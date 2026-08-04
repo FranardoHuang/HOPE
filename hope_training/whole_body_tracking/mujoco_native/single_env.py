@@ -39,6 +39,10 @@ RECEIPT_KIND = "a3_mujoco_single_env_fixed_tape_receipt_v1"
 TRACE_KIND = "a3_mujoco_single_env_fixed_tape_trace_v1"
 ACTION_SPECIFIC_HOLD_KIND = "a3_mujoco_action_specific_hold_candidate_v2"
 ACTION_SPECIFIC_HOLD_SCHEMA_VERSION = 2
+EXACT_FRAME0_ACTION_SPECIFIC_HOLD_KIND = (
+    "a3_mujoco_exact_frame0_action_specific_hold_candidate_v1"
+)
+EXACT_FRAME0_ACTION_SPECIFIC_HOLD_SCHEMA_VERSION = 1
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MJCF = (
@@ -438,6 +442,8 @@ class ResetState:
     hold_candidate_path: str | None
     hold_candidate_sha256: str | None
     hold_candidate_content_sha256: str | None
+    hold_candidate_kind: str | None
+    hold_candidate_schema_version: int | None
 
     @staticmethod
     def from_mapping(value: Any) -> "ResetState":
@@ -466,6 +472,8 @@ class ResetState:
                 hold_candidate_path=None,
                 hold_candidate_sha256=None,
                 hold_candidate_content_sha256=None,
+                hold_candidate_kind=None,
+                hold_candidate_schema_version=None,
             )
         if mode not in ("teacher_frame", "action_specific_hold"):
             raise ContractError(f"unsupported reset_state mode: {mode!r}")
@@ -485,6 +493,7 @@ class ResetState:
             "source_joint_order_contract_id",
             "source_joint_order_contract_sha256",
         }
+        present_identity_keys: set[str] = set()
         if mode == "action_specific_hold":
             expected.update(
                 {
@@ -493,6 +502,17 @@ class ResetState:
                     "hold_candidate_content_sha256",
                 }
             )
+            identity_keys = {
+                "hold_candidate_kind",
+                "hold_candidate_schema_version",
+            }
+            present_identity_keys = identity_keys.intersection(value)
+            if present_identity_keys and present_identity_keys != identity_keys:
+                raise ContractError(
+                    "action-specific hold candidate kind/schema must appear together"
+                )
+            if present_identity_keys:
+                expected.update(identity_keys)
         if set(value) != expected:
             raise ContractError(
                 f"{mode} reset keys differ: missing={sorted(expected-set(value))}, "
@@ -516,6 +536,8 @@ class ResetState:
         hold_path: str | None = None
         hold_sha: str | None = None
         hold_content_sha: str | None = None
+        hold_kind: str | None = None
+        hold_schema_version: int | None = None
         if mode == "action_specific_hold":
             hold_path = str(value.get("hold_candidate_path", ""))
             hold_sha = str(value.get("hold_candidate_sha256", ""))
@@ -531,6 +553,22 @@ class ResetState:
                 ):
                     raise ContractError(
                         f"action-specific hold candidate {label} SHA-256 is invalid"
+                    )
+            if present_identity_keys:
+                hold_kind = str(value.get("hold_candidate_kind", ""))
+                hold_schema_version = _int_scalar(
+                    value.get("hold_candidate_schema_version"),
+                    "hold_candidate_schema_version",
+                )
+                if (hold_kind, hold_schema_version) not in {
+                    (ACTION_SPECIFIC_HOLD_KIND, ACTION_SPECIFIC_HOLD_SCHEMA_VERSION),
+                    (
+                        EXACT_FRAME0_ACTION_SPECIFIC_HOLD_KIND,
+                        EXACT_FRAME0_ACTION_SPECIFIC_HOLD_SCHEMA_VERSION,
+                    ),
+                }:
+                    raise ContractError(
+                        "action-specific hold candidate kind/schema is unsupported"
                     )
         frame = _int_scalar(value.get("source_frame_index"), "source_frame_index")
         root_point = value.get("root_lin_vel_point")
@@ -567,6 +605,8 @@ class ResetState:
             hold_candidate_path=hold_path,
             hold_candidate_sha256=hold_sha,
             hold_candidate_content_sha256=hold_content_sha,
+            hold_candidate_kind=hold_kind,
+            hold_candidate_schema_version=hold_schema_version,
         )
 
 
@@ -847,9 +887,17 @@ def _action_specific_hold_reset_payload(
             f"missing={sorted(expected_top-set(candidate))}, "
             f"unknown={sorted(set(candidate)-expected_top)}"
         )
+    legacy_candidate = bool(
+        candidate.get("schema_version") == ACTION_SPECIFIC_HOLD_SCHEMA_VERSION
+        and candidate.get("kind") == ACTION_SPECIFIC_HOLD_KIND
+    )
+    exact_frame0_candidate = bool(
+        candidate.get("schema_version")
+        == EXACT_FRAME0_ACTION_SPECIFIC_HOLD_SCHEMA_VERSION
+        and candidate.get("kind") == EXACT_FRAME0_ACTION_SPECIFIC_HOLD_KIND
+    )
     if (
-        candidate.get("schema_version") != ACTION_SPECIFIC_HOLD_SCHEMA_VERSION
-        or candidate.get("kind") != ACTION_SPECIFIC_HOLD_KIND
+        not (legacy_candidate or exact_frame0_candidate)
         or candidate.get("diagnostic_unauthorized") is not True
     ):
         raise ContractError("action-specific hold candidate kind/schema/auth mismatch")
@@ -867,13 +915,23 @@ def _action_specific_hold_reset_payload(
     if tuple(str(name) for name in candidate.get("joint_names", ())) != binding.joint_names:
         raise ContractError("action-specific hold candidate joint order mismatch")
 
+    expected_source_names = (
+        {
+            "training_contract",
+            "teacher_motion",
+            "exact_frame0_threshold_first_artifact",
+            "root_mjcf",
+        }
+        if exact_frame0_candidate
+        else {
+            "training_contract",
+            "teacher_motion",
+            "shared_lower_root_seed",
+            "root_mjcf",
+        }
+    )
     sources = candidate.get("sources")
-    if not isinstance(sources, dict) or set(sources) != {
-        "training_contract",
-        "teacher_motion",
-        "shared_lower_root_seed",
-        "root_mjcf",
-    }:
+    if not isinstance(sources, dict) or set(sources) != expected_source_names:
         raise ContractError("action-specific hold candidate sources are incomplete")
 
     def source_file(label: str) -> tuple[Path, str, Mapping[str, Any]]:
@@ -899,7 +957,10 @@ def _action_specific_hold_reset_payload(
         or contract_sha != binding.source_sha256
     ):
         raise ContractError("action-specific hold belongs to a different training contract")
-    source_file("shared_lower_root_seed")
+    if legacy_candidate:
+        source_file("shared_lower_root_seed")
+    else:
+        source_file("exact_frame0_threshold_first_artifact")
     source_file("root_mjcf")
     teacher_path, _teacher_sha, teacher_row = source_file("teacher_motion")
     if teacher_motion is not None and teacher_path != Path(teacher_motion).expanduser().resolve():
@@ -971,6 +1032,35 @@ def _action_specific_hold_reset_payload(
     _raw_qdes, decoded_qdes, clamps = binding.decode_action(hold_action)
     if clamps != 0 or not np.allclose(decoded_qdes, hold_qdes, rtol=0.0, atol=2.0e-10):
         raise ContractError("action-specific hold action does not decode to sealed qdes")
+    if exact_frame0_candidate:
+        if (
+            physical.get("all_joints_exact_teacher_q0") is not True
+            or physical.get("root_exact_teacher_frame0") is not True
+            or physical.get("stored_quaternion_unchanged") is not True
+            or not np.array_equal(physical_q, teacher_q)
+            or not np.array_equal(
+                vector3("root_pos"),
+                np.asarray(teacher_mapping["root_pos"], dtype=np.float64),
+            )
+            or not np.array_equal(
+                root_quat,
+                np.asarray(
+                    teacher_mapping["root_quat_wxyz"], dtype=np.float64
+                ),
+            )
+        ):
+            raise ContractError(
+                "exact-frame0 hold changed its measured teacher endpoint"
+            )
+        from . import exact_frame0_action_specific_hold as exact_frame0_hold
+
+        rebuilt = exact_frame0_hold.rebuild_candidate_from_sources(
+            binding, candidate
+        )
+        if candidate != rebuilt:
+            raise ContractError(
+                "exact-frame0 hold differs from its deterministic source projection"
+            )
 
     reset = {
         "mode": "action_specific_hold",
@@ -994,8 +1084,93 @@ def _action_specific_hold_reset_payload(
         "hold_candidate_path": str(candidate_file),
         "hold_candidate_sha256": actual_file_sha,
         "hold_candidate_content_sha256": content_sha,
+        "hold_candidate_kind": str(candidate["kind"]),
+        "hold_candidate_schema_version": int(candidate["schema_version"]),
     }
     return reset, hold_action.copy(), candidate
+
+
+def _revalidate_action_specific_reset_state(
+    binding: PlantBinding,
+    reset: ResetState,
+    history_fill_action: Sequence[float],
+) -> Mapping[str, Any]:
+    """Reopen every hold source and compare it with one decoded reset row."""
+
+    if reset.mode != "action_specific_hold":
+        raise ContractError("action-specific reset revalidation requires its reset mode")
+    if reset.hold_candidate_path is None or reset.hold_candidate_sha256 is None:
+        raise ContractError("action-specific reset omits its candidate identity")
+    expected_mapping, expected_center, candidate = (
+        _action_specific_hold_reset_payload(
+            binding,
+            reset.hold_candidate_path,
+            expected_file_sha256=reset.hold_candidate_sha256,
+            teacher_motion=reset.source_motion_path,
+            teacher_frame_index=reset.source_frame_index,
+        )
+    )
+    expected = ResetState.from_mapping(expected_mapping)
+    scalar_fields = [
+        "source_motion_path",
+        "source_motion_sha256",
+        "source_motion_uid",
+        "source_frame_index",
+        "source_joint_order_contract_id",
+        "source_joint_order_contract_sha256",
+        "root_lin_vel_point",
+        "hold_candidate_path",
+        "hold_candidate_sha256",
+        "hold_candidate_content_sha256",
+        "hold_candidate_kind",
+        "hold_candidate_schema_version",
+    ]
+    if (
+        reset.hold_candidate_kind is None
+        and reset.hold_candidate_schema_version is None
+        and expected.hold_candidate_kind == ACTION_SPECIFIC_HOLD_KIND
+        and expected.hold_candidate_schema_version
+        == ACTION_SPECIFIC_HOLD_SCHEMA_VERSION
+    ):
+        # Preserve replay compatibility for already-written v2 diagnostic
+        # tapes.  Exact-frame0 candidates have never existed without this
+        # identity pair and may not take this legacy path.
+        scalar_fields.remove("hold_candidate_kind")
+        scalar_fields.remove("hold_candidate_schema_version")
+    for field in scalar_fields:
+        if getattr(reset, field) != getattr(expected, field):
+            raise ContractError(
+                f"action-specific hold reset lineage disagrees with source: {field}"
+            )
+    vector_fields = (
+        "joint_pos",
+        "joint_vel",
+        "root_pos",
+        "root_quat_wxyz",
+        "root_lin_vel_w",
+        "root_ang_vel_w",
+    )
+    for field in vector_fields:
+        if not np.array_equal(getattr(reset, field), getattr(expected, field)):
+            raise ContractError(
+                f"action-specific hold reset state disagrees with source: {field}"
+            )
+    fill_action = _finite_vector(history_fill_action, "history_fill_action")
+    _raw_qdes, fill_qdes, fill_clamps = binding.decode_action(fill_action)
+    candidate_qdes = np.asarray(candidate["hold"]["joint_qdes"], dtype=np.float64)
+    if fill_clamps != 0 or not np.allclose(
+        fill_qdes, candidate_qdes, rtol=0.0, atol=2.0e-10
+    ):
+        raise ContractError(
+            "action-specific history fill does not decode to sealed hold qdes"
+        )
+    if not np.allclose(
+        fill_action, expected_center, rtol=0.0, atol=2.0e-12
+    ):
+        raise ContractError(
+            "action-specific history fill differs from sealed hold action"
+        )
+    return candidate
 
 
 def _validate_fixed_tape_reset_contract(
@@ -1022,62 +1197,9 @@ def _validate_fixed_tape_reset_contract(
         return
 
     if tape.reset_state.mode == "action_specific_hold":
-        reset = tape.reset_state
-        assert reset.hold_candidate_path is not None
-        assert reset.hold_candidate_sha256 is not None
-        expected_mapping, expected_center, candidate = (
-            _action_specific_hold_reset_payload(
-                binding,
-                reset.hold_candidate_path,
-                expected_file_sha256=reset.hold_candidate_sha256,
-                teacher_motion=reset.source_motion_path,
-                teacher_frame_index=reset.source_frame_index,
-            )
+        _revalidate_action_specific_reset_state(
+            binding, tape.reset_state, tape.history_fill_action
         )
-        expected = ResetState.from_mapping(expected_mapping)
-        scalar_fields = (
-            "source_motion_path",
-            "source_motion_sha256",
-            "source_motion_uid",
-            "source_frame_index",
-            "source_joint_order_contract_id",
-            "source_joint_order_contract_sha256",
-            "root_lin_vel_point",
-            "hold_candidate_path",
-            "hold_candidate_sha256",
-            "hold_candidate_content_sha256",
-        )
-        for field in scalar_fields:
-            if getattr(reset, field) != getattr(expected, field):
-                raise ContractError(
-                    f"action-specific hold reset lineage disagrees with source: {field}"
-                )
-        vector_fields = (
-            "joint_pos",
-            "joint_vel",
-            "root_pos",
-            "root_quat_wxyz",
-            "root_lin_vel_w",
-            "root_ang_vel_w",
-        )
-        for field in vector_fields:
-            if not np.array_equal(getattr(reset, field), getattr(expected, field)):
-                raise ContractError(
-                    f"action-specific hold reset state disagrees with source: {field}"
-                )
-        candidate_qdes = np.asarray(candidate["hold"]["joint_qdes"], dtype=np.float64)
-        if fill_clamps != 0 or not np.allclose(
-            fill_qdes, candidate_qdes, rtol=0.0, atol=2.0e-10
-        ):
-            raise ContractError(
-                "action-specific history fill does not decode to sealed hold qdes"
-            )
-        if not np.allclose(
-            tape.history_fill_action, expected_center, rtol=0.0, atol=2.0e-12
-        ):
-            raise ContractError(
-                "action-specific history fill differs from sealed hold action"
-            )
         return
 
     reset = tape.reset_state
@@ -1423,6 +1545,26 @@ class MujocoSingleEnv:
             np.asarray(self.model.geom_bodyid, dtype=np.int64)
         ]
 
+    def _revalidate_action_specific_reset_authority(
+        self,
+        reset_state: ResetState,
+        history_fill_action: Sequence[float],
+    ) -> None:
+        candidate = _revalidate_action_specific_reset_state(
+            self.binding, reset_state, history_fill_action
+        )
+        candidate_mjcf = candidate["sources"]["root_mjcf"]
+        if (
+            _resolve_action_specific_hold_logical_path(
+                candidate_mjcf.get("path"), "root_mjcf"
+            )
+            != self.mjcf_path
+            or candidate_mjcf["sha256"] != self.scene.canonical_xml_sha256
+        ):
+            raise ContractError(
+                "action-specific hold was not audited on this exact root MJCF"
+            )
+
     def reset(
         self,
         *,
@@ -1431,6 +1573,10 @@ class MujocoSingleEnv:
         history_fill_action: Sequence[float],
     ) -> None:
         mujoco = self.mujoco
+        if reset_state.mode == "action_specific_hold":
+            self._revalidate_action_specific_reset_authority(
+                reset_state, history_fill_action
+            )
         if reset_state.mode == "named_stand_root_executed_zero_action_q_zero_velocity":
             key_id = int(
                 mujoco.mj_name2id(
@@ -1648,29 +1794,6 @@ class MujocoSingleEnv:
     def run_tape(self, tape: FixedTape) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         if tape.plant_binding_sha256 != self.binding.binding_sha256:
             raise ContractError("tape and runner plant binding differ")
-        if tape.reset_state.mode == "action_specific_hold":
-            assert tape.reset_state.hold_candidate_path is not None
-            assert tape.reset_state.hold_candidate_sha256 is not None
-            _reset_mapping, _hold_action, candidate = (
-                _action_specific_hold_reset_payload(
-                    self.binding,
-                    tape.reset_state.hold_candidate_path,
-                    expected_file_sha256=tape.reset_state.hold_candidate_sha256,
-                    teacher_motion=tape.reset_state.source_motion_path,
-                    teacher_frame_index=tape.reset_state.source_frame_index,
-                )
-            )
-            candidate_mjcf = candidate["sources"]["root_mjcf"]
-            if (
-                _resolve_action_specific_hold_logical_path(
-                    candidate_mjcf.get("path"), "root_mjcf"
-                )
-                != self.mjcf_path
-                or candidate_mjcf["sha256"] != self.scene.canonical_xml_sha256
-            ):
-                raise ContractError(
-                    "action-specific hold was not audited on this exact root MJCF"
-                )
         self.reset(
             reset_state=tape.reset_state,
             delay_steps=tape.delay_steps,

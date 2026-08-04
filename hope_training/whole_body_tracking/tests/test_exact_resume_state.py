@@ -364,6 +364,7 @@ def _make_contract_bound_runner(
         training_contract_lineage_exact=lineage_exact,
         require_exact_resume_state=True,
     )
+    runner.alg.policy = torch.nn.Linear(1, 1)
     return runner
 
 
@@ -484,6 +485,7 @@ def _install_runtime_bootstrap_stubs(
 
 
 def _strict_resume_checkpoint(*, lineage_exact):
+    model = torch.nn.Linear(1, 1)
     return {
         "iter": 4,
         "infos": {
@@ -504,11 +506,238 @@ def _strict_resume_checkpoint(*, lineage_exact):
                 "environment_resume_state": {
                     "schema_version": 3,
                     "common_step_counter": 96,
-                    "command_terms": {},
+                    "active_term_names": ["motion", "racket_target"],
+                    "command_terms": {
+                        "motion": {
+                            "scalars": {},
+                            "tensors": {},
+                            "tensor_dicts": {},
+                        },
+                        "racket_target": {
+                            "scalars": {},
+                            "tensors": {},
+                            "tensor_dicts": {},
+                        },
+                    },
                 },
             },
         },
+        "model_state_dict": model.state_dict(),
         "optimizer_state_dict": {},
+    }
+
+
+class _ResumeNormalizer(torch.nn.Module):
+    def __init__(self, width):
+        super().__init__()
+        self.register_buffer("_mean", torch.zeros(1, width))
+        self.register_buffer("_var", torch.ones(1, width))
+        self.register_buffer("_std", torch.ones(1, width))
+        self.register_buffer("count", torch.tensor(4, dtype=torch.long))
+
+
+class _ResumeCommandTerm:
+    def __init__(self):
+        self.validate_calls = 0
+        self.load_calls = 0
+
+    def exact_resume_state_dict(self):
+        return {"schema_version": 1}
+
+    def validate_exact_resume_state_dict(self, state, *, strict=True):
+        assert strict is True
+        if not isinstance(state, dict) or state.get("schema_version") != 1:
+            raise ValueError("command exact state is invalid")
+        self.validate_calls += 1
+
+    def load_exact_resume_state_dict(self, state, strict=True):
+        self.validate_exact_resume_state_dict(state, strict=strict)
+        self.load_calls += 1
+
+    def finalize_action_ball_exact_resume(self):
+        return None
+
+
+class _ResumeActionTerm:
+    control_step_action_delay_enabled = False
+    action_runtime_state_required = True
+
+    def __init__(self):
+        self.validate_calls = 0
+        self.load_calls = 0
+
+    def action_delay_exact_resume_state_dict(self):
+        return {"schema_version": 1, "token": torch.tensor([1])}
+
+    def validate_action_delay_exact_resume_state_dict(
+        self, state, *, strict=True
+    ):
+        assert strict is True
+        if (
+            not isinstance(state, dict)
+            or set(state) != {"schema_version", "token"}
+            or state["schema_version"] != 1
+            or not torch.equal(state["token"], torch.tensor([1]))
+        ):
+            raise ValueError("action exact state is invalid")
+        self.validate_calls += 1
+
+    def load_action_delay_exact_resume_state_dict(
+        self, state, *, strict=True
+    ):
+        self.validate_action_delay_exact_resume_state_dict(
+            state, strict=strict
+        )
+        self.load_calls += 1
+
+
+def _action_ball_211_preflight_fixture(
+    runner_module, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        runner_module,
+        "is_empirical_normalizer",
+        lambda value: isinstance(value, _ResumeNormalizer),
+    )
+    racket = _ResumeCommandTerm()
+    motion = _ResumeCommandTerm()
+    action = _ResumeActionTerm()
+    commands = FakeCommandManager(
+        {"racket_target": racket, "motion": motion}
+    )
+    actions = FakeCommandManager({"joint_pos": action})
+    inner = SimpleNamespace(
+        common_step_counter=96,
+        command_manager=commands,
+        action_manager=actions,
+        cfg=SimpleNamespace(
+            obs_mode="action_ball_a211",
+            commands=SimpleNamespace(
+                racket_target=SimpleNamespace(target_mode="action_ball")
+            ),
+        ),
+        num_envs=4,
+    )
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.env = FakeVecEnv(inner)
+    runner.log_dir = str(tmp_path)
+    runner.require_exact_resume_state = True
+    runner.training_contract_schema_version = 3
+    runner.training_contract_sha256 = "a" * 64
+    runner.training_contract_lineage_exact = False
+    runner.training_launch_claim_sha256 = None
+    runner.empirical_normalization = True
+    runner.obs_normalizer = _ResumeNormalizer(211)
+    runner.privileged_obs_normalizer = _ResumeNormalizer(319)
+    runner.action_ball_a211_trainability_preflight = {
+        "actor_width": 211,
+        "critic_width": 319,
+    }
+    runner.action_ball_c211_trainability_preflight = None
+    policy = torch.nn.Linear(2, 1)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1.0e-3)
+    policy(torch.ones(1, 2)).sum().backward()
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    runner.alg = SimpleNamespace(
+        policy=policy,
+        optimizer=optimizer,
+        rnd=None,
+    )
+    environment = {
+        "schema_version": 4,
+        "common_step_counter": 96,
+        "active_term_names": ["racket_target", "motion"],
+        "command_terms": {
+            "racket_target": {
+                "capture_mode": "explicit",
+                "term_type": (
+                    f"{type(racket).__module__}.{type(racket).__qualname__}"
+                ),
+                "exact_state": {
+                    "schema_version": 1,
+                    "integrity_sha256": "d" * 64,
+                },
+            },
+            "motion": {
+                "capture_mode": "explicit",
+                "term_type": (
+                    f"{type(motion).__module__}.{type(motion).__qualname__}"
+                ),
+                "exact_state": {
+                    "schema_version": 1,
+                    "action_ball_birth": {
+                        "shared_racket_state_sha256": "d" * 64,
+                    },
+                },
+            },
+        },
+        "active_action_term_names": ["joint_pos"],
+        "action_terms": {
+            "joint_pos": {
+                "capture_mode": "explicit_delay",
+                "term_type": (
+                    f"{type(action).__module__}.{type(action).__qualname__}"
+                ),
+                "exact_state": {
+                    "schema_version": 1,
+                    "token": torch.tensor([1]),
+                },
+            }
+        },
+    }
+    cuda_states = (
+        torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []
+    )
+    exact = {
+        "schema_version": 3,
+        "next_learning_iteration": 5,
+        "tot_timesteps": 384,
+        "tot_time": 1.0,
+        "algorithm_learning_rate": 1.0e-3,
+        "python_random_state": random.getstate(),
+        "numpy_random_state": runner._serialize_numpy_rng_state(
+            __import__("numpy").random.get_state()
+        ),
+        "torch_random_state": torch.get_rng_state(),
+        "torch_cuda_random_states": cuda_states,
+        "torch_cuda_device_count": len(cuda_states),
+        "environment_resume_state": environment,
+    }
+    checkpoint = {
+        "model_state_dict": policy.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "obs_norm_state_dict": runner.obs_normalizer.state_dict(),
+        "privileged_obs_norm_state_dict": (
+            runner.privileged_obs_normalizer.state_dict()
+        ),
+        "iter": 4,
+        "infos": {
+            "training_contract_schema_version": 3,
+            "training_contract_sha256": "a" * 64,
+            "training_contract_lineage_exact": 0,
+            "hope_exact_resume_state": exact,
+        },
+    }
+    return runner, checkpoint, racket, motion, action
+
+
+def _mutable_resume_hashes(runner):
+    return {
+        "policy": runner._exact_resume_tree_sha256(
+            runner.alg.policy.state_dict()
+        ),
+        "optimizer": runner._exact_resume_tree_sha256(
+            runner.alg.optimizer.state_dict()
+        ),
+        "actor": runner._exact_resume_tree_sha256(
+            runner.obs_normalizer.state_dict()
+        ),
+        "critic": runner._exact_resume_tree_sha256(
+            runner.privileged_obs_normalizer.state_dict()
+        ),
     }
 
 
@@ -560,6 +789,176 @@ def test_strict_resume_state_is_independent_from_formal_lineage(
             path="wrong_lineage.pt",
             load_optimizer=True,
         )
+
+
+def test_action_ball_preflight_accepts_outer3_inner4_and_calls_read_only_hooks(
+    runner_module, tmp_path, monkeypatch
+):
+    runner, checkpoint, racket, motion, action = (
+        _action_ball_211_preflight_fixture(
+            runner_module, tmp_path, monkeypatch
+        )
+    )
+    before = _mutable_resume_hashes(runner)
+    state = runner._preflight_required_exact_resume_checkpoint(
+        checkpoint,
+        path="model_4.pt",
+        load_optimizer=True,
+    )
+    assert state["schema_version"] == 3
+    assert state["environment_resume_state"]["schema_version"] == 4
+    assert racket.validate_calls == 1
+    assert motion.validate_calls == 1
+    assert action.validate_calls == 1
+    assert racket.load_calls == motion.load_calls == action.load_calls == 0
+    assert _mutable_resume_hashes(runner) == before
+
+
+def test_action_ball_preflight_rejects_schema3_before_any_live_mutation(
+    runner_module, tmp_path, monkeypatch
+):
+    runner, checkpoint, _racket, _motion, _action = (
+        _action_ball_211_preflight_fixture(
+            runner_module, tmp_path, monkeypatch
+        )
+    )
+    nested = checkpoint["infos"]["hope_exact_resume_state"][
+        "environment_resume_state"
+    ]
+    nested.pop("active_action_term_names")
+    nested.pop("action_terms")
+    nested["schema_version"] = 3
+    before = _mutable_resume_hashes(runner)
+    with pytest.raises(RuntimeError, match="inner action schema 4"):
+        runner._preflight_required_exact_resume_checkpoint(
+            checkpoint,
+            path="schema3.pt",
+            load_optimizer=True,
+        )
+    assert _mutable_resume_hashes(runner) == before
+
+
+def test_action_ball_preflight_rejects_false_command_resume_declaration_atomically(
+    runner_module, tmp_path, monkeypatch
+):
+    runner, checkpoint, racket, motion, action = (
+        _action_ball_211_preflight_fixture(
+            runner_module, tmp_path, monkeypatch
+        )
+    )
+    checkpoint["infos"]["hope_exact_resume_state"][
+        "environment_resume_state"
+    ]["command_terms"]["racket_target"]["exact_state"] = {
+        "schema_version": 1,
+        "exact_resume_supported": False,
+    }
+    checkpoint_path = tmp_path / "fresh-only.pt"
+    torch.save(checkpoint, checkpoint_path)
+    runner._loaded_checkpoint_path = "sentinel-before-rejection"
+    before = _mutable_resume_hashes(runner)
+    with pytest.raises(
+        RuntimeError, match="exact_resume_supported=false"
+    ):
+        runner.load(str(checkpoint_path), load_optimizer=True)
+    assert _mutable_resume_hashes(runner) == before
+    assert runner._loaded_checkpoint_path == "sentinel-before-rejection"
+    assert racket.validate_calls == motion.validate_calls == 0
+    assert action.validate_calls == 0
+    assert racket.load_calls == motion.load_calls == action.load_calls == 0
+
+
+def test_action_ball_preflight_rejects_cross_payload_digest_before_mutation(
+    runner_module, tmp_path, monkeypatch
+):
+    runner, checkpoint, racket, motion, action = (
+        _action_ball_211_preflight_fixture(
+            runner_module, tmp_path, monkeypatch
+        )
+    )
+    checkpoint["infos"]["hope_exact_resume_state"][
+        "environment_resume_state"
+    ]["command_terms"]["motion"]["exact_state"]["action_ball_birth"][
+        "shared_racket_state_sha256"
+    ] = "e" * 64
+    before = _mutable_resume_hashes(runner)
+    with pytest.raises(RuntimeError, match="cross-payload digest differs"):
+        runner._preflight_required_exact_resume_checkpoint(
+            checkpoint,
+            path="cross_payload_mismatch.pt",
+            load_optimizer=True,
+        )
+    assert _mutable_resume_hashes(runner) == before
+    assert racket.validate_calls == motion.validate_calls == 1
+    assert action.validate_calls == 0
+    assert racket.load_calls == motion.load_calls == action.load_calls == 0
+
+
+def test_action_ball_preflight_rejects_nonfinite_or_wrong_width_normalizer_atomically(
+    runner_module, tmp_path, monkeypatch
+):
+    runner, checkpoint, racket, motion, action = (
+        _action_ball_211_preflight_fixture(
+            runner_module, tmp_path, monkeypatch
+        )
+    )
+    checkpoint["obs_norm_state_dict"]["_mean"] = torch.full(
+        (1, 211), float("nan")
+    )
+    before = _mutable_resume_hashes(runner)
+    with pytest.raises(RuntimeError, match="actor normalizer.*non-finite"):
+        runner._preflight_required_exact_resume_checkpoint(
+            checkpoint,
+            path="bad_actor_norm.pt",
+            load_optimizer=True,
+        )
+    assert _mutable_resume_hashes(runner) == before
+    assert racket.validate_calls == motion.validate_calls == 0
+    assert action.validate_calls == 0
+
+    checkpoint["obs_norm_state_dict"] = {
+        "_mean": torch.zeros(1, 210),
+        "_var": torch.ones(1, 210),
+        "_std": torch.ones(1, 210),
+        "count": torch.tensor(4, dtype=torch.long),
+    }
+    with pytest.raises(RuntimeError, match="shape/dtype differs"):
+        runner._preflight_required_exact_resume_checkpoint(
+            checkpoint,
+            path="wrong_actor_width.pt",
+            load_optimizer=True,
+        )
+    assert _mutable_resume_hashes(runner) == before
+
+
+def test_formal_apply_uses_the_same_supported_normalizer_aliases_as_preflight(
+    runner_module, tmp_path, monkeypatch
+):
+    runner, checkpoint, _racket, _motion, _action = (
+        _action_ball_211_preflight_fixture(
+            runner_module, tmp_path, monkeypatch
+        )
+    )
+    actor = runner.obs_normalizer
+    critic = runner.privileged_obs_normalizer
+    del runner.obs_normalizer
+    del runner.privileged_obs_normalizer
+    runner.actor_obs_normalizer = actor
+    runner.critic_obs_normalizer = critic
+
+    runner._preflight_required_exact_resume_checkpoint(
+        checkpoint,
+        path="alternate_aliases.pt",
+        load_optimizer=True,
+    )
+    infos = runner._apply_formal_preloaded_checkpoint(
+        checkpoint,
+        load_optimizer=True,
+        prefix="alternate aliases",
+    )
+    assert infos is checkpoint["infos"]
+    assert runner.current_learning_iteration == 4
+    assert runner.actor_obs_normalizer is actor
+    assert runner.critic_obs_normalizer is critic
 
 
 def test_diagnostic_strict_runner_saves_lineage_zero(

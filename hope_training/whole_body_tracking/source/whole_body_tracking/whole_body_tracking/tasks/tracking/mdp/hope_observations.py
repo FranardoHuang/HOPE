@@ -968,6 +968,14 @@ def _stage1_motion_and_command(
 ) -> tuple[RacketTargetCommand, object]:
     command = _cmd(env, command_name)
     motion = command._motion()
+    if bool(
+        getattr(motion, "action_ball_diagnostic_split_ready_teacher", False)
+    ):
+        capture = getattr(
+            motion, "_capture_action_ball_safe_ready_reference", None
+        )
+        if callable(capture):
+            capture()
     body_names = tuple(str(name) for name in motion.cfg.body_names)
     robot_body_names = tuple(str(name) for name in command.robot.body_names)
     if not body_names or not robot_body_names or body_names[0] != robot_body_names[0]:

@@ -234,8 +234,8 @@ def test_exact_resume_latch_roundtrip_is_strict_and_side_effect_free_while_stagi
             recipient._stage_strike_window_entry_distance_probe_exact_state(bad)
 
 
-def test_probe_is_wired_only_to_metrics_resample_ledger_and_v6_exact_state():
-    assert "_ACTION_BALL_STATE_SCHEMA_VERSION = 6" in SOURCE
+def test_probe_is_wired_only_to_metrics_resample_ledger_and_v8_exact_state():
+    assert "_ACTION_BALL_STATE_SCHEMA_VERSION = 8" in SOURCE
 
     def method_source(name: str) -> str:
         node = next(

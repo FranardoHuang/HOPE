@@ -168,6 +168,18 @@ def _portable_ast_dump(node: ast.AST) -> str:
     """Serialize source semantics without Python-version-only empty fields."""
 
     def normalize(value: Any) -> Any:
+        # Python 3.8 alone materializes this semantics-free wrapper around
+        # subscript slices; Python 3.9+ parses the child directly.
+        if isinstance(value, ast.Index):
+            return normalize(value.value)
+        if isinstance(value, ast.ExtSlice):
+            return [
+                "Tuple",
+                [
+                    ["elts", normalize(value.dims)],
+                    ["ctx", normalize(ast.Load())],
+                ],
+            ]
         if isinstance(value, ast.AST):
             fields = []
             for field, child in ast.iter_fields(value):

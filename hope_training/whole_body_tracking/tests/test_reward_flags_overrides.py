@@ -2570,9 +2570,12 @@ _PACK_V2_WEIGHTS = {
     "strike_ang_vel": 0.0,
     "strike_foot_vel": 0.0,
     "strike_vbob": 0.0,
-    "hit_unstable_support": -10.0,
+    # 2026-08-05 层级对齐:这三个数的唯一权威是 train._REWARD_PACK_V2_DIRECT
+    #(train.py:12170/12173/12201),本表只是它的镜像。旧值 -10.0 / 1.0 / -300.0
+    # 已按 exp §5.6 偏离记录第 5/6/7 条下调,理由写在 train.py 那三行的上方注释里。
+    "hit_unstable_support": -1.0,
     "upright": 0.0,
-    "upright_exp": 1.0,
+    "upright_exp": 0.25,
     "arm_overreach": 0.0,
     "hold_ready": 0.0,
     "foot_orientation": 0.0,
@@ -2596,7 +2599,7 @@ _PACK_V2_WEIGHTS = {
     "action_rate_l2": 0.0,
     "action_rate_clamped": -0.2,
     "action_acc_l2": -0.05,
-    "death_penalty": -300.0,
+    "death_penalty": -10.0,
 }
 
 _PACK_DEFAULTED_MARKER = (
@@ -2650,7 +2653,7 @@ def test_reward_pack_defaults_to_v2_full_expansion():
     assert "motion.stand_start_prob=1.0 (reward_pack=v2 stand starts)" in applied
     assert _PACK_DEFAULTED_MARKER in applied
     # 逐项走的仍是 v2 包机器:defaulted 标记之外,每条包改动照旧带 reward_pack=v2
-    assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
+    assert "rewards.hit_unstable_support.weight=-1.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_landing.weight=500.0 (reward_pack=v2)" in applied
     assert not any("strike_capture_bonus" in m for m in applied)  # v2.1:代理不进包
     assert "rewards.racket_position.weight=4.0" in applied
@@ -2659,7 +2662,7 @@ def test_reward_pack_defaults_to_v2_full_expansion():
 def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
     # 连 rewards 节点都没有的任务照样吃默认包(线上大量任务节点只配 racket/motion)。
     env_cfg, applied = _apply_default({"motion": {"hold_steps_range": [0, 100]}})
-    assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
+    assert env_cfg.rewards.upright_exp.weight == pytest.approx(0.25)
     assert env_cfg.rewards.virtual_landing.weight == pytest.approx(500.0)
     assert env_cfg.rewards.virtual_landing.params["mode"] == "legal_base"
     # 07-26 裁决:延付默认关(消融 flag);臂级显式键单测见 test_settle_delay_flag_*
@@ -2684,7 +2687,7 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert R.racket_velocity.weight == pytest.approx(7.0)
     assert R.racket_normal.weight == pytest.approx(5.0)
     # 没被压过的包项照常落地
-    assert R.hit_unstable_support.weight == pytest.approx(-10.0)
+    assert R.hit_unstable_support.weight == pytest.approx(-1.0)
     assert R.virtual_landing.weight == pytest.approx(500.0)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)  # v2.1:代理不进包
     assert len([m for m in applied if "user override wins" in m]) == 3
@@ -2840,7 +2843,7 @@ def test_reward_pack_default_optout_normal_channel_keeps_sigma_machinery_off():
     env_cfg, applied = _apply_default({"racket": {"adaptive_sigma_normal": False}})
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
     assert env_cfg.commands.racket_target.adaptive_sigma is False
-    assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
+    assert env_cfg.rewards.upright_exp.weight == pytest.approx(0.25)
     assert not any("racket_target.adaptive_sigma=True" in m for m in applied)
 
 
@@ -2871,9 +2874,9 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert "rewards.racket_normal.weight=0.5" in applied
     assert len([m for m in applied if "full-body mimic" in m]) == 4
     # direct 项的标记逐条在
-    assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
-    assert "rewards.upright_exp.weight=1.0 (reward_pack=v2)" in applied
-    assert "rewards.death_penalty.weight=-300.0 (reward_pack=v2)" in applied
+    assert "rewards.hit_unstable_support.weight=-1.0 (reward_pack=v2)" in applied
+    assert "rewards.upright_exp.weight=0.25 (reward_pack=v2)" in applied
+    assert "rewards.death_penalty.weight=-10.0 (reward_pack=v2)" in applied
     assert "rewards.racket_strike_success.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_pass_net.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_spin.weight=0.0 (reward_pack=v2)" in applied
@@ -2897,7 +2900,7 @@ def test_reward_pack_v2_uses_one_generic_catastrophe_price_when_table_term_exist
         env_cfg,
     )
 
-    assert env_cfg.rewards.death_penalty.weight == pytest.approx(-300.0)
+    assert env_cfg.rewards.death_penalty.weight == pytest.approx(-10.0)
     assert env_cfg.rewards.table_hit_penalty.weight == pytest.approx(0.0)
     assert (
         "rewards.table_hit_penalty.weight=0.0 (reward_pack=v2 optional)"
@@ -3117,7 +3120,9 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
             "racket_velocity": 0.5,
             "racket_normal": 0.5,
             "virtual_landing": 500.0,
-            "death_penalty": -300.0,
+            # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0。
+            # 权威是 train.py 的 _REWARD_PACK_V2_DIRECT 与 HOPEPingPongActionBall.yaml:151。
+            "death_penalty": -10.0,
             "table_hit_penalty": 0.0,
             "qdes_limit_barrier": -5.0,
             "joint_limit": -5.0,
@@ -3126,8 +3131,19 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
     assert R.racket_position.params["std"] == pytest.approx(0.075)
     assert R.racket_velocity.params["std"] == pytest.approx(0.5)
     assert R.racket_normal.params["std"] == pytest.approx(0.262)
-    assert R.qdes_limit_barrier.params["margin_frac"] == pytest.approx(0.08)
+    # 0.08 -> 0.05:HOPEPingPongActionBall.yaml:169 的显式键,唯一权威在那份 yaml 的注释里
+    #(barrier 带宽必须 <= pre-apply guard 的 0.05*span 投影内缩量,否则是护栏自造底噪)。
+    assert R.qdes_limit_barrier.params["margin_frac"] == pytest.approx(0.05)
     assert R.qdes_limit_barrier_probe.weight == pytest.approx(1.0)
+    # 探针必须与实罚同带宽,否则运行期直接炸(不是慢性偏差):
+    # hope_rewards.py:2910 在同一步里比对两者的 (action_name, margin_frac, penalty_floor)
+    # 签名,不一致就 raise "probe and RewardTerm used different parameters in one step"。
+    # train.py:14012-14013 靠 params.clear()+update(实罚 params) 保证这一点;
+    # 0.08 -> 0.05 之后这条配对没有任何测试钉住,补一条,免得日后有人只改一边。
+    assert R.qdes_limit_barrier_probe.params["margin_frac"] == pytest.approx(0.05)
+    assert (
+        R.qdes_limit_barrier_probe.params == R.qdes_limit_barrier.params
+    ), "qdes barrier 探针与实罚的 params 必须逐键相等(运行期签名校验)"
 
     # Prove the explicit ActionBall values agree exactly with the adopted r6 table.
     for key, low in (
@@ -3280,7 +3296,7 @@ def test_reward_pack_v2_works_on_omegaconf_nodes():
     from omegaconf import OmegaConf
 
     env_cfg, applied = _apply(OmegaConf.create(_pack_v2_task()))
-    assert env_cfg.rewards.hit_unstable_support.weight == pytest.approx(-10.0)
+    assert env_cfg.rewards.hit_unstable_support.weight == pytest.approx(-1.0)
     assert env_cfg.rewards.foot_slip_sq.weight == pytest.approx(-0.1)
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False  # 07-26 退役:包不动 sigma
 
@@ -3310,7 +3326,7 @@ def test_reward_pack_v2_explicit_user_keys_win():
     assert R.racket_normal.weight == pytest.approx(5.0)
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
     # 没被用户压过的包项照常落地
-    assert R.hit_unstable_support.weight == pytest.approx(-10.0)
+    assert R.hit_unstable_support.weight == pytest.approx(-1.0)
     assert R.virtual_landing.weight == pytest.approx(500.0)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)
     assert R.foot_drag.weight == 0.0
@@ -3323,7 +3339,7 @@ def test_reward_pack_v2_optout_normal_channel_lifts_adaptive_sigma_requirement()
         {"rewards": {"reward_pack": "v2"}, "racket": {"adaptive_sigma_normal": False}}
     )
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
-    assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
+    assert env_cfg.rewards.upright_exp.weight == pytest.approx(0.25)
 
 
 def test_reward_pack_v2_conflicting_motion_scale_in_window_fails_loud():

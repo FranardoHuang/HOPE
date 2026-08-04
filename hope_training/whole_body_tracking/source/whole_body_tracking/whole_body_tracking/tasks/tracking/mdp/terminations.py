@@ -501,6 +501,7 @@ def actual_joint_position_forbidden_zone(
     limit_source: str,
     margin_rad: float,
     margin_fraction: float,
+    terminate: bool = True,
 ) -> torch.Tensor:
     """Terminate only at the physical hard edge; retain the inset band as diagnostic evidence.
 
@@ -509,6 +510,16 @@ def actual_joint_position_forbidden_zone(
     recovery, and conflates a soft constraint with a mechanical hard-edge violation.  This term
     still requires the inset margins so diagnostic runs can report the exact joint/side occupancy,
     but the Done bit is reserved for non-finite/invalid state or a current/substep raw hard edge.
+
+    ``terminate=False`` keeps every measurement and latch above but stops the hard edge from
+    shortening the episode, matching the vendor-aligned ``build_1`` structure where the same
+    quantity is a ``DoneTerm`` that always returns False and feeds checkpoint NO-GO evidence
+    instead of PPO resets.  A binary reset on every violation is exactly the CaT
+    (arXiv:2403.18765) ablation whose return is identically zero; on this branch it was measured
+    as 7/7 episodes killed at ticks 69--88, all before the nominal strike tick, with a teacher
+    whose own minimum limit margin is 0.116 rad (16.6% of travel).  Evidence is therefore
+    mandatory in this mode: the diagnostic recorder must be enabled so a non-zero hard-edge count
+    still blocks promotion and deployment.
     """
 
     context = "actual_joint_position_forbidden_zone"
@@ -582,6 +593,14 @@ def actual_joint_position_forbidden_zone(
         raise RuntimeError(
             f"{context} requires an exact boolean diagnostic-enabled flag"
         )
+    if type(terminate) is not bool:
+        raise RuntimeError(f"{context} requires an exact boolean terminate flag")
+    if not terminate and not diagnostic_enabled:
+        raise RuntimeError(
+            f"{context} telemetry mode (terminate=False) requires the attribution "
+            "recorder: dropping the reset without latching the hard-edge evidence "
+            "would train a policy that cannot be promoted or deployed"
+        )
     if diagnostic_enabled:
         diagnostic_recorder = getattr(
             action, "record_actual_joint_forbidden_diagnostic", None
@@ -623,6 +642,10 @@ def actual_joint_position_forbidden_zone(
             hard_terminal=hard_terminal,
             episode_age=env.episode_length_buf,
         )
+    if not terminate:
+        # The recorder above already latched the true hard-edge event, so the evidence and the
+        # promotion NO-GO survive; only the Done bit is withheld.
+        return torch.zeros_like(hard_terminal)
     return hard_terminal
 
 

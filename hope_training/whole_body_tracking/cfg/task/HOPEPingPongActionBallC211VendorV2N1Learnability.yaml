@@ -14,7 +14,13 @@ actor_obs_contract: action_ball_c211
 physical_ball: false
 
 env:
+  # Every formal C211 scale/long arm uses the production-size vectorized scene.
+  num_envs: 4096
   episode_length_s: 10.0
+
+domain_rand:
+  # Match A211's stable startup plant and add no new DR axis.
+  stable_ready_plant: true
 
 task_wait:
   enabled: true
@@ -26,8 +32,15 @@ task_wait:
   required_active_ticks: 200
 
 motion:
-  # RESET_WAIT is not the historical split-ready teacher transition.
-  action_ball_diagnostic_split_ready_teacher: false
+  # Physical reset and the hidden RESET_WAIT teacher use the separately held
+  # safe-ready state.  At reveal the teacher switches to exact measured frame 0;
+  # the family-specific, receipt-derived teacher-start countdown and dense mimic
+  # teach that bridge.  No hardcoded timing constant, frame0 physical-reset or
+  # passive-soak claim is made.
+  action_ball_diagnostic_split_ready_teacher: true
+  # Keep the same explicit Take061 backhand family authority as A; never let
+  # the legacy singleton-forehand fallback define the task semantics.
+  clip_family_per_clip: [backhand]
 
 actions:
   control_step_action_delay_min: 0
@@ -48,12 +61,12 @@ racket:
   vb_metrics_only: false
   action_ball_pool_refill_rows: 1
 
-  # The immutable row owns the matched incoming question and landing aim, but
-  # compatibility desired-contact fields remain invalid and zero.  C211 sees
-  # causal ball p/v/spin only after task_valid becomes one.
-  action_ball_target_source: immutable_tape
-  action_ball_immutable_tape_path: ""
-  action_ball_immutable_tape_sha256: ""
+  # C211 consumes the curriculum/sampler's incoming-ball question directly.
+  # It neither constructs nor caches a desired-contact inverse solution; all
+  # compatibility desired-contact fields remain invalid and zero.
+  action_ball_target_source: direct_ball
+  action_ball_reuse_exact_question_until_semantics_change: false
+  action_ball_initial_center_single_question: true
   action_ball_target_recipe: outcome_dense_only
   action_ball_target_validity_mask: [false, false, false]
   action_ball_target_observation_noise: false
@@ -65,11 +78,12 @@ racket:
 
 rewards:
   # HOPEActionBallC211RewardsCfg freezes the exact-strike proximity manager
-  # weight at 220.0.  With policy dt=0.02 its one-shot peak is 4.4: above the
-  # compatible-swing motion maximum 3.6575 and below legal landing's 6.0 floor.
+  # weight at 240.0.  With policy dt=0.02 its one-shot peak is 4.8: above the
+  # task-valid Take061 swing-mimic budget and below legal landing's 8.4 floor.
   # This C-only term deliberately has no generic YAML override.
   # Target-dependent reward terms stay ineligible in C.  Explicit zeros are
   # applied after the shared v2 pack and inherited VendorV2 YAML.
+  base_position_weight: 0.0
   racket_position_coarse_weight: 0.0
   racket_velocity_coarse_weight: 0.0
   racket_normal_coarse_weight: 0.0
@@ -83,5 +97,6 @@ rewards:
   strike_capture_bonus_weight: 0.0
   virtual_pass_net_weight: 0.0
   virtual_landing_dense_weight: 0.0
-  virtual_landing_weight: 500.0
+  # Shared A/C legal-table floor/max = 8.4/14.0 after policy dt.
+  virtual_landing_weight: 700.0
   virtual_landing_base_frac: 0.6

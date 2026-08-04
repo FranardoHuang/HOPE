@@ -23,7 +23,15 @@ def portable_launch_tools(tmp_path: Path) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     flock = bin_dir / "flock"
-    flock.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    flock.write_text(
+        f"#!{sys.executable}\n"
+        "import fcntl, sys\n"
+        "if len(sys.argv) != 3 or sys.argv[1] not in ('-x', '-u'):\n"
+        "    raise SystemExit(2)\n"
+        "operation = fcntl.LOCK_EX if sys.argv[1] == '-x' else fcntl.LOCK_UN\n"
+        "fcntl.flock(int(sys.argv[2]), operation)\n",
+        encoding="utf-8",
+    )
     setsid = bin_dir / "setsid"
     setsid.write_text(
         "#!/usr/bin/env python3\n"
@@ -40,7 +48,9 @@ def portable_launch_tools(tmp_path: Path) -> Path:
         "import os, subprocess, sys, time\n"
         "pid = int(sys.argv[-1])\n"
         "if any('stat=' in value for value in sys.argv):\n"
-        "    raise SystemExit(subprocess.run(['/bin/ps', '-o', 'stat=', '-p', str(pid)]).returncode)\n"
+        "    result = subprocess.run(['/bin/ps', '-o', 'stat=', '-p', str(pid)], capture_output=True, text=True)\n"
+        "    sys.stdout.write(result.stdout)\n"
+        "    raise SystemExit(result.returncode)\n"
         "for _ in range(200):\n"
         "    try:\n"
         "        pgid = os.getpgid(pid)\n"
@@ -249,6 +259,20 @@ def _terminate_group_from_state(state: Path) -> None:
         os.killpg(int(fields["pgid"]), signal.SIGTERM)
     except (KeyError, ProcessLookupError):
         return
+
+
+def _wait_for_event(path: Path, event: str, *, timeout_s: float = 8.0) -> list[str]:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        rows = (
+            path.read_text(encoding="utf-8").splitlines()
+            if path.is_file()
+            else []
+        )
+        if event in rows:
+            return rows
+        time.sleep(0.02)
+    pytest.fail(f"timed out waiting for event {event!r}: {rows!r}")
 
 
 def test_source_contract_has_180s_default_and_no_broad_signal() -> None:
@@ -485,6 +509,57 @@ def test_pre_marker_exit_publishes_terminal_classification(
     assert fields["terminal_exit_code"] == "17"
 
 
+@pytest.mark.parametrize(
+    ("child_exit", "expected_kind"),
+    ((0, "clean_completion"), (17, "completion_nonzero_exit")),
+)
+def test_completion_marker_flushed_immediately_before_exit_is_not_lost(
+    tmp_path: Path,
+    portable_launch_tools: Path,
+    child_exit: int,
+    expected_kind: str,
+) -> None:
+    real_grep = shutil.which("grep", path=os.defpath)
+    assert real_grep is not None
+    grep_count = tmp_path / "grep.count"
+    grep = portable_launch_tools / "grep"
+    grep.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, sys, time\n"
+        "counter = pathlib.Path(os.environ['MARKER_EXIT_GREP_COUNT'])\n"
+        "count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "counter.write_text(str(count))\n"
+        "if count == 1:\n"
+        "    time.sleep(1.0)\n"
+        "    raise SystemExit(1)\n"
+        f"os.execv({real_grep!r}, [{real_grep!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    grep.chmod(0o755)
+    child = _write_child(
+        tmp_path,
+        "printf 'KIT_READY\\n'\n"
+        f"exit {child_exit}\n",
+    )
+    proc, _log, state, _ = _run_launcher(
+        tmp_path,
+        portable_launch_tools,
+        child,
+        timeout_s=8,
+        extra_env={
+            "KIT_WAIT_FOR_COMPLETION": "1",
+            "KIT_COMPLETION_TIMEOUT_S": "5",
+            "MARKER_EXIT_GREP_COUNT": str(grep_count),
+        },
+    )
+    assert proc.returncode == child_exit, proc.stderr
+    fields = _state_fields(state)
+    assert "ready_utc" in fields
+    assert "boot_lock_released_utc" in fields
+    assert fields["completion_exit_code"] == str(child_exit)
+    assert fields["terminal_kind"] == expected_kind
+
+
 def test_completion_mode_waits_for_clean_exit_and_empty_group(
     tmp_path: Path, portable_launch_tools: Path
 ) -> None:
@@ -510,6 +585,288 @@ def test_completion_mode_waits_for_clean_exit_and_empty_group(
     assert fields["completion_exit_code"] == "0"
     assert fields["terminal_kind"] == "clean_completion"
     assert fields["terminal_exit_code"] == "0"
+
+
+def test_completion_deadline_rechecks_natural_exit_before_term(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    term_seen = tmp_path / "term.seen"
+    child = _write_child(
+        tmp_path,
+        f"trap 'printf term > {term_seen!s}; exit 0' TERM\n"
+        "printf 'KIT_READY\\n'\n"
+        "sleep 3\n",
+    )
+    original_ps = portable_launch_tools / "ps.real"
+    (portable_launch_tools / "ps").rename(original_ps)
+    stat_count = tmp_path / "stat.count"
+    ps = portable_launch_tools / "ps"
+    ps.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, sys\n"
+        "if any('stat=' in value for value in sys.argv):\n"
+        "    counter = pathlib.Path(os.environ['DEADLINE_STAT_COUNT'])\n"
+        "    count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "    counter.write_text(str(count))\n"
+        "    if count <= 2:\n"
+        "        print('S')\n"
+        "        raise SystemExit(0)\n"
+        "    raise SystemExit(1)\n"
+        f"os.execv({str(original_ps)!r}, [{str(original_ps)!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    ps.chmod(0o755)
+    proc, _log, state, _ = _run_launcher(
+        tmp_path,
+        portable_launch_tools,
+        child,
+        timeout_s=8,
+        extra_env={
+            "KIT_WAIT_FOR_COMPLETION": "1",
+            "KIT_COMPLETION_TIMEOUT_S": "1",
+            "DEADLINE_STAT_COUNT": str(stat_count),
+        },
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert int(stat_count.read_text(encoding="ascii")) >= 3
+    assert not term_seen.exists()
+    fields = _state_fields(state)
+    assert fields["terminal_kind"] == "clean_completion"
+    assert "completion_timeout_s" not in fields
+
+
+def test_completion_mode_releases_shared_boot_lock_at_marker_before_exit(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    """A ready trainer may keep running while the next Kit boot begins."""
+
+    fixed_lock = tmp_path / "kit.lock"
+    fixed_lock.touch()
+    launcher = _copy_test_launcher(tmp_path, portable_launch_tools, fixed_lock)
+    events = tmp_path / "events"
+    first = tmp_path / "first.sh"
+    first.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f"printf 'A_STARTED\\n' >> {events!s}\n"
+        "sleep 2\n"
+        "printf 'KIT_READY\\n'\n"
+        f"printf 'A_READY\\n' >> {events!s}\n"
+        "sleep 5\n"
+        f"printf 'A_EXIT\\n' >> {events!s}\n",
+        encoding="utf-8",
+    )
+    second = tmp_path / "second.sh"
+    second.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f"printf 'B_STARTED\\n' >> {events!s}\n"
+        "printf 'KIT_READY\\n'\n"
+        "sleep 1\n"
+        f"printf 'B_EXIT\\n' >> {events!s}\n",
+        encoding="utf-8",
+    )
+    first.chmod(0o755)
+    second.chmod(0o755)
+    common_env = {
+        **os.environ,
+        "PATH": f"{portable_launch_tools}{os.pathsep}{os.environ['PATH']}",
+        "KIT_BOOT_MARKER": "KIT_READY",
+        "KIT_BOOT_TIMEOUT_S": "12",
+        "KIT_BOOT_STALE_TIMEOUT_S": "8",
+        "KIT_BOOT_POLL_S": "1",
+        "KIT_WAIT_FOR_COMPLETION": "1",
+        "KIT_COMPLETION_TIMEOUT_S": "12",
+    }
+    first_log = tmp_path / "first.log"
+    first_state = tmp_path / "first.launch"
+    second_log = tmp_path / "second.log"
+    second_state = tmp_path / "second.launch"
+    first_proc = subprocess.Popen(
+        [str(launcher), str(first_log), str(first)],
+        cwd=tmp_path,
+        env={**common_env, "KIT_BOOT_STATE_FILE": str(first_state)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    second_proc: subprocess.Popen[str] | None = None
+    try:
+        _wait_for_event(events, "A_STARTED")
+        second_proc = subprocess.Popen(
+            [str(launcher), str(second_log), str(second)],
+            cwd=tmp_path,
+            env={**common_env, "KIT_BOOT_STATE_FILE": str(second_state)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        # B is still behind the pod-wide boot lock while A has not emitted the
+        # readiness marker.
+        time.sleep(1.0)
+        assert "B_STARTED" not in events.read_text(encoding="utf-8").splitlines()
+        _wait_for_event(events, "A_READY")
+        rows = _wait_for_event(events, "B_STARTED")
+        assert "A_EXIT" not in rows
+        assert rows.index("A_READY") < rows.index("B_STARTED")
+        first_stdout, first_stderr = first_proc.communicate(timeout=12)
+        second_stdout, second_stderr = second_proc.communicate(timeout=12)
+        assert first_proc.returncode == 0, (first_stdout, first_stderr)
+        assert second_proc.returncode == 0, (second_stdout, second_stderr)
+        final_rows = events.read_text(encoding="utf-8").splitlines()
+        assert final_rows.index("B_STARTED") < final_rows.index("A_EXIT")
+        for state in (first_state, second_state):
+            fields = _state_fields(state)
+            assert "ready_utc" in fields
+            assert "boot_lock_released_utc" in fields
+            assert "completion_utc" in fields
+            assert fields["terminal_kind"] == "clean_completion"
+    finally:
+        for proc, state in (
+            (first_proc, first_state),
+            (second_proc, second_state),
+        ):
+            if proc is not None and proc.poll() is None:
+                _terminate_group_from_state(state)
+                proc.kill()
+                proc.wait(timeout=3)
+
+
+def test_completion_mode_sigterm_stops_exact_group_after_lock_release(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    target_term = tmp_path / "target.term"
+    child = _write_child(
+        tmp_path,
+        "trap 'printf term > \"$TARGET_TERM_FILE\"; exit 0' TERM\n"
+        "printf 'KIT_READY\\n'\n"
+        "while :; do sleep 1; done\n",
+    )
+    fixed_lock = tmp_path / "kit.lock"
+    fixed_lock.touch()
+    launcher = _copy_test_launcher(tmp_path, portable_launch_tools, fixed_lock)
+    log = tmp_path / "run.log"
+    state = tmp_path / "run.launch"
+    proc = subprocess.Popen(
+        [str(launcher), str(log), str(child)],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "PATH": f"{portable_launch_tools}{os.pathsep}{os.environ['PATH']}",
+            "KIT_BOOT_MARKER": "KIT_READY",
+            "KIT_BOOT_TIMEOUT_S": "8",
+            "KIT_BOOT_STALE_TIMEOUT_S": "4",
+            "KIT_BOOT_POLL_S": "1",
+            "KIT_WAIT_FOR_COMPLETION": "1",
+            "KIT_COMPLETION_TIMEOUT_S": "12",
+            "KIT_BOOT_STATE_FILE": str(state),
+            "TARGET_TERM_FILE": str(target_term),
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            if state.is_file() and "boot_lock_released_utc=" in state.read_text(
+                encoding="utf-8"
+            ):
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("completion mode never released the boot lock")
+        proc.send_signal(signal.SIGTERM)
+        _stdout, stderr = proc.communicate(timeout=10)
+        assert proc.returncode == 143, stderr
+        fields = _state_fields(state)
+        assert fields["stop_signal"] == "TERM"
+        assert fields["terminal_kind"] == "signal_stop"
+        assert fields["terminal_exit_code"] == "143"
+        assert target_term.is_file()
+    finally:
+        if proc.poll() is None:
+            _terminate_group_from_state(state)
+            proc.kill()
+            proc.wait(timeout=3)
+
+
+def test_boot_timeout_holds_shared_lock_through_exact_cleanup(
+    tmp_path: Path, portable_launch_tools: Path
+) -> None:
+    """A waiting boot cannot enter until the timed-out owner is cleaned."""
+
+    fixed_lock = tmp_path / "kit.lock"
+    fixed_lock.touch()
+    launcher = _copy_test_launcher(tmp_path, portable_launch_tools, fixed_lock)
+    events = tmp_path / "events"
+    first = tmp_path / "timeout.sh"
+    first.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f"trap 'echo A_CLEANED >> {events!s}; exit 0' TERM\n"
+        f"printf 'A_STARTED\\n' >> {events!s}\n"
+        "while :; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    second = tmp_path / "after-timeout.sh"
+    second.write_text(
+        "#!/bin/sh\nset -eu\n"
+        f"printf 'B_STARTED\\n' >> {events!s}\n"
+        "printf 'KIT_READY\\n'\n",
+        encoding="utf-8",
+    )
+    first.chmod(0o755)
+    second.chmod(0o755)
+    common_env = {
+        **os.environ,
+        "PATH": f"{portable_launch_tools}{os.pathsep}{os.environ['PATH']}",
+        "KIT_BOOT_MARKER": "KIT_READY",
+        "KIT_BOOT_TIMEOUT_S": "2",
+        "KIT_BOOT_STALE_TIMEOUT_S": "1",
+        "KIT_BOOT_POLL_S": "1",
+        "KIT_WAIT_FOR_COMPLETION": "1",
+        "KIT_COMPLETION_TIMEOUT_S": "6",
+    }
+    first_log = tmp_path / "timeout.log"
+    first_state = tmp_path / "timeout.launch"
+    second_log = tmp_path / "after-timeout.log"
+    second_state = tmp_path / "after-timeout.launch"
+    first_proc = subprocess.Popen(
+        [str(launcher), str(first_log), str(first)],
+        cwd=tmp_path,
+        env={**common_env, "KIT_BOOT_STATE_FILE": str(first_state)},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    second_proc: subprocess.Popen[str] | None = None
+    try:
+        _wait_for_event(events, "A_STARTED")
+        second_proc = subprocess.Popen(
+            [str(launcher), str(second_log), str(second)],
+            cwd=tmp_path,
+            env={**common_env, "KIT_BOOT_STATE_FILE": str(second_state)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(1.0)
+        assert "B_STARTED" not in events.read_text(encoding="utf-8").splitlines()
+        first_stdout, first_stderr = first_proc.communicate(timeout=12)
+        assert first_proc.returncode == 124, (first_stdout, first_stderr)
+        rows = _wait_for_event(events, "B_STARTED")
+        assert rows.index("A_CLEANED") < rows.index("B_STARTED")
+        second_stdout, second_stderr = second_proc.communicate(timeout=8)
+        assert second_proc.returncode == 0, (second_stdout, second_stderr)
+        assert _state_fields(first_state)["terminal_kind"] == "boot_timeout"
+        assert "boot_lock_released_utc" in _state_fields(first_state)
+    finally:
+        for proc, state in (
+            (first_proc, first_state),
+            (second_proc, second_state),
+        ):
+            if proc is not None and proc.poll() is None:
+                _terminate_group_from_state(state)
+                proc.kill()
+                proc.wait(timeout=3)
 
 
 @pytest.mark.parametrize(

@@ -482,6 +482,33 @@ def test_schema3_policy_bootstrap_binds_physical_ready_and_hold_qdes(tmp_path):
     )
 
     assert validated["schema_version"] == 3
+
+
+def test_schema3_policy_bootstrap_accepts_exact_dr_l0_zero_decoder(tmp_path):
+    """The active N=1 dynamic-ready path may bind an absent startup event."""
+
+    rows = _upgrade_inputs_to_schema2(_materialize_inputs(tmp_path))
+    binding = _load(rows)
+    contract = _schema3_bootstrap(rows, binding)
+    decoder = contract["decoder"]
+    decoder["startup_offset_delta_source"] = (
+        TC.ACTION_BALL_DR_L0_ZERO_DECODER_SOURCE
+    )
+    decoder["startup_offset_delta_identity"] = (
+        TC.action_ball_dr_l0_zero_decoder_identity(
+            joint_names=contract["joint_names"]
+        )
+    )
+    decoder["startup_offset_delta_lower"] = [0.0] * 31
+    decoder["startup_offset_delta_upper"] = [0.0] * 31
+
+    validated = TC.validate_action_ball_policy_bootstrap(
+        contract, expected_action_count=1
+    )
+    assert validated["schema_version"] == 3
+    assert validated["decoder"]["startup_offset_delta_identity"]["kind"] == (
+        TC.ACTION_BALL_DR_L0_ZERO_DECODER_KIND
+    )
     assert (
         validated["ready_source"]["identity"]["binding_sha256"]
         == binding["binding_sha256"]

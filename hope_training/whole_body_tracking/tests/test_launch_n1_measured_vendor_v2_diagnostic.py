@@ -684,6 +684,62 @@ def _fake_proc_stat(pid: int, starttime: int) -> str:
     return "%d (python worker) %s\n" % (pid, " ".join(fields))
 
 
+def test_legacy_wrapper_rejects_new_global_reservation_before_gpu_pid_boot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = _admission_spec(tmp_path / "legacy", allow=True)
+    checkout = Path(spec["source"]["checkout"])
+    lock_path = tmp_path / "gpu2.lock"
+    spec["gpu"]["lock_path"] = str(lock_path)
+    namespace = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / "agibot_a3_action_ball_a211_four_arm_diagnostic"
+        / "new-global-pending"
+    )
+    namespace.mkdir(parents=True)
+    pid = 7301
+    starttime = 8301
+    claim_sha = "d" * 64
+    registry = Path(
+        str(lock_path) + launcher._A.GPU_RESERVATION_REGISTRY_SUFFIX
+    )
+    _canonical_write(
+        registry / (claim_sha + ".json"),
+        {
+            "schema_version": 1,
+            "kind": "measured_vendor_v2_gpu_slot_reservation_v1",
+            "owner_pid": pid,
+            "owner_proc_starttime_ticks": starttime,
+            "gpu_index": spec["gpu"]["index"],
+            "gpu_uuid": spec["gpu"]["uuid"],
+            "namespace": str(namespace),
+            "checkout": str(checkout),
+            "commit_sha": spec["source"]["commit_sha"],
+            "launch_claim_sha256": claim_sha,
+            "max_compute_pids": launcher.MAX_VENDOR_V2_COMPUTE_PIDS,
+            "minimum_free_memory_mib": launcher.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+            "allow_vendor_v2_colocation": True,
+        },
+    )
+    proc_root = tmp_path / "proc"
+    stat_path = proc_root / str(pid) / "stat"
+    stat_path.parent.mkdir(parents=True)
+    stat_path.write_text(_fake_proc_stat(pid, starttime), encoding="ascii")
+    monkeypatch.setattr(launcher, "_query_gpu_processes", lambda *_: _gpu_query([]))
+    with pytest.raises(
+        launcher.LaunchRefused, match="belongs to another experiment family"
+    ):
+        launcher._verify_gpu_admission(
+            spec,
+            phase="pre_launch",
+            current_namespace=None,
+            proc_root=proc_root,
+        )
+
+
 @pytest.mark.parametrize("drift", ("commit_checkout", "gpu"))
 def test_dead_historical_reservation_is_ignored_before_current_identity_checks(
     tmp_path: Path, drift: str
@@ -714,9 +770,10 @@ def test_dead_historical_reservation_is_ignored_before_current_identity_checks(
     else:
         receipt["gpu_index"] = 7
         receipt["gpu_uuid"] = "GPU-OLD00000"
-    _canonical_write(namespace / launcher.GPU_RESERVATION_FILENAME, receipt)
+    registry = tmp_path / "gpu.lock.vendor_v2_reservations"
+    _canonical_write(registry / (receipt["launch_claim_sha256"] + ".json"), receipt)
     assert launcher._live_reservations(
-        root,
+        registry,
         checkout=checkout,
         commit="a" * 40,
         gpu_index=2,
@@ -733,8 +790,9 @@ def test_live_reservation_on_another_gpu_does_not_block_current_gpu(tmp_path: Pa
     namespace.mkdir(parents=True)
     pid = 4567
     starttime = 987
+    registry = tmp_path / "gpu.lock.vendor_v2_reservations"
     _canonical_write(
-        namespace / launcher.GPU_RESERVATION_FILENAME,
+        registry / ("b" * 64 + ".json"),
         {
             "schema_version": 1,
             "kind": "measured_vendor_v2_gpu_slot_reservation_v1",
@@ -758,13 +816,200 @@ def test_live_reservation_on_another_gpu_does_not_block_current_gpu(tmp_path: Pa
         _fake_proc_stat(pid, starttime), encoding="ascii"
     )
     assert launcher._live_reservations(
-        root,
+        registry,
         checkout=checkout,
         commit="a" * 40,
         gpu_index=2,
         gpu_uuid="GPU-12345678",
         proc_root=proc,
     ) == []
+
+
+def _reservation_receipt(
+    *, namespace: Path, checkout: Path, pid: int, starttime: int
+):
+    return {
+        "schema_version": 1,
+        "kind": "measured_vendor_v2_gpu_slot_reservation_v1",
+        "owner_pid": pid,
+        "owner_proc_starttime_ticks": starttime,
+        "gpu_index": 2,
+        "gpu_uuid": "GPU-12345678",
+        "namespace": str(namespace),
+        "checkout": str(checkout),
+        "commit_sha": "a" * 40,
+        "launch_claim_sha256": "b" * 64,
+        "max_compute_pids": 2,
+        "minimum_free_memory_mib": launcher.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+        "allow_vendor_v2_colocation": True,
+    }
+
+
+def test_physical_registry_blocks_live_same_gpu_reservation_from_other_checkout(
+    tmp_path: Path,
+):
+    checkout_one = tmp_path / "checkout-one"
+    checkout_two = tmp_path / "checkout-two"
+    checkout_one.mkdir()
+    checkout_two.mkdir()
+    namespace = (
+        checkout_one
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / launcher.EXPERIMENT_NAME
+        / "live"
+    )
+    namespace.mkdir(parents=True)
+    receipt = _reservation_receipt(
+        namespace=namespace, checkout=checkout_one, pid=7411, starttime=8801
+    )
+    registry = tmp_path / "gpu.lock.vendor_v2_reservations"
+    _canonical_write(registry / ("b" * 64 + ".json"), receipt)
+    proc_root = tmp_path / "proc"
+    stat_path = proc_root / "7411" / "stat"
+    stat_path.parent.mkdir(parents=True)
+    stat_path.write_text(_fake_proc_stat(7411, 8801), encoding="ascii")
+    with pytest.raises(launcher.LaunchRefused, match="identity differs"):
+        launcher._live_reservations(
+            registry,
+            checkout=checkout_two,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            proc_root=proc_root,
+        )
+
+
+@pytest.mark.parametrize("mode", ("malformed", "identity_drift"))
+def test_live_reservation_proc_identity_ambiguity_fails_closed(
+    tmp_path: Path, mode: str
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    namespace = tmp_path / launcher.EXPERIMENT_NAME / "live"
+    namespace.mkdir(parents=True)
+    receipt = _reservation_receipt(
+        namespace=namespace, checkout=checkout, pid=7412, starttime=8802
+    )
+    registry = tmp_path / "gpu.lock.vendor_v2_reservations"
+    _canonical_write(registry / ("b" * 64 + ".json"), receipt)
+    proc_root = tmp_path / "proc"
+    stat_path = proc_root / "7412" / "stat"
+    stat_path.parent.mkdir(parents=True)
+    stat_path.write_text(
+        "malformed\n"
+        if mode == "malformed"
+        else _fake_proc_stat(7412, 8803),
+        encoding="ascii",
+    )
+    pattern = "proc stat" if mode == "malformed" else "identity drifted"
+    with pytest.raises(launcher.LaunchRefused, match=pattern):
+        launcher._live_reservations(
+            registry,
+            checkout=checkout,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            proc_root=proc_root,
+        )
+
+
+def test_live_reservation_proc_eacces_fails_closed(tmp_path: Path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    namespace = tmp_path / launcher.EXPERIMENT_NAME / "live"
+    namespace.mkdir(parents=True)
+    receipt = _reservation_receipt(
+        namespace=namespace, checkout=checkout, pid=7413, starttime=8804
+    )
+    registry = tmp_path / "gpu.lock.vendor_v2_reservations"
+    _canonical_write(registry / ("b" * 64 + ".json"), receipt)
+    proc_root = tmp_path / "proc"
+    stat_path = proc_root / "7413" / "stat"
+    stat_path.parent.mkdir(parents=True)
+    stat_path.write_text(_fake_proc_stat(7413, 8804), encoding="ascii")
+    original = Path.lstat
+
+    def denied(path):
+        if path == stat_path:
+            raise PermissionError("fixture EACCES")
+        return original(path)
+
+    monkeypatch.setattr(Path, "lstat", denied)
+    with pytest.raises(launcher.LaunchRefused, match="process liveness"):
+        launcher._live_reservations(
+            registry,
+            checkout=checkout,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            proc_root=proc_root,
+        )
+
+
+def test_missing_proc_stat_is_the_only_dead_owner_case(tmp_path: Path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    namespace = tmp_path / launcher.EXPERIMENT_NAME / "spent"
+    namespace.mkdir(parents=True)
+    receipt = _reservation_receipt(
+        namespace=namespace, checkout=checkout, pid=7414, starttime=8805
+    )
+    registry = tmp_path / "gpu.lock.vendor_v2_reservations"
+    _canonical_write(registry / ("b" * 64 + ".json"), receipt)
+    assert launcher._live_reservations(
+        registry,
+        checkout=checkout,
+        commit="a" * 40,
+        gpu_index=2,
+        gpu_uuid="GPU-12345678",
+        proc_root=tmp_path / "missing-proc",
+    ) == []
+
+
+def test_reservation_dual_publish_is_transactional_and_cleanup_keeps_audit_copy(
+    tmp_path: Path, monkeypatch
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    namespace = tmp_path / launcher.EXPERIMENT_NAME / "candidate"
+    namespace.mkdir(parents=True)
+    lock_path = tmp_path / "gpu.lock"
+    receipt = _reservation_receipt(
+        namespace=namespace, checkout=checkout, pid=7415, starttime=8806
+    )
+    spec = {
+        "source": {"checkout": str(checkout), "commit_sha": "a" * 40},
+        "gpu": {
+            "index": 2,
+            "uuid": "GPU-12345678",
+            "lock_path": str(lock_path),
+        },
+        "namespace": str(namespace),
+        launcher.VENDOR_V2_COLOCATION_SPEC_KEY: True,
+    }
+    monkeypatch.setattr(
+        launcher._ADMISSION, "_reservation_document", lambda *_args: receipt
+    )
+    handle = launcher._ADMISSION._write_reservation(spec, "b" * 64)
+    assert handle["registry_path"].is_file()
+    assert handle["namespace_path"].is_file()
+    assert handle["registry_path"].read_bytes() == handle[
+        "namespace_path"
+    ].read_bytes()
+    launcher._ADMISSION._release_reservation(handle)
+    assert not handle["registry_path"].exists()
+    assert handle["namespace_path"].is_file()
+
+    failed_namespace = tmp_path / launcher.EXPERIMENT_NAME / "failed"
+    failed_namespace.mkdir(parents=True)
+    (failed_namespace / launcher.GPU_RESERVATION_FILENAME).mkdir()
+    failed_spec = {**spec, "namespace": str(failed_namespace)}
+    with pytest.raises(launcher.LaunchRefused):
+        launcher._ADMISSION._write_reservation(failed_spec, "c" * 64)
+    registry_root = launcher._ADMISSION._reservation_registry_root(lock_path)
+    assert not (registry_root / ("c" * 64 + ".json")).exists()
 
 
 def test_post_boot_failure_exactly_cleans_current_trainer_group_only(

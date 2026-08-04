@@ -247,6 +247,23 @@ class RewardsCfg:
             "sensor_cfg": SceneEntityCfg(
                 "contact_forces",
                 body_names=[
+                    # 人话:脚和手腕本来就该碰东西(站地、打球),不算"不该有的接触"。
+                    #
+                    # 这里的小写 `_link` 是【对的】,不要再改成 `_Link`。本类是 G1 血统的
+                    # 共享基类,而这一行的唯一实际消费者就是 G1/humanoid:
+                    # config/g1/flat_env_cfg.py:16-30 的 body 名全是小写 `_link`
+                    # (left_ankle_roll_link 等),且 G1FlatEnvCfg 从不覆盖 undesired_contacts。
+                    #
+                    # A3 这边【走不到这一行】:AgibotA3FlatEnvCfg.__post_init__
+                    # (config/agibot_a3/flat_env_cfg.py:52-54)在 super() 之后无条件把
+                    # sensor_cfg 整个换成 A3_CONTACT_EXCLUDE_REGEX,那份用的就是正确的
+                    # `_Link`,而且还多排除了四个球拍 link。所有 ActionBall(含 A211/C211)
+                    # 都继承 AgibotA3FlatEnvCfg,所以本行对它们是死码。
+                    #
+                    # 2026-08-05 复核记录(exp §5.6 第 12 条):曾有一版把这四条改成 `_Link`,
+                    # 理由是"A3 双脚双腕被误罚"。该前提不成立(A3 根本不用这一行),
+                    # 改完对 A211/C211 零效果,却让 G1 的四条排除项真的全部落空 ——
+                    # 唯一被影响的臂反而被引入了那个 bug。故还原为小写。
                     r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
                 ],
             ),

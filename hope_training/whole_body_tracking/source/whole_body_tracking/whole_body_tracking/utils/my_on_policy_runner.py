@@ -44,6 +44,10 @@ _REWARD_PPO_ECONOMY_SCHEMA_VERSION = 1
 _REWARD_PPO_ECONOMY_GATE_ENV = (
     "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_GATE"
 )
+_PRELONG_SEMANTICS_ENABLE_ENV = "HOPE_ACTION_BALL_4096X5_PRELONG_SEMANTICS"
+_PRELONG_SEMANTICS_RECIPE_SHA_ENV = (
+    "HOPE_ACTION_BALL_4096X5_PRELONG_REWARD_RECIPE_SHA256"
+)
 _REWARD_PPO_ECONOMY_NUM_ENVS = 4096
 _REWARD_PPO_ECONOMY_STEPS_PER_UPDATE = 24
 _REWARD_PPO_ECONOMY_ADVANTAGE_TOLERANCE = 5.0e-5
@@ -56,6 +60,10 @@ _C211_ACTOR_WIDTH = 211
 _C211_CRITIC_WIDTH = 319
 _C211_ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v2"
 _C211_CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
+_ACTION_BALL_211_WAIT_MASK_RANGES = {
+    "actor": (_A211_ACTOR_WIDTH, 197, 210),
+    "critic": (_A211_CRITIC_WIDTH, 305, 318),
+}
 _ADAPTIVE_KL_LEARNING_RATE_FLOOR = 1.0e-5
 _JOINT_SAFETY_EVENT = "hope_joint_safety_update"
 _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION = 2
@@ -102,6 +110,71 @@ _EXACT_RESUME_TELEMETRY_KEYS = (
     "wandb_run_id",
     "wandb_run_name",
 )
+
+
+def _mask_action_ball_211_wait_after_normalization(
+    raw_observations: torch.Tensor,
+    normalized_observations: torch.Tensor,
+    *,
+    role: str,
+) -> torch.Tensor:
+    """Restore the hidden-WAIT zero tuple after empirical normalization.
+
+    The final ``task_valid`` column is deliberately read from the raw tensor.
+    Reading the normalized indicator would make the decision depend on running
+    moments.  The indicator itself remains normalized; only task9 + base2 +
+    clocks2 are restored to exact zero for raw-invalid rows.
+    """
+
+    try:
+        width, mask_start, mask_stop = _ACTION_BALL_211_WAIT_MASK_RANGES[role]
+    except KeyError as exc:
+        raise ValueError("ActionBall211 normalizer role must be actor or critic") from exc
+    if not isinstance(raw_observations, torch.Tensor) or not isinstance(
+        normalized_observations, torch.Tensor
+    ):
+        raise RuntimeError(
+            f"ActionBall211 {role} normalizer must consume and return tensors"
+        )
+    if (
+        raw_observations.shape != normalized_observations.shape
+        or raw_observations.ndim < 1
+        or raw_observations.shape[-1] != width
+    ):
+        raise RuntimeError(
+            f"ActionBall211 {role} normalizer ABI must remain {width}-D; "
+            f"raw={tuple(raw_observations.shape)!r} "
+            f"normalized={tuple(normalized_observations.shape)!r}"
+        )
+    raw_invalid = raw_observations[..., -1] == 0
+    masked_region = torch.where(
+        raw_invalid.unsqueeze(-1),
+        torch.zeros_like(normalized_observations[..., mask_start:mask_stop]),
+        normalized_observations[..., mask_start:mask_stop],
+    )
+    return torch.cat(
+        (
+            normalized_observations[..., :mask_start],
+            masked_region,
+            normalized_observations[..., mask_stop:],
+        ),
+        dim=-1,
+    )
+
+
+def _action_ball_211_wait_forward_hook(role: str):
+    """Build one stateless hook without wrapping the normalizer module/state."""
+
+    def hook(_module, inputs, output):
+        if not isinstance(inputs, tuple) or len(inputs) != 1:
+            raise RuntimeError(
+                f"ActionBall211 {role} normalizer requires one raw observation input"
+            )
+        return _mask_action_ball_211_wait_after_normalization(
+            inputs[0], output, role=role
+        )
+
+    return hook
 
 
 def _ratio_or_none(counters: dict, numerator: str, denominator: str):
@@ -334,6 +407,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         else:
             self.action_ball_c211_trainability_preflight = None
+        self._install_action_ball_211_wait_normalizer_masks()
         self.registry_name = registry_name
         self.training_contract_schema_version = training_contract_schema_version
         self.training_contract_sha256 = training_contract_sha256
@@ -392,6 +466,114 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 "critic_obs_normalizer",
             )
         raise ValueError("normalizer role must be actor or critic")
+
+    def _action_ball_211_wait_mask_required(self) -> bool:
+        """Return whether this is exactly one fresh A211/C211 runner."""
+
+        enabled = tuple(
+            name
+            for name in (
+                "action_ball_a211_trainability_preflight",
+                "action_ball_c211_trainability_preflight",
+            )
+            if getattr(self, name, None) is not None
+        )
+        if len(enabled) > 1:
+            raise RuntimeError("runner cannot be both fresh A211 and fresh C211")
+        return bool(enabled)
+
+    def _install_action_ball_211_wait_normalizer_masks(self) -> None:
+        """Attach one post-normalization mask while preserving module identity.
+
+        RSL-RL saves and restores the normalizers' own state dictionaries.
+        Forward hooks are therefore intentional here: unlike a wrapper module,
+        they do not prefix keys, replace the live object, or change the frozen
+        evaluation/checkpoint hashes.  Re-entry is idempotent and also handles
+        a test/runtime that deliberately replaces one normalizer object.
+        """
+
+        if not self._action_ball_211_wait_mask_required():
+            return
+        installed = dict(
+            getattr(self, "_action_ball_211_wait_normalizer_hooks", {})
+        )
+        for role in ("actor", "critic"):
+            attribute, normalizer, _aliases = self._resolve_runtime_normalizer(role)
+            if attribute is None or not is_empirical_normalizer(normalizer):
+                raise RuntimeError(
+                    f"fresh ActionBall211 requires a live empirical {role} normalizer"
+                )
+            prior = installed.get(role)
+            if prior is not None and prior[0] is normalizer:
+                continue
+            if prior is not None:
+                prior[1].remove()
+            registrar = getattr(normalizer, "register_forward_hook", None)
+            if not callable(registrar):
+                raise RuntimeError(
+                    f"fresh ActionBall211 {role} normalizer cannot install WAIT masking"
+                )
+            installed[role] = (
+                normalizer,
+                registrar(_action_ball_211_wait_forward_hook(role)),
+            )
+        self._action_ball_211_wait_normalizer_hooks = installed
+
+    def _normalize_action_ball_211_initial_observations(self, result):
+        """Normalize the initial actor/critic pair before its first storage insert.
+
+        RSL-RL 2.3.1 normalizes observations returned by ``env.step`` and reuses
+        the final normalized critic tensor for bootstrap, but its initial
+        ``get_observations`` result goes directly to ``alg.act``.  A211/C211
+        cannot leave that first storage row on a different scale.  Both calls
+        below use the same live modules (and therefore the same moment-update
+        semantics) as every subsequent rollout row.
+        """
+
+        if not self._action_ball_211_wait_mask_required():
+            raise RuntimeError(
+                "initial ActionBall211 normalization is restricted to fresh A211/C211"
+            )
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise RuntimeError(
+                "ActionBall211 env.get_observations() must return (actor, extras)"
+            )
+        raw_actor, raw_extras = result
+        if not isinstance(raw_actor, torch.Tensor) or not isinstance(
+            raw_extras, Mapping
+        ):
+            raise RuntimeError(
+                "ActionBall211 initial actor/extras observation payload is invalid"
+            )
+        observation_groups = raw_extras.get("observations")
+        if not isinstance(observation_groups, Mapping):
+            raise RuntimeError(
+                "ActionBall211 initial extras lacks observation groups"
+            )
+        privileged_type = getattr(self, "privileged_obs_type", None)
+        if privileged_type != "critic":
+            raise RuntimeError(
+                "ActionBall211 initial rollout requires an explicit critic group"
+            )
+        raw_critic = observation_groups.get(privileged_type)
+        if not isinstance(raw_critic, torch.Tensor):
+            raise RuntimeError(
+                "ActionBall211 initial rollout lacks the critic tensor"
+            )
+        self._install_action_ball_211_wait_normalizer_masks()
+        _actor_attribute, actor_normalizer, _actor_aliases = (
+            self._resolve_runtime_normalizer("actor")
+        )
+        _critic_attribute, critic_normalizer, _critic_aliases = (
+            self._resolve_runtime_normalizer("critic")
+        )
+        normalized_actor = actor_normalizer(raw_actor.to(self.device))
+        normalized_critic = critic_normalizer(raw_critic.to(self.device))
+        normalized_groups = dict(observation_groups)
+        normalized_groups[privileged_type] = normalized_critic
+        normalized_extras = dict(raw_extras)
+        normalized_extras["observations"] = normalized_groups
+        return normalized_actor, normalized_extras
 
     def _resolve_runtime_normalizer(
         self, role: str
@@ -810,6 +992,59 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 "reward/PPO economy evidence requires exact 4096x24 RL storage"
             )
         return True
+
+    def _prelong_preregistered_reward_recipe(self, expected_sha256: str) -> dict:
+        """Read the hash-bound pre-scene recipe used to construct this runner."""
+
+        if self.log_dir is None or self.training_contract_sha256 is None:
+            raise RuntimeError(
+                "pre-long semantics require a hash-bound training_contract.json"
+            )
+        contract_path = pathlib.Path(self.log_dir) / "params" / "training_contract.json"
+        raw = contract_path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != self.training_contract_sha256:
+            raise RuntimeError(
+                "training_contract.json changed before pre-long reward binding"
+            )
+
+        def reject_duplicates(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise RuntimeError(
+                        f"training contract repeats JSON key {key!r}"
+                    )
+                result[key] = value
+            return result
+
+        try:
+            contract = json.loads(
+                raw.decode("utf-8"),
+                object_pairs_hook=reject_duplicates,
+                parse_constant=lambda token: (_ for _ in ()).throw(
+                    RuntimeError(
+                        "training contract contains non-finite "
+                        f"number {token}"
+                    )
+                ),
+            )
+            receipt = contract["effective_reward_recipe"]
+            action_ball_recipe_sha256 = contract["action_ball_training"][
+                "effective_reward_recipe_sha256"
+            ]
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise RuntimeError(
+                "training contract lacks the pre-long effective reward recipe"
+            ) from exc
+        if (
+            not isinstance(receipt, dict)
+            or receipt.get("sha256") != expected_sha256
+            or action_ball_recipe_sha256 != expected_sha256
+        ):
+            raise RuntimeError(
+                "pre-long launcher recipe SHA differs from the bound training contract"
+            )
+        return receipt
 
     @staticmethod
     def _economy_finite_tensor(value, *, name: str):
@@ -4353,6 +4588,539 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         with open(filesystem_path, "rb") as stream:
             return io.BytesIO(stream.read())
 
+    @staticmethod
+    def _validate_checkpoint_module_state(
+        module: object,
+        saved_state: object,
+        *,
+        prefix: str,
+        label: str,
+    ) -> Mapping[str, torch.Tensor]:
+        """Read-only strict ``state_dict`` compatibility check.
+
+        ``torch.nn.Module.load_state_dict`` is not a validator: it may copy a
+        prefix of the checkpoint before a later shape/key error is raised.
+        Formal resume therefore compares the complete key/type/shape/dtype
+        envelope while all live modules are still untouched.  Formal
+        ActionBall deliberately supports the current tensor-only ActorCritic
+        state contract; modules using PyTorch ``get_extra_state`` are rejected
+        rather than executing an opaque mutation hook during admission.
+        """
+
+        state_dict = getattr(module, "state_dict", None)
+        if not callable(state_dict):
+            raise RuntimeError(f"{prefix} live {label} has no state_dict()")
+        live_state = state_dict()
+        if not isinstance(live_state, Mapping) or not isinstance(
+            saved_state, Mapping
+        ):
+            raise RuntimeError(
+                f"{prefix} {label} state must be a mapping"
+            )
+        if any(type(key) is not str for key in live_state) or any(
+            type(key) is not str for key in saved_state
+        ):
+            raise RuntimeError(
+                f"{prefix} {label} state keys must be exact strings"
+            )
+        live_keys = set(live_state)
+        saved_keys = set(saved_state)
+        if saved_keys != live_keys:
+            missing = sorted(live_keys - saved_keys)
+            unexpected = sorted(saved_keys - live_keys)
+            raise RuntimeError(
+                f"{prefix} {label} state keys differ from the live module; "
+                f"missing={missing}, unexpected={unexpected}"
+            )
+        for key, live_value in live_state.items():
+            saved_value = saved_state[key]
+            if not torch.is_tensor(live_value) or not torch.is_tensor(
+                saved_value
+            ):
+                raise RuntimeError(
+                    f"{prefix} {label} state {key!r} must be a tensor; "
+                    "PyTorch extra_state is unsupported by formal resume"
+                )
+            if (
+                tuple(saved_value.shape) != tuple(live_value.shape)
+                or saved_value.dtype != live_value.dtype
+            ):
+                raise RuntimeError(
+                    f"{prefix} {label} state {key!r} shape/dtype differs "
+                    "from the live module"
+                )
+            if (
+                (saved_value.is_floating_point() or saved_value.is_complex())
+                and not bool(torch.isfinite(saved_value).all().item())
+            ):
+                raise RuntimeError(
+                    f"{prefix} {label} state {key!r} is non-finite"
+                )
+        return saved_state
+
+    @staticmethod
+    def _validate_checkpoint_normalizer_moments(
+        saved_state: Mapping[str, torch.Tensor],
+        *,
+        prefix: str,
+        role: str,
+        expected_width: int,
+    ) -> None:
+        """Validate the saved empirical moments, including their semantic width."""
+
+        semantic_aliases = {
+            "mean": "mean",
+            "running_mean": "mean",
+            "var": "var",
+            "variance": "var",
+            "running_var": "var",
+            "std": "std",
+            "running_std": "std",
+            "count": "count",
+            "running_count": "count",
+            "num_batches_tracked": "count",
+        }
+        semantic = {"mean": [], "var": [], "std": [], "count": []}
+        for key, value in saved_state.items():
+            leaf = key.rsplit(".", 1)[-1].lstrip("_")
+            semantic_name = semantic_aliases.get(leaf)
+            if semantic_name is not None:
+                semantic[semantic_name].append((key, value))
+        if len(semantic["mean"]) != 1 or len(semantic["count"]) != 1:
+            raise RuntimeError(
+                f"{prefix} empirical {role} normalizer must contain one "
+                "mean and one count buffer"
+            )
+        if len(semantic["var"]) > 1 or len(semantic["std"]) > 1 or (
+            not semantic["var"] and not semantic["std"]
+        ):
+            raise RuntimeError(
+                f"{prefix} empirical {role} normalizer variance/std buffers "
+                "are ambiguous or absent"
+            )
+        _mean_key, mean = semantic["mean"][0]
+        _count_key, count = semantic["count"][0]
+        moments = [entry[1] for entry in semantic["var"] + semantic["std"]]
+        if (
+            mean.ndim < 1
+            or mean.numel() != expected_width
+            or any(tuple(value.shape) != tuple(mean.shape) for value in moments)
+        ):
+            raise RuntimeError(
+                f"{prefix} empirical {role} normalizer must have exact "
+                f"semantic width {expected_width}"
+            )
+        if count.numel() != 1 or count.dtype == torch.bool or count.is_complex():
+            raise RuntimeError(
+                f"{prefix} empirical {role} normalizer count is invalid"
+            )
+        count_value = float(count.detach().cpu().item())
+        if not math.isfinite(count_value) or count_value < 0.0:
+            raise RuntimeError(
+                f"{prefix} empirical {role} normalizer count is invalid"
+            )
+        if any(
+            not value.is_floating_point()
+            or not bool(torch.isfinite(value).all().item())
+            or bool((value < 0).any().item())
+            for value in moments
+        ):
+            raise RuntimeError(
+                f"{prefix} empirical {role} normalizer variance/std is invalid"
+            )
+
+    def _preflight_required_checkpoint_normalizers(
+        self, loaded: Mapping[str, object], *, prefix: str
+    ) -> None:
+        """Validate actor/critic normalizer bytes before any live state copy."""
+
+        empirical = getattr(self, "empirical_normalization", None)
+        if type(empirical) is not bool:
+            raise RuntimeError(
+                f"{prefix} empirical_normalization is not an exact bool"
+            )
+        fresh_211 = self._action_ball_211_wait_mask_required()
+        if fresh_211 and not empirical:
+            raise RuntimeError(
+                f"{prefix} fresh ActionBall211 requires actor/critic empirical "
+                "normalizers"
+            )
+        fields = (
+            ("actor", "obs_norm_state_dict"),
+            ("critic", "privileged_obs_norm_state_dict"),
+        )
+        for role, field in fields:
+            attribute, normalizer, _aliases = self._resolve_runtime_normalizer(
+                role
+            )
+            saved = loaded.get(field)
+            if not empirical:
+                if field in loaded:
+                    raise RuntimeError(
+                        f"{prefix} contains {role} normalizer state while "
+                        "normalization is disabled"
+                    )
+                continue
+            if attribute is None or not is_empirical_normalizer(normalizer):
+                raise RuntimeError(
+                    f"{prefix} has no live empirical {role} normalizer"
+                )
+            live_binding = self._validate_empirical_normalizer_state(
+                role=role,
+                attribute_name=attribute,
+                normalizer=normalizer,
+            )
+            self._validate_checkpoint_module_state(
+                normalizer,
+                saved,
+                prefix=prefix,
+                label=f"{role} normalizer",
+            )
+            expected_width = (
+                (_A211_ACTOR_WIDTH if role == "actor" else _A211_CRITIC_WIDTH)
+                if fresh_211
+                else int(live_binding["semantic_width"])
+            )
+            self._validate_checkpoint_normalizer_moments(
+                saved,
+                prefix=prefix,
+                role=role,
+                expected_width=expected_width,
+            )
+
+    @staticmethod
+    def _validate_declared_exact_resume_support(
+        value: object, *, prefix: str, label: str
+    ) -> None:
+        """Reject any nested producer declaration that explicitly forbids resume."""
+
+        pending = [(label, value)]
+        seen = set()
+        visited = 0
+        while pending:
+            path, current = pending.pop()
+            if isinstance(current, Mapping):
+                identity = id(current)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                visited += 1
+                if visited > 100000:
+                    raise RuntimeError(
+                        f"{prefix} {label} is too large to preflight safely"
+                    )
+                if "exact_resume_supported" in current:
+                    supported = current["exact_resume_supported"]
+                    if type(supported) is not bool:
+                        raise RuntimeError(
+                            f"{prefix} {path}.exact_resume_supported must be "
+                            "an exact bool"
+                        )
+                    if not supported:
+                        raise RuntimeError(
+                            f"{prefix} {path} explicitly declares "
+                            "exact_resume_supported=false; this checkpoint is "
+                            "fresh/warm-start only"
+                        )
+                for key, child in current.items():
+                    pending.append((f"{path}.{key}", child))
+            elif isinstance(current, (list, tuple)):
+                identity = id(current)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                visited += 1
+                if visited > 100000:
+                    raise RuntimeError(
+                        f"{prefix} {label} is too large to preflight safely"
+                    )
+                for index, child in enumerate(current):
+                    pending.append((f"{path}[{index}]", child))
+
+    def _preflight_required_environment_resume_state(
+        self, nested: object, *, prefix: str
+    ) -> None:
+        """Read-only schema/identity/support validation for the inner state.
+
+        Command terms may expose ``validate_exact_resume_state_dict`` with
+        signature ``(state, *, strict=True)``.  Formal ActionBall resume
+        requires that read-only hook; the later loader remains the sole commit
+        operation.  This deliberately leaves fresh training unchanged while
+        giving command payloads a fail-closed admission interface.
+        """
+
+        if not isinstance(nested, Mapping):
+            raise RuntimeError(
+                f"{prefix} requires an environment_resume_state mapping"
+            )
+        schema = nested.get("schema_version")
+        if type(schema) is not int or schema not in (3, 4):
+            raise RuntimeError(
+                f"{prefix} requires a supported schema-3/4 "
+                "environment_resume_state"
+            )
+        env = getattr(self.env, "unwrapped", self.env)
+        (
+            _action_manager,
+            action_names,
+            action_terms,
+        ) = self._ordered_action_resume_terms(env)
+        runtime_action_state = self._action_runtime_state_required(action_terms)
+        fresh_211 = self._action_ball_211_wait_mask_required()
+        if (fresh_211 or runtime_action_state) and schema != 4:
+            raise RuntimeError(
+                f"{prefix} fresh ActionBall211 requires inner action schema 4; "
+                "schema 3 is fresh-only"
+            )
+        expected_keys = {
+            "schema_version",
+            "common_step_counter",
+            "active_term_names",
+            "command_terms",
+        }
+        if schema == 4:
+            expected_keys.update({"active_action_term_names", "action_terms"})
+        if set(nested) != expected_keys:
+            raise RuntimeError(
+                f"{prefix} inner environment schema {schema} keys do not "
+                "match the supported envelope"
+            )
+        common_step_counter = nested["common_step_counter"]
+        if type(common_step_counter) is not int or common_step_counter < 0:
+            raise RuntimeError(
+                f"{prefix} environment common_step_counter is invalid"
+            )
+
+        manager = getattr(env, "command_manager", None)
+        raw_command_names = (
+            tuple(getattr(manager, "active_terms", ()))
+            if manager is not None
+            else ()
+        )
+        command_names = tuple(str(name) for name in raw_command_names)
+        saved_command_names = nested["active_term_names"]
+        command_states = nested["command_terms"]
+        if (
+            type(saved_command_names) is not list
+            or any(type(name) is not str for name in saved_command_names)
+            or len(saved_command_names) != len(set(saved_command_names))
+            or not isinstance(command_states, Mapping)
+            or tuple(saved_command_names) != command_names
+            or tuple(command_states) != command_names
+        ):
+            raise RuntimeError(
+                f"{prefix} ordered command term identity/state is incomplete"
+            )
+        strict_action_ball = self._strict_exact_resume_target_mode() == "action_ball"
+        if strict_action_ball:
+            missing_pair = [
+                name
+                for name in ("racket_target", "motion")
+                if name not in command_names
+            ]
+            if missing_pair:
+                raise RuntimeError(
+                    f"{prefix} ActionBall command dependency pair is "
+                    f"incomplete; missing={missing_pair}"
+                )
+            motion_finalize = getattr(
+                manager.get_term("motion"),
+                "finalize_action_ball_exact_resume",
+                None,
+            )
+            if not callable(motion_finalize):
+                raise RuntimeError(
+                    f"{prefix} ActionBall Motion command lacks "
+                    "finalize_action_ball_exact_resume()"
+                )
+        for raw_name, name in zip(raw_command_names, command_names):
+            term = manager.get_term(raw_name)
+            record = command_states[name]
+            if not isinstance(record, Mapping):
+                raise RuntimeError(
+                    f"{prefix} command term {name!r} state is not a mapping"
+                )
+            mode = record.get("capture_mode")
+            if mode != "explicit":
+                if strict_action_ball:
+                    raise RuntimeError(
+                        f"{prefix} ActionBall command term {name!r} lacks "
+                        "explicit resume state"
+                    )
+                continue
+            if set(record) != {"capture_mode", "term_type", "exact_state"}:
+                raise RuntimeError(
+                    f"{prefix} command term {name!r} explicit state has an "
+                    "unsupported envelope"
+                )
+            term_type = f"{type(term).__module__}.{type(term).__qualname__}"
+            if record["term_type"] != term_type:
+                raise RuntimeError(
+                    f"{prefix} command term {name!r} type changed"
+                )
+            exact_state = record["exact_state"]
+            if not isinstance(exact_state, Mapping):
+                raise RuntimeError(
+                    f"{prefix} command term {name!r} exact state is not a mapping"
+                )
+            self._validate_declared_exact_resume_support(
+                exact_state,
+                prefix=prefix,
+                label=f"command_terms.{name}.exact_state",
+            )
+            getter = getattr(term, "exact_resume_state_dict", None)
+            loader = getattr(term, "load_exact_resume_state_dict", None)
+            if callable(getter) != callable(loader):
+                raise RuntimeError(
+                    f"{prefix} command term {name!r} has a partial exact "
+                    "resume getter/loader interface"
+                )
+            if strict_action_ball and not callable(getter):
+                raise RuntimeError(
+                    f"{prefix} ActionBall command term {name!r} cannot "
+                    "capture/restore exact state"
+                )
+            validator = getattr(term, "validate_exact_resume_state_dict", None)
+            if validator is not None and not callable(validator):
+                raise RuntimeError(
+                    f"{prefix} command term {name!r} has a non-callable "
+                    "read-only resume validator"
+                )
+            if strict_action_ball and not callable(validator):
+                raise RuntimeError(
+                    f"{prefix} ActionBall command term {name!r} lacks "
+                    "validate_exact_resume_state_dict(state, strict=True)"
+                )
+            if callable(validator):
+                validator(exact_state, strict=True)
+
+        if strict_action_ball:
+            racket_exact = command_states["racket_target"]["exact_state"]
+            motion_exact = command_states["motion"]["exact_state"]
+            motion_birth = (
+                motion_exact.get("action_ball_birth")
+                if isinstance(motion_exact, Mapping)
+                else None
+            )
+            racket_digest = (
+                racket_exact.get("integrity_sha256")
+                if isinstance(racket_exact, Mapping)
+                else None
+            )
+            motion_digest = (
+                motion_birth.get("shared_racket_state_sha256")
+                if isinstance(motion_birth, Mapping)
+                else None
+            )
+            digests = (racket_digest, motion_digest)
+            if any(
+                type(digest) is not str
+                or len(digest) != 64
+                or digest != digest.lower()
+                or any(character not in "0123456789abcdef" for character in digest)
+                for digest in digests
+            ):
+                raise RuntimeError(
+                    f"{prefix} ActionBall Racket/Motion cross-payload digest "
+                    "is absent or invalid"
+                )
+            if racket_digest != motion_digest:
+                raise RuntimeError(
+                    f"{prefix} ActionBall Racket/Motion cross-payload digest "
+                    "differs"
+                )
+
+        if schema == 4:
+            saved_action_names = nested["active_action_term_names"]
+            action_states = nested["action_terms"]
+            if (
+                type(saved_action_names) is not list
+                or any(type(name) is not str for name in saved_action_names)
+                or len(saved_action_names) != len(set(saved_action_names))
+                or not isinstance(action_states, Mapping)
+                or tuple(saved_action_names) != action_names
+                or tuple(action_states) != action_names
+            ):
+                raise RuntimeError(
+                    f"{prefix} ordered action term identity/state is incomplete"
+                )
+            if fresh_211 and not action_names:
+                raise RuntimeError(
+                    f"{prefix} fresh ActionBall211 inner schema 4 has no "
+                    "active action terms"
+                )
+            staged_names = set()
+            for name in action_names:
+                term = action_terms[name]
+                record = action_states[name]
+                if not isinstance(record, Mapping):
+                    raise RuntimeError(
+                        f"{prefix} action term {name!r} state is not a mapping"
+                    )
+                term_type = f"{type(term).__module__}.{type(term).__qualname__}"
+                if record.get("term_type") != term_type:
+                    raise RuntimeError(
+                        f"{prefix} action term {name!r} type changed"
+                    )
+                mode = record.get("capture_mode")
+                getter = getattr(term, "action_delay_exact_resume_state_dict", None)
+                validator = getattr(
+                    term, "validate_action_delay_exact_resume_state_dict", None
+                )
+                loader = getattr(
+                    term, "load_action_delay_exact_resume_state_dict", None
+                )
+                interface = tuple(
+                    callable(value) for value in (getter, validator, loader)
+                )
+                if any(interface) and not all(interface):
+                    raise RuntimeError(
+                        f"{prefix} action term {name!r} has a partial "
+                        "schema-4 resume interface"
+                    )
+                if mode == "identity_only":
+                    if set(record) != {"capture_mode", "term_type"} or all(
+                        interface
+                    ):
+                        raise RuntimeError(
+                            f"{prefix} action term {name!r} has an invalid "
+                            "identity-only schema-4 record"
+                        )
+                    continue
+                if mode != "explicit_delay" or set(record) != {
+                    "capture_mode",
+                    "term_type",
+                    "exact_state",
+                }:
+                    raise RuntimeError(
+                        f"{prefix} action term {name!r} has an invalid "
+                        "schema-4 record"
+                    )
+                if not all(interface):
+                    raise RuntimeError(
+                        f"{prefix} action term {name!r} cannot validate and "
+                        "restore schema-4 state"
+                    )
+                exact_state = record["exact_state"]
+                if not isinstance(exact_state, Mapping):
+                    raise RuntimeError(
+                        f"{prefix} action term {name!r} exact state is not a "
+                        "mapping"
+                    )
+                validator(exact_state, strict=True)
+                staged_names.add(name)
+            missing = [
+                name
+                for name, term in action_terms.items()
+                if self._action_runtime_state_required({name: term})
+                and name not in staged_names
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"{prefix} required action runtime state is missing for "
+                    f"terms {missing}"
+                )
+
     def _apply_formal_preloaded_checkpoint(
         self,
         loaded: Mapping[str, object],
@@ -4392,19 +5160,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise RuntimeError(
                 f"{prefix} empirical_normalization is not an exact bool"
             )
+        _actor_attribute, actor_normalizer, _actor_aliases = (
+            self._resolve_runtime_normalizer("actor")
+        )
+        _critic_attribute, critic_normalizer, _critic_aliases = (
+            self._resolve_runtime_normalizer("critic")
+        )
         normalizer_fields = (
-            (
-                "obs_norm_state_dict",
-                getattr(self, "obs_normalizer", None),
-                "actor",
-            ),
+            ("obs_norm_state_dict", actor_normalizer, "actor"),
             (
                 "privileged_obs_norm_state_dict",
-                getattr(
-                    self,
-                    "privileged_obs_normalizer",
-                    getattr(self, "critic_obs_normalizer", None),
-                ),
+                critic_normalizer,
                 "critic",
             ),
         )
@@ -4878,6 +5644,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 f"{prefix} requires hope_exact_resume_state schema 3; "
                 "legacy warm-start fallback is forbidden"
             )
+        policy = getattr(getattr(self, "alg", None), "policy", None)
+        self._validate_checkpoint_module_state(
+            policy,
+            loaded.get("model_state_dict"),
+            prefix=prefix,
+            label="policy",
+        )
+        self._preflight_required_checkpoint_normalizers(
+            loaded,
+            prefix=prefix,
+        )
         self._validate_checkpoint_runtime_bootstrap_binding(
             checkpoint_infos=checkpoint_infos,
             exact_state=state,
@@ -4938,6 +5715,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise RuntimeError(
                 f"{prefix} requires a schema-3/4 environment_resume_state"
             )
+        self._preflight_required_environment_resume_state(
+            nested,
+            prefix=prefix,
+        )
         live_env = getattr(self.env, "unwrapped", self.env)
         _manager, _names, live_action_terms = self._ordered_action_resume_terms(
             live_env
@@ -4997,7 +5778,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise RuntimeError(
                 "immutable checkpoint bytes require formal strict ActionBall"
             )
-        self._loaded_checkpoint_path = str(
+        resolved_checkpoint_path = str(
             pathlib.Path(path).expanduser().resolve()
         )
         snapshot = (
@@ -5045,6 +5826,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 **kwargs,
             )
         if self.log_dir is None:
+            self._loaded_checkpoint_path = resolved_checkpoint_path
             return infos
         state = (
             required_state
@@ -5151,6 +5933,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 )
         else:
             self.env.reset()
+        self._loaded_checkpoint_path = resolved_checkpoint_path
         return infos
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
@@ -5164,6 +5947,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         (老实说明:若主线程死死卡在 native Isaac/CUDA 调用里,Python 层任何 handler 都
         不会被执行,第一次信号同样没反应,那种情况仍然只有 SIGKILL 能救。)
         """
+        self._install_action_ball_211_wait_normalizer_masks()
         action_ball_update_profile_requested = False
         raw_update_profile = os.environ.get(
             "HOPE_ACTION_BALL_UPDATE_PROFILE"
@@ -5201,6 +5985,26 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         reward_ppo_economy_requested = (
             self._reward_ppo_economy_gate_requested()
         )
+        prelong_expected_recipe_sha256 = None
+        prelong_preregistered_recipe = None
+        if (
+            _PRELONG_SEMANTICS_ENABLE_ENV in os.environ
+            or _PRELONG_SEMANTICS_RECIPE_SHA_ENV in os.environ
+        ):
+            from whole_body_tracking.utils.action_ball_prelong_semantics import (
+                parse_prelong_runtime_request,
+            )
+
+            prelong_expected_recipe_sha256 = parse_prelong_runtime_request(
+                os.environ,
+                reward_ppo_economy_requested=reward_ppo_economy_requested,
+            )
+            if prelong_expected_recipe_sha256 is not None:
+                prelong_preregistered_recipe = (
+                    self._prelong_preregistered_reward_recipe(
+                        prelong_expected_recipe_sha256
+                    )
+                )
         normalizer_binding = self._validate_training_normalizers()
         # This stdout receipt is inside the run's durable JSON log boundary.
         # The formal bootstrap receipt itself is minted later by train.py and
@@ -5235,6 +6039,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
         reward_activation_ledger = None
         reward_ppo_economy_ledger = None
+        prelong_semantics_ledger = None
         reward_activation_json = None
         reward_ledger_is_action_bound = False
         original_env_step = None
@@ -5305,6 +6110,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 task_kind="action_ball",
                 expected_environment_step_count=self.num_steps_per_env,
             )
+            if prelong_expected_recipe_sha256 is not None:
+                from whole_body_tracking.utils.action_ball_prelong_semantics import (
+                    ActionBallPrelongSemanticsLedger,
+                )
+
+                prelong_semantics_ledger = ActionBallPrelongSemanticsLedger(
+                    unwrapped_env,
+                    preregistered_effective_reward_recipe=(
+                        prelong_preregistered_recipe
+                    ),
+                )
             original_env_step = getattr(self.env, "step", None)
             if not callable(original_env_step):
                 raise RuntimeError(
@@ -5379,6 +6195,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             reward_artifact = None
             economy_activation = None
             economy_rollout = None
+            prepared_prelong_semantics = None
             if joint_safety_action_term is not None:
                 # Freeze and validate before PPO may consume the rollout. Formal
                 # tasks durably publish the full identity-bound receipt;
@@ -5463,6 +6280,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     activation=economy_activation,
                     ppo_update=next_rollout_step,
                 )
+                if prelong_semantics_ledger is not None:
+                    prepared_prelong_semantics = (
+                        prelong_semantics_ledger.prepare_update(
+                            next_rollout_step
+                        )
+                    )
                 result, economy_gradient = (
                     self._run_reward_ppo_economy_optimizer(original_update)
                 )
@@ -5529,6 +6352,21 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             self._service_action_ball_frozen_evaluation(
                 next_rollout_step
             )
+            if prelong_semantics_ledger is not None:
+                # Emit only after every required post-optimizer commit and
+                # boundary service succeeds.  Flush before destructive
+                # acknowledgement so a BrokenPipe cannot silently consume the
+                # sole terminal marker.
+                prelong_ack = prelong_semantics_ledger.prepare_acknowledgement(
+                    prepared_prelong_semantics
+                )
+                prelong_marker_line = prelong_ack.marker_line
+                print(prelong_marker_line, flush=True)
+                acknowledged_line = prelong_ack.consume()
+                if acknowledged_line != prelong_marker_line:
+                    raise RuntimeError(
+                        "pre-long marker changed during acknowledgement"
+                    )
             next_rollout_step += 1
             return result
 
@@ -5543,22 +6381,37 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 if reward_ledger_is_action_bound
                 else None
             )
+            prelong_step_token = (
+                prelong_semantics_ledger.begin_environment_step()
+                if prelong_semantics_ledger is not None
+                else None
+            )
             try:
                 result = original_env_step(*args, **kwargs)
+                if reward_ledger_is_action_bound:
+                    active_reward_ledger.observe_after_environment_step(
+                        step_token
+                    )
+                else:
+                    active_reward_ledger.observe_after_environment_step()
+                if prelong_semantics_ledger is not None:
+                    prelong_semantics_ledger.observe_after_environment_step(
+                        prelong_step_token
+                    )
             except BaseException:
                 if reward_ledger_is_action_bound:
                     active_reward_ledger.abort_environment_step()
+                if prelong_semantics_ledger is not None:
+                    prelong_semantics_ledger.abort_environment_step(
+                        prelong_step_token
+                    )
                 raise
-            if reward_ledger_is_action_bound:
-                active_reward_ledger.observe_after_environment_step(
-                    step_token
-                )
-            else:
-                active_reward_ledger.observe_after_environment_step()
             return result
 
         self._rollout_update_wrapper_active = True
         reward_activation_step_wrapper_active = False
+        initial_observation_wrapper_active = False
+        original_get_observations = None
         action_ball_update_profiler = None
         try:
             if action_ball_update_profile_requested:
@@ -5582,6 +6435,26 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             ):
                 self.env.step = step_with_reward_activation
                 reward_activation_step_wrapper_active = True
+            if self._action_ball_211_wait_mask_required():
+                original_get_observations = getattr(
+                    self.env, "get_observations", None
+                )
+                if not callable(original_get_observations):
+                    raise RuntimeError(
+                        "fresh ActionBall211 requires env.get_observations()"
+                    )
+
+                def get_normalized_initial_observations():
+                    return self._normalize_action_ball_211_initial_observations(
+                        original_get_observations()
+                    )
+
+                # Upstream calls this getter exactly at the rollout initial
+                # boundary.  Subsequent actor/critic observations flow through
+                # the same hooked normalizer modules after env.step(), and the
+                # final normalized critic is reused for compute_returns().
+                self.env.get_observations = get_normalized_initial_observations
+                initial_observation_wrapper_active = True
             self.alg.update = update_with_rollout_boundary
             super().learn(
                 num_learning_iterations=num_learning_iterations,
@@ -5589,6 +6462,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         finally:
             self.alg.update = original_update
+            if initial_observation_wrapper_active:
+                self.env.get_observations = original_get_observations
             if action_ball_update_profiler is not None:
                 action_ball_update_profiler.close()
                 self._action_ball_update_profiler = None
@@ -5601,25 +6476,71 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             for signum, handler in previous_handlers.items():
                 signal.signal(signum, handler)
 
+    @staticmethod
+    def _action_ball_profile_reset_reason_counters(
+        exact_behavior: Mapping[str, Mapping]
+    ) -> Dict[str, int]:
+        """Select reset strata already owned by the exact behavior ledger.
+
+        This deliberately does not inspect device masks or rescan rollout
+        storage.  The profiler's wrappers own true-reset/wrap batch counts;
+        this projection adds the same-update terminal reason accounting that
+        the diagnostic runner already consumed for its canonical receipt.
+        """
+
+        selected: Dict[str, int] = {}
+        for record in exact_behavior.values():
+            counters = record.get("counters")
+            if not isinstance(counters, Mapping):
+                raise RuntimeError(
+                    "ActionBall profile requires exact behavior counters"
+                )
+            for name, value in counters.items():
+                include = name in {
+                    "terminal_reset_count",
+                    "timeout_reset_count",
+                    "swing_completion_count",
+                } or name.startswith("termination_reason_")
+                if not include:
+                    continue
+                if type(value) is not int or value < 0:
+                    raise RuntimeError(
+                        "ActionBall profile reset reason counters must be "
+                        "non-negative integers"
+                    )
+                if name in selected:
+                    raise RuntimeError(
+                        "ActionBall profile reset reason counter is duplicated"
+                    )
+                selected[name] = value
+        return dict(sorted(selected.items()))
+
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
         step = int(locs["it"])
         super().log(locs, width=width, pad=pad)
+        self._consume_actual_joint_forbidden_diagnostic(step)
+        self._consume_push_velocity_diagnostic_update(step)
+        # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
+        # per-update receipt, while dashboard logging is optional presentation only.
+        exact_behavior = self._consume_exact_behavior_updates(step)
         action_ball_update_profiler = getattr(
             self, "_action_ball_update_profiler", None
         )
         if action_ball_update_profiler is not None:
             # RSL-RL has already measured these two walls.  Reuse them rather
             # than wrapping/reimplementing PPO or adding a CUDA synchronize.
+            # The exact behavior ledger was already consumed above, so adding
+            # its scalar reset reasons performs no second rollout/device scan.
             action_ball_update_profiler.emit_update(
                 update=step,
                 collection_time_s=locs["collection_time"],
                 learning_time_s=locs["learn_time"],
+                reset_reason_counters=(
+                    self._action_ball_profile_reset_reason_counters(
+                        exact_behavior
+                    )
+                ),
             )
-        self._consume_actual_joint_forbidden_diagnostic(step)
-        self._consume_push_velocity_diagnostic_update(step)
-        # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
-        # per-update receipt, while dashboard logging is optional presentation only.
-        exact_behavior = self._consume_exact_behavior_updates(step)
         if not self.disable_logs and self.writer is not None:
             self._log_live_metrics(step, exact_behavior=exact_behavior)
         # Ctrl-C 缓冲(见 learn()):恰好在一个 PPO 迭代完整结束、日志落账之后才真正存档退出。

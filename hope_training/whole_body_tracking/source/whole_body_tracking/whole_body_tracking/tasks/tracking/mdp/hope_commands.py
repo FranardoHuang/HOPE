@@ -77,6 +77,17 @@ _RECOVERY_START_YAW_THRESHOLD = 0.30
 # Absolute, reference-independent balance guards from HOPEDeployParityTerminationsCfg.  A reset
 # caused only by anchor/body tracking envelopes is a guard reset, not evidence that the robot fell.
 _PHYSICAL_FALL_TERMINATION_TERMS = ("base_fell_tilt", "base_too_low")
+_PHYSICAL_FALL_ATTRIBUTION_PHASES = (
+    "hidden_wait",
+    "revealed_pre_strike",
+    "post_strike",
+)
+_BEHAVIORAL_TERMINATION_PHASE_TERMS = (
+    *_PHYSICAL_FALL_TERMINATION_TERMS,
+    "robot_hit_table",
+)
+_TASK_WAIT_STARTED_COUNTER = "task_wait_started_count"
+_TASK_REVEAL_REACHED_COUNTER = "task_reveal_reached_count"
 _ACTION_BALL_HARD_TERMINATION_TERMS = (
     *_PHYSICAL_FALL_TERMINATION_TERMS,
     "robot_hit_table",
@@ -118,7 +129,12 @@ _RACKET_PROGRESS_POTENTIAL_CAP_M = 4.65
 # everywhere: position, linear velocity, signed face.  It is a per-run constant for the first
 # fixed-question experiment, so the actor/critic widths stay at 194/318; the final variable-ball
 # ABI will carry validity explicitly once incoming ball/task fields are no longer constants.
-_ACTION_BALL_TARGET_SOURCES = ("online_solver", "immutable_tape")
+_ACTION_BALL_TARGET_SOURCES = (
+    "online_solver",
+    "direct_ball",
+    "immutable_tape",
+    "banded_question_bank",
+)
 _ACTION_BALL_TARGET_VALIDITY_BY_RECIPE = {
     "current_lm": (True, True, True),
     "analytic_full": (True, True, True),
@@ -207,16 +223,136 @@ def _action_ball_target_recipe_contract(
             "online_solver is the historical current_lm 111 control only; "
             "all other recipes require one immutable tape"
         )
+    if source == "direct_ball" and (
+        recipe != "outcome_dense_only" or mask != (False, False, False)
+    ):
+        raise ValueError(
+            "direct_ball is the C211 incoming-ball-only source and requires "
+            "outcome_dense_only with validity mask 000"
+        )
+    if source == "banded_question_bank" and (
+        recipe != "current_lm" or mask != (True, True, True)
+    ):
+        raise ValueError(
+            "banded_question_bank is the draft current_lm 111 source; "
+            "target-ablation recipes remain immutable_tape-only"
+        )
     if type(target_observation_noise) is not bool:
         raise ValueError(
             "action_ball_target_observation_noise must be an explicit boolean"
         )
-    if source == "immutable_tape" and target_observation_noise:
+    if source in ("direct_ball", "immutable_tape") and target_observation_noise:
         raise ValueError(
-            "immutable fixed-question ablations require target observation noise "
-            "disabled so zero-filled invalid columns remain zero"
+            "direct/immutable target-invalid recipes require target observation "
+            "noise disabled so zero-filled invalid columns remain zero"
         )
     return source, recipe, mask, target_observation_noise
+
+
+def _action_ball_question_reuse_contract(cfg, *, source: str) -> bool:
+    """Validate exact-question answer reuse without changing sampler authority."""
+
+    enabled = getattr(
+        cfg,
+        "action_ball_reuse_exact_question_until_semantics_change",
+        False,
+    )
+    if type(enabled) is not bool:
+        raise ValueError(
+            "action_ball_reuse_exact_question_until_semantics_change must "
+            "be an explicit boolean"
+        )
+    if enabled and source != "online_solver":
+        raise ValueError(
+            "exact curriculum-question reuse is an online_solver policy, "
+            "not an immutable_tape/banded_question_bank source"
+        )
+    return enabled
+
+
+def _action_ball_semantic_levels(value, *, fallback) -> dict[str, float]:
+    """Return one exact curriculum-level mapping from sample/receipt objects."""
+
+    selected = fallback if value is None else value
+    if hasattr(selected, "as_dict"):
+        mapping = selected.as_dict()
+    elif hasattr(selected, "to_dict"):
+        mapping = selected.to_dict()
+    elif isinstance(selected, dict):
+        mapping = selected
+    else:
+        raise TypeError("action-ball semantic levels have no mapping representation")
+    return {str(name): float(amount) for name, amount in mapping.items()}
+
+
+def _action_ball_exact_question_payload(
+    *,
+    action_uid: int,
+    action_slot: int,
+    birth,
+    sample,
+    mount_normal_sign: int,
+) -> dict[str, object]:
+    """Build the complete solver-question identity from a sample or its receipt.
+
+    The same helper is used before the first solve and by the pure emitted-task
+    assertion.  This prevents a cache hit from being authorized by a shorter
+    replay key than the producer used.
+    """
+
+    domain_levels = birth.domain_levels
+    incoming_spin = (
+        sample.incoming_spin_w_radps
+        if hasattr(sample, "incoming_spin_w_radps")
+        else sample.spin_w_radps
+    )
+    return {
+        "action_uid": int(action_uid),
+        "action_slot": int(action_slot),
+        "domain_epoch": int(birth.domain_epoch),
+        "domain_levels": _action_ball_semantic_levels(
+            domain_levels,
+            fallback=domain_levels,
+        ),
+        "birth_sampling_stratum": getattr(
+            sample,
+            "birth_sampling_stratum",
+            "domain",
+        ),
+        "birth_sampling_levels": _action_ball_semantic_levels(
+            getattr(sample, "birth_sampling_levels", None),
+            fallback=domain_levels,
+        ),
+        "birth_frontier_arm": getattr(sample, "birth_frontier_arm", None),
+        "sampling_stratum": getattr(sample, "sampling_stratum", "domain"),
+        "sampling_levels": _action_ball_semantic_levels(
+            getattr(sample, "sampling_levels", None),
+            fallback=domain_levels,
+        ),
+        "frontier_arm": getattr(sample, "frontier_arm", None),
+        "base_yaw_rad": float(birth.base_yaw_rad),
+        "base_quat_wxyz": list(birth.base_quat_wxyz),
+        "base_spawn_w_m": list(birth.base_spawn_w_m),
+        "base_goal_w_m": list(sample.base_goal_w_m),
+        "base_travel_latent_b_yaw_m": list(
+            sample.base_travel_latent_b_yaw_m
+        ),
+        "contact_w_m": list(
+            sample.ball_contact_w_m
+            if hasattr(sample, "ball_contact_w_m")
+            else sample.contact_w_m
+        ),
+        "time_to_contact_s": float(sample.time_to_contact_s),
+        "incoming_velocity_w_mps": list(sample.incoming_velocity_w_mps),
+        "incoming_spin_w_radps": list(incoming_spin),
+        "landing_aim_w_xy_m": list(sample.landing_aim_w_xy_m),
+        "manifest_sha256": birth.manifest_sha256,
+        "profile_sha256": birth.profile_sha256,
+        "motion_sha256": birth.motion_sha256,
+        "physics_sha256": birth.physics_sha256,
+        "solver_sha256": birth.solver_sha256,
+        "mount_normal_sign": int(mount_normal_sign),
+    }
 
 
 def _reference_guard_mode(value: object) -> str:
@@ -246,8 +382,9 @@ _PLANNER_INITIAL_TTS_BUCKETS = (
     "gt_0p5_le_0p9",
     "gt_0p9",
 )
+_EXACT_STRIKE_TIMING_COUNTER = "exact_strike_timing_tick_count"
 _TIMING_BUCKET_SPARSE_EVENTS = (
-    "strike_opportunity_count",
+    _EXACT_STRIKE_TIMING_COUNTER,
     "virtual_capture_count",
     "virtual_legal_return_count",
 )
@@ -299,18 +436,19 @@ _TASK_FIRST_UNSAFE_TERMINATIONS = (
     "robot_hit_table",
 )
 
-_ACTION_BALL_STATE_SCHEMA_VERSION = 6
+_ACTION_BALL_STATE_SCHEMA_VERSION = 8
 _ACTION_BALL_STATE_KIND = "whole_body_tracking.RacketTargetCommand.action_ball"
 _ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 2
 _ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION = 1
 _ACTION_BALL_DOMAIN_AUTHORITY_SCHEMA_VERSION = 1
-_ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 5
+_ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 6
 _ACTION_BALL_LEDGER_NAMES = (
     "P",
     "A",
     "I",
     "S",
     "C",
+    "H",
     "L",
     "F",
     "U_table",
@@ -319,6 +457,9 @@ _ACTION_BALL_LEDGER_NAMES = (
     "U_joint_qdes",
     "U_joint_actual",
     "X",
+)
+_ACTION_BALL_OUTCOME_LEDGER_NAMES = tuple(
+    name for name in _ACTION_BALL_LEDGER_NAMES if name != "H"
 )
 _ACTION_BALL_CONTACT_REJECTION_COUNTERS = (
     "virtual_contact_face_reject_count",
@@ -965,6 +1106,12 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
     seed = getattr(cfg, "action_ball_seed", None)
     if type(seed) is not int or not 0 <= seed < (1 << 63):
         failures.append("action_ball_seed must be a plain integer in [0, 2**63)")
+    if type(
+        getattr(cfg, "action_ball_initial_center_single_question", None)
+    ) is not bool:
+        failures.append(
+            "action_ball_initial_center_single_question must be an exact boolean"
+        )
     refill = getattr(cfg, "action_ball_pool_refill_rows", None)
     if type(refill) is not int or refill <= 0:
         failures.append("action_ball_pool_refill_rows must be a positive plain integer")
@@ -2665,11 +2812,18 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_target_validity_mask,
             self._action_ball_target_observation_noise,
         ) = _action_ball_target_recipe_contract(cfg)
+        self._action_ball_reuse_exact_question = (
+            _action_ball_question_reuse_contract(
+                cfg,
+                source=self._action_ball_target_source,
+            )
+        )
         if not self._action_ball_enabled and (
             self._action_ball_target_source != "online_solver"
             or self._action_ball_target_recipe != "current_lm"
             or self._action_ball_target_validity_mask != (True, True, True)
             or not self._action_ball_target_observation_noise
+            or self._action_ball_reuse_exact_question
         ):
             raise ValueError(
                 "action_ball_target_* ablation fields may only be changed when "
@@ -3213,6 +3367,7 @@ class RacketTargetCommand(CommandTerm):
         # exactly once by MotionOnPolicyRunner.  They do not enter observations, rewards, resets or
         # sampling.
         _sparse_names = (
+            _EXACT_STRIKE_TIMING_COUNTER,
             "strike_opportunity_count",
             "virtual_capture_count",
             "virtual_net_clear_count",
@@ -4429,6 +4584,7 @@ class RacketTargetCommand(CommandTerm):
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionBinding,
             ActionBirthBroker,
+            ActionDomainLevels,
             LazyActionTaskPool,
             RuntimePins,
             TASK_RECEIPT_TIMING_AUTHORITY,
@@ -4928,6 +5084,9 @@ class RacketTargetCommand(CommandTerm):
             # (20/60/20); constructor defaults are not launch authority.
             sampling_mixture=SamplingMixture(),
             contact_time_step_s=policy_dt_s,
+            initial_center_single_question=(
+                self.cfg.action_ball_initial_center_single_question
+            ),
             diagnostic_unauthorized=(
                 self.cfg.action_ball_diagnostic_unauthorized
             ),
@@ -5039,12 +5198,21 @@ class RacketTargetCommand(CommandTerm):
             "stroke_adapt_torch.py",
             "virtual_ball.py",
         ]
+        if self._action_ball_reuse_exact_question:
+            runtime_source_names.append("action_ball_question_cache.py")
         if counter_rally_objective is not None:
             runtime_source_names.extend(
                 ("counter_rally.py", "counter_rally_torch.py")
             )
         if self._action_ball_target_source == "immutable_tape":
             runtime_source_names.append("action_ball_fixed_question_tape.py")
+        elif self._action_ball_target_source == "banded_question_bank":
+            runtime_source_names.extend(
+                (
+                    "action_ball_fixed_question_tape.py",
+                    "action_ball_banded_question_bank.py",
+                )
+            )
         runtime_sources = {
             name: _action_ball_sha256_file(module_dir / name)
             for name in runtime_source_names
@@ -5347,6 +5515,7 @@ class RacketTargetCommand(CommandTerm):
             for slot, action in enumerate(manifest.actions)
         )
         immutable_tape = None
+        banded_question_bank = None
         if self._action_ball_target_source == "immutable_tape":
             if not diagnostic_unauthorized:
                 raise ValueError(
@@ -5413,6 +5582,115 @@ class RacketTargetCommand(CommandTerm):
                 raise ValueError(
                     "immutable tape target validity differs from the configured recipe"
                 )
+            if (
+                str(
+                    getattr(
+                        self.cfg, "action_ball_banded_question_bank_path", ""
+                    )
+                    or ""
+                ).strip()
+                or str(
+                    getattr(
+                        self.cfg, "action_ball_banded_question_bank_sha256", ""
+                    )
+                    or ""
+                ).strip()
+            ):
+                raise ValueError(
+                    "immutable_tape must not carry a banded question bank path/SHA"
+                )
+        elif self._action_ball_target_source == "banded_question_bank":
+            if not diagnostic_unauthorized:
+                raise ValueError(
+                    "action_ball_target_source='banded_question_bank' is "
+                    "construction-only while cached question draw ranges and "
+                    "future birth/base coverage remain unclosed; formal or "
+                    "expanding-curriculum training must fail closed"
+                )
+            bank_path = str(
+                getattr(
+                    self.cfg, "action_ball_banded_question_bank_path", ""
+                )
+                or ""
+            ).strip()
+            bank_sha256 = str(
+                getattr(
+                    self.cfg, "action_ball_banded_question_bank_sha256", ""
+                )
+                or ""
+            ).strip()
+            if not bank_path or not bank_sha256:
+                raise ValueError(
+                    "banded_question_bank requires "
+                    "action_ball_banded_question_bank_path and "
+                    "action_ball_banded_question_bank_sha256"
+                )
+            if (
+                str(
+                    getattr(self.cfg, "action_ball_immutable_tape_path", "")
+                    or ""
+                ).strip()
+                or str(
+                    getattr(self.cfg, "action_ball_immutable_tape_sha256", "")
+                    or ""
+                ).strip()
+            ):
+                raise ValueError(
+                    "banded_question_bank must not carry immutable_tape path/SHA"
+                )
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_banded_question_bank import (
+                load_banded_question_bank,
+            )
+
+            banded_question_bank = load_banded_question_bank(
+                bank_path, expected_file_sha256=bank_sha256
+            )
+            binding_by_uid = {binding.action_uid: binding for binding in bindings}
+            center_levels_sha256 = ActionDomainLevels().canonical_sha256
+            center_uids = set()
+            for block in banded_question_bank.blocks:
+                key = block.key
+                binding = binding_by_uid.get(key["action_uid"])
+                if binding is None:
+                    raise ValueError(
+                        "banded question bank contains an action outside the manifest"
+                    )
+                expected = (
+                    binding.action_slot,
+                    binding.profile_sha256,
+                    binding.motion_sha256,
+                    loaded.file_sha256,
+                    sampler.sampler_contract_sha256,
+                    domain_authority_contract["sha256"],
+                    ARM_CATALOG_SHA256,
+                    physics_contract["sha256"],
+                    solver_contract["sha256"],
+                    manifest.mobility_mode,
+                )
+                actual = (
+                    key["action_slot"],
+                    key["profile_sha256"],
+                    key["motion_sha256"],
+                    key["manifest_sha256"],
+                    key["sampler_sha256"],
+                    key["domain_authority_sha256"],
+                    key["arm_catalog_sha256"],
+                    key["physics_sha256"],
+                    key["solver_sha256"],
+                    key["mobility_mode"],
+                )
+                if actual != expected:
+                    raise ValueError(
+                        "banded question block identity differs from the loaded "
+                        "ActionBall runtime contract"
+                    )
+                if key["levels_sha256"] == center_levels_sha256:
+                    center_uids.add(key["action_uid"])
+            if center_uids != set(binding_by_uid):
+                raise ValueError(
+                    "banded question bank must contain one exact center block "
+                    "for every manifest action"
+                )
         else:
             if (
                 str(getattr(self.cfg, "action_ball_immutable_tape_path", "") or "").strip()
@@ -5422,6 +5700,23 @@ class RacketTargetCommand(CommandTerm):
             ):
                 raise ValueError(
                     "online_solver must not carry an immutable tape path/SHA"
+                )
+            if (
+                str(
+                    getattr(
+                        self.cfg, "action_ball_banded_question_bank_path", ""
+                    )
+                    or ""
+                ).strip()
+                or str(
+                    getattr(
+                        self.cfg, "action_ball_banded_question_bank_sha256", ""
+                    )
+                    or ""
+                ).strip()
+            ):
+                raise ValueError(
+                    "online_solver must not carry a banded question bank path/SHA"
                 )
         effective_pool_refill_rows = (
             1
@@ -5466,6 +5761,29 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_pins = pins
         self._action_ball_bindings = bindings
         self._action_ball_immutable_tape = immutable_tape
+        self._action_ball_banded_question_bank = banded_question_bank
+        if self._action_ball_reuse_exact_question:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_question_cache import (
+                ExactCurriculumQuestionCache,
+            )
+
+            self._action_ball_exact_question_cache = (
+                ExactCurriculumQuestionCache(bundle.action_uids)
+            )
+        else:
+            self._action_ball_exact_question_cache = None
+        # The immutable N=1 diagnostic has a receipt-free reset data plane.
+        # Keep its authority/counters separate from the legacy pool so online
+        # and banded sources retain their exact pool/replay semantics.
+        self._action_ball_fixed_view_enabled = False
+        self._action_ball_fixed_view_identity_sha256 = None
+        self._action_ball_fixed_view_template = None
+        self._action_ball_fixed_view_install_row_device = None
+        self._action_ball_fixed_view_observation_row_device = None
+        self._action_ball_fixed_view_timing_row_device = None
+        self._action_ball_fixed_view_pristine_pool_state = None
+        self._action_ball_fixed_view_counter_rally_identity = None
+        self._action_ball_fixed_view_counter_rally_row_device = None
         self._action_ball_effective_pool_refill_rows = (
             effective_pool_refill_rows
         )
@@ -5583,6 +5901,9 @@ class RacketTargetCommand(CommandTerm):
             dtype=torch.long,
             device=self.device,
         )
+        self._action_ball_fixed_view_ledger = torch.zeros_like(
+            self._action_ball_ledger
+        )
         self._action_ball_action_uid = torch.full(
             (self.num_envs,), -1, dtype=torch.long, device=self.device
         )
@@ -5602,6 +5923,16 @@ class RacketTargetCommand(CommandTerm):
             (self.num_envs,), -1, dtype=torch.long, device=self.device
         )
         self._action_ball_attempt_legal = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._action_ball_attempt_hit = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        # Data-only exact resume restores the old command graph before the runner's mandatory
+        # first simulator reset.  These rows must be retired as X, never graded against the fresh
+        # simulator state.  The latch is load-housekeeping (not checkpoint continuation state) and
+        # is cleared by that first reset.
+        self._action_ball_resume_reset_exclusion = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
         self._counter_rally_return_direction_env_xy = torch.zeros(
@@ -5659,10 +5990,18 @@ class RacketTargetCommand(CommandTerm):
                     "target_validity_mask": list(
                         self._action_ball_target_validity_mask
                     ),
+                    "reuse_exact_question_until_semantics_change": (
+                        self._action_ball_reuse_exact_question
+                    ),
                     "immutable_tape_canonical_sha256": (
                         None
                         if immutable_tape is None
                         else immutable_tape.canonical_sha256
+                    ),
+                    "banded_question_bank_canonical_sha256": (
+                        None
+                        if banded_question_bank is None
+                        else banded_question_bank.canonical_sha256
                     ),
                     "task_wait_schedule_canonical_sha256": (
                         None
@@ -5705,7 +6044,16 @@ class RacketTargetCommand(CommandTerm):
             state_getter=self._action_ball_solver_mutable_state_dict,
             state_loader=self._action_ball_load_solver_mutable_state,
         )
-        if immutable_tape is None:
+        if banded_question_bank is not None:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_banded_question_bank import (
+                BandedQuestionBankSolver,
+            )
+
+            self._action_ball_pool_solver = BandedQuestionBankSolver(
+                bank=banded_question_bank,
+                solver_contract_sha256=solver_contract["sha256"],
+            )
+        elif immutable_tape is None:
             self._action_ball_pool_solver = _ActionBallPoolSolverAdapter(
                 solver_contract_sha256=solver_contract["sha256"],
                 state_owner_sha256=self._action_ball_state_owner_sha256,
@@ -5734,12 +6082,144 @@ class RacketTargetCommand(CommandTerm):
                 target_recipe=self._action_ball_target_recipe,
                 solver_contract_sha256=solver_contract["sha256"],
             )
+            fixed_view_template = (
+                self._action_ball_pool_solver.reset_batch_view(
+                    batch_size=1
+                )
+            )
+            fixed_counter_rally_payload = immutable_tape.question_payload[
+                "counter_rally_task"
+            ]
+            if (fixed_counter_rally_payload is None) != (
+                not self._counter_rally_enabled
+            ):
+                raise ValueError(
+                    "immutable fixed-view counter-rally identity differs "
+                    "from the loaded N1 manifest"
+                )
+            if fixed_counter_rally_payload is not None:
+                from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+                    CounterRallyTaskIdentity,
+                )
+
+                fixed_counter_rally_identity = (
+                    CounterRallyTaskIdentity.from_dict(
+                        fixed_counter_rally_payload
+                    )
+                )
+                if (
+                    fixed_counter_rally_identity.objective_profile_sha256
+                    != self._counter_rally_objective.sha256
+                ):
+                    raise ValueError(
+                        "immutable fixed-view counter-rally objective differs "
+                        "from the loaded N1 manifest"
+                    )
+            else:
+                fixed_counter_rally_identity = None
+            fixed_view_identity_sha256 = _action_ball_canonical_sha256(
+                {
+                    "schema_version": 1,
+                    "kind": (
+                        "whole_body_tracking.RacketTargetCommand."
+                        "immutable_n1_fixed_reset_view"
+                    ),
+                    "diagnostic_unauthorized": True,
+                    "target_source": self._action_ball_target_source,
+                    "target_recipe": self._action_ball_target_recipe,
+                    "lineage": dict(fixed_view_template.lineage),
+                    "install_row": list(fixed_view_template.install_row),
+                    "observation_row": list(
+                        fixed_view_template.observation_row
+                    ),
+                    "timing_row": list(fixed_view_template.timing_row),
+                    "counter_rally_task": (
+                        None
+                        if fixed_counter_rally_identity is None
+                        else fixed_counter_rally_identity.to_dict()
+                    ),
+                }
+            )
+            fixed_dtype = self.racket_target_pos_w.dtype
+            self._action_ball_fixed_view_template = fixed_view_template
+            self._action_ball_fixed_view_identity_sha256 = (
+                fixed_view_identity_sha256
+            )
+            self._action_ball_fixed_view_install_row_device = torch.tensor(
+                fixed_view_template.install_row,
+                dtype=fixed_dtype,
+                device=self.device,
+            ).reshape(1, -1)
+            self._action_ball_fixed_view_observation_row_device = torch.tensor(
+                fixed_view_template.observation_row,
+                dtype=fixed_dtype,
+                device=self.device,
+            ).reshape(1, -1)
+            self._action_ball_fixed_view_timing_row_device = torch.tensor(
+                fixed_view_template.timing_row,
+                dtype=fixed_dtype,
+                device=self.device,
+            ).reshape(1, -1)
+            fixed_install = (
+                self._action_ball_fixed_view_install_row_device
+            )
+            fixed_cache_checks = _action_ball_host_bool_packet(
+                (
+                    torch.isfinite(fixed_install).all(),
+                    torch.all(
+                        torch.abs(
+                            torch.linalg.norm(
+                                fixed_install[:, 19:22], dim=-1
+                            )
+                            - 1.0
+                        )
+                        <= 1.0e-6
+                    ),
+                    torch.all(
+                        torch.abs(
+                            torch.linalg.norm(
+                                fixed_install[:, 15:19], dim=-1
+                            )
+                            - 1.0
+                        )
+                        <= 1.0e-6
+                    ),
+                    torch.all(fixed_install[:, 30] > 0.0),
+                )
+            )
+            if not all(fixed_cache_checks):
+                raise ValueError(
+                    "immutable fixed-view cached install row is invalid"
+                )
+            self._action_ball_fixed_view_counter_rally_identity = (
+                fixed_counter_rally_identity
+            )
+            self._action_ball_fixed_view_counter_rally_row_device = (
+                None
+                if fixed_counter_rally_identity is None
+                else torch.tensor(
+                    (
+                        *fixed_counter_rally_identity.return_direction_env_xy,
+                        fixed_counter_rally_identity.target_baseline_speed_mps,
+                    ),
+                    dtype=fixed_dtype,
+                    device=self.device,
+                ).reshape(1, 3)
+            )
+            self._action_ball_fixed_view_enabled = True
 
         broker.bind_domain_claim_authority(
             self._action_ball_domain_authority
         )
         broker.bind_provider(self._action_ball_birth_provider)
         pool.bind_solver(self._action_ball_pool_solver)
+        if self._action_ball_fixed_view_enabled:
+            # Capture the never-bound, never-used legacy-pool identity once.
+            # Its authority SHA is deliberately null: fixed resets never
+            # register births or tasks with this compatibility object.
+            self._action_ball_fixed_view_pristine_pool_state = (
+                pool.state_dict()
+            )
         pool.bind_birth_authority(broker)
         motion_command.bind_action_ball_birth_broker(
             broker, trusted_repo_root=repo_root
@@ -5749,10 +6229,23 @@ class RacketTargetCommand(CommandTerm):
             resolve_task_ref=self.action_ball_resolve_task_ref,
             shared_state_sha256=self.action_ball_shared_state_sha256,
         )
+        if self._action_ball_fixed_view_enabled:
+            motion_command.bind_action_ball_fixed_view_timing(
+                fixed_view_identity_sha256=(
+                    self._action_ball_fixed_view_identity_sha256
+                ),
+                timing_row=self._action_ball_fixed_view_template.timing_row,
+                broker_exact_state=(
+                    self._action_ball_fixed_view_broker_state_dict
+                ),
+            )
 
         # Runner exact-resume hooks are installed only for this explicit mode.  Legacy and old
         # task-first checkpoints retain their own state shape.
         self.exact_resume_state_dict = self._action_ball_exact_resume_state_dict
+        self.validate_exact_resume_state_dict = (
+            self._action_ball_validate_exact_resume_state_dict
+        )
         self.load_exact_resume_state_dict = self._action_ball_load_exact_resume_state_dict
         self.on_rollout_end = self._action_ball_on_rollout_end
         print(
@@ -5937,6 +6430,9 @@ class RacketTargetCommand(CommandTerm):
             },
             "sampling": {
                 "action_ball_seed": int(self.cfg.action_ball_seed),
+                "initial_center_single_question": (
+                    self._action_ball_sampler.initial_center_single_question
+                ),
                 "pool_refill_rows": (
                     self._action_ball_effective_pool_refill_rows
                 ),
@@ -5958,7 +6454,9 @@ class RacketTargetCommand(CommandTerm):
             },
             "timing": {
                 "authority": (
-                    self._action_ball_task_receipt_timing_authority
+                    "immutable_n1_fixed_view_timing"
+                    if self._action_ball_fixed_view_enabled
+                    else self._action_ball_task_receipt_timing_authority
                 ),
                 "policy_dt_s": self._action_ball_attempt_close_margin_s,
                 "attempt_close_margin_s": (
@@ -6041,6 +6539,18 @@ class RacketTargetCommand(CommandTerm):
                 "target_observation_noise": (
                     self._action_ball_target_observation_noise
                 ),
+                "exact_question_answer_reuse": {
+                    "enabled": self._action_ball_reuse_exact_question,
+                    "ownership": "curriculum_sampler_rng",
+                    "capacity": (
+                        "all_active_birth_semantic_rows_plus_one_hot_row_per_action"
+                    ),
+                    "hit_rule": "complete_semantic_question_sha256_equal",
+                    "miss_rule": (
+                        "epoch_or_levels_or_stratum_or_base_or_ball_or_aim_or_"
+                        "motion_or_physics_or_solver_changed"
+                    ),
+                },
                 "actor_width_unchanged": True,
                 "critic_width_unchanged": True,
                 "immutable_tape": (
@@ -6068,7 +6578,61 @@ class RacketTargetCommand(CommandTerm):
                         ),
                         "online_lm_calls": 0,
                         "physical_rng_draws": 0,
+                        # Both counters above belong only to the immutable
+                        # target/question solver. Episode births retain their
+                        # separate sampler tape and may consume RNG.
+                        "zero_counter_scope": "target_question_solver_only",
+                        "birth_sampler_rng": "separate_tracked_mutable_state",
+                        "reset_operation": (
+                            "FixedQuestionTapeSolver.reset_batch_view"
+                        ),
+                        "task_receipts_per_reset": 0,
+                        "lazy_task_pool_bypassed": True,
+                        "fixed_view_identity_sha256": (
+                            self._action_ball_fixed_view_identity_sha256
+                        ),
                         "diagnostic_unauthorized": True,
+                    }
+                ),
+                "banded_question_bank": (
+                    None
+                    if self._action_ball_banded_question_bank is None
+                    else {
+                        "path": str(
+                            Path(
+                                self.cfg.action_ball_banded_question_bank_path
+                            ).expanduser().resolve(strict=True)
+                        ),
+                        "file_sha256": (
+                            self.cfg.action_ball_banded_question_bank_sha256
+                        ),
+                        "canonical_sha256": (
+                            self._action_ball_banded_question_bank.canonical_sha256
+                        ),
+                        "block_keys": [
+                            {
+                                "key": dict(block.key),
+                                "key_sha256": block.key_sha256,
+                                "content_sha256": block.content_sha256,
+                                "row_count": len(block.rows),
+                            }
+                            for block in sorted(
+                                self._action_ball_banded_question_bank.blocks,
+                                key=lambda item: item.key_sha256,
+                            )
+                        ],
+                        "selection": (
+                            self._action_ball_banded_question_bank.canonical_payload[
+                                "selection"
+                            ]
+                        ),
+                        "online_solver_calls_per_reset": 0,
+                        "missing_block_policy": "fail_closed",
+                        "diagnostic_unauthorized_required": True,
+                        "curriculum_authority_retained": True,
+                        "command_exact_resume_integration": (
+                            "pool_owned_bounded_block_state"
+                        ),
                     }
                 ),
             },
@@ -6083,6 +6647,7 @@ class RacketTargetCommand(CommandTerm):
                     *(
                         ("task_solver",)
                         if self._action_ball_immutable_tape is None
+                        and self._action_ball_banded_question_bank is None
                         else ()
                     ),
                 ],
@@ -6175,6 +6740,20 @@ class RacketTargetCommand(CommandTerm):
         receipt = self._action_ball_task_by_env[env_id]
         birth = self._action_ball_birth_by_env[env_id]
         active = bool(self._action_ball_attempt_active[env_id].item())
+        fixed_view = self._action_ball_fixed_view_enabled
+        if fixed_view:
+            if (
+                receipt is not None
+                or self._action_ball_task_ref_by_env[env_id] is not None
+            ):
+                raise RuntimeError(
+                    "immutable fixed-view env acquired a task receipt/ref"
+                )
+            if active and birth is None:
+                raise RuntimeError(
+                    "active immutable fixed-view env has no episode birth"
+                )
+            return None
         if receipt is None:
             if active:
                 raise RuntimeError(
@@ -6250,6 +6829,11 @@ class RacketTargetCommand(CommandTerm):
     def action_ball_resolve_task_ref(self, ref):
         """Resolve one exact current opaque ref; stale/cross-env refs fail closed."""
 
+        if self._action_ball_fixed_view_enabled:
+            raise RuntimeError(
+                "immutable fixed-view timing has no task receipt refs"
+            )
+
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionTaskReceiptRef,
         )
@@ -6306,9 +6890,16 @@ class RacketTargetCommand(CommandTerm):
             raise RuntimeError(f"invalid action-ball ledger slot {action_slot!r}")
         if type(amount) is not int or amount < 0:
             raise RuntimeError("action-ball ledger increments must be non-negative plain ints")
-        self._action_ball_ledger[
+        self._action_ball_live_ledger()[
             _ACTION_BALL_LEDGER_NAMES.index(name), action_slot
         ].add_(amount)
+
+    def _action_ball_live_ledger(self) -> torch.Tensor:
+        """Return the mutually exclusive evidence ledger for this task source."""
+
+        if self._action_ball_fixed_view_enabled:
+            return self._action_ball_fixed_view_ledger
+        return self._action_ball_ledger
 
     def _action_ball_decode_provider_births(
         self, raw_provider: object, *, staged_sampler, curriculum=None
@@ -6615,6 +7206,11 @@ class RacketTargetCommand(CommandTerm):
             "action_uids": list(self._action_ball_bundle.action_uids),
             "curriculum_state_sha256": curriculum_state["state_sha256"],
             "sampler": self._action_ball_sampler.state_dict(),
+            "exact_question_cache": (
+                None
+                if self._action_ball_exact_question_cache is None
+                else self._action_ball_exact_question_cache.state_dict()
+            ),
             "provider_births": provider_births,
             "provider_history": provider_history,
             "task_transcripts": task_transcripts,
@@ -6625,7 +7221,7 @@ class RacketTargetCommand(CommandTerm):
             "proposal_ledger": {
                 name: [
                     int(value)
-                    for value in self._action_ball_ledger[
+                    for value in self._action_ball_live_ledger()[
                         _ACTION_BALL_LEDGER_NAMES.index(name)
                     ]
                     .detach()
@@ -6669,6 +7265,7 @@ class RacketTargetCommand(CommandTerm):
             "action_uids",
             "curriculum_state_sha256",
             "sampler",
+            "exact_question_cache",
             "provider_births",
             "provider_history",
             "task_transcripts",
@@ -6727,8 +7324,29 @@ class RacketTargetCommand(CommandTerm):
             seed=int(self.cfg.action_ball_seed),
             sampling_mixture=SamplingMixture(),
             contact_time_step_s=float(self._env.step_dt),
+            initial_center_single_question=(
+                self.cfg.action_ball_initial_center_single_question
+            ),
+            diagnostic_unauthorized=(
+                self._action_ball_fixed_view_enabled
+            ),
         )
         staged_sampler.load_state_dict(state["sampler"])
+        if self._action_ball_exact_question_cache is None:
+            if state["exact_question_cache"] is not None:
+                raise ValueError(
+                    "action-ball mutable state unexpectedly contains an "
+                    "exact-question cache"
+                )
+            staged_question_cache = None
+        else:
+            staged_question_cache = self._action_ball_exact_question_cache.clone()
+            staged_question_cache.load_state_dict(
+                state["exact_question_cache"]
+            )
+        self._action_ball_restore_fixed_sampler_highwaters(
+            staged_sampler
+        )
         provider_history = self._action_ball_decode_provider_history(
             state["provider_history"],
             staged_sampler=staged_sampler,
@@ -6749,6 +7367,12 @@ class RacketTargetCommand(CommandTerm):
                 raise ValueError(
                     "active action-ball provider birth is absent from exact history"
                 )
+        if staged_question_cache is not None and not set(
+            staged_question_cache.active_birth_sha256s
+        ).issubset(provider_births):
+            raise ValueError(
+                "exact-question cache references a non-active provider birth"
+            )
         task_transcripts, emitted_task_counts = (
             self._action_ball_decode_task_transcripts(
                 state["task_transcripts"],
@@ -6809,7 +7433,16 @@ class RacketTargetCommand(CommandTerm):
             for slot in range(count)
         ):
             raise ValueError("action-ball solver proposal ledger requires P >= A")
-        if any(
+        if self._action_ball_fixed_view_enabled:
+            if (
+                any(emitted_task_counts.values())
+                or proposal_rows["P"] != proposal_rows["A"]
+            ):
+                raise ValueError(
+                    "immutable fixed-view mutable state contains task "
+                    "receipts or rejected logical rows"
+                )
+        elif any(
             emitted_task_counts[int(uid)] != proposal_rows["A"][slot]
             for slot, uid in enumerate(self._action_ball_bundle.action_uids)
         ):
@@ -6853,6 +7486,7 @@ class RacketTargetCommand(CommandTerm):
                 )
         return (
             state["sampler"],
+            staged_question_cache,
             provider_births,
             provider_history,
             task_transcripts,
@@ -6865,6 +7499,7 @@ class RacketTargetCommand(CommandTerm):
     def _action_ball_load_solver_mutable_state(self, state: object) -> None:
         (
             sampler_state,
+            staged_question_cache,
             provider_births,
             provider_history,
             task_transcripts,
@@ -6877,13 +7512,22 @@ class RacketTargetCommand(CommandTerm):
         )
         # The disposable sampler above makes the following commit non-branching and exact.
         self._action_ball_sampler.load_state_dict(sampler_state)
+        if self._action_ball_exact_question_cache is not None:
+            if staged_question_cache is None:
+                raise RuntimeError("validated question cache disappeared")
+            self._action_ball_exact_question_cache.load_state_dict(
+                staged_question_cache.state_dict()
+            )
+        self._action_ball_restore_fixed_sampler_highwaters(
+            self._action_ball_sampler
+        )
         self._action_ball_provider_births = provider_births
         self._action_ball_provider_history = provider_history
         self._action_ball_task_transcript_by_birth = task_transcripts
         self._action_ball_emitted_task_count_by_uid = emitted_task_counts
         self._action_ball_domain_cursor_by_uid = domain_cursors
         for name in ("P", "A"):
-            self._action_ball_ledger[
+            self._action_ball_live_ledger()[
                 _ACTION_BALL_LEDGER_NAMES.index(name)
             ].copy_(
                 torch.tensor(
@@ -6891,6 +7535,110 @@ class RacketTargetCommand(CommandTerm):
                 )
             )
         self._action_ball_reject_counts = rejection_rows
+
+    def _action_ball_restore_fixed_sampler_highwaters(self, sampler) -> None:
+        """Rebuild diagnostic-only highwaters omitted by sampler state bytes."""
+
+        if not self._action_ball_fixed_view_enabled:
+            return
+        if not bool(getattr(sampler, "_diagnostic_fast_path", False)):
+            raise RuntimeError(
+                "immutable fixed-view sampler restore lost diagnostic mode"
+            )
+        birth_highwaters = {}
+        sample_highwaters = {}
+        for uid in self._action_ball_bundle.action_uids:
+            action_uid = int(uid)
+            birth_count = sampler.birth_count_for(action_uid)
+            sample_count = sampler.sample_count_for(action_uid)
+            retired_births, retired_samples = sampler.retired_prefix_for(
+                action_uid
+            )
+            if (
+                sample_count != 0
+                or retired_births != 0
+                or retired_samples != 0
+            ):
+                raise RuntimeError(
+                    "immutable fixed-view sampler state contains solved "
+                    "samples or compacted birth authority"
+                )
+            if birth_count == 0:
+                birth_draw_end = 0
+            else:
+                try:
+                    last_birth = sampler._issued_births_by_action[
+                        action_uid
+                    ][birth_count - 1]
+                except (AttributeError, KeyError) as error:
+                    raise RuntimeError(
+                        "immutable fixed-view sampler lost its retained "
+                        "birth highwater"
+                    ) from error
+                birth_draw_end = int(last_birth.draw_end)
+            if birth_draw_end != sampler.draw_count_for(action_uid):
+                raise RuntimeError(
+                    "immutable fixed-view birth highwater differs from RNG"
+                )
+            birth_highwaters[action_uid] = birth_draw_end
+            sample_highwaters[action_uid] = 0
+        sampler._diagnostic_last_birth_draw_end_by_action = (
+            birth_highwaters
+        )
+        sampler._diagnostic_last_sample_draw_end_by_action = (
+            sample_highwaters
+        )
+
+    def _action_ball_fixed_view_broker_state_dict(self) -> dict:
+        """Snapshot a complete fixed-view birth transcript read-only.
+
+        The ordinary diagnostic broker intentionally retains only the latest
+        consumed receipt per env.  Fixed exact resume instead owns append-only
+        provider/sampler history.  The broker's strict diagnostic-only seam
+        validates that full transcript without mutating its compact live
+        state or changing legacy ``state_dict()`` bytes.
+        """
+
+        if not self._action_ball_fixed_view_enabled:
+            return self._action_ball_broker.state_dict()
+        receipts = tuple(
+            sorted(
+                self._action_ball_provider_history.values(),
+                key=lambda receipt: (
+                    receipt.env_id,
+                    receipt.reset_generation,
+                ),
+            )
+        )
+        return (
+            self._action_ball_broker
+            .diagnostic_state_dict_with_consumed_history(receipts)
+        )
+
+    def _action_ball_fixed_view_pool_state_dict(self) -> dict:
+        """Return the cached, unbound legacy-pool identity for fixed resume."""
+
+        if not self._action_ball_fixed_view_enabled:
+            return self._action_ball_pool.state_dict()
+        state = self._action_ball_fixed_view_pristine_pool_state
+        if (
+            not self._action_ball_fixed_view_pool_is_pristine(state)
+            or state.get("birth_authority_state_sha256") is not None
+            or state.get("solver_state")
+            != self._action_ball_pool_solver.state_dict()
+        ):
+            raise RuntimeError(
+                "immutable fixed-view cached pool identity is not pristine"
+            )
+        return json.loads(
+            json.dumps(
+                state,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+        )
 
     def _action_ball_phase_center_mask_tensor(self) -> torch.Tensor:
         """(n_actions,) bool — True while the action's curriculum phase is center.
@@ -7268,6 +8016,7 @@ class RacketTargetCommand(CommandTerm):
             ActionBirthReceipt,
             ActionDomainLevels,
             ActionSamplingMixture,
+            task_transcript_sha256,
         )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             ARM_CATALOG_SHA256,
@@ -7450,6 +8199,11 @@ class RacketTargetCommand(CommandTerm):
                 receipt_sha256 in staged_digests
                 or receipt_sha256
                 in self._action_ball_provider_births
+                or (
+                    self._action_ball_fixed_view_enabled
+                    and receipt_sha256
+                    in self._action_ball_provider_history
+                )
             ):
                 raise RuntimeError(
                     "action-ball birth provider produced a duplicate "
@@ -7482,6 +8236,19 @@ class RacketTargetCommand(CommandTerm):
                 "levels": levels,
                 "rho": rho,
             }
+            if self._action_ball_fixed_view_enabled:
+                # Exact fixed-view resume retains the legitimate birth tape,
+                # but its per-birth task transcript is provably empty because
+                # no ActionBallTaskReceipt exists in this data plane.
+                self._action_ball_provider_history[
+                    receipt_sha256
+                ] = receipt
+                self._action_ball_task_transcript_by_birth[
+                    receipt_sha256
+                ] = (
+                    0,
+                    task_transcript_sha256(receipt_sha256, ()),
+                )
         return tuple(row[1] for row in staged)
 
     def _action_ball_assert_issued_birth(self, receipt) -> None:
@@ -7595,6 +8362,8 @@ class RacketTargetCommand(CommandTerm):
 
         quat = self._ref_racket_quat_w_per_clip
         omega = self._ref_racket_ang_vel_w_per_clip
+        velocity = self._ref_racket_vel_w_per_clip
+        raw_normal = self._ref_racket_normal_raw_w_per_clip
         expected_device = str(self.device)
         metadata = (
             tuple(quat.shape),
@@ -7603,13 +8372,28 @@ class RacketTargetCommand(CommandTerm):
             tuple(omega.shape),
             str(omega.device),
             str(omega.dtype),
+            tuple(velocity.shape),
+            str(velocity.device),
+            str(velocity.dtype),
+            tuple(raw_normal.shape),
+            str(raw_normal.device),
+            str(raw_normal.dtype),
         )
         if (
             metadata[0] != (len(actions), 4)
             or metadata[3] != (len(actions), 3)
+            or metadata[6] != (len(actions), 3)
+            or metadata[9] != (len(actions), 3)
             or metadata[1] != expected_device
             or metadata[4] != expected_device
-            or metadata[2] != metadata[5]
+            or metadata[7] != expected_device
+            or metadata[10] != expected_device
+            or not (
+                metadata[2]
+                == metadata[5]
+                == metadata[8]
+                == metadata[11]
+            )
         ):
             raise RuntimeError(
                 "action-ball reference host cache tensor shape/device/dtype "
@@ -7628,11 +8412,23 @@ class RacketTargetCommand(CommandTerm):
             tuple(float(value) for value in row)
             for row in omega.detach().cpu().tolist()
         )
+        velocity_rows = tuple(
+            tuple(float(value) for value in row)
+            for row in velocity.detach().cpu().tolist()
+        )
+        raw_normal_rows = tuple(
+            tuple(float(value) for value in row)
+            for row in raw_normal.detach().cpu().tolist()
+        )
         if (
             len(quat_rows) != len(actions)
             or any(len(row) != 4 for row in quat_rows)
             or len(omega_rows) != len(actions)
             or any(len(row) != 3 for row in omega_rows)
+            or len(velocity_rows) != len(actions)
+            or any(len(row) != 3 for row in velocity_rows)
+            or len(raw_normal_rows) != len(actions)
+            or any(len(row) != 3 for row in raw_normal_rows)
         ):
             raise RuntimeError(
                 "action-ball reference host cache conversion changed tensor shape"
@@ -7641,6 +8437,8 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_reference_host_tensor_metadata = metadata
         self._action_ball_reference_quat_host_rows = quat_rows
         self._action_ball_reference_omega_host_rows = omega_rows
+        self._action_ball_reference_velocity_host_rows = velocity_rows
+        self._action_ball_reference_raw_normal_host_rows = raw_normal_rows
 
     def _action_ball_assert_emitted_sample(self, receipt) -> None:
         """Cross-check a task sample against live sampler/provider issuance state."""
@@ -7679,26 +8477,103 @@ class RacketTargetCommand(CommandTerm):
             receipt.sampler_identity_receipt()
         )
 
+    def _action_ball_assert_emitted_task_reference_and_timing(
+        self,
+        receipts,
+    ) -> None:
+        """Prove solver-independent measured-reference and timing fields."""
+
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+            derive_action_teacher_site_timing,
+        )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            racket_contact_geometry as contact_geometry,
+        )
+
+        reference_quat_rows = self._action_ball_reference_quat_host_rows
+        reference_omega_rows = self._action_ball_reference_omega_host_rows
+        for receipt in receipts:
+            slot = receipt.action_slot
+            profile = self._action_ball_bundle.profiles[slot]
+            expected_reference_quat = contact_geometry.canonical_quat_wxyz(
+                reference_quat_rows[slot]
+            )
+            expected_reference_omega = tuple(
+                float(value) for value in reference_omega_rows[slot]
+            )
+            if (
+                receipt.mount_normal_sign
+                != self._action_ball_mount_signs[slot]
+                or receipt.reference_racket_quat_wxyz
+                != expected_reference_quat
+                or receipt.reference_racket_angular_velocity_w_radps
+                != expected_reference_omega
+                or receipt.geometry_source_sha256
+                != contact_geometry.GEOMETRY_SOURCE_SHA256
+            ):
+                raise RuntimeError(
+                    "action-ball exact-face receipt differs from the selected "
+                    "motion's sign/reference quaternion/angular velocity"
+                )
+            expected_timing = derive_action_teacher_site_timing(
+                racket_site_velocity_w_mps=(
+                    receipt.racket_site_velocity_w_mps
+                ),
+                time_to_contact_s=receipt.time_to_contact_s,
+                reference_t_hit_s=profile.reference_t_hit_s,
+                reference_t_cycle_s=profile.reference_t_cycle_s,
+                reference_racket_site_speed_mps=(
+                    profile.reference_racket_site_speed_mps
+                ),
+                reaction_margin_s=profile.reaction_margin_s,
+                teacher_rate_min=profile.teacher_rate_min,
+                teacher_rate_max=profile.teacher_rate_max,
+            )
+            if (
+                receipt.reference_t_hit_s != profile.reference_t_hit_s
+                or receipt.reference_t_cycle_s != profile.reference_t_cycle_s
+                or receipt.reference_racket_site_speed_mps
+                != profile.reference_racket_site_speed_mps
+                or receipt.reaction_margin_s != profile.reaction_margin_s
+                or receipt.teacher_rate_min != profile.teacher_rate_min
+                or receipt.teacher_rate_max != profile.teacher_rate_max
+                or receipt.required_racket_site_speed_mps
+                != expected_timing.required_racket_site_speed_mps
+                or receipt.teacher_rate != expected_timing.teacher_rate
+                or receipt.scaled_t_hit_s != expected_timing.scaled_t_hit_s
+                or receipt.scaled_t_cycle_s != expected_timing.scaled_t_cycle_s
+                or receipt.pre_swing_wait_s != expected_timing.pre_swing_wait_s
+            ):
+                raise RuntimeError(
+                    "action-ball task timing differs from the exact pinned "
+                    "profile/formula"
+                )
+            if (
+                receipt.pre_swing_wait_s
+                + receipt.scaled_t_cycle_s
+                + self._action_ball_attempt_close_margin_s
+                > self._action_ball_episode_length_s + 1.0e-12
+            ):
+                raise RuntimeError(
+                    "action-ball task timing exceeds the pinned episode horizon"
+                )
+
     def _action_ball_replay_emitted_tasks(
         self,
         receipts,
         *,
         sampler,
         provider_history: dict,
+        question_cache,
     ) -> None:
         """Purely replay one task batch through the pinned sampler and solver."""
 
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionBallTaskReceipt,
-            derive_action_teacher_site_timing,
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
             solve_proposals,
         )
-        from whole_body_tracking.tasks.tracking.mdp import (
-            racket_contact_geometry as contact_geometry,
-        )
-
         receipts = tuple(receipts)
         if not receipts:
             return
@@ -7830,6 +8705,81 @@ class RacketTargetCommand(CommandTerm):
                         "counter-rally task receipt differs from pinned "
                         "precheck replay"
                     )
+        if self._action_ball_target_source == "direct_ball":
+            for receipt in canonical:
+                slot = int(receipt.action_slot)
+                expected_velocity = (
+                    self._action_ball_reference_velocity_host_rows[slot]
+                )
+                expected_normal = (
+                    self._action_ball_reference_raw_normal_host_rows[slot]
+                )
+                if (
+                    receipt.racket_face_center_velocity_w_mps
+                    != expected_velocity
+                    or receipt.racket_normal_w != expected_normal
+                    or receipt.solver_residual_m != 0.0
+                ):
+                    raise RuntimeError(
+                        "direct-ball receipt carrier differs from the pinned "
+                        "teacher reference rows"
+                    )
+            # Full receipt round-trip above already re-proves exact-face
+            # geometry and teacher timing.  C211 deliberately has no inverse
+            # ball-to-paddle target to replay.
+            self._action_ball_assert_emitted_task_reference_and_timing(
+                canonical
+            )
+            return
+        if question_cache is not None:
+            if self._action_ball_target_source != "online_solver":
+                raise RuntimeError(
+                    "exact-question answer cache is bound to a non-online target source"
+                )
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_question_cache import (
+                exact_question_sha256,
+            )
+
+            for receipt, birth in zip(canonical, births):
+                slot = int(receipt.action_slot)
+                question_sha256 = exact_question_sha256(
+                    _action_ball_exact_question_payload(
+                        action_uid=int(receipt.action_uid),
+                        action_slot=slot,
+                        birth=birth,
+                        sample=receipt,
+                        mount_normal_sign=int(
+                            self._action_ball_mount_signs[slot]
+                        ),
+                    )
+                )
+                answer = question_cache.peek(
+                    action_uid=int(receipt.action_uid),
+                    question_sha256=question_sha256,
+                )
+                if answer is None:
+                    raise RuntimeError(
+                        "cache-enabled emitted task has no exact semantic answer"
+                    )
+                velocity, normal, residual = answer.values()
+                if (
+                    not answer.admitted
+                    or answer.reason_code != -1
+                    or velocity
+                    != receipt.racket_face_center_velocity_w_mps
+                    or normal != receipt.racket_normal_w
+                    or residual != receipt.solver_residual_m
+                ):
+                    raise RuntimeError(
+                        "cache-enabled emitted task differs from its exact IEEE answer"
+                    )
+            # The sampler assertion above still replays every question/RNG row.
+            # Only the deterministic inverse answer is reused, so neither pool
+            # purity checks nor cold-resume validation call the inverse again.
+            self._action_ball_assert_emitted_task_reference_and_timing(
+                canonical
+            )
+            return
         dtype = self._ref_racket_normal_raw_w_per_clip.dtype
         clip_ids = torch.tensor(
             [receipt.action_slot for receipt in canonical],
@@ -7916,92 +8866,7 @@ class RacketTargetCommand(CommandTerm):
             raise RuntimeError(
                 "action-ball task solver outputs differ from deterministic replay"
             )
-        reference_quat_rows = (
-            self._action_ball_reference_quat_host_rows
-        )
-        reference_omega_rows = (
-            self._action_ball_reference_omega_host_rows
-        )
-        for receipt in canonical:
-            slot = receipt.action_slot
-            profile = self._action_ball_bundle.profiles[
-                slot
-            ]
-            expected_reference_quat = (
-                contact_geometry.canonical_quat_wxyz(
-                    reference_quat_rows[slot]
-                )
-            )
-            expected_reference_omega = tuple(
-                float(value)
-                for value in reference_omega_rows[slot]
-            )
-            if (
-                receipt.mount_normal_sign
-                != self._action_ball_mount_signs[slot]
-                or receipt.reference_racket_quat_wxyz
-                != expected_reference_quat
-                or receipt.reference_racket_angular_velocity_w_radps
-                != expected_reference_omega
-                or receipt.geometry_source_sha256
-                != contact_geometry.GEOMETRY_SOURCE_SHA256
-            ):
-                raise RuntimeError(
-                    "action-ball exact-face receipt differs from the selected "
-                    "motion's sign/reference quaternion/angular velocity"
-                )
-            expected_timing = derive_action_teacher_site_timing(
-                racket_site_velocity_w_mps=(
-                    receipt.racket_site_velocity_w_mps
-                ),
-                time_to_contact_s=receipt.time_to_contact_s,
-                reference_t_hit_s=profile.reference_t_hit_s,
-                reference_t_cycle_s=profile.reference_t_cycle_s,
-                reference_racket_site_speed_mps=(
-                    profile.reference_racket_site_speed_mps
-                ),
-                reaction_margin_s=profile.reaction_margin_s,
-                teacher_rate_min=profile.teacher_rate_min,
-                teacher_rate_max=profile.teacher_rate_max,
-            )
-            if (
-                receipt.reference_t_hit_s
-                != profile.reference_t_hit_s
-                or receipt.reference_t_cycle_s
-                != profile.reference_t_cycle_s
-                or receipt.reference_racket_site_speed_mps
-                != profile.reference_racket_site_speed_mps
-                or receipt.reaction_margin_s
-                != profile.reaction_margin_s
-                or receipt.teacher_rate_min
-                != profile.teacher_rate_min
-                or receipt.teacher_rate_max
-                != profile.teacher_rate_max
-                or receipt.required_racket_site_speed_mps
-                != expected_timing.required_racket_site_speed_mps
-                or receipt.teacher_rate
-                != expected_timing.teacher_rate
-                or receipt.scaled_t_hit_s
-                != expected_timing.scaled_t_hit_s
-                or receipt.scaled_t_cycle_s
-                != expected_timing.scaled_t_cycle_s
-                or receipt.pre_swing_wait_s
-                != expected_timing.pre_swing_wait_s
-            ):
-                raise RuntimeError(
-                    "action-ball task timing differs from the exact pinned "
-                    "profile/formula"
-                )
-            if (
-                receipt.pre_swing_wait_s
-                + receipt.scaled_t_cycle_s
-                + self._action_ball_attempt_close_margin_s
-                > self._action_ball_episode_length_s + 1.0e-12
-            ):
-                raise RuntimeError(
-                    "action-ball task timing exceeds the pinned episode "
-                    "horizon"
-                )
+        self._action_ball_assert_emitted_task_reference_and_timing(canonical)
 
     def _action_ball_assert_emitted_tasks(self, receipts) -> None:
         """Batch proof for all sampler, solver, timing, and birth-owned fields."""
@@ -8010,6 +8875,7 @@ class RacketTargetCommand(CommandTerm):
             tuple(receipts),
             sampler=self._action_ball_sampler,
             provider_history=self._action_ball_provider_history,
+            question_cache=self._action_ball_exact_question_cache,
         )
 
     def _action_ball_emitted_task_count_for(self, action_uid: int) -> int:
@@ -8139,6 +9005,21 @@ class RacketTargetCommand(CommandTerm):
         requests = tuple(requests)
         if not requests:
             raise RuntimeError("action-ball refill batch must be non-empty")
+        # Source-level tensor tests construct a narrow command view with
+        # ``__new__``/SimpleNamespace.  Absence is the safe, historical
+        # cache-disabled behavior; real runtimes always bind the attribute in
+        # ``_load_action_ball_runtime``.
+        live_question_cache = getattr(
+            self, "_action_ball_exact_question_cache", None
+        )
+        target_source = getattr(
+            self, "_action_ball_target_source", "online_solver"
+        )
+        staged_question_cache = (
+            None
+            if live_question_cache is None
+            else live_question_cache.clone()
+        )
         diagnostic_unauthorized = getattr(
             self,
             "_action_ball_diagnostic_unauthorized",
@@ -8504,38 +9385,236 @@ class RacketTargetCommand(CommandTerm):
                 "h": float(self.cfg.vb_rollout_h),
                 "n_steps": int(self.cfg.vb_rollout_steps),
             }
-            if diagnostic_unauthorized:
-                (
-                    host_packet,
-                    solver_reason_counts,
-                ) = _solve_proposals_diagnostic_host_only(
-                    clip_ids,
-                    contact,
-                    incoming,
-                    spin,
-                    aim,
-                    ref_normal,
-                    _diagnostic_prevalidated_authority=(
-                        _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+            if target_source == "direct_ball":
+                from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
+                    ProposalHostPacket,
+                )
+
+                # C211 has no desired-contact inverse target.  Its task is the
+                # sampler-owned incoming ball plus landing aim; these reference
+                # rows are receipt carriers only and all desired p/v/face
+                # validity bits/rewards remain zero.  No LM/analytic inverse is
+                # called on reset.
+                direct_slots = [
+                    int(states[index]["slot"])
+                    for index in flat_state_indices
+                ]
+                host_packet = ProposalHostPacket(
+                    reason_codes=tuple(-1 for _ in direct_slots),
+                    admitted=tuple(True for _ in direct_slots),
+                    racket_velocity_rows=tuple(
+                        self._action_ball_reference_velocity_host_rows[slot]
+                        for slot in direct_slots
                     ),
-                    **solver_kwargs,
+                    racket_normal_rows=tuple(
+                        self._action_ball_reference_raw_normal_host_rows[slot]
+                        for slot in direct_slots
+                    ),
+                    residual_rows=tuple(0.0 for _ in direct_slots),
                 )
-            else:
-                result = solve_proposals(
-                    clip_ids,
-                    contact,
-                    incoming,
-                    spin,
-                    aim,
-                    ref_normal,
-                    **solver_kwargs,
-                )
-                host_packet = result.proposal_host_packet
-                if host_packet is None:
-                    raise RuntimeError(
-                        "fixed-action solver omitted its immutable host result packet"
+                solver_reason_counts = {}
+            elif staged_question_cache is None:
+                if diagnostic_unauthorized:
+                    (
+                        host_packet,
+                        solver_reason_counts,
+                    ) = _solve_proposals_diagnostic_host_only(
+                        clip_ids,
+                        contact,
+                        incoming,
+                        spin,
+                        aim,
+                        ref_normal,
+                        _diagnostic_prevalidated_authority=(
+                            _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+                        ),
+                        **solver_kwargs,
                     )
-                solver_reason_counts = result.reason_counts
+                else:
+                    result = solve_proposals(
+                        clip_ids,
+                        contact,
+                        incoming,
+                        spin,
+                        aim,
+                        ref_normal,
+                        **solver_kwargs,
+                    )
+                    host_packet = result.proposal_host_packet
+                    if host_packet is None:
+                        raise RuntimeError(
+                            "fixed-action solver omitted its immutable host result packet"
+                        )
+                    solver_reason_counts = result.reason_counts
+            else:
+                from whole_body_tracking.tasks.tracking.mdp.action_ball_question_cache import (
+                    CachedQuestionAnswer,
+                    exact_question_sha256,
+                )
+                from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
+                    ProposalHostPacket,
+                )
+
+                question_keys = []
+                action_uids = []
+                birth_sha256s = []
+                for sample, state_index in zip(
+                    flat_samples, flat_state_indices
+                ):
+                    state = states[state_index]
+                    request = state["request"]
+                    slot = int(state["slot"])
+                    question_keys.append(
+                        exact_question_sha256(
+                            _action_ball_exact_question_payload(
+                                action_uid=int(request.action_uid),
+                                action_slot=slot,
+                                birth=request.birth,
+                                sample=sample,
+                                mount_normal_sign=int(
+                                    self._action_ball_mount_signs[slot]
+                                ),
+                            )
+                        )
+                    )
+                    action_uids.append(int(request.action_uid))
+                    birth_sha256s.append(request.birth.canonical_sha256)
+
+                answers = [None] * len(question_keys)
+                unique_miss_indices = []
+                first_miss_by_key = {}
+                duplicate_of = {}
+                for index, (uid, key) in enumerate(
+                    zip(action_uids, question_keys)
+                ):
+                    cached = staged_question_cache.peek(
+                        action_uid=uid, question_sha256=key
+                    )
+                    if cached is not None:
+                        answers[index] = staged_question_cache.note_hit(
+                            action_uid=uid,
+                            question_sha256=key,
+                            birth_sha256=birth_sha256s[index],
+                        )
+                        continue
+                    identity = (uid, key)
+                    if identity in first_miss_by_key:
+                        duplicate_of[index] = first_miss_by_key[identity]
+                    else:
+                        first_miss_by_key[identity] = index
+                        unique_miss_indices.append(index)
+
+                if unique_miss_indices:
+                    selector = torch.tensor(
+                        unique_miss_indices,
+                        dtype=torch.long,
+                        device=self.device,
+                    )
+                    miss_clip_ids = clip_ids.index_select(0, selector)
+                    miss_contact = contact.index_select(0, selector)
+                    miss_incoming = incoming.index_select(0, selector)
+                    miss_spin = spin.index_select(0, selector)
+                    miss_aim = aim.index_select(0, selector)
+                    miss_ref_normal = ref_normal.index_select(0, selector)
+                    miss_kwargs = dict(solver_kwargs)
+                    miss_kwargs["base_quat"] = base_quat.index_select(
+                        0, selector
+                    )
+                    if diagnostic_unauthorized:
+                        miss_packet, _ = (
+                            _solve_proposals_diagnostic_host_only(
+                                miss_clip_ids,
+                                miss_contact,
+                                miss_incoming,
+                                miss_spin,
+                                miss_aim,
+                                miss_ref_normal,
+                                _diagnostic_prevalidated_authority=(
+                                    _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY
+                                ),
+                                **miss_kwargs,
+                            )
+                        )
+                    else:
+                        miss_result = solve_proposals(
+                            miss_clip_ids,
+                            miss_contact,
+                            miss_incoming,
+                            miss_spin,
+                            miss_aim,
+                            miss_ref_normal,
+                            **miss_kwargs,
+                        )
+                        miss_packet = miss_result.proposal_host_packet
+                        if miss_packet is None:
+                            raise RuntimeError(
+                                "fixed-action solver omitted its immutable "
+                                "host result packet"
+                            )
+                    for miss_row, original_index in enumerate(
+                        unique_miss_indices
+                    ):
+                        answer = CachedQuestionAnswer.from_values(
+                            reason_code=miss_packet.reason_codes[miss_row],
+                            admitted=miss_packet.admitted[miss_row],
+                            racket_velocity=(
+                                miss_packet.racket_velocity_rows[miss_row]
+                            ),
+                            racket_normal=(
+                                miss_packet.racket_normal_rows[miss_row]
+                            ),
+                            residual=miss_packet.residual_rows[miss_row],
+                        )
+                        staged_question_cache.install_novel(
+                            action_uid=action_uids[original_index],
+                            question_sha256=question_keys[original_index],
+                            answer=answer,
+                            birth_sha256=(
+                                birth_sha256s[original_index]
+                            ),
+                        )
+                        answers[original_index] = answer
+                for index, original_index in duplicate_of.items():
+                    answer = answers[original_index]
+                    if answer is None:
+                        raise RuntimeError(
+                            "in-batch exact-question producer answer missing"
+                        )
+                    staged_question_cache.note_in_batch_reuse(
+                        action_uid=action_uids[index],
+                        question_sha256=question_keys[index],
+                        answer=answer,
+                        birth_sha256=birth_sha256s[index],
+                    )
+                    answers[index] = answer
+                if any(answer is None for answer in answers):
+                    raise RuntimeError(
+                        "exact-question cache did not resolve every proposal"
+                    )
+                unpacked = [answer.values() for answer in answers]
+                host_packet = ProposalHostPacket(
+                    reason_codes=tuple(
+                        answer.reason_code for answer in answers
+                    ),
+                    admitted=tuple(answer.admitted for answer in answers),
+                    racket_velocity_rows=tuple(
+                        values[0] for values in unpacked
+                    ),
+                    racket_normal_rows=tuple(
+                        values[1] for values in unpacked
+                    ),
+                    residual_rows=tuple(values[2] for values in unpacked),
+                )
+                solver_reason_counts = {}
+                for admitted, code in zip(
+                    host_packet.admitted, host_packet.reason_codes
+                ):
+                    if admitted:
+                        continue
+                    name = reason_schema[code]
+                    solver_reason_counts[name] = (
+                        solver_reason_counts.get(name, 0) + 1
+                    )
             unknown_reasons = sorted(
                 set(solver_reason_counts) - known_reasons
             )
@@ -9090,6 +10169,16 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_emitted_task_count_by_uid[
                 uid
             ] += amount
+        if live_question_cache is not None:
+            if staged_question_cache is None:
+                raise RuntimeError("staged exact-question cache disappeared")
+            # Last operation in the producer transaction: exceptions above
+            # leave the live cache byte-identical; pool-level rollback still
+            # restores this same checkpoint state if a later protocol gate
+            # rejects the returned batch.
+            live_question_cache.load_state_dict(
+                staged_question_cache.state_dict()
+            )
         return batches
 
     def _action_ball_reset_outcome_masks(
@@ -9212,16 +10301,43 @@ class RacketTargetCommand(CommandTerm):
         """Close prior installed attempts before any replacement task is requested."""
 
         installed_active = self._action_ball_attempt_active[ids]
-        active = installed_active
+        resume_exclusion_state = getattr(
+            self, "_action_ball_resume_reset_exclusion", None
+        )
+        if resume_exclusion_state is None:
+            resume_exclusion_state = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._action_ball_resume_reset_exclusion = (
+                resume_exclusion_state
+            )
+        if (
+            resume_exclusion_state.dtype != torch.bool
+            or tuple(resume_exclusion_state.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "ActionBall resume reset-exclusion latch is invalid"
+            )
+        resume_exclusion = resume_exclusion_state[ids] & installed_active
+        active = installed_active & ~resume_exclusion
         if self._action_ball_task_wait_schedule is not None:
             # A reset during RESET_WAIT is a safety/reset fact, not a closed
             # task opportunity.  Only revealed tasks enter C/L/F denominators.
             active = active & self._action_ball_task_valid[ids]
         slots = self._action_ball_attempt_action[ids]
         n_actions = len(self._action_ball_bindings)
-        invalid = active & ((slots < 0) | (slots >= n_actions))
+        slot_authority = (
+            installed_active
+            if self._action_ball_fixed_view_enabled
+            else (active | resume_exclusion)
+        )
+        invalid = slot_authority & (
+            (slots < 0) | (slots >= n_actions)
+        )
         inactive_dirty = ~installed_active & (
-            (slots != -1) | self._action_ball_attempt_legal[ids]
+            (slots != -1)
+            | self._action_ball_attempt_legal[ids]
+            | self._action_ball_attempt_hit[ids]
         )
         diagnostic_fast_path = self._action_ball_diagnostic_unauthorized
         if diagnostic_fast_path:
@@ -9278,10 +10394,18 @@ class RacketTargetCommand(CommandTerm):
         collision &= active
         joint_qdes &= active
         joint_actual &= active
+        if diagnostic_fast_path:
+            # A resumed row has no checkpointed PhysX state and is deliberately
+            # retired as X on the mandatory first fresh reset.  Termination
+            # manager residues observed while performing that reset therefore
+            # cannot be attributed to the old policy attempt.  Keep the normal
+            # diagnostic fail-close check for every genuinely gradeable row.
+            unattributed &= active
         unsafe_union = (
             table | fall | collision | joint_qdes | joint_actual
         )
         safe = active & ~unsafe_union
+        hit = active & self._action_ball_attempt_hit[ids]
         legal = safe & self._action_ball_attempt_legal[ids]
         failed = safe & ~self._action_ball_attempt_legal[ids]
         # A timeout is a completed safe policy outcome: legal-at-strike remains L, otherwise F.
@@ -9302,6 +10426,7 @@ class RacketTargetCommand(CommandTerm):
         clamped = slots.clamp(min=0)
         additions = {
             "C": torch.bincount(clamped[active], minlength=n_actions),
+            "H": torch.bincount(clamped[hit], minlength=n_actions),
             "L": torch.bincount(clamped[legal], minlength=n_actions),
             "F": torch.bincount(clamped[failed], minlength=n_actions),
             "U_table": torch.bincount(clamped[table], minlength=n_actions),
@@ -9316,6 +10441,21 @@ class RacketTargetCommand(CommandTerm):
                 clamped[joint_actual], minlength=n_actions
             ),
         }
+        if self._action_ball_fixed_view_enabled:
+            # A fixed row installed but reset before private RESET_WAIT reveal
+            # is not a policy opportunity (so it must not enter C/L/F), yet it
+            # still consumes one logical S row.  Record that withdrawal as X
+            # so every fixed install remains exactly C-or-X conserved.
+            hidden_withdrawal = installed_active & ~active
+            additions["X"] = torch.bincount(
+                clamped[hidden_withdrawal], minlength=n_actions
+            )
+        resume_x = torch.bincount(
+            clamped[resume_exclusion], minlength=n_actions
+        )
+        additions["X"] = additions.get(
+            "X", torch.zeros_like(resume_x)
+        ) + resume_x
         unsafe_unique = torch.bincount(
             clamped[active & unsafe_union], minlength=n_actions
         )
@@ -9342,6 +10482,7 @@ class RacketTargetCommand(CommandTerm):
                         additions["C"]
                         == additions["L"] + additions["F"] + unsafe_unique
                     ),
+                    torch.all(additions["H"] <= additions["C"]),
                     torch.all(unsafe_max <= unsafe_unique),
                     torch.all(unsafe_unique <= unsafe_sum),
                 )
@@ -9365,6 +10506,7 @@ class RacketTargetCommand(CommandTerm):
                 additions["C"],
                 additions["L"] + additions["F"] + unsafe_unique,
             )
+            or bool((additions["H"] > additions["C"]).any())
             or bool((unsafe_max > unsafe_unique).any())
             or bool((unsafe_unique > unsafe_sum).any())
         ):
@@ -9373,10 +10515,11 @@ class RacketTargetCommand(CommandTerm):
             )
         for name, values in additions.items():
             row = _ACTION_BALL_LEDGER_NAMES.index(name)
-            self._action_ball_ledger[row].add_(values)
+            self._action_ball_live_ledger()[row].add_(values)
         if active_host_env_ids is None:
             active_host_env_ids = tuple(
-                int(env) for env in ids[active].detach().cpu().tolist()
+                int(env)
+                for env in ids[installed_active].detach().cpu().tolist()
             )
         for env_id in active_host_env_ids:
             self._action_ball_task_by_env[env_id] = None
@@ -9385,6 +10528,8 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_attempt_active[ids] = False
         self._action_ball_attempt_action[ids] = -1
         self._action_ball_attempt_legal[ids] = False
+        self._action_ball_attempt_hit[ids] = False
+        self._action_ball_resume_reset_exclusion[ids] = False
         self._counter_rally_reward_terms[ids] = 0.0
         self._counter_rally_accepted[ids] = False
         self._counter_rally_legal_first_landing[ids] = False
@@ -9427,9 +10572,34 @@ class RacketTargetCommand(CommandTerm):
         births = tuple(birth for _env_id, birth, _sampler_birth in rows)
         if not births:
             return
-        # The pool performs one validate-all/commit-all retirement.  Provider
-        # maps and env latches are mutated only after that atomic call returns.
-        discarded = self._action_ball_pool.retire_many(births)
+        fixed_view = self._action_ball_fixed_view_enabled
+        if fixed_view:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+                task_transcript_sha256,
+            )
+
+            for _env_id, birth, _sampler_birth in rows:
+                birth_sha = birth.canonical_sha256
+                if (
+                    self._action_ball_provider_history.get(birth_sha)
+                    != birth
+                    or self._action_ball_task_transcript_by_birth.get(
+                        birth_sha
+                    )
+                    != (0, task_transcript_sha256(birth_sha, ()))
+                ):
+                    raise RuntimeError(
+                        "immutable fixed-view birth history/transcript drifted"
+                    )
+            # Fixed rows were never registered with LazyActionTaskPool.  The
+            # validate-all boundary above is therefore the complete logical
+            # retirement receipt; legitimate sampler/provider history remains
+            # append-only for exact replay.
+            discarded = (0,) * len(rows)
+        else:
+            # The pool performs one validate-all/commit-all retirement.
+            # Provider maps and env latches mutate only after this atomic call.
+            discarded = self._action_ball_pool.retire_many(births)
         if (
             not isinstance(discarded, tuple)
             or len(discarded) != len(rows)
@@ -9438,16 +10608,28 @@ class RacketTargetCommand(CommandTerm):
             raise AssertionError(
                 "action-ball pool returned an invalid batch discard receipt"
             )
-        if self._action_ball_diagnostic_unauthorized:
+        if self._action_ball_diagnostic_unauthorized and not fixed_view:
             self._action_ball_sampler.forget_diagnostic_births(
                 tuple(
                     sampler_birth
                     for _env_id, _birth, sampler_birth in rows
                 )
             )
+        question_cache = self._action_ball_exact_question_cache
+        if question_cache is not None:
+            # The pool has now atomically retired every queue that could replay
+            # these births.  Release their exact-answer ownership while
+            # retaining the latest static question per action as the intended
+            # cross-reset hot row.
+            question_cache.retire_births(
+                tuple(birth.canonical_sha256 for birth in births)
+            )
         for env_id, birth, _sampler_birth in rows:
             del self._action_ball_provider_births[birth.canonical_sha256]
-            if self._action_ball_diagnostic_unauthorized:
+            if (
+                self._action_ball_diagnostic_unauthorized
+                and not fixed_view
+            ):
                 # Batched diagnostic births never enter either formal proof
                 # catalog.  Retain compatibility with a scalar diagnostic
                 # adapter without paying two empty-map hash probes per reset.
@@ -9753,10 +10935,10 @@ class RacketTargetCommand(CommandTerm):
         install_counts = torch.bincount(
             action_slots, minlength=len(self._action_ball_bindings)
         )
-        self._action_ball_ledger[_ACTION_BALL_LEDGER_NAMES.index("I")].add_(
+        self._action_ball_live_ledger()[_ACTION_BALL_LEDGER_NAMES.index("I")].add_(
             install_counts
         )
-        self._action_ball_ledger[_ACTION_BALL_LEDGER_NAMES.index("S")].add_(
+        self._action_ball_live_ledger()[_ACTION_BALL_LEDGER_NAMES.index("S")].add_(
             install_counts
         )
         self._action_ball_action_uid[ids] = action_uids
@@ -9766,6 +10948,7 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_attempt_active[ids] = True
         self._action_ball_attempt_action[ids] = action_slots
         self._action_ball_attempt_legal[ids] = False
+        self._action_ball_attempt_hit[ids] = False
         self._action_ball_invalidate_virtual_contact_history(ids)
         for row_index, (env_id, birth, receipt) in enumerate(
             zip(host_env_ids, births, receipts)
@@ -9804,6 +10987,209 @@ class RacketTargetCommand(CommandTerm):
             else tts_abs <= float(wide_window_s)
         )
         return diagnostic_task_refs
+
+    def _action_ball_commit_fixed_view_install(
+        self,
+        *,
+        ids: torch.Tensor,
+        origins: torch.Tensor,
+        births: tuple,
+        view,
+        action_uids: torch.Tensor,
+        action_slots: torch.Tensor,
+        reset_generations: torch.Tensor,
+        swing_generations: torch.Tensor,
+        host_env_ids: tuple,
+    ) -> None:
+        """Install one immutable row-zero view without task materialization."""
+
+        if not self._action_ball_fixed_view_enabled:
+            raise RuntimeError(
+                "immutable fixed-view install used outside its authority"
+            )
+        template = self._action_ball_fixed_view_template
+        if (
+            template is None
+            or len(ids) != len(host_env_ids)
+            or view.batch_size != len(ids)
+            or view.row_index != 0
+            or view.install_row != template.install_row
+            or view.observation_row != template.observation_row
+            or view.timing_row != template.timing_row
+            or dict(view.lineage) != dict(template.lineage)
+        ):
+            raise RuntimeError(
+                "immutable fixed-view reset template drifted before install"
+            )
+        install_rows = view.expand_install_rows(
+            self._action_ball_fixed_view_install_row_device
+        )
+        observation_rows = view.expand_observation_rows(
+            self._action_ball_fixed_view_observation_row_device
+        )
+        timing_rows = view.expand_timing_rows(
+            self._action_ball_fixed_view_timing_row_device
+        )
+        if (
+            tuple(install_rows.shape) != (len(ids), 31)
+            or tuple(observation_rows.shape)[0] != len(ids)
+            or tuple(timing_rows.shape) != (len(ids), 15)
+        ):
+            raise RuntimeError(
+                "immutable fixed-view cached tensor broadcast drifted"
+            )
+        if len(births) != len(ids):
+            raise RuntimeError(
+                "immutable fixed-view birth batch has the wrong size"
+            )
+        for env_id, birth in zip(host_env_ids, births):
+            if (
+                self._action_ball_task_by_env[env_id] is not None
+                or self._action_ball_task_ref_by_env[env_id] is not None
+            ):
+                raise RuntimeError(
+                    "immutable fixed-view install found a task receipt/ref"
+                )
+            # This pure assertion preserves the legacy fixed-tape physical
+            # guard (action/base/fixed-domain identity) without invoking its
+            # pool-compatible materializer.
+            self._action_ball_pool_solver._assert_birth_matches_question(
+                birth
+            )
+
+        ball_contact_local = install_rows[:, 0:3]
+        site_target_local = install_rows[:, 3:6]
+        base_goal_local = install_rows[:, 6:9]
+        face_center_velocity = install_rows[:, 9:12]
+        site_velocity = install_rows[:, 12:15]
+        command_quat = install_rows[:, 15:19]
+        racket_normal = install_rows[:, 19:22]
+        incoming_velocity = install_rows[:, 22:25]
+        incoming_spin = install_rows[:, 25:28]
+        landing_aim = install_rows[:, 28:30]
+        initial_tts = install_rows[:, 30].to(
+            dtype=self.time_to_strike.dtype
+        )
+        counter_rally_identity = (
+            self._action_ball_fixed_view_counter_rally_identity
+        )
+        counter_rally_rows = (
+            None
+            if counter_rally_identity is None
+            else self._action_ball_fixed_view_counter_rally_row_device.expand(
+                len(ids), 3
+            )
+        )
+        if (
+            (counter_rally_rows is None) != (not self._counter_rally_enabled)
+            or (
+                counter_rally_rows is not None
+                and tuple(counter_rally_rows.shape) != (len(ids), 3)
+            )
+        ):
+            raise RuntimeError(
+                "immutable fixed-view counter-rally cache drifted"
+            )
+        self.racket_target_pos_w[ids] = origins + site_target_local
+        self.racket_target_vel_w[ids] = site_velocity
+        self.racket_target_normal_w[ids] = racket_normal
+        self.target_normal_cmd[ids] = racket_normal
+        self._action_ball_ball_contact_target_w[ids] = (
+            origins + ball_contact_local
+        )
+        self._action_ball_face_center_velocity_target_w[ids] = (
+            face_center_velocity
+        )
+        self._action_ball_racket_command_quat_w[ids] = command_quat
+        self.base_target_pos_w[ids] = (
+            origins[:, :2] + base_goal_local[:, :2]
+        )
+        self.vb_vel_in_w[ids] = incoming_velocity
+        self.vb_spin_in_w[ids] = incoming_spin
+        self._vb_target_xy_per_env[ids] = landing_aim
+        if counter_rally_rows is not None:
+            self._counter_rally_return_direction_env_xy[ids] = (
+                counter_rally_rows[:, :2]
+            )
+            self._counter_rally_target_baseline_speed_mps[ids] = (
+                counter_rally_rows[:, 2]
+            )
+        self._counter_rally_reward_terms[ids] = 0.0
+        self._counter_rally_accepted[ids] = False
+        self._counter_rally_legal_first_landing[ids] = False
+        self._counter_rally_primary_reason_code[ids] = -1
+
+        install_counts = torch.bincount(
+            action_slots, minlength=len(self._action_ball_bindings)
+        )
+        fixed_ledger = self._action_ball_fixed_view_ledger
+        for name in ("P", "A", "I", "S"):
+            fixed_ledger[
+                _ACTION_BALL_LEDGER_NAMES.index(name)
+            ].add_(install_counts)
+        self._action_ball_action_uid[ids] = action_uids
+        self._action_ball_action_slot[ids] = action_slots
+        self._action_ball_reset_generation[ids] = reset_generations
+        self._action_ball_swing_generation[ids] = swing_generations
+        self._action_ball_attempt_active[ids] = True
+        self._action_ball_attempt_action[ids] = action_slots
+        self._action_ball_attempt_legal[ids] = False
+        self._action_ball_attempt_hit[ids] = False
+        self._action_ball_invalidate_virtual_contact_history(ids)
+        for env_id, birth in zip(host_env_ids, births):
+            self._action_ball_birth_by_env[env_id] = birth
+            self._action_ball_task_by_env[env_id] = None
+            self._action_ball_task_ref_by_env[env_id] = None
+            self._counter_rally_task_identity_by_env[env_id] = (
+                counter_rally_identity
+            )
+
+        self.time_to_strike[ids] = initial_tts
+        self.pre_strike[ids] = True
+        tts_abs = initial_tts.abs()
+        self.strike_window[ids] = (
+            tts_abs <= float(self.cfg.strike_window_s)
+        )
+        pos_window_s = self.cfg.strike_window_pos_s
+        wide_window_s = self.cfg.strike_window_wide_s
+        self.strike_window_pos[ids] = (
+            self.strike_window[ids]
+            if pos_window_s is None
+            else tts_abs <= float(pos_window_s)
+        )
+        self.strike_window_wide[ids] = (
+            self.strike_window[ids]
+            if wide_window_s is None
+            else tts_abs <= float(wide_window_s)
+        )
+
+    def _action_ball_finish_fixed_view_reset(
+        self,
+        *,
+        ids: torch.Tensor,
+        action_slots: torch.Tensor,
+        host_identity_rows: tuple,
+        true_reset: bool,
+    ) -> None:
+        """Publish fixed Motion timing, then the episode latch/wait state."""
+
+        self._motion().install_action_ball_fixed_view_timing_now(
+            env_ids=ids,
+            host_identity_rows=host_identity_rows,
+            fixed_view_identity_sha256=(
+                self._action_ball_fixed_view_identity_sha256
+            ),
+        )
+        if true_reset:
+            phase_by_slot = self._action_ball_phase_center_mask_tensor()
+            self._action_ball_reference_term_center_latch[ids] = (
+                phase_by_slot[action_slots]
+            )
+        self._action_ball_arm_task_wait(
+            ids,
+            host_identity_rows=host_identity_rows,
+            true_reset=true_reset,
+        )
 
     def _sample_targets_action_ball(
         self,
@@ -10000,6 +11386,32 @@ class RacketTargetCommand(CommandTerm):
                     "action-ball consumed birth does not match its env generation"
                 )
 
+        if self._action_ball_fixed_view_enabled:
+            # This is the complete immutable reset data plane.  It never
+            # enters LazyActionTaskPool and therefore cannot materialize or
+            # forge a per-environment ActionBallTaskReceipt.
+            fixed_view = self._action_ball_pool_solver.reset_batch_view(
+                batch_size=n
+            )
+            self._action_ball_commit_fixed_view_install(
+                ids=ids,
+                origins=origins,
+                births=births,
+                view=fixed_view,
+                action_uids=action_uids,
+                action_slots=action_slots,
+                reset_generations=reset_generations,
+                swing_generations=swing_generations,
+                host_env_ids=host_env_ids,
+            )
+            self._action_ball_finish_fixed_view_reset(
+                ids=ids,
+                action_slots=action_slots,
+                host_identity_rows=host_identity_rows,
+                true_reset=true_reset,
+            )
+            return
+
         # The pool can refill each birth lazily.  Simulator/command buffers remain untouched until
         # all rows issue and validate; solver rejects only increase P/reason counters upstream.
         receipts = self._action_ball_pool.request_many(
@@ -10011,6 +11423,20 @@ class RacketTargetCommand(CommandTerm):
                 for birth, row in zip(births, host_identity_rows)
             )
         )
+        if self._action_ball_banded_question_bank is not None:
+            # The precomputed solver bypasses the online proposal callback, so
+            # the pool is the task P/A authority.  Mirror only those aggregate
+            # counters after the pool transaction commits; broker/domain
+            # sampler state and the bank's bounded block state remain separate.
+            for action_slot in sorted({int(row[1]) for row in host_identity_rows}):
+                action_uid = int(self._action_ball_bindings[action_slot].action_uid)
+                pool_ledger = self._action_ball_pool.ledger(action_uid)
+                self._action_ball_live_ledger()[
+                    _ACTION_BALL_LEDGER_NAMES.index("P"), action_slot
+                ] = int(pool_ledger.proposed)
+                self._action_ball_live_ledger()[
+                    _ACTION_BALL_LEDGER_NAMES.index("A"), action_slot
+                ] = int(pool_ledger.admitted)
         if len(receipts) != n:
             raise RuntimeError("action-ball pool issued the wrong task batch size")
         for birth, receipt, row in zip(
@@ -10090,13 +11516,18 @@ class RacketTargetCommand(CommandTerm):
         """Install one deterministic RESET_WAIT without exposing its countdown.
 
         The immutable task is already installed, but both Motion clocks are
-        extended by exactly ``wait_ticks * policy_dt``.  Motion therefore keeps
-        the teacher at frame zero (and the physical ball parked) until the
-        reveal boundary.  Actor/critic/reward consumers see only
-        ``_action_ball_task_valid``; the wait countdown remains private.
+        extended by exactly ``wait_ticks * policy_dt``.  The public teacher
+        remains the frozen physical safe-ready reference (and the physical
+        ball remains parked) until the atomic frame-zero reveal.  Actor,
+        critic, and reward consumers see only ``_action_ball_task_valid``;
+        the wait countdown remains private.
         """
 
         schedule = self._action_ball_task_wait_schedule
+        motion = self._motion()
+        motion.bind_action_ball_public_task_valid(
+            self._action_ball_task_valid
+        )
         if schedule is None or not true_reset:
             self._action_ball_task_wait_total_ticks[ids] = 0
             self._action_ball_task_wait_elapsed_ticks[ids] = 0
@@ -10122,7 +11553,6 @@ class RacketTargetCommand(CommandTerm):
         ):
             raise RuntimeError("ActionBall task-wait assignment is malformed")
         wait_s = wait_ticks.to(dtype=torch.float64) * float(self._env.step_dt)
-        motion = self._motion()
         motion._action_ball_time_to_contact_s[ids] += wait_s
         motion._action_ball_pre_swing_wait_s[ids] += wait_s
         self.time_to_strike[ids] = (
@@ -10133,6 +11563,9 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_task_wait_total_ticks[ids] = wait_ticks
         self._action_ball_task_wait_elapsed_ticks[ids] = 0
         self._action_ball_task_valid[ids] = False
+        self._ensure_exact_behavior_decision_counters()[
+            _TASK_WAIT_STARTED_COUNTER
+        ].add_(len(ids))
 
     def _advance_action_ball_task_wait(self) -> None:
         """Reveal tasks exactly after their private integer wait expires."""
@@ -10160,10 +11593,67 @@ class RacketTargetCommand(CommandTerm):
             async_validate=bool(self._action_ball_diagnostic_unauthorized),
         )
         reveal = waiting & (elapsed == total)
+        # This counter is consumed transactionally by the once-per-PPO-update
+        # exact-behavior marker.  Count the false->true edge, never the number
+        # of task-valid samples: it is the honest survival denominator for
+        # reaching the public task reveal after RESET_WAIT.
+        self._ensure_exact_behavior_decision_counters()[
+            _TASK_REVEAL_REACHED_COUNTER
+        ].add_(reveal.sum(dtype=torch.long))
         self._action_ball_task_valid |= reveal
+        # Motion ran earlier in CommandManager order and cached the hidden
+        # safe-ready aligned body tuple.  Update newly revealed rows now so
+        # joint/body/paddle consumers all observe measured frame 0 this tick.
+        self._motion().refresh_action_ball_revealed_body_reference(reveal)
 
     def _action_ball_ledger_payload(self) -> dict:
-        values = self._action_ball_ledger.detach().cpu().tolist()
+        fixed_view = self._action_ball_fixed_view_enabled
+        values = self._action_ball_live_ledger().detach().cpu().tolist()
+        fixed_active_counts = None
+        if fixed_view:
+            fixed_solver_state = self._action_ball_pool_solver.state_dict()
+            if (
+                any(
+                    task is not None
+                    for task in self._action_ball_task_by_env
+                )
+                or any(
+                    ref is not None
+                    for ref in self._action_ball_task_ref_by_env
+                )
+                or any(self._action_ball_emitted_task_count_by_uid.values())
+                or any(
+                    any(int(count) != 0 for count in counts.values())
+                    for counts in self._action_ball_reject_counts.values()
+                )
+                or fixed_solver_state.get("highwaters") != []
+                or fixed_solver_state.get("assignments") != []
+                or fixed_solver_state.get("emitted_tasks") != []
+                or fixed_solver_state.get("physical_rng_draws") != 0
+                or fixed_solver_state.get("online_lm_calls") != 0
+            ):
+                raise RuntimeError(
+                    "immutable fixed-view report acquired task receipt or "
+                    "solver-rejection state"
+                )
+            active = self._action_ball_attempt_active
+            slots = self._action_ball_attempt_action
+            invalid_active = active & (
+                (slots < 0) | (slots >= len(self._action_ball_bindings))
+            )
+            if bool(invalid_active.any().item()):
+                raise RuntimeError(
+                    "immutable fixed-view report has an invalid active slot"
+                )
+            fixed_active_counts = (
+                torch.bincount(
+                    slots[active],
+                    minlength=len(self._action_ball_bindings),
+                )
+                .detach()
+                .cpu()
+                .tolist()
+            )
         payload = {
             action: {
                 name: int(values[row][slot])
@@ -10172,20 +11662,46 @@ class RacketTargetCommand(CommandTerm):
             for slot, action in enumerate(self._action_ball_manifest.action_order)
         }
         for slot, uid in enumerate(self._action_ball_bundle.action_uids):
-            ledger = self._action_ball_outcome_type(
-                **payload[self._action_ball_manifest.action_order[slot]]
-            )
-            pool = self._action_ball_pool.ledger(int(uid))
-            if (
-                ledger.P != pool.proposed
-                or ledger.A != pool.admitted
-                or ledger.I != pool.issued
-                or ledger.S != pool.issued
-            ):
+            values = payload[self._action_ball_manifest.action_order[slot]]
+            if values["H"] > values["C"]:
                 raise RuntimeError(
-                    "action-ball outcome ledger diverged from the solved-task pool: "
-                    f"action_uid={uid}, ledger={ledger.as_dict()}, pool={pool.to_dict()}"
+                    "action-ball selected-rubber hits exceed closed attempts"
                 )
+            ledger = self._action_ball_outcome_type(
+                **{
+                    name: values[name]
+                    for name in _ACTION_BALL_OUTCOME_LEDGER_NAMES
+                }
+            )
+            if fixed_view:
+                if not (
+                    ledger.P == ledger.A == ledger.I == ledger.S
+                    and ledger.S
+                    == ledger.C
+                    + ledger.X
+                    + int(fixed_active_counts[slot])
+                ):
+                    raise RuntimeError(
+                        "immutable fixed-view logical ledger does not "
+                        "conserve P=A=I=S=C+X+active: "
+                        f"action_uid={uid}, ledger={ledger.as_dict()}"
+                    )
+            else:
+                pool = self._action_ball_pool.ledger(int(uid))
+                if (
+                    ledger.P != pool.proposed
+                    or ledger.A != pool.admitted
+                    or ledger.I != pool.issued
+                    or ledger.S != pool.issued
+                ):
+                    raise RuntimeError(
+                        "action-ball outcome ledger diverged from the solved-task pool: "
+                        f"action_uid={uid}, ledger={ledger.as_dict()}, pool={pool.to_dict()}"
+                    )
+        if fixed_view and bool(self._action_ball_ledger.any().item()):
+            raise RuntimeError(
+                "immutable fixed-view evidence leaked into the legacy pool ledger"
+            )
         return payload
 
     def _action_ball_on_rollout_end(self, step: int) -> None:
@@ -10200,6 +11716,7 @@ class RacketTargetCommand(CommandTerm):
             raise RuntimeError(
                 "action-ball rollout callback must run exactly once in increasing step order"
             )
+        ledger_payload = self._action_ball_ledger_payload()
         receipt = {
             "event": "action_ball_training_ledger",
             "schema_version": 1,
@@ -10207,7 +11724,7 @@ class RacketTargetCommand(CommandTerm):
             "manifest_sha256": self._action_ball_loaded_manifest.file_sha256,
             "status": "report_only_requires_frozen_checkpoint_evidence",
             "action_order": list(self._action_ball_manifest.action_order),
-            "ledger": self._action_ball_ledger_payload(),
+            "ledger": ledger_payload,
             "solver_rejections": {
                 str(uid): {
                     name: int(count)
@@ -10217,13 +11734,30 @@ class RacketTargetCommand(CommandTerm):
                 }
                 for uid in self._action_ball_bundle.action_uids
             },
-            "pool": {
-                str(uid): {
-                    **self._action_ball_pool.ledger(int(uid)).to_dict(),
-                    "pending": self._action_ball_pool.pending_count(int(uid)),
+            "exact_question_answer_cache": (
+                None
+                if self._action_ball_exact_question_cache is None
+                else {
+                    "policy": (
+                        "reuse_exact_question_until_semantics_change"
+                    ),
+                    "consumer_hit_count": (
+                        self._action_ball_exact_question_cache.consumer_hit_count
+                    ),
+                    "novel_producer_count": (
+                        self._action_ball_exact_question_cache.novel_producer_count
+                    ),
+                    "row_count": (
+                        self._action_ball_exact_question_cache.row_count
+                    ),
+                    "active_birth_count": (
+                        self._action_ball_exact_question_cache.active_birth_count
+                    ),
+                    "capacity_policy": (
+                        "active_birth_rows_plus_one_hot_row_per_action"
+                    ),
                 }
-                for uid in self._action_ball_bundle.action_uids
-            },
+            ),
             "curriculum": {
                 str(key.action_uid): {
                     "phase": self._action_ball_curriculum.phase(key),
@@ -10243,6 +11777,26 @@ class RacketTargetCommand(CommandTerm):
                 for key in self._action_ball_profile_keys
             },
         }
+        if self._action_ball_fixed_view_enabled:
+            receipt["fixed_view"] = {
+                "identity_sha256": (
+                    self._action_ball_fixed_view_identity_sha256
+                ),
+                "reset_operation": (
+                    "FixedQuestionTapeSolver.reset_batch_view"
+                ),
+                "task_pool_bypassed": True,
+                "task_receipts_created": 0,
+                "logical_ledger": ledger_payload,
+            }
+        else:
+            receipt["pool"] = {
+                str(uid): {
+                    **self._action_ball_pool.ledger(int(uid)).to_dict(),
+                    "pending": self._action_ball_pool.pending_count(int(uid)),
+                }
+                for uid in self._action_ball_bundle.action_uids
+            }
         if self._action_ball_diagnostic_unauthorized:
             # Brand every receipt this run emits; default-off runs stay
             # byte-identical.
@@ -10309,7 +11863,7 @@ class RacketTargetCommand(CommandTerm):
                 slots[active],
                 minlength=len(self._action_ball_bindings),
             )
-            self._action_ball_ledger[
+            self._action_ball_live_ledger()[
                 _ACTION_BALL_LEDGER_NAMES.index("X")
             ].add_(additions)
         for env_id in range(self.num_envs):
@@ -10319,6 +11873,7 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_attempt_active.zero_()
         self._action_ball_attempt_action.fill_(-1)
         self._action_ball_attempt_legal.zero_()
+        self._action_ball_attempt_hit.zero_()
         self._counter_rally_reward_terms.zero_()
         self._counter_rally_accepted.zero_()
         self._counter_rally_legal_first_landing.zero_()
@@ -10373,17 +11928,30 @@ class RacketTargetCommand(CommandTerm):
             raise RuntimeError(
                 "action-ball drain snapshot is not exact N-of-N"
             )
-        broker_state = self._action_ball_broker.state_dict()
-        pool_state = self._action_ball_pool.state_dict()
+        fixed_view = self._action_ball_fixed_view_enabled
+        broker_state = (
+            self._action_ball_fixed_view_broker_state_dict()
+            if fixed_view
+            else self._action_ball_broker.state_dict()
+        )
+        pool_state = (
+            self._action_ball_fixed_view_pool_state_dict()
+            if fixed_view
+            else self._action_ball_pool.state_dict()
+        )
         active_attempts = int(
             self._action_ball_attempt_active.sum().item()
         )
         active_births = sum(
             birth is not None for birth in self._action_ball_birth_by_env
         )
-        pending_tasks = sum(
-            self._action_ball_pool.pending_count(int(uid))
-            for uid in self._action_ball_bundle.action_uids
+        pending_tasks = (
+            0
+            if fixed_view
+            else sum(
+                self._action_ball_pool.pending_count(int(uid))
+                for uid in self._action_ball_bundle.action_uids
+            )
         )
         env_state = {
             "action_uid": [
@@ -10875,6 +12443,17 @@ class RacketTargetCommand(CommandTerm):
                 "requires_runner_binding": False,
             }
         if phase == "commit_global_reset":
+            # A band-backed curriculum release is usable only if the exact next
+            # domain block already exists.  Validate that while the old domain
+            # and every live attempt are still untouched: draining first would
+            # irreversibly burn rollout work even though commit must then fail.
+            pending_releases = tuple(
+                self._action_ball_curriculum.pending_domain_release(key)
+                for key in self._action_ball_profile_keys
+            )
+            bank = self._action_ball_banded_question_bank
+            if bank is not None:
+                bank.preflight_pending_releases(pending_releases)
             self._action_ball_force_drain_for_release()
             receipt = (
                 self._action_ball_curriculum.issue_global_pre_reset_barrier()
@@ -11915,6 +13494,7 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_attempt_action[env_ids] = slots
         self._action_ball_attempt_active[env_ids] = True
         self._action_ball_attempt_legal[env_ids] = False
+        self._action_ball_attempt_hit[env_ids] = False
         for index, env_id in enumerate(
             env_ids.detach().cpu().tolist()
         ):
@@ -12329,6 +13909,9 @@ class RacketTargetCommand(CommandTerm):
                         self._action_ball_ready_yaw[action_slot]
                     ),
                     policy_dt_s=policy_dt_s,
+                    initial_center_single_question=(
+                        self.cfg.action_ball_initial_center_single_question
+                    ),
                 )
                 issued_content = {
                     "request_content_sha256": request_content_sha256,
@@ -12923,38 +14506,340 @@ class RacketTargetCommand(CommandTerm):
         self._exact_vel_err_sum = staged["velocity_error_sum"]
         self._exact_nrm_err_sum = staged["normal_error_sum_rad"]
 
+    def _action_ball_fixed_view_pool_is_pristine(
+        self, pool_state: object
+    ) -> bool:
+        """Whether the legacy receipt pool has remained completely unused."""
+
+        if not isinstance(pool_state, dict):
+            return False
+        solver_state = pool_state.get("solver_state")
+        if (
+            not isinstance(solver_state, dict)
+            or solver_state.get("highwaters") != []
+            or solver_state.get("assignments") != []
+            or solver_state.get("emitted_tasks") != []
+            or solver_state.get("physical_rng_draws") != 0
+            or solver_state.get("online_lm_calls") != 0
+            or pool_state.get("retired_generations") != []
+        ):
+            return False
+        actions = pool_state.get("actions")
+        if not isinstance(actions, list) or len(actions) != len(
+            self._action_ball_bindings
+        ):
+            return False
+        zero_ledger = {
+            "requests": 0,
+            "refill_calls": 0,
+            "proposed": 0,
+            "admitted": 0,
+            "issued": 0,
+            "discarded": 0,
+        }
+        for action in actions:
+            if (
+                not isinstance(action, dict)
+                or action.get("ledger") != zero_ledger
+                or action.get("last_sample_index") is not None
+                or action.get("last_sample_draw_end") is not None
+                or action.get("lifecycle_sample_count") != 0
+                or action.get("births") != []
+                or action.get("retired_births") != []
+            ):
+                return False
+        return True
+
+    def _action_ball_task_wait_exact_state_dict(self) -> dict:
+        """Serialize the hidden WAIT/reveal clock for every ActionBall source.
+
+        This used to live only inside the deprecated immutable-tape fixture.  A211 cached-target
+        and C211 direct-ball both use the same hidden WAIT ABI, so omitting it made a checkpoint
+        silently reveal a different task cohort after cold load.
+        """
+
+        return {
+            "schema_version": 1,
+            "schedule_enabled": self._action_ball_task_wait_schedule is not None,
+            "highwater": (
+                None
+                if self._action_ball_task_wait_highwater is None
+                else self._action_ball_task_wait_highwater.state_dict()
+            ),
+            "task_valid": [
+                bool(value)
+                for value in self._action_ball_task_valid.detach().cpu().tolist()
+            ],
+            "total_ticks": [
+                int(value)
+                for value in (
+                    self._action_ball_task_wait_total_ticks.detach().cpu().tolist()
+                )
+            ],
+            "elapsed_ticks": [
+                int(value)
+                for value in (
+                    self._action_ball_task_wait_elapsed_ticks.detach().cpu().tolist()
+                )
+            ],
+            "last_advance_step": int(
+                self._action_ball_task_wait_last_advance_step
+            ),
+        }
+
+    def _action_ball_stage_task_wait_exact_state(
+        self, state: object
+    ) -> dict:
+        """Read-only validation of hidden WAIT state."""
+
+        expected = {
+            "schema_version",
+            "schedule_enabled",
+            "highwater",
+            "task_valid",
+            "total_ticks",
+            "elapsed_ticks",
+            "last_advance_step",
+        }
+        if (
+            not isinstance(state, dict)
+            or set(state) != expected
+            or state.get("schema_version") != 1
+            or type(state.get("schedule_enabled")) is not bool
+            or state["schedule_enabled"]
+            != (self._action_ball_task_wait_schedule is not None)
+        ):
+            raise ValueError("ActionBall task-wait exact-resume schema/identity mismatch")
+        vectors = (
+            state["task_valid"],
+            state["total_ticks"],
+            state["elapsed_ticks"],
+        )
+        if any(
+            not isinstance(vector, list) or len(vector) != self.num_envs
+            for vector in vectors
+        ):
+            raise ValueError("ActionBall task-wait vectors must match num_envs")
+        if any(type(value) is not bool for value in vectors[0]) or any(
+            type(value) is not int or value < 0
+            for vector in vectors[1:]
+            for value in vector
+        ):
+            raise ValueError("ActionBall task-wait vector values are invalid")
+        if any(
+            elapsed > total
+            for total, elapsed in zip(vectors[1], vectors[2])
+        ):
+            raise ValueError("ActionBall task-wait elapsed ticks exceed total ticks")
+        last_step = state["last_advance_step"]
+        if type(last_step) is not int or last_step < -1:
+            raise ValueError("ActionBall task-wait last advance step is invalid")
+        if self._action_ball_task_wait_schedule is None:
+            if (
+                state["highwater"] is not None
+                or not all(vectors[0])
+                or any(vectors[1])
+                or any(vectors[2])
+                or last_step != -1
+            ):
+                raise ValueError("disabled ActionBall task wait has non-empty state")
+            highwater = None
+        else:
+            from whole_body_tracking.tasks.tracking.action_ball_task_wait import (
+                ActionBallTaskWaitHighwater,
+            )
+
+            highwater = ActionBallTaskWaitHighwater.from_state_dict(
+                self._action_ball_task_wait_schedule,
+                state["highwater"],
+            )
+        return {
+            "task_valid": list(vectors[0]),
+            "total_ticks": list(vectors[1]),
+            "elapsed_ticks": list(vectors[2]),
+            "last_advance_step": last_step,
+            "highwater": highwater,
+        }
+
+    @staticmethod
+    def _action_ball_runtime_latch_field_names() -> tuple[str, ...]:
+        """Observation/reward/event tensors that survive between command ticks."""
+
+        return (
+            "_prev_motion_steps",
+            "racket_target_pos_w",
+            "racket_target_vel_w",
+            "racket_target_normal_w",
+            "target_normal_cmd",
+            "base_target_pos_w",
+            "swing_sign",
+            "time_to_strike",
+            "pre_strike",
+            "strike_window",
+            "strike_window_pos",
+            "strike_window_wide",
+            "_post_strike_elapsed_s",
+            "_post_strike_elapsed_valid",
+            "_exact_fired",
+            "_action_ball_ball_contact_target_w",
+            "_action_ball_face_center_velocity_target_w",
+            "_action_ball_racket_command_quat_w",
+            "_action_ball_prev_racket_site_w",
+            "_action_ball_prev_racket_quat_w",
+            "_action_ball_prev_racket_site_velocity_w",
+            "_action_ball_prev_racket_angular_velocity_w",
+            "_action_ball_prev_attempt_action",
+            "_action_ball_prev_reset_generation",
+            "_action_ball_prev_swing_generation",
+            "_action_ball_prev_contact_valid",
+            "vb_vel_in_w",
+            "vb_spin_in_w",
+            "vb_fired",
+            "vb_landing_xy",
+            "vb_landing_valid",
+            "vb_on_opponent",
+            "vb_depth_ok",
+            "vb_net_z",
+            "vb_net_clear",
+            "vb_net_crossed",
+            "vb_topspin",
+            "vb_spin_out_norm",
+            "_vb_target_xy_per_env",
+            "_counter_rally_return_direction_env_xy",
+            "_counter_rally_target_baseline_speed_mps",
+            "_counter_rally_reward_terms",
+            "_counter_rally_accepted",
+            "_counter_rally_legal_first_landing",
+            "_counter_rally_primary_reason_code",
+        )
+
+    def _action_ball_runtime_latches_exact_state_dict(self) -> dict:
+        if bool(self._strike_timing_metrics_handoff_pending) or (
+            self._strike_timing_metrics_step_token is not None
+        ):
+            raise RuntimeError(
+                "ActionBall checkpoint captured an in-flight metrics/update timing handoff"
+            )
+        tensors = {}
+        for name in self._action_ball_runtime_latch_field_names():
+            value = getattr(self, name, None)
+            if not torch.is_tensor(value):
+                raise RuntimeError(
+                    f"ActionBall exact-resume runtime latch {name} is unavailable"
+                )
+            if torch.is_floating_point(value) and not bool(
+                torch.isfinite(value).all()
+            ):
+                raise RuntimeError(
+                    f"ActionBall exact-resume runtime latch {name} is non-finite"
+                )
+            tensors[name] = value.detach().cpu().tolist()
+        return {
+            "schema_version": 1,
+            "tensors": tensors,
+            "post_strike_elapsed_last_step": int(
+                self._post_strike_elapsed_last_step
+            ),
+            "metrics_update_handoff_clear": True,
+        }
+
+    def _action_ball_stage_runtime_latches_exact_state(
+        self, state: object
+    ) -> dict[str, torch.Tensor | int]:
+        expected = {
+            "schema_version",
+            "tensors",
+            "post_strike_elapsed_last_step",
+            "metrics_update_handoff_clear",
+        }
+        names = self._action_ball_runtime_latch_field_names()
+        if (
+            not isinstance(state, dict)
+            or set(state) != expected
+            or state.get("schema_version") != 1
+            or state.get("metrics_update_handoff_clear") is not True
+            or not isinstance(state.get("tensors"), dict)
+            or tuple(state["tensors"]) != names
+        ):
+            raise ValueError(
+                "ActionBall runtime-latch exact-resume schema/order mismatch"
+            )
+        last_step = state["post_strike_elapsed_last_step"]
+        if type(last_step) is not int or last_step < -1:
+            raise ValueError(
+                "ActionBall post-strike elapsed last step is invalid"
+            )
+        staged: dict[str, torch.Tensor | int] = {
+            "post_strike_elapsed_last_step": last_step
+        }
+
+        def _raw_leaves(value):
+            if isinstance(value, list):
+                for item in value:
+                    yield from _raw_leaves(item)
+                return
+            yield value
+
+        for name in names:
+            live = getattr(self, name, None)
+            if not torch.is_tensor(live):
+                raise ValueError(
+                    f"ActionBall runtime latch {name} is absent from the live command"
+                )
+            raw = state["tensors"][name]
+            leaves = tuple(_raw_leaves(raw))
+            if live.dtype == torch.bool:
+                scalar_types_valid = all(type(value) is bool for value in leaves)
+            elif torch.is_floating_point(live):
+                scalar_types_valid = all(
+                    type(value) in (int, float) for value in leaves
+                )
+            else:
+                scalar_types_valid = all(type(value) is int for value in leaves)
+            if not scalar_types_valid:
+                raise ValueError(
+                    f"ActionBall runtime latch {name} has invalid scalar types"
+                )
+            try:
+                value = torch.as_tensor(
+                    raw, dtype=live.dtype, device="cpu"
+                )
+            except (TypeError, ValueError, RuntimeError) as exc:
+                raise ValueError(
+                    f"ActionBall runtime latch {name} cannot be decoded"
+                ) from exc
+            if tuple(value.shape) != tuple(live.shape):
+                raise ValueError(
+                    f"ActionBall runtime latch {name} shape changed: "
+                    f"checkpoint={tuple(value.shape)} runtime={tuple(live.shape)}"
+                )
+            if torch.is_floating_point(value) and not bool(
+                torch.isfinite(value).all()
+            ):
+                raise ValueError(
+                    f"ActionBall runtime latch {name} contains NaN or Inf"
+                )
+            staged[name] = value.clone()
+
+        if bool(
+            (
+                staged["_counter_rally_accepted"]
+                & ~staged["_counter_rally_legal_first_landing"]
+            ).any()
+        ):
+            raise ValueError(
+                "ActionBall counter-rally acceptance lacks a legal first landing"
+            )
+        return staged
+
     def _action_ball_exact_resume_state_dict(self) -> dict:
         """Serialize every random tape, receipt queue, generation and attribution latch."""
 
-        if self._action_ball_diagnostic_unauthorized:
-            payload = {
-                "schema_version": 1,
-                "kind": (
-                    "whole_body_tracking.RacketTargetCommand."
-                    "action_ball_diagnostic_checkpoint"
-                ),
-                "diagnostic_unauthorized": True,
-                "exact_resume_supported": False,
-                "manifest_sha256": (
-                    self._action_ball_loaded_manifest.file_sha256
-                ),
-                "action_order": list(
-                    self._action_ball_manifest.action_order
-                ),
-                "effective_pool_refill_rows": (
-                    self._action_ball_effective_pool_refill_rows
-                ),
-                "effective_cq_overdraw": (
-                    self._action_ball_effective_cq_overdraw
-                ),
-                "effective_cq_max_redraw_rounds": (
-                    self._action_ball_effective_cq_max_redraw_rounds
-                ),
-            }
-            payload["integrity_sha256"] = (
-                _action_ball_canonical_sha256(payload)
-            )
-            return payload
+        fixed_view = self._action_ball_fixed_view_enabled
+        # ``diagnostic_unauthorized`` removes evaluator/promotion authority; it does not make the
+        # sampler, curriculum, exact-question cache, WAIT clock or outcome latches disappear.
+        # A211/C211 therefore use the same complete data-continuation envelope as formal runs while
+        # retaining their diagnostic brand in ``hard_contract`` and frozen-evaluation state.
         hard_contract = self.action_ball_hard_contract()
         if hard_contract is None:
             raise RuntimeError("action-ball exact state requested before runtime admission")
@@ -12967,15 +14852,39 @@ class RacketTargetCommand(CommandTerm):
             for name in _ACTION_BALL_LEDGER_NAMES
         }
         mutable_state = self._action_ball_solver_mutable_state_dict()
-        broker_state = self._action_ball_broker.state_dict()
+        broker_state = (
+            self._action_ball_fixed_view_broker_state_dict()
+            if fixed_view
+            else self._action_ball_broker.state_dict()
+        )
         pool_state = self._action_ball_pool.state_dict()
+        banded_question_bank = self._action_ball_banded_question_bank
         if (
             broker_state["provider_state"] != mutable_state
             or broker_state["domain_authority_state"] != mutable_state
-            or pool_state["solver_state"] != mutable_state
+            or (
+                not fixed_view
+                and
+                banded_question_bank is None
+                and pool_state["solver_state"] != mutable_state
+            )
         ):
             raise RuntimeError(
                 "action-ball shared mutable state views diverged at checkpoint"
+            )
+        if (
+            (fixed_view or banded_question_bank is not None)
+            and pool_state["solver_state"]
+            != self._action_ball_pool_solver.state_dict()
+        ):
+            raise RuntimeError(
+                "action-ball precomputed solver state diverged from the pool"
+            )
+        if fixed_view and not self._action_ball_fixed_view_pool_is_pristine(
+            pool_state
+        ):
+            raise RuntimeError(
+                "immutable fixed-view exact state found legacy pool activity"
             )
         env_state = {
             "births": [
@@ -12985,6 +14894,22 @@ class RacketTargetCommand(CommandTerm):
             "tasks": [
                 None if task is None else task.to_dict()
                 for task in self._action_ball_task_by_env
+            ],
+            "task_refs": [
+                (
+                    None
+                    if task is None
+                    else (
+                        self._action_ball_task_ref_by_env[env_id]
+                        if self._action_ball_diagnostic_unauthorized
+                        else task.task_ref()
+                    ).to_dict()
+                )
+                for env_id, task in enumerate(self._action_ball_task_by_env)
+            ],
+            "counter_rally_tasks": [
+                None if task is None else task.to_dict()
+                for task in self._counter_rally_task_identity_by_env
             ],
             "action_uid": [
                 int(value)
@@ -13014,6 +14939,10 @@ class RacketTargetCommand(CommandTerm):
                 bool(value)
                 for value in self._action_ball_attempt_legal.detach().cpu().tolist()
             ],
+            "attempt_hit": [
+                bool(value)
+                for value in self._action_ball_attempt_hit.detach().cpu().tolist()
+            ],
             "reference_term_center_latch": [
                 bool(value)
                 for value in (
@@ -13026,6 +14955,91 @@ class RacketTargetCommand(CommandTerm):
                 self._strike_window_entry_distance_probe_exact_state()
             ),
         }
+        task_wait_state = self._action_ball_task_wait_exact_state_dict()
+        runtime_latches_state = (
+            self._action_ball_runtime_latches_exact_state_dict()
+        )
+        fixed_view_state = None
+        if fixed_view:
+            if any(task is not None for task in self._action_ball_task_by_env) or any(
+                ref is not None for ref in self._action_ball_task_ref_by_env
+            ):
+                raise RuntimeError(
+                    "immutable fixed-view exact state acquired a task receipt/ref"
+                )
+            # The simulator is intentionally not checkpointed.  Canonicalize
+            # each in-flight installed attempt into exactly one X now, inside
+            # the serialized continuation, so cold load and a no-step re-save
+            # are byte-stable and the deferred first reset cannot grade stale
+            # physics as L/F evidence.
+            for env_id, active in enumerate(env_state["attempt_active"]):
+                if not active:
+                    continue
+                slot = env_state["attempt_action_slot"][env_id]
+                if type(slot) is not int or not 0 <= slot < len(
+                    self._action_ball_bindings
+                ):
+                    raise RuntimeError(
+                        "immutable fixed-view active attempt has an invalid slot"
+                    )
+                ledger_rows["X"][slot] += 1
+                env_state["attempt_active"][env_id] = False
+                env_state["attempt_action_slot"][env_id] = -1
+                env_state["attempt_legal"][env_id] = False
+                env_state["attempt_hit"][env_id] = False
+                env_state["counter_rally_tasks"][env_id] = None
+                # Match the data-only reset disposition above.  These are
+                # command-side event/reward memories, not simulator bytes;
+                # leaving them armed after the serialized attempt became X
+                # would make the strict loader correctly reject its own
+                # fixed-view snapshot as an outcome latch without an active
+                # attempt.
+                runtime_latches_state["tensors"][
+                    "_action_ball_prev_contact_valid"
+                ][env_id] = False
+                runtime_latches_state["tensors"]["vb_fired"][env_id] = False
+                runtime_latches_state["tensors"][
+                    "_post_strike_elapsed_valid"
+                ][env_id] = False
+                runtime_latches_state["tensors"]["_exact_fired"][env_id] = False
+                reward_row = runtime_latches_state["tensors"][
+                    "_counter_rally_reward_terms"
+                ][env_id]
+                runtime_latches_state["tensors"][
+                    "_counter_rally_reward_terms"
+                ][env_id] = [0.0 for _ in reward_row]
+                runtime_latches_state["tensors"][
+                    "_counter_rally_accepted"
+                ][env_id] = False
+                runtime_latches_state["tensors"][
+                    "_counter_rally_legal_first_landing"
+                ][env_id] = False
+                runtime_latches_state["tensors"][
+                    "_counter_rally_primary_reason_code"
+                ][env_id] = -1
+            fixed_view_state = {
+                "schema_version": 1,
+                "kind": (
+                    "whole_body_tracking.RacketTargetCommand."
+                    "immutable_n1_fixed_view_exact_resume"
+                ),
+                "diagnostic_unauthorized": True,
+                "exact_resume_supported": True,
+                "identity_sha256": (
+                    self._action_ball_fixed_view_identity_sha256
+                ),
+                "task_receipts_created": 0,
+                "legacy_pool_pristine": True,
+                "task_wait_highwater": (
+                    task_wait_state["highwater"]
+                ),
+                "task_valid": task_wait_state["task_valid"],
+                "task_wait_total_ticks": task_wait_state["total_ticks"],
+                "task_wait_elapsed_ticks": task_wait_state["elapsed_ticks"],
+                "task_wait_last_advance_step": int(
+                    task_wait_state["last_advance_step"]
+                ),
+            }
         payload = {
             "schema_version": _ACTION_BALL_STATE_SCHEMA_VERSION,
             "kind": _ACTION_BALL_STATE_KIND,
@@ -13045,8 +15059,12 @@ class RacketTargetCommand(CommandTerm):
             "pool": pool_state,
             "ledger": ledger_rows,
             "env_state": env_state,
+            "task_wait": task_wait_state,
+            "runtime_latches": runtime_latches_state,
             "last_rollout_step": self._action_ball_last_rollout_step,
         }
+        if fixed_view_state is not None:
+            payload["fixed_view"] = fixed_view_state
         if self._action_ball_adaptive_sigma_active():
             payload["adaptive_sigma"] = (
                 self._action_ball_adaptive_sigma_state_dict()
@@ -13266,19 +15284,27 @@ class RacketTargetCommand(CommandTerm):
             "recovered_request": recovered_request,
         }
 
+    def _action_ball_validate_exact_resume_state_dict(
+        self, state: dict, *, strict: bool = True
+    ) -> None:
+        """Validate the full ActionBall graph without changing live command state."""
+
+        self._action_ball_load_exact_resume_state_dict(
+            state, strict=strict, _validate_only=True
+        )
+
     def _action_ball_load_exact_resume_state_dict(
-        self, state: dict, strict: bool = True
+        self,
+        state: dict,
+        strict: bool = True,
+        *,
+        _validate_only: bool = False,
     ) -> None:
         """Strictly validate into temporary components, then commit without sampling or sim I/O."""
 
         if strict is not True:
             raise ValueError("action-ball exact resume only supports strict=True")
-        if self._action_ball_diagnostic_unauthorized:
-            raise ValueError(
-                "diagnostic_unauthorized fast checkpoints contain policy/"
-                "optimizer weights but no exact ActionBall command resume "
-                "state"
-            )
+        fixed_view = self._action_ball_fixed_view_enabled
         expected = {
             "schema_version",
             "kind",
@@ -13296,12 +15322,16 @@ class RacketTargetCommand(CommandTerm):
             "pool",
             "ledger",
             "env_state",
+            "task_wait",
+            "runtime_latches",
             "last_rollout_step",
             "integrity_sha256",
         }
         adaptive_sigma_active = self._action_ball_adaptive_sigma_active()
         if adaptive_sigma_active:
             expected.add("adaptive_sigma")
+        if fixed_view:
+            expected.add("fixed_view")
         if not isinstance(state, dict) or set(state) != expected:
             raise ValueError(
                 f"action-ball exact-resume keys must be exactly {sorted(expected)}"
@@ -13333,6 +15363,137 @@ class RacketTargetCommand(CommandTerm):
             or state["physics"] != self._action_ball_physics_contract
         ):
             raise ValueError("action-ball exact-resume immutable identity mismatch")
+        staged_task_wait_state = (
+            self._action_ball_stage_task_wait_exact_state(
+                state["task_wait"]
+            )
+        )
+        staged_runtime_latches = (
+            self._action_ball_stage_runtime_latches_exact_state(
+                state["runtime_latches"]
+            )
+        )
+        staged_fixed_view_state = None
+        if fixed_view:
+            fixed = state["fixed_view"]
+            fixed_keys = {
+                "schema_version",
+                "kind",
+                "diagnostic_unauthorized",
+                "exact_resume_supported",
+                "identity_sha256",
+                "task_receipts_created",
+                "legacy_pool_pristine",
+                "task_wait_highwater",
+                "task_valid",
+                "task_wait_total_ticks",
+                "task_wait_elapsed_ticks",
+                "task_wait_last_advance_step",
+            }
+            if (
+                not isinstance(fixed, dict)
+                or set(fixed) != fixed_keys
+                or fixed["schema_version"] != 1
+                or fixed["kind"]
+                != (
+                    "whole_body_tracking.RacketTargetCommand."
+                    "immutable_n1_fixed_view_exact_resume"
+                )
+                or fixed["diagnostic_unauthorized"] is not True
+                or fixed["exact_resume_supported"] is not True
+                or fixed["identity_sha256"]
+                != self._action_ball_fixed_view_identity_sha256
+                or fixed["task_receipts_created"] != 0
+                or fixed["legacy_pool_pristine"] is not True
+            ):
+                raise ValueError(
+                    "immutable fixed-view exact-resume identity/schema mismatch"
+                )
+            task_vectors = (
+                fixed["task_valid"],
+                fixed["task_wait_total_ticks"],
+                fixed["task_wait_elapsed_ticks"],
+            )
+            if any(
+                not isinstance(vector, list)
+                or len(vector) != self.num_envs
+                for vector in task_vectors
+            ):
+                raise ValueError(
+                    "immutable fixed-view task-wait vectors must match num_envs"
+                )
+            if any(type(value) is not bool for value in task_vectors[0]) or any(
+                type(value) is not int or value < 0
+                for vector in task_vectors[1:]
+                for value in vector
+            ):
+                raise ValueError(
+                    "immutable fixed-view task-wait vector values are invalid"
+                )
+            last_wait_step = fixed["task_wait_last_advance_step"]
+            if type(last_wait_step) is not int or last_wait_step < -1:
+                raise ValueError(
+                    "immutable fixed-view task-wait step is invalid"
+                )
+            if self._action_ball_task_wait_schedule is None:
+                if (
+                    fixed["task_wait_highwater"] is not None
+                    or any(task_vectors[1])
+                    or any(task_vectors[2])
+                    or not all(task_vectors[0])
+                ):
+                    raise ValueError(
+                        "disabled fixed-view task wait has non-empty state"
+                    )
+                staged_wait_highwater = None
+            else:
+                from whole_body_tracking.tasks.tracking.action_ball_task_wait import (
+                    ActionBallTaskWaitHighwater,
+                )
+
+                staged_wait_highwater = (
+                    ActionBallTaskWaitHighwater.from_state_dict(
+                        self._action_ball_task_wait_schedule,
+                        fixed["task_wait_highwater"],
+                    )
+                )
+            staged_fixed_view_state = {
+                "task_valid": list(task_vectors[0]),
+                "total_ticks": list(task_vectors[1]),
+                "elapsed_ticks": list(task_vectors[2]),
+                "last_advance_step": last_wait_step,
+                "highwater": staged_wait_highwater,
+            }
+            fixed_wait_comparable = {
+                "task_valid": staged_fixed_view_state["task_valid"],
+                "total_ticks": staged_fixed_view_state["total_ticks"],
+                "elapsed_ticks": staged_fixed_view_state["elapsed_ticks"],
+                "last_advance_step": staged_fixed_view_state[
+                    "last_advance_step"
+                ],
+                "highwater": (
+                    None
+                    if staged_fixed_view_state["highwater"] is None
+                    else staged_fixed_view_state["highwater"].state_dict()
+                ),
+            }
+            shared_wait_comparable = {
+                "task_valid": staged_task_wait_state["task_valid"],
+                "total_ticks": staged_task_wait_state["total_ticks"],
+                "elapsed_ticks": staged_task_wait_state["elapsed_ticks"],
+                "last_advance_step": staged_task_wait_state[
+                    "last_advance_step"
+                ],
+                "highwater": (
+                    None
+                    if staged_task_wait_state["highwater"] is None
+                    else staged_task_wait_state["highwater"].state_dict()
+                ),
+            }
+            if fixed_wait_comparable != shared_wait_comparable:
+                raise ValueError(
+                    "immutable fixed-view and shared task-wait states differ"
+                )
         last_step = state["last_rollout_step"]
         if last_step is not None and (type(last_step) is not int or last_step < 0):
             raise ValueError(
@@ -13350,6 +15511,8 @@ class RacketTargetCommand(CommandTerm):
             ActionBallTaskReceipt,
             ActionBirthBroker,
             ActionBirthReceipt,
+            ActionTaskReceiptRef,
+            CounterRallyTaskIdentity,
             LazyActionTaskPool,
         )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
@@ -13414,6 +15577,7 @@ class RacketTargetCommand(CommandTerm):
         curriculum_state_sha = state["curriculum"].get("state_sha256")
         (
             _sampler_state,
+            staged_question_cache,
             provider_births,
             provider_history,
             task_transcripts,
@@ -13426,15 +15590,44 @@ class RacketTargetCommand(CommandTerm):
             curriculum=staged_curriculum,
             expected_curriculum_state_sha256=curriculum_state_sha,
         )
+        if self._action_ball_target_source == "direct_ball" and (
+            staged_question_cache is not None
+            or state["mutable_state"].get("exact_question_cache") is not None
+        ):
+            raise ValueError(
+                "C211 direct_ball exact resume must remain solver/cache free"
+            )
+        if self._action_ball_reuse_exact_question and (
+            staged_question_cache is None
+        ):
+            raise ValueError(
+                "A211 exact-question reuse lost its checkpoint cache"
+            )
         mutable_state = state["mutable_state"]
+        banded_question_bank = self._action_ball_banded_question_bank
         if (
             state["broker"].get("provider_state") != mutable_state
             or state["broker"].get("domain_authority_state")
             != mutable_state
-            or state["pool"].get("solver_state") != mutable_state
+            or (
+                not fixed_view
+                and
+                banded_question_bank is None
+                and state["pool"].get("solver_state") != mutable_state
+            )
         ):
             raise ValueError(
                 "action-ball shared mutable state copies differ in exact checkpoint"
+            )
+        if fixed_view and (
+            state["pool"].get("solver_state")
+            != self._action_ball_pool_solver.state_dict()
+            or not self._action_ball_fixed_view_pool_is_pristine(
+                state["pool"]
+            )
+        ):
+            raise ValueError(
+                "immutable fixed-view exact checkpoint has non-pristine pool state"
             )
 
         def _json_clone(value):
@@ -13453,12 +15646,22 @@ class RacketTargetCommand(CommandTerm):
             seed=int(self.cfg.action_ball_seed),
             sampling_mixture=SamplingMixture(),
             contact_time_step_s=float(self._env.step_dt),
+            initial_center_single_question=(
+                self.cfg.action_ball_initial_center_single_question
+            ),
+            diagnostic_unauthorized=(
+                self._action_ball_diagnostic_unauthorized
+            ),
         )
         staged_sampler.load_state_dict(_sampler_state)
+        self._action_ball_restore_fixed_sampler_highwaters(
+            staged_sampler
+        )
         staged_shared = {
             "state": _json_clone(mutable_state),
             "decoded": (
                 _sampler_state,
+                staged_question_cache,
                 provider_births,
                 provider_history,
                 task_transcripts,
@@ -13487,8 +15690,17 @@ class RacketTargetCommand(CommandTerm):
                 seed=int(self.cfg.action_ball_seed),
                 sampling_mixture=SamplingMixture(),
                 contact_time_step_s=float(self._env.step_dt),
+                initial_center_single_question=(
+                    self.cfg.action_ball_initial_center_single_question
+                ),
+                diagnostic_unauthorized=(
+                    self._action_ball_diagnostic_unauthorized
+                ),
             )
             replacement_sampler.load_state_dict(decoded[0])
+            self._action_ball_restore_fixed_sampler_highwaters(
+                replacement_sampler
+            )
             staged_shared["state"] = detached
             staged_shared["decoded"] = decoded
             staged_shared["sampler"] = replacement_sampler
@@ -13503,10 +15715,10 @@ class RacketTargetCommand(CommandTerm):
                 receipt.sampler_identity_receipt()
             )
             staged_shared["sampler"].assert_issued_birth(sampler_birth)
-            provider = staged_shared["decoded"][1].get(
+            provider = staged_shared["decoded"][2].get(
                 receipt.canonical_sha256
             )
-            historical_receipt = staged_shared["decoded"][2].get(
+            historical_receipt = staged_shared["decoded"][3].get(
                 receipt.canonical_sha256
             )
             if historical_receipt != receipt:
@@ -13522,7 +15734,7 @@ class RacketTargetCommand(CommandTerm):
                 )
 
         def _staged_assert_sample(receipt):
-            provider = staged_shared["decoded"][1].get(
+            provider = staged_shared["decoded"][2].get(
                 receipt.birth_sha256
             )
             if (
@@ -13543,14 +15755,15 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_replay_emitted_tasks(
                 tuple(receipts),
                 sampler=staged_shared["sampler"],
-                provider_history=staged_shared["decoded"][2],
+                provider_history=staged_shared["decoded"][3],
+                question_cache=staged_shared["decoded"][1],
             )
 
         def _staged_assert_proposal_assignments(assignments):
             self._action_ball_assert_proposal_assignments_against(
                 tuple(assignments),
                 sampler=staged_shared["sampler"],
-                provider_history=staged_shared["decoded"][2],
+                provider_history=staged_shared["decoded"][3],
             )
 
         staged_domain = _ActionBallDomainAuthorityAdapter(
@@ -13561,7 +15774,7 @@ class RacketTargetCommand(CommandTerm):
             claim=_staged_forbidden,
             claim_many=None,
             domain_cursor_for=lambda uid: int(
-                staged_shared["decoded"][5][int(uid)]
+                staged_shared["decoded"][6][int(uid)]
             ),
             state_getter=_staged_state,
             state_loader=_staged_load,
@@ -13596,28 +15809,50 @@ class RacketTargetCommand(CommandTerm):
                 "action-ball exact checkpoint captured an in-flight birth transaction"
             )
 
-        staged_solver = _ActionBallPoolSolverAdapter(
-            solver_contract_sha256=self._action_ball_solver_contract["sha256"],
-            state_owner_sha256=self._action_ball_state_owner_sha256,
-            solve=_staged_forbidden,
-            solve_many=lambda _requests: (_staged_forbidden(None),),
-            assert_emitted_sample=_staged_assert_sample,
-            assert_emitted_tasks=_staged_assert_tasks,
-            emitted_task_count_for=lambda uid: int(
-                staged_shared["decoded"][4][int(uid)]
-            ),
-            task_transcript_for_birth=lambda birth_sha: (
-                staged_shared["decoded"][3][birth_sha]
-            ),
-            assert_proposal_assignments=(
-                _staged_assert_proposal_assignments
-            ),
-            sample_highwater_for=lambda uid: (
-                staged_shared["sampler"].sample_highwater_for(uid)
-            ),
-            state_getter=_staged_state,
-            state_loader=_staged_load,
-        )
+        if fixed_view:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_fixed_question_tape import (
+                FixedQuestionTapeSolver,
+            )
+
+            staged_solver = FixedQuestionTapeSolver(
+                tape=self._action_ball_immutable_tape,
+                target_recipe=self._action_ball_target_recipe,
+                solver_contract_sha256=(
+                    self._action_ball_solver_contract["sha256"]
+                ),
+            )
+        elif banded_question_bank is None:
+            staged_solver = _ActionBallPoolSolverAdapter(
+                solver_contract_sha256=self._action_ball_solver_contract["sha256"],
+                state_owner_sha256=self._action_ball_state_owner_sha256,
+                solve=_staged_forbidden,
+                solve_many=lambda _requests: (_staged_forbidden(None),),
+                assert_emitted_sample=_staged_assert_sample,
+                assert_emitted_tasks=_staged_assert_tasks,
+                emitted_task_count_for=lambda uid: int(
+                    staged_shared["decoded"][5][int(uid)]
+                ),
+                task_transcript_for_birth=lambda birth_sha: (
+                    staged_shared["decoded"][4][birth_sha]
+                ),
+                assert_proposal_assignments=(
+                    _staged_assert_proposal_assignments
+                ),
+                sample_highwater_for=lambda uid: (
+                    staged_shared["sampler"].sample_highwater_for(uid)
+                ),
+                state_getter=_staged_state,
+                state_loader=_staged_load,
+            )
+        else:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_banded_question_bank import (
+                BandedQuestionBankSolver,
+            )
+
+            staged_solver = BandedQuestionBankSolver(
+                bank=banded_question_bank,
+                solver_contract_sha256=self._action_ball_solver_contract["sha256"],
+            )
         staged_pool = LazyActionTaskPool(
             self._action_ball_bindings,
             self._action_ball_pins,
@@ -13632,13 +15867,43 @@ class RacketTargetCommand(CommandTerm):
         staged_pool.load_state_dict(state["pool"])
         if (
             staged_broker.provider_state_snapshot() != mutable_state
-            or staged_pool.state_dict()["solver_state"] != mutable_state
+            or (
+                not fixed_view
+                and
+                banded_question_bank is None
+                and staged_pool.state_dict()["solver_state"] != mutable_state
+            )
+            or (
+                not fixed_view
+                and banded_question_bank is not None
+                and staged_pool.state_dict()["solver_state"]
+                != state["pool"]["solver_state"]
+            )
         ):
             raise ValueError(
-                "action-ball staged protocol views did not restore one exact shared state"
+                "action-ball staged protocol views did not restore their exact states"
             )
+        if fixed_view:
+            zero_pool_ledger = {
+                "requests": 0,
+                "refill_calls": 0,
+                "proposed": 0,
+                "admitted": 0,
+                "issued": 0,
+                "discarded": 0,
+            }
+            if staged_solver.state_dict() != state["pool"]["solver_state"] or any(
+                staged_pool.ledger(int(uid)).to_dict()
+                != zero_pool_ledger
+                or staged_pool.pending_count(int(uid)) != 0
+                for uid in self._action_ball_bundle.action_uids
+            ):
+                raise ValueError(
+                    "immutable fixed-view staged legacy pool is not pristine"
+                )
         (
             _sampler_state,
+            staged_question_cache,
             provider_births,
             provider_history,
             task_transcripts,
@@ -13664,7 +15929,7 @@ class RacketTargetCommand(CommandTerm):
             ):
                 raise ValueError(f"action-ball ledger.{name} has invalid values")
             ledger_rows.append([int(value) for value in row])
-        if (
+        if not fixed_view and banded_question_bank is None and (
             proposal_rows["P"] != raw_ledger["P"]
             or proposal_rows["A"] != raw_ledger["A"]
         ):
@@ -13676,22 +15941,43 @@ class RacketTargetCommand(CommandTerm):
                 name: ledger_rows[row][slot]
                 for row, name in enumerate(_ACTION_BALL_LEDGER_NAMES)
             }
-            outcome = self._action_ball_outcome_type(**values)
-            pool_ledger = staged_pool.ledger(int(uid))
-            if (
-                outcome.P != pool_ledger.proposed
-                or outcome.A != pool_ledger.admitted
-                or outcome.I != pool_ledger.issued
-                or outcome.S != pool_ledger.issued
-            ):
+            if values["H"] > values["C"]:
                 raise ValueError(
-                    "action-ball exact ledger disagrees with restored pool accounting"
+                    "action-ball exact selected-rubber hits exceed closed attempts"
                 )
+            outcome = self._action_ball_outcome_type(
+                **{
+                    name: values[name]
+                    for name in _ACTION_BALL_OUTCOME_LEDGER_NAMES
+                }
+            )
+            if fixed_view:
+                if not (
+                    outcome.P == outcome.A == outcome.I == outcome.S
+                    and outcome.S == outcome.C + outcome.X
+                ):
+                    raise ValueError(
+                        "immutable fixed-view exact ledger does not conserve "
+                        "P=A=I=S=C+X"
+                    )
+            else:
+                pool_ledger = staged_pool.ledger(int(uid))
+                if (
+                    outcome.P != pool_ledger.proposed
+                    or outcome.A != pool_ledger.admitted
+                    or outcome.I != pool_ledger.issued
+                    or outcome.S != pool_ledger.issued
+                ):
+                    raise ValueError(
+                        "action-ball exact ledger disagrees with restored pool accounting"
+                    )
 
         env = state["env_state"]
         env_keys = {
             "births",
             "tasks",
+            "task_refs",
+            "counter_rally_tasks",
             "action_uid",
             "action_slot",
             "reset_generation",
@@ -13699,6 +15985,7 @@ class RacketTargetCommand(CommandTerm):
             "attempt_active",
             "attempt_action_slot",
             "attempt_legal",
+            "attempt_hit",
             "reference_term_center_latch",
             "strike_window_entry_armed",
         }
@@ -13713,6 +16000,7 @@ class RacketTargetCommand(CommandTerm):
         for name in (
             "attempt_active",
             "attempt_legal",
+            "attempt_hit",
             "reference_term_center_latch",
             "strike_window_entry_armed",
         ):
@@ -13729,6 +16017,8 @@ class RacketTargetCommand(CommandTerm):
                 raise ValueError(f"action-ball env_state.{name} must contain ints")
         births = []
         tasks = []
+        task_refs = []
+        counter_rally_tasks = []
         env_birth_digests = set()
         staged_strike_window_entry_armed = (
             self._stage_strike_window_entry_distance_probe_exact_state(
@@ -13746,15 +16036,33 @@ class RacketTargetCommand(CommandTerm):
                 if env["tasks"][index] is None
                 else ActionBallTaskReceipt.from_dict(env["tasks"][index])
             )
+            task_ref = (
+                None
+                if env["task_refs"][index] is None
+                else ActionTaskReceiptRef.from_dict(
+                    env["task_refs"][index]
+                )
+            )
+            counter_rally_task = (
+                None
+                if env["counter_rally_tasks"][index] is None
+                else CounterRallyTaskIdentity.from_dict(
+                    env["counter_rally_tasks"][index]
+                )
+            )
             active = env["attempt_active"][index]
             attempt_slot = env["attempt_action_slot"][index]
             legal = env["attempt_legal"][index]
+            hit = env["attempt_hit"][index]
             if birth is None:
                 if (
                     task is not None
+                    or task_ref is not None
+                    or counter_rally_task is not None
                     or active
                     or attempt_slot != -1
                     or legal
+                    or hit
                     or env["action_uid"][index] != -1
                     or env["action_slot"][index] != -1
                     or env["reset_generation"][index] != 0
@@ -13788,6 +16096,11 @@ class RacketTargetCommand(CommandTerm):
                     registry_sha256=self._action_ball_broker.registry_sha256,
                 )
                 if active:
+                    if fixed_view:
+                        raise ValueError(
+                            "immutable fixed-view checkpoint was not "
+                            "canonicalized to a reset-ready X state"
+                        )
                     if task is None or attempt_slot != birth.action_slot:
                         raise ValueError(
                             f"action-ball active env {index} has no matching task"
@@ -13799,16 +16112,118 @@ class RacketTargetCommand(CommandTerm):
                         registry_sha256=self._action_ball_broker.registry_sha256,
                     )
                     task.assert_birth(birth)
+                    expected_ref = task.task_ref()
+                    if task_ref != expected_ref:
+                        raise ValueError(
+                            f"action-ball active env {index} task ref mismatch"
+                        )
+                    if task.counter_rally_task != counter_rally_task:
+                        raise ValueError(
+                            f"action-ball active env {index} counter-rally task mismatch"
+                        )
                     if task.swing_generation != env["swing_generation"][index]:
                         raise ValueError(
                             f"action-ball env {index} task swing generation mismatch"
                         )
-                elif task is not None or attempt_slot != -1 or legal:
+                elif (
+                    task is not None
+                    or task_ref is not None
+                    or counter_rally_task is not None
+                    or attempt_slot != -1
+                    or legal
+                    or hit
+                ):
                     raise ValueError(
                         f"action-ball inactive env {index} has dirty attempt state"
                     )
             births.append(birth)
             tasks.append(task)
+            task_refs.append(task_ref)
+            counter_rally_tasks.append(counter_rally_task)
+        active_mask = torch.tensor(
+            env["attempt_active"], dtype=torch.bool
+        )
+        task_valid_mask = torch.tensor(
+            staged_task_wait_state["task_valid"], dtype=torch.bool
+        )
+        prev_valid = staged_runtime_latches[
+            "_action_ball_prev_contact_valid"
+        ]
+        if bool((prev_valid & ~active_mask).any()):
+            raise ValueError(
+                "ActionBall previous-contact latch outlives its active attempt"
+            )
+        for latch_name, env_name in (
+            ("_action_ball_prev_attempt_action", "attempt_action_slot"),
+            ("_action_ball_prev_reset_generation", "reset_generation"),
+            ("_action_ball_prev_swing_generation", "swing_generation"),
+        ):
+            staged_values = staged_runtime_latches[latch_name]
+            expected_values = torch.tensor(
+                env[env_name], dtype=staged_values.dtype
+            )
+            if bool(
+                (prev_valid & (staged_values != expected_values)).any()
+            ):
+                raise ValueError(
+                    f"ActionBall previous-contact identity {latch_name} drifted"
+                )
+        if bool(
+            (
+                staged_runtime_latches["vb_fired"]
+                & (~active_mask | ~task_valid_mask)
+            ).any()
+        ):
+            raise ValueError(
+                "ActionBall fired outcome latch is outside a revealed active task"
+            )
+        if self._action_ball_task_wait_schedule is not None:
+            wait_state = state["task_wait"]
+            highwater_rows = wait_state["highwater"][
+                "highwater_by_env"
+            ]
+            highwater_by_env = {
+                int(row[0]): int(row[1]) for row in highwater_rows
+            }
+            expected_highwater = {
+                env_id: int(env["reset_generation"][env_id])
+                for env_id, birth in enumerate(births)
+                if birth is not None
+            }
+            if highwater_by_env != expected_highwater:
+                raise ValueError(
+                    "ActionBall wait highwater differs from reset generations"
+                )
+            for env_id, birth in enumerate(births):
+                valid = staged_task_wait_state["task_valid"][env_id]
+                total = staged_task_wait_state["total_ticks"][env_id]
+                elapsed = staged_task_wait_state["elapsed_ticks"][env_id]
+                if birth is None:
+                    if not valid or total != 0 or elapsed != 0:
+                        raise ValueError(
+                            "empty ActionBall env has task-wait state"
+                        )
+                    continue
+                assignment = self._action_ball_task_wait_schedule.assignment(
+                    env_id=env_id,
+                    reset_generation=birth.reset_generation,
+                )
+                staged_task_wait_state["highwater"].assert_recorded(
+                    assignment
+                )
+                if env["swing_generation"][env_id] == 0:
+                    if (
+                        total != assignment.wait_ticks
+                        or elapsed > total
+                        or valid != (elapsed == total)
+                    ):
+                        raise ValueError(
+                            "ActionBall reset wait state is inconsistent"
+                        )
+                elif not valid or total != 0 or elapsed != 0:
+                    raise ValueError(
+                        "ActionBall wrap retained reset-wait state"
+                    )
         provider_birth_digests = set(provider_births)
         if env_birth_digests != provider_birth_digests:
             raise ValueError(
@@ -13819,40 +16234,74 @@ class RacketTargetCommand(CommandTerm):
             str(row["canonical_sha256"])
             for row in state["broker"]["consumed_receipts"]
         }
-        if broker_birth_digests != provider_history_digests:
-            raise ValueError(
-                "action-ball broker/provider birth assignment histories differ"
-            )
-        for receipt in provider_history.values():
-            staged_broker.assert_consumed_birth(receipt)
+        if fixed_view:
+            latest_by_env = {}
+            for row in state["broker"]["consumed_receipts"]:
+                env_id = int(row["env_id"])
+                generation = int(row["reset_generation"])
+                previous = latest_by_env.get(env_id)
+                if previous is None or generation > previous[0]:
+                    latest_by_env[env_id] = (
+                        generation,
+                        str(row["canonical_sha256"]),
+                    )
+            if broker_birth_digests != provider_history_digests or {
+                digest for _generation, digest in latest_by_env.values()
+            } != env_birth_digests:
+                raise ValueError(
+                    "immutable fixed-view broker/current/history births differ"
+                )
+            for _generation, digest in latest_by_env.values():
+                staged_broker.assert_consumed_birth(
+                    provider_history[digest]
+                )
+        else:
+            if broker_birth_digests != provider_history_digests:
+                raise ValueError(
+                    "action-ball broker/provider birth assignment histories differ"
+                )
+            for receipt in provider_history.values():
+                staged_broker.assert_consumed_birth(receipt)
 
         pool_birth_digests = {
             birth_row["birth"]["canonical_sha256"]
             for action_row in state["pool"]["actions"]
             for birth_row in action_row["births"]
         }
-        if pool_birth_digests != env_birth_digests:
+        if (
+            (fixed_view and pool_birth_digests)
+            or (not fixed_view and pool_birth_digests != env_birth_digests)
+        ):
             raise ValueError(
                 "action-ball restored pool births do not equal current env births"
             )
-        # Restored mid-swing attempts cannot yield fresh evidence: mark each X and clear its task
-        # latch.  Motion/command buffers are restored elsewhere; this hook performs no sim write.
-        active_slots = [
-            env["attempt_action_slot"][index]
-            for index, active in enumerate(env["attempt_active"])
-            if active
-        ]
+        # Preserve the command graph byte-for-byte for the verifier's no-step round trip.  The
+        # simulator is intentionally not serialized; a private post-load exclusion latch below
+        # makes the runner's mandatory first true reset retire these active rows as X rather than
+        # grading them against newly reset physics.
         restored_ledger = [list(row) for row in ledger_rows]
-        x_row = _ACTION_BALL_LEDGER_NAMES.index("X")
-        for slot in active_slots:
-            restored_ledger[x_row][slot] += 1
         for slot in range(n_actions):
+            values = {
+                name: restored_ledger[row][slot]
+                for row, name in enumerate(_ACTION_BALL_LEDGER_NAMES)
+            }
+            if values["H"] > values["C"]:
+                raise ValueError(
+                    "action-ball restored selected-rubber hits exceed closed attempts"
+                )
             self._action_ball_outcome_type(
                 **{
-                    name: restored_ledger[row][slot]
-                    for row, name in enumerate(_ACTION_BALL_LEDGER_NAMES)
+                    name: values[name]
+                    for name in _ACTION_BALL_OUTCOME_LEDGER_NAMES
                 }
             )
+
+        # All nested receipts, RNG tapes, cache rows, curriculum/domain state, broker/pool
+        # transcripts, WAIT fields and outcome ledgers are now staged on disposable objects.
+        # Runner calls this branch for both Racket and Motion before any checkpoint component is
+        # committed, which makes a late command-schema failure process-wide atomic.
+        if _validate_only:
+            return
 
         # Atomic live commit after all nested structures, cross-links and X
         # accounting validate.  The evaluator/coordinator/drain graph must move
@@ -13893,15 +16342,24 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_emitted_task_count_by_uid = emitted_task_counts
         self._action_ball_domain_cursor_by_uid = domain_cursors
         self._action_ball_reject_counts = reject_counts
-        self._action_ball_ledger.copy_(
-            torch.tensor(restored_ledger, dtype=torch.long, device=self.device)
+        restored_ledger_tensor = torch.tensor(
+            restored_ledger, dtype=torch.long, device=self.device
         )
+        if fixed_view:
+            self._action_ball_ledger.zero_()
+            self._action_ball_fixed_view_ledger.copy_(
+                restored_ledger_tensor
+            )
+        else:
+            self._action_ball_ledger.copy_(restored_ledger_tensor)
         self._action_ball_birth_by_env = births
-        self._action_ball_task_by_env = [None] * self.num_envs
-        self._action_ball_task_ref_by_env = [None] * self.num_envs
-        self._counter_rally_task_identity_by_env = (
-            [None] * self.num_envs
+        self._action_ball_task_by_env = tasks
+        self._action_ball_task_ref_by_env = (
+            task_refs
+            if self._action_ball_diagnostic_unauthorized
+            else [None] * self.num_envs
         )
+        self._counter_rally_task_identity_by_env = counter_rally_tasks
         self._action_ball_action_uid.copy_(
             torch.tensor(env["action_uid"], dtype=torch.long, device=self.device)
         )
@@ -13918,14 +16376,85 @@ class RacketTargetCommand(CommandTerm):
                 env["swing_generation"], dtype=torch.long, device=self.device
             )
         )
-        self._action_ball_attempt_active.zero_()
-        self._action_ball_attempt_action.fill_(-1)
-        self._action_ball_attempt_legal.zero_()
-        self._counter_rally_reward_terms.zero_()
-        self._counter_rally_accepted.zero_()
-        self._counter_rally_legal_first_landing.zero_()
-        self._counter_rally_primary_reason_code.fill_(-1)
-        self._action_ball_invalidate_virtual_contact_history()
+        self._action_ball_attempt_active.copy_(
+            torch.tensor(
+                env["attempt_active"], dtype=torch.bool, device=self.device
+            )
+        )
+        self._action_ball_attempt_action.copy_(
+            torch.tensor(
+                env["attempt_action_slot"],
+                dtype=torch.long,
+                device=self.device,
+            )
+        )
+        self._action_ball_attempt_legal.copy_(
+            torch.tensor(
+                env["attempt_legal"], dtype=torch.bool, device=self.device
+            )
+        )
+        self._action_ball_attempt_hit.copy_(
+            torch.tensor(
+                env["attempt_hit"], dtype=torch.bool, device=self.device
+            )
+        )
+        self._action_ball_task_wait_highwater = staged_task_wait_state[
+            "highwater"
+        ]
+        self._action_ball_task_valid.copy_(
+            torch.tensor(
+                staged_task_wait_state["task_valid"],
+                dtype=torch.bool,
+                device=self.device,
+            )
+        )
+        self._action_ball_task_wait_total_ticks.copy_(
+            torch.tensor(
+                staged_task_wait_state["total_ticks"],
+                dtype=torch.long,
+                device=self.device,
+            )
+        )
+        self._action_ball_task_wait_elapsed_ticks.copy_(
+            torch.tensor(
+                staged_task_wait_state["elapsed_ticks"],
+                dtype=torch.long,
+                device=self.device,
+            )
+        )
+        self._action_ball_task_wait_last_advance_step = (
+            staged_task_wait_state["last_advance_step"]
+        )
+        for name in self._action_ball_runtime_latch_field_names():
+            getattr(self, name).copy_(
+                staged_runtime_latches[name].to(device=self.device)
+            )
+        self._post_strike_elapsed_last_step = staged_runtime_latches[
+            "post_strike_elapsed_last_step"
+        ]
+        self._strike_timing_metrics_step_token = None
+        self._strike_timing_metrics_handoff_pending = False
+        resume_reset_exclusion = getattr(
+            self, "_action_ball_resume_reset_exclusion", None
+        )
+        if resume_reset_exclusion is None:
+            resume_reset_exclusion = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._action_ball_resume_reset_exclusion = (
+                resume_reset_exclusion
+            )
+        elif (
+            not torch.is_tensor(resume_reset_exclusion)
+            or resume_reset_exclusion.dtype != torch.bool
+            or tuple(resume_reset_exclusion.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "ActionBall resume reset-exclusion latch is invalid"
+            )
+        resume_reset_exclusion.copy_(
+            self._action_ball_attempt_active
+        )
         self._action_ball_reference_term_center_latch.copy_(
             torch.tensor(
                 env["reference_term_center_latch"],
@@ -19952,20 +22481,29 @@ class RacketTargetCommand(CommandTerm):
             self._rally_returned = self._rally_returned | (legal & ~wrapped)
             self._rally_pending_return = self._rally_pending_return | (legal & wrapped)
         if self._action_ball_enabled:
+            # ``gate`` is the actual swept contact against the face selected by
+            # this attempt's mounted rubber sign.  Latch it for the whole
+            # attempt: a later early terminal/reset must still close one H/C
+            # fact, while hidden RESET_WAIT tasks remain outside both.
+            hit = gate & self._action_ball_attempt_active
+            if self._action_ball_task_wait_schedule is not None:
+                hit = hit & self._action_ball_task_valid
+            self._action_ball_attempt_hit |= hit
             # The immutable task is graded exactly once at its strike opportunity, then closed at
             # the next wrap/reset.  Ordinary ActionBall grades a legal first landing; exact N=1
             # counter-rally keeps its stricter objective acceptance as the curriculum outcome even
             # though the published virtual-return metrics above retain their narrower landing
             # meaning.
             if counter_rally_accepted is None:
-                self._action_ball_attempt_legal |= (
-                    legal & self._action_ball_attempt_active
-                )
+                accepted = legal & self._action_ball_attempt_active
             else:
-                self._action_ball_attempt_legal |= (
+                accepted = (
                     counter_rally_accepted
                     & self._action_ball_attempt_active
                 )
+            if self._action_ball_task_wait_schedule is not None:
+                accepted = accepted & self._action_ball_task_valid
+            self._action_ball_attempt_legal |= accepted
         return bucket_values
 
     def _book_sparse_reward_eligibility(
@@ -20058,10 +22596,19 @@ class RacketTargetCommand(CommandTerm):
             )
             masks.update(contact_rejections)
         if book_strike_opportunity:
-            masks = {"strike_opportunity_count": exact_strike, **masks}
+            # Exact strike is a timing tick, not an attempted-ball or hit
+            # denominator.  Keep the historical key as a compatibility alias
+            # for existing A-side receipts; new evidence must use the explicit
+            # timing name or the transactional ActionBall H/C ledger.
+            masks = {
+                _EXACT_STRIKE_TIMING_COUNTER: exact_strike,
+                "strike_opportunity_count": exact_strike,
+                **masks,
+            }
         ledger = getattr(self, "_sparse_reward_eligibility_counters", None)
         if ledger is None:
             names = (
+                _EXACT_STRIKE_TIMING_COUNTER,
                 "strike_opportunity_count",
                 "virtual_capture_count",
                 "virtual_net_clear_count",
@@ -20083,11 +22630,11 @@ class RacketTargetCommand(CommandTerm):
                 )
             if name not in ledger:
                 ledger[name] = torch.zeros(
-                    (), dtype=torch.long, device=self.device
+                    (), dtype=torch.long, device=mask.device
                 )
                 for family in self._clip_names.values():
                     ledger[f"{name}_{family}"] = torch.zeros(
-                        (), dtype=torch.long, device=self.device
+                        (), dtype=torch.long, device=mask.device
                     )
             ledger[name].add_(mask.detach().sum(dtype=torch.long))
 
@@ -20793,6 +23340,8 @@ class RacketTargetCommand(CommandTerm):
             "ready_planner_legacy_hold_violation_count",
             "ready_foot_sensor_unavailable_sample_count",
             "ready_nonfinite_value_count",
+            _TASK_WAIT_STARTED_COUNTER,
+            _TASK_REVEAL_REACHED_COUNTER,
         ):
             if name not in ledger:
                 ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
@@ -20923,6 +23472,22 @@ class RacketTargetCommand(CommandTerm):
             key = f"termination_reason_{term_name}_count"
             if key not in ledger:
                 ledger[key] = torch.zeros((), dtype=torch.long, device=self.device)
+        # These reason totals and reason-by-phase counters are a fixed producer
+        # ABI, not a dynamic reflection of the active TerminationManager list.
+        # A reason absent from a run therefore emits an explicit zero instead
+        # of silently losing schema coverage at the pre-long gate.
+        for reason in _BEHAVIORAL_TERMINATION_PHASE_TERMS:
+            reason_key = f"termination_reason_{reason}_count"
+            if reason_key not in ledger:
+                ledger[reason_key] = torch.zeros(
+                    (), dtype=torch.long, device=self.device
+                )
+            for phase in _PHYSICAL_FALL_ATTRIBUTION_PHASES:
+                key = f"termination_reason_{reason}_{phase}_count"
+                if key not in ledger:
+                    ledger[key] = torch.zeros(
+                        (), dtype=torch.long, device=self.device
+                    )
         return ledger
 
     @staticmethod
@@ -20981,12 +23546,33 @@ class RacketTargetCommand(CommandTerm):
             selected_phase_masks[name] = value
         pre_strike = selected_phase_masks["pre_strike"]
         recovering = selected_phase_masks["recovering"]
+        task_valid_source = getattr(self, "_action_ball_task_valid", None)
+        if task_valid_source is None:
+            # Legacy/non-ActionBall callers have no hidden RESET_WAIT.  Treat
+            # their whole attempt as publicly revealed so the fixed phase ABI
+            # still conserves without inventing a hidden phase.
+            task_valid = torch.ones_like(terminated)
+        else:
+            task_valid = self._selected_bool(task_valid_source, env_ids)
         reason_masks: dict[str, torch.Tensor] = {}
         get_term = getattr(tm, "get_term", None)
         if callable(get_term):
             for term_name in tuple(getattr(tm, "active_terms", ())):
                 mask = self._selected_bool(get_term(term_name), env_ids)
                 reason_masks[str(term_name)] = mask
+
+        behavioral_reason_phase_masks: dict[str, dict[str, torch.Tensor]] = {}
+        for reason in _BEHAVIORAL_TERMINATION_PHASE_TERMS:
+            reason_mask = reason_masks.get(reason, torch.zeros_like(terminated))
+            behavioral_reason_phase_masks[reason] = {
+                "hidden_wait": reason_mask & ~task_valid,
+                "revealed_pre_strike": (
+                    reason_mask & task_valid & pre_strike & ~recovering
+                ),
+                "post_strike": (
+                    reason_mask & task_valid & (~pre_strike | recovering)
+                ),
+            }
 
         # Commit only after every dynamic reason mask has passed strict dtype/shape selection.
         # A malformed late-listed term must not leave a partially updated decision transaction.
@@ -20996,6 +23582,11 @@ class RacketTargetCommand(CommandTerm):
             ledger[f"termination_reason_{term_name}_count"].add_(
                 mask.sum(dtype=torch.long)
             )
+        for reason, phase_masks in behavioral_reason_phase_masks.items():
+            for phase, mask in phase_masks.items():
+                ledger[f"termination_reason_{reason}_{phase}_count"].add_(
+                    mask.sum(dtype=torch.long)
+                )
 
         physical = torch.zeros_like(terminated)
         for term_name in _PHYSICAL_FALL_TERMINATION_TERMS:
@@ -21817,18 +24408,34 @@ class RacketTargetCommand(CommandTerm):
         target_pos_valid, target_vel_valid, target_face_valid = target_validity
         # commanded base repositioning = distance of the base target from spawn (0 if coupling disabled).
         self.metrics["base_target_offset_norm"] = torch.norm(self.base_target_pos_w - origins[:, :2], dim=-1)
-        pos_err = torch.norm(self.racket_pos_w - self.racket_target_pos_w, dim=-1)
-        vel_err = torch.norm(self.racket_lin_vel_w - self.racket_target_vel_w, dim=-1)
-        measured_normal, target_normal = face_tracking_pair(self)
-        cos_ang = torch.sum(measured_normal * target_normal, dim=-1).clamp(-1.0, 1.0)
-        # 弧度值先算(adaptive sigma 第三通道的驱动量纲),度数只是它的展示换算——数值逐字节同旧式。
-        normal_err_rad = torch.acos(cos_ang)
-        normal_err_deg = normal_err_rad * (180.0 / math.pi)
+        # Position is intentionally still evaluated for a validity-000 C211 row:
+        # internal progress/footwork diagnostics historically consume that norm.
+        # Velocity and face, however, have no consumer when their immutable
+        # validity columns are false.  Avoid their vector norm, face-frame
+        # construction, dot product, clamp, and acos on every policy step while
+        # retaining byte-identical zero-valued public metrics below.
+        racket_pos_err_vec = self.racket_pos_w - self.racket_target_pos_w
+        pos_err = torch.norm(racket_pos_err_vec, dim=-1)
+        if target_vel_valid:
+            racket_vel_err_vec = self.racket_lin_vel_w - self.racket_target_vel_w
+            vel_err = torch.norm(racket_vel_err_vec, dim=-1)
+        else:
+            racket_vel_err_vec = torch.zeros_like(self.racket_lin_vel_w)
+            vel_err = torch.zeros_like(pos_err)
+        if target_face_valid:
+            measured_normal, target_normal = face_tracking_pair(self)
+            cos_ang = torch.sum(measured_normal * target_normal, dim=-1).clamp(
+                -1.0, 1.0
+            )
+            # 弧度值先算(adaptive sigma 第三通道的驱动量纲),度数只是它的展示换算——数值逐字节同旧式。
+            normal_err_rad = torch.acos(cos_ang)
+            normal_err_deg = normal_err_rad * (180.0 / math.pi)
+        else:
+            normal_err_rad = torch.zeros_like(pos_err)
+            normal_err_deg = torch.zeros_like(pos_err)
         base_err = torch.norm(self.base_pos_w[:, :2] - self.base_target_pos_w, dim=-1)
         base_pos_rel = self.base_pos_w[:, :2] - origins[:, :2]
         base_err_xy = self.base_pos_w[:, :2] - self.base_target_pos_w
-        racket_pos_err_vec = self.racket_pos_w - self.racket_target_pos_w
-        racket_vel_err_vec = self.racket_lin_vel_w - self.racket_target_vel_w
 
         # Diagnostic-only window-entry distribution.  This samples the same fresh FK/target pair
         # as the reward masks, once per swing, before any PPO-window reporting boundary can consume
@@ -22994,6 +25601,12 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # tasks may only use the default.
     reference_guard_mode: str = _REFERENCE_GUARD_PHASE_GATED
     action_ball_seed: int = 0
+    # Optional curriculum-owned literal level-zero question.  The sampler and
+    # RNG still run on every reset and consume their normal fixed draw budget,
+    # but while all 32 domain levels are exactly zero every physical field is
+    # pinned to the profile center.  Any promoted arm restores the manifest's
+    # ordinary initial/max support.  This is not a tape or a frozen curriculum.
+    action_ball_initial_center_single_question: bool = False
     # Fresh A211/C211-only pre-task reveal schedule.  Historical ActionBall
     # leaves keep this disabled and therefore retain their byte-for-byte timing.
     # The enabled schedule is integer-tick and content addressed by
@@ -23008,14 +25621,23 @@ class RacketTargetCommandCfg(CommandTermCfg):
     action_ball_task_wait_required_active_ticks: int = 200
     action_ball_pool_refill_rows: int = 16
     action_ball_fixed_direction: bool = True
-    # Diagnostic fixed-question N1 ablation.  ``online_solver`` preserves the historical path.
-    # ``immutable_tape`` is diagnostic-only and loads one canonical JSON containing the same base
-    # question plus all five precomputed target variants; reset then materializes receipts by
-    # copying the selected row and cannot call LM.  Validity is ordered [position, velocity, face]
-    # and must exactly match the named recipe (no arbitrary masks that change the experiment).
+    # ``online_solver`` preserves the historical path. ``immutable_tape`` remains the diagnostic
+    # N1 target-ablation fixture. ``banded_question_bank`` is a draft current_lm/111 cache: it
+    # resolves an exact levels/action/profile/solver block and indexes a precomputed row, but remains
+    # diagnostic-only until its question tape and future birth/base coverage close exactly. Validity
+    # is ordered [position, velocity, face].
     action_ball_target_source: str = "online_solver"
+    # Keep curriculum/sampler/RNG ownership unchanged, but reuse the deterministic
+    # numeric solver answer while the complete emitted question is byte-identical.
+    # This is useful for fixed-center N1: the first row is solved, later resets
+    # hit the bounded per-action cache.  A changed level/stratum/base/ball/aim or
+    # physics/motion/solver pin is a natural miss; equal distribution parameters
+    # alone never authorize reuse.
+    action_ball_reuse_exact_question_until_semantics_change: bool = False
     action_ball_immutable_tape_path: str = ""
     action_ball_immutable_tape_sha256: str = ""
+    action_ball_banded_question_bank_path: str = ""
+    action_ball_banded_question_bank_sha256: str = ""
     action_ball_target_recipe: str = "current_lm"
     action_ball_target_validity_mask: tuple = (True, True, True)
     # Whether Isaac observation-group noise may be applied to target-derived actor columns.

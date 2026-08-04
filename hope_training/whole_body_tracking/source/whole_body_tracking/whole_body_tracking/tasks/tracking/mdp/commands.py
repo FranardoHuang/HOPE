@@ -793,9 +793,29 @@ class _BalancedRoundRobinClipSampler:
             "cursor": self.cursor,
         }
 
-    def load_state_dict(self, state: dict):
+    def validate_state_dict(self, state: dict) -> tuple[tuple[int, ...], int]:
+        """Validate one saved cursor without changing the live sampler.
+
+        Command checkpoint preflight runs before *any* policy, optimizer, normalizer, command, or
+        action state is allowed to move.  Keeping this parser separate from ``load_state_dict``
+        lets ``MotionCommand.validate_exact_resume_state_dict`` exercise the exact same schema and
+        identity checks without the old mutate-then-rollback validation trick.
+        """
+
         if type(state) is not dict:
             raise ValueError("balanced clip sampler state must be a dictionary")
+        expected_keys = {
+            "schema_version",
+            "num_segments",
+            "seed",
+            "clip_order",
+            "permutation",
+            "cursor",
+        }
+        if set(state) != expected_keys:
+            raise ValueError(
+                "balanced clip sampler state keys do not match the strict schema"
+            )
         if state.get("schema_version") != self._STATE_SCHEMA_VERSION:
             raise ValueError(
                 "balanced clip sampler state has an unsupported schema_version"
@@ -829,6 +849,10 @@ class _BalancedRoundRobinClipSampler:
             raise ValueError(
                 "balanced clip sampler state cursor must be an integer inside the permutation"
             )
+        return tuple(permutation), cursor
+
+    def load_state_dict(self, state: dict):
+        permutation, cursor = self.validate_state_dict(state)
         # Restore saved bytes instead of regenerating, so exact resume survives
         # a future torch release changing randperm internals.
         self.permutation = torch.tensor(
@@ -1194,6 +1218,13 @@ class MotionCommand(CommandTerm):
         self._action_ball_task_receipt_resolver = None
         self._action_ball_shared_state_sha256_accessor = None
         self._action_ball_expected_shared_racket_state_sha256 = None
+        # The immutable-N1 diagnostic may bind a separate receipt-free task
+        # view after the ordinary birth authority is admitted.  ``None`` keeps
+        # every online/banded/legacy branch byte-for-behavior unchanged.
+        self._action_ball_fixed_view_identity_sha256 = None
+        self._action_ball_fixed_view_timing_row = None
+        self._action_ball_fixed_view_timing_row_device = None
+        self._action_ball_fixed_view_broker_state_accessor = None
         self._action_ball_action_uids = None
         self._action_ball_motion_sha256 = None
         self._action_ball_segment_lengths = None
@@ -1205,6 +1236,11 @@ class MotionCommand(CommandTerm):
         self._action_ball_seen_birth_receipts = None
         self._action_ball_active_task_refs = None
         self._action_ball_task_timing_active = None
+        self._action_ball_public_task_valid = None
+        self._action_ball_safe_ready_body_pos_w = None
+        self._action_ball_safe_ready_body_quat_w = None
+        self._action_ball_safe_ready_reference_pending = None
+        self._action_ball_safe_ready_pending_count = None
         self._action_ball_diagnostic_pending_row_count = None
         self._action_ball_task_pending_elapsed_s = None
         self._action_ball_task_age_s = None
@@ -2511,16 +2547,46 @@ class MotionCommand(CommandTerm):
                     "action_ball_dynamic_ready physical_ready must contain "
                     "exact root/joint state fields"
                 )
-            root_pos_rows.append(
-                self._action_ball_dynamic_ready_vector(
-                    physical["root_pos_w_m"],
-                    name=(
-                        "action_ball_dynamic_ready."
-                        f"rows[{action_slot}].physical_ready.root_pos_w_m"
-                    ),
-                    length=3,
-                )
+            physical_root_pos = self._action_ball_dynamic_ready_vector(
+                physical["root_pos_w_m"],
+                name=(
+                    "action_ball_dynamic_ready."
+                    f"rows[{action_slot}].physical_ready.root_pos_w_m"
+                ),
+                length=3,
             )
+            # 人话:这个字段名里的 `_w_` 会让人以为它是 HOPE 世界系(原点在近端左桌角),
+            # 但它其实是机器人局部地面系。照字面理解会把机器人放到台面上去,所以这里
+            # 显式钉住它的系。
+            #
+            # The artifact carries no frame declaration of its own and its SHA is pinned by the
+            # lineage, so the frame contract has to live here.  Values are in
+            # ``a3_robot_origin_ground_z0`` (robot local ground origin, ground z=0), NOT the HOPE
+            # ``world`` frame whose origin is the near-left table corner with the table SURFACE at
+            # z=0.  The documented bridge is a pure translation with no rotation:
+            #   p_a3_robot_origin_ground_z0 = p_world + [0.5, 0.7625, 0.76]
+            # so a HOPE-world reading of the same numbers would place the pelvis about 0.15 m ONTO
+            # the table at 1.07 m above its surface.  See docs/interfaces/frames_and_coordinates.md.
+            #
+            # The bounds below are deliberately loose: they only have to separate the two frames,
+            # not certify the stance.  A HOPE-world vector for this robot would have x <= 0 and
+            # y around -0.76, both of which fall outside these ranges.
+            _ROBOT_GROUND_FRAME_BOUNDS = (
+                (-1.0, 1.0),  # x: forward of the robot ground origin
+                (-1.0, 1.0),  # y: lateral about the robot ground origin
+                (0.3, 1.6),  # z: pelvis above the FLOOR, never a table-surface-relative height
+            )
+            for _axis, (_lo, _hi) in enumerate(_ROBOT_GROUND_FRAME_BOUNDS):
+                _value = float(physical_root_pos[_axis])
+                if not _lo <= _value <= _hi:
+                    raise ValueError(
+                        "action_ball_dynamic_ready."
+                        f"rows[{action_slot}].physical_ready.root_pos_w_m is declared in the "
+                        "a3_robot_origin_ground_z0 robot-local ground frame, but axis "
+                        f"{_axis} = {_value!r} is outside [{_lo}, {_hi}]; a HOPE-world vector "
+                        "here would spawn the robot on the table surface"
+                    )
+            root_pos_rows.append(physical_root_pos)
             root_quat_rows.append(
                 self._action_ball_dynamic_ready_vector(
                     physical["root_quat_wxyz"],
@@ -3219,6 +3285,28 @@ class MotionCommand(CommandTerm):
         self._action_ball_task_timing_active = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+        # Racket owns task reveal, but Motion owns every teacher/mimic tensor.
+        # Racket binds its exact public task-valid tensor after construction so
+        # RESET_WAIT can use the physical safe-ready reference and the reveal
+        # tick can switch atomically to the measured clip frame 0.  No
+        # safe-ready -> frame0 interpolation is a runtime authority.
+        self._action_ball_public_task_valid = None
+        body_shape = (self.num_envs, len(self.body_indexes), 3)
+        quat_shape = (self.num_envs, len(self.body_indexes), 4)
+        self._action_ball_safe_ready_body_pos_w = torch.zeros(
+            body_shape,
+            dtype=self.motion.body_pos_w.dtype,
+            device=self.device,
+        )
+        self._action_ball_safe_ready_body_quat_w = torch.zeros(
+            quat_shape,
+            dtype=self.motion.body_quat_w.dtype,
+            device=self.device,
+        )
+        self._action_ball_safe_ready_reference_pending = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._action_ball_safe_ready_pending_count = 0
         self._action_ball_single_stroke_complete = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
@@ -3270,6 +3358,11 @@ class MotionCommand(CommandTerm):
             self._action_ball_seen_birth_receipts = None
             self._action_ball_active_task_refs = None
             self._action_ball_task_timing_active = None
+            self._action_ball_public_task_valid = None
+            self._action_ball_safe_ready_body_pos_w = None
+            self._action_ball_safe_ready_body_quat_w = None
+            self._action_ball_safe_ready_reference_pending = None
+            self._action_ball_safe_ready_pending_count = None
             self._action_ball_single_stroke_complete = None
             self._action_ball_diagnostic_pending_row_count = None
             self._action_ball_task_pending_elapsed_s = None
@@ -3283,6 +3376,174 @@ class MotionCommand(CommandTerm):
         self._action_ball_motion_admission_receipt_sha256 = receipt[
             "canonical_sha256"
         ]
+
+    def bind_action_ball_public_task_valid(
+        self, task_valid: torch.Tensor
+    ) -> None:
+        """Share Racket's sole WAIT/reveal bit with teacher-reference accessors."""
+
+        if not self.action_ball_diagnostic_split_ready_teacher:
+            return
+        if (
+            not torch.is_tensor(task_valid)
+            or task_valid.dtype != torch.bool
+            or tuple(task_valid.shape) != (self.num_envs,)
+            or task_valid.device != torch.device(self.device)
+        ):
+            raise ValueError(
+                "split-ready task_valid must be one bool tensor on Motion's device"
+            )
+        if (
+            self._action_ball_public_task_valid is not None
+            and self._action_ball_public_task_valid is not task_valid
+        ):
+            raise RuntimeError(
+                "split-ready task_valid authority may be bound exactly once"
+            )
+        self._action_ball_public_task_valid = task_valid
+
+    def refresh_action_ball_revealed_body_reference(
+        self, reveal: torch.Tensor
+    ) -> None:
+        """Refresh cached aligned bodies on the exact split-ready reveal tick.
+
+        Motion updates before RacketTargetCommand.  Racket owns ``task_valid``
+        and may therefore reveal a row after Motion has already materialized
+        ``body_*_relative_w`` from the safe-ready tuple for this policy tick.
+        Joint and paddle accessors read the public bit lazily, but critic/body
+        consumers read these cached aligned tensors.  Refreshing only newly
+        revealed rows here keeps all three teacher views on measured frame 0
+        during the same public tick.
+        """
+
+        if not self.action_ball_diagnostic_split_ready_teacher:
+            return
+        if (
+            not torch.is_tensor(reveal)
+            or reveal.dtype != torch.bool
+            or tuple(reveal.shape) != (self.num_envs,)
+            or reveal.device != torch.device(self.device)
+        ):
+            raise ValueError(
+                "split-ready reveal must be one bool tensor on Motion's device"
+            )
+        task_valid = getattr(self, "_action_ball_public_task_valid", None)
+        pending = getattr(
+            self, "_action_ball_safe_ready_reference_pending", None
+        )
+        if task_valid is None or pending is None:
+            raise RuntimeError(
+                "split-ready reveal requires bound task-valid and safe-ready state"
+            )
+
+        # Keep this full-batch and mask-select below.  A CUDA ``nonzero`` /
+        # one-argument ``where`` would add a host synchronization to every
+        # policy tick merely to discover that most reveal masks are empty.
+        torch._assert_async(torch.all(~reveal | task_valid))
+        torch._assert_async(torch.all(~reveal | ~pending))
+        steps = self._pose_reference_steps()
+        frame_zero = self.motion.seg_start[self.clip_id]
+        torch._assert_async(torch.all(~reveal | (steps == frame_zero)))
+
+        body_pos_w = (
+            self.motion.body_pos_w[steps]
+            + self._env.scene.env_origins[:, None, :]
+        )
+        body_quat_w = self.motion.body_quat_w[steps]
+        anchor_pos_w = body_pos_w[:, self.motion_anchor_body_index]
+        anchor_quat_w = body_quat_w[:, self.motion_anchor_body_index]
+        robot_anchor_pos_w = self.robot.data.body_pos_w[
+            :, self.robot_anchor_body_index
+        ]
+        robot_anchor_quat_w = self.robot.data.body_quat_w[
+            :, self.robot_anchor_body_index
+        ]
+        body_count = len(self.cfg.body_names)
+        anchor_pos_w_repeat = anchor_pos_w[:, None, :].repeat(
+            1, body_count, 1
+        )
+        anchor_quat_w_repeat = anchor_quat_w[:, None, :].repeat(
+            1, body_count, 1
+        )
+        robot_anchor_pos_w_repeat = robot_anchor_pos_w[:, None, :].repeat(
+            1, body_count, 1
+        )
+        robot_anchor_quat_w_repeat = robot_anchor_quat_w[:, None, :].repeat(
+            1, body_count, 1
+        )
+        delta_pos_w = robot_anchor_pos_w_repeat
+        delta_pos_w[..., 2] = anchor_pos_w_repeat[..., 2]
+        delta_ori_w = yaw_quat(
+            quat_mul(
+                robot_anchor_quat_w_repeat,
+                quat_inv(anchor_quat_w_repeat),
+            )
+        )
+        measured_body_quat_relative_w = quat_mul(delta_ori_w, body_quat_w)
+        measured_body_pos_relative_w = delta_pos_w + quat_apply(
+            delta_ori_w, body_pos_w - anchor_pos_w_repeat
+        )
+        self.body_quat_relative_w = torch.where(
+            reveal[:, None, None],
+            measured_body_quat_relative_w,
+            self.body_quat_relative_w,
+        )
+        self.body_pos_relative_w = torch.where(
+            reveal[:, None, None],
+            measured_body_pos_relative_w,
+            self.body_pos_relative_w,
+        )
+
+    def _action_ball_safe_ready_wait_mask(self) -> torch.Tensor:
+        if not self.action_ball_diagnostic_split_ready_teacher:
+            return torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        # Reset observations can consume a teacher property before the next
+        # command-manager update.  Materialize the settled physical tuple at
+        # the first such access, independent of observation-term ordering.
+        self._capture_action_ball_safe_ready_reference()
+        task_valid = getattr(self, "_action_ball_public_task_valid", None)
+        if task_valid is None:
+            return torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        return ~task_valid
+
+    def _capture_action_ball_safe_ready_reference(self) -> None:
+        """Freeze FK body targets after the physical safe-ready reset settles."""
+
+        pending = getattr(
+            self, "_action_ball_safe_ready_reference_pending", None
+        )
+        if getattr(self, "_action_ball_safe_ready_pending_count", 0) == 0:
+            return
+        if pending is None:
+            raise RuntimeError("split-ready safe reference pending mask is absent")
+        ids = torch.where(pending)[0]
+        body_pos = self.robot.data.body_pos_w[ids][:, self.body_indexes]
+        body_quat = self.robot.data.body_quat_w[ids][:, self.body_indexes]
+        if (
+            tuple(body_pos.shape)
+            != tuple(self._action_ball_safe_ready_body_pos_w[ids].shape)
+            or tuple(body_quat.shape)
+            != tuple(self._action_ball_safe_ready_body_quat_w[ids].shape)
+            or not bool(torch.isfinite(body_pos).all())
+            or not bool(torch.isfinite(body_quat).all())
+        ):
+            raise RuntimeError(
+                "split-ready physical FK reference is unavailable after reset"
+            )
+        self._action_ball_safe_ready_body_pos_w[ids] = body_pos
+        self._action_ball_safe_ready_body_quat_w[ids] = body_quat
+        # Reset may request its first observation before Motion's next command
+        # update.  Keep the materialized body cache on the same newly captured
+        # physical tuple so body and paddle consumers cannot see the previous
+        # episode while joint targets already expose the new safe-ready pose.
+        self.body_pos_relative_w[ids] = body_pos
+        self.body_quat_relative_w[ids] = body_quat
+        pending[ids] = False
+        self._action_ball_safe_ready_pending_count = 0
 
     def bind_action_ball_task_authority(
         self, *, task_ref_for_env, resolve_task_ref, shared_state_sha256
@@ -3351,6 +3612,76 @@ class MotionCommand(CommandTerm):
         # come only from the current immutable task receipt (never the generic speed sampler).
         self.retiming_active = True
         self._action_ball_expected_shared_racket_state_sha256 = None
+
+    def bind_action_ball_fixed_view_timing(
+        self,
+        *,
+        fixed_view_identity_sha256: str,
+        timing_row: tuple,
+        broker_exact_state,
+    ) -> None:
+        """Bind one prevalidated immutable-N1 timing row without task receipts.
+
+        Birth receipts remain the episode/root identity authority.  This seam
+        replaces only the per-swing ``ActionBallTaskReceipt`` resolver for the
+        explicitly unauthorized, single-action immutable-tape diagnostic.
+        """
+
+        if (
+            self._action_ball_birth_broker is None
+            or not self._action_ball_birth_broker.diagnostic_fast_path
+            or self._action_ball_task_ref_for_env is None
+            or self._action_ball_task_receipt_resolver is None
+            or self._action_ball_shared_state_sha256_accessor is None
+        ):
+            raise RuntimeError(
+                "fixed-view timing requires the diagnostic ActionBall birth/task binding"
+            )
+        if (
+            self._action_ball_fixed_view_identity_sha256 is not None
+            or self._action_ball_fixed_view_timing_row is not None
+            or self._action_ball_fixed_view_timing_row_device is not None
+            or self._action_ball_fixed_view_broker_state_accessor is not None
+        ):
+            raise ValueError("fixed-view timing may be bound exactly once")
+        if (
+            self._action_ball_action_uids is None
+            or len(self._action_ball_action_uids) != 1
+            or self._action_ball_segment_lengths is None
+            or len(self._action_ball_segment_lengths) != 1
+        ):
+            raise ValueError("fixed-view timing requires exact ActionBall N=1")
+        identity = self._action_ball_sha256(
+            fixed_view_identity_sha256,
+            name="fixed_view_identity_sha256",
+        )
+        validated = self._validate_action_ball_fixed_view_timing_row(timing_row)
+        if not callable(broker_exact_state):
+            raise TypeError(
+                "fixed-view timing requires a callable exact broker-state accessor"
+            )
+        task_owner = getattr(
+            self._action_ball_task_ref_for_env, "__self__", None
+        )
+        broker_state_owner = getattr(broker_exact_state, "__self__", None)
+        if task_owner is None or broker_state_owner is not task_owner:
+            raise ValueError(
+                "fixed-view timing and exact broker state require one Racket owner"
+            )
+        self._action_ball_fixed_view_identity_sha256 = identity
+        self._action_ball_fixed_view_timing_row = validated
+        self._action_ball_fixed_view_timing_row_device = torch.tensor(
+            validated,
+            dtype=self._action_ball_task_age_s.dtype,
+            device=self.device,
+        ).reshape(1, 5)
+        self._action_ball_fixed_view_broker_state_accessor = (
+            broker_exact_state
+        )
+
+    @property
+    def action_ball_fixed_view_enabled(self) -> bool:
+        return self._action_ball_fixed_view_identity_sha256 is not None
 
     def validate_action_ball_task_authority_binding(self) -> None:
         """Probe the shared Racket digest after both runtime owners are published."""
@@ -3999,6 +4330,13 @@ class MotionCommand(CommandTerm):
         self.speed_scale[env_ids] = 0.0
         self.hold_counter[env_ids] = 1
         self.metrics["in_hold"][env_ids] = 1.0
+        if self.action_ball_diagnostic_split_ready_teacher:
+            if self._action_ball_safe_ready_reference_pending is None:
+                raise RuntimeError(
+                    "split-ready safe reference buffers are not bound"
+                )
+            self._action_ball_safe_ready_reference_pending[env_ids] = True
+            self._action_ball_safe_ready_pending_count += int(env_ids.numel())
         if diagnostic_fast_path:
             # Racket will reuse its one identity D2H to replace the inactive
             # host refs and install every final timing column.  Until then the
@@ -4049,6 +4387,143 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 f"{name} is inconsistent: actual={actual}, expected={expected}"
             )
+
+    def _validate_action_ball_fixed_view_timing_row(
+        self, timing_row: object
+    ) -> tuple[float, float, float, float, float]:
+        """Validate Motion's immutable timing algebra once at fixed-view bind."""
+
+        if (
+            not isinstance(timing_row, tuple)
+            or len(timing_row) != 15
+            or any(
+                isinstance(value, bool)
+                or type(value) not in (int, float)
+                or not math.isfinite(float(value))
+                for value in timing_row
+            )
+        ):
+            raise ValueError(
+                "fixed-view timing row must contain exactly 15 finite plain numbers"
+            )
+        (
+            time_to_contact,
+            reference_t_hit,
+            reference_t_cycle,
+            reference_speed,
+            required_speed,
+            teacher_rate_min,
+            teacher_rate_max,
+            teacher_rate,
+            scaled_t_hit,
+            scaled_t_cycle,
+            pre_swing_wait,
+            reaction_margin,
+            site_vx,
+            site_vy,
+            site_vz,
+        ) = tuple(float(value) for value in timing_row)
+        if (
+            time_to_contact <= 0.0
+            or reference_t_hit <= 0.0
+            or reference_t_cycle <= reference_t_hit
+            or reference_speed <= 0.0
+            or required_speed <= 0.0
+            or teacher_rate_min <= 0.0
+            or teacher_rate_max < teacher_rate_min
+            or teacher_rate <= 0.0
+            or scaled_t_hit <= 0.0
+            or scaled_t_cycle <= scaled_t_hit
+            or pre_swing_wait < 0.0
+            or reaction_margin < 0.0
+            or not teacher_rate_min <= 1.0 <= teacher_rate_max
+        ):
+            raise ValueError("fixed-view timing row has a range/order violation")
+        runtime = self._action_ball_runtime_module_bound
+        contact_geometry = runtime._contact_geometry
+        try:
+            canonical_teacher_rate = (
+                contact_geometry.canonical_teacher_rate_from_site_speed(
+                    required_speed,
+                    reference_speed,
+                    teacher_rate_min,
+                    teacher_rate_max,
+                )
+            )
+        except contact_geometry.ExactFaceContactGeometryError as exc:
+            raise ValueError(
+                "fixed-view teacher_rate is outside its certified range"
+            ) from exc
+        self._action_ball_close_float(
+            teacher_rate,
+            canonical_teacher_rate,
+            name="fixed-view canonical teacher_rate",
+        )
+        self._action_ball_close_float(
+            required_speed,
+            math.sqrt(site_vx * site_vx + site_vy * site_vy + site_vz * site_vz),
+            name="fixed-view required racket-site speed",
+        )
+        self._action_ball_close_float(
+            teacher_rate,
+            required_speed / reference_speed,
+            name="fixed-view teacher_rate=required/reference",
+        )
+        self._action_ball_close_float(
+            scaled_t_hit,
+            reference_t_hit / teacher_rate,
+            name="fixed-view scaled_t_hit_s",
+        )
+        self._action_ball_close_float(
+            scaled_t_cycle,
+            reference_t_cycle / teacher_rate,
+            name="fixed-view scaled_t_cycle_s",
+        )
+        self._action_ball_close_float(
+            pre_swing_wait,
+            time_to_contact - scaled_t_hit,
+            name="fixed-view pre_swing_wait_s",
+        )
+        if (
+            pre_swing_wait + 1.0e-12 < reaction_margin
+            or pre_swing_wait > 1.0 + 1.0e-12
+        ):
+            raise ValueError(
+                "fixed-view pre-swing wait violates reaction/one-second bounds"
+            )
+        policy_dt = float(self._env.step_dt)
+        if (
+            pre_swing_wait
+            + scaled_t_cycle
+            + policy_dt
+            > int(self._env.max_episode_length) * policy_dt + 1.0e-12
+        ):
+            raise ValueError(
+                "fixed-view task cycle plus close tick exceeds runtime episode horizon"
+            )
+        segment_length = int(self._action_ball_segment_lengths[0])
+        self._action_ball_close_float(
+            reference_t_cycle,
+            (segment_length - 1) * policy_dt,
+            name="fixed-view reference_t_cycle_s vs admitted motion",
+        )
+        hit_frame = reference_t_hit / policy_dt
+        self._action_ball_close_float(
+            hit_frame,
+            float(round(hit_frame)),
+            name="fixed-view reference_t_hit_s policy-frame alignment",
+        )
+        if not 0 < round(hit_frame) < segment_length - 1:
+            raise ValueError(
+                "fixed-view task hit frame is outside the admitted motion interior"
+            )
+        return (
+            time_to_contact,
+            teacher_rate,
+            scaled_t_hit,
+            scaled_t_cycle,
+            pre_swing_wait,
+        )
 
     def _validate_action_ball_task_ref_and_receipt_host(
         self,
@@ -4305,14 +4780,6 @@ class MotionCommand(CommandTerm):
         ):
             raise ValueError(
                 "action-ball pre-swing wait violates reaction/one-second bounds"
-            )
-        if (
-            self.action_ball_diagnostic_split_ready_teacher
-            and pre_swing_wait + 1.0e-12 < float(self._env.step_dt)
-        ):
-            raise ValueError(
-                "split-ready measured stroke requires at least one policy "
-                "step of teacher-frame0 transition"
             )
         runtime_episode_length = (
             int(self._env.max_episode_length) * float(self._env.step_dt)
@@ -4646,15 +5113,6 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball pre-swing wait violates reaction/one-second bounds"
             )
-        if (
-            self.action_ball_diagnostic_split_ready_teacher
-            and pre_swing_wait + 1.0e-12 < float(self._env.step_dt)
-        ):
-            raise ValueError(
-                "split-ready measured stroke requires at least one policy "
-                "step of teacher-frame0 transition"
-            )
-
         runtime_episode_length = (
             int(self._env.max_episode_length) * float(self._env.step_dt)
         )
@@ -4942,6 +5400,157 @@ class MotionCommand(CommandTerm):
             host_identity_rows=host_identity_rows,
             receipts=receipts,
             task_refs=task_refs,
+        )
+
+    def install_action_ball_fixed_view_timing_now(
+        self,
+        *,
+        env_ids: torch.Tensor,
+        host_identity_rows: tuple,
+        fixed_view_identity_sha256: str,
+    ) -> None:
+        """Activate one shared immutable timing row without task receipts."""
+
+        if (
+            not self.action_ball_fixed_view_enabled
+            or self._action_ball_birth_broker is None
+            or not self._action_ball_birth_broker.diagnostic_fast_path
+            or fixed_view_identity_sha256
+            != self._action_ball_fixed_view_identity_sha256
+        ):
+            raise RuntimeError(
+                "fixed-view timing install is outside its immutable N1 diagnostic authority"
+            )
+        ids = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.device
+        ).reshape(-1)
+        if (
+            type(host_identity_rows) is not tuple
+            or not host_identity_rows
+            or len(host_identity_rows) != len(ids)
+            or self._action_ball_diagnostic_pending_row_count != len(ids)
+        ):
+            raise ValueError(
+                "fixed-view timing requires one aligned non-empty pending reset batch"
+            )
+        seen_envs = set()
+        for row_index, row in enumerate(host_identity_rows):
+            if type(row) is not tuple or len(row) != 7:
+                raise ValueError(
+                    "fixed-view timing identity row must have seven fields"
+                )
+            (
+                env_id,
+                action_slot,
+                action_uid,
+                reset_generation,
+                swing_generation,
+                previous_swing_generation,
+                active_before_install,
+            ) = row
+            if (
+                type(env_id) is not int
+                or env_id < 0
+                or env_id >= self.num_envs
+                or env_id in seen_envs
+                or type(action_slot) is not int
+                or action_slot != 0
+                or type(action_uid) is not int
+                or action_uid != self._action_ball_action_uids[0]
+                or type(reset_generation) is not int
+                or reset_generation < 1
+                or type(swing_generation) is not int
+                or swing_generation < 0
+                or type(previous_swing_generation) is not int
+                or previous_swing_generation < -1
+                or type(active_before_install) is not bool
+            ):
+                raise ValueError(
+                    f"fixed-view timing identity row {row_index} is invalid"
+                )
+            if swing_generation > 0 and (
+                swing_generation != previous_swing_generation + 1
+            ):
+                raise ValueError(
+                    "fixed-view wrap generation did not advance exactly once"
+                )
+            seen_envs.add(env_id)
+        # The caller's device ids are already the reset selection.  Validate
+        # their host identity/generation handoff with one compact H2D packet;
+        # never copy the ids back to the host (that would add a second reset
+        # synchronization after Racket's existing identity packet).
+        expected_identity = torch.tensor(
+            [
+                (row[0], row[3], row[4])
+                for row in host_identity_rows
+            ],
+            dtype=torch.long,
+            device=self.device,
+        )
+        if tuple(expected_identity.shape) != (len(ids), 3):
+            raise RuntimeError(
+                "fixed-view timing identity staging returned the wrong shape"
+            )
+        torch._assert_async(torch.all(ids == expected_identity[:, 0]))
+        torch._assert_async(
+            torch.all(
+                self._action_ball_reset_generation[ids]
+                == expected_identity[:, 1]
+            )
+        )
+        torch._assert_async(
+            torch.all(
+                self._action_ball_swing_generation[ids]
+                == expected_identity[:, 2]
+            )
+        )
+        torch._assert_async(torch.all(self.clip_id[ids] == 0))
+        timing = self._action_ball_fixed_view_timing_row_device.expand(
+            len(ids), 5
+        )
+        if tuple(timing.shape) != (len(ids), 5):
+            raise RuntimeError("fixed-view timing broadcast returned the wrong shape")
+        swing_generation = self._action_ball_swing_generation[ids]
+        pending_elapsed = torch.where(
+            swing_generation == 0,
+            torch.zeros(
+                len(ids),
+                dtype=self._action_ball_task_age_s.dtype,
+                device=self.device,
+            ),
+            torch.full(
+                (len(ids),),
+                float(self._env.step_dt),
+                dtype=self._action_ball_task_age_s.dtype,
+                device=self.device,
+            ),
+        )
+        torch._assert_async(
+            torch.all(~self._action_ball_task_timing_active[ids])
+        )
+        torch._assert_async(
+            torch.all(pending_elapsed <= timing[:, 4] + 1.0e-12)
+        )
+        self._action_ball_task_pending_elapsed_s[ids] = pending_elapsed
+        self._action_ball_task_age_s[ids] = pending_elapsed
+        self._action_ball_time_to_contact_s[ids] = timing[:, 0]
+        self._action_ball_teacher_rate[ids] = timing[:, 1]
+        self._action_ball_scaled_t_hit_s[ids] = timing[:, 2]
+        self._action_ball_scaled_t_cycle_s[ids] = timing[:, 3]
+        self._action_ball_pre_swing_wait_s[ids] = timing[:, 4]
+        self._action_ball_task_timing_active[ids] = True
+        self._action_ball_diagnostic_pending_row_count -= len(ids)
+        # A strict load deliberately keeps timing inactive until its deferred
+        # first true reset.  The first successful fixed-view install consumes
+        # that checkpoint-only allowance; subsequent snapshots must again
+        # observe a fully installed handoff.
+        self._action_ball_expected_shared_racket_state_sha256 = None
+        torch._assert_async(
+            torch.all(
+                self._action_ball_task_timing_active[
+                    self._action_ball_reset_generation > 0
+                ]
+            )
         )
 
     def _resolve_pending_action_ball_tasks(self) -> None:
@@ -5462,10 +6071,10 @@ class MotionCommand(CommandTerm):
         """Rows allowed to receive body-imitation income this control step.
 
         Ordinary hold/recovery rows stay excluded.  The measured split-ready
-        diagnostic is different: its receipt-owned wait is the supervised
-        physical-ready -> frozen teacher-frame0 transition, so body pose and
-        stationary velocity imitation must remain active while ``in_hold``
-        continues to protect reset-relative termination semantics.
+        diagnostic is different: hidden RESET_WAIT supervises the frozen
+        physical safe-ready reference, then atomic reveal exposes measured
+        frame 0.  Body pose and stationary velocity imitation therefore stay
+        active while ``in_hold`` protects reset-relative termination semantics.
         """
 
         if self.action_ball_diagnostic_split_ready_teacher:
@@ -5982,7 +6591,19 @@ class MotionCommand(CommandTerm):
         # stand_start transition. C++ mirrors this (pp_policy: refs.joint_pos =
         # default_q at level 0) — keep them in lockstep.
         if self.canonical_ready_mode:
-            return self.motion.joint_pos[self._pose_reference_steps()]
+            measured = self.motion.joint_pos[self._pose_reference_steps()]
+            if (
+                self.action_ball_diagnostic_split_ready_teacher
+                and self._action_ball_public_task_valid is not None
+            ):
+                wait = self._action_ball_safe_ready_wait_mask()
+                safe = (
+                    self._action_ball_dynamic_ready_physical_joint_pos_rad[
+                        self.clip_id
+                    ]
+                )
+                measured = torch.where(wait[:, None], safe, measured)
+            return measured
         jp = self.motion.joint_pos[self.time_steps]
         dq = self.robot.data.default_joint_pos
         return torch.where(self.in_hold[:, None], dq, jp)
@@ -6000,16 +6621,46 @@ class MotionCommand(CommandTerm):
         # R14: at playback speed s the reference joints traverse the same poses s× as fast.
         if self.retiming_active:
             jv = jv * self.speed_scale[:, None]
-        return torch.where(self.in_hold[:, None], torch.zeros_like(jv), jv)
+        stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
+        return torch.where(stationary[:, None], torch.zeros_like(jv), jv)
 
     @property
     def body_pos_w(self) -> torch.Tensor:
+        if self.action_ball_diagnostic_split_ready_teacher:
+            self._capture_action_ball_safe_ready_reference()
         steps = self._pose_reference_steps()
-        return self.motion.body_pos_w[steps] + self._env.scene.env_origins[:, None, :]
+        measured = (
+            self.motion.body_pos_w[steps]
+            + self._env.scene.env_origins[:, None, :]
+        )
+        if (
+            self.action_ball_diagnostic_split_ready_teacher
+            and self._action_ball_public_task_valid is not None
+        ):
+            wait = self._action_ball_safe_ready_wait_mask()
+            measured = torch.where(
+                wait[:, None, None],
+                self._action_ball_safe_ready_body_pos_w,
+                measured,
+            )
+        return measured
 
     @property
     def body_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[self._pose_reference_steps()]
+        if self.action_ball_diagnostic_split_ready_teacher:
+            self._capture_action_ball_safe_ready_reference()
+        measured = self.motion.body_quat_w[self._pose_reference_steps()]
+        if (
+            self.action_ball_diagnostic_split_ready_teacher
+            and self._action_ball_public_task_valid is not None
+        ):
+            wait = self._action_ball_safe_ready_wait_mask()
+            measured = torch.where(
+                wait[:, None, None],
+                self._action_ball_safe_ready_body_quat_w,
+                measured,
+            )
+        return measured
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
@@ -6019,25 +6670,24 @@ class MotionCommand(CommandTerm):
         v = self.motion.body_lin_vel_w[self.time_steps]
         if self.retiming_active:
             v = v * self.speed_scale[:, None, None]
-        return torch.where(self.in_hold[:, None, None], torch.zeros_like(v), v)
+        stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
+        return torch.where(stationary[:, None, None], torch.zeros_like(v), v)
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
         v = self.motion.body_ang_vel_w[self.time_steps]
         if self.retiming_active:
             v = v * self.speed_scale[:, None, None]
-        return torch.where(self.in_hold[:, None, None], torch.zeros_like(v), v)
+        stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
+        return torch.where(stationary[:, None, None], torch.zeros_like(v), v)
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
-        steps = self._pose_reference_steps()
-        return self.motion.body_pos_w[steps, self.motion_anchor_body_index] + self._env.scene.env_origins
+        return self.body_pos_w[:, self.motion_anchor_body_index]
 
     @property
     def anchor_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[
-            self._pose_reference_steps(), self.motion_anchor_body_index
-        ]
+        return self.body_quat_w[:, self.motion_anchor_body_index]
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
@@ -6045,7 +6695,8 @@ class MotionCommand(CommandTerm):
         if self.retiming_active:
             alv = alv * self.speed_scale[:, None]
         if self.canonical_ready_mode:
-            alv = torch.where(self.in_hold[:, None], torch.zeros_like(alv), alv)
+            stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
+            alv = torch.where(stationary[:, None], torch.zeros_like(alv), alv)
         return alv
 
     @property
@@ -6054,7 +6705,8 @@ class MotionCommand(CommandTerm):
         if self.retiming_active:
             aav = aav * self.speed_scale[:, None]
         if self.canonical_ready_mode:
-            aav = torch.where(self.in_hold[:, None], torch.zeros_like(aav), aav)
+            stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
+            aav = torch.where(stationary[:, None], torch.zeros_like(aav), aav)
         return aav
 
     @property
@@ -6388,7 +7040,7 @@ class MotionCommand(CommandTerm):
             admission_receipt = (
                 self.action_ball_motion_admission_hard_contract()
             )
-            identity["action_ball"] = {
+            action_ball_identity = {
                 "runtime_contract_sha256": (
                     self._action_ball_runtime_module_bound.RUNTIME_CONTRACT_SHA256
                 ),
@@ -6408,8 +7060,12 @@ class MotionCommand(CommandTerm):
                     admission_receipt["canonical_sha256"]
                 ),
                 "timing_authority": (
-                    self._action_ball_runtime_module_bound
-                    .TASK_RECEIPT_TIMING_AUTHORITY
+                    (
+                        "immutable_n1_fixed_view_row_zero"
+                        if self.action_ball_fixed_view_enabled
+                        else self._action_ball_runtime_module_bound
+                        .TASK_RECEIPT_TIMING_AUTHORITY
+                    )
                 ),
                 "policy_dt_s": float(self._env.step_dt),
                 "episode_length_s": (
@@ -6417,10 +7073,39 @@ class MotionCommand(CommandTerm):
                     * float(self._env.step_dt)
                 ),
             }
+            # Keep the established online/banded identity byte-for-byte
+            # stable.  Only the explicitly bound fixed view owns this key.
+            if self.action_ball_fixed_view_enabled:
+                action_ball_identity["fixed_view_identity_sha256"] = (
+                    self._action_ball_fixed_view_identity_sha256
+                )
+            identity["action_ball"] = action_ball_identity
         return identity
 
     def _action_ball_exact_resume_state_dict(self) -> dict:
-        broker_state = self._action_ball_birth_broker.state_dict()
+        if self.action_ball_fixed_view_enabled:
+            pending_count = self._action_ball_diagnostic_pending_row_count
+            active_generation = self._action_ball_reset_generation > 0
+            timing_complete = bool(
+                torch.all(
+                    ~active_generation
+                    | self._action_ball_task_timing_active
+                )
+            )
+            if pending_count != 0 or (
+                not timing_complete
+                and self._action_ball_expected_shared_racket_state_sha256
+                is None
+            ):
+                raise RuntimeError(
+                    "fixed-view exact resume cannot snapshot an incomplete "
+                    "Motion/Racket timing handoff"
+                )
+        broker_state = (
+            self._action_ball_fixed_view_broker_state_accessor()
+            if self.action_ball_fixed_view_enabled
+            else self._action_ball_birth_broker.state_dict()
+        )
         self._action_ball_sha256(
             broker_state.get("integrity_sha256"),
             name="broker.integrity_sha256",
@@ -6445,7 +7130,19 @@ class MotionCommand(CommandTerm):
             transcript[(row["env_id"], row["reset_generation"])] = row[
                 "canonical_sha256"
             ]
-        expected_seen = set(transcript.values())
+        expected_seen = (
+            {
+                transcript[(env_id, generation)]
+                for env_id, generation in (
+                    (int(env), int(generation))
+                    for env, generation in broker_state.get(
+                        "consumed_generations", ()
+                    )
+                )
+            }
+            if self.action_ball_fixed_view_enabled
+            else set(transcript.values())
+        )
         if expected_seen != self._action_ball_seen_birth_receipts:
             raise RuntimeError(
                 "Motion/broker committed birth transcript diverged"
@@ -6483,24 +7180,31 @@ class MotionCommand(CommandTerm):
                 raise RuntimeError(
                     "Motion current generation/receipt differs from broker transcript"
                 )
-            if type(task_ref) is not runtime.ActionTaskReceiptRef:
-                raise RuntimeError(
-                    "positive-generation env lacks an exact active task ref"
+            if self.action_ball_fixed_view_enabled:
+                if task_ref is not None:
+                    raise RuntimeError(
+                        "fixed-view Motion state must not contain a legacy task ref"
+                    )
+                task_ref_rows.append(None)
+            else:
+                if type(task_ref) is not runtime.ActionTaskReceiptRef:
+                    raise RuntimeError(
+                        "positive-generation env lacks an exact active task ref"
+                    )
+                live_ref = self._action_ball_task_ref_for_env(env_id)
+                if live_ref != task_ref:
+                    raise RuntimeError(
+                        "Motion active task ref differs from Racket authority"
+                    )
+                resolved = self._action_ball_task_receipt_resolver(task_ref)
+                self._validate_action_ball_task_ref_and_receipt(
+                    task_ref, resolved, env_id=env_id
                 )
-            live_ref = self._action_ball_task_ref_for_env(env_id)
-            if live_ref != task_ref:
-                raise RuntimeError(
-                    "Motion active task ref differs from Racket authority"
-                )
-            resolved = self._action_ball_task_receipt_resolver(task_ref)
-            self._validate_action_ball_task_ref_and_receipt(
-                task_ref, resolved, env_id=env_id
-            )
-            task_ref_rows.append(task_ref.to_dict())
+                task_ref_rows.append(task_ref.to_dict())
         admission_receipt = (
             self.action_ball_motion_admission_hard_contract()
         )
-        return {
+        result = {
             "runtime_contract_sha256": (
                 self._action_ball_runtime_module_bound.RUNTIME_CONTRACT_SHA256
             ),
@@ -6529,6 +7233,11 @@ class MotionCommand(CommandTerm):
             ),
             "active_task_refs": task_ref_rows,
         }
+        if self.action_ball_fixed_view_enabled:
+            result["fixed_view_identity_sha256"] = (
+                self._action_ball_fixed_view_identity_sha256
+            )
+        return result
 
     def action_ball_shared_broker_state_sha256(self) -> str:
         """Return the live Racket-owned broker snapshot digest for runner ordering checks."""
@@ -6628,16 +7337,13 @@ class MotionCommand(CommandTerm):
             "balanced_clip_sampler": self.balanced_clip_sampler_state_dict(),
         }
         if self._action_ball_birth_broker is not None:
+            # Diagnostic A211/C211 has no promotion authority, but its sampler, question/cache,
+            # WAIT and command continuation state are still real mutable bytes.  Authorization and
+            # recoverability are independent axes: serialize the full schema-4 handoff and keep the
+            # diagnostic brand inside Racket's hard contract instead of silently making every
+            # diagnostic checkpoint fresh-only.
             state["action_ball_birth"] = (
-                {
-                    "diagnostic_unauthorized": True,
-                    "exact_resume_supported": False,
-                    "broker_registry_sha256": (
-                        self._action_ball_birth_broker.registry_sha256
-                    ),
-                }
-                if self._action_ball_birth_broker.diagnostic_fast_path
-                else self._action_ball_exact_resume_state_dict()
+                self._action_ball_exact_resume_state_dict()
             )
         return state
 
@@ -6679,6 +7385,8 @@ class MotionCommand(CommandTerm):
             "seen_birth_receipts",
             "active_task_refs",
         }
+        if self.action_ball_fixed_view_enabled:
+            expected.add("fixed_view_identity_sha256")
         if type(value) is not dict or set(value) != expected:
             raise ValueError(
                 "Motion action-ball exact-resume state keys do not match schema 4"
@@ -6694,6 +7402,11 @@ class MotionCommand(CommandTerm):
             != self._action_ball_birth_broker.registry_sha256
             or value["motion_admission_receipt_sha256"]
             != admission_receipt["canonical_sha256"]
+            or (
+                self.action_ball_fixed_view_enabled
+                and value["fixed_view_identity_sha256"]
+                != self._action_ball_fixed_view_identity_sha256
+            )
         ):
             raise ValueError(
                 "Motion action-ball exact-resume immutable identity differs"
@@ -6765,11 +7478,13 @@ class MotionCommand(CommandTerm):
         for env_id, generation in enumerate(reset_rows):
             digest = current_receipts[env_id]
             ref_row = task_ref_rows[env_id]
-            task_ref = (
-                None
-                if ref_row is None
-                else runtime.ActionTaskReceiptRef.from_dict(ref_row)
-            )
+            task_ref = None
+            if ref_row is not None:
+                if self.action_ball_fixed_view_enabled:
+                    raise ValueError(
+                        "fixed-view Motion resume must not contain task refs"
+                    )
+                task_ref = runtime.ActionTaskReceiptRef.from_dict(ref_row)
             if generation == 0:
                 if digest is not None or task_ref is not None:
                     raise ValueError(
@@ -6780,7 +7495,12 @@ class MotionCommand(CommandTerm):
                     raise ValueError(
                         "positive-generation Motion env lacks a seen birth ref"
                     )
-                if (
+                if self.action_ball_fixed_view_enabled:
+                    if task_ref is not None:
+                        raise ValueError(
+                            "positive-generation fixed-view env has a task ref"
+                        )
+                elif (
                     type(task_ref) is not runtime.ActionTaskReceiptRef
                     or task_ref.env_id != env_id
                     or task_ref.reset_generation != generation
@@ -6810,7 +7530,22 @@ class MotionCommand(CommandTerm):
             "active_task_refs": task_refs,
         }
 
-    def load_exact_resume_state_dict(self, state: dict, strict: bool = True):
+    def validate_exact_resume_state_dict(
+        self, state: dict, *, strict: bool = True
+    ) -> None:
+        """Read-only strict parser used by runner-wide atomic preflight."""
+
+        self.load_exact_resume_state_dict(
+            state, strict=strict, _validate_only=True
+        )
+
+    def load_exact_resume_state_dict(
+        self,
+        state: dict,
+        strict: bool = True,
+        *,
+        _validate_only: bool = False,
+    ) -> None:
         """Restore only an exact schema/config/clip identity match."""
         if strict is not True:
             raise ValueError("MotionCommand exact resume supports only strict=True")
@@ -6845,15 +7580,6 @@ class MotionCommand(CommandTerm):
         if state["identity"] != self._exact_resume_identity():
             raise ValueError(
                 "MotionCommand exact resume motion/config/clip identity does not match"
-            )
-        if (
-            action_ball_bound
-            and self._action_ball_birth_broker.diagnostic_fast_path
-        ):
-            raise ValueError(
-                "diagnostic_unauthorized fast checkpoints contain policy/"
-                "optimizer weights but no exact Motion ActionBall resume "
-                "state"
             )
         action_ball_state = (
             self._prepare_action_ball_exact_resume_state(
@@ -6949,6 +7675,25 @@ class MotionCommand(CommandTerm):
                 dtype=self.robot.data.joint_vel.dtype,
             )
 
+        sampler_state = state["balanced_clip_sampler"]
+        if self._balanced_clip_sampler is None:
+            if sampler_state is not None:
+                raise ValueError(
+                    "checkpoint contains balanced clip sampler state but "
+                    "balanced_clip_sampling is disabled"
+                )
+        else:
+            if sampler_state is None:
+                raise ValueError(
+                    "balanced_clip_sampling is enabled but checkpoint sampler state is missing"
+                )
+            self._balanced_clip_sampler.validate_state_dict(sampler_state)
+
+        # Everything above is pure parsing/staging.  Runner preflight calls this branch for every
+        # command before it allows the first live mutation anywhere in the checkpoint graph.
+        if _validate_only:
+            return
+
         # Racket owns and restores the shared evaluator/curriculum/provider/domain/broker/pool/task
         # graph before this local load.  Motion never restores those bytes; it stages their full
         # digest plus opaque local refs for the runner's post-load finalize.
@@ -7036,6 +7781,8 @@ class MotionCommand(CommandTerm):
                 ):
                     if task_ref is not None:
                         self.clip_id[env_id] = task_ref.action_slot
+                if self.action_ball_fixed_view_enabled:
+                    self.clip_id.zero_()
                 # The documented resume path finalizes Racket's restored authority and then
                 # performs one full reset.  No pre-checkpoint task clock is replayed or allowed to
                 # touch the simulator between those operations.
@@ -8161,6 +8908,13 @@ class MotionCommand(CommandTerm):
             _max_len = int(getattr(self._env, "max_episode_length", 0) or 0)
             if _ep_buf is not None and _max_len > 1:
                 _ep_buf.add_(torch.randint(0, _max_len, (self.num_envs,), device=_ep_buf.device))
+        # The first command update after a physical split-ready reset sees the
+        # simulator's settled FK tensors.  Freeze them once for RESET_WAIT;
+        # later policy motion cannot turn the mimic target into a moving copy
+        # of the robot.
+        if self.action_ball_diagnostic_split_ready_teacher:
+            self._capture_action_ball_safe_ready_reference()
+
         # Pre-swing HOLD: action-ball owns a continuous receipt deadline (including a possible
         # fractional first motion tick); legacy paths retain their integer random hold counter.
         action_ball_active = self._action_ball_birth_broker is not None

@@ -133,14 +133,17 @@ TERMINATION_SOURCE_A3_BODY_NAMES = (
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/robots/agibot_a3.py"
 )
+# Repinned when the Isaac ActionBall actual-q hard edge moved to telemetry mode
+# (``terminate=False``) and the ActionBall reference envelope narrowed to the feet.
 EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256 = (
-    "0d70e9ac8e79bfd6e5f3ebba1321e7cd5463eb278b12290229fbd1d51baf37c2"
+    "34fa770e03b4dc15d63cef73ad946b306508e31dc3b38f2a15101f2e58813a2e"
 )
 EXPECTED_PHASE_BASE_CONFIG_SEMANTIC_AST_SHA256 = (
     "aefdf83d0dbd39144da07cb4c7bcb2eee59c552174e00b8d28747cdde992e49c"
 )
+# Repinned for the ``terminate`` parameter on actual_joint_position_forbidden_zone.
 EXPECTED_PHASE_RAW_CALLABLES_SEMANTIC_AST_SHA256 = (
-    "ca2bba2fb604d5624ccc7482228a11dd3a15f36d2e08a16a70cdfa453abdf8c4"
+    "741fc1beaa0143d54b7883fe2b4d22b56316ef362275f5318b6b41bfbf8ba587"
 )
 EXPECTED_PHASE_WRAPPERS_SEMANTIC_AST_SHA256 = (
     "cda50dc553aecc5657470f726e21c4d3ed572a829f2eec0ba951166286646420"
@@ -226,9 +229,25 @@ def _plain_sha256(value: Any, name: str) -> str:
 
 
 def _portable_ast_dump(node: ast.AST) -> str:
-    """Serialize selected source semantics identically on Python 3.10+."""
+    """Serialize selected source semantics identically on Python 3.8+."""
 
     def normalize(value: Any) -> Any:
+        # Python 3.8 wraps subscript slices in ``ast.Index`` while 3.9+
+        # removed that syntax-only node.  It carries no source semantics, so
+        # unwrap it before the generic AST case to keep pinned digests stable
+        # across every interpreter supported by this repository.
+        if isinstance(value, ast.Index):
+            return normalize(value.value)
+        # Multi-dimensional slices were ``ExtSlice(dims=...)`` on 3.8 and are
+        # ``Tuple(elts=..., ctx=Load())`` on 3.9+.  Canonicalize to the latter.
+        if isinstance(value, ast.ExtSlice):
+            return [
+                "Tuple",
+                [
+                    ["elts", normalize(value.dims)],
+                    ["ctx", normalize(ast.Load())],
+                ],
+            ]
         if isinstance(value, ast.AST):
             fields = []
             for field, child in ast.iter_fields(value):
@@ -968,6 +987,9 @@ def _c_lite_physical_sample(core: Any, question: Any) -> dict[str, Any]:
     if not math.isfinite(nominal_time) or nominal_time <= 0.0:
         raise VecEnvContractError("C-lite question contact time is invalid")
     return {
+        # C211's causal strike bridge grades the achieved official site, not
+        # the selected-rubber area centroid used by the legacy C-lite term.
+        "official_racket_site_w_m": tuple(float(value) for value in site),
         "selected_rubber_center_w_m": tuple(float(value) for value in selected_center),
         "ball_center_w_m": tuple(float(value) for value in ball),
         "miss_sample_eligible": (
@@ -1115,6 +1137,26 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
                     "q<=lower+tolerance or q>=upper-tolerance)"
                 ),
                 "sample_timing": "post_control_step",
+                # 人话:这一条只记录不终止。收据必须自己说清楚,否则读收据的人会以为它还会掐 episode。
+                #
+                # The predicate above is unchanged; only its consequence moved.  Isaac's
+                # HOPEActionBallTerminationsCfg passes ``terminate=False`` and this lane mirrors
+                # it, so the reason never enters ``exact_hard_reasons`` and never drives a reset.
+                # Evidence is preserved under ``joint_actual_forbidden_observed_ticks`` /
+                # ``first_joint_actual_forbidden_observed`` in the ledger snapshot, and a non-zero
+                # count is promotion-blocking (see ``promotion_blocking_evidence``).
+                "terminates_episode": False,
+                "mode": "telemetry_only",
+                "evidence_fields": (
+                    "joint_actual_forbidden_observed_ticks",
+                    "first_joint_actual_forbidden_observed",
+                ),
+                "rationale": (
+                    "binary termination on every hard-edge touch reproduced the CaT "
+                    "(arXiv:2403.18765) identically-zero-return ablation: 7/7 episodes died at "
+                    "ticks 69-88, all before the nominal strike, against a measured teacher whose "
+                    "own worst limit margin is 0.116 rad (16.6% of travel)"
+                ),
             },
         },
         "exact_robot_table": {
@@ -1264,6 +1306,17 @@ class DiagnosticEventLedger:
         }
     )
     first_exact_hard_termination: dict[str, Any] | None = None
+    # 人话:关节撞硬限位不再终止 episode,但事件本身必须继续留痕,否则会训出一个不能上机的策略。
+    #
+    # Observed-but-not-terminal hard-edge accounting.  ``joint_actual_forbidden`` moved to
+    # telemetry mode to match the Isaac ``terminate=False`` semantics, so it must NOT enter
+    # ``exact_hard_reason_counts`` (that dict is the terminal-reason ledger and feeds the
+    # reset mask).  It still has to survive as promotion-blocking evidence: the vendor-aligned
+    # ``build_1`` structure is "do not shorten the episode, but any non-zero fault blocks the
+    # checkpoint".  Dropping the count instead of the reset would trade one silent failure for
+    # another.
+    joint_actual_forbidden_observed_ticks: int = 0
+    first_joint_actual_forbidden_observed: dict[str, Any] | None = None
     contact_edge_counts: dict[str, int] = field(
         default_factory=lambda: {label: 0 for label in CONTACT_EVENT_LABELS}
     )
@@ -1377,6 +1430,8 @@ class DiagnosticEventLedger:
             raise VecEnvContractError(
                 "plant.joint_actual_forbidden_substep must be bool"
             )
+        # 保留"本 tick 末态自身越限"与"tick 内 substep 触边"两个来源,便于收据归因。
+        current_actual_forbidden = joint_actual_forbidden
         joint_actual_forbidden = joint_actual_forbidden or substep_actual
         robot_hit_table = plant.get("robot_hit_table_substep")
         if type(robot_hit_table) is not bool:
@@ -1409,8 +1464,22 @@ class DiagnosticEventLedger:
             exact_hard_reasons.append("robot_hit_table")
         if joint_qdes_forbidden:
             exact_hard_reasons.append("joint_qdes_forbidden")
+        # 人话:关节撞硬限位照样记录、照样进收据、照样卡晋级,但不再当场掐掉这一局 ——
+        # 与 Isaac 侧 HOPEActionBallTerminationsCfg.joint_actual_forbidden(terminate=False)
+        # 保持同一个 MDP。两个引擎在这一条上必须同步,否则 cross-engine parity 比的是两个
+        # 不同的问题。
+        #
+        # 它**不进** exact_hard_reasons(那是终止原因账本, 会驱动 reset mask), 而是走独立的
+        # observed 计数, 这样"不终止"与"仍然卡晋级"两件事同时成立。
         if joint_actual_forbidden:
-            exact_hard_reasons.append("joint_actual_forbidden")
+            self.joint_actual_forbidden_observed_ticks += 1
+            if self.first_joint_actual_forbidden_observed is None:
+                self.first_joint_actual_forbidden_observed = {
+                    "policy_tick": int(self.policy_ticks),
+                    "physics_substep": int(self.physics_substeps),
+                    "current_step_predicate": bool(current_actual_forbidden),
+                    "substep_latch": bool(substep_actual),
+                }
 
         normalized_events = []
         previous_order: tuple[int, int, str] | None = None
@@ -1540,6 +1609,39 @@ class DiagnosticEventLedger:
             },
             "plant_counters": dict(self.plant_counters),
             "plant_maxima": dict(self.plant_maxima),
+            # Observed-but-not-terminal hard-edge evidence.  Non-zero here must block
+            # promotion/deployment even though it no longer ends an episode.
+            "joint_actual_forbidden_observed_ticks": int(
+                self.joint_actual_forbidden_observed_ticks
+            ),
+            "first_joint_actual_forbidden_observed": (
+                None
+                if self.first_joint_actual_forbidden_observed is None
+                else dict(self.first_joint_actual_forbidden_observed)
+            ),
+            # 人话:上面两个是原始计数,下面这个是"能不能上机"的结论。分开写是因为只有结论会被
+            # 下游读 —— 一个需要人记得去看的计数器,等于没有护栏。
+            #
+            # The whole point of moving the hard edge off the Done bit is that the episode keeps
+            # running while the fault still bars promotion.  Emitting only a raw counter would
+            # have delivered the first half and silently dropped the second, which is precisely
+            # the "trains a policy that cannot be deployed" failure this mode has to avoid.
+            # Consumers must treat ``promotion_blocked`` as fail-closed: absent field or True
+            # both mean "not promotable".
+            "promotion_blocking_evidence": {
+                "promotion_blocked": (
+                    self.joint_actual_forbidden_observed_ticks > 0
+                ),
+                "reasons": (
+                    ["joint_actual_forbidden_observed"]
+                    if self.joint_actual_forbidden_observed_ticks > 0
+                    else []
+                ),
+                "semantics": (
+                    "non-terminal hard-edge faults; these never shorten an episode but they do "
+                    "bar checkpoint promotion, deployment and hardware use"
+                ),
+            },
             "exact_hard_reason_counts": dict(self.exact_hard_reason_counts),
             "first_exact_hard_termination": (
                 None
@@ -1635,6 +1737,11 @@ class DiagnosticBatchStep:
     time_outs: Any
     exact_hard_terminations: Any
     exact_hard_termination_reasons: tuple[str | None, ...]
+    # Diagnostic-only visibility into finite qdes projection.  The mask is in
+    # the sealed 31-joint action order and is derived from the exact raw/applied
+    # qdes pair returned by PlantRunner for this transition.  It is deliberately
+    # not an actor observation and does not alter reward semantics.
+    per_env_qdes_projection_masks: tuple[tuple[bool, ...], ...]
 
 
 class MujocoN1DiagnosticVecEnv:
@@ -1666,7 +1773,7 @@ class MujocoN1DiagnosticVecEnv:
             )
         if diagnostic_episode_length is not None and not enable_c_lite_reward:
             raise VecEnvContractError(
-                "a shortened diagnostic episode is only available in C-lite"
+                "an explicit diagnostic episode horizon is only available in C-lite"
             )
         if any(
             core.binding.binding_sha256 != robot_tape.plant_binding_sha256
@@ -1703,13 +1810,28 @@ class MujocoN1DiagnosticVecEnv:
         tape_episode_length = int(robot_tape.actions.shape[0])
         if tape_episode_length < 1:
             raise VecEnvContractError("robot tape must contain at least one action row")
+        phase_replay_bound = any(
+            getattr(core, "phase_fidelity_reference_tape", None) is not None
+            for core in self.cores
+        )
         if (
             diagnostic_episode_length is not None
             and diagnostic_episode_length > tape_episode_length
+            and phase_replay_bound
         ):
             raise VecEnvContractError(
-                "diagnostic_episode_length exceeds the bound robot tape"
+                "diagnostic_episode_length exceeds its bound phase-replay tape"
             )
+        # In live-policy C-lite/A/C training the fixed robot tape supplies only
+        # the physical reset and delayed-action history.  Its probe actions are
+        # never replayed, so they do not cap the learned-policy horizon.  A
+        # bound phase-fidelity tape is the one case where row count remains a
+        # real runtime dependency and is rejected above.
+        self.live_policy_horizon_decoupled_from_probe_actions = bool(
+            diagnostic_episode_length is not None
+            and diagnostic_episode_length > tape_episode_length
+            and not phase_replay_bound
+        )
         self.max_episode_length = (
             tape_episode_length
             if diagnostic_episode_length is None
@@ -1856,6 +1978,9 @@ class MujocoN1DiagnosticVecEnv:
             ),
             "episode_length": self.max_episode_length,
             "robot_tape_length": tape_episode_length,
+            "live_policy_horizon_decoupled_from_probe_actions": (
+                self.live_policy_horizon_decoupled_from_probe_actions
+            ),
             "diagnostic_unauthorized": True,
         }
         self.unwrapped = self
@@ -1865,6 +1990,14 @@ class MujocoN1DiagnosticVecEnv:
         self._exact_hard_terminated_buf = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+        # Optional outer ActionBall adapters may install one source-bound,
+        # per-episode timeout tick for the measured non-looping stroke.  Zero
+        # means absent.  The native compact-reset machinery must own this edge
+        # so reset observations and episode bookkeeping remain atomic.
+        self._diagnostic_single_stroke_timeout_steps = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._diagnostic_single_stroke_timeout_authority_sha256 = None
         self._observations = torch.empty(
             (self.num_envs, OBSERVATION_WIDTH),
             dtype=torch.float32,
@@ -1875,6 +2008,19 @@ class MujocoN1DiagnosticVecEnv:
         self._c_lite_reward_latches = tuple(
             n1_scalar_reward.N1ScalarRewardLatch() for _ in self.cores
         )
+        # An outer, source-bound recipe may need to choose a different sealed
+        # question for every reset generation (for example a WAIT-extended
+        # ballistic launch).  The provider is deliberately transactional:
+        # staging cannot consume a generation, and commit happens only after
+        # every selected core reset and observation conversion succeeds.
+        self._question_reset_provider = None
+        # Construction performs one bootstrap reset so a trainer can inspect
+        # observations immediately.  A source-bound outer recipe may still
+        # replace that unconsumed boundary with its transactional reset
+        # provider.  The window closes permanently at the first policy
+        # transition (or successful provider install); runtime hot-swapping is
+        # never allowed.
+        self._question_reset_provider_install_open = True
         self._c_lite_reward_receipt = c_lite_reward_contract_receipt()
         self._c_lite_observation_sha256 = _c_lite_observation_contract_sha256()
         self._c_lite_action_sha256 = None
@@ -2021,17 +2167,104 @@ class MujocoN1DiagnosticVecEnv:
         values = np.stack([flatten_observation_groups(row) for row in groups], axis=0)
         return torch.as_tensor(values, dtype=torch.float32, device=self.device)
 
+    def install_question_reset_provider(self, provider: Any) -> None:
+        """Install one transactional per-reset question provider.
+
+        The narrow private protocol is ``stage(env_ids) -> token`` where the
+        token exposes ``questions`` in ``env_ids`` order, followed by exactly
+        one ``commit(token)`` or ``abort(token)``.  This hook exists because a
+        compact reset occurs inside :meth:`diagnostic_step`; an outer wrapper
+        is otherwise too late to install the next episode's question.
+        """
+
+        if not self._question_reset_provider_install_open:
+            raise VecEnvContractError(
+                "question reset provider must be installed before the first "
+                "policy transition"
+            )
+        if self._question_reset_provider is not None:
+            raise VecEnvContractError("question reset provider is already installed")
+        if any(
+            not callable(getattr(provider, name, None))
+            for name in ("stage", "commit", "abort")
+        ):
+            raise VecEnvContractError(
+                "question reset provider omits stage/commit/abort"
+            )
+        self._question_reset_provider = provider
+        self._question_reset_provider_install_open = False
+
+    def _stage_reset_questions(
+        self, env_ids: Sequence[int]
+    ) -> tuple[Any | None, tuple[n1_ball_core.N1Question, ...]]:
+        ids = tuple(int(value) for value in env_ids)
+        provider = self._question_reset_provider
+        if provider is None:
+            return None, tuple(self.questions[index] for index in ids)
+        token = provider.stage(ids)
+        questions = getattr(token, "questions", None)
+        if not isinstance(questions, tuple) or len(questions) != len(ids):
+            try:
+                provider.abort(token)
+            finally:
+                raise VecEnvContractError(
+                    "question reset provider staged a malformed question tuple"
+                )
+        for index, question in zip(ids, questions):
+            if (
+                not isinstance(question, n1_ball_core.N1Question)
+                or question.scene_binding_sha256
+                != self.cores[index].scene_binding_sha256
+                or question.source_sha256
+                != self.question_source_sha256_by_env[index]
+            ):
+                try:
+                    provider.abort(token)
+                finally:
+                    raise VecEnvContractError(
+                        f"question reset provider staged an unbound row {index}"
+                    )
+        return token, questions
+
+    def _commit_reset_questions(
+        self,
+        env_ids: Sequence[int],
+        token: Any | None,
+        questions: Sequence[n1_ball_core.N1Question],
+    ) -> None:
+        if token is None:
+            return
+        provider = self._question_reset_provider
+        if provider is None:
+            raise VecEnvContractError("question reset provider disappeared")
+        provider.commit(token)
+        rows = list(self.questions)
+        for index, question in zip(env_ids, questions):
+            rows[int(index)] = question
+        self.questions = tuple(rows)
+
     def reset(self, *, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
         if seed is not None and (type(seed) is not int or seed < 0):
             raise VecEnvContractError("reset seed must be a non-negative integer")
         self._has_reset = False
+        env_ids = tuple(range(self.num_envs))
+        token = None
         try:
+            token, questions = self._stage_reset_questions(env_ids)
             groups = [
                 core.reset(robot_tape=self.robot_tape, question=question)
-                for core, question in zip(self.cores, self.questions)
+                for core, question in zip(self.cores, questions)
             ]
+            observations = self._tensor_observations(groups)
         except Exception as exc:  # noqa: BLE001 - core reset is an external boundary
+            if token is not None and self._question_reset_provider is not None:
+                self._question_reset_provider.abort(token)
             raise VecEnvContractError("full VecEnv reset failed") from exc
+        try:
+            self._commit_reset_questions(env_ids, token, questions)
+        except Exception as exc:  # noqa: BLE001 - provider commit is an authority boundary
+            self._has_reset = False
+            raise VecEnvContractError("full VecEnv reset question commit failed") from exc
         self.episode_length_buf.zero_()
         self._exact_hard_terminated_buf.zero_()
         self._event_ledgers = tuple(
@@ -2046,10 +2279,58 @@ class MujocoN1DiagnosticVecEnv:
         self._c_lite_reward_latches = tuple(
             n1_scalar_reward.N1ScalarRewardLatch() for _ in self.cores
         )
-        self._observations = self._tensor_observations(groups)
+        self._observations = observations
         self._has_reset = True
         self._at_reset_boundary = True
         return self.get_observations()
+
+    def install_diagnostic_single_stroke_timeout_steps(
+        self,
+        *,
+        env_ids: Sequence[int],
+        timeout_steps: Sequence[int],
+        authority_sha256: str,
+    ) -> None:
+        """Install reset-generation timeouts owned by a sealed outer adapter.
+
+        Only rows currently at their compact-reset boundary may change.  The
+        source identity is immutable after first install, while the tick can
+        vary with each reset generation's WAIT assignment.
+        """
+
+        authority = _plain_sha256(
+            authority_sha256,
+            "diagnostic single-stroke timeout authority SHA",
+        )
+        ids = tuple(env_ids)
+        steps = tuple(timeout_steps)
+        if (
+            len(ids) != len(steps)
+            or not ids
+            or any(type(value) is not int for value in ids)
+            or len(set(ids)) != len(ids)
+            or any(value < 0 or value >= self.num_envs for value in ids)
+            or any(type(value) is not int for value in steps)
+            or any(value < 1 or value > self.max_episode_length for value in steps)
+        ):
+            raise VecEnvContractError(
+                "diagnostic single-stroke timeout rows are malformed"
+            )
+        if (
+            self._diagnostic_single_stroke_timeout_authority_sha256 is not None
+            and self._diagnostic_single_stroke_timeout_authority_sha256
+            != authority
+        ):
+            raise VecEnvContractError(
+                "diagnostic single-stroke timeout authority changed"
+            )
+        if any(int(self.episode_length_buf[index].item()) != 0 for index in ids):
+            raise VecEnvContractError(
+                "diagnostic single-stroke timeout can change only at reset rows"
+            )
+        self._diagnostic_single_stroke_timeout_authority_sha256 = authority
+        for index, step in zip(ids, steps):
+            self._diagnostic_single_stroke_timeout_steps[index] = step
 
     def _compact_reset(self, episode_dones: Any) -> tuple[int, ...]:
         """Reset exactly the completed rows; invalidate the batch on failure."""
@@ -2071,19 +2352,32 @@ class MujocoN1DiagnosticVecEnv:
         if not reset_env_ids:
             return ()
         reset_groups: list[Mapping[str, Any]] = []
+        token = None
         try:
-            for index in reset_env_ids:
+            token, reset_questions = self._stage_reset_questions(reset_env_ids)
+            for index, question in zip(reset_env_ids, reset_questions):
                 reset_groups.append(
                     self.cores[index].reset(
                         robot_tape=self.robot_tape,
-                        question=self.questions[index],
+                        question=question,
                     )
                 )
             reset_observations = self._tensor_observations(reset_groups)
         except Exception as exc:  # noqa: BLE001 - partial core reset is unrecoverable
+            if token is not None and self._question_reset_provider is not None:
+                self._question_reset_provider.abort(token)
             self._has_reset = False
             raise VecEnvContractError(
                 "per-env compact reset failed; full VecEnv reset is required"
+            ) from exc
+        try:
+            self._commit_reset_questions(
+                reset_env_ids, token, reset_questions
+            )
+        except Exception as exc:  # noqa: BLE001 - provider commit is an authority boundary
+            self._has_reset = False
+            raise VecEnvContractError(
+                "per-env compact reset question commit failed"
             ) from exc
         ledgers = list(self._event_ledgers)
         for row, index in enumerate(reset_env_ids):
@@ -2126,6 +2420,58 @@ class MujocoN1DiagnosticVecEnv:
 
         return bool(self._has_reset and self._at_reset_boundary)
 
+    def restore_reset_boundary_questions(
+        self, questions: Sequence[n1_ball_core.N1Question]
+    ) -> Any:
+        """Reconstruct an exact reset boundary without consuming a generation."""
+
+        if not self.is_reset_boundary():
+            raise VecEnvContractError(
+                "question boundary restore requires an existing reset boundary"
+            )
+        rows = tuple(questions)
+        if len(rows) != self.num_envs:
+            raise VecEnvContractError("restored question cardinality differs")
+        for index, question in enumerate(rows):
+            if (
+                not isinstance(question, n1_ball_core.N1Question)
+                or question.scene_binding_sha256
+                != self.cores[index].scene_binding_sha256
+                or question.source_sha256
+                != self.question_source_sha256_by_env[index]
+            ):
+                raise VecEnvContractError(
+                    f"restored reset-boundary question {index} is unbound"
+                )
+        self._has_reset = False
+        try:
+            groups = [
+                core.reset(robot_tape=self.robot_tape, question=question)
+                for core, question in zip(self.cores, rows)
+            ]
+            observations = self._tensor_observations(groups)
+        except Exception as exc:  # noqa: BLE001 - external core boundary
+            raise VecEnvContractError("reset-boundary question restore failed") from exc
+        self.questions = rows
+        self.episode_length_buf.zero_()
+        self._exact_hard_terminated_buf.zero_()
+        self._event_ledgers = tuple(
+            DiagnosticEventLedger(
+                self.control_decimation,
+                phase_fidelity_runtime_available=(
+                    self.exact_phase_fidelity_runtime_available
+                ),
+            )
+            for _ in self.cores
+        )
+        self._c_lite_reward_latches = tuple(
+            n1_scalar_reward.N1ScalarRewardLatch() for _ in self.cores
+        )
+        self._observations = observations
+        self._has_reset = True
+        self._at_reset_boundary = True
+        return observations.clone()
+
     def diagnostic_step(self, actions: Any) -> DiagnosticBatchStep:
         """Advance physics without manufacturing a reward tensor."""
 
@@ -2149,6 +2495,7 @@ class MujocoN1DiagnosticVecEnv:
             )
         if actions.device.type != "cpu" or not torch.isfinite(actions).all():
             raise VecEnvContractError("actions must be finite CPU values")
+        self._question_reset_provider_install_open = False
         self._at_reset_boundary = False
         try:
             rows = []
@@ -2244,7 +2591,17 @@ class MujocoN1DiagnosticVecEnv:
             self.episode_length_buf += 1
             pre_reset_observations = self._tensor_observations(rows)
             self._observations = pre_reset_observations.clone()
-            time_outs = self.episode_length_buf >= self.max_episode_length
+            horizon_time_outs = (
+                self.episode_length_buf >= self.max_episode_length
+            )
+            single_stroke_time_outs = (
+                (self._diagnostic_single_stroke_timeout_steps > 0)
+                & (
+                    self.episode_length_buf
+                    >= self._diagnostic_single_stroke_timeout_steps
+                )
+            )
+            time_outs = horizon_time_outs | single_stroke_time_outs
 
             # Validate and commit every ledger as one batch.  A bad row cannot
             # leave earlier ledgers advanced while later rows remain stale.
@@ -2271,10 +2628,36 @@ class MujocoN1DiagnosticVecEnv:
             exact_hard_reasons = tuple(
                 row["termination"]["exact_hard_reason"] for row in ledgers
             )
+            qdes_projection_masks = []
+            for index, plant in enumerate(plant_rows):
+                raw_qdes = np.asarray(plant.get("qdes_raw"), dtype=np.float64)
+                applied_qdes = np.asarray(plant.get("qdes"), dtype=np.float64)
+                if (
+                    raw_qdes.shape != (self.num_actions,)
+                    or applied_qdes.shape != (self.num_actions,)
+                    or not np.isfinite(raw_qdes).all()
+                    or not np.isfinite(applied_qdes).all()
+                ):
+                    raise VecEnvContractError(
+                        f"plant row {index} omits finite raw/applied qdes"
+                    )
+                mask = np.not_equal(raw_qdes, applied_qdes)
+                declared = plant.get("qdes_clamp_joint_events")
+                if type(declared) is not int or int(np.count_nonzero(mask)) != declared:
+                    raise VecEnvContractError(
+                        f"plant row {index} qdes projection mask/count differ"
+                    )
+                qdes_projection_masks.append(
+                    tuple(bool(value) for value in mask.tolist())
+                )
             self._exact_hard_terminated_buf.copy_(exact_hard_terminations)
             episode_dones = exact_hard_terminations | time_outs
             episode_done_reasons = tuple(
-                "time_out"
+                (
+                    "action_ball_single_stroke_complete"
+                    if bool(single_stroke_time_outs[index].item())
+                    else "time_out"
+                )
                 if bool(time_outs[index].item())
                 else exact_hard_reasons[index]
                 for index in range(self.num_envs)
@@ -2308,6 +2691,7 @@ class MujocoN1DiagnosticVecEnv:
                 time_outs=time_outs.clone(),
                 exact_hard_terminations=exact_hard_terminations.clone(),
                 exact_hard_termination_reasons=exact_hard_reasons,
+                per_env_qdes_projection_masks=tuple(qdes_projection_masks),
             )
         except Exception:
             self._has_reset = False
@@ -2560,6 +2944,9 @@ class MujocoN1DiagnosticVecEnv:
             "robot_tape_length": int(self.robot_tape.actions.shape[0]),
             "shortened_diagnostic_horizon": (
                 self.max_episode_length < int(self.robot_tape.actions.shape[0])
+            ),
+            "live_policy_horizon_decoupled_from_probe_actions": (
+                self.live_policy_horizon_decoupled_from_probe_actions
             ),
             "motion_reward_available": False,
             "motion_reward_value": 0.0,

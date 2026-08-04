@@ -97,7 +97,10 @@ class FakeDiagnosticVecEnv:
         done = self._tick >= self.horizon
         dones = torch.full((self.num_envs,), done, dtype=torch.bool)
         self._boundary = done
-        return observations, rewards, dones, {"tick": self._tick}
+        return observations, rewards, dones, {
+            "tick": self._tick,
+            "time_outs": dones.clone(),
+        }
 
 
 def _config(*, rollout_steps=4):
@@ -237,19 +240,30 @@ def test_checkpoint_contains_complete_state_and_cold_load_matches_next_update(
         "kind",
         "identity",
         "config_sha256",
+        "normalizer_identities",
         "model_state_dict",
         "optimizer_state_dict",
-        "normalizer_state_dict",
+        "actor_normalizer_state_dict",
+        "critic_normalizer_state_dict",
         "rng_state",
         "update_counter",
         "last_update_receipt",
+        "environment_state",
         "boundary",
     }
+    # The generic fake VecEnv has no continuation-state producer.  Schema v3
+    # still carries the field so C211 can seal its 5--25 tick WAIT schedule.
+    assert payload["environment_state"] is None
     assert payload["update_counter"] == first["update_counter"]
+    assert payload["normalizer_identities"] == {
+        "actor": uninterrupted.config.actor_normalizer_identity,
+        "critic": uninterrupted.config.critic_normalizer_identity,
+    }
     assert set(payload["rng_state"]) == {"python", "numpy", "torch_cpu"}
     expected_second = uninterrupted.run_update()
     expected_state = _state_clone(uninterrupted)
-    expected_normalizer = uninterrupted.normalizer.state_dict()
+    expected_actor_normalizer = uninterrupted.actor_normalizer.state_dict()
+    expected_critic_normalizer = uninterrupted.critic_normalizer.state_dict()
 
     cold_env = FakeDiagnosticVecEnv()
     cold = _trainer(cold_env)
@@ -262,7 +276,12 @@ def test_checkpoint_contains_complete_state_and_cold_load_matches_next_update(
     for key, value in cold.model.state_dict().items():
         assert torch.equal(value, expected_state[key])
     for key in ("mean", "m2", "count"):
-        assert torch.equal(cold.normalizer.state_dict()[key], expected_normalizer[key])
+        assert torch.equal(
+            cold.actor_normalizer.state_dict()[key], expected_actor_normalizer[key]
+        )
+        assert torch.equal(
+            cold.critic_normalizer.state_dict()[key], expected_critic_normalizer[key]
+        )
     assert (
         cold.optimizer.state_dict()["param_groups"]
         == uninterrupted.optimizer.state_dict()["param_groups"]

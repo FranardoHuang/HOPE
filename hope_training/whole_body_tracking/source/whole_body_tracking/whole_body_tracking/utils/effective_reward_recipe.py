@@ -44,8 +44,11 @@ REWARD_BACKEND_COMPATIBILITY_KIND = (
 REWARD_TERM_ROLE_OBJECTIVE = "objective"
 REWARD_TERM_ROLE_DIAGNOSTIC_PROBE = "diagnostic_probe"
 ACTION_BALL_ADOPTED_STEP_DT_S = 0.02
-ACTION_BALL_ADOPTED_DEATH_WEIGHT = -300.0
-ACTION_BALL_ADOPTED_DEATH_PER_TERMINATION = -6.0
+# 2026-08-05 层级对齐(exp §5.6 第 7 条):-300.0 -> -10.0,post-dt -6.0 -> -0.2。
+# 这两个常量是运行期 activation ledger 的准入门,不跟着 _REWARD_PACK_V2_DIRECT 改会让
+# A211/C211 一开跑就 RewardActivationLedgerError。
+ACTION_BALL_ADOPTED_DEATH_WEIGHT = -10.0
+ACTION_BALL_ADOPTED_DEATH_PER_TERMINATION = -0.2
 ACTION_BALL_ADOPTED_SOFT_LIMIT_WEIGHT = -5.0
 ACTION_BALL_REWARD_GROUP_TAXONOMY_SCHEMA_VERSION = 1
 ACTION_BALL_REWARD_GROUP_MJLAB_STABILITY = "mjlab_balance_stability"
@@ -295,6 +298,11 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
             ),
             ("strike_capture_bonus", "HOPE", "strike_capture"),
             ("virtual_pass_net", "HOPE", "virtual_net_clearance"),
+            (
+                "virtual_landing_dense",
+                "HOPE A211 achieved-contact shaping",
+                "achieved_contact_landing_error",
+            ),
             ("virtual_landing", "HOPE", "virtual_landing_error"),
             ("virtual_spin", "HOPE", "virtual_spin_error"),
         ),

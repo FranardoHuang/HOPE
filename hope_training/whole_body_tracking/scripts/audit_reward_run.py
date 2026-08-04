@@ -115,10 +115,17 @@ SOFT_LIMIT_CALLABLES = {
     "qdes_limit_barrier": "qdes_limit_barrier_v2",
 }
 ADOPTED_POLICY_DT_S = 0.02
-ADOPTED_DEATH_WEIGHT = -300.0
-ADOPTED_DEATH_PER_EVENT = -6.0
+# 2026-08-05 层级对齐(exp §5.6 第 7 条):-300.0 -> -10.0,post-dt -6.0 -> -0.2。
+ADOPTED_DEATH_WEIGHT = -10.0
+ADOPTED_DEATH_PER_EVENT = -0.2
 ADOPTED_SOFT_LIMIT_WEIGHT = -5.0
-ADOPTED_SOFT_LIMIT_MARGIN_FRAC = 0.08
+# 2026-08-05 带宽对齐(exp §5.6 第 9 条):qdes 通道 0.08 -> 0.05,让 barrier 带外沿接上
+# pre-apply guard 的投影包络内沿;actual-q 通道(joint_limit)不经过投影,保持 0.08。
+# 原本一个常量同时代签两个通道,现按通道分开,免得再抄一次就漂一次。
+ADOPTED_SOFT_LIMIT_MARGIN_FRAC_BY_TERM = {
+    "joint_limit": 0.08,
+    "qdes_limit_barrier": 0.05,
+}
 ADOPTED_SOFT_LIMIT_PENALTY_FLOOR = 0.25
 ADOPTED_SOFT_LIMIT_MAX_JOINTS = 31
 REQUIRED_TERMINATION_TERM_ORDER = (
@@ -3644,7 +3651,8 @@ def _validate_safety_transitions(
             set(params) != expected_param_keys
             or not _close(
                 params.get("margin_frac"),
-                ADOPTED_SOFT_LIMIT_MARGIN_FRAC,
+                # 2026-08-05(exp §5.6 第 9 条):两个通道的带宽自此不同,按项名取。
+                ADOPTED_SOFT_LIMIT_MARGIN_FRAC_BY_TERM[name],
                 rel_tol=0.0,
             )
             or not _close(
@@ -3664,8 +3672,10 @@ def _validate_safety_transitions(
         ):
             audit.fail(
                 "soft_limit_recipe_params",
-                "recipe term {!r} does not bind the adopted 0.08-margin/"
-                "0.25-floor 31-joint contract".format(name),
+                "recipe term {!r} does not bind the adopted {}-margin/"
+                "0.25-floor 31-joint contract".format(
+                    name, ADOPTED_SOFT_LIMIT_MARGIN_FRAC_BY_TERM[name]
+                ),
             )
     if death is None or not _close(
         death["weight"], ADOPTED_DEATH_WEIGHT, rel_tol=0.0

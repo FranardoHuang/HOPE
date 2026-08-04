@@ -1411,6 +1411,17 @@ def _action_ball_preflight_contract(
             "[train.py] action-ball requires racket.action_ball_seed "
             "as a plain integer in [0,2**63)"
         )
+    initial_center_single_question = getattr(
+        racket_cfg,
+        "action_ball_initial_center_single_question",
+        False,
+    )
+    if type(initial_center_single_question) is not bool:
+        raise _OverrideError(
+            "[train.py] action-ball requires "
+            "racket.action_ball_initial_center_single_question as an "
+            "explicit boolean"
+        )
     if (
         isinstance(policy_dt_s, bool)
         or type(policy_dt_s) not in (int, float)
@@ -1426,6 +1437,7 @@ def _action_ball_preflight_contract(
         seed=seed,
         sampling_mixture=SamplingMixture(),
         contact_time_step_s=float(policy_dt_s),
+        initial_center_single_question=initial_center_single_question,
     )
     curriculum_config = build_curriculum_config(loaded.manifest).as_dict()
     profile_adapter = adapted.to_contract()
@@ -1482,6 +1494,9 @@ def _action_ball_preflight_contract(
             "contract_sha256": sampler.sampler_contract_sha256,
             "arm_catalog_sha256": ARM_CATALOG_SHA256,
             "seed": seed,
+            "initial_center_single_question": (
+                initial_center_single_question
+            ),
             "pool_refill_rows": getattr(
                 racket_cfg, "action_ball_pool_refill_rows", None
             ),
@@ -3013,6 +3028,30 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
     )
 
 
+def _validate_immutable_fixed_question_sigma(
+    racket_cfg, *, trainable_211: bool
+) -> None:
+    """Keep fixed-N1 reward widths fixed from rollout zero.
+
+    The rule belongs to the registered learnability experiment, not to an
+    immutable-tape provider.  The historical function name is retained while
+    old diagnostic fixture tests still import/inspect it.
+    """
+
+    adaptive_sigma_attrs = (
+        "adaptive_sigma",
+        "adaptive_sigma_monotonic",
+        "adaptive_sigma_normal",
+    )
+    for attr in adaptive_sigma_attrs:
+        if bool(getattr(racket_cfg, attr, False)):
+            scope = "trainable A211/C211" if trainable_211 else "target ablation"
+            raise _OverrideError(
+                "[train.py] fixed-N1 %s requires "
+                "racket.%s=false" % (scope, attr)
+            )
+
+
 def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     """Fail closed on the action -> ball -> solved-task training recipe."""
 
@@ -3114,9 +3153,9 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
                 "match actor_obs_contract"
             )
         expected_marker = (
-            "action_ball_a211_fixed_question_learnability_v1"
+            "action_ball_a211_fixed_question_learnability_v2"
             if a211_trainable
-            else "action_ball_c211_fixed_midpoint_learnability_v1"
+            else "action_ball_c211_fixed_midpoint_learnability_v2"
         )
         if (
             str(
@@ -3238,6 +3277,16 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     target_observation_noise = getattr(
         racket_cfg, "action_ball_target_observation_noise", True
     )
+    reuse_exact_question = getattr(
+        racket_cfg,
+        "action_ball_reuse_exact_question_until_semantics_change",
+        False,
+    )
+    initial_center_single_question = getattr(
+        racket_cfg,
+        "action_ball_initial_center_single_question",
+        False,
+    )
     validity_shape_is_exact = (
         type(raw_validity) in (tuple, list)
         and len(raw_validity) == 3
@@ -3245,38 +3294,82 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     )
     if a211_trainable:
         target_contract_invalid = (
-            target_source != "immutable_tape"
+            target_source != "online_solver"
+            or target_recipe != "current_lm"
             or not validity_shape_is_exact
             or tuple(raw_validity) != (True, True, True)
-            or type(target_observation_noise) is not bool
+            or target_observation_noise is not False
+            or reuse_exact_question is not True
+            or initial_center_single_question is not True
         )
     elif c211_trainable:
         target_contract_invalid = (
-            target_source != "immutable_tape"
+            target_source != "direct_ball"
             or target_recipe != "outcome_dense_only"
             or not validity_shape_is_exact
             or tuple(raw_validity) != (False, False, False)
             or target_observation_noise is not False
+            or reuse_exact_question is not False
+            or initial_center_single_question is not True
         )
     else:
         target_contract_invalid = (
-            target_source not in ("online_solver", "immutable_tape")
+            target_source not in (
+                "online_solver",
+                "direct_ball",
+                "immutable_tape",
+                "banded_question_bank",
+            )
             or target_recipe not in validity_by_recipe
             or not validity_shape_is_exact
             or tuple(raw_validity) != validity_by_recipe.get(target_recipe)
             or type(target_observation_noise) is not bool
-        )
+            or type(reuse_exact_question) is not bool
+            or type(initial_center_single_question) is not bool
+            or (reuse_exact_question and target_source != "online_solver")
+            or (
+                target_source == "online_solver"
+                and (
+                    target_recipe != "current_lm"
+                    or tuple(raw_validity) != (True, True, True)
+                )
+            )
+            or (
+                target_source == "direct_ball"
+                and (
+                    target_recipe != "outcome_dense_only"
+                    or tuple(raw_validity) != (False, False, False)
+                    or target_observation_noise is not False
+                )
+            )
+            or (
+                target_source == "banded_question_bank"
+                and (
+                    target_recipe != "current_lm"
+                    or tuple(raw_validity) != (True, True, True)
+                )
+            )
+    )
     if target_contract_invalid:
         raise _OverrideError(
             "[train.py] invalid fixed-question target contract "
             f"contract: source={target_source!r}, recipe={target_recipe!r}, "
-            f"validity={raw_validity!r}"
+            f"validity={raw_validity!r}, target_observation_noise="
+            f"{target_observation_noise!r}, exact_question_reuse="
+            f"{reuse_exact_question!r}, initial_center_single_question="
+            f"{initial_center_single_question!r}"
         )
     tape_path = str(
         getattr(racket_cfg, "action_ball_immutable_tape_path", "") or ""
     ).strip()
     tape_sha256 = str(
         getattr(racket_cfg, "action_ball_immutable_tape_sha256", "") or ""
+    ).strip()
+    bank_path = str(
+        getattr(racket_cfg, "action_ball_banded_question_bank_path", "") or ""
+    ).strip()
+    bank_sha256 = str(
+        getattr(racket_cfg, "action_ball_banded_question_bank_sha256", "") or ""
     ).strip()
     if target_source == "immutable_tape":
         if not bool(
@@ -3296,45 +3389,84 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
                 "[train.py] immutable fixed-question ablations require "
                 "racket.action_ball_target_observation_noise=false"
             )
-        adaptive_sigma_attrs = (
-            "adaptive_sigma",
-            "adaptive_sigma_monotonic",
-            "adaptive_sigma_normal",
-        )
-        if a211_trainable:
-            disabled = [
-                attr
-                for attr in adaptive_sigma_attrs
-                if not bool(getattr(racket_cfg, attr, False))
-            ]
-            adaptive_sigma_source = str(
-                getattr(racket_cfg, "adaptive_sigma_source", "")
+        if bank_path or bank_sha256:
+            raise _OverrideError(
+                "[train.py] immutable_tape must not carry banded question-bank bytes"
             )
-            if disabled or adaptive_sigma_source != "ball_exact_strike":
-                raise _OverrideError(
-                    "[train.py] trainable A211 fixed-question curriculum requires "
-                    "racket.adaptive_sigma=true, "
-                    "racket.adaptive_sigma_monotonic=true, "
-                    "racket.adaptive_sigma_normal=true, and "
-                    "racket.adaptive_sigma_source='ball_exact_strike'; "
-                    f"disabled={disabled!r}, source={adaptive_sigma_source!r}"
-                )
-        else:
-            for attr in adaptive_sigma_attrs:
-                if bool(getattr(racket_cfg, attr, False)):
-                    raise _OverrideError(
-                        "[train.py] fixed-question target ablations other than "
-                        "trainable A211 require "
-                        f"racket.{attr}=false"
-                    )
-    elif (
-        target_recipe != "current_lm"
-        or tuple(raw_validity) != (True, True, True)
-        or tape_path
-        or tape_sha256
-    ):
-        raise _OverrideError(
-            "[train.py] online_solver is current_lm/111 and must not carry tape bytes"
+        if not trainable_211:
+            _validate_immutable_fixed_question_sigma(
+                racket_cfg, trainable_211=False
+            )
+    elif target_source == "banded_question_bank":
+        if getattr(
+            racket_cfg, "action_ball_diagnostic_unauthorized", False
+        ) is not True:
+            raise _OverrideError(
+                "[train.py] banded_question_bank is construction-only while "
+                "cached question draw ranges and future birth/base coverage "
+                "remain unclosed; formal or expanding-curriculum training is "
+                "fail-closed"
+            )
+        if not bank_path or len(bank_sha256) != 64 or any(
+            ch not in "0123456789abcdef" for ch in bank_sha256
+        ):
+            raise _OverrideError(
+                "[train.py] banded question bank requires a path and lowercase "
+                "file SHA-256"
+            )
+        if tape_path or tape_sha256:
+            raise _OverrideError(
+                "[train.py] banded question bank must not carry immutable tape bytes"
+            )
+        try:
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_banded_question_bank import (
+                load_banded_question_bank,
+            )
+
+            load_banded_question_bank(
+                bank_path, expected_file_sha256=bank_sha256
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            raise _OverrideError(
+                "[train.py] banded question-bank preflight rejected the exact "
+                f"artifact: {exc}"
+            ) from exc
+    elif target_source == "online_solver":
+        if (
+            target_recipe != "current_lm"
+            or tuple(raw_validity) != (True, True, True)
+            or tape_path
+            or tape_sha256
+            or bank_path
+            or bank_sha256
+        ):
+            raise _OverrideError(
+                "[train.py] online_solver is current_lm/111 and must not carry "
+                "tape or bank bytes"
+            )
+    elif target_source == "direct_ball":
+        if (
+            target_recipe != "outcome_dense_only"
+            or tuple(raw_validity) != (False, False, False)
+            or target_observation_noise is not False
+            or reuse_exact_question
+            or tape_path
+            or tape_sha256
+            or bank_path
+            or bank_sha256
+        ):
+            raise _OverrideError(
+                "[train.py] direct_ball is outcome_dense_only/000, performs no "
+                "inverse solve/cache, and must not carry tape or bank bytes"
+            )
+
+    if trainable_211:
+        # The first fixed-N1 A211/C211 experiment freezes one reward recipe
+        # from rollout zero.  This is independent of how its question/answer is
+        # produced: A solves the first distinct question and reuses only that
+        # exact answer; C consumes the incoming ball directly.
+        _validate_immutable_fixed_question_sigma(
+            racket_cfg, trainable_211=True
         )
 
     artifact_fields = {
@@ -5354,11 +5486,8 @@ def _lower_body_pose_imitation_reward_contract(
     probe_params = getattr(probe, "params", None)
     if not isinstance(params, dict) or params != probe_params:
         raise RuntimeError("lower_body_pose_imitation probe params must match the reward")
-    if (
-        params.get("racket_command_name") != "racket_target"
-        or params.get("motion_command_name") != "motion"
-    ):
-        raise RuntimeError("lower_body_pose_imitation requires racket_target/motion commands")
+    # 精简治理 2026-08-05:racket_command_name/motion_command_name 的名字校验已删。
+    # 权威副本在 hope_rewards.py 的奖励函数自己身上(名字不对直接 ValueError),那才是真消费方。
     std = _lower_body_reward_number(
         params.get("std"), name="lower_body_pose_imitation.std", positive=True
     )
@@ -5430,11 +5559,7 @@ def _lower_body_stability_bundle_reward_contract(
     probe_params = getattr(probe, "params", None)
     if not isinstance(params, dict) or params != probe_params:
         raise RuntimeError("lower_body_stability_bundle probe params must match the reward")
-    if (
-        params.get("racket_command_name") != "racket_target"
-        or params.get("motion_command_name") != "motion"
-    ):
-        raise RuntimeError("lower_body_stability_bundle requires racket_target/motion commands")
+    # 精简治理 2026-08-05:命令名校验已删,权威副本见 hope_rewards.py 的奖励函数本体。
     numeric_specs = (
         ("min_stance_width_m", True, False),
         ("stance_scale_m", True, False),
@@ -5548,11 +5673,7 @@ def _post_swing_settle_debt_reward_contract(env_cfg, runtime_facts: dict) -> dic
     probe_params = getattr(probe, "params", None)
     if not isinstance(params, dict) or params != probe_params:
         raise RuntimeError("post_swing_settle_debt probe params must match the reward")
-    if (
-        params.get("racket_command_name") != "racket_target"
-        or params.get("motion_command_name") != "motion"
-    ):
-        raise RuntimeError("post_swing_settle_debt requires racket_target/motion commands")
+    # 精简治理 2026-08-05:命令名校验已删,权威副本见 hope_rewards.py 的奖励函数本体。
     values = {
         name: _lower_body_reward_number(
             params.get(name),
@@ -5696,9 +5817,10 @@ def _stage1_natural_clip_agent_recipe(agent_cfg) -> dict:
         raise RuntimeError(
             "Stage-1 requires explicit PPO init_noise_std and noise_std_type"
         ) from exc
-    if not math.isfinite(init_noise_std) or init_noise_std != 0.02:
+    # 人话:探索幅度是要调的参数,不是要焊死的常数。安全性由 4-sigma 硬带门按真实值判。
+    if not math.isfinite(init_noise_std) or not (0.0 < init_noise_std <= 1.0):
         raise RuntimeError(
-            "Stage-1 requires algo.policy.init_noise_std=0.02, got "
+            "Stage-1 requires a finite algo.policy.init_noise_std in (0, 1], got "
             f"{init_noise_std!r}"
         )
     if noise_std_type != "log":
@@ -6338,6 +6460,37 @@ def _resolve_teacher_qdes_oracle_request(
     return str(path), episodes
 
 
+def _resolve_c211_live_oracle_request(
+    cfg, *, c211: bool, action_ball: bool, diagnostic: bool,
+    dynamic_ready: bool, shared_ready: bool, num_envs: int, max_iterations: int,
+) -> tuple[str | None, int | None]:
+    """Resolve the exact fresh C211/000 inference-only oracle request."""
+
+    output = _get(cfg, "action_ball_c211_oracle_bundle_output_path")
+    episodes = _get(cfg, "action_ball_c211_oracle_episodes")
+    if output is None and episodes is None:
+        return None, None
+    if output is None or episodes is None:
+        raise RuntimeError("C211 oracle output_path/episodes must be supplied together")
+    if type(output) is not str or not output.strip() or not os.path.isabs(output.strip()):
+        raise RuntimeError("C211 oracle output_path must be a non-empty absolute path")
+    # 精简治理 2026-08-05:原来硬钉 episodes == 32。32 只是 launch_action_ball_c211_diagnostic.py
+    # 里写死的那一个默认值,钉在这里等于把发射器的口味写进运行时,换个样本量就得改两处代码。
+    # 降级成"正整数"即可,样本量由发射器/配方决定。
+    if type(episodes) is not int or isinstance(episodes, bool) or episodes < 1:
+        raise RuntimeError("C211 oracle episodes must be a positive integer")
+    if not c211 or not action_ball or not diagnostic or not dynamic_ready or shared_ready:
+        raise RuntimeError("C211 oracle requires diagnostic C211 dynamic-ready only")
+    if _get(cfg, "checkpoint_path") is not None or num_envs != 1 or max_iterations != 0:
+        raise RuntimeError("C211 oracle requires fresh, num_envs=1, max_iterations=0")
+    if bool(_get(cfg, "video")):
+        raise RuntimeError("C211 oracle forbids video wrappers")
+    path = pathlib.Path(output.strip())
+    if not path.parent.is_dir() or os.path.lexists(path):
+        raise RuntimeError("C211 oracle output must be fresh under an existing directory")
+    return str(path), episodes
+
+
 def _install_teacher_qdes_prereset_capture(base, capture):
     """Wrap the real auto-reset long enough to snapshot terminal evidence."""
 
@@ -6363,6 +6516,305 @@ def _install_teacher_qdes_prereset_capture(base, capture):
     return restore
 
 
+def _make_c211_live_runtime_step_adapter(env, *, action_id: str):
+    """Bind the generic collector to real RSL inference and Isaac auto-reset."""
+
+    import torch
+    from action_ball_c211_live_oracle import build_achieved_analytic_evidence
+
+    base = env.unwrapped
+    racket = base.command_manager.get_term("racket_target")
+    action = base.action_manager.get_term("joint_pos")
+    tm = base.termination_manager
+    term_names = tuple(str(name) for name in tm.active_terms)
+    hard_names = (
+        "base_fell_tilt", "base_too_low", "joint_actual_forbidden",
+        "joint_qdes_forbidden", "robot_hit_table",
+    )
+    if base.num_envs != 1 or "action_ball_single_stroke_complete" not in term_names:
+        raise RuntimeError("C211 live adapter requires one env and single-stroke termination")
+
+    state = {}
+    terminal_capture = []
+    totals = {"control_steps": 0, "exact_strikes": 0, "selected_contacts": 0}
+
+    def new_episode():
+        state.clear()
+        state.update(
+            control_steps=0, wait_steps=0, task_steps=0, incoming=None,
+            exact_step=None, contact=None, flight=None, prediction=None,
+            affine_error=0.0, sample=None,
+        )
+
+    new_episode()
+
+    def current_observations():
+        packet = env.get_observations()
+        if type(packet) is not tuple or len(packet) != 2 or type(packet[1]) is not dict:
+            raise RuntimeError("C211 live adapter observation packet differs")
+        actor = packet[0]
+        observations = packet[1].get("observations")
+        if type(observations) is not dict or "critic" not in observations:
+            raise RuntimeError("C211 live adapter lacks privileged critic observation")
+        critic = observations["critic"]
+        if tuple(actor.shape) != (1, 211) or tuple(critic.shape) != (1, 319):
+            raise RuntimeError("C211 live adapter actor/critic width differs")
+        return actor, critic
+
+    def incoming_snapshot(actor, critic):
+        fields = (
+            "incoming_ball_contact_position_heading",
+            "incoming_ball_contact_velocity_heading",
+            "incoming_ball_contact_spin_heading",
+        )
+        actor_values = actor[0, 197:206].detach().cpu().reshape(3, 3).tolist()
+        critic_values = critic[0, 305:314].detach().cpu().reshape(3, 3).tolist()
+        if actor_values != critic_values:
+            raise RuntimeError("C211 live actor/critic incoming-ball terms differ")
+        return {
+            "source": "runtime_actor_and_critic_observation_terms",
+            "actor": {name: actor_values[index] for index, name in enumerate(fields)},
+            "critic": {name: critic_values[index] for index, name in enumerate(fields)},
+        }
+
+    def observe_one_shot(runtime_control_step):
+        exact = bool((racket.metrics["exact_strike_hit_rate"][0] > 0.5).item())
+        fired = bool(racket.vb_fired[0].item())
+        if exact and state["exact_step"] is None:
+            state["exact_step"] = runtime_control_step
+        if fired:
+            if state["contact"] is not None:
+                raise RuntimeError("C211 live episode fired selected contact twice")
+            state["contact"] = {
+                "runtime_control_step": runtime_control_step,
+                "task_valid": True,
+                "exact_strike": True,
+                "selected_face_sweep_contact": True,
+                "selected_face_bracketed": True,
+                "selected_face_edge_safe": True,
+                "selected_face_geometry_finite": True,
+                "selected_face_closing_speed_positive": True,
+                "selected_face_normal_speed_consistent": True,
+                "wrong_surface_contact": False,
+                "edge_or_rim_ambiguous": False,
+                "between_planes_ambiguous": False,
+            }
+            state["flight"], state["prediction"] = build_achieved_analytic_evidence(
+                selected_rubber_contact=True,
+                landing_xy_m=racket.vb_landing_xy[0].detach().cpu().tolist(),
+                landing_valid=bool(racket.vb_landing_valid[0].item()),
+                net_crossed=bool(racket.vb_net_crossed[0].item()),
+                net_clear=bool(racket.vb_net_clear[0].item()),
+                on_opponent_table=bool(racket.vb_on_opponent[0].item()),
+            )
+
+    def capture_before_reset(env_ids):
+        if env_ids.detach().cpu().tolist() != [0]:
+            raise RuntimeError("C211 live adapter saw unexpected reset env ids")
+        observe_one_shot(state["control_steps"])
+        terminal_capture.append(
+            {
+                "reasons": [
+                    name for name in term_names if bool(tm.get_term(name)[0].item())
+                ],
+                "active": bool(racket._action_ball_attempt_active[0].item()),
+                "task_valid": bool(racket._action_ball_task_valid[0].item()),
+                "hit": bool(racket._action_ball_attempt_hit[0].item()),
+            }
+        )
+
+    restore_holder = {"restore": None}
+
+    def adapter(*, env, actions, source_episode, runtime_control_step):
+        if restore_holder["restore"] is None:
+            # The generic driver owns one explicit initial reset.  Install the
+            # terminal interceptor only after that reset, immediately before
+            # the first real policy step.
+            restore_holder["restore"] = _install_teacher_qdes_prereset_capture(
+                base, capture_before_reset
+            )
+        actor, critic = current_observations()
+        task_valid = bool(racket._action_ball_task_valid[0].item())
+        state["control_steps"] += 1
+        totals["control_steps"] += 1
+        if state["control_steps"] != runtime_control_step:
+            raise RuntimeError("C211 live adapter control-step order differs")
+        if task_valid:
+            state["task_steps"] += 1
+            receipt = racket._action_ball_task_receipt_for_env(0)
+            if receipt is None:
+                raise RuntimeError("C211 TASK_ACTIVE step lacks sampler task receipt")
+            sample = {
+                "sampler_sample_index": receipt.sample_index,
+                "sampler_sample_sha256": receipt.sample_sha256,
+                "sampler_draw_start": receipt.sample_draw_start,
+                "sampler_draw_end": receipt.sample_draw_end,
+            }
+            if state["sample"] is None:
+                state["sample"] = sample
+            elif state["sample"] != sample:
+                raise RuntimeError("C211 sampler receipt changed within one attempt")
+            if state["incoming"] is None:
+                state["incoming"] = incoming_snapshot(actor, critic)
+        else:
+            state["wait_steps"] += 1
+        before = racket._action_ball_ledger_payload()[action_id]
+        expected_qdes = actions * action._scale + action._offset
+        next_observation, _rewards, dones, extras = env.step(actions)
+        if type(extras) is not dict or tuple(dones.shape) != (1,):
+            raise RuntimeError("C211 live adapter requires wrapped RSL four-tuple step")
+        state["affine_error"] = max(
+            state["affine_error"],
+            float((action._pre_clamp_qdes - expected_qdes).abs().max().item()),
+        )
+        done = bool(dones[0].item())
+        if not done:
+            if terminal_capture:
+                raise RuntimeError("C211 live adapter reset without done")
+            observe_one_shot(runtime_control_step)
+            return {"next_observation": next_observation, "completed_episode": None}
+        if len(terminal_capture) != 1:
+            raise RuntimeError("C211 live adapter terminal snapshot missing")
+        terminal = terminal_capture.pop()
+        after = racket._action_ball_ledger_payload()[action_id]
+        c_delta, h_delta = after["C"] - before["C"], after["H"] - before["H"]
+        closed = terminal["active"]
+        selected = state["contact"] is not None
+        if c_delta != int(closed) or h_delta != int(selected) or terminal["hit"] is not selected:
+            raise RuntimeError("C211 live C/H ledger does not match achieved contact")
+        if closed and (not terminal["task_valid"] or state["incoming"] is None):
+            raise RuntimeError("C211 closed attempt lacks TASK_ACTIVE observation")
+        if closed and state["sample"] is None:
+            raise RuntimeError("C211 closed attempt lacks sampler receipt identity")
+        if not closed and (state["task_steps"] or selected or c_delta or h_delta):
+            raise RuntimeError("C211 WAIT reset contaminated the closed-attempt ledger")
+        totals["exact_strikes"] += int(state["exact_step"] is not None)
+        totals["selected_contacts"] += int(selected)
+        contact = state["contact"]
+        if contact is None:
+            contact = {
+                "runtime_control_step": state["exact_step"] or state["control_steps"],
+                "task_valid": bool(closed),
+                "exact_strike": state["exact_step"] is not None,
+                "selected_face_sweep_contact": False,
+                "selected_face_bracketed": False,
+                "selected_face_edge_safe": False,
+                # The adapter separately fails the runtime non-finite
+                # projection ledger.  A finite swept evaluation with no
+                # selected contact is therefore an observed no-contact miss,
+                # not an "unknown" geometry row.
+                "selected_face_geometry_finite": True,
+                "selected_face_closing_speed_positive": False,
+                "selected_face_normal_speed_consistent": False,
+                "wrong_surface_contact": False,
+                "edge_or_rim_ambiguous": False,
+                "between_planes_ambiguous": False,
+            }
+            flight, prediction = build_achieved_analytic_evidence(
+                selected_rubber_contact=False
+            )
+        else:
+            flight, prediction = state["flight"], state["prediction"]
+        reasons = terminal["reasons"]
+        if not reasons:
+            raise RuntimeError("C211 live terminal has no active reason")
+        row = {
+            "schema_version": 2,
+            "kind": "action_ball_c211_live_oracle_episode_v2",
+            "source_episode": source_episode,
+            "control_steps": state["control_steps"],
+            "wait_control_steps": state["wait_steps"],
+            "task_valid_control_steps": state["task_steps"],
+            "sampler_sample_index": (
+                state["sample"]["sampler_sample_index"] if closed else None
+            ),
+            "sampler_sample_sha256": (
+                state["sample"]["sampler_sample_sha256"] if closed else None
+            ),
+            "sampler_draw_start": (
+                state["sample"]["sampler_draw_start"] if closed else None
+            ),
+            "sampler_draw_end": (
+                state["sample"]["sampler_draw_end"] if closed else None
+            ),
+            "incoming_ball_observation": state["incoming"] if closed else {
+                "source": "runtime_actor_and_critic_observation_terms",
+                "actor": {name: [0.0, 0.0, 0.0] for name in (
+                    "incoming_ball_contact_position_heading",
+                    "incoming_ball_contact_velocity_heading",
+                    "incoming_ball_contact_spin_heading",
+                )},
+                "critic": {name: [0.0, 0.0, 0.0] for name in (
+                    "incoming_ball_contact_position_heading",
+                    "incoming_ball_contact_velocity_heading",
+                    "incoming_ball_contact_spin_heading",
+                )},
+            },
+            "actual_contact": contact,
+            "achieved_analytic_flight": flight,
+            "predicted_outcome": prediction,
+            "attempt_closure": {
+                "closed_attempt": closed,
+                "terminal_phase": (
+                    "post_strike" if closed and state["exact_step"] is not None
+                    else "pre_strike_or_same_step_unknown" if closed else None
+                ),
+                "termination_reasons": reasons,
+            },
+            "safety": {
+                "hard_termination_by_reason": {
+                    name: int(name in reasons) for name in hard_names
+                },
+                "robot_table_contact_count": int("robot_hit_table" in reasons),
+                "projection_nonfinite_count": 0,
+                "projection_observed_sample_count": state["control_steps"],
+                "qdes_observed_sample_count": state["control_steps"],
+                "actual_observed_sample_count": state["control_steps"],
+                "reference_guard_sample_count": state["control_steps"],
+            },
+            "teacher_qdes": {
+                "preclamp_max_abs_error_rad": state["affine_error"],
+                "teleport_used": False,
+            },
+        }
+        new_episode()
+        return {"next_observation": next_observation, "completed_episode": row}
+
+    def verify_after():
+        exposure = _consume_teacher_oracle_limit_exposure(base)
+        behavior = racket.consume_exact_behavior_decision_counters()
+        scalar = lambda key: int(behavior[key].detach().item())
+        rejection_total = sum(
+            scalar(key) for key in (
+                "virtual_contact_face_reject_count",
+                "virtual_contact_geometry_reject_count",
+                "virtual_contact_nonfinite_reject_count",
+                "virtual_contact_u_n_below_fit_reject_count",
+                "virtual_contact_u_n_above_fit_reject_count",
+            )
+        )
+        if (
+            exposure["projection"]["observed_sample_count"] != totals["control_steps"]
+            or exposure["projection"]["nonfinite_sample_count"] != 0
+            or exposure["soft_limit"]["qdes"]["observed_sample_count"]
+            != totals["control_steps"]
+            or exposure["soft_limit"]["actual"]["observed_sample_count"]
+            != totals["control_steps"]
+            or scalar("virtual_capture_count") != totals["selected_contacts"]
+            or scalar("strike_opportunity_count") != totals["exact_strikes"]
+            or scalar("virtual_capture_count") + rejection_total
+            != totals["exact_strikes"]
+        ):
+            raise RuntimeError("C211 live projection evidence denominator/nonfinite differs")
+
+    def restore():
+        if restore_holder["restore"] is not None:
+            restore_holder["restore"]()
+            restore_holder["restore"] = None
+
+    return adapter, restore, verify_after
+
+
 def _run_teacher_qdes_oracle(
     env, *, cfg, hard_contract: dict, hard_contract_sha256: str, episodes: int
 ) -> dict:
@@ -6378,20 +6830,23 @@ def _run_teacher_qdes_oracle(
     ab = hard_contract["action_ball_training"]
     preflight, runtime = ab["preflight"], ab["runtime"]
     target = runtime["target_provider"]
-    tape = target["immutable_tape"]
     bootstrap = ab["policy_bootstrap"]
     dynamic = bootstrap["ready_source"]["identity"]
     if (
         base.num_envs != 1
         or preflight["action_order"] != ["take_061_unit04_bh"]
-        or target["source"] != "immutable_tape"
+        or target["source"] != "online_solver"
         or target["recipe"] != "current_lm"
         or target["validity_mask"] != [True, True, True]
-        or tape["online_lm_calls"] != 0
-        or tape["physical_rng_draws"] != 0
+        or target["target_observation_noise"] is not False
+        or target["immutable_tape"] is not None
+        or target["exact_question_answer_reuse"].get("enabled") is not True
         or getattr(motion, "action_ball_diagnostic_split_ready_teacher", False) is not True
     ):
-        raise RuntimeError("teacher-q_des oracle requires exact Take061/current_lm/111 fixed-tape runtime")
+        raise RuntimeError(
+            "teacher-q_des oracle requires exact Take061/current_lm/111 "
+            "online runtime with exact-question answer reuse"
+        )
     term_names = tuple(str(name) for name in tm.active_terms)
     if "action_ball_single_stroke_complete" not in term_names:
         raise RuntimeError("teacher-q_des oracle requires single-stroke completion termination")
@@ -6669,11 +7124,7 @@ def _run_teacher_qdes_oracle(
             "dynamic_ready_nominal_hold_sha256": dynamic_row["nominal_hold_receipt"]["sha256"],
             "manifest_sha256": preflight["manifest"]["file_sha256"],
             "motion_sha256": hard_contract["motion_clips"][0]["sha256"],
-            "tape_file_sha256": tape["file_sha256"],
-            "tape_canonical_sha256": tape["canonical_sha256"],
-            "tape_base_question_sha256": tape["base_question_sha256"],
-            "tape_target_producer_sha256": tape["target_lineage"]["target_producer_sha256"],
-            "tape_target_column_sha256": tape["target_lineage"]["target_column_sha256"],
+            "target_provider_contract_sha256": _canonical_contract_sha256(target),
         },
         "completion": {"requested": episodes, "terminal": len(rows),
                        "single_stroke": sum("action_ball_single_stroke_complete" in row["termination_reasons"] for row in rows),
@@ -6759,8 +7210,85 @@ def _action_ball_policy_bootstrap_schema_version(
     )
 
 
+def _action_ball_startup_offset_decoder_contract(
+    env, joint_names, *, dr_l0_zero_decoder: bool
+) -> dict:
+    """Bind either the sampled startup event or the explicit DR-L0 zero source."""
+
+    from whole_body_tracking.utils.training_contract import (
+        ACTION_BALL_DR_L0_ZERO_DECODER_SOURCE,
+        action_ball_dr_l0_zero_decoder_identity,
+    )
+
+    names = list(joint_names)
+    if len(names) != 31 or len(set(names)) != 31:
+        raise RuntimeError(
+            "ActionBall startup offset decoder requires 31 ordered unique joints"
+        )
+    startup_event = getattr(
+        getattr(env.cfg, "events", None), "add_joint_default_pos", None
+    )
+    if dr_l0_zero_decoder:
+        if startup_event is not None:
+            raise RuntimeError(
+                "DR-L0 zero decoder requires events.add_joint_default_pos=None"
+            )
+        return {
+            "startup_offset_delta_source": (
+                ACTION_BALL_DR_L0_ZERO_DECODER_SOURCE
+            ),
+            "startup_offset_delta_identity": (
+                action_ball_dr_l0_zero_decoder_identity(joint_names=names)
+            ),
+            "startup_offset_delta_lower": [0.0] * 31,
+            "startup_offset_delta_upper": [0.0] * 31,
+        }
+
+    startup_params = (
+        None if startup_event is None else getattr(startup_event, "params", None)
+    )
+    startup_func = (
+        None if startup_event is None else getattr(startup_event, "func", None)
+    )
+    try:
+        startup_range = tuple(
+            float(value)
+            for value in startup_params["pos_distribution_params"]
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires the explicit startup "
+            "joint-default calibration range"
+        ) from exc
+    if (
+        len(startup_range) != 2
+        or not all(math.isfinite(value) for value in startup_range)
+        or startup_range[0] > startup_range[1]
+        or startup_params.get("operation") != "add"
+        or startup_params.get("distribution", "uniform") != "uniform"
+        or getattr(startup_func, "__name__", "")
+        != "randomize_joint_default_pos"
+    ):
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires uniform additive startup "
+            "joint-default calibration randomization"
+        )
+    return {
+        "startup_offset_delta_source": (
+            "events.add_joint_default_pos.uniform_add"
+        ),
+        "startup_offset_delta_lower": [startup_range[0]] * 31,
+        "startup_offset_delta_upper": [startup_range[1]] * 31,
+    }
+
+
 def _action_ball_policy_bootstrap_contract(
-    env, actor_contract, agent_cfg, *, dynamic_ready_binding=None
+    env,
+    actor_contract,
+    agent_cfg,
+    *,
+    dynamic_ready_binding=None,
+    dr_l0_zero_decoder: bool = False,
 ) -> dict:
     """Build the fresh-policy shared-ready or N1 dynamic-ready contract."""
 
@@ -6929,40 +7457,11 @@ def _action_ball_policy_bootstrap_contract(
                     "dynamic-ready normalized actor action does not decode "
                     f"through the live action decoder at joint {index}"
                 )
-    startup_event = getattr(
-        getattr(env.cfg, "events", None), "add_joint_default_pos", None
+    startup_offset_decoder = _action_ball_startup_offset_decoder_contract(
+        env,
+        joint_names,
+        dr_l0_zero_decoder=dr_l0_zero_decoder,
     )
-    startup_params = (
-        None if startup_event is None else getattr(startup_event, "params", None)
-    )
-    startup_func = (
-        None if startup_event is None else getattr(startup_event, "func", None)
-    )
-    try:
-        startup_range = tuple(
-            float(value)
-            for value in startup_params["pos_distribution_params"]
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError(
-            "shared-ready actor bootstrap requires the explicit startup "
-            "joint-default calibration range"
-        ) from exc
-    if (
-        len(startup_range) != 2
-        or not all(math.isfinite(value) for value in startup_range)
-        or startup_range[0] > startup_range[1]
-        or startup_params.get("operation") != "add"
-        or startup_params.get("distribution", "uniform") != "uniform"
-        or getattr(startup_func, "__name__", "")
-        != "randomize_joint_default_pos"
-    ):
-        raise RuntimeError(
-            "shared-ready actor bootstrap requires uniform additive startup "
-            "joint-default calibration randomization"
-        )
-    startup_delta_lower = [startup_range[0]] * 31
-    startup_delta_upper = [startup_range[1]] * 31
 
     motion_cfg = motion_cmd.cfg
     motion_files = _configured_items(
@@ -7000,10 +7499,10 @@ def _action_ball_policy_bootstrap_contract(
             "shared-ready actor bootstrap requires explicit PPO "
             "init_noise_std and noise_std_type"
         ) from exc
-    if not math.isfinite(init_noise_std) or init_noise_std != 0.02:
+    if not math.isfinite(init_noise_std) or not (0.0 < init_noise_std <= 1.0):
         raise RuntimeError(
-            "shared-ready actor bootstrap requires "
-            f"algo.policy.init_noise_std=0.02, got {init_noise_std!r}"
+            "shared-ready actor bootstrap requires a finite "
+            f"algo.policy.init_noise_std in (0, 1], got {init_noise_std!r}"
         )
     if noise_std_type not in ("scalar", "log"):
         raise RuntimeError(
@@ -7087,11 +7586,7 @@ def _action_ball_policy_bootstrap_contract(
         "default_joint_pos": default_q,
         "action_scale": action_scale,
         "normalized_bias": normalized_bias,
-        "startup_offset_delta_source": (
-            "events.add_joint_default_pos.uniform_add"
-        ),
-        "startup_offset_delta_lower": startup_delta_lower,
-        "startup_offset_delta_upper": startup_delta_upper,
+        **startup_offset_decoder,
     }
     if dynamic_ready_binding is not None:
         decoder["target_joint_pos"] = target_q
@@ -8705,83 +9200,11 @@ def _load_action_ball_evaluator_launch_from_cfg(
     }
 
 
-def _validate_action_ball_visible_motion_identity(
-    value, *, motion_cfg, action_count: int
-) -> dict:
-    """Validate supplemental canonical-bank facts.
-
-    This mapping is useful checkpoint identity, but is deliberately not motion
-    authorization.  Formal authority is accepted only from MotionCommand's
-    separate opaque admission receipt.
-    """
-
-    keys = (
-        "canonical_registry_sha256",
-        "canonical_registry_alignment_sha256",
-        "canonical_ready_sha256",
-        "canonical_ready_fk_sha256",
-        "canonical_source_manifest_sha256_per_clip",
-        "canonical_build_manifest_sha256_per_clip",
-        "canonical_applicability_manifest_sha256_per_clip",
-        "canonical_evidence_level_per_clip",
-        "canonical_evidence_manifest_sha256_per_clip",
-        "canonical_training_config_sha256_per_clip",
-        "canonical_adoption_manifest_sha256_per_clip",
-    )
-    identity = _action_ball_exact_dict(
-        value, keys, name="action-ball runtime motion_admission identity"
-    )
-    for field in keys[:4]:
-        actual = _action_ball_sha256(
-            identity[field],
-            name=f"action-ball runtime motion_admission.{field}",
-        )
-        expected = str(getattr(motion_cfg, field, "") or "")
-        if actual != expected:
-            raise RuntimeError(
-                "action-ball runtime motion admission identity disagrees "
-                f"with motion.{field}: runtime={actual}, expected={expected}"
-            )
-    sha_columns = (
-        "canonical_source_manifest_sha256_per_clip",
-        "canonical_build_manifest_sha256_per_clip",
-        "canonical_applicability_manifest_sha256_per_clip",
-        "canonical_evidence_manifest_sha256_per_clip",
-        "canonical_training_config_sha256_per_clip",
-        "canonical_adoption_manifest_sha256_per_clip",
-    )
-    for field in sha_columns:
-        values = identity[field]
-        if (
-            isinstance(values, (str, bytes))
-            or not isinstance(values, (list, tuple))
-            or len(values) != action_count
-        ):
-            raise RuntimeError(
-                f"action-ball runtime motion_admission.{field} must contain "
-                f"exactly {action_count} entries"
-            )
-        for index, digest in enumerate(values):
-            _action_ball_sha256(
-                digest,
-                name=(
-                    "action-ball runtime motion_admission."
-                    f"{field}[{index}]"
-                ),
-            )
-    evidence = identity["canonical_evidence_level_per_clip"]
-    if (
-        isinstance(evidence, (str, bytes))
-        or not isinstance(evidence, (list, tuple))
-        or len(evidence) != action_count
-        or any(type(level) is not str or not level for level in evidence)
-    ):
-        raise RuntimeError(
-            "action-ball runtime motion_admission."
-            "canonical_evidence_level_per_clip must contain one non-empty "
-            "string per action"
-        )
-    return identity
+# 精简治理 2026-08-05:_validate_action_ball_visible_motion_identity 已整体删除。
+# 它全仓零调用点(唯一出现处就是它自己的 def),且它自己的 docstring 已承认这些
+# canonical_* 字段"不是动作授权"。真正的动作授权在下面
+# _validate_action_ball_runtime_hard_contract 里,只认 MotionCommand 的 opaque
+# admission receipt(action_ball_motion_admission_hard_contract)。
 
 
 def _validate_action_ball_runtime_hard_contract(
@@ -9570,16 +9993,15 @@ def _build_training_hard_contract(
     )
 
     env_cfg = env.cfg
-    runtime_reward_receipt = build_effective_reward_receipt(env_cfg)
-    if (
-        effective_reward_receipt is not None
-        and effective_reward_receipt != runtime_reward_receipt
-    ):
-        raise RuntimeError(
-            "effective reward recipe changed between pre-gym composition and "
-            "runtime hard-contract capture"
-        )
-    effective_reward_receipt = runtime_reward_receipt
+    action_ball_dr_l0_contract = _action_ball_dr_l0_runtime_contract(
+        env_cfg, policy_bootstrap=action_ball_policy_bootstrap
+    )
+    # 精简治理 2026-08-05:这里原本把同一个 env_cfg 再算一遍 receipt,然后跟 _run() 传进来的
+    # 那份比对("effective reward recipe changed between pre-gym composition and runtime")。
+    # gym.make 拿的就是同一个 cfg 对象、同一个进程,比对必然相等,属于自证。现在直接以运行时
+    # 重算值为准(play.py 不传 receipt,仍走这条路)。真正的跨边界护栏是落盘的
+    # effective_reward_recipe.json 与 checkpoint 里的 hard contract 对拍。
+    effective_reward_receipt = build_effective_reward_receipt(env_cfg)
     motion_cmd = env.command_manager.get_term("motion")
     motion = motion_cmd.cfg
     try:
@@ -10438,6 +10860,11 @@ def _build_training_hard_contract(
         ),
         **(
             {}
+            if action_ball_dr_l0_contract is None
+            else {"action_ball_dr_l0": action_ball_dr_l0_contract}
+        ),
+        **(
+            {}
             if stage1_natural_clip_contract is None
             else {
                 "stage1_natural_clip_training": stage1_natural_clip_contract,
@@ -10659,7 +11086,378 @@ _DOMAIN_RAND_KEYS = (
     "kp_gain_range",
     "kd_gain_range",
     "stable_ready_plant",
+    "startup_physics_material",
+    "startup_joint_default_pos",
+    "policy_observation_corruption",
 )
+
+_ACTION_BALL_DR_L0_KEYS = (
+    "startup_physics_material",
+    "startup_joint_default_pos",
+    "policy_observation_corruption",
+)
+
+_ACTION_BALL_DR_L0_RUNTIME_ATTR = "_action_ball_dr_l0_runtime_contract"
+
+_ACTION_BALL_DR_L0_EVENT_SLOTS = (
+    "physics_material",
+    "add_joint_default_pos",
+    "base_com",
+    "randomize_link_mass",
+    "randomize_pd_gains",
+    "push_robot",
+    "force_push",
+    "force_push_sweep",
+    "combined_push",
+    "combined_push_sweep",
+)
+
+_ACTION_BALL_DR_L0_RESET_AXES = (
+    "x",
+    "y",
+    "z",
+    "roll",
+    "pitch",
+    "yaw",
+)
+
+_ACTION_BALL_DR_L0_TARGET_ZERO_FIELDS = (
+    "achieved_target_mix_prob",
+    "midswing_resample_prob",
+    "target_delay_steps",
+    "target_jitter_pos_per_s",
+    "target_jitter_vel_per_s",
+    "target_noise_white",
+    "target_noise_ar1_sigma",
+    "target_dropout_prob",
+    "target_post_strike_dropout_s",
+    "target_bias_per_swing",
+)
+
+
+def _action_ball_dr_l0_contract_payload() -> dict:
+    """Return the canonical all-off state bound into checkpoints/normalizers."""
+
+    return {
+        "schema_version": 1,
+        "identity": "action_ball_dr_l0_exact_all_off_v1",
+        "event_slots": {
+            name: None for name in _ACTION_BALL_DR_L0_EVENT_SLOTS
+        },
+        "policy_observation_corruption": False,
+        "motion_reset_noise": {
+            "joint_position_range": [0.0, 0.0],
+            "stand_start_yaw_range": [0.0, 0.0],
+            "pose_range": {
+                axis: [0.0, 0.0]
+                for axis in _ACTION_BALL_DR_L0_RESET_AXES
+            },
+            "velocity_range": {
+                axis: [0.0, 0.0]
+                for axis in _ACTION_BALL_DR_L0_RESET_AXES
+            },
+        },
+        "target_transport_noise": {
+            **{
+                name: 0.0
+                for name in _ACTION_BALL_DR_L0_TARGET_ZERO_FIELDS
+            },
+            "action_ball_target_observation_noise": False,
+        },
+        "control_step_action_delay": {
+            "min_steps": 0,
+            "max_steps": 0,
+        },
+        "push_flags": {
+            "push.enable": False,
+            "force_push.enable": False,
+            "lateral_perturbation_runtime_spec": None,
+        },
+        "startup_offset_delta": {
+            "source": "action_ball_dr_l0_exact_zero_decoder",
+            "ordered_joint_count": 31,
+            "lower": [0.0] * 31,
+            "upper": [0.0] * 31,
+        },
+        "lineage": {
+            # OnPolicyRunner stores actor/critic normalizers in the same
+            # checkpoint whose infos bind training_contract_sha256.  Giving
+            # DR-L0 its own hard-contract bytes therefore prevents either a
+            # retained-DR checkpoint or its normalizers from being resumed.
+            "binding": "training_contract_sha256",
+            "fresh_checkpoint_required": True,
+            "fresh_normalizers_required": True,
+            "retained_dr_resume_forbidden": True,
+        },
+    }
+
+
+def _action_ball_dr_l0_zero_pair(value) -> bool:
+    """Return true only for an exact finite numeric ``[0, 0]`` pair."""
+
+    if isinstance(value, (str, bytes)):
+        return False
+    try:
+        items = list(value)
+    except (TypeError, ValueError):
+        return False
+    if len(items) != 2:
+        return False
+    for item in items:
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, (int, float))
+            or not math.isfinite(float(item))
+            or float(item) != 0.0
+        ):
+            return False
+    return True
+
+
+def _action_ball_dr_l0_composed_state_drift(env_cfg) -> dict:
+    """Describe every non-L0 byte in the fully composed environment cfg.
+
+    DR-L0 is a causal nominal-plant experiment, not shorthand for three Hydra
+    switches.  Re-open every relevant producer after all task overrides so a
+    CLI override or later cfg mutation cannot quietly add robustness difficulty
+    while retaining the DR-L0 lineage name.
+    """
+
+    drift = {}
+    events = getattr(env_cfg, "events", None)
+    if events is None:
+        drift["events"] = "<missing>"
+    else:
+        non_absent_events = {}
+        for name in _ACTION_BALL_DR_L0_EVENT_SLOTS:
+            if not hasattr(events, name):
+                non_absent_events[name] = "<missing>"
+            elif getattr(events, name) is not None:
+                non_absent_events[name] = "<active>"
+        if non_absent_events:
+            drift["event_slots"] = non_absent_events
+
+    policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
+    if policy is None or getattr(policy, "enable_corruption", None) is not False:
+        drift["observations.policy.enable_corruption"] = (
+            "<missing>"
+            if policy is None
+            else getattr(policy, "enable_corruption", None)
+        )
+
+    joint_action = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
+    delay = (
+        None
+        if joint_action is None
+        else (
+            getattr(joint_action, "control_step_action_delay_min", None),
+            getattr(joint_action, "control_step_action_delay_max", None),
+        )
+    )
+    if (
+        delay is None
+        or any(type(value) is not int for value in delay)
+        or delay != (0, 0)
+    ):
+        drift["actions.joint_pos.control_step_action_delay"] = delay
+
+    motion = getattr(getattr(env_cfg, "commands", None), "motion", None)
+    if motion is None:
+        drift["commands.motion"] = "<missing>"
+    else:
+        joint_range = getattr(motion, "joint_position_range", None)
+        if not _action_ball_dr_l0_zero_pair(joint_range):
+            drift["commands.motion.joint_position_range"] = repr(joint_range)
+        stand_start_yaw_range = getattr(
+            motion, "stand_start_yaw_range", None
+        )
+        if not _action_ball_dr_l0_zero_pair(stand_start_yaw_range):
+            drift["commands.motion.stand_start_yaw_range"] = repr(
+                stand_start_yaw_range
+            )
+        for field in ("pose_range", "velocity_range"):
+            ranges = getattr(motion, field, None)
+            try:
+                actual_axes = tuple(sorted(str(axis) for axis in ranges.keys()))
+            except Exception:
+                actual_axes = ()
+            expected_axes = tuple(sorted(_ACTION_BALL_DR_L0_RESET_AXES))
+            bad_axes = {}
+            if actual_axes == expected_axes:
+                for axis in _ACTION_BALL_DR_L0_RESET_AXES:
+                    value = ranges[axis]
+                    if not _action_ball_dr_l0_zero_pair(value):
+                        bad_axes[axis] = repr(value)
+            else:
+                bad_axes["<axes>"] = actual_axes
+            if bad_axes:
+                drift[f"commands.motion.{field}"] = bad_axes
+
+    racket = getattr(getattr(env_cfg, "commands", None), "racket_target", None)
+    if racket is None:
+        drift["commands.racket_target"] = "<missing>"
+    else:
+        target_drift = {}
+        for name in _ACTION_BALL_DR_L0_TARGET_ZERO_FIELDS:
+            value = getattr(racket, name, None)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) != 0.0
+            ):
+                target_drift[name] = value
+        target_observation_noise = getattr(
+            racket, "action_ball_target_observation_noise", None
+        )
+        if target_observation_noise is not False:
+            target_drift["action_ball_target_observation_noise"] = (
+                target_observation_noise
+            )
+        if target_drift:
+            drift["commands.racket_target.transport_noise"] = target_drift
+
+    for field in ("push", "force_push"):
+        flags = getattr(env_cfg, field, None)
+        if flags is None or getattr(flags, "enable", None) is not False:
+            drift[f"{field}.enable"] = (
+                "<missing>" if flags is None else getattr(flags, "enable", None)
+            )
+    lateral_spec = getattr(env_cfg, _LATERAL_TRAINING_SPEC_ATTR, None)
+    if lateral_spec is not None:
+        drift["lateral_perturbation_runtime_spec"] = "<active>"
+    return drift
+
+
+def _resolve_action_ball_dr_l0_request(dr) -> bool:
+    """Recognize only the complete, all-off DR-L0 finalizer tuple.
+
+    The normal A/C leaves omit these keys and retain their historical material,
+    startup joint-offset and proprioceptive corruption behavior byte-for-byte.
+    Presence of only part of the tuple would create an unregistered mixed plant,
+    so it is rejected rather than interpreted as a partial ablation.
+    """
+
+    present = tuple(key for key in _ACTION_BALL_DR_L0_KEYS if _mapping_has_key(dr, key))
+    if not present:
+        return False
+    if present != _ACTION_BALL_DR_L0_KEYS:
+        missing = tuple(key for key in _ACTION_BALL_DR_L0_KEYS if key not in present)
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L0 requires the three finalizer fields "
+            "together; present=%r missing=%r" % (present, missing)
+        )
+    values = {
+        key: _as_explicit_bool(_get(dr, key), f"task.domain_rand.{key}")
+        for key in _ACTION_BALL_DR_L0_KEYS
+    }
+    enabled = {key: value for key, value in values.items() if value}
+    if enabled:
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L0 is the exact all-off tuple; mixed or "
+            f"enabled axes are not registered: {enabled!r}"
+        )
+    if not _as_explicit_bool(
+        _get(dr, "stable_ready_plant"),
+        "task.domain_rand.stable_ready_plant",
+    ):
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L0 requires stable_ready_plant=true so "
+            "CoM/link-mass/PD-gain axes are disabled in the same finalizer"
+        )
+    return True
+
+
+def _apply_action_ball_dr_l0_finalizer(env_cfg, dr, applied) -> bool:
+    """Apply and verify the exact nominal-plant/proprio DR-L0 state."""
+
+    if not _resolve_action_ball_dr_l0_request(dr):
+        return False
+    events = getattr(env_cfg, "events", None)
+    _require(events is not None, "events (ActionBall DR-L0 finalizer)")
+    for name in _ACTION_BALL_DR_L0_EVENT_SLOTS:
+        _require(hasattr(events, name), f"events.{name} (ActionBall DR-L0 finalizer)")
+    policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
+    _require(
+        policy is not None and hasattr(policy, "enable_corruption"),
+        "observations.policy.enable_corruption (ActionBall DR-L0 finalizer)",
+    )
+
+    # stable_ready_plant already removed the latter three axes above.  Repeat
+    # the assignments here deliberately: this is the single final state whose
+    # receipt is meaningful, not a sequence of independent best-effort edits.
+    events.physics_material = None
+    events.add_joint_default_pos = None
+    events.base_com = None
+    events.randomize_link_mass = None
+    events.randomize_pd_gains = None
+    policy.enable_corruption = False
+    drift = _action_ball_dr_l0_composed_state_drift(env_cfg)
+    if drift:
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L0 post-finalizer state did not hold: "
+            f"{drift!r}"
+        )
+    setattr(
+        env_cfg,
+        _ACTION_BALL_DR_L0_RUNTIME_ATTR,
+        _action_ball_dr_l0_contract_payload(),
+    )
+    applied.append(
+        "task.domain_rand=action_ball_dr_l0_exact_all_off_v1 "
+        "(events.physics_material/add_joint_default_pos/base_com/"
+        "randomize_link_mass/randomize_pd_gains/push*=None; "
+        "observations.policy.enable_corruption=false; reset/target noise=0; "
+        "action delay=[0,0])"
+    )
+    return True
+
+
+def _action_ball_dr_l0_runtime_contract(
+    env_cfg, *, policy_bootstrap: dict | None
+) -> dict | None:
+    """Re-open the final DR-L0 state before minting the hard contract.
+
+    A config marker alone is not evidence: every disabled event slot and the
+    live observation-corruption switch are checked again after Gym/Isaac has
+    instantiated the environment.  The fresh bootstrap must independently
+    prove that the absent startup event decodes as an ordered 31-D zero delta.
+    """
+
+    marker = getattr(env_cfg, _ACTION_BALL_DR_L0_RUNTIME_ATTR, None)
+    if marker is None:
+        return None
+    expected = _action_ball_dr_l0_contract_payload()
+    if marker != expected:
+        raise RuntimeError(
+            "ActionBall DR-L0 runtime marker differs from its canonical payload"
+        )
+    drift = _action_ball_dr_l0_composed_state_drift(env_cfg)
+    if drift:
+        raise RuntimeError(
+            "ActionBall DR-L0 runtime state drifted after finalization: "
+            f"{drift!r}"
+        )
+    if not isinstance(policy_bootstrap, dict):
+        raise RuntimeError(
+            "ActionBall DR-L0 requires a fresh policy/bootstrap/normalizer lineage"
+        )
+    decoder = policy_bootstrap.get("decoder")
+    zero = expected["startup_offset_delta"]
+    if (
+        not isinstance(decoder, dict)
+        or decoder.get("startup_offset_delta_source") != zero["source"]
+        or decoder.get("startup_offset_delta_lower") != zero["lower"]
+        or decoder.get("startup_offset_delta_upper") != zero["upper"]
+        or not isinstance(decoder.get("startup_offset_delta_identity"), dict)
+        or decoder["startup_offset_delta_identity"].get("startup_offset_delta")
+        != zero["lower"]
+    ):
+        raise RuntimeError(
+            "ActionBall DR-L0 bootstrap does not prove the exact ordered 31-D "
+            "zero startup delta"
+        )
+    return expected
 
 
 def _mapping_has_key(node, key: str) -> bool:
@@ -10835,8 +11633,12 @@ _RACKET_KEYS = (
     "action_ball_policy_contract_sha256", "action_ball_seed",
     "action_ball_pool_refill_rows", "action_ball_fixed_direction",
     "action_ball_target_source", "action_ball_immutable_tape_path",
-    "action_ball_immutable_tape_sha256", "action_ball_target_recipe",
+    "action_ball_immutable_tape_sha256",
+    "action_ball_banded_question_bank_path",
+    "action_ball_banded_question_bank_sha256", "action_ball_target_recipe",
     "action_ball_target_validity_mask", "action_ball_target_observation_noise",
+    "action_ball_reuse_exact_question_until_semantics_change",
+    "action_ball_initial_center_single_question",
     "action_ball_evaluator_launch_receipt_path",
     "action_ball_evaluator_launch_receipt_file_sha256",
     "action_ball_sidecar_launch_receipt_path",
@@ -11269,9 +12071,22 @@ _REWARD_PACK_V2_DIRECT = (
     ("strike_ang_vel", 0.0),
     ("strike_foot_vel", 0.0),
     ("strike_vbob", 0.0),
-    ("hit_unstable_support", -10.0),     # ……换 PACE 单条(B1 已在 cfg 声明 weight=0 待命)
+    # 2026-08-04 层级对齐(与 exp §5.3 的折扣 per-swing 账对表,详见 §5.6 偏离记录)。
+    # 这两项此前从未进过 exp 的层级账,实测量级压过主层级,构成 §5.1 明令禁止的倒置:
+    #   upright_exp=1.0  -> 每步无条件 +0.02,无 task_valid mask/无窗口,RESET_WAIT 内照付;
+    #                       500 步 gamma=.99 折扣 = +1.9869 > task-valid mimic 1.77331(112%)
+    #                       且 > accepted window 1.85151(107%)。即"站着不动"比"学动作"挣得多。
+    #   hit_unstable_support=-10 -> 窗内单脚/腾空每步 -0.2,wide 窗 ±0.10 s = 11 步,
+    #                       最坏单次挥拍 -2.2 > accepted window +1.85151。即"进窗但重心转移"
+    #                       比"不挥拍"更差 —— 而重心转移正是人打球必然发生的事。
+    # 对齐后(保持 exp 的比例口径,只改标量):
+    #   upright_exp 0.25 -> 折扣 +0.4967 = mimic 预算的 28%,回到辅助项该在的位置;
+    #   hit_unstable_support -1.0 -> 最坏 -0.22 = accepted window 的 12%。
+    # 该臂无 footwork 任务(base_position_weight 已显式 0),窗内稳定性另有 base_fell_tilt +
+    # foot_slip_sq + upright_exp 三条覆盖,不靠这一条单笔压过 target。
+    ("hit_unstable_support", -1.0),      # 原 -10.0;PACE 单条(B1 已在 cfg 声明 weight=0 待命)
     ("upright", 0.0),                    # 税型站正(flat_orientation_l2)下岗……
-    ("upright_exp", 1.0),                # ……换收入型站正(B1 已声明 weight=0 待命)
+    ("upright_exp", 0.25),               # 原 1.0;收入型站正(B1 已声明 weight=0 待命)
     ("arm_overreach", 0.0),              # 伸臂过远税下岗,交给全身模仿
     # 击中/结果层(Franco 2026-07-25 v2.1 裁定:代理全删、分开学、上台扛大奖)。
     # 三核乘积(strike_success)是"结果"的人造 AND 代理,capture_bonus 是它的二值化——
@@ -11289,8 +12104,17 @@ _REWARD_PACK_V2_DIRECT = (
     ("action_rate_l2", 0.0),
     ("action_rate_clamped", -0.2),
     # 统一硬安全终止价:fall/table/hard-qdes/hard-actual 只收一次。
-    # -300×policy_dt(0.02 s)=-6;具名原因只分账,不叠加第二份罚。
-    ("death_penalty", -300.0),
+    # 具名原因只分账,不叠加第二份罚。
+    #
+    # 2026-08-04 量级对齐:-300×0.02 = -6.0 是合法上台折扣下界 3.33209 的 180%,
+    # 即"打成一次再摔"净亏,这正是 §5.1 要防的倒置。外部三库(instinct_mj/mjlab/unitree)
+    # 全部没有 death penalty 这一项 —— 终止的代价就是失去未来收入 —— 其最大单步罚
+    # post-dt ≈ -0.2 = 视野收入的 2%(dr_reward_external_diligence_20260731.md:1562/2881),
+    # 对齐后的 build_1 同样无此项。取 -10.0 -> post-dt -0.2,= 上台下界的 6%,
+    # 既保留"硬安全有明确价格"又不再压过主层级。
+    # 另注:joint_actual_forbidden 已改为 terminate=False,本项触发面从"唯一死因"
+    # 塌回"摔倒/撞桌/NaN",正是压量级的窗口。
+    ("death_penalty", -10.0),
 )
 # 包里的【可选】项:term 不存在时【跳过并记账】,不 fail-loud。
 # 与上面 DIRECT 的区别就是这一条,理由也只有一条:DIRECT 的 fail-loud 是在说"这个 cfg 血统根
@@ -13377,13 +14201,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     "lower_body_imitation_scale_in_window",
                     nonnegative=True,
                 )
-            if (
-                _pose_term.params.get("racket_command_name") != "racket_target"
-                or _pose_term.params.get("motion_command_name") != "motion"
-            ):
-                raise _OverrideError(
-                    "rewards.lower_body_pose_imitation requires racket_target/motion commands"
-                )
+            # 精简治理 2026-08-05:命令名校验已删,权威副本见 hope_rewards.py 的奖励函数本体。
         if _bundle_requested:
             _require(
                 hasattr(R, "lower_body_stability_bundle")
@@ -13419,13 +14237,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _bundle_param_values[_param] = _lower_body_number(
                     _raw, _key, positive=_positive, nonnegative=_nonnegative
                 )
-            if (
-                _bundle_term.params.get("racket_command_name") != "racket_target"
-                or _bundle_term.params.get("motion_command_name") != "motion"
-            ):
-                raise _OverrideError(
-                    "rewards.lower_body_stability_bundle requires racket_target/motion commands"
-                )
+            # 精简治理 2026-08-05:命令名校验已删,权威副本见 hope_rewards.py 的奖励函数本体。
         if (
             _pose_weight is not None
             and _bundle_weight is not None
@@ -13530,13 +14342,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 _settle_param_values[_param] = _lower_body_number(
                     _raw, _key, positive=_positive, nonnegative=_nonnegative
                 )
-            if (
-                _settle_term.params.get("racket_command_name") != "racket_target"
-                or _settle_term.params.get("motion_command_name") != "motion"
-            ):
-                raise _OverrideError(
-                    "rewards.post_swing_settle_debt requires racket_target/motion commands"
-                )
+            # 精简治理 2026-08-05:命令名校验已删,权威副本见 hope_rewards.py 的奖励函数本体。
             _settle_start = _settle_param_values.get(
                 "recovery_start_s", _settle_term.params.get("recovery_start_s")
             )
@@ -14662,6 +15468,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 "action_ball_target_source",
                 "action_ball_immutable_tape_path",
                 "action_ball_immutable_tape_sha256",
+                "action_ball_banded_question_bank_path",
+                "action_ball_banded_question_bank_sha256",
                 "action_ball_target_recipe",
             ):
                 _set_attr(
@@ -14695,6 +15503,36 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 lambda value: _as_explicit_bool(
                     value,
                     "task.racket.action_ball_target_observation_noise",
+                ),
+                applied,
+                "racket_target",
+            )
+            _set_attr(
+                C,
+                "action_ball_reuse_exact_question_until_semantics_change",
+                _get(
+                    rk,
+                    "action_ball_reuse_exact_question_until_semantics_change",
+                ),
+                lambda value: _as_explicit_bool(
+                    value,
+                    "task.racket."
+                    "action_ball_reuse_exact_question_until_semantics_change",
+                ),
+                applied,
+                "racket_target",
+            )
+            _set_attr(
+                C,
+                "action_ball_initial_center_single_question",
+                _get(
+                    rk,
+                    "action_ball_initial_center_single_question",
+                ),
+                lambda value: _as_explicit_bool(
+                    value,
+                    "task.racket."
+                    "action_ball_initial_center_single_question",
                 ),
                 applied,
                 "racket_target",
@@ -15397,6 +16235,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied,
             stable_ready_plant=stable_ready_plant,
         )
+        _apply_action_ball_dr_l0_finalizer(env_cfg, dr, applied)
 
     # These must be the final command/observation mutations: each formal mode
     # validates the fully composed state and appends its canonical actor tail
@@ -15469,6 +16308,8 @@ def _run(cfg):
         for field in (
             "action_ball_teacher_qdes_oracle_output_path",
             "action_ball_teacher_qdes_oracle_episodes",
+            "action_ball_c211_oracle_bundle_output_path",
+            "action_ball_c211_oracle_episodes",
         )
     ):
         num_envs = 1
@@ -15769,6 +16610,24 @@ def _run(cfg):
         num_envs=num_envs,
         max_iterations=agent_cfg.max_iterations,
     )
+    (
+        action_ball_c211_oracle_bundle_output_path,
+        action_ball_c211_oracle_episodes,
+    ) = _resolve_c211_live_oracle_request(
+        cfg,
+        c211=_211_mode == C211_ACTOR_CONTRACT,
+        action_ball=action_ball_launch_requested,
+        diagnostic=diagnostic_launch,
+        dynamic_ready=action_ball_dynamic_ready_bootstrap_requested,
+        shared_ready=action_ball_shared_ready_bootstrap_requested,
+        num_envs=num_envs,
+        max_iterations=agent_cfg.max_iterations,
+    )
+    if (
+        action_ball_c211_oracle_bundle_output_path is not None
+        and action_ball_teacher_qdes_oracle_output_path is not None
+    ):
+        raise RuntimeError("C211 live oracle and teacher-q_des oracle are mutually exclusive")
     if action_ball_teacher_qdes_oracle_output_path is not None:
         # This finite oracle is the sole caller that force-enables the already
         # reviewed attribution diagnostic.  ``apply_table_obstacle`` only
@@ -15933,16 +16792,10 @@ def _run(cfg):
         f"{effective_reward_receipt['sha256']}",
         flush=True,
     )
-    if (
-        reward_backend_compatibility_receipt[
-            "effective_reward_recipe_sha256"
-        ]
-        != effective_reward_receipt["sha256"]
-    ):
-        raise RuntimeError(
-            "Reward configuration changed after backend compatibility "
-            "resolution"
-        )
+    # 精简治理 2026-08-05:原来这里断言 backend-compatibility receipt 里的 recipe SHA 必须等于
+    # 刚算出来的 receipt SHA。两者都由同一个 env_cfg 在 _apply_task_overrides 之后算出,中间
+    # 没有任何一行改 rewards,所以恒等,属于自证。真正的绑定检查留在
+    # _write_reward_backend_compatibility_receipt:落盘前仍会拒绝不绑定 effective recipe 的收据。
     if action_ball_effective_reward_recipe_output_path is not None:
         materialized = _materialize_effective_reward_recipe_receipt(
             action_ball_effective_reward_recipe_output_path,
@@ -16022,6 +16875,9 @@ def _run(cfg):
                 actor_contract,
                 agent_cfg,
                 dynamic_ready_binding=action_ball_dynamic_ready_binding,
+                dr_l0_zero_decoder=_resolve_action_ball_dr_l0_request(
+                    _get(cfg.task, "domain_rand")
+                ),
             )
         )
         ready_identity = (
@@ -16628,6 +17484,129 @@ def _run(cfg):
         )
 
     _load_requested_checkpoint()
+
+    if action_ball_c211_oracle_bundle_output_path is not None:
+        from action_ball_c211_live_oracle import (
+            collect_live_oracle_bundle,
+            write_canonical_no_clobber,
+        )
+
+        ab = hard_contract["action_ball_training"]
+        preflight = ab["preflight"]
+        target = ab["runtime"]["target_provider"]
+        exact_reuse = target.get("exact_question_answer_reuse")
+        if (
+            target.get("source") != "direct_ball"
+            or target.get("recipe") != "outcome_dense_only"
+            or target.get("validity_mask") != [False, False, False]
+            or target.get("target_observation_noise") is not False
+            or target.get("immutable_tape") is not None
+            or type(exact_reuse) is not dict
+            or exact_reuse.get("enabled") is not False
+        ):
+            raise RuntimeError(
+                "C211 live oracle requires the direct-ball/000 no-cache runtime"
+            )
+        dynamic = ab["policy_bootstrap"]["ready_source"]["identity"]
+        dynamic_row = dynamic["rows"][0]
+        claim_sha = os.environ.get("HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256")
+        bindings = {
+            "oracle_launch_claim_sha256": claim_sha,
+            "lineage_sha256": _get(cfg, "action_ball_c211_oracle_lineage_sha256"),
+            "recipe_contract_sha256": _get(
+                cfg, "action_ball_c211_oracle_recipe_contract_sha256"
+            ),
+            "reward_contract_sha256": _get(
+                cfg, "action_ball_c211_oracle_reward_contract_sha256"
+            ),
+            "runtime_effective_reward_sha256": ab[
+                "effective_reward_recipe_sha256"
+            ],
+            "runtime_policy_recipe_sha256": hard_contract[
+                "action_ball_ppo_runner_recipe"
+            ]["sha256"],
+            "hard_contract_sha256": hard_contract_sha256,
+            "motion_sha256": hard_contract["motion_clips"][0]["sha256"],
+            "manifest_sha256": preflight["manifest"]["file_sha256"],
+            "dynamic_ready_artifact_sha256": dynamic_row["artifact"]["sha256"],
+            "dynamic_ready_nominal_receipt_sha256": dynamic_row[
+                "nominal_hold_receipt"
+            ]["sha256"],
+        }
+        adapter, restore_adapter, verify_adapter = (
+            _make_c211_live_runtime_step_adapter(
+                env, action_id=preflight["action_order"][0]
+            )
+        )
+        try:
+            oracle = collect_live_oracle_bundle(
+                runner,
+                env,
+                identity={
+                    "action_id": preflight["action_order"][0],
+                    "action_uid": preflight["action_uids"][0],
+                    "motion_sha256": hard_contract["motion_clips"][0]["sha256"],
+                },
+                bindings=bindings,
+                training_contract_path=contract_path,
+                runner_preflight_facts=action_ball_211_runner_preflight,
+                question_contract={
+                    "target_source": target["source"],
+                    "question_source": "runtime_curriculum_sampler",
+                    "target_recipe": target["recipe"],
+                    "target_validity_mask": target["validity_mask"],
+                    "target_observation_noise": target[
+                        "target_observation_noise"
+                    ],
+                    "incoming_ball_fields": [
+                        "incoming_ball_contact_position_heading",
+                        "incoming_ball_contact_velocity_heading",
+                        "incoming_ball_contact_spin_heading",
+                    ],
+                    "desired_contact_fields_observed": False,
+                    "reset_inverse_solve": False,
+                    "online_solver_calls": 0,
+                    "online_lm_calls": 0,
+                    "question_rng": {
+                        "owner": "runtime_curriculum_sampler",
+                        "cadence": "every_episode_reset",
+                        "draw_count_authority": (
+                            "sample_receipt_draw_end_minus_draw_start"
+                        ),
+                        "zero_draw_claim_permitted": False,
+                        "checkpoint_resume": (
+                            "exact_sampler_and_curriculum_state"
+                        ),
+                    },
+                },
+                episodes=action_ball_c211_oracle_episodes,
+                runtime_step_adapter=adapter,
+            )
+            verify_adapter()
+            published = write_canonical_no_clobber(
+                action_ball_c211_oracle_bundle_output_path, oracle
+            )
+        finally:
+            restore_adapter()
+            env.close()
+        print(
+            "[train.py] ACTION_BALL_C211_OBSERVED_ORACLE_BUNDLE_JSON="
+            + json.dumps(
+                {
+                    **published,
+                    "closed_attempts": len(oracle["episodes"]),
+                    "selected_rubber_hits": sum(
+                        row["observed_selected_rubber_contact"]
+                        ["selected_face_sweep_contact"]
+                        for row in oracle["episodes"]
+                    ),
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return
 
     n1_vendor_completion_payload = (
         _build_n1_vendor_training_completion_payload(

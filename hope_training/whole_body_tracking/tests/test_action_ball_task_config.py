@@ -194,6 +194,12 @@ def test_action_ball_source_adds_exact_preclamp_and_actual_joint_safety_terms():
                 "limit_source": "joint_pos_limits",
                 "margin_rad": 0.0,
                 "margin_fraction": 0.02,
+                # Telemetry mode: the hard edge stays fully measured and latched as
+                # promotion-blocking evidence, but no longer ends the episode.  Binary
+                # termination here reproduced the CaT (arXiv:2403.18765) zero-return
+                # ablation -- 7/7 episodes died at ticks 69--88, all before the nominal
+                # strike -- against a teacher whose own worst limit margin is 0.116 rad.
+                "terminate": False,
             },
         ),
     }
@@ -331,7 +337,8 @@ def test_a211_c211_task_profiles_pin_frozen_reset_wait_schedule(
     assert task.actor_obs_contract == actor_contract
     assert task.gym_task == gym_task
     assert task.env.episode_length_s == pytest.approx(10.0)
-    assert task.motion.action_ball_diagnostic_split_ready_teacher is False
+    assert task.motion.action_ball_diagnostic_split_ready_teacher is True
+    assert list(task.motion.clip_family_per_clip) == ["backhand"]
     assert task.task_wait.enabled is True
     assert task.task_wait.policy_dt_s == pytest.approx(0.02)
     assert task.task_wait.seed == 20260804
@@ -339,6 +346,38 @@ def test_a211_c211_task_profiles_pin_frozen_reset_wait_schedule(
     assert task.task_wait.max_wait_ticks == 25
     assert task.task_wait.episode_horizon_ticks == 500
     assert task.task_wait.required_active_ticks == 200
+    assert task.racket.action_ball_initial_center_single_question is True
+    for retired in (
+        "action_ball_immutable_tape_path",
+        "action_ball_immutable_tape_sha256",
+        "action_ball_banded_question_bank_path",
+        "action_ball_banded_question_bank_sha256",
+    ):
+        assert retired not in task.racket
+    if actor_contract == "action_ball_a211":
+        assert task.racket.action_ball_target_source == "online_solver"
+        assert task.racket.action_ball_target_recipe == "current_lm"
+        assert list(task.racket.action_ball_target_validity_mask) == [
+            True,
+            True,
+            True,
+        ]
+        assert (
+            task.racket.action_ball_reuse_exact_question_until_semantics_change
+            is True
+        )
+    else:
+        assert task.racket.action_ball_target_source == "direct_ball"
+        assert task.racket.action_ball_target_recipe == "outcome_dense_only"
+        assert list(task.racket.action_ball_target_validity_mask) == [
+            False,
+            False,
+            False,
+        ]
+        assert (
+            task.racket.action_ball_reuse_exact_question_until_semantics_change
+            is False
+        )
 
 
 def test_historical_a225_c225_task_receipts_remain_named_and_distinct():
@@ -401,10 +440,15 @@ def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
     assert task.rewards.racket_velocity_weight == pytest.approx(0.5)
     assert task.rewards.racket_normal_weight == pytest.approx(0.5)
     assert task.rewards.virtual_landing_weight == pytest.approx(500.0)
-    assert task.rewards.death_penalty_weight == pytest.approx(-300.0)
+    # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0(post-dt -6.0 -> -0.2)。
+    # 权威在 HOPEPingPongActionBall.yaml:151;这里是它的 Hydra 组合断言副本。
+    assert task.rewards.death_penalty_weight == pytest.approx(-10.0)
     assert task.rewards.table_hit_penalty_weight == pytest.approx(0.0)
     assert task.rewards.qdes_limit_barrier_weight == pytest.approx(-5.0)
-    assert task.rewards.qdes_limit_barrier_margin_frac == pytest.approx(0.08)
+    # 0.08 -> 0.05：barrier 带宽必须 <= pre-apply guard 的投影包络内缩量（0.05*span），
+    # 否则任何被投影/被刹车钳住的关节恒落在带内，构造上每步扣 -0.0844（理论上限的 84%），
+    # 而这是护栏自己放进去的位置，策略无法规避。详见 exp §5.6 偏离记录第 9 条。
+    assert task.rewards.qdes_limit_barrier_margin_frac == pytest.approx(0.05)
     assert task.rewards.joint_limit_weight == pytest.approx(-5.0)
     assert task.actions.qdes_clamp is True
 

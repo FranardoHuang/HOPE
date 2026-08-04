@@ -91,23 +91,58 @@ def action_ball_211_wait_contract_facts() -> dict:
     }
 
 
-def action_ball_211_question_source_contract_facts() -> dict:
-    """Separate the current diagnostic tape from the final curriculum ABI."""
+def action_ball_211_question_source_contract_facts(*, family: str) -> dict:
+    """Return one family's question authority and target-provider semantics."""
 
-    return {
-        "identity": "action_ball_211_question_source_scope_v1",
-        "current_immutable_tape": {
-            "scope": "diagnostic_n1_early_fixed_band_only",
-            "final_curriculum_frozen": False,
-        },
-        "final_curriculum": {
-            "source": "pregenerated_cached_band_question_bank",
-            "generation": "offline_before_rollout",
-            "reset_selection": "index_one_bank_row",
+    if family not in ("A211", "C211"):
+        raise ValueError("question-source family must be A211 or C211")
+    sampler = {
+        "source": "runtime_curriculum_sampler",
+        "cadence": "every_episode_reset",
+        "curriculum_domain_levels_consulted_every_reset": True,
+        "sampler_runs_every_reset": True,
+        "initial_center_single_question": True,
+        "initial_center_activation": "all_32_domain_levels_exact_zero",
+        "initial_center_physical_support": "literal_profile_center_point",
+        "initial_center_rng_draws": "normal_fixed_budget",
+        "post_promotion_support": "zero_to_manifest_max_width_per_promoted_arm",
+        "sampler_rng_reused_by_target_provider": False,
+        "physical_rng_draw_count_authority": (
+            "sample_receipt_draw_end_minus_draw_start"
+        ),
+        "zero_physical_rng_draw_claim_permitted": False,
+        "selection": "sample_current_domain_levels",
+        "checkpoint_resume": "exact_sampler_and_curriculum_state",
+    }
+    if family == "A211":
+        target_provider = {
+            "source": "online_solver",
+            "desired_contact_inverse": True,
+            "online_inverse_solves_per_step": 0,
+            "exact_question_answer_cache": {
+                "enabled": True,
+                "role": "answer_only_never_question_source",
+                "key": "complete_semantic_question_sha256",
+                "cold_first_distinct_question_inverse_solve_calls": 1,
+                "same_batch_identical_question_inverse_solve_calls": 0,
+                "later_identical_question_inverse_solve_calls": 0,
+                "changed_question_inverse_solve_calls": 1,
+                "checkpoint_resume": "exact_ieee_answer_and_counters",
+            },
+        }
+    else:
+        target_provider = {
+            "source": "direct_ball",
+            "desired_contact_inverse": False,
+            "exact_question_answer_cache": {"enabled": False},
             "online_inverse_solves_per_reset": 0,
             "online_inverse_solves_per_step": 0,
-            "wait_remaining_observed": False,
-        },
+        }
+    return {
+        "identity": "action_ball_211_question_source_scope_v5",
+        "family": family,
+        "question_sampler": sampler,
+        "target_provider": target_provider,
     }
 
 
@@ -251,6 +286,40 @@ def _validate_cfg(env_cfg, *, entrypoint: str, contract: _TrainabilityContract):
             f"{entrypoint}: {contract.label} requires an explicit privileged critic "
             "group; symmetric actor fallback is forbidden"
         )
+    command_cfg = getattr(
+        getattr(env_cfg, "commands", None), "racket_target", None
+    )
+    if command_cfg is None:
+        raise RuntimeError(
+            f"{entrypoint}: {contract.label} requires an explicit racket-target config"
+        )
+    expected_question_source = {
+        "A211": {
+            "action_ball_target_source": "online_solver",
+            "action_ball_reuse_exact_question_until_semantics_change": True,
+            "action_ball_initial_center_single_question": True,
+            "action_ball_target_recipe": "current_lm",
+            "action_ball_target_validity_mask": [True, True, True],
+        },
+        "C211": {
+            "action_ball_target_source": "direct_ball",
+            "action_ball_reuse_exact_question_until_semantics_change": False,
+            "action_ball_initial_center_single_question": True,
+            "action_ball_target_recipe": "outcome_dense_only",
+            "action_ball_target_validity_mask": [False, False, False],
+        },
+    }[contract.label]
+    for attribute, expected_value in expected_question_source.items():
+        actual = getattr(command_cfg, attribute, None)
+        if type(expected_value) is bool:
+            valid = type(actual) is bool and actual is expected_value
+        else:
+            valid = actual == expected_value
+        if not valid:
+            raise RuntimeError(
+                f"{entrypoint}: {contract.label} question-source fact {attribute} "
+                f"must be {expected_value!r}, got {actual!r}"
+            )
     _validate_wait_cfg(env_cfg, label=contract.label)
 
 
@@ -288,7 +357,9 @@ def _validate_runtime(env, *, contract: _TrainabilityContract) -> dict | None:
         "symmetric_critic_fallback_forbidden": True,
         "task_valid_required": True,
         "task_wait_contract": _validate_wait_cfg(cfg, label=contract.label),
-        "question_source_contract": action_ball_211_question_source_contract_facts(),
+        "question_source_contract": action_ball_211_question_source_contract_facts(
+            family=contract.label
+        ),
     }
     if callable(contract.extra_runtime_facts):
         facts.update(contract.extra_runtime_facts())

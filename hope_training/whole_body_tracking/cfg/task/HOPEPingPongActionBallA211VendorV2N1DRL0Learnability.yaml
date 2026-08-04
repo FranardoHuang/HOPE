@@ -1,0 +1,23 @@
+# Fresh-only A211 DR-L0 learnability candidate.
+#
+# This is a new Hydra leaf, not an in-place mutation of the retained-DR A211
+# diagnostic.  The shared train finalizer consumes the three DR-L0
+# fields below as one indivisible all-off tuple.  The runtime hard contract
+# re-opens the composed event slots after Gym construction and the fresh policy
+# bootstrap represents the absent joint-default event as an exact 31-D zero
+# startup delta.  Any retained-DR checkpoint/normalizer lineage is rejected.
+defaults:
+  - HOPEPingPongActionBallA211VendorV2N1Learnability@_here_
+  - _self_
+
+name: HOPEPingPongActionBallA211VendorV2N1DRL0Learnability
+
+domain_rand:
+  # Keep the parent's already adopted N1 stabilizers: torso CoM, link-mass and
+  # PD-gain randomization remain absent.  DR-L0 additionally removes the three
+  # retained axes so the first causal long asks only whether the nominal plant
+  # can learn balance -> imitation -> contact target -> landing.
+  stable_ready_plant: true
+  startup_physics_material: false
+  startup_joint_default_pos: false
+  policy_observation_corruption: false

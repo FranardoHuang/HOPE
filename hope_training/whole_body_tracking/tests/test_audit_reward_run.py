@@ -76,7 +76,8 @@ def _recipe():
                 "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
                 "action_ball_safety_terminated"
             ),
-            "weight": -300.0,
+            # 2026-08-05 层级对齐(exp §5.6 第 7 条):-300.0 -> -10.0。
+            "weight": -10.0,
             "params": {
                 "term_names": [
                     "base_fell_tilt",
@@ -110,7 +111,8 @@ def _recipe():
             "weight": -5.0,
             "params": {
                 "action_name": "joint_pos",
-                "margin_frac": 0.08,
+                # 2026-08-05 带宽对齐(exp §5.6 第 9 条):qdes 通道 0.08 -> 0.05。
+                "margin_frac": 0.05,
                 "penalty_floor": 0.25,
             },
         },
@@ -121,7 +123,8 @@ def _recipe():
                 "qdes_limit_barrier_probe"
             ),
             "weight": 1.0,
-            "params": {"action_name": "joint_pos", "margin_frac": 0.08},
+            # train.py 把 term 的 params 整份拷给 probe,所以 probe 也跟到 0.05。
+            "params": {"action_name": "joint_pos", "margin_frac": 0.05},
         },
         {
             "name": "racket_position",
@@ -155,12 +158,14 @@ def _activation():
                 "action_ball_safety_terminated"
             ),
             "role": "objective",
-            "weight": -300.0,
+            # 2026-08-05 层级对齐(exp §5.6 第 7 条):-300.0 -> -10.0,
+            # weighted = raw 3.0 * -10.0 * dt 0.02 = -0.6(原 -18.0)。
+            "weight": -10.0,
             "recipe_term_sha256": _sha(_recipe()["terms"][0]),
             "observed_environment_step_count": 3,
             "observed_sample_count": 6,
             "nonzero_sample_count": 3,
-            "weighted_sum": -18.0,
+            "weighted_sum": -0.6,
             "raw_sum": 3.0,
             "raw_recovery": (
                 "validated_weighted_eq_raw_times_weight_times_step_dt"
@@ -436,9 +441,10 @@ def _per_action(recipe, manifest_sha):
         recipe,
         {
             group.ACTION_BALL_REWARD_GROUP_HOPE_TASK: [0.16, 0.0, 0.0],
+            # 2026-08-05(exp §5.6 第 7 条):death -12.0 -> -0.4,组内合计 -12.2 -> -0.6。
             group.ACTION_BALL_REWARD_GROUP_IMMUTABLE_SAFETY: [
-                -6.1,
-                -6.1,
+                -0.3,
+                -0.3,
                 0.0,
             ],
         },
@@ -447,8 +453,9 @@ def _per_action(recipe, manifest_sha):
         recipe,
         {
             group.ACTION_BALL_REWARD_GROUP_HOPE_TASK: [0.08, 0.0, 0.0],
+            # 2026-08-05(exp §5.6 第 7 条):death -6.0 -> -0.2,组内合计 -6.4 -> -0.6。
             group.ACTION_BALL_REWARD_GROUP_IMMUTABLE_SAFETY: [
-                -6.0,
+                -0.2,
                 -0.2,
                 -0.2,
             ],
@@ -474,7 +481,7 @@ def _per_action(recipe, manifest_sha):
                 "negative_weighted_sum": a_negative,
                 "reward_groups": a_groups,
                 "terms": [
-                    _term("death_penalty", 3, 2, 2.0, -12.0),
+                    _term("death_penalty", 3, 2, 2.0, -0.4),
                     _term("joint_limit", 3, 1, 1.0, -0.1),
                     _term("qdes_limit_barrier", 3, 1, 1.0, -0.1),
                     _term("qdes_limit_barrier_probe", 3, 0, 0.0, 0.0),
@@ -489,7 +496,7 @@ def _per_action(recipe, manifest_sha):
                 "negative_weighted_sum": b_negative,
                 "reward_groups": b_groups,
                 "terms": [
-                    _term("death_penalty", 3, 1, 1.0, -6.0),
+                    _term("death_penalty", 3, 1, 1.0, -0.2),
                     _term("joint_limit", 3, 1, 2.0, -0.2),
                     _term("qdes_limit_barrier", 3, 1, 2.0, -0.2),
                     _term("qdes_limit_barrier_probe", 3, 0, 0.0, 0.0),
@@ -553,13 +560,14 @@ def _safety(recipe, manifest_sha):
                 )
             },
             "death_raw_value": 1.0,
-            "death_weighted_contribution": -6.0,
+            # 2026-08-05(exp §5.6 第 7 条):-10.0 * dt 0.02 = -0.2(原 -6.0)。
+            "death_weighted_contribution": -0.2,
             "death_activation": {
                 "term_name": "death_penalty",
                 "eligible": True,
                 "active": True,
                 "raw": 1.0,
-                "weighted": -6.0,
+                "weighted": -0.2,
                 "step_dt_s": 0.02,
                 "effective": True,
             },

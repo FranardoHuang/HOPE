@@ -6402,6 +6402,186 @@ class ActionBirthBroker:
         payload["integrity_sha256"] = _sha256_json(payload)
         return payload
 
+    def diagnostic_state_dict_with_consumed_history(
+        self, receipts: Sequence[ActionBirthReceipt]
+    ) -> Dict[str, object]:
+        """Snapshot a complete diagnostic consumed transcript, read-only.
+
+        The diagnostic live broker deliberately retains only the latest
+        consumed receipt per environment.  Immutable-N1 exact resume keeps
+        the complete provider-issued birth history separately and may supply
+        it here at a stable (no-pending-transaction) checkpoint.  This method
+        neither changes the legacy ``state_dict()`` payload nor mutates broker
+        or callback state.
+        """
+
+        if not self._diagnostic_fast_path:
+            raise ActionBallContractError(
+                "diagnostic consumed-history state requires diagnostic mode"
+            )
+        if (
+            isinstance(receipts, (str, bytes))
+            or not isinstance(receipts, Sequence)
+        ):
+            raise TypeError("diagnostic consumed history must be a sequence")
+        if self._pending:
+            raise BirthProtocolError(
+                "diagnostic consumed-history state forbids pending births"
+            )
+        converted = tuple(receipts)
+        if any(
+            not isinstance(receipt, ActionBirthReceipt)
+            for receipt in converted
+        ):
+            raise TypeError(
+                "diagnostic consumed history requires ActionBirthReceipt rows"
+            )
+        keys = tuple(
+            (receipt.env_id, receipt.reset_generation)
+            for receipt in converted
+        )
+        if keys != tuple(sorted(keys)) or len(keys) != len(set(keys)):
+            raise ActionBallContractError(
+                "diagnostic consumed history must be unique and sorted by "
+                "env/generation"
+            )
+        expected_keys = tuple(
+            (env, generation)
+            for env, last_generation in sorted(
+                self._consumed_generation.items()
+            )
+            for generation in range(1, last_generation + 1)
+        )
+        if keys != expected_keys:
+            raise ActionBallContractError(
+                "diagnostic consumed history is missing or adds a generation"
+            )
+        by_key = dict(zip(keys, converted))
+        for env, generation in self._consumed_generation.items():
+            current = self._diagnostic_consumed_receipt_by_env.get(env)
+            if current is None or by_key[(env, generation)] != current:
+                raise ActionBallContractError(
+                    "diagnostic consumed history changed the live env receipt"
+                )
+
+        provider_state, authority_state = self._callback_states()
+        transcript = converted
+        try:
+            if self._provider is None:
+                raise BirthProtocolError("birth provider is not bound")
+            # Historical rows arrive through a diagnostic-only read seam,
+            # rather than through reserve/consume.  Re-run the complete
+            # immutable broker contract for every generation before trusting
+            # provider high-waters; a permissive provider adapter must not
+            # allow an older, re-signed receipt to drift from bindings/pins.
+            for receipt in transcript:
+                binding = self._binding(
+                    receipt.action_uid, receipt.action_slot
+                )
+                receipt.assert_contract(
+                    binding=binding,
+                    pins=self._pins,
+                    mobility_mode=self._mobility_mode,
+                    registry_sha256=self._registry_sha256,
+                )
+            self._assert_complete_birth_transcript(
+                transcript,
+                sampler_birth_indices=self._last_sampler_birth_index,
+                sampler_draw_ends=self._last_sampler_draw_end,
+            )
+            for receipt in transcript:
+                self._provider.assert_issued_birth(receipt)
+            if self._callback_states() != (
+                provider_state,
+                authority_state,
+            ):
+                raise ActionBallContractError(
+                    "birth provider authority assertion must be pure"
+                )
+            if (
+                self._callback_highwaters()
+                != self._broker_callback_highwaters()
+            ):
+                raise ActionBallContractError(
+                    "broker callback high-water differs from provider/domain "
+                    "authority"
+                )
+        except Exception:
+            self._restore_callback_states(
+                provider_state, authority_state
+            )
+            raise
+
+        payload: Dict[str, object] = {
+            "schema_version": BROKER_STATE_SCHEMA_VERSION,
+            "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
+            "registry_sha256": self._registry_sha256,
+            "pins": self._pins.to_dict(),
+            "mobility_mode": self._mobility_mode,
+            "bindings": [
+                binding.to_dict() for binding in self._bindings
+            ],
+            "domain_authority_contract_sha256": (
+                self._pins.domain_authority_sha256
+            ),
+            "domain_authority_state_owner_sha256": (
+                self._domain_authority_state_owner_sha256()
+            ),
+            "domain_authority_state": authority_state,
+            "domain_authority_state_sha256": _sha256_json(
+                authority_state
+            ),
+            "provider_contract_sha256": self._pins.sampler_sha256,
+            "provider_state_owner_sha256": (
+                self._provider_state_owner_sha256()
+            ),
+            "provider_state": provider_state,
+            "provider_state_sha256": _sha256_json(provider_state),
+            "domain_claim_counts": [
+                [action_uid, count]
+                for action_uid, count in sorted(
+                    self._domain_claim_count.items()
+                )
+            ],
+            "last_sampler_birth_indices": [
+                [action_uid, birth_index]
+                for action_uid, birth_index in sorted(
+                    self._last_sampler_birth_index.items()
+                )
+            ],
+            "last_sampler_draw_ends": [
+                [action_uid, draw_end]
+                for action_uid, draw_end in sorted(
+                    self._last_sampler_draw_end.items()
+                )
+            ],
+            "last_generations": [
+                [env, generation]
+                for env, generation in sorted(
+                    self._last_generation.items()
+                )
+            ],
+            "consumed_generations": [
+                [env, generation]
+                for env, generation in sorted(
+                    self._consumed_generation.items()
+                )
+            ],
+            "consumed_receipts": [
+                receipt.to_dict() for receipt in converted
+            ],
+            "pending": [],
+        }
+        payload["integrity_sha256"] = _sha256_json(payload)
+        if self._callback_states() != (
+            provider_state,
+            authority_state,
+        ):
+            raise ActionBallContractError(
+                "diagnostic consumed-history snapshot mutated callback state"
+            )
+        return payload
+
     @staticmethod
     def _generation_rows(
         value: object, *, name: str
@@ -7802,6 +7982,26 @@ class LazyActionTaskPool:
         )
         return count, root
 
+    def _solver_delegates_birth_task_transcripts(self) -> bool:
+        """Whether the bounded solver deliberately leaves birth roots to this pool.
+
+        Precomputed band sources can revalidate every receipt from immutable
+        cache rows but must not retain one duplicate state entry per historical
+        birth.  Existing online and immutable-tape solvers keep their original
+        solver-owned transcript contract.
+        """
+
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        value = getattr(
+            self._solver, "pool_owns_birth_task_transcripts", False
+        )
+        if type(value) is not bool:
+            raise ActionBallContractError(
+                "solver pool_owns_birth_task_transcripts must be an exact boolean"
+            )
+        return value
+
     def _solver_task_transcript_for_birth_pure(
         self, birth_sha256: str
     ) -> Tuple[int, str]:
@@ -7856,6 +8056,9 @@ class LazyActionTaskPool:
 
     def _assert_all_task_transcripts_pure(self) -> None:
         """Cross-check compact active/retired roots with solver authority."""
+
+        if self._solver_delegates_birth_task_transcripts():
+            return
 
         solver_state = self._solver_state()
         try:
@@ -8676,9 +8879,13 @@ class LazyActionTaskPool:
                     expected_root, receipt.canonical_sha256
                 )
             expected_count += len(batch.receipts)
-            if self._solver_task_transcript_for_birth_pure(
-                birth_digest
-            ) != (expected_count, expected_root):
+            if (
+                not self._solver_delegates_birth_task_transcripts()
+                and self._solver_task_transcript_for_birth_pure(
+                    birth_digest
+                )
+                != (expected_count, expected_root)
+            ):
                 raise ActionBallContractError(
                     "solver birth task transcript differs from staged "
                     "callback result"
@@ -9342,52 +9549,53 @@ class LazyActionTaskPool:
                     ) in staged_refills
                 )
             )
-            authority_transcripts = (
-                self._solver_task_transcripts_for_births_pure(
-                    tuple(
-                        digest
-                        for (
-                            _binding,
-                            digest,
-                            _request,
-                            _batch,
-                            _digests,
-                            _sample_index,
-                            _draw_end,
-                        ) in staged_refills
+            if not self._solver_delegates_birth_task_transcripts():
+                authority_transcripts = (
+                    self._solver_task_transcripts_for_births_pure(
+                        tuple(
+                            digest
+                            for (
+                                _binding,
+                                digest,
+                                _request,
+                                _batch,
+                                _digests,
+                                _sample_index,
+                                _draw_end,
+                            ) in staged_refills
+                        )
                     )
                 )
-            )
-            for (
-                (
-                    binding,
-                    digest,
-                    _request,
-                    batch,
-                    _digests,
-                    _sample_index,
-                    _draw_end,
-                ),
-                authority_transcript,
-            ) in zip(staged_refills, authority_transcripts):
-                expected_count, expected_root = (
-                    self._expected_task_transcript_for_active_birth(
-                        binding.action_uid, digest
+                for (
+                    (
+                        binding,
+                        digest,
+                        _request,
+                        batch,
+                        _digests,
+                        _sample_index,
+                        _draw_end,
+                    ),
+                    authority_transcript,
+                ) in zip(staged_refills, authority_transcripts):
+                    expected_count, expected_root = (
+                        self._expected_task_transcript_for_active_birth(
+                            binding.action_uid, digest
+                        )
                     )
-                )
-                for receipt in batch.receipts:
-                    expected_root = _task_transcript_extend(
-                        expected_root, receipt.canonical_sha256
-                    )
-                expected_count += len(batch.receipts)
-                if authority_transcript != (
-                    expected_count,
-                    expected_root,
-                ):
-                    raise ActionBallContractError(
-                        "solver birth task transcript differs from staged "
-                        "callback result"
-                    )
+                    for receipt in batch.receipts:
+                        expected_root = _task_transcript_extend(
+                            expected_root, receipt.canonical_sha256
+                        )
+                    expected_count += len(batch.receipts)
+                    if authority_transcript != (
+                        expected_count,
+                        expected_root,
+                    ):
+                        raise ActionBallContractError(
+                            "solver birth task transcript differs from staged "
+                            "callback result"
+                        )
             for uid in staged_sample_indices_by_uid:
                 authority_highwater = authority_highwaters[uid]
                 emitted_highwater = projected_sample_highwater[uid]
@@ -10742,19 +10950,20 @@ class LazyActionTaskPool:
                         "pool admitted-task count differs from solver "
                         "authority"
                     )
-            for birth_digest, expectation in (
-                task_transcript_expectations.items()
-            ):
-                if (
-                    self._solver_task_transcript_for_birth(
-                        birth_digest
-                    )
-                    != expectation
+            if not self._solver_delegates_birth_task_transcripts():
+                for birth_digest, expectation in (
+                    task_transcript_expectations.items()
                 ):
-                    raise ActionBallContractError(
-                        "pool birth task transcript differs from solver "
-                        "authority"
-                    )
+                    if (
+                        self._solver_task_transcript_for_birth(
+                            birth_digest
+                        )
+                        != expectation
+                    ):
+                        raise ActionBallContractError(
+                            "pool birth task transcript differs from solver "
+                            "authority"
+                        )
             for binding in self._bindings:
                 uid = binding.action_uid
                 saved_highwater = (

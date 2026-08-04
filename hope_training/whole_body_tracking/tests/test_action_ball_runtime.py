@@ -1102,6 +1102,21 @@ def _broker(
     return broker, provider
 
 
+def _diagnostic_broker_with_counted_producers():
+    bindings = _bindings(1)
+    broker = R.ActionBirthBroker(
+        bindings,
+        _pins(),
+        "no_move",
+        diagnostic_unauthorized=True,
+    )
+    authority = BatchedDomainAuthority(bindings, "no_move")
+    provider = BatchedBirthProvider()
+    broker.bind_domain_claim_authority(authority)
+    broker.bind_provider(provider)
+    return broker, provider, authority
+
+
 def _reserve(
     broker,
     *,
@@ -1186,6 +1201,42 @@ def _integrity(payload):
             allow_nan=False,
         ).encode("ascii")
     ).hexdigest()
+
+
+def _canonical_json_bytes(payload):
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+
+
+def _consume_same_env_birth_history(broker, *, generations=3):
+    history = []
+    for generation in range(1, generations + 1):
+        birth = _reserve(broker, env_id=0, generation=generation)
+        history.append(_consume(broker, birth))
+    return tuple(history)
+
+
+def _mutate_consumed_birth_history(history, case):
+    if case == "missing":
+        return (history[0], *history[2:])
+    if case == "extra":
+        return (
+            *history,
+            replace(history[-1], reset_generation=len(history) + 1),
+        )
+    if case == "out_of_order":
+        return (history[1], history[0], *history[2:])
+    if case == "identity_drift":
+        return (
+            replace(history[0], motion_sha256=_digest("history-drift")),
+            *history[1:],
+        )
+    raise AssertionError(f"unknown history mutation case {case!r}")
 
 
 def test_receipts_are_immutable_canonical_strict_and_no_move_is_physical():
@@ -2983,6 +3034,182 @@ def test_broker_exact_resume_and_atomic_tamper_rejection():
     ):
         restored.load_state_dict(forged)
     assert restored.state_dict() == before
+
+
+def test_diagnostic_consumed_history_keeps_legacy_state_bytes_and_values():
+    broker, _provider = _broker(1, diagnostic_unauthorized=True)
+    history = _consume_same_env_birth_history(broker, generations=1)
+    legacy_before = deepcopy(broker.state_dict())
+    legacy_bytes_before = _canonical_json_bytes(legacy_before)
+
+    full_history = broker.diagnostic_state_dict_with_consumed_history(history)
+    legacy_after = broker.state_dict()
+
+    assert full_history == legacy_before
+    assert legacy_after == legacy_before
+    assert _canonical_json_bytes(legacy_after) == legacy_bytes_before
+
+
+def test_diagnostic_consumed_history_exact_resume_without_producer_calls():
+    source, source_provider, source_authority = (
+        _diagnostic_broker_with_counted_producers()
+    )
+    history = _consume_same_env_birth_history(source)
+    source_producer_calls = (
+        source_provider.scalar_calls,
+        source_provider.batch_calls,
+        source_authority.scalar_calls,
+        source_authority.batch_calls,
+    )
+    source_callback_state = (
+        deepcopy(source_provider.state_dict()),
+        deepcopy(source_authority.state_dict()),
+    )
+
+    saved = source.diagnostic_state_dict_with_consumed_history(history)
+    saved_bytes = _canonical_json_bytes(saved)
+    assert len(saved["consumed_receipts"]) == len(history) == 3
+    assert (
+        source_provider.scalar_calls,
+        source_provider.batch_calls,
+        source_authority.scalar_calls,
+        source_authority.batch_calls,
+    ) == source_producer_calls
+    assert (
+        source_provider.state_dict(),
+        source_authority.state_dict(),
+    ) == source_callback_state
+
+    restored, restored_provider, restored_authority = (
+        _diagnostic_broker_with_counted_producers()
+    )
+    assert (
+        restored_provider.scalar_calls,
+        restored_provider.batch_calls,
+        restored_authority.scalar_calls,
+        restored_authority.batch_calls,
+    ) == (0, 0, 0, 0)
+    restored.load_state_dict(saved)
+    restored_history = tuple(
+        R.ActionBirthReceipt.from_dict(row)
+        for row in saved["consumed_receipts"]
+    )
+    restored_callback_state = (
+        deepcopy(restored_provider.state_dict()),
+        deepcopy(restored_authority.state_dict()),
+    )
+    resaved = restored.diagnostic_state_dict_with_consumed_history(
+        restored_history
+    )
+
+    assert resaved == saved
+    assert _canonical_json_bytes(resaved) == saved_bytes
+    assert (
+        restored_provider.scalar_calls,
+        restored_provider.batch_calls,
+        restored_authority.scalar_calls,
+        restored_authority.batch_calls,
+    ) == (0, 0, 0, 0)
+    assert (
+        restored_provider.state_dict(),
+        restored_authority.state_dict(),
+    ) == restored_callback_state
+
+
+@pytest.mark.parametrize(
+    ("case", "error_match"),
+    (
+        ("missing", "missing or adds"),
+        ("extra", "missing or adds"),
+        ("out_of_order", "unique and sorted"),
+        ("identity_drift", "action binding|issued birth|live env receipt"),
+    ),
+)
+def test_diagnostic_consumed_history_save_fails_closed_atomically(
+    case, error_match
+):
+    broker, provider, authority = _diagnostic_broker_with_counted_producers()
+    history = _consume_same_env_birth_history(broker)
+    before_broker = broker.diagnostic_state_dict_with_consumed_history(history)
+    before_provider = deepcopy(provider.state_dict())
+    before_authority = deepcopy(authority.state_dict())
+    before_producer_calls = (
+        provider.scalar_calls,
+        provider.batch_calls,
+        authority.scalar_calls,
+        authority.batch_calls,
+    )
+
+    with pytest.raises(R.ActionBallContractError, match=error_match):
+        broker.diagnostic_state_dict_with_consumed_history(
+            _mutate_consumed_birth_history(history, case)
+        )
+
+    assert broker.diagnostic_state_dict_with_consumed_history(history) == (
+        before_broker
+    )
+    assert provider.state_dict() == before_provider
+    assert authority.state_dict() == before_authority
+    assert (
+        provider.scalar_calls,
+        provider.batch_calls,
+        authority.scalar_calls,
+        authority.batch_calls,
+    ) == before_producer_calls
+
+
+@pytest.mark.parametrize(
+    ("case", "error_match"),
+    (
+        ("missing", "contiguous"),
+        ("extra", "exceeds generation ledger"),
+        ("out_of_order", "sorted by env/generation"),
+        ("identity_drift", "action binding|canonical SHA"),
+    ),
+)
+def test_diagnostic_consumed_history_load_fails_closed_atomically(
+    case, error_match
+):
+    source, _provider, _authority = (
+        _diagnostic_broker_with_counted_producers()
+    )
+    source_history = _consume_same_env_birth_history(source)
+    saved = source.diagnostic_state_dict_with_consumed_history(source_history)
+    forged = deepcopy(saved)
+    forged["consumed_receipts"] = [
+        receipt.to_dict()
+        for receipt in _mutate_consumed_birth_history(source_history, case)
+    ]
+    forged["integrity_sha256"] = _integrity(forged)
+
+    target, provider, authority = _diagnostic_broker_with_counted_producers()
+    target_history = _consume_same_env_birth_history(target, generations=1)
+    before_broker = target.diagnostic_state_dict_with_consumed_history(
+        target_history
+    )
+    before_provider = deepcopy(provider.state_dict())
+    before_authority = deepcopy(authority.state_dict())
+    before_producer_calls = (
+        provider.scalar_calls,
+        provider.batch_calls,
+        authority.scalar_calls,
+        authority.batch_calls,
+    )
+
+    with pytest.raises(R.ActionBallContractError, match=error_match):
+        target.load_state_dict(forged)
+
+    assert target.diagnostic_state_dict_with_consumed_history(
+        target_history
+    ) == before_broker
+    assert provider.state_dict() == before_provider
+    assert authority.state_dict() == before_authority
+    assert (
+        provider.scalar_calls,
+        provider.batch_calls,
+        authority.scalar_calls,
+        authority.batch_calls,
+    ) == before_producer_calls
 
 
 def test_broker_load_rejects_pending_sampler_transcript_forgery():

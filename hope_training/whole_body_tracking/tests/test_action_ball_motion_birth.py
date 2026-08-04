@@ -435,10 +435,23 @@ def _motion_harness(
     command._action_ball_task_receipt_resolver = None
     command._action_ball_shared_state_sha256_accessor = None
     command._action_ball_expected_shared_racket_state_sha256 = None
+    command._action_ball_fixed_view_identity_sha256 = None
+    command._action_ball_fixed_view_timing_row = None
+    command._action_ball_fixed_view_timing_row_device = None
     command._action_ball_active_task_refs = [None] * num_envs
     command._action_ball_task_timing_active = torch.zeros(
         num_envs, dtype=torch.bool
     )
+    command.action_ball_diagnostic_split_ready_teacher = False
+    command._action_ball_public_task_valid = None
+    command._action_ball_safe_ready_reference_pending = torch.zeros(
+        num_envs, dtype=torch.bool
+    )
+    command._action_ball_safe_ready_pending_count = 0
+    command._action_ball_single_stroke_complete = torch.zeros(
+        num_envs, dtype=torch.bool
+    )
+    command._action_ball_diagnostic_pending_row_count = 0
     command._action_ball_task_pending_elapsed_s = torch.zeros(
         num_envs, dtype=torch.float64
     )
@@ -676,6 +689,7 @@ class _TaskAuthority:
         self._runtime = runtime
         self._broker = broker
         self._tasks = {}
+        self._consumed_birth_history = {}
         self._nonce = 0
         self.ref_calls = 0
         self.resolve_calls = 0
@@ -687,12 +701,36 @@ class _TaskAuthority:
         }
         self._nonce += 1
 
+    def record_consumed_births(self, receipts):
+        for receipt in receipts:
+            key = (receipt.env_id, receipt.reset_generation)
+            previous = self._consumed_birth_history.get(key)
+            if previous is not None and previous != receipt:
+                raise ValueError("synthetic Racket birth history drifted")
+            self._consumed_birth_history[key] = receipt
+
     def state_dict(self):
+        if self._consumed_birth_history:
+            receipts = tuple(
+                self._consumed_birth_history[key]
+                for key in sorted(self._consumed_birth_history)
+            )
+            broker_state = (
+                self._broker.diagnostic_state_dict_with_consumed_history(
+                    receipts
+                )
+            )
+        else:
+            broker_state = self._broker.state_dict()
         return {
-            "broker": self._broker.state_dict(),
+            "broker": broker_state,
             "tasks": [
                 self._tasks[env_id].to_dict()
                 for env_id in sorted(self._tasks)
+            ],
+            "consumed_birth_history": [
+                self._consumed_birth_history[key].to_dict()
+                for key in sorted(self._consumed_birth_history)
             ],
             "nonce": self._nonce,
         }
@@ -701,6 +739,7 @@ class _TaskAuthority:
         if type(state) is not dict or set(state) != {
             "broker",
             "tasks",
+            "consumed_birth_history",
             "nonce",
         }:
             raise ValueError("invalid synthetic Racket state")
@@ -708,8 +747,16 @@ class _TaskAuthority:
             self._runtime.ActionBallTaskReceipt.from_dict(row)
             for row in state["tasks"]
         ]
+        consumed_births = [
+            self._runtime.ActionBirthReceipt.from_dict(row)
+            for row in state["consumed_birth_history"]
+        ]
         self._broker.load_state_dict(state["broker"])
         self._tasks = {receipt.env_id: receipt for receipt in tasks}
+        self._consumed_birth_history = {
+            (receipt.env_id, receipt.reset_generation): receipt
+            for receipt in consumed_births
+        }
         self._nonce = int(state["nonce"])
 
     def action_ball_task_ref_for_env(self, env_id):
@@ -727,6 +774,15 @@ class _TaskAuthority:
     def action_ball_shared_state_sha256(self):
         self.digest_calls += 1
         return self._runtime._sha256_json(self.state_dict())
+
+    def action_ball_fixed_view_broker_exact_state(self):
+        receipts = tuple(
+            self._consumed_birth_history[key]
+            for key in sorted(self._consumed_birth_history)
+        )
+        return self._broker.diagnostic_state_dict_with_consumed_history(
+            receipts
+        )
 
 
 def _bind_task_authority(command, runtime, broker):
@@ -1496,6 +1552,9 @@ def test_schema4_exact_resume_handoff_restores_local_refs_without_shared_io():
     command._resolve_pending_action_ball_tasks()
     saved_shared_racket = deepcopy(task_authority.state_dict())
     saved = command.exact_resume_state_dict()
+    before_preflight = deepcopy(saved)
+    command.validate_exact_resume_state_dict(saved, strict=True)
+    _assert_nested_equal(command.exact_resume_state_dict(), before_preflight)
     assert saved["schema_version"] == 4
     assert "broker_state" not in saved["action_ball_birth"]
     assert (
@@ -1510,6 +1569,16 @@ def test_schema4_exact_resume_handoff_restores_local_refs_without_shared_io():
         row is not None
         for row in saved["action_ball_birth"]["active_task_refs"]
     )
+
+    tampered_preflight = deepcopy(saved)
+    tampered_preflight["action_ball_birth"][
+        "shared_racket_state_sha256"
+    ] = "not-a-sha"
+    with pytest.raises(ValueError, match="shared_racket_state_sha256"):
+        command.validate_exact_resume_state_dict(
+            tampered_preflight, strict=True
+        )
+    _assert_nested_equal(command.exact_resume_state_dict(), before_preflight)
 
     # Move every behaviorally relevant tape/state away from the checkpoint.
     command._balanced_clip_sampler.sample(7)

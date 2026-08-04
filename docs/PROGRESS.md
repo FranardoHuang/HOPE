@@ -8,7 +8,86 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-04: MuJoCo WIP A211/C211 已在 exact Pod 各完成 `1 env x 2 PPO update`、
+  reset-boundary save 与 fresh-process cold-load；211/319 observation 均有限，cold-load/update2
+  exact 均为 true，A/C result SHA 分别为 `d58cb750…83bb2` / `440a1f2e…23733`。
+  fresh WAIT deterministic canary 的 hard/nonfinite/projection 均为0，随机 WAIT 的 joint-event
+  projection 为 `31/775=4.0%`；decoded mean→tape qdes最大误差`6.62e-8 rad`。这关闭的是
+  “MuJoCo A/C 主链能执行并冷载”的 smoke，不是4096、完整reward parity或formal训练授权；每个
+  update仍有7个无selected-contact的TASK_ACTIVE hard-terminal row；确定性checkpoint replay已确认
+  7/7都是`joint_actual_forbidden`，A/C分别发生在episode tick `70..84`/`69..88`、早于nominal
+  strike，故MuJoCo先做current/inset与mean/std单变量诊断，暂不发4096 scale。Isaac四格仍等待launcher共享helper恢复、C
+  `v3/240/700` repin与A/C各自literal-center WAIT receipt；另发现pod-wide Kit boot lock当前会持有
+  到训练自然结束，实际把四格全Pod串行，须收窄为仅保护Kit/extension boot并通过双进程overlap
+  smoke后才兑现“一卡两个”。详见
+  [successor readiness](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+
+- 2026-08-04: A/C fixed-N1 reward 候选已实际改到同一会计口径：A 删掉无动作
+  `base_position=1.5` 白拿收入，保留 `racket_progress=10`，九个 window 项`×1.15`；
+  C proximity=`240`；A/C landing=`700` (`+8.4..14`)；`gamma/lambda=.99/.95`不变。
+  Take061 task-valid 静态折扣账为 A `1.773<1.852≤3.009<3.332`、C
+  `1.773<1.904<3.332`。pre-long ledger 已按 pre-step `task_valid` 分开 ready/swing mimic，
+  与 reward/contract/config 联合=`228 passed`；C reward identity 升为v3。A/C leaf 另显式钉
+  `clip_family_per_clip=[backhand]`，避免单clip被默认成正手。当前仍须串行 repin
+  launcher/oracle/fixture 和 MuJoCo consumer（schema-3 training-contract 已与 runtime exact
+  cross-check），exact Pod 实测 eligible income，并单独监控
+  `legal_landing ∧ post_contact_fall_or_termination`；因此不授权 long。详见
+  [successor readiness](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#53-统一会计实际改动与静态层级-gate)。
+
+- 2026-08-04: **CURRENT CORRECTION（覆盖下方同日 candidate-route 条目）：**direct measured-frame0
+  physical birth 已在 Pod 同门槛扫描为 `0/73`，所以 current A211/C211 使用 tracked split-ready
+  physical reset + `60/240/1.2 s` hold，hidden WAIT 5--25 tick 后原子切 measured-frame0 teacher，并
+  由公开 `.712376 s` teacher-start clock 与 dense mimic 学 bridge；`200/800`/4 s被动hold不再是
+  first-long前置。A formal source=`online_solver + complete-semantic answer cache`，host 已证 cold Q=1、
+  同批4096/后续Q=0、Q'=1；C=`direct_ball`、总inverse=0，formal两族均不用immutable tape。A/C
+  launcher已绑定严格 all-off 的 fresh DR-L0；A/C launcher/materializer/C-live整合=`303 passed`，
+  更宽source回归=`778 passed,64 optional skipped`，另以Conda关闭pre-long/A-env/C-env=`45/15/27`
+  tests。代码仍待S0、lineage仍待clean S1，因此四格4096x5和long尚未发。
+  MuJoCo A/C host已修split-ready、reward/contact、100-row probe与500-step live horizon解耦；Pod WIP
+  r3真实进入physics/update后定位到fresh actor缺少safe-ready bias，补bias后可穿过16-tick WAIT，但
+  tick74 `waist_roll_joint` actual hard-limit仍早于nominal strike tick108，故需MuJoCo-native
+  `>=500` tick safe hold和4σ startup gate后才重跑A/C cold-load。0803 normalized
+  successor已按project-owned q=0 gripper lock可复现，closure=`73a47e85…8f08`、producer=`6 passed`；
+  它仍需新USD/retarget/hold/MuJoCo identity，不能代签canonical long。详见
+  [successor readiness](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)、
+  [G05](gates/G05_isaac_training_first_loop.md) 与 [G06](gates/G06_isaac_to_mujoco.md)。
+
+- 2026-08-04: pre-long review closed several branch-level contract gaps before any new long:
+  **SUPERSEDED HISTORICAL CANDIDATE（见上方 current correction）：**
+  A/C actor/critic remain `211/319` after deleting actor-only teacher-base15 and adding task-valid1;
+  actor angular velocity is one noisy pelvis/body-frame IMU gyro. Hidden WAIT now requires one coherent
+  safe-ready teacher tuple and atomic reveal to measured frame0; C live oracle and C long terminal
+  checkpoint/telemetry re-audit are being aligned with A. Reset selection is now threshold-first: exact
+  frame0 must first clear one pre-registered 13-slack robust vector and fresh single LP witness; otherwise
+  fallback remains blocked on torque-speed/swept/runtime transition authority. Host source tests pass, while
+  Take-061/73-action MuJoCo evaluation and exact Pod `200/800` remain `未测`. MuJoCo commit `934b7c03`
+  passed the executable `1 env x 2 step x 2 PPO update + save/cold-load` with the correct
+  `action_specific_hold` tape; result SHA=`9987e723…aa3b`, still C-lite/diagnostic only. See
+  [G05](gates/G05_isaac_training_first_loop.md), [G06](gates/G06_isaac_to_mujoco.md), and the
+  [successor readiness ledger](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md).
+
+- 2026-08-04: MuJoCo-native C211 host successor now carries the seeded per-env `5..25` tick
+  **SUPERSEDED HISTORICAL C-ONLY SNAPSHOT（见上方 current correction）：**
+  RESET_WAIT schedule, one exact-frame0 endpoint, atomic task reveal and checkpoint-v3
+  reset-boundary continuation in addition to the 211/319 ABI and C task reward. Host integration is
+  green. The scalar reward now includes a partial Isaac-synonymous subset: upright/base/joint/action
+  regularization, 13-body non-wrist pose/velocity mimic and measured-paddle p/v/face/long-axis;
+  WAIT keeps these priors active while masking the task. Exact Pod fresh/cold-load and cross-engine
+  WAIT receipts remain `未测`; foot/contact, undesired-contact, applied-torque, complete safety/
+  termination, export and GPU4096 remain fail-closed. See [G06](gates/G06_isaac_to_mujoco.md) and the
+  [successor readiness ledger](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md).
+
+- 2026-08-04: threshold-first safe-ready source 已收口 strict Stage1/Stage2 gate、独立 schema-v4
+  **SUPERSEDED/REJECTED DIRECT-FRAME0 ROUTE（见上方 current correction）：**
+  拍心/face/long 绑定、`0.1 N/contact + 1 N/foot` 单一 fresh LP witness、保守真实 collision
+  clearance 与 pinned snapshot/no-partial I/O。exact direct 的 physical/teacher 保留 raw quaternion
+  bitwise 相等，MuJoCo 单位化审计状态单独封存；无证书的非零 fallback 继续 fail closed。
+  Python 3.8 专项=`42 passed`，未上 Pod、未物化、未授权训练。详见
+  [G04](gates/G04_sim_modeling_mujoco_isaac.md)、[G05](gates/G05_isaac_training_first_loop.md) 与
+  [准备账 §12.4](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+
 - 2026-08-04: exact Pod 把 historical dynamic-ready hold 从旧 `60/240` 延长到 Gate 要求的
+  **SUPERSEDED HISTORICAL DURABILITY INTERPRETATION（见上方 current correction）：**
   `200 policy tick / 800 physics substep`；在 step62 因 `waist_roll_joint` 越过硬下限约
   `4.15e-5 rad` 失败，无碰桌且双脚仍接触。旧短时 PASS 已被撤销为不足证据；A211 当前没有
   通过 200/800 的 reset authority，需先用不弱化安全门的预注册 qdes 候选搜索找到 full-horizon
@@ -16,13 +95,14 @@
   [G05](gates/G05_isaac_training_first_loop.md) 与
   [successor readiness](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 
-- 2026-08-04: 把 0803 A3-P1 raw delivery 确定性归一为独立 ignored 31-action
-  candidate：9 个左夹爪轴固定但保留 `0.76626209416 kg` 及全部 inertial/origin，
-  78 个 mesh 大小写、20 个缺失 collision、重复 pelvis IMU link 和 NaN color 均显式收口。
-  Exact receipt 为 `63 links / 62 joints / 31 movable`，URDF `2f15df8a…2535`、closure
-  `73a47e85…8f08`，host focused `4 passed`。exact Pod importer、31 joint/32 body order 与20-step
-  finite 已通过；现役 asset pointer 未改。正式 standing/FK/dynamics、夹爪 mount authority 和
-  MuJoCo v3 未闭合，因此尚不能替换 pre-long plant。详见
+- 2026-08-04: 0803 successor 复核改为 fail closed：raw 没有九个 left-gripper movable joints 的
+  **SUPERSEDED BY PROJECT-OWNED Q=0 LOCK（见上方 current correction）：**
+  neutral/default/calibration authority，`q=0` 仅是合法 coordinate zero；包内还缺 20 个必须保留的
+  collision meshes，并含 geometry-free NaN visual。已撤销猜 `q=0` 的 closure `73a47e85…8f08`
+  及删除 21-link/`0.76626209416 kg` 的 closure `77ed6a4d…fe17`；本机 ignored 后者标为
+  `INVALID_NOT_FOR_TRAINING`，tracked manifest 改为 `output=null`。0803 原包和右拍继续作为
+  future-primary raw source，现役训练仍用未改动的旧 31-action `agibot_a3/`。只有取得九维锁位、
+  mount/collision/visual authority 后才能 materialize 并做质量/COM/惯量及 Pod promotion gates。详见
   [0803 31-action 归一化记录](experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
 
 - 2026-08-03: Preserved the new A3-P1 0803 vendor delivery byte-for-byte under ignored
@@ -51,9 +131,12 @@
   frame0 artifact/receipt；这只修正输入封装，不改 hold 数值或安全门。
   第二个 preflight 又移除了 wrapper 重复的 `--motion-file` override：motion 必须只由
   SHA 冻结的 nominal-hold artifact 提供，避免 artifact 与 CLI 两个权威。
-- `immutable_tape` 口径已纠正：它是 fixed-center N1 的单行 cache，reset/step online LM/inverse
-  solve 为零，但同时冻结 curriculum；可用于今晚 finite canary。扩域/full-curriculum long 前必须
-  切换到按 exact domain level 索引、缺块 fail closed 的 `banded_question_bank`。
+- `immutable_tape` 口径已纠正：它是 fixed-center N1 的单行 cache，只保证
+  question/task reset/step online LM/inverse solve 为零；birth sampler/RNG 仍独立记账，
+  curriculum 被冻结。它可用于 finite canary 和固定题 N1 learnability long。
+  `banded_question_bank` 经复核仍为 construction-only draft：birth/question draw range 存在
+  owner 重叠，且缺跨-owner tape-root、连续 base coverage/checkpoint 和 C direct-ball schema；
+  train/runtime 已双层 fail closed，expanding/full-curriculum long 暂无授权题源。
 - MuJoCo exact clean Pod `ebe963f5` component suite 已得到 `108 passed, 0 skipped, 0 failed`，关闭
   旧的“Pod 组件未测”说法；用户可执行 C-lite runner 的 `1 env x 2 step x 2 PPO update +
   save/cold-load` 仍未跑，不能称 trainer ready。长跑前七项基础门已集中记录在
@@ -85,7 +168,7 @@
 - fresh A/C 已删除 actor 的 raw teacher-base 15-D 并新增 actor/critic `task_valid`，因而
   ABI 为 `211/319`，不复用 225/318 normalizer/checkpoint。WAIT 内 task/base-goal/两钟、
   task/contact/outcome reward 和对应分母全关，balance、safety 和非任务 mimic 保留。
-- C211 reward-v2 只有拍心-球心 Cauchy 距离与 actual-contact-gated analytic landing；无
+- **SUPERSEDED HISTORICAL SNAPSHOT（current 见顶部 2026-08-04 reward-v3）：**C211 reward-v2 只有拍心-球心 Cauchy 距离与 actual-contact-gated analytic landing；无
   desired-contact/独立 hit bonus。单拍距离峰值 `4.4`，低于 legal landing 下界 `6`，
   对方侧出界不超过同质量合法奖励一半。host 相关回归 `267 passed, 17 skipped`，
   Torch/Pod 数值仍`未测`。

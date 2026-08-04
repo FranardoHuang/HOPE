@@ -853,6 +853,10 @@ def test_split_ready_update_latches_completion_without_wrap_resample():
     command._event_scheduler = None
     command._multiseg = True
     command.action_ball_diagnostic_split_ready_teacher = True
+    command._action_ball_safe_ready_reference_pending = torch.zeros(
+        4, dtype=torch.bool
+    )
+    command._action_ball_safe_ready_pending_count = 0
     command._action_ball_single_stroke_complete = torch.zeros(
         4, dtype=torch.bool
     )

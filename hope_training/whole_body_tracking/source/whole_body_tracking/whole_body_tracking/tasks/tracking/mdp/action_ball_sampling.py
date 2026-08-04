@@ -3479,6 +3479,7 @@ def _contact_time_tick_grid(
     *,
     step_s: float,
     frontier_band_fraction: float,
+    allow_zero_initial: bool = False,
 ) -> _ContactTimeTickGrid:
     """Quantize one profile once; no per-proposal continuous TTC exists."""
 
@@ -3497,6 +3498,8 @@ def _contact_time_tick_grid(
         raise ValueError(
             "time-to-contact frontier band must lie in (0, 1)"
         )
+    if type(allow_zero_initial) is not bool:
+        raise TypeError("allow_zero_initial must be an exact boolean")
     epsilon = 1.0e-12
     strict_reaction_floor_s = (
         profile.reference_t_hit_s / profile.teacher_rate_min
@@ -3537,15 +3540,19 @@ def _contact_time_tick_grid(
         *,
         side: str,
     ) -> Tuple[int, int]:
+        initial_floor = 0 if allow_zero_initial else 1
         initial = min(
             capacity,
-            max(1, math.ceil(initial_s / step - epsilon)),
+            max(
+                initial_floor,
+                math.ceil(initial_s / step - epsilon),
+            ),
         )
         maximum = min(
             capacity,
             max(initial, math.ceil(maximum_s / step - epsilon)),
         )
-        if not 1 <= initial <= maximum <= capacity:
+        if not initial_floor <= initial <= maximum <= capacity:
             raise ValueError(
                 f"time-to-contact {side} tick widths are invalid"
             )
@@ -3582,17 +3589,25 @@ def _contact_time_tick_grid(
             time_to_contact_upper=level,
         )
         lower, upper = result.width_ticks(levels)
-        if lower < 1 or upper < 1:
+        minimum_expected_width = 1 if level == 1.0 else 0
+        if lower < minimum_expected_width or upper < minimum_expected_width:
             raise AssertionError(
                 "time-to-contact reachable level lost one side"
             )
-        for side in ("negative", "positive"):
-            result.sample_tick(
-                uniform=0.5,
-                levels=levels,
-                frontier_side=side,
-                frontier_band_fraction=frontier_band,
-            )
+        if level == 0.0 and allow_zero_initial:
+            if lower != 0 or upper != 0:
+                raise AssertionError(
+                    "time-to-contact level zero is not the center tick"
+                )
+            continue
+        for side, width in (("negative", lower), ("positive", upper)):
+            if width > 0:
+                result.sample_tick(
+                    uniform=0.5,
+                    levels=levels,
+                    frontier_side=side,
+                    frontier_band_fraction=frontier_band,
+                )
     if not (
         result.minimum_tick * step > strict_reaction_floor_s
         and result.maximum_tick * step
@@ -3683,6 +3698,28 @@ _BASE_SPAWN_ARMS = (
     "base_spawn_y_lower",
     "base_spawn_y_upper",
 )
+
+
+def _zero_initial_support_profile(
+    profile: SamplingProfile,
+) -> SamplingProfile:
+    """Keep every center/max/bound but make curriculum level zero a point."""
+
+    updates = {}
+    for descriptor in fields(profile):
+        if "_initial_" not in descriptor.name:
+            continue
+        value = getattr(profile, descriptor.name)
+        if isinstance(value, tuple):
+            updates[descriptor.name] = tuple(0.0 for _ in value)
+        elif type(value) in (int, float) and type(value) is not bool:
+            updates[descriptor.name] = 0.0
+        else:  # pragma: no cover - SamplingProfile owns only numeric widths.
+            raise TypeError(
+                "initial support field is not numeric: "
+                f"{descriptor.name}"
+            )
+    return replace(profile, **updates)
 
 
 def _arm_support_parameters(
@@ -4513,6 +4550,7 @@ class ActionBallSampler:
         seed: int,
         sampling_mixture: Optional[SamplingMixture] = None,
         contact_time_step_s: Optional[float] = None,
+        initial_center_single_question: bool = False,
         diagnostic_unauthorized: bool = False,
     ) -> None:
         if not isinstance(profiles, (tuple, list)) or not profiles:
@@ -4530,6 +4568,21 @@ class ActionBallSampler:
             ordered[profile.action_uid] = profile
         self._profiles = dict(sorted(ordered.items()))
         self._seed = _plain_int(seed, name="seed")
+        if type(initial_center_single_question) is not bool:
+            raise TypeError(
+                "initial_center_single_question must be an exact boolean"
+            )
+        self._initial_center_single_question = (
+            initial_center_single_question
+        )
+        self._support_profiles = (
+            {
+                uid: _zero_initial_support_profile(profile)
+                for uid, profile in self._profiles.items()
+            }
+            if self._initial_center_single_question
+            else self._profiles
+        )
         if type(diagnostic_unauthorized) is not bool:
             raise TypeError(
                 "diagnostic_unauthorized must be an exact boolean"
@@ -4565,10 +4618,13 @@ class ActionBallSampler:
             self._contact_time_step_s = step
             self._contact_time_grid_by_action = {
                 uid: _contact_time_tick_grid(
-                    self._profiles[uid],
+                    self._support_profiles[uid],
                     step_s=step,
                     frontier_band_fraction=(
                         sampling_mixture.frontier_band_fraction
+                    ),
+                    allow_zero_initial=(
+                        self._initial_center_single_question
                     ),
                 )
                 for uid in self.action_uids
@@ -4647,6 +4703,14 @@ class ActionBallSampler:
                     }
                     for uid in self.action_uids
                 ]
+        if self._initial_center_single_question:
+            contract_payload["initial_center_single_question"] = {
+                "enabled": True,
+                "activation": "all_32_domain_levels_exact_zero",
+                "physical_support": "literal_profile_center_point",
+                "rng_draws": "consumed_at_normal_fixed_budget",
+                "promotion": "zero_to_manifest_max_width_per_promoted_arm",
+            }
         self._contract_sha256 = _sha256_json(contract_payload)
         self._retired_birth_count_by_action = {
             uid: 0 for uid in self.action_uids
@@ -4688,6 +4752,119 @@ class ActionBallSampler:
     @property
     def contact_time_step_s(self) -> Optional[float]:
         return self._contact_time_step_s
+
+    @property
+    def initial_center_single_question(self) -> bool:
+        return self._initial_center_single_question
+
+    def _literal_initial_center_active(
+        self, levels: DomainLevels
+    ) -> bool:
+        return self._initial_center_single_question and all(
+            getattr(levels, name) == 0.0 for name in ARM_KEYS
+        )
+
+    def _support_profile(
+        self, profile: SamplingProfile
+    ) -> SamplingProfile:
+        support = self._support_profiles.get(profile.action_uid)
+        if support is None:
+            raise ValueError("profile is outside this sampler")
+        return support
+
+    def _sampling_plan_for_request(
+        self,
+        *,
+        profile: SamplingProfile,
+        levels: DomainLevels,
+        proposal_index: int,
+        scope: str,
+        contact_time_tick_grid: Optional[_ContactTimeTickGrid] = None,
+        override: Optional[
+            Tuple[str, DomainLevels, Optional[str]]
+        ] = None,
+    ) -> Tuple[str, DomainLevels, Optional[str]]:
+        """Resolve a plan without letting level-zero quotas widen one question.
+
+        The sampler still consumes its normal fixed random-draw budget and
+        advances every transcript/counter.  Only the physical support is a
+        point while all 32 curriculum levels are exactly zero.  The first
+        promoted arm therefore restores the ordinary profile widths without
+        replacing curriculum, RNG, or checkpoint authority.
+        """
+
+        support_profile = self._support_profile(profile)
+        if self._literal_initial_center_active(levels):
+            point_plan = ("center", DomainLevels(), None)
+            if override is not None:
+                validated = _validated_sampling_plan_override(
+                    profile=support_profile,
+                    domain_levels=levels,
+                    mixture=self._sampling_mixture,
+                    scope=scope,
+                    plan=override,
+                )
+                if validated != point_plan:
+                    raise ValueError(
+                        "initial-center single-question mode only accepts "
+                        "the literal center plan at level zero"
+                    )
+            return point_plan
+        if self._initial_center_single_question:
+            if scope == "birth":
+                active_arms = tuple(_BASE_SPAWN_ARMS)
+            elif scope == "swing":
+                active_arms = tuple(
+                    arm
+                    for arm in ARM_KEYS
+                    if arm not in _BASE_SPAWN_ARMS
+                    and not (
+                        profile.counter_rally_objective is not None
+                        and arm
+                        in profile.counter_rally_objective.inactive_curriculum_arms
+                    )
+                    and not (
+                        profile.mobility_mode == "no_move"
+                        and arm.startswith("base_travel_")
+                    )
+                )
+            else:
+                raise ValueError("sampling scope must be 'birth' or 'swing'")
+            if all(
+                _arm_physical_width(support_profile, levels, arm) <= 0.0
+                for arm in active_arms
+            ):
+                inactive_plan = ("center", DomainLevels(), None)
+                if override is not None:
+                    validated = _validated_sampling_plan_override(
+                        profile=support_profile,
+                        domain_levels=levels,
+                        mixture=self._sampling_mixture,
+                        scope=scope,
+                        plan=override,
+                    )
+                    if validated != inactive_plan:
+                        raise ValueError(
+                            "zero-support sampling component only accepts "
+                            "the literal center plan"
+                        )
+                return inactive_plan
+        if override is not None:
+            return _validated_sampling_plan_override(
+                profile=support_profile,
+                domain_levels=levels,
+                mixture=self._sampling_mixture,
+                scope=scope,
+                plan=override,
+            )
+        return _sampling_plan(
+            profile=support_profile,
+            levels=levels,
+            mixture=self._sampling_mixture,
+            proposal_index=proposal_index,
+            scope=scope,
+            contact_time_tick_grid=contact_time_tick_grid,
+        )
 
     @property
     def draw_count(self) -> int:
@@ -5016,6 +5193,7 @@ class ActionBallSampler:
         levels = self._validated_levels(levels)
         base_yaw_rad = _finite(base_yaw_rad, name="base_yaw_rad")
         profile = self._profiles[action_uid]
+        support_profile = self._support_profile(profile)
         _validate_counter_rally_profile_support(
             profile, base_yaw_rad=base_yaw_rad
         )
@@ -5030,30 +5208,17 @@ class ActionBallSampler:
         # The episode-base mixture owns an independent per-action proposal
         # cursor.  Freeze its plan before consuming the random tape so an
         # invalid frontier leaves counters/transcripts byte-identical.
-        if _sampling_plan_override is None:
-            (
-                sampling_stratum,
-                sampling_levels,
-                frontier_arm,
-            ) = _sampling_plan(
-                profile=profile,
-                levels=levels,
-                mixture=self._sampling_mixture,
-                proposal_index=birth_index,
-                scope="birth",
-            )
-        else:
-            (
-                sampling_stratum,
-                sampling_levels,
-                frontier_arm,
-            ) = _validated_sampling_plan_override(
-                profile=profile,
-                domain_levels=levels,
-                mixture=self._sampling_mixture,
-                scope="birth",
-                plan=_sampling_plan_override,
-            )
+        (
+            sampling_stratum,
+            sampling_levels,
+            frontier_arm,
+        ) = self._sampling_plan_for_request(
+            profile=profile,
+            levels=levels,
+            proposal_index=birth_index,
+            scope="birth",
+            override=_sampling_plan_override,
+        )
         draw_start = rng.draw_count
         request_digest = self._request_digest(
             kind="base_birth",
@@ -5072,7 +5237,7 @@ class ActionBallSampler:
                 frontier_side,
                 frontier_draw_index,
             ) = _frontier_width_pair(
-                profile, sampling_levels, frontier_arm
+                support_profile, sampling_levels, frontier_arm
             )
             if frontier_draw_index >= DRAWS_PER_BIRTH:
                 raise AssertionError(
@@ -5087,28 +5252,39 @@ class ActionBallSampler:
                     self._sampling_mixture.frontier_band_fraction
                 ),
             )
+        literal_initial_center = self._literal_initial_center_active(
+            levels
+        )
         base_start_w_m = _sample_asymmetric_vector3(
-            center=profile.base_spawn_center_w_m,
-            lower_std=_vec3_lerp_levels(
-                profile.base_spawn_std_lower_initial_m,
-                profile.base_spawn_std_lower_max_m,
-                (
-                    sampling_levels.base_spawn_x_lower,
-                    sampling_levels.base_spawn_y_lower,
-                    0.0,
-                ),
+            center=support_profile.base_spawn_center_w_m,
+            lower_std=(
+                (0.0, 0.0, 0.0)
+                if literal_initial_center
+                else _vec3_lerp_levels(
+                    support_profile.base_spawn_std_lower_initial_m,
+                    support_profile.base_spawn_std_lower_max_m,
+                    (
+                        sampling_levels.base_spawn_x_lower,
+                        sampling_levels.base_spawn_y_lower,
+                        0.0,
+                    ),
+                )
             ),
-            upper_std=_vec3_lerp_levels(
-                profile.base_spawn_std_upper_initial_m,
-                profile.base_spawn_std_upper_max_m,
-                (
-                    sampling_levels.base_spawn_x_upper,
-                    sampling_levels.base_spawn_y_upper,
-                    0.0,
-                ),
+            upper_std=(
+                (0.0, 0.0, 0.0)
+                if literal_initial_center
+                else _vec3_lerp_levels(
+                    support_profile.base_spawn_std_upper_initial_m,
+                    support_profile.base_spawn_std_upper_max_m,
+                    (
+                        sampling_levels.base_spawn_x_upper,
+                        sampling_levels.base_spawn_y_upper,
+                        0.0,
+                    ),
+                )
             ),
-            lower_bound=profile.base_spawn_min_w_m,
-            upper_bound=profile.base_spawn_max_w_m,
+            lower_bound=support_profile.base_spawn_min_w_m,
+            upper_bound=support_profile.base_spawn_max_w_m,
             uniforms=uniforms,
             name="base_birth_spawn",
         )
@@ -5186,30 +5362,17 @@ class ActionBallSampler:
         if not isinstance(birth, BaseBirthReceipt):
             raise TypeError("birth must be a BaseBirthReceipt")
         profile = self._profiles[action_uid]
-        if sampling_plan_override is None:
-            (
-                expected_birth_stratum,
-                expected_birth_levels,
-                expected_birth_frontier,
-            ) = _sampling_plan(
-                profile=profile,
-                levels=levels,
-                mixture=self._sampling_mixture,
-                proposal_index=birth.birth_index,
-                scope="birth",
-            )
-        else:
-            (
-                expected_birth_stratum,
-                expected_birth_levels,
-                expected_birth_frontier,
-            ) = _validated_sampling_plan_override(
-                profile=profile,
-                domain_levels=levels,
-                mixture=self._sampling_mixture,
-                scope="birth",
-                plan=sampling_plan_override,
-            )
+        (
+            expected_birth_stratum,
+            expected_birth_levels,
+            expected_birth_frontier,
+        ) = self._sampling_plan_for_request(
+            profile=profile,
+            levels=levels,
+            proposal_index=birth.birth_index,
+            scope="birth",
+            override=sampling_plan_override,
+        )
         mismatches = []
         expected_fields = [
             ("sampler_contract_sha256", self._contract_sha256),
@@ -5425,6 +5588,7 @@ class ActionBallSampler:
             raise RuntimeError(
                 "sample diagnostic prevalidation has no internal authority"
             )
+        support_profile = self._support_profile(profile)
         rng = self._rng_by_action[action_uid]
         sample_index = self._sample_count_by_action[action_uid]
         sample_birth_indices = (
@@ -5450,33 +5614,20 @@ class ActionBallSampler:
         # Validate and freeze the stratum before consuming the counter tape.
         # In particular, a malformed/zero-width frontier request must leave
         # RNG, assignment, and sample counters byte-identical for retry.
-        if _sampling_plan_override is None:
-            (
-                sampling_stratum,
-                sampling_levels,
-                frontier_arm,
-            ) = _sampling_plan(
-                profile=profile,
-                levels=levels,
-                mixture=self._sampling_mixture,
-                proposal_index=sample_index,
-                scope="swing",
-                contact_time_tick_grid=(
-                    self._contact_time_grid_by_action.get(action_uid)
-                ),
-            )
-        else:
-            (
-                sampling_stratum,
-                sampling_levels,
-                frontier_arm,
-            ) = _validated_sampling_plan_override(
-                profile=profile,
-                domain_levels=levels,
-                mixture=self._sampling_mixture,
-                scope="swing",
-                plan=_sampling_plan_override,
-            )
+        (
+            sampling_stratum,
+            sampling_levels,
+            frontier_arm,
+        ) = self._sampling_plan_for_request(
+            profile=profile,
+            levels=levels,
+            proposal_index=sample_index,
+            scope="swing",
+            contact_time_tick_grid=(
+                self._contact_time_grid_by_action.get(action_uid)
+            ),
+            override=_sampling_plan_override,
+        )
         draw_start = rng.draw_count
         request_digest = self._request_digest(
             kind="swing_sample",
@@ -5506,6 +5657,9 @@ class ActionBallSampler:
         native_ttc_grid = self._contact_time_grid_by_action.get(
             action_uid
         )
+        literal_initial_center = self._literal_initial_center_active(
+            levels
+        )
         if (
             frontier_arm is not None
             and not (
@@ -5519,7 +5673,7 @@ class ActionBallSampler:
                 frontier_side,
                 frontier_draw_index,
             ) = _frontier_width_pair(
-                profile, sampling_levels, frontier_arm
+                support_profile, sampling_levels, frontier_arm
             )
             uniforms[frontier_draw_index] = _frontier_band_uniform(
                 uniforms[frontier_draw_index],
@@ -5534,27 +5688,35 @@ class ActionBallSampler:
             # Legacy receipts retain their historical, explicitly unused
             # per-swing latent spawn bytes.
             base_spawn_latent_w_m = _sample_asymmetric_vector3(
-                center=profile.base_spawn_center_w_m,
-                lower_std=_vec3_lerp_levels(
-                    profile.base_spawn_std_lower_initial_m,
-                    profile.base_spawn_std_lower_max_m,
-                    (
-                        sampling_levels.base_spawn_x_lower,
-                        sampling_levels.base_spawn_y_lower,
-                        0.0,
-                    ),
+                center=support_profile.base_spawn_center_w_m,
+                lower_std=(
+                    (0.0, 0.0, 0.0)
+                    if literal_initial_center
+                    else _vec3_lerp_levels(
+                        support_profile.base_spawn_std_lower_initial_m,
+                        support_profile.base_spawn_std_lower_max_m,
+                        (
+                            sampling_levels.base_spawn_x_lower,
+                            sampling_levels.base_spawn_y_lower,
+                            0.0,
+                        ),
+                    )
                 ),
-                upper_std=_vec3_lerp_levels(
-                    profile.base_spawn_std_upper_initial_m,
-                    profile.base_spawn_std_upper_max_m,
-                    (
-                        sampling_levels.base_spawn_x_upper,
-                        sampling_levels.base_spawn_y_upper,
-                        0.0,
-                    ),
+                upper_std=(
+                    (0.0, 0.0, 0.0)
+                    if literal_initial_center
+                    else _vec3_lerp_levels(
+                        support_profile.base_spawn_std_upper_initial_m,
+                        support_profile.base_spawn_std_upper_max_m,
+                        (
+                            sampling_levels.base_spawn_x_upper,
+                            sampling_levels.base_spawn_y_upper,
+                            0.0,
+                        ),
+                    )
                 ),
-                lower_bound=profile.base_spawn_min_w_m,
-                upper_bound=profile.base_spawn_max_w_m,
+                lower_bound=support_profile.base_spawn_min_w_m,
+                upper_bound=support_profile.base_spawn_max_w_m,
                 uniforms=uniforms[0:3],
                 name="base_spawn_latent",
             )
@@ -5564,32 +5726,40 @@ class ActionBallSampler:
             # actual birth instead of exposing an unused latent as capability.
             base_spawn_latent_w_m = birth.base_start_w_m
         base_travel_latent_b_yaw_m = _sample_asymmetric_vector3(
-            center=profile.base_travel_center_b_yaw_m,
-            lower_std=_vec3_lerp_levels(
-                profile.base_travel_std_lower_initial_m,
-                profile.base_travel_std_lower_max_m,
-                (
-                    sampling_levels.base_travel_x_lower,
-                    sampling_levels.base_travel_y_lower,
-                    0.0,
-                ),
+            center=support_profile.base_travel_center_b_yaw_m,
+            lower_std=(
+                (0.0, 0.0, 0.0)
+                if literal_initial_center
+                else _vec3_lerp_levels(
+                    support_profile.base_travel_std_lower_initial_m,
+                    support_profile.base_travel_std_lower_max_m,
+                    (
+                        sampling_levels.base_travel_x_lower,
+                        sampling_levels.base_travel_y_lower,
+                        0.0,
+                    ),
+                )
             ),
-            upper_std=_vec3_lerp_levels(
-                profile.base_travel_std_upper_initial_m,
-                profile.base_travel_std_upper_max_m,
-                (
-                    sampling_levels.base_travel_x_upper,
-                    sampling_levels.base_travel_y_upper,
-                    0.0,
-                ),
+            upper_std=(
+                (0.0, 0.0, 0.0)
+                if literal_initial_center
+                else _vec3_lerp_levels(
+                    support_profile.base_travel_std_upper_initial_m,
+                    support_profile.base_travel_std_upper_max_m,
+                    (
+                        sampling_levels.base_travel_x_upper,
+                        sampling_levels.base_travel_y_upper,
+                        0.0,
+                    ),
+                )
             ),
-            lower_bound=profile.base_travel_min_b_yaw_m,
-            upper_bound=profile.base_travel_max_b_yaw_m,
+            lower_bound=support_profile.base_travel_min_b_yaw_m,
+            upper_bound=support_profile.base_travel_max_b_yaw_m,
             uniforms=uniforms[3:6],
             name="base_travel",
         )
         base_start_w_m = birth.base_start_w_m
-        if profile.mobility_mode == "no_move":
+        if support_profile.mobility_mode == "no_move":
             base_goal_w_m = base_start_w_m
         else:
             base_goal_w_m = _add(
@@ -5598,27 +5768,35 @@ class ActionBallSampler:
             )
 
         contact_offset_b_yaw_m = _sample_asymmetric_vector3(
-            center=profile.contact_offset_center_b_yaw_m,
-            lower_std=_vec3_lerp_levels(
-                profile.contact_offset_std_lower_initial_m,
-                profile.contact_offset_std_lower_max_m,
-                (
-                    sampling_levels.contact_x_lower,
-                    sampling_levels.contact_y_lower,
-                    sampling_levels.contact_z_lower,
-                ),
+            center=support_profile.contact_offset_center_b_yaw_m,
+            lower_std=(
+                (0.0, 0.0, 0.0)
+                if literal_initial_center
+                else _vec3_lerp_levels(
+                    support_profile.contact_offset_std_lower_initial_m,
+                    support_profile.contact_offset_std_lower_max_m,
+                    (
+                        sampling_levels.contact_x_lower,
+                        sampling_levels.contact_y_lower,
+                        sampling_levels.contact_z_lower,
+                    ),
+                )
             ),
-            upper_std=_vec3_lerp_levels(
-                profile.contact_offset_std_upper_initial_m,
-                profile.contact_offset_std_upper_max_m,
-                (
-                    sampling_levels.contact_x_upper,
-                    sampling_levels.contact_y_upper,
-                    sampling_levels.contact_z_upper,
-                ),
+            upper_std=(
+                (0.0, 0.0, 0.0)
+                if literal_initial_center
+                else _vec3_lerp_levels(
+                    support_profile.contact_offset_std_upper_initial_m,
+                    support_profile.contact_offset_std_upper_max_m,
+                    (
+                        sampling_levels.contact_x_upper,
+                        sampling_levels.contact_y_upper,
+                        sampling_levels.contact_z_upper,
+                    ),
+                )
             ),
-            lower_bound=profile.contact_offset_min_b_yaw_m,
-            upper_bound=profile.contact_offset_max_b_yaw_m,
+            lower_bound=support_profile.contact_offset_min_b_yaw_m,
+            upper_bound=support_profile.contact_offset_max_b_yaw_m,
             uniforms=uniforms[6:9],
             name="contact_offset",
         )
@@ -5630,19 +5808,27 @@ class ActionBallSampler:
         if native_ttc_grid is None:
             time_to_contact_tick = None
             time_to_contact_s = _sample_asymmetric_truncated(
-                center=profile.time_to_contact_center_s,
-                lower_std=_lerp(
-                    profile.time_to_contact_std_lower_initial_s,
-                    profile.time_to_contact_std_lower_max_s,
-                    sampling_levels.time_to_contact_lower,
+                center=support_profile.time_to_contact_center_s,
+                lower_std=(
+                    0.0
+                    if literal_initial_center
+                    else _lerp(
+                        support_profile.time_to_contact_std_lower_initial_s,
+                        support_profile.time_to_contact_std_lower_max_s,
+                        sampling_levels.time_to_contact_lower,
+                    )
                 ),
-                upper_std=_lerp(
-                    profile.time_to_contact_std_upper_initial_s,
-                    profile.time_to_contact_std_upper_max_s,
-                    sampling_levels.time_to_contact_upper,
+                upper_std=(
+                    0.0
+                    if literal_initial_center
+                    else _lerp(
+                        support_profile.time_to_contact_std_upper_initial_s,
+                        support_profile.time_to_contact_std_upper_max_s,
+                        sampling_levels.time_to_contact_upper,
+                    )
                 ),
-                lower_bound=profile.time_to_contact_min_s,
-                upper_bound=profile.time_to_contact_max_s,
+                lower_bound=support_profile.time_to_contact_min_s,
+                upper_bound=support_profile.time_to_contact_max_s,
                 uniform=uniforms[9],
                 name="time_to_contact",
             )
@@ -5665,65 +5851,93 @@ class ActionBallSampler:
                 ttc_frontier_band = (
                     self._sampling_mixture.frontier_band_fraction
                 )
-            time_to_contact_tick = native_ttc_grid.sample_tick(
-                uniform=uniforms[9],
-                levels=sampling_levels,
-                frontier_side=ttc_frontier_side,
-                frontier_band_fraction=ttc_frontier_band,
+            time_to_contact_tick = (
+                native_ttc_grid.center_tick
+                if literal_initial_center
+                else native_ttc_grid.sample_tick(
+                    uniform=uniforms[9],
+                    levels=sampling_levels,
+                    frontier_side=ttc_frontier_side,
+                    frontier_band_fraction=ttc_frontier_band,
+                )
             )
             time_to_contact_s = (
                 time_to_contact_tick * native_ttc_grid.step_s
             )
         speed_mps = _sample_asymmetric_truncated(
-            center=profile.incoming_speed_center_mps,
-            lower_std=_lerp(
-                profile.incoming_speed_std_lower_initial_mps,
-                profile.incoming_speed_std_lower_max_mps,
-                sampling_levels.incoming_speed_lower,
+            center=support_profile.incoming_speed_center_mps,
+            lower_std=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.incoming_speed_std_lower_initial_mps,
+                    support_profile.incoming_speed_std_lower_max_mps,
+                    sampling_levels.incoming_speed_lower,
+                )
             ),
-            upper_std=_lerp(
-                profile.incoming_speed_std_upper_initial_mps,
-                profile.incoming_speed_std_upper_max_mps,
-                sampling_levels.incoming_speed_upper,
+            upper_std=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.incoming_speed_std_upper_initial_mps,
+                    support_profile.incoming_speed_std_upper_max_mps,
+                    sampling_levels.incoming_speed_upper,
+                )
             ),
-            lower_bound=profile.incoming_speed_min_mps,
-            upper_bound=profile.incoming_speed_max_mps,
+            lower_bound=support_profile.incoming_speed_min_mps,
+            upper_bound=support_profile.incoming_speed_max_mps,
             uniform=uniforms[10],
             name="incoming_speed",
         )
         incoming_direction_b_yaw = _sample_asymmetric_direction(
-            center=profile.incoming_direction_center_b_yaw,
-            tangent_u=profile.incoming_direction_tangent_u_b_yaw,
-            tangent_v=profile.incoming_direction_tangent_v_b_yaw,
-            u_negative_width_deg=_lerp(
-                profile.incoming_direction_tangent_u_neg_initial_deg,
-                profile.incoming_direction_tangent_u_neg_max_deg,
-                sampling_levels.incoming_direction_u_neg,
+            center=support_profile.incoming_direction_center_b_yaw,
+            tangent_u=support_profile.incoming_direction_tangent_u_b_yaw,
+            tangent_v=support_profile.incoming_direction_tangent_v_b_yaw,
+            u_negative_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.incoming_direction_tangent_u_neg_initial_deg,
+                    support_profile.incoming_direction_tangent_u_neg_max_deg,
+                    sampling_levels.incoming_direction_u_neg,
+                )
             ),
-            u_positive_width_deg=_lerp(
-                profile.incoming_direction_tangent_u_pos_initial_deg,
-                profile.incoming_direction_tangent_u_pos_max_deg,
-                sampling_levels.incoming_direction_u_pos,
+            u_positive_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.incoming_direction_tangent_u_pos_initial_deg,
+                    support_profile.incoming_direction_tangent_u_pos_max_deg,
+                    sampling_levels.incoming_direction_u_pos,
+                )
             ),
-            v_negative_width_deg=_lerp(
-                profile.incoming_direction_tangent_v_neg_initial_deg,
-                profile.incoming_direction_tangent_v_neg_max_deg,
-                sampling_levels.incoming_direction_v_neg,
+            v_negative_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.incoming_direction_tangent_v_neg_initial_deg,
+                    support_profile.incoming_direction_tangent_v_neg_max_deg,
+                    sampling_levels.incoming_direction_v_neg,
+                )
             ),
-            v_positive_width_deg=_lerp(
-                profile.incoming_direction_tangent_v_pos_initial_deg,
-                profile.incoming_direction_tangent_v_pos_max_deg,
-                sampling_levels.incoming_direction_v_pos,
+            v_positive_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.incoming_direction_tangent_v_pos_initial_deg,
+                    support_profile.incoming_direction_tangent_v_pos_max_deg,
+                    sampling_levels.incoming_direction_v_pos,
+                )
             ),
             uniforms=uniforms[11:13],
         )
         if (
             _dot(
                 incoming_direction_b_yaw,
-                profile.incoming_inbound_axis_b_yaw,
+                support_profile.incoming_inbound_axis_b_yaw,
             )
             + 1.0e-12
-            < profile.incoming_inbound_min_cosine
+            < support_profile.incoming_inbound_min_cosine
         ):
             raise AssertionError(
                 "sampled incoming direction violates inbound cone contract"
@@ -5736,45 +5950,69 @@ class ActionBallSampler:
         )
 
         spin_magnitude_radps = _sample_asymmetric_truncated(
-            center=profile.spin_magnitude_center_radps,
-            lower_std=_lerp(
-                profile.spin_magnitude_std_lower_initial_radps,
-                profile.spin_magnitude_std_lower_max_radps,
-                sampling_levels.spin_magnitude_lower,
+            center=support_profile.spin_magnitude_center_radps,
+            lower_std=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.spin_magnitude_std_lower_initial_radps,
+                    support_profile.spin_magnitude_std_lower_max_radps,
+                    sampling_levels.spin_magnitude_lower,
+                )
             ),
-            upper_std=_lerp(
-                profile.spin_magnitude_std_upper_initial_radps,
-                profile.spin_magnitude_std_upper_max_radps,
-                sampling_levels.spin_magnitude_upper,
+            upper_std=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.spin_magnitude_std_upper_initial_radps,
+                    support_profile.spin_magnitude_std_upper_max_radps,
+                    sampling_levels.spin_magnitude_upper,
+                )
             ),
-            lower_bound=profile.spin_magnitude_min_radps,
-            upper_bound=profile.spin_magnitude_max_radps,
+            lower_bound=support_profile.spin_magnitude_min_radps,
+            upper_bound=support_profile.spin_magnitude_max_radps,
             uniform=uniforms[13],
             name="spin_magnitude",
         )
         spin_direction_b_yaw = _sample_asymmetric_direction(
-            center=profile.spin_direction_center_b_yaw,
-            tangent_u=profile.spin_direction_tangent_u_b_yaw,
-            tangent_v=profile.spin_direction_tangent_v_b_yaw,
-            u_negative_width_deg=_lerp(
-                profile.spin_direction_tangent_u_neg_initial_deg,
-                profile.spin_direction_tangent_u_neg_max_deg,
-                sampling_levels.spin_direction_u_neg,
+            center=support_profile.spin_direction_center_b_yaw,
+            tangent_u=support_profile.spin_direction_tangent_u_b_yaw,
+            tangent_v=support_profile.spin_direction_tangent_v_b_yaw,
+            u_negative_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.spin_direction_tangent_u_neg_initial_deg,
+                    support_profile.spin_direction_tangent_u_neg_max_deg,
+                    sampling_levels.spin_direction_u_neg,
+                )
             ),
-            u_positive_width_deg=_lerp(
-                profile.spin_direction_tangent_u_pos_initial_deg,
-                profile.spin_direction_tangent_u_pos_max_deg,
-                sampling_levels.spin_direction_u_pos,
+            u_positive_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.spin_direction_tangent_u_pos_initial_deg,
+                    support_profile.spin_direction_tangent_u_pos_max_deg,
+                    sampling_levels.spin_direction_u_pos,
+                )
             ),
-            v_negative_width_deg=_lerp(
-                profile.spin_direction_tangent_v_neg_initial_deg,
-                profile.spin_direction_tangent_v_neg_max_deg,
-                sampling_levels.spin_direction_v_neg,
+            v_negative_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.spin_direction_tangent_v_neg_initial_deg,
+                    support_profile.spin_direction_tangent_v_neg_max_deg,
+                    sampling_levels.spin_direction_v_neg,
+                )
             ),
-            v_positive_width_deg=_lerp(
-                profile.spin_direction_tangent_v_pos_initial_deg,
-                profile.spin_direction_tangent_v_pos_max_deg,
-                sampling_levels.spin_direction_v_pos,
+            v_positive_width_deg=(
+                0.0
+                if literal_initial_center
+                else _lerp(
+                    support_profile.spin_direction_tangent_v_pos_initial_deg,
+                    support_profile.spin_direction_tangent_v_pos_max_deg,
+                    sampling_levels.spin_direction_v_pos,
+                )
             ),
             uniforms=uniforms[14:16],
         )
@@ -5784,27 +6022,35 @@ class ActionBallSampler:
         spin_w_radps = _scale(
             spin_direction_w, spin_magnitude_radps
         )
-        if profile.counter_rally_objective is None:
+        if support_profile.counter_rally_objective is None:
             landing_aim_w_xy_m = _sample_asymmetric_vector2(
-                center=profile.landing_aim_center_w_xy_m,
-                lower_std=_vec2_lerp_levels(
-                    profile.landing_aim_std_lower_initial_m,
-                    profile.landing_aim_std_lower_max_m,
-                    (
-                        sampling_levels.landing_aim_x_lower,
-                        sampling_levels.landing_aim_y_lower,
-                    ),
+                center=support_profile.landing_aim_center_w_xy_m,
+                lower_std=(
+                    (0.0, 0.0)
+                    if literal_initial_center
+                    else _vec2_lerp_levels(
+                        support_profile.landing_aim_std_lower_initial_m,
+                        support_profile.landing_aim_std_lower_max_m,
+                        (
+                            sampling_levels.landing_aim_x_lower,
+                            sampling_levels.landing_aim_y_lower,
+                        ),
+                    )
                 ),
-                upper_std=_vec2_lerp_levels(
-                    profile.landing_aim_std_upper_initial_m,
-                    profile.landing_aim_std_upper_max_m,
-                    (
-                        sampling_levels.landing_aim_x_upper,
-                        sampling_levels.landing_aim_y_upper,
-                    ),
+                upper_std=(
+                    (0.0, 0.0)
+                    if literal_initial_center
+                    else _vec2_lerp_levels(
+                        support_profile.landing_aim_std_upper_initial_m,
+                        support_profile.landing_aim_std_upper_max_m,
+                        (
+                            sampling_levels.landing_aim_x_upper,
+                            sampling_levels.landing_aim_y_upper,
+                        ),
+                    )
                 ),
-                lower_bound=profile.landing_aim_min_w_xy_m,
-                upper_bound=profile.landing_aim_max_w_xy_m,
+                lower_bound=support_profile.landing_aim_min_w_xy_m,
+                upper_bound=support_profile.landing_aim_max_w_xy_m,
                 uniforms=uniforms[16:18],
                 name="landing_aim",
             )
@@ -5815,19 +6061,27 @@ class ActionBallSampler:
             # is a deterministic consequence of the reverse incoming ray.
             _reserved_landing_y_draw = uniforms[17]
             landing_x = _sample_asymmetric_truncated(
-                center=profile.landing_aim_center_w_xy_m[0],
-                lower_std=_lerp(
-                    profile.landing_aim_std_lower_initial_m[0],
-                    profile.landing_aim_std_lower_max_m[0],
-                    sampling_levels.landing_aim_x_lower,
+                center=support_profile.landing_aim_center_w_xy_m[0],
+                lower_std=(
+                    0.0
+                    if literal_initial_center
+                    else _lerp(
+                        support_profile.landing_aim_std_lower_initial_m[0],
+                        support_profile.landing_aim_std_lower_max_m[0],
+                        sampling_levels.landing_aim_x_lower,
+                    )
                 ),
-                upper_std=_lerp(
-                    profile.landing_aim_std_upper_initial_m[0],
-                    profile.landing_aim_std_upper_max_m[0],
-                    sampling_levels.landing_aim_x_upper,
+                upper_std=(
+                    0.0
+                    if literal_initial_center
+                    else _lerp(
+                        support_profile.landing_aim_std_upper_initial_m[0],
+                        support_profile.landing_aim_std_upper_max_m[0],
+                        sampling_levels.landing_aim_x_upper,
+                    )
                 ),
-                lower_bound=profile.landing_aim_min_w_xy_m[0],
-                upper_bound=profile.landing_aim_max_w_xy_m[0],
+                lower_bound=support_profile.landing_aim_min_w_xy_m[0],
+                upper_bound=support_profile.landing_aim_max_w_xy_m[0],
                 uniform=uniforms[16],
                 name="landing_aim.x",
             )
@@ -5838,7 +6092,7 @@ class ActionBallSampler:
                 contact_w_m=contact_w_m,
                 incoming_direction_w=incoming_direction_w,
                 landing_x_w_m=landing_x,
-                objective=profile.counter_rally_objective,
+                objective=support_profile.counter_rally_objective,
             )
             # A per-proposal miss remains a proposal.  The fixed-action solver
             # calls the same helper and owns named rejection accounting; the
@@ -6026,10 +6280,9 @@ class ActionBallSampler:
                 raise ValueError(
                     "sample TTC is not exactly its policy-step tick"
                 )
-        expected = _sampling_plan(
+        expected = self._sampling_plan_for_request(
             profile=profile,
             levels=sample.domain_levels,
-            mixture=self._sampling_mixture,
             proposal_index=sample.sample_index,
             scope="swing",
             contact_time_tick_grid=(
@@ -6105,7 +6358,9 @@ class ActionBallSampler:
                 )
             return
         negative, positive, side, _ = _frontier_width_pair(
-            profile, sample.sampling_levels, sample.frontier_arm
+            self._support_profile(profile),
+            sample.sampling_levels,
+            sample.frontier_arm,
         )
         delta = _frontier_coordinate_delta(
             sample, profile, sample.frontier_arm
@@ -6195,7 +6450,9 @@ class ActionBallSampler:
             raise ValueError("frontier birth has no sampler mixture")
         profile = self._profiles[birth.action_uid]
         negative, positive, side, _ = _frontier_width_pair(
-            profile, birth.sampling_levels, birth.frontier_arm
+            self._support_profile(profile),
+            birth.sampling_levels,
+            birth.frontier_arm,
         )
         delta = _birth_frontier_coordinate_delta(
             birth, profile, birth.frontier_arm
@@ -6520,9 +6777,15 @@ class ActionBallSampler:
 
         replay = object.__new__(ActionBallSampler)
         replay._profiles = {action_uid: profile}
+        replay._support_profiles = {
+            action_uid: self._support_profiles[action_uid]
+        }
         replay._seed = self._seed
         replay._diagnostic_fast_path = False
         replay._sampling_mixture = self._sampling_mixture
+        replay._initial_center_single_question = (
+            self._initial_center_single_question
+        )
         replay._contact_time_step_s = self._contact_time_step_s
         replay._contact_time_grid_by_action = {
             action_uid: self._contact_time_grid_by_action[action_uid]
@@ -7500,6 +7763,7 @@ class ActionBallSampler:
                 retired_birth_sample_draws // DRAWS_PER_SAMPLE
             )
             profile = self._profiles[uid]
+            support_profile = self._support_profile(profile)
             for offset, raw_birth in enumerate(action_births):
                 index = retired_birth_count + offset
                 birth_row = _exact_mapping(
@@ -7575,10 +7839,9 @@ class ActionBallSampler:
                     sampling_stratum,
                     sampling_levels,
                     frontier_arm,
-                ) = _sampling_plan(
+                ) = self._sampling_plan_for_request(
                     profile=profile,
                     levels=levels,
-                    mixture=self._sampling_mixture,
                     proposal_index=index,
                     scope="birth",
                 )
@@ -7680,7 +7943,7 @@ class ActionBallSampler:
                         frontier_side,
                         frontier_draw_index,
                     ) = _frontier_width_pair(
-                        profile, sampling_levels, frontier_arm
+                        support_profile, sampling_levels, frontier_arm
                     )
                     if frontier_draw_index >= DRAWS_PER_BIRTH:
                         raise ValueError(
@@ -7700,10 +7963,10 @@ class ActionBallSampler:
                         )
                     )
                 replayed_base_start = _sample_asymmetric_vector3(
-                    center=profile.base_spawn_center_w_m,
+                    center=support_profile.base_spawn_center_w_m,
                     lower_std=_vec3_lerp_levels(
-                        profile.base_spawn_std_lower_initial_m,
-                        profile.base_spawn_std_lower_max_m,
+                        support_profile.base_spawn_std_lower_initial_m,
+                        support_profile.base_spawn_std_lower_max_m,
                         (
                             sampling_levels.base_spawn_x_lower,
                             sampling_levels.base_spawn_y_lower,
@@ -7711,16 +7974,16 @@ class ActionBallSampler:
                         ),
                     ),
                     upper_std=_vec3_lerp_levels(
-                        profile.base_spawn_std_upper_initial_m,
-                        profile.base_spawn_std_upper_max_m,
+                        support_profile.base_spawn_std_upper_initial_m,
+                        support_profile.base_spawn_std_upper_max_m,
                         (
                             sampling_levels.base_spawn_x_upper,
                             sampling_levels.base_spawn_y_upper,
                             0.0,
                         ),
                     ),
-                    lower_bound=profile.base_spawn_min_w_m,
-                    upper_bound=profile.base_spawn_max_w_m,
+                    lower_bound=support_profile.base_spawn_min_w_m,
+                    upper_bound=support_profile.base_spawn_max_w_m,
                     uniforms=replay_uniforms,
                     name="replayed_base_birth_spawn",
                 )
@@ -7985,6 +8248,7 @@ def sample_frozen_evaluation_proposal(
     selected_arm: Optional[str],
     base_yaw_rad: float,
     policy_dt_s: float,
+    initial_center_single_question: bool = False,
 ) -> FrozenEvaluationProposal:
     """Random-access one formal proposal without touching training state.
 
@@ -8017,6 +8281,8 @@ def sample_frozen_evaluation_proposal(
     policy_dt_s = _finite(
         policy_dt_s, name="policy_dt_s", minimum=0.0
     )
+    if type(initial_center_single_question) is not bool:
+        raise TypeError("initial_center_single_question must be an exact boolean")
     if policy_dt_s <= 0.0:
         raise ValueError("policy_dt_s must be > 0")
     if sampling_stratum not in (
@@ -8033,6 +8299,13 @@ def sample_frozen_evaluation_proposal(
         )
     if selected_arm is not None and selected_arm not in ARM_KEYS:
         raise ValueError("selected_arm is outside ARM_KEYS")
+    if initial_center_single_question and all(
+        getattr(levels, arm) == 0.0 for arm in ARM_KEYS
+    ) and (sampling_stratum != "center" or selected_arm is not None):
+        raise ValueError(
+            "initial-center frozen evaluation has point support and only "
+            "accepts the center stratum before the first promotion"
+        )
 
     mixture = SamplingMixture()
     expected_sample_stratum = mixture.stratum_for(
@@ -8110,6 +8383,7 @@ def sample_frozen_evaluation_proposal(
         seed=evaluation_seed,
         sampling_mixture=mixture,
         contact_time_step_s=policy_dt_s,
+        initial_center_single_question=initial_center_single_question,
     )
     uid = profile.action_uid
     # Random access: external indices are installed directly as receipt

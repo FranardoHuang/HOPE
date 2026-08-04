@@ -1,8 +1,8 @@
 """Reset-boundary-only checkpoint for the controlled MuJoCo PPO shell.
 
-The checkpoint saves model, optimizer, normalizer, Python/NumPy/Torch RNG, and
-the completed-update counter.  No environment state is present, so this format
-must never be described as exact mid-episode resume.
+The v3 checkpoint additionally saves an optional exact reset-boundary
+environment continuation state.  C211 uses it for the counter-based WAIT
+highwater/current assignment; this is still not mid-episode resume.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from .trainer import (
 )
 
 
-CHECKPOINT_KIND = "a3_mujoco_controlled_diagnostic_reset_boundary_checkpoint_v1"
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_KIND = "a3_mujoco_controlled_diagnostic_reset_boundary_checkpoint_v3"
+CHECKPOINT_SCHEMA_VERSION = 3
 
 
 class CheckpointRefused(DiagnosticPPOError):
@@ -60,12 +60,15 @@ def _validate_payload(
         "kind",
         "identity",
         "config_sha256",
+        "normalizer_identities",
         "model_state_dict",
         "optimizer_state_dict",
-        "normalizer_state_dict",
+        "actor_normalizer_state_dict",
+        "critic_normalizer_state_dict",
         "rng_state",
         "update_counter",
         "last_update_receipt",
+        "environment_state",
         "boundary",
     }
     if set(payload) != required:
@@ -81,6 +84,11 @@ def _validate_payload(
         )
     if payload["config_sha256"] != trainer.config.content_sha256:
         raise CheckpointRefused("checkpoint PPO config SHA differs")
+    if payload["normalizer_identities"] != {
+        "actor": trainer.config.actor_normalizer_identity,
+        "critic": trainer.config.critic_normalizer_identity,
+    }:
+        raise CheckpointRefused("checkpoint actor/critic normalizer identity differs")
     if payload["boundary"] != {
         "kind": "explicit_full_reset_boundary",
         "mid_episode_resume": False,
@@ -107,7 +115,12 @@ def _validate_payload(
     ):
         raise CheckpointRefused("checkpoint model/optimizer state is non-finite")
     try:
-        trainer.normalizer.validate_state_dict(payload["normalizer_state_dict"])
+        trainer.actor_normalizer.validate_state_dict(
+            payload["actor_normalizer_state_dict"]
+        )
+        trainer.critic_normalizer.validate_state_dict(
+            payload["critic_normalizer_state_dict"]
+        )
     except DiagnosticPPOContractError as exc:
         raise CheckpointRefused(str(exc)) from exc
     rng = payload["rng_state"]
@@ -122,6 +135,15 @@ def _validate_payload(
         or rng["torch_cpu"].dtype != torch.uint8
     ):
         raise CheckpointRefused("checkpoint torch CPU RNG state differs")
+    live_env_checkpoint = callable(getattr(trainer.env, "checkpoint_state", None))
+    if live_env_checkpoint != (payload["environment_state"] is not None):
+        raise CheckpointRefused(
+            "checkpoint environment continuation availability differs"
+        )
+    if payload["environment_state"] is not None and not isinstance(
+        payload["environment_state"], Mapping
+    ):
+        raise CheckpointRefused("checkpoint environment state is malformed")
     return payload
 
 
@@ -144,6 +166,10 @@ class ResetBoundaryCheckpoint:
             "kind": CHECKPOINT_KIND,
             "identity": trainer.identity.as_dict(),
             "config_sha256": trainer.config.content_sha256,
+            "normalizer_identities": {
+                "actor": trainer.config.actor_normalizer_identity,
+                "critic": trainer.config.critic_normalizer_identity,
+            },
             **state,
             "boundary": {
                 "kind": "explicit_full_reset_boundary",
@@ -170,8 +196,8 @@ class ResetBoundaryCheckpoint:
                 pass
             raise CheckpointRefused("checkpoint file write failed") from exc
         return {
-            "schema_version": 1,
-            "kind": "a3_mujoco_controlled_diagnostic_checkpoint_save_receipt_v1",
+            "schema_version": 3,
+            "kind": "a3_mujoco_controlled_diagnostic_checkpoint_save_receipt_v3",
             "path": str(target),
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "update_counter": trainer.update_counter,
@@ -202,7 +228,8 @@ class ResetBoundaryCheckpoint:
 
         old_model = copy.deepcopy(trainer.model.state_dict())
         old_optimizer = copy.deepcopy(trainer.optimizer.state_dict())
-        old_normalizer = trainer.normalizer.state_dict()
+        old_actor_normalizer = trainer.actor_normalizer.state_dict()
+        old_critic_normalizer = trainer.critic_normalizer.state_dict()
         old_counter = trainer.update_counter
         old_receipt = copy.deepcopy(trainer._last_update_receipt)
         old_python_rng = __import__("random").getstate()
@@ -210,29 +237,49 @@ class ResetBoundaryCheckpoint:
 
         old_numpy_rng = np.random.get_state()
         old_torch_rng = torch.get_rng_state().clone()
+        old_environment_state = None
+        environment_checkpoint = getattr(trainer.env, "checkpoint_state", None)
+        environment_loader = getattr(trainer.env, "load_checkpoint_state", None)
+        if payload["environment_state"] is not None:
+            if not callable(environment_checkpoint) or not callable(environment_loader):
+                raise CheckpointRefused(
+                    "live environment cannot restore checkpoint continuation state"
+                )
+            old_environment_state = copy.deepcopy(environment_checkpoint())
         try:
             trainer.model.load_state_dict(payload["model_state_dict"], strict=True)
             trainer.optimizer.load_state_dict(payload["optimizer_state_dict"])
-            trainer.normalizer.load_state_dict(payload["normalizer_state_dict"])
+            trainer.actor_normalizer.load_state_dict(
+                payload["actor_normalizer_state_dict"]
+            )
+            trainer.critic_normalizer.load_state_dict(
+                payload["critic_normalizer_state_dict"]
+            )
             trainer.update_counter = payload["update_counter"]
             trainer._last_update_receipt = copy.deepcopy(payload["last_update_receipt"])
             __import__("random").setstate(payload["rng_state"]["python"])
             np.random.set_state(payload["rng_state"]["numpy"])
             torch.set_rng_state(payload["rng_state"]["torch_cpu"])
-            trainer._observations = None
+            if payload["environment_state"] is not None:
+                environment_loader(copy.deepcopy(payload["environment_state"]))
+            trainer._actor_observations = None
+            trainer._critic_observations = None
         except Exception as exc:  # noqa: BLE001 - rollback keeps load transactional
             trainer.model.load_state_dict(old_model, strict=True)
             trainer.optimizer.load_state_dict(old_optimizer)
-            trainer.normalizer.load_state_dict(old_normalizer)
+            trainer.actor_normalizer.load_state_dict(old_actor_normalizer)
+            trainer.critic_normalizer.load_state_dict(old_critic_normalizer)
             trainer.update_counter = old_counter
             trainer._last_update_receipt = old_receipt
             __import__("random").setstate(old_python_rng)
             np.random.set_state(old_numpy_rng)
             torch.set_rng_state(old_torch_rng)
+            if old_environment_state is not None:
+                environment_loader(old_environment_state)
             raise CheckpointRefused("checkpoint state could not be installed") from exc
         return {
-            "schema_version": 1,
-            "kind": "a3_mujoco_controlled_diagnostic_checkpoint_load_receipt_v1",
+            "schema_version": 3,
+            "kind": "a3_mujoco_controlled_diagnostic_checkpoint_load_receipt_v3",
             "path": str(source),
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "update_counter": trainer.update_counter,

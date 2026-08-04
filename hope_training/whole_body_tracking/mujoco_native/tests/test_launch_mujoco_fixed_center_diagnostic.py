@@ -50,7 +50,8 @@ def test_plan_is_read_only_and_labels_4096_unmeasured(tmp_path: Path, capsys) ->
     assert result["outputs"]["launch_preparation"].endswith("launch_preparation.json")
     assert result["workload"]["num_envs_4096_plan_shape_supported"] is True
     assert result["workload"]["matched_4096_runtime_measured"] is False
-    assert result["claims"]["physical_ball_parked_during_wait"] is False
+    assert result["claims"]["physical_ball_parked_during_wait"] is True
+    assert result["claims"]["ball_only_atomic_sealed_launch_on_reveal"] is True
     assert result["diagnostic_unauthorized"] is True
     assert result["formal_authorized"] is False
 

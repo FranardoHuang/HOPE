@@ -298,7 +298,7 @@ P2 单独 A/B,P4 上呈治理,P5/P6 否决留档。**
 1. **`init_noise_std=0.02`:正当,但理由和"warm-start"无关,且证明只盖第 0 步。**
    N1/ActionBall **全部 fresh 起跑**(launcher 从不发 checkpoint_path;bootstrap 在
    checkpoint_path≠None 时拒绝应用)。0.02 的真正理由:actor 末层被 bootstrap 成
-   weight=zeros / bias=ready 姿态,[train.py:5004](../../hope_training/whole_body_tracking/scripts/train.py) 强制 0.02 精确等值,
+   weight=zeros / bias=ready 姿态,[train.py:5004(**§21 核查修正:零初始化末层实际在 scripts/train.py:7010/7062/7065,调用点 16237;5004 是 init_noise_std 的强制校验点**)](../../hope_training/whole_body_tracking/scripts/train.py) 强制 0.02 精确等值,
    [training_contract.py:4132](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py) 逐关节证明 4σ×action_scale+startup 偏移带严格卡在
    硬限位内 2% 包络里;σ=1.0 会在第一步就打穿限位。外部三家全是 σ=1.0——因为没人做
    末层清零的安全 bootstrap,**外部共识在这个轴上不适用**。
@@ -1530,7 +1530,7 @@ init_noise_std=0.02 的探索 + racket_position σ=0.075 m 的核（0.3 m 误差
   - 证据:rsl_rl 2.3.1: ppo.py:96 单 Adam、324 合并 loss、372-373 单 backward、385 单裁剪、386 单 step；actor_critic.py:15 单 nn.Module。⚠ 全仓库 grep 不到任何 rsl-rl 版本 pin，diligence doc 自己把'rsl_rl 版本写进 receipt'列为未完成 TODO；若实际是 5.x（分开裁剪）本条不成立
 - **[high] 熵项对 σ 的推力已经和'非死亡任务信号'同量级，σ 实际由死亡和熵共同决定，与击球质量无关**
   - 机制:init_noise_std=0.02、31 关节：每维熵 = 0.5·ln(2πe·0.0004) = -2.494 nat，合计 -77.3 nat；entropy_coef=0.01 对每个 log σ 是恒定 -0.01 的上推梯度。surrogate 对 log σ 的梯度 ≈ 归一化 advantage × O(1)：dense 侧 ≈0.007（推不过熵），死亡侧 ≈3（狠压 σ）。所以探索幅度的实际控制权在熵常数和死亡尾巴手上，任务质量完全插不上话。
-  - 证据:cfg/algo/ppo.yaml:50 entropy_coef=0.01（已是三库 0.005 的 2 倍）；init_noise_std=0.02 由 train.py:5004 与 training_contract.py:4041-4051 硬性锁死（!=0.02 直接报错）；C1 推导出的归一化 advantage 量级 0.007 vs 3
+  - 证据:cfg/algo/ppo.yaml:50 entropy_coef=0.01（已是三库 0.005 的 2 倍）；init_noise_std=0.02 由 train.py:5004(**§21 核查修正:零初始化末层实际在 scripts/train.py:7010/7062/7065,调用点 16237;5004 是 init_noise_std 的强制校验点**) 与 training_contract.py:4041-4051 硬性锁死（!=0.02 直接报错）；C1 推导出的归一化 advantage 量级 0.007 vs 3
 - **[medium] 权重跨度 7.7 个数量级，但真正的病不是跨度而是'最大项是尖峰不是 dense 锚'**
   - 机制:跨度本身不是病：unitree_rl_lab 跨度 7.6 个数量级也照样能训，因为它的极端来自把 joint_acc 刻意做成 2.5e-7 的'已知安全常数'（全任务族复用），最大项仍是 -10.0 的常规罚项。我们的极端方向相反：最大项 1648.8 是一个只在事件上发放的巨型尖峰，dense 锚反而是最小的一档。BeyondMimic/mjlab 都刻意把跨度压在 2 个数量级内。
   - 证据:我们 1648.8 / 3e-5 = 5.5e7 ≈ 7.7 数量级（注意分母必须用活值 -3e-5，来自 HOPEPingPongHitter.yaml:235 经 defaults 继承，不是 dataclass 默认的 -1e-5）；BeyondMimic 10.0/0.1 = 100x；mjlab 10.0/0.1 = 100x；unitree 10.0/2.5e-7 = 4e7
@@ -1585,7 +1585,7 @@ init_noise_std=0.02 的探索 + racket_position σ=0.075 m 的核（0.3 m 误差
 
 **S9(P2（但结论要现在写进 doc，防止有人把 entropy 当 scale 旋钮）):【答 (c)：entropy_coef 不动，init_noise_std 也不动】保持 entropy_coef=0.01（已是三库 0.005 的 2 倍），init_noise_std 保持 0.02。理由要说清楚：熵项的值和梯度对 reward 尺度严格不变（纯 σ 的函数），所以'用 entropy 补偿 scale 问题'是错配的旋钮。真实耦合是间接的——熵对每个 log σ 是恒定 +0.01 的上推，而 surrogate 那侧对 σ 的梯度被死亡尾巴主导（dense 侧归一化 advantage ≈0.007，死亡侧 ≈3）。换句话说现在探索幅度是被'熵常数'和'死亡'合议决定的，任务质量插不上话，而且熵的推力已经压过非死亡任务信号（0.01 vs 0.007）——此时再调大 entropy_coef 就是纯注噪，在 31 维、Adam 逐参数归一化下还可能让 log σ 每个 update 涨 ~2%（约 35 个 update 翻倍），直接破坏 shared-ready 的安全起步性质。正确顺序：先做 R2+R4 修尾，然后看 log std / mean action std 的轨迹；只有在修尾之后 σ 仍单调下滑到 <0.02 时，才做 0.01 vs 0.02 的同批 A/B，且按 ppo.yaml:50 自己的规矩用 task 级 algo: override 钉，绝不改全局默认。**
 - 先例:三库一致用 entropy_coef=0.005（我们已经翻倍）；cfg/algo/ppo.yaml:50 的历史注释本身就记载过'全局改 0.015 被审计撤回、同日回退 0.01'的教训并规定了 task 级 override + 同批 A/B 的做法
-- 落点:/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/cfg/algo/ppo.yaml:50（保持不动）；init_noise_std=0.02 由 train.py:5004 与 training_contract.py:4041-4051 硬锁（!=0.02 直接报错），要动就得先拆这道 shared-ready bootstrap 护栏，不建议
+- 落点:/Users/Franco/Dropbox/乒乓/nohope/hope_training/whole_body_tracking/cfg/algo/ppo.yaml:50（保持不动）；init_noise_std=0.02 由 train.py:5004(**§21 核查修正:零初始化末层实际在 scripts/train.py:7010/7062/7065,调用点 16237;5004 是 init_noise_std 的强制校验点**) 与 training_contract.py:4041-4051 硬锁（!=0.02 直接报错），要动就得先拆这道 shared-ready bootstrap 护栏，不建议
 - 风险:不动的风险：若重尾修完仍探索不足，会多花一个 A/B 周期。动的风险大得多：σ 膨胀会同时破坏 deploy-parity 的 clamp 假设和安全起步
 
 **S10(P2):【数值卫生 + 注释除锈】①给 reward 加 nan_to_num 兜底（我们这边 IsaacLab 的 RewardManager 没有）；②修 train.py:~11172 那句写着 '包 direct 写 -1800' 的注释，实际 DIRECT 表是 -3600；③把 -3600 的真实生效点写清楚（train.py:8896 / train.py:11171-11184），hope_env_cfg.py:2108-2120 那里的类默认是 0.0，别再当引用出处。**
@@ -2515,3 +2515,782 @@ docs 判定"更快的旋转已经在往下折叠",不是巧合。
 3. **"Ace 只有上台才有奖励"** → Ace 是**三级阶梯**,"碰到球"单独发钱;它没有的是**稠密接近引导**(这条如实),代替品是 off-policy 回放 + HER + 事件分层采样 + 富起点 + 单板 episode。
 4. **"22.9 rev/s 是对称图案的信息论极限"** → 是**部署用链式最近邻匹配的逐帧对应连续性界**,几何是**不对称**的;并且生产函数根本不输出混叠标记,模块 docstring 里的 ~17 rev/s 是过时估计,这个数在仓内**不可复现**。
 5. **`configs/ball_physics_optitrack_20260730.yaml:252-255`** 的"重拟合尚未完成"整段作废(同一文件同一提交内自相矛盾),`docs/ball_physics_optitrack_20260730.md` §6.4 同步作废。
+
+
+---
+
+## 二十一、Policy 容量尽调:225-D 输入要不要扩网(08-02)
+
+**方法**:3 抽取(我方容量与约束 / 13 个外部 repo 网络普查 / 四篇论文 + RL 扩容文献)+ 3 对抗核查
+(22 修正)+ 1 裁决。参数量一律按 `Σ(in×out+out)` 手算复核。
+
+### 21.1 裁决
+
+不要扩容。现在扩网络是把钱花在没有故障的零件上。
+
+一句话结论：我们学不好的原因，证据几乎全部指向"信号不足 / 优化被压制"，不是"网络太小"。我给"网络容量是当前主要瓶颈"的概率 ≤10%。
+
+三条硬证据（都来自我们自己的尽调 doc 和代码，不是外部类比）：
+1. 击中层收入恒为 0（§16：strike_opportunity_count=0）。网络再大也拟合不出一个从来没有出现过的目标。这是容量假说的直接证伪：容量只有在"有梯度但拟合不上"时才是瓶颈。
+2. 回报分布被 -72 死亡尖峰支配，advantage 归一化后 dense 项的有效梯度约为死亡方向的 1/500（§16）。这是梯度方向被压缩到 1/500，不是表达能力不够。扩容会把这个被压缩的方向复制到更多参数上，压缩比例不变。
+3. 窗内 exp 核在大误差处梯度精确为零（§7）。零梯度乘以任何参数量还是零。
+
+两条外部对照证据说明 [512,256,128] @ 225-D 在同类任务上绰绰有余：
+- HITTER（arXiv 2508.21043v2 §V.B.3，Unitree G1 29 自由度打乒乓，我们这条线的直接母本）actor obs 只有 104 维、网络就是 [512,256,128]、约 22.2 万参数、无历史堆叠，零样本上真机成功。我们 A225 是 225 维、28.4 万参数——比母本还大 28%。
+- 生态普查：从 obs=42 到 obs=705（约 17 倍跨度），[512,256,128] 是近乎唯一的默认值，没有任何一个 locomotion/tracking 仓库把宽度随 obs 维度往上调（beyondmimic 160-D、mjlab 160-D、unitree_rl_lab 480-D、legged_gym 235-D、ASAP 576-D、XBot-L 705-D 全是这一个网络）。
+
+关于"225-D 是否要求更大网络"：不要求，而且这个提问方式本身就错了。194→225 只多 31 列，第一层只多 31×512 = 15,872 个参数，占 actor 总量的 5.6%；而那个 512 宽的第一隐层本身就占了 actor 参数的 40.7%（115,712 / 283,935），actor+critic 合起来第一层占 45.6%（279,040 / 611,616）。换句话说：参数量几乎不看输入宽度，只看隐层宽度。而且 A225 的 225 列里有 154 列（68.4%）是 achieved-vs-teacher 成对镜像（base 15+15、joint pos 31+31、joint vel 31+31），这是刻意的残差/模仿结构——要学的函数更接近"恒等 + 修正"，比从零编码一个任务更容易表示，不是更难。
+
+关于扩容文献的适用性（这条最容易踩坑）：SimBa（ICLR 2025）、BRO（NeurIPS 2024 spotlight，注意不是 ICLR 2025）、Dormant-Neuron/ReDo（ICML 2023）这三篇"扩容有效"的核心证据全部是 off-policy（SAC / TD-MPC2 / DQN / DrQ，带 replay buffer、高 UTD）。SimBa 唯一的 on-policy PPO 实验跑在 Craftax（离散生存游戏），不是连续控制。真正对口的是 Andrychowicz et al.（arXiv 2006.05990，ICLR 2021）：在 5 个 MuJoCo 连续控制环境上扫了宽度 {16,32,64,128,256,512} × 深度 {1,2,4,8}，结论是 actor 宽度最优值依环境而定且非单调——太窄和太宽都掉性能（HalfCheetah 最优 policy 宽度只有 16-32 单元），而 critic 加宽没有下行风险；深度 2 层在所有环境都够用，4/8 层无收益。这篇唯一对口的 on-policy 证据是反对盲目加宽 actor 的。
+
+另外两个我们仓库特有的、必须写进裁决的约束：
+- critic 在部署侧是免费的（exporter.py 只 trace self.actor），但在优化侧不免费：rsl_rl 用单个 Adam 覆盖 actor+critic 全部参数、单个全局 max_grad_norm=1.0、单个 adaptive-KL 驱动的学习率（desired_kl=0.01, lr=0.001）。加大 critic 会稀释/重塑 actor 也在其中的那份梯度范数预算和 KL 学习率。"critic 随便扩"在别的框架成立，在我们这里不成立。
+- 任何 hidden_dims 改动都会让 checkpoint 形状不匹配（strict load 报错），等于放弃全部 warm start，从零重跑 2 万-2.5 万 iter。这是一次 GPU-周级别的代价，只应该在诊断指标明确指向欠拟合之后才付。
+
+顺带纠正/确认前提：actor 末层 weight 零初始化是真的，但不在 rsl_rl 的 ActorCritic 里，而在 scripts/train.py 的 _apply_action_ball_fresh_policy_bootstrap（定义 7010 行、置零 7062 行、断言 7065 行、调用点 16237 行）——不是给定的 5004 行，请把 doc 里的行号改过来。init_noise_std=0.02 是 CLI 强制覆盖（ppo.yaml 自身默认仍是 1.0）并在 receipt 里硬校验。
+
+### 21.2 全景对照表
+
+## 观测维度 × 网络宽度 × 参数量 × 历史/RNN 全景对照
+
+参数量口径统一为「actor（含输出层）」，按 `Σ(in×out+out)` 手算；标 ~ 的为估算或论文未给全。
+
+| 来源 | 系统 / 任务 | actor obs 维 | 动作维 | actor 隐层 | 激活 | actor 参数量 | 历史 / RNN | 备注 |
+|---|---|---|---|---|---|---|---|---|
+| **我们** | A225 actor（现役诊断对） | **225** | 31 | [512,256,128] | ELU | **283,935** | 无（仅 prev action 31-D） | 154/225=68.4% 是 achieved-vs-teacher 成对镜像 |
+| **我们** | A225 critic（318-D 特权） | 318 | 1 | [512,256,128] | ELU | **327,681** | 无 | A225 自有 ABI；与 L194 的 318 宽度只是巧合，不是共享合同 |
+| **我们** | L194 actor | 194 | 31 | [512,256,128] | ELU | 268,063 | 无 | 与 A225 差 31 列 → 第一层仅差 15,872 参数（5.6%） |
+| 我们（备选） | actor [512,512,256] | 225 | 31 | [512,512,256] | ELU | 517,663 | 无 | 合计 actor+critic 1,075,232 = 1.76× |
+| 我们（备选） | actor [1024,512,256] | 225 | 31 | [1024,512,256] | ELU | 895,519 | 无 | 合计 1,878,560 = 3.07× |
+| 论文 | **HITTER**（arXiv 2508.21043v2，Unitree G1 29-DoF 乒乓） | **104** | 29 | **[512,256,128]** | 未述 | 221,725 | **无历史** | 与我们同任务同机型；零样本上真机；论文明写三隐层 512/256/128 |
+| 论文 | **PACE**（arXiv 2509.21690v3，Booster T1 乒乓） | **410**（82×H=5） | 21 | [512,512,128] | 未述 | 541,461 | 历史 H=5 | 另有 [64,64] 球轨迹预测小网络；4096 并行环境 |
+| 论文 | **SMASH**（arXiv 2604.01158v1，G1 乒乓 + 自视觉） | 未给 | 未给 | **论文未给** | 未给 | — | actor 用带噪历史 | 15 页全文无隐层尺寸/激活/环境数；视觉是 YOLO+AprilTag+EKF 经典管线，非 CNN 进策略 |
+| 论文 | **Sony Ace**（Nature s41586-026-10338-5，8-DoF 机械臂） | N 步带噪测量历史（N 未给） | 16 | **Supp. Table 8，正文无** | — | — | 历史 + 球态嵌入 | 唯一 off-policy（SAC，异步并行采集）；带球态重建辅助损失 |
+| repo | beyondmimic G1 tracking | 160 | 29 | [512,256,128] | ELU | 250,397 | 无 | 我们 critic 的历史祖先 |
+| repo | mjlab G1 tracking | 160 | 29 | [512,256,128] | ELU | 250,397 | 无 | 显式声明是 beyondmimic 重实现 |
+| repo | unitree_rl_lab G1-29 locomotion | 480（96×5） | 29 | [512,256,128] | ELU | 414,237 | 历史 5（扁平堆叠） | |
+| repo | unitree_rl_lab G1-29 mimic | 154 | 29 | [512,256,128] | ELU | 247,325 | 无 | |
+| repo | legged_gym anymal_c rough / A1 | 235 | 12 | [512,256,128] | ELU | 286,604 | 无 | 含 187 维高度扫描 |
+| repo | legged_gym anymal_c **flat** | 48 | 12 | **[128,64,32]** | ELU | **17,004** | 无 | ⚠️ 同仓库内主动**缩小**网络的实例（obs 变小则网络变小） |
+| repo | humanoid-gym XBot-L | **705**（47×15） | 12 | [512,256,128]（critic [768,256,128]） | ELU | 527,244 | 历史 15 | 全普查中 obs 最宽仍用同一网络；actor/critic 非对称宽度 |
+| repo | IsaacGymEnvs AnymalTerrain (MLP) | 188 | 12 | [512,256,128] | ELU | 262,540 | 无 | yaml 里有被注释掉的 rnn 块 |
+| repo | IsaacGymEnvs AnymalTerrain (LSTM) | 188 | 12 | [512] + LSTM(256,1层) | ELU | ~887,308 | **RNN** | 同任务同 obs，加 RNN 后参数 ×3.4 |
+| repo | IsaacGymEnvs ShadowHand full_state | 211 | 20 | [512,512,256,128]（共享 trunk） | ELU | ~538,004 | 无 | 灵巧手，非 locomotion |
+| repo | IsaacGymEnvs ShadowHandOpenAI_FF（真实默认链） | 42 | 20 | **[400,400,200,100]** | ELU | 279,920 | 无 | ⚠️ 第三种独立架构；其 central_value critic 用 [512,512,256,128] 吃 211-D |
+| repo | IsaacGymEnvs ShadowHandOpenAI_LSTM | 42 | 20 | [512] + LSTM(1024,1层) | ReLU | ~6,338,068 | **RNN** | 全普查最大 actor；**RNN 只出现在灵巧手，locomotion/tracking 无一例** |
+| repo | booster_gym T1（真机人形） | 47 | 12 | **[256,128,128]** | ELU | **63,244** | 无 | 唯一主动缩小的真机人形；logstd=-2.0（std≈0.135） |
+| repo | ASAP / HumanoidVerse G1-29 loco | 576（96 + 480 历史） | 29 | [512,256,128] | ELU | 463,389 | 历史 5 | init_noise_std=0.8 |
+| repo | FALCON（HumanoidVerse 派生） | 575（两 actor 共享同一输入） | 15+14 | [512,256,128] ×2 个独立 actor | ELU | 922,013（合计） | 历史 5 | 上下身分离双 actor，宽度按身体复制而非共享 |
+| repo | mujoco_playground G1 joystick | 103 | 29 | (512,256,128) | swish | ~224,954 | 无 | Brax，输出层 2×动作维（均值+logstd） |
+| repo | PBHC（G1-23，HumanoidVerse fork） | 416（224 原始 + Conv 编码 128+64） | 23 | [768,512,256] + LayerNorm | **SiLU** | ~851,223 | Conv1D 压缩历史 10 步 + 未来 20 步 | 唯一用 LayerNorm + 编码器压缩历史的 locomotion 系 |
+| repo | PHC（SMPL 全身模仿） | ~700-720（估） | 69 | [1024,512] | ReLU | ~1.3M / 每 primitive | 无；PMCP num_prim=3 | im_pnn_big 扩到 [2048,1536,1024,1024,512,512]，注释 `# comparable paramter to z_big_task`（原文有拼写错） |
+| repo | ProtoMotions Mimic | 与机型相关 | 与机型相关 | [1024]×6 | ReLU | — | 无 | 全普查最深的纯 MLP actor；logstd 固定 -2.9 |
+| repo | ProtoMotions MaskedMimic | 与机型相关 | 与机型相关 | Transformer(512) prior → 64-D VAE latent → trunk [1024]×3 | ReLU | — | 5 步历史 token + 5 步未来 token | 全普查唯一策略路径里有真 Transformer 的 |
+
+### 这张表告诉我们三件事
+
+1. **宽度不随 obs 维度走。** obs 从 42 到 705（17 倍），[512,256,128] 一路不变。两个例外都是**往下缩**（legged_gym flat [128,64,32]、booster_gym T1 [256,128,128]），没有一个是因为 obs 变宽而往上扩的。
+2. **我们已经在同类任务的上半区。** 我们 283,935 参数 vs 直接母本 HITTER 221,725（+28%）、vs beyondmimic 250,397（+13%）。真正比我们大的（PBHC 851K、PHC 1.3M、ProtoMotions 6×1024）全都同时换掉了观测处理范式（Conv/Transformer/VAE 编码器），不是单纯把 MLP 拉宽。
+3. **RNN 在这个生态里不属于 locomotion。** LSTM 只出现在 IsaacGymEnvs 的灵巧手任务；所有人形/四足 locomotion 与 tracking 仓库、以及四篇乒乓论文的 on-policy 三篇，用的都是前馈 MLP（有的加扁平历史堆叠）。
+
+### 21.3 建议(排序)
+
+**C1(P0):不扩容。冻结 hidden_dims=[512,256,128]，把这一轮资源全部投到 §16 死亡尖峰、§7 零梯度窗、strike_opportunity_count=0 这三个信号侧故障上。**
+- 证据:§16：advantage 归一化后 dense 项有效梯度约为 -72 死亡方向的 1/500，且击中层收入恒为 0；§7：窗内 exp 核在大误差处梯度精确为零——三者都是「梯度不存在或被压到 1/500」，不是「表达能力不足」。外部对照：HITTER（arXiv 2508.21043v2 §V.B.3）用 104-D obs + [512,256,128] + 221,725 参数在同机型同任务上零样本成功；我们 225-D 下是 283,935 参数，比它大 28%。生态普查中 obs 从 42 到 705（17 倍）宽度不变，无一例因 obs 变宽而扩网。
+- 落点:hope_training/whole_body_tracking/cfg/algo/ppo.yaml:39-40 保持不动；本轮改动全部落在 reward/termination 侧。
+- 风险:若诊断后确证是欠拟合，会晚一轮才扩——但因为扩容必然要从零重训 2 万-2.5 万 iter（checkpoint 形状不匹配、strict load 报错），先诊断再扩本来就是省时的顺序。
+
+**C2(P0):上一套可证伪的诊断仪表盘，把「容量不足 vs 信号不足」变成一个能被数据判定的问题，而不是一次架构赌博。五个指标：(a) explained_variance，且必须分拆成「含死亡终止 episode」与「不含」两条曲线；(b) 训练回报 vs 固定种子确定性评估回报的 gap；(c) clip 之前的梯度范数分布（对照 max_grad_norm=1.0）；(d) dormant neuron 比例（ReDo 定义，τ=0 与 0.025 两档）；(e) 倒数第二层激活的有效秩。**
+- 证据:ppo.yaml:69 max_grad_norm=1.0、:54 desired_kl=0.01、:52 lr=0.001 全是单一全局量，rsl_rl/algorithms/ppo.py 用一个 Adam 覆盖 actor+critic 全部参数——所以「梯度预算是否已经被 clip 吃满」是可直接观测的。判定规则：EV 低但只在含死亡 episode 上低 → 是 §16 尖峰，不是 critic 容量；train/eval gap 大 → 已过拟合，扩容有害；dormant 比例 <5% 且有效秩接近层宽 → 现有容量尚未用满，扩容无收益。
+- 落点:my_on_policy_runner.py 的日志端新增这五个标量；EV 分拆需要在 rollout 里带上 termination 标志。
+- 风险:仪表本身要几天工时，且有效秩/dormant 的计算会给每次 update 加一点开销（建议每 N iter 采样一次而非每步算）。
+
+**C3(P0):跑一次监督拟合能力探针——这是最便宜、最直接证伪「容量不足」的实验。冻结环境，dump 一个 98,304 样本的 rollout buffer，用完全相同的 [512,256,128] 架构去监督回归 teacher/reference 动作（或已算好的 advantage 目标），看训练损失能否压到接近零。**
+- 证据:容量瓶颈的定义就是「目标存在但拟合不上」。若 [512,256,128] 能在 98,304 样本上把监督损失打到近零，容量假说被直接证伪，剩下的一切归因于 RL 信号侧。当前参数/样本比已经是 611,616/98,304 ≈ 6.2 倍（每 update 只有 5 epoch×4 minibatch=20 个梯度步），[1024,512,256] 下变成 19.1 倍——容量不是稀缺资源，样本的信息含量才是。
+- 落点:单卡离线脚本即可，几分钟到几十分钟；不需要动训练主干。
+- 风险:监督拟合能力是 RL 拟合能力的上界而非等价物——探针通过不能 100% 排除「on-policy 分布漂移下的有效容量不足」。但探针不通过就能 100% 确认容量确实是瓶颈，所以它作为证伪工具是有效的。
+
+**C4(P1):无论扩不扩，先把 G07 的推理延迟实测数补上（--probe 工具已存在，输出从未入库）。**
+- 证据:docs/operations/run_deploy_dryrun.md 的「Required Documentation Before Hardware」明确要求 G07 列出 latency result，但 docs/gates/G07_mujoco_to_real.md 全文没有任何延迟数字。部署侧硬约束：period_ns=20,000,000（a3_based_task.hpp:30）、policy_hz: 50.0（a3_runtime_config.yaml:201-203）、ORT 单线程 SetIntraOpNumThreads(1)（ort_session.hpp:50-51），a3_based_task.cpp:142 会统计 overrun。估算上 actor 前向 [512,256,128] 约 28.4 万次乘加、[1024,512,256] 约 89.4 万次，对 20,000 µs 的预算都可以忽略（差 4-5 个数量级，瓶颈是 ORT 会话/张量拷贝开销，与隐层宽度基本无关）——但「估算可忽略」不等于「实测过」。
+- 落点:跑一次 --probe，把数字写进 docs/gates/G07_mujoco_to_real.md 的 Outputs。
+- 风险:几乎无风险，纯补数据；顺带解掉 G07 的一个未填字段。
+
+**C5(P1):如果（且仅如果）诊断明确指向欠拟合，第一步只扩 critic，不动 actor：critic 从 [512,256,128] 改到 [512,512,256]（327,681 → 557,569，合计 841,504 ≈ 1.38×），actor 保持不变。但必须同时监控共享的梯度范数与 KL 学习率。**
+- 证据:Andrychowicz et al.（arXiv 2006.05990，ICLR 2021，>25 万 agent 的超参扫描，宽度网格 {16,...,512} × 深度 {1,2,4,8}）原文：value 网络加宽「没有下行风险」，而 policy 宽度最优值依环境而定、过宽会显著掉性能。部署侧 critic 完全免费：exporter.py:86-120 的 export() 只 trace self.actor(self.normalizer(x))，critic 从不进 ONNX。观测合同也不动，225-D deploy parity 不受影响。
+- 落点:cfg/algo/ppo.yaml:40 critic_hidden_dims 单行改动 + 新建一条对照臂。
+- 风险:关键风险（我们仓库特有，与外部文献不同）：rsl_rl/algorithms/ppo.py:96,385 是单个 Adam 覆盖 self.policy.parameters()（actor+critic 合并）、单个全局 clip_grad_norm_(max_grad_norm=1.0)、单个 adaptive-KL 学习率。加大 critic 会改变被 clip 的总梯度向量和 KL 驱动的有效学习率，actor 的优化动力学不是隔离的——所以「critic 免费」在别的框架成立，在我们这里只在部署侧成立，在优化侧不成立。另外这一改动仍然作废全部 checkpoint（strict load 形状不匹配），是从零重训。
+
+**C6(P2):如果 actor 最终也要扩，只加宽中层到 [512,512,256]（283,935 → 517,663），不要加深，不要直接跳 [1024,512,256]。**
+- 证据:Andrychowicz（arXiv 2006.05990）：2 个隐层在所有测试环境都够用，深度 4/8 无收益——我们已经是 3 层，已在甜点之上，加深是纯损失。宽度非单调（HalfCheetah 最优 policy 宽度仅 16-32 单元），所以要小步走。参数/样本比：[512,512,256] 下 actor+critic 合计 1,075,232 / 98,304 ≈ 10.9 倍；[1024,512,256] 下 1,878,560 / 98,304 ≈ 19.1 倍，且每 update 只有 20 个梯度步、同一批 on-policy 样本被复用 5 个 epoch——批内过拟合风险随容量线性上升，而 PPO 侧只有 clip_param=0.2 与 adaptive KL 这两道弱护栏。
+- 落点:cfg/algo/ppo.yaml:39；必须与 P1 的 critic 臂分开跑，否则无法归因。
+- 风险:零初始化末层的安全性会变：weight=0 时初始动作严格等于 bias（与宽度无关，这一点安全），但第一次反向传播后末层的有效步长正比于倒数第二层激活范数 ‖h‖，而 ‖h‖ 大致随宽度 √ 增长——把倒数第二层从 128 加宽到 256 会让策略脱离零初始点的速度变快约 √2 倍。在 init_noise_std=0.02 这种极紧探索下，早期动力学对这个变化敏感，需要在扩容臂上专门看头 200 iter 的动作幅度曲线。
+
+**C7(P3):不要把 SimBa/BRO 式的 residual + LayerNorm 作为默认架构引入；如果要试，必须以独立消融臂的形式，且明确标注为「文献空白区的探索」而非「已验证配方」。**
+- 证据:SimBa（ICLR 2025）、BRO（NeurIPS 2024 spotlight，注意不是 ICLR 2025）、ReDo（ICML 2023）的核心证据全部是 off-policy（SAC / TD-MPC2 / DQN / DrQ，带 replay buffer 与高 UTD）。SimBa 唯一的 on-policy PPO 实验在 Craftax（离散生存游戏），BRO 全文零 PPO 实验，ReDo 只测 DQN 与 SAC/DrQ。唯一专门研究 on-policy 可塑性的论文（Juliani & Ash 2024, arXiv 2405.19153）只跑 gridworld / Montezuma / ProcGen，不是连续控制；它的结论也需要精确复述：末层 reset 在三种条件下全部失效，而 LayerNorm 能解决训练侧可塑性丢失（§4.5 标题原意）、并在 CoinRun 上属于三个最有效方法之一，但在泛化/测试性能上不稳定。没有任何一篇论文在 100-300 维观测的腿式/人形连续控制任务上、用 PPO 测过 SimBa/BRO 式缩放架构——这是真实的文献空白。
+- 落点:若做，作为单独 arm，与基线同种子同步跑，不进默认 cfg。
+- 风险:在空白区上押注默认配置，等于用一次 2 万 iter 的从零重训去赌一个跨范式外推；即使有效也难归因（架构变了、初始化变了、warm start 没了）。
+
+**C8(P3):不要上 RNN。若确认需要时序信息，history stacking 排在 RNN 之前，但必须走完整的观测合同流程（新命名合同 + 新 critic ABI + 部署侧历史缓冲）。**
+- 证据:生态普查里 LSTM 只出现在 IsaacGymEnvs 的灵巧手任务（ShadowHandOpenAI_LSTM ~634 万参数、AllegroHandDextremeADR、AnymalTerrain_LSTM 变体），所有人形/四足 locomotion 与 tracking 仓库、以及三篇 on-policy 乒乓论文，无一使用 RNN。代码侧 rsl_rl 的 ActorCritic 硬编码 is_recurrent=False 且 __init__ 根本没有 rnn_type/rnn_hidden_size 参数，ppo_cfg.py 的 RslRlPpoActorCriticCfg 也没有 RNN 配置面——引入 RNN 是框架级改造，且 ONNX 侧要在 50 Hz 循环里跨 tick 携带隐状态，直接威胁部署 parity。history 侧的先例充分：PACE H=5（82×5=410 维）、ASAP 5（576）、FALCON 5（575）、unitree_rl_lab 5（480）、XBot-L 15（705）。但反证同样有力：HITTER（同机型同任务、我们的直接母本）不用任何历史堆叠。
+- 落点:若做，作为新的命名合同（如 A225H5）进 actor_observation_contract.py，不得就地改 A225。
+- 风险:history 会打断 194/225-D 部署 parity 这条神圣约束；且我们的 A1 延迟旋钮据前期结论全为零（本轮未重新核实，按「继承结论」处理），在零延迟下单帧观测的马尔可夫性本来就够——历史带来的收益可能很小而合同代价很大。
+
+**C9(P2):修正尽调 doc 里的两处事实：(a) actor 末层零初始化的位置是 scripts/train.py 的 _apply_action_ball_fresh_policy_bootstrap（定义 7010 行、weight.zero_() 在 7062 行、断言在 7065 行、调用点 16237 行），不是 5004 行；(b) A225 的 318-D critic 是 A225 自有 ABI，与 L194 那条线的 318 维只是标量宽度巧合，不是共享合同。**
+- 证据:grep 实测：train.py:7010 / 7062 / 7065 / 16237。A225 侧代码自己的 docstring（action_ball_225_trainability.py:41-43）明确警告：这是 A225-owned ABI，即使标量宽度等于历史 Stage-1 critic，其 normalizer/checkpoint 血统是新的。两条线的 critic 词条结构其实不同（A225 用 task_desired_contact_* 系列，另一条用 racket_pos_b / racket_lin_vel_w / racket_normal_w / episode_time_left）。
+- 落点:docs 里对应段落的行号与措辞。
+- 风险:不修的风险是后续有人按「critic ABI 跨 actor 宽度稳定」去做 warm start 或 checkpoint 复用，会踩到静默的语义不匹配（宽度对得上、含义对不上，strict load 不会报错）。
+
+
+### 21.4 补充
+
+## §21 网络容量裁决：225-D 输入要不要扩容？
+
+**裁决：不扩。** 现在扩网络是给没坏的零件花钱。我给"网络容量是当前主要瓶颈"的概率 **≤10%**。
+
+### 21.1 两种假说必须先分开
+
+| | 容量不足 | 信号不足 / 优化被压制 |
+|---|---|---|
+| 长什么样 | 有明确的学习目标、有非零梯度，但网络拟合不上 | 目标从未出现，或梯度被压到近零 |
+| 怎么救 | 加宽/加深/换架构 | 修 reward、修终止、修核函数 |
+| 加参数有用吗 | 有 | **没有**——零乘以任何参数量还是零 |
+
+我们的三条硬证据全部落在右列：
+
+1. **击中层收入恒为 0**（§16，`strike_opportunity_count=0`）。网络再大也拟合不出一个从未出现过的目标。
+2. **回报被 -72 死亡尖峰支配**（§16）。advantage 归一化后，dense 项的有效梯度约为死亡方向的 **1/500**。这是方向被压缩 500 倍，不是表达力不够；扩容只会把这个被压缩的方向复制到更多参数上，压缩比例一点不变。
+3. **窗内 exp 核在大误差处梯度精确为零**（§7）。
+
+### 21.2 外部对照：[512,256,128] @ 225-D 已经绰绰有余
+
+- **直接母本 HITTER**（arXiv 2508.21043v2 §V.B.3）：Unitree G1、29 自由度、打乒乓、actor obs 仅 **104 维**、网络就是 **[512,256,128]**、**221,725 参数**、**无历史堆叠**，零样本上真机。我们 A225 是 225 维、**283,935 参数**，比母本大 **28%**。
+- **PACE**（arXiv 2509.21690v3）：Booster T1 打乒乓，obs 82×H=5=**410 维**，网络 [512,512,128]（541,461 参数）。比我们宽的输入、只比我们大 1.9 倍的网络。
+- **生态普查**：obs 从 42 维到 705 维（**约 17 倍跨度**），`[512,256,128]` 是近乎唯一的默认值，**没有任何一个 locomotion/tracking 仓库把宽度随 obs 维度往上调**（beyondmimic 160-D、mjlab 160-D、unitree_rl_lab 480-D、legged_gym 235-D、ASAP 576-D、XBot-L 705-D，全是这一个网络）。仅有的两个主动偏离都是**往下缩**：legged_gym 的 anymal_c flat 变体缩到 [128,64,32]（17,004 参数），booster_gym T1 缩到 [256,128,128]（63,244 参数）。
+
+### 21.3 直接回答"225-D 是不是本身就要求更大网络"
+
+**不要求，而且这个提法本身就是错的。**
+
+- 194 → 225 只多 **31 列**，第一层只多 `31×512 = 15,872` 参数 = actor 总量的 **5.6%**。
+- 而那个 512 宽的第一隐层本身就占 actor 参数的 **40.7%**（115,712 / 283,935）；actor+critic 合起来第一层占 **45.6%**（279,040 / 611,616）。
+- 极端一点：把输入从 225 换成 318（critic 那边的宽度）也只多 47,616 参数，占合并总量的 7.8%。
+
+**第一层参数占比说明的就是这件事：参数量几乎不看输入宽度，只看隐层宽度。** 用输入维度去推导"需要更大网络"是把两个不相关的量绑在一起了。
+
+更进一步，A225 的 225 列里有 **154 列（68.4%）** 是 achieved-vs-teacher 成对镜像（base 15+15、joint_pos 31+31、joint_vel 31+31）。这是刻意的残差/模仿结构——要学的函数更接近「恒等 + 修正」，**比从零编码一个任务更容易表示，不是更难**。
+
+### 21.4 扩容文献不能直接搬（最容易踩的坑）
+
+| 论文 | 结论 | 算法基座 | 对我们适用吗 |
+|---|---|---|---|
+| SimBa（ICLR 2025） | RSNorm + 残差 + LayerNorm 让参数量可安全放大 | **SAC / TD-MPC2**（off-policy）。唯一的 PPO 实验在 Craftax（离散生存游戏） | ✗ 范式不同 |
+| BRO（**NeurIPS 2024 spotlight**，不是 ICLR 2025） | 强正则化解锁 critic 缩放到 2630 万参数 | **SAC**，全文零 PPO 实验 | ✗ |
+| Dormant Neuron / ReDo（ICML 2023） | 休眠神经元吃掉有效容量 | **DQN / SAC / DrQ**，全 replay-based | ✗（诊断指标本身可借） |
+| **Andrychowicz et al.（arXiv 2006.05990，ICLR 2021）** | 5 个 MuJoCo 连续控制环境、宽度 {16…512} × 深度 {1,2,4,8} 大规模扫描 | **PPO / on-policy** | ✓ **唯一对口** |
+
+唯一对口的那篇说的是：**actor 宽度最优值依环境而定且非单调，太窄和太宽都掉性能**（HalfCheetah 最优 policy 宽度只有 16-32 单元）；**critic 加宽没有下行风险**；**2 个隐层在所有环境都够用，4/8 层无收益**（我们已经是 3 层，已在甜点之上）。
+
+另外要精确复述 on-policy 可塑性那篇（Juliani & Ash 2024, arXiv 2405.19153，PPO 但跑在 gridworld / Montezuma / ProcGen，非连续控制）：**末层 reset 在三种条件下全部失效**；**LayerNorm 能解决训练侧可塑性丢失、在 CoinRun 上属最有效的三个方法之一，但在泛化/测试性能上不稳定**（不要把 LayerNorm 和末层 reset 一起打成"无效"）。
+
+**文献空白（重要）**：没有任何一篇论文在 100-300 维观测的腿式/人形连续控制任务上、用 PPO 测过 SimBa/BRO 式缩放架构。这正是我们所处的位置。
+
+### 21.5 可证伪的诊断指标（先诊断，再决定扩不扩）
+
+| 指标 | 怎么读 | 指向 |
+|---|---|---|
+| `explained_variance`，**分拆成含死亡终止 / 不含两条曲线** | 只在含死亡的那条上低 | §16 尖峰问题，**不是** critic 容量 |
+| 训练回报 vs 固定种子确定性评估回报的 gap | gap 大 | 已过拟合，**扩容有害** |
+| clip 之前的梯度范数分布（对照 `max_grad_norm=1.0`） | 长期远大于 1 | 预算已被 clip 吃满，加参数只是分蛋糕 |
+| dormant neuron 比例（ReDo 定义，τ=0 与 0.025） | < 5% | 现有容量尚未用满，**扩容无收益** |
+| 倒数第二层激活的有效秩 | 接近层宽 = 饱和；很低 = 表征坍缩 | 区分容量 vs 可塑性 |
+| **监督拟合探针（最便宜、最直接）** | dump 98,304 样本 buffer，用同一架构监督回归 teacher 动作 | 若损失能压到近零 → **容量假说被直接证伪** |
+
+判定规则：只有当"§16/§7 修完 → `strike_opportunity_count > 0` → EV 高、train/eval gap ≈ 0、dormant 低、监督探针也压不下去"这一整条链都成立时，才认定容量是瓶颈。
+
+参数/样本比作为背景：`4096 env × 24 步 = 98,304 样本/update`，每 update 只有 `5 epoch × 4 minibatch = 20 个梯度步`。当前合并参数 611,616 已经是单次 update 样本量的 **6.2 倍**；改到 [1024,512,256]（1,878,560）会变成 **19.1 倍**。整轮 2 万-2.5 万 iter 累计约 20-25 亿样本，总量不缺；但**同一批 on-policy 样本被复用 5 个 epoch 的批内过拟合风险随容量线性上升**，而 PPO 侧只有 `clip_param=0.2` 与 adaptive KL 这两道弱护栏。
+
+### 21.6 如果最终要扩，形状是什么
+
+**第一步（且仅在诊断指向欠拟合后）：只扩 critic。**
+`critic_hidden_dims: [512,256,128] → [512,512,256]`（327,681 → 557,569，合计 841,504 ≈ **1.38×**）。
+
+- 部署侧完全免费：`exporter.py:86-120` 的 `export()` 只 trace `self.actor(self.normalizer(x))`，**critic 从不进 ONNX**。
+- 观测合同不动，225-D deploy parity 不受影响。
+- Andrychowicz 明确说 value 网络加宽无下行风险。
+
+⚠️ **但"critic 免费"在我们这里只在部署侧成立，优化侧不成立**：`rsl_rl/algorithms/ppo.py:96,385` 是**单个 Adam** 覆盖 `self.policy.parameters()`（actor+critic 合并）、**单个全局** `clip_grad_norm_(max_grad_norm=1.0)`、**单个 adaptive-KL 学习率**（`desired_kl=0.01`, `lr=0.001`）。加大 critic 会重塑 actor 也在其中的梯度范数预算与有效学习率。两个网络在这套配置下**不是**可独立调的。
+
+**第二步（若 actor 也确需扩）：只加宽中层到 [512,512,256]**（283,935 → 517,663）。**不加深**（Andrychowicz：深度 2 够用，4/8 无收益，我们已是 3 层）。**不要直接跳 [1024,512,256]**（3.07×，参数/样本比 19.1 倍）。
+
+**不做的事：**
+- ✗ **不上 residual + LayerNorm 作为默认**。全部证据是 off-policy 外推；若要试，只能作为独立消融臂并标注为"文献空白区探索"。
+- ✗ **不上 RNN**。全普查中 LSTM 只出现在 IsaacGymEnvs 的灵巧手任务，所有人形/四足 locomotion、tracking 仓库与三篇 on-policy 乒乓论文无一使用。代码侧 rsl_rl 的 `ActorCritic` 硬编码 `is_recurrent=False`、`__init__` 根本没有 RNN 参数，`ppo_cfg.py` 也无 RNN 配置面——引入是框架级改造，且 ONNX 要在 50 Hz 循环里跨 tick 携带隐状态，直接威胁部署 parity。
+- △ **history stacking 排在 RNN 之前但不是现在**。先例充分（PACE H=5、ASAP 5、FALCON 5、unitree_rl_lab 5、XBot-L 15），但反证同样有力：HITTER 同机型同任务不用任何历史。且它会打断 194/225-D 部署 parity 这条神圣约束，必须走新命名合同（如 A225H5），不得就地改 A225。A1 延迟旋钮据前期结论全为零（本轮未重新核实，按继承结论处理），零延迟下单帧观测的马尔可夫性本来就够。
+
+### 21.7 与既定工程约束的相容性
+
+| 约束 | 扩容后是否安全 | 依据 |
+|---|---|---|
+| **ONNX / 50 Hz 延迟** | ✓ 不是瓶颈，但**从未实测过** | 周期硬定 20 ms（`a3_based_task.hpp:30` period_ns=20,000,000；`a3_runtime_config.yaml:201-203` policy_hz: 50.0），ORT 强制单线程（`ort_session.hpp:50-51`）。估算 actor 前向 [512,256,128] ≈ 28.4 万次乘加、[1024,512,256] ≈ 89.4 万次，对 20,000 µs 预算差 4-5 个数量级；真正的开销是 ORT 会话/张量拷贝，与隐层宽度基本无关。**但仓库里没有任何实测延迟数字**——`docs/operations/run_deploy_dryrun.md` 要求 G07 列出 latency result，`docs/gates/G07_mujoco_to_real.md` 该字段至今空白，`--probe` 工具存在但输出从未入库。**无论扩不扩都该先补这个数。** |
+| **194 / 225-D 观测合同** | ✓ 只改 hidden_dims 不动合同 | 观测合同与网络宽度正交 |
+| **`init_noise_std=0.02` + 末层 weight=0** | △ 基本安全，但早期动力学会变 | weight=0 时初始动作严格等于 bias（与宽度无关，安全）。但首次反向后末层的有效步长正比于倒数第二层激活范数 ‖h‖，而 ‖h‖ 大致随宽度 √ 增长——倒数第二层 128→256 会让脱离零初始点的速度快约 √2 倍。在 0.02 这种极紧探索下需专门观察头 200 iter 的动作幅度曲线。 |
+| **warm start / checkpoint** | ✗ **任何 hidden_dims 改动都作废全部 checkpoint** | 形状不匹配触发 strict load 报错；等于放弃 warm start，从零重跑 2 万-2.5 万 iter。这是 GPU-周级别代价，只应在诊断确证欠拟合之后付。 |
+| **§16 尖峰是否让扩容变成浪费** | ✗ **会** | 在死亡方向支配、dense 梯度只有 1/500、击中层收入恒为 0 的前提下扩容，等于**用一次从零重训去放大一个被压缩 500 倍的信号**。修 §16/§7 之前扩容，是把钱烧在错误的自由度上。 |
+
+### 21.8 需要修正的既有记录
+
+1. actor 末层零初始化的位置是 `scripts/train.py` 的 `_apply_action_ball_fresh_policy_bootstrap`：**定义 7010 行、`output.weight.zero_()` 在 7062 行、`count_nonzero` 断言在 7065 行、调用点 16237 行**——不是 doc 里写的 5004 行。（`init_noise_std=0.02` 确认为 CLI 强制覆盖，`ppo.yaml` 自身默认仍是 1.0，并在 receipt 里硬校验 `required_realized_init_noise_std`。）
+2. **A225 的 318-D critic 是 A225 自有 ABI**，与另一条线的 318 维只是标量宽度巧合，不是共享合同。A225 代码自己的 docstring（`action_ball_225_trainability.py:41-43`）明确警告过这点；两条线的 critic 词条结构不同（A225 用 `task_desired_contact_*` 系列，另一条用 `racket_pos_b` / `racket_lin_vel_w` / `racket_normal_w` / `episode_time_left`）。**不修的风险是：有人按"critic ABI 跨 actor 宽度稳定"去复用 checkpoint，宽度对得上、含义对不上，strict load 不会报错，静默出错。**
+3. A225 中 teacher 镜像列的占比是 **68.4%（154/225）**，此前 doc 中出现过的 "~55%" 与 "大约一半" 两种说法都不对。
+
+
+---
+
+## 二十二、随机性/噪声的"开局加满 vs 逐步加"裁决(08-02)
+
+**方法**:2 抽取(我方全轴盘点含可调度性 / 外部 9 库 + ADR 与论文的分档证据)+ 2 对抗核查(6 修正)
++ 1 裁决。**两处对本 doc 前文的重要修正已并入**:①PD 增益已于 07-31 commit `567dbbe25`
+改为 **startup 级 + 厂商非对称 Kp(0.8,1.2)/Kd(0.7,1.3)**(§1/§11 记的"reset 级 ±15%"作废;
+`HOPEPingPongHitter.yaml:519-520` 那句注释是陈旧残留);②执行器延迟**不再是死代码**——
+`hope_actions.py` 新建了 `_EpisodeSharedPolicyActionDelay`(整条 31-D q_des 按控制步延迟、
+每 env 每集抽一次),厂商叶子设 [0,2] 步、**现役 N1 叶子显式清零**,开启**不需要写代码**。
+
+### 22.1 裁决:三闸判据
+
+## 一句话裁决
+
+**"开局就加满"的资格是三闸全过:零均值且只扰动机器人自身参数(不改任务几何)× 抽签发生在 startup/reset 级(不注入 episode 内动力学方差)× 实测终止率增量 ≤ 0.5 个百分点。三条缺一,就必须分档进;若同时踩中"改任务几何"和"抬终止率"两条,则在 -72 死亡尖峰与 σ=0.075 m 死核修好之前一律不开。**
+
+---
+
+### 闸 1(支撑集闸):这条随机性改不改"哪些动作能击中球"?
+
+- **不改** → 只在标称值附近扰动机器人自身的物理参数(体摩擦、连杆质量、CoM、关节零点、Kp/Kd)。判定口诀:**同一条参考轨迹在扰动后是否仍近似可行**?是 → 过闸,day-1 开满。
+- **改** → 动的是球的来路/落点、期望接触 p-v-face 元组、起点分布、目标可观测性。这些直接重塑"能击中"的集合。出处:32-arm 的 16 条轴全部是来球/落点/出生位几何(action_ball_sampling.py ARM_KEYS);A1 八旋钮直接给 racket target 加噪;canonical_ready 的零噪声 reset 是把起点塌成每 action 一个 delta 函数(§9)。
+- 这条闸解释了一个容易搞混的不对称:**本体感受观测噪声(joint_pos/joint_vel)不改转移、不改支撑集**,可以 day-1 开满;而**给 desired-contact / racket-heading / time_to_contact 这些任务通道加噪 = 直接降低任务目标的可观测性 = 改支撑集**,不能 day-1。二者都叫"观测噪声",分档完全相反。
+
+### 闸 2(终止闸,-72 放大器):这条随机性把终止率抬高多少?
+
+- **硬阈值:一格 200-iter smoke,终止占比的绝对增量 Δp_term ≤ 0.5 pp 才准 day-1。**
+- 依据(全部是我们自己的数字,§16.1):死亡一次 = -3600 × dt 0.02 = **-72.0**(生效点 scripts/train.py:8896 的 v2 DIRECT 表 + yaml 键 `death_penalty_weight`,train.py:11171-11184)。γ=0.99 的折扣视野 100 步 > 平均 episode 124.11 步(=2.48 s),所以**以死亡结尾的 episode 里几乎每个状态的回报都是 -72×0.99^k ∈ [-72,-21]**,而全段 dense 收入只有 ~7.4。全 batch advantage 归一化统一的是整体尺度、不改项间比例,于是 dense 项的归一化 advantage ≈ **0.007**、死亡方向 ≈ **3**,**相差约 500 倍**;PPO 的 clip=0.2 与 desired_kl=0.01 这两个"策略移动预算"几乎全花在死亡方向上。
+- **在 strike_opportunity_count=0 的当下,这条闸比平时严厉得多**:§16 已核实盈亏平衡命中率 = 72/(72+32.98) = **69%**,一个 from-scratch 策略永远够不到,**"不挥拍"在结构上就是当前 reward 下的最优解**。此时任何 Δp_term > 0,都不是"练抗扰",而是**给"别动"这个已经最优的退化解再补一笔贴**。终止占比的基线本身就在 3.1%/15.7%/32.0% 之间跳一个数量级(configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json),再往上抬只会让 grad-norm 裁剪因子的批间抖动更大(§16.1 C4)。
+- 推论:**推撞、reset 状态噪声、摩擦低端外扩、terrain 凹凸、执行器延迟,全部在闸 2 前面排队**,直到死亡尖峰降到三库量级(三库最大单步罚项 post-dt ≈ -0.2,只占各自视野收入 9.5 的 2%;我们现在是 1200%,差约 600 倍)。
+
+### 闸 3(cadence 闸):抽签频率决定它注入的是"环境异质"还是"episode 内方差"
+
+- **startup 级**(env 构造抽一次,永不重抽)→ 只造跨 env 的异质性,不给单条轨迹注入额外方差 → **最安全,默认 day-1**。我们现役的摩擦/质量/CoM/关节零点/PD 五项全在这一级。
+- **reset 级**(每集抽一次、集内固定)→ 次之,注入的是 episode 间方差,仍可接受。
+- **每步级** → 只允许零均值**观测**噪声(不改转移);**不允许每步级动力学扰动**。
+
+### 配套判据:"分几档"怎么定(不是拍脑袋)
+
+**档位数 = ceil(终态幅度 ÷ 该轴的一个任务容差单位)**,容差单位取自我们自己的窗口常数:
+
+- **延迟**的容差单位 = `strike_window_pos_s` = 0.02 s = **1 个控制步 @50 Hz**(HOPEPingPongActionBallA3VendorV2.yaml:15)。终态厂商值 2 步 = 40 ms = **位置窗的 2 倍** → 分 **2 档**(0→1→2),绝不允许一次上满 [0,2]。
+- **推撞**的容差单位 = "期望撞进击球窗的次数 ≤ 0.1 次/episode"。击球窗 0.10 s、平均 episode 2.48 s:节奏 [1,3] s(均值 2 s)→ 每 episode 期望 1.24 次推、撞窗概率 ≈ 5%;节奏 [10,30] s(均值 20 s)→ 期望 0.124 次、撞窗概率 ≈ 0.5%。**外部的 [1,3] s 节奏不能抄**。
+- **reset 噪声**:终态取厂商 A3 值(位姿 ±0.1、速度六维 ±0.2、关节 ±0.15 rad),按 1/3、2/3、满分 **3 档**。
+
+### 元裁决:现在不该写 in-loop DR scheduler(这条同样可操作)
+
+三条论证,全部有证据:
+
+1. **ADR 家族的扩张条件是 success rate 过阈,我们 success = 0 → 扩张永远不触发,写了也是 no-op。** OpenAI 自己写明 ADR 的初始分布"concentrated on a single environment",并且"additional environments are only added when a minimum level of performance is achieved"(arXiv 1910.07113)。我们连一个环境都还没解开(exact 命中 0.23%、window 5.01%、capture/return = 0/0)。**ADR 的前提不满足,顺序是反的。**
+2. **外部 9 个库里 8 个是 day-1 固定 DR**;唯一自带 in-loop DR 幅度课程的是 IsaacLab dexsuite(manipulation,performance-gated,difficulty 0..10);PBHC 的 obs 噪声课程和出生偏移课程**默认都是 False**。所有 locomotion/tracking 库 ramp 的是**任务难度**(terrain level / command 速度区间),**不是 DR 幅度**。
+3. **机械上也不该在 loop 里改**:我们全部 5 条现役物理 DR 都是 startup 级(env 构造时抽),in-loop 改它需要新写 CurriculumTermCfg hook,而全仓 `CurriculumCfg` 至今还是 `pass`(tracking_env_cfg.py:286-290),零脚手架可复用。
+
+→ **我们的"分档"落在发射/续训边界(换一次 argv = 升一档),不是 in-loop。** 里程碑判据本来就要人判(§13 的 NO_OPPORTUNITY_CONTINUE 契约、frozen-policy canary→heldout 双窗口也是离线 sidecar 判的),不存在"必须自动"的需求。
+
+### 一句更难听的总结
+
+现在讨论"DR 加多少"这件事本身,优先级低于 §16/§7 两个 critical。**在 -72 尖峰和 σ 死核修好之前,唯一正确的 DR 动作是"一格都不动"**——保持现役 day-1 集合原封不动,好让 reward 侧的改动是单变量可比的。任何在此之前加的 DR,都会被记进"为什么还是学不会"的混淆项里。
+
+### 22.2 全轴分档表
+
+## 全轴分档表(§1-21 盘点出的每一条)
+
+档位含义:**D1** = day-1 开满/保持现状;**S** = 分阶段进;**X** = 暂不开(含"需新代码,不排产")。
+触发信号定义见 schedule 一节:**M0** = 死亡尖峰与死核 σ 修复验收;**M1** = strike_opportunity_count > 0 且 window 命中率连续 3 个 ≥100-update 评测窗 ≥ 20%;**M2** = exact 命中率 ≥ 修复后的盈亏平衡率(死亡改 -7.2 时 = 7.2/(7.2+32.98) = **17.9%**,取整 20%)。
+
+### A. 物理/引擎域随机化(全部 startup 级)
+
+| 轴 | 现役状态 | 档 | 开局幅度 | 终态幅度 | 分档数 | 升档触发 | 理由与出处 |
+|---|---|---|---|---|---|---|---|
+| 机器人体摩擦 physics_material | **ON**,static (0.3,1.6)/dynamic (0.3,1.2)/restitution (0,0.5),64 桶,startup | **D1**(保持)+ 低端外扩另算 **S** | 维持 (0.3,1.6)/(0.3,1.2) | 厂商 (0.2,1.8)/(0.2,1.5) | 外扩 1 档 | **M2** 之后单格消融 | 三闸全过:零均值乘性、只改握地容差、startup 级。但**低端从 0.3 降到 0.2 会增打滑→抬终止率**,踩闸 2 → 外扩必须等 M2。出处:tracking_env_cfg.py:163-173;CLI `task.plant.robot_material_static_friction_range` / `..._dynamic_friction_range`(train.py:11796-11891,含 `robot_material_make_consistent` 保证 dynamic≤static);厂商值见 §11.2 |
+| 地面 terrain 摩擦 | 固定点值 1.0/1.0(**不是分布**) | **X** | — | — | — | — | 今天它是个点不是轴。CLI(`task.plant.ground_static_friction/ground_dynamic_friction`)只能移动这个点,造分布要新代码。机器人体那一侧已经在随机了,重复投入无收益。出处:tracking_env_cfg.py:49-54;train.py:11835-11871 |
+| 连杆质量 link_mass | **ON**,scale (0.85,1.15) = ±15%,全身,recompute_inertia=True,startup | **D1**(保持) | ±15% | ±15%(不动) | — | — | 三闸全过。厂商是"选择性末端质量 ±20%",哲学不同但我们全身 ±15% 已覆盖。出处:randomization_base.yaml:5;hope_env_cfg.py:1112-1123;CLI `task.domain_rand.link_mass_range` |
+| **腕 + 拍**选择性质量 ±20% | 不存在(link_mass 是全身单一 range) | **S**(低优先) | 关 | 腕组 + 拍 scale ±20% | 1 档 | **M2** | 拍子是真实的质量未知源(§11.3 第 6 条)。但**需要新键**(按 body 分组的 mass range),属"要写代码"的一类,§21 裁定资源投信号侧 → 排在最后 |
+| 躯干 CoM 抖动 base_com | **ON**,torso_link x±0.025 / y±0.05 / z±0.05 m,startup | **D1**(保持) | 现值 | 现值 | — | — | 三闸全过。**注意:幅度没有 CLI 出口**,只有 `stable_ready_plant` 的捆绑式 on/off;要调幅度得写新键。既然判定是"保持",这个缺口不构成阻塞。出处:tracking_env_cfg.py:185-192 |
+| 关节零点标定偏移 add_joint_default_pos | **ON**,±0.01 rad,全关节,**双写 sim default 与 action offset** | **D1**(保持,且不可关) | ±0.01 rad | ±0.01 rad | — | — | 这不只是 DR,是 train==deploy parity 的机制本体。厂商同值 ✅。完全无 CLI 出口(train.py 只读不写)。出处:tracking_env_cfg.py:175-183 |
+| PD 增益 Kp/Kd | **ON**,startup 级 log_uniform,**Kp (0.8,1.2) / Kd (0.7,1.3)**(07-31 commit 567dbbe25 已对齐厂商) | **D1**(保持) | 现值 | 现值 | — | — | 三闸全过,且已经是厂商同底盘实跑值。**修正入档**:该 commit 之前是**对称 ±20%**(不是文档里写的 ±15%);HOPEPingPongHitter.yaml:519-520 那句 "+/-15% reset-level" 是仓库内的陈旧注释,顺手清掉。出处:randomization_base.yaml:9-11;train.py:10583-10721(硬性要求 mode=='startup') |
+| armature / 关节机械摩擦 / 力矩上限随机化 | **不存在**(mdp 包里只有 randomize_joint_default_pos 与 randomize_rigid_body_com 两个本地函数) | **X** | — | — | — | — | 需要写新 EventTerm + 接线。§21 已裁定不扩工程、资源投信号侧。记台账,不排产 |
+
+### B. 时序 / 扰动类(全部踩闸 2,必须排队)
+
+| 轴 | 现役状态 | 档 | 开局幅度 | 终态幅度 | 分档数 | 升档触发 | 理由与出处 |
+|---|---|---|---|---|---|---|---|
+| **执行器命令延迟** | **OFF**,N1 叶子显式写死 min=max=0(byte-identical no-op);父本 A3VendorV1 是厂商 [0,2] 控制步 | **S** | 0 步 | 2 控制步(= 40 ms @50 Hz) | **2 档**(0→1→2) | 1 步:**M1**;2 步:**M2** | 决定性数字:`strike_window_pos_s = 0.02 s` = **正好 1 个控制步**。一次上满 2 步 = 40 ms = **把位置窗整个吃掉**。外部双重先例都说"从零长进来":ADR 的 `action_latency` init_range 是 **[0,0]** 零宽起步;ManualDR 用 `actionLatencyScheduledSteps = 10,000,000`(**修正:不是 2,000,000;2M 那个值在 ADR yaml 里,而 ADR 子类完全 override 了那段代码、根本不读它**)做纯时间线性斜坡。落点已接线,无需改码:`task.actions.control_step_action_delay_min/max`(hope_actions.py:684-830 每 env 每集抽一次;发射器 launch_action_ball_a225_four_arm_diagnostic.py:1391-1392) |
+| **外部推撞**(Wave-P 速度 / F 轴力 / 合并互斥) | **OFF**,N1 叶子 `push.enable=false` 且每个字段显式 null(train.py 拒绝 enable=false 携带休眠幅度,所以是干净全关);发射器另传 `task.push.enable=false` | **S** | 厂商半幅:vel_xy ±0.125 m/s、vz ±0.05、roll/pitch ±0.13、yaw ±0.195 rad/s,节奏 **[10,30] s** | 厂商全幅 ±0.25/±0.1/±0.26/±0.39,节奏 **[5,15] s**(**不是外部的 [1,3] s**) | **2 档** | 半幅:**M1** 且 Δp_term ≤ 0.5 pp;全幅:**M2** | 三家外部同配方 [1,3] s + ±0.5 m/s,但**他们是连续行走、没有击球窗**;厂商 ±0.25 已经是 BeyondMimic 的半幅。撞窗概率:[1,3] s → 每 episode 期望 1.24 次推、≈5% 撞进 0.10 s 窗;[10,30] s → 0.124 次、≈0.5%。§3.1 的 v2.3 裁定([10,30] s)方向正确,只是发射器断链没继承。落点已接线:`task.push.enable/recipe=axis_box_6d_v2/velocity_range/interval_range_s`(train.py:451-489, 12228-12238) |
+| 推撞的**相位门控**(替代节奏放疏) | 不存在于 push,但 `lateral_perturbation` 已有 `recovery_hold` 相位门控的完整实现 | **S**(与推撞捆绑,优先于"放疏节奏") | 关 | 只在 recovery_hold 窗内触发 | 1 档 | 与推撞全幅同批(**M2**) | **这是仓库里已有的答案**:lateral_perturbation.py 已经实现了"只在 recovery 相位开火"的资格窗,恰好把冲量赶出挥拍/接触窗。把这个门控思路搬给 push,比单纯把 interval 拉长更精准。需要少量新代码,但结构现成 |
+| lateral_perturbation L1 处理(冻结冲量实验) | **OFF**(缺 `task.lateral_perturbation` 键 = 历史无 hook 路径,byte-identical) | **X** | — | — | — | — | 它是一个**冻结的两格 CRN 实验单元**(L0 零对照 / L1 处理),不是训练用 DR:幅度/时序是模块内硬编码常数 + 不可变硬安全上限(0.15 m/s 冲量 / 2.0 m/s² / 200 N),**故意不参数化**以防蔓延成"任意时刻任意力"。保持 L0/不挂钩;只借它的相位门控设计 |
+| 地形凹凸 terrain rough patch | **OFF**(默认无键 = 平地) | **X** → 最早 **M2** 之后 | 关 | (band 0.01-0.15 m 内,且须为高度场分辨率整数倍) | 1 档 | **M2** 之后再议 | 抬终止率(闸 2),且踩已知的雷:generator 把 env origins 与克隆桌子拆散(07-29 记忆)。任务上我们是室内平地,与厂商 parkour 的地形课程不对齐(§11.2 明确"不对齐")。收益最低、风险最高,排最后 |
+
+### C. 观测噪声(关键在于分两类,不是一个轴)
+
+| 轴 | 现役状态 | 档 | 开局幅度 | 终态幅度 | 分档数 | 升档触发 | 理由与出处 |
+|---|---|---|---|---|---|---|---|
+| **本体感受** obs 噪声(A225 合同下只有这两条) | **ON**,`joint_pos ±0.01 rad`、`joint_vel ±0.5`,Unoise 每步 | **D1 开满** | 现值 | 现值 | — | — | 三闸全过:不改转移、不改支撑集、不造终止事件。外部 **9/9 库 day-1 固定**;厂商甚至**评测(play)时 DR 全关但 obs 噪声保留**。噪声区间与厂商/BeyondMimic 一致 ✅。出处:hope_env_cfg.py:2833-2954 |
+| A225 合同里的 **14 条干净通道**(实际/教师底座状态、教师关节 p/v、actions、3 条拍朝向、3 条任务期望接触、desired_base_xy、time_to_contact、time_to_teacher_start) | **零噪声**(有意设计) | **X**(至少到 M2) | 关 | 待定,不早于 M2 | — | **M2** 之后单独立项 | **这是本次盘点最重要的一条修正**:07-31 尽调的 obs 噪声清单描述的是 legacy 177/194-D 合同,**现役 N1 走的是 `actor_obs_contract: action_ball_a225`,那个 ABI 里根本没有 base_ang_vel / projected_gravity / motion_anchor / racket_target 通道**。给任务/教师通道加噪 = 降低任务目标可观测性 = 踩闸 1(改支撑集),而击中层收入本来就恒为 0(§7 死核)。**顺带记一笔洞**:合同里没有 base_ang_vel/projected_gravity,真机 IMU 噪声将来无处对应 |
+| 厂商式 obs `scale` + `history=8` 帧堆叠 | 无 | **X** | — | — | — | — | 厂商同底盘实跑(ang_vel scale 0.25、joint_vel scale 0.05、全组 history=8),但**破坏 110/177/194-D 部署契约**,必须独立臂 + 同批改部署侧。§11.3 已排在低优先第 8 条。与延迟臂捆绑才有意义(堆叠是策略自估延迟的标准配方) |
+| 评测口径:play 带不带 obs 噪声 | 我们 `eval_deterministic` 把 noise_scales 归零;厂商 play 保留 obs 噪声 | **D1**(只做记录) | — | — | — | — | 不是训练轴,是**跨栈比较的陷阱**。判读文档里必须明示两种口径,否则拿我们的 deterministic 数去比厂商的带噪数会系统性偏乐观。§11.2 末行 |
+
+### D. 任务目标 / 拍状态噪声(A1 八旋钮 —— 必须拆开看)
+
+| 轴 | 现役状态 | 档 | 开局幅度 | 终态幅度 | 分档数 | 升档触发 | 理由与出处 |
+|---|---|---|---|---|---|---|---|
+| `target_noise_white` | **0.0** | **S**(可早开) | 0.0 | 场地实测 **σ = 0.0019 m** | 1 档 | **M0**(死核修好即可) | 关键量纲比较:1.9 mm 相对 `sigma_pos_min = 0.075 m` 只有 **2.5%**,几乎不动核的输出。**它其实不踩闸 1**(零均值、幅度远小于容差),真正的门槛只是"别在死核期加任何东西"。实测值躺在注释里没用 |
+| `target_noise_ar1_sigma` | **0.0** | **S**(可早开) | 0.0 | 场地实测 **σ = 0.0052 m** | 1 档 | **M0** | 5.2 mm = 核宽的 **6.9%**,同上。AR1 相关噪声比白噪更像真实跟踪误差 |
+| `target_delay_steps` | 0 | **X** → **M2** | 关 | 待标定 | 1 档 | **M2** | 改接触相位,与执行器延迟叠加会双倍吃掉 0.02 s 位置窗 |
+| `target_dropout_prob` / `target_post_strike_dropout_s` | 0.0 / 0.0 | **X** | 关 | 待定 | — | **M2** 后再议 | dropout 会**制造"目标突然消失"的状态**,在击中层收入恒为 0 时纯粹是加噪不加信 |
+| `target_bias_per_swing` | 0.0 | **X** | 关 | 待定 | — | **M2** 后 | **非零均值**,直接违反闸 1 的核心条件:它系统性地移动目标,等于每挥拍换一个任务 |
+| `target_jitter_pos_per_s` / `target_jitter_vel_per_s` | 0.0 / 0.0 | **X** | 关 | 待定 | — | **M2** 后 | 同 dropout,先修死核再谈 |
+| `midswing_resample_prob` | 0.0 | **X** | — | — | — | — | 改支撑集最狠的一条(挥到一半换目标),且与 planner revisions / post_strike_t1 互斥。不排产 |
+| `achieved_target_mix_prob`(HER 式混合) | 0.0 | **X** | — | — | — | — | 与 question_bank/CQ solver 互斥;本臂走 immutable_tape,路径上根本没有 bank。不排产 |
+| **非对称 critic 的免疫性**(记录项) | `HOPECriticCfg.racket_target_vel_w_live` 永远看真值 | — | — | — | — | — | 好消息:即便把 actor 侧目标搞脏,**value estimation 不会跟着坏**。这降低了 A1 旋钮的风险等级,但不改变"死核期不加噪"的裁定 |
+
+### E. Reset / 起点分布
+
+| 轴 | 现役状态 | 档 | 开局幅度 | 终态幅度 | 分档数 | 升档触发 | 理由与出处 |
+|---|---|---|---|---|---|---|---|
+| reset 位姿 / 速度 / 关节噪声 | **全零**,`canonical_ready_mode=true` 把四组区间强制成 (0,0),`stand_start_prob=1.0`,`hold_steps_range=(0,0)`,`post_swing_start_prob=0`,`clip_switch_prob=0` | **S** | 全零(保持) | 厂商 A3 值:位姿 x/y/yaw **±0.1**、速度六维 **±0.2**、关节 **±0.15 rad**(关节速度 0) | **3 档**(0 → 1/3 → 2/3 → 满) | 1/3 档:**M1** 且 Δp_term ≤ 0.5 pp;后续每档需再测一次 Δp_term | 双重踩闸:改起点分布 = 改支撑集(闸 1),且抬终止率(闸 2)。§9 已把起点塌成"每 action 一个 delta 函数"记为病灶(自我收窄循环),所以终态**必须**离开全零 —— 但不是现在。**这是唯一值得写的新代码**:`canonical_ready_mode` 是验证器强制的 on/off,不是幅度旋钮,需要新增分级键。注意:**这不是重开 RSI**(§9.4 反 RSI 裁定不动摇),只是放宽 ready 球 |
+| 失败加权自适应 RSI 采样器 | 建好、checkpoint-safe(α=0.001,uniform floor 0.1,λ=0.8),但**每个已注册任务的控制流都绕过它**,零臂可达 | **X** | — | — | — | — | 结构不可达。要用它得改任务控制流。§21 裁定不排产,记台账 |
+
+### F. 任务难度 / 题目采样(定义上就是课程,但现在被冻结)
+
+| 轴 | 现役状态 | 档 | 开局幅度 | 终态幅度 | 分档数 | 升档触发 | 理由与出处 |
+|---|---|---|---|---|---|---|---|
+| **32-arm 球/题难度课程**(16 物理轴 × 双侧) | **冻结**在 manifest-initial:`task.racket.action_ball_diagnostic_unauthorized=true` 让 frozen_evaluation_boundary 直接短路(hope_commands.py:9060-9071),canary/heldout 永不请求 | **S**(但有三条硬前置) | manifest initial | manifest maximum(L=1.0 且 rho=1.0) | 机制自带 **5 档** `LEVELS=(0,0.25,0.5,0.75,1.0)` + 全局 `JOINT_RHOS` 同 5 档(action_ball_curriculum.py:61-62) | **M1** + §13 R1(可逆化)落地 + 154 行样本量修复 | 这是**唯一一条按定义就该分阶段**的轴,也是仓库里最强的现成 in-loop 调度器(Wilson 95% CI、冻结策略 canary→heldout 双窗口、≥100 update 节拍、state_dict + sha256 交叉校验)。三条硬前置缺一不可:(a) §13 裁定单臂**不可逆锁定**;(b) marginal 只用 154 行新带样本 → 有效扩张阈值 **3.25%**(设计目标 10%),真实失败率 5% 的臂有 **79%** 概率第一轮就被永久锁死;(c) **ADR 的前提"至少解开一个环境"在 strike_opportunity_count=0 时不满足**,现在解冻只会得到一串永久锁 |
+| question_bank / CQ 求解器 | 旁路(本臂 `action_ball_target_source=immutable_tape`,三个 bank 键全空,继承自 HOPEPingPongActionBall.yaml:209-212 而非叶子) | **X**(本阶段) | — | — | — | — | §20 新架构第一阶段目标源用 clip,此时"不需要题库"。与 32-arm 是**两条独立轴**(即便走 tape,32-arm 仍管来球物理参数)。记忆里"题库是真卡点"针对的是别的臂 |
+| `balanced_clip_sampling` | ON,seed=0,确定性轮转(计数差 ≤1) | **D1**(保持) | — | — | — | — | 不是噪声,是采样公平层;N1 单 action UID 下退化成平凡单 clip 情形。仓库独有的强项,零成本保留 |
+
+### G. 策略侧随机性(容易被漏掉,但 §16 说它是 binding 的)
+
+| 轴 | 现役状态 | 档 | 开局幅度 | 终态幅度 | 分档数 | 升档触发 | 理由与出处 |
+|---|---|---|---|---|---|---|---|
+| **PPO 探索噪声 `init_noise_std`** | **0.02**,且被 train.py:5689 / 6993 **硬性验证器钉死** | **S**(方向是**调大**,不是加满) | 0.02(现值) | 待定,建议先试 0.05-0.10 | 2 档 | **M0**(死亡尖峰修好之后,一步都不能提前) | §16.1 D:31 关节 × 每维熵 -2.494 nat = **-77.3 nat**;entropy_coef=0.01 对每个 log σ 的梯度是恒定 **-0.01**(往上推),而 surrogate 在 dense 侧只有 **≈0.007**(推不过熵)、死亡侧 **≈3**(往下狠压)。**结论:现在 σ 是被"死亡"和"熵"共同决定的,和击球质量无关。** 在 -72 修好之前调大 σ = 更快摔死 = 反向。这是全表**唯一一条"现役值本身就是病灶"**的随机性轴 |
+| `adaptive_sigma` 核宽课程 | **ON**(从 A3VendorV2 继承),三通道单调收缩,`sigma_update_every=500`,pos [0.075,0.50] / vel [0.50,3.0] / normal [0.262,2.10] | **D1**(保持,但方向要复核) | — | — | 连续 | 误差 EMA 自驱 | 它是**误差自适应**的(符合"σ课程钦定"),且是全仓最干净的 in-loop hook 骨架。但注意:它只**单调收缩**、永不回宽,而 §7 的死核问题恰恰是"太窄"。**它不会造成死核(下限 0.075 就是死核值本身),但也永远救不了死核** —— 修死核要动的是远场核形状/Cauchy 尾/racket_progress,不是这个课程 |
+| 死亡尖峰 -72.0(不是随机性,是全表的总闸门) | ON | **必修** | — | 目标:post-dt |罚| ≲ 视野收入 2%(即 **≈ -0.2/次**,或改用 termination bootstrap) | — | 立即 | 三库最大单步罚项 post-dt ≈ -0.2 = 视野收入 9.5 的 2%;我们是 1200%,**差约 600 倍**。修完后盈亏平衡命中率从 69% 降到(若改 -7.2)**17.9%** —— 这个数字直接变成 M2 的门槛。落点:train.py:8896 DIRECT 表 + yaml 键 `death_penalty_weight`(train.py:11171-11184) |
+
+### H. 发射器口径不一致(必须先统一,否则上面整张表都失真)
+
+| 项 | 现状 | 处置 |
+|---|---|---|
+| `task.domain_rand.stable_ready_plant` | 一个布尔键**同时关掉 base_com + link_mass + PD 增益三条轴**。`launch_n1_reward_screen_diagnostic.py` 和 `launch_n1_vendor_baseline_diagnostic.py` **设了**;现役的 `launch_action_ball_a225_four_arm_diagnostic.py` **没设** | **D1 动作:把 DR 姿态写进每个发射器的 claim 摘要**。今天"哪些物理 DR 开着"取决于跑的是哪个脚本,不是仓库统一默认 —— 读者必须查具体 argv。这直接违反"统一队列表 + 依赖核对单"的发射工序教训 |
+
+### 22.3 与里程碑绑定的日程
+
+## 与谱系里程碑绑定的分档日程
+
+**总原则:每一档 = 一次新发射或一次续训边界上的 argv 变更,不是 in-loop。** 理由见 verdict 的元裁决(ADR 前提不满足 + startup 级 DR 只能在 env 构造抽 + CurriculumCfg 全仓为空)。
+
+---
+
+### 阶段零 — 信号侧修复(现在;**DR 一格不动**)
+
+**这是全表的总前置。在它验收之前,任何 DR 变更都是在给"为什么还是学不会"添混淆项。**
+
+| 动作 | 目标值 | 落点 |
+|---|---|---|
+| 压平死亡尖峰 | -72.0/次 → 量级 **-0.2/次**(= 三库口径:视野收入 9.5 的 2%),或改用 termination bootstrap | `scripts/train.py:8896` 的 v2 DIRECT 表 + yaml 键 `death_penalty_weight`(train.py:11171-11184)。**顺手修**:train.py:~11172 中文注释写 "-1800" 与 DIRECT 表实际 -3600 不符 |
+| 修死核 | 让 e ∈ [0.15, 0.50] m 区间有非零梯度(现在 e=0.30 m 时 exp(-16) = 1.1e-7,**梯度精确为零**) | §7.4 的核形状菜单;`racket_progress` 现在的远场上限只有 +0.03/步(clamp ±0.15 m/步 × 权重 10 × dt) |
+| 钉住 rsl_rl 版本 | 写进 training receipt | §16.1 C4 的版本警告:全仓 grep 不到任何 rsl-rl 版本 pin。若实际是 5.x,actor/critic 分开裁剪,C4 直接降级为不成立 |
+| **DR 姿态** | **原封不动**:摩擦 (0.3,1.6)/(0.3,1.2)、link_mass ±15%、CoM ±0.025/0.05/0.05、关节零点 ±0.01、Kp(0.8,1.2)/Kd(0.7,1.3)、本体感受 obs 噪声开、延迟 0、推撞关、reset 全零、32-arm 冻结 | 保证 reward 侧改动是单变量可比的 |
+| **发射器口径统一** | 把 `stable_ready_plant` 的取值和五条物理 DR 的实际幅度写进每个发射器的 claim 摘要 | 三个 N1 发射器现在 DR 姿态不一致;不统一的话下面所有 A/B 都不可比 |
+
+**M0 验收:** 死亡尖峰量级达标 + 死核修复后在 e=0.3 m 处梯度可测非零 + 终止占比基线重测(建立 Δp_term 的比较基准)。
+
+---
+
+### 阶段一 — 拍状态 mimic(§20:任务通道 dense 化,第一阶段目标源用 clip)
+
+**这一阶段任务已被大幅简化(不需要题库),是**验证"三闸判据本身"**的最好窗口。**
+
+| 轴 | 动作 | 幅度 |
+|---|---|---|
+| 全部 D1 物理 DR | 继续保持 | 现值 |
+| 本体感受 obs 噪声 | 继续开满 | joint_pos ±0.01 / joint_vel ±0.5 |
+| `target_noise_white` / `target_noise_ar1_sigma` | **M0 之后可开**(唯一在这一阶段新开的轴) | 场地实测 **0.0019 m / 0.0052 m** —— 相对 `sigma_pos_min=0.075 m` 只有 2.5% / 6.9%,是真正的"零成本诚实" |
+| `init_noise_std` | **M0 之后**试 0.02 → 0.05 一档 A/B | 硬验证器在 train.py:5689/6993,提值要同步改验证器。**M0 之前一步都不能提**(更大探索 = 更快摔死) |
+| 其余全部 S/X 轴 | 不动 | — |
+
+**M1 门槛(阶段一 → 二):`strike_opportunity_count > 0` 且 window 命中率连续 3 个 ≥100-update 评测窗 ≥ 20%**(现役 update250 是 5.01%,即要求 4 倍)。
+
+---
+
+### 阶段二 — 学会击中(strike_opportunity_count 首次非零之后)
+
+**这一阶段第一次允许踩闸 2,但每开一轴都要配一格 200-iter smoke 测 Δp_term。**
+
+| 轴 | 动作 | 幅度 | 前置 |
+|---|---|---|---|
+| **执行器延迟** | 进第 1 档 | `control_step_action_delay_min=0, max=1`(= 20 ms = 正好 1 个 `strike_window_pos_s`) | M0 + M1;Δp_term ≤ 0.5 pp |
+| **推撞** | 进第 1 档 | `recipe=axis_box_6d_v2`、vel_xy **±0.125** m/s、vz ±0.05、roll/pitch ±0.13、yaw ±0.195 rad/s、`interval_range_s=[10,30]`(每 episode 期望 0.124 次推,≈0.5% 撞进 0.10 s 击球窗) | **必须等 M0**:推撞的全部风险都在闸 2。同时给 Wave-P 6 臂补收口(判读或作废,§3.1) |
+| **reset 噪声** | 进第 1 档(1/3 幅) | 位姿 x/y/yaw ±0.033、速度六维 ±0.067、关节 ±0.05 rad。**需要新增分级键**(`canonical_ready_mode` 是 on/off 不是旋钮) | M0 + M1;这是全表唯一值得写的新代码 |
+| 摩擦 / 质量 / CoM / PD / 零点 | 继续不动 | 现值 | — |
+| A1 其余六旋钮、32-arm、terrain、腕拍质量 | 继续关 | — | — |
+
+**M2 门槛(阶段二 → 三):exact 命中率 ≥ 修复后的盈亏平衡率。** 若死亡改到 -7.2,盈亏平衡 = 7.2/(7.2+32.98) = **17.9%** → 取 **20%** 作为门槛(现役 update250 是 0.23%)。这个门槛不是拍脑袋:它就是"挥拍在期望上不亏"的那条线。
+
+---
+
+### 阶段三 — 上台质量(capture / return 首次非零之后)
+
+| 轴 | 动作 | 幅度 |
+|---|---|---|
+| **执行器延迟** | 进第 2 档(终态) | `max=2` 控制步 = 40 ms = 厂商 [0,2] 全值 |
+| **推撞** | 进第 2 档(终态) | 厂商全幅 ±0.25/±0.1/±0.26/±0.39,节奏 **[5,15] s**;**优先改用相位门控**(照搬 lateral_perturbation 的 `recovery_hold` 资格窗),门控落地后节奏可回到 [1,3] s 而不撞窗 |
+| **reset 噪声** | 进 2/3 档 → 满档(厂商 A3 值) | 位姿 ±0.1、速度六维 ±0.2、关节 ±0.15 rad |
+| **32-arm 课程解冻** | 关掉 `action_ball_diagnostic_unauthorized` | **三条硬前置全部落地才准解冻**:(a) §13 R1 可逆化(`arm_reopen_after_epochs`);(b) 154 行样本量 / 3.25% 有效阈值修复;(c) M2 已达成(= ADR 的"至少解开一个环境"前提满足) |
+| **摩擦外扩** | 单格消融 | (0.2,1.8)/(0.2,1.5)(厂商值) |
+| **腕 + 拍质量 ±20%** | 若还有余力 | 需新键(按 body 分组的 mass range) |
+| A1 delay/dropout/jitter | 逐个单格消融 | 待标定 |
+| terrain 凹凸 | 最后,若确有必要 | band ∈ [0.01,0.15] m |
+
+---
+
+### 必须等信号侧修好才能开的轴(明确点名)
+
+| 阻塞源 | 被阻塞的轴 | 为什么 |
+|---|---|---|
+| **-72 死亡尖峰**(§16) | 推撞(全部)、reset 状态噪声(全部)、摩擦低端外扩、terrain 凹凸、执行器延迟(全部)、`init_noise_std` 上调 | 这六条**全部会抬高终止率**。dense 归一化 advantage ≈0.007 vs 死亡方向 ≈3,**约 500 倍**;盈亏平衡 69% 已让"不挥拍"成为结构最优解。每抬一个百分点的终止率,就是给这个退化解再补一笔贴 |
+| **σ=0.075 m 死核**(§7) | A1 八旋钮全部(包括本来很小的 white/AR1)、A225 任务通道加噪、32-arm 解冻 | 击中层收入恒等于 0 时,给任务目标加噪是在**零梯度带上加抖动** —— 纯粹损失,没有任何学习收益可换。white/AR1 因为幅度只有核宽的 2.5%/6.9%,可以在 M0(而不是 M1/M2)之后就开 |
+| **§13 的不可逆锁定 + 154 行样本量** | 32-arm 课程解冻 | 现在解冻只会在训练最早期(~3k iter)用最弱的策略把 26-28 条臂逐个永久锁死。**用坏的调度器不如不用调度器** —— HITTER 完全没有课程也拿到 92.3% 回球率 |
+| **发射器 DR 姿态不统一** | 所有 A/B | 三个 N1 发射器的 `stable_ready_plant` 取值不一致 → 跨臂比较全部失真。这条是阶段零的 D1 动作,零成本 |
+
+### 22.4 建议(排序)
+
+**N1(P0):【P0】DR 一格不动,先修 -72 死亡尖峰与 σ 死核;把所有 DR 变更冻结到 M0 验收之后**
+- 证据:§16.1:死亡 -72.0/次(-3600 × dt 0.02),γ=0.99 视野 100 步 > 平均 episode 124.11 步(2.48 s),以死亡结尾的 episode 里每个状态回报 -72×0.99^k ∈[-72,-21],dense 收入 7.4 只是零头;dense 归一化 advantage ≈0.007 vs 死亡方向 ≈3,相差约 500 倍;三库最大单步罚项 post-dt ≈ -0.2 = 各自视野收入 9.5 的 2%,我们是 1200%,差约 600 倍。§7:σ_pos_min=0.075 m 在 e=0.30 m 处 exp(-16)=1.1e-7,梯度精确为零;唯一远场梯度 racket_progress 上限只有 +0.03/步。盈亏平衡命中率 72/(72+32.98)=69%,'不挥拍'是当前 reward 下的结构最优解。
+- 落点:scripts/train.py:8896(v2 DIRECT 表)+ yaml 键 death_penalty_weight(train.py:11171-11184);§7.4 核形状菜单。顺手清两处注释漂移:train.py:~11172 写 '-1800' 与 DIRECT 表 -3600 不符;HOPEPingPongHitter.yaml:519-520 的 '+/-15% reset-level' 与现役 startup 级 Kp(0.8,1.2)/Kd(0.7,1.3) 不符。另需把 rsl_rl 版本写进 training receipt(全仓 grep 不到任何 pin,§16.1 C4 的成立与否完全依赖它)。
+- 风险:改 reward 会打断与在跑臂的单变量可比性 → 必须走新臂而不是原地改。若不改 reward 而先加 DR,则所有后续 A/B 都被 -72 的噪声淹没,等于白跑。
+
+**N2(P0):【P0】观测噪声分两类处理:本体感受 day-1 开满并永久保持;任务/教师通道保持零噪至少到 M2。答'能不能一直开满'——本体感受能,任务通道不能。**
+- 证据:外部 9/9 库的 obs 噪声都是 day-1 固定;厂商 instinct_mj 连评测(play)时 DR 全关都保留 obs 噪声;PBHC 虽有 add_noise_currculum 但默认 False;唯一 ramp obs 噪声的 IsaacLab dexsuite 是 manipulation + ADR 家族(前提不满足)。我们现役 A225 合同下只有 joint_pos ±0.01 rad / joint_vel ±0.5 带噪,区间与厂商/BeyondMimic 一致。反面:该合同的另外 14 条通道(实际/教师底座状态、教师关节 p/v、actions、3 条拍朝向、3 条任务期望接触、desired_base_xy、time_to_contact、time_to_teacher_start)全部零噪 —— 给它们加噪 = 降低任务目标可观测性 = 改支撑集,而击中层收入本来就恒为 0。
+- 落点:hope_env_cfg.py:2833-2954(HOPEActionBallA225ObservationsCfg / TrainableObservationsCfg)。同时必须入档一条重要修正:07-31 尽调 §2/§4/§8 的 obs 噪声清单描述的是 legacy 177/194-D 合同,现役 N1 走 actor_obs_contract: action_ball_a225(叶子 yaml:12),那个 ABI 根本没有 base_ang_vel / projected_gravity / motion_anchor / racket_target 通道 —— 现役噪声覆盖比文档暗示的窄得多。
+- 风险:两个洞要记账:(a) A225 合同没有 base_ang_vel/projected_gravity,真机 IMU 噪声将来无处对应,是 sim2real 的结构性缺口;(b) 评测口径差异 —— 我们 eval_deterministic 归零噪声、厂商 play 保留噪声,跨栈比数会系统性偏乐观,判读文档必须明示。
+
+**N3(P0):【P0,零成本】统一三个 N1 发射器的 DR 姿态口径,并把实际幅度写进每个发射器的 claim 摘要**
+- 证据:task.domain_rand.stable_ready_plant=true 一个布尔键同时关掉 base_com + randomize_link_mass + randomize_pd_gains 三条轴。launch_n1_reward_screen_diagnostic.py 与 launch_n1_vendor_baseline_diagnostic.py 设了它;现役的 launch_action_ball_a225_four_arm_diagnostic.py 没设。也就是说'哪些物理 DR 开着'取决于跑的是哪个脚本,不是仓库统一默认。
+- 落点:scripts/train.py:15277-15347(捆绑关闭逻辑与 restricted-launch 守卫);三个 launch_*.py 的 claim 组装处。
+- 风险:不修的话,上面整张分档表和所有跨臂 A/B 都失真。这直接违反'统一队列表 + 依赖核对单'的发射工序教训,且属于'说没有先查三层'的典型:机制码、实验史裁定、现役 argv 三层不一致。
+
+**N4(P1):【P1】执行器延迟必须分两档进(0→1→2 控制步),不能一次上满厂商 [0,2]**
+- 证据:决定性数字:strike_window_pos_s = 0.02 s = 正好 1 个控制步 @50 Hz(HOPEPingPongActionBallA3VendorV2.yaml:15)。2 步延迟 = 40 ms = 位置窗的 2 倍,一次上满等于把位置窗整个吃掉。外部双重先例都指向'从零长进来':IsaacGymEnvs AllegroHandDextremeADR 的 action_latency init_range 是字面 [0,0] 零宽起步(27 个 ADR 参数里有 8 个是零宽起步);AllegroHandDextremeManualDR 用 actionLatencyScheduledSteps 做纯时间线性斜坡(action_latency_min=1 → actionLatencyMax=15)。修正一处外部数据:该值是 10,000,000 不是 2,000,000 —— 2M 那个值写在 ADR 的 yaml 里,而 ADR 子类完全 override 了 apply_action_noise_latency、根本不读它。
+- 落点:task.actions.control_step_action_delay_min / control_step_action_delay_max —— 已完全接线,无需改码。机制在 hope_actions.py:684-830(_EpisodeSharedPolicyActionDelay,整 31-D q_des 延迟,每 env 每集抽一次,min=max=0 是 byte-identical no-op);现役 N1 叶子 yaml:21-25 与发射器 launch_action_ball_a225_four_arm_diagnostic.py:1391-1392 双重清零。顺带记录:robots/actuator.py:11-75 的 DelayedImplicitActuator 仍是真死代码(agibot_a3.py 五个 actuator 组全是 plain ImplicitActuatorCfg),尽调说的'延迟是死代码'只对了一半。
+- 风险:延迟改接触相位,对毫秒/厘米级的击球是直接税(尽调点名它是最可能砸掉接触时序的一条)。阶段一/二早期绝不能开。若同时开 target_delay_steps,两者叠加会双倍吃掉位置窗。
+
+**N5(P1):【P1】推撞:起步用厂商半幅 + [10,30] s 节奏;终态优先做相位门控而不是单纯放疏节奏**
+- 证据:厂商 instinct_mj 的 ±0.25/±0.1/±0.26/±0.39 m·s⁻¹ @[1,3]s 恰好已是 BeyondMimic(±0.5/±0.2/±0.52/±0.78 @[1,3]s)的半幅 —— 但他们是连续行走、没有击球窗。撞窗概率算给你:平均 episode 2.48 s、击球窗 0.10 s,节奏均值 2 s → 每 episode 期望 1.24 次推、≈5% 撞进窗;节奏均值 20 s → 0.124 次、≈0.5%。所以外部的 [1,3] s 不能抄,§3.1 的 v2.3 裁定 [10,30] s 方向正确。仓库里已有现成的相位门控实现:lateral_perturbation.py 把冲量门控到 recovery_hold 资格窗,恰好把扰动赶出挥拍/接触相位 —— 这比放疏节奏精准得多。
+- 落点:task.push.enable / recipe=axis_box_6d_v2 / velocity_range / interval_range_s(train.py:451-489, 12228-12238,已完全接线)。现役 N1 叶子 yaml:27-37 把每个字段显式 null(train.py 拒绝 enable=false 携带休眠幅度,所以是干净全关),发射器 :1393 另传一次。相位门控可借 lateral_perturbation.py:271-424 的资格窗结构。同时补 §3.1 的断链:Wave-P 6 臂(p1push_{w,v}_{p02,p035,p05},07-20/21 发射,science rc=0)至今无判读记录,EXP-P1 文档底部'运行表/决定'仍停在 preregistered、与头部运行态自相矛盾 —— 要么判读要么正式作废。
+- 风险:推撞是全表最直接的闸 2 违反者,撞进击球窗 = 直接税击中收入层(红线)。合并抽签 CLI 未接线是已知 TODO,v2.3 用双独立事件近似时两种推可能同帧叠加。另:大踢恢复可能要求真机给不出的加速度(包络仅剩 ~3.5% 余量)。
+
+**N6(P1):【P1】不要新写 scheduler —— 但也不要现在复用 32-arm。答'有没有现成机制可复用':有两个,一个语义不匹配、一个前提不满足,所以答案是'现阶段用分档发射,不用 in-loop'**
+- 证据:三条论证:(1) ADR 家族的扩张条件是 success rate 过阈,我们 exact 0.23%/window 5.01%/capture=return=0 → 扩张永不触发,写了是 no-op;OpenAI 原文写明 ADR 从'concentrated on a single environment'起步、'additional environments are only added when a minimum level of performance is achieved'(arXiv 1910.07113)。(2) 外部 9 库里 8 个 day-1 固定 DR,唯一自带 in-loop DR 幅度课程的是 IsaacLab dexsuite(manipulation, performance-gated, difficulty 0..10, difficulty_frac<0.1 时冻结);所有 locomotion/tracking 库 ramp 的是任务难度(terrain level / command 速度)而非 DR 幅度;PBHC 的 add_noise_currculum 与 born_offset_curriculum 默认都是 False。(3) 我们 5 条现役物理 DR 全是 startup 级(env 构造时抽一次),in-loop 改需要新 CurriculumTermCfg hook,而全仓 CurriculumCfg 至今是 pass(tracking_env_cfg.py:286-290),零脚手架。两个现成 hook:32-arm 课程(LEVELS=(0,0.25,0.5,0.75,1.0) 5 档阶梯 + 同 5 档全局 JOINT_RHOS、Wilson 95% CI、冻结策略 canary→heldout 双窗口、≥100 update 节拍、state_dict+sha256 交叉校验 —— action_ball_curriculum.py:61-62, 502)语义是题目难度不是 DR 幅度;adaptive_sigma(sigma_update_every=500、误差 EMA 驱动)方向是单调收缩而非扩张。
+- 落点:现阶段:把档位写进发射器 argv(每档一次新 launch 或 resume)。将来若真要 in-loop DR 幅度课程,复用 32-arm 的 5 档阶梯 + Wilson 判据 + checkpoint 骨架,按 IsaacLab dexsuite 的 initial_final_interpolate_fn 结构组织(任意嵌套 int/float/tuple 按 difficulty_frac 线性插值,frac<0.1 时返回 NO_CHANGE 冻结)—— 那是最贴切的现成模板,不必从零设计。
+- 风险:最大的风险是'觉得有现成机器就该用' —— §13 已裁定 32-arm 现在通电只会在 ~3k iter 用最弱策略把 26-28 条臂逐个永久锁死。HITTER 完全没有课程也拿到 92.3% 回球率,固定难度本身不丢人。用坏的调度器不如不用调度器。
+
+**N7(P2):【P2】32-arm 解冻的三条硬前置(缺一不可),在此之前 action_ball_diagnostic_unauthorized=true 保持**
+- 证据:§13.3 三条 critical:(a) 单臂晋级不可逆 —— marginal 分支 quality_bad 或 too_hard 一律 statuses='decided'(lock_marginal),代码中无任何路径改回可探;所有外部先例(ADR 队列清空后同一边界无限重测、legged_gym/IsaacLab/PBHC 每次 reset 重判)都是可逆的。(b) 判决样本 n=154(HELDOUT_NEW_BAND_MIN),在 z=1.96、带 [0.075,0.125] 下 'too_easy 继续扩'实际要求 F≤5/154 = 3.25%,而设计目标是 10% —— 真实失败率 5% 的臂有 79% 概率第一轮永久锁死,7% 的是 96%。更糟:新带比例 = 1/5,768×0.2 = 153.6 < 154,即代码底线窗口下期望新带行数就低于门限。(c) ADR 前提'至少解开一个环境'在 strike_opportunity_count=0 时不满足。
+- 落点:§13.4 R1:新增 arm_reopen_after_epochs(默认 0 = byte-identical),把 'lock/bound' 改成'休眠 + 到期重开',落在 action_ball_curriculum.py 的 _apply_formal_evidence marginal 分支(:4683-4700)与 _reselect_arm;_Progress 增 arm_decided_epoch 字段。同时修 :4640-4643 的 'NB<154 → quality_bad → 等价 too_hard → 永久锁'这条把'样本不够'当'太难'的路径(ADR 的做法是 deque 未满 256 时什么决定都不做,只等)。
+- 风险:§13 已裁定 R1 可逆化是 R9 并行扩张的硬前置。另注意 high 级问题:整窗零容忍安全 blocker 门控的是单臂新带判决 —— 一次来自 center/interior 行(占 80%)的撞台会永久锁死一条完全无关的轴,残余不安全率高于 ~1e-5 晋级流水线就会被无关事件随机掐断。
+
+**N8(P2):【P2】reset 状态噪声分 3 档进(0 → 1/3 → 2/3 → 厂商 A3 满值)—— 这是全表唯一值得写的新代码**
+- 证据:现役 canonical_ready_mode=true 把位姿/速度/关节四组区间全部强制成 (0,0),stand_start_prob=1.0、hold_steps_range=(0,0)、post_swing_start_prob=0、clip_switch_prob=0 —— §9.2 已把这个'起点分布塌成每 action 一个 delta 函数'诊断为自我收窄循环。终态目标用厂商 A3 值(§11.3 第 5 条):位姿 x/y/yaw ±0.1、速度六维 ±0.2、关节 ±0.15 rad、关节速度 0 —— 比 BeyondMimic 的速度噪声温和 2.5×、关节宽 1.5×。
+- 落点:需要新增分级键:canonical_ready_mode 今天是验证器强制的单一 on/off 开关,不是幅度旋钮;把它改成 false 会退回材质上不同的 legacy reset 架构,不是想要的。所以新键应该是'canonical_ready + 分级噪声球半径'的组合,落在 HOPEPingPongActionBall.yaml 的 motion 块 + 对应验证器。
+- 风险:双重踩闸(改支撑集 + 抬终止率),必须 M0 + M1 之后,且每档配一格 200-iter smoke 测 Δp_term ≤ 0.5 pp。明确一句:这不是重开 RSI —— §9.4 的反 RSI 裁定不动摇,只是放宽 ready 球。另:仓库里那个失败加权自适应 RSI 采样器(α=0.001、uniform floor 0.1、λ=0.8、checkpoint-safe)对每个已注册任务都结构不可达,不排产。
+
+**N9(P2):【P2】A1 八旋钮拆开处理:white/AR1 用场地实测值可以在 M0 之后就开;delay/dropout/jitter/bias/resample/HER-mix 一律等 M2**
+- 证据:量纲比较是关键:场地实测 white σ=0.0019 m、AR1 σ=0.0052 m,相对 sigma_pos_min=0.075 m 只有 2.5% 和 6.9% —— 这两条其实不踩闸 1(零均值、幅度远小于任务容差),真正的门槛只是'别在死核期加任何东西'。而 target_bias_per_swing 是非零均值(系统性移动目标 = 每挥拍换一个任务)、dropout 制造'目标突然消失'的新状态、midswing_resample 是改支撑集最狠的一条(挥到一半换目标)。八个旋钮现役全零,实测值躺在注释里没用。
+- 落点:task.racket.target_noise_white / target_noise_ar1_sigma(现役 N1 叶子 yaml:53-54 显式 0.0);其余六条同在 task.racket.* 下,均为普通 float/int CLI 键,无需改码。互斥守卫:achieved_target_mix_prob>0 与 question_bank/CQ solver 互斥;midswing_resample_prob>0 与 planner revisions / post_strike_t1 互斥(hope_commands.py:2361-2546, 3538-3616, 15077-15099)。
+- 风险:好消息降低风险等级:非对称 critic(HOPECriticCfg.racket_target_vel_w_live)永远看真值,所以把 actor 侧目标搞脏不会连带坏掉 value estimation。坏消息:在击中层收入恒为 0 时,给任务目标加噪是在零梯度带上加抖动 —— 纯损失无收益。
+
+**N10(P3):【P3】init_noise_std=0.02 是'现役值本身就是病灶'的唯一一条随机性轴,但方向是调大、且必须排在 -72 修复之后**
+- 证据:§16.1 D/C5:31 关节 × 每维熵 0.5·ln(2πe·0.02²) = -2.494 nat,合计 -77.3 nat;entropy_coef=0.01 对每个 log σ 的梯度是恒定 -0.01(往上推 σ),而 surrogate 对 log σ 的梯度在 dense 侧只有 ≈0.007(推不过熵)、死亡侧 ≈3(往下狠压)。结论原文:现在 σ 是被'死亡'和'熵'共同决定的,和击球质量无关。它与 σ=0.075 m 死核、racket_progress 上限 +0.03/步 三者共同锁死了 strike_opportunity_count=0。
+- 落点:cfg/algo/ppo.yaml:42 是 1.0,但 ActionBall 路径被 scripts/train.py:5689 与 :6993 两处硬验证器钉死为 0.02 —— 提值要同步改验证器(这是刻意的守卫,不是疏漏,改动要走新臂 + 明确记录)。建议 0.02 → 0.05 一档 A/B。
+- 风险:在 -72 修好之前调大 σ = 探索更大 = 更快摔死 = 反向。这条排 P3 不是因为不重要,是因为它的前置比 DR 各轴还硬。
+
+**N11(P3):【P3】阶段三消融清单:摩擦外扩、腕+拍选择性质量、terrain 凹凸 —— 收益递减,排最后**
+- 证据:摩擦外扩到厂商 (0.2,1.8)/(0.2,1.5) 两端各宽 0.1-0.3,低端 0.3→0.2 会增打滑抬终止率;腕+拍 ±20% 是厂商'选择性末端质量'哲学 × 我们拍子质量未知的组合(§11.3 第 6 条),但需要新的按 body 分组 mass range 键;terrain 与我们室内平地任务不对齐(§11.2 明确写'不对齐'),且踩已知的雷(generator 把 env origins 与克隆桌子拆散,07-29 记忆),band 还有 [0.01,0.15] m 且须为高度场分辨率整数倍的约束。
+- 落点:摩擦:task.plant.robot_material_static_friction_range / robot_material_dynamic_friction_range(已接线,含 robot_material_make_consistent 保证 dynamic≤static);terrain:task.plant.terrain_rough_height_range(已接线,要求 scene.terrain.terrain_type=='plane');腕拍质量需新键。
+- 风险:三条都是'厂商有我们没有'的对齐项,容易被当成必做;实际上在击球都还没学会时,它们的边际收益接近零,而 terrain 的实现风险最高。§21 已裁定不扩网络/不扩工程,资源投信号侧。
+
+**N12(记录):【记录,不排产】armature / 关节机械摩擦 / 力矩上限随机化;lateral_perturbation L1;失败加权 RSI 采样器;厂商 obs scale + history=8**
+- 证据:前三条:mdp 包里本地只定义了 randomize_joint_default_pos 与 randomize_rigid_body_com 两个函数,armature/关节摩擦/力矩上限三条随机化全部不存在,要写新 EventTerm + 接线(task.plant.zero_joint_friction 是把静摩擦系数设成精确 0.0 的跨引擎单值覆写,不是随机化)。lateral_perturbation 是冻结的两格 CRN 实验单元(L0 零对照 / L1 处理),幅度/时序是模块内硬编码常数 + 不可变硬安全上限(0.15 m/s 冲量 / 2.0 m/s² / 200 N),故意不参数化以防蔓延成'任意时刻任意力'。失败加权 RSI 采样器每个已注册任务的控制流都绕过它。obs scale+history=8 是厂商同底盘实跑,但破坏 110/177/194-D 部署契约。
+- 落点:台账项,不动代码。lateral_perturbation 唯一该借的是它的 recovery_hold 相位门控设计(见 P1 推撞条)。obs scale+history 若将来做,必须独立臂 + 部署侧同批改,并与延迟臂捆绑(堆叠是策略自估延迟的标准配方)。
+- 风险:把这四条留在'可做清单'里会持续消耗审查注意力。明确写成'不排产'比留白更省事。
+
+
+
+---
+
+## 二十三、两处配置核查:immutable_tape 语义 与 base_ang_vel/projected_gravity 缺口(08-03)
+
+**方法**:2 抽取(tape 语义与 curriculum 交互 / 观测合同 git 考古与部署侧可得性)+ 2 对抗核查
+(6 修正)+ 1 裁决。判据用 Franco 的原话原意,而非"设计得对不对"。
+
+### 23.1 immutable_tape:配错了(选错工具,不是填错参数)
+
+配错了——但不是参数填错,是**选错工具**:现状与本意不一致,而且不是程度差异,是方向相反。
+
+**一句话**:Franco 要的是"缓存"(档位不变就复用、档位一升就重解),仓库里给的是"永久冻结 + 课程停权"。immutable_tape 的设计岗位从来不是省算力,而是**目标信息消融夹具**(5 个 recipe 里 4 个只能走 tape,online_solver 被合同限死只能配 current_lm 全掩码,hope_commands.py:205-209)。
+
+**(a) tape 之下 32-arm curriculum 还起不起作用:完全不起作用,而且是双重的。**
+1. 结构性停权:`immutable_tape` 强制要求 `action_ball_diagnostic_unauthorized=true`(hope_commands.py:5349-5357,"immutable_tape is diagnostic-only";n_actions 必须 =1)。这个开关让 ActionBallCurriculum 构造时 `evaluator_authority=None`、`drain_reset_authority=None`(hope_commands.py:5307-5315,代码注释自陈"A diagnostic authority is deliberately NOT bound")。
+2. 运行期短路:真正的把门人是 runner 侧的 `action_ball_frozen_evaluation_boundary`(hope_commands.py:10799-10823)——只要 diagnostic_unauthorized 为真,phase='poll' 直接返回 `{"diagnostic_unauthorized": True}`,**根本不调用** `_action_ball_eval_consume_ready`(hope_commands.py:10845),而后者是 `curriculum.observe_scheduler`(action_ball_curriculum.py:3625)/`stage_selected`(:3974)的唯一调用方。所以课程不是"被调用时报错",是**从头到尾没人调用**;曲线永远停在初始 phase='center'、32 臂全 0.0 档(LEVELS=(0,.25,.5,.75,1.0),action_ball_curriculum.py:61-62)。
+3. 反向确认 tape 也不读课程:`FixedQuestionTapeSolver._assert_birth_matches_question`(action_ball_fixed_question_tape.py:838-870)对 domain_levels 做**硬断言**——课程若真升了档,进程是崩,不是换题。也就是说 tape 不是"跟着档位走的缓存",是"逼着课程每次 reset 复读同一个档位的常量"。artifact 实测:`row_count=1`、`selection="constant_row_zero"`、`online_lm_calls=0`(action_ball_fixed_question_tape.py:582-584;活体 JSON 见 configs/action_ball_n1_measured_20260803/fresh_tape_seed0_20260803_take061_robust20n_r4_splitready/immutable_n1_tape.v1.22052606032f.json)。冻的不只是来球:base_spawn、落点、期望接触 p-v-face 元组全是字面浮点数。
+
+**(b) 有没有"档位不变复用、档位升重解"的缓存:没有,一行都没有。** 搜遍 continuous_questions.py / action_ball_sampling.py / strike_spec_torch.py,唯一的 cache 是审计回执的 sha/digest 记账(action_ball_sampling.py:4579-4937),不是解算结果缓存。值得注意的是:**这个正确设计已经以字符串形式写在仓库里但零实现**——未提交的 hope_commands.py:6120-6134 往诊断 payload 里塞了 `"final_curriculum_question_source": "pregenerated_or_cached_band_question_bank"`、`"final_curriculum_reset_operation": "index_precomputed_question_row"`、`"does_not_freeze_final_curriculum_to_one_question": True`。没有任何代码读它。
+
+**(c) 省算力动机今天还成不成立:成立,但只剩当初的一半,而且要修正一处跨文档口径。**
+- **口径修正(重要)**:dr_reward_external_diligence_20260731.md §10.2 把 23.48 s/update 里的 13.5-17.8 s(60-75%)记成"reset 仪式"= 逐 env Python 记账残差,那是**估算**;同日晚些的 Pod 分段 profiler(design_audit_and_speedup_20260729.md §8.10)把它拆开了:profiled reset 40.732 s 里 `solver_solve_many` = 33.432 s = **82.1%**,占五轮总 collection 的 **64.7%**;而 `Racket install` 只有 0.202 s。**reset 仪式的大头本来就是求解器本身,不是 Python 记账。**§10.2 的归因应以 §8.10 为准。
+- **今天的值**:§8.11(host-only solver result 优化后,同 seed 4096×5)五轮 solver=16.367 s / collection=32.924 s ≈ **49.7%**;均值 6.700 s/update,reset-free update ≈ 2.7 s。也就是 reset 增量 ≈ 4.0 s/update 里 solver 约 3.27 s ≈ **82%**。§8.11 自己的结论原话:reset-heavy update 的主差额仍在 fixed-direction solver/LM。
+- 结论:**动机成立且是当前第一杠杆**,这恰恰说明不该用"永久冻结"去换它——应该用真缓存换。同时 §8.11 已排产一条不改语义就能拿走一截的路:固定题带预注册 `cq_n_iters=4/6/8/12`,若 8 次过数值门估省 ≈1.1 s/update(**估算,未验收**)。
+
+**(d) 最小修复(三步,按"不改现役字节"顺序)**
+1. **零代码,立刻**:承认 immutable_tape = N=1 消融夹具而非缓存,把这句人话写进 launch_action_ball_a225_four_arm_diagnostic.py 的 claim 摘要,并给它一个显式到期条件(M1 / strike_opportunity_count 首次非零)。现役 argv 在 launch_...py:1382-1385 一次性同时设了 target_source=immutable_tape + diagnostic_unauthorized=true,读者今天看不出这等于把课程停权。
+2. **拿掉一半动机、零语义风险**:先跑 §8.11 已排产的 `cq_n_iters` 预注册,把求解器单价压下去。这条和 tape 完全独立。
+3. **真缓存(才是本意的落点)**:新增**第三个** source 值 `banded_question_bank`(不动 immutable_tape 现语义,`_ACTION_BALL_TARGET_SOURCES` 在 hope_commands.py:121),reset 时按当前 domain_levels **索引预生成表行**;表按 32-arm 的 5 档 × 臂键分块离线生成。关键:**失效机制不用新写**——课程每次 reset 已经通过 `_action_ball_claim_domain`(hope_commands.py:6994-7042)报出 domain_levels,直接拿它做 key,升档=换块=天然重解;`_assert_birth_matches_question` 的硬断言逻辑按行保留即可。且这个 source **不绑定 diagnostic_unauthorized**,课程保留权威、可升档、可导出。风险:题带规模 = 5 档 × 32 臂 × 每档行数,离线生成与 sha 钉带来新的谱系管理成本;这是它比 tape 贵的地方,也是它唯一的成本。
+
+### 23.2 base_ang_vel / projected_gravity:该加,但理由要换
+
+**该加,Franco 的判断成立——但理由要换一个,原来的理由(缺信息)站不住。**
+
+**(a) 有无表(actor 侧;base_lin_vel 全家族缺席,HOPEPolicyCfg 一律 `base_lin_vel = None`,hope_env_cfg.py:928)**
+
+| 合同(总维) | base_ang_vel | projected_gravity | motion_anchor_pos_b | motion_anchor_ori_b |
+|---|---|---|---|---|
+| hitter_pure(110) | 有 | 有 | 无 | 无(用 base_forward_xy) |
+| stage1_natural_clip_site_v1(170) | 有 | 有 | 有 | 有 |
+| deploy_parity(175) | 有 | 有 | 无 | 有 |
+| hitter_footwork(177) | 有 | 有 | 无 | 有 |
+| deploy_parity_face179(179) | 有 | 有 | 无 | 有 |
+| full(180) | 有 | 有 | 有 | 有 |
+| deploy_parity_station181(181) | 有 | 有 | 无 | 有 |
+| L194 | 有 `[68:71]` | 有 `[164:167]` | 无 | 有 `[62:68]` |
+| **stage1_..._paddle_world_v2 / A225 / C225(225)** | **无独立列**(世界系角速度埋在两个 15-D 块的 `[12:15]`) | **无独立列**(可从 6-D 姿态子块代数反解) | 无 | 无 |
+
+**(b) 刻意还是抄前缀漏的:刻意,且留了理由,不是静默遗漏。** 全 git 历史里**没有任何一次 diff 删掉过**这两个词(`git log --all -p` 对两个词名的 `-` 行零命中)——225 家族是**从零写的新合同**,不是砍别人。7e5907a6(08-02 06:43)建 170-D 时两条还都在;同日 d361d1bd(08-02 17:56)建 225-D V2 时同一个 commit 就把理由写进了 docs/interfaces/policy_observation_action.md:428(`projected_gravity` is omitted because actual base orientation already determines it)和 :466-471(legacy `base_ang_vel ±0.2` / `projected_gravity ±0.05` 这套旧噪声旋钮"do not define physically valid noise"给一个位置/姿态/线速度/角速度混装的 15-D 块)。A225/C225(10e3ab14,08-03)是直接切 `STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[:10]` 复用(actor_observation_contract.py:286-293、320-324),所以它们连"重新加回来"的机会都没有——但源头是设计决定,不是手滑。
+
+**(c) 两个 15-D 块装了什么:确实已隐含角速度,重力方向也能代数反解——所以"补信息"这个理由不成立。** 两块都由同一个 `_stage1_pack_base_state_world`(hope_observations.py:310-349)按固定顺序拼:`[0:3]` 世界系位置、`[3:9]` 世界系旋转矩阵前两列(连续 6-D 表示)、`[9:12]` 世界系线速度、`[12:15]` **世界系角速度**。`actual_base_now_world` 取 `robot.data.root_lin_vel_w/root_ang_vel_w`;`teacher_base_now_world` 取对齐后的参考 clip 同构四段。所以:角速度**有**(世界系,不是骨盆系);重力方向**没有显式列**,但 `R^T·[0,0,-1]` 可由 `[3:9]` 反解。**信息意义上是冗余的。**
+
+**真正该拿来支持"加回来"的三条理由(与信息量无关):**
+1. **来源不同**:15-D 块的底座位姿真机侧要靠 OptiTrack mocap,而 mocap 按团队自己的"Deploy-Available Signal Set"(policy_observation_action.md:1100-1120)**只在 PLAY 期间可得**;base_ang_vel/projected_gravity 走骨盆 IMU,是**永远可得**的机器人侧信号。加回来不是加信息,是加一条**不依赖 mocap 的本体姿态通路**。
+2. **噪声挂载点**:这正是 §22.2 C 表点名的那个"洞"——"合同里没有 base_ang_vel/projected_gravity,真机 IMU 噪声将来无处对应"。今天 A225 的这两个量藏在一个官方判定"无法定义物理有效噪声"的混装块里,等于**真机 IMU 噪声在训练侧没有任何可挂的钩子**。
+3. **参考栈一致性**:四库 + 厂商 + 我们自己 8 个历史合同全都保留这两条骨盆系通道;C++ 部署侧 `build_obs_175/177/179/180` 每一个都在逐段拷 `state.base_ang_vel_b` 和 `projected_gravity_body(state.base_quat_w)`(pp_obs_builder.hpp)。
+
+**(d) 真机给不给得出:给,而且已经在跑。** RobotState 携带骨盆 IMU 的 `imu_quat_wxyz` / `imu_gyro` / `imu_accel`(agi/a3_deploy_example/README_robot_io_backend.md:121-128、207-208)。硬证据不在那张已被标注为历史的 180-D 勾选表,而在 C++:pp_policy.hpp:1124-1125 直接 `st.base_quat_w = state.imu_quat_wxyz`(注释"real pelvis IMU orientation")、`st.base_ang_vel_b = state.imu_gyro`(注释"real pelvis gyro (body frame)"),`build_obs_175` 就吃这两个字段。**一处必须记的实况**:pp_policy.hpp 下游约 :1135/:1159 会按定位模式用 yaw 对齐或 oracle/mocap 骨盆姿态**覆盖** `base_quat_w`,所以"IMU 直供"是基线而非唯一路径。另注:部署侧**根本没有** build_obs_181/194/225(整个 deploy 树对 181/194/225 零命中),225 家族今天是纯 sim。
+
+**(e) 加回来的完整机械成本清单(全部是"新增合同",不是原地改——225 家族被显式冻结)**
+1. `actor_observation_contract.py`:新 `ActorObservationContract`(新 name、total_dim=228 或 231),在 `CONTRACTS` 字典按 `.name` 和 `.obs_mode` 双注册,并加进 `infer_actor_observation_contract()` 的元组(约 :1093-1113),否则按形状自动识别会静默失败。
+2. `hope_env_cfg.py`:新 ObsGroup 子类,插 `base_ang_vel` / `projected_gravity` 两个 ObsTerm(mdp 函数已存在,零新数学),外加新 EnvCfg + 新 cfg/task yaml(不能改钉死的 `HOPEPingPongActionBallA225VendorV2N1Learnability.yaml`)。
+3. **critic ABI:内容不用动**(318-D critic 经 PrivilegedCfg 已带 `base_lin_vel3`+`base_ang_vel3`,tracking_env_cfg.py:140-155),但 schema-3 要求**新注册一个 critic 身份串**。**口径纠正**:A225/C225 的 critic 不是 hope_env_cfg.py 的 `Stage1CriticCfg`,而是各自独立注册的 `action_ball_a225_critic_v1` / `action_ball_c225_critic_v1`(布局定义在 action_ball_225_trainability.py / action_ball_c225_trainability.py),doc :459-462 明令三者虽同为 318 不得互相复用谱系。
+4. **checkpoint:必然不兼容**,现役 in_features=225,228/231 是硬形状失配,无 warm start;ONNX 元数据钉合同名+宽度,等于全新导出件。
+5. `training_contract.py`(schema-3):`_STAGE1_..._ACTOR_OBS_CONTRACT` 一族冻结常量按合同名钉有序项名与总维(约 :155-194、:2351-2450、:5659-5845),不加新常量+校验分支,新合同一律 fail closed。**这就是问的那个"钉维度的校验器"。**
+6. MuJoCo-native fixed-tape parity:**任何** 225-D 合同今天都没有(mujoco_native 全树不引用 `actual_base_now_world`),加不加这两列都是从零开始。
+7. C++ 部署 builder:今天没有 `build_obs_225`,也是从零;但加回这两列反而让未来那个函数的这 6 个标量**退化成 175/177/179/180 已验证的成熟写法**,难点仍在 `actual_base_now_world`/`teacher_base_now_world` 需要的 mocap+因果估计器。
+8. 下游把 225 当魔数的消费者要跟或另立:tests/test_action_ball_a225_trainability.py、scripts/materialize_action_ball_a225_lineage.py、上述 yaml。
+
+**交叉问题裁决(DR 噪声同步开不开)——分成两件事,答案相反:**
+- **观测噪声 ±0.2 / ±0.05:随合同一起开,day-1,不走 §22 的排队。** §22.1 三闸对它全过:闸 1 支撑集——骨盆 IMU 是**本体感受**,不改转移不改"哪些动作能击中球"(§22.1 原文点名了这个不对称:本体感受噪声可 day-1,任务通道噪声不行);闸 2 终止——零均值观测噪声不造终止事件,Δp_term 预期 0;闸 3 cadence——每步级**只允许**零均值观测噪声,正好落在允许区。§22.2 A 行现役 `joint_pos ±0.01` / `joint_vel ±0.5` 已判"D1 开满",外部 9/9 库 day-1 固定,厂商连 play 都保留 obs 噪声。而 doc :466-471 那句"旧噪声旋钮定义不出物理有效噪声"针对的是**混装 15-D 块**,不针对重新独立出来的骨盆系单列——单列的物理含义和 175/177/179/180/194 完全一致,旧旋钮原样适用。**更关键的是**:加通道却不加噪声,等于把 §22 记的那个洞从"无处对应"改写成"有处对应但故意空着",sim2real 缺口反而更隐蔽。
+- **厂商 `scale=0.25` + `history=8`:不开,维持 §11.3 低优先第 8 条。** 这是另一根轴(§22.2 C 第三行),破坏 110/177/194-D 部署契约,必须独立臂 + 同批改部署侧,且只有与延迟臂捆绑才有意义。
+- **唯一让步**:若 Franco 要与现役 A225 臂做严格单变量对比,则第一发新合同臂噪声关闭、第二发开——代价是多一格。默认建议**不这么做**,因为噪声正是本次修改的目的之一;真要控变量,变量应该控在"有没有这两列",而不是"这两列有没有噪声"。
+- **不动的**:两个 15-D 块继续保持零噪声,按 doc :469-471 的要求,底座位姿/twist 噪声必须按 mocap/IMU 分量各自定义,那是另一个独立立项。
+
+### 23.3 行动项
+
+**[P0][tape / 发射器交代]** 零代码即办:在 launch_action_ball_a225_four_arm_diagnostic.py:1382-1385 的 claim 摘要里用人话写明『target_source=immutable_tape + diagnostic_unauthorized=true 这一对 argv 等于把 32-arm 课程整跑停权』,并写死一个到期条件(M1 或 strike_opportunity_count 首次非零)。今天读 argv 看不出这层后果,已经踩了『发射工序:依赖核对单 + WARN 必进摘要』的教训。风险:无,纯文档;不做的风险是下一个人以为 tape 只是省算力。
+
+**[P0][tape / 认知纠偏]** 把『immutable_tape = 目标信息消融夹具(5 recipe 里 4 个只能走它,hope_commands.py:205-209),不是缓存』这条写进 docs/research/dr_reward_external_diligence_20260731.md §22.2 F 行与本次章节,避免后续再把它当成本优化手段引用。风险:无。
+
+**[P0][求解器成本 / 口径修正]** 修正跨文档归因:dr_reward §10.2 把 reset 的 60-75% 记为逐 env Python 仪式是估算,已被同日 Pod 分段 profiler(design_audit §8.10)推翻——profiled reset 40.732 s 里 solver_solve_many 占 82.1%,Racket install 只有 0.202 s。以 §8.10 为准。风险:不改会导致提速工单排错顺序(去磨 Python 记账而不是求解器)。
+
+**[P1][求解器成本 / 真提速]** 跑 design_audit §8.11 已排产的固定题带预注册 cq_n_iters=4/6/8/12,按残差 / admit mask+reason / racket task / replay 稳定性选最小充分迭代数;若 8 次过门,估省约 1.1 s/update(估算,未验收)。这条与 tape 完全解耦,是『不改任何语义就拿走一半省算力动机』的路。风险:降迭代可能动数值门,必须同 seed 4096x5 三组 JSON parity + finite checkpoint 验收。
+
+**[P1][obs / 新合同]** 新建 228-D(或 231-D)合同:actor_observation_contract.py 加新 ActorObservationContract 并在 CONTRACTS 双注册 + 进 infer_actor_observation_contract() 元组(~:1093-1113);hope_env_cfg.py 新 ObsGroup 插 base_ang_vel / projected_gravity 两个 ObsTerm;新 EnvCfg + 新 cfg/task yaml。绝不原地改 A225(该家族被显式冻结)。风险:漏注册 infer 元组会让形状自动识别静默失败,是最容易踩的一处。
+
+**[P1][obs / 校验器与身份]** training_contract.py schema-3 加新的冻结常量与校验分支(~:155-194、:2351-2450、:5659-5845),并为新合同注册独立的 318-D critic 身份(仿 action_ball_a225_critic_v1 / action_ball_c225_critic_v1,分别定义在 action_ball_225_trainability.py / action_ball_c225_trainability.py);critic 项表内容不变。风险:不加分支则新合同 fail closed 跑不起来;复用 A225 critic 身份会污染 normalizer/checkpoint 谱系(doc :459-462 明令禁止)。
+
+**[P1][obs / DR 噪声]** 新合同的这两列 day-1 直接开厂商级观测噪声 base_ang_vel ±0.2、projected_gravity ±0.05(§22.1 三闸全过:本体感受、零均值、不造终止),不进 §22 的排队。厂商 obs scale=0.25 + history=8 不开(破坏 110/177/194-D 部署契约,维持 §11.3 第 8 条)。两个 15-D 块继续零噪声。风险:与现役 A225 臂不再严格单变量;若 Franco 坚持控变量,变量应控在『有没有这两列』而非『这两列有没有噪声』。
+
+**[P2][tape / 真缓存]** 新增第三个 target source 值 banded_question_bank(不动 immutable_tape 语义;枚举在 hope_commands.py:121):reset 按当前 domain_levels 索引预生成题带行,题带按 32-arm 的 5 档(action_ball_curriculum.py:61-62)x 臂键离线分块生成。失效机制不用新写——课程每次 reset 已经通过 _action_ball_claim_domain(hope_commands.py:6994-7042)报出 domain_levels,直接做 key,升档=换块=天然重解;_assert_birth_matches_question(action_ball_fixed_question_tape.py:838-870)的硬断言按行保留。该 source 不绑定 diagnostic_unauthorized,课程保留权威。风险:题带规模 = 5 档 x 32 臂 x 每档行数,离线生成 + sha 钉 + 谱系管理是它比 tape 贵的唯一地方;必须排在 §13 R1(课程可逆化)与 154 行样本量修复之后,否则解冻课程只会拿到一串永久锁。
+
+**[P2][tape / 前向意图落地]** 未提交的 hope_commands.py:6120-6134 已经把正确设计写成了 payload 字符串(final_curriculum_question_source=pregenerated_or_cached_band_question_bank、final_curriculum_reset_operation=index_precomputed_question_row),但零代码读它。要么随上条一起实现,要么明确标注为 aspirational 注解,别让它以后被当成已实现的机制引用。风险:今天它就是一条会被误读为『已经有缓存了』的字符串。
+
+**[P3][obs / 部署与 parity 缺口(台账,不排产)]** 记账两条今天无论加不加这两列都不存在的东西:(1) 任何 225 家族合同都没有 MuJoCo-native fixed-tape parity(mujoco_native 全树不引用 actual_base_now_world);(2) 部署侧没有 build_obs_225(整个 deploy 树对 181/194/225 零命中)。同时记 pp_policy.hpp ~:1135/:1159 会按定位模式用 yaw 对齐或 oracle 骨盆姿态覆盖 base_quat_w,『IMU 直供 projected_gravity』是基线而非唯一路径。风险:不记会在未来上真机时被当成新发现的阻断。
+
+
+### 23.4 补充
+
+## 二十三、两项裁决:immutable_tape 的真实身份,与 base_ang_vel / projected_gravity 的回归(2026-08-04)
+
+### 23.1 一句话
+
+- **tape**:配错了,不是参数填错,是选错工具。要的是"缓存",拿到的是"永久冻结 + 课程停权"。
+- **obs**:该加,Franco 判断成立;但支持它的理由必须换掉——不是"缺信息"(信息其实冗余),而是"缺一条不依赖 mocap 的本体姿态通路"和"缺一个能挂真机 IMU 噪声的钩子"。
+
+---
+
+### 23.2 immutable_tape 不是缓存,是消融夹具
+
+**本意 vs 现状**
+
+| | Franco 的本意 | 仓库现状 |
+|---|---|---|
+| 触发 | 档位不变就复用 | 与档位无关,永远一行 |
+| 失效 | 档位升了就重解 | 档位**不可能**升;真升了会崩(硬断言) |
+| 多样性 | 不变(只是省重复计算) | 塌成 1 题 |
+| curriculum | 照常运转 | 整跑停权 |
+
+**为什么它天生不是缓存**:`action_ball_target_source` 只有两个合法值(`online_solver` / `immutable_tape`,hope_commands.py:121),而合同校验器把 `online_solver` 限死只能配 `current_lm` + 全掩码(hope_commands.py:205-209)——5 个 target recipe 里另外 4 个(`analytic_full` / `analytic_no_velocity` / `teacher_pos_face_no_velocity` / `outcome_dense_only`)**根本没有 online 路径,只能走 tape**。它的设计岗位就是目标信息消融的载具。模块自述也是实验设计口径,不是缓存口径。
+
+**32-arm curriculum 在 tape 下起不起作用:完全不起,而且是双重的**
+
+1. **构造期停权**:`immutable_tape` 强制 `diagnostic_unauthorized=true`(hope_commands.py:5349-5357;并强制 n_actions=1),该开关让 ActionBallCurriculum 拿到 `evaluator_authority=None` / `drain_reset_authority=None`(hope_commands.py:5307-5315,注释自陈"A diagnostic authority is deliberately NOT bound")。
+2. **运行期短路(这才是主机制)**:真正的把门人是 runner 侧的 `action_ball_frozen_evaluation_boundary`(hope_commands.py:10799-10823)——diagnostic_unauthorized 为真时,phase='poll' 直接返回 `{"diagnostic_unauthorized": True}`,**根本不调用** `_action_ball_eval_consume_ready`(:10845),而后者是 `curriculum.observe_scheduler`(action_ball_curriculum.py:3625)/ `stage_selected`(:3974)的唯一调用方。所以课程不是"被调用时报错",是**从头到尾没人调用**;曲线永远停在初始 `phase='center'`、32 臂全 0.0 档(`LEVELS=(0,.25,.5,.75,1.0)`,action_ball_curriculum.py:61-62)。课程内部的 `evaluator_authority is None` fail-loud 只是纵深防御,真跑里从不触发。
+3. **tape 也不读课程**:`FixedQuestionTapeSolver._assert_birth_matches_question`(action_ball_fixed_question_tape.py:838-870)对 domain_levels 做**硬断言**——课程若真升了档,进程崩,不是换题。tape 不是"跟着档位走",是"逼课程每次 reset 复读同一常量"。
+
+**冻的到底是什么**:不只是来球。实测 artifact `row_count=1`、`selection="constant_row_zero"`、`online_lm_calls=0`、`physical_rng_draws=0`(action_ball_fixed_question_tape.py:582-584;活体件 `configs/action_ball_n1_measured_20260803/fresh_tape_seed0_20260803_take061_robust20n_r4_splitready/immutable_n1_tape.v1.22052606032f.json`)。`base_spawn` / `ball_contact` / `incoming_velocity` / `incoming_spin=[0,0,0]` / `landing_aim` 全是字面浮点数,5 个 recipe 的期望接触 p-v-face 元组也各自预算死。**这是一道题,不是一个分布。**
+
+**有没有真缓存:一行都没有。** 搜遍 continuous_questions.py / action_ball_sampling.py / strike_spec_torch.py,唯一的 cache 是审计回执的 sha/digest 记账(action_ball_sampling.py:4579-4937)。有意思的是**正确设计已经以字符串形式躺在仓库里但零实现**:未提交的 hope_commands.py:6120-6134 往诊断 payload 塞了 `final_curriculum_question_source: "pregenerated_or_cached_band_question_bank"`、`final_curriculum_reset_operation: "index_precomputed_question_row"`、`does_not_freeze_final_curriculum_to_one_question: True`——没有任何代码读它,**不能当成"已经有缓存了"引用**。
+
+---
+
+### 23.3 省算力这个动机今天还成不成立:成立,但只剩一半,且要改一处归因
+
+**跨文档口径修正(以本节为准)**:§10.2 把 23.48 s/update 里的 13.5-17.8 s(60-75%)记成"reset 仪式 = 逐 env Python 记账残差",那是**估算**。同日晚些的 Pod 分段 profiler(design_audit_and_speedup_20260729.md §8.10)把它拆开了:
+
+- profiled reset = 40.732 s,其中 `pool_request_many` = 34.724 s、**`solver_solve_many` = 33.432 s = reset 的 82.1%**、= 五轮总 collection(51.654 s)的 **64.7%**;
+- 对照:Motion true reset 4.979 s、provider 4.247 s、broker reserve 4.624 s、**Racket install 仅 0.202 s**(静态审计里"先做 install packet"的排序被实测推翻)。
+
+**reset 仪式的大头本来就是求解器本身,不是 Python 记账。**
+
+**优化后的今天(§8.11,host-only solver result,同 seed 4096×5)**:五轮 solver = 16.367 s / collection = 32.924 s ≈ **49.7%**;均值 **6.700 s/update**(≈14.67k env-steps/s),**reset-free update ≈ 2.7 s**。即 reset 增量 ≈ 4.0 s/update 里 solver 约 3.27 s ≈ **82%**。§8.11 原话:reset-heavy update 的主差额仍在 fixed-direction solver/LM。
+
+→ **动机成立,而且求解器仍是第一杠杆**;这恰恰说明不该用"永久冻结"去换它。另有一条不改语义的路已排产:固定题带预注册 `cq_n_iters=4/6/8/12`,若 8 次过数值门估省 ≈1.1 s/update(**估算,未验收**)。
+
+---
+
+### 23.4 最小修复(三步,按"不改现役字节"顺序)
+
+1. **零代码,即办**:承认 immutable_tape 是 N=1 消融夹具,把这句人话 + 显式到期条件(M1 或 strike_opportunity_count 首次非零)写进 `launch_action_ball_a225_four_arm_diagnostic.py` 的 claim 摘要。现役 argv(:1382-1385)一次性同时设了 `target_source=immutable_tape` 与 `diagnostic_unauthorized=true`,今天读 argv 看不出这等于把课程停权——这正是"发射工序:依赖核对单 + WARN 必进摘要"要防的。
+2. **先拿掉一半动机**:跑 §8.11 的 `cq_n_iters` 预注册。与 tape 完全解耦,零语义风险,验收沿用同 seed 4096×5 三组 JSON parity + finite checkpoint。
+3. **真缓存(本意的落点)**:新增**第三个** source 值 `banded_question_bank`(不动 immutable_tape 现语义),reset 按当前 domain_levels **索引预生成表行**,表按 32-arm 的 5 档 × 臂键离线分块生成。**失效机制不用新写**——课程每次 reset 已通过 `_action_ball_claim_domain`(hope_commands.py:6994-7042)报出 domain_levels,直接做 key,升档=换块=天然重解;`_assert_birth_matches_question` 的硬断言按行保留即可。该 source **不绑定** diagnostic_unauthorized,课程保留权威、可升档、可导出。**依赖**:必须排在 §13 R1(单臂可逆化)与 154 行样本量修复之后,否则解冻课程只会拿到一串永久锁。**成本**:题带规模 = 5 档 × 32 臂 × 每档行数,离线生成 + sha 钉 + 谱系管理,这是它比 tape 贵的唯一地方。
+
+---
+
+### 23.5 base_ang_vel / projected_gravity:有无表
+
+actor 侧。`base_lin_vel` 全家族缺席(`HOPEPolicyCfg` 一律 `base_lin_vel = None`,hope_env_cfg.py:928),是 HOPE 家族级的 critic-only。
+
+| 合同(总维) | base_ang_vel | projected_gravity | motion_anchor_pos_b | motion_anchor_ori_b |
+|---|---|---|---|---|
+| hitter_pure(110) | 有 | 有 | 无 | 无(用 base_forward_xy) |
+| stage1_natural_clip_site_v1(170) | 有 | 有 | 有 | 有 |
+| deploy_parity(175) | 有 | 有 | 无 | 有 |
+| hitter_footwork(177) | 有 | 有 | 无 | 有 |
+| deploy_parity_face179(179) | 有 | 有 | 无 | 有 |
+| full(180) | 有 | 有 | 有 | 有 |
+| deploy_parity_station181(181) | 有 | 有 | 无 | 有 |
+| L194 | 有 `[68:71]` | 有 `[164:167]` | 无 | 有 `[62:68]` |
+| **paddle_world_v2 / A225 / C225(225)** | **无独立列** | **无独立列** | 无 | 无 |
+
+---
+
+### 23.6 是刻意设计,不是抄前缀漏掉
+
+`git log --all -p` 对这两个词名的删除行(`-` 开头)在 `actor_observation_contract.py` 全历史**零命中**:没有任何合同曾经有过再被删掉。225 家族是**从零写的新合同**。
+
+- `7e5907a6`(08-02 06:43)建 170-D 时两条都在;
+- `d361d1bd`(08-02 17:56,同日)建 225-D V2 时**同一个 commit** 写下了理由,见 `docs/interfaces/policy_observation_action.md:428`(`projected_gravity` is omitted because actual base orientation already determines it)与 `:466-471`(旧的 `base_ang_vel ±0.2` / `projected_gravity ±0.05` 旋钮 "do not define physically valid noise",因为 15-D 是位置/姿态/线速度/角速度混装块,底座位姿噪声必须按 mocap/IMU 分量各自定义);
+- `10e3ab14`(08-03)建 A225/C225 时直接切 `STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2.terms[:10]` 复用(actor_observation_contract.py:286-293、320-324),所以它们连"重新加"的机会都没有——但源头是设计决定。
+
+---
+
+### 23.7 两个 15-D 块装了什么(会不会重复:信息上会)
+
+两块由同一个 `_stage1_pack_base_state_world`(hope_observations.py:310-349)按固定顺序拼接并断言有限:
+
+| 列 | 内容 |
+|---|---|
+| `[0:3]` | 世界系底座位置(Isaac per-env 帧换算到 HOPE 场地帧) |
+| `[3:9]` | 世界系旋转矩阵前两列(连续 6-D 表示) |
+| `[9:12]` | 世界系线速度 |
+| `[12:15]` | **世界系角速度** |
+
+`actual_base_now_world` 取 `root_lin_vel_w` / `root_ang_vel_w`;`teacher_base_now_world` 取对齐后参考 clip 的同构四段(速度经 `_stage1_reference_vector_in_aligned_world` 转到同一世界基)。
+
+→ **角速度有**(世界系,不是骨盆系);**重力方向无显式列但可反解**(`R^T·[0,0,-1]`,由 `[3:9]` Gram-Schmidt 补全)。**所以"补信息"这个理由不成立。**
+
+**真正支持加回来的三条**:
+
+1. **来源不同**。15-D 块的底座位姿真机侧靠 OptiTrack mocap,而团队自己的 "Deploy-Available Signal Set"(policy_observation_action.md:1100-1120)写明 mocap **只在 PLAY 期间可得**;`base_ang_vel` / `projected_gravity` 走骨盆 IMU,**永远可得**。加回来是加一条不依赖 mocap 的本体姿态通路。
+2. **噪声挂载点**。这正是 §22.2 C 表点名的洞:"合同里没有 base_ang_vel/projected_gravity,真机 IMU 噪声将来无处对应"。今天这两个量藏在一个官方判定"定义不出物理有效噪声"的混装块里 = IMU 噪声在训练侧**没有任何钩子**。
+3. **参考栈一致性**。四库 + 厂商 + 我们 8 个历史合同全保留这两条骨盆系通道;C++ 部署侧 `build_obs_175/177/179/180` 每个都在逐段拷 `state.base_ang_vel_b` 与 `projected_gravity_body(state.base_quat_w)`。
+
+---
+
+### 23.8 真机给不给得出:给,而且已经在跑
+
+- `RobotState` 携带骨盆 IMU 的 `imu_quat_wxyz` / `imu_gyro` / `imu_accel`(`agi/a3_deploy_example/README_robot_io_backend.md:121-128、207-208)。
+- **硬证据在 C++,不在那张 180-D 勾选表**(那张表所在的 PINGPONG_DEPLOY_ALIGNMENT.md 第 3 节已被其自身第 0 节标注为历史;且现役是 175-D,偏移应为 `base_ang_vel[68:71]` / `projected_gravity[164:167]`,与 180-D 表差 3)。真正该引的是 `pp_policy.hpp:1124-1125`:`st.base_quat_w = state.imu_quat_wxyz`(注释 "real pelvis IMU orientation")、`st.base_ang_vel_b = state.imu_gyro`(注释 "real pelvis gyro (body frame)"),`build_obs_175` 直接吃这两个字段。
+- **实况提醒**:`pp_policy.hpp` 下游约 `:1135` / `:1159` 会按定位模式用 yaw 对齐或 oracle/mocap 骨盆姿态**覆盖** `base_quat_w`,所以"IMU 直供"是基线路径而非唯一路径。
+- **缺口**:部署侧只有 `build_obs_110/175/177/179/180`,**没有 181/194/225**(整个 deploy 树对这三个数字零命中)。225 家族今天是纯 sim。
+
+---
+
+### 23.9 加回来的机械成本清单
+
+225 家族被显式冻结("must never be silently reinterpreted by a checkpoint or rollout receipt"),所以这是**新增合同**,不是原地改。
+
+1. `actor_observation_contract.py`:新 `ActorObservationContract`(新 name、`total_dim`=228 或 231),在 `CONTRACTS` 按 `.name` 与 `.obs_mode` **双注册**,并加进 `infer_actor_observation_contract()` 的元组(约 :1093-1113)——**漏这一步会让按形状自动识别静默失败**。
+2. `hope_env_cfg.py`:新 ObsGroup 子类插两个 ObsTerm(mdp 函数已存在,零新数学)+ 新 EnvCfg + 新 cfg/task yaml(不能改钉死的 `HOPEPingPongActionBallA225VendorV2N1Learnability.yaml`)。
+3. **critic ABI:内容不动**(318-D critic 经 `PrivilegedCfg` 已带 `base_lin_vel3` + `base_ang_vel3`,tracking_env_cfg.py:140-155),但 schema-3 要求**新注册一个 critic 身份串**。**口径纠正**:A225/C225 的 critic 不是 `Stage1CriticCfg`,而是各自独立注册的 `action_ball_a225_critic_v1` / `action_ball_c225_critic_v1`(布局在 `action_ball_225_trainability.py` / `action_ball_c225_trainability.py`);doc `:459-462` 明令三者虽同为 318 不得互相复用 checkpoint 谱系。
+4. **checkpoint 必然不兼容**:现役 `in_features=225`,228/231 是硬形状失配,无 warm start;ONNX 元数据钉合同名 + 宽度,等于全新导出件。
+5. `training_contract.py`(schema-3):`_STAGE1_..._ACTOR_OBS_CONTRACT` 一族冻结常量按合同名钉有序项名与总维(约 :155-194、:2351-2450、:5659-5845)。不加新常量 + 校验分支,新合同一律 fail closed。**这就是那个"钉维度的校验器"。**
+6. **MuJoCo-native fixed-tape parity**:任何 225-D 合同今天都没有(mujoco_native 全树不引用 `actual_base_now_world`),加不加这两列都是从零。
+7. **C++ 部署 builder**:今天没有 `build_obs_225`,也是从零;但加回这两列反而让未来那个函数的这 6 个标量退化成 175/177/179/180 已验证的成熟写法,难点仍在 `actual_base_now_world` / `teacher_base_now_world` 需要的 mocap + 因果估计器。
+8. **把 225 当魔数的下游**要跟或另立:`tests/test_action_ball_a225_trainability.py`、`scripts/materialize_action_ball_a225_lineage.py`、上述 yaml。
+
+---
+
+### 23.10 交叉裁决:DR 侧同步开噪声吗(应 §22 之问)
+
+**分成两件事,答案相反。**
+
+**(一)观测噪声 `base_ang_vel ±0.2` / `projected_gravity ±0.05` —— 随合同一起开,day-1,不进 §22 排队。**
+
+对 §22.1 三闸逐条:
+
+- **闸 1(支撑集)过**:骨盆 IMU 是**本体感受**通道,不改转移、不改"哪些动作能击中球"。§22.1 原文已点名这个不对称——本体感受噪声可 day-1,任务通道(desired-contact / racket-heading / time_to_contact)噪声不行。这两条属前者。
+- **闸 2(终止)过**:零均值观测噪声不改动力学、不造终止事件,Δp_term 预期为 0,远在 0.5 pp 阈内。
+- **闸 3(cadence)过**:每步级**只允许**零均值观测噪声,这正落在允许区。
+
+旁证:§22.2 A 行已判现役 `joint_pos ±0.01` / `joint_vel ±0.5` 为 "D1 开满";外部 9/9 库 day-1 固定;厂商连 play 都保留 obs 噪声。
+
+至于 doc `:466-471` 那句"旧旋钮定义不出物理有效噪声"——它针对的是**混装 15-D 块**,不针对重新独立出来的骨盆系单列:单列的物理含义、帧、单位与 175/177/179/180/194 完全一致,旧旋钮原样适用。
+
+**更关键的一句**:加了通道却不给噪声,等于把 §22 记的那个洞从"无处对应"改写成"有处对应但故意空着",sim2real 缺口反而更隐蔽。
+
+**(二)厂商 `scale=0.25` + `history=8` —— 不开。** 这是另一根轴(§22.2 C 第三行):破坏 110/177/194-D 部署契约,必须独立臂 + 同批改部署侧,且只有与延迟臂捆绑才有意义。维持 §11.3 低优先第 8 条。
+
+**(三)唯一让步**:若要与现役 A225 臂做严格单变量对比,可第一发新合同臂噪声关闭、第二发开,代价多一格。**默认不建议**——噪声本身就是这次修改的目的之一;真要控变量,变量应控在"有没有这两列",不是"这两列有没有噪声"。
+
+**(四)不动的**:两个 15-D 块继续零噪声,按 doc `:469-471`,底座位姿/twist 噪声必须按 mocap / IMU 分量各自定义,那是独立立项。
+
+---
+
+### 23.11 本节顺带修正的既有说法(以本节为准)
+
+1. §10.2 的"reset 仪式 = 60-75% Python 记账"是估算,已被 §8.10 分段 profiler 细化:reset 的 82.1% 就是求解器本身。
+2. §22.2 F 行把 immutable_tape 记作"旁路 / DR 轴一行",本节补足其真实身份:**它同时是课程停权开关**,不是中性的目标源选择。
+3. 把 A225 的 critic 称为 `Stage1CriticCfg` 是口径错误;A225/C225 各有独立注册的 318-D critic 身份。
+4. 引用真机 IMU 可用性时,不要引 `PINGPONG_DEPLOY_ALIGNMENT.md` 第 3 节的 180-D 勾选表(已被其自身第 0 节标为历史,且偏移与现役 175-D 差 3),改引 `pp_policy.hpp:1124-1125`。

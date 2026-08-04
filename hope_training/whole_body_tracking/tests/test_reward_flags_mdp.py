@@ -4006,6 +4006,11 @@ def test_exact_behavior_terminal_reset_separates_physical_pre_post_and_guards():
         time_outs=torch.zeros(4, dtype=torch.bool),
     )
     command = _exact_behavior_command(tm)
+    # Env 0 fell before its private task reveal.  The remaining falls were
+    # publicly revealed and occurred after the nominal strike boundary.
+    command._action_ball_task_valid = torch.tensor(
+        [False, True, True, True], dtype=torch.bool
+    )
     command._exact_attempt_active[:] = True
     command._close_exact_swing_attempts(torch.arange(4))
     command._book_exact_behavior_terminal_reset(
@@ -4024,10 +4029,164 @@ def test_exact_behavior_terminal_reset_separates_physical_pre_post_and_guards():
     assert first["non_physical_terminal_reset_count"].item() == 1
     assert first["termination_reason_base_fell_tilt_count"].item() == 1
     assert first["termination_reason_base_too_low_count"].item() == 2
+    assert (
+        first["termination_reason_base_fell_tilt_hidden_wait_count"].item()
+        == 1
+    )
+    assert (
+        first[
+            "termination_reason_base_fell_tilt_revealed_pre_strike_count"
+        ].item()
+        == 0
+    )
+    assert first["termination_reason_base_fell_tilt_post_strike_count"].item() == 0
+    assert first["termination_reason_base_too_low_hidden_wait_count"].item() == 0
+    assert (
+        first[
+            "termination_reason_base_too_low_revealed_pre_strike_count"
+        ].item()
+        == 0
+    )
+    assert first["termination_reason_base_too_low_post_strike_count"].item() == 2
+    for reason in ("base_fell_tilt", "base_too_low"):
+        assert first[f"termination_reason_{reason}_count"].item() == sum(
+            first[f"termination_reason_{reason}_{phase}_count"].item()
+            for phase in ("hidden_wait", "revealed_pre_strike", "post_strike")
+        )
     assert first["termination_reason_anchor_pos_count"].item() == 1
     # Consume is a hard PPO-update boundary: the next transaction cannot inherit any event.
     second = command.consume_exact_behavior_decision_counters()
     assert all(value.item() == 0 for value in second.values())
+
+
+def test_task_wait_reveal_books_one_edge_per_environment_and_update_transaction():
+    command = _exact_behavior_command(
+        types.SimpleNamespace(active_terms=()), num_envs=4
+    )
+    command._action_ball_task_wait_schedule = object()
+    command._action_ball_task_valid = torch.tensor(
+        [False, False, True, False], dtype=torch.bool
+    )
+    command._action_ball_task_wait_elapsed_ticks = torch.tensor(
+        [0, 1, 0, 2], dtype=torch.long
+    )
+    command._action_ball_task_wait_total_ticks = torch.tensor(
+        [1, 2, 0, 4], dtype=torch.long
+    )
+    command._action_ball_task_wait_last_advance_step = 0
+    command._action_ball_diagnostic_unauthorized = False
+    command._env.common_step_counter = 1
+    refreshed = []
+    command._motion = lambda: types.SimpleNamespace(
+        refresh_action_ball_revealed_body_reference=(
+            lambda mask: refreshed.append(mask.detach().clone())
+        )
+    )
+
+    command._advance_action_ball_task_wait()
+    assert torch.equal(
+        command._action_ball_task_valid,
+        torch.tensor([True, True, True, False]),
+    )
+    assert command._exact_behavior_decision_counters[
+        "task_reveal_reached_count"
+    ].item() == 2
+    assert torch.equal(refreshed[-1], torch.tensor([True, True, False, False]))
+
+    # Same policy-step token is idempotent; the remaining task reveals once on
+    # the next token and all three edges are delivered in the update snapshot.
+    command._advance_action_ball_task_wait()
+    assert command._exact_behavior_decision_counters[
+        "task_reveal_reached_count"
+    ].item() == 2
+    command._env.common_step_counter = 2
+    command._advance_action_ball_task_wait()
+    snapshot = command.consume_exact_behavior_decision_counters()
+    assert snapshot["task_reveal_reached_count"].item() == 3
+    assert command.consume_exact_behavior_decision_counters()[
+        "task_reveal_reached_count"
+    ].item() == 0
+
+
+def test_task_wait_arm_books_hidden_phase_exposure_denominator_once():
+    command = _exact_behavior_command(
+        types.SimpleNamespace(active_terms=()), num_envs=3
+    )
+    command._action_ball_task_wait_schedule = object()
+    command._action_ball_task_wait_highwater = types.SimpleNamespace(
+        record=lambda **_kwargs: types.SimpleNamespace(wait_ticks=2)
+    )
+    command._action_ball_task_wait_total_ticks = torch.zeros(3, dtype=torch.long)
+    command._action_ball_task_wait_elapsed_ticks = torch.zeros(3, dtype=torch.long)
+    command._action_ball_task_valid = torch.ones(3, dtype=torch.bool)
+    command.time_to_strike = torch.zeros(3)
+    command._env.step_dt = 0.02
+    time_to_contact = torch.ones(3, dtype=torch.float64)
+    pre_swing_wait = torch.ones(3, dtype=torch.float64)
+    motion = types.SimpleNamespace(
+        _action_ball_time_to_contact_s=time_to_contact,
+        _action_ball_pre_swing_wait_s=pre_swing_wait,
+        action_ball_time_to_contact_remaining_s=time_to_contact,
+        bind_action_ball_public_task_valid=lambda _value: None,
+    )
+    command._motion = lambda: motion
+
+    command._action_ball_arm_task_wait(
+        torch.tensor([0, 2]),
+        host_identity_rows=((0, 0, 0, 1), (2, 0, 0, 1)),
+        true_reset=True,
+    )
+
+    assert command._exact_behavior_decision_counters[
+        "task_wait_started_count"
+    ].item() == 2
+    assert torch.equal(
+        command._action_ball_task_valid,
+        torch.tensor([False, True, False]),
+    )
+    assert torch.equal(
+        command._action_ball_task_wait_total_ticks,
+        torch.tensor([2, 0, 2]),
+    )
+
+
+def test_each_fall_reason_partitions_hidden_revealed_pre_and_post_strike():
+    reasons = {
+        "base_fell_tilt": torch.ones(3, dtype=torch.bool),
+        "base_too_low": torch.ones(3, dtype=torch.bool),
+        "robot_hit_table": torch.ones(3, dtype=torch.bool),
+    }
+    command = _exact_behavior_command(
+        types.SimpleNamespace(
+            active_terms=list(reasons),
+            get_term=lambda name: reasons[name],
+            terminated=torch.ones(3, dtype=torch.bool),
+            time_outs=torch.zeros(3, dtype=torch.bool),
+        ),
+        num_envs=3,
+    )
+    command._action_ball_task_valid = torch.tensor(
+        [False, True, True], dtype=torch.bool
+    )
+
+    command._book_exact_behavior_terminal_reset(
+        torch.arange(3),
+        pre_strike=torch.tensor([True, True, False]),
+        recovering=torch.zeros(3, dtype=torch.bool),
+    )
+    snapshot = command.consume_exact_behavior_decision_counters()
+
+    for reason in ("base_fell_tilt", "base_too_low", "robot_hit_table"):
+        assert snapshot[f"termination_reason_{reason}_count"].item() == 3
+        assert snapshot[
+            f"termination_reason_{reason}_hidden_wait_count"
+        ].item() == 1
+        assert snapshot[
+            f"termination_reason_{reason}_revealed_pre_strike_count"
+        ].item() == 1
+        assert snapshot[
+            f"termination_reason_{reason}_post_strike_count"
+        ].item() == 1
 
 
 def test_exact_swing_closeout_pairs_window_denominator_and_transfers_wrap_strike():
@@ -4084,10 +4243,10 @@ def test_exact_initial_tts_buckets_pair_closeout_and_sparse_outcomes_per_update(
     assert snapshot["planner_initial_tts_eq_0p5_swing_completion_count"].item() == 0
     assert snapshot["planner_initial_tts_gt_0p5_le_0p9_swing_completion_count"].item() == 1
     assert snapshot["planner_initial_tts_gt_0p9_swing_completion_count"].item() == 0
-    assert snapshot["planner_initial_tts_lt_0p5_strike_opportunity_count"].item() == 1
-    assert snapshot["planner_initial_tts_eq_0p5_strike_opportunity_count"].item() == 1
-    assert snapshot["planner_initial_tts_gt_0p5_le_0p9_strike_opportunity_count"].item() == 1
-    assert snapshot["planner_initial_tts_gt_0p9_strike_opportunity_count"].item() == 0
+    assert snapshot["planner_initial_tts_lt_0p5_exact_strike_timing_tick_count"].item() == 1
+    assert snapshot["planner_initial_tts_eq_0p5_exact_strike_timing_tick_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p5_le_0p9_exact_strike_timing_tick_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p9_exact_strike_timing_tick_count"].item() == 0
     assert snapshot["planner_initial_tts_lt_0p5_virtual_capture_count"].item() == 1
     assert snapshot["planner_initial_tts_gt_0p5_le_0p9_virtual_capture_count"].item() == 1
     assert snapshot["planner_initial_tts_gt_0p5_le_0p9_virtual_legal_return_count"].item() == 1
@@ -4126,9 +4285,9 @@ def test_exact_initial_tts_bucket_defers_same_wrap_sparse_outcome_to_new_task():
     command._assign_exact_attempt_initial_tts(torch.tensor([0]), torch.tensor([1.10]))
     snapshot = command.consume_exact_behavior_decision_counters()
     assert snapshot["planner_initial_tts_lt_0p5_swing_outcome_count"].item() == 1
-    assert snapshot["planner_initial_tts_lt_0p5_strike_opportunity_count"].item() == 0
-    assert snapshot["planner_initial_tts_eq_0p5_strike_opportunity_count"].item() == 1
-    assert snapshot["planner_initial_tts_gt_0p9_strike_opportunity_count"].item() == 1
+    assert snapshot["planner_initial_tts_lt_0p5_exact_strike_timing_tick_count"].item() == 0
+    assert snapshot["planner_initial_tts_eq_0p5_exact_strike_timing_tick_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p9_exact_strike_timing_tick_count"].item() == 1
     assert snapshot["planner_initial_tts_gt_0p9_virtual_capture_count"].item() == 1
     assert snapshot["planner_initial_tts_gt_0p9_virtual_legal_return_count"].item() == 1
 

@@ -16,7 +16,14 @@ actor_obs_contract: action_ball_a211
 physical_ball: false
 
 env:
+  # Every formal A211 scale/long arm uses the production-size vectorized scene.
+  num_envs: 4096
   episode_length_s: 10.0
+
+domain_rand:
+  # Freeze the inherited startup gain randomization for the first learnability
+  # setting.  No additional DR axis is introduced by this leaf.
+  stable_ready_plant: true
 
 task_wait:
   enabled: true
@@ -28,8 +35,16 @@ task_wait:
   required_active_ticks: 200
 
 motion:
-  # RESET_WAIT is not the historical split-ready teacher transition.
-  action_ball_diagnostic_split_ready_teacher: false
+  # Physical reset and the hidden RESET_WAIT teacher use the separately held
+  # safe-ready state.  At reveal the teacher switches to exact measured frame 0;
+  # the family-specific, receipt-derived teacher-start countdown and dense mimic
+  # teach that bridge.  No hardcoded timing constant, frame0 physical-reset or
+  # passive-soak claim is made.
+  action_ball_diagnostic_split_ready_teacher: true
+  # Take_061_unit04_BH is a backhand teacher.  A singleton motion otherwise
+  # falls through the legacy "one clip means forehand" default, corrupting
+  # swing_sign, target-side selection and per-side telemetry.
+  clip_family_per_clip: [backhand]
 
 actions:
   # All first-wave arms are delay-matched at zero.  A delay/history study is a
@@ -54,11 +69,52 @@ racket:
   vb_metrics_only: false
   action_ball_pool_refill_rows: 1
 
-  # A versioned immutable A211 tape owns one complete desired p/v/face tuple.
-  # The A211 producer rejects incomplete tuples once task_valid becomes one.
-  action_ball_target_source: immutable_tape
-  action_ball_immutable_tape_path: ""
-  action_ball_immutable_tape_sha256: ""
+  # Keep the first A211 setting stationary: the fine kernels use their fixed
+  # rollout-zero widths and do not contract from policy-generated errors.
+  adaptive_sigma: false
+  adaptive_sigma_monotonic: false
+  adaptive_sigma_normal: false
+
+  # The curriculum/sampler remains the question authority.  The first distinct
+  # semantic question is solved online; while the fixed N1 curriculum emits the
+  # exact same question, only its already-proved answer is reused.  Expansion or
+  # any other semantic field change naturally misses the cache and solves again.
+  action_ball_target_source: online_solver
+  action_ball_reuse_exact_question_until_semantics_change: true
+  # Curriculum level 0 is one literal center ball/question.  Resets still
+  # consume the sampler's fixed RNG budget; the first promoted arm restores
+  # the manifest's ordinary non-zero support.
+  action_ball_initial_center_single_question: true
+  action_ball_target_recipe: current_lm
+  action_ball_target_validity_mask: [true, true, true]
   action_ball_target_observation_noise: false
   target_noise_white: 0.0
   target_noise_ar1_sigma: 0.0
+
+rewards:
+  # Take061 initial-center N1 starts at its commanded no-move base goal.
+  # Paying base_position for every pre-strike tick is therefore free income,
+  # not footwork guidance.  Keep it off in this fixed-N1 profile; a widened
+  # base-target curriculum must restore it or replace it with a potential term.
+  base_position_weight: 0.0
+
+  # Keep gamma=.99/lambda=.95 and price task guidance locally instead.  Every
+  # window term is the VendorV2 value times 1.15, preserving the broad Cauchy
+  # tail and the fine/precision ratios while making accepted target guidance
+  # exceed task-valid swing mimic.  racket_progress remains the inherited 10.
+  racket_position_coarse_weight: 11.5
+  racket_velocity_coarse_weight: 11.5
+  racket_normal_coarse_weight: 5.75
+  racket_position_coarse_std: 0.20
+  racket_velocity_coarse_std: 1.50
+  racket_position_weight: 4.6
+  racket_velocity_weight: 0.575
+  racket_normal_weight: 0.575
+  racket_position_precision_weight: 0.575
+  racket_velocity_precision_weight: 0.2875
+  racket_normal_precision_weight: 0.575
+
+  # Shared A/C initial-center legal-table scale: floor/max = 8.4/14.0 after dt.
+  # This keeps legal-table income above the full theoretical target+progress
+  # envelope at gamma=.99, while leaving racket_progress live for reach.
+  virtual_landing_weight: 700.0

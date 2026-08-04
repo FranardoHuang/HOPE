@@ -225,14 +225,15 @@ def validate_frame0_artifact(
 ) -> tuple[str, Mapping[str, Any]]:
     expected_keys = {
         "schema_version", "kind", "diagnostic_unauthorized", "source_kind",
-        "action_id", "motion_sha256", "task_close_ticks", "policy_dt_s",
-        "wait_schedule_canonical_sha256", "frame0", "content_sha256",
+        "action_id", "motion_sha256", "policy_dt_s",
+        "wait_schedule_canonical_sha256", "timing_receipt", "birth_horizon",
+        "frame0", "content_sha256",
     }
     if set(document) != expected_keys:
         raise ReceiptError("frame0 artifact keys differ")
     seal = _verify_seal(document, name="frame0 artifact")
     if (
-        document["schema_version"] != 1
+        document["schema_version"] != 2
         or document["kind"] != _L.FRAME0_EXACT_ARTIFACT_KIND
         or document["diagnostic_unauthorized"] is not True
         or document["source_kind"] != _L.FRAME0_EXACT_SOURCE_KIND
@@ -240,10 +241,53 @@ def validate_frame0_artifact(
         or document["policy_dt_s"] != _L.POLICY_DT_S
         or document["wait_schedule_canonical_sha256"]
         != _L.WAIT_SCHEDULE["canonical_sha256"]
-        or type(document["task_close_ticks"]) is not int
-        or document["task_close_ticks"] != _L.WAIT_SCHEDULE["required_active_ticks"]
     ):
         raise ReceiptError("frame0 artifact contract differs")
+    timing_pin = document["timing_receipt"]
+    horizon = document["birth_horizon"]
+    horizon_keys = {
+        "schema_version", "kind", "derivation",
+        "timing_receipt_canonical_sha256", "policy_dt_s",
+        "post_reset_coverage_policy_ticks", "max_reset_wait_policy_ticks",
+        "pre_swing_wait_s", "pre_swing_wait_policy_ticks_ceil",
+        "required_policy_ticks",
+    }
+    if (
+        type(timing_pin) is not dict
+        or set(timing_pin) != {"path", "sha256"}
+        or type(timing_pin["path"]) is not str
+        or not timing_pin["path"]
+        or SHA256_RE.fullmatch(str(timing_pin["sha256"])) is None
+        or type(horizon) is not dict
+        or set(horizon) != horizon_keys
+    ):
+        raise ReceiptError("frame0 birth-horizon authority is incomplete")
+    try:
+        pre_wait = float(horizon["pre_swing_wait_s"])
+        pre_wait_ticks = int(math.ceil(pre_wait / _L.POLICY_DT_S))
+        required_ticks = (
+            1 + int(_L.WAIT_SCHEDULE["max_wait_ticks"]) + pre_wait_ticks
+        )
+    except (TypeError, ValueError, ZeroDivisionError) as exc:
+        raise ReceiptError("frame0 birth-horizon timing is malformed") from exc
+    if (
+        not math.isfinite(pre_wait)
+        or pre_wait < 0.0
+        or horizon["schema_version"] != 1
+        or horizon["kind"] != "action_ball_frame0_dynamic_birth_horizon_v1"
+        or horizon["derivation"]
+        != "post_reset_coverage_plus_max_reset_wait_plus_ceil_pre_swing_wait"
+        or SHA256_RE.fullmatch(
+            str(horizon["timing_receipt_canonical_sha256"])
+        ) is None
+        or horizon["policy_dt_s"] != _L.POLICY_DT_S
+        or horizon["post_reset_coverage_policy_ticks"] != 1
+        or horizon["max_reset_wait_policy_ticks"]
+        != _L.WAIT_SCHEDULE["max_wait_ticks"]
+        or horizon["pre_swing_wait_policy_ticks_ceil"] != pre_wait_ticks
+        or horizon["required_policy_ticks"] != required_ticks
+    ):
+        raise ReceiptError("frame0 birth horizon is not the sealed timing derivation")
     frame0 = document["frame0"]
     if type(frame0) is not dict or set(frame0) != {
         "root_pos_w_m", "root_quat_wxyz", "root_lin_vel_w_mps",
@@ -363,7 +407,8 @@ def derive_probe_input(
                 "file_sha256": frame0_file_sha256,
                 "content_sha256": artifact_content_sha,
                 "artifact_source_commit": artifact_source_commit,
-                "task_close_ticks": frame0_artifact["task_close_ticks"],
+                "birth_horizon": frame0_artifact["birth_horizon"],
+                "timing_receipt": frame0_artifact["timing_receipt"],
             },
             "plant_template": {
                 "file_sha256": plant_template_file_sha256,
@@ -373,7 +418,9 @@ def derive_probe_input(
         },
         "required_next_gate": {
             "kind": GENERIC_RECEIPT_KIND,
-            "exact_policy_steps": frame0_artifact["task_close_ticks"],
+            "exact_policy_steps": frame0_artifact["birth_horizon"][
+                "required_policy_ticks"
+            ],
             "zero_terminal_required": list(REQUIRED_TERMINATIONS),
         },
         "non_claims": [
@@ -417,7 +464,7 @@ def validate_live_receipt(
     content_sha = _verify_seal(document, name="live safety evidence")
     raw_file_sha = sha256_file(raw_path)
     artifact = document.get("artifact")
-    ticks = frame0_artifact["task_close_ticks"]
+    ticks = frame0_artifact["birth_horizon"]["required_policy_ticks"]
     policy_dt = frame0_artifact["policy_dt_s"]
     expected_duration = ticks * policy_dt
     joint = document.get("joint_safety_telemetry")
@@ -463,7 +510,7 @@ def validate_live_receipt(
         or delay.get("initialized_env_count") != 1
         or delay.get("contract") != control_step_action_delay
     ):
-        raise ReceiptError("live receipt does not prove the exact 200-tick safe hold")
+        raise ReceiptError("live receipt does not prove the exact dynamic birth horizon")
     for key in (
         "minimum_root_z_m",
         "maximum_root_tilt_rad",
@@ -498,6 +545,67 @@ def validate_live_receipt(
         if sha256_file(path) != _sha(row.get("sha256"), name="screenshot SHA-256"):
             raise ReceiptError("live screenshot bytes differ")
     return raw_file_sha, content_sha
+
+
+def _dynamic_birth_gate_evidence(
+    live: Mapping[str, Any], *, policy_dt_s: float
+) -> dict[str, Any]:
+    """Project velocity one policy tick forward inside the observed hard limits."""
+
+    joint = live["joint_safety_telemetry"]
+    names = joint["joint_order"]
+    lower = joint["hard_lower_rad"]
+    upper = joint["hard_upper_rad"]
+    rows = []
+    for label in ("preterminal", "final"):
+        q = joint[label + "_joint_pos_rad"]
+        dq = joint[label + "_joint_vel_radps"]
+        projected = [p + policy_dt_s * v for p, v in zip(q, dq)]
+        gaps = [
+            min(value - lo, hi - value)
+            for value, lo, hi in zip(projected, lower, upper)
+        ]
+        minimum = min(gaps)
+        index = gaps.index(minimum)
+        if not math.isfinite(minimum) or minimum <= 0.0:
+            raise ReceiptError(
+                "%s velocity projection has no forward hard-gap headroom" % label
+            )
+        rows.append(
+            {
+                "state": label,
+                "minimum_forward_hard_gap_rad": minimum,
+                "minimum_forward_hard_gap_joint_name": names[index],
+            }
+        )
+    terminations = set(live["terminal_reasons"])
+    return {
+        "schema_version": 1,
+        "kind": "action_ball_frame0_dynamic_birth_gate_evidence_v1",
+        "thresholds_preregistered": {
+            "table_contact_count_max": 0,
+            "nonfinite_count_max": 0,
+            "actual_hard_edge_joint_count_max": 0,
+            "minimum_forward_hard_gap_rad_exclusive_min": 0.0,
+        },
+        "observed": {
+            "table_contact_count": int("robot_hit_table" in terminations),
+            "nonfinite_count": 0,
+            "current_actual_hard_edge_joint_count": joint[
+                "current_actual_hard_edge_joint_count"
+            ],
+            "substep_actual_hard_edge_joint_count": joint[
+                "substep_actual_hard_edge_joint_count"
+            ],
+            "forward_headroom": rows,
+        },
+        "nominal_scope": {
+            "actor_bias": "exact_frame0_normalized_action",
+            "per_env_joint_default_offset_dr_preserved": True,
+            "per_env_joint_default_offset_range_rad": [-0.01, 0.01],
+            "full_dr_distribution_hold_pass_claimed": False,
+        },
+    }
 
 
 def _write_new(root: Path, relative: str, payload: bytes) -> dict[str, str]:
@@ -559,6 +667,31 @@ def consume(args: argparse.Namespace) -> dict[str, Any]:
     )
     frame, _frame_raw = _strict_json(frame_path, name="frame0 artifact", newline=True)
     template, _template_raw = _strict_json(template_path, name="plant template", newline=None)
+    validate_frame0_artifact(frame, motion_sha256=args.expected_motion_sha256)
+    timing_pin = frame["timing_receipt"]
+    timing_path = _tracked_input(
+        root,
+        timing_pin["path"],
+        timing_pin["sha256"],
+        probe_source_commit,
+        name="sealed timing receipt",
+    )
+    timing, timing_raw = _strict_json(
+        timing_path, name="sealed timing receipt", newline=True
+    )
+    timing_unsigned = dict(timing)
+    timing_seal = timing_unsigned.pop("canonical_sha256", None)
+    if (
+        timing_raw != canonical_bytes(timing) + b"\n"
+        or timing_seal != frame["birth_horizon"]["timing_receipt_canonical_sha256"]
+        or timing_seal != canonical_sha256(timing_unsigned)
+        or timing.get("schema_version") != 5
+        or timing.get("motion_sha256") != frame["motion_sha256"]
+        or timing.get("contact_time_step_s") != frame["policy_dt_s"]
+        or timing.get("pre_swing_wait_s")
+        != frame["birth_horizon"]["pre_swing_wait_s"]
+    ):
+        raise ReceiptError("sealed timing receipt differs from the birth horizon")
     committed_artifact = _git(
         root,
         ("show", artifact_source_commit + ":" + _relative(args.frame0_artifact_path, name="frame0 artifact path")),
@@ -594,7 +727,7 @@ def consume(args: argparse.Namespace) -> dict[str, Any]:
         control_step_action_delay=runtime["control_step_action_delay"],
     )
     unsigned = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": _L.FRAME0_EXACT_RECEIPT_KIND,
         "diagnostic_unauthorized": True,
         "source_kind": _L.FRAME0_EXACT_SOURCE_KIND,
@@ -611,9 +744,28 @@ def consume(args: argparse.Namespace) -> dict[str, Any]:
         "probe_input_content_sha256": probe_content_sha,
         "live_safety_evidence_file_sha256": live_file_sha,
         "live_safety_evidence_content_sha256": live_content_sha,
-        "task_close_ticks": frame["task_close_ticks"],
         "policy_dt_s": frame["policy_dt_s"],
         "wait_schedule_canonical_sha256": frame["wait_schedule_canonical_sha256"],
+        "timing_receipt": frame["timing_receipt"],
+        "timing_receipt_canonical_sha256": timing_seal,
+        "birth_horizon": frame["birth_horizon"],
+        "birth_execution_horizon": {
+            "schema_version": 1,
+            "kind": "action_ball_frame0_dynamic_birth_execution_horizon_v1",
+            "control_decimation": int(runtime["control_decimation"]),
+            "required_policy_ticks": frame["birth_horizon"][
+                "required_policy_ticks"
+            ],
+            "required_physics_substeps": frame["birth_horizon"][
+                "required_policy_ticks"
+            ]
+            * int(runtime["control_decimation"]),
+            "plant_template_file_sha256": sha256_file(template_path),
+            "plant_template_content_sha256": template["content_sha256"],
+        },
+        "dynamic_birth_gate_evidence": _dynamic_birth_gate_evidence(
+            live, policy_dt_s=frame["policy_dt_s"]
+        ),
         "live_safety_evidence": live,
     }
     receipt = {**unsigned, "content_sha256": canonical_sha256(unsigned)}

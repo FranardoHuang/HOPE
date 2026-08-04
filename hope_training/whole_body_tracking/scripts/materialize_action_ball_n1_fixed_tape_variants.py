@@ -829,6 +829,7 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
         sampling_mixture=mixture,
         contact_time_step_s=POLICY_DT_S,
         diagnostic_unauthorized=True,
+        initial_center_single_question=True,
     )
     levels = sampling.DomainLevels()
     sampler_birth = sampler.reserve_birth(

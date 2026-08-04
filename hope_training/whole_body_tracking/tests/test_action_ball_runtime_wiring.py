@@ -282,8 +282,22 @@ def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
     )
     assert "residual_rows = host_packet.residual_rows" in refill
     assert ".cpu()" not in refill
-    assert '"exact_resume_supported": False' in diagnostic_state
-    assert "action_ball_diagnostic_checkpoint" in diagnostic_state
+    # Diagnostic authorization and checkpoint recoverability are independent.
+    # A211/C211 remain promotion-unauthorized, but now serialize the complete
+    # mutable sampler/cache/WAIT/task/latch graph for strict preflight plus a
+    # mandatory fresh-reset continuation.
+    assert '"exact_resume_supported": False' not in diagnostic_state
+    assert "action_ball_diagnostic_checkpoint" not in diagnostic_state
+    for exact_key in (
+        '"curriculum"',
+        '"mutable_state"',
+        '"broker"',
+        '"pool"',
+        '"env_state"',
+        '"task_wait"',
+        '"runtime_latches"',
+    ):
+        assert exact_key in diagnostic_state
 
     reserve_start = MOTION_SOURCE.index(
         "    def _reserve_action_ball_true_reset("
@@ -1120,7 +1134,7 @@ def test_reset_task_identity_is_packed_once_and_reused_across_python_seams():
 
 
 def test_diagnostic_install_packet_matches_fixed_receipt_tape():
-    import torch
+    torch = pytest.importorskip("torch")
 
     pack_rows, bool_packet = _module_functions(
         (
@@ -1537,6 +1551,14 @@ def test_action_ball_reference_host_rows_are_bound_once_as_immutable_copies():
         ((0.1, 0.2, 0.3),),
         shape=(1, 3),
     )
+    velocity = ReferenceTensor(
+        ((1.1, 1.2, 1.3),),
+        shape=(1, 3),
+    )
+    raw_normal = ReferenceTensor(
+        ((0.0, 1.0, 0.0),),
+        shape=(1, 3),
+    )
     command = SimpleNamespace(
         device="cuda:0",
         _action_ball_manifest=SimpleNamespace(actions=(action,)),
@@ -1546,11 +1568,15 @@ def test_action_ball_reference_host_rows_are_bound_once_as_immutable_copies():
         ),
         _ref_racket_quat_w_per_clip=quat,
         _ref_racket_ang_vel_w_per_clip=omega,
+        _ref_racket_vel_w_per_clip=velocity,
+        _ref_racket_normal_raw_w_per_clip=raw_normal,
     )
 
     cache_rows(command)
     assert quat.cpu_calls == 1
     assert omega.cpu_calls == 1
+    assert velocity.cpu_calls == 1
+    assert raw_normal.cpu_calls == 1
     assert command._action_ball_reference_host_identity == (
         (
             "bh_block",
@@ -1567,6 +1593,12 @@ def test_action_ball_reference_host_rows_are_bound_once_as_immutable_copies():
     assert command._action_ball_reference_omega_host_rows == (
         (0.1, 0.2, 0.3),
     )
+    assert command._action_ball_reference_velocity_host_rows == (
+        (1.1, 1.2, 1.3),
+    )
+    assert command._action_ball_reference_raw_normal_host_rows == (
+        (0.0, 1.0, 0.0),
+    )
     assert isinstance(
         command._action_ball_reference_quat_host_rows, tuple
     )
@@ -1577,8 +1609,12 @@ def test_action_ball_reference_host_rows_are_bound_once_as_immutable_copies():
     # The cached receipt rows must not remain a mutable tensor/list view.
     quat.values[0][0] = -1.0
     omega.values[0][0] = 9.0
+    velocity.values[0][0] = 9.0
+    raw_normal.values[0][0] = 9.0
     assert command._action_ball_reference_quat_host_rows[0][0] == 1.0
     assert command._action_ball_reference_omega_host_rows[0][0] == 0.1
+    assert command._action_ball_reference_velocity_host_rows[0][0] == 1.1
+    assert command._action_ball_reference_raw_normal_host_rows[0][0] == 0.0
 
 
 @pytest.mark.parametrize(
@@ -1660,6 +1696,16 @@ def test_action_ball_reference_host_cache_fails_closed_before_copy(
         shape=(1, 3),
         device=omega_device,
     )
+    velocity = ReferenceTensor(
+        [[1.1, 1.2, 1.3]],
+        shape=(1, 3),
+        device=omega_device,
+    )
+    raw_normal = ReferenceTensor(
+        [[0.0, 1.0, 0.0]],
+        shape=(1, 3),
+        device=omega_device,
+    )
     command = SimpleNamespace(
         device="cuda:0",
         _action_ball_manifest=SimpleNamespace(actions=(action,)),
@@ -1669,11 +1715,15 @@ def test_action_ball_reference_host_cache_fails_closed_before_copy(
         ),
         _ref_racket_quat_w_per_clip=quat,
         _ref_racket_ang_vel_w_per_clip=omega,
+        _ref_racket_vel_w_per_clip=velocity,
+        _ref_racket_normal_raw_w_per_clip=raw_normal,
     )
     with pytest.raises(RuntimeError, match=message):
         cache_rows(command)
     assert quat.cpu_calls == 0
     assert omega.cpu_calls == 0
+    assert velocity.cpu_calls == 0
+    assert raw_normal.cpu_calls == 0
 
 
 def test_opaque_task_ref_rejects_forged_stale_and_cross_env_refs(
@@ -1749,6 +1799,7 @@ def test_opaque_task_ref_rejects_forged_stale_and_cross_env_refs(
     command = SimpleNamespace(
         num_envs=2,
         _action_ball_enabled=True,
+        _action_ball_fixed_view_enabled=False,
         _action_ball_task_by_env=[receipt, None],
         _action_ball_birth_by_env=[birth, None],
         _action_ball_attempt_active=_FakeTensor([True, False]),
@@ -3140,7 +3191,6 @@ def test_action_ball_runtime_has_no_training_selector_or_legacy_ball_producer():
         "generate_continuous_questions",
         "_apply_question_bank_targets",
         "select_and_fit",
-        "question_bank",
         "action_selector",
         "planner_selector",
     ):
@@ -3321,9 +3371,10 @@ def test_exact_resume_captures_every_receipt_tape_queue_and_generation_without_i
     assert "ActionBallSampler(" not in staged_assert_sample
     assert 'staged_shared["sampler"].assert_issued_birth' in staged_assert_birth
     assert 'staged_shared["sampler"].assert_issued_sample' in staged_assert_sample
-    assert 'restored_ledger[x_row][slot] += 1' in load
-    assert "self._action_ball_attempt_active.zero_()" in load
-    assert "self._action_ball_task_by_env = [None] * self.num_envs" in load
+    assert 'restored_ledger[x_row][slot] += 1' not in load
+    assert "self._action_ball_attempt_active.copy_(" in load
+    assert "self._action_ball_task_by_env = tasks" in load
+    assert "resume_reset_exclusion.copy_(" in load
     for forbidden in (
         "solve_proposals",
         "write_root_state_to_sim",
@@ -3332,6 +3383,46 @@ def test_exact_resume_captures_every_receipt_tape_queue_and_generation_without_i
         "._action_ball_sampler.sample(",
     ):
         assert forbidden not in load
+
+
+def test_action_ball_exact_resume_preflight_is_read_only_and_precedes_commit():
+    initialize = _method_source("_initialize_action_ball_runtime")
+    validate = _method_source(
+        "_action_ball_validate_exact_resume_state_dict"
+    )
+    load = _method_source("_action_ball_load_exact_resume_state_dict")
+
+    assert (
+        "self.validate_exact_resume_state_dict = (" in initialize
+    )
+    assert "_validate_only=True" in validate
+    validation_boundary = load.index("if _validate_only:")
+    first_live_commit = load.index(
+        "self._action_ball_curriculum = staged_runtime"
+    )
+    assert validation_boundary < first_live_commit
+    for staged_component in (
+        "staged_task_wait_state",
+        "staged_runtime_latches",
+        "staged_curriculum",
+        "staged_sampler",
+        "staged_broker",
+        "staged_pool",
+    ):
+        assert load.index(staged_component) < validation_boundary
+
+
+def test_action_ball_resume_requires_fresh_reset_and_retires_open_attempt_as_x():
+    load = _method_source("_action_ball_load_exact_resume_state_dict")
+    close = _method_source("_action_ball_close_attempts")
+
+    assert "resume_reset_exclusion.copy_(" in load
+    assert "self._action_ball_attempt_active" in load
+    assert "active = installed_active & ~resume_exclusion" in close
+    assert "unattributed &= active" in close
+    assert "clamped[resume_exclusion]" in close
+    assert 'additions["X"]' in close
+    assert "self._action_ball_resume_reset_exclusion[ids] = False" in close
 
 
 def _stage_resume_curriculum_method(namespace):
@@ -3464,3 +3555,61 @@ def test_legal_result_only_latches_onto_an_installed_action_ball_attempt():
         "legal & self._action_ball_attempt_active"
         in " ".join(book.split())
     )
+
+
+def test_split_ready_wait_uses_one_task_valid_bit_and_no_transition_driver():
+    arm_wait = _method_source("_action_ball_arm_task_wait")
+    assert "motion.bind_action_ball_public_task_valid(" in arm_wait
+    assert "motion._action_ball_time_to_contact_s[ids] += wait_s" in arm_wait
+    assert "motion._action_ball_pre_swing_wait_s[ids] += wait_s" in arm_wait
+    assert "_action_ball_task_valid[ids] = False" in arm_wait
+    assert "connector" not in SOURCE
+    assert "connector" not in MOTION_SOURCE
+    assert "teacher-frame0 transition" not in MOTION_SOURCE
+
+    motion_tree = ast.parse(MOTION_SOURCE, filename=str(MOTION_COMMAND_PATH))
+    motion_class = next(
+        node
+        for node in motion_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MotionCommand"
+    )
+    methods = {
+        node.name: ast.get_source_segment(MOTION_SOURCE, node)
+        for node in motion_class.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert "return ~task_valid" in methods["_action_ball_safe_ready_wait_mask"]
+    assert "_action_ball_dynamic_ready_physical_joint_pos_rad" in methods["joint_pos"]
+    assert "_action_ball_safe_ready_body_pos_w" in methods["body_pos_w"]
+    assert "_action_ball_safe_ready_body_quat_w" in methods["body_quat_w"]
+    for name in (
+        "joint_vel",
+        "body_lin_vel_w",
+        "body_ang_vel_w",
+        "anchor_lin_vel_w",
+        "anchor_ang_vel_w",
+    ):
+        assert "_action_ball_safe_ready_wait_mask()" in methods[name]
+    assert "return torch.ones(" in methods["imitation_eligible"]
+
+
+def test_hidden_wait_is_ineligible_and_active_miss_closes_zero_over_c():
+    close = " ".join(_method_source("_action_ball_close_attempts").split())
+    assert "active = active & self._action_ball_task_valid[ids]" in close
+    assert '"C": torch.bincount(clamped[active]' in close
+    assert '"H": torch.bincount(clamped[hit]' in close
+    assert "hit = active & self._action_ball_attempt_hit[ids]" in close
+
+    strike = " ".join(_method_source("_vb_book_strike_step").split())
+    assert "hit = hit & self._action_ball_task_valid" in strike
+    sparse = " ".join(
+        _method_source("_book_sparse_reward_eligibility").split()
+    )
+    for name in (
+        "exact_strike",
+        "capture",
+        "net_clear",
+        "landing_valid",
+        "legal_return",
+    ):
+        assert f"{name} = {name} & task_valid" in sparse

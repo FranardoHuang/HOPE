@@ -40,7 +40,7 @@ C211_CRITIC_CONTRACT = "action_ball_c211_critic_v1"
 C211_TRAINABILITY_CONTRACT = "action_ball_c211_fixed_midpoint_learnability_v2"
 C211_ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v2"
 C211_CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
-C211_REWARD_CONTRACT = "action_ball_c211_achieved_outcome_reward_v2"
+C211_REWARD_CONTRACT = "action_ball_c211_achieved_outcome_reward_v3"
 
 
 def c211_reward_contract_facts() -> dict:
@@ -57,7 +57,7 @@ def c211_reward_contract_facts() -> dict:
                 "action_ball_c225_rewards."
                 "c225_strike_ball_paddle_center_proximity"
             ),
-            "weight": 220.0,
+            "weight": 240.0,
             "std_m": 0.15,
             "kernel": "cauchy_inverse_quadratic",
             "eligibility": "task_valid_active_swing_single_exact_strike_tick",
@@ -65,10 +65,20 @@ def c211_reward_contract_facts() -> dict:
         },
         "economics": {
             "policy_dt_s": 0.02,
-            "compatible_swing_motion_static_max": 3.6575,
-            "strike_bridge_post_dt_peak": 4.4,
-            "legal_landing_post_dt_min": 6.0,
-            "ordering": "motion_lt_strike_peak_lt_legal_landing",
+            # Take061's task-valid support is 103 policy ticks.  The previous
+            # native-catalog maximum did not describe this fixed-N1 wall-clock
+            # opportunity.
+            "task_valid_swing_mimic_undiscounted_cap": 2.8325,
+            "task_reveal_discounted_gamma": 0.99,
+            "task_reveal_contact_tick": 92,
+            "task_valid_swing_mimic_discounted_cap": 1.7733077595610476,
+            "strike_bridge_post_dt_peak": 4.8,
+            "strike_bridge_discounted_at_contact": 1.9040534708257204,
+            "legal_landing_post_dt_min": 8.4,
+            "legal_landing_discounted_at_contact_min": 3.332093573945011,
+            "ordering": (
+                "task_valid_swing_mimic_lt_strike_peak_lt_legal_landing"
+            ),
         },
         "landing": {
             "term": "virtual_landing",
@@ -76,7 +86,7 @@ def c211_reward_contract_facts() -> dict:
                 "whole_body_tracking.tasks.tracking.mdp."
                 "action_ball_c225_rewards.c225_landing_outcome_actual_contact"
             ),
-            "weight": 500.0,
+            "weight": 700.0,
             "evidence_source": "analytic_prediction_from_achieved_selected_rubber_contact",
             "observed_physical_landing_available": False,
             "eligibility": (

@@ -25,6 +25,7 @@ import json
 import math
 from pathlib import Path
 import sys
+from types import MappingProxyType
 from typing import Dict, Mapping, Sequence, Tuple
 
 try:
@@ -91,9 +92,30 @@ INSTALL_LAYOUT = (
     ("landing_aim_w_xy_m", 2),
     ("time_to_contact_s", 1),
 )
+# Motion owns teacher phase/deadline validation.  This runtime-only row is
+# derived from the already canonical, construction-validated tape payload; it
+# is deliberately not added to the on-disk schema (which would invalidate
+# existing immutable-tape SHAs).  The fixed-view consumer uploads it once and
+# broadcasts row zero just like the install and observation rows.
+TIMING_LAYOUT = (
+    ("time_to_contact_s", 1),
+    ("reference_t_hit_s", 1),
+    ("reference_t_cycle_s", 1),
+    ("reference_racket_site_speed_mps", 1),
+    ("required_racket_site_speed_mps", 1),
+    ("teacher_rate_min", 1),
+    ("teacher_rate_max", 1),
+    ("teacher_rate", 1),
+    ("scaled_t_hit_s", 1),
+    ("scaled_t_cycle_s", 1),
+    ("pre_swing_wait_s", 1),
+    ("reaction_margin_s", 1),
+    ("racket_site_velocity_w_mps", 3),
+)
 QUESTION_WIDTH = sum(width for _name, width in QUESTION_LAYOUT)
 TARGET_WIDTH = sum(width for _name, width in TARGET_LAYOUT)
 INSTALL_WIDTH = sum(width for _name, width in INSTALL_LAYOUT)
+TIMING_WIDTH = sum(width for _name, width in TIMING_LAYOUT)
 OBSERVATION_WIDTH = (
     QUESTION_WIDTH
     + TARGET_WIDTH
@@ -691,6 +713,18 @@ class ImmutableN1QuestionTape:
             raise RuntimeError("immutable tape install width drifted")
         return row
 
+    def timing_row(self, recipe: str) -> Tuple[float, ...]:
+        """Return Motion's prevalidated fixed teacher-timing row."""
+
+        payload = {
+            **self.question_payload,
+            **self.targets[recipe].runtime_target,
+        }
+        row = _flatten_layout(payload, TIMING_LAYOUT)
+        if len(row) != TIMING_WIDTH:
+            raise RuntimeError("immutable tape timing width drifted")
+        return row
+
     def reset_batch_view(
         self, recipe: str, *, batch_size: int
     ) -> "ImmutableResetBatchView":
@@ -701,6 +735,7 @@ class ImmutableN1QuestionTape:
             row_index=0,
             install_row=self.install_row(recipe),
             observation_row=self.observation_row(recipe),
+            timing_row=self.timing_row(recipe),
             lineage=self.target_lineage(recipe),
         )
 
@@ -725,6 +760,7 @@ class ImmutableResetBatchView:
     row_index: int
     install_row: Tuple[float, ...]
     observation_row: Tuple[float, ...]
+    timing_row: Tuple[float, ...]
     lineage: Mapping[str, object]
 
     def __post_init__(self) -> None:
@@ -736,6 +772,79 @@ class ImmutableResetBatchView:
             raise ValueError("immutable reset install row has wrong width")
         if len(self.observation_row) != OBSERVATION_WIDTH:
             raise ValueError("immutable reset observation row has wrong width")
+        if len(self.timing_row) != TIMING_WIDTH:
+            raise ValueError("immutable reset timing row has wrong width")
+
+    def expand_install_rows(self, install_row_tensor: object) -> object:
+        """Expand a cached row-zero device tensor without allocating N rows.
+
+        This method deliberately has no Torch import.  A consumer uploads each
+        immutable install row once, then passes the cached 1-D or
+        ``[1, INSTALL_WIDTH]`` device tensor here.  The return value is an
+        ordinary zero-stride ``expand`` view; this method never iterates over
+        environments or Python values.
+        """
+
+        return _expand_device_row_zero(
+            install_row_tensor,
+            batch_size=self.batch_size,
+            width=INSTALL_WIDTH,
+            name="install_row_tensor",
+        )
+
+    def expand_observation_rows(self, observation_row_tensor: object) -> object:
+        """Broadcast the cached observation row as a zero-stride view."""
+
+        return _expand_device_row_zero(
+            observation_row_tensor,
+            batch_size=self.batch_size,
+            width=OBSERVATION_WIDTH,
+            name="observation_row_tensor",
+        )
+
+    def expand_timing_rows(self, timing_row_tensor: object) -> object:
+        """Broadcast the cached Motion timing row as a zero-stride view."""
+
+        return _expand_device_row_zero(
+            timing_row_tensor,
+            batch_size=self.batch_size,
+            width=TIMING_WIDTH,
+            name="timing_row_tensor",
+        )
+
+
+def _expand_device_row_zero(
+    row_tensor: object,
+    *,
+    batch_size: int,
+    width: int,
+    name: str,
+) -> object:
+    """Return ``[batch_size, width]`` through a tensor-like ``expand`` view."""
+
+    shape = getattr(row_tensor, "shape", None)
+    try:
+        shape = tuple(shape)
+    except TypeError as error:
+        raise TypeError(f"{name} must expose a tensor-like shape") from error
+    if shape == (width,):
+        unsqueeze = getattr(row_tensor, "unsqueeze", None)
+        if not callable(unsqueeze):
+            raise TypeError(f"{name} must provide unsqueeze()")
+        row_zero = unsqueeze(0)
+    elif shape == (1, width):
+        row_zero = row_tensor
+    else:
+        raise ValueError(
+            f"{name} must have shape ({width},) or (1, {width}), got {shape}"
+        )
+    expand = getattr(row_zero, "expand", None)
+    if not callable(expand):
+        raise TypeError(f"{name} must provide expand()")
+    rows = expand(batch_size, width)
+    if tuple(getattr(rows, "shape", ())) != (batch_size, width):
+        raise ValueError(f"{name}.expand() returned the wrong shape")
+    return rows
 
 
 def _sample_identity(
@@ -826,6 +935,26 @@ class FixedQuestionTapeSolver:
         self._emitted = []
         self._assignments: Dict[Tuple[int, int], Tuple[str, int]] = {}
         self._highwater: Dict[int, Tuple[int, int]] = {}
+        # Build and hash the immutable row/lineage once at construction.  The
+        # reset hot path only changes batch-size metadata around these shared
+        # tuples; it does not rebuild payloads or receipts.
+        base_reset_batch_template = tape.reset_batch_view(
+            target_recipe, batch_size=1
+        )
+        self._reset_batch_template = ImmutableResetBatchView(
+            batch_size=1,
+            row_index=base_reset_batch_template.row_index,
+            install_row=base_reset_batch_template.install_row,
+            observation_row=base_reset_batch_template.observation_row,
+            timing_row=base_reset_batch_template.timing_row,
+            lineage=MappingProxyType(
+                {
+                    **base_reset_batch_template.lineage,
+                    "solver_contract_sha256": self.solver_contract_sha256,
+                    "state_owner_sha256": self.state_owner_sha256,
+                }
+            ),
+        )
 
     @property
     def online_lm_calls(self) -> int:
@@ -834,6 +963,27 @@ class FixedQuestionTapeSolver:
     @property
     def physical_rng_draws(self) -> int:
         return 0
+
+    def reset_batch_view(self, *, batch_size: int) -> ImmutableResetBatchView:
+        """Return the O(1) fixed-row producer view for a reset batch.
+
+        This is intentionally separate from the legacy pool-compatible
+        ``solve_many`` API.  Reading the view is stateless: task generations,
+        logical counters, replay authority, and receipt materialization remain
+        unchanged until the consumer commits through its chosen protocol.
+        """
+
+        if type(batch_size) is not int or batch_size < 1:
+            raise ValueError("batch_size must be a positive plain integer")
+        template = self._reset_batch_template
+        return ImmutableResetBatchView(
+            batch_size=batch_size,
+            row_index=template.row_index,
+            install_row=template.install_row,
+            observation_row=template.observation_row,
+            timing_row=template.timing_row,
+            lineage=template.lineage,
+        )
 
     def _assert_birth_matches_question(self, birth: object) -> None:
         question = self.tape.question_payload
@@ -1197,9 +1347,11 @@ __all__ = [
     "TARGET_LAYOUT",
     "VALIDITY_LAYOUT",
     "INSTALL_LAYOUT",
+    "TIMING_LAYOUT",
     "QUESTION_WIDTH",
     "TARGET_WIDTH",
     "INSTALL_WIDTH",
+    "TIMING_WIDTH",
     "OBSERVATION_WIDTH",
     "TargetVariant",
     "ImmutableN1QuestionTape",

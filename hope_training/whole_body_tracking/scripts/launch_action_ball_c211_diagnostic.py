@@ -14,6 +14,7 @@ import argparse
 import fcntl
 import hashlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -24,16 +25,30 @@ import subprocess
 import sys
 from typing import Any, Mapping, Sequence
 
+import numpy as np
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_FILE = SCRIPT_DIR / "launch_n1_reward_screen_diagnostic.py"
 ADMISSION_FILE = SCRIPT_DIR / "vendor_v2_gpu_admission.py"
 EXACT_GROUP_FILE = SCRIPT_DIR / "exact_process_group.py"
 OLD_VALIDATOR_FILE = SCRIPT_DIR / "launch_n1_measured_vendor_v2_diagnostic.py"
+C211_EVIDENCE_FILE = SCRIPT_DIR / "action_ball_c211_oracle_evidence.py"
+FOUR_GRID_FILE = SCRIPT_DIR / "action_ball_211_four_grid_contract.py"
+FOUR_GRID_BARRIER_FILE = (
+    SCRIPT_DIR / "action_ball_211_four_grid_prelong_barrier.py"
+)
+PRELONG_GATE_FILE = SCRIPT_DIR / "action_ball_4096x5_prelong_gate.py"
+PRELONG_SEMANTICS_FILE = (
+    SCRIPT_DIR.parent
+    / "source/whole_body_tracking/whole_body_tracking/utils/"
+    "action_ball_prelong_semantics.py"
+)
 TASK_WAIT_FILE = (
     SCRIPT_DIR.parent
     / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/action_ball_task_wait.py"
 )
+A211_LAUNCHER_FILE = SCRIPT_DIR / "launch_action_ball_a211_four_arm_diagnostic.py"
 
 
 def _load_helper(name: str, path: Path):
@@ -50,31 +65,103 @@ _B = _load_helper("_c211_diagnostic_base", BASE_FILE)
 _A = _load_helper("_c211_diagnostic_gpu_admission", ADMISSION_FILE)
 _G = _load_helper("_c211_diagnostic_exact_process_group", EXACT_GROUP_FILE)
 _OLD = _load_helper("_c211_diagnostic_oracle_validator", OLD_VALIDATOR_FILE)
+_C = _load_helper("_c211_diagnostic_oracle_evidence", C211_EVIDENCE_FILE)
+_F = _load_helper("_a211_c211_four_grid_authority", FOUR_GRID_FILE)
+_Q = _load_helper("_a211_c211_four_grid_prelong_barrier", FOUR_GRID_BARRIER_FILE)
+_P = _load_helper("_c211_4096x5_prelong_gate", PRELONG_GATE_FILE)
+_S = _load_helper("_c211_4096x5_prelong_semantics", PRELONG_SEMANTICS_FILE)
 _W = _load_helper("_c211_task_wait_schedule", TASK_WAIT_FILE)
+_FRAME0 = _load_helper("_c211_shared_frame0_authority", A211_LAUNCHER_FILE)
 
 LaunchRefused = _B.LaunchRefused
 
 SCHEMA_VERSION = 2
 SPEC_KIND = "action_ball_c211_diagnostic_spec_v2"
 CLAIM_KIND = "action_ball_c211_diagnostic_claim_v2"
-LINEAGE_KIND = "action_ball_c211_fixed_midpoint_lineage_v1"
-C211_BUNDLE_KIND = "action_ball_c211_fixed_midpoint_bundle_v1"
+LINEAGE_KIND = "action_ball_c211_direct_ball_split_ready_lineage_v4"
+C211_BUNDLE_KIND = "action_ball_c211_direct_ball_split_ready_bundle_v4"
 RECIPE_KIND = "action_ball_c211_matched_recipe_v1"
 MATERIALIZATION_KIND = "action_ball_c211_reward_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_c211_policy_materialization_v1"
-ORACLE32_KIND = "action_ball_c211_oracle32_receipt_v1"
-C211_RAW_ORACLE_KIND = "action_ball_c211_oracle_raw_evidence_v1"
+ORACLE32_KIND = "action_ball_c211_oracle32_receipt_v2"
+C211_RAW_ORACLE_KIND = "action_ball_c211_oracle_raw_evidence_v2"
 C211_RUNNER_PREFLIGHT_KIND = "action_ball_c211_runner_preflight_evidence_v1"
 C211_SELECTED_RUBBER_KIND = (
     "action_ball_c211_selected_rubber_contact_evidence_v1"
 )
 RESULT_KIND = "action_ball_c211_diagnostic_launch_result_v1"
-FRAME0_EXACT_ARTIFACT_KIND = "action_ball_c211_frame0_exact_artifact_v1"
-FRAME0_EXACT_RECEIPT_KIND = "action_ball_c211_frame0_exact_receipt_v1"
-FRAME0_EXACT_SOURCE_KIND = "action_ball_c211_teacher_motion_frame0_exact_v1"
+SCALE4096_TERMINAL_ACCEPTANCE_KIND = (
+    "action_ball_c211_scale4096_terminal_acceptance_v2"
+)
+# Retired 2026-08-05: FRAME0_EXACT_ARTIFACT_KIND / FRAME0_EXACT_RECEIPT_KIND /
+# FRAME0_EXACT_SOURCE_KIND deleted with _validate_retired_exact_frame0_lineage;
+# the live copies stay in launch_action_ball_a211_four_arm_diagnostic.py.
+FRAME0_LIVE_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
+FRAME0_RECEIPT_PROBE_SOURCE_PATHS = _FRAME0.FRAME0_RECEIPT_PROBE_SOURCE_PATHS
+# Retired 2026-08-05: PASSIVE_HOLD_SOAK_GATE_KIND deleted with _validate_passive_hold_soak.
+PRELONG_SEMANTICS_ENABLE_ENV = (
+    "HOPE_ACTION_BALL_4096X5_PRELONG_SEMANTICS"
+)
+
+
+def _verify_frame0_probe_source_commit(
+    checkout: Path, lineage_commit: str, probe_commit: str
+) -> None:
+    try:
+        _FRAME0._verify_frame0_probe_source_commit(
+            checkout, lineage_commit, probe_commit
+        )
+    except _FRAME0.LaunchRefused as exc:
+        raise LaunchRefused(str(exc)) from exc
+
+
+def _verify_commit_ancestor(
+    checkout: Path, ancestor: str, descendant: str, *, name: str
+) -> None:
+    try:
+        _FRAME0._verify_commit_ancestor(
+            checkout, ancestor, descendant, name=name
+        )
+    except _FRAME0.LaunchRefused as exc:
+        raise LaunchRefused(str(exc)) from exc
+
+
+# Retired 2026-08-05: _validate_frame0_live_safety_evidence and
+# _frame0_birth_gate_binding_sha256 shims deleted with
+# _validate_retired_exact_frame0_lineage; the underlying authorities remain in
+# _FRAME0 (launch_action_ball_a211_four_arm_diagnostic.py).
+PRELONG_REWARD_RECIPE_SHA_ENV = (
+    "HOPE_ACTION_BALL_4096X5_PRELONG_REWARD_RECIPE_SHA256"
+)
+REWARD_PPO_ECONOMY_ENABLE_ENV = "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_GATE"
+UPDATE_PROFILE_ENV = "HOPE_ACTION_BALL_UPDATE_PROFILE"
+UPDATE_PROFILE_JSON_PREFIX = "HOPE_ACTION_BALL_UPDATE_PROFILE_JSON="
+# Retired 2026-08-05: _FRAME0_HANDOFF_KEYS deleted with
+# _exact_zero_handoff_semantics; A211 keeps the authoritative copy.
+_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS = {
+    "left_sole_floor_slack_m": 1.0e-4,
+    "right_sole_floor_slack_m": 1.0e-4,
+    "left_contact_load_slack_n": 1.0e-1,
+    "right_contact_load_slack_n": 1.0e-1,
+    "support_margin_slack_m": 1.0e-3,
+    "joint_position_slack_rad": 2.0e-2,
+    "qdes_slack_rad": 2.0e-2,
+    "torque_slack_nm": 2.0,
+    "table_clearance_slack_m": 1.0e-2,
+    "root_height_slack_m": 2.0e-2,
+    "root_tilt_slack_rad": 2.0e-2,
+    "collision_slack_m": 5.0e-3,
+    "ground_lp_residual_slack": 5.0e-8,
+}
 EXPERIMENT_NAME = "agibot_a3_action_ball_c211_diagnostic"
 
-RECIPE_ID = "C0-corrected-phase-fixedlr"
+ISAAC_FOUR_GRID_KIND = _F.KIND
+A_FIXED_CELL_ID = _F.A_FIXED_CELL_ID
+A_ADAPTIVE_KL_CELL_ID = _F.A_ADAPTIVE_KL_CELL_ID
+C_FIXED_CELL_ID = _F.C_FIXED_CELL_ID
+C_ADAPTIVE_KL_CELL_ID = _F.C_ADAPTIVE_KL_CELL_ID
+ISAAC_FOUR_GRID_CELL_IDS = _F.CELL_IDS
+RECIPE_IDS = _F.FAMILY_CELL_IDS["C211"]
 ACTOR_CONTRACT = "action_ball_c211"
 ACTOR_WIDTH = 211
 CRITIC_CONTRACT = "action_ball_c211_critic_v1"
@@ -82,11 +169,12 @@ CRITIC_WIDTH = 319
 TRAINABILITY_CONTRACT = "action_ball_c211_fixed_midpoint_learnability_v2"
 ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v2"
 CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
-TASK_PROFILE_ID = "HOPEPingPongActionBallC211VendorV2N1Learnability"
+TASK_PROFILE_ID = "HOPEPingPongActionBallC211VendorV2N1DRL0Learnability"
 GYM_TASK_ID = "HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0"
 TARGET_SEMANTICS = "c211_incoming_ball_p_v_spin_outcome_dense_v1"
 TARGET_RECIPE = "outcome_dense_only"
 TARGET_VALIDITY_MASK = (False, False, False)
+TARGET_SOURCE = "direct_ball"
 ACTION_ID = "take_061_unit04_bh"
 ACTION_UID = 5527597793770800
 TEACHER_ID = "Take_061_unit04_BH"
@@ -99,8 +187,11 @@ PHYSICAL_BALL_SEMANTICS = "analytic_virtual_ball_authoritative_physx_disabled"
 REWARD_MATERIALIZATION_PROFILE = "measured_vendor_v2_n1_static_v1"
 REWARD_RECIPE_FILENAME = "c211_effective_reward_recipe.json"
 POLICY_RECIPE_FILENAME = "c211_dynamic_ready_policy_recipe.json"
+C211_OBSERVED_BUNDLE_FILENAME = "c211_observed_oracle_bundle.json"
 RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 POLICY_DT_S = 0.02
+PASSIVE_HOLD_SOAK_POLICY_STEPS = 200
+PASSIVE_HOLD_SOAK_PHYSICS_STEPS = 800
 WAIT_SCHEDULE = _W.ActionBallTaskWaitSchedule(
     seed=20260804,
     min_wait_ticks=5,
@@ -109,6 +200,9 @@ WAIT_SCHEDULE = _W.ActionBallTaskWaitSchedule(
     required_active_ticks=200,
 ).to_dict()
 COLOCATION_SPEC_KEY = "allow_vendor_v2_colocation"
+COLOCATED_STAGES = ("scale4096", "long4096")
+MAX_COLOCATED_PROCESSES_PER_GPU = 2
+assert MAX_COLOCATED_PROCESSES_PER_GPU == _A.MAX_VENDOR_V2_COMPUTE_PIDS
 HARD_TERMINATION_UNION = (
     "base_fell_tilt",
     "base_too_low",
@@ -116,6 +210,25 @@ HARD_TERMINATION_UNION = (
     "joint_qdes_forbidden",
     "robot_hit_table",
 )
+STRICT_HARD_TERMINATION_UNION = (
+    "joint_actual_forbidden",
+    "joint_qdes_forbidden",
+)
+PHYSICAL_FALL_REASONS = ("base_fell_tilt", "base_too_low")
+PHYSICAL_FALL_PHASES = (
+    "hidden_wait",
+    "revealed_pre_strike",
+    "post_strike",
+)
+TASK_WAIT_STARTED_COUNTER = "task_wait_started_count"
+TASK_REVEAL_REACHED_COUNTER = "task_reveal_reached_count"
+PROHIBITED_HOLD_REFERENCE_TERMINATIONS = (
+    "anchor_pos",
+    "anchor_ori",
+    "ee_body_pos",
+)
+# Retired 2026-08-05: FULL_ACTIVE_TERMINATIONS deleted with
+# _validate_passive_hold_soak; A211 keeps the live copy.
 
 REQUIRED_OUTCOME_TERMS: Mapping[str, Mapping[str, Any]] = {
     "c225_strike_ball_paddle_center_proximity": {
@@ -123,7 +236,7 @@ REQUIRED_OUTCOME_TERMS: Mapping[str, Mapping[str, Any]] = {
             "whole_body_tracking.tasks.tracking.mdp.action_ball_c225_rewards."
             "c225_strike_ball_paddle_center_proximity"
         ),
-        "weight": 220.0,
+        "weight": 240.0,
         "params": {"command_name": "racket_target", "std": 0.15},
     },
     "virtual_landing": {
@@ -131,7 +244,7 @@ REQUIRED_OUTCOME_TERMS: Mapping[str, Mapping[str, Any]] = {
             "whole_body_tracking.tasks.tracking.mdp.action_ball_c225_rewards."
             "c225_landing_outcome_actual_contact"
         ),
-        "weight": 500.0,
+        "weight": 700.0,
         "params": {
             "command_name": "racket_target",
             "mode": "legal_base",
@@ -203,7 +316,9 @@ REQUIRED_PRIOR_TERMS: Mapping[str, Mapping[str, Any]] = {
         "params": {"command_name": "racket_target", "scale_in_strike_window": 1.0},
     },
 }
-PROHIBITED_CONTACT_TARGET_TERMS = (
+PROHIBITED_TASK_DIRECTED_TERMS = (
+    "base_position",
+    "racket_progress",
     "racket_position",
     "racket_velocity",
     "racket_normal",
@@ -214,12 +329,14 @@ PROHIBITED_CONTACT_TARGET_TERMS = (
     "racket_velocity_precision",
     "racket_normal_precision",
     "racket_strike_success",
-)
-PROHIBITED_DUPLICATE_OUTCOME_TERMS = (
     "strike_capture_bonus",
     "virtual_pass_net",
     "virtual_landing_dense",
+    "virtual_spin",
 )
+ALLOWED_TASK_DIRECTED_TERMS = frozenset(REQUIRED_OUTCOME_TERMS)
+TASK_DIRECTED_PREFIXES = ("desired_", "racket_", "strike_", "virtual_", "c211_", "c225_")
+assert not ALLOWED_TASK_DIRECTED_TERMS.intersection(PROHIBITED_TASK_DIRECTED_TERMS)
 
 LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
@@ -236,6 +353,13 @@ OLD_VALIDATOR_SOURCE = (
     "hope_training/whole_body_tracking/scripts/"
     "launch_n1_measured_vendor_v2_diagnostic.py"
 )
+C211_EVIDENCE_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "action_ball_c211_oracle_evidence.py"
+)
+C211_LIVE_ORACLE_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/action_ball_c211_live_oracle.py"
+)
 TRAINING_CONTRACT_SOURCE = _OLD.TRAINING_CONTRACT_SOURCE
 TASK_WAIT_SOURCE = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
@@ -245,6 +369,10 @@ KIT_LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
 TASK_PROFILE_SOURCE = (
+    "hope_training/whole_body_tracking/cfg/task/"
+    "HOPEPingPongActionBallC211VendorV2N1DRL0Learnability.yaml"
+)
+RETAINED_TASK_PROFILE_PARENT_SOURCE = (
     "hope_training/whole_body_tracking/cfg/task/"
     "HOPEPingPongActionBallC211VendorV2N1Learnability.yaml"
 )
@@ -272,18 +400,52 @@ C211_REGISTRY_SOURCE = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/config/agibot_a3/__init__.py"
 )
+FOUR_GRID_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "action_ball_211_four_grid_contract.py"
+)
+PRELONG_GATE_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "action_ball_4096x5_prelong_gate.py"
+)
+FOUR_GRID_BARRIER_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "action_ball_211_four_grid_prelong_barrier.py"
+)
+PRELONG_SEMANTICS_SOURCE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/utils/action_ball_prelong_semantics.py"
+)
+ACTION_BALL_SAMPLING_SOURCE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/action_ball_sampling.py"
+)
+ACTION_BALL_COMMAND_SOURCE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/hope_commands.py"
+)
 
 RUNTIME_SOURCE_PATHS = (
     (LAUNCHER_SOURCE, "VendorV2 N1 launcher"),
+    (FOUR_GRID_SOURCE, "Isaac A211/C211 four-grid authority"),
+    (FOUR_GRID_BARRIER_SOURCE, "Isaac A211/C211 all-four pre-long barrier"),
+    (PRELONG_GATE_SOURCE, "shared ActionBall 4096x5 pre-long terminal gate"),
+    (PRELONG_SEMANTICS_SOURCE, "ActionBall 4096x5 semantic marker schema"),
+    (ACTION_BALL_SAMPLING_SOURCE, "ActionBall curriculum question sampler"),
+    (ACTION_BALL_COMMAND_SOURCE, "ActionBall runtime command integration"),
     (ADMISSION_SOURCE, "VendorV2 GPU admission"),
     (EXACT_GROUP_SOURCE, "exact process-group helper"),
     (BASE_SOURCE, "no-clobber base helper"),
     (KIT_LAUNCHER_SOURCE, "locked Kit launcher"),
     (TRAIN_SOURCE, "training entrypoint"),
     (OLD_VALIDATOR_SOURCE, "oracle32 acceptance validator"),
+    (C211_EVIDENCE_SOURCE, "C211 observed-oracle sidecar publisher"),
+    (C211_LIVE_ORACLE_SOURCE, "C211 live runtime oracle adapter"),
     (TRAINING_CONTRACT_SOURCE, "dynamic-ready policy contract"),
     (TASK_WAIT_SOURCE, "pre-task wait schedule contract"),
-    (TASK_PROFILE_SOURCE, "C211 task profile"),
+    (TASK_PROFILE_SOURCE, "C211 DR-L0 task profile"),
+    (RETAINED_TASK_PROFILE_PARENT_SOURCE, "C211 inherited task-profile parent"),
+    (_FRAME0.DR_L0_MANIFEST_SOURCE, "ActionBall DR-L0 launch manifest"),
     (C211_CONTRACT_SOURCE, "C211 trainability contract"),
     (C211_ENV_SOURCE, "C211 environment config"),
     (C211_REWARD_SOURCE, "C211 causal reward functions"),
@@ -300,13 +462,21 @@ BUDGETS: Mapping[str, tuple[int, int, int]] = {
     "long4096": (4096, 1000, 100),
 }
 STAGE_ORDER = tuple(BUDGETS)
-BLOCKED_RUNTIME_STAGES = ("oracle32", "scale4096", "long4096")
+FORMAL_GRID_STAGE_ORDER = _F.FORMAL_STAGE_ORDER
+BLOCKED_RUNTIME_STAGES: tuple[str, ...] = ()
 ORACLE_RUNTIME_BLOCKER = "C211_ORACLE_NOT_IMPLEMENTED"
-ORACLE_RUNTIME_DEPENDENCIES = (
-    "C211_000_RAW_EXPORTER_NOT_IMPLEMENTED",
-    "C211_RUNNER_PREFLIGHT_RECEIPT_NOT_IMPLEMENTED",
-    "C211_SELECTED_RUBBER_AUTHORITY_NOT_IMPLEMENTED",
-)
+ORACLE_RUNTIME_DEPENDENCIES: tuple[str, ...] = ()
+C211_ORACLE_HOOK_SOURCE_MARKERS = {
+    TRAIN_SOURCE: (
+        b"action_ball_c211_oracle_bundle_output_path",
+        b"_make_c211_live_runtime_step_adapter",
+        b"collect_live_oracle_bundle(",
+        b"racket._action_ball_ledger_payload()",
+        b"racket.vb_fired[0]",
+        b"env.step(actions)",
+        b"ACTION_BALL_C211_OBSERVED_ORACLE_BUNDLE_JSON",
+    ),
+}
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PIN_KEYS = ("path", "sha256")
 FOREIGN_VALUE_TOKENS = (
@@ -321,8 +491,138 @@ def canonical_sha256(value: Any) -> str:
     return _B.canonical_sha256(value)
 
 
+def _isaac_four_grid_manifest() -> dict[str, Any]:
+    """Validate local matched settings against the single shared authority."""
+
+    try:
+        return _F.validate_runtime_match(
+            wait_contract=_wait_contract(),
+            formal_budgets={
+                stage: BUDGETS[stage] for stage in FORMAL_GRID_STAGE_ORDER
+            },
+            action_id=ACTION_ID,
+            action_uid=ACTION_UID,
+            teacher_id=TEACHER_ID,
+        )
+    except _F.FourGridContractError as exc:
+        raise LaunchRefused("C211 four-grid authority differs: %s" % exc) from exc
+
+
+def _four_grid_cell(cell_id: str, *, task_family: str) -> dict[str, Any]:
+    if task_family != "C211":
+        raise LaunchRefused("C211 launcher cannot select another task family")
+    _isaac_four_grid_manifest()
+    try:
+        return _F.cell_for_family(cell_id, "C211")
+    except _F.FourGridContractError as exc:
+        raise LaunchRefused("selector is not a formal C211 grid cell") from exc
+
+
 def _exact_dict(value: Any, keys: Sequence[str], *, name: str) -> dict[str, Any]:
     return _B._exact_dict(value, tuple(keys), name=name)
+
+
+# Retired 2026-08-05: _finite_handoff_vector deleted with
+# _exact_zero_handoff_semantics (its only caller).
+
+
+def _whole_body_state_sha256(
+    joint_pos: Sequence[float],
+    root_pos: Sequence[float],
+    root_quat: Sequence[float],
+) -> str:
+    digest = hashlib.sha256()
+    for label, values in (
+        ("joint_pos", joint_pos),
+        ("root_pos_w", root_pos),
+        ("root_quat_wxyz", root_quat),
+    ):
+        array = np.ascontiguousarray(np.asarray(values, dtype=np.float64))
+        digest.update(label.encode("utf-8"))
+        digest.update(str(array.dtype).encode("ascii"))
+        digest.update(np.asarray(array.shape, np.int64).tobytes())
+        digest.update(array.tobytes())
+    return digest.hexdigest()
+
+
+# Retired 2026-08-05: _exact_zero_handoff_semantics deleted with its only caller
+# _validate_retired_exact_frame0_lineage; A211 keeps the live copy.
+
+
+def _prelong_semantics_exec_environment(
+    stage: str, runtime_reward_sha256: Any
+) -> dict[str, str]:
+    if stage != "scale4096":
+        return {}
+    reward_sha = _B._sha256(
+        runtime_reward_sha256, name="C211 prelong runtime Reward recipe SHA"
+    )
+    return {
+        REWARD_PPO_ECONOMY_ENABLE_ENV: "1",
+        PRELONG_SEMANTICS_ENABLE_ENV: "1",
+        PRELONG_REWARD_RECIPE_SHA_ENV: reward_sha,
+    }
+
+
+def _update_profile_exec_environment(
+    environ: Mapping[str, str]
+) -> dict[str, str]:
+    """Pass only the exact diagnostic profiler switch across both execs."""
+
+    value = environ.get(UPDATE_PROFILE_ENV)
+    if value is None:
+        return {}
+    if value not in ("0", "1"):
+        raise LaunchRefused(
+            "%s must be exactly 0 or 1 when set" % UPDATE_PROFILE_ENV
+        )
+    return {UPDATE_PROFILE_ENV: value}
+
+
+def _update_profile_contract(environ: Mapping[str, str]) -> dict[str, Any]:
+    forwarded = _update_profile_exec_environment(environ)
+    value = forwarded.get(UPDATE_PROFILE_ENV)
+    mode = (
+        "not_requested"
+        if value is None
+        else "profile_on_attribution_only"
+        if value == "1"
+        else "explicit_profiler_off"
+    )
+    return {
+        "environment_variable": UPDATE_PROFILE_ENV,
+        "forwarded_value": value,
+        "mode": mode,
+        "profile_json_prefix": UPDATE_PROFILE_JSON_PREFIX,
+        "speed_evidence_eligible": False,
+        "gpu_kernel_attribution_claimed": False,
+        "gpu_attribution_reason": (
+            "host perf-counter spans add no CUDA synchronization and cannot "
+            "delimit asynchronous GPU kernels"
+        ),
+    }
+
+
+def _deferred_speed_measurement_contract() -> dict[str, Any]:
+    """State the unimplemented matched gate without minting fake evidence."""
+
+    return {
+        "status": "DEFERRED_UNTIL_FINITE",
+        "implemented_by_this_launcher": False,
+        "workload_kind": "direct_ball_sampler_consumer",
+        "online_solver_calls_required": 0,
+        "novel_question_producer_unit": "seconds_per_4096_novel_questions",
+        "producer_evidence_must_be_separate": True,
+        "num_envs": 4096,
+        "steps_per_env": 24,
+        "warmup_updates": 10,
+        "minimum_measured_updates": 50,
+        "isolation": "exclusive_single_process_same_gpu",
+        "abba_order": ["current_A", "current_C", "current_C", "current_A"],
+        "main_timing_mode": "profiler_off",
+        "profile_run_is_separate_non_speed_evidence": True,
+        "scale4096_is_speed_or_rate_evidence": False,
+    }
 
 
 def _assert_c211_only(value: Any, *, name: str) -> None:
@@ -351,6 +651,23 @@ def _pin(value: Any, *, name: str) -> dict[str, str]:
         "path": _B._relative_path(row["path"], name="%s.path" % name),
         "sha256": _B._sha256(row["sha256"], name="%s.sha256" % name),
     }
+
+
+def _four_grid_prelong_receipt_pin(value: Any) -> dict[str, str]:
+    try:
+        pin, _path = _Q._pin(value, name="four-grid scale4096 receipt")
+    except _Q.BarrierRefused as exc:
+        raise LaunchRefused("C211 four-grid pre-long receipt pin differs") from exc
+    return pin
+
+
+def _validate_four_grid_prelong_receipt(
+    value: Any, *, checkout: Path
+) -> dict[str, Any]:
+    try:
+        return _Q.validate_receipt(value, checkout=checkout)
+    except _Q.BarrierRefused as exc:
+        raise LaunchRefused("C211 four-grid pre-long barrier refused: %s" % exc) from exc
 
 
 def _external_pin(value: Any, *, name: str) -> tuple[dict[str, str], Path]:
@@ -413,31 +730,56 @@ def _hard_wait_contract() -> dict[str, Any]:
 
 
 def _hard_question_source_contract() -> dict[str, Any]:
-    """Exact fixed-band/offline-inverse scope emitted by schema-3 runtime."""
+    """Exact C211 sampler/provider scope emitted by the runtime contract."""
 
     return {
-        "identity": "action_ball_211_question_source_scope_v1",
-        "current_immutable_tape": {
-            "scope": "diagnostic_n1_early_fixed_band_only",
-            "final_curriculum_frozen": False,
+        "identity": "action_ball_211_question_source_scope_v5",
+        "family": "C211",
+        "question_sampler": {
+            "source": "runtime_curriculum_sampler",
+            "cadence": "every_episode_reset",
+            "curriculum_domain_levels_consulted_every_reset": True,
+            "sampler_runs_every_reset": True,
+            "initial_center_single_question": True,
+            "initial_center_activation": "all_32_domain_levels_exact_zero",
+            "initial_center_physical_support": "literal_profile_center_point",
+            "initial_center_rng_draws": "normal_fixed_budget",
+            "post_promotion_support": "zero_to_manifest_max_width_per_promoted_arm",
+            "sampler_rng_reused_by_target_provider": False,
+            "physical_rng_draw_count_authority": (
+                "sample_receipt_draw_end_minus_draw_start"
+            ),
+            "zero_physical_rng_draw_claim_permitted": False,
+            "selection": "sample_current_domain_levels",
+            "checkpoint_resume": "exact_sampler_and_curriculum_state",
         },
-        "final_curriculum": {
-            "source": "pregenerated_cached_band_question_bank",
-            "generation": "offline_before_rollout",
-            "reset_selection": "index_one_bank_row",
+        "target_provider": {
+            "source": "direct_ball",
+            "desired_contact_inverse": False,
+            "exact_question_answer_cache": {"enabled": False},
             "online_inverse_solves_per_reset": 0,
             "online_inverse_solves_per_step": 0,
-            "wait_remaining_observed": False,
         },
+    }
+
+
+def _question_rng_contract() -> dict[str, Any]:
+    return {
+        "owner": "runtime_curriculum_sampler",
+        "cadence": "every_episode_reset",
+        "draw_count_authority": "sample_receipt_draw_end_minus_draw_start",
+        "zero_draw_claim_permitted": False,
+        "checkpoint_resume": "exact_sampler_and_curriculum_state",
     }
 
 
 def _curriculum_scope_contract() -> dict[str, Any]:
     return {
-        "current_tape_scope": "diagnostic_n1_early_fixed_band_only",
-        "permanent_single_question_curriculum": False,
-        "final_curriculum_source": "pregenerated_cached_band_question_bank",
-        "reset_question_selection": "index_pregenerated_bank_row",
+        "question_source": "runtime_curriculum_sampler",
+        "domain_levels_authority": "runtime_action_ball_curriculum",
+        "reset_question_selection": "sample_current_domain_levels",
+        "question_rng": _question_rng_contract(),
+        "desired_contact_inverse": False,
         "online_inverse_solve_calls": 0,
     }
 
@@ -462,7 +804,8 @@ def _verify_frame0_artifact_source_commit(
 
 def _question_contract() -> dict[str, Any]:
     return {
-        "target_source": "immutable_tape",
+        "target_source": TARGET_SOURCE,
+        "question_source": "runtime_curriculum_sampler",
         "target_recipe": TARGET_RECIPE,
         "target_validity_mask": list(TARGET_VALIDITY_MASK),
         "target_observation_noise": False,
@@ -471,13 +814,13 @@ def _question_contract() -> dict[str, Any]:
         "reset_inverse_solve": False,
         "online_solver_calls": 0,
         "online_lm_calls": 0,
-        "physical_rng_draws": 0,
+        "question_rng": _question_rng_contract(),
     }
 
 
 def _c211_reward_contract() -> dict[str, Any]:
     return {
-        "identity": "action_ball_c211_achieved_outcome_reward_v2",
+        "identity": "action_ball_c211_achieved_outcome_reward_v3",
         "desired_contact_position_velocity_face_consumed": False,
         "task_valid_required": True,
         "strike_bridge": {
@@ -485,7 +828,7 @@ def _c211_reward_contract() -> dict[str, Any]:
             "callable": REQUIRED_OUTCOME_TERMS[
                 "c225_strike_ball_paddle_center_proximity"
             ]["callable"],
-            "weight": 220.0,
+            "weight": 240.0,
             "std_m": 0.15,
             "kernel": "cauchy_inverse_quadratic",
             "eligibility": "task_valid_active_swing_single_exact_strike_tick",
@@ -493,15 +836,22 @@ def _c211_reward_contract() -> dict[str, Any]:
         },
         "economics": {
             "policy_dt_s": 0.02,
-            "compatible_swing_motion_static_max": 3.6575,
-            "strike_bridge_post_dt_peak": 4.4,
-            "legal_landing_post_dt_min": 6.0,
-            "ordering": "motion_lt_strike_peak_lt_legal_landing",
+            "task_valid_swing_mimic_undiscounted_cap": 2.8325,
+            "task_reveal_discounted_gamma": 0.99,
+            "task_reveal_contact_tick": 92,
+            "task_valid_swing_mimic_discounted_cap": 1.7733077595610476,
+            "strike_bridge_post_dt_peak": 4.8,
+            "strike_bridge_discounted_at_contact": 1.9040534708257204,
+            "legal_landing_post_dt_min": 8.4,
+            "legal_landing_discounted_at_contact_min": 3.332093573945011,
+            "ordering": (
+                "task_valid_swing_mimic_lt_strike_peak_lt_legal_landing"
+            ),
         },
         "landing": {
             "term": "virtual_landing",
             "callable": REQUIRED_OUTCOME_TERMS["virtual_landing"]["callable"],
-            "weight": 500.0,
+            "weight": 700.0,
             "evidence_source": (
                 "analytic_prediction_from_achieved_selected_rubber_contact"
             ),
@@ -520,11 +870,20 @@ def _c211_reward_contract() -> dict[str, Any]:
     }
 
 
-def _recipe_contract() -> dict[str, Any]:
+def _recipe_contract(recipe_id: str) -> dict[str, Any]:
+    if recipe_id not in RECIPE_IDS:
+        raise LaunchRefused("recipe_id must select one of the two formal C211 grid cells")
+    manifest = _isaac_four_grid_manifest()
+    matched = manifest["matched_contract"]
+    cell = _four_grid_cell(recipe_id, task_family="C211")
     unsigned = {
         "schema_version": 1,
         "kind": RECIPE_KIND,
-        "recipe_id": RECIPE_ID,
+        "recipe_id": recipe_id,
+        "four_grid_cell_id": recipe_id,
+        "isaac_four_grid_manifest_sha256": manifest["content_sha256"],
+        "ppo_adaptation_axis": cell["ppo_adaptation_axis"],
+        "contact_sigma_adaptation": False,
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
@@ -532,34 +891,57 @@ def _recipe_contract() -> dict[str, Any]:
         "trainability_contract": TRAINABILITY_CONTRACT,
         "fresh_normalizers_required": True,
         "foreign_checkpoint_reuse_prohibited": True,
-        "init_noise_std": 0.02,
-        "noise_std_type": "log",
-        "entropy_coef": 0.01,
-        "actor_hidden_dims": [512, 256, 128],
-        "critic_hidden_dims": [512, 256, 128],
-        "reference_guard_mode": "phase_gated",
-        "soft_weights": {
-            "death_penalty": -30.0,
-            "qdes_limit": -0.5,
-            "qdes_projection": -0.5,
-            "joint_limit": -0.5,
-        },
-        "ppo": {
-            "schedule": "fixed",
-            "learning_rate": 1.0e-4,
-            "desired_kl": 0.01,
-            "clip_param": 0.2,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-        },
+        "init_noise_std": matched["init_noise_std"],
+        "noise_std_type": matched["noise_std_type"],
+        "entropy_coef": matched["entropy_coef"],
+        "actor_hidden_dims": matched["actor_hidden_dims"],
+        "critic_hidden_dims": matched["critic_hidden_dims"],
+        "reference_guard_mode": matched["reference_guard_mode"],
+        "soft_weights": matched["soft_weights"],
+        "ppo": cell["ppo"],
     }
     return {**unsigned, "recipe_contract_sha256": canonical_sha256(unsigned)}
+
+
+def _verify_c211_runtime_authorities(checkout: Path) -> None:
+    """Require the live runner-before-oracle evidence hook."""
+
+    missing = []
+    for authority, sources in (
+        ("runner-before-oracle", C211_ORACLE_HOOK_SOURCE_MARKERS),
+    ):
+        for relative, markers in sources.items():
+            path = checkout / relative
+            try:
+                payload = path.read_bytes()
+            except OSError:
+                missing.append("%s:%s:missing" % (authority, relative))
+                continue
+            missing.extend(
+                "%s:%s:%s"
+                % (authority, relative, marker.decode("ascii"))
+                for marker in markers
+                if marker not in payload
+            )
+    if missing:
+        raise LaunchRefused(
+            "C211 live-oracle runtime authority is absent: " + ", ".join(missing)
+        )
+
+
+# Retired 2026-08-05: _validate_passive_hold_soak and
+# _validate_retired_exact_frame0_lineage deleted -- both had zero call sites after
+# the C211 lineage moved to the direct-ball split-ready contract validated by
+# _validate_lineage below.
 
 
 def _validate_lineage(
     checkout: Path, commit: str, value: Any
 ) -> dict[str, Any]:
+    """Validate direct-ball C211 with separate physical and teacher births."""
+
     pin, row = _tracked_json(checkout, commit, value, name="C211 lineage")
+    _verify_c211_runtime_authorities(checkout)
     row = _exact_dict(
         row,
         (
@@ -570,38 +952,39 @@ def _validate_lineage(
             "critic_contract",
             "critic_width",
             "trainability_contract",
-            "trainability_contract",
             "actor_normalizer_identity",
             "critic_normalizer_identity",
             "task_profile",
             "gym_task",
             "target_semantics",
             "curriculum_scope",
+            "target_source",
+            "question_source",
+            "question_rng",
             "target_recipe",
             "target_validity_mask",
             "incoming_ball_fields",
             "reset_inverse_solve",
             "online_solver_calls",
             "online_lm_calls",
-            "physical_rng_draws",
             "action_id",
             "action_uid",
             "teacher_id",
             "seed",
             "bundle",
             "motion",
-            "immutable_tape",
             "action_manifest",
+            "initial_center_task_receipt",
             "dynamic_ready_artifact",
             "dynamic_ready_nominal_receipt",
-            "frame0_exact_artifact",
-            "frame0_exact_receipt",
+            "teacher_frame0_artifact",
+            "dr_l0_manifest",
         ),
         name="C211 lineage",
     )
     _assert_c211_only(row, name="C211 lineage")
     expected = {
-        "schema_version": 1,
+        "schema_version": 4,
         "kind": LINEAGE_KIND,
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
@@ -614,70 +997,60 @@ def _validate_lineage(
         "gym_task": GYM_TASK_ID,
         "target_semantics": TARGET_SEMANTICS,
         "curriculum_scope": _curriculum_scope_contract(),
+        "target_source": TARGET_SOURCE,
+        "question_source": "runtime_curriculum_sampler",
+        "question_rng": _question_rng_contract(),
         "target_recipe": TARGET_RECIPE,
         "target_validity_mask": list(TARGET_VALIDITY_MASK),
         "incoming_ball_fields": list(INCOMING_BALL_FIELDS),
         "reset_inverse_solve": False,
         "online_solver_calls": 0,
         "online_lm_calls": 0,
-        "physical_rng_draws": 0,
+        "action_id": ACTION_ID,
+        "action_uid": ACTION_UID,
+        "teacher_id": TEACHER_ID,
+        "seed": 0,
     }
-    for key, wanted in expected.items():
-        if row[key] != wanted:
-            raise LaunchRefused("C211 lineage %s differs" % key)
-    action_id = row["action_id"]
-    action_uid = row["action_uid"]
-    teacher_id = row["teacher_id"]
-    if (
-        type(action_id) is not str
-        or SAFE_COMPONENT.fullmatch(action_id) is None
-        or type(action_uid) is not int
-        or action_uid <= 0
-        or type(teacher_id) is not str
-        or SAFE_COMPONENT.fullmatch(teacher_id) is None
-    ):
-        raise LaunchRefused("C211 action/teacher identity is unsafe")
-    if (
-        action_id != ACTION_ID
-        or action_uid != ACTION_UID
-        or teacher_id != TEACHER_ID
-    ):
-        raise LaunchRefused("C211 first-wave action/teacher identity differs")
-    seed = _B._plain_int(
-        row["seed"], name="C211 lineage seed", maximum=(1 << 31) - 1
-    )
-    if seed != 0:
-        raise LaunchRefused("C211 first-wave lineage requires seed 0")
-    pins = {}
-    paths = {}
+    if any(row[key] != wanted for key, wanted in expected.items()):
+        raise LaunchRefused("C211 split-ready lineage identity differs")
+
+    pins: dict[str, dict[str, str]] = {}
+    paths: dict[str, Path] = {}
     for key in (
         "bundle",
         "motion",
-        "immutable_tape",
         "action_manifest",
+        "initial_center_task_receipt",
         "dynamic_ready_artifact",
         "dynamic_ready_nominal_receipt",
-        "frame0_exact_artifact",
-        "frame0_exact_receipt",
+        "teacher_frame0_artifact",
     ):
-        normalized, _path = _B._verify_tracked_file(
+        normalized, resolved = _B._verify_tracked_file(
             checkout,
             commit,
             _pin(row[key], name="lineage.%s" % key),
             name="C211 %s" % key,
         )
         pins[key] = normalized
-        paths[key] = _path
+        paths[key] = resolved
+    if (
+        pins["dynamic_ready_artifact"]["sha256"]
+        != _FRAME0.SPLIT_READY_DYNAMIC_ARTIFACT_SHA256
+        or pins["dynamic_ready_nominal_receipt"]["sha256"]
+        != _FRAME0.SPLIT_READY_NOMINAL_HOLD_SHA256
+        or pins["teacher_frame0_artifact"]["sha256"]
+        != _FRAME0.SPLIT_READY_TEACHER_FRAME0_ARTIFACT_SHA256
+    ):
+        raise LaunchRefused("C211 split-ready authority bytes differ")
 
-    documents = {}
+    documents: dict[str, dict[str, Any]] = {}
     for key in (
         "bundle",
-        "immutable_tape",
         "action_manifest",
+        "initial_center_task_receipt",
         "dynamic_ready_artifact",
         "dynamic_ready_nominal_receipt",
-        "frame0_exact_artifact",
-        "frame0_exact_receipt",
+        "teacher_frame0_artifact",
     ):
         document = _B._strict_json_bytes(
             paths[key].read_bytes(), name="C211 %s" % key
@@ -702,6 +1075,9 @@ def _validate_lineage(
             "trainability_contract",
             "actor_normalizer_identity",
             "critic_normalizer_identity",
+            "target_source",
+            "question_source",
+            "question_rng",
             "target_recipe",
             "curriculum_scope",
             "target_validity_mask",
@@ -709,24 +1085,23 @@ def _validate_lineage(
             "reset_inverse_solve",
             "online_solver_calls",
             "online_lm_calls",
-            "physical_rng_draws",
             "motion",
-            "immutable_tape",
             "action_manifest",
+            "initial_center_task_receipt",
             "dynamic_ready_artifact",
             "dynamic_ready_nominal_receipt",
-            "frame0_exact_artifact",
-            "frame0_exact_receipt",
+            "teacher_frame0_artifact",
+            "dr_l0_manifest",
         ),
-        name="C211 bundle",
+        name="C211 split-ready bundle",
     )
     expected_bundle = {
-        "schema_version": 1,
+        "schema_version": 4,
         "kind": C211_BUNDLE_KIND,
         "diagnostic_unauthorized": True,
-        "action_id": action_id,
-        "action_uid": action_uid,
-        "teacher_id": teacher_id,
+        "action_id": ACTION_ID,
+        "action_uid": ACTION_UID,
+        "teacher_id": TEACHER_ID,
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
@@ -734,6 +1109,9 @@ def _validate_lineage(
         "trainability_contract": TRAINABILITY_CONTRACT,
         "actor_normalizer_identity": ACTOR_NORMALIZER_IDENTITY,
         "critic_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
+        "target_source": TARGET_SOURCE,
+        "question_source": "runtime_curriculum_sampler",
+        "question_rng": _question_rng_contract(),
         "target_recipe": TARGET_RECIPE,
         "curriculum_scope": _curriculum_scope_contract(),
         "target_validity_mask": list(TARGET_VALIDITY_MASK),
@@ -741,166 +1119,77 @@ def _validate_lineage(
         "reset_inverse_solve": False,
         "online_solver_calls": 0,
         "online_lm_calls": 0,
-        "physical_rng_draws": 0,
         "motion": pins["motion"],
-        "immutable_tape": pins["immutable_tape"],
         "action_manifest": pins["action_manifest"],
+        "initial_center_task_receipt": pins["initial_center_task_receipt"],
         "dynamic_ready_artifact": pins["dynamic_ready_artifact"],
         "dynamic_ready_nominal_receipt": pins[
             "dynamic_ready_nominal_receipt"
         ],
-        "frame0_exact_artifact": pins["frame0_exact_artifact"],
-        "frame0_exact_receipt": pins["frame0_exact_receipt"],
+        "teacher_frame0_artifact": pins["teacher_frame0_artifact"],
     }
-    if any(bundle[key] != wanted for key, wanted in expected_bundle.items()):
-        raise LaunchRefused("C211 bundle semantics or input closure differs")
-
-    tape = documents["immutable_tape"]
-    tape_unsigned = dict(tape)
-    tape_seal = tape_unsigned.pop("canonical_sha256", None)
-    question = tape.get("question")
-    target = (
-        tape.get("targets", {}).get(TARGET_RECIPE)
-        if type(tape.get("targets")) is dict
-        else None
-    )
-    reset = tape.get("reset_semantics")
-    if (
-        tape.get("schema_version") != 1
-        or tape.get("kind") != "action_ball_n1_immutable_single_question_tape"
-        or tape.get("diagnostic_unauthorized") is not True
-        or tape.get("row_count") != 1
-        or _B._sha256(tape_seal, name="C211 tape canonical SHA")
-        != canonical_sha256(tape_unsigned)
-        or type(question) is not dict
-        or question.get("action_uid") != action_uid
-        or question.get("motion_sha256") != pins["motion"]["sha256"]
-        or any(
-            type(question.get(field)) is not list
-            or len(question[field]) != 3
-            for field in (
-                "ball_contact_w_m",
-                "incoming_velocity_w_mps",
-                "incoming_spin_w_radps",
-            )
+    try:
+        dr_l0_manifest = _FRAME0._dr_l0_manifest_binding(
+            checkout,
+            commit,
+            family="C",
+            task_profile=TASK_PROFILE_ID,
         )
-        or type(target) is not dict
-        or target.get("recipe") != TARGET_RECIPE
-        or target.get("validity_mask") != list(TARGET_VALIDITY_MASK)
-        or type(reset) is not dict
-        or reset.get("online_lm_calls") != 0
-        or reset.get("physical_rng_draws") != 0
-    ):
-        raise LaunchRefused("C211 immutable tape semantics differ")
+    except _FRAME0.LaunchRefused as exc:
+        raise LaunchRefused(str(exc)) from exc
+    expected_bundle["dr_l0_manifest"] = dr_l0_manifest
+    if any(bundle[key] != wanted for key, wanted in expected_bundle.items()):
+        raise LaunchRefused("C211 split-ready bundle closure differs")
 
     manifest = documents["action_manifest"]
     actions = manifest.get("actions")
     action = actions[0] if type(actions) is list and len(actions) == 1 else None
     if (
         manifest.get("schema_version") != 3
-        or manifest.get("action_order") != [action_id]
+        or manifest.get("action_order") != [ACTION_ID]
         or manifest.get("mobility_mode") != "no_move"
         or type(action) is not dict
-        or action.get("action_id") != action_id
-        or action.get("action_uid") != action_uid
+        or action.get("action_id") != ACTION_ID
+        or action.get("action_uid") != ACTION_UID
         or action.get("motion_path") != pins["motion"]["path"]
         or action.get("motion_sha256") != pins["motion"]["sha256"]
     ):
         raise LaunchRefused("C211 action manifest closure differs")
 
-    for key, nominal in (
-        ("dynamic_ready_artifact", False),
-        ("dynamic_ready_nominal_receipt", True),
-    ):
-        dynamic = documents[key]
-        dynamic_unsigned = dict(dynamic)
-        dynamic_seal = dynamic_unsigned.pop("content_sha256", None)
-        if (
-            _B._sha256(dynamic_seal, name="C211 %s content SHA" % key)
-            != canonical_sha256(dynamic_unsigned)
-            or dynamic.get("action_id") != action_id
-            or dynamic.get("motion_sha256") != pins["motion"]["sha256"]
-            or (nominal and dynamic.get("verdict") != "PASS")
-            or (
-                not nominal
-                and dynamic.get("kind")
-                != "agibot_a3_action_dynamic_ready_candidate_v2"
-            )
-        ):
-            raise LaunchRefused("C211 %s closure differs" % key)
-    artifact = _sealed_row(
-        documents["frame0_exact_artifact"],
-        (
-            "schema_version", "kind", "diagnostic_unauthorized", "action_id",
-            "source_kind", "motion_sha256", "task_close_ticks", "policy_dt_s",
-            "wait_schedule_canonical_sha256",
-        ),
-        name="C211 frame0-exact artifact",
-    )
-    receipt = _sealed_row(
-        documents["frame0_exact_receipt"],
-        (
-            "schema_version", "kind", "diagnostic_unauthorized", "verdict",
-            "source_kind", "action_id", "motion_sha256", "artifact_file_sha256",
-            "artifact_content_sha256", "artifact_source_commit",
-            "task_close_ticks", "policy_dt_s",
-            "wait_schedule_canonical_sha256",
-        ),
-        name="C211 frame0-exact receipt",
-    )
-    task_close_ticks = artifact["task_close_ticks"]
-    if (
-        artifact["schema_version"] != 1
-        or artifact["kind"] != FRAME0_EXACT_ARTIFACT_KIND
-        or artifact["diagnostic_unauthorized"] is not True
-        or artifact["source_kind"] != FRAME0_EXACT_SOURCE_KIND
-        or artifact["action_id"] != action_id
-        or artifact["motion_sha256"] != pins["motion"]["sha256"]
-        or type(task_close_ticks) is not int
-        or not 1 <= task_close_ticks <= WAIT_SCHEDULE["required_active_ticks"]
-        or artifact["policy_dt_s"] != POLICY_DT_S
-        or artifact["wait_schedule_canonical_sha256"]
-        != WAIT_SCHEDULE["canonical_sha256"]
-    ):
-        raise LaunchRefused("C211 frame0-exact artifact binding differs")
-    artifact_content_sha = artifact["content_sha256"]
-    if (
-        receipt["schema_version"] != 1
-        or receipt["kind"] != FRAME0_EXACT_RECEIPT_KIND
-        or receipt["diagnostic_unauthorized"] is not True
-        or receipt["source_kind"] != FRAME0_EXACT_SOURCE_KIND
-        or receipt["verdict"] != "PASS"
-        or receipt["action_id"] != action_id
-        or receipt["motion_sha256"] != pins["motion"]["sha256"]
-        or receipt["artifact_file_sha256"]
-        != pins["frame0_exact_artifact"]["sha256"]
-        or receipt["artifact_content_sha256"] != artifact_content_sha
-        or receipt["task_close_ticks"] != task_close_ticks
-        or receipt["policy_dt_s"] != POLICY_DT_S
-        or receipt["wait_schedule_canonical_sha256"]
-        != WAIT_SCHEDULE["canonical_sha256"]
-    ):
-        raise LaunchRefused("C211 frame0-exact receipt binding differs")
-    artifact_source_commit = receipt["artifact_source_commit"]
-    if (
-        type(artifact_source_commit) is not str
-        or re.fullmatch(r"[0-9a-f]{40}", artifact_source_commit) is None
-    ):
-        raise LaunchRefused("C211 frame0-exact artifact source commit is malformed")
-    _verify_frame0_artifact_source_commit(
-        checkout, artifact_source_commit, pins["frame0_exact_artifact"]
-    )
+    try:
+        teacher = _FRAME0._validate_teacher_frame0_artifact(
+            documents["teacher_frame0_artifact"],
+            motion_path=paths["motion"],
+            motion_sha256=pins["motion"]["sha256"],
+        )
+        timing = _FRAME0._initial_center_timing_authority(
+            receipt=documents["initial_center_task_receipt"],
+            receipt_pin=pins["initial_center_task_receipt"],
+            action_manifest=documents["action_manifest"],
+            action_manifest_pin=pins["action_manifest"],
+            motion_sha256=pins["motion"]["sha256"],
+            family="C",
+        )
+        reset_wait = _FRAME0._split_ready_reset_wait_semantics(
+            dynamic=documents["dynamic_ready_artifact"],
+            nominal=documents["dynamic_ready_nominal_receipt"],
+            dynamic_pin=pins["dynamic_ready_artifact"],
+            nominal_pin=pins["dynamic_ready_nominal_receipt"],
+            teacher_frame0=teacher["frame0"],
+            motion_sha256=pins["motion"]["sha256"],
+            initial_center_timing_authority=timing,
+        )
+    except _FRAME0.LaunchRefused as exc:
+        raise LaunchRefused(str(exc)) from exc
+    if row["dr_l0_manifest"] != dr_l0_manifest:
+        raise LaunchRefused("C211 DR-L0 lineage binding differs")
     return {
         **expected,
-        "action_id": action_id,
-        "action_uid": action_uid,
-        "teacher_id": teacher_id,
-        "seed": seed,
         **pins,
-        "tape_canonical_sha256": tape_seal,
-        "tape_question_sha256": canonical_sha256(question),
-        "frame0_exact_artifact_content_sha256": artifact_content_sha,
-        "frame0_exact_receipt_content_sha256": receipt["content_sha256"],
+        "dr_l0_manifest": dr_l0_manifest,
+        "teacher_frame0_artifact_content_sha256": teacher["content_sha256"],
+        "initial_center_timing_authority": timing,
+        "split_ready_reset_wait_authority": reset_wait,
         "artifact": pin,
         "lineage_sha256": pin["sha256"],
     }
@@ -915,16 +1204,15 @@ def _planned_materialization(
         "reference_guard_mode": recipe["reference_guard_mode"],
         "c211_reward_contract": _c211_reward_contract(),
         "required_positive_outcome_terms": list(REQUIRED_OUTCOME_TERMS),
-        "desired_contact_reward_terms_prohibited": True,
-        "duplicate_predicted_outcome_terms_prohibited": list(
-            PROHIBITED_DUPLICATE_OUTCOME_TERMS
-        ),
+        "allowed_task_directed_terms": sorted(ALLOWED_TASK_DIRECTED_TERMS),
+        "prohibited_task_directed_terms": list(PROHIBITED_TASK_DIRECTED_TERMS),
+        "unregistered_task_directed_terms_prohibited": True,
     }
     unsigned = {
         "schema_version": 1,
         "kind": MATERIALIZATION_KIND,
         "diagnostic_unauthorized": True,
-        "recipe_id": RECIPE_ID,
+        "recipe_id": recipe["recipe_id"],
         "lineage_sha256": lineage["lineage_sha256"],
         "recipe_contract_sha256": recipe["recipe_contract_sha256"],
         "reward_contract_sha256": canonical_sha256(reward),
@@ -933,6 +1221,7 @@ def _planned_materialization(
         "critic_contract": CRITIC_CONTRACT,
         "critic_width": CRITIC_WIDTH,
         "trainability_contract": TRAINABILITY_CONTRACT,
+        "dr_l0_manifest": lineage["dr_l0_manifest"],
     }
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
@@ -950,28 +1239,32 @@ def _validated_stage_result(
     value: Any, *, expected_stage: str, name: str
 ) -> tuple[dict[str, str], dict[str, Any]]:
     pin, row = _canonical_external_json(value, name=name)
+    base_keys = (
+        "schema_version",
+        "kind",
+        "diagnostic_unauthorized",
+        "accepted",
+        "launch_claim_sha256",
+        "stage",
+        "namespace",
+        "completion",
+        "gpu_admission",
+        "output_contract",
+        "reward_materialization",
+        "policy_recipe_materialization",
+        "oracle32_receipt",
+        "predecessor_result",
+    )
+    has_terminal_acceptance = (
+        type(row) is dict and "terminal_acceptance" in row
+    )
     row = _sealed_row(
         row,
-        (
-            "schema_version",
-            "kind",
-            "diagnostic_unauthorized",
-            "accepted",
-            "launch_claim_sha256",
-            "stage",
-            "namespace",
-            "completion",
-            "gpu_admission",
-            "output_contract",
-            "reward_materialization",
-            "policy_recipe_materialization",
-            "oracle32_receipt",
-            "predecessor_result",
-        ),
+        base_keys + (("terminal_acceptance",) if has_terminal_acceptance else ()),
         name=name,
     )
     if (
-        row["schema_version"] != 1
+        row["schema_version"] != 2
         or row["kind"] != RESULT_KIND
         or row["diagnostic_unauthorized"] is not True
         or row["accepted"] is not True
@@ -998,6 +1291,15 @@ def _validated_stage_result(
         )
     ):
         raise LaunchRefused("%s lacks its exact finite natural-exit receipt" % name)
+    if expected_stage == "scale4096":
+        if not has_terminal_acceptance or type(row["terminal_acceptance"]) is not dict:
+            raise LaunchRefused(
+                "C211 scale4096 result lacks terminal checkpoint/safety acceptance"
+            )
+    elif has_terminal_acceptance:
+        raise LaunchRefused(
+            "%s contains a scale4096-only terminal acceptance" % name
+        )
     return pin, row
 
 
@@ -1028,6 +1330,7 @@ def _validate_materialization(
             "critic_contract",
             "critic_width",
             "trainability_contract",
+            "dr_l0_manifest",
             "runtime_effective_reward_artifact",
             "runtime_effective_reward_sha256",
             "runtime_effective_reward_term_count",
@@ -1049,6 +1352,7 @@ def _validate_materialization(
         "critic_contract",
         "critic_width",
         "trainability_contract",
+        "dr_l0_manifest",
     ):
         if row[key] != planned[key]:
             raise LaunchRefused("C211 reward materialization binding differs")
@@ -1118,7 +1422,7 @@ def _validate_policy_materialization(
         "schema_version": 1,
         "kind": POLICY_MATERIALIZATION_KIND,
         "diagnostic_unauthorized": True,
-        "recipe_id": RECIPE_ID,
+        "recipe_id": recipe["recipe_id"],
         "lineage_sha256": lineage["lineage_sha256"],
         "recipe_contract_sha256": recipe["recipe_contract_sha256"],
         "noise_std_type": recipe["noise_std_type"],
@@ -1156,6 +1460,15 @@ def _finite_vec3(value: Any, *, name: str) -> list[float | int]:
     return list(value)
 
 
+def _finite_vec2(value: Any, *, name: str) -> list[float | int]:
+    if type(value) is not list or len(value) != 2:
+        raise LaunchRefused("%s must be a length-2 list" % name)
+    for component in value:
+        if type(component) not in (int, float) or not math.isfinite(float(component)):
+            raise LaunchRefused("%s must contain finite numbers" % name)
+    return list(value)
+
+
 def _validate_c211_hard_contract(
     value: Any,
     *,
@@ -1184,6 +1497,22 @@ def _validate_c211_hard_contract(
         ) from exc
     if authorized is not True:
         raise LaunchRefused("C211 hard training contract is not action-ball authorized")
+    try:
+        resolved_dr_l0 = module.action_ball_dr_l0_contract_payload()
+        resolved_dr_l0_sha256 = module.action_ball_dr_l0_contract_sha256()
+    except Exception as exc:
+        raise LaunchRefused(
+            "C211 hard training contract cannot resolve DR-L0 finalizer"
+        ) from exc
+    if (
+        contract.get("action_ball_dr_l0") != resolved_dr_l0
+        or canonical_sha256(resolved_dr_l0) != resolved_dr_l0_sha256
+        or lineage.get("dr_l0_manifest", {}).get("contract_sha256")
+        != resolved_dr_l0_sha256
+        or lineage.get("dr_l0_manifest", {}).get("hard_contract_identity")
+        != resolved_dr_l0.get("identity")
+    ):
+        raise LaunchRefused("C211 hard training contract DR-L0 binding differs")
     expected = {
         "schema_version": 3,
         "target_mode": "action_ball",
@@ -1200,7 +1529,7 @@ def _validate_c211_hard_contract(
         "question_source_contract": _hard_question_source_contract(),
         "contact_target_absent": True,
         # The shared schema kept this historical field spelling when C225 was
-        # retired.  Its value identity is nevertheless the C211 reward-v2
+        # retired.  Its value identity is nevertheless the C211 reward-v3
         # contract and is revalidated in full below.
         "c225_reward_contract": _c211_reward_contract(),
     }
@@ -1227,32 +1556,26 @@ def _validate_c211_hard_contract(
         raise LaunchRefused("C211 hard training contract incoming-ball layout differs")
     try:
         target = contract["action_ball_training"]["runtime"]["target_provider"]
-        tape = target["immutable_tape"]
     except (KeyError, TypeError) as exc:
         raise LaunchRefused("C211 hard training contract target provider is missing") from exc
-    expected_tape_path = checkout / lineage["immutable_tape"]["path"]
-    try:
-        observed_tape_path = Path(str(tape.get("path", ""))).resolve(strict=True)
-        expected_tape_path = expected_tape_path.resolve(strict=True)
-    except (AttributeError, OSError) as exc:
-        raise LaunchRefused("C211 hard training contract tape path is invalid") from exc
+    exact_reuse = (
+        target.get("exact_question_answer_reuse")
+        if type(target) is dict
+        else None
+    )
     if (
         type(target) is not dict
-        or target.get("source") != "immutable_tape"
+        or target.get("source") != TARGET_SOURCE
         or target.get("recipe") != TARGET_RECIPE
         or target.get("validity_mask") != list(TARGET_VALIDITY_MASK)
         or target.get("target_observation_noise") is not False
         or target.get("actor_width_unchanged") is not True
         or target.get("critic_width_unchanged") is not True
-        or type(tape) is not dict
-        or observed_tape_path != expected_tape_path
-        or tape.get("file_sha256") != lineage["immutable_tape"]["sha256"]
-        or tape.get("canonical_sha256") != lineage["tape_canonical_sha256"]
-        or tape.get("base_question_sha256") != lineage["tape_question_sha256"]
-        or tape.get("online_lm_calls") != 0
-        or tape.get("physical_rng_draws") != 0
+        or target.get("immutable_tape") is not None
+        or type(exact_reuse) is not dict
+        or exact_reuse.get("enabled") is not False
     ):
-        raise LaunchRefused("C211 hard training contract 000/tape contract differs")
+        raise LaunchRefused("C211 hard training contract direct-ball/000 differs")
     return pin
 
 
@@ -1304,6 +1627,9 @@ def _validate_c211_runner_preflight(
             "critic_normalizer_identity",
             "fresh_normalizers_required",
             "symmetric_critic_fallback_forbidden",
+            "task_valid_required",
+            "task_wait_contract",
+            "question_source_contract",
             "contact_target_absent",
             "c225_reward_contract",
             "runner_actor_width",
@@ -1323,6 +1649,9 @@ def _validate_c211_runner_preflight(
         "critic_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
         "fresh_normalizers_required": True,
         "symmetric_critic_fallback_forbidden": True,
+        "task_valid_required": True,
+        "task_wait_contract": _hard_wait_contract(),
+        "question_source_contract": _hard_question_source_contract(),
         "contact_target_absent": True,
         "c225_reward_contract": _c211_reward_contract(),
         "runner_actor_width": ACTOR_WIDTH,
@@ -1435,22 +1764,82 @@ def _validate_c211_selected_rubber(
             raise LaunchRefused("C211 selected-rubber episode evidence differs")
         buckets[classification] += 1
         row_sha256.append(canonical_sha256(item))
-    if buckets != {
-        "selected_rubber": 32,
-        "no_contact": 0,
-        "wrong_surface": 0,
-        "edge_or_rim_ambiguous": 0,
-        "between_planes_ambiguous": 0,
-        "unknown": 0,
-    }:
-        raise LaunchRefused("C211 selected-rubber denominator did not pass")
+    if sum(buckets.values()) != 32:
+        raise LaunchRefused("C211 selected-rubber denominator does not close")
     return {
         "artifact": pin,
         "content_sha256": row["content_sha256"],
         "row_sha256": row_sha256,
         "eligible_episode_denominator": len(episodes),
         "actual_selected_rubber_contact_count": buckets["selected_rubber"],
+        "classifications": [item["classification"] for item in episodes],
     }
+
+
+def _validate_c211_analytic_pair(flight_value: Any, prediction_value: Any, *, selected: bool):
+    flight = _exact_dict(
+        flight_value,
+        (
+            "evaluated", "finite", "landing_xy_m", "landing_valid",
+            "net_crossed", "net_clear", "on_opponent_table", "source",
+        ),
+        name="C211 achieved analytic flight",
+    )
+    prediction = _exact_dict(
+        prediction_value,
+        (
+            "evaluated", "predicted_net_clear", "predicted_legal_landing",
+            "predicted_landing_xy_m", "source",
+        ),
+        name="C211 predicted analytic outcome",
+    )
+    if flight["evaluated"] is not selected or prediction["evaluated"] is not selected:
+        raise LaunchRefused("C211 analytic evaluation differs from achieved contact")
+    if selected:
+        for key in (
+            "finite", "landing_valid", "net_crossed", "net_clear",
+            "on_opponent_table",
+        ):
+            if type(flight[key]) is not bool:
+                raise LaunchRefused("C211 analytic flight boolean differs")
+        if (
+            flight["finite"] is not True
+            or flight["source"]
+            != "runtime_vb_one_shot_from_achieved_selected_rubber_contact"
+            or prediction["source"]
+            != "runtime_c225_achieved_flight_prediction_one_shot"
+        ):
+            raise LaunchRefused("C211 analytic authority differs")
+        _finite_vec2(flight["landing_xy_m"], name="C211 achieved landing")
+        _finite_vec2(
+            prediction["predicted_landing_xy_m"], name="C211 predicted landing"
+        )
+        expected_legal = bool(
+            flight["landing_valid"] and flight["net_crossed"]
+            and flight["net_clear"] and flight["on_opponent_table"]
+        )
+        if (
+            prediction["predicted_landing_xy_m"] != flight["landing_xy_m"]
+            or prediction["predicted_net_clear"] is not flight["net_clear"]
+            or prediction["predicted_legal_landing"] is not expected_legal
+            or (flight["net_clear"] and not flight["net_crossed"])
+            or (flight["on_opponent_table"] and not flight["landing_valid"])
+        ):
+            raise LaunchRefused("C211 predicted outcome differs from achieved flight")
+    elif (
+        flight != {
+            "evaluated": False, "finite": False, "landing_xy_m": None,
+            "landing_valid": False, "net_crossed": False, "net_clear": False,
+            "on_opponent_table": False, "source": None,
+        }
+        or prediction != {
+            "evaluated": False, "predicted_net_clear": None,
+            "predicted_legal_landing": None,
+            "predicted_landing_xy_m": None, "source": None,
+        }
+    ):
+        raise LaunchRefused("C211 miss carries hypothetical analytic outcome")
+    return flight, prediction
 
 
 def _validate_c211_raw_oracle(
@@ -1463,6 +1852,7 @@ def _validate_c211_raw_oracle(
     lineage: Mapping[str, Any],
     materialization: Mapping[str, Any],
     policy: Mapping[str, Any],
+    observed_bundle: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Parse C-owned evidence and derive PASS; the producer has no verdict field."""
 
@@ -1478,6 +1868,7 @@ def _validate_c211_raw_oracle(
             "kind",
             "diagnostic_unauthorized",
             "bindings",
+            "observed_oracle_bundle_content_sha256",
             "training_contract_artifact",
             "runner_preflight_artifact",
             "question_contract",
@@ -1492,11 +1883,13 @@ def _validate_c211_raw_oracle(
         name="C211 raw oracle evidence",
     )
     if (
-        row["schema_version"] != 1
+        row["schema_version"] != 2
         or row["kind"] != C211_RAW_ORACLE_KIND
         or row["diagnostic_unauthorized"] is not True
     ):
         raise LaunchRefused("C211 raw oracle evidence schema differs")
+    if row["observed_oracle_bundle_content_sha256"] != canonical_sha256(observed_bundle):
+        raise LaunchRefused("C211 raw oracle is not bound to the observed live bundle")
 
     hard_contract = _validate_c211_hard_contract(
         row["training_contract_artifact"],
@@ -1516,9 +1909,6 @@ def _validate_c211_raw_oracle(
             "hard_contract_sha256",
             "motion_sha256",
             "manifest_sha256",
-            "tape_file_sha256",
-            "tape_canonical_sha256",
-            "tape_base_question_sha256",
             "dynamic_ready_artifact_sha256",
             "dynamic_ready_nominal_receipt_sha256",
         ),
@@ -1538,9 +1928,6 @@ def _validate_c211_raw_oracle(
         "hard_contract_sha256": hard_contract["sha256"],
         "motion_sha256": lineage["motion"]["sha256"],
         "manifest_sha256": lineage["action_manifest"]["sha256"],
-        "tape_file_sha256": lineage["immutable_tape"]["sha256"],
-        "tape_canonical_sha256": lineage["tape_canonical_sha256"],
-        "tape_base_question_sha256": lineage["tape_question_sha256"],
         "dynamic_ready_artifact_sha256": lineage[
             "dynamic_ready_artifact"
         ]["sha256"],
@@ -1571,36 +1958,36 @@ def _validate_c211_raw_oracle(
         row["question_contract"],
         (
             "target_source",
+            "question_source",
             "target_recipe",
             "target_validity_mask",
             "target_observation_noise",
             "incoming_ball_fields",
+            "desired_contact_fields_observed",
             "reset_inverse_solve",
             "online_solver_calls",
             "online_lm_calls",
-            "physical_rng_draws",
-            "immutable_tape_file_sha256",
-            "immutable_tape_canonical_sha256",
-            "immutable_tape_base_question_sha256",
+            "question_rng",
         ),
         name="C211 raw oracle question contract",
     )
     expected_question = {
-        "target_source": "immutable_tape",
+        "target_source": TARGET_SOURCE,
+        "question_source": "runtime_curriculum_sampler",
         "target_recipe": TARGET_RECIPE,
         "target_validity_mask": list(TARGET_VALIDITY_MASK),
         "target_observation_noise": False,
         "incoming_ball_fields": list(INCOMING_BALL_FIELDS),
+        "desired_contact_fields_observed": False,
         "reset_inverse_solve": False,
         "online_solver_calls": 0,
         "online_lm_calls": 0,
-        "physical_rng_draws": 0,
-        "immutable_tape_file_sha256": lineage["immutable_tape"]["sha256"],
-        "immutable_tape_canonical_sha256": lineage["tape_canonical_sha256"],
-        "immutable_tape_base_question_sha256": lineage["tape_question_sha256"],
+        "question_rng": _question_rng_contract(),
     }
     if question != expected_question:
-        raise LaunchRefused("C211 raw oracle 000/tape/counter contract differs")
+        raise LaunchRefused(
+            "C211 raw oracle direct-ball/000/counter contract differs"
+        )
 
     desired = _exact_dict(
         row["desired_contact_metrics"], ("status", "reason"),
@@ -1631,6 +2018,9 @@ def _validate_c211_raw_oracle(
     if type(episodes) is not list or len(episodes) != 32:
         raise LaunchRefused("C211 raw oracle episode ledger must contain 32 rows")
     episode_step_sum = 0
+    sample_indices: set[int] = set()
+    sample_sha256: set[str] = set()
+    draw_intervals: set[tuple[int, int]] = set()
     for index, episode in enumerate(episodes):
         item = _exact_dict(
             episode,
@@ -1639,10 +2029,14 @@ def _validate_c211_raw_oracle(
                 "control_steps",
                 "terminal_phase",
                 "termination_reasons",
-                "tape_question_index",
-                "tape_question_sha256",
+                "sampler_sample_index",
+                "sampler_sample_sha256",
+                "sampler_draw_start",
+                "sampler_draw_end",
                 "incoming_ball_observation",
                 "selected_rubber_evidence_sha256",
+                "achieved_analytic_flight",
+                "predicted_outcome",
             ),
             name="C211 raw oracle episode",
         )
@@ -1666,11 +2060,21 @@ def _validate_c211_raw_oracle(
             item["episode"] != index
             or type(item["control_steps"]) is not int
             or item["control_steps"] <= 0
-            or item["terminal_phase"] != "post_strike"
+            or item["terminal_phase"] not in (
+                "post_strike", "pre_strike_or_same_step_unknown"
+            )
             or item["termination_reasons"]
             != ["action_ball_single_stroke_complete"]
-            or item["tape_question_index"] != 0
-            or item["tape_question_sha256"] != lineage["tape_question_sha256"]
+            or type(item["sampler_sample_index"]) is not int
+            or item["sampler_sample_index"] < 0
+            or _B._sha256(
+                item["sampler_sample_sha256"],
+                name="C211 sampler sample SHA",
+            ) != item["sampler_sample_sha256"]
+            or type(item["sampler_draw_start"]) is not int
+            or type(item["sampler_draw_end"]) is not int
+            or item["sampler_draw_start"] < 0
+            or item["sampler_draw_end"] <= item["sampler_draw_start"]
             or incoming["source"]
             != "runtime_actor_and_critic_observation_terms"
             or actor != critic
@@ -1678,6 +2082,31 @@ def _validate_c211_raw_oracle(
             != selected["row_sha256"][index]
         ):
             raise LaunchRefused("C211 raw oracle episode evidence differs")
+        sample_index = item["sampler_sample_index"]
+        sample_digest = item["sampler_sample_sha256"]
+        draw_interval = (item["sampler_draw_start"], item["sampler_draw_end"])
+        if (
+            sample_index in sample_indices
+            or sample_digest in sample_sha256
+            or draw_interval in draw_intervals
+        ):
+            raise LaunchRefused(
+                "C211 raw oracle does not prove one distinct sampler receipt per reset"
+            )
+        sample_indices.add(sample_index)
+        sample_sha256.add(sample_digest)
+        draw_intervals.add(draw_interval)
+        selected_contact = selected["classifications"][index] == "selected_rubber"
+        flight, prediction = _validate_c211_analytic_pair(
+            item["achieved_analytic_flight"], item["predicted_outcome"],
+            selected=selected_contact,
+        )
+        live_episode = observed_bundle["episodes"][index]
+        if (
+            flight != live_episode["achieved_analytic_flight"]
+            or prediction != live_episode["predicted_outcome"]
+        ):
+            raise LaunchRefused("C211 raw analytic row differs from pinned live bundle")
         episode_step_sum += item["control_steps"]
     if episode_step_sum != control_steps:
         raise LaunchRefused("C211 raw oracle episode/control-step ledger differs")
@@ -1687,15 +2116,18 @@ def _validate_c211_raw_oracle(
         ("allowed_reason", "by_reason", "unexpected_by_reason", "phase_by_reason"),
         name="C211 raw oracle termination",
     )
-    if termination != {
-        "allowed_reason": "action_ball_single_stroke_complete",
-        "by_reason": {"action_ball_single_stroke_complete": 32},
-        "unexpected_by_reason": {},
-        "phase_by_reason": {
-            "post_strike": {"action_ball_single_stroke_complete": 32},
-            "pre_strike_or_same_step_unknown": {},
-        },
-    }:
+    phases = termination.get("phase_by_reason")
+    if (
+        termination.get("allowed_reason") != "action_ball_single_stroke_complete"
+        or termination.get("by_reason") != {"action_ball_single_stroke_complete": 32}
+        or termination.get("unexpected_by_reason") != {}
+        or type(phases) is not dict
+        or set(phases) != {"post_strike", "pre_strike_or_same_step_unknown"}
+        or sum(
+            phase.get("action_ball_single_stroke_complete", 0)
+            for phase in phases.values() if type(phase) is dict
+        ) != 32
+    ):
         raise LaunchRefused("C211 raw oracle termination ledger differs")
 
     safety = _exact_dict(
@@ -1748,7 +2180,6 @@ def _validate_c211_raw_oracle(
         or type(error) not in (int, float)
         or not math.isfinite(float(error))
         or error < 0.0
-        or error > 2.0e-6
         or teacher["teleport_used"] is not False
     ):
         raise LaunchRefused("C211 raw oracle teacher-qdes evidence differs")
@@ -1807,15 +2238,19 @@ def _validate_oracle32(
             "critic_contract",
             "critic_width",
             "trainability_contract",
+            "target_source",
+            "question_source",
+            "question_rng",
             "target_recipe",
             "target_validity_mask",
             "incoming_ball_fields",
             "reset_inverse_solve",
             "online_solver_calls",
             "online_lm_calls",
-            "physical_rng_draws",
-            "seed",
-            "raw_oracle_artifact",
+                "seed",
+                "observed_oracle_bundle_artifact",
+                "observed_oracle_bundle_content_sha256",
+                "raw_oracle_artifact",
             "raw_oracle_kind",
             "raw_oracle_content_sha256",
             "control_step_denominator",
@@ -1825,12 +2260,12 @@ def _validate_oracle32(
         name="C211 oracle32 receipt",
     )
     expected = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": ORACLE32_KIND,
         "diagnostic_unauthorized": True,
         "verdict": "PASS",
         "episodes": 32,
-        "recipe_id": RECIPE_ID,
+        "recipe_id": recipe["recipe_id"],
         "lineage_sha256": lineage["lineage_sha256"],
         "recipe_contract_sha256": recipe["recipe_contract_sha256"],
         "reward_contract_sha256": materialization["reward_contract_sha256"],
@@ -1843,13 +2278,15 @@ def _validate_oracle32(
         "critic_contract": CRITIC_CONTRACT,
         "critic_width": CRITIC_WIDTH,
         "trainability_contract": TRAINABILITY_CONTRACT,
+        "target_source": TARGET_SOURCE,
+        "question_source": "runtime_curriculum_sampler",
+        "question_rng": _question_rng_contract(),
         "target_recipe": TARGET_RECIPE,
         "target_validity_mask": list(TARGET_VALIDITY_MASK),
         "incoming_ball_fields": list(INCOMING_BALL_FIELDS),
         "reset_inverse_solve": False,
         "online_solver_calls": 0,
         "online_lm_calls": 0,
-        "physical_rng_draws": 0,
         "seed": lineage["seed"],
     }
     if any(row[key] != wanted for key, wanted in expected.items()):
@@ -1863,6 +2300,21 @@ def _validate_oracle32(
     expected_raw_path = oracle_namespace / "teacher_qdes_oracle_32ep.json"
     if _artifact_path.resolve(strict=True) != expected_raw_path.resolve(strict=True):
         raise LaunchRefused("C211 raw oracle artifact path differs")
+    _observed_pin, observed_path = _external_pin(
+        row["observed_oracle_bundle_artifact"],
+        name="C211 observed oracle bundle artifact",
+    )
+    expected_observed_path = oracle_namespace / C211_OBSERVED_BUNDLE_FILENAME
+    if observed_path.resolve(strict=True) != expected_observed_path.resolve(strict=True):
+        raise LaunchRefused("C211 observed oracle bundle artifact path differs")
+    try:
+        observed_bundle = _C._load_canonical(observed_path)
+    except (_C.EvidenceError, OSError, ValueError) as exc:
+        raise LaunchRefused("C211 observed oracle bundle is invalid") from exc
+    if row["observed_oracle_bundle_content_sha256"] != canonical_sha256(
+        observed_bundle
+    ):
+        raise LaunchRefused("C211 observed oracle bundle content SHA differs")
     raw_facts = _validate_c211_raw_oracle(
         _artifact_path,
         checkout=checkout,
@@ -1872,6 +2324,7 @@ def _validate_oracle32(
         lineage=lineage,
         materialization=materialization,
         policy=policy,
+        observed_bundle=observed_bundle,
     )
     expected_raw = {
         "raw_oracle_kind": raw_facts["kind"],
@@ -1893,9 +2346,625 @@ def _validate_oracle32(
     }
 
 
+def _stable_artifact_bytes(
+    path: Path, *, name: str, max_bytes: int
+) -> tuple[bytes, dict[str, Any]]:
+    """Read one bounded real file while binding its identity and digest."""
+
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise LaunchRefused("%s is missing" % name) from exc
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_size <= 0
+        or before.st_size > max_bytes
+        or path.resolve(strict=True) != path
+    ):
+        raise LaunchRefused("%s must be a bounded real regular file" % name)
+    try:
+        raw = path.read_bytes()
+        after = path.lstat()
+    except OSError as exc:
+        raise LaunchRefused("%s cannot be read stably" % name) from exc
+    if (
+        len(raw) != before.st_size
+        or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    ):
+        raise LaunchRefused("%s changed while it was audited" % name)
+    return raw, {
+        "path": str(path),
+        "size_bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _finite_tensor_tree(
+    value: Any, *, name: str, torch_module: Any
+) -> dict[str, int]:
+    """Recursively require a non-empty, entirely finite tensor subtree."""
+
+    tensor_count = 0
+    element_count = 0
+
+    def visit(item: Any) -> None:
+        nonlocal tensor_count, element_count
+        if torch_module.is_tensor(item):
+            tensor_count += 1
+            element_count += int(item.numel())
+            try:
+                finite = bool(torch_module.isfinite(item).all().item())
+            except (RuntimeError, TypeError, ValueError) as exc:
+                raise LaunchRefused(
+                    "C211 scale4096 checkpoint %s tensor cannot be audited" % name
+                ) from exc
+            if not finite:
+                raise LaunchRefused(
+                    "C211 scale4096 checkpoint %s contains a non-finite tensor"
+                    % name
+                )
+            return
+        if isinstance(item, Mapping):
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    if tensor_count <= 0 or element_count <= 0:
+        raise LaunchRefused(
+            "C211 scale4096 checkpoint %s contains no tensors" % name
+        )
+    return {"tensor_count": tensor_count, "element_count": element_count}
+
+
+def _checkpoint_run_dir(
+    *, log_raw: bytes, checkout: Path, namespace: Path
+) -> Path:
+    """Resolve the unique RSL log directory printed by this exact namespace."""
+
+    try:
+        lines = log_raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise LaunchRefused("C211 scale4096 run log is not UTF-8") from exc
+    marker = " | log: "
+    candidates = [
+        line.rsplit(marker, 1)[1]
+        for line in lines
+        if line.startswith("[INFO] Task: ") and marker in line
+    ]
+    if len(candidates) != 1:
+        raise LaunchRefused(
+            "C211 scale4096 run log lacks one exact RSL log directory"
+        )
+    run_dir = _B._absolute_path(
+        candidates[0], name="C211 scale4096 RSL log directory"
+    )
+    root = checkout / _B.WBT_RELATIVE / "logs" / "rsl_rl" / EXPERIMENT_NAME
+    expected_suffix = "_%s-DIAGNOSTIC_UNAUTHORIZED" % namespace.name
+    if (
+        not run_dir.name.endswith(expected_suffix)
+        or re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}"
+            + re.escape(expected_suffix),
+            run_dir.name,
+        )
+        is None
+    ):
+        raise LaunchRefused("C211 scale4096 RSL run name differs")
+    try:
+        if (
+            root.resolve(strict=True) != root
+            or run_dir.resolve(strict=True) != run_dir
+            or run_dir.parent != root
+            or not stat.S_ISDIR(run_dir.lstat().st_mode)
+        ):
+            raise LaunchRefused(
+                "C211 scale4096 RSL run directory escapes checkout"
+            )
+    except OSError as exc:
+        raise LaunchRefused(
+            "C211 scale4096 RSL run directory is missing"
+        ) from exc
+    return run_dir
+
+
+def _terminal_json_events(
+    log_raw: bytes, *, prefix: str, name: str
+) -> list[dict[str, Any]]:
+    try:
+        lines = log_raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise LaunchRefused("C211 scale4096 run log is not UTF-8") from exc
+
+    def reject_constant(value: str) -> None:
+        raise ValueError("non-finite JSON constant %s" % value)
+
+    rows = []
+    for line in lines:
+        if not line.startswith(prefix):
+            continue
+        try:
+            row = json.loads(
+                line[len(prefix) :], parse_constant=reject_constant
+            )
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise LaunchRefused(
+                "C211 scale4096 %s JSON is invalid" % name
+            ) from exc
+        if type(row) is not dict:
+            raise LaunchRefused(
+                "C211 scale4096 %s must be a JSON object" % name
+            )
+        rows.append(row)
+    return rows
+
+
+def _plain_counter(value: Any, *, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise LaunchRefused(
+            "C211 scale4096 %s must be a nonnegative integer" % name
+        )
+    return value
+
+
+def _ordered_terminal_events(
+    rows: list[dict[str, Any]],
+    *,
+    event: str,
+    schema_version: int,
+    expected_updates: int,
+    name: str,
+) -> list[dict[str, Any]]:
+    if (
+        len(rows) != expected_updates
+        or any(
+            row.get("event") != event
+            or row.get("schema_version") != schema_version
+            or row.get("ppo_update") != index
+            for index, row in enumerate(rows)
+        )
+    ):
+        raise LaunchRefused(
+            "C211 scale4096 %s lacks exactly %d contiguous terminal updates"
+            % (name, expected_updates)
+        )
+    return rows
+
+
+def _prelong_terminal_gate_binding(
+    *,
+    log_raw: bytes,
+    run_log: Mapping[str, Any],
+    checkpoint: Mapping[str, Any],
+    safety_counters: Mapping[str, Any],
+    launch_claim_sha256: str,
+) -> dict[str, Any]:
+    """Consume the five real semantic markers and bind PASS to exact artifacts."""
+
+    if (
+        _S.PRELONG_SEMANTICS_EVENT != _P.SEMANTIC_EVENT
+        or _S.PRELONG_SEMANTICS_SCHEMA_VERSION != _P.SEMANTIC_SCHEMA_VERSION
+    ):
+        raise LaunchRefused("C211 pre-long producer and gate schemas differ")
+    try:
+        log_text = log_raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LaunchRefused("C211 scale4096 run log is not UTF-8") from exc
+    semantic_updates = _terminal_json_events(
+        log_raw,
+        prefix=_S.PRELONG_SEMANTICS_MARKER_PREFIX,
+        name="pre-long semantic marker",
+    )
+    try:
+        gate = _P.validate_prelong_gate(
+            log_text=log_text,
+            checkpoint_acceptance={
+                "checkpoint": checkpoint,
+                "safety_counters": safety_counters,
+            },
+            semantic_updates=semantic_updates,
+        )
+    except _P.PreLongGateRefused as exc:
+        raise LaunchRefused("C211 scale4096 pre-long gate rejected: %s" % exc) from exc
+    unsigned = {
+        "schema_version": 1,
+        "kind": "action_ball_c211_4096x5_prelong_gate_binding_v1",
+        "diagnostic_unauthorized": True,
+        "launch_claim_sha256": launch_claim_sha256,
+        "run_log_sha256": run_log["sha256"],
+        "checkpoint_sha256": checkpoint["sha256"],
+        "semantic_marker_prefix": _S.PRELONG_SEMANTICS_MARKER_PREFIX,
+        "semantic_update_count": len(semantic_updates),
+        "gate": gate,
+        "gate_sha256": canonical_sha256(gate),
+    }
+    return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
+
+
+def _audit_scale4096_terminal(
+    *,
+    checkout: Path,
+    namespace: Path,
+    launch_claim_sha256: str,
+) -> dict[str, Any]:
+    """Independently recompute the terminal gate consumed by ``long4096``.
+
+    The checkpoint is accepted only from the exact RSL directory named in this
+    namespace's stable run log.  It is loaded on CPU with ``weights_only=True``;
+    ordinary pickle loading has no fallback path.
+    """
+
+    expected_updates = BUDGETS["scale4096"][1]
+    log_raw, log_artifact = _stable_artifact_bytes(
+        namespace / "run.log",
+        name="C211 scale4096 terminal run log",
+        max_bytes=512 << 20,
+    )
+    run_dir = _checkpoint_run_dir(
+        log_raw=log_raw, checkout=checkout, namespace=namespace
+    )
+    checkpoint_path = run_dir / ("model_%d.pt" % expected_updates)
+    checkpoint_raw, checkpoint_artifact = _stable_artifact_bytes(
+        checkpoint_path,
+        name="C211 scale4096 exact checkpoint",
+        max_bytes=32 << 30,
+    )
+    try:
+        import torch as torch_module
+    except ImportError as exc:  # pragma: no cover - exact Pod dependency
+        raise LaunchRefused(
+            "PyTorch is required to audit the C211 scale4096 checkpoint"
+        ) from exc
+    try:
+        checkpoint = torch_module.load(
+            io.BytesIO(checkpoint_raw), map_location="cpu", weights_only=True
+        )
+    except Exception as exc:
+        raise LaunchRefused(
+            "C211 scale4096 checkpoint failed safe CPU weights-only load; "
+            "ordinary pickle execution is forbidden"
+        ) from exc
+    if type(checkpoint) is not dict:
+        raise LaunchRefused("C211 scale4096 checkpoint root must be a dict")
+    embedded_iteration = checkpoint.get("iter")
+    infos = checkpoint.get("infos")
+    if (
+        type(embedded_iteration) is not int
+        or embedded_iteration != expected_updates
+        or type(infos) is not dict
+        or infos.get("training_launch_claim_sha256") != launch_claim_sha256
+    ):
+        raise LaunchRefused(
+            "C211 scale4096 checkpoint iteration/launch-claim binding differs"
+        )
+    tensor_groups = {}
+    for key, label in (
+        ("model_state_dict", "model"),
+        ("optimizer_state_dict", "optimizer"),
+        ("obs_norm_state_dict", "actor_normalizer"),
+        ("privileged_obs_norm_state_dict", "critic_normalizer"),
+    ):
+        subtree = checkpoint.get(key)
+        if not isinstance(subtree, Mapping) or not subtree:
+            raise LaunchRefused(
+                "C211 scale4096 checkpoint lacks %s state" % label
+            )
+        tensor_groups[label] = _finite_tensor_tree(
+            subtree, name=label, torch_module=torch_module
+        )
+
+    joint_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_JOINT_SAFETY_UPDATE_JSON=",
+            name="joint-safety counter",
+        ),
+        event="hope_joint_safety_diagnostic_compact_update",
+        schema_version=1,
+        expected_updates=expected_updates,
+        name="joint-safety counters",
+    )
+    actual_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON=",
+            name="actual-hard counter",
+        ),
+        event="action_ball_actual_joint_forbidden_diagnostic_update",
+        schema_version=2,
+        expected_updates=expected_updates,
+        name="actual-hard counters",
+    )
+    reward_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=",
+            name="reward-safety counter",
+        ),
+        event="hope_reward_safety_transition_update",
+        schema_version=2,
+        expected_updates=expected_updates,
+        name="reward-safety counters",
+    )
+    behavior_rows = _ordered_terminal_events(
+        _terminal_json_events(
+            log_raw,
+            prefix="HOPE_EXACT_BEHAVIOR_UPDATE_JSON=",
+            name="exact-behavior counter",
+        ),
+        event="hope_exact_behavior_update",
+        schema_version=1,
+        expected_updates=expected_updates,
+        name="exact-behavior counters",
+    )
+
+    actual_hard_edge_count = 0
+    for index, row in enumerate(joint_rows):
+        totals = row.get("counter_totals")
+        if (
+            row.get("status")
+            != "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+            or type(totals) is not dict
+            or "actual_hard_edge_events" not in totals
+        ):
+            raise LaunchRefused(
+                "C211 scale4096 joint-safety terminal counter %d is incomplete"
+                % index
+            )
+        actual_hard_edge_count += _plain_counter(
+            totals["actual_hard_edge_events"],
+            name="actual_hard_edge_events",
+        )
+
+    actual_hard_terminal_count = 0
+    physics_nonfinite_count = 0
+    for index, row in enumerate(actual_rows):
+        if row.get("enabled") is not True or "total_hard_terminal_count" not in row:
+            raise LaunchRefused(
+                "C211 scale4096 actual-hard terminal counter %d is incomplete"
+                % index
+            )
+        actual_hard_terminal_count += _plain_counter(
+            row["total_hard_terminal_count"], name="actual hard terminal count"
+        )
+        control = row.get("physx_control_position_limits")
+        if type(control) is not dict or control.get("enabled") is not True:
+            raise LaunchRefused(
+                "C211 scale4096 actual-hard control telemetry is missing"
+            )
+        by_joint = control.get("by_joint")
+        if type(by_joint) is not list or not by_joint:
+            raise LaunchRefused(
+                "C211 scale4096 actual-hard control telemetry has no joints"
+            )
+        for joint in by_joint:
+            sides = joint.get("sides") if type(joint) is dict else None
+            if type(sides) is not dict or set(sides) != {"lower", "upper"}:
+                raise LaunchRefused(
+                    "C211 scale4096 actual-hard control side telemetry is incomplete"
+                )
+            for side in sides.values():
+                if type(side) is not dict or type(
+                    side.get("nonfinite_readback_observed")
+                ) is not bool:
+                    raise LaunchRefused(
+                        "C211 scale4096 actual-hard nonfinite counter is missing"
+                    )
+                physics_nonfinite_count += int(
+                    side["nonfinite_readback_observed"]
+                )
+
+    strict_hard_termination_count = 0
+    table_contact_count = 0
+    joint_qdes_terminal_count = 0
+    joint_actual_terminal_count = 0
+    reward_fall_by_reason = {reason: 0 for reason in PHYSICAL_FALL_REASONS}
+    for index, row in enumerate(reward_rows):
+        transitions = row.get("terminal_transitions")
+        if row.get("coverage") != "complete_update" or type(transitions) is not list:
+            raise LaunchRefused(
+                "C211 scale4096 reward-safety terminal counter %d is incomplete"
+                % index
+            )
+        for transition in transitions:
+            terms = (
+                transition.get("termination_terms")
+                if type(transition) is dict
+                else None
+            )
+            if (
+                type(terms) is not list
+                or not terms
+                or any(type(term) is not str for term in terms)
+            ):
+                raise LaunchRefused(
+                    "C211 scale4096 terminal transition lacks reason counters"
+            )
+            term_set = set(terms)
+            strict_hard_termination_count += int(
+                bool(term_set & set(STRICT_HARD_TERMINATION_UNION))
+            )
+            table_contact_count += int("robot_hit_table" in term_set)
+            joint_qdes_terminal_count += int("joint_qdes_forbidden" in term_set)
+            joint_actual_terminal_count += int("joint_actual_forbidden" in term_set)
+            for reason in PHYSICAL_FALL_REASONS:
+                reward_fall_by_reason[reason] += int(reason in term_set)
+
+    required_nonfinite_counters = {
+        "ready_nonfinite_value_count",
+        "strike_window_entry_racket_target_distance_nonfinite_count",
+        "virtual_contact_nonfinite_reject_count",
+    }
+    behavior_nonfinite_count = 0
+    task_wait_started_by_update = []
+    task_reveal_reached_by_update = []
+    behavior_fall_by_reason = {reason: 0 for reason in PHYSICAL_FALL_REASONS}
+    physical_fall_by_reason_phase = {
+        reason: {phase: 0 for phase in PHYSICAL_FALL_PHASES}
+        for reason in PHYSICAL_FALL_REASONS
+    }
+    table_contact_by_phase = {phase: 0 for phase in PHYSICAL_FALL_PHASES}
+    behavior_table_contact_count = 0
+    for index, row in enumerate(behavior_rows):
+        counters = row.get("counters")
+        required_balance_counters = {
+            TASK_WAIT_STARTED_COUNTER,
+            TASK_REVEAL_REACHED_COUNTER,
+            "termination_reason_robot_hit_table_count",
+            *(
+                f"termination_reason_{reason}_count"
+                for reason in PHYSICAL_FALL_REASONS
+            ),
+            *(
+                f"termination_reason_{reason}_{phase}_count"
+                for reason in PHYSICAL_FALL_REASONS
+                for phase in PHYSICAL_FALL_PHASES
+            ),
+            *(
+                f"termination_reason_robot_hit_table_{phase}_count"
+                for phase in PHYSICAL_FALL_PHASES
+            ),
+        }
+        if (
+            type(counters) is not dict
+            or not required_nonfinite_counters.issubset(counters)
+            or not required_balance_counters.issubset(counters)
+        ):
+            raise LaunchRefused(
+                "C211 scale4096 exact-behavior nonfinite counters and survival/fall counters %d are missing"
+                % index
+            )
+        task_wait_started_by_update.append(
+            _plain_counter(
+                counters[TASK_WAIT_STARTED_COUNTER],
+                name="task wait started count",
+            )
+        )
+        task_reveal_reached_by_update.append(
+            _plain_counter(
+                counters[TASK_REVEAL_REACHED_COUNTER],
+                name="task reveal reached count",
+            )
+        )
+        for reason in PHYSICAL_FALL_REASONS:
+            reason_total = _plain_counter(
+                counters[f"termination_reason_{reason}_count"],
+                name=f"{reason} terminal count",
+            )
+            phase_counts = {
+                phase: _plain_counter(
+                    counters[f"termination_reason_{reason}_{phase}_count"],
+                    name=f"{reason} {phase} terminal count",
+                )
+                for phase in PHYSICAL_FALL_PHASES
+            }
+            if sum(phase_counts.values()) != reason_total:
+                raise LaunchRefused(
+                    f"C211 scale4096 {reason} reason-by-phase counters do not conserve "
+                    f"in update {index}"
+                )
+            behavior_fall_by_reason[reason] += reason_total
+            for phase, count in phase_counts.items():
+                physical_fall_by_reason_phase[reason][phase] += count
+        table_total = _plain_counter(
+            counters["termination_reason_robot_hit_table_count"],
+            name="robot_hit_table terminal count",
+        )
+        table_phase_counts = {
+            phase: _plain_counter(
+                counters[f"termination_reason_robot_hit_table_{phase}_count"],
+                name=f"robot_hit_table {phase} terminal count",
+            )
+            for phase in PHYSICAL_FALL_PHASES
+        }
+        if sum(table_phase_counts.values()) != table_total:
+            raise LaunchRefused(
+                "C211 scale4096 robot_hit_table reason-by-phase counters do not "
+                f"conserve in update {index}"
+            )
+        behavior_table_contact_count += table_total
+        for phase, count in table_phase_counts.items():
+            table_contact_by_phase[phase] += count
+        for key, value in counters.items():
+            if "nonfinite" in key:
+                behavior_nonfinite_count += _plain_counter(
+                    value, name="exact-behavior %s" % key
+                )
+
+    if behavior_fall_by_reason != reward_fall_by_reason:
+        raise LaunchRefused(
+            "C211 scale4096 physical-fall behavior and terminal-transition counts differ"
+        )
+    if behavior_table_contact_count != table_contact_count:
+        raise LaunchRefused(
+            "C211 scale4096 table-contact behavior and terminal-transition counts differ"
+        )
+    safety = {
+        "observed_ppo_updates": expected_updates,
+        "actual_hard_edge_event_count": actual_hard_edge_count,
+        "actual_hard_terminal_count": actual_hard_terminal_count,
+        "joint_qdes_forbidden_terminal_count": joint_qdes_terminal_count,
+        "joint_actual_forbidden_terminal_count": joint_actual_terminal_count,
+        "strict_hard_termination_count": strict_hard_termination_count,
+        "table_contact_count": table_contact_count,
+        "nonfinite_count": physics_nonfinite_count + behavior_nonfinite_count,
+        "base_fell_tilt_terminal_count": behavior_fall_by_reason["base_fell_tilt"],
+        "base_too_low_terminal_count": behavior_fall_by_reason["base_too_low"],
+        "physical_fall_by_reason_phase": physical_fall_by_reason_phase,
+        "table_contact_by_phase": table_contact_by_phase,
+        "task_wait_started_by_update": task_wait_started_by_update,
+        "task_wait_started_count": sum(task_wait_started_by_update),
+        "task_reveal_reached_by_update": task_reveal_reached_by_update,
+        "task_reveal_reached_count": sum(task_reveal_reached_by_update),
+    }
+    strict_zero_keys = (
+        "actual_hard_edge_event_count",
+        "actual_hard_terminal_count",
+        "joint_qdes_forbidden_terminal_count",
+        "joint_actual_forbidden_terminal_count",
+        "strict_hard_termination_count",
+        "nonfinite_count",
+    )
+    if any(safety[key] != 0 for key in strict_zero_keys):
+        raise LaunchRefused(
+            "C211 scale4096 observed joint-qdes/joint-actual/nonfinite implementation counters are nonzero"
+        )
+    checkpoint_acceptance = {
+        **checkpoint_artifact,
+        "filename_iteration": expected_updates,
+        "embedded_iteration": embedded_iteration,
+        "map_location": "cpu",
+        "load_mode": "torch_weights_only",
+        "tensor_groups": tensor_groups,
+        "all_tensors_finite": True,
+    }
+    prelong_gate = _prelong_terminal_gate_binding(
+        log_raw=log_raw,
+        run_log=log_artifact,
+        checkpoint=checkpoint_acceptance,
+        safety_counters=safety,
+        launch_claim_sha256=launch_claim_sha256,
+    )
+    unsigned = {
+        "schema_version": 1,
+        "kind": SCALE4096_TERMINAL_ACCEPTANCE_KIND,
+        "diagnostic_unauthorized": True,
+        "launch_claim_sha256": launch_claim_sha256,
+        "run_log": log_artifact,
+        "checkpoint": checkpoint_acceptance,
+        "safety_counters": safety,
+        "prelong_gate": prelong_gate,
+    }
+    return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
+
+
 def _validate_scale_predecessor(
     value: Any,
     *,
+    checkout: Path,
     materialization: Mapping[str, Any],
     policy: Mapping[str, Any],
     oracle32: Mapping[str, Any],
@@ -1927,12 +2996,32 @@ def _validate_scale_predecessor(
         raise LaunchRefused(
             "C211 long4096 requires the exact finite natural-exit scale4096 result"
         )
+    namespace = _B._absolute_path(
+        result["namespace"],
+        name="C211 scale4096 predecessor namespace",
+        must_exist=True,
+    )
+    recomputed_terminal = _audit_scale4096_terminal(
+        checkout=checkout,
+        namespace=namespace,
+        launch_claim_sha256=result["launch_claim_sha256"],
+    )
+    if result["terminal_acceptance"] != recomputed_terminal:
+        raise LaunchRefused(
+            "C211 scale4096 predecessor terminal checkpoint/safety acceptance differs"
+        )
     return {
         "artifact": pin,
         "stage": "scale4096",
         "launch_claim_sha256": result["launch_claim_sha256"],
         "content_sha256": result["content_sha256"],
         "completion": expected_completion,
+        "finite_model_artifact": recomputed_terminal["checkpoint"],
+        "safety_counters": recomputed_terminal["safety_counters"],
+        "prelong_gate": recomputed_terminal["prelong_gate"],
+        "terminal_acceptance_content_sha256": recomputed_terminal[
+            "content_sha256"
+        ],
     }
 
 
@@ -2002,13 +3091,12 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
             "recipe_result",
             "oracle32_result",
             "predecessor_result",
+            "four_grid_scale4096_receipt",
             "stage",
             "num_envs",
             "max_iterations",
             "save_interval",
             "wait_contract",
-            "frame0_exact_artifact_sha256",
-            "frame0_exact_receipt_sha256",
             "gpu",
             "namespace",
             "log_path",
@@ -2025,18 +3113,10 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
     _assert_c211_only(row, name="C211 launch spec")
     if row["schema_version"] != SCHEMA_VERSION or row["kind"] != SPEC_KIND:
         raise LaunchRefused("C211 launch spec schema/kind differs")
-    if row["recipe_id"] != RECIPE_ID:
-        raise LaunchRefused("C211 launcher accepts only its code-owned recipe")
+    if row["recipe_id"] not in RECIPE_IDS:
+        raise LaunchRefused("C211 launcher accepts only its two code-owned grid recipes")
     if row["wait_contract"] != _wait_contract():
         raise LaunchRefused("C211 launch wait schedule differs")
-    frame0_artifact_sha = _B._sha256(
-        row["frame0_exact_artifact_sha256"],
-        name="spec.frame0_exact_artifact_sha256",
-    )
-    frame0_receipt_sha = _B._sha256(
-        row["frame0_exact_receipt_sha256"],
-        name="spec.frame0_exact_receipt_sha256",
-    )
     allow_colocation = row.get(COLOCATION_SPEC_KEY, False)
     if type(allow_colocation) is not bool:
         raise LaunchRefused("allow_vendor_v2_colocation must be a boolean")
@@ -2052,6 +3132,10 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
     if stage not in BUDGETS:
         raise LaunchRefused(
             "stage must be materialize, recipe, oracle32, scale4096, or long4096"
+        )
+    if allow_colocation and stage not in COLOCATED_STAGES:
+        raise LaunchRefused(
+            "VendorV2 colocation is restricted to scale4096/long4096 and is excluded from rate evidence"
         )
     actual_budget = (
         _B._plain_int(row["num_envs"], name="num_envs", minimum=1),
@@ -2076,6 +3160,17 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
         raise LaunchRefused("namespace parent must be an existing real directory")
     if parent.name != EXPERIMENT_NAME:
         raise LaunchRefused("namespace parent must be the dedicated C211 experiment root")
+    expected_parent = (
+        Path(row["source"]["checkout"])
+        / _B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / EXPERIMENT_NAME
+    )
+    if parent != expected_parent:
+        raise LaunchRefused(
+            "namespace parent must be the checkout-local C211 experiment root"
+        )
     log_path = _B._absolute_path(row["log_path"], name="log_path")
     if log_path != namespace / "run.log":
         raise LaunchRefused("log_path must equal <namespace>/run.log")
@@ -2085,6 +3180,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
         "recipe_result": stage not in ("materialize", "recipe"),
         "oracle32_result": stage in ("scale4096", "long4096"),
         "predecessor_result": stage == "long4096",
+        "four_grid_scale4096_receipt": stage == "long4096",
     }
     for key, needed in requirements.items():
         if needed is not (row[key] is not None):
@@ -2097,19 +3193,22 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
             "commit_sha": commit,
             "isaac_python": str(python),
         },
-        "recipe_id": RECIPE_ID,
+        "recipe_id": row["recipe_id"],
         "lineage": _pin(row["lineage"], name="spec.lineage"),
         "materialization_result": row["materialization_result"],
         "recipe_result": row["recipe_result"],
         "oracle32_result": row["oracle32_result"],
         "predecessor_result": row["predecessor_result"],
+        "four_grid_scale4096_receipt": (
+            _four_grid_prelong_receipt_pin(row["four_grid_scale4096_receipt"])
+            if stage == "long4096"
+            else None
+        ),
         "stage": stage,
         "num_envs": actual_budget[0],
         "max_iterations": actual_budget[1],
         "save_interval": actual_budget[2],
         "wait_contract": _wait_contract(),
-        "frame0_exact_artifact_sha256": frame0_artifact_sha,
-        "frame0_exact_receipt_sha256": frame0_receipt_sha,
         "gpu": _validate_gpu(row["gpu"], allow_colocation=allow_colocation),
         "namespace": str(namespace),
         "log_path": str(log_path),
@@ -2163,8 +3262,11 @@ def _termination_contract() -> dict[str, Any]:
 def _continuation_stop_gate() -> dict[str, Any]:
     return {
         "exact_stage_budget_required": True,
-        "hard_termination_count_max": 0,
-        "table_contact_count_max": 0,
+        "strict_hard_termination_count_max": 0,
+        "behavioral_termination_policy": (
+            "fall_too_low_and_table_remain_terminal_but_are_reported_by_reason_phase_"
+            "without_an_unvalidated_numeric_cutoff"
+        ),
         "nonfinite_count_max": 0,
         "finite_model_required_when_updates_positive": True,
         "oracle32_pass_required_for_training_stages": True,
@@ -2222,7 +3324,8 @@ def _training_argv(
         "algo.runner.empirical_normalization=true",
         "algo.policy.actor_hidden_dims=[512,256,128]",
         "algo.policy.critic_hidden_dims=[512,256,128]",
-        "algo.policy.init_noise_std=0.02",
+        # 0.02 -> 0.1:见 exp §5.6 第 3 条与 action_ball_211_four_grid_contract 的复算表。
+        "algo.policy.init_noise_std=0.1",
         "algo.policy.noise_std_type=log",
         "algo.algorithm.entropy_coef=0.01",
         "algo.algorithm.schedule=%s" % ppo["schedule"],
@@ -2235,6 +3338,7 @@ def _training_argv(
         "task.experiment_name=%s" % EXPERIMENT_NAME,
         "task.gym_task=%s" % GYM_TASK_ID,
         "task.actor_obs_contract=%s" % ACTOR_CONTRACT,
+        "task.domain_rand.stable_ready_plant=true",
         "action_ball_dynamic_ready_bootstrap=true",
         "action_ball_dynamic_ready_artifact_path=%s"
         % (checkout / lineage["dynamic_ready_artifact"]["path"]),
@@ -2252,22 +3356,21 @@ def _training_argv(
         % lineage["action_manifest"]["sha256"],
         "task.racket.action_ball_policy_contract_sha256=%s" % policy_sha,
         "task.racket.action_ball_seed=%d" % lineage["seed"],
-        "task.racket.action_ball_target_source=immutable_tape",
+        "task.racket.action_ball_target_source=direct_ball",
         "task.racket.action_ball_target_recipe=%s" % TARGET_RECIPE,
         "task.racket.action_ball_target_validity_mask=[false,false,false]",
         "task.racket.action_ball_target_observation_noise=false",
+        "task.racket.action_ball_reuse_exact_question_until_semantics_change=false",
+        "task.racket.action_ball_initial_center_single_question=true",
         "task.racket.adaptive_sigma=false",
         "task.racket.adaptive_sigma_monotonic=false",
         "task.racket.adaptive_sigma_normal=false",
         "task.racket.target_noise_white=0.0",
         "task.racket.target_noise_ar1_sigma=0.0",
-        "task.racket.action_ball_immutable_tape_path=%s"
-        % (checkout / lineage["immutable_tape"]["path"]),
-        "task.racket.action_ball_immutable_tape_sha256=%s"
-        % lineage["immutable_tape"]["sha256"],
         "task.racket.action_ball_diagnostic_unauthorized=true",
         "+task.racket.reference_guard_mode=%s" % recipe["reference_guard_mode"],
         "task.rewards.death_penalty_weight=%s" % weights["death_penalty"],
+        "task.rewards.base_position_weight=0.0",
         "task.rewards.qdes_limit_barrier_weight=%s" % weights["qdes_limit"],
         "+task.rewards.qdes_projection_penalty_weight=%s"
         % weights["qdes_projection"],
@@ -2302,9 +3405,18 @@ def _training_argv(
     if spec["stage"] == "oracle32":
         argv.extend(
             (
-                "+action_ball_teacher_qdes_oracle_output_path=%s"
-                % (Path(spec["namespace"]) / "teacher_qdes_oracle_32ep.json"),
-                "+action_ball_teacher_qdes_oracle_episodes=32",
+                "+action_ball_c211_oracle_bundle_output_path=%s"
+                % (
+                    Path(spec["namespace"])
+                    / C211_OBSERVED_BUNDLE_FILENAME
+                ),
+                "+action_ball_c211_oracle_episodes=32",
+                "+action_ball_c211_oracle_lineage_sha256=%s"
+                % lineage["lineage_sha256"],
+                "+action_ball_c211_oracle_recipe_contract_sha256=%s"
+                % recipe["recipe_contract_sha256"],
+                "+action_ball_c211_oracle_reward_contract_sha256=%s"
+                % materialization["reward_contract_sha256"],
             )
         )
     return argv
@@ -2313,27 +3425,56 @@ def _training_argv(
 def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
     stage = spec["stage"]
     runtime_blocked = stage in BLOCKED_RUNTIME_STAGES
+    profile_contract = _update_profile_contract(os.environ)
+    if (
+        profile_contract["forwarded_value"] is not None
+        and spec[COLOCATION_SPEC_KEY]
+    ):
+        raise LaunchRefused(
+            "ActionBall update profiling requires an exclusive GPU claim"
+        )
+    rate_isolation = (
+        "excluded_colocated_diagnostic"
+        if spec[COLOCATION_SPEC_KEY]
+        else "excluded_scale_finite_gate"
+        if stage == "scale4096"
+        else "excluded_profile_instrumented_diagnostic"
+        if profile_contract["mode"] == "profile_on_attribution_only"
+        else "excluded_no_matched_abba_speed_stage"
+    )
     output = {
         "ppo_update_count": 0 if runtime_blocked else spec["max_iterations"],
         "requested_ppo_update_count": spec["max_iterations"],
         "finite_model_save_interval": spec["save_interval"],
         "effective_reward_recipe": None,
         "policy_recipe": None,
-        "teacher_qdes_oracle32": None,
+        "c211_observed_oracle_bundle": None,
+        "c211_raw_oracle32": None,
         "boot_marker": "Learning iteration",
-        "speed_benchmark_eligible": not spec[COLOCATION_SPEC_KEY],
+        # Existing finite/long stages do not implement the matched
+        # profiler-off A->C->C->A speed gate.  scale4096 additionally carries
+        # the five-update pre-long evidence ledger and is never rate evidence.
+        "speed_benchmark_eligible": False,
+        "rate_evidence_eligible": False,
+        "rate_evidence_isolation": rate_isolation,
+        "update_profile": profile_contract,
+        "deferred_matched_speed_measurement": (
+            _deferred_speed_measurement_contract()
+        ),
+        "colocated_stage": (
+            spec["stage"] if spec[COLOCATION_SPEC_KEY] else None
+        ),
+        "max_compute_processes_per_gpu": MAX_COLOCATED_PROCESSES_PER_GPU,
+        "colocation_result_scope": "training_diagnostic_only",
         "diagnostic_unauthorized": True,
         "runtime_gate": ORACLE_RUNTIME_BLOCKER if runtime_blocked else "READY",
         "runtime_dependencies": (
             list(ORACLE_RUNTIME_DEPENDENCIES) if runtime_blocked else []
         ),
         "wait_contract": _wait_contract(),
-        "frame0_exact_artifact_sha256": spec[
-            "frame0_exact_artifact_sha256"
-        ],
-        "frame0_exact_receipt_sha256": spec[
-            "frame0_exact_receipt_sha256"
-        ],
+        "physical_reset_semantics": "separate_safe_ready_zero_velocity",
+        "teacher_reveal_semantics": "measured_frame0_with_public_countdown",
+        "passive_hold_after_reveal_required": False,
     }
     namespace = Path(spec["namespace"])
     if stage == "materialize":
@@ -2343,10 +3484,13 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
         output["policy_recipe"] = str(namespace / POLICY_RECIPE_FILENAME)
         output["boot_marker"] = "ACTION_BALL_POLICY_RECIPE_MATERIALIZED"
     elif stage == "oracle32":
-        output["teacher_qdes_oracle32"] = str(
+        output["c211_observed_oracle_bundle"] = str(
+            namespace / C211_OBSERVED_BUNDLE_FILENAME
+        )
+        output["c211_raw_oracle32"] = str(
             namespace / "teacher_qdes_oracle_32ep.json"
         )
-        output["boot_marker"] = "ACTION_BALL_TEACHER_QDES_ORACLE_COMPLETE_JSON"
+        output["boot_marker"] = "ACTION_BALL_C211_OBSERVED_ORACLE_BUNDLE_JSON"
     return output
 
 
@@ -2388,9 +3532,18 @@ def _materialization_inputs(
     predecessor = (
         _validate_scale_predecessor(
             spec["predecessor_result"],
+            checkout=Path(spec["source"]["checkout"]),
             materialization=materialization,
             policy=policy,
             oracle32=oracle32,
+        )
+        if spec["stage"] == "long4096"
+        else None
+    )
+    four_grid_receipt = (
+        _validate_four_grid_prelong_receipt(
+            spec["four_grid_scale4096_receipt"],
+            checkout=Path(spec["source"]["checkout"]),
         )
         if spec["stage"] == "long4096"
         else None
@@ -2400,6 +3553,7 @@ def _materialization_inputs(
         "policy_recipe_materialization": policy,
         "oracle32_receipt": oracle32,
         "predecessor_result": predecessor,
+        "four_grid_scale4096_receipt": four_grid_receipt,
     }
 
 
@@ -2411,6 +3565,7 @@ def _admission_training_argv(
         (
             "lineage",
             "recipe",
+            "isaac_four_grid_manifest",
             "question_contract",
             "normalizers",
             "checkpoint_contract",
@@ -2420,6 +3575,8 @@ def _admission_training_argv(
         ),
         name="C211 claim bundle",
     )
+    if row["isaac_four_grid_manifest"] != _isaac_four_grid_manifest():
+        raise LaunchRefused("C211 claim four-grid manifest drifted")
     return _training_argv(spec, row["lineage"], row["recipe"])
 
 
@@ -2440,6 +3597,13 @@ _ADMISSION = _A.VendorV2GPUAdmission(
     validate_spec=_validate_spec,
     output_contract=_output_contract,
     training_argv=_admission_training_argv,
+    physical_reservation_registry=True,
+    forbidden_namespace_experiment_names=(
+        "agibot_a3_action_ball_measured_vendor_v2_n1_diagnostic",
+        "agibot_a3_action_ball_a225_four_arm_diagnostic",
+        "agibot_a3_action_ball_c225_diagnostic",
+        "agibot_a3_action_ball_a211_four_arm_diagnostic",
+    ),
 )
 _open_gpu_shared_lock = _ADMISSION._open_gpu_shared_lock
 _lock_gpu_admission = _ADMISSION._lock_gpu_admission
@@ -2448,6 +3612,8 @@ _query_gpu_processes = _ADMISSION._query_gpu_processes
 _validate_runtime_gpu_process = _ADMISSION._validate_runtime_gpu_process
 _live_reservations = _ADMISSION._live_reservations
 _reservation_document = _ADMISSION._reservation_document
+_write_reservation = _ADMISSION._write_reservation
+_release_reservation = _ADMISSION._release_reservation
 _runtime_namespace_receipt = _ADMISSION._runtime_namespace_receipt
 _cleanup_post_boot_admission_failure = _ADMISSION._cleanup_post_boot_admission_failure
 
@@ -2486,14 +3652,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     runtime_sources = _runtime_sources(checkout, commit)
     runtime_assets = _B._validate_runtime_asset_environment()
     lineage = _validate_lineage(checkout, commit, spec["lineage"])
-    if (
-        spec["frame0_exact_artifact_sha256"]
-        != lineage["frame0_exact_artifact"]["sha256"]
-        or spec["frame0_exact_receipt_sha256"]
-        != lineage["frame0_exact_receipt"]["sha256"]
-    ):
-        raise LaunchRefused("C211 spec frame0-exact pins differ from lineage")
-    recipe = _recipe_contract()
+    recipe = _recipe_contract(spec["recipe_id"])
     inputs = _materialization_inputs(
         spec, recipe=recipe, lineage=lineage
     )
@@ -2501,6 +3660,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     bundle = {
         "lineage": lineage,
         "recipe": recipe,
+        "isaac_four_grid_manifest": _isaac_four_grid_manifest(),
         "question_contract": _question_contract(),
         "normalizers": _normalizer_contract(),
         "checkpoint_contract": _checkpoint_contract(),
@@ -2552,9 +3712,10 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
 
 
 def _revalidate_claim_payload(
-    payload: Mapping[str, Any]
+    payload: Mapping[str, Any], *, claimed: bool = True
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    spec = _validate_spec(payload["spec"], claimed=True)
+    spec = _validate_spec(payload["spec"], claimed=claimed)
+    payload = _ADMISSION._validate_claim_payload_safety(payload, spec)
     checkout = Path(spec["source"]["checkout"])
     commit = spec["source"]["commit_sha"]
     if _B._verify_clean_source(checkout, commit) != payload["source"]:
@@ -2563,10 +3724,11 @@ def _revalidate_claim_payload(
         raise LaunchRefused("runtime source identity drifted")
     _B._validate_runtime_asset_claim(payload["runtime_assets"])
     lineage = _validate_lineage(checkout, commit, spec["lineage"])
-    recipe = _recipe_contract()
+    recipe = _recipe_contract(spec["recipe_id"])
     expected_bundle = {
         "lineage": lineage,
         "recipe": recipe,
+        "isaac_four_grid_manifest": _isaac_four_grid_manifest(),
         "question_contract": _question_contract(),
         "normalizers": _normalizer_contract(),
         "checkpoint_contract": _checkpoint_contract(),
@@ -2659,14 +3821,24 @@ def _require_c211_outcome_terms(terms: Any) -> None:
             or any(params.get(key) != value for key, value in required["params"].items())
         ):
             raise LaunchRefused("C211 required motion-prior term differs: %s" % name)
-    for name in PROHIBITED_CONTACT_TARGET_TERMS:
-        term = by_name.get(name)
-        if term is not None and term.get("weight") != 0.0:
-            raise LaunchRefused("C211 desired-contact reward term is active: %s" % name)
-    for name in PROHIBITED_DUPLICATE_OUTCOME_TERMS:
-        term = by_name.get(name)
-        if term is not None and term.get("weight") != 0.0:
-            raise LaunchRefused("C211 duplicate contact/outcome term is active: %s" % name)
+    for name, term in by_name.items():
+        weight = term.get("weight")
+        if (
+            type(weight) not in (int, float)
+            or not math.isfinite(float(weight))
+        ):
+            raise LaunchRefused("C211 runtime reward weight is malformed: %s" % name)
+        if float(weight) == 0.0:
+            continue
+        if name in PROHIBITED_TASK_DIRECTED_TERMS:
+            raise LaunchRefused(
+                "C211 prohibited task-directed reward term is active: %s" % name
+            )
+        task_directed = name.startswith(TASK_DIRECTED_PREFIXES)
+        if task_directed and name not in ALLOWED_TASK_DIRECTED_TERMS:
+            raise LaunchRefused(
+                "C211 unregistered task-directed reward term is active: %s" % name
+            )
 
 
 def _runtime_reward_materialization(
@@ -2747,7 +3919,7 @@ def _runtime_policy_materialization(
         "schema_version": 1,
         "kind": POLICY_MATERIALIZATION_KIND,
         "diagnostic_unauthorized": True,
-        "recipe_id": RECIPE_ID,
+        "recipe_id": recipe["recipe_id"],
         "lineage_sha256": lineage["lineage_sha256"],
         "recipe_contract_sha256": recipe["recipe_contract_sha256"],
         "runtime_policy_recipe_artifact": validated["artifact"],
@@ -2756,6 +3928,96 @@ def _runtime_policy_materialization(
         "noise_std_type": validated["noise_std_type"],
         "configured_and_realized_init_noise_std": validated[
             "configured_and_realized_init_noise_std"
+        ],
+    }
+    return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
+
+
+def _runtime_oracle32_receipt(
+    *,
+    bundle_path: Path,
+    namespace: Path,
+    checkout: Path,
+    launch_claim_sha256: str,
+    recipe: Mapping[str, Any],
+    lineage: Mapping[str, Any],
+    materialization: Mapping[str, Any],
+    policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Publish the C sidecars from the runner-bound 000 observation bundle."""
+
+    try:
+        resolved_bundle = bundle_path.resolve(strict=True)
+        if resolved_bundle != (namespace / C211_OBSERVED_BUNDLE_FILENAME).resolve(strict=True):
+            raise LaunchRefused("C211 observed bundle path differs")
+        observed = _C._load_canonical(resolved_bundle)
+        publication = _C.publish_bundle(observed, namespace=namespace)
+    except (_C.EvidenceError, FileNotFoundError, OSError, ValueError) as exc:
+        raise LaunchRefused(
+            "C211 runner-before-oracle bundle publication failed: %s" % exc
+        ) from exc
+    raw_pin = publication.get("raw_oracle_artifact")
+    if type(raw_pin) is not dict or set(raw_pin) != set(PIN_KEYS):
+        raise LaunchRefused("C211 oracle sidecar publication pin is malformed")
+    raw_path = Path(raw_pin["path"])
+    raw_facts = _validate_c211_raw_oracle(
+        raw_path,
+        checkout=checkout,
+        oracle_namespace=namespace,
+        launch_claim_sha256=launch_claim_sha256,
+        recipe=recipe,
+        lineage=lineage,
+        materialization=materialization,
+        policy=policy,
+        observed_bundle=observed,
+    )
+    if raw_pin["sha256"] != raw_facts["file_sha256"]:
+        raise LaunchRefused("C211 published raw-oracle file SHA differs")
+    unsigned = {
+        "schema_version": 2,
+        "kind": ORACLE32_KIND,
+        "diagnostic_unauthorized": True,
+        "verdict": "PASS",
+        "episodes": 32,
+        "recipe_id": recipe["recipe_id"],
+        "lineage_sha256": lineage["lineage_sha256"],
+        "recipe_contract_sha256": recipe["recipe_contract_sha256"],
+        "reward_contract_sha256": materialization["reward_contract_sha256"],
+        "runtime_effective_reward_sha256": materialization[
+            "runtime_effective_reward_sha256"
+        ],
+        "runtime_policy_recipe_sha256": policy[
+            "runtime_policy_recipe_sha256"
+        ],
+        "actor_contract": ACTOR_CONTRACT,
+        "actor_width": ACTOR_WIDTH,
+        "critic_contract": CRITIC_CONTRACT,
+        "critic_width": CRITIC_WIDTH,
+        "trainability_contract": TRAINABILITY_CONTRACT,
+        "target_source": TARGET_SOURCE,
+        "question_source": "runtime_curriculum_sampler",
+        "question_rng": _question_rng_contract(),
+        "target_recipe": TARGET_RECIPE,
+        "target_validity_mask": list(TARGET_VALIDITY_MASK),
+        "incoming_ball_fields": list(INCOMING_BALL_FIELDS),
+        "reset_inverse_solve": False,
+        "online_solver_calls": 0,
+        "online_lm_calls": 0,
+        "seed": lineage["seed"],
+        "observed_oracle_bundle_artifact": {
+            "path": str(resolved_bundle),
+            "sha256": hashlib.sha256(resolved_bundle.read_bytes()).hexdigest(),
+        },
+        "observed_oracle_bundle_content_sha256": canonical_sha256(observed),
+        "raw_oracle_artifact": dict(raw_pin),
+        "raw_oracle_kind": raw_facts["kind"],
+        "raw_oracle_content_sha256": raw_facts["content_sha256"],
+        "control_step_denominator": raw_facts["control_steps"],
+        "selected_rubber_episode_denominator": raw_facts[
+            "selected_rubber_episode_denominator"
+        ],
+        "actual_selected_rubber_contact_count": raw_facts[
+            "actual_selected_rubber_contact_count"
         ],
     }
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
@@ -2780,12 +4042,6 @@ def _internal_exec(claim_path: Path, claim_sha: str, lock_fd: int) -> int:
     ):
         raise LaunchRefused("internal claim digest differs")
     payload = outer["canonical_payload"]
-    raw_spec = payload.get("spec") if type(payload) is dict else None
-    if type(raw_spec) is dict and raw_spec.get("stage") in BLOCKED_RUNTIME_STAGES:
-        raise LaunchRefused(
-            "%s: true C211 needs an independent 000/p-v-spin oracle consumer"
-            % ORACLE_RUNTIME_BLOCKER
-        )
     spec, _lineage, _recipe = _revalidate_claim_payload(payload)
     lock_path = Path(spec["gpu"]["lock_path"])
     descriptor_info = os.fstat(lock_fd)
@@ -2835,6 +4091,13 @@ def _internal_exec(claim_path: Path, claim_sha: str, lock_fd: int) -> int:
         "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256": claim_sha,
         _A.GPU_NAMESPACE_RECEIPT_ENV: str(namespace_receipt),
         _A.GPU_NAMESPACE_RECEIPT_SHA_ENV: namespace_receipt_sha,
+        **_update_profile_exec_environment(os.environ),
+        **_prelong_semantics_exec_environment(
+            spec["stage"],
+            payload["materialization_inputs"]["reward_materialization"][
+                "runtime_effective_reward_sha256"
+            ],
+        ),
         **_B._runtime_asset_exec_environment(payload["runtime_assets"]),
     }
     os.chdir(wbt)
@@ -2869,22 +4132,26 @@ def _completion_stage(stage: str) -> bool:
 
 def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     expected = _B._sha256(confirm_claim, name="--confirm-claim")
-    if expected != plan["launch_claim_sha256"]:
+    outer = _exact_dict(
+        plan,
+        ("schema_version", "kind", "launch_claim_sha256", "canonical_payload"),
+        name="C211 launch plan",
+    )
+    payload = outer["canonical_payload"]
+    if expected != outer["launch_claim_sha256"]:
         raise LaunchRefused("--confirm-claim differs from freshly recomputed plan")
-    payload = plan["canonical_payload"]
-    if canonical_sha256(payload) != expected:
+    if (
+        outer["schema_version"] != SCHEMA_VERSION
+        or outer["kind"] != CLAIM_KIND
+        or type(payload) is not dict
+        or canonical_sha256(payload) != expected
+    ):
         raise LaunchRefused("launch plan payload seal differs before execution")
-    spec = payload["spec"]
-    if spec["stage"] in BLOCKED_RUNTIME_STAGES:
-        raise LaunchRefused(
-            "%s: true C211 needs an independent 000/p-v-spin oracle consumer"
-            % ORACLE_RUNTIME_BLOCKER
-        )
+    spec, _lineage, _recipe = _revalidate_claim_payload(payload, claimed=False)
     checkout = Path(spec["source"]["checkout"])
-    _B._verify_clean_source(checkout, spec["source"]["commit_sha"])
-    _B._validate_runtime_asset_claim(payload["runtime_assets"])
     lock_fd = _open_gpu_shared_lock(Path(spec["gpu"]["lock_path"]))
     namespace = None
+    reservation_handle = None
     try:
         _lock_gpu_admission(lock_fd)
         try:
@@ -2892,10 +4159,7 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
                 spec, phase="pre_launch", current_namespace=None
             )
             namespace = _B._claim_namespace(plan)
-            _B._write_exclusive_json(
-                namespace / _A.GPU_RESERVATION_FILENAME,
-                _reservation_document(spec, expected),
-            )
+            reservation_handle = _write_reservation(spec, expected)
             _B._write_exclusive_json(
                 namespace / "pre_launch_gpu_admission.json",
                 {
@@ -2929,6 +4193,7 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "KIT_BOOT_STALE_TIMEOUT_S": "1800",
             "KIT_BOOT_POLL_S": "5",
             "KIT_BOOT_STATE_FILE": str(state),
+            **_update_profile_exec_environment(os.environ),
             **(
                 {
                     "KIT_WAIT_FOR_COMPLETION": "1",
@@ -2990,10 +4255,32 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
                 lineage=payload["bundle"]["lineage"],
                 recipe=payload["bundle"]["recipe"],
             )
-        elif spec["stage"] == "oracle32":  # pragma: no cover - blocked above
-            raise LaunchRefused(ORACLE_RUNTIME_BLOCKER)
+        elif spec["stage"] == "oracle32":
+            oracle32 = _runtime_oracle32_receipt(
+                bundle_path=Path(
+                    payload["output_contract"][
+                        "c211_observed_oracle_bundle"
+                    ]
+                ),
+                namespace=namespace,
+                checkout=checkout,
+                launch_claim_sha256=expected,
+                recipe=payload["bundle"]["recipe"],
+                lineage=payload["bundle"]["lineage"],
+                materialization=materialization,
+                policy=policy,
+            )
+        terminal_acceptance = (
+            _audit_scale4096_terminal(
+                checkout=checkout,
+                namespace=namespace,
+                launch_claim_sha256=expected,
+            )
+            if spec["stage"] == "scale4096"
+            else None
+        )
         unsigned = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": RESULT_KIND,
             "diagnostic_unauthorized": True,
             "accepted": True,
@@ -3008,11 +4295,21 @@ def execute(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
             "oracle32_receipt": oracle32,
             "predecessor_result": inputs["predecessor_result"],
         }
+        if terminal_acceptance is not None:
+            unsigned["terminal_acceptance"] = terminal_acceptance
         launch_result = {**unsigned, "content_sha256": canonical_sha256(unsigned)}
         _B._write_exclusive_json(namespace / "launch_result.json", launch_result)
         return launch_result
     finally:
-        os.close(lock_fd)
+        try:
+            if reservation_handle is not None:
+                _lock_gpu_admission(lock_fd)
+                try:
+                    _release_reservation(reservation_handle)
+                finally:
+                    _unlock_gpu_admission(lock_fd)
+        finally:
+            os.close(lock_fd)
 
 
 def _paired_pin(path: str | None, digest: str | None, *, name: str) -> dict | None:
@@ -3031,7 +4328,7 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
             "commit_sha": args.commit_sha,
             "isaac_python": str(_isaac_python_entry(args.isaac_python)),
         },
-        "recipe_id": RECIPE_ID,
+        "recipe_id": args.recipe_id,
         "lineage": {"path": args.lineage_path, "sha256": args.lineage_sha256},
         "materialization_result": _paired_pin(
             args.materialization_result_path,
@@ -3053,13 +4350,16 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
             args.predecessor_result_sha256,
             name="predecessor result",
         ),
+        "four_grid_scale4096_receipt": _paired_pin(
+            args.four_grid_scale4096_receipt_path,
+            args.four_grid_scale4096_receipt_sha256,
+            name="four-grid scale4096 receipt",
+        ),
         "stage": args.stage,
         "num_envs": budget[0],
         "max_iterations": budget[1],
         "save_interval": budget[2],
         "wait_contract": _wait_contract(),
-        "frame0_exact_artifact_sha256": args.frame0_exact_artifact_sha256,
-        "frame0_exact_receipt_sha256": args.frame0_exact_receipt_sha256,
         "gpu": {
             "index": args.gpu_index,
             "uuid": args.gpu_uuid,
@@ -3089,10 +4389,9 @@ def _parser() -> argparse.ArgumentParser:
     template.add_argument("--checkout", required=True)
     template.add_argument("--commit-sha", required=True)
     template.add_argument("--isaac-python", required=True)
+    template.add_argument("--recipe-id", required=True, choices=RECIPE_IDS)
     template.add_argument("--lineage-path", required=True)
     template.add_argument("--lineage-sha256", required=True)
-    template.add_argument("--frame0-exact-artifact-sha256", required=True)
-    template.add_argument("--frame0-exact-receipt-sha256", required=True)
     template.add_argument("--stage", choices=STAGE_ORDER, required=True)
     template.add_argument("--materialization-result-path")
     template.add_argument("--materialization-result-sha256")
@@ -3102,6 +4401,8 @@ def _parser() -> argparse.ArgumentParser:
     template.add_argument("--oracle32-result-sha256")
     template.add_argument("--predecessor-result-path")
     template.add_argument("--predecessor-result-sha256")
+    template.add_argument("--four-grid-scale4096-receipt-path")
+    template.add_argument("--four-grid-scale4096-receipt-sha256")
     template.add_argument("--gpu-index", type=int, required=True)
     template.add_argument("--gpu-uuid", required=True)
     template.add_argument("--owner", required=True)

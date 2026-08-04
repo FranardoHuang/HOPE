@@ -24,6 +24,11 @@ REGISTRY_PATH = ENV_CFG_PATH.with_name("__init__.py")
 TASK_YAML = (
     ROOT / "cfg/task/HOPEPingPongActionBallC211VendorV2N1Learnability.yaml"
 )
+COMMAND_PATH = (
+    ROOT
+    / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp"
+    / "hope_commands.py"
+)
 SPEC = importlib.util.spec_from_file_location("c211_trainability_under_test", MODULE_PATH)
 M = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -45,6 +50,11 @@ def _cfg(*, critic=True):
                 action_ball_task_wait_max_wait_ticks=25,
                 action_ball_task_wait_episode_horizon_ticks=500,
                 action_ball_task_wait_required_active_ticks=200,
+                action_ball_target_source="direct_ball",
+                action_ball_reuse_exact_question_until_semantics_change=False,
+                action_ball_initial_center_single_question=True,
+                action_ball_target_recipe="outcome_dense_only",
+                action_ball_target_validity_mask=[False, False, False],
             )
         ),
         observations=SimpleNamespace(critic=object() if critic else None),
@@ -110,10 +120,36 @@ def test_c211_cfg_runtime_wrapper_and_runner_fail_closed_on_fallbacks():
     with pytest.raises(RuntimeError, match="symmetric actor fallback"):
         M.validate_action_ball_c211_cfg_trainability(_cfg(critic=False), entrypoint="test")
 
+    for attribute, bad_value in (
+        ("action_ball_target_source", "online_solver"),
+        ("action_ball_reuse_exact_question_until_semantics_change", True),
+        ("action_ball_initial_center_single_question", False),
+        ("action_ball_target_recipe", "current_lm"),
+        ("action_ball_target_validity_mask", [False, True, False]),
+    ):
+        wrong = _cfg()
+        setattr(wrong.commands.racket_target, attribute, bad_value)
+        with pytest.raises(RuntimeError, match=attribute):
+            M.validate_action_ball_c211_cfg_trainability(wrong, entrypoint="test")
+
     facts = M.validate_action_ball_c211_runtime(_runtime())
     assert facts["actor_width"] == 211
     assert facts["critic_width"] == 319
     assert facts["contact_target_absent"] is True
+    source = facts["question_source_contract"]
+    assert source["family"] == "C211"
+    assert source["question_sampler"]["sampler_runs_every_reset"] is True
+    assert source["question_sampler"][
+        "curriculum_domain_levels_consulted_every_reset"
+    ] is True
+    provider = source["target_provider"]
+    assert provider == {
+        "source": "direct_ball",
+        "desired_contact_inverse": False,
+        "exact_question_answer_cache": {"enabled": False},
+        "online_inverse_solves_per_reset": 0,
+        "online_inverse_solves_per_step": 0,
+    }
     assert facts["c225_reward_contract"] == M.c211_reward_contract_facts()
     assert facts["c225_reward_contract"]["landing"][
         "observed_physical_landing_available"
@@ -186,7 +222,7 @@ def test_c211_trainable_cfg_gym_and_yaml_are_dedicated_and_dense_outcome_enabled
     assert c_reward_source is not None
     assert "c225_strike_ball_paddle_center_proximity" in c_reward_source
     assert "c225_landing_outcome_actual_contact" in c_reward_source
-    assert "weight=220.0" in c_reward_source
+    assert "weight=240.0" in c_reward_source
     c_base_source = ast.get_source_segment(
         env_source, classes["HOPEPingPongActionBallC211AgibotA3EnvCfg"]
     )
@@ -218,7 +254,7 @@ def test_c211_trainable_cfg_gym_and_yaml_are_dedicated_and_dense_outcome_enabled
     ):
         assert c_rewards[name] == 0.0
     assert c_rewards["strike_capture_bonus_weight"] == 0.0
-    assert c_rewards["virtual_landing_weight"] == pytest.approx(500.0)
+    assert c_rewards["virtual_landing_weight"] == pytest.approx(700.0)
     assert c_rewards["virtual_landing_base_frac"] == pytest.approx(0.6)
 
     if importlib.util.find_spec("hydra") is None:
@@ -237,7 +273,11 @@ def test_c211_trainable_cfg_gym_and_yaml_are_dedicated_and_dense_outcome_enabled
         ).task
     assert task.actor_obs_contract == "action_ball_c211"
     assert task.gym_task == "HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0"
-    assert task.racket.action_ball_target_source == "immutable_tape"
+    assert task.racket.action_ball_target_source == "direct_ball"
+    assert (
+        task.racket.action_ball_reuse_exact_question_until_semantics_change
+        is False
+    )
     assert task.racket.action_ball_target_recipe == "outcome_dense_only"
     assert list(task.racket.action_ball_target_validity_mask) == [False, False, False]
     assert task.racket.action_ball_target_observation_noise is False
@@ -247,36 +287,74 @@ def test_c211_trainable_cfg_gym_and_yaml_are_dedicated_and_dense_outcome_enabled
     assert task.rewards.strike_capture_bonus_weight == 0.0
     assert task.rewards.virtual_pass_net_weight == 0.0
     assert task.rewards.virtual_landing_dense_weight == 0.0
-    assert task.rewards.virtual_landing_weight == pytest.approx(500.0)
+    assert task.rewards.virtual_landing_weight == pytest.approx(700.0)
     assert task.rewards.virtual_landing_base_frac == pytest.approx(0.6)
     assert task.rewards.racket_position_weight == 0.0
     assert task.rewards.racket_velocity_weight == 0.0
     assert task.rewards.racket_normal_weight == 0.0
 
 
+def test_c211_validity_000_skips_unused_velocity_and_face_metric_kernels():
+    """Keep the C hot path cheap without dropping its position progress norm."""
+
+    source = COMMAND_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(COMMAND_PATH))
+    command_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "RacketTargetCommand"
+    )
+    update_metrics = next(
+        node
+        for node in command_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_update_metrics"
+    )
+    segment = ast.get_source_segment(source, update_metrics)
+    assert segment is not None
+    assert "racket_pos_err_vec = self.racket_pos_w - self.racket_target_pos_w" in segment
+    assert "pos_err = torch.norm(racket_pos_err_vec, dim=-1)" in segment
+
+    validity_branches = {
+        node.test.id: ast.get_source_segment(source, node)
+        for node in ast.walk(update_metrics)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id in {"target_vel_valid", "target_face_valid"}
+    }
+    assert set(validity_branches) == {"target_vel_valid", "target_face_valid"}
+    velocity_branch = validity_branches["target_vel_valid"]
+    face_branch = validity_branches["target_face_valid"]
+    assert velocity_branch is not None and face_branch is not None
+    assert "vel_err = torch.norm" in velocity_branch
+    assert "vel_err = torch.zeros_like(pos_err)" in velocity_branch
+    assert "face_tracking_pair(self)" in face_branch
+    assert "normal_err_rad = torch.acos" in face_branch
+    assert "normal_err_rad = torch.zeros_like(pos_err)" in face_branch
+
+
 def test_c211_post_dt_reward_economics_have_margin_and_a_nonzero_tail():
     contract = M.c211_reward_contract_facts()
-    assert contract["identity"] == "action_ball_c211_achieved_outcome_reward_v2"
+    assert contract["identity"] == "action_ball_c211_achieved_outcome_reward_v3"
     assert contract["task_valid_required"] is True
     bridge = contract["strike_bridge"]
     economics = contract["economics"]
-    assert bridge["weight"] == 220.0
+    assert bridge["weight"] == 240.0
     assert bridge["std_m"] == 0.15
     assert (
-        economics["compatible_swing_motion_static_max"]
-        < economics["strike_bridge_post_dt_peak"]
-        < economics["legal_landing_post_dt_min"]
+        economics["task_valid_swing_mimic_discounted_cap"]
+        < economics["strike_bridge_discounted_at_contact"]
+        < economics["legal_landing_discounted_at_contact_min"]
     )
 
     amplitude = bridge["weight"] * economics["policy_dt_s"]
     sigma = bridge["std_m"]
     expected = {
-        0.0: (4.4, 0.0),
-        0.075: (3.52, -18.773333333333333),
-        0.15: (2.2, -14.666666666666666),
-        0.30: (0.88, -4.693333333333333),
-        0.45: (0.44, -1.76),
-        0.90: (0.11891891891891893, -0.2571219868517166),
+        0.0: (4.8, 0.0),
+        0.075: (3.84, -20.48),
+        0.15: (2.4, -16.0),
+        0.30: (0.96, -5.12),
+        0.45: (0.48, -1.92),
+        0.90: (0.12972972972972974, -0.2804967129291454),
     }
     for distance, (expected_income, expected_gradient) in expected.items():
         ratio = distance / sigma

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import sys
@@ -298,6 +299,18 @@ def test_termination_receipt_fails_closed_if_pinned_callable_source_drifts(
     vec_env._termination_contract_receipt_cached.cache_clear()
 
 
+def test_portable_ast_dump_removes_python38_index_wrapper():
+    expression = ast.parse("value[:, index]").body[0].value
+    dumped = vec_env._portable_ast_dump(expression)
+    table_dumped = vec_env.table_termination._portable_ast_dump(expression)
+
+    assert '"Index"' not in dumped
+    assert '"ExtSlice"' not in dumped
+    assert '"Index"' not in table_dumped
+    assert '"ExtSlice"' not in table_dumped
+    assert dumped == table_dumped
+
+
 def test_termination_receipt_fails_closed_if_pinned_action_latch_drifts(
     tmp_path, monkeypatch
 ):
@@ -566,6 +579,7 @@ def _plant_row(**overrides):
         "pelvis_height_m": 1.0,
         "pelvis_up_world_z": 1.0,
         "qdes_raw": np.zeros(31, dtype=np.float64),
+        "qdes": np.zeros(31, dtype=np.float64),
         "q": np.zeros(31, dtype=np.float64),
         "joint_position_limits": np.tile(
             np.asarray([-1.0, 1.0], dtype=np.float64), (31, 1)
@@ -803,6 +817,7 @@ def test_event_ledger_phase_fidelity_precedes_base_and_table_reason_order():
         time_out=False,
         phase_fidelity_sample=sample,
     )
+    # 人话:关节撞硬限位改成只记录不终止,所以它退出终止原因序列,其余原因的相对次序原样不动。
     assert result["first_exact_hard_termination"] == {
         "policy_tick": 0,
         "sample_timing": "post_control_step",
@@ -815,8 +830,16 @@ def test_event_ledger_phase_fidelity_precedes_base_and_table_reason_order():
             "ee_body_pos",
             "base_too_low",
             "robot_hit_table",
-            "joint_actual_forbidden",
         ],
+    }
+    # 人话:同一 tick 的关节触边事件必须仍然被看见、被计数,只是不进终止账本。
+    assert result["exact_hard_reason_counts"]["joint_actual_forbidden"] == 0
+    assert result["joint_actual_forbidden_observed_ticks"] == 1
+    assert result["first_joint_actual_forbidden_observed"] == {
+        "policy_tick": 0,
+        "physics_substep": 0,
+        "current_step_predicate": False,
+        "substep_latch": True,
     }
     assert result["phase_fidelity"]["exact_sample_count"] == 1
     assert result["phase_fidelity"]["exact_runtime_sample_seen"] is True
@@ -860,16 +883,20 @@ def test_event_ledger_robot_table_substep_is_sticky_and_isaac_ordered():
         events=(),
         time_out=False,
     )
+    # 人话:桌面碰撞仍然按 Isaac 次序终止;同 tick 的关节触边只留痕,不再挤进 all_reasons。
     assert simultaneous["first_exact_hard_termination"]["reason"] == "base_too_low"
     assert simultaneous["first_exact_hard_termination"]["all_reasons"] == [
         "base_too_low",
         "robot_hit_table",
-        "joint_actual_forbidden",
     ]
     assert (
         simultaneous["first_exact_hard_termination"]["robot_hit_table_first_substep"]
         == 0
     )
+    # 人话:证据不能丢 —— 独立计数器接住了这次关节触边,收据里查得到。
+    assert simultaneous["exact_hard_reason_counts"]["joint_actual_forbidden"] == 0
+    assert simultaneous["joint_actual_forbidden_observed_ticks"] == 1
+    assert simultaneous["first_joint_actual_forbidden_observed"]["substep_latch"] is True
 
 
 @pytest.mark.parametrize(
@@ -892,15 +919,35 @@ def test_event_ledger_robot_table_substep_schema_fails_without_commit(hit, subst
 
 
 def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict():
+    # 人话:容差判定(闭区间)和 substep 粘滞这两件事一点没变,变的只是它不再掐掉这一局。
     ledger = vec_env.DiagnosticEventLedger(control_decimation=4)
     tolerance = vec_env.JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD
     safe_q = np.zeros(31, dtype=np.float64)
     safe_q[7] = np.nextafter(-1.0, np.inf)
     safe = ledger.record_step(plant=_plant_row(q=safe_q), events=(), time_out=False)
     assert safe["termination"]["exact_hard_terminated"] is False
+    # 人话:严格在界内的一个 ULP 也不算触边 —— 谓词没有被放宽成"接近就算"。
+    assert safe["joint_actual_forbidden_observed_ticks"] == 0
+    assert safe["first_joint_actual_forbidden_observed"] is None
 
     boundary_q = np.zeros(31, dtype=np.float64)
     boundary_q[7] = -1.0 + tolerance
+    # 人话:恰好压在 lower+tolerance 上仍然算触边(<= 闭区间),这条谓词语义原样保留。
+    boundary_only = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
+        plant=_plant_row(q=boundary_q), events=(), time_out=False
+    )
+    assert boundary_only["joint_actual_forbidden_observed_ticks"] == 1
+    assert boundary_only["first_joint_actual_forbidden_observed"] == {
+        "policy_tick": 0,
+        "physics_substep": 0,
+        "current_step_predicate": True,
+        "substep_latch": False,
+    }
+    # 人话:触边单独出现时 done 为 False —— telemetry 模式的核心断言,回球层因此有机会兑现。
+    assert boundary_only["termination"]["exact_hard_terminated"] is False
+    assert boundary_only["termination"]["exact_hard_reason"] is None
+    assert boundary_only["exact_hard_reason_counts"]["joint_actual_forbidden"] == 0
+
     simultaneous = ledger.record_step(
         plant=_plant_row(
             q=boundary_q,
@@ -923,9 +970,9 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
         "all_reasons": [
             "base_fell_tilt",
             "base_too_low",
-            "joint_actual_forbidden",
         ],
     }
+    # 人话:终止账本里这一项恒为 0,它已经搬到独立计数器上了。
     assert simultaneous["exact_hard_reason_counts"] == {
         "anchor_pos": 0,
         "anchor_ori": 0,
@@ -933,20 +980,32 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
         "base_fell_tilt": 1,
         "base_too_low": 1,
         "joint_qdes_forbidden": 0,
-        "joint_actual_forbidden": 1,
+        "joint_actual_forbidden": 0,
         "robot_hit_table": 0,
     }
+    assert simultaneous["joint_actual_forbidden_observed_ticks"] == 1
 
     recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
     assert recovered["termination"]["exact_hard_terminated"] is True
     assert recovered["termination"]["exact_hard_reason"] == "base_fell_tilt"
+    # 人话:终止latch照旧粘滞,而触边计数是按 tick 计的,干净的一步不会再加。
+    assert recovered["joint_actual_forbidden_observed_ticks"] == 1
 
     substep = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
         plant=_plant_row(joint_actual_forbidden_substep=True),
         events=(),
         time_out=False,
     )
-    assert substep["termination"]["exact_hard_reason"] == ("joint_actual_forbidden")
+    # 人话:tick 内 substep 触过限、末态已退回界内时,粘滞仍然生效 —— 事件照记,只是不终止。
+    assert substep["termination"]["exact_hard_terminated"] is False
+    assert substep["termination"]["exact_hard_reason"] is None
+    assert substep["joint_actual_forbidden_observed_ticks"] == 1
+    assert substep["first_joint_actual_forbidden_observed"] == {
+        "policy_tick": 0,
+        "physics_substep": 0,
+        "current_step_predicate": False,
+        "substep_latch": True,
+    }
 
 
 def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact():
@@ -967,6 +1026,7 @@ def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact(
         events=(),
         time_out=False,
     )
+    # 人话:qdes 非有限仍然是终止项;同 tick 的关节实际触边只留痕,两者的分工不再混在一起。
     assert simultaneous["first_exact_hard_termination"] == {
         "policy_tick": 1,
         "sample_timing": "post_control_step",
@@ -975,7 +1035,6 @@ def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact(
         "reason": "joint_qdes_forbidden",
         "all_reasons": [
             "joint_qdes_forbidden",
-            "joint_actual_forbidden",
         ],
     }
     assert simultaneous["exact_hard_reason_counts"] == {
@@ -985,8 +1044,16 @@ def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact(
         "base_fell_tilt": 0,
         "base_too_low": 0,
         "joint_qdes_forbidden": 1,
-        "joint_actual_forbidden": 1,
+        "joint_actual_forbidden": 0,
         "robot_hit_table": 0,
+    }
+    # 人话:q 压在上限 1.0 上这件事照样被观测到并进收据,只是不再决定 episode 长度。
+    assert simultaneous["joint_actual_forbidden_observed_ticks"] == 1
+    assert simultaneous["first_joint_actual_forbidden_observed"] == {
+        "policy_tick": 1,
+        "physics_substep": 4,
+        "current_step_predicate": True,
+        "substep_latch": False,
     }
 
     recovered = ledger.record_step(plant=_plant_row(), events=(), time_out=False)
@@ -1024,7 +1091,19 @@ def test_event_ledger_joint_actual_invalid_bounds_fail_closed_without_commit(
             events=(),
             time_out=False,
         )
-        assert result["termination"]["exact_hard_reason"] == ("joint_actual_forbidden")
+        # 人话:区间反了或带 NaN,仍然一律按"已经触边"处理(fail closed),这条判定没变;
+        # 变的只是它现在报进独立计数器而不是终止账本 —— 无效区间照样卡晋级,但不掐 episode。
+        assert result["joint_actual_forbidden_observed_ticks"] == 1
+        assert result["first_joint_actual_forbidden_observed"] == {
+            "policy_tick": 0,
+            "physics_substep": 0,
+            "current_step_predicate": True,
+            "substep_latch": False,
+        }
+        assert result["termination"]["exact_hard_terminated"] is False
+        assert result["termination"]["exact_hard_reason"] is None
+        assert result["exact_hard_reason_counts"]["joint_actual_forbidden"] == 0
+        assert ledger.policy_ticks == 1
         return
     with pytest.raises(vec_env.VecEnvContractError, match="shape"):
         ledger.record_step(
@@ -1601,6 +1680,45 @@ def test_vecenv_per_env_compact_reset_preserves_terminal_observation_and_batch()
         alternate_receipt["trace_and_event_sha256"]
         != receipt_a["trace_and_event_sha256"]
     )
+
+
+def test_vecenv_preserves_exact_hard_reason_when_horizon_timeout_coincides():
+    torch = pytest.importorskip("torch")
+
+    class _FallsOnHorizonCore(_FakeCore):
+        def step(self, action):
+            row = super().step(action)
+            if self.ticks == 2:
+                row["plant"] = _plant_row(pelvis_height_m=0.49)
+            return row
+
+    tape = SimpleNamespace(
+        plant_binding_sha256="a" * 64,
+        actions=np.zeros((2, 31), dtype=np.float64),
+        source_sha256="c" * 64,
+    )
+    question = SimpleNamespace(
+        scene_binding_sha256="b" * 64,
+        source_sha256="d" * 64,
+    )
+    env = vec_env.MujocoN1DiagnosticVecEnv(
+        cores=(_FallsOnHorizonCore(0),),
+        robot_tape=tape,
+        questions=(question,),
+    )
+    first = env.diagnostic_step(torch.zeros((1, 31)))
+    assert first.episode_dones.tolist() == [False]
+    second = env.diagnostic_step(torch.zeros((1, 31)))
+    assert second.episode_dones.tolist() == [True]
+    assert second.time_outs.tolist() == [True]
+    assert second.exact_hard_terminations.tolist() == [True]
+    assert second.episode_done_reasons == ("time_out",)
+    assert second.exact_hard_termination_reasons == ("base_too_low",)
+    event = second.per_env_ledgers[0]["first_exact_hard_termination"]
+    assert event["policy_tick"] == 1
+    assert event["reason"] == "base_too_low"
+    assert event["all_reasons"] == ["base_too_low"]
+    assert second.reset_env_ids == (0,)
 
 
 def test_compact_reset_failure_invalidates_vecenv_until_full_reset():

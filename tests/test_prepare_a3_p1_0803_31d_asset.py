@@ -24,9 +24,27 @@ def test_import_is_side_effect_free_and_candidate_path_is_not_current_runtime():
     assert MODULE.DEFAULT_SUCCESSOR_MANIFEST.is_file()
 
 
-def test_tracked_manifest_is_fail_closed_and_binds_all_order_domains():
+def test_successor_root_hard_rejects_current_runtime_and_descendants():
+    with pytest.raises(MODULE.AssetError, match="current runtime asset"):
+        MODULE.require_isolated_successor_root(MODULE.ACTIVE_ASSET_ROOT)
+    with pytest.raises(MODULE.AssetError, match="current runtime asset"):
+        MODULE.require_isolated_successor_root(MODULE.ACTIVE_ASSET_ROOT / "nested")
+    with pytest.raises(MODULE.AssetError, match="immutable raw source"):
+        MODULE.require_isolated_successor_root(
+            MODULE.DEFAULT_SOURCE_ROOT / "derived", MODULE.DEFAULT_SOURCE_ROOT
+        )
+    with pytest.raises(MODULE.AssetError, match="immutable raw source"):
+        MODULE.require_isolated_successor_root(
+            MODULE.DEFAULT_SOURCE_ROOT.parent, MODULE.DEFAULT_SOURCE_ROOT
+        )
+    MODULE.require_isolated_successor_root(MODULE.DEFAULT_OUTPUT_ROOT, MODULE.DEFAULT_SOURCE_ROOT)
+
+
+def test_tracked_manifest_binds_project_lock_and_all_order_domains():
     manifest = json.loads(MODULE.DEFAULT_SUCCESSOR_MANIFEST.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 2
     assert manifest["asset_id"] == "a3_p1_0803_berkeley_pingpang_31action_normalized_v1"
+    assert manifest["candidate_role"] == "future_primary_successor_candidate_not_current_runtime"
     assert manifest["status"] == "pod_import_verified_short_step_diagnostic_standing_pending"
     assert manifest["abi"]["policy_action_dim"] == 31
     assert manifest["abi"]["runtime_joint_set_exact"] is True
@@ -61,10 +79,30 @@ def test_tracked_manifest_is_fail_closed_and_binds_all_order_domains():
         "left_joint8",
         "left_joint15",
     ]
+    lock = manifest["normalization_diff"]["fixed_gripper_subtree"]
+    assert lock["lock_contract"] == MODULE.PROJECT_GRIPPER_LOCK_CONTRACT
+    assert lock["all_q0_within_raw_limits"] is True
+    assert lock["retained_subtree_mass_kg"] == pytest.approx(
+        MODULE.EXPECTED_GRIPPER_SUBTREE_MASS_KG, abs=1e-12
+    )
+    assert manifest["normalization_diff"]["normalized_unique_link_mass_kg"] == pytest.approx(
+        MODULE.EXPECTED_NORMALIZED_UNIQUE_LINK_MASS_KG, abs=1e-12
+    )
+    assert manifest["project_gripper_lock_contract"] == MODULE.PROJECT_GRIPPER_LOCK_CONTRACT
+    removed = manifest["normalization_diff"]["removed_missing_collision_elements"]
+    assert len(removed) == MODULE.EXPECTED_MISSING_GRIPPER_COLLISION_COUNT
+    assert all(item["link"].startswith("left_") for item in removed)
+    assert tuple((item["link"], item["reference"]) for item in removed) == (
+        MODULE.EXPECTED_MISSING_GRIPPER_COLLISIONS
+    )
     assert manifest["authorization"] == {
         "current_runtime_pointer_changed": False,
         "canonical_runtime": False,
+        "materialization_authorized": True,
+        "project_q0_gripper_lock_authorized": True,
+        "missing_gripper_collision_elements_explicitly_disabled": True,
         "pod_isaac_import_verified": True,
+        "racket_local_contract_verified": True,
         "standing_pose_verified": False,
         "racket_fk_parity_verified": False,
         "dynamics_parity_verified": False,
@@ -82,6 +120,34 @@ def test_tracked_manifest_is_fail_closed_and_binds_all_order_domains():
     assert receipt["finite_steps_all_state_finite"] is True
     assert receipt["formal_standing_hold_verified"] is False
     assert receipt["table_and_self_collision_verified"] is False
+
+
+def test_right_racket_local_center_is_exact_but_successor_world_fk_is_new():
+    manifest = json.loads(MODULE.DEFAULT_SUCCESSOR_MANIFEST.read_text(encoding="utf-8"))
+    racket = manifest["right_racket_contract"]
+    assert tuple(float(value) for value in racket["origin_xyz"].split()) == (
+        MODULE.OFFICIAL_RACKET_SITE_XYZ_M
+    )
+    assert tuple(float(value) for value in racket["origin_rpy"].split()) == (
+        MODULE.OFFICIAL_RACKET_SITE_RPY_RAD
+    )
+    assert racket["mesh_sha256"] == MODULE.EXPECTED_RACKET_MESH_SHA256
+    assert racket["local_contract_exact_current_and_raw"] is True
+    assert racket["official_paddle_center_control_point"] is True
+    lineage = racket["fk_lineage"]
+    assert lineage["right_hand_and_paddle_link_inertials_exact_current"] is True
+    assert lineage["right_racket_fixed_joint_semantics_exact_current"] is True
+    assert lineage["normalized_preserves_raw_right_chain_and_site_for_all_common_q"] is True
+    assert lineage["normalized_vs_raw_q0"] == {
+        "position_norm_m": 0.0,
+        "rotation_matrix_max_abs": 0.0,
+    }
+    assert lineage["successor_vs_current_q0"]["position_norm_m"] == pytest.approx(
+        0.009013878161711154, abs=1e-15
+    )
+    assert lineage["successor_vs_current_q0"]["rotation_matrix_max_abs"] == 0.0
+    assert lineage["successor_world_site_requires_new_motion_fk_revalidation"] is True
+    assert manifest["authorization"]["racket_fk_parity_verified"] is False
 
 
 def test_raw_intake_records_observed_metadata_defects_and_exact_racket_hashes():

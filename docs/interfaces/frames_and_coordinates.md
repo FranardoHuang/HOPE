@@ -131,16 +131,21 @@ the interface boundary.
 The historical base flat wire already carried position plus a normalized quaternion, but the old
 `LocMode::kExternalBase` C++ consumer deliberately uses only mocap position and retains the
 yaw-aligned pelvis-IMU quaternion. That mixed historical producer is not the fresh contract.
-The preferred successor instead uses calibrated OptiTrack for table-relative position/full
-orientation and projected gravity, the pelvis IMU gyro for three-axis angular velocity, and a
-causal OptiTrack-anchored estimator for three-axis root-COM linear velocity. These sources must be
-time aligned as one causal state packet and need explicit latency/stale/dropout handling.
+The current fresh A211/C211 successor uses calibrated OptiTrack/localization for canonical
+HOPE-world position, full orientation and root-COM linear velocity, followed by exactly one pelvis/body-frame
+IMU gyro for three-axis angular velocity.  It does **not** append a separate projected-gravity row:
+the 6-D base orientation already determines gravity, while the direct gyro preserves the
+low-latency robot-frame angular-rate measurement.  These sources must be time aligned as one causal
+state packet and need explicit latency/stale/dropout handling.  Historical L194/H225 proposals that
+packed projected gravity separately do not define the current 211-D actor ABI; see
+[the ordered A211/C211 contract](policy_observation_action.md#current-fresh-a211c211-contracts).
 
 <a id="action-ball-table-pose-frame"></a>
 
-## ActionBall table-centered actor frame
+## Historical ActionBall table-centered actor frame
 
-[`action_ball_table_pose_n<N>`](../DEFINITIONS.md#action-ball-table-pose-n-contract) separates two
+[`action_ball_table_pose_n<N>`](../DEFINITIONS.md#action-ball-table-pose-n-contract) is a historical
+pre-A211/C211 contract and separates two
 kinds of geometry:
 
 - **task channels stay robot-relative**: `base_target_pos_b` is a base-goal residual in the current
@@ -169,24 +174,32 @@ rotation representation follows Zhou et al.,
 [CVPR 2019](https://openaccess.thecvf.com/content_CVPR_2019/html/Zhou_On_the_Continuity_of_Rotation_Representations_in_Neural_Networks_CVPR_2019_paper.html),
 and avoids Euler wrap/gimbal singularities and quaternion sign ambiguity at the network boundary.
 
-At deployment the same `p_base_table` and `R_table_base` must be built from a calibrated table pose,
+For a deployment of that historical contract, the same `p_base_table` and `R_table_base` must be built from a calibrated table pose,
 the OptiTrack rigid-body pose and the measured marker-cluster→`base_link` SE(3). OptiTrack owns
-absolute position/orientation and the derived `projected_gravity`; the pelvis IMU's calibrated
-three-axis gyroscope owns `base_ang_vel`. The actor must not use IMU attitude/yaw under this
-contract name, and it must not obtain angular velocity by differentiating filtered mocap
-quaternions when a direct gyro measurement exists. `motion_anchor_ori_b` combines the same
-OptiTrack base orientation with joint-encoder FK. The current arbitrary-N deploy builder, rotational
+absolute position/orientation; the pelvis IMU's calibrated three-axis gyroscope owns
+`base_ang_vel`. A table-centered actor would derive gravity from `R_table_base`; current A211/C211
+instead derive it from their canonical HOPE-world base orientation and likewise omit a duplicate
+`projected_gravity` vector. Neither contract obtains angular velocity by differentiating filtered
+mocap quaternions when the direct gyro exists. `motion_anchor_ori_b` combines the same OptiTrack
+base orientation with joint-encoder FK. The current arbitrary-N deploy builder, rotational
 marker extrinsic and time-aligned OptiTrack/gyro producer remain OPEN, so this frame contract is
 simulator-training-only until those are closed.
 
-Fresh N1 ActionBall actors use the fixed-width 194-D
-`action_ball_table_pose_twist_heading_task_teacher_start_v2` representation. It replaces the old
-constant N1 one-hot slot with `time_to_teacher_start_s`; stable action UID/slot remains control-plane
-state. The N-dependent `...teacher_start_n<N>` and `...heading_task_n<N>` layouts remain historical
-checkpoint/receipt compatibility only. N5/N73 fail closed until a fixed-width
-teacher-trajectory/ball/task/validity/history ABI is frozen and N2/N3 shared-policy validation
-passes; no motion ID or synthetic intent code is required. All three racket-task vectors
-share the current base yaw-heading frame:
+The fixed-width 194-D
+`action_ball_table_pose_twist_heading_task_teacher_start_v2` representation is the historical L194
+diagnostic, not the current fresh N1 authority.  Current A211/C211 actors use the purpose-grouped
+211-D v2 layout and 319-D critic defined in
+[policy_observation_action.md](policy_observation_action.md#current-fresh-a211c211-contracts): A
+receives desired contact p/v/face, C receives incoming-ball-at-contact p/v/spin, and both append the
+atomic task-valid bit.  Stable action UID/slot remains control-plane state; no motion ID or synthetic
+intent code is required. N5/N73 still fail closed until the varying-ball/task/history ABI is frozen,
+but a formal N2/N3 action-count staircase is not a prerequisite for the fixed-N1 diagnostic. Unlike
+the historical table-centered block above, current A211/C211 actor columns `[0:12]` are
+`actual_base_pose_lin_vel_world`: canonical HOPE-world position3, orientation6D and linear velocity3.
+Column `[12:15]` is the sole pelvis/body-frame IMU gyro. The current implementation does not subtract
+the table center or rotate the base orientation into `R_table_base`; changing it to do so would be a
+new ABI, not a documentation clarification. All
+three racket-task vectors share the current base yaw-heading frame:
 
 ```text
 p_task_h = R_heading^T (p_target_table - p_racket_FK_table)
@@ -194,7 +207,7 @@ v_task_h = R_heading^T v_target_table
 n_rawA_h = R_heading^T n_rawA_table
 ```
 
-The full table-relative base orientation remains a separate 6-D channel. We deliberately do not
+The full canonical HOPE-world base orientation remains a separate 6-D channel. We deliberately do not
 rotate the ballistic task through the instantaneous base roll/pitch: table Z is the physical
 vertical axis, while transient body tilt is state context rather than a redefinition of the task.
 Planner wire, solver, Reward and physics stay in canonical table/world coordinates; only the actor

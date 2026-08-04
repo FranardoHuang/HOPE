@@ -326,6 +326,27 @@ def _count_nonfinite_tree(value: Any) -> int:
 
 
 def _exact_dict(value: Any, keys: Iterable[str], label: str) -> Dict[str, Any]:
+    """严格键集相等。本文件里保持严格，不降级成"必需键子集 + 忽略未知键"。
+
+    降级的一般理由是：给生产者加字段是正常演进，严格集合相等在加字段时必然误伤
+    （已经造成过三次真实事故：四格 barrier 6 键 vs 16 键、oracle evidence 15 键
+    vs 18 键、fitted-ball receipt 多出字段）。这个理由适用于"同仓另一个模块在同
+    一次运行里现造的 dict"。
+
+    但本文件一处都不属于那一类。attest-prelaunch / attest-stage 是训练跑完之后
+    另起的一次 `python -I -B action_ball_stage_evidence.py`，它校验的每一个 dict
+    都是**别的进程早先落盘的产物**：trainer 写的 .pt checkpoint 与 train.log、
+    MuJoCo fitted-ball gate 收据、Isaac table-smoke 收据、supervisor terminal、
+    exact-resume verifier 收据、runtime bootstrap 收据、V4 inbox 转录，以及
+    `_committed_file()` 从某个精确 commit 取出的字节。对这些外部输入，多出来的
+    未知键正是这个 fail-closed 签名器要拒的东西——它们会原样流进
+    `dict(row)` 拷贝、进而流进签名后的 stage receipt，而下游
+    launch_action_ball_curriculum.py 对 receipt 做的是它自己的严格键集校验。
+
+    所以：加字段时该做的是同时改这里的键元组（一次显式的契约变更），不是把校验
+    放宽。要放宽请先确认那个 dict 真的是同进程现造的。
+    """
+
     if type(value) is not dict:
         raise EvidenceError("{} must be a plain JSON object".format(label))
     wanted = set(keys)
@@ -1366,20 +1387,9 @@ _TABLE_TOP_KEYS = {
     "non_claims",
     "receipt_payload_sha256",
 }
-_TABLE_ACTION_KEYS = {
-    "motion_id",
-    "action_uid",
-    "scope",
-    "robot_body_contract_count",
-    "motion_sha256",
-    "complete_cycle",
-    "isaac_pose_obb_pass",
-    "table_contact_count",
-    "fall_count",
-    "hard_limit_count",
-    "unsafe_count",
-    "verdict",
-}
+# _TABLE_ACTION_KEYS 已删：它唯一的用处是 _validate_table_rows 里那个被紧随其后的
+# 整字典相等完全蕴含的 _exact_dict 调用。现役的行模式定义在 _validate_table_rows 内的
+# expected 字面量里（同样 12 个键），不再需要单独的键集常量。
 _ACTION_BALL_SOLVER_SOURCE_NAMES = {
     "continuous_questions.py",
     "hope_commands.py",
@@ -2143,11 +2153,8 @@ def _validate_table_rows(
     motions = [row["motion_sha256"] for row in bindings]
     action_ids = [row["motion_id"] for row in bindings]
     action_uids = [row["action_uid"] for row in bindings]
-    receipt_action_set_contract = _exact_dict(
-        document["action_set_contract"],
-        action_set_contract.keys(),
-        "Isaac table-smoke action-set contract",
-    )
+    # 原来这里先用 _exact_dict 校验 action_set_contract 的键集，再在下面做整字典相等。
+    # 整字典相等已经蕴含键集相等，前一步是纯冗余，已删；判定移到下面那行 != dict(...)。
     if (
         document["schema_version"] != 4
         or document["receipt_class"]
@@ -2157,7 +2164,7 @@ def _validate_table_rows(
         or document["with_table"] is not True
         or document["scope"] != action_set_contract["scope"]
         or document["mobility_mode"] != action_set_contract["mobility_mode"]
-        or receipt_action_set_contract != dict(action_set_contract)
+        or document["action_set_contract"] != dict(action_set_contract)
         or document["ordered_action_ids"]
         != action_set_contract["ordered_action_ids"]
         or action_set_contract.get("expected_n") != len(bindings)
@@ -2172,10 +2179,9 @@ def _validate_table_rows(
         "hardware_authorization",
     ]:
         raise EvidenceError("Isaac table-smoke non-claims are not exact")
-    manifest = _exact_dict(
-        document["manifest"], ("path", "sha256"), "table manifest binding"
-    )
-    if manifest != {
+    # 原来这里先 _exact_dict(..., ("path","sha256"))，再和下面这个两键字面量整字典相等。
+    # 字面量相等已蕴含键集相等，前一步已删；判定由下面的 != 承担。
+    if document["manifest"] != {
         "path": manifest_relative,
         "sha256": manifest_sha256,
     }:
@@ -2191,11 +2197,8 @@ def _validate_table_rows(
         ),
         "Isaac table-smoke profile contract",
     )
-    profile_binding = _exact_dict(
-        profile_contract["profile_pins"],
-        ("path", "sha256"),
-        "Isaac table-smoke profile pins",
-    )
+    # 原来这里先 _exact_dict(profile_pins, ("path","sha256"))，再和下面的两键字面量整字典相等。
+    # 字面量相等已蕴含键集相等，前一步已删；判定由下面 profile_contract["profile_pins"] != {...} 承担。
     solver_payload = profile_document.get("solver_payload")
     physics_payload = profile_document.get("physics_payload")
     source_map = profile_document.get(
@@ -2204,7 +2207,7 @@ def _validate_table_rows(
     solver_sha = canonical_sha256(solver_payload)
     physics_sha = canonical_sha256(physics_payload)
     if (
-        profile_binding
+        profile_contract["profile_pins"]
         != {"path": profile_relative, "sha256": profile_sha256}
         or profile_contract["solver_profile_sha256"] != solver_sha
         or profile_contract["physics_profile_sha256"] != physics_sha
@@ -2367,10 +2370,10 @@ def _validate_table_rows(
         raise EvidenceError(
             "table-smoke receipt lacks exact contracted action rows"
         )
-    for index, (raw, binding) in enumerate(zip(actions, bindings)):
-        action = _exact_dict(
-            raw, _TABLE_ACTION_KEYS, "table-smoke actions[{}]".format(index)
-        )
+    for raw, binding in zip(actions, bindings):
+        # 原来这里先 _exact_dict(raw, _TABLE_ACTION_KEYS, ...)，再和下面的 expected 整字典相等。
+        # expected 的键就是 _TABLE_ACTION_KEYS 那 12 个，整字典相等已蕴含键集相等，前一步已删；
+        # 行的模式现在只由下面这个 expected 字面量描述（_TABLE_ACTION_KEYS 常量随之删除）。
         expected = {
             "motion_id": binding["motion_id"],
             "action_uid": binding["action_uid"],
@@ -2385,7 +2388,7 @@ def _validate_table_rows(
             "unsafe_count": 0,
             "verdict": "PASS",
         }
-        if action != expected:
+        if raw != expected:
             raise EvidenceError(
                 "table-smoke action is partial/unsafe: {}".format(binding["motion_id"])
             )

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build C211 oracle sidecars only from observed runtime episode facts.
 
-This module is deliberately independent from the launcher and from Hydra.  A
-future C211 zero-PPO runtime hook may hand it the exact per-episode facts after
-stepping the real environment.  It never accepts a producer-authored PASS or a
+This module is deliberately independent from the launcher and from Hydra.  The
+C211 zero-PPO runner-before-oracle hook hands it the exact per-episode facts
+after stepping the real environment.  It never accepts a producer-authored PASS or a
 precomputed selected-rubber classification: classification and every content
 SHA are derived here, and publication is canonical/no-clobber.
 
@@ -25,11 +25,12 @@ import sys
 from typing import Any, Mapping, Sequence
 
 
-RAW_KIND = "action_ball_c211_oracle_raw_evidence_v1"
+RAW_KIND = "action_ball_c211_oracle_raw_evidence_v2"
 PREFLIGHT_KIND = "action_ball_c211_runner_preflight_evidence_v1"
 SELECTED_KIND = "action_ball_c211_selected_rubber_contact_evidence_v1"
-INPUT_KIND = "action_ball_c211_observed_oracle_bundle_v1"
-OUTPUT_KIND = "action_ball_c211_oracle_evidence_publication_v1"
+INPUT_KIND = "action_ball_c211_observed_oracle_bundle_v2"
+OUTPUT_KIND = "action_ball_c211_oracle_evidence_publication_v2"
+OBSERVED_BUNDLE_MARKER = "ACTION_BALL_C211_OBSERVED_ORACLE_BUNDLE_JSON"
 CLASSIFIER_CONTRACT = "runtime_contact_pair_selected_rubber_v1"
 PREFLIGHT_MARKER = "ACTION_BALL_C211_TRAINABILITY_PREFLIGHT_JSON"
 
@@ -79,12 +80,60 @@ SHA_KEYS = (
     "hard_contract_sha256",
     "motion_sha256",
     "manifest_sha256",
-    "tape_file_sha256",
-    "tape_canonical_sha256",
-    "tape_base_question_sha256",
     "dynamic_ready_artifact_sha256",
     "dynamic_ready_nominal_receipt_sha256",
 )
+QUESTION_RNG = {
+    "owner": "runtime_curriculum_sampler",
+    "cadence": "every_episode_reset",
+    "draw_count_authority": "sample_receipt_draw_end_minus_draw_start",
+    "zero_draw_claim_permitted": False,
+    "checkpoint_resume": "exact_sampler_and_curriculum_state",
+}
+TASK_WAIT_CONTRACT = {
+    "identity": "action_ball_pre_task_wait_schedule_v1",
+    "policy_dt_s": 0.02,
+    "seed": 20260804,
+    "min_wait_ticks": 5,
+    "max_wait_ticks": 25,
+    "episode_horizon_ticks": 500,
+    "required_active_ticks": 200,
+    "schedule_canonical_sha256": (
+        "58aa7bb62406d301df619caf7026af8d595f4b8cd9594ea8441b4c89997d400e"
+    ),
+    "task_valid_actor_and_critic": True,
+    "wait_task_ball_base_and_clocks_masked": True,
+    "wait_remaining_observed": False,
+}
+QUESTION_SOURCE_CONTRACT = {
+    "identity": "action_ball_211_question_source_scope_v5",
+    "family": "C211",
+    "question_sampler": {
+        "source": "runtime_curriculum_sampler",
+        "cadence": "every_episode_reset",
+        "curriculum_domain_levels_consulted_every_reset": True,
+        "sampler_runs_every_reset": True,
+        "initial_center_single_question": True,
+        "initial_center_activation": "all_32_domain_levels_exact_zero",
+        "initial_center_physical_support": "literal_profile_center_point",
+        "initial_center_rng_draws": "normal_fixed_budget",
+        "post_promotion_support": "zero_to_manifest_max_width_per_promoted_arm",
+        "sampler_rng_reused_by_target_provider": False,
+        "physical_rng_draw_count_authority": (
+            "sample_receipt_draw_end_minus_draw_start"
+        ),
+        "zero_physical_rng_draw_claim_permitted": False,
+        "selection": "sample_current_domain_levels",
+        "checkpoint_resume": "exact_sampler_and_curriculum_state",
+    },
+    "target_provider": {
+        "source": "direct_ball",
+        "desired_contact_inverse": False,
+        "exact_question_answer_cache": {"enabled": False},
+        "online_inverse_solves_per_reset": 0,
+        "online_inverse_solves_per_step": 0,
+    },
+}
 
 
 class EvidenceError(RuntimeError):
@@ -252,6 +301,9 @@ def _validate_runner_facts(value: Any) -> dict[str, Any]:
         "critic_normalizer_identity",
         "fresh_normalizers_required",
         "symmetric_critic_fallback_forbidden",
+        "task_valid_required",
+        "task_wait_contract",
+        "question_source_contract",
         "contact_target_absent",
         "c225_reward_contract",
         "runner_actor_width",
@@ -270,6 +322,9 @@ def _validate_runner_facts(value: Any) -> dict[str, Any]:
         "critic_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
         "fresh_normalizers_required": True,
         "symmetric_critic_fallback_forbidden": True,
+        "task_valid_required": True,
+        "task_wait_contract": TASK_WAIT_CONTRACT,
+        "question_source_contract": QUESTION_SOURCE_CONTRACT,
         "contact_target_absent": True,
         "runner_actor_width": ACTOR_WIDTH,
         "runner_critic_width": CRITIC_WIDTH,
@@ -289,14 +344,15 @@ def _validate_runner_facts(value: Any) -> dict[str, Any]:
     reward = facts["c225_reward_contract"]
     if (
         type(reward) is not dict
-        or reward.get("identity") != "action_ball_c211_achieved_outcome_reward_v2"
+        or reward.get("identity") != "action_ball_c211_achieved_outcome_reward_v3"
         or reward.get("task_valid_required") is not True
         or type(reward.get("strike_bridge")) is not dict
-        or reward["strike_bridge"].get("weight") != 220.0
+        or reward["strike_bridge"].get("weight") != 240.0
+        or reward.get("landing", {}).get("weight") != 700.0
         or reward["strike_bridge"].get("eligibility")
         != "task_valid_active_swing_single_exact_strike_tick"
     ):
-        raise EvidenceError("runner preflight reward-v2/task_valid contract differs")
+        raise EvidenceError("runner preflight reward-v3/task_valid contract differs")
     return facts
 
 
@@ -368,34 +424,33 @@ def build_selected_rubber(
 def _validate_question(value: Any) -> dict[str, Any]:
     keys = (
         "target_source",
+        "question_source",
         "target_recipe",
         "target_validity_mask",
         "target_observation_noise",
         "incoming_ball_fields",
+        "desired_contact_fields_observed",
         "reset_inverse_solve",
         "online_solver_calls",
         "online_lm_calls",
-        "physical_rng_draws",
-        "immutable_tape_file_sha256",
-        "immutable_tape_canonical_sha256",
-        "immutable_tape_base_question_sha256",
+        "question_rng",
     )
     row = _exact_dict(value, keys, name="question contract")
     expected = {
-        "target_source": "immutable_tape",
+        "target_source": "direct_ball",
+        "question_source": "runtime_curriculum_sampler",
         "target_recipe": "outcome_dense_only",
         "target_validity_mask": [False, False, False],
         "target_observation_noise": False,
         "incoming_ball_fields": list(INCOMING_FIELDS),
+        "desired_contact_fields_observed": False,
         "reset_inverse_solve": False,
         "online_solver_calls": 0,
         "online_lm_calls": 0,
-        "physical_rng_draws": 0,
+        "question_rng": QUESTION_RNG,
     }
-    if any(row[key] != wanted for key, wanted in expected.items()):
-        raise EvidenceError("question contract is not C211 000 fixed-tape")
-    for key in keys[-3:]:
-        _sha(row[key], name=key)
+    if row != expected:
+        raise EvidenceError("question contract is not C211 runtime-sampled direct-ball")
     return row
 
 
@@ -407,16 +462,112 @@ def _finite_vec3(value: Any, *, name: str) -> list[float | int]:
     return list(value)
 
 
+def _finite_vec2(value: Any, *, name: str) -> list[float | int]:
+    if type(value) is not list or len(value) != 2:
+        raise EvidenceError("%s must be a length-2 list" % name)
+    for component in value:
+        _finite_number(component, name=name)
+    return list(value)
+
+
+def _validate_achieved_analytic_flight(value: Any, *, selected: bool) -> dict[str, Any]:
+    row = _exact_dict(
+        value,
+        (
+            "evaluated", "finite", "landing_xy_m", "landing_valid",
+            "net_crossed", "net_clear", "on_opponent_table", "source",
+        ),
+        name="achieved analytic flight",
+    )
+    for key in (
+        "evaluated", "finite", "landing_valid", "net_crossed", "net_clear",
+        "on_opponent_table",
+    ):
+        if type(row[key]) is not bool:
+            raise EvidenceError("achieved analytic flight %s must be bool" % key)
+    if row["evaluated"] is not selected:
+        raise EvidenceError("analytic flight evaluation differs from selected contact")
+    if selected:
+        if (
+            row["source"]
+            != "runtime_vb_one_shot_from_achieved_selected_rubber_contact"
+            or row["finite"] is not True
+        ):
+            raise EvidenceError("analytic flight authority/finite gate differs")
+        row["landing_xy_m"] = _finite_vec2(
+            row["landing_xy_m"], name="achieved analytic landing"
+        )
+        if row["net_clear"] and not row["net_crossed"]:
+            raise EvidenceError("analytic net-clear cannot precede net crossing")
+        if row["on_opponent_table"] and not row["landing_valid"]:
+            raise EvidenceError("opponent-table outcome requires valid analytic landing")
+    elif (
+        row["finite"] or row["landing_xy_m"] is not None
+        or row["landing_valid"] or row["net_crossed"] or row["net_clear"]
+        or row["on_opponent_table"] or row["source"] is not None
+    ):
+        raise EvidenceError("no-contact row carries hypothetical analytic flight")
+    return row
+
+
+def _validate_predicted_outcome(
+    value: Any, *, selected: bool, flight: Mapping[str, Any]
+) -> dict[str, Any]:
+    row = _exact_dict(
+        value,
+        (
+            "evaluated", "predicted_net_clear", "predicted_legal_landing",
+            "predicted_landing_xy_m", "source",
+        ),
+        name="predicted analytic outcome",
+    )
+    if type(row["evaluated"]) is not bool or row["evaluated"] is not selected:
+        raise EvidenceError("predicted outcome evaluation differs from selected contact")
+    if selected:
+        if row["source"] != "runtime_c225_achieved_flight_prediction_one_shot":
+            raise EvidenceError("predicted outcome authority differs")
+        if type(row["predicted_net_clear"]) is not bool or type(
+            row["predicted_legal_landing"]
+        ) is not bool:
+            raise EvidenceError("predicted outcome booleans differ")
+        row["predicted_landing_xy_m"] = _finite_vec2(
+            row["predicted_landing_xy_m"], name="predicted analytic landing"
+        )
+        expected_legal = bool(
+            flight["landing_valid"] and flight["net_crossed"]
+            and flight["net_clear"] and flight["on_opponent_table"]
+        )
+        if (
+            row["predicted_landing_xy_m"] != flight["landing_xy_m"]
+            or row["predicted_net_clear"] is not flight["net_clear"]
+            or row["predicted_legal_landing"] is not expected_legal
+        ):
+            raise EvidenceError("predicted outcome differs from achieved analytic flight")
+    elif any(
+        row[key] is not None
+        for key in (
+            "predicted_net_clear", "predicted_legal_landing",
+            "predicted_landing_xy_m", "source",
+        )
+    ):
+        raise EvidenceError("no-contact row carries hypothetical predicted outcome")
+    return row
+
+
 def _validate_episode(value: Any, *, episode: int, selected_row_sha256: str) -> dict[str, Any]:
     keys = (
         "episode",
         "control_steps",
         "terminal_phase",
         "termination_reasons",
-        "tape_question_index",
-        "tape_question_sha256",
+        "sampler_sample_index",
+        "sampler_sample_sha256",
+        "sampler_draw_start",
+        "sampler_draw_end",
         "incoming_ball_observation",
         "observed_selected_rubber_contact",
+        "achieved_analytic_flight",
+        "predicted_outcome",
         "safety",
         "teacher_qdes",
     )
@@ -424,7 +575,16 @@ def _validate_episode(value: Any, *, episode: int, selected_row_sha256: str) -> 
     if row["episode"] != episode:
         raise EvidenceError("runtime oracle episode order differs")
     _plain_int(row["control_steps"], name="episode control steps", minimum=1)
-    _sha(row["tape_question_sha256"], name="tape question SHA")
+    _plain_int(row["sampler_sample_index"], name="sampler sample index", minimum=0)
+    _sha(row["sampler_sample_sha256"], name="sampler sample SHA")
+    draw_start = _plain_int(
+        row["sampler_draw_start"], name="sampler draw start", minimum=0
+    )
+    draw_end = _plain_int(
+        row["sampler_draw_end"], name="sampler draw end", minimum=1
+    )
+    if draw_end <= draw_start:
+        raise EvidenceError("sampler receipt must prove positive physical RNG draws")
     incoming = _exact_dict(
         row["incoming_ball_observation"],
         ("source", "actor", "critic"),
@@ -451,6 +611,13 @@ def _validate_episode(value: Any, *, episode: int, selected_row_sha256: str) -> 
         }
     ) != selected_row_sha256:
         raise EvidenceError("selected-rubber row binding differs")
+    selected = _classification == "selected_rubber"
+    flight = _validate_achieved_analytic_flight(
+        row["achieved_analytic_flight"], selected=selected
+    )
+    _validate_predicted_outcome(
+        row["predicted_outcome"], selected=selected, flight=flight
+    )
     safety = _exact_dict(
         row["safety"],
         (
@@ -493,10 +660,15 @@ def build_raw_oracle(
     question_contract: Any,
     episodes: Sequence[Any],
     selected_row_sha256: Sequence[str],
+    observed_oracle_bundle_content_sha256: str,
 ) -> dict[str, Any]:
     binding = _exact_dict(bindings, SHA_KEYS, name="raw oracle bindings")
     for key in SHA_KEYS:
         _sha(binding[key], name=key)
+    _sha(
+        observed_oracle_bundle_content_sha256,
+        name="observed oracle bundle content SHA",
+    )
     question = _validate_question(question_contract)
     if type(episodes) not in (list, tuple) or len(episodes) != EPISODES:
         raise EvidenceError("raw oracle requires exactly 32 runtime episodes")
@@ -520,10 +692,27 @@ def build_raw_oracle(
         "post_strike": {},
         "pre_strike_or_same_step_unknown": {},
     }
+    sample_indices: set[int] = set()
+    sample_sha256: set[str] = set()
+    draw_intervals: set[tuple[int, int]] = set()
     for index, value in enumerate(episodes):
         row = _validate_episode(
             value, episode=index, selected_row_sha256=selected_row_sha256[index]
         )
+        sample_identity = row["sampler_sample_index"]
+        sample_digest = row["sampler_sample_sha256"]
+        draw_interval = (row["sampler_draw_start"], row["sampler_draw_end"])
+        if (
+            sample_identity in sample_indices
+            or sample_digest in sample_sha256
+            or draw_interval in draw_intervals
+        ):
+            raise EvidenceError(
+                "runtime episodes do not prove one distinct sampler receipt per reset"
+            )
+        sample_indices.add(sample_identity)
+        sample_sha256.add(sample_digest)
+        draw_intervals.add(draw_interval)
         control_steps += row["control_steps"]
         for reason in row["termination_reasons"]:
             if type(reason) is not str or not reason:
@@ -551,10 +740,14 @@ def build_raw_oracle(
                 "control_steps": row["control_steps"],
                 "terminal_phase": row["terminal_phase"],
                 "termination_reasons": list(row["termination_reasons"]),
-                "tape_question_index": row["tape_question_index"],
-                "tape_question_sha256": row["tape_question_sha256"],
+                "sampler_sample_index": row["sampler_sample_index"],
+                "sampler_sample_sha256": row["sampler_sample_sha256"],
+                "sampler_draw_start": row["sampler_draw_start"],
+                "sampler_draw_end": row["sampler_draw_end"],
                 "incoming_ball_observation": row["incoming_ball_observation"],
                 "selected_rubber_evidence_sha256": selected_row_sha256[index],
+                "achieved_analytic_flight": row["achieved_analytic_flight"],
+                "predicted_outcome": row["predicted_outcome"],
             }
         )
     unexpected = {
@@ -563,10 +756,13 @@ def build_raw_oracle(
         if key != "action_ball_single_stroke_complete"
     }
     unsigned = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": RAW_KIND,
         "diagnostic_unauthorized": True,
         "bindings": binding,
+        "observed_oracle_bundle_content_sha256": (
+            observed_oracle_bundle_content_sha256
+        ),
         "training_contract_artifact": dict(training_contract_artifact),
         "runner_preflight_artifact": dict(runner_preflight_artifact),
         "question_contract": question,
@@ -642,7 +838,7 @@ def publish_bundle(bundle: Any, *, namespace: Path) -> dict[str, Any]:
     )
     row = _exact_dict(bundle, keys, name="observed oracle bundle")
     if (
-        row["schema_version"] != 1
+        row["schema_version"] != 2
         or row["kind"] != INPUT_KIND
         or row["diagnostic_unauthorized"] is not True
     ):
@@ -729,6 +925,7 @@ def publish_bundle(bundle: Any, *, namespace: Path) -> dict[str, Any]:
         question_contract=row["question_contract"],
         episodes=row["episodes"],
         selected_row_sha256=selected_rows,
+        observed_oracle_bundle_content_sha256=canonical_sha256(row),
     )
     # Complete every semantic validation before the first sidecar write.  A
     # filesystem race can still spend part of the namespace, which is safe;
@@ -755,7 +952,7 @@ def publish_bundle(bundle: Any, *, namespace: Path) -> dict[str, Any]:
         raise EvidenceError("published selected-rubber pin differs")
     raw_pin = _publish_no_clobber(raw_path, raw)
     unsigned = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": OUTPUT_KIND,
         "diagnostic_unauthorized": True,
         "oracle_launch_claim_sha256": binding["oracle_launch_claim_sha256"],

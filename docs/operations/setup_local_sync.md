@@ -31,7 +31,7 @@ git check-ignore -q vendor_assets
 | Path | Purpose | Source | Required By |
 | --- | --- | --- | --- |
 | `vendor_assets/agibot/a3_deploy_example_full/` | Complete Agibot deploy payload, including heavy runtime assets | Private/vendor-gated: Agibot handoff (~1.7 GB, no public URL) | G07 |
-| `vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg/` | 2026-08-03 A3-P1 raw URDF/mesh/workbook/PDF delivery; 同日 normalized 31-action candidate 的 byte authority，仍不是 current runtime canonical | Restore the exact private vendor delivery and verify `configs/a3_p1_0803_raw_intake_v1.json`: 112 files, 57,803,270 bytes, closure SHA-256 `b1da6430...7818f`, primary URDF SHA-256 `7dc98e48...51704`. 用 `scripts/prepare_a3_p1_0803_31d_asset.py` 产生独立 ignored output；不覆盖现役 `agi/` 或 `assets/agibot_a3/` | G04/G05/G06 successor plant |
+| `vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg/` | 2026-08-03 A3-P1 raw URDF/mesh/workbook/PDF delivery；project-owned q=0 locked-left-gripper 31-action candidate 的 byte authority，仍不是 current runtime canonical | Restore the exact private vendor delivery and verify `configs/a3_p1_0803_raw_intake_v1.json`: 112 files, 57,803,270 bytes, closure SHA-256 `b1da6430...7818f`, primary URDF SHA-256 `7dc98e48...51704`. 用 `scripts/prepare_a3_p1_0803_31d_asset.py` 产生独立 ignored output；20 个缺失 gripper collision 只按 receipt 显式 disabled；不覆盖现役 `agi/` 或 `assets/agibot_a3/` | G04/G05/G06 successor plant |
 | `external_repos/TTRL-ICRA2026/` | Auto-synced local TTRL reference clone | Public but may be access-gated: [purdue-tracelab/TTRL-ICRA2026](https://github.com/purdue-tracelab/TTRL-ICRA2026.git) | G05, G08 |
 | `external_repos/IsaacLab/` | Local Isaac Lab source checkout used by `setup_train_env.sh` when a pre-provisioned Isaac Lab checkout is absent | Public: [isaac-sim/IsaacLab](https://github.com/isaac-sim/IsaacLab.git), observed tag `v2.1.0` / commit `21f7136` | G05 |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Package-local Isaac A3 URDF, meshes, and config; ignored by upstream `**/assets/` rule | Normally rebuild from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/`. For C3/D3 K100 v2, do **not** rebuild or hand-copy: the attestor inventories the exact training checkout source under `/workspace/codexschema/nohope_signed_face_c3d3_l1_4467d79/.../assets/agibot_a3` and hydrates a fresh eval checkout per [v2 operation](run_phase1_signed_face_c3d3_k100_v2.md) | G04, G05, G06 |
@@ -307,25 +307,26 @@ Then verify all copied URDF mesh references resolve:
 python3 -c 'import pathlib, re, sys; urdf=pathlib.Path("hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf"); refs=re.findall(r"filename=\"([^\"]+)\"", urdf.read_text()); missing=[r for r in refs if not (urdf.parent / r).resolve().exists()]; print(f"mesh_refs={len(refs)} missing={len(missing)}"); sys.exit(1 if missing else 0)'
 ```
 
-5a. 只在构建 0803 successor 时，先以 no-clobber 方式恢复 raw delivery，再生成独立版本化
-ignored asset：
+5a. 只在审核 0803 successor 时，以 no-clobber 方式恢复 raw delivery。若 versioned generated
+output 尚不存在，先 materialize；若已存在，只运行 `--check`（只核验、不写）：
 
 ```bash
 test -d vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg
-test ! -e hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v1
-
 python3 scripts/prepare_a3_p1_0803_31d_asset.py
 python3 scripts/prepare_a3_p1_0803_31d_asset.py --check
 ```
 
-本 repo 已跟踪 exact manifest；新 checkout 应从已验证私有副本恢复 ignored output，并只运行
-`--check`。若需重建，必须在新的 versioned output/manifest path 上铸新收据；不得删掉或覆盖
-`agibot_a3_p1_0803_31d_v1`。现有 `agibot_a3/` 仍是运行时路径，上述命令不会改 pointer。
+本 repo 已跟踪 exact raw manifest 与 schema-2 normalized receipt。生成器只接受项目明确拥有的
+九维 URDF-coordinate `q=0` lock；它不把这个姿态叫 vendor neutral/home。它保留所有 gripper
+inertial 和 `0.76626209416 kg` 质量，不伪造 20 个缺失 collision mesh，只删除对应左夹爪
+collision element；output/URDF closure 必须精确为 `73a47e85…8f08` / `2f15df8a…2535`。
+生成器拒绝覆盖已存在的 versioned output，也硬拒绝把现役 `agibot_a3/` 或其子目录作为 output。
 
-本地检查的期望身份是 `31 movable / 63 links / 62 joints`、URDF SHA-256
-`2f15df8a...2535`、output closure `73a47e85...8f08`。exact Pod importer/joint/body/20-step finite
-已通过；仍缺的 standing/FK/dynamics parity
-门见 [0803 31-action 归一化记录](../experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
+`--check` 成功只证明 raw→normalized 可复现、31-action ABI、右拍 local/mesh 与已有 Pod short-import
+receipt；不授权训练。0803 相对现役有 `9.013878 mm` 的共同 `q=0` world paddle-centre delta，必须
+重做 successor safe-ready、full-phase FK/retarget、collision/dynamics 与 MuJoCo parity 后才能切
+pointer。现有 `agibot_a3/` 仍是运行时路径。详见
+[0803 31-action 归一化记录](../experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
 
 Detached training worktrees also omit this ignored tree. For the Pod1 signed-face L1 funnel, the
 reviewed restore source is the clean `6d93bcb16c422a2f42748c2dc99432559653480b` checkout and the

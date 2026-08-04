@@ -2428,14 +2428,16 @@ class HOPEActionBallC211RewardsCfg(HOPEActionBallRewardsCfg):
     c225_strike_ball_paddle_center_proximity = RewTerm(
         func=mdp.c225_strike_ball_paddle_center_proximity,
         # RewardManager multiplies by policy dt=0.02: the peak one-shot income
-        # is 4.4, above compatible-swing motion max 3.6575 and below the legal
-        # landing floor 500 * 0.6 * 0.02 = 6.0.
-        weight=220.0,
+        # is 4.8.  On the Take061 initial-center task-valid swing, gamma=.99
+        # gives motion<strike<legal landing (8.4 floor at weight=700/base=.6)
+        # without adding a hit bonus.
+        weight=240.0,
         params={"command_name": "racket_target", "std": 0.15},
     )
     virtual_landing = RewTerm(
         func=mdp.c225_landing_outcome_actual_contact,
-        weight=500.0,
+        # Legal opponent-table income is 8.4..14.0 after policy dt.
+        weight=700.0,
         params={
             "command_name": "racket_target",
             "mode": "legal_base",
@@ -2458,6 +2460,24 @@ class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
     transition.  Fall and table contact remain independent hard terminations.
     """
 
+    # 人话:参考包络终止只留脚,手腕拿掉。手腕本来就是要大幅甩出去打球的那一端。
+    #
+    # The parent deploy-parity envelope watches feet AND hands.  On a swing task the wrist is the
+    # one body that must travel furthest from the reference before contact, so a 0.25 m z-only
+    # envelope on it fires on exactly the behaviour we are trying to learn.  ``build_1`` removed
+    # the wrist envelope outright at V9 with the reason recorded in code: fresh-policy smokes
+    # produced 1.67-step episodes because nearly every reset tripped the wrist guard.  Feet keep
+    # the envelope: a foot leaving its reference height IS the pre-fall signal it was built for.
+    ee_body_pos = DoneTerm(
+        func=mdp.bad_motion_body_pos_z_only_hold_aware,
+        params={
+            "command_name": "motion",
+            "threshold": 0.25,
+            "body_names": list(A3_FEET_BODIES),
+            "ignore_hold": True,
+        },
+    )
+
     joint_qdes_forbidden = DoneTerm(
         func=mdp.pre_clamp_qdes_forbidden_zone,
         time_out=False,
@@ -2468,6 +2488,19 @@ class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
             "margin_fraction": 0.02,
         },
     )
+    # 人话:关节撞到机械硬限位这件事继续全量观测、继续记账、继续卡晋级,但不再当场把这一局掐掉。
+    #
+    # ``terminate=False`` matches the vendor-aligned ``build_1`` arm, whose same-quantity DoneTerm
+    # ``actual_q_hard_limit_telemetry`` always returns False ("intentionally not a PPO episode
+    # termination, matching the Unitree training structure") and routes hard-edge events to
+    # checkpoint NO-GO evidence only.  Deterministic replay on this branch showed 7/7 episodes
+    # terminated by this term at ticks 69--88, every one of them before the nominal strike tick,
+    # so the strike/landing layers never became eligible at all -- the CaT (arXiv:2403.18765)
+    # "binary termination => identically zero return" ablation, reproduced.  The measured teacher
+    # is not the cause: its minimum limit margin over 31 joints x 57 frames is 0.116 rad
+    # (16.6% of travel) with zero excursions, so nothing is being asked of a joint that its own
+    # reference already violates.  Fall (base_fell_tilt/base_too_low) and table contact remain
+    # hard terminations; the actual-q barrier keeps teaching recoverable proximity.
     joint_actual_forbidden = DoneTerm(
         func=mdp.actual_joint_position_forbidden_zone,
         time_out=False,
@@ -2476,6 +2509,7 @@ class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
             "limit_source": "joint_pos_limits",
             "margin_rad": 0.0,
             "margin_fraction": 0.02,
+            "terminate": False,
         },
     )
 

@@ -286,6 +286,20 @@ if (
     raise SystemExit("Kit boot lock pathname identity changed after flock")
 ' "$lock_file"
 
+# FD 9 owns only the pod-wide Kit/extension boot window.  Completion-mode
+# callers still wait for the exact training process group, but they must not
+# serialize already-booted trainers.  Close the descriptor on first release so
+# later cleanup paths cannot accidentally reacquire or leak it.
+boot_lock_held=1
+release_boot_lock() {
+  if [[ $boot_lock_held == 1 ]]; then
+    "$FLOCK_BIN" -u 9
+    exec 9>&-
+    boot_lock_held=0
+    printf 'boot_lock_released_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&8
+  fi
+}
+
 # The setsid leader is a tiny inherited-FD gate wrapper.  It cannot execute
 # the workload until the parent has durably bound PID=PGID plus starttime.
 stop_signal=
@@ -363,7 +377,7 @@ if [[ -n $stop_signal ]]; then
   reap_still_gated_child "signal_${stop_signal}"
   reap_rc=$?
   set -e
-  "$FLOCK_BIN" -u 9
+  release_boot_lock
   (( reap_rc == 0 )) || exit "$reap_rc"
   exit "$(stop_exit_code)"
 fi
@@ -412,7 +426,7 @@ if [[ -n $stop_signal ]]; then
   reap_still_gated_child "signal_${stop_signal}"
   reap_rc=$?
   set -e
-  "$FLOCK_BIN" -u 9
+  release_boot_lock
   (( reap_rc == 0 )) || exit "$reap_rc"
   exit "$(stop_exit_code)"
 fi
@@ -576,27 +590,51 @@ cleanup_completed_group() {
 }
 
 finish_ready() {
-  printf 'ready_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&8
-  "$FLOCK_BIN" -u 9
+  release_boot_lock
   echo "KIT_BOOT_READY pid=$pid pgid=$pgid log=$log_file"
   exit 0
 }
 
 finish_completed() {
   local completion_deadline process_state rc cleanup_rc
+  # The readiness marker closes the boot critical section even when the
+  # launcher remains alive to verify natural completion.
+  release_boot_lock
   completion_deadline=$((SECONDS + completion_timeout_s))
   while true; do
+    if [[ -n $stop_signal ]]; then
+      echo "KIT_COMPLETION_STOP pid=$pid pgid=$pgid signal=$stop_signal" >&2
+      printf 'stop_signal=%s\n' "$stop_signal" >&8
+      set +e
+      terminate_exact_group
+      rc=$?
+      set -e
+      (( rc == 0 )) || exit "$rc"
+      printf 'terminal_kind=signal_stop\n' >&8
+      printf 'terminal_exit_code=%s\n' "$(stop_exit_code)" >&8
+      exit "$(stop_exit_code)"
+    fi
     process_state=$($PS_BIN -o stat= -p "$pid" 2>/dev/null || true)
     process_state=${process_state//[[:space:]]/}
     [[ -z $process_state || $process_state == Z* ]] && break
     if (( SECONDS >= completion_deadline )); then
+      # Close the natural-exit race once more before exact signalling.  A
+      # leader that became absent/zombie at the deadline belongs to the normal
+      # wait+completed-group path below, not the timeout TERM path.
+      process_state=$($PS_BIN -o stat= -p "$pid" 2>/dev/null || true)
+      process_state=${process_state//[[:space:]]/}
+      if [[ -z $process_state || $process_state == Z* ]] || ! kill -0 "$pid" 2>/dev/null; then
+        break
+      fi
       printf 'completion_timeout_s=%s\n' "$completion_timeout_s" >&8
       set +e
       terminate_exact_group
       rc=$?
       set -e
-      "$FLOCK_BIN" -u 9
+      release_boot_lock
       (( rc == 0 )) || exit "$rc"
+      printf 'terminal_kind=completion_timeout\n' >&8
+      printf 'terminal_exit_code=124\n' >&8
       exit 124
     fi
     sleep 1
@@ -613,27 +651,38 @@ finish_completed() {
   if (( cleanup_rc != 0 )); then
     printf 'terminal_kind=completion_cleanup_quarantined\n' >&8
     printf 'terminal_exit_code=%s\n' "$cleanup_rc" >&8
-    "$FLOCK_BIN" -u 9
+    release_boot_lock
     exit "$cleanup_rc"
   fi
   if (( rc != 0 )); then
     printf 'terminal_kind=completion_nonzero_exit\n' >&8
     printf 'terminal_exit_code=%s\n' "$rc" >&8
-    "$FLOCK_BIN" -u 9
+    release_boot_lock
     exit "$rc"
   fi
   if (( completed_initial_members != 0 )); then
     printf 'terminal_kind=completion_residual_group\n' >&8
     printf 'terminal_exit_code=123\n' >&8
-    "$FLOCK_BIN" -u 9
+    release_boot_lock
     exit 123
   fi
   printf 'completion_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&8
   printf 'terminal_kind=clean_completion\n' >&8
   printf 'terminal_exit_code=0\n' >&8
-  "$FLOCK_BIN" -u 9
+  release_boot_lock
   echo "KIT_COMPLETION_READY pid=$pid pgid=$pgid log=$log_file"
   exit 0
+}
+
+finish_marker_observed() {
+  # One marker has one meaning in every watchdog branch: boot is complete and
+  # the pod-wide lock is released before any optional completion wait.
+  printf 'ready_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&8
+  release_boot_lock
+  if [[ $wait_for_completion == 1 ]]; then
+    finish_completed
+  fi
+  finish_ready
 }
 
 while true; do
@@ -644,7 +693,7 @@ while true; do
     terminate_exact_group
     cleanup_rc=$?
     set -e
-    "$FLOCK_BIN" -u 9
+    release_boot_lock
     (( cleanup_rc == 0 )) || exit "$cleanup_rc"
     printf 'terminal_kind=signal_stop\n' >&8
     printf 'terminal_exit_code=%s\n' "$(stop_exit_code)" >&8
@@ -653,13 +702,16 @@ while true; do
   # Marker is authoritative even if it arrives on the same poll that would
   # otherwise cross either watchdog deadline.
   if "$GREP_BIN" -Fq -- "$marker" "$log_file"; then
-    if [[ $wait_for_completion == 1 ]]; then
-      finish_completed
-    fi
-    finish_ready
+    finish_marker_observed
   fi
 
   if ! kill -0 "$pid" 2>/dev/null; then
+    # The marker may have been flushed between the leading check and the
+    # leader exit.  Recheck before reaping/classifying so completion mode can
+    # still verify the exact exit code and residual process group.
+    if "$GREP_BIN" -Fq -- "$marker" "$log_file"; then
+      finish_marker_observed
+    fi
     set +e
     wait "$pid"
     rc=$?
@@ -672,7 +724,7 @@ while true; do
     printf 'pre_marker_exit_code=%s\n' "$rc" >&8
     printf 'terminal_kind=pre_marker_exit\n' >&8
     printf 'terminal_exit_code=%s\n' "$rc" >&8
-    "$FLOCK_BIN" -u 9
+    release_boot_lock
     echo "KIT_BOOT_FAILED pid=$pid pgid=$pgid exit=$rc log=$log_file" >&2
     tail -n 80 "$log_file" >&2 || true
     exit "$rc"
@@ -685,7 +737,7 @@ while true; do
     cleanup_rc=$?
     set -e
     printf 'boot_watchdog_error=log_fingerprint\n' >&8
-    "$FLOCK_BIN" -u 9
+    release_boot_lock
     (( cleanup_rc == 0 )) || exit "$cleanup_rc"
     printf 'terminal_kind=watchdog_error\n' >&8
     printf 'terminal_exit_code=126\n' >&8
@@ -705,7 +757,7 @@ while true; do
       # Close the check-to-signal window once more before classifying a stale
       # importer; a marker that arrived during stat processing still wins.
       if "$GREP_BIN" -Fq -- "$marker" "$log_file"; then
-        finish_ready
+        finish_marker_observed
       fi
       echo "KIT_BOOT_STALE pid=$pid pgid=$pgid after=${stale_timeout_s}s last_size=${last_log_size} log=$log_file" >&2
       printf 'boot_stale_timeout_s=%s\n' "$stale_timeout_s" >&8
@@ -715,7 +767,7 @@ while true; do
       terminate_exact_group
       cleanup_rc=$?
       set -e
-      "$FLOCK_BIN" -u 9
+      release_boot_lock
       (( cleanup_rc == 0 )) || exit "$cleanup_rc"
       printf 'terminal_kind=stale_timeout\n' >&8
       printf 'terminal_exit_code=125\n' >&8
@@ -729,7 +781,7 @@ while true; do
 
   if (( SECONDS >= deadline )); then
     if "$GREP_BIN" -Fq -- "$marker" "$log_file"; then
-      finish_ready
+      finish_marker_observed
     fi
     echo "KIT_BOOT_TIMEOUT pid=$pid pgid=$pgid after=${timeout_s}s log=$log_file" >&2
     set +e
@@ -737,7 +789,7 @@ while true; do
     cleanup_rc=$?
     set -e
     printf 'boot_timeout_s=%s\n' "$timeout_s" >&8
-    "$FLOCK_BIN" -u 9
+    release_boot_lock
     (( cleanup_rc == 0 )) || exit "$cleanup_rc"
     printf 'terminal_kind=boot_timeout\n' >&8
     printf 'terminal_exit_code=124\n' >&8

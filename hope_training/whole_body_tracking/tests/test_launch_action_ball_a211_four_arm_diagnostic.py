@@ -21,6 +21,22 @@ launcher = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = launcher
 SPEC.loader.exec_module(launcher)
 
+_TRAINING_CONTRACT = launcher._OLD._load_training_contract_module(
+    Path(__file__).resolve().parents[3]
+)
+_DR_L0_PAYLOAD = _TRAINING_CONTRACT.action_ball_dr_l0_contract_payload()
+_DR_L0_CONTRACT_SHA256 = (
+    _TRAINING_CONTRACT.action_ball_dr_l0_contract_sha256()
+)
+
+_DR_L0_BINDING = {
+    "path": launcher.DR_L0_MANIFEST_SOURCE,
+    "file_sha256": "d" * 64,
+    "contract_sha256": _DR_L0_CONTRACT_SHA256,
+    "hard_contract_identity": "action_ball_dr_l0_exact_all_off_v1",
+    "task_profile": launcher.TASK_PROFILE_ID,
+}
+
 
 class _FakeTensor:
     def __init__(self, values):
@@ -74,7 +90,279 @@ def _sealed(value):
     return {**value, "content_sha256": launcher.canonical_sha256(value)}
 
 
+def _exact_zero_handoff_fields(
+    *, motion_sha: str, joint_pos, root_pos, root_quat
+):
+    joint_pos = [float(value) for value in joint_pos]
+    root_pos = [float(value) for value in root_pos]
+    root_quat = [float(value) for value in root_quat]
+    root_norm = float(np.linalg.norm(np.asarray(root_quat, np.float64)))
+    audit_quat = (np.asarray(root_quat, np.float64) / root_norm).tolist()
+    raw_sha = launcher._whole_body_state_sha256(joint_pos, root_pos, root_quat)
+    audit_sha = launcher._whole_body_state_sha256(
+        joint_pos, root_pos, audit_quat
+    )
+    handoff = {
+        "schema_version": 1,
+        "kind": "exact_frame0_zero_duration_handoff_v1",
+        "selection_semantics": "threshold_first_exact_frame0_direct",
+        "state_sha256_semantics": (
+            "float64_array_bytes_without_quaternion_normalization_v1"
+        ),
+        "physical_ready_state_sha256": raw_sha,
+        "teacher_frame0_state_sha256": raw_sha,
+        "mjcf_audit_state_sha256": audit_sha,
+        "stored_root_quaternion_norm": root_norm,
+        "mjcf_audit_root_quat_wxyz": list(audit_quat),
+        "mjcf_audit_quaternion_semantics": (
+            "stored_root_quat_unit_normalized_for_numerical_backend_only"
+        ),
+        "stored_teacher_and_physical_quaternion_unchanged": True,
+        "endpoints_bitwise_equal": True,
+        "physical_ready_joint_velocity_exact_zero": True,
+        "teacher_static_endpoint_joint_velocity_exact_zero": True,
+        "measured_motion_velocity_channels_consumed": False,
+        "not_a_motion_velocity_continuity_claim": True,
+        "certified_transition_s": 0.0,
+        "required_min_wait_s": 0.0,
+        "torque_speed_curve_required": False,
+        "torque_speed_non_requirement_reason": (
+            "identical_stored_configuration_and_constructed_zero_joint_"
+            "velocity_endpoints"
+        ),
+        "runtime_transition_reference_required": False,
+        "required_followup_hold_gate": launcher.FRAME0_LIVE_RECEIPT_KIND,
+        "required_followup_policy_steps": launcher.PHYSICAL_READY_HOLD_POLICY_STEPS,
+        "required_followup_physics_steps": launcher.PHYSICAL_READY_HOLD_PHYSICS_STEPS,
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+    }
+    robust = dict(launcher._DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS)
+    return {
+        "teacher_reference": {
+            "semantics": "exact_motion_bytes_frame0_reference",
+            "motion_sha256": motion_sha,
+            "frame_index": 0,
+            "root_pos_w_m": list(root_pos),
+            "root_quat_wxyz": list(root_quat),
+            "joint_pos_rad": list(joint_pos),
+            "static_handoff_joint_vel_radps": [0.0] * 31,
+            "static_handoff_velocity_semantics": (
+                "constructed_zero_joint_velocity_endpoint_not_measured_motion_"
+                "velocity"
+            ),
+        },
+        "physical_ready": {
+            "root_pos_w_m": list(root_pos),
+            "root_quat_wxyz": list(root_quat),
+            "joint_pos_rad": list(joint_pos),
+            "joint_vel_radps": [0.0] * 31,
+        },
+        "frame0_handoff": dict(handoff),
+        "physical_birth_composition": {
+            "semantics": (
+                "measured_frame0_direct_if_safe_else_lexicographic_whole_body_"
+                "safe_ready"
+            ),
+            "teacher_reference_unchanged": True,
+            "historical_physical_birth_seed_consumed": False,
+            "selection_priority": [
+                "exact_measured_frame0_if_all_safety_gates_pass",
+                "lexicographic_whole_body_safe_ready_only_if_frame0_unsafe",
+            ],
+            "exact_measured_frame0_selected": True,
+            "teacher_and_physical_birth_differ": False,
+            "changed_joint_mask": [False] * 31,
+            "changed_joint_indices": [],
+            "changed_joint_names": [],
+            "physical_minus_teacher_joint_pos_rad": [0.0] * 31,
+            "physical_minus_teacher_root_pos_m": [0.0] * 3,
+            "physical_minus_teacher_root_rotation_vector_rad": [0.0] * 3,
+            "teacher_root_quat_wxyz": list(root_quat),
+            "physical_root_quat_wxyz": list(root_quat),
+            "stored_physical_root_quat_wxyz": list(root_quat),
+            "mjcf_audit_root_quat_wxyz": list(audit_quat),
+            "frame0_handoff": dict(handoff),
+        },
+        "physical_birth_static_evidence": {
+            "authority": "fresh_current_exact_mjcf_whole_body_lexicographic_search",
+            "selected_hold_witness_authority": (
+                "new_backend_new_solver_final_state_cache_miss"
+            ),
+            "exact_contact_lp_reused": False,
+            "fresh_direct_robust_gate_passed": True,
+            "all_safety_slacks_meet_original_and_locked_gate": True,
+            "geometry_passed": True,
+            "ground_dynamics_passed": True,
+            "stored_endpoint_state_sha256": raw_sha,
+            "mjcf_audit_state_sha256": audit_sha,
+            "stored_root_quat_wxyz": list(root_quat),
+            "mjcf_audit_root_quat_wxyz": list(audit_quat),
+            "stored_root_quaternion_norm": root_norm,
+            "direct_frame0_robust_minimum_slacks": robust,
+            "direct_frame0_robust_gate_sha256": launcher.canonical_sha256(robust),
+            "safety_slacks": dict(robust),
+            "evaluator_evidence": {
+                "lp_feasible": True,
+                "exact_state_lp_cache_hit": False,
+                "evaluated_state_sha256": audit_sha,
+                "required_minimum_normal_force_per_contact_n": 0.1,
+                "required_minimum_normal_force_per_foot_n": 1.0,
+            },
+            "independent_measured_racket_frame0": {
+                "authority": "independent_schema_v4_measured_racket_channel",
+                "motion_sha256": motion_sha,
+                "frame_index": 0,
+            },
+            "frame0_handoff": dict(handoff),
+        },
+    }
+
+
+def _prelong_marker_lines(update: int) -> list[str]:
+    invalid_samples = 7 if update == 0 else 0
+    counters = {name: 0 for name in launcher._S.required_prelong_counter_names()}
+    counters.update({
+        launcher._S.TASK_INVALID_OBSERVED_COUNTER: invalid_samples,
+        launcher._S.TASK_INVALID_REWARD_SUM_COUNTER: 0.0,
+        launcher._S.TASK_INVALID_REWARD_ELIGIBLE_COUNTER: 0,
+        launcher._S.READY_MIMIC_REWARD_SUM_COUNTER: 0.0,
+        launcher._S.READY_MIMIC_ELIGIBLE_COUNTER: invalid_samples,
+        launcher._S.SWING_MIMIC_REWARD_SUM_COUNTER: 3.0,
+        launcher._S.SWING_MIMIC_ELIGIBLE_COUNTER: 98304 - invalid_samples,
+        launcher._S.EXACT_STRIKE_TIMING_COUNTER: 9,
+        launcher._S.ELIGIBLE_CLOSED_SWING_COUNTER: 9,
+        launcher._S.ACTUAL_CONTACT_COUNTER: 0,
+        launcher._S.ACHIEVED_FLIGHT_COUNTER: 0,
+        launcher._S.UNKNOWN_ATTRIBUTION_COUNTER: 0,
+    })
+    group_values = {
+        "balance": (4.0, 98304),
+        "mimic": (3.0, 98304),
+        "strike": (0.0, 9),
+        "target": (1.0, 1),
+        "outcome": (0.0, 0),
+    }
+    for group, (income, denominator) in group_values.items():
+        counters[launcher._S.reward_group_sum_counter(group)] = income
+        counters[launcher._S.reward_group_eligible_counter(group)] = denominator
+    economy = {
+        "event": "hope_action_ball_reward_ppo_economy_update",
+        "schema_version": 1,
+        "status": "PASS",
+        "ppo_update": update,
+        "gate": {
+            "num_envs": 4096,
+            "steps_per_env_per_update": 24,
+            "rollout_samples_per_update": 98304,
+        },
+        "reward": {
+            "explained_variance": 0.1,
+            "per_term_weighted_dt_sum": {"motion": 1.0, "task": 0.0},
+            "per_term_eligible_denominator": {
+                "motion": 98304,
+                "task": 98304,
+            },
+        },
+        "ppo": {
+            "learning_rate": 1.0e-4,
+            "approx_kl": 0.01,
+            "clip_fraction": 0.2,
+        },
+        "gradient": {"pre_clip_total_grad_norm": 0.5},
+        "policy": {
+            "policy_std_min": 0.01,
+            "policy_std_mean": 0.02,
+            "policy_std_max": 0.03,
+        },
+    }
+    groups = {
+        "event": "hope_effective_reward_activation_by_action_update",
+        "schema_version": 2,
+        "ppo_update": update,
+        "actions": [
+            {
+                "action_id": launcher.TEACHER_ID,
+                "reward_groups": [
+                    {
+                        "group": "motion",
+                        "eligibility": (
+                            "reward_manager_evaluated_active_group_terms"
+                        ),
+                        "eligible_sample_count": 98304,
+                        "weighted_sum": 4.0,
+                    },
+                    {
+                        "group": "task",
+                        "eligibility": (
+                            "reward_manager_evaluated_active_group_terms"
+                        ),
+                        "eligible_sample_count": 98304,
+                        "weighted_sum": 0.0,
+                    },
+                ],
+            }
+        ],
+    }
+    return [
+        launcher._P.ECONOMY_PREFIX
+        + json.dumps(economy, sort_keys=True, separators=(",", ":")),
+        launcher._P.GROUP_PREFIX
+        + json.dumps(groups, sort_keys=True, separators=(",", ":")),
+        launcher._S.prelong_semantics_marker_line(
+            ppo_update=update,
+            counters=counters,
+            profile=launcher._S.PRELONG_PROFILE_A211,
+        ),
+    ]
+
+
+def _rewrite_prelong_marker(log_path: Path, update: int, mutate, *, allow_nan=False):
+    prefix = launcher._S.PRELONG_SEMANTICS_MARKER_PREFIX
+    rewritten = []
+    matched = 0
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(prefix):
+            row = json.loads(line[len(prefix) :])
+            if row["ppo_update"] == update:
+                mutate(row)
+                line = prefix + json.dumps(
+                    row,
+                    allow_nan=allow_nan,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                matched += 1
+        rewritten.append(line)
+    assert matched == 1
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+
 def _terminal_acceptance_fixture():
+    gate = {
+        "schema_version": 1,
+        "kind": "action_ball_4096x5_prelong_terminal_gate",
+        "status": "PASS",
+        "diagnostic_unauthorized": True,
+        "num_envs": 4096,
+        "ppo_updates": 5,
+    }
+    prelong_gate = _sealed(
+        {
+            "schema_version": 1,
+            "kind": "action_ball_a211_4096x5_prelong_gate_binding_v1",
+            "diagnostic_unauthorized": True,
+            "launch_claim_sha256": "1" * 64,
+            "run_log_sha256": "2" * 64,
+            "finite_model_sha256": "3" * 64,
+            "semantic_marker_prefix": (
+                launcher._S.PRELONG_SEMANTICS_MARKER_PREFIX
+            ),
+            "semantic_update_count": 5,
+            "gate": gate,
+            "gate_sha256": launcher.canonical_sha256(gate),
+        }
+    )
     return _sealed(
         {
             "schema_version": 1,
@@ -97,10 +385,26 @@ def _terminal_acceptance_fixture():
                 "observed_ppo_updates": 5,
                 "actual_hard_edge_event_count": 0,
                 "actual_hard_terminal_count": 0,
-                "hard_termination_count": 0,
+                "joint_qdes_forbidden_terminal_count": 0,
+                "joint_actual_forbidden_terminal_count": 0,
+                "strict_hard_termination_count": 0,
                 "table_contact_count": 0,
                 "nonfinite_count": 0,
+                "base_fell_tilt_terminal_count": 0,
+                "base_too_low_terminal_count": 0,
+                "physical_fall_by_reason_phase": {
+                    reason: {phase: 0 for phase in launcher.PHYSICAL_FALL_PHASES}
+                    for reason in launcher.PHYSICAL_FALL_REASONS
+                },
+                "table_contact_by_phase": {
+                    phase: 0 for phase in launcher.PHYSICAL_FALL_PHASES
+                },
+                "task_wait_started_by_update": [12] * 5,
+                "task_wait_started_count": 60,
+                "task_reveal_reached_by_update": [10] * 5,
+                "task_reveal_reached_count": 50,
             },
+            "prelong_gate": prelong_gate,
         }
     )
 
@@ -170,112 +474,55 @@ def _required_effective_terms():
 
 
 def _lineage(checkout: Path) -> dict:
+    repo = Path(__file__).resolve().parents[3]
     pins = {}
-    for key in (
-        "bundle",
-        "immutable_tape",
-        "action_manifest",
-        "dynamic_ready_artifact",
-        "dynamic_ready_nominal_receipt",
-    ):
-        raw = ("a211-%s\n" % key).encode()
-        path = checkout / (key + ".bin")
-        path.write_bytes(raw)
-        pins[key] = {"path": path.name, "sha256": hashlib.sha256(raw).hexdigest()}
-    root_pos = np.asarray(
-        [
-            [[-0.125, 0.375, 0.8125], [1.0, 2.0, 3.0]],
-            [[9.0, 8.0, 7.0], [6.0, 5.0, 4.0]],
-        ],
-        dtype=np.float32,
-    )
-    root_quat = np.asarray(
-        [
-            [[0.5, 0.5, -0.5, 0.5], [1.0, 0.0, 0.0, 0.0]],
-            [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
-        ],
-        dtype=np.float32,
-    )
-    joint_pos = (
-        np.arange(62, dtype=np.float32).reshape(2, 31) / np.float32(17.0)
-    )
-    motion_path = checkout / "motion.npz"
-    np.savez(
-        motion_path,
-        body_names=np.asarray(["pelvis_link", "torso_link"]),
-        body_pos_w=root_pos,
-        body_quat_w=root_quat,
-        joint_pos=joint_pos,
-    )
-    pins["motion"] = {
-        "path": motion_path.name,
-        "sha256": hashlib.sha256(motion_path.read_bytes()).hexdigest(),
+    sources = {
+        "motion": repo / "assets/motions/chingmu73_measured_v4_20260803/hope_Take_061_unit04_BH.npz",
+        "action_manifest": repo / "configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/take_061_unit04_bh.full.manifest.v3.7d2139028427.json",
+        "dynamic_ready_artifact": repo / "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json",
+        "dynamic_ready_nominal_receipt": repo / "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.robust20n.nominal_hold.v1.json",
+        "teacher_frame0_artifact": repo / "configs/action_ball_n1_measured_20260803/a211_frame0_exact_20260803/take_061_unit04_bh.frame0_exact.v1.json",
     }
-    frame0_artifact = _sealed(
+    for key, source in sources.items():
+        destination = checkout / source.name
+        destination.write_bytes(source.read_bytes())
+        pins[key] = {
+            "path": destination.name,
+            "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
+        }
+    source_receipt = json.loads(
+        (
+            repo
+            / "configs/action_ball_n1_measured_20260803/"
+            "fresh_tape_seed0_20260803_take061_robust20n_r4_splitready/"
+            "current_lm.target.task_receipt.v5.f64f52137ad8.json"
+        ).read_text(encoding="utf-8")
+    )
+    source_receipt.pop("canonical_sha256")
+    source_receipt.update(
         {
-            "schema_version": 1,
-            "kind": launcher.FRAME0_EXACT_ARTIFACT_KIND,
-            "diagnostic_unauthorized": True,
-            "source_kind": launcher.FRAME0_EXACT_SOURCE_KIND,
-            "action_id": "take_061_unit04_bh",
-            "motion_sha256": pins["motion"]["sha256"],
-            "task_close_ticks": 200,
-            "policy_dt_s": launcher.POLICY_DT_S,
-            "wait_schedule_canonical_sha256": launcher.WAIT_SCHEDULE[
-                "canonical_sha256"
-            ],
-            "frame0": {
-                "root_pos_w_m": root_pos[0, 0].tolist(),
-                "root_quat_wxyz": root_quat[0, 0].tolist(),
-                "root_lin_vel_w_mps": [0.0, 0.0, 0.0],
-                "root_ang_vel_w_radps": [0.0, 0.0, 0.0],
-                "joint_pos_rad": joint_pos[0].tolist(),
-                "joint_vel_radps": [0.0] * 31,
-            },
+            "sampling_stratum": "center",
+            "birth_sampling_stratum": "center",
+            "frontier_arm": None,
+            "birth_frontier_arm": None,
+            "time_to_contact_tick": 91,
+            "time_to_contact_s": 1.82,
+            "pre_swing_wait_s": 1.82 - source_receipt["scaled_t_hit_s"],
+            "manifest_sha256": pins["action_manifest"]["sha256"],
         }
     )
-    frame0_artifact_path = checkout / "frame0_exact_artifact.json"
-    frame0_artifact_sha = _write(frame0_artifact_path, frame0_artifact)
-    live = _live_safety("take_061_unit04_bh", pins["motion"]["sha256"], 200)
-    live_file_sha = hashlib.sha256(launcher._B._canonical_bytes(live)).hexdigest()
-    frame0_receipt = _sealed(
-        {
-            "schema_version": 1,
-            "kind": launcher.FRAME0_EXACT_RECEIPT_KIND,
-            "diagnostic_unauthorized": True,
-            "source_kind": launcher.FRAME0_EXACT_SOURCE_KIND,
-            "verdict": "PASS",
-            "action_id": "take_061_unit04_bh",
-            "motion_sha256": pins["motion"]["sha256"],
-            "artifact_file_sha256": frame0_artifact_sha,
-            "artifact_content_sha256": frame0_artifact["content_sha256"],
-            "artifact_source_commit": "a" * 40,
-            "probe_source_commit": "b" * 40,
-            "plant_template_file_sha256": "1" * 64,
-            "plant_template_content_sha256": "2" * 64,
-            "probe_input_file_sha256": "3" * 64,
-            "probe_input_content_sha256": "4" * 64,
-            "live_safety_evidence_file_sha256": live_file_sha,
-            "live_safety_evidence_content_sha256": live["content_sha256"],
-            "live_safety_evidence": live,
-            "task_close_ticks": 200,
-            "policy_dt_s": launcher.POLICY_DT_S,
-            "wait_schedule_canonical_sha256": launcher.WAIT_SCHEDULE[
-                "canonical_sha256"
-            ],
-        }
-    )
-    frame0_receipt_path = checkout / "frame0_exact_receipt.json"
-    pins["frame0_exact_artifact"] = {
-        "path": frame0_artifact_path.name,
-        "sha256": frame0_artifact_sha,
+    source_receipt["canonical_sha256"] = launcher.canonical_sha256(source_receipt)
+    receipt_path = checkout / "initial_center_a.task_receipt.v5.json"
+    receipt_sha = _write(receipt_path, source_receipt)
+    pins["initial_center_task_receipt"] = {
+        "path": receipt_path.name,
+        "sha256": receipt_sha,
     }
-    pins["frame0_exact_receipt"] = {
-        "path": frame0_receipt_path.name,
-        "sha256": _write(frame0_receipt_path, frame0_receipt),
-    }
+    assert pins["dynamic_ready_artifact"]["sha256"] == launcher.SPLIT_READY_DYNAMIC_ARTIFACT_SHA256
+    assert pins["dynamic_ready_nominal_receipt"]["sha256"] == launcher.SPLIT_READY_NOMINAL_HOLD_SHA256
+    assert pins["teacher_frame0_artifact"]["sha256"] == launcher.SPLIT_READY_TEACHER_FRAME0_ARTIFACT_SHA256
     return {
-        "schema_version": 2,
+        "schema_version": 5,
         "kind": launcher.LINEAGE_KIND,
         "actor_contract": launcher.ACTOR_CONTRACT,
         "actor_width": 211,
@@ -286,10 +533,12 @@ def _lineage(checkout: Path) -> dict:
         "task_profile": launcher.TASK_PROFILE_ID,
         "gym_task": launcher.GYM_TASK_ID,
         "target_semantics": launcher.TARGET_SEMANTICS,
+        "runtime_target_contract": launcher._runtime_target_contract(),
         "curriculum_scope": launcher._curriculum_scope_contract(),
-        "action_id": "take_061_unit04_bh",
-        "teacher_id": "Take_061_unit04_BH",
+        "action_id": launcher.ACTION_ID,
+        "teacher_id": launcher.TEACHER_ID,
         "seed": 0,
+        "dr_l0_manifest": dict(_DR_L0_BINDING),
         **pins,
     }
 
@@ -339,7 +588,11 @@ def _result(
 def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
     arm = launcher._arm_contract(arm_id)
     planned = launcher._planned_materialization(
-        arm=arm, lineage={"lineage_sha256": lineage_sha}
+        arm=arm,
+        lineage={
+            "lineage_sha256": lineage_sha,
+            "dr_l0_manifest": dict(_DR_L0_BINDING),
+        },
     )
     reward_artifact = tmp_path / (arm_id + ".effective_reward.json")
     reward_artifact.write_text("fixture\n", encoding="utf-8")
@@ -484,10 +737,20 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
         probe_result,
         scale_result,
     ) = generated
-    root = tmp_path / launcher.EXPERIMENT_NAME
-    root.mkdir()
+    root = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / launcher.EXPERIMENT_NAME
+    )
+    root.mkdir(parents=True)
     namespace = root / (arm_id + "-" + stage)
     budget = launcher.BUDGETS[stage]
+    four_grid_receipt_path = tmp_path / (arm_id + ".four-grid-scale4096.json")
+    four_grid_receipt_sha = _write(
+        four_grid_receipt_path, {"fixture": "four-grid-scale4096"}
+    )
     spec = {
         "schema_version": launcher.SCHEMA_VERSION,
         "kind": launcher.SPEC_KIND,
@@ -517,6 +780,14 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
             if stage == "long4096"
             else None
         ),
+        "four_grid_scale4096_receipt": (
+            {
+                "path": str(four_grid_receipt_path),
+                "sha256": four_grid_receipt_sha,
+            }
+            if stage == "long4096"
+            else None
+        ),
         "stage": stage,
         "num_envs": budget[0],
         "max_iterations": budget[1],
@@ -539,6 +810,28 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
     return spec_path, spec, lineage
 
 
+def _rewrite_physical_ready_hold(
+    spec_path: Path,
+    spec: dict,
+    lineage: dict,
+    mutate,
+) -> None:
+    """Rewrite the tracked hold and enclosing pins for semantic negatives."""
+
+    checkout = Path(spec["source"]["checkout"])
+    receipt_path = checkout / lineage["dynamic_ready_nominal_receipt"]["path"]
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt.pop("content_sha256")
+    mutate(receipt)
+    receipt["content_sha256"] = launcher.canonical_sha256(receipt)
+    lineage["dynamic_ready_nominal_receipt"]["sha256"] = _write(
+        receipt_path, receipt
+    )
+    lineage_path = checkout / spec["lineage"]["path"]
+    spec["lineage"]["sha256"] = _write(lineage_path, lineage)
+    _write(spec_path, spec)
+
+
 def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         launcher._B,
@@ -546,6 +839,11 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         lambda checkout, commit: {"checkout": str(checkout), "commit_sha": commit, "clean": True},
     )
     monkeypatch.setattr(launcher, "_runtime_sources", lambda checkout, commit: {})
+    monkeypatch.setattr(
+        launcher,
+        "_dr_l0_manifest_binding",
+        lambda checkout, commit, *, family, task_profile: dict(_DR_L0_BINDING),
+    )
     monkeypatch.setattr(
         launcher._B, "_validate_runtime_asset_environment", lambda: {"kind": "test_runtime_assets"}
     )
@@ -556,15 +854,11 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         return dict(pin), path
 
     monkeypatch.setattr(launcher._B, "_verify_tracked_file", verify)
-    monkeypatch.setattr(
-        launcher, "_verify_frame0_artifact_source_commit", lambda *_args: None
-    )
-    monkeypatch.setattr(
-        launcher, "_verify_frame0_probe_source_commit", lambda *_args: None
-    )
-    monkeypatch.setattr(
-        launcher, "_verify_commit_ancestor", lambda *_args, **_kwargs: None
-    )
+    # [已删除 2026-08-05 安全门精简] 这里曾 stub 掉 _verify_frame0_artifact_source_commit /
+    # _verify_frame0_probe_source_commit / _verify_commit_ancestor 三个 git 子进程校验。
+    # 它们唯一的调用者是已退役的 _validate_retired_exact_frame0_lineage, 现在全仓零调用点,
+    # 计划路径根本走不到, stub 已经是空转 —— 留着反而会在源函数被删时把上百个用例
+    # 一起 AttributeError 打挂。原 stub 见 git 历史。
 
     def runtime_policy(*, path, checkout, lineage, arm):
         return _sealed(
@@ -591,6 +885,17 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         launcher,
         "_audit_scale4096_terminal",
         lambda **_kwargs: copy.deepcopy(_terminal_acceptance_fixture()),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_validate_four_grid_prelong_receipt",
+        lambda value, *, checkout: {
+            "artifact": copy.deepcopy(value),
+            "schema_version": 1,
+            "kind": launcher._Q.KIND,
+            "status": "PASS",
+            "content_sha256": "f" * 64,
+        },
     )
 
 
@@ -692,6 +997,19 @@ def _raw_oracle_fixture(
         "critic_obs_normalizer_identity": launcher.CRITIC_NORMALIZER_IDENTITY,
         "fresh_normalizers_required": True,
         "symmetric_critic_fallback_forbidden": True,
+        "action_ball_dr_l0": copy.deepcopy(_DR_L0_PAYLOAD),
+        "action_ball_training": {
+            "runtime": {
+                "target_provider": {
+                    "source": "online_solver",
+                    "recipe": "current_lm",
+                    "validity_mask": [True, True, True],
+                    "target_observation_noise": False,
+                    "immutable_tape": None,
+                    "exact_question_answer_reuse": {"enabled": True},
+                }
+            }
+        },
         "effective_reward_recipe": hard_reward,
         "action_ball_ppo_runner_recipe": {
             "sha256": policy_materialization["runtime_policy_recipe_sha256"],
@@ -732,7 +1050,7 @@ def _raw_oracle_fixture(
     hard_sha = _write(hard_path, hard_document)
     claim["runtime_sources"] = {
         "training entrypoint": {"sha256": "6" * 64},
-        "A211 task profile": {"sha256": "7" * 64},
+        "A211 DR-L0 task profile": {"sha256": "7" * 64},
     }
     lineage = claim["bundle"]["lineage"]
     bindings = {
@@ -755,11 +1073,9 @@ def _raw_oracle_fixture(
         ]["sha256"],
         "manifest_sha256": lineage["action_manifest"]["sha256"],
         "motion_sha256": lineage["motion"]["sha256"],
-        "tape_file_sha256": lineage["immutable_tape"]["sha256"],
-        "tape_canonical_sha256": "8" * 64,
-        "tape_base_question_sha256": "9" * 64,
-        "tape_target_producer_sha256": "a" * 64,
-        "tape_target_column_sha256": "b" * 64,
+        "target_provider_contract_sha256": launcher.canonical_sha256(
+            hard_document["action_ball_training"]["runtime"]["target_provider"]
+        ),
     }
     oracle_path = tmp_path / "raw-oracle32.json"
     _write(
@@ -798,6 +1114,14 @@ def _raw_oracle_fixture(
         def validate_action_ball_training_authorization(document):
             return True
 
+        @staticmethod
+        def action_ball_dr_l0_contract_payload():
+            return copy.deepcopy(_DR_L0_PAYLOAD)
+
+        @staticmethod
+        def action_ball_dr_l0_contract_sha256():
+            return _DR_L0_CONTRACT_SHA256
+
     monkeypatch.setattr(
         launcher._OLD,
         "_load_training_contract_module",
@@ -823,20 +1147,110 @@ def _flatten_strings(value):
         yield value
 
 
-def test_four_code_owned_arms_are_exact():
+def test_two_formal_a211_grid_cells_are_exact():
+    # 2026-08-05 层级对齐(exp §5.6 第 3/7 条):death -300.0 -> -10.0,
+    # init_noise_std 0.02 -> 0.1。两者都由 four-grid manifest 定,本表只是镜像。
     expected = {
-        launcher.ARM_IDS[0]: (-30.0, -0.5, "metrics_only", "fixed", 1e-4),
-        launcher.ARM_IDS[1]: (-300.0, -5.0, "metrics_only", "fixed", 1e-4),
-        launcher.ARM_IDS[2]: (-30.0, -0.5, "phase_gated", "fixed", 1e-4),
-        launcher.ARM_IDS[3]: (-30.0, -0.5, "phase_gated", "adaptive", 1e-3),
+        launcher.ARM_IDS[0]: (-10.0, -5.0, "metrics_only", "fixed", 1e-4),
+        launcher.ARM_IDS[1]: (-10.0, -5.0, "metrics_only", "adaptive", 1e-3),
     }
     assert tuple(launcher.ARMS) == launcher.ARM_IDS
     for arm_id, values in expected.items():
         arm = launcher._arm_contract(arm_id)
         assert (arm["soft_weights"]["death_penalty"], arm["soft_weights"]["qdes_limit"], arm["reference_guard_mode"], arm["ppo"]["schedule"], arm["ppo"]["learning_rate"]) == values
         assert arm["actor_hidden_dims"] == arm["critic_hidden_dims"] == [512, 256, 128]
-        assert arm["init_noise_std"] == 0.02
+        assert arm["init_noise_std"] == 0.1
         assert arm["entropy_coef"] == 0.01
+    assert {
+        (arm["ppo"]["schedule"], arm["ppo"]["learning_rate"])
+        for arm in launcher.ARMS.values()
+    } == {
+        ("fixed", 1.0e-4),
+        ("adaptive", 1.0e-3),
+    }
+    assert all(
+        arm["reference_guard_mode"] == "metrics_only"
+        and set(arm["soft_weights"].values()) == {-10.0, -5.0}
+        for arm in launcher.ARMS.values()
+    )
+    manifest = launcher._isaac_four_grid_manifest()
+    assert [
+        row["cell_id"]
+        for row in manifest["cells"]
+        if row["task_family"] == "A211"
+    ] == list(launcher.ARM_IDS)
+    for arm_id in launcher.ARM_IDS:
+        arm = launcher._arm_contract(arm_id)
+        cell = launcher._four_grid_cell(arm_id, task_family="A211")
+        assert arm["four_grid_cell_id"] == arm_id
+        assert arm["isaac_four_grid_manifest_sha256"] == manifest["content_sha256"]
+        assert arm["ppo"] == cell["ppo"]
+        assert arm["ppo_adaptation_axis"] == cell["ppo_adaptation_axis"]
+        assert arm["contact_sigma_adaptation"] is False
+
+
+@pytest.mark.parametrize(
+    "retired_arm_id",
+    (
+        "L0-corrected-metrics-fixed-lr1e4",
+        "L1-corrected-metrics-fixed-lr1e3",
+        "L2-corrected-metrics-adaptive-lr1e4",
+        "L3-corrected-metrics-adaptive-lr1e3",
+    ),
+)
+def test_historical_a211_arm_ids_are_not_formal_grid_selectors(retired_arm_id):
+    with pytest.raises(launcher.LaunchRefused, match="two formal A211 grid cells"):
+        launcher._arm_contract(retired_arm_id)
+
+
+def test_required_a211_task_reward_contract_is_complete_and_exact():
+    expected_stds = {
+        "racket_position_coarse": 0.20,
+        "racket_velocity_coarse": 1.50,
+        "racket_normal_coarse": 1.0,
+        "racket_position": 0.50,
+        "racket_velocity": 3.0,
+        "racket_normal": 2.10,
+        "racket_position_precision": 0.075,
+        "racket_velocity_precision": 0.50,
+        "racket_normal_precision": 0.262,
+    }
+    required_task_terms = set(expected_stds) | {
+        "strike_capture_bonus",
+        "virtual_pass_net",
+        "virtual_landing_dense",
+        "virtual_landing",
+    }
+    assert required_task_terms.issubset(launcher.REQUIRED_EFFECTIVE_TERMS)
+    assert {
+        name: launcher.REQUIRED_EFFECTIVE_TERMS[name]["params"]["std"]
+        for name in expected_stds
+    } == expected_stds
+    assert all(
+        launcher.REQUIRED_EFFECTIVE_TERMS[name]["callable"].startswith(
+            "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
+        )
+        for name in required_task_terms
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value,match",
+    (
+        ("callable", "pkg.drifted", "callable differs"),
+        ("weight", 0.0, "not positive"),
+        ("std", 0.21, "gate identity differs"),
+    ),
+)
+def test_required_a211_task_reward_contract_fails_closed(field, value, match):
+    terms = _required_effective_terms()
+    term = next(row for row in terms if row["name"] == "racket_position_coarse")
+    if field == "std":
+        term["params"]["std"] = value
+    else:
+        term[field] = value
+    with pytest.raises(launcher.LaunchRefused, match=match):
+        launcher._require_effective_learnability_terms(terms)
 
 
 def test_a211_v2_actor_layout_binds_localizer_and_body_gyro_exact_slices():
@@ -884,34 +1298,328 @@ def test_a211_v2_lineage_rejects_same_width_pre_imu_layout(tmp_path, monkeypatch
         launcher.build_plan(spec_path)
 
 
-@pytest.mark.parametrize(
-    "mutation",
-    (
-        lambda live: live.__setitem__("completed_policy_steps", 199),
-        lambda live: live["joint_safety_telemetry"].__setitem__(
-            "current_actual_hard_edge_joint_count", 1
-        ),
-    ),
-)
-def test_frame0_receipt_rejects_resealed_live_safety_tamper(tmp_path, mutation):
-    lineage = _lineage(tmp_path)
-    artifact = json.loads(
-        (tmp_path / lineage["frame0_exact_artifact"]["path"]).read_text()
+def test_a211_safe_wait_uses_split_ready_then_public_teacher_bridge(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
     )
-    receipt_path = tmp_path / lineage["frame0_exact_receipt"]["path"]
+    checkout = Path(_spec["source"]["checkout"])
+    physical = json.loads(
+        (checkout / lineage["dynamic_ready_artifact"]["path"]).read_text()
+    )["physical_ready"]
+    frame0 = json.loads(
+        (checkout / lineage["teacher_frame0_artifact"]["path"]).read_text()
+    )["frame0"]
+    assert physical["joint_vel_radps"] == [0.0] * 31
+    assert physical["joint_pos_rad"] != frame0["joint_pos_rad"]
+    payload = launcher.build_plan(spec_path)["canonical_payload"]
+    plan_lineage = payload["bundle"]["lineage"]
+    assert "frame0_exact_receipt" not in plan_lineage
+    authority = plan_lineage["split_ready_reset_wait_authority"]
+    unsigned = dict(authority)
+    claim_sha256 = unsigned.pop("claim_sha256")
+    assert authority["kind"] == launcher.SPLIT_READY_RESET_WAIT_GATE_KIND
+    assert claim_sha256 == launcher.canonical_sha256(unsigned)
+    assert authority["hidden_wait_required_policy_steps"] == 25
+    assert authority["observed_policy_steps"] == 60
+    assert authority["observed_physics_steps"] == 240
+    assert authority["time_to_teacher_start_at_reveal_s"] == pytest.approx(
+        0.6923759904781779
+    )
+    assert authority["initial_center_timing_authority"]["timing_mode"] == (
+        "a_online_solver"
+    )
+    assert authority["bridge_learning_signal"] == "dense_mimic_after_task_reveal"
+    assert authority["passive_hold_after_reveal_required"] is False
+
+
+def test_initial_center_timing_rejects_old_interior_tick92_receipt(tmp_path):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    lineage = _lineage(checkout)
+    receipt_path = checkout / lineage["initial_center_task_receipt"]["path"]
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt.pop("canonical_sha256")
+    receipt.update(
+        {
+            "sampling_stratum": "interior",
+            "birth_sampling_stratum": "interior",
+            "time_to_contact_tick": 92,
+            "time_to_contact_s": 1.84,
+            "pre_swing_wait_s": 1.84 - receipt["scaled_t_hit_s"],
+        }
+    )
+    receipt["canonical_sha256"] = launcher.canonical_sha256(receipt)
+    manifest = json.loads(
+        (checkout / lineage["action_manifest"]["path"]).read_text(encoding="utf-8")
+    )
+    with pytest.raises(launcher.LaunchRefused, match="literal all-zero center"):
+        launcher._initial_center_timing_authority(
+            receipt=receipt,
+            receipt_pin=lineage["initial_center_task_receipt"],
+            action_manifest=manifest,
+            action_manifest_pin=lineage["action_manifest"],
+            motion_sha256=lineage["motion"]["sha256"],
+            family="A",
+        )
+
+
+def test_a211_split_ready_rejects_equality_or_nonzero_reset_velocity(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    _spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    checkout = Path(spec["source"]["checkout"])
+    dynamic_path = checkout / lineage["dynamic_ready_artifact"]["path"]
+    dynamic = json.loads(dynamic_path.read_text(encoding="utf-8"))
+    nominal = json.loads(
+        (checkout / lineage["dynamic_ready_nominal_receipt"]["path"]).read_text()
+    )
+    frame0 = json.loads(
+        (checkout / lineage["teacher_frame0_artifact"]["path"]).read_text()
+    )["frame0"]
+    initial_center = json.loads(
+        (checkout / lineage["initial_center_task_receipt"]["path"]).read_text()
+    )
+    manifest = json.loads(
+        (checkout / lineage["action_manifest"]["path"]).read_text()
+    )
+    timing = launcher._initial_center_timing_authority(
+        receipt=initial_center,
+        receipt_pin=lineage["initial_center_task_receipt"],
+        action_manifest=manifest,
+        action_manifest_pin=lineage["action_manifest"],
+        motion_sha256=lineage["motion"]["sha256"],
+        family="A",
+    )
+    kwargs = {
+        "nominal": nominal,
+        "dynamic_pin": lineage["dynamic_ready_artifact"],
+        "nominal_pin": lineage["dynamic_ready_nominal_receipt"],
+        "teacher_frame0": frame0,
+        "motion_sha256": lineage["motion"]["sha256"],
+        "initial_center_timing_authority": timing,
+    }
+    assert launcher._split_ready_reset_wait_semantics(
+        dynamic=dynamic, **kwargs
+    )["observed_policy_steps"] == 60
+    equal = copy.deepcopy(dynamic)
+    equal["physical_ready"]["joint_pos_rad"] = list(frame0["joint_pos_rad"])
+    equal["physical_ready"]["root_pos_w_m"] = list(frame0["root_pos_w_m"])
+    equal["physical_ready"]["root_quat_wxyz"] = list(frame0["root_quat_wxyz"])
+    equal.pop("content_sha256")
+    equal["content_sha256"] = launcher.canonical_sha256(equal)
+    with pytest.raises(launcher.LaunchRefused, match="separated teacher"):
+        launcher._split_ready_reset_wait_semantics(dynamic=equal, **kwargs)
+    moving = copy.deepcopy(dynamic)
+    moving["physical_ready"]["joint_vel_radps"][0] = 1.0e-6
+    moving.pop("content_sha256")
+    moving["content_sha256"] = launcher.canonical_sha256(moving)
+    with pytest.raises(launcher.LaunchRefused, match="separated teacher"):
+        launcher._split_ready_reset_wait_semantics(dynamic=moving, **kwargs)
+
+
+def test_a211_prelong_exec_environment_is_scale_only_and_recipe_bound():
+    reward_sha = "a" * 64
+    expected = {
+        launcher.REWARD_PPO_ECONOMY_ENABLE_ENV: "1",
+        launcher.PRELONG_SEMANTICS_ENABLE_ENV: "1",
+        launcher.PRELONG_REWARD_RECIPE_SHA_ENV: reward_sha,
+    }
+    assert launcher._prelong_semantics_exec_environment(
+        "scale4096", reward_sha
+    ) == expected
+    for stage in launcher.BUDGETS:
+        if stage != "scale4096":
+            assert launcher._prelong_semantics_exec_environment(
+                stage, None
+            ) == {}
+    with pytest.raises(launcher.LaunchRefused):
+        launcher._prelong_semantics_exec_environment("scale4096", True)
+
+
+def test_a211_update_profile_switch_is_exact_claim_bound_and_non_speed(
+    tmp_path, monkeypatch
+):
+    assert launcher._update_profile_exec_environment({}) == {}
+    assert launcher._update_profile_exec_environment(
+        {launcher.UPDATE_PROFILE_ENV: "0"}
+    ) == {launcher.UPDATE_PROFILE_ENV: "0"}
+    assert launcher._update_profile_exec_environment(
+        {launcher.UPDATE_PROFILE_ENV: "1"}
+    ) == {launcher.UPDATE_PROFILE_ENV: "1"}
+    for invalid in ("", "true", "2"):
+        with pytest.raises(launcher.LaunchRefused, match="exactly 0 or 1"):
+            launcher._update_profile_exec_environment(
+                {launcher.UPDATE_PROFILE_ENV: invalid}
+            )
+
+    _patch_plan_environment(monkeypatch)
+    monkeypatch.setenv(launcher.UPDATE_PROFILE_ENV, "1")
+    _spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    normalized = launcher._validate_spec(spec)
+    lineage = {
+        **lineage,
+        "teacher_frame0_artifact_content_sha256": "1" * 64,
+        "split_ready_reset_wait_authority": {"claim_sha256": "2" * 64},
+    }
+    profile = launcher._output_contract(normalized, lineage)["update_profile"]
+    assert profile["forwarded_value"] == "1"
+    assert profile["mode"] == "profile_on_attribution_only"
+    assert profile["speed_evidence_eligible"] is False
+    assert profile["gpu_kernel_attribution_claimed"] is False
+    _path, colocated, colocated_lineage = _case(
+        tmp_path / "colocated-profile",
+        arm_id=launcher.ARM_IDS[0],
+        stage="scale4096",
+        allow_colocation=True,
+    )
+    with pytest.raises(launcher.LaunchRefused, match="exclusive GPU claim"):
+        launcher._output_contract(
+            launcher._validate_spec(colocated),
+            {
+                **colocated_lineage,
+                "teacher_frame0_artifact_content_sha256": "1" * 64,
+                "split_ready_reset_wait_authority": {"claim_sha256": "2" * 64},
+            },
+        )
+
+    monkeypatch.setenv(launcher.UPDATE_PROFILE_ENV, "0")
+    off = launcher._output_contract(normalized, lineage)["update_profile"]
+    assert off["forwarded_value"] == "0"
+    assert off["mode"] == "explicit_profiler_off"
+    assert off != profile
+
+
+def test_a211_formal_lineage_has_no_bundle_or_immutable_tape(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    payload = launcher.build_plan(spec_path)["canonical_payload"]
+    assert "bundle" not in lineage
+    assert "immutable_tape" not in lineage
+    assert payload["bundle"]["lineage"]["runtime_target_contract"] == (
+        launcher._runtime_target_contract()
+    )
+
+
+def test_a211_accepts_60_tick_hold_but_rejects_less_than_hidden_wait(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    checkout = Path(spec["source"]["checkout"])
+    receipt_path = checkout / lineage["dynamic_ready_nominal_receipt"]["path"]
     receipt = json.loads(receipt_path.read_text())
-    live = receipt["live_safety_evidence"]
-    live.pop("content_sha256")
-    mutation(live)
-    live["content_sha256"] = launcher.canonical_sha256(live)
-    receipt["live_safety_evidence_content_sha256"] = live["content_sha256"]
-    receipt["live_safety_evidence_file_sha256"] = hashlib.sha256(
-        launcher._B._canonical_bytes(live)
-    ).hexdigest()
     receipt.pop("content_sha256")
+    assert launcher.build_plan(spec_path)["canonical_payload"]["bundle"][
+        "lineage"
+    ]["split_ready_reset_wait_authority"]["observed_policy_steps"] == 60
+    receipt.update({
+        "requested_duration_s": 0.48,
+        "completed_duration_s": 0.48,
+        "completed_policy_steps": 24,
+        "completed_physics_steps": 96,
+    })
     receipt["content_sha256"] = launcher.canonical_sha256(receipt)
-    with pytest.raises(launcher.LaunchRefused, match="live safety evidence"):
-        launcher._validate_frame0_live_safety_evidence(receipt, artifact)
+    lineage["dynamic_ready_nominal_receipt"]["sha256"] = _write(
+        receipt_path, receipt
+    )
+    lineage_path = checkout / spec["lineage"]["path"]
+    spec["lineage"]["sha256"] = _write(lineage_path, lineage)
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize("missing", launcher.FULL_ACTIVE_TERMINATIONS)
+def test_a211_rejects_physical_ready_hold_missing_any_active_termination(
+    tmp_path, monkeypatch, missing
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    checkout = Path(spec["source"]["checkout"])
+    receipt_path = checkout / lineage["dynamic_ready_nominal_receipt"]["path"]
+    receipt = json.loads(receipt_path.read_text())
+    receipt.pop("content_sha256")
+    receipt["active_terminations"].remove(missing)
+    receipt["content_sha256"] = launcher.canonical_sha256(receipt)
+    lineage["dynamic_ready_nominal_receipt"]["sha256"] = _write(
+        receipt_path, receipt
+    )
+    lineage_path = checkout / spec["lineage"]["path"]
+    spec["lineage"]["sha256"] = _write(lineage_path, lineage)
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize(
+    "reference_termination", launcher.PROHIBITED_HOLD_REFERENCE_TERMINATIONS
+)
+def test_a211_rejects_physical_ready_hold_with_reference_envelope_active(
+    tmp_path, monkeypatch, reference_termination
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    _rewrite_physical_ready_hold(
+        spec_path,
+        spec,
+        lineage,
+        lambda row: row["active_terminations"].append(reference_termination),
+    )
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize("fraction", (0.0, 0.5, None))
+def test_a211_rejects_physical_ready_hold_without_full_both_feet_contact(
+    tmp_path, monkeypatch, fraction
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    _rewrite_physical_ready_hold(
+        spec_path,
+        spec,
+        lineage,
+        lambda row: row.__setitem__("both_feet_contact_fraction", fraction),
+    )
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
+
+
+def test_a211_rejects_resealed_reported_hard_gap_drift(tmp_path, monkeypatch):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, lineage = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    _rewrite_physical_ready_hold(
+        spec_path,
+        spec,
+        lineage,
+        lambda row: row["joint_safety_telemetry"].__setitem__(
+            "final_minimum_hard_gap_rad", 0.5
+        ),
+    )
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.build_plan(spec_path)
 
 
 @pytest.mark.parametrize("stage,budget", list(launcher.BUDGETS.items()))
@@ -919,9 +1627,47 @@ def test_stage_budgets_are_code_owned(stage, budget):
     assert launcher.BUDGETS[stage] == budget
 
 
+def test_formal_a211_scale_and_long_are_4096_envs():
+    assert {
+        stage: launcher.BUDGETS[stage][0]
+        for stage in ("scale4096", "long4096")
+    } == {"scale4096": 4096, "long4096": 4096}
+
+
+def test_a211_leaf_freezes_stable_plant_static_sigma_and_coarse_widths():
+    leaf = (
+        SCRIPT.parent.parent
+        / "cfg/task/HOPEPingPongActionBallA211VendorV2N1DRL0Learnability.yaml"
+    ).read_text(encoding="utf-8")
+    parent = (
+        SCRIPT.parent.parent
+        / "cfg/task/HOPEPingPongActionBallA211VendorV2N1Learnability.yaml"
+    ).read_text(encoding="utf-8")
+    assert "HOPEPingPongActionBallA211VendorV2N1Learnability@_here_" in leaf
+    for marker in (
+        "stable_ready_plant: true",
+        "startup_physics_material: false",
+        "startup_joint_default_pos: false",
+        "policy_observation_corruption: false",
+    ):
+        assert marker in leaf
+    for marker in (
+        "num_envs: 4096",
+        "adaptive_sigma: false",
+        "adaptive_sigma_monotonic: false",
+        "adaptive_sigma_normal: false",
+        "racket_position_coarse_std: 0.20",
+        "racket_velocity_coarse_std: 1.50",
+    ):
+        assert marker in parent
+    assert launcher.REWARD_MATERIALIZATION_PROFILE == (
+        "measured_vendor_v2_n1_static_v1"
+    )
+
+
 def test_plan_claim_is_a211_fresh_and_denies_retired_lineage(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
-    spec_path, _spec, _lineage_doc = _case(tmp_path, arm_id=launcher.ARM_IDS[2], stage="long4096")
+    spec_path, _spec, _lineage_doc = _case(tmp_path, arm_id=launcher.ARM_IDS[1], stage="long4096")
     payload = launcher.build_plan(spec_path)["canonical_payload"]
     assert payload["fresh_only"] is True
     assert payload["single_gpu"] is True
@@ -931,21 +1677,21 @@ def test_plan_claim_is_a211_fresh_and_denies_retired_lineage(tmp_path, monkeypat
     assert payload["vendor_v2_colocation_opt_in"] is False
     assert payload["bundle"]["lineage"]["actor_contract"] == launcher.ACTOR_CONTRACT
     assert payload["bundle"]["normalizers"] == launcher._normalizer_contract()
-    assert payload["bundle"]["curriculum_scope"] == {
-        "current_tape_scope": "diagnostic_n1_early_fixed_band_only",
-        "permanent_single_question_curriculum": False,
-        "final_curriculum_source": "pregenerated_cached_band_question_bank",
-        "reset_question_selection": "index_pregenerated_bank_row",
-        "online_inverse_solve_calls": 0,
-    }
+    assert payload["bundle"]["curriculum_scope"] == (
+        launcher._curriculum_scope_contract()
+    )
     assert payload["bundle"]["continuation_stop_gate"]["iter500_quantitative_threshold_status"] == "UNSET"
     assert payload["bundle"]["continuation_stop_gate"]["scale4096_required_for_long4096"] is True
     assert payload["materialization_inputs"]["predecessor_result"][
         "terminal_attestation"
     ]["completion"]["terminal_kind"] == "clean_completion"
-    assert payload["output_contract"]["speed_benchmark_eligible"] is True
+    assert payload["output_contract"]["speed_benchmark_eligible"] is False
+    assert payload["output_contract"]["rate_evidence_eligible"] is False
+    assert payload["output_contract"]["rate_evidence_isolation"] == (
+        "excluded_no_matched_abba_speed_stage"
+    )
     flattened = "\n".join(_flatten_strings(payload)).lower()
-    for retired in ("target_recipe", "target_validity_mask", "l194", "checkpoint"):
+    for retired in ("target_recipe", "target_validity_mask", "l194"):
         assert retired not in flattened
 
 
@@ -1021,24 +1767,40 @@ def test_retired_vocabulary_scan_treats_hashes_as_opaque():
 
 def test_training_argv_pins_a211_lineage_bootstrap_and_optimizer(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
-    spec_path, _spec, _lineage_doc = _case(tmp_path, arm_id=launcher.ARM_IDS[3], stage="probe512")
+    spec_path, _spec, _lineage_doc = _case(tmp_path, arm_id=launcher.ARM_IDS[1], stage="probe512")
     argv = launcher.build_plan(spec_path)["canonical_payload"]["training_argv"]
     for exact in (
-        "task=HOPEPingPongActionBallA211VendorV2N1Learnability",
+        "task=HOPEPingPongActionBallA211VendorV2N1DRL0Learnability",
         "task.actor_obs_contract=action_ball_a211",
         "algo.policy.actor_hidden_dims=[512,256,128]",
         "algo.policy.critic_hidden_dims=[512,256,128]",
         "algo.algorithm.schedule=adaptive",
         "algo.algorithm.learning_rate=0.001",
-        "+task.racket.reference_guard_mode=phase_gated",
+        "+task.racket.reference_guard_mode=metrics_only",
+        "task.domain_rand.stable_ready_plant=true",
+        "task.racket.adaptive_sigma=false",
+        "task.racket.adaptive_sigma_monotonic=false",
+        "task.racket.adaptive_sigma_normal=false",
+        "task.actions.control_step_action_delay_min=0",
+        "task.actions.control_step_action_delay_max=0",
         "action_ball_dynamic_ready_bootstrap=true",
     ):
         assert exact in argv
     joined = "\n".join(argv)
+    assert joined.count("task.domain_rand.stable_ready_plant=true") == 1
     assert "action_ball_policy_contract_sha256=" in joined
     assert "expected_effective_reward_recipe_sha256=" + "3" * 64 in argv
     assert "action_ball_manifest_sha256=" in joined
     assert "target_recipe" not in joined and "validity_mask" not in joined
+
+
+def test_a211_runtime_source_manifest_pins_the_a211_contract_source():
+    assert launcher.A211_CONTRACT_SOURCE.endswith(
+        "/action_ball_a211_trainability.py"
+    )
+    assert "action_ball_225_trainability.py" not in {
+        path for path, _label in launcher.RUNTIME_SOURCE_PATHS
+    }
 
 
 def test_materialize_stage_publishes_and_binds_runtime_effective_reward(tmp_path, monkeypatch):
@@ -1158,6 +1920,26 @@ def test_raw_oracle_accepts_projection_manager_minus_one_with_arm_objective(
 
 
 @pytest.mark.parametrize(
+    "binding",
+    (
+        "tape_canonical_sha256",
+        "tape_base_question_sha256",
+        "tape_target_producer_sha256",
+        "tape_target_column_sha256",
+    ),
+)
+def test_raw_oracle_rejects_retired_tape_binding_injection(
+    tmp_path, monkeypatch, binding
+):
+    raw, claim = _raw_oracle_fixture(tmp_path, monkeypatch)
+    document = json.loads(raw.read_text(encoding="utf-8"))
+    document["bindings"][binding] = "f" * 64
+    _write(raw, document)
+    with pytest.raises(launcher.LaunchRefused, match="bindings keys differ"):
+        launcher._validate_raw_oracle32(raw, claim=claim)
+
+
+@pytest.mark.parametrize(
     "mutation",
     (
         {"qdes_objective_weight": -0.25},
@@ -1185,7 +1967,7 @@ def test_raw_oracle_rejects_reward_sha_drift_from_revalidated_materialization(
 def test_recipe_stage_materializes_policy_before_oracle32(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
     recipe_path, _spec, _ = _case(
-        tmp_path / "recipe", arm_id=launcher.ARM_IDS[3], stage="recipe"
+        tmp_path / "recipe", arm_id=launcher.ARM_IDS[1], stage="recipe"
     )
     recipe = launcher.build_plan(recipe_path)["canonical_payload"]
     assert recipe["policy_recipe_materialization_only"] is True
@@ -1206,7 +1988,7 @@ def test_recipe_stage_materializes_policy_before_oracle32(tmp_path, monkeypatch)
     ]["arm_materialization"]
 
     oracle_path, _spec, _ = _case(
-        tmp_path / "oracle", arm_id=launcher.ARM_IDS[3], stage="oracle32"
+        tmp_path / "oracle", arm_id=launcher.ARM_IDS[1], stage="oracle32"
     )
     oracle = launcher.build_plan(oracle_path)["canonical_payload"]
     assert (
@@ -1248,7 +2030,7 @@ def test_recipe_accepts_exact_legacy_reward_only_result_without_trusting_its_pla
 def test_runtime_policy_recipe_is_exact_arm_owned_and_no_observed_sha_is_baked(
     tmp_path, monkeypatch
 ):
-    arm = launcher._arm_contract(launcher.ARM_IDS[3])
+    arm = launcher._arm_contract(launcher.ARM_IDS[1])
     lineage = {
         "lineage_sha256": "1" * 64,
         "motion": {"path": "motion", "sha256": "2" * 64},
@@ -1332,7 +2114,16 @@ def test_full_stage_chain_is_enforced(tmp_path, monkeypatch):
         "long512",
     ):
         spec_path, _spec, _lineage = _case(tmp_path / stage, arm_id=launcher.ARM_IDS[0], stage=stage)
-        assert launcher.build_plan(spec_path)["canonical_payload"]["spec"]["stage"] == stage
+        payload = launcher.build_plan(spec_path)["canonical_payload"]
+        assert payload["spec"]["stage"] == stage
+        if stage == "long4096":
+            assert payload["materialization_inputs"][
+                "four_grid_scale4096_receipt"
+            ]["status"] == "PASS"
+        else:
+            assert payload["materialization_inputs"][
+                "four_grid_scale4096_receipt"
+            ] is None
     spec_path, spec, _ = _case(
         tmp_path / "missing-policy", arm_id=launcher.ARM_IDS[0], stage="oracle32"
     )
@@ -1354,6 +2145,29 @@ def test_full_stage_chain_is_enforced(tmp_path, monkeypatch):
     spec["predecessor_result"] = None
     _write(spec_path, spec)
     with pytest.raises(launcher.LaunchRefused, match="completed scale4096"):
+        launcher.build_plan(spec_path)
+
+    spec_path, spec, _ = _case(
+        tmp_path / "long4096-missing-all-four",
+        arm_id=launcher.ARM_IDS[0],
+        stage="long4096",
+    )
+    spec["four_grid_scale4096_receipt"] = None
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="four-grid scale4096"):
+        launcher.build_plan(spec_path)
+
+    spec_path, spec, _ = _case(
+        tmp_path / "scale4096-extra-all-four",
+        arm_id=launcher.ARM_IDS[0],
+        stage="scale4096",
+    )
+    spec["four_grid_scale4096_receipt"] = {
+        "path": str(tmp_path / "foreign-aggregate.json"),
+        "sha256": "f" * 64,
+    }
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="four-grid scale4096"):
         launcher.build_plan(spec_path)
 
 
@@ -1394,23 +2208,85 @@ def test_policy_recipe_artifact_sha_drift_is_rejected(tmp_path, monkeypatch):
         launcher.build_plan(spec_path)
 
 
-def test_default_empty_gpu_and_explicit_colocation_claim_scope(tmp_path, monkeypatch):
+def test_default_empty_gpu_and_scale_long_colocation_claim_scope(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
     default_path, _, _ = _case(tmp_path / "default", arm_id=launcher.ARM_IDS[0], stage="materialize")
     default = launcher.build_plan(default_path)["canonical_payload"]
     assert default["spec"]["gpu"]["require_empty"] is True
-    assert default["output_contract"]["speed_benchmark_eligible"] is True
+    assert default["output_contract"]["speed_benchmark_eligible"] is False
+    assert default["output_contract"]["rate_evidence_eligible"] is False
+    assert default["output_contract"]["rate_evidence_isolation"] == (
+        "excluded_no_matched_abba_speed_stage"
+    )
 
-    opted_path, _, _ = _case(tmp_path / "opted", arm_id=launcher.ARM_IDS[0], stage="materialize", allow_colocation=True)
+    opted_path, _, _ = _case(tmp_path / "opted", arm_id=launcher.ARM_IDS[0], stage="long4096", allow_colocation=True)
     opted = launcher.build_plan(opted_path)["canonical_payload"]
     assert opted["spec"]["gpu"]["require_empty"] is False
     assert opted["vendor_v2_colocation_opt_in"] is True
     assert opted["output_contract"]["speed_benchmark_eligible"] is False
+    assert opted["output_contract"]["rate_evidence_eligible"] is False
+    assert opted["output_contract"]["rate_evidence_isolation"] == "excluded_colocated_diagnostic"
+    assert opted["output_contract"]["colocated_stage"] == "long4096"
+    assert opted["output_contract"]["max_compute_processes_per_gpu"] == 2
     assert opted["output_contract"]["colocation_result_scope"] == "training_diagnostic_only"
+
+    _path, colocated_scale, _lineage = _case(
+        tmp_path / "colocated-scale",
+        arm_id=launcher.ARM_IDS[0],
+        stage="scale4096",
+        allow_colocation=True,
+    )
+    scale_output = launcher.build_plan(_path)["canonical_payload"][
+        "output_contract"
+    ]
+    assert scale_output["speed_benchmark_eligible"] is False
+    assert scale_output["rate_evidence_eligible"] is False
+    assert scale_output["colocated_stage"] == "scale4096"
+
+    exclusive_scale_path, _, _ = _case(
+        tmp_path / "exclusive-scale",
+        arm_id=launcher.ARM_IDS[0],
+        stage="scale4096",
+    )
+    exclusive_scale = launcher.build_plan(exclusive_scale_path)[
+        "canonical_payload"
+    ]["output_contract"]
+    assert exclusive_scale["speed_benchmark_eligible"] is False
+    assert exclusive_scale["rate_evidence_eligible"] is False
+    assert exclusive_scale["rate_evidence_isolation"] == (
+        "excluded_scale_finite_gate"
+    )
+    assert exclusive_scale["deferred_matched_speed_measurement"] == {
+        "status": "DEFERRED_UNTIL_FINITE",
+        "implemented_by_this_launcher": False,
+        "workload_kind": "fixed_question_exact_answer_cache_consumer",
+        "cold_first_distinct_question_solver_calls_required": 1,
+        "steady_identical_question_solver_calls_required": 0,
+        "novel_question_producer_unit": "seconds_per_4096_novel_questions",
+        "producer_evidence_must_be_separate": True,
+        "num_envs": 4096,
+        "steps_per_env": 24,
+        "warmup_updates": 10,
+        "minimum_measured_updates": 50,
+        "isolation": "exclusive_single_process_same_gpu",
+        "abba_order": ["current_A", "current_C", "current_C", "current_A"],
+        "main_timing_mode": "profiler_off",
+        "profile_run_is_separate_non_speed_evidence": True,
+        "scale4096_is_speed_or_rate_evidence": False,
+    }
+
+    _path, forbidden, _lineage = _case(
+        tmp_path / "forbidden",
+        arm_id=launcher.ARM_IDS[0],
+        stage="recipe",
+        allow_colocation=True,
+    )
+    with pytest.raises(launcher.LaunchRefused, match="scale4096/long4096"):
+        launcher._validate_spec(forbidden)
 
 
 def test_colocation_gpu_validation_is_cross_bound_and_fail_closed(tmp_path, monkeypatch):
-    _, raw_spec, _ = _case(tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize", allow_colocation=True)
+    _, raw_spec, _ = _case(tmp_path, arm_id=launcher.ARM_IDS[0], stage="long4096", allow_colocation=True)
     spec = launcher._validate_spec(raw_spec)
     query = lambda index, uuid: {
         "total_memory_mib": 24576,
@@ -1438,6 +2314,7 @@ def test_scale4096_executes_as_completion_stage_and_emits_natural_exit_result(
     tmp_path, monkeypatch
 ):
     _patch_plan_environment(monkeypatch)
+    monkeypatch.setenv(launcher.UPDATE_PROFILE_ENV, "1")
     spec_path, _, _ = _case(tmp_path, arm_id=launcher.ARM_IDS[1], stage="scale4096")
     plan = launcher.build_plan(spec_path)
     monkeypatch.setattr(launcher._B, "_validate_runtime_asset_claim", lambda value: value)
@@ -1457,8 +2334,11 @@ def test_scale4096_executes_as_completion_stage_and_emits_natural_exit_result(
 
     monkeypatch.setattr(launcher, "_verify_gpu_admission", admission)
     monkeypatch.setattr(
-        launcher, "_reservation_document", lambda spec, digest: {"claim": digest}
+        launcher,
+        "_write_reservation",
+        lambda spec, digest: {"registry_path": lock_file, "claim": digest},
     )
+    monkeypatch.setattr(launcher, "_release_reservation", lambda handle: None)
 
     def run(*args, **kwargs):
         state = Path(kwargs["env"]["KIT_BOOT_STATE_FILE"])
@@ -1469,6 +2349,7 @@ def test_scale4096_executes_as_completion_stage_and_emits_natural_exit_result(
             encoding="utf-8",
         )
         assert kwargs["env"]["KIT_WAIT_FOR_COMPLETION"] == "1"
+        assert kwargs["env"][launcher.UPDATE_PROFILE_ENV] == "1"
         return type("Completed", (), {"returncode": 0})()
 
     monkeypatch.setattr(launcher.subprocess, "run", run)
@@ -1480,6 +2361,8 @@ def test_scale4096_executes_as_completion_stage_and_emits_natural_exit_result(
         "terminal_exit_code": "0",
     }
     assert phases == [("pre_launch", False), ("post_completion", False)]
+    assert result["output_contract"]["update_profile"]["forwarded_value"] == "1"
+    assert result["output_contract"]["speed_benchmark_eligible"] is False
     assert Path(result["namespace"], "launch_result.json").is_file()
 
 
@@ -1569,6 +2452,20 @@ def _scale4096_terminal_artifacts(tmp_path: Path):
                         "schema_version": 1,
                         "ppo_update": update,
                         "counters": {
+                            "task_wait_started_count": 12,
+                            "task_reveal_reached_count": 10,
+                            "termination_reason_base_fell_tilt_count": 0,
+                            "termination_reason_base_fell_tilt_hidden_wait_count": 0,
+                            "termination_reason_base_fell_tilt_revealed_pre_strike_count": 0,
+                            "termination_reason_base_fell_tilt_post_strike_count": 0,
+                            "termination_reason_base_too_low_count": 0,
+                            "termination_reason_base_too_low_hidden_wait_count": 0,
+                            "termination_reason_base_too_low_revealed_pre_strike_count": 0,
+                            "termination_reason_base_too_low_post_strike_count": 0,
+                            "termination_reason_robot_hit_table_count": 0,
+                            "termination_reason_robot_hit_table_hidden_wait_count": 0,
+                            "termination_reason_robot_hit_table_revealed_pre_strike_count": 0,
+                            "termination_reason_robot_hit_table_post_strike_count": 0,
                             "ready_nonfinite_value_count": 0,
                             "strike_window_entry_racket_target_distance_nonfinite_count": 0,
                             "virtual_contact_nonfinite_reject_count": 0,
@@ -1579,6 +2476,7 @@ def _scale4096_terminal_artifacts(tmp_path: Path):
                 ),
             )
         )
+        lines.extend(_prelong_marker_lines(update))
     log_path = namespace / "run.log"
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return checkout, namespace, claim_sha, checkpoint_path, checkpoint, log_path
@@ -1610,14 +2508,104 @@ def test_scale4096_terminal_checkpoint_and_safety_gate_accepts_valid_case(
     assert acceptance["checkpoint"]["embedded_iteration"] == 5
     assert acceptance["checkpoint"]["load_mode"] == "torch_weights_only"
     assert acceptance["checkpoint"]["all_tensors_finite"] is True
+    assert acceptance["prelong_gate"]["semantic_update_count"] == 5
+    assert acceptance["prelong_gate"]["launch_claim_sha256"] == claim
+    assert acceptance["prelong_gate"]["run_log_sha256"] == acceptance[
+        "run_log"
+    ]["sha256"]
+    assert acceptance["prelong_gate"]["finite_model_sha256"] == acceptance[
+        "checkpoint"
+    ]["sha256"]
+    assert acceptance["prelong_gate"]["gate"]["status"] == "PASS"
     assert acceptance["safety_counters"] == {
         "observed_ppo_updates": 5,
         "actual_hard_edge_event_count": 0,
         "actual_hard_terminal_count": 0,
-        "hard_termination_count": 0,
+        "joint_qdes_forbidden_terminal_count": 0,
+        "joint_actual_forbidden_terminal_count": 0,
+        "strict_hard_termination_count": 0,
         "table_contact_count": 0,
         "nonfinite_count": 0,
+        "base_fell_tilt_terminal_count": 0,
+        "base_too_low_terminal_count": 0,
+        "physical_fall_by_reason_phase": {
+            reason: {phase: 0 for phase in launcher.PHYSICAL_FALL_PHASES}
+            for reason in launcher.PHYSICAL_FALL_REASONS
+        },
+        "table_contact_by_phase": {
+            phase: 0 for phase in launcher.PHYSICAL_FALL_PHASES
+        },
+        "task_wait_started_by_update": [12] * 5,
+        "task_wait_started_count": 60,
+        "task_reveal_reached_by_update": [10] * 5,
+        "task_reveal_reached_count": 50,
     }
+
+
+@pytest.mark.parametrize("mode", ("missing", "duplicate"))
+def test_scale4096_prelong_gate_requires_exactly_five_semantic_markers(
+    tmp_path, monkeypatch, mode
+):
+    checkout, namespace, claim, _checkpoint_path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    prefix = launcher._S.PRELONG_SEMANTICS_MARKER_PREFIX
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    marker = next(
+        line
+        for line in lines
+        if line.startswith(prefix) and '"ppo_update":4' in line
+    )
+    if mode == "missing":
+        lines.remove(marker)
+    else:
+        lines.append(marker)
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(launcher.LaunchRefused, match="exactly 5"):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation,allow_nan,match",
+    (
+        (
+            lambda row: row["task_invalid"].__setitem__(
+                "task_reward_weighted_sum", 0.25
+            ),
+            False,
+            "task_valid=0 leaked",
+        ),
+            (
+                lambda row: row["reward_groups"][2].__setitem__(
+                    "eligible_denominator", 10
+                ),
+                False,
+                "strike-group denominator",
+        ),
+        (
+            lambda row: row["reward_groups"][0].__setitem__(
+                "weighted_sum", float("nan")
+            ),
+            True,
+            "JSON is invalid",
+        ),
+    ),
+)
+def test_scale4096_prelong_gate_rejects_wait_denominator_or_nonfinite_drift(
+    tmp_path, monkeypatch, mutation, allow_nan, match
+):
+    checkout, namespace, claim, _checkpoint_path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    _rewrite_prelong_marker(
+        log_path, 2, mutation, allow_nan=allow_nan
+    )
+    with pytest.raises(launcher.LaunchRefused, match=match):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
 
 
 def test_scale4096_terminal_checkpoint_gate_rejects_missing_checkpoint(
@@ -1707,7 +2695,10 @@ def test_scale4096_terminal_gate_rejects_missing_safety_counters(
         )
 
 
-@pytest.mark.parametrize("counter_kind", ("actual_hard", "table", "nonfinite"))
+@pytest.mark.parametrize(
+    "counter_kind",
+    ("actual_hard", "joint_qdes", "joint_actual", "nonfinite"),
+)
 def test_scale4096_terminal_gate_rejects_observed_safety_event(
     tmp_path, counter_kind, monkeypatch
 ):
@@ -1728,6 +2719,19 @@ def test_scale4096_terminal_gate_rejects_observed_safety_event(
                 row["terminal_transitions"] = [
                     {"termination_terms": ["robot_hit_table"]}
                 ]
+            elif (
+                counter_kind in {"joint_qdes", "joint_actual"}
+                and prefix == "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON"
+            ):
+                row["terminal_transitions"] = [
+                    {
+                        "termination_terms": [
+                            "joint_qdes_forbidden"
+                            if counter_kind == "joint_qdes"
+                            else "joint_actual_forbidden"
+                        ]
+                    }
+                ]
             elif counter_kind == "nonfinite" and prefix == "HOPE_EXACT_BEHAVIOR_UPDATE_JSON":
                 row["counters"]["ready_nonfinite_value_count"] = 1
         rewritten.append(
@@ -1735,8 +2739,115 @@ def test_scale4096_terminal_gate_rejects_observed_safety_event(
         )
     log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
     with pytest.raises(
-        launcher.LaunchRefused, match="hard/table/nonfinite safety counters are nonzero"
+        launcher.LaunchRefused, match="implementation counters are nonzero"
     ):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
+
+
+def test_scale4096_terminal_gate_reports_physical_fall_without_rejecting_finite(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, _checkpoint_path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    rewritten = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        prefix, separator, payload = line.partition("=")
+        if not separator or not prefix.startswith("HOPE_"):
+            rewritten.append(line)
+            continue
+        row = json.loads(payload)
+        if row.get("ppo_update") == 0:
+            if prefix == "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON":
+                row["terminal_transitions"] = [
+                    {"termination_terms": ["base_fell_tilt"]}
+                ]
+            elif prefix == "HOPE_EXACT_BEHAVIOR_UPDATE_JSON":
+                row["counters"]["termination_reason_base_fell_tilt_count"] = 1
+                row["counters"][
+                    "termination_reason_base_fell_tilt_revealed_pre_strike_count"
+                ] = 1
+        rewritten.append(
+            prefix + "=" + json.dumps(row, sort_keys=True, separators=(",", ":"))
+        )
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+    accepted = _audit_terminal_fixture(
+        checkout, namespace, claim, checkpoint, monkeypatch
+    )
+
+    assert accepted["safety_counters"]["base_fell_tilt_terminal_count"] == 1
+    assert accepted["safety_counters"]["strict_hard_termination_count"] == 0
+    assert accepted["prelong_gate"]["gate"]["status"] == "PASS"
+
+
+def test_scale4096_terminal_gate_reports_table_by_phase_without_rejecting_finite(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, _checkpoint_path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    rewritten = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        prefix, separator, payload = line.partition("=")
+        if not separator or not prefix.startswith("HOPE_"):
+            rewritten.append(line)
+            continue
+        row = json.loads(payload)
+        if row.get("ppo_update") == 0:
+            if prefix == "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON":
+                row["terminal_transitions"] = [
+                    {"termination_terms": ["robot_hit_table"]}
+                ]
+            elif prefix == "HOPE_EXACT_BEHAVIOR_UPDATE_JSON":
+                row["counters"]["termination_reason_robot_hit_table_count"] = 1
+                row["counters"][
+                    "termination_reason_robot_hit_table_revealed_pre_strike_count"
+                ] = 1
+        rewritten.append(
+            prefix + "=" + json.dumps(row, sort_keys=True, separators=(",", ":"))
+        )
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+    accepted = _audit_terminal_fixture(
+        checkout, namespace, claim, checkpoint, monkeypatch
+    )
+
+    assert accepted["safety_counters"]["table_contact_count"] == 1
+    assert accepted["safety_counters"]["strict_hard_termination_count"] == 0
+    table = accepted["prelong_gate"]["gate"]["survival_denominators"][
+        "robot_hit_table"
+    ]
+    assert table["by_phase"]["revealed_pre_strike"] == 1
+    assert table["acceptance_threshold"] is None
+
+
+def test_scale4096_terminal_gate_rejects_fall_reason_phase_nonconservation(
+    tmp_path, monkeypatch
+):
+    checkout, namespace, claim, _checkpoint_path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    rewritten = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        prefix, separator, payload = line.partition("=")
+        if not separator or not prefix.startswith("HOPE_"):
+            rewritten.append(line)
+            continue
+        row = json.loads(payload)
+        if (
+            row.get("ppo_update") == 0
+            and prefix == "HOPE_EXACT_BEHAVIOR_UPDATE_JSON"
+        ):
+            row["counters"]["termination_reason_base_too_low_count"] = 1
+        rewritten.append(
+            prefix + "=" + json.dumps(row, sort_keys=True, separators=(",", ":"))
+        )
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+    with pytest.raises(launcher.LaunchRefused, match="reason-by-phase counters"):
         _audit_terminal_fixture(
             checkout, namespace, claim, checkpoint, monkeypatch
         )
@@ -1769,6 +2880,32 @@ def test_long4096_rejects_launch_accepted_without_exact_scale_terminal_receipt(
     )
     _write(spec_path, spec)
     with pytest.raises(launcher.LaunchRefused, match="finite natural-exit receipt"):
+        launcher.build_plan(spec_path)
+
+
+def test_long4096_revalidates_prelong_gate_instead_of_trusting_resealed_receipt(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="long4096"
+    )
+    predecessor_path = Path(spec["predecessor_result"]["path"])
+    predecessor = json.loads(predecessor_path.read_text(encoding="utf-8"))
+    predecessor.pop("content_sha256")
+    terminal = predecessor["terminal_acceptance"]
+    terminal.pop("content_sha256")
+    prelong = terminal["prelong_gate"]
+    prelong.pop("content_sha256")
+    prelong["gate"]["status"] = "BLOCKED"
+    prelong["gate_sha256"] = launcher.canonical_sha256(prelong["gate"])
+    prelong["content_sha256"] = launcher.canonical_sha256(prelong)
+    terminal["content_sha256"] = launcher.canonical_sha256(terminal)
+    spec["predecessor_result"]["sha256"] = _write(
+        predecessor_path, _sealed(predecessor)
+    )
+    _write(spec_path, spec)
+    with pytest.raises(launcher.LaunchRefused, match="terminal checkpoint/safety"):
         launcher.build_plan(spec_path)
 
 
@@ -1824,6 +2961,56 @@ def test_confirm_digest_mismatch_blocks_before_source_lock_or_namespace(tmp_path
     assert not Path(plan["canonical_payload"]["spec"]["namespace"]).exists()
 
 
+@pytest.mark.parametrize("mutation", ("outer_extra", "payload"))
+def test_mutated_plan_envelope_blocks_before_gpu_lock_or_namespace(
+    tmp_path, monkeypatch, mutation
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, _, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    plan = launcher.build_plan(spec_path)
+    if mutation == "outer_extra":
+        plan["unsealed_extra"] = True
+    else:
+        plan["canonical_payload"]["bundle"]["normalizers"]["actor"][
+            "state"
+        ] = "mutated"
+    monkeypatch.setattr(
+        launcher,
+        "_open_gpu_shared_lock",
+        lambda *_args: pytest.fail("GPU lock touched"),
+    )
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.execute(plan, confirm_claim=plan["launch_claim_sha256"])
+    assert not Path(plan["canonical_payload"]["spec"]["namespace"]).exists()
+
+
+@pytest.mark.parametrize("mutation", ("authorization", "extra"))
+def test_resealed_unsafe_payload_blocks_before_gpu_lock_or_namespace(
+    tmp_path, monkeypatch, mutation
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, _, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    plan = launcher.build_plan(spec_path)
+    if mutation == "authorization":
+        plan["canonical_payload"]["diagnostic_unauthorized"] = False
+    else:
+        plan["canonical_payload"]["unsealed_extra"] = True
+    digest = launcher.canonical_sha256(plan["canonical_payload"])
+    plan["launch_claim_sha256"] = digest
+    monkeypatch.setattr(
+        launcher,
+        "_open_gpu_shared_lock",
+        lambda *_args: pytest.fail("GPU lock touched"),
+    )
+    with pytest.raises(launcher.LaunchRefused):
+        launcher.execute(plan, confirm_claim=digest)
+    assert not Path(plan["canonical_payload"]["spec"]["namespace"]).exists()
+
+
 def test_claim_namespace_is_no_clobber(tmp_path, monkeypatch):
     _patch_plan_environment(monkeypatch)
     spec_path, _, _ = _case(tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize")
@@ -1833,6 +3020,23 @@ def test_claim_namespace_is_no_clobber(tmp_path, monkeypatch):
     with pytest.raises(launcher.LaunchRefused):
         launcher._B._claim_namespace(plan)
     assert (namespace / "launch_claim.json").read_bytes() == original
+
+
+def test_a211_vendor_admission_adapter_reconstructs_lineage_output_contract(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    plan = launcher.build_plan(spec_path)
+    payload = plan["canonical_payload"]
+    assert launcher._ADMISSION._output_contract_from_payload is (
+        launcher._admission_output_contract
+    )
+    assert launcher._ADMISSION._output_contract_from_payload(
+        payload["spec"], payload
+    ) == payload["output_contract"]
 
 
 def test_pre_exec_admission_race_refuses_before_execve(tmp_path, monkeypatch):
@@ -1886,8 +3090,11 @@ def test_post_boot_admission_failure_routes_exact_cleanup_and_spends_namespace(
 
     monkeypatch.setattr(launcher, "_verify_gpu_admission", admission)
     monkeypatch.setattr(
-        launcher, "_reservation_document", lambda spec, digest: {"claim": digest}
+        launcher,
+        "_write_reservation",
+        lambda spec, digest: {"registry_path": lock_file, "claim": digest},
     )
+    monkeypatch.setattr(launcher, "_release_reservation", lambda handle: None)
     monkeypatch.setattr(
         launcher.subprocess,
         "run",
@@ -1922,6 +3129,36 @@ def test_claim_revalidation_detects_code_owned_bundle_mutation(tmp_path, monkeyp
     monkeypatch.setattr(launcher._B, "_validate_runtime_asset_claim", lambda value: value)
     with pytest.raises(launcher.LaunchRefused, match="drifted"):
         launcher._revalidate_claim_payload(payload)
+    payload = copy.deepcopy(plan["canonical_payload"])
+    payload["bundle"]["isaac_four_grid_manifest"]["cells"].pop()
+    with pytest.raises(launcher.LaunchRefused, match="drifted"):
+        launcher._revalidate_claim_payload(payload)
+
+
+def test_claim_revalidation_refuses_shared_four_grid_source_sha_drift(
+    tmp_path, monkeypatch
+):
+    _patch_plan_environment(monkeypatch)
+    source = {
+        "Isaac A211/C211 four-grid authority": {
+            "path": launcher.FOUR_GRID_SOURCE,
+            "sha256": "a" * 64,
+        }
+    }
+    monkeypatch.setattr(
+        launcher, "_runtime_sources", lambda _checkout, _commit: copy.deepcopy(source)
+    )
+    spec_path, _, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    plan = launcher.build_plan(spec_path)
+    Path(plan["canonical_payload"]["spec"]["namespace"]).mkdir()
+    source["Isaac A211/C211 four-grid authority"]["sha256"] = "b" * 64
+    monkeypatch.setattr(
+        launcher._B, "_validate_runtime_asset_claim", lambda value: value
+    )
+    with pytest.raises(launcher.LaunchRefused, match="runtime source identity drifted"):
+        launcher._revalidate_claim_payload(plan["canonical_payload"])
 
 
 @pytest.mark.parametrize("retired_key", ("target_recipe", "target_validity_mask", "resume_path", "checkpoint_path"))
@@ -1932,7 +3169,20 @@ def test_spec_rejects_retired_control_keys(tmp_path, retired_key):
         launcher._validate_spec(spec)
 
 
-def test_template_colocation_and_python_symlink(tmp_path):
+def test_spec_rejects_disconnected_same_named_experiment_root(tmp_path):
+    _, spec, _ = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[0], stage="materialize"
+    )
+    detached = tmp_path / "detached" / launcher.EXPERIMENT_NAME
+    detached.mkdir(parents=True)
+    namespace = detached / "fresh"
+    spec["namespace"] = str(namespace)
+    spec["log_path"] = str(namespace / "run.log")
+    with pytest.raises(launcher.LaunchRefused, match="checkout-local A211"):
+        launcher._validate_spec(spec)
+
+
+def test_template_python_symlink_defaults_to_exclusive(tmp_path):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     real_python = tmp_path / "real-python"
@@ -1941,21 +3191,27 @@ def test_template_colocation_and_python_symlink(tmp_path):
     venv_python = tmp_path / "venv-python"
     venv_python.symlink_to(real_python)
     output = tmp_path / "template.json"
-    root = tmp_path / launcher.EXPERIMENT_NAME
-    root.mkdir()
+    root = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / launcher.EXPERIMENT_NAME
+    )
+    root.mkdir(parents=True)
     args = launcher._parser().parse_args([
         "template", "--output", str(output), "--checkout", str(checkout),
         "--commit-sha", "a" * 40, "--isaac-python", str(venv_python),
         "--arm-id", launcher.ARM_IDS[0], "--lineage-path", "a211.json",
         "--lineage-sha256", "b" * 64, "--stage", "materialize",
         "--gpu-index", "2", "--gpu-uuid", "GPU-12345678", "--owner", "Franco",
-        "--namespace", str(root / "fresh"), "--allow-colocation",
+        "--namespace", str(root / "fresh"),
     ])
     launcher._write_template(args)
     document = json.loads(output.read_text())
     assert document["source"]["isaac_python"] == str(venv_python)
-    assert document[launcher.COLOCATION_SPEC_KEY] is True
-    assert document["gpu"]["require_empty"] is False
+    assert launcher.COLOCATION_SPEC_KEY not in document
+    assert document["gpu"]["require_empty"] is True
 
 
 def test_parser_exposes_explicit_execute_and_hidden_exec():

@@ -1,0 +1,16 @@
+# Fresh-only C211 DR-L0 learnability candidate.
+#
+# This leaf inherits the exact C211 observation/reward/task semantics and only
+# removes retained plant/proprioceptive randomization.  The three fields form
+# one fail-closed runtime tuple; see the shared DR-L0 candidate manifest.
+defaults:
+  - HOPEPingPongActionBallC211VendorV2N1Learnability@_here_
+  - _self_
+
+name: HOPEPingPongActionBallC211VendorV2N1DRL0Learnability
+
+domain_rand:
+  stable_ready_plant: true
+  startup_physics_material: false
+  startup_joint_default_pos: false
+  policy_observation_corruption: false

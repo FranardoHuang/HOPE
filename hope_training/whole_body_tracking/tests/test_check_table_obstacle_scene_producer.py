@@ -320,7 +320,9 @@ def _split_nominal_hold_fixture(tmp_path: Path):
         "grounded_ready_receipt_sha256": "2" * 64,
     }
     document.pop("content_sha256")
-    document["content_sha256"] = _sha(P._canonical_json_bytes(document))
+    document["content_sha256"] = _sha(
+        P._canonical_ascii_json_bytes(document)
+    )
     artifact_path.write_bytes(P._canonical_json_bytes(document))
     return artifact_path, document, runtime_contract
 
@@ -368,9 +370,12 @@ def _direct_frame0_nominal_hold_fixture(tmp_path: Path):
         "left_ankle_roll_joint",
         "right_ankle_roll_joint",
     }
-    mechanical = [[-1.0, 1.0] for _ in range(31)]
+    mechanical = [
+        [-1.1, 1.1] if name in selected else [-1.0, 1.0]
+        for name in A3_JOINT_NAMES
+    ]
     control = [
-        [-0.96, 0.96] if name in selected else [-1.0, 1.0]
+        [-1.056, 1.056] if name in selected else [-1.0, 1.0]
         for name in A3_JOINT_NAMES
     ]
     hctrl = {
@@ -396,6 +401,451 @@ def _direct_frame0_nominal_hold_fixture(tmp_path: Path):
     document["content_sha256"] = _sha(P._canonical_json_bytes(document))
     artifact_path.write_bytes(P._canonical_json_bytes(document))
     return artifact_path, document, runtime_contract
+
+
+def _whole_body_threshold_frame0_nominal_hold_fixture(tmp_path: Path):
+    artifact_path, document, runtime_contract = (
+        _direct_frame0_nominal_hold_fixture(tmp_path)
+    )
+    semantics = P.MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS
+    teacher = document["teacher_reference"]
+    physical = document["physical_ready"]
+    # Real Take061 has this same important shape: stored source bytes are close
+    # to unit length, but not bitwise equal to their normalized MuJoCo copy.
+    raw_quat = [1.0000000259, 0.0, 0.0, 0.0]
+    quat_norm = float(np.linalg.norm(np.asarray(raw_quat, np.float64)))
+    audit_quat = [value / quat_norm for value in raw_quat]
+    teacher["root_quat_wxyz"] = raw_quat
+    teacher["static_handoff_joint_vel_radps"] = [0.0] * 31
+    teacher["static_handoff_velocity_semantics"] = (
+        "constructed_zero_joint_velocity_endpoint_not_measured_motion_velocity"
+    )
+    physical["root_quat_wxyz"] = raw_quat
+    state_sha = P._whole_body_state_sha256(
+        physical["joint_pos_rad"],
+        physical["root_pos_w_m"],
+        physical["root_quat_wxyz"],
+    )
+    audit_state_sha = P._whole_body_state_sha256(
+        physical["joint_pos_rad"],
+        physical["root_pos_w_m"],
+        audit_quat,
+    )
+    handoff = {
+        "schema_version": 1,
+        "kind": "exact_frame0_zero_duration_handoff_v1",
+        "selection_semantics": "threshold_first_exact_frame0_direct",
+        "state_sha256_semantics": (
+            "float64_array_bytes_without_quaternion_normalization_v1"
+        ),
+        "physical_ready_state_sha256": state_sha,
+        "teacher_frame0_state_sha256": state_sha,
+        "mjcf_audit_state_sha256": audit_state_sha,
+        "stored_root_quaternion_norm": quat_norm,
+        "mjcf_audit_root_quat_wxyz": audit_quat,
+        "mjcf_audit_quaternion_semantics": (
+            "stored_root_quat_unit_normalized_for_numerical_backend_only"
+        ),
+        "stored_teacher_and_physical_quaternion_unchanged": True,
+        "endpoints_bitwise_equal": True,
+        "physical_ready_joint_velocity_exact_zero": True,
+        "teacher_static_endpoint_joint_velocity_exact_zero": True,
+        "measured_motion_velocity_channels_consumed": False,
+        "not_a_motion_velocity_continuity_claim": True,
+        "certified_transition_s": 0.0,
+        "required_min_wait_s": 0.0,
+        "torque_speed_curve_required": False,
+        "torque_speed_non_requirement_reason": (
+            "identical_stored_configuration_and_constructed_zero_joint_"
+            "velocity_endpoints"
+        ),
+        "runtime_transition_reference_required": False,
+        "required_followup_hold_gate": P.NOMINAL_HOLD_RECEIPT_KIND,
+        "required_followup_policy_steps": 200,
+        "required_followup_physics_steps": 800,
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+    }
+    safety_slacks = {
+        "left_sole_floor_slack_m": 1.0e-3,
+        "right_sole_floor_slack_m": 1.0e-3,
+        "left_contact_load_slack_n": 9.9,
+        "right_contact_load_slack_n": 9.9,
+        "support_margin_slack_m": 1.95e-2,
+        "joint_position_slack_rad": 1.0,
+        "qdes_slack_rad": 0.9,
+        "torque_slack_nm": 40.0,
+        "table_clearance_slack_m": 2.0e-2,
+        "root_height_slack_m": 0.5,
+        "root_tilt_slack_rad": 0.7,
+        "collision_slack_m": 1.0e-2,
+        "ground_lp_residual_slack": 2.0e-7,
+    }
+    normalized = {
+        name: safety_slacks[name] / scale
+        for name, scale in P._WHOLE_BODY_SAFETY_SLACK_SCALES.items()
+    }
+    thresholds = dict(P._WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS)
+    threshold_sha = _sha(P._canonical_json_bytes(thresholds))
+    optimizer = {
+        "algorithm": "exact_measured_frame0_safety_short_circuit",
+        "global_optimum_claimed": False,
+        "stage1_objective": (
+            "prefer_exact_measured_frame0_when_all_safety_gates_pass"
+        ),
+        "stage2_objective": "not_run_exact_frame0_already_safe",
+        "safety_weighted_against_tracking": False,
+        "exact_measured_frame0_selected": True,
+        "direct_frame0_robust_minimum_slacks": thresholds,
+        "stage1_runs": [],
+        "stage1_worst_normalized_slack": min(normalized.values()),
+        "stage1_lock_tolerance_normalized": 5.0e-5,
+        "stage1_locked_worst_normalized_slack": min(normalized.values()),
+        "stage2_success": True,
+        "stage2_status": 0,
+        "stage2_message": "not run; exact measured frame0 is safe",
+        "stage2_iterations": 0,
+        "stage2_accepted_steps": 0,
+        "stage2_objective_value": 0.0,
+        "evaluation_count": 4,
+        "movable_joint_names": list(A3_JOINT_NAMES),
+        "root_degrees_of_freedom": ["z", "roll", "pitch"],
+        "slack_scales": dict(P._WHOLE_BODY_SAFETY_SLACK_SCALES),
+        "racket_reference_authority": (
+            "caller_supplied_independent_measurement"
+        ),
+    }
+    axis = list(P._WHOLE_BODY_MEASURED_RACKET_AXIS_LOCAL)
+    racket_reference = {
+        "authority": "independent_schema_v4_measured_racket_channel",
+        "motion_sha256": document["sources"]["stable_motion"]["sha256"],
+        "frame_index": 0,
+        "site_pos_w_m": [0.5, 0.0, 1.1],
+        "signed_face_normal_w": [0.0, 1.0, 0.0],
+        "long_axis_w": axis,
+        "position_semantics": "physical_blade_center",
+        "normal_semantics": "signed_physical_hitting_face",
+        "long_axis_semantics": "measured_paddle_butt_to_blade",
+        "robot_mount_normal_sign": 1,
+        "robot_butt_to_blade_axis_local": axis,
+        "robot_rigid_visual_mesh_sha256": (
+            P._WHOLE_BODY_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256
+        ),
+        "source_sha256": "4" * 64,
+        "retarget_receipt_sha256": "5" * 64,
+        "input_motion_sha256": "6" * 64,
+        "manifest_sha256": "7" * 64,
+        "catalog_sha256": "8" * 64,
+        "source_and_retarget_receipt_sha_semantics": (
+            "opaque_labels_content_bound_by_exact_materialized_motion_sha"
+        ),
+        "signed_face_normal_w_unit": [0.0, 1.0, 0.0],
+        "long_axis_w_unit": axis,
+        "official_site_rotation_w": [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+    }
+    racket_fidelity = {
+        "site_name": "right_racket",
+        "site_semantics": (
+            "official_mjcf_site_against_independent_schema_v4_measured_blade"
+        ),
+        "reference_authority": racket_reference,
+        "physical_site_pos_w_m": [0.5, 0.0, 1.1],
+        "physical_signed_face_normal_w": [0.0, 1.0, 0.0],
+        "physical_long_axis_w": axis,
+        "physical_minus_measured_position_w_m": [0.0, 0.0, 0.0],
+        "position_error_m": 0.0,
+        "physical_minus_measured_rotation_vector_rad": [0.0, 0.0, 0.0],
+        "orientation_error_rad": 0.0,
+        "signed_face_error_rad": 0.0,
+        "long_axis_error_rad": 0.0,
+        "independent_measured_frame0_required": True,
+    }
+    document["ready_source"].update(
+        {
+            "kind": "measured_retarget_l0_diagnostic",
+            "frame_index": 0,
+            "teacher_reference_unchanged": True,
+            "teacher_and_physical_birth_same": True,
+            "physical_birth_semantics": semantics,
+            "plant_template_action_binding_consumed": False,
+            "plant_template_delay_overridden_to_zero": True,
+            "isaac_live_plant_match_required": True,
+            "diagnostic_unauthorized": True,
+            "training_authorized": False,
+        }
+    )
+    document["physical_birth_composition"] = {
+        "semantics": semantics,
+        "teacher_reference_unchanged": True,
+        "historical_physical_birth_seed_consumed": False,
+        "vendor_key_used_as_optimizer_start_only": True,
+        "selection_priority": [
+            "exact_measured_frame0_if_all_safety_gates_pass",
+            "lexicographic_whole_body_safe_ready_only_if_frame0_unsafe",
+        ],
+        "exact_measured_frame0_selected": True,
+        "released_root_degrees_of_freedom": ["z", "roll", "pitch"],
+        "released_joint_indices": list(range(31)),
+        "released_joint_names": list(A3_JOINT_NAMES),
+        "changed_joint_mask": [False] * 31,
+        "changed_joint_indices": [],
+        "changed_joint_names": [],
+        "physical_minus_teacher_joint_pos_rad": [0.0] * 31,
+        "physical_minus_teacher_joint_pos_by_name_rad": {
+            name: 0.0 for name in A3_JOINT_NAMES
+        },
+        "physical_minus_teacher_root_pos_m": [0.0, 0.0, 0.0],
+        "physical_minus_teacher_root_rotation_vector_rad": [0.0, 0.0, 0.0],
+        "physical_root_quat_wxyz": list(teacher["root_quat_wxyz"]),
+        "stored_physical_root_quat_wxyz": list(teacher["root_quat_wxyz"]),
+        "mjcf_audit_root_quat_wxyz": audit_quat,
+        "teacher_root_quat_wxyz": list(teacher["root_quat_wxyz"]),
+        "teacher_and_physical_birth_differ": False,
+        "racket_site_fidelity": racket_fidelity,
+        "safety_slacks": safety_slacks,
+        "normalized_safety_slacks": normalized,
+        "worst_normalized_safety_slack": min(normalized.values()),
+        "stage1_locked_worst_normalized_safety_slack": min(
+            normalized.values()
+        ),
+        "optimizer_report": optimizer,
+        "evaluator_contract": {},
+        "safety_weighted_against_tracking": False,
+        "training_authorized": False,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
+        "required_live_table_gate": P.NOMINAL_HOLD_RECEIPT_KIND,
+        "frame0_handoff": handoff,
+    }
+    contact_normals = [10.0] * 6
+    solver_report = {
+        "model_binding": "3" * 64,
+        "exact_state_lp_cache_hit": False,
+        "normal_force_per_foot_n": [30.0, 30.0],
+        "normal_force_per_contact_n": contact_normals,
+        "cop_interior_margin_per_foot_m": [0.02, 0.02],
+        "contact_geometry": {
+            "feet": [
+                {"support_point_range": [0, 3]},
+                {"support_point_range": [3, 6]},
+            ]
+        },
+    }
+    collision_authority = {
+        "self_collision_geom_id_pairs": [[1, 2]],
+        "unsupported_floor_robot_geom_ids": [],
+        "expected_foot_floor_geom_ids": [3, 4],
+        "floor_geom_id": 0,
+    }
+    collision = {
+        **collision_authority,
+        "pair_authority_sha256": _sha(
+            P._canonical_json_bytes(collision_authority)
+        ),
+        "enabled_self_pair_count": 1,
+        "unsupported_floor_pair_count": 0,
+        "required_clearance_m": 2.0e-3,
+        "capped_clearance_m": 2.0e-2,
+        "bisection_tolerance_m": 1.0e-4,
+        "distance_semantics": (
+            "mujoco_geomDistance_saturation_bisection_with_robot_pair_"
+            "sphere_lower_bound_pruning"
+        ),
+        "realized_capped_minimum_clearance_m": 1.2e-2,
+        "raw_bisection_midpoint_or_saturated_cap_m": 1.21e-2,
+        "positive_unsaturated_conservative_deduction_m": 1.0e-4,
+        "realized_slack_m": 1.0e-2,
+        "unsupported_contacts": [],
+        "self_collision_pairs": [],
+    }
+    tau_lower = [-40.0] * 31
+    tau_upper = [40.0] * 31
+    witness = {
+        "exact_contact_lp_reused": True,
+        "lp_feasible": True,
+        "lp_error": None,
+        "lp_objective": "hold_minimax_normalized_available_torque",
+        "equality_residual": 0.0,
+        "root_residual": 0.0,
+        "normal_force_per_foot_n": [30.0, 30.0],
+        "normal_force_per_contact_n": contact_normals,
+        "minimum_normal_force_per_contact_per_foot_n": [10.0, 10.0],
+        "required_minimum_normal_force_per_contact_n": 0.1,
+        "required_minimum_normal_force_per_foot_n": 1.0,
+        "cop_interior_margin_per_foot_m": [0.02, 0.02],
+        "global_support_margin_m": 0.02,
+        "support_hull_floor_xy_m": [
+            [-0.1, -0.1],
+            [0.1, -0.1],
+            [0.1, 0.1],
+            [-0.1, 0.1],
+        ],
+        "hold_qdes_joint_pos_rad": [0.0] * 31,
+        "actuator_generalized_force_runtime_order_nm": [0.0] * 31,
+        "actuator_generalized_force_mujoco_row_order_nm": [0.0] * 31,
+        "mujoco_row_for_runtime_joint": list(range(31)),
+        "mujoco_actuated_dof_indices": list(range(6, 37)),
+        "executed_qdes_lower_rad": [-0.9] * 31,
+        "executed_qdes_upper_rad": [0.9] * 31,
+        "model_tau_lower_mujoco_row_order_nm": tau_lower,
+        "model_tau_upper_mujoco_row_order_nm": tau_upper,
+        "runtime_tau_lower_runtime_order_nm": tau_lower,
+        "runtime_tau_upper_runtime_order_nm": tau_upper,
+        "runtime_tau_lower_mujoco_row_order_nm": tau_lower,
+        "runtime_tau_upper_mujoco_row_order_nm": tau_upper,
+        "effective_tau_lower_mujoco_row_order_nm": tau_lower,
+        "effective_tau_upper_mujoco_row_order_nm": tau_upper,
+        "actuator_limit_contract": {},
+        "solver_report": solver_report,
+        "exact_state_lp_cache_hit": False,
+        "evaluated_state_sha256": audit_state_sha,
+        "evaluated_joint_pos_rad": [0.0] * 31,
+        "evaluated_root_pos_w_m": [0.0, 0.0, 1.0],
+        "evaluated_root_quat_wxyz": audit_quat,
+        "sole_minimum_distance_m": [1.0e-3, -1.0e-3],
+        "exact_joint_position_lower_rad": [-1.0] * 31,
+        "exact_joint_position_upper_rad": [1.0] * 31,
+        "conservative_table_clearance_m": 3.0e-2,
+        "table_geometry": {
+            "near_x_m": 0.8,
+            "half_width_m": 0.7625,
+            "surface_z_m": 0.76,
+            "required_clearance_m": 1.0e-2,
+            "semantics": (
+                "collision_sphere_separation_from_overapproximated_near_side_table_prism"
+            ),
+        },
+        "root_limits": {
+            "minimum_height_m": 0.5,
+            "maximum_tilt_rad": 0.7,
+        },
+        "collision_clearance": collision,
+    }
+    document["physical_birth_composition"]["evaluator_contract"] = {
+        "executed_qdes_lower_rad": [-0.9] * 31,
+        "executed_qdes_upper_rad": [0.9] * 31,
+        "exact_joint_position_lower_rad": [-1.0] * 31,
+        "exact_joint_position_upper_rad": [1.0] * 31,
+        "table_near_x_m": 0.8,
+        "table_half_width_m": 0.7625,
+        "table_surface_z_m": 0.76,
+        "minimum_table_clearance_m": 1.0e-2,
+        "minimum_root_height_m": 0.5,
+        "maximum_root_tilt_rad": 0.7,
+        "collision_pair_authority": {
+            name: collision[name]
+            for name in (
+                "self_collision_geom_id_pairs",
+                "unsupported_floor_robot_geom_ids",
+                "expected_foot_floor_geom_ids",
+                "floor_geom_id",
+                "pair_authority_sha256",
+                "enabled_self_pair_count",
+                "unsupported_floor_pair_count",
+                "required_clearance_m",
+                "capped_clearance_m",
+                "bisection_tolerance_m",
+                "distance_semantics",
+            )
+        },
+    }
+    document["physical_birth_static_evidence"] = {
+        "authority": "fresh_current_exact_mjcf_whole_body_lexicographic_search",
+        "selected_hold_witness_authority": (
+            "new_backend_new_solver_final_state_cache_miss"
+        ),
+        "exact_contact_lp_reused": False,
+        "all_safety_slacks_meet_original_and_locked_gate": True,
+        "required_final_normalized_safety_gate": min(normalized.values()),
+        "direct_frame0_robust_minimum_slacks": thresholds,
+        "direct_frame0_robust_gate_sha256": threshold_sha,
+        "fresh_direct_robust_gate_passed": True,
+        "safety_slacks": safety_slacks,
+        "normalized_safety_slacks": normalized,
+        "evaluator_evidence": witness,
+        "stored_endpoint_state_sha256": state_sha,
+        "mjcf_audit_state_sha256": audit_state_sha,
+        "stored_root_quat_wxyz": raw_quat,
+        "mjcf_audit_root_quat_wxyz": audit_quat,
+        "stored_root_quaternion_norm": quat_norm,
+        "independent_measured_racket_frame0": racket_reference,
+        "racket_site_fidelity": racket_fidelity,
+        "frame0_handoff": handoff,
+        "optimizer_report": optimizer,
+        "geometry_passed": True,
+        "ground_dynamics_passed": True,
+    }
+    document["frame0_handoff"] = handoff
+    document["sources"]["mujoco_model"][
+        "ground_model_binding_sha256"
+    ] = "3" * 64
+    document["hold_candidate"].update(
+        {
+            "semantics": (
+                "tau_pd=kp*(qdes-physical_q) at zero joint velocity; "
+                "the new-backend cache-miss whole-body final-state LP is the "
+                "single selected witness; Isaac must validate it"
+            ),
+            "hold_qdes_mode": "fresh_static_lp",
+            "selected_hold_authority": {
+                "semantics": (
+                    "fresh_new_backend_whole_body_final_state_0p1n_static_lp"
+                ),
+                "source_physical_birth_seed_sha256": None,
+                "inherited_hold_claim": False,
+            },
+            "lp_objective": "hold_minimax_normalized_available_torque",
+            "actuator_generalized_force_runtime_order_nm": [0.0] * 31,
+            "actuator_generalized_force_mujoco_row_order_nm": [0.0] * 31,
+            "mujoco_row_for_runtime_joint": list(range(31)),
+            "mujoco_actuated_dof_indices": list(range(6, 37)),
+            "model_tau_lower_mujoco_row_order_nm": tau_lower,
+            "model_tau_upper_mujoco_row_order_nm": tau_upper,
+            "runtime_tau_lower_runtime_order_nm": tau_lower,
+            "runtime_tau_upper_runtime_order_nm": tau_upper,
+            "runtime_tau_lower_mujoco_row_order_nm": tau_lower,
+            "runtime_tau_upper_mujoco_row_order_nm": tau_upper,
+            "effective_tau_lower_mujoco_row_order_nm": tau_lower,
+            "effective_tau_upper_mujoco_row_order_nm": tau_upper,
+            "actuator_limit_contract": {},
+            "solver_report": solver_report,
+            "solver_report_role": (
+                "selected_whole_body_final_state_single_witness"
+            ),
+        }
+    )
+    document["required_next_gate"] = {
+        "kind": P.NOMINAL_HOLD_RECEIPT_KIND,
+        "required_policy_steps": 200,
+        "required_physics_steps": 800,
+        "required_min_wait_s": 0.0,
+        "minimum_horizon_semantics": "validated_t_hit_plus_reaction_margin",
+        "zero_terminal_required": [
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+            "robot_hit_table",
+            "base_fell_tilt",
+            "base_too_low",
+        ],
+    }
+    document.pop("content_sha256")
+    document["content_sha256"] = _sha(
+        P._canonical_ascii_json_bytes(document)
+    )
+    artifact_path.write_bytes(P._canonical_json_bytes(document))
+    return artifact_path, document, runtime_contract
+
+
+def _rewrite_dynamic_ready(path: Path, document: dict) -> None:
+    document.pop("content_sha256", None)
+    document["content_sha256"] = _sha(
+        P._canonical_ascii_json_bytes(document)
+    )
+    path.write_bytes(P._canonical_json_bytes(document))
 
 
 def _fixture_tree(tmp_path: Path, action_count: int = 5):
@@ -907,6 +1357,211 @@ def test_direct_frame0_rejects_any_teacher_physical_delta(tmp_path):
         P._load_nominal_hold_input(
             path, expected_sha256=_sha(path.read_bytes())
         )
+
+
+def test_nominal_hold_accepts_only_threshold_first_whole_body_frame0(
+    tmp_path,
+):
+    path, document, _contract = (
+        _whole_body_threshold_frame0_nominal_hold_fixture(tmp_path)
+    )
+    loaded = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    assert loaded.teacher_physical_separated is False
+    assert loaded.physical_joint_pos == loaded.teacher_joint_pos
+    assert loaded.physical_root_pos == loaded.teacher_root_pos
+    assert loaded.physical_root_quat == loaded.teacher_root_quat
+    assert document["frame0_handoff"]["certified_transition_s"] == 0.0
+    assert document["required_next_gate"]["required_policy_steps"] == 200
+    assert document["required_next_gate"]["required_physics_steps"] == 800
+    assert "physical_birth_seed" not in document["sources"]
+
+    unicode_root = tmp_path / "乒乓"
+    unicode_root.mkdir()
+    unicode_path, _unicode_document, _unicode_contract = (
+        _whole_body_threshold_frame0_nominal_hold_fixture(unicode_root)
+    )
+    unicode_loaded = P._load_nominal_hold_input(
+        unicode_path, expected_sha256=_sha(unicode_path.read_bytes())
+    )
+    assert unicode_loaded.teacher_physical_separated is False
+
+    missing_hctrl = json.loads(json.dumps(document))
+    missing_hctrl["runtime_plant"].pop("physx_control_position_limits")
+    _rewrite_dynamic_ready(path, missing_hctrl)
+    with pytest.raises(
+        P.TableSmokeReceiptError,
+        match="whole-body frame0 hold requires exact Vendor PhysX H_ctrl",
+    ):
+        P._load_nominal_hold_input(
+            path, expected_sha256=_sha(path.read_bytes())
+        )
+
+    qdes_outside_hctrl = json.loads(json.dumps(document))
+    qdes_outside_hctrl["runtime_plant"]["qdes_joint_pos_limits"][0] = [
+        -1.2,
+        1.2,
+    ]
+    _rewrite_dynamic_ready(path, qdes_outside_hctrl)
+    with pytest.raises(
+        P.TableSmokeReceiptError,
+        match="qdes envelope must remain inside exact Vendor PhysX H_ctrl",
+    ):
+        P._load_nominal_hold_input(
+            path, expected_sha256=_sha(path.read_bytes())
+        )
+
+
+def test_whole_body_frame0_rejects_fallback_or_tampered_handoff(tmp_path):
+    path, document, _contract = (
+        _whole_body_threshold_frame0_nominal_hold_fixture(tmp_path)
+    )
+    variants = []
+
+    fallback = json.loads(json.dumps(document))
+    fallback["physical_birth_composition"][
+        "exact_measured_frame0_selected"
+    ] = False
+    fallback["physical_birth_composition"]["optimizer_report"][
+        "algorithm"
+    ] = "two_stage_deterministic_coordinate_local_lexicographic"
+    fallback["physical_birth_static_evidence"]["optimizer_report"] = fallback[
+        "physical_birth_composition"
+    ]["optimizer_report"]
+    variants.append(fallback)
+
+    missing = json.loads(json.dumps(document))
+    missing.pop("frame0_handoff")
+    variants.append(missing)
+
+    transition = json.loads(json.dumps(document))
+    transition["frame0_handoff"]["certified_transition_s"] = 0.01
+    variants.append(transition)
+
+    wrong_state_sha = json.loads(json.dumps(document))
+    for location in (
+        wrong_state_sha,
+        wrong_state_sha["physical_birth_composition"],
+        wrong_state_sha["physical_birth_static_evidence"],
+    ):
+        location["frame0_handoff"]["physical_ready_state_sha256"] = "9" * 64
+        location["frame0_handoff"]["teacher_frame0_state_sha256"] = "9" * 64
+    variants.append(wrong_state_sha)
+
+    moved_physical = json.loads(json.dumps(document))
+    moved_physical["physical_ready"]["joint_pos_rad"][0] = 1.0e-5
+    variants.append(moved_physical)
+
+    moving_teacher_endpoint = json.loads(json.dumps(document))
+    moving_teacher_endpoint["teacher_reference"][
+        "static_handoff_joint_vel_radps"
+    ][0] = 1.0e-5
+    variants.append(moving_teacher_endpoint)
+
+    wrong_gate = json.loads(json.dumps(document))
+    wrong_gate["required_next_gate"]["required_policy_steps"] = 199
+    variants.append(wrong_gate)
+
+    for variant in variants:
+        _rewrite_dynamic_ready(path, variant)
+        with pytest.raises(P.TableSmokeReceiptError, match="threshold-first"):
+            P._load_nominal_hold_input(
+                path, expected_sha256=_sha(path.read_bytes())
+            )
+
+
+def test_whole_body_frame0_rejects_tampered_fresh_evidence_or_seed(tmp_path):
+    path, document, _contract = (
+        _whole_body_threshold_frame0_nominal_hold_fixture(tmp_path)
+    )
+    variants = []
+
+    robust_hash = json.loads(json.dumps(document))
+    robust_hash["physical_birth_static_evidence"][
+        "direct_frame0_robust_gate_sha256"
+    ] = "0" * 64
+    variants.append(robust_hash)
+
+    robust_pass = json.loads(json.dumps(document))
+    robust_pass["physical_birth_static_evidence"][
+        "fresh_direct_robust_gate_passed"
+    ] = False
+    variants.append(robust_pass)
+
+    reused_lp = json.loads(json.dumps(document))
+    reused_lp["physical_birth_static_evidence"]["evaluator_evidence"][
+        "exact_state_lp_cache_hit"
+    ] = True
+    variants.append(reused_lp)
+
+    residual = json.loads(json.dumps(document))
+    residual["physical_birth_static_evidence"]["evaluator_evidence"][
+        "equality_residual"
+    ] = 1.0
+    variants.append(residual)
+
+    sole_distance = json.loads(json.dumps(document))
+    sole_distance["physical_birth_static_evidence"]["evaluator_evidence"][
+        "sole_minimum_distance_m"
+    ][0] = 1.0e-2
+    variants.append(sole_distance)
+
+    joint_limits = json.loads(json.dumps(document))
+    joint_limits["physical_birth_static_evidence"]["evaluator_evidence"][
+        "exact_joint_position_lower_rad"
+    ][0] = -0.5
+    variants.append(joint_limits)
+
+    contact = json.loads(json.dumps(document))
+    contact["physical_birth_static_evidence"]["evaluator_evidence"][
+        "normal_force_per_contact_n"
+    ][0] = 0.0
+    variants.append(contact)
+
+    cop = json.loads(json.dumps(document))
+    cop["physical_birth_static_evidence"]["evaluator_evidence"][
+        "cop_interior_margin_per_foot_m"
+    ][0] = -0.01
+    variants.append(cop)
+
+    qdes = json.loads(json.dumps(document))
+    qdes["physical_birth_static_evidence"]["evaluator_evidence"][
+        "hold_qdes_joint_pos_rad"
+    ][0] = 1.0e-3
+    variants.append(qdes)
+
+    racket = json.loads(json.dumps(document))
+    racket["physical_birth_composition"]["racket_site_fidelity"][
+        "reference_authority"
+    ]["position_semantics"] = "robot_site_origin"
+    variants.append(racket)
+
+    collision_authority = json.loads(json.dumps(document))
+    collision_authority["physical_birth_static_evidence"][
+        "evaluator_evidence"
+    ]["collision_clearance"]["enabled_self_pair_count"] = 0
+    variants.append(collision_authority)
+
+    seeded = json.loads(json.dumps(document))
+    seed_path = tmp_path / "physical_birth_seed.json"
+    seeded["sources"]["physical_birth_seed"] = {
+        "path": str(seed_path.resolve()),
+        "sha256": _sha(seed_path.read_bytes()),
+        "content_sha256": "1" * 64,
+        "source_role": "numerical_seed_only",
+        "inherited_model_identity": False,
+        "inherited_hold_claim": False,
+        "inherited_nominal_hold_claim": False,
+    }
+    variants.append(seeded)
+
+    for variant in variants:
+        _rewrite_dynamic_ready(path, variant)
+        with pytest.raises(P.TableSmokeReceiptError, match="threshold-first"):
+            P._load_nominal_hold_input(
+                path, expected_sha256=_sha(path.read_bytes())
+            )
 
 
 def test_nominal_hold_live_motion_must_remain_teacher_not_physical(

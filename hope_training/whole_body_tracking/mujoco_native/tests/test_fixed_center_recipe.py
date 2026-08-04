@@ -91,6 +91,11 @@ class _FakeCLiteBase:
         self.hidden_contact = hidden_contact
         self.hidden_nonracket_event = hidden_nonracket_event
         self.reset_calls = 0
+        self._question_reset_provider = None
+
+    def install_question_reset_provider(self, provider):
+        assert self._question_reset_provider is None
+        self._question_reset_provider = provider
 
     def _row(self, offset: float = 0.0):
         row = self.torch.zeros(76, dtype=self.torch.float32)
@@ -99,6 +104,9 @@ class _FakeCLiteBase:
 
     def reset(self, *, seed=None):
         del seed
+        token = self._question_reset_provider.stage(tuple(range(self.num_envs)))
+        self.questions = token.questions
+        self._question_reset_provider.commit(token)
         self.reset_calls += 1
         self._ticks[:] = 0
         self._boundary = True
@@ -169,6 +177,13 @@ class _FakeCLiteBase:
             )
             ledgers.append(
                 {
+                    "policy_ticks": tick,
+                    "termination": {
+                        "exact_time_out_latched": done,
+                        "exact_hard_terminated": False,
+                        "exact_hard_reason": None,
+                    },
+                    "first_exact_hard_termination": None,
                     "latest_pelvis_samples": {
                         "height_m": 1.0,
                         "up_world_z": 1.0,
@@ -181,6 +196,13 @@ class _FakeCLiteBase:
                 reset_ids.append(index)
             observation_rows.append(self._row(float(index)))
         self._boundary = len(reset_ids) == self.num_envs
+        if reset_ids:
+            token = self._question_reset_provider.stage(tuple(reset_ids))
+            questions = list(self.questions)
+            for index, question in zip(reset_ids, token.questions):
+                questions[index] = question
+            self.questions = tuple(questions)
+            self._question_reset_provider.commit(token)
         done_tensor = self.torch.as_tensor(dones, dtype=self.torch.bool)
         terminal = self.torch.stack(terminal_rows)
         observations = self.torch.stack(observation_rows)
@@ -208,10 +230,21 @@ class _FakeCLiteBase:
             time_outs=done_tensor.clone(),
             exact_hard_terminations=self.torch.zeros_like(done_tensor),
             exact_hard_termination_reasons=(None,) * self.num_envs,
+            per_env_qdes_projection_masks=tuple(
+                (False,) * self.num_actions for _ in range(self.num_envs)
+            ),
         )
 
     def _c_lite_event_eligibility(self, **_kwargs):
         return _eligibility(target=True)
+
+    def restore_reset_boundary_questions(self, questions):
+        assert self.is_reset_boundary()
+        self.questions = tuple(questions)
+        self._ticks[:] = 0
+        return self.torch.stack(
+            [self._row(float(index)) for index in range(self.num_envs)]
+        )
 
 
 def _wrapped(torch, *, num_envs=1, hidden_contact=False, hidden_nonracket_event=False):
@@ -224,32 +257,44 @@ def _wrapped(torch, *, num_envs=1, hidden_contact=False, hidden_nonracket_event=
     )
     base._fixed_center_continuous_wait_preparation = recipe.ContinuousWaitPreparation(
         spec_sha256=spec.content_sha256,
-        wait_policy_steps=1,
-        wait_physics_substeps=4,
+        wait_policy_min_steps=1,
+        wait_policy_max_steps=1,
+        control_decimation=4,
         physics_step_dt_s=0.005,
         per_env=tuple(
             {
                 "env_index": index,
                 "parent_question_source_sha256": "7" * 64,
-                "launch_content_sha256": "8" * 64,
-                "wait_s": 0.02,
-                "gravity_w_mps2": [0.0, 0.0, -9.81],
-                "wind_w_mps": [0.0, 0.0, 0.0],
-                "fluid_density": 0.0,
-                "fluid_viscosity": 0.0,
-                "ball_dof_damping": [0.0] * 6,
-                "ball_body_gravcomp": 0.0,
-                "ball_qfrc_applied": [0.0] * 6,
-                "ball_xfrc_applied": [0.0] * 6,
-                "reset_ball_position_w_m": [1.0, 1.0, 1.0],
-                "reset_ball_linear_velocity_w_mps": [1.0, 1.0, 1.0],
-                "reveal_ball_position_w_m": [1.0 + index] * 3,
-                "reveal_ball_linear_velocity_w_mps": [1.0 + index] * 3,
-                "parent_nominal_time_to_contact_s": 0.02,
-                "derived_nominal_time_to_contact_s": 0.04,
+                "variants": [{
+                    "launch_content_sha256": "8" * 64,
+                    "wait_policy_steps": 1,
+                    "wait_physics_substeps": 4,
+                    "wait_s": 0.02,
+                    "gravity_w_mps2": [0.0, 0.0, -9.81],
+                    "wind_w_mps": [0.0, 0.0, 0.0],
+                    "fluid_density": 0.0,
+                    "fluid_viscosity": 0.0,
+                    "ball_dof_damping": [0.0] * 6,
+                    "ball_body_gravcomp": 0.0,
+                    "ball_qfrc_applied": [0.0] * 6,
+                    "ball_xfrc_applied": [0.0] * 6,
+                    "reset_ball_position_w_m": [1.0, 1.0, 1.0],
+                    "reset_ball_linear_velocity_w_mps": [1.0, 1.0, 1.0],
+                    "reveal_ball_position_w_m": [1.0 + index] * 3,
+                    "reveal_ball_linear_velocity_w_mps": [1.0 + index] * 3,
+                    "reveal_ball_spin_w_radps": [1.0 + index] * 3,
+                    "wait_ball_state": "sealed_contact_free_parking",
+                    "conservative_park_z_after_wait_m": 10.0,
+                    "atomic_ball_launch_on_reveal": True,
+                    "parent_nominal_time_to_contact_s": 0.02,
+                    "derived_nominal_time_to_contact_s": 0.04,
+                }],
             }
             for index in range(num_envs)
         ),
+    )
+    base._fixed_center_wait_question_variants = tuple(
+        (question,) for question in base.questions
     )
     return recipe.FixedCenterDiagnosticVecEnv(
         base_env=base,
@@ -275,7 +320,7 @@ def test_recipe_receipt_is_explicitly_diagnostic_and_not_full_body():
     assert "cpu_sequential_vecenv_has_no_4096_matched_workload_receipt" in (
         recipe.FORMAL_BLOCKERS
     )
-    assert "continuous_native_gravity_wait_is_not_cross_engine_launch_parity" in (
+    assert "parked_wait_atomic_native_ball_launch_is_not_cross_engine_parity" in (
         recipe.FORMAL_BLOCKERS
     )
     assert len(recipe.RECIPE_SOURCE_SHA256) == 64
@@ -386,13 +431,128 @@ def test_wait_preparation_preserves_external_question_sha_and_seals_launch(
     assert prepared.questions[0].source_path == question.source_path
     assert prepared.questions[0].source_sha256 == parent_sha
     launch_sha = prepared._fixed_center_continuous_wait_preparation.per_env[0][
-        "launch_content_sha256"
-    ]
+        "variants"
+    ][0]["launch_content_sha256"]
     assert launch_sha != parent_sha
     assert len(launch_sha) == 64
     assert prepared.diagnostic_training_receipt()["ppo_ready"] is False
     with pytest.raises(ValueError):
         prepared.questions[0].birth_position_w_m[0] = 99.0
+
+
+def test_seeded_wait_range_has_exact_5_and_25_tick_atomic_boundaries():
+    wait = recipe._load_task_wait_module()
+    schedule = wait.ActionBallTaskWaitSchedule(
+        seed=20260804,
+        min_wait_ticks=5,
+        max_wait_ticks=25,
+        episode_horizon_ticks=500,
+        required_active_ticks=200,
+    )
+    assignments = [
+        schedule.assignment(env_id=env_id, reset_generation=generation)
+        for env_id in range(32)
+        for generation in range(1, 33)
+    ]
+    assert {assignment.wait_ticks for assignment in assignments} == set(range(5, 26))
+    for boundary in (5, 25):
+        assignment = next(
+            value for value in assignments if value.wait_ticks == boundary
+        )
+        state = recipe._EpisodeState()
+        state.reset(assignment)
+        for _ in range(boundary - 1):
+            assert state.task_valid is False
+            assert state.advance() is False
+        assert state.task_valid is False
+        assert state.advance() is True
+        assert state.task_valid is True
+
+
+def test_question_provider_can_replace_only_unconsumed_bootstrap_reset():
+    class Provider:
+        @staticmethod
+        def stage(_env_ids):
+            return None
+
+        @staticmethod
+        def commit(_token):
+            return None
+
+        @staticmethod
+        def abort(_token):
+            return None
+
+    native = object.__new__(vec_env.MujocoN1DiagnosticVecEnv)
+    native._has_reset = True
+    native._at_reset_boundary = True
+    native._question_reset_provider = None
+    native._question_reset_provider_install_open = True
+    provider = Provider()
+
+    native.install_question_reset_provider(provider)
+    assert native._question_reset_provider is provider
+    assert native._question_reset_provider_install_open is False
+    with pytest.raises(
+        vec_env.VecEnvContractError,
+        match="before the first policy transition",
+    ):
+        native.install_question_reset_provider(Provider())
+
+
+def test_question_provider_cannot_be_installed_after_transition_window_closes():
+    native = object.__new__(vec_env.MujocoN1DiagnosticVecEnv)
+    native._has_reset = True
+    native._at_reset_boundary = True
+    native._question_reset_provider = None
+    native._question_reset_provider_install_open = False
+    provider = SimpleNamespace(
+        stage=lambda _ids: None,
+        commit=lambda _token: None,
+        abort=lambda _token: None,
+    )
+    with pytest.raises(
+        vec_env.VecEnvContractError,
+        match="before the first policy transition",
+    ):
+        native.install_question_reset_provider(provider)
+
+
+def test_wait_provider_abort_preserves_generation_and_checkpoint_roundtrips():
+    wait = recipe._load_task_wait_module()
+    schedule = wait.ActionBallTaskWaitSchedule(
+        seed=20260804,
+        min_wait_ticks=5,
+        max_wait_ticks=25,
+        episode_horizon_ticks=500,
+        required_active_ticks=200,
+    )
+    variants = tuple(
+        tuple(SimpleNamespace(wait_ticks=value) for value in range(5, 26))
+        for _ in range(2)
+    )
+    provider = recipe._WaitQuestionResetProvider(
+        schedule=schedule, variants=variants
+    )
+    staged = provider.stage((0,))
+    first = staged.assignments[0]
+    provider.abort(staged)
+    retry = provider.stage((0,))
+    assert retry.assignments[0] == first
+    provider.commit(retry)
+    provider.consume_committed((0,))
+    other = provider.stage((1,))
+    provider.commit(other)
+    provider.consume_committed((1,))
+    state = provider.state_dict()
+    restored = recipe._WaitQuestionResetProvider(
+        schedule=schedule, variants=variants
+    )
+    restored.load_state_dict(state)
+    assert restored.state_dict() == state
+    next_source = provider.stage((0, 1))
+    next_restored = restored.stage((0, 1))
+    assert next_source.assignments == next_restored.assignments
 
 
 def test_preparation_mutation_fails_closed_before_physics():

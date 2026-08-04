@@ -138,9 +138,17 @@ rewards:
   virtual_landing_base_frac: 0.6
   virtual_landing_settle_delay_s: 0.0
   # Every true unsafe termination is charged exactly once by generic death:
-  # -300 * policy_dt(0.02 s) = -6.  Table/fall/joint masks remain distinct evidence channels,
+  # -10 * policy_dt(0.02 s) = -0.2.  Table/fall/joint masks remain distinct evidence channels,
   # but no reason-specific reward may stack a second charge on the same terminal transition.
-  death_penalty_weight: -300.0
+  #
+  # 2026-08-05 层级对齐(exp §5.6 第 7 条):-300.0 -> -10.0。
+  # 这一行【必须】跟着 train.py 的 _REWARD_PACK_V2_DIRECT 一起改,否则整个对齐是空转:
+  # 包先写 direct weight,随后 train.py:14662 的 rewards.death_penalty_weight 用户键
+  # 【压在包后面】(源码原注:"包 direct 写 -300 在前,用户键在此压包"),
+  # 所以只要这里还写 -300.0,凡是没在 argv 里显式钉 task.rewards.death_penalty_weight 的
+  # ActionBall 运行都会被这行拽回旧价。A211/C211 两个 launcher 有 argv 钉,
+  # launch_n1_reward_screen_diagnostic.py(task=HOPEPingPongActionBall,无 argv 钉)没有。
+  death_penalty_weight: -10.0
   table_hit_penalty_weight: 0.0
   hold_ready_weight: 0.0
   foot_orientation_weight: 0.0
@@ -156,7 +164,17 @@ rewards:
   # ``joint_limit`` is the actual-q channel on this
   # ActionBall leaf (not Isaac Lab's legacy past-the-soft-limit-only tail).
   qdes_limit_barrier_weight: -5.0
-  qdes_limit_barrier_margin_frac: 0.08
+  # 人话:这条罚"命令值离限位多近"。带宽必须比投影包络窄,否则罚的是护栏自己放进去的位置。
+  #
+  # 2026-08-04 修 0.08 -> 0.05。原值构造上保证永久底噪:pre-apply guard 会把越界目标投影进
+  # [lower + 0.05*span, upper - 0.05*span](hope_actions.py:4984-4996,inset 常数 0.05 在 :1234),
+  # 于是任何被投影/被刹车钳住的关节,其 processed q_des 必然落在 d = 0.05*span 处;而 barrier
+  # 带宽 0.08 > 0.05 -> intrusion = (0.08-0.05)/0.08 = 0.375 -> per-joint 0.8435
+  # -> post-dt -0.0844/关节/步,是该项理论上限 -0.10 的 84%。3 个关节被钳就是 -0.25/步,
+  # 吃掉窗内全部 dense 收入 0.575/步 的 44% —— 而这不是策略放进去的,它躲不掉。
+  # 取 0.05 让 barrier 带外沿正好接上投影包络内沿:包络内的合法目标零罚,真正越界仍由
+  # qdes_projection_penalty(罚投影前超出量)与 joint_limit(罚实际 q 靠限位多近)两条覆盖。
+  qdes_limit_barrier_margin_frac: 0.05
   joint_limit_weight: -5.0
   # Unlike DeployParity, action-ball exposes a real base task through HITTER's native +2 channel.
   base_position_weight: 1.5

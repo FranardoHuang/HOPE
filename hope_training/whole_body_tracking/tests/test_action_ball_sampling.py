@@ -1695,6 +1695,169 @@ def test_explicit_joint_mixture_is_exact_20_60_20_and_center_is_not_a_point():
         sampler.assert_issued_sample(receipt)
 
 
+def test_opt_in_initial_center_is_one_question_then_promotes_only_selected_arm():
+    profile = _profile()
+    mixture = S.SamplingMixture()
+    center = S.DomainLevels()
+    kwargs = {
+        "seed": 20260804,
+        "sampling_mixture": mixture,
+        "contact_time_step_s": 0.02,
+        "initial_center_single_question": True,
+    }
+    sampler = S.ActionBallSampler([profile], **kwargs)
+
+    def physical_question(birth, sample):
+        return (
+            birth.base_start_w_m,
+            sample.base_spawn_latent_w_m,
+            sample.base_travel_latent_b_yaw_m,
+            sample.base_goal_w_m,
+            sample.contact_offset_from_base_goal_b_yaw_m,
+            sample.contact_w_m,
+            sample.time_to_contact_s,
+            sample.time_to_contact_tick,
+            sample.incoming_speed_mps,
+            sample.incoming_direction_b_yaw,
+            sample.incoming_velocity_w_mps,
+            sample.spin_magnitude_radps,
+            sample.spin_direction_b_yaw,
+            sample.spin_w_radps,
+            sample.landing_aim_w_xy_m,
+        )
+
+    center_rows = []
+    for _ in range(3):
+        birth = _birth(sampler, levels=center)
+        sample = _sample(sampler, birth, levels=center)
+        center_rows.append((birth, sample))
+        assert birth.sampling_stratum == "center"
+        assert birth.sampling_levels == center
+        assert birth.frontier_arm is None
+        assert sample.sampling_stratum == "center"
+        assert sample.sampling_levels == center
+        assert sample.frontier_arm is None
+
+    expected = physical_question(*center_rows[0])
+    assert all(physical_question(*row) == expected for row in center_rows)
+    assert len({row[0].birth_id for row in center_rows}) == 3
+    assert len({row[1].sample_id for row in center_rows}) == 3
+    assert sampler.draw_count == 3 * (
+        S.DRAWS_PER_BIRTH + S.DRAWS_PER_SAMPLE
+    )
+    grid = sampler._contact_time_grid_by_action[profile.action_uid]
+    assert expected[7] == grid.center_tick
+    assert expected[6] == grid.center_tick * grid.step_s
+
+    # Exact checkpoint restore keeps the counter tape and point-support mode;
+    # it does not serialize a shortcut question source.
+    restored = S.ActionBallSampler([profile], **kwargs)
+    restored.load_state_dict(deepcopy(sampler.state_dict()))
+    next_birth = _birth(sampler, levels=center)
+    restored_birth = _birth(restored, levels=center)
+    assert restored_birth == next_birth
+    next_sample = _sample(sampler, next_birth, levels=center)
+    restored_sample = _sample(restored, restored_birth, levels=center)
+    assert restored_sample == next_sample
+    assert physical_question(next_birth, next_sample) == expected
+
+    # A single promoted arm expands continuously from zero to that arm's
+    # manifest maximum; all other physical coordinates remain at center.
+    promoted = S.DomainLevels(incoming_speed_upper=0.5)
+    promoted_birth = _birth(sampler, epoch=1, levels=promoted)
+    promoted_sample = _sample(
+        sampler, promoted_birth, epoch=1, levels=promoted
+    )
+    assert promoted_birth.base_start_w_m == profile.base_spawn_center_w_m
+    assert promoted_sample.sampling_stratum == "interior"
+    assert promoted_sample.frontier_arm is None
+    assert promoted_sample.incoming_speed_mps > profile.incoming_speed_center_mps
+    assert promoted_sample.contact_offset_from_base_goal_b_yaw_m == (
+        profile.contact_offset_center_b_yaw_m
+    )
+    assert promoted_sample.incoming_direction_b_yaw == (
+        profile.incoming_direction_center_b_yaw
+    )
+    assert promoted_sample.spin_magnitude_radps == (
+        profile.spin_magnitude_center_radps
+    )
+    assert promoted_sample.landing_aim_w_xy_m == (
+        profile.landing_aim_center_w_xy_m
+    )
+
+
+def test_initial_center_mode_preserves_fixed_rng_budget_and_is_contract_owned():
+    profile = _profile()
+    common = {
+        "seed": 99,
+        "sampling_mixture": S.SamplingMixture(),
+        "contact_time_step_s": 0.02,
+    }
+    legacy = S.ActionBallSampler([profile], **common)
+    point = S.ActionBallSampler(
+        [profile], initial_center_single_question=True, **common
+    )
+    legacy_birth = _birth(legacy)
+    point_birth = _birth(point)
+    legacy_sample = _sample(legacy, legacy_birth)
+    point_sample = _sample(point, point_birth)
+    assert (legacy_birth.draw_start, legacy_birth.draw_end) == (
+        point_birth.draw_start,
+        point_birth.draw_end,
+    )
+    assert (legacy_sample.draw_start, legacy_sample.draw_end) == (
+        point_sample.draw_start,
+        point_sample.draw_end,
+    )
+    assert legacy.draw_count == point.draw_count
+    assert legacy.sampler_contract_sha256 != point.sampler_contract_sha256
+    with pytest.raises(ValueError, match="contract does not match"):
+        legacy.load_state_dict(point.state_dict())
+
+
+@pytest.mark.parametrize(
+    "promoted,owning_scope,arm",
+    (
+        (
+            S.DomainLevels(base_spawn_x_upper=1.0),
+            "birth",
+            "base_spawn_x_upper",
+        ),
+        (
+            S.DomainLevels(incoming_speed_upper=1.0),
+            "swing",
+            "incoming_speed_upper",
+        ),
+    ),
+)
+def test_single_question_frontier_keeps_the_zero_support_component_at_center(
+    promoted, owning_scope, arm
+):
+    sampler = S.ActionBallSampler(
+        [_profile()],
+        seed=20260804,
+        sampling_mixture=S.SamplingMixture(),
+        contact_time_step_s=0.02,
+        initial_center_single_question=True,
+    )
+    rows = []
+    for _ in range(4):
+        birth = _birth(sampler, epoch=1, levels=promoted)
+        sample = _sample(sampler, birth, epoch=1, levels=promoted)
+        rows.append((birth, sample))
+    birth, sample = rows[-1]
+    if owning_scope == "birth":
+        assert birth.sampling_stratum == "frontier"
+        assert birth.frontier_arm == arm
+        assert sample.sampling_stratum == "center"
+        assert sample.frontier_arm is None
+    else:
+        assert birth.sampling_stratum == "center"
+        assert birth.frontier_arm is None
+        assert sample.sampling_stratum == "frontier"
+        assert sample.frontier_arm == arm
+
+
 def test_production_ttc_is_native_tick_sampled_replayable_and_two_sided():
     profile = _profile()
     mixture = S.SamplingMixture()
@@ -3092,4 +3255,40 @@ def test_frozen_evaluation_refuses_schedule_and_receipt_drift():
             selected_arm=None,
             base_yaw_rad=0.0,
             policy_dt_s=0.0,
+        )
+
+
+def test_frozen_evaluation_cannot_widen_point_support_before_first_promotion():
+    levels = S.DomainLevels()
+    center = S.sample_frozen_evaluation_proposal(
+        _profile(),
+        evaluation_seed=20260804,
+        external_sample_index=1,
+        external_birth_index=1,
+        domain_epoch=0,
+        domain_levels=levels,
+        rho=0.0,
+        sampling_stratum="center",
+        selected_arm=None,
+        base_yaw_rad=0.0,
+        policy_dt_s=0.02,
+        initial_center_single_question=True,
+    )
+    assert center.birth.sampling_stratum == "center"
+    assert center.sample.sampling_stratum == "center"
+    assert center.sample.incoming_speed_mps == _profile().incoming_speed_center_mps
+    with pytest.raises(ValueError, match="point support"):
+        S.sample_frozen_evaluation_proposal(
+            _profile(),
+            evaluation_seed=20260804,
+            external_sample_index=3,
+            external_birth_index=3,
+            domain_epoch=0,
+            domain_levels=levels,
+            rho=0.0,
+            sampling_stratum="frontier",
+            selected_arm="incoming_speed_upper",
+            base_yaw_rad=0.0,
+            policy_dt_s=0.02,
+            initial_center_single_question=True,
         )

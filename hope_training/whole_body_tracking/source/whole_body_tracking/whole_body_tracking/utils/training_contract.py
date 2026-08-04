@@ -44,6 +44,12 @@ FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY = "formal_evidence_bookable"
 ACTION_BALL_POLICY_BOOTSTRAP_KIND = (
     "action_ball_shared_ready_actor_bootstrap_v1"
 )
+ACTION_BALL_DR_L0_ZERO_DECODER_SOURCE = (
+    "action_ball_dr_l0_exact_zero_decoder"
+)
+ACTION_BALL_DR_L0_ZERO_DECODER_KIND = (
+    "action_ball_dr_l0_exact_zero_decoder_v1"
+)
 ACTION_BALL_DYNAMIC_READY_RUNTIME_BINDING_KIND = (
     "action_ball_dynamic_ready_runtime_binding_v1"
 )
@@ -257,23 +263,58 @@ def _action_ball_211_wait_contract_facts() -> dict:
     }
 
 
-def _action_ball_211_question_source_contract_facts() -> dict:
-    """Return current diagnostic versus final question-source semantics."""
+def _action_ball_211_question_source_contract_facts(*, family: str) -> dict:
+    """Return one family's question authority and target-provider semantics."""
 
-    return {
-        "identity": "action_ball_211_question_source_scope_v1",
-        "current_immutable_tape": {
-            "scope": "diagnostic_n1_early_fixed_band_only",
-            "final_curriculum_frozen": False,
-        },
-        "final_curriculum": {
-            "source": "pregenerated_cached_band_question_bank",
-            "generation": "offline_before_rollout",
-            "reset_selection": "index_one_bank_row",
+    if family not in ("A211", "C211"):
+        raise ValueError("question-source family must be A211 or C211")
+    sampler = {
+        "source": "runtime_curriculum_sampler",
+        "cadence": "every_episode_reset",
+        "curriculum_domain_levels_consulted_every_reset": True,
+        "sampler_runs_every_reset": True,
+        "initial_center_single_question": True,
+        "initial_center_activation": "all_32_domain_levels_exact_zero",
+        "initial_center_physical_support": "literal_profile_center_point",
+        "initial_center_rng_draws": "normal_fixed_budget",
+        "post_promotion_support": "zero_to_manifest_max_width_per_promoted_arm",
+        "sampler_rng_reused_by_target_provider": False,
+        "physical_rng_draw_count_authority": (
+            "sample_receipt_draw_end_minus_draw_start"
+        ),
+        "zero_physical_rng_draw_claim_permitted": False,
+        "selection": "sample_current_domain_levels",
+        "checkpoint_resume": "exact_sampler_and_curriculum_state",
+    }
+    if family == "A211":
+        target_provider = {
+            "source": "online_solver",
+            "desired_contact_inverse": True,
+            "online_inverse_solves_per_step": 0,
+            "exact_question_answer_cache": {
+                "enabled": True,
+                "role": "answer_only_never_question_source",
+                "key": "complete_semantic_question_sha256",
+                "cold_first_distinct_question_inverse_solve_calls": 1,
+                "same_batch_identical_question_inverse_solve_calls": 0,
+                "later_identical_question_inverse_solve_calls": 0,
+                "changed_question_inverse_solve_calls": 1,
+                "checkpoint_resume": "exact_ieee_answer_and_counters",
+            },
+        }
+    else:
+        target_provider = {
+            "source": "direct_ball",
+            "desired_contact_inverse": False,
+            "exact_question_answer_cache": {"enabled": False},
             "online_inverse_solves_per_reset": 0,
             "online_inverse_solves_per_step": 0,
-            "wait_remaining_observed": False,
-        },
+        }
+    return {
+        "identity": "action_ball_211_question_source_scope_v5",
+        "family": family,
+        "question_sampler": sampler,
+        "target_provider": target_provider,
     }
 
 
@@ -322,7 +363,7 @@ def _action_ball_c225_reward_contract_facts() -> dict:
     """
 
     return {
-        "identity": "action_ball_c211_achieved_outcome_reward_v2",
+        "identity": "action_ball_c211_achieved_outcome_reward_v3",
         "desired_contact_position_velocity_face_consumed": False,
         "task_valid_required": True,
         "strike_bridge": {
@@ -332,7 +373,7 @@ def _action_ball_c225_reward_contract_facts() -> dict:
                 "action_ball_c225_rewards."
                 "c225_strike_ball_paddle_center_proximity"
             ),
-            "weight": 220.0,
+            "weight": 240.0,
             "std_m": 0.15,
             "kernel": "cauchy_inverse_quadratic",
             "eligibility": "task_valid_active_swing_single_exact_strike_tick",
@@ -340,10 +381,17 @@ def _action_ball_c225_reward_contract_facts() -> dict:
         },
         "economics": {
             "policy_dt_s": 0.02,
-            "compatible_swing_motion_static_max": 3.6575,
-            "strike_bridge_post_dt_peak": 4.4,
-            "legal_landing_post_dt_min": 6.0,
-            "ordering": "motion_lt_strike_peak_lt_legal_landing",
+            "task_valid_swing_mimic_undiscounted_cap": 2.8325,
+            "task_reveal_discounted_gamma": 0.99,
+            "task_reveal_contact_tick": 92,
+            "task_valid_swing_mimic_discounted_cap": 1.7733077595610476,
+            "strike_bridge_post_dt_peak": 4.8,
+            "strike_bridge_discounted_at_contact": 1.9040534708257204,
+            "legal_landing_post_dt_min": 8.4,
+            "legal_landing_discounted_at_contact_min": 3.332093573945011,
+            "ordering": (
+                "task_valid_swing_mimic_lt_strike_peak_lt_legal_landing"
+            ),
         },
         "landing": {
             "term": "virtual_landing",
@@ -352,7 +400,7 @@ def _action_ball_c225_reward_contract_facts() -> dict:
                 "action_ball_c225_rewards."
                 "c225_landing_outcome_actual_contact"
             ),
-            "weight": 500.0,
+            "weight": 700.0,
             "evidence_source": (
                 "analytic_prediction_from_achieved_selected_rubber_contact"
             ),
@@ -490,9 +538,21 @@ _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS = frozenset(
         "startup_offset_delta_upper",
     }
 )
+_ACTION_BALL_POLICY_BOOTSTRAP_DR_L0_DECODER_KEYS = frozenset(
+    {
+        *_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS,
+        "startup_offset_delta_identity",
+    }
+)
 _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS = frozenset(
     {
         *_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS,
+        "target_joint_pos",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_DR_L0_DECODER_V2_KEYS = frozenset(
+    {
+        *_ACTION_BALL_POLICY_BOOTSTRAP_DR_L0_DECODER_KEYS,
         "target_joint_pos",
     }
 )
@@ -2444,7 +2504,7 @@ def runtime_execution_facts(
                 cfg, policy_dt=policy_dt
             ),
             "question_source_contract": (
-                _action_ball_211_question_source_contract_facts()
+                _action_ball_211_question_source_contract_facts(family="A211")
             ),
         }
     elif actor_contract_name == "action_ball_c211":
@@ -2481,7 +2541,7 @@ def runtime_execution_facts(
                 cfg, policy_dt=policy_dt
             ),
             "question_source_contract": (
-                _action_ball_211_question_source_contract_facts()
+                _action_ball_211_question_source_contract_facts(family="C211")
             ),
             "contact_target_absent": True,
             "c225_reward_contract": _action_ball_c225_reward_contract_facts(),
@@ -4566,6 +4626,114 @@ def action_ball_shared_ready_sha256(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def action_ball_dr_l0_zero_decoder_identity(
+    *, joint_names: list[str] | tuple[str, ...]
+) -> dict:
+    """Build the portable identity for an intentionally absent startup offset.
+
+    DR-L0 removes ``events.add_joint_default_pos`` rather than sampling a
+    degenerate event.  The policy bootstrap therefore needs a source identity
+    that says exactly that: all 31 ordered decoder deltas are zero.  Keeping a
+    reproducible content digest on this tiny document prevents a disabled
+    event from being mislabeled as the historical sampled-event contract.
+    """
+
+    names = list(joint_names)
+    if (
+        len(names) != 31
+        or any(type(name) is not str or not name for name in names)
+        or len(set(names)) != 31
+    ):
+        raise ValueError(
+            "DR-L0 zero decoder identity requires 31 unique ordered joint names"
+        )
+    unsigned = {
+        "schema_version": 1,
+        "kind": ACTION_BALL_DR_L0_ZERO_DECODER_KIND,
+        "joint_names": names,
+        "startup_offset_delta": [0.0] * 31,
+    }
+    return {
+        **unsigned,
+        "content_sha256": _action_ball_canonical_sha256(unsigned),
+    }
+
+
+def action_ball_dr_l0_contract_payload() -> dict:
+    """Return the one canonical resolved DR-L0 finalizer contract.
+
+    This dependency-free helper lets launchers, the training finalizer, and
+    hard-contract validators hash identical bytes instead of maintaining
+    descriptive mirrors of the all-off state.
+    """
+
+    event_slots = (
+        "physics_material",
+        "add_joint_default_pos",
+        "base_com",
+        "randomize_link_mass",
+        "randomize_pd_gains",
+        "push_robot",
+        "force_push",
+        "force_push_sweep",
+        "combined_push",
+        "combined_push_sweep",
+    )
+    reset_axes = ("x", "y", "z", "roll", "pitch", "yaw")
+    target_zero_fields = (
+        "achieved_target_mix_prob",
+        "midswing_resample_prob",
+        "target_delay_steps",
+        "target_jitter_pos_per_s",
+        "target_jitter_vel_per_s",
+        "target_noise_white",
+        "target_noise_ar1_sigma",
+        "target_dropout_prob",
+        "target_post_strike_dropout_s",
+        "target_bias_per_swing",
+    )
+    return {
+        "schema_version": 1,
+        "identity": "action_ball_dr_l0_exact_all_off_v1",
+        "event_slots": {name: None for name in event_slots},
+        "policy_observation_corruption": False,
+        "motion_reset_noise": {
+            "joint_position_range": [0.0, 0.0],
+            "stand_start_yaw_range": [0.0, 0.0],
+            "pose_range": {axis: [0.0, 0.0] for axis in reset_axes},
+            "velocity_range": {axis: [0.0, 0.0] for axis in reset_axes},
+        },
+        "target_transport_noise": {
+            **{name: 0.0 for name in target_zero_fields},
+            "action_ball_target_observation_noise": False,
+        },
+        "control_step_action_delay": {"min_steps": 0, "max_steps": 0},
+        "push_flags": {
+            "push.enable": False,
+            "force_push.enable": False,
+            "lateral_perturbation_runtime_spec": None,
+        },
+        "startup_offset_delta": {
+            "source": ACTION_BALL_DR_L0_ZERO_DECODER_SOURCE,
+            "ordered_joint_count": 31,
+            "lower": [0.0] * 31,
+            "upper": [0.0] * 31,
+        },
+        "lineage": {
+            "binding": "training_contract_sha256",
+            "fresh_checkpoint_required": True,
+            "fresh_normalizers_required": True,
+            "retained_dr_resume_forbidden": True,
+        },
+    }
+
+
+def action_ball_dr_l0_contract_sha256() -> str:
+    """Hash the exact resolved DR-L0 finalizer contract."""
+
+    return _action_ball_canonical_sha256(action_ball_dr_l0_contract_payload())
+
+
 def action_ball_dynamic_ready_binding_sha256(value: Mapping) -> str:
     """Hash one runtime binding without its self-authenticating digest."""
 
@@ -5348,13 +5516,29 @@ def validate_action_ball_policy_bootstrap(
             dynamic_binding["rows"][0]["hold_qdes_joint_pos_rad"]
         )
 
-    decoder_keys = (
-        _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS
-        if schema_version == 1
-        else _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS
+    decoder_raw = block["decoder"]
+    decoder_source = (
+        decoder_raw.get("startup_offset_delta_source")
+        if isinstance(decoder_raw, Mapping)
+        else None
     )
+    dr_l0_zero_decoder = (
+        decoder_source == ACTION_BALL_DR_L0_ZERO_DECODER_SOURCE
+    )
+    if schema_version == 1:
+        decoder_keys = (
+            _ACTION_BALL_POLICY_BOOTSTRAP_DR_L0_DECODER_KEYS
+            if dr_l0_zero_decoder
+            else _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS
+        )
+    else:
+        decoder_keys = (
+            _ACTION_BALL_POLICY_BOOTSTRAP_DR_L0_DECODER_V2_KEYS
+            if dr_l0_zero_decoder
+            else _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_V2_KEYS
+        )
     decoder = _require_exact_mapping_keys(
-        block["decoder"],
+        decoder_raw,
         decoder_keys,
         name="action-ball policy bootstrap decoder",
     )
@@ -5398,7 +5582,28 @@ def validate_action_ball_policy_bootstrap(
             raise ValueError(
                 "dynamic-ready decoder bias disagrees with its runtime binding"
             )
-    if (
+    if dr_l0_zero_decoder:
+        zero_identity = _require_exact_mapping_keys(
+            decoder["startup_offset_delta_identity"],
+            frozenset(
+                {
+                    "schema_version",
+                    "kind",
+                    "joint_names",
+                    "startup_offset_delta",
+                    "content_sha256",
+                }
+            ),
+            name="action-ball DR-L0 zero decoder identity",
+        )
+        expected_zero_identity = action_ball_dr_l0_zero_decoder_identity(
+            joint_names=list(joint_names)
+        )
+        if dict(zero_identity) != expected_zero_identity:
+            raise ValueError(
+                "action-ball DR-L0 zero decoder identity/content SHA is not reproducible"
+            )
+    elif (
         decoder["startup_offset_delta_source"]
         != "events.add_joint_default_pos.uniform_add"
     ):
@@ -5421,6 +5626,13 @@ def validate_action_ball_policy_bootstrap(
     ):
         raise ValueError(
             "action-ball policy bootstrap startup offset envelope is invalid"
+        )
+    if dr_l0_zero_decoder and (
+        any(value != 0.0 for value in startup_delta_lower)
+        or any(value != 0.0 for value in startup_delta_upper)
+    ):
+        raise ValueError(
+            "action-ball DR-L0 startup offset envelope must be exactly 31-D zero"
         )
     if any(item <= 0.0 for item in scale):
         raise ValueError("action-ball policy bootstrap action_scale must be positive")
@@ -5475,20 +5687,33 @@ def validate_action_ball_policy_bootstrap(
         )
     noise_std = initialization["init_noise_std"]
     sigma = initialization["sigma_envelope"]
+    # 人话:探索幅度不再钉死在一个数上,只要求"配置值 = 实际值",到底安不安全交给下面那道
+    # 真正按这个值算出来的 4-sigma 硬带门去判。
+    #
+    # Pinning init_noise_std to a literal turned an experiment into a refactor: any exploration
+    # ablation had to edit source, and editing source moved the runtime-source SHA, which then
+    # tripped the lineage validators.  The safety property that actually matters is the one
+    # checked below -- that the 4-sigma q_des envelope around the bootstrap hold cannot reach the
+    # hard forbidden band -- and that check must be computed FROM this value, not from a constant.
+    # Reference point: the vendor-aligned build_1 arm that does reach the ball trains at
+    # init_noise_std=1.0 (50x this branch's 0.02, i.e. 21.5 deg vs 0.43 deg of 1-sigma shoulder
+    # pitch travel).  With a zero-weight actor whose bias is pinned to the ready pose, the initial
+    # policy is a constant, so every gradient the mimic terms can supply has to arrive through
+    # exploration.
     if (
         type(noise_std) not in (int, float)
         or not math.isfinite(float(noise_std))
-        or float(noise_std) != 0.02
+        or not (0.0 < float(noise_std) <= 1.0)
         or noise_std_type not in ("scalar", "log")
         or type(realized_noise_std) not in (int, float)
         or not math.isfinite(float(realized_noise_std))
-        or float(realized_noise_std) != 0.02
+        or float(realized_noise_std) != float(noise_std)
         or type(sigma) not in (int, float)
         or float(sigma) != 4.0
     ):
         raise ValueError(
-            "action-ball policy bootstrap requires configured and realized "
-            "init_noise_std=0.02 plus a 4-sigma envelope"
+            "action-ball policy bootstrap requires a finite configured init_noise_std in "
+            "(0, 1] that the runtime realizes exactly, plus a 4-sigma envelope"
         )
     if schema_version == 2 and noise_std_type != "scalar":
         raise ValueError(
@@ -5577,7 +5802,10 @@ def validate_action_ball_policy_bootstrap(
                 "action-ball policy bootstrap hard-inner envelope is not "
                 f"reproducible at joint {index}"
             )
-        radius = 4.0 * 0.02 * gain
+        # 这里以前写死 4.0 * 0.02:σ 调大以后这道门还按 0.02 算,照样放行,等于假绿。
+        # Compute the envelope from the value actually being launched, so this gate fails closed
+        # when a wider exploration std really would reach the forbidden band.
+        radius = float(sigma) * float(noise_std) * gain
         if not (
             inner_lo < target + offset_lo - radius
             and target + offset_hi + radius < inner_hi
@@ -5829,7 +6057,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             or contract.get("task_wait_contract")
             != _action_ball_211_wait_contract_facts()
             or contract.get("question_source_contract")
-            != _action_ball_211_question_source_contract_facts()
+            != _action_ball_211_question_source_contract_facts(family="A211")
         ):
             raise ValueError(
                 "schema-3 A211 training requires its exact 319-D privileged "
@@ -5858,7 +6086,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             or contract.get("task_wait_contract")
             != _action_ball_211_wait_contract_facts()
             or contract.get("question_source_contract")
-            != _action_ball_211_question_source_contract_facts()
+            != _action_ball_211_question_source_contract_facts(family="C211")
             or contract.get("contact_target_absent") is not True
             or contract.get("c225_reward_contract")
             != _action_ball_c225_reward_contract_facts()

@@ -18,6 +18,11 @@ MODULE_PATH = (
     ROOT
     / "source/whole_body_tracking/whole_body_tracking/utils/training_contract.py"
 )
+C211_CONTRACT_PATH = (
+    ROOT
+    / "source/whole_body_tracking/whole_body_tracking/tasks/tracking"
+    / "action_ball_c211_trainability.py"
+)
 SPEC = importlib.util.spec_from_file_location("training_contract_under_test", MODULE_PATH)
 TC = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(TC)
@@ -1275,7 +1280,7 @@ def test_c211_schema3_requires_independent_ball_critic_and_normalizer_lineage():
             "task_valid_required": True,
             "task_wait_contract": TC._action_ball_211_wait_contract_facts(),
             "question_source_contract": (
-                TC._action_ball_211_question_source_contract_facts()
+                TC._action_ball_211_question_source_contract_facts(family="C211")
             ),
             "contact_target_absent": True,
             "c225_reward_contract": (
@@ -1319,6 +1324,21 @@ def test_c211_schema3_requires_independent_ball_critic_and_normalizer_lineage():
         TC.validate_action_ball_training_authorization(legacy)
 
 
+def test_c211_schema3_reward_contract_exactly_matches_runtime_preflight():
+    """Do not let two internally consistent copies silently drift together."""
+
+    spec = importlib.util.spec_from_file_location(
+        "c211_trainability_schema3_crosscheck", C211_CONTRACT_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    assert (
+        TC._action_ball_c225_reward_contract_facts()
+        == module.c211_reward_contract_facts()
+    )
+
+
 def test_a211_schema3_requires_task_valid_wait_and_fresh_319d_critic():
     actor_layout = TC._ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS[
         "action_ball_a211"
@@ -1349,7 +1369,7 @@ def test_a211_schema3_requires_task_valid_wait_and_fresh_319d_critic():
             "task_valid_required": True,
             "task_wait_contract": TC._action_ball_211_wait_contract_facts(),
             "question_source_contract": (
-                TC._action_ball_211_question_source_contract_facts()
+                TC._action_ball_211_question_source_contract_facts(family="A211")
             ),
         }
     )
@@ -1363,12 +1383,12 @@ def test_a211_schema3_requires_task_valid_wait_and_fresh_319d_critic():
 
     wrong = dict(contract)
     wrong["question_source_contract"] = dict(contract["question_source_contract"])
-    wrong["question_source_contract"]["final_curriculum"] = dict(
-        contract["question_source_contract"]["final_curriculum"]
+    wrong["question_source_contract"]["target_provider"] = dict(
+        contract["question_source_contract"]["target_provider"]
     )
-    wrong["question_source_contract"]["final_curriculum"][
-        "online_inverse_solves_per_reset"
-    ] = 1
+    wrong["question_source_contract"]["target_provider"][
+        "source"
+    ] = "direct_ball"
     with pytest.raises(ValueError, match="scoped question source"):
         TC.validate_action_ball_training_authorization(wrong)
 

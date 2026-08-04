@@ -200,13 +200,24 @@ def test_diagnostic_profile_emits_stable_update_schema_and_resets():
         update=7,
         collection_time_s=0.100,
         learning_time_s=0.010,
+        reset_reason_counters={
+            "terminal_reset_count": 3,
+            "timeout_reset_count": 1,
+            "termination_reason_time_out_count": 1,
+            "swing_completion_count": 2,
+        },
     )
     assert len(lines) == 1
     assert lines[0].startswith(P.PROFILE_JSON_PREFIX)
     assert json.loads(lines[0][len(P.PROFILE_JSON_PREFIX) :]) == payload
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["update"] == 7
     assert payload["clock"] == "host_perf_counter_ns_no_cuda_sync"
+    assert payload["measurement_mode"] == "profile_on_attribution_only"
+    assert payload["profile_overhead_present"] is True
+    assert payload["speed_evidence_eligible"] is False
+    assert payload["gpu_kernel_attribution"]["claimed"] is False
+    assert payload["total_ms"] == payload["update_wall_ms"] == 110.0
     assert payload["reset_env_count"] == 3
     assert payload["wrap_env_count"] == 2
     assert payload["reset_ms_per_env"] is not None
@@ -222,6 +233,17 @@ def test_diagnostic_profile_emits_stable_update_schema_and_resets():
     assert payload["unattributed"]["may_include_async_gpu_work"] is True
     assert payload["unattributed"]["nonnegative"] is True
     assert payload["unattributed"]["timing_scope_mismatch"] is False
+    assert payload["reset_strata"] == {
+        "true_reset_env_count": 3,
+        "wrap_env_count": 2,
+        "exact_behavior_counters": {
+            "swing_completion_count": 2,
+            "terminal_reset_count": 3,
+            "termination_reason_time_out_count": 1,
+            "timeout_reset_count": 1,
+        },
+        "reason_counter_source": "same-update exact behavior ledger",
+    }
 
     empty = profiler.emit_update(
         update=8,
@@ -266,6 +288,29 @@ def test_active_span_closes_and_wrappers_unwind_after_exception():
     profiler.close()
 
 
+def test_profile_reset_reasons_reject_noninteger_or_negative_counts():
+    env, _motion, _racket = _rig()
+    profiler = P.install_diagnostic_action_ball_update_profiler(
+        env,
+        diagnostic_fast_path=True,
+        clock_ns=_Clock(),
+        emit_line=lambda _line: None,
+    )
+    for counters in (
+        {"terminal_reset_count": True},
+        {"terminal_reset_count": -1},
+        {"terminal_reset_count": 1.0},
+    ):
+        with pytest.raises(RuntimeError, match="count is invalid"):
+            profiler.emit_update(
+                update=0,
+                collection_time_s=0.010,
+                learning_time_s=0.001,
+                reset_reason_counters=counters,
+            )
+    profiler.close()
+
+
 @pytest.fixture()
 def profile_runner_module(monkeypatch):
     monkeypatch.setitem(
@@ -276,6 +321,36 @@ def profile_runner_module(monkeypatch):
     return ER._load_runner_module(
         monkeypatch, ER._load_contract_module()
     )
+
+
+def test_runner_projects_existing_exact_reset_reasons_without_rescan(
+    profile_runner_module,
+):
+    project = (
+        profile_runner_module.MotionOnPolicyRunner
+        ._action_ball_profile_reset_reason_counters
+    )
+    projected = project(
+        {
+            "racket_target": {
+                "counters": {
+                    "terminal_reset_count": 7,
+                    "timeout_reset_count": 2,
+                    "swing_completion_count": 5,
+                    "termination_reason_time_out_count": 2,
+                    "termination_reason_robot_hit_table_count": 1,
+                    "virtual_capture_count": 99,
+                }
+            }
+        }
+    )
+    assert projected == {
+        "swing_completion_count": 5,
+        "terminal_reset_count": 7,
+        "termination_reason_robot_hit_table_count": 1,
+        "termination_reason_time_out_count": 2,
+        "timeout_reset_count": 2,
+    }
 
 
 class _ResetStop(RuntimeError):

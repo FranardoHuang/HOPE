@@ -1,0 +1,520 @@
+"""Cross-launcher contract tests for the exact A211/C211 Isaac four-grid."""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+import pytest
+
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
+def _load(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / filename)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+A = _load("a211_four_grid_contract", "launch_action_ball_a211_four_arm_diagnostic.py")
+C = _load("c211_four_grid_contract", "launch_action_ball_c211_diagnostic.py")
+F = _load("shared_action_ball_211_four_grid", "action_ball_211_four_grid_contract.py")
+
+
+def test_a211_c211_share_one_exact_sealed_four_grid_manifest():
+    manifest = A._isaac_four_grid_manifest()
+    assert manifest == C._isaac_four_grid_manifest()
+    unsigned = dict(manifest)
+    seal = unsigned.pop("content_sha256")
+    assert seal == A.canonical_sha256(unsigned) == C.canonical_sha256(unsigned)
+    assert seal == F.CONTENT_SHA256
+    assert manifest["cell_order"] == [
+        A.A_FIXED_CELL_ID,
+        A.A_ADAPTIVE_KL_CELL_ID,
+        C.C_FIXED_CELL_ID,
+        C.C_ADAPTIVE_KL_CELL_ID,
+    ]
+    assert A.ARM_IDS == tuple(manifest["cell_order"][:2])
+    assert C.RECIPE_IDS == tuple(manifest["cell_order"][2:])
+    assert manifest["registered_difference_axes"] == [
+        "task_semantics_and_reward",
+        "ppo_learning_rate_schedule_cell",
+    ]
+    assert manifest["adaptive_term_disambiguation"] == {
+        "adaptive_means": "ppo_kl_learning_rate_schedule",
+        "contact_kernel_sigma_controller": "disabled_static_all_cells",
+    }
+
+
+def test_both_launchers_pin_the_same_shared_authority_file_and_content():
+    assert A.FOUR_GRID_SOURCE == C.FOUR_GRID_SOURCE
+    assert A.FOUR_GRID_FILE.resolve() == C.FOUR_GRID_FILE.resolve()
+    assert A.FOUR_GRID_FILE.resolve() == (
+        SCRIPTS / "action_ball_211_four_grid_contract.py"
+    ).resolve()
+    assert sum(path == A.FOUR_GRID_SOURCE for path, _label in A.RUNTIME_SOURCE_PATHS) == 1
+    assert sum(path == C.FOUR_GRID_SOURCE for path, _label in C.RUNTIME_SOURCE_PATHS) == 1
+    assert hashlib.sha256(A.FOUR_GRID_FILE.read_bytes()).hexdigest() == hashlib.sha256(
+        C.FOUR_GRID_FILE.read_bytes()
+    ).hexdigest()
+    assert A._F.CONTENT_SHA256 == C._F.CONTENT_SHA256 == F.CONTENT_SHA256
+
+
+def test_shared_authority_rejects_resealed_field_count_order_and_family_drift():
+    mutations = (
+        lambda value: value["matched_contract"].__setitem__("entropy_coef", 0.02),
+        lambda value: value["cells"].pop(),
+        lambda value: value["cell_order"].reverse(),
+        lambda value: value["cells"][0].__setitem__("task_family", "C211"),
+        lambda value: value.__setitem__("unknown_field", True),
+    )
+    for mutate in mutations:
+        candidate = copy.deepcopy(F.manifest())
+        mutate(candidate)
+        unsigned = dict(candidate)
+        unsigned.pop("content_sha256")
+        candidate["content_sha256"] = F.canonical_sha256(unsigned)
+        with pytest.raises(F.FourGridContractError):
+            F.validate_manifest(candidate)
+
+
+def test_launchers_reject_cross_family_selection_and_local_matched_drift(monkeypatch):
+    with pytest.raises(A.LaunchRefused, match="another task family"):
+        A._four_grid_cell(C.C_FIXED_CELL_ID, task_family="C211")
+    with pytest.raises(C.LaunchRefused, match="another task family"):
+        C._four_grid_cell(A.A_FIXED_CELL_ID, task_family="A211")
+    monkeypatch.setattr(A, "TEACHER_ID", "safe-but-wrong-teacher")
+    with pytest.raises(A.LaunchRefused, match="four-grid authority differs"):
+        A._isaac_four_grid_manifest()
+
+
+def test_four_grid_cells_match_every_non_registered_setting():
+    contracts = [
+        A._arm_contract(A.A_FIXED_CELL_ID),
+        A._arm_contract(A.A_ADAPTIVE_KL_CELL_ID),
+        C._recipe_contract(C.C_FIXED_CELL_ID),
+        C._recipe_contract(C.C_ADAPTIVE_KL_CELL_ID),
+    ]
+    matched_keys = (
+        "soft_weights",
+        "actor_hidden_dims",
+        "critic_hidden_dims",
+        "init_noise_std",
+        "noise_std_type",
+        "entropy_coef",
+        "reference_guard_mode",
+        "contact_sigma_adaptation",
+    )
+    for key in matched_keys:
+        assert [contract[key] for contract in contracts] == [contracts[0][key]] * 4
+    assert contracts[0]["ppo"] == contracts[2]["ppo"]
+    assert contracts[1]["ppo"] == contracts[3]["ppo"]
+    assert (contracts[0]["ppo"]["schedule"], contracts[0]["ppo"]["learning_rate"]) == (
+        "fixed",
+        1.0e-4,
+    )
+    assert (contracts[1]["ppo"]["schedule"], contracts[1]["ppo"]["learning_rate"]) == (
+        "adaptive",
+        1.0e-3,
+    )
+    for key in ("desired_kl", "clip_param", "num_learning_epochs", "num_mini_batches"):
+        assert [contract["ppo"][key] for contract in contracts] == [
+            contracts[0]["ppo"][key]
+        ] * 4
+    manifest = A._isaac_four_grid_manifest()
+    matched = manifest["matched_contract"]
+    assert matched["wait_contract"] == A._wait_contract() == C._wait_contract()
+    assert matched["formal_budgets"] == {
+        stage: list(C.BUDGETS[stage]) for stage in C.STAGE_ORDER
+    }
+    assert all(A.BUDGETS[stage] == C.BUDGETS[stage] for stage in C.STAGE_ORDER)
+    assert matched["seed"] == 0
+    # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0。
+    assert matched["soft_weights"] == {
+        "death_penalty": -10.0,
+        "qdes_limit": -5.0,
+        "qdes_projection": -5.0,
+        "joint_limit": -5.0,
+    }
+    source = matched["runtime_question_source"]
+    assert source["action_id"] == A.ACTION_ID == C.ACTION_ID
+    assert source["action_uid"] == A.ACTION_UID == C.ACTION_UID
+    assert source["teacher_id"] == A.TEACHER_ID == C.TEACHER_ID
+    assert source["source"] == "runtime_curriculum_sampler"
+    assert source["cadence"] == "every_episode_reset"
+    assert source["sampler_runs_every_reset"] is True
+    assert source["zero_physical_rng_draw_claim_permitted"] is False
+    assert source["family_target_providers"] == {
+        "A211": "online_solver_with_complete_semantic_answer_cache",
+        "C211": "direct_ball_no_inverse_no_answer_cache",
+    }
+    assert "fixed_question" not in matched
+    assert "canonical_source_tape" not in repr(manifest)
+
+
+def test_both_families_keep_exact_scale_long_max_two_gpu_policy():
+    assert A.BUDGETS["scale4096"] == C.BUDGETS["scale4096"] == (4096, 5, 1)
+    assert A.BUDGETS["long4096"] == C.BUDGETS["long4096"] == (4096, 1000, 100)
+    assert A.COLOCATED_STAGES == C.COLOCATED_STAGES == (
+        "scale4096",
+        "long4096",
+    )
+    assert A.MAX_COLOCATED_PROCESSES_PER_GPU == 2
+    assert C.MAX_COLOCATED_PROCESSES_PER_GPU == 2
+
+
+def test_formal_grid_samples_each_reset_and_only_a_caches_inverse_answers():
+    source = F.manifest()["matched_contract"]["runtime_question_source"]
+    assert source["selection"] == "sample_current_domain_levels"
+    assert source["curriculum_domain_levels_consulted_every_reset"] is True
+    assert source["physical_rng_draw_count_authority"] == (
+        "sample_receipt_draw_end_minus_draw_start"
+    )
+    assert source["shared_ac_question_claim"].endswith("not_one_frozen_question")
+    assert A._curriculum_scope_contract()["answer_reuse"] == (
+        "complete_semantic_question_sha256_exact_cache"
+    )
+    assert C._curriculum_scope_contract()["desired_contact_inverse"] is False
+    assert C._curriculum_scope_contract()["online_inverse_solve_calls"] == 0
+
+
+def test_retired_target_projection_validator_remains_fail_closed_only():
+    a_target = {
+        "recipe": A.A_SELECTED_TAPE_VARIANT,
+        "producer_sha256": "a" * 64,
+        "column_sha256": "b" * 64,
+        **copy.deepcopy(F.CANONICAL_TEACHER_PROJECTION),
+    }
+    c_target = {
+        "recipe": C.TARGET_RECIPE,
+        "validity_mask": list(C.TARGET_VALIDITY_MASK),
+        **copy.deepcopy(F.CANONICAL_TEACHER_PROJECTION),
+    }
+    a_binding = F.validate_teacher_projection(
+        a_target, target_variant=("A211", A.A_SELECTED_TAPE_VARIANT)
+    )
+    c_binding = F.validate_teacher_projection(
+        c_target, target_variant=("C211", C.TARGET_RECIPE)
+    )
+    assert a_binding["teacher_projection"] == c_binding["teacher_projection"]
+    assert (
+        a_binding["teacher_projection_sha256"]
+        == c_binding["teacher_projection_sha256"]
+        == F.CANONICAL_TEACHER_PROJECTION_SHA256
+    )
+
+
+def test_retired_question_and_teacher_projection_validators_fail_closed_on_drift():
+    question = copy.deepcopy(F.CANONICAL_BASE_QUESTION)
+    question["time_to_contact_s"] += 0.02
+    with pytest.raises(F.FourGridContractError, match="base question differs"):
+        F.validate_base_question(
+            question, motion_sha256=F.CANONICAL_MOTION_SHA256
+        )
+
+    target = {
+        "recipe": A.A_SELECTED_TAPE_VARIANT,
+        **copy.deepcopy(F.CANONICAL_TEACHER_PROJECTION),
+    }
+    target["runtime_target"]["teacher_rate"] += 1.0e-12
+    with pytest.raises(F.FourGridContractError, match="teacher projection differs"):
+        F.validate_teacher_projection(
+            target, target_variant=("A211", A.A_SELECTED_TAPE_VARIANT)
+        )
+
+
+def _canonical_write(path: Path, value) -> None:
+    raw = (
+        json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+
+
+def _fake_proc_stat(pid: int, starttime: int) -> str:
+    fields = ["S"] + ["0"] * 19
+    fields[19] = str(starttime)
+    return "%d (python worker) %s\n" % (pid, " ".join(fields))
+
+
+@pytest.mark.parametrize("launcher", (A, C))
+def test_both_admissions_scan_one_checkout_local_physical_gpu_root(
+    tmp_path: Path, launcher
+):
+    checkout = tmp_path / launcher.EXPERIMENT_NAME / "checkout"
+    lock_path = tmp_path / (launcher.EXPERIMENT_NAME + ".lock")
+    coordination_root = Path(
+        str(lock_path) + launcher._A.GPU_RESERVATION_REGISTRY_SUFFIX
+    )
+    namespace = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / launcher.EXPERIMENT_NAME
+        / "candidate"
+    )
+    captured = []
+
+    def reservations(root, **_kwargs):
+        captured.append(root)
+        return []
+
+    snapshot = launcher._ADMISSION._verify_gpu_admission(
+        {
+            "source": {"checkout": str(checkout), "commit_sha": "a" * 40},
+            "gpu": {
+                "index": 2,
+                "uuid": "GPU-12345678",
+                "lock_path": str(lock_path),
+            },
+            "namespace": str(namespace),
+            launcher.COLOCATION_SPEC_KEY: False,
+        },
+        phase="pre_launch",
+        current_namespace=None,
+        query_gpu_processes=lambda *_args: {
+            "total_memory_mib": 24576,
+            "free_memory_mib": launcher._A.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+            "processes": [],
+            "nvidia_smi_path": "/usr/bin/nvidia-smi",
+            "nvidia_smi_sha256": "b" * 64,
+        },
+        live_reservations=reservations,
+    )
+    assert captured == [coordination_root]
+    assert snapshot["live_reservation_count"] == 0
+
+
+@pytest.mark.parametrize("launcher,foreign", ((A, C), (C, A)))
+def test_live_same_gpu_foreign_family_reservation_is_never_invisible(
+    tmp_path: Path, launcher, foreign
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    coordination_root = tmp_path / "gpu.lock.vendor_v2_reservations"
+    coordination_root.mkdir()
+    namespace = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / foreign.EXPERIMENT_NAME
+        / "live-foreign"
+    )
+    namespace.mkdir(parents=True)
+    pid = 4567
+    starttime = 987
+    _canonical_write(
+        coordination_root / ("b" * 64 + ".json"),
+        {
+            "schema_version": 1,
+            "kind": "measured_vendor_v2_gpu_slot_reservation_v1",
+            "owner_pid": pid,
+            "owner_proc_starttime_ticks": starttime,
+            "gpu_index": 2,
+            "gpu_uuid": "GPU-12345678",
+            "namespace": str(namespace),
+            "checkout": str(checkout),
+            "commit_sha": "a" * 40,
+            "launch_claim_sha256": "b" * 64,
+            "max_compute_pids": 2,
+            "minimum_free_memory_mib": launcher._A.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+            "allow_vendor_v2_colocation": True,
+        },
+    )
+    proc_root = tmp_path / "proc"
+    pid_root = proc_root / str(pid)
+    pid_root.mkdir(parents=True)
+    (pid_root / "stat").write_text(
+        _fake_proc_stat(pid, starttime), encoding="ascii"
+    )
+    with pytest.raises(
+        launcher.LaunchRefused, match="belongs to another experiment family"
+    ):
+        launcher._ADMISSION._live_reservations(
+            coordination_root,
+            checkout=checkout,
+            commit="a" * 40,
+            gpu_index=2,
+            gpu_uuid="GPU-12345678",
+            proc_root=proc_root,
+        )
+
+
+@pytest.mark.parametrize(
+    "launcher,cells,gpu_index,gpu_uuid",
+    (
+        (A, A.ARM_IDS, 0, "GPU-A0000000"),
+        (C, C.RECIPE_IDS, 1, "GPU-C1111111"),
+    ),
+)
+def test_planned_same_family_two_process_colocation_remains_available(
+    tmp_path: Path, launcher, cells, gpu_index: int, gpu_uuid: str
+):
+    assert len(cells) == 2
+    assert launcher.COLOCATED_STAGES == ("scale4096", "long4096")
+    assert launcher.BUDGETS["scale4096"] == (4096, 5, 1)
+    checkout = tmp_path / "checkout"
+    lock_path = tmp_path / ("gpu%d.lock" % gpu_index)
+    coordination_root = Path(
+        str(lock_path) + launcher._A.GPU_RESERVATION_REGISTRY_SUFFIX
+    )
+    experiment_root = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / launcher.EXPERIMENT_NAME
+    )
+    first = experiment_root / cells[0]
+    second = experiment_root / cells[1]
+    existing = {
+        "owner_pid": 1001,
+        "owner_proc_starttime_ticks": 2001,
+        "reservation_owner_kind": "outer_launcher",
+        "namespace": str(first),
+        "reservation_receipt": {"path": "/reservation", "sha256": "d" * 64},
+        "allow_vendor_v2_colocation": True,
+    }
+    spec = {
+        "source": {"checkout": str(checkout), "commit_sha": "a" * 40},
+        "gpu": {
+            "index": gpu_index,
+            "uuid": gpu_uuid,
+            "lock_path": str(lock_path),
+        },
+        "namespace": str(second),
+        launcher.COLOCATION_SPEC_KEY: True,
+    }
+    query = lambda *_args: {
+        "total_memory_mib": 24576,
+        "free_memory_mib": launcher._A.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+        "processes": [],
+        "nvidia_smi_path": "/usr/bin/nvidia-smi",
+        "nvidia_smi_sha256": "e" * 64,
+    }
+    snapshot = launcher._ADMISSION._verify_gpu_admission(
+        spec,
+        phase="pre_launch",
+        current_namespace=None,
+        query_gpu_processes=query,
+        live_reservations=lambda root, **_kwargs: (
+            [existing] if root == coordination_root else pytest.fail("wrong root")
+        ),
+    )
+    assert snapshot["gpu_index"] == gpu_index
+    assert snapshot["live_reservation_count"] == 1
+    assert snapshot["allow_vendor_v2_colocation"] is True
+
+    third = dict(existing)
+    third["namespace"] = str(
+        experiment_root / "already-second"
+    )
+    with pytest.raises(launcher.LaunchRefused, match="no free compute-PID slot"):
+        launcher._ADMISSION._verify_gpu_admission(
+            spec,
+            phase="pre_launch",
+            current_namespace=None,
+            query_gpu_processes=query,
+            live_reservations=lambda *_args, **_kwargs: [existing, third],
+        )
+
+
+@pytest.mark.parametrize("launcher", (A, C))
+def test_current_layout_preflight_rejects_live_legacy_vendor_v2_pending(
+    tmp_path: Path, launcher, monkeypatch
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    lock_path = tmp_path / "gpu0.lock"
+    old_experiment = (
+        "agibot_a3_action_ball_measured_vendor_v2_n1_diagnostic"
+    )
+    old_namespace = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / old_experiment
+        / "live-old"
+    )
+    old_namespace.mkdir(parents=True)
+    pid = 8123
+    starttime = 9001
+    _canonical_write(
+        old_namespace / launcher._A.GPU_RESERVATION_FILENAME,
+        {
+            "schema_version": 1,
+            "kind": "measured_vendor_v2_gpu_slot_reservation_v1",
+            "owner_pid": pid,
+            "owner_proc_starttime_ticks": starttime,
+            "gpu_index": 0,
+            "gpu_uuid": "GPU-A0000000",
+            "namespace": str(old_namespace),
+            "checkout": str(checkout),
+            "commit_sha": "a" * 40,
+            "launch_claim_sha256": "f" * 64,
+            "max_compute_pids": 2,
+            "minimum_free_memory_mib": launcher._A.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+            "allow_vendor_v2_colocation": True,
+        },
+    )
+    proc_root = tmp_path / "proc"
+    stat_path = proc_root / str(pid) / "stat"
+    stat_path.parent.mkdir(parents=True)
+    stat_path.write_text(_fake_proc_stat(pid, starttime), encoding="ascii")
+    current_namespace = (
+        checkout
+        / launcher._B.WBT_RELATIVE
+        / "logs"
+        / "rsl_rl"
+        / launcher.EXPERIMENT_NAME
+        / "candidate"
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_query_gpu_processes",
+        lambda *_args: {
+            "total_memory_mib": 24576,
+            "free_memory_mib": launcher._A.MIN_VENDOR_V2_FREE_MEMORY_MIB,
+            "processes": [],
+            "nvidia_smi_path": "/usr/bin/nvidia-smi",
+            "nvidia_smi_sha256": "e" * 64,
+        },
+    )
+    with pytest.raises(
+        launcher.LaunchRefused, match="belongs to another experiment family"
+    ):
+        launcher._verify_gpu_admission(
+            {
+                "source": {
+                    "checkout": str(checkout),
+                    "commit_sha": "a" * 40,
+                },
+                "gpu": {
+                    "index": 0,
+                    "uuid": "GPU-A0000000",
+                    "lock_path": str(lock_path),
+                },
+                "namespace": str(current_namespace),
+                launcher.COLOCATION_SPEC_KEY: False,
+            },
+            phase="pre_launch",
+            current_namespace=None,
+            proc_root=proc_root,
+        )

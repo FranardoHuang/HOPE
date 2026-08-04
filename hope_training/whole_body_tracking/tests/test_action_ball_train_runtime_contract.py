@@ -180,7 +180,7 @@ def test_action_ball_manifest_scope_owns_effective_body_imitation_recipe():
     assert "full-scope ActionBall must include the exact" in source
 
 
-def test_only_trainable_a211_fixed_questions_keep_exact_strike_curriculum():
+def test_fresh_a211_c211_fixed_questions_freeze_adaptive_sigma():
     finalizer = next(
         node
         for node in TRAIN_TREE.body
@@ -188,12 +188,52 @@ def test_only_trainable_a211_fixed_questions_keep_exact_strike_curriculum():
         and node.name == "_finalize_action_ball_training_cfg"
     )
     source = ast.get_source_segment(TRAIN_SOURCE, finalizer)
-    assert "if a211_trainable:" in source
-    assert "if not bool(getattr(racket_cfg, attr, False))" in source
-    assert 'adaptive_sigma_source != "ball_exact_strike"' in source
-    assert "trainable A211 fixed-question curriculum requires" in source
-    assert "fixed-question target ablations other than" in source
-    assert "trainable A211 require" in source
+    assert "_validate_immutable_fixed_question_sigma(" in source
+    assert "adaptive_sigma_source !=" not in source
+
+    (validate,) = _train_functions(
+        ["_validate_immutable_fixed_question_sigma"],
+        {"_OverrideError": ValueError},
+    )
+    static = SimpleNamespace(
+        adaptive_sigma=False,
+        adaptive_sigma_monotonic=False,
+        adaptive_sigma_normal=False,
+    )
+    validate(static, trainable_211=True)
+    for attr in (
+        "adaptive_sigma",
+        "adaptive_sigma_monotonic",
+        "adaptive_sigma_normal",
+    ):
+        wrong = SimpleNamespace(**vars(static))
+        setattr(wrong, attr, True)
+        with pytest.raises(ValueError, match=rf"racket\.{attr}=false"):
+            validate(wrong, trainable_211=True)
+
+
+def test_formal_a211_and_c211_target_sources_are_distinct_and_fail_closed():
+    finalizer = next(
+        node
+        for node in TRAIN_TREE.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_finalize_action_ball_training_cfg"
+    )
+    source = ast.get_source_segment(TRAIN_SOURCE, finalizer)
+    assert source is not None
+    assert 'target_source != "online_solver"' in source
+    assert "reuse_exact_question is not True" in source
+    assert 'target_source != "direct_ball"' in source
+    assert "reuse_exact_question is not False" in source
+    assert "initial_center_single_question is not True" in source
+    assert (
+        "direct_ball is outcome_dense_only/000, performs no "
+        in source
+    )
+    assert (
+        '"action_ball_reuse_exact_question_until_semantics_change"'
+        in TRAIN_SOURCE
+    )
 
 
 def test_formal_runtime_hook_is_ready_and_owns_exact_sidecar_signature():
@@ -420,6 +460,7 @@ def test_action_ball_preflight_binds_production_mixture_and_policy_tick():
         "seed",
         "sampling_mixture",
         "contact_time_step_s",
+        "initial_center_single_question",
     }
     mixture = keywords["sampling_mixture"]
     assert (
@@ -437,6 +478,11 @@ def test_action_ball_preflight_binds_production_mixture_and_policy_tick():
         and len(step.args) == 1
         and isinstance(step.args[0], ast.Name)
         and step.args[0].id == "policy_dt_s"
+    )
+    point_support = keywords["initial_center_single_question"]
+    assert (
+        isinstance(point_support, ast.Name)
+        and point_support.id == "initial_center_single_question"
     )
 
 

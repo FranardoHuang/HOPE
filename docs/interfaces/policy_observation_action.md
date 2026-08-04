@@ -22,6 +22,10 @@ safety-gated long result and production deploy-consumer parity.
 The branch-candidate fresh A/C successor is separately frozen at actor/critic=`211/319`: its v2 actor
 uses localizer world pose+linear velocity12 followed by body-frame IMU gyro3, removes teacher-base15,
 omits projected gravity and appends atomic `task_valid`; the same-width pre-IMU211 lineage is rejected.
+Its physical reset is the tracked zero-velocity split-ready state, not measured frame 0. During the
+private 5--25 tick WAIT both plant and teacher remain split-ready; atomic reveal changes the teacher to
+measured frame 0 and exposes the original teacher-start clock so dense mimic can learn the bridge.
+Direct measured-frame0 physical birth was screened under the same support gate and passed `0/73`.
 
 ## HITTER-Compatible Contract
 
@@ -378,9 +382,22 @@ new source-homogeneous v2 layout: localizer world `position3 + orientation6D + l
 followed by the pelvis/body-frame IMU gyro3. It contains neither `projected_gravity` nor a second,
 world-frame angular-velocity copy. The actor also keeps teacher q/dq, achieved paddle9,
 teacher-now paddle9 and teacher-at-hit paddle9. Teacher-to-task adaptation is expressed by the
-teacher nominal contact versus A's desired contact or C's incoming ball state. Fresh reset starts at
-the measured teacher frame-0 root/q with all root/joint velocities zero, so the historical split-ready
-root mismatch is no longer a reason to expose teacher-base distance.
+teacher nominal contact versus A's desired contact or C's incoming ball state. Physical reset uses
+the tracked split-ready artifact with literal-zero joint velocity. The same-gate direct measured-
+frame0 physical-birth screen passed `0/73`, so measured frame 0 is retained only as teacher authority
+and must not be repurposed as reset authority. The split-ready state has a `60 policy tick / 240
+physics substep / 1.2 s` PhysX nominal-hold receipt, which covers the hidden WAIT maximum of 25
+control ticks. Each episode privately samples 5--25 WAIT ticks; physical state and teacher both
+remain split-ready, while the not-yet-active ball is held in a no-contact parked state rather than
+reverse-integrated through table/floor collisions. The reveal event atomically installs the sealed
+incoming-ball launch state and complete task tuple; on that same tick the teacher changes to measured frame 0
+and the actor sees the original `time_to_teacher_start` (about
+`.712376 s` for the current N1), so dense mimic learns the split-ready-to-frame0 bridge. No hand-
+authored robot connector, robot teleport or robot reset rewrite is part of this contract; installing
+the ball launch state is the task-start event itself. The separate `200/800`
+durability soak and a 4 s passive hold are not birth or first-learnability prerequisites. The policy
+therefore never needs the raw teacher-base block: it receives the teacher/reference stream and task-
+relative contact information that explain the transition and professional swing adaptation.
 
 Both actor and critic append one atomic `task_valid` scalar. Therefore actor width is
 `225 - 15 + 1 = 211`; the historical 318-D critic did not own that actor teacher-base block, so its
@@ -428,6 +445,20 @@ mimic remain active. At reveal, the complete tuple and both clocks become valid 
 valid swing is active, a completed miss is reported honestly as zero successes over a non-zero
 closed-swing/opportunity denominator; only the achieved-outgoing-flight outcome denominator can stay
 zero until such a valid flight exists. The private random wait countdown is not an observation.
+The runner uses the raw final validity bit to re-mask actor `[197:210]` and critic `[305:318]`
+**after empirical normalization** on the fresh initial observation, every rollout next observation,
+and the bootstrap/terminal value observation. Therefore a normalizer's learned non-zero mean cannot
+turn a raw WAIT zero into hidden task information; the normalized validity indicator itself remains
+present as the state bit. This post-normalizer mask does not add parameters or change the 211/319
+state-dict layout.
+
+For C211, “paddle centre” in the nominal-strike proximity reward is exactly the live URDF
+`official_racket_site` (`pingpang_red_Link` origin), which is also the retargeting target of the
+measured `physical_blade_center` channel. The reward must not add the red/black rubber-area-centroid
+offset to that point. Selected-rubber offsets remain part of the exact contact classifier and the
+achieved-outgoing-flight calculation, where the contacted surface actually matters. Thus the dense
+distance and measured retargeting use one paddle-centre ground truth, while contact physics may use
+a distinct face centre and ball-centre offset.
 
 The exact frame/packing contract is:
 
@@ -446,11 +477,15 @@ unit normal, not the old 194-D compatibility layout's `normal3 + legacy rho0` fo
 long-axis remains a full-phase paddle-mimic reward/metric together with position, velocity and signed
 face; it is not silently inserted as another actor column because that would change the versioned
 ABI. A consumes no separate incoming-ball row because desired contact is the ball/question summary;
-C consumes no contact target or fixed-midpoint task row. The C source remains
-`required_action_ball_causal_question_packet`, so config/launcher wiring must fail closed until that
-causal packet is implemented and audited.
+C consumes no contact target or fixed-midpoint task row. Formal A keeps `online_solver` as its
+question source and may reuse only an exact answer keyed by the complete question semantics: sampler,
+curriculum and RNG advance on every reset; the first cold Q and each changed Q' really solve once;
+replay/assert/checkpoint paths do not re-solve. Formal C uses `direct_ball`, performs zero inverse
+calls and has no answer cache. `immutable_tape` is a historical target-information ablation fixture,
+not an A211/C211 formal-lineage input. An offline `banded_question_bank` is only an optional future
+producer optimization and is not a prerequisite for the first expanding long.
 
-The following paragraph applies only to historical `L194/H225`, not to the unwired A/C prototypes.
+The following paragraph applies only to historical `L194/H225`, not to current A211/C211.
 `L194` reads its receipt-owned continuous pre-swing deadline. `H225` has no ball receipt and reads
 `max(MotionCommand.hold_counter_after_current_update, 0) * policy_dt`: the counter is the number
 of future frozen-reference control steps visible to the next action.  Consequently the final
@@ -477,10 +512,20 @@ three coordinates yield to the ball-task target and long axis remains only a low
 pin. All three right-wrist joints remain in the 31-D action, so this reward can teach their motion.
 This is not yet proof of dynamic learnability or validated off-centre spin/contact.
 A uses contact-target income in a valid strike window and achieved-outcome income only after actual
-contact. C has no contact target: full-phase measured-paddle/body mimic remains the dense pre-contact
-guide, then actual selected-rubber contact plus a valid achieved outgoing flight unlock dense
-landing/net/outcome feedback. A C run must never regain an oracle target through the critic, Reward,
-normalizer or checkpoint side channel.
+contact. C has no contact target and its task reward is deliberately minimal: one nominal-strike
+Cauchy paddle-centre-to-ball-centre distance term, plus one landing outcome gated by actual
+selected-rubber contact and a valid achieved outgoing flight. It has no desired-contact reward,
+independent hit bonus or additional dense outcome term. Full-phase measured-paddle/body mimic remains
+a shared non-task prior, not a hidden C contact oracle. A C run must never regain an oracle target
+through the critic, Reward, normalizer or checkpoint side channel.
+
+For the five-update scale gate, only qdes-hard, actual-hard and nonfinite are implementation
+strict-zero accounts. Fall, base-too-low and robot-hit-table remain real terminations, but are initial-
+policy behavioral evidence: report them separately for hidden-WAIT, revealed-pre-strike and
+post-strike phases with conserved denominators instead of requiring zero occurrences. The current
+MuJoCo A211/C211 host paths preserve the same split-ready/WAIT/reveal contract, but each family's
+`1 env x 2 PPO update + save/fresh-process cold-load` remains exact-Pod `未测` and cannot authorize
+canonical N1 or 4096-native training.
 A future outgoing-spin target is an explicit 3-D outcome block with frame/unit/validity, not a
 revival of the scalar placeholder.
 

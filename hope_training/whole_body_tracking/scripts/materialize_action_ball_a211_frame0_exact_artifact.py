@@ -117,6 +117,90 @@ def _input_path(root: Path, relative: str) -> Path:
     return path
 
 
+def _timing_receipt(
+    root: Path,
+    relative: str,
+    expected_file_sha256: str,
+    *,
+    motion_sha256: str,
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Load the sealed task receipt that owns the birth timing."""
+
+    relative = _relative(relative, name="timing_receipt_path")
+    expected_file_sha256 = str(expected_file_sha256)
+    if SHA256_RE.fullmatch(expected_file_sha256) is None:
+        raise MaterializationError(
+            "expected_timing_receipt_sha256 must be one lowercase SHA-256"
+        )
+    path = root / relative
+    _regular(path, name="timing receipt")
+    if path.resolve(strict=True) != path:
+        raise MaterializationError("timing receipt path must not traverse a symlink")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected_file_sha256:
+        raise MaterializationError("timing receipt file SHA differs")
+    try:
+        receipt = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise MaterializationError("timing receipt is not strict JSON") from exc
+    if type(receipt) is not dict or raw != canonical_bytes(receipt) + b"\n":
+        raise MaterializationError("timing receipt must be canonical JSON plus newline")
+    seal = receipt.get("canonical_sha256")
+    unsigned = dict(receipt)
+    unsigned.pop("canonical_sha256", None)
+    if (
+        type(seal) is not str
+        or SHA256_RE.fullmatch(seal) is None
+        or canonical_sha256(unsigned) != seal
+        or receipt.get("schema_version") != 5
+        or receipt.get("motion_sha256") != motion_sha256
+    ):
+        raise MaterializationError("timing receipt seal/action binding differs")
+    return {"path": relative, "sha256": expected_file_sha256}, receipt
+
+
+def _derive_birth_horizon(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    """Derive reset-to-teacher-start coverage; never reuse the 200-tick soak."""
+
+    dt = receipt.get("contact_time_step_s")
+    pre_wait = receipt.get("pre_swing_wait_s")
+    if (
+        type(dt) not in (int, float)
+        or type(dt) is bool
+        or type(pre_wait) not in (int, float)
+        or type(pre_wait) is bool
+        or not math.isfinite(float(dt))
+        or not math.isfinite(float(pre_wait))
+        or float(dt) <= 0.0
+        or float(pre_wait) < 0.0
+        or not math.isclose(float(dt), _L.POLICY_DT_S, rel_tol=0.0, abs_tol=1.0e-12)
+    ):
+        raise MaterializationError("timing receipt policy/pre-swing timing differs")
+    pre_wait_ticks = int(math.ceil(float(pre_wait) / float(dt)))
+    post_reset_coverage_ticks = 1
+    policy_ticks = (
+        post_reset_coverage_ticks
+        + int(_L.WAIT_SCHEDULE["max_wait_ticks"])
+        + pre_wait_ticks
+    )
+    if policy_ticks < 1:
+        raise MaterializationError("birth horizon derivation differs")
+    return {
+        "schema_version": 1,
+        "kind": "action_ball_frame0_dynamic_birth_horizon_v1",
+        "derivation": (
+            "post_reset_coverage_plus_max_reset_wait_plus_ceil_pre_swing_wait"
+        ),
+        "timing_receipt_canonical_sha256": receipt["canonical_sha256"],
+        "policy_dt_s": float(dt),
+        "post_reset_coverage_policy_ticks": post_reset_coverage_ticks,
+        "max_reset_wait_policy_ticks": int(_L.WAIT_SCHEDULE["max_wait_ticks"]),
+        "pre_swing_wait_s": float(pre_wait),
+        "pre_swing_wait_policy_ticks_ceil": pre_wait_ticks,
+        "required_policy_ticks": policy_ticks,
+    }
+
+
 def _scalar(array: np.ndarray, *, name: str) -> object:
     values = np.asarray(array).reshape(-1)
     if values.size != 1:
@@ -288,26 +372,28 @@ def materialize(args: argparse.Namespace) -> dict[str, Any]:
     expected_motion_sha = args.expected_motion_sha256
     if type(expected_motion_sha) is not str or SHA256_RE.fullmatch(expected_motion_sha) is None:
         raise MaterializationError("expected_motion_sha256 must be one lowercase SHA-256")
-    task_close_ticks = args.task_close_ticks
-    if (
-        type(task_close_ticks) is not int
-        or not 1 <= task_close_ticks <= _L.WAIT_SCHEDULE["required_active_ticks"]
-    ):
-        raise MaterializationError("task_close_ticks exceeds required active ticks")
     motion_path = _input_path(root, args.motion_path)
     if sha256_file(motion_path) != expected_motion_sha:
         raise MaterializationError("motion file SHA differs")
+    timing_pin, timing_receipt = _timing_receipt(
+        root,
+        args.timing_receipt_path,
+        args.expected_timing_receipt_sha256,
+        motion_sha256=expected_motion_sha,
+    )
+    birth_horizon = _derive_birth_horizon(timing_receipt)
 
     unsigned = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": _L.FRAME0_EXACT_ARTIFACT_KIND,
         "diagnostic_unauthorized": True,
         "source_kind": _L.FRAME0_EXACT_SOURCE_KIND,
         "action_id": action_id,
         "motion_sha256": expected_motion_sha,
-        "task_close_ticks": task_close_ticks,
         "policy_dt_s": _L.POLICY_DT_S,
         "wait_schedule_canonical_sha256": _L.WAIT_SCHEDULE["canonical_sha256"],
+        "timing_receipt": timing_pin,
+        "birth_horizon": birth_horizon,
         "frame0": _load_frame0(motion_path),
     }
     artifact = {**unsigned, "content_sha256": canonical_sha256(unsigned)}
@@ -329,7 +415,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--action-id", required=True)
     parser.add_argument("--motion-path", required=True)
     parser.add_argument("--expected-motion-sha256", required=True)
-    parser.add_argument("--task-close-ticks", required=True, type=int)
+    parser.add_argument("--timing-receipt-path", required=True)
+    parser.add_argument("--expected-timing-receipt-sha256", required=True)
     parser.add_argument("--output", required=True)
     return parser
 

@@ -2,10 +2,13 @@
 """Build or verify the non-canonical A3-P1 0803 31-action Isaac candidate.
 
 The vendor delivery is immutable and ignored under ``vendor_assets``.  This
-tool derives a separate ignored asset by locking the unresolved left-gripper
-subtree at its URDF zero pose, restoring the established mixed-case A3 body-name
-ABI, and copying only meshes referenced by the retained robot.  It never changes the current
-``assets/agibot_a3`` runtime asset.
+tool derives a separate ignored asset under a versioned project-owned contract:
+the non-policy left gripper is locked at its raw-URDF coordinate zero, while the
+raw URDF (not the contradictory workbook) owns the mount frame.  Missing vendor
+collision meshes are never fabricated; only the twenty absent gripper collision
+elements are disabled and recorded.  The tool restores the established mixed-
+case A3 body-name ABI and never changes the current ``assets/agibot_a3`` runtime
+asset.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,16 +45,51 @@ DEFAULT_OUTPUT_ROOT = (
     / "assets"
     / "agibot_a3_p1_0803_31d_v1"
 )
+ACTIVE_ASSET_ROOT = DEFAULT_OUTPUT_ROOT.parent / "agibot_a3"
 DEFAULT_SUCCESSOR_MANIFEST = REPO_ROOT / "configs" / "a3_p1_0803_31d_v1.json"
 RUNTIME_JOINT_ORDER = REPO_ROOT / "configs" / "a3_runtime_articulation_joint_order.txt"
 RUNTIME_BODY_ORDER = REPO_ROOT / "configs" / "a3_runtime_body_order.txt"
 GMR_JOINT_ORDER = REPO_ROOT / "configs" / "a3_gmr_dof_pos_joint_order.txt"
 JOINT_BIJECTION = REPO_ROOT / "configs" / "a3_joint_order_bijection_v1.json"
+ACTIVE_REFERENCE_URDF = (
+    REPO_ROOT
+    / "agi"
+    / "URDF"
+    / "A3T2.5-URDF-std-pingpang"
+    / "urdf"
+    / "URDF-JOINT-LINK.urdf"
+)
+ACTIVE_REFERENCE_MESHES = ACTIVE_REFERENCE_URDF.parents[1] / "meshes"
 
 GRIPPER_MOUNT_JOINT = "left_OP3_joint"
 RAW_DUPLICATE_LINK = "imu_in_pelvis_link"
 EXPECTED_MOVABLE_JOINTS = 31
 EXPECTED_FIXED_GRIPPER_JOINTS = 9
+EXPECTED_GRIPPER_SUBTREE_MASS_KG = 0.76626209416
+EXPECTED_NORMALIZED_UNIQUE_LINK_MASS_KG = 57.60001015416
+EXPECTED_MISSING_GRIPPER_COLLISION_COUNT = 20
+EXPECTED_MISSING_GRIPPER_COLLISIONS = (
+    ("left_base_link", "../meshes/base_link_collision.stl"),
+    ("left_link1", "../meshes/Link1_collision.stl"),
+    ("left_link10", "../meshes/Link10_collision.stl"),
+    ("left_link11", "../meshes/Link11_collision.stl"),
+    ("left_link11-1", "../meshes/Link11-1_collision.stl"),
+    ("left_link13", "../meshes/Link13_collision.stl"),
+    ("left_link14", "../meshes/Link14_collision.stl"),
+    ("left_link14-1", "../meshes/Link14-1_collision.stl"),
+    ("left_link15", "../meshes/Link15_collision.stl"),
+    ("left_link17", "../meshes/Link17_collision.stl"),
+    ("left_link18", "../meshes/Link18_collision.stl"),
+    ("left_link2", "../meshes/Link2_collision.stl"),
+    ("left_link3", "../meshes/Link3_collision.stl"),
+    ("left_link4", "../meshes/Link4_collision.stl"),
+    ("left_link4-1", "../meshes/Link4-1_collision.stl"),
+    ("left_link6", "../meshes/Link6_collision.stl"),
+    ("left_link7", "../meshes/Link7_collision.stl"),
+    ("left_link7-1", "../meshes/Link7-1_collision.stl"),
+    ("left_link8", "../meshes/Link8_collision.stl"),
+    ("left_link9", "../meshes/Link9_collision.stl"),
+)
 EXPECTED_MALFORMED_FIXED_AXES = {
     "torso_shell_joint": "0.0",
     "imu_in_torso_joint": "",
@@ -73,6 +111,26 @@ REQUIRED_RACKET_MESHES = {
     "pingpang_red_Link.stl",
     "pingpang_black_Link.stl",
     "pingbang_ball_Link.stl",
+}
+EXPECTED_RACKET_MESH_SHA256 = {
+    "right_hand_pingpang_Link.stl": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd",
+    "pingpang_red_Link.stl": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842",
+    "pingpang_black_Link.stl": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
+    "pingbang_ball_Link.stl": "21c39c9f6112304776f4eadf7439193163a814b59391790df027ff5aa8249c93",
+}
+OFFICIAL_RACKET_SITE_XYZ_M = (0.21021, 0.032078, 0.032036)
+OFFICIAL_RACKET_SITE_RPY_RAD = (0.0, 0.0, 0.0)
+PROJECT_GRIPPER_LOCK_CONTRACT = {
+    "schema_version": 1,
+    "authority": "project_owned_training_projection_20260804",
+    "raw_mount_frame_authority": "primary_urdf_selected_over_workbook",
+    "locked_joint_position": "all_nine_gripper_movable_coordinates_q_equal_zero",
+    "q0_claim_scope": "project_lock_pose_not_vendor_neutral_or_hardware_home",
+    "gripper_policy_controlled": False,
+    "missing_collision_policy": (
+        "disable_only_collision_elements_whose_twenty_gripper_meshes_are_absent;"
+        "never_substitute_visual_mesh_or_invent_geometry"
+    ),
 }
 
 
@@ -169,6 +227,29 @@ def verify_raw_closure(source_root: Path, intake: dict[str, Any]) -> None:
         raise AssetError("raw primary URDF SHA-256 does not match intake manifest")
 
 
+def require_isolated_successor_root(output_root: Path, source_root: Optional[Path] = None) -> None:
+    """Reject overlap with the current runtime pointer or immutable raw source."""
+
+    resolved_output = output_root.resolve(strict=False)
+    resolved_active = ACTIVE_ASSET_ROOT.resolve(strict=False)
+    if resolved_output == resolved_active or resolved_active in resolved_output.parents:
+        raise AssetError(
+            "refusing to use the current runtime asset or a child path as successor output: "
+            f"{output_root}"
+        )
+    if source_root is not None:
+        resolved_source = source_root.resolve(strict=False)
+        if (
+            resolved_output == resolved_source
+            or resolved_source in resolved_output.parents
+            or resolved_output in resolved_source.parents
+        ):
+            raise AssetError(
+                "refusing successor output that overlaps the immutable raw source: "
+                f"output={output_root}, source={source_root}"
+            )
+
+
 def descendants_for_joint(root: ET.Element, mount_joint_name: str) -> tuple[list[str], list[str]]:
     joints = root.findall("joint")
     by_parent: dict[str, list[ET.Element]] = defaultdict(list)
@@ -210,6 +291,21 @@ def element_fingerprint(element: ET.Element | None) -> Any:
         "attrib": dict(sorted(element.attrib.items())),
         "children": [element_fingerprint(child) for child in element],
     }
+
+
+def link_mass_kg(root: ET.Element, names: set[str] | None = None) -> float:
+    values = []
+    for link in root.findall("link"):
+        if names is not None and link.get("name") not in names:
+            continue
+        mass = link.find("inertial/mass")
+        if mass is None:
+            continue
+        value = float(mass.get("value"))
+        if not math.isfinite(value):
+            raise AssetError(f"non-finite mass on {link.get('name')}")
+        values.append(value)
+    return math.fsum(values)
 
 
 def retained_semantics(root: ET.Element, retained_link_raw_names: set[str], retained_joint_names: set[str]) -> dict[str, Any]:
@@ -339,6 +435,20 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
         raise AssetError(
             f"expected {EXPECTED_FIXED_GRIPPER_JOINTS} movable gripper joints, found {fixed_movable}"
         )
+    raw_joints = {joint.get("name"): joint for joint in root.findall("joint")}
+    for name in fixed_movable:
+        limit = raw_joints[name].find("limit")
+        if limit is None:
+            raise AssetError(f"project-locked gripper joint has no limit: {name}")
+        lower = float(limit.get("lower"))
+        upper = float(limit.get("upper"))
+        if not (math.isfinite(lower) and math.isfinite(upper) and lower <= 0.0 <= upper):
+            raise AssetError(f"project q=0 lock is outside raw limits for {name}: [{lower}, {upper}]")
+    raw_gripper_mass = link_mass_kg(root, gripper_link_set)
+    if not math.isclose(
+        raw_gripper_mass, EXPECTED_GRIPPER_SUBTREE_MASS_KG, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise AssetError(f"raw gripper subtree mass drifted: {raw_gripper_mass}")
 
     invalid_rgba_before = parse_rgba(root)
     if invalid_rgba_before != [{"tag": "color", "rgba": "nan nan nan nan"}]:
@@ -397,10 +507,17 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
 
     malformed_fixed_axis_normalizations = normalize_malformed_fixed_axes(root)
     mesh_reference_rewrites, removed_missing_collisions = normalize_mesh_references(root, source_meshes)
-    if len(removed_missing_collisions) != 20:
+    if len(removed_missing_collisions) != EXPECTED_MISSING_GRIPPER_COLLISION_COUNT:
         raise AssetError(
-            f"expected 20 missing gripper collision refs, found {len(removed_missing_collisions)}"
+            "expected "
+            f"{EXPECTED_MISSING_GRIPPER_COLLISION_COUNT} missing gripper collision refs, "
+            f"found {len(removed_missing_collisions)}"
         )
+    if any(item["link"] not in gripper_link_set for item in removed_missing_collisions):
+        raise AssetError("normalization attempted to disable a missing collision outside the gripper")
+    removed_pairs = tuple((item["link"], item["reference"]) for item in removed_missing_collisions)
+    if removed_pairs != EXPECTED_MISSING_GRIPPER_COLLISIONS:
+        raise AssetError(f"missing gripper collision inventory drifted: {removed_pairs}")
 
     output_semantics = {
         "links": {
@@ -424,6 +541,11 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
         raw_semantics["joints"][item["joint"]]["axis"] = None
     if raw_semantics != output_semantics:
         raise AssetError("normalization changed retained body inertials or joint origin/axis/limit semantics")
+    normalized_mass = link_mass_kg(root)
+    if not math.isclose(
+        normalized_mass, EXPECTED_NORMALIZED_UNIQUE_LINK_MASS_KG, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise AssetError(f"normalized unique-link mass drifted: {normalized_mass}")
 
     normalized_movable = movable_joint_names(root)
     if len(normalized_movable) != EXPECTED_MOVABLE_JOINTS:
@@ -460,7 +582,10 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
             "converted_to_fixed_joint_names": fixed_movable,
             "converted_joint_originals": fixed_joint_originals,
             "fixed_pose": "each converted joint at its URDF q=0 origin",
-            "reason": "left gripper is outside the established 31-action policy ABI; fixed links retain delivered mass, inertias, COMs, and joint origins without inventing coupling",
+            "lock_contract": PROJECT_GRIPPER_LOCK_CONTRACT,
+            "all_q0_within_raw_limits": True,
+            "retained_subtree_mass_kg": raw_gripper_mass,
+            "reason": "left gripper is outside the established 31-action policy ABI; project-owned q=0 locking retains delivered mass, inertias, COMs, and joint origins without claiming vendor neutral or inventing coupling",
         },
         "removed_duplicate_link": {
             "name": RAW_DUPLICATE_LINK,
@@ -469,7 +594,7 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
             "raw_occurrence_fingerprint_sha256": duplicate_sha,
         },
         "link_name_map": link_name_map,
-        "mesh_reference_policy": "rewrite to delivered case-exact basenames, replace USD-unsafe hyphens with deterministic underscore aliases, and copy only referenced bytes",
+        "mesh_reference_policy": "rewrite to delivered case-exact basenames, replace USD-unsafe hyphens with deterministic underscore aliases, copy only referenced bytes, and explicitly disable only the twenty absent left-gripper collision elements",
         "mesh_reference_rewrites": mesh_reference_rewrites,
         "usd_safe_mesh_aliases": usd_safe_mesh_aliases,
         "malformed_fixed_axis_normalizations": malformed_fixed_axis_normalizations,
@@ -478,6 +603,7 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
         "invalid_rgba_before": invalid_rgba_before,
         "invalid_rgba_after": invalid_rgba_after,
         "retained_semantics_sha256": canonical_json_sha(raw_semantics),
+        "normalized_unique_link_mass_kg": normalized_mass,
     }
     return root, diff
 
@@ -586,12 +712,187 @@ def racket_contract(root: ET.Element, output_meshes: Path) -> dict[str, Any]:
         if not path.is_file():
             raise AssetError(f"missing required racket mesh: {path}")
         mesh_sha[name] = sha256_path(path)
+    if mesh_sha != EXPECTED_RACKET_MESH_SHA256:
+        raise AssetError(f"right-racket mesh bytes drifted from the current/raw authority: {mesh_sha}")
+    xyz = tuple(float(value) for value in origin.get("xyz").split())
+    rpy = tuple(float(value) for value in origin.get("rpy").split())
+    if xyz != OFFICIAL_RACKET_SITE_XYZ_M or rpy != OFFICIAL_RACKET_SITE_RPY_RAD:
+        raise AssetError(f"official racket site local transform drifted: xyz={xyz}, rpy={rpy}")
+    if parent.get("link") != "right_hand_pingpang_Link" or child.get("link") != "pingpang_red_Link":
+        raise AssetError("official racket site parent/child link identity drifted")
     return {
         "parent_link": parent.get("link"),
         "child_link": child.get("link"),
         "origin_xyz": origin.get("xyz"),
         "origin_rpy": origin.get("rpy"),
         "mesh_sha256": mesh_sha,
+        "local_contract_exact_current_and_raw": True,
+        "official_paddle_center_control_point": True,
+    }
+
+
+def _origin_transform(origin: ET.Element | None) -> list[list[float]]:
+    xyz = [0.0, 0.0, 0.0]
+    rpy = [0.0, 0.0, 0.0]
+    if origin is not None:
+        xyz = [float(value) for value in origin.get("xyz", "0 0 0").split()]
+        rpy = [float(value) for value in origin.get("rpy", "0 0 0").split()]
+    cr, cp, cy = (math.cos(value) for value in rpy)
+    sr, sp, sy = (math.sin(value) for value in rpy)
+    # URDF fixed-axis roll-pitch-yaw: Rz(yaw) @ Ry(pitch) @ Rx(roll).
+    rotation = [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+    return [
+        rotation[0] + [xyz[0]],
+        rotation[1] + [xyz[1]],
+        rotation[2] + [xyz[2]],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def _matmul4(left: list[list[float]], right: list[list[float]]) -> list[list[float]]:
+    return [
+        [math.fsum(left[row][k] * right[k][column] for k in range(4)) for column in range(4)]
+        for row in range(4)
+    ]
+
+
+def zero_coordinate_link_frame(root: ET.Element, target_link: str) -> list[list[float]]:
+    """Return root-to-link FK with every movable coordinate set to zero."""
+
+    joints = []
+    child_links = set()
+    for joint in root.findall("joint"):
+        parent = joint.find("parent")
+        child = joint.find("child")
+        if parent is None or child is None:
+            raise AssetError(f"joint lacks parent/child: {joint.get('name')}")
+        child_links.add(child.get("link"))
+        joints.append((parent.get("link"), child.get("link"), _origin_transform(joint.find("origin"))))
+    root_links = [link.get("name") for link in root.findall("link") if link.get("name") not in child_links]
+    if len(root_links) != 1:
+        raise AssetError(f"expected one URDF root link, found {root_links}")
+    identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    frames = {root_links[0]: identity}
+    for _ in range(len(joints) + 1):
+        for parent, child, transform in joints:
+            if parent in frames and child not in frames:
+                frames[child] = _matmul4(frames[parent], transform)
+    if target_link not in frames:
+        raise AssetError(f"target link is unreachable from URDF root: {target_link}")
+    return frames[target_link]
+
+
+def _frame_delta(left: list[list[float]], right: list[list[float]]) -> dict[str, float]:
+    position_delta = math.sqrt(math.fsum((left[index][3] - right[index][3]) ** 2 for index in range(3)))
+    rotation_max_abs = max(
+        abs(left[row][column] - right[row][column]) for row in range(3) for column in range(3)
+    )
+    return {
+        "position_norm_m": position_delta,
+        "rotation_matrix_max_abs": rotation_max_abs,
+    }
+
+
+def racket_fk_lineage_contract(source_root: Path, normalized_root: ET.Element) -> dict[str, Any]:
+    raw_root = ET.parse(source_root / "urdf" / "A3-P1-32dof-0803-BerkeleyPingpang-90deg.urdf").getroot()
+    active_root = ET.parse(ACTIVE_REFERENCE_URDF).getroot()
+    raw_links = {link.get("name"): link for link in raw_root.findall("link")}
+    active_links = {link.get("name"): link for link in active_root.findall("link")}
+    for raw_name in (
+        "right_wrist_yaw_link",
+        "right_hand_pingpang_link",
+        "pingpang_red_link",
+        "pingpang_black_link",
+        "pingbang_ball_link",
+    ):
+        active_name = normalized_link_name(raw_name)
+        if element_fingerprint(raw_links[raw_name].find("inertial")) != element_fingerprint(
+            active_links[active_name].find("inertial")
+        ):
+            raise AssetError(f"raw/current right-hand or paddle inertial drifted: {raw_name}")
+    raw_joints = {joint.get("name"): joint for joint in raw_root.findall("joint")}
+    active_joints = {joint.get("name"): joint for joint in active_root.findall("joint")}
+    for name in (
+        "right_hand_pingpang_joint",
+        "pingpang_red_joint",
+        "pingpang_black_joint",
+        "pingbang_ball_joint",
+    ):
+        raw_joint = raw_joints[name]
+        active_joint = active_joints[name]
+        raw_fixed = {
+            "type": raw_joint.get("type"),
+            "origin": element_fingerprint(raw_joint.find("origin")),
+            "axis": element_fingerprint(raw_joint.find("axis")),
+            "limit": element_fingerprint(raw_joint.find("limit")),
+        }
+        active_fixed = {
+            "type": active_joint.get("type"),
+            "origin": element_fingerprint(active_joint.find("origin")),
+            "axis": element_fingerprint(active_joint.find("axis")),
+            "limit": element_fingerprint(active_joint.find("limit")),
+        }
+        if raw_fixed != active_fixed:
+            raise AssetError(f"raw/current right-racket fixed-joint semantics drifted: {name}")
+    for root, expected_parent, expected_child, label in (
+        (raw_root, "right_hand_pingpang_link", "pingpang_red_link", "raw"),
+        (active_root, "right_hand_pingpang_Link", "pingpang_red_Link", "current"),
+    ):
+        joint = next(
+            (candidate for candidate in root.findall("joint") if candidate.get("name") == "pingpang_red_joint"),
+            None,
+        )
+        if joint is None:
+            raise AssetError(f"{label} URDF lacks pingpang_red_joint")
+        origin = joint.find("origin")
+        xyz = tuple(float(value) for value in origin.get("xyz").split())
+        rpy = tuple(float(value) for value in origin.get("rpy").split())
+        if xyz != OFFICIAL_RACKET_SITE_XYZ_M or rpy != OFFICIAL_RACKET_SITE_RPY_RAD:
+            raise AssetError(f"{label} official racket-site local transform drifted")
+        if (
+            joint.find("parent").get("link") != expected_parent
+            or joint.find("child").get("link") != expected_child
+        ):
+            raise AssetError(f"{label} official racket-site parent/child drifted")
+    normalized_frame = zero_coordinate_link_frame(normalized_root, "pingpang_red_Link")
+    raw_frame = zero_coordinate_link_frame(raw_root, "pingpang_red_link")
+    active_frame = zero_coordinate_link_frame(active_root, "pingpang_red_Link")
+    normalized_raw = _frame_delta(normalized_frame, raw_frame)
+    normalized_active = _frame_delta(normalized_frame, active_frame)
+    if normalized_raw["position_norm_m"] > 1e-12 or normalized_raw["rotation_matrix_max_abs"] > 1e-12:
+        raise AssetError(f"normalization moved the raw official racket site: {normalized_raw}")
+    expected_predecessor_delta = 0.009013878161711154
+    if not math.isclose(
+        normalized_active["position_norm_m"],
+        expected_predecessor_delta,
+        rel_tol=0.0,
+        abs_tol=1e-15,
+    ) or normalized_active["rotation_matrix_max_abs"] > 1e-12:
+        raise AssetError(
+            "successor/current official racket-site q0 delta drifted: "
+            f"{normalized_active}"
+        )
+    for raw_name, expected_sha in EXPECTED_RACKET_MESH_SHA256.items():
+        active_name = raw_name[:-4] + ".STL"
+        if sha256_path(ACTIVE_REFERENCE_MESHES / active_name) != expected_sha:
+            raise AssetError(f"tracked active right-racket mesh drifted: {active_name}")
+    return {
+        "right_hand_and_paddle_link_inertials_exact_current": True,
+        "right_racket_fixed_joint_semantics_exact_current": True,
+        "normalized_preserves_raw_right_chain_and_site_for_all_common_q": True,
+        "normalized_vs_raw_q0": normalized_raw,
+        "successor_vs_current_q0": normalized_active,
+        "successor_world_site_requires_new_motion_fk_revalidation": (
+            normalized_active["position_norm_m"] > 1e-12
+            or normalized_active["rotation_matrix_max_abs"] > 1e-12
+        ),
+        "expected_successor_vs_current_q0_position_delta_m": expected_predecessor_delta,
+        "tracked_current_reference_urdf_path": relative_path(ACTIVE_REFERENCE_URDF),
+        "tracked_current_reference_urdf_sha256": sha256_path(ACTIVE_REFERENCE_URDF),
     }
 
 
@@ -650,9 +951,10 @@ def build_manifest(
         }
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "manifest_type": "agibot_a3_p1_0803_31action_normalized_asset_v1",
         "asset_id": "a3_p1_0803_berkeley_pingpang_31action_normalized_v1",
+        "candidate_role": "future_primary_successor_candidate_not_current_runtime",
         "status": (
             "pod_import_verified_short_step_diagnostic_standing_pending"
             if pod_import_verified
@@ -689,12 +991,20 @@ def build_manifest(
             "runtime_body_order_sha256": sha256_path(RUNTIME_BODY_ORDER),
             "runtime_body_names_all_present": True,
         },
-        "right_racket_contract": racket_contract(normalized_root, output_root / "meshes"),
+        "project_gripper_lock_contract": PROJECT_GRIPPER_LOCK_CONTRACT,
+        "right_racket_contract": {
+            **racket_contract(normalized_root, output_root / "meshes"),
+            "fk_lineage": racket_fk_lineage_contract(source_root, normalized_root),
+        },
         "pod_import_receipt": pod_import_receipt,
         "authorization": {
             "current_runtime_pointer_changed": False,
             "canonical_runtime": False,
+            "materialization_authorized": True,
+            "project_q0_gripper_lock_authorized": True,
+            "missing_gripper_collision_elements_explicitly_disabled": True,
             "pod_isaac_import_verified": pod_import_verified,
+            "racket_local_contract_verified": True,
             "standing_pose_verified": False,
             "racket_fk_parity_verified": False,
             "dynamics_parity_verified": False,
@@ -706,6 +1016,7 @@ def build_manifest(
 
 
 def prepare(source_root: Path, output_root: Path, intake_path: Path, manifest_out: Path) -> dict[str, Any]:
+    require_isolated_successor_root(output_root, source_root)
     if output_root.exists():
         raise AssetError(f"refusing to overwrite versioned output root: {output_root}")
     intake = load_json(intake_path)
@@ -762,6 +1073,7 @@ def compare_closure(expected: dict[str, Any], observed: dict[str, Any]) -> None:
 
 
 def check(source_root: Path, output_root: Path, intake_path: Path, manifest_path: Path) -> dict[str, Any]:
+    require_isolated_successor_root(output_root, source_root)
     intake = load_json(intake_path)
     verify_raw_closure(source_root, intake)
     manifest = load_json(manifest_path)

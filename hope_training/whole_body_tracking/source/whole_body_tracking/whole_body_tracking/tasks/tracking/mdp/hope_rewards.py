@@ -21,6 +21,7 @@ import torch
 from typing import TYPE_CHECKING
 
 from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand, face_tracking_pair
+from whole_body_tracking.tasks.tracking.mdp import racket_contact_geometry
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -54,9 +55,20 @@ def action_ball_task_valid_mask(cmd: RacketTargetCommand) -> torch.Tensor:
     """
 
     task_valid = getattr(cmd, "_action_ball_task_valid", None)
-    template = cmd.pre_strike
     if task_valid is None:
+        template = getattr(cmd, "pre_strike", None)
+        if template is None:
+            template = getattr(cmd, "strike_window", None)
+        if template is None:
+            raise RuntimeError(
+                "reward eligibility requires pre_strike or strike_window"
+            )
         return torch.ones_like(template, dtype=torch.bool)
+    template = getattr(cmd, "pre_strike", None)
+    if template is None:
+        raise RuntimeError(
+            "ActionBall task_valid requires the command pre_strike batch"
+        )
     if (
         not isinstance(task_valid, torch.Tensor)
         or task_valid.dtype != torch.bool
@@ -67,6 +79,32 @@ def action_ball_task_valid_mask(cmd: RacketTargetCommand) -> torch.Tensor:
             "ActionBall task_valid must be a bool tensor matching the command batch"
         )
     return task_valid
+
+
+def _stage1_split_ready_wait_mask(cmd: RacketTargetCommand) -> torch.Tensor:
+    """Return the one public mask that selects the hidden-WAIT teacher."""
+
+    motion = cmd._motion()
+    if not bool(
+        getattr(motion, "action_ball_diagnostic_split_ready_teacher", False)
+    ):
+        return torch.zeros_like(motion.in_hold, dtype=torch.bool)
+    # Rewards and paddle observations may be the first reset-time consumers;
+    # do not depend on a preceding Motion command update or observation term.
+    capture = getattr(
+        motion, "_capture_action_ball_safe_ready_reference", None
+    )
+    if callable(capture):
+        capture()
+    task_valid = action_ball_task_valid_mask(cmd)
+    bound = getattr(motion, "_action_ball_public_task_valid", None)
+    owned = getattr(cmd, "_action_ball_task_valid", None)
+    if bound is None or bound is not owned:
+        raise RuntimeError(
+            "split-ready teacher requires Motion and Racket to share one "
+            "task_valid tensor"
+        )
+    return ~task_valid
 
 
 def _window_pos(cmd: RacketTargetCommand) -> torch.Tensor:
@@ -284,6 +322,135 @@ def stage1_clip_site_target_from_aligned_measured_racket(
     return current_site_pos_w, normal, velocity
 
 
+def _stage1_split_ready_safe_racket_tuple(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build the official paddle tuple from Motion's physical safe-ready body.
+
+    The returned order is site position, signed face, site-point velocity and
+    butt-to-blade long axis.  This path intentionally reads no measured motion
+    row.  Position/orientation come from the same aligned safe-ready body
+    snapshot used by whole-body mimic, and a frozen snapshot has literal-zero
+    point velocity.
+    """
+
+    motion = cmd._motion()
+    if not bool(
+        getattr(motion, "action_ball_diagnostic_split_ready_teacher", False)
+    ):
+        raise RuntimeError("safe-ready racket tuple requested outside split-ready")
+
+    source_index = (
+        int(cmd._racket_body_index)
+        if cmd._racket_mode == "body"
+        else int(cmd._wrist_body_index)
+    )
+    robot_body_names = tuple(motion.robot.body_names)
+    tracked_body_names = tuple(motion.cfg.body_names)
+    if source_index < 0 or source_index >= len(robot_body_names):
+        raise RuntimeError("split-ready racket source body index is invalid")
+    source_name = robot_body_names[source_index]
+    try:
+        local_index = tracked_body_names.index(source_name)
+    except ValueError as exc:
+        raise RuntimeError(
+            "split-ready racket source body is absent from the physical "
+            "safe-ready tracking tuple"
+        ) from exc
+
+    body_pos = motion.body_pos_relative_w
+    body_quat = motion.body_quat_relative_w
+    expected_pos = (cmd.num_envs, len(tracked_body_names), 3)
+    expected_quat = (cmd.num_envs, len(tracked_body_names), 4)
+    if body_pos.shape != expected_pos or body_quat.shape != expected_quat:
+        raise ValueError(
+            "split-ready aligned body tuple changed shape: "
+            f"{tuple(body_pos.shape)}/{tuple(body_quat.shape)} vs "
+            f"{expected_pos}/{expected_quat}"
+        )
+    site_pos = body_pos[:, local_index]
+    site_quat = _stage1_quat_normalize(
+        body_quat[:, local_index], name="safe_ready_racket_body_quat"
+    )
+    if cmd._racket_mode != "body":
+        site_pos = site_pos + _stage1_quat_apply(site_quat, cmd._mount_offset)
+        site_quat = _stage1_quat_normalize(
+            _stage1_quat_mul(site_quat, cmd._mount_quat),
+            name="safe_ready_racket_site_quat",
+        )
+
+    axis = torch.zeros_like(site_pos)
+    axis[:, int(cmd.cfg.mount_normal_axis)] = 1.0
+    signed_face = _stage1_quat_apply(site_quat, axis)
+    use_per_clip_sign = bool(cmd.cfg.mount_normal_sign_per_clip) or (
+        str(getattr(cmd.cfg, "motion_teacher_racket_source", "robot_fk"))
+        == "measured_channel"
+    )
+    if use_per_clip_sign:
+        signs = cmd._mount_signs_cfg(int(motion.motion.num_segments))
+        sign_table = torch.as_tensor(
+            signs, device=cmd.device, dtype=signed_face.dtype
+        )
+        sign = (
+            sign_table[motion.clip_id]
+            if bool(getattr(motion, "_multiseg", False))
+            else sign_table[0].expand(cmd.num_envs)
+        )
+    else:
+        sign = torch.full(
+            (cmd.num_envs,),
+            float(cmd.cfg.mount_normal_sign),
+            device=cmd.device,
+            dtype=signed_face.dtype,
+        )
+    signed_face = signed_face * sign[:, None]
+
+    local_long_axis = torch.as_tensor(
+        racket_contact_geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+        device=cmd.device,
+        dtype=site_pos.dtype,
+    ).expand(cmd.num_envs, 3)
+    long_axis = _stage1_quat_apply(site_quat, local_long_axis)
+    long_axis = long_axis / torch.linalg.vector_norm(
+        long_axis, dim=-1, keepdim=True
+    ).clamp_min(1.0e-12)
+    point_velocity = torch.zeros_like(site_pos)
+    finite = (
+        torch.isfinite(site_pos).all(dim=-1)
+        & torch.isfinite(signed_face).all(dim=-1)
+        & torch.isfinite(long_axis).all(dim=-1)
+    )
+    unit = (
+        (torch.linalg.vector_norm(signed_face, dim=-1) - 1.0).abs()
+        <= 1.0e-5
+    ) & (
+        (torch.linalg.vector_norm(long_axis, dim=-1) - 1.0).abs()
+        <= 1.0e-5
+    )
+    torch._assert_async((finite & unit).all())
+    return site_pos, signed_face, point_velocity, long_axis
+
+
+def _stage1_select_split_ready_site_target(
+    cmd: RacketTargetCommand,
+    measured: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Atomically select safe-ready or measured paddle p/face/point-v."""
+
+    wait = _stage1_split_ready_wait_mask(cmd)
+    if not bool(
+        getattr(
+            cmd._motion(), "action_ball_diagnostic_split_ready_teacher", False
+        )
+    ):
+        return measured
+    safe = _stage1_split_ready_safe_racket_tuple(cmd)
+    return tuple(
+        torch.where(wait[:, None], safe_value, measured_value)
+        for safe_value, measured_value in zip(safe[:3], measured)
+    )
+
+
 def _stage1_aligned_clip_site_target_at_steps(
     cmd: RacketTargetCommand, current: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -327,7 +494,9 @@ def _stage1_aligned_clip_site_target_at_steps(
     # an enormous moving target).  Use a harmless unit rate for the geometric differentiation and
     # overwrite the held point velocity with literal zero, matching MotionCommand's joint/body
     # velocity semantics.  Unheld rows remain byte-for-byte on the prior span formula.
-    held = motion.in_hold.to(device=cmd.device, dtype=torch.bool)
+    held = motion.in_hold.to(
+        device=cmd.device, dtype=torch.bool
+    ) | _stage1_split_ready_wait_mask(cmd)
     speed = motion.speed_scale.to(device=cmd.device)
     if held.shape != (cmd.num_envs,) or speed.shape != (cmd.num_envs,):
         raise ValueError(
@@ -491,15 +660,19 @@ def _stage1_aligned_clip_site_target(
     token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
     cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
     if type(token) is int and cached is not None and cached[0] == token:
-        return cached[1]
-    current = cmd._motion()._pose_reference_steps()
-    result = _stage1_aligned_clip_site_target_at_steps(cmd, current)
-    if type(token) is int:
-        cmd._stage1_clip_site_target_cache = (token, result)
-    return result
+        measured = cached[1]
+    else:
+        current = cmd._motion()._pose_reference_steps()
+        measured = _stage1_aligned_clip_site_target_at_steps(cmd, current)
+        if type(token) is int:
+            cmd._stage1_clip_site_target_cache = (token, measured)
+    # Cache only the measured producer.  task_valid may reveal within the same
+    # public control token, so caching the selected value would make one
+    # consumer observe WAIT while another observes TASK_ACTIVE.
+    return _stage1_select_split_ready_site_target(cmd, measured)
 
 
-def _stage1_aligned_clip_long_axis_target(
+def _stage1_aligned_clip_measured_long_axis_target(
     cmd: RacketTargetCommand,
 ) -> torch.Tensor:
     """Return the aligned measured butt-to-blade axis at the current teacher phase."""
@@ -554,6 +727,23 @@ def _stage1_aligned_clip_long_axis_target(
     return result
 
 
+def _stage1_aligned_clip_long_axis_target(
+    cmd: RacketTargetCommand,
+) -> torch.Tensor:
+    """Atomically select safe-ready or measured butt-to-blade axis."""
+
+    measured = _stage1_aligned_clip_measured_long_axis_target(cmd)
+    if not bool(
+        getattr(
+            cmd._motion(), "action_ball_diagnostic_split_ready_teacher", False
+        )
+    ):
+        return measured
+    wait = _stage1_split_ready_wait_mask(cmd)
+    safe_long_axis = _stage1_split_ready_safe_racket_tuple(cmd)[3]
+    return torch.where(wait[:, None], safe_long_axis, measured)
+
+
 def stage1_aligned_clip_site_target_now(
     cmd: RacketTargetCommand,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -580,21 +770,24 @@ def stage1_aligned_clip_site_target_at_reference_hit(
     token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
     cached = getattr(cmd, "_stage1_clip_site_reference_hit_cache", None)
     if type(token) is int and cached is not None and cached[0] == token:
-        return cached[1]
-    env_ids = torch.arange(cmd.num_envs, device=cmd.device, dtype=torch.long)
-    # One row authority: this is the exact producer used by the live strike clock, including its
-    # single-clip Python-double and multi-clip cached-tensor rounding behavior.  Reimplementing the
-    # phase arithmetic here would let a half-frame boundary put the observation and reward windows
-    # on adjacent reference rows.
-    hit_steps = cmd._strike_steps_for_envs(env_ids).to(
-        device=cmd.device, dtype=torch.long
-    )
-    if hit_steps.shape != (cmd.num_envs,):
-        raise ValueError("Stage-1 reference-hit rows changed shape")
-    result = _stage1_aligned_clip_site_target_at_steps(cmd, hit_steps)
-    if type(token) is int:
-        cmd._stage1_clip_site_reference_hit_cache = (token, result)
-    return result
+        measured = cached[1]
+    else:
+        env_ids = torch.arange(
+            cmd.num_envs, device=cmd.device, dtype=torch.long
+        )
+        # One row authority: this is the exact producer used by the live strike clock, including its
+        # single-clip Python-double and multi-clip cached-tensor rounding behavior.  Reimplementing the
+        # phase arithmetic here would let a half-frame boundary put the observation and reward windows
+        # on adjacent reference rows.
+        hit_steps = cmd._strike_steps_for_envs(env_ids).to(
+            device=cmd.device, dtype=torch.long
+        )
+        if hit_steps.shape != (cmd.num_envs,):
+            raise ValueError("Stage-1 reference-hit rows changed shape")
+        measured = _stage1_aligned_clip_site_target_at_steps(cmd, hit_steps)
+        if type(token) is int:
+            cmd._stage1_clip_site_reference_hit_cache = (token, measured)
+    return _stage1_select_split_ready_site_target(cmd, measured)
 
 
 def stage1_clip_racket_tracking_errors(

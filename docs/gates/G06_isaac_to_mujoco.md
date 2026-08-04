@@ -10,7 +10,53 @@ Isaac-trained ONNX 与 reset-first 179-D 条款是旧版接受条件，尚未由
 [MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 在代码/合同和 `main` 主板切换前，Gate 状态不晋级。
 
-**2026-08-03 C-lite trainer successor（Gate 仍 `Partial`）：**native 路径已新增连续
+**2026-08-04 19:53 current correction（Gate 仍 `Partial`）：**exact Pod WIP r6 已使
+A211/C211 各完成 `1 env x 2 PPO update + reset-boundary save + fresh-process cold-load`；
+211/319 observation有限，fresh WAIT canary通过，cold-load/update2 exact均为true。A/C result
+SHA分别为`d58cb750…83bb2`/`440a1f2e…23733`，native+legacy组合回归为
+`219 passed, 2 skipped, 0 failed`。这关闭下文r3/r4所描述的“尚未跑通当前A/C执行链”阻塞，
+但不关闭Gate：当前仍是CPU、cap64、partial-reward、diagnostic-only路径，不是4096或formal
+training。每个update还有7个无selected-contact的TASK_ACTIVE hard-terminal row，而当前receipt
+没有具体termination reason；补齐reason telemetry、完整reward/safety、mid-episode resume、
+4096与cross-engine parity前不得晋级。随后对exact checkpoint做确定性replay，已把每个update的
+7个hard-terminal全部定位为`joint_actual_forbidden`：A在episode tick `70..84`，C在`69..88`，
+全部早于nominal strike；timeout/base/table/contact/strike/landing均0。因此当前MuJoCo 4096 scale
+明确阻塞，须先用sealed current mean-only/std.02与未sealed4σ-inset候选做同条件100+ tick诊断；
+若采用inset必须产生新lineage，不能拿r6代签。下方同日r3/tick74段落保留为历史根因记录，其
+运行态由本段覆盖。
+
+**2026-08-04 A211/C211 移植 successor（Gate 仍 `Partial`）：**当前 branch 已有相互独立的
+211/319-D A/C ABI、`task_valid`、各自 task/reward 和 reset-boundary checkpoint。A 消费 desired
+contact，formal question source 是 `online_solver + complete-semantic exact-answer cache`：cold Q/Q'
+各真实解一次，sampler/curriculum/RNG 每次 reset 正常推进。C 消费 incoming-ball-at-contact，formal
+source 是 `direct_ball`、总 inverse call=`0`，且不使用 `immutable_tape` 或 answer cache；C 的最小 task
+reward 只有 nominal-strike 拍心-球心距离与 actual-selected-rubber-contact-gated 的一次落点，没有
+desired-contact、独立 hit bonus 或额外 dense outcome。
+
+两族 physical reset 都使用 tracked split-ready，而 exact measured frame 0 只作 teacher authority：
+direct physical-birth 同门槛扫描为 `0/73`。Host 已实现 seed=`20260804` 的 per-env 5--25 tick
+RESET_WAIT；WAIT 中 plant/teacher 都停在 split-ready，最大25 tick 已被 `60/240/1.2 s` hold receipt
+覆盖；球停在无接触 parked state，不能用反向弹道在 WAIT 内先穿过桌/地。task reveal 同 tick
+原子安装 sealed incoming-ball launch state和tuple、把 teacher 切到 measured frame 0并公开原始约
+`.712376 s` teacher-start clock，让 dense mimic 学 bridge。checkpoint v3 保存 reset-boundary WAIT
+continuation。Pod WIP r3 已真实进入physics/update并验证parked-ball→reveal，但尚未完成验收：native
+fresh actor原先没有Isaac采用的safe-ready output bias；补成末层weight=0、bias=normalized hold、
+std=`.02`后能穿过16-tick WAIT，却仍在tick74因`waist_roll_joint` actual hard-limit失败，早于nominal
+strike tick108，且qdes恒为`-0.0816`。这证明bootstrap必要但不足，也证明旧Isaac split-ready/PD不能
+直接代签MuJoCo稳定hold。当前须先关闭per-joint 4σ executed-qdes margin和MuJoCo-native
+`>=500` control-tick safe hold；随后A/C各自重跑`1 env x 2 PPO update + save/fresh-process cold-load`，
+rollout可继续采集到reset boundary但不得丢弃或覆盖transition。当前还没有clean S1 exact receipt，
+也没有跨引擎 WAIT parity receipt。当前 scalar reward 已消费与 Isaac 数值/集合同义的 partial subset：
+upright、base angular/vertical velocity、joint velocity、action rate、13-body non-wrist pose/velocity mimic
+与 measured-paddle position/velocity/signed-face/long-axis；WAIT 中 prior 继续工作而 task 严格 mask。
+脚接触/滑动/落地、undesired-contact、Isaac applied-torque、完整 safety/projection、termination/
+mid-episode resume/export 与 GPU 4096 VecEnv 仍未闭合。因此只能称 `A211/C211 code-path partial`，
+不能称 MuJoCo 移植已完成或 trainer ready。
+当前 five-update scale 的 implementation strict-zero 只包括 qdes-hard、actual-hard、nonfinite；
+fall/base-too-low/robot-hit-table 仍终止，但属于待按 hidden-WAIT、revealed-pre-strike、post-strike
+分相位守恒报告的行为账，不能改写成“初始 policy 必须零次”的实现门。
+
+**2026-08-03 C-lite trainer 历史（Gate 仍 `Partial`）：**native 路径已新增连续
 physics-substep transcript 的 observed selected-rubber outcome resolver，可分 racket/table/net/floor 事件、
 valid achieved flight 与 observed landing。scalar reward 没有独立 contact bonus：只有
 `1/(1+(distance/.15m)^2)` 拍心-球心距离、legal landing=`1`和 opponent-side-out=`.5`；
@@ -21,11 +67,9 @@ next-update exact parity；显式禁止 mid-episode resume/formal authorization�
 `MujocoN1DiagnosticVecEnv` 现已接 C-lite normal step，但只接受 immediate `TASK_ACTIVE` portable parent，
 显式拒绝尚未移植的 RESET_WAIT/task-valid authority。为了不伪造 full mimic，MuJoCo C-lite 当前
 motion/balance scalar 明确为0，所以只是 plumbing/learnability smoke，不是和 Isaac 配方等价的
-canonical N1。host 历史 portable VecEnv/Torch/trainer 聚焦数保留；最新 exact clean Pod commit
-`ebe963f5` 的 component suite 已是 `108 passed, 0 skipped, 0 failed`，因此“MuJoCo+Torch Pod
-组件未测”这一旧口径关闭。但这108项没有调用一条用户可执行 C-lite run entrypoint，不能代签
-`MujocoN1BallCore 1 env x 2 step x 2 PPO update + save/cold-load`。该 executable-runner receipt
-仍为`未测`，未过前不写 trainer ready/4096 throughput/formal parity。branch 现已增加
+canonical N1。host 历史 portable VecEnv/Torch/trainer 聚焦数保留；latest exact clean Pod component
+suite 已是 `108 passed, 0 skipped, 0 failed`，因此“MuJoCo+Torch Pod 组件未测”这一旧口径关闭。
+branch 另有
 `run_mujoco_c_lite_pod_diagnostic.py`：默认只做 SHA-validating plan，执行必须显式确认
 `diagnostic_unauthorized`；它在 reset boundary 保存，再用 fresh Python 进程重建真 core/
 trainer，比较 next-update transition/reason/safety 以及 model/Adam/normalizer/RNG 摘要。
@@ -34,13 +78,17 @@ question，用真 MuJoCo 3.10.0 + Torch CPU 完成 `1 env x 2 step x 2 PPO updat
 checkpoint 保存/加载 SHA 同为 `e623d214…0026`，fresh child 自然退出，下一 update 的
 receipt/model/optimizer/normalizer/RNG/reason+safety transition 全部 exact。tracked result 为
 `configs/mujoco_c_lite_20260803/42500ade_pod1_reset_boundary_cold_load.receipt.v1.json`，file SHA
-`ad62b45d…377a`。这关闭 executable plumbing gate，不关闭收据中列出的 formal mimic/
-phase/physics parity、mid-episode resume、throughput/export/deploy blockers。
+`ad62b45d…377a`。commit `934b7c03` 又先按 `action_specific_hold` producer 生成正确 robot tape，
+再由 executable runner 重跑同一 `1x2x2`：checkpoint SHA=`1d72324e…d8a3`、fresh-process
+cold-load exact=`true`。历史 local/untracked result（本轮显式不纳入 S0 source commit）位于
+`configs/mujoco_fixed_center_20260803/934b7c03_pod1_action_specific_hold_1x2x2.result.v1.json`
+file SHA=`9987e723…aa3b`。这关闭 executable plumbing gate，不关闭收据中列出的 formal 211/319
+ABI、mimic/phase/physics parity、mid-episode resume、throughput/export/deploy blockers。
 
 这也是 [PRE-LONG 基础闭包](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)
-的第五项：任何 Isaac/MuJoCo long 前必须由 exact clean Pod 真实 runner 跑完两次 update，保存后在
-fresh process cold-load，并验证下一 update/state 与源 SHA/normalizer/checkpoint lineage；component
-test、host fake core 或只构造 CLI 都不够。
+的第五项：任何 current A/C long 前，A211 与 C211 必须分别由 exact clean Pod 真实 runner 跑完
+`1 env x 2 PPO update`，保存后在 fresh process cold-load，并验证下一 update/state 与源
+SHA/normalizer/checkpoint lineage；component test、host fake core、历史76-D C-lite 或只构造 CLI 都不够。
 
 当前 MuJoCo 实现状态已不再只是 single-env：
 `deec4a52c758b1f173436d4522e3e13e7ccb7bfd` 已在 native physical-ball core 外增加一条
@@ -140,7 +188,9 @@ Python 3.10/MuJoCo 3.10/Torch 2.7 复核，不是 Reward/PPO 或 normal-step 授
 compact-reset/lineage successor；该 successor 的最新 exact Pod 复核是上述 `299145e9/161 passed`，
 两者都不改变 Reward/PPO blocker 或授权状态。
 
-single-env 底层仍绑定 schema-3 31-D action、implicit total-PD、episode-fixed delay、
+以下 single-env 记录是 current A211/C211 split-ready contract 之前的历史 predecessor，只保留底层
+plant/action 证据；其中的 reset composition 不再是 current A/C 发车输入。该 predecessor 绑定
+schema-3 31-D action、implicit total-PD、episode-fixed delay、
 immutable teacher reference + 独立 sealed physical reset/hold 和 100-tick fixed tape。
 首轮 tick9 hand↔hip/wrist↔table 失败的根因是把动态 v5 teacher frame0 当成静态出生状态；
 teacher reference 没有被改写，physical reset 现使用在当前 exact MJCF 重审的 shared
@@ -1791,7 +1841,7 @@ Isaac full-scene probe 与 vendor MuJoCo continuous gate 均未绑定。因而�
 Gate3/Gate3B 或部署证据；`launch-check` 必须失败，G06 保持 `Partial`。复现入口见
 [恢复操作](../operations/run_phase1_recovery_tuple_prereg.md)。
 
-### 2026-08-03 N1 reward/event kernel 与 native physical-facts integration
+### 2026-08-03 N1 reward/event kernel 与 native physical-facts integration（历史 predecessor）
 
 新增 `mujoco_native/n1_reward_event_kernel.py`，仅把调用方已 source-bound 的事实映射为 motion-mimic、A
 target-window、closed-swing/hit、achieved outgoing flight、predicted outcome 与 observed net/legal-landing 的
@@ -1820,8 +1870,10 @@ source/dependency-light host focused tests=`73 passed, 28 skipped`。exact Pod d
 但还需 exact Pod 真 MuJoCo ball-racket contact rollout；其余接口是 desired-contact/window、
 outgoing-flight predictor、observed net/legal-landing resolver、swing-closure 和
 per-term reward magnitude/weights receipt；全部齐备且能独立 replay sum-closure 后才能打开 normal reward。
-PPO/save/cold-load 仍未实现；exact resume 还缺 MuJoCo/core/ledger/delay/RNG state hooks。G06 保持
-`Partial`。
+在这个历史快照中 PPO/save/cold-load 尚未实现；后续76-D C-lite 已完成 reset-boundary cold-load，
+current A211/C211 host code path 也已实现，但两族各自的 exact-Pod `1 env x 2 PPO update +
+save/fresh-process cold-load` 仍为`未测`。mid-episode exact resume 继续缺
+MuJoCo/core/ledger/delay/RNG state hooks，G06 保持 `Partial`。
 
 action-specific hold 的候选身份也从 path-bound v1 升级为 portable v2。generator 只把 repo-relative
 POSIX logical path 和 source SHA 写入 canonical payload；consumer 固定从 repo root 解析，拒绝旧 v1、

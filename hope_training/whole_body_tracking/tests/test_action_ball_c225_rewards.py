@@ -47,7 +47,6 @@ def _strike_command():
         _action_ball_ball_contact_target_w=torch.tensor(
             [[0.02, 0.0, 0.0], [0.50, 0.0, 0.0], [0.02, 0.0, 0.0]]
         ),
-        face_center_w=torch.zeros((3, 3)),
     )
 
 
@@ -73,16 +72,8 @@ def _landing_command():
     )
 
 
-def test_strike_bridge_is_exact_tick_only_and_miss_keeps_a_cauchy_tail(monkeypatch):
+def test_strike_bridge_is_exact_tick_only_and_miss_keeps_a_cauchy_tail():
     command = _strike_command()
-    monkeypatch.setattr(
-        M,
-        "_selected_face_center_w",
-        lambda cmd: (
-            cmd.face_center_w,
-            torch.ones(3, dtype=torch.bool),
-        ),
-    )
     reward = M.c225_strike_ball_paddle_center_proximity(
         _env(command), "racket_target", std=0.15
     )
@@ -128,14 +119,9 @@ def test_landing_hierarchy_is_contact_flight_gated_and_off_table_decays():
     )[0].item() == 0.0
 
 
-def test_task_valid_zero_masks_every_c211_outcome_income(monkeypatch):
+def test_task_valid_zero_masks_every_c211_outcome_income():
     strike = _strike_command()
     strike._action_ball_task_valid[:] = False
-    monkeypatch.setattr(
-        M,
-        "_selected_face_center_w",
-        lambda cmd: (cmd.face_center_w, torch.ones(3, dtype=torch.bool)),
-    )
     assert torch.count_nonzero(
         M.c225_strike_ball_paddle_center_proximity(
             _env(strike), "racket_target", std=0.15
@@ -161,8 +147,24 @@ def test_c225_reward_source_never_reads_desired_contact_or_inverse_targets():
         "target_normal_cmd",
     } & used_attributes
     source = MODULE_PATH.read_text(encoding="utf-8")
-    assert "FACE_AREA_CENTER_XZ_FROM_SITE_M" in source
-    assert "_action_ball_mount_signs" in source
+    assert "FACE_AREA_CENTER_XZ_FROM_SITE_M" not in source
+    assert "_action_ball_mount_signs" not in source
+    assert "official_racket_site" in source
+
+
+def test_paddle_center_is_exact_live_official_site_without_face_offset():
+    command = _strike_command()
+    command.racket_pos_w = torch.tensor(
+        [[0.123, -0.456, 0.789], [1.0, 2.0, 3.0], [-4.0, 5.0, 6.0]]
+    )
+    center, finite = M._paddle_center_w(command)
+    assert torch.equal(center, command.racket_pos_w)
+    assert finite.tolist() == [True, True, True]
+    # The helper returns the authoritative site itself, not site+offset or a
+    # teacher/measured tensor with a similar name.
+    command.measured_racket_site_pos_w = command.racket_pos_w + 0.123
+    center_again, _ = M._paddle_center_w(command)
+    assert torch.equal(center_again, command.racket_pos_w)
 
 
 @pytest.mark.parametrize(
@@ -172,13 +174,8 @@ def test_c225_reward_source_never_reads_desired_contact_or_inverse_targets():
         ({"std": float("nan")}, "std"),
     ),
 )
-def test_invalid_strike_kernel_contract_fails_closed(monkeypatch, kwargs, match):
+def test_invalid_strike_kernel_contract_fails_closed(kwargs, match):
     command = _strike_command()
-    monkeypatch.setattr(
-        M,
-        "_selected_face_center_w",
-        lambda cmd: (cmd.face_center_w, torch.ones(3, dtype=torch.bool)),
-    )
     with pytest.raises(ValueError, match=match):
         M.c225_strike_ball_paddle_center_proximity(
             _env(command), "racket_target", **kwargs

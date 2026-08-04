@@ -57,12 +57,26 @@ def _motion(path: Path) -> dict[str, np.ndarray]:
 
 
 def _argv(root: Path, motion_sha: str, output: str) -> list[str]:
+    timing = root / "timing.json"
+    if not timing.exists():
+        unsigned = {
+            "schema_version": 5,
+            "motion_sha256": motion_sha,
+            "contact_time_step_s": 0.02,
+            "pre_swing_wait_s": 0.7123799138976297,
+        }
+        document = {
+            **unsigned,
+            "canonical_sha256": materializer.canonical_sha256(unsigned),
+        }
+        timing.write_bytes(materializer.canonical_bytes(document) + b"\n")
     return [
         "--repo-root", str(root),
         "--action-id", "take_061_unit04_bh",
         "--motion-path", "motion.npz",
         "--expected-motion-sha256", motion_sha,
-        "--task-close-ticks", "180",
+        "--timing-receipt-path", "timing.json",
+        "--expected-timing-receipt-sha256", _sha(timing),
         "--output", output,
     ]
 
@@ -87,7 +101,12 @@ def test_exact_frame0_copy_zero_velocity_and_canonical_bindings(
     assert artifact["action_id"] == "take_061_unit04_bh"
     assert artifact["motion_sha256"] == _sha(motion)
     assert artifact["policy_dt_s"] == materializer._L.POLICY_DT_S
-    assert artifact["task_close_ticks"] == 180
+    assert artifact["schema_version"] == 2
+    assert artifact["birth_horizon"]["required_policy_ticks"] == 62
+    assert artifact["birth_horizon"]["pre_swing_wait_policy_ticks_ceil"] == 36
+    assert "durability_policy_ticks_excluded" not in artifact["birth_horizon"]
+    assert "durability_physics_substeps_excluded" not in artifact["birth_horizon"]
+    assert artifact["timing_receipt"]["sha256"] == _sha(tmp_path / "timing.json")
     assert artifact["wait_schedule_canonical_sha256"] == (
         materializer._L.WAIT_SCHEDULE["canonical_sha256"]
     )

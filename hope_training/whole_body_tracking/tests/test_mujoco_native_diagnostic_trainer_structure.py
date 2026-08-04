@@ -134,7 +134,7 @@ def test_nonempty_blockers_and_existing_vecenv_style_blocked_receipt_fail_closed
 
 def test_checkpoint_schema_explicitly_denies_mid_episode_and_formal_resume():
     source = CHECKPOINT_SOURCE.read_text(encoding="utf-8")
-    assert C.CHECKPOINT_KIND.endswith("reset_boundary_checkpoint_v1")
+    assert C.CHECKPOINT_KIND.endswith("reset_boundary_checkpoint_v3")
     assert '"kind": "explicit_full_reset_boundary"' in source
     assert '"mid_episode_resume": False' in source
     assert '"diagnostic_unauthorized": True' in source
@@ -142,8 +142,10 @@ def test_checkpoint_schema_explicitly_denies_mid_episode_and_formal_resume():
     for state_name in (
         "model_state_dict",
         "optimizer_state_dict",
-        "normalizer_state_dict",
+        "actor_normalizer_state_dict",
+        "critic_normalizer_state_dict",
         "rng_state",
         "update_counter",
+        "environment_state",
     ):
         assert state_name in source

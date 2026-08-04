@@ -56,6 +56,10 @@ def qdes_projection_penalty():
     pass
 
 
+def virtual_landing_dense_actual_contact():
+    pass
+
+
 def actual_joint_limit_barrier_v2():
     pass
 
@@ -429,7 +433,7 @@ def test_zero_weight_term_is_not_given_raw_or_activation_claims():
 def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_reason():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-300.0),
+            "death_penalty": _death_cfg(-10.0),
             "joint_limit": FakeTermCfg(actual_joint_limit_barrier_v2, -5.0),
             "qdes_limit_barrier": FakeTermCfg(qdes_limit_barrier_v2, -5.0),
             "racket_position": FakeTermCfg(dense_objective, 4.0),
@@ -512,9 +516,11 @@ def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_rea
     assert a_groups[
         RECIPE.ACTION_BALL_REWARD_GROUP_HOPE_TASK
     ]["weighted_sum"] == pytest.approx(3.0 * 4.0 * 0.02)
+    # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0,
+    # 组内合计 = death(-10.0 * dt 0.02) + soft(-0.1) = -0.3(原 -6.1)。
     assert a_groups[
         RECIPE.ACTION_BALL_REWARD_GROUP_IMMUTABLE_SAFETY
-    ]["weighted_sum"] == pytest.approx(-6.1)
+    ]["weighted_sum"] == pytest.approx(-10.0 * 0.02 + -0.1)
     assert a_groups[
         RECIPE.ACTION_BALL_REWARD_GROUP_MJLAB_STABILITY
     ]["eligible_sample_count"] == 0
@@ -556,8 +562,9 @@ def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_rea
     ]
     assert table_and_hard["post_terminal_reason_mask"]["robot_hit_table"]
     assert table_and_hard["death_raw_value"] == pytest.approx(1.0)
+    # 2026-08-05 层级对齐(exp §5.6 第 7 条):-10.0 * dt 0.02 = -0.2(原 -6.0)。
     assert table_and_hard["death_weighted_contribution"] == pytest.approx(
-        -6.0
+        -0.2
     )
     assert table_and_hard["reason_specific_penalties"] == []
     assert table_and_hard["joint_policy_step_sequence"] == 77
@@ -573,7 +580,7 @@ def test_action_bound_ledger_freezes_identity_and_proves_one_death_for_multi_rea
 def test_episode_closure_persists_open_sums_and_binds_external_reset():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-300.0),
+            "death_penalty": _death_cfg(-10.0),
             "joint_limit": FakeTermCfg(
                 actual_joint_limit_barrier_v2, -5.0
             ),
@@ -645,7 +652,7 @@ def test_episode_closure_persists_open_sums_and_binds_external_reset():
 def test_action_bound_ledger_rejects_reason_specific_terminal_stack():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-300.0),
+            "death_penalty": _death_cfg(-10.0),
             "joint_limit": FakeTermCfg(actual_joint_limit_barrier_v2, -5.0),
             "qdes_limit_barrier": FakeTermCfg(qdes_limit_barrier_v2, -5.0),
             "table_hit_penalty": FakeTermCfg(terminated_by_term, -100.0),
@@ -672,7 +679,7 @@ def test_action_bound_ledger_rejects_reason_specific_terminal_stack():
 def test_action_bound_taxonomy_rejects_unmapped_active_term():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-300.0),
+            "death_penalty": _death_cfg(-10.0),
             "joint_limit": FakeTermCfg(
                 actual_joint_limit_barrier_v2, -5.0
             ),
@@ -723,6 +730,30 @@ def test_qdes_projection_penalty_has_independent_immutable_safety_axis():
     assert term["causal_axis"] == "qdes_projection_distance"
 
 
+def test_virtual_landing_dense_has_authoritative_hope_task_taxonomy():
+    taxonomy = RECIPE.build_action_ball_reward_group_taxonomy(
+        [
+            {
+                "name": "virtual_landing_dense",
+                "callable": (
+                    f"{__name__}.virtual_landing_dense_actual_contact"
+                ),
+                "weight": 20.0,
+                "params": {"command_name": "racket_target"},
+            }
+        ]
+    )
+
+    assert len(taxonomy["active_terms"]) == 1
+    term = taxonomy["active_terms"][0]
+    assert term["group"] == RECIPE.ACTION_BALL_REWARD_GROUP_HOPE_TASK
+    assert term["expected_weight_sign"] == "positive"
+    assert term["expected_contribution"] == "positive"
+    assert term["adjustability"] == "preregistered_scientific"
+    assert term["source"] == "HOPE A211 achieved-contact shaping"
+    assert term["causal_axis"] == "achieved_contact_landing_error"
+
+
 @pytest.mark.parametrize(
     "bad_term,bad_raw",
     (
@@ -737,7 +768,7 @@ def test_action_bound_runtime_rejects_wrong_signed_term_contribution(
 ):
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-300.0),
+            "death_penalty": _death_cfg(-10.0),
             "joint_limit": FakeTermCfg(
                 actual_joint_limit_barrier_v2, -5.0
             ),
@@ -776,7 +807,8 @@ def test_crafted_causal_probes_cover_each_objective_and_require_worse_return():
         {
             "name": "death_penalty",
             "callable": f"{__name__}.is_terminated",
-            "weight": -300.0,
+            # 2026-08-05 层级对齐(exp §5.6 第 7 条):-300.0 -> -10.0。
+            "weight": -10.0,
             "params": {},
         },
         {
@@ -838,10 +870,12 @@ def test_crafted_causal_probes_cover_each_objective_and_require_worse_return():
 @pytest.mark.parametrize(
     "step_dt,death_weight,joint_weight,qdes_weight,match",
     (
-        (0.01, -300.0, -5.0, -5.0, "step_dt=0.02"),
-        (0.02, -301.0, -5.0, -5.0, "death_penalty weight=-300.0"),
-        (0.02, -300.0, -6.0, -5.0, "joint_limit weight=-5.0"),
-        (0.02, -300.0, -5.0, -6.0, "qdes_limit_barrier weight=-5.0"),
+        # 2026-08-05 层级对齐(exp §5.6 第 7 条):adopted death -300.0 -> -10.0。
+        # 每行只让一个量偏离 adopted 值,其余三项必须是 adopted 值,才能钉住报错归属。
+        (0.01, -10.0, -5.0, -5.0, "step_dt=0.02"),
+        (0.02, -301.0, -5.0, -5.0, "death_penalty weight=-10.0"),
+        (0.02, -10.0, -6.0, -5.0, "joint_limit weight=-5.0"),
+        (0.02, -10.0, -5.0, -6.0, "qdes_limit_barrier weight=-5.0"),
     ),
 )
 def test_action_bound_ledger_rejects_nonadopted_negative_dose(
@@ -880,7 +914,7 @@ def test_action_bound_ledger_rejects_nonadopted_negative_dose(
 def test_required_unsafe_reason_cannot_hide_behind_timeout_without_death():
     env = FakeEnv(
         {
-            "death_penalty": _death_cfg(-300.0),
+            "death_penalty": _death_cfg(-10.0),
             "joint_limit": FakeTermCfg(
                 actual_joint_limit_barrier_v2, -5.0
             ),

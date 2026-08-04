@@ -234,8 +234,9 @@ def _plan(args: argparse.Namespace) -> dict[str, Any]:
             "joint_space_frame0_teacher_only": True,
             "full_body_measured_mimic": False,
             "actor_task_mask_only_wait": True,
-            "physical_ball_parked_during_wait": False,
-            "physical_ball_trajectory_includes_wait_from_reset": True,
+            "physical_ball_parked_during_wait": True,
+            "physical_ball_trajectory_includes_wait_from_reset": False,
+            "ball_only_atomic_sealed_launch_on_reveal": True,
             "fixed_question": True,
             "online_inverse_solve_calls": 0,
             "reset_boundary_resume_only": True,
@@ -290,6 +291,21 @@ def _build_env(
     *,
     expected_launch_preparation: Mapping[str, Any] | None = None,
 ) -> Any:
+    ranged_wait = getattr(args, "reset_wait_min_steps", None) is not None
+    if ranged_wait:
+        episode_length = int(args.episode_horizon_steps)
+        recipe_spec = fixed_center_recipe.FixedCenterRecipeSpec(
+            reset_wait_steps=None,
+            reset_wait_min_steps=int(args.reset_wait_min_steps),
+            reset_wait_max_steps=int(args.reset_wait_max_steps),
+            reset_wait_seed=int(args.reset_wait_seed),
+            required_active_steps=int(args.required_active_steps),
+        )
+    else:
+        episode_length = args.reset_wait_steps + args.active_steps
+        recipe_spec = fixed_center_recipe.FixedCenterRecipeSpec(
+            reset_wait_steps=args.reset_wait_steps
+        )
     base = vec_env.MujocoN1DiagnosticVecEnv.from_authorities(
         contract_path=args.plant_contract,
         robot_tape_path=args.robot_tape,
@@ -303,12 +319,10 @@ def _build_env(
             args.expected_phase_fidelity_reference_tape_sha256
         ),
         enable_c_lite_reward=True,
-        diagnostic_episode_length=args.reset_wait_steps + args.active_steps,
+        diagnostic_episode_length=episode_length,
     )
     _validate_selected_rubber(base, args)
-    spec = fixed_center_recipe.FixedCenterRecipeSpec(
-        reset_wait_steps=args.reset_wait_steps
-    )
+    spec = recipe_spec
     base = fixed_center_recipe.prepare_continuous_wait_base(base, spec)
     teacher_reference = fixed_center_recipe.Frame0JointTeacher.from_fixed_tape(
         base.cores[0].binding, base.robot_tape

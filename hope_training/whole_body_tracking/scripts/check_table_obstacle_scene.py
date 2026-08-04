@@ -44,6 +44,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -82,6 +83,48 @@ MEASURED_BIRTH_FULL_SEED_SEMANTICS = (
 )
 MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS = (
     "exact_measured_teacher_frame0_root_joint_physical_birth"
+)
+MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS = (
+    "measured_frame0_direct_if_safe_else_lexicographic_whole_body_safe_ready"
+)
+_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS = {
+    "left_sole_floor_slack_m": 1.0e-4,
+    "right_sole_floor_slack_m": 1.0e-4,
+    "left_contact_load_slack_n": 1.0e-1,
+    "right_contact_load_slack_n": 1.0e-1,
+    "support_margin_slack_m": 1.0e-3,
+    "joint_position_slack_rad": 2.0e-2,
+    "qdes_slack_rad": 2.0e-2,
+    "torque_slack_nm": 2.0,
+    "table_clearance_slack_m": 1.0e-2,
+    "root_height_slack_m": 2.0e-2,
+    "root_tilt_slack_rad": 2.0e-2,
+    "collision_slack_m": 5.0e-3,
+    "ground_lp_residual_slack": 5.0e-8,
+}
+_WHOLE_BODY_SAFETY_SLACK_SCALES = {
+    "left_sole_floor_slack_m": 2.0e-3,
+    "right_sole_floor_slack_m": 2.0e-3,
+    "left_contact_load_slack_n": 100.0,
+    "right_contact_load_slack_n": 100.0,
+    "support_margin_slack_m": 2.0e-2,
+    "joint_position_slack_rad": 0.2,
+    "qdes_slack_rad": 0.2,
+    "torque_slack_nm": 20.0,
+    "table_clearance_slack_m": 5.0e-2,
+    "root_height_slack_m": 0.2,
+    "root_tilt_slack_rad": 0.2,
+    "collision_slack_m": 2.0e-2,
+    "ground_lp_residual_slack": 1.0e-6,
+}
+_WHOLE_BODY_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256 = (
+    "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+)
+_WHOLE_BODY_GROUND_LP_EQUALITY_RESIDUAL_TOLERANCE = 2.0e-7
+_WHOLE_BODY_MEASURED_RACKET_AXIS_LOCAL = (
+    1.0 / math.sqrt(2.0),
+    0.0,
+    1.0 / math.sqrt(2.0),
 )
 _A3_LEG_JOINT_NAMES = frozenset(
     {
@@ -330,6 +373,23 @@ def _canonical_json_bytes(value: Any) -> bytes:
         ) from exc
 
 
+def _canonical_ascii_json_bytes(value: Any) -> bytes:
+    """Match the dynamic-ready materializer's content-seal canonicalization."""
+
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise TableSmokeReceiptError(
+            f"JSON value is not finite/ASCII-canonicalizable: {exc}"
+        ) from exc
+
+
 def _strict_json_object(payload: bytes, label: str) -> dict[str, Any]:
     def unique(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -547,6 +607,1487 @@ def _pinned_external_file(
     return path, digest
 
 
+def _whole_body_number(value: object, label: str) -> float:
+    if (
+        isinstance(value, bool)
+        or type(value) not in (int, float)
+        or not math.isfinite(float(value))
+    ):
+        raise TableSmokeReceiptError(f"{label} must be one finite number")
+    return float(value)
+
+
+def _whole_body_named_numbers(
+    value: object, *, expected: Mapping[str, float], label: str
+) -> dict[str, float]:
+    if not isinstance(value, Mapping) or set(value) != set(expected):
+        raise TableSmokeReceiptError(f"{label} fields are incomplete or unknown")
+    return {
+        name: _whole_body_number(value[name], f"{label}.{name}")
+        for name in expected
+    }
+
+
+def _whole_body_matrix(
+    value: object, *, rows: int | None, columns: int, label: str
+) -> tuple[tuple[float, ...], ...]:
+    if not isinstance(value, list) or (rows is not None and len(value) != rows):
+        expected_rows = "one or more" if rows is None else str(rows)
+        raise TableSmokeReceiptError(
+            f"{label} must have {expected_rows} rows of {columns} numbers"
+        )
+    result = tuple(
+        _finite_tuple(row, columns, f"{label} row {index}")
+        for index, row in enumerate(value)
+    )
+    if rows is None and not result:
+        raise TableSmokeReceiptError(f"{label} must not be empty")
+    return result
+
+
+def _whole_body_state_sha256(
+    joint_pos: Sequence[float],
+    root_pos: Sequence[float],
+    root_quat: Sequence[float],
+) -> str:
+    """Reproduce ``canonical_grounded_ready.state_digest`` without NumPy."""
+
+    digest = hashlib.sha256()
+    for label, values in (
+        ("joint_pos", tuple(joint_pos)),
+        ("root_pos_w", tuple(root_pos)),
+        ("root_quat_wxyz", tuple(root_quat)),
+    ):
+        digest.update(label.encode("utf-8"))
+        digest.update(b"float64")
+        digest.update(struct.pack("=q", len(values)))
+        digest.update(struct.pack(f"={len(values)}d", *values))
+    return digest.hexdigest()
+
+
+def _whole_body_close(left: float, right: float, *, tolerance: float = 1.0e-10) -> bool:
+    return math.isclose(left, right, rel_tol=1.0e-12, abs_tol=tolerance)
+
+
+def _whole_body_vector_norm(value: Sequence[float]) -> float:
+    return math.sqrt(sum(float(item) * float(item) for item in value))
+
+
+def _whole_body_dot(left: Sequence[float], right: Sequence[float]) -> float:
+    return sum(float(a) * float(b) for a, b in zip(left, right))
+
+
+def _whole_body_mapping_equal(left: object, right: Mapping[str, Any]) -> bool:
+    return isinstance(left, Mapping) and dict(left) == dict(right)
+
+
+def _whole_body_cross(
+    left: Sequence[float], right: Sequence[float]
+) -> tuple[float, float, float]:
+    return (
+        float(left[1]) * float(right[2])
+        - float(left[2]) * float(right[1]),
+        float(left[2]) * float(right[0])
+        - float(left[0]) * float(right[2]),
+        float(left[0]) * float(right[1])
+        - float(left[1]) * float(right[0]),
+    )
+
+
+def _whole_body_racket_fidelity(
+    value: object,
+    *,
+    motion_sha256: str,
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    if not isinstance(value, Mapping):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body racket-site fidelity is missing"
+        )
+    reference = value.get("reference_authority")
+    if not isinstance(reference, Mapping):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body independent racket authority is missing"
+        )
+    mount_sign = reference.get("robot_mount_normal_sign")
+    if isinstance(mount_sign, bool) or type(mount_sign) is not int:
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body racket mount sign is invalid"
+        )
+    reference_position = _finite_tuple(
+        reference.get("site_pos_w_m"), 3, "measured racket blade center"
+    )
+    measured_face = _finite_tuple(
+        reference.get("signed_face_normal_w"),
+        3,
+        "measured racket signed face",
+    )
+    measured_long = _finite_tuple(
+        reference.get("long_axis_w"), 3, "measured racket long axis"
+    )
+    measured_face_unit = _finite_tuple(
+        reference.get("signed_face_normal_w_unit"),
+        3,
+        "unit measured racket signed face",
+    )
+    measured_long_unit = _finite_tuple(
+        reference.get("long_axis_w_unit"),
+        3,
+        "unit measured racket long axis",
+    )
+    axis_local = _finite_tuple(
+        reference.get("robot_butt_to_blade_axis_local"),
+        3,
+        "racket butt-to-blade local axis",
+    )
+    official_rotation = _whole_body_matrix(
+        reference.get("official_site_rotation_w"),
+        rows=3,
+        columns=3,
+        label="independent measured racket official-site rotation",
+    )
+    if (
+        reference.get("authority")
+        != "independent_schema_v4_measured_racket_channel"
+        or reference.get("motion_sha256") != motion_sha256
+        or reference.get("frame_index") != 0
+        or reference.get("position_semantics") != "physical_blade_center"
+        or reference.get("normal_semantics")
+        != "signed_physical_hitting_face"
+        or reference.get("long_axis_semantics")
+        != "measured_paddle_butt_to_blade"
+        or reference.get("robot_rigid_visual_mesh_sha256")
+        != _WHOLE_BODY_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256
+        or mount_sign not in (-1, 1)
+        or any(
+            not _whole_body_close(actual, expected, tolerance=1.0e-15)
+            for actual, expected in zip(
+                axis_local, _WHOLE_BODY_MEASURED_RACKET_AXIS_LOCAL
+            )
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body measured racket lost schema-v4 authority"
+        )
+    face_norm = _whole_body_vector_norm(measured_face)
+    long_norm = _whole_body_vector_norm(measured_long)
+    if (
+        abs(face_norm - 1.0) > 1.0e-3
+        or abs(long_norm - 1.0) > 1.0e-3
+        or abs(_whole_body_dot(measured_face, measured_long)) > 1.0e-3
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-12)
+            for actual, expected in zip(
+                measured_face_unit,
+                (value / face_norm for value in measured_face),
+            )
+        )
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-12)
+            for actual, expected in zip(
+                measured_long_unit,
+                (value / long_norm for value in measured_long),
+            )
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body measured racket axes are invalid"
+        )
+    site_y = tuple(float(mount_sign) * value for value in measured_face_unit)
+    projection = _whole_body_dot(site_y, measured_long_unit)
+    site_y = tuple(
+        value - projection * axis
+        for value, axis in zip(site_y, measured_long_unit)
+    )
+    site_y_norm = _whole_body_vector_norm(site_y)
+    if site_y_norm <= 1.0e-12:
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body measured racket axes are degenerate"
+        )
+    site_y = tuple(value / site_y_norm for value in site_y)
+    local_y = (0.0, 1.0, 0.0)
+    local_third = _whole_body_cross(axis_local, local_y)
+    world_third = _whole_body_cross(measured_long_unit, site_y)
+    # R_world_local = B_world @ B_local.T.
+    expected_rotation = tuple(
+        tuple(
+            measured_long_unit[row] * axis_local[column]
+            + site_y[row] * local_y[column]
+            + world_third[row] * local_third[column]
+            for column in range(3)
+        )
+        for row in range(3)
+    )
+    if any(
+        not _whole_body_close(actual, expected, tolerance=2.0e-6)
+        for actual_row, expected_row in zip(
+            official_rotation, expected_rotation
+        )
+        for actual, expected in zip(actual_row, expected_row)
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body official racket-site rotation drifted"
+        )
+
+    physical_position = _finite_tuple(
+        value.get("physical_site_pos_w_m"), 3, "physical racket blade center"
+    )
+    physical_face = _finite_tuple(
+        value.get("physical_signed_face_normal_w"),
+        3,
+        "physical racket signed face",
+    )
+    physical_long = _finite_tuple(
+        value.get("physical_long_axis_w"), 3, "physical racket long axis"
+    )
+    position_delta = _finite_tuple(
+        value.get("physical_minus_measured_position_w_m"),
+        3,
+        "physical-minus-measured racket center",
+    )
+    rotation_delta = _finite_tuple(
+        value.get("physical_minus_measured_rotation_vector_rad"),
+        3,
+        "physical-minus-measured racket rotation",
+    )
+    position_error = _whole_body_number(
+        value.get("position_error_m"), "racket position error"
+    )
+    orientation_error = _whole_body_number(
+        value.get("orientation_error_rad"), "racket orientation error"
+    )
+    face_error = _whole_body_number(
+        value.get("signed_face_error_rad"), "racket signed-face error"
+    )
+    long_error = _whole_body_number(
+        value.get("long_axis_error_rad"), "racket long-axis error"
+    )
+    physical_face_norm = _whole_body_vector_norm(physical_face)
+    physical_long_norm = _whole_body_vector_norm(physical_long)
+    if physical_face_norm <= 1.0e-12 or physical_long_norm <= 1.0e-12:
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body physical racket axes are degenerate"
+        )
+    expected_position_delta = tuple(
+        actual - measured
+        for actual, measured in zip(physical_position, reference_position)
+    )
+    expected_face_error = math.acos(
+        max(
+            -1.0,
+            min(
+                1.0,
+                _whole_body_dot(physical_face, measured_face_unit)
+                / physical_face_norm,
+            ),
+        )
+    )
+    expected_long_error = math.acos(
+        max(
+            -1.0,
+            min(
+                1.0,
+                _whole_body_dot(physical_long, measured_long_unit)
+                / physical_long_norm,
+            ),
+        )
+    )
+    if (
+        value.get("site_name") != "right_racket"
+        or value.get("site_semantics")
+        != "official_mjcf_site_against_independent_schema_v4_measured_blade"
+        or value.get("independent_measured_frame0_required") is not True
+        or abs(physical_face_norm - 1.0) > 2.0e-6
+        or abs(physical_long_norm - 1.0) > 2.0e-6
+        or abs(_whole_body_dot(physical_face, physical_long)) > 2.0e-6
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-10)
+            for actual, expected in zip(position_delta, expected_position_delta)
+        )
+        or not _whole_body_close(
+            position_error,
+            _whole_body_vector_norm(expected_position_delta),
+            tolerance=2.0e-10,
+        )
+        or not _whole_body_close(
+            orientation_error,
+            _whole_body_vector_norm(rotation_delta),
+            tolerance=2.0e-10,
+        )
+        or not _whole_body_close(
+            face_error, expected_face_error, tolerance=2.0e-6
+        )
+        or not _whole_body_close(
+            long_error, expected_long_error, tolerance=2.0e-6
+        )
+        or min(position_error, orientation_error, face_error, long_error) < 0.0
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body racket center/face/long fidelity is invalid"
+        )
+    return value, reference
+
+
+def _whole_body_threshold_first_contract(
+    document: Mapping[str, Any],
+    *,
+    joint_names: tuple[str, ...],
+    motion_sha256: str,
+    physical: Mapping[str, Any],
+) -> tuple[
+    tuple[float, ...],
+    tuple[float, ...],
+    tuple[float, ...],
+    bool,
+]:
+    """Accept only the materializer's seedless exact-frame0 short circuit."""
+
+    teacher = document.get("teacher_reference")
+    composition = document.get("physical_birth_composition")
+    static = document.get("physical_birth_static_evidence")
+    ready_source = document.get("ready_source")
+    sources = document.get("sources")
+    runtime = document.get("runtime_plant")
+    hold = document.get("hold_candidate")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (
+            teacher,
+            composition,
+            static,
+            ready_source,
+            sources,
+            runtime,
+            hold,
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body authority fields are incomplete"
+        )
+    assert isinstance(teacher, Mapping)
+    assert isinstance(composition, Mapping)
+    assert isinstance(static, Mapping)
+    assert isinstance(ready_source, Mapping)
+    assert isinstance(sources, Mapping)
+    assert isinstance(runtime, Mapping)
+    assert isinstance(hold, Mapping)
+
+    physical_q = _finite_tuple(
+        physical.get("joint_pos_rad"), 31, "whole-body ready q"
+    )
+    physical_root = _finite_tuple(
+        physical.get("root_pos_w_m"), 3, "whole-body ready root position"
+    )
+    physical_quat = _finite_tuple(
+        physical.get("root_quat_wxyz"), 4, "whole-body ready root quaternion"
+    )
+    physical_velocity = _finite_tuple(
+        physical.get("joint_vel_radps"), 31, "whole-body ready velocity"
+    )
+    teacher_q = _finite_tuple(
+        teacher.get("joint_pos_rad"), 31, "whole-body teacher frame-0 q"
+    )
+    teacher_root = _finite_tuple(
+        teacher.get("root_pos_w_m"), 3, "whole-body teacher root position"
+    )
+    teacher_quat = _finite_tuple(
+        teacher.get("root_quat_wxyz"), 4, "whole-body teacher root quaternion"
+    )
+    teacher_static_velocity = _finite_tuple(
+        teacher.get("static_handoff_joint_vel_radps"),
+        31,
+        "whole-body teacher static-handoff velocity",
+    )
+    delta_q = _finite_tuple(
+        composition.get("physical_minus_teacher_joint_pos_rad"),
+        31,
+        "whole-body physical-minus-teacher q",
+    )
+    delta_root = _finite_tuple(
+        composition.get("physical_minus_teacher_root_pos_m"),
+        3,
+        "whole-body physical-minus-teacher root",
+    )
+    delta_rotation = _finite_tuple(
+        composition.get("physical_minus_teacher_root_rotation_vector_rad"),
+        3,
+        "whole-body physical-minus-teacher root rotation",
+    )
+    recorded_teacher_quat = _finite_tuple(
+        composition.get("teacher_root_quat_wxyz"),
+        4,
+        "whole-body composition teacher quaternion",
+    )
+    recorded_physical_quat = _finite_tuple(
+        composition.get("physical_root_quat_wxyz"),
+        4,
+        "whole-body composition physical quaternion",
+    )
+    stored_physical_quat = _finite_tuple(
+        composition.get("stored_physical_root_quat_wxyz"),
+        4,
+        "whole-body stored physical quaternion",
+    )
+    audit_quat = _finite_tuple(
+        composition.get("mjcf_audit_root_quat_wxyz"),
+        4,
+        "whole-body MuJoCo audit quaternion",
+    )
+    stored_quaternion_norm = _whole_body_vector_norm(physical_quat)
+    if stored_quaternion_norm <= 1.0e-12:
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body stored quaternion is degenerate"
+        )
+    expected_audit_quat = tuple(
+        value / stored_quaternion_norm for value in physical_quat
+    )
+    close_endpoint = lambda left, right: math.isclose(
+        left, right, rel_tol=0.0, abs_tol=1.0e-12
+    )
+    by_name_delta = composition.get("physical_minus_teacher_joint_pos_by_name_rad")
+    if (
+        teacher.get("semantics") != "exact_motion_bytes_frame0_reference"
+        or teacher.get("motion_sha256") != motion_sha256
+        or teacher.get("frame_index") != 0
+        or composition.get("semantics")
+        != MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS
+        or composition.get("teacher_reference_unchanged") is not True
+        or composition.get("historical_physical_birth_seed_consumed") is not False
+        or composition.get("selection_priority")
+        != [
+            "exact_measured_frame0_if_all_safety_gates_pass",
+            "lexicographic_whole_body_safe_ready_only_if_frame0_unsafe",
+        ]
+        or composition.get("exact_measured_frame0_selected") is not True
+        or composition.get("released_root_degrees_of_freedom")
+        != ["z", "roll", "pitch"]
+        or composition.get("released_joint_indices") != list(range(31))
+        or tuple(composition.get("released_joint_names", ())) != joint_names
+        or composition.get("changed_joint_mask") != [False] * 31
+        or composition.get("changed_joint_indices") != []
+        or composition.get("changed_joint_names") != []
+        or composition.get("teacher_and_physical_birth_differ") is not False
+        or composition.get("safety_weighted_against_tracking") is not False
+        or composition.get("training_authorized") is not False
+        or composition.get("deployment_authorized") is not False
+        or composition.get("hardware_authorized") is not False
+        or composition.get("required_live_table_gate")
+        != NOMINAL_HOLD_RECEIPT_KIND
+        or not isinstance(by_name_delta, Mapping)
+        or set(by_name_delta) != set(joint_names)
+        or any(
+            _whole_body_number(
+                by_name_delta[name],
+                f"whole-body physical-minus-teacher q for {name}",
+            )
+            != 0.0
+            for name in joint_names
+        )
+        or any(value != 0.0 for value in physical_velocity)
+        or any(value != 0.0 for value in teacher_static_velocity)
+        or teacher.get("static_handoff_velocity_semantics")
+        != "constructed_zero_joint_velocity_endpoint_not_measured_motion_velocity"
+        or physical_q != teacher_q
+        or physical_root != teacher_root
+        or physical_quat != teacher_quat
+        or any(not close_endpoint(value, 0.0) for value in delta_q)
+        or any(not close_endpoint(value, 0.0) for value in delta_root)
+        or any(not close_endpoint(value, 0.0) for value in delta_rotation)
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(physical_q, teacher_q)
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(physical_root, teacher_root)
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(physical_quat, teacher_quat)
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(recorded_teacher_quat, teacher_quat)
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(recorded_physical_quat, physical_quat)
+        )
+        or stored_physical_quat != physical_quat
+        or not math.isfinite(stored_quaternion_norm)
+        or abs(stored_quaternion_norm - 1.0) > 2.0e-6
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(audit_quat, expected_audit_quat)
+        )
+        or sources.get("physical_birth_seed") is not None
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body exact-frame0 authority is invalid"
+        )
+    if (
+        ready_source.get("kind") != "measured_retarget_l0_diagnostic"
+        or ready_source.get("frame_index") != 0
+        or ready_source.get("teacher_reference_unchanged") is not True
+        or ready_source.get("teacher_and_physical_birth_same") is not True
+        or ready_source.get("physical_birth_semantics")
+        != MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS
+        or ready_source.get("plant_template_action_binding_consumed") is not False
+        or ready_source.get("plant_template_delay_overridden_to_zero") is not True
+        or ready_source.get("isaac_live_plant_match_required") is not True
+        or ready_source.get("diagnostic_unauthorized") is not True
+        or ready_source.get("training_authorized") is not False
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body ready-source authority is invalid"
+        )
+
+    handoff_keys = {
+        "schema_version",
+        "kind",
+        "selection_semantics",
+        "state_sha256_semantics",
+        "physical_ready_state_sha256",
+        "teacher_frame0_state_sha256",
+        "mjcf_audit_state_sha256",
+        "stored_root_quaternion_norm",
+        "mjcf_audit_root_quat_wxyz",
+        "mjcf_audit_quaternion_semantics",
+        "stored_teacher_and_physical_quaternion_unchanged",
+        "endpoints_bitwise_equal",
+        "physical_ready_joint_velocity_exact_zero",
+        "teacher_static_endpoint_joint_velocity_exact_zero",
+        "measured_motion_velocity_channels_consumed",
+        "not_a_motion_velocity_continuity_claim",
+        "certified_transition_s",
+        "required_min_wait_s",
+        "torque_speed_curve_required",
+        "torque_speed_non_requirement_reason",
+        "runtime_transition_reference_required",
+        "required_followup_hold_gate",
+        "required_followup_policy_steps",
+        "required_followup_physics_steps",
+        "diagnostic_unauthorized",
+        "training_authorized",
+    }
+    top_handoff = document.get("frame0_handoff")
+    composition_handoff = composition.get("frame0_handoff")
+    static_handoff = static.get("frame0_handoff")
+    if (
+        not isinstance(top_handoff, Mapping)
+        or not isinstance(composition_handoff, Mapping)
+        or not isinstance(static_handoff, Mapping)
+        or set(top_handoff) != handoff_keys
+        or dict(top_handoff) != dict(composition_handoff)
+        or dict(top_handoff) != dict(static_handoff)
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body frame0 handoff is missing or tampered"
+        )
+    physical_state_sha = _require_sha256(
+        top_handoff.get("physical_ready_state_sha256"),
+        "whole-body physical-ready state SHA-256",
+    )
+    teacher_state_sha = _require_sha256(
+        top_handoff.get("teacher_frame0_state_sha256"),
+        "whole-body teacher frame0 state SHA-256",
+    )
+    audit_state_sha = _require_sha256(
+        top_handoff.get("mjcf_audit_state_sha256"),
+        "whole-body MuJoCo audit state SHA-256",
+    )
+    handoff_audit_quat = _finite_tuple(
+        top_handoff.get("mjcf_audit_root_quat_wxyz"),
+        4,
+        "whole-body handoff MuJoCo audit quaternion",
+    )
+    handoff_quaternion_norm = _whole_body_number(
+        top_handoff.get("stored_root_quaternion_norm"),
+        "whole-body handoff stored quaternion norm",
+    )
+    if (
+        top_handoff.get("schema_version") != 1
+        or top_handoff.get("kind")
+        != "exact_frame0_zero_duration_handoff_v1"
+        or top_handoff.get("selection_semantics")
+        != "threshold_first_exact_frame0_direct"
+        or top_handoff.get("state_sha256_semantics")
+        != "float64_array_bytes_without_quaternion_normalization_v1"
+        or physical_state_sha != teacher_state_sha
+        or physical_state_sha
+        != _whole_body_state_sha256(physical_q, physical_root, physical_quat)
+        or audit_state_sha
+        != _whole_body_state_sha256(physical_q, physical_root, audit_quat)
+        or audit_state_sha
+        != _whole_body_state_sha256(
+            physical_q, physical_root, handoff_audit_quat
+        )
+        or not _whole_body_close(
+            handoff_quaternion_norm,
+            stored_quaternion_norm,
+            tolerance=1.0e-15,
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(handoff_audit_quat, audit_quat)
+        )
+        or top_handoff.get("mjcf_audit_quaternion_semantics")
+        != "stored_root_quat_unit_normalized_for_numerical_backend_only"
+        or top_handoff.get(
+            "stored_teacher_and_physical_quaternion_unchanged"
+        )
+        is not True
+        or top_handoff.get("endpoints_bitwise_equal") is not True
+        or top_handoff.get("physical_ready_joint_velocity_exact_zero")
+        is not True
+        or top_handoff.get(
+            "teacher_static_endpoint_joint_velocity_exact_zero"
+        )
+        is not True
+        or top_handoff.get("measured_motion_velocity_channels_consumed")
+        is not False
+        or top_handoff.get("not_a_motion_velocity_continuity_claim")
+        is not True
+        or top_handoff.get("certified_transition_s") != 0.0
+        or top_handoff.get("required_min_wait_s") != 0.0
+        or top_handoff.get("torque_speed_curve_required") is not False
+        or top_handoff.get("torque_speed_non_requirement_reason")
+        != (
+            "identical_stored_configuration_and_constructed_zero_joint_"
+            "velocity_endpoints"
+        )
+        or top_handoff.get("runtime_transition_reference_required") is not False
+        or top_handoff.get("required_followup_hold_gate")
+        != NOMINAL_HOLD_RECEIPT_KIND
+        or top_handoff.get("required_followup_policy_steps") != 200
+        or top_handoff.get("required_followup_physics_steps") != 800
+        or top_handoff.get("diagnostic_unauthorized") is not True
+        or top_handoff.get("training_authorized") is not False
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body zero-duration handoff is invalid"
+        )
+    required_gate = document.get("required_next_gate")
+    if (
+        not isinstance(required_gate, Mapping)
+        or set(required_gate)
+        != {
+            "kind",
+            "required_policy_steps",
+            "required_physics_steps",
+            "required_min_wait_s",
+            "minimum_horizon_semantics",
+            "zero_terminal_required",
+        }
+        or required_gate.get("kind") != NOMINAL_HOLD_RECEIPT_KIND
+        or required_gate.get("required_policy_steps") != 200
+        or required_gate.get("required_physics_steps") != 800
+        or required_gate.get("required_min_wait_s") != 0.0
+        or required_gate.get("minimum_horizon_semantics")
+        != "validated_t_hit_plus_reaction_margin"
+        or required_gate.get("zero_terminal_required")
+        != [
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
+            "robot_hit_table",
+            "base_fell_tilt",
+            "base_too_low",
+        ]
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body nominal-hold followup must be exact 200/800"
+        )
+
+    optimizer = composition.get("optimizer_report")
+    if not isinstance(optimizer, Mapping):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body optimizer report is missing"
+        )
+    optimizer_thresholds = _whole_body_named_numbers(
+        optimizer.get("direct_frame0_robust_minimum_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="optimizer direct-frame0 robust minimum slacks",
+    )
+    optimizer_scales = _whole_body_named_numbers(
+        optimizer.get("slack_scales"),
+        expected=_WHOLE_BODY_SAFETY_SLACK_SCALES,
+        label="optimizer safety slack scales",
+    )
+    if (
+        optimizer.get("algorithm")
+        != "exact_measured_frame0_safety_short_circuit"
+        or optimizer.get("global_optimum_claimed") is not False
+        or optimizer.get("stage1_objective")
+        != "prefer_exact_measured_frame0_when_all_safety_gates_pass"
+        or optimizer.get("stage2_objective")
+        != "not_run_exact_frame0_already_safe"
+        or optimizer.get("safety_weighted_against_tracking") is not False
+        or optimizer.get("exact_measured_frame0_selected") is not True
+        or optimizer.get("stage1_runs") != []
+        or optimizer.get("stage2_success") is not True
+        or optimizer.get("stage2_status") != 0
+        or optimizer.get("stage2_iterations") != 0
+        or optimizer.get("stage2_accepted_steps") != 0
+        or tuple(optimizer.get("movable_joint_names", ())) != joint_names
+        or optimizer.get("root_degrees_of_freedom")
+        != ["z", "roll", "pitch"]
+        or optimizer.get("racket_reference_authority")
+        != "caller_supplied_independent_measurement"
+        or optimizer_thresholds
+        != _WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS
+        or optimizer_scales != _WHOLE_BODY_SAFETY_SLACK_SCALES
+        or not _whole_body_mapping_equal(
+            static.get("optimizer_report"), optimizer
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body artifact selected lexicographic fallback"
+        )
+
+    static_thresholds = _whole_body_named_numbers(
+        static.get("direct_frame0_robust_minimum_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="fresh direct-frame0 robust minimum slacks",
+    )
+    expected_threshold_sha = hashlib.sha256(
+        _canonical_json_bytes(_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS)
+    ).hexdigest()
+    safety_slacks = _whole_body_named_numbers(
+        static.get("safety_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="fresh whole-body safety slacks",
+    )
+    normalized_slacks = _whole_body_named_numbers(
+        static.get("normalized_safety_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="fresh whole-body normalized safety slacks",
+    )
+    required_final_gate = _whole_body_number(
+        static.get("required_final_normalized_safety_gate"),
+        "required final normalized safety gate",
+    )
+    composition_safety = _whole_body_named_numbers(
+        composition.get("safety_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="composition safety slacks",
+    )
+    composition_normalized = _whole_body_named_numbers(
+        composition.get("normalized_safety_slacks"),
+        expected=_WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS,
+        label="composition normalized safety slacks",
+    )
+    static_stored_quat = _finite_tuple(
+        static.get("stored_root_quat_wxyz"),
+        4,
+        "fresh static stored root quaternion",
+    )
+    static_audit_quat = _finite_tuple(
+        static.get("mjcf_audit_root_quat_wxyz"),
+        4,
+        "fresh static MuJoCo audit quaternion",
+    )
+    static_quaternion_norm = _whole_body_number(
+        static.get("stored_root_quaternion_norm"),
+        "fresh static stored quaternion norm",
+    )
+    if (
+        static.get("authority")
+        != "fresh_current_exact_mjcf_whole_body_lexicographic_search"
+        or static.get("selected_hold_witness_authority")
+        != "new_backend_new_solver_final_state_cache_miss"
+        or static.get("exact_contact_lp_reused") is not False
+        or static.get("all_safety_slacks_meet_original_and_locked_gate")
+        is not True
+        or static_thresholds
+        != _WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS
+        or static.get("direct_frame0_robust_gate_sha256")
+        != expected_threshold_sha
+        or static.get("fresh_direct_robust_gate_passed") is not True
+        or static.get("geometry_passed") is not True
+        or static.get("ground_dynamics_passed") is not True
+        or static.get("stored_endpoint_state_sha256") != physical_state_sha
+        or static.get("mjcf_audit_state_sha256") != audit_state_sha
+        or static_stored_quat != physical_quat
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(static_audit_quat, audit_quat)
+        )
+        or not _whole_body_close(
+            static_quaternion_norm,
+            stored_quaternion_norm,
+            tolerance=1.0e-15,
+        )
+        or safety_slacks != composition_safety
+        or normalized_slacks != composition_normalized
+        or any(
+            safety_slacks[name] < minimum
+            for name, minimum in _WHOLE_BODY_DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS.items()
+        )
+        or any(
+            not _whole_body_close(
+                normalized_slacks[name],
+                safety_slacks[name] / _WHOLE_BODY_SAFETY_SLACK_SCALES[name],
+                tolerance=2.0e-12,
+            )
+            for name in safety_slacks
+        )
+        or any(value < required_final_gate for value in normalized_slacks.values())
+        or not _whole_body_close(
+            _whole_body_number(
+                composition.get("worst_normalized_safety_slack"),
+                "worst normalized safety slack",
+            ),
+            min(normalized_slacks.values()),
+            tolerance=2.0e-12,
+        )
+        or not _whole_body_close(
+            _whole_body_number(
+                composition.get("stage1_locked_worst_normalized_safety_slack"),
+                "stage1 locked normalized safety slack",
+            ),
+            _whole_body_number(
+                optimizer.get("stage1_locked_worst_normalized_slack"),
+                "optimizer stage1 locked normalized safety slack",
+            ),
+            tolerance=2.0e-12,
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body fresh robust safety evidence is invalid"
+        )
+
+    fidelity, racket_reference = _whole_body_racket_fidelity(
+        composition.get("racket_site_fidelity"), motion_sha256=motion_sha256
+    )
+    if (
+        not _whole_body_mapping_equal(
+            static.get("racket_site_fidelity"), fidelity
+        )
+        or not _whole_body_mapping_equal(
+            static.get("independent_measured_racket_frame0"),
+            racket_reference,
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body fresh racket evidence drifted"
+        )
+
+    evaluator_contract = composition.get("evaluator_contract")
+    evaluator_contract_keys = {
+        "executed_qdes_lower_rad",
+        "executed_qdes_upper_rad",
+        "exact_joint_position_lower_rad",
+        "exact_joint_position_upper_rad",
+        "table_near_x_m",
+        "table_half_width_m",
+        "table_surface_z_m",
+        "minimum_table_clearance_m",
+        "minimum_root_height_m",
+        "maximum_root_tilt_rad",
+        "collision_pair_authority",
+    }
+    if (
+        not isinstance(evaluator_contract, Mapping)
+        or set(evaluator_contract) != evaluator_contract_keys
+        or not isinstance(
+            evaluator_contract.get("collision_pair_authority"), Mapping
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body evaluator contract is incomplete"
+        )
+    evaluator_executed_lower = _finite_tuple(
+        evaluator_contract.get("executed_qdes_lower_rad"),
+        31,
+        "whole-body evaluator executed qdes lower",
+    )
+    evaluator_executed_upper = _finite_tuple(
+        evaluator_contract.get("executed_qdes_upper_rad"),
+        31,
+        "whole-body evaluator executed qdes upper",
+    )
+    evaluator_joint_lower = _finite_tuple(
+        evaluator_contract.get("exact_joint_position_lower_rad"),
+        31,
+        "whole-body evaluator exact joint-position lower",
+    )
+    evaluator_joint_upper = _finite_tuple(
+        evaluator_contract.get("exact_joint_position_upper_rad"),
+        31,
+        "whole-body evaluator exact joint-position upper",
+    )
+    evaluator_table = tuple(
+        _whole_body_number(
+            evaluator_contract.get(name), f"whole-body evaluator {name}"
+        )
+        for name in (
+            "table_near_x_m",
+            "table_half_width_m",
+            "table_surface_z_m",
+        )
+    )
+    evaluator_minimum_table_clearance = _whole_body_number(
+        evaluator_contract.get("minimum_table_clearance_m"),
+        "whole-body evaluator minimum table clearance",
+    )
+    evaluator_minimum_root_height = _whole_body_number(
+        evaluator_contract.get("minimum_root_height_m"),
+        "whole-body evaluator minimum root height",
+    )
+    evaluator_maximum_root_tilt = _whole_body_number(
+        evaluator_contract.get("maximum_root_tilt_rad"),
+        "whole-body evaluator maximum root tilt",
+    )
+    evaluator_collision_authority = evaluator_contract[
+        "collision_pair_authority"
+    ]
+
+    model_source = sources.get("mujoco_model")
+    if not isinstance(model_source, Mapping):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body exact MuJoCo source is missing"
+        )
+    _pinned_external_file(
+        model_source.get("path"),
+        model_source.get("sha256"),
+        "whole-body exact MuJoCo model",
+    )
+    ground_model_binding = _require_sha256(
+        model_source.get("ground_model_binding_sha256"),
+        "whole-body ground-model binding SHA-256",
+    )
+    witness = static.get("evaluator_evidence")
+    if not isinstance(witness, Mapping):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body fresh evaluator witness is missing"
+        )
+    solver_report = witness.get("solver_report")
+    if not isinstance(solver_report, Mapping):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body fresh LP solver report is missing"
+        )
+    witness_q = _finite_tuple(
+        witness.get("evaluated_joint_pos_rad"), 31, "fresh LP evaluated q"
+    )
+    witness_root = _finite_tuple(
+        witness.get("evaluated_root_pos_w_m"), 3, "fresh LP evaluated root"
+    )
+    witness_quat = _finite_tuple(
+        witness.get("evaluated_root_quat_wxyz"),
+        4,
+        "fresh LP evaluated root quaternion",
+    )
+    witness_sole_distances = _finite_tuple(
+        witness.get("sole_minimum_distance_m"),
+        2,
+        "fresh exact sole-floor distances",
+    )
+    witness_joint_lower = _finite_tuple(
+        witness.get("exact_joint_position_lower_rad"),
+        31,
+        "fresh exact joint-position lower",
+    )
+    witness_joint_upper = _finite_tuple(
+        witness.get("exact_joint_position_upper_rad"),
+        31,
+        "fresh exact joint-position upper",
+    )
+    if (
+        witness.get("exact_contact_lp_reused") is not True
+        or witness.get("lp_feasible") is not True
+        or witness.get("lp_error") is not None
+        or witness.get("lp_objective")
+        != "hold_minimax_normalized_available_torque"
+        or witness.get("exact_state_lp_cache_hit") is not False
+        or solver_report.get("exact_state_lp_cache_hit") is not False
+        or solver_report.get("model_binding") != ground_model_binding
+        or witness.get("evaluated_state_sha256") != audit_state_sha
+        or witness.get("required_minimum_normal_force_per_contact_n") != 0.1
+        or witness.get("required_minimum_normal_force_per_foot_n") != 1.0
+        or witness_joint_lower != evaluator_joint_lower
+        or witness_joint_upper != evaluator_joint_upper
+        or any(
+            not lower < position < upper
+            for lower, position, upper in zip(
+                witness_joint_lower, physical_q, witness_joint_upper
+            )
+        )
+        or not _whole_body_close(
+            safety_slacks["left_sole_floor_slack_m"],
+            2.0e-3 - abs(witness_sole_distances[0]),
+            tolerance=2.0e-12,
+        )
+        or not _whole_body_close(
+            safety_slacks["right_sole_floor_slack_m"],
+            2.0e-3 - abs(witness_sole_distances[1]),
+            tolerance=2.0e-12,
+        )
+        or not _whole_body_close(
+            safety_slacks["joint_position_slack_rad"],
+            min(
+                min(position - lower, upper - position)
+                for lower, position, upper in zip(
+                    witness_joint_lower, physical_q, witness_joint_upper
+                )
+            ),
+            tolerance=2.0e-12,
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(witness_q, physical_q)
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(witness_root, physical_root)
+        )
+        or any(
+            not close_endpoint(actual, expected)
+            for actual, expected in zip(witness_quat, audit_quat)
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body fresh cache-miss 0.1N+1N LP authority is invalid"
+        )
+
+    rows_raw = witness.get("mujoco_row_for_runtime_joint")
+    actuated_raw = witness.get("mujoco_actuated_dof_indices")
+    if (
+        not isinstance(rows_raw, list)
+        or len(rows_raw) != 31
+        or any(type(value) is not int for value in rows_raw)
+        or sorted(rows_raw) != list(range(31))
+        or not isinstance(actuated_raw, list)
+        or len(actuated_raw) != 31
+        or any(type(value) is not int for value in actuated_raw)
+        or actuated_raw != list(range(6, 37))
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body LP actuator permutation is invalid"
+        )
+    rows = tuple(rows_raw)
+    vector_names = (
+        "model_tau_lower_mujoco_row_order_nm",
+        "model_tau_upper_mujoco_row_order_nm",
+        "runtime_tau_lower_runtime_order_nm",
+        "runtime_tau_upper_runtime_order_nm",
+        "runtime_tau_lower_mujoco_row_order_nm",
+        "runtime_tau_upper_mujoco_row_order_nm",
+        "effective_tau_lower_mujoco_row_order_nm",
+        "effective_tau_upper_mujoco_row_order_nm",
+    )
+    witness_vectors = {
+        name: _finite_tuple(witness.get(name), 31, f"fresh LP {name}")
+        for name in vector_names
+    }
+    hold_vectors = {
+        name: _finite_tuple(hold.get(name), 31, f"selected hold {name}")
+        for name in vector_names
+    }
+    executed_lower = _finite_tuple(
+        runtime.get("executed_qdes_lower_rad"), 31, "executed qdes lower"
+    )
+    executed_upper = _finite_tuple(
+        runtime.get("executed_qdes_upper_rad"), 31, "executed qdes upper"
+    )
+    witness_executed_lower = _finite_tuple(
+        witness.get("executed_qdes_lower_rad"),
+        31,
+        "fresh LP executed qdes lower",
+    )
+    witness_executed_upper = _finite_tuple(
+        witness.get("executed_qdes_upper_rad"),
+        31,
+        "fresh LP executed qdes upper",
+    )
+    tau_model = _finite_tuple(
+        witness.get("actuator_generalized_force_mujoco_row_order_nm"),
+        31,
+        "fresh LP model-order torque",
+    )
+    tau_runtime = _finite_tuple(
+        witness.get("actuator_generalized_force_runtime_order_nm"),
+        31,
+        "fresh LP runtime-order torque",
+    )
+    qdes = _finite_tuple(
+        witness.get("hold_qdes_joint_pos_rad"), 31, "fresh LP hold qdes"
+    )
+    selected_qdes = _finite_tuple(
+        hold.get("hold_qdes_joint_pos_rad"), 31, "selected hold qdes"
+    )
+    kp = _finite_tuple(
+        runtime.get("joint_stiffness"), 31, "whole-body joint stiffness"
+    )
+    effort = _finite_tuple(
+        runtime.get("joint_effort_limits"), 31, "whole-body joint effort"
+    )
+    expected_runtime_lower = tuple(
+        max(-limit, gain * (lower - position))
+        for limit, gain, lower, position in zip(
+            effort, kp, executed_lower, physical_q
+        )
+    )
+    expected_runtime_upper = tuple(
+        min(limit, gain * (upper - position))
+        for limit, gain, upper, position in zip(
+            effort, kp, executed_upper, physical_q
+        )
+    )
+    runtime_lower = witness_vectors["runtime_tau_lower_runtime_order_nm"]
+    runtime_upper = witness_vectors["runtime_tau_upper_runtime_order_nm"]
+    runtime_lower_model = witness_vectors[
+        "runtime_tau_lower_mujoco_row_order_nm"
+    ]
+    runtime_upper_model = witness_vectors[
+        "runtime_tau_upper_mujoco_row_order_nm"
+    ]
+    model_lower = witness_vectors["model_tau_lower_mujoco_row_order_nm"]
+    model_upper = witness_vectors["model_tau_upper_mujoco_row_order_nm"]
+    effective_lower = witness_vectors[
+        "effective_tau_lower_mujoco_row_order_nm"
+    ]
+    effective_upper = witness_vectors[
+        "effective_tau_upper_mujoco_row_order_nm"
+    ]
+    mapped_runtime_lower = [0.0] * 31
+    mapped_runtime_upper = [0.0] * 31
+    for runtime_index, model_index in enumerate(rows):
+        mapped_runtime_lower[model_index] = runtime_lower[runtime_index]
+        mapped_runtime_upper[model_index] = runtime_upper[runtime_index]
+    if (
+        any(gain <= 0.0 for gain in kp)
+        or witness_executed_lower != executed_lower
+        or witness_executed_upper != executed_upper
+        or evaluator_executed_lower != executed_lower
+        or evaluator_executed_upper != executed_upper
+        or witness_vectors != hold_vectors
+        or qdes != selected_qdes
+        or tau_runtime
+        != tuple(tau_model[rows[index]] for index in range(31))
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-9)
+            for actual, expected in zip(runtime_lower, expected_runtime_lower)
+        )
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-9)
+            for actual, expected in zip(runtime_upper, expected_runtime_upper)
+        )
+        or tuple(mapped_runtime_lower) != runtime_lower_model
+        or tuple(mapped_runtime_upper) != runtime_upper_model
+        or any(
+            not _whole_body_close(
+                effective_lower[index],
+                max(model_lower[index], runtime_lower_model[index]),
+                tolerance=2.0e-9,
+            )
+            or not _whole_body_close(
+                effective_upper[index],
+                min(model_upper[index], runtime_upper_model[index]),
+                tolerance=2.0e-9,
+            )
+            or not effective_lower[index] <= tau_model[index] <= effective_upper[index]
+            for index in range(31)
+        )
+        or any(
+            not _whole_body_close(
+                qdes[index],
+                physical_q[index] + tau_runtime[index] / kp[index],
+                tolerance=2.0e-10,
+            )
+            or not executed_lower[index] < qdes[index] < executed_upper[index]
+            for index in range(31)
+        )
+        or hold.get("hold_qdes_mode") != "fresh_static_lp"
+        or not isinstance(hold.get("selected_hold_authority"), Mapping)
+        or hold["selected_hold_authority"].get("semantics")
+        != "fresh_new_backend_whole_body_final_state_0p1n_static_lp"
+        or hold["selected_hold_authority"].get(
+            "source_physical_birth_seed_sha256"
+        )
+        is not None
+        or hold["selected_hold_authority"].get("inherited_hold_claim") is not False
+        or hold.get("lp_objective")
+        != "hold_minimax_normalized_available_torque"
+        or tuple(hold.get("mujoco_row_for_runtime_joint", ())) != rows
+        or hold.get("mujoco_actuated_dof_indices") != actuated_raw
+        or _finite_tuple(
+            hold.get("actuator_generalized_force_mujoco_row_order_nm"),
+            31,
+            "selected hold model-order torque",
+        )
+        != tau_model
+        or _finite_tuple(
+            hold.get("actuator_generalized_force_runtime_order_nm"),
+            31,
+            "selected hold runtime-order torque",
+        )
+        != tau_runtime
+        or hold.get("solver_report_role")
+        != "selected_whole_body_final_state_single_witness"
+        or not _whole_body_mapping_equal(
+            hold.get("solver_report"), solver_report
+        )
+        or not isinstance(witness.get("actuator_limit_contract"), Mapping)
+        or not _whole_body_mapping_equal(
+            hold.get("actuator_limit_contract"),
+            witness.get("actuator_limit_contract"),
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body single-witness qdes/torque evidence is invalid"
+        )
+
+    contact_normals = tuple(
+        _whole_body_number(value, "fresh LP contact normal")
+        for value in witness.get("normal_force_per_contact_n", ())
+    )
+    per_foot_normals = _finite_tuple(
+        witness.get("normal_force_per_foot_n"),
+        2,
+        "fresh LP normal force per foot",
+    )
+    minimum_per_foot = _finite_tuple(
+        witness.get("minimum_normal_force_per_contact_per_foot_n"),
+        2,
+        "fresh LP minimum contact normal per foot",
+    )
+    cop_margins = _finite_tuple(
+        witness.get("cop_interior_margin_per_foot_m"),
+        2,
+        "fresh LP CoP interior margin",
+    )
+    contact_geometry = solver_report.get("contact_geometry")
+    feet = (
+        contact_geometry.get("feet")
+        if isinstance(contact_geometry, Mapping)
+        else None
+    )
+    if (
+        len(contact_normals) < 6
+        or any(value < 0.1 - 1.0e-7 for value in contact_normals)
+        or not isinstance(feet, list)
+        or len(feet) != 2
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body contact witness is invalid"
+        )
+    calculated_foot_normals: list[float] = []
+    calculated_foot_minima: list[float] = []
+    cursor = 0
+    for foot_index, row in enumerate(feet):
+        support_range = row.get("support_point_range") if isinstance(row, Mapping) else None
+        if (
+            not isinstance(support_range, list)
+            or len(support_range) != 2
+            or any(type(value) is not int for value in support_range)
+            or support_range[0] != cursor
+            or not cursor < support_range[1] <= len(contact_normals)
+        ):
+            raise TableSmokeReceiptError(
+                f"threshold-first whole-body foot-{foot_index} support range is invalid"
+            )
+        values = contact_normals[support_range[0] : support_range[1]]
+        calculated_foot_normals.append(sum(values))
+        calculated_foot_minima.append(min(values))
+        cursor = support_range[1]
+    global_support_margin = _whole_body_number(
+        witness.get("global_support_margin_m"), "fresh LP global support margin"
+    )
+    _whole_body_matrix(
+        witness.get("support_hull_floor_xy_m"),
+        rows=None,
+        columns=2,
+        label="fresh LP support hull",
+    )
+    expected_support_slack = min(
+        global_support_margin - 5.0e-4,
+        min(cop_margins) - 5.0e-4,
+    )
+    if (
+        cursor != len(contact_normals)
+        or any(value < 1.0 - 1.0e-7 for value in per_foot_normals)
+        or any(value <= 0.0 for value in cop_margins)
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-8)
+            for actual, expected in zip(
+                per_foot_normals, calculated_foot_normals
+            )
+        )
+        or any(
+            not _whole_body_close(actual, expected, tolerance=2.0e-8)
+            for actual, expected in zip(
+                minimum_per_foot, calculated_foot_minima
+            )
+        )
+        or tuple(solver_report.get("normal_force_per_contact_n", ()))
+        != contact_normals
+        or tuple(solver_report.get("normal_force_per_foot_n", ()))
+        != per_foot_normals
+        or tuple(solver_report.get("cop_interior_margin_per_foot_m", ()))
+        != cop_margins
+        or not _whole_body_close(
+            safety_slacks["left_contact_load_slack_n"],
+            min(minimum_per_foot[0] - 0.1, per_foot_normals[0] - 1.0),
+            tolerance=2.0e-8,
+        )
+        or not _whole_body_close(
+            safety_slacks["right_contact_load_slack_n"],
+            min(minimum_per_foot[1] - 0.1, per_foot_normals[1] - 1.0),
+            tolerance=2.0e-8,
+        )
+        or not _whole_body_close(
+            safety_slacks["support_margin_slack_m"],
+            expected_support_slack,
+            tolerance=2.0e-10,
+        )
+        or not _whole_body_close(
+            safety_slacks["qdes_slack_rad"],
+            min(
+                min(qdes[index] - executed_lower[index], executed_upper[index] - qdes[index])
+                for index in range(31)
+            ),
+            tolerance=2.0e-10,
+        )
+        or not _whole_body_close(
+            safety_slacks["torque_slack_nm"],
+            min(
+                min(tau_model[index] - effective_lower[index], effective_upper[index] - tau_model[index])
+                for index in range(31)
+            ),
+            tolerance=2.0e-8,
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body contact/CoP/static margin evidence is invalid"
+        )
+
+    table_geometry = witness.get("table_geometry")
+    root_limits = witness.get("root_limits")
+    collision = witness.get("collision_clearance")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (table_geometry, root_limits, collision)
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body static geometry evidence is missing"
+        )
+    assert isinstance(table_geometry, Mapping)
+    assert isinstance(root_limits, Mapping)
+    assert isinstance(collision, Mapping)
+    authority_rows = {
+        "self_collision_geom_id_pairs": collision.get(
+            "self_collision_geom_id_pairs"
+        ),
+        "unsupported_floor_robot_geom_ids": collision.get(
+            "unsupported_floor_robot_geom_ids"
+        ),
+        "expected_foot_floor_geom_ids": collision.get(
+            "expected_foot_floor_geom_ids"
+        ),
+        "floor_geom_id": collision.get("floor_geom_id"),
+    }
+    authority_sha = hashlib.sha256(
+        _canonical_json_bytes(authority_rows)
+    ).hexdigest()
+    collision_authority_keys = {
+        *authority_rows,
+        "pair_authority_sha256",
+        "enabled_self_pair_count",
+        "unsupported_floor_pair_count",
+        "required_clearance_m",
+        "capped_clearance_m",
+        "bisection_tolerance_m",
+        "distance_semantics",
+    }
+    if set(evaluator_collision_authority) != collision_authority_keys:
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body collision evaluator authority is invalid"
+        )
+    witness_collision_authority = {
+        name: collision.get(name) for name in collision_authority_keys
+    }
+    realized_collision = _whole_body_number(
+        collision.get("realized_capped_minimum_clearance_m"),
+        "realized collision clearance",
+    )
+    table_clearance = _whole_body_number(
+        witness.get("conservative_table_clearance_m"),
+        "conservative table clearance",
+    )
+    table_contract_values = tuple(
+        _whole_body_number(
+            table_geometry.get(name), f"fresh LP table geometry {name}"
+        )
+        for name in ("near_x_m", "half_width_m", "surface_z_m")
+    )
+    equality_residual = _whole_body_number(
+        witness.get("equality_residual"), "LP equality residual"
+    )
+    root_residual = _whole_body_number(
+        witness.get("root_residual"), "LP root residual"
+    )
+    _w, x, y, _z = physical_quat
+    quat_norm = math.sqrt(sum(value * value for value in physical_quat))
+    root_tilt = math.acos(
+        max(-1.0, min(1.0, 1.0 - 2.0 * ((x / quat_norm) ** 2 + (y / quat_norm) ** 2)))
+    )
+    if (
+        table_geometry.get("required_clearance_m") != 1.0e-2
+        or table_contract_values != evaluator_table
+        or evaluator_minimum_table_clearance != 1.0e-2
+        or table_geometry.get("semantics")
+        != "collision_sphere_separation_from_overapproximated_near_side_table_prism"
+        or root_limits.get("minimum_height_m") != 0.5
+        or root_limits.get("maximum_tilt_rad") != 0.7
+        or evaluator_minimum_root_height != 0.5
+        or evaluator_maximum_root_tilt != 0.7
+        or witness_collision_authority != dict(evaluator_collision_authority)
+        or collision.get("pair_authority_sha256") != authority_sha
+        or collision.get("enabled_self_pair_count")
+        != len(authority_rows["self_collision_geom_id_pairs"] or ())
+        or collision.get("unsupported_floor_pair_count")
+        != len(authority_rows["unsupported_floor_robot_geom_ids"] or ())
+        or collision.get("required_clearance_m") != 2.0e-3
+        or collision.get("capped_clearance_m") != 2.0e-2
+        or collision.get("bisection_tolerance_m") != 1.0e-4
+        or collision.get("positive_unsaturated_conservative_deduction_m")
+        != 1.0e-4
+        or collision.get("unsupported_contacts") != []
+        or collision.get("self_collision_pairs") != []
+        or not _whole_body_close(
+            safety_slacks["table_clearance_slack_m"],
+            table_clearance - 1.0e-2,
+            tolerance=2.0e-10,
+        )
+        or not _whole_body_close(
+            safety_slacks["root_height_slack_m"],
+            physical_root[2] - 0.5,
+            tolerance=2.0e-10,
+        )
+        or not _whole_body_close(
+            safety_slacks["root_tilt_slack_rad"],
+            0.7 - root_tilt,
+            tolerance=2.0e-10,
+        )
+        or not _whole_body_close(
+            safety_slacks["collision_slack_m"],
+            realized_collision - 2.0e-3,
+            tolerance=2.0e-10,
+        )
+        or equality_residual < 0.0
+        or root_residual < 0.0
+        or not _whole_body_close(
+            safety_slacks["ground_lp_residual_slack"],
+            _WHOLE_BODY_GROUND_LP_EQUALITY_RESIDUAL_TOLERANCE
+            - max(equality_residual, root_residual),
+            tolerance=2.0e-15,
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "threshold-first whole-body fresh static scene evidence is invalid"
+        )
+    return teacher_root, teacher_quat, teacher_q, False
+
+
 def _nominal_teacher_physical_contract(
     document: Mapping[str, Any],
     *,
@@ -589,6 +2130,16 @@ def _nominal_teacher_physical_contract(
         else None
     )
     composition_semantics = composition.get("semantics")
+    if (
+        composition_semantics
+        == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS
+    ):
+        return _whole_body_threshold_first_contract(
+            document,
+            joint_names=joint_names,
+            motion_sha256=motion_sha256,
+            physical=physical,
+        )
     direct_frame0 = (
         composition_semantics == MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
     )
@@ -898,7 +2449,10 @@ def _load_nominal_hold_input(
     content_sha = _require_sha256(
         unsigned.pop("content_sha256", None), "artifact content SHA-256"
     )
-    if hashlib.sha256(_canonical_json_bytes(unsigned)).hexdigest() != content_sha:
+    if (
+        hashlib.sha256(_canonical_ascii_json_bytes(unsigned)).hexdigest()
+        != content_sha
+    ):
         raise TableSmokeReceiptError("dynamic-ready content SHA-256 mismatch")
     try:
         robot = document["robot"]
@@ -1033,14 +2587,34 @@ def _load_nominal_hold_input(
             else {}
         ),
     }
-    if (
-        document.get("physical_birth_composition", {}).get("semantics")
-        == MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS
-        and "physx_control_position_limits" not in expected_plant
-    ):
-        raise TableSmokeReceiptError(
-            "direct measured frame0 hold requires exact Vendor PhysX H_ctrl"
-        )
+    frame0_semantics = document.get("physical_birth_composition", {}).get(
+        "semantics"
+    )
+    if "physx_control_position_limits" not in expected_plant:
+        if frame0_semantics == MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS:
+            raise TableSmokeReceiptError(
+                "direct measured frame0 hold requires exact Vendor PhysX H_ctrl"
+            )
+        if (
+            frame0_semantics
+            == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS
+        ):
+            raise TableSmokeReceiptError(
+                "threshold-first whole-body frame0 hold requires exact Vendor PhysX H_ctrl"
+            )
+    else:
+        control_limits = expected_plant["physx_control_position_limits"][
+            "control_joint_pos_limits"
+        ]
+        if any(
+            not control_lower <= qdes_lower < qdes_upper <= control_upper
+            for (control_lower, control_upper), (qdes_lower, qdes_upper) in zip(
+                control_limits, limits
+            )
+        ):
+            raise TableSmokeReceiptError(
+                "nominal hold qdes envelope must remain inside exact Vendor PhysX H_ctrl"
+            )
     root_quat = _finite_tuple(
         physical["root_quat_wxyz"], 4, "root quaternion"
     )

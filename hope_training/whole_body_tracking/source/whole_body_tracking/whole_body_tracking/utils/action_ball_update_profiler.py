@@ -21,7 +21,7 @@ from typing import Callable, Mapping, Optional
 
 PROFILE_ENV_VAR = "HOPE_ACTION_BALL_UPDATE_PROFILE"
 PROFILE_JSON_PREFIX = "HOPE_ACTION_BALL_UPDATE_PROFILE_JSON="
-PROFILE_SCHEMA_VERSION = 1
+PROFILE_SCHEMA_VERSION = 2
 
 _SEGMENT_NAMES = (
     "motion_true_reset_total",
@@ -370,6 +370,7 @@ class ActionBallUpdateProfiler:
         update: int,
         collection_time_s: object,
         learning_time_s: object,
+        reset_reason_counters: Optional[Mapping[str, int]] = None,
     ) -> dict:
         if self._closed:
             raise RuntimeError(
@@ -385,6 +386,22 @@ class ActionBallUpdateProfiler:
         learning_ms = self._seconds_to_ms(
             learning_time_s, name="learning_time"
         )
+        reason_counters = {}
+        if reset_reason_counters is not None:
+            if not isinstance(reset_reason_counters, Mapping):
+                raise RuntimeError(
+                    "ActionBall update profiler reset reasons must be a mapping"
+                )
+            for raw_name, raw_count in reset_reason_counters.items():
+                if type(raw_name) is not str or not raw_name:
+                    raise RuntimeError(
+                        "ActionBall update profiler reset reason name is invalid"
+                    )
+                if type(raw_count) is not int or raw_count < 0:
+                    raise RuntimeError(
+                        "ActionBall update profiler reset reason count is invalid"
+                    )
+                reason_counters[raw_name] = raw_count
         segment_rows = {}
         for name in _SEGMENT_NAMES:
             raw = self._segments[name]
@@ -418,8 +435,19 @@ class ActionBallUpdateProfiler:
             "schema_version": PROFILE_SCHEMA_VERSION,
             "update": update,
             "clock": "host_perf_counter_ns_no_cuda_sync",
+            "measurement_mode": "profile_on_attribution_only",
+            "profile_overhead_present": True,
+            "speed_evidence_eligible": False,
+            "gpu_kernel_attribution": {
+                "claimed": False,
+                "reason": (
+                    "host wall spans do not synchronize or delimit "
+                    "asynchronous GPU kernels"
+                ),
+            },
             "collection_ms": self._rounded(collection_ms),
             "learning_ms": self._rounded(learning_ms),
+            "total_ms": self._rounded(collection_ms + learning_ms),
             "update_wall_ms": self._rounded(
                 collection_ms + learning_ms
             ),
@@ -436,6 +464,16 @@ class ActionBallUpdateProfiler:
                 else self._rounded(wrap_ms / self._wrap_env_count)
             ),
             "profiled_reset_ms": self._rounded(profiled_reset_ms),
+            "reset_strata": {
+                "true_reset_env_count": int(self._reset_env_count),
+                "wrap_env_count": int(self._wrap_env_count),
+                "exact_behavior_counters": dict(
+                    sorted(reason_counters.items())
+                ),
+                "reason_counter_source": (
+                    "same-update exact behavior ledger"
+                ),
+            },
             "unattributed": {
                 "collection_ms": self._rounded(
                     unattributed_collection_ms

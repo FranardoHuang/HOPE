@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
+import io
 import json
 import math
 import sys
@@ -105,6 +107,32 @@ class _EmpiricalNormalizer(torch.nn.Module):
         self.register_buffer("_var", torch.ones(1, width))
         self.register_buffer("_std", torch.ones(1, width))
         self.register_buffer("count", torch.tensor(0, dtype=torch.long))
+        self.forward_calls = 0
+
+    def forward(self, values):
+        self.forward_calls += 1
+        if values.ndim != 2 or values.shape[1] != self._mean.shape[1]:
+            raise RuntimeError("test normalizer width mismatch")
+        if self.training and values.shape[0] > 0:
+            detached = values.detach()
+            batch_count = float(detached.shape[0])
+            batch_mean = detached.mean(dim=0, keepdim=True)
+            batch_var = detached.var(dim=0, unbiased=False, keepdim=True)
+            old_count = float(self.count.item())
+            total_count = old_count + batch_count
+            delta = batch_mean - self._mean
+            combined_mean = self._mean + delta * (batch_count / total_count)
+            combined_m2 = (
+                self._var * old_count
+                + batch_var * batch_count
+                + delta.square() * old_count * batch_count / total_count
+            )
+            with torch.no_grad():
+                self._mean.copy_(combined_mean)
+                self._var.copy_(combined_m2 / total_count)
+                self._std.copy_(torch.sqrt(self._var))
+                self.count.fill_(int(total_count))
+        return (values - self._mean) / (self._std + 1.0e-2)
 
 
 class _Policy(torch.nn.Module):
@@ -205,6 +233,237 @@ def test_a211_c211_normalizers_are_fresh_211_319_and_separately_identified(
     assert binding[receipt_key] == {"actor_width": 211, "critic_width": 319}
     assert binding["normalizers"]["actor"]["contract_identity"] == actor_identity
     assert binding["normalizers"]["critic"]["contract_identity"] == critic_identity
+
+
+def _fresh_action_ball_211_runner(runner_module, preflight_attribute):
+    runner = _runner(runner_module, empirical=True)
+    runner.obs_normalizer = _EmpiricalNormalizer(211)
+    runner.privileged_obs_normalizer = _EmpiricalNormalizer(319)
+    runner.action_ball_a211_trainability_preflight = None
+    runner.action_ball_c211_trainability_preflight = None
+    setattr(
+        runner,
+        preflight_attribute,
+        {"actor_width": 211, "critic_width": 319},
+    )
+    runner.device = "cpu"
+    runner.privileged_obs_type = "critic"
+    runner._install_action_ball_211_wait_normalizer_masks()
+    return runner
+
+
+def _active_211_rows(width, mask_start, mask_stop):
+    rows = torch.zeros(4, width, dtype=torch.float32)
+    row_scale = torch.arange(1, 5, dtype=torch.float32).unsqueeze(1)
+    feature_scale = torch.arange(
+        1, mask_stop - mask_start + 1, dtype=torch.float32
+    ).unsqueeze(0)
+    rows[:, mask_start:mask_stop] = row_scale * feature_scale
+    rows[:, -1] = 1.0
+    return rows
+
+
+def _wait_211_rows(width, mask_start, mask_stop):
+    rows = torch.full((2, width), 7.0, dtype=torch.float32)
+    rows[:, mask_start:mask_stop] = 0.0
+    rows[:, -1] = 0.0
+    return rows
+
+
+def _assert_exact_zero(tensor, start, stop):
+    region = tensor[..., start:stop]
+    assert torch.equal(region, torch.zeros_like(region))
+
+
+def test_action_ball_211_initial_normalization_is_wired_and_scope_is_leaf_only(
+    runner_module,
+):
+    learn_source = inspect.getsource(runner_module.MotionOnPolicyRunner.learn)
+    patch = learn_source.index(
+        "self.env.get_observations = get_normalized_initial_observations"
+    )
+    base_learn = learn_source.index("super().learn(")
+    restore = learn_source.index(
+        "self.env.get_observations = original_get_observations"
+    )
+    assert patch < base_learn < restore
+    assert "self._normalize_action_ball_211_initial_observations(" in learn_source
+
+    legacy = _runner(runner_module, empirical=True)
+    actor = legacy.obs_normalizer
+    critic = legacy.privileged_obs_normalizer
+    legacy._install_action_ball_211_wait_normalizer_masks()
+    assert legacy.obs_normalizer is actor
+    assert legacy.privileged_obs_normalizer is critic
+    assert len(actor._forward_hooks) == 0
+    assert len(critic._forward_hooks) == 0
+
+
+@pytest.mark.parametrize(
+    "preflight_attribute",
+    [
+        "action_ball_a211_trainability_preflight",
+        "action_ball_c211_trainability_preflight",
+    ],
+)
+def test_action_ball_211_wait_mask_uses_raw_validity_for_initial_next_and_bootstrap(
+    runner_module, preflight_attribute
+):
+    runner = _fresh_action_ball_211_runner(
+        runner_module, preflight_attribute
+    )
+    actor_normalizer = runner.obs_normalizer
+    critic_normalizer = runner.privileged_obs_normalizer
+
+    # Warm the exact live moments with TASK_ACTIVE rows first.  A later raw
+    # zero would therefore become nonzero without the post-normalization mask.
+    active_actor = _active_211_rows(211, 197, 210)
+    active_critic = _active_211_rows(319, 305, 318)
+    actor_normalizer(active_actor)
+    critic_normalizer(active_critic)
+    assert actor_normalizer.count.item() == 4
+    assert critic_normalizer.count.item() == 4
+
+    raw_wait_actor = _wait_211_rows(211, 197, 210)
+    raw_wait_critic = _wait_211_rows(319, 305, 318)
+    raw_extras = {
+        "observations": {"critic": raw_wait_critic},
+        "sentinel": "preserved",
+    }
+
+    # This is the one initial getter call patched ahead of the first alg.act
+    # (and hence ahead of the first RolloutStorage insert).
+    initial_actor, initial_extras = (
+        runner._normalize_action_ball_211_initial_observations(
+            (raw_wait_actor, raw_extras)
+        )
+    )
+    initial_critic = initial_extras["observations"]["critic"]
+    assert actor_normalizer.forward_calls == 2
+    assert critic_normalizer.forward_calls == 2
+    assert actor_normalizer.count.item() == 6
+    assert critic_normalizer.count.item() == 6
+    _assert_exact_zero(initial_actor, 197, 210)
+    _assert_exact_zero(initial_critic, 305, 318)
+    assert torch.count_nonzero(initial_actor[:, -1]).item() == 2
+    assert torch.count_nonzero(initial_critic[:, -1]).item() == 2
+    assert initial_extras["sentinel"] == "preserved"
+    assert raw_extras["observations"]["critic"] is raw_wait_critic
+
+    # Upstream next-observation calls hit these same modules.  alg.act stores
+    # the previous pair, and compute_returns reuses the final normalized
+    # critic tensor as bootstrap without another transform.
+    storage = [(initial_actor, initial_critic)]
+    next_actor = actor_normalizer(raw_wait_actor)
+    next_critic = critic_normalizer(raw_wait_critic)
+    storage.append((next_actor, next_critic))
+    bootstrap_critic = next_critic
+    assert actor_normalizer.forward_calls == 3
+    assert critic_normalizer.forward_calls == 3
+    for stored_actor, stored_critic in storage:
+        _assert_exact_zero(stored_actor, 197, 210)
+        _assert_exact_zero(stored_critic, 305, 318)
+    assert bootstrap_critic is next_critic
+    _assert_exact_zero(bootstrap_critic, 305, 318)
+
+    # TASK_ACTIVE is not inferred from the normalized last column and must not
+    # be cleared even when the probe is far from the accumulated mean.
+    actor_normalizer.eval()
+    critic_normalizer.eval()
+    active_actor_probe = active_actor[:1].clone()
+    active_actor_probe[:, 197:210] += 100.0
+    active_critic_probe = active_critic[:1].clone()
+    active_critic_probe[:, 305:318] += 100.0
+    expected_actor = (
+        active_actor_probe - actor_normalizer._mean
+    ) / (actor_normalizer._std + 1.0e-2)
+    expected_critic = (
+        active_critic_probe - critic_normalizer._mean
+    ) / (critic_normalizer._std + 1.0e-2)
+    actual_actor = actor_normalizer(active_actor_probe)
+    actual_critic = critic_normalizer(active_critic_probe)
+    torch.testing.assert_close(actual_actor, expected_actor, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(actual_critic, expected_critic, rtol=0.0, atol=0.0)
+    assert torch.count_nonzero(actual_actor[:, 197:210]).item() == 13
+    assert torch.count_nonzero(actual_critic[:, 305:318]).item() == 13
+
+
+@pytest.mark.parametrize(
+    "preflight_attribute",
+    [
+        "action_ball_a211_trainability_preflight",
+        "action_ball_c211_trainability_preflight",
+    ],
+)
+def test_action_ball_211_wait_hook_preserves_checkpoint_state_and_formal_restore(
+    runner_module, preflight_attribute
+):
+    source = _fresh_action_ball_211_runner(
+        runner_module, preflight_attribute
+    )
+    source_actor = source.obs_normalizer
+    source_critic = source.privileged_obs_normalizer
+    source_actor(_active_211_rows(211, 197, 210))
+    source_critic(_active_211_rows(319, 305, 318))
+
+    # Idempotent installation keeps the concrete objects and the exact RSL-RL
+    # state keys; no wrapper prefix may enter checkpoints or frozen-eval hashes.
+    source._install_action_ball_211_wait_normalizer_masks()
+    assert source.obs_normalizer is source_actor
+    assert source.privileged_obs_normalizer is source_critic
+    assert tuple(source_actor.state_dict()) == ("_mean", "_var", "_std", "count")
+    assert tuple(source_critic.state_dict()) == ("_mean", "_var", "_std", "count")
+    assert len(source_actor._forward_hooks) == 1
+    assert len(source_critic._forward_hooks) == 1
+
+    source_policy = torch.nn.Linear(2, 1)
+    source_optimizer = torch.optim.Adam(source_policy.parameters(), lr=1.0e-3)
+    payload = {
+        "model_state_dict": source_policy.state_dict(),
+        "optimizer_state_dict": source_optimizer.state_dict(),
+        "obs_norm_state_dict": source_actor.state_dict(),
+        "privileged_obs_norm_state_dict": source_critic.state_dict(),
+        "iter": 7,
+        "infos": {"sentinel": "roundtrip"},
+    }
+    stream = io.BytesIO()
+    torch.save(payload, stream)
+    stream.seek(0)
+    restored_payload = torch.load(stream, map_location="cpu", weights_only=False)
+
+    restored = _fresh_action_ball_211_runner(
+        runner_module, preflight_attribute
+    )
+    restored_actor = restored.obs_normalizer
+    restored_critic = restored.privileged_obs_normalizer
+    restored_policy = torch.nn.Linear(2, 1)
+    restored_optimizer = torch.optim.Adam(
+        restored_policy.parameters(), lr=1.0e-3
+    )
+    restored.alg = SimpleNamespace(
+        policy=restored_policy,
+        optimizer=restored_optimizer,
+    )
+    infos = restored._apply_formal_preloaded_checkpoint(
+        restored_payload,
+        load_optimizer=True,
+        prefix="test ActionBall211 checkpoint",
+    )
+    assert infos == {"sentinel": "roundtrip"}
+    assert restored.current_learning_iteration == 7
+    assert restored.obs_normalizer is restored_actor
+    assert restored.privileged_obs_normalizer is restored_critic
+    for key, value in source_actor.state_dict().items():
+        torch.testing.assert_close(restored_actor.state_dict()[key], value)
+    for key, value in source_critic.state_dict().items():
+        torch.testing.assert_close(restored_critic.state_dict()[key], value)
+
+    restored_actor.eval()
+    restored_critic.eval()
+    normalized_wait_actor = restored_actor(_wait_211_rows(211, 197, 210))
+    normalized_wait_critic = restored_critic(_wait_211_rows(319, 305, 318))
+    _assert_exact_zero(normalized_wait_actor, 197, 210)
+    _assert_exact_zero(normalized_wait_critic, 305, 318)
 
 
 def test_a211_normalizer_rejects_legacy_225_actor_width(runner_module):

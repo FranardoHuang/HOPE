@@ -4,13 +4,14 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
 部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
-历史 225/318-D Stage1 V2 smoke/probe 仍只是 ball-free dense-paddle canary；当前 fixed-question
-diagnostic 是 194/318-D。两者都不能代签真实 physical hit/legal
-return、自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` 迁移账见
+历史 225/318-D Stage1 V2 和 194/318-D fixed-question 只保留证据账；当前 branch
+successor 是分离的 A211/C211 actor/critic=`211/319`。它们仍只是
+`diagnostic_unauthorized` learnability lane，不能代签 observed physical-ball return、
+自动扩域/resume 或最终 ABI。完整验收草案和旧 `READY` 迁移账见
 [MuJoCo 原生下一版准备账](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 该提案未合入 `main`，不覆盖 `origin/main:docs/NOW.md`。
 
-**2026-08-03 A211/C211 fresh successor（Gate 仍 `Partial`）：**用户裁决后，fresh actor
+**2026-08-04 A211/C211 fresh successor（Gate 仍 `Partial`）：**用户裁决后，fresh actor
 从 A225/C225 删除 raw teacher-base 15-D，新增 `task_valid(1)`，得到 actor/critic=`211/319`。
 同宽 actor 的 base 入口已升级为 v2：`[0:12]` 只含 localizer 提供的 world
 position3/orientation6D/linear-velocity3，`[12:15]` 只含 pelvis/body-frame IMU gyro3；不输入
@@ -19,68 +20,92 @@ layout、两段 exact slice、producer 与 content SHA，旧 pre-IMU A211 actor 
 一律拒绝；critic 内容未变，故 critic contract/normalizer 保持 v1。
 WAIT 内 A task/C ball 9-D、base goal 与两只钟在最终 observation 边界归零；A/C task/contact/
 outcome reward、opportunity、closed-swing 和 outcome denominator 同时不记账，balance、safety 与
-非任务 whole-body mimic 仍正常。任务 reveal 时完整 tuple+两只钟+validity 原子提交；一旦 TASK_ACTIVE
+非任务 whole-body mimic 仍正常。pre-long ledger 已用 env-step 前冻结的 `task_valid`
+将 mimic 拆成 task-invalid ready 与 task-valid swing，并强制两边的 denominator/income
+互斥且完整加回 aggregate mimic。任务 reveal 时完整 tuple+两只钟+validity 原子提交；一旦 TASK_ACTIVE
 的 swing 结束，miss 必须按非零 eligible denominator 报 `0/C`，只有尚无 valid achieved outgoing
 flight 时 outcome denominator 才可为零，WAIT 不能稀释失败率。
-C211 reward-v2 没有 desired-contact 或独立 hit bonus；只用 nominal strike tick 拍心-球心
-Cauchy 距离（post-dt 峰值 `4.4`）和 actual-contact-gated analytic landing（合法 `6..10`，
+C211 reward-v3 没有 desired-contact 或独立 hit bonus；只用 nominal strike tick 拍心-球心
+Cauchy 距离（post-dt 峰值 `4.8`）和 actual-contact-gated analytic landing（合法 `8.4..14`，
 对方侧出界不超过同质量合法奖励一半）。
+runtime facts、schema-3 training-contract、resolved C leaf 与 reward hierarchy 已按
+`v3 / proximity=240 / landing=700` 双向 cross-check，本组 contract/config/reward 专项
+`228 passed`；launcher/oracle/fixture 和 MuJoCo consumer 未 repin 前仍不得发 long。
 
-fresh reset 不再用 historical split-ready；frame0 producer 已从 measured Take061 frame0 原样读
-root/q 并强制 root/joint velocity 为零，但它正确地只产生
-`MATERIALIZED_POD_NOMINAL_HOLD_REQUIRED`，不伪造 Pod hold receipt。当前 tracked candidate 是
-`configs/action_ball_n1_measured_20260803/a211_frame0_exact_20260803/take_061_unit04_bh.frame0_exact.v1.json`
-（file SHA-256=`ad17d984…bc54`，motion SHA-256=`aab1953b…dd8e`）。因此当前真实前置是
-frame0 artifact -> exact Pod nominal-hold receipt -> lineage -> oracle32；未过前不启动 4096。
-一旦 oracle32 通过，主链直接进 `scale4096`；512 只用于失败定位。固定 tape 只表示
-N1/课程最初 fixed band：[`immutable_tape`](../DEFINITIONS.md#action-ball-immutable-tape) 是单行中心题
-cache，reset/step online LM 与 inverse solve 为零，但它也明确冻结 curriculum。它适合今晚
-fixed-center finite run，不适合扩域/full-curriculum long；后者必须切换到
-[`banded_question_bank`](../DEFINITIONS.md#action-ball-banded-question-bank)，按 exact domain level
-索引预解块、缺块 fail closed。host 集成回归已有 `250 passed, 17 skipped`；Torch 数值与 Isaac Pod
-runtime 仍为`未测`。
+Pod1 已用相同双足/地面/支撑门扫描73条 measured clip 的 direct physical frame-0 birth，结果
+为 `0/73`。因此 exact measured frame 0 只保留为 teacher authority，不再作为 physical reset
+authority。fresh A211/C211 的物理出生统一消费 tracked split-ready artifact（关节速度逐字节为零）及
+其 `60 policy tick / 240 physics substep / 1.2 s` PhysX hold PASS；该时域覆盖 hidden WAIT 的
+最大25个 control tick。每回合私有采样5--25 tick WAIT，WAIT 中 teacher 与 physical plant 都停在
+split-ready，球停在无接触 parked state；task reveal 同 tick 原子安装 sealed incoming-ball launch
+state 与完整 tuple，并把 teacher 切到 measured frame 0，同时向
+actor 公开由 A/C 各自 task receipt 派生的 `time_to_teacher_start`。literal-center
+预计 A约`.692376 s`、C约`.86 s`，不得共用旧`.712376 s`常量或 receipt。
+A/C leaf 已显式钉 `motion.clip_family_per_clip=[backhand]`，不让单clip legacy 默认
+把 Take061 标成正手。safe-ready→frame0 是 dense mimic 要学习的
+bridge，不是机器人 connector、teleport 或 reset 重写；球的 launch state 安装就是 task-start event。
 
-2026-08-03 已补齐 [frame0 exact Pod hold 工序](../operations/run_action_ball_a211_frame0_nominal_hold.md)：
-wrapper 从 tracked artifact 与 exact plant 模板只派生 root/q exact、零速度、`hold_qdes=q` 和逐关节 affine
-反解 action，复用既有 live Isaac probe 跑足 `200 tick / 800 substep`；consumer 只有在五类 safety
+A 的 formal question source 保持 `online_solver`，只对**完整语义**相等的 Q 复用 exact answer：
+sampler/curriculum/RNG 每次 reset 正常推进，cold Q/Q' 各真实求解一次，replay/assert/checkpoint 路径
+不得重解。C 从启动起使用 `direct_ball`、总 inverse call=`0`，也不使用 answer cache。
+[`immutable_tape`](../DEFINITIONS.md#action-ball-immutable-tape) 只保留为历史目标信息消融，不进入
+A/C formal lineage；[`banded_question_bank`](../DEFINITIONS.md#action-ball-banded-question-bank) 是可选的
+未来 producer 优化，不阻塞第一条 expanding long。A/C cache/direct-ball integration、oracle32 与
+Pod runtime 证据未闭合前继续 fail closed；一旦 oracle32 通过，主链直接进 `scale4096`，512 只用于
+失败定位。
+
+**SUPERSEDED / COUNTEREXAMPLE（2026-08-03 exact-frame0 predecessor）：**旧
+[frame0 exact Pod hold 工序](../operations/run_action_ball_a211_frame0_nominal_hold.md)
+wrapper 从 tracked artifact、timing receipt 与 exact plant 模板只派生 root/q exact、零速度、
+`hold_qdes=q` 和逐关节 affine 反解 action，复用既有 live Isaac probe 跑满推导出生时域
+（当前 `62 tick / 248 substep`）；consumer 只有在五类 safety
 termination 全启用、zero terminal、current/substep actual-hard edge 均为零、最终 hard gap 为正且五帧
 截图可核时，才 no-clobber 发布嵌入 raw live evidence 的 receipt。exact Pod commit
 `ea8c7e1d` 已真跑：精确 frame0 在 policy step 9（`.18 s / 36` physics substep）触发
 `robot_hit_table`，未发生 current/substep actual hard-edge，只产生 raw FAIL，没有铸造
-PASS receipt。因此“measured frame0 可直接作静态 ready”已被实测否定；不得关掉桌体
-termination 继续。当前修复方向是恢复已验证 physical-ready 作 reset，WAIT 内让 teacher
-冻结在 measured frame0 并学安全过渡；新 reset receipt/lineage 通过前 oracle32/4096 仍阻断。
+PASS receipt。它后来由同门槛的73条 direct-frame0 physical-birth 扫描扩展为 `0/73`，因此只保留为
+失败反例和工具追溯；当前 A/C 不消费其 artifact/receipt，也不等待新的 exact-frame0 candidate。
+不得关掉桌体或其他 safety termination 绕过。
 
-随后把 historical dynamic-ready 的同一 hold 从旧 `60 policy tick / 240 substep` 延长到
+另一个历史 durability 反例把当时 dynamic-ready 的同一 hold 从旧 `60 policy tick / 240 substep` 延长到
 Gate 要求的 `200 / 800`。exact Pod commit `5482eb54` 在 policy step 62（`1.24 s / 248`
 substep）触发 `joint_actual_forbidden`：`waist_roll_joint=-0.34910727 rad`，低于硬下限
 `-0.34906581 rad` 约 `4.15e-5 rad`；无碰桌、双脚仍接触，最大倾角 `.0210 rad`、最低
 root-Z `1.06689 m`。旧 60-tick PASS 的末帧该关节已到约 `-.32054 rad` 且速度约
 `-1.1869 rad/s`，因此这是验证时长截断暴露出的真实漂移，不是 termination 误报。当前没有任何
-ready/hold authority 通过 200/800；必须在不弱化硬限位的前提下，按预注册搜索和 exact Pod
-full-horizon canary 选出替代 hold qdes，之后才有资格验证 physical-ready→teacher-frame0 过渡。
+ready/hold authority 通过独立 `200/800` 耐久 soak。该 soak 不回溯成 birth/first-long 前置。
+旧 leg12 projection 与 threshold-first fallback 都只作机械探索；它们不能替换当前 tracked
+split-ready reset，host dependency-light 结果也不能代签 Isaac authority。
 
 **PRE-LONG 基础门：**以下七项全部 exact PASS 前不发 A211/C211 `long4096`：211-D actor
 ordered-layout v2/IMU gyro与 fresh actor normalizer v2；WAIT observation/reward/denominator masks；
-safe-reset exact Pod `200 tick / 800 substep` live hold；fixed-center tape 零 online inverse；MuJoCo C-lite
-真实 runner 的两次 PPO update+save/cold-load（`42500ade` 已通过）；Isaac `oracle32` 后 `4096 env x 5 update` finite/natural
-exit；以及单卡双进程 colocation 的 PID/UUID/namespace/显存/cleanup Pod receipt。用于关闭这些门的
-fixed-center finite probe 可以先跑，不等待 band bank；扩域/full-curriculum long 必须另过 band bank。
+tracked split-ready artifact/hold 与 measured-frame0 teacher reveal lineage；A complete-semantic cache 与
+C `direct_ball`/zero-inverse receipt；MuJoCo A211 **和** C211 各自 `1 env x 2 PPO update +
+save/fresh-process cold-load`；A/C 各自 `oracle32`；A0/A1/C0/C1 四格 `4096 env x 5 update`
+finite/natural exit 及全局 aggregate barrier；以及单卡最多双进程的
+PID/UUID/namespace/显存/cleanup Pod receipt。历史76-D C-lite 只是 plumbing 证据，不能关闭当前
+MuJoCo A 或 C 项。fixed-center finite probe 可以先跑，不等待 band bank；首个 expanding long 也不把
+band bank 设为前置，真正前置是 scheduler/cache/curriculum/receipt 闭包。
+当前 reward 静态层级已按 Take061 task-valid/`gamma=.99` 复算通过：A
+`1.773<1.852≤3.009<3.332`，C `1.773<1.904<3.332`。但 landing floor `+8.4`高于
+death `-6`，所以 live gate 必须单独报告 `legal_landing ∧ post_contact_fall_or_termination`；
+不得把合法上台后摔倒的正净事件收入冒充 safety PASS。
 完整逐项定义见 [successor PRE-LONG checklist](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)。
 其中 `scale4096 -> long4096` 不再信任“已保存”声明：launcher 必须在 checkout-bound RSL
 run 中找到 exact `model_5.pt`，绑定 path/size/inode/SHA/文件名与内嵌 iteration/
 launch-claim，只用 CPU `torch.load(weights_only=True)` 读取，递归检查 model、optimizer、
-actor normalizer、critic normalizer 所有 tensor finite；同时要求恰好5个连续 update 的
-actual-hard/table/nonfinite 运行计数全零。long 发射时重算并与 scale result 逐字等值，
-任一缺失/非有限/篡改都在 GPU mutation 前拒绝。
+actor normalizer、critic normalizer 所有 tensor finite；同时从恰好5个连续 update 重算
+qdes-hard/actual-hard/nonfinite 三项 implementation strict-zero。fall/base-too-low/robot-hit-table 仍是
+真实 termination，但必须按 hidden-WAIT/revealed-pre-strike/post-strike 分项计数、守恒并带分母报告，
+不能把“初始 policy 已经学会平衡”循环写成 scale 前的零事件要求。long 发射时重算并与 scale result
+逐字等值；任一缺失/非有限/篡改都在 GPU mutation 前拒绝。
 
-C211 的 dependency-light observed-evidence producer 已实现：它只接受 runtime 逐 episode contact
-facts，自行分类 selected/wrong/edge/between/unknown/no-contact，并发布 SHA 可重算、canonical、
-no-clobber 的 runner-preflight、selected-rubber 和 raw-oracle sidecar；外部直接塞 verdict 会被拒绝。
-但 shared `train.py` 仍没有 C211 `outcome_dense_only/000` oracle 分流、runner-before-oracle hook 和
-command live selected-face ledger，所以 `oracle32/scale4096/long4096` 继续在 GPU/namespace mutation
-前 fail closed。当前 dependency-light A/C+MuJoCo 组合为 `492 passed, 40 skipped`；40个 skip/本机
-collection 缺口主要来自 Torch/MuJoCo host 环境，必须在 exact Pod 重跑，不能当 pass。
+C211 live oracle 已实现：runner validation/dynamic bootstrap/checkpoint-load 后、optimizer 前运行真实
+inference+`env.step()`，收集32个 TASK_ACTIVE closed attempts；WAIT 不计 C，active miss 记
+`H/C=0/1`，只有 selected-rubber actual contact 才允许 achieved-flight sidecar。actor/critic incoming-ball
+slice 逐值比对，observed bundle/raw receipt no-clobber 且 SHA 互绑。host 回归通过，但 exact Pod
+oracle32 尚未执行；C 的 long4096 terminal checkpoint/telemetry 独立复核也必须与 A 对齐。因此
+`oracle32/scale4096/long4096` 继续 fail closed，host test 不代签 live evidence。
 
 **2026-08-03 A225 四臂 runtime 更新（Gate 仍 `Partial`）：**dedicated A225
 225/318-D producer/critic/normalizer/Gym/launcher 已实现。L0-L3 在 exact Pod 均完成
@@ -5896,7 +5921,7 @@ exact Pod2 CPU overlay 的最终组合回归为 `368 passed, 0 failed, 0 skipped
 且 long-axis contact pin/TTC one-ULP/adaptive exact-resume 点名复验 `3 passed in 1.69s`；
 未启动 GPU 或训练，故 G05 仍是 `Partial`。
 
-2026-08-03 superseding correction：上述 schema-v3 `73/73`、`landing=12..20`、“不需重做
+2026-08-03 **HISTORICAL CORRECTION（已被本文顶部 2026-08-04 A211/C211 reward 会计替代）：**上述 schema-v3 `73/73`、`landing=12..20`、“不需重做
 重定向”三句已失效。v3 的拍柄长轴错了45°；新 schema-v4 本地 sibling 在正确 URDF/MJCF
 轴上闭合 73/73 运动学门，但产生 37/73 超速和 58/73 近限位反例，不是
 training-ready teacher。当前 reward 为全相位低权 measured paddle + window 内高权 task target，

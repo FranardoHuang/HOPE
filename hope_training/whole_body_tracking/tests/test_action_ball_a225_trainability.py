@@ -10,6 +10,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TRAIN_SCRIPT = ROOT / "scripts/train.py"
 TASK_YAML = (
     ROOT / "cfg/task/HOPEPingPongActionBallA211VendorV2N1Learnability.yaml"
 )
@@ -39,6 +40,11 @@ def _cfg(*, mode: str = M.A211_ACTOR_CONTRACT, critic=True):
                 action_ball_task_wait_max_wait_ticks=25,
                 action_ball_task_wait_episode_horizon_ticks=500,
                 action_ball_task_wait_required_active_ticks=200,
+                action_ball_target_source="online_solver",
+                action_ball_reuse_exact_question_until_semantics_change=True,
+                action_ball_initial_center_single_question=True,
+                action_ball_target_recipe="current_lm",
+                action_ball_target_validity_mask=[True, True, True],
             )
         ),
         observations=SimpleNamespace(critic=object() if critic else None),
@@ -91,6 +97,18 @@ def test_cfg_guard_allows_only_dedicated_a211_and_refuses_legacy_abis():
             _cfg(critic=False), entrypoint="test"
         )
 
+    for attribute, bad_value in (
+        ("action_ball_target_source", "direct_ball"),
+        ("action_ball_reuse_exact_question_until_semantics_change", False),
+        ("action_ball_initial_center_single_question", False),
+        ("action_ball_target_recipe", "outcome_dense_only"),
+        ("action_ball_target_validity_mask", [True, False, True]),
+    ):
+        wrong = _cfg()
+        setattr(wrong.commands.racket_target, attribute, bad_value)
+        with pytest.raises(RuntimeError, match=attribute):
+            M.validate_action_ball_211_cfg_trainability(wrong, entrypoint="test")
+
 
 def test_runtime_and_wrapper_require_exact_actor_and_privileged_critic_abis():
     runtime = _runtime()
@@ -100,10 +118,21 @@ def test_runtime_and_wrapper_require_exact_actor_and_privileged_critic_abis():
     assert facts["fresh_normalizers_required"] is True
     assert facts["task_wait_contract"] == M.action_ball_211_wait_contract_facts()
     source = facts["question_source_contract"]
-    assert source == M.action_ball_211_question_source_contract_facts()
-    assert source["current_immutable_tape"]["final_curriculum_frozen"] is False
-    assert source["final_curriculum"]["reset_selection"] == "index_one_bank_row"
-    assert source["final_curriculum"]["online_inverse_solves_per_step"] == 0
+    assert source == M.action_ball_211_question_source_contract_facts(
+        family="A211"
+    )
+    assert source["family"] == "A211"
+    sampler = source["question_sampler"]
+    assert sampler["curriculum_domain_levels_consulted_every_reset"] is True
+    assert sampler["sampler_runs_every_reset"] is True
+    assert sampler["sampler_rng_reused_by_target_provider"] is False
+    provider = source["target_provider"]
+    assert provider["source"] == "online_solver"
+    cache = provider["exact_question_answer_cache"]
+    assert cache["cold_first_distinct_question_inverse_solve_calls"] == 1
+    assert cache["same_batch_identical_question_inverse_solve_calls"] == 0
+    assert cache["later_identical_question_inverse_solve_calls"] == 0
+    assert cache["changed_question_inverse_solve_calls"] == 1
     assert M.A211_ACTOR_LAYOUT[-1] == ("task_valid", 1)
     assert M.A211_CRITIC_LAYOUT[-1] == ("task_valid", 1)
     assert "teacher_base_now_world" not in M.layout_names(M.A211_ACTOR_LAYOUT)
@@ -150,16 +179,13 @@ def test_runner_requires_asymmetric_networks_and_distinct_fresh_normalizers():
         M.validate_action_ball_211_runner(runner)
 
 
-def test_a211_resolved_cfg_inherits_vendor_v2_adaptive_sigma_contract():
+def test_a211_resolved_cfg_disables_controller_but_keeps_fixed_fine_widths():
     import yaml
 
     raw_task = yaml.safe_load(TASK_YAML.read_text(encoding="utf-8"))
-    for key in (
-        "adaptive_sigma",
-        "adaptive_sigma_monotonic",
-        "adaptive_sigma_normal",
-    ):
-        assert key not in raw_task["racket"]
+    assert raw_task["racket"]["adaptive_sigma"] is False
+    assert raw_task["racket"]["adaptive_sigma_monotonic"] is False
+    assert raw_task["racket"]["adaptive_sigma_normal"] is False
 
     if importlib.util.find_spec("hydra") is None:
         return
@@ -176,10 +202,20 @@ def test_a211_resolved_cfg_inherits_vendor_v2_adaptive_sigma_contract():
             ],
         ).task
 
-    assert task.racket.adaptive_sigma is True
-    assert task.racket.adaptive_sigma_monotonic is True
-    assert task.racket.adaptive_sigma_normal is True
+    assert task.racket.adaptive_sigma is False
+    assert task.racket.adaptive_sigma_monotonic is False
+    assert task.racket.adaptive_sigma_normal is False
     assert task.racket.adaptive_sigma_source == "ball_exact_strike"
     assert task.racket.sigma_pos_max == pytest.approx(0.50)
     assert task.racket.sigma_vel_max == pytest.approx(3.0)
     assert task.racket.sigma_normal_max == pytest.approx(2.10)
+
+
+def test_train_finalizer_accepts_only_the_current_a211_c211_v2_markers():
+    """Prevent the launcher/runtime ABI version from drifting past train.py again."""
+
+    source = TRAIN_SCRIPT.read_text(encoding="utf-8")
+    assert '"action_ball_a211_fixed_question_learnability_v2"' in source
+    assert '"action_ball_c211_fixed_midpoint_learnability_v2"' in source
+    assert '"action_ball_a211_fixed_question_learnability_v1"' not in source
+    assert '"action_ball_c211_fixed_midpoint_learnability_v1"' not in source

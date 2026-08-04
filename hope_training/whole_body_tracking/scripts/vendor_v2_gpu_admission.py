@@ -16,6 +16,7 @@ from typing import Any, Mapping, Sequence
 MAX_VENDOR_V2_COMPUTE_PIDS = 2
 MIN_VENDOR_V2_FREE_MEMORY_MIB = 8 * 1024
 GPU_RESERVATION_FILENAME = "vendor_v2_gpu_slot_reservation.json"
+GPU_RESERVATION_REGISTRY_SUFFIX = ".vendor_v2_reservations"
 GPU_NAMESPACE_RECEIPT_FILENAME = "vendor_v2_gpu_namespace_receipt.json"
 GPU_NAMESPACE_RECEIPT_ENV = "HOPE_VENDOR_V2_GPU_NAMESPACE_RECEIPT"
 GPU_NAMESPACE_RECEIPT_SHA_ENV = "HOPE_VENDOR_V2_GPU_NAMESPACE_RECEIPT_SHA256"
@@ -43,6 +44,9 @@ class VendorV2GPUAdmission:
         validate_spec: Any,
         output_contract: Any,
         training_argv: Any,
+        output_contract_from_payload: Any = None,
+        physical_reservation_registry: bool = False,
+        forbidden_namespace_experiment_names: Sequence[str] = (),
     ) -> None:
         self._B = base
         self.LaunchRefused = base.LaunchRefused
@@ -61,7 +65,111 @@ class VendorV2GPUAdmission:
         self._exact_dict = exact_dict
         self._validate_spec = validate_spec
         self._output_contract = output_contract
+        self._output_contract_from_payload = output_contract_from_payload
         self._training_argv = training_argv
+        if type(physical_reservation_registry) is not bool:
+            raise TypeError("physical_reservation_registry must be a boolean")
+        self.physical_reservation_registry = physical_reservation_registry
+        self.forbidden_namespace_experiment_names = tuple(
+            forbidden_namespace_experiment_names
+        )
+        if any(
+            type(name) is not str or not name or "/" in name
+            for name in self.forbidden_namespace_experiment_names
+        ):
+            raise TypeError(
+                "forbidden_namespace_experiment_names must be safe names"
+            )
+
+    def _validate_claim_payload_safety(
+        self, payload: Mapping[str, Any], spec: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Validate the complete fixed safety envelope before any GPU mutation."""
+
+        row = self._exact_dict(
+            payload,
+            (
+                "schema_version",
+                "kind",
+                "diagnostic_unauthorized",
+                "formal_evidence_prohibited",
+                "promotion_prohibited",
+                "resume_prohibited",
+                "export_prohibited",
+                "deployment_prohibited",
+                "hardware_prohibited",
+                "single_gpu",
+                "max_compute_pids_on_physical_gpu",
+                "minimum_free_memory_mib",
+                "gpu_default_empty",
+                "vendor_v2_colocation_opt_in",
+                "fresh_only",
+                "reward_materialization_only",
+                "policy_recipe_materialization_only",
+                "teacher_qdes_oracle_only",
+                "ppo_updates_authorized",
+                "control_step_action_delay",
+                "reset_inverse_solve",
+                "physical_ball_semantics",
+                "spec_file_sha256",
+                "spec",
+                "source",
+                "runtime_sources",
+                "runtime_assets",
+                "bundle",
+                "materialization_inputs",
+                "output_contract",
+                "boot_marker",
+                "training_argv",
+            ),
+            name="canonical launch payload",
+        )
+        output_contract = (
+            self._output_contract(spec)
+            if self._output_contract_from_payload is None
+            else self._output_contract_from_payload(spec, row)
+        )
+        fixed_true = (
+            "diagnostic_unauthorized",
+            "formal_evidence_prohibited",
+            "promotion_prohibited",
+            "resume_prohibited",
+            "export_prohibited",
+            "deployment_prohibited",
+            "hardware_prohibited",
+            "single_gpu",
+            "fresh_only",
+        )
+        if (
+            row["schema_version"] != self.schema_version
+            or row["kind"] != self.claim_kind
+            or row["spec"] != spec
+            or any(row[key] is not True for key in fixed_true)
+            or row["max_compute_pids_on_physical_gpu"]
+            != MAX_VENDOR_V2_COMPUTE_PIDS
+            or row["minimum_free_memory_mib"] != MIN_VENDOR_V2_FREE_MEMORY_MIB
+            or row["gpu_default_empty"] is not (
+                not spec[self.colocation_spec_key]
+            )
+            or row["vendor_v2_colocation_opt_in"]
+            is not spec[self.colocation_spec_key]
+            or row["reward_materialization_only"]
+            is not (spec["stage"] == "materialize")
+            or row["policy_recipe_materialization_only"]
+            is not (spec["stage"] == "recipe")
+            or row["teacher_qdes_oracle_only"]
+            is not (spec["stage"] in ("oracle2", "oracle32"))
+            or row["ppo_updates_authorized"]
+            != output_contract["ppo_update_count"]
+            or row["control_step_action_delay"] != 0
+            or row["reset_inverse_solve"] is not False
+            or row["physical_ball_semantics"] != self.physical_ball_semantics
+            or row["output_contract"] != output_contract
+            or row["boot_marker"] != output_contract["boot_marker"]
+        ):
+            raise self.LaunchRefused("launch claim safety semantics differ")
+        self._B._sha256(row["spec_file_sha256"], name="launch spec file SHA")
+        return row
 
     def _open_gpu_shared_lock(self, lock_path: Path) -> int:
         """Hold the physical-GPU flock shared for one VendorV2 trainer lifetime.
@@ -507,7 +615,11 @@ class VendorV2GPUAdmission:
             raise self.LaunchRefused(
                 "co-resident claim did not opt in to VendorV2 colocation"
             )
-        output_contract = self._output_contract(spec)
+        output_contract = (
+            self._output_contract(spec)
+            if self._output_contract_from_payload is None
+            else self._output_contract_from_payload(spec, payload)
+        )
         fixed_true = (
             "diagnostic_unauthorized",
             "formal_evidence_prohibited",
@@ -856,12 +968,13 @@ class VendorV2GPUAdmission:
             raise self.LaunchRefused(
                 "VendorV2 runtime handoff process identity is invalid"
             )
-        try:
-            start = self._proc_starttime(pid, proc_root=proc_root)
-        except self.LaunchRefused:
+        start = self._proc_starttime_if_present(pid, proc_root=proc_root)
+        if start is None:
             return None
         if start != expected_start:
-            return None
+            raise self.LaunchRefused(
+                "VendorV2 runtime handoff process identity drifted"
+            )
         receipt = self._exact_dict(
             receipt,
             (
@@ -916,28 +1029,174 @@ class VendorV2GPUAdmission:
         )
         return {"pid": pid, "proc_starttime_ticks": start}
 
+    def _proc_starttime_if_present(
+        self, pid: int, *, proc_root: Path
+    ) -> int | None:
+        """Return None only for a confirmed-absent proc stat entry.
+
+        Permission failures, malformed stat payloads and other identity ambiguity
+        remain launch refusals; they must never be reclassified as a dead owner.
+        """
+
+        stat_path = proc_root / str(pid) / "stat"
+        try:
+            stat_path.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise self.LaunchRefused(
+                "cannot determine VendorV2 reservation process liveness"
+            ) from exc
+        return self._proc_starttime(pid, proc_root=proc_root)
+
+    def _reservation_registry_root(self, lock_path: Path) -> Path:
+        if not lock_path.is_absolute() or lock_path.name in ("", ".", ".."):
+            raise self.LaunchRefused(
+                "VendorV2 GPU lock path cannot identify a physical registry"
+            )
+        return lock_path.parent / (
+            lock_path.name + GPU_RESERVATION_REGISTRY_SUFFIX
+        )
+
+    def _ensure_reservation_registry(self, root: Path) -> None:
+        try:
+            os.mkdir(root, 0o700)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise self.LaunchRefused(
+                "cannot create VendorV2 physical-GPU reservation registry"
+            ) from exc
+        try:
+            info = root.lstat()
+            resolved = root.resolve(strict=True)
+        except OSError as exc:
+            raise self.LaunchRefused(
+                "cannot verify VendorV2 physical-GPU reservation registry"
+            ) from exc
+        if not stat.S_ISDIR(info.st_mode) or resolved != root:
+            raise self.LaunchRefused(
+                "VendorV2 physical-GPU reservation registry is not a real directory"
+            )
+
+    def _write_reservation(
+        self, spec: Mapping[str, Any], claim_sha: str
+    ) -> dict[str, Any]:
+        """Publish global and namespace copies as one lock-scoped transaction."""
+
+        document = self._reservation_document(spec, claim_sha)
+        registry_root = self._reservation_registry_root(
+            Path(spec["gpu"]["lock_path"])
+        )
+        self._ensure_reservation_registry(registry_root)
+        registry_path = registry_root / (claim_sha + ".json")
+        namespace_path = (
+            Path(spec["namespace"]) / GPU_RESERVATION_FILENAME
+        )
+        wrote_registry = False
+        try:
+            self._B._write_exclusive_json(registry_path, document)
+            wrote_registry = True
+            self._B._write_exclusive_json(namespace_path, document)
+        except Exception:
+            if wrote_registry:
+                try:
+                    registry_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise self.LaunchRefused(
+                        "cannot roll back partial VendorV2 reservation"
+                    ) from exc
+            raise
+        return {
+            "registry_path": registry_path,
+            "namespace_path": namespace_path,
+            "document": document,
+            "registry_sha256": self._B.sha256_file(registry_path),
+        }
+
+    def _release_reservation(self, handle: Mapping[str, Any]) -> None:
+        """Remove only the physical registry entry; retain namespace audit copy."""
+
+        path = handle.get("registry_path")
+        expected_sha = handle.get("registry_sha256")
+        if not isinstance(path, Path) or type(expected_sha) is not str:
+            raise self.LaunchRefused("VendorV2 reservation handle is malformed")
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise self.LaunchRefused(
+                "cannot inspect VendorV2 reservation during cleanup"
+            ) from exc
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or path.resolve(strict=True) != path
+            or self._B.sha256_file(path) != expected_sha
+        ):
+            raise self.LaunchRefused(
+                "VendorV2 reservation changed before cleanup"
+            )
+        try:
+            path.unlink()
+        except OSError as exc:
+            raise self.LaunchRefused(
+                "cannot clean VendorV2 physical reservation"
+            ) from exc
+
     def _live_reservations(
         self,
-        experiment_root: Path,
+        coordination_root: Path,
         *,
         checkout: Path,
         commit: str,
         gpu_index: int,
         gpu_uuid: str,
         proc_root: Path = Path("/proc"),
+        namespace_audit_mode: bool = False,
     ) -> list[dict[str, Any]]:
         result = []
         try:
-            children = tuple(experiment_root.iterdir())
+            root_info = coordination_root.lstat()
+            if (
+                not stat.S_ISDIR(root_info.st_mode)
+                or coordination_root.resolve(strict=True) != coordination_root
+            ):
+                raise self.LaunchRefused(
+                    "VendorV2 coordination root is not a real directory"
+                )
+            entries = tuple(coordination_root.iterdir())
+        except FileNotFoundError:
+            return []
         except OSError as exc:
-            raise self.LaunchRefused("cannot scan VendorV2 namespace root") from exc
-        for namespace in children:
-            receipt_path = namespace / GPU_RESERVATION_FILENAME
-            if not receipt_path.exists():
+            raise self.LaunchRefused(
+                "cannot scan VendorV2 coordination root"
+            ) from exc
+        receipt_paths = []
+        for entry in entries:
+            if entry.is_file():
+                receipt_paths.append(entry)
                 continue
+            if self.physical_reservation_registry and not namespace_audit_mode:
+                raise self.LaunchRefused(
+                    "physical-GPU reservation registry contains a non-file entry"
+                )
+            if entry.is_dir():
+                legacy = entry / GPU_RESERVATION_FILENAME
+                if legacy.is_file():
+                    receipt_paths.append(legacy)
+        for receipt_path in receipt_paths:
             receipt, receipt_sha = self._stable_canonical_json(
                 receipt_path, name="VendorV2 GPU reservation"
             )
+            namespace_value = receipt.get("namespace")
+            if type(namespace_value) is not str:
+                raise self.LaunchRefused(
+                    "VendorV2 GPU reservation namespace is invalid"
+                )
+            namespace = Path(namespace_value)
             receipt_gpu_index = receipt.get("gpu_index")
             receipt_gpu_uuid = receipt.get("gpu_uuid")
             if (
@@ -965,11 +1224,14 @@ class VendorV2GPUAdmission:
                 raise self.LaunchRefused(
                     "VendorV2 GPU reservation process identity is invalid"
                 )
-            try:
-                live_start = self._proc_starttime(pid, proc_root=proc_root)
-            except self.LaunchRefused:
-                live_start = None
+            live_start = self._proc_starttime_if_present(
+                pid, proc_root=proc_root
+            )
             owner_kind = "outer_launcher"
+            if live_start is not None and expected_start != live_start:
+                raise self.LaunchRefused(
+                    "VendorV2 GPU reservation process identity drifted"
+                )
             if expected_start != live_start:
                 handoff = self._live_runtime_handoff(
                     namespace,
@@ -1010,6 +1272,12 @@ class VendorV2GPUAdmission:
                 or receipt["gpu_index"] != gpu_index
                 or receipt["gpu_uuid"] != gpu_uuid
                 or receipt["namespace"] != str(namespace)
+                or (
+                    self.physical_reservation_registry
+                    and not namespace_audit_mode
+                    and receipt_path.name
+                    != receipt["launch_claim_sha256"] + ".json"
+                )
                 or receipt["checkout"] != str(checkout)
                 or receipt["commit_sha"] != commit
                 or receipt["max_compute_pids"] != MAX_VENDOR_V2_COMPUTE_PIDS
@@ -1018,7 +1286,11 @@ class VendorV2GPUAdmission:
                 raise self.LaunchRefused(
                     "live VendorV2 GPU reservation identity differs"
                 )
-            self._validate_namespace_claim(
+            if namespace.parent.name != self.experiment_name:
+                raise self.LaunchRefused(
+                    "live VendorV2 reservation belongs to another experiment family"
+                )
+            validated_claim = self._validate_namespace_claim(
                 namespace,
                 receipt["launch_claim_sha256"],
                 checkout=checkout,
@@ -1027,6 +1299,13 @@ class VendorV2GPUAdmission:
                 gpu_uuid=gpu_uuid,
                 require_colocation_opt_in=False,
             )
+            if (
+                validated_claim["spec"][self.colocation_spec_key]
+                is not receipt["allow_vendor_v2_colocation"]
+            ):
+                raise self.LaunchRefused(
+                    "VendorV2 reservation colocation differs from launch claim"
+                )
             result.append(
                 {
                     "owner_pid": pid,
@@ -1070,6 +1349,14 @@ class VendorV2GPUAdmission:
         reservations_query = (
             self._live_reservations if live_reservations is None else live_reservations
         )
+        using_default_reservation_query = (
+            live_reservations is None
+            or (
+                getattr(live_reservations, "__self__", None) is self
+                and getattr(live_reservations, "__func__", None)
+                is type(self)._live_reservations
+            )
+        )
         queried = query(gpu["index"], gpu["uuid"])
         if queried["free_memory_mib"] < MIN_VENDOR_V2_FREE_MEMORY_MIB:
             raise self.LaunchRefused(
@@ -1102,14 +1389,52 @@ class VendorV2GPUAdmission:
             raise self.LaunchRefused(
                 "one VendorV2 namespace owns multiple compute PIDs"
             )
+        reservation_root = (
+            self._reservation_registry_root(Path(spec["gpu"]["lock_path"]))
+            if self.physical_reservation_registry
+            else Path(spec["namespace"]).parent
+        )
         reservations = reservations_query(
-            Path(spec["namespace"]).parent,
+            reservation_root,
             checkout=checkout,
             commit=commit,
             gpu_index=gpu["index"],
             gpu_uuid=gpu["uuid"],
             proc_root=proc_root,
         )
+        if not self.physical_reservation_registry and using_default_reservation_query:
+            reservations.extend(
+                self._live_reservations(
+                    self._reservation_registry_root(
+                        Path(spec["gpu"]["lock_path"])
+                    ),
+                    checkout=checkout,
+                    commit=commit,
+                    gpu_index=gpu["index"],
+                    gpu_uuid=gpu["uuid"],
+                    proc_root=proc_root,
+                )
+            )
+        if (
+            self.physical_reservation_registry
+            and using_default_reservation_query
+            and self.forbidden_namespace_experiment_names
+        ):
+            legacy_root = (
+                checkout / self._B.WBT_RELATIVE / "logs" / "rsl_rl"
+            )
+            for experiment_name in self.forbidden_namespace_experiment_names:
+                reservations.extend(
+                    self._live_reservations(
+                        legacy_root / experiment_name,
+                        checkout=checkout,
+                        commit=commit,
+                        gpu_index=gpu["index"],
+                        gpu_uuid=gpu["uuid"],
+                        proc_root=proc_root,
+                        namespace_audit_mode=True,
+                    )
+                )
         reserved_namespaces = {row["namespace"] for row in reservations}
         if len(reserved_namespaces) != len(reservations):
             raise self.LaunchRefused("duplicate live VendorV2 namespace reservation")

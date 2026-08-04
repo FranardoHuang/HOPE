@@ -118,15 +118,20 @@ license/README，URDF 实际含 `40` 个 movable joints（旧身体31轴加9个�
 大小写 mesh 失配、20个缺失夹爪 collision mesh、非有限颜色、夹爪安装姿态冲突和旧身体 plant
 参数变化。不得用它原地覆盖 `agi/URDF/A3T2.5-URDF-std-pingpang/` 或改写历史模型 SHA。
 
-2026-08-03 的非现役 31-action candidate 由 `scripts/prepare_a3_p1_0803_31d_asset.py`
-确定性生成到 ignored
-`hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v1/`，
-小型 diff/closure 收据是 [`configs/a3_p1_0803_31d_v1.json`](../configs/a3_p1_0803_31d_v1.json)。
-它把 9 个夹爪轴固定在 URDF 零位，保留夹爪质量/惯量/origin，只删除 20 个确认缺文件的
-collision element 和一个无 geometry 的非有限颜色 visual，并把 78 个 mesh 路径改成交付文件的
-大小写。该路径仍为 ignored generated asset；不允许将 56 MB mesh 复制品加入 Git。
-当前 `agibot_a3/` pointer 未改；Pod Isaac import、standing/FK/dynamics parity、夹爪 mount authority 和
-MuJoCo identity v3 闭合前，该 candidate 仍 `training_authorized=false`。
+2026-08-04 项目裁决 raw URDF（不是冲突 workbook）为该交付的 mount/几何 ground truth，并
+版本化拥有左夹爪 training projection：九个非 policy joint 固定在 URDF coordinate `q=0`。这不
+声称 `q=0` 是 vendor neutral 或硬件 home。生成器保留 `0.76626209416 kg` 夹爪质量/inertial；
+20 个未随包交付的 gripper collision mesh 不得伪造，只有对应的 20 个 collision element 被显式
+disabled，并保留为 collision/sim-to-real promotion 风险。可复现 candidate receipt 是
+[`configs/a3_p1_0803_31d_v1.json`](../configs/a3_p1_0803_31d_v1.json)：31 movable joints，
+URDF SHA `2f15df8a…2535`，closure `73a47e85…8f08`。它仍为 ignored future-primary candidate；
+`current_runtime_pointer_changed=false / training_authorized=false`，不得热覆盖现役
+`agibot_a3/`。不允许把 56 MB mesh 复制品加入 Git。
+
+0803 raw/normalized 的 official paddle-centre local transform 与四个右拍 mesh bytes 均和现役
+exact；但新 `right_elbow_joint` origin 令共同 `q=0` 的 world paddle centre 相对现役移动
+`9.013878 mm`。所以“local right racket unchanged”只授权 candidate construction，不授权复用旧
+动作的 world-FK/retarget receipt；切换前必须在 successor 上重跑 full-phase audit。
 
 Generated Isaac training asset:
 

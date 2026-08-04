@@ -26,7 +26,9 @@ ENV_CFG = (
 )
 ACTION_BALL_YAML = ROOT / "cfg/task/HOPEPingPongActionBall.yaml"
 JOINTS = list(hope_rewards_mod._A3_RUNTIME_JOINT_ORDER)
-MARGIN = 0.08
+# 2026-08-05 层级对齐(exp §5.6 第 9 条):qdes_limit_barrier_margin_frac 0.08 -> 0.05。
+# 注:本常量在本文件内已无引用(死码),跟着改只是不让它成为下一个被误抄的旧值来源。
+MARGIN = 0.05
 FLOOR = 0.25
 
 
@@ -207,18 +209,22 @@ def test_adopted_scale_and_generic_death_invariants_are_pinned():
     rewards = task["rewards"]
     assert rewards["qdes_limit_barrier_weight"] == pytest.approx(-5.0)
     assert rewards["joint_limit_weight"] == pytest.approx(-5.0)
-    assert rewards["death_penalty_weight"] == pytest.approx(-300.0)
+    # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0(post-dt -6.0 -> -0.2)。
+    # 权威在 HOPEPingPongActionBall.yaml:151;本文件读那份 yaml,是它的算术副本。
+    assert rewards["death_penalty_weight"] == pytest.approx(-10.0)
     assert rewards["table_hit_penalty_weight"] == pytest.approx(0.0)
 
     policy_dt = 0.02
     floor_step_per_joint_channel = abs(-5.0 * policy_dt * FLOOR)
     full_step_per_joint_channel = abs(-5.0 * policy_dt)
     max_two_channel_step = 31 * 2 * full_step_per_joint_channel
-    hard_death = abs(-300.0 * policy_dt)
+    hard_death = abs(-10.0 * policy_dt)
     landing_max = 500.0 * policy_dt
     assert floor_step_per_joint_channel == pytest.approx(0.025)
     assert full_step_per_joint_channel == pytest.approx(0.10)
     assert max_two_channel_step == pytest.approx(6.2)
-    assert hard_death == pytest.approx(6.0)
+    # 对齐后 death 不再压过 soft 限位通道:6.0 -> 0.2,与 max_two_channel_step 6.2 的量级
+    # 关系整个翻转(原本 death 约等于两通道满额,现在只有它的 3%)。这正是 §5.6 想要的次序。
+    assert hard_death == pytest.approx(0.2)
     assert landing_max == pytest.approx(10.0)
     assert 50 * floor_step_per_joint_channel == pytest.approx(1.25)

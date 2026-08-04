@@ -3,8 +3,9 @@
 
 The wrapper creates one deterministic dynamic-ready-shaped probe input outside
 the repository, invokes the existing live ``check_table_obstacle_scene.py``
-nominal-hold path for exactly ``task_close_ticks``, and delegates publication
-to the independent fail-closed consumer.  It never starts PPO.
+nominal-hold path for the sealed timing-derived dynamic birth horizon, publishes that producer's
+raw receipt directly at a fresh trackable repository path, and delegates the
+same file to the independent fail-closed consumer.  It never starts PPO.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from typing import Sequence
+from typing import Sequence, Tuple
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -54,6 +55,88 @@ def _outside_repo(path: Path, root: Path, *, name: str) -> Path:
     raise RunError("%s must stay outside the exact clean checkout" % name)
 
 
+def _fresh_repo_output(root: Path, value: str, *, name: str) -> Tuple[Path, str]:
+    """Resolve one explicit, trackable, no-clobber repository output."""
+
+    relative = _C._relative(value, name=name)
+    if relative != value:
+        raise RunError("%s must be an explicit normalized relative path" % name)
+    parts = relative.split("/")
+    if any(part.casefold() == ".git" for part in parts):
+        raise RunError("%s must not enter Git metadata" % name)
+    output = root / relative
+    parent = output.parent
+    try:
+        resolved_parent = parent.resolve(strict=True)
+    except OSError as exc:
+        raise RunError("%s parent must already exist: %s" % (name, exc)) from exc
+    if resolved_parent != parent or not parent.is_dir():
+        raise RunError("%s parent must be a plain repository directory" % name)
+    try:
+        output.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RunError("cannot inspect %s: %s" % (name, exc)) from exc
+    else:
+        raise RunError("fresh no-clobber %s already exists: %s" % (name, output))
+    ignored = _C._git(
+        root,
+        ("check-ignore", "-q", "--no-index", "--", relative),
+    )
+    if ignored.returncode == 0:
+        raise RunError("%s must not be Git-ignored" % name)
+    if ignored.returncode != 1:
+        raise RunError("cannot inspect %s Git tracking policy" % name)
+    return output, relative
+
+
+def _verify_exact_source_with_candidates(
+    root: Path,
+    source_commit: str,
+    candidates: Sequence[Tuple[Path, str]],
+) -> None:
+    """Allow only the already-produced, preflighted receipt candidates."""
+
+    source_commit = _C._commit(source_commit, name="probe_source_commit")
+    head = _C._git(root, ("rev-parse", "HEAD"))
+    if head.returncode or head.stdout.strip() != source_commit:
+        raise RunError("probe source commit is not the checkout HEAD")
+    expected_status = []
+    for path, relative in candidates:
+        if path != root / relative:
+            raise RunError("generated receipt candidate escaped repository root")
+        _C._regular(path, name="generated receipt candidate")
+        if path.resolve(strict=True) != path:
+            raise RunError("generated receipt candidate traverses a symlink")
+        expected_status.append("?? " + relative)
+    status = _C._git(
+        root,
+        ("status", "--porcelain=v1", "-z", "--untracked-files=all"),
+    )
+    if status.returncode:
+        raise RunError("cannot verify exact checkout after live receipt publication")
+    records = status.stdout.split("\0")
+    if records and records[-1] == "":
+        records.pop()
+    if len(records) != len(expected_status) or set(records) != set(expected_status):
+        raise RunError(
+            "exact checkout changed outside the preflighted receipt candidates"
+        )
+    for path in (PROBE_FILE, CONSUMER_FILE, Path(__file__).resolve()):
+        try:
+            relative = path.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise RunError("probe source escaped repository root") from exc
+        committed = _C._git(
+            root,
+            ("show", source_commit + ":" + relative),
+            binary=True,
+        )
+        if committed.returncode or committed.stdout != path.read_bytes():
+            raise RunError("probe source differs from exact source commit: %s" % relative)
+
+
 def _write_probe(path: Path, document: dict) -> str:
     payload = _C.canonical_bytes(document) + b"\n"
     descriptor = os.open(
@@ -83,7 +166,7 @@ def _live_command(
     device: str,
     probe_path: Path,
     probe_sha256: str,
-    live_path: Path,
+    raw_nominal_path: Path,
     screenshot_dir: Path,
     duration_s: float,
 ) -> list[str]:
@@ -96,7 +179,7 @@ def _live_command(
         "--table-obstacle", "on",
         "--nominal-hold", str(probe_path),
         "--nominal-hold-sha256", probe_sha256,
-        "--nominal-hold-receipt-out", str(live_path),
+        "--nominal-hold-receipt-out", str(raw_nominal_path),
         "--duration-s", format(duration_s, ".17g"),
         "--screenshot-dir", str(screenshot_dir),
     ]
@@ -108,6 +191,14 @@ def run(args: argparse.Namespace) -> dict:
     artifact_source_commit = _C._commit(
         args.artifact_source_commit, name="artifact_source_commit"
     )
+    raw_nominal_path, raw_nominal_relative = _fresh_repo_output(
+        root, args.raw_nominal_output, name="raw nominal output"
+    )
+    output_path, output_relative = _fresh_repo_output(
+        root, args.output, name="frame0 consumer output"
+    )
+    if raw_nominal_path == output_path:
+        raise RunError("raw nominal and frame0 consumer outputs must be distinct")
     _C.verify_exact_clean_source(root, source_commit)
     ancestor = _C._git(
         root,
@@ -152,7 +243,6 @@ def run(args: argparse.Namespace) -> dict:
         raise RunError("fresh no-clobber work_dir already exists")
     os.mkdir(work_dir, 0o755)
     probe_path = work_dir / "a211_frame0_nominal_hold.probe_input.v1.json"
-    live_path = work_dir / "a211_frame0_nominal_hold.live_safety.v1.json"
     screenshot_dir = work_dir / "screenshots"
     probe = _C.derive_probe_input(
         frame0_artifact=frame,
@@ -165,23 +255,52 @@ def run(args: argparse.Namespace) -> dict:
         probe_source_commit=source_commit,
     )
     probe_sha = _write_probe(probe_path, probe)
-    duration = frame["task_close_ticks"] * frame["policy_dt_s"]
+    duration = (
+        frame["birth_horizon"]["required_policy_ticks"]
+        * frame["policy_dt_s"]
+    )
     command = _live_command(
         python=args.python,
         device=args.device,
         probe_path=probe_path,
         probe_sha256=probe_sha,
-        live_path=live_path,
+        raw_nominal_path=raw_nominal_path,
         screenshot_dir=screenshot_dir,
         duration_s=duration,
     )
     completed = subprocess.run(command, cwd=str(root), check=False)
     if completed.returncode != 0:
-        raise RunError(
-            "live Isaac nominal hold failed with exit code %d; preserved %s"
-            % (completed.returncode, work_dir)
+        try:
+            raw_nominal_path.lstat()
+        except FileNotFoundError:
+            failed_candidates = ()
+        else:
+            failed_candidates = ((raw_nominal_path, raw_nominal_relative),)
+        _verify_exact_source_with_candidates(
+            root,
+            source_commit,
+            failed_candidates,
         )
-    _C.verify_exact_clean_source(root, source_commit)
+        raise RunError(
+            "live Isaac nominal hold failed with exit code %d; preserved raw candidate "
+            "%s when published and probe/screenshots in %s"
+            % (completed.returncode, raw_nominal_path, work_dir)
+        )
+    try:
+        raw_nominal_path.lstat()
+    except FileNotFoundError:
+        successful_candidates = ()
+    else:
+        successful_candidates = ((raw_nominal_path, raw_nominal_relative),)
+    _verify_exact_source_with_candidates(
+        root,
+        source_commit,
+        successful_candidates,
+    )
+    _C._regular(raw_nominal_path, name="raw nominal receipt")
+    raw_info = raw_nominal_path.lstat()
+    raw_identity = (raw_info.st_dev, raw_info.st_ino, raw_info.st_size)
+    raw_sha256 = _C.sha256_file(raw_nominal_path)
     consumer_args = argparse.Namespace(
         repo_root=str(root),
         probe_source_commit=source_commit,
@@ -193,14 +312,103 @@ def run(args: argparse.Namespace) -> dict:
         motion_path=args.motion_path,
         expected_motion_sha256=args.expected_motion_sha256,
         probe_input=str(probe_path),
-        live_receipt=str(live_path),
-        output=args.output,
+        live_receipt=str(raw_nominal_path),
+        output=output_relative,
     )
-    result = _C.consume(consumer_args)
+    original_verify = _C.verify_exact_clean_source
+
+    def verify_with_raw(candidate_root: Path, candidate_commit: str) -> None:
+        _verify_exact_source_with_candidates(
+            candidate_root,
+            candidate_commit,
+            ((raw_nominal_path, raw_nominal_relative),),
+        )
+
+    _C.verify_exact_clean_source = verify_with_raw
+    try:
+        result = _C.consume(consumer_args)
+    finally:
+        _C.verify_exact_clean_source = original_verify
+    owned_output_identity = None
+    try:
+        if type(result) is not dict or type(result.get("receipt")) is not dict:
+            raise RunError("consumer did not return an exact receipt pin")
+        receipt_pin = result["receipt"]
+        if receipt_pin.get("path") != output_relative:
+            raise RunError("consumer receipt pin path differs from requested output")
+        pinned_output_sha = _C._sha(
+            receipt_pin.get("sha256"), name="consumer receipt pin SHA-256"
+        )
+        _C._regular(output_path, name="frame0 consumer receipt")
+        output_info = output_path.lstat()
+        if _C.sha256_file(output_path) != pinned_output_sha:
+            raise RunError("consumer receipt pin SHA-256 differs from output bytes")
+        owned_output_identity = (
+            output_info.st_dev,
+            output_info.st_ino,
+            output_info.st_size,
+            pinned_output_sha,
+        )
+        _verify_exact_source_with_candidates(
+            root,
+            source_commit,
+            (
+                (raw_nominal_path, raw_nominal_relative),
+                (output_path, output_relative),
+            ),
+        )
+        current_raw_info = raw_nominal_path.lstat()
+        if (
+            (
+                current_raw_info.st_dev,
+                current_raw_info.st_ino,
+                current_raw_info.st_size,
+            )
+            != raw_identity
+            or _C.sha256_file(raw_nominal_path) != raw_sha256
+        ):
+            raise RunError("raw nominal receipt changed while it was consumed")
+    except Exception as audit_exc:
+        if owned_output_identity is None:
+            raise RunError(
+                "post-consumer validation failed before final output ownership "
+                "was proven; preserved unknown path %s" % output_path
+            ) from audit_exc
+        try:
+            current_output_info = output_path.lstat()
+        except FileNotFoundError:
+            raise audit_exc
+        current_output_file_identity = (
+            current_output_info.st_dev,
+            current_output_info.st_ino,
+            current_output_info.st_size,
+        )
+        if current_output_file_identity != owned_output_identity[:3]:
+            raise RunError(
+                "post-consumer audit failed after final output identity changed; "
+                "cleanup refused for %s" % output_path
+            ) from audit_exc
+        if _C.sha256_file(output_path) != owned_output_identity[3]:
+            raise RunError(
+                "post-consumer audit failed after final output bytes changed; "
+                "cleanup refused for %s" % output_path
+            ) from audit_exc
+        try:
+            output_path.unlink()
+        except OSError as cleanup_exc:
+            raise RunError(
+                "post-consumer audit failed and final receipt cleanup failed: %s"
+                % cleanup_exc
+            ) from audit_exc
+        raise
     return {
         **result,
         "work_dir": str(work_dir),
-        "live_evidence_preserved": str(live_path),
+        "raw_nominal_receipt": {
+            "path": raw_nominal_relative,
+            "sha256": raw_sha256,
+        },
+        "live_evidence_preserved": str(raw_nominal_path),
         "screenshots_preserved": str(screenshot_dir),
         "completed_live_command": command,
     }
@@ -220,6 +428,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", required=True)
     parser.add_argument("--python", required=True, help="exact Pod Isaac Python executable")
     parser.add_argument("--work-dir", required=True, help="fresh path outside checkout")
+    parser.add_argument(
+        "--raw-nominal-output",
+        required=True,
+        help="fresh trackable repository-relative raw nominal-hold receipt",
+    )
     parser.add_argument("--output", required=True, help="fresh repository-relative final receipt")
     return parser
 

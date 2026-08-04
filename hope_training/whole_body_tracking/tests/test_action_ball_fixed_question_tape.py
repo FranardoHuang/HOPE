@@ -271,6 +271,34 @@ def _request(birth, refill_index=1):
     )
 
 
+class _ExpandOnlyTensor:
+    """Dependency-light tensor double that forbids value/env iteration."""
+
+    def __init__(self, shape, calls, storage):
+        self.shape = tuple(shape)
+        self.calls = calls
+        self.storage = storage
+
+    def __iter__(self):
+        raise AssertionError("device expansion must not iterate tensor values")
+
+    def unsqueeze(self, dim):
+        assert dim == 0
+        self.calls["unsqueeze"] += 1
+        return _ExpandOnlyTensor((1, *self.shape), self.calls, self.storage)
+
+    def expand(self, *shape):
+        self.calls["expand"] += 1
+        return _ExpandOnlyTensor(shape, self.calls, self.storage)
+
+
+def _expand_only_tensor(width, *, row_zero_batched=False):
+    calls = {"unsqueeze": 0, "expand": 0}
+    storage = object()
+    shape = (1, width) if row_zero_batched else (width,)
+    return _ExpandOnlyTensor(shape, calls, storage), calls, storage
+
+
 def test_all_five_recipes_share_one_question_and_fixed_width():
     tape = _tape()
     assert tape.question_sha256 == tape.to_dict()["question_sha256"]
@@ -300,6 +328,121 @@ def test_all_five_recipes_share_one_question_and_fixed_width():
     assert len(view.install_row) == 31
     assert len(view.observation_row) == 24
     assert view.lineage["base_question_sha256"] == tape.question_sha256
+
+
+@pytest.mark.parametrize("recipe", T.TARGET_RECIPES)
+def test_timing_rows_have_one_fixed_runtime_width(recipe):
+    tape = _tape()
+    row = tape.timing_row(recipe)
+    view = tape.reset_batch_view(recipe, batch_size=4096)
+
+    assert T.TIMING_WIDTH == sum(width for _name, width in T.TIMING_LAYOUT)
+    assert len(row) == T.TIMING_WIDTH == 15
+    assert view.timing_row == row
+
+
+@pytest.mark.parametrize("batch_size", (1, 4096))
+@pytest.mark.parametrize("row_zero_batched", (False, True))
+@pytest.mark.parametrize(
+    ("expand_method", "width"),
+    (
+        ("expand_install_rows", T.INSTALL_WIDTH),
+        ("expand_observation_rows", T.OBSERVATION_WIDTH),
+        ("expand_timing_rows", T.TIMING_WIDTH),
+    ),
+)
+def test_solver_reset_batch_view_uses_constant_device_expand_work(
+    batch_size, row_zero_batched, expand_method, width
+):
+    solver = T.FixedQuestionTapeSolver(
+        tape=_tape(),
+        target_recipe="analytic_full",
+        solver_contract_sha256=_pins().solver_sha256,
+    )
+    before = solver.state_dict()
+    row, row_calls, row_storage = _expand_only_tensor(
+        width, row_zero_batched=row_zero_batched
+    )
+    view = solver.reset_batch_view(batch_size=batch_size)
+    rows = getattr(view, expand_method)(row)
+
+    assert rows.shape == (batch_size, width)
+    assert rows.storage is row_storage
+    assert row_calls == {
+        "unsqueeze": int(not row_zero_batched),
+        "expand": 1,
+    }
+    assert view.lineage["solver_contract_sha256"] == _pins().solver_sha256
+    assert view.lineage["state_owner_sha256"] == solver.state_owner_sha256
+    with pytest.raises(TypeError):
+        view.lineage["state_owner_sha256"] = "0" * 64
+    assert solver.state_dict() == before
+
+
+def test_solver_reset_batch_view_is_hash_and_receipt_free_after_init(monkeypatch):
+    solver = T.FixedQuestionTapeSolver(
+        tape=_tape(),
+        target_recipe="teacher_pos_face_no_velocity",
+        solver_contract_sha256=_pins().solver_sha256,
+    )
+    template = solver.reset_batch_view(batch_size=1)
+    before = solver.state_dict()
+    forbidden_calls = []
+    sha256_json = T._sha256_json
+
+    def forbidden(*args, **kwargs):
+        forbidden_calls.append((args, kwargs))
+        raise AssertionError("reset batch view rebuilt per-env identity")
+
+    monkeypatch.setattr(T, "_sha256_json", forbidden)
+    monkeypatch.setattr(solver, "_materialize", forbidden)
+    monkeypatch.setattr(solver, "materialize_many", forbidden)
+    monkeypatch.setattr(solver, "solve_many", forbidden)
+    view = solver.reset_batch_view(batch_size=4096)
+    assert view.batch_size == 4096
+    assert view.install_row is template.install_row
+    assert view.observation_row is template.observation_row
+    assert view.timing_row is template.timing_row
+    assert view.lineage is template.lineage
+    assert forbidden_calls == []
+    monkeypatch.setattr(T, "_sha256_json", sha256_json)
+    assert solver.state_dict() == before
+
+
+@pytest.mark.parametrize("recipe", T.TARGET_RECIPES)
+def test_solver_reset_batch_view_install_row_matches_legacy_receipt(recipe):
+    solver = T.FixedQuestionTapeSolver(
+        tape=_tape(),
+        target_recipe=recipe,
+        solver_contract_sha256=_pins().solver_sha256,
+    )
+    view = solver.reset_batch_view(batch_size=1)
+    batch = solver(_request(_birth(env_id=3, birth_index=3)))
+    receipt = batch.receipts[0]
+    receipt_install_row = T._flatten_layout(
+        {
+            name: getattr(receipt, name)
+            for name, _width in T.INSTALL_LAYOUT
+        },
+        T.INSTALL_LAYOUT,
+    )
+
+    assert view.install_row == receipt_install_row
+    assert view.lineage["target_recipe"] == recipe
+    assert tuple(view.lineage["target_validity_mask"]) == (
+        T.TARGET_VALIDITY_BY_RECIPE[recipe]
+    )
+
+
+@pytest.mark.parametrize("batch_size", (0, -1, True, 1.0))
+def test_solver_reset_batch_view_rejects_non_positive_plain_sizes(batch_size):
+    solver = T.FixedQuestionTapeSolver(
+        tape=_tape(),
+        target_recipe="outcome_dense_only",
+        solver_contract_sha256=_pins().solver_sha256,
+    )
+    with pytest.raises(ValueError, match="positive plain integer"):
+        solver.reset_batch_view(batch_size=batch_size)
 
 
 def test_file_bytes_are_pinned_and_canonical(tmp_path):
@@ -374,7 +517,7 @@ def test_builder_emits_one_canonical_five_recipe_container(tmp_path):
     assert set(built.targets) == set(T.TARGET_RECIPES)
 
 
-def test_4096_resets_are_index_copy_only_with_zero_lm_and_rng_draws():
+def test_legacy_4096_receipts_keep_zero_lm_and_rng_draws():
     tape = _tape()
     solver = T.FixedQuestionTapeSolver(
         tape=tape,
@@ -412,6 +555,56 @@ def test_4096_resets_are_index_copy_only_with_zero_lm_and_rng_draws():
         for alias in node.names
     }
     assert not any("continuous_questions" in name for name in imports)
+
+
+def test_reset_batch_view_does_not_perturb_legacy_identity_or_replay_state():
+    tape = _tape()
+    fast = T.FixedQuestionTapeSolver(
+        tape=tape,
+        target_recipe="analytic_no_velocity",
+        solver_contract_sha256=_pins().solver_sha256,
+    )
+    control = T.FixedQuestionTapeSolver(
+        tape=tape,
+        target_recipe="analytic_no_velocity",
+        solver_contract_sha256=_pins().solver_sha256,
+    )
+    requests = tuple(
+        _request(_birth(env_id=index, birth_index=index), refill_index=index + 1)
+        for index in range(8)
+    )
+
+    initial_state = fast.state_dict()
+    view = fast.reset_batch_view(batch_size=len(requests))
+    assert fast.state_dict() == initial_state
+    fast_batches, fast_issues = fast.materialize_many(requests)
+    control_batches, control_issues = control.materialize_many(requests)
+
+    assert fast_batches == control_batches
+    assert fast_issues == control_issues
+    assert fast.state_dict() == control.state_dict()
+    assert R._sha256_json(fast.state_dict()) == R._sha256_json(
+        control.state_dict()
+    )
+    assert fast.online_lm_calls == control.online_lm_calls == 0
+    assert fast.physical_rng_draws == control.physical_rng_draws == 0
+    assert fast.sample_highwater_for(_binding().action_uid) == (
+        control.sample_highwater_for(_binding().action_uid)
+    )
+    assert {
+        issue.lineage["logical_sample_index"] for issue in fast_issues
+    } == set(range(8))
+    assert {
+        issue.task_receipt.swing_generation for issue in fast_issues
+    } == {0}
+    assert {
+        issue.observation_row for issue in fast_issues
+    } == {view.observation_row}
+    for request in requests:
+        birth_sha = request.birth.canonical_sha256
+        assert fast.task_transcript_for_birth(birth_sha) == (
+            control.task_transcript_for_birth(birth_sha)
+        )
 
 
 def test_fixed_base_mismatch_fails_before_issue_and_state_is_atomic():
