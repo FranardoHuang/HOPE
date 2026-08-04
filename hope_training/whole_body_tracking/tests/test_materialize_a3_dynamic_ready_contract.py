@@ -12,7 +12,10 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
+import stat
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -42,8 +45,39 @@ def _write_measured_identity_clip(
     np.savez(
         path,
         joint_pos=np.zeros((frames, 31), dtype=np.float32),
+        measured_racket_site_pos_w=np.zeros((frames, 3), dtype=np.float32),
+        measured_racket_normal_w=np.tile(
+            np.asarray([0.0, 1.0, 0.0], np.float32), (frames, 1)
+        ),
+        measured_racket_long_axis_w=np.tile(
+            np.asarray([1.0, 0.0, 0.0], np.float32), (frames, 1)
+        ),
         measured_racket_uid=np.asarray(uid),
         measured_racket_schema_version=np.asarray([4], dtype=np.int64),
+        measured_racket_position_semantics=np.asarray(
+            materializer.EXPECTED_MEASURED_RACKET_POSITION_SEMANTICS
+        ),
+        measured_racket_normal_semantics=np.asarray(
+            materializer.EXPECTED_MEASURED_RACKET_NORMAL_SEMANTICS
+        ),
+        measured_racket_long_axis_semantics=np.asarray(
+            materializer.EXPECTED_MEASURED_RACKET_LONG_AXIS_SEMANTICS
+        ),
+        measured_racket_robot_mount_normal_sign=np.asarray(
+            [1], dtype=np.int8
+        ),
+        measured_racket_robot_butt_to_blade_axis_local=np.asarray(
+            materializer.EXPECTED_MEASURED_RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+            np.float64,
+        ),
+        measured_racket_robot_rigid_visual_mesh_sha256=np.asarray(
+            materializer.EXPECTED_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256
+        ),
+        measured_racket_source_sha256=np.asarray("c" * 64),
+        measured_racket_retarget_receipt_sha256=np.asarray("d" * 64),
+        measured_racket_input_motion_sha256=np.asarray("f" * 64),
+        measured_racket_manifest_sha256=np.asarray("1" * 64),
+        measured_racket_catalog_sha256=np.asarray("2" * 64),
         measured_racket_retarget_admitted=np.asarray([1], dtype=np.int64),
         measured_racket_joint_order_contract_id=np.asarray(
             materializer.EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID
@@ -68,9 +102,19 @@ def _measured_evidence_documents(
             "deployment": False,
             "mechanical_admission": False,
         },
+        "authorities": {
+            "source_manifest": {"sha256": "1" * 64},
+            "signed_catalog": {"sha256": "2" * 64},
+        },
+        "source_manifest": {"sha256": "1" * 64},
         "denominators": {"materialized_npz": 1},
         "actions": [
-            {"uid": uid, "sha256": motion_sha, "frames": frames}
+            {
+                "uid": uid,
+                "sha256": motion_sha,
+                "frames": frames,
+                "robot_mount_normal_sign": 1,
+            }
         ],
     }
     mechanical = {
@@ -235,12 +279,65 @@ def test_direct_frame0_loader_preserves_stored_float32_quaternion_exactly(
     assert np.array_equal(loaded_quat, root_quat.astype(np.float64))
     assert not np.array_equal(
         loaded_quat,
-        root_quat.astype(np.float64) / np.linalg.norm(root_quat.astype(np.float64)),
+        root_quat.astype(np.float64)
+        / np.linalg.norm(root_quat.astype(np.float64)),
     )
 
 
+@pytest.mark.parametrize("mount_sign", (-1, 1))
+def test_independent_measured_racket_reference_preserves_signed_face_and_long_axis(
+    mount_sign: int,
+) -> None:
+    motion_sha = "e" * 64
+    axis_local = np.asarray(
+        materializer.EXPECTED_MEASURED_RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+        np.float64,
+    )
+    signed_face = np.asarray([0.0, 1.0, 0.0], np.float64)
+    long_axis = np.asarray([1.0, 0.0, 0.0], np.float64)
+    value = {
+        "authority": "independent_schema_v4_measured_racket_channel",
+        "motion_sha256": motion_sha,
+        "frame_index": 0,
+        "site_pos_w_m": [0.8, -0.2, 1.1],
+        "signed_face_normal_w": signed_face.tolist(),
+        "long_axis_w": long_axis.tolist(),
+        "position_semantics": (
+            materializer.EXPECTED_MEASURED_RACKET_POSITION_SEMANTICS
+        ),
+        "normal_semantics": (
+            materializer.EXPECTED_MEASURED_RACKET_NORMAL_SEMANTICS
+        ),
+        "long_axis_semantics": (
+            materializer.EXPECTED_MEASURED_RACKET_LONG_AXIS_SEMANTICS
+        ),
+        "robot_mount_normal_sign": mount_sign,
+        "robot_butt_to_blade_axis_local": axis_local.tolist(),
+        "robot_rigid_visual_mesh_sha256": (
+            materializer.EXPECTED_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256
+        ),
+    }
+
+    position, rotation, evidence = (
+        materializer._independent_measured_racket_frame0_reference(
+            value, expected_motion_sha256=motion_sha
+        )
+    )
+
+    np.testing.assert_array_equal(position, np.asarray([0.8, -0.2, 1.1]))
+    np.testing.assert_allclose(rotation @ axis_local, long_axis, atol=1.0e-12)
+    np.testing.assert_allclose(
+        rotation @ np.asarray([0.0, 1.0, 0.0]),
+        mount_sign * signed_face,
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(rotation.T @ rotation, np.eye(3), atol=1.0e-12)
+    assert np.linalg.det(rotation) == pytest.approx(1.0, abs=1.0e-12)
+    assert evidence["official_site_rotation_w"] == pytest.approx(rotation)
+
+
 def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     count = 31
     names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
@@ -403,17 +500,24 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
                 },
             )
 
+    mjcf_source = tmp_path / "a3.xml"
+    original_mjcf = b'<mujoco model="hashed"/>\n'
+    mjcf_source.write_bytes(original_mjcf)
+    mjcf_digest = hashlib.sha256(original_mjcf).hexdigest()
+    pinned_mjcf, _ = materializer._pinned_file(
+        mjcf_source, mjcf_digest, name="A3 MJCF"
+    )
     paths = {
         "motion": Path("/tmp/motion.npz"),
         "receipt": Path("/tmp/receipt.json"),
         "runtime": Path("/tmp/training_contract.json"),
-        "mjcf": Path("/tmp/a3.xml"),
+        "mjcf": pinned_mjcf,
     }
     shas = {
         "motion": "1" * 64,
         "receipt": "2" * 64,
         "runtime": "3" * 64,
-        "mjcf": "4" * 64,
+        "mjcf": mjcf_digest,
     }
 
     def fake_pinned(
@@ -426,6 +530,8 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
             "A3 MJCF": "mjcf",
         }[name]
         assert path_value == key
+        if key == "mjcf":
+            mjcf_source.write_text('<mujoco model="replacement"/>\n')
         return paths[key], shas[key]
 
     def fake_read_json(_path: Path, *, name: str) -> dict:
@@ -468,10 +574,12 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
         "load",
         lambda _identity: backend,
     )
+    def ground_config(**kwargs: object) -> object:
+        captured["ground_model_source_path"] = kwargs["model_source_path"]
+        return object()
+
     monkeypatch.setattr(
-        materializer.torque_topp,
-        "GroundContactConfig",
-        lambda **_kwargs: object(),
+        materializer.torque_topp, "GroundContactConfig", ground_config
     )
     monkeypatch.setattr(
         materializer.torque_topp, "MujocoGroundContactLPSolver", FakeSolver
@@ -509,6 +617,10 @@ def test_materialize_scatter_gathers_runtime_and_mujoco_force_orders(
 
     assert captured["lower"] == pytest.approx(expected_lower_model)
     assert captured["upper"] == pytest.approx(expected_upper_model)
+    ground_model_path = Path(str(captured["ground_model_source_path"]))
+    assert ground_model_path != mjcf_source
+    assert ground_model_path.parent == mjcf_source.parent
+    assert ground_model_path.read_bytes() == original_mjcf
     hold = result["hold_candidate"]
     assert hold["mujoco_row_for_runtime_joint"] == (
         model_row_for_runtime.tolist()
@@ -541,6 +653,175 @@ def test_exclusive_writer_never_clobbers_existing_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         materializer._write_exclusive(output, b"second\n")
     assert output.read_bytes() == b"first\n"
+
+
+def test_pinned_json_reads_hashed_bytes_after_path_replacement(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "contract.json"
+    original = b'{"generation": "hashed"}\n'
+    source.write_bytes(original)
+    pinned, digest = materializer._pinned_file(
+        source, hashlib.sha256(original).hexdigest(), name="runtime contract"
+    )
+
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text('{"generation": "replacement"}\n')
+    replacement.replace(source)
+
+    assert digest == hashlib.sha256(original).hexdigest()
+    assert str(pinned) == str(source)
+    assert materializer._read_json(pinned, name="runtime contract") == {
+        "generation": "hashed"
+    }
+
+
+def test_pinned_npz_reads_hashed_bytes_after_in_place_rewrite(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "motion.npz"
+    root_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float32)
+    np.savez(
+        source,
+        joint_pos=np.zeros((2, 31), np.float32),
+        body_pos_w=np.zeros((2, 1, 3), np.float32),
+        body_quat_w=np.broadcast_to(root_quat, (2, 1, 4)).copy(),
+    )
+    pinned, _digest = materializer._pinned_file(
+        source, _sha256(source), name="motion"
+    )
+
+    np.savez(
+        source,
+        joint_pos=np.full((2, 31), 7.0, np.float32),
+        body_pos_w=np.full((2, 1, 3), 8.0, np.float32),
+        body_quat_w=np.broadcast_to(root_quat, (2, 1, 4)).copy(),
+    )
+
+    joint_pos, root_pos, loaded_quat = (
+        materializer._load_motion_frame0_exact(pinned)
+    )
+    assert np.array_equal(joint_pos, np.zeros(31, np.float64))
+    assert np.array_equal(root_pos, np.zeros(3, np.float64))
+    assert np.array_equal(loaded_quat, root_quat.astype(np.float64))
+
+
+def test_exact_model_identity_uses_same_directory_hashed_mjcf_snapshot(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "a3.xml"
+    original = b'<mujoco model="hashed"/>\n'
+    source.write_bytes(original)
+    digest = hashlib.sha256(original).hexdigest()
+    pinned, _actual = materializer._pinned_file(source, digest, name="A3 MJCF")
+    receipt = {
+        "inputs": {
+            "exact_model": {
+                "mjcf_sha256": digest,
+                "joint_order": list(materializer.grounded.RUNTIME_JOINT_NAMES),
+                "compiled_model_sha256": "a" * 64,
+                "path_model_binding_sha256": "b" * 64,
+                "ground_model_binding_sha256": "c" * 64,
+                "xml_model_name": "A3-test",
+            }
+        }
+    }
+
+    identity = materializer._exact_model_identity(
+        receipt, mjcf_path=pinned, mjcf_sha256=digest
+    )
+    pinned_model = Path(identity.mjcf_path)
+    source.write_text('<mujoco model="replacement"/>\n')
+
+    assert pinned_model.parent == source.parent
+    assert pinned_model != source
+    assert pinned_model.read_bytes() == original
+
+
+def test_exclusive_writer_removes_temp_and_never_publishes_partial_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "candidate.json"
+    before = set(tmp_path.iterdir())
+    real_write = materializer.os.write
+    calls = 0
+
+    def fail_after_prefix(descriptor: int, payload: object) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return real_write(descriptor, bytes(payload)[:3])
+        raise OSError("injected write failure")
+
+    monkeypatch.setattr(materializer.os, "write", fail_after_prefix)
+    with pytest.raises(OSError, match="injected write failure"):
+        materializer._write_exclusive(output, b"complete payload\n")
+
+    assert not output.exists()
+    assert set(tmp_path.iterdir()) == before
+
+
+def test_exclusive_writer_cannot_overwrite_concurrent_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "candidate.json"
+    real_link = materializer.os.link
+    real_write = materializer.os.write
+
+    def race_link(
+        source_name: str,
+        destination_name: str,
+        *,
+        src_dir_fd: int,
+        dst_dir_fd: int,
+        follow_symlinks: bool,
+    ) -> None:
+        descriptor = materializer.os.open(
+            destination_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o644,
+            dir_fd=dst_dir_fd,
+        )
+        try:
+            real_write(descriptor, b"concurrent winner\n")
+        finally:
+            materializer.os.close(descriptor)
+        real_link(
+            source_name,
+            destination_name,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+
+    monkeypatch.setattr(materializer.os, "link", race_link)
+    with pytest.raises(FileExistsError):
+        materializer._write_exclusive(output, b"materializer bytes\n")
+
+    assert output.read_bytes() == b"concurrent winner\n"
+    assert set(tmp_path.iterdir()) == {output}
+
+
+def test_exclusive_writer_fsyncs_file_then_parent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "candidate.json"
+    real_fsync = materializer.os.fsync
+    fsync_targets: list[str] = []
+
+    def record_fsync(descriptor: int) -> None:
+        fsync_targets.append(
+            "directory"
+            if stat.S_ISDIR(materializer.os.fstat(descriptor).st_mode)
+            else "file"
+        )
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(materializer.os, "fsync", record_fsync)
+    materializer._write_exclusive(output, b"complete\n")
+
+    assert fsync_targets == ["file", "directory"]
+    assert output.read_bytes() == b"complete\n"
 
 
 def test_physx_control_position_limits_are_exact_and_fail_loud() -> None:
@@ -653,6 +934,38 @@ def test_measured_retarget_evidence_is_cross_bound_and_unknown_is_explicit(
     with pytest.raises(
         materializer.DynamicReadyMaterializationError,
         match="diagnostic-only schema-v4 import",
+    ):
+        materializer._validate_measured_retarget_l0_evidence(
+            motion_path=clip,
+            motion_sha256=motion_sha,
+            measured_uid=uid,
+            bank_receipt=changed,
+            bank_receipt_sha256=bank_sha,
+            mechanical_audit=mechanical,
+            allow_mechanical_unknown=True,
+        )
+
+    changed = json.loads(json.dumps(bank))
+    changed["actions"][0]["robot_mount_normal_sign"] = -1
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="does not bind the exact selected motion",
+    ):
+        materializer._validate_measured_retarget_l0_evidence(
+            motion_path=clip,
+            motion_sha256=motion_sha,
+            measured_uid=uid,
+            bank_receipt=changed,
+            bank_receipt_sha256=bank_sha,
+            mechanical_audit=mechanical,
+            allow_mechanical_unknown=True,
+        )
+
+    changed = json.loads(json.dumps(bank))
+    changed["authorities"]["signed_catalog"]["sha256"] = "3" * 64
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="manifest/catalog authorities",
     ):
         materializer._validate_measured_retarget_l0_evidence(
             motion_path=clip,
@@ -958,7 +1271,15 @@ def test_physical_birth_seed_composes_only_root_and_leg12() -> None:
     )
     teacher_q = np.linspace(1.0, 2.0, 31, dtype=np.float64)
     teacher_root = np.asarray([-0.1, 0.2, 0.9], np.float64)
-    teacher_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float64)
+    # Exact Take_061_unit04_BH frame-0 float32 values.  Their promoted norm is
+    # 1.0000000259060773, so a hidden normalization changes emitted bytes.
+    teacher_quat = np.asarray(
+        [0.966759086, 0.040494341, 0.252240956, -0.010565540],
+        np.float32,
+    ).astype(np.float64)
+    assert np.linalg.norm(teacher_quat) == pytest.approx(
+        1.0000000259060773, abs=1.0e-15
+    )
     seed = materializer._align_seed_world_yaw_to_teacher(
         seed=seed,
         teacher_root_quat=teacher_quat,
@@ -1255,6 +1576,458 @@ def test_projected_frame0_birth_rejects_racket_fk_drift(
         )
 
 
+def test_whole_body_threshold_first_exact_frame0_seals_robust_single_witness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names = tuple(materializer.grounded.RUNTIME_JOINT_NAMES)
+    teacher_q = np.zeros(31, np.float64)
+    teacher_root = np.asarray([0.0, 0.0, 0.9], np.float64)
+    # Exact Take_061_unit04_BH frame-0 float32 values.  Their promoted norm is
+    # 1.0000000259060773, so a hidden normalization changes emitted bytes.
+    teacher_quat = np.asarray(
+        [0.966759086, 0.040494341, 0.252240956, -0.010565540],
+        np.float32,
+    ).astype(np.float64)
+    assert np.linalg.norm(teacher_quat) == pytest.approx(
+        1.0000000259060773, abs=1.0e-15
+    )
+    final_q = teacher_q.copy()
+    final_state = materializer.grounded.ReadyState(
+        final_q,
+        teacher_root,
+        teacher_quat / np.linalg.norm(teacher_quat),
+    )
+    slacks = {
+        name: (
+            materializer.whole_body_ready.DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS[
+                name
+            ]
+            + 0.1
+        )
+        for name in materializer.whole_body_ready.REQUIRED_SAFETY_SLACK_NAMES
+    }
+    fake_result = materializer.whole_body_ready.WholeBodySafeReadyResult(
+        state=final_state,
+        safety_slacks=slacks,
+        normalized_safety_slacks=slacks,
+        worst_normalized_safety_slack=0.01,
+        stage1_locked_worst_normalized_slack=1.0e-6,
+        changed_joint_mask=(False,) * 31,
+        joint_delta_rad=(0.0,) * 31,
+        root_position_delta_m=(0.0, 0.0, 0.0),
+        root_rotation_delta_rad=(0.0, 0.0, 0.0),
+        racket_position_delta_m=(0.01, -0.02, 0.03),
+        racket_rotation_delta_rad=(0.0, 0.04, 0.0),
+        evaluator_evidence={"exact_contact_lp_reused": True},
+        optimizer_report={
+            "safety_weighted_against_tracking": False,
+            "global_optimum_claimed": False,
+            "exact_measured_frame0_selected": True,
+        },
+    )
+    backend = SimpleNamespace(
+        position_lower=np.full(31, -2.0),
+        position_upper=np.full(31, 2.0),
+        vendor_key_state=lambda _index: materializer.grounded.ReadyState(
+            np.zeros(31), teacher_root, teacher_quat
+        ),
+    )
+    captured: dict[str, object] = {}
+    selected_result = {"value": fake_result}
+
+    def solve(measured, **kwargs):
+        captured["measured"] = measured
+        captured.update(kwargs)
+        return selected_result["value"]
+
+    motion_sha = "e" * 64
+    measured_racket_frame0 = {
+        "authority": "independent_schema_v4_measured_racket_channel",
+        "motion_sha256": motion_sha,
+        "frame_index": 0,
+        "site_pos_w_m": [0.8, -0.2, 1.1],
+        "signed_face_normal_w": [0.0, 1.0, 0.0],
+        "long_axis_w": list(
+            materializer.EXPECTED_MEASURED_RACKET_BUTT_TO_BLADE_AXIS_LOCAL
+        ),
+        "position_semantics": (
+            materializer.EXPECTED_MEASURED_RACKET_POSITION_SEMANTICS
+        ),
+        "normal_semantics": (
+            materializer.EXPECTED_MEASURED_RACKET_NORMAL_SEMANTICS
+        ),
+        "long_axis_semantics": (
+            materializer.EXPECTED_MEASURED_RACKET_LONG_AXIS_SEMANTICS
+        ),
+        "robot_mount_normal_sign": 1,
+        "robot_butt_to_blade_axis_local": list(
+            materializer.EXPECTED_MEASURED_RACKET_BUTT_TO_BLADE_AXIS_LOCAL
+        ),
+        "robot_rigid_visual_mesh_sha256": (
+            materializer.EXPECTED_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256
+        ),
+        "source_sha256": "c" * 64,
+        "retarget_receipt_sha256": "d" * 64,
+    }
+
+    final_evaluation = materializer.whole_body_ready.SafetyEvaluation(
+        slacks=slacks,
+        racket_position_w=np.asarray([0.81, -0.22, 1.13], np.float64),
+        racket_rotation_w=np.eye(3),
+        evidence={
+            "lp_feasible": True,
+            "exact_state_lp_cache_hit": False,
+            "evaluated_state_sha256": materializer.grounded.state_digest(
+                final_state
+            ),
+            "required_minimum_normal_force_per_contact_n": (
+                materializer.WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N
+            ),
+            "required_minimum_normal_force_per_foot_n": (
+                materializer.WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_FOOT_N
+            ),
+            "sole_minimum_distance_m": [0.0, 0.0],
+            "exact_joint_position_lower_rad": [-2.0] * 31,
+            "exact_joint_position_upper_rad": [2.0] * 31,
+        },
+    )
+
+    monkeypatch.setattr(
+        materializer,
+        "_build_whole_body_safety_evaluator",
+        lambda **_kwargs: (
+            lambda _state: final_evaluation,
+            {"table_near_x_m": 0.5},
+        ),
+    )
+    monkeypatch.setattr(
+        materializer.grounded.MujocoGroundedReadyBackend,
+        "load",
+        lambda _identity: backend,
+    )
+    monkeypatch.setattr(
+        materializer.whole_body_ready,
+        "solve_measured_conditioned_whole_body_safe_ready",
+        solve,
+    )
+    ready_q, ready_root, ready_quat, provenance, static = (
+        materializer._compose_measured_whole_body_safe_frame0_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+            backend=backend,
+            identity=SimpleNamespace(),
+            plant={},
+            hard_inner_lower=np.full(31, -1.0),
+            hard_inner_upper=np.full(31, 1.0),
+            runtime_contract={},
+            measured_racket_frame0=measured_racket_frame0,
+            motion_sha256=motion_sha,
+        )
+    )
+    np.testing.assert_array_equal(ready_q, final_q)
+    np.testing.assert_array_equal(ready_root, final_state.root_pos_w)
+    np.testing.assert_array_equal(ready_quat, teacher_quat)
+    assert not np.array_equal(ready_quat, final_state.root_quat_wxyz)
+    assert captured["config"].movable_joint_names == names
+    np.testing.assert_array_equal(
+        captured["racket_reference_position_w"],
+        np.asarray([0.8, -0.2, 1.1]),
+    )
+    np.testing.assert_allclose(
+        captured["racket_reference_rotation_w"], np.eye(3), atol=1.0e-12
+    )
+    assert provenance["released_root_degrees_of_freedom"] == [
+        "z",
+        "roll",
+        "pitch",
+    ]
+    assert provenance["released_joint_names"] == list(names)
+    assert provenance["changed_joint_mask"] == [False] * 31
+    assert provenance["exact_measured_frame0_selected"] is True
+    assert provenance["racket_site_fidelity"]["position_error_m"] == pytest.approx(
+        np.linalg.norm([0.01, -0.02, 0.03])
+    )
+    assert provenance["racket_site_fidelity"]["reference_authority"][
+        "authority"
+    ] == "independent_schema_v4_measured_racket_channel"
+    assert provenance["safety_weighted_against_tracking"] is False
+    assert static["exact_contact_lp_reused"] is False
+    assert static["selected_hold_witness_authority"] == (
+        "new_backend_new_solver_final_state_cache_miss"
+    )
+    assert static["all_safety_slacks_meet_original_and_locked_gate"] is True
+    assert static["fresh_direct_robust_gate_passed"] is True
+    assert static["safety_slacks"] == slacks
+    assert static["evaluator_evidence"]["sole_minimum_distance_m"] == [
+        0.0,
+        0.0,
+    ]
+    assert static["evaluator_evidence"][
+        "exact_joint_position_lower_rad"
+    ] == [-2.0] * 31
+    assert static["evaluator_evidence"][
+        "exact_joint_position_upper_rad"
+    ] == [2.0] * 31
+    assert provenance["frame0_handoff"]["certified_transition_s"] == 0.0
+    assert provenance["frame0_handoff"]["endpoints_bitwise_equal"] is True
+    handoff = provenance["frame0_handoff"]
+    assert handoff["physical_ready_state_sha256"] == (
+        materializer._stored_ready_state_sha256(
+            teacher_q, teacher_root, teacher_quat
+        )
+    )
+    assert handoff["teacher_frame0_state_sha256"] == (
+        handoff["physical_ready_state_sha256"]
+    )
+    assert handoff["mjcf_audit_state_sha256"] == (
+        materializer.grounded.state_digest(final_state)
+    )
+    assert handoff["stored_root_quaternion_norm"] == pytest.approx(
+        np.linalg.norm(teacher_quat), abs=0.0
+    )
+    np.testing.assert_array_equal(
+        handoff["mjcf_audit_root_quat_wxyz"],
+        final_state.root_quat_wxyz,
+    )
+    assert handoff["physical_ready_joint_velocity_exact_zero"] is True
+    assert handoff["teacher_static_endpoint_joint_velocity_exact_zero"] is True
+    assert handoff["measured_motion_velocity_channels_consumed"] is False
+    assert handoff["not_a_motion_velocity_continuity_claim"] is True
+    assert "zero_velocity_at_both_endpoints" not in handoff
+
+    selected_result["value"] = replace(
+        fake_result,
+        optimizer_report={
+            "safety_weighted_against_tracking": False,
+            "global_optimum_claimed": False,
+            "exact_measured_frame0_selected": False,
+        },
+    )
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="authoritative swept torque-speed transition certificate",
+    ):
+        materializer._compose_measured_whole_body_safe_frame0_physical_birth(
+            teacher_q=teacher_q,
+            teacher_root_pos=teacher_root,
+            teacher_root_quat=teacher_quat,
+            backend=backend,
+            identity=SimpleNamespace(),
+            plant={},
+            hard_inner_lower=np.full(31, -1.0),
+            hard_inner_upper=np.full(31, 1.0),
+            runtime_contract={},
+            measured_racket_frame0=measured_racket_frame0,
+            motion_sha256=motion_sha,
+        )
+
+
+def test_whole_body_selected_hold_rejects_qdes_from_a_second_lp() -> None:
+    ready_q = np.zeros(31, np.float64)
+    ready_root = np.asarray([0.0, 0.0, 0.9], np.float64)
+    ready_quat = np.asarray([1.0, 0.0, 0.0, 0.0], np.float64)
+    state = materializer.grounded.ReadyState(ready_q, ready_root, ready_quat)
+    identity = SimpleNamespace(ground_model_binding_sha256="a" * 64)
+    rows = np.arange(31, dtype=np.int64)
+    actuated = rows + 6
+    kp = np.full(31, 100.0, np.float64)
+    tau_model = np.linspace(-0.2, 0.2, 31, dtype=np.float64)
+    tau_runtime = tau_model[rows]
+    qdes = ready_q + tau_runtime / kp
+    expected_vectors = {
+        "executed_qdes_lower_rad": np.full(31, -1.0),
+        "executed_qdes_upper_rad": np.full(31, 1.0),
+        "model_tau_lower_mujoco_row_order_nm": np.full(31, -2.0),
+        "model_tau_upper_mujoco_row_order_nm": np.full(31, 2.0),
+        "runtime_tau_lower_runtime_order_nm": np.full(31, -1.5),
+        "runtime_tau_upper_runtime_order_nm": np.full(31, 1.5),
+        "runtime_tau_lower_mujoco_row_order_nm": np.full(31, -1.5),
+        "runtime_tau_upper_mujoco_row_order_nm": np.full(31, 1.5),
+        "effective_tau_lower_mujoco_row_order_nm": np.full(31, -1.5),
+        "effective_tau_upper_mujoco_row_order_nm": np.full(31, 1.5),
+    }
+    report = {
+        "model_binding": identity.ground_model_binding_sha256,
+        "exact_state_lp_cache_hit": False,
+        "normal_force_per_contact_n": [0.2] * 8,
+        "normal_force_per_foot_n": [10.0, 11.0],
+        "cop_interior_margin_per_foot_m": [0.01, 0.02],
+    }
+    witness = {
+        "lp_feasible": True,
+        "exact_state_lp_cache_hit": False,
+        "required_minimum_normal_force_per_contact_n": (
+            materializer.WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N
+        ),
+        "required_minimum_normal_force_per_foot_n": (
+            materializer.WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_FOOT_N
+        ),
+        "evaluated_state_sha256": materializer.grounded.state_digest(state),
+        "evaluated_joint_pos_rad": ready_q.tolist(),
+        "evaluated_root_pos_w_m": ready_root.tolist(),
+        "evaluated_root_quat_wxyz": ready_quat.tolist(),
+        "mujoco_row_for_runtime_joint": rows.tolist(),
+        "mujoco_actuated_dof_indices": actuated.tolist(),
+        "actuator_generalized_force_mujoco_row_order_nm": tau_model.tolist(),
+        "actuator_generalized_force_runtime_order_nm": tau_runtime.tolist(),
+        "hold_qdes_joint_pos_rad": qdes.tolist(),
+        "normal_force_per_contact_n": [0.2] * 8,
+        "normal_force_per_foot_n": [10.0, 11.0],
+        "cop_interior_margin_per_foot_m": [0.01, 0.02],
+        "equality_residual": 1.0e-9,
+        "root_residual": 2.0e-9,
+        "solver_report": report,
+        **{name: value.tolist() for name, value in expected_vectors.items()},
+    }
+    static = {
+        "selected_hold_witness_authority": (
+            "new_backend_new_solver_final_state_cache_miss"
+        ),
+        "evaluator_evidence": witness,
+    }
+
+    selected = materializer._consume_whole_body_selected_hold_witness(
+        static_birth_evidence=static,
+        ready_q=ready_q,
+        ready_root_pos=ready_root,
+        ready_root_quat=ready_quat,
+        identity=identity,
+        kp=kp,
+        model_row_for_runtime=rows,
+        actuated=actuated,
+        expected_vectors=expected_vectors,
+    )
+    np.testing.assert_array_equal(
+        selected.actuator_generalized_force, tau_model
+    )
+
+    second_lp_witness = dict(witness)
+    second_lp_witness["hold_qdes_joint_pos_rad"] = (
+        qdes + 1.0e-3
+    ).tolist()
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="qdes/torque is internally inconsistent",
+    ):
+        materializer._consume_whole_body_selected_hold_witness(
+            static_birth_evidence={
+                **static,
+                "evaluator_evidence": second_lp_witness,
+            },
+            ready_q=ready_q,
+            ready_root_pos=ready_root,
+            ready_root_quat=ready_quat,
+            identity=identity,
+            kp=kp,
+            model_row_for_runtime=rows,
+            actuated=actuated,
+            expected_vectors=expected_vectors,
+        )
+
+
+def test_whole_body_table_gate_is_runtime_bound_and_conservative() -> None:
+    contract = {
+        "action_ball_training": {
+            "runtime": {
+                "counter_rally": {
+                    "objective_profile": {
+                        "table_near_x_env_m": 0.5,
+                        "table_half_width_m": 0.7625,
+                        "table_surface_z_env_m": 0.76,
+                    }
+                }
+            }
+        }
+    }
+    assert materializer._whole_body_table_geometry(contract) == (
+        0.5,
+        0.7625,
+        0.76,
+    )
+    with pytest.raises(
+        materializer.DynamicReadyMaterializationError,
+        match="runtime-bound table geometry",
+    ):
+        materializer._whole_body_table_geometry({})
+
+    model = SimpleNamespace(
+        ngeom=3,
+        geom_bodyid=np.asarray([0, 1, 1], np.int64),
+        geom_contype=np.asarray([1, 1, 1], np.int64),
+        geom_rbound=np.asarray([0.0, 0.1, 0.05], np.float64),
+    )
+    data = SimpleNamespace(
+        geom_xpos=np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [0.2, 0.0, 0.7],
+                [0.3, 0.0, 1.0],
+            ],
+            np.float64,
+        )
+    )
+    backend = SimpleNamespace(
+        model=model,
+        _data=data,
+        _floor_geom=0,
+        _install=lambda _state: None,
+    )
+    clearance = materializer._conservative_robot_table_clearance_m(
+        backend,
+        object(),
+        table_near_x_m=0.5,
+        table_half_width_m=0.7625,
+        table_surface_z_m=0.76,
+    )
+    # First geom proves 0.20 m near-edge separation; second proves 0.19 m
+    # top separation.  The conservative all-geom result is their minimum.
+    assert clearance == pytest.approx(0.19, abs=1.0e-15)
+
+    data.geom_xpos[1] = [0.55, 0.0, 0.7]
+    assert materializer._conservative_robot_table_clearance_m(
+        backend,
+        object(),
+        table_near_x_m=0.5,
+        table_half_width_m=0.7625,
+        table_surface_z_m=0.76,
+    ) < 0.0
+
+
+def test_whole_body_collision_bisection_midpoint_is_deducted_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tolerance = materializer.WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M
+    raw_midpoint = (
+        materializer.WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M
+        - 0.49 * tolerance
+    )
+    model = SimpleNamespace(
+        ngeom=3,
+        geom_rbound=np.asarray([0.0, 0.2, 0.2], np.float64),
+    )
+    data = SimpleNamespace(
+        geom_xpos=np.asarray(
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.5], [0.1, 0.0, 0.5]],
+            np.float64,
+        )
+    )
+    backend = SimpleNamespace(model=model, _data=data, _floor_geom=0)
+    monkeypatch.setattr(
+        materializer.self_collision_audit,
+        "geom_clearance",
+        lambda *_args, **_kwargs: (raw_midpoint, False),
+    )
+
+    conservative, raw = materializer._whole_body_collision_clearance_m(
+        backend,
+        self_pairs=((1, 2),),
+        unsupported_floor_geoms=(),
+    )
+    assert raw == raw_midpoint
+    assert conservative == pytest.approx(raw_midpoint - tolerance)
+    assert conservative < materializer.WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M
+
 def test_projected_frame0_birth_rejects_incomplete_static_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1426,6 +2199,18 @@ def test_mechanical_limit_inner_guard_and_parser_source_defaults() -> None:
     )
     assert projected.physical_birth_composition_mode == (
         materializer.MEASURED_BIRTH_PROJECTED_FRAME0_MODE
+    )
+    whole_body = parser.parse_args(
+        [
+            *common,
+            "--ready-source-kind",
+            materializer.MEASURED_RETARGET_SOURCE_KIND,
+            "--physical-birth-composition-mode",
+            materializer.MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE,
+        ]
+    )
+    assert whole_body.physical_birth_composition_mode == (
+        materializer.MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE
     )
 
 

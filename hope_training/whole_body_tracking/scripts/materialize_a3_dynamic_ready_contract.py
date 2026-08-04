@@ -17,7 +17,12 @@ Two fail-closed ready-source branches are supported:
   content-pinned numerical ready without inheriting its historical model/hold
   claims.  The measured-frame0 projection mode instead preserves the exact
   root, every non-leg joint, and racket-site FK while solving only leg12 and an
-  algorithmic common support-edge shift.  Every composition must pass current-
+  algorithmic common support-edge shift.  That leg-only path remains a failure
+  baseline.  The whole-body mode releases root z/roll/pitch plus all 31 joints,
+  first accepts exact measured frame 0 unchanged if all physical gates pass;
+  otherwise it maximizes the worst physical safety slack, then locks that
+  safety floor before minimizing measured-frame0 root/joint/racket error.
+  Every composition must pass current-
   MJCF static gates, a fresh ground LP, and the downstream exact Isaac
   nominal-hold gate.
 
@@ -32,6 +37,10 @@ import hashlib
 import json
 import math
 import os
+import secrets
+import stat
+import tempfile
+import weakref
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -40,6 +49,8 @@ import numpy as np
 import canonical_grounded_ready as grounded
 import canonical_mujoco_path_adapter as path_adapter
 import canonical_torque_path_topp as torque_topp
+import audit_self_collision as self_collision_audit
+import whole_body_safe_ready as whole_body_ready
 
 
 SCHEMA_VERSION = 2
@@ -57,6 +68,9 @@ MEASURED_BIRTH_SHARED_LOWER_MODE = "shared_lower_teacher_nonleg"
 MEASURED_BIRTH_FULL_SEED_MODE = "full_seed"
 MEASURED_BIRTH_DIRECT_FRAME0_MODE = "direct_teacher_frame0"
 MEASURED_BIRTH_PROJECTED_FRAME0_MODE = "projected_teacher_frame0_grounded"
+MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE = (
+    "whole_body_safe_teacher_frame0_grounded"
+)
 MEASURED_BIRTH_SHARED_LOWER_SEMANTICS = (
     "shared_seed_root_leg12_plus_teacher_frame0_nonleg19"
 )
@@ -69,10 +83,31 @@ MEASURED_BIRTH_DIRECT_FRAME0_SEMANTICS = (
 MEASURED_BIRTH_PROJECTED_FRAME0_SEMANTICS = (
     "exact_measured_teacher_frame0_root_nonleg_plus_grounded_leg12_projection"
 )
+MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS = (
+    "measured_frame0_direct_if_safe_else_lexicographic_whole_body_safe_ready"
+)
 MEASURED_PROJECTED_FRAME0_RACKET_SITE = "right_racket"
 FULL_SEED_QDES_FRESH_STATIC_LP = "fresh_static_lp"
 FULL_SEED_QDES_SEED_TRANSPORT = "seed_transport"
+WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N = 0.1
+WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_FOOT_N = 1.0
+WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M = 2.0e-3
+WHOLE_BODY_COLLISION_CLEARANCE_CAP_M = 2.0e-2
+WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M = 1.0e-4
 EXPECTED_MEASURED_RACKET_SCHEMA = 4
+EXPECTED_MEASURED_RACKET_POSITION_SEMANTICS = "physical_blade_center"
+EXPECTED_MEASURED_RACKET_NORMAL_SEMANTICS = "signed_physical_hitting_face"
+EXPECTED_MEASURED_RACKET_LONG_AXIS_SEMANTICS = (
+    "measured_paddle_butt_to_blade"
+)
+EXPECTED_MEASURED_RACKET_BUTT_TO_BLADE_AXIS_LOCAL = (
+    1.0 / math.sqrt(2.0),
+    0.0,
+    1.0 / math.sqrt(2.0),
+)
+EXPECTED_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256 = (
+    "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+)
 EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID = (
     "a3-gmr-dof-pos-to-runtime-articulation-v1"
 )
@@ -116,6 +151,97 @@ class DynamicReadyMaterializationError(RuntimeError):
     """The requested dynamic-ready artifact cannot be produced exactly."""
 
 
+def _remove_pinned_snapshots(paths: list[Path]) -> None:
+    for path in reversed(paths):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+class _PinnedFile:
+    """Original display path plus a private snapshot of its hashed bytes."""
+
+    __slots__ = (
+        "source_path",
+        "snapshot_path",
+        "mjcf_snapshot_path",
+        "_cleanup_paths",
+        "_finalizer",
+        "__weakref__",
+    )
+
+    def __init__(self, source_path: Path, snapshot_path: Path) -> None:
+        self.source_path = source_path
+        self.snapshot_path = snapshot_path
+        self.mjcf_snapshot_path: Path | None = None
+        self._cleanup_paths = [snapshot_path]
+        self._finalizer = weakref.finalize(
+            self, _remove_pinned_snapshots, self._cleanup_paths
+        )
+
+    def __fspath__(self) -> str:
+        return str(self.source_path)
+
+    def __str__(self) -> str:
+        return str(self.source_path)
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    view = memoryview(payload)
+    written = 0
+    while written < len(view):
+        count = os.write(descriptor, view[written:])
+        if count <= 0:
+            raise OSError("write made no progress")
+        written += count
+
+
+def _pinned_snapshot_path(path: Path) -> Path:
+    if isinstance(path, _PinnedFile):
+        return path.snapshot_path
+    return Path(path)
+
+
+def _pinned_mjcf_path(path: Path) -> Path:
+    """Return a same-directory MJCF snapshot so relative assets still resolve."""
+
+    if not isinstance(path, _PinnedFile):
+        return Path(path)
+    if path.mjcf_snapshot_path is not None:
+        return path.mjcf_snapshot_path
+    descriptor = -1
+    snapshot_path: Path | None = None
+    try:
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix=f".{path.source_path.name}.pinned-",
+            suffix=path.source_path.suffix,
+            dir=str(path.source_path.parent),
+        )
+        snapshot_path = Path(raw_path)
+        with path.snapshot_path.open("rb") as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                _write_all(descriptor, block)
+        os.fsync(descriptor)
+        os.fchmod(descriptor, 0o400)
+        os.close(descriptor)
+        descriptor = -1
+    except OSError as exc:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if snapshot_path is not None:
+            try:
+                snapshot_path.unlink()
+            except OSError:
+                pass
+        raise DynamicReadyMaterializationError(
+            f"cannot create same-directory pinned MJCF snapshot: {exc}"
+        ) from exc
+    path.mjcf_snapshot_path = snapshot_path
+    path._cleanup_paths.append(snapshot_path)
+    return snapshot_path
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -148,17 +274,82 @@ def _pinned_file(
             f"{name} must be one regular file without symlink components"
         )
     expected = _require_sha256(expected_sha256, name=f"expected {name}")
-    actual = _sha256_file(path)
-    if actual != expected:
-        raise DynamicReadyMaterializationError(
-            f"{name} SHA-256 mismatch: {actual} != {expected}"
+    source_descriptor = -1
+    snapshot_descriptor = -1
+    snapshot_path: Path | None = None
+    try:
+        source_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        source_flags |= getattr(os, "O_CLOEXEC", 0)
+        source_descriptor = os.open(path, source_flags)
+        source_before = os.fstat(source_descriptor)
+        if not stat.S_ISREG(source_before.st_mode):
+            raise DynamicReadyMaterializationError(
+                f"{name} must remain one regular file while it is pinned"
+            )
+        snapshot_descriptor, raw_snapshot_path = tempfile.mkstemp(
+            prefix="a3-dynamic-ready-input-",
+            suffix=path.suffix,
         )
-    return path, actual
+        snapshot_path = Path(raw_snapshot_path)
+        digest = hashlib.sha256()
+        while True:
+            block = os.read(source_descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            _write_all(snapshot_descriptor, block)
+        source_after = os.fstat(source_descriptor)
+        stable_fields = ("st_dev", "st_ino", "st_mode", "st_size")
+        if any(
+            getattr(source_before, field) != getattr(source_after, field)
+            for field in stable_fields
+        ) or source_before.st_mtime_ns != source_after.st_mtime_ns:
+            raise DynamicReadyMaterializationError(
+                f"{name} changed while its bytes were being pinned"
+            )
+        actual = digest.hexdigest()
+        if actual != expected:
+            raise DynamicReadyMaterializationError(
+                f"{name} SHA-256 mismatch: {actual} != {expected}"
+            )
+        os.fsync(snapshot_descriptor)
+        os.fchmod(snapshot_descriptor, 0o400)
+        os.close(snapshot_descriptor)
+        snapshot_descriptor = -1
+        os.close(source_descriptor)
+        source_descriptor = -1
+    except DynamicReadyMaterializationError:
+        if snapshot_descriptor >= 0:
+            os.close(snapshot_descriptor)
+        if source_descriptor >= 0:
+            os.close(source_descriptor)
+        if snapshot_path is not None:
+            try:
+                snapshot_path.unlink()
+            except OSError:
+                pass
+        raise
+    except OSError as exc:
+        if snapshot_descriptor >= 0:
+            os.close(snapshot_descriptor)
+        if source_descriptor >= 0:
+            os.close(source_descriptor)
+        if snapshot_path is not None:
+            try:
+                snapshot_path.unlink()
+            except OSError:
+                pass
+        raise DynamicReadyMaterializationError(
+            f"cannot pin {name}: {exc}"
+        ) from exc
+    return _PinnedFile(path, snapshot_path), actual
 
 
 def _read_json(path: Path, *, name: str) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(
+            _pinned_snapshot_path(path).read_text(encoding="utf-8")
+        )
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise DynamicReadyMaterializationError(
             f"cannot read {name} JSON: {exc}"
@@ -260,11 +451,25 @@ def _load_measured_motion_identity(
     """Validate the measured-retarget identity embedded in one exact NPZ."""
 
     try:
-        with np.load(path, allow_pickle=False) as archive:
+        with np.load(_pinned_snapshot_path(path), allow_pickle=False) as archive:
             required = {
                 "joint_pos",
+                "measured_racket_site_pos_w",
+                "measured_racket_normal_w",
+                "measured_racket_long_axis_w",
                 "measured_racket_uid",
                 "measured_racket_schema_version",
+                "measured_racket_position_semantics",
+                "measured_racket_normal_semantics",
+                "measured_racket_long_axis_semantics",
+                "measured_racket_robot_mount_normal_sign",
+                "measured_racket_robot_butt_to_blade_axis_local",
+                "measured_racket_robot_rigid_visual_mesh_sha256",
+                "measured_racket_source_sha256",
+                "measured_racket_retarget_receipt_sha256",
+                "measured_racket_input_motion_sha256",
+                "measured_racket_manifest_sha256",
+                "measured_racket_catalog_sha256",
                 "measured_racket_retarget_admitted",
                 "measured_racket_joint_order_contract_id",
                 "measured_racket_joint_order_contract_sha256",
@@ -275,6 +480,15 @@ def _load_measured_motion_identity(
                     f"measured motion lacks identity fields {sorted(missing)}"
                 )
             joint_pos = np.asarray(archive["joint_pos"])
+            racket_position = np.asarray(
+                archive["measured_racket_site_pos_w"], np.float64
+            )
+            racket_normal = np.asarray(
+                archive["measured_racket_normal_w"], np.float64
+            )
+            racket_long_axis = np.asarray(
+                archive["measured_racket_long_axis_w"], np.float64
+            )
 
             def scalar(name: str) -> Any:
                 value = np.asarray(archive[name]).reshape(-1)
@@ -284,9 +498,52 @@ def _load_measured_motion_identity(
                     )
                 return value[0].item()
 
+            def exact_integer(name: str) -> int:
+                value = scalar(name)
+                if (
+                    isinstance(value, bool)
+                    or type(value) not in (int, float)
+                    or not math.isfinite(float(value))
+                    or float(value) != float(int(value))
+                ):
+                    raise DynamicReadyMaterializationError(
+                        f"measured motion {name} must be one exact integer"
+                    )
+                return int(value)
+
             uid = str(scalar("measured_racket_uid"))
-            schema = int(scalar("measured_racket_schema_version"))
-            admitted = int(scalar("measured_racket_retarget_admitted"))
+            schema = exact_integer("measured_racket_schema_version")
+            position_semantics = str(
+                scalar("measured_racket_position_semantics")
+            )
+            normal_semantics = str(
+                scalar("measured_racket_normal_semantics")
+            )
+            long_axis_semantics = str(
+                scalar("measured_racket_long_axis_semantics")
+            )
+            mount_normal_sign = exact_integer(
+                "measured_racket_robot_mount_normal_sign"
+            )
+            robot_axis_local = np.asarray(
+                archive["measured_racket_robot_butt_to_blade_axis_local"],
+                np.float64,
+            ).reshape(-1)
+            rigid_visual_mesh_sha256 = str(
+                scalar("measured_racket_robot_rigid_visual_mesh_sha256")
+            )
+            measured_source_sha256 = str(
+                scalar("measured_racket_source_sha256")
+            )
+            retarget_receipt_sha256 = str(
+                scalar("measured_racket_retarget_receipt_sha256")
+            )
+            input_motion_sha256 = str(
+                scalar("measured_racket_input_motion_sha256")
+            )
+            manifest_sha256 = str(scalar("measured_racket_manifest_sha256"))
+            catalog_sha256 = str(scalar("measured_racket_catalog_sha256"))
+            admitted = exact_integer("measured_racket_retarget_admitted")
             order_id = str(scalar("measured_racket_joint_order_contract_id"))
             order_sha = str(
                 scalar("measured_racket_joint_order_contract_sha256")
@@ -300,6 +557,42 @@ def _load_measured_motion_identity(
     if (
         uid != expected_uid
         or schema != EXPECTED_MEASURED_RACKET_SCHEMA
+        or position_semantics != EXPECTED_MEASURED_RACKET_POSITION_SEMANTICS
+        or normal_semantics != EXPECTED_MEASURED_RACKET_NORMAL_SEMANTICS
+        or long_axis_semantics != EXPECTED_MEASURED_RACKET_LONG_AXIS_SEMANTICS
+        or mount_normal_sign not in (-1, 1)
+        or robot_axis_local.shape != (3,)
+        or not np.array_equal(
+            robot_axis_local,
+            np.asarray(
+                EXPECTED_MEASURED_RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+                np.float64,
+            ),
+        )
+        or rigid_visual_mesh_sha256
+        != EXPECTED_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256
+        or len(measured_source_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in measured_source_sha256
+        )
+        or len(retarget_receipt_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in retarget_receipt_sha256
+        )
+        or any(
+            len(digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in digest
+            )
+            for digest in (
+                input_motion_sha256,
+                manifest_sha256,
+                catalog_sha256,
+            )
+        )
         or admitted != 1
         or order_id != EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_ID
         or order_sha != EXPECTED_MEASURED_JOINT_ORDER_CONTRACT_SHA256
@@ -307,6 +600,26 @@ def _load_measured_motion_identity(
         or joint_pos.shape[0] < 2
         or joint_pos.shape[1] != 31
         or not np.all(np.isfinite(joint_pos))
+        or racket_position.shape != (joint_pos.shape[0], 3)
+        or racket_normal.shape != racket_position.shape
+        or racket_long_axis.shape != racket_position.shape
+        or not np.all(np.isfinite(racket_position))
+        or not np.all(np.isfinite(racket_normal))
+        or not np.all(np.isfinite(racket_long_axis))
+        or float(
+            np.max(np.abs(np.linalg.norm(racket_normal, axis=-1) - 1.0))
+        )
+        > 1.0e-3
+        or float(
+            np.max(np.abs(np.linalg.norm(racket_long_axis, axis=-1) - 1.0))
+        )
+        > 1.0e-3
+        or float(
+            np.max(
+                np.abs(np.sum(racket_normal * racket_long_axis, axis=-1))
+            )
+        )
+        > 1.0e-3
     ):
         raise DynamicReadyMaterializationError(
             "motion is not the exact admitted measured-retarget schema-v4 A3 clip"
@@ -319,6 +632,35 @@ def _load_measured_motion_identity(
         "measured_racket_retarget_admitted": True,
         "joint_order_contract_id": order_id,
         "joint_order_contract_sha256": order_sha,
+        "measured_racket_source_sha256": measured_source_sha256,
+        "measured_racket_retarget_receipt_sha256": (
+            retarget_receipt_sha256
+        ),
+        "measured_racket_input_motion_sha256": input_motion_sha256,
+        "measured_racket_manifest_sha256": manifest_sha256,
+        "measured_racket_catalog_sha256": catalog_sha256,
+        "measured_racket_frame0": {
+            "authority": "independent_schema_v4_measured_racket_channel",
+            "motion_sha256": expected_motion_sha256,
+            "frame_index": 0,
+            "site_pos_w_m": racket_position[0].tolist(),
+            "signed_face_normal_w": racket_normal[0].tolist(),
+            "long_axis_w": racket_long_axis[0].tolist(),
+            "position_semantics": position_semantics,
+            "normal_semantics": normal_semantics,
+            "long_axis_semantics": long_axis_semantics,
+            "robot_mount_normal_sign": mount_normal_sign,
+            "robot_butt_to_blade_axis_local": robot_axis_local.tolist(),
+            "robot_rigid_visual_mesh_sha256": rigid_visual_mesh_sha256,
+            "source_sha256": measured_source_sha256,
+            "retarget_receipt_sha256": retarget_receipt_sha256,
+            "input_motion_sha256": input_motion_sha256,
+            "manifest_sha256": manifest_sha256,
+            "catalog_sha256": catalog_sha256,
+            "source_and_retarget_receipt_sha_semantics": (
+                "opaque_labels_content_bound_by_exact_materialized_motion_sha"
+            ),
+        },
     }
 
 
@@ -353,6 +695,33 @@ def _validate_measured_retarget_l0_evidence(
         raise DynamicReadyMaterializationError(
             "measured bank receipt is not the diagnostic-only schema-v4 import"
         )
+    bank_authorities = bank_receipt.get("authorities")
+    bank_manifest_authority = (
+        bank_authorities.get("source_manifest")
+        if isinstance(bank_authorities, Mapping)
+        else None
+    )
+    bank_catalog_authority = (
+        bank_authorities.get("signed_catalog")
+        if isinstance(bank_authorities, Mapping)
+        else None
+    )
+    bank_source_manifest = bank_receipt.get("source_manifest")
+    if (
+        not isinstance(bank_manifest_authority, Mapping)
+        or not isinstance(bank_catalog_authority, Mapping)
+        or not isinstance(bank_source_manifest, Mapping)
+        or bank_manifest_authority.get("sha256")
+        != motion["measured_racket_manifest_sha256"]
+        or bank_source_manifest.get("sha256")
+        != motion["measured_racket_manifest_sha256"]
+        or bank_catalog_authority.get("sha256")
+        != motion["measured_racket_catalog_sha256"]
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured bank manifest/catalog authorities do not bind the exact "
+            "schema-v4 motion"
+        )
     bank_rows = [
         row
         for row in bank_receipt.get("actions", ())
@@ -362,6 +731,8 @@ def _validate_measured_retarget_l0_evidence(
         len(bank_rows) != 1
         or bank_rows[0].get("sha256") != motion_sha256
         or bank_rows[0].get("frames") != motion["frames"]
+        or bank_rows[0].get("robot_mount_normal_sign")
+        != motion["measured_racket_frame0"]["robot_mount_normal_sign"]
     ):
         raise DynamicReadyMaterializationError(
             "measured bank receipt does not bind the exact selected motion"
@@ -607,7 +978,7 @@ def _load_motion_frame0_arrays(
     path: Path,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     try:
-        with np.load(path, allow_pickle=False) as archive:
+        with np.load(_pinned_snapshot_path(path), allow_pickle=False) as archive:
             joint_pos = np.asarray(archive["joint_pos"], np.float64)
             body_pos = np.asarray(archive["body_pos_w"], np.float64)
             body_quat = np.asarray(archive["body_quat_w"], np.float64)
@@ -675,6 +1046,31 @@ def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
         ensure_ascii=True,
         allow_nan=False,
     ).encode("ascii")
+
+
+def _stored_ready_state_sha256(
+    joint_pos: Sequence[float],
+    root_pos_w: Sequence[float],
+    root_quat_wxyz: Sequence[float],
+) -> str:
+    """Hash emitted float64 state arrays without normalizing quaternion bytes."""
+
+    digest = hashlib.sha256()
+    for label, value, shape in (
+        ("joint_pos", joint_pos, (31,)),
+        ("root_pos_w", root_pos_w, (3,)),
+        ("root_quat_wxyz", root_quat_wxyz, (4,)),
+    ):
+        array = np.ascontiguousarray(np.asarray(value, np.float64))
+        if array.shape != shape or not np.isfinite(array).all():
+            raise DynamicReadyMaterializationError(
+                f"stored ready state has malformed {label}"
+            )
+        digest.update(label.encode("utf-8"))
+        digest.update(str(array.dtype).encode("ascii"))
+        digest.update(np.asarray(array.shape, np.int64).tobytes())
+        digest.update(array.tobytes())
+    return digest.hexdigest()
 
 
 def _pretty_json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -1372,6 +1768,882 @@ def _exact_racket_site_pose(
     return position, rotation
 
 
+def _whole_body_table_geometry(
+    runtime_contract: Mapping[str, Any],
+) -> tuple[float, float, float]:
+    """Resolve the bound ActionBall table prism without inventing dimensions."""
+
+    try:
+        objective = runtime_contract["action_ball_training"]["runtime"][
+            "counter_rally"
+        ]["objective_profile"]
+        near_x = float(objective["table_near_x_env_m"])
+        half_width = float(objective["table_half_width_m"])
+        surface_z = float(objective["table_surface_z_env_m"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DynamicReadyMaterializationError(
+            "whole-body safe-ready requires the runtime-bound table geometry"
+        ) from exc
+    if not all(math.isfinite(value) for value in (near_x, half_width, surface_z)) or (
+        half_width <= 0.0
+    ):
+        raise DynamicReadyMaterializationError(
+            "runtime-bound table geometry is malformed"
+        )
+    return near_x, half_width, surface_z
+
+
+def _independent_measured_racket_frame0_reference(
+    value: Mapping[str, Any], *, expected_motion_sha256: str
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Build the official-site pose target from the independent v4 channel."""
+
+    if not isinstance(value, Mapping):
+        raise DynamicReadyMaterializationError(
+            "whole-body safe-ready requires independent measured racket frame0"
+        )
+    raw_mount_sign = value.get("robot_mount_normal_sign")
+    if (
+        isinstance(raw_mount_sign, bool)
+        or type(raw_mount_sign) not in (int, float)
+        or not math.isfinite(float(raw_mount_sign))
+        or float(raw_mount_sign) != float(int(raw_mount_sign))
+    ):
+        raise DynamicReadyMaterializationError(
+            "independent measured racket mount sign must be one exact integer"
+        )
+    try:
+        position = np.asarray(value["site_pos_w_m"], np.float64)
+        signed_face = np.asarray(value["signed_face_normal_w"], np.float64)
+        long_axis = np.asarray(value["long_axis_w"], np.float64)
+        axis_local = np.asarray(
+            value["robot_butt_to_blade_axis_local"], np.float64
+        )
+        mount_sign = int(raw_mount_sign)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DynamicReadyMaterializationError(
+            "independent measured racket frame0 is malformed"
+        ) from exc
+    if (
+        value.get("authority")
+        != "independent_schema_v4_measured_racket_channel"
+        or value.get("motion_sha256") != expected_motion_sha256
+        or value.get("frame_index") != 0
+        or value.get("position_semantics")
+        != EXPECTED_MEASURED_RACKET_POSITION_SEMANTICS
+        or value.get("normal_semantics")
+        != EXPECTED_MEASURED_RACKET_NORMAL_SEMANTICS
+        or value.get("long_axis_semantics")
+        != EXPECTED_MEASURED_RACKET_LONG_AXIS_SEMANTICS
+        or value.get("robot_rigid_visual_mesh_sha256")
+        != EXPECTED_MEASURED_RACKET_RIGID_VISUAL_MESH_SHA256
+        or position.shape != (3,)
+        or signed_face.shape != (3,)
+        or long_axis.shape != (3,)
+        or axis_local.shape != (3,)
+        or mount_sign not in (-1, 1)
+        or not np.array_equal(
+            axis_local,
+            np.asarray(
+                EXPECTED_MEASURED_RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+                np.float64,
+            ),
+        )
+        or not (
+            np.isfinite(position).all()
+            and np.isfinite(signed_face).all()
+            and np.isfinite(long_axis).all()
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "independent measured racket frame0 lost its schema-v4 authority"
+        )
+    face_norm = float(np.linalg.norm(signed_face))
+    long_norm = float(np.linalg.norm(long_axis))
+    if (
+        abs(face_norm - 1.0) > 1.0e-3
+        or abs(long_norm - 1.0) > 1.0e-3
+        or abs(float(signed_face @ long_axis)) > 1.0e-3
+    ):
+        raise DynamicReadyMaterializationError(
+            "independent measured racket frame0 axes are not orthonormal"
+        )
+    signed_face = signed_face / face_norm
+    long_axis = long_axis / long_norm
+    site_y = float(mount_sign) * signed_face
+    site_y = site_y - float(site_y @ long_axis) * long_axis
+    site_y_norm = float(np.linalg.norm(site_y))
+    if site_y_norm <= 1.0e-12:
+        raise DynamicReadyMaterializationError(
+            "independent measured racket frame0 site axes are degenerate"
+        )
+    site_y = site_y / site_y_norm
+    local_y = np.asarray([0.0, 1.0, 0.0], np.float64)
+    local_third = np.cross(axis_local, local_y)
+    world_third = np.cross(long_axis, site_y)
+    local_basis = np.column_stack((axis_local, local_y, local_third))
+    world_basis = np.column_stack((long_axis, site_y, world_third))
+    rotation = world_basis @ local_basis.T
+    if (
+        np.max(np.abs(rotation.T @ rotation - np.eye(3))) > 2.0e-6
+        or np.linalg.det(rotation) < 1.0 - 2.0e-6
+    ):
+        raise DynamicReadyMaterializationError(
+            "independent measured racket frame0 does not define a proper site rotation"
+        )
+    return position, rotation, {
+        **dict(value),
+        "signed_face_normal_w_unit": signed_face.tolist(),
+        "long_axis_w_unit": long_axis.tolist(),
+        "official_site_rotation_w": rotation.tolist(),
+    }
+
+
+def _conservative_robot_table_clearance_m(
+    backend: grounded.MujocoGroundedReadyBackend,
+    state: grounded.ReadyState,
+    *,
+    table_near_x_m: float,
+    table_half_width_m: float,
+    table_surface_z_m: float,
+) -> float:
+    """Conservative collision-sphere distance from the near-side table prism.
+
+    The table occupies ``x>=near_x``, ``abs(y)<=half_width`` and
+    ``z<=surface_z``.  This intentionally over-approximates the finite table:
+    a positive result proves separation from top, edges and underside without
+    relying on the vendor robot-only MJCF to contain an Isaac table body.
+    """
+
+    backend._install(state)
+    model = backend.model
+    data = backend._data
+    clearances: list[float] = []
+    for geom in range(int(model.ngeom)):
+        if geom == backend._floor_geom or int(model.geom_bodyid[geom]) == 0:
+            continue
+        if int(model.geom_contype[geom]) == 0:
+            continue
+        center = np.asarray(data.geom_xpos[geom], np.float64)
+        radius = float(model.geom_rbound[geom])
+        if not np.all(np.isfinite(center)) or not math.isfinite(radius) or radius < 0.0:
+            raise DynamicReadyMaterializationError(
+                "exact MJCF returned malformed robot collision bounds"
+            )
+        clearances.append(
+            max(
+                table_near_x_m - (float(center[0]) + radius),
+                abs(float(center[1])) - (table_half_width_m + radius),
+                (float(center[2]) - radius) - table_surface_z_m,
+            )
+        )
+    if not clearances:
+        raise DynamicReadyMaterializationError(
+            "exact MJCF has no collidable robot geometry for the table gate"
+        )
+    return float(min(clearances))
+
+
+def _whole_body_collision_pair_authority(
+    backend: grounded.MujocoGroundedReadyBackend,
+) -> tuple[tuple[tuple[int, int], ...], tuple[int, ...], dict[str, Any]]:
+    """Freeze every enabled robot self pair and unsupported floor pair."""
+
+    model = backend.model
+    floor_geom = int(backend._floor_geom)
+    robot_geoms = tuple(
+        geom
+        for geom in range(int(model.ngeom))
+        if int(model.geom_bodyid[geom]) != 0
+    )
+    foot_geoms = frozenset(
+        int(geom)
+        for group in backend._foot_geom_sets
+        for geom in group
+    )
+    self_pairs = tuple(
+        (left, right)
+        for offset, left in enumerate(robot_geoms)
+        for right in robot_geoms[offset + 1 :]
+        if self_collision_audit.geom_pair_enabled(model, left, right)
+    )
+    unsupported_floor_geoms = tuple(
+        geom
+        for geom in robot_geoms
+        if geom not in foot_geoms
+        and self_collision_audit.geom_pair_enabled(model, floor_geom, geom)
+    )
+    authority_rows = {
+        "self_collision_geom_id_pairs": [list(pair) for pair in self_pairs],
+        "unsupported_floor_robot_geom_ids": list(unsupported_floor_geoms),
+        "expected_foot_floor_geom_ids": sorted(foot_geoms),
+        "floor_geom_id": floor_geom,
+    }
+    authority_sha = hashlib.sha256(
+        _canonical_json_bytes(authority_rows)
+    ).hexdigest()
+    return self_pairs, unsupported_floor_geoms, {
+        **authority_rows,
+        "pair_authority_sha256": authority_sha,
+        "enabled_self_pair_count": len(self_pairs),
+        "unsupported_floor_pair_count": len(unsupported_floor_geoms),
+        "required_clearance_m": WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M,
+        "capped_clearance_m": WHOLE_BODY_COLLISION_CLEARANCE_CAP_M,
+        "bisection_tolerance_m": (
+            WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M
+        ),
+        "distance_semantics": (
+            "mujoco_geomDistance_saturation_bisection_with_robot_pair_"
+            "sphere_lower_bound_pruning"
+        ),
+    }
+
+
+def _whole_body_collision_clearance_m(
+    backend: grounded.MujocoGroundedReadyBackend,
+    *,
+    self_pairs: Sequence[tuple[int, int]],
+    unsupported_floor_geoms: Sequence[int],
+) -> tuple[float, float]:
+    """Return a conservative capped signed clearance over the frozen pairs."""
+
+    model = backend.model
+    data = backend._data
+    best = WHOLE_BODY_COLLISION_CLEARANCE_CAP_M
+    raw_best = WHOLE_BODY_COLLISION_CLEARANCE_CAP_M
+    floor_geom = int(backend._floor_geom)
+    for geom in unsupported_floor_geoms:
+        distance, saturated = self_collision_audit.geom_clearance(
+            model,
+            data,
+            floor_geom,
+            int(geom),
+            distmax=best,
+            tol=WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M,
+        )
+        raw_best = min(raw_best, float(distance))
+        if distance < 0.0:
+            return float(distance), raw_best
+        conservative = (
+            float(distance)
+            if saturated
+            else float(distance)
+            - WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M
+        )
+        best = min(best, conservative)
+    centers = np.asarray(data.geom_xpos, np.float64)
+    radii = np.asarray(model.geom_rbound, np.float64)
+    if (
+        centers.shape != (int(model.ngeom), 3)
+        or radii.shape != (int(model.ngeom),)
+        or not np.isfinite(centers).all()
+        or not np.isfinite(radii).all()
+        or np.any(radii < 0.0)
+    ):
+        raise DynamicReadyMaterializationError(
+            "exact MJCF returned malformed collision bounding spheres"
+        )
+    for left, right in self_pairs:
+        sphere_lower_bound = float(
+            np.linalg.norm(centers[left] - centers[right])
+            - radii[left]
+            - radii[right]
+        )
+        if sphere_lower_bound >= best:
+            continue
+        distance, saturated = self_collision_audit.geom_clearance(
+            model,
+            data,
+            int(left),
+            int(right),
+            distmax=best,
+            tol=WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M,
+        )
+        raw_best = min(raw_best, float(distance))
+        if distance < 0.0:
+            return float(distance), raw_best
+        conservative = (
+            float(distance)
+            if saturated
+            else float(distance)
+            - WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M
+        )
+        best = min(best, conservative)
+    if not math.isfinite(best):
+        raise DynamicReadyMaterializationError(
+            "exact MJCF collision clearance is non-finite"
+        )
+    return float(best), float(raw_best)
+
+
+def _build_whole_body_safety_evaluator(
+    *,
+    backend: grounded.MujocoGroundedReadyBackend,
+    identity: grounded.ExactModelIdentity,
+    plant: Mapping[str, Any],
+    hard_inner_lower: np.ndarray,
+    hard_inner_upper: np.ndarray,
+    runtime_contract: Mapping[str, Any],
+) -> tuple[Any, dict[str, Any]]:
+    """Build one evaluator that reuses the exact static contact LP."""
+
+    table_near_x, table_half_width, table_surface_z = (
+        _whole_body_table_geometry(runtime_contract)
+    )
+    (
+        collision_self_pairs,
+        collision_unsupported_floor_geoms,
+        collision_pair_authority,
+    ) = _whole_body_collision_pair_authority(backend)
+    qdes_limits = np.asarray(plant["qdes_limits"], np.float64)
+    inset = float(plant["projection_inset"])
+    span = qdes_limits[:, 1] - qdes_limits[:, 0]
+    executed_lower = np.maximum(
+        qdes_limits[:, 0] + inset * span,
+        np.asarray(hard_inner_lower, np.float64),
+    )
+    executed_upper = np.minimum(
+        qdes_limits[:, 1] - inset * span,
+        np.asarray(hard_inner_upper, np.float64),
+    )
+    if np.any(executed_lower >= executed_upper):
+        raise DynamicReadyMaterializationError(
+            "whole-body evaluator has an empty executed qdes envelope"
+        )
+    contact_config = torque_topp.GroundContactConfig(
+        expected_model_binding=identity.ground_model_binding_sha256,
+        model_source_path=str(Path(identity.mjcf_path).expanduser().resolve()),
+        expected_source_sha256=identity.mjcf_sha256,
+        minimum_normal_force_per_contact_n=(
+            WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N
+        ),
+        minimum_normal_force_per_foot_n=(
+            WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_FOOT_N
+        ),
+    )
+    solver = torque_topp.MujocoGroundContactLPSolver(
+        backend.model, contact_config
+    )
+    actuator_contract = torque_topp.direct_actuator_contract_from_mujoco(
+        backend.model,
+        support_mode="ground",
+        contact_mode="double_support_floor",
+        fixed_lp_solver="scipy.optimize.linprog:highs",
+    )
+    model_lower, model_upper, actuated, actuator_report = (
+        torque_topp._resolve_grounded_actuator_limits(
+            actuator_contract, int(backend.model.nv)
+        )
+    )
+    model_row_for_runtime = (
+        np.asarray(backend._binding.joint_dof_adrs, np.int64) - 6
+    )
+    if not np.array_equal(np.sort(model_row_for_runtime), np.arange(31)):
+        raise DynamicReadyMaterializationError(
+            "whole-body evaluator lost the runtime-to-model actuator permutation"
+        )
+    exact_lower = np.asarray(backend.position_lower, np.float64)
+    exact_upper = np.asarray(backend.position_upper, np.float64)
+    kp = np.asarray(plant["kp"], np.float64)
+    effort = np.asarray(plant["effort"], np.float64)
+
+    def evaluator(state: grounded.ReadyState) -> whole_body_ready.SafetyEvaluation:
+        scene = backend.static_scene(
+            state,
+            contact_gap_tolerance_m=2.0e-3,
+            penetration_tolerance_m=2.0e-3,
+        )
+        collision_clearance, raw_collision_clearance = (
+            _whole_body_collision_clearance_m(
+            backend,
+            self_pairs=collision_self_pairs,
+            unsupported_floor_geoms=collision_unsupported_floor_geoms,
+            )
+        )
+        contact_list_collision = bool(
+            scene.unsupported_contacts or scene.self_collision_pairs
+        )
+        if contact_list_collision != (collision_clearance <= 0.0):
+            raise DynamicReadyMaterializationError(
+                "exact contact list and signed collision clearance disagree"
+            )
+        hull, _com_xy, global_support_margin = grounded._support_margin(scene)
+        runtime_tau_lower = np.maximum(
+            -effort, kp * (executed_lower - state.joint_pos)
+        )
+        runtime_tau_upper = np.minimum(
+            effort, kp * (executed_upper - state.joint_pos)
+        )
+        runtime_tau_lower_model = np.empty(31, np.float64)
+        runtime_tau_upper_model = np.empty(31, np.float64)
+        runtime_tau_lower_model[model_row_for_runtime] = runtime_tau_lower
+        runtime_tau_upper_model[model_row_for_runtime] = runtime_tau_upper
+        hold_lower = np.maximum(model_lower, runtime_tau_lower_model)
+        hold_upper = np.minimum(model_upper, runtime_tau_upper_model)
+        solution = None
+        lp_error = None
+        if np.all(hold_lower < 0.0) and np.all(hold_upper > 0.0):
+            try:
+                solution = solver.solve(
+                    backend._qpos(state),
+                    np.zeros(int(backend.model.nv), np.float64),
+                    np.zeros(int(backend.model.nv), np.float64),
+                    actuated,
+                    hold_lower,
+                    hold_upper,
+                    np.full(int(backend.model.nv), 1.0e6, np.float64),
+                    path_tangent=np.zeros(int(backend.model.nv), np.float64),
+                    lp_objective=LP_OBJECTIVE,
+                )
+            except Exception as exc:
+                lp_error = f"{type(exc).__name__}: {exc}"
+        feasible = bool(solution is not None and solution.feasible)
+        tau_model = (
+            np.asarray(solution.actuator_generalized_force, np.float64)
+            if feasible
+            else np.zeros(31, np.float64)
+        )
+        tau_runtime = tau_model[model_row_for_runtime]
+        qdes = state.joint_pos + tau_runtime / kp
+        report = dict(solution.report) if feasible else {}
+        per_foot_normal = np.asarray(
+            report.get("normal_force_per_foot_n", [-1.0, -1.0]), np.float64
+        )
+        cop_margin = np.asarray(
+            report.get("cop_interior_margin_per_foot_m", [-1.0, -1.0]),
+            np.float64,
+        )
+        normal_per_contact = np.asarray(
+            report.get("normal_force_per_contact_n", ()), np.float64
+        )
+        feet_report = (
+            report.get("contact_geometry", {}).get("feet", ())
+            if isinstance(report.get("contact_geometry"), Mapping)
+            else ()
+        )
+        minimum_normal_per_foot = np.full(2, -1.0, np.float64)
+        if feasible and isinstance(feet_report, list) and len(feet_report) == 2:
+            for foot, row in enumerate(feet_report):
+                support_range = (
+                    row.get("support_point_range")
+                    if isinstance(row, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(support_range, list)
+                    and len(support_range) == 2
+                    and all(type(value) is int for value in support_range)
+                    and 0 <= support_range[0] < support_range[1]
+                    <= len(normal_per_contact)
+                ):
+                    minimum_normal_per_foot[foot] = float(
+                        np.min(
+                            normal_per_contact[
+                                support_range[0] : support_range[1]
+                            ]
+                        )
+                    )
+        qdes_slack = (
+            float(np.min(np.minimum(qdes - executed_lower, executed_upper - qdes)))
+            if feasible
+            else -1.0
+        )
+        torque_slack = (
+            float(np.min(np.minimum(tau_model - hold_lower, hold_upper - tau_model)))
+            if feasible
+            else -1.0
+        )
+        equality_residual = float(
+            solution.equality_residual if feasible else 1.0
+        )
+        root_residual = float(solution.root_residual if feasible else 1.0)
+        residual_tolerance = float(contact_config.equality_residual_tolerance)
+        support_slack = -1.0
+        if global_support_margin is not None and cop_margin.shape == (2,):
+            support_slack = min(
+                float(global_support_margin) - 5.0e-4,
+                float(np.min(cop_margin)) - 5.0e-4,
+            )
+        root_rotation = whole_body_ready._quat_to_rotation(
+            state.root_quat_wxyz
+        )
+        root_tilt = math.acos(
+            float(np.clip(root_rotation[2, 2], -1.0, 1.0))
+        )
+        table_clearance = _conservative_robot_table_clearance_m(
+            backend,
+            state,
+            table_near_x_m=table_near_x,
+            table_half_width_m=table_half_width,
+            table_surface_z_m=table_surface_z,
+        )
+        racket_position, racket_rotation = _exact_racket_site_pose(
+            backend, state
+        )
+        slacks = {
+            "left_sole_floor_slack_m": 2.0e-3
+            - abs(float(scene.sole_minimum_distance_m[0])),
+            "right_sole_floor_slack_m": 2.0e-3
+            - abs(float(scene.sole_minimum_distance_m[1])),
+            "left_contact_load_slack_n": (
+                min(
+                    float(minimum_normal_per_foot[0])
+                    - WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N,
+                    float(per_foot_normal[0])
+                    - float(contact_config.minimum_normal_force_per_foot_n),
+                )
+                if minimum_normal_per_foot.shape == (2,)
+                and per_foot_normal.shape == (2,)
+                else -1.0
+            ),
+            "right_contact_load_slack_n": (
+                min(
+                    float(minimum_normal_per_foot[1])
+                    - WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N,
+                    float(per_foot_normal[1])
+                    - float(contact_config.minimum_normal_force_per_foot_n),
+                )
+                if minimum_normal_per_foot.shape == (2,)
+                and per_foot_normal.shape == (2,)
+                else -1.0
+            ),
+            "support_margin_slack_m": support_slack,
+            "joint_position_slack_rad": float(
+                np.min(
+                    np.minimum(
+                        state.joint_pos - exact_lower,
+                        exact_upper - state.joint_pos,
+                    )
+                )
+            ),
+            "qdes_slack_rad": qdes_slack,
+            "torque_slack_nm": torque_slack,
+            "table_clearance_slack_m": table_clearance - 1.0e-2,
+            "root_height_slack_m": float(state.root_pos_w[2]) - 0.5,
+            "root_tilt_slack_rad": 0.7 - root_tilt,
+            "collision_slack_m": (
+                collision_clearance
+                - WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M
+            ),
+            "ground_lp_residual_slack": residual_tolerance
+            - max(equality_residual, root_residual),
+        }
+        return whole_body_ready.SafetyEvaluation(
+            slacks=slacks,
+            racket_position_w=racket_position,
+            racket_rotation_w=racket_rotation,
+            evidence={
+                "exact_contact_lp_reused": True,
+                "lp_feasible": feasible,
+                "lp_error": lp_error,
+                "lp_objective": LP_OBJECTIVE,
+                "equality_residual": equality_residual,
+                "root_residual": root_residual,
+                "normal_force_per_foot_n": per_foot_normal.tolist(),
+                "normal_force_per_contact_n": normal_per_contact.tolist(),
+                "minimum_normal_force_per_contact_per_foot_n": (
+                    minimum_normal_per_foot.tolist()
+                ),
+                "required_minimum_normal_force_per_contact_n": (
+                    WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N
+                ),
+                "required_minimum_normal_force_per_foot_n": float(
+                    contact_config.minimum_normal_force_per_foot_n
+                ),
+                "cop_interior_margin_per_foot_m": cop_margin.tolist(),
+                "global_support_margin_m": global_support_margin,
+                "support_hull_floor_xy_m": hull.tolist(),
+                "hold_qdes_joint_pos_rad": qdes.tolist(),
+                "actuator_generalized_force_runtime_order_nm": tau_runtime.tolist(),
+                "actuator_generalized_force_mujoco_row_order_nm": tau_model.tolist(),
+                "mujoco_row_for_runtime_joint": model_row_for_runtime.tolist(),
+                "mujoco_actuated_dof_indices": np.asarray(
+                    actuated, np.int64
+                ).tolist(),
+                "executed_qdes_lower_rad": executed_lower.tolist(),
+                "executed_qdes_upper_rad": executed_upper.tolist(),
+                "model_tau_lower_mujoco_row_order_nm": model_lower.tolist(),
+                "model_tau_upper_mujoco_row_order_nm": model_upper.tolist(),
+                "runtime_tau_lower_runtime_order_nm": runtime_tau_lower.tolist(),
+                "runtime_tau_upper_runtime_order_nm": runtime_tau_upper.tolist(),
+                "runtime_tau_lower_mujoco_row_order_nm": (
+                    runtime_tau_lower_model.tolist()
+                ),
+                "runtime_tau_upper_mujoco_row_order_nm": (
+                    runtime_tau_upper_model.tolist()
+                ),
+                "effective_tau_lower_mujoco_row_order_nm": hold_lower.tolist(),
+                "effective_tau_upper_mujoco_row_order_nm": hold_upper.tolist(),
+                "actuator_limit_contract": actuator_report,
+                "solver_report": report,
+                "exact_state_lp_cache_hit": report.get(
+                    "exact_state_lp_cache_hit"
+                ),
+                "evaluated_state_sha256": grounded.state_digest(state),
+                "evaluated_joint_pos_rad": state.joint_pos.tolist(),
+                "evaluated_root_pos_w_m": state.root_pos_w.tolist(),
+                "evaluated_root_quat_wxyz": state.root_quat_wxyz.tolist(),
+                "sole_minimum_distance_m": np.asarray(
+                    scene.sole_minimum_distance_m, np.float64
+                ).tolist(),
+                "exact_joint_position_lower_rad": exact_lower.tolist(),
+                "exact_joint_position_upper_rad": exact_upper.tolist(),
+                "conservative_table_clearance_m": table_clearance,
+                "table_geometry": {
+                    "near_x_m": table_near_x,
+                    "half_width_m": table_half_width,
+                    "surface_z_m": table_surface_z,
+                    "required_clearance_m": 1.0e-2,
+                    "semantics": "collision_sphere_separation_from_overapproximated_near_side_table_prism",
+                },
+                "root_limits": {
+                    "minimum_height_m": 0.5,
+                    "maximum_tilt_rad": 0.7,
+                },
+                "collision_clearance": {
+                    **collision_pair_authority,
+                    "realized_capped_minimum_clearance_m": (
+                        collision_clearance
+                    ),
+                    "raw_bisection_midpoint_or_saturated_cap_m": (
+                        raw_collision_clearance
+                    ),
+                    "positive_unsaturated_conservative_deduction_m": (
+                        WHOLE_BODY_COLLISION_CLEARANCE_TOLERANCE_M
+                    ),
+                    "realized_slack_m": (
+                        collision_clearance
+                        - WHOLE_BODY_REQUIRED_COLLISION_CLEARANCE_M
+                    ),
+                    "unsupported_contacts": [
+                        dict(row) for row in scene.unsupported_contacts
+                    ],
+                    "self_collision_pairs": [
+                        dict(row) for row in scene.self_collision_pairs
+                    ],
+                },
+            },
+        )
+
+    return evaluator, {
+        "exact_joint_position_lower_rad": exact_lower.tolist(),
+        "exact_joint_position_upper_rad": exact_upper.tolist(),
+        "executed_qdes_lower_rad": executed_lower.tolist(),
+        "executed_qdes_upper_rad": executed_upper.tolist(),
+        "table_near_x_m": table_near_x,
+        "table_half_width_m": table_half_width,
+        "table_surface_z_m": table_surface_z,
+        "minimum_table_clearance_m": 1.0e-2,
+        "minimum_root_height_m": 0.5,
+        "maximum_root_tilt_rad": 0.7,
+        "collision_pair_authority": collision_pair_authority,
+    }
+
+
+def _consume_whole_body_selected_hold_witness(
+    *,
+    static_birth_evidence: Mapping[str, Any],
+    ready_q: np.ndarray,
+    ready_root_pos: np.ndarray,
+    ready_root_quat: np.ndarray,
+    identity: grounded.ExactModelIdentity,
+    kp: np.ndarray,
+    model_row_for_runtime: np.ndarray,
+    actuated: np.ndarray,
+    expected_vectors: Mapping[str, np.ndarray],
+) -> torque_topp.GroundContactLPSolution:
+    """Validate and select the one fresh whole-body final-state LP witness.
+
+    The whole-body optimizer uses many LP samples.  Its winner is re-audited
+    with a newly loaded backend and a newly constructed solver.  This function
+    binds that exact cache-miss result to the state and envelopes which will be
+    written into the artifact; it deliberately never solves another LP.
+    """
+
+    if not isinstance(static_birth_evidence, Mapping):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold has no static evidence mapping"
+        )
+    witness = static_birth_evidence.get("evaluator_evidence")
+    if not isinstance(witness, Mapping):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold has no final evaluator witness"
+        )
+    report = witness.get("solver_report")
+    if not isinstance(report, Mapping):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold has no exact LP solver report"
+        )
+    if (
+        static_birth_evidence.get("selected_hold_witness_authority")
+        != "new_backend_new_solver_final_state_cache_miss"
+        or witness.get("lp_feasible") is not True
+        or witness.get("exact_state_lp_cache_hit") is not False
+        or report.get("exact_state_lp_cache_hit") is not False
+        or report.get("model_binding")
+        != identity.ground_model_binding_sha256
+        or witness.get("required_minimum_normal_force_per_contact_n")
+        != WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N
+        or witness.get("required_minimum_normal_force_per_foot_n")
+        != WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_FOOT_N
+    ):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold witness lost its fresh 0.1N LP authority"
+        )
+
+    state_vectors = {
+        "evaluated_joint_pos_rad": np.asarray(ready_q, np.float64),
+        "evaluated_root_pos_w_m": np.asarray(ready_root_pos, np.float64),
+        "evaluated_root_quat_wxyz": np.asarray(ready_root_quat, np.float64),
+    }
+    for name, expected in state_vectors.items():
+        actual = np.asarray(witness.get(name, ()), np.float64)
+        if actual.shape != expected.shape or not np.array_equal(actual, expected):
+            raise DynamicReadyMaterializationError(
+                "whole-body selected hold witness state differs from physical_ready: "
+                f"{name}"
+            )
+    witness_state = grounded.ReadyState(
+        state_vectors["evaluated_joint_pos_rad"],
+        state_vectors["evaluated_root_pos_w_m"],
+        state_vectors["evaluated_root_quat_wxyz"],
+    )
+    if witness.get("evaluated_state_sha256") != grounded.state_digest(
+        witness_state
+    ):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold witness state digest is invalid"
+        )
+
+    required_vector_names = set(expected_vectors)
+    if required_vector_names != {
+        "executed_qdes_lower_rad",
+        "executed_qdes_upper_rad",
+        "model_tau_lower_mujoco_row_order_nm",
+        "model_tau_upper_mujoco_row_order_nm",
+        "runtime_tau_lower_runtime_order_nm",
+        "runtime_tau_upper_runtime_order_nm",
+        "runtime_tau_lower_mujoco_row_order_nm",
+        "runtime_tau_upper_mujoco_row_order_nm",
+        "effective_tau_lower_mujoco_row_order_nm",
+        "effective_tau_upper_mujoco_row_order_nm",
+    }:
+        raise DynamicReadyMaterializationError(
+            "internal whole-body selected hold vector schema is incomplete"
+        )
+    for name, expected_value in expected_vectors.items():
+        expected = np.asarray(expected_value)
+        actual = np.asarray(witness.get(name, ()), expected.dtype)
+        if (
+            actual.shape != expected.shape
+            or not np.isfinite(actual).all()
+            or not np.array_equal(actual, expected)
+        ):
+            raise DynamicReadyMaterializationError(
+                "whole-body selected hold witness differs from current plant: "
+                f"{name}"
+            )
+    witness_rows = np.asarray(
+        witness.get("mujoco_row_for_runtime_joint", ()), np.int64
+    )
+    witness_actuated = np.asarray(
+        witness.get("mujoco_actuated_dof_indices", ()), np.int64
+    )
+    if not np.array_equal(witness_rows, model_row_for_runtime) or not np.array_equal(
+        witness_actuated, np.asarray(actuated, np.int64)
+    ):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold witness actuator permutation changed"
+        )
+
+    tau_model = np.asarray(
+        witness.get("actuator_generalized_force_mujoco_row_order_nm", ()),
+        np.float64,
+    )
+    tau_runtime = np.asarray(
+        witness.get("actuator_generalized_force_runtime_order_nm", ()),
+        np.float64,
+    )
+    qdes = np.asarray(witness.get("hold_qdes_joint_pos_rad", ()), np.float64)
+    if (
+        tau_model.shape != (31,)
+        or tau_runtime.shape != (31,)
+        or qdes.shape != (31,)
+        or not (
+            np.isfinite(tau_model).all()
+            and np.isfinite(tau_runtime).all()
+            and np.isfinite(qdes).all()
+        )
+        or not np.array_equal(tau_runtime, tau_model[model_row_for_runtime])
+        or not np.array_equal(
+            qdes,
+            np.asarray(ready_q, np.float64)
+            + tau_runtime / np.asarray(kp, np.float64),
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold witness qdes/torque is internally inconsistent"
+        )
+
+    contact_normals = np.asarray(
+        witness.get("normal_force_per_contact_n", ()), np.float64
+    )
+    report_normals = np.asarray(
+        report.get("normal_force_per_contact_n", ()), np.float64
+    )
+    cop_margins = np.asarray(
+        witness.get("cop_interior_margin_per_foot_m", ()), np.float64
+    )
+    report_cop_margins = np.asarray(
+        report.get("cop_interior_margin_per_foot_m", ()), np.float64
+    )
+    per_foot_normals = np.asarray(
+        witness.get("normal_force_per_foot_n", ()), np.float64
+    )
+    report_per_foot_normals = np.asarray(
+        report.get("normal_force_per_foot_n", ()), np.float64
+    )
+    if (
+        contact_normals.ndim != 1
+        or contact_normals.size < 6
+        or not np.isfinite(contact_normals).all()
+        or np.any(
+            contact_normals
+            < WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N - 1.0e-7
+        )
+        or not np.array_equal(contact_normals, report_normals)
+        or cop_margins.shape != (2,)
+        or not np.isfinite(cop_margins).all()
+        or np.any(cop_margins <= 0.0)
+        or not np.array_equal(cop_margins, report_cop_margins)
+        or per_foot_normals.shape != (2,)
+        or not np.isfinite(per_foot_normals).all()
+        or np.any(
+            per_foot_normals
+            < WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_FOOT_N - 1.0e-7
+        )
+        or not np.array_equal(per_foot_normals, report_per_foot_normals)
+    ):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold witness lacks its required contact/CoP margin"
+        )
+
+    equality_residual = float(witness.get("equality_residual", math.inf))
+    root_residual = float(witness.get("root_residual", math.inf))
+    if not math.isfinite(equality_residual) or not math.isfinite(root_residual):
+        raise DynamicReadyMaterializationError(
+            "whole-body selected hold witness has non-finite LP residuals"
+        )
+    return torque_topp.GroundContactLPSolution(
+        feasible=True,
+        actuator_generalized_force=tau_model.copy(),
+        point_force_floor=np.empty((0, 3), np.float64),
+        equality_residual=equality_residual,
+        root_residual=root_residual,
+        report=dict(report),
+    )
+
+
 def _compose_measured_projected_frame0_physical_birth(
     *,
     teacher_q: np.ndarray,
@@ -1573,6 +2845,383 @@ def _compose_measured_projected_frame0_physical_birth(
     )
 
 
+def _compose_measured_whole_body_safe_frame0_physical_birth(
+    *,
+    teacher_q: np.ndarray,
+    teacher_root_pos: np.ndarray,
+    teacher_root_quat: np.ndarray,
+    backend: grounded.MujocoGroundedReadyBackend,
+    identity: grounded.ExactModelIdentity,
+    plant: Mapping[str, Any],
+    hard_inner_lower: np.ndarray,
+    hard_inner_upper: np.ndarray,
+    runtime_contract: Mapping[str, Any],
+    measured_racket_frame0: Mapping[str, Any],
+    motion_sha256: str,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Find a safe whole-body ready, then pull it toward measured frame 0."""
+
+    stored_teacher_q = np.asarray(teacher_q, np.float64).copy()
+    stored_teacher_root_pos = np.asarray(teacher_root_pos, np.float64).copy()
+    stored_teacher_root_quat = np.asarray(teacher_root_quat, np.float64).copy()
+    quaternion_norm = float(np.linalg.norm(stored_teacher_root_quat))
+    if (
+        stored_teacher_q.shape != (31,)
+        or stored_teacher_root_pos.shape != (3,)
+        or stored_teacher_root_quat.shape != (4,)
+        or not np.isfinite(stored_teacher_q).all()
+        or not np.isfinite(stored_teacher_root_pos).all()
+        or not np.isfinite(stored_teacher_root_quat).all()
+        or not math.isfinite(quaternion_norm)
+        or abs(quaternion_norm - 1.0) > 2.0e-6
+    ):
+        raise DynamicReadyMaterializationError(
+            "measured whole-body frame0 input is malformed"
+    )
+    measured = grounded.ReadyState(
+        stored_teacher_q,
+        stored_teacher_root_pos,
+        stored_teacher_root_quat / quaternion_norm,
+    )
+    stored_endpoint_state_sha256 = _stored_ready_state_sha256(
+        stored_teacher_q,
+        stored_teacher_root_pos,
+        stored_teacher_root_quat,
+    )
+    mjcf_audit_state_sha256 = grounded.state_digest(measured)
+    (
+        racket_reference_position,
+        racket_reference_rotation,
+        racket_reference_contract,
+    ) = _independent_measured_racket_frame0_reference(
+        measured_racket_frame0,
+        expected_motion_sha256=motion_sha256,
+    )
+    evaluator, evaluator_contract = _build_whole_body_safety_evaluator(
+        backend=backend,
+        identity=identity,
+        plant=plant,
+        hard_inner_lower=hard_inner_lower,
+        hard_inner_upper=hard_inner_upper,
+        runtime_contract=runtime_contract,
+    )
+    initial_states: list[grounded.ReadyState] = []
+    # The compiled vendor key is merely a deterministic optimizer start.  It
+    # imports no historical hold/authorization claim and is fully re-evaluated.
+    try:
+        initial_states.append(backend.vendor_key_state(0))
+    except Exception:
+        pass
+    search_config = whole_body_ready.WholeBodySearchConfig()
+    try:
+        result = whole_body_ready.solve_measured_conditioned_whole_body_safe_ready(
+            measured,
+            evaluator=evaluator,
+            racket_reference_position_w=racket_reference_position,
+            racket_reference_rotation_w=racket_reference_rotation,
+            position_lower=np.asarray(backend.position_lower, np.float64),
+            position_upper=np.asarray(backend.position_upper, np.float64),
+            initial_states=tuple(initial_states),
+            config=search_config,
+        )
+    except Exception as exc:
+        report = getattr(exc, "report", None)
+        suffix = "" if report is None else f"; report={report}"
+        raise DynamicReadyMaterializationError(
+            f"measured-conditioned whole-body safe-ready failed: {exc}{suffix}"
+        ) from exc
+
+    # Do not seal the optimizer closure's cached LP result.  Load a new exact
+    # backend and build a new LP solver after the winner is known, then make
+    # this cache-miss evaluation the sole physical/hold witness consumed by
+    # the artifact below.
+    try:
+        fresh_backend = grounded.MujocoGroundedReadyBackend.load(identity)
+        fresh_evaluator, fresh_evaluator_contract = (
+            _build_whole_body_safety_evaluator(
+                backend=fresh_backend,
+                identity=identity,
+                plant=plant,
+                hard_inner_lower=hard_inner_lower,
+                hard_inner_upper=hard_inner_upper,
+                runtime_contract=runtime_contract,
+            )
+        )
+        fresh_final = fresh_evaluator(result.state)
+    except Exception as exc:
+        raise DynamicReadyMaterializationError(
+            "fresh whole-body winner re-audit failed on a new exact backend: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    if fresh_evaluator_contract != evaluator_contract:
+        raise DynamicReadyMaterializationError(
+            "fresh whole-body evaluator contract differs from the search evaluator"
+        )
+    fresh_normalized_slacks = {
+        name: float(
+            fresh_final.slacks[name]
+            / whole_body_ready.DEFAULT_SLACK_SCALES[name]
+        )
+        for name in whole_body_ready.REQUIRED_SAFETY_SLACK_NAMES
+    }
+    required_final_gate = max(
+        search_config.positive_gate_normalized_slack,
+        float(result.stage1_locked_worst_normalized_slack),
+    )
+    exact_measured_frame0_selected = bool(
+        result.optimizer_report.get("exact_measured_frame0_selected", False)
+    )
+    fresh_direct_robust_gate_passed = all(
+        fresh_final.slacks[name]
+        >= whole_body_ready.DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS[name]
+        for name in whole_body_ready.REQUIRED_SAFETY_SLACK_NAMES
+    )
+    if (
+        not math.isfinite(required_final_gate)
+        or any(
+            value <= search_config.positive_gate_normalized_slack
+            or value < required_final_gate
+            for value in fresh_normalized_slacks.values()
+        )
+        or (
+            exact_measured_frame0_selected
+            and not fresh_direct_robust_gate_passed
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "fresh whole-body winner violates the original or stage-1 safety gate"
+        )
+    fresh_witness = dict(fresh_final.evidence)
+    expected_state_sha = grounded.state_digest(result.state)
+    if (
+        fresh_witness.get("lp_feasible") is not True
+        or fresh_witness.get("exact_state_lp_cache_hit") is not False
+        or fresh_witness.get("evaluated_state_sha256") != expected_state_sha
+        or fresh_witness.get("required_minimum_normal_force_per_contact_n")
+        != WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N
+    ):
+        raise DynamicReadyMaterializationError(
+            "fresh whole-body winner lacks one cache-miss 0.1N exact LP witness"
+        )
+    if not exact_measured_frame0_selected:
+        raise DynamicReadyMaterializationError(
+            "lexicographic fallback ready requires an authoritative swept "
+            "torque-speed transition certificate and runtime-consumed bridge; "
+            "no such authority is available"
+        )
+    if (
+        not np.array_equal(result.state.joint_pos, measured.joint_pos)
+        or not np.array_equal(result.state.root_pos_w, measured.root_pos_w)
+        or not np.array_equal(
+            result.state.root_quat_wxyz, measured.root_quat_wxyz
+        )
+    ):
+        raise DynamicReadyMaterializationError(
+            "exact-frame0 short circuit changed the teacher endpoint"
+        )
+    transition_contract = {
+        "schema_version": 1,
+        "kind": "exact_frame0_zero_duration_handoff_v1",
+        "selection_semantics": "threshold_first_exact_frame0_direct",
+        "state_sha256_semantics": (
+            "float64_array_bytes_without_quaternion_normalization_v1"
+        ),
+        "physical_ready_state_sha256": stored_endpoint_state_sha256,
+        "teacher_frame0_state_sha256": stored_endpoint_state_sha256,
+        "mjcf_audit_state_sha256": mjcf_audit_state_sha256,
+        "stored_root_quaternion_norm": quaternion_norm,
+        "mjcf_audit_root_quat_wxyz": measured.root_quat_wxyz.tolist(),
+        "mjcf_audit_quaternion_semantics": (
+            "stored_root_quat_unit_normalized_for_numerical_backend_only"
+        ),
+        "stored_teacher_and_physical_quaternion_unchanged": True,
+        "endpoints_bitwise_equal": True,
+        "physical_ready_joint_velocity_exact_zero": True,
+        "teacher_static_endpoint_joint_velocity_exact_zero": True,
+        "measured_motion_velocity_channels_consumed": False,
+        "not_a_motion_velocity_continuity_claim": True,
+        "certified_transition_s": 0.0,
+        "required_min_wait_s": 0.0,
+        "torque_speed_curve_required": False,
+        "torque_speed_non_requirement_reason": (
+            "identical_stored_configuration_and_constructed_zero_joint_"
+            "velocity_endpoints"
+        ),
+        "runtime_transition_reference_required": False,
+        "required_followup_hold_gate": "isaac_action_ball_nominal_hold_v1",
+        "required_followup_policy_steps": 200,
+        "required_followup_physics_steps": 800,
+        "diagnostic_unauthorized": True,
+        "training_authorized": False,
+    }
+    changed_indices = [
+        index for index, changed in enumerate(result.changed_joint_mask) if changed
+    ]
+    mount_sign = int(racket_reference_contract["robot_mount_normal_sign"])
+    racket_axis_local = np.asarray(
+        racket_reference_contract["robot_butt_to_blade_axis_local"],
+        np.float64,
+    )
+    physical_racket_position = fresh_final.racket_position_w
+    physical_racket_rotation = fresh_final.racket_rotation_w
+    physical_signed_face = (
+        physical_racket_rotation[:, 1] * float(mount_sign)
+    )
+    physical_long_axis = physical_racket_rotation @ racket_axis_local
+    measured_signed_face = np.asarray(
+        racket_reference_contract["signed_face_normal_w_unit"], np.float64
+    )
+    measured_long_axis = np.asarray(
+        racket_reference_contract["long_axis_w_unit"], np.float64
+    )
+    racket_position_delta = physical_racket_position - racket_reference_position
+    racket_rotation_delta = grounded._so3_log(
+        racket_reference_rotation.T @ physical_racket_rotation
+    )
+    face_error_rad = math.acos(
+        float(np.clip(physical_signed_face @ measured_signed_face, -1.0, 1.0))
+    )
+    long_axis_error_rad = math.acos(
+        float(np.clip(physical_long_axis @ measured_long_axis, -1.0, 1.0))
+    )
+    provenance = {
+        "semantics": MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_SEMANTICS,
+        "teacher_reference_unchanged": True,
+        "historical_physical_birth_seed_consumed": False,
+        "vendor_key_used_as_optimizer_start_only": bool(initial_states),
+        "selection_priority": [
+            "exact_measured_frame0_if_all_safety_gates_pass",
+            "lexicographic_whole_body_safe_ready_only_if_frame0_unsafe",
+        ],
+        "exact_measured_frame0_selected": bool(
+            exact_measured_frame0_selected
+        ),
+        "released_root_degrees_of_freedom": ["z", "roll", "pitch"],
+        "released_joint_indices": list(range(31)),
+        "released_joint_names": list(grounded.RUNTIME_JOINT_NAMES),
+        "changed_joint_mask": list(result.changed_joint_mask),
+        "changed_joint_indices": changed_indices,
+        "changed_joint_names": [
+            grounded.RUNTIME_JOINT_NAMES[index] for index in changed_indices
+        ],
+        "physical_minus_teacher_joint_pos_rad": list(result.joint_delta_rad),
+        "physical_minus_teacher_joint_pos_by_name_rad": {
+            name: float(result.joint_delta_rad[index])
+            for index, name in enumerate(grounded.RUNTIME_JOINT_NAMES)
+        },
+        "physical_minus_teacher_root_pos_m": list(result.root_position_delta_m),
+        "physical_minus_teacher_root_rotation_vector_rad": list(
+            result.root_rotation_delta_rad
+        ),
+        "physical_root_quat_wxyz": stored_teacher_root_quat.tolist(),
+        "stored_physical_root_quat_wxyz": stored_teacher_root_quat.tolist(),
+        "mjcf_audit_root_quat_wxyz": result.state.root_quat_wxyz.tolist(),
+        "teacher_root_quat_wxyz": stored_teacher_root_quat.tolist(),
+        "teacher_and_physical_birth_differ": bool(
+            changed_indices
+            or any(float(value) != 0.0 for value in result.root_position_delta_m)
+            or any(float(value) != 0.0 for value in result.root_rotation_delta_rad)
+        ),
+        "racket_site_fidelity": {
+            "site_name": MEASURED_PROJECTED_FRAME0_RACKET_SITE,
+            "site_semantics": "official_mjcf_site_against_independent_schema_v4_measured_blade",
+            "reference_authority": racket_reference_contract,
+            "physical_site_pos_w_m": physical_racket_position.tolist(),
+            "physical_signed_face_normal_w": physical_signed_face.tolist(),
+            "physical_long_axis_w": physical_long_axis.tolist(),
+            "physical_minus_measured_position_w_m": (
+                racket_position_delta.tolist()
+            ),
+            "position_error_m": float(np.linalg.norm(racket_position_delta)),
+            "physical_minus_measured_rotation_vector_rad": (
+                racket_rotation_delta.tolist()
+            ),
+            "orientation_error_rad": float(np.linalg.norm(racket_rotation_delta)),
+            "signed_face_error_rad": face_error_rad,
+            "long_axis_error_rad": long_axis_error_rad,
+            "independent_measured_frame0_required": True,
+        },
+        "safety_slacks": dict(fresh_final.slacks),
+        "normalized_safety_slacks": dict(fresh_normalized_slacks),
+        "worst_normalized_safety_slack": (
+            min(fresh_normalized_slacks.values())
+        ),
+        "stage1_locked_worst_normalized_safety_slack": (
+            result.stage1_locked_worst_normalized_slack
+        ),
+        "optimizer_report": dict(result.optimizer_report),
+        "evaluator_contract": fresh_evaluator_contract,
+        "safety_weighted_against_tracking": False,
+        "training_authorized": False,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
+        "required_live_table_gate": "isaac_action_ball_nominal_hold_v1",
+        "frame0_handoff": transition_contract,
+    }
+    static_evidence = {
+        "authority": "fresh_current_exact_mjcf_whole_body_lexicographic_search",
+        "selected_hold_witness_authority": (
+            "new_backend_new_solver_final_state_cache_miss"
+        ),
+        "exact_contact_lp_reused": False,
+        "all_safety_slacks_meet_original_and_locked_gate": all(
+            value > search_config.positive_gate_normalized_slack
+            and value >= required_final_gate
+            for value in fresh_normalized_slacks.values()
+        ),
+        "required_final_normalized_safety_gate": required_final_gate,
+        "direct_frame0_robust_minimum_slacks": dict(
+            whole_body_ready.DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS
+        ),
+        "direct_frame0_robust_gate_sha256": hashlib.sha256(
+            _canonical_json_bytes(
+                dict(whole_body_ready.DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS)
+            )
+        ).hexdigest(),
+        "fresh_direct_robust_gate_passed": (
+            fresh_direct_robust_gate_passed
+            if exact_measured_frame0_selected
+            else None
+        ),
+        "safety_slacks": dict(fresh_final.slacks),
+        "normalized_safety_slacks": dict(fresh_normalized_slacks),
+        "evaluator_evidence": fresh_witness,
+        "stored_endpoint_state_sha256": stored_endpoint_state_sha256,
+        "mjcf_audit_state_sha256": mjcf_audit_state_sha256,
+        "stored_root_quat_wxyz": stored_teacher_root_quat.tolist(),
+        "mjcf_audit_root_quat_wxyz": measured.root_quat_wxyz.tolist(),
+        "stored_root_quaternion_norm": quaternion_norm,
+        "independent_measured_racket_frame0": racket_reference_contract,
+        "racket_site_fidelity": provenance["racket_site_fidelity"],
+        "frame0_handoff": transition_contract,
+        "optimizer_report": dict(result.optimizer_report),
+        "geometry_passed": True,
+        "ground_dynamics_passed": True,
+    }
+    if (
+        static_evidence[
+            "all_safety_slacks_meet_original_and_locked_gate"
+        ]
+        is not True
+    ):
+        raise DynamicReadyMaterializationError(
+            "whole-body solver returned a final safety slack below its gate"
+        )
+    return (
+        stored_teacher_q,
+        stored_teacher_root_pos,
+        stored_teacher_root_quat,
+        provenance,
+        static_evidence,
+    )
+
+
 def _write_exclusive(path_value: str | Path, payload: bytes) -> Path:
     output = Path(path_value).expanduser().absolute()
     parent_input = output.parent
@@ -1587,28 +3236,52 @@ def _write_exclusive(path_value: str | Path, payload: bytes) -> Path:
             "output must have one concrete leaf under an existing real directory"
         )
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    parent_flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     parent_descriptor = os.open(parent, parent_flags)
+    descriptor = -1
+    temporary_name: str | None = None
     try:
-        descriptor = os.open(
-            output.name,
-            flags,
-            0o644,
-            dir_fd=parent_descriptor,
-        )
+        for _attempt in range(128):
+            candidate = f".a3-ready-{secrets.token_hex(16)}.tmp"
+            try:
+                descriptor = os.open(
+                    candidate,
+                    flags,
+                    0o644,
+                    dir_fd=parent_descriptor,
+                )
+            except FileExistsError:
+                continue
+            temporary_name = candidate
+            break
+        if descriptor < 0 or temporary_name is None:
+            raise FileExistsError("cannot allocate a unique output temp file")
         try:
-            view = memoryview(payload)
-            written = 0
-            while written < len(view):
-                count = os.write(descriptor, view[written:])
-                if count <= 0:
-                    raise OSError("exclusive write made no progress")
-                written += count
+            _write_all(descriptor, payload)
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
+            descriptor = -1
+        os.link(
+            temporary_name,
+            output.name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        os.unlink(temporary_name, dir_fd=parent_descriptor)
+        temporary_name = None
+        os.fsync(parent_descriptor)
     finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name, dir_fd=parent_descriptor)
+            except OSError:
+                pass
         os.close(parent_descriptor)
     return output
 
@@ -1635,8 +3308,9 @@ def _exact_model_identity(
         raise DynamicReadyMaterializationError(
             "stable receipt exact-model joint order is not the A3 runtime order"
         )
+    pinned_mjcf_path = _pinned_mjcf_path(mjcf_path)
     return grounded.ExactModelIdentity(
-        mjcf_path=str(mjcf_path),
+        mjcf_path=str(pinned_mjcf_path),
         mjcf_sha256=mjcf_sha256,
         compiled_model_sha256=_require_sha256(
             exact.get("compiled_model_sha256"),
@@ -1667,12 +3341,13 @@ def _derive_exact_model_identity(
     try:
         import mujoco
 
-        model = mujoco.MjModel.from_xml_path(str(mjcf_path))
+        pinned_mjcf_path = _pinned_mjcf_path(mjcf_path)
+        model = mujoco.MjModel.from_xml_path(str(pinned_mjcf_path))
         compiled_sha = path_adapter.compiled_model_signature(model, mujoco)
         binding = path_adapter.bind_exact_mujoco_model(
             mujoco,
             model,
-            mjcf_path=mjcf_path,
+            mjcf_path=pinned_mjcf_path,
             expected_mjcf_sha256=mjcf_sha256,
             expected_compiled_model_sha256=compiled_sha,
             expected_xml_model_name=path_adapter.EXPECTED_MJCF_MODEL_NAME,
@@ -1683,7 +3358,7 @@ def _derive_exact_model_identity(
             f"cannot derive exact measured-branch MuJoCo identity: {exc}"
         ) from exc
     return grounded.ExactModelIdentity(
-        mjcf_path=str(mjcf_path),
+        mjcf_path=str(pinned_mjcf_path),
         mjcf_sha256=mjcf_sha256,
         compiled_model_sha256=binding.compiled_model_sha256,
         path_model_binding_sha256=binding.model_binding_sha256,
@@ -2053,6 +3728,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         MEASURED_BIRTH_FULL_SEED_MODE,
         MEASURED_BIRTH_DIRECT_FRAME0_MODE,
         MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
+        MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE,
     ):
         raise DynamicReadyMaterializationError(
             "unsupported measured physical-birth composition mode"
@@ -2121,6 +3797,7 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     seedless_frame0_birth = measured_birth_mode in (
         MEASURED_BIRTH_DIRECT_FRAME0_MODE,
         MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
+        MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE,
     )
     if source_kind == MEASURED_RETARGET_SOURCE_KIND and seedless_frame0_birth:
         teacher_q, teacher_root_pos, teacher_root_quat = (
@@ -2339,6 +4016,28 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 backend=backend,
                 identity=identity,
             )
+        elif measured_birth_mode == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE:
+            (
+                ready_q,
+                ready_root_pos,
+                ready_root_quat,
+                physical_birth_composition,
+                static_birth_evidence,
+            ) = _compose_measured_whole_body_safe_frame0_physical_birth(
+                teacher_q=teacher_q,
+                teacher_root_pos=teacher_root_pos,
+                teacher_root_quat=teacher_root_quat,
+                backend=backend,
+                identity=identity,
+                plant=plant,
+                hard_inner_lower=hard_inner_lower,
+                hard_inner_upper=hard_inner_upper,
+                runtime_contract=runtime_contract,
+                measured_racket_frame0=measured_evidence.get(
+                    "measured_racket_frame0"
+                ),
+                motion_sha256=motion_sha,
+            )
         else:
             seed_ready = grounded.ReadyState(
                 np.asarray(physical_birth_seed["joint_pos_rad"], np.float64),
@@ -2375,13 +4074,40 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         backend_ready_root_quat = ready_root_quat / stored_quaternion_norm
         physical_birth_composition["current_mjcf_audit_quaternion"] = {
             "semantics": "unit_normalization_for_numerical_backend_only",
-            "stored_teacher_and_physical_quaternion_unchanged": True,
+            "stored_teacher_and_physical_quaternion_unchanged": (
+                True
+            ),
             "stored_quaternion_norm": stored_quaternion_norm,
             "backend_root_quat_wxyz": backend_ready_root_quat.tolist(),
         }
     ready = grounded.ReadyState(
         ready_q, ready_root_pos, backend_ready_root_quat
     )
+    if (
+        source_kind == MEASURED_RETARGET_SOURCE_KIND
+        and measured_birth_mode == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE
+    ):
+        handoff = physical_birth_composition.get("frame0_handoff")
+        stored_state_sha = _stored_ready_state_sha256(
+            ready_q, ready_root_pos, ready_root_quat
+        )
+        if (
+            not isinstance(handoff, Mapping)
+            or not np.array_equal(ready_q, teacher_q)
+            or not np.array_equal(ready_root_pos, teacher_root_pos)
+            or not np.array_equal(ready_root_quat, teacher_root_quat)
+            or handoff.get("physical_ready_state_sha256") != stored_state_sha
+            or handoff.get("teacher_frame0_state_sha256") != stored_state_sha
+            or handoff.get("mjcf_audit_state_sha256")
+            != grounded.state_digest(ready)
+            or not np.array_equal(
+                np.asarray(handoff.get("mjcf_audit_root_quat_wxyz", ())),
+                ready.root_quat_wxyz,
+            )
+        ):
+            raise DynamicReadyMaterializationError(
+                "whole-body exact-zero handoff does not bind emitted and audit states"
+            )
     if source_kind == MEASURED_RETARGET_SOURCE_KIND:
         if not seedless_frame0_birth:
             seed_yaw_alignment_evidence = _audit_realized_seed_yaw_alignment(
@@ -2414,14 +4140,27 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             )
     qpos = backend._qpos(ready)
 
+    whole_body_selected_hold = bool(
+        source_kind == MEASURED_RETARGET_SOURCE_KIND
+        and measured_birth_mode == MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE
+    )
+    selected_contact_normal_n = (
+        WHOLE_BODY_MINIMUM_NORMAL_FORCE_PER_CONTACT_N
+        if whole_body_selected_hold
+        else robust_contact_normal_n
+    )
     ground_config = torque_topp.GroundContactConfig(
         expected_model_binding=identity.ground_model_binding_sha256,
-        model_source_path=str(mjcf_path),
+        model_source_path=str(_pinned_mjcf_path(mjcf_path)),
         expected_source_sha256=mjcf_sha,
-        minimum_normal_force_per_contact_n=robust_contact_normal_n,
+        minimum_normal_force_per_contact_n=selected_contact_normal_n,
     )
-    solver = torque_topp.MujocoGroundContactLPSolver(
-        backend.model, ground_config
+    solver = (
+        None
+        if whole_body_selected_hold
+        else torque_topp.MujocoGroundContactLPSolver(
+            backend.model, ground_config
+        )
     )
     actuator_contract = torque_topp.direct_actuator_contract_from_mujoco(
         backend.model,
@@ -2493,17 +4232,50 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "hold torque envelope must contain zero on both sides"
         )
 
-    solution = solver.solve(
-        qpos,
-        np.zeros(int(backend.model.nv), np.float64),
-        np.zeros(int(backend.model.nv), np.float64),
-        actuated,
-        hold_tau_lower_model,
-        hold_tau_upper_model,
-        np.full(int(backend.model.nv), 1.0e6, np.float64),
-        path_tangent=np.zeros(int(backend.model.nv), np.float64),
-        lp_objective=LP_OBJECTIVE,
-    )
+    if whole_body_selected_hold:
+        solution = _consume_whole_body_selected_hold_witness(
+            static_birth_evidence=static_birth_evidence,
+            ready_q=ready_q,
+            ready_root_pos=ready_root_pos,
+            ready_root_quat=ready.root_quat_wxyz,
+            identity=identity,
+            kp=plant["kp"],
+            model_row_for_runtime=model_row_for_runtime,
+            actuated=np.asarray(actuated, np.int64),
+            expected_vectors={
+                "executed_qdes_lower_rad": executed_qdes_lower,
+                "executed_qdes_upper_rad": executed_qdes_upper,
+                "model_tau_lower_mujoco_row_order_nm": model_tau_lower,
+                "model_tau_upper_mujoco_row_order_nm": model_tau_upper,
+                "runtime_tau_lower_runtime_order_nm": runtime_tau_lower,
+                "runtime_tau_upper_runtime_order_nm": runtime_tau_upper,
+                "runtime_tau_lower_mujoco_row_order_nm": (
+                    runtime_tau_lower_model
+                ),
+                "runtime_tau_upper_mujoco_row_order_nm": (
+                    runtime_tau_upper_model
+                ),
+                "effective_tau_lower_mujoco_row_order_nm": (
+                    hold_tau_lower_model
+                ),
+                "effective_tau_upper_mujoco_row_order_nm": (
+                    hold_tau_upper_model
+                ),
+            },
+        )
+    else:
+        assert solver is not None
+        solution = solver.solve(
+            qpos,
+            np.zeros(int(backend.model.nv), np.float64),
+            np.zeros(int(backend.model.nv), np.float64),
+            actuated,
+            hold_tau_lower_model,
+            hold_tau_upper_model,
+            np.full(int(backend.model.nv), 1.0e6, np.float64),
+            path_tangent=np.zeros(int(backend.model.nv), np.float64),
+            lp_objective=LP_OBJECTIVE,
+        )
     if not solution.feasible:
         raise DynamicReadyMaterializationError(
             "no static double-support hold exists inside the executed qdes envelope"
@@ -2514,17 +4286,17 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
     cop_interior_margins = np.asarray(
         solution.report.get("cop_interior_margin_per_foot_m", ()), np.float64
     )
-    if robust_contact_normal_n > 0.0 and (
+    if selected_contact_normal_n > 0.0 and (
         contact_normals.ndim != 1
         or contact_normals.size < 6
         or not np.all(np.isfinite(contact_normals))
-        or np.any(contact_normals < robust_contact_normal_n - 1.0e-7)
+        or np.any(contact_normals < selected_contact_normal_n - 1.0e-7)
         or cop_interior_margins.shape != (2,)
         or not np.all(np.isfinite(cop_interior_margins))
         or np.any(cop_interior_margins <= 0.0)
     ):
         raise DynamicReadyMaterializationError(
-            "robust-contact full seed lacks positive support-vertex/CoP margin"
+            "selected hold lacks its required support-vertex/CoP margin"
         )
     fresh_tau_model = np.asarray(
         solution.actuator_generalized_force, np.float64
@@ -2649,12 +4421,12 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "diagnostic_unauthorized": True,
             "training_authorized": False,
             "robust_contact_interior": {
-                "enabled": robust_contact_normal_n > 0.0,
+                "enabled": selected_contact_normal_n > 0.0,
                 "semantics": (
                     "every_exact_mujoco_support_vertex_has_positive_normal_force"
                 ),
                 "minimum_normal_force_per_support_vertex_n": (
-                    robust_contact_normal_n
+                    selected_contact_normal_n
                 ),
                 "normal_force_per_support_vertex_n": contact_normals.tolist(),
                 "cop_interior_margin_per_foot_m": (
@@ -2750,6 +4522,17 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "root_pos_w_m": teacher_root_pos.tolist(),
             "root_quat_wxyz": teacher_root_quat.tolist(),
             "joint_pos_rad": teacher_q.tolist(),
+            **(
+                {
+                    "static_handoff_joint_vel_radps": [0.0] * 31,
+                    "static_handoff_velocity_semantics": (
+                        "constructed_zero_joint_velocity_endpoint_not_"
+                        "measured_motion_velocity"
+                    ),
+                }
+                if whole_body_selected_hold
+                else {}
+            ),
         },
         **(
             {}
@@ -2758,6 +4541,15 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
                 "physical_birth_composition": physical_birth_composition,
                 "physical_birth_static_evidence": static_birth_evidence,
             }
+        ),
+        **(
+            {
+                "frame0_handoff": physical_birth_composition[
+                    "frame0_handoff"
+                ]
+            }
+            if whole_body_selected_hold
+            else {}
         ),
         "physical_ready": {
             "root_pos_w_m": ready_root_pos.tolist(),
@@ -2806,9 +4598,13 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "semantics": (
                 "tau_pd=kp*(qdes-physical_q) at zero joint velocity; "
                 + (
-                    "current MuJoCo contact LP initializes the candidate"
-                    if full_seed_qdes_mode
-                    == FULL_SEED_QDES_FRESH_STATIC_LP
+                    (
+                        "the new-backend cache-miss whole-body final-state LP "
+                        "is the single selected witness"
+                        if whole_body_selected_hold
+                        else "current MuJoCo contact LP initializes the candidate"
+                    )
+                    if full_seed_qdes_mode == FULL_SEED_QDES_FRESH_STATIC_LP
                     else (
                         "content-pinned seed numerics are transported under "
                         "world-z yaw symmetry; current MuJoCo contact LP is "
@@ -2820,9 +4616,12 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "hold_qdes_mode": full_seed_qdes_mode,
             "selected_hold_authority": {
                 "semantics": (
-                    "fresh_current_mjcf_static_lp"
-                    if full_seed_qdes_mode
-                    == FULL_SEED_QDES_FRESH_STATIC_LP
+                    (
+                        "fresh_new_backend_whole_body_final_state_0p1n_static_lp"
+                        if whole_body_selected_hold
+                        else "fresh_current_mjcf_static_lp"
+                    )
+                    if full_seed_qdes_mode == FULL_SEED_QDES_FRESH_STATIC_LP
                     else (
                         "world_z_yaw_symmetry_transport_of_content_pinned_"
                         "seed_numerics"
@@ -2868,7 +4667,11 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "actuator_limit_contract": actuator_limit_report,
             "solver_report": solution.report,
             "solver_report_role": (
-                "selected_hold_solution"
+                (
+                    "selected_whole_body_final_state_single_witness"
+                    if whole_body_selected_hold
+                    else "selected_hold_solution"
+                )
                 if full_seed_qdes_mode
                 == FULL_SEED_QDES_FRESH_STATIC_LP
                 else "fresh_current_mjcf_comparator_not_selected"
@@ -2892,6 +4695,19 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
         },
         "required_next_gate": {
             "kind": "isaac_action_ball_nominal_hold_v1",
+            "required_policy_steps": (
+                200 if whole_body_selected_hold else None
+            ),
+            "required_physics_steps": (
+                800 if whole_body_selected_hold else None
+            ),
+            "required_min_wait_s": (
+                physical_birth_composition["frame0_handoff"][
+                    "required_min_wait_s"
+                ]
+                if whole_body_selected_hold
+                else None
+            ),
             "minimum_horizon_semantics": "validated_t_hit_plus_reaction_margin",
             "zero_terminal_required": [
                 "joint_qdes_forbidden",
@@ -2918,6 +4734,12 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             "grounded_ready_tool_path": str(Path(grounded.__file__).resolve()),
             "grounded_ready_tool_sha256": _sha256_file(
                 Path(grounded.__file__).resolve()
+            ),
+            "whole_body_safe_ready_tool_path": str(
+                Path(whole_body_ready.__file__).resolve()
+            ),
+            "whole_body_safe_ready_tool_sha256": _sha256_file(
+                Path(whole_body_ready.__file__).resolve()
             ),
             "mujoco_path_adapter_tool_path": str(
                 Path(path_adapter.__file__).resolve()
@@ -2968,6 +4790,7 @@ def _parser() -> argparse.ArgumentParser:
             MEASURED_BIRTH_FULL_SEED_MODE,
             MEASURED_BIRTH_DIRECT_FRAME0_MODE,
             MEASURED_BIRTH_PROJECTED_FRAME0_MODE,
+            MEASURED_BIRTH_WHOLE_BODY_SAFE_FRAME0_MODE,
         ),
         default=MEASURED_BIRTH_SHARED_LOWER_MODE,
         help=(
@@ -2976,7 +4799,9 @@ def _parser() -> argparse.ArgumentParser:
             "measured motion remains the exact teacher, or use exact teacher "
             "frame0 root/joints directly without consuming a historical seed, "
             "or ground frame0 by projecting only leg12 while preserving root, "
-            "non-leg joints, and exact racket-site FK"
+            "non-leg joints, and exact racket-site FK, or run the measured-"
+            "conditioned lexical whole-body search that releases root z/roll/"
+            "pitch and all 31 joints while locking safety before fidelity"
         ),
     )
     parser.add_argument(
