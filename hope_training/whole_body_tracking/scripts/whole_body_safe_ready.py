@@ -325,6 +325,47 @@ def solve_measured_conditioned_whole_body_safe_ready(
     def worst(value: np.ndarray) -> float:
         return float(np.min(evaluate(value)[2]))
 
+    def stage1_feasibility_restoration_key(
+        value: np.ndarray,
+    ) -> tuple[float, ...]:
+        """Return a bounded per-gate key used only to navigate infeasible states.
+
+        An infeasible contact LP reports several deliberately conservative
+        sentinels.  In particular, a residual slack near ``-1`` becomes about
+        ``-1e6`` after its physical ``1e-6`` normalization.  Maximizing only
+        the raw minimum then makes every coordinate trial look identical until
+        the discontinuous LP suddenly becomes feasible; pattern search cannot
+        take the smooth sole/contact-precondition steps needed to reach it.
+
+        This key is a standard feasibility-restoration merit: first reduce the
+        number of uncleared gates, then their bounded dimensionless deficits.
+        Clipping is deliberately confined to *navigation*.  Stage 1 still
+        selects its winner by the uncapped worst normalized slack below, and
+        both the original positive gate and the fresh final evaluator remain
+        authoritative.
+        """
+
+        normalized = evaluate(value)[2]
+        gate = float(cfg.positive_gate_normalized_slack)
+        unsafe_count = float(np.count_nonzero(normalized <= gate))
+        deficits = np.maximum(gate - normalized, 0.0)
+        with np.errstate(over="ignore", invalid="ignore"):
+            bounded_deficits = 1.0 - 1.0 / (1.0 + deficits)
+        bounded_deficits = np.nan_to_num(
+            bounded_deficits,
+            nan=1.0,
+            posinf=1.0,
+            neginf=0.0,
+        )
+        clipped_margins = np.clip(normalized - gate, -1.0, 1.0)
+        return (
+            unsafe_count,
+            float(bounded_deficits @ bounded_deficits),
+            float(np.sum(bounded_deficits)),
+            -float(np.sum(clipped_margins)),
+            -float(np.min(clipped_margins)),
+        )
+
     racket_reference_position = np.asarray(
         racket_reference_position_w, np.float64
     )
@@ -474,6 +515,7 @@ def solve_measured_conditioned_whole_body_safe_ready(
         objective: Callable[[np.ndarray], float],
         feasible: Callable[[np.ndarray], bool],
         maximum_sweeps: int,
+        ranking: Callable[[np.ndarray], tuple[float, ...]] | None = None,
     ) -> dict[str, Any]:
         """Bounded deterministic pattern search with no optional dependency.
 
@@ -482,8 +524,39 @@ def solve_measured_conditioned_whole_body_safe_ready(
         is preferable to an optimizer whose library/version changes sampling.
         """
 
+        def ranking_key(
+            candidate: np.ndarray, candidate_score: float
+        ) -> tuple[float, ...]:
+            raw = (
+                (candidate_score,)
+                if ranking is None
+                else tuple(float(item) for item in ranking(candidate))
+            )
+            if not raw or not all(math.isfinite(item) for item in raw):
+                raise WholeBodySafeReadyError(
+                    "coordinate-search ranking is empty or nonfinite",
+                    code="INVALID_SEARCH_RANKING",
+                )
+            return raw
+
+        def improves(
+            candidate: tuple[float, ...], incumbent: tuple[float, ...]
+        ) -> bool:
+            if len(candidate) != len(incumbent):
+                raise WholeBodySafeReadyError(
+                    "coordinate-search ranking cardinality changed",
+                    code="INVALID_SEARCH_RANKING",
+                )
+            for candidate_item, incumbent_item in zip(candidate, incumbent):
+                if candidate_item < incumbent_item - cfg.optimizer_ftol:
+                    return True
+                if candidate_item > incumbent_item + cfg.optimizer_ftol:
+                    return False
+            return False
+
         value = np.clip(np.asarray(start, np.float64), variable_lower, variable_upper)
         score = float(objective(value))
+        score_key = ranking_key(value, score)
         steps = 0.25 * (variable_upper - variable_lower)
         sweeps = 0
         accepted = 0
@@ -491,7 +564,9 @@ def solve_measured_conditioned_whole_body_safe_ready(
             sweeps += 1
             improved = False
             for index in range(len(value)):
-                choices: list[tuple[float, np.ndarray]] = []
+                choices: list[
+                    tuple[tuple[float, ...], float, np.ndarray]
+                ] = []
                 for sign in (-1.0, 1.0):
                     trial = value.copy()
                     trial[index] = float(
@@ -503,15 +578,30 @@ def solve_measured_conditioned_whole_body_safe_ready(
                     )
                     if trial[index] == value[index] or not feasible(trial):
                         continue
-                    choices.append((float(objective(trial)), trial))
-                if choices:
-                    trial_score, trial = min(
-                        choices,
-                        key=lambda row: (row[0], row[1].tobytes()),
+                    trial_score = float(objective(trial))
+                    choices.append(
+                        (
+                            ranking_key(trial, trial_score),
+                            trial_score,
+                            trial,
+                        )
                     )
-                    if trial_score < score - cfg.optimizer_ftol:
+                if choices:
+                    trial_key, trial_score, trial = choices[0]
+                    for candidate_key, candidate_score, candidate in choices[1:]:
+                        candidate_better = improves(candidate_key, trial_key)
+                        trial_better = improves(trial_key, candidate_key)
+                        if candidate_better or (
+                            not trial_better
+                            and candidate.tobytes() < trial.tobytes()
+                        ):
+                            trial_key = candidate_key
+                            trial_score = candidate_score
+                            trial = candidate
+                    if improves(trial_key, score_key):
                         value = trial
                         score = trial_score
+                        score_key = trial_key
                         accepted += 1
                         improved = True
             if not improved:
@@ -519,6 +609,7 @@ def solve_measured_conditioned_whole_body_safe_ready(
         return {
             "x": value,
             "objective": score,
+            "ranking": score_key,
             "success": bool(feasible(value)),
             "status": 0 if feasible(value) else 1,
             "message": (
@@ -538,6 +629,7 @@ def solve_measured_conditioned_whole_body_safe_ready(
             objective=lambda value: -worst(value),
             feasible=lambda _value: True,
             maximum_sweeps=cfg.stage1_max_iterations,
+            ranking=stage1_feasibility_restoration_key,
         )
         stage1_candidates.append(np.asarray(result["x"], np.float64))
         stage1_rows.append(
@@ -549,8 +641,15 @@ def solve_measured_conditioned_whole_body_safe_ready(
                 "iterations": int(result["iterations"]),
                 "accepted_steps": int(result["accepted_steps"]),
                 "worst_normalized_slack": worst(result["x"]),
+                "feasibility_restoration_key": list(result["ranking"]),
             }
         )
+    # Search navigation may temporarily trade one unsafe margin for progress
+    # on another.  The lexical stage-1 authority is therefore selected from
+    # every exact evaluation, not merely the navigation endpoints.
+    stage1_candidates.extend(
+        np.frombuffer(key, dtype=np.float64).copy() for key in cache
+    )
     stage1_value = max(stage1_candidates, key=worst)
     stage1_worst = worst(stage1_value)
     if stage1_worst <= cfg.positive_gate_normalized_slack:
@@ -564,6 +663,10 @@ def solve_measured_conditioned_whole_body_safe_ready(
                 "best_normalized_slacks": dict(zip(REQUIRED_SAFETY_SLACK_NAMES, normalized.tolist())),
                 "worst_normalized_slack": stage1_worst,
                 "stage1_runs": stage1_rows,
+                "stage1_navigation_objective": (
+                    "minimize_count_and_bounded_dimensionless_deficit_of_"
+                    "uncleared_physical_gates"
+                ),
                 "evaluation_count": evaluation_count,
             },
         )
@@ -662,6 +765,10 @@ def solve_measured_conditioned_whole_body_safe_ready(
                 "algorithm": "two_stage_deterministic_coordinate_local_lexicographic",
                 "global_optimum_claimed": False,
                 "stage1_objective": "maximize_min_normalized_physical_safety_slack",
+                "stage1_navigation_objective": (
+                    "minimize_count_and_bounded_dimensionless_deficit_of_"
+                    "uncleared_physical_gates"
+                ),
                 "stage2_objective": "minimize_weighted_root_31q_racket_error",
                 "racket_reference_authority": racket_reference_authority,
                 "safety_weighted_against_tracking": False,

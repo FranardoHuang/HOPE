@@ -233,6 +233,90 @@ def test_search_fails_closed_without_positive_all_gate_interior() -> None:
     assert caught.value.report["best_slacks"]["table_clearance_slack_m"] < 0.0
 
 
+def test_stage1_restores_feasibility_across_ground_lp_sentinel_plateau() -> None:
+    """LP sentinels must not suppress smooth pre-contact search progress.
+
+    This models the Pod failure: while either sole is outside the contact
+    tolerance the LP returns conservative ``-1`` sentinels, including a
+    ground residual which normalizes to roughly ``-1e6``.  Reaching the valid
+    LP region requires two separate coordinate moves, neither of which alone
+    improves that raw worst value.
+    """
+
+    waist_index = grounded.RUNTIME_JOINT_NAMES.index("waist_yaw_joint")
+    measured = _state(root_z=0.9, waist_yaw=0.0)
+
+    def discontinuous_lp(
+        state: grounded.ReadyState,
+    ) -> safe_ready.SafetyEvaluation:
+        waist = float(state.joint_pos[waist_index])
+        root_delta = float(state.root_pos_w[2] - 0.9)
+        left_sole = waist - 0.05
+        right_sole = root_delta - 0.05
+        lp_feasible = left_sole > 0.0 and right_sole > 0.0
+        slacks = {
+            name: 0.2 for name in safe_ready.REQUIRED_SAFETY_SLACK_NAMES
+        }
+        slacks["left_sole_floor_slack_m"] = left_sole
+        slacks["right_sole_floor_slack_m"] = right_sole
+        if not lp_feasible:
+            slacks.update(
+                {
+                    "left_contact_load_slack_n": -1.0,
+                    "right_contact_load_slack_n": -1.0,
+                    "support_margin_slack_m": -1.0,
+                    "qdes_slack_rad": -1.0,
+                    "torque_slack_nm": -1.0,
+                    "ground_lp_residual_slack": 2.0e-7 - 1.0,
+                }
+            )
+        return safe_ready.SafetyEvaluation(
+            slacks=slacks,
+            racket_position_w=np.asarray(
+                [0.8 + waist, -0.2, 1.1 + root_delta], np.float64
+            ),
+            racket_rotation_w=np.eye(3),
+            evidence={"lp_feasible": lp_feasible},
+        )
+
+    measured_row = discontinuous_lp(measured)
+    measured_ground_normalized = (
+        measured_row.slacks["ground_lp_residual_slack"]
+        / safe_ready.DEFAULT_SLACK_SCALES["ground_lp_residual_slack"]
+    )
+    assert measured_ground_normalized == pytest.approx(-999999.8)
+
+    result = safe_ready.solve_measured_conditioned_whole_body_safe_ready(
+        measured,
+        evaluator=discontinuous_lp,
+        **_independent_racket_reference(),
+        position_lower=np.full(31, -0.2),
+        position_upper=np.full(31, 0.2),
+        config=safe_ready.WholeBodySearchConfig(
+            stage1_max_iterations=40,
+            stage2_max_iterations=40,
+        ),
+    )
+
+    assert sum(
+        row["accepted_steps"]
+        for row in result.optimizer_report["stage1_runs"]
+    ) > 0
+    assert result.evaluator_evidence["lp_feasible"] is True
+    assert result.safety_slacks["left_sole_floor_slack_m"] > 0.0
+    assert result.safety_slacks["right_sole_floor_slack_m"] > 0.0
+    assert all(value > 0.0 for value in result.safety_slacks.values())
+    assert all(
+        len(row["feasibility_restoration_key"]) == 5
+        for row in result.optimizer_report["stage1_runs"]
+    )
+    assert all(
+        value
+        > safe_ready.WholeBodySearchConfig().positive_gate_normalized_slack
+        for value in result.normalized_safety_slacks.values()
+    )
+
+
 def test_stage2_lock_cannot_relax_below_original_positive_gate() -> None:
     """Regression for a stage-1 interior thinner than the lock tolerance.
 
