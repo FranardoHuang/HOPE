@@ -139,6 +139,10 @@ def _valid_recipe(**overrides):
         "action_ball_evaluation_run_id": "run-001",
         "action_ball_frozen_eval_interval_updates": 100,
         "action_ball_seed": 7,
+        # S0 新增的必填开关: 课程自有的 level-zero 单题(所有 32 个 domain level
+        # 全零时把物理字段钉在 profile 中心), 校验器要求它是精确 bool。
+        # 出厂的 A211/C211 诊断 YAML 都是 true, 这里照抄真实发射配方。
+        "action_ball_initial_center_single_question": True,
         "action_ball_pool_refill_rows": 16,
         "cq_n_iters": 24,
         "cq_max_redraw_rounds": 5,

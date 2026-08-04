@@ -771,6 +771,56 @@ accepted window `1.85151` 的 `107%`。即在本文自己的口径下，**“站
 
 仍待确认（非代码）：`0.347 m` 的站位离台边偏近（人类选手一般 `0.5--1 m`），需对着实际击球点位置复核。
 
+#### 5.6.2c 探索包：零权重 bootstrap 与 `init_noise_std` 是同一件事（2026-08-05）
+
+**事实。** 本分支的 actor 用零权重输出层 + bias 钉死在 ready 姿态，因此**初始策略是一个常数**；
+`training_contract.py` 的 4σ 硬内带门正是为它而存在，按 hold 姿态逐关节复算给出 σ 上界 `0.1698`
+（绑定关节 `waist_pitch`）。`build_1` 的 `HitterPingPong`——目前唯一已知能打到球的同底盘臂——
+**三样都没有**：无零权重初始化、无钉死 bias、无 4σ 门，`init_noise_std: 1.0`。该 bootstrap 在
+`git log -S` 中查不到引入点，即它只存在于尚未提交的 v5 改写里。
+
+**机制修正（此前 §5.6 表述有误，以本节为准）。** “σ 小 -> 梯度小 -> 学不动”是错的：PPO 对均值的梯度
+约为 `A * (a - mu) / sigma^2`，`1/sigma^2` 反而放大单位 advantage 的梯度。真正的机制是
+**σ 小则采样动作几乎相同，advantage 本身趋于零**——不是梯度小，是信号没有了。
+
+**本任务特有的叠加，也是本节的关键。** 本配方存在一份**不受策略控制**的回报方差源：
+每 episode `5--25` tick 的随机隐藏 WAIT。等待长度差 `20` tick，仅 `upright_exp`（对齐前 `+0.02/`步）
+一项就造成约 `±0.4` 的回报差；而 `sigma=0.02` 时肩 pitch 的 1σ 动作扰动只有 `0.43 度`，其在 mimic 核上
+引起的回报差要小若干数量级。**动作造成的回报差被等待造成的回报差淹没**，优势估计实际上在拟合
+“这一局等了几 tick”。这是结构性的信噪比问题，不是超参数调优问题。
+
+**bootstrap 的前提已经消失（决定性证据）。** 它由 commit `b1d299e1`（2026-07-29
+"Fix ActionBall launch safety and bootstrap"）一次落地，理由写在同批文档 hunk 里：当时
+`joint_qdes_forbidden` 是**硬终止**，标准初始化 + `sigma=1.0` 的 fresh policy 出现
+`24/24 policy steps` 全为 `joint_qdes_forbidden`、mean episode length 约 `1.0`
+（`docs/gates/G05_isaac_training_first_loop.md:4135`）——出生即被 reset。把初始策略钉成常数、
+`sigma` 压到 `0.02`，正是为了让 `q_des` 物理上出不了那条带。
+
+**但同一个 commit 还引入了 `finite q_des execution projection` 与 `qdes_projection_penalty`**，
+即**把该 reset 本身取消掉的机制**。两个修复同批落地，此后无人回头复核 bootstrap 是否仍有必要。
+按 §1 已冻结的当前语义，有限越界 proposal **被投影并保留 transition**，只有有效 pre-clamp affine
+`q_des` 含 `NaN/Inf` 才终止。**因此 bootstrap 所防的威胁已不存在**，而它的代价——初始策略是常数、
+`sigma` 被 4σ 门压到 `0.1698` 以下——恰好就是当前的可学性病灶。4σ 门同理：它保护的是一件
+clamp/投影/罚三层已经处理的事。
+
+**保留意见（因此不直接照搬）。** `build_1` 的 reset 分布与本分支不同（三分支：`25%` 站立 /
+`35%` 随挥回放 / `40%` RSI 带位姿速度关节噪声，每 episode `3--4` 拍），所以“`build_1` 用 `1.0` 能打到球”
+不能直接推出“本分支改 σ 就能”。σ 与 bootstrap 是一包，reset 分布是另一包。
+
+**裁决：测这一包，而非照搬。** 一卡两进程 × 3 卡 = 6 槽，把第二轴由 PPO schedule（二阶）换成
+探索包（一阶）：
+
+| 格 | 初始化 | `init_noise_std` | 回答的问题 |
+| --- | --- | ---: | --- |
+| `A0 / C0` | 零权重 + 钉 bias（现状） | `0.1` | 当前结构在 4σ 门下的上限 |
+| `A1 / C1` | 标准初始化 | `1.0` | `build_1` 对齐 |
+| `A2 / C2` | 标准初始化 | `0.3` | 中间点 |
+
+判读：`A1/C1` 出现接触而 `A0/C0` 没有，则 bootstrap 是病灶；三档都没有接触，则排除探索包、
+下一嫌疑是 reset 起点分布（§5.6 第 4 条与尽调 §9 的“起点塌缩”）。原四格的 `fixed-lr1e-4` 与
+`adaptive-KL-lr1e-3` 对照降级为 later，理由是在**从未观测到一次接触**的前提下，LR schedule 的
+差异无法被任何指标分辨。
+
 #### 5.6.3 尚未对齐、需单独裁决的
 
 - **`virtual_landing` 的实际 raw 不是本文 §5.3 所写的 `legal_base` 底薪 + 中心核。** 当前 launcher 绑定的

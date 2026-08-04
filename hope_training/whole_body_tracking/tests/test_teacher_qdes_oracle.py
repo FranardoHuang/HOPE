@@ -318,18 +318,17 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
                 "policy_contract_sha256": sha,
                 "manifest": {"file_sha256": sha},
             },
+            # S0 把 teacher-q_des oracle 的准入运行时从"不可变磁带"换成了
+            # "在线求解器 + 精确问题答案复用": 决定性不再靠一条录好的磁带,
+            # 而是靠 ExactCurriculumQuestionCache 对同一道题必然给同一个答案。
+            # 门槛没有放松, 只是换了等价的决定性来源, 而且额外要求磁带确实
+            # 不在场(immutable_tape is None)、目标观测噪声关死。
             "runtime": {"target_provider": {
-                "source": "immutable_tape", "recipe": "current_lm",
+                "source": "online_solver", "recipe": "current_lm",
                 "validity_mask": [True, True, True],
-                "immutable_tape": {
-                    "online_lm_calls": 0, "physical_rng_draws": 0,
-                    "file_sha256": sha, "canonical_sha256": sha,
-                    "base_question_sha256": sha,
-                    "target_lineage": {
-                        "target_producer_sha256": sha,
-                        "target_column_sha256": sha,
-                    },
-                },
+                "target_observation_noise": False,
+                "immutable_tape": None,
+                "exact_question_answer_reuse": {"enabled": True},
             }, "reference_guard": {"contract_payload": {
                 "counter_schema_sha256": sha,
                 "counter_names": [

@@ -906,7 +906,12 @@ def _racket_ledger_fixture():
     # Complete the production constructor contract for the extracted view.
     # Legacy hidden-WAIT evidence must never silently opt into fixed-view
     # semantics merely because this dependency-light fixture omitted a field.
+    view.num_envs = 2
     view._action_ball_fixed_view_enabled = False
+    # S0 给 close_attempts 加了 resume 重置豁免闩: 从 checkpoint 恢复后的那次
+    # 重置不算一次"关闭的机会"。真构造器在 __init__ 里就建好这个 [num_envs]
+    # bool 张量, 这里照做, 不走它那条为老 checkpoint 准备的惰性补建分支。
+    view._action_ball_resume_reset_exclusion = torch.zeros(2, dtype=torch.bool)
     view._action_ball_task_wait_schedule = object()
     view._action_ball_task_valid = torch.tensor([False, True])
     view._action_ball_attempt_active = torch.ones(2, dtype=torch.bool)

@@ -968,8 +968,12 @@ def test_solver_and_resume_contracts_pin_geometry_source_and_v5_receipts():
     assert '"racket_contact_geometry.py"' in command_source
     assert "contact_geometry_contract=contact_geometry_contract" in command_source
     assert "TASK_RECEIPT_SCHEMA_VERSION = 5" in runtime_source
+    # 两个 exact-resume schema 版本随 S0 一起前进: ActionBall 主状态 6 -> 8
+    # (新增 WAIT/runtime-latch/resume-exclusion 分段), solver 状态 5 -> 6
+    # (求解器 resume 载荷跟着换了字段)。任务收据 TASK_RECEIPT_SCHEMA_VERSION
+    # 没动, 仍然是 5 —— 本测试名字里的 "v5_receipts" 说的是它, 不是 solver。
     assert "_ACTION_BALL_STATE_SCHEMA_VERSION = 8" in command_source
-    assert "_ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 5" in command_source
+    assert "_ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 6" in command_source
     assert '"frozen_evaluation"' in command_source
     assert "action-ball exact-resume schema/kind mismatch" in command_source
     authority = "TASK_RECEIPT_TIMING_AUTHORITY"

@@ -21,6 +21,12 @@ def _counter_metric_rig():
     command._action_ball_enabled = True
     command._action_ball_attempt_active = torch.ones(4, dtype=torch.bool)
     command._action_ball_attempt_legal = torch.zeros(4, dtype=torch.bool)
+    # S0 起 _vb_book_strike_step 除了 L(legal) 还要闩 H(hit), 并且在 A211/C211
+    # 的 RESET_WAIT 日程开着时用 task_valid 把隐藏任务挡在 C/H/L/F 分母外面。
+    # 本 rig 是老的 counter-rally 臂: 没有 WAIT 日程(=None), 所以 task_valid
+    # 这条口径对它是恒等的, 分母语义与 S0 之前逐位一致。
+    command._action_ball_attempt_hit = torch.zeros(4, dtype=torch.bool)
+    command._action_ball_task_wait_schedule = None
     return command
 
 
