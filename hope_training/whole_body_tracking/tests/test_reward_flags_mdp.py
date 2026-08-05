@@ -5096,5 +5096,204 @@ def test_motion_command_exact_resume_rejects_schema_drift(clips, mutation, match
         cmd.load_exact_resume_state_dict(state)
 
 
+# --------------------------------------------------------------------------------------------- #
+# 起点扰动斜坡:MotionCommand 必须读 utils/training_contract.py 的那一条法则,
+# 而不是自己在这里再实现一遍插值。缺席时逐字节等于旧路径。
+# --------------------------------------------------------------------------------------------- #
+_START_POSE_RAMP_AXES = ("x", "y", "z", "roll", "pitch", "yaw")
+
+
+def _start_pose_ramp_contract():
+    return commands_mod.MotionCommand._training_contract_module()
+
+
+def test_motion_command_binds_the_repository_start_pose_ramp_law():
+    module = _start_pose_ramp_contract()
+    expected = os.path.abspath(
+        os.path.join(
+            MDP_DIR, "..", "..", "..", "utils", "training_contract.py"
+        )
+    )
+    assert os.path.realpath(module.__file__) == os.path.realpath(expected)
+    # 默认缺席 = 旧路径
+    assert commands_mod.MotionCommandCfg.start_pose_ramp is None
+    # 再取一次必须是同一个已缓存对象(不允许每次复位重新执行仓库字节)
+    assert _start_pose_ramp_contract() is module
+
+
+def _ramp_stub(ramp, *, pose_seed=None, hold=(0, 0)):
+    zero = {axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES}
+    return types.SimpleNamespace(
+        cfg=types.SimpleNamespace(
+            pose_range=dict(zero if pose_seed is None else pose_seed),
+            velocity_range=dict(zero),
+            joint_position_range=(0.0, 0.0),
+            hold_steps_range=hold,
+        ),
+        _start_pose_ramp=ramp,
+        _start_pose_ramp_enabled=bool(ramp["enabled"]),
+        _training_contract_module=(
+            commands_mod.MotionCommand._training_contract_module
+        ),
+    )
+
+
+def test_start_pose_ramp_effective_ranges_walk_seed_to_declared_endpoint():
+    contract = _start_pose_ramp_contract()
+    ramp = contract.validate_action_ball_start_pose_ramp(
+        contract.ACTION_BALL_START_POSE_RAMP_FOUR_CELL, name="four_cell"
+    )
+    stub = _ramp_stub(ramp)
+    at_zero = commands_mod.MotionCommand._effective_reset_range_list(
+        stub, "pose_range", 0.0
+    )
+    assert at_zero == [(0.0, 0.0)] * 6
+    at_one = commands_mod.MotionCommand._effective_reset_range_list(
+        stub, "pose_range", 1.0
+    )
+    assert [list(pair) for pair in at_one] == [
+        ramp["pose_range"][axis] for axis in _START_POSE_RAMP_AXES
+    ]
+    half = commands_mod.MotionCommand._effective_reset_range_list(
+        stub, "pose_range", 0.5
+    )
+    assert half[1] == pytest.approx((-1.2625 / 2.0, 1.2625 / 2.0))
+    # 速度终点是零,所以任何进度上都不许冒出出生初速度
+    for progress in (0.0, 0.37, 1.0):
+        assert commands_mod.MotionCommand._effective_reset_range_list(
+            stub, "velocity_range", progress
+        ) == [(0.0, 0.0)] * 6
+    # ActionBall 的等待归收据所有,hold 窗口在任何进度上都保持零
+    assert commands_mod.MotionCommand._effective_hold_steps_range(stub, 1.0) == (0, 0)
+
+
+def test_start_pose_ramp_absent_returns_the_static_config_unchanged():
+    contract = _start_pose_ramp_contract()
+    disabled = contract.validate_action_ball_start_pose_ramp(None, name="absent")
+    seed = {axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES}
+    seed["y"] = (-0.3, 0.3)
+    stub = _ramp_stub(disabled, pose_seed=seed, hold=(4, 9))
+    for progress in (0.0, 0.5, 1.0):
+        effective = commands_mod.MotionCommand._effective_reset_range_list(
+            stub, "pose_range", progress
+        )
+        assert effective[1] == (-0.3, 0.3)
+        assert commands_mod.MotionCommand._effective_hold_steps_range(
+            stub, progress
+        ) == (4, 9)
+        assert commands_mod.MotionCommand._effective_joint_position_range(
+            stub, progress
+        ) == (0.0, 0.0)
+    assert commands_mod.MotionCommand.start_pose_ramp_progress(stub) == 0.0
+
+
+def test_start_pose_ramp_progress_requires_an_integer_step_counter():
+    contract = _start_pose_ramp_contract()
+    ramp = contract.validate_action_ball_start_pose_ramp(
+        contract.ACTION_BALL_START_POSE_RAMP_FOUR_CELL, name="four_cell"
+    )
+    stub = _ramp_stub(ramp)
+    stub._env = types.SimpleNamespace(common_step_counter=48000)
+    assert commands_mod.MotionCommand.start_pose_ramp_progress(stub) == 0.5
+    stub._env = types.SimpleNamespace(common_step_counter=None)
+    with pytest.raises(RuntimeError, match="common_step_counter"):
+        commands_mod.MotionCommand.start_pose_ramp_progress(stub)
+    stub._env = types.SimpleNamespace(common_step_counter=-1)
+    with pytest.raises(RuntimeError, match="common_step_counter"):
+        commands_mod.MotionCommand.start_pose_ramp_progress(stub)
+
+
+def _canonical_ready_guard_stub(*, pose_range, ramp_enabled):
+    return types.SimpleNamespace(
+        cfg=types.SimpleNamespace(
+            stand_start_prob=1.0,
+            post_swing_start_prob=0.0,
+            post_swing_teacher_receipt="",
+            post_swing_require_ready_at_init=False,
+            post_swing_fail_fast_first_reset=False,
+            post_swing_first_reset_require_readback=False,
+            wrap_teleport=False,
+            clip_switch_prob=0.0,
+            event_timing_mode="disabled",
+            rsi_skip_settle_frames=0,
+            joint_position_range=(0.0, 0.0),
+            stand_start_yaw_range=(0.0, 0.0),
+            pose_range=pose_range,
+            velocity_range={axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES},
+        ),
+        _start_pose_ramp_enabled=ramp_enabled,
+        _range_is_exact_zero_pair=(
+            commands_mod.MotionCommand._range_is_exact_zero_pair
+        ),
+        _mapping_ranges_are_exact_zero=(
+            commands_mod.MotionCommand._mapping_ranges_are_exact_zero
+        ),
+    )
+
+
+def test_canonical_ready_guard_still_refuses_reset_noise_without_a_ramp():
+    """Softening the guard must not remove it when no ramp is declared.
+
+    ``_validate_canonical_ready_config`` is the runtime twin of train.py's
+    hard gate.  Without a declared ramp its old all-zero clause has to stand
+    exactly as before; with one, the seed bound is enforced separately by
+    ``_configure_start_pose_ramp``.
+    """
+
+    noisy = {axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES}
+    noisy["x"] = (-0.1, 0.1)
+    with pytest.raises(ValueError, match=r"pose_range entries must be \(0, 0\)"):
+        commands_mod.MotionCommand._validate_canonical_ready_config(
+            _canonical_ready_guard_stub(pose_range=noisy, ramp_enabled=False)
+        )
+    # 声明了斜坡之后同一份静态种子放行(边界由 _configure_start_pose_ramp 管)
+    commands_mod.MotionCommand._validate_canonical_ready_config(
+        _canonical_ready_guard_stub(pose_range=noisy, ramp_enabled=True)
+    )
+    # 全零 + 无斜坡仍然通过(旧行为)
+    commands_mod.MotionCommand._validate_canonical_ready_config(
+        _canonical_ready_guard_stub(
+            pose_range={axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES},
+            ramp_enabled=False,
+        )
+    )
+    # 斜坡不接管 stand_start_yaw_range:出生朝向只有 pose_range.yaw 一个来源
+    stub = _canonical_ready_guard_stub(
+        pose_range={axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES},
+        ramp_enabled=True,
+    )
+    stub.cfg.stand_start_yaw_range = (-0.2, 0.2)
+    with pytest.raises(ValueError, match="stand_start_yaw_range"):
+        commands_mod.MotionCommand._validate_canonical_ready_config(stub)
+
+
+def test_start_pose_ramp_configure_refuses_a_seed_outside_the_endpoint():
+    contract = _start_pose_ramp_contract()
+    spec = copy.deepcopy(dict(contract.ACTION_BALL_START_POSE_RAMP_FOUR_CELL))
+    seed = {axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES}
+    seed["y"] = (-2.0, 2.0)  # 超出声明的 +/-1.2625 终点
+    stub = types.SimpleNamespace(
+        cfg=types.SimpleNamespace(
+            start_pose_ramp=spec,
+            pose_range=seed,
+            velocity_range={axis: (0.0, 0.0) for axis in _START_POSE_RAMP_AXES},
+            joint_position_range=(0.0, 0.0),
+        ),
+        _training_contract_module=(
+            commands_mod.MotionCommand._training_contract_module
+        ),
+    )
+    with pytest.raises(ValueError, match=r"\[0, endpoint\]"):
+        commands_mod.MotionCommand._configure_start_pose_ramp(stub)
+    # 种子落在终点内则接受,并把规范化后的 payload 绑上
+    seed["y"] = (-0.5, 0.5)
+    commands_mod.MotionCommand._configure_start_pose_ramp(stub)
+    assert stub._start_pose_ramp_enabled is True
+    assert stub._start_pose_ramp["kind"] == (
+        contract.ACTION_BALL_START_POSE_RAMP_KIND
+    )
+    assert len(stub._start_pose_ramp_sha256) == 64
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

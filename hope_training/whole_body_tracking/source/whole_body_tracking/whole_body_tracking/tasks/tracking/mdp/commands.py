@@ -73,6 +73,10 @@ if TYPE_CHECKING:
 
 
 _CANONICAL_REGISTRY_RUNTIME_MODULE = None
+# 起点扰动斜坡的法则住在 utils/training_contract.py。这个文件在依赖极轻的测试里
+# 是被 spec_from_file_location 单独加载的("whole_body_tracking 不是包"),所以
+# 这里不能写普通 import,必须和 canonical registry 一样按仓库路径加载真字节。
+_TRAINING_CONTRACT_RUNTIME_MODULE = None
 _ACTION_BALL_RUNTIME_MODULE = None
 
 
@@ -927,6 +931,9 @@ class MotionCommand(CommandTerm):
                 "action_ball_diagnostic_unauthorized must be an exact boolean"
             )
         self._canonical_diagnostic_unauthorized = diagnostic_unauthorized
+        # 起点扰动斜坡必须在 canonical-ready 复位守卫之前解析:那道守卫要知道
+        # "非零的静态种子是不是有一条已声明的 ramp 在背书"。
+        self._configure_start_pose_ramp()
         if self.action_ball_diagnostic_split_ready_teacher and (
             not self.canonical_ready_mode or not diagnostic_unauthorized
         ):
@@ -1501,6 +1508,22 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_top1_bin"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["motion_phase"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["in_hold"] = torch.zeros(self.num_envs, device=self.device)
+        if bool(getattr(self, "_start_pose_ramp_enabled", False)):
+            # 出生偏移必须自陈:只放一个"斜坡开着"的计数器,没人会去读。
+            # 这三条记录的是每个 env 这一条命实际被挪了多远/转了多少,
+            # 收据出生 + 这三个数 = 物理出生,任何时候都能对得上。
+            self.metrics["start_pose_ramp_progress"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+            self.metrics["start_pose_ramp_dx_m"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+            self.metrics["start_pose_ramp_dy_m"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+            self.metrics["start_pose_ramp_dyaw_rad"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
         if self._event_scheduler is not None:
             self.metrics["event_timing_armed"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics["event_question_installed"] = torch.zeros(self.num_envs, device=self.device)
@@ -1580,6 +1603,55 @@ class MotionCommand(CommandTerm):
             sys.modules.pop(module_name, None)
             raise ValueError("canonical registry executed from a wrong file")
         _CANONICAL_REGISTRY_RUNTIME_MODULE = module
+        return module
+
+    @staticmethod
+    def _training_contract_module():
+        """Load the shared execution-contract helpers from their repository bytes.
+
+        ``commands.py`` is imported standalone by the dependency-light tests, so
+        an ordinary package import is not available here.  Reuse the canonical
+        registry loader's trust pattern: always execute the exact repository
+        file, never a caller-preloaded ``sys.modules`` object.
+        """
+
+        import importlib.util
+        import sys
+
+        global _TRAINING_CONTRACT_RUNTIME_MODULE
+        module_name = "_hope_training_contract_runtime"
+        script = (
+            Path(__file__).resolve().parents[3]
+            / "utils"
+            / "training_contract.py"
+        )
+        if _TRAINING_CONTRACT_RUNTIME_MODULE is not None:
+            if (
+                Path(_TRAINING_CONTRACT_RUNTIME_MODULE.__file__).resolve()
+                != script
+            ):
+                raise ValueError(
+                    "cached training-contract module resolved to a different file"
+                )
+            return _TRAINING_CONTRACT_RUNTIME_MODULE
+        if not script.is_file():
+            raise ValueError(f"training contract module is missing: {script}")
+        spec = importlib.util.spec_from_file_location(module_name, script)
+        if spec is None or spec.loader is None:
+            raise ValueError(
+                f"cannot create training-contract loader spec for {script}"
+            )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
+        if Path(module.__file__).resolve() != script:
+            sys.modules.pop(module_name, None)
+            raise ValueError("training contract executed from a wrong file")
+        _TRAINING_CONTRACT_RUNTIME_MODULE = module
         return module
 
     @staticmethod
@@ -1860,6 +1932,146 @@ class MotionCommand(CommandTerm):
                 "canonical motion bytes changed between registry validation and MotionLoader adoption"
             )
 
+    def _configure_start_pose_ramp(self) -> None:
+        """Normalize and bind the declared start-pose ramp (or the legacy identity).
+
+        ``cfg.start_pose_ramp is None`` is the literal pre-ramp path: the
+        resolved payload is the all-zero identity, ``_start_pose_ramp_enabled``
+        is False, and every effective range below returns the static config
+        unchanged.  A present declaration is re-validated here rather than
+        trusted from ``train.py`` — a directly constructed cfg (tests, exports,
+        a future launcher) must meet the same law.
+        """
+
+        contract = self._training_contract_module()
+
+        raw = getattr(self.cfg, "start_pose_ramp", None)
+        self._start_pose_ramp = contract.validate_action_ball_start_pose_ramp(
+            raw, name="MotionCommandCfg.start_pose_ramp"
+        )
+        self._start_pose_ramp_enabled = bool(self._start_pose_ramp["enabled"])
+        self._start_pose_ramp_sha256 = (
+            contract.action_ball_start_pose_ramp_sha256(self._start_pose_ramp)
+        )
+        if not self._start_pose_ramp_enabled:
+            return
+        # 静态种子 = ramp 在 progress=0 处的取值,必须落在 [0, 终点] 内。
+        # 这条和 train.py 的硬门读同一个函数,不是两份互相抄的实现。
+        offenders: list[str] = []
+        for field, static in (
+            ("pose_range", self.cfg.pose_range),
+            ("velocity_range", self.cfg.velocity_range),
+        ):
+            for axis, pair in dict(static or {}).items():
+                if str(axis) not in self._start_pose_ramp[field]:
+                    offenders.append(f"{field}.{axis} has no declared endpoint")
+                    continue
+                if not contract.action_ball_start_pose_ramp_seed_within_endpoint(
+                    self._start_pose_ramp,
+                    field=field,
+                    axis=str(axis),
+                    static=pair,
+                ):
+                    offenders.append(
+                        f"{field}.{axis}={list(pair)!r} leaves endpoint "
+                        f"{self._start_pose_ramp[field][str(axis)]!r}"
+                    )
+        joint_static = tuple(
+            float(value) for value in (self.cfg.joint_position_range or ())
+        )
+        joint_endpoint = self._start_pose_ramp["joint_position_range"]
+        if len(joint_static) != 2:
+            offenders.append("joint_position_range must be a [lo,hi] pair")
+        else:
+            for seed, end in zip(joint_static, joint_endpoint):
+                if seed == 0.0:
+                    continue
+                if seed * end < 0.0 or abs(seed) > abs(end):
+                    offenders.append(
+                        f"joint_position_range={list(joint_static)!r} leaves "
+                        f"endpoint {list(joint_endpoint)!r}"
+                    )
+                    break
+        if offenders:
+            raise ValueError(
+                "start_pose_ramp static seeds must lie inside [0, endpoint]: "
+                + "; ".join(offenders)
+            )
+        print(
+            "[MotionCommand] start_pose_ramp enabled: "
+            f"ramp_steps={self._start_pose_ramp['ramp_steps']} "
+            f"pose_x={self._start_pose_ramp['pose_range']['x']} "
+            f"pose_y={self._start_pose_ramp['pose_range']['y']} "
+            f"pose_yaw={self._start_pose_ramp['pose_range']['yaw']} "
+            f"sha={self._start_pose_ramp_sha256}",
+            flush=True,
+        )
+
+    def start_pose_ramp_progress(self) -> float:
+        """Return this control step's ramp fraction in ``[0, 1]``."""
+
+        ramp = getattr(self, "_start_pose_ramp", None)
+        if ramp is None or not ramp.get("enabled", False):
+            return 0.0
+        step = getattr(self._env, "common_step_counter", None)
+        if type(step) is not int or step < 0:
+            raise RuntimeError(
+                "start_pose_ramp requires a non-negative integer "
+                "env.common_step_counter"
+            )
+        return self._training_contract_module(
+        ).action_ball_start_pose_ramp_progress(ramp, step)
+
+    def _effective_reset_range_list(
+        self, field: str, progress: float
+    ) -> list[tuple[float, float]]:
+        """Return the six ordered axis ranges after the ramp interpolation."""
+
+        static = getattr(self.cfg, field, None) or {}
+        ramp = getattr(self, "_start_pose_ramp", None)
+        out = []
+        for axis in ("x", "y", "z", "roll", "pitch", "yaw"):
+            seed = static.get(axis, (0.0, 0.0))
+            if ramp is None or not ramp.get("enabled", False):
+                out.append((float(seed[0]), float(seed[1])))
+                continue
+            out.append(
+                self._training_contract_module(
+                ).action_ball_start_pose_ramp_axis_range(
+                    ramp, field=field, axis=axis, static=seed, progress=progress
+                )
+            )
+        return out
+
+    def _effective_joint_position_range(
+        self, progress: float
+    ) -> tuple[float, float]:
+        """Return the reset joint-noise range after the ramp interpolation."""
+
+        seed = tuple(
+            float(value) for value in (self.cfg.joint_position_range or (0.0, 0.0))
+        )
+        ramp = getattr(self, "_start_pose_ramp", None)
+        if ramp is None or not ramp.get("enabled", False):
+            return (seed[0], seed[1])
+        endpoint = ramp["joint_position_range"]
+        return (
+            seed[0] + (endpoint[0] - seed[0]) * progress,
+            seed[1] + (endpoint[1] - seed[1]) * progress,
+        )
+
+    def _effective_hold_steps_range(self, progress: float) -> tuple[int, int]:
+        """Return the legacy motion hold window after the ramp interpolation."""
+
+        ramp = getattr(self, "_start_pose_ramp", None)
+        static = tuple(int(value) for value in self.cfg.hold_steps_range)
+        if ramp is None or not ramp.get("enabled", False):
+            return static
+        return self._training_contract_module(
+        ).action_ball_start_pose_ramp_hold_window(
+            ramp, static=static, progress=progress
+        )
+
     def _validate_canonical_ready_config(self) -> None:
         """Reject reset curricula that would silently bypass the formal ready contract."""
 
@@ -1892,14 +2104,21 @@ class MotionCommand(CommandTerm):
             )
         if int(getattr(self.cfg, "rsi_skip_settle_frames", 0)) != 0:
             conflicts.append("rsi_skip_settle_frames must be 0")
+        # 起点扰动:ramp 未启用时,下面四条仍然是逐字节不变的旧硬门。启用时,
+        # 静态种子已经在 _configure_start_pose_ramp 里按 [0, 终点] 校验过,
+        # 这里放行的是"有一条已声明、已规范化、已入哈希的斜坡在背书"这件事,
+        # 而不是"随便什么非零值都行"。stand_start_yaw_range 不在斜坡范围内:
+        # 出生朝向由 pose_range.yaw 拥有,两个 yaw 源不许同时活着。
+        ramp_enabled = bool(getattr(self, "_start_pose_ramp_enabled", False))
         if not self._range_is_exact_zero_pair(self.cfg.joint_position_range):
             conflicts.append("joint_position_range must be (0, 0)")
         if not self._range_is_exact_zero_pair(self.cfg.stand_start_yaw_range):
             conflicts.append("stand_start_yaw_range must be (0, 0)")
-        if not self._mapping_ranges_are_exact_zero(self.cfg.pose_range):
-            conflicts.append("all pose_range entries must be (0, 0)")
-        if not self._mapping_ranges_are_exact_zero(self.cfg.velocity_range):
-            conflicts.append("all velocity_range entries must be (0, 0)")
+        if not ramp_enabled:
+            if not self._mapping_ranges_are_exact_zero(self.cfg.pose_range):
+                conflicts.append("all pose_range entries must be (0, 0)")
+            if not self._mapping_ranges_are_exact_zero(self.cfg.velocity_range):
+                conflicts.append("all velocity_range entries must be (0, 0)")
         if conflicts:
             raise ValueError(
                 "canonical_ready_mode is the formal all-true-reset ready-entry path and is "
@@ -5911,6 +6130,85 @@ class MotionCommand(CommandTerm):
                     self._env.scene.env_origins[env_ids].to(root_pos.dtype)
                     + spawn
                 )
+        # --- 起点扰动斜坡:收据之外、显式声明的物理出生偏移 -------------------
+        #
+        # 收据仍然是"这一拍的任务"的唯一真相:base_goal / 接触点 / B_yaw 目标框
+        # 一个字节都不动。这里改的只是**机器人物理出生在哪、朝哪**。于是目标不动、
+        # 起点动 —— 这正是"要走过去才够得着"的步法训练,而不是偷偷换了一道题。
+        #
+        # 只动 XY 与 yaw:
+        #   * 出生高度 Z 归 canonical-ready 的 root-Z 合同拥有,不许碰;
+        #   * roll/pitch 是物理 ready 姿态的一部分(fivebind ~-11.2 deg、
+        #     ChingMu73 ~+8..12 deg 实测),不是"站位",碰了就等于换了个 ready。
+        # 偏移量按 ramp 进度插值,progress=0 时逐字节等于过去的收据出生。
+        ramp_progress = self.start_pose_ramp_progress()
+        if bool(getattr(self, "_start_pose_ramp_enabled", False)):
+            if not action_ball_write:
+                raise RuntimeError(
+                    "start_pose_ramp may only perturb an action-ball "
+                    "true-reset transaction"
+                )
+            ramp_ranges = self._effective_reset_range_list(
+                "pose_range", ramp_progress
+            )
+            axis_index = {
+                axis: index
+                for index, axis in enumerate(
+                    ("x", "y", "z", "roll", "pitch", "yaw")
+                )
+            }
+            for axis in ("z", "roll", "pitch"):
+                lo, hi = ramp_ranges[axis_index[axis]]
+                if lo != 0.0 or hi != 0.0:
+                    raise RuntimeError(
+                        "start_pose_ramp may not perturb the canonical-ready "
+                        f"{axis} axis; the ready root height and physical "
+                        "roll/pitch belong to the ready contract"
+                    )
+            velocity_ranges = self._effective_reset_range_list(
+                "velocity_range", ramp_progress
+            )
+            if any(pair != (0.0, 0.0) for pair in velocity_ranges):
+                raise RuntimeError(
+                    "start_pose_ramp may not give a canonical-ready birth a "
+                    "non-zero root velocity; the split-ready physical reset is "
+                    "a stationary safe-ready state"
+                )
+            lo_x, hi_x = ramp_ranges[axis_index["x"]]
+            lo_y, hi_y = ramp_ranges[axis_index["y"]]
+            lo_yaw, hi_yaw = ramp_ranges[axis_index["yaw"]]
+            bounds = torch.tensor(
+                [[lo_x, hi_x], [lo_y, hi_y], [lo_yaw, hi_yaw]],
+                dtype=root_pos.dtype,
+                device=root_pos.device,
+            )
+            samples = sample_uniform(
+                bounds[:, 0],
+                bounds[:, 1],
+                (len(env_ids), 3),
+                device=root_pos.device,
+            ).to(dtype=root_pos.dtype)
+            root_pos = root_pos.clone()
+            root_pos[:, 0] += samples[:, 0]
+            root_pos[:, 1] += samples[:, 1]
+            zero = torch.zeros_like(samples[:, 2])
+            yaw_delta = quat_from_euler_xyz(zero, zero, samples[:, 2]).to(
+                dtype=root_quat.dtype
+            )
+            root_quat = quat_mul(yaw_delta, root_quat)
+            if "start_pose_ramp_dx_m" in self.metrics:
+                self.metrics["start_pose_ramp_progress"][env_ids] = float(
+                    ramp_progress
+                )
+                self.metrics["start_pose_ramp_dx_m"][env_ids] = samples[
+                    :, 0
+                ].to(self.metrics["start_pose_ramp_dx_m"].dtype)
+                self.metrics["start_pose_ramp_dy_m"][env_ids] = samples[
+                    :, 1
+                ].to(self.metrics["start_pose_ramp_dy_m"].dtype)
+                self.metrics["start_pose_ramp_dyaw_rad"][env_ids] = samples[
+                    :, 2
+                ].to(self.metrics["start_pose_ramp_dyaw_rad"].dtype)
         root_velocity = torch.zeros(
             len(env_ids), 6, dtype=root_pos.dtype, device=root_pos.device
         )
@@ -8556,7 +8854,9 @@ class MotionCommand(CommandTerm):
         # Pre-swing HOLD (Phase A): freeze the reference at the swing's first frame for a random
         # number of control steps ("the ball is not reaching yet"). Applies to resets AND wraps.
         if self._action_ball_birth_broker is None:
-            lo, hi = self.cfg.hold_steps_range
+            lo, hi = self._effective_hold_steps_range(
+                self.start_pose_ramp_progress()
+            )
             self.hold_counter[env_ids_t] = torch.randint(
                 int(lo),
                 int(hi) + 1,
@@ -8811,13 +9111,18 @@ class MotionCommand(CommandTerm):
                     + self._env.scene.env_origins[held_rsi, 2]
                 )
 
-        range_list = [self.cfg.pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+        # 起点扰动斜坡:ramp 关闭时 _effective_* 原样返回静态配置,采样调用和
+        # RNG 消耗与过去逐字节相同;打开后同一批调用读的是插值后的范围。
+        ramp_progress = self.start_pose_ramp_progress()
+        range_list = self._effective_reset_range_list("pose_range", ramp_progress)
         ranges = torch.tensor(range_list, device=self.device)
         rand_samples = sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=self.device)
         root_pos[env_ids] += rand_samples[:, 0:3]
         orientations_delta = quat_from_euler_xyz(rand_samples[:, 3], rand_samples[:, 4], rand_samples[:, 5])
         root_ori[env_ids] = quat_mul(orientations_delta, root_ori[env_ids])
-        range_list = [self.cfg.velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+        range_list = self._effective_reset_range_list(
+            "velocity_range", ramp_progress
+        )
         ranges = torch.tensor(range_list, device=self.device)
         rand_samples = sample_uniform(ranges[:, 0], ranges[:, 1], (len(env_ids), 6), device=self.device)
         root_lin_vel[env_ids] += rand_samples[:, :3]
@@ -8826,7 +9131,11 @@ class MotionCommand(CommandTerm):
         joint_pos = self.joint_pos.clone()
         joint_vel = self.joint_vel.clone()
 
-        joint_pos += sample_uniform(*self.cfg.joint_position_range, joint_pos.shape, joint_pos.device)
+        joint_pos += sample_uniform(
+            *self._effective_joint_position_range(ramp_progress),
+            joint_pos.shape,
+            joint_pos.device,
+        )
         soft_joint_pos_limits = self.robot.data.soft_joint_pos_limits[env_ids]
         joint_pos[env_ids] = torch.clip(
             joint_pos[env_ids], soft_joint_pos_limits[:, :, 0], soft_joint_pos_limits[:, :, 1]
@@ -9190,6 +9499,14 @@ class MotionCommandCfg(CommandTermCfg):
     velocity_range: dict[str, tuple[float, float]] = {}
 
     joint_position_range: tuple[float, float] = (-0.52, 0.52)
+
+    # 起点扰动斜坡(2026-08-05)。``None`` = 逐字节的旧路径:上面三个静态范围就是
+    # 全部的复位噪声。装上一份规范化 payload 后,每次真复位读
+    # ``min(1, common_step_counter / ramp_steps)`` 把静态种子线性插值到声明的终点,
+    # 于是"第 0 步和过去完全一样、之后按 ramp 张开"是一条可审计的法则而不是手改配置。
+    # payload 由 ``training_contract.validate_action_ball_start_pose_ramp`` 生成/校验,
+    # train.py 与本类读的是同一份代码,谁都不能自己另写一套插值。
+    start_pose_ramp: dict | None = None
 
     # --- Phase A (2026-07-02): swing ENTRY / TRANSITION / WAITING coverage --------------------
     # Deploy enters every swing from a NOMINAL STAND, waits at the windup while the ball is not

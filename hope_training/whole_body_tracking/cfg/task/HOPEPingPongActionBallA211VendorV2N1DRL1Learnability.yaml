@@ -1,0 +1,76 @@
+# Fresh-only A211 DR-L1 restored-plant candidate.
+#
+# 人话:DR-L0 是"整套随机性全关"的因果对照,它那份 leaf 一个字节都不动。这是
+# **另开的一档**,把逻辑上本来就该开着的几条恢复到 day-1 基线,并给出生位姿装上
+# 一条声明式的斜坡。
+#
+# 恢复(全部回到 EventCfg / HOPEEventCfg 里本来写着的值):
+#   * 摩擦        physics_material        static (0.3,1.6) / dynamic (0.3,1.2)
+#   * 关节零点偏移 add_joint_default_pos   +/-0.01 rad(train==deploy parity 的机制
+#                                        本体;相对 action_scale 0.375-0.59 只有
+#                                        1.7%-2.7%,改不了可达集)
+#   * 躯干 CoM     base_com               x +/-0.025, y/z +/-0.05
+#   * 连杆质量     randomize_link_mass    scale (0.85,1.15)
+#   * PD 增益      randomize_pd_gains     Kp (0.8,1.2) / Kd (0.7,1.3) log-uniform
+#
+# 仍然保持关闭(各自另有裁定,不在这一批):
+#   * 观测腐蚀     policy_observation_corruption=false
+#   * 执行器延迟   control_step_action_delay=[0,0](§6 裁定首轮 d=0;actor 也没有
+#                  delay 的可观测性,单臂开延迟等于换 ABI)
+#
+# 复位分支仍然是 100% 站立:RSI / post-swing 回放与 split-ready + reveal bridge 的
+# 交互没验证过,canonical_ready_mode 现在也硬性要求 stand_start_prob=1.0。
+defaults:
+  - HOPEPingPongActionBallA211VendorV2N1Learnability@_here_
+  - _self_
+
+name: HOPEPingPongActionBallA211VendorV2N1DRL1Learnability
+
+domain_rand:
+  # 恢复 CoM / 连杆质量 / PD 三条,所以 stable_ready_plant 必须是 false。
+  # true 是 DR-L0 的拼写,train.py 会拒绝把它和 L1 元组混在一起。
+  stable_ready_plant: false
+  startup_physics_material: true
+  startup_joint_default_pos: true
+  policy_observation_corruption: false
+
+motion:
+  # 起点扰动斜坡。终点值的换算过程写在
+  # utils/training_contract.ACTION_BALL_START_POSE_RAMP_FOUR_CELL 的注释里,
+  # 这里是那份代码常量的镜像,专门有测试防止两边漂移。
+  #
+  #   x   [-1.0, 0.0]              标准站位 world x=-0.5 -> 可退到 x=-1.5(桌后 1 m)
+  #   y   [-1.2625, +1.2625]       标准站位 world y=-0.7625(中线)-> 左右各出界 0.5 m
+  #   yaw [-0.5236, +0.5236]       +/-30 度
+  #   z / roll / pitch 不动:出生高度归 canonical-ready 的 root-Z 合同,
+  #                    滚转/俯仰是物理 ready 姿态本身。
+  start_pose_ramp:
+    enabled: true
+    ramp_steps: 96000
+    pose_range:
+      x: [-1.0, 0.0]
+      y: [-1.2625, 1.2625]
+      z: [0.0, 0.0]
+      roll: [0.0, 0.0]
+      pitch: [0.0, 0.0]
+      yaw: [-0.5235987755982988, 0.5235987755982988]
+    velocity_range:
+      x: [0.0, 0.0]
+      y: [0.0, 0.0]
+      z: [0.0, 0.0]
+      roll: [0.0, 0.0]
+      pitch: [0.0, 0.0]
+      yaw: [0.0, 0.0]
+    joint_position_range: [0.0, 0.0]
+    # 每拍之间的等待归任务收据 / task_wait 所有(隐藏 WAIT 5-25 tick),不是这条
+    # 斜坡。motion.hold_steps_range 必须保持 [0,0],否则运行时的
+    # bind_action_ball_task_authority 会当场报"两个时钟"。
+    hold_clock_owner: action_ball_task_receipt
+    hold_steps_range_start: [0, 0]
+    hold_steps_range_end: [0, 0]
+
+rewards:
+  # 出生点被挪开之后,base_position 不再是"站着不动白拿钱"——起点与命令目标之间
+  # 真的有距离了。但把它从 0 改成非零会同时改掉奖励层级,那是一次独立的注册变更,
+  # 不能搭这一批的车。这里保持 0,并把这句话留在配方里,免得下次有人以为是漏了。
+  base_position_weight: 0.0

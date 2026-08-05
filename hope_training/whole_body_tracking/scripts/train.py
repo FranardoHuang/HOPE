@@ -51,6 +51,66 @@ def _capture_original_training_argv() -> tuple[str, ...]:
 
 _ORIGINAL_TRAINING_ARGV = _capture_original_training_argv()
 
+# 授权的慢放下界。慢放单调更安全是无条件结论(加速度包络已扣重力,慢放只会降低
+# 需求);提速则不授权 —— 现有 clip 在 s=1 已经用掉 93% 的加速度预算,只剩 3.5%。
+#
+# 注意这个常数**不**作用在 motion.speed_scale_range 上:ActionBall 的每拍速率归
+# 任务收据的 teacher_rate 所有,通用采样器必须留在 [1.0,1.0](运行时
+# bind_action_ball_task_authority 硬性要求)。这里保留常数是为了让下界这条裁定
+# 有一个代码里的落点,并被上面那道门的错误信息引用。
+ACTION_BALL_MIN_SPEED_SCALE_LOWER = 0.85
+
+_TRAINING_CONTRACT_PATH_MODULE = None
+
+
+def _training_contract_module():
+    """Execute ``utils/training_contract.py`` from its exact checkout bytes.
+
+    The ordinary ``from whole_body_tracking.utils...`` spelling used elsewhere
+    in this file pulls in the package ``__init__`` and therefore Isaac.  The
+    ramp/DR-level law must also be reachable from the dependency-light contract
+    tests, which import ``train.py`` without a simulator, so bind it the same
+    way the canonical registry verifier is bound: by path, under a private
+    alias, never through a caller-populated import alias.
+    """
+
+    global _TRAINING_CONTRACT_PATH_MODULE
+    source = (
+        pathlib.Path(__file__).resolve(strict=True).parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "utils"
+        / "training_contract.py"
+    )
+    if _TRAINING_CONTRACT_PATH_MODULE is not None:
+        if (
+            pathlib.Path(_TRAINING_CONTRACT_PATH_MODULE.__file__).resolve()
+            != source
+        ):
+            raise RuntimeError(
+                "cached training-contract module resolved to a different file"
+            )
+        return _TRAINING_CONTRACT_PATH_MODULE
+    if not source.is_file():
+        raise RuntimeError(f"training contract module is missing: {source}")
+    module_name = "_hope_train_training_contract"
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot create the training-contract loader spec")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    if pathlib.Path(module.__file__).resolve() != source:
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("training contract executed from a wrong file")
+    _TRAINING_CONTRACT_PATH_MODULE = module
+    return module
+
 
 def _lean_queue_binding_requested(cfg) -> bool:
     """Return whether this is a queue launch, rejecting a half-bound request."""
@@ -3052,6 +3112,136 @@ def _validate_immutable_fixed_question_sigma(
             )
 
 
+def _validate_action_ball_reset_noise_against_ramp(motion_cfg, applied) -> dict:
+    """Gate ActionBall reset noise against its declared start-pose ramp.
+
+    This is the 2026-08-05 replacement for the blanket "all reset ranges must
+    be literal zero" clause.  It is a named helper rather than an inline block
+    so the contract tests can drive the EXACT production law instead of a
+    mirror that could silently drift away from it.
+
+    Returns the normalized ramp payload.
+    """
+
+    #
+    # 旧行为(2026-08-05 之前):canonical-ready 入场要求
+    # joint_position_range / pose_range / velocity_range 全部逐字节为零。
+    # 那条门不是删掉,而是变成"ramp 未启用时仍然要求全零"。
+    #
+    # 启用时:静态配置值是这条 ramp 在 progress=0 处的取值(种子),必须落在
+    # [0, 终点] 之间 —— 同号且绝对值不超过终点。终点本身由 start_pose_ramp
+    # 声明,运行时按 min(1, step/ramp_steps) 线性插值。这样"静态配置偷偷超过
+    # ramp 曾经授权过的范围"这件事在启动时就被挡住,而不是等到跑起来才发现。
+    _contract = _training_contract_module()
+    action_ball_start_pose_ramp_seed_within_endpoint = (
+        _contract.action_ball_start_pose_ramp_seed_within_endpoint
+    )
+
+    try:
+        start_pose_ramp = _contract.validate_action_ball_start_pose_ramp(
+            getattr(motion_cfg, "start_pose_ramp", None),
+            name="task.motion.start_pose_ramp",
+        )
+    except ValueError as exc:
+        raise _OverrideError(f"[train.py] {exc}") from exc
+    ramp_enabled = bool(start_pose_ramp["enabled"])
+
+    joint_range = tuple(
+        float(value)
+        for value in (
+            getattr(motion_cfg, "joint_position_range", ()) or ()
+        )
+    )
+    joint_endpoint = tuple(start_pose_ramp["joint_position_range"])
+    if not ramp_enabled:
+        if joint_range != (0.0, 0.0):
+            raise _OverrideError(
+                "[train.py] action-ball canonical-ready entry requires "
+                "motion.joint_position_range=[0,0]"
+            )
+    else:
+        if len(joint_range) != 2 or not all(
+            math.isfinite(value) for value in joint_range
+        ):
+            raise _OverrideError(
+                "[train.py] action-ball motion.joint_position_range must be a "
+                "finite [lo,hi] pair"
+            )
+        for seed, end in zip(joint_range, joint_endpoint):
+            if seed == 0.0:
+                continue
+            if seed * end < 0.0 or abs(seed) > abs(end):
+                raise _OverrideError(
+                    "[train.py] action-ball motion.joint_position_range="
+                    f"{joint_range!r} leaves the start_pose_ramp endpoint "
+                    f"{list(joint_endpoint)!r}; the static seed must lie in "
+                    "[0, endpoint]"
+                )
+    for attr in ("pose_range", "velocity_range"):
+        ranges = getattr(motion_cfg, attr, None)
+        try:
+            items = dict(ranges)
+        except Exception as exc:
+            raise _OverrideError(
+                f"[train.py] action-ball motion.{attr} must be a mapping"
+            ) from exc
+        for axis, value in items.items():
+            try:
+                pair = tuple(float(component) for component in value)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    f"[train.py] action-ball motion.{attr} ranges must be [0,0]"
+                ) from exc
+            if not ramp_enabled:
+                if pair != (0.0, 0.0):
+                    raise _OverrideError(
+                        f"[train.py] action-ball canonical-ready entry requires "
+                        f"all motion.{attr} ranges to equal [0,0]"
+                    )
+                continue
+            if str(axis) not in start_pose_ramp[attr]:
+                raise _OverrideError(
+                    f"[train.py] action-ball motion.{attr} declares axis "
+                    f"{axis!r} that task.motion.start_pose_ramp.{attr} does not"
+                )
+            if not action_ball_start_pose_ramp_seed_within_endpoint(
+                start_pose_ramp, field=attr, axis=str(axis), static=pair
+            ):
+                raise _OverrideError(
+                    f"[train.py] action-ball motion.{attr}.{axis}={list(pair)!r} "
+                    "leaves the start_pose_ramp endpoint "
+                    f"{start_pose_ramp[attr][str(axis)]!r}; the static seed must "
+                    "lie in [0, endpoint]"
+                )
+    if ramp_enabled:
+        # ActionBall 的每拍等待由任务收据 / task_wait 拥有(见
+        # commands.bind_action_ball_task_receipt_timing 的硬性要求)。ramp 若同时
+        # 声明自己管 hold 时钟,就是两个时钟数同一段等待,当场拒绝。
+        ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT = (
+            _contract.ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT
+        )
+        if (
+            start_pose_ramp["hold_clock_owner"]
+            != ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT
+        ):
+            raise _OverrideError(
+                "[train.py] action-ball requires "
+                "task.motion.start_pose_ramp.hold_clock_owner="
+                f"{ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT!r}; the "
+                "per-swing wait belongs to the task receipt/task_wait schedule, "
+                "not to the legacy motion hold clock"
+            )
+        applied.append(
+            "task.motion.start_pose_ramp=enabled("
+            f"ramp_steps={start_pose_ramp['ramp_steps']},"
+            f"pose_x={start_pose_ramp['pose_range']['x']},"
+            f"pose_y={start_pose_ramp['pose_range']['y']},"
+            f"pose_yaw={start_pose_ramp['pose_range']['yaw']})"
+        )
+
+    return start_pose_ramp
+
+
 def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     """Fail closed on the action -> ball -> solved-task training recipe."""
 
@@ -3725,6 +3915,16 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         raise _OverrideError(
             "[train.py] action-ball requires motion.clip_switch_prob=0"
         )
+    # 参考播放速度:ActionBall 的每拍速率由**任务收据的 teacher_rate** 拥有
+    # (manifest/profile 的 teacher_rate_min/max -> 收据 -> retiming 车道),
+    # 通用的 motion.speed_scale_range 必须保持 [1.0,1.0] —— 否则运行时的
+    # bind_action_ball_task_authority 会当场报
+    # "action-ball teacher_rate requires native generic speed configuration"。
+    #
+    # 2026-08-05 核实:"慢放单调更安全、下界可以放到 0.85"这条结论是对的,但它
+    # 该落在 teacher_rate 的下界上,不是落在这个通用采样器上。在这里放开只会让
+    # 一份必然被运行时拒绝的配置多活半分钟,属于把 fail-closed 挪成 fail-late。
+    # 这道门因此保持逐字节不变,并把真正的旋钮名字写进错误信息。
     speed_range = tuple(
         float(value)
         for value in (getattr(motion_cfg, "speed_scale_range", ()) or ())
@@ -3732,7 +3932,11 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     if speed_range != (1.0, 1.0):
         raise _OverrideError(
             "[train.py] action-ball requires native motion speed "
-            "motion.speed_scale_range=[1.0,1.0]"
+            "motion.speed_scale_range=[1.0,1.0]; the per-swing playback rate "
+            "belongs to the task receipt's teacher_rate (manifest/profile "
+            f"teacher_rate_min/max, lower bound "
+            f"{ACTION_BALL_MIN_SPEED_SCALE_LOWER} is the authorized slow-down "
+            "floor there), not to this generic sampler"
         )
     speed_per_clip = getattr(motion_cfg, "speed_scale_per_clip", None)
     if speed_per_clip is not None and (
@@ -3749,38 +3953,11 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "motion.event_timing_mode='disabled'"
         )
 
-    joint_range = tuple(
-        float(value)
-        for value in (
-            getattr(motion_cfg, "joint_position_range", ()) or ()
-        )
+    # --- 起点扰动:ramp 未启用 = 一字不变的旧硬门;启用 = 按 ramp 终点校验 -----
+    start_pose_ramp = _validate_action_ball_reset_noise_against_ramp(
+        motion_cfg, applied
     )
-    if joint_range != (0.0, 0.0):
-        raise _OverrideError(
-            "[train.py] action-ball canonical-ready entry requires "
-            "motion.joint_position_range=[0,0]"
-        )
-    for attr in ("pose_range", "velocity_range"):
-        ranges = getattr(motion_cfg, attr, None)
-        try:
-            values = list(ranges.values())
-        except Exception as exc:
-            raise _OverrideError(
-                f"[train.py] action-ball motion.{attr} must be a mapping"
-            ) from exc
-        for value in values:
-            try:
-                pair = tuple(float(component) for component in value)
-            except (TypeError, ValueError) as exc:
-                raise _OverrideError(
-                    f"[train.py] action-ball motion.{attr} ranges must be [0,0]"
-                ) from exc
-            if pair != (0.0, 0.0):
-                raise _OverrideError(
-                    f"[train.py] action-ball canonical-ready entry requires "
-                    f"all motion.{attr} ranges to equal [0,0]"
-                )
-
+    del start_pose_ramp  # 解析结果由 DR-L1 finalizer 再取一次;这里只要它的判定
     manifest_phases = tuple(
         float(action.strike_phase) for action in manifest.actions
     )
@@ -10112,6 +10289,14 @@ def _build_training_hard_contract(
     action_ball_dr_l0_contract = _action_ball_dr_l0_runtime_contract(
         env_cfg, policy_bootstrap=action_ball_policy_bootstrap
     )
+    action_ball_dr_l1_contract = _action_ball_dr_l1_runtime_contract(env_cfg)
+    if (
+        action_ball_dr_l0_contract is not None
+        and action_ball_dr_l1_contract is not None
+    ):
+        raise RuntimeError(
+            "ActionBall DR-L0 and DR-L1 runtime contracts cannot coexist"
+        )
     # 精简治理 2026-08-05:这里原本把同一个 env_cfg 再算一遍 receipt,然后跟 _run() 传进来的
     # 那份比对("effective reward recipe changed between pre-gym composition and runtime")。
     # gym.make 拿的就是同一个 cfg 对象、同一个进程,比对必然相等,属于自证。现在直接以运行时
@@ -10981,6 +11166,11 @@ def _build_training_hard_contract(
         ),
         **(
             {}
+            if action_ball_dr_l1_contract is None
+            else {"action_ball_dr_l1": action_ball_dr_l1_contract}
+        ),
+        **(
+            {}
             if stage1_natural_clip_contract is None
             else {
                 "stage1_natural_clip_training": stage1_natural_clip_contract,
@@ -11467,21 +11657,367 @@ def _resolve_action_ball_dr_l0_request(dr) -> bool:
         key: _as_explicit_bool(_get(dr, key), f"task.domain_rand.{key}")
         for key in _ACTION_BALL_DR_L0_KEYS
     }
+    stable_ready_plant = _as_explicit_bool(
+        _get(dr, "stable_ready_plant"),
+        "task.domain_rand.stable_ready_plant",
+    )
+    if values == _ACTION_BALL_DR_L1_TUPLE and not stable_ready_plant:
+        # 这是 DR-L1 的注册元组,不是"混合的 L0"。交给 L1 解析器,别在这里报错。
+        return False
     enabled = {key: value for key, value in values.items() if value}
     if enabled:
         raise _OverrideError(
             "[train.py] ActionBall DR-L0 is the exact all-off tuple; mixed or "
-            f"enabled axes are not registered: {enabled!r}"
+            f"enabled axes are not registered: {enabled!r} "
+            f"(the only other registered level is DR-L1 "
+            f"{_ACTION_BALL_DR_L1_TUPLE!r} with stable_ready_plant=false)"
         )
-    if not _as_explicit_bool(
-        _get(dr, "stable_ready_plant"),
-        "task.domain_rand.stable_ready_plant",
-    ):
+    if not stable_ready_plant:
         raise _OverrideError(
             "[train.py] ActionBall DR-L0 requires stable_ready_plant=true so "
             "CoM/link-mass/PD-gain axes are disabled in the same finalizer"
         )
     return True
+
+
+# --------------------------------------------------------------------------- #
+# DR-L1: 把"逻辑上就该开着"的那几条恢复到 day-1 基线
+#
+# DR-L0 的身份(exact all-off)一个字节都不动,它继续作为归因对照。DR-L1 是**另开
+# 的一档**:摩擦 / 连杆质量 / PD 增益 / 躯干 CoM / 关节零点 ±0.01 rad 全部回到
+# EventCfg 里本来写着的那几行。观测腐蚀与执行器延迟**不在这一批**——它们各自另有
+# 裁定(actor 没有 delay 可观测性;§6 裁定首轮 d=0),所以 L1 保持 corruption=false、
+# delay=[0,0]。
+# --------------------------------------------------------------------------- #
+_ACTION_BALL_DR_L1_TUPLE = {
+    "startup_physics_material": True,
+    "startup_joint_default_pos": True,
+    # 观测腐蚀不在这一批恢复:它改的是 actor 看到的世界,不是被控对象。
+    "policy_observation_corruption": False,
+}
+
+_ACTION_BALL_DR_L1_RUNTIME_ATTR = "_action_ball_dr_l1_runtime_contract"
+
+_ACTION_BALL_DR_L1_REQUIRED_EVENTS = (
+    "physics_material",
+    "add_joint_default_pos",
+    "base_com",
+    "randomize_link_mass",
+    "randomize_pd_gains",
+)
+
+
+def _action_ball_dr_l1_event_param(term, key):
+    params = getattr(term, "params", None)
+    try:
+        return params[key]
+    except Exception:
+        return "<missing>"
+
+
+def _action_ball_dr_l1_pair_matches(value, expected) -> bool:
+    """Compare one numeric pair against the code-owned day-1 baseline."""
+
+    if isinstance(value, (str, bytes)):
+        return False
+    try:
+        items = list(value)
+    except (TypeError, ValueError):
+        return False
+    if len(items) != 2:
+        return False
+    for actual, want in zip(items, expected):
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+            return False
+        if not math.isfinite(float(actual)) or float(actual) != float(want):
+            return False
+    return True
+
+
+def _action_ball_dr_l1_event_drift(events) -> dict:
+    """Describe every restored plant event that differs from the day-1 baseline."""
+
+    ACTION_BALL_DR_L1_ACTIVE_EVENTS = (
+        _training_contract_module().ACTION_BALL_DR_L1_ACTIVE_EVENTS
+    )
+
+    drift = {}
+    for name in _ACTION_BALL_DR_L1_REQUIRED_EVENTS:
+        term = getattr(events, name, None)
+        if term is None:
+            drift[name] = "<disabled>"
+            continue
+        spec = ACTION_BALL_DR_L1_ACTIVE_EVENTS[name]
+        if str(getattr(term, "mode", "")) != spec["mode"]:
+            drift[f"{name}.mode"] = getattr(term, "mode", None)
+        for key, want in spec.items():
+            if key in ("func", "mode", "body_names"):
+                continue
+            actual = _action_ball_dr_l1_event_param(term, key)
+            if key == "com_range":
+                if not isinstance(actual, dict) or sorted(actual) != sorted(
+                    want
+                ):
+                    drift[f"{name}.{key}"] = actual
+                    continue
+                for axis, axis_want in want.items():
+                    if not _action_ball_dr_l1_pair_matches(
+                        actual[axis], axis_want
+                    ):
+                        drift[f"{name}.{key}.{axis}"] = actual[axis]
+                continue
+            if isinstance(want, list):
+                if not _action_ball_dr_l1_pair_matches(actual, want):
+                    drift[f"{name}.{key}"] = actual
+                continue
+            if isinstance(want, bool):
+                if actual is not want:
+                    drift[f"{name}.{key}"] = actual
+                continue
+            if isinstance(want, int):
+                if type(actual) is not int or actual != want:
+                    drift[f"{name}.{key}"] = actual
+                continue
+            if str(actual) != str(want):
+                drift[f"{name}.{key}"] = actual
+    for name in (
+        "push_robot",
+        "force_push",
+        "force_push_sweep",
+        "combined_push",
+        "combined_push_sweep",
+    ):
+        if not hasattr(events, name):
+            drift[name] = "<missing>"
+        elif getattr(events, name) is not None:
+            drift[name] = "<active>"
+    return drift
+
+
+def _action_ball_dr_l1_composed_state_drift(env_cfg) -> dict:
+    """Describe every non-L1 byte in the fully composed environment cfg.
+
+    Same discipline as the DR-L0 checker: re-open every relevant producer after
+    all task overrides, so a CLI override cannot quietly add or remove
+    robustness difficulty while keeping the DR-L1 lineage name.  The difference
+    is what "correct" means — five plant events must be ACTIVE and hold their
+    exact day-1 parameters instead of being absent.
+    """
+
+    drift = {}
+    events = getattr(env_cfg, "events", None)
+    if events is None:
+        drift["events"] = "<missing>"
+    else:
+        event_drift = _action_ball_dr_l1_event_drift(events)
+        if event_drift:
+            drift["event_slots"] = event_drift
+
+    policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
+    if policy is None or getattr(policy, "enable_corruption", None) is not False:
+        drift["observations.policy.enable_corruption"] = (
+            "<missing>"
+            if policy is None
+            else getattr(policy, "enable_corruption", None)
+        )
+
+    joint_action = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
+    delay = (
+        None
+        if joint_action is None
+        else (
+            getattr(joint_action, "control_step_action_delay_min", None),
+            getattr(joint_action, "control_step_action_delay_max", None),
+        )
+    )
+    if (
+        delay is None
+        or any(type(value) is not int for value in delay)
+        or delay != (0, 0)
+    ):
+        drift["actions.joint_pos.control_step_action_delay"] = delay
+
+    motion = getattr(getattr(env_cfg, "commands", None), "motion", None)
+    if motion is None:
+        drift["commands.motion"] = "<missing>"
+    else:
+        joint_range = getattr(motion, "joint_position_range", None)
+        if not _action_ball_dr_l0_zero_pair(joint_range):
+            drift["commands.motion.joint_position_range"] = repr(joint_range)
+        stand_start_yaw_range = getattr(motion, "stand_start_yaw_range", None)
+        if not _action_ball_dr_l0_zero_pair(stand_start_yaw_range):
+            drift["commands.motion.stand_start_yaw_range"] = repr(
+                stand_start_yaw_range
+            )
+        # 静态复位噪声在 L1 里仍然是零:出生扰动完全由声明的 start_pose_ramp
+        # 拥有,静态字段偷偷写非零就是绕过斜坡的第二条路,当场记为漂移。
+        for field in ("pose_range", "velocity_range"):
+            ranges = getattr(motion, field, None)
+            try:
+                actual_axes = tuple(sorted(str(axis) for axis in ranges.keys()))
+            except Exception:
+                actual_axes = ()
+            expected_axes = tuple(sorted(_ACTION_BALL_DR_L0_RESET_AXES))
+            bad_axes = {}
+            if actual_axes == expected_axes:
+                for axis in _ACTION_BALL_DR_L0_RESET_AXES:
+                    value = ranges[axis]
+                    if not _action_ball_dr_l0_zero_pair(value):
+                        bad_axes[axis] = repr(value)
+            else:
+                bad_axes["<axes>"] = actual_axes
+            if bad_axes:
+                drift[f"commands.motion.{field}"] = bad_axes
+
+    racket = getattr(getattr(env_cfg, "commands", None), "racket_target", None)
+    if racket is None:
+        drift["commands.racket_target"] = "<missing>"
+    else:
+        target_drift = {}
+        for name in _ACTION_BALL_DR_L0_TARGET_ZERO_FIELDS:
+            value = getattr(racket, name, None)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) != 0.0
+            ):
+                target_drift[name] = value
+        target_observation_noise = getattr(
+            racket, "action_ball_target_observation_noise", None
+        )
+        if target_observation_noise is not False:
+            target_drift["action_ball_target_observation_noise"] = (
+                target_observation_noise
+            )
+        if target_drift:
+            drift["commands.racket_target.transport_noise"] = target_drift
+
+    for field in ("push", "force_push"):
+        flags = getattr(env_cfg, field, None)
+        if flags is None or getattr(flags, "enable", None) is not False:
+            drift[f"{field}.enable"] = (
+                "<missing>" if flags is None else getattr(flags, "enable", None)
+            )
+    lateral_spec = getattr(env_cfg, _LATERAL_TRAINING_SPEC_ATTR, None)
+    if lateral_spec is not None:
+        drift["lateral_perturbation_runtime_spec"] = "<active>"
+    return drift
+
+
+def _resolve_action_ball_dr_l1_request(dr) -> bool:
+    """Recognize only the complete, registered DR-L1 finalizer tuple."""
+
+    present = tuple(
+        key for key in _ACTION_BALL_DR_L0_KEYS if _mapping_has_key(dr, key)
+    )
+    if present != _ACTION_BALL_DR_L0_KEYS:
+        return False
+    values = {
+        key: _as_explicit_bool(_get(dr, key), f"task.domain_rand.{key}")
+        for key in _ACTION_BALL_DR_L0_KEYS
+    }
+    if values != _ACTION_BALL_DR_L1_TUPLE:
+        return False
+    if _as_explicit_bool(
+        _get(dr, "stable_ready_plant"),
+        "task.domain_rand.stable_ready_plant",
+    ):
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L1 restores the torso-CoM/link-mass/"
+            "PD-gain axes and therefore requires stable_ready_plant=false; "
+            "stable_ready_plant=true is the DR-L0 spelling"
+        )
+    return True
+
+
+def _apply_action_ball_dr_l1_finalizer(env_cfg, dr, applied) -> bool:
+    """Verify the restored day-1 plant state and mint the DR-L1 hard contract."""
+
+    if not _resolve_action_ball_dr_l1_request(dr):
+        return False
+    _contract = _training_contract_module()
+    ACTION_BALL_DR_L1_IDENTITY = _contract.ACTION_BALL_DR_L1_IDENTITY
+    action_ball_dr_l1_contract_payload = (
+        _contract.action_ball_dr_l1_contract_payload
+    )
+    validate_action_ball_start_pose_ramp = (
+        _contract.validate_action_ball_start_pose_ramp
+    )
+
+    events = getattr(env_cfg, "events", None)
+    _require(events is not None, "events (ActionBall DR-L1 finalizer)")
+    for name in _ACTION_BALL_DR_L1_REQUIRED_EVENTS:
+        _require(hasattr(events, name), f"events.{name} (ActionBall DR-L1 finalizer)")
+    policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
+    _require(
+        policy is not None and hasattr(policy, "enable_corruption"),
+        "observations.policy.enable_corruption (ActionBall DR-L1 finalizer)",
+    )
+    # 观测腐蚀在 L1 里显式保持关闭 —— 和 L0 一样,是同一个 finalizer 写的最终状态,
+    # 不是"碰巧没人打开"。
+    policy.enable_corruption = False
+    drift = _action_ball_dr_l1_composed_state_drift(env_cfg)
+    if drift:
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L1 post-finalizer state did not hold: "
+            f"{drift!r}"
+        )
+    motion = getattr(getattr(env_cfg, "commands", None), "motion", None)
+    try:
+        ramp = validate_action_ball_start_pose_ramp(
+            getattr(motion, "start_pose_ramp", None),
+            name="task.motion.start_pose_ramp",
+        )
+    except ValueError as exc:
+        raise _OverrideError(f"[train.py] {exc}") from exc
+    setattr(
+        env_cfg,
+        _ACTION_BALL_DR_L1_RUNTIME_ATTR,
+        action_ball_dr_l1_contract_payload(start_pose_ramp=ramp),
+    )
+    applied.append(
+        f"task.domain_rand={ACTION_BALL_DR_L1_IDENTITY} "
+        "(events.physics_material/add_joint_default_pos/base_com/"
+        "randomize_link_mass/randomize_pd_gains restored to the day-1 "
+        "baseline; push*=None; observations.policy.enable_corruption=false; "
+        "action delay=[0,0]; static reset noise=0 with "
+        f"start_pose_ramp.enabled={ramp['enabled']})"
+    )
+    return True
+
+
+def _action_ball_dr_l1_runtime_contract(env_cfg) -> dict | None:
+    """Re-open the final DR-L1 state before minting the hard contract."""
+
+    marker = getattr(env_cfg, _ACTION_BALL_DR_L1_RUNTIME_ATTR, None)
+    if marker is None:
+        return None
+    _contract = _training_contract_module()
+    action_ball_dr_l1_contract_payload = (
+        _contract.action_ball_dr_l1_contract_payload
+    )
+    validate_action_ball_start_pose_ramp = (
+        _contract.validate_action_ball_start_pose_ramp
+    )
+
+    motion = getattr(getattr(env_cfg, "commands", None), "motion", None)
+    ramp = validate_action_ball_start_pose_ramp(
+        getattr(motion, "start_pose_ramp", None),
+        name="task.motion.start_pose_ramp",
+    )
+    expected = action_ball_dr_l1_contract_payload(start_pose_ramp=ramp)
+    if marker != expected:
+        raise RuntimeError(
+            "ActionBall DR-L1 runtime marker differs from its canonical payload"
+        )
+    drift = _action_ball_dr_l1_composed_state_drift(env_cfg)
+    if drift:
+        raise RuntimeError(
+            "ActionBall DR-L1 runtime state drifted after finalization: "
+            f"{drift!r}"
+        )
+    return expected
 
 
 def _apply_action_ball_dr_l0_finalizer(env_cfg, dr, applied) -> bool:
@@ -11883,6 +12419,9 @@ _MOTION_KEYS = (
     "canonical_ready_sha256", "canonical_ready_fk_sha256",
     "canonical_promotion_certificate_path",
     "joint_position_range", "pose_range", "velocity_range",
+    # 起点扰动斜坡(2026-08-05)。缺席 = 旧的全零硬门,逐字节不变;present 时
+    # 必须是完整声明(enabled/ramp_steps/各轴终点/hold 归属),部分拼写一律拒。
+    "start_pose_ramp",
 )
 
 # YAML keys under `rewards:` consumed by the rewards block of _apply_task_overrides below.
@@ -13526,6 +14065,36 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     },
                     applied,
                     "commands.motion",
+                )
+            # 起点扰动斜坡:这里只做"解析 + 规范化 + 安装",授权判定留给
+            # _finalize_action_ball_training_cfg 的 ramp-aware 硬门。规范化在这一步
+            # 完成,所以 MotionCommand 读到的永远是补全过的 payload,而不是一份
+            # 半拼写的 YAML 映射。
+            _start_pose_ramp_raw = _get(mt, "start_pose_ramp")
+            if _start_pose_ramp_raw is not None:
+                try:
+                    _start_pose_ramp_value = (
+                        _training_contract_module(
+                        ).validate_action_ball_start_pose_ramp(
+                            OmegaConf.to_container(
+                                _start_pose_ramp_raw, resolve=True
+                            )
+                            if OmegaConf.is_config(_start_pose_ramp_raw)
+                            else _start_pose_ramp_raw,
+                            name="task.motion.start_pose_ramp",
+                        )
+                    )
+                except ValueError as exc:
+                    raise _OverrideError(f"[train.py] {exc}") from exc
+                _require(
+                    hasattr(M, "start_pose_ramp"),
+                    "commands.motion.start_pose_ramp",
+                )
+                M.start_pose_ramp = _start_pose_ramp_value
+                applied.append(
+                    "commands.motion.start_pose_ramp="
+                    f"enabled={_start_pose_ramp_value['enabled']},"
+                    f"ramp_steps={_start_pose_ramp_value['ramp_steps']}"
                 )
             # R-c(i): every swing entry (RSI reset AND wrap) starts the reference N frames past the
             # clip start — the v5 clips carry a 3-4 frame IK cold-start transient at frame 0 (GMR
@@ -16351,7 +16920,13 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied,
             stable_ready_plant=stable_ready_plant,
         )
-        _apply_action_ball_dr_l0_finalizer(env_cfg, dr, applied)
+        _l0_applied = _apply_action_ball_dr_l0_finalizer(env_cfg, dr, applied)
+        _l1_applied = _apply_action_ball_dr_l1_finalizer(env_cfg, dr, applied)
+        if _l0_applied and _l1_applied:
+            raise _OverrideError(
+                "[train.py] ActionBall DR-L0 and DR-L1 cannot both finalize "
+                "one environment"
+            )
 
     # These must be the final command/observation mutations: each formal mode
     # validates the fully composed state and appends its canonical actor tail

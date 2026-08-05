@@ -1,0 +1,147 @@
+{
+  "authorization": {
+    "diagnostic_unauthorized": true,
+    "formal": false,
+    "hardware": false,
+    "main_setting": false,
+    "promotion": false,
+    "ready": false,
+    "runtime_launch": true
+  },
+  "deferred_axes": {
+    "action_delay": "still 0/0. The A3 same-chassis reference is [0,2] control steps, but the A211/C211 actor has no delay observability, so a delay study is a separate ABI and cannot enter one arm.",
+    "armature_joint_friction_torque_limit_randomization": "no mechanism exists in this repository yet",
+    "hold_or_wait_window": "the per-swing gap is owned by the content-addressed task_wait schedule (hidden RESET_WAIT, 5-25 policy ticks), not by motion.hold_steps_range, which bind_action_ball_task_authority pins to [0,0]. Making that window contract with proficiency needs a new schedule kind plus per-level trainability facts; doing it in place would move DR-L0's identity.",
+    "motion_speed_scale": "still [1.0,1.0]. The authorized 0.85 slow-down floor belongs to the task receipt's teacher_rate (manifest/profile teacher_rate_min/max); the generic sampler is refused by bind_action_ball_task_authority.",
+    "observation_corruption": "still false. Proprioceptive noise changes what the actor sees rather than what it controls; restore it as its own level.",
+    "push": "defer; a later cadence must account for strike-window exposure rather than copy the vendor 1-3 s interval",
+    "reset_branch_split": "still 100% stand. build_1's 25/35/40 stand/post-swing/RSI split is expressible in config, but canonical_ready_mode requires stand_start_prob=1.0 and the RSI birth has never been validated against split-ready + reveal bridge.",
+    "task_or_target_noise": "defer because it changes task observability/support"
+  },
+  "exact_leaf_fields": {
+    "task.domain_rand.policy_observation_corruption": false,
+    "task.domain_rand.stable_ready_plant": false,
+    "task.domain_rand.startup_joint_default_pos": true,
+    "task.domain_rand.startup_physics_material": true
+  },
+  "fresh_lineage_required": true,
+  "identity": "action_ball_211_dr_l1_restored_plant_candidate_v1",
+  "inherited_fixed_axes": {
+    "action_delay_steps": [0, 0],
+    "motion_speed_scale": [1.0, 1.0],
+    "motion_hold_steps_range": [0, 0],
+    "motion_static_pose_reset_ranges": "all zero (birth perturbation is owned solely by start_pose_ramp)",
+    "motion_static_velocity_reset_ranges": "all zero",
+    "push_enabled": false,
+    "racket_target_ar1_noise_sigma": 0.0,
+    "racket_target_observation_noise": false,
+    "racket_target_white_noise": 0.0,
+    "stand_start_prob": 1.0,
+    "task_wait": "unchanged A211/C211 hidden RESET_WAIT contract"
+  },
+  "kind": "action_ball_211_dr_l1_restored_plant_candidate",
+  "parent_profiles": {
+    "A": "HOPEPingPongActionBallA211VendorV2N1Learnability",
+    "C": "HOPEPingPongActionBallC211VendorV2N1Learnability"
+  },
+  "attribution_control": {
+    "dr_l0_identity": "action_ball_dr_l0_exact_all_off_v1",
+    "dr_l0_contract_sha256": "fd22321e3371a81b1f979dc4ecfb79e76c44c8d7734fffb2eebdc92620cb7ed9",
+    "dr_l0_unchanged": true,
+    "semantics": "DR-L1 is a new level, not an edit of DR-L0. The exact all-off leaf, its payload and its digest remain available as the attribution control."
+  },
+  "restored_axes": {
+    "add_joint_default_pos": {
+      "operation": "add",
+      "pos_distribution_params": [-0.01, 0.01],
+      "reason": "train==deploy parity mechanism itself; +/-0.01 rad is 1.7%-2.7% of action_scale 0.375-0.59 and cannot change the reachable set"
+    },
+    "base_com": {
+      "body": "torso_link",
+      "com_range": {"x": [-0.025, 0.025], "y": [-0.05, 0.05], "z": [-0.05, 0.05]}
+    },
+    "physics_material": {
+      "dynamic_friction_range": [0.3, 1.2],
+      "num_buckets": 64,
+      "restitution_range": [0.0, 0.5],
+      "static_friction_range": [0.3, 1.6]
+    },
+    "randomize_link_mass": {
+      "distribution": "uniform",
+      "mass_distribution_params": [0.85, 1.15],
+      "operation": "scale"
+    },
+    "randomize_pd_gains": {
+      "damping_distribution_params": [0.7, 1.3],
+      "distribution": "log_uniform",
+      "operation": "scale",
+      "stiffness_distribution_params": [0.8, 1.2]
+    }
+  },
+  "start_pose_ramp": {
+    "kind": "action_ball_start_pose_ramp_v1",
+    "payload_sha256": "9446051560075882d30876efaed3b4f9ae6a297d6b2dac091d3614ca48be8212",
+    "ramp_steps": 96000,
+    "hold_clock_owner": "action_ball_task_receipt",
+    "world_frame_derivation": {
+      "robot_ground_origin_w_m": [-0.5, -0.7625, -0.76],
+      "table_extent_m": {"x": 2.74, "y": -1.525},
+      "x_offset_m": [-1.0, 0.0],
+      "x_world_region_m": [-1.5, -0.5],
+      "y_offset_m": [-1.2625, 1.2625],
+      "y_world_region_m": [-2.025, 0.5],
+      "yaw_offset_rad": [-0.5235987755982988, 0.5235987755982988],
+      "yaw_offset_deg": [-30.0, 30.0],
+      "z_roll_pitch": "not perturbed; the ready root height and physical roll/pitch belong to the canonical-ready contract"
+    },
+    "applies_to": "physical birth only; the task receipt's base_goal / contact target / B_yaw frame are unchanged, so the displacement is footwork rather than a different question"
+  },
+  "required_post_finalizer_state": {
+    "actions.joint_pos.control_step_action_delay_max": 0,
+    "actions.joint_pos.control_step_action_delay_min": 0,
+    "events.add_joint_default_pos": "active_day_one_baseline",
+    "events.base_com": "active_day_one_baseline",
+    "events.combined_push": null,
+    "events.combined_push_sweep": null,
+    "events.force_push": null,
+    "events.force_push_sweep": null,
+    "events.physics_material": "active_day_one_baseline",
+    "events.push_robot": null,
+    "events.randomize_link_mass": "active_day_one_baseline",
+    "events.randomize_pd_gains": "active_day_one_baseline",
+    "force_push.enable": false,
+    "lateral_perturbation_runtime_spec": null,
+    "motion.joint_position_range": [0.0, 0.0],
+    "motion.pose_range_all_six_axes": [0.0, 0.0],
+    "motion.stand_start_yaw_range": [0.0, 0.0],
+    "motion.velocity_range_all_six_axes": [0.0, 0.0],
+    "observations.policy.enable_corruption": false,
+    "push.enable": false,
+    "racket.action_ball_target_observation_noise": false,
+    "racket.all_target_transport_mutations": 0.0
+  },
+  "resolved_finalizer_contract": {
+    "contract_sha256": "01985b9460cf19ee2be23b3c5ba00ad9c831cc44acf0bf29a55e8c0479016211",
+    "hard_contract_identity": "action_ball_dr_l1_measured_plant_restored_v1",
+    "source": "whole_body_tracking.utils.training_contract.action_ball_dr_l1_contract_payload",
+    "start_pose_ramp_bound": true
+  },
+  "runtime_hard_contract": {
+    "checkpoint_and_normalizer_binding": "training_contract_sha256",
+    "fresh_checkpoint_required": true,
+    "fresh_normalizers_required": true,
+    "identity": "action_ball_dr_l1_measured_plant_restored_v1",
+    "restored_state": "five startup plant events at their day-1 parameters + proprio corruption still off + six-axis static reset ranges still zero + declared start-pose ramp + target transport zero + action delay zero + all push writers absent",
+    "retained_dr_resume_forbidden": true,
+    "startup_offset_delta": "ordered 31-D sampled +/-0.01 rad"
+  },
+  "runtime_integration_blockers": [
+    "launcher_lineage_not_materialized: launch_action_ball_a211_four_arm_diagnostic.py and launch_action_ball_c211_diagnostic.py still bind LINEAGE_KIND ...dr_l0_lineage_v5 and DR_L0_MANIFEST_SOURCE. A DR-L1 four-cell launch needs its own lineage kind, manifest binding and materialized lineage artifacts."
+  ],
+  "schema_version": 1,
+  "status": "BOUND_MECHANISM_LANDED_LAUNCH_LINEAGE_PENDING",
+  "task_profiles": {
+    "A": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBallA211VendorV2N1DRL1Learnability.yaml",
+    "C": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBallC211VendorV2N1DRL1Learnability.yaml"
+  }
+}

@@ -4787,6 +4787,627 @@ def action_ball_dr_l0_contract_sha256() -> str:
     return _action_ball_canonical_sha256(action_ball_dr_l0_contract_payload())
 
 
+# --------------------------------------------------------------------------- #
+# DR-L1 (2026-08-05)
+#
+# 人话:DR-L0 是"整套随机性全关"的因果对照,它的身份不许动。DR-L1 是另开的一档,
+# 把本来就该开的几条恢复到 day-1 基线(摩擦/连杆质量/PD/CoM/关节零点 ±0.01),
+# 同时**保持** obs 腐蚀关、执行器延迟 0/0 —— 这两条另有裁定,不在这一批。
+# 下面这些数字不是新编的,是 EventCfg / HOPEEventCfg 里本来就写着的那几行,
+# 抄到这里是为了让 manifest 和 finalizer 哈希同一串字节。
+# --------------------------------------------------------------------------- #
+ACTION_BALL_DR_L1_IDENTITY = "action_ball_dr_l1_measured_plant_restored_v1"
+ACTION_BALL_DR_L1_STARTUP_JOINT_OFFSET_RAD = (-0.01, 0.01)
+ACTION_BALL_DR_L1_SAMPLED_DECODER_SOURCE = (
+    "action_ball_dr_l1_sampled_startup_joint_default_pos"
+)
+ACTION_BALL_DR_L1_ACTIVE_EVENTS = {
+    # tracking_env_cfg.EventCfg.physics_material
+    "physics_material": {
+        "func": "randomize_rigid_body_material",
+        "mode": "startup",
+        "static_friction_range": [0.3, 1.6],
+        "dynamic_friction_range": [0.3, 1.2],
+        "restitution_range": [0.0, 0.5],
+        "num_buckets": 64,
+    },
+    # tracking_env_cfg.EventCfg.add_joint_default_pos
+    "add_joint_default_pos": {
+        "func": "randomize_joint_default_pos",
+        "mode": "startup",
+        "pos_distribution_params": [
+            ACTION_BALL_DR_L1_STARTUP_JOINT_OFFSET_RAD[0],
+            ACTION_BALL_DR_L1_STARTUP_JOINT_OFFSET_RAD[1],
+        ],
+        "operation": "add",
+    },
+    # tracking_env_cfg.EventCfg.base_com
+    "base_com": {
+        "func": "randomize_rigid_body_com",
+        "mode": "startup",
+        "body_names": "torso_link",
+        "com_range": {
+            "x": [-0.025, 0.025],
+            "y": [-0.05, 0.05],
+            "z": [-0.05, 0.05],
+        },
+    },
+    # hope_env_cfg.HOPEEventCfg.randomize_link_mass
+    "randomize_link_mass": {
+        "func": "randomize_rigid_body_mass",
+        "mode": "startup",
+        "mass_distribution_params": [0.85, 1.15],
+        "operation": "scale",
+        "distribution": "uniform",
+        "recompute_inertia": True,
+    },
+    # hope_env_cfg.HOPEEventCfg.randomize_pd_gains
+    "randomize_pd_gains": {
+        "func": "randomize_actuator_gains",
+        "mode": "startup",
+        "stiffness_distribution_params": [0.8, 1.2],
+        "damping_distribution_params": [0.7, 1.3],
+        "operation": "scale",
+        "distribution": "log_uniform",
+    },
+}
+ACTION_BALL_DR_L1_ABSENT_EVENTS = (
+    "push_robot",
+    "force_push",
+    "force_push_sweep",
+    "combined_push",
+    "combined_push_sweep",
+)
+
+
+def action_ball_dr_l1_contract_payload(
+    *, start_pose_ramp: Mapping | None = None
+) -> dict:
+    """Return the one canonical resolved DR-L1 finalizer contract.
+
+    DR-L1 deliberately reuses DR-L0's shape so the two levels are diffable.
+    The differences are explicit: five startup plant events return to their
+    day-1 baseline parameters, the startup joint-offset decoder is a *sampled*
+    +/-0.01 rad source rather than the exact 31-D zero, and the reset noise
+    block carries the resolved start-pose ramp.  Observation corruption and the
+    control-step action delay stay exactly where DR-L0 left them; restoring
+    those needs its own ruling and its own level.
+    """
+
+    ramp = validate_action_ball_start_pose_ramp(
+        None if start_pose_ramp is None else dict(start_pose_ramp),
+        name="task.motion.start_pose_ramp",
+    )
+    reset_axes = ("x", "y", "z", "roll", "pitch", "yaw")
+    target_zero_fields = (
+        "achieved_target_mix_prob",
+        "midswing_resample_prob",
+        "target_delay_steps",
+        "target_jitter_pos_per_s",
+        "target_jitter_vel_per_s",
+        "target_noise_white",
+        "target_noise_ar1_sigma",
+        "target_dropout_prob",
+        "target_post_strike_dropout_s",
+        "target_bias_per_swing",
+    )
+    return {
+        "schema_version": 1,
+        "identity": ACTION_BALL_DR_L1_IDENTITY,
+        "parent_identity": "action_ball_dr_l0_exact_all_off_v1",
+        "event_slots": {
+            **{
+                name: deepcopy(spec)
+                for name, spec in ACTION_BALL_DR_L1_ACTIVE_EVENTS.items()
+            },
+            **{name: None for name in ACTION_BALL_DR_L1_ABSENT_EVENTS},
+        },
+        "policy_observation_corruption": False,
+        "motion_reset_noise": {
+            "joint_position_range": [0.0, 0.0],
+            "stand_start_yaw_range": [0.0, 0.0],
+            "pose_range": {axis: [0.0, 0.0] for axis in reset_axes},
+            "velocity_range": {axis: [0.0, 0.0] for axis in reset_axes},
+            "start_pose_ramp": ramp,
+        },
+        "target_transport_noise": {
+            **{name: 0.0 for name in target_zero_fields},
+            "action_ball_target_observation_noise": False,
+        },
+        "control_step_action_delay": {"min_steps": 0, "max_steps": 0},
+        "push_flags": {
+            "push.enable": False,
+            "force_push.enable": False,
+            "lateral_perturbation_runtime_spec": None,
+        },
+        "startup_offset_delta": {
+            "source": ACTION_BALL_DR_L1_SAMPLED_DECODER_SOURCE,
+            "ordered_joint_count": 31,
+            "lower": [ACTION_BALL_DR_L1_STARTUP_JOINT_OFFSET_RAD[0]] * 31,
+            "upper": [ACTION_BALL_DR_L1_STARTUP_JOINT_OFFSET_RAD[1]] * 31,
+        },
+        "lineage": {
+            "binding": "training_contract_sha256",
+            "fresh_checkpoint_required": True,
+            "fresh_normalizers_required": True,
+            "retained_dr_resume_forbidden": True,
+        },
+    }
+
+
+def action_ball_dr_l1_contract_sha256(
+    *, start_pose_ramp: Mapping | None = None
+) -> str:
+    """Hash the exact resolved DR-L1 finalizer contract."""
+
+    return _action_ball_canonical_sha256(
+        action_ball_dr_l1_contract_payload(start_pose_ramp=start_pose_ramp)
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Start-pose / hold ramp (2026-08-05)
+#
+# 人话:出生点和"两拍之间等多久"这两件事,以前是硬钉死的零。这里给它们一条
+# 明确的、可审计的斜坡:第 0 步和今天逐字节相同,ramp_steps 步之后到达配置的
+# 终点。斜坡只有一条法则(线性、单调、夹在 [0,1]),train.py 校验它、
+# MotionCommand 执行它,两边读同一份代码,谁都不能自己另写一套。
+# --------------------------------------------------------------------------- #
+ACTION_BALL_START_POSE_RAMP_SCHEMA_VERSION = 1
+ACTION_BALL_START_POSE_RAMP_KIND = "action_ball_start_pose_ramp_v1"
+ACTION_BALL_START_POSE_RAMP_AXES = ("x", "y", "z", "roll", "pitch", "yaw")
+ACTION_BALL_START_POSE_RAMP_KEYS = frozenset(
+    {
+        "enabled",
+        "ramp_steps",
+        "pose_range",
+        "velocity_range",
+        "joint_position_range",
+        "hold_clock_owner",
+        "hold_steps_range_start",
+        "hold_steps_range_end",
+    }
+)
+# 谁拥有"两拍之间的等待"必须写明白,不能靠一个沉默的零来表示"这里没人管"。
+#   motion_hold_steps        —— 旧的 MotionCommand 随机 hold 时钟归这条 ramp 管。
+#   action_ball_task_receipt —— ActionBall 的每拍等待由任务收据/task_wait 拥有;
+#                               此时本 ramp 的 hold 字段必须是零,否则就是两个时钟
+#                               同时在数同一段等待(运行时也会当场拒绝)。
+ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_MOTION = "motion_hold_steps"
+ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT = "action_ball_task_receipt"
+ACTION_BALL_START_POSE_RAMP_HOLD_OWNERS = (
+    ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_MOTION,
+    ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT,
+)
+# The disabled ramp is a literal identity element, not "some small ramp".  Its
+# every endpoint is zero and its hold window is the historical (0, 0), so a
+# disabled declaration reproduces the pre-ramp bytes exactly.
+ACTION_BALL_START_POSE_RAMP_DISABLED = {
+    "schema_version": ACTION_BALL_START_POSE_RAMP_SCHEMA_VERSION,
+    "kind": ACTION_BALL_START_POSE_RAMP_KIND,
+    "enabled": False,
+    "ramp_steps": 0,
+    "pose_range": {
+        axis: [0.0, 0.0] for axis in ACTION_BALL_START_POSE_RAMP_AXES
+    },
+    "velocity_range": {
+        axis: [0.0, 0.0] for axis in ACTION_BALL_START_POSE_RAMP_AXES
+    },
+    "joint_position_range": [0.0, 0.0],
+    "hold_clock_owner": ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_MOTION,
+    "hold_steps_range_start": [0, 0],
+    "hold_steps_range_end": [0, 0],
+}
+
+
+# --------------------------------------------------------------------------- #
+# 四格用的 ramp 终点 —— 换算过程写在这里,别在 YAML 里算数
+#
+# 世界系:原点在近端左桌角,桌面 z=0,台面 2.74 m (+X) x 1.525 m (-Y)。
+# 机器人地面原点(标准站位)在 world [-0.5, -0.7625, -0.76]:
+#   x = -0.5      桌子近端边缘之后 0.5 m
+#   y = -0.7625   正好是台宽 1.525 的一半,站在中线上
+#
+# Franco 的要求 -> world 目标区间 -> 相对标准站位的 pose_range 偏移量:
+#
+#   前后 x:"桌后约 1 m 范围"
+#       world x ∈ [-1.5, -0.5]
+#       -1.5 - (-0.5) = -1.0 ;  -0.5 - (-0.5) = 0.0
+#       => pose_range.x = [-1.0, 0.0]      (只许往后退,不许挤进桌子)
+#
+#   左右 y:"左右超出桌子 0.5 m"
+#       台宽 y ∈ [-1.525, 0];两侧各外扩 0.5 => world y ∈ [-2.025, +0.5]
+#       -2.025 - (-0.7625) = -1.2625 ;  0.5 - (-0.7625) = +1.2625
+#       => pose_range.y = [-1.2625, +1.2625]   (对称,正好左右各出界 0.5 m)
+#
+#   朝向 yaw:"歪到 ±30 度"
+#       30 deg = 0.5235987755982988 rad
+#       => pose_range.yaw = [-0.5235987755982988, +0.5235987755982988]
+#
+#   z / roll / pitch:不动。出生高度由 canonical-ready 的 root Z 合同拥有,
+#       翻滚/俯仰是物理 ready 姿态的一部分,不是"站位"。
+#
+# ramp_steps 取 96000 控制步,和 build_1 的站立位姿 ramp 同量级。
+# hold 窗口起点 45-60 步(build_1 的 hold),终点下限收到 20 步:
+#   "0 肯定是不对的",每拍之间必须有间隔;熟练之后下限收缩、上限保持,
+#   于是间隔的**变化范围**反而变大,而不是变成一个固定节拍。
+# --------------------------------------------------------------------------- #
+ACTION_BALL_START_POSE_RAMP_YAW_LIMIT_RAD = 0.5235987755982988  # 30 deg
+ACTION_BALL_START_POSE_RAMP_FOUR_CELL = {
+    "enabled": True,
+    "ramp_steps": 96000,
+    "pose_range": {
+        "x": [-1.0, 0.0],
+        "y": [-1.2625, 1.2625],
+        "z": [0.0, 0.0],
+        "roll": [0.0, 0.0],
+        "pitch": [0.0, 0.0],
+        "yaw": [
+            -ACTION_BALL_START_POSE_RAMP_YAW_LIMIT_RAD,
+            ACTION_BALL_START_POSE_RAMP_YAW_LIMIT_RAD,
+        ],
+    },
+    "velocity_range": {
+        # 出生速度保持零:split-ready 的物理复位就是"静止安全 ready",
+        # 给它塞初速度会同时改掉复位语义和 ready 合同,那是另一档的事。
+        axis: [0.0, 0.0]
+        for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+    },
+    # 关节复位噪声保持零。Franco 要恢复的 ±0.01 rad 是**关节零点偏移**
+    # (events.add_joint_default_pos,startup 事件、DR-L1 里那条),
+    # 不是这里的每次复位关节噪声,两者别混。
+    "joint_position_range": [0.0, 0.0],
+    # 谁数"两拍之间的等待":ActionBall 是任务收据 / task_wait 数的,不是这条 ramp。
+    #
+    # 事实核查(2026-08-05):Franco 看到的 motion.hold_steps_range=[0,0] 并不是
+    # "没有间隔"。ActionBall 绑定任务收据计时时,commands.py 的
+    # bind_action_ball_task_receipt_timing 会硬性要求 hold_steps_range=(0,0)、
+    # stand_start_min_hold=0、post_swing_min_hold=0 —— 因为每拍的准备时间由收据
+    # 独占。真正活着的间隔是 task_wait 的隐藏 WAIT:min 5 / max 25 policy tick
+    # (50 Hz 下 0.10-0.50 s),它确实非零且每次复位都变。
+    #
+    # 所以"下限随熟练度收缩"要改的是 task_wait 的窗口,不是这里。那份 schedule 是
+    # 内容寻址的(seed/min/max/horizon/required_active 一起进身份哈希,A 和 C 共享
+    # 同一个 SHA),要让它随里程碑收缩必须新开一个 schedule kind,并且把窗口做成
+    # 分档事实 —— 否则会连带改掉 DR-L0 的既有身份。那是下一批的事,这里显式声明
+    # 归属并把本 ramp 的 hold 字段钉零,免得两个时钟同时数同一段等待。
+    "hold_clock_owner": ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT,
+    "hold_steps_range_start": [0, 0],
+    "hold_steps_range_end": [0, 0],
+}
+
+
+def _start_pose_ramp_pair(value, *, name: str) -> list[float]:
+    """Return one finite ordered ``[lo, hi]`` endpoint pair."""
+
+    if isinstance(value, (str, bytes)) or isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a finite numeric [lo, hi] pair")
+    try:
+        items = list(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name} must be a finite numeric [lo, hi] pair"
+        ) from exc
+    if len(items) != 2:
+        raise ValueError(f"{name} must be a finite numeric [lo, hi] pair")
+    out = []
+    for item in items:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise ValueError(f"{name} must be a finite numeric [lo, hi] pair")
+        component = float(item)
+        if not math.isfinite(component):
+            raise ValueError(f"{name} must be a finite numeric [lo, hi] pair")
+        out.append(component)
+    if out[0] > out[1]:
+        raise ValueError(f"{name} must satisfy lo <= hi, got {out!r}")
+    return out
+
+
+def _start_pose_ramp_hold_pair(value, *, name: str) -> list[int]:
+    """Return one ordered non-negative integer hold window."""
+
+    if isinstance(value, (str, bytes)) or isinstance(value, Mapping):
+        raise ValueError(f"{name} must be an integer [lo, hi] hold window")
+    try:
+        items = list(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name} must be an integer [lo, hi] hold window"
+        ) from exc
+    if len(items) != 2:
+        raise ValueError(f"{name} must be an integer [lo, hi] hold window")
+    out = []
+    for item in items:
+        if type(item) is not int:
+            raise ValueError(
+                f"{name} must be an integer [lo, hi] hold window "
+                "(plain ints, no floats/bools)"
+            )
+        if item < 0:
+            raise ValueError(f"{name} entries must be >= 0, got {items!r}")
+        out.append(int(item))
+    if out[0] > out[1]:
+        raise ValueError(f"{name} must satisfy lo <= hi, got {out!r}")
+    return out
+
+
+def _start_pose_ramp_axis_map(value, *, name: str) -> dict:
+    """Return one exact six-axis endpoint mapping."""
+
+    if not isinstance(value, Mapping):
+        try:
+            value = dict(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a six-axis mapping") from exc
+    actual = tuple(sorted(str(axis) for axis in value.keys()))
+    if actual != tuple(sorted(ACTION_BALL_START_POSE_RAMP_AXES)):
+        raise ValueError(
+            f"{name} must declare exactly {list(ACTION_BALL_START_POSE_RAMP_AXES)}, "
+            f"got {list(actual)}"
+        )
+    return {
+        axis: _start_pose_ramp_pair(value[axis], name=f"{name}.{axis}")
+        for axis in ACTION_BALL_START_POSE_RAMP_AXES
+    }
+
+
+def validate_action_ball_start_pose_ramp(value, *, name: str) -> dict:
+    """Normalize one start-pose ramp declaration into its canonical payload.
+
+    ``None`` is the literal legacy path: it returns the disabled identity whose
+    every endpoint is zero.  A present declaration must be complete — partial
+    spellings are refused rather than silently defaulted, because a missing
+    ``ramp_steps`` would otherwise read as "jump to the endpoint immediately".
+    """
+
+    if value is None:
+        return deepcopy(ACTION_BALL_START_POSE_RAMP_DISABLED)
+    if not isinstance(value, Mapping):
+        try:
+            value = dict(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a mapping") from exc
+    # 规范化必须幂等:train.py 把规范化后的 payload 装回 cfg,运行时合同会再校验
+    # 一遍同一份东西。所以已经带着正确 schema/kind 的输入要放行,但那两个字段的
+    # 值必须**恰好**是本版本的值 —— 不许拿一个别的版本的 payload 混进来。
+    value = dict(value)
+    for pinned, expected in (
+        ("schema_version", ACTION_BALL_START_POSE_RAMP_SCHEMA_VERSION),
+        ("kind", ACTION_BALL_START_POSE_RAMP_KIND),
+    ):
+        if pinned in value:
+            if value[pinned] != expected:
+                raise ValueError(
+                    f"{name}.{pinned} must be {expected!r}, got "
+                    f"{value[pinned]!r}"
+                )
+            value.pop(pinned)
+    present = frozenset(str(key) for key in value.keys())
+    if present != ACTION_BALL_START_POSE_RAMP_KEYS:
+        missing = sorted(ACTION_BALL_START_POSE_RAMP_KEYS - present)
+        unknown = sorted(present - ACTION_BALL_START_POSE_RAMP_KEYS)
+        raise ValueError(
+            f"{name} must declare exactly "
+            f"{sorted(ACTION_BALL_START_POSE_RAMP_KEYS)}; "
+            f"missing={missing} unknown={unknown}"
+        )
+    enabled = value["enabled"]
+    if type(enabled) is not bool:
+        raise ValueError(f"{name}.enabled must be an explicit bool")
+    ramp_steps = value["ramp_steps"]
+    if type(ramp_steps) is not int or ramp_steps < 0:
+        raise ValueError(f"{name}.ramp_steps must be a plain int >= 0")
+    payload = {
+        "schema_version": ACTION_BALL_START_POSE_RAMP_SCHEMA_VERSION,
+        "kind": ACTION_BALL_START_POSE_RAMP_KIND,
+        "enabled": bool(enabled),
+        "ramp_steps": int(ramp_steps),
+        "pose_range": _start_pose_ramp_axis_map(
+            value["pose_range"], name=f"{name}.pose_range"
+        ),
+        "velocity_range": _start_pose_ramp_axis_map(
+            value["velocity_range"], name=f"{name}.velocity_range"
+        ),
+        "joint_position_range": _start_pose_ramp_pair(
+            value["joint_position_range"],
+            name=f"{name}.joint_position_range",
+        ),
+        "hold_clock_owner": str(value["hold_clock_owner"]),
+        "hold_steps_range_start": _start_pose_ramp_hold_pair(
+            value["hold_steps_range_start"],
+            name=f"{name}.hold_steps_range_start",
+        ),
+        "hold_steps_range_end": _start_pose_ramp_hold_pair(
+            value["hold_steps_range_end"],
+            name=f"{name}.hold_steps_range_end",
+        ),
+    }
+    if payload["hold_clock_owner"] not in ACTION_BALL_START_POSE_RAMP_HOLD_OWNERS:
+        raise ValueError(
+            f"{name}.hold_clock_owner must be one of "
+            f"{list(ACTION_BALL_START_POSE_RAMP_HOLD_OWNERS)}, got "
+            f"{payload['hold_clock_owner']!r}"
+        )
+    receipt_owns_hold = (
+        payload["hold_clock_owner"]
+        == ACTION_BALL_START_POSE_RAMP_HOLD_OWNER_RECEIPT
+    )
+    if receipt_owns_hold and (
+        payload["hold_steps_range_start"] != [0, 0]
+        or payload["hold_steps_range_end"] != [0, 0]
+    ):
+        raise ValueError(
+            f"{name} declares the ActionBall task receipt as the wait owner "
+            "but also configures a legacy motion hold window; two clocks "
+            "cannot both own the gap between swings"
+        )
+    if payload["enabled"]:
+        if payload["ramp_steps"] <= 0:
+            raise ValueError(
+                f"{name}.ramp_steps must be > 0 while the ramp is enabled; "
+                "a zero-length ramp would jump straight to the endpoint"
+            )
+        # 下限只许收缩,不许扩张:Franco 的要求是"击球间隔的下限随熟练度收缩"。
+        # 上限允许变化但必须仍是合法窗口(lo <= hi 已在上面查过)。
+        if (
+            payload["hold_steps_range_end"][0]
+            > payload["hold_steps_range_start"][0]
+        ):
+            raise ValueError(
+                f"{name}.hold_steps_range_end lower bound must contract "
+                "(<= the start lower bound), not grow"
+            )
+        if (
+            not receipt_owns_hold
+            and payload["hold_steps_range_start"][1] <= 0
+        ):
+            raise ValueError(
+                f"{name}.hold_steps_range_start upper bound must be > 0 while "
+                "this ramp owns the hold clock; a zero window means the swings "
+                "have no gap between them"
+            )
+    else:
+        if payload != ACTION_BALL_START_POSE_RAMP_DISABLED:
+            raise ValueError(
+                f"{name} is disabled but declares a non-identity ramp; a "
+                "disabled ramp must be exactly the all-zero identity so the "
+                "legacy bytes are reproduced"
+            )
+    return payload
+
+
+def action_ball_start_pose_ramp_progress(ramp: Mapping, step) -> float:
+    """Return the monotone ramp fraction in ``[0, 1]`` for one control step."""
+
+    if not isinstance(ramp, Mapping):
+        raise ValueError("start-pose ramp progress requires the ramp payload")
+    if not ramp.get("enabled", False):
+        return 0.0
+    ramp_steps = ramp.get("ramp_steps")
+    if type(ramp_steps) is not int or ramp_steps <= 0:
+        raise ValueError(
+            "an enabled start-pose ramp requires a positive integer ramp_steps"
+        )
+    if isinstance(step, bool) or not isinstance(step, (int, float)):
+        raise ValueError("start-pose ramp progress requires a numeric step")
+    value = float(step)
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(
+            "start-pose ramp progress requires a finite non-negative step"
+        )
+    return min(1.0, value / float(ramp_steps))
+
+
+def action_ball_start_pose_ramp_axis_range(
+    ramp: Mapping,
+    *,
+    field: str,
+    axis: str,
+    static: object,
+    progress: float,
+) -> tuple[float, float]:
+    """Interpolate one axis from its static seed toward the ramp endpoint."""
+
+    if field not in ("pose_range", "velocity_range"):
+        raise ValueError(
+            "start-pose ramp axis field must be pose_range or velocity_range"
+        )
+    if axis not in ACTION_BALL_START_POSE_RAMP_AXES:
+        raise ValueError(f"unknown start-pose ramp axis {axis!r}")
+    seed = _start_pose_ramp_pair(
+        (0.0, 0.0) if static is None else static,
+        name=f"commands.motion.{field}.{axis}",
+    )
+    if not ramp.get("enabled", False):
+        return (seed[0], seed[1])
+    endpoint = ramp[field][axis]
+    frac = float(progress)
+    if not math.isfinite(frac) or not 0.0 <= frac <= 1.0:
+        raise ValueError("start-pose ramp progress must be in [0, 1]")
+    return (
+        seed[0] + (endpoint[0] - seed[0]) * frac,
+        seed[1] + (endpoint[1] - seed[1]) * frac,
+    )
+
+
+def action_ball_start_pose_ramp_hold_window(
+    ramp: Mapping, *, static, progress: float
+) -> tuple[int, int]:
+    """Return the integer hold window for one ramp fraction.
+
+    Disabled ramps return the static configured window unchanged.  While the
+    ramp is live the window walks from ``hold_steps_range_start`` toward
+    ``hold_steps_range_end``; both bounds are rounded half-up to integers so
+    the sampled ``randint`` support is always a well-formed closed interval.
+    """
+
+    seed = _start_pose_ramp_hold_pair(
+        (0, 0) if static is None else [int(v) for v in static],
+        name="commands.motion.hold_steps_range",
+    )
+    if not ramp.get("enabled", False):
+        return (seed[0], seed[1])
+    frac = float(progress)
+    if not math.isfinite(frac) or not 0.0 <= frac <= 1.0:
+        raise ValueError("start-pose ramp progress must be in [0, 1]")
+    start = ramp["hold_steps_range_start"]
+    end = ramp["hold_steps_range_end"]
+    lo = int(math.floor(start[0] + (end[0] - start[0]) * frac + 0.5))
+    hi = int(math.floor(start[1] + (end[1] - start[1]) * frac + 0.5))
+    lo = max(0, lo)
+    hi = max(lo, hi)
+    return (lo, hi)
+
+
+def action_ball_start_pose_ramp_seed_within_endpoint(
+    ramp: Mapping, *, field: str, axis: str, static: object
+) -> bool:
+    """Return whether one static seed lies inside ``[0, endpoint]``.
+
+    This is the gate law shared by ``train.py`` and ``MotionCommand``: the
+    statically configured reset noise is the ramp's value at progress 0 and may
+    never exceed what the ramp is ever authorized to reach, on either side of
+    zero.
+    """
+
+    seed = _start_pose_ramp_pair(
+        (0.0, 0.0) if static is None else static,
+        name=f"commands.motion.{field}.{axis}",
+    )
+    if not ramp.get("enabled", False):
+        return seed == [0.0, 0.0]
+    endpoint = ramp[field][axis]
+    for seed_component, end_component in zip(seed, endpoint):
+        if seed_component == 0.0:
+            continue
+        if seed_component * end_component < 0.0:
+            return False
+        if abs(seed_component) > abs(end_component):
+            return False
+    return True
+
+
+def action_ball_start_pose_ramp_sha256(ramp: Mapping) -> str:
+    """Hash one already-normalized start-pose ramp payload.
+
+    The argument must be the output of
+    :func:`validate_action_ball_start_pose_ramp`; hashing a raw YAML mapping
+    would bind a spelling rather than the resolved law.
+    """
+
+    if not isinstance(ramp, Mapping):
+        raise ValueError("start-pose ramp digest requires the ramp payload")
+    if (
+        ramp.get("schema_version")
+        != ACTION_BALL_START_POSE_RAMP_SCHEMA_VERSION
+        or ramp.get("kind") != ACTION_BALL_START_POSE_RAMP_KIND
+    ):
+        raise ValueError(
+            "start-pose ramp digest requires the normalized schema/kind"
+        )
+    return _action_ball_canonical_sha256(ramp)
+
+
 def action_ball_dynamic_ready_binding_sha256(value: Mapping) -> str:
     """Hash one runtime binding without its self-authenticating digest."""
 
