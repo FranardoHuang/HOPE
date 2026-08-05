@@ -716,10 +716,25 @@ def _whole_body_state_sha256(
 
 
 def _prelong_semantics_exec_environment(
-    stage: str, runtime_reward_sha256: Any
+    stage: str, arm_materialization: Any
 ) -> dict[str, str]:
+    """Emit the prelong switches, and only for the stage that owns them.
+
+    人话:这三条环境变量只有 scale4096 用得上,而 ``runtime_effective_reward_sha256``
+    要等 reward 真的产出之后才存在。取值必须发生在 stage 判断**之后** —— 原来在调用
+    点直接下标取,materialize / recipe / oracle32 三个阶段根本还没有这个键,于是 exec
+    前当场 KeyError,整条流水线的第一站就过不去。scale4096 上缺这个键仍然是硬错:
+    下面的 ``_sha256(None)`` 会拒。
+    """
+
     if stage != "scale4096":
         return {}
+    try:
+        runtime_reward_sha256 = arm_materialization["runtime_effective_reward_sha256"]
+    except (KeyError, TypeError) as exc:
+        raise LaunchRefused(
+            "A211 scale4096 requires the materialized runtime reward recipe SHA"
+        ) from exc
     reward_sha = _B._sha256(
         runtime_reward_sha256, name="A211 prelong runtime Reward recipe SHA"
     )
@@ -4419,9 +4434,7 @@ def _internal_exec(claim_path: Path, claim_sha: str, lock_fd: int) -> int:
         **_update_profile_exec_environment(os.environ),
         **_prelong_semantics_exec_environment(
             spec["stage"],
-            payload["materialization_inputs"]["arm_materialization"][
-                "runtime_effective_reward_sha256"
-            ],
+            payload["materialization_inputs"]["arm_materialization"],
         ),
         **_B._runtime_asset_exec_environment(payload["runtime_assets"]),
     }

@@ -1477,16 +1477,29 @@ def test_a211_prelong_exec_environment_is_scale_only_and_recipe_bound():
         launcher.PRELONG_SEMANTICS_ENABLE_ENV: "1",
         launcher.PRELONG_REWARD_RECIPE_SHA_ENV: reward_sha,
     }
+    materialized = {"runtime_effective_reward_sha256": reward_sha}
     assert launcher._prelong_semantics_exec_environment(
-        "scale4096", reward_sha
+        "scale4096", materialized
     ) == expected
+    # 关键回归:materialize / recipe / oracle32 三个阶段的 arm_materialization 里
+    # **没有** runtime_effective_reward_sha256 这个键(reward 还没产出)。这个 helper
+    # 必须在取值之前就按 stage 短路,否则每条流水线的第一站都会在 exec 前 KeyError。
+    planned = {
+        "schema_version": 1,
+        "kind": launcher.MATERIALIZATION_KIND,
+        "arm_id": launcher.ARM_IDS[0],
+    }
+    assert "runtime_effective_reward_sha256" not in planned
     for stage in launcher.BUDGETS:
         if stage != "scale4096":
             assert launcher._prelong_semantics_exec_environment(
-                stage, None
+                stage, planned
             ) == {}
-    with pytest.raises(launcher.LaunchRefused):
-        launcher._prelong_semantics_exec_environment("scale4096", True)
+            assert launcher._prelong_semantics_exec_environment(stage, None) == {}
+    # scale4096 上缺键 / 类型不对仍然是硬错,不许静默放行。
+    for bad in ({}, None, True, {"runtime_effective_reward_sha256": True}):
+        with pytest.raises(launcher.LaunchRefused):
+            launcher._prelong_semantics_exec_environment("scale4096", bad)
 
 
 def test_a211_update_profile_switch_is_exact_claim_bound_and_non_speed(
