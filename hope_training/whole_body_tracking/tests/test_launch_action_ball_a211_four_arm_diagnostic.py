@@ -993,7 +993,7 @@ def _raw_oracle_fixture(
         "critic_obs_contract": launcher.CRITIC_CONTRACT,
         "critic_obs_total_dim": launcher.CRITIC_WIDTH,
         "action_ball_211_trainability_contract": launcher.TRAINABILITY_CONTRACT,
-        "action_ball_task_wait_contract": launcher._wait_contract(),
+        "task_wait_contract": launcher._hard_wait_contract(),
         "actor_obs_normalizer_identity": launcher.ACTOR_NORMALIZER_IDENTITY,
         "critic_obs_normalizer_identity": launcher.CRITIC_NORMALIZER_IDENTITY,
         "fresh_normalizers_required": True,
@@ -3580,3 +3580,26 @@ def test_launcher_trainability_literal_matches_the_contract_publisher():
         launcher.TRAINABILITY_CONTRACT
         == _TRAINING_CONTRACT._ACTION_BALL_A211_TRAINABILITY_CONTRACT
     )
+
+
+def test_hard_wait_contract_is_the_shape_training_contract_actually_emits():
+    """The oracle32 ABI gate must compare the schema-3 block, not the spec block.
+
+    The gate used to look for ``action_ball_task_wait_contract`` -- a key no
+    producer in this repo has ever written -- and compare it against the
+    spec-shaped ``_wait_contract()``.  That made the gate unsatisfiable, so the
+    A211 oracle32 refused every run with "hard-contract ABI/authorization
+    differs" no matter how healthy the run was.  Pin both the key and the shape
+    to training_contract's own frozen authority.
+    """
+    assert (
+        launcher._hard_wait_contract()
+        == _TRAINING_CONTRACT._action_ball_211_wait_contract_facts()
+    )
+    # the spec shape and the hard shape are genuinely different objects
+    assert launcher._hard_wait_contract() != launcher._wait_contract()
+    # The gate must bind the real key as code.  Match on the quoted spellings so
+    # the prose that explains this bug does not satisfy or trip the check.
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert '"task_wait_contract": _hard_wait_contract(),' in text
+    assert '"action_ball_task_wait_contract"' not in text

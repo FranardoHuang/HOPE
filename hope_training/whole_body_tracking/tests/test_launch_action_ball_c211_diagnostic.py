@@ -3786,3 +3786,11 @@ def test_launcher_trainability_literal_matches_the_contract_publisher():
         launcher.TRAINABILITY_CONTRACT
         == _TRAINING_CONTRACT._ACTION_BALL_C211_TRAINABILITY_CONTRACT
     )
+
+
+def test_hard_wait_contract_is_the_shape_training_contract_actually_emits():
+    """C211's hard wait block must stay pinned to the producer's authority."""
+    assert (
+        launcher._hard_wait_contract()
+        == _TRAINING_CONTRACT._action_ball_211_wait_contract_facts()
+    )

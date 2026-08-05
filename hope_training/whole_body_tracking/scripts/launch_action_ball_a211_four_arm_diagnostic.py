@@ -3291,10 +3291,40 @@ def _isaac_python_entry(value: Any) -> Path:
 
 
 def _wait_contract() -> dict[str, Any]:
+    """Spec-shaped wait contract: what this launcher *asks* the run for."""
+
     return {
         "policy_dt_s": POLICY_DT_S,
         "schedule": dict(WAIT_SCHEDULE),
         "in_loop_expansion_prohibited": True,
+    }
+
+
+def _hard_wait_contract() -> dict[str, Any]:
+    """Exact schema-3 field names emitted by training_contract.py.
+
+    The hard contract is *not* spelled like the spec.  Comparing the schema-3
+    document against ``_wait_contract()`` under the invented key
+    ``action_ball_task_wait_contract`` could never match: nothing in the repo
+    has ever published that key, and the block training_contract.py does
+    publish (``task_wait_contract``) carries different field names plus the
+    runtime-only masking/observability facts.  C211 got this right from the
+    start; A211 is aligned to its sibling here.  The exact schedule identity is
+    still pinned, via schedule_canonical_sha256.
+    """
+
+    return {
+        "identity": "action_ball_pre_task_wait_schedule_v1",
+        "policy_dt_s": POLICY_DT_S,
+        "seed": WAIT_SCHEDULE["seed"],
+        "min_wait_ticks": WAIT_SCHEDULE["min_wait_ticks"],
+        "max_wait_ticks": WAIT_SCHEDULE["max_wait_ticks"],
+        "episode_horizon_ticks": WAIT_SCHEDULE["episode_horizon_ticks"],
+        "required_active_ticks": WAIT_SCHEDULE["required_active_ticks"],
+        "schedule_canonical_sha256": WAIT_SCHEDULE["canonical_sha256"],
+        "task_valid_actor_and_critic": True,
+        "wait_task_ball_base_and_clocks_masked": True,
+        "wait_remaining_observed": False,
     }
 
 
@@ -3973,7 +4003,7 @@ def _validate_raw_oracle32(
         "critic_obs_contract": CRITIC_CONTRACT,
         "critic_obs_total_dim": CRITIC_WIDTH,
         "action_ball_211_trainability_contract": TRAINABILITY_CONTRACT,
-        "action_ball_task_wait_contract": _wait_contract(),
+        "task_wait_contract": _hard_wait_contract(),
         "actor_obs_normalizer_identity": ACTOR_NORMALIZER_IDENTITY,
         "critic_obs_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
         "fresh_normalizers_required": True,
