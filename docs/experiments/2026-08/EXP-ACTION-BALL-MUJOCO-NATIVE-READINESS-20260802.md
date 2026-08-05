@@ -45,7 +45,7 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 | --- | --- | --- |
 | **termination/reward 对齐（2026-08-05 新增，明细见 §5.6）** | 反向审计发现 A211 运行时 `42` 个非零 term 而 §5.3 只覆盖 `22` 个；三项零命中项压过主层级。已落字节：`joint_actual_forbidden` 改 `terminate=False`（只记账不 reset，telemetry 模式强制证据记录器）、`ee_body_pos` 去腕只留脚、`upright_exp 1.0→0.25`、`hit_unstable_support -10→-1`、`death_penalty -300→-10`、`undesired_contacts` 正则 `_link→_Link`（**bug**：A3 是 `_Link`，原为 G1 命名，双脚双腕反被罚 `-2.0/episode`）、`qdes_limit_barrier_margin_frac 0.08→0.05`（消除护栏自造的 `-0.0844/关节/步` 底噪）、`init_noise_std` 四处硬钉解开且 4σ 门改为按真实 σ 计算（原为字面量 `0.02`，**假绿**）。MuJoCo 侧 `joint_actual_forbidden` 已同步 | 重跑 A/C focused suite；让 `audit_action_ball_reward_hierarchy.py` 接受 DRL0 leaf 并重算全部静态数值（**当前它拒收实际发射的 profile**）；`counter_rally_v1` 与 `virtual_landing` 的口径差待裁决 |
 | observation/reward | A/C=`211/319`；无 teacher-base；唯一 actor 角速度是 body-frame IMU gyro；C 只有 nominal-strike 拍心距离与`vb_fired` selected-rubber swept analytic contact-gated单次落点；`physical_ball=false`时不是PhysX observed landing。`.99/.95`保持A3/BeyondMimic/mjlab基线。runtime/training-contract已安装fixed-N1 A `base_position 1.5→0`、九个window项`×1.15`、C proximity`240`、A/C landing`700`；progress10保留。按Take061 task-valid折扣账，A `1.773<1.852≤3.009<3.332`，C `1.773<1.904<3.332`。C launcher与oracle的旧`v2/220/500`当前已改成`v3/240/700`，等待focused test确证 | ready/swing mimic ledger和schema-3 runtime交叉检查已过；补C fixture/live ledger全链、landing∧post-contact-fall监控；真球另走promotion |
-| reset/teacher | direct frame0 physical birth=`0/73`；split-ready artifact+`60/240` hold 已有；WAIT 5--25 tick期间机器人/teacher保持split-ready、球停在无接触park位；reveal原子安装来球并切measured frame0，机器人不reset。A/C leaf显式钉`backhand`。旧`.71237599 s`来自interior tick92；A literal-center已收紧到TTC=`1.82`/tick91/wait=`.69237599 s`，A/C materializer分别=`12/12`、`11/11`；C走独立family-C receipt。误删helper已恢复。bridge schema-v3专项=`56 passed`，但共享4096 gate仍写schema-v2，A launcher在第84项正确fail-closed，未被绕过 | 把shared gate升级为严格消费v3 `reveal_to_playback_bridge`与唯一counter表；随后A/C launcher余下测试、旧interior负例→exact-source suite→S0/S1 |
+| reset/teacher | direct frame0 physical birth=`0/73`；split-ready artifact+`60/240` hold 已有；WAIT 5--25 tick期间机器人/teacher保持split-ready、球停在无接触park位；reveal原子安装来球并切measured frame0，机器人不reset。A/C leaf显式钉`backhand`。旧`.7123759904781779 s`来自 tracked interior receipt(`r4_splitready`, tick92)；A literal-center已收紧到TTC=`1.82`/tick91/wait=**`.6923799138976297 s`**，A/C materializer分别=`12/12`、`11/11`；C走独立family-C receipt。**2026-08-05 更正**：本行此前写作`.69237599 s`，那是从旧 tracked receipt 减一 tick 推出的；仓库存在两份相差`3.9e-6`的 interior 权威——tracked receipt 的`0.7123759904781779`与 code-owned `action_ball_211_four_grid_contract.CANONICAL_TEACHER_PROJECTION`(`:201`)的`0.7123799138976297`。launcher 导入期自检比对的是后者，producer 也从 prepared core 重算出与后者一致的值，故以 code-owned 常量为准，旧数只作历史。误删helper已恢复。bridge schema-v3专项=`56 passed`，但共享4096 gate仍写schema-v2，A launcher在第84项正确fail-closed，未被绕过 | 把shared gate升级为严格消费v3 `reveal_to_playback_bridge`与唯一counter表；随后A/C launcher余下测试、旧interior负例→exact-source suite→S0/S1 |
 | question source | A cache schema-v2保存所有active-birth semantic rows+每动作跨reset hot row，mixed Q/Q' pure/cold replay correctness已过；C=`direct_ball`且formal A/C不用immutable tape。但当前level-0 TTC grid仍强制center±1 tick并携带stratum provenance，所以“fixed-N1”是小有限题带，不是用户要求的严格单Q | 增加curriculum-owned initial-center single-Q模式；升档后才扩题，Pod断言A cold=1/warm=0、C inverse=0 |
 | checkpoint/resume | action FIFO/containment schema-v4与outer optimizer/RNG/normalizer组件各自存在，但当前non-fixed-view diagnostic command payload明确`exact_resume_supported=false`，普通A/C不保存WAIT/reveal、curriculum/domain、sampler、A hot-cache/active task；所以fresh `4096x5`可跑，当前long只能是不可恢复的fresh进程，不能再写成exact-resume已闭合 | long前补所有A/C command state、211/319 normalizer与outer schema3/inner schema4的mutation-before-load preflight，并做mid-WAIT/cache/curriculum/RNG/optimizer冷恢复逐tick镜像 |
 | DR | shared DR-L0 finalizer/leaf专项 host=`31 passed`；A/C launcher profile已切严格all-off DR-L0：material、joint-default offset、CoM/mass/PD、push、reset/target/proprio/body-gyro corruption与delay均关，PPO探索噪声不属于DR且保持算法配方 | exact Pod复核resolved config；nominal learnability后才以fresh lineage单轴恢复 |
@@ -821,6 +821,12 @@ clamp/投影/罚三层已经处理的事。
 `adaptive-KL-lr1e-3` 对照降级为 later，理由是在**从未观测到一次接触**的前提下，LR schedule 的
 差异无法被任何指标分辨。
 
+**已落地的是四格，不是六格（2026-08-05）。** 中间档 `A2/C2`（标准初始化 + `sigma=.3`）暂缓：
+两端点先分出胜负再决定要不要插值，六格会把 `gpu2` 也占满而 MuJoCo lane 需要它。
+落地形态见上文 §5.5 的四格表；code-owned 权威在
+`hope_training/whole_body_tracking/scripts/action_ball_211_four_grid_contract.py`
+（`schema_version=3`，content seal `1bc1df34…b1ca`）。
+
 #### 5.6.3 尚未对齐、需单独裁决的
 
 - **`virtual_landing` 的实际 raw 不是本文 §5.3 所写的 `legal_base` 底薪 + 中心核。** 当前 launcher 绑定的
@@ -1206,26 +1212,41 @@ explained variance、pre-clip grad norm、advantage/return tails 和逐 reward-g
 这些是 launch/health receipt，不是因为 reward 变了就一起调 entropy/std 的额外消融。
 
 当前唯一可发的四格不再是 A225 的 penalty/guard 四臂，而是
-`A211/C211 x PPO schedule` 的最小矩阵。共享 code-owned manifest 冻结同一 teacher、
+`A211/C211 x 探索包` 的最小矩阵。共享 code-owned manifest 冻结同一 teacher、
 base question、seed、211/319 各自 ABI、ActionBall base-safety、death manager weight `-300`、
 actual-q/qdes barrier manager weight 各 `-5`，以及 qdes projection manager weight `-1`
 配 `objective_weight=-5` 的同剂量目标、`metrics_only`、
-`[512,256,128]` network、`init_noise_std=.02`、`entropy=.01`、delay=0 和 static contact sigma：
+`[512,256,128]` network、`entropy=.01`、delay=0 和 static contact sigma：
 
-| cell | ABI / task semantics | PPO/LR | 唯一要回答的问题 |
+**2026-08-05 第二轴改版（本表已按 §5.6.2c 裁决重写；旧的 `x PPO schedule` 四格
+（`A0/C0 fixed-lr1e4` 对 `A1/C1 adaptive-KL-lr1e3`）为 SUPERSEDED，其 cell_id
+`*-base-safety-fixed-lr1e4` / `*-base-safety-adaptive-kl-initial-lr1e3` 已从代码中移除。）**
+理由：在**从未观测到一次接触**的前提下，LR schedule 的差异无法被任何指标分辨；探索包才是
+一阶量。四格现在共用 `fixed lr=1e-4`（沿用原 A0/C0 的保守值，使对照格相对上一版一字未动），
+第二轴换成初始化方式 + `init_noise_std` + `noise_std_type`：
+
+| cell | ABI / task semantics | 初始化 / 探索包 | 唯一要回答的问题 |
 | --- | --- | --- | --- |
-| `A0-base-safety-fixed-lr1e4` | `A211`，desired-contact p/v/face | fixed `lr=1e-4` | contact oracle 在保守学习率下能否学 |
-| `A1-base-safety-adaptive-kl-initial-lr1e3` | `A211`，desired-contact p/v/face | adaptive-KL，initial `lr=1e-3`，desired KL `.01` | A 是否被 fixed `1e-4` 拖慢 |
-| `C0-base-safety-fixed-lr1e4` | `C211`，incoming ball p/v/spin | fixed `lr=1e-4` | 无 contact oracle 时的直接球状态方案 |
-| `C1-base-safety-adaptive-kl-initial-lr1e3` | `C211`，incoming ball p/v/spin | adaptive-KL，initial `lr=1e-3`，desired KL `.01` | C 是否被 fixed `1e-4` 拖慢 |
+| `A0-base-safety-zero-weight-bootstrap-sigma0p1` | `A211`，desired-contact p/v/face | 零权重输出层 + 钉死 ready bias，`init_noise_std=.1`，`noise_std_type=log`，4σ 硬内带门开 | 当前结构在 4σ 门下的上限 |
+| `A1-base-safety-standard-init-sigma1p0` | `A211`，desired-contact p/v/face | 标准 rsl_rl 初始化，`init_noise_std=1.0`，`noise_std_type=scalar`，4σ 门显式跳过 | 对齐 `build_1`：bootstrap 是不是病灶 |
+| `C0-base-safety-zero-weight-bootstrap-sigma0p1` | `C211`，incoming ball p/v/spin | 同 `A0` | 无 contact oracle 时的直接球状态方案 |
+| `C1-base-safety-standard-init-sigma1p0` | `C211`，incoming ball p/v/spin | 同 `A1` | 同 `A1`，在 outcome-only 奖励下 |
+
+判读：`A1/C1` 出现接触而 `A0/C0` 没有，则 bootstrap 是病灶；两档都没有接触，则排除探索包，
+下一嫌疑是 reset 起点分布。GPU 布局不变：A 对同卡 `gpu0`、C 对同卡 `gpu1`、`gpu2` 留给 MuJoCo。
+`A1/C1` 的运行时收据是 schema 2（带 `actor_init_mode` / `four_sigma_hard_inner_gate_applied`），
+只认 schema 1 + `sigma=0.02` 的 n1_vendor probe-gate 会拒收它们——这是刻意的 fail-closed，
+那条冻结 gate 本来就不适用于这条新路线。
 
 四格不再沿用历史 A225 `corrected-metrics` 的十分之一 safety 价格。hard
 termination 仍只收一次 `-300*.02=-6`；actual-q/qdes barrier 的 manager weight 为 `-5`，
 qdes projection 的 manager weight 为 `-1`、callable 内 `objective_weight=-5`，三路有效目标剂量
-相同且四格完全一致。这里的 `adaptive` 只指 PPO 的 KL learning-rate schedule，不是 contact sigma。Build_1 中
-`std=.6/entropy=.0005/AdamW` 建议来自 generic `ppo.yaml`，而正式 Hitter success lineage 又是
-`std=1/entropy=.01/Adam/adaptive-lr1e-3`；没有因果证据说明哪个单项导致 hit。因此本波不引入
-Build_1 的新变量，只保留主流 adaptive-KL 对照；这与 SMASH 风格/任务分账路线更一致。
+相同且四格完全一致。四格的 PPO KL learning-rate schedule 现已统一关闭（`fixed`），
+manifest 里 `adaptive` 一词只用于说明"它指 KL learning-rate schedule，不是 contact sigma"。
+Build_1 中 `std=.6/entropy=.0005/AdamW` 建议来自 generic `ppo.yaml`，而正式 Hitter success
+lineage 又是 `std=1/entropy=.01/Adam/adaptive-lr1e-3`；没有因果证据说明哪个单项导致 hit。
+因此本波**只**引入 Build_1 的一个变量——`std=1`（连同它所必需的标准初始化），
+entropy/优化器/LR schedule 一律不动，避免把三件事混成一次冷启动。
 
 以下 2026-08-03 A225 L0--L3 为 **SUPERSEDED HISTORICAL DIAGNOSTIC**，仅保留根因和
 namespace 追溯，不再是当前 TODO 或发射矩阵。

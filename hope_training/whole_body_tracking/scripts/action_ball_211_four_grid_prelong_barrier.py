@@ -104,13 +104,15 @@ EXPECTED_RUNTIME_SAFETY_WEIGHTS = {
     )
 }
 AUTHORIZED_LAYOUT = {
+    # 2026-08-05 第二轴改版(exp §5.6.2c):cell_id 随之改名,GPU 布局本身未变——
+    # A 对同卡 gpu0、C 对同卡 gpu1、gpu2 留给 MuJoCo,不占用。
     "gpu0": [
-        "A0-base-safety-fixed-lr1e4",
-        "A1-base-safety-adaptive-kl-initial-lr1e3",
+        "A0-base-safety-zero-weight-bootstrap-sigma0p1",
+        "A1-base-safety-standard-init-sigma1p0",
     ],
     "gpu1": [
-        "C0-base-safety-fixed-lr1e4",
-        "C1-base-safety-adaptive-kl-initial-lr1e3",
+        "C0-base-safety-zero-weight-bootstrap-sigma0p1",
+        "C1-base-safety-standard-init-sigma1p0",
     ],
     "gpu2": "reserved_for_mujoco",
     "legacy_vendor_v2_same_gpu": "prohibited_after_transition_drain",
@@ -168,6 +170,17 @@ if (
 ):  # pragma: no cover - import-time ratchet
     raise BarrierRefused(
         "four-grid barrier safety reward economy differs from the sealed manifest"
+    )
+
+# 同理:AUTHORIZED_LAYOUT 的两张卡上的 cell_id 是手抄副本(常量区写在 _F 之前)。
+# 2026-08-05 cell_id 改名后,这道 import 期断言保证布局表与权威同步,gpu2 仍空给 MuJoCo。
+if (
+    AUTHORIZED_LAYOUT["gpu0"] != list(_F.FAMILY_CELL_IDS["A211"])
+    or AUTHORIZED_LAYOUT["gpu1"] != list(_F.FAMILY_CELL_IDS["C211"])
+    or AUTHORIZED_LAYOUT["gpu2"] != "reserved_for_mujoco"
+):  # pragma: no cover - import-time ratchet
+    raise BarrierRefused(
+        "four-grid barrier authorized GPU layout differs from the sealed manifest"
     )
 
 

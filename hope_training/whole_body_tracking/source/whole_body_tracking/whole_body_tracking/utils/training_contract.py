@@ -44,6 +44,46 @@ FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY = "formal_evidence_bookable"
 ACTION_BALL_POLICY_BOOTSTRAP_KIND = (
     "action_ball_shared_ready_actor_bootstrap_v1"
 )
+# 人话:演员输出层怎么初始化,只有下面两种合法写法,别的一律拒。
+#   zero_weight_ready_bias = 老路子:输出层权重清零、bias 钉死在 ready 姿态,初始策略是常数。
+#   default               = 标准 rsl_rl 初始化(权重/bias 都保持框架默认),初始策略不是常数。
+# 两条路各自单独校验,谁都不能借另一条的结论放行。
+ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = "zero_weight_ready_bias"
+ACTION_BALL_ACTOR_INIT_MODE_DEFAULT = "default"
+ACTION_BALL_ACTOR_INIT_MODES = (
+    ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+    ACTION_BALL_ACTOR_INIT_MODE_DEFAULT,
+)
+# The 4-sigma hard-inner gate measures the exploration envelope of a *constant* policy around
+# one hold q_des.  That geometry only exists when the output layer is exactly zero-weight with
+# the ready pose as its bias.  Under the standard initialization the actor mean is not the hold,
+# so the envelope is not a bound on anything and the gate must be skipped -- explicitly, with the
+# reason recorded in the contract, never silently.
+ACTION_BALL_FOUR_SIGMA_GATE_APPLIED_REASON = (
+    "zero_weight_actor_mean_is_the_constant_hold_qdes_so_the_envelope_bounds_"
+    "every_reachable_initial_qdes"
+)
+ACTION_BALL_FOUR_SIGMA_GATE_SKIPPED_REASON = (
+    "default_initialized_actor_mean_is_not_the_constant_hold_qdes_so_the_"
+    "four_sigma_envelope_geometry_does_not_apply"
+)
+_ACTION_BALL_FOUR_SIGMA_GATE_RECORDS = {
+    ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS: {
+        "applied": True,
+        "reason": ACTION_BALL_FOUR_SIGMA_GATE_APPLIED_REASON,
+    },
+    ACTION_BALL_ACTOR_INIT_MODE_DEFAULT: {
+        "applied": False,
+        "reason": ACTION_BALL_FOUR_SIGMA_GATE_SKIPPED_REASON,
+    },
+}
+_ACTION_BALL_ACTOR_INIT_OUTPUT_LAYER = {
+    ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS: (
+        "zeros",
+        "decoder.normalized_bias",
+    ),
+    ACTION_BALL_ACTOR_INIT_MODE_DEFAULT: ("default", "default"),
+}
 ACTION_BALL_DR_L0_ZERO_DECODER_SOURCE = (
     "action_ball_dr_l0_exact_zero_decoder"
 )
@@ -572,6 +612,19 @@ _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS = frozenset(
         "noise_std_type",
         "required_realized_init_noise_std",
     }
+)
+# 人话:第三代 initialization 块多两把钥匙 —— 自陈用的是哪条初始化路线,以及 4-sigma 门到底
+# 有没有跑。老的 V1/V2 写法继续原样受理(它们只能是零权重那条路),所以既有 run 的字节和 SHA
+# 一个都不动;想走标准初始化就必须用 V3 显式声明,漏声明=拒绝,不存在默默滑过去。
+_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_V3_KEYS = frozenset(
+    {
+        *_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS,
+        "actor_init_mode",
+        "four_sigma_hard_inner_gate",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_FOUR_SIGMA_GATE_KEYS = frozenset(
+    {"applied", "reason"}
 )
 _ACTION_BALL_POLICY_BOOTSTRAP_GUARD_KEYS = frozenset(
     {
@@ -5666,6 +5719,48 @@ def validate_action_ball_policy_bootstrap(
         )
         noise_std_type = "scalar"
         realized_noise_std = initialization["init_noise_std"]
+        actor_init_mode = ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        four_sigma_gate = None
+    elif (
+        initialization_keys
+        == _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_V3_KEYS
+    ):
+        initialization = _require_exact_mapping_keys(
+            initialization_raw,
+            _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_V3_KEYS,
+            name="action-ball policy bootstrap initialization",
+        )
+        noise_std_type = initialization["noise_std_type"]
+        realized_noise_std = initialization[
+            "required_realized_init_noise_std"
+        ]
+        actor_init_mode = initialization["actor_init_mode"]
+        if (
+            type(actor_init_mode) is not str
+            or actor_init_mode not in ACTION_BALL_ACTOR_INIT_MODES
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap actor_init_mode must be exactly "
+                f"one of {list(ACTION_BALL_ACTOR_INIT_MODES)}"
+            )
+        four_sigma_gate = _require_exact_mapping_keys(
+            initialization["four_sigma_hard_inner_gate"],
+            _ACTION_BALL_POLICY_BOOTSTRAP_FOUR_SIGMA_GATE_KEYS,
+            name=(
+                "action-ball policy bootstrap "
+                "initialization.four_sigma_hard_inner_gate"
+            ),
+        )
+        expected_gate = _ACTION_BALL_FOUR_SIGMA_GATE_RECORDS[actor_init_mode]
+        if (
+            four_sigma_gate["applied"] is not expected_gate["applied"]
+            or four_sigma_gate["reason"] != expected_gate["reason"]
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap four_sigma_hard_inner_gate must "
+                "state the exact applied/reason pair its actor_init_mode "
+                f"implies: mode={actor_init_mode!r}"
+            )
     else:
         initialization = _require_exact_mapping_keys(
             initialization_raw,
@@ -5676,15 +5771,39 @@ def validate_action_ball_policy_bootstrap(
         realized_noise_std = initialization[
             "required_realized_init_noise_std"
         ]
+        actor_init_mode = ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        four_sigma_gate = None
+    # 人话:V1/V2 老写法没有自陈字段,那就只能是零权重那条路 —— 标准初始化必须显式写 V3 才认。
+    #
+    # An absent self-declaration can only mean the historical zero-weight path.  The standard
+    # initialization is reachable only through the explicit V3 declaration, so a contract that
+    # merely drops the "zeros" literal without saying which path it is on still fails closed.
+    expected_output_layer = _ACTION_BALL_ACTOR_INIT_OUTPUT_LAYER[
+        actor_init_mode
+    ]
     if (
         initialization["fresh_only"] is not True
         or initialization["resume_overwrite_prohibited"] is not True
-        or initialization["output_layer_weight"] != "zeros"
-        or initialization["output_layer_bias"] != "decoder.normalized_bias"
+        or initialization["output_layer_weight"] != expected_output_layer[0]
+        or initialization["output_layer_bias"] != expected_output_layer[1]
     ):
+        if (
+            actor_init_mode
+            == ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        ):
+            raise ValueError(
+                "action-ball actor bootstrap must be a fresh-only zero-weight/bias initialization"
+            )
         raise ValueError(
-            "action-ball actor bootstrap must be a fresh-only zero-weight/bias initialization"
+            "action-ball actor bootstrap must be a fresh-only standard "
+            "rsl_rl output-layer initialization when "
+            f"actor_init_mode={actor_init_mode!r}"
         )
+    four_sigma_gate_applied = (
+        True
+        if four_sigma_gate is None
+        else bool(four_sigma_gate["applied"])
+    )
     noise_std = initialization["init_noise_std"]
     sigma = initialization["sigma_envelope"]
     # 人话:探索幅度不再钉死在一个数上,只要求"配置值 = 实际值",到底安不安全交给下面那道
@@ -5802,6 +5921,11 @@ def validate_action_ball_policy_bootstrap(
                 "action-ball policy bootstrap hard-inner envelope is not "
                 f"reproducible at joint {index}"
             )
+        if not four_sigma_gate_applied:
+            # 人话:标准初始化下策略不是常数,"hold 点 ± 4σ" 这个几何前提根本不成立,所以这道门
+            # 不适用 —— 但上面已经强制合同里写清 applied=false 和跳过理由,是明说跳过,不是不查。
+            # 上面 hard_lower/hard_upper/hard_inner_* 的结构和可复现性检查照旧全跑。
+            continue
         # 这里以前写死 4.0 * 0.02:σ 调大以后这道门还按 0.02 算,照样放行,等于假绿。
         # Compute the envelope from the value actually being launched, so this gate fails closed
         # when a wider exploration std really would reach the forbidden band.

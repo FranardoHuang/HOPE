@@ -1359,7 +1359,7 @@ def _case(
     tmp_path: Path,
     *,
     stage: str,
-    recipe_id: str = launcher.C_FIXED_CELL_ID,
+    recipe_id: str = launcher.C_BOOTSTRAP_CELL_ID,
     allow_colocation: bool = False,
 ):
     checkout = tmp_path / "checkout"
@@ -1580,9 +1580,20 @@ def test_two_code_owned_c211_recipes_and_five_stage_chain_are_exact():
         "scale4096": (4096, 5, 1),
         "long4096": (4096, 1000, 100),
     }
+    # 2026-08-05 第二轴改版(exp §5.6.2c):PPO schedule 对照降级,两格共用 fixed lr1e-4;
+    # 唯一差异是探索包(零权重 bootstrap+0.1+log 对 标准初始化+1.0+scalar)。
     expected_ppo = {
-        launcher.C_FIXED_CELL_ID: ("fixed", 1.0e-4),
-        launcher.C_ADAPTIVE_KL_CELL_ID: ("adaptive", 1.0e-3),
+        launcher.C_BOOTSTRAP_CELL_ID: ("fixed", 1.0e-4),
+        launcher.C_STANDARD_INIT_CELL_ID: ("fixed", 1.0e-4),
+    }
+    expected_exploration = {
+        launcher.C_BOOTSTRAP_CELL_ID: (
+            "zero_weight_ready_bias",
+            0.1,
+            "log",
+            True,
+        ),
+        launcher.C_STANDARD_INIT_CELL_ID: ("default", 1.0, "scalar", False),
     }
     assert launcher.RECIPE_IDS == tuple(expected_ppo)
     manifest = launcher._isaac_four_grid_manifest()
@@ -1598,6 +1609,12 @@ def test_two_code_owned_c211_recipes_and_five_stage_chain_are_exact():
         assert recipe["ppo"] == cell["ppo"]
         assert recipe["ppo"]["schedule"] == schedule
         assert recipe["ppo"]["learning_rate"] == learning_rate
+        assert (
+            recipe["actor_init_mode"],
+            recipe["init_noise_std"],
+            recipe["noise_std_type"],
+            recipe["four_sigma_hard_inner_gate_applies"],
+        ) == expected_exploration[recipe_id]
         assert recipe["ppo_adaptation_axis"] == cell["ppo_adaptation_axis"]
         assert recipe["contact_sigma_adaptation"] is False
         assert recipe["actor_width"] == 211
@@ -2241,14 +2258,28 @@ def test_structurally_resealed_retired_c_lineage_is_rejected(
 
 
 @pytest.mark.parametrize(
-    "recipe_id,schedule,learning_rate",
+    "recipe_id,schedule,learning_rate,sigma,std_type,init_mode",
     (
-        (launcher.C_FIXED_CELL_ID, "fixed", "0.0001"),
-        (launcher.C_ADAPTIVE_KL_CELL_ID, "adaptive", "0.001"),
+        (
+            launcher.C_BOOTSTRAP_CELL_ID,
+            "fixed",
+            "0.0001",
+            "0.1",
+            "log",
+            "zero_weight_ready_bias",
+        ),
+        (
+            launcher.C_STANDARD_INIT_CELL_ID,
+            "fixed",
+            "0.0001",
+            "1.0",
+            "scalar",
+            "default",
+        ),
     ),
 )
 def test_training_argv_pins_c211_grid_cell_and_static_contact_sigma(
-    tmp_path, monkeypatch, recipe_id, schedule, learning_rate
+    tmp_path, monkeypatch, recipe_id, schedule, learning_rate, sigma, std_type, init_mode
 ):
     _patch_plan_environment(monkeypatch)
     spec_path, _spec, _lineage_doc = _case(
@@ -2286,6 +2317,14 @@ def test_training_argv_pins_c211_grid_cell_and_static_contact_sigma(
     assert "algo.runner.empirical_normalization=true" in joined
     assert "algo.algorithm.schedule=" + schedule in argv
     assert "algo.algorithm.learning_rate=" + learning_rate in argv
+    # 探索包是唯一的注册差异轴(exp §5.6.2c)。
+    assert "algo.policy.init_noise_std=" + sigma in argv
+    assert "algo.policy.noise_std_type=" + std_type in argv
+    assert "action_ball_actor_init_mode=" + init_mode in argv
+    assert joined.count("algo.policy.init_noise_std=") == 1
+    assert joined.count("action_ball_actor_init_mode=") == 1
+    # 标准初始化格必须与一个显式 bootstrap 同时给,否则 train.py 侧 fail-closed。
+    assert "action_ball_dynamic_ready_bootstrap=true" in argv
     assert payload["bundle"]["recipe"]["recipe_id"] == recipe_id
     assert payload["bundle"]["isaac_four_grid_manifest"] == (
         launcher._isaac_four_grid_manifest()

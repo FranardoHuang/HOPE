@@ -949,6 +949,12 @@ def produce(args: argparse.Namespace) -> dict[str, Any]:
             **sampler_birth.sampling_levels.as_dict()
         ),
         frontier_arm=sampler_birth.frontier_arm,
+        # This producer always runs the sampler in initial-center single-question
+        # mode at all-zero levels, so the emitted row is the literal centre point
+        # rather than the quota slot.  Say so in the receipt.
+        initial_center_single_question=(
+            sampler.initial_center_single_question
+        ),
     )
     prototypes = modules["stroke_prototypes_torch"].load_stroke_prototype_tensors(
         str(prototype_path),

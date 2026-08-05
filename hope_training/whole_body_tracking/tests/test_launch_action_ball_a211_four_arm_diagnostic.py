@@ -1148,26 +1148,54 @@ def _flatten_strings(value):
 
 
 def test_two_formal_a211_grid_cells_are_exact():
-    # 2026-08-05 层级对齐(exp §5.6 第 3/7 条):death -300.0 -> -10.0,
-    # init_noise_std 0.02 -> 0.1。两者都由 four-grid manifest 定,本表只是镜像。
+    # 2026-08-05 层级对齐(exp §5.6 第 3/7 条):death -300.0 -> -10.0。
+    # 2026-08-05 第二轴改版(exp §5.6.2c):PPO schedule 对照降级,四格共用 fixed lr1e-4;
+    # 第二格改为标准初始化 + sigma 1.0 + scalar,第一格维持零权重 bootstrap + 0.1 + log。
     expected = {
         launcher.ARM_IDS[0]: (-10.0, -5.0, "metrics_only", "fixed", 1e-4),
-        launcher.ARM_IDS[1]: (-10.0, -5.0, "metrics_only", "adaptive", 1e-3),
+        launcher.ARM_IDS[1]: (-10.0, -5.0, "metrics_only", "fixed", 1e-4),
     }
     assert tuple(launcher.ARMS) == launcher.ARM_IDS
     for arm_id, values in expected.items():
         arm = launcher._arm_contract(arm_id)
         assert (arm["soft_weights"]["death_penalty"], arm["soft_weights"]["qdes_limit"], arm["reference_guard_mode"], arm["ppo"]["schedule"], arm["ppo"]["learning_rate"]) == values
         assert arm["actor_hidden_dims"] == arm["critic_hidden_dims"] == [512, 256, 128]
-        assert arm["init_noise_std"] == 0.1
         assert arm["entropy_coef"] == 0.01
     assert {
         (arm["ppo"]["schedule"], arm["ppo"]["learning_rate"])
         for arm in launcher.ARMS.values()
-    } == {
-        ("fixed", 1.0e-4),
-        ("adaptive", 1.0e-3),
+    } == {("fixed", 1.0e-4)}
+    bootstrap = launcher._arm_contract(launcher.ARM_IDS[0])
+    standard = launcher._arm_contract(launcher.ARM_IDS[1])
+    assert (
+        bootstrap["actor_init_mode"],
+        bootstrap["init_noise_std"],
+        bootstrap["noise_std_type"],
+        bootstrap["four_sigma_hard_inner_gate_applies"],
+    ) == ("zero_weight_ready_bias", 0.1, "log", True)
+    assert (
+        standard["actor_init_mode"],
+        standard["init_noise_std"],
+        standard["noise_std_type"],
+        standard["four_sigma_hard_inner_gate_applies"],
+    ) == ("default", 1.0, "scalar", False)
+    # 对照实验前提:除探索包之外逐字段相同。
+    varying = {
+        "arm_id",
+        "four_grid_cell_id",
+        "arm_contract_sha256",
+        "exploration_axis",
+        "actor_init_mode",
+        "init_noise_std",
+        "noise_std_type",
+        "four_sigma_hard_inner_gate_applies",
     }
+    assert set(bootstrap) == set(standard)
+    for key in bootstrap:
+        if key in varying:
+            continue
+        assert bootstrap[key] == standard[key], key
+    assert bootstrap["arm_contract_sha256"] != standard["arm_contract_sha256"]
     assert all(
         arm["reference_guard_mode"] == "metrics_only"
         and set(arm["soft_weights"].values()) == {-10.0, -5.0}
@@ -1774,8 +1802,8 @@ def test_training_argv_pins_a211_lineage_bootstrap_and_optimizer(tmp_path, monke
         "task.actor_obs_contract=action_ball_a211",
         "algo.policy.actor_hidden_dims=[512,256,128]",
         "algo.policy.critic_hidden_dims=[512,256,128]",
-        "algo.algorithm.schedule=adaptive",
-        "algo.algorithm.learning_rate=0.001",
+        "algo.algorithm.schedule=fixed",
+        "algo.algorithm.learning_rate=0.0001",
         "+task.racket.reference_guard_mode=metrics_only",
         "task.domain_rand.stable_ready_plant=true",
         "task.racket.adaptive_sigma=false",
@@ -1784,6 +1812,10 @@ def test_training_argv_pins_a211_lineage_bootstrap_and_optimizer(tmp_path, monke
         "task.actions.control_step_action_delay_min=0",
         "task.actions.control_step_action_delay_max=0",
         "action_ball_dynamic_ready_bootstrap=true",
+        # A1 = 标准 rsl_rl 初始化 + sigma 1.0 + scalar(exp §5.6.2c)
+        "algo.policy.init_noise_std=1.0",
+        "algo.policy.noise_std_type=scalar",
+        "action_ball_actor_init_mode=default",
     ):
         assert exact in argv
     joined = "\n".join(argv)
@@ -1792,6 +1824,36 @@ def test_training_argv_pins_a211_lineage_bootstrap_and_optimizer(tmp_path, monke
     assert "expected_effective_reward_recipe_sha256=" + "3" * 64 in argv
     assert "action_ball_manifest_sha256=" in joined
     assert "target_recipe" not in joined and "validity_mask" not in joined
+
+
+@pytest.mark.parametrize(
+    "arm_index,sigma_token,std_type,init_mode",
+    (
+        (0, "algo.policy.init_noise_std=0.1", "log", "zero_weight_ready_bias"),
+        (1, "algo.policy.init_noise_std=1.0", "scalar", "default"),
+    ),
+)
+def test_training_argv_carries_each_cell_exploration_package(
+    tmp_path, monkeypatch, arm_index, sigma_token, std_type, init_mode
+):
+    """人话:两个格子的 argv 只在初始化方式与 sigma 上不同,PPO 三项完全一样。"""
+
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, _lineage_doc = _case(
+        tmp_path, arm_id=launcher.ARM_IDS[arm_index], stage="probe512"
+    )
+    argv = launcher.build_plan(spec_path)["canonical_payload"]["training_argv"]
+    assert sigma_token in argv
+    assert "algo.policy.noise_std_type=%s" % std_type in argv
+    assert "action_ball_actor_init_mode=%s" % init_mode in argv
+    assert "algo.algorithm.schedule=fixed" in argv
+    assert "algo.algorithm.learning_rate=0.0001" in argv
+    # 标准初始化格必须与一个显式 bootstrap 同时给,否则 train.py 侧 fail-closed。
+    assert "action_ball_dynamic_ready_bootstrap=true" in argv
+    joined = "\n".join(argv)
+    assert joined.count("algo.policy.init_noise_std=") == 1
+    assert joined.count("algo.policy.noise_std_type=") == 1
+    assert joined.count("action_ball_actor_init_mode=") == 1
 
 
 def test_a211_runtime_source_manifest_pins_the_a211_contract_source():

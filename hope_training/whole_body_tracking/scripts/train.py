@@ -6078,6 +6078,48 @@ def _resolve_action_ball_shared_ready_bootstrap_request(
     return requested, output
 
 
+def _resolve_action_ball_actor_init_mode(
+    cfg, *, action_ball_launch_requested: bool, bootstrap_requested: bool
+) -> str:
+    """Resolve which ActionBall actor output-layer initialization is launching.
+
+    人话:两条路都得明写。不填=老的零权重 bootstrap(和以前逐字节一样);想用标准 rsl_rl
+    初始化就得显式写 default,写错字直接报错,不会默默退回任何一条。
+    """
+
+    from whole_body_tracking.utils.training_contract import (
+        ACTION_BALL_ACTOR_INIT_MODES,
+        ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+    )
+
+    raw = _get(cfg, "action_ball_actor_init_mode")
+    if raw is None:
+        mode = ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+    else:
+        if type(raw) is not str or raw.strip() != raw or not raw:
+            raise RuntimeError(
+                "action_ball_actor_init_mode must be one exact unpadded string"
+            )
+        mode = raw
+    if mode not in ACTION_BALL_ACTOR_INIT_MODES:
+        raise RuntimeError(
+            "action_ball_actor_init_mode must be exactly one of "
+            f"{list(ACTION_BALL_ACTOR_INIT_MODES)}, got {mode!r}"
+        )
+    if mode != ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS:
+        if not action_ball_launch_requested:
+            raise RuntimeError(
+                "action_ball_actor_init_mode is ActionBall-only"
+            )
+        if not bootstrap_requested:
+            raise RuntimeError(
+                "action_ball_actor_init_mode requires one explicit shared-ready "
+                "or dynamic-ready ActionBall bootstrap so the chosen actor "
+                "initialization is recorded in a validated contract"
+            )
+    return mode
+
+
 def _resolve_action_ball_effective_reward_materialization_request(
     cfg, *, action_ball_launch_requested: bool
 ) -> str | None:
@@ -7289,18 +7331,31 @@ def _action_ball_policy_bootstrap_contract(
     *,
     dynamic_ready_binding=None,
     dr_l0_zero_decoder: bool = False,
+    actor_init_mode: str | None = None,
 ) -> dict:
     """Build the fresh-policy shared-ready or N1 dynamic-ready contract."""
 
     import torch
 
     from whole_body_tracking.utils.training_contract import (
+        ACTION_BALL_ACTOR_INIT_MODES,
+        ACTION_BALL_ACTOR_INIT_MODE_DEFAULT,
+        ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+        ACTION_BALL_FOUR_SIGMA_GATE_SKIPPED_REASON,
         ACTION_BALL_POLICY_BOOTSTRAP_KIND,
         action_ball_shared_ready_sha256,
         runtime_execution_facts,
         validate_action_ball_dynamic_ready_runtime_binding,
         validate_action_ball_policy_bootstrap,
     )
+
+    if actor_init_mode is None:
+        actor_init_mode = ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+    if actor_init_mode not in ACTION_BALL_ACTOR_INIT_MODES:
+        raise RuntimeError(
+            "ActionBall actor bootstrap requires one of "
+            f"{list(ACTION_BALL_ACTOR_INIT_MODES)}, got {actor_init_mode!r}"
+        )
 
     racket_cmd = env.command_manager.get_term("racket_target")
     racket_cfg = racket_cmd.cfg
@@ -7590,6 +7645,38 @@ def _action_ball_policy_bootstrap_contract(
     }
     if dynamic_ready_binding is not None:
         decoder["target_joint_pos"] = target_q
+    # 人话:零权重那条路照原样发,合同字节和以前一模一样(SHA 不动);标准初始化那条路多写
+    # 两把钥匙 —— 自陈 actor_init_mode,以及 4-sigma 门 applied=false 加跳过理由。
+    #
+    # The zero-weight path emits the historical V2 initialization block verbatim so every frozen
+    # lineage SHA stays reproducible.  Only the standard-initialization path emits the V3 block.
+    initialization = {
+        "fresh_only": True,
+        "resume_overwrite_prohibited": True,
+        "output_layer_weight": "zeros",
+        "output_layer_bias": "decoder.normalized_bias",
+        "init_noise_std": init_noise_std,
+        "noise_std_type": noise_std_type,
+        "required_realized_init_noise_std": init_noise_std,
+        "sigma_envelope": 4.0,
+    }
+    if actor_init_mode == ACTION_BALL_ACTOR_INIT_MODE_DEFAULT:
+        # The 4-sigma gate is the property this path gives up, so require the runtime safety net
+        # that replaced the hard forbidden-band reset before letting the launch continue: a finite
+        # out-of-band q_des is projected and penalized, not terminated.
+        if runtime_facts.get("finite_preclamp_qdes_projection_enabled") is not True:
+            raise RuntimeError(
+                "standard ActionBall actor initialization requires the finite "
+                "pre-clamp q_des projection runtime fact to be exact true, "
+                "because it deliberately skips the 4-sigma hard-inner gate"
+            )
+        initialization["output_layer_weight"] = "default"
+        initialization["output_layer_bias"] = "default"
+        initialization["actor_init_mode"] = ACTION_BALL_ACTOR_INIT_MODE_DEFAULT
+        initialization["four_sigma_hard_inner_gate"] = {
+            "applied": False,
+            "reason": ACTION_BALL_FOUR_SIGMA_GATE_SKIPPED_REASON,
+        }
     contract = {
         "schema_version": _action_ball_policy_bootstrap_schema_version(
             dynamic_ready=dynamic_ready_binding is not None,
@@ -7601,16 +7688,7 @@ def _action_ball_policy_bootstrap_contract(
         "joint_names": joint_names,
         "ready_source": ready_source,
         "decoder": decoder,
-        "initialization": {
-            "fresh_only": True,
-            "resume_overwrite_prohibited": True,
-            "output_layer_weight": "zeros",
-            "output_layer_bias": "decoder.normalized_bias",
-            "init_noise_std": init_noise_std,
-            "noise_std_type": noise_std_type,
-            "required_realized_init_noise_std": init_noise_std,
-            "sigma_envelope": 4.0,
-        },
+        "initialization": initialization,
         "hard_inner_guard": {
             "limit_source": "articulation.data.joint_pos_limits",
             "margin_rad": 0.0,
@@ -7628,6 +7706,12 @@ def _action_ball_policy_bootstrap_contract(
     except ValueError as exc:
         raise RuntimeError(
             "ActionBall actor bootstrap failed the 4-sigma hard-inner gate"
+            if actor_init_mode
+            == ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+            else (
+                "ActionBall standard-initialization actor bootstrap failed its "
+                "contract validation"
+            )
         ) from exc
     return contract
 
@@ -7640,6 +7724,8 @@ def _apply_action_ball_fresh_policy_bootstrap(
     import torch
 
     from whole_body_tracking.utils.training_contract import (
+        ACTION_BALL_ACTOR_INIT_MODE_DEFAULT,
+        ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
         validate_action_ball_policy_bootstrap,
     )
 
@@ -7649,6 +7735,10 @@ def _apply_action_ball_fresh_policy_bootstrap(
         raise RuntimeError(
             "refusing to apply an invalid ActionBall policy bootstrap"
         ) from exc
+    actor_init_mode = contract["initialization"].get(
+        "actor_init_mode",
+        ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+    )
     expected_noise_std_type = contract["initialization"].get(
         "noise_std_type", "scalar"
     )
@@ -7680,19 +7770,33 @@ def _apply_action_ball_fresh_policy_bootstrap(
         raise RuntimeError(
             "ActionBall bootstrap actor output does not match the 31-joint contract"
         )
-    expected_bias = torch.tensor(
-        bias_values, device=output.bias.device, dtype=output.bias.dtype
-    )
-    with torch.no_grad():
-        output.weight.zero_()
-        output.bias.copy_(expected_bias)
-    if (
-        int(torch.count_nonzero(output.weight).item()) != 0
-        or not torch.equal(output.bias, expected_bias)
-    ):
-        raise RuntimeError(
-            "ActionBall actor output bootstrap did not apply exactly"
+    if actor_init_mode == ACTION_BALL_ACTOR_INIT_MODE_DEFAULT:
+        # 人话:标准初始化这条路,输出层保持 rsl_rl 建好的样子,一个数都不动;这里只留一道
+        # 反向断言,防止别处偷偷把它清成零权重再冒充标准初始化。
+        #
+        # The contract promised the framework default, so overwriting the layer here would make
+        # the receipt a lie.  Assert the negative instead: a fully zeroed output weight is what
+        # the other path produces, and seeing it here means something already overwrote it.
+        if int(torch.count_nonzero(output.weight).item()) == 0:
+            raise RuntimeError(
+                "ActionBall standard actor initialization found an exactly "
+                "zero output weight matrix, which is the zero-weight bootstrap "
+                "this contract explicitly did not select"
+            )
+    else:
+        expected_bias = torch.tensor(
+            bias_values, device=output.bias.device, dtype=output.bias.dtype
         )
+        with torch.no_grad():
+            output.weight.zero_()
+            output.bias.copy_(expected_bias)
+        if (
+            int(torch.count_nonzero(output.weight).item()) != 0
+            or not torch.equal(output.bias, expected_bias)
+        ):
+            raise RuntimeError(
+                "ActionBall actor output bootstrap did not apply exactly"
+            )
     claimed_noise_std_type = getattr(policy, "noise_std_type", None)
     if (
         claimed_noise_std_type is not None
@@ -7754,6 +7858,18 @@ def _apply_action_ball_fresh_policy_bootstrap(
         "realized_policy_std_mean": float(realized_summary[1]),
         "realized_policy_std_max": float(realized_summary[2]),
     }
+    if actor_init_mode != ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS:
+        # 人话:老收据的键集被下游 gate 逐字校验,所以只有新路线才改 schema 并加自陈字段;
+        # 那些只认 schema 1 + sigma=0.02 的冻结 gate 会因此直接拒绝新路线,这是对的。
+        #
+        # Downstream probe-gate consumers pin the schema-1 receipt key set exactly.  Emitting a
+        # distinct schema for the new path keeps them byte-stable and makes them fail closed on
+        # a run they were never reviewed for, instead of silently accepting it.
+        runtime_receipt["schema_version"] = 2
+        runtime_receipt["actor_init_mode"] = actor_init_mode
+        runtime_receipt["four_sigma_hard_inner_gate_applied"] = bool(
+            contract["initialization"]["four_sigma_hard_inner_gate"]["applied"]
+        )
     print(
         "HOPE_ACTION_BALL_POLICY_BOOTSTRAP_JSON="
         + json.dumps(
@@ -16598,6 +16714,14 @@ def _run(cfg):
         raise RuntimeError(
             "shared-ready and dynamic-ready actor bootstraps are mutually exclusive"
         )
+    action_ball_actor_init_mode = _resolve_action_ball_actor_init_mode(
+        cfg,
+        action_ball_launch_requested=action_ball_launch_requested,
+        bootstrap_requested=(
+            action_ball_shared_ready_bootstrap_requested
+            or action_ball_dynamic_ready_bootstrap_requested
+        ),
+    )
     (
         action_ball_teacher_qdes_oracle_output_path,
         action_ball_teacher_qdes_oracle_episodes,
@@ -16878,6 +17002,7 @@ def _run(cfg):
                 dr_l0_zero_decoder=_resolve_action_ball_dr_l0_request(
                     _get(cfg.task, "domain_rand")
                 ),
+                actor_init_mode=action_ball_actor_init_mode,
             )
         )
         ready_identity = (
@@ -16895,6 +17020,7 @@ def _run(cfg):
             f"N={action_ball_policy_bootstrap['action_count']} "
             "noise_std="
             f"{action_ball_policy_bootstrap['initialization']['init_noise_std']} "
+            f"actor_init_mode={action_ball_actor_init_mode} "
             f"ready_identity_sha256={ready_identity}",
             flush=True,
         )
@@ -17310,7 +17436,8 @@ def _run(cfg):
         )
         print(
             "[train.py] ActionBall policy bootstrap: "
-            f"{'APPLIED_FRESH' if bootstrap_applied else 'SKIPPED_RESUME'}",
+            f"{'APPLIED_FRESH' if bootstrap_applied else 'SKIPPED_RESUME'} "
+            f"actor_init_mode={action_ball_actor_init_mode}",
             flush=True,
         )
     if strict_exact_training and bool(getattr(runner, "is_distributed", False)):

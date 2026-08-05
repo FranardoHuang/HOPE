@@ -1950,6 +1950,19 @@ _MIXTURE_BIRTH_PAYLOAD_KEYS = (
     "frontier_arm",
     *_BIRTH_PAYLOAD_KEYS[13:],
 )
+# The initial-center collapse is written down only when the sampler actually
+# ran under that law, so every receipt produced before this field existed keeps
+# its exact bytes and canonical SHA.  ``False`` therefore means "absent", which
+# is also what every legacy row on disk asserts.
+_INITIAL_CENTER_MIXTURE_BIRTH_PAYLOAD_KEYS = (
+    *_BIRTH_PAYLOAD_KEYS[:13],
+    "sampling_mixture",
+    "sampling_stratum",
+    "sampling_levels",
+    "frontier_arm",
+    "initial_center_single_question",
+    *_BIRTH_PAYLOAD_KEYS[13:],
+)
 
 
 @dataclass(frozen=True)
@@ -1985,6 +1998,7 @@ class ActionBirthReceipt:
     sampling_stratum: str = "domain"
     sampling_levels: ActionDomainLevels | None = None
     frontier_arm: str | None = None
+    initial_center_single_question: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -2041,10 +2055,15 @@ class ActionBirthReceipt:
             raise ActionBallContractError(
                 "birth receipt arm catalog SHA mismatch"
             )
+        if type(self.initial_center_single_question) is not bool:
+            raise ActionBallContractError(
+                "birth initial_center_single_question must be a plain bool"
+            )
         if self.sampling_mixture is None:
             if (
                 self.sampling_stratum != "domain"
                 or self.frontier_arm is not None
+                or self.initial_center_single_question
             ):
                 raise ActionBallContractError(
                     "legacy birth cannot carry mixture sampling metadata"
@@ -2093,7 +2112,35 @@ class ActionBirthReceipt:
                     )
                 )
             )
-            if (
+            # ``ActionBallSampler._literal_initial_center_active`` collapses the
+            # whole plan to the literal centre point while the sampler runs in
+            # initial-center single-question mode and all 32 curriculum arms are
+            # exactly zero.  Under that law the quota slot no longer selects the
+            # stratum, so comparing against the schedule would reject the only
+            # plan the sampler is allowed to emit.  The gate stays fail-closed:
+            # it now asserts the *unique* legal row instead of the quota slot,
+            # and rejects any non-centre row the collapse cannot have produced.
+            initial_center_collapse = (
+                self.initial_center_single_question
+                and all(
+                    getattr(self.domain_levels, arm) == 0.0
+                    for arm in ARM_KEYS
+                )
+            )
+            if initial_center_collapse:
+                if (
+                    self.sampling_stratum != "center"
+                    or self.frontier_arm is not None
+                    or any(
+                        getattr(self.sampling_levels, arm) != 0.0
+                        for arm in ARM_KEYS
+                    )
+                ):
+                    raise ActionBallContractError(
+                        "birth initial-center collapse is not the literal "
+                        "all-zero center row"
+                    )
+            elif (
                 self.sampling_stratum != expected_stratum
                 and not inactive_birth_frontier
             ):
@@ -2277,6 +2324,8 @@ class ActionBirthReceipt:
                     "frontier_arm": self.frontier_arm,
                 }
             )
+            if self.initial_center_single_question:
+                result["initial_center_single_question"] = True
         return result
 
     @_WeakIdentityCachedCanonicalSha256
@@ -2327,16 +2376,20 @@ class ActionBirthReceipt:
                 "action birth receipt must be a mapping"
             )
         has_mixture = "sampling_mixture" in value
+        has_initial_center = "initial_center_single_question" in value
+        if has_initial_center and not has_mixture:
+            raise ActionBallContractError(
+                "legacy birth cannot carry mixture sampling metadata"
+            )
+        if has_initial_center:
+            payload_keys = _INITIAL_CENTER_MIXTURE_BIRTH_PAYLOAD_KEYS
+        elif has_mixture:
+            payload_keys = _MIXTURE_BIRTH_PAYLOAD_KEYS
+        else:
+            payload_keys = _BIRTH_PAYLOAD_KEYS
         row = _exact_mapping(
             value,
-            (
-                *(
-                    _MIXTURE_BIRTH_PAYLOAD_KEYS
-                    if has_mixture
-                    else _BIRTH_PAYLOAD_KEYS
-                ),
-                "canonical_sha256",
-            ),
+            (*payload_keys, "canonical_sha256"),
             name="action birth receipt",
         )
         if row["schema_version"] != SCHEMA_VERSION:
@@ -2347,11 +2400,15 @@ class ActionBirthReceipt:
             raise ActionBallContractError(
                 "action birth receipt runtime contract SHA mismatch"
             )
-        payload_keys = (
-            _MIXTURE_BIRTH_PAYLOAD_KEYS
-            if has_mixture
-            else _BIRTH_PAYLOAD_KEYS
-        )
+        if has_initial_center and row[
+            "initial_center_single_question"
+        ] is not True:
+            # The key exists only to record a collapse that actually happened;
+            # a serialized ``False`` would be an unwritten default masquerading
+            # as evidence, and would also fork the canonical bytes.
+            raise ActionBallContractError(
+                "birth initial_center_single_question is only written when true"
+            )
         fields = {
             name: row[name]
             for name in payload_keys
@@ -3305,6 +3362,16 @@ _COUNTER_RALLY_MIXTURE_TASK_PAYLOAD_KEYS = (
     *_MIXTURE_TASK_PAYLOAD_KEYS,
     "counter_rally_task",
 )
+# Same rule as the birth row: the initial-center collapse is only ever written
+# down when it happened, so pre-existing task receipts keep their exact bytes.
+_INITIAL_CENTER_MIXTURE_TASK_PAYLOAD_KEYS = (
+    *_MIXTURE_TASK_PAYLOAD_KEYS,
+    "initial_center_single_question",
+)
+_INITIAL_CENTER_COUNTER_RALLY_MIXTURE_TASK_PAYLOAD_KEYS = (
+    *_COUNTER_RALLY_MIXTURE_TASK_PAYLOAD_KEYS,
+    "initial_center_single_question",
+)
 
 
 @dataclass(frozen=True)
@@ -3479,6 +3546,7 @@ class ActionBallTaskReceipt:
     contact_time_step_s: float | None = None
     time_to_contact_tick: int | None = None
     counter_rally_task: CounterRallyTaskIdentity | None = None
+    initial_center_single_question: bool = False
     _validation_mode: InitVar[object] = _FULL_TASK_RECEIPT_VALIDATION
 
     def __post_init__(
@@ -3678,6 +3746,10 @@ class ActionBallTaskReceipt:
                 "sampler sample draw range must consume exactly "
                 f"{SAMPLER_SAMPLE_DRAW_COUNT} draws"
             )
+        if type(self.initial_center_single_question) is not bool:
+            raise ActionBallContractError(
+                "task initial_center_single_question must be a plain bool"
+            )
         if self.sampling_mixture is None:
             if (
                 self.birth_index != -1
@@ -3687,6 +3759,7 @@ class ActionBallTaskReceipt:
                 or self.frontier_arm is not None
                 or self.contact_time_step_s is not None
                 or self.time_to_contact_tick is not None
+                or self.initial_center_single_question
             ):
                 raise ActionBallContractError(
                     "legacy task cannot carry mixture/tick metadata"
@@ -3741,7 +3814,34 @@ class ActionBallTaskReceipt:
                     )
                 )
             )
-            if (
+            # ``_literal_initial_center_active`` keys off the frozen domain
+            # levels, which this receipt copies verbatim from its birth, so the
+            # collapse binds the birth plan and the swing plan identically.
+            # Both must therefore be the literal centre row, and nothing else.
+            initial_center_collapse = (
+                self.initial_center_single_question
+                and all(
+                    getattr(self.domain_levels, arm) == 0.0
+                    for arm in ARM_KEYS
+                )
+            )
+            if initial_center_collapse:
+                if (
+                    self.birth_sampling_stratum != "center"
+                    or self.sampling_stratum != "center"
+                    or self.birth_frontier_arm is not None
+                    or self.frontier_arm is not None
+                    or any(
+                        getattr(self.birth_sampling_levels, arm) != 0.0
+                        or getattr(self.sampling_levels, arm) != 0.0
+                        for arm in ARM_KEYS
+                    )
+                ):
+                    raise ActionBallContractError(
+                        "task initial-center collapse is not the literal "
+                        "all-zero center row"
+                    )
+            elif (
                 (
                     self.birth_sampling_stratum
                     != expected_birth_stratum
@@ -4399,6 +4499,9 @@ class ActionBallTaskReceipt:
             sampling_levels=sampling_levels,
             frontier_arm=frontier_arm,
             counter_rally_task=counter_rally_task,
+            initial_center_single_question=(
+                birth.initial_center_single_question
+            ),
             _validation_mode=_validation_mode,
         )
 
@@ -4506,7 +4609,7 @@ class ActionBallTaskReceipt:
             )
         if self.sampling_mixture is None:
             return payload
-        return {
+        payload = {
             **payload,
             "birth_index": self.birth_index,
             "birth_sampling_stratum": (
@@ -4523,6 +4626,9 @@ class ActionBallTaskReceipt:
             "contact_time_step_s": self.contact_time_step_s,
             "time_to_contact_tick": self.time_to_contact_tick,
         }
+        if self.initial_center_single_question:
+            payload["initial_center_single_question"] = True
+        return payload
 
     @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
@@ -4555,7 +4661,21 @@ class ActionBallTaskReceipt:
             isinstance(value, Mapping)
             and "counter_rally_task" in value
         )
-        if has_mixture and has_counter_rally_task:
+        has_initial_center = (
+            isinstance(value, Mapping)
+            and "initial_center_single_question" in value
+        )
+        if has_initial_center and not has_mixture:
+            raise ActionBallContractError(
+                "legacy task cannot carry mixture/tick metadata"
+            )
+        if has_initial_center and has_counter_rally_task:
+            payload_keys = (
+                _INITIAL_CENTER_COUNTER_RALLY_MIXTURE_TASK_PAYLOAD_KEYS
+            )
+        elif has_initial_center:
+            payload_keys = _INITIAL_CENTER_MIXTURE_TASK_PAYLOAD_KEYS
+        elif has_mixture and has_counter_rally_task:
             payload_keys = _COUNTER_RALLY_MIXTURE_TASK_PAYLOAD_KEYS
         elif has_mixture:
             payload_keys = _MIXTURE_TASK_PAYLOAD_KEYS
@@ -4571,6 +4691,12 @@ class ActionBallTaskReceipt:
         if row["schema_version"] != TASK_RECEIPT_SCHEMA_VERSION:
             raise ActionBallContractError(
                 "unsupported action-ball task receipt schema_version"
+            )
+        if has_initial_center and row[
+            "initial_center_single_question"
+        ] is not True:
+            raise ActionBallContractError(
+                "task initial_center_single_question is only written when true"
             )
         if row["runtime_contract_sha256"] != RUNTIME_CONTRACT_SHA256:
             raise ActionBallContractError(
@@ -4834,6 +4960,7 @@ _DIAGNOSTIC_TASK_RECEIPT_BIRTH_FIELD_NAMES = (
     "physics_sha256",
     "solver_sha256",
     "registry_sha256",
+    "initial_center_single_question",
 )
 _DIAGNOSTIC_TASK_RECEIPT_SEQUENCE_KWARGS = (
     "base_goal_w_m",
@@ -4937,6 +5064,9 @@ def _diagnostic_prevalidated_task_receipt_from_birth(
         physics_sha256=birth.physics_sha256,
         solver_sha256=birth.solver_sha256,
         registry_sha256=birth.registry_sha256,
+        initial_center_single_question=(
+            birth.initial_center_single_question
+        ),
     )
     receipt = object.__new__(ActionBallTaskReceipt)
     for name in _DIAGNOSTIC_TASK_RECEIPT_STORAGE_FIELDS:

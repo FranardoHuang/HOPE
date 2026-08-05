@@ -2839,7 +2839,11 @@ class MujocoC211DiagnosticVecEnv:
                 "native single-stroke timeout installation failed"
             ) from exc
 
-    def fresh_actor_bootstrap_contract(self) -> dict[str, Any]:
+    def fresh_actor_bootstrap_contract(
+        self,
+        *,
+        actor_init_mode: str = trainer.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+    ) -> dict[str, Any]:
         """Bind native fresh-policy initialization to the physical hold action.
 
         The split-ready reset is intentionally not the plant's default pose.
@@ -2847,8 +2851,19 @@ class MujocoC211DiagnosticVecEnv:
         is the same fresh-only output-layer initialization used by the Isaac
         ActionBall lane; checkpoints restore their saved policy and never
         reapply it.
+
+        ``actor_init_mode`` mirrors the Isaac switch.  Under the standard
+        initialization the hold action is still measured and sealed here -- it
+        is the shared anchor between this authority and the trainer -- but it is
+        no longer installed into the network, and the 4-sigma excursion figures
+        stay in the payload as a labelled forecast only.
         """
 
+        if actor_init_mode not in trainer.ACTOR_INIT_MODES:
+            raise C211EnvError(
+                "fresh actor bootstrap actor_init_mode must be exactly one of "
+                f"{list(trainer.ACTOR_INIT_MODES)}"
+            )
         bias = _finite_vector(
             self.producer.robot_tape.history_fill_action,
             self.num_actions,
@@ -2889,8 +2904,60 @@ class MujocoC211DiagnosticVecEnv:
         unsafe = np.flatnonzero((lower_margin <= 0.0) | (upper_margin <= 0.0))
         unsafe_names = [first.joint_names[int(index)] for index in unsafe]
         payload = trainer.fresh_actor_bootstrap_contract(
-            bias.tolist(), initial_action_std=0.02
+            bias.tolist(),
+            initial_action_std=0.02,
+            actor_init_mode=actor_init_mode,
         )
+        if actor_init_mode == trainer.ACTOR_INIT_MODE_DEFAULT:
+            # 人话:标准初始化下"演员均值就是密封 hold"这句话不成立,所以那套以它为前提的门
+            # 一个都不能声称通过。这里换一份自陈的门:明说哪几条前提没了、4-sigma 只当预报。
+            payload["safety_gate"] = {
+                "schema_version": 1,
+                "kind": "a3_action_ball_default_actor_init_gate_v1",
+                "actor_init_mode": trainer.ACTOR_INIT_MODE_DEFAULT,
+                "sealed_mean_gate_applicable": False,
+                "sealed_mean_gate_inapplicable_reason": (
+                    "default_initialized_actor_mean_is_not_the_sealed_hold_"
+                    "action_so_the_sealed_mean_criterion_has_no_subject"
+                ),
+                "four_sigma_hard_inner_gate": {
+                    "applied": False,
+                    "reason": trainer.FOUR_SIGMA_GATE_SKIPPED_REASON,
+                },
+                "four_sigma_projection_forecast": {
+                    "role": (
+                        "analytic_projection_risk_forecast_not_launch_blocker"
+                    ),
+                    "sigma_envelope": 4.0,
+                    "criterion": (
+                        "hold_qdes_plus_or_minus_4_times_0.02_times_abs_action_"
+                        "scale_compared_with_executed_qdes_limits"
+                    ),
+                    "forecast_subject_is_the_hold_not_the_actor_mean": True,
+                    "joints_not_strictly_inside": unsafe_names,
+                    "all_joints_strictly_inside": unsafe.size == 0,
+                },
+                "plant_binding_sha256": _plain_sha256(
+                    first.binding_sha256, "fresh actor plant binding SHA"
+                ),
+                "plant_contract_file_sha256": _plain_sha256(
+                    first.source_sha256, "fresh actor plant source SHA"
+                ),
+                "robot_tape_file_sha256": _plain_sha256(
+                    self.producer.robot_tape.source_sha256,
+                    "fresh actor robot tape SHA",
+                ),
+                "joint_names": list(first.joint_names),
+                "mean_hold_qdes_rad": mean_qdes.tolist(),
+                "four_sigma_qdes_excursion_rad": excursion.tolist(),
+                "executed_qdes_lower_rad": executed_lower.tolist(),
+                "executed_qdes_upper_rad": executed_upper.tolist(),
+                "minimum_lower_margin_rad": float(np.min(lower_margin)),
+                "minimum_upper_margin_rad": float(np.min(upper_margin)),
+            }
+            payload.pop("content_sha256")
+            payload["content_sha256"] = _sha256_json(payload)
+            return payload
         payload["safety_gate"] = {
             "schema_version": 2,
             "kind": "a3_action_ball_fresh_actor_wait_bootstrap_gate_v2",

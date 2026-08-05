@@ -464,10 +464,12 @@ RUNTIME_SOURCE_PATHS = (
 )
 
 ISAAC_FOUR_GRID_KIND = _F.KIND
-A_FIXED_CELL_ID = _F.A_FIXED_CELL_ID
-A_ADAPTIVE_KL_CELL_ID = _F.A_ADAPTIVE_KL_CELL_ID
-C_FIXED_CELL_ID = _F.C_FIXED_CELL_ID
-C_ADAPTIVE_KL_CELL_ID = _F.C_ADAPTIVE_KL_CELL_ID
+A_BOOTSTRAP_CELL_ID = _F.A_BOOTSTRAP_CELL_ID
+A_STANDARD_INIT_CELL_ID = _F.A_STANDARD_INIT_CELL_ID
+C_BOOTSTRAP_CELL_ID = _F.C_BOOTSTRAP_CELL_ID
+C_STANDARD_INIT_CELL_ID = _F.C_STANDARD_INIT_CELL_ID
+ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = _F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+ACTOR_INIT_MODE_DEFAULT = _F.ACTOR_INIT_MODE_DEFAULT
 ISAAC_FOUR_GRID_CELL_IDS = _F.CELL_IDS
 ARM_IDS = _F.FAMILY_CELL_IDS["A211"]
 A_SELECTED_TAPE_VARIANT = "current_lm"
@@ -481,6 +483,9 @@ def _arm(
     guard: str,
     schedule: str,
     learning_rate: float,
+    actor_init_mode: str,
+    init_noise_std: float,
+    noise_std_type: str,
 ) -> dict[str, Any]:
     return {
         "soft_weights": {
@@ -498,15 +503,42 @@ def _arm(
             "num_learning_epochs": 5,
             "num_mini_batches": 4,
         },
+        "actor_init_mode": actor_init_mode,
+        "init_noise_std": init_noise_std,
+        "noise_std_type": noise_std_type,
     }
 
 
 # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0(post-dt -6.0 -> -0.2)。
-# 本表是 four-grid manifest matched_contract.soft_weights 的手抄副本,_arm_contract() 逐字段
-# 比对两者,不同步就 LaunchRefused。其余三项(qdes/projection/joint = -5.0)本次不变。
+# 2026-08-05 第二轴改版(exp §5.6.2c):PPO schedule 对照降级为 later,四格共用 fixed lr1e-4;
+# 第二格改跑标准 rsl_rl 初始化 + sigma 1.0 + scalar(对齐 BeyondMimic / build_1),第一格
+# 维持零权重 bootstrap + 钉死 bias + sigma 0.1 + log。两格其余设定逐字节相同。
+# 本表是 four-grid manifest 的手抄副本,_arm_contract() 逐字段比对两者,不同步就 LaunchRefused。
 ARMS: Mapping[str, dict[str, Any]] = {
-    ARM_IDS[0]: _arm(-10.0, -5.0, -5.0, -5.0, "metrics_only", "fixed", 1.0e-4),
-    ARM_IDS[1]: _arm(-10.0, -5.0, -5.0, -5.0, "metrics_only", "adaptive", 1.0e-3),
+    ARM_IDS[0]: _arm(
+        -10.0,
+        -5.0,
+        -5.0,
+        -5.0,
+        "metrics_only",
+        "fixed",
+        1.0e-4,
+        ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+        0.1,
+        "log",
+    ),
+    ARM_IDS[1]: _arm(
+        -10.0,
+        -5.0,
+        -5.0,
+        -5.0,
+        "metrics_only",
+        "fixed",
+        1.0e-4,
+        ACTOR_INIT_MODE_DEFAULT,
+        1.0,
+        "scalar",
+    ),
 }
 
 BUDGETS: Mapping[str, tuple[int, int, int]] = {
@@ -548,6 +580,24 @@ FORBIDDEN_VALUE_TOKENS = (
 
 def canonical_sha256(value: Any) -> str:
     return _B.canonical_sha256(value)
+
+
+def _float_override_token(value: Any, *, name: str) -> str:
+    """Emit a Hydra override that always parses back as a float.
+
+    人话:".12g" 会把 1.0 打成 "1",Hydra 读回来就是 int。init_noise_std 必须始终是浮点,
+    所以这里用 repr 保住小数点。
+    """
+
+    if type(value) is not float or value != value or value in (
+        float("inf"),
+        float("-inf"),
+    ):
+        raise LaunchRefused("%s must be a finite float override" % name)
+    token = repr(value)
+    if "." not in token and "e" not in token and "E" not in token:
+        raise LaunchRefused("%s override lost its float form" % name)
+    return token
 
 
 def _isaac_four_grid_manifest() -> dict[str, Any]:
@@ -1809,15 +1859,25 @@ def _arm_contract(arm_id: str) -> dict[str, Any]:
     matched = manifest["matched_contract"]
     cell = _four_grid_cell(arm_id, task_family="A211")
     arm = json.loads(json.dumps(ARMS[arm_id]))
+    # 探索包是本轮唯一的注册差异轴,所以它不能从 matched_contract 取(那里已经没有这三个键),
+    # 必须逐字段对上本格 cell;本地手抄表与 sealed cell 任一处不同即拒。
+    exploration = {key: arm.pop(key) for key in _F.EXPLORATION_CELL_KEYS if key in arm}
     if (
         arm["soft_weights"] != matched["soft_weights"]
         or arm["reference_guard_mode"] != matched["reference_guard_mode"]
         or arm["ppo"] != cell["ppo"]
+        or arm["ppo"] != matched["ppo"]
+        or set(exploration) != {"actor_init_mode", "init_noise_std", "noise_std_type"}
+        or any(cell[key] != value for key, value in exploration.items())
     ):
         raise LaunchRefused("A211 arm differs from the sealed Isaac four-grid cell")
+    try:
+        _F.validate_exploration_package(cell)
+    except _F.FourGridContractError as exc:
+        raise LaunchRefused("A211 exploration package differs: %s" % exc) from exc
     payload = {
-        "schema_version": 1,
-        "kind": "action_ball_a211_learnability_arm_v1",
+        "schema_version": 2,
+        "kind": "action_ball_a211_learnability_arm_v2",
         "arm_id": arm_id,
         "four_grid_cell_id": arm_id,
         "isaac_four_grid_manifest_sha256": manifest["content_sha256"],
@@ -1829,8 +1889,13 @@ def _arm_contract(arm_id: str) -> dict[str, Any]:
         "critic_width": CRITIC_WIDTH,
         "trainability_contract": TRAINABILITY_CONTRACT,
         "fresh_normalizers_required": True,
-        "init_noise_std": matched["init_noise_std"],
-        "noise_std_type": matched["noise_std_type"],
+        "exploration_axis": cell["exploration_axis"],
+        "actor_init_mode": cell["actor_init_mode"],
+        "four_sigma_hard_inner_gate_applies": cell[
+            "four_sigma_hard_inner_gate_applies"
+        ],
+        "init_noise_std": cell["init_noise_std"],
+        "noise_std_type": cell["noise_std_type"],
         "entropy_coef": matched["entropy_coef"],
         "actor_hidden_dims": matched["actor_hidden_dims"],
         "critic_hidden_dims": matched["critic_hidden_dims"],
@@ -3405,9 +3470,14 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
         "algo.runner.empirical_normalization=true",
         "algo.policy.actor_hidden_dims=[512,256,128]",
         "algo.policy.critic_hidden_dims=[512,256,128]",
-        # 0.02 -> 0.1:见 exp §5.6 第 3 条与 action_ball_211_four_grid_contract 的复算表。
-        "algo.policy.init_noise_std=0.1",
-        "algo.policy.noise_std_type=log",
+        # 探索包是本轮的注册差异轴(exp §5.6.2c):零权重格是 0.1/log,标准初始化格是
+        # 1.0/scalar。三个 override 一起从选中的 cell 里发出,不再硬钉字面量。
+        "algo.policy.init_noise_std=%s"
+        % _float_override_token(
+            arm["init_noise_std"], name="algo.policy.init_noise_std"
+        ),
+        "algo.policy.noise_std_type=%s" % arm["noise_std_type"],
+        "action_ball_actor_init_mode=%s" % arm["actor_init_mode"],
         "algo.algorithm.entropy_coef=0.01",
         "algo.algorithm.schedule=%s" % ppo["schedule"],
         "algo.algorithm.learning_rate=%s" % format(ppo["learning_rate"], ".12g"),

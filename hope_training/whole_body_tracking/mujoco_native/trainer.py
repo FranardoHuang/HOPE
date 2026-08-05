@@ -503,11 +503,45 @@ def _terminal_row_telemetry_receipt(
     return payload
 
 
-def fresh_actor_bootstrap_contract(
-    output_bias: Sequence[float], *, initial_action_std: float
-) -> dict[str, Any]:
-    """Canonicalize the Isaac-equivalent fresh ActionBall actor bootstrap."""
+# 人话:和 Isaac 侧同名的两条初始化路线,字面量必须一模一样,否则跨引擎对不上。
+#   zero_weight_ready_bias = 输出层清零 + bias 钉死物理 hold,初始策略是常数(老路)。
+#   default                = 标准初始化,输出层保持框架默认,不做任何覆盖。
+# Isaac source of truth: whole_body_tracking.utils.training_contract
+# ACTION_BALL_ACTOR_INIT_MODE_*.  These literals are duplicated rather than imported because the
+# native MuJoCo lane must stay importable without the Isaac package installed; the cross-engine
+# test asserts the two spellings are identical.
+ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = "zero_weight_ready_bias"
+ACTOR_INIT_MODE_DEFAULT = "default"
+ACTOR_INIT_MODES = (
+    ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+    ACTOR_INIT_MODE_DEFAULT,
+)
+FOUR_SIGMA_GATE_SKIPPED_REASON = (
+    "default_initialized_actor_mean_is_not_the_constant_hold_qdes_so_the_"
+    "four_sigma_envelope_geometry_does_not_apply"
+)
 
+
+def fresh_actor_bootstrap_contract(
+    output_bias: Sequence[float],
+    *,
+    initial_action_std: float,
+    actor_init_mode: str = ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+) -> dict[str, Any]:
+    """Canonicalize the Isaac-equivalent fresh ActionBall actor bootstrap.
+
+    ``actor_init_mode`` selects between the historical zero-weight hold bootstrap and the
+    standard initialization.  The zero-weight payload is emitted verbatim -- same keys, same
+    schema, same content SHA -- so every sealed native launch artifact stays reproducible.  The
+    standard path emits its own schema/kind and self-declares that the 4-sigma envelope forecast
+    does not apply to it, instead of quietly reusing the hold vocabulary.
+    """
+
+    if actor_init_mode not in ACTOR_INIT_MODES:
+        raise DiagnosticPPOContractError(
+            "fresh actor bootstrap actor_init_mode must be exactly one of "
+            f"{list(ACTOR_INIT_MODES)}"
+        )
     if isinstance(output_bias, (str, bytes)):
         raise DiagnosticPPOContractError("fresh actor output bias must be a sequence")
     try:
@@ -520,6 +554,31 @@ def fresh_actor_bootstrap_contract(
         raise DiagnosticPPOContractError(
             "fresh actor output bias must be a non-empty finite sequence"
         )
+    if actor_init_mode == ACTOR_INIT_MODE_DEFAULT:
+        std = float(initial_action_std)
+        if not math.isfinite(std) or not 0.0 < std <= 1.0:
+            raise DiagnosticPPOContractError(
+                "standard actor initialization requires a finite "
+                "initial_action_std in (0, 1]"
+            )
+        payload = {
+            "schema_version": 1,
+            "kind": "a3_action_ball_default_actor_init_bootstrap_v1",
+            "actor_init_mode": ACTOR_INIT_MODE_DEFAULT,
+            "fresh_only": True,
+            "resume_overwrite_prohibited": True,
+            "output_layer_weight": "default",
+            "output_layer_bias": "default",
+            "hold_reference_action": list(values),
+            "initial_action_std": std,
+            "noise_parameterization": "log_std",
+            "four_sigma_hard_inner_gate": {
+                "applied": False,
+                "reason": FOUR_SIGMA_GATE_SKIPPED_REASON,
+            },
+        }
+        payload["content_sha256"] = _canonical_json_sha256(payload)
+        return payload
     if not math.isclose(
         float(initial_action_std), 0.02, rel_tol=0.0, abs_tol=0.0
     ):
@@ -578,6 +637,7 @@ class DiagnosticPPOConfig:
     initial_action_std: float = 0.2
     fresh_actor_output_bias: tuple[float, ...] = ()
     fresh_actor_bootstrap_authority_sha256: str | None = None
+    actor_init_mode: str = ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
     normalizer_epsilon: float = 1.0e-5
     actor_normalizer_identity: str = "mujoco_diagnostic_actor_norm_v1"
     critic_normalizer_identity: str = "mujoco_diagnostic_critic_norm_v1"
@@ -632,6 +692,10 @@ class DiagnosticPPOConfig:
             )
         _finite_positive(self.max_grad_norm, "max_grad_norm")
         _finite_positive(self.initial_action_std, "initial_action_std")
+        if self.actor_init_mode not in ACTOR_INIT_MODES:
+            raise DiagnosticPPOContractError(
+                f"actor_init_mode must be exactly one of {list(ACTOR_INIT_MODES)}"
+            )
         if not isinstance(self.fresh_actor_output_bias, tuple) or any(
             isinstance(value, bool) or not math.isfinite(float(value))
             for value in self.fresh_actor_output_bias
@@ -639,16 +703,42 @@ class DiagnosticPPOConfig:
             raise DiagnosticPPOContractError(
                 "fresh_actor_output_bias must be a finite tuple"
             )
-        if self.fresh_actor_output_bias and (
-            len(self.fresh_actor_output_bias) != self.action_dim
-            or not math.isclose(
-                float(self.initial_action_std), 0.02, rel_tol=0.0, abs_tol=0.0
+        if (
+            self.actor_init_mode == ACTOR_INIT_MODE_DEFAULT
+            and not self.fresh_actor_output_bias
+        ):
+            # 人话:标准初始化也要求把物理 hold 写进合同 —— 它不再被装进网络,但收据必须留底,
+            # 否则 VecEnv 那份权威和 trainer 这份就没有共同锚点了。
+            raise DiagnosticPPOContractError(
+                "standard actor initialization still requires the physical hold "
+                "reference action so the VecEnv authority and the trainer share "
+                "one anchor"
+            )
+        if (
+            self.actor_init_mode == ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+            and self.fresh_actor_output_bias
+            and (
+                len(self.fresh_actor_output_bias) != self.action_dim
+                or not math.isclose(
+                    float(self.initial_action_std), 0.02, rel_tol=0.0, abs_tol=0.0
+                )
             )
         ):
             raise DiagnosticPPOContractError(
                 "fresh actor bootstrap requires one bias per action and "
                 "initial_action_std=0.02"
             )
+        if self.actor_init_mode == ACTOR_INIT_MODE_DEFAULT:
+            if len(self.fresh_actor_output_bias) != self.action_dim:
+                raise DiagnosticPPOContractError(
+                    "standard actor initialization requires one hold reference "
+                    "value per action"
+                )
+            if not 0.0 < float(self.initial_action_std) <= 1.0:
+                raise DiagnosticPPOContractError(
+                    "standard actor initialization requires a finite "
+                    "initial_action_std in (0, 1]"
+                )
         if self.fresh_actor_output_bias:
             _sha256(
                 self.fresh_actor_bootstrap_authority_sha256,
@@ -736,7 +826,13 @@ class DiagnosticPPOConfig:
 
     @property
     def content_sha256(self) -> str:
-        return _canonical_json_sha256(asdict(self))
+        # 人话:老配置(零权重那条路)的 SHA 一个字节都不能动,否则已有 checkpoint 全部作废。
+        # 所以只有真正选了新路线时,这个自陈字段才进哈希 —— 它一进去 SHA 必然变,两条路的
+        # checkpoint 也就再不可能互相冒充。
+        payload = asdict(self)
+        if payload.get("actor_init_mode") == ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS:
+            payload.pop("actor_init_mode")
+        return _canonical_json_sha256(payload)
 
     @property
     def normalizer_binding(self) -> dict[str, Any] | None:
@@ -773,6 +869,7 @@ class DiagnosticPPOConfig:
         payload = fresh_actor_bootstrap_contract(
             self.fresh_actor_output_bias,
             initial_action_std=self.initial_action_std,
+            actor_init_mode=self.actor_init_mode,
         )
         payload["authority_content_sha256"] = (
             self.fresh_actor_bootstrap_authority_sha256
@@ -1023,6 +1120,15 @@ def _build_actor_critic(config: DiagnosticPPOConfig) -> Any:
             raise DiagnosticPPOContractError(
                 "fresh actor bootstrap cannot identify the output Linear"
             )
+        if config.actor_init_mode == ACTOR_INIT_MODE_DEFAULT:
+            # 人话:标准初始化不动输出层;这里反过来断言它不是全零,免得别处偷偷清零后冒充。
+            if int(torch.count_nonzero(output.weight).item()) == 0:
+                raise DiagnosticPPOContractError(
+                    "standard actor initialization found an exactly zero output "
+                    "weight matrix, which is the zero-weight bootstrap this "
+                    "config explicitly did not select"
+                )
+            return module
         expected_bias = torch.tensor(
             config.fresh_actor_output_bias,
             dtype=output.bias.dtype,
@@ -1169,7 +1275,7 @@ class MujocoDiagnosticPPOTrainer:
                 raise DiagnosticPPOBlocked(
                     "fresh actor bootstrap authority SHA differs"
                 )
-            for key in (
+            compared_keys = (
                 "schema_version",
                 "kind",
                 "fresh_only",
@@ -1178,7 +1284,29 @@ class MujocoDiagnosticPPOTrainer:
                 "output_layer_bias",
                 "initial_action_std",
                 "noise_parameterization",
-            ):
+            )
+            if self.config.actor_init_mode == ACTOR_INIT_MODE_DEFAULT:
+                # 人话:新路线的合同键不一样,得按它自己的键比 —— 尤其是自陈的模式和"门跳过了"
+                # 这两条,必须两边一致,否则一边零权重一边标准初始化就悄悄分叉了。
+                compared_keys = (
+                    "schema_version",
+                    "kind",
+                    "actor_init_mode",
+                    "fresh_only",
+                    "resume_overwrite_prohibited",
+                    "output_layer_weight",
+                    "output_layer_bias",
+                    "hold_reference_action",
+                    "initial_action_std",
+                    "noise_parameterization",
+                    "four_sigma_hard_inner_gate",
+                )
+            elif actual_bootstrap.get("actor_init_mode") is not None:
+                raise DiagnosticPPOBlocked(
+                    "VecEnv advertises a non-default actor initialization mode "
+                    "the trainer config did not select"
+                )
+            for key in compared_keys:
                 if actual_bootstrap.get(key) != expected_bootstrap.get(key):
                     raise DiagnosticPPOBlocked(
                         "fresh actor hold bootstrap differs from VecEnv authority"
@@ -1750,6 +1878,10 @@ class MujocoDiagnosticPPOTrainer:
 
 
 __all__ = [
+    "ACTOR_INIT_MODES",
+    "ACTOR_INIT_MODE_DEFAULT",
+    "ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS",
+    "FOUR_SIGMA_GATE_SKIPPED_REASON",
     "DIAGNOSTIC_TRAINER_RECEIPT_KIND",
     "DIAGNOSTIC_UPDATE_RECEIPT_KIND",
     "NORMALIZER_BINDING_KIND",

@@ -46,31 +46,33 @@ ALLOWED_CLAIM_KINDS = (
     "action_ball_a211_four_arm_diagnostic_claim_v2",
     "action_ball_c211_diagnostic_claim_v2",
 )
+# 2026-08-05 第二轴改版(exp §5.6.2c):cell_id 由 PPO-schedule 命名改为探索包命名。
+# 卡角色未变:gpu0 = A 对,gpu1 = C 对,gpu2 留给 MuJoCo(本 preflight 仍要求它是空的)。
 TARGET_SPECS = (
     (
         "a0",
-        "A0-base-safety-fixed-lr1e4",
+        "A0-base-safety-zero-weight-bootstrap-sigma0p1",
         "A211",
         0,
         A_EXPERIMENT_NAME,
     ),
     (
         "a1",
-        "A1-base-safety-adaptive-kl-initial-lr1e3",
+        "A1-base-safety-standard-init-sigma1p0",
         "A211",
         0,
         A_EXPERIMENT_NAME,
     ),
     (
         "c0",
-        "C0-base-safety-fixed-lr1e4",
+        "C0-base-safety-zero-weight-bootstrap-sigma0p1",
         "C211",
         1,
         C_EXPERIMENT_NAME,
     ),
     (
         "c1",
-        "C1-base-safety-adaptive-kl-initial-lr1e3",
+        "C1-base-safety-standard-init-sigma1p0",
         "C211",
         1,
         C_EXPERIMENT_NAME,

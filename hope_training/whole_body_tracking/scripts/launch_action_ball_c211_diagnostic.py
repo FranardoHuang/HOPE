@@ -80,7 +80,10 @@ SPEC_KIND = "action_ball_c211_diagnostic_spec_v2"
 CLAIM_KIND = "action_ball_c211_diagnostic_claim_v2"
 LINEAGE_KIND = "action_ball_c211_direct_ball_split_ready_lineage_v4"
 C211_BUNDLE_KIND = "action_ball_c211_direct_ball_split_ready_bundle_v4"
-RECIPE_KIND = "action_ball_c211_matched_recipe_v1"
+# 2026-08-05 v1 -> v2:recipe 合同新增 exploration_axis / actor_init_mode /
+# four_sigma_hard_inner_gate_applies 三键,schema 随之 1 -> 2,kind 同批改名,
+# 老 v1 收据不能冒充新配方。
+RECIPE_KIND = "action_ball_c211_matched_recipe_v2"
 MATERIALIZATION_KIND = "action_ball_c211_reward_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_c211_policy_materialization_v1"
 ORACLE32_KIND = "action_ball_c211_oracle32_receipt_v2"
@@ -156,10 +159,12 @@ _DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS = {
 EXPERIMENT_NAME = "agibot_a3_action_ball_c211_diagnostic"
 
 ISAAC_FOUR_GRID_KIND = _F.KIND
-A_FIXED_CELL_ID = _F.A_FIXED_CELL_ID
-A_ADAPTIVE_KL_CELL_ID = _F.A_ADAPTIVE_KL_CELL_ID
-C_FIXED_CELL_ID = _F.C_FIXED_CELL_ID
-C_ADAPTIVE_KL_CELL_ID = _F.C_ADAPTIVE_KL_CELL_ID
+A_BOOTSTRAP_CELL_ID = _F.A_BOOTSTRAP_CELL_ID
+A_STANDARD_INIT_CELL_ID = _F.A_STANDARD_INIT_CELL_ID
+C_BOOTSTRAP_CELL_ID = _F.C_BOOTSTRAP_CELL_ID
+C_STANDARD_INIT_CELL_ID = _F.C_STANDARD_INIT_CELL_ID
+ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = _F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+ACTOR_INIT_MODE_DEFAULT = _F.ACTOR_INIT_MODE_DEFAULT
 ISAAC_FOUR_GRID_CELL_IDS = _F.CELL_IDS
 RECIPE_IDS = _F.FAMILY_CELL_IDS["C211"]
 ACTOR_CONTRACT = "action_ball_c211"
@@ -489,6 +494,24 @@ FOREIGN_VALUE_TOKENS = (
 
 def canonical_sha256(value: Any) -> str:
     return _B.canonical_sha256(value)
+
+
+def _float_override_token(value: Any, *, name: str) -> str:
+    """Emit a Hydra override that always parses back as a float.
+
+    人话:".12g" 会把 1.0 打成 "1",Hydra 读回来就是 int。init_noise_std 必须始终是浮点,
+    所以这里用 repr 保住小数点。
+    """
+
+    if type(value) is not float or value != value or value in (
+        float("inf"),
+        float("-inf"),
+    ):
+        raise LaunchRefused("%s must be a finite float override" % name)
+    token = repr(value)
+    if "." not in token and "e" not in token and "E" not in token:
+        raise LaunchRefused("%s override lost its float form" % name)
+    return token
 
 
 def _isaac_four_grid_manifest() -> dict[str, Any]:
@@ -876,8 +899,16 @@ def _recipe_contract(recipe_id: str) -> dict[str, Any]:
     manifest = _isaac_four_grid_manifest()
     matched = manifest["matched_contract"]
     cell = _four_grid_cell(recipe_id, task_family="C211")
+    # 探索包是本轮唯一的注册差异轴(exp §5.6.2c),三个键只能从本格 cell 取;
+    # matched_contract 里已经刻意没有同名键,旧写法会 KeyError 而不是读到过期常量。
+    if cell["ppo"] != matched["ppo"]:
+        raise LaunchRefused("C211 grid cell PPO differs from the matched contract")
+    try:
+        _F.validate_exploration_package(cell)
+    except _F.FourGridContractError as exc:
+        raise LaunchRefused("C211 exploration package differs: %s" % exc) from exc
     unsigned = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": RECIPE_KIND,
         "recipe_id": recipe_id,
         "four_grid_cell_id": recipe_id,
@@ -891,8 +922,13 @@ def _recipe_contract(recipe_id: str) -> dict[str, Any]:
         "trainability_contract": TRAINABILITY_CONTRACT,
         "fresh_normalizers_required": True,
         "foreign_checkpoint_reuse_prohibited": True,
-        "init_noise_std": matched["init_noise_std"],
-        "noise_std_type": matched["noise_std_type"],
+        "exploration_axis": cell["exploration_axis"],
+        "actor_init_mode": cell["actor_init_mode"],
+        "four_sigma_hard_inner_gate_applies": cell[
+            "four_sigma_hard_inner_gate_applies"
+        ],
+        "init_noise_std": cell["init_noise_std"],
+        "noise_std_type": cell["noise_std_type"],
         "entropy_coef": matched["entropy_coef"],
         "actor_hidden_dims": matched["actor_hidden_dims"],
         "critic_hidden_dims": matched["critic_hidden_dims"],
@@ -3324,9 +3360,14 @@ def _training_argv(
         "algo.runner.empirical_normalization=true",
         "algo.policy.actor_hidden_dims=[512,256,128]",
         "algo.policy.critic_hidden_dims=[512,256,128]",
-        # 0.02 -> 0.1:见 exp §5.6 第 3 条与 action_ball_211_four_grid_contract 的复算表。
-        "algo.policy.init_noise_std=0.1",
-        "algo.policy.noise_std_type=log",
+        # 探索包是本轮的注册差异轴(exp §5.6.2c):零权重格是 0.1/log,标准初始化格是
+        # 1.0/scalar。三个 override 一起从选中的 cell 里发出,不再硬钉字面量。
+        "algo.policy.init_noise_std=%s"
+        % _float_override_token(
+            recipe["init_noise_std"], name="algo.policy.init_noise_std"
+        ),
+        "algo.policy.noise_std_type=%s" % recipe["noise_std_type"],
+        "action_ball_actor_init_mode=%s" % recipe["actor_init_mode"],
         "algo.algorithm.entropy_coef=0.01",
         "algo.algorithm.schedule=%s" % ppo["schedule"],
         "algo.algorithm.learning_rate=%s" % format(ppo["learning_rate"], ".12g"),

@@ -7973,6 +7973,14 @@ class RacketTargetCommand(CommandTerm):
                 )
             ),
             frontier_arm=sampler_birth.frontier_arm,
+            # Record the sampler law this birth was drawn under.  With every
+            # curriculum arm at level zero the sampler collapses the plan to the
+            # literal centre point, so the receipt gate must judge the row
+            # against that law rather than against the quota slot.
+            initial_center_single_question=(
+                sampler_birth.sampling_mixture is not None
+                and self._action_ball_sampler.initial_center_single_question
+            ),
         )
         receipt_sha256 = receipt.canonical_sha256
         if (
@@ -8193,6 +8201,11 @@ class RacketTargetCommand(CommandTerm):
                     )
                 ),
                 frontier_arm=sampler_birth.frontier_arm,
+                # Same sampler-law record as the single-birth path above.
+                initial_center_single_question=(
+                    sampler_birth.sampling_mixture is not None
+                    and self._action_ball_sampler.initial_center_single_question
+                ),
             )
             receipt_sha256 = receipt.canonical_sha256
             if (

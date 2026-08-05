@@ -1,11 +1,12 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "manifest_type": "agibot_a3_p1_0803_31action_normalized_asset_v1",
   "asset_id": "a3_p1_0803_berkeley_pingpang_31action_normalized_v1",
+  "candidate_role": "future_primary_successor_candidate_not_current_runtime",
   "status": "pod_import_verified_short_step_diagnostic_standing_pending",
   "source": {
     "producer_path": "scripts/prepare_a3_p1_0803_31d_asset.py",
-    "producer_sha256": "e605ca477ac44a19c7a9cba91d267f56ca0eb7492d01bef2c42e7fcf1fbad275",
+    "producer_sha256": "058f7d5037479729833c571b0e43874b6bf744919fbc2e28a7f62e46ac2a0eb0",
     "raw_intake_manifest_path": "configs/a3_p1_0803_raw_intake_v1.json",
     "raw_intake_manifest_sha256": "bf56217cf8aa448a0cea868fb4c01c977152217797e4b3917fc6f9048f9c6688",
     "raw_asset_path": "vendor_assets/agibot/A3-P1-32dof-0803-BerkeleyPingpang-90deg",
@@ -849,7 +850,18 @@
         }
       },
       "fixed_pose": "each converted joint at its URDF q=0 origin",
-      "reason": "left gripper is outside the established 31-action policy ABI; fixed links retain delivered mass, inertias, COMs, and joint origins without inventing coupling"
+      "lock_contract": {
+        "schema_version": 1,
+        "authority": "project_owned_training_projection_20260804",
+        "raw_mount_frame_authority": "primary_urdf_selected_over_workbook",
+        "locked_joint_position": "all_nine_gripper_movable_coordinates_q_equal_zero",
+        "q0_claim_scope": "project_lock_pose_not_vendor_neutral_or_hardware_home",
+        "gripper_policy_controlled": false,
+        "missing_collision_policy": "disable_only_collision_elements_whose_twenty_gripper_meshes_are_absent;never_substitute_visual_mesh_or_invent_geometry"
+      },
+      "all_q0_within_raw_limits": true,
+      "retained_subtree_mass_kg": 0.76626209416,
+      "reason": "left gripper is outside the established 31-action policy ABI; project-owned q=0 locking retains delivered mass, inertias, COMs, and joint origins without claiming vendor neutral or inventing coupling"
     },
     "removed_duplicate_link": {
       "name": "imu_in_pelvis_link",
@@ -925,7 +937,7 @@
       "waist_roll_link": "waist_roll_Link",
       "waist_yaw_link": "waist_yaw_Link"
     },
-    "mesh_reference_policy": "rewrite to delivered case-exact basenames, replace USD-unsafe hyphens with deterministic underscore aliases, and copy only referenced bytes",
+    "mesh_reference_policy": "rewrite to delivered case-exact basenames, replace USD-unsafe hyphens with deterministic underscore aliases, copy only referenced bytes, and explicitly disable only the twenty absent left-gripper collision elements",
     "mesh_reference_rewrites": [
       {
         "raw_reference": "../meshes/Link11-1.stl",
@@ -1414,7 +1426,8 @@
       }
     ],
     "invalid_rgba_after": [],
-    "retained_semantics_sha256": "f3a1d01919c79d9094f1eaef3252d2ca12f21192ad3e25af109cf5c44cedfa4b"
+    "retained_semantics_sha256": "f3a1d01919c79d9094f1eaef3252d2ca12f21192ad3e25af109cf5c44cedfa4b",
+    "normalized_unique_link_mass_kg": 57.60001015416
   },
   "abi": {
     "policy_action_dim": 31,
@@ -1463,6 +1476,15 @@
     "runtime_body_order_sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a",
     "runtime_body_names_all_present": true
   },
+  "project_gripper_lock_contract": {
+    "schema_version": 1,
+    "authority": "project_owned_training_projection_20260804",
+    "raw_mount_frame_authority": "primary_urdf_selected_over_workbook",
+    "locked_joint_position": "all_nine_gripper_movable_coordinates_q_equal_zero",
+    "q0_claim_scope": "project_lock_pose_not_vendor_neutral_or_hardware_home",
+    "gripper_policy_controlled": false,
+    "missing_collision_policy": "disable_only_collision_elements_whose_twenty_gripper_meshes_are_absent;never_substitute_visual_mesh_or_invent_geometry"
+  },
   "right_racket_contract": {
     "parent_link": "right_hand_pingpang_Link",
     "child_link": "pingpang_red_Link",
@@ -1473,6 +1495,25 @@
       "pingpang_black_Link.stl": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
       "pingpang_red_Link.stl": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842",
       "right_hand_pingpang_Link.stl": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+    },
+    "local_contract_exact_current_and_raw": true,
+    "official_paddle_center_control_point": true,
+    "fk_lineage": {
+      "right_hand_and_paddle_link_inertials_exact_current": true,
+      "right_racket_fixed_joint_semantics_exact_current": true,
+      "normalized_preserves_raw_right_chain_and_site_for_all_common_q": true,
+      "normalized_vs_raw_q0": {
+        "position_norm_m": 0.0,
+        "rotation_matrix_max_abs": 0.0
+      },
+      "successor_vs_current_q0": {
+        "position_norm_m": 0.009013878161711154,
+        "rotation_matrix_max_abs": 0.0
+      },
+      "successor_world_site_requires_new_motion_fk_revalidation": true,
+      "expected_successor_vs_current_q0_position_delta_m": 0.009013878161711154,
+      "tracked_current_reference_urdf_path": "agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf",
+      "tracked_current_reference_urdf_sha256": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
     }
   },
   "pod_import_receipt": {
@@ -1504,7 +1545,11 @@
   "authorization": {
     "current_runtime_pointer_changed": false,
     "canonical_runtime": false,
+    "materialization_authorized": true,
+    "project_q0_gripper_lock_authorized": true,
+    "missing_gripper_collision_elements_explicitly_disabled": true,
     "pod_isaac_import_verified": true,
+    "racket_local_contract_verified": true,
     "standing_pose_verified": false,
     "racket_fk_parity_verified": false,
     "dynamics_parity_verified": false,

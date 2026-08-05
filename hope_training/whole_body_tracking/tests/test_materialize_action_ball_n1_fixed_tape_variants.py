@@ -313,3 +313,88 @@ def test_rejects_prepared_core_without_dynamic_ready_pass():
             motion_path=motion_path,
             motion_state=state,
         )
+
+
+# --- initial-center single-question collapse, end to end -------------------
+
+TRACKED_CORE_RELATIVE = (
+    "configs/action_ball_n1_measured_20260803/"
+    "fresh_core_seed0_20260803_take061_robust20n_r8_splitready/"
+    "take_061_unit04_bh.measured_prepared_core.v1.c5212ce9f41b.json"
+)
+TRACKED_CORE_SHA256 = (
+    "c5212ce9f41b23a4932f470859c6cb6627d245eab8caca3215e993702db60370"
+)
+
+
+def _link_or_copy(source, destination):
+    try:
+        import os
+
+        os.link(source, destination)
+    except OSError:
+        shutil.copyfile(source, destination)
+
+
+def _mirror_repo(tmp_path: Path) -> Path:
+    """Mirror the tracked trees ``produce`` reads, without touching the repo.
+
+    ``produce`` resolves every input through ``_repo_path``, which refuses any
+    path that escapes the supplied root, so a symlink farm is not usable and
+    the output directory must live inside that same root.  Hard links keep this
+    close to free while still giving the producer a private root to write into.
+    """
+
+    root = tmp_path / "repo"
+    for name in ("assets", "configs", "hope_training"):
+        shutil.copytree(
+            REPO_ROOT / name,
+            root / name,
+            copy_function=_link_or_copy,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    return root
+
+
+def test_produce_draws_the_collapsed_center_question_not_the_quota_slot(
+    tmp_path,
+):
+    pytest.importorskip("torch")
+    root = _mirror_repo(tmp_path)
+    args = types.SimpleNamespace(
+        repo_root=str(root),
+        prepared_core_bundle=TRACKED_CORE_RELATIVE,
+        expected_prepared_core_bundle_sha256=TRACKED_CORE_SHA256,
+        seed=0,
+        output_dir="out_center",
+    )
+    report = M.produce(args)
+    assert report["status"] == "PASS_DIAGNOSTIC_ONLY"
+
+    runtime = M._load_mdp_modules(root)["action_ball_runtime"]
+    receipt_paths = sorted(
+        (root / "out_center").glob("*.task_receipt.v5.*.json")
+    )
+    assert receipt_paths, "producer wrote no task receipts"
+    for path in receipt_paths:
+        row = json.loads(path.read_text(encoding="utf-8"))
+        # The sampler ran at level zero with initial_center_single_question on,
+        # so the quota slot ("interior" at birth index 0) is not the law; the
+        # only legal plan is the literal centre point, and the receipt has to
+        # say so or the runtime gate would reject it.
+        assert row["initial_center_single_question"] is True
+        assert row["sampling_stratum"] == "center"
+        assert row["birth_sampling_stratum"] == "center"
+        assert row["frontier_arm"] is None
+        assert row["birth_frontier_arm"] is None
+        assert row["sampling_mixture"]["schedule"][0] == "interior"
+        assert row["time_to_contact_tick"] == 91
+        assert row["time_to_contact_s"] == 1.82
+        assert all(row["domain_levels"][arm] == 0.0 for arm in runtime.ARM_KEYS)
+        assert all(
+            row["sampling_levels"][arm] == 0.0 for arm in runtime.ARM_KEYS
+        )
+        # Round-tripping proves the runtime receipt gate admits the collapse.
+        parsed = runtime.ActionBallTaskReceipt.from_dict(row)
+        assert parsed.initial_center_single_question is True
+        assert parsed.to_dict() == row

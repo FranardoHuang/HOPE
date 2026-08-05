@@ -69,6 +69,13 @@ action_ball_dynamic_ready_nominal_receipt_sha256: null
 # ActionBall, and an unused absolute output path; the process closes the
 # environment without constructing a PPO runner.
 action_ball_policy_recipe_output_path: null
+# ActionBall 演员输出层怎么初始化。两个合法值:
+#   zero_weight_ready_bias = 老路子(权重清零 + bias 钉死 ready 姿态,初始策略是常数),
+#                            合同字节与历史 run 完全一致,4-sigma 硬内带门照旧生效。
+#   default                = 标准 rsl_rl 初始化(不动输出层),4-sigma 门不适用、显式跳过并
+#                            在合同里写明跳过理由;这条路要求有限 q_des 投影运行时事实为真。
+# 只能配合一个显式的 shared-ready / dynamic-ready bootstrap 使用;写错字直接失败,不回退。
+action_ball_actor_init_mode: zero_weight_ready_bias
 
 # logging
 logger: wandb           # wandb | tensorboard | neptune

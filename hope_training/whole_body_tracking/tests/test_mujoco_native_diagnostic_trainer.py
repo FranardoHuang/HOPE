@@ -339,3 +339,165 @@ def test_checkpoint_save_is_no_clobber(tmp_path):
 
     assert path.read_bytes() == original
     assert first["update_counter"] == 0
+
+
+# --------------------------------------------------------------------------
+# 演员初始化两条路(零权重 hold / 标准初始化):跨引擎字面量必须和 Isaac 侧一致,
+# 老路线的配置 SHA 一个字节都不许动。
+# --------------------------------------------------------------------------
+
+
+CONTRACT_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "hope_training"
+    / "whole_body_tracking"
+    / "source"
+    / "whole_body_tracking"
+    / "whole_body_tracking"
+    / "utils"
+    / "training_contract.py"
+)
+
+
+def _isaac_contract_module():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "_mujoco_cross_engine_training_contract", CONTRACT_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_actor_init_mode_literals_match_the_isaac_lane():
+    isaac = _isaac_contract_module()
+    assert (
+        T.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        == isaac.ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+    )
+    assert T.ACTOR_INIT_MODE_DEFAULT == isaac.ACTION_BALL_ACTOR_INIT_MODE_DEFAULT
+    assert tuple(T.ACTOR_INIT_MODES) == tuple(isaac.ACTION_BALL_ACTOR_INIT_MODES)
+    assert (
+        T.FOUR_SIGMA_GATE_SKIPPED_REASON
+        == isaac.ACTION_BALL_FOUR_SIGMA_GATE_SKIPPED_REASON
+    )
+
+
+def _bootstrap_config(mode, *, std):
+    return T.DiagnosticPPOConfig(
+        observation_dim=3,
+        action_dim=2,
+        initial_action_std=std,
+        fresh_actor_output_bias=(0.25, -0.25),
+        fresh_actor_bootstrap_authority_sha256=_digest("e"),
+        actor_init_mode=mode,
+    )
+
+
+def test_zero_weight_config_sha_is_byte_identical_to_the_legacy_shape():
+    implicit = T.DiagnosticPPOConfig(observation_dim=3, action_dim=2)
+    explicit = T.DiagnosticPPOConfig(
+        observation_dim=3,
+        action_dim=2,
+        actor_init_mode=T.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+    )
+    assert implicit.content_sha256 == explicit.content_sha256
+
+    zeros = _bootstrap_config(T.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS, std=0.02)
+    default = _bootstrap_config(T.ACTOR_INIT_MODE_DEFAULT, std=1.0)
+    assert zeros.content_sha256 != default.content_sha256
+    assert zeros.fresh_actor_bootstrap["output_layer_weight"] == "zeros"
+    assert "actor_init_mode" not in zeros.fresh_actor_bootstrap
+
+
+def test_default_actor_init_contract_self_declares_the_skipped_gate():
+    config = _bootstrap_config(T.ACTOR_INIT_MODE_DEFAULT, std=1.0)
+    payload = config.fresh_actor_bootstrap
+    assert payload["actor_init_mode"] == "default"
+    assert payload["kind"] == "a3_action_ball_default_actor_init_bootstrap_v1"
+    assert payload["output_layer_weight"] == "default"
+    assert payload["output_layer_bias"] == "default"
+    assert payload["hold_reference_action"] == [0.25, -0.25]
+    assert payload["initial_action_std"] == 1.0
+    assert payload["four_sigma_hard_inner_gate"] == {
+        "applied": False,
+        "reason": T.FOUR_SIGMA_GATE_SKIPPED_REASON,
+    }
+    assert payload["fresh_only"] is True
+    assert payload["resume_overwrite_prohibited"] is True
+
+
+def test_default_actor_init_leaves_the_output_layer_at_framework_defaults():
+    torch.manual_seed(0)
+    module = T._build_actor_critic(
+        _bootstrap_config(T.ACTOR_INIT_MODE_DEFAULT, std=1.0)
+    )
+    output = module.actor[-1]
+    assert int(torch.count_nonzero(output.weight).item()) != 0
+    assert not torch.equal(
+        output.bias.detach(), torch.tensor([0.25, -0.25], dtype=output.bias.dtype)
+    )
+
+    zero_module = T._build_actor_critic(
+        _bootstrap_config(T.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS, std=0.02)
+    )
+    zero_output = zero_module.actor[-1]
+    assert int(torch.count_nonzero(zero_output.weight).item()) == 0
+    assert torch.equal(
+        zero_output.bias.detach(),
+        torch.tensor([0.25, -0.25], dtype=zero_output.bias.dtype),
+    )
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"actor_init_mode": "defualt"}, "actor_init_mode must be"),
+        (
+            {
+                "actor_init_mode": T.ACTOR_INIT_MODE_DEFAULT,
+                "fresh_actor_output_bias": (),
+                "fresh_actor_bootstrap_authority_sha256": None,
+            },
+            "hold reference action",
+        ),
+        (
+            {
+                "actor_init_mode": T.ACTOR_INIT_MODE_DEFAULT,
+                "fresh_actor_output_bias": (0.25,),
+            },
+            "one hold reference value per action",
+        ),
+    ],
+)
+def test_actor_init_mode_config_fails_closed(kwargs, match):
+    base = {
+        "observation_dim": 3,
+        "action_dim": 2,
+        "initial_action_std": 1.0,
+        "fresh_actor_output_bias": (0.25, -0.25),
+        "fresh_actor_bootstrap_authority_sha256": _digest("e"),
+    }
+    base.update(kwargs)
+    with pytest.raises(T.DiagnosticPPOContractError, match=match):
+        T.DiagnosticPPOConfig(**base)
+
+
+@pytest.mark.parametrize("bad_std", (0.0, 1.5))
+def test_default_actor_init_still_bounds_sigma(bad_std):
+    with pytest.raises(T.DiagnosticPPOContractError):
+        T.fresh_actor_bootstrap_contract(
+            (0.25, -0.25),
+            initial_action_std=bad_std,
+            actor_init_mode=T.ACTOR_INIT_MODE_DEFAULT,
+        )
+
+
+def test_zero_weight_actor_init_still_pins_sigma_to_two_percent():
+    with pytest.raises(T.DiagnosticPPOContractError, match="0.02"):
+        T.fresh_actor_bootstrap_contract(
+            (0.25, -0.25), initial_action_std=1.0
+        )

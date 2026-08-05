@@ -27,6 +27,25 @@ A = _load("a211_four_grid_contract", "launch_action_ball_a211_four_arm_diagnosti
 C = _load("c211_four_grid_contract", "launch_action_ball_c211_diagnostic.py")
 F = _load("shared_action_ball_211_four_grid", "action_ball_211_four_grid_contract.py")
 
+TRAINING_CONTRACT_FILE = (
+    Path(__file__).resolve().parents[1]
+    / "source"
+    / "whole_body_tracking"
+    / "whole_body_tracking"
+    / "utils"
+    / "training_contract.py"
+)
+
+
+def _load_training_contract():
+    spec = importlib.util.spec_from_file_location(
+        "four_grid_training_contract_literals", TRAINING_CONTRACT_FILE
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 def test_a211_c211_share_one_exact_sealed_four_grid_manifest():
     manifest = A._isaac_four_grid_manifest()
@@ -36,21 +55,92 @@ def test_a211_c211_share_one_exact_sealed_four_grid_manifest():
     assert seal == A.canonical_sha256(unsigned) == C.canonical_sha256(unsigned)
     assert seal == F.CONTENT_SHA256
     assert manifest["cell_order"] == [
-        A.A_FIXED_CELL_ID,
-        A.A_ADAPTIVE_KL_CELL_ID,
-        C.C_FIXED_CELL_ID,
-        C.C_ADAPTIVE_KL_CELL_ID,
+        A.A_BOOTSTRAP_CELL_ID,
+        A.A_STANDARD_INIT_CELL_ID,
+        C.C_BOOTSTRAP_CELL_ID,
+        C.C_STANDARD_INIT_CELL_ID,
     ]
     assert A.ARM_IDS == tuple(manifest["cell_order"][:2])
     assert C.RECIPE_IDS == tuple(manifest["cell_order"][2:])
+    # 2026-08-05:第二轴由 PPO schedule 换成探索包(exp §5.6.2c)。
     assert manifest["registered_difference_axes"] == [
         "task_semantics_and_reward",
-        "ppo_learning_rate_schedule_cell",
+        "actor_initialization_and_exploration_sigma_cell",
+    ]
+    assert manifest["deferred_difference_axes"] == [
+        "ppo_learning_rate_schedule_cell"
     ]
     assert manifest["adaptive_term_disambiguation"] == {
         "adaptive_means": "ppo_kl_learning_rate_schedule",
+        "ppo_kl_learning_rate_schedule": "disabled_fixed_learning_rate_all_cells",
         "contact_kernel_sigma_controller": "disabled_static_all_cells",
+        "init_noise_std_is": (
+            "static_ppo_action_distribution_initialization_not_a_controller"
+        ),
     }
+    assert manifest["schema_version"] == 3
+    assert manifest["kind"].endswith("_v3")
+
+
+def test_four_grid_actor_init_mode_literals_match_the_runtime_contract():
+    """人话:四格权威里的 actor_init_mode 字面量必须和 train.py 真正认的那两个一字不差。"""
+
+    runtime = _load_training_contract()
+    assert (
+        F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        == runtime.ACTION_BALL_ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+    )
+    assert F.ACTOR_INIT_MODE_DEFAULT == runtime.ACTION_BALL_ACTOR_INIT_MODE_DEFAULT
+    assert F.ACTOR_INIT_MODES == tuple(runtime.ACTION_BALL_ACTOR_INIT_MODES)
+    assert A.ACTOR_INIT_MODE_DEFAULT == C.ACTOR_INIT_MODE_DEFAULT == "default"
+    assert (
+        A.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        == C.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        == "zero_weight_ready_bias"
+    )
+
+
+def test_exploration_package_cross_lock_rejects_every_half_set():
+    """初始化方式 / sigma / std 参数化 / 4σ 门开关必须整包对上,任一处半套都拒。"""
+
+    good = F.manifest()["cells"]
+    zero_weight = next(
+        row for row in good if row["actor_init_mode"] == F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+    )
+    standard = next(
+        row for row in good if row["actor_init_mode"] == F.ACTOR_INIT_MODE_DEFAULT
+    )
+    assert F.validate_exploration_package(zero_weight)["init_noise_std"] == 0.1
+    assert F.validate_exploration_package(standard)["init_noise_std"] == 1.0
+    mutations = (
+        # 只把字面量改成 default 而不改其余三项 -> 拒
+        lambda row: row.__setitem__("actor_init_mode", F.ACTOR_INIT_MODE_DEFAULT),
+        # 零权重路上把 sigma 抬到 1.0 -> 拒(4σ 门上界 0.1698)
+        lambda row: row.__setitem__("init_noise_std", 1.0),
+        # 零权重路上声称 4σ 门跳过 -> 拒
+        lambda row: row.__setitem__("four_sigma_hard_inner_gate_applies", False),
+        lambda row: row.__setitem__("noise_std_type", "scalar"),
+    )
+    for mutate in mutations:
+        candidate = copy.deepcopy(zero_weight)
+        mutate(candidate)
+        with pytest.raises(F.FourGridContractError):
+            F.validate_exploration_package(candidate)
+    standard_mutations = (
+        # 标准初始化路上声称 4σ 门 applied -> 拒
+        lambda row: row.__setitem__("four_sigma_hard_inner_gate_applies", True),
+        lambda row: row.__setitem__("noise_std_type", "log"),
+        lambda row: row.__setitem__(
+            "actor_init_mode", F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+        ),
+        lambda row: row.__setitem__("init_noise_std", 1.5),
+        lambda row: row.__setitem__("exploration_axis", "unregistered"),
+    )
+    for mutate in standard_mutations:
+        candidate = copy.deepcopy(standard)
+        mutate(candidate)
+        with pytest.raises(F.FourGridContractError):
+            F.validate_exploration_package(candidate)
 
 
 def test_both_launchers_pin_the_same_shared_authority_file_and_content():
@@ -87,9 +177,9 @@ def test_shared_authority_rejects_resealed_field_count_order_and_family_drift():
 
 def test_launchers_reject_cross_family_selection_and_local_matched_drift(monkeypatch):
     with pytest.raises(A.LaunchRefused, match="another task family"):
-        A._four_grid_cell(C.C_FIXED_CELL_ID, task_family="C211")
+        A._four_grid_cell(C.C_BOOTSTRAP_CELL_ID, task_family="C211")
     with pytest.raises(C.LaunchRefused, match="another task family"):
-        C._four_grid_cell(A.A_FIXED_CELL_ID, task_family="A211")
+        C._four_grid_cell(A.A_BOOTSTRAP_CELL_ID, task_family="A211")
     monkeypatch.setattr(A, "TEACHER_ID", "safe-but-wrong-teacher")
     with pytest.raises(A.LaunchRefused, match="four-grid authority differs"):
         A._isaac_four_grid_manifest()
@@ -97,37 +187,53 @@ def test_launchers_reject_cross_family_selection_and_local_matched_drift(monkeyp
 
 def test_four_grid_cells_match_every_non_registered_setting():
     contracts = [
-        A._arm_contract(A.A_FIXED_CELL_ID),
-        A._arm_contract(A.A_ADAPTIVE_KL_CELL_ID),
-        C._recipe_contract(C.C_FIXED_CELL_ID),
-        C._recipe_contract(C.C_ADAPTIVE_KL_CELL_ID),
+        A._arm_contract(A.A_BOOTSTRAP_CELL_ID),
+        A._arm_contract(A.A_STANDARD_INIT_CELL_ID),
+        C._recipe_contract(C.C_BOOTSTRAP_CELL_ID),
+        C._recipe_contract(C.C_STANDARD_INIT_CELL_ID),
     ]
     matched_keys = (
         "soft_weights",
         "actor_hidden_dims",
         "critic_hidden_dims",
-        "init_noise_std",
-        "noise_std_type",
         "entropy_coef",
         "reference_guard_mode",
         "contact_sigma_adaptation",
+        "ppo",
+        "ppo_adaptation_axis",
     )
     for key in matched_keys:
         assert [contract[key] for contract in contracts] == [contracts[0][key]] * 4
-    assert contracts[0]["ppo"] == contracts[2]["ppo"]
-    assert contracts[1]["ppo"] == contracts[3]["ppo"]
-    assert (contracts[0]["ppo"]["schedule"], contracts[0]["ppo"]["learning_rate"]) == (
-        "fixed",
-        1.0e-4,
-    )
-    assert (contracts[1]["ppo"]["schedule"], contracts[1]["ppo"]["learning_rate"]) == (
-        "adaptive",
-        1.0e-3,
-    )
-    for key in ("desired_kl", "clip_param", "num_learning_epochs", "num_mini_batches"):
-        assert [contract["ppo"][key] for contract in contracts] == [
-            contracts[0]["ppo"][key]
-        ] * 4
+    # 第二轴换成探索包之后,四格 PPO 完全相同(保留 A0/C0 原本的保守 fixed lr1e-4)。
+    assert contracts[0]["ppo"] == {
+        "schedule": "fixed",
+        "learning_rate": 1.0e-4,
+        "desired_kl": 0.01,
+        "clip_param": 0.2,
+        "num_learning_epochs": 5,
+        "num_mini_batches": 4,
+    }
+    # 唯一的注册差异:初始化方式 + sigma + std 参数化 + 4σ 门开关。
+    exploration = [
+        (
+            contract["actor_init_mode"],
+            contract["init_noise_std"],
+            contract["noise_std_type"],
+            contract["four_sigma_hard_inner_gate_applies"],
+        )
+        for contract in contracts
+    ]
+    assert exploration == [
+        ("zero_weight_ready_bias", 0.1, "log", True),
+        ("default", 1.0, "scalar", False),
+        ("zero_weight_ready_bias", 0.1, "log", True),
+        ("default", 1.0, "scalar", False),
+    ]
+    assert contracts[0]["exploration_axis"] == contracts[2]["exploration_axis"]
+    assert contracts[1]["exploration_axis"] == contracts[3]["exploration_axis"]
+    assert contracts[0]["exploration_axis"] != contracts[1]["exploration_axis"]
+    assert "init_noise_std" not in A._isaac_four_grid_manifest()["matched_contract"]
+    assert "noise_std_type" not in A._isaac_four_grid_manifest()["matched_contract"]
     manifest = A._isaac_four_grid_manifest()
     matched = manifest["matched_contract"]
     assert matched["wait_contract"] == A._wait_contract() == C._wait_contract()

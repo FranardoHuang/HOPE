@@ -15,20 +15,76 @@ import json
 from typing import Any, Mapping, Sequence
 
 
-KIND = "action_ball_211_isaac_four_grid_manifest_v2"
-A_FIXED_CELL_ID = "A0-base-safety-fixed-lr1e4"
-A_ADAPTIVE_KL_CELL_ID = "A1-base-safety-adaptive-kl-initial-lr1e3"
-C_FIXED_CELL_ID = "C0-base-safety-fixed-lr1e4"
-C_ADAPTIVE_KL_CELL_ID = "C1-base-safety-adaptive-kl-initial-lr1e3"
+# 2026-08-05 第二轴改版(exp §5.6.2c 裁决):
+# 旧的第二轴是 PPO schedule(A0/C0 fixed lr1e-4 对 A1/C1 adaptive-KL lr1e-3)。
+# 在**从未观测到一次接触**的前提下,LR schedule 的差异无法被任何指标分辨,故该对照降级为
+# later;第二轴换成**探索包**——零权重 bootstrap + 钉死 bias + sigma 0.1(现状) 对
+# 标准 rsl_rl 初始化 + sigma 1.0(BeyondMimic / build_1 对齐)。探索包是一阶量:零权重
+# actor 的初始策略是常数,梯度只能经由"探索产生了不同回报"传导。
+# 因此 cell_id 也一并改名——留着 "adaptive-kl-initial-lr1e3" 而实际不跑 adaptive KL,
+# 会让收据、namespace 与 barrier 布局表同时说谎。
+KIND = "action_ball_211_isaac_four_grid_manifest_v3"
+A_BOOTSTRAP_CELL_ID = "A0-base-safety-zero-weight-bootstrap-sigma0p1"
+A_STANDARD_INIT_CELL_ID = "A1-base-safety-standard-init-sigma1p0"
+C_BOOTSTRAP_CELL_ID = "C0-base-safety-zero-weight-bootstrap-sigma0p1"
+C_STANDARD_INIT_CELL_ID = "C1-base-safety-standard-init-sigma1p0"
 CELL_IDS = (
-    A_FIXED_CELL_ID,
-    A_ADAPTIVE_KL_CELL_ID,
-    C_FIXED_CELL_ID,
-    C_ADAPTIVE_KL_CELL_ID,
+    A_BOOTSTRAP_CELL_ID,
+    A_STANDARD_INIT_CELL_ID,
+    C_BOOTSTRAP_CELL_ID,
+    C_STANDARD_INIT_CELL_ID,
 )
 FAMILY_CELL_IDS = {
-    "A211": (A_FIXED_CELL_ID, A_ADAPTIVE_KL_CELL_ID),
-    "C211": (C_FIXED_CELL_ID, C_ADAPTIVE_KL_CELL_ID),
+    "A211": (A_BOOTSTRAP_CELL_ID, A_STANDARD_INIT_CELL_ID),
+    "C211": (C_BOOTSTRAP_CELL_ID, C_STANDARD_INIT_CELL_ID),
+}
+# 与 whole_body_tracking.utils.training_contract 的 ACTION_BALL_ACTOR_INIT_MODE_* 字面量
+# 必须逐字相同。本模块刻意 dependency-free(两个 launcher 用 py3.8 直接 exec 它),所以
+# 这里是手抄副本;跨模块一致性由 tests/test_action_ball_211_isaac_four_grid.py 断言。
+ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = "zero_weight_ready_bias"
+ACTOR_INIT_MODE_DEFAULT = "default"
+ACTOR_INIT_MODES = (
+    ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+    ACTOR_INIT_MODE_DEFAULT,
+)
+# 4σ 硬内带门按 hold 姿态逐关节复算出的全局 sigma 上界(绑定关节 waist_pitch:
+# 余量 0.4007 rad / action_scale 0.5900 / 4)。零权重路线的 sigma 高于它 = 直接拒。
+ZERO_WEIGHT_READY_BIAS_SIGMA_CEILING = 0.1698
+# 标准初始化路线不受 4σ 门约束(演员均值不再是那个常数 hold qdes,包络几何不成立),
+# 上界改由 train.py 的 (0, 1] 区间校验承担。
+STANDARD_INIT_SIGMA_CEILING = 1.0
+EXPLORATION_PACKAGES = {
+    ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS: {
+        "exploration_axis": "zero_weight_ready_bias_bootstrap_sigma0p1_log",
+        "actor_init_mode": ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+        "init_noise_std": 0.1,
+        "noise_std_type": "log",
+        "four_sigma_hard_inner_gate_applies": True,
+    },
+    ACTOR_INIT_MODE_DEFAULT: {
+        "exploration_axis": "standard_rsl_rl_initialization_sigma1p0_scalar",
+        "actor_init_mode": ACTOR_INIT_MODE_DEFAULT,
+        "init_noise_std": 1.0,
+        "noise_std_type": "scalar",
+        "four_sigma_hard_inner_gate_applies": False,
+    },
+}
+EXPLORATION_CELL_KEYS = (
+    "exploration_axis",
+    "actor_init_mode",
+    "init_noise_std",
+    "noise_std_type",
+    "four_sigma_hard_inner_gate_applies",
+)
+# 第二轴换掉 PPO schedule 之后,四格共用同一份 PPO;保留 A0/C0 原本的保守 fixed lr1e-4,
+# 使对照组(零权重格)相对上一版四格一字未动,新增变量只有 A1/C1 的探索包。
+SHARED_PPO = {
+    "schedule": "fixed",
+    "learning_rate": 1.0e-4,
+    "desired_kl": 0.01,
+    "clip_param": 0.2,
+    "num_learning_epochs": 5,
+    "num_mini_batches": 4,
 }
 FORMAL_STAGE_ORDER = (
     "materialize",
@@ -218,34 +274,72 @@ def canonical_sha256(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def validate_exploration_package(value: Any) -> dict:
+    """Cross-lock the three exploration fields so no half-set can be sealed.
+
+    人话:初始化方式、sigma、std 参数化必须整包对上,而且 4σ 门开关必须与初始化方式
+    严格对应。任一项对不上直接拒——两条路线各自 fail-closed,谁都不能借另一条放行。
+    """
+
+    if type(value) is not dict:
+        raise FourGridContractError("four-grid exploration package must be a dict")
+    mode = value.get("actor_init_mode")
+    if type(mode) is not str or mode not in ACTOR_INIT_MODES:
+        raise FourGridContractError("four-grid actor_init_mode is not a known mode")
+    expected = EXPLORATION_PACKAGES[mode]
+    observed = {key: value.get(key) for key in EXPLORATION_CELL_KEYS}
+    if observed != expected:
+        raise FourGridContractError(
+            "four-grid exploration package differs from the sealed %s package" % mode
+        )
+    gate = observed["four_sigma_hard_inner_gate_applies"]
+    sigma = observed["init_noise_std"]
+    if type(sigma) is not float or sigma != sigma or not (0.0 < sigma):
+        raise FourGridContractError("four-grid init_noise_std must be a positive float")
+    if mode == ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS:
+        # 零权重 + 钉死 bias:演员均值就是那个常数 hold qdes,4σ 包络几何成立,门必须开。
+        if (
+            gate is not True
+            or observed["noise_std_type"] != "log"
+            or sigma > ZERO_WEIGHT_READY_BIAS_SIGMA_CEILING
+        ):
+            raise FourGridContractError(
+                "zero-weight bootstrap cell must keep the 4-sigma hard inner gate and "
+                "stay at or below the recomputed sigma ceiling"
+            )
+    else:
+        # 标准初始化:sealed-mean 前提不成立,4σ 门显式跳过(不是"忘了开")。
+        if (
+            gate is not False
+            or observed["noise_std_type"] != "scalar"
+            or sigma > STANDARD_INIT_SIGMA_CEILING
+        ):
+            raise FourGridContractError(
+                "standard-initialization cell must declare the 4-sigma gate skipped, "
+                "use the scalar std parameterization and stay within (0, 1]"
+            )
+    return copy.deepcopy(observed)
+
+
 def _cell(
     cell_id: str,
     task_family: str,
     reward_semantics: str,
-    schedule: str,
-    learning_rate: float,
+    actor_init_mode: str,
 ) -> dict:
-    adaptive = schedule == "adaptive"
-    return {
+    package = copy.deepcopy(EXPLORATION_PACKAGES[actor_init_mode])
+    row = {
         "cell_id": cell_id,
         "task_family": task_family,
         "task_reward_semantics": reward_semantics,
-        "ppo": {
-            "schedule": schedule,
-            "learning_rate": learning_rate,
-            "desired_kl": 0.01,
-            "clip_param": 0.2,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-        },
-        "ppo_adaptation_axis": (
-            "kl_adaptive_learning_rate" if adaptive else "fixed_learning_rate"
-        ),
-        "learning_rate_role": (
-            "initial_for_ppo_kl_adaptation" if adaptive else "constant"
-        ),
+        "ppo": copy.deepcopy(SHARED_PPO),
+        "ppo_adaptation_axis": "fixed_learning_rate",
+        "learning_rate_role": "constant",
         "contact_sigma_adaptation": False,
+        **package,
     }
+    validate_exploration_package(row)
+    return row
 
 
 def _build_canonical_manifest() -> dict:
@@ -262,15 +356,13 @@ def _build_canonical_manifest() -> dict:
         },
         "actor_hidden_dims": [512, 256, 128],
         "critic_hidden_dims": [512, 256, 128],
-        # 2026-08-05 探索幅度(exp §5.6 第 3 条):0.02 -> 0.1。
-        #
-        # 零权重 actor + bias 钉死 ready 姿态意味着初始策略是**常数**,mimic 的梯度只能经由
-        # "探索产生了不同回报"传导,所以 sigma 是本配方的一阶量。0.02 折算肩 pitch 1σ 仅 0.43°,
-        # 物理上挥不出一拍;参照系 build_1(唯一已知能击到球的同底盘臂)用的是 1.0(21.5°)。
-        # 上界由 4σ 硬内带门按 hold 姿态逐关节复算得出:绑定关节 waist_pitch,σ_max=0.1698
-        # (余量 0.4007 rad / action_scale 0.5900 / 4)。取 0.1 用掉 59% 余量,是一步不是一跳。
-        "init_noise_std": 0.1,
-        "noise_std_type": "log",
+        # 2026-08-05 探索包上升为**注册差异轴**(exp §5.6.2c),因此 init_noise_std /
+        # noise_std_type / actor_init_mode 三项从 matched_contract 移到每格 cells[i]。
+        # 这里刻意不留同名键:任何仍去 matched_contract 里取 init_noise_std 的旧代码会
+        # 直接 KeyError,而不是读到一个已经不再"全格相同"的数字。
+        "exploration_axis_is_registered_difference": True,
+        "ppo": copy.deepcopy(SHARED_PPO),
+        "ppo_adaptation_axis": "fixed_learning_rate",
         "entropy_coef": 0.01,
         "reference_guard_mode": "metrics_only",
         "wait_contract": {
@@ -328,51 +420,89 @@ def _build_canonical_manifest() -> dict:
         "contact_sigma_contract": "static_rollout0_widths",
     }
     unsigned = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": KIND,
         "formal_cell_count": 4,
         "cell_order": list(CELL_IDS),
         "matched_contract": matched,
         "registered_difference_axes": [
             "task_semantics_and_reward",
+            "actor_initialization_and_exploration_sigma_cell",
+        ],
+        "deferred_difference_axes": [
+            # exp §5.6.2c:在从未观测到一次接触前,LR schedule 的差异无法被任何指标分辨。
             "ppo_learning_rate_schedule_cell",
         ],
         "adaptive_term_disambiguation": {
             "adaptive_means": "ppo_kl_learning_rate_schedule",
+            "ppo_kl_learning_rate_schedule": "disabled_fixed_learning_rate_all_cells",
             "contact_kernel_sigma_controller": "disabled_static_all_cells",
+            "init_noise_std_is": (
+                "static_ppo_action_distribution_initialization_not_a_controller"
+            ),
         },
         "cells": [
             _cell(
-                A_FIXED_CELL_ID,
+                A_BOOTSTRAP_CELL_ID,
                 "A211",
                 "desired_contact_dense",
-                "fixed",
-                1.0e-4,
+                ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
             ),
             _cell(
-                A_ADAPTIVE_KL_CELL_ID,
+                A_STANDARD_INIT_CELL_ID,
                 "A211",
                 "desired_contact_dense",
-                "adaptive",
-                1.0e-3,
+                ACTOR_INIT_MODE_DEFAULT,
             ),
             _cell(
-                C_FIXED_CELL_ID,
+                C_BOOTSTRAP_CELL_ID,
                 "C211",
                 "achieved_contact_outcome_only",
-                "fixed",
-                1.0e-4,
+                ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
             ),
             _cell(
-                C_ADAPTIVE_KL_CELL_ID,
+                C_STANDARD_INIT_CELL_ID,
                 "C211",
                 "achieved_contact_outcome_only",
-                "adaptive",
-                1.0e-3,
+                ACTOR_INIT_MODE_DEFAULT,
             ),
         ],
     }
+    _require_one_registered_difference_axis(unsigned["cells"])
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
+
+
+def _require_one_registered_difference_axis(cells: Sequence[Any]) -> None:
+    """Reject any grid where the two family cells differ outside the exploration axis.
+
+    人话:对照实验的前提是"只有初始化与 sigma 不同"。此处逐字段比对同族两格,除探索包
+    五个键之外任何差异(包括 PPO)一律拒;跨族只允许 task 语义/reward 不同。
+    """
+
+    if type(cells) not in (list, tuple) or len(cells) != len(CELL_IDS):
+        raise FourGridContractError("four-grid must hold exactly four cells")
+    for family, expected_ids in FAMILY_CELL_IDS.items():
+        rows = [row for row in cells if row["task_family"] == family]
+        if [row["cell_id"] for row in rows] != list(expected_ids):
+            raise FourGridContractError("four-grid family cell order differs")
+        first, second = rows
+        varying = set(EXPLORATION_CELL_KEYS) | {"cell_id"}
+        if set(first) != set(second):
+            raise FourGridContractError("four-grid family cells have different fields")
+        for key in first:
+            if key in varying:
+                continue
+            if first[key] != second[key]:
+                raise FourGridContractError(
+                    "%s cells differ outside the registered exploration axis: %s"
+                    % (family, key)
+                )
+        modes = {row["actor_init_mode"] for row in rows}
+        if modes != set(ACTOR_INIT_MODES):
+            raise FourGridContractError(
+                "%s cells must cover both registered actor init modes exactly once"
+                % family
+            )
 
 
 _CANONICAL_MANIFEST = _build_canonical_manifest()
@@ -443,6 +573,7 @@ def cell_for_family(cell_id: Any, task_family: Any) -> dict:
     matches = [row for row in value["cells"] if row["cell_id"] == cell_id]
     if len(matches) != 1 or matches[0]["task_family"] != task_family:
         raise FourGridContractError("four-grid family registry is inconsistent")
+    validate_exploration_package(matches[0])
     return copy.deepcopy(matches[0])
 
 
@@ -511,8 +642,11 @@ if (
     != CANONICAL_TEACHER_PROJECTION_SHA256
 ):
     raise RuntimeError("canonical Take061 teacher projection drifted")
-# 2026-08-05 重钉:manifest 内含 init_noise_std 0.02 -> 0.1 与 death_penalty -300 -> -10
-# 两处层级对齐(exp §5.6 第 3/7 条),故 content seal 随之更新。旧值
-# 823d6d88...0709 只代签对齐前的字节。
-if CONTENT_SHA256 != "960fed56afed6438e0fe1ef44b5436b6ad2e95fcb4d68c5895cf3c639a97c6e0":
+# 2026-08-05 重钉(第二次,先算后写):第二轴由 PPO schedule 换成探索包(exp §5.6.2c),
+# 四格 cell_id 全部改名、init_noise_std/noise_std_type 从 matched_contract 下放到每格、
+# 新增 actor_init_mode 与 four_sigma_hard_inner_gate_applies、schema 2 -> 3、kind v2 -> v3、
+# 四格 PPO 统一为 fixed lr1e-4。故 content seal 随之更新。
+# 旧值 960fed56...c6e0 只代签本次改名与下放之前的字节;更旧的 823d6d88...0709 只代签
+# 2026-08-05 层级对齐之前的字节。
+if CONTENT_SHA256 != "1bc1df349b3f66316c81f5b0b2a6a79b3b84735c4a489c0e910943fc751ab1ca":
     raise RuntimeError("formal A211/C211 Isaac four-grid manifest drifted")

@@ -4472,3 +4472,236 @@ def test_move_mode_is_frozen_and_no_move_task_cannot_smuggle_travel():
     move_pool.bind_birth_authority(broker)
     with pytest.raises(R.ActionBallContractError, match="frozen run mode"):
         move_pool.request(frozen, swing_generation=0)
+
+
+# --- initial-center single-question collapse -------------------------------
+#
+# ``ActionBallSampler`` collapses the whole sampling plan to the literal profile
+# centre while ``initial_center_single_question`` is on and all 32 curriculum
+# arms are exactly zero.  The quota schedule no longer picks the stratum in that
+# regime, so the receipt gates judge the row against the collapse law instead.
+# These tests pin both directions: the collapse is accepted, and every gate that
+# guards the ordinary quota regime still refuses a mislabelled row.
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_CENTER_TASK_RECEIPT = _REPO_ROOT / (
+    "configs/action_ball_n1_measured_20260803/"
+    "fresh_tape_seed0_20260803_take061_robust20n_r9_center/"
+    "current_lm.target.task_receipt.v5.f9e0ddf178aa.json"
+)
+_INTERIOR_TASK_RECEIPT = _REPO_ROOT / (
+    "configs/action_ball_n1_measured_20260803/"
+    "fresh_tape_seed0_20260803_take061_robust20n_r4_splitready/"
+    "current_lm.target.task_receipt.v5.f64f52137ad8.json"
+)
+
+
+def _initial_center_birth_kwargs(*, initial_center_single_question):
+    """Reserve one real level-zero birth from an initial-center sampler."""
+
+    action_uid = 907_311
+    profile = _sampling_profile(action_uid)
+    mixture = S.SamplingMixture()
+    sampler = S.ActionBallSampler(
+        (profile,),
+        seed=20260805,
+        sampling_mixture=mixture,
+        contact_time_step_s=0.02,
+        initial_center_single_question=initial_center_single_question,
+    )
+    zero_levels = S.DomainLevels()
+    levels = R.ActionDomainLevels.from_dict(zero_levels.as_dict())
+    authority_sha = _digest("initial-center-authority")
+    pins = R.RuntimePins(
+        manifest_sha256=_digest("initial-center-manifest"),
+        sampler_sha256=sampler.sampler_contract_sha256,
+        domain_authority_sha256=authority_sha,
+        physics_sha256=_digest("initial-center-physics"),
+        solver_sha256=_digest("initial-center-solver"),
+    )
+    binding = R.ActionBinding(
+        action_uid=action_uid,
+        action_slot=0,
+        motion_path="vendor_assets/motions/initial_center.npz",
+        motion_sha256=_digest("initial-center-motion"),
+        profile_sha256=profile.sha256,
+    )
+    yaw = 0.0
+    sampled_birth = sampler.reserve_birth(
+        action_uid=action_uid,
+        domain_epoch=0,
+        levels=zero_levels,
+        base_yaw_rad=yaw,
+    )
+    claim = R.ActionDomainClaim(
+        authority_contract_sha256=authority_sha,
+        arm_catalog_sha256=R.ARM_CATALOG_SHA256,
+        action_uid=action_uid,
+        domain_epoch=0,
+        domain_levels=levels,
+        levels_sha256=levels.canonical_sha256,
+        profile_sha256=profile.sha256,
+        mobility_mode="no_move",
+    )
+    kwargs = dict(
+        env_id=0,
+        reset_generation=1,
+        action_uid=action_uid,
+        action_slot=0,
+        domain_epoch=0,
+        domain_claim_sha256=claim.canonical_sha256,
+        domain_authority_sha256=authority_sha,
+        domain_levels=levels,
+        arm_catalog_sha256=R.ARM_CATALOG_SHA256,
+        levels_sha256=levels.canonical_sha256,
+        sampler_birth_sha256=sampled_birth.birth_id,
+        sampler_birth_index=sampled_birth.birth_index,
+        sampler_draw_start=sampled_birth.draw_start,
+        sampler_draw_end=sampled_birth.draw_end,
+        mobility_mode="no_move",
+        base_yaw_rad=yaw,
+        base_quat_wxyz=_yaw_quat(yaw),
+        base_spawn_w_m=sampled_birth.base_start_w_m,
+        manifest_sha256=pins.manifest_sha256,
+        sampler_sha256=pins.sampler_sha256,
+        profile_sha256=profile.sha256,
+        motion_sha256=binding.motion_sha256,
+        physics_sha256=pins.physics_sha256,
+        solver_sha256=pins.solver_sha256,
+        registry_sha256=R._registry_sha256((binding,), pins, "no_move"),
+        sampling_mixture=R.ActionSamplingMixture.from_dict(
+            sampled_birth.sampling_mixture.as_dict()
+        ),
+        sampling_stratum=sampled_birth.sampling_stratum,
+        sampling_levels=R.ActionDomainLevels.from_dict(
+            sampled_birth.sampling_levels.as_dict()
+        ),
+        frontier_arm=sampled_birth.frontier_arm,
+        initial_center_single_question=initial_center_single_question,
+    )
+    return mixture, sampled_birth, kwargs
+
+
+def test_initial_center_birth_receipt_accepts_the_collapse_the_quota_forbids():
+    mixture, sampled_birth, kwargs = _initial_center_birth_kwargs(
+        initial_center_single_question=True
+    )
+    # The quota slot this birth landed on is *not* centre.  Without the
+    # collapse being written down, the schedule comparison is the wrong law.
+    assert mixture.schedule[0] == "interior"
+    assert sampled_birth.birth_index == 0
+    assert sampled_birth.sampling_stratum == "center"
+    assert sampled_birth.frontier_arm is None
+
+    receipt = R.ActionBirthReceipt(**kwargs)
+    assert receipt.initial_center_single_question is True
+    payload = receipt.payload_dict()
+    assert payload["initial_center_single_question"] is True
+    assert R.ActionBirthReceipt.from_dict(receipt.to_dict()) == receipt
+
+
+def test_initial_center_birth_receipt_refuses_any_non_center_row():
+    _mixture, _sampled_birth, kwargs = _initial_center_birth_kwargs(
+        initial_center_single_question=True
+    )
+    for override in (
+        {"sampling_stratum": "interior"},
+        {"sampling_stratum": "frontier", "frontier_arm": "base_spawn_x_lower"},
+        {
+            "sampling_levels": R.ActionDomainLevels.from_dict(
+                {
+                    **S.DomainLevels().as_dict(),
+                    "contact_x_lower": 0.25,
+                }
+            )
+        },
+    ):
+        with pytest.raises(
+            R.ActionBallContractError,
+            match="birth initial-center collapse is not the literal",
+        ):
+            R.ActionBirthReceipt(**{**kwargs, **override})
+
+
+def test_quota_schedule_birth_gate_survives_without_the_initial_center_law():
+    # Mutation control: strip the recorded collapse and the ordinary quota gate
+    # must still refuse the very same centre row.
+    _mixture, _sampled_birth, kwargs = _initial_center_birth_kwargs(
+        initial_center_single_question=True
+    )
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="birth sampling stratum differs from quota schedule",
+    ):
+        R.ActionBirthReceipt(
+            **{**kwargs, "initial_center_single_question": False}
+        )
+    # A legacy row may not carry the flag at all.
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="legacy birth cannot carry mixture sampling metadata",
+    ):
+        R.ActionBirthReceipt(
+            **{
+                **kwargs,
+                "sampling_mixture": None,
+                "sampling_stratum": "domain",
+                "sampling_levels": None,
+                "frontier_arm": None,
+            }
+        )
+
+
+def test_center_task_receipt_round_trips_and_is_the_literal_center_row():
+    row = json.loads(_CENTER_TASK_RECEIPT.read_text(encoding="utf-8"))
+    receipt = R.ActionBallTaskReceipt.from_dict(row)
+    assert receipt.initial_center_single_question is True
+    assert receipt.sampling_stratum == "center"
+    assert receipt.birth_sampling_stratum == "center"
+    assert receipt.frontier_arm is None and receipt.birth_frontier_arm is None
+    assert receipt.time_to_contact_tick == 91
+    assert receipt.time_to_contact_s == 1.82
+    assert receipt.sampling_mixture.schedule[0] == "interior"
+    assert all(
+        getattr(receipt.domain_levels, arm) == 0.0 for arm in R.ARM_KEYS
+    )
+    assert receipt.to_dict() == row
+
+
+def test_center_task_receipt_refuses_a_non_center_stratum():
+    row = json.loads(_CENTER_TASK_RECEIPT.read_text(encoding="utf-8"))
+    for key in ("sampling_stratum", "birth_sampling_stratum"):
+        mutated = {**row, key: "interior"}
+        with pytest.raises(
+            R.ActionBallContractError,
+            match="task initial-center collapse is not the literal",
+        ):
+            R.ActionBallTaskReceipt.from_dict(mutated)
+
+
+def test_quota_schedule_task_gate_survives_without_the_initial_center_law():
+    # Mutation control 1: drop the recorded collapse from the centre row.
+    row = json.loads(_CENTER_TASK_RECEIPT.read_text(encoding="utf-8"))
+    stripped = {
+        key: value
+        for key, value in row.items()
+        if key != "initial_center_single_question"
+    }
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="task sampling stratum differs from quota schedule",
+    ):
+        R.ActionBallTaskReceipt.from_dict(stripped)
+
+    # Mutation control 2: the tracked interior receipt carries no collapse, so
+    # relabelling its stratum must still be refused by the quota gate.
+    interior = json.loads(_INTERIOR_TASK_RECEIPT.read_text(encoding="utf-8"))
+    assert "initial_center_single_question" not in interior
+    assert interior["sampling_stratum"] == "interior"
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="task sampling stratum differs from quota schedule",
+    ):
+        R.ActionBallTaskReceipt.from_dict(
+            {**interior, "sampling_stratum": "center"}
+        )

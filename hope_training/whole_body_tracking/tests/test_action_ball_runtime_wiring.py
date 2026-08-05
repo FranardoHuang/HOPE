@@ -3617,3 +3617,47 @@ def test_hidden_wait_is_ineligible_and_active_miss_closes_zero_over_c():
         "legal_return",
     ):
         assert f"{name} = {name} & task_valid" in sparse
+
+
+def test_every_live_birth_receipt_declares_the_sampler_initial_center_law():
+    """Both live birth sites must record the law the sampler drew under.
+
+    ``ActionBallSampler`` collapses the whole plan to the literal centre point
+    while ``initial_center_single_question`` is on and all 32 curriculum arms
+    are exactly zero, so the quota slot no longer picks the stratum.  The
+    receipt gate can only judge that row if the receipt says which law applied.
+    A birth site that forgets the keyword silently falls back to ``False`` and
+    is then rejected by the quota comparison at the first level-zero reset --
+    i.e. it breaks training, not a test.  Assert over *every* construction call
+    so a future third site cannot be added without the keyword.
+    """
+
+    calls = [
+        node
+        for node in ast.walk(COMMAND_CLASS)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "ActionBirthReceipt"
+    ]
+    assert len(calls) == 2, "birth receipt construction sites moved"
+    for call in calls:
+        keywords = {
+            keyword.arg: keyword
+            for keyword in call.keywords
+            if keyword.arg is not None
+        }
+        assert "initial_center_single_question" in keywords
+        value = " ".join(
+            ast.get_source_segment(
+                SOURCE, keywords["initial_center_single_question"]
+            ).split()
+        )
+        # The value has to come from the sampler that produced the birth, not
+        # from a literal or from the receipt's own default.
+        assert (
+            "self._action_ball_sampler.initial_center_single_question"
+            in value
+        )
+        # Legacy births carry no mixture at all and the receipt refuses the
+        # flag there, so the sampler law is gated on the mixture being present.
+        assert "sampler_birth.sampling_mixture is not None" in value
