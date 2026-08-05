@@ -827,6 +827,48 @@ clamp/投影/罚三层已经处理的事。
 `hope_training/whole_body_tracking/scripts/action_ball_211_four_grid_contract.py`
 （`schema_version=3`，content seal `1bc1df34…b1ca`）。
 
+#### 5.6.2d reveal bridge 的可学性从未被验证（2026-08-05，四格第二轴）
+
+本文多处写“reveal 同 tick **原子切**到 measured frame0 ... 由 **dense mimic 学 bridge**”
+（:1027、:1597、:1713）。这是一句**设计声明，不是已验证事实**——全文没有任何一处给出该 bridge
+可学的证据，而 §5.4 的非消失引导 Gate 六条**只覆盖 task 核**，从未对唯一负责桥接的 mimic 核
+做过支撑度复算。
+
+从 tracked split-ready artifact 逐字节复算 reveal 那一 tick 的阶跃量：
+
+| 量 | 值 |
+| --- | ---: |
+| pelvis 高度下降 | `0.1766 m` |
+| 去 yaw 后残余 tilt | `0 -> 0.5171 rad`（`29.63 deg`） |
+| 单关节最大 `abs(dq)` | `2.2434 rad`（`right_wrist_yaw`） |
+| 关节偏差 L2 / L1 | `3.6719` / `13.9110` |
+| 预算 | `0.6923799138976297 s` |
+
+在该误差下唯一能精确复算的 mimic 项 `motion_global_anchor_ori` 的 raw kernel 为
+`exp(-0.5171^2 / 0.4^2) = 0.1882`，即峰值的 `18.8%`；同族 body 方向核 `exp(-mse / 0.4^2)` 的
+`1%` 峰值半径是 `2.146 * 0.4 = 0.858 rad`，而仅左右 `hip_pitch` 的偏差就已是 `1.2902 / 1.3270 rad`、
+`knee` 为 `0.9003 / 0.9904 rad`。**若 body 方向核在桥接段进入亚 `1%` 区，则“用 dense mimic 学 bridge”
+在数学上是空的**：桥接段唯一还有梯度的是位置核与 Cauchy 球拍核，而同段内 teacher 的关节/身体/球拍
+速度又被硬置零（`mujoco_native/action_ball_c211_env.py:2355-2385`，`held` 条件恒真），
+位置目标与被置零的速度目标互相打架。
+
+这条在因果链的**最前面**（平衡 -> **桥接** -> 模仿 -> 击球 -> 上台）。若它不可学，四格会一起失败
+且失败形态相同，A/C 这条主对照将得不到任何信息。因此四格第二轴取它：
+
+| 格 | family | reveal 时 teacher 过渡 |
+| --- | --- | --- |
+| `A0` / `C0` | A211 / C211 | **阶跃**（本文现状：同 tick 原子切） |
+| `A1` / `C1` | A211 / C211 | **插值**：在 `time_to_teacher_start` 窗内由 split-ready 平滑过渡到 frame0 |
+
+插值使 mimic 核全程留在高梯度区，把桥接从“学一个看不见的目标”变成“跟一条看得见的轨迹”。
+判读：插值格出现接触而阶跃格没有 -> 桥接是病灶，且本文上述三处表述必须改；两者皆无接触 ->
+桥接不是瓶颈，可排除该嫌疑，下一嫌疑转向起点分布塌缩（尽调 §9）。
+
+**被否决的第二轴候选及理由。** `init_noise_std`：参考实现无歧义（rsl_rl 上游、BeyondMimic、
+`build_1` 全为 `1.0`，无反例），故 `0.02` 是本分支自身缺陷而非待测假设，四格统一取 `1.0`，
+不占对照格。`seed`：独立性属 §9.1 的验收要求，可在通过后补齐，不是当前最不确定的量。
+`counter_rally_v1` 与 landing 口径：只在**已经发生接触之后**才影响判读，排在桥接之后。
+
 #### 5.6.3 尚未对齐、需单独裁决的
 
 - **`virtual_landing` 的实际 raw 不是本文 §5.3 所写的 `legal_base` 底薪 + 中心核。** 当前 launcher 绑定的
