@@ -3637,6 +3637,143 @@ def test_completion_state_rejects_nonexact_or_duplicate_rows(tmp_path, text):
         launcher._validate_completion_state(path)
 
 
+def _c211_policy_recipe_bytes(path, *, noise_std_type, init_noise_std, recipe):
+    """Write a policy-recipe artifact carrying one exact exploration package."""
+
+    document = {
+        "action_ball_ppo_runner_recipe": {
+            "recipe": {
+                "algorithm": {
+                    "entropy_coef": recipe["entropy_coef"],
+                    **recipe["ppo"],
+                },
+                "policy": {
+                    "actor_hidden_dims": recipe["actor_hidden_dims"],
+                    "critic_hidden_dims": recipe["critic_hidden_dims"],
+                    "init_noise_std": init_noise_std,
+                    "noise_std_type": noise_std_type,
+                },
+                "runner": {
+                    "empirical_normalization": True,
+                    "init_at_random_ep_len": False,
+                },
+            }
+        }
+    }
+    path.write_bytes(launcher._B._canonical_bytes(document) + b"\n")
+    return path
+
+
+def _c211_policy_lineage():
+    return {
+        "lineage_sha256": "a" * 64,
+        "dynamic_ready_artifact": {"path": "artifact.json", "sha256": "b" * 64},
+        "dynamic_ready_nominal_receipt": {
+            "path": "nominal.json",
+            "sha256": "c" * 64,
+        },
+        "motion": {"path": "motion.npz", "sha256": "d" * 64},
+    }
+
+
+def test_c211_policy_gate_binds_the_registered_exploration_package(
+    tmp_path, monkeypatch
+):
+    """C forwards its own registered sigma, and still refuses anything else.
+
+    人话:借来的那台 A225 验证器默认要 log/0.02。四格 2026-08-05 把探索包定死成
+    标准初始化 + sigma 1.0 + scalar 之后,那个默认值会把 C 的 recipe 阶段夹在两条
+    互斥的门中间(先被要求 log/0.02,二十几行后又被要求等于 recipe 的 scalar/1.0),
+    任何一份 recipe 都过不去。修法是把该期待哪个包交给注册的四格 cell。
+
+    这不是放宽门,下面三段就是证据:
+      1. 传出去的值必须逐字节等于 ``_recipe_contract`` 里的注册包,而那个包已被
+         ``recipe_contract_sha256`` 封住 —— 不是这里现编的字面量;
+      2. 借来的默认值和 C 的注册包不相等,所以一旦有人把这两个参数删掉,真验证器
+         会当场拒 —— 转发是承重的,不是装饰;
+      3. 产出的 recipe 只要偏离注册包一个字段,C 自己那道 ``expected_policy``
+         仍然当场拒。
+    """
+
+    borrowed_defaults = (
+        launcher._OLD._validate_policy_materialization.__kwdefaults__
+    )
+    seen = []
+
+    def _record(value, *, checkout, bundle, **expectations):
+        assert set(expectations) == {
+            "expected_noise_std_type",
+            "expected_init_noise_std",
+        }, (
+            "C211 must name its own exploration package; falling back to the "
+            "borrowed A225 log/0.02 default cannot pass the four-grid contract"
+        )
+        seen.append(dict(expectations))
+        return {
+            "artifact": dict(value),
+            "policy_contract_sha256": "e" * 64,
+            "dynamic_ready_binding_sha256": "f" * 64,
+            "noise_std_type": expectations["expected_noise_std_type"],
+            "configured_and_realized_init_noise_std": expectations[
+                "expected_init_noise_std"
+            ],
+        }
+
+    monkeypatch.setattr(launcher._OLD, "_validate_policy_materialization", _record)
+    lineage = _c211_policy_lineage()
+
+    for recipe_id in launcher.RECIPE_IDS:
+        recipe = launcher._recipe_contract(recipe_id)
+        # 2. 借来的默认值不可能满足 C 的注册包。
+        assert (
+            borrowed_defaults["expected_noise_std_type"]
+            != recipe["noise_std_type"]
+        )
+        assert (
+            borrowed_defaults["expected_init_noise_std"]
+            != recipe["init_noise_std"]
+        )
+
+        path = _c211_policy_recipe_bytes(
+            tmp_path / (recipe_id + ".json"),
+            noise_std_type=recipe["noise_std_type"],
+            init_noise_std=recipe["init_noise_std"],
+            recipe=recipe,
+        )
+        materialization = launcher._runtime_policy_materialization(
+            path=path, checkout=tmp_path, lineage=lineage, recipe=recipe
+        )
+        # 1. 转发出去的就是注册包本身。
+        assert seen[-1] == {
+            "expected_noise_std_type": recipe["noise_std_type"],
+            "expected_init_noise_std": recipe["init_noise_std"],
+        }
+        assert materialization["noise_std_type"] == recipe["noise_std_type"]
+        assert (
+            materialization["configured_and_realized_init_noise_std"]
+            == recipe["init_noise_std"]
+        )
+
+    # 3. 偏离注册包一个字段就拒 —— 两个方向各来一次。
+    recipe = launcher._recipe_contract(launcher.RECIPE_IDS[0])
+    for wrong_type, wrong_sigma in (
+        (borrowed_defaults["expected_noise_std_type"], recipe["init_noise_std"]),
+        (recipe["noise_std_type"], borrowed_defaults["expected_init_noise_std"]),
+    ):
+        drifted = _c211_policy_recipe_bytes(
+            tmp_path / ("drift_%s_%s.json" % (wrong_type, wrong_sigma)),
+            noise_std_type=wrong_type,
+            init_noise_std=wrong_sigma,
+            recipe=recipe,
+        )
+        with pytest.raises(
+            launcher.LaunchRefused, match="C211 runtime policy recipe differs"
+        ):
+            launcher._runtime_policy_materialization(
+                path=drifted, checkout=tmp_path, lineage=lineage, recipe=recipe
+            )
+
+
 def test_launcher_never_sets_or_repurposes_home():
     source = SCRIPT.read_text(encoding="utf-8")
     assert '"HOME"' not in source

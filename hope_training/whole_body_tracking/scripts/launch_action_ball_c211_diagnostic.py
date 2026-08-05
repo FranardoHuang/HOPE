@@ -4021,11 +4021,20 @@ def _runtime_policy_materialization(
         },
         "motion": lineage["motion"],
     }
+    # 借来的那台验证器要"发射方声明的探索包"和"运行时真吐出来的探索包"逐字节相等。
+    # 它的默认值是 A225 那条 vendor-v2 诊断线自己的 log/0.02;C211 必须把**本格注册
+    # 的**探索包传进去,否则默认值会把 C 夹在两条互斥的门中间:先在那里被要求
+    # log/0.02,二十几行后又被下面的 expected_policy 要求等于 recipe 的 scalar/1.0,
+    # 没有任何一份 recipe 能同时满足。传的是 _recipe_contract 里由
+    # recipe_contract_sha256 封住的四格 matched exploration_package,不是字面量,
+    # 所以这不是放宽门:包一旦和注册的格子不符,这里和下面都仍然当场拒。
     try:
         validated = _OLD._validate_policy_materialization(
             {"path": str(path), "sha256": _B.sha256_file(path)},
             checkout=checkout,
             bundle=bundle,
+            expected_noise_std_type=recipe["noise_std_type"],
+            expected_init_noise_std=recipe["init_noise_std"],
         )
     except _OLD.LaunchRefused as exc:
         raise LaunchRefused("C211 runtime policy recipe validation failed") from exc
