@@ -414,51 +414,6 @@ def test_formal_grid_samples_each_reset_and_only_a_caches_inverse_answers():
     assert C._curriculum_scope_contract()["online_inverse_solve_calls"] == 0
 
 
-def test_retired_target_projection_validator_remains_fail_closed_only():
-    a_target = {
-        "recipe": A.A_SELECTED_TAPE_VARIANT,
-        "producer_sha256": "a" * 64,
-        "column_sha256": "b" * 64,
-        **copy.deepcopy(F.CANONICAL_TEACHER_PROJECTION),
-    }
-    c_target = {
-        "recipe": C.TARGET_RECIPE,
-        "validity_mask": list(C.TARGET_VALIDITY_MASK),
-        **copy.deepcopy(F.CANONICAL_TEACHER_PROJECTION),
-    }
-    a_binding = F.validate_teacher_projection(
-        a_target, target_variant=("A211", A.A_SELECTED_TAPE_VARIANT)
-    )
-    c_binding = F.validate_teacher_projection(
-        c_target, target_variant=("C211", C.TARGET_RECIPE)
-    )
-    assert a_binding["teacher_projection"] == c_binding["teacher_projection"]
-    assert (
-        a_binding["teacher_projection_sha256"]
-        == c_binding["teacher_projection_sha256"]
-        == F.CANONICAL_TEACHER_PROJECTION_SHA256
-    )
-
-
-def test_retired_question_and_teacher_projection_validators_fail_closed_on_drift():
-    question = copy.deepcopy(F.CANONICAL_BASE_QUESTION)
-    question["time_to_contact_s"] += 0.02
-    with pytest.raises(F.FourGridContractError, match="base question differs"):
-        F.validate_base_question(
-            question, motion_sha256=F.CANONICAL_MOTION_SHA256
-        )
-
-    target = {
-        "recipe": A.A_SELECTED_TAPE_VARIANT,
-        **copy.deepcopy(F.CANONICAL_TEACHER_PROJECTION),
-    }
-    target["runtime_target"]["teacher_rate"] += 1.0e-12
-    with pytest.raises(F.FourGridContractError, match="teacher projection differs"):
-        F.validate_teacher_projection(
-            target, target_variant=("A211", A.A_SELECTED_TAPE_VARIANT)
-        )
-
-
 def _canonical_write(path: Path, value) -> None:
     raw = (
         json.dumps(

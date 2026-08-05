@@ -168,167 +168,22 @@ FORMAL_STAGE_ORDER = (
     "scale4096",
     "long4096",
 )
-CANONICAL_SOURCE_TAPE = {
-    "path": (
-        "configs/action_ball_n1_measured_20260803/fresh_592835dc_take061/"
-        "rematerialized_1d5d9d44/tape/"
-        "immutable_n1_tape.v1.1eeccd2aa7b7.json"
-    ),
-    "file_sha256": (
-        "1eeccd2aa7b7fbede5fb5d52356740f934664f20058b1af4237ae807655d94e6"
-    ),
-    "canonical_sha256": (
-        "6e4a502d46df0ecfe7209b9d63327b67708d66d61fd0c7ca9803ea6d96011113"
-    ),
-}
-CANONICAL_BASE_QUESTION_SHA256 = (
-    "9b9cf4d614c0e31ead2754feee4f5ed2db81167cabdd66f7a94a7ba1ba2ad940"
-)
+# [已退役 2026-08-06] CANONICAL_SOURCE_TAPE / CANONICAL_BASE_QUESTION[_SHA256] /
+# CANONICAL_TEACHER_PROJECTION[_SHA256] 五个常量连同 validate_base_question /
+# validate_teacher_projection 两个函数已整体删除:它们没有任何生产调用点,只是把下面
+# 这份 tracked 磁带artifact 的字节在代码里又抄了一遍,而"同一事实两处存"迟早对不上。
+# 题面/教师投影的唯一权威是磁带本体及其 task receipt:
+#   configs/action_ball_n1_measured_20260803/fresh_592835dc_take061/
+#     rematerialized_1d5d9d44/tape/immutable_n1_tape.v1.1eeccd2aa7b7.json
+#     (question_sha256=9b9cf4d6..., canonical_sha256=6e4a502d...)
+#     current_lm.target.task_receipt.v5.5e09858672ac.json (teacher 投影 22 字段)
+# 注意:磁带题面的 time_to_contact_s=1.84(tick 92)是**现役**值,不要跟课程 level=0 的
+# 初始中心 tick 混为一谈 —— 后者由 launcher 的 _initial_center_timing_authority 钉死在
+# tick 91 / 1.82 / stratum="center"(635652f6 给 _contact_time_tick_grid 加
+# allow_zero_initial 之后初始带真正塌到中心 tick)。两者是不同的量,都在现役。
 CANONICAL_MOTION_SHA256 = (
     "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e"
 )
-CANONICAL_BASE_QUESTION = {
-    "action_slot": 0,
-    "action_uid": 5527597793770800,
-    "ball_contact_w_m": [
-        0.5163478872256125,
-        -0.003197546078811897,
-        1.0502659655327715,
-    ],
-    "base_goal_w_m": [-0.19223234, 0.28527880999999994, 1.0684000253677368],
-    "base_quat_wxyz": [1.0, 0.0, 0.0, -2.710608404399295e-10],
-    "base_spawn_latent_w_m": [
-        -0.19223234,
-        0.28527880999999994,
-        1.0684000253677368,
-    ],
-    "base_spawn_w_m": [-0.19223234, 0.28527880999999994, 1.0684000253677368],
-    "base_travel_latent_b_yaw_m": [0.0, 0.0, 0.0],
-    "base_yaw_rad": -5.42121680879859e-10,
-    "contact_offset_from_base_goal_b_yaw_m": [
-        0.7085802273820018,
-        -0.2884763556946751,
-        -0.0181340598349653,
-    ],
-    "counter_rally_task": {
-        "canonical_sha256": (
-            "e1d07370111849bf852ec671e50d998de11722ad9be7cadd327259077f695a83"
-        ),
-        "objective_profile_sha256": (
-            "7f490a9163fd5f45a2b4538cf711a03ce8d0a01288688897c4d7220d35a505ce"
-        ),
-        "return_direction_env_xy": [
-            0.9375428134404594,
-            -0.3478699081066772,
-        ],
-        "schema_version": 1,
-        "target_baseline_speed_mps": 3.032258730715438,
-    },
-    "incoming_direction_b_yaw": [
-        -0.9346040118217726,
-        0.3467794819684754,
-        0.07911594006471784,
-    ],
-    "incoming_speed_mps": 3.032258730715438,
-    "incoming_spin_w_radps": [0.0, 0.0, 0.0],
-    "incoming_velocity_w_mps": [
-        -2.8339611740381896,
-        1.0515251133682382,
-        0.23989999999999997,
-    ],
-    "landing_aim_w_xy_m": [2.3, -0.6650114789147565],
-    "mobility_mode": "no_move",
-    "motion_sha256": CANONICAL_MOTION_SHA256,
-    "physics_sha256": (
-        "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7"
-    ),
-    "profile_sha256": (
-        "ff30739979f76345e0b2fcc370eae6280207201192d68498ce88be725b5c3b39"
-    ),
-    "spin_direction_b_yaw": [0.0, 1.0, 0.0],
-    "spin_magnitude_radps": 0.0,
-    "time_to_contact_s": 1.84,
-}
-CANONICAL_TEACHER_PROJECTION_SHA256 = (
-    "8fa2d28768c870c5dec9e867d598e1b49750f5d9ccc496d90e6980d4bc6de2ae"
-)
-CANONICAL_TEACHER_PROJECTION = {
-    "desired_racket_site_w_m": [
-        0.4992229370660459,
-        0.0022324255145186878,
-        1.0413862765896302,
-    ],
-    "desired_racket_face_center_velocity_w_mps": [
-        1.4995014667510986,
-        -0.258115291595459,
-        0.527797520160675,
-    ],
-    "desired_racket_face_normal_w": [
-        0.8406938314437866,
-        -0.33081427216529846,
-        0.42871421575546265,
-    ],
-    "runtime_target": {
-        "geometry_source_sha256": (
-            "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e"
-        ),
-        "mount_normal_sign": 1,
-        "pre_swing_wait_s": 0.7123799138976297,
-        "racket_command_angular_velocity_w_radps": [
-            0.9587719532128958,
-            0.1573498735067746,
-            -0.8158117388007565,
-        ],
-        "racket_command_quat_wxyz": [
-            0.1198626197378295,
-            -0.6341276706887109,
-            -0.5658849908747452,
-            -0.5131171666970264,
-        ],
-        "racket_face_center_velocity_w_mps": [
-            1.4995014667510986,
-            -0.258115291595459,
-            0.527797520160675,
-        ],
-        "racket_normal_w": [
-            0.8406938314437866,
-            -0.33081427216529846,
-            0.42871421575546265,
-        ],
-        "racket_site_target_w_m": [
-            0.4992229370660459,
-            0.0022324255145186878,
-            1.0413862765896302,
-        ],
-        "racket_site_velocity_w_mps": [
-            1.498485602738144,
-            -0.2575687000540188,
-            0.526709063385955,
-        ],
-        "reaction_margin_s": 0.1,
-        "reference_racket_angular_velocity_w_radps": [
-            0.37466728687286377,
-            0.479988694190979,
-            -1.3601197004318237,
-        ],
-        "reference_racket_quat_wxyz": [
-            0.3626406234330121,
-            -0.7461820926331505,
-            -0.42612779628720443,
-            -0.36072034057028113,
-        ],
-        "reference_racket_site_speed_mps": 1.8900631416182667,
-        "reference_t_cycle_s": 1.12,
-        "reference_t_hit_s": 0.96,
-        "required_racket_site_speed_mps": 1.6091063278459647,
-        "scaled_t_cycle_s": 1.3155567671194324,
-        "scaled_t_hit_s": 1.1276200861023704,
-        "solver_residual_m": 0.00345757813192904,
-        "teacher_rate": 0.8513505672981129,
-        "teacher_rate_max": 1.01,
-        "teacher_rate_min": 0.6,
-    },
-}
 
 
 class FourGridContractError(ValueError):
@@ -747,71 +602,6 @@ def cell_for_family(cell_id: Any, task_family: Any) -> dict:
     return copy.deepcopy(matches[0])
 
 
-def validate_base_question(value: Any, *, motion_sha256: Any) -> dict:
-    """Accept only the committed Take061 fixed counter-rally question."""
-
-    if (
-        type(motion_sha256) is not str
-        or motion_sha256 != CANONICAL_MOTION_SHA256
-        or type(value) is not dict
-        or value != CANONICAL_BASE_QUESTION
-        or canonical_sha256(value) != CANONICAL_BASE_QUESTION_SHA256
-    ):
-        raise FourGridContractError(
-            "base question differs from the canonical Take061 fixed row"
-        )
-    return {
-        "source_tape": copy.deepcopy(CANONICAL_SOURCE_TAPE),
-        "question_sha256": CANONICAL_BASE_QUESTION_SHA256,
-        "question": copy.deepcopy(CANONICAL_BASE_QUESTION),
-    }
-
-
-def validate_teacher_projection(value: Any, *, target_variant: Any) -> dict:
-    """Bind A/C target variants to one exact Take061 teacher projection."""
-
-    expected_variant = {
-        "A211": "current_lm",
-        "C211": "outcome_dense_only",
-    }
-    if (
-        type(target_variant) is not tuple
-        or len(target_variant) != 2
-        or target_variant[0] not in expected_variant
-        or target_variant[1] != expected_variant[target_variant[0]]
-        or type(value) is not dict
-    ):
-        raise FourGridContractError("target variant is not a formal A/C grid variant")
-    projection = {
-        key: copy.deepcopy(value.get(key))
-        for key in (
-            "desired_racket_site_w_m",
-            "desired_racket_face_center_velocity_w_mps",
-            "desired_racket_face_normal_w",
-            "runtime_target",
-        )
-    }
-    if (
-        projection != CANONICAL_TEACHER_PROJECTION
-        or canonical_sha256(projection) != CANONICAL_TEACHER_PROJECTION_SHA256
-    ):
-        raise FourGridContractError(
-            "target variant teacher projection differs from canonical Take061"
-        )
-    return {
-        "target_variant": target_variant[1],
-        "teacher_projection_sha256": CANONICAL_TEACHER_PROJECTION_SHA256,
-        "teacher_projection": copy.deepcopy(CANONICAL_TEACHER_PROJECTION),
-    }
-
-
-if canonical_sha256(CANONICAL_BASE_QUESTION) != CANONICAL_BASE_QUESTION_SHA256:
-    raise RuntimeError("canonical Take061 base-question bytes drifted")
-if (
-    canonical_sha256(CANONICAL_TEACHER_PROJECTION)
-    != CANONICAL_TEACHER_PROJECTION_SHA256
-):
-    raise RuntimeError("canonical Take061 teacher projection drifted")
 # 2026-08-05 重钉(第三次,先算后写):第二轴由探索包换成**本体感观测噪声开关**
 # (exp §5.6.2d)。四格 cell_id 全部改名;探索包(exploration_axis / actor_init_mode /
 # init_noise_std / noise_std_type / four_sigma_hard_inner_gate_applies)从每格 cells[i]

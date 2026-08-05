@@ -624,7 +624,10 @@ def _four_grid_cell(cell_id: str, *, task_family: str) -> dict[str, Any]:
 
 # [已删除 2026-08-05 安全门精简] _base_question_binding(49 行):
 # 只被已退役的 _validate_retired_exact_frame0_lineage 调用, 随之一并退役。
-# 共享题面校验本身仍在 _F.validate_base_question(action_ball_211_four_grid_contract.py)。
+# [订正 2026-08-06] 上面这条此前写作"共享题面校验本身仍在 _F.validate_base_question",
+# 该函数已于本日连同 CANONICAL_BASE_QUESTION 一起删除(无任何生产调用点)。题面的唯一
+# 权威是 tracked 磁带 immutable_n1_tape.v1.1eeccd2aa7b7.json 及其 task receipt;
+# 运行时题面 sha 由 tape 自己算(见 hope_commands 的 question_sha256),不读代码常量。
 
 
 # [已删除 2026-08-05 安全门精简] _selected_tape_variant_binding(37 行):
