@@ -1205,9 +1205,51 @@ def _load_training_contract_module(checkout: Path):
     return module
 
 
+# The emitted ``policy_bootstrap`` ABI is a function of the exploration package,
+# not a free parameter: ``train.py._action_ball_policy_bootstrap_schema_version``
+# stamps 2 for the scalar sigma and 3 for the log sigma on every dynamic-ready
+# bootstrap.  Mirroring that mapping here keeps the caller from being able to ask
+# for a sigma/ABI pair the runtime can never emit.
+_DYNAMIC_READY_BOOTSTRAP_SCHEMA_BY_NOISE_STD_TYPE = {"scalar": 2, "log": 3}
+
+
 def _validate_policy_materialization(
-    value: Any, *, checkout: Path, bundle: Mapping[str, Any]
+    value: Any,
+    *,
+    checkout: Path,
+    bundle: Mapping[str, Any],
+    expected_noise_std_type: str = "log",
+    expected_init_noise_std: float = 0.02,
 ) -> dict[str, Any]:
+    """Bind the emitted PPO recipe to one exact exploration package.
+
+    人话:这道门要的是"发射方声明的探索包"和"运行时真吐出来的探索包"逐字节相等,
+    不是某一个写死的数。默认值仍是本文件自己那台 N1 vendor-v2 诊断用的 log/0.02,
+    所以老调用点一字未改;新的四格发射器把自己 arm 合同里的 sigma 传进来。
+
+    为什么要参数化:2026-08-05 四格把探索包定死成标准 rsl_rl 初始化 + sigma 1.0 +
+    scalar(A211/C211 两格 arm 表和 arm_id 里的 ``sigma1p0`` 都是这么写的),但这里
+    仍然写死 log/0.02。于是 A211 的 recipe 阶段同时被两条互斥的门夹住:先在这里被
+    要求 log/0.02,二十几行后又被 ``_runtime_policy_materialization`` 要求等于
+    arm 的 scalar/1.0。任何一份 recipe 都不可能同时满足,该阶段无法通过。
+    """
+
+    if expected_noise_std_type not in _DYNAMIC_READY_BOOTSTRAP_SCHEMA_BY_NOISE_STD_TYPE:
+        raise LaunchRefused(
+            "expected policy noise_std_type must be scalar or log"
+        )
+    if (
+        type(expected_init_noise_std) not in (int, float)
+        or not math.isfinite(float(expected_init_noise_std))
+        or float(expected_init_noise_std) <= 0.0
+    ):
+        raise LaunchRefused(
+            "expected policy init_noise_std must be one finite positive number"
+        )
+    expected_init_noise_std = float(expected_init_noise_std)
+    expected_bootstrap_schema = _DYNAMIC_READY_BOOTSTRAP_SCHEMA_BY_NOISE_STD_TYPE[
+        expected_noise_std_type
+    ]
     header = _validate_policy_materialization_header(value)
     row = header["document"]
     policy_sha = header["policy_contract_sha256"]
@@ -1274,28 +1316,29 @@ def _validate_policy_materialization(
         or runner_sha != policy_sha
         or runner_payload.get("policy_initialization") != portable_bootstrap
         or type(bootstrap) is not dict
-        or bootstrap.get("schema_version") != 3
+        or bootstrap.get("schema_version") != expected_bootstrap_schema
         or bootstrap.get("action_count") != 1
         or bootstrap.get("action_order") != [ACTION_ID]
         or type(identity) is not dict
         or identity.get("binding_sha256")
         != expected_binding["binding_sha256"]
         or type(initialization) is not dict
-        or initialization.get("noise_std_type") != "log"
+        or initialization.get("noise_std_type") != expected_noise_std_type
         or type(init_noise_std) not in (int, float)
-        or float(init_noise_std) != 0.02
+        or float(init_noise_std) != expected_init_noise_std
         or type(realized_noise_std) not in (int, float)
-        or float(realized_noise_std) != 0.02
+        or float(realized_noise_std) != expected_init_noise_std
     ):
         raise LaunchRefused(
-            "materialized policy is not the exact log-std dynamic-ready N1 contract"
+            "materialized policy is not the exact %s-std dynamic-ready N1 contract"
+            % expected_noise_std_type
         )
     return {
         "artifact": header["artifact"],
         "policy_contract_sha256": policy_sha,
         "dynamic_ready_binding_sha256": expected_binding["binding_sha256"],
-        "noise_std_type": "log",
-        "configured_and_realized_init_noise_std": 0.02,
+        "noise_std_type": expected_noise_std_type,
+        "configured_and_realized_init_noise_std": expected_init_noise_std,
     }
 
 

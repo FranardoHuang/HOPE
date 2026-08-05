@@ -2232,13 +2232,24 @@ def test_runtime_policy_recipe_is_exact_arm_owned_and_no_observed_sha_is_baked(
     path = tmp_path / "policy.json"
     _write(path, document)
 
-    def validate(value, *, checkout, bundle):
+    def validate(
+        value,
+        *,
+        checkout,
+        bundle,
+        expected_noise_std_type,
+        expected_init_noise_std,
+    ):
+        # The borrowed validator must be asked for this arm's exploration
+        # package, not the retired log/0.02 one.
+        assert expected_noise_std_type == arm["noise_std_type"]
+        assert expected_init_noise_std == arm["init_noise_std"]
         return {
             "artifact": dict(value),
             "policy_contract_sha256": document["policy_contract_sha256"],
             "dynamic_ready_binding_sha256": "5" * 64,
-            "noise_std_type": "log",
-            "configured_and_realized_init_noise_std": 0.02,
+            "noise_std_type": expected_noise_std_type,
+            "configured_and_realized_init_noise_std": expected_init_noise_std,
         }
 
     monkeypatch.setattr(launcher._OLD, "_validate_policy_materialization", validate)
@@ -2259,6 +2270,176 @@ def test_runtime_policy_recipe_is_exact_arm_owned_and_no_observed_sha_is_baked(
     with pytest.raises(launcher.LaunchRefused, match="selected A211 PPO arm"):
         launcher._runtime_policy_materialization(
             path=path, checkout=tmp_path, lineage=lineage, arm=arm
+        )
+
+
+def _policy_materialization_bytes(
+    tmp_path, *, noise_std_type, init_noise_std, bootstrap_schema_version
+):
+    """One materialized policy recipe carrying an exact exploration package."""
+
+    portable = {"portable_bootstrap": True}
+    runner = {
+        "policy": {
+            "init_noise_std": init_noise_std,
+            "noise_std_type": noise_std_type,
+        },
+        "policy_initialization": portable,
+    }
+    policy_sha = launcher.canonical_sha256(runner)
+    bootstrap = {
+        "schema_version": bootstrap_schema_version,
+        "action_count": 1,
+        "action_order": [launcher._OLD.ACTION_ID],
+        "ready_source": {"identity": {"binding_sha256": "b" * 64}},
+        "initialization": {
+            "noise_std_type": noise_std_type,
+            "init_noise_std": init_noise_std,
+            "required_realized_init_noise_std": init_noise_std,
+        },
+    }
+    document = {
+        "schema_version": 1,
+        "kind": "action_ball_shared_ready_policy_recipe_materialization_v1",
+        "action_count": 1,
+        "action_order": [launcher._OLD.ACTION_ID],
+        "policy_contract_sha256": policy_sha,
+        "action_ball_ppo_runner_recipe": {
+            "schema_version": 1,
+            "sha256": policy_sha,
+            "recipe": runner,
+        },
+        "policy_bootstrap": bootstrap,
+    }
+    path = tmp_path / ("policy_%s.json" % noise_std_type)
+    digest = _write(path, document)
+    return {"path": str(path), "sha256": digest}, portable
+
+
+def test_borrowed_policy_validator_takes_the_arm_s_sigma_not_the_retired_one(
+    tmp_path, monkeypatch
+):
+    """The A211 recipe stage was unreachable: two gates demanded different sigmas.
+
+    ``_runtime_policy_materialization`` first hands the emitted recipe to the
+    borrowed vendor-v2 validator and then checks the same recipe against the
+    selected arm.  The borrowed validator used to hardcode the retired log-std
+    package (``schema_version`` 3 / ``noise_std_type`` "log" / sigma 0.02) while
+    every A211 arm declares the standard scalar sigma 1.0 package, so no emitted
+    recipe could satisfy both and the stage could never pass.  Nothing here
+    loosens the equality -- the expected package just comes from the hashed arm
+    contract instead of a stale literal.
+    """
+
+    import types
+
+    stub_binding = {"binding_sha256": "b" * 64}
+
+    def _stub_contract_module(checkout):
+        return types.SimpleNamespace(
+            load_action_ball_dynamic_ready_runtime_binding=(
+                lambda **kwargs: stub_binding
+            ),
+            validate_action_ball_policy_bootstrap=(
+                lambda bootstrap, *, expected_action_count: None
+            ),
+            action_ball_policy_bootstrap_scientific_identity=(
+                lambda bootstrap, *, repo_root: {"portable_bootstrap": True}
+            ),
+        )
+
+    monkeypatch.setattr(
+        launcher._OLD, "_load_training_contract_module", _stub_contract_module
+    )
+    bundle = {
+        "core": {
+            "dynamic_ready": {
+                "artifact": {"path": "a", "sha256": "1" * 64},
+                "nominal_hold_receipt": {"path": "b", "sha256": "2" * 64},
+            }
+        },
+        "motion": {"path": "m", "sha256": "3" * 64},
+    }
+
+    # Every A211 arm's declared package now passes the borrowed validator.
+    for arm_id in launcher.ARM_IDS:
+        arm = launcher._arm_contract(arm_id)
+        assert (arm["noise_std_type"], arm["init_noise_std"]) == ("scalar", 1.0)
+        pin, _portable = _policy_materialization_bytes(
+            tmp_path / arm_id,
+            noise_std_type=arm["noise_std_type"],
+            init_noise_std=arm["init_noise_std"],
+            bootstrap_schema_version=2,
+        )
+        validated = launcher._OLD._validate_policy_materialization(
+            pin,
+            checkout=tmp_path,
+            bundle=bundle,
+            expected_noise_std_type=arm["noise_std_type"],
+            expected_init_noise_std=arm["init_noise_std"],
+        )
+        assert validated["noise_std_type"] == arm["noise_std_type"]
+        assert (
+            validated["configured_and_realized_init_noise_std"]
+            == arm["init_noise_std"]
+        )
+
+    # The retired log/0.02 package is still the default, so the vendor-v2
+    # callers that never pass the new keywords keep their exact old gate.
+    log_pin, _ = _policy_materialization_bytes(
+        tmp_path / "log",
+        noise_std_type="log",
+        init_noise_std=0.02,
+        bootstrap_schema_version=3,
+    )
+    defaulted = launcher._OLD._validate_policy_materialization(
+        log_pin, checkout=tmp_path, bundle=bundle
+    )
+    assert defaulted["noise_std_type"] == "log"
+    assert defaulted["configured_and_realized_init_noise_std"] == 0.02
+
+    # The gate is still exact in both directions.
+    with pytest.raises(launcher._OLD.LaunchRefused, match="dynamic-ready N1 contract"):
+        launcher._OLD._validate_policy_materialization(
+            log_pin,
+            checkout=tmp_path,
+            bundle=bundle,
+            expected_noise_std_type="scalar",
+            expected_init_noise_std=1.0,
+        )
+    scalar_pin, _ = _policy_materialization_bytes(
+        tmp_path / "scalar_default",
+        noise_std_type="scalar",
+        init_noise_std=1.0,
+        bootstrap_schema_version=2,
+    )
+    with pytest.raises(launcher._OLD.LaunchRefused, match="dynamic-ready N1 contract"):
+        launcher._OLD._validate_policy_materialization(
+            scalar_pin, checkout=tmp_path, bundle=bundle
+        )
+
+    # The bootstrap ABI is derived from the sigma, never taken on trust.
+    wrong_abi, _ = _policy_materialization_bytes(
+        tmp_path / "wrong_abi",
+        noise_std_type="scalar",
+        init_noise_std=1.0,
+        bootstrap_schema_version=3,
+    )
+    with pytest.raises(launcher._OLD.LaunchRefused, match="dynamic-ready N1 contract"):
+        launcher._OLD._validate_policy_materialization(
+            wrong_abi,
+            checkout=tmp_path,
+            bundle=bundle,
+            expected_noise_std_type="scalar",
+            expected_init_noise_std=1.0,
+        )
+    with pytest.raises(launcher._OLD.LaunchRefused, match="scalar or log"):
+        launcher._OLD._validate_policy_materialization(
+            scalar_pin,
+            checkout=tmp_path,
+            bundle=bundle,
+            expected_noise_std_type="uniform",
+            expected_init_noise_std=1.0,
         )
 
 

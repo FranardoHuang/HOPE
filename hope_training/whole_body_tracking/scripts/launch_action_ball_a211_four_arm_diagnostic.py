@@ -2117,6 +2117,12 @@ def _runtime_policy_materialization(
             {"path": str(path), "sha256": _B.sha256_file(path)},
             checkout=checkout,
             bundle=bundle,
+            # 探索包由本发射器的 arm 合同说了算,不是借来的那份 log/0.02 常量。
+            # arm["noise_std_type"]/arm["init_noise_std"] 已经被 _arm_contract()
+            # 和四格 manifest 对拍过,并且哈希进 arm_contract_sha256,所以这里传的
+            # 是有据可查的声明值;下面 expected_policy 那道门再拿同一对值复核一次。
+            expected_noise_std_type=arm["noise_std_type"],
+            expected_init_noise_std=arm["init_noise_std"],
         )
     except _OLD.LaunchRefused as exc:
         raise LaunchRefused("runtime policy recipe validation failed") from exc
