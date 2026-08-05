@@ -304,6 +304,27 @@ def test_l0n_finalizer_reaches_the_l0_plant_with_the_sensor_on():
     assert not hasattr(env_cfg, train._ACTION_BALL_DR_L0_RUNTIME_ATTR)
 
 
+def test_l0n_inherits_the_same_carrier_gate_as_l0():
+    """L0N 删的是同一批槽,所以它必须共用同一道"载体被点名"闸,不能只护 L0。"""
+
+    train = _load_train_module()
+    env_cfg = _finalizer_env(enable_corruption=False)
+    train._note_authored_event_randomization(
+        env_cfg, "randomize_link_mass", "task.venue_profile.physics.mass_distribution_params"
+    )
+    with pytest.raises(train._OverrideError) as excinfo:
+        train._apply_action_ball_dr_l0n_finalizer(env_cfg, L0N_DR, [])
+    message = str(excinfo.value)
+    assert "DR-L0N" in message
+    assert "events.randomize_link_mass" in message
+    assert not hasattr(env_cfg, train._ACTION_BALL_DR_L0N_RUNTIME_ATTR)
+    # 闸不动 payload:L0N 的 digest 与 L0 的 digest 都保持钉死的值。
+    assert (
+        TC.action_ball_dr_l0n_contract_sha256()
+        == "562d22555018e11e165bdf38a4adaab2d06608772241f0b4e9577ae7783eb10d"
+    )
+
+
 def test_l0_and_l0n_are_mutually_exclusive_resolvers():
     train = _load_train_module()
     assert train._resolve_action_ball_dr_l0_request(L0N_DR) is False

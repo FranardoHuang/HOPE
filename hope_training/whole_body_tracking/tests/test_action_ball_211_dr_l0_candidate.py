@@ -419,6 +419,171 @@ def test_normal_a_c_leaf_retains_material_joint_offset_and_corruption(side: str)
     assert not hasattr(env_cfg, train._ACTION_BALL_DR_L0_RUNTIME_ATTR)
 
 
+# --------------------------------------------------------------------------------------------- #
+# 2026-08-06 载体普查:"关掉这一轴"与"删掉承载常量的 EventTerm"在 IsaacLab 里是同一个动作。
+# 6321db33(关节零点)和 d4bcda22(机器人材质)都是这个形状的下游受害者。下面这一组把它
+# 变成一条通用闸:任何**逐轴点名**的显式随机化配置,若落在 DR-L0/DR-L0N 会删掉的槽上,
+# 必须当场报死,而不是让它被无声吃掉、还在 applied 里留一行假收据。
+# --------------------------------------------------------------------------------------------- #
+_DR_L0_TUPLE = {
+    "stable_ready_plant": True,
+    "startup_physics_material": False,
+    "startup_joint_default_pos": False,
+    "policy_observation_corruption": False,
+}
+_DR_L0N_TUPLE = dict(_DR_L0_TUPLE, policy_observation_corruption=True)
+_VENUE_PROFILE = "franco_rig_20260725"
+
+
+def _plant_carrier_env():
+    """A finalizer env whose two authorable plant events still carry real params."""
+
+    env_cfg = _finalizer_env()
+    env_cfg.events.physics_material = types.SimpleNamespace(
+        params={
+            "static_friction_range": (1.0, 1.0),
+            "dynamic_friction_range": (1.0, 1.0),
+            "restitution_range": (0.0, 0.0),
+        }
+    )
+    env_cfg.events.randomize_link_mass = types.SimpleNamespace(
+        params={"mass_distribution_params": (1.0, 1.0)}
+    )
+    return env_cfg
+
+
+@pytest.mark.parametrize(
+    "slot", ("physics_material", "add_joint_default_pos", "randomize_link_mass")
+)
+@pytest.mark.parametrize("level", ("L0", "L0N"))
+def test_dr_l0_refuses_to_delete_an_authored_randomization_carrier(slot, level):
+    train = _load_train_module()
+    env_cfg = _finalizer_env()
+    train._note_authored_event_randomization(env_cfg, slot, "task.some_explicit_key")
+    finalizer = (
+        train._apply_action_ball_dr_l0_finalizer
+        if level == "L0"
+        else train._apply_action_ball_dr_l0n_finalizer
+    )
+    dr = _DR_L0_TUPLE if level == "L0" else _DR_L0N_TUPLE
+    with pytest.raises(train._OverrideError) as excinfo:
+        finalizer(env_cfg, dr, [])
+    message = str(excinfo.value)
+    assert f"events.{slot}" in message
+    assert "task.some_explicit_key" in message
+    # 门是双向的:既没有替 DR-L0 保留随机化,也没有默默丢掉作者的键。
+    assert env_cfg.events.physics_material is not None
+    assert not hasattr(env_cfg, train._ACTION_BALL_DR_L0_RUNTIME_ATTR)
+    assert not hasattr(env_cfg, train._ACTION_BALL_DR_L0N_RUNTIME_ATTR)
+
+
+def test_ledger_only_covers_slots_the_dr_l0_finalizer_actually_deletes():
+    train = _load_train_module()
+    env_cfg = _finalizer_env()
+    # 不在 DR-L0 删除名单上的槽记了账也不该触发冲突(闸只管它自己删掉的那些)。
+    train._note_authored_event_randomization(
+        env_cfg, "some_unrelated_event", "task.other"
+    )
+    assert train._authored_event_randomization_conflicts(env_cfg) == {}
+    assert train._apply_action_ball_dr_l0_finalizer(env_cfg, _DR_L0_TUPLE, []) is True
+
+
+def test_venue_profile_authored_plant_axes_become_a_loud_dr_l0_conflict():
+    """The venue profile writes into two carriers DR-L0 then deletes."""
+
+    train = _load_train_module()
+    env_cfg = _plant_carrier_env()
+    applied = []
+    assert (
+        train._apply_venue_profile_task_override(
+            env_cfg, {"venue_profile": _VENUE_PROFILE}, applied
+        )
+        is not None
+    )
+    # 这两行 applied 就是会变成假话的收据:范围写进去了,随后整段事件被删掉。
+    assert any(
+        "events.physics_material.params.static_friction_range" in line
+        for line in applied
+    )
+    assert any(
+        "events.randomize_link_mass.params.mass_distribution_params" in line
+        for line in applied
+    )
+    conflicts = train._authored_event_randomization_conflicts(env_cfg)
+    assert set(conflicts) == {"physics_material", "randomize_link_mass"}
+    with pytest.raises(train._OverrideError, match="task.venue_profile"):
+        train._apply_action_ball_dr_l0_finalizer(env_cfg, _DR_L0_TUPLE, [])
+    with pytest.raises(train._OverrideError, match="task.venue_profile"):
+        train._apply_action_ball_dr_l0n_finalizer(env_cfg, _DR_L0N_TUPLE, [])
+
+
+def test_plant_authored_robot_material_becomes_a_loud_dr_l0_conflict():
+    train = _load_train_module()
+    env_cfg = _plant_carrier_env()
+    applied = []
+    train._apply_ground_plant_task_override(
+        env_cfg,
+        {"robot_material_static_friction_range": [0.5, 1.0]},
+        applied,
+    )
+    assert train._authored_event_randomization_conflicts(env_cfg) == {
+        "physics_material": ["task.plant.robot_material_static_friction_range"]
+    }
+    # d4bcda22 的指纹侧闸没有被替换,它仍旧独立成立。
+    assert getattr(
+        env_cfg, train._GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR
+    ) is True
+    with pytest.raises(train._OverrideError, match="task.plant.robot_material"):
+        train._apply_action_ball_dr_l0_finalizer(env_cfg, _DR_L0_TUPLE, [])
+
+
+@pytest.mark.parametrize("side", ("A", "C"))
+def test_inherited_platform_gain_and_mass_defaults_are_not_a_conflict(side: str):
+    """`stable_ready_plant=true` turning off the inherited axes is declared semantics.
+
+    HOPEPingPongActionBall.yaml hands every ActionBall leaf link_mass_range /
+    kp_gain_range / kd_gain_range and says in writing that an exact-N1 diagnostic may
+    add ``stable_ready_plant=true`` to switch both gain axes off together.  That is a
+    platform default being overridden, not a per-axis request being swallowed, so the
+    new carrier gate must stay silent about it or every DR-L0 launch dies.
+    """
+
+    train = _load_train_module()
+    hydra = pytest.importorskip("hydra")
+    leaf_name, _parent_name, _actor_contract = LEAVES[side]
+    with hydra.initialize_config_dir(
+        version_base=None,
+        config_dir=str((ROOT / "cfg").resolve()),
+    ):
+        task = hydra.compose(
+            config_name="train", overrides=[f"task={leaf_name}"]
+        ).task
+
+    dr = task.domain_rand
+    assert dr.link_mass_range is not None
+    assert dr.kp_gain_range is not None
+    assert dr.kd_gain_range is not None
+    env_cfg = _finalizer_env()
+    assert train._apply_action_ball_dr_l0_finalizer(env_cfg, dr, []) is True
+    assert train._authored_event_randomization_conflicts(env_cfg) == {}
+
+
+def test_carrier_gate_does_not_move_the_pinned_dr_l0_identity():
+    """The ledger is an env_cfg-private attribute, never a contract byte."""
+
+    train = _load_train_module()
+    payload = train._action_ball_dr_l0_contract_payload()
+    assert train._AUTHORED_EVENT_RANDOMIZATION_ATTR not in payload
+    assert (
+        TC.action_ball_dr_l0_contract_sha256()
+        == "fd22321e3371a81b1f979dc4ecfb79e76c44c8d7734fffb2eebdc92620cb7ed9"
+    )
+    assert (
+        TC.action_ball_dr_l0n_contract_sha256()
+        == "562d22555018e11e165bdf38a4adaab2d06608772241f0b4e9577ae7783eb10d"
+    )
+
+
 _JOINT_NAMES = [f"joint_{index:02d}" for index in range(31)]
 
 

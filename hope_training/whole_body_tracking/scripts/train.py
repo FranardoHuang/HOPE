@@ -11523,6 +11523,70 @@ _ACTION_BALL_DR_L0_TARGET_ZERO_FIELDS = (
     "target_bias_per_swing",
 )
 
+# 2026-08-06 普查产物:"这一档 DR 把某个事件整个删掉"与"配方点名要在那个事件上随机化"
+# 是不能同时成立的两件事。DR-L0/DR-L0N 的定义就是把 _ACTION_BALL_DR_L0_EVENT_SLOTS 里的
+# 槽置 None,而 finalizer 跑在所有 task 覆写之后 —— 于是任何先写进这些槽的显式配置都会被
+# 无声吃掉,run 记录里还留着一行"我写了"的假收据。这本账把"谁点名要过哪个槽"记下来,
+# finalizer 删槽之前逐个对照,冲突就当场报死。
+#
+# 【不】记账的是 task.domain_rand.link_mass_range / kp_gain_range / kd_gain_range:那三个键
+# 由 cfg/base/randomization_base.yaml 与 HOPEPingPongActionBall.yaml 作为平台默认继承下来,
+# 而 HOPEPingPongActionBall.yaml 明写"exact-N1 diagnostic 可以加 stable_ready_plant=true,
+# train.py 于是把两根增益轴一起关掉"。那是已声明的语义,applied 里也逐条记了关闭动作,
+# 不是冲突。记账只针对**逐轴点名**的显式来源(task.plant.robot_material_* / task.venue_profile)。
+#
+# 这本账是 env_cfg 上的私有属性,不进 payload、不进合同 —— DR-L0/DR-L0N 的 identity 与
+# contract sha256 一个字节都不动。
+_AUTHORED_EVENT_RANDOMIZATION_ATTR = "_action_ball_authored_event_randomization"
+
+
+def _note_authored_event_randomization(env_cfg, slot: str, source: str) -> None:
+    """Record that a config explicitly authored randomization on ``events.<slot>``."""
+
+    ledger = getattr(env_cfg, _AUTHORED_EVENT_RANDOMIZATION_ATTR, None)
+    if not isinstance(ledger, dict):
+        ledger = {}
+        setattr(env_cfg, _AUTHORED_EVENT_RANDOMIZATION_ATTR, ledger)
+    sources = ledger.setdefault(slot, [])
+    if source not in sources:
+        sources.append(source)
+
+
+def _authored_event_randomization_conflicts(env_cfg, slots=None) -> dict:
+    """Return {slot: [sources]} for authored axes the caller is about to delete."""
+
+    ledger = getattr(env_cfg, _AUTHORED_EVENT_RANDOMIZATION_ATTR, None)
+    if not isinstance(ledger, dict):
+        return {}
+    if slots is None:
+        slots = _ACTION_BALL_DR_L0_EVENT_SLOTS
+    return {slot: sorted(ledger[slot]) for slot in slots if ledger.get(slot)}
+
+
+def _require_no_authored_randomization_on_removed_events(
+    env_cfg, level: str, slots=None
+) -> None:
+    """Refuse to delete an event slot whose randomization the recipe named on purpose.
+
+    人话:这是 6321db33 / d4bcda22 那一族毛病的通用闸。"关掉这一轴"和"删掉承载常量的
+    结构"在 IsaacLab 的 EventTerm 上是同一个动作,所以只要有人显式点名过某个槽的随机化,
+    DR-L0/DR-L0N 再把该槽删掉,作者要的东西就凭空消失了 —— 而且中途还往 applied 里写了
+    一行"已写入"的假收据。这里不放宽任何一侧:既不替 DR-L0 保留随机化(那就不是 L0 了),
+    也不默默丢掉作者的配置,而是让这对组合成为一个说得清的配置冲突。
+    """
+
+    conflicts = _authored_event_randomization_conflicts(env_cfg, slots)
+    if not conflicts:
+        return
+    detail = "; ".join(
+        f"events.{slot} <- {', '.join(sources)}" for slot, sources in conflicts.items()
+    )
+    raise _OverrideError(
+        f"[train.py] ActionBall {level} deletes the event slots that carry these "
+        f"explicitly authored randomizations, which would silently discard them: "
+        f"{detail}. Drop those keys or pick a DR level that keeps the events."
+    )
+
 
 def _action_ball_dr_l0_contract_payload() -> dict:
     """Return the canonical all-off state bound into checkpoints/normalizers."""
@@ -11924,6 +11988,7 @@ def _apply_action_ball_dr_l0n_finalizer(env_cfg, dr, applied) -> bool:
 
     if not _resolve_action_ball_dr_l0n_request(dr):
         return False
+    _require_no_authored_randomization_on_removed_events(env_cfg, "DR-L0N")
     _contract = _training_contract_module()
     ACTION_BALL_DR_L0N_IDENTITY = _contract.ACTION_BALL_DR_L0N_IDENTITY
     channels = _contract.ACTION_BALL_DR_L0N_PROPRIO_NOISE_CHANNELS
@@ -12372,6 +12437,7 @@ def _apply_action_ball_dr_l0_finalizer(env_cfg, dr, applied) -> bool:
 
     if not _resolve_action_ball_dr_l0_request(dr):
         return False
+    _require_no_authored_randomization_on_removed_events(env_cfg, "DR-L0")
     events = getattr(env_cfg, "events", None)
     _require(events is not None, "events (ActionBall DR-L0 finalizer)")
     for name in _ACTION_BALL_DR_L0_EVENT_SLOTS:
@@ -13775,6 +13841,9 @@ def _apply_ground_plant_task_override(env_cfg, plant, applied):
         )
         params[param] = (lo, hi)
         setattr(env_cfg, _GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR, True)
+        _note_authored_event_randomization(
+            env_cfg, "physics_material", f"task.plant.{key}"
+        )
         applied.append(f"events.physics_material.params.{param}=({lo}, {hi})")
 
     # 2.5) 静/动摩擦物理一致性(2026-07-29)。人话:isaaclab 的材质随机化默认静、动独立采样,
@@ -13796,6 +13865,11 @@ def _apply_ground_plant_task_override(env_cfg, plant, applied):
             )
             params["make_consistent"] = True
             setattr(env_cfg, _GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR, True)
+            _note_authored_event_randomization(
+                env_cfg,
+                "physics_material",
+                "task.plant.robot_material_make_consistent",
+            )
             applied.append(
                 "events.physics_material.params.make_consistent=True "
                 "(逐桶 dynamic=min(static, dynamic),动摩擦不再超过静摩擦)"
@@ -14086,6 +14160,12 @@ def _apply_venue_profile_task_override(env_cfg, task, applied):
         )
         value = tuple(physics[profile_key])
         material_params[profile_key] = value
+        # 2026-08-06:场地档案是逐轴点名的显式来源。DR-L0/DR-L0N 随后会把整个
+        # events.physics_material 删掉,那样这行 applied 就是一句假话,所以记账,
+        # 由 finalizer 把这对组合判成配置冲突。
+        _note_authored_event_randomization(
+            env_cfg, "physics_material", f"task.venue_profile.physics.{profile_key}"
+        )
         applied.append(f"events.physics_material.params.{profile_key}={value} ({tag})")
     link_mass = None if events is None else getattr(events, "randomize_link_mass", None)
     link_mass_params = None if link_mass is None else getattr(link_mass, "params", None)
@@ -14095,6 +14175,11 @@ def _apply_venue_profile_task_override(env_cfg, task, applied):
     )
     mass_value = tuple(physics["mass_distribution_params"])
     link_mass_params["mass_distribution_params"] = mass_value
+    _note_authored_event_randomization(
+        env_cfg,
+        "randomize_link_mass",
+        "task.venue_profile.physics.mass_distribution_params",
+    )
     applied.append(
         f"events.randomize_link_mass.params.mass_distribution_params={mass_value} ({tag})"
     )
@@ -17380,6 +17465,15 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     "[train.py] stable-ready ActionBall plant cannot disable "
                     f"the required DR axes; missing event slots={missing_events}"
                 )
+            # 2026-08-06:stable_ready_plant 也是"关轴 == 删事件"的一个入口,而且它比
+            # DR-L0 finalizer 更早跑。继承来的 link_mass_range/kp_gain_range/kd_gain_range
+            # 是平台默认(HOPEPingPongActionBall.yaml 明写这个开关会一起关掉它们),不算
+            # 冲突;逐轴点名的显式来源(task.venue_profile 等)被这里删掉就是无声吞配置。
+            _require_no_authored_randomization_on_removed_events(
+                env_cfg,
+                "task.domain_rand.stable_ready_plant=true",
+                slots=required_events,
+            )
             E.base_com = None
             E.randomize_link_mass = None
             applied.append(
