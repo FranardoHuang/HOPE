@@ -1466,6 +1466,47 @@ outcome/scheduler/reward 全部加回。当前 successor 已有本地 v4 `73/73`
 retarget/materialize/FK-audit 闭环和新 reward static/counterfactual Gate，但机械准入已发现超速/限位
 反例，且尚未进入完整球任务的 exact Isaac boot/学习门。
 
+### 9.2.0 mjlab/mujoco-warp 实测（2026-08-05，pod1 GPU2）
+
+按 Franco 2026-08-05 裁定，MuJoCo 走 mjlab、CPU 顺序实现不再作为通往 `4096` 的路径。本节是**实测**，
+不是估算。环境：driver `590.48.01`，`3x RTX 5090`（sm_120 Blackwell），独立 venv
+`/workspace/mjlab_venv`（py3.12，未污染 `hope_isaac_venv`）。装的是
+`mjlab 1.5.3` + `mujoco 3.10.0` + `mujoco-warp 3.10.0.3` + `warp-lang 1.16.0` + `torch 2.13.0+cu130`。
+**sm_120 不是阻塞**：torch 的 `arch_list` 已含 `sm_120`。
+
+| 项 | 实测 |
+| --- | ---: |
+| 本仓 `a3_pingpong.xml`，`nworld=4096` | **`3,954,523` steps/s**（realtime `3,955x`） |
+| mjlab 完整 PPO 端到端（`4096` env，含推理与学习） | **`196,329` env-step/s**，`0.50 s`/iteration |
+| 显存（`4096` humanoid） | `758 MiB` / `32,607 MiB` |
+| 对照：Isaac A 轨迹（§8.1，`512 env x 24`） | `3,931` env-step/s |
+
+即 **mjlab 端到端吞吐约为当前 Isaac 轨迹的 `50` 倍**。另外确认：阻挡 `4096` 的
+`MAX_EXECUTE_ENVS=64` 纯粹是旧纯 Python 顺序循环的产物，与授权门、与 MuJoCo 本身都无关。
+
+**确定性：实测不成立，且比 §14 预估更糟。** 同一进程、同一初始态、同一串固定 `ctrl`、全程零 RNG、
+背靠背两次 rollout：
+
+| 模型 | 逐位相同 | 发散世界 | `max abs(dqpos)` |
+| --- | --- | ---: | ---: |
+| `humanoid` | 否 | `1024/1024` | `1.6e-05` |
+| 本仓 `a3_pingpong` | 否 | `959/1024` | `1.4e-08` |
+| **`pendula`（无接触）** | 否 | `1007/1024` | `1.4e-05` |
+
+跨进程 `sha256(qpos|qvel)` 亦不同。**`pendula` 那一行是关键**：完全没有接触也发散，说明它不在
+接触/约束求解路径上，而是 smooth-dynamics kernel 中浮点累加顺序不结合导致的**结构性**不确定；
+调模型、关接触、降 solver 迭代都绕不过，且 mujoco-warp **无 CPU 回退**可供对拍。
+
+**因此 exact-resume 与精确课程续跑在 mujoco-warp 下不成立**：seed 给出的是分布而非轨迹。
+本文 §9.2 原本就把 MuJoCo 验收分成 Tier-1（question/curriculum/receipt/ABI/action identity 要求 exact）
+与 Tier-2（Warp/GPU 物理轨迹只要求统计等价）——现在这条分层由实测坐实，并须补上：
+Tier-2 的复现口径改为 **N-seed 统计带**，checkpoint 续跑必须**容忍轨迹漂移**，
+不得再要求逐 tick bitwise parity。§9.1 的独立性门（`fresh seeds >= 3`）与该口径同源，可复用。
+
+判断：以 `50x` 吞吐换逐位复现，在当前阶段**值得**——我们尚未观测到任何一次接触，需要的是迭代速度；
+而 exact-resume 本就未闭合（§12 的 `RESET-TERMINATION-RESUME` 仍为 `IN_PROGRESS`，只允许声称
+reset-boundary resume）。真正要改的是**验收口径**，不是放弃该路线。
+
 ### 9.2 MuJoCo 顺序
 
 - **MuJoCo core 现在并行做**：pin mjlab/runtime，实现 MJCF/scene/plant、action/delay、deterministic
