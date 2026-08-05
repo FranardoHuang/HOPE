@@ -572,6 +572,87 @@ def test_train_bootstrap_source_requires_event_absence_only_for_dr_l0(monkeypatc
         )
 
 
+def _nominal_env(torch, *, rows, startup_event=None, nominal=None):
+    """One fake env whose robot carries a per-environment default_joint_pos."""
+
+    data = types.SimpleNamespace(default_joint_pos=torch.stack(rows))
+    if nominal is not None:
+        data.default_joint_pos_nominal = nominal
+    return types.SimpleNamespace(
+        cfg=types.SimpleNamespace(
+            events=types.SimpleNamespace(add_joint_default_pos=startup_event)
+        ),
+        scene={"robot": types.SimpleNamespace(data=data)},
+    )
+
+
+def test_dr_l0_publishes_the_nominal_joint_zero_its_finalizer_removed():
+    """DR-L0 removes the only carrier of ``default_joint_pos_nominal``.
+
+    ``events.randomize_joint_default_pos`` stores the nominal row *before* it
+    randomizes, so deleting the whole event term -- which is exactly what the
+    DR-L0/L0N finalizers do -- deletes the measurement along with the
+    randomization and leaves ``runtime_execution_facts`` with nothing to write
+    into the schema-3 deploy decoder.  The publication below must reproduce the
+    removed event's bytes, and must refuse whenever it cannot prove row 0 is
+    still nominal.
+    """
+
+    torch = pytest.importorskip("torch")
+    train = _load_train_module()
+    row = torch.arange(31, dtype=torch.float64) / 100.0
+
+    # Non-DR-L0 leaves keep their real startup capture; nothing is published.
+    sampled = _nominal_env(torch, rows=[row, row], startup_event=object())
+    assert (
+        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
+            sampled, dr_l0_zero_decoder=False
+        )
+        is False
+    )
+    assert not hasattr(sampled.scene["robot"].data, "default_joint_pos_nominal")
+
+    # DR-L0: the published bytes are the removed event's own clone of row 0.
+    env = _nominal_env(torch, rows=[row, row, row])
+    assert (
+        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
+            env, dr_l0_zero_decoder=True
+        )
+        is True
+    )
+    published = env.scene["robot"].data.default_joint_pos_nominal
+    assert torch.equal(published, row)
+    assert published.data_ptr() != env.scene["robot"].data.default_joint_pos.data_ptr()
+
+    # An existing real capture always outranks the fallback.
+    other = row + 1.0
+    kept = _nominal_env(torch, rows=[row, row], nominal=other)
+    assert (
+        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
+            kept, dr_l0_zero_decoder=True
+        )
+        is False
+    )
+    assert torch.equal(kept.scene["robot"].data.default_joint_pos_nominal, other)
+
+    # The randomizer being present contradicts the zero-delta declaration.
+    with pytest.raises(
+        RuntimeError, match="requires events.add_joint_default_pos=None"
+    ):
+        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
+            _nominal_env(torch, rows=[row, row], startup_event=object()),
+            dr_l0_zero_decoder=True,
+        )
+
+    # A per-environment spread means row 0 is not nominal: refuse, never guess.
+    perturbed = _nominal_env(torch, rows=[row, row + 1.0e-9])
+    with pytest.raises(RuntimeError, match="differs across environments"):
+        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
+            perturbed, dr_l0_zero_decoder=True
+        )
+    assert not hasattr(perturbed.scene["robot"].data, "default_joint_pos_nominal")
+
+
 def test_runtime_contract_reopens_all_off_state_and_binds_fresh_lineage():
     train = _load_train_module()
     env_cfg = _finalizer_env()

@@ -7429,6 +7429,66 @@ def _action_ball_policy_bootstrap_schema_version(
     )
 
 
+def _action_ball_publish_dr_l0_nominal_default_joint_pos(
+    env, *, dr_l0_zero_decoder: bool
+) -> bool:
+    """Publish the nominal joint zero that DR-L0 removed the carrier for.
+
+    人话: schema-3 部署解码器要的 ``default_joint_pos_nominal`` 是"没被随机化过的
+    关节零点"。全仓它只有一个产地 —— startup 事件 ``add_joint_default_pos``
+    (``events.randomize_joint_default_pos`` 的第一行副作用先存一份 nominal,
+    之后才去加 ±0.01 rad)。采集是导出用的测量,随机化才是 DR;可它俩长在同一个
+    事件里,于是 DR-L0/L0N 的 finalizer 把整条事件摘掉时,连采集一起摘没了,
+    ``runtime_execution_facts`` 当场缺料。
+
+    这里不是放宽那道门 —— ``runtime_execution_facts`` 的 ``hasattr`` 检查一字未动。
+    这里是补上缺掉的采集,并且只在能自证"没有任何东西动过关节零点"时才补:
+
+    1. ``dr_l0_zero_decoder`` 为真,即 finalizer 已判定这是完整的全关元组;
+    2. ``events.add_joint_default_pos`` 确实是 ``None``(随机化真的不在场);
+    3. 已经有采集就原样保留,绝不覆盖真实采集;
+    4. ``default_joint_pos`` 每一行逐字节相同 —— 只要有任何来源做过 per-env 扰动,
+       第 0 行就不再是 nominal,这时宁可当场拒绝,也不把被扰动的值冒充成 nominal。
+
+    满足这四条时 ``default_joint_pos[0]`` 与被摘掉的事件会存下的那份字节相同,
+    取的也是同一个下标、同一个 clone,不是另算一个近似值。
+    """
+
+    if not dr_l0_zero_decoder:
+        return False
+
+    import torch
+
+    robot = env.scene["robot"]
+    data = robot.data
+    if hasattr(data, "default_joint_pos_nominal"):
+        # A real startup capture already ran; its bytes outrank anything here.
+        return False
+    startup_event = getattr(
+        getattr(env.cfg, "events", None), "add_joint_default_pos", None
+    )
+    if startup_event is not None:
+        raise RuntimeError(
+            "DR-L0 nominal-pose publication requires "
+            "events.add_joint_default_pos=None"
+        )
+    default_joint_pos = data.default_joint_pos
+    if getattr(default_joint_pos, "ndim", 0) != 2 or default_joint_pos.shape[0] < 1:
+        raise RuntimeError(
+            "robot.data.default_joint_pos is not a per-environment joint matrix; "
+            "the DR-L0 nominal joint zero cannot be published"
+        )
+    nominal = default_joint_pos[0]
+    if not bool(torch.equal(default_joint_pos, nominal.expand_as(default_joint_pos))):
+        raise RuntimeError(
+            "DR-L0 declares an exact zero startup joint-default delta, but the "
+            "live robot.data.default_joint_pos differs across environments; "
+            "something randomized the joint zero and row 0 is not nominal"
+        )
+    data.default_joint_pos_nominal = torch.clone(nominal)
+    return True
+
+
 def _action_ball_startup_offset_decoder_contract(
     env, joint_names, *, dr_l0_zero_decoder: bool
 ) -> dict:
@@ -7647,6 +7707,9 @@ def _action_ball_policy_bootstrap_contract(
             )
         shared_ready = physical_ready_tensor
 
+    _action_ball_publish_dr_l0_nominal_default_joint_pos(
+        env, dr_l0_zero_decoder=dr_l0_zero_decoder
+    )
     runtime_facts = runtime_execution_facts(env, actor_contract)
     joint_names = list(runtime_facts["joint_names"])
     default_q = list(runtime_facts["default_joint_pos"])
