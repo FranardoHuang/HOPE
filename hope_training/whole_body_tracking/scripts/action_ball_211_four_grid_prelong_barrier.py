@@ -104,15 +104,15 @@ EXPECTED_RUNTIME_SAFETY_WEIGHTS = {
     )
 }
 AUTHORIZED_LAYOUT = {
-    # 2026-08-05 第二轴改版(exp §5.6.2c):cell_id 随之改名,GPU 布局本身未变——
+    # 2026-08-05 第二轴改版(第二次,exp §5.6.2d):cell_id 随轴改名,GPU 布局本身未变——
     # A 对同卡 gpu0、C 对同卡 gpu1、gpu2 留给 MuJoCo,不占用。
     "gpu0": [
-        "A0-base-safety-zero-weight-bootstrap-sigma0p1",
-        "A1-base-safety-standard-init-sigma1p0",
+        "A0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off",
+        "A1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on",
     ],
     "gpu1": [
-        "C0-base-safety-zero-weight-bootstrap-sigma0p1",
-        "C1-base-safety-standard-init-sigma1p0",
+        "C0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off",
+        "C1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on",
     ],
     "gpu2": "reserved_for_mujoco",
     "legacy_vendor_v2_same_gpu": "prohibited_after_transition_drain",

@@ -55,20 +55,21 @@ def test_a211_c211_share_one_exact_sealed_four_grid_manifest():
     assert seal == A.canonical_sha256(unsigned) == C.canonical_sha256(unsigned)
     assert seal == F.CONTENT_SHA256
     assert manifest["cell_order"] == [
-        A.A_BOOTSTRAP_CELL_ID,
-        A.A_STANDARD_INIT_CELL_ID,
-        C.C_BOOTSTRAP_CELL_ID,
-        C.C_STANDARD_INIT_CELL_ID,
+        A.A_OBS_NOISE_OFF_CELL_ID,
+        A.A_OBS_NOISE_ON_CELL_ID,
+        C.C_OBS_NOISE_OFF_CELL_ID,
+        C.C_OBS_NOISE_ON_CELL_ID,
     ]
     assert A.ARM_IDS == tuple(manifest["cell_order"][:2])
     assert C.RECIPE_IDS == tuple(manifest["cell_order"][2:])
-    # 2026-08-05:第二轴由 PPO schedule 换成探索包(exp §5.6.2c)。
+    # 2026-08-05(第二次改版):第二轴由探索包换成本体感观测噪声开关(exp §5.6.2d)。
     assert manifest["registered_difference_axes"] == [
         "task_semantics_and_reward",
-        "actor_initialization_and_exploration_sigma_cell",
+        "policy_observation_corruption_cell",
     ]
     assert manifest["deferred_difference_axes"] == [
-        "ppo_learning_rate_schedule_cell"
+        "ppo_learning_rate_schedule_cell",
+        "actor_initialization_and_exploration_sigma_cell",
     ]
     assert manifest["adaptive_term_disambiguation"] == {
         "adaptive_means": "ppo_kl_learning_rate_schedule",
@@ -77,9 +78,18 @@ def test_a211_c211_share_one_exact_sealed_four_grid_manifest():
         "init_noise_std_is": (
             "static_ppo_action_distribution_initialization_not_a_controller"
         ),
+        "policy_observation_corruption_is": (
+            "sensor_side_observation_noise_owned_by_the_dr_level_not_the_ppo_recipe"
+        ),
     }
-    assert manifest["schema_version"] == 3
-    assert manifest["kind"].endswith("_v3")
+    assert manifest["schema_version"] == 4
+    assert manifest["kind"].endswith("_v4")
+    # cell_id 必须自陈真实变量:四格都写着标准初始化 + sigma1p0,噪声开关一off一on。
+    for cell_id in manifest["cell_order"]:
+        assert "standard-init-sigma1p0" in cell_id
+        assert "zero-weight-bootstrap" not in cell_id
+    assert sum("proprio-obs-noise-off" in cell_id for cell_id in manifest["cell_order"]) == 2
+    assert sum("proprio-obs-noise-on" in cell_id for cell_id in manifest["cell_order"]) == 2
 
 
 def test_four_grid_actor_init_mode_literals_match_the_runtime_contract():
@@ -100,16 +110,108 @@ def test_four_grid_actor_init_mode_literals_match_the_runtime_contract():
     )
 
 
+def test_four_grid_dr_level_literals_match_the_runtime_contract():
+    """人话:四格权威里那两个 DR 档身份必须和 training_contract 真正解析出来的一字不差。"""
+
+    runtime = _load_training_contract()
+    assert (
+        F.DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+        == runtime.action_ball_dr_l0_contract_payload()["identity"]
+    )
+    assert (
+        F.DR_LEVEL_IDENTITY_OBS_NOISE_ON
+        == runtime.ACTION_BALL_DR_L0N_IDENTITY
+        == runtime.action_ball_dr_l0n_contract_payload()["identity"]
+    )
+    # 通道表也是手抄副本,同样不许漂。
+    assert (
+        F.PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS
+        == runtime.ACTION_BALL_DR_L0N_PROPRIO_NOISE_CHANNELS
+    )
+    # 这一档只准是"L0 + 传感器":plant 那半边必须逐字节相同。
+    l0 = runtime.action_ball_dr_l0_contract_payload()
+    l0n = runtime.action_ball_dr_l0n_contract_payload()
+    for key in set(l0) | set(l0n):
+        if key in runtime.ACTION_BALL_DR_L0N_DECLARED_DIFFERENCES:
+            continue
+        assert l0[key] == l0n[key], key
+    assert l0["policy_observation_corruption"] is False
+    assert l0n["policy_observation_corruption"] is True
+    assert (
+        l0n["proprioceptive_observation_noise"]["task_channel_observation_noise"]
+        is False
+    )
+
+
+def test_observation_noise_package_cross_lock_rejects_every_half_set():
+    """开关 / 通道表 / DR 身份 / 任务通道无噪必须整包对上,任一处半套都拒。"""
+
+    good = F.manifest()["cells"]
+    off = next(row for row in good if not row["policy_observation_corruption"])
+    on = next(row for row in good if row["policy_observation_corruption"])
+    assert F.validate_observation_noise_package(off)[
+        "proprioceptive_observation_noise_channels"
+    ] is None
+    assert F.validate_observation_noise_package(on)[
+        "proprioceptive_observation_noise_channels"
+    ] == F.PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS
+    off_mutations = (
+        # 只把布尔翻成 true 而不给通道表 / 不换 DR 身份 -> 拒
+        lambda row: row.__setitem__("policy_observation_corruption", True),
+        lambda row: row.__setitem__(
+            "dr_level_identity", F.DR_LEVEL_IDENTITY_OBS_NOISE_ON
+        ),
+        lambda row: row.__setitem__(
+            "proprioceptive_observation_noise_channels",
+            copy.deepcopy(F.PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS),
+        ),
+        # 任务通道加噪 -> 拒(改支撑集 = 换题)
+        lambda row: row.__setitem__("task_channel_observation_noise", True),
+        lambda row: row.__setitem__("observation_noise_axis", "unregistered"),
+    )
+    for mutate in off_mutations:
+        candidate = copy.deepcopy(off)
+        mutate(candidate)
+        with pytest.raises(F.FourGridContractError):
+            F.validate_observation_noise_package(candidate)
+    on_mutations = (
+        lambda row: row.__setitem__("policy_observation_corruption", False),
+        lambda row: row.__setitem__(
+            "dr_level_identity", F.DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+        ),
+        lambda row: row.__setitem__(
+            "proprioceptive_observation_noise_channels", None
+        ),
+        lambda row: row.__setitem__("task_channel_observation_noise", True),
+        # 偷偷放宽某一路的幅度 -> 拒
+        lambda row: row["proprioceptive_observation_noise_channels"].__setitem__(
+            "joint_vel", [-5.0, 5.0]
+        ),
+        # 偷偷多加一路(比如给任务通道之外的 base 线速度加噪)-> 拒
+        lambda row: row["proprioceptive_observation_noise_channels"].__setitem__(
+            "actual_base_pose_lin_vel_world", [-0.1, 0.1]
+        ),
+        # 少一路 -> 拒
+        lambda row: row["proprioceptive_observation_noise_channels"].pop("joint_pos"),
+    )
+    for mutate in on_mutations:
+        candidate = copy.deepcopy(on)
+        mutate(candidate)
+        with pytest.raises(F.FourGridContractError):
+            F.validate_observation_noise_package(candidate)
+
+
 def test_exploration_package_cross_lock_rejects_every_half_set():
     """初始化方式 / sigma / std 参数化 / 4σ 门开关必须整包对上,任一处半套都拒。"""
 
-    good = F.manifest()["cells"]
-    zero_weight = next(
-        row for row in good if row["actor_init_mode"] == F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
+    zero_weight = copy.deepcopy(
+        F.EXPLORATION_PACKAGES[F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS]
     )
-    standard = next(
-        row for row in good if row["actor_init_mode"] == F.ACTOR_INIT_MODE_DEFAULT
+    standard = copy.deepcopy(
+        F.manifest()["matched_contract"]["exploration_package"]
     )
+    # 本轮四格全部取标准初始化那一包,零权重路线只是仍然注册、不再被选中。
+    assert standard == F.EXPLORATION_PACKAGES[F.ACTOR_INIT_MODE_DEFAULT]
     assert F.validate_exploration_package(zero_weight)["init_noise_std"] == 0.1
     assert F.validate_exploration_package(standard)["init_noise_std"] == 1.0
     mutations = (
@@ -177,9 +279,9 @@ def test_shared_authority_rejects_resealed_field_count_order_and_family_drift():
 
 def test_launchers_reject_cross_family_selection_and_local_matched_drift(monkeypatch):
     with pytest.raises(A.LaunchRefused, match="another task family"):
-        A._four_grid_cell(C.C_BOOTSTRAP_CELL_ID, task_family="C211")
+        A._four_grid_cell(C.C_OBS_NOISE_OFF_CELL_ID, task_family="C211")
     with pytest.raises(C.LaunchRefused, match="another task family"):
-        C._four_grid_cell(A.A_BOOTSTRAP_CELL_ID, task_family="A211")
+        C._four_grid_cell(A.A_OBS_NOISE_OFF_CELL_ID, task_family="A211")
     monkeypatch.setattr(A, "TEACHER_ID", "safe-but-wrong-teacher")
     with pytest.raises(A.LaunchRefused, match="four-grid authority differs"):
         A._isaac_four_grid_manifest()
@@ -187,10 +289,10 @@ def test_launchers_reject_cross_family_selection_and_local_matched_drift(monkeyp
 
 def test_four_grid_cells_match_every_non_registered_setting():
     contracts = [
-        A._arm_contract(A.A_BOOTSTRAP_CELL_ID),
-        A._arm_contract(A.A_STANDARD_INIT_CELL_ID),
-        C._recipe_contract(C.C_BOOTSTRAP_CELL_ID),
-        C._recipe_contract(C.C_STANDARD_INIT_CELL_ID),
+        A._arm_contract(A.A_OBS_NOISE_OFF_CELL_ID),
+        A._arm_contract(A.A_OBS_NOISE_ON_CELL_ID),
+        C._recipe_contract(C.C_OBS_NOISE_OFF_CELL_ID),
+        C._recipe_contract(C.C_OBS_NOISE_ON_CELL_ID),
     ]
     matched_keys = (
         "soft_weights",
@@ -213,7 +315,7 @@ def test_four_grid_cells_match_every_non_registered_setting():
         "num_learning_epochs": 5,
         "num_mini_batches": 4,
     }
-    # 唯一的注册差异:初始化方式 + sigma + std 参数化 + 4σ 门开关。
+    # 探索包本轮**不是**差异轴:四格逐字相同,标准初始化 + sigma 1.0 + scalar。
     exploration = [
         (
             contract["actor_init_mode"],
@@ -223,18 +325,39 @@ def test_four_grid_cells_match_every_non_registered_setting():
         )
         for contract in contracts
     ]
-    assert exploration == [
-        ("zero_weight_ready_bias", 0.1, "log", True),
-        ("default", 1.0, "scalar", False),
-        ("zero_weight_ready_bias", 0.1, "log", True),
-        ("default", 1.0, "scalar", False),
+    assert exploration == [("default", 1.0, "scalar", False)] * 4
+    assert len({contract["exploration_axis"] for contract in contracts}) == 1
+    # 唯一的注册差异:本体感观测噪声开关(以及随它变的通道表与 DR 档身份)。
+    noise = [
+        (
+            contract["policy_observation_corruption"],
+            contract["dr_level_identity"],
+            contract["task_channel_observation_noise"],
+        )
+        for contract in contracts
     ]
-    assert contracts[0]["exploration_axis"] == contracts[2]["exploration_axis"]
-    assert contracts[1]["exploration_axis"] == contracts[3]["exploration_axis"]
-    assert contracts[0]["exploration_axis"] != contracts[1]["exploration_axis"]
-    assert "init_noise_std" not in A._isaac_four_grid_manifest()["matched_contract"]
-    assert "noise_std_type" not in A._isaac_four_grid_manifest()["matched_contract"]
+    assert noise == [
+        (False, F.DR_LEVEL_IDENTITY_OBS_NOISE_OFF, False),
+        (True, F.DR_LEVEL_IDENTITY_OBS_NOISE_ON, False),
+        (False, F.DR_LEVEL_IDENTITY_OBS_NOISE_OFF, False),
+        (True, F.DR_LEVEL_IDENTITY_OBS_NOISE_ON, False),
+    ]
+    for contract in contracts:
+        channels = contract["proprioceptive_observation_noise_channels"]
+        if contract["policy_observation_corruption"]:
+            assert channels == F.PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS
+        else:
+            assert channels is None
+    # 探索包现在住在 matched_contract 里;cells[i] 上一个探索键都不许留下。
     manifest = A._isaac_four_grid_manifest()
+    assert manifest["matched_contract"]["exploration_package"]["init_noise_std"] == 1.0
+    assert (
+        manifest["matched_contract"]["exploration_axis_is_registered_difference"]
+        is False
+    )
+    for cell in manifest["cells"]:
+        for key in F.EXPLORATION_CELL_KEYS:
+            assert key not in cell
     matched = manifest["matched_contract"]
     assert matched["wait_contract"] == A._wait_contract() == C._wait_contract()
     assert matched["formal_budgets"] == {

@@ -4788,6 +4788,105 @@ def action_ball_dr_l0_contract_sha256() -> str:
 
 
 # --------------------------------------------------------------------------- #
+# DR-L0N (2026-08-05): DR-L0 的整机 plant 一个字节不动,只把**本体感观测噪声**打开
+#
+# 人话:这是四格实验的第二根轴,不是一档新的 DR 强度。被控对象(摩擦/质量/CoM/PD/
+# 关节零点/推力/复位噪声/执行器延迟)与 DR-L0 完全相同;唯一的差别是 actor 看到的
+# 那三路本体感通道上叠加了均匀噪声。所以名字叫 L0N("L0 + Noise"),不叫 L2 ——
+# 它跟 DR-L1 不在同一个维度上,把它排进 L0<L1<L2 的序列会误导。
+#
+# 为什么这一条值得单独占一根轴(尽调 §22):
+#   * §22 判本体感噪声"D1 开满",证据是外部 9/9 库 day-1 全开 + 智元连 play 都保留
+#     + build_1 全开,**零反例**;
+#   * DR-L0 的裁定相反 —— 它判这条"会改估计误差与终止率",所以为了归因先关;
+#   * 两边都是推理,谁都没实测过。恢复的那批随机性里,这是唯一有真冲突的一条,
+#     而它的成本只是一个布尔。四格里花两格去测它,是全表性价比最高的 A/B。
+#
+# 噪声幅度不是新编的:下面三行就是 hope_env_cfg 里 ActionBall{A,C}211PolicyCfg 已经
+# 写着的 Unoise 边界(与智元、build_1 同区间)。本档只决定"要不要生效",不改数值,
+# 也不新增通道。
+#
+# 任务通道绝不加噪(§22 闸 1):给 desired-contact / incoming-ball 这些通道加噪会改
+# 支撑集,等于换了一道题,而不是换一个传感器。finalizer 会逐项复核:除这三路之外
+# 任何一路带噪都当场拒。
+# --------------------------------------------------------------------------- #
+ACTION_BALL_DR_L0N_IDENTITY = (
+    "action_ball_dr_l0n_plant_all_off_proprio_obs_noise_on_v1"
+)
+# term 名 -> [n_min, n_max];与 hope_env_cfg 的 Unoise 逐字对应。
+ACTION_BALL_DR_L0N_PROPRIO_NOISE_CHANNELS = {
+    "base_ang_vel_body": [-0.2, 0.2],
+    "joint_pos": [-0.01, 0.01],
+    "joint_vel": [-0.5, 0.5],
+}
+ACTION_BALL_DR_L0N_NOISE_OPERATION = "add"
+# L0N 相对 L0 只允许差这三个键。多差一个键 = 有人顺手改了 plant,模块导入时就炸。
+ACTION_BALL_DR_L0N_DECLARED_DIFFERENCES = (
+    "identity",
+    "policy_observation_corruption",
+    "proprioceptive_observation_noise",
+)
+
+
+def action_ball_dr_l0n_contract_payload() -> dict:
+    """Return the one canonical resolved DR-L0N finalizer contract.
+
+    刻意由 DR-L0 的 payload 派生:这样"plant 与 L0 逐字节相同"不是一句注释里的
+    承诺,而是构造方式本身,底下的模块级断言再把差异面钉死在三个键上。
+    """
+
+    payload = action_ball_dr_l0_contract_payload()
+    payload["identity"] = ACTION_BALL_DR_L0N_IDENTITY
+    payload["policy_observation_corruption"] = True
+    payload["proprioceptive_observation_noise"] = {
+        "channels": {
+            name: list(bounds)
+            for name, bounds in ACTION_BALL_DR_L0N_PROPRIO_NOISE_CHANNELS.items()
+        },
+        "operation": ACTION_BALL_DR_L0N_NOISE_OPERATION,
+        "distribution": "uniform_additive_per_policy_step",
+        # 支撑集不许动:任务通道(desired contact / incoming ball / 时间)一律无噪。
+        "task_channel_observation_noise": False,
+        "unlisted_policy_channel_noise_forbidden": True,
+        "critic_group_corruption": False,
+    }
+    return payload
+
+
+def action_ball_dr_l0n_contract_sha256() -> str:
+    """Hash the exact resolved DR-L0N finalizer contract."""
+
+    return _action_ball_canonical_sha256(action_ball_dr_l0n_contract_payload())
+
+
+_ACTION_BALL_DR_L0N_MISSING = object()
+
+
+def _assert_action_ball_dr_l0n_is_l0_plus_noise() -> None:
+    """Fail import if DR-L0N ever drifts away from "DR-L0 plus the sensor"."""
+
+    l0 = action_ball_dr_l0_contract_payload()
+    l0n = action_ball_dr_l0n_contract_payload()
+    differing = sorted(
+        key
+        for key in set(l0) | set(l0n)
+        if l0.get(key, _ACTION_BALL_DR_L0N_MISSING)
+        != l0n.get(key, _ACTION_BALL_DR_L0N_MISSING)
+    )
+    if tuple(differing) != tuple(sorted(ACTION_BALL_DR_L0N_DECLARED_DIFFERENCES)):
+        raise RuntimeError(
+            "ActionBall DR-L0N must differ from DR-L0 only in "
+            f"{sorted(ACTION_BALL_DR_L0N_DECLARED_DIFFERENCES)!r}; observed "
+            f"{differing!r}"
+        )
+    if l0["identity"] == l0n["identity"]:
+        raise RuntimeError("ActionBall DR-L0N must not reuse the DR-L0 identity")
+
+
+_assert_action_ball_dr_l0n_is_l0_plus_noise()
+
+
+# --------------------------------------------------------------------------- #
 # DR-L1 (2026-08-05)
 #
 # 人话:DR-L0 是"整套随机性全关"的因果对照,它的身份不许动。DR-L1 是另开的一档,

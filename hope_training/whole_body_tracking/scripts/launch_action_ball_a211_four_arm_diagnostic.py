@@ -464,12 +464,14 @@ RUNTIME_SOURCE_PATHS = (
 )
 
 ISAAC_FOUR_GRID_KIND = _F.KIND
-A_BOOTSTRAP_CELL_ID = _F.A_BOOTSTRAP_CELL_ID
-A_STANDARD_INIT_CELL_ID = _F.A_STANDARD_INIT_CELL_ID
-C_BOOTSTRAP_CELL_ID = _F.C_BOOTSTRAP_CELL_ID
-C_STANDARD_INIT_CELL_ID = _F.C_STANDARD_INIT_CELL_ID
+A_OBS_NOISE_OFF_CELL_ID = _F.A_OBS_NOISE_OFF_CELL_ID
+A_OBS_NOISE_ON_CELL_ID = _F.A_OBS_NOISE_ON_CELL_ID
+C_OBS_NOISE_OFF_CELL_ID = _F.C_OBS_NOISE_OFF_CELL_ID
+C_OBS_NOISE_ON_CELL_ID = _F.C_OBS_NOISE_ON_CELL_ID
 ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = _F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
 ACTOR_INIT_MODE_DEFAULT = _F.ACTOR_INIT_MODE_DEFAULT
+DR_LEVEL_IDENTITY_OBS_NOISE_OFF = _F.DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+DR_LEVEL_IDENTITY_OBS_NOISE_ON = _F.DR_LEVEL_IDENTITY_OBS_NOISE_ON
 ISAAC_FOUR_GRID_CELL_IDS = _F.CELL_IDS
 ARM_IDS = _F.FAMILY_CELL_IDS["A211"]
 A_SELECTED_TAPE_VARIANT = "current_lm"
@@ -483,9 +485,7 @@ def _arm(
     guard: str,
     schedule: str,
     learning_rate: float,
-    actor_init_mode: str,
-    init_noise_std: float,
-    noise_std_type: str,
+    policy_observation_corruption: bool,
 ) -> dict[str, Any]:
     return {
         "soft_weights": {
@@ -503,16 +503,15 @@ def _arm(
             "num_learning_epochs": 5,
             "num_mini_batches": 4,
         },
-        "actor_init_mode": actor_init_mode,
-        "init_noise_std": init_noise_std,
-        "noise_std_type": noise_std_type,
+        "policy_observation_corruption": policy_observation_corruption,
     }
 
 
 # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0(post-dt -6.0 -> -0.2)。
-# 2026-08-05 第二轴改版(exp §5.6.2c):PPO schedule 对照降级为 later,四格共用 fixed lr1e-4;
-# 第二格改跑标准 rsl_rl 初始化 + sigma 1.0 + scalar(对齐 BeyondMimic / build_1),第一格
-# 维持零权重 bootstrap + 钉死 bias + sigma 0.1 + log。两格其余设定逐字节相同。
+# 2026-08-05 第二轴改版(第二次,exp §5.6.2d):探索包定死为四格共用的标准 rsl_rl 初始化 +
+# sigma 1.0 + scalar(对齐 BeyondMimic / build_1),第二轴换成**本体感观测噪声开关**:
+# A0 关(DR-L0,现状)、A1 开(DR-L0N,plant 与 L0 逐字节相同,只有三路本体感通道带噪)。
+# 两格其余设定逐字节相同。
 # 本表是 four-grid manifest 的手抄副本,_arm_contract() 逐字段比对两者,不同步就 LaunchRefused。
 ARMS: Mapping[str, dict[str, Any]] = {
     ARM_IDS[0]: _arm(
@@ -523,9 +522,7 @@ ARMS: Mapping[str, dict[str, Any]] = {
         "metrics_only",
         "fixed",
         1.0e-4,
-        ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
-        0.1,
-        "log",
+        False,
     ),
     ARM_IDS[1]: _arm(
         -10.0,
@@ -535,9 +532,7 @@ ARMS: Mapping[str, dict[str, Any]] = {
         "metrics_only",
         "fixed",
         1.0e-4,
-        ACTOR_INIT_MODE_DEFAULT,
-        1.0,
-        "scalar",
+        True,
     ),
 }
 
@@ -1859,25 +1854,36 @@ def _arm_contract(arm_id: str) -> dict[str, Any]:
     matched = manifest["matched_contract"]
     cell = _four_grid_cell(arm_id, task_family="A211")
     arm = json.loads(json.dumps(ARMS[arm_id]))
-    # 探索包是本轮唯一的注册差异轴,所以它不能从 matched_contract 取(那里已经没有这三个键),
-    # 必须逐字段对上本格 cell;本地手抄表与 sealed cell 任一处不同即拒。
-    exploration = {key: arm.pop(key) for key in _F.EXPLORATION_CELL_KEYS if key in arm}
+    # 观测噪声开关是本轮唯一的注册差异轴,所以它不能从 matched_contract 取,必须逐字段
+    # 对上本格 cell;本地手抄表与 sealed cell 任一处不同即拒。探索包反过来:它已经全格
+    # 相同,只能从 matched_contract 取,本地手抄表里出现同名键即拒。
+    observation_noise = {
+        key: arm.pop(key) for key in _F.OBSERVATION_NOISE_CELL_KEYS if key in arm
+    }
+    exploration = matched["exploration_package"]
     if (
         arm["soft_weights"] != matched["soft_weights"]
         or arm["reference_guard_mode"] != matched["reference_guard_mode"]
         or arm["ppo"] != cell["ppo"]
         or arm["ppo"] != matched["ppo"]
-        or set(exploration) != {"actor_init_mode", "init_noise_std", "noise_std_type"}
-        or any(cell[key] != value for key, value in exploration.items())
+        or set(observation_noise) != {"policy_observation_corruption"}
+        or any(cell[key] != value for key, value in observation_noise.items())
+        or any(key in arm for key in _F.EXPLORATION_CELL_KEYS)
+        or matched["exploration_axis_is_registered_difference"] is not False
     ):
         raise LaunchRefused("A211 arm differs from the sealed Isaac four-grid cell")
     try:
-        _F.validate_exploration_package(cell)
+        _F.validate_observation_noise_package(cell)
+        _F.validate_exploration_package(exploration)
     except _F.FourGridContractError as exc:
-        raise LaunchRefused("A211 exploration package differs: %s" % exc) from exc
+        raise LaunchRefused("A211 four-grid cell package differs: %s" % exc) from exc
     payload = {
-        "schema_version": 2,
-        "kind": "action_ball_a211_learnability_arm_v2",
+        # v2 -> v3(第二轴换成本体感观测噪声开关):arm 合同新增 observation_noise_axis /
+        # policy_observation_corruption / proprioceptive_observation_noise_channels /
+        # task_channel_observation_noise / dr_level_identity 五键。v2 收据不带 DR 档身份,
+        # 放它冒充新配方等于让"跑的是哪一档"无法自陈,所以 kind 同批改名。
+        "schema_version": 3,
+        "kind": "action_ball_a211_learnability_arm_v3",
         "arm_id": arm_id,
         "four_grid_cell_id": arm_id,
         "isaac_four_grid_manifest_sha256": manifest["content_sha256"],
@@ -1889,13 +1895,22 @@ def _arm_contract(arm_id: str) -> dict[str, Any]:
         "critic_width": CRITIC_WIDTH,
         "trainability_contract": TRAINABILITY_CONTRACT,
         "fresh_normalizers_required": True,
-        "exploration_axis": cell["exploration_axis"],
-        "actor_init_mode": cell["actor_init_mode"],
-        "four_sigma_hard_inner_gate_applies": cell[
+        # 全格相同的探索包(标准 rsl_rl 初始化 + sigma 1.0 + scalar,4σ 门显式跳过)。
+        "exploration_axis": exploration["exploration_axis"],
+        "actor_init_mode": exploration["actor_init_mode"],
+        "four_sigma_hard_inner_gate_applies": exploration[
             "four_sigma_hard_inner_gate_applies"
         ],
-        "init_noise_std": cell["init_noise_std"],
-        "noise_std_type": cell["noise_std_type"],
+        "init_noise_std": exploration["init_noise_std"],
+        "noise_std_type": exploration["noise_std_type"],
+        # 本轮唯一的注册差异轴:本体感观测噪声开关及其 DR 档身份。
+        "observation_noise_axis": cell["observation_noise_axis"],
+        "policy_observation_corruption": cell["policy_observation_corruption"],
+        "proprioceptive_observation_noise_channels": cell[
+            "proprioceptive_observation_noise_channels"
+        ],
+        "task_channel_observation_noise": cell["task_channel_observation_noise"],
+        "dr_level_identity": cell["dr_level_identity"],
         "entropy_coef": matched["entropy_coef"],
         "actor_hidden_dims": matched["actor_hidden_dims"],
         "critic_hidden_dims": matched["critic_hidden_dims"],
@@ -3489,7 +3504,15 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
         "task.experiment_name=%s" % EXPERIMENT_NAME,
         "task.gym_task=%s" % GYM_TASK_ID,
         "task.actor_obs_contract=%s" % ACTOR_CONTRACT,
+        # 注册 DR 元组整包写进 argv,不靠 leaf 记忆:三个键一起出现才是一档合法的
+        # DR 档,train.py 见到半套会直接拒。四格里**唯一**变的就是最后这个布尔 ——
+        # false = DR-L0(现状),true = DR-L0N(plant 与 L0 逐字节相同,只把
+        # joint_pos/joint_vel/base_ang_vel 三路本体感通道的噪声打开)。
         "task.domain_rand.stable_ready_plant=true",
+        "task.domain_rand.startup_physics_material=false",
+        "task.domain_rand.startup_joint_default_pos=false",
+        "task.domain_rand.policy_observation_corruption=%s"
+        % ("true" if arm["policy_observation_corruption"] else "false"),
         "task.motion.action_ball_diagnostic_split_ready_teacher=true",
         "action_ball_dynamic_ready_bootstrap=true",
         "action_ball_dynamic_ready_artifact_path=%s" % dynamic_ready,
@@ -3926,19 +3949,37 @@ def _validate_raw_oracle32(
         resolved_dr_l0_sha256 = (
             training_contract.action_ball_dr_l0_contract_sha256()
         )
+        resolved_dr_l0n = training_contract.action_ball_dr_l0n_contract_payload()
     except Exception as exc:
         raise LaunchRefused(
             "A211 oracle32 hard contract cannot resolve DR-L0 finalizer"
         ) from exc
+    # 谱系(lineage)绑的是**共用的 DR-L0 leaf** 与它解析出来的字节 —— 这一条对四格
+    # 都成立,不随格变。真正跑的那一档由本格 cell 决定并写进 arm 合同:噪声关 = L0,
+    # 噪声开 = L0N。所以这里按本格身份挑一份 payload 去对拍 checkpoint 里的硬合同,
+    # 并且要求另一档的键**不存在** —— 两档同时出现即视为混档。
+    corruption = arm["policy_observation_corruption"]
+    if arm["dr_level_identity"] != (
+        DR_LEVEL_IDENTITY_OBS_NOISE_ON
+        if corruption
+        else DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+    ):
+        raise LaunchRefused("A211 arm DR level identity differs from its cell")
+    expected_dr_key = "action_ball_dr_l0n" if corruption else "action_ball_dr_l0"
+    forbidden_dr_key = "action_ball_dr_l0" if corruption else "action_ball_dr_l0n"
+    expected_dr_payload = resolved_dr_l0n if corruption else resolved_dr_l0
     if (
-        hard_document.get("action_ball_dr_l0") != resolved_dr_l0
+        hard_document.get(expected_dr_key) != expected_dr_payload
+        or forbidden_dr_key in hard_document
+        or expected_dr_payload.get("identity") != arm["dr_level_identity"]
+        or expected_dr_payload.get("policy_observation_corruption") is not corruption
         or canonical_sha256(resolved_dr_l0) != resolved_dr_l0_sha256
         or lineage.get("dr_l0_manifest", {}).get("contract_sha256")
         != resolved_dr_l0_sha256
         or lineage.get("dr_l0_manifest", {}).get("hard_contract_identity")
         != resolved_dr_l0.get("identity")
     ):
-        raise LaunchRefused("A211 oracle32 hard-contract DR-L0 binding differs")
+        raise LaunchRefused("A211 oracle32 hard-contract DR binding differs")
     try:
         runtime_target = hard_document["action_ball_training"]["runtime"][
             "target_provider"

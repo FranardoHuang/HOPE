@@ -83,7 +83,12 @@ C211_BUNDLE_KIND = "action_ball_c211_direct_ball_split_ready_bundle_v4"
 # 2026-08-05 v1 -> v2:recipe 合同新增 exploration_axis / actor_init_mode /
 # four_sigma_hard_inner_gate_applies 三键,schema 随之 1 -> 2,kind 同批改名,
 # 老 v1 收据不能冒充新配方。
-RECIPE_KIND = "action_ball_c211_matched_recipe_v2"
+# 2026-08-05 v2 -> v3(第二轴换成本体感观测噪声开关):recipe 合同再新增
+# observation_noise_axis / policy_observation_corruption /
+# proprioceptive_observation_noise_channels / task_channel_observation_noise /
+# dr_level_identity 五键,schema 2 -> 3。v2 收据不带 DR 档身份,放它冒充新配方等于
+# 让"跑的是哪一档"无法自陈,所以 kind 同批改名。
+RECIPE_KIND = "action_ball_c211_matched_recipe_v3"
 MATERIALIZATION_KIND = "action_ball_c211_reward_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_c211_policy_materialization_v1"
 ORACLE32_KIND = "action_ball_c211_oracle32_receipt_v2"
@@ -159,12 +164,14 @@ _DIRECT_FRAME0_ROBUST_MINIMUM_SLACKS = {
 EXPERIMENT_NAME = "agibot_a3_action_ball_c211_diagnostic"
 
 ISAAC_FOUR_GRID_KIND = _F.KIND
-A_BOOTSTRAP_CELL_ID = _F.A_BOOTSTRAP_CELL_ID
-A_STANDARD_INIT_CELL_ID = _F.A_STANDARD_INIT_CELL_ID
-C_BOOTSTRAP_CELL_ID = _F.C_BOOTSTRAP_CELL_ID
-C_STANDARD_INIT_CELL_ID = _F.C_STANDARD_INIT_CELL_ID
+A_OBS_NOISE_OFF_CELL_ID = _F.A_OBS_NOISE_OFF_CELL_ID
+A_OBS_NOISE_ON_CELL_ID = _F.A_OBS_NOISE_ON_CELL_ID
+C_OBS_NOISE_OFF_CELL_ID = _F.C_OBS_NOISE_OFF_CELL_ID
+C_OBS_NOISE_ON_CELL_ID = _F.C_OBS_NOISE_ON_CELL_ID
 ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = _F.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
 ACTOR_INIT_MODE_DEFAULT = _F.ACTOR_INIT_MODE_DEFAULT
+DR_LEVEL_IDENTITY_OBS_NOISE_OFF = _F.DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+DR_LEVEL_IDENTITY_OBS_NOISE_ON = _F.DR_LEVEL_IDENTITY_OBS_NOISE_ON
 ISAAC_FOUR_GRID_CELL_IDS = _F.CELL_IDS
 RECIPE_IDS = _F.FAMILY_CELL_IDS["C211"]
 ACTOR_CONTRACT = "action_ball_c211"
@@ -899,16 +906,23 @@ def _recipe_contract(recipe_id: str) -> dict[str, Any]:
     manifest = _isaac_four_grid_manifest()
     matched = manifest["matched_contract"]
     cell = _four_grid_cell(recipe_id, task_family="C211")
-    # 探索包是本轮唯一的注册差异轴(exp §5.6.2c),三个键只能从本格 cell 取;
-    # matched_contract 里已经刻意没有同名键,旧写法会 KeyError 而不是读到过期常量。
+    # 观测噪声开关是本轮唯一的注册差异轴(exp §5.6.2d),那几个键只能从本格 cell 取。
+    # 探索包反过来:它已经全格相同,只能从 matched_contract 取 —— cell 上刻意没有同名
+    # 键,旧写法会 KeyError 而不是读到一个"看起来是本格的"数字。
+    exploration = matched["exploration_package"]
     if cell["ppo"] != matched["ppo"]:
         raise LaunchRefused("C211 grid cell PPO differs from the matched contract")
+    if matched["exploration_axis_is_registered_difference"] is not False:
+        raise LaunchRefused(
+            "C211 grid still advertises the exploration package as a difference axis"
+        )
     try:
-        _F.validate_exploration_package(cell)
+        _F.validate_observation_noise_package(cell)
+        _F.validate_exploration_package(exploration)
     except _F.FourGridContractError as exc:
-        raise LaunchRefused("C211 exploration package differs: %s" % exc) from exc
+        raise LaunchRefused("C211 four-grid cell package differs: %s" % exc) from exc
     unsigned = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": RECIPE_KIND,
         "recipe_id": recipe_id,
         "four_grid_cell_id": recipe_id,
@@ -922,13 +936,22 @@ def _recipe_contract(recipe_id: str) -> dict[str, Any]:
         "trainability_contract": TRAINABILITY_CONTRACT,
         "fresh_normalizers_required": True,
         "foreign_checkpoint_reuse_prohibited": True,
-        "exploration_axis": cell["exploration_axis"],
-        "actor_init_mode": cell["actor_init_mode"],
-        "four_sigma_hard_inner_gate_applies": cell[
+        # 全格相同的探索包(标准 rsl_rl 初始化 + sigma 1.0 + scalar,4σ 门显式跳过)。
+        "exploration_axis": exploration["exploration_axis"],
+        "actor_init_mode": exploration["actor_init_mode"],
+        "four_sigma_hard_inner_gate_applies": exploration[
             "four_sigma_hard_inner_gate_applies"
         ],
-        "init_noise_std": cell["init_noise_std"],
-        "noise_std_type": cell["noise_std_type"],
+        "init_noise_std": exploration["init_noise_std"],
+        "noise_std_type": exploration["noise_std_type"],
+        # 本轮唯一的注册差异轴:本体感观测噪声开关及其 DR 档身份。
+        "observation_noise_axis": cell["observation_noise_axis"],
+        "policy_observation_corruption": cell["policy_observation_corruption"],
+        "proprioceptive_observation_noise_channels": cell[
+            "proprioceptive_observation_noise_channels"
+        ],
+        "task_channel_observation_noise": cell["task_channel_observation_noise"],
+        "dr_level_identity": cell["dr_level_identity"],
         "entropy_coef": matched["entropy_coef"],
         "actor_hidden_dims": matched["actor_hidden_dims"],
         "critic_hidden_dims": matched["critic_hidden_dims"],
@@ -1511,6 +1534,7 @@ def _validate_c211_hard_contract(
     checkout: Path,
     oracle_namespace: Path,
     lineage: Mapping[str, Any],
+    recipe: Mapping[str, Any],
 ) -> dict[str, str]:
     pin, path = _external_pin(value, name="C211 hard training contract")
     expected_path = oracle_namespace / "params" / "training_contract.json"
@@ -1536,19 +1560,36 @@ def _validate_c211_hard_contract(
     try:
         resolved_dr_l0 = module.action_ball_dr_l0_contract_payload()
         resolved_dr_l0_sha256 = module.action_ball_dr_l0_contract_sha256()
+        resolved_dr_l0n = module.action_ball_dr_l0n_contract_payload()
     except Exception as exc:
         raise LaunchRefused(
             "C211 hard training contract cannot resolve DR-L0 finalizer"
         ) from exc
+    # 谱系绑的是**共用的 DR-L0 leaf** 与它解析出来的字节 —— 这一条对四格都成立。
+    # 真正跑的那一档由本格 cell 决定并写进 recipe 合同:噪声关 = L0,噪声开 = L0N。
+    # 这里按本格身份挑一份 payload 去对拍硬合同,并要求另一档的键**不存在**。
+    corruption = recipe["policy_observation_corruption"]
+    if recipe["dr_level_identity"] != (
+        DR_LEVEL_IDENTITY_OBS_NOISE_ON
+        if corruption
+        else DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+    ):
+        raise LaunchRefused("C211 recipe DR level identity differs from its cell")
+    expected_dr_key = "action_ball_dr_l0n" if corruption else "action_ball_dr_l0"
+    forbidden_dr_key = "action_ball_dr_l0" if corruption else "action_ball_dr_l0n"
+    expected_dr_payload = resolved_dr_l0n if corruption else resolved_dr_l0
     if (
-        contract.get("action_ball_dr_l0") != resolved_dr_l0
+        contract.get(expected_dr_key) != expected_dr_payload
+        or forbidden_dr_key in contract
+        or expected_dr_payload.get("identity") != recipe["dr_level_identity"]
+        or expected_dr_payload.get("policy_observation_corruption") is not corruption
         or canonical_sha256(resolved_dr_l0) != resolved_dr_l0_sha256
         or lineage.get("dr_l0_manifest", {}).get("contract_sha256")
         != resolved_dr_l0_sha256
         or lineage.get("dr_l0_manifest", {}).get("hard_contract_identity")
         != resolved_dr_l0.get("identity")
     ):
-        raise LaunchRefused("C211 hard training contract DR-L0 binding differs")
+        raise LaunchRefused("C211 hard training contract DR binding differs")
     expected = {
         "schema_version": 3,
         "target_mode": "action_ball",
@@ -1932,6 +1973,7 @@ def _validate_c211_raw_oracle(
         checkout=checkout,
         oracle_namespace=oracle_namespace,
         lineage=lineage,
+        recipe=recipe,
     )
     bindings = _exact_dict(
         row["bindings"],
@@ -3360,8 +3402,9 @@ def _training_argv(
         "algo.runner.empirical_normalization=true",
         "algo.policy.actor_hidden_dims=[512,256,128]",
         "algo.policy.critic_hidden_dims=[512,256,128]",
-        # 探索包是本轮的注册差异轴(exp §5.6.2c):零权重格是 0.1/log,标准初始化格是
-        # 1.0/scalar。三个 override 一起从选中的 cell 里发出,不再硬钉字面量。
+        # 探索包本轮四格相同(标准 rsl_rl 初始化 + sigma 1.0 + scalar)。三个 override
+        # 仍然从 recipe 合同里发出而不是硬钉字面量 —— 合同的值来自 matched_contract,
+        # 所以"四格相同"这件事也由同一份封印背书。
         "algo.policy.init_noise_std=%s"
         % _float_override_token(
             recipe["init_noise_std"], name="algo.policy.init_noise_std"
@@ -3379,7 +3422,15 @@ def _training_argv(
         "task.experiment_name=%s" % EXPERIMENT_NAME,
         "task.gym_task=%s" % GYM_TASK_ID,
         "task.actor_obs_contract=%s" % ACTOR_CONTRACT,
+        # 注册 DR 元组整包写进 argv,不靠 leaf 记忆:三个键一起出现才是一档合法的
+        # DR 档,train.py 见到半套会直接拒。四格里**唯一**变的就是最后这个布尔 ——
+        # false = DR-L0(现状),true = DR-L0N(plant 与 L0 逐字节相同,只把
+        # joint_pos/joint_vel/base_ang_vel 三路本体感通道的噪声打开)。
         "task.domain_rand.stable_ready_plant=true",
+        "task.domain_rand.startup_physics_material=false",
+        "task.domain_rand.startup_joint_default_pos=false",
+        "task.domain_rand.policy_observation_corruption=%s"
+        % ("true" if recipe["policy_observation_corruption"] else "false"),
         "action_ball_dynamic_ready_bootstrap=true",
         "action_ball_dynamic_ready_artifact_path=%s"
         % (checkout / lineage["dynamic_ready_artifact"]["path"]),

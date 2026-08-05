@@ -25,6 +25,7 @@ _TRAINING_CONTRACT = launcher._OLD._load_training_contract_module(
     Path(__file__).resolve().parents[3]
 )
 _DR_L0_PAYLOAD = _TRAINING_CONTRACT.action_ball_dr_l0_contract_payload()
+_DR_L0N_PAYLOAD = _TRAINING_CONTRACT.action_ball_dr_l0n_contract_payload()
 _DR_L0_CONTRACT_SHA256 = (
     _TRAINING_CONTRACT.action_ball_dr_l0_contract_sha256()
 )
@@ -997,7 +998,13 @@ def _raw_oracle_fixture(
         "critic_obs_normalizer_identity": launcher.CRITIC_NORMALIZER_IDENTITY,
         "fresh_normalizers_required": True,
         "symmetric_critic_fallback_forbidden": True,
-        "action_ball_dr_l0": copy.deepcopy(_DR_L0_PAYLOAD),
+        # 硬合同里带的是**本格真正跑的那一档**:噪声关 = DR-L0,噪声开 = DR-L0N。
+        # 夹具从 arm 合同推导而不是抄死一档,否则换轴时又要"改测试让它变绿"。
+        **(
+            {"action_ball_dr_l0n": copy.deepcopy(_DR_L0N_PAYLOAD)}
+            if arm["policy_observation_corruption"]
+            else {"action_ball_dr_l0": copy.deepcopy(_DR_L0_PAYLOAD)}
+        ),
         "action_ball_training": {
             "runtime": {
                 "target_provider": {
@@ -1122,6 +1129,10 @@ def _raw_oracle_fixture(
         def action_ball_dr_l0_contract_sha256():
             return _DR_L0_CONTRACT_SHA256
 
+        @staticmethod
+        def action_ball_dr_l0n_contract_payload():
+            return copy.deepcopy(_DR_L0N_PAYLOAD)
+
     monkeypatch.setattr(
         launcher._OLD,
         "_load_training_contract_module",
@@ -1149,8 +1160,8 @@ def _flatten_strings(value):
 
 def test_two_formal_a211_grid_cells_are_exact():
     # 2026-08-05 层级对齐(exp §5.6 第 3/7 条):death -300.0 -> -10.0。
-    # 2026-08-05 第二轴改版(exp §5.6.2c):PPO schedule 对照降级,四格共用 fixed lr1e-4;
-    # 第二格改为标准初始化 + sigma 1.0 + scalar,第一格维持零权重 bootstrap + 0.1 + log。
+    # 2026-08-05 第二轴改版(第二次,exp §5.6.2d):四格共用 fixed lr1e-4 与标准初始化 +
+    # sigma 1.0 + scalar;唯一差异是本体感观测噪声开关(A0 关 / A1 开)。
     expected = {
         launcher.ARM_IDS[0]: (-10.0, -5.0, "metrics_only", "fixed", 1e-4),
         launcher.ARM_IDS[1]: (-10.0, -5.0, "metrics_only", "fixed", 1e-4),
@@ -1165,37 +1176,45 @@ def test_two_formal_a211_grid_cells_are_exact():
         (arm["ppo"]["schedule"], arm["ppo"]["learning_rate"])
         for arm in launcher.ARMS.values()
     } == {("fixed", 1.0e-4)}
-    bootstrap = launcher._arm_contract(launcher.ARM_IDS[0])
-    standard = launcher._arm_contract(launcher.ARM_IDS[1])
+    noise_off = launcher._arm_contract(launcher.ARM_IDS[0])
+    noise_on = launcher._arm_contract(launcher.ARM_IDS[1])
+    # 探索包本轮**不是**差异轴:两格逐字相同。
+    for arm in (noise_off, noise_on):
+        assert (
+            arm["actor_init_mode"],
+            arm["init_noise_std"],
+            arm["noise_std_type"],
+            arm["four_sigma_hard_inner_gate_applies"],
+        ) == ("default", 1.0, "scalar", False)
+    assert noise_off["policy_observation_corruption"] is False
+    assert noise_on["policy_observation_corruption"] is True
+    assert noise_off["dr_level_identity"] == launcher.DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+    assert noise_on["dr_level_identity"] == launcher.DR_LEVEL_IDENTITY_OBS_NOISE_ON
+    assert noise_off["proprioceptive_observation_noise_channels"] is None
     assert (
-        bootstrap["actor_init_mode"],
-        bootstrap["init_noise_std"],
-        bootstrap["noise_std_type"],
-        bootstrap["four_sigma_hard_inner_gate_applies"],
-    ) == ("zero_weight_ready_bias", 0.1, "log", True)
-    assert (
-        standard["actor_init_mode"],
-        standard["init_noise_std"],
-        standard["noise_std_type"],
-        standard["four_sigma_hard_inner_gate_applies"],
-    ) == ("default", 1.0, "scalar", False)
-    # 对照实验前提:除探索包之外逐字段相同。
+        noise_on["proprioceptive_observation_noise_channels"]
+        == launcher._F.PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS
+    )
+    # 任务通道两格都无噪:那会改支撑集,等于换题。
+    assert noise_off["task_channel_observation_noise"] is False
+    assert noise_on["task_channel_observation_noise"] is False
+    # 对照实验前提:除观测噪声包之外逐字段相同。
     varying = {
         "arm_id",
         "four_grid_cell_id",
         "arm_contract_sha256",
-        "exploration_axis",
-        "actor_init_mode",
-        "init_noise_std",
-        "noise_std_type",
-        "four_sigma_hard_inner_gate_applies",
+        "observation_noise_axis",
+        "policy_observation_corruption",
+        "proprioceptive_observation_noise_channels",
+        "task_channel_observation_noise",
+        "dr_level_identity",
     }
-    assert set(bootstrap) == set(standard)
-    for key in bootstrap:
+    assert set(noise_off) == set(noise_on)
+    for key in noise_off:
         if key in varying:
             continue
-        assert bootstrap[key] == standard[key], key
-    assert bootstrap["arm_contract_sha256"] != standard["arm_contract_sha256"]
+        assert noise_off[key] == noise_on[key], key
+    assert noise_off["arm_contract_sha256"] != noise_on["arm_contract_sha256"]
     assert all(
         arm["reference_guard_mode"] == "metrics_only"
         and set(arm["soft_weights"].values()) == {-10.0, -5.0}
@@ -1827,33 +1846,42 @@ def test_training_argv_pins_a211_lineage_bootstrap_and_optimizer(tmp_path, monke
 
 
 @pytest.mark.parametrize(
-    "arm_index,sigma_token,std_type,init_mode",
+    "arm_index,corruption",
     (
-        (0, "algo.policy.init_noise_std=0.1", "log", "zero_weight_ready_bias"),
-        (1, "algo.policy.init_noise_std=1.0", "scalar", "default"),
+        (0, "false"),
+        (1, "true"),
     ),
 )
-def test_training_argv_carries_each_cell_exploration_package(
-    tmp_path, monkeypatch, arm_index, sigma_token, std_type, init_mode
+def test_training_argv_carries_each_cell_observation_noise_package(
+    tmp_path, monkeypatch, arm_index, corruption
 ):
-    """人话:两个格子的 argv 只在初始化方式与 sigma 上不同,PPO 三项完全一样。"""
+    """人话:两个格子的 argv 只在那一个布尔上不同,探索包与 PPO 三项完全一样。"""
 
     _patch_plan_environment(monkeypatch)
     spec_path, _spec, _lineage_doc = _case(
         tmp_path, arm_id=launcher.ARM_IDS[arm_index], stage="probe512"
     )
     argv = launcher.build_plan(spec_path)["canonical_payload"]["training_argv"]
-    assert sigma_token in argv
-    assert "algo.policy.noise_std_type=%s" % std_type in argv
-    assert "action_ball_actor_init_mode=%s" % init_mode in argv
+    # 四格相同的探索包。
+    assert "algo.policy.init_noise_std=1.0" in argv
+    assert "algo.policy.noise_std_type=scalar" in argv
+    assert "action_ball_actor_init_mode=default" in argv
     assert "algo.algorithm.schedule=fixed" in argv
     assert "algo.algorithm.learning_rate=0.0001" in argv
+    # 唯一的注册差异轴:整包 DR 元组写进 argv,只有最后这个布尔随格变。
+    assert "task.domain_rand.stable_ready_plant=true" in argv
+    assert "task.domain_rand.startup_physics_material=false" in argv
+    assert "task.domain_rand.startup_joint_default_pos=false" in argv
+    assert "task.domain_rand.policy_observation_corruption=%s" % corruption in argv
     # 标准初始化格必须与一个显式 bootstrap 同时给,否则 train.py 侧 fail-closed。
     assert "action_ball_dynamic_ready_bootstrap=true" in argv
     joined = "\n".join(argv)
     assert joined.count("algo.policy.init_noise_std=") == 1
     assert joined.count("algo.policy.noise_std_type=") == 1
     assert joined.count("action_ball_actor_init_mode=") == 1
+    assert joined.count("task.domain_rand.policy_observation_corruption=") == 1
+    # 任务/目标通道的噪声与这根轴无关,两格都必须保持关闭。
+    assert "task.racket.action_ball_target_observation_noise=false" in argv
 
 
 def test_a211_runtime_source_manifest_pins_the_a211_contract_source():

@@ -27,6 +27,7 @@ _TRAINING_CONTRACT = launcher._OLD._load_training_contract_module(
     Path(__file__).resolve().parents[3]
 )
 _DR_L0_PAYLOAD = _TRAINING_CONTRACT.action_ball_dr_l0_contract_payload()
+_DR_L0N_PAYLOAD = _TRAINING_CONTRACT.action_ball_dr_l0n_contract_payload()
 _DR_L0_CONTRACT_SHA256 = (
     _TRAINING_CONTRACT.action_ball_dr_l0_contract_sha256()
 )
@@ -1251,10 +1252,11 @@ def _chain(
             },
             "runtime_policy_recipe_sha256": "4" * 64,
             "dynamic_ready_binding_sha256": "5" * 64,
-            "noise_std_type": "log",
-            # 2026-08-05 探索幅度对齐(exp §5.6 第 3 条):0.02 -> 0.1,
-            # 权威在 four-grid manifest 的 init_noise_std,本行只是镜像。
-            "configured_and_realized_init_noise_std": 0.1,
+            # 这里刻意从 recipe 合同取值而不是抄字面量:权威在 four-grid manifest,
+            # 夹具再抄一遍只会在换轴时变成"改测试让它变绿"。launcher 侧的交叉校验
+            # 仍然被下面 test_policy_materialization_* 那组变异用例覆盖。
+            "noise_std_type": recipe["noise_std_type"],
+            "configured_and_realized_init_noise_std": recipe["init_noise_std"],
         }
     )
     recipe_result = _result(
@@ -1359,7 +1361,7 @@ def _case(
     tmp_path: Path,
     *,
     stage: str,
-    recipe_id: str = launcher.C_BOOTSTRAP_CELL_ID,
+    recipe_id: str = launcher.C_OBS_NOISE_OFF_CELL_ID,
     allow_colocation: bool = False,
 ):
     checkout = tmp_path / "checkout"
@@ -1477,6 +1479,10 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         def action_ball_dr_l0_contract_sha256():
             return _DR_L0_CONTRACT_SHA256
 
+        @staticmethod
+        def action_ball_dr_l0n_contract_payload():
+            return copy.deepcopy(_DR_L0N_PAYLOAD)
+
     monkeypatch.setattr(
         launcher._OLD,
         "_load_training_contract_module",
@@ -1580,20 +1586,27 @@ def test_two_code_owned_c211_recipes_and_five_stage_chain_are_exact():
         "scale4096": (4096, 5, 1),
         "long4096": (4096, 1000, 100),
     }
-    # 2026-08-05 第二轴改版(exp §5.6.2c):PPO schedule 对照降级,两格共用 fixed lr1e-4;
-    # 唯一差异是探索包(零权重 bootstrap+0.1+log 对 标准初始化+1.0+scalar)。
+    # 2026-08-05 第二轴改版(第二次,exp §5.6.2d):两格共用 fixed lr1e-4,探索包也共用
+    # (标准初始化 + sigma 1.0 + scalar);唯一差异是本体感观测噪声开关。
     expected_ppo = {
-        launcher.C_BOOTSTRAP_CELL_ID: ("fixed", 1.0e-4),
-        launcher.C_STANDARD_INIT_CELL_ID: ("fixed", 1.0e-4),
+        launcher.C_OBS_NOISE_OFF_CELL_ID: ("fixed", 1.0e-4),
+        launcher.C_OBS_NOISE_ON_CELL_ID: ("fixed", 1.0e-4),
     }
     expected_exploration = {
-        launcher.C_BOOTSTRAP_CELL_ID: (
-            "zero_weight_ready_bias",
-            0.1,
-            "log",
-            True,
+        launcher.C_OBS_NOISE_OFF_CELL_ID: ("default", 1.0, "scalar", False),
+        launcher.C_OBS_NOISE_ON_CELL_ID: ("default", 1.0, "scalar", False),
+    }
+    expected_observation_noise = {
+        launcher.C_OBS_NOISE_OFF_CELL_ID: (
+            False,
+            launcher.DR_LEVEL_IDENTITY_OBS_NOISE_OFF,
+            None,
         ),
-        launcher.C_STANDARD_INIT_CELL_ID: ("default", 1.0, "scalar", False),
+        launcher.C_OBS_NOISE_ON_CELL_ID: (
+            True,
+            launcher.DR_LEVEL_IDENTITY_OBS_NOISE_ON,
+            launcher._F.PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS,
+        ),
     }
     assert launcher.RECIPE_IDS == tuple(expected_ppo)
     manifest = launcher._isaac_four_grid_manifest()
@@ -1615,6 +1628,13 @@ def test_two_code_owned_c211_recipes_and_five_stage_chain_are_exact():
             recipe["noise_std_type"],
             recipe["four_sigma_hard_inner_gate_applies"],
         ) == expected_exploration[recipe_id]
+        assert (
+            recipe["policy_observation_corruption"],
+            recipe["dr_level_identity"],
+            recipe["proprioceptive_observation_noise_channels"],
+        ) == expected_observation_noise[recipe_id]
+        # 任务通道永远无噪:那会改支撑集,等于换题。
+        assert recipe["task_channel_observation_noise"] is False
         assert recipe["ppo_adaptation_axis"] == cell["ppo_adaptation_axis"]
         assert recipe["contact_sigma_adaptation"] is False
         assert recipe["actor_width"] == 211
@@ -2258,28 +2278,38 @@ def test_structurally_resealed_retired_c_lineage_is_rejected(
 
 
 @pytest.mark.parametrize(
-    "recipe_id,schedule,learning_rate,sigma,std_type,init_mode",
+    "recipe_id,schedule,learning_rate,sigma,std_type,init_mode,corruption",
     (
         (
-            launcher.C_BOOTSTRAP_CELL_ID,
-            "fixed",
-            "0.0001",
-            "0.1",
-            "log",
-            "zero_weight_ready_bias",
-        ),
-        (
-            launcher.C_STANDARD_INIT_CELL_ID,
+            launcher.C_OBS_NOISE_OFF_CELL_ID,
             "fixed",
             "0.0001",
             "1.0",
             "scalar",
             "default",
+            "false",
+        ),
+        (
+            launcher.C_OBS_NOISE_ON_CELL_ID,
+            "fixed",
+            "0.0001",
+            "1.0",
+            "scalar",
+            "default",
+            "true",
         ),
     ),
 )
 def test_training_argv_pins_c211_grid_cell_and_static_contact_sigma(
-    tmp_path, monkeypatch, recipe_id, schedule, learning_rate, sigma, std_type, init_mode
+    tmp_path,
+    monkeypatch,
+    recipe_id,
+    schedule,
+    learning_rate,
+    sigma,
+    std_type,
+    init_mode,
+    corruption,
 ):
     _patch_plan_environment(monkeypatch)
     spec_path, _spec, _lineage_doc = _case(
@@ -2317,12 +2347,17 @@ def test_training_argv_pins_c211_grid_cell_and_static_contact_sigma(
     assert "algo.runner.empirical_normalization=true" in joined
     assert "algo.algorithm.schedule=" + schedule in argv
     assert "algo.algorithm.learning_rate=" + learning_rate in argv
-    # 探索包是唯一的注册差异轴(exp §5.6.2c)。
+    # 探索包本轮四格相同,所以两格的这三个 override 逐字一样。
     assert "algo.policy.init_noise_std=" + sigma in argv
     assert "algo.policy.noise_std_type=" + std_type in argv
     assert "action_ball_actor_init_mode=" + init_mode in argv
     assert joined.count("algo.policy.init_noise_std=") == 1
     assert joined.count("action_ball_actor_init_mode=") == 1
+    # 唯一的注册差异轴:整包 DR 元组写进 argv,只有最后这个布尔随格变。
+    assert "task.domain_rand.startup_physics_material=false" in argv
+    assert "task.domain_rand.startup_joint_default_pos=false" in argv
+    assert "task.domain_rand.policy_observation_corruption=" + corruption in argv
+    assert joined.count("task.domain_rand.policy_observation_corruption=") == 1
     # 标准初始化格必须与一个显式 bootstrap 同时给,否则 train.py 侧 fail-closed。
     assert "action_ball_dynamic_ready_bootstrap=true" in argv
     assert payload["bundle"]["recipe"]["recipe_id"] == recipe_id

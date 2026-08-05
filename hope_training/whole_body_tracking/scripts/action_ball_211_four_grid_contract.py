@@ -15,28 +15,49 @@ import json
 from typing import Any, Mapping, Sequence
 
 
-# 2026-08-05 第二轴改版(exp §5.6.2c 裁决):
-# 旧的第二轴是 PPO schedule(A0/C0 fixed lr1e-4 对 A1/C1 adaptive-KL lr1e-3)。
-# 在**从未观测到一次接触**的前提下,LR schedule 的差异无法被任何指标分辨,故该对照降级为
-# later;第二轴换成**探索包**——零权重 bootstrap + 钉死 bias + sigma 0.1(现状) 对
-# 标准 rsl_rl 初始化 + sigma 1.0(BeyondMimic / build_1 对齐)。探索包是一阶量:零权重
-# actor 的初始策略是常数,梯度只能经由"探索产生了不同回报"传导。
-# 因此 cell_id 也一并改名——留着 "adaptive-kl-initial-lr1e3" 而实际不跑 adaptive KL,
-# 会让收据、namespace 与 barrier 布局表同时说谎。
-KIND = "action_ball_211_isaac_four_grid_manifest_v3"
-A_BOOTSTRAP_CELL_ID = "A0-base-safety-zero-weight-bootstrap-sigma0p1"
-A_STANDARD_INIT_CELL_ID = "A1-base-safety-standard-init-sigma1p0"
-C_BOOTSTRAP_CELL_ID = "C0-base-safety-zero-weight-bootstrap-sigma0p1"
-C_STANDARD_INIT_CELL_ID = "C1-base-safety-standard-init-sigma1p0"
+# 2026-08-05 第二轴改版(第二次,exp §5.6.2d 裁决):
+#
+# 第一次改版把第二轴从 PPO schedule 换成了探索包(零权重 bootstrap + sigma 0.1 对
+# 标准 rsl_rl 初始化 + sigma 1.0)。这一次把探索包也定死:**四格全部用标准初始化 +
+# sigma 1.0**(对齐 BeyondMimic / build_1),第二轴换成**本体感观测噪声的开关**。
+#
+# 为什么是这一轴:
+#   * 尽调 §22 判本体感噪声"D1 开满",证据是外部 9/9 库 day-1 全开 + 智元连 play 都
+#     保留 + build_1 全开,**零反例**;
+#   * DR-L0 的裁定正好相反 —— 它判这条"会改估计误差与终止率",所以为归因先关;
+#   * 两边都是推理,**谁都没实测过**,而成本只是一个布尔。上一轮恢复的那批随机性
+#     (摩擦/连杆质量/PD/CoM/关节零点/出生位姿)里,这是唯一有真冲突的一条。
+#     两格测它 = 全表性价比最高的 A/B。
+#
+# 噪声幅度用通道里已经定义好的值(与智元、build_1 同区间),本轮不新增通道也不改数:
+#     joint_pos ±0.01 rad / joint_vel ±0.5 rad·s⁻¹ / base_ang_vel ±0.2 rad·s⁻¹
+# 任务通道(desired contact / incoming ball / 时间)**不加噪**:那会改支撑集,
+# 等于换题而不是换传感器(§22 闸 1)。
+#
+# cell_id 随轴一起改名。留着 "zero-weight-bootstrap-sigma0p1" 而四格实际全跑标准
+# 初始化,会让收据、namespace 与 barrier 布局表同时说谎。
+KIND = "action_ball_211_isaac_four_grid_manifest_v4"
+A_OBS_NOISE_OFF_CELL_ID = (
+    "A0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off"
+)
+A_OBS_NOISE_ON_CELL_ID = (
+    "A1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on"
+)
+C_OBS_NOISE_OFF_CELL_ID = (
+    "C0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off"
+)
+C_OBS_NOISE_ON_CELL_ID = (
+    "C1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on"
+)
 CELL_IDS = (
-    A_BOOTSTRAP_CELL_ID,
-    A_STANDARD_INIT_CELL_ID,
-    C_BOOTSTRAP_CELL_ID,
-    C_STANDARD_INIT_CELL_ID,
+    A_OBS_NOISE_OFF_CELL_ID,
+    A_OBS_NOISE_ON_CELL_ID,
+    C_OBS_NOISE_OFF_CELL_ID,
+    C_OBS_NOISE_ON_CELL_ID,
 )
 FAMILY_CELL_IDS = {
-    "A211": (A_BOOTSTRAP_CELL_ID, A_STANDARD_INIT_CELL_ID),
-    "C211": (C_BOOTSTRAP_CELL_ID, C_STANDARD_INIT_CELL_ID),
+    "A211": (A_OBS_NOISE_OFF_CELL_ID, A_OBS_NOISE_ON_CELL_ID),
+    "C211": (C_OBS_NOISE_OFF_CELL_ID, C_OBS_NOISE_ON_CELL_ID),
 }
 # 与 whole_body_tracking.utils.training_contract 的 ACTION_BALL_ACTOR_INIT_MODE_* 字面量
 # 必须逐字相同。本模块刻意 dependency-free(两个 launcher 用 py3.8 直接 exec 它),所以
@@ -76,6 +97,60 @@ EXPLORATION_CELL_KEYS = (
     "noise_std_type",
     "four_sigma_hard_inner_gate_applies",
 )
+# 2026-08-05:探索包不再是差异轴,四格全部取标准初始化这一包。它因此从 cells[i]
+# 搬回 matched_contract —— 这不是搬家的偏好问题:上一版把它放在 cell 上,正是为了让
+# "还去 matched_contract 取 init_noise_std 的旧代码"直接 KeyError;现在方向反过来,
+# 还去 cell 上取 init_noise_std 的代码同样应该 KeyError,而不是读到一个骗人的数。
+MATCHED_EXPLORATION_PACKAGE = ACTOR_INIT_MODE_DEFAULT
+
+# --------------------------------------------------------------------------- #
+# 第二轴:本体感观测噪声开关
+# --------------------------------------------------------------------------- #
+# 与 whole_body_tracking.utils.training_contract 的
+# ACTION_BALL_DR_L0N_* / DR-L0 identity 必须逐字相同。本模块刻意 dependency-free
+# (两个 launcher 用 py3.8 直接 exec 它),所以这里是手抄副本;跨模块一致性由
+# tests/test_action_ball_211_isaac_four_grid.py 断言。
+DR_LEVEL_IDENTITY_OBS_NOISE_OFF = "action_ball_dr_l0_exact_all_off_v1"
+DR_LEVEL_IDENTITY_OBS_NOISE_ON = (
+    "action_ball_dr_l0n_plant_all_off_proprio_obs_noise_on_v1"
+)
+# term 名 -> [n_min, n_max]。这三行是 hope_env_cfg 的 ActionBall{A,C}211PolicyCfg 里
+# 已经写着的 Unoise 边界,本轮只决定它们生不生效,不改数值也不加通道。
+PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS = {
+    "base_ang_vel_body": [-0.2, 0.2],
+    "joint_pos": [-0.01, 0.01],
+    "joint_vel": [-0.5, 0.5],
+}
+OBSERVATION_NOISE_CELL_KEYS = (
+    "observation_noise_axis",
+    "policy_observation_corruption",
+    "proprioceptive_observation_noise_channels",
+    "task_channel_observation_noise",
+    "dr_level_identity",
+)
+OBSERVATION_NOISE_PACKAGES = {
+    False: {
+        "observation_noise_axis": (
+            "policy_observation_corruption_off_dr_l0_nominal_sensor"
+        ),
+        "policy_observation_corruption": False,
+        "proprioceptive_observation_noise_channels": None,
+        "task_channel_observation_noise": False,
+        "dr_level_identity": DR_LEVEL_IDENTITY_OBS_NOISE_OFF,
+    },
+    True: {
+        "observation_noise_axis": (
+            "policy_observation_corruption_on_proprioceptive_channels_only"
+        ),
+        "policy_observation_corruption": True,
+        "proprioceptive_observation_noise_channels": {
+            name: list(bounds)
+            for name, bounds in PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS.items()
+        },
+        "task_channel_observation_noise": False,
+        "dr_level_identity": DR_LEVEL_IDENTITY_OBS_NOISE_ON,
+    },
+}
 # 第二轴换掉 PPO schedule 之后,四格共用同一份 PPO;保留 A0/C0 原本的保守 fixed lr1e-4,
 # 使对照组(零权重格)相对上一版四格一字未动,新增变量只有 A1/C1 的探索包。
 SHARED_PPO = {
@@ -321,13 +396,79 @@ def validate_exploration_package(value: Any) -> dict:
     return copy.deepcopy(observed)
 
 
+def validate_observation_noise_package(value: Any) -> dict:
+    """Cross-lock the corruption switch, the channel table and the DR identity.
+
+    人话:"开不开噪声"、"哪几路带噪"、"跑的是哪一档 DR"必须整包对上。半套一律拒 ——
+    比如声称 corruption=true 却不给通道表,或者给了通道表却挂着 DR-L0 的身份。
+    任务通道加噪在**两种取值下都拒**:那不是这根轴的取值,是换了一道题。
+    """
+
+    if type(value) is not dict:
+        raise FourGridContractError(
+            "four-grid observation-noise package must be a dict"
+        )
+    corruption = value.get("policy_observation_corruption")
+    if type(corruption) is not bool:
+        raise FourGridContractError(
+            "four-grid policy_observation_corruption must be an explicit bool"
+        )
+    expected = OBSERVATION_NOISE_PACKAGES[corruption]
+    observed = {key: value.get(key) for key in OBSERVATION_NOISE_CELL_KEYS}
+    if observed != expected:
+        raise FourGridContractError(
+            "four-grid observation-noise package differs from the sealed "
+            "corruption=%s package" % corruption
+        )
+    if observed["task_channel_observation_noise"] is not False:
+        raise FourGridContractError(
+            "four-grid task channels must never be noised: noising the desired "
+            "contact / incoming ball / timing channels changes the support set"
+        )
+    channels = observed["proprioceptive_observation_noise_channels"]
+    if corruption:
+        if (
+            type(channels) is not dict
+            or sorted(channels) != sorted(PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS)
+            or observed["dr_level_identity"] != DR_LEVEL_IDENTITY_OBS_NOISE_ON
+        ):
+            raise FourGridContractError(
+                "the noise-on cell must declare exactly the proprioceptive "
+                "channel table and the DR-L0N identity"
+            )
+        for name, bounds in channels.items():
+            want = PROPRIOCEPTIVE_OBSERVATION_NOISE_CHANNELS[name]
+            if (
+                type(bounds) is not list
+                or len(bounds) != 2
+                or any(type(item) is not float for item in bounds)
+                or bounds != list(want)
+                or bounds[0] >= bounds[1]
+            ):
+                raise FourGridContractError(
+                    "proprioceptive noise channel %s differs from the sealed "
+                    "bounds" % name
+                )
+    elif (
+        channels is not None
+        or observed["dr_level_identity"] != DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+    ):
+        raise FourGridContractError(
+            "the noise-off cell must declare no channel table and the DR-L0 "
+            "identity"
+        )
+    return copy.deepcopy(observed)
+
+
 def _cell(
     cell_id: str,
     task_family: str,
     reward_semantics: str,
-    actor_init_mode: str,
+    policy_observation_corruption: bool,
 ) -> dict:
-    package = copy.deepcopy(EXPLORATION_PACKAGES[actor_init_mode])
+    package = copy.deepcopy(
+        OBSERVATION_NOISE_PACKAGES[policy_observation_corruption]
+    )
     row = {
         "cell_id": cell_id,
         "task_family": task_family,
@@ -338,7 +479,7 @@ def _cell(
         "contact_sigma_adaptation": False,
         **package,
     }
-    validate_exploration_package(row)
+    validate_observation_noise_package(row)
     return row
 
 
@@ -356,11 +497,14 @@ def _build_canonical_manifest() -> dict:
         },
         "actor_hidden_dims": [512, 256, 128],
         "critic_hidden_dims": [512, 256, 128],
-        # 2026-08-05 探索包上升为**注册差异轴**(exp §5.6.2c),因此 init_noise_std /
-        # noise_std_type / actor_init_mode 三项从 matched_contract 移到每格 cells[i]。
-        # 这里刻意不留同名键:任何仍去 matched_contract 里取 init_noise_std 的旧代码会
-        # 直接 KeyError,而不是读到一个已经不再"全格相同"的数字。
-        "exploration_axis_is_registered_difference": True,
+        # 2026-08-05(第二次改版):探索包不再是差异轴 —— 四格全部标准 rsl_rl 初始化 +
+        # sigma 1.0 + scalar,4σ 硬内带门显式跳过。它因此从 cells[i] 搬回 matched_contract。
+        # cells[i] 里刻意不留同名键:任何还去 cell 上取 init_noise_std 的旧代码会直接
+        # KeyError,而不是读到一个"看起来是本格的、其实全格相同"的数字。
+        "exploration_axis_is_registered_difference": False,
+        "exploration_package": copy.deepcopy(
+            EXPLORATION_PACKAGES[MATCHED_EXPLORATION_PACKAGE]
+        ),
         "ppo": copy.deepcopy(SHARED_PPO),
         "ppo_adaptation_axis": "fixed_learning_rate",
         "entropy_coef": 0.01,
@@ -418,20 +562,27 @@ def _build_canonical_manifest() -> dict:
         "control_step_action_delay": [0, 0],
         "contact_sigma_adaptation": False,
         "contact_sigma_contract": "static_rollout0_widths",
+        # 出生位姿仍然是标准站位:上一轮落地的 start_pose_ramp 挂在 DR-L1 那两片 leaf
+        # 上,本四格跑的是 DR-L0 / DR-L0N,斜坡不参与。写在这里是为了让"四格用的是
+        # 标准初始化"这句话在收据里有据可查,而不是靠读者记得。
+        "start_pose_ramp": None,
     }
     unsigned = {
-        "schema_version": 3,
+        "schema_version": 4,
         "kind": KIND,
         "formal_cell_count": 4,
         "cell_order": list(CELL_IDS),
         "matched_contract": matched,
         "registered_difference_axes": [
             "task_semantics_and_reward",
-            "actor_initialization_and_exploration_sigma_cell",
+            "policy_observation_corruption_cell",
         ],
         "deferred_difference_axes": [
             # exp §5.6.2c:在从未观测到一次接触前,LR schedule 的差异无法被任何指标分辨。
             "ppo_learning_rate_schedule_cell",
+            # exp §5.6.2d:探索包这一轴本轮定死在标准初始化 + sigma 1.0(对齐
+            # BeyondMimic / build_1),零权重 bootstrap 路线降级为 later。
+            "actor_initialization_and_exploration_sigma_cell",
         ],
         "adaptive_term_disambiguation": {
             "adaptive_means": "ppo_kl_learning_rate_schedule",
@@ -440,31 +591,37 @@ def _build_canonical_manifest() -> dict:
             "init_noise_std_is": (
                 "static_ppo_action_distribution_initialization_not_a_controller"
             ),
+            # 别把这两件事混成一个词:PPO 的 init_noise_std 是**动作分布**的探索噪声,
+            # 由算法配方拥有;policy_observation_corruption 是**观测**噪声,由 DR 档拥有。
+            # 本轮四格改的是后者,前者四格相同。
+            "policy_observation_corruption_is": (
+                "sensor_side_observation_noise_owned_by_the_dr_level_not_the_ppo_recipe"
+            ),
         },
         "cells": [
             _cell(
-                A_BOOTSTRAP_CELL_ID,
+                A_OBS_NOISE_OFF_CELL_ID,
                 "A211",
                 "desired_contact_dense",
-                ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+                False,
             ),
             _cell(
-                A_STANDARD_INIT_CELL_ID,
+                A_OBS_NOISE_ON_CELL_ID,
                 "A211",
                 "desired_contact_dense",
-                ACTOR_INIT_MODE_DEFAULT,
+                True,
             ),
             _cell(
-                C_BOOTSTRAP_CELL_ID,
+                C_OBS_NOISE_OFF_CELL_ID,
                 "C211",
                 "achieved_contact_outcome_only",
-                ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS,
+                False,
             ),
             _cell(
-                C_STANDARD_INIT_CELL_ID,
+                C_OBS_NOISE_ON_CELL_ID,
                 "C211",
                 "achieved_contact_outcome_only",
-                ACTOR_INIT_MODE_DEFAULT,
+                True,
             ),
         ],
     }
@@ -473,20 +630,30 @@ def _build_canonical_manifest() -> dict:
 
 
 def _require_one_registered_difference_axis(cells: Sequence[Any]) -> None:
-    """Reject any grid where the two family cells differ outside the exploration axis.
+    """Reject any grid where the two family cells differ outside the noise axis.
 
-    人话:对照实验的前提是"只有初始化与 sigma 不同"。此处逐字段比对同族两格,除探索包
-    五个键之外任何差异(包括 PPO)一律拒;跨族只允许 task 语义/reward 不同。
+    人话:对照实验的前提是"只有本体感观测噪声的开关不同"。此处逐字段比对同族两格,
+    除观测噪声包五个键之外任何差异(包括 PPO)一律拒;跨族只允许 task 语义/reward
+    不同。另外硬性要求:探索包这一轴已经**不是**差异轴,所以四格 cell 上一个探索键
+    都不许出现 —— 出现了就说明有人把已定死的轴又偷偷变回了变量。
     """
 
     if type(cells) not in (list, tuple) or len(cells) != len(CELL_IDS):
         raise FourGridContractError("four-grid must hold exactly four cells")
+    for row in cells:
+        stray = sorted(key for key in EXPLORATION_CELL_KEYS if key in row)
+        if stray:
+            raise FourGridContractError(
+                "the exploration package is matched across all four cells and "
+                "lives in matched_contract; cell %r still carries %r"
+                % (row.get("cell_id"), stray)
+            )
     for family, expected_ids in FAMILY_CELL_IDS.items():
         rows = [row for row in cells if row["task_family"] == family]
         if [row["cell_id"] for row in rows] != list(expected_ids):
             raise FourGridContractError("four-grid family cell order differs")
         first, second = rows
-        varying = set(EXPLORATION_CELL_KEYS) | {"cell_id"}
+        varying = set(OBSERVATION_NOISE_CELL_KEYS) | {"cell_id"}
         if set(first) != set(second):
             raise FourGridContractError("four-grid family cells have different fields")
         for key in first:
@@ -494,14 +661,14 @@ def _require_one_registered_difference_axis(cells: Sequence[Any]) -> None:
                 continue
             if first[key] != second[key]:
                 raise FourGridContractError(
-                    "%s cells differ outside the registered exploration axis: %s"
-                    % (family, key)
+                    "%s cells differ outside the registered observation-noise "
+                    "axis: %s" % (family, key)
                 )
-        modes = {row["actor_init_mode"] for row in rows}
-        if modes != set(ACTOR_INIT_MODES):
+        switches = {row["policy_observation_corruption"] for row in rows}
+        if switches != {False, True}:
             raise FourGridContractError(
-                "%s cells must cover both registered actor init modes exactly once"
-                % family
+                "%s cells must cover the observation-noise switch off and on "
+                "exactly once" % family
             )
 
 
@@ -573,7 +740,10 @@ def cell_for_family(cell_id: Any, task_family: Any) -> dict:
     matches = [row for row in value["cells"] if row["cell_id"] == cell_id]
     if len(matches) != 1 or matches[0]["task_family"] != task_family:
         raise FourGridContractError("four-grid family registry is inconsistent")
-    validate_exploration_package(matches[0])
+    validate_observation_noise_package(matches[0])
+    # 探索包已经是全格相同的 matched 项;这里顺手复核一遍,免得有人只改了
+    # matched_contract 的一半就把 manifest 重新封印。
+    validate_exploration_package(value["matched_contract"]["exploration_package"])
     return copy.deepcopy(matches[0])
 
 
@@ -642,11 +812,14 @@ if (
     != CANONICAL_TEACHER_PROJECTION_SHA256
 ):
     raise RuntimeError("canonical Take061 teacher projection drifted")
-# 2026-08-05 重钉(第二次,先算后写):第二轴由 PPO schedule 换成探索包(exp §5.6.2c),
-# 四格 cell_id 全部改名、init_noise_std/noise_std_type 从 matched_contract 下放到每格、
-# 新增 actor_init_mode 与 four_sigma_hard_inner_gate_applies、schema 2 -> 3、kind v2 -> v3、
-# 四格 PPO 统一为 fixed lr1e-4。故 content seal 随之更新。
-# 旧值 960fed56...c6e0 只代签本次改名与下放之前的字节;更旧的 823d6d88...0709 只代签
-# 2026-08-05 层级对齐之前的字节。
-if CONTENT_SHA256 != "1bc1df349b3f66316c81f5b0b2a6a79b3b84735c4a489c0e910943fc751ab1ca":
+# 2026-08-05 重钉(第三次,先算后写):第二轴由探索包换成**本体感观测噪声开关**
+# (exp §5.6.2d)。四格 cell_id 全部改名;探索包(exploration_axis / actor_init_mode /
+# init_noise_std / noise_std_type / four_sigma_hard_inner_gate_applies)从每格 cells[i]
+# 收回 matched_contract.exploration_package,四格统一为标准 rsl_rl 初始化 + sigma 1.0 +
+# scalar;每格新增 observation_noise_axis / policy_observation_corruption /
+# proprioceptive_observation_noise_channels / task_channel_observation_noise /
+# dr_level_identity 五键;schema 3 -> 4、kind v3 -> v4。故 content seal 随之更新。
+# 旧值 1bc1df34...1ca 只代签本次换轴之前的字节;更旧的 960fed56...c6e0 与
+# 823d6d88...0709 分别只代签再往前两次改动之前的字节。
+if CONTENT_SHA256 != "803144ef571bdca1543df8aa12a85ece06156df96ff119b93726ed1e3626445a":
     raise RuntimeError("formal A211/C211 Isaac four-grid manifest drifted")

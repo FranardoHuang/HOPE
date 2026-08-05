@@ -10289,13 +10289,23 @@ def _build_training_hard_contract(
     action_ball_dr_l0_contract = _action_ball_dr_l0_runtime_contract(
         env_cfg, policy_bootstrap=action_ball_policy_bootstrap
     )
+    action_ball_dr_l0n_contract = _action_ball_dr_l0n_runtime_contract(
+        env_cfg, policy_bootstrap=action_ball_policy_bootstrap
+    )
     action_ball_dr_l1_contract = _action_ball_dr_l1_runtime_contract(env_cfg)
     if (
-        action_ball_dr_l0_contract is not None
-        and action_ball_dr_l1_contract is not None
+        sum(
+            contract is not None
+            for contract in (
+                action_ball_dr_l0_contract,
+                action_ball_dr_l0n_contract,
+                action_ball_dr_l1_contract,
+            )
+        )
+        > 1
     ):
         raise RuntimeError(
-            "ActionBall DR-L0 and DR-L1 runtime contracts cannot coexist"
+            "ActionBall DR-L0, DR-L0N and DR-L1 runtime contracts cannot coexist"
         )
     # 精简治理 2026-08-05:这里原本把同一个 env_cfg 再算一遍 receipt,然后跟 _run() 传进来的
     # 那份比对("effective reward recipe changed between pre-gym composition and runtime")。
@@ -11166,6 +11176,11 @@ def _build_training_hard_contract(
         ),
         **(
             {}
+            if action_ball_dr_l0n_contract is None
+            else {"action_ball_dr_l0n": action_ball_dr_l0n_contract}
+        ),
+        **(
+            {}
             if action_ball_dr_l1_contract is None
             else {"action_ball_dr_l1": action_ball_dr_l1_contract}
         ),
@@ -11405,6 +11420,11 @@ _ACTION_BALL_DR_L0_KEYS = (
 
 _ACTION_BALL_DR_L0_RUNTIME_ATTR = "_action_ball_dr_l0_runtime_contract"
 
+# DR-L0N 的噪声只允许是"加性均匀"。这个字面量与
+# training_contract.ACTION_BALL_DR_L0N_NOISE_OPERATION 必须一字不差(有测试对拍);
+# 之所以在这里留一份,是因为漂移检查跑在 finalizer 之外,不该为读一个常量去 import。
+_ACTION_BALL_DR_L0N_NOISE_OPERATION = "add"
+
 _ACTION_BALL_DR_L0_EVENT_SLOTS = (
     "physics_material",
     "add_joint_default_pos",
@@ -11520,13 +11540,92 @@ def _action_ball_dr_l0_zero_pair(value) -> bool:
     return True
 
 
-def _action_ball_dr_l0_composed_state_drift(env_cfg) -> dict:
+def _action_ball_policy_observation_noise_table(policy) -> dict:
+    """Describe the per-term noise actually attached to the policy obs group.
+
+    人话:把"这一路带不带噪、带多大"逐项摊开,让上层能逐字对照声明的通道表。
+    不认识的噪声类型不静默放行,原样记成 repr 交给调用方判成漂移。
+    """
+
+    table = {}
+    # 用 dir() 而不是 vars():Isaac 的 configclass 是 dataclass,某些字段可能只挂在类上
+    # 而不在实例 __dict__ 里。漏读一路 = 漏检一路带噪,所以这里宁可扫全集再按 .func 过滤。
+    for name in sorted(set(dir(policy)) | set(vars(policy))):
+        if name.startswith("_"):
+            continue
+        term = getattr(policy, name, None)
+        if term is None or not hasattr(term, "func"):
+            continue
+        noise = getattr(term, "noise", None)
+        if noise is None:
+            table[name] = None
+            continue
+        n_min = getattr(noise, "n_min", None)
+        n_max = getattr(noise, "n_max", None)
+        if (
+            type(noise).__name__ != "UniformNoiseCfg"
+            or isinstance(n_min, bool)
+            or isinstance(n_max, bool)
+            or not isinstance(n_min, (int, float))
+            or not isinstance(n_max, (int, float))
+            or not math.isfinite(float(n_min))
+            or not math.isfinite(float(n_max))
+        ):
+            table[name] = repr(noise)
+            continue
+        table[name] = {
+            "operation": str(getattr(noise, "operation", "")),
+            "bounds": [float(n_min), float(n_max)],
+        }
+    return table
+
+
+def _action_ball_policy_observation_noise_drift(policy, channels) -> dict:
+    """Reject any policy obs group whose noise differs from the declared table.
+
+    ``channels`` maps term name -> [n_min, n_max].  Every listed term must carry
+    exactly that additive uniform noise; **every other term must carry none**,
+    which is how the task channels (desired contact / incoming ball / timing)
+    are kept unnoised — noising those would change the support set, i.e. ask a
+    different question rather than model a worse sensor.
+    """
+
+    observed = _action_ball_policy_observation_noise_table(policy)
+    drift = {}
+    for name, bounds in sorted(channels.items()):
+        want = {
+            "operation": _ACTION_BALL_DR_L0N_NOISE_OPERATION,
+            "bounds": [float(bounds[0]), float(bounds[1])],
+        }
+        if name not in observed:
+            drift[name] = "<missing>"
+        elif observed[name] != want:
+            drift[name] = observed[name]
+    for name, value in observed.items():
+        if name in channels:
+            continue
+        if value is not None:
+            drift[name] = value
+    return drift
+
+
+def _action_ball_dr_l0_composed_state_drift(
+    env_cfg, *, policy_observation_noise_channels=None
+) -> dict:
     """Describe every non-L0 byte in the fully composed environment cfg.
 
     DR-L0 is a causal nominal-plant experiment, not shorthand for three Hydra
     switches.  Re-open every relevant producer after all task overrides so a
     CLI override or later cfg mutation cannot quietly add robustness difficulty
     while retaining the DR-L0 lineage name.
+
+    ``policy_observation_noise_channels`` is the single byte DR-L0N moves:
+    ``None`` (the DR-L0 default) demands corruption OFF, and a channel mapping
+    demands corruption ON with exactly those channels noised.  One argument
+    carries both facts on purpose — "corruption on" with no declared channel
+    table is not a state anyone may ask for.  The plant half of this checker is
+    shared verbatim so "L0N is L0 plus the sensor" is enforced by one
+    implementation instead of two lists that can drift apart.
     """
 
     drift = {}
@@ -11543,13 +11642,31 @@ def _action_ball_dr_l0_composed_state_drift(env_cfg) -> dict:
         if non_absent_events:
             drift["event_slots"] = non_absent_events
 
+    expect_corruption = policy_observation_noise_channels is not None
     policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
-    if policy is None or getattr(policy, "enable_corruption", None) is not False:
+    if (
+        policy is None
+        or getattr(policy, "enable_corruption", None) is not expect_corruption
+    ):
         drift["observations.policy.enable_corruption"] = (
             "<missing>"
             if policy is None
             else getattr(policy, "enable_corruption", None)
         )
+    elif expect_corruption:
+        noise_drift = _action_ball_policy_observation_noise_drift(
+            policy, policy_observation_noise_channels
+        )
+        if noise_drift:
+            drift["observations.policy.noise"] = noise_drift
+        # DR-L0N 的 payload 明写 critic_group_corruption=False。不查就只是个说法:
+        # 非对称 actor-critic 的前提是 critic 看的是干净的特权观测,critic 也带噪
+        # 等于把这一档偷偷换成"两边都退化",那不是本轴要测的东西。
+        critic = getattr(getattr(env_cfg, "observations", None), "critic", None)
+        if critic is not None and getattr(critic, "enable_corruption", None) is not False:
+            drift["observations.critic.enable_corruption"] = getattr(
+                critic, "enable_corruption", None
+            )
 
     joint_action = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
     delay = (
@@ -11664,13 +11781,18 @@ def _resolve_action_ball_dr_l0_request(dr) -> bool:
     if values == _ACTION_BALL_DR_L1_TUPLE and not stable_ready_plant:
         # 这是 DR-L1 的注册元组,不是"混合的 L0"。交给 L1 解析器,别在这里报错。
         return False
+    if values == _ACTION_BALL_DR_L0N_TUPLE and stable_ready_plant:
+        # 这是 DR-L0N 的注册元组(plant 与 L0 逐字节相同,只开本体感观测噪声)。
+        # 交给 L0N 解析器,别在这里当成"混合的 L0"报错。
+        return False
     enabled = {key: value for key, value in values.items() if value}
     if enabled:
         raise _OverrideError(
             "[train.py] ActionBall DR-L0 is the exact all-off tuple; mixed or "
             f"enabled axes are not registered: {enabled!r} "
-            f"(the only other registered level is DR-L1 "
-            f"{_ACTION_BALL_DR_L1_TUPLE!r} with stable_ready_plant=false)"
+            f"(the other registered levels are DR-L0N "
+            f"{_ACTION_BALL_DR_L0N_TUPLE!r} with stable_ready_plant=true and "
+            f"DR-L1 {_ACTION_BALL_DR_L1_TUPLE!r} with stable_ready_plant=false)"
         )
     if not stable_ready_plant:
         raise _OverrideError(
@@ -11678,6 +11800,168 @@ def _resolve_action_ball_dr_l0_request(dr) -> bool:
             "CoM/link-mass/PD-gain axes are disabled in the same finalizer"
         )
     return True
+
+
+# --------------------------------------------------------------------------- #
+# DR-L0N: plant 与 DR-L0 逐字节相同,只把**本体感观测噪声**打开
+#
+# 这是四格实验的第二根轴(尽调 §22),不是一档更强的 DR。被控对象没有任何变化 ——
+# 摩擦/质量/CoM/PD/关节零点/推力/复位噪声/执行器延迟全部保持 DR-L0 的关闭态;
+# 唯一的差别是 actor 看到的三路本体感通道叠了噪声:
+#     joint_pos ±0.01 rad / joint_vel ±0.5 rad·s⁻¹ / base_ang_vel ±0.2 rad·s⁻¹
+# 这三行不是新编的数,是 hope_env_cfg 的 ActionBall{A,C}211PolicyCfg 里本来就写着的
+# Unoise 边界(与智元、build_1 同区间)。本档只决定它们要不要生效。
+#
+# 为什么要花两格去测:§22 判"D1 开满",证据是外部 9/9 库 day-1 全开 + 智元连 play 都
+# 保留 + build_1 全开,零反例;DR-L0 的裁定相反,判它会改估计误差与终止率,所以为了
+# 归因先关。两边都是推理,谁都没实测过 —— 恢复的那批随机性里,这是唯一有真冲突的
+# 一条,而成本只是一个布尔。
+#
+# 任务通道不加噪(§22 闸 1):给 desired-contact / incoming-ball / 时间这些通道加噪
+# 会改支撑集,那是换题,不是换传感器。finalizer 逐项复核,多一路带噪当场拒。
+# --------------------------------------------------------------------------- #
+_ACTION_BALL_DR_L0N_TUPLE = {
+    "startup_physics_material": False,
+    "startup_joint_default_pos": False,
+    "policy_observation_corruption": True,
+}
+
+_ACTION_BALL_DR_L0N_RUNTIME_ATTR = "_action_ball_dr_l0n_runtime_contract"
+
+
+def _resolve_action_ball_dr_l0n_request(dr) -> bool:
+    """Recognize only the complete, registered DR-L0N finalizer tuple."""
+
+    present = tuple(
+        key for key in _ACTION_BALL_DR_L0_KEYS if _mapping_has_key(dr, key)
+    )
+    if present != _ACTION_BALL_DR_L0_KEYS:
+        return False
+    values = {
+        key: _as_explicit_bool(_get(dr, key), f"task.domain_rand.{key}")
+        for key in _ACTION_BALL_DR_L0_KEYS
+    }
+    if values != _ACTION_BALL_DR_L0N_TUPLE:
+        return False
+    if not _as_explicit_bool(
+        _get(dr, "stable_ready_plant"),
+        "task.domain_rand.stable_ready_plant",
+    ):
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L0N keeps the DR-L0 nominal plant and "
+            "only enables proprioceptive observation noise, so it requires "
+            "stable_ready_plant=true; stable_ready_plant=false is the DR-L1 "
+            "spelling and would silently change the plant as well"
+        )
+    return True
+
+
+def _apply_action_ball_dr_l0n_finalizer(env_cfg, dr, applied) -> bool:
+    """Verify the DR-L0 plant plus the declared proprioceptive sensor noise."""
+
+    if not _resolve_action_ball_dr_l0n_request(dr):
+        return False
+    _contract = _training_contract_module()
+    ACTION_BALL_DR_L0N_IDENTITY = _contract.ACTION_BALL_DR_L0N_IDENTITY
+    channels = _contract.ACTION_BALL_DR_L0N_PROPRIO_NOISE_CHANNELS
+
+    events = getattr(env_cfg, "events", None)
+    _require(events is not None, "events (ActionBall DR-L0N finalizer)")
+    for name in _ACTION_BALL_DR_L0_EVENT_SLOTS:
+        _require(
+            hasattr(events, name), f"events.{name} (ActionBall DR-L0N finalizer)"
+        )
+    policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
+    _require(
+        policy is not None and hasattr(policy, "enable_corruption"),
+        "observations.policy.enable_corruption (ActionBall DR-L0N finalizer)",
+    )
+
+    # 与 DR-L0 同样的最终状态写法:这里重复赋值不是"多次尽力而为的编辑",而是把
+    # 唯一有意义的那份最终状态一次写清楚。plant 全关,传感器打开。
+    events.physics_material = None
+    events.add_joint_default_pos = None
+    events.base_com = None
+    events.randomize_link_mass = None
+    events.randomize_pd_gains = None
+    policy.enable_corruption = True
+    drift = _action_ball_dr_l0_composed_state_drift(
+        env_cfg, policy_observation_noise_channels=channels
+    )
+    if drift:
+        raise _OverrideError(
+            "[train.py] ActionBall DR-L0N post-finalizer state did not hold: "
+            f"{drift!r}"
+        )
+    setattr(
+        env_cfg,
+        _ACTION_BALL_DR_L0N_RUNTIME_ATTR,
+        _contract.action_ball_dr_l0n_contract_payload(),
+    )
+    applied.append(
+        f"task.domain_rand={ACTION_BALL_DR_L0N_IDENTITY} "
+        "(DR-L0 plant byte-for-byte: events.physics_material/"
+        "add_joint_default_pos/base_com/randomize_link_mass/"
+        "randomize_pd_gains/push*=None; reset/target noise=0; action "
+        "delay=[0,0]; the one difference is "
+        "observations.policy.enable_corruption=true over the declared "
+        f"proprioceptive channels {sorted(channels)!r} with task channels "
+        "left unnoised)"
+    )
+    return True
+
+
+def _action_ball_dr_l0n_runtime_contract(
+    env_cfg, *, policy_bootstrap: dict | None
+) -> dict | None:
+    """Re-open the final DR-L0N state before minting the hard contract.
+
+    Same discipline as DR-L0: the marker alone is not evidence.  The absent
+    startup event must still decode as an ordered 31-D zero delta — DR-L0N adds
+    a sensor, it does not restore a plant axis — and the live corruption switch
+    plus the per-term noise table are re-read after Gym/Isaac construction.
+    """
+
+    marker = getattr(env_cfg, _ACTION_BALL_DR_L0N_RUNTIME_ATTR, None)
+    if marker is None:
+        return None
+    _contract = _training_contract_module()
+    expected = _contract.action_ball_dr_l0n_contract_payload()
+    if marker != expected:
+        raise RuntimeError(
+            "ActionBall DR-L0N runtime marker differs from its canonical payload"
+        )
+    drift = _action_ball_dr_l0_composed_state_drift(
+        env_cfg,
+        policy_observation_noise_channels=(
+            _contract.ACTION_BALL_DR_L0N_PROPRIO_NOISE_CHANNELS
+        ),
+    )
+    if drift:
+        raise RuntimeError(
+            "ActionBall DR-L0N runtime state drifted after finalization: "
+            f"{drift!r}"
+        )
+    if not isinstance(policy_bootstrap, dict):
+        raise RuntimeError(
+            "ActionBall DR-L0N requires a fresh policy/bootstrap/normalizer lineage"
+        )
+    decoder = policy_bootstrap.get("decoder")
+    zero = expected["startup_offset_delta"]
+    if (
+        not isinstance(decoder, dict)
+        or decoder.get("startup_offset_delta_source") != zero["source"]
+        or decoder.get("startup_offset_delta_lower") != zero["lower"]
+        or decoder.get("startup_offset_delta_upper") != zero["upper"]
+        or not isinstance(decoder.get("startup_offset_delta_identity"), dict)
+        or decoder["startup_offset_delta_identity"].get("startup_offset_delta")
+        != zero["lower"]
+    ):
+        raise RuntimeError(
+            "ActionBall DR-L0N bootstrap does not prove the exact ordered 31-D "
+            "zero startup delta"
+        )
+    return expected
 
 
 # --------------------------------------------------------------------------- #
@@ -16921,11 +17205,12 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             stable_ready_plant=stable_ready_plant,
         )
         _l0_applied = _apply_action_ball_dr_l0_finalizer(env_cfg, dr, applied)
+        _l0n_applied = _apply_action_ball_dr_l0n_finalizer(env_cfg, dr, applied)
         _l1_applied = _apply_action_ball_dr_l1_finalizer(env_cfg, dr, applied)
-        if _l0_applied and _l1_applied:
+        if sum((_l0_applied, _l0n_applied, _l1_applied)) > 1:
             raise _OverrideError(
-                "[train.py] ActionBall DR-L0 and DR-L1 cannot both finalize "
-                "one environment"
+                "[train.py] ActionBall DR-L0, DR-L0N and DR-L1 are mutually "
+                "exclusive; exactly one may finalize one environment"
             )
 
     # These must be the final command/observation mutations: each formal mode

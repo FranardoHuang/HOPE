@@ -382,14 +382,20 @@ class BoundLauncherHelpers:
             self.ISAAC_FOUR_GRID_KIND = four_grid.KIND
             self.ISAAC_FOUR_GRID_CELL_IDS = four_grid.CELL_IDS
             self.FORMAL_GRID_STAGE_ORDER = four_grid.FORMAL_STAGE_ORDER
-            self.A_BOOTSTRAP_CELL_ID = four_grid.A_BOOTSTRAP_CELL_ID
-            self.A_STANDARD_INIT_CELL_ID = four_grid.A_STANDARD_INIT_CELL_ID
-            self.C_BOOTSTRAP_CELL_ID = four_grid.C_BOOTSTRAP_CELL_ID
-            self.C_STANDARD_INIT_CELL_ID = four_grid.C_STANDARD_INIT_CELL_ID
+            self.A_OBS_NOISE_OFF_CELL_ID = four_grid.A_OBS_NOISE_OFF_CELL_ID
+            self.A_OBS_NOISE_ON_CELL_ID = four_grid.A_OBS_NOISE_ON_CELL_ID
+            self.C_OBS_NOISE_OFF_CELL_ID = four_grid.C_OBS_NOISE_OFF_CELL_ID
+            self.C_OBS_NOISE_ON_CELL_ID = four_grid.C_OBS_NOISE_ON_CELL_ID
             self.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS = (
                 four_grid.ACTOR_INIT_MODE_ZERO_WEIGHT_READY_BIAS
             )
             self.ACTOR_INIT_MODE_DEFAULT = four_grid.ACTOR_INIT_MODE_DEFAULT
+            self.DR_LEVEL_IDENTITY_OBS_NOISE_OFF = (
+                four_grid.DR_LEVEL_IDENTITY_OBS_NOISE_OFF
+            )
+            self.DR_LEVEL_IDENTITY_OBS_NOISE_ON = (
+                four_grid.DR_LEVEL_IDENTITY_OBS_NOISE_ON
+            )
 
     # -- 逐字相同:_exact_dict ---------------------------------------------
     def _exact_dict(self, value: Any, keys: Sequence[str], *, name: str) -> dict:
