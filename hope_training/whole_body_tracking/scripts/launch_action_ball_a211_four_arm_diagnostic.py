@@ -1295,14 +1295,30 @@ def _initial_center_timing_authority(
         scaled_t_hit_s = float(receipt["scaled_t_hit_s"])
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
         raise LaunchRefused("initial-center timing receipt clocks are malformed") from exc
-    if family == "A":
-        derived_wait_s = time_to_contact_s - scaled_t_hit_s
-        derivation = "time_to_contact_s_minus_scaled_t_hit_s"
-        timing_mode = "a_online_solver"
-    else:
-        derived_wait_s = time_to_contact_s - reference_t_hit_s
-        derivation = "time_to_contact_s_minus_reference_t_hit_s"
-        timing_mode = "c_direct_ball"
+    # [2026-08-06 Franco 裁定] A 和 C 用同一条等待律, 就是运行时真正执行的那条。
+    #
+    # 人话: C 以前单独执行 `wait == time_to_contact_s - reference_t_hit_s`, 那等价于
+    # 要求 `teacher_rate` 恰好等于 1.0(教师原速)。运行时里没有这条律 ——
+    # hope_commands.py 对所有题源(包括 C 的 direct_ball)一律算
+    # `pre_swing_wait_s = time_to_contact_s - scaled_t_hit_s`, 而且 direct_ball 自己
+    # 吐的收据还要过 `_action_ball_assert_emitted_task_reference_and_timing`, 那道断言
+    # 正是拿运行时的 `derive_action_teacher_site_timing` 逐字段重算的, 没有 C 的例外
+    # 分支。所以旧的 C 律是一条运行时未实现、也没有任何 producer 产出过的平行定时律:
+    # 2026-08-06 全仓清点 configs 下 54 份 schema_version=5 收据, 54 份满足运行时这条,
+    # 0 份满足旧 C 律(唯一"满足"过它的是一份手改数值后重封 canonical_sha256 的测试
+    # 夹具, 那不是证据)。
+    #
+    # 为什么不改成让 C 产一份原速收据: Franco 裁定"C 的老师速度不需要改, 因为速度不会
+    # 差很多, 让 policy 自己学会泛化"。C 的运行时载体(教师 FK 参考行)确实给出
+    # teacher_rate≈1.0, 而这份标定收据的载体是 current_lm 逆解速度, 速率差约 15%
+    # (0.851 对 1.0)。这个差只影响被记录下来的标定数字, 不影响任何运行时行为
+    # (见下面 role=calibration_receipt_not_runtime_question_source), 所以按裁定接受,
+    # 不为它再造第二条定时律。
+    #
+    # family 仍然保留: `timing_mode` 要如实记下这份标定被哪一个运行时题源消费。
+    derived_wait_s = time_to_contact_s - scaled_t_hit_s
+    derivation = "time_to_contact_s_minus_scaled_t_hit_s"
+    timing_mode = "a_online_solver" if family == "A" else "c_direct_ball"
     center_identity = {
         "action_uid": ACTION_UID,
         "motion_sha256": motion_sha256,

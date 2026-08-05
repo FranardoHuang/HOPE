@@ -184,6 +184,35 @@ CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
 TASK_PROFILE_ID = "HOPEPingPongActionBallC211VendorV2N1DRL0Learnability"
 GYM_TASK_ID = "HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0"
 TARGET_SEMANTICS = "c211_incoming_ball_p_v_spin_outcome_dense_v1"
+# [2026-08-06 载体错配核查结论: 对运行时无害, 只影响被记录的标定数字]
+#
+# `TARGET_RECIPE` 在运行时唯一的含义是选中全关的目标有效位:
+# `hope_commands._action_ball_target_recipe_contract` 只用它查
+# `_ACTION_BALL_TARGET_VALIDITY_BY_RECIPE`, 并强制 direct_ball 必须配
+# outcome_dense_only + (False, False, False)。它不是收据选择器 —— 全仓没有任何一处
+# 用 TARGET_RECIPE 去挑 `initial_center_task_receipt` 该是哪一份文件。
+#
+# 离线 producer 里 outcome_dense_only 的
+# `algorithm_id = coherent_current_lm_carrier_mask_all_targets`, 即"借 current_lm 的
+# 载体、把所有目标位掩掉"。实测这两份收据的字节完全相同(同一 sha256), recipe 之间的
+# 区别只落在 tape 的 `target_producer_sha256` 上, 不落在收据内容上。
+#
+# C 的运行时在 direct_ball 分支(hope_commands.py 约 9401 行)用的是另一个载体:
+# `_action_ball_reference_velocity_host_rows` / `_action_ball_reference_raw_normal_host_rows`,
+# 也就是教师 FK 参考行, 不调任何 LM/解析逆解(`reset_inverse_solve=False`,
+# `online_lm_calls=0`)。同一份题在两个载体下的教师速率: 教师 FK 载体≈1.0
+# (producer 的 teacher_pos_face_no_velocity 实测 0.9999999716), current_lm 载体
+# 0.8513505673, 差约 15%。
+#
+# 判定为无害的理由: 这份被钉的 `initial_center_task_receipt` 的角色是
+# `calibration_receipt_not_runtime_question_source` —— 它不是运行时题源, 不进 argv,
+# 运行时一个字段都不读它; C 的题由 `runtime_curriculum_sampler` 现场采样, 收据由运行时
+# 自己吐、并被运行时自己的 derive_action_teacher_site_timing 逐字段复核。载体错配的
+# 全部后果, 是发射凭据里记下的 `time_to_teacher_start_at_reveal_s` 取的是 current_lm
+# 载体的 0.6924 s 而不是教师载体的 0.8600 s; 隐藏 WAIT 的真实长度由
+# `WAIT_SCHEDULE["max_wait_ticks"]` 定, 与这个数字无关。
+#
+# 按 Franco 2026-08-06 裁定, 速率差交给 policy 泛化, 不改 TARGET_RECIPE、不新造原速配方。
 TARGET_RECIPE = "outcome_dense_only"
 TARGET_VALIDITY_MASK = (False, False, False)
 TARGET_SOURCE = "direct_ball"

@@ -59,6 +59,29 @@ trainability = importlib.util.module_from_spec(TRAINABILITY_SPEC)
 sys.modules[TRAINABILITY_SPEC.name] = trainability
 TRAINABILITY_SPEC.loader.exec_module(trainability)
 
+# The exact runtime clock the launcher gate must agree with.  ``action_ball_runtime``
+# is deliberately dependency-light (stdlib only), so a CPU-only launcher test can
+# import the very function ``hope_commands`` re-derives every emitted receipt from.
+RUNTIME_SOURCE = (
+    SCRIPT.parent.parent
+    / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/"
+    "action_ball_runtime.py"
+)
+RUNTIME_SPEC = importlib.util.spec_from_file_location(
+    "action_ball_runtime_for_c211_launcher_test", RUNTIME_SOURCE
+)
+runtime = importlib.util.module_from_spec(RUNTIME_SPEC)
+sys.modules[RUNTIME_SPEC.name] = runtime
+RUNTIME_SPEC.loader.exec_module(runtime)
+
+# Producer-emitted bytes, never hand-edited and never re-sealed: the center-stratum
+# ``outcome_dense_only`` target receipt from the fixed-tape build.
+INITIAL_CENTER_C_RECEIPT_SOURCE = Path(__file__).resolve().parents[3] / (
+    "configs/action_ball_n1_measured_20260803/"
+    "fresh_tape_seed0_20260803_take061_robust20n_r9_center/"
+    "outcome_dense_only.target.task_receipt.v5.f9e0ddf178aa.json"
+)
+
 
 def _real_runner_preflight_facts() -> dict:
     """Build the fixture through the same validator used by the real runner."""
@@ -530,32 +553,15 @@ def _lineage(checkout: Path) -> dict:
             "path": relative.as_posix(),
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         }
-    source_receipt = json.loads(
-        (
-            repo
-            / "configs/action_ball_n1_measured_20260803/"
-            "fresh_tape_seed0_20260803_take061_robust20n_r4_splitready/"
-            "current_lm.target.task_receipt.v5.f64f52137ad8.json"
-        ).read_text(encoding="utf-8")
-    )
-    source_receipt.pop("canonical_sha256")
-    source_receipt.update(
-        {
-            "sampling_stratum": "center",
-            "birth_sampling_stratum": "center",
-            "frontier_arm": None,
-            "birth_frontier_arm": None,
-            "time_to_contact_tick": 91,
-            "time_to_contact_s": 1.82,
-            "pre_swing_wait_s": 1.82 - source_receipt["reference_t_hit_s"],
-            "manifest_sha256": pins["action_manifest"]["sha256"],
-        }
-    )
-    source_receipt["canonical_sha256"] = launcher.canonical_sha256(source_receipt)
+    # 这份收据是 producer 原样吐出的字节, 一个数值都没改, canonical_sha256 也没重封。
+    # 它是 outcome_dense_only(即 C 钉的 TARGET_RECIPE)在 center 层的目标收据, 天然满足
+    # 运行时那条 `pre_swing_wait_s = time_to_contact_s - scaled_t_hit_s`。
+    receipt_bytes = INITIAL_CENTER_C_RECEIPT_SOURCE.read_bytes()
     receipt_path = checkout / "initial_center_c.task_receipt.v5.json"
+    receipt_path.write_bytes(receipt_bytes)
     pins["initial_center_task_receipt"] = {
         "path": receipt_path.name,
-        "sha256": _write(receipt_path, source_receipt),
+        "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
     }
     bundle_unsigned = {
         "schema_version": 4,
@@ -1869,7 +1875,16 @@ def test_c211_claim_seals_split_ready_hidden_wait_and_teacher_bridge(
     assert authority["observed_physics_steps"] == 240
     assert authority["physical_reset_source"] == "dynamic_ready.physical_ready"
     assert authority["teacher_source"] == "measured_motion.frame0"
-    assert authority["time_to_teacher_start_at_reveal_s"] == pytest.approx(0.86)
+    # C 与 A 同律: 等待 = 到达时间 - 缩放后的命中时刻, 就是运行时算的那条。
+    receipt = json.loads(
+        INITIAL_CENTER_C_RECEIPT_SOURCE.read_text(encoding="utf-8")
+    )
+    assert authority["time_to_teacher_start_at_reveal_s"] == (
+        receipt["time_to_contact_s"] - receipt["scaled_t_hit_s"]
+    )
+    assert authority["time_to_teacher_start_at_reveal_s"] == pytest.approx(
+        0.6923799138976297
+    )
     assert authority["initial_center_timing_authority"]["timing_mode"] == (
         "c_direct_ball"
     )
@@ -1884,6 +1899,215 @@ def test_c211_claim_seals_split_ready_hidden_wait_and_teacher_bridge(
         "action_ball_dynamic_ready_nominal_receipt_sha256=%s"
         % receipt_pin["sha256"]
     ) in argv
+
+
+def _initial_center_case(tmp_path: Path):
+    """Checkout + lineage + the untouched producer receipt the C gate reads."""
+
+    checkout = tmp_path / "initial-center-checkout"
+    checkout.mkdir()
+    lineage = _lineage(checkout)
+    receipt = json.loads(
+        (checkout / lineage["initial_center_task_receipt"]["path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    manifest = json.loads(
+        (checkout / lineage["action_manifest"]["path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    return lineage, manifest, receipt
+
+
+def _c_timing(lineage, manifest, receipt):
+    return launcher._FRAME0._initial_center_timing_authority(
+        receipt=receipt,
+        receipt_pin=lineage["initial_center_task_receipt"],
+        action_manifest=manifest,
+        action_manifest_pin=lineage["action_manifest"],
+        motion_sha256=lineage["motion"]["sha256"],
+        family="C",
+    )
+
+
+def _resealed(receipt: dict, **changes) -> dict:
+    """Mutation helper.  Only ever used to prove the gate REFUSES something."""
+
+    mutated = dict(receipt)
+    mutated.pop("canonical_sha256")
+    mutated.update(changes)
+    mutated["canonical_sha256"] = launcher.canonical_sha256(mutated)
+    return mutated
+
+
+def _runtime_timing(receipt: dict):
+    return runtime.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=receipt["racket_site_velocity_w_mps"],
+        time_to_contact_s=receipt["time_to_contact_s"],
+        reference_t_hit_s=receipt["reference_t_hit_s"],
+        reference_t_cycle_s=receipt["reference_t_cycle_s"],
+        reference_racket_site_speed_mps=(
+            receipt["reference_racket_site_speed_mps"]
+        ),
+        reaction_margin_s=receipt["reaction_margin_s"],
+        teacher_rate_min=receipt["teacher_rate_min"],
+        teacher_rate_max=receipt["teacher_rate_max"],
+    )
+
+
+def test_c211_initial_center_timing_is_the_runtime_wait_law(tmp_path):
+    """C 的定时门算的就是运行时那条式子, 不是一条平行的 C 专用律。
+
+    运行时 (``hope_commands``) 对所有题源, 包括 C 的 ``direct_ball``, 一律算
+    ``pre_swing_wait_s = time_to_contact_s - scaled_t_hit_s``, 并用
+    ``derive_action_teacher_site_timing`` 逐字段复核自己吐出的收据。这里直接调同一个
+    函数, 证明 producer 原样吐出的收据一位不差地满足它, 且发射门给出同一个数。
+    """
+
+    lineage, manifest, receipt = _initial_center_case(tmp_path)
+    live = _runtime_timing(receipt)
+    assert live.teacher_rate == receipt["teacher_rate"]
+    assert live.scaled_t_hit_s == receipt["scaled_t_hit_s"]
+    assert live.pre_swing_wait_s == receipt["pre_swing_wait_s"]
+    assert live.pre_swing_wait_s == (
+        receipt["time_to_contact_s"] - receipt["scaled_t_hit_s"]
+    )
+
+    timing = _c_timing(lineage, manifest, receipt)
+    assert timing["derivation"] == "time_to_contact_s_minus_scaled_t_hit_s"
+    assert timing["timing_mode"] == "c_direct_ball"
+    assert timing["family"] == "C"
+    assert timing["initial_center_time_to_teacher_start_at_reveal_s"] == (
+        live.pre_swing_wait_s
+    )
+    # 载体速率差约 15%: 教师 FK 载体 ~1.0, 这份 current_lm 载体 0.8513...。按 Franco
+    # 2026-08-06 裁定接受, 交给 policy 泛化。
+    assert timing["scaled_t_hit_s"] != timing["reference_t_hit_s"]
+    assert 0.84 < receipt["teacher_rate"] < 0.86
+
+
+def test_c211_initial_center_timing_refuses_a_tampered_wait(tmp_path):
+    """把 wait 改掉再重封 SHA, 门必须照样拒 —— 改门不等于放宽门。"""
+
+    lineage, manifest, receipt = _initial_center_case(tmp_path)
+    assert _c_timing(lineage, manifest, receipt)
+
+    for wait in (
+        # 退役的那条 C 律: 等价于强制 teacher_rate 恰好 1.0。运行时从没实现过它,
+        # 任何 producer 也没产出过满足它的收据。
+        receipt["time_to_contact_s"] - receipt["reference_t_hit_s"],
+        # 极小篡改也要拒: 门是精确相等, 不是 approx。
+        receipt["pre_swing_wait_s"] + 1.0e-15,
+        receipt["pre_swing_wait_s"] - 1.0e-15,
+        receipt["pre_swing_wait_s"] + 0.05,
+    ):
+        tampered = _resealed(receipt, pre_swing_wait_s=wait)
+        with pytest.raises(
+            launcher._FRAME0.LaunchRefused, match="timing derivation differs"
+        ):
+            _c_timing(lineage, manifest, tampered)
+
+    # 同族的其他时钟字段一并 fail-closed, 免得只把 wait 挡住而放过速率。
+    for changes in (
+        {"teacher_rate": receipt["teacher_rate"] * 1.01},
+        {"scaled_t_hit_s": receipt["scaled_t_hit_s"] + 1.0e-15},
+        {"time_to_contact_s": receipt["time_to_contact_s"] + 0.02},
+    ):
+        with pytest.raises(launcher._FRAME0.LaunchRefused):
+            _c_timing(lineage, manifest, _resealed(receipt, **changes))
+
+
+def test_c211_initial_center_timing_goes_red_if_the_runtime_clock_moves(
+    tmp_path, monkeypatch
+):
+    """动运行时的公式, C 的门就变红 —— 证明门跟的是运行时, 不是一条抄下来的常量。"""
+
+    lineage, manifest, receipt = _initial_center_case(tmp_path)
+    original = runtime.derive_action_teacher_timing
+
+    def shifted_clock(**kwargs):
+        timing = original(**kwargs)
+        return runtime.ActionTeacherTiming(
+            required_racket_site_speed_mps=(
+                timing.required_racket_site_speed_mps
+            ),
+            teacher_rate=timing.teacher_rate,
+            scaled_t_hit_s=timing.scaled_t_hit_s,
+            scaled_t_cycle_s=timing.scaled_t_cycle_s,
+            pre_swing_wait_s=timing.pre_swing_wait_s - 0.05,
+        )
+
+    monkeypatch.setattr(runtime, "derive_action_teacher_timing", shifted_clock)
+    moved = _runtime_timing(receipt)
+    assert moved.pre_swing_wait_s != receipt["pre_swing_wait_s"]
+    assert moved.scaled_t_hit_s == receipt["scaled_t_hit_s"]
+
+    # 收据由"改过公式的运行时"产出 —— 现在的 C 门必须拒。
+    with pytest.raises(
+        launcher._FRAME0.LaunchRefused, match="timing derivation differs"
+    ):
+        _c_timing(
+            lineage,
+            manifest,
+            _resealed(receipt, pre_swing_wait_s=moved.pre_swing_wait_s),
+        )
+
+    monkeypatch.undo()
+    assert _runtime_timing(receipt).pre_swing_wait_s == (
+        receipt["pre_swing_wait_s"]
+    )
+    assert _c_timing(lineage, manifest, receipt)[
+        "initial_center_time_to_teacher_start_at_reveal_s"
+    ] == receipt["pre_swing_wait_s"]
+
+
+def test_c211_initial_center_receipt_is_producer_bytes_never_resealed(tmp_path):
+    """夹具用的是 producer 原样吐出的字节, 没有手改数值再重封 canonical_sha256。"""
+
+    lineage, _manifest, receipt = _initial_center_case(tmp_path)
+    source = json.loads(
+        INITIAL_CENTER_C_RECEIPT_SOURCE.read_text(encoding="utf-8")
+    )
+    assert receipt == source
+    assert lineage["initial_center_task_receipt"]["sha256"] == hashlib.sha256(
+        INITIAL_CENTER_C_RECEIPT_SOURCE.read_bytes()
+    ).hexdigest()
+    unsigned = dict(source)
+    seal = unsigned.pop("canonical_sha256")
+    assert seal == launcher.canonical_sha256(unsigned)
+
+
+def test_c211_target_recipe_carrier_mismatch_stays_out_of_the_runtime(tmp_path):
+    """载体错配核查: 收据的载体不是 C 运行时的载体, 但运行时一个字段都不读它。
+
+    ``outcome_dense_only`` 的 producer 载体是 ``current_lm`` 逆解速度
+    (``coherent_current_lm_carrier_mask_all_targets``), 而 C 的运行时在
+    ``direct_ball`` 分支用的是教师 FK 参考行。差的只是这份标定收据里的速率/等待数字,
+    它既不进 argv 也不是运行时题源, 所以是无害错配。
+    """
+
+    lineage, manifest, receipt = _initial_center_case(tmp_path)
+    assert lineage["target_recipe"] == "outcome_dense_only"
+    assert lineage["target_source"] == "direct_ball"
+    assert lineage["reset_inverse_solve"] is False
+    assert lineage["online_lm_calls"] == 0
+    assert lineage["online_solver_calls"] == 0
+    assert lineage["question_source"] == "runtime_curriculum_sampler"
+
+    timing = _c_timing(lineage, manifest, receipt)
+    assert timing["role"] == "calibration_receipt_not_runtime_question_source"
+    # 收据里 C 用不到的逆解载体字段(位置/朝向/残差)从来没进过标定凭据。
+    carrier_only = (
+        "racket_site_target_w_m",
+        "racket_site_velocity_w_mps",
+        "racket_face_center_velocity_w_mps",
+        "racket_command_quat_wxyz",
+        "racket_normal_w",
+        "solver_residual_m",
+    )
+    assert all(field in receipt for field in carrier_only)
+    assert not any(field in timing for field in carrier_only)
 
 
 def _audit_scale_terminal(

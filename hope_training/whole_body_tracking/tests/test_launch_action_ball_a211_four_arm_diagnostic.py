@@ -1413,6 +1413,64 @@ def test_initial_center_timing_rejects_old_interior_tick92_receipt(tmp_path):
         )
 
 
+def test_a_family_initial_center_wait_law_is_unchanged(tmp_path):
+    """2026-08-06 C 对齐运行时公式那次改动, A 族的门一字未变。
+
+    A 一直执行的就是运行时那条 ``wait = time_to_contact_s - scaled_t_hit_s``。这里把
+    A 的判定式、``derivation``/``timing_mode`` 字面量, 以及"改了 wait 就拒"三件事一起
+    钉死, 这样以后任何人再动这个函数, A 侧走样会立刻变红。
+    """
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    lineage = _lineage(checkout)
+    receipt = json.loads(
+        (checkout / lineage["initial_center_task_receipt"]["path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    manifest = json.loads(
+        (checkout / lineage["action_manifest"]["path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    kwargs = {
+        "receipt_pin": lineage["initial_center_task_receipt"],
+        "action_manifest": manifest,
+        "action_manifest_pin": lineage["action_manifest"],
+        "motion_sha256": lineage["motion"]["sha256"],
+        "family": "A",
+    }
+    timing = launcher._initial_center_timing_authority(
+        receipt=receipt, **kwargs
+    )
+    assert timing["family"] == "A"
+    assert timing["timing_mode"] == "a_online_solver"
+    assert timing["derivation"] == "time_to_contact_s_minus_scaled_t_hit_s"
+    assert timing["initial_center_time_to_teacher_start_at_reveal_s"] == (
+        receipt["time_to_contact_s"] - receipt["scaled_t_hit_s"]
+    )
+    assert timing["initial_center_time_to_teacher_start_at_reveal_s"] == (
+        pytest.approx(0.6923759904781779)
+    )
+
+    for wait in (
+        receipt["time_to_contact_s"] - receipt["reference_t_hit_s"],
+        receipt["pre_swing_wait_s"] + 1.0e-15,
+        receipt["pre_swing_wait_s"] - 1.0e-15,
+    ):
+        tampered = dict(receipt)
+        tampered.pop("canonical_sha256")
+        tampered["pre_swing_wait_s"] = wait
+        tampered["canonical_sha256"] = launcher.canonical_sha256(tampered)
+        with pytest.raises(
+            launcher.LaunchRefused, match="timing derivation differs"
+        ):
+            launcher._initial_center_timing_authority(
+                receipt=tampered, **kwargs
+            )
+
+
 def test_a211_split_ready_rejects_equality_or_nonzero_reset_velocity(
     tmp_path, monkeypatch
 ):
