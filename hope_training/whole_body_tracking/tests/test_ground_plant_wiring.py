@@ -499,6 +499,130 @@ def test_contract_reader_fail_loud_on_odd_terrain():
         train_mod._ground_plant_contract(cfg5)
 
 
+# --------------------------------------------------------------------------------------------- #
+# 2026-08-06:DR-L0/DR-L0N 把 events.physics_material 整个删掉后,指纹怎么诚实地记这件事
+# --------------------------------------------------------------------------------------------- #
+_ABSENT_BLOCK_KWARGS = dict(
+    ground_static_friction=1.0,
+    ground_dynamic_friction=1.0,
+    robot_material_static_friction_range=None,
+    robot_material_dynamic_friction_range=None,
+    terrain_type=TC.GROUND_PLANT_TERRAIN_PLANE,
+    terrain_rough_height_range_m=None,
+)
+
+
+def _dr_l0_cfg(*, marker="l0"):
+    """现役 cfg,但 events.physics_material 已被 DR-L0/DR-L0N finalizer 置空 + 落下 marker。"""
+    cfg = _ground_env_cfg()
+    cfg.events.physics_material = None
+    if marker == "l0":
+        setattr(
+            cfg,
+            train_mod._ACTION_BALL_DR_L0_RUNTIME_ATTR,
+            train_mod._action_ball_dr_l0_contract_payload(),
+        )
+    elif marker == "l0n":
+        setattr(
+            cfg,
+            train_mod._ACTION_BALL_DR_L0N_RUNTIME_ATTR,
+            train_mod._training_contract_module().action_ball_dr_l0n_contract_payload(),
+        )
+    return cfg
+
+
+def test_block_randomization_absent_spells_null_ranges_and_round_trips():
+    block = TC.ground_plant_block(
+        **_ABSENT_BLOCK_KWARGS, robot_material_randomization_absent=True
+    )
+    assert block["robot_material_randomization_absent"] is True
+    assert block["robot_material_static_friction_range"] is None
+    assert block["robot_material_dynamic_friction_range"] is None
+    # 事件不在场必然偏离历史默认 -> 落完整块,不是 None
+    TC._validate_ground_plant_contract({"ground_plant": block})
+    # false 的唯一拼写仍是键缺席
+    spelled_false = dict(block)
+    spelled_false["robot_material_randomization_absent"] = False
+    with pytest.raises(ValueError, match="omitting the key"):
+        TC._validate_ground_plant_contract({"ground_plant": spelled_false})
+
+
+def test_block_randomization_absent_refuses_numbers_and_make_consistent():
+    # 填回 base cfg 的范围 = 在收据里谎称跑过随机化,拒收
+    with pytest.raises(ValueError, match="ranges to be null"):
+        TC.ground_plant_block(
+            **{
+                **_ABSENT_BLOCK_KWARGS,
+                "robot_material_static_friction_range": [0.3, 1.6],
+            },
+            robot_material_randomization_absent=True,
+        )
+    # 事件都没了就没有 make_consistent 可言
+    with pytest.raises(ValueError, match="property of the removed randomization event"):
+        TC.ground_plant_block(
+            **_ABSENT_BLOCK_KWARGS,
+            robot_material_randomization_absent=True,
+            robot_material_make_consistent=True,
+        )
+    with pytest.raises(ValueError, match="randomization_absent must be a bool"):
+        TC.ground_plant_block(
+            **_ABSENT_BLOCK_KWARGS, robot_material_randomization_absent="yes"
+        )
+    # 不声明 absent 却传 null 范围 -> 老信封原样 fail-loud
+    with pytest.raises(ValueError, match=r"\[lo, hi\] pair"):
+        TC.ground_plant_block(**_ABSENT_BLOCK_KWARGS)
+
+
+@pytest.mark.parametrize("marker", ["l0", "l0n"])
+def test_contract_reader_fingerprints_removed_robot_material_event(marker):
+    block = train_mod._ground_plant_contract(_dr_l0_cfg(marker=marker))
+    assert block == {
+        "schema_version": 1,
+        "ground_static_friction": 1.0,
+        "ground_dynamic_friction": 1.0,
+        "robot_material_static_friction_range": None,
+        "robot_material_dynamic_friction_range": None,
+        "terrain_type": "plane",
+        "terrain_rough_height_range_m": None,
+        "robot_material_randomization_absent": True,
+    }
+    TC._validate_ground_plant_contract({"ground_plant": block})
+    # 全 DR 谱系(不落键)与 DR-L0 谱系(落这个块)在 resume 对账上互相拒绝
+    assert train_mod._contract_diff({}, {"ground_plant": block})
+
+
+def test_contract_reader_still_fails_closed_without_the_finalizer_proof():
+    # marker 缺席 = 不是 DR-L0 的定义删的,门一点没松
+    cfg = _ground_env_cfg()
+    cfg.events.physics_material = None
+    with pytest.raises(RuntimeError, match="requires events.physics_material.params"):
+        train_mod._ground_plant_contract(cfg)
+    # 槽整个消失(不是 finalizer 写的那种最终状态)也照旧拒收
+    cfg2 = _dr_l0_cfg()
+    del cfg2.events.physics_material
+    with pytest.raises(RuntimeError, match="requires events.physics_material.params"):
+        train_mod._ground_plant_contract(cfg2)
+    # marker 被篡改 -> 拒绝拿它当指纹依据
+    cfg3 = _dr_l0_cfg()
+    tampered = train_mod._action_ball_dr_l0_contract_payload()
+    tampered["policy_observation_corruption"] = True
+    setattr(cfg3, train_mod._ACTION_BALL_DR_L0_RUNTIME_ATTR, tampered)
+    with pytest.raises(RuntimeError, match="differs from its canonical payload"):
+        train_mod._ground_plant_contract(cfg3)
+
+
+def test_contract_reader_refuses_authored_robot_material_under_dr_l0():
+    cfg, _ = _apply_plant({"robot_material_static_friction_range": [0.6, 1.6]})
+    cfg.events.physics_material = None
+    setattr(
+        cfg,
+        train_mod._ACTION_BALL_DR_L0_RUNTIME_ATTR,
+        train_mod._action_ball_dr_l0_contract_payload(),
+    )
+    with pytest.raises(RuntimeError, match="task.plant explicitly authored"):
+        train_mod._ground_plant_contract(cfg)
+
+
 if __name__ == "__main__":
     import sys
 

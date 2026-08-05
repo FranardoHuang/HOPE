@@ -822,6 +822,12 @@ _GROUND_PLANT_KEYS = frozenset(
 # 2026-07-29 opt-in:逐桶 dynamic=min(static, dynamic)(isaaclab make_consistent)。false 的
 # 唯一拼写是【键缺席】(= 历史独立采样,任何已存 6 键块逐字节兼容);true 时块里长出这个键。
 GROUND_PLANT_MAKE_CONSISTENT_KEY = "robot_material_make_consistent"
+# 2026-08-06 opt-in:机器人身体材质随机化【事件本身不存在】(DR-L0/DR-L0N finalizer 把
+# events.physics_material 整个删掉)。false 的唯一拼写是【键缺席】(= 历史上事件在场、按
+# 范围随机,任何已存 6/7 键块逐字节兼容);true 时块里长出这个键,而且两条 robot material
+# 范围必须是 null —— 没有事件就没有范围,写任何一对数字都是在收据里谎称跑过随机化。
+# 这个块因此必然偏离 GROUND_PLANT_DEFAULT,resume 对账会拒绝拿全 DR 的 checkpoint 续训。
+GROUND_PLANT_ROBOT_MATERIAL_ABSENT_KEY = "robot_material_randomization_absent"
 
 RUNTIME_EXECUTION_KEYS = (
     "articulation_joint_names",
@@ -3141,6 +3147,7 @@ def ground_plant_block(
     terrain_type,
     terrain_rough_height_range_m,
     robot_material_make_consistent=False,
+    robot_material_randomization_absent=False,
 ) -> dict | None:
     """Canonical ground/terrain plant identity block.
 
@@ -3150,6 +3157,13 @@ def ground_plant_block(
     对账(_contract_diff)会把它当成另一套 plant 拒绝静默续训。This is the single
     validation/assembly source shared by the train.py ``task.plant`` override path and the
     schema-3 contract validator.
+
+    ``robot_material_randomization_absent=True`` 是 2026-08-06 加的第三种拼写,专给
+    DR-L0/DR-L0N —— 它们的定义就是把 ``events.physics_material`` 整个删掉,于是根本不存在
+    "随机到什么范围"。这时两条范围必须传 ``None``:填回 base cfg 的 (0.3,1.6)/(0.3,1.2)
+    等于在收据里谎称跑过随机化,而返回 ``None``(合同不落键)是用省略说同一个谎、还会让
+    DR-L0 的 checkpoint 看起来和全 DR 的逐字节兼容。事件不在场也就没有 make_consistent
+    可言,所以两个 opt-in 键互斥。
     """
 
     static = _wave_finite(
@@ -3163,14 +3177,38 @@ def ground_plant_block(
             "ground_plant ground dynamic friction must not exceed static friction "
             f"(got static={static}, dynamic={dynamic})"
         )
-    static_range = _ground_plant_range(
-        robot_material_static_friction_range,
-        name="ground_plant.robot_material_static_friction_range",
-    )
-    dynamic_range = _ground_plant_range(
-        robot_material_dynamic_friction_range,
-        name="ground_plant.robot_material_dynamic_friction_range",
-    )
+    if not isinstance(robot_material_randomization_absent, bool):
+        raise ValueError(
+            "ground_plant robot_material_randomization_absent must be a bool"
+        )
+    if robot_material_randomization_absent:
+        if (
+            robot_material_static_friction_range is not None
+            or robot_material_dynamic_friction_range is not None
+        ):
+            raise ValueError(
+                "ground_plant robot_material_randomization_absent requires both robot "
+                "material friction ranges to be null: with the randomization event "
+                "removed there is no range, and any pair of numbers would claim a "
+                "randomization this run did not perform"
+            )
+        if robot_material_make_consistent:
+            raise ValueError(
+                "ground_plant robot_material_make_consistent cannot be true while "
+                "robot_material_randomization_absent is true: make_consistent is a "
+                "property of the removed randomization event"
+            )
+        static_range = None
+        dynamic_range = None
+    else:
+        static_range = _ground_plant_range(
+            robot_material_static_friction_range,
+            name="ground_plant.robot_material_static_friction_range",
+        )
+        dynamic_range = _ground_plant_range(
+            robot_material_dynamic_friction_range,
+            name="ground_plant.robot_material_dynamic_friction_range",
+        )
     if terrain_type not in (GROUND_PLANT_TERRAIN_PLANE, GROUND_PLANT_TERRAIN_ROUGH):
         raise ValueError(
             "ground_plant terrain_type must be "
@@ -3229,6 +3267,8 @@ def ground_plant_block(
     # false 的唯一拼写是键缺席(历史 6 键块逐字节兼容);true 才让块长出这个键。
     if robot_material_make_consistent:
         block[GROUND_PLANT_MAKE_CONSISTENT_KEY] = True
+    if robot_material_randomization_absent:
+        block[GROUND_PLANT_ROBOT_MATERIAL_ABSENT_KEY] = True
     if {key: value for key, value in block.items() if key != "schema_version"} == (
         GROUND_PLANT_DEFAULT
     ):
@@ -3263,10 +3303,24 @@ def _validate_ground_plant_contract(contract: Mapping) -> None:
                 "default (false) must be spelled by omitting the key"
             )
         make_consistent = True
+    # Optional 2026-08-06 key, same envelope: only the literal True may appear, false is
+    # spelled by omission, so every pre-existing 6/7-key block stays byte-exact here.
+    randomization_absent = False
+    if GROUND_PLANT_ROBOT_MATERIAL_ABSENT_KEY in block:
+        if block[GROUND_PLANT_ROBOT_MATERIAL_ABSENT_KEY] is not True:
+            raise ValueError(
+                "schema-3 ground_plant robot_material_randomization_absent equal to "
+                "the default (false) must be spelled by omitting the key"
+            )
+        randomization_absent = True
     base = {
         key: value
         for key, value in dict(block).items()
-        if key != GROUND_PLANT_MAKE_CONSISTENT_KEY
+        if key
+        not in (
+            GROUND_PLANT_MAKE_CONSISTENT_KEY,
+            GROUND_PLANT_ROBOT_MATERIAL_ABSENT_KEY,
+        )
     }
     base = _require_exact_mapping_keys(
         base, _GROUND_PLANT_KEYS, name="schema-3 ground_plant"
@@ -3284,6 +3338,7 @@ def _validate_ground_plant_contract(contract: Mapping) -> None:
                 "robot_material_dynamic_friction_range"
             ],
             robot_material_make_consistent=make_consistent,
+            robot_material_randomization_absent=randomization_absent,
             terrain_type=base["terrain_type"],
             terrain_rough_height_range_m=base["terrain_rough_height_range_m"],
         )

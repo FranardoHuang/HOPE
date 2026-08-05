@@ -13656,6 +13656,11 @@ _PLANT_KEYS = (
     "terrain_rough_height_range",
 )
 _GROUND_PLANT_TASK_KEYS = _PLANT_KEYS[1:]
+# 2026-08-06:task.plant 显式写过机器人材质随机化时打的戳。DR-L0/DR-L0N finalizer 随后会把
+# 整个 events.physics_material 删掉;两者同时出现是配置冲突(作者点名要的随机化被这一档 DR
+# 的定义吃掉),必须 fail-loud 而不是让 ground_plant 指纹默默记成"没有随机化"。戳是单向的,
+# 只由 override 写入,只被指纹读。
+_GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR = "_ground_plant_robot_material_authored"
 
 
 def _attach_rough_ground_patch(env_cfg, height_range):
@@ -13769,6 +13774,7 @@ def _apply_ground_plant_task_override(env_cfg, plant, applied):
             f"events.physics_material.params['{param}'] (task.plant.{key})",
         )
         params[param] = (lo, hi)
+        setattr(env_cfg, _GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR, True)
         applied.append(f"events.physics_material.params.{param}=({lo}, {hi})")
 
     # 2.5) 静/动摩擦物理一致性(2026-07-29)。人话:isaaclab 的材质随机化默认静、动独立采样,
@@ -13789,6 +13795,7 @@ def _apply_ground_plant_task_override(env_cfg, plant, applied):
                 "events.physics_material.params (task.plant.robot_material_make_consistent)",
             )
             params["make_consistent"] = True
+            setattr(env_cfg, _GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR, True)
             applied.append(
                 "events.physics_material.params.make_consistent=True "
                 "(逐桶 dynamic=min(static, dynamic),动摩擦不再超过静摩擦)"
@@ -13905,6 +13912,21 @@ def _ground_plant_contract(env_cfg) -> dict | None:
     events = getattr(env_cfg, "events", None)
     event_term = None if events is None else getattr(events, "physics_material", None)
     params = None if event_term is None else getattr(event_term, "params", None)
+    if params is None and _ground_plant_randomization_removal_is_proven(env_cfg, events):
+        # 2026-08-06:DR-L0/DR-L0N 的定义就是 events.physics_material = None,所以这里
+        # 没有"随机到什么范围"可读。照 6321db33 的纪律,门一点没松:只有当 finalizer 已经
+        # 落下 marker、slot 确实在场且确实是 None 时,才允许走这条分支;其他任何拿不到
+        # params 的情形仍旧 fail-closed。落进合同的是"事件不在场"这句实话本身,而不是把
+        # base cfg 的 (0.3,1.6)/(0.3,1.2) 填回去谎称跑过随机化。
+        return ground_plant_block(
+            ground_static_friction=float(material.static_friction),
+            ground_dynamic_friction=float(material.dynamic_friction),
+            robot_material_static_friction_range=None,
+            robot_material_dynamic_friction_range=None,
+            robot_material_randomization_absent=True,
+            terrain_type=terrain_type,
+            terrain_rough_height_range_m=height,
+        )
     if not isinstance(params, dict):
         raise RuntimeError(
             "ground-plant contract requires events.physics_material.params"
@@ -13934,6 +13956,57 @@ def _ground_plant_contract(env_cfg) -> dict | None:
         terrain_type=terrain_type,
         terrain_rough_height_range_m=height,
     )
+
+
+def _ground_plant_randomization_removal_is_proven(env_cfg, events) -> bool:
+    """Is the missing robot-material randomization the resolved DR-L0/DR-L0N tuple?
+
+    人话:"读不到机器人材质随机化范围"有两种成因 —— 一种是 DR-L0/DR-L0N finalizer 按定义
+    把整个事件删掉了(真实、可证),另一种是配方写错/事件被谁悄悄拆了(必须继续 fail-closed)。
+    这个判据只认前者,而且要三件事同时成立:finalizer 的 marker 必须已经落在 env_cfg 上、
+    并且逐字节等于它自己的规范 payload(marker 里 event_slots.physics_material 本来就是
+    None,所以这句话同时就是"这一档 DR 的定义确实包含删除该事件"的书面凭据);events 容器
+    必须还在;``physics_material`` 这个槽必须【存在且为 None】—— 属性整个消失(hasattr 假)
+    说明这不是 finalizer 写的那种最终状态,照旧拒收。
+    """
+
+    if events is None:
+        return False
+    if not hasattr(events, "physics_material"):
+        return False
+    if getattr(events, "physics_material", None) is not None:
+        return False
+    if getattr(env_cfg, _GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR, False):
+        raise RuntimeError(
+            "ground-plant contract: task.plant explicitly authored robot-material "
+            "randomization, but the resolved DR level deleted events.physics_material; "
+            "drop the task.plant robot_material_* keys or pick a DR level that keeps "
+            "the event"
+        )
+    _contract = _training_contract_module()
+    for attr, expected in (
+        (_ACTION_BALL_DR_L0_RUNTIME_ATTR, _action_ball_dr_l0_contract_payload()),
+        (
+            _ACTION_BALL_DR_L0N_RUNTIME_ATTR,
+            _contract.action_ball_dr_l0n_contract_payload(),
+        ),
+    ):
+        marker = getattr(env_cfg, attr, None)
+        if marker is None:
+            continue
+        if marker != expected:
+            raise RuntimeError(
+                f"ground-plant contract found a {attr} marker that differs from its "
+                "canonical payload; refusing to fingerprint the plant from it"
+            )
+        if expected["event_slots"]["physics_material"] is not None:
+            raise RuntimeError(
+                f"ground-plant contract: {attr} does not declare "
+                "event_slots.physics_material=None, so the absent event is not this "
+                "level's definition"
+            )
+        return True
+    return False
 
 
 def _venue_profile_module():
