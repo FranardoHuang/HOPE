@@ -3735,10 +3735,21 @@ class MotionCommand(CommandTerm):
         pending = getattr(
             self, "_action_ball_safe_ready_reference_pending", None
         )
-        if getattr(self, "_action_ball_safe_ready_pending_count", 0) == 0:
+        count = getattr(self, "_action_ball_safe_ready_pending_count", None)
+        if count is None and pending is None:
+            # 人话:两者同时是 None 表示**任务权威还没绑定** —— 这是构造期(以及绑定
+            # 失败后的清零态)的合法状态,此时"没有待冻结的 env",不是"待冻结但掩码
+            # 丢了"。原来用 `count == 0` 判空,而 None != 0,于是 ObservationManager
+            # 在 gym.make 里探测观测维度的那次干调用就被误判成"掩码缺失"并抛错 ——
+            # A211/C211 四格从 materialize 走到 recipe 就是死在这一行,一次都没建成过环境。
+            # 只有一边是 None 仍然是硬错:那才是真正的半初始化。
             return
-        if pending is None:
-            raise RuntimeError("split-ready safe reference pending mask is absent")
+        if pending is None or count is None:
+            raise RuntimeError(
+                "split-ready safe reference pending state is half-initialized"
+            )
+        if count == 0:
+            return
         ids = torch.where(pending)[0]
         body_pos = self.robot.data.body_pos_w[ids][:, self.body_indexes]
         body_quat = self.robot.data.body_quat_w[ids][:, self.body_indexes]

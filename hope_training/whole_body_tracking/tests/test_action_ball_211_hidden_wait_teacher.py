@@ -1016,3 +1016,43 @@ def test_a211_and_c211_enable_the_same_split_ready_teacher():
         source = (TASK_CFG / name).read_text(encoding="utf-8")
         assert source.count("action_ball_diagnostic_split_ready_teacher: true") == 1
         assert "action_ball_diagnostic_split_ready_teacher: false" not in source
+
+
+def test_unbound_safe_ready_state_is_not_mistaken_for_a_lost_pending_mask():
+    """构造期取观测不许炸,半初始化仍然必须炸。
+
+    人话:``_action_ball_safe_ready_pending_count`` 和 ``..._reference_pending`` 在
+    MotionCommand ``__init__`` 里都是 ``None``,要等任务权威绑定才变成 0 / 掩码。
+    ObservationManager 在 ``gym.make`` 里会先干调一次观测项去探测维度 —— 那时两者
+    都还是 None。原来的守卫用 ``count == 0`` 判空,而 ``None != 0``,于是这次合法的
+    干调用被判成"掩码缺失"直接抛错:A211/C211 四格从 materialize 走到 recipe 时,
+    环境在 ``gym.make`` 里就建不起来,一次都没跑成过。
+    """
+
+    view = _load_motion_teacher_view()()
+    view.num_envs = 2
+    view.device = torch.device("cpu")
+    view.action_ball_diagnostic_split_ready_teacher = True
+
+    # 1) 未绑定(两者都是 None)= 没有待冻结的 env,直接返回,不抛错。
+    view._action_ball_safe_ready_reference_pending = None
+    view._action_ball_safe_ready_pending_count = None
+    assert view._capture_action_ball_safe_ready_reference() is None
+    # 同一状态下的等待掩码也必须给出"全 False",而不是炸。
+    view._action_ball_public_task_valid = None
+    assert not bool(view._action_ball_safe_ready_wait_mask().any())
+
+    # 2) 半初始化才是真错:两个方向都要拒。
+    view._action_ball_safe_ready_reference_pending = torch.zeros(2, dtype=torch.bool)
+    view._action_ball_safe_ready_pending_count = None
+    with pytest.raises(RuntimeError, match="half-initialized"):
+        view._capture_action_ball_safe_ready_reference()
+    view._action_ball_safe_ready_reference_pending = None
+    view._action_ball_safe_ready_pending_count = 1
+    with pytest.raises(RuntimeError, match="half-initialized"):
+        view._capture_action_ball_safe_ready_reference()
+
+    # 3) 已绑定但没有待冻结的 env:返回,不抛错。
+    view._action_ball_safe_ready_reference_pending = torch.zeros(2, dtype=torch.bool)
+    view._action_ball_safe_ready_pending_count = 0
+    assert view._capture_action_ball_safe_ready_reference() is None
