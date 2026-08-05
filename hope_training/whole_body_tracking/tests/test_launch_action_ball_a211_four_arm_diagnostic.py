@@ -3566,3 +3566,17 @@ def test_launcher_never_sets_or_repurposes_home():
     source = SCRIPT.read_text(encoding="utf-8")
     assert '"HOME"' not in source
     assert "$HOME" not in source
+
+
+def test_launcher_trainability_literal_matches_the_contract_publisher():
+    """Consumer and producer must spell the marker identically.
+
+    The oracle32 ABI gate compares the hard document's
+    ``action_ball_211_trainability_contract`` against this launcher's literal.
+    train.py publishes it from training_contract's own literal, so if the two
+    ever drift the gate refuses every run for a reason no log explains.
+    """
+    assert (
+        launcher.TRAINABILITY_CONTRACT
+        == _TRAINING_CONTRACT._ACTION_BALL_A211_TRAINABILITY_CONTRACT
+    )

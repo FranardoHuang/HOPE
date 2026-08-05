@@ -3778,3 +3778,11 @@ def test_launcher_never_sets_or_repurposes_home():
     source = SCRIPT.read_text(encoding="utf-8")
     assert '"HOME"' not in source
     assert '"CODEX_HOME"' not in source
+
+
+def test_launcher_trainability_literal_matches_the_contract_publisher():
+    """Consumer and producer must spell the C211 marker identically."""
+    assert (
+        launcher.TRAINABILITY_CONTRACT
+        == _TRAINING_CONTRACT._ACTION_BALL_C211_TRAINABILITY_CONTRACT
+    )

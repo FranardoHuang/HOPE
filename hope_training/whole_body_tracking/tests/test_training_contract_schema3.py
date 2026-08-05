@@ -2895,3 +2895,96 @@ def test_runner_embeds_schema_sha_and_lineage_in_checkpoint_infos():
     train = (ROOT / "scripts/train.py").read_text(encoding="utf-8")
     assert "require_checkpoint_contract_binding(" in train
     assert "training_contract_lineage_exact=contract_lineage_exact" in train
+
+
+# --- 211 trainability marker publication -------------------------------------
+# 人话:train.py 一直在 env_cfg 上校验"这一档是不是可训练"的标记,但从没把它写进
+# schema-3 文档;而 launcher 的 oracle32 闸是按文档里的这个键判 ABI 的,于是文档里
+# 恒缺席、闸恒拒。下面几条钉住修好之后的发布行为,以及两处字面量不许漂。
+
+A211_CONTRACT_PATH = (
+    ROOT
+    / "source/whole_body_tracking/whole_body_tracking/tasks/tracking"
+    / "action_ball_a211_trainability.py"
+)
+
+
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_211_trainability_literals_match_the_canonical_task_constants():
+    """The publisher's literals must equal the task modules' authority."""
+    a211 = _load_module("a211_trainability_under_test", A211_CONTRACT_PATH)
+    c211 = _load_module("c211_trainability_under_test", C211_CONTRACT_PATH)
+    assert (
+        TC._ACTION_BALL_A211_TRAINABILITY_CONTRACT
+        == a211.A211_TRAINABILITY_CONTRACT
+        == "action_ball_a211_fixed_question_learnability_v2"
+    )
+    assert (
+        TC._ACTION_BALL_C211_TRAINABILITY_CONTRACT
+        == c211.C211_TRAINABILITY_CONTRACT
+        == "action_ball_c211_fixed_midpoint_learnability_v2"
+    )
+    assert (
+        TC._ACTION_BALL_211_TRAINABILITY_KEY
+        == "action_ball_211_trainability_contract"
+    )
+
+
+@pytest.mark.parametrize(
+    "family,marker",
+    [
+        ("A211", "action_ball_a211_fixed_question_learnability_v2"),
+        ("C211", "action_ball_c211_fixed_midpoint_learnability_v2"),
+    ],
+)
+def test_trainable_211_leaf_publishes_its_exact_trainability_marker(family, marker):
+    cfg = SimpleNamespace(
+        action_ball_211_construction_only=False,
+        action_ball_211_trainability_contract=marker,
+    )
+    assert TC._action_ball_211_trainability_facts(cfg, family=family) == {
+        "action_ball_211_trainability_contract": marker
+    }
+
+
+@pytest.mark.parametrize("family", ["A211", "C211"])
+def test_construction_only_211_leaf_publishes_no_marker(family):
+    """Construction-only sidecars stay byte-identical to before this fix."""
+    cfg = SimpleNamespace(action_ball_211_construction_only=True)
+    assert TC._action_ball_211_trainability_facts(cfg, family=family) == {}
+
+
+@pytest.mark.parametrize(
+    "family,wrong",
+    [
+        # the other family's marker, a truthy lookalike, and total absence
+        ("A211", "action_ball_c211_fixed_midpoint_learnability_v2"),
+        ("A211", "action_ball_a211_fixed_question_learnability_v1"),
+        ("A211", None),
+        ("C211", "action_ball_a211_fixed_question_learnability_v2"),
+        ("C211", True),
+        ("C211", None),
+    ],
+)
+def test_trainable_211_leaf_refuses_to_publish_a_wrong_marker(family, wrong):
+    """A leaf that claims trainability must carry the exact marker or raise."""
+    cfg = SimpleNamespace(
+        action_ball_211_construction_only=False,
+        action_ball_211_trainability_contract=wrong,
+    )
+    with pytest.raises(RuntimeError, match="trainability"):
+        TC._action_ball_211_trainability_facts(cfg, family=family)
+
+
+def test_211_trainability_marker_is_spliced_at_document_top_level():
+    """The launcher reads this key off the document root, not a nested block."""
+    source = MODULE_PATH.read_text(encoding="utf-8")
+    assert '**_action_ball_211_trainability_facts(cfg, family="A211")' in source
+    assert '**_action_ball_211_trainability_facts(cfg, family="C211")' in source
+    assert "**critic_facts," in source

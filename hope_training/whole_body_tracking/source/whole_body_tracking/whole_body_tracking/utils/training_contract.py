@@ -240,6 +240,46 @@ _STAGE1_NATURAL_CLIP_PADDLE_WORLD_V2_CRITIC_OBS_LAYOUT = (
     ("time_to_teacher_start", 1),
 )
 _ACTION_BALL_A211_CRITIC_OBS_CONTRACT = "action_ball_a211_critic_v1"
+# 可训练 A211/C211 叶子的"这一档到底是不是可训练"标记。train.py 早就在 env_cfg 上校验
+# 它(见 trainable_211 分支),但从来没把它写进 schema-3 文档,而 launcher 的 oracle32
+# 闸是按**文档**里的这个键判 ABI 的 —— 于是文档里恒为缺席,闸恒拒。这里补的是发布端,
+# 不是把闸放松:只有 cfg 自称 construction_only=False 且标记逐字精确时才发布,
+# construction-only 叶子照旧一个字节不写(闸继续拒它,这正是闸该干的事)。
+# 字面量与 tasks/tracking/action_ball_{a,c}211_trainability.py 的权威常量由测试钉住不许漂。
+_ACTION_BALL_A211_TRAINABILITY_CONTRACT = (
+    "action_ball_a211_fixed_question_learnability_v2"
+)
+_ACTION_BALL_C211_TRAINABILITY_CONTRACT = (
+    "action_ball_c211_fixed_midpoint_learnability_v2"
+)
+_ACTION_BALL_211_TRAINABILITY_KEY = "action_ball_211_trainability_contract"
+
+
+def _action_ball_211_trainability_facts(cfg, *, family: str) -> dict:
+    """Publish the 211 trainability marker for a genuinely trainable leaf.
+
+    Returns an empty dict for a construction-only leaf so its sidecar stays
+    byte-identical to today.  When the leaf claims to be trainable the marker is
+    load-bearing, so it must be exact: a missing or wrong marker raises rather
+    than publishing a comfortable-looking string.
+    """
+
+    expected = (
+        _ACTION_BALL_A211_TRAINABILITY_CONTRACT
+        if family == "A211"
+        else _ACTION_BALL_C211_TRAINABILITY_CONTRACT
+    )
+    if getattr(cfg, "action_ball_211_construction_only", None) is not False:
+        return {}
+    marker = getattr(cfg, _ACTION_BALL_211_TRAINABILITY_KEY, None)
+    if marker != expected:
+        raise RuntimeError(
+            f"{family} env cfg claims to be trainable but its "
+            f"{_ACTION_BALL_211_TRAINABILITY_KEY} is {marker!r}, not {expected!r}"
+        )
+    return {_ACTION_BALL_211_TRAINABILITY_KEY: expected}
+
+
 _ACTION_BALL_A211_CRITIC_OBS_LAYOUT = (
     ("command", 62),
     ("motion_anchor_pos_b", 3),
@@ -2565,6 +2605,7 @@ def runtime_execution_facts(
             "question_source_contract": (
                 _action_ball_211_question_source_contract_facts(family="A211")
             ),
+            **_action_ball_211_trainability_facts(cfg, family="A211"),
         }
     elif actor_contract_name == "action_ball_c211":
         critic_names, critic_dims, critic_total = _observation_group_layout(
@@ -2604,6 +2645,7 @@ def runtime_execution_facts(
             ),
             "contact_target_absent": True,
             "c225_reward_contract": _action_ball_c225_reward_contract_facts(),
+            **_action_ball_211_trainability_facts(cfg, family="C211"),
         }
 
     motion = env.command_manager.get_term("motion")
