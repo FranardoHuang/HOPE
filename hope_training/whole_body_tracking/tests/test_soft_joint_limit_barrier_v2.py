@@ -16,6 +16,7 @@ import torch
 import yaml
 
 from test_reward_flags_mdp import hope_rewards_mod
+from test_reward_flags_overrides import _NS, _Term, _apply_legacy_v1, _make_env_cfg, train_mod
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +27,8 @@ ENV_CFG = (
 )
 ACTION_BALL_YAML = ROOT / "cfg/task/HOPEPingPongActionBall.yaml"
 JOINTS = list(hope_rewards_mod._A3_RUNTIME_JOINT_ORDER)
-# 2026-08-05 层级对齐(exp §5.6 第 9 条):qdes_limit_barrier_margin_frac 0.08 -> 0.05。
-# 注:本常量在本文件内已无引用(死码),跟着改只是不让它成为下一个被误抄的旧值来源。
+# 2026-08-05 层级对齐(exp §5.6 第 9 条):两条 soft-limit v2 通道的带宽一起 0.08 -> 0.05
+#(q_des 的 qdes_limit_barrier_margin_frac 与 actual-q 的 joint_limit_margin_frac)。
 MARGIN = 0.05
 FLOOR = 0.25
 
@@ -209,6 +210,14 @@ def test_adopted_scale_and_generic_death_invariants_are_pinned():
     rewards = task["rewards"]
     assert rewards["qdes_limit_barrier_weight"] == pytest.approx(-5.0)
     assert rewards["joint_limit_weight"] == pytest.approx(-5.0)
+    # 2026-08-05 带宽对齐(exp §5.6 第 9 条):两条通道一起 0.08 -> 0.05。v2 硬合同要求
+    # q_des / actual-q 通道逐字段同权同带宽,所以这里断言的是"相等"本身,不只是数值。
+    assert rewards["qdes_limit_barrier_margin_frac"] == pytest.approx(MARGIN)
+    assert rewards["joint_limit_margin_frac"] == pytest.approx(MARGIN)
+    assert (
+        rewards["joint_limit_margin_frac"] == rewards["qdes_limit_barrier_margin_frac"]
+    )
+    assert rewards["joint_limit_weight"] == rewards["qdes_limit_barrier_weight"]
     # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0(post-dt -6.0 -> -0.2)。
     # 权威在 HOPEPingPongActionBall.yaml:151;本文件读那份 yaml,是它的算术副本。
     assert rewards["death_penalty_weight"] == pytest.approx(-10.0)
@@ -228,3 +237,91 @@ def test_adopted_scale_and_generic_death_invariants_are_pinned():
     assert hard_death == pytest.approx(0.2)
     assert landing_max == pytest.approx(10.0)
     assert 50 * floor_step_per_joint_channel == pytest.approx(1.25)
+
+
+# --------------------------------------------------------------------------------------------- #
+# train.py override translation: the actual-q band travels with the q_des band
+# --------------------------------------------------------------------------------------------- #
+_ACTUAL_PARAMS = {
+    "margin_frac": 0.08,
+    "penalty_floor": 0.25,
+    "expected_joint_count": 31,
+}
+
+
+def _actual_band_env_cfg():
+    cfg = _make_env_cfg()
+    cfg.rewards.joint_limit = _Term(
+        weight=-5.0,
+        params={"asset_cfg": _NS(name="robot", joint_ids=slice(None)), **_ACTUAL_PARAMS},
+    )
+    cfg.rewards.actual_joint_limit_barrier_probe = _Term(
+        weight=1.0,
+        params={"asset_cfg": _NS(name="robot", joint_ids=slice(None)), **_ACTUAL_PARAMS},
+    )
+    return cfg
+
+
+def _apply_actual_band(task, cfg=None):
+    cfg = cfg if cfg is not None else _actual_band_env_cfg()
+    return cfg, _apply_legacy_v1(cfg, task)
+
+
+def test_actual_band_override_moves_term_and_probe_together():
+    cfg, applied = _apply_actual_band(
+        {"rewards": {"joint_limit_weight": -5.0, "joint_limit_margin_frac": MARGIN}}
+    )
+    term = cfg.rewards.joint_limit
+    probe = cfg.rewards.actual_joint_limit_barrier_probe
+    assert term.params["margin_frac"] == pytest.approx(MARGIN)
+    assert probe.params["margin_frac"] == pytest.approx(MARGIN)
+    assert probe.weight == pytest.approx(1.0)
+    assert term.weight == pytest.approx(-5.0)
+    assert f"rewards.joint_limit.params.margin_frac={MARGIN}" in applied
+    assert any(
+        marker.startswith("rewards.actual_joint_limit_barrier_probe=")
+        for marker in applied
+    )
+
+
+def test_actual_band_without_explicit_weight_is_refused():
+    with pytest.raises(train_mod._OverrideError, match="joint_limit_weight"):
+        _apply_actual_band({"rewards": {"joint_limit_margin_frac": MARGIN}})
+
+
+@pytest.mark.parametrize("margin", [0.0, 0.5, -0.1, float("nan"), True, "bad"])
+def test_invalid_actual_band_override_is_refused(margin):
+    with pytest.raises(train_mod._OverrideError, match=r"\(0, 0.5\)"):
+        _apply_actual_band(
+            {
+                "rewards": {
+                    "joint_limit_weight": -5.0,
+                    "joint_limit_margin_frac": margin,
+                }
+            }
+        )
+
+
+def test_invalid_actual_band_does_not_partially_mutate_either_term():
+    cfg = _actual_band_env_cfg()
+    term = cfg.rewards.joint_limit
+    probe = cfg.rewards.actual_joint_limit_barrier_probe
+    before = (dict(term.params), probe.weight, dict(probe.params))
+    with pytest.raises(train_mod._OverrideError):
+        _apply_actual_band(
+            {
+                "rewards": {
+                    "joint_limit_weight": -5.0,
+                    "joint_limit_margin_frac": 0.5,
+                }
+            },
+            cfg=cfg,
+        )
+    assert (dict(term.params), probe.weight, dict(probe.params)) == before
+
+
+def test_reward_keys_whitelist_carries_both_actual_band_keys_once():
+    keys = [key for key in train_mod._REWARD_KEYS if key.startswith("joint_limit")]
+    assert sorted(keys) == ["joint_limit_margin_frac", "joint_limit_weight"]
+    with pytest.raises(train_mod._OverrideError, match="joint_limit_margin_farc"):
+        _apply_actual_band({"rewards": {"joint_limit_margin_farc": MARGIN}})

@@ -176,6 +176,16 @@ rewards:
   # qdes_projection_penalty(罚投影前超出量)与 joint_limit(罚实际 q 靠限位多近)两条覆盖。
   qdes_limit_barrier_margin_frac: 0.05
   joint_limit_weight: -5.0
+  # 人话:实际值通道的带宽必须和上面命令值通道一模一样 —— 它们盯的是同一条限位带,
+  # 只是一个看命令、一个看关节真到哪。train.py 的 v2 硬合同逐字段比对两条通道的
+  # weight/margin_frac/penalty_floor,只改一边开机即拒(RuntimeError: qdes/actual soft-limit
+  # barrier v2 margin_frac must match exactly)。
+  #
+  # 同一条 0.05 的理由在这条通道上一字不改地成立:护栏把命令投影到 d = 0.05*span 后,PD 会把
+  # 实际 q 拉到同一位置(barrier 两条通道都读 soft_joint_pos_limits),于是 0.08 带宽下被钳关节
+  # 的实际角同样恒扣 -0.0844/关节/步,同样由护栏自己造成、策略无法规避。真正的越界(实际 q
+  # 冲过投影内沿继续贴限位)在 0.05 带内照罚,硬终止仍是安全底线。
+  joint_limit_margin_frac: 0.05
   # Unlike DeployParity, action-ball exposes a real base task through HITTER's native +2 channel.
   base_position_weight: 1.5
   base_position_std: 0.20

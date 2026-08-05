@@ -12870,6 +12870,9 @@ _REWARD_KEYS = (
     # 迈多大",它罚"方向掉头多猛";weight-only 键,finite 且 <= 0,显式 0 = 对照;剂量别抄
     # 一阶惯用值,见 hope_env_cfg 注释)。
     "action_rate_weight", "action_acc_weight", "joint_limit_weight", "undesired_contacts_weight",
+    # Soft-limit v2 actual-q band.  The v2 contract binds this channel to the q_des channel, so
+    # this key exists to move the pair together; it also requires joint_limit_weight explicitly.
+    "joint_limit_margin_frac",
     # Probe-only, identically-zero RewardManager observers.  Absent/false leaves the cfg slot None,
     # so the vendor N1 manager does not construct or call either term.
     "action_acc_jerk_probe", "implicit_pd_post_step_effort_proxy_probe",
@@ -15046,6 +15049,66 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "rewards.qdes_limit_barrier_probe="
                 f"(margin_frac={float(_qbar_term.params['margin_frac'])},weight=1.0)"
+            )
+
+        # Soft-limit v2 actual-q channel band (``joint_limit``).  The v2 hard contract
+        # (_actual_joint_limit_barrier_reward_contract) requires the q_des and actual-q channels
+        # to declare the SAME weight/margin_frac/penalty_floor: they are two separately receipted
+        # observers of one physical band, not two independently tunable bands.  Before this key
+        # existed, ``qdes_limit_barrier_margin_frac`` alone could move only half of that pair, and
+        # the contract refused the run at boot.  人话:命令值通道和实际值通道罚的是同一条限位带,
+        # 带宽必须一起改;只改一边 = 开机即拒。Same fail-loud envelope as qbar: the parameter
+        # without its weight is refused, and nothing mutates until every value validates.
+        _actual_margin_raw = _get(rw, "joint_limit_margin_frac")
+        if _actual_margin_raw is not None:
+            if _get(rw, "joint_limit_weight") is None:
+                raise _OverrideError(
+                    "joint_limit_margin_frac requires joint_limit_weight explicitly"
+                )
+            _require(
+                hasattr(R, "joint_limit") and R.joint_limit is not None,
+                "rewards.joint_limit",
+            )
+            _require(
+                hasattr(R, "actual_joint_limit_barrier_probe")
+                and R.actual_joint_limit_barrier_probe is not None,
+                "rewards.actual_joint_limit_barrier_probe",
+            )
+            _actual_term = R.joint_limit
+            _actual_probe = R.actual_joint_limit_barrier_probe
+            _require(
+                isinstance(_actual_term.params, dict)
+                and isinstance(_actual_probe.params, dict),
+                "rewards.joint_limit.params",
+            )
+            if isinstance(_actual_margin_raw, bool):
+                raise _OverrideError(
+                    "rewards.joint_limit.margin_frac must be finite and in (0, 0.5)"
+                )
+            try:
+                _actual_margin = float(_actual_margin_raw)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    "rewards.joint_limit.margin_frac must be finite and in (0, 0.5)"
+                ) from exc
+            if not math.isfinite(_actual_margin) or not 0.0 < _actual_margin < 0.5:
+                raise _OverrideError(
+                    "rewards.joint_limit.margin_frac must be finite and in (0, 0.5)"
+                )
+            _require(
+                "margin_frac" in _actual_term.params
+                and "margin_frac" in _actual_probe.params,
+                "rewards.joint_limit.params['margin_frac']",
+            )
+            _actual_term.params["margin_frac"] = _actual_margin
+            _actual_probe.params["margin_frac"] = _actual_margin
+            _actual_probe.weight = 1.0
+            applied.append(
+                f"rewards.joint_limit.params.margin_frac={_actual_margin}"
+            )
+            applied.append(
+                "rewards.actual_joint_limit_barrier_probe="
+                f"(margin_frac={_actual_margin},weight=1.0)"
             )
 
         # mjlab-ported foot-contact shaping (default OFF).  Same fail-loud envelope as the qbar

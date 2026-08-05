@@ -3077,7 +3077,26 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
     env_cfg = _make_env_cfg()
     # Add the Hitter/ActionBall-only reward terms to the dependency-light DeployParity fake.
     env_cfg.rewards.base_position = _Term(weight=1.0, params={"std": 0.3})
-    env_cfg.rewards.joint_limit = _Term(weight=-5.0)
+    # actual-q soft-limit v2 通道:带 params 的真形状(此前这里是个裸 weight 项,于是
+    # "只有 q_des 一条通道被改带宽"这个 bug 在本用例里根本无处显形)。
+    env_cfg.rewards.joint_limit = _Term(
+        weight=-5.0,
+        params={
+            "asset_cfg": _NS(name="robot", joint_ids=slice(None)),
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+            "expected_joint_count": 31,
+        },
+    )
+    env_cfg.rewards.actual_joint_limit_barrier_probe = _Term(
+        weight=1.0,
+        params={
+            "asset_cfg": _NS(name="robot", joint_ids=slice(None)),
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+            "expected_joint_count": 31,
+        },
+    )
     env_cfg.rewards.undesired_contacts = _Term(weight=-0.1)
     env_cfg.rewards.pre_strike_foot_slip = _Term(weight=-0.2)
     env_cfg.rewards.arm_torque_saturation = _Term(weight=-0.5)
@@ -3144,6 +3163,14 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
     assert (
         R.qdes_limit_barrier_probe.params == R.qdes_limit_barrier.params
     ), "qdes barrier 探针与实罚的 params 必须逐键相等(运行期签名校验)"
+    # actual-q 通道必须跟着一起走到 0.05。train.py 的 v2 硬合同逐字段比对两条通道的
+    # weight/margin_frac/penalty_floor,只改 q_des 一边 = 开机即 RuntimeError
+    #("qdes/actual soft-limit barrier v2 margin_frac must match exactly")。
+    assert R.joint_limit.params["margin_frac"] == pytest.approx(0.05)
+    assert R.actual_joint_limit_barrier_probe.params["margin_frac"] == pytest.approx(0.05)
+    assert R.actual_joint_limit_barrier_probe.weight == pytest.approx(1.0)
+    assert R.joint_limit.params["margin_frac"] == R.qdes_limit_barrier.params["margin_frac"]
+    assert R.joint_limit.weight == R.qdes_limit_barrier.weight
 
     # Prove the explicit ActionBall values agree exactly with the adopted r6 table.
     for key, low in (

@@ -43,7 +43,7 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 
 | 关键路径 | 当前事实 | 下一道可执行门 |
 | --- | --- | --- |
-| **termination/reward 对齐（2026-08-05 新增，明细见 §5.6）** | 反向审计发现 A211 运行时 `42` 个非零 term 而 §5.3 只覆盖 `22` 个；三项零命中项压过主层级。已落字节：`joint_actual_forbidden` 改 `terminate=False`（只记账不 reset，telemetry 模式强制证据记录器）、`ee_body_pos` 去腕只留脚、`upright_exp 1.0→0.25`、`hit_unstable_support -10→-1`、`death_penalty -300→-10`、`undesired_contacts` 正则 `_link→_Link`（**bug**：A3 是 `_Link`，原为 G1 命名，双脚双腕反被罚 `-2.0/episode`）、`qdes_limit_barrier_margin_frac 0.08→0.05`（消除护栏自造的 `-0.0844/关节/步` 底噪）、`init_noise_std` 四处硬钉解开且 4σ 门改为按真实 σ 计算（原为字面量 `0.02`，**假绿**）。MuJoCo 侧 `joint_actual_forbidden` 已同步 | 重跑 A/C focused suite；让 `audit_action_ball_reward_hierarchy.py` 接受 DRL0 leaf 并重算全部静态数值（**当前它拒收实际发射的 profile**）；`counter_rally_v1` 与 `virtual_landing` 的口径差待裁决 |
+| **termination/reward 对齐（2026-08-05 新增，明细见 §5.6）** | 反向审计发现 A211 运行时 `42` 个非零 term 而 §5.3 只覆盖 `22` 个；三项零命中项压过主层级。已落字节：`joint_actual_forbidden` 改 `terminate=False`（只记账不 reset，telemetry 模式强制证据记录器）、`ee_body_pos` 去腕只留脚、`upright_exp 1.0→0.25`、`hit_unstable_support -10→-1`、`death_penalty -300→-10`、`undesired_contacts` 正则 `_link→_Link`（**bug**：A3 是 `_Link`，原为 G1 命名，双脚双腕反被罚 `-2.0/episode`）、soft-limit v2 两条通道带宽 `0.08→0.05`（`qdes_limit_barrier_margin_frac` 与新增的 `joint_limit_margin_frac`，消除护栏自造的 `-0.0844/关节/步` 底噪）、`init_noise_std` 四处硬钉解开且 4σ 门改为按真实 σ 计算（原为字面量 `0.02`，**假绿**）。MuJoCo 侧 `joint_actual_forbidden` 已同步 | 重跑 A/C focused suite；让 `audit_action_ball_reward_hierarchy.py` 接受 DRL0 leaf 并重算全部静态数值（**当前它拒收实际发射的 profile**）；`counter_rally_v1` 与 `virtual_landing` 的口径差待裁决 |
 | observation/reward | A/C=`211/319`；无 teacher-base；唯一 actor 角速度是 body-frame IMU gyro；C 只有 nominal-strike 拍心距离与`vb_fired` selected-rubber swept analytic contact-gated单次落点；`physical_ball=false`时不是PhysX observed landing。`.99/.95`保持A3/BeyondMimic/mjlab基线。runtime/training-contract已安装fixed-N1 A `base_position 1.5→0`、九个window项`×1.15`、C proximity`240`、A/C landing`700`；progress10保留。按Take061 task-valid折扣账，A `1.773<1.852≤3.009<3.332`，C `1.773<1.904<3.332`。C launcher与oracle的旧`v2/220/500`当前已改成`v3/240/700`，等待focused test确证 | ready/swing mimic ledger和schema-3 runtime交叉检查已过；补C fixture/live ledger全链、landing∧post-contact-fall监控；真球另走promotion |
 | reset/teacher | direct frame0 physical birth=`0/73`；split-ready artifact+`60/240` hold 已有；WAIT 5--25 tick期间机器人/teacher保持split-ready、球停在无接触park位；reveal原子安装来球并切measured frame0，机器人不reset。A/C leaf显式钉`backhand`。旧`.7123759904781779 s`来自 tracked interior receipt(`r4_splitready`, tick92)；A literal-center已收紧到TTC=`1.82`/tick91/wait=**`.6923799138976297 s`**，A/C materializer分别=`12/12`、`11/11`；C走独立family-C receipt。**2026-08-05 更正**：本行此前写作`.69237599 s`，那是从旧 tracked receipt 减一 tick 推出的；仓库存在两份相差`3.9e-6`的 interior 权威——旧 tape(`r3`/`r4_splitready`)receipt 的`0.7123759904781779`与现役 tape(`fresh_592835dc_take061/rematerialized_1d5d9d44`)receipt 的`0.7123799138976297`。producer 从 prepared core 重算出的正是后者，故以现役 tape receipt 为准，旧数只作历史。**2026-08-06 更正**：此前本句写作"以 code-owned 常量 `CANONICAL_TEACHER_PROJECTION`(`:201`)为准、launcher 导入期自检比对的是后者"——那条描述有误：该常量只是把同一份 tape receipt 的字节在代码里抄了一遍(22 个 `runtime_target` 字段逐一相等，3 个顶层键只是改名)，所谓"导入期自检"仅是常量与自身 sha 的循环比对，从不读磁带，因此对漂移零保护。该常量与 `CANONICAL_BASE_QUESTION` / `CANONICAL_SOURCE_TAPE` / 两个 validate 函数已于 2026-08-06 整体删除，唯一权威改为 tracked 磁带及其 `current_lm.target.task_receipt.v5.5e09858672ac.json`。误删helper已恢复。bridge schema-v3专项=`56 passed`，但共享4096 gate仍写schema-v2，A launcher在第84项正确fail-closed，未被绕过 | 把shared gate升级为严格消费v3 `reveal_to_playback_bridge`与唯一counter表；随后A/C launcher余下测试、旧interior负例→exact-source suite→S0/S1 |
 | question source | A cache schema-v2保存所有active-birth semantic rows+每动作跨reset hot row，mixed Q/Q' pure/cold replay correctness已过；C=`direct_ball`且formal A/C不用immutable tape。但当前level-0 TTC grid仍强制center±1 tick并携带stratum provenance，所以“fixed-N1”是小有限题带，不是用户要求的严格单Q | 增加curriculum-owned initial-center single-Q模式；升档后才扩题，Pod断言A cold=1/warm=0、C inverse=0 |
@@ -736,8 +736,30 @@ accepted window `1.85151` 的 `107%`。即在本文自己的口径下，**“站
 | 6 | `hit_unstable_support` | 本文全文零命中 | `-10.0 -> -1.0`（窗内最坏 `-2.2 -> -0.22` = accepted window `12%`） | 同上。原值使“进窗但重心转移”劣于“不挥拍”，而重心转移是击球必然 |
 | 7 | `death_penalty` | `-300`（post-dt `-6.0`） | `-10`（post-dt `-0.2` = 合法上台折扣下界 `3.33209` 的 `6%`） | 原值为上台下界的 `180%`，“打成一次再摔”净亏。外部三库与 `build_1` 均无此项；尽调目标 `-0.2` |
 | 8 | `undesired_contacts` 排除正则 | —（未记载） | `_link -> _Link` | **Bug**：A3 body 名为 `_Link`，原写法是 Unitree G1 命名，`re.fullmatch` 大小写敏感 → 四条负向前瞻全部落空 → 双脚双腕反在惩罚名单，站立每步恒扣 `-0.004`、每 episode `-2.0` |
-| 9 | `qdes_limit_barrier_margin_frac` | `0.08` | `0.05` | **构造性重叠**：投影包络内沿在 `0.05*span`，barrier 带宽 `0.08` → 任何被钳关节恒扣 `-0.0844/关节/步`（理论上限 `84%`），3 关节即吃掉窗内 dense 收入 `44%`，且由护栏自身造成、策略无法规避 |
+| 9 | soft-limit v2 两条通道带宽：`qdes_limit_barrier_margin_frac` + `joint_limit_margin_frac`（新键） | 均 `0.08` | 均 `0.05` | **构造性重叠**：投影包络内沿在 `0.05*span`，barrier 带宽 `0.08` → 任何被钳关节恒扣 `-0.0844/关节/步`（理论上限 `84%`），3 关节即吃掉窗内 dense 收入 `44%`，且由护栏自身造成、策略无法规避。**两条通道必须同时改**：见下方返工记 |
 | 10 | MuJoCo `joint_actual_forbidden` | 与 Isaac 同为硬终止 | 同步改为不进 `exact_hard_reasons`；事件走独立 `joint_actual_forbidden_observed_ticks` / `first_..._observed`，并在收据里自陈 `terminates_episode=false` / `mode=telemetry_only`，另出 `promotion_blocking_evidence.promotion_blocked` 结论位 | 两引擎对同一物理事件必须给出相同 Done，否则 cross-engine parity 比较的是两个不同 MDP |
+
+**第 9 条的返工：只改一半的带宽，是开机即死的配置（2026-08-06 发现）。**
+首版只把 `q_des` 通道改到 `0.05`，`actual-q` 通道（`joint_limit`）留在 `0.08`，
+当时写下的理由是"actual-q 不经过投影"。这条理由有两处不成立：
+
+1. **它根本跑不起来。** `train.py:_actual_joint_limit_barrier_reward_contract` 逐字段要求
+   两条通道的 `weight` / `margin_frac` / `penalty_floor` 完全相同——它们是同一条限位带的
+   两个记账观察者，不是两条可独立调剂量的带。任何 ActionBall 发射在构建硬合同时立刻
+   `RuntimeError: qdes/actual soft-limit barrier v2 margin_frac must match exactly`，
+   A211 的 `oracle32` 就是这样被拒的（`/tmp/a211_oracle32.log`，`train.py:5559`）。
+2. **底噪的算术在两条通道上一模一样。** 护栏把命令投影到 `d = 0.05*span` 后，PD 会把实际
+   关节角拉到同一位置；两条通道都读 `articulation.data.soft_joint_pos_limits`，于是
+   `0.08` 带宽下被钳关节的**实际角**同样恒扣 `-0.0844/关节/步`。"不经过投影"说的是
+   命令通路，不是稳态位置。
+
+已落字节：新增显式覆盖键 `joint_limit_margin_frac`（沿用 qbar 的 fail-loud 信封——不给
+`joint_limit_weight` 就拒收，越界值不留半改），`HOPEPingPongActionBall.yaml` 两条通道同为
+`0.05`，`audit_reward_run.py` 的 `ADOPTED_SOFT_LIMIT_MARGIN_FRAC_BY_TERM` 同批改（此前它
+把 `0.08` 写成 actual 通道的"已采纳值"，等于用审计脚本给一个开不了机的配置背书）。
+真正的越界（实际 q 冲过投影内沿继续贴限位）在 `0.05` 带内照罚，硬终止仍是安全底线。
+教训与第 10 条同源：**一处数值有两个通道时，改一个就必须同一次改完另一个和它的审计常量**；
+这次是硬合同自己拦下来的，但它拦在发射时刻，代价是一次 GPU 排队。
 
 **第 10 条的一处返工，值得单独记。** 首版实现只把事件挂成一个模块属性，既没有计数也没有进收据；
 独立复核用变异测试发现该字段**全仓无人读取**（`checkpoint.py` 的 `observed`/`NO-GO`/`blocker` 关键字
