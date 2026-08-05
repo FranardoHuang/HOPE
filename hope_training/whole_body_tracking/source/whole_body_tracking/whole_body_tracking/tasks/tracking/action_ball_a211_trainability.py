@@ -313,6 +313,20 @@ def _validate_cfg(env_cfg, *, entrypoint: str, contract: _TrainabilityContract):
         actual = getattr(command_cfg, attribute, None)
         if type(expected_value) is bool:
             valid = type(actual) is bool and actual is expected_value
+        elif type(expected_value) is list:
+            # 人话:validity mask 在 cfg 上既可能是 list 也可能是 tuple —— Hydra /
+            # configclass 会把序列固化成 tuple。拿 list 直接 `==` tuple 永远是 False,
+            # 于是一个完全合法的 (True, True, True) 被判成漂移;A211/C211 四格流水线
+            # 的第一站就是死在这个假阴性上。这里逐元素比,并且**加强**要求:每一项
+            # 必须是显式 bool、长度必须一致。比原来的 `==` 更严,不是更松。
+            valid = (
+                type(actual) in (list, tuple)
+                and len(actual) == len(expected_value)
+                and all(
+                    type(item) is bool and item is want
+                    for item, want in zip(actual, expected_value)
+                )
+            )
         else:
             valid = actual == expected_value
         if not valid:

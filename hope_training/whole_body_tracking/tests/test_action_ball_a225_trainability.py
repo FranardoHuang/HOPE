@@ -110,6 +110,36 @@ def test_cfg_guard_allows_only_dedicated_a211_and_refuses_legacy_abis():
             M.validate_action_ball_211_cfg_trainability(wrong, entrypoint="test")
 
 
+def test_validity_mask_accepts_the_tuple_the_runtime_actually_holds():
+    """人话:Hydra / configclass 会把序列固化成 tuple。
+
+    这道门原来拿 list 直接 `==` tuple,于是完全合法的 (True, True, True) 被判成漂移 ——
+    A211/C211 四格流水线的第一站(materialize)就死在这个假阴性上,一次都没跑起来。
+    现在 tuple 与 list 都认,但要求逐元素是**显式 bool**、长度一致,比原来更严。
+    """
+
+    tupled = _cfg()
+    tupled.commands.racket_target.action_ball_target_validity_mask = (
+        True,
+        True,
+        True,
+    )
+    M.validate_action_ball_211_cfg_trainability(tupled, entrypoint="test")
+
+    for bad_value in (
+        (True, False, True),          # 值不对
+        (True, True),                 # 长度不对
+        (True, True, True, True),     # 长度不对
+        (1, 1, 1),                    # 不是显式 bool(原来的 `==` 会放行!)
+        "TTT",                        # 不是序列容器
+        None,
+    ):
+        wrong = _cfg()
+        wrong.commands.racket_target.action_ball_target_validity_mask = bad_value
+        with pytest.raises(RuntimeError, match="action_ball_target_validity_mask"):
+            M.validate_action_ball_211_cfg_trainability(wrong, entrypoint="test")
+
+
 def test_runtime_and_wrapper_require_exact_actor_and_privileged_critic_abis():
     runtime = _runtime()
     facts = M.validate_action_ball_211_runtime(runtime)
