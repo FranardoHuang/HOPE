@@ -1254,31 +1254,54 @@ explained variance、pre-clip grad norm、advantage/return tails 和逐 reward-g
 这些是 launch/health receipt，不是因为 reward 变了就一起调 entropy/std 的额外消融。
 
 当前唯一可发的四格不再是 A225 的 penalty/guard 四臂，而是
-`A211/C211 x 探索包` 的最小矩阵。共享 code-owned manifest 冻结同一 teacher、
+`A211/C211 x 本体感观测噪声开关` 的最小矩阵。共享 code-owned manifest 冻结同一 teacher、
 base question、seed、211/319 各自 ABI、ActionBall base-safety、death manager weight `-300`、
 actual-q/qdes barrier manager weight 各 `-5`，以及 qdes projection manager weight `-1`
 配 `objective_weight=-5` 的同剂量目标、`metrics_only`、
 `[512,256,128]` network、`entropy=.01`、delay=0 和 static contact sigma：
 
-**2026-08-05 第二轴改版（本表已按 §5.6.2c 裁决重写；旧的 `x PPO schedule` 四格
-（`A0/C0 fixed-lr1e4` 对 `A1/C1 adaptive-KL-lr1e3`）为 SUPERSEDED，其 cell_id
-`*-base-safety-fixed-lr1e4` / `*-base-safety-adaptive-kl-initial-lr1e3` 已从代码中移除。）**
-理由：在**从未观测到一次接触**的前提下，LR schedule 的差异无法被任何指标分辨；探索包才是
-一阶量。四格现在共用 `fixed lr=1e-4`（沿用原 A0/C0 的保守值，使对照格相对上一版一字未动），
-第二轴换成初始化方式 + `init_noise_std` + `noise_std_type`：
+**2026-08-05 第二轴改版（第二次，本表已按 §5.6.2d 裁决重写）。** 上一版（§5.6.2c）把第二轴
+从 PPO schedule 换成了探索包（`A0/C0` 零权重 bootstrap + sigma 0.1 对 `A1/C1` 标准初始化 +
+sigma 1.0）；那一版同样为 SUPERSEDED，其 cell_id `*-base-safety-zero-weight-bootstrap-sigma0p1`
+/ `*-base-safety-standard-init-sigma1p0` 已从代码中移除。
 
-| cell | ABI / task semantics | 初始化 / 探索包 | 唯一要回答的问题 |
+理由：探索包这一轴上，`build_1` / BeyondMimic / 正式 Hitter success lineage 的证据都指向
+`std=1` + 标准初始化，**再花两格去验证"零权重 bootstrap 是不是更好"是拿实验位去证一个没人
+主张的方案**。所以本轮把探索包**定死**在四格共用的标准 rsl_rl 初始化 + `init_noise_std=1.0` +
+`noise_std_type=scalar`（4σ 硬内带门显式跳过），把腾出来的两格换给**本体感观测噪声开关**：
+
+* 尽调 §22 判本体感噪声"D1 开满"，证据是外部 **9/9 库 day-1 全开** + 智元连 `play` 都保留 +
+  `build_1` 全开，**零反例**；
+* DR-L0 的裁定正好相反——它判这条"会改估计误差与终止率"，所以为归因先关；
+* **两边都是推理，谁都没实测过**，而成本只是一个布尔。上一轮恢复的那批随机性（摩擦 /
+  连杆质量 / PD / CoM / 关节零点 / 出生位姿斜坡）里，这是唯一有真冲突的一条 —— 花两格测它
+  是全表性价比最高的 A/B。
+
+噪声幅度用通道里已经定义好的值（与智元、`build_1` 同区间），本轮不新增通道也不改数：
+`joint_pos ±0.01 rad` / `joint_vel ±0.5 rad·s⁻¹` / `base_ang_vel ±0.2 rad·s⁻¹`。
+**任务通道不加噪**（§22 闸 1）：给 desired-contact / incoming-ball / 时间通道加噪会改支撑集，
+等于换题而不是换传感器；finalizer 逐项复核，多一路带噪当场拒。
+
+实现上新开一档 `DR-L0N`（"L0 + Noise"），它的 payload **由 DR-L0 的 payload 派生**，只允许差
+`identity` / `policy_observation_corruption` / `proprioceptive_observation_noise` 三个键，
+module 导入期断言把差异面钉死。它不是 `L2`：plant 与 L0 逐字节相同，跟 DR-L1 不在同一维度上，
+排进 `L0<L1<L2` 会误导。DR-L0 的身份与 digest `fd22321e…` 一个字节没动。
+
+| cell | ABI / task semantics | 本体感观测噪声 | 唯一要回答的问题 |
 | --- | --- | --- | --- |
-| `A0-base-safety-zero-weight-bootstrap-sigma0p1` | `A211`，desired-contact p/v/face | 零权重输出层 + 钉死 ready bias，`init_noise_std=.1`，`noise_std_type=log`，4σ 硬内带门开 | 当前结构在 4σ 门下的上限 |
-| `A1-base-safety-standard-init-sigma1p0` | `A211`，desired-contact p/v/face | 标准 rsl_rl 初始化，`init_noise_std=1.0`，`noise_std_type=scalar`，4σ 门显式跳过 | 对齐 `build_1`：bootstrap 是不是病灶 |
-| `C0-base-safety-zero-weight-bootstrap-sigma0p1` | `C211`，incoming ball p/v/spin | 同 `A0` | 无 contact oracle 时的直接球状态方案 |
-| `C1-base-safety-standard-init-sigma1p0` | `C211`，incoming ball p/v/spin | 同 `A1` | 同 `A1`，在 outcome-only 奖励下 |
+| `A0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off` | `A211`，desired-contact p/v/face | **关**（DR-L0，现状） | 归因基线：干净传感器下学不学得会 |
+| `A1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on` | `A211`，desired-contact p/v/face | **开**（DR-L0N，三路本体感通道） | §22 的"D1 开满"对不对：噪声是帮手还是病灶 |
+| `C0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off` | `C211`，incoming ball p/v/spin | 同 `A0` | 无 contact oracle 时的直接球状态方案 |
+| `C1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on` | `C211`，incoming ball p/v/spin | 同 `A1` | 同 `A1`，在 outcome-only 奖励下 |
 
-判读：`A1/C1` 出现接触而 `A0/C0` 没有，则 bootstrap 是病灶；两档都没有接触，则排除探索包，
-下一嫌疑是 reset 起点分布。GPU 布局不变：A 对同卡 `gpu0`、C 对同卡 `gpu1`、`gpu2` 留给 MuJoCo。
-`A1/C1` 的运行时收据是 schema 2（带 `actor_init_mode` / `four_sigma_hard_inner_gate_applied`），
-只认 schema 1 + `sigma=0.02` 的 n1_vendor probe-gate 会拒收它们——这是刻意的 fail-closed，
-那条冻结 gate 本来就不适用于这条新路线。
+判读：`A1/C1` 出现接触而 `A0/C0` 没有，则 DR-L0 关噪声的裁定是错的，§22 的"day-1 开满"成立；
+`A0/C0` 有接触而 `A1/C1` 没有，则噪声确实在这个阶段压制学习，DR-L0 的保守做法有据；
+两档都没有接触，则这根轴被排除，下一嫌疑回到 reset 起点分布（上一轮已落地的 `start_pose_ramp`
+挂在 DR-L1 上，正好是下一轮的候选）。GPU 布局不变：A 对同卡 `gpu0`、C 对同卡 `gpu1`、
+`gpu2` 留给 MuJoCo。四格的运行时收据是 schema 3（arm/recipe 合同带 `policy_observation_corruption`
+/ `proprioceptive_observation_noise_channels` / `dr_level_identity`），只认 schema 1 +
+`sigma=0.02` 的 n1_vendor probe-gate 会拒收它们——这是刻意的 fail-closed，那条冻结 gate 本来
+就不适用于这条新路线。
 
 四格不再沿用历史 A225 `corrected-metrics` 的十分之一 safety 价格。hard
 termination 仍只收一次 `-300*.02=-6`；actual-q/qdes barrier 的 manager weight 为 `-5`，
@@ -1506,6 +1529,60 @@ Tier-2 的复现口径改为 **N-seed 统计带**，checkpoint 续跑必须**容
 判断：以 `50x` 吞吐换逐位复现，在当前阶段**值得**——我们尚未观测到任何一次接触，需要的是迭代速度；
 而 exact-resume 本就未闭合（§12 的 `RESET-TERMINATION-RESUME` 仍为 `IN_PROGRESS`，只允许声称
 reset-boundary resume）。真正要改的是**验收口径**，不是放弃该路线。
+
+### 9.2.1 plant 必须继承智元 MJCF，不是 mjlab 默认（2026-08-05 实测）
+
+按 Franco 裁定「mjlab 只是框架，设置要继承智元的 MuJoCo」，本节把三方逐字段 compile 后对齐。
+方法是**真 compile 读 `MjModel` 字段**，不读源 XML——MJCF 有 `<default>` 继承与 class 覆盖。
+另用一份无 `<option>` 的 URDF compile 出 MuJoCo `3.10` 出厂默认作基准线，用于区分
+「智元刻意选的」与「MuJoCo 默认」。
+
+**智元 `<option>` 只显式写了四项**：`timestep=0.001`、`gravity`、`noslip_iterations=3`、
+`noslip_tolerance=1e-6`。`solver=Newton` / `iterations=100` / `ls_iterations=50` **全是 MuJoCo 默认**，
+不是 A3 调参。这个区分决定了哪些不能动、哪些可以为 GPU 调。
+
+| 字段 | 智元 MJCF（权威） | mjlab 默认 | 我们 Isaac / MJN |
+| --- | --- | --- | --- |
+| `opt.timestep` | **`0.001`**（显式） | `0.005` | `0.005`（慢 `5x`） |
+| `opt.integrator` | `EULER`（默认） | **`IMPLICITFAST`** | MJN `EULER` |
+| `opt.noslip_iterations` | **`3`**（显式；MuJoCo 默认 `0`） | `0` | MJN `3` |
+| `opt.ccd_iterations` | `35`（默认） | **`50`**（mjlab 显式） | MJN `35` |
+| geom `solref` | **`(0.005, 1)`**——收硬到默认的 `1/4` | `(0.02, 1)` | MJN `(0.005,1)` |
+| geom `friction` | **`(1.5, 0.005, 0.0001)` 含地面** | 躯干 `1.0` / 足 `0.6` | **Isaac 地面 `1.0`（低 `33%`）** |
+| geom `condim` | `3`（全部） | 躯干 `1` / 足 `3` | MJN `3` |
+| **`dof_damping`** | 腰 `1.0/0.5/0.8`、头 `1.0`、肩 `1.5`、膝 `2.0`、踝 `2.0` | `0.0` | **Isaac 无此项；MJN 显式清零** |
+| **`dof_frictionloss`** | `1.1971 / 0.69223 / 1.7 / ...` | — | **MJN 显式清零** |
+| `ctrlrange`（力矩上限） | 腰 `220/46/118`、膝 `320` 等 | — | **Isaac 逐位完全相同** |
+| `dof_armature` | 全精度值 | G1 自己的 | Isaac 圆整表，`15/18` 组相对差 `~1e-4` |
+
+**`dof_damping` 与 `dof_frictionloss` 是真实物理项，智元设了值而我们两个引擎都清零**——
+这不是随机性缺失，是 plant 不同。
+
+**执行器结构三方都不同。** 智元是 **31 个纯力矩 `motor`**（`biastype=NONE`、`gainprm=[1,0,0]`），
+PD 律在 aimrt 的 C++ 插件里逐消息计算：`ctrl = effort_ff + kp*(q_des - q) + kd*(qd_des - qd)`，
+`kp/kd` 在仿真侧**不固定**（随消息传入，真值在 deploy 端）。我们的 MJN 只实现
+`tau = clip(kp*(qdes - q) - kd*qd, ±effort)`，**缺 `effort_ff` 前馈与 `qd_des` 两项**；
+mjlab 则用 MuJoCo 内置 position 执行器。
+
+**落地方案（两段式，缺一不可）。** 实测 `MjSpec.attach()` **会丢掉 entity 的 `<option>`**
+（`timestep 0.001 -> 0.002`、`noslip 3 -> 0`），且 `MujocoCfg.apply()` 之后还会无条件再写 12 个字段。
+故：MJCF 负责 body/geom/joint/actuator/exclude（attach 后逐字段验证原样保留），
+`SimulationCfg` **逐字段显式**写智元 opt 值；`decimation=20`（`1000 Hz` 物理 / `50 Hz` 策略），
+不是 mjlab 的 `4`；mjlab 的便利改写器（`CollisionCfg`、`BuiltinPositionActuator`、terrain、
+`joint_pos` 默认 keyframe）**一律不用**。
+
+**具名偏离（无法继承）**：`noslip_iterations=3` 是 mujoco-warp 的硬缺口，带不过去，登记为偏离。
+
+**球/台/网没有智元权威可继承**（`a3_pingpong.xml` 是机器人模型，无球无台无网）。我们的权威是两份
+实测拟合 `ball_physics_venue.yaml` 与 `ball_physics_optitrack_20260730.yaml`，但它们是**解析接触/飞行
+模型的参数**，不是 MuJoCo 的 `solref/solimp/friction`。**当前原生接触参数是错的**：台面恢复系数
+实现值 `e=0.131` 而实测为 `0.9215`（venue，`58` 次门控回弹；OptiTrack 独立机位 `0.9102`
+CI95 `[0.8825, 0.9311]` 包含之）。现役 C211 走解析路径（`physical_ball=false`）故未暴露，
+一旦上原生接触必踩。原生接触路线上除几何与 `condim=3` 外**尚无一个物理参数被裁定**。
+
+**有效性包络（写进扩域闸门）**：实测覆盖球速 `1--7 m/s`、旋转 `0--15 rev/s`、台面 `v_n 1.0--4.5 m/s`、
+拍面 `u_n 1.4--7.2 m/s`；`SR>1.6` 完全空白。而 `build_1` 给 `400 Hz + CCD` 的理由是
+`15--25 m/s` 回击速度——**该速度段我们一个参数都没测过**，扩域不得越过该边界。
 
 ### 9.2 MuJoCo 顺序
 
