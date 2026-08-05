@@ -99,7 +99,17 @@ def _stage1_split_ready_wait_mask(cmd: RacketTargetCommand) -> torch.Tensor:
     task_valid = action_ball_task_valid_mask(cmd)
     bound = getattr(motion, "_action_ball_public_task_valid", None)
     owned = getattr(cmd, "_action_ball_task_valid", None)
-    if bound is None or bound is not owned:
+    if bound is None:
+        # 人话:Motion 侧还没绑定,只可能是 RacketTargetCommand.
+        # _install_action_ball_task_wait 一次都没跑过 —— 也就是 gym.make 里
+        # ObservationManager 探测观测维度的那次干调用(此时还没有任何 reset)。
+        # 这不是"两边各持一份张量",而是"还没有任何一行处在 WAIT"。Motion 自己的
+        # commands._action_ball_safe_ready_wait_mask 对同一个状态就是返回全 False,
+        # 奖励侧必须给出同一个答案,否则两边在构造期就自相矛盾,四格从 materialize
+        # 走到 recipe 一次都建不成环境。真正的分歧在下面照旧硬拒;真正跑到 reveal
+        # 却仍未绑定,commands.refresh_action_ball_revealed_body_reference 也照旧硬拒。
+        return torch.zeros_like(task_valid)
+    if bound is not owned:
         raise RuntimeError(
             "split-ready teacher requires Motion and Racket to share one "
             "task_valid tensor"

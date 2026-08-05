@@ -1056,3 +1056,53 @@ def test_unbound_safe_ready_state_is_not_mistaken_for_a_lost_pending_mask():
     view._action_ball_safe_ready_reference_pending = torch.zeros(2, dtype=torch.bool)
     view._action_ball_safe_ready_pending_count = 0
     assert view._capture_action_ball_safe_ready_reference() is None
+
+
+def test_reward_wait_mask_matches_motion_on_the_unbound_construction_state():
+    """奖励侧的等待掩码必须和 Motion 侧对"还没绑定"给出同一个答案。
+
+    人话:``MotionCommand._action_ball_public_task_valid`` 只有在
+    ``RacketTargetCommand._install_action_ball_task_wait`` 第一次跑过之后才有值,
+    而那要等第一次 reset。``gym.make`` 里 ``ObservationManager`` 会先干调一次
+    观测项去探测维度 —— 那时它必然还是 ``None``。Motion 自己的
+    ``_action_ball_safe_ready_wait_mask`` 对这个状态返回全 False(见上一条测试),
+    奖励侧的 ``_stage1_split_ready_wait_mask`` 却把它当成"两边各持一份张量"直接抛错,
+    于是 A211/C211 四格从 materialize 走到 recipe 时环境在 ``gym.make`` 里就建不起来。
+
+    真正的分歧 —— Motion 绑的和 Racket own 的不是同一个张量 —— 仍然必须硬拒。
+    """
+
+    namespace = _load_reward_helpers()
+    _, _, _ = _paddle_fixture(namespace)
+    mask = namespace["_stage1_split_ready_wait_mask"]
+
+    owned = torch.tensor([False, True])
+    motion = SimpleNamespace(
+        action_ball_diagnostic_split_ready_teacher=True,
+        _action_ball_public_task_valid=None,
+        in_hold=torch.zeros(2, dtype=torch.bool),
+        _capture_action_ball_safe_ready_reference=lambda: None,
+    )
+    cmd = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        pre_strike=torch.zeros(2, dtype=torch.bool),
+        strike_window=torch.zeros(2, dtype=torch.bool),
+        _action_ball_task_valid=owned,
+        _motion=lambda: motion,
+    )
+
+    # 1) 未绑定 = 构造期干调用:全 False,不抛错,和 Motion 侧一致。
+    result = mask(cmd)
+    assert result.dtype == torch.bool
+    assert result.shape == owned.shape
+    assert not bool(result.any())
+
+    # 2) 绑的是同一个张量:恢复原语义 ~task_valid。
+    motion._action_ball_public_task_valid = owned
+    assert mask(cmd).tolist() == [True, False]
+
+    # 3) 绑的是"另一份"张量 —— 真正的分歧,照旧硬拒。
+    motion._action_ball_public_task_valid = owned.clone()
+    with pytest.raises(RuntimeError, match="share one"):
+        mask(cmd)
