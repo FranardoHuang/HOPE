@@ -304,6 +304,34 @@ def test_l0n_finalizer_reaches_the_l0_plant_with_the_sensor_on():
     assert not hasattr(env_cfg, train._ACTION_BALL_DR_L0_RUNTIME_ATTR)
 
 
+def test_l0n_asks_for_the_same_zero_startup_offset_decoder_as_l0():
+    """L0N 删的也是 events.add_joint_default_pos,所以它必须走同一份零解码器。
+
+    这条事件同时承载 ±0.01 rad 随机化和 ``default_joint_pos_nominal`` 的采集。删掉之后,
+    startup offset 必须由"精确 31 维零"这条路解出来。以前这个开关只问 DR-L0,于是 L0N
+    (四格里 obs-noise-on 的 A1/C1 两格)拿到 False:解码器去读一条已是 None 的事件当场
+    RuntimeError,标称零点也永远不会发布 —— 那两格根本起不来。
+    """
+
+    train = _load_train_module()
+    assert train._resolve_action_ball_zero_startup_offset_request(L0N_DR) is True
+    l0_dr = dict(L0N_DR, policy_observation_corruption=False)
+    assert train._resolve_action_ball_zero_startup_offset_request(l0_dr) is True
+    # 只在 finalizer 注册过的两档为真:DR-L1 把事件恢复成真的 ±0.01 采样,必须为假。
+    l1_dr = {
+        "stable_ready_plant": False,
+        "startup_physics_material": True,
+        "startup_joint_default_pos": True,
+        "policy_observation_corruption": False,
+    }
+    assert train._resolve_action_ball_zero_startup_offset_request(l1_dr) is False
+    # payload 侧的对拍:L0N 的 startup_offset_delta 与 L0 的逐字节相同,要的就是同一份零解码器。
+    assert (
+        TC.action_ball_dr_l0n_contract_payload()["startup_offset_delta"]
+        == TC.action_ball_dr_l0_contract_payload()["startup_offset_delta"]
+    )
+
+
 def test_l0n_inherits_the_same_carrier_gate_as_l0():
     """L0N 删的是同一批槽,所以它必须共用同一道"载体被点名"闸,不能只护 L0。"""
 

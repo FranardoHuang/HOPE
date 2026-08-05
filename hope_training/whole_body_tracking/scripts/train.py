@@ -11983,6 +11983,27 @@ def _resolve_action_ball_dr_l0n_request(dr) -> bool:
     return True
 
 
+def _resolve_action_ball_zero_startup_offset_request(dr) -> bool:
+    """Does the resolved DR level delete ``events.add_joint_default_pos``?
+
+    人话:载体普查的第四例。DR-L0 和 DR-L0N 都把这条 startup 事件整个删掉,而那条事件
+    同时承载两样东西 —— ±0.01 rad 的随机化(DR)和 ``default_joint_pos_nominal`` 的采集
+    (导出用的测量)。删掉它之后,startup offset 解码器必须走"精确 31 维零"这条路,标称
+    关节零点也必须另行发布(见 ``_publish_dr_l0_nominal_joint_zero``)。
+
+    之前这个开关只问 DR-L0,于是 DR-L0N(四格里 obs-noise-on 的 A1/C1 两格)拿到 False:
+    解码器去读一条已经是 ``None`` 的事件,当场 RuntimeError,标称零点也永远不会发布。
+    两档删的是同一个槽,所以这里必须同时认这两档 —— L0N 的 payload 本来就是从 L0 派生的,
+    ``startup_offset_delta.source`` 逐字节相同,要的就是同一份零解码器。DR-L1 把事件恢复成
+    真的 ±0.01 采样,不在此列。
+    """
+
+    return bool(
+        _resolve_action_ball_dr_l0_request(dr)
+        or _resolve_action_ball_dr_l0n_request(dr)
+    )
+
+
 def _apply_action_ball_dr_l0n_finalizer(env_cfg, dr, applied) -> bool:
     """Verify the DR-L0 plant plus the declared proprioceptive sensor noise."""
 
@@ -18152,8 +18173,10 @@ def _run(cfg):
                 actor_contract,
                 agent_cfg,
                 dynamic_ready_binding=action_ball_dynamic_ready_binding,
-                dr_l0_zero_decoder=_resolve_action_ball_dr_l0_request(
-                    _get(cfg.task, "domain_rand")
+                dr_l0_zero_decoder=(
+                    _resolve_action_ball_zero_startup_offset_request(
+                        _get(cfg.task, "domain_rand")
+                    )
                 ),
                 actor_init_mode=action_ball_actor_init_mode,
             )
