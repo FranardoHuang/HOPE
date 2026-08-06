@@ -23,6 +23,19 @@
   materializer 那份被 bundle producer sha 钉着），所以只读 AST 核对、不 import 任何持有者。
   **没有放宽任何 fail-closed 门**，新增的是净增保护。
 
+  勘误：上面这批改动落在 `92c4ce94`，但那条 commit message 写错了自己的 diff，以本条为准。
+  它说词表是 “hand-copied across action_ball_runtime、hope_rewards、observations 和
+  action_ball_curriculum” —— 不是。真正的多份副本在四个发射器／三个 oracle 脚本／audit 工具
+  和 production 包之间；`observations.py` 与 `action_ball_curriculum.py` 那两处是**无关的**零
+  调用点死代码（`robot_anchor_ori_w`、`BallCurriculumStalledError`），而占 diff 大头的
+  `_refill`（129 行）和 `FrozenAttemptSource`（81 行）它一个字都没提。更要紧的是它说
+  “Single-sources the vocabulary” —— **恰恰相反**：这批改动是刻意**不**做单一真源 import，
+  理由写在 `tests/test_action_ball_safety_vocabulary_single_source.py` 的 docstring 里（inbox
+  要能 CPU-only 单独审计、`hope_commands.py` 在 `SOLVER_SOURCES` 里逐字节钉着、发射器把加载过
+  的每个文件钉进 `RUNTIME_SOURCE_PATHS`）。照那句话去“把 import 接上”会让一个未被 provenance
+  覆盖的文件参与决策，那是**放宽** fail-closed 门。`92c4ce94` 已推送、其上已有他人 commit，
+  不改写历史，只在此处更正。
+
 - 2026-08-06: 过期结构清理一轮（只删零调用点，**没有放宽任何 fail-closed 门**）。删掉的最大一
   块是 `scripts/action_ball_211_launcher_shared.py`（577 行）：它 08-05 建立时自述“本轮只建库、
   接线是下一步”，接线从未发生，于是成了 A211/C211 两个发射器那 49 个共享常量的**第三份**手抄
