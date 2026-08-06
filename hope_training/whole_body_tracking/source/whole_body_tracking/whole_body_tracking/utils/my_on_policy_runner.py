@@ -1259,7 +1259,18 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         named = list(policy.named_parameters())
         actor = [parameter for name, parameter in named if name.startswith("actor.")]
         critic = [parameter for name, parameter in named if name.startswith("critic.")]
-        std = [parameter for name, parameter in named if name == "log_std"]
+        # 人话:噪声参数在 rsl-rl 里有两个名字 —— noise_std_type="scalar" 叫 std,
+        # "log" 才叫 log_std。这里以前写死了 log_std,于是每一个 scalar 策略(四格
+        # 全都是 sigma1p0 scalar)都被这道门判成"参数划分不合法"而永远发不出
+        # scale4096。名字改成问本类已有的 ABI 权威(_policy_std_abi 自己就是
+        # fail-closed:必须恰好暴露 std/log_std 之一、必须与 noise_std_type 自洽、
+        # 必须非空浮点),门本身一点没放松:仍要求 actor/critic 非空、噪声参数恰好
+        # 一个、并且三组之和穷尽 named_parameters()。
+        abi = self._policy_std_abi()
+        std_parameter_name = None if abi is None else abi["parameter_name"]
+        std = [
+            parameter for name, parameter in named if name == std_parameter_name
+        ]
         covered = {id(parameter) for parameter in (*actor, *critic, *std)}
         if (
             not actor
@@ -1269,7 +1280,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             or any(id(parameter) not in covered for _name, parameter in named)
         ):
             raise RuntimeError(
-                "reward/PPO economy requires exact actor/critic/log_std parameter partition"
+                "reward/PPO economy requires exact actor/critic/%s parameter partition"
+                % (std_parameter_name or "log_std")
             )
 
         original_clip = torch.nn.utils.clip_grad_norm_

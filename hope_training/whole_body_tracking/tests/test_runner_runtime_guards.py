@@ -772,17 +772,31 @@ def test_reward_ppo_economy_gate_is_explicit_and_exact_4096x24(
         runner._reward_ppo_economy_gate_requested()
 
 
-def test_reward_ppo_economy_observes_real_gradient_clip_without_replacing_it(
-    runner_module,
-):
-    class EconomyPolicy(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.actor = torch.nn.Linear(2, 2)
-            self.critic = torch.nn.Linear(2, 1)
-            self.log_std = torch.nn.Parameter(torch.zeros(2))
+class _EconomyPolicy(torch.nn.Module):
+    """Actor/critic plus the one trainable noise parameter, under either ABI name.
 
-    policy = EconomyPolicy()
+    人话:rsl-rl 的 noise_std_type="scalar" 把噪声参数叫 std,"log" 才叫 log_std。
+    四格现役配方全是 scalar,所以经济门必须两种名字都认。
+    """
+
+    def __init__(self, noise_std_type: str):
+        super().__init__()
+        self.actor = torch.nn.Linear(2, 2)
+        self.critic = torch.nn.Linear(2, 1)
+        self.noise_std_type = noise_std_type
+        if noise_std_type == "scalar":
+            self.std = torch.nn.Parameter(torch.ones(2))
+        elif noise_std_type == "log":
+            self.log_std = torch.nn.Parameter(torch.zeros(2))
+        else:
+            raise ValueError(noise_std_type)
+
+    @property
+    def std_parameter(self) -> torch.nn.Parameter:
+        return self.std if self.noise_std_type == "scalar" else self.log_std
+
+
+def _economy_runner(runner_module, policy):
     runner = _runner(runner_module, empirical=False)
     runner.alg = SimpleNamespace(
         policy=policy,
@@ -790,6 +804,17 @@ def test_reward_ppo_economy_observes_real_gradient_clip_without_replacing_it(
         num_mini_batches=4,
         max_grad_norm=1.0,
     )
+    return runner
+
+
+# 现役四格全是 scalar;此前这个用例只造过 log_std,于是 scalar 分支从没被跑到,
+# 而 scale4096 恰恰死在那里。两种 ABI 名字都必须过。
+@pytest.mark.parametrize("noise_std_type", ["scalar", "log"])
+def test_reward_ppo_economy_observes_real_gradient_clip_without_replacing_it(
+    runner_module, noise_std_type
+):
+    policy = _EconomyPolicy(noise_std_type)
+    runner = _economy_runner(runner_module, policy)
     calls = []
 
     def update():
@@ -798,7 +823,7 @@ def test_reward_ppo_economy_observes_real_gradient_clip_without_replacing_it(
             loss = (
                 policy.actor(torch.ones(3, 2)).sum()
                 + policy.critic(torch.ones(3, 2)).sum()
-                + policy.log_std.sum()
+                + policy.std_parameter.sum()
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
@@ -820,3 +845,32 @@ def test_reward_ppo_economy_observes_real_gradient_clip_without_replacing_it(
         gradient["pre_clip_total_grad_norm"]
     )
     assert 0.0 <= gradient["clip_factor_distribution"]["min"] <= 1.0
+
+
+# 人话:上面那条只证明"两种名字都认";这条证明门没被放松 —— 划分必须穷尽。
+@pytest.mark.parametrize("noise_std_type", ["scalar", "log"])
+def test_reward_ppo_economy_still_refuses_an_unpartitioned_parameter(
+    runner_module, noise_std_type
+):
+    policy = _EconomyPolicy(noise_std_type)
+    # 一个既不属于 actor/critic、也不是噪声参数的可训练张量:三组之和不再穷尽
+    # named_parameters(),门必须照旧拒绝。
+    policy.stowaway = torch.nn.Parameter(torch.zeros(2))
+    runner = _economy_runner(runner_module, policy)
+
+    with pytest.raises(RuntimeError, match="exact actor/critic/.* parameter partition"):
+        runner._run_reward_ppo_economy_optimizer(lambda: {})
+
+
+# 人话:噪声参数一个都没有(既没 std 也没 log_std)时,ABI 权威自己就要 fail-closed,
+# 绝不能被当成"划分合法"放行。
+def test_reward_ppo_economy_refuses_a_policy_with_no_noise_parameter(runner_module):
+    class NoNoisePolicy(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.actor = torch.nn.Linear(2, 2)
+            self.critic = torch.nn.Linear(2, 1)
+
+    runner = _economy_runner(runner_module, NoNoisePolicy())
+    with pytest.raises(RuntimeError):
+        runner._run_reward_ppo_economy_optimizer(lambda: {})
