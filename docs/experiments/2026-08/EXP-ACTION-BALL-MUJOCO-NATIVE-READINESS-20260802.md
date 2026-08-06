@@ -2596,6 +2596,8 @@ running-max 时间序列）、`seed/randpose_{elliptic,pyramidal}_s{7,13,29}.jso
 | `--njmax 70`（`nefc` 轴，`--nworld 64`） | 退出 `1`，`CAPACITY_OVERFLOW at env step 46/49: d.overflow = 1 = **NEFC**`，`nefc` 峰 `71 > 70`。两次复现落在 env step `46` 与 `49`——**mujoco-warp 非确定，这个数不要写死** |
 | 健康配置 `--nconmax 128`（假阳性检查） | 退出 `0`，`verdict: PASS_NO_OVERFLOW`，`nefc 77--80`、`nacon 1870`、`ncollision 4692`，`naconmax_headroom_x = 6.98`（若照旧除 `nacon` 会写成 `17.5`，虚高 `2.5` 倍） |
 | `--no-capacity-probe` | 退出 `0`，`verdict: NOT_MEASURED`，`[WARN][CAPACITY GATE OFF]` 进摘要 |
+| **eval 路径同一条变异**（`--eval zero --nconmax 10`，`256` 世界） | 退出 **`1`**，`status: gate_fired`、`capacity_gate: ENFORCED`、`verdict: OVERFLOW`、`overflow_flags: ["BROADPHASE"]`、`overflow_reported_by: "env step 18"`、`naconmax_headroom_x = 0.973`，收据落盘。**修复前 `evaluate()` 恒 `return 0`、从不判决**（§9.2.4 P5） |
+| eval 健康 + eval 关门 | 健康：退出 `0`、`capacity_gate: ENFORCED`、`PASS_NO_OVERFLOW`、`capacity_samples_stepped = 800`，接触探针照常（`ball_table_contact_substeps = 143`）。`--no-capacity-probe`：退出 `0`、`capacity_gate: **NOT_GATED**`、`[WARN][EVAL NOT GATED]` 进摘要 |
 
 #### 三、吞吐：§9.2.2 那个"探针吃掉 9%"不成立，撤回
 
@@ -2636,6 +2638,7 @@ running-max 时间序列）、`seed/randpose_{elliptic,pyramidal}_s{7,13,29}.jso
 | `AFTER.status` / `AFTER_m*.out` / `AFTER_m*.json` | 修复后六条（三条 T8 + `njmax70` + 健康对照 + 门关掉对照） |
 | `FPSCLEAN.status` / `FPST*.json`、`FPSTIE.status` / `FPSC*.json` | 配对吞吐，含每次跑前/跑后 GPU2 上的他人进程数 |
 | `WIRE.json` | 接线冒烟：`capacity_samples_stepped = 960`、`overflow_mask = 0`、uuid 与 `nvidia-smi` 对上 |
+| `EVALGATE.json` / `EVALMUT.json` / `EVALOFF.json` | eval 路径三态：设门通过 / 设门开火（点名 `BROADPHASE`，退出 `1`） / 明写 `NOT_GATED` |
 | `test_mjlab_lane_capacity_gate.py` | 与 repo 同一份的单测 |
 | `run_gpu2_smoke.sh.pre-T7` / `audit.sh.pre-T7` | 两个 pod 脚本改前的备份 |
 
