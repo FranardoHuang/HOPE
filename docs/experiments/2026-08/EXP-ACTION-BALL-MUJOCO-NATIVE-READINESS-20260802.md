@@ -1257,10 +1257,28 @@ worktree `/workspace/franco/s10_ff_20260806`（`33c9bdc3`）。**未跑 Isaac `o
 M7/M8 就是这次改动要消除的那个回归：**旧门一装回去，"未训练策略摔倒/碰桌"立刻被误拒。**
 M3 则证明重定范围没有降门槛：两类实现故障非零时，新门照旧拒绝。
 
-**收据。** pod1 worktree `/workspace/franco/c211_oracle32_rescope_20260806`（`de0641be` + 本改动），
-`hope_isaac_venv`、`pytest -n 64`。基线对拍（改动前 7 个模块）`475 passed in 9.69s`；
-改动后同 7 个模块 `475 passed in 9.12s`（新增用例后 C211 模块由 `154 -> 172`）；
-变异 harness `/tmp/mutate_c211_gate.py`，`10/10` 变异体被杀、`SURVIVING MUTANTS: none`。
+**收据。** pod1、`hope_isaac_venv`。**基线对拍是真的 A/B**：另开一棵**未改动**的 `de0641be`
+worktree（`/workspace/franco/c211_rescope_BASELINE_20260806`），与改动树
+（`/workspace/franco/c211_oracle32_rescope_20260806`）跑**同一份 64 模块清单**
+（清单 = 全仓所有提到本次四个被改脚本或 `train.py` 的测试文件，即真实爆炸半径），`pytest -n 32`：
+
+| | 结果 |
+| --- | --- |
+| 基线（未改动 `de0641be`） | `17 failed, 2497 passed, 86 skipped in 111.09s` |
+| 改动后 | `17 failed, 2514 passed, 86 skipped in 112.32s` |
+| 失败集合 | **逐条相同**（`diff` 为空）——那 17 条在未改动树上就红，与本改动无关 |
+| 差值 | `+17 passed` = 本节新增的 17 个用例 |
+
+那 17 条既有失败分布在 `test_action_ball_table_pose_observation` / `test_audit_reward_run` /
+`test_event_timing_scheduler` / `test_foot_contact_shaping` / `test_launch_a3_vendor_identity_smoke` /
+`test_launch_n1_measured_vendor_v2_diagnostic` / `test_reward_flags_overrides` /
+`test_training_launch_claim`，**没有一条是 C211 oracle/launcher 测试**；本节不认领也不掩盖它们。
+
+推送后在**第三棵干净 worktree** 上按提交号复核（`/workspace/franco/c211_rescope_verify_20260806`，
+`e8079c33`）：`17 failed, 2514 passed, 86 skipped in 104.59s`，与改动树逐条一致 ——
+证明提交是自洽的，没有把哪个改动漏在工作区里。
+
+变异 harness `/tmp/mutate_c211_gate.py`：`10/10` 变异体被杀，`SURVIVING MUTANTS: none`。
 
 #### 5.6.9 手抄的 Isaac 常量改成读活值：指纹只证明"字节没动"，不证明"抄对了"（2026-08-06）
 
