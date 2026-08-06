@@ -7586,11 +7586,20 @@ class RacketTargetCommand(CommandTerm):
                 raise ValueError(
                     "action-ball domain cursor/provider assignment transcript diverged"
                 )
-        # In the live-births-only scope the birth history that would anchor these
-        # cursors is intentionally empty.  The cursors keep an independent
-        # witness: ``ActionBirthBroker.load_state_dict`` re-reads
-        # ``domain_cursor_for`` and requires it to equal its own serialized
-        # ``domain_claim_counts`` before it commits.
+        # 人话:live-only 这一档没有 provider_history 可以给这些 cursor 当锚点。
+        # 这里以前写着"独立见证在 ``ActionBirthBroker.load_state_dict``",那句话
+        # 是错的 —— broker 的 ``load_state_dict`` 只在
+        # ``_action_ball_load_exact_resume_state_dict`` 里被调用,而那个函数第一句
+        # 就把 live-only 顶回去了(见下面 15550 附近);broker 自己的存档现在也
+        # 自陈 ``birth_transcript_scope=live_envs_only`` 并拒绝载入。那条锚点在
+        # 这一档**永远走不到**。
+        #
+        # 实际依据是:live-only 解码器唯一的活消费者是**进程内回滚**
+        # (``_restore_solver_state`` -> ``_action_ball_load_solver_mutable_state``),
+        # 载荷是本进程几行之前自己刚生成的,``integrity_sha256`` 覆盖了含范围牌子
+        # 在内的全部字段。也就是自产自销 + 完整性哈希,不是第二个独立证人。
+        # 这一档本来就不支持跨进程续跑,所以这样是够的 —— 但别再声称一个
+        # 跑不到的锚点。
         raw_proposals = state["proposal_ledger"]
         if not isinstance(raw_proposals, dict) or set(raw_proposals) != {"P", "A"}:
             raise ValueError("action-ball solver proposal_ledger has invalid keys")
@@ -7622,11 +7631,17 @@ class RacketTargetCommand(CommandTerm):
                     "receipts or rejected logical rows"
                 )
         elif live_only:
-            # No per-birth transcript exists to rebuild these counts from, so
-            # the admitted-proposal ledger is the restored value rather than a
-            # second opinion about it.  Its independent witness lives one layer
-            # out: ``_action_ball_load_exact_resume_state_dict`` requires the
-            # top-level ``A`` row to equal the restored pool's ``admitted``.
+            # 没有逐出生 transcript 可以重建这些计数,所以这里的 admitted 提案
+            # 台账是**被复原的值本身**,不是对它的第二种意见。
+            #
+            # 这里以前写着"独立见证在外面一层:
+            # ``_action_ball_load_exact_resume_state_dict`` 要求顶层 ``A`` 等于
+            # 复原后池子的 ``admitted``"。那句话是错的 —— 那条检查就在那个函数
+            # 里面,而该函数对 live-only 直接抛错(15550 附近),这一档根本走不到。
+            #
+            # 真正的依据是:live-only 唯一能到这里的入口是进程内回滚,而生产者
+            # (``_action_ball_solver_mutable_state_dict``)在几行之前刚断言过
+            # ``A[slot] == emitted[uid]``,``integrity_sha256`` 又覆盖了全部字段。
             if state["task_transcripts"] != []:
                 raise ValueError(
                     "live-births-only action-ball solver state carries a "

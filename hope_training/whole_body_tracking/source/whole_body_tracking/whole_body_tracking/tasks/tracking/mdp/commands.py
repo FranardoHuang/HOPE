@@ -7696,8 +7696,17 @@ class MotionCommand(CommandTerm):
             # Diagnostic A211/C211 has no promotion authority, but its sampler, question/cache,
             # WAIT and command continuation state are still real mutable bytes.  Authorization and
             # recoverability are independent axes: serialize the full schema-4 handoff and keep the
-            # diagnostic brand inside Racket's hard contract instead of silently making every
-            # diagnostic checkpoint fresh-only.
+            # diagnostic brand inside Racket's hard contract.
+            #
+            # 人话勘误(2026-08-07):这段以前的结尾是"而不是悄悄把每个诊断
+            # checkpoint 变成只能重开"。现在它**就是**只能重开的 —— 但关键在
+            # "不是悄悄"。诊断跑的三份存档各自自陈范围:solver 的
+            # ``task_transcript_scope=diagnostic_live_births_only``、池子的
+            # ``pool_state_scope=diagnostic_live_births_only``、broker 的
+            # ``birth_transcript_scope=live_envs_only``;三者的载入端都点名拒绝,
+            # 并说明理由。存档照存不误(权重、取证数据、训练连续性都在),
+            # 只是不承载"从第 N 步接着跑"所需的逐出生历史 —— 那半份材料这条
+            # 快路本来就故意不写,让它悄悄变成零才是真正的错。
             state["action_ball_birth"] = (
                 self._action_ball_exact_resume_state_dict()
             )
