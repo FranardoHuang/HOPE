@@ -1565,29 +1565,35 @@ live_declared_term_blockers()` 也折进去（无环：`isaac_reference_envelope
 - 同批重钉一枚：`EXPECTED_PHASE_BASE_CONFIG_SEMANTIC_AST_SHA256`
   （`aefdf83d…` → `65e9c395…`，因为选择器从 1 个名字扩到 4 个）。
 - **全量套件基线对拍**（`pytest tests hope_training/whole_body_tracking/tests
-  hope_training/whole_body_tracking/mujoco_native/tests -n 64`，两次都是同一条命令）：
+  hope_training/whole_body_tracking/mujoco_native/tests -n 64`，四次都是同一条命令）：
 
-  | | failed | passed | skipped | errors | 用时 |
+  | 跑法 | failed | passed | skipped | errors | 失败集合条数 |
   | --- | --- | --- | --- | --- | --- |
-  | 基线 `dbf40773` | 266 | 9929 | 173 | 19 | 28:00 |
-  | 本改动 | 266 | 9946 | 173 | 27 | 28:43 |
+  | 基线 `dbf40773`（第 1 次） | 266 | 9929 | 173 | 19 | 285 |
+  | 基线 `dbf40773`（第 2 次，**同一棵树同一个 commit**） | 265 | 9930 | 173 | 19 | 284 |
+  | 本改动（**工作区未提交**） | 266 | 9946 | 173 | 27 | 293 |
+  | 推上去的 `9ea4d0c0`（**干净检出**） | 266 | 9966 | 173 | 19 | 285 |
 
-  `failed` 逐条相同（`comm` 比对失败集合，266 条一条不差）；`passed` `+17`。
-  `errors` `+8`，**逐条查明与本改动无关**，两条证据：
+  **先看第 1 行和第 2 行**：同一个 commit、同一棵 worktree 连跑两次，失败集合就差了 5 条
+  （`test_canonical_motion_compile_cli`、`test_joint_limit_safety`、
+  `test_run_phase1_q50_persistent_supervisor`×2、`test_motion_backhand_loop_b_table_net_clearance`）。
+  **这条套件本来就有一条约 2--3 条/次的抖动尾巴**，`-n 64` 下和别的 agent 抢资源时尤其明显。
+  没有这条对照，任何"改动前后失败集合不完全相同"的结论都是没意义的。
 
-  1. 那 8 条全在 `tests/test_launch_a3_vendor_identity_smoke.py`。把它单独跑，
-     两棵 worktree 的结果**完全一样**（都是 `2 failed, 43 passed`，同一条
-     `official profile pinner does not reproduce the pinned profile`）。这个模块读的是**实时 GPU 占用**
-     （`test_launch_refuses_occupied_gpu_before_namespace_claim` 就在那 8 条里），
-     本轮另有 agent 在 GPU 上跑 Isaac 链条。基线那次它是 `1 FAILED`，本次是 `8 ERROR`，
-     两次都不是它自己的稳定态。
-  2. 另有 1 条只在本次红的 `test_joint_limit_safety.py::test_prepare_returns_borrowed_view_...`，
-     单独跑两棵树都是 `116 passed`——`-n 64` 争抢下的抖动。
+  **第 3 行那 8 个多出来的 `errors` 已经查清**：全在
+  `tests/test_launch_a3_vendor_identity_smoke.py`，起因是**我的工作区当时还没提交**——
+  那个模块的 fixture 要求源码树干净（`test_dirty_source_refuses_before_any_runtime_or_gpu_work`
+  就在那 8 条里）。提交推送后按干净检出重跑（第 4 行），`errors` 回到 `19`，和基线一模一样。
+  这正是 Franco 交代的"别在共写树上跑"那条纪律的另一面：**带着未提交改动跑全量套件，
+  收据本身会被污染**。
 
-  机制上也走不通：`mujoco_native` 这四个字在这两个测试模块里**一次都没出现过**
-  （`grep -c mujoco_native` 均为 `0`），本改动全部落在 `mujoco_native/` 内，没有 import 路径能传过去。
+  第 4 行对第 1 行，失败集合差 4 条（进 2 出 2）；对第 2 行差 5 条（进 3 出 2）——
+  **都不比基线自己跟自己的差异更大**，而且这 6 个模块 `grep -c mujoco_native` **全是 `0`**，
+  本改动全部落在 `mujoco_native/` 内，没有 import 路径能传过去。
+
+- 干净检出 `9ea4d0c0` 上把本改动直接相关的 8 个模块单独跑：`355 passed`（含新增 25 条）。
 - 已知既有基线本来就红着 `266 failed / 19 errors`，不在本轮爆炸半径内；本轮没有让任何一条
-  原本绿的测试变红。
+  稳定绿的测试变红。
 
 ## 6. 智元 setting 的采用表
 
