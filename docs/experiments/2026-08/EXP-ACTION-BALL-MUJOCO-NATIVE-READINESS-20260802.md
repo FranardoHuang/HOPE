@@ -51,6 +51,7 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 | DR | shared DR-L0 finalizer/leaf专项 host=`31 passed`；A/C launcher profile已切严格all-off DR-L0：material、joint-default offset、CoM/mass/PD、push、reset/target/proprio/body-gyro corruption与delay均关，PPO探索噪声不属于DR且保持算法配方 | exact Pod复核resolved config；nominal learnability后才以fresh lineage单轴恢复 |
 | Isaac | 4096环境与admission层每GPU最多2进程的合同已有；四格尚未运行。pod-wide `.kit_boot.lock` 原来会把scale全Pod串行；补丁已把锁收窄到Kit/extension boot，真实fcntl host suite=`22 passed`。Pod headless Isaac App 同GPU0双进程overlap已PASS：B在A尚未退出且双方各占约641 MiB时进入READY，二者自然退出；这关闭boot串行，不代签两个4096场景的显存/吞吐，正式scale仍记peak/min-free，跨GPU对照在补。当前analytic `physical_ball=false` learnability不冒充PhysX outcome。pre-long barrier/reward链专项=`71 passed`；A helper已恢复，C v3/各自timing receipt仍在focused test收口 | cross-GPU lock对照→initial-center single-Q四处一致→整组回归→oracle32→A0/A1/C0/C1各4096x5；正式四格共驻只为缩短总等待，rate证据另跑exclusive ABBA |
 | MuJoCo | parked-ball/reveal、A/C task/reward、runtime seals、fresh hold-bias、single-stroke timeout与RSL式timeout bootstrap已实现；native+legacy组合回归=`219 passed,2 skipped,0 failed`。exact Pod WIP r6 的A/C各`1 env×2 update`均`COMPLETE`，211/319有限，fresh WAIT canary、reset-boundary save与cold-load exact均通过；decoded mean→tape qdes最大误差`6.62e-8 rad`，mean-action projection=0，随机WAIT transition projection=`31/775=4.0%`。确定性checkpoint replay已把每个update的7个hard-terminal全部定位成`joint_actual_forbidden`：A在episode tick `70..84`，C在`69..88`，均早于nominal strike，timeout/base/table/contact/strike/landing均0；所以它证明移植主链可执行/可冷载，同时明确反证当前plant/action bootstrap可直接做4096学习。现役hold的WAIT25另有`1000/1000`、`0` hard；4σ inward mean仍只是未sealed候选 | 先做sealed current mean-only/std.02与4σ-inset同条件100+ tick诊断，区分静态漂移、探索累积、PD/plant或projection根因；正式receipt补reason/phase/tick后才能发MuJoCo scale。inset若胜出须新lineage，不能偷换r6授权。完整reward/safety、mid-episode resume、4096与cross-engine parity继续阻塞formal promotion |
+| **MuJoCo GPU / mjlab lane（2026-08-06，明细见 §9.2.2/§9.2.3）** | **已在 pod1 GPU2 发车**：`4096 env x 5 update` 跑完 `10.9 s`，PID `2862997` 实测在 index `2`（`11,290 MiB`），GPU0/GPU1 全程 `2 MiB, 0 %` 未被碰；`nonfinite_state=0`、吞吐 `45,706` env-step/s。新增**接触容量看门狗**（逐 substep GPU 侧累积 `nefc`/`nacon` 峰值，触顶即 `CAPACITY_OVERFLOW` 非零退出；探针关闭时记 `NOT_MEASURED` 而非 `PASS`），变异测试 `--njmax 70` 确认会拦。加桌加球后重测容量：最坏情况（`ctrl=0` 摊平）`nefc=95`/世界、`nacon=55,455`，对 `njmax=572`/`naconmax=524,288` 余量 `6.02x`/`9.45x`；实测桌子接住机器人反而**降低**了行峰值（plant-only 是 `115`）。球台恢复系数复核 `e=0.9214117` vs 实测权威 `0.9215`，`4096/4096` 世界在带内 | 这条 lane 是 court/ready/reach-touch 任务，**不代签** canonical N1：缺 measured teacher、完整 reward 层级、§9.2 的 termination union 与 cross-engine parity。下一道门是把 A211/C211 的 measured teacher 与 reward 接到这条已验证的 `4096` GPU 回路上 |
 | 0803 plant | normalized successor可复现，host producer=`6 passed`；但 world racket FK因右肘原点变化约9 mm，旧retarget/hold/MuJoCo identity不可代签 | 当前旧plant只跑`OLD-PLANT-FINITE`；canonical long另走promotion DAG |
 | 文档合同 | G04/G05/G06、policy ABI、工具目录与旧frame0操作页已同步；Gate保持Partial | 代码收口后再写exact test/Pod receipt与PROGRESS |
 
@@ -1660,6 +1661,86 @@ CI95 `[0.8825, 0.9311]` 包含之）。现役 C211 走解析路径（`physical_b
 **有效性包络（写进扩域闸门）**：实测覆盖球速 `1--7 m/s`、旋转 `0--15 rev/s`、台面 `v_n 1.0--4.5 m/s`、
 拍面 `u_n 1.4--7.2 m/s`；`SR>1.6` 完全空白。而 `build_1` 给 `400 Hz + CCD` 的理由是
 `15--25 m/s` 回击速度——**该速度段我们一个参数都没测过**，扩域不得越过该边界。
+
+### 9.2.2 mjlab lane 在 pod1 GPU2 上发车 + 接触容量看门狗（2026-08-06 实测）
+
+**人话**：MuJoCo GPU 这条线现在能自己跑训练了，不再只是"能跑物理"。`4096` 个环境一起跑，`5` 次
+PPO 更新 `10.9` 秒跑完，全程没有任何一个环境算出 NaN。这次真正补上的缺口是一个**接触容量看门狗**：
+在此之前，如果某一步需要的约束行数超过预分配的 `njmax`，mujoco-warp 会把多出来的行**悄悄丢掉**，
+训练照常往下跑、曲线照常上升，但那些世界的物理已经是错的，而且**没有任何收据会记下这件事**。
+现在它会当场停机并写明差多少。
+
+**改了什么**（`hope_training/whole_body_tracking/mjlab_lane/a3_train_ppo.py`）。默认开启，逐 physics
+substep 在 GPU 上累积 `nefc`（每世界约束行）与 `nacon`（全世界接触）的滚动最大值，每次迭代随其它
+统计量一次性读回（**不额外增加 GPU 同步**）；任一项触到分配上限即 `raise RuntimeError`
+`CAPACITY_OVERFLOW`，训练进程非零退出。每次迭代的峰值写进 `.jsonl`，run 级峰值与余量写进
+`.json` 的 `capacity` 段。`verdict` 是**三值**的：探针关掉时记 `NOT_MEASURED`，**不是** `PASS`——
+没测过的 run 不允许声称容量门成立。
+
+**变异测试**（按"验收用变异测试"准绳）：同一份 smoke 把 `--njmax` 故意压到 `70`（低于实测的 `74`），
+进程在 iteration `1` 抛 `CAPACITY_OVERFLOW: nefc peak 71 vs njmax 70`，退出码 `1`。
+顺带确认：mujoco-warp `3.10` 自己**确实**会往 stderr 打一行 `nefc overflow - please increase njmax`，
+但那行埋在 `170 KB` 日志里且不影响退出码——它不是门，看门狗才是。
+
+**发车实测**（`SMOKE5CAP`，pod1，`CUDA_VISIBLE_DEVICES=2`，`4096 env x 5 update`，规模对齐 Isaac 侧）：
+
+| 项 | 实测 |
+| --- | ---: |
+| PID / GPU | `2862997` on `GPU-473a79f3…`（`nvidia-smi` index **`2`**） |
+| 显存峰值 | `11,290 MiB` / `32,607 MiB` |
+| update 计数 | `0,1,2,3,4` 全部落盘，逐条有 loss/reward/termination |
+| 吞吐 | `45,706` env-step/s（`2.13 s`/iteration，collect 占 `95.3%`） |
+| `nonfinite_state` 终止 | **`0`**（`5/5` 迭代全为零） |
+| GPU0 / GPU1 | 全程 `2 MiB, 0 %`，无任何 compute proc |
+
+GPU 归属不是靠"我设了环境变量"自证：独立采样器每 `2` 秒抓一次 `--query-compute-apps`，`268` 行里
+出现过的**每一个** compute proc 都在 `GPU-473a79f3`（=index `2`），GPU0/GPU1 在整个 `~9` 分钟窗口里
+只有 `2 MiB, 0 %` 一种状态。Isaac 那两张卡没被碰过。
+
+**吞吐代价要如实记**：同配置不开看门狗的历史 run（`TRAIN_s0`，`300` iter）是 `50,221` env-step/s，
+开了是 `45,706`，即探针吃掉约 **`9%`**。这个代价买的是"物理是不是真的"，不打折。
+
+### 9.2.3 njmax/nconmax 加桌加球后的重新标定（2026-08-06 实测）
+
+§9.2 的老数 `njmax=508` / `nconmax=128` 是**光机器人**时期的，必须在桌子和球进场后重测。测了，结论
+是**旧数在行数上其实也够，但理由和当初想的不一样，而且现在有了确定的余量数字**。
+
+`508` 是 plant-only 的 `suggest_njmax` 结果；court（robot + 桌 + 网 + 球，`ngeom=82`、`npair=5`）
+自动定出的是 **`572`**，也就是 trainer 的现役值，配 `nconmax=128`/世界 →
+`naconmax = 128 x 4096 = 524,288`。
+
+三个场景的实测峰值（都在 `4096` 世界、都含桌球，除标注的 plant-only 那行）：
+
+| 场景 | `nefc` 峰值/世界 | `nacon` 峰值/全世界 | 行余量 | 接触余量 |
+| --- | ---: | ---: | ---: | ---: |
+| **最坏情况**：`ctrl=0` 全体瘫倒摊平，`3000` 步 | **`95`** | **`55,455`** | **`6.02x`** | **`9.45x`** |
+| 实际 PPO 训练（会学的策略 + 每 env reset 随机 + 活球发球），`5` update | `83` | `29,060` | `6.89x` | `18.0x` |
+| 对照：plant-only（无桌球），`2000` 步 | `115` | `66,676` | — | — |
+
+**关键判读，与事前假设相反**：加桌加球**没有**把约束行峰值推高，反而从 plant-only 的 `115` 降到
+`95`。原因是桌子先接住了机器人，它不再完全摊平到地面。所以"沿用旧数会溢出"这个担心在行数上
+**实测不成立**；但这不是运气——`572 > 508` 本来就已经是 court-aware 的自动定值，两者都远高于
+两个场景的实测峰值。真正该记住的是：**最坏情况是瘫倒摊平（`95`），不是打球**，训练时的 `83` 低于它，
+所以按摊平定容量是对的口径。
+
+余量按最坏情况算：行 **`6.02x`**（`572` 分配 / `95` 实测，空 `477` 行），接触 **`9.45x`**
+（`524,288` / `55,455`，空 `468,833` 槽）。`constraint_headroom_ok = true`。
+
+**NaN / 发散**三条独立证据全绿：court 训练 `5` 迭代 `nonfinite_state=0`；court `ctrl=0` 摊平
+`3500` 步 `worlds_with_nan=0`、`worlds_with_inf=0`、`qvel_absmax=7.77`；`nan_probe.py` 在 plant
+`4096 x 2000` 步 `first_nonfinite_step=None`。
+
+顺带**复核了球的恢复系数**（§9.2.1 的 `0.92150`）：本次 `4096` 世界重测 `e_mean=0.9214117`，
+实测权威是 `0.9215`，`4096/4096` 世界全部落在接受带 `[0.88, 0.93]` 内。
+
+收据在 pod1 `/workspace/mjlab_lane/`：`SMOKE5CAP.json`（发车）、`CENSUS_TRAINALLOC.json`（容量最坏
+情况）、`NANPROBE_4096.json`（NaN）、`GPU2_SAMPLER.log`（GPU 归属）、`CAPMUT`（变异测试）。
+
+**这一节不代签什么**：这是 mjlab lane 自己的 court/ready/reach-touch 任务，**不是** canonical
+ActionBall N1。它没有 measured teacher、没有完整 reward 层级、没有 §9.2 要求的 termination union、
+没有 cross-engine parity，也没有 exact-resume（§9.2.0 已裁定 mujoco-warp 下逐位复现不成立）。
+它证明的是：GPU-native `4096` 训练回路在这条 lane 上真的转起来了，且容量与 NaN 两个 fail-closed
+门现在有代码在守、有数字可查。
 
 ### 9.2 MuJoCo 顺序
 

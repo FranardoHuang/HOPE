@@ -188,7 +188,8 @@ class A3ReadyBallVecEnv:
   def __init__(self, sim_cfg: SimCfg, task_cfg: TaskCfg, device: str,
                xml_path: Path | None = None,
                ready_pose_path: Path | None = None,
-               seed: int = 0, count_contacts: bool = False) -> None:
+               seed: int = 0, count_contacts: bool = False,
+               capacity_probe: bool = True) -> None:
     import mujoco
     import torch
 
@@ -323,6 +324,24 @@ class A3ReadyBallVecEnv:
     if self.count_contacts:
       self._setup_contact_probe(mujoco)
 
+    # Constraint/contact capacity watch.  ON by default, including during the
+    # timed runs.  mujoco-warp does not fail loudly when a world needs more
+    # constraint rows than `njmax`: it drops the surplus rows *silently* (see
+    # the a3_plant_env.py header, where the warp heuristic njmax=64 put ~96% of
+    # 4096 worlds non-finite), and an over-full broadphase array overruns into
+    # a CUDA illegal access.  The standalone census sized both caps under a
+    # zero-ctrl sprawl of the bare-plus-court scene; nothing re-checked them
+    # once a *learning* policy, per-env reset randomisation and live ball
+    # serves were driving the scene.  So the check rides inside the training
+    # loop: running maxima accumulate GPU-side (no per-substep sync) and are
+    # read once per iteration with the rest of the statistics.
+    self.capacity_probe = bool(capacity_probe)
+    self._cap_ok = False
+    self.njmax_alloc = int(getattr(self.sim.wp_data, "njmax", -1))
+    self.naconmax_alloc = int(getattr(self.sim.wp_data, "naconmax", -1))
+    if self.capacity_probe:
+      self._setup_capacity_probe()
+
     # first full reset
     self.reset()
     self.num_obs = int(self._obs_buf.shape[1])
@@ -376,6 +395,31 @@ class A3ReadyBallVecEnv:
     self._acc["contact_ball_table_substeps"] = torch.zeros((), device=self.device)
     self._acc["ep_touched_racket"] = torch.zeros((), device=self.device)
     self._cur_touched = torch.zeros(self.num_envs, device=self.device)
+
+  def _setup_capacity_probe(self) -> None:
+    """Wire the per-substep running maxima of `nefc` (rows/world) and `nacon`."""
+    torch = self._torch
+    d = self.sim.data
+    self._nefc_arr = getattr(d, "nefc", None)
+    self._nacon_arr = getattr(d, "nacon", None)
+    if self._nefc_arr is None or self._nacon_arr is None:
+      print("[a3_train_ppo] capacity probe disabled: nefc/nacon not exposed")
+      return
+    if self.njmax_alloc <= 0 or self.naconmax_alloc <= 0:
+      print("[a3_train_ppo] capacity probe disabled: allocation not readable")
+      return
+    # float32 holds these exactly: naconmax here is O(5e5), well under 2**24.
+    for k in ("cap_peak_nefc", "cap_peak_nacon"):
+      self._acc[k] = torch.zeros((), device=self.device)
+    self._cap_ok = True
+
+  def _probe_capacity(self):
+    torch = self._torch
+    a = self._acc
+    nefc = torch.as_tensor(self._nefc_arr[:]).max().float()
+    nacon = torch.as_tensor(self._nacon_arr[:]).max().float()
+    torch.maximum(a["cap_peak_nefc"], nefc, out=a["cap_peak_nefc"])
+    torch.maximum(a["cap_peak_nacon"], nacon, out=a["cap_peak_nacon"])
 
   def _probe_contacts(self):
     torch = self._torch
@@ -552,6 +596,8 @@ class A3ReadyBallVecEnv:
       self.sim.step()
       if self._contact_ok:
         self._probe_contacts()
+      if self._cap_ok:
+        self._probe_capacity()
     tau_sq /= self.decimation
 
     self.episode_length_buf += 1
@@ -691,6 +737,19 @@ class A3ReadyBallVecEnv:
       "ball_reserves": out["reserves"],
       "reward_terms_mean": {k: out["r_" + k] / steps for k in self._rew_terms},
     }
+    if self._cap_ok:
+      peak_nefc = int(out["cap_peak_nefc"])
+      peak_nacon = int(out["cap_peak_nacon"])
+      stats["capacity"] = {
+        "njmax_allocated_per_world": self.njmax_alloc,
+        "naconmax_allocated_all_worlds": self.naconmax_alloc,
+        "nefc_peak_per_world": peak_nefc,
+        "nacon_peak_all_worlds": peak_nacon,
+        "njmax_headroom_x": self.njmax_alloc / max(1, peak_nefc),
+        "naconmax_headroom_x": self.naconmax_alloc / max(1, peak_nacon),
+        "njmax_saturated": peak_nefc >= self.njmax_alloc,
+        "naconmax_saturated": peak_nacon >= self.naconmax_alloc,
+      }
     if self._contact_ok:
       stats["contact"] = {
         "ball_racket_contact_substeps": out["contact_ball_racket_substeps"],
@@ -777,7 +836,8 @@ def train(args) -> int:
                      action_scale_mode=args.action_scale_mode)
 
   t_build = time.perf_counter()
-  env = A3ReadyBallVecEnv(sim_cfg, task_cfg, device=device, seed=args.seed)
+  env = A3ReadyBallVecEnv(sim_cfg, task_cfg, device=device, seed=args.seed,
+                          capacity_probe=not args.no_capacity_probe)
   build_s = time.perf_counter() - t_build
   print(f"[a3_train_ppo] scene built in {build_s:.1f}s: nworld={env.num_envs} "
         f"nq={env.mj_model.nq} nu={env.num_actions} obs={env.num_obs} "
@@ -800,6 +860,7 @@ def train(args) -> int:
   orig_log = runner.logger.log
   collection_size = env.num_envs * args.num_steps_per_env
   t_start = time.perf_counter()
+  cap_peak = {"nefc": 0, "nacon": 0}
 
   def log_hook(**kw):
     stats = env.pop_stats()
@@ -817,6 +878,22 @@ def train(args) -> int:
       "losses": {k: float(v) for k, v in kw["loss_dict"].items()},
     }
     rec.update(stats)
+    cap = stats.get("capacity")
+    if cap is not None:
+      cap_peak["nefc"] = max(cap_peak["nefc"], cap["nefc_peak_per_world"])
+      cap_peak["nacon"] = max(cap_peak["nacon"], cap["nacon_peak_all_worlds"])
+      if cap["njmax_saturated"] or cap["naconmax_saturated"]:
+        # Fail closed.  A saturated cap means mujoco-warp has been dropping
+        # constraint rows (silently) or overrunning the broadphase array, so
+        # every number this run produced is suspect.  Raise --njmax/--nconmax
+        # and re-run; do not soften the comparison.
+        raise RuntimeError(
+          f"CAPACITY_OVERFLOW at iteration {it}: "
+          f"nefc peak {cap['nefc_peak_per_world']} vs njmax "
+          f"{cap['njmax_allocated_per_world']} per world; "
+          f"nacon peak {cap['nacon_peak_all_worlds']} vs naconmax "
+          f"{cap['naconmax_allocated_all_worlds']} across worlds. "
+          f"Re-size with --njmax/--nconmax and re-run.")
     if runner.logger.rewbuffer:
       rec["rsl_rl_mean_reward"] = statistics.mean(runner.logger.rewbuffer)
       rec["rsl_rl_mean_ep_len"] = statistics.mean(runner.logger.lenbuffer)
@@ -829,7 +906,10 @@ def train(args) -> int:
           f"term/step={rec['termination_rate_per_env_step']:.4f} "
           f"minD={rec['mean_episode_min_racket_ball_dist_m']:.3f}m "
           f"fps={rec['env_steps_per_s']:.0f} "
-          f"({ct:.2f}s+{lt:.2f}s)", flush=True)
+          + (f"nefc={cap['nefc_peak_per_world']}/{cap['njmax_allocated_per_world']} "
+             f"nacon={cap['nacon_peak_all_worlds']}/"
+             f"{cap['naconmax_allocated_all_worlds']} " if cap else "")
+          + f"({ct:.2f}s+{lt:.2f}s)", flush=True)
     if args.rsl_rl_console:
       return orig_log(**kw)
     return None
@@ -879,6 +959,7 @@ def train(args) -> int:
       "rsl_rl_version": _rsl_rl_version(),
     },
     "task_cfg": asdict(task_cfg),
+    "capacity": _capacity_summary(env, cap_peak),
     "throughput": _throughput_summary(records, env, args),
     "learning": _learning_summary(records),
     "nvidia_smi_start": smi_start,
@@ -892,7 +973,7 @@ def train(args) -> int:
   out = Path(args.out_prefix + ".json")
   out.write_text(json.dumps(summary, indent=2))
   print(json.dumps({k: summary[k] for k in
-                    ("throughput", "learning")}, indent=2), flush=True)
+                    ("capacity", "throughput", "learning")}, indent=2), flush=True)
   print(f"[a3_train_ppo] wrote {out}", flush=True)
   return 0
 
@@ -919,7 +1000,8 @@ def evaluate(args) -> int:
   task_cfg = TaskCfg(episode_length_s=args.episode_s,
                      action_scale_mode=args.action_scale_mode)
   env = A3ReadyBallVecEnv(sim_cfg, task_cfg, device=args.device, seed=args.seed,
-                          count_contacts=not args.no_contact_probe)
+                          count_contacts=not args.no_contact_probe,
+                          capacity_probe=not args.no_capacity_probe)
 
   policy = None
   if args.eval == "ckpt":
@@ -955,6 +1037,38 @@ def evaluate(args) -> int:
   Path(args.out_prefix + ".json").write_text(json.dumps(out, indent=2))
   print(json.dumps(out, indent=2), flush=True)
   return 0
+
+
+def _capacity_summary(env, cap_peak) -> dict:
+  """Run-level constraint/contact capacity receipt.
+
+  `verdict` is deliberately three-valued.  If the probe was switched off, the
+  answer is NOT_MEASURED, never PASS -- a run with no measurement must not be
+  able to claim the capacity gate held.
+  """
+  njmax = int(getattr(env.sim.wp_data, "njmax", -1))
+  naconmax = int(getattr(env.sim.wp_data, "naconmax", -1))
+  if not env._cap_ok:
+    return {"probe_enabled": False, "verdict": "NOT_MEASURED",
+            "njmax_allocated_per_world": njmax,
+            "naconmax_allocated_all_worlds": naconmax}
+  nefc, nacon = int(cap_peak["nefc"]), int(cap_peak["nacon"])
+  return {
+    "probe_enabled": True,
+    "scene_includes_table_and_ball": True,
+    "njmax_allocated_per_world": njmax,
+    "naconmax_allocated_all_worlds": naconmax,
+    "nconmax_allocated_per_world": naconmax // max(1, env.num_envs),
+    "nefc_peak_per_world_over_run": nefc,
+    "nacon_peak_all_worlds_over_run": nacon,
+    "nacon_peak_per_world_equivalent": nacon / max(1, env.num_envs),
+    "njmax_headroom_x": njmax / max(1, nefc),
+    "naconmax_headroom_x": naconmax / max(1, nacon),
+    "njmax_spare_rows": njmax - nefc,
+    "naconmax_spare_slots": naconmax - nacon,
+    "verdict": ("PASS_NO_OVERFLOW" if (nefc < njmax and nacon < naconmax)
+                else "OVERFLOW"),
+  }
 
 
 def _throughput_summary(records, env, args) -> dict:
@@ -1138,6 +1252,10 @@ def main(argv=None) -> int:
   p.add_argument("--eval-steps", type=int, default=750)
   p.add_argument("--no-contact-probe", action="store_true",
                  help="eval only: skip the per-substep ball<->racket contact count")
+  p.add_argument("--no-capacity-probe", action="store_true",
+                 help="skip the per-substep nefc/nacon peak watch.  The run then "
+                      "records verdict=NOT_MEASURED and cannot claim the njmax/"
+                      "nconmax gate held -- only use it to time the probe's cost")
   a = p.parse_args(argv)
 
   if a.analyze:
