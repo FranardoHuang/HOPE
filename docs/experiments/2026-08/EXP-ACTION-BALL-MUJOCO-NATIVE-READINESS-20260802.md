@@ -3003,6 +3003,158 @@ pod1 当时同时还有别的 workflow 在跑套件，`load average` 一度到 `
    在两棵树上都随机红（见五）。它和本轮三条改动无关，但它自己不确定这件事要单独查——
    一条"字节不许变"的证书测试自己不稳定，等于这条判据平时是靠运气过的。
 
+#### 5.6.19 `scale4096` 第一次存盘必死的第四个出口，以及它后面那道从没跑到过的验收门（2026-08-07）
+
+**人话一句：** 四格 `scale4096` 还是跑完 update 0 就在**第一次存 checkpoint** 那一刻死掉，
+但报的已经不是 §5.6.15 那句话了。这次是 **sampler 自己**拿一本它这个模式**故意一行都不写**
+的账（逐样本 `sample -> birth` 的 assignment）去核对一个正常增长的 `sample_count`。
+**同一个病的第四个出口，错的还是对账范围。** 修完之后崩溃点往后挪了一格，露出第二个
+真 bug（一个比生产方更粗的收据解码器）；再修完，训练**五个 update 全部跑完、五个
+checkpoint 全部落盘**，剩下的 `SCALE4096_EXIT=2` 已经是**发射器终局验收门自己的三处口径
+不一致**，不再是崩溃。
+
+**现场（`c0_scale4096_s12r1/run.log:881`，C1 逐字相同）。**
+
+```
+runner.save -> _checkpoint_infos -> _build_exact_resume_state
+  -> _capture_environment_resume_state -> _action_ball_exact_resume_state_dict
+  -> broker.state_dict() -> _callback_states() -> provider.state_dict()
+  -> _action_ball_solver_mutable_state_dict   ("sampler": ...state_dict())
+  -> action_ball_sampling.py:7089
+RuntimeError: sample authority ledger is inconsistent with retired/sample counts
+```
+
+`save_interval=1` 是四格预算（`SCALE_BUDGET`）写死的，所以**每个诊断格必死，不是 flake**。
+
+**为什么说还是范围错。** `ActionBallSampler.sample()` 末尾原文就写着
+`if not self._diagnostic_fast_path:` 才 `sample_birth_indices.append(...)` 并推
+`assignment_head` 哈希链；`forget_diagnostic_births` 又把出生表收成"只留还活着的那些"。
+而 `_sample_count_by_action` 每个样本无条件 `+1`。同一个类里**发放时**那条同名检查
+（`:5460`）本来就已经带着 `not self._diagnostic_fast_path` 前缀 —— **存盘时那条忘了带**。
+
+**换成什么见证（等强，不是删检查）。** 这个模式自己维护着另一本能证伪 `sample_count` 的账：
+每次出生恰好吃 `DRAWS_PER_BIRTH=3` 个随机数、每个样本恰好吃 `DRAWS_PER_SAMPLE=18` 个
+（两处在发放时就断言），而诊断退休**按定义不动 RNG、不动 retired 前缀**。所以 per-action 的
+`draw_count` 仍然把两个计数器钉死：多一个样本差 18，少一个也差 18。`load_state_dict`
+审精确档状态包用的**就是这同一条格子**（`per_action[uid] draw_count is inconsistent with
+birth/sample counts`），不是新发明的判据。
+
+同时把这一档自己声称的四件事写成会拒绝的检查：一行 assignment 都没有、一段 compaction
+都没折、retired 前缀没动、留着的出生下标都在 `[0, birth_count)` 里。
+（最后一条用上下界比较而不是 `set(range(birth_count))`：`birth_count` 会随整个诊断跑一路涨到
+百万级，活的出生表却永远只有 `num_envs` 行。）**精确那两条严格对账一个字没动。**
+
+**resume 语义一起做掉，两个方向 fail-closed。** 状态包新增一块**跟着签名一起落盘**的自陈牌子
+`transcript_scope`（`exact_per_birth` / `diagnostic_live_births_only`）：
+
+- 两种 scope 的状态包**互不相认**（错误里同时打印双方的值）；
+- `diagnostic_live_births_only` **一旦发过样本就根本不能做精确续跑**——它按设计不含逐样本
+  assignment；A211/C211 四格的发射合同本来就写着 `fresh_only`；
+- 但**"只有出生、零样本"的不可变 fixed-view 状态仍然完整复原**（那条车道靠
+  `_action_ball_restore_fixed_sampler_highwaters` 续跑，不能被误伤）；
+- 没有这块牌子的老状态包按名字拒绝，理由写在错误里。
+
+**修完之后崩溃往后挪一格，露出第二个真 bug。** 同一条链的下一站
+`assert_issued_birth -> BaseBirthReceipt.from_identity_receipt` 报
+`ValueError: birth sampling_stratum disagrees with mixture schedule`。
+
+这是"**期望值是第三份手抄**"的老形状。`initial_center_single_question` 的合同写着
+「32 条 curriculum arm 全是**精确 0** 时，物理支撑集就是 profile 中心那一个点」，所以生产方
+`_sampling_plan_for_request` 的 initial-center 分支对**每一个** proposal_index 都发
+`("center", 全零 sampling levels, 无 frontier arm)`。两个独立收据解码器却直接拿
+`mixture.stratum_for(index)` 对答案——比生产方粗一档。四格（DR-L0 全关 +
+`action_ball_initial_center_single_question=true`）每 5 个 birth 里有 4 个必然对不上，
+所以**这条路径在这个配置下从来没有通过过**，只是以前被更早的崩溃挡住了。
+
+实测同一组零 level 上的两种生产方：
+
+| `initial_center_single_question` | birth 0..4 的 stratum |
+| --- | --- |
+| `False` | `interior / center / interior / frontier(base_spawn_x_lower) / interior` |
+| `True` | `center / center / center / center / center` |
+| 排班表 `stratum_for(i)` | `interior / center / interior / frontier / interior` |
+
+新增 `_point_support_stratum_collapse`：只承认这张收据**自己的数字**能证明的那一档——
+`stratum=="center"` **且**无 frontier arm **且** sampling levels 全零 **且** 32 条 domain level
+精确为 0，四件事缺一不可。三个检查点（birth 解码、sample 里的 birth 档、sample 档）统一走它。
+**为什么不是放宽：** 上表第一行那些收据没有一条能同时满足四件事，判决完全不变；`stratum`
+本身已经进了 `birth_id`/`sample_id` 的规范身份哈希，几行之后就重算比对；签发证明还要再拿活的
+transcript 逐字段对一遍。
+
+**端到端收据（pod1 GPU1，四阶段全新跑）。**
+
+| 轮次 | commit | materialize | recipe | oracle32 | scale4096 |
+| --- | --- | --- | --- | --- | --- |
+| `s12r1`（修之前） | `64036cb1` | `0` | `0` | `0` | `2`——sampler 对账，**0 个 checkpoint** |
+| `s13r1`（只修第一处） | `abcdaf12` | `0` | `0` | `0` | `2`——挪到 `from_identity_receipt`，**0 个 checkpoint** |
+| `s14r1`（两处都修，C0 与 C1） | `aae61869` | `0` | `0` | `0` | `2`——**5 个 update 全跑完、`model_0..4.pt` 全部落盘、`run.log` 零 traceback、`terminal_kind=clean_completion` / `completion_exit_code=0`**，死在发射器的终局验收门 |
+
+**`s13r1` 这一格正好复刻了上一轮那句教训：只修一处会把崩溃往后推。** 所以这次两处一起修，
+并把第三处也写清楚——但**没有替发射合同做判断题**。
+
+**剩下的 `SCALE4096_EXIT=2` 是什么（交接，不在本轮修）。**
+`REFUSED: C211 scale4096 exact checkpoint is missing`，来自
+`launch_action_ball_c211_diagnostic.py:_audit_scale4096_terminal`（A211 launcher `:2475` 同形）。
+它对终局 checkpoint 有**三条**期望，而**同一个发射器自己命令 `train.py` 产出的东西一条都不满足**：
+
+| 验收门要的 | 实跑真的产出 | 出处 |
+| --- | --- | --- |
+| 文件名 `model_{BUDGETS["scale4096"][1]}.pt` = `model_5.pt` | 只有 `model_0..4.pt` | rsl_rl `on_policy_runner.py:270` 循环内按 `it` 存（`it∈[0,5)`），`:285` 收尾再用 `current_learning_iteration`＝`4` 存一次，**`model_5.pt` 不存在** |
+| `checkpoint["iter"] == 5` | 实读 `model_4.pt`，`iter == 4` | 同上 |
+| `infos["training_launch_claim_sha256"] == launch_claim_sha256` | `infos` 里**没有这个键**（只有 `hope_exact_resume_state` / `training_contract_*`） | `training_argv` 里没有 `++training_launch_claim_sha256=`；全仓唯一会加这个 override 的是 `action_ball_exact_resume_verifier.py:897` |
+
+三条都不是"跑得不对"，是**验收门与生产方的口径从来没对过**（这道门此前从没被跑到过）。
+收口有三种可能方式（文件名 `-1`／让 runner 补发一份 `model_N.pt`／让发射器把 claim override
+加进 `training_argv`），**每一种都改 `launch_action_ball_*_diagnostic.py` 的字节，而这个文件是
+A211/C211 两个 launcher 都钉住的运行时源（`LAUNCHER_SOURCE`），改它会挪动两族的 launch claim
+SHA。属于 Franco 的判断题，本轮不背着发射的人做。**
+
+**变异测试（十种"粗一个档次"的改法，各自杀掉指定用例）。**
+
+`tests/test_action_ball_sampler_transcript_scope.py`（25 例）：
+
+| 把守卫改粗成 | 必须变红的用例 | 实测 |
+| --- | --- | --- |
+| 删掉范围守卫（`_diagnostic_fast_path` 恒 `False`） | `..._live_births_only_run_can_serialize_and_says_so` 等 | `14 failed` |
+| 停掉替换后的随机带对账 | `..._sample_counter_drift_is_still_refused[±1]` 等 | `3 failed` |
+| 牌子只查"是不是已知值" | `..._a_known_but_wrong_scope_value_is_not_enough` 等 | `3 failed` |
+| 去掉 live-only 的续跑拒绝 | `..._state_with_samples_cannot_be_resumed` | `1 failed` |
+| 去掉"没牌子就拒绝" | `..._without_the_brand_is_refused_by_name` | `1 failed` |
+| 去掉出生下标上下界 | `..._refuses_a_birth_row_it_never_issued` 等 | `2 failed` |
+| 去掉"这一档不写 assignment" | `..._refuses_an_assignment_row_it_claims_not_to_write` | `1 failed` |
+
+`tests/test_action_ball_point_support_stratum.py`（5 例）：
+
+| 把守卫改粗成 | 必须变红的用例 | 实测 |
+| --- | --- | --- |
+| 让路永不生效 | `..._level_zero_initial_center_births_and_samples_decode` 等 | `2 failed` |
+| 让路只看 stratum 不看物理事实 | `..._a_widened_run_may_not_claim_the_collapse` 等 | `2 failed` |
+| 把"精确 0"放宽成"约等于 0" | `..._needs_every_one_of_its_four_facts` | `1 failed` |
+
+源码复原后 30 例全绿。
+
+**基线对拍（pod1 专用 worktree `samplerscope_20260807`，解释器
+`/workspace/hope_isaac_venv/bin/python`，两批都是 `0 skipped`）。**
+
+| 批次 | 基线 `20303a3d` | 本轮 `aae61869` | 判定 |
+| --- | --- | --- | --- |
+| sampler / runtime / curriculum / bank / adapter / transcript-scope 六模块 | `6 failed / 276 passed` | `6 failed / 306 passed`（+30＝本轮新增用例） | 失败集合逐 node-id 相同 |
+| launcher / materializer 六模块 | `15 failed / 142 passed` | 同样 15 条，`diff` 为空 | 零回归 |
+
+两批的既有失败都是**本轮之前就红的**（curriculum 那 6 条是
+`profile_order must contain unique ActionProfileKey values`；另 15 条是这棵 bare worktree
+缺 assets 造成的收集期失败），与本轮改动无关。
+
+**没做的、交接给下一个人的两件事。**
+
+1. **上面那道终局验收门的三条口径**（见表），需要发射合同的主人来定。
+2. **`_sampling_plan_for_request` 还有第二个塌缩分支**：level 不为零、但该 scope 的活跃 arm
+   物理宽度都是 `0`，生产方同样发 `center`。那一档收据**自己证不出来**（需要 profile 宽度），
+   所以解码器仍会拒——**是拒绝不是放行**，本轮留档不改。
+
+**跑 Isaac 链的 worktree 和跑 pytest 的 worktree 全程分开**（`pinv3_isaac_20260807` /
+`samplerscope_20260807`），沿用 §5.6.15 末尾那条教训。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |
