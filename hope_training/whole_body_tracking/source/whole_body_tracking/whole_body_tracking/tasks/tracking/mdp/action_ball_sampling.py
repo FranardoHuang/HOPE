@@ -82,6 +82,44 @@ SAMPLER_TRANSCRIPT_SCOPES = (
     SAMPLER_TRANSCRIPT_SCOPE_DIAGNOSTIC,
 )
 
+
+def _point_support_stratum_collapse(
+    *,
+    domain_levels: "DomainLevels",
+    sampling_stratum: str,
+    sampling_levels: "DomainLevels",
+    frontier_arm: Optional[str],
+) -> bool:
+    """Whether a receipt's own numbers prove its support collapsed to a point.
+
+    人话:``initial_center_single_question`` 的合同(见 ``ActionBallSampler``
+    构造里那块 ``activation: all_32_domain_levels_exact_zero`` /
+    ``physical_support: literal_profile_center_point``)规定,32 条 curriculum arm
+    全是**精确 0** 时物理支撑集就是 profile 中心那一个点 —— center / interior /
+    frontier 抽出来是同一道题。所以生产方(``_sampling_plan_for_request`` 的
+    initial-center 分支)对**每一个** proposal_index 都发
+    ``("center", 全零 sampling levels, 无 frontier arm)``,而不是排班表那一档。
+
+    独立收据解码器读不到那个开关(它只进了 sampler contract SHA,解码器没有
+    profiles 可以重算),所以它只承认这张收据**自己的数字**能证明的那一档:下面四件
+    事必须同时成立,少一件仍然按排班表拒。
+
+    这不是放宽:(1) 关掉那个开关的生产方在同样的零 level 上发的是
+    ``interior``/``frontier``(带 arm),四件事没有一个能同时满足,判决完全不变;
+    (2) stratum 本身已经进了 ``birth_id``/``sample_id`` 的规范身份哈希,本函数的
+    调用点在几行之后就会重算并比对;(3) 签发证明还要再拿活的 transcript 逐字段
+    对一遍。
+    """
+
+    return (
+        sampling_stratum == "center"
+        and frontier_arm is None
+        and sampling_levels == DomainLevels()
+        and all(
+            getattr(domain_levels, arm) == 0.0 for arm in ARM_KEYS
+        )
+    )
+
 ARM_KEYS = (
     "time_to_contact_lower",
     "time_to_contact_upper",
@@ -1685,6 +1723,12 @@ class BaseBirthReceipt:
             result.sampling_mixture is not None
             and result.sampling_stratum
             != result.sampling_mixture.stratum_for(result.birth_index)
+            and not _point_support_stratum_collapse(
+                domain_levels=result.domain_levels,
+                sampling_stratum=result.sampling_stratum,
+                sampling_levels=result.sampling_levels,
+                frontier_arm=result.frontier_arm,
+            )
         ):
             raise ValueError(
                 "birth sampling_stratum disagrees with mixture schedule"
@@ -2364,11 +2408,6 @@ class BallBaseSample:
                 raise ValueError(
                     "sample.birth_sampling_stratum is invalid"
                 )
-            if birth_stratum != mixture.stratum_for(birth_index):
-                raise ValueError(
-                    "sample birth_sampling_stratum disagrees with "
-                    "mixture birth schedule"
-                )
             birth_sampling_levels = DomainLevels.from_mapping(
                 row["birth_sampling_levels"]
             )
@@ -2386,6 +2425,20 @@ class BallBaseSample:
                 raise ValueError(
                     "sample.birth_frontier_arm must be present exactly "
                     "for frontier"
+                )
+            # Ordered after the frontier-arm parse so the point-support
+            # carve-out can read every field its claim depends on.
+            if birth_stratum != mixture.stratum_for(
+                birth_index
+            ) and not _point_support_stratum_collapse(
+                domain_levels=levels,
+                sampling_stratum=birth_stratum,
+                sampling_levels=birth_sampling_levels,
+                frontier_arm=raw_birth_frontier_arm,
+            ):
+                raise ValueError(
+                    "sample birth_sampling_stratum disagrees with "
+                    "mixture birth schedule"
                 )
             stratum = row["sampling_stratum"]
             if stratum not in ("center", "interior", "frontier"):
@@ -2412,7 +2465,14 @@ class BallBaseSample:
                     name="sample.sample_index",
                 )
             )
-            if stratum != expected_stratum:
+            if stratum != expected_stratum and not (
+                _point_support_stratum_collapse(
+                    domain_levels=levels,
+                    sampling_stratum=stratum,
+                    sampling_levels=sampling_levels,
+                    frontier_arm=raw_frontier_arm,
+                )
+            ):
                 raise ValueError(
                     "sample sampling_stratum disagrees with mixture schedule"
                 )
