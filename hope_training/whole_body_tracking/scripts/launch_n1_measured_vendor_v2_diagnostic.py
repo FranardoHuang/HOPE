@@ -1733,6 +1733,7 @@ def _validate_teacher_qdes_oracle(
         or set(qdes) != {
             "control_step_denominator", "preclamp_max_abs_error_rad",
             "raw_action_max_abs", "teleport_used",
+            "wait_hold_command_steps", "teacher_reference_command_steps",
         }
         or qdes.get("teleport_used") is not False
         or qdes.get("control_step_denominator") != completion["control_steps"]
@@ -1742,6 +1743,17 @@ def _validate_teacher_qdes_oracle(
             or qdes[name] < 0
             for name in ("preclamp_max_abs_error_rad", "raw_action_max_abs")
         )
+        # 人话:等待阶段发的是"保持 q_des",揭示后发老师姿态;两个计数必须
+        # 恰好把总步数分完,收据才说得清哪一步是被什么驱动的。
+        or any(
+            type(qdes.get(name)) is not int or qdes[name] < 0
+            for name in (
+                "wait_hold_command_steps", "teacher_reference_command_steps",
+            )
+        )
+        or qdes["wait_hold_command_steps"]
+        + qdes["teacher_reference_command_steps"]
+        != completion["control_steps"]
         or type(capture) is not dict
         or set(capture) != {"opportunities", "captures", "rejects", "conserved"}
         or capture.get("conserved") is not True

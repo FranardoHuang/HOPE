@@ -141,6 +141,17 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
         def max(self):
             return Tensor(np.max(self.data))
 
+        def sum(self):
+            return Tensor(np.sum(self.data))
+
+        @property
+        def dtype(self):
+            return self.data.dtype
+
+        @property
+        def device(self):
+            return "fake"
+
         def ne(self, value):
             return Tensor(self.data != value)
 
@@ -166,6 +177,11 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
         "torch",
         all=lambda value: Tensor(np.all(value.data)),
         isfinite=lambda value: Tensor(np.isfinite(value.data)),
+        is_tensor=lambda value: isinstance(value, Tensor),
+        bool=np.dtype(bool),
+        where=lambda condition, first, second: Tensor(
+            np.where(condition.data, first.data, second.data)
+        ),
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
@@ -178,9 +194,18 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
             "attribution_diagnostic": True,
         },
     )
+    # The split-ready WAIT reference IS the birth pose; the executable command for
+    # those rows is the contract hold q_des.  The fake reproduces both channels so
+    # the oracle's substitution is exercised, not stubbed away.
+    hold_qdes = Tensor(np.full((1, 31), 0.5))
+    wait_rows = {"value": True}
     motion = SimpleNamespace(
         joint_pos=Tensor(np.full((1, 31), 0.25)),
         action_ball_diagnostic_split_ready_teacher=True,
+        action_ball_split_ready_hold_command=lambda: (
+            Tensor(np.array([wait_rows["value"]])),
+            hold_qdes,
+        ),
     )
     racket = SimpleNamespace(
         cfg=SimpleNamespace(
@@ -287,6 +312,9 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
                     "Cannot call env.step() before calling env.reset()"
                 )
             self.step_count += 1
+            # Exercise both command channels: the first four control steps are the
+            # pre-task WAIT (hold q_des), everything after is the teacher reference.
+            wait_rows["value"] = self.step_count < 4
             action._pre_clamp_qdes = Tensor(raw.data.copy())
             if self.step_count % 2:
                 # Real ordering: command.compute publishes this step's metrics only
@@ -401,6 +429,16 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
         "conserved": True,
     }
     assert result["teacher_qdes"]["preclamp_max_abs_error_rad"] == 0.0
+    # WAIT rows were driven by the hold q_des (0.5), revealed rows by the teacher
+    # reference (0.25); the two counts must partition every control step.
+    assert result["teacher_qdes"]["wait_hold_command_steps"] == 4
+    assert result["teacher_qdes"]["teacher_reference_command_steps"] == 60
+    assert (
+        result["teacher_qdes"]["wait_hold_command_steps"]
+        + result["teacher_qdes"]["teacher_reference_command_steps"]
+        == result["completion"]["control_steps"]
+    )
+    assert result["teacher_qdes"]["raw_action_max_abs"] == 0.5
     assert result["bindings"]["hard_contract_sha256"] == sha
     assert result["schema_version"] == 2
     assert result["kind"] == "action_ball_teacher_qdes_dynamic_oracle_v2"
@@ -434,7 +472,11 @@ def test_oracle_steps_teacher_action_without_teleport_or_ppo():
     oracle = source.split("def _run_teacher_qdes_oracle", 1)[1].split(
         "def _publish_teacher_qdes_oracle", 1
     )[0]
-    assert "raw = (teacher - offset) / scale" in oracle
+    assert "raw = (command - offset) / scale" in oracle
+    # The WAIT-phase reference is the birth pose itself; sending it as q_des is a
+    # zero-torque command.  The oracle must route those rows through the contract
+    # hold q_des instead, and must not silently fall back to the reference.
+    assert "_teacher_qdes_oracle_control_command(" in oracle
     assert "env.step(raw)" in oracle
     assert "set_table_context(" in oracle
     assert "consume_table_rows()" in oracle

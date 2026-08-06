@@ -7034,6 +7034,58 @@ def _make_c211_live_runtime_step_adapter(env, *, action_id: str):
     return adapter, restore, verify_after
 
 
+def _teacher_qdes_oracle_control_command(motion, reference):
+    """What the zero-PPO oracle actually SENDS this control step.
+
+    人话:等待阶段发"能撑住出生姿态的 q_des",任务揭示之后才发老师姿态。
+    参考姿态不是指令 —— 把它当指令发下去等于 PD 误差为零、扭矩为零、机器人塌。
+
+    ``reference`` is ``motion.joint_pos``, the imitation reference.  During the
+    split-ready pre-task WAIT that reference IS the robot's own birth configuration,
+    so ``q_des = reference`` yields ``tau = kp * 0 - kd * 0 = 0`` on all 31 joints and
+    the plant free-falls out of its validated stance.  The dynamic-ready contract
+    ships the executable hold ``q_des`` for exactly this window; substitute it there
+    and leave every revealed row on the teacher reference.  Returns
+    ``(command, wait_row_count)``.
+    """
+
+    import torch
+
+    resolve = getattr(motion, "action_ball_split_ready_hold_command", None)
+    if not callable(resolve):
+        raise RuntimeError(
+            "teacher-q_des oracle requires the split-ready hold-command accessor"
+        )
+    resolved = resolve()
+    if resolved is None:
+        raise RuntimeError(
+            "teacher-q_des oracle requires a split-ready hold command; this env "
+            "reports none"
+        )
+    if type(resolved) is not tuple or len(resolved) != 2:
+        raise RuntimeError(
+            "split-ready hold command must be one exact (mask, q_des) pair"
+        )
+    wait, hold_qdes = resolved
+    if (
+        not torch.is_tensor(wait)
+        or wait.dtype != torch.bool
+        or tuple(wait.shape) != (reference.shape[0],)
+        or not torch.is_tensor(hold_qdes)
+        or tuple(hold_qdes.shape) != tuple(reference.shape)
+        or hold_qdes.dtype != reference.dtype
+        or hold_qdes.device != reference.device
+        or wait.device != reference.device
+        or not bool(torch.all(torch.isfinite(hold_qdes)).item())
+    ):
+        raise RuntimeError(
+            "split-ready hold command must be one finite same-device q_des matching "
+            "the teacher reference and one bool row mask"
+        )
+    command = torch.where(wait[:, None], hold_qdes, reference)
+    return command, int(wait.sum().item())
+
+
 def _run_teacher_qdes_oracle(
     env, *, cfg, hard_contract: dict, hard_contract_sha256: str, episodes: int
 ) -> dict:
@@ -7127,6 +7179,7 @@ def _run_teacher_qdes_oracle(
     rows, exact_rows = [], []
     episode_exact = None
     episode_steps = total_steps = 0
+    wait_hold_steps = 0
     preclamp_max = raw_max = 0.0
     step_cap = episodes * (int(base.max_episode_length) + 1)
     submitted_teacher = None
@@ -7161,12 +7214,19 @@ def _run_teacher_qdes_oracle(
         while len(rows) < episodes:
             if total_steps >= step_cap:
                 raise RuntimeError("teacher-q_des oracle exhausted the episode-horizon cap")
-            teacher = motion.joint_pos.detach().clone()
-            submitted_teacher = teacher
+            reference = motion.joint_pos.detach().clone()
+            # The WAIT-phase reference IS the birth pose, so sending it as q_des
+            # commands zero PD torque.  Send the contract's hold q_des instead for
+            # exactly those rows; revealed rows still get the teacher reference.
+            command, wait_rows = _teacher_qdes_oracle_control_command(
+                motion, reference
+            )
+            wait_hold_steps += 1 if wait_rows else 0
+            submitted_teacher = command
             scale, offset = action._scale, action._offset
-            raw = (teacher - offset) / scale
+            raw = (command - offset) / scale
             if tuple(raw.shape) != (1, 31) or not bool(torch.all(
-                torch.isfinite(raw) & torch.isfinite(teacher) & torch.isfinite(scale) & scale.ne(0)
+                torch.isfinite(raw) & torch.isfinite(command) & torch.isfinite(scale) & scale.ne(0)
             ).item()):
                 raise RuntimeError("teacher-q_des oracle affine action is invalid")
             raw_max = max(raw_max, float(raw.abs().max().item()))
@@ -7197,7 +7257,7 @@ def _run_teacher_qdes_oracle(
                 if terminal_capture:
                     raise RuntimeError("teacher-q_des oracle reset without a terminal step")
                 preclamp_error = float(
-                    (action._pre_clamp_qdes - teacher).abs().max().item()
+                    (action._pre_clamp_qdes - command).abs().max().item()
                 )
                 exact, exact_row = step_evidence()
             if preclamp_error > 2.0e-6:
@@ -7372,9 +7432,16 @@ def _run_teacher_qdes_oracle(
             "projection_exposure_is_weight_independent": True,
         },
         "safety_exposure": limit_exposure,
+        # ``wait_hold_command_steps`` self-declares how many control steps were
+        # driven by the dynamic-ready hold q_des instead of the teacher reference.
+        # Without it a reader cannot tell an oracle that held its stance through the
+        # WAIT from one that commanded q_des == q and sagged.
         "teacher_qdes": {"control_step_denominator": total_steps,
                          "preclamp_max_abs_error_rad": preclamp_max,
-                         "raw_action_max_abs": raw_max, "teleport_used": False},
+                         "raw_action_max_abs": raw_max, "teleport_used": False,
+                         "wait_hold_command_steps": wait_hold_steps,
+                         "teacher_reference_command_steps":
+                             total_steps - wait_hold_steps},
         "episodes": rows,
     }
 

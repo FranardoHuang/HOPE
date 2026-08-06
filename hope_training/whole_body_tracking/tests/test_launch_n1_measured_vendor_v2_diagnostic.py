@@ -2018,6 +2018,8 @@ def test_oracle2_output_is_cross_bound_to_claim_and_hard_contract(
             "preclamp_max_abs_error_rad": 0.0,
             "raw_action_max_abs": 1.0,
             "teleport_used": False,
+            "wait_hold_command_steps": 1,
+            "teacher_reference_command_steps": 3,
         },
         "episodes": [
             {
@@ -2121,6 +2123,27 @@ def test_oracle2_output_is_cross_bound_to_claim_and_hard_contract(
             {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
         )
     document["completion"]["control_steps"] = 4
+
+    # 变异测试:等待段/老师段两个计数必须恰好把 control_steps 分完,
+    # 也不许是浮点或负数 —— 否则收据说不清哪一步是被什么 q_des 驱动的。
+    for wait_steps, teacher_steps in ((1, 2), (2, 3), (-1, 5), (1.0, 3)):
+        document["teacher_qdes"]["wait_hold_command_steps"] = wait_steps
+        document["teacher_qdes"]["teacher_reference_command_steps"] = teacher_steps
+        file_sha = _canonical_write(output, document)
+        with pytest.raises(launcher.LaunchRefused, match="qdes/capture ledger"):
+            launcher._validate_teacher_qdes_oracle(
+                {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+            )
+    del document["teacher_qdes"]["wait_hold_command_steps"]
+    document["teacher_qdes"]["teacher_reference_command_steps"] = 4
+    file_sha = _canonical_write(output, document)
+    with pytest.raises(launcher.LaunchRefused, match="qdes/capture ledger"):
+        launcher._validate_teacher_qdes_oracle(
+            {"path": str(output), "sha256": file_sha}, spec=spec, claim=claim
+        )
+    document["teacher_qdes"]["wait_hold_command_steps"] = 1
+    document["teacher_qdes"]["teacher_reference_command_steps"] = 3
+    file_sha = _canonical_write(output, document)
 
     for opportunities, captures in ((0, 0), (3, 3)):
         document["capture_rejection"]["opportunities"] = opportunities

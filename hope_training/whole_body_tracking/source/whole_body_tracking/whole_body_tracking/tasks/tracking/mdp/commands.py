@@ -3729,6 +3729,41 @@ class MotionCommand(CommandTerm):
             )
         return ~task_valid
 
+    def action_ball_split_ready_hold_command(self):
+        """WAIT-phase ``(mask, executable q_des)`` for anything that DRIVES the plant.
+
+        人话:等待阶段能把出生姿态撑住的是"保持 q_des",不是"参考姿态"本身。
+        谁在等待阶段直接驱动机器人,就必须发这个,不能把参考姿态当指令发下去。
+
+        ``joint_pos`` deliberately returns the physical BIRTH configuration during the
+        pre-task WAIT — that is where the robot is supposed to physically BE, so it is
+        the correct imitation REFERENCE.  It is not a command.  A zero-PPO driver that
+        sends it as ``q_des`` makes every PD error exactly zero, so the gravity-holding
+        torque the contract's LP solved for is never produced (for
+        ``take_061_unit04_bh`` that discards 36.5 N*m at ``right_hip_roll``, 18.7 N*m at
+        ``waist_pitch``, 15.7 N*m at ``left_ankle_pitch``) and the robot sags out of its
+        stance inside half a second.  ``hold_qdes_joint_pos_rad`` is that same LP
+        solution expressed as a ``q_des`` — ``kp * (hold_qdes - q_birth)`` reproduces the
+        artifact's holding torque exactly — and is already what the reset bootstrap
+        installs into the action term.  A driver must keep sending it for the whole WAIT.
+
+        Returns ``None`` when this is not a split-ready diagnostic: there is then no
+        separate birth pose and nothing to substitute.  Raises when it IS one but the
+        hold ``q_des`` binding is absent, because such a driver has no safe command.
+        """
+
+        if not self.action_ball_diagnostic_split_ready_teacher:
+            return None
+        hold_qdes = getattr(
+            self, "_action_ball_dynamic_ready_hold_qdes_joint_pos_rad", None
+        )
+        if not torch.is_tensor(hold_qdes):
+            raise RuntimeError(
+                "split-ready diagnostic has no dynamic-ready hold q_des to command "
+                "during the pre-task WAIT"
+            )
+        return self._action_ball_safe_ready_wait_mask(), hold_qdes[self.clip_id]
+
     def _capture_action_ball_safe_ready_reference(self) -> None:
         """Freeze FK body targets after the physical safe-ready reset settles."""
 
