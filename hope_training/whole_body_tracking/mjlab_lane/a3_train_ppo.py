@@ -39,11 +39,25 @@ computes the PD itself.  We do the same, once per *physics* step (1 kHz):
 so the policy's action is a residual joint-position target around the
 split-ready pose, which is the same shape the Isaac lane uses.
 
+HOW A RUN FROM THIS FILE MAY BE REPORTED
+----------------------------------------
+The headline is the **binary per-episode racket-ball contact rate** measured
+against the **zero policy on the same scene**, over **at least two runs**, with
+the run-to-run band shown.  ``reach_term_weighted`` / ``touch_term_weighted``
+are weighted reward terms with ceilings 2.0 / 4.0 -- they are not
+probabilities, they are not contact rates, and quoting them as such once turned
+"0.12% -> 49.2%/97.8%" into "touch 4e-5 -> 0.21".  ``--report`` enforces this
+and refuses (exit 2) anything weaker.  See the "How this run is allowed to be
+reported" section below.
+
 Usage
 -----
   python a3_train_ppo.py --smoke                       # 64 worlds, 3 iters
   python a3_train_ppo.py --nworld 4096 --iterations 60 --seed 0 --tag s0
   python a3_train_ppo.py --analyze RUN_s0.jsonl RUN_s1.jsonl --out BAND.json
+  python a3_train_ppo.py --report TRAIN_s0.json TRAIN_s1.json \
+      --report-zero-policy EVAL_zero.json \
+      --report-eval EVAL_ckpt_s0.json EVAL_ckpt_s1.json --out REPORT.json
 """
 
 from __future__ import annotations
@@ -443,6 +457,265 @@ def _match_uuid_against_smi(uuid_s, pid, smi: dict | None) -> dict:
 
 
 # ==========================================================================
+# How this run is allowed to be reported.
+# ==========================================================================
+#
+# PLAIN LANGUAGE.  On 2026-08-06 an audit found that this lane's own headline
+# number was wrong in a way that made a decent result look like a bad one.  The
+# curve everyone was quoting, `touch: 4e-5 -> 0.21`, is not a contact rate and
+# never was: `touch` is a *weighted reward term*, `w_touch * exp(-(d/sigma)^2)`,
+# whose ceiling is 4.0, so 0.21 is a kernel mean of 5.25% -- and even that is
+# not "5.25% of the time the racket was on the ball", it is the average of a
+# smooth bump function of distance.  The one number with physical meaning is
+# binary: did the racket and the ball actually touch during this episode, yes
+# or no.  Measured that way the same policies go from 0.12% (do-nothing
+# baseline) to 49.2% and 97.8% -- 400-800x, not "0.21".  Reproduced on
+# 2026-08-06 with two fresh 4096x300 runs: `touch_term_weighted` 0.003 -> 0.252
+# and 0.004 -> 0.189, i.e. the old headline; binary contact rate 0.14% -> 80.7%
+# and 56.0%, i.e. the same two runs told honestly.
+#
+# Two more things the audit found, both of which this section encodes:
+#   * the binary counter existed but was wired only into `--eval`, so no
+#     training curve could ever show it;
+#   * one seed, one point is not a result on this engine -- the same config run
+#     four times gave touch = 0.21 / 0.46 / 0.59 / 0.61, and 0.21 (the number
+#     that got reported) was the worst of the four.
+#
+# So: the receipt names its own units, the binary rate rides the training
+# curve, and `--report` refuses to print a headline that is not
+# "zero-policy baseline vs binary contact rate, over at least two runs".
+
+# The reward terms whose value is a *weight times a shaping kernel in [0, 1]*.
+# Mapping: receipt key -> (kernel key, weight attribute on TaskCfg).
+KERNEL_REWARD_TERMS = {
+  "reach_term_weighted": ("reach_kernel_mean", "w_reach"),
+  "touch_term_weighted": ("touch_kernel_mean", "w_touch"),
+}
+
+# The only contact metric with a physical meaning, and where it lives in a
+# per-iteration record / an eval receipt's stats block.
+BINARY_CONTACT_KEY = "contact.fraction_of_episodes_with_a_racket_touch"
+
+_NOT_A_PROBABILITY = (
+  "reward_terms_mean values are weighted per-step reward, NOT probabilities "
+  "and NOT contact rates; divide by reward_terms_max_possible to get the "
+  "shaping kernel, and use "
+  + BINARY_CONTACT_KEY
+  + " for anything that claims the racket touched the ball")
+
+
+def reward_term_ceilings(cfg) -> dict:
+  """Per-step ceiling of every reward term, straight off the config.
+
+  Pure, so the receipt can say what "0.21" is 0.21 *of* without anyone having
+  to go read the weights out of the source.  Penalty terms (action_rate,
+  joint_vel, torque, termination) are <= 0 by construction, so their ceiling is
+  0.0 and they have no lower bound worth printing.
+  """
+  return {
+    "alive": float(cfg.w_alive),
+    "pose": float(cfg.w_pose),
+    "upright": float(cfg.w_upright),
+    "height": float(cfg.w_height),
+    "reach_term_weighted": float(cfg.w_reach),
+    "touch_term_weighted": float(cfg.w_touch),
+    "action_rate": 0.0,
+    "joint_vel": 0.0,
+    "torque": 0.0,
+    "termination": 0.0,
+  }
+
+
+def reward_term_report(weighted_means: dict, cfg) -> dict:
+  """Receipt block for the reward terms: value, ceiling, and kernel mean.
+
+  Pure.  ``weighted_means`` is what the accumulators produce (weight already
+  applied).  The kernel means are the same numbers divided by their weight, so
+  a reader who wants "how close to the ceiling is this term" does not have to
+  know the weight -- and a reader who mistakes either one for a contact rate is
+  told in the receipt itself that it is not one.
+  """
+  ceilings = reward_term_ceilings(cfg)
+  kernels = {}
+  for term, (kernel_key, weight_attr) in KERNEL_REWARD_TERMS.items():
+    w = float(getattr(cfg, weight_attr, 0.0))
+    v = weighted_means.get(term)
+    kernels[kernel_key] = (float(v) / w) if (v is not None and w) else None
+  return {
+    "reward_terms_mean": {k: float(v) for k, v in weighted_means.items()},
+    "reward_terms_max_possible": {k: ceilings[k] for k in weighted_means
+                                  if k in ceilings},
+    "reward_kernel_mean": kernels,
+    "reward_terms_are_weighted_not_probabilities": True,
+    "reward_terms_note": _NOT_A_PROBABILITY,
+  }
+
+
+def binary_contact_fields(*, probe_on: bool, touched_episodes: float,
+                          episodes_finished: float,
+                          racket_substeps: float = 0.0,
+                          table_substeps: float = 0.0) -> dict:
+  """The binary "did the racket touch the ball this episode" block.  Pure.
+
+  Two ways this can be un-measured, and neither may look like a measured zero:
+
+  * the probe was switched off -> ``probe: "OFF"``, fraction ``None``;
+  * the probe was on but no episode finished inside this window (short eval,
+    tiny iteration) -> ``probe: "ON"``, fraction ``None``, reason
+    ``NO_EPISODES_FINISHED``.
+
+  The old code divided by ``max(episodes, 1)``, so "nothing to divide" printed
+  as ``0.0`` -- a perfect zero contact rate, indistinguishable from a policy
+  that genuinely never touched the ball.  Same defect class as the capacity
+  gate's zero-sample PASS.
+  """
+  if not probe_on:
+    return {
+      "probe": "OFF",
+      "fraction_of_episodes_with_a_racket_touch": None,
+      "measured": False,
+      "reason": "CONTACT_PROBE_OFF",
+      "note": "--no-contact-probe was passed: this run cannot support any "
+              "claim about whether the racket touched the ball",
+    }
+  eps = float(episodes_finished)
+  if eps <= 0:
+    return {
+      "probe": "ON",
+      "ball_racket_contact_substeps": float(racket_substeps),
+      "ball_table_contact_substeps": float(table_substeps),
+      "episodes_with_a_racket_touch": float(touched_episodes),
+      "episodes_finished": 0.0,
+      "fraction_of_episodes_with_a_racket_touch": None,
+      "measured": False,
+      "reason": "NO_EPISODES_FINISHED",
+      "note": "no episode ended inside this window, so the per-episode rate "
+              "has no denominator; this is not a contact rate of zero",
+    }
+  return {
+    "probe": "ON",
+    "ball_racket_contact_substeps": float(racket_substeps),
+    "ball_table_contact_substeps": float(table_substeps),
+    "episodes_with_a_racket_touch": float(touched_episodes),
+    "episodes_finished": eps,
+    "fraction_of_episodes_with_a_racket_touch": float(touched_episodes) / eps,
+    "measured": True,
+    "denominator": "episodes that ENDED inside this window",
+  }
+
+
+def _dig(obj, dotted: str):
+  """Follow a dotted path through nested dicts; ``None`` if anything is missing."""
+  cur = obj
+  for part in dotted.split("."):
+    if not isinstance(cur, dict) or part not in cur:
+      return None
+    cur = cur[part]
+  return cur
+
+
+def _binary_contact_curve(records) -> list:
+  """Per-iteration binary contact rate, ``None`` where it was not measured."""
+  return [_dig(r, BINARY_CONTACT_KEY) for r in records]
+
+
+def _band(values) -> dict:
+  """min / mean / max over runs, ignoring the ones that measured nothing."""
+  seen = [float(v) for v in values if v is not None]
+  if not seen:
+    return {"n": 0, "lo": None, "mean": None, "hi": None, "spread": None}
+  return {"n": len(seen), "lo": min(seen), "mean": float(np.mean(seen)),
+          "hi": max(seen), "spread": max(seen) - min(seen)}
+
+
+class ReportRefused(RuntimeError):
+  """``--report`` was asked to print a headline the evidence does not support."""
+
+
+def report_refusals(runs: list, baseline, evals: list | None = None) -> list:
+  """Every reason this set of receipts may NOT be reported.  Pure, fail-closed.
+
+  Each reason is ``(CODE, plain-language sentence)``.  The codes exist so a
+  mutation test can assert *which* rule fired, not merely that something did.
+
+  ``evals`` is optional and holds one ``--eval ckpt`` receipt per run: the
+  deterministic-policy measurement, which is what the 0.12% -> 49.2%/97.8%
+  headline actually came from.  Given, it is checked as strictly as the rest;
+  omitted, the report falls back to the on-policy training curve and says so.
+  """
+  out = []
+  if len(runs) < 2:
+    out.append((
+      "SINGLE_SEED_NOT_EVIDENCE",
+      f"only {len(runs)} run given.  mujoco-warp is non-deterministic and this "
+      "config measurably swings ~3x between identical runs (touch 0.21 / 0.46 "
+      "/ 0.59 / 0.61 on 2026-08-06), so one run is a sample, not a result.  "
+      "Give at least two."))
+  for name, r in runs:
+    if r.get("status") != "completed":
+      out.append(("RUN_DID_NOT_COMPLETE",
+                  f"{name}: status={r.get('status')!r}; a run that stopped "
+                  "early -- or a pre-2026-08-06 receipt that does not say "
+                  "whether it did -- cannot be quoted as a learning result"))
+    verdict = _dig(r, "capacity.verdict")
+    if verdict != "PASS_NO_OVERFLOW":
+      out.append(("RUN_HAS_NO_CAPACITY_PASS",
+                  f"{name}: capacity verdict={verdict!r}.  The physics behind "
+                  "the curve is only trustworthy when the capacity gate saw "
+                  "samples and every overflow bit stayed clear"))
+    if _dig(r, "learning.binary_contact_rate.measured") is not True:
+      out.append(("NO_BINARY_CONTACT_RATE",
+                  f"{name}: no binary contact rate on the training curve "
+                  "(pre-2026-08-06 receipt, or --no-contact-probe).  The "
+                  "weighted `touch` term is not a substitute -- that swap is "
+                  "the whole reason this gate exists"))
+  for name, e in (evals or []):
+    if e.get("mode") != "ckpt":
+      out.append(("EVAL_IS_NOT_A_CHECKPOINT_RUN",
+                  f"{name}: mode={e.get('mode')!r}, not 'ckpt'; this slot is "
+                  "for the trained policy's deterministic evaluation"))
+    if e.get("status") != "completed" or (
+        _dig(e, "capacity.verdict") != "PASS_NO_OVERFLOW"):
+      out.append(("EVAL_DID_NOT_COMPLETE_OR_PASS",
+                  f"{name}: status={e.get('status')!r}, capacity verdict="
+                  f"{_dig(e, 'capacity.verdict')!r}"))
+    if _dig(e, "stats.contact.fraction_of_episodes_with_a_racket_touch") is None:
+      out.append(("EVAL_HAS_NO_BINARY_CONTACT_RATE",
+                  f"{name}: no measured binary contact rate in the eval "
+                  "receipt (--no-contact-probe, or too short a window for any "
+                  "episode to end)"))
+  if evals and len(evals) != len(runs):
+    out.append(("EVAL_COUNT_DOES_NOT_MATCH_RUNS",
+                f"{len(evals)} eval receipt(s) for {len(runs)} run(s).  Pair "
+                "them one-to-one or leave --report-eval off entirely; a "
+                "partial pairing is how one good seed ends up standing in for "
+                "the band"))
+  if baseline is None:
+    out.append((
+      "NO_ZERO_POLICY_BASELINE",
+      "no --report-zero-policy receipt.  'the contact rate went up' means "
+      "nothing without the do-nothing policy measured on the same scene: it "
+      "is 0.12% here, so 49.2% is 400x, not noise"))
+    return out
+  bname, b = baseline
+  if b.get("mode") != "zero":
+    out.append(("BASELINE_IS_NOT_A_ZERO_POLICY_RUN",
+                f"{bname}: mode={b.get('mode')!r}, not 'zero'.  A trained "
+                "checkpoint cannot be its own baseline"))
+  if b.get("status") != "completed" or (
+      _dig(b, "capacity.verdict") != "PASS_NO_OVERFLOW"):
+    out.append(("BASELINE_DID_NOT_COMPLETE_OR_PASS",
+                f"{bname}: status={b.get('status')!r}, capacity verdict="
+                f"{_dig(b, 'capacity.verdict')!r}.  The baseline is held to "
+                "the same standard as the runs it anchors"))
+  if _dig(b, "stats.contact.fraction_of_episodes_with_a_racket_touch") is None:
+    out.append(("BASELINE_HAS_NO_BINARY_CONTACT_RATE",
+                f"{bname}: the baseline receipt has no measured binary contact "
+                "rate, so there is nothing to compare against"))
+  return out
+
+
+# ==========================================================================
 # The environment.
 # ==========================================================================
 
@@ -575,7 +848,13 @@ class A3ReadyBallVecEnv:
       "term_fall_h", "term_tilt", "term_nonfinite", "term_timeout",
       "steps", "rew_sum", "reserves",
     )}
-    self._rew_terms = ("alive", "pose", "upright", "height", "reach", "touch",
+    # The two shaping terms carry `_term_weighted` in their names on purpose.
+    # They used to be called `reach` and `touch`, and a receipt that says
+    # `touch: 0.21` next to `reach: 0.98` reads like two percentages -- it is
+    # in fact `4.0 * exp(-(d/0.15)^2)` and `2.0 * exp(-d/0.8)`, ceilings 4.0
+    # and 2.0.  The name now says which one it is.
+    self._rew_terms = ("alive", "pose", "upright", "height",
+                       "reach_term_weighted", "touch_term_weighted",
                        "action_rate", "joint_vel", "torque", "termination")
     for k in self._rew_terms:
       self._acc["r_" + k] = torch.zeros((), device=self.device)
@@ -585,10 +864,12 @@ class A3ReadyBallVecEnv:
     self.generator = torch.Generator(device=self.device)
     self.generator.manual_seed(int(seed))
 
-    # Optional per-substep contact probe.  OFF during the timed training runs
-    # (it adds ~5 kernels over the naconmax array per physics step); ON for the
-    # untimed policy evaluations, where "did the racket ever touch the ball"
-    # is the whole question.
+    # Per-substep contact probe.  ON by default everywhere now, training
+    # included -- it used to be wired only into `--eval`, which is why the
+    # training curve had no honest contact metric on it and the weighted
+    # `touch` reward term got quoted as one instead.  `--no-contact-probe`
+    # switches it off, and a run that does so records
+    # `fraction_of_episodes_with_a_racket_touch: null` rather than 0.
     self.count_contacts = bool(count_contacts)
     self._contact_ok = False
     if self.count_contacts:
@@ -634,7 +915,14 @@ class A3ReadyBallVecEnv:
   # ---- internals --------------------------------------------------------
 
   def _setup_contact_probe(self, mujoco):
-    """Wire a sync-free ball<->racket contact counter over mjwarp's contact array."""
+    """Wire a sync-free ball<->racket contact counter over mjwarp's contact array.
+
+    Fail-closed: if the caller asked for the contact metric and we cannot wire
+    it, the run stops.  It used to print one line and carry on with
+    ``_contact_ok = False``, which produced a receipt with no contact block at
+    all -- and "no contact block" is exactly the state in which somebody
+    reaches for the weighted ``touch`` term instead.
+    """
     torch = self._torch
     m = self.mj_model
     d = self.sim.data
@@ -643,8 +931,13 @@ class A3ReadyBallVecEnv:
     rackets = [gid(n) for n in court.RACKET_GEOMS]
     table = gid("court_table_top")
     if ball < 0 or any(r < 0 for r in rackets):
-      print("[a3_train_ppo] contact probe disabled: geoms not found")
-      return
+      raise RuntimeError(
+        "CONTACT_PROBE_UNAVAILABLE: the ball/racket geoms are not in this "
+        f"model (ball={ball}, rackets={rackets}), so the only physically "
+        "meaningful contact metric cannot be measured.  Refusing to run a "
+        "job that would silently report no contact data.  Pass "
+        "--no-contact-probe if you deliberately want a run that records "
+        "fraction_of_episodes_with_a_racket_touch = null.")
     try:
       contact = d.contact
       geom = contact.geom
@@ -655,12 +948,32 @@ class A3ReadyBallVecEnv:
       self._naconmax = int(geom.shape[0])
       self._con_idx = torch.arange(self._naconmax, device=self.device)
     except Exception as exc:
-      print(f"[a3_train_ppo] contact probe disabled: {exc!r}")
-      return
+      raise RuntimeError(
+        "CONTACT_PROBE_UNAVAILABLE: mujoco-warp did not expose the contact "
+        f"array this build needs ({exc!r}).  Refusing to run unmeasured; "
+        "pass --no-contact-probe to record that on purpose.") from exc
     self._ball_gid = int(ball)
-    self._racket_gids = torch.as_tensor(rackets, dtype=torch.long,
-                                        device=self.device)
-    self._table_gid = int(table)
+    # One small lookup table over geom ids (0 = don't care, 1 = racket,
+    # 2 = table top) instead of comparing every contact row against every
+    # racket geom.  Fewer kernels, same predicate.
+    #
+    # HONEST COST NOTE (paired 4096x12 runs, same card, 2026-08-06): this probe
+    # costs ~13% throughput and the table did NOT change that -- 38,816 vs
+    # 38,904 env-step/s before and after, against 44,987 / 44,735 with the
+    # probe off.  The cost is inherent: it is a pass over the whole
+    # pre-allocated contact array (524,288 rows at 4096 worlds x nconmax 128)
+    # once per PHYSICS substep, and it has to be per-substep because a
+    # racket-ball contact only lasts one or two of them.  We pay it because a
+    # training curve without the binary contact rate is a curve nobody can read
+    # honestly -- that is what T11 is about.  `--no-contact-probe` exists for
+    # timing runs and makes the receipt say so.
+    ngeom = int(m.ngeom)
+    cls = torch.zeros(ngeom, dtype=torch.int8, device=self.device)
+    for r in rackets:
+      cls[int(r)] = 1
+    if table >= 0:
+      cls[int(table)] = 2
+    self._geom_class = cls
     self._contact_ok = True
     self._acc["contact_ball_racket_substeps"] = torch.zeros((), device=self.device)
     self._acc["contact_ball_table_substeps"] = torch.zeros((), device=self.device)
@@ -789,15 +1102,24 @@ class A3ReadyBallVecEnv:
       raise CapacityOverflow(mask, where, detail=self._capacity_detail())
 
   def _probe_contacts(self):
+    """Per-substep, sync-free: which worlds had the racket on the ball.
+
+    Runs inside the 1 kHz loop over the whole pre-allocated contact array, so
+    every extra pass over it is throughput.  Kept to: one validity compare, two
+    ball compares, one select, one gather through the geom-class table, three
+    masks, two reductions and one scatter.  No host sync, no `.item()`.
+    """
     torch = self._torch
     g = self._con_geom[:]
     valid = self._con_idx < self._nacon[0]
-    g0, g1 = g[:, 0].long(), g[:, 1].long()
-    is_ball = (g0 == self._ball_gid) | (g1 == self._ball_gid)
-    other = torch.where(g0 == self._ball_gid, g1, g0)
-    is_racket = (other.unsqueeze(-1) == self._racket_gids).any(dim=-1)
-    hit = valid & is_ball & is_racket
-    tab = valid & is_ball & (other == self._table_gid)
+    g0, g1 = g[:, 0], g[:, 1]
+    is0 = g0 == self._ball_gid
+    is1 = g1 == self._ball_gid
+    other = torch.where(is0, g1, g0).long()
+    kind = self._geom_class[other]            # 1 = racket, 2 = table top
+    ball_row = valid & (is0 | is1)
+    hit = ball_row & (kind == 1)
+    tab = ball_row & (kind == 2)
     self._acc["contact_ball_racket_substeps"] += hit.sum()
     self._acc["contact_ball_table_substeps"] += tab.sum()
     w = self._con_world[:].long().clamp_(0, self.num_envs - 1)
@@ -1045,8 +1367,8 @@ class A3ReadyBallVecEnv:
       "pose": cfg.w_pose * pose,
       "upright": cfg.w_upright * upright,
       "height": cfg.w_height * height,
-      "reach": cfg.w_reach * reach,
-      "touch": cfg.w_touch * touch,
+      "reach_term_weighted": cfg.w_reach * reach,
+      "touch_term_weighted": cfg.w_touch * touch,
       "action_rate": cfg.w_action_rate * action_rate,
       "joint_vel": cfg.w_joint_vel * joint_vel,
       "torque": cfg.w_torque * tau_sq,
@@ -1119,17 +1441,22 @@ class A3ReadyBallVecEnv:
         "timeout_truncation": out["term_timeout"],
       },
       "ball_reserves": out["reserves"],
-      "reward_terms_mean": {k: out["r_" + k] / steps for k in self._rew_terms},
     }
+    stats.update(reward_term_report(
+      {k: out["r_" + k] / steps for k in self._rew_terms}, self.cfg))
     if self._cap_ok:
       stats["capacity"] = self.capacity_snapshot()
-    if self._contact_ok:
-      stats["contact"] = {
-        "ball_racket_contact_substeps": out["contact_ball_racket_substeps"],
-        "ball_table_contact_substeps": out["contact_ball_table_substeps"],
-        "episodes_with_a_racket_touch": out["ep_touched_racket"],
-        "fraction_of_episodes_with_a_racket_touch": out["ep_touched_racket"] / ep,
-      }
+    # The binary contact block is always present, in every mode, even when it
+    # says "not measured" -- a missing block is what sends a reader back to the
+    # weighted reward term.  `ep` above is max(episodes, 1); the real count is
+    # out["ep_cnt"], and passing the real one is what makes an empty window
+    # report null instead of a fake 0.0.
+    stats["contact"] = binary_contact_fields(
+      probe_on=self._contact_ok,
+      touched_episodes=out.get("ep_touched_racket", 0.0),
+      episodes_finished=out["ep_cnt"],
+      racket_substeps=out.get("contact_ball_racket_substeps", 0.0),
+      table_substeps=out.get("contact_ball_table_substeps", 0.0))
     return stats
 
   # ---- capacity receipt ---------------------------------------------------
@@ -1266,7 +1593,13 @@ def train(args) -> int:
 
   try:
     t_build = time.perf_counter()
+    # T11(b): the binary contact counter now runs during TRAINING too, not just
+    # in `--eval`.  "did the racket touch the ball this episode" is the only
+    # contact number on this curve that means anything physical; while it was
+    # eval-only the training plots had nothing to show but the weighted `touch`
+    # reward term, and that term got read as a contact probability.
     env = A3ReadyBallVecEnv(sim_cfg, task_cfg, device=device, seed=args.seed,
+                            count_contacts=not args.no_contact_probe,
                             capacity_probe=not args.no_capacity_probe)
     build_s = time.perf_counter() - t_build
     print(f"[a3_train_ppo] scene built in {build_s:.1f}s: nworld={env.num_envs} "
@@ -1314,12 +1647,17 @@ def train(args) -> int:
       records.append(rec)
       jf.write(json.dumps(rec) + "\n")
       jf.flush()
+      touch_rate = _dig(rec, BINARY_CONTACT_KEY)
       print(f"[it {it:4d}] R_ep={rec['mean_episode_return']:8.2f} "
             f"r_step={rec['mean_step_reward']:6.3f} "
             f"len={rec['mean_episode_length']:6.1f} "
             f"term/step={rec['termination_rate_per_env_step']:.4f} "
             f"minD={rec['mean_episode_min_racket_ball_dist_m']:.3f}m "
-            f"fps={rec['env_steps_per_s']:.0f} "
+            # The headline metric goes on the console line, in percent, with
+            # "n/a" (never 0) when this window had nothing to divide by.
+            + ("touchEp=n/a " if touch_rate is None
+               else f"touchEp={100.0 * touch_rate:5.1f}% ")
+            + f"fps={rec['env_steps_per_s']:.0f} "
             + (f"nefc={cap['nefc_peak_per_world_running']}/"
                f"{cap['njmax_allocated_per_world']} "
                f"con={cap['naconmax_binding_peak_all_worlds']}/"
@@ -1392,6 +1730,14 @@ def train(args) -> int:
       _warn_block("CAPACITY GATE OFF",
                   "--no-capacity-probe was passed: this run has no capacity "
                   "gate and cannot be cited as evidence that the caps held.")
+    learning = _safe(_learning_summary, records, default={})
+    if not _dig(learning, "binary_contact_rate.measured"):
+      _warn_block(
+        "CONTACT RATE NOT MEASURED",
+        "this run has no binary per-episode racket-ball contact rate "
+        f"({_dig(learning, 'binary_contact_rate.reason')}).  Its reward terms "
+        "are weighted sums, not contact probabilities -- do not quote "
+        "`touch_term_weighted` as one.  --report will refuse this receipt.")
     summary = {
       "status": status,
       "exit_code": exit_code,
@@ -1409,7 +1755,7 @@ def train(args) -> int:
       "capacity": capacity,
       "warp_stdout_overflow_scan": warp_warn,
       "throughput": _safe(_throughput_summary, records, env, args, default={}),
-      "learning": _safe(_learning_summary, records, default={}),
+      "learning": learning,
       "nvidia_smi_start": smi_start,
       "nvidia_smi_end": smi_end,
       "torch_cuda_mem_reserved_MiB": _safe(
@@ -1424,6 +1770,18 @@ def train(args) -> int:
     print(json.dumps({k: summary[k] for k in
                       ("status", "exit_code", "capacity", "throughput",
                        "learning")}, indent=2, default=str), flush=True)
+    # The last thing on stdout is the only metric that may be quoted, in the
+    # only form it may be quoted in -- and it says out loud that one run is not
+    # a result.  Everything above it is context.
+    bc = _dig(learning, "binary_contact_rate") or {}
+    if bc.get("measured"):
+      f0 = bc.get("fraction_of_episodes_with_a_racket_touch_first")
+      f1 = bc.get("fraction_of_episodes_with_a_racket_touch_last")
+      print("[a3_train_ppo][HEADLINE] binary per-episode racket-ball contact "
+            f"rate {100.0 * (f0 or 0.0):.2f}% -> {100.0 * (f1 or 0.0):.2f}% "
+            "(this ONE run only; not a result until it is put next to the "
+            "zero-policy baseline and a second run -- use --report)",
+            flush=True)
     print(f"[a3_train_ppo] wrote {out} (status={status}, exit={exit_code})",
           flush=True)
   return exit_code
@@ -1609,6 +1967,13 @@ def evaluate(args) -> int:
                   "no physics step was taken; verdict=NO_SAMPLES.")
       if args.eval_steps > 0 and exit_code == 0:
         status, exit_code = "gate_fired", 1
+    contact = (stats or {}).get("contact") or {}
+    if not contact.get("measured"):
+      _warn_block(
+        "CONTACT RATE NOT MEASURED (eval)",
+        f"reason={contact.get('reason')}: this eval reports "
+        "fraction_of_episodes_with_a_racket_touch = null, not 0.  A "
+        "zero-policy baseline receipt in this state cannot anchor a report.")
     out = {
       "status": status,
       "exit_code": exit_code,
@@ -1706,17 +2071,43 @@ def _throughput_summary(records, env, args) -> dict:
   }
 
 
+def _tied_ranks(y) -> "np.ndarray":
+  """Spearman ranks with ties averaged, which is what Spearman actually is.
+
+  ``argsort(argsort(y))`` -- what this file used before -- breaks ties by
+  position, so a perfectly FLAT curve came out ranked 0,1,2,... and scored
+  rho = +1.0, "rising monotonically".  The binary contact rate is flat at 0.0
+  for the whole early part of a run, so that bug would have printed a rising
+  trend for a policy that had never once touched the ball.
+  """
+  y = np.asarray(y, dtype=float)
+  order = np.argsort(y, kind="mergesort")
+  ranks = np.empty(len(y), dtype=float)
+  ranks[order] = np.arange(len(y), dtype=float)
+  s = y[order]
+  i = 0
+  while i < len(s):
+    j = i
+    while j + 1 < len(s) and s[j + 1] == s[i]:
+      j += 1
+    if j > i:
+      ranks[order[i:j + 1]] = float(np.mean(np.arange(i, j + 1, dtype=float)))
+    i = j + 1
+  return ranks
+
+
 def _spearman(y) -> float:
   y = np.asarray(y, dtype=float)
   n = len(y)
   if n < 3:
     return float("nan")
-  x = np.arange(n, dtype=float)
-  rx = np.argsort(np.argsort(x)).astype(float)
-  ry = np.argsort(np.argsort(y)).astype(float)
-  rx -= rx.mean()
-  ry -= ry.mean()
+  rx = _tied_ranks(np.arange(n, dtype=float))
+  ry = _tied_ranks(y)
+  rx = rx - rx.mean()
+  ry = ry - ry.mean()
   den = math.sqrt(float((rx * rx).sum() * (ry * ry).sum()))
+  # A constant series has zero rank variance: the honest answer is "no trend
+  # measurable", i.e. nan -- not +1.0.
   return float((rx * ry).sum() / den) if den > 0 else float("nan")
 
 
@@ -1762,6 +2153,65 @@ def _learning_summary(records) -> dict:
     "reward_terms_last": {t: float(np.mean([r["reward_terms_mean"][t]
                                             for r in records[-k:]]))
                           for t in records[0]["reward_terms_mean"]},
+    "reward_terms_max_possible": records[-1].get("reward_terms_max_possible"),
+    "reward_terms_are_weighted_not_probabilities": True,
+    "reward_terms_note": _NOT_A_PROBABILITY,
+    "binary_contact_rate": _binary_contact_summary(records, k),
+    "reporting": {
+      "headline_metric": BINARY_CONTACT_KEY,
+      "headline_needs_a_zero_policy_baseline": True,
+      "headline_needs_at_least_two_runs": True,
+      "do_not_quote_as_a_contact_rate": sorted(KERNEL_REWARD_TERMS),
+      "how": ("python a3_train_ppo.py --report RUN_A.json RUN_B.json "
+              "--report-zero-policy EVAL_zero.json --out REPORT.json"),
+      "note": ("report the binary per-episode contact rate against the "
+               "do-nothing policy measured on the same scene, over at least "
+               "two runs with the run-to-run band shown.  A single run is a "
+               "sample: this config gave touch = 0.21/0.46/0.59/0.61 on four "
+               "identical tries, and the 0.21 is the one that got published."),
+    },
+  }
+
+
+def _binary_contact_summary(records, k: int) -> dict:
+  """The headline metric, summarised: curve, first/last decile, and honesty.
+
+  ``measured`` is the flag ``--report`` gates on.  It is True only when at
+  least one iteration actually produced a rate; a run with the probe off, or
+  one whose windows never closed an episode, says False and carries no numbers
+  at all rather than zeros.
+  """
+  curve = _binary_contact_curve(records)
+  seen = [v for v in curve if v is not None]
+  probe = _dig(records[-1], "contact.probe")
+  if not seen:
+    return {
+      "measured": False,
+      "probe": probe,
+      "curve_fraction_of_episodes_with_a_racket_touch": curve,
+      "iterations_measured": 0,
+      "reason": ("CONTACT_PROBE_OFF" if probe == "OFF"
+                 else "NO_EPISODES_FINISHED_IN_ANY_ITERATION"),
+      "note": "this run cannot support any claim about racket-ball contact",
+    }
+  first = [v for v in curve[:k] if v is not None]
+  last = [v for v in curve[-k:] if v is not None]
+  return {
+    "measured": True,
+    "probe": probe,
+    "curve_fraction_of_episodes_with_a_racket_touch": curve,
+    "iterations_measured": len(seen),
+    "iterations_total": len(curve),
+    "fraction_of_episodes_with_a_racket_touch_first": (
+      float(np.mean(first)) if first else None),
+    "fraction_of_episodes_with_a_racket_touch_last": (
+      float(np.mean(last)) if last else None),
+    "fraction_of_episodes_with_a_racket_touch_max": float(max(seen)),
+    "spearman_vs_iteration": _spearman(seen),
+    "denominator": "episodes that ENDED inside that iteration",
+    "note": ("binary: an episode counts once if the racket and the ball were "
+             "ever in contact during it.  This is the contact metric; the "
+             "weighted touch reward term is not one."),
   }
 
 
@@ -1771,6 +2221,17 @@ def _learning_summary(records) -> dict:
 
 
 def analyze(paths, out_path) -> int:
+  # A "band" over one run is not a band -- it is a point with the error bars
+  # drawn at zero width, which is worse than no error bars at all.  This used
+  # to be allowed and would happily print `rel_spread_max_pct: 0.0`.
+  if len(paths) < 2:
+    _warn_block(
+      "BAND REFUSED",
+      f"--analyze needs at least 2 runs, got {len(paths)}.  mujoco-warp is "
+      "non-deterministic and this config swings ~3x between identical runs, "
+      "so a single-run 'band' reports zero spread and is a false claim of "
+      "reproducibility.  Re-run with another seed (or another repeat).")
+    return 2
   curves, names = [], []
   for p in paths:
     p = Path(p)
@@ -1783,6 +2244,10 @@ def analyze(paths, out_path) -> int:
   n = min(len(c) for c in curves)
   band: dict[str, Any] = {"runs": names, "iterations_compared": n,
                           "n_seeds": len(curves)}
+  # The binary contact rate is the headline metric, so it gets a band like
+  # everything else -- and `np.nan` where an iteration closed no episode, so a
+  # missing measurement never averages in as a zero.
+  band["binary_contact_rate"] = _contact_band(curves, n)
   for key in ("mean_episode_return", "mean_step_reward", "mean_episode_length",
               "termination_rate_per_env_step",
               "mean_episode_min_racket_ball_dist_m", "env_steps_per_s"):
@@ -1824,6 +2289,190 @@ def analyze(paths, out_path) -> int:
   print(json.dumps({"mean_episode_return": {
     k: v for k, v in band["mean_episode_return"].items()
     if not k.startswith("band_")}}, indent=2))
+  print(json.dumps({"binary_contact_rate": {
+    k: v for k, v in band["binary_contact_rate"].items()
+    if not k.startswith("band_")}}, indent=2, default=str))
+  print(f"[a3_train_ppo] wrote {out_path}")
+  return 0
+
+
+def _contact_band(curves, n: int) -> dict:
+  """Run-to-run band of the binary contact rate, NaN-aware.
+
+  Iterations in which a run closed no episode carry ``None``; they become NaN
+  here and are skipped by the nan-aware reductions, so "not measured" never
+  averages in as a contact rate of zero.
+  """
+  arr = np.array([[_dig(c[i], BINARY_CONTACT_KEY) for i in range(n)]
+                  for c in curves], dtype=object)
+  arr = np.array([[np.nan if v is None else float(v) for v in row]
+                  for row in arr], dtype=float)
+  measured = int(np.isfinite(arr).sum())
+  if measured == 0:
+    return {"measured": False, "n_runs": len(curves),
+            "reason": "no run on this list carries a binary contact rate "
+                      "(pre-2026-08-06 receipts, or --no-contact-probe)",
+            "note": "do not substitute the weighted touch reward term"}
+  with np.errstate(all="ignore"):
+    lo = np.nanmin(arr, axis=0)
+    hi = np.nanmax(arr, axis=0)
+    mean = np.nanmean(arr, axis=0)
+  k = max(1, n // 10)
+  per_run_first, per_run_last = [], []
+  for row in arr:
+    f = row[:k][np.isfinite(row[:k])]
+    l = row[-k:][np.isfinite(row[-k:])]
+    per_run_first.append(float(f.mean()) if f.size else None)
+    per_run_last.append(float(l.mean()) if l.size else None)
+  spread = hi - lo
+  finite_last = [v for v in per_run_last if v is not None]
+  return {
+    "measured": True,
+    "n_runs": len(curves),
+    "iterations_compared": n,
+    "iterations_with_a_measurement": measured,
+    "band_mean": [None if not np.isfinite(v) else float(v) for v in mean],
+    "band_lo": [None if not np.isfinite(v) else float(v) for v in lo],
+    "band_hi": [None if not np.isfinite(v) else float(v) for v in hi],
+    "per_run_first": per_run_first,
+    "per_run_last": per_run_last,
+    "final_decile_band": _band(per_run_last),
+    "final_decile_spread_x": (
+      (max(finite_last) / min(finite_last))
+      if finite_last and min(finite_last) > 0 else None),
+    "abs_spread_mean": float(np.nanmean(spread)) if measured else None,
+    "note": ("binary per-episode racket-ball contact rate; the band is over "
+             "runs, and this is the number to quote -- always next to the "
+             "zero-policy baseline measured on the same scene"),
+  }
+
+
+def report(run_paths, zero_policy_path, out_path, eval_paths=None) -> int:
+  """Print the ONE reporting format this lane's evidence supports.
+
+  PLAIN LANGUAGE.  This exists because the previous headline
+  ("touch 4e-5 -> 0.21") was a weighted reward term read as a probability, from
+  a single run, with no do-nothing baseline next to it -- three separate ways
+  to be wrong at once, and together they made a policy that learned quite a lot
+  look like one that barely moved.  So the format is fixed here in code:
+  binary per-episode contact rate, against the zero policy on the same scene,
+  over at least two runs, with the run-to-run band shown.  Anything the
+  evidence does not support is REFUSED by name and exits 2 -- it does not
+  degrade into a weaker claim.
+  """
+  runs = []
+  for p in run_paths:
+    p = Path(p)
+    runs.append((p.stem, json.loads(p.read_text())))
+  baseline = None
+  if zero_policy_path:
+    bp = Path(zero_policy_path)
+    baseline = (bp.stem, json.loads(bp.read_text()))
+  evals = []
+  for p in (eval_paths or []):
+    p = Path(p)
+    evals.append((p.stem, json.loads(p.read_text())))
+
+  refusals = report_refusals(runs, baseline, evals)
+  if refusals:
+    for code, why in refusals:
+      _warn_block(f"REPORT REFUSED: {code}", why)
+    _safe(Path(out_path).write_text, json.dumps(
+      {"status": "refused", "exit_code": 2,
+       "refusals": [{"code": c, "why": w} for c, w in refusals],
+       "runs": [n for n, _ in runs],
+       "evals": [n for n, _ in evals],
+       "zero_policy": baseline[0] if baseline else None}, indent=2))
+    print(f"[a3_train_ppo] REFUSED, wrote {out_path}")
+    return 2
+
+  bname, b = baseline
+  base_rate = float(_dig(b, "stats.contact.fraction_of_episodes_with_a_racket_touch"))
+  last = [float(_dig(r, "learning.binary_contact_rate."
+                        "fraction_of_episodes_with_a_racket_touch_last"))
+          for _, r in runs]
+  first = [_dig(r, "learning.binary_contact_rate."
+                   "fraction_of_episodes_with_a_racket_touch_first")
+           for _, r in runs]
+  band_last = _band(last)
+  weighted = {t: [_dig(r, "learning.reward_terms_last." + t) for _, r in runs]
+              for t in sorted(KERNEL_REWARD_TERMS)}
+  out = {
+    "status": "reported",
+    "exit_code": 0,
+    "headline_metric": BINARY_CONTACT_KEY,
+    "runs": [n for n, _ in runs],
+    "seeds": [r.get("seed") for _, r in runs],
+    "iterations": [_dig(r, "learning.iterations") for _, r in runs],
+    "zero_policy_baseline": {
+      "receipt": bname,
+      "fraction_of_episodes_with_a_racket_touch": base_rate,
+      "policy_steps": b.get("policy_steps"),
+      "nworld": b.get("nworld"),
+    },
+    "trained_on_policy_training_curve": {
+      "per_run_first_decile": first,
+      "per_run_last_decile": last,
+      "band": band_last,
+      "note": ("measured DURING training, so the policy still carries its "
+               "exploration noise; this is the conservative number"),
+    },
+    # Suffixed on purpose.  An unqualified `gain_vs_zero_policy_x` sitting next
+    # to a sentence quoting the deterministic eval is precisely the kind of
+    # "which number is this?" ambiguity this whole section exists to kill.
+    "gain_vs_zero_policy_x_on_policy_training_curve": [
+      (v / base_rate) if base_rate > 0 else None for v in last],
+    "run_to_run_spread_x_on_policy_training_curve": (
+      (max(last) / min(last)) if min(last) > 0 else None),
+    "weighted_reward_terms_for_context_only": {
+      "values": weighted,
+      "max_possible": _dig(runs[0][1], "learning.reward_terms_max_possible"),
+      "warning": _NOT_A_PROBABILITY,
+    },
+  }
+  # The deterministic evaluation, when it was handed over: same metric, same
+  # scene, no exploration noise.  This is where "0.12% -> 49.2%/97.8%" came
+  # from, so the sentence leads with it when it exists and says which it is.
+  ev_rates = [float(_dig(e, "stats.contact."
+                            "fraction_of_episodes_with_a_racket_touch"))
+              for _, e in evals]
+  if ev_rates:
+    out["trained_deterministic_eval"] = {
+      "receipts": [n for n, _ in evals],
+      "per_run": ev_rates,
+      "band": _band(ev_rates),
+      "gain_vs_zero_policy_x": [(v / base_rate) if base_rate > 0 else None
+                                for v in ev_rates],
+      "policy_steps": [e.get("policy_steps") for _, e in evals],
+    }
+  headline = ev_rates or last
+  which = ("deterministic eval" if ev_rates
+           else "on-policy training curve, final decile")
+  hband = _band(headline)
+  out["headline_measurement"] = which
+  out["headline_per_run"] = headline
+  out["headline_band"] = hband
+  out["headline_gain_vs_zero_policy_x"] = [
+    (v / base_rate) if base_rate > 0 else None for v in headline]
+  out["headline_run_to_run_spread_x"] = (
+    (max(headline) / min(headline)) if min(headline) > 0 else None)
+  out["sentence"] = (
+    f"binary per-episode racket-ball contact rate ({which}): zero policy "
+    f"{100.0 * base_rate:.2f}%  ->  trained "
+    + " / ".join(f"{100.0 * v:.1f}%" for v in headline)
+    + f"  (band {100.0 * hband['lo']:.1f}--{100.0 * hband['hi']:.1f}%"
+      f" over {len(headline)} runs)")
+  Path(out_path).write_text(json.dumps(out, indent=2))
+  print("[a3_train_ppo][REPORT] " + out["sentence"], flush=True)
+  print("[a3_train_ppo][REPORT] 人话: 零策略基本碰不到球, 训练后每局摸到球的"
+        "比例见上; 括号里是 run 之间的散布, 单次跑不作数.", flush=True)
+  print("[a3_train_ppo][REPORT] the weighted `touch_term_weighted` reward term "
+        f"(ceiling {_dig(runs[0][1], 'learning.reward_terms_max_possible.touch_term_weighted')}) "
+        "is NOT a contact rate and is printed here only for context: "
+        + ", ".join(f"{n}={v:.3f}" if isinstance(v, (int, float)) else f"{n}={v}"
+                    for n, v in
+                    zip(out["runs"], weighted["touch_term_weighted"])),
+        flush=True)
   print(f"[a3_train_ppo] wrote {out_path}")
   return 0
 
@@ -1854,14 +2503,34 @@ def main(argv=None) -> int:
   p.add_argument("--smoke", action="store_true",
                  help="64 worlds / 3 iterations, for wiring checks")
   p.add_argument("--analyze", nargs="+", default=None,
-                 help="two or more run .jsonl/.json files -> N-seed band")
+                 help="two or more run .jsonl/.json files -> N-seed band.  "
+                      "One file is refused: a band over one run reports zero "
+                      "spread, which is a false reproducibility claim")
+  p.add_argument("--report", nargs="+", default=None,
+                 help="two or more training .json receipts -> the one "
+                      "reportable headline: binary per-episode contact rate "
+                      "vs the zero policy, with the run-to-run band.  Refuses "
+                      "(exit 2) anything the evidence does not support")
+  p.add_argument("--report-zero-policy", default=None,
+                 help="the `--eval zero` receipt measured on the same scene; "
+                      "required by --report, because 'the contact rate rose' "
+                      "is meaningless without the do-nothing number")
+  p.add_argument("--report-eval", nargs="+", default=None,
+                 help="optional: one `--eval ckpt` receipt per run, in the "
+                      "same order.  This is the deterministic-policy number "
+                      "(the 49.2%%/97.8%% in the record); without it --report "
+                      "falls back to the on-policy training curve and says so")
   p.add_argument("--out", default="BAND.json")
   p.add_argument("--eval", choices=("zero", "ckpt"), default=None,
                  help="score a fixed policy instead of training")
   p.add_argument("--eval-ckpt", default=None)
   p.add_argument("--eval-steps", type=int, default=750)
   p.add_argument("--no-contact-probe", action="store_true",
-                 help="eval only: skip the per-substep ball<->racket contact count")
+                 help="turn the per-substep ball<->racket contact counter OFF "
+                      "(training AND eval).  The run then records "
+                      "fraction_of_episodes_with_a_racket_touch = null, and "
+                      "--report will refuse it -- only use it to time the "
+                      "probe's own cost")
   p.add_argument("--no-capacity-probe", action="store_true",
                  help="turn the capacity gate OFF.  The run then records "
                       "verdict=NOT_MEASURED and cannot claim the njmax/nconmax "
@@ -1875,6 +2544,9 @@ def main(argv=None) -> int:
 
   if a.analyze:
     return analyze(a.analyze, a.out)
+
+  if a.report:
+    return report(a.report, a.report_zero_policy, a.out, a.report_eval)
 
   if a.smoke:
     a.nworld, a.iterations = 64, 3

@@ -52,7 +52,7 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 | Isaac | 4096环境与admission层每GPU最多2进程的合同已有；四格尚未运行。pod-wide `.kit_boot.lock` 原来会把scale全Pod串行；补丁已把锁收窄到Kit/extension boot，真实fcntl host suite=`22 passed`。Pod headless Isaac App 同GPU0双进程overlap已PASS：B在A尚未退出且双方各占约641 MiB时进入READY，二者自然退出；这关闭boot串行，不代签两个4096场景的显存/吞吐，正式scale仍记peak/min-free，跨GPU对照在补。当前analytic `physical_ball=false` learnability不冒充PhysX outcome。pre-long barrier/reward链专项=`71 passed`；A helper已恢复，C v3/各自timing receipt仍在focused test收口 | cross-GPU lock对照→initial-center single-Q四处一致→整组回归→oracle32→A0/A1/C0/C1各4096x5；正式四格共驻只为缩短总等待，rate证据另跑exclusive ABBA |
 | MuJoCo | parked-ball/reveal、A/C task/reward、runtime seals、fresh hold-bias、single-stroke timeout与RSL式timeout bootstrap已实现；native+legacy组合回归=`219 passed,2 skipped,0 failed`。exact Pod WIP r6 的A/C各`1 env×2 update`均`COMPLETE`，211/319有限，fresh WAIT canary、reset-boundary save与cold-load exact均通过；decoded mean→tape qdes最大误差`6.62e-8 rad`，mean-action projection=0，随机WAIT transition projection=`31/775=4.0%`。确定性checkpoint replay已把每个update的7个hard-terminal全部定位成`joint_actual_forbidden`：A在episode tick `70..84`，C在`69..88`，均早于nominal strike，timeout/base/table/contact/strike/landing均0；所以它证明移植主链可执行/可冷载，同时明确反证当前plant/action bootstrap可直接做4096学习。现役hold的WAIT25另有`1000/1000`、`0` hard；4σ inward mean仍只是未sealed候选 | 先做sealed current mean-only/std.02与4σ-inset同条件100+ tick诊断，区分静态漂移、探索累积、PD/plant或projection根因；正式receipt补reason/phase/tick后才能发MuJoCo scale。inset若胜出须新lineage，不能偷换r6授权。完整reward/safety、mid-episode resume、4096与cross-engine parity继续阻塞formal promotion |
 | **MuJoCo GPU / mjlab lane（2026-08-06 发车 + 同日四方独立复核，明细见 §9.2.2/§9.2.3/§9.2.4）** | **已在 pod1 GPU2 发车**：`4096 env x 5 update` 跑完 `10.9 s`，PID `2862997` 实测在 index `2`（`11,290 MiB`），GPU0/GPU1 全程 `2 MiB, 0 %` 未被碰（依据是 Warp 横幅只枚举 `1` 张 CUDA 卡，不是采样密度）；`nonfinite_state=0`、吞吐 `45,706` env-step/s。**数据干净但门不可信**：08-05 双 seed 历史 run 已被事后判定无溢出（两份 `5292` 行日志 `grep -ci overflow = 0`），复跑余量 `6.29--6.65x`；但当时新加的容量看门狗只守 `nefc` 一条轴，对 broadphase 溢出**静默放行**（`--nconmax 10` 实测 `1134` 行引擎警告仍判 `PASS`），且 `--iterations 0` 零测量也会签发 `PASS`。**门已于同日重做完（§9.2.6）**：改读引擎自己的 `d.overflow`（`9` 类全覆盖），判决延迟 `480 → 20` substep，零测量判 `NO_SAMPLES`；同三条变异**修前**（退出 `0` + `PASS`、CUDA 非法访问且无收据、零样本满余量 `PASS`）**修后**全部变成非零退出 + 点名 `BROADPHASE`/`NARROWPHASE`、崩前拦住并落收据、`NO_SAMPLES`。配对实测吞吐代价 ≤ `1%`（§9.2.2 那个"探针吃掉 `9%`"是拿不同长度的两条跑比出来的，已撤回）。**门可信 ≠ 可放行**：容量数值那几条（普查收敛、策略驱动构型分布）仍在 §9.2.7。容量普查的"最坏情况 `95` 行"被证伪（合法力矩即到 `117--120`，随机构型到 `188`；**这三个数本身
-也是定长窗口的下界，T9 收敛普查后是 `135--137` 与 `265`，见 §9.2.7**），"接触余量 `9.45x`" 算在了错的计数器上（真值 `~3--8x`）| 这条 lane 是 court/ready/reach-touch 任务，**不代签** canonical N1：缺 measured teacher、完整 reward 层级、§9.2 的 termination union 与 cross-engine parity。**且在 §9.2.4 的 T1--T4 待办落地前，不得再引用容量门作为放行依据**——它只证明过 `nefc` 没超 |
+也是定长窗口的下界，T9 收敛普查后是 `135--137` 与 `265`，见 §9.2.7**），"接触余量 `9.45x`" 算在了错的计数器上（真值 `~3--8x`）。**汇报口径也是坏的，而且比容量门更要紧（T11，已修完，见 §9.2.8）**：被引用的"`touch 4e-5 → 0.21`"是**加权奖励项**（上限 `4.0`）不是接触率，真正的二值接触率当时只在 eval 有——`0.12% → 49.2%/97.8%`，即比零策略强 `400--800` 倍，**一个报法像没学会、另一个是学得不错**。现在：两项改名并自带上限与核均值、二值接触率进训练曲线（配对实测代价 `13%` 吞吐，如实记）、`--report` 把"零策略对照 + 二值接触率 + run 间散布"写成会拒绝的门（`11` 条拒绝规则各有代号），`--analyze` 只给一份文件从退出 `0` 改成退出 `2`。今天两条全新 `4096 x 300` run 复现了这件事：同样这两条，旧报法是 `touch 0.003 → 0.25`，新报法是**零策略 `0.14%` → `80.7%` / `56.0%`**（`570` / `395` 倍）| 这条 lane 是 court/ready/reach-touch 任务，**不代签** canonical N1：缺 measured teacher、完整 reward 层级、§9.2 的 termination union 与 cross-engine parity。**且在 §9.2.4 的 T1--T4 待办落地前，不得再引用容量门作为放行依据**——它只证明过 `nefc` 没超 |
 | 0803 plant | normalized successor可复现，host producer=`6 passed`；但 world racket FK因右肘原点变化约9 mm，旧retarget/hold/MuJoCo identity不可代签 | 当前旧plant只跑`OLD-PLANT-FINITE`；canonical long另走promotion DAG |
 | 文档合同 | G04/G05/G06、policy ABI、工具目录与旧frame0操作页已同步；Gate保持Partial | 代码收口后再写exact test/Pod receipt与PROGRESS |
 
@@ -2019,19 +2019,32 @@ NaN 那条链也被 `nan_to_num` 掐断了（都见 §9.2.4）。准确说法是
      "学会以后接触变多可能撑爆"这个方向是反的。
    **所以那两条 run 不需要打"物理存疑"标签，也不需要重训。**
 2. **但那两条学习曲线仍然不能按原来的方式引用 —— 理由与溢出无关，是口径和复现性。**
+   （**这一条已于同日按 T11 修完，见 §9.2.8**：改名 + 二值接触率进训练曲线 + `--report`
+   把口径写成会拒绝的代码。下面三小条的**判定全部成立、原文保留**，只在末尾各加一句"现在怎样"。）
    - `reach`/`touch` 是**带权奖励项**，不是概率：`w_reach=2.0`（上限 `2.0`）、`w_touch=4.0`
      （上限 `4.0`）。"`0.53→0.98`"和"`4e-5→0.21`"并排写必然被读成两个百分比。真实含义是：
-     球拍平均离球从约 `1.0 m` 缩到约 `0.57 m`；`touch` 高斯核均值 `0.21/4 = 5.4%`。
+     球拍平均离球从约 `1.0 m` 缩到约 `0.57 m`；`touch` 高斯核均值 `0.21/4 = 5.25%`
+     （原文写 `5.4%`，是笔误，就地更正；不影响结论）。
      **`0.21` 完全不是接触率。**
+     —— **现在**：收据里这两项叫 `reach_term_weighted` / `touch_term_weighted`，同时落
+     `reward_terms_max_possible`（`2.0`/`4.0`）与 `reward_kernel_mean`（除掉权重之后的核均值），
+     并自带一句"这不是概率、要接触率请看二值那项"。
    - **真正的二值接触率只在 eval 路径有**（`count_contacts` 只在 eval 开）：
      零策略对照 `0.12%`、s0 `49.2%`、s1 `97.8%`（今天复现 `49.1%`/`97.6%`）。策略确实学到了东西
      （`400--800` 倍于零策略对照），**但支撑它的是这组 eval 二值接触率，不是训练曲线上的 `touch` 奖励项**。
+     —— **现在**：`count_contacts` 训练路径默认打开，
+     `fraction_of_episodes_with_a_racket_touch` 逐迭代上曲线（配对实测吞吐代价见 §9.2.8 第四节）。
    - **单 seed 单点不可复现**：同配置同 seed 四次跑出 `touch` = `0.21` / `0.46` / `0.59` / `0.61`，
      近 `3` 倍散布，而 `0.21` 是四次里最差的一次。要报就报带，别报点。
+     —— **现在**：`--analyze` 给一份文件直接退出 `2`（以前会给出零宽度的"带"），
+     `--report` 少于两条 run 退出 `2` 并点名 `SINGLE_SEED_NOT_EVIDENCE`。
    - 顺带排除了"溢出造成穿透、反而更容易够到"这条假阳性路径：前提就不成立（无溢出）；
      零策略 `0.0012` vs 训练后 `0.49`/`0.98` 是 `400--800` 倍不是噪声；穿透会把距离推向 `0`、
      `touch` 冲向上限 `4.0`，而实测最小距离 `0.086 m`/`0.047 m`、`touch` 只有 `0.21--0.62`，
      没有穿透签名；掉接触会让机器人陷进地面而 `height` 项 `300` iter 最低 `0.329/0.5`，骨盆一直在位。
+     （**这一处用 `touch` 是对的、保留**：这里问的是"它有没有顶到自己的上限 `4.0`"，
+     即把它当**带上限的加权项**用；错的是把同一个数当成百分比。新收据的
+     `reward_terms_max_possible` 正是为这种用法准备的。）
 
 #### D. 现在到底可信到什么程度（一句话）
 
@@ -2152,7 +2165,8 @@ NaN 那条链也被 `nan_to_num` 掐断了（都见 §9.2.4）。准确说法是
   **落地时的一处偏离**：`±3--5` 倍场地 σ 这条**单独用达不到变异测试要求**——实测 `k` 改 `10` 倍
   只让 `e` 偏离权威 `0.0043`，任何按场地 σ（`0.005`）定的带都放行。所以带子照收（且上沿因
   "不许放宽"被夹在 `0.93`），另**加了两道按推导精度定的门**，开火的是后者。全部数字见 §9.2.5。
-- **T11 口径修正（比容量门更要紧）。**
+- ~~**T11 口径修正（比容量门更要紧）。**~~ **DONE（2026-08-06 晚，见 §9.2.8）。**
+  原文：
   (a) `reward_terms_mean` 里的 `reach`/`touch` 是加权后的核均值（上限 `2.0`/`4.0`），
   receipt 要么改名（`reach_term_weighted`/`touch_term_weighted`），要么同时输出
   `touch_kernel_mean = touch/4.0`，并在 json 里写明 `max_possible`。
@@ -2160,6 +2174,12 @@ NaN 那条链也被 `nan_to_num` 掐断了（都见 §9.2.4）。准确说法是
   `fraction_of_episodes_with_a_racket_touch` 出现在训练曲线上——这才是唯一有物理意义的接触指标。
   (c) 汇报一律用"零策略对照 + 二值接触率"（`0.12% → 49.2%/97.8%`），不用 `touch 4e-5→0.21`。
   (d) 曲线一律带 run 间散布（`BAND_2seed.json` 已有 N-seed band 机制）。
+  **落地时多做的三件**：(a) 两样都做了（改名**并且**同时输出核均值与上限），因为只改名挡不住
+  下一个人照旧把 `0.21` 当百分比；(c)/(d) 从"约定"改成**会拒绝的代码**——新增 `--report`，
+  少于两条 run / 没有零策略对照 / 拿 ckpt eval 冒充对照 / run 没有二值接触率 / run 没过容量门，
+  五种情形一律退出 `2` 并点名；`--analyze` 只给一份文件也从"退出 `0` 打出零宽度的带"改成退出 `2`。
+  另外顺手修了一个会造假趋势的 bug：`_spearman` 用 `argsort(argsort())` 处理并列，
+  **全平的曲线会被算成 `+1.0`（"单调上升"）**——二值接触率早期正好长期全 `0`。
 - **T12 把 warp 的 overflow printf 接进"WARN 必进摘要"的通道。** 按 MEMORY 里的发射工序教训，
   那行字当初就在 stdout 上，只是淹在 `5292` 行里没人读。
 
@@ -2651,6 +2671,190 @@ E4（普查没跑到收敛）、E5（策略驱动的构型分布没普查）、E
 E2（深压 `nconmax` 时门现在比 CUDA fault 先到）、E8（失败路径现在有 telemetry）；
 E3（`EPA_HORIZON` 历史 run 无证据）从"真静默"改成"会打印但不含 overflow 字样，
 历史 `grep` 一样覆盖不到"——结论不变，仍然只能靠新跑补测。**
+
+### 9.2.8 汇报口径：把"加权奖励项"当接触率的那条链，改成会拒绝的代码（T11 落地，2026-08-06 实测，pod1 GPU2）
+
+**人话一句**：这条 lane 之前把自己**报坏了**。被反复引用的那句"`touch 4e-5 → 0.21`"里，
+`touch` 根本不是"碰到球的比例"，而是**加权奖励项** `4.0 * exp(-(d/0.15)^2)`，上限就是 `4.0`；
+`0.21` 折成核均值是 `5.25%`（`0.21/4.0`；§9.2.4 那里写的 `5.4%` 是笔误，已就地更正）。真正问"球拍到底有没有碰到球"的那个二值指标当时只在 eval 打开，
+它的答案是**零策略 `0.12%` → 训练后 `49.2%` / `97.8%`**。同一批策略，一个口径像"几乎没学会"，
+另一个口径是"比什么都不做强 `400--800` 倍"。这一轮把口径本身变成代码。
+
+> **为什么裁定说这条比容量门更要紧**：容量门错了，是让**坏数据**看起来像好数据；口径错了，是让
+> **好结果**看起来像坏结果，然后有人据此砍掉一条其实在学的配方。前者骗审计，后者骗决策。
+
+**今天用现役代码把这件事复现了一遍**（`4096 x 300` 迭代，seed `0`/`1`，两条全新 run）：
+
+| 同样这两条 run，两种报法 | seed 0 | seed 1 |
+| --- | ---: | ---: |
+| **旧报法**：`touch` 加权项（上限 `4.0`） | `0.003 → 0.252` | `0.004 → 0.189` |
+| 同一个数折成核均值 | `0.1% → 6.3%` | `0.1% → 4.7%` |
+| **新报法**：二值"这一局摸到球了吗"（训练曲线） | `0.44% → 74.1%` | `0.49% → 64.6%` |
+| **新报法**：确定性 eval，对零策略 `0.14%` | **`80.7%`（`570` 倍）** | **`56.0%`（`395` 倍）** |
+
+**同一批 run，"0.25/4.0" 和 "80.7%" 说的是同一件事。** 这就是 T11 要修的东西。
+
+改的是 `hope_training/whole_body_tracking/mjlab_lane/a3_train_ppo.py` 一个文件，
+新单测 `tests/test_mjlab_lane_reporting_gate.py`。
+
+#### 一、改了什么（逐条对上 T11 的 (a)--(d)）
+
+| T11 | 改法 | 人话 |
+| --- | --- | --- |
+| **(a)** | `reward_terms_mean` 里 `reach`/`touch` 改名 `reach_term_weighted`/`touch_term_weighted`；**并且**同时新增 `reward_terms_max_possible`（`2.0`/`4.0`）与 `reward_kernel_mean`（除掉权重后的核均值），外加一句 `reward_terms_note` 自陈"这不是概率、要接触率看二值那项" | 名字里写着"带权"、旁边写着"上限多少"、再写一句"你要的不是我"——三层都绕过去才可能再错读。只改名不够：`0.25` 一样能被当成 `25%` |
+| **(b)** | `count_contacts` **训练路径默认开**（原来只有 eval 开）；`fraction_of_episodes_with_a_racket_touch` 逐迭代进 `.jsonl`、进控制台行（`touchEp=`）、进 `learning.binary_contact_rate`，run 结束再打一行 `[HEADLINE]` | 训练曲线上第一次有了"这一局到底摸没摸到球"这个有物理意义的数 |
+| **(c)** | 新增 `--report`：**只**输出"零策略对照 + 二值接触率 + run 间散布"这一种句式；证据不够就**退出 `2` 并点名**，不降级成弱一点的说法 | 口径从"约定"变成"会拒绝的门" |
+| **(d)** | `--analyze` 只给一份文件，从"退出 `0` 打出零宽度的带"改成**退出 `2`**；带里新增二值接触率一项（没测到的迭代写 `null`，不按 `0` 平均） | 单 seed 单点从此报不出来 |
+
+顺手修的两个**会造假象**的坑（都属于"记录与阻断必须同批"）：
+
+1. **`_spearman` 把全平的曲线算成 `+1.0`。** 原实现 `argsort(argsort(y))` 处理并列时按下标排成
+   `0,1,2,...`，于是一条**完全不动**的曲线被算成"单调上升"。二值接触率早期正好长期全 `0`——
+   这个 bug 会给一个一次球都没碰到的策略打出"在上升"。改成并列取平均秩：常数序列秩方差为 `0`，
+   判 `nan`（"测不出趋势"），不判 `+1.0`。
+2. **"没有分母"被写成 `0.0`。** 二值接触率的分母是"这一窗口内**结束**的 episode 数"，原来除的是
+   `max(episodes, 1)`，所以一个没有任何 episode 结束的窗口打印 `0.0`——与"真的一次没碰到"
+   无法区分。现在这种情况写 `null` + `reason: NO_EPISODES_FINISHED`；探针被关掉写 `null` +
+   `reason: CONTACT_PROBE_OFF`；**真的测出来的 `0` 仍然是 `0` 且 `measured: true`**。
+   这与容量门"零样本不许判 PASS"是同一类修法。
+
+`--report` 的拒绝规则（每条有代号，变异测试断言的是**哪一条**开火，不是"有东西开火了"）：
+
+| 代号 | 什么时候开火 |
+| --- | --- |
+| `SINGLE_SEED_NOT_EVIDENCE` | 给的 run 少于 `2` 条 |
+| `NO_ZERO_POLICY_BASELINE` | 没给 `--report-zero-policy` |
+| `BASELINE_IS_NOT_A_ZERO_POLICY_RUN` | 拿 ckpt eval 冒充"什么都不做"的对照 |
+| `BASELINE_HAS_NO_BINARY_CONTACT_RATE` / `BASELINE_DID_NOT_COMPLETE_OR_PASS` | 对照收据没有二值接触率，或它自己没跑完 / 没过容量门 |
+| `NO_BINARY_CONTACT_RATE` | 某条 run 的训练曲线上没有二值接触率（旧收据，或 `--no-contact-probe`） |
+| `RUN_DID_NOT_COMPLETE` / `RUN_HAS_NO_CAPACITY_PASS` | 某条 run 没跑完，或容量门不是 `PASS_NO_OVERFLOW` |
+| `EVAL_IS_NOT_A_CHECKPOINT_RUN` / `EVAL_HAS_NO_BINARY_CONTACT_RATE` / `EVAL_DID_NOT_COMPLETE_OR_PASS` / `EVAL_COUNT_DOES_NOT_MATCH_RUNS` | 可选的 `--report-eval`（确定性评估）那一格填错 |
+
+#### 二、变异测试：修前 / 修后（pod1 GPU2，同一天，同一份 `a3_court_env.py`）
+
+"修前"跑的是 `T11/a3_train_ppo_T11BEFORE.py`，与本次改动前的 shipped 版**逐字节相同**
+（`md5 417ce53b496140423f8cbf64335f10d1`）。
+
+| 变异 | 修前 | 修后 |
+| --- | --- | --- |
+| **一条训练收据怎么说自己的单位**（`--smoke`，`64` 世界 `x 3` 迭代） | 退出 `0`；键叫 `reach`/`touch`；**没有** `reward_terms_max_possible`、**没有** `reward_kernel_mean`、训练收据里**完全没有** `contact` 段 | 退出 `0`；键叫 `reach_term_weighted`/`touch_term_weighted`；上限、核均值、"不是概率"那句都在；`contact` 段在且 `measured: true`（`11` 个 episode 结束、`0` 次触球——**测出来的 `0`**） |
+| **给 `--analyze` 一份文件** | 退出 **`0`**，写出 `n_seeds = 1`、`rel_spread_max_pct = 0.0` 的"带"——读起来像完美复现 | 退出 **`2`**，`[WARN][BAND REFUSED]`，不写文件 |
+| **`--report` 只给一条 run** | 子命令**当时不存在**（`unrecognized arguments`，退出 `2`） | 退出 **`2`**，`SINGLE_SEED_NOT_EVIDENCE` |
+| **不给零策略对照** | 同上 | 退出 **`2`**，`NO_ZERO_POLICY_BASELINE` |
+| **拿 ckpt eval 冒充零策略对照** | 同上 | 退出 **`2`**，`BASELINE_IS_NOT_A_ZERO_POLICY_RUN` |
+| **训练时 `--no-contact-probe`，再拿它汇报** | 同上；且那种 run 的收据里连 `contact` 段都没有，读的人只剩加权项 | 训练退出 `0` 但收据写 `fraction: null` + `reason: CONTACT_PROBE_OFF`，`[WARN][CONTACT RATE NOT MEASURED]` 进摘要；`--report` 退出 **`2`**，`NO_BINARY_CONTACT_RATE` |
+| **eval 窗口短到没有 episode 结束**（`--eval zero --nworld 512 --eval-steps 5`） | 退出 `0`，`fraction_of_episodes_with_a_racket_touch = 0.0`，无任何 WARN——与"真的一次没碰到"无法区分 | 退出 `0`，`fraction: null` + `reason: NO_EPISODES_FINISHED` + `[WARN][CONTACT RATE NOT MEASURED (eval)]` |
+| **拿 08-05 那两份历史收据汇报**（当初被引用的正是它们） | 无从拒绝 | 退出 **`2`**，逐条点名：两条 run 各 `RUN_DID_NOT_COMPLETE` + `RUN_HAS_NO_CAPACITY_PASS` + `NO_BINARY_CONTACT_RATE`，对照 `EVALC_zero.json` 再加 `BASELINE_DID_NOT_COMPLETE_OR_PASS`（旧收据没有 `status`，训练路径也没有二值接触率） |
+| **拿一条真开过容量门的 run 汇报**（真收据 `T1T8/AFTER_m1_blind_nc10.json`） | 无从拒绝 | 退出 **`2`**，`RUN_DID_NOT_COMPLETE` + `RUN_HAS_NO_CAPACITY_PASS` + `NO_BINARY_CONTACT_RATE` |
+| **两条 run 只配一份 ckpt eval** | 同上 | 退出 **`2`**，`EVAL_COUNT_DOES_NOT_MATCH_RUNS` |
+| **把零策略 eval 塞进"训练后"那一格** | 同上 | 退出 **`2`**，`EVAL_IS_NOT_A_CHECKPOINT_RUN` |
+| **健康路径**（两条 run + 零策略对照 + 两份 ckpt eval） | —— | 退出 **`0`**，写出下面第三节那一句 |
+
+#### 三、这一轮的实测：现在唯一允许的那句话长什么样
+
+两条全新训练（`4096` 世界 `x 300` 迭代，seed `0`/`1`，接触探针 ON，容量门 ON），
+三条评估（`4096` 世界 `x 750` 步，各 `20,480` 个结束的 episode）：
+
+```
+[REPORT] binary per-episode racket-ball contact rate (deterministic eval):
+         zero policy 0.14%  ->  trained 80.7% / 56.0%  (band 56.0--80.7% over 2 runs)
+[REPORT] 人话: 零策略基本碰不到球, 训练后每局摸到球的比例见上;
+         括号里是 run 之间的散布, 单次跑不作数.
+[REPORT] the weighted `touch_term_weighted` reward term (ceiling 4.0) is NOT a
+         contact rate and is printed here only for context: s0=0.252, s1=0.189
+```
+
+| 量 | seed 0 | seed 1 | 备注 |
+| --- | ---: | ---: | --- |
+| 二值接触率，训练曲线首/末十分位 | `0.44% → 74.08%`（峰 `80.75%`） | `0.49% → 64.64%`（峰 `73.46%`） | 带探索噪声，是保守数 |
+| 二值接触率，确定性 eval | **`80.72%`** | **`56.00%`** | 对零策略 `0.1416%` 是 `570` / `395` 倍 |
+| run 间散布（eval / 训练曲线） | `1.44x` / `1.15x` | | 单点仍然不作数 |
+| `touch_term_weighted`（上限 `4.0`） | `0.0030 → 0.2520` | `0.0039 → 0.1893` | **这就是当初被当成百分比的那个数** |
+| `reach_term_weighted`（上限 `2.0`） | `0.6921 → 1.0079` | `0.7009 → 0.9721` | |
+| 每局最小拍球距离 | `0.42 → 0.076 m` | `0.41 → 0.080 m` | |
+| 二值接触率 spearman vs 迭代 | `0.758` | `0.715` | 并列已按平均秩处理 |
+| 容量 | `nefc` 峰 `86`，`PASS_NO_OVERFLOW` | `nefc` 峰 `88`，`PASS_NO_OVERFLOW` | 引擎 overflow printf `0` 行；落卡 uuid `473a79f3…` 与 `nvidia-smi` 对得上 |
+
+`--analyze` 的两条 run 带：`mean_episode_return` 的 `rel_spread_max_pct = 5.66%`、
+`learning_gain_vs_seed_spread = 18.2`（涨幅是 seed 间散布的 `18` 倍，所以"确实在学"这句成立），
+二值接触率末十分位 `64.6%--74.1%`。
+
+**注意两个数不要混**：训练期二值接触率（带探索噪声、按"这一迭代内结束的 episode"算）和
+eval 二值接触率（确定性策略、`750` 步窗口）是两个测量。收据里分开放，`--report` 的句子里
+写明了用的是哪一个（`headline_measurement` 字段），倍数与散布也各自带后缀，不共用一个裸键名。
+
+**与 08-05 那两条历史 run 的关系**：那次 eval 是 `49.2%` / `97.8%`，今天是 `80.7%` / `56.0%`。
+**方向一致、量级一致、seed 间散布依旧大**（历史 `2.0x`，今天 `1.44x`）。这正是"要报就报带"
+的理由，也是为什么 `--report` 把"至少两条 run"写成硬门。
+
+#### 四、吞吐：这道探针**真的要钱**，如实记
+
+配对实测（`--nworld 4096 --iterations 12 --seed 0`，同一张 GPU2 背靠背交替，去掉 iteration 0
+后取中位数；六条收据里跑前/跑后 GPU2 上他人进程数全是 `0`）：
+
+| 配置 | 三次中位 env-step/s | 中位 | 相对 |
+| --- | --- | ---: | ---: |
+| 接触探针 **ON**（现在的默认） | `38,904` / `38,627` / `38,947` | `38,904` | **`-13.0%`** |
+| 接触探针 OFF（`--no-contact-probe`） | `44,735` / `45,044` / `44,603` | `44,735` | 基准 |
+
+**这和容量门那 `≤1%` 不是一个量级，不要混为一谈。** 原因是结构性的：容量探针每 substep 只扫
+`nworld = 4096` 个 int；接触探针必须扫**整个预分配接触数组**（`4096 x nconmax 128 = 524,288` 行），
+而且**必须每个 physics substep 扫一次**——球拍碰球只持续 `1--2` 个 substep，
+按 env-step（`20` 个 substep）采样会漏掉大部分接触。
+
+优化过一版（把"逐个球拍 geom 比一遍再 `any()`"换成一张 geom 分类查找表，kernel 数减少），
+**实测没有区别**：优化前 `38,816`，优化后 `38,904`；同期两次 OFF 是 `44,987` / `44,735`，
+即这台机器同配置的噪声约 `0.6%`。两组都留在 `T11/probe_v1/` 与 `T11/THR_*`。
+**如实写：`13%` 是这条探针的固有成本，不是实现没写好。**
+
+值不值：**值**。没有二值接触率的训练曲线，是一条只能靠加权奖励项去猜的曲线，而那正是这次要修的病。
+`--no-contact-probe` 保留给纯计时跑，且那种 run 的收据会自己说"我没测过接触"，`--report` 会拒绝它。
+
+#### 五、零回归
+
+- `tests/test_mjlab_lane_reporting_gate.py`（新，`45` 条）+ `tests/test_mjlab_lane_capacity_gate.py`
+  （原有 `17` 条）在 pod1 `/workspace/mjlab_venv` 上 **`62 passed`**。新单测覆盖：加权项上限与核均值
+  换算（含 `0.21/4.0 = 5.25%` 这条换算本身）、"没有分母"写 `null`、探针关掉写 `null`、
+  **真的测出来的 `0` 仍算测过**、带里跳过未测的 run 而不是按 `0` 平均、全平曲线 spearman 判 `nan`、
+  十一条拒绝规则各一条、端到端 `--report` 的句子/倍数/"headline 的倍数必须与 headline 同源"。
+- 该模块在本机（py3.8、无 mujoco）自动 skip，host 测试集不受影响。
+- 全仓 `grep` 确认：除 `a3_train_ppo.py` 与新单测外，**没有任何脚本或文档读
+  `reward_terms_mean.reach/touch` 这两个旧键名**，改名没有下游破坏。
+- 老功能不变：两条 `300` 迭代 run 均 `status: completed`、`PASS_NO_OVERFLOW`、
+  `warp_overflow_printf_lines = 0`、落卡 uuid 与 `nvidia-smi` 对账通过、`nonfinite_state` 终止 `0`。
+
+#### 六、收据（pod1 `/workspace/mjlab_lane/T11/`）
+
+| 文件 | 是什么 |
+| --- | --- |
+| `a3_train_ppo_T11BEFORE.py` | 改动前的 shipped 版（`md5 417ce53b…`），变异表"修前"一栏是它跑的 |
+| `THR_on_*.json` / `THR_off_*.json` | 配对吞吐六条，收据自带跑前/跑后 GPU2 上他人进程数 |
+| `probe_v1/THR_*.json` | 探针第一版的同一组配对（"优化没带来区别"这句是量出来的） |
+| `TRAIN_s0.json/.jsonl`、`TRAIN_s1.json/.jsonl` | 两条 `4096 x 300` 训练，逐迭代带二值接触率 |
+| `EVAL_zero.json`、`EVAL_ckpt_s0.json`、`EVAL_ckpt_s1.json` | 零策略对照与两条 ckpt 的确定性评估 |
+| `REPORT.json` / `REPORT_curve_only.json` | `--report` 输出（带 eval 一份、不带 eval 一份） |
+| `BAND_2seed_t11.json` | `--analyze` 的两条 run 带，含二值接触率带 |
+| `mut/MUT.status`、`mut/MUT_FINAL.status`、`mut/M*.json/.log` | 变异 battery 的退出码与逐条收据 |
+| `test_mjlab_lane_reporting_gate.py` | 与 repo 同一份的新单测 |
+| `t11_run2.sh` / `t11_mut.sh` / `t11_collect.py` | 这一轮的跑法、变异脚本、取数脚本 |
+
+一处如实交代：两条 `300` 迭代 run 之间，文件差了一行**已死变量的删除**（`_probe_contacts`
+换成查找表之后，那个按 geom 列表建的 tensor 不再被用到，在 `TRAIN_s0` 跑完后删掉）。
+物理与统计路径逐字相同；`TRAIN_s1` 与全部评估、全部 `--report`/`--analyze` 变异
+都是用**与本次提交完全一致**的文件跑的。
+
+#### 七、这一节不代签什么
+
+- **只改了口径，没改物理，也没改容量数值**：`njmax=572` / `nconmax=128`、恢复系数带、普查结论
+  全部原样。§9.2.7 的 `2.07x` 行余量与 §9.2.5 的标定门不受影响。
+- **不代签"这条 lane 可以放行"**：它仍然是 court/ready/reach-touch 任务，没有 measured teacher、
+  没有完整 reward 层级、没有 cross-engine parity（§9.2.2 末尾那段照旧）。
+- **二值接触率不等于"回球"**：它只回答"球拍和球有没有碰上"，不回答上不上台、过不过网、旋转对不对。
+  真正的回球指标要等 §9.2 的 reward 层级落地。
+- **两条 run 不是"复现"的终点**：`--report` 的"至少两条"是**下限**不是**标准**。这条 lane 已知
+  同配置能有 `1.4--3` 倍散布，认真的结论应当要更多 seed。
+- **`13%` 的探针成本没有被优化掉**，只是被量准了并写进了默认值的理由里。要更便宜的写法，
+  得改成引擎侧 kernel（warp 里做一次归约），那是另一件事。
 
 ### 9.2 MuJoCo 顺序
 
