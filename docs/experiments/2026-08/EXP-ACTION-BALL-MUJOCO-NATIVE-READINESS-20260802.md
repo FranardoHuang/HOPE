@@ -901,6 +901,16 @@ clamp/投影/罚三层已经处理的事。
 - **治理断链**：两个 launcher 实际发射的 profile 是 `...DRL0Learnability`，而生成 §5.3/§5.4 静态收据的
   `audit_action_ball_reward_hierarchy.py` **明确拒收该 profile**（只接受 VendorV2 与非 DRL0 leaf）。
   因此 §5.3 的那份账**不是对发射配方计算的**。发车前必须让审计器接受 DRL0 leaf 并重算全部数值。
+- **hold 窗口只做了一半：下限非零已满足，"随熟练收窄"的课程不存在。** Franco 2026-08-05 的要求是
+  「hold 的窗口也是一点点扩大的，0 肯定是不对的；每次击球之间肯定有一些时间间隔，但确实是变化的，
+  而且可以随着学习熟练一点点减小下限」。现状分两处，**不要混为一谈**：
+  (1) ActionBall 训练侧的隐藏 WAIT 是 `5..25` control step，下限非零，符合要求的前半句；但它是**静态区间**，
+  没有任何随 competence 收窄下限的机制。(2) `isaac_bank_exam.py` 与 `mujoco_eval_onnx.py` 里的
+  `hold_steps_range` 默认 `(0, 100)` 那个 `0`，是**评测侧 resample hold**，与训练 WAIT 不是同一概念，
+  不能拿来当"下限是 0"的证据。
+  **暂不实现**：hold 课程会随训练进度改变题目分布，若在四格 DR-L0/DR-L0N 归因跑期间引入，
+  正好破坏这四格"只差一个轴"的设计。应挂到 DR-L1 或其后的课程臂，与 `start_pose_ramp` 同批裁决，
+  并且要先定清楚 competence 的度量（用什么信号驱动收窄、收窄是否可逆、回退条件）。
 - **`qdes_limit_barrier_probe` / `actual_joint_limit_barrier_probe`**：与 live barrier 逐字节同一 kernel、
   返回恒零、记账幂等恒 no-op，每步在 `4096x31` 上白算两遍；但其非零权重是躲开 RewardManager
   零权重剪枝、从而让 barrier ledger 落盘的唯一手段。**省算力与保遥测冲突，待裁决**，暂不改。
