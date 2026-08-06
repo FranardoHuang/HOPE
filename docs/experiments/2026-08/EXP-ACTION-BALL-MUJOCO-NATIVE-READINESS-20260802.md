@@ -1900,7 +1900,7 @@ Franco 说「0 肯定是不对的」。现状比 §5.6.3 记的更强一层：
 
 | 时钟 | 值 | 出处 | 变不变 |
 | --- | --- | --- | --- |
-| 隐藏 `RESET_WAIT` | `5..25` policy tick = `0.10..0.50 s` | 四格合同 `:372-373`；运行时 `hope_commands.py:11788-11791` **拒绝** `wait_ticks<=0` | 每 env 每次 reset 变 |
+| 隐藏 `RESET_WAIT` | `5..25` policy tick = `0.10..0.50 s` | 四格合同 `:372-373`；**两层独立拒零**：schedule 自己把 `min_wait_ticks` 的下界钉在 `1`（`action_ball_task_wait.py:84-89`），运行时再断言一次 `wait_ticks<=0` 即 `RuntimeError`（`hope_commands.py:11788-11791`） | 每 env 每次 reset 变 |
 | 收据派生 `pre_swing_wait_s` | 活值 `0.71238 s`，硬界 `reaction_margin_s(0.1) ≤ · ≤ 1.0` | 派生式 `hope_commands.py:9981-9989`：`time_to_contact_s − reference_t_hit_s/teacher_rate`；叠加在 `:11793-11794` | 随题目变；四格只有一道题，所以是常数 |
 | 遗留 `motion.hold_steps_range` | `(0,0)` | `…ActionBall.yaml:79`；`hope_commands.py:4817-4824` 硬性要求（两个时钟不能同时数同一段等待） | 不变，且不该变 |
 
