@@ -1416,6 +1416,179 @@ worktree（`/workspace/franco/c211_rescope_BASELINE_20260806`），与改动树
 `EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256`（选择器新增 `ee_body_pos`）与
 `EXPECTED_N1_BALL_CORE_SOURCE_SHA256`（`n1_ball_core.py` 改了磁带校验）。
 
+#### 5.6.11 收口：把"指纹盖了章、语义没跟上"这个形状变成枚举题（2026-08-06）
+
+**人话一句：** 前四次都是事后一处一处捞，因为从来没有一张"这条车道里到底有多少份手抄件"的
+清单；这一轮补的是那张清单本身，外加清单在扫的过程中抓到的第四类窟窿——**终止原因的先后顺序**。
+
+##### (a) 先验收上两轮：声称的变异测试是不是真的会开火
+
+不看代码里的注释，直接把修复改回旧实现，看测试红不红。全部在 pod1 独立 worktree
+`/workspace/franco/closeout_mut_20260806`（`dbf40773` 检出，未拷 `logs/`）上做。
+
+| 回退的东西 | 声称 | 实测 |
+| --- | --- | --- |
+| `PHASE_EE_BODY_NAMES` / `..._Z_THRESHOLD_M` 从"读活值"改回旧的四身体手抄 | §5.6.10 说 9 条转红 | **至少红了 30 条**（输出截到 30 行；含点名的 5 条：`..._is_the_live_action_ball_override_not_the_parent`、`wrist_only_displacement...`、`..._carry_the_live_two_body_order`、`changing_only_the_live_override...`、`unrelated_edits...`）。比声称的多，是因为测试侧的向量宽度也改成跟着活包络走了，回退后宽度对不上——方向一致，声称偏保守 |
+| `table_termination.live_isaac_constant_blockers()` 直接 `return ()`（指纹全留着不动） | §5.6.9 说重钉之后值门照样红 | **红了 6 条**（5 条 `test_repinned_*` + 1 条`test_a_runtime_value_is_reported_as_unreadable_not_as_a_match` 的 fail-closed），含那条直接复刻 `5ed998f1` 的 `test_repinned_margin_change_is_still_refused` |
+| `n1_reward_event_kernel.live_source_digest_blockers()` 直接 `return ()` | §5.6.9 说 host 侧就能看见陈旧兄弟钉 | **红了 `test_the_event_facts_contract_refuses_a_stale_native_pin`** |
+
+**结论：上两轮的变异证据核实无误**，只有一处声称偏保守（实际影响面更大）。
+
+##### (b)(c) 全仓扫同形状：`mujoco_native` 20 个文件、309 个模块级常量，逐个过
+
+扫的判据就是任务给的四条：同名/同义的常量与名单、只有指纹没有活值比对的跨模块一致性、
+**AST 选择器覆盖面小于它保护的语义面**、以及拿"第三份手抄字面量"当期望值的测试。
+
+扫出来最要紧的一条，是第三条判据的又一个实例，而且比 `ee_body_pos` 高一层：
+
+**终止原因的先后是一份跨两个文件、三个类的手抄件，而它的指纹只点了一个名字。**
+
+事实链（行号以 `dbf40773` 为准）：
+
+1. Isaac 评估终止项的顺序不是 `hope_env_cfg.py` 一个文件能决定的。两个 HOPE 终止类最终都派生自
+   **另一个文件**里的 `tracking_env_cfg.TerminationsCfg`，而 `configclass` 是 dataclass 底子：
+   字段顺序 = 先父类按声明序、再接子类新加的字段，**子类覆写一条不会把它挪到队尾**。
+   实际顺序 = `time_out, anchor_pos, anchor_ori, ee_body_pos`（根类）→
+   `base_fell_tilt, base_too_low, robot_hit_table`（父类）→
+   `joint_qdes_forbidden, joint_actual_forbidden`（子类）。
+2. `vec_env.py` 把这份顺序抄成了四个元组（`EXACT_ACTIVE_/HARD_/PHASE_FIDELITY_/BASE_..._REASON_ORDER`）。
+   **同一步里两条终止都成立时，排在前面的那条才是被记进收据的原因**——顺序就是"实验把锅算在谁头上"。
+   §5.6.5 那次腕部 guard 的误判之所以难查，正是这一类。
+3. 唯一罩着它的是 `base_config` 这枚指纹，而它的选择器写的是 `TerminationsCfg|time_out`——
+   **只点了一个名字**。往根类里新加一条终止项、或者把 `anchor_pos` 和 `anchor_ori` 换个位置，
+   这枚指纹一个 bit 都不会动。和 `ee_body_pos` 那个窟窿完全同形，只是高了一层。
+4. 更糟的是 `live_class_chain` 原来的行为：**出了文件的基类直接结束遍历**。所以上一轮新加的
+   "这个类声明了哪几条 term"集合门，压根没看过根类——顺序的整个头部无人看管。
+
+今天**没有漂**（活值推出来的顺序与手抄的四个元组逐位相等），所以这是潜伏漂移，不是在跑的错。
+
+**做法**（`isaac_reference_envelope.py` 扩，`vec_env.py` 接线）：
+
+| 改动 | 人话 |
+| --- | --- |
+| 登记 `EXTERNAL_TERMINATION_BASES`，链遍历跨文件走到根类 | 以前"看不见的基类"= 悄悄停下；现在看不见就**报错**，断链不许当成到头了 |
+| `live_termination_reason_order()` 按 dataclass 字段序推出现役顺序 | 覆写留在父类给的格子里，这一步最容易想当然写反 |
+| `live_timeout_term_names()` 从 `DoneTerm(..., time_out=True)` 读"哪几条是截断" | "哪几条算硬终止"不再是隐含常识 |
+| 四份原因名单必须**恰好划分**现役硬终止项（相位 / 基座与关节 / 撞桌三个桶） | 新增一条 Isaac 终止项会落进"谁都没认领"，重钉任何指纹都救不了 |
+| 根类进 `DECLARED_TERMS`；`base_config` 选择器点全四条并重钉 | 新增/删除项由集合门兜底，顺序由逐位比兜底，字节改动由指纹逼人重看 |
+| 收据自陈 `live_reason_order_compared` / `live_reason_order_class_chain` | 收据自己说清楚"我比过顺序，比的是这三个类" |
+
+##### (d) 通用护栏：新增一处只有指纹保护的手抄常量，这件事本身会被测试发现
+
+新增 `mujoco_native/mirrored_constant_registry.py`。测试把 `mujoco_native` 下每个文件的**模块级常量
+全数枚举出来**，要求每一个都被显式分类；**没有兜底通配，没有"其余的都算本地常量"**。
+新加一个常量而不分类——当场红；新加一个文件而不登记——当场红。
+
+理由档位是一张封闭词表（自由文本的理由没人能机器检）：
+
+| 档位 | 机器检的是什么 | 计数 |
+| --- | --- | --- |
+| `live_value_compared` | 把常量的值跟**活值比对入口实际拿去比的那个值**对上 | 25 |
+| `live_value_derived` | 赋值不是字面量（活读不许被"简化"回它当时返回的那个数） | 1 |
+| `derived_in_module` | 同上，必须还是算出来的 | 55 |
+| `live_source_path` | 文件真的在（上游改名在 host 测试就红，不用烧 pod 时间） | 36 |
+| `pinned_file_digest` | **在 host 上重算一遍**该文件的 SHA | 4 |
+| `pinned_external_digest` | 主体不是本模块指名的文件（派生载荷/只有 launcher 能解析的路径），必须写明谁在重算 | 15 |
+| `flows_into_live_comparison` | 常量本身不被比，但它按序包含在某个被活值比对的对象里 | 3 |
+| `not_mirrored` | 本车道自己的词汇（收据 kind、schema 版本、blocker 名单、状态枚举） | 165 |
+| `mirrored_isaac_value_not_yet_live_compared` | **强制**在 `OPEN_MIRROR_DEBT` 里写清"真源在哪 / 怎么修 / 为什么这轮没修" | 5 |
+
+`mirrored_constant_registry.py` 把**自己**也登记进去了，否则"给护栏加个常量"就成了唯一的免检通道。
+
+**这道门诚实的边界**（写进了代码注释和一条专门的测试）：它拦不住有人把一份真手抄的 Isaac 常量
+硬标成 `not_mirrored`——它没办法知道上游有没有同义的数。它保证的是**这件事必须有人动手写一行、
+署上一个理由档位**，而不是像前四次那样悄无声息地混进来。真正的语义防线仍然是
+`live_value_compared` 那一档；这张表的作用是让"哪些还没进那一档"变成一个可以数出来的数字。
+
+##### 这一轮明确没做的（`OPEN_MIRROR_DEBT`，五条，全在 `action_ball_c211_env.py`）
+
+| 常量 | 真源 | 为什么这轮没做 |
+| --- | --- | --- |
+| `C211_UPRIGHT_STD` | `hope_env_cfg.py` `upright_exp` 的 `params={"std": math.sqrt(0.2)}` | 求值器折不出 `math.sqrt(0.2)` 这种 Call，要先给白名单加一小撮纯函数；**放宽求值器会扩大"猜"的面**，这轮定调是收紧不放宽，不同批做 |
+| `C211_ACTION_RATE_CLAMP` | `action_rate_clamped` 的 `params={"value_clamp": 9.0}` | 值是纯字面量、现在就读得出；缺的是给 `c211_env` 建一张和 `table_termination` 同款的镜像表并接进收据。要做就一次做完整张表 |
+| `C211_RACKET_LONG_AXIS_LOCAL` | 球拍长轴局部方向 | 与 `C211_UPRIGHT_STD` 卡在同一个求值器限制上 |
+| `TRACKED_BODY_NAMES` | Isaac 的 motion 跟踪 body 名单 | **真源还没定位到唯一符号**；没定位清楚就注册等于给门喂一个猜的答案 |
+| `C211_IMPLEMENTED_ISAAC_PRIOR_TERM_NAMES` | `HOPERewardsCfg` 那 14 条 `RewTerm` 的名字与顺序 | 机制现成（就是本节的类链推导），但奖励项有 `weight=0.0` 的"默认跳过"语义，要先想清楚"声明了但权重为零算不算实现"，不带着未定义的语义上门 |
+
+还有一条扫到、**判定必须做但不在这一批**的（不进 `OPEN_MIRROR_DEBT`，因为它不是常量而是选择器）：
+`table_termination.verify_isaac_source_authority()`（`table_termination.py:461-478`）的 config 选择器
+里，`HOPEActionBallTerminationsCfg` 只有一个 `class_header`、**没有 `class_assignments`**，而
+`class_header` 只哈希装饰器/基类/关键字、不含类体。所以万一子类哪天**覆写** `robot_hit_table`
+（父类那条是 `table_hit_done_term()`），这枚指纹一个 bit 都不会动 —— 和 `ee_body_pos` 一模一样的洞，
+换了一条 term。**今天已经被兜住了**，但兜它的是 `vec_env` 那条链上的
+`live_declared_term_blockers()`（子类多一个名字 → 集合不等 → 开火），而不是 table 车道**自己**的门；
+`verify_isaac_source_authority()` 单独跑是看不见的。修法：在
+`table_termination.live_isaac_constant_blockers()` 里把 `isaac_reference_envelope.
+live_declared_term_blockers()` 也折进去（无环：`isaac_reference_envelope` 只依赖 `isaac_live_constants`，
+而 `table_termination` 已经在 import 它）。这轮没做的原因只有一个：全量套件基线对拍已经在跑，
+不想为一处已被别处兜住的洞把 A/B 作废；它需要自己的变异测试（子类覆写 `robot_hit_table` → 断言
+`verify_isaac_source_authority()` 单独调用时也必须红）。
+
+另外两条扫到但**判定不必做**的，理由记在码里：`table_termination.COMPONENT_WORLD_AABB_GUARD_M`
+（Isaac 侧写成内联 `.add_(1.0e-6)`，没有可指名的符号；它只放宽广相**预筛**、方向保守，且那个函数体
+已经在 callables 指纹里）、`TABLE_CONTACT_BODY_NAMES`（已经与碰撞代理产物的 `body_order` 逐位比过，
+而那份产物的 SHA 本身是活值比对项，不重复造门）。
+
+##### 变异测试（新增 25 条，每条都构造成"粗一个档次的检查就抓不到"）
+
+顺序这条链（10 条）：
+
+| 变异 | 为什么粗一档抓不到 |
+| --- | --- |
+| 把根类里 `anchor_pos` 和 `anchor_ori` **换位** | 集合一样、数量一样、每条项的字节一样，只有位置变了；测试里**先断言**集合与计数确实不变，再要求门开火 |
+| 把 `base_too_low` 从父类**搬进**子类 | 整条链声明的项名、数量、集合统统不变，只有位置变了——只看"一共有哪些项"的检查完全是瞎的 |
+| 往**根类**里新加一条 `base_out_of_bounds` | 测试里**直接断言旧的窄选择器指纹仍等于旧的钉子值**（`aefdf83d…`），即旧门确实一个 bit 没动；新门必须报"这条项落进谁都没认领" |
+| `time_out=True` → `False` | 名字、顺序、数量全不变，只是不再算截断；硬终止名单必须跟着变 |
+| 把根类改名（断链） | 必须报 `unreadable` 并 fail closed，不许像修复前那样"看不见就当到头了" |
+| 负对照：在根类所在文件别处追加一个无关函数 | 门不该响；防止这批门退化成"文件一改就红" |
+
+护栏这一层（15 条）：
+
+| 变异 | 为什么粗一档抓不到 |
+| --- | --- |
+| 真往 `vec_env.py` 文件尾**追加**一行 `SOME_NEW_ISAAC_THRESHOLD_M = 0.42` | 就是任务点名的那一条：新增一处只有指纹保护的手抄常量，测试必须红 |
+| 真往车道里**新增一个文件** | 模块级也不许默认放行 |
+| 把活读 `_ACTION_BALL_REFERENCE_ENVELOPE = live_reference_envelope(...)` 换成它**当时返回的那个字面量** | `5ed998f1` 的形状在登记表这一层重放：值在那一刻**完全正确**（测试里先断言这一点），指纹一个 bit 都不用动，但复刻从此不再跟着上游走 |
+| 把 `mirrored_isaac_termination_entries()` 里 `base_fell_tilt` 那条的镜像值换成另一个数 | `5c4ced66` 的形状：常量本身一个字节没动，只有"到底拿谁去比"变了 |
+| 编辑一个被钉的文件（只加一行注释）却不重钉 | 以前只有 pod 上开起来才红 |
+| 上游源文件改名 | 路径必须在 host 测试就报不在 |
+| `MIRRORED_TODO` 没有配套的债务说明 / 债还了却留在清单里 / 说明是空串 | 债务清单不许烂成沉默，也不许开始骗人 |
+| 某个 provider 没有任何常量引用它 | 接线断了要说出来 |
+| 负对照：追加一个**小写**模块级赋值 | 普通 helper 不是常量，不该被这道门缠上 |
+| 边界声明：一份真手抄常量被硬标成 `not_mirrored` | **这道门确实拦不住**——写成一条测试，免得下一个人以为它比实际更强 |
+
+##### 收据
+
+- 变异验收 worktree：pod1 `/workspace/franco/closeout_mut_20260806`；基线/对拍 worktree：
+  `/workspace/franco/closeout_20260806`。两棵都是独立 fork，未拷 `logs/`，全程只用 CPU，
+  没有碰 GPU0/GPU1/GPU2。
+- 同批重钉一枚：`EXPECTED_PHASE_BASE_CONFIG_SEMANTIC_AST_SHA256`
+  （`aefdf83d…` → `65e9c395…`，因为选择器从 1 个名字扩到 4 个）。
+- **全量套件基线对拍**（`pytest tests hope_training/whole_body_tracking/tests
+  hope_training/whole_body_tracking/mujoco_native/tests -n 64`，两次都是同一条命令）：
+
+  | | failed | passed | skipped | errors | 用时 |
+  | --- | --- | --- | --- | --- | --- |
+  | 基线 `dbf40773` | 266 | 9929 | 173 | 19 | 28:00 |
+  | 本改动 | 266 | 9946 | 173 | 27 | 28:43 |
+
+  `failed` 逐条相同（`comm` 比对失败集合，266 条一条不差）；`passed` `+17`。
+  `errors` `+8`，**逐条查明与本改动无关**，两条证据：
+
+  1. 那 8 条全在 `tests/test_launch_a3_vendor_identity_smoke.py`。把它单独跑，
+     两棵 worktree 的结果**完全一样**（都是 `2 failed, 43 passed`，同一条
+     `official profile pinner does not reproduce the pinned profile`）。这个模块读的是**实时 GPU 占用**
+     （`test_launch_refuses_occupied_gpu_before_namespace_claim` 就在那 8 条里），
+     本轮另有 agent 在 GPU 上跑 Isaac 链条。基线那次它是 `1 FAILED`，本次是 `8 ERROR`，
+     两次都不是它自己的稳定态。
+  2. 另有 1 条只在本次红的 `test_joint_limit_safety.py::test_prepare_returns_borrowed_view_...`，
+     单独跑两棵树都是 `116 passed`——`-n 64` 争抢下的抖动。
+
+  机制上也走不通：`mujoco_native` 这四个字在这两个测试模块里**一次都没出现过**
+  （`grep -c mujoco_native` 均为 `0`），本改动全部落在 `mujoco_native/` 内，没有 import 路径能传过去。
+- 已知既有基线本来就红着 `266 failed / 19 errors`，不在本轮爆炸半径内；本轮没有让任何一条
+  原本绿的测试变红。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |

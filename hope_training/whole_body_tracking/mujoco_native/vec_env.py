@@ -97,6 +97,10 @@ EXACT_PHASE_FIDELITY_REASON_ORDER = (
     "anchor_ori",
     "ee_body_pos",
 )
+#: 人话:撞桌是自成一格的终止原因,单列出来是为了让下面那条"三份名单必须恰好
+#: 划分现役终止项"的检查有第三个桶 —— 没有它,``robot_hit_table`` 就会落进
+#: "谁都没认领"里。这一格也因此被同一道门盯着,不是白写的一行。
+EXACT_TABLE_GUARD_REASON_ORDER = ("robot_hit_table",)
 EXACT_HARD_TERMINATION_REASON_ORDER = (
     *EXACT_PHASE_FIDELITY_REASON_ORDER,
     "base_fell_tilt",
@@ -125,11 +129,7 @@ TERMINATION_SOURCE_PHASE_GATE = (
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/mdp/hope_commands.py"
 )
-TERMINATION_SOURCE_BASE_CONFIG = (
-    single_env.REPO_ROOT
-    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
-    "whole_body_tracking/tasks/tracking/tracking_env_cfg.py"
-)
+TERMINATION_SOURCE_BASE_CONFIG = isaac_reference_envelope.ISAAC_BASE_TERMINATION_CONFIG
 TERMINATION_SOURCE_A3_BODY_NAMES = (
     single_env.REPO_ROOT
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
@@ -142,8 +142,11 @@ TERMINATION_SOURCE_A3_BODY_NAMES = (
 EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256 = (
     "5e6f66e44758a42197edbbcf5ac024b5fefd027d756fc87c12ea200bb0095ce8"
 )
+# Repinned when the base selector stopped naming only ``time_out``.  人话:这个类是
+# 整条终止继承链的根,它的类体顺序就是 Isaac 评估终止的开头几项;只点一个名字等于
+# 让"往根类里加一条项"和"把 anchor_pos / ee_body_pos 换位"都不动指纹。
 EXPECTED_PHASE_BASE_CONFIG_SEMANTIC_AST_SHA256 = (
-    "aefdf83d0dbd39144da07cb4c7bcb2eee59c552174e00b8d28747cdde992e49c"
+    "65e9c395b7c4fc027325efd5430a201a7eb40575489d2a46de11b86aec413cd2"
 )
 # Repinned for the ``terminate`` parameter on actual_joint_position_forbidden_zone.
 EXPECTED_PHASE_RAW_CALLABLES_SEMANTIC_AST_SHA256 = (
@@ -535,13 +538,16 @@ def mirrored_isaac_termination_entries() -> tuple:
 def live_isaac_termination_constant_blockers() -> tuple:
     """Every way this lane's termination semantics differ from the live Isaac ones.
 
-    Three questions, none of which a semantic AST digest can answer:
+    Four questions, none of which a semantic AST digest can answer:
 
     * do the hand-copied thresholds still equal the numbers Isaac ships?
     * does the reference envelope this lane runs -- body names AND threshold --
       still equal the ``HOPEActionBallTerminationsCfg`` override it mirrors?
     * does that class still declare exactly the terms this lane knows about?
       (人话:指纹的选择器按名字点名,新加一条终止项它一个 bit 都不会动。)
+    * are the four reason lists below still in Isaac's evaluation ORDER, and do
+      they still cover exactly the live terms?  (人话:同一步里两条终止都成立时,
+      排在前面的那条才是被记进收据的原因 —— 顺序就是"锅算在谁头上"。)
     """
 
     return (
@@ -558,7 +564,20 @@ def live_isaac_termination_constant_blockers() -> tuple:
             mirrored_threshold_m=PHASE_EE_BODY_POS_Z_THRESHOLD_M,
         )
         + isaac_reference_envelope.live_declared_term_blockers(
-            TERMINATION_SOURCE_CONFIG
+            TERMINATION_SOURCE_CONFIG,
+            base_config_path=TERMINATION_SOURCE_BASE_CONFIG,
+        )
+        + isaac_reference_envelope.live_termination_reason_order_blockers(
+            PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS,
+            config_path=TERMINATION_SOURCE_CONFIG,
+            base_config_path=TERMINATION_SOURCE_BASE_CONFIG,
+            mirrored_active_order=EXACT_ACTIVE_TERMINATION_REASON_ORDER,
+            mirrored_hard_order=EXACT_HARD_TERMINATION_REASON_ORDER,
+            mirrored_partition={
+                "phase_fidelity": EXACT_PHASE_FIDELITY_REASON_ORDER,
+                "base_and_joint": EXACT_BASE_TERMINATION_REASON_ORDER,
+                "table_guard": EXACT_TABLE_GUARD_REASON_ORDER,
+            },
         )
     )
 
@@ -638,7 +657,17 @@ def _phase_fidelity_sample_contract_cached() -> dict[str, Any]:
             TERMINATION_SOURCE_BASE_CONFIG,
             (
                 ("class_header", "TerminationsCfg"),
-                ("class_assignments", "TerminationsCfg|time_out"),
+                # 人话:这一行以前只点了 ``time_out`` 一个名字,可这个类是整条终止
+                # 继承链的**根**,它的类体顺序就是 Isaac 评估终止项的开头三项。选择器
+                # 覆盖面小于它保护的语义面 —— 往这个类里加一条项、或把 ``anchor_pos``
+                # 和 ``ee_body_pos`` 换个位置,指纹一个 bit 都不会动。和 ``ee_body_pos``
+                # 那个窟窿同形,只是高一层。现在四条全点名;新增/删除项由
+                # ``live_declared_term_blockers`` 兜底,顺序由
+                # ``live_termination_reason_order_blockers`` 逐位比。
+                (
+                    "class_assignments",
+                    "TerminationsCfg|time_out,anchor_pos,anchor_ori,ee_body_pos",
+                ),
             ),
             EXPECTED_PHASE_BASE_CONFIG_SEMANTIC_AST_SHA256,
         ),
@@ -719,6 +748,18 @@ def _phase_fidelity_sample_contract_cached() -> dict[str, Any]:
                 isaac_reference_envelope.DECLARED_TERMS.items()
             )
         },
+        # 人话:原因**顺序**也被逐位比过了,而且比的是整条继承链(含另一个文件里的
+        # 那个根类),不是只比 hope_env_cfg.py 里的两个类。
+        "live_reason_order_compared": (
+            "active_and_hard_orders_plus_three_way_partition_of_the_live_terms"
+        ),
+        "live_reason_order_class_chain": list(
+            isaac_reference_envelope.live_class_chain(
+                PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS,
+                TERMINATION_SOURCE_CONFIG,
+                base_config_path=TERMINATION_SOURCE_BASE_CONFIG,
+            )
+        ),
     }
     payload["content_sha256"] = _sha256_json(payload)
     return payload
@@ -3355,6 +3396,7 @@ __all__ = [
     "EXACT_BASE_TERMINATION_REASON_ORDER",
     "EXACT_HARD_TERMINATION_REASON_ORDER",
     "EXACT_PHASE_FIDELITY_REASON_ORDER",
+    "EXACT_TABLE_GUARD_REASON_ORDER",
     "FORMAL_TERMINATION_BLOCKERS",
     "MujocoN1DiagnosticVecEnv",
     "OBSERVATION_LAYOUT",
