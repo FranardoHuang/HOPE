@@ -1178,6 +1178,74 @@ worktree `/workspace/franco/s10_ff_20260806`（`33c9bdc3`）。**未跑 Isaac `o
 本节已经证明这条 clip 的开环回放必然失败且原因不在被测系统里，再跑一遍只会复现已知结果、
 并占住一张 GPU；要跑的是重定向修好之后的那一次。
 
+#### 5.6.9 手抄的 Isaac 常量改成读活值：指纹只证明"字节没动"，不证明"抄对了"（2026-08-06）
+
+**这是同一个形状的第三次。** 前两次分别是 `5ed998f1`（把桌面终局从广相 AABB 改成精确 SAT，
+**同一个提交**把复刻侧的 AST 指纹扩到覆盖新函数并重新盖章，复刻语义没跟上，两天没人发现 ——
+因为旧测试的盒子全是轴对齐的，轴对齐时广相恒等于精确，根本区分不了）和 `5c4ced66`
+（改了 trainability 叶子却没重钉镜像 SHA；语义其实没漂，**真正的缺陷是测试没能力说这句话**）。
+
+**这一次的对象**：`mujoco_native` 里那批**从 Isaac 手抄过来的常量** ——
+`table_termination.py` 的桌面外扩 `2 cm`、拍面盒子的中心与半轴、五段桌台的名字、碰撞代理的
+路径与 SHA。**值现在全都还对得上**，所以这不是一次事故复盘，是把"离下一次粗心重钉只差一步"
+这件事关掉。它们此前的全部保护只有语义 AST 指纹，而指纹只说"源文件那几个节点的字节没动过"：
+源文件一动，把指纹重钉成新值是一行的事，副本跟没跟上**没有任何机制在看**。
+
+**做法**：新增 `mujoco_native/isaac_live_constants.py`，**把 Isaac 源码里那个数直接读出来**。
+`hope_env_cfg.py` 拉的是整棵 Isaac Lab，host 上装不了，所以走 AST 取值而不是 import ——
+但取的是**值**，不是哈希：把 `0.02` 改成 `0.03` 再重钉一遍指纹，这里照样红。求值器是白名单式的
+（常量 / 元组列表 / 模块级名字 / `list()`、`tuple()` / 序列相加），读不出来的一律 fail closed
+报 blocker，不猜。范式与 `action_ball_211_abi.live_source_parity_blockers` 相同，
+差别只是那边的叶子 dependency-free、可以直接 host-load 比活值。
+
+比对的**锚点特意选在 `table_hit_done_term()` 真正塞进 `DoneTerm` 的 `params`**，而不是同名模块
+常量。这样"把常量改了"和"把这个 term 改成用另一个常量"两种漂移都拦得住 —— 后者是只比模块常量
+的检查会整个漏掉的一类。`verify_isaac_source_authority()` 现在对活值门 fail closed，收据自陈
+`live_constant_parity` 与 `live_constant_parity_constants_compared=7`。
+
+**第二处是另一个形状**：`n1_reward_event_kernel.py` 手抄的四个兄弟模块字节指纹
+（`observed_outcome_resolver` / `n1_ball_core` / `physical_ball_scene` / `mujoco_table_scene`）。
+这里常量本身就是摘要，"重钉"即"移植"，没有"钉了但没抄"的中间态；真正的缺陷是**过去只有在 pod 上
+真开起一个 MuJoCo core 才会去核对** —— host 侧改了 `n1_ball_core.py` 而忘了重钉，本地全绿，
+要烧一次 pod 时间才红。现在 `native_physical_event_facts_contract()` 第一件事就核对这四个摘要。
+落地当天就抓到一个活的：另一位 agent 改了 `n1_ball_core.py` 尚未重钉，门当场开火。
+
+**变异测试**（21 条新用例，全部构造成"粗一个档次的检查就抓不到"，且**每条都先替那个粗心的作者
+把指纹重钉好**、再要求活值门拦下来）：
+
+| 变异 | 为什么粗一档就抓不到 |
+| --- | --- |
+| 拍面半轴 `(0.082, 0.008, 0.082)` → `(0.082, 0.010, 0.082)` | 只动厚度那一维：长度、个数、对角结构全不变 |
+| 五段桌台 `post_left`/`post_right` 换序 | 集合与长度一字不差，集合式检查放行 |
+| 参考包络把脚和腕的顺序对调 | 同上，四个身体一个不少 |
+| `"margin"` 改指向 `TABLE_HIT_FORCE_THRESHOLD_N` | `TABLE_HIT_MARGIN_M` 自己没动，只比模块常量的检查放行 |
+| `margin_fraction` `0.02` → `0.05` | `0.02` 在同一文件里还有别的出处，"这个数还在"式检查放行 |
+| 碰撞代理只改路径不改 SHA | 只比 SHA 的检查放行 |
+| `TABLE_HIT_MARGIN_M` 改成 `os.environ` 表达式 | 必须报 `live_value_unreadable`，不得静默当"相等" |
+
+其中 `test_repinned_margin_change_is_still_refused` 把 `5ed998f1` 完整重放一遍：**关掉活值门之后，
+重钉过的指纹独自放行了漂移的源文件** —— 这就是当年发生的事，写成了一条常驻断言。
+
+**两处确认不适合改成活值比对，理由写在码里，不硬做**：
+
+- `COMPONENT_WORLD_AABB_GUARD_M = 1e-6`：Isaac 侧是 `.add_(1.0e-6)` 行内字面量，上游没有具名符号
+  可读；它只作用于 broad-phase 预筛（判决归 15 轴 SAT），且方向是保守放大，
+  已被 `_geometric_table_contact_hit_mask_unchecked` 的 AST 指纹覆盖。
+- `TABLE_CONTACT_BODY_NAMES`（32 个 body）：已经在跟碰撞代理 artifact 的 `body_order` 逐位比对 ——
+  那本来就是活值比对，不重复第二遍。
+
+**收据。** pod1 worktree `/workspace/franco/livevalue_final_20260806`（`391f41c9` + 本改动），
+`hope_isaac_venv`、`pytest -n 32`。基线对拍：`391f41c9` 同 14 个模块 `469 passed`，
+本改动后 `490 passed`（`+21`，零回归）。提交 `61cd804c`。
+
+> **同轮相邻发现（不在本提交内）**：`vec_env.PHASE_EE_BODY_NAMES` 抄的是父类
+> `HOPEDeployParityTerminationsCfg` 的"两脚 + 两腕"，而这条 native 车道复刻的
+> `HOPEActionBallTerminationsCfg` 早在 `635252f6` 就把包络**收窄成只有两脚**（腕是挥拍时要甩最远
+> 的那一端，`0.25 m` 的 z 包络套上去等于在惩罚要教的动作）。该车道目前没有生产调用点
+> （没有任何 launcher 装 phase reference tape），所以是潜伏漂移而不是在跑的错。
+> 这一条由同轮另一位 agent 以 `mujoco_native/isaac_reference_envelope.py` 修复（直接读活值，
+> 不再留第四份手抄），并复用了本提交的 `isaac_live_constants` 求值器。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |
