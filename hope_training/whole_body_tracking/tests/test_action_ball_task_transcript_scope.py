@@ -55,9 +55,10 @@ _METHODS = (
     "_action_ball_birth_catalogs_are_live_only",
     "_action_ball_task_transcript_scope",
     "_action_ball_online_solver_owns_admitted_task_counts",
-    "_action_ball_admitted_proposal_row",
+    "_action_ball_host_proposal_rows",
     "_action_ball_expected_admitted_task_counts_live_only",
     "_action_ball_live_ledger",
+    "_action_ball_task_transcript_for_birth",
     "_action_ball_solver_mutable_state_dict",
     "_action_ball_decode_solver_mutable_state",
     "_action_ball_load_exact_resume_state_dict",
@@ -479,6 +480,95 @@ def test_a_banded_question_bank_run_must_keep_the_counter_at_zero():
     quiet._action_ball_banded_question_bank = object()
     payload = quiet._action_ball_solver_mutable_state_dict()
     assert payload["task_transcript_scope"] == SCOPE_DIAGNOSTIC
+
+
+def test_the_new_witness_costs_no_extra_per_reset_device_read():
+    """This blob is rebuilt inside the pool's purity envelope on every reset.
+
+    The admitted-proposal witness reuses the host rows the payload already
+    needed, so it must not add a second device-to-host read.
+    """
+
+    source = ast.get_source_segment(
+        SOURCE,
+        next(
+            node
+            for node in COMMAND_CLASS.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_action_ball_solver_mutable_state_dict"
+        ),
+    )
+    assert "_action_ball_live_ledger()" not in source
+    assert source.count("_action_ball_host_proposal_rows()") == 1
+
+    reader = ast.get_source_segment(
+        SOURCE,
+        next(
+            node
+            for node in COMMAND_CLASS.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_action_ball_host_proposal_rows"
+        ),
+    )
+    assert reader.count(".cpu()") == 1
+    assert reader.count("_action_ball_live_ledger()") == 1
+
+
+def test_the_solver_side_transcript_reader_names_the_owner_instead_of_guessing():
+    """Asking the solver for a root it never wrote must say who does own it.
+
+    The old message was "requested unknown birth", which reads as corruption
+    rather than as "wrong owner, ask the pool".
+    """
+
+    live_only = _command(
+        live_only=True,
+        admitted_task_counts={7: 0},
+        admitted=(0,),
+        proposed=(0,),
+    )
+    with pytest.raises(RuntimeError, match="the pool owns those roots"):
+        live_only._action_ball_task_transcript_for_birth("a" * 64)
+
+    history, transcripts = _exact_transcript_catalog(admitted_count=3)
+    exact = _command(
+        live_only=False,
+        admitted_task_counts={7: 3},
+        admitted=(3,),
+        proposed=(3,),
+        provider_history=history,
+        task_transcript_by_birth=transcripts,
+    )
+    assert exact._action_ball_task_transcript_for_birth("a" * 64) == (
+        3,
+        "b" * 64,
+    )
+    with pytest.raises(RuntimeError, match="unknown birth"):
+        exact._action_ball_task_transcript_for_birth("c" * 64)
+
+
+def test_issued_birth_proof_keeps_the_sampler_transcript_in_every_scope():
+    """Dropping the provider-history lookup must not drop the issuance proof."""
+
+    source = ast.get_source_segment(
+        SOURCE,
+        next(
+            node
+            for node in COMMAND_CLASS.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_action_ball_assert_issued_birth"
+        ),
+    )
+    sampler_proof = "self._action_ball_sampler.assert_issued_birth(sampler_birth)"
+    scope_branch = "if self._action_ball_birth_catalogs_are_live_only():"
+    assert source.count(sampler_proof) == 1
+    assert source.index(sampler_proof) < source.index(scope_branch)
+    live_branch = source[
+        source.index(scope_branch) : source.index("        else:")
+    ]
+    # The live-only branch asserts the catalog is empty; it must not try to
+    # look a receipt up in it.
+    assert "_action_ball_provider_history.get(" not in live_branch
 
 
 def test_the_pool_is_told_who_owns_the_per_birth_roots():

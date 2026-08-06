@@ -7213,20 +7213,30 @@ class RacketTargetCommand(CommandTerm):
             and self._action_ball_immutable_tape is None
         )
 
-    def _action_ball_admitted_proposal_row(self) -> list:
-        """Return the per-slot admitted-proposal ledger row ``A``."""
+    def _action_ball_host_proposal_rows(self) -> dict:
+        """Read the ``P``/``A`` ledger rows to the host exactly once.
 
-        return [
-            int(value)
-            for value in self._action_ball_live_ledger()[
-                _ACTION_BALL_LEDGER_NAMES.index("A")
+        This whole state blob is rebuilt inside the pool's purity envelope on
+        every reset batch, not only at checkpoint time, so each extra
+        device-to-host read here is a per-reset synchronization.  One read
+        serves both the admitted-task reconciliation and the payload.
+        """
+
+        ledger = self._action_ball_live_ledger()
+        return {
+            name: [
+                int(value)
+                for value in ledger[_ACTION_BALL_LEDGER_NAMES.index(name)]
+                .detach()
+                .cpu()
+                .tolist()
             ]
-            .detach()
-            .cpu()
-            .tolist()
-        ]
+            for name in ("P", "A")
+        }
 
-    def _action_ball_expected_admitted_task_counts_live_only(self) -> dict:
+    def _action_ball_expected_admitted_task_counts_live_only(
+        self, admitted_row: list
+    ) -> dict:
         """Admitted-task counts a live-births-only run must be showing.
 
         The per-birth transcript is intentionally absent here, so the check
@@ -7237,9 +7247,8 @@ class RacketTargetCommand(CommandTerm):
 
         if not self._action_ball_online_solver_owns_admitted_task_counts():
             return {int(uid): 0 for uid in self._action_ball_bundle.action_uids}
-        admitted = self._action_ball_admitted_proposal_row()
         return {
-            int(uid): admitted[slot]
+            int(uid): admitted_row[slot]
             for slot, uid in enumerate(self._action_ball_bundle.action_uids)
         }
 
@@ -7288,6 +7297,7 @@ class RacketTargetCommand(CommandTerm):
                 }
             )
             transcript_counts[int(receipt.action_uid)] += int(count)
+        proposal_rows = self._action_ball_host_proposal_rows()
         if self._action_ball_birth_catalogs_are_live_only():
             # Both per-birth catalogs are deliberately empty in this mode, so
             # reconciling the admitted-task counts against them would compare a
@@ -7304,7 +7314,9 @@ class RacketTargetCommand(CommandTerm):
                     "wrote a per-birth provider-history/task-transcript row"
                 )
             if (
-                self._action_ball_expected_admitted_task_counts_live_only()
+                self._action_ball_expected_admitted_task_counts_live_only(
+                    proposal_rows["A"]
+                )
                 != self._action_ball_emitted_task_count_by_uid
             ):
                 raise RuntimeError(
@@ -7347,17 +7359,11 @@ class RacketTargetCommand(CommandTerm):
                 [int(uid), int(self._action_ball_domain_cursor_by_uid[int(uid)])]
                 for uid in self._action_ball_bundle.action_uids
             ],
+            # Same host rows the admitted-task reconciliation above already
+            # read; re-reading the device here would double the per-reset
+            # synchronization for no extra evidence.
             "proposal_ledger": {
-                name: [
-                    int(value)
-                    for value in self._action_ball_live_ledger()[
-                        _ACTION_BALL_LEDGER_NAMES.index(name)
-                    ]
-                    .detach()
-                    .cpu()
-                    .tolist()
-                ]
-                for name in ("P", "A")
+                name: list(proposal_rows[name]) for name in ("P", "A")
             },
             "solver_rejections": [
                 {
