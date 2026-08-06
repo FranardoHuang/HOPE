@@ -25,6 +25,8 @@ from typing import Any, Iterable, Mapping
 
 import numpy as np
 
+from . import isaac_live_constants
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ISAAC_TERMINATION_CONFIG = (
@@ -146,6 +148,120 @@ TABLE_CONTACT_BODY_NAMES = (
 
 class TableTerminationContractError(RuntimeError):
     """The exact Isaac robot/table termination cannot be reproduced."""
+
+
+# --------------------------------------------------------------------------
+# Live-value parity for the constants above
+#
+# 人话:上面那几行(桌面外扩 2 cm、拍面盒子的中心与半轴、五段桌台的名字、
+# 碰撞代理文件与它的 SHA)真源都在 Isaac 侧,这里存的是**副本**。副本此前只被
+# 语义 AST 指纹罩着 —— 而指纹只说"源文件那几个节点的字节没动过"。源文件一动,
+# 把指纹重钉成新值是一行的事,副本跟没跟上没人查:5ed998f1 就是这么让桌面终局
+# 的复刻停在原地两天的。
+#
+# 下面这组检查改成**直接把 Isaac 现在那个数读出来跟副本比**。它读的是
+# ``table_hit_done_term()`` 真正塞进 DoneTerm 的 ``params``,不是同名模块常量 ——
+# 所以"把常量改了"和"把这个 term 改成用另一个常量"两种漂移都拦得住。
+# --------------------------------------------------------------------------
+
+#: The Isaac factory whose ``params={...}`` is what the live ``robot_hit_table``
+#: DoneTerm is actually constructed with.
+ISAAC_TABLE_TERM_FACTORY = "table_hit_done_term"
+
+
+def _mirrored_blade_half_extents_m() -> tuple:
+    """The three half extents this port encodes as a diagonal half-axis matrix."""
+
+    axes = np.asarray(RACKET_BLADE_LOCAL_HALF_AXES_M, dtype=np.float64)
+    if axes.shape != (3, 3) or not np.array_equal(axes, np.diag(np.diagonal(axes))):
+        raise TableTerminationContractError(
+            "racket blade half-axis matrix is no longer the Isaac diagonal box"
+        )
+    return tuple(float(value) for value in np.diagonal(axes))
+
+
+def mirrored_isaac_constant_entries() -> tuple:
+    """``(key, source, selector, mirrored_value)`` for every hand copy here.
+
+    Built on call, not at import, because the source paths are module globals
+    that the drift tests repoint at mutated copies.
+    """
+
+    return (
+        (
+            "table_guard_margin_m",
+            ISAAC_TERMINATION_CONFIG,
+            ("function_return_param", ISAAC_TABLE_TERM_FACTORY, "margin"),
+            TABLE_GUARD_MARGIN_M,
+        ),
+        (
+            "racket_body_name",
+            ISAAC_TERMINATION_CONFIG,
+            ("function_return_param", ISAAC_TABLE_TERM_FACTORY, "racket_body_name"),
+            RACKET_BODY_NAME,
+        ),
+        (
+            "racket_blade_center_offset_wrist_m",
+            ISAAC_TERMINATION_CONFIG,
+            (
+                "function_return_param",
+                ISAAC_TABLE_TERM_FACTORY,
+                "racket_blade_center_offset_wrist_m",
+            ),
+            tuple(
+                float(value)
+                for value in np.asarray(
+                    RACKET_BLADE_CENTER_OFFSET_WRIST_M, dtype=np.float64
+                )
+            ),
+        ),
+        (
+            "racket_blade_half_extents_m",
+            ISAAC_TERMINATION_CONFIG,
+            (
+                "function_return_param",
+                ISAAC_TABLE_TERM_FACTORY,
+                "racket_blade_half_extents_m",
+            ),
+            _mirrored_blade_half_extents_m(),
+        ),
+        (
+            "collision_proxy_artifact_repo_relative_path",
+            ISAAC_TERMINATION_CONFIG,
+            (
+                "function_return_param",
+                ISAAC_TABLE_TERM_FACTORY,
+                "collision_proxy_artifact_path",
+            ),
+            COLLISION_PROXY_ARTIFACT.relative_to(REPO_ROOT).as_posix(),
+        ),
+        (
+            "collision_proxy_artifact_sha256",
+            ISAAC_TERMINATION_CONFIG,
+            (
+                "function_return_param",
+                ISAAC_TABLE_TERM_FACTORY,
+                "collision_proxy_artifact_sha256",
+            ),
+            EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256,
+        ),
+        (
+            "table_assembly_roles",
+            ISAAC_TERMINATION_CALLABLES,
+            ("assignment", "_TABLE_GUARD_OBSTACLE_ROLES"),
+            TABLE_ASSEMBLY_ROLES,
+        ),
+    )
+
+
+def live_isaac_constant_blockers() -> tuple:
+    """Every hand-copied Isaac constant here that no longer equals the live one."""
+
+    try:
+        entries = mirrored_isaac_constant_entries()
+    except TableTerminationContractError as exc:
+        return (f"table_guard_mirror_self_inconsistent:{exc}",)
+    return isaac_live_constants.parity_blockers("table_guard", entries)
 
 
 def _strict_object(pairs: Iterable[tuple[str, Any]]) -> dict[str, Any]:
@@ -390,10 +506,27 @@ def verify_isaac_source_authority() -> dict[str, str]:
         raise TableTerminationContractError(
             "Isaac robot/table action-latch semantic AST SHA-256 drifted"
         )
+    # 人话:上面三道门只说"源文件的字节跟我钉的一样"。源文件一动,把这三行重钉
+    # 成新值是一行的事,而这个文件顶部那几个手抄常量跟没跟上,过去没有任何机制
+    # 在看。这道门把手抄件跟 Isaac 现役 ``robot_hit_table`` 真正用的参数逐个比值,
+    # 所以"光重钉指纹"从今往后不再放行。
+    constant_blockers = live_isaac_constant_blockers()
+    if constant_blockers:
+        raise TableTerminationContractError(
+            "Isaac robot/table guard constants were hand-copied and no longer "
+            "equal the live Isaac source (re-pinning the AST SHA does not port "
+            "them): " + "; ".join(constant_blockers)
+        )
     return {
         "config_semantic_ast_sha256": config_sha,
         "callables_semantic_ast_sha256": callable_sha,
         "action_latch_semantic_ast_sha256": action_latch_sha,
+        "live_constant_parity": (
+            "margin_racket_body_blade_box_proxy_path_sha_assembly_roles"
+        ),
+        "live_constant_parity_constants_compared": str(
+            len(mirrored_isaac_constant_entries())
+        ),
     }
 
 
@@ -966,15 +1099,22 @@ __all__ = [
     "EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256",
     "ExactRobotTableGuard",
     "ISAAC_ACTION_LATCH",
+    "ISAAC_TABLE_TERM_FACTORY",
     "ISAAC_TERMINATION_CALLABLE_SELECTORS",
     "ISAAC_TERMINATION_CALLABLES",
     "ISAAC_TERMINATION_CONFIG",
     "MUJOCO_IDENTITY_MANIFEST",
+    "RACKET_BLADE_CENTER_OFFSET_WRIST_M",
+    "RACKET_BLADE_LOCAL_HALF_AXES_M",
+    "RACKET_BODY_NAME",
+    "TABLE_ASSEMBLY_ROLES",
     "TABLE_CONTACT_BODY_NAMES",
     "TABLE_GUARD_MARGIN_M",
     "TableTerminationContractError",
     "bind_pre_registered_owner_frames",
     "geometric_robot_table_hit",
+    "live_isaac_constant_blockers",
     "load_collision_components",
+    "mirrored_isaac_constant_entries",
     "verify_isaac_source_authority",
 ]

@@ -266,6 +266,12 @@ def test_exact_sources_artifact_and_table_geometry_are_reopened_and_pinned():
         "action_latch_semantic_ast_sha256": (
             term.EXPECTED_ISAAC_ACTION_LATCH_SEMANTIC_AST_SHA256
         ),
+        # 人话:上面三行只说"源文件字节没动过"。下面两行说的是另一件事 ——
+        # 这个文件顶部那 7 个手抄常量刚刚跟 Isaac 现役的值逐个比过。
+        "live_constant_parity": (
+            "margin_racket_body_blade_box_proxy_path_sha_assembly_roles"
+        ),
+        "live_constant_parity_constants_compared": "7",
     }
     components = term.load_collision_components()
     assert components.owner_indices.shape == (43,)

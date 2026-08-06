@@ -21,6 +21,8 @@ import hashlib
 import json
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
 
 from . import observed_outcome_resolver
@@ -51,9 +53,81 @@ EXPECTED_TABLE_SCENE_SOURCE_SHA256 = (
     "db382094674ee5e290f980164b01ad10ece676c45be6496525e4609399213ee2"
 )
 
+MODULE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 class N1RewardEventKernelError(ValueError):
     """The caller supplied incomplete, unordered, or non-finite event facts."""
+
+
+# --------------------------------------------------------------------------
+# Live-source digest parity
+#
+# 人话:上面那四行是**别的文件**的字节指纹 —— 这个 kernel 自己不 import 它们
+# (n1_ball_core 反过来 import 这个 kernel,硬凑 import 会成环),所以只能手抄一份。
+# 手抄本身没错,错在过去**只有真的在 pod 上开起一个 MuJoCo core** 才会去核对:
+# host 侧改了 n1_ball_core.py 而忘了重钉,本地测试全绿,要烧一次 pod 时间才红。
+#
+# 下面把同一件核对搬到 host:四个真源就在磁盘上,重新算一遍摘要逐个比。
+# 这里的漂移形状跟 5ed998f1 不同 —— 常量本身就是摘要,"重钉"即"移植",
+# 没有"钉了但没抄"的中间态;真正缺的是**任何人在本地都看得见**这句话。
+# --------------------------------------------------------------------------
+
+
+def mirrored_source_digest_entries() -> tuple:
+    """``(key, live source path, pinned digest)`` for every hand copy above."""
+
+    return (
+        (
+            "observed_outcome_resolver_source_sha256",
+            MODULE_DIR / "observed_outcome_resolver.py",
+            EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256,
+        ),
+        (
+            "n1_ball_core_source_sha256",
+            MODULE_DIR / "n1_ball_core.py",
+            EXPECTED_N1_BALL_CORE_SOURCE_SHA256,
+        ),
+        (
+            "physical_ball_scene_source_sha256",
+            MODULE_DIR / "physical_ball_scene.py",
+            EXPECTED_PHYSICAL_BALL_SCENE_SOURCE_SHA256,
+        ),
+        (
+            "table_scene_source_sha256",
+            REPO_ROOT / "scripts/mujoco_table_scene.py",
+            EXPECTED_TABLE_SCENE_SOURCE_SHA256,
+        ),
+    )
+
+
+def source_digest_blockers(entries) -> tuple:
+    """List every pinned sibling digest that the live file no longer produces."""
+
+    blockers = []
+    for key, path, expected in entries:
+        try:
+            actual = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        except OSError as exc:
+            blockers.append(f"native_source_unreadable:{key}:{exc}")
+            continue
+        if actual != expected:
+            blockers.append(
+                f"native_source_digest_differs:{key}:live={actual} pin={expected}"
+            )
+    return tuple(blockers)
+
+
+@lru_cache(maxsize=1)
+def _live_source_digest_blockers_cached() -> tuple:
+    return source_digest_blockers(mirrored_source_digest_entries())
+
+
+def live_source_digest_blockers() -> tuple:
+    """Cached host-side answer to "do the four pins still match the files?"."""
+
+    return _live_source_digest_blockers_cached()
 
 
 Vector3 = Tuple[float, float, float]
@@ -178,8 +252,18 @@ def native_physical_event_facts_contract() -> dict[str, Any]:
 
     Selected-rubber identity is conditional on an exact per-question action
     lineage.  The ABI still cannot by itself authorize reward payment.
+
+    人话:第一件事是核对上面那四个手抄的兄弟模块指纹。以前这句话只有在 pod 上
+    真开起一个 core 时才说得出来;现在 host 也说得出来,改了源不重钉当场就红。
     """
 
+    blockers = live_source_digest_blockers()
+    if blockers:
+        raise N1RewardEventKernelError(
+            "native source digests pinned in this kernel no longer match the "
+            "live files (re-pin them in the same change that edits the source): "
+            + "; ".join(blockers)
+        )
     payload = {
         "schema_version": 4,
         "kind": NATIVE_PHYSICAL_EVENT_FACTS_CONTRACT_KIND,
