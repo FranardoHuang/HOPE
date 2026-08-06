@@ -649,11 +649,10 @@ def actual_joint_position_forbidden_zone(
     return hard_terminal
 
 
-def bad_anchor_pos(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:
-    command: MotionCommand = env.command_manager.get_term(command_name)
-    return torch.norm(command.anchor_pos_w - command.robot_anchor_pos_w, dim=1) > threshold
-
-
+# [已删除 2026-08-06 过期结构清理] bad_anchor_pos(全 3D 版):零调用点,而且**不可达**——
+# 终止项是按字符串解析的,scripts/termination_contract.py 的 FUNCTION_IDENTITIES 是穷举
+# allow-list("an unlisted active term is a hard reject by design"),里面只有下面这个
+# _z_only 版。两个只差 norm(3D) / abs(z) 的同名族函数并排放着,谁去调阈值都可能调错那份。
 def bad_anchor_pos_z_only(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     return torch.abs(command.anchor_pos_w[:, -1] - command.robot_anchor_pos_w[:, -1]) > threshold
@@ -672,16 +671,8 @@ def bad_anchor_ori(
     return (motion_projected_gravity_b[:, 2] - robot_projected_gravity_b[:, 2]).abs() > threshold
 
 
-def bad_motion_body_pos(
-    env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str] | None = None
-) -> torch.Tensor:
-    command: MotionCommand = env.command_manager.get_term(command_name)
-
-    body_indexes = _get_body_indexes(command, body_names)
-    error = torch.norm(command.body_pos_relative_w[:, body_indexes] - command.robot_body_pos_w[:, body_indexes], dim=-1)
-    return torch.any(error > threshold, dim=-1)
-
-
+# [已删除 2026-08-06 过期结构清理] bad_motion_body_pos(全 3D 版):同上,零调用点且不在
+# termination_contract.FUNCTION_IDENTITIES 的穷举 allow-list 里,任何 frozen 合同都到不了它。
 def bad_motion_body_pos_z_only(
     env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str] | None = None
 ) -> torch.Tensor:
@@ -776,49 +767,14 @@ def _aligned_body_ids(sensor, asset, sensor_cfg: SceneEntityCfg, asset_cfg: Scen
     return pair
 
 
-def _aligned_body_ids_in_expected_order(
-    sensor,
-    asset,
-    sensor_cfg: SceneEntityCfg,
-    asset_cfg: SceneEntityCfg,
-    expected_names: tuple[str, ...] | list[str],
-):
-    """Memoize explicit-order alignment for the ActionBall full-table guard."""
-
-    key = (
-        f"_hope_table_hit_expected_ids__{sensor_cfg.name}__"
-        f"{asset_cfg.name}"
-    )
-    expected = tuple(str(name) for name in expected_names)
-    cached = getattr(sensor, key, None)
-    if cached is not None:
-        cached_expected, pair = cached
-        if cached_expected != expected:
-            raise RuntimeError(
-                "robot_hit_table expected body order changed during one run"
-            )
-        return pair
-    sensor_ids = sensor_cfg.body_ids
-    asset_ids = asset_cfg.body_ids
-    sensor_ids = (
-        list(sensor_ids)
-        if isinstance(sensor_ids, (list, tuple))
-        else list(range(len(sensor.body_names)))
-    )
-    asset_ids = (
-        list(asset_ids)
-        if isinstance(asset_ids, (list, tuple))
-        else list(range(len(asset.body_names)))
-    )
-    pair = align_body_ids_in_expected_order(
-        list(sensor.body_names),
-        list(asset.body_names),
-        sensor_ids,
-        asset_ids,
-        expected,
-    )
-    setattr(sensor, key, (expected, pair))
-    return pair
+# [已删除 2026-08-06 过期结构清理] _aligned_body_ids_in_expected_order(43 行):零调用点。
+# 它是上面 _aligned_body_ids(现役,唯一调用点在 robot_hit_table 的 :2280 附近)的
+# "显式顺序"孪生兄弟——同一个 sensor 上的 memo、同一句 "expected body order changed
+# during one run"、只差调 align_body_ids_in_expected_order 而不是 align_body_ids。
+# robot_hit_table 正是眼下 32/32 终止的那条路径,并排放两份几乎一样的 body-id 对齐 memo
+# 是明确的踩坑点:改一份、另一份留在原地,而且没有任何东西会报警。
+# 注意:纯函数 align_body_ids_in_expected_order(:719)保留,但它现在**只剩测试调用点**
+# (test_table_obstacle_termination.py),生产侧无消费方;将来真要做显式顺序守卫时从那里接。
 
 
 def _asset_body_ids_in_expected_order(

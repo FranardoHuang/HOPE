@@ -523,27 +523,11 @@ def _validate_preregistered_reward_recipe(
     }
 
 
-def prelong_runtime_effective_reward_recipe_sha256(manager) -> str:
-    """Return the canonical complete runtime recipe SHA for launcher binding."""
-
-    raw_names = getattr(manager, "active_terms", None)
-    if not isinstance(raw_names, (list, tuple)):
-        raise PrelongSemanticLedgerError(
-            "pre-long semantics require ordered RewardManager active_terms"
-        )
-    names = tuple(raw_names)
-    if (
-        not names
-        or any(type(name) is not str or not name for name in names)
-        or len(names) != len(set(names))
-    ):
-        raise PrelongSemanticLedgerError(
-            "pre-long RewardManager active_terms must be unique names"
-        )
-    receipt, _rows = _normalized_runtime_reward_recipe(manager, names)
-    return receipt["sha256"]
-
-
+# [已删除 2026-08-06 过期结构清理] prelong_runtime_effective_reward_recipe_sha256(19 行)。
+# 全仓零引用,而它的 docstring 写着 "for launcher binding" —— 没有任何 launcher 绑它,
+# 这句话本身就是过期描述。函数体前 17 行与下面 _receipt 版逐字相同,只是末尾取 ["sha256"];
+# 现役生产路径根本不走这两个模块级入口,而是类内的 _normalized_runtime_reward_recipe(:1725)。
+# 也就是说"active_terms 怎么校验"这条规矩曾经存三份、跑一份。
 def prelong_runtime_effective_reward_recipe_receipt(manager) -> dict:
     """Return the complete normalized runtime receipt for host/runtime tests."""
 

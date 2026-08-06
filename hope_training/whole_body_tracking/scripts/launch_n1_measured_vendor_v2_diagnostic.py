@@ -213,12 +213,33 @@ def _teacher_oracle_filename(stage: str) -> str:
     if stage == "oracle32":
         return TEACHER_QDES_ORACLE32_FILENAME
     raise LaunchRefused("stage is not a teacher-qdes oracle")
+# 下面三张严格键表的**生产方全在本仓**(scripts/train.py 的 teacher-qdes oracle 收据),
+# 消费方是本文件。生产方多写一个字段,消费方就当场 LaunchRefused —— 那是设计要的
+# fail-closed,但不该等到发射当天才发现。因此三张表都提成模块级常量,由
+# tests/test_launch_n1_measured_vendor_v2_diagnostic.py 的
+# ``test_teacher_qdes_receipt_key_sets_match_the_train_py_producer`` 直接 AST 读
+# train.py 的字面量逐一对齐:漂了在 host 测试就红,不必先烧一次 Pod 时间。
+# train.py 已经在本发射器的 TRAIN_SOURCE 钉子表里,配对是合法的 provenance 关系。
 TEACHER_ORACLE_REJECT_KEYS = (
     "virtual_contact_face_reject_count",
     "virtual_contact_geometry_reject_count",
     "virtual_contact_nonfinite_reject_count",
     "virtual_contact_u_n_below_fit_reject_count",
     "virtual_contact_u_n_above_fit_reject_count",
+)
+TEACHER_QDES_RECEIPT_KEYS = (
+    "control_step_denominator",
+    "preclamp_max_abs_error_rad",
+    "raw_action_max_abs",
+    "teleport_used",
+    "wait_hold_command_steps",
+    "teacher_reference_command_steps",
+)
+TEACHER_CAPTURE_REJECTION_KEYS = (
+    "opportunities",
+    "captures",
+    "rejects",
+    "conserved",
 )
 RECIPE_SENTINEL_POLICY_SHA256 = "0" * 64
 # ``noise_std_type`` is owned by cfg/algo/ppo.yaml.  This must be a normal
@@ -1730,11 +1751,7 @@ def _validate_teacher_qdes_oracle(
     capture = row["capture_rejection"]
     if (
         type(qdes) is not dict
-        or set(qdes) != {
-            "control_step_denominator", "preclamp_max_abs_error_rad",
-            "raw_action_max_abs", "teleport_used",
-            "wait_hold_command_steps", "teacher_reference_command_steps",
-        }
+        or set(qdes) != set(TEACHER_QDES_RECEIPT_KEYS)
         or qdes.get("teleport_used") is not False
         or qdes.get("control_step_denominator") != completion["control_steps"]
         or any(
@@ -1755,7 +1772,7 @@ def _validate_teacher_qdes_oracle(
         + qdes["teacher_reference_command_steps"]
         != completion["control_steps"]
         or type(capture) is not dict
-        or set(capture) != {"opportunities", "captures", "rejects", "conserved"}
+        or set(capture) != set(TEACHER_CAPTURE_REJECTION_KEYS)
         or capture.get("conserved") is not True
         or type(capture.get("opportunities")) is not int
         or type(capture.get("captures")) is not int

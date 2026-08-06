@@ -286,12 +286,8 @@ def _finite(value: object, *, label: str) -> float:
     return float(value)
 
 
-def _freeze_pair(row: dict[str, Any], center_key: str, min_key: str, max_key: str) -> None:
-    center = deepcopy(row[center_key])
-    row[min_key] = center
-    row[max_key] = deepcopy(center)
-
-
+# [已删除 2026-08-06 过期结构清理] _freeze_pair(4 行):零调用点。现役冻结走下面
+# _freeze_ball_profile 的后缀规则(std_lower_/std_upper_/_neg_/_pos_),不是逐三元组搬 center。
 def _freeze_ball_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
     row = deepcopy(dict(profile))
     for key in tuple(row):

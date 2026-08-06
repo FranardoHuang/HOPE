@@ -431,13 +431,9 @@ def derive_probe_input(
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
 
-def _same_numbers(left: object, right: object, count: int, *, name: str) -> None:
-    got = _finite_vector(left, count, name=name)
-    wanted = _finite_vector(right, count, name=name + " expected")
-    if got != wanted:
-        raise ReceiptError("%s differs" % name)
-
-
+# [已删除 2026-08-06 过期结构清理] _same_numbers(5 行):零调用点。
+# 它是"逐向量比对"的旧写法;现役校验是下面 validate_probe_input 的 ``probe != expected``
+# 整字典相等,覆盖面严格更大(连非数值字段一起管),所以删它不放宽任何门。
 def validate_probe_input(
     probe: Mapping[str, Any],
     *,

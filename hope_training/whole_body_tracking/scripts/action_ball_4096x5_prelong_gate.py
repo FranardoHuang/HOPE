@@ -690,7 +690,16 @@ def _validate_reveal_bridge(
     previous_lifetime: Optional[Mapping[int, Mapping[str, int]]],
     expected_authority: Optional[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], dict[int, dict[str, int]], dict[str, Any]]:
-    """Strictly consume one schema-v3 reveal-to-playback bridge record."""
+    """Strictly consume one schema-v3 reveal-to-playback bridge record.
+
+    **尚未接线(2026-08-06 核实):本函数全仓零调用点。**
+    别把它读成"本 gate 已经严格消费 v3" —— 现役 gate 仍按 schema-v2 走,A launcher 在第 84
+    项 fail-closed 拒的也是 v2 那条路。生产方 ``utils/action_ball_prelong_semantics.py``
+    确实已经产出 ``reveal_to_playback_bridge``,消费方就差这一步接线。
+    接线是独立一步(见 docs/experiments/2026-08/
+    EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md 的"把 shared gate 升级为严格消费
+    v3"一条),不是清理能顺手做的:它会改变 gate 的拒绝面。
+    """
 
     bridge = _exact_keys(
         value,

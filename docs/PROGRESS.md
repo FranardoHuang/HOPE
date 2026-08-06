@@ -8,6 +8,33 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-06: 过期结构清理一轮（只删零调用点，**没有放宽任何 fail-closed 门**）。删掉的最大一
+  块是 `scripts/action_ball_211_launcher_shared.py`（577 行）：它 08-05 建立时自述“本轮只建库、
+  接线是下一步”，接线从未发生，于是成了 A211/C211 两个发射器那 49 个共享常量的**第三份**手抄
+  副本（删除当天实测 49/49 仍逐字相同，也就是还没漂，但没有任何机制拦得住它漂）。那 577 行里
+  真正有价值的知识——哪 49 个常量必须相同、哪 22 个必须各不相同——改写成断言放进新的
+  `tests/test_action_ball_211_launcher_shared_constants.py`（72 passed），另加一条把
+  211/319 两个 ABI 宽度在四个持有者（A/C launcher、`mujoco_native/action_ball_211_abi.py`、
+  `action_ball_c211_oracle_evidence.py`）之间逐位核对；这三件此前**零机器检查**。
+  同批删掉 15 处零调用点的重复实现（`action_ball_sampling` 的 4 个 Vec3/Vec2 逐字复制校验器 +
+  2 个 lerp + 2 个截断采样 + 死的锥形方向采样、`my_on_policy_runner.MyOnPolicyRunner`、
+  `terminations` 里两个不在穷举 allow-list 上的全 3D 终止项与 robot_hit_table 路径上的孪生
+  body-id memo、`prelong_semantics` 里 docstring 自称“for launcher binding”但没人绑的 sha
+  入口等），并把 teacher-qdes 收据的三张严格键表提成常量、加一条直接 AST 读 `train.py` 生产方
+  字面量的生产者-消费者一致性断言，让“加一个字段就 LaunchRefused”在 host 测试先红而不是在
+  发射当天。
+  **两处已核实为死结构但本轮不动**，因为改它们会踩到今天刚落的实时 sha 钉子、逼别人重跑：
+  `mdp/hope_commands.py` 里指向不存在的 `_load_action_ball_runtime` 的注释（真正的绑定点是
+  `_initialize_action_ball_runtime`）——该文件在 `fresh_core_seed0_20260806_r2` 的
+  `solver_implementation_source_sha256` 七件套里，发射器逐字节复核；
+  `materialize_action_ball_n1_fixed_tape_variants.py` 的 `_target_values`——bundle
+  materializer 用**当前工作树**重算这份 producer sha 再跟磁带 build report 比，改一个字都会让
+  待跑的 A211/C211 materialize 直接 BundleError。两者都留到下次合法重钉时顺手带走。
+  全量套件基线对拍（Pod1，10106 项，`-n 24`）：清理前
+  `265 failed / 9712 passed / 111 skipped / 19 errors`，清理后失败集合逐条相同（差异的 3 进
+  1 出全部是并行顺序相关的 flake，在干净基线树上同样复现）；受影响模块定向对拍
+  `672 -> 745 passed`，失败集合同为那 3 项既有的 bundle-pin 失败。
+
 - 2026-08-04: MuJoCo WIP A211/C211 已在 exact Pod 各完成 `1 env x 2 PPO update`、
   reset-boundary save 与 fresh-process cold-load；211/319 observation 均有限，cold-load/update2
   exact 均为 true，A/C result SHA 分别为 `d58cb750…83bb2` / `440a1f2e…23733`。

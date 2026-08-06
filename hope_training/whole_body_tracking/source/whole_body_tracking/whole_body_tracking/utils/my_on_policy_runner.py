@@ -319,32 +319,13 @@ def zero_return_alarm_levels(cumulative: dict) -> Dict[str, str]:
     return levels
 
 
-class MyOnPolicyRunner(OnPolicyRunner):
-    def save(self, path: str, infos=None):
-        """Save the model and training information."""
-        super().save(path, infos)
-        if self.logger_type in ["wandb"]:
-            import wandb
-
-            policy_path = path.split("model")[0]
-            filename = policy_path.split("/")[-2] + ".onnx"
-            trained_with_obs_norm = bool(self.empirical_normalization)
-            normalizer = self.obs_normalizer if trained_with_obs_norm else None
-            export_policy_as_onnx(
-                self.alg.policy,
-                normalizer=normalizer,
-                path=policy_path,
-                filename=filename,
-            )
-            attach_onnx_metadata(
-                self.env.unwrapped, wandb.run.name, path=policy_path, filename=filename,
-                obs_norm_baked=is_empirical_normalizer(normalizer),
-                trained_with_obs_norm=trained_with_obs_norm,
-                source_checkpoint_path=path,
-            )
-            wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
-
-
+# [已删除 2026-08-06 过期结构清理] class MyOnPolicyRunner(26 行):上游 BeyondMimic 在
+# 8a9d329c 一起带进来的 runner,HOPE 从来没有实例化过它(全仓对 ``MyOnPolicyRunner``
+# 这个名字的引用数为 0,包括 yaml/json/文档/被 gitignore 的目录)。
+# 它的 save() 与下面 MotionOnPolicyRunner.save() 的 ONNX 导出段逐行相同 —— 也就是说
+# "checkpoint 落盘时怎么导 ONNX"这件事存了两份,而只有一份在跑。谁去修导出(改文件名规则、
+# 改 obs_norm 烘焙、加 metadata 字段),都有一半概率修在这份死的上。现役唯一 runner 是
+# MotionOnPolicyRunner:train.py:17641 与 action_ball_frozen_eval_sidecar.py:1938 导入它。
 class MotionOnPolicyRunner(OnPolicyRunner):
     def __init__(
         self,

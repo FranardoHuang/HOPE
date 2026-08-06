@@ -57,7 +57,11 @@ def test_every_native_attach_call_passes_obs_norm_baked():
             assert any(keyword.arg == "obs_norm_baked" for keyword in node.keywords), path
             assert any(keyword.arg == "trained_with_obs_norm" for keyword in node.keywords), path
             assert any(keyword.arg == "source_checkpoint_path" for keyword in node.keywords), path
-    assert calls == 4
+    # 2026-08-06: 4 -> 3。删掉的那一处在 my_on_policy_runner.MyOnPolicyRunner.save 里,
+    # 那个 runner 从 8a9d329c 引入起就零实例化(全仓零引用),它的 save() 与现役
+    # MotionOnPolicyRunner.save() 的导出段逐行相同。计数本身仍然是硬的:它防的是
+    # "某个 attach 调用点被 AST 走漏"。
+    assert calls == 3
 
 
 def test_native_callers_use_runner_normalizer_not_policy_attribute():

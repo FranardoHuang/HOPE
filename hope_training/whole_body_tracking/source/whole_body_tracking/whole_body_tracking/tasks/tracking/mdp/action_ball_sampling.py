@@ -316,68 +316,11 @@ def _vec2(
     )  # type: ignore[return-value]
 
 
-def _validate_interval(
-    lower: Vec3,
-    center: Vec3,
-    upper: Vec3,
-    *,
-    name: str,
-) -> None:
-    for index, (lo, middle, hi) in enumerate(zip(lower, center, upper)):
-        if hi < lo:
-            raise ValueError(f"{name}[{index}] has upper below lower")
-        if not lo <= middle <= hi:
-            raise ValueError(
-                f"{name}[{index}] center must lie inside its bounds"
-            )
-
-
-def _validate_interval2(
-    lower: Vec2,
-    center: Vec2,
-    upper: Vec2,
-    *,
-    name: str,
-) -> None:
-    for index, (lo, middle, hi) in enumerate(zip(lower, center, upper)):
-        if hi < lo:
-            raise ValueError(f"{name}[{index}] has upper below lower")
-        if not lo <= middle <= hi:
-            raise ValueError(
-                f"{name}[{index}] center must lie inside its bounds"
-            )
-
-
-def _validate_std_pair(
-    initial: Vec3,
-    maximum: Vec3,
-    *,
-    name: str,
-) -> None:
-    for index, (lo, hi) in enumerate(zip(initial, maximum)):
-        if lo < 0.0 or hi < 0.0:
-            raise ValueError(f"{name}[{index}] std must be non-negative")
-        if lo > hi:
-            raise ValueError(
-                f"{name}[{index}] initial std must not exceed maximum std"
-            )
-
-
-def _validate_std_pair2(
-    initial: Vec2,
-    maximum: Vec2,
-    *,
-    name: str,
-) -> None:
-    for index, (lo, hi) in enumerate(zip(initial, maximum)):
-        if lo < 0.0 or hi < 0.0:
-            raise ValueError(f"{name}[{index}] std must be non-negative")
-        if lo > hi:
-            raise ValueError(
-                f"{name}[{index}] initial std must not exceed maximum std"
-            )
-
-
+# [已删除 2026-08-06 过期结构清理] _validate_interval / _validate_interval2 /
+# _validate_std_pair / _validate_std_pair2(共 60 行,来自 6b13e0ff 的 07-27 WIP 快照)。
+# 四个函数全仓零调用点,而且是**两两函数体逐字相同**的 Vec3/Vec2 复制对——只有类型注解
+# 不同,函数体都靠 zip 逐分量走,长度自适应。留着就是"同一条边界规矩存四份":谁去补一条
+# 检查,补中两份的概率是 100%。区间/std 的现役校验走各 profile 自己的 _finite/_pair 路径。
 def _strict_unit(value: Vec3, *, name: str) -> Vec3:
     norm = math.sqrt(sum(component * component for component in value))
     if not math.isfinite(norm) or norm <= 1.0e-12:
@@ -497,14 +440,8 @@ def _lerp(initial: float, maximum: float, level: float) -> float:
     return initial + (maximum - initial) * level
 
 
-def _vec_lerp(initial: Vec3, maximum: Vec3, level: float) -> Vec3:
-    return tuple(_lerp(a, b, level) for a, b in zip(initial, maximum))  # type: ignore[return-value]
-
-
-def _vec2_lerp(initial: Vec2, maximum: Vec2, level: float) -> Vec2:
-    return tuple(_lerp(a, b, level) for a, b in zip(initial, maximum))  # type: ignore[return-value]
-
-
+# [已删除 2026-08-06 过期结构清理] _vec_lerp / _vec2_lerp:零调用点,且两者函数体逐字
+# 相同(同样是 zip 逐分量)。现役逐轴插值走 _vec3_lerp_levels。
 def _vec3_lerp_levels(
     initial: Vec3,
     maximum: Vec3,
@@ -3231,50 +3168,9 @@ def _sample_truncated_normal(
     return min(upper, max(lower, result))
 
 
-def _sample_vector_truncated(
-    *,
-    center: Vec3,
-    std: Vec3,
-    lower: Vec3,
-    upper: Vec3,
-    uniforms: Sequence[float],
-    name: str,
-) -> Vec3:
-    return tuple(
-        _sample_truncated_normal(
-            center=center[index],
-            std=std[index],
-            lower=lower[index],
-            upper=upper[index],
-            uniform=uniforms[index],
-            name=f"{name}[{index}]",
-        )
-        for index in range(3)
-    )  # type: ignore[return-value]
-
-
-def _sample_vector2_truncated(
-    *,
-    center: Vec2,
-    std: Vec2,
-    lower: Vec2,
-    upper: Vec2,
-    uniforms: Sequence[float],
-    name: str,
-) -> Vec2:
-    return tuple(
-        _sample_truncated_normal(
-            center=center[index],
-            std=std[index],
-            lower=lower[index],
-            upper=upper[index],
-            uniform=uniforms[index],
-            name=f"{name}[{index}]",
-        )
-        for index in range(2)
-    )  # type: ignore[return-value]
-
-
+# [已删除 2026-08-06 过期结构清理] _sample_vector_truncated / _sample_vector2_truncated
+# (共 44 行):零调用点,且只差 range(3)/range(2) 一个字面量。现役逐分量截断采样直接调
+# _sample_truncated_normal。
 def _sample_asymmetric_truncated(
     *,
     center: float,
@@ -4498,48 +4394,11 @@ def _validated_sampling_plan_override(
     return plan
 
 
-def _sample_direction_cone(
-    center: Vec3,
-    cone_deg: float,
-    radial_uniform: float,
-    azimuth_uniform: float,
-) -> Vec3:
-    """Uniformly sample solid angle inside a spherical cap."""
-
-    center = _strict_unit(center, name="cone center")
-    cone_rad = math.radians(cone_deg)
-    cosine_theta = 1.0 - radial_uniform * (1.0 - math.cos(cone_rad))
-    cosine_theta = min(1.0, max(-1.0, cosine_theta))
-    sine_theta = math.sqrt(max(0.0, 1.0 - cosine_theta * cosine_theta))
-    azimuth = 2.0 * math.pi * azimuth_uniform
-
-    # Pick the coordinate axis least aligned with the center to avoid a
-    # near-zero cross product.
-    abs_components = tuple(abs(component) for component in center)
-    auxiliary: Vec3
-    if abs_components[0] <= abs_components[1] and abs_components[0] <= abs_components[2]:
-        auxiliary = (1.0, 0.0, 0.0)
-    elif abs_components[1] <= abs_components[2]:
-        auxiliary = (0.0, 1.0, 0.0)
-    else:
-        auxiliary = (0.0, 0.0, 1.0)
-    tangent_u = _normalize_generated(
-        _cross(center, auxiliary), name="cone tangent"
-    )
-    tangent_v = _cross(center, tangent_u)
-    direction = _add(
-        _scale(center, cosine_theta),
-        _scale(
-            _add(
-                _scale(tangent_u, math.cos(azimuth)),
-                _scale(tangent_v, math.sin(azimuth)),
-            ),
-            sine_theta,
-        ),
-    )
-    return _normalize_generated(direction, name="sampled cone direction")
-
-
+# [已删除 2026-08-06 过期结构清理] _sample_direction_cone(41 行):零调用点。
+# 现役方向采样不是"球冠内均匀立体角",而是各 profile 自己的分量截断正态
+# (_sample_truncated_normal / _sample_asymmetric_truncated)。留着它会让下一个读代码的人
+# 以为存在一条现役的锥形方向分布。它用到的 _cross/_add/_scale/_normalize_generated/
+# _strict_unit 都还有其它现役调用点,不随之删除。
 class ActionBallSampler:
     """Arbitrary-N sampler with one independent random tape per action UID."""
 

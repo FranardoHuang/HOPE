@@ -2483,3 +2483,98 @@ def test_template_and_training_argv_preserve_venv_symlink_entry(tmp_path: Path):
     spec = launcher._validate_spec(raw)
     assert spec["source"]["isaac_python"] == str(venv_python)
     assert launcher._training_argv(spec, _bundle())[0] == str(venv_python)
+
+
+# --------------------------------------------------------------------------- #
+# 生产者-消费者严格键集:train.py 出收据,本发射器严格相等地吃
+# --------------------------------------------------------------------------- #
+def _train_module_level_tuple(train_tree, name: str) -> tuple:
+    return tuple(
+        ast.literal_eval(
+            next(
+                node.value
+                for node in train_tree.body
+                if isinstance(node, ast.Assign)
+                and any(
+                    isinstance(target, ast.Name) and target.id == name
+                    for target in node.targets
+                )
+            )
+        )
+    )
+
+
+def _oracle_document_literal(train_tree) -> ast.Dict:
+    """定位 train.py 里发布给本发射器的那一份 oracle 文档字面量。
+
+    不能只按 ``"teacher_qdes"`` 这个键名找:train.py 里有**两个**同名块,形状完全不同——
+    ``_make_c211_live_runtime_step_adapter`` 的**逐集** row 只有
+    ``preclamp_max_abs_error_rad`` / ``teleport_used`` 两个键,由 C211 evidence 那条链消费;
+    ``_run_teacher_qdes_oracle`` 的**文档级**块才是本发射器吃的那 6 个键。
+    所以锚点取"同一个 dict 字面量里同时有 teacher_qdes / capture_rejection / episodes",
+    这三个键只有那份发布文档同时具备。
+    """
+
+    anchors = {"teacher_qdes", "capture_rejection", "episodes"}
+    found = [
+        node
+        for node in ast.walk(train_tree)
+        if isinstance(node, ast.Dict)
+        and anchors
+        <= {
+            key.value
+            for key in node.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+    ]
+    assert len(found) == 1, (
+        "train.py 里同时带 teacher_qdes/capture_rejection/episodes 的文档字面量出现 "
+        "%d 次;本断言假设唯一发布点" % len(found)
+    )
+    return found[0]
+
+
+def _literal_block_keys(document: ast.Dict, block: str) -> tuple:
+    for key, value in zip(document.keys, document.values):
+        if (
+            isinstance(key, ast.Constant)
+            and key.value == block
+            and isinstance(value, ast.Dict)
+        ):
+            names = tuple(
+                inner.value
+                for inner in value.keys
+                if isinstance(inner, ast.Constant)
+                and isinstance(inner.value, str)
+            )
+            assert len(names) == len(value.keys), (
+                "train.py 的 %s 收据块混入了非字面量键,"
+                "这条一致性断言就不再是完整覆盖了" % block
+            )
+            return names
+    raise AssertionError("train.py 的 oracle 文档里找不到 %s 块" % block)
+
+
+def test_teacher_qdes_receipt_key_sets_match_the_train_py_producer():
+    """三张严格键表在 train.py 和本发射器里各存一份,这里是唯一逐键核对的地方。
+
+    人话:发射器用 ``set(...) != {...}`` 严格相等地吃 train.py 写出来的 teacher-qdes
+    收据。生产方加一个字段 = 消费方当场 LaunchRefused。那是 fail-closed 要的行为,
+    但没人应该在发射当天才发现。改了 train.py 的收据形状,本测试先红。
+    """
+
+    train_tree = ast.parse(
+        SCRIPT.with_name("train.py").read_text(encoding="utf-8")
+    )
+
+    assert _train_module_level_tuple(
+        train_tree, "_TEACHER_ORACLE_REJECT_KEYS"
+    ) == launcher.TEACHER_ORACLE_REJECT_KEYS
+
+    document = _oracle_document_literal(train_tree)
+    assert set(_literal_block_keys(document, "teacher_qdes")) == set(
+        launcher.TEACHER_QDES_RECEIPT_KEYS
+    )
+    assert set(_literal_block_keys(document, "capture_rejection")) == set(
+        launcher.TEACHER_CAPTURE_REJECTION_KEYS
+    )
