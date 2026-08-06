@@ -5362,6 +5362,140 @@ prototype / manifest / bundle / lineage）文件名里带着自己的摘要，�
   `classify_action_ball_contact`）被显式排除，理由码写进了收据。
   "题没变但分变了"仍然可能，那归 reward/grading 合同管，别指望 solver profile 拦。
 
+### 9.2.11 迁移做完了：离线重签这一步自己还是 v2，所以"重新物化"生不出能启动的 manifest（2026-08-07 落地并实跑验证）
+
+**人话先说**：§9.2.10 已经把新锁做好、收据也开好了，结论是"那 13 份内容寻址产物
+要由离线流水线按新 pin 重新物化"。**照做了，还是崩**——重新物化出来的 manifest 拿着
+`d26aaace…`，而 runtime 现算的是 `c196cf79…`。原因不在锁，也不在迁移脚本，
+**在离线流水线自己**：它重签的那一步还在按 v2 的规矩盖章。
+
+#### 断点在哪一行
+
+`scripts/materialize_measured_action_ball_n1_bundle.py` 的 `_materialize_live_profile_pins`。
+它的活是"把 pins 模板按活体源码重新封章"。v2 时代 payload 的身份就是七份源文件的
+**整文件 SHA 映射**，所以它做的唯一合理的事就是：把活体映射写进
+`solver_payload.implementation_source_sha256`，然后重算封章 SHA。
+
+v3 的 payload **根本没有这个键**。它封的是逐符号语义面，加上 counter-rally 两份
+**未裁定**源码的整文件 SHA。继续按 v2 塞，等于在密封件里多按一枚指纹——
+离线铸出的 pin 与 runtime 现算的那枚**永远差一个键**。
+
+**实测，不是推断**：同一份 v3 pins 文档 `action_ball_profile_pins.live.v2.5564d5b3c09d.json`，
+
+| 谁来铸 | 铸出的 `solver_profile_sha256` |
+| --- | --- |
+| `pin_action_ball_profile_contracts.py`（钉针脚本） | `c196cf79001df76d…` |
+| runtime boot 门现算 | `c196cf79001df76d…` |
+| `_materialize_live_profile_pins`（旧口径） | `d26aaace c335d143…` |
+
+两份 solver payload **逐键只差 `implementation_source_sha256` 一项**，去掉它逐字节相同。
+上一轮在 pod 上留下的 `fresh_core_seed0_20260807_r3` 就是这么来的：manifest 换了个数字，
+一样起不来。
+
+#### 改法：按 payload 自报的 schema 分叉，三条路都 fail-closed
+
+- `schema_version == 2`：维持整文件字节映射，**一行没动**（老谱系、老测试继续走）。
+- `schema_version == 3`：
+  1. 从**活体**源码重建语义面（`semantic_surface_contract` 自带那两道覆盖门，
+     有未分类符号就直接拒绝铸 pin）；
+  2. 只把 counter-rally 那两份未裁定源码的整文件 SHA 刷成活体值——runtime 也是这么算的，
+     **不刷才会对不上**；
+  3. 模板封着的语义面**只要不是活体那份就拒绝**——那是有覆盖符号动了，
+     属于"改题"不是"换章"，必须走 `migrate_action_ball_solver_pin_to_semantic_surface.py`
+     并留收据；
+  4. 模板声称 v3 却仍在密封 payload 里带着 v2 字节映射 → 拒绝，明说"这不是一枚 v3 pin"。
+- 其他 schema：**点名拒绝**，不再悄悄按 v2 盖章。
+
+注意第 3 条是**收紧**：v2 时代这一步会默默吸收源码漂移，正是它让 manifest 反复过期。
+
+#### 这支函数此前一条测试都没有——这就是错法能活下来的原因
+
+现在五条。载重的一条是**不动点**断言：把活体 v3 文档喂进去，吐回来的
+`solver_profile_sha256` 必须**还是那一枚**（也就是 runtime 现算的那枚）。
+拒绝那条的变异只动**一个覆盖符号的函数体**（`virtual_ball.flight_accel` 重力 `×1.05`），
+被钉源码清单、覆盖符号名、覆盖符号数**全都不变**——**粗一个档次的检查**
+（比个数、比名字、比文件清单）会直接放行。把旧行为塞回去，五条里**死两条**
+（不动点那条 + "拒绝混血文档"那条），pod 实测过。
+
+#### 重签账：动了什么，逐字段量出来的
+
+三次物化都在干净 checkout 里跑（`materialize_action_ball_*_lineage.py` 会**拒绝脏树**，
+所以产物和谱系分成两笔提交）。
+
+| 产物 | 叶字段数 | 变了几个 | 变的是什么 |
+| --- | --- | --- | --- |
+| action manifest | `182` | `3` | `solver_profile_sha256`，以及由它派生的 `prototype.path` / `prototype.sha256` |
+| task receipt（5 份同形） | `227` | `7` | `solver_sha256`、`manifest_sha256`，以及由这两个派生的 5 枚封章 |
+| c211 lineage | `62` | `6` | 三个指针（manifest / task receipt / bundle）的 path+sha |
+| c211 bundle | `58` | `5` | 两个指针 + 自己的 `content_sha256` |
+
+球的 profile、curriculum、counter-rally objective、holdout、landing aim、motion 绑定、
+task profile、actor/critic 宽度与 normalizer 身份、question-RNG 政策、DR-L0 绑定、
+trainability 合同——**全部逐字节相同**。
+
+**题目身份没动**：`offline_n1_tape_build_report` 里 `base_question_sha256` 前后都是
+`81eed5139b98…`，在它自陈的 **18 个**位置上逐个比过。
+
+**同时要明写一句反话，别让人引错字段**：`canonical_sha256` **是变了的**
+（`94b79245…` → `697227c8…`），因为它按构造就封着 solver pin。
+"题没变"的证据是 `base_question_sha256` **加上** 那 220 个没动的物理字段，
+**不是** `canonical_sha256`。拿 `canonical_sha256` 当同一性证据就是引错了字段。
+
+另有两处诚实记账：prototype 里 `provenance.producer_source_sha256` 变了（本轮改了 producer），
+`full_solver_admission_preflight` 下 `action_ball_curriculum` / `action_ball_sampling`
+两枚运行时模块摘要也变了——它们在 `92c4ce94`、`4c9cf280` 动过，而 r2 核心是在那之前封的。
+这是"这份核心是什么时候铸的"的出处记录，不是题目身份。
+
+#### 收据自陈，且"漏没漏"是数出来的不是嘴说的
+
+`configs/action_ball_n1_measured_20260807/solver_pin_v3_re_signing_ledger.v1.bfe7f6bc3a8f.json`
+一一列出 **18** 份产物的 before path+sha → after path+sha、各自变了哪些叶字段，
+**每个数字都是出账时现量的**，不是抄来的。里面还有一项
+`residual_references_to_retired_digests`：对三枚退役摘要（旧 pin / 旧 manifest / 旧 task receipt）
+做全树 `git grep` 并分类，结果 **`unresolved_live_reference_count: 0`** ——
+剩下的每一条要么是留作历史的 `2026-08-06` 旧谱系，要么是按设计记录 before 值的迁移收据。
+**漏一个引用就是下一轮的 boot 硬崩，所以它是数出来的。**
+
+`A211` 谱系也指着同一枚旧 manifest，**同批重签**了，不留半条断链。
+`2026-08-06` 旧谱系**原地保留**——崩掉的那些 run 就是拿它发的，删了等于抹掉崩因证据。
+
+#### 迁移脚本本身：三道门真的跑过并通过
+
+`migrate_action_ball_solver_pin_to_semantic_surface.py` 在本轮 checkout 上重跑
+（`--to-rev` 指向本轮提交，而不是上一轮的 `d4e1e70c`），**没有拒绝**：
+`198` 个覆盖符号在两个 revision 上逐个对拍，只有 `2` 个动了且都是 pin 自己的声明半边，
+三个"给题目取名字"的函数摘要逐字节相同。收据落在
+`…/v3pin_core_seed0_20260807_r1/solver_pin_semantic_surface_migration.v1.cce63a1bac8c.json`。
+
+#### 实跑验证：C0 recipe 真的过了那道门
+
+pod1 GPU1，干净 worktree `pinv3_isaac_20260807`，`materialize` → `recipe` 两段都 `EXIT=0`，
+`terminal_kind = clean_completion`。run.log 里 `solver profile SHA mismatch` 与 `Traceback`
+命中数**都是 0**，运行时自陈那行是：
+
+```
+[RacketTargetCommand] action-ball runtime bound: actions=1, mobility=no_move,
+manifest=bb65ca3f3a8e…, solver=c196cf79001df76d…, physics=aa5c9085f9b48ca6…,
+target_source=direct_ball, target_recipe=outcome_dense_only
+```
+
+#### 回归账（pod1，`/workspace/hope_isaac_venv/bin/python`，**不是** `/usr/bin/python3`）
+
+| 集合 | 基线（`085df5ec`） | 改后 |
+| --- | --- | --- |
+| 6 模块（bundle / contact-training-bundle / tape-variants / c211-lineage / semantic-surface / pinner） | `81 passed`，**`0 skipped`**，退出 `0` | `86 passed`，**`0 skipped`**，退出 `0` |
+| 2 个发射器模块（c211 / a211 four-arm） | —— | `310 passed`，**`0 skipped`**，退出 `0` |
+
+`+5` 就是本轮新增的五条。**skip 数写清是因为 `1 skipped` + 退出 `0` 看着像绿的、其实什么都没跑**；
+这两组都是 `0 skipped`。
+
+#### 还没关的洞（本轮新增，别当成已解决）
+
+- 旧的 `fresh_core_seed0_20260807_r2` / `_r3`（上一轮在 pod 上按旧口径铸的两份）**没有提交**，
+  也不该被拿来用；它们的 manifest 拿着 `d26aaace`，一样起不来。
+- 本轮只验到 `recipe` 段起得来。`oracle32` / `scale4096` 两段**没跑**，
+  它们各自的门是否还有别的过期指针，本轮没有证据。
+
 ### 9.2 MuJoCo 顺序
 
 - **MuJoCo core 现在并行做**：pin mjlab/runtime，实现 MJCF/scene/plant、action/delay、deterministic
