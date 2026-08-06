@@ -1,10 +1,14 @@
 """Exact native-MuJoCo port of the Isaac ActionBall robot/table guard.
 
-The Isaac rule is a conservative pose keep-out, not a resolved-contact test:
-43 pinned robot collision-component OBBs and one live racket-blade OBB are
-broadened to world AABBs and compared with the five inflated table-assembly
-AABBs at every physics substep.  This module consumes the same immutable
-component artifact and fails closed if any source identity drifts.
+The Isaac rule is a pose keep-out, not a resolved-contact test: 43 pinned robot
+collision-component OBBs and one live racket-blade OBB are compared with the
+five inflated table-assembly AABBs at every physics substep.  Broadening each
+OBB to a world AABB is only the PREFILTER; the verdict is the exact 15-axis
+separating-axis test.  This module consumes the same immutable component
+artifact and fails closed if any source identity drifts.
+
+人话:这个文件是 Isaac 撞桌判据的 MuJoCo 复刻。它一度停在旧版"胀成正方盒子就算撞",
+比 Isaac 现役判据更容易误报;现在两边都用精确 SAT,跨引擎结论才可比。
 """
 
 from __future__ import annotations
@@ -753,6 +757,73 @@ def _validated_table_aabbs(geometry_contract: Mapping[str, Any]) -> tuple[np.nda
     return lo, hi
 
 
+def _obb_aabb_sat_overlap(
+    obb_center: np.ndarray,
+    obb_half_axes: np.ndarray,
+    aabb_lo: np.ndarray,
+    aabb_hi: np.ndarray,
+    broad_phase: np.ndarray,
+) -> np.ndarray:
+    """NumPy transcription of Isaac ``terminations._obb_aabb_sat_overlap``.
+
+    人话:盒子是斜的,所以"把斜盒子胀成正盒子再比"会把空角落也算成撞上。
+    这里做的是 15 轴精确判定,和 Isaac 现役终止判据逐条对齐。
+
+    ``obb_center`` is ``[N,3]`` and ``obb_half_axes`` is ``[N,3,3]``; each of the
+    last-but-one rows is one rotated half-axis vector, not merely an extent.
+    Results are ``[N,O]``.  SAT is evaluated only for the positive pairs of the
+    conservative world-AABB ``broad_phase``; every other pair is exactly false,
+    so no world-AABB approximation reaches the verdict.  Degenerate
+    cross-product axes impose no constraint, as required by SAT, and the
+    comparison is inclusive so a touching face counts as overlap — both exactly
+    as the Isaac kernel does.
+    """
+
+    shape = (obb_center.shape[0], aabb_lo.shape[0])
+    result = np.zeros(shape, dtype=bool)
+    candidate = np.argwhere(broad_phase)
+    if candidate.size == 0:
+        return result
+    obb_index, box_index = candidate[:, 0], candidate[:, 1]
+    pair_center = obb_center[obb_index]
+    pair_half_axes = obb_half_axes[obb_index]
+    box_center = 0.5 * (aabb_lo + aabb_hi)
+    box_half = 0.5 * (aabb_hi - aabb_lo)
+    delta = box_center[box_index] - pair_center
+
+    axis_norm = np.linalg.norm(pair_half_axes, axis=-1)
+    safe_norm = np.maximum(axis_norm, np.finfo(np.float64).tiny)
+    obb_unit_axes = pair_half_axes / safe_norm[..., None]
+    overlap = np.ones((candidate.shape[0],), dtype=bool)
+
+    def apply_axis(axis: np.ndarray) -> None:
+        # Projection radii may use an unnormalised axis; every term then carries
+        # the same scale and a degenerate cross axis reduces to ``0 <= 0``.
+        separation = np.abs(np.sum(delta * axis, axis=-1))
+        obb_radius = np.sum(
+            np.abs(np.sum(pair_half_axes * axis[:, None, :], axis=-1)), axis=-1
+        )
+        box_radius = np.sum(box_half[box_index] * np.abs(axis), axis=-1)
+        np.logical_and(
+            overlap, separation <= obb_radius + box_radius, out=overlap
+        )
+
+    world_axes = np.eye(3, dtype=np.float64)
+    for world_axis in range(3):
+        apply_axis(np.broadcast_to(world_axes[world_axis], pair_center.shape))
+    for obb_axis in range(3):
+        axis = obb_unit_axes[:, obb_axis, :]
+        apply_axis(axis)
+        for world_axis in range(3):
+            apply_axis(
+                np.cross(
+                    axis, np.broadcast_to(world_axes[world_axis], axis.shape)
+                )
+            )
+    result[obb_index, box_index] = overlap
+    return result
+
+
 def geometric_robot_table_hit(
     body_pos_w: Any,
     body_rotation_w: Any,
@@ -762,7 +833,15 @@ def geometric_robot_table_hit(
     *,
     racket_body_index: int,
 ) -> bool:
-    """NumPy equivalent of Isaac's conservative broad-phase terminal kernel."""
+    """NumPy equivalent of Isaac's exact OBB-vs-AABB terminal kernel.
+
+    Mirrors ``terminations._geometric_table_contact_hit_mask_unchecked``: the
+    conservative world AABB is a PREFILTER, and the verdict is the exact 15-axis
+    separating-axis test on the component / racket-blade OBBs.  Isaac stopped
+    terminating on the broad phase in 5ed998f1 (2026-08-04); this port kept
+    returning the retired broad-phase verdict until it was corrected, which made
+    it fire on rotated boxes whose empty corners merely straddled a table AABB.
+    """
 
     positions = np.asarray(body_pos_w, dtype=np.float64)
     rotations = np.asarray(body_rotation_w, dtype=np.float64)
@@ -803,13 +882,16 @@ def geometric_robot_table_hit(
     component_half += COMPONENT_WORLD_AABB_GUARD_M
     component_lo = component_center - component_half
     component_hi = component_center + component_half
-    component_overlap = np.ones((43, 5), dtype=bool)
+    component_broad = np.ones((43, 5), dtype=bool)
     for axis in range(3):
-        component_overlap &= (
+        component_broad &= (
             (component_hi[:, axis, None] >= lo[None, :, axis])
             & (component_lo[:, axis, None] <= hi[None, :, axis])
         )
-    if bool(np.any(component_overlap)):
+    component_exact = _obb_aabb_sat_overlap(
+        component_center, rotated_axes, lo, hi, component_broad
+    )
+    if bool(np.any(component_exact)):
         return True
 
     racket_rotation = rotations[racket_body_index]
@@ -822,9 +904,13 @@ def geometric_robot_table_hit(
     blade_half = np.sum(np.abs(blade_axes), axis=0)
     blade_lo = blade_center - blade_half
     blade_hi = blade_center + blade_half
-    return bool(
-        np.any(np.all((blade_hi[None, :] >= lo) & (blade_lo[None, :] <= hi), axis=1))
+    blade_broad = np.all(
+        (blade_hi[None, :] >= lo) & (blade_lo[None, :] <= hi), axis=1
     )
+    blade_exact = _obb_aabb_sat_overlap(
+        blade_center[None, :], blade_axes[None, :, :], lo, hi, blade_broad[None, :]
+    )[0]
+    return bool(np.any(blade_exact))
 
 
 class ExactRobotTableGuard:

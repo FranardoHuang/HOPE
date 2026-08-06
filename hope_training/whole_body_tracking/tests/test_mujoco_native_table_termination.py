@@ -39,7 +39,7 @@ def _five_boxes():
     return lo, hi
 
 
-def test_numpy_guard_matches_inclusive_conservative_and_nonfinite_semantics():
+def test_numpy_guard_matches_inclusive_exact_and_nonfinite_semantics():
     positions = np.full((32, 3), 10.0, dtype=np.float64)
     rotations = np.tile(np.eye(3, dtype=np.float64), (32, 1, 1))
     lo, hi = _five_boxes()
@@ -53,11 +53,16 @@ def test_numpy_guard_matches_inclusive_conservative_and_nonfinite_semantics():
         positions, rotations, components, lo, hi, racket_body_index=31
     )
 
-    positions[0] = (0.110001, 0.0, 0.0)
+    # Axis-aligned: the exact test is inclusive, so a touching face still ends
+    # the episode, and one float past touching does not.  The retired broad
+    # phase inflated every component by COMPONENT_WORLD_AABB_GUARD_M and so
+    # answered True a micrometre beyond contact; Isaac's exact terminal does
+    # not, and neither may this port.
+    positions[0] = (0.11, 0.0, 0.0)
     assert term.geometric_robot_table_hit(
         positions, rotations, components, lo, hi, racket_body_index=31
     )
-    positions[0] = (0.1100021, 0.0, 0.0)
+    positions[0] = (0.110001, 0.0, 0.0)
     assert not term.geometric_robot_table_hit(
         positions, rotations, components, lo, hi, racket_body_index=31
     )
@@ -65,6 +70,187 @@ def test_numpy_guard_matches_inclusive_conservative_and_nonfinite_semantics():
     positions[7, 0] = np.nan
     assert term.geometric_robot_table_hit(
         positions, rotations, components, lo, hi, racket_body_index=31
+    )
+
+
+def test_terminal_is_exact_sat_not_the_retired_world_aabb_broad_phase():
+    """A rotated box whose EMPTY CORNER straddles the table is not a hit.
+
+    人话:斜着的碰撞盒,把它胀成正方盒子会把空角落也算进去。旧版 MuJoCo 复刻就是
+    这么判的,于是比 Isaac 更容易误报撞桌。这条用例在旧实现下必然失败。
+
+    45-degree yaw puts the component's world AABB corner inside box 0 while
+    every SAT axis still separates the two solids.  ``geometric_robot_table_hit``
+    must answer False, exactly as the live Isaac terminal does.
+    """
+
+    lo, hi = _five_boxes()
+    components = _synthetic_components()
+    positions = np.full((32, 3), 10.0, dtype=np.float64)
+    angle = np.pi / 4.0
+    cos_a, sin_a = float(np.cos(angle)), float(np.sin(angle))
+    rotations = np.tile(np.eye(3, dtype=np.float64), (32, 1, 1))
+    rotations[0] = np.array(
+        [[cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    # Half-extent 0.01 cubes: rotated world AABB half-extent is 0.01*sqrt(2)
+    # along x and y, so a centre at 0.1 + 0.012 is inside the inflated box in
+    # every axis, while the true corner-to-face distance stays positive.
+    positions[0] = (0.1 + 0.012, 0.1 + 0.012, 0.0)
+
+    owner_rotation = rotations[components.owner_indices]
+    centre = positions[components.owner_indices] + np.einsum(
+        "cij,cj->ci", owner_rotation, components.local_centers_m
+    )
+    rotated_axes = np.einsum(
+        "cij,ckj->cki", owner_rotation, components.local_half_axes_m
+    )
+    world_half = np.abs(rotated_axes).sum(axis=1) + term.COMPONENT_WORLD_AABB_GUARD_M
+    broad = np.ones((43, 5), dtype=bool)
+    for axis in range(3):
+        broad &= (
+            ((centre + world_half)[:, axis, None] >= lo[None, :, axis])
+            & ((centre - world_half)[:, axis, None] <= hi[None, :, axis])
+        )
+    assert bool(broad[0, 0]), "the discriminating case needs the prefilter to pass"
+
+    assert not term.geometric_robot_table_hit(
+        positions, rotations, components, lo, hi, racket_body_index=31
+    )
+
+
+def test_numpy_guard_verdict_equals_the_live_isaac_terminal_kernel():
+    """Randomised cross-implementation parity against the shipped Isaac kernel.
+
+    This is the check that would have caught the port standing still while
+    ``terminations`` moved from the broad phase to exact SAT in 5ed998f1.
+    """
+
+    torch = pytest.importorskip("torch")
+    sys.path.insert(0, str(WBT_ROOT / "tests"))
+    from test_reward_flags_mdp import _PKG, _load  # noqa: E402  (installs the isaaclab stub)
+
+    mdp_dir = (
+        WBT_ROOT
+        / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp"
+    )
+    sys.modules[_PKG].__path__ = [str(mdp_dir)]
+    isaac = _load(f"{_PKG}.terminations", "terminations.py")
+
+    components = term.load_collision_components()
+    lo = np.array(
+        [
+            (0.48, -0.7825, 0.69),
+            (0.48, -0.7825, -0.02),
+            (1.845, -0.9325, 0.74),
+            (1.84, 0.8825, 0.74),
+            (1.84, -0.9425, 0.74),
+        ],
+        dtype=np.float64,
+    )
+    hi = np.array(
+        [
+            (3.26, 0.7825, 0.78),
+            (3.26, 0.7825, 0.73),
+            (1.895, 0.9325, 0.9325),
+            (1.90, 0.9425, 0.9525),
+            (1.90, -0.8825, 0.9525),
+        ],
+        dtype=np.float64,
+    )
+    def retired_broad_phase_verdict(positions, rotations):
+        """The pre-5ed998f1 rule, kept here ONLY so the sample can prove it differs."""
+
+        owner_rotation = rotations[components.owner_indices]
+        centre = positions[components.owner_indices] + np.einsum(
+            "cij,cj->ci", owner_rotation, components.local_centers_m
+        )
+        axes = np.einsum(
+            "cij,ckj->cki", owner_rotation, components.local_half_axes_m
+        )
+        half = np.abs(axes).sum(axis=1) + term.COMPONENT_WORLD_AABB_GUARD_M
+        broad = np.ones((43, 5), dtype=bool)
+        for axis in range(3):
+            broad &= (
+                ((centre + half)[:, axis, None] >= lo[None, :, axis])
+                & ((centre - half)[:, axis, None] <= hi[None, :, axis])
+            )
+        if bool(np.any(broad)):
+            return True
+        racket_rotation = rotations[31]
+        blade_centre = positions[31] + (
+            racket_rotation @ term.RACKET_BLADE_CENTER_OFFSET_WRIST_M
+        )
+        blade_half = np.abs(
+            np.einsum("ij,kj->ki", racket_rotation, term.RACKET_BLADE_LOCAL_HALF_AXES_M)
+        ).sum(axis=0)
+        return bool(
+            np.any(
+                np.all(
+                    ((blade_centre + blade_half)[None, :] >= lo)
+                    & ((blade_centre - blade_half)[None, :] <= hi),
+                    axis=1,
+                )
+            )
+        )
+
+    rng = np.random.default_rng(20260806)
+    hit_samples = 0
+    retired_rule_disagreements = 0
+    for trial in range(400):
+        # Park the whole robot far away and graze ONE owner body across the
+        # near-top corner of the table slab.  Poses drawn uniformly over the
+        # court all overlap something, which never separates the two rules.
+        positions = np.full((32, 3), 50.0, dtype=np.float64)
+        owner = int(components.owner_indices[trial % 43])
+        positions[owner] = rng.uniform((0.36, -0.30, 0.60), (0.62, 0.30, 0.92))
+        quats = rng.normal(size=(32, 4))
+        quats /= np.linalg.norm(quats, axis=-1, keepdims=True)
+        w, x, y, z = quats[:, 0], quats[:, 1], quats[:, 2], quats[:, 3]
+        rotations = np.stack(
+            [
+                np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)], -1),
+                np.stack([2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)], -1),
+                np.stack([2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], -1),
+            ],
+            axis=1,
+        )
+        port = term.geometric_robot_table_hit(
+            positions, rotations, components, lo, hi, racket_body_index=31
+        )
+        live = bool(
+            isaac._geometric_table_contact_hit_mask_unchecked(
+                torch.as_tensor(positions, dtype=torch.float64)[None],
+                torch.as_tensor(quats, dtype=torch.float64)[None],
+                torch.zeros((1, 3), dtype=torch.float64),
+                torch.as_tensor(components.owner_indices, dtype=torch.long),
+                torch.as_tensor(components.local_centers_m, dtype=torch.float64),
+                torch.as_tensor(components.local_half_axes_m, dtype=torch.float64),
+                torch.as_tensor(lo, dtype=torch.float64),
+                torch.as_tensor(hi, dtype=torch.float64),
+                racket_body_index=31,
+                racket_blade_center_offset_wrist_m=torch.as_tensor(
+                    term.RACKET_BLADE_CENTER_OFFSET_WRIST_M, dtype=torch.float64
+                ),
+                racket_blade_local_half_axes_m=torch.as_tensor(
+                    term.RACKET_BLADE_LOCAL_HALF_AXES_M, dtype=torch.float64
+                ),
+            )[0].item()
+        )
+        assert port == live, (
+            "MuJoCo port and live Isaac terminal disagree on the same pose"
+        )
+        if live:
+            hit_samples += 1
+        if retired_broad_phase_verdict(positions, rotations) != live:
+            retired_rule_disagreements += 1
+    assert hit_samples > 0, "parity sample never exercised a hit"
+    # Without this the parity assertion is toothless: a sample on which the two
+    # rules agree everywhere would also pass against the retired broad phase.
+    assert retired_rule_disagreements > 0, (
+        "parity sample never separated the exact terminal from the retired "
+        "world-AABB broad phase, so it cannot detect the port standing still"
     )
 
 
