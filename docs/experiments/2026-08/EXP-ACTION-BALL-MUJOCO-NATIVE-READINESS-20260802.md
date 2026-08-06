@@ -47,6 +47,12 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 > 本表各行的"下一道可执行门"仍然有效，但**排序**看 §5.6.17。
 > 同批就地更正：§5.3 / §9.2.9 / §12 三处把死亡罚写成 post-dt `-6` 的旧数
 > （活值是 `-0.2`，weight `-10`），以及 §5.6.13 (A) 那句"四格 `scale4096` 正在发"（**没有在发**）。
+>
+> **§5.6.18 是 §5.6.17 的验收**：§5.6.17 读的是别人的收据，§5.6.18 把每一道声称
+> "已接线"的门改回接线前的样子实测（`15` 个变异全红），并核了每一条"删了因为别的机制管"
+> 的那个机制今天真的在跑。两处新发现：**平时跑套件的那个 venv 缺 `cryptography`，
+> 课程 launcher 的 `53` 条护栏测试在历次全量对拍里一次都没执行过**；
+> **零调用点的门有第六个**（§5.6.13 (C-2) 原写"没有第六个"，已就地更正）。
 
 | 关键路径 | 当前事实 | 下一道可执行门 |
 | --- | --- | --- |
@@ -1749,11 +1755,22 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
    （建议键名 `reveal_to_playback_bridge`），这样收据能**自陈**这一步跑过了——
    否则又是一个"只出结论、没人读"的位。
 2. **拒绝面会怎么变（这是本条唯一有风险的地方）。** 新增的硬拒收有四类：
-   (a) `status != "active_fail_closed"` —— **桥没配起来时生产方返回
-   `{"status": "not_configured"}`（`:3065`），接线当天这条就会把它拒掉**；
-   `require_bridge_telemetry` 默认 `True`（`:1673`），所以正常路径应当是 `:3285` 的
-   `active_fail_closed`，但"默认为真"和"每一格都真的配上了"是两回事，**接线前先拿一格
-   已落盘的 `scale4096` 收据实测一遍 `status` 到底是什么**，别在发射当天才发现。
+   (a) `status != "active_fail_closed"` —— 桥没配起来时生产方返回
+   `{"status": "not_configured"}`（`:3065`）。
+   > **2026-08-07 就地更正：原文这里要求"接线前先拿一格已落盘的 `scale4096` 收据
+   > 实测一遍 `status`"。这一步既做不到也不必做——没有任何一格跑完过，没有收据可读。
+   > 静态读三行就能给出更强的答案，而且今天就能读：**
+   > `_prelong_bridge_authority`（`action_ball_prelong_semantics.py:1369`）**只有在
+   > WAIT schedule 缺席且 `required=False` 时才返回 `None`**；`required` 就是
+   > `require_bridge_telemetry`，默认 `True`（`:1673`），而**全仓只有三处传 `False`，
+   > 全在 `test_action_ball_prelong_semantics.py` 里**，零个生产调用方。
+   > 所以现役路径上 `_bridge_enabled` 恒真，桥要么是 `:3285` 的 `active_fail_closed`，
+   > 要么在 ledger 构造那一刻就 `PrelongSemanticLedgerError` 直接死掉——
+   > **`not_configured` 在生产上根本产不出来**。
+   > 附带一条：真产出了 `not_configured`，它只有 `status` / `reason` 两个键，
+   > 而 `_exact_keys` 要六个，所以它会先在**键集合**上被拒、拒绝信息不会提 `status`。
+   > 接线前该做的那一步因此变成：**确认没有人给 `require_bridge_telemetry` 传 `False`**
+   > （一次 grep），不是等一份不存在的收据。
    (b) 七项权威 SHA / `wait_cohort_ticks` / `policy_dt_s == 0.02` 的逐项形状与相等；
    (c) 每个 WAIT 档 `reveal = start + terminal + censored`，且 `reveal/start/terminal`
    跨 update 单调不减，且整窗 `reveal_delta > 0`；
@@ -1894,8 +1911,22 @@ M4 让摘要**内部完全自洽**、`conserves` 依旧写着 `True`，只是整
 把名字形状放宽到 `_validate_*` / `_require_*` / `_valid_*` / `_check_*` / `_assert_*` /
 `_verify_*` / `_reverify_*` / `_ensure_*` / `_reject_*` / `_forbid_*` / `_guard_*` /
 `_refuse_*` / `_enforce_*` / `_must_*` 之后，结果**仍然是这 5 个**，与本节原先登记的一致：
-(A) 一条、本条两条、canonical 车道两条。**"零调用点 gate 是系统性的"这个前提，
-在本轮复核下只成立到 5 个为止，没有第六个**。canonical 车道那两条维持"只登记不判决"。
+(A) 一条、本条两条、canonical 车道两条。canonical 车道那两条维持"只登记不判决"。
+
+> **2026-08-07 就地更正：原文这里写着"没有第六个"，这句是错的，有第六个。**
+> 上面那张名字形状清单**每一条都带前导下划线**，于是漏掉了公开方法。
+> 2026-08-07 用同样的方法但把 `assert_*` / `validate_*` / `verify_*` / `require_*` /
+> `check_*` / `ensure_*` / `enforce_*` 这些**不带下划线**的形状也算进去、
+> 并且把 `def` 的收集范围从模块级放宽到含嵌套（即类里的方法也算），
+> 扫出第六个：`ActionBirthBroker.assert_known_generation`
+> （`mdp/action_ball_runtime.py:6390`，全仓 `.py` 命中 `1` 次、文档命中 `0` 次）。
+> 判决与证据见 §5.6.18 二.2。
+
+**(C-3) 上面那四条变异证据，只在 `/usr/bin/python3` 下有效——别拿正式 venv 复现。**
+`test_launch_action_ball_curriculum.py` 全模块 `59` 条，在 `/workspace/hope_isaac_venv`
+下 **`53` 条被 skip**（`could not import 'cryptography'`），其中就包括 M1/M2 要杀的那条。
+也就是说：拿 venv 跑 M1（把门整句删掉），pytest 会报 `1 skipped`、退出码 `0`，
+**看上去是绿的**。2026-08-07 独立复跑时先踩了这个坑，详见 §5.6.18 二.1。
 
 **(D) §5.6.3「尚未对齐、需单独裁决的」四条逐条现状。**
 
@@ -2600,6 +2631,12 @@ missed 说全仓零消费方零测试——**写的时候成立，现在不成�
 **但全部未提交**（`git show HEAD:` 对 `trainer.py` / `checkpoint.py` grep `promotion_blocked` 均 `0` 命中）。
 **裁决：这一条不是"要做"，是"要落地"。未提交 = 不存在。**
 
+> **2026-08-07 就地更正：已经落地了，本条作废。** `52e6199b`（11 个文件、`+746/-7`）
+> 把三个消费方连同测试一起提交并 push。2026-08-07 独立复跑四个变异（C1 拆掉
+> `run_update` 里的消费、C2 保留消费但去掉"计数 vs 结论"对账、C3 把结论位从 canary
+> 的 `passed` 里摘掉、C4 让 checkpoint 收据把这一位写死 `False`）**四条全部转红**，
+> 见 §5.6.18 一。下面二.B2 那一行同步作废。
+
 **矛盾 4：三道零调用点的门。**
 missed 说三道全是零调用点——写的时候成立。**本节写作过程中前两道落地了**：
 `8a6554c7`（2026-08-07 00:17）把 `_require_fresh_order_sentinel`
@@ -2640,7 +2677,7 @@ randomness 初稿判成真缺并给了对齐建议，Franco `48174f23` **两条�
 | # | 一句人话 | 这是什么 | 为什么非发车前不可 | 代价 |
 | --- | --- | --- | --- | --- |
 | **B1** | 让 `4096x5` 那道共享门**真的去读**每个 update 都在产的 reveal→playback 桥 | 桥 = "揭示任务那一刻的题目 / 采样器 / 奖励配方 / WAIT 表 / 计时合同这 `7` 个权威 SHA，加上逐 WAIT 档的 reveal→playback 寿命守恒，加上一个 `status` 位" | 桥没配起来时生产方返回 `status="not_configured"`，严格消费方要求 `active_fail_closed`——**接了线就是拒收，现在是静默放行**。四格的全部结论都建立在这道门上 | **具体怎么做 §5.6.13 (A) 已经写了逐步方案（`8a6554c7` 落的），照着做即可，本节不重复**。这里只补三条：(1) 纯 CPU，且**不动 `solver_profile_sha256`**（该门不在那 `5`(+`2`) 个源文件里），零 lineage 代价；(2) 那份方案的排期写着"等 `scale4096` 落地后执行"——**该前提不成立**（矛盾 2），已就地更正；(3) 方案 2(a) 那句"接线前先拿一格已落盘的 `scale4096` 收据实测一遍 `status`"是**真的要先做的一步**，因为现在没有一格跑完过，`status` 到底是 `active_fail_closed` 还是 `not_configured` 谁都没实测过 |
-| **B2** | 把 `promotion_blocked` 那三个消费方落地（写完了，**没提交**） | 见矛盾 3；两道零调用点门已于 `8a6554c7` 落地，不在本条范围内了 | 未提交的护栏在发车那一刻不存在。而 `promotion_blocked` 守的正是"`joint_actual_forbidden` 改软之后**不终止但卡晋级**"的后半句——四格恰恰是它会非零的场景（exact r6 每个 update 的 `7` 个硬终止全是这一条） | 已经写完了（`trainer.py` / `checkpoint.py` / 两个 launcher / `+68` 行测试 / §5.6.16），只差提交 |
+| ~~**B2**~~（**2026-08-07 已完成**，`52e6199b`，变异复跑见 §5.6.18 一） | 把 `promotion_blocked` 那三个消费方落地（写完了，**没提交**） | 见矛盾 3；两道零调用点门已于 `8a6554c7` 落地，不在本条范围内了 | 未提交的护栏在发车那一刻不存在。而 `promotion_blocked` 守的正是"`joint_actual_forbidden` 改软之后**不终止但卡晋级**"的后半句——四格恰恰是它会非零的场景（exact r6 每个 update 的 `7` 个硬终止全是这一条） | 已经写完了（`trainer.py` / `checkpoint.py` / 两个 launcher / `+68` 行测试 / §5.6.16），只差提交 |
 | **B3** | 把 §5.3/§5.4 的静态奖励层级账**对真正要发的 DRL0 leaf 重算一次**并落收据 | 那份账是"模仿 < 击中 < 上台"这条准绳的数值证明 | 审计器自 `635252f6` 起已经能读 DRL0 leaf，但**至今没有一份对它重算的收据**。四格的头号读数就是这三层的相对高低——账没重算 = 头号读数没有基准。而且 §5.3 那段的算术本轮刚被证明是错的（矛盾 1） | 纯 CPU host，不占 GPU |
 | **B4** | 给"权重非零、被门确认在编、但 kernel 结构上恒返回零"的奖励项加一条会说话的检查 | 现役 manifest 开着 `counter_rally_objective`，于是 `virtual_pass_net`（admitted 权重 `20.0`）与 `virtual_spin` **整窗恒零**（`hope_rewards.py:4836` / `:5019`） | `4096x5` gate 只按 `motion/strike/target/outcome` 四**组**报分母与收入、不逐**项**报，所以 outcome 组里躺着一个死项**看不出来**——四格读出来的 outcome 收入结构是错的，且没有任何机制会说 | 在 prelong 语义收据里逐项报 eligible 分母与收入，并对"权重非零 × 连续五个 update 收入恒为 `0`"出一条 blocker |
 
@@ -2722,6 +2759,238 @@ randomness 初稿判成真缺并给了对齐建议，Franco `48174f23` **两条�
 5. **不代签本节的三档排序在 Franco 的目标函数下是最优的。**
    排序判据只有两条（对四格结论可信度的影响 × 静默失败可能性），
    凡是"要 Franco 拍板"的（A2、C2 的二选一、push 剂量）都已单独标出，没有替他定。
+
+#### 5.6.18 三条 review 的独立验收：把门改回去，看测试红不红（2026-08-07）
+
+**人话一句：** §5.6.17 是把三份自述合并成一张清单，**它读的是别人的收据**。
+这一节相反：**默认三份自述都不准，逐条自己动手核**——把每一道声称"已接线"的门
+改回接线前的样子，看指定的测试会不会真的变红；把每一条声称"已有别的机制管"的删除，
+去核那个机制今天真的在跑。结论是**三条自述基本都站得住，但有两处新发现，
+其中一处直接推翻了一句写进本文的结论**。
+
+##### 一、把门改回去：16 个变异，16 个转红
+
+判据不是"跑一遍绿"，是"**把源码改回没有这道门的样子，指定的测试必须红**"。
+16 个变异**全部改的是被测源码本身**，不是测试。改完跑、跑完 `git checkout --` 还原，
+还原后的对照组两次都是绿的。
+
+| # | 我把源码改成什么 | 必须红的测试 | 实测 |
+| --- | --- | --- | --- |
+| A1 | 把 `_require_fresh_order_sentinel(...)` 那一句整个删掉（回到零调用点） | 课程 launcher 的 N5 顺序哨兵 | **红** |
+| A2 | 门还在，但 `tuple(raw) != ACTION_ORDER` 改成**按集合比** | 同上 | **红** |
+| A3 | 门还在，但**只比长度** | 同上 | **红** |
+| A4 | 检查照跑，但**不把它的摘要记进 launch claim**（收据不自陈） | 同上 | **红** |
+| B1 | 把 `_valid_table_guard_attribution_summary(...)` 那次调用短路掉 | N1 probe-gate 消费方 | **红** |
+| B2 | 门还在，但去掉"与独立重算出来的撞桌终止数对账"那一项 | 同上 | **红** |
+| B3 | 门还在，但只查 category/phase，不查 sparse-cell 展开 | 同上 | **红** |
+| B4 | 门还在，但不再要求 `enabled is True`（即允许 probe 收据自称"仪器没开"） | 同上 | **红** |
+| C1 | 把 `run_update` 里读 `promotion_blocked` 那段拆掉（回到没人读） | trainer / 活值 / launcher 三处 | **红** |
+| C2 | 还读，但去掉"结论位 vs `joint_actual_forbidden` 计数"的对账 | trainer + 活值 | **红** |
+| C3 | 把结论位从 canary 的 `passed` 条件里摘掉 | MuJoCo launcher | **红** |
+| C4 | checkpoint 存/取收据把 `promotion_blocked` 写死 `False` | trainer | **红** |
+| D1 | 把 `train.py` 那道 legacy set **只删掉一个名字**（字符串仍留在文件里） | 225 退役收据 | **红** |
+| D2 | 把 runner 那道 `if` 整个删掉 | 同上 | **红** |
+| D3 | 删掉 runner 那道 `if`，但留一句写着 `action_ball_a225` 的 TODO 注释 | 同上 | **红** |
+| E1 | 从 mirrored-constant 台账里删掉三个新常量中的**一个** | `test_mirrored_constant_registry.py` | **红**（`2 failed / 13 passed`） |
+
+**A4 / B4 / C4 是本轮新加的三条**，原三份自述里没有，专门补三个"半边"：
+A4 打的是"检查跑了但收据不自陈"（Franco 的准绳里这算没做完），
+B4 打的是"忘了 argv 规则"（probe 阶段强制 `+task.table_contact_attribution_diagnostic=true`，
+所以收据自称没开仪器只能是缺陷），
+C4 打的是"结论只写在 update 收据上、不写在被晋级的权重上"。
+
+**D1 / D3 是"grep 会放过、AST 才杀得掉"的那一对**：D1 之后 `action_ball_c225`
+这个字符串仍然在 `train.py` 里（只是不在判据 set 里了），D3 之后 `action_ball_a225`
+仍然在 runner 里（在注释里）。`grep "action_ball_a225"` 对这两个变异体都是通过的。
+收据读的是**判据节点本身**（`Compare(Name(x), In, Set(...))`），所以两个都杀得掉。
+
+**E1 验的是治理这一层**：`52e6199b` 自述"mirrored 台账那道门在三个新常量没登记时
+自己拦了一次"。这条是**非人为的开火证据**，比人写的变异更可信，所以专门复现了一遍——
+只删一个登记项就 `2 failed`，还原后 `15 passed`。
+
+对照组：正式 venv 下 `94 passed / 1 skipped`，`/usr/bin/python3` 下 `31 passed`，
+变异前后各跑一次，两次都一样。
+
+##### 二、两个新发现
+
+###### 2.1 那道 N5 顺序哨兵的测试，在大家平时跑套件的 venv 里根本不执行
+
+**这条差点让我自己写出一份假收据。** A1（把门整句删掉）在
+`/workspace/hope_isaac_venv` 下的输出是 `1 skipped`、**退出码 `0`**——看上去是绿的，
+差一点就要写"做不到，说明没接线"。换 `/usr/bin/python3` 再跑，四条 A 变异全红。
+
+| 解释器 | `test_launch_action_ball_curriculum.py`（`59` 条） | 缺什么 |
+| --- | --- | --- |
+| `/workspace/hope_isaac_venv/bin/python` | `6 passed / 53 skipped` | `cryptography` |
+| `/usr/bin/python3` | `59 passed` | —— |
+
+反过来也一样：`/usr/bin/python3` 跑 225 退役收据那三个模块时 `43 passed / 17 skipped`，
+skip 理由全是 `No module named 'hydra'`；同样三个模块在正式 venv 下 `60 passed`。
+
+**所以：pod1 上没有任何一个解释器能跑全这套护栏。** `cryptography` 在仓内
+任何 `requirements*.txt` / `*.toml` / `*.cfg` 里都**没有声明**，
+所以这不是"某人忘了装"，是没人写下来过。
+后果不是抽象的：本文 §5.6.13 (C-1) 那张 M1–M4 表**只在 `/usr/bin/python3` 下成立**
+（原文确实标了解释器，但没说另一个解释器会静默跳过），
+而§5.6.2 之后所有"全量套件对拍"都是用正式 venv 跑的，
+**课程 launcher 的 `53` 条护栏测试在那些对拍里一次都没执行过**。
+**该做的最小动作**：往 `hope_isaac_venv` 里装 `cryptography`，
+并把它写进依赖清单——一行 `pip install`，但要连"写下来"一起做。
+本轮没有代做，理由是那个 venv 是**多个 workflow 共用**的，装包会影响别人正在跑的东西。
+
+###### 2.2 零调用点的门有第六个：`ActionBirthBroker.assert_known_generation`
+
+§5.6.13 (C-2) 写着"重扫仍是 5 个，没有第六个"。**这句是错的。**
+错因很具体：那次重扫的名字形状清单 `_validate_*` / `_require_*` / … / `_must_*`
+**每一条都带前导下划线**，于是所有**公开方法**都被漏掉；并且 `def` 只收模块级。
+2026-08-07 用同样的 token 频次法，但 (i) 加上 `assert_*` / `validate_*` / `verify_*` /
+`require_*` / `check_*` / `ensure_*` / `enforce_*` 这些不带下划线的形状，
+(ii) `def` 收集含嵌套（类里的方法也算），(iii) 排除 `.claude/worktrees/`
+（那底下有别的 agent 会话留下的 `2674` 个 `.py`，不排掉会把别人树里的调用点当成本仓的）。
+规模：`1005` 个 `.py`、`24593` 个 `def`（含嵌套）、门形状 `1911` 个。
+结果是**四个**零调用点（代码命中 `<= 1`）：
+
+| 函数 | 位置 | 代码命中 | 文档命中 | 状态 |
+| --- | --- | --- | --- | --- |
+| `_validate_reveal_bridge` | `action_ball_4096x5_prelong_gate.py:685` | 1 | 6 | 已登记，仍开着 |
+| `_validate_artifact_path_hash` | `canonical_motion_bank_gate.py:3905` | 1 | 1 | 已登记，只登记不判决 |
+| `_reverify_receipt_contact_source_files` | `canonical_neutral_ready.py:3907` | 1 | 1 | 已登记，只登记不判决 |
+| **`assert_known_generation`** | **`mdp/action_ball_runtime.py:6390`** | **1** | **0** | **本轮新发现** |
+
+（原五个里的另外两个已于 `8a6554c7` 接线，所以现在剩四个。）
+
+**它是什么。** 它自己的 docstring 写着："a checkpoint must never invent retirement
+provenance for an env/generation the broker has not issued"——
+**存盘不许凭空编出一个 broker 从来没发过的 env/代次的退役来历**。三层复核：
+
+- **机制码**：现役退役路径 `LazyActionTaskPool.retire_many` / `_retire_many_diagnostic`
+  （`:9930+`）比的是**池子自己**那张活 birth 表和它自己的 `_retired_generation`；
+  `load_state_dict`（`:11087-11096`）从**同一份存档**里的退役 birth 记录重算
+  `expected_retired_generations` 再和存档里的台账比。两边都来自同一个文件，
+  **是自证循环**——正是本轮变异 B2/M4 专门用来打的那个形状。
+  没有任何一处拿 broker 的 transcript 当第二个证人，而那正是这个函数存在的理由。
+  同一个类上另一个 `assert_consumed_birth` 是有调用方的，所以这不是"整类方法都没人用"。
+- **实验史**：`3e64bea9`（08-07 凌晨）刚刚查过隔壁——三处自称"独立见证在
+  `ActionBirthBroker.load_state_dict`"的注释在 live-only 档下**根本走不到**，
+  因为 broker 的 `load_state_dict` 只在 `_action_ball_load_exact_resume_state_dict`
+  里被调用，而那个函数第一句就把 live-only 顶回去。也就是说 broker 侧的见证
+  在这条车道上本来就薄，这个零调用点是同一片区域的第二处。
+- **现役 argv**：四格与 N1 都是 live-only 诊断跑，跨进程续跑（exact-resume）不在
+  发车关键路径上。**所以它今天不会造成错误结论，但它和 (A)(B)(C) 是同一个病。**
+
+**裁决：登记，本轮不接线。** 理由是它属于 exact-resume / broker 那条车道，
+而那条车道 `3e64bea9` 刚动过；接线要动 `hope_commands.py` 附近，
+且要先定清楚"退役来历该跟谁对账"。**不接线不等于可以忘掉**——见六。
+
+##### 三、三份自述里被推翻或需要就地改的
+
+| 自述 | 谁说的 | 核出来 |
+| --- | --- | --- |
+| "重扫仍是 5 个，没有第六个" | dead-gates（写进 §5.6.13 C-2） | **推翻**，见二.2。已就地更正 |
+| "`promotion_blocked` 写完了但未提交 = 不存在" | §5.6.17 矛盾 3 / B2 | **过期**：`52e6199b` 已提交并 push。已就地更正两处 |
+| "四格 `scale4096` 正在跑，所以不碰那道共享门" | dead-gates / unread-bit | **第三次证伪**。2026-08-07 复核 pod1：GPU0 上唯一的 `train.py` 是别人的 `task=HitterPingPongPhase114`（`6390 MiB`），GPU1/GPU2 各 `2 MiB`；全机无 `launch_action_ball*` 进程。§5.6.17 矛盾 2 已经判过一次，这里只是再确认一次 |
+| "接线前先拿一格已落盘的 `scale4096` 收据实测 `status`" | dead-gates 的方案 2(a) | **既做不到也不必做**，静态三行就能给出更强的答案。已就地更正，见六 |
+| "M1–M4 四条变异全红" | dead-gates | **成立**，但只在 `/usr/bin/python3` 下成立。已补 §5.6.13 (C-3) |
+| "225 四道门任一都足以拦死" | family-225 | **成立**，逐道核过，见四 |
+| "三个被删的测试只测死文件" | family-225 | **成立**：三个文件各自只用 `importlib.util.spec_from_file_location` 加载**一个**被删脚本，再无其它本仓 import |
+| "零指纹需要重钉" | family-225 | **成立**：`test_launch_action_ball_a211_four_arm_diagnostic.py:1962` 明确断言 `action_ball_225_trainability.py` **不在** `RUNTIME_SOURCE_PATHS` 里 |
+| "38 个候选里只有 `promotion_blocked` 是真病" | unread-bit | 抽查两条**成立**：`oracle32_verdict` 的 `raise LaunchRefused` 就在同一函数上方 8 行；`runtime_blocker` 与 `status/verdict=BLOCKED` + `return 2` + stderr `[FATAL]` 同批写出 |
+
+##### 四、"删了因为别的机制管着" —— 那个机制真的在跑吗
+
+225 整族退役靠四道门。逐道核：
+
+| 门 | 谁在守 | 今天真的在跑吗 |
+| --- | --- | --- |
+| 1. gym 注册表里没有 225 | `test_action_ball_task_config.py:313-314` 对**活的** `registrations` 映射断言两条 225 id 不存在 | **在跑**（该模块正式 venv 下 `60 passed`），且注册文件里确实只有 `A211Learnability` / `C211Learnability` 两条 |
+| 2. 没有 EnvCfg 声明 225 的 `obs_mode` | 本轮新增收据里的 AST 检查 | **在跑**，且**不空转**：它先断言"至少解析到一个 `obs_mode` 默认值"，读法坏掉会自己红 |
+| 3. `train.py` 拒 actor 合同 | 新增收据比对**活值** `_LEGACY_MODES` | **在跑**：变异 D1 转红 |
+| 4. runner 拒 `obs_mode` | 同上 | **在跑**：变异 D2/D3 转红 |
+
+留下来的 225 字样也逐条核过，全部是**拒绝表 / 历史件**，不是活路径：
+`action_ball_211_transition_preflight.py` 的 `LEGACY_EXPERIMENT_NAMES` / `WRITER_SOURCE_NAMES`
+（拿去和 `/proc/*/cmdline` 与旧日志命名空间比对，不做路径解析）、
+A211 launcher 那 11 条"复活退役血统必须被拒"的参数化、
+安全词表的 8 个 holder（`== 8` 与"路径去重后也是 `8`"两条都钉着，8 个全是活的 211 车道文件）、
+以及 `configs/action_ball_n1_measured_20260803/` 下两份 0803 的历史血统 JSON。
+
+##### 五、全量套件对拍（pod1，`-n 64`）
+
+两棵独立 clone：`before` = `fd5471da`（三条改动之前那一版），`after` = `52e6199b`（HEAD）。
+同一个解释器（`/workspace/hope_isaac_venv`）、同一组目录
+（`tests` + `wbt/tests` + `wbt/mujoco_native/tests`）、`-p no:randomly`。
+
+| | before（`fd5471da`） | after（`52e6199b`） |
+| --- | --- | --- |
+| collect-only | `10440` | `10366` |
+| failed | `265` | `267` |
+| passed | `9982` | `9909` |
+| skipped | `175` | `172` |
+| errors | `19` | `19` |
+| 失败节点数（`FAILED` + `ERROR` 去重） | `284` | `286` |
+| 用时 | `23:55` | `25:38` |
+
+**收集数差 `-74`，四笔账加起来正好是 `-74`**：225 退役 `-124 / +12 = -112`、
+`8a6554c7` `+2`、`52e6199b` `+16`、区间里别人那笔 `16b842d8` 新增
+`test_action_ball_diagnostic_pool_checkpoint.py` `+20`。**没有一条测试是"消失了"的。**
+
+**失败节点集合的对称差是 `6` 条，逐条单跑核过，`6` 条全部与本轮三条改动无关**：
+
+- 只在 before 红的 `2` 条（`test_action_ball_stage_supervisor.py` /
+  `test_launch_kit_training_locked.py` 各一条），在 after 树上单跑 `2 passed`；
+- 只在 after 红的 `4` 条里，`test_run_phase1_q50_persistent_supervisor.py`、
+  `tests/test_action_ball_runtime.py`、`test_canonical_motion_compile_cli.py`
+  三条单跑全绿（第三条连跑 3 次全绿）；
+- 剩下 `tests/test_motion_backhand_loop_b_table_net_clearance.py::test_l1_certificate_path_swap_cannot_change_consumed_bytes`
+  **是一条真·不确定性测试，两棵树上都会随机红**（after 树连跑 6 次 `4` 红 `2` 绿，
+  before 树连跑 3 次 `1` 红 `2` 绿）。**它不是这次改动带来的**，
+  但"证书路径换了不许改变被消费的字节"这种测试自己不确定，是个独立的待办。
+
+这五条全是 supervisor / 活进程 / 原子发布 / 信号清理这一类**对并发和落盘时序敏感**的测试；
+pod1 当时同时还有别的 workflow 在跑套件，`load average` 一度到 `78`。
+
+**另外补一次"黑掉的那一面"的对拍。** 因为二.1 那个 venv 缺包问题，
+课程 launcher 那个模块在上面的对拍里几乎全被 skip 掉了，所以又用 `/usr/bin/python3`
+单独对了一次：`before` `58 passed`、`after` `59 passed`，
+**`+1` 恰好是新增的那条 N5 顺序哨兵测试**，没有一条旧测试因为这次改动变红。
+
+##### 六、`_validate_reveal_bridge` 的接线方案，逐步查了一遍能不能照做
+
+按交代本轮**不动** `action_ball_4096x5_prelong_gate.py`，只审方案。结论：**方案可执行**，
+签名、插入点、返回值顺序三处都对得上，另有一处该改、一处该补。
+
+- **插入点对得上**：生产方那一行就在 `reward_groups` 的**下一行**
+  （`action_ball_prelong_semantics.py:956-957`），方案说"紧挨 `row.get("reward_groups")` 之后"，
+  和生产方的字段顺序一致。
+- **返回值顺序对得上**：`_validate_reveal_bridge` 的 `return` 在 `:1190`，
+  三元组是 `(摘要, lifetime, authority)`；方案说"第二个值当下一轮的 `previous_lifetime`、
+  第一轮的 authority 当之后的 `expected_authority`"，与实际顺序一致。
+- **"不需要升版"这句成立**：`SEMANTIC_SCHEMA_VERSION` 解析到 `3`，
+  `_ordered_updates`（`:178-195`）逐行要求 `schema_version == 3`，现役 gate 收的本来就是 v3 行。
+- **该改的一处**：方案 2(a) 要求"接线前先拿一格已落盘的 `scale4096` 收据实测 `status`"——
+  **没有一格跑完过，没有收据可读**。静态答案更强且今天就能拿到：
+  `require_bridge_telemetry` 默认 `True`，**全仓只有三处传 `False`，全在测试里**；
+  而 `_prelong_bridge_authority` 在 `required=True` 时**只会抛异常，不会返回 `None`**。
+  所以生产上 `not_configured` 产不出来。已在 §5.6.13 (A) 就地更正。
+- **该补的一处**：方案说这条改动"零 lineage 代价"，对 `solver_profile_sha256` 成立
+  （那道门不在被哈希的 5(+2) 个源文件里），但
+  **`action_ball_4096x5_prelong_gate.py` 本身是被两个 211 launcher 钉住的运行时源**
+  （`launch_action_ball_a211_four_arm_diagnostic.py:418` `PRELONG_GATE_SOURCE`、
+  C211 launcher `:470` 同名），所以改它**会挪动 launch claim 里的那个 SHA**。
+  这不是问题，是必须在同一个 commit 里连生产方 SHA 一起钉的理由——方案末尾其实
+  已经说了"producer/consumer 必须同版本"，这里只是把"为什么"补上。
+
+##### 七、这一节没做什么
+
+1. **没有接 `_validate_reveal_bridge`**：按本轮交代该文件不动。方案已审完可照做，见六。
+2. **没有接 `assert_known_generation`**：新发现，属于 exact-resume/broker 车道，见二.2。
+3. **没有往共用 venv 里装 `cryptography`**：会影响别的 workflow 正在跑的东西，见二.1。
+4. **没有替 canonical 车道那两条零调用点的门下判决**：仍是"只登记不判决"，
+   需要有人带着 canonical 动作库那条车道的上下文来判。
+5. **没有修那条会随机红的测试**：
+   `tests/test_motion_backhand_loop_b_table_net_clearance.py::test_l1_certificate_path_swap_cannot_change_consumed_bytes`
+   在两棵树上都随机红（见五）。它和本轮三条改动无关，但它自己不确定这件事要单独查——
+   一条"字节不许变"的证书测试自己不稳定，等于这条判据平时是靠运气过的。
 
 ## 6. 智元 setting 的采用表
 
@@ -2980,6 +3249,9 @@ obs_mode，所以整族不可达"。前提**成立，而且被低估了**——r
 
 M1 和 M3 就是"粗一个档次就过不了"要防的两种真实写法：**名单被削窄**和**门被删但名字还留在注释里**。
 两种情况下源码里都还有 `action_ball_a225` 这个字符串，grep 一样绿。
+
+> **2026-08-07 独立复跑：M1 / M2 / M3 三条由另一轮在独立 pod clone 上重做过一遍，
+> 三条全红，还原后对照绿；四道门也逐道核了"今天真的在跑"。** 见 §5.6.18 一与四。
 
 同批还替换了一条本来就在读被删 yaml 的测试：
 `test_action_ball_task_config.py::test_historical_a225_c225_task_receipts_remain_named_and_distinct`
