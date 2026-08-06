@@ -905,6 +905,51 @@ clamp/投影/罚三层已经处理的事。
   返回恒零、记账幂等恒 no-op，每步在 `4096x31` 上白算两遍；但其非零权重是躲开 RewardManager
   零权重剪枝、从而让 barrier ledger 落盘的唯一手段。**省算力与保遥测冲突，待裁决**，暂不改。
 
+#### 5.6.4 build_1 的真实早期曲线：短 episode 与力矩饱和都不是缺陷（2026-08-06）
+
+本轮曾把两项观测读成硬件/plant 缺陷并据此提出改 ready pose 或改硬件。**两项都读错了，此处更正并给出反证数据**，
+以免下一轮再拿同样的现象当阻塞。
+
+**数据源**：`BerkeleyPingPong/hope_wbc`，jiayi（wandb 账号 `dongc_1`）。注意 yikang（`yyk956614`）名下也有
+`..._build1_...` 命名的 run（`lyhm86vl`），那**不是**原版，不要拿它当基线。原版取
+`830xw9hy`（`hitter_pingpong_build_fresh_r1`，3437 iter）与
+`i4dxpbwy`（`hitter_pingpong_v14_batchaligned_fresh_r4`，21896 iter）。
+
+| iter | `830xw9hy` mean_ep_len / 主终止项 | `i4dxpbwy` mean_ep_len / 主终止项 |
+| --- | --- | --- |
+| 0--4 | `23.1` / `base_fell_tilt=.0064 -> .303` | `23.4` / `base_fell_tilt=.964` |
+| 35--60 | **`2.1` / `base_fell_tilt=1.00`** | **`2.2` / `base_fell_tilt=1.00`** |
+| 120--136 | `5.3 -> 10.6` | `3.5 -> 14.3` |
+| 300--377 | `36 -> 52` | **`228`** |
+| 1500--1618 | `221` / `time_out=.461` | `235` / `time_out=.582` |
+| 终点 | `229` / `time_out=.517`、`fell_tilt=.480` | `249` / `time_out=.985`、`fell_tilt=.0030` |
+
+由此定两条**验收口径**，写死以防复犯：
+
+- **早期 episode 长度约 `20..25` tick 不是异常，是基线的第 0 迭代值。** 我们 A211/C211 oracle32 实测
+  `714/32 = 22.3` tick，与 build_1 的 `23.1`/`23.4` 同量级。任何"活不过隐藏 WAIT 所以 plant 不可用"的推论
+  都缺乏依据。§12.3 已写过 `4096x5` 不要求初始策略有 contact/landing income；本节补上它的正面证据。
+- **基线是先变差再变好：`23 -> 2` tick、`fell_tilt` 冲到 `1.00`，到 iter `300..377` 才反弹。**
+  因此**四格 `scale4096` 只有 5 个 update，其区间完全落在"尚未开始下降"的最前段，看不到任何上升、
+  甚至看到退化都属预期**，不得据此判失败。`scale4096` 的验收只应是：能跑完、收据落盘、
+  逐 reward 组 eligible 分母可见、无 fail-closed 触发。趋势判断最早要到 iter `400+` 量级才有意义。
+
+**同时撤回一条错误归因**：本轮曾以 `wait25_current_hold_std002_n1000.json` 中四个腕关节
+（`left/right_wrist_pitch`、`left/right_wrist_yaw`）`70..83%` 的力矩饱和，推断 `±6 N·m` 腕执行器"握不住拍子"。
+该推断错误：拍子约 `0.17 kg`、力臂约 `0.15 m`，静力矩量级仅 `0.25 N·m`，余量约 20 倍。饱和来自 PD 与
+噪声/速度较劲，不是重力。旁证：build_1 在 3437 iter 收敛态下 `Episode_Reward/rally_joint_qdes_saturation`
+仍为 `-.0994`，饱和惩罚在成熟策略上同样长期存在。**`±6 N·m` 不构成 ready pose 或硬件的否决理由。**
+
+**仍然成立、未被本节推翻的疑点**：build_1 的终止项集合里**没有** `robot_hit_table`（桌子是 ActionBall 才有的），
+它死于 `base_fell_tilt`；而我们是 `robot_hit_table=32/32`，且 MuJoCo 侧同一 split-ready hold 为
+`1000` 集 x `25` tick、`failure_count=0`。**问题不是"活得短"，而是"为什么是撞桌、且跨引擎不一致"**，
+按 §5.6.3 的口径单列待查。相关线索见 §12 段落中已记录的 `left_ankle_roll_Link` 对 keepout 的
+exact OBB-vs-AABB SAT overlap（换 world-root 解释不能复现，故当时未定为 live offender），
+以及已建成的 `table_contact_attribution_diagnostic` first-hit sidecar（导出 body/obstacle/
+blade-or-proxy/exact-vs-conservative）。**`table_robot_keepout` 本身是否仍有作用尚未确认**
+（Franco 2026-08-06：「我不确定是有用的」）；若查明真实桌面碰撞几何已覆盖同一区域、
+或它从未在合法轨迹上起过作用，则按"过期结构"清理，而不是保留后改几何。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |
