@@ -51,7 +51,7 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 | DR | shared DR-L0 finalizer/leaf专项 host=`31 passed`；A/C launcher profile已切严格all-off DR-L0：material、joint-default offset、CoM/mass/PD、push、reset/target/proprio/body-gyro corruption与delay均关，PPO探索噪声不属于DR且保持算法配方 | exact Pod复核resolved config；nominal learnability后才以fresh lineage单轴恢复 |
 | Isaac | 4096环境与admission层每GPU最多2进程的合同已有；四格尚未运行。pod-wide `.kit_boot.lock` 原来会把scale全Pod串行；补丁已把锁收窄到Kit/extension boot，真实fcntl host suite=`22 passed`。Pod headless Isaac App 同GPU0双进程overlap已PASS：B在A尚未退出且双方各占约641 MiB时进入READY，二者自然退出；这关闭boot串行，不代签两个4096场景的显存/吞吐，正式scale仍记peak/min-free，跨GPU对照在补。当前analytic `physical_ball=false` learnability不冒充PhysX outcome。pre-long barrier/reward链专项=`71 passed`；A helper已恢复，C v3/各自timing receipt仍在focused test收口 | cross-GPU lock对照→initial-center single-Q四处一致→整组回归→oracle32→A0/A1/C0/C1各4096x5；正式四格共驻只为缩短总等待，rate证据另跑exclusive ABBA |
 | MuJoCo | parked-ball/reveal、A/C task/reward、runtime seals、fresh hold-bias、single-stroke timeout与RSL式timeout bootstrap已实现；native+legacy组合回归=`219 passed,2 skipped,0 failed`。exact Pod WIP r6 的A/C各`1 env×2 update`均`COMPLETE`，211/319有限，fresh WAIT canary、reset-boundary save与cold-load exact均通过；decoded mean→tape qdes最大误差`6.62e-8 rad`，mean-action projection=0，随机WAIT transition projection=`31/775=4.0%`。确定性checkpoint replay已把每个update的7个hard-terminal全部定位成`joint_actual_forbidden`：A在episode tick `70..84`，C在`69..88`，均早于nominal strike，timeout/base/table/contact/strike/landing均0；所以它证明移植主链可执行/可冷载，同时明确反证当前plant/action bootstrap可直接做4096学习。现役hold的WAIT25另有`1000/1000`、`0` hard；4σ inward mean仍只是未sealed候选 | 先做sealed current mean-only/std.02与4σ-inset同条件100+ tick诊断，区分静态漂移、探索累积、PD/plant或projection根因；正式receipt补reason/phase/tick后才能发MuJoCo scale。inset若胜出须新lineage，不能偷换r6授权。完整reward/safety、mid-episode resume、4096与cross-engine parity继续阻塞formal promotion |
-| **MuJoCo GPU / mjlab lane（2026-08-06，明细见 §9.2.2/§9.2.3）** | **已在 pod1 GPU2 发车**：`4096 env x 5 update` 跑完 `10.9 s`，PID `2862997` 实测在 index `2`（`11,290 MiB`），GPU0/GPU1 全程 `2 MiB, 0 %` 未被碰；`nonfinite_state=0`、吞吐 `45,706` env-step/s。新增**接触容量看门狗**（逐 substep GPU 侧累积 `nefc`/`nacon` 峰值，触顶即 `CAPACITY_OVERFLOW` 非零退出；探针关闭时记 `NOT_MEASURED` 而非 `PASS`），变异测试 `--njmax 70` 确认会拦。加桌加球后重测容量：最坏情况（`ctrl=0` 摊平）`nefc=95`/世界、`nacon=55,455`，对 `njmax=572`/`naconmax=524,288` 余量 `6.02x`/`9.45x`；实测桌子接住机器人反而**降低**了行峰值（plant-only 是 `115`）。球台恢复系数复核 `e=0.9214117` vs 实测权威 `0.9215`，`4096/4096` 世界在带内 | 这条 lane 是 court/ready/reach-touch 任务，**不代签** canonical N1：缺 measured teacher、完整 reward 层级、§9.2 的 termination union 与 cross-engine parity。下一道门是把 A211/C211 的 measured teacher 与 reward 接到这条已验证的 `4096` GPU 回路上 |
+| **MuJoCo GPU / mjlab lane（2026-08-06 发车 + 同日四方独立复核，明细见 §9.2.2/§9.2.3/§9.2.4）** | **已在 pod1 GPU2 发车**：`4096 env x 5 update` 跑完 `10.9 s`，PID `2862997` 实测在 index `2`（`11,290 MiB`），GPU0/GPU1 全程 `2 MiB, 0 %` 未被碰（依据是 Warp 横幅只枚举 `1` 张 CUDA 卡，不是采样密度）；`nonfinite_state=0`、吞吐 `45,706` env-step/s。**数据干净但门不可信**：08-05 双 seed 历史 run 已被事后判定无溢出（两份 `5292` 行日志 `grep -ci overflow = 0`），复跑余量 `6.29--6.65x`；但新加的容量看门狗只守 `nefc` 一条轴，对 broadphase 溢出**静默放行**（`--nconmax 10` 实测 `1134` 行引擎警告仍判 `PASS`），且 `--iterations 0` 零测量也会签发 `PASS`。容量普查的"最坏情况 `95` 行"被证伪（合法力矩即到 `117--120`，随机构型到 `188`），"接触余量 `9.45x`" 算在了错的计数器上（真值 `~3--8x`）| 这条 lane 是 court/ready/reach-touch 任务，**不代签** canonical N1：缺 measured teacher、完整 reward 层级、§9.2 的 termination union 与 cross-engine parity。**且在 §9.2.4 的 T1--T4 待办落地前，不得再引用容量门作为放行依据**——它只证明过 `nefc` 没超 |
 | 0803 plant | normalized successor可复现，host producer=`6 passed`；但 world racket FK因右肘原点变化约9 mm，旧retarget/hold/MuJoCo identity不可代签 | 当前旧plant只跑`OLD-PLANT-FINITE`；canonical long另走promotion DAG |
 | 文档合同 | G04/G05/G06、policy ABI、工具目录与旧frame0操作页已同步；Gate保持Partial | 代码收口后再写exact test/Pod receipt与PROGRESS |
 
@@ -1692,25 +1692,50 @@ CI95 `[0.8825, 0.9311]` 包含之）。现役 C211 走解析路径（`physical_b
 拍面 `u_n 1.4--7.2 m/s`；`SR>1.6` 完全空白。而 `build_1` 给 `400 Hz + CCD` 的理由是
 `15--25 m/s` 回击速度——**该速度段我们一个参数都没测过**，扩域不得越过该边界。
 
-### 9.2.2 mjlab lane 在 pod1 GPU2 上发车 + 接触容量看门狗（2026-08-06 实测）
+### 9.2.2 mjlab lane 在 pod1 GPU2 上发车 + 接触容量看门狗（2026-08-06 实测，已按同日复核就地更正）
+
+> **2026-08-06 复核后就地更正。** 本节初稿有两处说错，已在下文改掉，不另起段落自相矛盾：
+> (1) mujoco-warp **不是**"悄悄丢行"——它会 printf 一行并置 `d.overflow` 位；真正的缺陷是我们的
+> 训练循环两样都不读。(2) GPU 归属的证据是"掩码生效"，不是"采样了 268 行"。
+> 看门狗本身的覆盖面缺口另见 §9.2.4。
 
 **人话**：MuJoCo GPU 这条线现在能自己跑训练了，不再只是"能跑物理"。`4096` 个环境一起跑，`5` 次
-PPO 更新 `10.9` 秒跑完，全程没有任何一个环境算出 NaN。这次真正补上的缺口是一个**接触容量看门狗**：
-在此之前，如果某一步需要的约束行数超过预分配的 `njmax`，mujoco-warp 会把多出来的行**悄悄丢掉**，
-训练照常往下跑、曲线照常上升，但那些世界的物理已经是错的，而且**没有任何收据会记下这件事**。
-现在它会当场停机并写明差多少。
+PPO 更新 `10.9` 秒跑完，全程没有任何一个环境算出 NaN。这次补上的缺口是一个**接触容量看门狗**：
+如果某一步需要的约束行数超过预分配的 `njmax`，mujoco-warp 会把多出来的行丢掉、训练照常往下跑、
+曲线照常上升，但那些世界的物理已经是错的。现在这种情况会当场停机并写明差多少。
+
+**关于"静默"的准确说法**（初稿写错了，这里更正）。mujoco-warp `3.10` 在丢行时**会说话**：
+`_src/forward.py:249` 直接 `wp.printf("nefc overflow - please increase njmax to %u")`，并在
+`d.overflow` 这个**逐世界粘性位掩码**上置 `OverflowType.NEFC`；`opt.warn_overflow` 在
+`_src/io.py:436` 是硬写 `True`，没有开关。`9` 种溢出类型里有 `5` 种会 printf
+（`NEFC` / `NJMAX_NNZ` / `BROADPHASE` / `NARROWPHASE` / `CCD`，另含 flex 变体），
+另 `4` 种（`HFIELD` / `NVMAX` / `CONTACT_MATCH` / `EPA_HORIZON`）**只置位、不打印**，那四种才是真静默。
+所以缺陷的正确表述是：**引擎在喊，只是没人读**——那行字混在 `5292` 行训练日志里，既不进摘要也不影响
+退出码。这正好是 MEMORY 里"只出计数器＝无人读"那条老毛病，不是引擎的锅。它决定了正确修法是
+**读 `d.overflow`**（见 §9.2.4 T1），而不是自己重算 max。
 
 **改了什么**（`hope_training/whole_body_tracking/mjlab_lane/a3_train_ppo.py`）。默认开启，逐 physics
 substep 在 GPU 上累积 `nefc`（每世界约束行）与 `nacon`（全世界接触）的滚动最大值，每次迭代随其它
-统计量一次性读回（**不额外增加 GPU 同步**）；任一项触到分配上限即 `raise RuntimeError`
-`CAPACITY_OVERFLOW`，训练进程非零退出。每次迭代的峰值写进 `.jsonl`，run 级峰值与余量写进
-`.json` 的 `capacity` 段。`verdict` 是**三值**的：探针关掉时记 `NOT_MEASURED`，**不是** `PASS`——
-没测过的 run 不允许声称容量门成立。
+统计量一次性读回（**不额外增加 GPU 同步**；零拷贝与流序已实测：`t.data_ptr() == a.ptr`，warp 默认流
+是 blocking 流，与 torch 的 legacy default stream 有隐式同步）；任一项触到分配上限即
+`raise RuntimeError` `CAPACITY_OVERFLOW`，训练进程非零退出。每次迭代的峰值写进 `.jsonl`，run 级
+峰值与余量写进 `.json` 的 `capacity` 段。
 
-**变异测试**（按"验收用变异测试"准绳）：同一份 smoke 把 `--njmax` 故意压到 `70`（低于实测的 `74`），
-进程在 iteration `1` 抛 `CAPACITY_OVERFLOW: nefc peak 71 vs njmax 70`，退出码 `1`。
-顺带确认：mujoco-warp `3.10` 自己**确实**会往 stderr 打一行 `nefc overflow - please increase njmax`，
-但那行埋在 `170 KB` 日志里且不影响退出码——它不是门，看门狗才是。
+**这个门守到什么程度（复核后的准确边界，不要读过头）**：
+
+- **只守 `nefc`/`njmax` 一条轴。** `nacon` 那一路在整轮 `--nconmax` 扫描里**一次都没真正开过火**；
+  broadphase（`ncollision`）根本不在监视范围内，而那恰恰是 `nconmax` 真正管住的东西。详见 §9.2.4。
+- **判决延迟一整个 PPO 迭代**（`24` env-step x `20` decimation = `480` 个 physics substep）。
+  累积不丢峰值，但"触顶即退出"要改成"触顶后最多 `480` 个 substep 才退出，前提是进程还活着"。
+- **`verdict` 的三值只在"探针被显式关掉"那条路上守住**（实测 `--no-capacity-probe` 确为
+  `NOT_MEASURED`）。初稿那句"没测过的 run 不允许声称容量门成立"**是假的**：`--iterations 0` 实测
+  拿到 `verdict: PASS_NO_OVERFLOW` + `njmax_headroom_x: 572.0`，零样本签发满余量 PASS。守卫加错了变量。
+
+**变异测试**（按"验收用变异测试"准绳）：同一份 smoke 把 `--njmax` 故意压到 `70`，进程抛
+`CAPACITY_OVERFLOW` 退出码 `1`。两次独立复现分别落在 iteration `1`（`nefc peak 71`）与
+iteration `2`（`nefc peak 77`）——mujoco-warp 非确定，机制一致但**具体迭代号和峰值不可复现**，
+引用时不要写死。同一跑里 `38` 行 warp printf 全部落在抛异常的那一迭代，看门狗没有漏迭代。
+**这一组变异只覆盖了 `nefc`**，不构成对整个容量门的验收（§9.2.4 T4 列出缺的三条）。
 
 **发车实测**（`SMOKE5CAP`，pod1，`CUDA_VISIBLE_DEVICES=2`，`4096 env x 5 update`，规模对齐 Isaac 侧）：
 
@@ -1723,38 +1748,94 @@ substep 在 GPU 上累积 `nefc`（每世界约束行）与 `nacon`（全世界�
 | `nonfinite_state` 终止 | **`0`**（`5/5` 迭代全为零） |
 | GPU0 / GPU1 | 全程 `2 MiB, 0 %`，无任何 compute proc |
 
-GPU 归属不是靠"我设了环境变量"自证：独立采样器每 `2` 秒抓一次 `--query-compute-apps`，`268` 行里
-出现过的**每一个** compute proc 都在 `GPU-473a79f3`（=index `2`），GPU0/GPU1 在整个 `~9` 分钟窗口里
-只有 `2 MiB, 0 %` 一种状态。Isaac 那两张卡没被碰过。
+**GPU 归属：结论成立，但初稿把证据强度说过头了，这里更正。** 初稿写的"`268` 行采样"是
+`GPU2_SAMPLER.log` 的**文件总行数**，绝大多数是 `set -x` 的 trace 行。自己重数过的真实数字：
+**采样 `25` 次**（跨度 `52` 秒，间隔 `2--3` 秒）、**compute-proc 观测行 `18` 条**、出现过的 PID
+**`3` 个**（`2862997` smoke / `2863381` census / `2863723` nanprobe），非 GPU2 的 uuid **`0` 行**。
+把证据量夸大了约 `10--15` 倍，任何下游拿"`268` 行"论证"密集采样无死角"的说法都要撤回。
+
+**真正封死这个洞的不是轮询密度，是掩码结构性生效**：`SMOKE5CAP.log` / `CENSUS_TRAINALLOC.log` /
+`NANPROBE_4096.log` 三份日志的 Warp 启动横幅在一台三卡机器上**只枚举出 `1` 个 CUDA 设备**
+（`"cuda:0" : "NVIDIA GeForce RTX 5090"`），说明 `CUDA_VISIBLE_DEVICES=2` 生效，进程在**整个
+生命周期内**物理上无法在 GPU0/GPU1 上建 context——这比"轮询那一刻没建"强得多。`2` 秒轮询本身有
+约 `75--90%` 的时间盲区，而三张卡的 `Accounting Mode` 都是 `Disabled`，事后没有任何 driver 侧历史
+可以补证。三层证据（掩码 + `25` 次轮询 + `2` 份进程内 `nvidia_smi_start/end` 收据）一致：
+Isaac 那两张卡没被碰过。
+
+**下次会咬人的隐患（这次没咬到）**：`run_gpu2_smoke.sh` 只 `export CUDA_VISIBLE_DEVICES=2`，
+**没锁 `CUDA_DEVICE_ORDER`**（默认 `FASTEST_FIRST`），而 CVD 的序号走的是 `CUDA_DEVICE_ORDER` 的
+顺序，与 `nvidia-smi` 的 PCI 顺序**没有契约保证一致**。本机三张同型号 `5090`，实测两种 order 给出
+同一张卡（`uuid 473a79f3`、`pci_bus_id 190`），所以这次退化成一致——这是**事后确认，不是事前保证**。
+换混合型号机器或改插卡顺序，`=2` 完全可能落到 Isaac 的卡上，而 `SMOKE5CAP.json` 只记了
+`cuda_visible_devices: "2"` 这个**意图字符串**、不记实际拿到的 uuid，事后无法自证。修法见 §9.2.4 T6。
 
 **吞吐代价要如实记**：同配置不开看门狗的历史 run（`TRAIN_s0`，`300` iter）是 `50,221` env-step/s，
-开了是 `45,706`，即探针吃掉约 **`9%`**。这个代价买的是"物理是不是真的"，不打折。
+开了是 `45,706`，即探针吃掉约 **`9%`**。注意这 `9%` 买到的覆盖面比原以为的窄（只有 `nefc` 一条轴），
+而 §9.2.4 T1 的 `d.overflow` 方案覆盖全部 `9` 类且更便宜——**这笔税基本是白交的**。
 
-### 9.2.3 njmax/nconmax 加桌加球后的重新标定（2026-08-06 实测）
+### 9.2.3 njmax/nconmax 加桌加球后的重新标定（2026-08-06 实测，已按同日复核就地更正）
 
-§9.2 的老数 `njmax=508` / `nconmax=128` 是**光机器人**时期的，必须在桌子和球进场后重测。测了，结论
-是**旧数在行数上其实也够，但理由和当初想的不一样，而且现在有了确定的余量数字**。
+> **2026-08-06 复核后就地更正。** 本节初稿的**操作性结论（现役 `572`/`128` 够用）仍然成立**，
+> 但支撑它的三处推理与两个数字被证伪，已在下文改掉：(1) "桌子接住机器人所以行数降低"是
+> **摩擦锥换算**造成的假因果；(2) "最坏情况是 `ctrl=0` 摊平"低估约 `2` 倍；(3) 接触余量 `9.45x`
+> 算在了错的计数器上。原来的"6.02x/9.45x"表述不要再引用。
+
+§9.2 的老数 `njmax=508` / `nconmax=128` 是**光机器人**时期的，必须在桌子和球进场后重测。测了，
+结论是**旧数在行数上够用，余量至少 `3x`**——但当初给出的理由是错的，余量数字也要按下面改口径。
 
 `508` 是 plant-only 的 `suggest_njmax` 结果；court（robot + 桌 + 网 + 球，`ngeom=82`、`npair=5`）
 自动定出的是 **`572`**，也就是 trainer 的现役值，配 `nconmax=128`/世界 →
 `naconmax = 128 x 4096 = 524,288`。
 
-三个场景的实测峰值（都在 `4096` 世界、都含桌球，除标注的 plant-only 那行）：
+实测峰值（`nefc` 单位是行/世界，`ncollision` 是 broadphase 候选对、全世界）：
 
-| 场景 | `nefc` 峰值/世界 | `nacon` 峰值/全世界 | 行余量 | 接触余量 |
-| --- | ---: | ---: | ---: | ---: |
-| **最坏情况**：`ctrl=0` 全体瘫倒摊平，`3000` 步 | **`95`** | **`55,455`** | **`6.02x`** | **`9.45x`** |
-| 实际 PPO 训练（会学的策略 + 每 env reset 随机 + 活球发球），`5` update | `83` | `29,060` | `6.89x` | `18.0x` |
-| 对照：plant-only（无桌球），`2000` 步 | `115` | `66,676` | — | — |
+| 场景 | 世界数 x 步数 | 摩擦锥 | `nefc` 峰值 | `ncollision` 峰值 | 行余量 vs `572` |
+| --- | ---: | :---: | ---: | ---: | ---: |
+| `ctrl=0` 摊平（初稿当成"最坏情况"） | `4096 x 3000` | elliptic | `95` | 未记 | `6.02x` |
+| `ctrl=0` 摊平，**跑够 4 倍长** | `2048 x 12000` | elliptic | **`106`** | `82,906` | `5.40x` |
+| **flail**：力矩在模型自己声明的 `ctrlrange` 内随机 | `4096 x 3000` | elliptic | **`117`** | `81,257` | `4.89x` |
+| **bang**：满力矩正反跳变 | `4096 x 3000` | elliptic | **`120`** | `71,742` | `4.77x` |
+| **randpose**：`jnt_range` 内随机构型 + 随机根姿态释放 | `4096 x 3000` | elliptic | **`188`** | `61,843` | **`3.04x`** |
+| 实际 PPO 训练（`5` update） | `4096` | elliptic | `83` | 未记 | `6.89x` |
+| 实际 PPO 训练（`300` iter x 2 seed，门全开复跑） | `4096` | elliptic | `86` / `91` | 未记 | `6.65x` / `6.29x` |
+| 对照：plant-only 无桌球 | `4096 x 2000` | **pyramidal** | `115` | — | — |
+| 对照：plant-only 无桌球，另一份普查 | `4096 x 3000` | **pyramidal** | `136` | `242,714` | — |
+| 对照：court 有桌球 | `4096 x 3000` | **pyramidal** | `115` | — | — |
 
-**关键判读，与事前假设相反**：加桌加球**没有**把约束行峰值推高，反而从 plant-only 的 `115` 降到
-`95`。原因是桌子先接住了机器人，它不再完全摊平到地面。所以"沿用旧数会溢出"这个担心在行数上
-**实测不成立**；但这不是运气——`572 > 508` 本来就已经是 court-aware 的自动定值，两者都远高于
-两个场景的实测峰值。真正该记住的是：**最坏情况是瘫倒摊平（`95`），不是打球**，训练时的 `83` 低于它，
-所以按摊平定容量是对的口径。
+**更正一：那个"桌子接住机器人"的因果解释是假的。** 初稿拿 plant-only 的 `115` 和 court 的 `95` 相减，
+但这两个数**摩擦锥不同**：plant 默认是 pyramidal（`a3_plant_env.py:68`），court 跑的是 elliptic。
+MuJoCo 每个接触占的行数 pyramidal 是 `2*(condim-1)=4`、elliptic 是 `condim=3`（`suggest_njmax`
+自己就这么写的），所以同样的物理接触数，换个锥就差 `4/3`。同锥对比才有意义：
+**plant-pyramidal `136` → court-pyramidal `115`**，桌子确实让机器人少摊了一点，但幅度是 `15%`，
+不是初稿暗示的那样由桌子造成 `115→95`。**这条要记住的实际后果**：哪天为了摩擦保真度把锥切回
+pyramidal，行价从 `3` 涨到 `4`，`randpose` 的 `188` 会变成约 `(188-31)*4/3+31 ≈ 240`，余量掉到 `2.4x`。
 
-余量按最坏情况算：行 **`6.02x`**（`572` 分配 / `95` 实测，空 `477` 行），接触 **`9.45x`**
-（`524,288` / `55,455`，空 `468,833` 槽）。`constraint_headroom_ok = true`。
+**更正二："最坏情况是瘫倒摊平"被证伪，差约 `2` 倍。** `flail` 和 `bang` 是**完全合法的输入**
+（初始就是 ready pose，力矩不越 `ctrlrange`），它们单独就把 `95` 顶穿 `23--26%`。`randpose` 的
+`52` 接触/世界已经吃掉 `a3_court_env.py:344` 那个 `ncon_per_world=56` 假设的 `93%`。真实训练里
+早期随机策略 + reset 随机化产生的构型分布，比 `flail/bang` 更靠近 `randpose` 那一端。
+**按 `ctrl=0` 摊平定容量不是保守口径，是乐观口径。**
+
+**更正三：报出来的每个 peak 都是下界，不是上界。** `3000` 步远没收敛。`ctrl=0` 跑到 `12000` 步：
+running max 依次 `92`(3k) → `95`(5k) → `101`(8k) → `106`(12k)，**最后一次刷新纪录在第 `11,640` 步
+（全程 `97%` 处）**，`nacon`/`ncollision` 峰值分别落在第 `11,999`/`11,998` 步——三条曲线在窗口末尾
+全都还在涨。收据自己也这么说：plant 普查 `peak_at_step = 2534/3000`（`84%` 处）。
+所以这些数只能支撑"这个步数内没超"，**不能支撑任何"余量 Nx"的断言**。
+
+**更正四：`9.45x` 接触余量算在了错的计数器上。** `naconmax` 同时是**三个**数组的上限：窄相接触
+`nacon`、宽相候选对 `ncollision`、以及 broadphase 的 `collision_pair` 三件套。必须塞进去的是
+`ncollision`，它恒 `≥` 接触数（实测比值 `2.2--2.3` 倍）。而收据里的
+`naconmax_headroom_x = naconmax / nacon_peak` 只除了 `nacon`。按正确分母重算：
+`4096` 世界 court 三个对抗场景是 **`6.45x` / `7.31x` / `8.48x`**；`ctrl=0` 跑 `12000` 步的
+`2048` 世界结果线性折算到 `4096` 约 `166k` → **`~3.2x`**；plant-only pyramidal 摊平那份是
+`242,714` → **`2.16x`**（不同场景/不同锥，仅作方向参考）。**真实区间 `~3--8x`，随场景和步数变，
+且未收敛——不是 `9.45x`。** `a3_plant_env.py:108` 的注释（"backs the broadphase array"）其实早就
+知道这件事，但这个数字既没进收据也没进训练门（§9.2.4 T2）。
+
+**没被推翻的部分**：我没能把它跑溢出。造出的最大值是 `188` 行/世界和约 `81k` 候选对，
+`world_substeps_at_or_over_njmax572 = 0`、`world_samples_at_or_over_nconmax128 = 0`。
+所以**现役 `njmax=572` / `nconmax=128` 在测到的所有场景里都安全，`constraint_headroom_ok` 的
+操作性结论仍然成立**——只是它现在是"碰巧对"，不是"被证明对"，因为支撑它的三个理由都得换。
 
 **NaN / 发散**三条独立证据全绿：court 训练 `5` 迭代 `nonfinite_state=0`；court `ctrl=0` 摊平
 `3500` 步 `worlds_with_nan=0`、`worlds_with_inf=0`、`qvel_absmax=7.77`；`nan_probe.py` 在 plant
@@ -1763,14 +1844,197 @@ GPU 归属不是靠"我设了环境变量"自证：独立采样器每 `2` 秒抓
 顺带**复核了球的恢复系数**（§9.2.1 的 `0.92150`）：本次 `4096` 世界重测 `e_mean=0.9214117`，
 实测权威是 `0.9215`，`4096/4096` 世界全部落在接受带 `[0.88, 0.93]` 内。
 
-收据在 pod1 `/workspace/mjlab_lane/`：`SMOKE5CAP.json`（发车）、`CENSUS_TRAINALLOC.json`（容量最坏
-情况）、`NANPROBE_4096.json`（NaN）、`GPU2_SAMPLER.log`（GPU 归属）、`CAPMUT`（变异测试）。
+> **更正五：上面这句"`4096/4096` 在带内"是空判，目前不构成任何证据。** 三个理由：
+> (1) **带宽荒谬**。`E_ACCEPT = (0.88, 0.93)` 宽 `0.05`，而实测 `e_std = 3.47e-6`、
+> 全幅 `e_max - e_min = 1.48e-4`——**带宽约等于实测全幅的 `340` 倍、`14,400σ`**。
+> 这个带过不了变异测试：接触刚度 `k` 改 `10` 倍（`1000` vs `10000`）两个都"通过"。
+> (2) **带没有出处**。`calibrate_restitution.py:95` 的注释只写 "acceptance band handed down for
+> this task"，谁定的、依据哪次测量，都没有。而 `e_mean` 与权威值差 `8.8e-5`，按实测 σ 算是 `25σ`
+> 的显著偏低，被宽带整个盖住。
+> (3) **`4096` 不是 `4096` 个样本**。这是同一个确定性落球重复 `4096` 次，差异只来自 mujoco-warp
+> 的非确定性，不是独立采样。
+> **还有一个收据层面的误导**：`e_vs_v_n_slope_per_m_s: 0.0` **不是测出来的**。`CENSUS_TRAINALLOC`
+> 的 `drop_height_m` 是 `[0.33, 0.33]`——单一落高、单一 `v_n = 2.5445 m/s`，`a3_court_env.py` 在
+> 退化情形下直接写死 `0.0`。而权威 `E_TABLE_MEASURED` 覆盖 `v_n 1.0--4.5 m/s`。
+> 把"没测"写成"斜率为 0"，会被读成"实测无速度依赖"。修法见 §9.2.4 T7。
+> **结论：任何以"球的弹性已核实"为前提的下游推断（击球质量奖励、sim2real 弹跳预算）目前都没有支撑。**
+
+收据在 pod1 `/workspace/mjlab_lane/`：`SMOKE5CAP.json`（发车）、`CENSUS_TRAINALLOC.json`（容量
+`ctrl=0` 口径）、`NANPROBE_4096.json`（NaN + plant-only 对照 `115`/`66,676`）、
+`GPU2_SAMPLER.log`（GPU 归属）、`CAPMUT`（`nefc` 变异测试）、
+`contact_census_4096.json`（plant-pyramidal `136`/`242,714`）、
+`CENSUS2_pyramidal.json` 与 `CENSUS2_elliptic.json`（同场景换锥的 `115` vs `96` 对照）。
+复核新增：`/workspace/advcheck/ADV_4096.json`、`ADV_ZERO_LONG.json`、`ADV_SCEN.json`（对抗场景与长跑），
+`/workspace/mjlab_lane/AUDIT_*`（门的变异与盲区扫描，逐条见 §9.2.4）。
 
 **这一节不代签什么**：这是 mjlab lane 自己的 court/ready/reach-touch 任务，**不是** canonical
 ActionBall N1。它没有 measured teacher、没有完整 reward 层级、没有 §9.2 要求的 termination union、
 没有 cross-engine parity，也没有 exact-resume（§9.2.0 已裁定 mujoco-warp 下逐位复现不成立）。
-它证明的是：GPU-native `4096` 训练回路在这条 lane 上真的转起来了，且容量与 NaN 两个 fail-closed
-门现在有代码在守、有数字可查。
+它证明的是：GPU-native `4096` 训练回路在这条 lane 上真的转起来了。
+**"容量与 NaN 两个 fail-closed 门现在有代码在守"这句初稿的话要收回**——容量门只守住 `nefc` 一条轴，
+NaN 那条链也被 `nan_to_num` 掐断了（都见 §9.2.4）。准确说法是：**数据干净，门不可信。**
+
+### 9.2.4 四方独立证伪后的汇总裁定（2026-08-06）
+
+**人话总结一句**：这条 lane 现在**跑出来的数据是干净的**（历史和复跑都查不到任何一次溢出，
+余量至少 `3` 倍），但**看门的那道门本身不可信**——它只盯着一个计数器、零测量也会盖 PASS 章。
+所以现在能说的是"这些 run 没坏"，**不能说**"门会拦住下一次坏"。
+
+四条独立证伪（看门狗 / GPU 隔离 / 容量普查 / 历史 run）的裁定如下。**冲突处已逐条查证，不和稀泥。**
+
+#### A. 成立、必须改的真问题
+
+| 编号 | 一句人话 | 硬证据 |
+| --- | --- | --- |
+| **P1** | **门对 broadphase 溢出完全失明，而那正是历史上真出过事的那条轴。** 更坏的是失明方向与被监视的信号**反相关**：宽相溢出时候选对在进窄相**之前**就被丢掉，于是 `nacon` 永远到不了上限——**溢出越深，被监视的数字看起来越健康**。 | `--nconmax 10` 实测：引擎打了 `1134` 行 `broadphase overflow - please increase nconmax to 11 or naconmax to 2561`，收据却写 `verdict: PASS_NO_OVERFLOW` + `naconmax_headroom_x=1.42`，**退出码 `0`**。`--nconmax 8` 同样（`1227` 行警告，`PASS`）。这正是 `a3_plant_env.py:92-101` 记录的历史事故（越界写 → CUDA illegal access），而 `CAPACITY_OVERFLOW` 的报错文案还在叫人 "Re-size with --njmax/--nconmax"。 |
+| **P2** | **零测量也能签发 PASS。** §9.2.2 初稿那句"没测过的 run 不允许声称容量门成立"是假的。 | `--iterations 0` 实测收据：`nefc_peak=0`、`nacon_peak=0`、`njmax_headroom_x: 572.0`、`naconmax_headroom_x: 8192.0`、`verdict: PASS_NO_OVERFLOW`。根因是 `_capacity_summary()` 只检查"探针接上了没"（`env._cap_ok`），从不检查"是否真的记录过样本"；而 `cap_peak` 初值是 `0`，`0` 和"测了且真是 0"无法区分。 |
+| **P3** | **`nacon` 那一路一次都没真正开过火。** | 扫 `--nconmax ∈ {10, 8, 6, 4, 2}`：`10`/`8` 静默 `PASS` 退出 `0`；`6`/`4`/`2` 直接 **CUDA illegal memory access** 崩掉（不是看门狗拦的）。**没有任何取值让 shipped 脚本打印出 `nacon` 路径的 `CAPACITY_OVERFLOW`。** 只读探针在 `nconmax=8` 观测到 `nacon` 峰值 `== naconmax`（原理上可达），但同配置的真实训练跑出 `1806 < 2048` 就放行——**同一个 `nconmax=8`，一跑拦一跑放**。 |
+| **P4** | **判决延迟一整个 PPO 迭代（`480` 个 physics substep），而 broadphase 那条轴"溢出→越界写→CUDA fault"的时间窗比这短。** | `--nconmax 6` 那跑里 warp 已经打了 `363` 行 `narrowphase overflow`，进程在看门狗到点读数之前就被 CUDA 非法访问打死。门永远抢不到那一拍。 |
+| **P5** | **eval 路径开了探针但完全没有门。** | `evaluate()` 传了 `capacity_probe=`，把含 `njmax_saturated` 的 `stats["capacity"]` 写进 JSON，但从不检查、从不调 `_capacity_summary`、永远 `return 0`。所有 `EVAL_*`/`EVALC_*`/`AUDIT_EVAL_*` 收据一律无门、无 `verdict`。 |
+| **P6** | **`sim.forward()` 是采样盲区。** | 探针只在 `sim.step()` 的 decimation 循环里调（`:600`）。而 `step()` 末尾在 env reset/补发球时还会调 `self.sim.forward()`（`:635`，`4096` env 下几乎每个控制步都会走），`reset()` 也调（`:528`）。`mjwarp.forward` 会重建碰撞与约束、同样会溢出，其 `nefc` 被下一次 step 覆盖，永不采样。 |
+| **P7** | **另外 `7` 种溢出类型无人看，其中 `4` 种连引擎都不打印。** | 引擎的 `d.overflow` 是 `9` 位粘性掩码。会 printf 的只有 `NEFC`/`NJMAX_NNZ`/`BROADPHASE`/`NARROWPHASE`/`CCD`；**`HFIELD`/`NVMAX`/`CONTACT_MATCH`/`EPA_HORIZON` 只置位、不打印**（`collision_convex.py:432`、`island.py:1001`、`sensor.py:2439`、`collision_gjk.py:1393/1412`）。本场景无 hfield / 无 flex / 无 contact-match sensor，但 **`EPA_HORIZON` 是凸体碰撞里真实可达且真静默的一条**。另注意 `forward.py` 里 `NJMAX_NNZ` 用的是 `elif`，只在 `nefc` **没**溢出时才检查。 |
+| **P8** | **`nan_to_num` 把 NaN 报警链掐断了，`nonfinite_state=0` 的证明力比看上去弱。** | `a3_train_ppo.py:572` 对 obs、`:671` 对 reward 都做了 `torch.nan_to_num`，rsl_rl 自带的 `check_nan(obs, rewards, dones)` 因此永远看不到。"溢出 → NaN → 崩"这条自然报警链不存在。（终止判据里的 `torch.isfinite(qpos/qvel)` 仍在，所以不是全无防线，但 obs/reward 这两路是哑的。） |
+| **P9** | **门禁一旦真的开火，落卡收据就同时消失。** | `CAPMUT`/`AUDIT_nc6`/`nc4`/`nc2` 这些非零退出的跑**只有 `.jsonl` 没有 `.json`**，没存 stderr、没存退出码、没存实际拿到的 GPU uuid。最需要证据的那一跑反而没有证据——和 MEMORY 里"改软硬门要连证据一起改"是同一类问题：失败路径上没有 telemetry。 |
+| **P10** | **`>=` vs `>` 差一行（良性，顺带记）。** | 引擎判据是 `nefc > njmax`，丢行判据是 `if efcid >= njmax_in`，所以 `nefc == njmax` 是**正好装下**；看门狗用 `peak >= njmax` 会在这一点误报。方向是 fail-closed 无害，但会在一个其实没坏的 run 上打出报错文案。 |
+
+数字层面的更正（`115→95` 的假因果、"最坏情况 `95`"低估 `2` 倍、`3000` 步未收敛、`9.45x` 用错分母、
+恢复系数带宽 `14,400σ`）已经就地写进 §9.2.3，不在这里重复。
+
+#### B. 证伪方自己出的错（一并记下，免得下游照抄）
+
+1. **`115` 的出处被认错了。** 有一方判定"`115` 出自 `CENSUS2_pyramidal.json`，那是 court 场景不是
+   plant-only"，据此说初稿引错了收据。**这条不成立**：初稿那行写的是"plant-only，`2000` 步，
+   `115` / `66,676`"，我按 `66676` 反查，源头是 `NANPROBE_4096.json`
+   （plant、`4096` 世界、`2000` 步、`njmax=508`），末条 trace 正是 `nefc_max: 115, nacon_max: 66676`。
+   **它确实是 plant-only。** `CENSUS2_pyramidal.json` 的 `115` 只是行数碰巧相同（那份是 `3000` 步、
+   `nacon 58,850`、court）。**但该方的实质结论仍然成立**——plant 默认 pyramidal、court 跑 elliptic，
+   `115` vs `95` 的锥混淆是真的，只是理由要换成"plant 那份普查本身就是 pyramidal"。
+2. **broadphase 真实余量被说窄了。** 有一方写"真实余量 `~2--3x`"，另一方写"约 `4--8x`"。两个都不是
+   在训练尺度上直接测的：`~2--3x` 来自 `2048`→`4096` 的线性外推和 plant-only pyramidal 那份
+   （不同场景、不同锥、不同分配），`4--8x` 来自 `256` 世界的比值外推。**直接在 `4096` 世界 court
+   场景测到的是 `6.45x` / `7.31x` / `8.48x`。** 正确写法是"`~3--8x`，随场景与步数变、且未收敛"，
+   见 §9.2.3 更正四。
+3. **"`9` 种 overflow 字符串一条都没有"这个说法不严谨。** 只有 `5` 种会打印，见 P7。这不影响该方的
+   主结论（下面 C1），因为与 `njmax`/`nconmax` 有关的那几种都在会打印的那一组里。
+4. **两处行号笔误**：`nan_to_num(obs)` 在 `:572` 不是 `:672`（`:671` 是 reward 那一处）；两处都真实
+   存在，不影响 P8 的实质。
+5. **变异测试的迭代号和峰值被当成固定值引用**（"iteration 1 / peak 71"）。两次独立复现是
+   iteration `1`/`71` 和 iteration `2`/`77`。mujoco-warp 非确定，这类数字不能写死。
+
+#### C. 被证伪方推翻、必须撤回的判定
+
+1. **"08-05 那次 `4096 env x 300 iter` 双 seed 训练的物理从未被验证、不可判定" —— 撤回。**
+   这条判定的地基是"引擎静默"，而地基是错的（见 §9.2.2 更正）。**可以事后判定，而且不需要重跑**：
+   - 两份历史日志各 `5292` 行、`grep -ci overflow` = **`0`**（我自己重跑过这条 grep，两份都是 `0`；
+     `2>&1` 两路都收了）。会打印的 `5` 类溢出——包括 broadphase——一条都没有。
+   - 同一脚本、同一环境的**对照组证明这条通道当时是活的**：`--njmax 60` 立刻打出 `13,008` 行
+     `nefc overflow`，`--nconmax 10` 打出 `1134` 行 `broadphase overflow`。
+   - 发车前 `31` 分钟就有一份**同分配值**的 census（`RECEIPT_COURT_4096_elliptic.json`，同
+     `572`/`524288`，余量 `8.06x`/`11.86x`）。所以"从不和实际需求比"只对训练循环内部成立，
+     对整条 lane 不成立。
+   - 今天补的两组主动实测一致：历史 ckpt 回放 `nefc 69`/`72`（`8.29x`/`7.94x`），
+     门全开同 seed 全量重跑 `86`/`91`（`6.65x`/`6.29x`），都是 `PASS_NO_OVERFLOW`、`0` 条 overflow、
+     `nonfinite` 终止 `0`。
+   - 顺带答一个反向担心：**晚期策略比早期更省行数**（回放 `69--72` < 训练期 `83--91`），
+     "学会以后接触变多可能撑爆"这个方向是反的。
+   **所以那两条 run 不需要打"物理存疑"标签，也不需要重训。**
+2. **但那两条学习曲线仍然不能按原来的方式引用 —— 理由与溢出无关，是口径和复现性。**
+   - `reach`/`touch` 是**带权奖励项**，不是概率：`w_reach=2.0`（上限 `2.0`）、`w_touch=4.0`
+     （上限 `4.0`）。"`0.53→0.98`"和"`4e-5→0.21`"并排写必然被读成两个百分比。真实含义是：
+     球拍平均离球从约 `1.0 m` 缩到约 `0.57 m`；`touch` 高斯核均值 `0.21/4 = 5.4%`。
+     **`0.21` 完全不是接触率。**
+   - **真正的二值接触率只在 eval 路径有**（`count_contacts` 只在 eval 开）：
+     零策略对照 `0.12%`、s0 `49.2%`、s1 `97.8%`（今天复现 `49.1%`/`97.6%`）。策略确实学到了东西
+     （`400--800` 倍于零策略对照），**但支撑它的是这组 eval 二值接触率，不是训练曲线上的 `touch` 奖励项**。
+   - **单 seed 单点不可复现**：同配置同 seed 四次跑出 `touch` = `0.21` / `0.46` / `0.59` / `0.61`，
+     近 `3` 倍散布，而 `0.21` 是四次里最差的一次。要报就报带，别报点。
+   - 顺带排除了"溢出造成穿透、反而更容易够到"这条假阳性路径：前提就不成立（无溢出）；
+     零策略 `0.0012` vs 训练后 `0.49`/`0.98` 是 `400--800` 倍不是噪声；穿透会把距离推向 `0`、
+     `touch` 冲向上限 `4.0`，而实测最小距离 `0.086 m`/`0.047 m`、`touch` 只有 `0.21--0.62`，
+     没有穿透签名；掉接触会让机器人陷进地面而 `height` 项 `300` iter 最低 `0.329/0.5`，骨盆一直在位。
+
+#### D. 现在到底可信到什么程度（一句话）
+
+**MuJoCo GPU lane 目前"数据可信、门不可信"：已经跑完的每一条 run（含 08-05 双 seed）都有当场或
+事后的证据表明没有发生任何一次约束/接触溢出，行余量至少 `3x`；但守门的代码只覆盖 `9` 类溢出里的
+`1` 类，能在零测量时签发 PASS，也拦不住历史上唯一真出过事的那条轴——所以它现在只够用来**记录**，
+不够用来**放行**。**
+
+#### E. 还剩哪些洞没被任何证据覆盖
+
+1. **`ncollision`（宽相候选对）在训练期从未被采样过**，只在事后的只读探针里量过；训练收据里至今没有
+   这个字段。
+2. **深度压 `nconmax` 时是 CUDA illegal access 先到、门后到**，中间没有任何一段由门接管；
+   在缩短判决延迟之前，这段区间无法被守住。
+3. **`EPA_HORIZON` 溢出真静默**（不 printf、不进日志），只有读 `d.overflow` 才看得见；历史 run 对这
+   一类**没有**任何证据。
+4. **容量普查从未跑到收敛**：`ctrl=0` 到 `12000` 步仍在刷新纪录，所有"余量 Nx"都是下界。
+5. **策略驱动的构型分布从未被普查**。现有普查都是 `ctrl=0` / 随机力矩 / 随机构型；
+   "早期随机策略 + reset 随机化 + 课程"下的真实分布没测过。
+6. **恢复系数带宽 `14,400σ`，且 `v_n` 依赖从未测过**（单一落高，斜率被写死 `0.0`）。
+   `e_in_accept_band_all_worlds: true` 目前不构成证据。
+7. **落卡 uuid 从不自证**：收据只记 `cuda_visible_devices` 这个意图字符串，不记实际拿到的 uuid；
+   `CUDA_DEVICE_ORDER` 未锁，本机是三张同型号卡才退化成一致。
+8. **失败路径无 telemetry**（P9）：门开火那一刻的证据是缺的。
+9. **`4096` 世界 court 场景的 `ctrl=0` 长跑（≥`12000` 步）没做过** ——
+   现有长跑只在 `2048` 世界做过，`4096` 的 `ncollision` 峰值靠线性外推。
+
+#### F. 给实现方的待办（**本次复核方未改任何实现代码**；Isaac lane 可能正在动同一批文件，不要就地改）
+
+全部指向 `hope_training/whole_body_tracking/mjlab_lane/a3_train_ppo.py`，行号以 commit `8afcae8a` 为准。
+
+- **T1（最高优先）换判据：读引擎自己的 `d.overflow`，不要自制近似。**
+  `mujoco_warp/_src/types.py:2350` 已经暴露 `d.overflow: array("nworld", int)`，逐世界粘性 OR 累积，
+  一次覆盖全部 `9` 类。在现有 decimation 循环里再读一个同形状小数组、GPU 侧 OR 归约，成本与现有
+  `nefc` 读回同量级。任何非零位即 fail，并把 flag 名字打进报错。
+  **必须注意**：`mjwarp.reset_data` 会把被 reset 世界的 `d.overflow` 清零（`io.py:2483`），而
+  `_reset_idx` 调 `sim.reset(ids)`（`:482`）——所以 OR 归约**必须留在 decimation 循环里**
+  （`:596-600` 现在的位置就对），不能挪到 step 末尾的 reset 之后。
+  现有 `nefc`/`nacon` 峰值保留，但降级为**报告用**（算余量），不再当门。顺带这能退掉那 `9%` 吞吐税。
+- **T2 把 `ncollision` 纳入监控并改 headroom 分母。** `naconmax_headroom_x` 应当是
+  `naconmax / max(nacon_peak, ncollision_peak)`；`.json` 里单列 `ncollision_peak_all_worlds`。
+  改的位置：`:741-751`（per-iteration stats）与 `:1042-1071`（run 级 summary）。
+- **T3 缩短判决延迟。** 现在每 `480` 个 substep 才判一次（门在 `log_hook` 里，`:881-896`）。
+  至少把 overflow 的 OR 结果累进一个 device 标量，在**每个 env-step 边界**读一次，而不是每个
+  PPO iteration 读一次。
+- **T4 PASS 必须以证据为前提。** `_capacity_summary()`（`:1042-1071`）增加"是否记录过样本"的判定，
+  不要只看 `env._cap_ok`。建议 `cap_peak` 初值用 `None`/`-1` 而非 `0`（`:863`），并在 `log_hook`
+  里累计 `cap_peak["iters"] += 1`；`iters == 0` 时 verdict 写 `NOT_MEASURED`（或新增 `NO_SAMPLES`），
+  **绝不写 PASS**。
+- **T5 eval 路径要么同样设门，要么明写 `NOT_GATED`。** `evaluate()`（`:981-1030`）现在把
+  `njmax_saturated` 写进 JSON 却不检查、恒 `return 0`。
+- **T6 补 `sim.forward()` 的采样点**（`:528` 与 `:635` 两处）。
+- **T7 收据要自陈落卡与失败。**
+  (a) `:919-921`/`:931-932` 现在只记 `device` 和 `cuda_visible_devices`（都是"我打算用哪张卡"）；
+  加上进程内真值 `torch.cuda.get_device_properties(0).uuid` / `.pci_bus_id` / `device_count`，
+  验收标准是 receipt 里的 uuid 能和 `nvidia_smi_start.compute_procs` 对上且 `device_count == 1`。
+  (b) receipt 落盘放进 `finally`，门开火时至少写
+  `{status: "gate_fired", device_uuid: ..., exit_code: ...}`。
+  (c) pod 上 `run_gpu2_smoke.sh` / `audit.sh` 只 `export CUDA_VISIBLE_DEVICES=2`，
+  加 `export CUDA_DEVICE_ORDER=PCI_BUS_ID`，或更硬地直接用 uuid 钉卡（实测本机可用）。
+- **T8 变异测试补齐并入收据**（按"改软硬门要连证据一起改"准绳，至少三条，且必须自陈 telemetry）：
+  `--nconmax` 落在盲区带（`nworld=256` 时是 `9~11`，`4096` 时需重新定位）——修复前退出 `0` + `PASS`，
+  修复后必须非零退出并点名 `BROADPHASE`；`--nconmax` 深压（`≤4`）——目前是 CUDA 非法访问，修复后应
+  在崩之前被门拦住；`--iterations 0`——修复后不得出现 `PASS`。
+- **T9 普查改成收敛判据，别用固定 `3000` 步。** `contact_census.py` 已经记了 `peak_at_step`，
+  直接拿它当门：`peak_at_step > 0.7 x steps` ⇒ 判 `NOT_CONVERGED` 而不是 `PASS`；收据输出 running-max
+  时间序列而不是单个标量；跑到"最近 K 步无新纪录"为止。同时把非准静态场景加进普查
+  （`ctrlrange` 内随机力矩、`jnt_range` 内随机构型释放），参考实现在 pod
+  `/workspace/advcheck/adv_capacity.py`，一张卡不到 `20` 分钟。
+- **T10 恢复系数验收带要么收紧要么别再当证据。** `calibrate_restitution.py:95` 的 `E_ACCEPT` 改成
+  能失败的宽度（例如权威 ±`3--5` 倍**场地**测量 σ），把 "handed down" 换成真实出处；走
+  `--height-sweep` 让 `e_vs_v_n_slope` 真的在 `1.0--4.5 m/s` 上测出来；`a3_court_env.py` 退化情形
+  应输出 `null`/`"NOT_MEASURED"` 而**不是 `0.0`**。验收用变异测试：`k` 改 `10` 倍，新带必须判 `FAIL`。
+- **T11 口径修正（比容量门更要紧）。**
+  (a) `reward_terms_mean` 里的 `reach`/`touch` 是加权后的核均值（上限 `2.0`/`4.0`），
+  receipt 要么改名（`reach_term_weighted`/`touch_term_weighted`），要么同时输出
+  `touch_kernel_mean = touch/4.0`，并在 json 里写明 `max_possible`。
+  (b) 把 `count_contacts` 也接进训练路径（现在只有 eval 开），让二值的
+  `fraction_of_episodes_with_a_racket_touch` 出现在训练曲线上——这才是唯一有物理意义的接触指标。
+  (c) 汇报一律用"零策略对照 + 二值接触率"（`0.12% → 49.2%/97.8%`），不用 `touch 4e-5→0.21`。
+  (d) 曲线一律带 run 间散布（`BAND_2seed.json` 已有 N-seed band 机制）。
+- **T12 把 warp 的 overflow printf 接进"WARN 必进摘要"的通道。** 按 MEMORY 里的发射工序教训，
+  那行字当初就在 stdout 上，只是淹在 `5292` 行里没人读。
 
 ### 9.2 MuJoCo 顺序
 
