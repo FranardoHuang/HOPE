@@ -43,7 +43,7 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 
 | 关键路径 | 当前事实 | 下一道可执行门 |
 | --- | --- | --- |
-| **termination/reward 对齐（2026-08-05 新增，明细见 §5.6）** | 反向审计发现 A211 运行时 `42` 个非零 term 而 §5.3 只覆盖 `22` 个；三项零命中项压过主层级。已落字节：`joint_actual_forbidden` 改 `terminate=False`（只记账不 reset，telemetry 模式强制证据记录器）、`ee_body_pos` 去腕只留脚、`upright_exp 1.0→0.25`、`hit_unstable_support -10→-1`、`death_penalty -300→-10`、`undesired_contacts` 正则 `_link→_Link`（**bug**：A3 是 `_Link`，原为 G1 命名，双脚双腕反被罚 `-2.0/episode`）、soft-limit v2 两条通道带宽 `0.08→0.05`（`qdes_limit_barrier_margin_frac` 与新增的 `joint_limit_margin_frac`，消除护栏自造的 `-0.0844/关节/步` 底噪）、`init_noise_std` 四处硬钉解开且 4σ 门改为按真实 σ 计算（原为字面量 `0.02`，**假绿**）。MuJoCo 侧 `joint_actual_forbidden` 已同步 | 重跑 A/C focused suite；让 `audit_action_ball_reward_hierarchy.py` 接受 DRL0 leaf 并重算全部静态数值（**当前它拒收实际发射的 profile**）；`counter_rally_v1` 与 `virtual_landing` 的口径差待裁决 |
+| **termination/reward 对齐（2026-08-05 新增，明细见 §5.6）** | 反向审计发现 A211 运行时 `42` 个非零 term 而 §5.3 只覆盖 `22` 个；三项零命中项压过主层级。已落字节：`joint_actual_forbidden` 改 `terminate=False`（只记账不 reset，telemetry 模式强制证据记录器）、`ee_body_pos` 去腕只留脚、`upright_exp 1.0→0.25`、`hit_unstable_support -10→-1`、`death_penalty -300→-10`、`undesired_contacts` 正则 `_link→_Link`（**bug**：A3 是 `_Link`，原为 G1 命名，双脚双腕反被罚 `-2.0/episode`）、soft-limit v2 两条通道带宽 `0.08→0.05`（`qdes_limit_barrier_margin_frac` 与新增的 `joint_limit_margin_frac`，消除护栏自造的 `-0.0844/关节/步` 底噪）、`init_noise_std` 四处硬钉解开且 4σ 门改为按真实 σ 计算（原为字面量 `0.02`，**假绿**）。MuJoCo 侧 `joint_actual_forbidden` 已同步 | 重跑 A/C focused suite；~~让 `audit_action_ball_reward_hierarchy.py` 接受 DRL0 leaf~~（**2026-08-06 更正：已于 `635252f6` 接受**，见 §5.6.13 (D)2）**并重算全部静态数值**（这半句仍欠，至今无对 DRL0 leaf 重算的收据）；`counter_rally_v1` 与 `virtual_landing` 的口径差待裁决 |
 | observation/reward | A/C=`211/319`；无 teacher-base；唯一 actor 角速度是 body-frame IMU gyro；C 只有 nominal-strike 拍心距离与`vb_fired` selected-rubber swept analytic contact-gated单次落点；`physical_ball=false`时不是PhysX observed landing。`.99/.95`保持A3/BeyondMimic/mjlab基线。runtime/training-contract已安装fixed-N1 A `base_position 1.5→0`、九个window项`×1.15`、C proximity`240`、A/C landing`700`；progress10保留。按Take061 task-valid折扣账，A `1.773<1.852≤3.009<3.332`，C `1.773<1.904<3.332`。C launcher与oracle的旧`v2/220/500`当前已改成`v3/240/700`，等待focused test确证 | ready/swing mimic ledger和schema-3 runtime交叉检查已过；补C fixture/live ledger全链、landing∧post-contact-fall监控；真球另走promotion |
 | reset/teacher | direct frame0 physical birth=`0/73`；split-ready artifact+`60/240` hold 已有；WAIT 5--25 tick期间机器人/teacher保持split-ready、球停在无接触park位；reveal原子安装来球并切measured frame0，机器人不reset。A/C leaf显式钉`backhand`。旧`.7123759904781779 s`来自 tracked interior receipt(`r4_splitready`, tick92)；A literal-center已收紧到TTC=`1.82`/tick91/wait=**`.6923799138976297 s`**，A/C materializer分别=`12/12`、`11/11`；C走独立family-C receipt。**2026-08-05 更正**：本行此前写作`.69237599 s`，那是从旧 tracked receipt 减一 tick 推出的；仓库存在两份相差`3.9e-6`的 interior 权威——旧 tape(`r3`/`r4_splitready`)receipt 的`0.7123759904781779`与现役 tape(`fresh_592835dc_take061/rematerialized_1d5d9d44`)receipt 的`0.7123799138976297`。producer 从 prepared core 重算出的正是后者，故以现役 tape receipt 为准，旧数只作历史。**2026-08-06 更正**：此前本句写作"以 code-owned 常量 `CANONICAL_TEACHER_PROJECTION`(`:201`)为准、launcher 导入期自检比对的是后者"——那条描述有误：该常量只是把同一份 tape receipt 的字节在代码里抄了一遍(22 个 `runtime_target` 字段逐一相等，3 个顶层键只是改名)，所谓"导入期自检"仅是常量与自身 sha 的循环比对，从不读磁带，因此对漂移零保护。该常量与 `CANONICAL_BASE_QUESTION` / `CANONICAL_SOURCE_TAPE` / 两个 validate 函数已于 2026-08-06 整体删除，唯一权威改为 tracked 磁带及其 `current_lm.target.task_receipt.v5.5e09858672ac.json`。误删helper已恢复。bridge schema-v3专项=`56 passed`，但共享4096 gate仍写schema-v2，A launcher在第84项正确fail-closed，未被绕过 | 把shared gate升级为严格消费v3 `reveal_to_playback_bridge`与唯一counter表；随后A/C launcher余下测试、旧interior负例→exact-source suite→S0/S1 |
 | question source | A cache schema-v2保存所有active-birth semantic rows+每动作跨reset hot row，mixed Q/Q' pure/cold replay correctness已过；C=`direct_ball`且formal A/C不用immutable tape。但当前level-0 TTC grid仍强制center±1 tick并携带stratum provenance，所以“fixed-N1”是小有限题带，不是用户要求的严格单Q | 增加curriculum-owned initial-center single-Q模式；升档后才扩题，Pod断言A cold=1/warm=0、C inverse=0 |
@@ -851,7 +851,17 @@ clamp/投影/罚三层已经处理的事。
 `hope_training/whole_body_tracking/scripts/action_ball_211_four_grid_contract.py`
 （`schema_version=3`，content seal `1bc1df34…b1ca`）。
 
-#### 5.6.2d reveal bridge 的可学性从未被验证（2026-08-05，四格第二轴）
+#### 5.6.2d reveal bridge 的可学性从未被验证（2026-08-05；**下表的"四格第二轴"已被取代，2026-08-06 更正**）
+
+> **读之前先看这条（2026-08-06 就地更正）。** 本节下面那张
+> 「`A0/C0` 阶跃 / `A1/C1` 插值」的表**不是现役四格**——§8.2「第二轴改版（第二次）」把第二轴
+> 换成了**本体感观测噪声开关**，现役身份是
+> `action_ball_211_four_grid_contract.py:115` 的 `..._proprio_obs_noise_on_v1`。
+> 本节的**问题**（reveal bridge 到底可不可学）仍然有效，但它后来是被 §5.6.6/§5.6.7 用
+> **另一条路**回答的：测量出来的运动学参考根本不是能产生力矩的指令，卡点在腿的几何
+> （`57/57` 帧脚底离地、`35/57` 帧质心出支撑多边形、站宽差 `0.350 m`），不在桥；
+> `34f8cf25` 把 reveal 的 `2.24 rad` 阶跃改成 ramp，实测只买到 `1` tick。
+> **所以：不要照本节下表去设计对照格。** 详见 §5.6.13 (F)。
 
 本文多处写“reveal 同 tick **原子切**到 measured frame0 ... 由 **dense mimic 学 bridge**”
 （:1027、:1597、:1713）。这是一句**设计声明，不是已验证事实**——全文没有任何一处给出该 bridge
@@ -901,8 +911,12 @@ clamp/投影/罚三层已经处理的事。
   同一 flag 还把 `virtual_pass_net` 与 `virtual_spin` 静默清零。后三档对早期策略基本不可达，
   故**合法上台的实际收入是平的 `+8.4` 台阶，不是 `8.4 -> 14` 的连续梯度**。本文全文 `counter_rally` 零命中。
 - **治理断链**：两个 launcher 实际发射的 profile 是 `...DRL0Learnability`，而生成 §5.3/§5.4 静态收据的
-  `audit_action_ball_reward_hierarchy.py` **明确拒收该 profile**（只接受 VendorV2 与非 DRL0 leaf）。
+  `audit_action_ball_reward_hierarchy.py` 曾**明确拒收该 profile**（只接受 VendorV2 与非 DRL0 leaf）。
   因此 §5.3 的那份账**不是对发射配方计算的**。发车前必须让审计器接受 DRL0 leaf 并重算全部数值。
+  **2026-08-06 就地更正（前半句已过期）**：审计器自 `635252f6`（2026-08-05 05:56）起已显式接受
+  两片 DRL0 leaf 并按 `<leaf> -> <非 DRL0 leaf> -> VendorV2 -> VendorV1 -> ActionBall` 解析继承链
+  （`audit_action_ball_reward_hierarchy.py:371-391`）。**仍然欠的是后半句**：至今没有一份
+  对 DRL0 leaf 重算的静态数值收据，§5.3/§5.4 的账仍是对上一层 profile 算的。逐条复查见 §5.6.13 (D)2。
 - **hold 窗口只做了一半：下限非零已满足，"随熟练收窄"的课程不存在。** Franco 2026-08-05 的要求是
   「hold 的窗口也是一点点扩大的，0 肯定是不对的；每次击球之间肯定有一些时间间隔，但确实是变化的，
   而且可以随着学习熟练一点点减小下限」。现状分两处，**不要混为一谈**：
@@ -1594,6 +1608,219 @@ live_declared_term_blockers()` 也折进去（无环：`isaac_reference_envelope
 - 干净检出 `9ea4d0c0` 上把本改动直接相关的 8 个模块单独跑：`355 passed`（含新增 25 条）。
 - 已知既有基线本来就红着 `266 failed / 19 errors`，不在本轮爆炸半径内；本轮没有让任何一条
   稳定绿的测试变红。
+
+#### 5.6.12 交接：`build_1` 加桌子那天会撞上的六个坑（2026-08-06，Franco 交代）
+
+**人话一句：** `build_1` 现在**没有桌子**（Franco 2026-08-06 确认），所以它的终止项里没有
+`robot_hit_table`；**但桌子是要加的**。我们这条线为了这张桌子已经趟过六个坑，全部写在这里，
+免得那天从头再趟一遍。**这不是待办，是交接单**——每条都配「症状 / 证据在哪 / 加桌子那天先做什么」。
+
+| # | 坑 | 加桌子那天先做什么 |
+| --- | --- | --- |
+| 1 | **`20 mm` 代理余量会在"没真接触"时终止** | 先接受它是 fail-closed 门，别当接触真值；把 first-hit 台账打开 |
+| 2 | **复刻侧曾拿广相 AABB 当终局判据** | 复刻任何终止判据前先问"这是预筛还是判决" |
+| 3 | **出生姿态把非持拍左手停在离真台面板 `32 mm`** | 加桌子前先量一次出生姿态到桌面的逐 body 间隙 |
+| 4 | **子类覆写一条终止项，桌子车道自己的指纹一个 bit 都不动** | 给 `HOPEActionBallTerminationsCfg` 补 `class_assignments` 选择器 |
+| 5 | **多一条终止项 = 终止原因的先后全变，而先后决定"锅算在谁头上"** | 让 `live_termination_reason_order()` 重推，四份原因名单必须重新恰好划分 |
+| 6 | **真桌子的物理体只有 `5 cm` 台面板，桌底那块体积没有任何碰撞体** | 决定要不要一起加 `table_robot_keepout`，否则机器人能走进桌子肚子里 |
+
+逐条展开：
+
+**坑 1：`20 mm` 余量是门，不是接触。** Isaac 侧 `TABLE_HIT_MARGIN_M = 0.02`
+（`hope_env_cfg.py:700`），把台面盒各向外扩 `2 cm` 再判重叠。`hope_env_cfg.py:697-699` 的注释写着
+"`2 cm` 是一个拍叶厚度的余量，远小于 `5 cm` 台板，所以它够不到任何没在碰桌子的东西"——
+**这句话被实测推翻了**：§5.6.5 的 `32/32` 终止瞬间，触发体 `right_hand_pingpang_Link`
+（手+拍整体网格的**粗包围盒**）对加余量盒是 `-4.1 / -2.5 mm`（重叠），对**真实台面板**却是
+`+24.2 / +20.7 mm`（净空），真实拍叶 OBB 对真台板还有 `+32.7 / +39.7 mm`。
+即门的实际伸手距离比标称 `20 mm` 还远，因为触发体是粗包围盒不是拍叶。
+guard 的 docstring 自己也承认这一点（"can terminate before resolved physical contact"）。
+**加桌子那天**：`robot_hit_table` 的计数**不能**当"真的撞到桌子了"读，必须配 first-hit 归因
+（哪个 body、对哪块板、精确 SAT 间隙多少）才有意义；`20 mm` 本身**不许放宽**，它是 fail-closed 门。
+
+**坑 2：广相不是判决。** `5ed998f1` 把 Isaac 的终局从 `any(component_overlap)` 换成
+`_obb_aabb_sat_overlap`，**同一个 diff 里**把复刻的 AST 指纹扩到覆盖新 helper 并重新盖章——
+指纹跟上了，语义没跟上，复刻的 `geometric_robot_table_hit` 继续拿保守世界 AABB 当终局，
+于是复刻会在活 kernel 放行的姿态上终止，**两天没人发现**。修复见 `142874da`。
+当时的测试为什么看不见：**它们造的盒子全是轴对齐的**，而轴对齐盒的广相 AABB 就是精确凸包，
+两种判据**按构造恒等**。新测试专门造了一个转 `45°`、空角伸进桌子体积的盒子（旧实现读 `True`、
+新实现读 `False`），并断言随机样本里**确实存在**两种判据不一致的姿态，否则 parity 测试自己判红。
+**加桌子那天**：任何"复刻一条桌子终止"的动作，第一句话必须是"这是宽相预筛还是终局判决"。
+
+**坑 3：贴边的是出生姿态，不是教师动作。** 出生姿态把**左手**（**非持拍手**）停在离真实台面板
+只有 `32 mm`（对加余量盒 `12 mm`）的地方；教师 frame0 自身很干净，最近间隙 `122 mm`。
+所以任何让左臂前伸的瞬态都会立刻撞线——MuJoCo `arm=teacher0` 对照 **tick 1** 撞的就是它
+（first-hit `left_hand_Link` vs `top`，精确 SAT `-7.2 mm`）。
+**加桌子那天**：先逐 body 量一次出生姿态到桌面的间隙；要压低撞桌率，**该动的是出生姿态而不是
+guard**，且必须走 fresh 臂、不与任何归因实验混变量（§5.6.5 已定此口径）。
+
+**坑 4：子类覆写对桌子车道自己的指纹是隐形的。** `table_termination.verify_isaac_source_authority()`
+（`table_termination.py:461-478`）的 config 选择器里，`HOPEDeployParityTerminationsCfg` 有
+`class_assignments|robot_hit_table`，而 `HOPEActionBallTerminationsCfg` **只有 `class_header`**；
+`class_header` 只哈希装饰器/基类/关键字、**不含类体**。而 ActionBall 子类**确实在覆写终止项**
+（`hope_env_cfg.py:2471` 的 `ee_body_pos` 就是覆写来的）。所以哪天子类覆写 `robot_hit_table`，
+这枚指纹一个 bit 都不会动。今天被别处兜住了（`vec_env` 链上的 `live_declared_term_blockers()`
+会因为声明项集合不等而开火），但 `verify_isaac_source_authority()` **单独跑是看不见的**。
+修法与无环性见 §5.6.11 末尾。**加桌子那天**：先补这条选择器，再动桌子。
+
+**坑 5：多一条终止项 = 归因顺序全变。** 两个 HOPE 终止类最终派生自 `tracking_env_cfg.TerminationsCfg`，
+`configclass` 是 dataclass 底子：字段顺序 = 先父类按声明序、再接子类新加字段，**子类覆写不会挪位**。
+现役顺序 = `time_out, anchor_pos, anchor_ori, ee_body_pos`（根类）→
+`base_fell_tilt, base_too_low, robot_hit_table`（父类）→ `joint_qdes_forbidden, joint_actual_forbidden`（子类）。
+**同一步里两条终止都成立时，排在前面的那条才被记进收据**——这个顺序就是"实验把锅算在谁头上"。
+§5.6.5 那次腕部 guard 的误判之所以难查正是这一类。`build_1` 现在没有 `robot_hit_table`，
+**加进来就会改动整条顺序**。好消息是 `9ea4d0c0` 之后这件事会 fail closed 而不是静默：
+`live_termination_reason_order()` 按 dataclass 字段序重推，四份复刻原因名单必须**恰好划分**
+现役硬终止项（相位 / 基座与关节 / 撞桌三个桶），新增一条落进"谁都没认领"就开火。
+**加桌子那天**：预期会红，红了就按新顺序重推并重钉，不要绕过。
+
+**坑 6：桌底那块体积除 keepout 外没有碰撞体。** 真实桌子的物理体只有 `5 cm` 台面板；
+可视 USD 的物理层是整网格凸包（代码明确写了不用，会把自由空间填实）。
+`table_robot_keepout` 在两个引擎里都是**真实碰撞体**（Isaac kinematic cuboid /
+MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它只覆盖桌子自身投影
+`x∈[.5, 3.24]`，机器人站在 `x=0`、出生姿态双脚离它 `137 mm`，**不挡合法站位**；历史触发 `0` 次。
+2026-07-29 `a93ccf8f` 作为明确安全代理引入，不是调试残留。
+**加桌子那天**：只加台板不加 keepout，机器人可以直接走进桌子肚子里而没有任何碰撞体阻止。
+
+**这一节不代签什么。** 它不代签 `build_1` 的桌子该长什么样、放哪里、用哪种碰撞体；
+也不代签这六条在 `build_1` 的代码结构下是同样的行号。它只代签**这六个坑我们已经踩过并留下了
+可复算的数字**，`build_1` 那边不必重新发现一遍。
+
+#### 5.6.13 全面复查"漏做的"：声称做了但没接线 / 没人读的（2026-08-06）
+
+**人话一句：** 这一轮不查新 bug，只把本文声称"已做/待裁决/待补"的每一条与仓库现状逐条对齐。
+下面按「后果 x 静默失败可能性」排序，**只列真影响判读的**。
+
+**(A) `4096x5` 共享 gate 至今不读 `reveal_to_playback_bridge`——而生产方每个 update 都在出它。**
+`action_ball_4096x5_prelong_gate.py` 的严格 v3 消费方 `_validate_reveal_bridge`（`:685`）
+**全仓零调用点**：整个文件里 `reveal_to_playback_bridge` 只出现在它自己的 docstring（`:698`）。
+真正跑的 `validate_semantic_updates`（`:1216`）逐字段 `row.get(...)`，**不要求键集合精确**，
+所以带 bridge 的行被原样收下、bridge 一个字段都没被看过。而 A launcher 的
+`scale4096` 阶段确实在调 `validate_prelong_gate`（`launch_action_ball_a211_four_arm_diagnostic.py:2445`），
+生产方 `action_ball_prelong_semantics.py:957` 每个 update 都写这块记录，且
+`require_bridge_telemetry` 默认 `True`（`:1673`）。
+**没人读的是这些**：`question_sha256` / `sampler_contract_sha256` /
+`effective_reward_recipe_sha256` / `wait_schedule_sha256` / `timing_contract_sha256` /
+`wait_cohort_ticks` / `policy_dt_s` 这七项权威、逐 WAIT 档的 reveal→playback 寿命守恒、
+以及 `status` 位。**尤其是 `status`**：桥没配起来时生产方返回
+`{"status": "not_configured", ...}`（`:3062-3065`），而严格消费方要求
+`status == "active_fail_closed"`——**接了线就是拒收，现在是静默放行**。
+**该做什么**：把 `_validate_reveal_bridge` 接进 `validate_semantic_updates`，同批加变异测试
+（把 `status` 改成 `not_configured` / 把任一权威 SHA 改一位 / 把某档 WAIT 的
+`reveal_count != start + terminal + censored`，三条都必须转红）。
+**为什么现在没做**：它会改变 gate 的拒绝面，而四格 `scale4096` 正在发；本轮不动正在跑的门。
+**这一条不能只当"清理遗留"读**——`_validate_reveal_bridge` 存在这件事本身，容易让人误以为
+"gate 已经严格消费 v3 了"。
+
+**(B) `promotion_blocked` 这个结论位全仓没有任何消费者，也没有任何测试。**
+§5.6.2 第 10 条记着："把一个硬门改软时，记录与阻断必须同一次改完；只出计数器等于把护栏换成了
+一个需要人记得去看的数字。" 现状是**只做了改名**：`mujoco_native/vec_env.py:1846` 发出
+`promotion_blocking_evidence.promotion_blocked`，代码注释就写着"只有结论会被下游读"——
+但全仓 `grep promotion_blocked` 的命中**只有这个发出点**，`checkpoint.py` 零命中，
+`launch_mujoco_action_ball_211_diagnostic.py` 只读 `plant_counters`（`:672-685`），
+`tests/test_mujoco_native_vec_env.py` 里 `promotion` 出现 `0` 次（断言的全是原始计数
+`joint_actual_forbidden_observed_ticks`）。**后果**：`joint_actual_forbidden` 从硬终止改软之后，
+"不终止但卡晋级"仍然只实现了前半句；把这个结论位整段删掉，**没有一条测试会红**。
+**该做什么**：给它一个真消费者（晋级/落盘路径读到 `True` 或字段缺失即拒），并配变异测试
+（"收据里把 `promotion_blocked` 写死 `False`" 必须被杀）。
+**为什么现在没做**：这条改的是 MuJoCo 侧晋级路径，而 §5.6.2 第 10 条明确要求"记录+阻断同批"，
+不能只补一半；且它需要先定清楚"哪一步算晋级"。
+
+**(C) 另外几个零调用点的门，逐个给判决。** 全仓扫了 `scripts/` 与 `mujoco_native/` 的
+`4736` 个模块级 `def`（token 频次索引法：把全仓 `.py` 的标识符出现次数建索引，
+出现次数 `<= 1` 即"除自己的 `def` 外无人提及"）。零调用点的函数共 `14` 个，
+其中**门形状的 `5` 个**：(A) 那条，加下面两条（本条），再加两条在 canonical 动作库车道的
+——`canonical_motion_bank_gate.py:3905 _validate_artifact_path_hash`（校验绑定路径与 SHA 同时对上）
+与 `canonical_neutral_ready.py:3907 _reverify_receipt_contact_source_files`
+（收据落盘前重算源动作 SHA）。后两条不在现役四格/N1 车道上，本轮只登记不判决。
+其余 `9` 个是纯数值 helper（`central_diff` / `_unit_quaternion` / `roll_pitch_from_quat_wxyz` 之类），
+删或留都不影响任何判据。本条要判的两个：
+
+- `launch_action_ball_curriculum.py:844` `_require_fresh_order_sentinel`：
+  **判定接线，不删**。它校验的是 MuJoCo 侧 `mujoco_teacher_motion_fitted_ball_gate.py:223`
+  的 `FRESH_N5_ORDER` 与本 launcher 的 `ACTION_ORDER`（`:42`）逐位相等。
+  **今天两边确实相等**（`bh_loop_c, v12_forehand_block, bh_block, s0_highpress, fh_loop_high`），
+  所以这是**潜伏漂移**不是在跑的错——和 §5.6.11 那条终止顺序完全同形。
+  它的成本是一次 AST 解析，收益是"两个车道的动作顺序不许各走各的"。
+  测试侧 `test_launch_action_ball_curriculum.py:504-505` 已经在给它写 fixture，
+  说明当初是打算接的。**注意**：这是 N5 curriculum 车道，不是现役四格，所以优先级低于 (A)。
+- `launch_n1_vendor_baseline_diagnostic.py:1711` `_valid_table_guard_attribution_summary`：
+  **判定接线，不删**，但要连它的生产方一起看。它要求 forensic 摘要三路自洽
+  （`first_hit_total_count == terminal_count == table_count`、`category_counts` 与
+  `phase_counts` 各自**恰好划分**同一个 total、`nonfinite == 0`），
+  正是 §5.6.5 那次"撞桌到底算在谁头上"最需要的那种守恒账。生产方在
+  `hope_commands.py:23455 _consume_table_guard_attribution_counts` /
+  `:23514 _validate_table_guard_attribution_conservation`，**已经存在且有测试**
+  （`test_reward_flags_mdp.py:365-409`）。差的就是 launcher 侧这一步接线。
+  **为什么现在没做**：`hope_commands.py` 此刻有另一条 workflow 在改，本轮不碰。
+
+**(D) §5.6.3「尚未对齐、需单独裁决的」四条逐条现状。**
+
+1. **`virtual_landing` 的实际 raw ≠ §5.3 写的 `legal_base`：仍然成立，且是活的。**
+   现役 launcher 绑的 `take_061_unit04_bh` manifest 确实带 `counter_rally_objective`
+   （`configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/
+   take_061_unit04_bh.full.manifest.v3.7d2139028427.json`），
+   `hope_commands.py:5823` 据此置 `_counter_rally_enabled=True`，于是
+   `hope_rewards.py:4836` 让 `virtual_pass_net` **恒返回零**、`:5019` 让 `virtual_spin` 恒返回零、
+   `:4932` 与 `:4993` 把 `virtual_landing` 换成 counter-rally 的五项复合。
+   **本轮新查到的一层**：A211 的 admitted 非零权重表里
+   `virtual_pass_net: 20.0` 还在（`action_ball_prelong_semantics.py:141`），
+   而这张表是**活值比对**的（`classify_prelong_reward_profile` 拿它跟运行时
+   RewardManager 权重逐项对，漂了就拒）。也就是说：**一个权重非零、被门确认"在编"、
+   但 kernel 结构上恒为零的奖励项，现在没有任何机制会说出来**。
+   `4096x5` gate 只按 `motion/strike/target/outcome` 四组报分母与收入，不逐项报，
+   所以 outcome 组里躺着一个死项是看不出来的。**待裁决内容不变**（§5.3/§5.4 的
+   `8.4 -> 14` 连续梯度对现役配方不成立，实际是平的 `+8.4` 台阶）；
+   **新增一条建议**：给"admitted 非零权重但整窗恒零收入"的项加一条会说话的检查，
+   否则每次改 counter-rally 开关都要靠人记得。
+2. **治理断链（审计器拒收 DRL0 leaf）：已修，但本文两处仍写着"当前它拒收"。**
+   `audit_action_ball_reward_hierarchy.py:371-391` 自 `635252f6`（2026-08-05 05:56）起
+   显式接受 `HOPEPingPongActionBall{A211,C211}VendorV2N1DRL0Learnability.yaml`
+   并按 `<leaf> -> <非 DRL0 leaf> -> VendorV2 -> ...` 解析继承链。
+   **仍然欠的是后半句**："并重算全部静态数值"——§5.3/§5.4 的那份账目前**没有**一份
+   对 DRL0 leaf 重算的收据。本文顶部状态表与 §5.6.3 第 2 条的"（**当前它拒收实际发射的
+   profile**）"这句话已经过期，此处就地更正。
+3. **hold 窗口课程：只做了一半，已明确 defer（`838ead25`）。** 状态不变、无遗漏。
+4. **两个 barrier probe 白算两遍：省算力与保遥测冲突，仍待裁决、暂不改。** 状态不变、无遗漏。
+
+**(E) DR-L1 四格到哪一步了：合同层齐了，发射层一步都没走。**
+已有：`training_contract.py:4987-5140` 的 payload/finalizer/digest、
+`train.py` 的运行时合同与逐项漂移检查（`_ACTION_BALL_DR_L1_RUNTIME_ATTR` 等）、
+两片 hydra 叶子（`HOPEPingPongActionBall{A211,C211}VendorV2N1DRL1Learnability.yaml`）、
+tracked 候选 manifest（`configs/action_ball_n1_measured_20260805/
+action_ball_211_dr_l1_restored_plant_candidate.v1.json`）、专项测试
+`tests/test_action_ball_start_pose_ramp_dr_l1.py`。
+**没有的**：任何能发它的路径。两个 launcher 都把 `TASK_PROFILE_ID` 与
+`DR_L0_MANIFEST_SOURCE` 硬钉在 DR-L0
+（`launch_action_ball_a211_four_arm_diagnostic.py:188/396`、
+`launch_action_ball_c211_diagnostic.py:184`），
+`action_ball_211_four_grid_contract.py` 的 DR 档身份只封了 L0 与 L0N 两个值。
+**这是设计使然不是遗漏**（四格刻意只差 obs-noise 一根轴），但它的后果要写明：
+**`start_pose_ramp` 与 hold 窗口课程这两件"挂到 DR-L1 同批裁决"的事，现在挂在一个
+没有发射路径的档上**——不给 DR-L1 一个 lineage kind 与一次 materialize，这两件事就一直悬着。
+
+**(F) §5.6.2d 的第二轴表与 §8.2 的第二轴表是两张不同的表，且 §5.6.2d 没标 SUPERSEDED。**
+§5.6.2d 写「`A1/C1` = 在 `time_to_teacher_start` 窗内由 split-ready **插值**到 frame0」，
+§8.2「第二轴改版（第二次）」写「`A1/C1` = 本体感观测噪声**开**」。现役是后者
+（`action_ball_211_four_grid_contract.py:115` 的 `..._proprio_obs_noise_on_v1`）。
+§5.6.2d 通篇没有 superseded 标记，单独读它会得出错误的四格定义。
+另外它提的那个问题（"reveal bridge 到底可不可学"）后来是被 §5.6.6/§5.6.7 用**别的方式**
+回答的（测量出来的运动学参考根本不是能产生力矩的指令；卡点在腿，不在桥），
+而 `34f8cf25` 的 ramp 实测只买到 `1` tick。**这两件事没有在 §5.6.2d 就地写清楚，
+下一个人会照着 §5.6.2d 去设计一组已经被证伪的对照格。**
+
+**(G) 本 session `28` 个提交留下的尾巴，逐条查过。**
+带机器可检归宿的（**没问题**）：`9ea4d0c0` 的 `OPEN_MIRROR_DEBT` 五条常量债
+——注册表强制每条写"真源在哪 / 怎么修 / 为什么这轮没修"，债还了却留在清单里也判红。
+**没有归宿的只有一条**：同一节末尾那个
+`table_termination.verify_isaac_source_authority()` 缺 `class_assignments` 的洞
+——它不是常量所以进不了 `OPEN_MIRROR_DEBT`，只活在本文的散文里。
+本节 §5.6.12 坑 4 已把它写成加桌子那天的前置动作，但它**仍然没有一条会红的测试**。
+其余带"这轮不做"的尾巴（`391f41c9` 建议 oracle32 重定范围、§9.2.8 的 `13%` 探针成本、
+§9.2.4 E5 策略驱动构型分布未普查）都已在各自小节里写明并留了理由，不重复列。
+
+**这一节没做的：** 本轮**零代码改动**。(A)(B)(C) 三条都要改门或改收据消费面，
+按「改软硬门要连证据一起改」必须记录+阻断+变异测试同批落地；而四格 `scale4096`
+正在发、`hope_commands.py` / `train.py` 另有 workflow 在改，本轮只出判决与依据。
 
 ## 6. 智元 setting 的采用表
 
