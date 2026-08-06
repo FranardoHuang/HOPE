@@ -123,11 +123,25 @@ def _source_lineage(profile: abi.ActionBall211Profile) -> dict[str, str]:
             f"{profile.label} mirrored task leaf SHA differs: "
             f"expected={profile.task_leaf_sha256} actual={leaf_actual}"
         )
+    # 人话:上一道门只说"源文件字节跟我钉的一样",不说"我这份手抄件抄对了"。
+    # 源文件一动,把 SHA 重钉成新值是一行的事 —— 5ed998f1 就是这么让 table
+    # 复刻停在原地两天的。这道门把手抄的身份串、逐行有序布局、两个宽度和
+    # RESET_WAIT 掩码块跟活的叶子再对一遍,所以光重钉 SHA 不再放行。
+    parity = abi.live_source_parity_blockers(profile, path)
+    if parity:
+        raise LaunchBlocked(
+            f"{profile.label} mirrored ABI semantics differ from the live Isaac "
+            "source (re-pinning the SHA does not port them): " + "; ".join(parity)
+        )
     return {
         "repo_relative_path": str(_SOURCE_PATHS[profile.label]),
         "sha256": actual,
         "task_leaf_repo_relative_path": str(leaf_path.relative_to(REPO_ROOT)),
         "task_leaf_sha256": leaf_actual,
+        "live_semantic_parity": "exact_identities_ordered_layouts_widths_wait_mask",
+        "live_semantic_parity_symbols_compared": str(
+            len(abi.MIRRORED_IDENTITY_SYMBOLS) + 6
+        ),
     }
 
 

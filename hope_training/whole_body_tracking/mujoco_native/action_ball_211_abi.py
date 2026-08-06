@@ -15,8 +15,11 @@ clocks are hidden.  Plant and measured-mimic groups remain untouched.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -25,11 +28,22 @@ import numpy as np
 ACTOR_WIDTH = 211
 CRITIC_WIDTH = 319
 
-# Exact mirror pin after the A authority adopted question-source contract v4:
-# online solver plus semantic question cache for A, direct-ball for C.  The
+# Exact mirror pin.  The A leaf currently ships question-source contract v5
+# (online solver plus semantic question cache) and the C leaf direct-ball; the
 # ordered 211/319 layouts did not change.  Every launcher reopens these exact
 # bytes and fails closed before constructing an env if either source drifts.
-A211_SOURCE_SHA256 = "704076ceb4a70f221fe1a6f88acc09bf7416e7c656fc88063a3f643f2fff988a"
+#
+# 人话:这四行只是"字节没变"的收据,不是"语义跟上了"的证明。SHA 谁都能重钉一行,
+# 5ed998f1 就是这么让复刻停在原地两天没人发现的。所以重钉的同时必须过
+# ``live_source_parity_blockers``:它把下面这份镜像逐符号跟活的 Isaac 叶子对一遍,
+# 光重钉 SHA 不再能让布局漂移蒙混过关。
+#
+# A211 repinned 20260806 for 5c4ced66 (the validity-mask gate now compares the
+# cfg sequence element by element instead of ``list == tuple``).  That edit is
+# Isaac-cfg-only -- the native lane has no env_cfg to validate -- so nothing in
+# the mirror needed to move with it; ``live_source_parity_blockers`` is what
+# says so out loud instead of leaving it to the next reader's memory.
+A211_SOURCE_SHA256 = "101a18c3f379b59c2a8c429a9a13b8b71e843d4da3a8ba0781f342203af77e93"
 C211_SOURCE_SHA256 = "95652ae9c1e27e400eef6162f8bfeecd0be564619350c8491567c27f4eda15cb"
 A211_TASK_LEAF_SHA256 = "0cf619caa7ee69650bd7e10cdcfc8de958fae9d3c3f6eccfec6d863da4032224"
 C211_TASK_LEAF_SHA256 = "adf4574f262185fc0d71a7d186e9d8de40697b310c91e1157ad4b43f30c6c44c"
@@ -392,6 +406,154 @@ C211_PROFILE = ActionBall211Profile(
 )
 
 PROFILES = {"A211": A211_PROFILE, "C211": C211_PROFILE}
+
+
+# --------------------------------------------------------------------------
+# Live-source semantic parity
+#
+# 人话:上面每一行都是手抄的。SHA 只证明"源文件字节没动过",一旦源文件动了,
+# 把 SHA 重钉成新值是一行的事,而手抄件是不是跟着动了没人查 —— 这正是
+# 5ed998f1 那次复刻停在原地的机制。下面这组检查把手抄件逐符号跟活的 Isaac
+# 叶子对一遍,所以"只重钉 SHA"从今往后不再够。
+# --------------------------------------------------------------------------
+
+#: The observation row after which every remaining non-``task_valid`` row is a
+#: task-authority row, i.e. exactly the RESET_WAIT-masked block.  Derived from
+#: the live layout rather than hardcoded so a new task row cannot be added
+#: upstream and silently left unmasked here.
+WAIT_MASK_TAIL_ANCHOR_FIELD = "racket_site_teacher_at_reference_hit_heading"
+
+#: (profile attribute, live module symbol suffix) for every identity string the
+#: mirror hand-copies out of the Isaac trainability leaf.
+MIRRORED_IDENTITY_SYMBOLS = (
+    ("actor_contract", "ACTOR_CONTRACT"),
+    ("critic_contract", "CRITIC_CONTRACT"),
+    ("trainability_contract", "TRAINABILITY_CONTRACT"),
+    ("actor_normalizer_identity", "ACTOR_NORMALIZER_IDENTITY"),
+    ("critic_normalizer_identity", "CRITIC_NORMALIZER_IDENTITY"),
+)
+
+_ABSENT = object()
+
+
+def load_live_trainability_module(source_path: Any) -> Any:
+    """Host-load one Isaac trainability leaf straight off disk.
+
+    The A/C leaves import only ``math``/``typing`` (C falls back to loading its
+    A sibling by path), so this works on a plain host without isaaclab.
+    """
+
+    path = Path(source_path)
+    unique = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:12]
+    spec = importlib.util.spec_from_file_location(
+        f"action_ball_211_live_mirror_{path.stem}_{unique}", path
+    )
+    if spec is None or spec.loader is None:
+        raise ActionBall211ABIError(f"cannot host-load live trainability leaf {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(spec.name, None)
+        raise
+    return module
+
+
+def _live_layout(module: Any, symbol: str) -> Any:
+    value = getattr(module, symbol, _ABSENT)
+    if value is _ABSENT:
+        return _ABSENT
+    try:
+        return tuple((str(name), int(width)) for name, width in value)
+    except (TypeError, ValueError):
+        return None
+
+
+def live_source_parity_blockers(
+    profile: ActionBall211Profile, source_path: Any
+) -> tuple:
+    """List every way this mirror disagrees with the live Isaac leaf.
+
+    Empty means the hand-copied identities, the *ordered* per-row layouts, both
+    widths and the RESET_WAIT mask block all still match what the leaf actually
+    ships.  Order and per-row width are compared row by row on purpose: a swap
+    of two same-width rows, or moving a dimension from one row to its
+    neighbour, leaves the total width and the name set untouched and is
+    invisible to every coarser check.
+    """
+
+    label = profile.label
+    prefix = label.lower()
+    try:
+        module = load_live_trainability_module(source_path)
+    except Exception as exc:  # noqa: BLE001 - any load failure must fail closed
+        return (f"{prefix}_live_trainability_source_unloadable:{exc}",)
+
+    blockers = []
+    for attribute, suffix in MIRRORED_IDENTITY_SYMBOLS:
+        symbol = f"{label}_{suffix}"
+        live = getattr(module, symbol, _ABSENT)
+        if live is _ABSENT:
+            blockers.append(f"{prefix}_live_symbol_absent:{symbol}")
+            continue
+        mirrored = getattr(profile, attribute)
+        if live != mirrored:
+            blockers.append(
+                f"{prefix}_{attribute}_differs:live={live!r} mirror={mirrored!r}"
+            )
+
+    for lane_name, lane, suffix in (
+        ("actor", profile.actor, "ACTOR"),
+        ("critic", profile.critic, "CRITIC"),
+    ):
+        symbol = f"{label}_{suffix}_LAYOUT"
+        live_layout = _live_layout(module, symbol)
+        if live_layout is _ABSENT:
+            blockers.append(f"{prefix}_live_symbol_absent:{symbol}")
+            continue
+        if live_layout is None:
+            blockers.append(f"{prefix}_live_symbol_malformed:{symbol}")
+            continue
+        if live_layout != lane.layout:
+            blockers.append(
+                f"{prefix}_{lane_name}_layout_differs:live={live_layout!r} "
+                f"mirror={lane.layout!r}"
+            )
+        width_symbol = f"{label}_{suffix}_WIDTH"
+        live_width = getattr(module, width_symbol, _ABSENT)
+        if live_width is _ABSENT:
+            blockers.append(f"{prefix}_live_symbol_absent:{width_symbol}")
+        elif int(live_width) != lane.width:
+            blockers.append(
+                f"{prefix}_{lane_name}_width_differs:live={live_width!r} "
+                f"mirror={lane.width}"
+            )
+        expected_mask = _wait_mask_tail_names(live_layout)
+        if expected_mask is None:
+            blockers.append(
+                f"{prefix}_{lane_name}_live_layout_has_no_task_tail_block"
+            )
+            continue
+        mirrored_mask = tuple(
+            field.name for field in lane.fields if field.mask_when_task_invalid
+        )
+        if expected_mask != mirrored_mask:
+            blockers.append(
+                f"{prefix}_{lane_name}_wait_mask_differs:live_tail={expected_mask!r} "
+                f"mirror_masked={mirrored_mask!r}"
+            )
+    return tuple(blockers)
+
+
+def _wait_mask_tail_names(layout: Sequence) -> Any:
+    """Rows strictly between the last mimic row and the trailing ``task_valid``."""
+
+    names = [name for name, _width in layout]
+    if names[-1:] != ["task_valid"] or WAIT_MASK_TAIL_ANCHOR_FIELD not in names:
+        return None
+    start = len(names) - 1 - names[::-1].index(WAIT_MASK_TAIL_ANCHOR_FIELD)
+    return tuple(names[start + 1 : -1])
 
 
 @dataclass(frozen=True)
