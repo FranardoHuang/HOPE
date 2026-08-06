@@ -78,31 +78,61 @@ DECIMATION = 20
 
 # ---------------------------------------------------------------------------
 # Static array capacities.  MuJoCo Warp sizes contacts and constraints once, up
-# front, and both of its heuristics are far too small for this plant.  Measured
-# with `contact_census.py` (limp zero-torque drop from the "stand" keyframe,
-# nworld=4096, 3000 steps -- the worst case a bare robot can produce):
+# front, and both of its heuristics are far too small for this plant.
 #
-#   demand                                   measured peak   warp heuristic
-#   constraint rows / world                        136             64
-#   contacts / world                                26             48
-#   broadphase candidate pairs, all worlds      242,714        196,608
+# RE-MEASURED 2026-08-06 with the convergence-gated `contact_census.py`.  The
+# numbers that used to sit here (136 rows / 26 contacts / 242,714 candidates)
+# came from a limp zero-torque drop over a FIXED 3000-step window, and both
+# halves of that were wrong:
+#
+#   * zero torque is not the worst case.  Torque that never leaves the model's
+#     own ctrlrange costs ~25% more rows, and a random configuration inside
+#     jnt_range costs about twice as much.
+#   * 3000 steps is not converged.  The zero-torque sprawl was still setting
+#     new records at step 25,590 of 30,000, so the old peaks were lower bounds.
+#
+# Per-world demand at nworld=4096, pyramidal (this plant's default cone), each
+# scenario run until it stopped setting records -- except `zero`, which never
+# does (see below).  `ncollision` is all worlds, and it, not the contact count,
+# is what naconmax really has to hold.
+#
+#   scenario   rows/world   contacts/world   broadphase candidates
+#   zero          159*           31*              268,846*   (* NOT converged)
+#   flail         170            32                77,615
+#   bang          167            31                71,838
+#   randpose      276            57               108,666
+#   slam          244            44               120,825
+#   warp heuristic  64           48               196,608 (= 48 * 4096)
 #
 # Two independent failures follow from trusting the heuristics:
 #
-#  1. njmax=64 drops the surplus constraint rows *silently*.  At nworld=4096
-#     that put ~96% of worlds non-finite by step 2000, while the identical drop
-#     on CPU MuJoCo -- which grows its arena on demand and peaked at nefc=92 --
-#     stayed finite for the full run.
+#  1. njmax=64 drops the surplus constraint rows.  Not silently -- the engine
+#     printfs a line and sets a bit in d.overflow -- but nothing downstream
+#     reads either, so it may as well be.  At nworld=4096 that put ~96% of
+#     worlds non-finite by step 2000, while the identical drop on CPU MuJoCo --
+#     which grows its arena on demand and peaked at nefc=92 -- stayed finite
+#     for the full run.
 #  2. nconmax=48/world also sizes the broadphase candidate array
-#     (naconmax = nconmax * nworld = 196,608).  The sprawl generates 242,714
-#     candidates, a 23% overflow, and MuJoCo Warp does not fail safe: it writes
+#     (naconmax = nconmax * nworld = 196,608).  The sprawl generates 268,846
+#     candidates, a 37% overflow, and MuJoCo Warp does not fail safe: it writes
 #     out of bounds and the process dies with a CUDA illegal memory access
 #     around step ~2,300.  Raising njmax alone converts the silent NaN into
 #     this hard crash, which is why both caps have to move together.
 #
-# The defaults below carry ~3.7x headroom on rows and ~2.2x on candidates.
-# They are sized for the bare robot; re-run `contact_census.py` once the ball
-# and table geoms join the scene.
+# Headroom the defaults below actually carry, against the converged numbers:
+# suggest_njmax returns 508 for this plant, so rows are 508/276 = 1.84x;
+# nconmax=128 gives 128/57 = 2.25x on contacts and 524,288/268,846 = 1.95x on
+# broadphase candidates -- and that last one is a LOWER BOUND, because the
+# zero-torque sprawl had not converged at 30,000 steps.  This is the tightest
+# number anywhere in the lane.  It is a diagnostic scene, not a trained one; if
+# you plan a long 4096-world plant run, raise nconmax to 192 first.
+# The trained scene is the court, which sizes itself (a3_court_env: njmax=572)
+# and has more room -- see EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802
+# section 9.2.7 for the full per-scenario, per-cone table.
+# Never compare a peak measured under one friction cone with one measured under
+# another: pyramidal spends 2*(condim-1) rows per contact, elliptic spends
+# condim, so the same physics costs 4/3 as many rows.  `contact_census.py`
+# refuses such a comparison outright.
 NJMAX_SAFETY = 2.0
 DEFAULT_NCON_PER_WORLD = 48   # contact-row term in suggest_njmax (peak was 26)
 DEFAULT_NCONMAX_PER_WORLD = 128  # backs the broadphase array (peak was 59/world)
