@@ -2207,7 +2207,13 @@ CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：扩全身会动�
   **运行时现在说的是和发射合同同一句话**，而不是走到一半才发现缺料。
 - 没有这块牌子的老状态包也拒，理由写在错误里：它无法自证空账是故意的。
 
-**收据（变异测试，`tests/test_action_ball_task_transcript_scope.py`，14 例）。**
+**顺带修掉的一笔热路径开销。** 这块状态包**不是只在存 checkpoint 时生成**：
+`LazyActionTaskPool.request_many` 每一批 reset 都会在纯净性信封里重建它。
+新的 `A` 见证若各读各的，就是每次 reset 多一次 device→host 同步；已改成读一次、
+对账与 payload 共用同一份主机行（`_action_ball_host_proposal_rows`），净增 `0`，
+并配了一条"生产方里不许再出现 `_action_ball_live_ledger()`"的会红测试。
+
+**收据（变异测试，`tests/test_action_ball_task_transcript_scope.py`，15 例）。**
 每一条都构造成"粗一个档次就通不过"，五种改法各自杀一条指定用例：
 
 | 把守卫改粗成 | 必须变红的用例 |
@@ -2218,7 +2224,15 @@ CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：扩全身会动�
 | 去掉 live-births-only 的续跑拒绝 | `..._refuses_exact_resume_outright` |
 | 停掉**精确档**的逐出生对账 | `..._reconciliation_is_unchanged_and_still_catches_drift` |
 
-五条实测全部 `RED (good)`，恢复源码后 14 例全绿。
+五条实测全部 `RED (good)`，恢复源码后 15 例全绿。
+
+**全量对拍（同一个 pod worktree，`-n 64`）。** 基线 `423f5409`：
+`119 failed / 7158 passed / 109 skipped / 21 errors`；本轮改动后同口径复跑，
+逐 node-id 比对 **`GONE=0`**，新增两条 —— 且两条都被证明是**跑 Isaac 链把
+`logs/` 留在了同一个 worktree** 造成的污染（那两个用例会整树 `shutil.copytree`，
+撞上 launcher 留下的 named pipe `run.log.launch.start_gate`）：删掉 `logs/` 后
+两条各自单独跑均通过，基线 worktree 上也通过。**判定：零回归。**
+（教训：端到端链和全量 pytest 不要共用一个 worktree。）
 
 **没做的、以及交接给下一个人的一件事。**
 
@@ -2228,13 +2242,16 @@ CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：扩全身会动�
 2. **`hope_commands.py` 的文件字节是 solver profile SHA 的输入**（`:5250-5287`
    把它列进 `solver_source_names`），所以这次修改让所有钉死旧 pin 的 A211/C211 manifest
    **一律拒收**——这正是 §5.6.14 末尾那条纪律说的同一件事。用仓库自己的
-   `pin_action_ball_profile_contracts.py --source-rev eccb30cd` 重算，
+   `pin_action_ball_profile_contracts.py --source-rev <commit>` 重算，
    **只有一个字段动**：
 
-   | 字段 | 旧（`take_061_unit04_bh.full.manifest.v3.653670aed246.json`） | 新（`eccb30cd`） |
-   | --- | --- | --- |
-   | `solver_profile_sha256` | `9d9a6d09…d72a0eb` | `4bee68b2…f6358360` |
-   | `physics_profile_sha256` | `aa5c9085…f4af85b7` | **不变** |
+   | 字段 | 旧（`take_061_unit04_bh.full.manifest.v3.653670aed246.json`） | `eccb30cd` | `308db7f0`（本轮末态） |
+   | --- | --- | --- | --- |
+   | `solver_profile_sha256` | `9d9a6d09…d72a0eb` | `4bee68b2…f6358360` | `3e0926c1…db8921b6` |
+   | `physics_profile_sha256` | `aa5c9085…f4af85b7` | **不变** | **不变** |
+
+   （`solver_profile_sha256` 直接哈希 `hope_commands.py` 的字节，所以**每一次**改这个文件
+   都会换值；接线时以当时的 HEAD 重跑那支脚本为准，上表只是"动的是哪一个字段"的样本。）
 
    因此本轮**端到端只跑到 `materialize`（`MATERIALIZE_EXIT=0`）**，
    `recipe` 阶段被这道 pin 拦下（`ValueError: action-ball solver profile SHA mismatch`），
@@ -2381,8 +2398,8 @@ N1 开始前一次冻结：
 | --- | --- | --- | --- | --- |
 | `L194` | `194 / 318` | legacy solved-target + component mask；`000` 没有 incoming-ball actor state | 仅本身份内部 | historical diagnostic only |
 | `H225` | `225 / 318` | ball-free；desired-contact 是 teacher copy | 仅本身份内部 | historical canary only |
-| `A225-proto` | `225 / 318` | `[212:221]=desired contact p/v/face`，仍含 raw teacher-base 15 | 只在本身份 fresh lineage 内 | superseded diagnostic history；不再发射 |
-| `C225-proto` | `225 / 318` | `[212:221]=incoming ball-at-contact p/v/spin`，仍含 raw teacher-base 15 | 只在本身份 fresh lineage 内 | superseded diagnostic history；不再发射 |
+| `A225-proto` | `225 / 318` | `[212:221]=desired contact p/v/face`，仍含 raw teacher-base 15 | 只在本身份 fresh lineage 内 | **2026-08-06 整族退役**（§8.1）；历史 artifact 保留 |
+| `C225-proto` | `225 / 318` | `[212:221]=incoming ball-at-contact p/v/spin`，仍含 raw teacher-base 15 | 只在本身份 fresh lineage 内 | **2026-08-06 整族退役**（§8.1）；历史 artifact 保留 |
 | `A211` | `211 / 319` | 删 teacher-base 15；保留 desired-contact 9；末尾 `task_valid=1` | A211-owned fresh lineage | current split-ready + online-solver/cache successor；lineage + oracle32 未过 |
 | `C211` | `211 / 319` | 删 teacher-base 15；保留 incoming-ball p/v/spin 9；末尾 `task_valid=1` | C211-owned fresh lineage；不可复用 A | current fixed-midpoint successor；C oracle/PPO 未过 |
 | `FINAL-N1/N73` | width unfrozen | varying-ball/task、两步 delay history 与完整 outcome | 必须新建 lineage | proposed only |
