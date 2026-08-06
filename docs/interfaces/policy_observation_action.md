@@ -354,6 +354,14 @@ silently use absolute joint angle while actual values are relative.
 
 ### Historical fixed-midpoint ActionBall A225/C225 contracts
 
+**2026-08-06: the A225/C225 family is retired as a runnable lane** — no gym task id, no EnvCfg, and two
+independent fail-closed refusals (`train.py` on `actor_obs_contract`, `MotionOnPolicyRunner.__init__` on
+`obs_mode`). Its launchers, materializer and trainability validators were deleted; see
+[successor ledger §8.1](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md).
+The two contract objects below are deliberately **kept as an ABI ledger**: they record why a 225-wide
+normalizer or checkpoint must never be loaded into a 211-wide network. They describe history, not a lane
+you can launch.
+
 Two 225-D contracts remain registered as superseded history. They preserve rows `[0:212]` (robot state,
 teacher/mimic state and achieved/teacher paddle state) and `[221:225]` (desired base station plus the
 two independent clocks). They intentionally give `[212:221]` different physical meanings and

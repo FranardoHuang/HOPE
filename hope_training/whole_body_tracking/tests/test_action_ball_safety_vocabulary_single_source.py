@@ -9,9 +9,10 @@
 这个文件盯的是三份**安全语义词表**。它们决定"什么算把人摔了 / 什么算撞桌子 /
 参考包络违规算哪几项",也就是每条臂的**终止面**。全仓各自手抄了这么多份:
 
-* **硬安全终止并集**(5 项):10 个持有者,横跨 production 包、四个发射器、三个
+* **硬安全终止并集**(5 项):8 个持有者,横跨 production 包、两个发射器、三个
   oracle 脚本和 audit 工具。改一处 = 那一条臂的死法跟别人不一样,而且没有任何
-  现役代码会发现。
+  现役代码会发现。(原本是 10 份;2026-08-06 两个 225 发射器随整族退役删掉,见
+  ``test_action_ball_225_family_retired.py``。)
 * **参考包络终止项**(3 项):9 个持有者。名字各不相同(``REFERENCE_GUARD_REASONS``
   是"守卫为什么开火"、``PROHIBITED_HOLD_REFERENCE_TERMINATIONS`` 是"hold 期间禁用
   哪几项"、``EXACT_PHASE_FIDELITY_REASON_ORDER`` 是跨引擎复盘的理由顺序),但指的
@@ -120,11 +121,7 @@ HARD_SAFETY_HOLDERS = (
      "HARD_TERMINATIONS"),
     (SCRIPTS / "launch_action_ball_a211_four_arm_diagnostic.py",
      "HARD_TERMINATION_UNION"),
-    (SCRIPTS / "launch_action_ball_a225_four_arm_diagnostic.py",
-     "HARD_TERMINATION_UNION"),
     (SCRIPTS / "launch_action_ball_c211_diagnostic.py",
-     "HARD_TERMINATION_UNION"),
-    (SCRIPTS / "launch_action_ball_c225_diagnostic.py",
      "HARD_TERMINATION_UNION"),
 )
 
@@ -139,10 +136,15 @@ def test_hard_safety_termination_union_is_identical_everywhere(path, name):
 
 
 def test_hard_safety_holder_count_is_pinned():
-    """新增一份手抄副本必须同批登记进来,否则这个门就只盯着旧的十份。"""
+    """新增一份手抄副本必须同批登记进来,否则这个门就只盯着旧的那几份。
 
-    assert len(HARD_SAFETY_HOLDERS) == 10
-    assert len({path for path, _name in HARD_SAFETY_HOLDERS}) == 10
+    2026-08-06 从十份降到八份:两个 225 发射器随整族退役删掉了(见
+    ``test_action_ball_225_family_retired.py``)。少的是**载体**不是**覆盖率** ——
+    现役持有者一个没漏。
+    """
+
+    assert len(HARD_SAFETY_HOLDERS) == 8
+    assert len({path for path, _name in HARD_SAFETY_HOLDERS}) == 8
 
 
 # ---------------------------------------------------------------------------

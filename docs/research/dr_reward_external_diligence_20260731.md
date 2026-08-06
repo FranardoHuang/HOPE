@@ -12,6 +12,16 @@ scratchpad(会话级,不入库);本文是归档结论。
 
 ---
 
+> **2026-08-06 时效更正(不改本文 0731 的正文与数值)**：本文多处把
+> `launch_action_ball_a225_four_arm_diagnostic.py` / `launch_action_ball_c225_diagnostic.py` /
+> `materialize_action_ball_a225_lineage.py` 称作"**现役**"发射器,并把 DR 落点(尤其
+> `task.actions.control_step_action_delay_min/max`、`task.domain_rand.stable_ready_plant`)挂在它们身上。
+> **A225/C225 家族已于 2026-08-06 整族退役,这三个文件已删除**(裁决与证据见
+> [successor 账本 §8.1](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md))。
+> 现役发射器是 `launch_action_ball_a211_four_arm_diagnostic.py` 与 `launch_action_ball_c211_diagnostic.py`,
+> 本文所有"写进 A225 发射器 claim 摘要"的 P0 动作要落到这两个上。
+> 另外第 8 条提到的 `tests/test_action_ball_a225_trainability.py` **名字骗人** —— 它测的是 A211 叶子,不是 A225。
+
 ## 一、结论先行(人话)
 
 1. **"我们没随机 kp/kd"这个前提是错的——而且四家里只有我们有。**

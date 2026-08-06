@@ -2773,6 +2773,143 @@ N1 开始前一次冻结：
 
 下文禁止用裸 `225` 代表一种语义；相同宽度绝不意味着合同、normalizer 或 checkpoint 相容。
 
+### 8.1 225 家族整族退役（2026-08-06 裁决 + 落地）
+
+**人话一句**：`A225/C225` 不是"旧一点的 211"，是**另一套 ABI**（actor `225` vs `211`，
+critic `318` vs `319`），2026-08-03 之后就再也发不出车了。这一轮核实到**四道各自独立的门**
+任何一道都足以拦死它，于是把它整族删了（约 `9.5k` 行），并把"它为什么回不来"写成了会失败的测试。
+
+**上一轮清理留的线索只对了一半。** 那份报告说"`MotionOnPolicyRunner.__init__` 硬拒 225 的
+obs_mode，所以整族不可达"。前提**成立，而且被低估了**——runner 那道门其实是**第四道**，
+前面还有三道；但同一份报告顺带的"两个 225 trainability validator 是零调用点"也**只对了一半**，
+因为同名的**测试文件**并不是 225 的（见下"文件名在撒谎"）。
+
+#### 三层核实
+
+| 层 | 结论 | 活证据 |
+| --- | --- | --- |
+| 机制码 | **不可达，四道门** | 见下表 |
+| 实验史 | **最后一次真跑 = 2026-08-03 17:26，且从未越过 `oracle32`** | pod1 上全部 `logs/rsl_rl/agibot_a3_action_ball_a225_four_arm_diagnostic/*` 目录名都带 `-DIAGNOSTIC_UNAUTHORIZED`，`model_*.pt` 一个都没有；`c225` 连一个 run 目录都没有 |
+| 现役 argv | **无人拉起** | 仓库无 CI；无队列/runbook 引用这两个发射器；唯一活引用是 `action_ball_211_transition_preflight.py` 的 `LEGACY_EXPERIMENT_NAMES` / `WRITER_SOURCE_NAMES`——那是**排空清单**（拿名字去扫 `/proc/*/cmdline` 和旧 log namespace），不解析文件路径，**删文件不影响它，也不该跟着删** |
+
+四道门（任何一道单独就够）：
+
+1. **gym 注册表里根本没有它**。`config/agibot_a3/__init__.py` 只注册 A211/C211；
+   两个 225 yaml 指向的 `HOPE-PingPong-ActionBall-A225Learnability-AgibotA3-v0` / `C225...`
+   不存在，`gym.make` 在任何 obs_mode 逻辑之前就 `NameNotFound`。
+   （`test_action_ball_task_config.py:313-314` 已经把"这两个 id 不在注册表里"钉成断言。）
+2. **没有对应的 EnvCfg 类**。`hope_env_cfg.py` 里 `obs_mode` 的默认值集合中没有 `action_ball_a225/c225`。
+3. **`train.py:3325` 拒 actor 合同**：`configured_actor_contract in {a225,c225,a210,c210}` → `_OverrideError`。
+4. **`my_on_policy_runner.py:358` 拒 obs_mode**：同一组四个名字 → `RuntimeError`，在 `super().__init__` **之前**。
+
+两个 225 发射器自己的 argv 写死了 `task.actor_obs_contract=action_ball_a225`（`launch_action_ball_a225_four_arm_diagnostic.py:1366`）
+和 `...=action_ball_c225`（`launch_action_ball_c225_diagnostic.py:2018`），所以它们连第 3 道门都过不去——
+是**结构性死代码**，不是"暂时不用"。
+
+#### 文件名在撒谎：七个"225 测试"里有四个其实是 211 的
+
+这是这一轮最容易踩的坑，也是"指纹不等于语义一致"的教科书例子。按名字删会**误删活的 211 覆盖**：
+
+| 文件名 | docstring 自陈的真实对象 | 处置 |
+| --- | --- | --- |
+| `test_action_ball_a225_trainability.py` | "the fresh trainable **A211** leaf"，加载的是 `action_ball_a211_trainability.py` | **留**（活的 A211 覆盖） |
+| `test_action_ball_c225_trainability.py` | "the fresh trainable **C211** leaf" | **留**（活的 C211 覆盖） |
+| `test_action_ball_a225_c225_contract.py` | "the fresh fixed-midpoint **A211/C211** split" | **留** |
+| `test_action_ball_225_observation_producers.py` | "real-task **A211** and causal-ball **C211**" | **留** |
+| `test_launch_action_ball_a225_four_arm_diagnostic.py` | 真测 A225 发射器 | **删** |
+| `test_launch_action_ball_c225_diagnostic.py` | 真测 C225 发射器 | **删** |
+| `test_materialize_action_ball_a225_lineage.py` | 真测 A225 materializer | **删** |
+
+同样的坑在 production 侧更贵：**`mdp/action_ball_c225_rewards.py` 是活的 C211 奖励模块**，
+被 `mdp/__init__.py:17` 星号导入，两个 term（`c225_strike_ball_paddle_center_proximity`、
+`c225_landing_outcome_actual_contact`）直接接在现役 `hope_env_cfg.py:2428-2438` 上，
+并被 `training_contract.py`、`action_ball_c211_trainability.py`、`mujoco_native/action_ball_c211_env.py`、
+`mjlab_lane/isaac_alignment.py`、`action_ball_prelong_semantics.py`、`effective_reward_recipe.py` 六处引用。
+**名字带 225，身份是 211 的承重墙，一个字节都不能动。**
+
+#### 删了什么 / 留了什么
+
+**删（10 个文件，`9531` 行）**：两个发射器 + `materialize_action_ball_a225_lineage.py` +
+两个零调用点 validator（`action_ball_225_trainability.py`、`action_ball_c225_trainability.py`）+
+两份 task yaml + 三个只测这些死文件的测试。
+
+**留**：
+
+- `mdp/action_ball_c225_rewards.py` 与 `test_action_ball_c225_rewards.py`——活的 C211 奖励。
+- `actor_observation_contract.py` 的 `ACTION_BALL_A225/C225`——它们是**ABI 台账**，
+  记着"`225` 宽度的 checkpoint 为什么绝不能塞进 `211` 网络"，并且被活的
+  `test_action_ball_a225_c225_contract.py` 核对着。删掉只会把明确的"legacy 被拒"退化成含糊的"未知合同"。
+- 四处 legacy 拒绝名单（`train.py`、`my_on_policy_runner.py`、`a211_trainability._LEGACY_MODES`、
+  以及两个 211 发射器/测试里的 a225 负例）——**这些是让 225 保持不可达的门本身，不许动**。
+  `test_launch_action_ball_a211_four_arm_diagnostic.py:1819-1862` 与
+  `test_launch_action_ball_c211_diagnostic.py:2738-2774` 是拿 a225 字段做的**变异测试**，
+  证明 211 发射器会拒绝带 225 合同的 lineage——它们必须继续拿着 225 的名字。
+- `action_ball_211_transition_preflight.py` 的两张排空清单。
+- 历史 artifact：`configs/action_ball_n1_measured_20260803/a225_take061u04_fixed_question_lineage.v1.json`
+  及其 rematerialized 副本——它们是 0803 那一轮的证据，不是可执行路径。
+
+#### 同批交付的证据（不是只删代码）
+
+新增 `hope_training/whole_body_tracking/tests/test_action_ball_225_family_retired.py`。
+**它不是仪式，是补一个真实的洞**：核对过——`train.py` 和 `my_on_policy_runner.py` 那两道门
+在 2026-08-06 之前**一个测试都没有**，而删掉 225 发射器等于删掉了唯一会踩到它们的代码路径。
+现在谁把那个 set 清空、或者把整个 `if` 删掉，全仓都不会红。
+
+这份收据做三件事：
+
+- 七个已删的**非测试**文件保持删除（两个发射器、materializer、两个 validator、两份 yaml；三个测试文件不钉，删测试本来就该看得见）；
+- `hope_env_cfg.py` 的 `obs_mode` 默认值集合里不出现 `a225/c225`（第 2 道门）；
+- **拿活值比两道门**：唯一权威是 `action_ball_a211_trainability._LEGACY_MODES`（纯 stdlib、直接 import、
+  且被 `test_action_ball_a225_trainability.py` 用真调用逐个跑过），断言 `train.py` 与
+  `my_on_policy_runner.py` 两处**内联 set 判据本身**跟它逐字相同。测试期望值**不是第三份手抄**。
+
+读法特意做成"粗一个档次就过不了"：不是 grep 源码里有没有 `"action_ball_a225"`
+（那种检查在 set 被清空、甚至整个 `if` 被删掉之后照样通过，因为名字还留在 docstring 和错误信息里），
+而是用 AST 定位**判据节点**
+`Compare(left=Name("configured_actor_contract"/"runtime_obs_mode"), ops=[In], comparators=[Set(...)])`，
+门没了就取不到，名单少一个就不等。
+
+**变异测试(2026-08-06 pod1 实跑,五发全中;不是跑一个自制脚本,是真改源码再跑 `pytest`)**：
+
+| 变异 | 本收据 | 换成 `grep "action_ball_a225"` 这种粗检查 |
+| --- | --- | --- |
+| M0 不改（对照） | `11 passed` | PASS |
+| M1 从 `train.py` 的 set 里删掉 `"action_ball_c225"` 一个名字 | **FAIL** `[train.py:configured_actor_contract]` | **PASS（漏）** |
+| M2 整段删掉 runner 的 `if runtime_obs_mode in {...}` | **FAIL** | FAIL |
+| M3 删掉同一段，但留一行 `# TODO: re-add the action_ball_a225 ... refusal` | **FAIL** `[my_on_policy_runner.py:runtime_obs_mode]` | **PASS（漏）** |
+| M4 某个 EnvCfg 把 `obs_mode` 改回 `"action_ball_a225"` | **FAIL** `test_no_env_cfg_declares_a_225_obs_mode` | 不适用 |
+| M5 某份 225 task yaml 复活 | **FAIL** ×2（本收据 + `test_action_ball_task_config.py`） | 不适用 |
+
+M1 和 M3 就是"粗一个档次就过不了"要防的两种真实写法：**名单被削窄**和**门被删但名字还留在注释里**。
+两种情况下源码里都还有 `action_ball_a225` 这个字符串，grep 一样绿。
+
+同批还替换了一条本来就在读被删 yaml 的测试：
+`test_action_ball_task_config.py::test_historical_a225_c225_task_receipts_remain_named_and_distinct`
+（旧意图是"225 的 yaml 不许被悄悄改写成 211 车道"）换成
+`test_no_shipped_task_yaml_claims_a_retired_225_actor_contract` —— 遍历 `cfg/task/*.yaml`，
+**任何**幸存 yaml 声称 `actor_obs_contract: action_ball_a225/c225` 都红。yaml 删了以后，
+同一个担心的正确形态比原来更强（原来只盯那两份，现在盯全部）。
+
+顺带同批改的门：`test_action_ball_safety_vocabulary_single_source.py` 的硬安全终止并集持有者
+从 `10` 份降到 `8` 份——**少的是载体不是覆盖率**，两个 225 发射器随文件一起没了，现役持有者一个没漏；
+那条 `assert len(...) == 10` 的数量钉也同批改成 `8`（记录 + 阻断同批，不留半改状态）。
+
+#### 边界
+
+- **不影响 211**：删除集合与 211 无 import 交集；两族真正的共用模块只有 `action_ball_c225_rewards.py`，已明确保留。
+- **零指纹需要重钉**：被删的文件从来不在任何 launch claim 的 tracked-source 钉子表里 ——
+  `test_launch_action_ball_a211_four_arm_diagnostic.py:1962` 本来就断言
+  `action_ball_225_trainability.py` **不在** A211 的 `RUNTIME_SOURCE_PATHS` 里。211 两个发射器
+  提到 225 的地方全是 `FORBIDDEN_VALUE_TOKENS` 与 `forbidden_namespace_experiment_names`
+  两张**禁用表**，删文件不改它们的值，也不许删。
+- **收集面机器核对**：删前删后各跑一次 `pytest --collect-only`，两边 `exit=0`（没有任何模块因为
+  文件消失而 import 失败），节点差恰好 `-124 / +12` 且逐条对得上：`117` 条来自三个被删测试模块，
+  `4` 条是 `test_commanded_contact_geometry` 对两份被删 yaml 的参数化，`2` 条是安全词表少的两个持有者，
+  `1` 条是被替换的 task-config 测试；新增 `11 + 1` 条。
+- **不放宽任何 fail-closed 门**：四道门一道没动，另外补了两道门的测试覆盖。
+- **不代签"225 的结论"**：0803 那一轮 225 从未越过 `oracle32`（0 PPO），所以它本来也没有任何 learnability 结论可继承；
+  §5.6 里引用 A225 数值的段落照旧只是历史，不是当前基线。
+
 - exact ordered actor/critic term、dim、unit、frame、source、validity/age、normalizer update rule；
 - incoming ball、current achieved paddle、`teacher_now`、`teacher_contact_nominal`、可选
   `desired_at_contact`、desired landing/time-or-arrival-speed/spin；其中 achieved 来自 simulator/live

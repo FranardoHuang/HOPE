@@ -107,7 +107,14 @@ slice 逐值比对，observed bundle/raw receipt no-clobber 且 SHA 互绑。hos
 oracle32 尚未执行；C 的 long4096 terminal checkpoint/telemetry 独立复核也必须与 A 对齐。因此
 `oracle32/scale4096/long4096` 继续 fail closed，host test 不代签 live evidence。
 
-**2026-08-03 A225 四臂 runtime 更新（Gate 仍 `Partial`）：**dedicated A225
+> **2026-08-06 整族退役（本节以下 A225/C225 段落一律为历史，不是当前状态）：**核实四道
+> 独立的门任何一道都足以拦死 225(gym 未注册 / 无 EnvCfg / `train.py` 拒 actor 合同 /
+> `MotionOnPolicyRunner.__init__` 拒 obs_mode)，两个 225 发射器、materializer、两个零调用点
+> trainability validator 与两份 task yaml 已删除。225 从未越过 `oracle32`(0 PPO)，因此**没有任何
+> learnability 结论可继承**。当前唯一在跑的是 A211/C211。裁决与变异测试见
+> [successor 账本 §8.1](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
+
+**2026-08-03 A225 四臂 runtime 更新（Gate 仍 `Partial`；已于 2026-08-06 整族退役）：**dedicated A225
 225/318-D producer/critic/normalizer/Gym/launcher 已实现。L0-L3 在 exact Pod 均完成
 composed Reward 物化并反读实际 soft weights；这不是 PPO 学习证据。首次 L0
 oracle32 在 0/32 episode 时 fail closed：launcher 的简化 policy envelope SHA=

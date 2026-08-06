@@ -380,17 +380,29 @@ def test_a211_c211_task_profiles_pin_frozen_reset_wait_schedule(
         )
 
 
-def test_historical_a225_c225_task_receipts_remain_named_and_distinct():
-    for label in ("A225", "C225"):
-        path = CFG_DIR / "task" / (
-            f"HOPEPingPongActionBall{label}VendorV2N1Learnability.yaml"
-        )
+def test_no_shipped_task_yaml_claims_a_retired_225_actor_contract():
+    """225 家族 2026-08-06 整族退役,两份 task yaml 已删。
+
+    这条替换的是旧的 ``test_historical_a225_c225_task_receipts_remain_named_and_distinct``。
+    旧那条防的是"225 的 yaml 被悄悄改写成 211 的车道"。yaml 删掉之后,同一个担心的正确
+    形态更强:**现存的任何 task yaml 都不许声称自己是 225 合同**——不管是 225 的 yaml 复活,
+    还是某条 211 车道被改回 225,都会在这里红。
+
+    文件层面的"保持删除"由 ``test_action_ball_225_family_retired.py`` 盯着;这里只管
+    ``cfg/task`` 这一面。
+    """
+
+    offenders = {}
+    for path in sorted((CFG_DIR / "task").glob("*.yaml")):
         source = path.read_text(encoding="utf-8")
-        assert f"name: HOPEPingPongActionBall{label}VendorV2N1Learnability" in source
-        assert f"actor_obs_contract: action_ball_{label.lower()}" in source
-        assert "action_ball_diagnostic_split_ready_teacher: true" in source
-        assert "action_ball_a211" not in source
-        assert "action_ball_c211" not in source
+        hits = sorted(
+            name
+            for name in ("action_ball_a225", "action_ball_c225")
+            if f"actor_obs_contract: {name}" in source
+        )
+        if hits:
+            offenders[path.name] = hits
+    assert not offenders, f"退役的 225 actor 合同又出现在 task yaml 里: {offenders}"
 
 
 def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
