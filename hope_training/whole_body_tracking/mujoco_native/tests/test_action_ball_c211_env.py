@@ -949,6 +949,11 @@ class _FakeFixedCenterBase:
                             "exact_hard_reason": None,
                         },
                         "first_exact_hard_termination": None,
+                        "joint_actual_forbidden_observed_ticks": 0,
+                        "promotion_blocking_evidence": {
+                            "promotion_blocked": False,
+                            "reasons": [],
+                        },
                     },
                 ),
                 "diagnostic_exact_hard_terminations": torch.as_tensor(

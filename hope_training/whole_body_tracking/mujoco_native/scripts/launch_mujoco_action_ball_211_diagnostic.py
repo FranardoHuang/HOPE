@@ -626,6 +626,7 @@ def _fresh_wait_bootstrap_canary(
         projected_env_transitions = 0
         hard_count = 0
         hard_reasons: dict[str, int] = {}
+        promotion_blocked_samples: list[dict[str, Any]] = []
         final_effort_by_env = [0 for _ in range(env.num_envs)]
         completed = 0
         for tick in range(1, FRESH_WAIT_BOOTSTRAP_CANARY_TICKS + 1):
@@ -683,6 +684,16 @@ def _fresh_wait_bootstrap_canary(
                 if type(value) is not int or value < 0:
                     raise LaunchBlocked("fresh WAIT effort-clip counter differs")
                 final_effort_by_env.append(value)
+            # 人话:joint_actual_forbidden 改成"只记录不 reset"之后,它就不再进
+            # hard_termination_count 了。这条 canary 的 passed 原本只看 hard,于是
+            # "起手姿态贴着关节硬边"会静默通过。这里把 ledger 的结论位接进来补上后半句。
+            promotion_blocked_samples.extend(
+                trainer.promotion_blocking_samples_from_step(
+                    extras=extras,
+                    rollout_step_1based=tick,
+                    num_envs=env.num_envs,
+                )
+            )
             hard = extras.get("diagnostic_exact_hard_terminations")
             reasons = extras.get("diagnostic_exact_hard_termination_reasons")
             if (
@@ -711,6 +722,10 @@ def _fresh_wait_bootstrap_canary(
             and reset_extras.get("task_valid") == [False] * env.num_envs
         )
         denominator = completed * env.num_envs
+        promotion_evidence = trainer.promotion_blocking_evidence_receipt(
+            promotion_blocked_samples,
+            checked_sample_count=denominator,
+        )
         return {
             "mode": "fresh_std_0p02" if stochastic else "sealed_mean",
             "requested_wait_ticks": FRESH_WAIT_BOOTSTRAP_CANARY_TICKS,
@@ -741,10 +756,12 @@ def _fresh_wait_bootstrap_canary(
             "hard_termination_reasons": hard_reasons,
             "nonfinite_transition_count": 0,
             "reset_legal_after_phase": reset_legal,
+            "promotion_blocking_evidence": promotion_evidence,
             "passed": bool(
                 completed == FRESH_WAIT_BOOTSTRAP_CANARY_TICKS
                 and hard_count == 0
                 and reset_legal
+                and promotion_evidence["promotion_blocked"] is False
             ),
         }
 
@@ -776,6 +793,10 @@ def _fresh_wait_bootstrap_canary(
         "stochastic_fresh_wait": stochastic,
         "projection_is_reported_not_a_hidden_hard_gate": True,
         "hard_or_nonfinite_required_zero": True,
+        "promotion_blocked": bool(
+            deterministic["promotion_blocking_evidence"]["promotion_blocked"]
+            or stochastic["promotion_blocking_evidence"]["promotion_blocked"]
+        ),
         "passed": bool(deterministic["passed"] and stochastic["passed"]),
         "diagnostic_unauthorized": True,
         "formal_authorized": False,
@@ -788,6 +809,79 @@ def _fresh_wait_bootstrap_canary(
             + json.dumps(receipt, sort_keys=True, allow_nan=False)
         )
     return receipt
+
+
+PROMOTION_SUMMARY_KIND = "a3_mujoco_launch_promotion_blocking_summary_v1"
+
+
+def _promotion_blocking_summary(
+    *,
+    profile: str,
+    canary: Mapping[str, Any],
+    update_receipts: Sequence[Mapping[str, Any]],
+    checkpoint_save_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Lift the promotion verdict to the top of the launch result, and WARN.
+
+    人话:结论位埋在几千行收据里等于没有。这一格挂在 result 的最外层,并且只在
+    "被卡住"时往 stderr 打一行带 WARN 的话——摘要抓异常不抓预期。
+
+    Fail-closed: a source that cannot produce the verdict counts as blocked,
+    because "we could not tell" and "not promotable" are the same answer here.
+    """
+
+    def _flag(payload: Any) -> bool:
+        if not isinstance(payload, Mapping):
+            return True
+        value = payload.get("promotion_blocked")
+        return True if type(value) is not bool else value
+
+    sources: list[dict[str, Any]] = [
+        {
+            "name": "fresh_wait_bootstrap_canary",
+            "promotion_blocked": _flag(canary),
+        }
+    ]
+    for index, receipt in enumerate(update_receipts):
+        sources.append(
+            {
+                "name": f"update_receipt[{index}]",
+                "promotion_blocked": trainer.promotion_blocked_from_evidence(
+                    receipt.get("promotion_blocking_evidence")
+                    if isinstance(receipt, Mapping)
+                    else None
+                ),
+            }
+        )
+    sources.append(
+        {
+            "name": "checkpoint_save_receipt",
+            "promotion_blocked": _flag(checkpoint_save_receipt),
+        }
+    )
+    blocked_sources = [row["name"] for row in sources if row["promotion_blocked"]]
+    summary = {
+        "schema_version": 1,
+        "kind": PROMOTION_SUMMARY_KIND,
+        "profile": profile,
+        "promotion_blocked": bool(blocked_sources),
+        "blocked_sources": blocked_sources,
+        "sources": sources,
+        "semantics": (
+            "non-terminal hard-edge faults never shorten an episode; any blocked "
+            "source bars checkpoint promotion, deployment and hardware use"
+        ),
+        "absent_verdict_counts_as_blocked": True,
+    }
+    if summary["promotion_blocked"]:
+        print(
+            f"[MUJOCO-{profile}] WARN promotion_blocked=True "
+            f"blocked_sources={','.join(blocked_sources)} "
+            "(non-terminal joint_actual_forbidden evidence; this run may not be "
+            "promoted, deployed or run on hardware)",
+            file=sys.stderr,
+        )
+    return summary
 
 
 def _run_audited_update(
@@ -995,6 +1089,12 @@ def _execute(args: argparse.Namespace, plan: Mapping[str, Any]) -> dict[str, Any
         "schema_version": 1,
         "kind": RESULT_KIND,
         "status": "C211_PARTIAL_ISAAC_REWARD_CHECKPOINT_DIAGNOSTIC_COMPLETE",
+        "promotion_blocking_evidence": _promotion_blocking_summary(
+            profile="C211",
+            canary=bootstrap_canary,
+            update_receipts=[*pre_checkpoint, reference_update],
+            checkpoint_save_receipt=save_receipt,
+        ),
         "plan": copy.deepcopy(dict(plan)),
         "pre_checkpoint_update_receipts": pre_checkpoint,
         "pre_checkpoint_raw_reward_audits": pre_checkpoint_reward_audits,

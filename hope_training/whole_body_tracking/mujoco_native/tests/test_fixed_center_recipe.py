@@ -187,7 +187,12 @@ class _FakeCLiteBase:
                     "latest_pelvis_samples": {
                         "height_m": 1.0,
                         "up_world_z": 1.0,
-                    }
+                    },
+                    "joint_actual_forbidden_observed_ticks": 0,
+                    "promotion_blocking_evidence": {
+                        "promotion_blocked": False,
+                        "reasons": [],
+                    },
                 }
             )
             dones.append(done)

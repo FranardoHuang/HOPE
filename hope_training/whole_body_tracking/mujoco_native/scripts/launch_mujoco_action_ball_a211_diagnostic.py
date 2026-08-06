@@ -493,6 +493,12 @@ def _execute(args: argparse.Namespace, plan: Mapping[str, Any]) -> dict[str, Any
         "schema_version": 1,
         "kind": RESULT_KIND,
         "status": "A211_PARTIAL_ISAAC_REWARD_CHECKPOINT_DIAGNOSTIC_COMPLETE",
+        "promotion_blocking_evidence": shared_launch._promotion_blocking_summary(
+            profile="A211",
+            canary=bootstrap_canary,
+            update_receipts=[*pre_updates, reference_update],
+            checkpoint_save_receipt=save,
+        ),
         "plan": copy.deepcopy(dict(plan)),
         "pre_checkpoint_update_receipts": pre_updates,
         "pre_checkpoint_raw_reward_audits": pre_audits,

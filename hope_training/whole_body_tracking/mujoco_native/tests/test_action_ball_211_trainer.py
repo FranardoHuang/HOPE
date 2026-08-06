@@ -134,8 +134,14 @@ class FakeActionBall211Env:
 class ExactTerminalTelemetryEnv(FakeActionBall211Env):
     """Script independent hard/timeout axes across exact WAIT/ACTIVE ticks."""
 
-    def __init__(self, profile: abi.ActionBall211Profile) -> None:
+    def __init__(
+        self,
+        profile: abi.ActionBall211Profile,
+        *,
+        forbidden_ticks_by_env: tuple[int, ...] = (0, 0, 0, 0),
+    ) -> None:
         super().__init__(profile, num_envs=4, horizon=2)
+        self.forbidden_ticks_by_env = forbidden_ticks_by_env
 
     def diagnostic_training_receipt(self):
         receipt = super().diagnostic_training_receipt()
@@ -161,7 +167,16 @@ class ExactTerminalTelemetryEnv(FakeActionBall211Env):
         }
 
     @classmethod
-    def _ledger(cls, *, tick: int, hard_reason=None, physics_substep=None):
+    def _ledger(
+        cls,
+        *,
+        tick: int,
+        hard_reason=None,
+        physics_substep=None,
+        forbidden_ticks: int = 0,
+    ):
+        # The reason string comes from the shared constant, not a fourth spelling
+        # of it: a fake that hand-copies the vocabulary stops testing agreement.
         return {
             "policy_ticks": tick,
             "termination": {
@@ -178,6 +193,16 @@ class ExactTerminalTelemetryEnv(FakeActionBall211Env):
                     physics_substep=physics_substep,
                 )
             ),
+            "joint_actual_forbidden_observed_ticks": forbidden_ticks,
+            "promotion_blocking_evidence": {
+                "promotion_blocked": forbidden_ticks > 0,
+                "reasons": (
+                    [trainer.PROMOTION_BLOCKING_REASON]
+                    if forbidden_ticks > 0
+                    else []
+                ),
+                "semantics": "fake env mirror of the live ledger conclusion",
+            },
         }
 
     def step(self, actions):
@@ -235,6 +260,7 @@ class ExactTerminalTelemetryEnv(FakeActionBall211Env):
                 tick=tick,
                 hard_reason=hard_reason,
                 physics_substep=(2 if index == 2 else None),
+                forbidden_ticks=self.forbidden_ticks_by_env[index],
             )
             ledger["termination"]["exact_time_out_latched"] = bool(
                 time_out_values[index]
@@ -278,6 +304,15 @@ def _config(profile: abi.ActionBall211Profile):
         hidden_dims=(8,),
         seed=53,
         learning_rate=1.0e-3,
+    )
+
+
+def _build_exact(profile: abi.ActionBall211Profile):
+    env = ExactTerminalTelemetryEnv(profile)
+    return env, trainer.MujocoDiagnosticPPOTrainer(
+        env=env,
+        identity=env.identity,
+        config=_config(profile),
     )
 
 
@@ -697,6 +732,157 @@ def test_exact_terminal_telemetry_faults_fail_before_optimizer(monkeypatch, faul
     assert instance.update_counter == 0
     for name, value in instance.model.state_dict().items():
         assert torch.equal(value, before[name])
+
+
+def test_clean_update_publishes_an_unblocked_promotion_conclusion():
+    env, instance = _build_exact(abi.A211_PROFILE)
+    receipt = instance.run_update()
+    evidence = receipt["promotion_blocking_evidence"]
+    assert evidence["kind"] == trainer.PROMOTION_BLOCKING_EVIDENCE_KIND
+    assert evidence["promotion_blocked"] is False
+    assert evidence["reasons"] == []
+    assert evidence["blocked_sample_count"] == 0
+    assert evidence["blocked_env_indices"] == []
+    assert evidence["first_blocked_sample"] is None
+    # It must have actually looked at every env on every rollout step; an
+    # evidence block computed over nothing would also say "not blocked".
+    assert evidence["checked_sample_count"] == (
+        receipt["rollout_steps"] * receipt["num_envs"]
+    )
+    assert len(evidence["content_sha256"]) == 64
+
+
+def test_observed_hard_edge_reaches_the_update_receipt_conclusion():
+    env = ExactTerminalTelemetryEnv(
+        abi.A211_PROFILE, forbidden_ticks_by_env=(0, 0, 3, 0)
+    )
+    instance = trainer.MujocoDiagnosticPPOTrainer(
+        env=env,
+        identity=env.identity,
+        config=_config(abi.A211_PROFILE),
+    )
+    receipt = instance.run_update()
+    evidence = receipt["promotion_blocking_evidence"]
+    assert evidence["promotion_blocked"] is True
+    assert evidence["reasons"] == [trainer.PROMOTION_BLOCKING_REASON]
+    assert evidence["blocked_env_indices"] == [2]
+    assert evidence["blocked_sample_count"] == receipt["rollout_steps"]
+    first = evidence["first_blocked_sample"]
+    assert first["rollout_step_1based"] == 1
+    assert first["env_index"] == 2
+    assert first["joint_actual_forbidden_observed_ticks"] == 3
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "evidence_removed",
+        "conclusion_hardcoded_false",
+        "conclusion_hardcoded_true",
+        "conclusion_is_a_truthy_int",
+        "reasons_emptied_while_blocked",
+        "counter_removed",
+        "evidence_is_not_a_mapping",
+    ),
+)
+def test_promotion_conclusion_mutations_fail_before_the_optimizer(
+    monkeypatch, mutation
+):
+    """Every way the conclusion bit can rot must stop the update.
+
+    人话:这些变异体就是"一个粗一个档次的检查会漏掉的"那些——把结论写死 False、
+    把结论删掉、把结论和它自己的计数拆开各说各话。只断言"字段还在"是抓不到的。
+    """
+
+    env = ExactTerminalTelemetryEnv(
+        abi.A211_PROFILE, forbidden_ticks_by_env=(0, 0, 3, 0)
+    )
+    instance = trainer.MujocoDiagnosticPPOTrainer(
+        env=env,
+        identity=env.identity,
+        config=_config(abi.A211_PROFILE),
+    )
+    before = copy.deepcopy(instance.model.state_dict())
+    original_step = env.step
+
+    def mutated_step(actions):
+        actor, rewards, dones, extras = original_step(actions)
+        ledger = extras["diagnostic_event_ledgers"][2]
+        if mutation == "evidence_removed":
+            ledger.pop("promotion_blocking_evidence")
+        elif mutation == "conclusion_hardcoded_false":
+            ledger["promotion_blocking_evidence"]["promotion_blocked"] = False
+        elif mutation == "conclusion_hardcoded_true":
+            for row in extras["diagnostic_event_ledgers"]:
+                row["promotion_blocking_evidence"]["promotion_blocked"] = True
+        elif mutation == "conclusion_is_a_truthy_int":
+            ledger["promotion_blocking_evidence"]["promotion_blocked"] = 1
+        elif mutation == "reasons_emptied_while_blocked":
+            ledger["promotion_blocking_evidence"]["reasons"] = []
+        elif mutation == "counter_removed":
+            ledger.pop("joint_actual_forbidden_observed_ticks")
+        elif mutation == "evidence_is_not_a_mapping":
+            ledger["promotion_blocking_evidence"] = [
+                trainer.PROMOTION_BLOCKING_REASON
+            ]
+        return actor, rewards, dones, extras
+
+    monkeypatch.setattr(env, "step", mutated_step)
+    with pytest.raises(trainer.DiagnosticPPOContractError, match="promotion"):
+        instance.run_update()
+    assert instance.update_counter == 0
+    for name, value in instance.model.state_dict().items():
+        assert torch.equal(value, before[name])
+
+
+def test_checkpoint_receipts_carry_the_promotion_conclusion(tmp_path: Path):
+    env = ExactTerminalTelemetryEnv(
+        abi.A211_PROFILE, forbidden_ticks_by_env=(0, 0, 3, 0)
+    )
+    instance = trainer.MujocoDiagnosticPPOTrainer(
+        env=env,
+        identity=env.identity,
+        config=_config(abi.A211_PROFILE),
+    )
+    instance.run_update()
+    blocked_path = tmp_path / "blocked.pt"
+    save = checkpoint.ResetBoundaryCheckpoint().save(blocked_path, instance)
+    assert save["promotion_blocked"] is True
+
+    clean_env, clean = _build_exact(abi.A211_PROFILE)
+    clean.run_update()
+    clean_path = tmp_path / "clean.pt"
+    clean_save = checkpoint.ResetBoundaryCheckpoint().save(clean_path, clean)
+    assert clean_save["promotion_blocked"] is False
+    load = checkpoint.ResetBoundaryCheckpoint().load(clean_path, clean)
+    assert load["promotion_blocked"] is False
+
+
+def test_checkpoint_without_an_update_receipt_reports_blocked(tmp_path: Path):
+    """No evidence is not the same as no fault; it is the same as blocked."""
+
+    _env, instance = _build_exact(abi.A211_PROFILE)
+    save = checkpoint.ResetBoundaryCheckpoint().save(
+        tmp_path / "never_updated.pt", instance
+    )
+    assert save["promotion_blocked"] is True
+
+
+def test_promotion_evidence_receipt_refuses_a_vacuous_sample_count():
+    with pytest.raises(trainer.DiagnosticPPOContractError):
+        trainer.promotion_blocking_evidence_receipt([], checked_sample_count=0)
+    with pytest.raises(trainer.DiagnosticPPOContractError):
+        trainer.promotion_blocking_evidence_receipt(
+            [
+                {
+                    "rollout_step_1based": 1,
+                    "env_index": 0,
+                    "joint_actual_forbidden_observed_ticks": 1,
+                    "reasons": [trainer.PROMOTION_BLOCKING_REASON],
+                }
+            ],
+            checked_sample_count=0,
+        )
 
 
 @pytest.mark.parametrize("profile", (abi.A211_PROFILE, abi.C211_PROFILE))

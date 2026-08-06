@@ -39,6 +39,13 @@ NORMALIZER_WAIT_OUTPUT_RULE = (
 TIMEOUT_BOOTSTRAP_RULE = (
     "rsl_rl_equivalent_reward_plus_gamma_pre_step_value_on_time_out_v1"
 )
+PROMOTION_BLOCKING_EVIDENCE_KIND = (
+    "a3_mujoco_diagnostic_promotion_blocking_evidence_v1"
+)
+PROMOTION_BLOCKING_REASON = "joint_actual_forbidden_observed"
+PROMOTION_BLOCKING_EVIDENCE_SOURCE = (
+    "extras.diagnostic_event_ledgers[*].promotion_blocking_evidence"
+)
 
 _IDENTITY_FIELDS = (
     "contract_sha256",
@@ -501,6 +508,129 @@ def _terminal_row_telemetry_receipt(
     }
     payload["content_sha256"] = _canonical_json_sha256(payload)
     return payload
+
+
+def promotion_blocking_samples_from_step(
+    *,
+    extras: Mapping[str, Any],
+    rollout_step_1based: int,
+    num_envs: int,
+) -> list[dict[str, Any]]:
+    """Read every env's promotion verdict out of this step's diagnostic ledgers.
+
+    人话:``joint_actual_forbidden`` 从硬终止改成"只记录不 reset"之后,ledger 同时报
+    原始计数和一个结论位 ``promotion_blocked``。这里两个都读,并要求它们互相对得上——
+    计数非零而结论说"没事"就直接拒收。这就是把"记录"和"阻断"钉在一根钉子上的那一步:
+    一份自称没问题、却和自己的证据打架的收据不许通过。
+
+    Fail-closed on all four shapes the conclusion bit can rot into: an absent
+    ledger, an absent counter, an absent/ill-typed conclusion, and a conclusion
+    that contradicts the counter it is derived from.  Returns one row per
+    ``(step, env)`` sample that is blocked; an empty list means "nothing observed".
+    """
+
+    _positive_int(rollout_step_1based, "rollout_step_1based")
+    _positive_int(num_envs, "num_envs")
+    ledgers = extras.get("diagnostic_event_ledgers")
+    if (
+        not isinstance(ledgers, Sequence)
+        or isinstance(ledgers, (str, bytes))
+        or len(ledgers) != num_envs
+    ):
+        raise DiagnosticPPOContractError(
+            "promotion evidence requires extras.diagnostic_event_ledgers rows"
+        )
+    samples: list[dict[str, Any]] = []
+    for env_index in range(num_envs):
+        ledger = ledgers[env_index]
+        if not isinstance(ledger, Mapping):
+            raise DiagnosticPPOContractError(
+                "promotion evidence ledger row must be a mapping"
+            )
+        observed = ledger.get("joint_actual_forbidden_observed_ticks")
+        if type(observed) is not int or observed < 0:
+            raise DiagnosticPPOContractError(
+                "promotion evidence requires the joint_actual_forbidden observed "
+                "count the conclusion is reconciled against"
+            )
+        evidence = ledger.get("promotion_blocking_evidence")
+        if not isinstance(evidence, Mapping):
+            raise DiagnosticPPOContractError(
+                "diagnostic ledger omits its promotion_blocking_evidence conclusion"
+            )
+        blocked = evidence.get("promotion_blocked")
+        if type(blocked) is not bool:
+            raise DiagnosticPPOContractError(
+                "promotion_blocked must be a plain boolean conclusion"
+            )
+        if blocked != (observed > 0):
+            raise DiagnosticPPOContractError(
+                "promotion_blocked contradicts its own observed-tick counter"
+            )
+        reasons = evidence.get("reasons")
+        expected_reasons = [PROMOTION_BLOCKING_REASON] if blocked else []
+        if not isinstance(reasons, list) or reasons != expected_reasons:
+            raise DiagnosticPPOContractError(
+                "promotion blocking reasons differ from the conclusion they explain"
+            )
+        if blocked:
+            samples.append(
+                {
+                    "rollout_step_1based": rollout_step_1based,
+                    "env_index": env_index,
+                    "joint_actual_forbidden_observed_ticks": observed,
+                    "reasons": list(reasons),
+                }
+            )
+    return samples
+
+
+def promotion_blocking_evidence_receipt(
+    blocked_samples: Sequence[Mapping[str, Any]],
+    *,
+    checked_sample_count: int,
+) -> dict[str, Any]:
+    """Fold per-``(step, env)`` promotion verdicts into one run-level conclusion.
+
+    ``checked_sample_count`` must be positive: an evidence block computed over
+    zero samples would say "not blocked" without having looked at anything.
+    """
+
+    _positive_int(checked_sample_count, "checked_sample_count")
+    samples = [copy.deepcopy(dict(row)) for row in blocked_samples]
+    if len(samples) > checked_sample_count:
+        raise DiagnosticPPOContractError(
+            "more blocked promotion samples than samples checked"
+        )
+    blocked = bool(samples)
+    payload = {
+        "schema_version": 1,
+        "kind": PROMOTION_BLOCKING_EVIDENCE_KIND,
+        "promotion_blocked": blocked,
+        "reasons": [PROMOTION_BLOCKING_REASON] if blocked else [],
+        "blocked_sample_count": len(samples),
+        "checked_sample_count": int(checked_sample_count),
+        "blocked_env_indices": sorted({int(row["env_index"]) for row in samples}),
+        "first_blocked_sample": copy.deepcopy(samples[0]) if samples else None,
+        "evidence_source": PROMOTION_BLOCKING_EVIDENCE_SOURCE,
+        "semantics": (
+            "non-terminal hard-edge faults; they never shorten an episode but a "
+            "blocked update bars checkpoint promotion, deployment and hardware use"
+        ),
+    }
+    payload["content_sha256"] = _canonical_json_sha256(payload)
+    return payload
+
+
+def promotion_blocked_from_evidence(evidence: Any) -> bool:
+    """Fail-closed read of a stored evidence block: absent or ill-typed means True."""
+
+    if not isinstance(evidence, Mapping):
+        return True
+    blocked = evidence.get("promotion_blocked")
+    if type(blocked) is not bool:
+        return True
+    return blocked
 
 
 # 人话:和 Isaac 侧同名的两条初始化路线,字面量必须一模一样,否则跨引擎对不上。
@@ -1548,6 +1678,8 @@ class MujocoDiagnosticPPOTrainer:
             readiness.get("terminal_row_telemetry_available", False)
         )
         terminal_rows: list[dict[str, Any]] = []
+        promotion_blocked_samples: list[dict[str, Any]] = []
+        promotion_checked_samples = 0
 
         maximum_rollout_steps = (
             self.config.rollout_steps
@@ -1614,6 +1746,17 @@ class MujocoDiagnosticPPOTrainer:
                         num_envs=self.num_envs,
                     )
                 )
+                # Every env every step, not just the terminal ones: the fault is
+                # non-terminal by construction, so a done-row-only read would miss
+                # exactly the case this evidence exists for.
+                promotion_blocked_samples.extend(
+                    promotion_blocking_samples_from_step(
+                        extras=extras,
+                        rollout_step_1based=_step + 1,
+                        num_envs=self.num_envs,
+                    )
+                )
+                promotion_checked_samples += self.num_envs
             raw_rewards = rewards.to(dtype=torch.float32).detach()
             timeout_bootstrap = (
                 self.config.gamma
@@ -1755,10 +1898,20 @@ class MujocoDiagnosticPPOTrainer:
             if terminal_telemetry_available
             else None
         )
-        if terminal_telemetry is not None:
+        promotion_evidence = (
+            promotion_blocking_evidence_receipt(
+                promotion_blocked_samples,
+                checked_sample_count=promotion_checked_samples,
+            )
+            if terminal_telemetry_available
+            else None
+        )
+        for side_payload in (terminal_telemetry, promotion_evidence):
+            if side_payload is None:
+                continue
             rollout_digest.update(
                 json.dumps(
-                    terminal_telemetry,
+                    side_payload,
                     sort_keys=True,
                     separators=(",", ":"),
                     ensure_ascii=False,
@@ -1803,6 +1956,9 @@ class MujocoDiagnosticPPOTrainer:
             ),
             "terminal_row_telemetry_available": terminal_telemetry_available,
             "terminal_row_telemetry": terminal_telemetry,
+            # 人话:这一格是"这次 update 能不能拿去晋级"的结论,不是又一个计数器。
+            # 它由 ledger 的结论位汇总而来,汇总时会和原始计数对账,对不上直接拒收。
+            "promotion_blocking_evidence": promotion_evidence,
             "raw_reward_sum": float(
                 torch.cat(raw_reward_rows, dim=0).sum().item()
             ),
@@ -1887,6 +2043,9 @@ __all__ = [
     "NORMALIZER_BINDING_KIND",
     "NORMALIZER_UPDATE_RULE",
     "NORMALIZER_WAIT_OUTPUT_RULE",
+    "PROMOTION_BLOCKING_EVIDENCE_KIND",
+    "PROMOTION_BLOCKING_EVIDENCE_SOURCE",
+    "PROMOTION_BLOCKING_REASON",
     "TERMINAL_ROW_TELEMETRY_CONTRACT_KIND",
     "TERMINAL_ROW_TELEMETRY_RECEIPT_KIND",
     "TIMEOUT_BOOTSTRAP_RULE",
@@ -1899,6 +2058,9 @@ __all__ = [
     "TrainerIdentity",
     "asymmetric_normalizer_binding",
     "fresh_actor_bootstrap_contract",
+    "promotion_blocked_from_evidence",
+    "promotion_blocking_evidence_receipt",
+    "promotion_blocking_samples_from_step",
     "terminal_row_telemetry_contract",
     "validate_diagnostic_readiness_receipt",
 ]

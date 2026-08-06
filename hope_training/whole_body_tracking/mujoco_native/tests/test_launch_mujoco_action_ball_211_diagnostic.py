@@ -20,7 +20,8 @@ class _CanaryEnv:
     num_actions = 31
     num_observations = 211
 
-    def __init__(self, *, reveal_tick=25, hard_tick=None):
+    def __init__(self, *, reveal_tick=25, hard_tick=None, forbidden_tick=None):
+        self.forbidden_tick = forbidden_tick
         self._wait_schedule = SimpleNamespace(min_wait_ticks=25, max_wait_ticks=25)
         self.producer = SimpleNamespace(
             robot_tape=SimpleNamespace(history_fill_action=np.zeros(31))
@@ -63,6 +64,9 @@ class _CanaryEnv:
         projected = not torch.equal(actions, torch.zeros_like(actions))
         mask = (bool(projected),) + (False,) * 30
         next_valid = self.tick >= self.reveal_tick
+        forbidden = int(
+            self.forbidden_tick is not None and self.tick >= self.forbidden_tick
+        )
         return (
             torch.zeros((1, 211)),
             torch.zeros(1),
@@ -70,7 +74,18 @@ class _CanaryEnv:
             {
                 "diagnostic_qdes_projection_masks": (mask,),
                 "diagnostic_event_ledgers": (
-                    {"plant_counters": {"effort_clip_joint_events": 0}},
+                    {
+                        "plant_counters": {"effort_clip_joint_events": 0},
+                        "joint_actual_forbidden_observed_ticks": forbidden,
+                        "promotion_blocking_evidence": {
+                            "promotion_blocked": forbidden > 0,
+                            "reasons": (
+                                [launch.trainer.PROMOTION_BLOCKING_REASON]
+                                if forbidden
+                                else []
+                            ),
+                        },
+                    },
                 ),
                 "diagnostic_exact_hard_terminations": torch.as_tensor(
                     [hard], dtype=torch.bool
@@ -124,6 +139,75 @@ def test_fresh_wait_bootstrap_canary_rejects_hard_termination():
         launch._fresh_wait_bootstrap_canary(
             _CanaryEnv(hard_tick=3), _canary_trainer(), profile="C211"
         )
+
+
+def test_fresh_wait_bootstrap_canary_publishes_its_promotion_conclusion():
+    receipt = launch._fresh_wait_bootstrap_canary(
+        _CanaryEnv(), _canary_trainer(), profile="C211"
+    )
+    assert receipt["promotion_blocked"] is False
+    for phase in ("deterministic_max_wait", "stochastic_fresh_wait"):
+        evidence = receipt[phase]["promotion_blocking_evidence"]
+        assert evidence["promotion_blocked"] is False
+        assert evidence["checked_sample_count"] == 25
+
+
+def test_fresh_wait_bootstrap_canary_rejects_a_non_terminal_hard_edge():
+    """The soften moved this fault off the Done bit; the canary must still refuse.
+
+    人话:改软之前,起手姿态贴关节硬边会算进 hard_termination_count,canary 直接不过。
+    改软之后它不再进 hard,如果没人读结论位,这条 canary 就会静默放行一个"不能上机"的起手。
+    """
+
+    with pytest.raises(launch.LaunchBlocked, match="canary failed"):
+        launch._fresh_wait_bootstrap_canary(
+            _CanaryEnv(forbidden_tick=4), _canary_trainer(), profile="C211"
+        )
+
+
+def test_promotion_blocking_summary_is_fail_closed_and_warns(capsys):
+    clean_update = {
+        "promotion_blocking_evidence": {"promotion_blocked": False},
+    }
+    summary = launch._promotion_blocking_summary(
+        profile="C211",
+        canary={"promotion_blocked": False},
+        update_receipts=[clean_update],
+        checkpoint_save_receipt={"promotion_blocked": False},
+    )
+    assert summary["promotion_blocked"] is False
+    assert summary["blocked_sources"] == []
+    assert capsys.readouterr().err == ""
+
+    # 缺字段与 True 同义:一个说不出结论的来源就是"卡住"。
+    blind = launch._promotion_blocking_summary(
+        profile="C211",
+        canary={},
+        update_receipts=[{}],
+        checkpoint_save_receipt={},
+    )
+    assert blind["promotion_blocked"] is True
+    assert blind["blocked_sources"] == [
+        "fresh_wait_bootstrap_canary",
+        "update_receipt[0]",
+        "checkpoint_save_receipt",
+    ]
+    captured = capsys.readouterr().err
+    assert "WARN" in captured
+    assert "promotion_blocked=True" in captured
+
+    reported = launch._promotion_blocking_summary(
+        profile="C211",
+        canary={"promotion_blocked": False},
+        update_receipts=[
+            clean_update,
+            {"promotion_blocking_evidence": {"promotion_blocked": True}},
+        ],
+        checkpoint_save_receipt={"promotion_blocked": False},
+    )
+    assert reported["promotion_blocked"] is True
+    assert reported["blocked_sources"] == ["update_receipt[1]"]
+    assert "WARN" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("profile", ("A211", "C211"))

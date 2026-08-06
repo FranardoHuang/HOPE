@@ -2406,6 +2406,104 @@ CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：扩全身会动�
    `scale4096` 未跑。**重建 manifest / lineage 会换掉正在发射的四格身份，
    属于 Franco 的判断题，本轮不背着发射的人做。** 上面那张表就是接线时要照抄的全部内容。
 
+#### 5.6.16 §5.6.13 (B) 落地：`promotion_blocked` 接上消费方（2026-08-06）
+
+**人话一句：** §5.6.13 (B) 点名的那个"没人读的结论位"这轮接线了。
+它现在有三个真消费方，加上一条只在出事时才说话的摘要行；
+并且**收据自己说谎会被拒收**——这是本轮唯一新增的硬拒绝面。
+
+**(1) 那一位到底是什么、谁产生、本该谁读。**
+
+| | 内容 |
+| --- | --- |
+| 生产方 | `mujoco_native/vec_env.py:1846` `DiagnosticEventLedger.snapshot()` 里的 `promotion_blocking_evidence.promotion_blocked`（值 = `joint_actual_forbidden_observed_ticks > 0`） |
+| 流到哪 | 每步进 `extras["diagnostic_event_ledgers"][env]`；落盘进 rollout 收据的 `final_event_ledgers` / `event_ledger_transcript` |
+| 接线前谁读 | **没有人。** 全仓 `grep promotion_blocked` 只命中生产点本身与它上面那行注释；`checkpoint.py` 零命中；`launch_mujoco_action_ball_211_diagnostic.py` 只从 ledger 里取 `plant_counters`；测试里 `promotion` 出现 0 次 |
+| 本该谁读 | `joint_actual_forbidden` 改软时（§5.6.2 第 10 条）承诺的后半句"不终止但卡晋级"的**执行者**：跑 update 的 trainer、被晋级的 checkpoint、决定发不发的 launcher |
+
+**裁决：接线，不删。** 删不掉的理由是 §5.6.2 第 10 条那次返工的原始动机没有别的机制在管——
+`joint_actual_forbidden` 的谓词一个字没改，改的只是它的后果；
+把"记录"留下、"阻断"扔掉，正好是那条教训点名的失败形态。
+
+**(2) 接上的三个消费方（记录+阻断同批）。**
+
+1. **`mujoco_native/trainer.py`：真拒绝面。** 新增
+   `promotion_blocking_samples_from_step()` / `promotion_blocking_evidence_receipt()`，
+   在 `run_update` 的 rollout 循环里**逐步逐 env**读（不是只读 done 行——这个 fault
+   按定义不终止 episode，只看 done 行正好漏掉它存在的理由）。
+   它同时读**原始计数和结论位并对账**：`promotion_blocked != (observed_ticks > 0)`
+   直接 `DiagnosticPPOContractError`。汇总结果进 update 收据的
+   `promotion_blocking_evidence`（`promotion_blocked` / `reasons` / `blocked_env_indices` /
+   `blocked_sample_count` / `checked_sample_count` / `first_blocked_sample`），
+   并折进 `rollout_sha256`。`checked_sample_count` 必须为正——
+   "一个样本都没看过"算出来的"没问题"不是结论。
+2. **`mujoco_native/checkpoint.py`：结论跟着被晋级的东西走。**
+   save/load 收据新增 `promotion_blocked`，从 trainer 最近一次 update 收据取，
+   **缺字段与 `True` 同义**：没有 update 收据、收据里没有证据块、结论不是 `bool`，
+   三种情况都记"卡住"。被晋级的是这份权重，不是那次 update，所以结论必须写在权重的收据上。
+3. **两个 MuJoCo launcher：发射时刻的门 + 摘要。**
+   - `_fresh_wait_bootstrap_canary` 的 `passed` 现在**要求 `promotion_blocked is False`**。
+     这是本轮真正补上的那个洞：改软之前，起手 hold 贴到关节硬边会进
+     `hard_termination_count`，canary 直接不过；改软之后它不再进 hard，
+     **没人读结论位的话这条 canary 就会静默放行一个"训得出来但不能上机"的起手姿态**。
+     成本是 25 tick，拦在 GPU 排队之前。
+   - 新增 `_promotion_blocking_summary()`：把 canary、每一份 update 收据、
+     checkpoint save 收据的结论**并起来挂到 `result` 最外层**（`status` 旁边），
+     并且**只在被卡住时**往 stderr 打一行
+     `[MUJOCO-<profile>] WARN promotion_blocked=True blocked_sources=...`。
+     照 Franco 的准绳走"WARN 必进摘要 / 摘要抓异常不抓预期"：
+     没事不出声，出事同时出现在 result 顶层和 stderr，不留在几千行收据里等人翻。
+     四个来源任一说不出结论就算被卡（`absent_verdict_counts_as_blocked: true`）。
+
+**(3) 变异测试（证明门会开火，不是证明它现在不报错）。**
+`test_action_ball_211_trainer.py` 新增 7 个变异体，全部必须转红：
+`evidence_removed` / `conclusion_hardcoded_false` / `conclusion_hardcoded_true` /
+`conclusion_is_a_truthy_int` / `reasons_emptied_while_blocked` / `counter_removed` /
+`evidence_is_not_a_mapping`。其中 `conclusion_hardcoded_false` 就是 §5.6.13 (B)
+点名"必须被杀"的那一个。**这些都构造成"粗一个档次的检查过不了"**：
+只断言"字段还在"或"类型对"的检查会放过 `hardcoded_false`，只有拿计数对账才杀得掉。
+另外 `test_mujoco_native_vec_env.py` 新增一条**活值**producer→consumer 交叉测试：
+拿真的 `DiagnosticEventLedger.record_step()` 快照直接喂给 trainer 的消费方，
+断言两边对同一个 reason 词表和同一个结论的判断一致——
+不是第三份手抄的期望值，vec_env 那侧的拼写一漂就红。
+launcher 侧新增 canary 的正/负对照与摘要 fail-closed 三格。
+
+**(4) 治理表同批。** `mirrored_constant_registry.py` 的 `trainer.py` 段登记了三个新常量
+（`PROMOTION_BLOCKING_EVIDENCE_KIND` / `PROMOTION_BLOCKING_REASON` /
+`PROMOTION_BLOCKING_EVIDENCE_SOURCE`），档位 `not_mirrored`：
+它们是本车道自己的收据词表，Isaac 那侧这一项仍是硬终止，压根没有"卡晋级"这个概念。
+`PROMOTION_BLOCKING_REASON` 与 vec_env 里那份字面量的一致性**不靠这张表**，
+靠上面那条活值交叉测试。（这道门本轮自己拦了一次：三个常量没登记时它就红了。）
+
+**(5) 顺手扫的同类"没人读的结论位"。** 判据是"名字自称结论 + 全仓文本命中 ≤ 2 次"：
+把 `scripts/` 与 `hope_training/` 下所有 `.py` 的 dict 字面量键取出来，
+挑出名字以 `_blocked`/`_verdict`/`_violation`/`_passed`/`_blocker`/`_warning` 结尾
+或含 `promotion_block`/`no_go`/`warn` 的，再和全仓标识符频次索引对。
+命中 38 个候选，**逐个查了发出点的上下文，只有本条是真病**：
+
+| 形态 | 例子 | 判决 |
+| --- | --- | --- |
+| 发出点自己就 raise / 决定退出码 | `oracle32_verdict`（`launch_n1_measured_vendor_v2_diagnostic.py:2094`，同一段里 `if failed: raise LaunchRefused`）、`runtime_blocker`（`mujoco_action_ball_policy_fitted_gate.py:2142`，同批 `status/verdict=BLOCKED` + `return 2`）、`torch_blocker`/`fitted_receipt_blocker`（`audit_action_ball_cross_engine_physics.py`，`verdict` 决定退出码 `0/3`） | **不是病**：结论位是已执行拒绝的存根 |
+| 收据里的证据明细，不是结论 | `shadow_foot_penetration_violations`（`mujoco_teacher_motion_fitted_ball_gate.py:9184`，切片列表）、`mechanical_verdict_counts` | **不是病**：它本来就是给人看的账 |
+| 结论位无人读、无测试、无分支 | `promotion_blocking_evidence.promotion_blocked` | **本条，已接线** |
+
+结论：**这一类在本仓不是普遍现象**，`promotion_blocked` 是唯一一处
+"文档明写供下游消费、实际零消费方零测试"的。§5.6.13 (A)(C) 那三处仍是
+**零调用点的门**（另一种病），不在本轮范围内，判决与依据不变。
+
+**(6) 没做什么、为什么。** 没有让 `checkpoint.save()` 在被卡住时**拒绝写盘**。
+理由是证据：`joint_actual_forbidden` 的谓词没变，改软前 exact r6 的 A/C 每个 update
+7 个硬终止全部就是这一条（§顶部状态表），所以改软后它在现役诊断跑里大概率非零；
+拒绝写盘会把整条 cold-load parity 证据链一起打掉，那不是"卡晋级"，是"删证据"。
+本车道的 `authorization.promotion` 本来就恒 `False`（`vec_env.py` 与 update 收据都是字面量），
+**今天没有一个"晋级动作"可拦**——所以本轮把结论位钉在
+"收据不许自相矛盾"+"canary 不许放行"+"摘要不许沉默"这三处能真开火的地方，
+而不是造一个新的晋级仪式来给它拦。**哪一步算晋级仍然待定**，
+但它不再是"接线的前置条件"：无论将来哪一步被定为晋级，
+它要读的字段现在已经在 update 收据和 checkpoint 收据上了。
+
+**(7) 收尾对拍。** 见提交信息里的 before/after 失败集合。
+
 #### 5.6.17 三条 review 合并成一份带排序的清单（2026-08-07）
 
 **人话一句：** 2026-08-06 三条独立 review（随机性 / MuJoCo 对齐 / 复查漏做的）各出了一份清单。

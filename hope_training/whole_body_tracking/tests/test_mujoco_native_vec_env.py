@@ -1015,6 +1015,14 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
     # 人话:终止latch照旧粘滞,而触边计数是按 tick 计的,干净的一步不会再加。
     assert recovered["joint_actual_forbidden_observed_ticks"] == 1
 
+    live_evidence = boundary_only["promotion_blocking_evidence"]
+    assert live_evidence["promotion_blocked"] is True
+    assert live_evidence["reasons"] == [
+        diagnostic_trainer.PROMOTION_BLOCKING_REASON
+    ]
+    assert safe["promotion_blocking_evidence"]["promotion_blocked"] is False
+    assert safe["promotion_blocking_evidence"]["reasons"] == []
+
     substep = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
         plant=_plant_row(joint_actual_forbidden_substep=True),
         events=(),
@@ -1030,6 +1038,66 @@ def test_event_ledger_joint_actual_bounds_tolerance_order_and_latch_are_strict()
         "current_step_predicate": False,
         "substep_latch": True,
     }
+
+
+def test_live_ledger_conclusion_is_read_by_the_trainer_that_consumes_it():
+    """The producer's conclusion bit and its only consumer must agree on live values.
+
+    人话:上面那些断言证明 ledger 自己算对了;这一条证明**有人在读**,而且读的是活值
+    不是手抄的期望值。结论位一旦没人读,它就退化成一个需要人记得去看的数字 ——
+    joint_actual_forbidden 从硬终止改软时,漏掉的正是这后半句。
+    """
+
+    clean = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
+        plant=_plant_row(), events=(), time_out=False
+    )
+    touched_q = np.zeros(31, dtype=np.float64)
+    touched_q[7] = -1.0 + vec_env.JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD
+    touched = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
+        plant=_plant_row(q=touched_q), events=(), time_out=False
+    )
+
+    extras = {"diagnostic_event_ledgers": (clean, touched)}
+    samples = diagnostic_trainer.promotion_blocking_samples_from_step(
+        extras=extras, rollout_step_1based=1, num_envs=2
+    )
+    assert samples == [
+        {
+            "rollout_step_1based": 1,
+            "env_index": 1,
+            "joint_actual_forbidden_observed_ticks": 1,
+            "reasons": [diagnostic_trainer.PROMOTION_BLOCKING_REASON],
+        }
+    ]
+    receipt = diagnostic_trainer.promotion_blocking_evidence_receipt(
+        samples, checked_sample_count=2
+    )
+    assert receipt["promotion_blocked"] is True
+    assert receipt["blocked_env_indices"] == [1]
+
+    clean_only = diagnostic_trainer.promotion_blocking_evidence_receipt(
+        diagnostic_trainer.promotion_blocking_samples_from_step(
+            extras={"diagnostic_event_ledgers": (clean,)},
+            rollout_step_1based=1,
+            num_envs=1,
+        ),
+        checked_sample_count=1,
+    )
+    assert clean_only["promotion_blocked"] is False
+
+    # 变异体:把活收据里的结论位改写成 False。粗一个档次的检查(只看字段在不在、
+    # 只看类型对不对)会放过它;对账检查必须杀掉它。
+    doctored = json.loads(json.dumps(touched))
+    doctored["promotion_blocking_evidence"]["promotion_blocked"] = False
+    doctored["promotion_blocking_evidence"]["reasons"] = []
+    with pytest.raises(
+        diagnostic_trainer.DiagnosticPPOContractError, match="promotion_blocked"
+    ):
+        diagnostic_trainer.promotion_blocking_samples_from_step(
+            extras={"diagnostic_event_ledgers": (doctored,)},
+            rollout_step_1based=1,
+            num_envs=1,
+        )
 
 
 def test_event_ledger_joint_qdes_projection_semantics_order_and_latch_are_exact():

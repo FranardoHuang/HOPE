@@ -626,6 +626,12 @@ CLASSIFICATION: dict = {
         "NORMALIZER_BINDING_KIND": (_N, ""),
         "TERMINAL_ROW_TELEMETRY_CONTRACT_KIND": (_N, ""),
         "TERMINAL_ROW_TELEMETRY_RECEIPT_KIND": (_N, ""),
+        "PROMOTION_BLOCKING_EVIDENCE_KIND": (_N, ""),
+        # 人话:这个 reason 字符串在 vec_env 的 ledger 里也有一份字面量。它不是 Isaac
+        # 的镜像(Isaac 那边这一项是硬终止,没有"卡晋级"这个概念),所以归 _N;两处拼写
+        # 一不一致由 test_mujoco_native_vec_env 拿真 ledger 快照比活值,不是靠这张表。
+        "PROMOTION_BLOCKING_REASON": (_N, ""),
+        "PROMOTION_BLOCKING_EVIDENCE_SOURCE": (_N, ""),
         "NORMALIZER_UPDATE_RULE": (_N, ""),
         "NORMALIZER_WAIT_OUTPUT_RULE": (_N, ""),
         "TIMEOUT_BOOTSTRAP_RULE": (_N, ""),

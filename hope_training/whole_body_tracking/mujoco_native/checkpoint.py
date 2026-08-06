@@ -20,6 +20,7 @@ from .trainer import (
     MujocoDiagnosticPPOTrainer,
     ResetBoundaryRequired,
     _require_torch,
+    promotion_blocked_from_evidence,
 )
 
 
@@ -29,6 +30,22 @@ CHECKPOINT_SCHEMA_VERSION = 3
 
 class CheckpointRefused(DiagnosticPPOError):
     """A checkpoint could not be safely saved or loaded."""
+
+
+def _checkpoint_promotion_blocked(trainer: MujocoDiagnosticPPOTrainer) -> bool:
+    """Carry the update's promotion verdict onto the artifact it produced.
+
+    人话:被晋级的是 checkpoint,不是 update。所以结论位必须跟着 checkpoint 走,
+    否则读 checkpoint 的人得先回去翻 update 收据才知道这份权重能不能上机。
+    没有 update 收据 / 收据里没有结论位,一律按"卡住"记——缺字段与 True 同义。
+    """
+
+    receipt = getattr(trainer, "_last_update_receipt", None)
+    if not isinstance(receipt, Mapping):
+        return True
+    return promotion_blocked_from_evidence(
+        receipt.get("promotion_blocking_evidence")
+    )
 
 
 def _torch_load_cpu(torch: Any, source: Any) -> Any:
@@ -202,6 +219,7 @@ class ResetBoundaryCheckpoint:
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "update_counter": trainer.update_counter,
             **trainer.identity.as_dict(),
+            "promotion_blocked": _checkpoint_promotion_blocked(trainer),
             "diagnostic_unauthorized": True,
             "formal_authorized": False,
             "mid_episode_resume": False,
@@ -284,6 +302,7 @@ class ResetBoundaryCheckpoint:
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "update_counter": trainer.update_counter,
             **trainer.identity.as_dict(),
+            "promotion_blocked": _checkpoint_promotion_blocked(trainer),
             "at_reset_boundary": True,
             "diagnostic_unauthorized": True,
             "formal_authorized": False,
