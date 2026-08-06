@@ -2803,8 +2803,10 @@ class _Progress:
         )
 
 
-class BallCurriculumStalledError(RuntimeError):
-    pass
+# ``BallCurriculumStalledError`` was deleted 2026-08-06.  It was declared here
+# and then never raised, never caught and never imported -- an exception type
+# for a failure mode nothing reports.  The curriculum's live fail-closed paths
+# raise ``DrainResetAuthorityError`` / ``ValueError`` instead.
 
 
 class ActionBallCurriculum:

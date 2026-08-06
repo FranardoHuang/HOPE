@@ -8,6 +8,21 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-06: 过期结构清理**第二轮**。再扫一遍全仓（AST 取定义 + 全仓原文引用计数，含字符串／
+  `getattr`／`importlib`／docs／yaml／json；另加一遍模块级字面量常量的跨文件相等聚类），删掉 8 处
+  零调用点结构，其中两处是**已经漂了的镜像**：`LazyActionTaskPool._refill`（129 行，`request()`
+  自向量化那天起只走 `request_many()`，但它自己抄了一份 solver-authority 不变式）与
+  `FrozenAttemptSource` Protocol（81 行，零 import／零标注／零实现者，且要求一个现役实现类
+  `FrozenSidecarInboxAttemptSource` 从来没有过的 `source_path` 属性）。删副本不够，所以新增
+  `tests/test_action_ball_safety_vocabulary_single_source.py`（28 passed，四组变异测试各自逐条变
+  红）：把**四张此前零机器检查的表**、24 个持有者钉在一起——硬安全终止并集（5 项 ×10 处）、参考
+  包络终止项（3 项 ×9 处）、终止 outcome 词表（7 项 ×2 处），以及**每个 recipe 的目标有效位**
+  （3 处：`hope_commands` 现役那份决定 position/velocity/face 哪几列进 reward 的 eligible 分母、
+  fixed-question tape、tape 的生产者 materializer）。这四张表都改不成单一真源 import（inbox 自陈
+  要能在 CPU-only host 单独审计、`hope_commands.py` 在 `SOLVER_SOURCES` 七件套里逐字节钉着、
+  materializer 那份被 bundle producer sha 钉着），所以只读 AST 核对、不 import 任何持有者。
+  **没有放宽任何 fail-closed 门**，新增的是净增保护。
+
 - 2026-08-06: 过期结构清理一轮（只删零调用点，**没有放宽任何 fail-closed 门**）。删掉的最大一
   块是 `scripts/action_ball_211_launcher_shared.py`（577 行）：它 08-05 建立时自述“本轮只建库、
   接线是下一步”，接线从未发生，于是成了 A211/C211 两个发射器那 49 个共享常量的**第三份**手抄

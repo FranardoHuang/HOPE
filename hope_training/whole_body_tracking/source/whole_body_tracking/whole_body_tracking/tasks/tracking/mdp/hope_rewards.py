@@ -2558,7 +2558,10 @@ def qdes_limit_barrier(
 # a policy can keep one or more joints an arbitrarily small distance inside the forbidden margin
 # while paying an arbitrarily small price.  Fresh ActionBall uses these explicitly versioned terms
 # instead.  Historical task IDs retain v1 unless their reward config opts into the v2 callables.
-_SOFT_LIMIT_BARRIER_V2_SCHEMA_VERSION = 2
+# ``_SOFT_LIMIT_BARRIER_V2_SCHEMA_VERSION = 2`` was deleted 2026-08-06.  The
+# comment above says these terms are "explicitly versioned", but the number was
+# never read: no receipt, telemetry key or contract ever emitted it, so it
+# versioned nothing.  The v1/v2 split is carried by the callable names alone.
 _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR = 0.25
 _SOFT_LIMIT_BARRIER_V2_SHAPE_RATE = 4.0
 _QDES_LIMIT_BARRIER_V2_ACTIVATION_ATTR = "_hope_qdes_limit_barrier_v2_activation_counters"
@@ -2583,7 +2586,8 @@ _SOFT_LIMIT_BARRIER_V2_ACTIVE_COUNT = "reward_enabled_sample_count"
 # This separate term charges the distance between those two points; it must not be folded into the
 # processed-q_des soft barrier above because a plant-state brake can replace ``processed_actions``
 # after the nominal projection has been computed.
-_QDES_PROJECTION_SCHEMA_VERSION = 1
+# ``_QDES_PROJECTION_SCHEMA_VERSION = 1`` was deleted 2026-08-06 for the same
+# reason as the barrier-v2 one above: declared, never emitted, never read.
 _QDES_PROJECTION_DEFAULT_SHAPE_RATE = 4.0
 _QDES_PROJECTION_ACTIVATION_ATTR = "_hope_qdes_projection_activation_counters"
 _QDES_PROJECTION_OBSERVED_STEP_ATTR = "_hope_qdes_projection_observed_step"

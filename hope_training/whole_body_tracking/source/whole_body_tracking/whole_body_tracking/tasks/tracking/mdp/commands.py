@@ -5652,20 +5652,10 @@ class MotionCommand(CommandTerm):
             )
         )
 
-    def install_action_ball_task_timing_diagnostic_many(
-        self,
-        *,
-        host_identity_rows: tuple,
-        receipts: tuple,
-        task_refs: tuple,
-    ) -> None:
-        """Compatibility wrapper for the diagnostic selected-batch resolver."""
-
-        self._resolve_action_ball_task_timing_diagnostic_selected(
-            host_identity_rows=host_identity_rows,
-            receipts=receipts,
-            task_refs=task_refs,
-        )
+    # ``install_action_ball_task_timing_diagnostic_many`` was deleted 2026-08-06.
+    # It called itself a "compatibility wrapper" and had zero callers -- callers
+    # already use ``_resolve_action_ball_task_timing_diagnostic_selected``
+    # directly, so the wrapper was compatibility with nothing.
 
     def install_action_ball_fixed_view_timing_now(
         self,
@@ -7583,16 +7573,11 @@ class MotionCommand(CommandTerm):
             )
         return result
 
-    def action_ball_shared_broker_state_sha256(self) -> str:
-        """Return the live Racket-owned broker snapshot digest for runner ordering checks."""
-
-        if self._action_ball_birth_broker is None:
-            raise RuntimeError("action-ball birth broker is not bound")
-        state = self._action_ball_birth_broker.state_dict()
-        return self._action_ball_sha256(
-            state.get("integrity_sha256"),
-            name="broker.integrity_sha256",
-        )
+    # ``action_ball_shared_broker_state_sha256`` was deleted 2026-08-06: zero
+    # callers.  Its docstring advertised "for runner ordering checks", but no
+    # runner ever read it -- the digest the runner does read is
+    # ``action_ball_shared_racket_state_sha256`` below, which covers the broker
+    # bytes along with every other shared action-ball authority byte.
 
     def action_ball_shared_racket_state_sha256(self) -> str:
         """Return Racket's digest over every shared action-ball authority byte."""

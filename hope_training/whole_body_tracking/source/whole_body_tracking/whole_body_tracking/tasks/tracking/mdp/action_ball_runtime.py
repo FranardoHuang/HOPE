@@ -900,15 +900,13 @@ class ActionSamplingMixture:
 
 
 FROZEN_ATTEMPT_SCHEMA_VERSION = 4
-FROZEN_TERMINAL_OUTCOMES = (
-    "legal_return",
-    "safe_nonreturn",
-    "table_hit",
-    "fall",
-    "collision",
-    "joint_qdes_limit",
-    "joint_actual_limit",
-)
+# ``FROZEN_TERMINAL_OUTCOMES`` lived here until 2026-08-06 as a third verbatim
+# copy of the terminal-outcome vocabulary, with zero readers.  The two copies
+# that are actually read -- ``action_ball_evaluation.TERMINAL_OUTCOMES`` and
+# ``action_ball_evaluation_inbox.TERMINAL_OUTCOMES`` -- must stay separate
+# because both modules are loaded standalone on CPU-only hosts, so they are now
+# held together by tests/test_action_ball_safety_vocabulary_single_source.py
+# instead of by nothing.
 
 
 @dataclass(frozen=True)
@@ -1455,87 +1453,13 @@ class FrozenTerminalEvent:
         )  # type: ignore[arg-type]
 
 
-class FrozenAttemptSource(Protocol):
-    """Same-process, code-pinned source of sampler/solver/runtime events.
-
-    Opaque Python capabilities deliberately do not cross process boundaries.
-    A cross-process evaluator must instead introduce a separately reviewed
-    authenticated transport; JSON rehydration is not equivalent authority.
-    """
-
-    source_contract_sha256: str
-    source_code_sha256: str
-    source_path: str
-    state_owner_sha256: str
-
-    def state_dict(self) -> Mapping[str, object]:
-        ...
-
-    def load_state_dict(self, state: object) -> None:
-        ...
-
-    def issue_proposal(
-        self,
-        request: FrozenEvaluationProposalRequest,
-    ) -> FrozenIssuedProposal:
-        ...
-
-    def assert_exact_proposal(
-        self,
-        request: FrozenEvaluationProposalRequest,
-        proposal: FrozenIssuedProposal,
-    ) -> None:
-        ...
-
-    def solver_event(
-        self,
-        request: FrozenEvaluationProposalRequest,
-        proposal: FrozenIssuedProposal,
-    ) -> FrozenSolverEvent:
-        ...
-
-    def assert_solver_event(
-        self,
-        request: FrozenEvaluationProposalRequest,
-        proposal: FrozenIssuedProposal,
-        event: FrozenSolverEvent,
-    ) -> None:
-        ...
-
-    def lifecycle_event(
-        self,
-        request: FrozenEvaluationProposalRequest,
-        proposal: FrozenIssuedProposal,
-        solver: FrozenSolverEvent,
-        stage: str,
-    ) -> FrozenLifecycleEvent:
-        ...
-
-    def assert_lifecycle_event(
-        self,
-        request: FrozenEvaluationProposalRequest,
-        proposal: FrozenIssuedProposal,
-        solver: FrozenSolverEvent,
-        event: FrozenLifecycleEvent,
-    ) -> None:
-        ...
-
-    def terminal_event(
-        self,
-        request: FrozenEvaluationProposalRequest,
-        proposal: FrozenIssuedProposal,
-        solver: FrozenSolverEvent,
-    ) -> FrozenTerminalEvent:
-        ...
-
-    def assert_terminal_event(
-        self,
-        request: FrozenEvaluationProposalRequest,
-        proposal: FrozenIssuedProposal,
-        solver: FrozenSolverEvent,
-        event: FrozenTerminalEvent,
-    ) -> None:
-        ...
+# The ``FrozenAttemptSource`` Protocol that used to sit here was deleted
+# 2026-08-06.  Nothing imported it, nothing annotated against it, and nothing
+# implemented it by name -- it was a second, unenforced copy of the interface
+# that ``action_ball_evaluation_inbox.FrozenSidecarInboxAttemptSource`` actually
+# provides.  It had already drifted: the Protocol required a ``source_path``
+# attribute the live class has never had.  The interface now has one home, the
+# class itself.
 
 
 @dataclass(frozen=True)
@@ -8926,135 +8850,11 @@ class LazyActionTaskPool:
                 lifecycle[sample_index] = _LIFECYCLE_PENDING
         self._task_lifecycle[uid] = lifecycle
 
-    def _refill(
-        self,
-        binding: ActionBinding,
-        birth: ActionBirthReceipt,
-        birth_digest: str,
-    ) -> None:
-        if self._solver is None:
-            raise PoolProtocolError("task solver is not bound")
-        request = self._build_refill_request(
-            binding, birth, birth_digest
-        )
-        solver_state = self._solver_state()
-        try:
-            previous_highwaters = self._solver_sample_highwaters()
-            if previous_highwaters != self._pool_sample_highwaters():
-                raise ActionBallContractError(
-                    "pool sample high-water differs from solver authority"
-                )
-            previous_task_counts = self._solver_emitted_task_counts()
-            if previous_task_counts != self._pool_emitted_task_counts():
-                raise ActionBallContractError(
-                    "pool admitted-task counts differ from solver authority"
-                )
-            batch = self._solver(request)
-            emitted_solver_state = self._solver_state()
-            authority_highwaters = self._solver_sample_highwaters()
-            authority_task_counts = self._solver_emitted_task_counts()
-            authority_highwater = authority_highwaters[
-                binding.action_uid
-            ]
-            if any(
-                authority_highwaters[uid] != prior
-                for uid, prior in previous_highwaters.items()
-                if uid != binding.action_uid
-            ):
-                raise ActionBallContractError(
-                    "solver advanced an unstaged action sample tape"
-                )
-            if any(
-                authority_task_counts[uid] != prior
-                for uid, prior in previous_task_counts.items()
-                if uid != binding.action_uid
-            ) or authority_task_counts[binding.action_uid] != (
-                previous_task_counts[binding.action_uid]
-                + len(batch.receipts)
-            ):
-                raise ActionBallContractError(
-                    "solver admitted-task transcript advanced outside the "
-                    "staged callback result"
-                )
-            (
-                new_digests,
-                last_sample_index,
-                last_sample_draw_end,
-            ) = self._validate_refill_batch(
-                binding=binding,
-                birth=birth,
-                birth_digest=birth_digest,
-                request=request,
-                batch=batch,
-            )
-            self._assert_emitted_tasks_pure(batch.receipts)
-            self._assert_proposal_assignments_pure(
-                (
-                    ActionSampleAssignment(
-                        birth=birth,
-                        refill_index=request.refill_index,
-                        proposal_sample_indices=(
-                            batch.proposal_sample_indices
-                        ),
-                    ),
-                )
-            )
-            expected_count, expected_root = (
-                self._expected_task_transcript_for_active_birth(
-                    binding.action_uid, birth_digest
-                )
-            )
-            for receipt in batch.receipts:
-                expected_root = _task_transcript_extend(
-                    expected_root, receipt.canonical_sha256
-                )
-            expected_count += len(batch.receipts)
-            if (
-                not self._solver_delegates_birth_task_transcripts()
-                and self._solver_task_transcript_for_birth_pure(
-                    birth_digest
-                )
-                != (expected_count, expected_root)
-            ):
-                raise ActionBallContractError(
-                    "solver birth task transcript differs from staged "
-                    "callback result"
-                )
-            previous_highwater = (
-                self._last_sample_index.get(binding.action_uid, -1),
-                self._last_sample_draw_end.get(binding.action_uid, 0),
-            )
-            if (
-                authority_highwater[0] < last_sample_index
-                or authority_highwater[1] < last_sample_draw_end
-                or authority_highwater[0] < previous_highwater[0]
-                or authority_highwater[1] < previous_highwater[1]
-            ):
-                raise ActionBallContractError(
-                    "solver sample high-water disagrees with emitted samples"
-                )
-            if self._solver_state() != emitted_solver_state:
-                raise ActionBallContractError(
-                    "solver sample authority assertion must be pure"
-                )
-            # Commit only after the whole callback result validates.
-            self._install_lifecycle_samples(
-                action_uid=binding.action_uid,
-                batches=(batch,),
-                authority_sample_index=authority_highwater[0],
-            )
-            self._install_refill_batch(
-                binding=binding,
-                birth_digest=birth_digest,
-                request=request,
-                batch=batch,
-                new_digests=new_digests,
-                last_sample_index=authority_highwater[0],
-                last_sample_draw_end=authority_highwater[1],
-            )
-        except Exception:
-            self._restore_solver_state(solver_state)
-            raise
+    # The scalar ``_refill`` that used to sit here was deleted 2026-08-06: it had
+    # zero callsites (``request`` has delegated to ``request_many`` since the pool
+    # was vectorized), and it carried its own hand-copied transcript of the
+    # solver-authority invariants that ``request_many`` re-checks below.  Two
+    # copies of "what a refill is allowed to do", one of them unreachable.
 
     def request(
         self,

@@ -11,10 +11,11 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
-def robot_anchor_ori_w(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
-    command: MotionCommand = env.command_manager.get_term(command_name)
-    mat = matrix_from_quat(command.robot_anchor_quat_w)
-    return mat[..., :2].reshape(mat.shape[0], -1)
+# ``robot_anchor_ori_w`` was deleted 2026-08-06: no ObsTerm, no cfg, no test and
+# no yaml referenced it anywhere in the repo -- the ``from .observations import *``
+# re-export was its only reachability.  It was the world-frame twin of the
+# anchor-relative orientations below (``motion_anchor_ori_b`` /
+# ``robot_body_ori_b``), which are the ones the policy actually observes.
 
 
 def robot_anchor_lin_vel_w(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
