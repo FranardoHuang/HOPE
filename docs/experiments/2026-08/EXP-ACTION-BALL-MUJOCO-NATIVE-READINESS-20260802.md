@@ -1698,7 +1698,8 @@ CI95 `[0.8825, 0.9311]` 包含之）。现役 C211 走解析路径（`physical_b
 > **2026-08-06 复核后就地更正。** 本节初稿有两处说错，已在下文改掉，不另起段落自相矛盾：
 > (1) mujoco-warp **不是**"悄悄丢行"——它会 printf 一行并置 `d.overflow` 位；真正的缺陷是我们的
 > 训练循环两样都不读。(2) GPU 归属的证据是"掩码生效"，不是"采样了 268 行"。
-> 看门狗本身的覆盖面缺口另见 §9.2.4。
+> 看门狗本身的覆盖面缺口另见 §9.2.4；**那道门已在同日重做（§9.2.6），所以本节描述的是
+> 一个已经被换掉的实现**——引用时请标日期，别当现役行为。
 
 **人话**：MuJoCo GPU 这条线现在能自己跑训练了，不再只是"能跑物理"。`4096` 个环境一起跑，`5` 次
 PPO 更新 `10.9` 秒跑完，全程没有任何一个环境算出 NaN。这次补上的缺口是一个**接触容量看门狗**：
@@ -1708,12 +1709,27 @@ PPO 更新 `10.9` 秒跑完，全程没有任何一个环境算出 NaN。这次�
 **关于"静默"的准确说法**（初稿写错了，这里更正）。mujoco-warp `3.10` 在丢行时**会说话**：
 `_src/forward.py:249` 直接 `wp.printf("nefc overflow - please increase njmax to %u")`，并在
 `d.overflow` 这个**逐世界粘性位掩码**上置 `OverflowType.NEFC`；`opt.warn_overflow` 在
-`_src/io.py:436` 是硬写 `True`，没有开关。`9` 种溢出类型里有 `5` 种会 printf
-（`NEFC` / `NJMAX_NNZ` / `BROADPHASE` / `NARROWPHASE` / `CCD`，另含 flex 变体），
-另 `4` 种（`HFIELD` / `NVMAX` / `CONTACT_MATCH` / `EPA_HORIZON`）**只置位、不打印**，那四种才是真静默。
+`_src/io.py:436` 是硬写 `True`，没有开关。
 所以缺陷的正确表述是：**引擎在喊，只是没人读**——那行字混在 `5292` 行训练日志里，既不进摘要也不影响
 退出码。这正好是 MEMORY 里"只出计数器＝无人读"那条老毛病，不是引擎的锅。它决定了正确修法是
-**读 `d.overflow`**（见 §9.2.4 T1），而不是自己重算 max。
+**读 `d.overflow`**（见 §9.2.4 T1、已在 §9.2.6 落地），而不是自己重算 max。
+
+> **更正六（2026-08-06 第二轮，逐行读源码后就地改）：上面这段原本还写了"`5` 种会 printf、
+> `HFIELD`/`NVMAX`/`CONTACT_MATCH`/`EPA_HORIZON` 这 `4` 种只置位不打印"，这句话是错的，撤回。**
+> 在 mujoco-warp `3.10.0.3` 上**九种全都会打印**：`HFIELD` 在 `collision_convex.py:427`
+> （`"height field collision overflow, number of collisions >= %u"`）、`NVMAX` 在
+> `island.py:995`（`"nvmax overflow: world %d needs %d active DOFs..."`）、`CONTACT_MATCH` 在
+> `sensor.py:2438`（`"contact match overflow: please increase..."`）、`EPA_HORIZON` 在
+> `collision_gjk.py:1392/1411`。原判据把"`atomic_or` 那一行"当成了整段，漏看了紧挨着上面的
+> `if warn_overflow: wp.printf(...)`。
+> **但真正的坑比"四种静默"更阴**，而且新发现的这两条才是要记住的：
+> (1) **`EPA_HORIZON` 打的字里根本没有 "overflow" 这个词**——原文是
+> `"Warning: EPA horizon = %d isn't large enough."`。所有历史上"`grep -ci overflow` = `0`"的
+> 结论**都不覆盖 `EPA_HORIZON`**（含 §9.2.4 C1 对 08-05 双 seed 的事后判定：那条结论对会打
+> "overflow" 字样的八种成立，对 `EPA_HORIZON` 不成立，只能靠 `d.overflow` 补测）。
+> (2) **`BROADPHASE`/`NARROWPHASE` 只由 `worldid == 0` 那个世界打印**（`forward.py:263/270`），
+> 所以**行数不等于受影响世界数**，拿 `1134` 行去推"多少世界坏了"是错的。
+> 这两条正好说明为什么 stdout 只能当**旁证通道**，`d.overflow` 才能当**门**。
 
 **改了什么**（`hope_training/whole_body_tracking/mjlab_lane/a3_train_ppo.py`）。默认开启，逐 physics
 substep 在 GPU 上累积 `nefc`（每世界约束行）与 `nacon`（全世界接触）的滚动最大值，每次迭代随其它
@@ -1770,9 +1786,17 @@ Isaac 那两张卡没被碰过。
 换混合型号机器或改插卡顺序，`=2` 完全可能落到 Isaac 的卡上，而 `SMOKE5CAP.json` 只记了
 `cuda_visible_devices: "2"` 这个**意图字符串**、不记实际拿到的 uuid，事后无法自证。修法见 §9.2.4 T6。
 
-**吞吐代价要如实记**：同配置不开看门狗的历史 run（`TRAIN_s0`，`300` iter）是 `50,221` env-step/s，
-开了是 `45,706`，即探针吃掉约 **`9%`**。注意这 `9%` 买到的覆盖面比原以为的窄（只有 `nefc` 一条轴），
-而 §9.2.4 T1 的 `d.overflow` 方案覆盖全部 `9` 类且更便宜——**这笔税基本是白交的**。
+~~**吞吐代价要如实记**：同配置不开看门狗的历史 run（`TRAIN_s0`，`300` iter）是 `50,221` env-step/s，
+开了是 `45,706`，即探针吃掉约 **`9%`**。~~
+
+> **更正七（2026-08-06 晚，见 §9.2.6 第三节）：这个 `9%` 撤回，它不是探针的成本。**
+> 那是拿 `5` 迭代的 `SMOKE5CAP` 去比 `300` 迭代的 `TRAIN_s0`——两条跑长度不同、当天机器状态
+> 也不同，**不可比**。改成配对实测（`4096 env x 12 iter`，同一张 GPU2 背靠背交替，
+> 收据逐条记了跑前/跑后卡上有没有别人的进程）：**旧看门狗 ON `44,923` vs OFF `45,202`，
+> 约 `0.6%`；新的 `d.overflow` 门 ON `45,041` vs OFF `44,833`，差值在噪声里（三对里两对 ON 反而略快）。**
+> 每条曲线都是同一个形状——iteration `1` 冲到 `50.2k--50.6k`，之后稳在 `44.8k--45.3k`，
+> 所以**长度不同的两条跑不能直接比均值**。准确说法：这道门（新旧都是）代价 ≤ `1%`，
+> 新门用同样的代价把覆盖面从 `1` 类换到 `9` 类。
 
 ### 9.2.3 njmax/nconmax 加桌加球后的重新标定（2026-08-06 实测，已按同日复核就地更正）
 
@@ -1948,7 +1972,7 @@ NaN 那条链也被 `nan_to_num` 掐断了（都见 §9.2.4）。准确说法是
 | **P4** | **判决延迟一整个 PPO 迭代（`480` 个 physics substep），而 broadphase 那条轴"溢出→越界写→CUDA fault"的时间窗比这短。** | `--nconmax 6` 那跑里 warp 已经打了 `363` 行 `narrowphase overflow`，进程在看门狗到点读数之前就被 CUDA 非法访问打死。门永远抢不到那一拍。 |
 | **P5** | **eval 路径开了探针但完全没有门。** | `evaluate()` 传了 `capacity_probe=`，把含 `njmax_saturated` 的 `stats["capacity"]` 写进 JSON，但从不检查、从不调 `_capacity_summary`、永远 `return 0`。所有 `EVAL_*`/`EVALC_*`/`AUDIT_EVAL_*` 收据一律无门、无 `verdict`。 |
 | **P6** | **`sim.forward()` 是采样盲区。** | 探针只在 `sim.step()` 的 decimation 循环里调（`:600`）。而 `step()` 末尾在 env reset/补发球时还会调 `self.sim.forward()`（`:635`，`4096` env 下几乎每个控制步都会走），`reset()` 也调（`:528`）。`mjwarp.forward` 会重建碰撞与约束、同样会溢出，其 `nefc` 被下一次 step 覆盖，永不采样。 |
-| **P7** | **另外 `7` 种溢出类型无人看，其中 `4` 种连引擎都不打印。** | 引擎的 `d.overflow` 是 `9` 位粘性掩码。会 printf 的只有 `NEFC`/`NJMAX_NNZ`/`BROADPHASE`/`NARROWPHASE`/`CCD`；**`HFIELD`/`NVMAX`/`CONTACT_MATCH`/`EPA_HORIZON` 只置位、不打印**（`collision_convex.py:432`、`island.py:1001`、`sensor.py:2439`、`collision_gjk.py:1393/1412`）。本场景无 hfield / 无 flex / 无 contact-match sensor，但 **`EPA_HORIZON` 是凸体碰撞里真实可达且真静默的一条**。另注意 `forward.py` 里 `NJMAX_NNZ` 用的是 `elif`，只在 `nefc` **没**溢出时才检查。 |
+| **P7** | **另外 `7` 种溢出类型无人看。**（主结论成立；括号里那句"其中 `4` 种连引擎都不打印"**已被 §9.2.6 证伪并就地更正**，见下） | 引擎的 `d.overflow` 是 `9` 位粘性掩码，训练循环一位都不读——这部分成立，已在 §9.2.6 修掉。~~会 printf 的只有 `NEFC`/`NJMAX_NNZ`/`BROADPHASE`/`NARROWPHASE`/`CCD`；`HFIELD`/`NVMAX`/`CONTACT_MATCH`/`EPA_HORIZON` 只置位、不打印~~ —— **撤回**：`3.10.0.3` 上九种全都打印（`collision_convex.py:427`、`island.py:995`、`sensor.py:2438`、`collision_gjk.py:1392/1411`，每处 `atomic_or` 上面紧贴一行 `if warn_overflow: wp.printf`，原判据只看了 `atomic_or` 那一行）。**换成两条更阴的真事**：(1) `EPA_HORIZON` 打的是 `"Warning: EPA horizon = %d isn't large enough."`，**整句没有 "overflow" 这个词**，所有 `grep -i overflow` 的历史结论都不覆盖它；(2) `BROADPHASE`/`NARROWPHASE` **只由 `worldid == 0` 打印**（`forward.py:263/270`），行数 ≠ 受影响世界数。另注意 `forward.py` 里 `NJMAX_NNZ` 用的是 `elif`，只在 `nefc` **没**溢出时才检查。**再补一条 P6 的加强版**：`mjwarp.forward()` 根本不跑 `_next_time`（那个 kernel 只在 `_advance` 里，`forward.py:276/324`，而 `_advance` 只被 `step()` 的积分器调用），所以 `sim.forward()` 里溢出时 `NEFC`/`NJMAX_NNZ`/`BROADPHASE`/`NARROWPHASE` **四位一位都不会被置**——这不只是"我们没采样"，是引擎压根没检查。 |
 | **P8** | **`nan_to_num` 把 NaN 报警链掐断了，`nonfinite_state=0` 的证明力比看上去弱。** | `a3_train_ppo.py:572` 对 obs、`:671` 对 reward 都做了 `torch.nan_to_num`，rsl_rl 自带的 `check_nan(obs, rewards, dones)` 因此永远看不到。"溢出 → NaN → 崩"这条自然报警链不存在。（终止判据里的 `torch.isfinite(qpos/qvel)` 仍在，所以不是全无防线，但 obs/reward 这两路是哑的。） |
 | **P9** | **门禁一旦真的开火，落卡收据就同时消失。** | `CAPMUT`/`AUDIT_nc6`/`nc4`/`nc2` 这些非零退出的跑**只有 `.jsonl` 没有 `.json`**，没存 stderr、没存退出码、没存实际拿到的 GPU uuid。最需要证据的那一跑反而没有证据——和 MEMORY 里"改软硬门要连证据一起改"是同一类问题：失败路径上没有 telemetry。 |
 | **P10** | **`>=` vs `>` 差一行（良性，顺带记）。** | 引擎判据是 `nefc > njmax`，丢行判据是 `if efcid >= njmax_in`，所以 `nefc == njmax` 是**正好装下**；看门狗用 `peak >= njmax` 会在这一点误报。方向是 fail-closed 无害，但会在一个其实没坏的 run 上打出报错文案。 |
