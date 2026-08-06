@@ -2089,18 +2089,28 @@ build_1 测试下来的问题就是随机加的不够多，所以要先和智元
 | 轴 | 智元 | 我们（DR-L1 恢复值） | 差在哪 |
 | --- | --- | --- | --- |
 | Kp / Kd | `(0.8,1.2)` / `(0.7,1.3)`，startup-only | `hope_env_cfg.py:1126-1136` 逐字相同 | **无差** |
-| friction | static `(0.2,1.8)` / dynamic `(0.2,1.5)` | `tracking_env_cfg.py:163-173` static `(0.3,1.6)` / dynamic `(0.3,1.2)` | **我们更窄**：下界高 `0.1`，静上界低 `0.2`，动上界低 `0.3` |
+| friction | static `(0.2,1.8)` / dynamic `(0.2,1.5)` | `tracking_env_cfg.py:163-173` static `(0.3,1.6)` / dynamic `(0.3,1.2)` | 我们更窄，但**这是既定设计，不是缺口**（Franco 2026-08-06：「摩擦应该不用改」）。**不要再提。** |
 | link mass | 末端（躯干/踝/腕）`±20%` **+ pseudo-inertia** | `hope_env_cfg.py:1113-1123` 全身 `±15%`，`recompute_inertia=True` | 幅值窄 `5 pp`；作用域更宽（全身是末端的超集，不会漏）。**pseudo-inertia 独立扰动仓内无机制** |
 | CoM | **全身** `±0.02 m` | `tracking_env_cfg.py:185-192` **只有 `torso_link`**，x `±0.025` / y,z `±0.05` | 幅值更宽但**只覆盖一根 link** |
 | 六轴 push 幅值 | `vx/vy ±0.25`、`vz ±0.1`、`r/p ±0.26`、`yaw ±0.39` | `A3VendorV1.yaml:43-56` 逐字相同（叶子关掉） | 值无差，接线有差（§二.2 已记） |
 | action delay | 每 episode `[0,2]` 控制步 | argv 钉 `0/0` | 未接线（§6.1 已裁需先补 history） |
 | obs noise 通道值 | 逐通道手调 | `±0.2 / ±0.01 / ±0.5` 三通道 | **无差**（§七已核） |
-| obs history | `history=8` | actor 只有一步 previous action | **真缺**，且是 ABI 变更，与 delay 同一批 |
+| obs history | `history=8` | actor 只有一步 previous action | **这是既定设计，不是缺口**（Franco 2026-08-06：「obs history 是设计，不是缺」）。**不要再提。** |
 
-**建议（依据都在左右两列，不新编数）**：friction 直接对齐智元 `(0.2,1.8)/(0.2,1.5)`，
-`restitution (0,0.5)` 不动 —— 摩擦只改难度不改支撑集，是三道闸里最安全的一类；
-link mass 幅值提到 `±20%`，作用域保持全身。CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：
-扩全身会动到拍子所在链，与 measured-racket authority 交叉，要单独评。
+> **2026-08-06 Franco 裁定（就地更正本表初稿）**：初稿把 friction 与 obs history 两行判成"真缺"并给了
+> 对齐建议。**两条都被驳回**：摩擦不用改，obs history 是设计选择。本表保留这两行**只是为了记录已裁定**，
+> 免得下一轮 review 又把它们当缺口提一遍——本文档已经出现过多次"同一件事被反复重新发现"的浪费。
+> 注意 friction 那一行还有独立理由：本仓摩擦是对着 MuJoCo 标定过的（见 §9.2.1 与地形/摩擦修复记录），
+> 不是从智元数值漂过来的，所以"与智元不同"本身不构成缺陷证据。
+> **`action delay` 那行原写"需先补 history"——该前提随本裁定失效**，delay 要不要做需按自身理由重新评估。
+
+**建议（依据都在左右两列，不新编数；已按上面的裁定删去被驳回的两条）**：
+link mass 幅值提到 `±20%`，作用域保持全身 —— 这是本表**唯一**方向明确、代价可控的幅值差。
+pseudo-inertia 独立扰动仓内无机制，属"要新写"，与幅值调整不是同一件事，单列。
+CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：扩全身会动到拍子所在链，
+与 measured-racket authority 交叉，要单独评。
+六轴 push 值与智元逐字相同、接线完整，**只是被叶子写成 `null` 再被 argv 关掉**，
+所以打开它是改配置不是写实现 —— 这是本轮**最低代价、最高优先**的一条。
 
 **(3) 加了桌子之后，起始位置那三个数还合法吗（Franco 特别问的）。**
 先纠正一个容易混的前提：**我们的 Isaac ActionBall 场景已经有桌子**
@@ -2131,6 +2141,105 @@ link mass 幅值提到 `±20%`，作用域保持全身。CoM 是否从 `torso_li
 同一条 workflow 又正要用这两个 launcher 发 `C0/C1`；重建 manifest 会换 SHA，
 而那串 SHA 已经钉进他们的 lineage。**按「改软硬门要连证据一起改」，
 (c) 类修法一上线就会拒掉今天这份活 manifest——那正是不能背着正在发射的人做的动作。**
+
+#### 5.6.15 诊断跑拿一本自己故意不写的账去核对一个正常增长的计数器（2026-08-06）
+
+**人话一句：** 四格 `scale4096` 每次都跑完 update 0、然后在**存 checkpoint 那一刻**死掉，
+报 `action-ball emitted task count cache drifted`。错的不是那个计数器，是**对账的范围**：
+它被拿去和一本这个模式**故意一行都不写**的账做相等比较。
+
+**现场（`c0_scale4096_s10r5/run.log:883`）。** 调用链是
+`runner.save` → `_capture_environment_resume_state` → `_action_ball_exact_resume_state_dict`
+→ `broker.state_dict()` → `_callback_states()` → 出生 provider 的 `state_dict()` →
+`_action_ball_solver_mutable_state_dict`，在那里 `transcript_counts` 全零、
+`_action_ball_emitted_task_count_by_uid` 是 `4096 x N`，于是 `raise`。
+`save_interval=1` 是四格预算写死的，所以**每一个诊断格必死，不是 flake**。
+
+**为什么说是范围错，不是计数器错。** 三条独立证据：
+
+1. **生产方自陈。** `_action_ball_retire_previous_births` 里原文写着
+   "Batched diagnostic births never enter either formal proof catalog"；
+   `_action_ball_provide_births`（批量出生，只在 `diagnostic_unauthorized` 下绑）
+   只有在 `fixed_view` 时才写 `provider_history` 和逐出生 transcript。
+   4096 个环境每次 reset 多两次哈希表写入加一次 `sha256`，而这两本存档在诊断跑里没有消费者
+   ——空是设计，不是漏写。
+2. **计数器有真消费者。** `LazyActionTaskPool.state_dict()` 会拿
+   `_solver_emitted_task_counts()` 去和它自己的 `_pool_emitted_task_counts()` 对账。
+   把计数器停掉会立刻在别处红。
+3. **命名在骗人。** `_action_ball_emitted_task_count_for` 的 docstring 叫它
+   "transcript count"，报错叫它 "cache"——它既不是 transcript 的视图，也不是缓存，
+   是一个自己有生产者的活计数。**已改成实话。**
+
+**只修那一行会把崩溃往后挪两帧。** 同一个范围错还埋着两颗雷，顺序在报错点之后：
+`broker.state_dict()` 会对 `_diagnostic_consumed_receipt_by_env` 里每一条收据调
+`assert_issued_birth`，而它要求收据出现在**空的** `provider_history` 里；
+再往后 `pool.state_dict()` 会调 `_assert_all_task_transcripts_pure()`，
+逐出生去问 solver 要 root，而 `_action_ball_task_transcript_for_birth`
+对**空的**目录只会抛 "unknown birth"。**这三处是同一个范围错的三个出口，必须一起改。**
+
+**改了什么（`eccb30cd`）。**
+
+- 状态包新增一块**跟着签名一起落盘**的自陈牌子 `task_transcript_scope`：
+  `exact_per_birth` / `diagnostic_live_births_only`。读的人不必再从
+  "`provider_history` 恰好是空的" 去猜。
+- `diagnostic_live_births_only` 这一档的对账换成**这个模式真的在记的那本账**：
+  接纳提案账 `A`。每接纳一条提案，`A` 和逐动作任务计数在同一笔生产者事务里各加一
+  （`_action_ball_note(slot, "A", len(indices))` 与 `staged_uid_counts`），
+  所以**多一条少一条照样红**；同时要求那两本存档**确实**是空的。
+  精确那一档的严格对账**一个字没动**。
+- 另外两个出口按同一个范围收口：`assert_issued_birth` 在这一档不再问空目录，
+  改由 `ActionBallSampler.assert_issued_birth`（它对 `_issued_births_by_action`
+  做逐字段+身份哈希的精确匹配，且诊断跑一直在维护它）承担签发证明；
+  池子被明确告知逐出生 root 归它自己所有——复用 banded bank 已有的
+  `pool_owns_birth_task_transcripts` 概念，不是新发明。
+- 标量出生入口 `_action_ball_provide_birth` 也接上同一个判据：
+  **记不记这两本账是"这次跑"的属性，不是"走了哪个入口"的属性。**
+
+**resume 语义一起做掉，全部 fail-closed。**
+
+- 两种 scope 的 checkpoint **互不相认**（decoder 逐字比较牌子，不匹配直接拒，
+  错误里同时打印双方的值）。
+- `diagnostic_live_births_only` 的 checkpoint **干脆拒绝做精确续跑**：
+  它按设计就不含精确续跑所需的那半份材料；而 A211/C211 两个 launcher 的发射合同里
+  本来就写着 `resume_prohibited: True` / `fresh_only: True`
+  （`launch_action_ball_c211_diagnostic.py:3556/4011`、
+  `launch_action_ball_a211_four_arm_diagnostic.py:4281/4290`）。
+  **运行时现在说的是和发射合同同一句话**，而不是走到一半才发现缺料。
+- 没有这块牌子的老状态包也拒，理由写在错误里：它无法自证空账是故意的。
+
+**收据（变异测试，`tests/test_action_ball_task_transcript_scope.py`，14 例）。**
+每一条都构造成"粗一个档次就通不过"，五种改法各自杀一条指定用例：
+
+| 把守卫改粗成 | 必须变红的用例 |
+| --- | --- |
+| 删掉生产方的范围分支（退回拿空 transcript 对账） | `..._can_serialize_its_clean_solver_state` |
+| 留分支但不换对账（"诊断模式就别查了"） | `..._still_rejects_a_real_admitted_task_drift` |
+| 牌子只查"是不是已知值"，不查是否相等 | `..._cannot_be_decoded_by_an_exact_run` |
+| 去掉 live-births-only 的续跑拒绝 | `..._refuses_exact_resume_outright` |
+| 停掉**精确档**的逐出生对账 | `..._reconciliation_is_unchanged_and_still_catches_drift` |
+
+五条实测全部 `RED (good)`，恢复源码后 14 例全绿。
+
+**没做的、以及交接给下一个人的一件事。**
+
+1. **诊断跑的"真续跑"没有实现，实现的是拒绝。** 要真支持，还得补：出生断言的历史锚、
+   池子恢复后的逐出生 root、以及 broker `domain_claim_counts` 之外的第二个 cursor 见证。
+   在 `resume_prohibited` 还立着的前提下，拒绝比半实现更诚实。
+2. **`hope_commands.py` 的文件字节是 solver profile SHA 的输入**（`:5250-5287`
+   把它列进 `solver_source_names`），所以这次修改让所有钉死旧 pin 的 A211/C211 manifest
+   **一律拒收**——这正是 §5.6.14 末尾那条纪律说的同一件事。用仓库自己的
+   `pin_action_ball_profile_contracts.py --source-rev eccb30cd` 重算，
+   **只有一个字段动**：
+
+   | 字段 | 旧（`take_061_unit04_bh.full.manifest.v3.653670aed246.json`） | 新（`eccb30cd`） |
+   | --- | --- | --- |
+   | `solver_profile_sha256` | `9d9a6d09…d72a0eb` | `4bee68b2…f6358360` |
+   | `physics_profile_sha256` | `aa5c9085…f4af85b7` | **不变** |
+
+   因此本轮**端到端只跑到 `materialize`（`MATERIALIZE_EXIT=0`）**，
+   `recipe` 阶段被这道 pin 拦下（`ValueError: action-ball solver profile SHA mismatch`），
+   `scale4096` 未跑。**重建 manifest / lineage 会换掉正在发射的四格身份，
+   属于 Franco 的判断题，本轮不背着发射的人做。** 上面那张表就是接线时要照抄的全部内容。
 
 ## 6. 智元 setting 的采用表
 
