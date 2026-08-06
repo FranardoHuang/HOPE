@@ -1,0 +1,235 @@
+{
+  "kind": "action_ball_211_dr_l2_vendor_push_and_footwork_candidate",
+  "identity": "action_ball_211_dr_l2_vendor_aligned_push_and_footwork_candidate_v1",
+  "authorization": {
+    "diagnostic_unauthorized": true,
+    "formal": false,
+    "hardware": false,
+    "main_setting": false,
+    "promotion": false,
+    "ready": false,
+    "runtime_launch": false
+  },
+  "plain_language": {
+    "what_this_is": "一张可执行的清单：把智元 A3 的随机性设置逐条落到 ActionBall 这边，再把机器人的出生站位从一个点扩开成一片区域。它不是代码，是下一个人动手时要逐项对的帐。",
+    "why_a_new_level": "DR-L0 / DR-L0N 是归因对照，它们的身份一个字节都不能动。DR-L1 已经把五条 plant 随机性写好了但从来没被发射过。本档是 DR-L1 之上再加两件东西：推撕（智元同底盘幅值）与出生站位泛化（步法）。",
+    "not_implemented_yet": "本轮只落这份声明。launcher 的 TASK_PROFILE_ID 是常量，当下又有另一条 workflow 在用同两个 launcher 跑 C0/C1，所以不在这一轮改发射器。"
+  },
+  "parent_level": {
+    "identity": "action_ball_dr_l1_measured_plant_restored_v1",
+    "candidate_config": "configs/action_ball_n1_measured_20260805/action_ball_211_dr_l1_restored_plant_candidate.v1.json",
+    "profiles": {
+      "A": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBallA211VendorV2N1DRL1Learnability.yaml",
+      "C": "hope_training/whole_body_tracking/cfg/task/HOPEPingPongActionBallC211VendorV2N1DRL1Learnability.yaml"
+    },
+    "never_launched": true,
+    "never_launched_evidence": "仓内 grep 'DRL1Learnability' 只命中两份 YAML 自身、一份测试和本 candidate；两个 launcher 的 TASK_PROFILE_ID 都写死在 DRL0Learnability。"
+  },
+  "vendor_alignment_ledger": {
+    "source": "docs/research/dr_reward_external_diligence_20260731.md:1073 (智元 Instinct-Parkour-Target-Amp-A3-v0 二手摘要，Franco 提供)",
+    "source_strength": "同底盘二手摘要，不是 resolved config。可作首选 baseline，不能宣称数值复现。",
+    "rows": [
+      {
+        "axis": "Kp/Kd startup randomization",
+        "vendor": "startup-only draw; Kp log-uniform (0.8,1.2); Kd (0.7,1.3)",
+        "ours": "hope_env_cfg.py randomize_pd_gains: stiffness (0.8,1.2), damping (0.7,1.3), log_uniform, mode=startup",
+        "verdict": "EXACT_MATCH",
+        "action": "DR-L1 已含；本档不改"
+      },
+      {
+        "axis": "friction",
+        "vendor": "static (0.2,1.8) / dynamic (0.2,1.5)",
+        "ours": "tracking_env_cfg.py EventCfg.physics_material: static (0.3,1.6) / dynamic (0.3,1.2) / restitution (0.0,0.5)",
+        "verdict": "NARROWER_THAN_VENDOR",
+        "action": "建议对齐智元 (0.2,1.8)/(0.2,1.5)。摩擦不改支撑集，只改难度；扩宽后 restitution 保持 (0.0,0.5) 不动。",
+        "proposed": {
+          "static_friction_range": [0.2, 1.8],
+          "dynamic_friction_range": [0.2, 1.5],
+          "restitution_range": [0.0, 0.5],
+          "num_buckets": 64
+        }
+      },
+      {
+        "axis": "link mass",
+        "vendor": "末端（躯干/踝/腕）±20% + pseudo-inertia",
+        "ours": "hope_env_cfg.py randomize_link_mass: body_names='.*' (全身), scale (0.85,1.15) = ±15%, recompute_inertia=true",
+        "verdict": "DIFFERENT_SCOPE_AND_NARROWER",
+        "action": "幅值提到 ±20%；作用域不直接抄智元的“只末端”——全身±20% 是严格更宽的超集，不存在“没盖到”的风险。pseudo-inertia 仓内无机制，标为真缺。",
+        "proposed": {
+          "mass_distribution_params": [0.8, 1.2],
+          "operation": "scale",
+          "distribution": "uniform",
+          "recompute_inertia": true
+        },
+        "residual_gap": "pseudo-inertia 随机化（不是按质量 scale 重算惯量，而是独立扰动惯量张量）在本仓无实现"
+      },
+      {
+        "axis": "CoM",
+        "vendor": "全身 CoM ±0.02 m",
+        "ours": "tracking_env_cfg.py EventCfg.base_com: 只有 torso_link, x ±0.025 / y ±0.05 / z ±0.05",
+        "verdict": "DIFFERENT_SCOPE (幅值更宽但只有一根 link)",
+        "action": "本轮不改幅值（比智元宽）；待裁决是否把 body_names 扩到全身。扩全身会同时改到拍子所在链，与 measured racket authority 有交叉，需单独评。"
+      },
+      {
+        "axis": "joint default offset",
+        "vendor": "（摘要未列）",
+        "ours": "add_joint_default_pos ±0.01 rad",
+        "verdict": "OURS_ONLY",
+        "action": "DR-L1 已含；不改"
+      },
+      {
+        "axis": "六轴 velocity push",
+        "vendor": "vx/vy ±0.25, vz ±0.1, roll/pitch ±0.26, yaw ±0.39",
+        "ours": "机制齐全（hope_env_cfg.py HOPEPushRobotCfg / apply_push_robot_event / axis_box_6d_v2），同款数字已写在 HOPEPingPongActionBallA3VendorV1.yaml:43-56；但 ActionBall A211/C211 leaf 把 push 全字段置 null，launcher argv 明写 task.push.enable=false",
+        "verdict": "MECHANISM_PRESENT_NOT_WIRED",
+        "action": "幅值直接 adopt 智元；cadence 不直接抄 1-3 s（见下 push_cadence_derivation）"
+      },
+      {
+        "axis": "action delay",
+        "vendor": "每 episode 执行器延迟 [0,2] 控制步",
+        "ours": "机制在 (task.actions.control_step_action_delay_min/max)，live argv 钉 0/0",
+        "verdict": "MECHANISM_PRESENT_NOT_WIRED",
+        "action": "不进本档。actor 只看一步 previous action，d=2 前必须先补 history/alias（exp §6.1 已裁）；DELAY-L1/L2 是另一条 fresh lineage。"
+      },
+      {
+        "axis": "obs noise",
+        "vendor": "逐通道手调 + history=8",
+        "ours": "DR-L0N 三通道 joint_pos ±0.01 rad / joint_vel ±0.5 rad·s⁻¹ / base_ang_vel ±0.2 rad·s⁻¹；history 为 1 步 previous action",
+        "verdict": "PARTIAL",
+        "action": "噪声那一半已在四格里当第二轴在测，不动。history=8 是 ABI 变更，与 delay 同一批裁决。"
+      }
+    ]
+  },
+  "push_cadence_derivation": {
+    "plain_language": "推多大直接抄智元；多久推一次不能抄，因为我们的一局短得多，照搬等于每一拍都被推。",
+    "episode_length_estimate_s": 2.3,
+    "episode_length_derivation": "隐藏 WAIT 5..25 tick 均值 15 tick = 0.30 s；加 reveal 之后的 time_to_contact 中心 1.825 s；加 follow-through (t_cycle 1.12 - t_hit 0.96 = 0.16 s)。episode 在 action_ball_single_stroke_complete 终止，不是 10 s 的 episode_length_s。",
+    "strike_sensitive_fraction": 0.87,
+    "strike_sensitive_note": "reveal 之后到拍结束都是击球敏感期，只有隐藏 WAIT 那 0.30 s 不敏感。",
+    "vendor_cadence_if_copied": {
+      "interval_range_s": [1.0, 3.0],
+      "expected_pushes_per_episode": 1.15,
+      "expected_strike_window_hits_per_episode": 1.0,
+      "verdict": "REJECT_AS_FIRST_DOSE",
+      "why": "exp §6 的目标是每 episode 命中击球窗期不超过约 0.1 次；1-3 s 是该目标的约 10 倍。那不是“更真实”，那是把每一拍都改成受扰拍。"
+    },
+    "proposed_cadence": {
+      "interval_range_s": [10.0, 30.0],
+      "expected_pushes_per_episode": 0.115,
+      "expected_strike_window_hits_per_episode": 0.1,
+      "matches_exp_section_6": true
+    },
+    "required_telemetry_before_dose_ranking": [
+      "push 触发时刻落在哪个相（hidden_wait / revealed_pre_strike / strike / follow_through）的逐相计数",
+      "每 episode push 命中击球窗期的实测期望（不是算出来的）",
+      "逐相 base_fell_tilt / base_too_low / robot_hit_table 终止率"
+    ]
+  },
+  "footwork_axis": {
+    "plain_language": "Franco 要的“从标准站位一点点泛化到桌子后面 1 米、左右出界半米、角度歪 30 度”。仓里有两套机制在干同一件事，必须先选一套。",
+    "mechanism_a_start_pose_ramp": {
+      "where": "training_contract.ACTION_BALL_START_POSE_RAMP_FOUR_CELL; commands.py MotionCommand._configure_start_pose_ramp / true-reset 里的 ramp 块",
+      "ranges_already_match_franco": {
+        "x_offset_m": [-1.0, 0.0],
+        "y_offset_m": [-1.2625, 1.2625],
+        "yaw_offset_rad": [-0.5235987755982988, 0.5235987755982988],
+        "yaw_offset_deg": [-30.0, 30.0]
+      },
+      "driver": "env.common_step_counter / ramp_steps（墙钟）",
+      "ramp_steps": 96000,
+      "ramp_steps_in_ppo_iterations": 4000,
+      "ramp_steps_in_ppo_iterations_derivation": "num_steps_per_env=24 (cfg/algo/ppo.yaml) → 96000/24 = 4000 个 PPO update",
+      "problems": [
+        "驱动信号是墙钟不是熟练度：策略学不会也照扩",
+        "不可逆：progress = min(1, step/N) 只增不减，没有回退路径",
+        "没有分层：均匀盒采样，没有 center/interior/frontier 配额，也没有逐臂分母",
+        "没有可行性门：目标不动、起点动，满幅时位移最大 1.61 m 而 time_to_contact 只有 1.825 s"
+      ]
+    },
+    "mechanism_b_curriculum_base_spawn": {
+      "where": "action_ball_sampling.ARM_KEYS 里的 base_spawn_x_lower/upper、base_spawn_y_lower/upper、base_travel_x/y_*",
+      "driver": "success-gated domain level expansion（熟练度）",
+      "properties": ["可逆", "有逐臂分母", "有 center/interior/frontier 分层", "有 checkpoint 可恢复的 sampler 状态"],
+      "blocking_defect": "活的 manifest 里 base_spawn_std_lower_max_m / base_spawn_std_upper_max_m 都是 [0,0]，即使 level 满格 1.0 也插值到 0。base_travel 的 std_max 更是在 build_action_ball_manifest.py 里硬编码 [0,0]，连 CLI 旗标都没有。",
+      "no_yaw_arm": "32 臂里没有 base_yaw 这一轴；base_yaw_rad 是每 birth 的确定量，不是可随机轴。yaw ±30° 只在 start_pose_ramp 里有。"
+    },
+    "recommendation": {
+      "choose": "mechanism_b_curriculum_base_spawn 为主，start_pose_ramp 降为不用",
+      "why": "Franco 这句话里的“一点点泛化”和“随着学习熟练”是同一件事；只有课程侧是由熟练度驱动、可逆、有分母的。墙钟 ramp 完不成这个语义。",
+      "required_changes": [
+        "把 _freeze_ball_profile 改成只冻 _initial_ 不冻 _max_（保住“N1 固定题从中心开局”，同时让扩张天花板不再是 0）",
+        "给 build_action_ball_manifest.py 的 base_travel_std_* 加上 CLI 旗标（现在是硬编码 [0,0]）",
+        "新增 base_yaw 两个臂（lower/upper），否则 30° 偏航无处安放",
+        "把桌子写成硬上界：base_spawn 的 x 上界必须 fail-closed 地 ≤ 桌子近沿减出生安全余量，不允许靠向桌子"
+      ]
+    },
+    "table_legality_check": {
+      "question": "build_1 现在没桌子，但桌子是要加的。加了桌子之后这些范围还合法吗？",
+      "our_scene_already_has_the_table": "是。robot_hit_table 在 A211/C211 的 HARD_TERMINATION_UNION 里；没有桌子的是 build_1（jiayi 那条线）。",
+      "world_frame": {
+        "robot_ground_origin_w_m": [-0.5, -0.7625, -0.76],
+        "table_x_extent_m": [0.0, 2.74],
+        "table_y_extent_m": [-1.525, 0.0]
+      },
+      "verdict": "当前三个数值对桌子安全。x 偏移只允许 [-1.0, 0]，即 root x 始终 ≤ -0.5，永远在桌子近沿之外；所以横向再怎么走都不会压到台面足迹。出生姿态里非持拍左手距台面板 32 mm 那个坑也不会变差，因为 ramp 只会把机器人推得离桌子更远。",
+      "the_real_constraint": "真正被桌子卡住的是反方向：一旦有人把 x 上界从 0 放宽成正值（往桌子靠），那 32 mm 余量立刻变成硬约束。所以 x 上界 0 必须是一道 fail-closed 的门，不是一个碰巧写成 0 的数。"
+      ,
+      "feasibility_gate_missing": "满幅位移 sqrt(1.0^2 + 1.2625^2) = 1.61 m，而 time_to_contact 中心只有 1.825 s，平均需 0.88 m/s 的走位再加一整拍。目前没有任何一道门在算“这个出生点还够不够得着”。扩张到满幅之前必须先有 extrema-feasibility 门（exp §6.1 四闸之一）。"
+    }
+  },
+  "three_gate_review": {
+    "framework": "exp §6.1 的三道闸：支撑集 / 终止率放大器 / 扰动 cadence",
+    "rows": [
+      {
+        "axis": "friction / link mass / CoM / PD / joint offset (DR-L1 五条)",
+        "support_set": "不改（startup 级 plant 异质性，最安全那一档）",
+        "termination_amplifier": "会放大，但是 day-1 baseline 量级",
+        "cadence": "startup only，不是每步",
+        "verdict": "ADOPT"
+      },
+      {
+        "axis": "六轴 push",
+        "support_set": "不改题目，但会改可达集（被推开之后能不能回到拍位）",
+        "termination_amplifier": "强",
+        "cadence": "interval，必须逐相统计曝光",
+        "verdict": "ADOPT_AMPLITUDE_DEFER_VENDOR_CADENCE"
+      },
+      {
+        "axis": "出生站位泛化",
+        "support_set": "直接改：目标不动、起点动，就是换了能不能够着",
+        "termination_amplifier": "强（要走位才够得着，弱腰平衡下走位就是摔）",
+        "cadence": "reset 级",
+        "verdict": "ADOPT_VIA_CURRICULUM_ONLY：必须走 success-gated、可逆、有分母的课程侧，不走墙钟 ramp"
+      },
+      {
+        "axis": "reset noise (位姿/速度/关节)",
+        "support_set": "位姿改、速度改得更狠（出生就带速度等于换了 ready 语义）",
+        "termination_amplifier": "中",
+        "cadence": "reset 级",
+        "verdict": "DEFER：split-ready 的物理复位就是“静止安全 ready”，给它塞初速度是另一档的事"
+      },
+      {
+        "axis": "来球分布（位置/速度/旋转/方向）",
+        "support_set": "直接改",
+        "termination_amplifier": "中",
+        "cadence": "reset 级",
+        "verdict": "ADOPT_VIA_CURRICULUM_ONLY；但先得把天花板从 0 改回非零，否则课程是恒等变换"
+      }
+    ]
+  },
+  "rollback": {
+    "reversible": true,
+    "how": "本档描述的每一条都是新 leaf + fresh lineage；DR-L0 / DR-L0N 的 payload 与摘要一个字节不动，归因对照永远在线。",
+    "stop_conditions": [
+      "任一相（hidden_wait / revealed_pre_strike / strike / follow_through）的 base_fell_tilt 终止率相对同种子 DR-L1 对照恶化且不回来",
+      "teacher-to-hit 分母塌缩（不是命中率低，是根本没机会出拍）",
+      "任一 hard safety 终止项出现非零计数",
+      "吐吐量相对 matched DR-L1 降超过可接受阈（待定，需 matched ABBA）"
+    ]
+  },
+  "not_signed_here": [
+    "本档不宣称任何一条已经实现、已经发射或已经通过任何门",
+    "智元那份是二手摘要，不是 resolved config；cadence 在摘要里根本没给，1-3 s 是 BeyondMimic / unitree_rl_lab 的数，不要当成智元的",
+    "本档不放宽任何现有 fail-closed 门"
+  ]
+}

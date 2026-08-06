@@ -1822,6 +1822,316 @@ action_ball_211_dr_l1_restored_plant_candidate.v1.json`）、专项测试
 按「改软硬门要连证据一起改」必须记录+阻断+变异测试同批落地；而四格 `scale4096`
 正在发、`hope_commands.py` / `train.py` 另有 workflow 在改，本轮只出判决与依据。
 
+#### 5.6.14 随机性/DR 完整性审计：逐轴三层核对、缺什么、range 合不合理（2026-08-06）
+
+本节回答 Franco 2026-08-05 的五问（起点分支 / 站立扰动 / 起始位置 ramp / hold 窗口 /
+「缺很多随机性，甚至 range 都不合理」）。**本轮只审计与记账，一行运行时代码都没改**：
+四格 DR-L0/DR-L0N 归因跑正在进行，任何轴的改动都会破坏「只差一个轴」的设计。
+
+**与 `action_ball_211_dr_l2_vendor_push_and_footwork_candidate.v1.json` 的关系**：
+同日另有一条 workflow 落了一份 DR-L2 候选声明（`configs/action_ball_n1_measured_20260805/`），
+覆盖推撞幅值/cadence 与步法两轴。本节是**独立复核**：两边在「episode ≈ `2.3 s`」、
+「cadence 取 `[10,30] s` 而不是厂商 `[1,3] s`」、「步法应走课程侧而不是挂钟 ramp」、
+「`base_travel_std_*` 在 builder 里硬编码 `[0,0]` 且无 CLI 旗标」、「32 臂里没有 `base_yaw`」
+五点上**各自独立得到同一结论**。本节额外补的是那份候选没有的四件事：
+(1) 全轴三层核对表（含 obs/reset/speed/terrain/起点分支）；
+(2) 现役 manifest **30/32 条曲线臂上限为 `0`** 的实测；
+(3) hold 窗口的三时钟账与「下限不可能是 0」的运行时证据；
+(4) 三处三层不一致（`death_penalty` 活值 vs 文档四处、push 的机制位置被说错、
+`action_ball_task_wait` 的 docstring 过时）。
+
+判据沿用 §6.1 的三闸（支撑集 / 终止率放大器 / 扰动 cadence）与尽调
+[`docs/research/dr_reward_external_diligence_20260731.md`](../../research/dr_reward_external_diligence_20260731.md)
+§22 的分档表，不另起炉灶。每条按「机制码 / 实验史裁定 / 现役 argv」三层查；三层不一致就写出来。
+
+**现役 argv 的取证方式**：不是读 launcher 源码推断，而是从 pod1 上一份真实落盘的
+`launch_claim.json`（`/workspace/franco/l0n_tmp/bt3/…/A1-…-proprio-obs-noise-on-scale4096/launch_claim.json`
+的 `canonical_payload.training_argv`）里逐条读出来的。
+
+##### 一、逐轴现状表
+
+「跑没跑过」一列只回答**这条轴在 ActionBall 谱系上有没有以非零幅度真正发射过**。
+
+| 轴 | 机制码在哪 | 现役值 | 谁决定 | 哪档 DR 启用 | 跑没跑过 |
+| --- | --- | --- | --- | --- | --- |
+| 出生位姿 x/y/yaw ramp | `training_contract.py:5232`（端点常量）、`:5349`（校验器）、`commands.py:6207-6274`（施加）、`commands.py:1511-1526`（四条遥测） | **关**（`start_pose_ramp=None`） | `action_ball_211_four_grid_contract.py:420-423` 把它钉成 `None` | DR-L1（`cfg/task/HOPEPingPongActionBall{A,C}211VendorV2N1DRL1Learnability.yaml:47`） | **从未**。全仓没有任何 launcher 引用 `DRL1Learnability`；只有一枚 commit `4420345a` |
+| 站立推扰动（六轴速度踢） | `hope_env_cfg.py:1144-1250`（`HOPEPushRobotCfg` + `apply_push_robot_event`，legacy 与 `axis_box_6d_v2` 两种拼写）、`:1258-1300`（力推）、`training_contract.py:3400/3565`（装配函数） | **关**（`task.push.enable=false`） | 叶子 `…A211VendorV2N1Learnability.yaml:55-65` 把八个字段显式写 null；argv 再关一次 | 未挂任何 DR 档（DR-L1 也把它列在 `ABSENT_EVENTS` 里） | ActionBall 谱系**从未**。旧 P1 谱系发过 14 臂（`EXP-P1-PUSH-ROBUSTNESS-20260721`），裁定 `closed_incomplete / superseded`、`no dose winner` |
+| 推扰动的相位门控 | `mdp/lateral_perturbation.py`（`recovery_hold` 资格窗、strike 中断计数器、冻结 L0/L1 冲量 `0.04–0.08 m/s`、机会 `0.5 s`、`p=0.5`、脉冲 `0.1 s`、硬上限 `0.15 m/s` / `2.0 m/s²` / `200 N`） | **关**（缺 `task.lateral_perturbation` 键 = 历史无 hook 路径） | 模块自述 launch-ineligible：全场 solver-response 与吞吐门没跑过 | 不属任何 DR 档，是冻结的两格 CRN 实验单元 | **从未** |
+| hold / 两拍之间的等待 | 三个独立时钟，见下面第三节 | 训练侧隐藏 `RESET_WAIT` = `5..25` policy tick + 收据派生 `pre_swing_wait_s` | `launch_action_ball_a211_…:204-205` / `launch_action_ball_c211_…:238-239` / 四格合同 `:372-373`（三处手抄同一组 `5/25`，`canonical_sha256=58aa7bb6…`） | 属 DR-L0 身份的一部分（进内容哈希） | **在跑**，但是静态区间，无任何随熟练收窄机制 |
+| action delay | `hope_actions.py:1722-1723`（消费 cfg）、`:6299-6300`（字段）、`:5363-5433`（运行时收据） | `min=max=0` | 叶子 `:49-53` + argv 两条 | DR-L1 也显式保持 `0/0`（另立 `DELAY-L0/L1/L2`） | ActionBall **从未**非零。父本 `A3VendorV1.yaml:27-28` 挂着厂商 `[0,2]`，被叶子清零 |
+| Kp/Kd startup | `hope_env_cfg.py:1126-1136`（`randomize_pd_gains`，Kp log_u `(0.8,1.2)` / Kd `(0.7,1.3)`） | **关** | `task.domain_rand.stable_ready_plant=true` 一个布尔同时关掉 CoM + link mass + PD 三条 | DR-L1（`stable_ready_plant=false`） | ActionBall N1 四格**从未**开过 |
+| link mass ±15% | `hope_env_cfg.py:1113-1123`（scale `(0.85,1.15)`，`recompute_inertia=True`） | **关**（同上一条捆绑） | 同上 | DR-L1 | 同上 |
+| torso CoM | `tracking_env_cfg.py:185-192`（x±0.025 / y,z±0.05） | **关**（同上捆绑） | 同上 | DR-L1 | 同上 |
+| friction（机器人体） | `tracking_env_cfg.py:163-173`（static `(0.3,1.6)` / dynamic `(0.3,1.2)` / restitution `(0,0.5)`，64 桶） | **关** | `task.domain_rand.startup_physics_material=false` | DR-L1 | 同上 |
+| 关节零点偏移 ±0.01 rad | `tracking_env_cfg.py:175-183` + `mdp/events.py:16-52`（双写 sim default 与 action offset） | **关** | `task.domain_rand.startup_joint_default_pos=false` | DR-L1（并换成**采样**解码器） | 同上 |
+| 本体感 obs 噪声 | `hope_env_cfg.py:2908-2922`（A211）/`:3042-3056`（C211）：`base_ang_vel ±0.2` / `joint_pos ±0.01` / `joint_vel ±0.5`；档位定义 `training_contract.py:4910-4986` | **A1/C1 = 开，A0/C0 = 关** | argv `task.domain_rand.policy_observation_corruption` | 开 = DR-L0N，关 = DR-L0 | **正在跑**（这就是四格第二轴） |
+| task/racket/time 噪声（A1 八旋钮） | `HOPEPingPongHitter.yaml:357-366` 定义全部通道 | 全零 | `…ActionBall.yaml:255-266` 把继承来的全部清零 + argv `action_ball_target_observation_noise=false` | 无（§6.1 判它改支撑集，晚恢复） | **从未** |
+| reset noise（位姿/速度/关节） | `…ActionBall.yaml:94-110`（`joint_position_range` / `pose_range` / `velocity_range`） | 全零 | `canonical_ready_mode` 验证器强制 | DR-L1 也保持全零（出生扰动全归 ramp） | **从未** |
+| 起点分支（stand / post-swing / RSI） | `…ActionBall.yaml:77-83`；失败加权 bin-EMA 采样器在 `commands.py:4633-4684` | `stand_start_prob=1.0`、`post_swing_start_prob=0.0` | `commands.py:2079-2082` **硬性拒绝**任何别的值 | 无档可挂 | **从未**。build_1 谱系（`HOPEPingPongHitter.yaml:146/158/165`）活跑 stand .25 + post-swing .25 |
+| motion 速度 `speed_scale_range` | `…ActionBall.yaml:90` | `[1.0, 1.0]` | 通用采样器被 `bind_action_ball_task_authority` 拒收 | — | **从未**。ActionBall 的等价物是收据的 `teacher_rate`：manifest 预算 `0.6..1.01`，**活值是单点 `0.85135`** |
+| 球的发球分布（位置/速度/旋转/落点/出生位） | 32 条曲线臂：`mdp/action_ball_sampling.py:740-774`、`mdp/action_ball_curriculum.py:24-56`；升级判据 canary→heldout 双窗口 | 冻结在 manifest initial；`question_bank` 空、`action_ball_initial_center_single_question=true` | argv + `action_ball_diagnostic_unauthorized=true` 短路 frozen_evaluation_boundary | — | **从未解冻**。见下面第四节的量化 |
+| 地形凹凸 | `tasks/tracking/terrain_patch.py`（per-env 零均值凹凸垫）、门在 `train.py:14046-14080` | 缺键 = 平地 | 没有任何 cfg/launcher 设置 `task.plant.terrain_rough_height_range` | — | **从未**，且 §3.3 已**明确拒绝**（parkour 专属，任务不对齐）。这条不算缺口 |
+
+##### 二、三层不一致的地方（三条，都写出来）
+
+1. **`death_penalty` 的活值已经改了，本文档四处还写着旧数。**
+   四格合同 `action_ball_211_four_grid_contract.py:347` 是 `-10.0`（post-dt `-0.2`），
+   pod1 收据里的 argv 也是 `task.rewards.death_penalty_weight=-10.0`。
+   但本文 §5.3（行 `586`）、§6.1（行 `1623`）、§8.2（行 `2019`）、§12（行 `3834`）仍写
+   post-dt `-6` / weight `-300`。**这不是措辞问题**：尽调 §22 的闸 2 把推撞、reset 噪声、
+   摩擦外扩、地形、执行器延迟**全部**排在「死亡尖峰降到三库量级（post-dt ≈ `-0.2`）」之后，
+   而现役发射值**已经就是 `-0.2`**。也就是说 §22 的 M0 前置在字节上已被满足，
+   却没有任何一处文档跟着更新。§6.1 那句本节就地更正；**本节不据此恢复任何轴**——
+   闸 1（支撑集）与闸 3（cadence）各自独立，M0 满足不等于全部放行，恢复顺序仍由 Franco 裁。
+2. **`push_robot` 不是「只在 `launch_n1_vendor_baseline_diagnostic.py` 里出现」。**
+   厂商那组完整六轴数值就写在 ActionBall 自己的继承链上：
+   `cfg/task/HOPEPingPongActionBallA3VendorV1.yaml:43-56`，`enable: true`、
+   `interval_range_s: [1.0, 3.0]`、`x/y ±0.25`、`z ±0.1`、`roll/pitch ±0.26`、`yaw ±0.39`。
+   A211/C211 叶子在下游把八个字段逐个写 null 关掉。所以这条轴是**接线完整、值被关掉**，
+   不是「没有机制」。
+3. **`action_ball_task_wait.py` 的模块 docstring 说自己「deliberately not wired into an
+   environment」，这句已经过时。** `mdp/hope_commands.py:4638-4640` 直接 import 并构造
+   `ActionBallTaskWaitSchedule`，`:4995-5013` 建调度器与 highwater，`:11783-11800` 每次真
+   reset 消费。按「说『没有』先查三层」，光读那句 docstring 会得出「训练侧没有 WAIT」的错误结论。
+
+##### 三、hold 窗口：训练侧其实有三个时钟，而且下限**不可能**是 0
+
+Franco 说「0 肯定是不对的」。现状比 §5.6.3 记的更强一层：
+
+| 时钟 | 值 | 出处 | 变不变 |
+| --- | --- | --- | --- |
+| 隐藏 `RESET_WAIT` | `5..25` policy tick = `0.10..0.50 s` | 四格合同 `:372-373`；运行时 `hope_commands.py:11788-11791` **拒绝** `wait_ticks<=0` | 每 env 每次 reset 变 |
+| 收据派生 `pre_swing_wait_s` | 活值 `0.71238 s`，硬界 `reaction_margin_s(0.1) ≤ · ≤ 1.0` | 派生式 `hope_commands.py:9981-9989`：`time_to_contact_s − reference_t_hit_s/teacher_rate`；叠加在 `:11793-11794` | 随题目变；四格只有一道题，所以是常数 |
+| 遗留 `motion.hold_steps_range` | `(0,0)` | `…ActionBall.yaml:79`；`hope_commands.py:4817-4824` 硬性要求（两个时钟不能同时数同一段等待） | 不变，且不该变 |
+
+所以**两拍之间的实际间隔 = `0.81 .. 1.21 s`，下限非零，而且运行时会在 `wait_ticks<=0` 上直接抛异常**。
+`isaac_bank_exam.py:687` / `mujoco_eval_onnx.py:6549` 的 `(0,100)` 是**评测侧 resample hold**，
+与训练 WAIT 不是同一概念（§5.6.3 已记）。
+
+**真正缺的只有「随熟练收窄下限」**，而且缺得很具体：`5..25` 是内容寻址的
+（seed/min/max/horizon/required_active 一起进身份哈希，A/C 共享同一个 SHA），
+就地改它会**连带改掉 DR-L0 的身份**，所以必须新开 schedule kind。
+
+**同批发现一处自相矛盾**：`training_contract.py:5228-5229` 的注释写着
+「hold 窗口起点 45-60 步（build_1 的 hold），终点下限收到 20 步」，而 40 行之后的
+`ACTION_BALL_START_POSE_RAMP_FOUR_CELL`（`:5270-5272`）钉的是
+`hold_steps_range_start=[0,0]` / `hold_steps_range_end=[0,0]`（因为 hold 归收据所有）。
+注释描述的是一个代码里并不存在的方案。而且那个「45-60」在仓内没有出处：
+`HOPEPingPongHitter.yaml:158` 是 `[50,200]`（+`stand_start_min_hold: 25`），
+`hope_env_cfg.py:3734`（HitterPureRally）是 `(25,125)`，两个都不是 45-60。
+**建议改注释，不改常量**（常量是对的：ActionBall 的 hold 本来就归收据）。
+
+##### 四、球的题目分布：不是「range 不合理」，是**30/32 条臂的上限就是 0**
+
+现役 manifest
+`configs/action_ball_n1_measured_20260803/fresh_592835dc_take061/rematerialized_1d5d9d44/core/take_061_unit04_bh.full.manifest.v3.fa9d108d9be1.json`
+的实测值：
+
+| 曲线臂族 | `*_std_*_max`（level=1.0 时的最大半宽） | 对照：73 库 `configs/action_ball_chingmu73_measured_v4_f10_20260803.json` |
+| --- | --- | --- |
+| `time_to_contact` 上/下 | **`0.12525 s`**（唯一非零） | `0.1 s` |
+| `contact_offset` x/y/z 上/下 | `0.0 / 0.0 / 0.0` | `0.08 / 0.20 / 0.15 m` |
+| `incoming_speed` 上/下 | `0.0` | 下 `1.849` / 上 `1.0 m/s` |
+| `spin_magnitude` 上/下 | `0.0` | 上 `40 rad/s` |
+| `base_spawn` x/y 上/下 | `0.0` | `0.15 / 0.25 m` |
+| `base_travel` x/y 上/下 | `0.0` | `0.0`（两边都是零） |
+| `landing_aim` x/y 上/下 | `0.0` | `0.25 / 0.45 m` |
+| `incoming_direction` u/v 正负 | `0.0` | `0.0` |
+| `spin_direction` u/v 正负 | `0.0` | `0.0` |
+
+**即使把课程等级拉满到 `L=1.0`，现役这道题也只有接触时刻能动 ±0.125 s，其余 30 条臂纹丝不动。**
+manifest 顶层还写着 `mobility_mode: "no_move"`。这是 N1 定题诊断的**有意**设计
+（`action_ball_initial_center_single_question=true`），不是 bug；但它意味着
+「解冻 32-arm 课程」在现役 manifest 上**几乎什么都解冻不出来**——真正要动的是重建一份
+非退化 manifest（73 库那份已经有非零预算）。
+
+另外，课程只有升不许降：`action_ball_curriculum.py` 全文没有 demote/rollback/收缩路径
+（`grep -n "demote\|rollback\|shrink"` 零命中），与尽调 §13 记的「单臂不可逆」一致，
+也就是 §6.1 要求的「有可逆回退」这一条**目前不成立**。
+
+##### 五、起始位置：仓里有**两套互不知情**的机制，量级差 5–8 倍
+
+| | `start_pose_ramp`（DR-L1） | `base_spawn_{x,y}` 曲线臂（课程） |
+| --- | --- | --- |
+| 动的是什么 | **物理出生点**：`commands.py:6254-6261` 在收据写完之后，直接给 `root_pos[:,0]`、`root_pos[:,1]` 加均匀偏移、给 root 乘一个 yaw 增量 | **题目里的站位**：`base_spawn_w_m` 进收据，`base_goal` / 接触点 / B_yaw 框跟着一起走 |
+| 端点 | x `[-1.0, 0]`、y `±1.2625`、yaw `±30°`（正是 Franco 要的桌后 1 m / 左右各出界 0.5 m / 歪 30°） | 现役 manifest `0.0`；73 库 `±0.15 / ±0.25 m` |
+| manifest 自己声明的站位硬框 | 不受约束（**没有任何校验把 ramp 和它对齐**） | `base_spawn_min/max_w_xy_m` ⇒ 中心 `[-0.192, 0.285]`、x `±0.30`、y `±0.40 m`；越界在 `build_action_ball_manifest.py:1454-1457` 会被拒 |
+| 驱动信号 | **挂钟**：`common_step_counter / 96000`（`training_contract.py:5475-5494`） | competence：冻结策略 canary → 不相交 heldout 双窗口 |
+| 可逆 | 否（单调 `min(1, step/N)`） | 否（同上，`action_ball_curriculum.py` 无降级路径） |
+
+三件必须写下来的事实：
+
+1. **ramp 的终点比 manifest 自己声明的站位框大 3.2–3.3 倍**（x `1.0` vs `0.30`；
+   y `1.2625` vs `0.40`），比 73 库的课程预算大 5.1–6.7 倍。两条路径**没有任何交叉校验**：
+   `grep mobility_mode` 在 `commands.py` 零命中，DR-L1 的测试文件里也没有 `base_spawn` /
+   `no_move`。也就是说，一道 `mobility_mode="no_move"` 的题目配上一条把机器人扔到
+   1.26 m 外的 ramp，今天没有任何门会拒。
+2. **ramp 的早期斜率其实很温和，问题只在终点。** `ramp_steps=96000` 控制步 ÷
+   `num_steps_per_env=24`（`cfg/algo/ppo.yaml:19`）= **4000 个 PPO update** 才到满幅。
+   在 build_1 曲线刚回弹的 iter `300..377`（§5.6.4），进度只有 `7.5%`：后退 `≤0.075 m`、
+   横移 `≤0.095 m`、歪 `≤2.25°`。对 `racket_position_coarse_std=0.20 m` 的核，
+   `exp(−(0.095/0.20)²)=0.80`，几乎不掉收入。
+   到 iter `2000`（50%）横移 `±0.63 m`，同一核只剩 `4.9e-5`；到 `4000`（100%）是 `4.9e-18`。
+   长程梯度只剩 `racket_progress`（weight `10`，telescoping 到「拍到目标的距离减少量」，
+   `hope_env_cfg.py:1538`），而 `base_position_weight` 被叶子钉在 `0.0`（`…A211…Learnability.yaml:99`）。
+3. **相对模仿会跟着走，全局锚不会**：`motion_body_pos` 用的是
+   `body_pos_relative_w`（`commands.py:9439-9449` 每步以机器人**当前**锚点重建参考），
+   所以出生点被挪开不会被模仿项罚；而 `motion_global_anchor_pos` 会被罚，
+   但它在 ActionBall 栈里本来就是 `None`（`hope_env_cfg.py:1528`）。这条是好消息：
+   ramp 不会和模仿打架。**真正的缺口是教师本身**——`take_061_unit04_bh` 是一条站着不动的
+   反手，clip 里没有任何步法，`mobility_mode` 也写着 `no_move`。
+
+##### 六、站立推扰动：cadence 该取多少，以及 §6 那句判据本身不自洽
+
+先把现役 episode 长度算出来（这是所有 cadence 算术的分母）：
+`RESET_WAIT 0.10..0.50 s` + `pre_swing_wait 0.712 s` + `scaled_t_cycle = 1.12/0.85135 = 1.3155 s`
+≈ **`2.13..2.53 s`**（单挥拍即终止，`action_ball_single_stroke_complete`），取 `2.3 s`。
+
+| cadence | (a) 每 episode 期望推数 | (b) 落进 `0.10 s` 窄窗（尽调 §22 口径） | (c) 落进 reveal 之后全部敏感期（`87%`，DR-L2 候选口径） |
+| --- | --- | --- | --- |
+| `[1,3] s`（`A3VendorV1.yaml:48` 现值，厂商原值） | `1.15` | `≈0.050` | `≈1.0` |
+| `[5,15] s`（尽调 §22 的终态建议） | `0.23` | `≈0.010` | `≈0.20` |
+| `[10,30] s`（本文 §6 的建议） | `0.115` | `≈0.005` | `≈0.10` |
+
+**§6 那句「目标是每 episode 命中击球窗期不超过约 `.1` 次」没有定义「击球窗期」，三种读法差 20 倍**：
+(a) 与 (c) 都判 `[10,30] s` 达标、`[1,3] s` 超标约 10 倍；只有 (b) 那个 `0.10 s` 窄窗读法会
+**连 `[1,3] s` 都放行**。尽调 §22 正文自己引用的是 (a)（`1.24` 次/episode）；同日的 DR-L2
+候选用的是 (c)。**所以 `[10,30] s` 这个结论在三种读法里的两种下成立且互相独立地被得到，
+是稳的；不稳的是判据的措辞。建议把 §6 那句钉成 (c)**：「reveal 之后到本拍结束的全部时间」
+才是「击球窗期」，`0.10 s` 那个窄窗只是接触瞬间。本节不擅自改 §6 的判据，只把歧义与三个数记下来。
+
+**更重要的一条**：`2.3 s` 的单挥拍 episode 上做 interval 推撞，`[10,30] s` 意味着
+**约九成 episode 一次都不会被推到**——它是一个高方差、低暴露的处置，样本效率很差。
+仓里已经有更好的答案：`mdp/lateral_perturbation.py` 的 `recovery_hold` 资格窗
+（每 `0.5 s` 一次机会、`p=0.5`、脉冲 `0.1 s`、带 strike 中断计数器），
+暴露量可控且天然把冲量赶出击球窗。尽调 §22 已经把这条列为「仓库里已有的答案」；
+本节按现役 episode 长度的算术**支持把相位门控排在「把 interval 拉长」之前**，
+而不是两者并列。它当前 launch-ineligible 的原因是全场 solver-response 与吞吐门没跑过，
+这是一道**可以现在就跑的 CPU/单卡门**，不需要动四格。
+
+##### 七、三分类结论
+
+**(i) 机制都没有，真缺（3 条）**
+
+| 缺什么 | 为什么算缺 |
+| --- | --- |
+| **hold 窗口的 competence 收窄** | `5..25` 是静态区间且进 DR-L0 身份哈希，没有任何随熟练收窄的接口；要做必须新开 schedule kind |
+| **推撞的相位分层暴露统计**（pre-strike / strike / follow-through / recovery） | §6.1 明写「push 需按四相位 exposure 统计」，但 `apply_push_robot_event` 装的是裸 interval 事件，**没有任何相位计数器**；`lateral_perturbation` 那套计数器不在 push 路径上 |
+| **课程的可逆回退** | `action_ball_curriculum.py` 无 demote/rollback；§6.1 要求的「可逆回退 + 独立 new-band 分母」目前只有后半句 |
+
+**(ii) 机制有、但没接线（6 条）**
+
+| 轴 | 断在哪一环 |
+| --- | --- |
+| `start_pose_ramp` | 契约 + 校验器 + 运行时 + 遥测 + 两份 DR-L1 profile + 候选 config 全齐，**但没有任何 launcher 能选中 `DRL1Learnability`** |
+| DR-L1 的五条 plant 轴（friction / joint offset / CoM / link mass / Kp-Kd） | 同上：全靠那两份没人发射的 profile |
+| 六轴推撞 | 值和装配函数都在（`A3VendorV1.yaml:43-56`），叶子和 argv 双重关掉 |
+| 相位门控扰动 | `lateral_perturbation` 实现完整，卡在自述的 launch-ineligible 门 |
+| 起点分支（post-swing / 失败加权 RSI） | `commands.py:2079-2082` 把 `stand_start_prob` 硬钉 `1.0`；失败加权 bin-EMA 采样器（`commands.py:4633-4684`）所有已注册任务都绕过它。**所以「起点分支可以直接 adapt」这句在今天不成立**：要先做尽调 §9.5 R2（把 `canonical_ready_mode` 的「契约绑定」和「reset 分布裁定」两个职能拆开），才谈得上 adapt build_1 的 25/25 分流 |
+| 地形凹凸 | 机制在、门在、无人设键——但 §3.3 已明确拒绝，**这条不该补** |
+
+**(iii) 接了线、但 range 不合理（4 条，给建议值）**
+
+| 轴 | 现值 | 建议 | 依据 |
+| --- | --- | --- | --- |
+| 推撞 cadence | `A3VendorV1.yaml:48` = `[1,3] s` | 首档 `[10,30] s` + 半幅（`x/y ±0.125`、`z ±0.05`、`r/p ±0.13`、`yaw ±0.195`）；**或者直接走相位门控，跳过 cadence 这个旋钮** | 本节第六节的暴露算术；厂商 `[1,3] s` 是连续行走场景，我们是 `2.3 s` 单挥拍 |
+| `start_pose_ramp` 端点 | x `-1.0 m`、y `±1.2625 m` | **首档砍到 manifest 自己的站位框以内**：x `[-0.30, 0]`、y `±0.40`、yaw `±10°`；Franco 那组 1 m / ±0.5 m / ±30° 留作**终态**，并且必须与一份 `mobility_mode="move"`、`base_travel` 预算非零的 manifest 一起上 | ramp 终点是 manifest `base_spawn_min/max` 的 3.2–3.3 倍，而 `mobility_mode="no_move"`；两者之间**没有任何校验** |
+| `ramp_steps` 的驱动 | 挂钟 `96000` 步（= `4000` update） | 换成 competence 驱动，复用课程已有的 canary→heldout 双窗口 + checkpoint 化发布 | §6.1 对「来球位置/速度/时间/落点」要求「checkpointed band curriculum，有可逆回退」；起点位移改的同样是支撑集，不该用挂钟 |
+| 现役 manifest 的课程预算 | 30/32 臂 `max=0` | 这不是要马上改，而是要**知道**：解冻 32-arm 课程在这份 manifest 上是 no-op，真正的动作是切到非退化 manifest（73 库那份已有预算） | 第四节的实测表 |
+
+**没有发现问题的地方**（一并写出来，免得下轮重查）：
+本体感 obs 噪声的区间（`±0.2 / ±0.01 / ±0.5`）与厂商、BeyondMimic、build_1 三家逐字一致，
+不需要动；`speed_scale_range=[1,1]` 是对的（ActionBall 的速度轴是收据 `teacher_rate`，
+不是通用采样器）；task/racket 噪声全零、reset 噪声全零、地形关闭这三条都有明确裁定支撑，
+不是遗漏；`death_penalty` 的**活值**已经在三库量级，只是文档没跟上。
+
+##### 八、Franco 四条要求的可执行落地方案（写作时的口径是「本轮不实现」，**已被 §九 (1) 更正**）
+
+> **先读 §九 (1)**：本节标题里的「本轮不实现」是**写作本节的那条 workflow 收到的约束**
+> （四格归因跑期间不得动任何轴），不是 Franco 的目标。Franco 2026-08-06 的口径是
+> 随机性要交付，做法是把它放到自己那条臂上（即下表 P0），而不是整件事往后推。
+> 下表的**内容**（挂哪档 / 什么信号 / 可不可逆 / 什么条件停车）不受这条更正影响，只有排期受影响。
+
+四格 DR-L0/DR-L0N 归因跑期间在**同一条 leaf 上**引入任何一条都会破坏「只差一个轴」的设计；
+放到 fresh lineage 的新 leaf 上则不冲突。以下是排好的下一批。
+
+| # | 做什么 | 挂哪档 | competence 信号 | 可逆 | 回退条件 |
+| --- | --- | --- | --- | --- | --- |
+| P0 | 给 `DRL1Learnability` 两份 profile 接一个 launcher（它今天没有入口） | DR-L1 | — | — | 无新科学，纯接线 |
+| P1 | 起始位置：**两套机制先二选一**。DR-L2 候选与第五节各自独立地判「课程侧（`base_spawn`）为主、挂钟 ramp 降为不用」——因为 Franco 那句「一点点泛化」和「随着学习熟练」是同一件事，只有课程侧由熟练度驱动、可逆、有逐臂分母。**若走课程侧**：解开 `_freeze_ball_profile` 只冻 `_initial_` 不冻 `_max_`、给 `base_travel_std_*` 补 CLI 旗标、新增 `base_yaw` 两臂（32 臂里没有偏航轴，`±30°` 今天无处安放）。**若临时先用 ramp**：首档必须收到 manifest 站位框以内（x `[-0.30,0]`、y `±0.40`、yaw `±10°`），并新增一道 fail-closed 门——ramp 端点必须落在该 action 的 `base_spawn_min/max_w_xy_m` 内、`mobility_mode=="no_move"` 时禁止非零 ramp、`x` 上界 `0` 写成门而不是巧合 | DR-L1 / DR-L2 | 课程侧 = canary→heldout；ramp 侧 = 挂钟（这正是它该被降级的原因） | 课程侧可逆（前提是先补 (i) 那条降级路径）；ramp 侧不可逆 | `base_fell_tilt` 或 `robot_hit_table` 相对同档零位移对照上升 > 0.5 pp 即停；满幅前必须先过 extrema-feasibility 门（满幅位移 `1.61 m` / `time_to_contact 1.825 s` ⇒ 需 `0.88 m/s` 走位再加一整拍） |
+| P2 | hold 下限收窄：新开 `action_ball_pre_task_wait_schedule_v2`，把 `(min,max)` 做成**分档事实**（如 `5..25 → 3..25 → 2..25`），每档一个新 SHA、一次新发射边界 | DR-L1 之后的课程臂 | 复用课程的冻结策略 canary → 不相交 heldout 双窗口（`action_ball_curriculum.py`），判据用 `strike_opportunity` / `legal_landing` 的 Wilson 下界 | 是（换 argv = 换档；**并且必须允许降档**，这是 (i) 里那条「可逆回退」的第一个用户） | 任一档 `legal_landing` 率的 Wilson 下界跌破上一档，立即回上一档并冻结 |
+| P3 | 推撞：先跑 `lateral_perturbation` 的全场 solver-response + 吞吐门（CPU/单卡即可），过了就用它的 `recovery_hold` 相位门控起步；**不要**先去调 interval | DR-L1 之后 | 无（固定幅度，不做课程） | 是 | 四相位 exposure 表里 strike 相位命中 > 0 即视为门控失效 |
+| P4 | 起点分支：先做尽调 §9.5 R2（拆 `canonical_ready_mode` 双职能），再谈 post-swing / 失败加权 | 独立轴 | — | — | R2 本身零行为变化 |
+
+**不做的事**：不动四格任何一格；不放宽 `wait_ticks<=0`、`pre_swing_wait ≤ 1.0`、
+`base_spawn` 越界这三道现有 fail-closed 门；不在同一个 optimizer 运行内热改任何支撑集。
+
+##### 九、补：与智元逐项的**差额**表，以及 Franco 2026-08-06 对本节定位的更正（第二次审计）
+
+上面一到八节是同日另一条 workflow 写的。本节是**独立第二次审计**的补充，只写前八节没覆盖的三件事，
+不重复已经写对的部分。
+
+**(1) Franco 2026-08-06 的更正，直接改变本节的定位。** 原话：「随机不就是这两天我让你加上的吗？
+build_1 测试下来的问题就是随机加的不够多，所以要先和智元那里对齐，然后再把起始位置和乒乓的
+环境对齐」。所以：
+- **§八 的「本轮不实现」不是 Franco 的目标。** 随机性是要交付的东西，不是等归因跑完再议的。
+  归因洁净度的顾虑仍然成立，但正确的处理是**把随机性放到它自己那条臂上并且真把那条臂建起来**
+  （P0 那一步），而不是整件事往后推。
+- **判「做没做」的口径要改**：`start_pose_ramp` 挂在一个**从未被 materialize 过、也没有任何
+  launcher 入口**的 DR-L1 leaf 上 = **没做**，不是「故意的」。§5.6.13 (E) 与 §八 P0 说的是同一件事。
+- **优先级是 Franco 给的**：**第一步和智元对齐，第二步起始位置与乒乓环境对齐。**
+
+**(2) 前八节没做的那张表：我们和智元逐项差多少。** 智元那两段话的原始出处是
+`docs/research/dr_reward_external_diligence_20260731.md:1073`（Franco 提供的二手摘要，
+不是 resolved config —— 按 §3.1 只能当首选 baseline）。前八节核对了 push 的六个幅值，
+但没核对其余轴。补齐：
+
+| 轴 | 智元 | 我们（DR-L1 恢复值） | 差在哪 |
+| --- | --- | --- | --- |
+| Kp / Kd | `(0.8,1.2)` / `(0.7,1.3)`，startup-only | `hope_env_cfg.py:1126-1136` 逐字相同 | **无差** |
+| friction | static `(0.2,1.8)` / dynamic `(0.2,1.5)` | `tracking_env_cfg.py:163-173` static `(0.3,1.6)` / dynamic `(0.3,1.2)` | **我们更窄**：下界高 `0.1`，静上界低 `0.2`，动上界低 `0.3` |
+| link mass | 末端（躯干/踝/腕）`±20%` **+ pseudo-inertia** | `hope_env_cfg.py:1113-1123` 全身 `±15%`，`recompute_inertia=True` | 幅值窄 `5 pp`；作用域更宽（全身是末端的超集，不会漏）。**pseudo-inertia 独立扰动仓内无机制** |
+| CoM | **全身** `±0.02 m` | `tracking_env_cfg.py:185-192` **只有 `torso_link`**，x `±0.025` / y,z `±0.05` | 幅值更宽但**只覆盖一根 link** |
+| 六轴 push 幅值 | `vx/vy ±0.25`、`vz ±0.1`、`r/p ±0.26`、`yaw ±0.39` | `A3VendorV1.yaml:43-56` 逐字相同（叶子关掉） | 值无差，接线有差（§二.2 已记） |
+| action delay | 每 episode `[0,2]` 控制步 | argv 钉 `0/0` | 未接线（§6.1 已裁需先补 history） |
+| obs noise 通道值 | 逐通道手调 | `±0.2 / ±0.01 / ±0.5` 三通道 | **无差**（§七已核） |
+| obs history | `history=8` | actor 只有一步 previous action | **真缺**，且是 ABI 变更，与 delay 同一批 |
+
+**建议（依据都在左右两列，不新编数）**：friction 直接对齐智元 `(0.2,1.8)/(0.2,1.5)`，
+`restitution (0,0.5)` 不动 —— 摩擦只改难度不改支撑集，是三道闸里最安全的一类；
+link mass 幅值提到 `±20%`，作用域保持全身。CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：
+扩全身会动到拍子所在链，与 measured-racket authority 交叉，要单独评。
+
+**(3) 加了桌子之后，起始位置那三个数还合法吗（Franco 特别问的）。**
+先纠正一个容易混的前提：**我们的 Isaac ActionBall 场景已经有桌子**
+（`robot_hit_table` 在 A launcher `:233-239` 的 `HARD_TERMINATION_UNION` 里）；
+没有桌子的是 build_1。所以这个问题对我们是「现在就已经成立的约束」，不是未来的。
+
+世界系：机器人地面原点 `[-0.5, -0.7625, -0.76]`，台面 `x ∈ [0, 2.74]`、`y ∈ [-1.525, 0]`。
+
+- **合法。** ramp 的 `x` 偏移只允许 `[-1.0, 0]`，所以 root `x` 恒 `≤ -0.5` ——
+  **永远在桌子近沿之外**；既然 x 方向不重叠，`y` 再怎么走（`±1.2625`，即左右各出界 `0.5 m`）
+  都不可能压到台面足迹。`yaw ±30°` 只转不移，同理。
+- **§5.6.12 坑 3 那个 `32 mm` 不会更糟**：ramp 只把机器人推得**离桌子更远**，
+  非持拍左手到台板的余量只会变大。
+- **真正会被桌子卡的是反方向。** 一旦有人把 `x` 上界从 `0` 放宽成正值（往桌子靠），
+  那 `32 mm` 立刻是硬约束，而 §5.6.12 坑 1 说触发体是手+拍的粗包围盒、`20 mm` 代理余量
+  实际在离真台板还有 `24 mm` 时就终止。**所以 `x` 上界 `0` 必须写成一道 fail-closed 的门，
+  不是一个碰巧写成 0 的数**——这一条应当并进 §八 P1 那道新门里一起做。
+- 顺带确认 §八 P1 的首档收缩仍然安全：`x [-0.30, 0]` → root `x ∈ [-0.80, -0.50]`，同样在近沿之外。
+
+**(4) 本次落的东西**：
+`configs/action_ball_n1_measured_20260805/action_ball_211_dr_l2_vendor_push_and_footwork_candidate.v1.json`
+——和已有的 `..._dr_l1_restored_plant_candidate.v1.json` 同一种工件（声明式候选，无运行时代码路径），
+逐轴写明智元原值 / 我们现值 / 差在哪 / 建议值 / 依据 / 三闸判定 / 停车条件，
+外加 push cadence 的那笔算术和桌子合法性的推导。**P0 接线时照着对即可，不必重新推导。**
+
+**本节没做的**：没有改 launcher、没有改 `_freeze_ball_profile`、没有重建 manifest。
+三条都卡在同一条纪律上：`train.py` / `hope_commands.py` 另有 workflow 在改，
+同一条 workflow 又正要用这两个 launcher 发 `C0/C1`；重建 manifest 会换 SHA，
+而那串 SHA 已经钉进他们的 lineage。**按「改软硬门要连证据一起改」，
+(c) 类修法一上线就会拒掉今天这份活 manifest——那正是不能背着正在发射的人做的动作。**
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |
@@ -1847,7 +2157,12 @@ action_ball_211_dr_l1_restored_plant_candidate.v1.json`）、专项测试
 尽调收口为三道闸：支撑集（是否改变“哪些动作能击球”）、终止率放大器和扰动
 cadence。startup 级 plant 异质性最安全，reset 级次之；per-step 只允许零均值观测噪声，不允许
 每步改动力学。但这个框架不能把旧 `-72`/`sigma=.075` 经济直接套到 A211/C211：
-当前四格 base death 都是 `-6` post-dt；较早 corrected learnability 臂的 `-.6` 已不是本轮发射值。
+当前四格 base death 是 **`-0.2` post-dt**（weight `-10`，见 §5.6.2 第 7 条与
+`action_ball_211_four_grid_contract.py:347`；pod1 收据里的 argv 同样是
+`task.rewards.death_penalty_weight=-10.0`）。旧的 `-6` post-dt（weight `-300`）与更早的
+`-.6` 都**不是**本轮发射值——2026-08-06 就地更正，取证与后果见 §5.6.12 第二节：
+尽调 §22 闸 2 那句「一切排在死亡尖峰降到三库量级（post-dt ≈ `-0.2`）之后」的前置**在字节上
+已经满足**，但闸 1（支撑集）与闸 3（cadence）各自独立，M0 满足不等于全部放行。
 A 有 broad Cauchy 与固定宽 fine kernel，C 用 `sigma=.15` 拍心-球心 Cauchy。因此旧 69%
 break-even/500x 结论不是当前事实，
 必须按 exact reward arm 重算。
