@@ -41,6 +41,13 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 这张小表覆盖本文件后文中任何尚未明确标为 historical 的旧运行口径；每次关键状态变化必须先改
 这里和§12交付账，再发下一步命令。
 
+> **2026-08-07 起，"下一步做什么"以 §5.6.17 为准。** 那一节把 08-06 三条独立 review
+> （随机性 / MuJoCo 对齐 / 复查漏做的）合并成一份去重、消解矛盾后的清单，
+> 分成**发车前必须做 / 发车后补 / 记着但暂不做**三档，并单列 `build_1` 加桌子的交接单。
+> 本表各行的"下一道可执行门"仍然有效，但**排序**看 §5.6.17。
+> 同批就地更正：§5.3 / §9.2.9 / §12 三处把死亡罚写成 post-dt `-6` 的旧数
+> （活值是 `-0.2`，weight `-10`），以及 §5.6.13 (A) 那句"四格 `scale4096` 正在发"（**没有在发**）。
+
 | 关键路径 | 当前事实 | 下一道可执行门 |
 | --- | --- | --- |
 | **termination/reward 对齐（2026-08-05 新增，明细见 §5.6）** | 反向审计发现 A211 运行时 `42` 个非零 term 而 §5.3 只覆盖 `22` 个；三项零命中项压过主层级。已落字节：`joint_actual_forbidden` 改 `terminate=False`（只记账不 reset，telemetry 模式强制证据记录器）、`ee_body_pos` 去腕只留脚、`upright_exp 1.0→0.25`、`hit_unstable_support -10→-1`、`death_penalty -300→-10`、`undesired_contacts` 正则 `_link→_Link`（**bug**：A3 是 `_Link`，原为 G1 命名，双脚双腕反被罚 `-2.0/episode`）、soft-limit v2 两条通道带宽 `0.08→0.05`（`qdes_limit_barrier_margin_frac` 与新增的 `joint_limit_margin_frac`，消除护栏自造的 `-0.0844/关节/步` 底噪）、`init_noise_std` 四处硬钉解开且 4σ 门改为按真实 σ 计算（原为字面量 `0.02`，**假绿**）。MuJoCo 侧 `joint_actual_forbidden` 已同步 | 重跑 A/C focused suite；~~让 `audit_action_ball_reward_hierarchy.py` 接受 DRL0 leaf~~（**2026-08-06 更正：已于 `635252f6` 接受**，见 §5.6.13 (D)2）**并重算全部静态数值**（这半句仍欠，至今无对 DRL0 leaf 重算的收据）；`counter_rally_v1` 与 `virtual_landing` 的口径差待裁决 |
@@ -583,8 +590,11 @@ C: task-valid mimic 1.77331 < nominal-strike proximity 1.90405
 零；但它比 base V2 宽 coarse/adaptive 反事实的 `2.6644/2.8727` 弱，必须在
 pre-long 中用真实 eligible income/advantage 证明仍可辨认。
 
-这个定价会带来一个必须单独监控的 safety-economy 风险：death 一次 post-dt=`-6`，
-而 legal landing floor=`+8.4`，所以“合法上台后同回合摔倒”的最低事件净值仍可为 `+2.4`。
+这个定价会带来一个必须单独监控的 safety-economy 风险：death 一次 post-dt=**`-0.2`**
+（weight `-10`；**2026-08-07 就地更正**，本句原写 `-6`，那是 weight `-300` 时代的旧值，
+取证见 §5.6.17 矛盾 1 与 `action_ball_211_four_grid_contract.py:347`），
+而 legal landing floor=`+8.4`，所以“合法上台后同回合摔倒”的最低事件净值是 **`+8.2`**（原写 `+2.4`）。
+**这条更正把风险放大了 `3.4` 倍，不是缩小**：按活值算，"打成一次再摔"几乎不亏钱。
 这不把 landing 降回 target 以下，但 pre-long/long 必须独立报告
 `legal_landing ∧ post_contact_fall_or_termination`，不得把它平均进全部 TASK_ACTIVE；
 若该层显著上升，则修正 outcome eligibility/恢复稳定性或 termination 经济，不得把摔倒回球当成成功。
@@ -1704,12 +1714,23 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
 以及 `status` 位。**尤其是 `status`**：桥没配起来时生产方返回
 `{"status": "not_configured", ...}`（`:3062-3065`），而严格消费方要求
 `status == "active_fail_closed"`——**接了线就是拒收，现在是静默放行**。
-**为什么现在没做**：它会改变 gate 的拒绝面，而四格 `scale4096` 正在发；本轮不动正在跑的门。
+~~**为什么现在没做**：它会改变 gate 的拒绝面，而四格 `scale4096` 正在发；本轮不动正在跑的门。~~
+> **2026-08-07 就地更正：这条理由不成立，本条已提到"发车前必须做"（§5.6.17 二.B1）。**
+> 四格 `scale4096` **没有在发**：`eccb30cd` 改了 `hope_commands.py`，`recipe` 阶段被
+> solver profile pin 拦下（§5.6.15 末尾自己写了"`scale4096` 未跑"）；2026-08-07 复核 pod1，
+> 唯一的 `scripts/train.py` 是别人的 `task=HitterPingPongPhase114`，GPU1/GPU2 各 `8 MiB` 空闲。
+> 本条原文自己那节的 pod 复核也写着"无 `train.py` / `launch_action_ball` 进程"，与这句理由自相矛盾。
+> 另补一条支持它现在就该做的事实：`solver_profile_sha256` 只哈希 `hope_commands.py` /
+> `continuous_questions.py` / `racket_contact_geometry.py` / `stroke_adapt_torch.py` /
+> `virtual_ball.py`（counter-rally 开时再加两个），
+> **`action_ball_4096x5_prelong_gate.py` 不在里面**——接这条线是零 lineage 代价的改动。
+
 **这一条不能只当"清理遗留"读**——`_validate_reveal_bridge` 存在这件事本身，容易让人误以为
 "gate 已经严格消费 v3 了"。`4c9cf280` 已在该函数 docstring 里写明"**尚未接线**"，
 读代码的人不会再被误导；但接线本身仍然欠着。
 
-**接线方案（2026-08-06 核实，可照着做；等 `scale4096` 落地后执行）。**
+**接线方案（2026-08-06 核实，可照着做；~~等 `scale4096` 落地后执行~~ **→ 2026-08-07 更正：
+现在就执行，`scale4096` 没有在跑，理由见上面那个更正块与 §5.6.17 矛盾 2**）。**
 先纠正一处措辞：**不需要"升版"**。`SEMANTIC_SCHEMA_VERSION`（`:63`）就是
 `_SEMANTICS.PRELONG_SEMANTICS_SCHEMA_VERSION`，而生产方那个常量**已经是 `3`**
 （`action_ball_prelong_semantics.py:27`），`_ordered_updates`（`:178-195`）逐行要求
@@ -1754,6 +1775,8 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
    （证明测试确实在测这道门，而不是在测别的东西）。
 
 **(B) `promotion_blocked` 这个结论位全仓没有任何消费者，也没有任何测试。**
+（**2026-08-06 已接线，见 §5.6.16**；下面这段保留为接线前的现状记录。
+唯一被后来推翻的是最后那句"需要先定清楚哪一步算晋级"——不需要，见 §5.6.16 (6)。）
 §5.6.2 第 10 条记着："把一个硬门改软时，记录与阻断必须同一次改完；只出计数器等于把护栏换成了
 一个需要人记得去看的数字。" 现状是**只做了改名**：`mujoco_native/vec_env.py:1846` 发出
 `promotion_blocking_evidence.promotion_blocked`，代码注释就写着"只有结论会被下游读"——
@@ -1767,7 +1790,15 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
 **为什么现在没做**：这条改的是 MuJoCo 侧晋级路径，而 §5.6.2 第 10 条明确要求"记录+阻断同批"，
 不能只补一半；且它需要先定清楚"哪一步算晋级"。
 
-**(C) 另外几个零调用点的门，逐个给判决。** 全仓扫了 `scripts/` 与 `mujoco_native/` 的
+**(C) 另外几个零调用点的门，逐个给判决。**
+> **2026-08-07 就地更正：下面两条判"该接线"的门，已于 `8a6554c7` 接线并各配变异测试。**
+> `launch_action_ball_curriculum.py:4378` 调 `_require_fresh_order_sentinel`、
+> `launch_n1_vendor_baseline_diagnostic.py:2261` 调 `_valid_table_guard_attribution_summary`。
+> 同轮把零调用点普查重跑了一遍，**代码引用与文档提及分开计数**（上一遍混在一起，
+> 而本文档正好按名字讨论这些函数，反而抬高了计数、盖住了要找的东西），结论仍是五个，没有第六个。
+> `_validate_reveal_bridge`（(A) 那条）**仍然是零调用点**，是本文档目前唯一真开着的那个口。
+
+全仓扫了 `scripts/` 与 `mujoco_native/` 的
 `4736` 个模块级 `def`（token 频次索引法：把全仓 `.py` 的标识符出现次数建索引，
 出现次数 `<= 1` 即"除自己的 `def` 外无人提及"）。零调用点的函数共 `14` 个，
 其中**门形状的 `5` 个**：(A) 那条，加下面两条（本条），再加两条在 canonical 动作库车道的
@@ -1988,10 +2019,14 @@ action_ball_211_dr_l1_restored_plant_candidate.v1.json`）、专项测试
 ##### 二、三层不一致的地方（三条，都写出来）
 
 1. **`death_penalty` 的活值已经改了，本文档四处还写着旧数。**
+   （**2026-08-07 收口：四处已全部就地更正**——§6.1 由本节当轮改，§5.3 / §8.2 / §12
+   由 §5.6.17 那轮改；同轮还发现 §9.2.9 在 08-06 又新写了一次 `-6`，也已改。
+   §5.3 那处的更正**改变了结论**：按活值重算，"合法上台后同回合摔倒"的最低净值是 `+8.2` 而不是 `+2.4`，
+   套利口子比原文大 `3.4` 倍。下面保留原始取证。）
    四格合同 `action_ball_211_four_grid_contract.py:347` 是 `-10.0`（post-dt `-0.2`），
    pod1 收据里的 argv 也是 `task.rewards.death_penalty_weight=-10.0`。
-   但本文 §5.3（行 `586`）、§6.1（行 `1623`）、§8.2（行 `2019`）、§12（行 `3834`）仍写
-   post-dt `-6` / weight `-300`。**这不是措辞问题**：尽调 §22 的闸 2 把推撞、reset 噪声、
+   但本文 §5.3、§6.1、§8.2、§12 四处当时仍写
+   post-dt `-6` / weight `-300`（行号以当时的版本为准，此后已多次移位）。**这不是措辞问题**：尽调 §22 的闸 2 把推撞、reset 噪声、
    摩擦外扩、地形、执行器延迟**全部**排在「死亡尖峰降到三库量级（post-dt ≈ `-0.2`）」之后，
    而现役发射值**已经就是 `-0.2`**。也就是说 §22 的 M0 前置在字节上已被满足，
    却没有任何一处文档跟着更新。§6.1 那句本节就地更正；**本节不据此恢复任何轴**——
@@ -2371,6 +2406,225 @@ CoM 是否从 `torso_link` 扩到全身**不在本轮建议**：扩全身会动�
    `scale4096` 未跑。**重建 manifest / lineage 会换掉正在发射的四格身份，
    属于 Franco 的判断题，本轮不背着发射的人做。** 上面那张表就是接线时要照抄的全部内容。
 
+#### 5.6.17 三条 review 合并成一份带排序的清单（2026-08-07）
+
+**人话一句：** 2026-08-06 三条独立 review（随机性 / MuJoCo 对齐 / 复查漏做的）各出了一份清单。
+这一节把它们**合成一份**：去掉重复、把互相矛盾的当场查清后下判断（不各打五十大板）、
+按「不做会不会毁掉四格的可信结论」×「会不会**静默**失败」排成三档，
+最后单列一份给 `build_1` 加桌子的交接单。**本轮零代码改动，只有文档。**
+
+##### 零、本轮实际复跑/复测了什么（不是转述别人的收据）
+
+| 复核项 | 谁声称的 | 怎么验的 | 结果 |
+| --- | --- | --- | --- |
+| mjlab 对齐台账的 `21` 条测试 | mujoco-align | **自建**独立 pod worktree `/workspace/franco/mergerev_20260806`（`git clone --local` + `fetch origin` + `checkout fd5471da`），`mjlab_venv` 复跑 | `21 passed / 936.59 s`，与声称一致 |
+| **那些变异测试真的会开火吗**（本轮验收重点） | — | 我**反过来把台账自己的检查改粗一档**再跑（见下一张表） | 两条都**如期变红**；恢复后 md5 回到 `fe1113a6…` |
+| pod 上四个文件 = 本地提交版 | mujoco-align | `md5sum` 逐一比对 | 四份全等（`a9ada5c3…` / `4e95a22a…` / `fe1113a6…` / `30a88762…`） |
+| 撞桌 `0% → 100%` | mujoco-align | 直接读 `RECEIPTS/SMOKE_TABLE.json` | `curve=[0.0, 0.037, 0.633, 1.0, ×8, 0.978]`、`peak=1.0`、`iterations_measured=12` |
+| `_validate_reveal_bridge` 零调用点 | missed | 全仓 grep | **成立**（全仓只有 `:685` 那个 `def` 自己） |
+| `promotion_blocked` 零消费方零测试 | missed | grep + `git show HEAD:` 对比 | 写的时候成立、**现在不成立**（矛盾 3） |
+| 两道零调用点门 | missed | 同上 | 写的时候成立、**现在已闭**（`8a6554c7`，矛盾 4） |
+| DR-L1 没有任何 launcher 入口 | randomness + missed | grep `DRL1Learnability` / `TASK_PROFILE_ID` | **成立**（两个 launcher 都硬钉 `…DRL0Learnability`） |
+| 课程曲线臂的扩张上限就是 `0` | randomness | 从活 manifest 直接取值 | **成立，且本轮取到更精确的数**（见下） |
+| `death_penalty` 活值 | randomness | `action_ball_211_four_grid_contract.py:347` + pod argv | **成立**：weight `-10.0`，post-dt `-0.2` |
+| 六轴 push 值在厂商继承链上、只是被关掉 | randomness | `HOPEPingPongActionBallA3VendorV1.yaml:43-56` | **成立**：`enable: true`、`interval_range_s: [1.0, 3.0]`、六轴速度盒逐字 |
+| 课程没有降级/回退路径 | randomness | grep `demote|rollback|shrink|regress` | **成立**：`action_ball_curriculum.py` 零命中 |
+| `canonical_ready_mode` 硬拒起点分流 | randomness | `commands.py:2075-2082` | **成立** |
+| `mobility_mode` 与 ramp 之间零交叉校验 | randomness | grep | **成立**：`mobility_mode` 在 `commands.py` 零命中 |
+| `action_ball_task_wait.py` 的 docstring 说"没接线" | randomness | grep | **成立**：`hope_commands.py:4638` 真 import、`:4969+` 每次真 reset 消费 |
+| 「四格 `scale4096` 正在发」 | missed（拿它当不接线的理由） | pod1 `ps` + `nvidia-smi` | **不成立**（矛盾 2） |
+
+**反向变异（本轮验收的核心）。** 判据是「**把台账自己的检查改粗一个档次，指定的那条测试必须变红**」——
+只跑一遍绿的不算数，那只证明它今天不报错。
+
+| 我把台账改粗成什么 | 必须变红的测试 | 实测 |
+| --- | --- | --- |
+| `pd_gains` 由**逐关节**比对改成比对**总和**（`sum(kp)` 相等就判对齐） | `test_mutation_swapped_kp_flips_the_pd_gains_axis` | **FAILED**（`:179`，"the swapped Kp table was accepted"）—— 正是期望的红 |
+| 撞桌那条的 `refusal_wired` 由"拒绝码在不在拒绝表里"改成"计数器字段存不存在" | `test_mutation_unwiring_the_table_refusal_is_caught_by_the_ledger` | **FAILED**（`:344`）—— 正是期望的红 |
+| （对照）不改任何东西 | 上面两条 | `2 passed / 190.22 s` |
+
+**结论：mujoco-align 那组变异测试不是摆设，它钉在守卫上而不是钉在"字段还在"上。**
+选这两条不是随便挑的：`pd_gains` 那条对应"手抄常量"的形状，撞桌那条是本轮新增、
+最可能被人当成"有计数器就够了"的那一条。
+
+**本轮取到的两组精确数（前面几条 review 只给了比值，容易被下一轮照抄错）。**
+
+其一，现役 launcher 绑的活 manifest
+（`configs/action_ball_n1_measured_20260803/fresh_core_seed0_20260803_take061_robust20n_r8_splitready/take_061_unit04_bh.full.manifest.v3.7d2139028427.json`）
+的课程 σ 上限逐项：
+
+| 曲线轴 | `_std_lower_max` | `_std_upper_max` |
+| --- | --- | --- |
+| `base_spawn`（x,y） | `[0.0, 0.0]` | `[0.0, 0.0]` |
+| `base_travel`（x,y） | `[0.0, 0.0]` | `[0.0, 0.0]` |
+| `contact_offset`（3 轴） | `[0.0, 0.0, 0.0]` | `[0.0, 0.0, 0.0]` |
+| `incoming_speed` | `0.0` | `0.0` |
+| `spin_magnitude` | `0.0` | `0.0` |
+| `incoming/spin direction` 四个 tangent | `0.0` deg（共 `8` 项） | — |
+| **`time_to_contact`** | **`0.12524752…` s** | **`0.12524752…` s** |
+
+即 **`28` 条 σ 上限里 `26` 条是 `0.0`**，唯一非零的是 `time_to_contact` 上下各 `±0.1252 s`。
+**把课程等级拉满到 `L=1.0`，题目也几乎不动**——在这份 manifest 上"解冻 32 臂课程"是 no-op。
+
+其二，起始位置两套机制的实测量纲（此前只写了倍数）：
+活 manifest 的站位硬框是 `base_spawn_min_w_xy_m = [-0.49223234, -0.11472119]`、
+`base_spawn_max_w_xy_m = [0.10776766, 0.68527881]`（**半宽 x `0.30` / y `0.40`，中心不在原点**），
+顶层 `mobility_mode: "no_move"`，`base_travel_max_b_yaw_xy_m = [0.0, 0.0]`；
+而 `start_pose_ramp` 的端点是 x `[-1.0, 0]`、y `±1.2625`、yaw `±30°`
+（`training_contract.py:5231-5246`）。y 半宽是站位框的 **`3.16` 倍**，x 最远处是 **`3.33` 倍**。
+`mobility_mode` 在 `commands.py` 里 **零命中**——两条路径之间没有任何校验。
+
+##### 一、三条 review 之间的矛盾，逐条裁决
+
+**矛盾 1：死亡一次到底罚多少？`-6` 还是 `-0.2`（post-dt）。**
+randomness 查到活值是 `-0.2`（weight `-10`），而 mujoco-align 在**同一天新写的 §9.2.9 里又写了一次 `-6`**。
+**裁决：`-0.2`，依据是活值不是文档**——`action_ball_211_four_grid_contract.py:347` 写着
+`"death_penalty": -10.0`，同一处注释自陈「`-300 -> -10`，post-dt 由 `-6.0` 降到 `-0.2`」；
+pod1 收据 argv 同样是 `task.rewards.death_penalty_weight=-10.0`。
+**后果不是措辞**：§5.3 那段拿 `-6` 算出"合法上台后同回合摔倒的最低事件净值 `+2.4`"；
+按活值重算是 **`+8.2`**，**这个套利口子比文档写的大 `3.4` 倍**，那段"必须单独监控"的理由因此更强。
+本轮把 §5.3、§9.2.9、§12 三处 `-6` **就地更正**。
+
+**矛盾 2：四格 `scale4096` 是不是"正在发"。**
+missed 拿「正在发」当作不接 reveal bridge 的理由，但**它自己那一节的 pod 复核**又写着
+"无 `train.py` / `launch_action_ball` 进程"。
+**裁决：没有在发。** 2026-08-07 复核 pod1：唯一的 `scripts/train.py` 是别人的
+`task=HitterPingPongPhase114`，GPU1/GPU2 各 `8 MiB`、`0 %`；且 §5.6.15 已写明
+`recipe` 阶段被 solver profile pin 拦下、`scale4096` 未跑。
+**这条理由作废，(A) 因此从"发车后"提到"发车前"**（补强依据见 §5.6.13 (A) 的就地更正块）。
+
+**矛盾 3：`promotion_blocked` 有没有消费方。**
+missed 说全仓零消费方零测试——**写的时候成立，现在不成立**：工作区里
+`mujoco_native/trainer.py`（`promotion_blocking_samples_from_step` /
+`promotion_blocking_evidence_receipt` / `promotion_blocked_from_evidence`）、
+`checkpoint.py`（save/load 收据带这一位、缺字段与 `True` 同义）、两个 MuJoCo launcher、
+以及 `test_mujoco_native_vec_env.py`（`+68` 行）都已接线，另有 §5.6.16 的写作。
+**但全部未提交**（`git show HEAD:` 对 `trainer.py` / `checkpoint.py` grep `promotion_blocked` 均 `0` 命中）。
+**裁决：这一条不是"要做"，是"要落地"。未提交 = 不存在。**
+
+**矛盾 4：三道零调用点的门。**
+missed 说三道全是零调用点——写的时候成立。**本节写作过程中前两道落地了**：
+`8a6554c7`（2026-08-07 00:17）把 `_require_fresh_order_sentinel`
+（`launch_action_ball_curriculum.py:4378`）与 `_valid_table_guard_attribution_summary`
+（`launch_n1_vendor_baseline_diagnostic.py:2261`）都接上了，并各配两条变异测试
+（M2 "改成按集合比而不是按位比"、M4 "table_count 取自摘要自己"——都是**粗一档就能过**的形状）。
+它同轮独立重跑了零调用点普查（`1009` 个 `.py`、`19507` 个模块级 `def`，
+**把代码引用与文档提及分开计数**——上一遍混在一起，而本文档正好按名字讨论这些函数，
+把它们的计数抬高、恰好盖住了要找的东西），结论仍是同样五个，没有第六个。
+**`_validate_reveal_bridge` 仍是零调用点**，且同轮已把逐步接线方案写进 §5.6.13 (A)。
+**裁决：前两条已闭；第三条是本文档目前唯一真开着的那个口，见 B1。**
+
+**矛盾 5：推撞该先做什么。**
+Franco `48174f23` 已裁：六轴 push 值与厂商逐字相同、接线完整，**打开它是改配置不是写实现，
+是最低代价最高优先**。randomness 的 P3 说"不要先去调 interval，先跑 `lateral_perturbation` 的门"。
+**裁决：两句话讲的不是同一件事，合起来才是可执行结论。** Franco 裁的是**做哪一件**（push，因为便宜）；
+randomness 给的是**用什么剂量**。剂量的算术如下（本轮重算，用活值）：
+
+- 四格 episode 预算 `10 s`（`HOPEPingPongActionBall.yaml:52`），但单挥拍任务真正"活着"的窗口是
+  WAIT `0.10..0.50 s` + `time_to_contact` `1.70..1.95 s` ≈ **`1.8..2.45 s`**。
+- 厂商 cadence `[1,3] s`（均值 `2 s`）：活窗口内约 **`1.1` 次/episode**，整 `10 s` 预算内约 `5` 次。
+- §6 写的 `10..30 s`（均值 `20 s`）：活窗口内约 **`0.11` 次/episode**，整 `10 s` 预算内约 `0.5` 次。
+- §6 的目标是「每 episode 命中击球窗期不超过约 `.1` 次」。
+  **只有把"击球窗期"读成"活窗口"，`10..30 s` 才恰好达标**；读成整 episode 预算就超标 `5` 倍。
+
+**所以：打开 push，cadence 用 §6 的 `10..30 s`，不要照抄厂商的 `[1,3] s`（那是目标的约 `10` 倍）；
+并且把 §6 那句判据钉成「reveal 之后到本拍结束」——正好对上"活窗口"那一读。**
+`lateral_perturbation` 的相位门控留在后面，**不作为打开 push 的前置**：它自陈 launch-ineligible
+（`lateral_perturbation.py:16/24-25`，全场 solver-response 与吞吐门未跑）。
+
+**矛盾 6：friction 与 obs history。**
+randomness 初稿判成真缺并给了对齐建议，Franco `48174f23` **两条都驳回**。
+**裁决：已裁定，本清单不收这两条，下一轮 review 也不要再提。**
+连带作废的还有 action delay 那行"需先补 history"的理由——delay 要做得按自身理由重新论证。
+
+##### 二、发车前必须做的（判据：不做，四格就会给出一个"看起来通过了"的结论）
+
+| # | 一句人话 | 这是什么 | 为什么非发车前不可 | 代价 |
+| --- | --- | --- | --- | --- |
+| **B1** | 让 `4096x5` 那道共享门**真的去读**每个 update 都在产的 reveal→playback 桥 | 桥 = "揭示任务那一刻的题目 / 采样器 / 奖励配方 / WAIT 表 / 计时合同这 `7` 个权威 SHA，加上逐 WAIT 档的 reveal→playback 寿命守恒，加上一个 `status` 位" | 桥没配起来时生产方返回 `status="not_configured"`，严格消费方要求 `active_fail_closed`——**接了线就是拒收，现在是静默放行**。四格的全部结论都建立在这道门上 | **具体怎么做 §5.6.13 (A) 已经写了逐步方案（`8a6554c7` 落的），照着做即可，本节不重复**。这里只补三条：(1) 纯 CPU，且**不动 `solver_profile_sha256`**（该门不在那 `5`(+`2`) 个源文件里），零 lineage 代价；(2) 那份方案的排期写着"等 `scale4096` 落地后执行"——**该前提不成立**（矛盾 2），已就地更正；(3) 方案 2(a) 那句"接线前先拿一格已落盘的 `scale4096` 收据实测一遍 `status`"是**真的要先做的一步**，因为现在没有一格跑完过，`status` 到底是 `active_fail_closed` 还是 `not_configured` 谁都没实测过 |
+| **B2** | 把 `promotion_blocked` 那三个消费方落地（写完了，**没提交**） | 见矛盾 3；两道零调用点门已于 `8a6554c7` 落地，不在本条范围内了 | 未提交的护栏在发车那一刻不存在。而 `promotion_blocked` 守的正是"`joint_actual_forbidden` 改软之后**不终止但卡晋级**"的后半句——四格恰恰是它会非零的场景（exact r6 每个 update 的 `7` 个硬终止全是这一条） | 已经写完了（`trainer.py` / `checkpoint.py` / 两个 launcher / `+68` 行测试 / §5.6.16），只差提交 |
+| **B3** | 把 §5.3/§5.4 的静态奖励层级账**对真正要发的 DRL0 leaf 重算一次**并落收据 | 那份账是"模仿 < 击中 < 上台"这条准绳的数值证明 | 审计器自 `635252f6` 起已经能读 DRL0 leaf，但**至今没有一份对它重算的收据**。四格的头号读数就是这三层的相对高低——账没重算 = 头号读数没有基准。而且 §5.3 那段的算术本轮刚被证明是错的（矛盾 1） | 纯 CPU host，不占 GPU |
+| **B4** | 给"权重非零、被门确认在编、但 kernel 结构上恒返回零"的奖励项加一条会说话的检查 | 现役 manifest 开着 `counter_rally_objective`，于是 `virtual_pass_net`（admitted 权重 `20.0`）与 `virtual_spin` **整窗恒零**（`hope_rewards.py:4836` / `:5019`） | `4096x5` gate 只按 `motion/strike/target/outcome` 四**组**报分母与收入、不逐**项**报，所以 outcome 组里躺着一个死项**看不出来**——四格读出来的 outcome 收入结构是错的，且没有任何机制会说 | 在 prelong 语义收据里逐项报 eligible 分母与收入，并对"权重非零 × 连续五个 update 收入恒为 `0`"出一条 blocker |
+
+##### 三、发车后补的
+
+| # | 一句人话 | 这是什么 | 为什么可以等 |
+| --- | --- | --- | --- |
+| **A1** | 给 `DRL1Learnability` 两片 profile 接一个 launcher 入口 | DR-L1 = 恢复五条 plant 随机化（friction / 关节零点 / CoM / link mass / Kp-Kd）+ `start_pose_ramp` 的那一档 | DR-L1 **按定义不能进四格**（四格刻意只差 obs-noise 一根轴）。但它今天**一条都发不出去**——"随机性不够"这句话最直接的原因就是这个，所以它是发车后的第一件事 |
+| **A2** | mjlab lane 的撞桌要不要装成硬终止（**要 Franco 拍板**） | 该 lane 的策略在第 `3` 次 PPO 更新后几乎每局都把球拍搁在桌上（`0%→100%`，主犯 `robot/right_racket_collision`），Isaac 对同一事件是硬终止 | 是**发车决定**不是护栏问题：装了会改训练分布，新 run 与既有 `103` 条收据不可比。但不装 = 一直付钱让它学一个 Isaac 判死的动作 |
+| **A3** | 删掉 pod 上 `/workspace/mjlab_lane/geometry.py` 那份**优先于仓库**的字节拷贝，或在启动时比摘要并 fail closed | 部署目录自带一份 `geometry.py`，`a3_court_env` 的解析顺序优先用它 | 今天两份内容相同（`md5 0f334186…`）。这是"**连指纹都没有**"，比"指纹不等于语义"还低一档 |
+| **A4** | 那个部署目录发车前先同步到 `fd5471da` | 它还是旧代码：没有撞桌探针、没有对齐台账 | 不同步 = 新收据里没有 `isaac_alignment` 块，`--report` 会以 `ROBOT_TABLE_CONTACT_NOT_MEASURED` 拒 |
+| **A5** | 打开六轴 push，cadence 用 `10..30 s`（**不是**厂商的 `[1,3] s`） | 见矛盾 5 | 必须走 fresh lineage 的新臂，不能进四格 |
+| **A6** | 三处零风险文字修复 | (a) `training_contract.py:5226-5228` 的"hold 起点 `45-60` → 终点 `20`"注释：**"45-60" 在仓内只出现在一份 DR-L1 测试 fixture 里，没有任何活配置出处**（Hitter yaml 是 `[50,200]`、HitterPureRally 是 `(25,125)`）。注意这段并不是天真的自相矛盾——同一个 block 往下 `40` 行有一段 2026-08-05 的事实核查，已经把 hold 的归属交给 `task_wait`、并解释了常量为什么钉 `[0,0]`；**要改的是那段过期的头注释，不是常量**。(b) `action_ball_task_wait.py` 的模块 docstring「deliberately not wired into an environment」——`hope_commands.py:4638` 真 import、每次真 reset 消费；只读这句会得出"训练侧没有 WAIT"的错误结论。(c) §6 那句「每 episode 命中击球窗期不超过约 `.1` 次」钉成「reveal 之后到本拍结束」 | 都不改行为 |
+
+##### 四、记着但暂不做的（每条写清**为什么现在不做**）
+
+| # | 一句人话 | 为什么现在不做 |
+| --- | --- | --- |
+| **C1** | hold 窗口随熟练收窄（新开 `action_ball_pre_task_wait_schedule_v2`，`5..25 → 3..25 → 2..25` 分档） | 两个理由，任一都足够：(1) 它**改的是题目分布**，四格归因跑期间动它就毁掉"只差一根轴"的设计；(2) `seed/min/max/horizon/required_active` 一起进 DR-L0 的**内容哈希**，就地改会连带换掉 DR-L0 的身份。**必须新开 schedule kind，不能在 loop 内改** |
+| **C2** | 起始位置泛化（`base_spawn` 课程臂 **或** `start_pose_ramp`，两套先二选一） | 它**改支撑集**。而且今天两套机制之间没有任何交叉校验（零节的量纲表）。要做的第一步是补一道 fail-closed 门——ramp 端点必须落在 `base_spawn_min/max_w_xy_m` 内、`mobility_mode=="no_move"` 时禁止非零 ramp、`x` 上界 `0` 写成门而不是巧合——**不是先放大范围**。两条独立分析都判"课程侧为主"：只有它由熟练度驱动、可逆、有逐臂分母 |
+| **C3** | 课程的降级 / 回退路径 | `action_ball_curriculum.py` 全文没有 demote/rollback/收缩。它是 C1 的前置（"必须允许降档"），C1 不做它就不急。但要记着：§6.1 要求的"可逆回退"目前只有"独立 new-band 分母"那半句成立 |
+| **C4** | 推撞的四相位（pre-strike/strike/follow-through/recovery）暴露统计 | §6.1 明写要按相位统计，而 `apply_push_robot_event` 装的是**裸 interval 事件、零相位计数器**。等 A5 打开 push 那一批一起做——现在 push 是关的，先做也没数可统 |
+| **C5** | `lateral_perturbation` 的相位门控扰动（`recovery_hold` 资格窗、strike 中断计数、冻结 L0/L1 冲量 `0.04–0.08 m/s`） | 实现完整，但自陈 launch-ineligible：全场 solver-response + 吞吐门没跑过。那道门 CPU/单卡就能跑，但不在四格关键路径上 |
+| **C6** | 起点分支（post-swing / 失败加权 RSI），即尽调 §9.5 R2 | `commands.py:2075-2082` 在 `canonical_ready_mode` 下**硬拒** `stand_start_prob != 1.0` / `post_swing_start_prob != 0.0`。要 adapt `build_1` 的 `25/25` 分流，必须先拆 `canonical_ready_mode` 的两个职能（契约绑定 vs reset 分布裁定）；那本身是零行为变化的重构，但排在四格之后 |
+| **C7** | action delay `[0,2]` 控制步 | Franco 驳回 obs history 之后，delay 那行"需先补 history"的理由**作废**；它现在**没有理由**，要做得先给一个 |
+| **C8** | 解冻 `32` 臂课程 | 在现役 manifest 上是 **no-op**（零节实测：`28` 条 σ 上限里 `26` 条是 `0.0`）。真正的动作是切到非退化 manifest（`73` 库那份有预算），那是**换题**不是调参 |
+| **C9** | link mass `±15% → ±20%`；pseudo-inertia 独立扰动 | Franco `48174f23` 已排序：mass 是幅值差里唯一方向明确、代价可控的一条；pseudo-inertia 仓内**无机制**，属"要新写"，与幅值调整不是一件事。两者都排在 A1（DR-L1 能发车）之后 |
+| — | ~~friction 对齐厂商 `(0.2,1.8)/(0.2,1.5)`~~ | **Franco 2026-08-06 驳回：不是缺口。不要再提。** 独立理由：本仓摩擦是对着 MuJoCo 标定过的，"与厂商不同"本身不构成缺陷证据 |
+| — | ~~obs history=8~~ | **Franco 2026-08-06 驳回：一步 previous action 是设计选择，不是缺。不要再提。** |
+| — | ~~CoM 从 `torso_link` 扩到全身~~ | Franco：扩全身会动到**拍子所在链**，与 measured-racket authority 交叉，不在范围内 |
+| — | ~~地形凹凸垫~~ | §3.3 已明确拒绝（parkour 专属、任务不对齐）。机制存在但无人设键 = 平地，**这不算缺口，不该补** |
+
+##### 五、给 `build_1` 加桌子的交接清单
+
+§5.6.12 已经写了**六个坑**（代理余量 `20 mm` 是门不是接触 / 广相 AABB 不是终局判据 /
+出生姿态非持拍左手离台板 `32 mm` / 子类覆写对桌子车道指纹隐形 / 多一条终止项会改整条归因顺序 /
+桌底除 keepout 外无碰撞体）。**本轮跨 review 合出第七个**，它不在那六个里，
+而且是唯一一个"**不改代码也会持续发生**"的：
+
+**坑 7：奖励在付钱让球拍靠近球，而球在桌子上方——没有终止项的话，策略会学会把球拍搁在桌面上。**
+
+- **症状（实测，不是推测）**：mjlab lane，`512` 世界 `12` 次 PPO 更新，两个 seed 独立复现：
+  每局至少碰一次桌子的比例 `0.0 → 0.037 → 0.633 → 1.000` 并稳在 `1.0`。
+  按 geom 名独立点名，主犯是**球拍本身** `robot/right_racket_collision`（`4262` 行），
+  其次 `left_elbow`（`125`）、`left_wrist_roll_1`（`123`）。
+- **机制**：该 lane 的 `w_reach=2.0` / `w_touch=4.0` 在付钱让球拍靠近球；球在桌面上方；
+  把拍子搁在桌上**同时**降低"够不着"的代价并买到平衡。这条 lane 没有任何终止项或罚款拦它。
+- **和 `build_1` 的关系**：`build_1` 现在**没有桌子**，所以也没有 `robot_hit_table`。
+  加了桌子而**不同时**加终止或撞桌罚，它会不会长出同一个套利，取决于它自己的 reach/touch 类整形项——
+  **加桌子那天先看这个，再看那六个坑。**
+- **该做什么**：加桌子的**同一批**里，要么装 `robot_hit_table` 硬终止（Isaac ActionBall 的做法，
+  `hope_env_cfg.py:704-723`），要么装 `table_hit_penalty` 这一族窄罚
+  （`hope_env_cfg.py:762`，默认 `weight=0.0`，`reward_pack=v2` 给真值，
+  只认 `robot_hit_table` 一个终止原因，所以能和摔倒**分开定价、分开消融**）。
+  **"只加桌子不加价"那条路已经被实测走过了，结果是 `100%`。**
+- **顺带纠正一个会被照抄的数**：撞桌/摔倒的 post-dt 罚在现役四格是 **`-0.2`（weight `-10`）**，
+  不是本文旧处写的 `-6`（矛盾 1）。
+
+**排序提醒（这条本轮从"散文"升级为"必须有测试"）**：§5.6.12 坑 4 —— 给
+`table_termination.verify_isaac_source_authority()` 的 `HOPEActionBallTerminationsCfg`
+补上 `class_assignments|robot_hit_table` 选择器 —— **必须排在加桌子之前**。
+今天它只有 `class_header`（只哈希装饰器/基类/关键字、**不含类体**），
+而该子类确实在覆写终止项（`hope_env_cfg.py:2471` 的 `ee_body_pos`）。
+它不是常量，所以进不了 `OPEN_MIRROR_DEBT`（那张表对常量债是强制且会红的），
+**目前只活在散文里，没有一条会红的测试逼人做**。补选择器的同批要加它自己的变异测试：
+让子类覆写 `robot_hit_table`，**单独调** `verify_isaac_source_authority()` 也必须红
+（今天它被 `vec_env` 链上的 `live_declared_term_blockers()` 兜住，但那不是这枚指纹的功劳）。
+
+##### 六、这一节不代签什么
+
+1. **不代签"发车前必须做"里任何一条已经做了。** 本轮零代码改动，只有文档。
+2. **不代签 mjlab lane 的撞桌率在 `4096` 世界、长预算下还是 `100%`。**
+   那个数是 `512` 世界 / `12` 迭代 / 两 seed 的烟测规模。
+   能代签的是**方向与机制**（从 `0` 学到约 `1`，主犯是球拍），不是绝对数。
+3. **不代签工作区里 `promotion_blocked` 那三个未提交的消费方会被提交。**
+   矛盾 3 的状态是"待落地"，不是"已完成"（矛盾 4 的两条已于 `8a6554c7` 落地）。
+   本节写作过程中并发方就落了一次地——**读这一节时先 `git log` 看一眼，别把"待落地"当成"没做"**。
+4. **不代签 A 族那条 measured clip 的 `oracle32` 拒绝该怎么处理。** 按交代本轮未碰 A 族的门。
+5. **不代签本节的三档排序在 Franco 的目标函数下是最优的。**
+   排序判据只有两条（对四格结论可信度的影响 × 静默失败可能性），
+   凡是"要 Franco 拍板"的（A2、C2 的二选一、push 剂量）都已单独标出，没有替他定。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |
@@ -2748,7 +3002,9 @@ explained variance、pre-clip grad norm、advantage/return tails 和逐 reward-g
 
 当前唯一可发的四格不再是 A225 的 penalty/guard 四臂，而是
 `A211/C211 x 本体感观测噪声开关` 的最小矩阵。共享 code-owned manifest 冻结同一 teacher、
-base question、seed、211/319 各自 ABI、ActionBall base-safety、death manager weight `-300`、
+base question、seed、211/319 各自 ABI、ActionBall base-safety、death manager weight **`-10`**
+（post-dt `-0.2`；**2026-08-07 就地更正**，本句原写 `-300`，那是 2026-08-05 层级对齐之前的值，
+见 §5.6.17 矛盾 1）、
 actual-q/qdes barrier manager weight 各 `-5`，以及 qdes projection manager weight `-1`
 配 `objective_weight=-5` 的同剂量目标、`metrics_only`、
 `[512,256,128]` network、`entropy=.01`、delay=0 和 static contact sigma：
@@ -4258,7 +4514,9 @@ eval 二值接触率（确定性策略、`750` 步窗口）是两个测量。收
 3. **本轮量到一件必须马上说的事**：这条 lane 的机器人**在第 3 次 PPO 更新之后，几乎每一局都在碰桌子**
    （`0% -> 100%`，两个 seed 独立复现；按 geom 名点出来,主犯是**球拍本身** `robot/right_racket_collision`，
    `4262/4550` 行）。同一件事在 Isaac 的 ActionBall 里是**硬终止**（`robot_hit_table`，跟摔倒同级，
-   还挂 `-6` 安全罚）。**在此之前没有任何东西在看这个通道。**
+   并按 `death_penalty` 计一次 post-dt **`-0.2`** 的安全罚——**2026-08-07 就地更正**，
+   本句原写 `-6`，那是 weight `-300` 时代的旧值，现役 weight 是 `-10`，见 §5.6.17 矛盾 1）。
+   **在此之前没有任何东西在看这个通道。**
 4. Franco 那条「MuJoCo 设置要继承智元的 MuJoCo，不是 mjlab 默认」的规矩**今天仍然成立**，
    当场复验：`92` 组字段匹配、`1` 条不匹配且是已登记的具名偏离、`0` 条未登记。
 
@@ -4806,7 +5064,8 @@ ABI、mount 与 plant 差异未闭合；normalized 31-D Isaac asset 与 MuJoCo i
    fixed 或 expanding long 的硬前置。
 6. **旧随机性报告的关键数值不再支配 A211/C211。**`-72/69%/sigma=.075` 来自旧 A225 配方。
    当前四格是 `A/C x {fixed-lr1e-4, adaptive-KL-initial-lr1e-3}`，四格恢复
-   ActionBall base-safety：death post-dt=`-6`，actual-q/qdes barrier manager weight=`-5`，
+   ActionBall base-safety：death post-dt=**`-0.2`**（weight `-10`；**2026-08-07 就地更正**，
+   本句原写 `-6`，见 §5.6.17 矛盾 1），actual-q/qdes barrier manager weight=`-5`，
    qdes projection manager weight=`-1` 且 `objective_weight=-5`；A 用
    `.20 m / 1.50 m/s / 1 rad` coarse、固定 `.50/3.0/2.10` fine 与 precision
    overlay，C 使用 `.15 m` 球拍距离核。因此 support-set/cadence/termination 三闸只保留为
