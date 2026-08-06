@@ -650,6 +650,38 @@ def verify(env: A3PlantEnv, verbose: bool = True) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def vendor_pd_for_joint_names(joint_names):
+    """Resolve ``(kp, kd)`` for an ordered list of *unprefixed* joint names.
+
+    Pure and model-free on purpose.  ``_pd_wiring`` below is the runtime caller
+    and this is the one place the substring rule lives, so a host-side audit
+    (``isaac_alignment.py``, which cannot compile a MuJoCo model) reads the SAME
+    table through the SAME matcher instead of writing a second copy of the rule.
+    A second copy is precisely how ``VENDOR_KP`` would drift away from the
+    vendor Kp table it was hand-copied from without anybody noticing.
+
+    Fails closed on an unmatched joint rather than leaving a silent ``0`` gain.
+    """
+    kp = np.zeros(len(joint_names), dtype=np.float64)
+    kd = np.zeros(len(joint_names), dtype=np.float64)
+    unmatched = []
+    for i, jname in enumerate(joint_names):
+        hit = False
+        for key, val in VENDOR_KP.items():
+            if key in jname:
+                kp[i], hit = val, True
+                break
+        for key, val in VENDOR_KD.items():
+            if key in jname:
+                kd[i] = val
+                break
+        if not hit:
+            unmatched.append(jname)
+    if unmatched:
+        raise RuntimeError(f"no vendor PD gain for joints: {unmatched}")
+    return kp, kd
+
+
 def _pd_wiring(env: A3PlantEnv):
     """Per-actuator kp/kd plus the explicit actuator -> qpos/qvel address map.
 
@@ -661,31 +693,17 @@ def _pd_wiring(env: A3PlantEnv):
 
     m = env.mj_model
     prefix = env.entity_prefix
-    kp = np.zeros(m.nu, dtype=np.float64)
-    kd = np.zeros(m.nu, dtype=np.float64)
     q_adr = np.zeros(m.nu, dtype=np.int64)
     v_adr = np.zeros(m.nu, dtype=np.int64)
-    unmatched = []
+    names = []
     for a in range(m.nu):
         assert m.actuator_trntype[a] == mujoco.mjtTrn.mjTRN_JOINT
         jid = int(m.actuator_trnid[a, 0])
         q_adr[a] = m.jnt_qposadr[jid]
         v_adr[a] = m.jnt_dofadr[jid]
         jname = (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, jid) or "")
-        jname = jname.removeprefix(prefix)
-        hit = False
-        for key, val in VENDOR_KP.items():
-            if key in jname:
-                kp[a], hit = val, True
-                break
-        for key, val in VENDOR_KD.items():
-            if key in jname:
-                kd[a] = val
-                break
-        if not hit:
-            unmatched.append(jname)
-    if unmatched:
-        raise RuntimeError(f"no vendor PD gain for joints: {unmatched}")
+        names.append(jname.removeprefix(prefix))
+    kp, kd = vendor_pd_for_joint_names(names)
     return kp, kd, q_adr, v_adr
 
 

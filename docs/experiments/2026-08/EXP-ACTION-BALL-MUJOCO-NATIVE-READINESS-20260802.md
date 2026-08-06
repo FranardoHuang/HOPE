@@ -52,7 +52,7 @@ gravity、无 world angular velocity 重复列；A211/C211 actor normalizer/trai
 | Isaac | 4096环境与admission层每GPU最多2进程的合同已有；四格尚未运行。pod-wide `.kit_boot.lock` 原来会把scale全Pod串行；补丁已把锁收窄到Kit/extension boot，真实fcntl host suite=`22 passed`。Pod headless Isaac App 同GPU0双进程overlap已PASS：B在A尚未退出且双方各占约641 MiB时进入READY，二者自然退出；这关闭boot串行，不代签两个4096场景的显存/吞吐，正式scale仍记peak/min-free，跨GPU对照在补。当前analytic `physical_ball=false` learnability不冒充PhysX outcome。pre-long barrier/reward链专项=`71 passed`；A helper已恢复，C v3/各自timing receipt仍在focused test收口 | cross-GPU lock对照→initial-center single-Q四处一致→整组回归→oracle32→A0/A1/C0/C1各4096x5；正式四格共驻只为缩短总等待，rate证据另跑exclusive ABBA |
 | MuJoCo | parked-ball/reveal、A/C task/reward、runtime seals、fresh hold-bias、single-stroke timeout与RSL式timeout bootstrap已实现；native+legacy组合回归=`219 passed,2 skipped,0 failed`。exact Pod WIP r6 的A/C各`1 env×2 update`均`COMPLETE`，211/319有限，fresh WAIT canary、reset-boundary save与cold-load exact均通过；decoded mean→tape qdes最大误差`6.62e-8 rad`，mean-action projection=0，随机WAIT transition projection=`31/775=4.0%`。确定性checkpoint replay已把每个update的7个hard-terminal全部定位成`joint_actual_forbidden`：A在episode tick `70..84`，C在`69..88`，均早于nominal strike，timeout/base/table/contact/strike/landing均0；所以它证明移植主链可执行/可冷载，同时明确反证当前plant/action bootstrap可直接做4096学习。现役hold的WAIT25另有`1000/1000`、`0` hard；4σ inward mean仍只是未sealed候选 | 先做sealed current mean-only/std.02与4σ-inset同条件100+ tick诊断，区分静态漂移、探索累积、PD/plant或projection根因；正式receipt补reason/phase/tick后才能发MuJoCo scale。inset若胜出须新lineage，不能偷换r6授权。完整reward/safety、mid-episode resume、4096与cross-engine parity继续阻塞formal promotion |
 | **MuJoCo GPU / mjlab lane（2026-08-06 发车 + 同日四方独立复核，明细见 §9.2.2/§9.2.3/§9.2.4）** | **已在 pod1 GPU2 发车**：`4096 env x 5 update` 跑完 `10.9 s`，PID `2862997` 实测在 index `2`（`11,290 MiB`），GPU0/GPU1 全程 `2 MiB, 0 %` 未被碰（依据是 Warp 横幅只枚举 `1` 张 CUDA 卡，不是采样密度）；`nonfinite_state=0`、吞吐 `45,706` env-step/s。**数据干净但门不可信**：08-05 双 seed 历史 run 已被事后判定无溢出（两份 `5292` 行日志 `grep -ci overflow = 0`），复跑余量 `6.29--6.65x`；但当时新加的容量看门狗只守 `nefc` 一条轴，对 broadphase 溢出**静默放行**（`--nconmax 10` 实测 `1134` 行引擎警告仍判 `PASS`），且 `--iterations 0` 零测量也会签发 `PASS`。**门已于同日重做完（§9.2.6）**：改读引擎自己的 `d.overflow`（`9` 类全覆盖），判决延迟 `480 → 20` substep，零测量判 `NO_SAMPLES`；同三条变异**修前**（退出 `0` + `PASS`、CUDA 非法访问且无收据、零样本满余量 `PASS`）**修后**全部变成非零退出 + 点名 `BROADPHASE`/`NARROWPHASE`、崩前拦住并落收据、`NO_SAMPLES`。配对实测吞吐代价 ≤ `1%`（§9.2.2 那个"探针吃掉 `9%`"是拿不同长度的两条跑比出来的，已撤回）。**门可信 ≠ 可放行**：容量数值那几条（普查收敛、策略驱动构型分布）仍在 §9.2.7。容量普查的"最坏情况 `95` 行"被证伪（合法力矩即到 `117--120`，随机构型到 `188`；**这三个数本身
-也是定长窗口的下界，T9 收敛普查后是 `135--137` 与 `265`，见 §9.2.7**），"接触余量 `9.45x`" 算在了错的计数器上（真值 `~3--8x`）。**汇报口径也是坏的，而且比容量门更要紧（T11，已修完，见 §9.2.8）**：被引用的"`touch 4e-5 → 0.21`"是**加权奖励项**（上限 `4.0`）不是接触率，真正的二值接触率当时只在 eval 有——`0.12% → 49.2%/97.8%`，即比零策略强 `400--800` 倍，**一个报法像没学会、另一个是学得不错**。现在：两项改名并自带上限与核均值、二值接触率进训练曲线（配对实测代价 `13%` 吞吐，如实记）、`--report` 把"零策略对照 + 二值接触率 + run 间散布"写成会拒绝的门（`11` 条拒绝规则各有代号），`--analyze` 只给一份文件从退出 `0` 改成退出 `2`。今天两条全新 `4096 x 300` run 复现了这件事：同样这两条，旧报法是 `touch 0.003 → 0.25`，新报法是**零策略 `0.14%` → `80.7%` / `56.0%`**（`570` / `395` 倍）| 这条 lane 是 court/ready/reach-touch 任务，**不代签** canonical N1：缺 measured teacher、完整 reward 层级、§9.2 的 termination union 与 cross-engine parity。**且在 §9.2.4 的 T1--T4 待办落地前，不得再引用容量门作为放行依据**——它只证明过 `nefc` 没超 |
+也是定长窗口的下界，T9 收敛普查后是 `135--137` 与 `265`，见 §9.2.7**），"接触余量 `9.45x`" 算在了错的计数器上（真值 `~3--8x`）。**汇报口径也是坏的，而且比容量门更要紧（T11，已修完，见 §9.2.8）**：被引用的"`touch 4e-5 → 0.21`"是**加权奖励项**（上限 `4.0`）不是接触率，真正的二值接触率当时只在 eval 有——`0.12% → 49.2%/97.8%`，即比零策略强 `400--800` 倍，**一个报法像没学会、另一个是学得不错**。现在：两项改名并自带上限与核均值、二值接触率进训练曲线（配对实测代价 `13%` 吞吐，如实记）、`--report` 把"零策略对照 + 二值接触率 + run 间散布"写成会拒绝的门（`11` 条拒绝规则各有代号），`--analyze` 只给一份文件从退出 `0` 改成退出 `2`。今天两条全新 `4096 x 300` run 复现了这件事：同样这两条，旧报法是 `touch 0.003 → 0.25`，新报法是**零策略 `0.14%` → `80.7%` / `56.0%`**（`570` / `395` 倍）**2026-08-06 再补（§9.2.9）**：与 Isaac A211/C211 的逐项活值对齐台账已落地，`17` 轴 = `5` 对齐 / `10` 要紧差异 / `2` 有理由差异；每条收据从此自带该台账与一句"这是本车道内部陈述"。同轮量到一件事实：**这条 lane 的机器人在第 3 次 PPO 更新后几乎每局都在碰桌子（`0% → 100%`，两 seed 复现，主犯是球拍本身），而 Isaac 对同一事件是硬终止**；现已逐集测量并由 `--report` 拒绝（`ROBOT_LEANED_ON_THE_TABLE`），但**没有**装成硬终止（那会改训练分布，属发车决定）。| 这条 lane 是 court/ready/reach-touch 任务，**不代签** canonical N1：缺 measured teacher、完整 reward 层级、§9.2 的 termination union 与 cross-engine parity。**且在 §9.2.4 的 T1--T4 待办落地前，不得再引用容量门作为放行依据**——它只证明过 `nefc` 没超 。**现在还要加一条**：引用这条 lane 的任何数字前先看它收据里的 `isaac_alignment.blocking_axes`；非空就不是 Isaac 的结果 |
 | 0803 plant | normalized successor可复现，host producer=`6 passed`；但 world racket FK因右肘原点变化约9 mm，旧retarget/hold/MuJoCo identity不可代签 | 当前旧plant只跑`OLD-PLANT-FINITE`；canonical long另走promotion DAG |
 | 文档合同 | G04/G05/G06、policy ABI、工具目录与旧frame0操作页已同步；Gate保持Partial | 代码收口后再写exact test/Pod receipt与PROGRESS |
 
@@ -4132,6 +4132,200 @@ eval 二值接触率（确定性策略、`750` 步窗口）是两个测量。收
   同配置能有 `1.4--3` 倍散布，认真的结论应当要更多 seed。
 - **`13%` 的探针成本没有被优化掉**，只是被量准了并写进了默认值的理由里。要更便宜的写法，
   得改成引擎侧 kernel（warp 里做一次归约），那是另一件事。
+
+### 9.2.9 MuJoCo GPU lane 和 Isaac A211/C211 到底差什么：一张逐项活值对齐台账（2026-08-06 实测，pod1 GPU2）
+
+**人话（先看这四句）**
+
+1. **两条车道现在问的不是同一道题**，`17` 条对齐轴里 `10` 条是**要紧的差异**、`5` 条真的对上了、
+   `2` 条是有理由的差异。差异不在"参数没调"，在**观测长什么样、动作是什么意思、什么算这一局结束、
+   奖励在付什么钱**这四件事上。
+2. 所以 **mjlab lane 的曲线是"这条车道内部"的陈述**。它可以说"球拍碰到球的比例涨了"，
+   不能说"ActionBall 学会了"，更不能跟 Isaac 的曲线并排读。
+3. **本轮量到一件必须马上说的事**：这条 lane 的机器人**在第 3 次 PPO 更新之后，几乎每一局都在碰桌子**
+   （`0% -> 100%`，两个 seed 独立复现；按 geom 名点出来,主犯是**球拍本身** `robot/right_racket_collision`，
+   `4262/4550` 行）。同一件事在 Isaac 的 ActionBall 里是**硬终止**（`robot_hit_table`，跟摔倒同级，
+   还挂 `-6` 安全罚）。**在此之前没有任何东西在看这个通道。**
+4. Franco 那条「MuJoCo 设置要继承智元的 MuJoCo，不是 mjlab 默认」的规矩**今天仍然成立**，
+   当场复验：`92` 组字段匹配、`1` 条不匹配且是已登记的具名偏离、`0` 条未登记。
+
+**这不是一张手写对照表。** 每一行两侧都是**活值**：Isaac 侧 AST 从源码取值 / host-load 无依赖的
+trainability 叶子 / 直接解析智元 MJCF / 读 `cfg/algo/ppo.yaml`；mjlab 侧直接 import 本车道模块读常量。
+每一行的**裁定**（表里写死的那个词）会跟**当场量出来的裁定**对账，**两个方向都对**——
+说"对齐了"其实没对齐会炸，说"差着"其实已经对上了也会炸（后者才是会烂掉的那种：它让一个已经补好的
+洞看起来还开着，然后没人再去读）。写这一节时第一次跑就被它抓到一条我自己写错的裁定
+（`control_rate` 我记成"差着"，实测两边 policy dt 都是 `0.02 s`，是真对齐）。
+
+新增：`hope_training/whole_body_tracking/mjlab_lane/isaac_alignment.py`、
+`hope_training/whole_body_tracking/mjlab_lane/tests/test_isaac_alignment.py`。
+
+#### 一、逐项差异表（`17` 轴，活值，`ledger_sha256=c977c47e…9a8a`）
+
+| 轴 | Isaac A211/C211 | mjlab GPU lane | 裁定 | 要不要紧 |
+| --- | --- | --- | --- | --- |
+| actor 观测 ABI | `211` 维 `17` 行（含 measured teacher `31+31+9+9`、任务包 `9`、两个时钟、`task_valid`） | `114` 维 `10` 行（本体感 + 球的相对位置） | **要紧** | 输入不同 = 学到的映射不可互相解释；这边连 mimic 层都不存在 |
+| critic 观测 ABI | `319` 维特权（`command 62`、`body_pos 42`、`body_ori 84`、两个 anchor） | 与 actor 同一份 `114`（对称） | **要紧** | 非对称 critic 改价值估计方差，同预算曲线不可比 |
+| 动作解码 | 逐关节 `0.25*力矩上限/Kp`，`0.0375`（头 / 腕俯仰）到 `0.6875`（髋偏航 / 髋俯仰） | **默认 flat `0.25` rad 全关节**（vendor 模式已实现但不是默认） | **要紧** | 不是缩放是**重新加权哪个关节动得动**；实验史三层核对：机制默认 `flat`、pod 上 `103` 条收据 `flat` / `2` 条 `vendor` |
+| PD 增益 Kp/Kd | 活的 `stiffness`/`damping` | `VENDOR_KP`/`VENDOR_KD` 手抄件 | **对齐**（逐关节 `31/31`） | — |
+| 力矩上限 | `effort_limit_sim` | 智元 MJCF `<motor ctrlrange>` | **对齐**（逐关节 `31/31`） | — |
+| 终止 union | `9` 条：`time_out` / `anchor_pos` / `anchor_ori` / `ee_body_pos`(只脚) / `base_fell_tilt` / `base_too_low` / **`robot_hit_table`** / `joint_qdes_forbidden` / `joint_actual_forbidden`(`terminate=False`) | `3` 条终止（`fall_height` / `fall_tilt` / `nonfinite_state`）+ 超时截断 | **要紧** | 终止 union 决定回报支撑集（CaT）；撞桌那条见下文第三节 |
+| 摔倒阈值（两边都有的那两条） | `limit_angle=0.7 rad`（`40.1°`）、`minimum_height=0.5 m` | `max_tilt_proj_g=-0.5`（`60.0°`）、`min_pelvis_z=0.70 m` | **要紧** | 这边对倾角更宽容、对下蹲更严格，早期终止率不可比 |
+| reward 组 | 完整 ActionBall 层级（balance/mimic/strike/target/outcome），锚点项 `base_position`/`death_penalty`/`qdes_limit_barrier`/`joint_limit`/`c225_strike_ball_paddle_center_proximity`/`virtual_landing` 全在 | `10` 项；按 Isaac 词汇分组后 **mimic / strike / target / outcome 四组覆盖 = `0` 项**，两边项名交集 `0` | **要紧** | 这边的 `reach`/`touch` 是**拍球距离整形**，不是击球质量、更不是上台 |
+| episode 结构 | `500` tick（`10 s`）；开局 `5--25` tick WAIT 遮住任务行，揭示后至少 `200` tick 有效 | `150` tick（`3 s`）；**没有 WAIT / 揭示** | **要紧** | reveal bridge 是四格第二根轴（§5.6.2d），这边测不到；集长差 `3.3` 倍 |
+| 控制频率 | `sim.dt=0.005 x decimation 4 = 0.02 s` | `timestep=0.001 x decimation 20 = 0.02 s` | **对齐** | 物理步长不同（`5 ms` vs `1 ms`），后者是智元显式值，记在行里不按要紧记 |
+| 观测噪声与 DR | 四格 = `{corruption off, on}`，plant 全冻结；噪声三通道 `base_ang_vel_body ±0.2` / `joint_pos ±0.01` / `joint_vel ±0.5` | 观测**无噪声**，但复位时加了 `joint ±0.05 rad`、`root xy ±0.02 m`、`yaw ±0.05 rad` | **要紧** | 它既不是 A0/C0 也不是 A1/C1：多了一份四格里**没有**的复位随机化 |
+| 题目分布 | **一道固定题**（`initial_center_single_question`、`all_32_domain_levels_exact_zero`、profile 中心点） | 每次发球从 `ServeConfig.reachable_returner()` 的均匀盒子重采（pos/vel 各 3 维） | **要紧** | 固定题 vs 分布题是两种可学性，混着读会得出相反结论 |
+| plant 继承智元 MJCF | 智元 `<option>` 只显式写 `timestep/gravity/noslip_*` | 逐字段显式写同一份；`92` 组匹配 / `1` 条已登记偏离 / `0` 未登记 | **对齐** | `noslip_iterations=3` 带不过去，mujoco-warp 无 noslip pass（具名偏离） |
+| 球的接触模型 | 现役 C211 走**解析**路径（`physical_ball=false`） | **真接触**：`ball_solref=(-902.5,-1921.42)`、`solimp` 常阻抗、`solreffriction`、球拍 `e=0.654` 常数、网 `e=0.10` 假设 | **要紧** | 一边引擎解、一边解析给；命中率/上台率不可比，且球拍与网都还没标定（具名缺口） |
+| PPO 超参 | 网络 `[512,256,128]` elu、`init_noise_std=1.0`、lr `1e-3` adaptive、KL `0.01`、epochs `5`、mb `4`、gamma `.99`、lam `.95`、`max_grad_norm 1.0`；**熵系数 `0.01`** | 以上全同；**熵系数 `0.002`** | 有理由的差异 | `31` 维动作下 rsl-rl 的逐维熵奖励把 std 从 `1.00` 推到 `1.16`，实测后减半（理由写在 `build_agent_cfg`） |
+| geometry 来源 | 仓库 `tasks/table_tennis/geometry.py` | 解析顺序：环境变量 → **自己旁边的同名拷贝** → 仓库 | **对齐**（在仓库 checkout 里） | 见下文第四节：pod 部署形态下这一行会变红 |
+| 确定性层级 | Tier-1 exact（question/curriculum/receipt/ABI/action identity） | mujoco-warp 无 CPU 回退、实测非确定 | 有理由的差异 | 跨引擎**只能**统计对拍；见第五节 |
+
+**顺带纠正一条文档里的手抄错误**：`TaskCfg.action_scale_mode` 的 docstring 原写 vendor 解码上界是
+`0.647 rad`（腰偏航 `220/85`）。逐关节活值算出来是 **`0.6875`**（髋偏航 / 髋俯仰 `220/80`）。
+已改，并在 docstring 里注明是活值读出来纠正的。**这就是"手抄件默认已漂"的一个当场标本。**
+
+#### 二、(b) 「继承智元 MuJoCo」这条规矩今天还成立——当场复验
+
+`pod1 GPU2`，`a3_plant_env.py --verify --nworld 64`：
+
+```
+matched groups : 92
+mismatches     : 1 (0 not covered by a named deviation)
+  opt.noslip_iterations  mjlab=0  mjcf=3   registered_deviation=true
+dof_damping      : mjcf 31 个非零，mjlab 31 个非零，sum 38.3 == 38.3
+dof_frictionloss : mjcf 31 个非零，mjlab 31 个非零，sum 25.57215 == 25.57215
+```
+
+比 §9.2.1 那张表更新的一点：**`dof_damping` 与 `dof_frictionloss` 现在是带过去了的**
+（§9.2.1 记的是"mjlab 默认 `0.0`"）。所以在这两项真实物理项上，**MuJoCo 车道比 Isaac 更接近智元**——
+Isaac 侧根本没有 `dof_damping`，而 `frictionloss` 被搬成了一个**未标定**的 PhysX 无量纲 `friction` 系数
+（`agibot_a3.py` 自己写着这句话）。这是一条跨引擎不可比因素，方向是"MuJoCo 更对"，不是缺陷。
+
+#### 三、(c) 本轮真补上的：撞桌通道，从"没人看"变成"测得到 + 会拒绝"
+
+**先说量到的事实。** `512` 世界、`12` 次 PPO 更新、`seed 0`：每局至少碰一次桌子的比例
+
+```
+iter  0    1      2      3 ... 11
+      0.0  0.037  0.633  1.0 ... 0.978        peak = 1.000
+最后一格窗口: 45 局里 44 局碰到，接触子步 106,255
+```
+
+`seed 1` 独立复现 `peak = 1.000`。**按 geom 名独立点名**（把接触数组拉回 host 数名字，不信探针自己的分类表）：
+
+```
+robot/right_racket_collision      4262   <-- 主犯:球拍本身
+robot/left_elbow_collision         125
+robot/left_wrist_roll_collision_1  123
+robot/right_hip_roll_collision      15
+...
+```
+
+**人话**：这条 lane 的 `reach`(权重 `2.0`) / `touch`(权重 `4.0`) 在付钱让球拍靠近球，而球在桌子上方，
+于是策略学会了**把球拍搁在桌面上**。同一件事在 Isaac 的 ActionBall 里第一时间终止（`robot_hit_table`，
+跟摔倒同级，racket blade OBB 明确在护栏几何里）。这正是 Franco 2026-08-06 预判的那批坑
+（"build_1 之后都会遇到"）——**它已经在 MuJoCo 侧发生了，只是没人在看。**
+
+**改法（记录 + 阻断同一批，不改训练分布）：**
+
+- 接触探针**同一趟**里多数一个通道：`table geom` 对 `robot/` 前缀 geom（排除 `robot/floor`）的接触。
+  四个逐元素算子，不加同步。
+- 收据逐迭代写 `robot_table` 块、run 级写 `learning.robot_table_contact`（报 **peak** 不报 last：
+  问题是"这条曲线里有没有 Isaac 判死的行为"，一格就够污染）。**没测到报 `null` 不报 `0`。**
+- `--report` 新增两条拒绝：`ROBOT_LEANED_ON_THE_TABLE`（非零就拒）与
+  `ROBOT_TABLE_CONTACT_NOT_MEASURED`（没这块也拒——"没测"不许长得像"是零"）。
+- **没有**装成硬终止。装了就改训练分布，那是发车决定不是 review 改动；台账里如实写着
+  "这是证据+阻断，不是护栏"，而且这句话**是被机器检的**（见下）。
+
+同批把 `tests/test_mjlab_lane_reporting_gate.py` 的 `_good_run()` 收据形状一起改了——
+门和它判的那个形状必须同批动，否则门在判一个没人写的形状。
+
+**其余本轮做到的**（都是"让两边能被同一句话描述"，不是假装对齐）：
+
+- `_compute_obs` 改成**由 `OBS_LAYOUT` 逐行拼**，名字变成承重件；GPU 上逐元素证明是 no-op
+  （同进程同一份 `_state()` 快照，新旧两式 `torch.equal` 为真，`max abs diff = 0`）。
+- `VENDOR_KP/KD` 的匹配规则抽成纯函数 `vendor_pd_for_joint_names()`，**运行时与台账走同一份实现**，
+  不再各写一遍。
+- vendor 动作解码逐关节对上活的 Isaac 表（`31/31`），所以"把默认从 flat 改成 vendor"从此是一个
+  **已验证**的 flag，不是一次赌博。
+
+#### 四、变异测试：每一条都做成"粗一个档次的检查会照样通过"
+
+全部在子进程里跑，树是临时拷贝，本仓不动。每条**先断言粗检查确实过得去**，再断言台账当场红。
+
+| 变异 | 为什么粗检查抓不到 | 结果 |
+| --- | --- | --- |
+| 交换两个关节的 `Kp`（`shoulder_yaw 30` ↔ `wrist_pitch 20`，各匹配 2 个关节） | `31` 个数的**和不变、排序后多重集不变、个数不变**（测试里逐条断言过） | `pd_gains` 变红 ✅ |
+| 交换两条 `<motor>` 的 `ctrlrange`（`shoulder_yaw 24` ↔ `wrist_pitch 6`） | 同上，和与多重集都不变 | `effort_limits` 变红 ✅ |
+| 改 Isaac `self.sim.dt` `0.005 -> 0.004` | 这个值在 `__post_init__` 里，**只扫模块级赋值的读法看不见它**（测试里断言 `"decimation" not in _module_consts`） | `control_rate` 变红 ✅ |
+| 改智元 MJCF `<option timestep>` `0.001 -> 0.002` | — | `vendor_plant_inheritance` 变红 ✅ |
+| 车道旁的 `geometry.py` 拷贝**只追加一行注释**（语义完全不变） | 只比"车道今天读到的那几个值"的检查会全过 | `geometry_provenance` 变红 ✅ |
+| Isaac 新增一条终止项 | — | 枚举门开火：`invented_guard` 未分类，点名 `ISAAC_TO_MJLAB_TERMINATION` ✅ |
+| 改掉 Isaac 唯一一处 strike 锚点项名 | 选的是**父类没有影子**的那一项；换成有影子的 `virtual_landing` 时台账**正确地不报警**（第一版测试就是这么写错的，被自己的断言抓住） | `reward_surface` 锚点门开火 ✅ |
+| 把 `--report` 里 `ROBOT_LEANED_ON_THE_TABLE` 这条拒绝改名 | 计数器、收据字段、docstring **全都还在**——典型的"计数器没人读"形状 | 台账查的是**阻断**不是测量，变红 ✅ |
+| 给 `TaskCfg` 加一个没分类的旋钮 / 删掉一个已分类的 | — | 枚举门两个方向都开火 ✅ |
+
+另外两条不需要变异的硬规则：`assert_cross_engine_claim` **无条件**拒绝 `bitwise_parity`
+（哪怕台账一条 blocking 都没有），以及台账有 blocking 时拒绝 `cross_engine_comparable`。
+
+#### 五、(e) 跨引擎只能统计对拍——这条写进了代码
+
+§9.2.0 实测：mujoco-warp 无 CPU 回退，**连没有接触的 `pendula` 都发散**（`1007/1024` 世界，
+`max abs dqpos 1.4e-05`）。所以**任何"逐位一致"的跨引擎验收都是错的标准，不是更严的标准**。
+`assert_cross_engine_claim(ledger, CLAIM_BITWISE_PARITY)` 永远抛，理由字符串里写着为什么。
+
+**注意区分**：本节里那条 `_compute_obs` 重构的 no-op 证明**是允许逐位的**——它在**同一个进程、
+同一份快照**里比两个表达式，中间不走物理。跨**引擎**才是只能统计。
+
+#### 六、(d) 补不动的，以及为什么
+
+- **actor `211` / critic `319` 观测 ABI**：需要 measured teacher artifact（`teacher_joint_pos/vel`、
+  三组 racket-site heading）与在线 question solver；critic 还需要 Isaac 的 motion command manager
+  才有 `command 62` / `body_pos 42` / `body_ori 84`。这不是本车道能单独造的，造一个形状对、
+  内容是零填充的 `211` 就是**假对齐层**，明确不做。
+- **mimic / target / outcome 三组 reward**：同上，分别卡在 measured teacher、question packet、
+  analytic outcome evaluator。
+- **参考包络三条终止**（`anchor_pos` / `anchor_ori` / `ee_body_pos`）：需要 motion reference，没有。
+- **WAIT / 揭示结构**：计数器和掩码本身好搬，但**被掩掉的那些行这边根本不存在**，搬过来是个空 WAIT，
+  测不到 reveal bridge 的可学性。属于"形式能对、语义不能对"，登记不做。
+- **球的接触模型**：要么两边同上原生接触、要么两边同走解析，当前谁都不是。而且本车道球拍恢复系数
+  （`e=0.654` 常数，实测是速度相关 `0.759*exp(-0.0441 u_n)`）与网（`e=0.10` 纯假设）本就是具名缺口。
+- **摔倒阈值 / 动作解码默认 / 撞桌硬终止 / 复位随机化**：这四条**技术上一行就能改**，
+  但每一条都会改训练分布、让新 run 与既有 `103` 条 flat 收据不可比。**属发车决定，不在 review 里替 Franco 定。**
+  台账里每条都写了 `closable_by`。
+
+#### 七、这一节不代签什么
+
+- **不代签"补上这些差异之后两边就会学出同一个策略"**。台账只回答"问的是不是同一道题"。
+- **不代签 mjlab lane 的任何一条曲线**。相反：这一节的结论是那些曲线现在**只能**当本车道内部陈述读，
+  而且从今天起每条收据自己带着这句话（`isaac_alignment.scope_sentence`）。
+- **不代签 Isaac 侧 reward 权重的完整性**：台账读的是**类体里声明的**那一份，发车时 reward-pack YAML
+  仍可覆盖，这一点写在该行的 `caveat` 里。
+- **不代签撞桌率的绝对数**：`512` 世界、`12` 迭代、两个 seed 是**烟测规模**，`100%` 这个数在
+  `4096` 世界、长预算下会是多少没测。能代签的是**方向和机制**：它从 `0` 学到 `~1`，主犯是球拍，
+  而 Isaac 判它死。
+- **不代签吞吐结论**：同配置背靠背一对（`seed 1`，`512` 世界）探针关 `3168.5` / 开 `2739.0` env-step/s
+  （`-13.5%`），与 §9.2.8 在 `4096` 世界量的 `~13%` 同量级，但**一对不是吞吐结果**，
+  且 `512` 世界的绝对值与 `4096` 的不可比（同一天同配置另一条 seed 0 的 median 是 `7908.9`，
+  散布本身就说明这个规模下的计时不可引用）。
+
+#### 八、收据
+
+- pod1 独立 worktree `/workspace/franco/mjalign_20260806`（`e309b5b5` + 本轮改动），
+  收据在 `/workspace/franco/mjalign_20260806/RECEIPTS/`：
+  `ALIGN_LEDGER.json`（`ledger_sha256=c977c47e3a2d1a5c23462b1308a0f6114434c7ec8297373bf3149435569a9a8a`，
+  `17` 轴 = `5` 对齐 / `10` 要紧差异 / `2` 有理由差异 / `0` 读不到）、
+  `SMOKE_TABLE.json`（seed 0 撞桌曲线）、`PROBE_OFF.json` / `PROBE_ON2.json`（seed 1 探针关/开配对）、
+  `SMOKE_ALIGN.json`（收据里第一次带 `isaac_alignment` 块）。
+- 测试（`/workspace/mjlab_venv`，host-only，不占 GPU）：
+  `mjlab_lane/tests/test_isaac_alignment.py` **`21 passed`**；
+  既有 `tests/test_mjlab_lane_reporting_gate.py` + `tests/test_mjlab_lane_capacity_gate.py`
+  **`64 passed`**（改动前 `62`，本轮新增 2 条撞桌拒绝测试）。零回归。
+- plant 复验：`/tmp/PLANTVERIFY_20260806.json`（`92 match / 1 registered mismatch / 0 unregistered`）。
+- 部署形态验证：把本车道拷到一个**没有仓库**的目录（复现 pod 上 `/workspace/mjlab_lane` 的形状），
+  台账给出 `17` 条 `unverifiable`、`cross_engine_comparable=false`，并拒绝 comparability 主张。
+  **"我读不到"从此不会长得像"我读了且对上了"。**
 
 ### 9.2 MuJoCo 顺序
 

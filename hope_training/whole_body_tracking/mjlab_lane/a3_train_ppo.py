@@ -114,9 +114,17 @@ class TaskCfg:
   ``vendor`` = the Isaac/deploy decoder scale, per joint
   ``0.25 * effort_limit / kp`` (``robots/agibot_a3.py::AGIBOT_A3_ACTION_SCALE``),
   i.e. ``a = 1`` asks for a quarter of that joint's torque budget at zero
-  velocity.  Ranges from 0.0375 rad (head, 6/40) to 0.647 rad (waist yaw,
-  220/85), so it is NOT a rescaling of ``flat`` -- it re-weights which joints
-  the policy can move.  Provided because A211 parity will need it.
+  velocity.  Ranges from 0.0375 rad (head and wrist pitch/yaw, 6/40 and 6/20)
+  to 0.6875 rad (hip yaw and hip pitch, 220/80), so it is NOT a rescaling of
+  ``flat`` -- it re-weights which joints the policy can move.  Provided because
+  A211 parity will need it.
+
+  Those two endpoints are not hand-written trivia: ``isaac_alignment.py``
+  re-derives the whole 31-joint table from the live Isaac actuator literals and
+  the vendor MJCF ``ctrlrange`` on every call, and the ``action_decoder`` row
+  records whether ``vendor`` mode reproduces it joint by joint.  (An earlier
+  version of this docstring said 0.647 / waist yaw; the live read is what
+  corrected it.)
   """
   action_clip: float = 4.0            # hard clip on the raw policy output
 
@@ -485,6 +493,59 @@ def _match_uuid_against_smi(uuid_s, pid, smi: dict | None) -> dict:
 # curve, and `--report` refuses to print a headline that is not
 # "zero-policy baseline vs binary contact rate, over at least two runs".
 
+# ==========================================================================
+# The lane's own ABI, declared once so an auditor can read it without a GPU.
+# ==========================================================================
+#
+# PLAIN LANGUAGE.  These three tuples are what this lane's policy sees, what it
+# is paid for, and what ends its episode.  They used to exist only as an
+# anonymous `torch.cat([...])` inside `_compute_obs` and two string tuples
+# buried in `__init__`, which meant the only way to answer "is this the same
+# question Isaac is asking?" was to read the source and copy it out by hand --
+# and a hand copy is what `isaac_alignment.py` exists to stop.  `_compute_obs`
+# now BUILDS from `OBS_LAYOUT`, so the names below are load-bearing: reorder
+# them and the observation really is reordered.
+
+#: Ordered (name, width) actor rows.  This lane is symmetric -- the critic is
+#: fed the same group (`obs_groups` in `build_agent_cfg`), which is itself a
+#: named divergence from Isaac's asymmetric 211/319 pair.
+OBS_LAYOUT = (
+  ("base_lin_vel_body", 3),
+  ("base_ang_vel_body", 3),
+  ("projected_gravity", 3),
+  ("joint_pos_rel_ready", 31),
+  ("joint_vel_scaled", 31),
+  ("actions", 31),
+  ("ball_minus_racket_body", 3),
+  ("ball_lin_vel_body_scaled", 3),
+  ("ball_minus_pelvis_body", 3),
+  ("racket_minus_pelvis_body", 3),
+)
+OBS_WIDTH = sum(width for _name, width in OBS_LAYOUT)   # 114
+
+#: reward term -> which of the five Isaac ActionBall reward groups it belongs
+#: to, or ``None`` when this lane has no term in that group at all.  The groups
+#: are Isaac's own vocabulary (balance / mimic / strike / target / outcome);
+#: writing this lane's terms in that vocabulary is what lets the alignment
+#: ledger say "mimic coverage = 0 terms" as a machine fact rather than prose.
+REWARD_TERM_GROUP = {
+  "alive": "balance",
+  "pose": "balance",
+  "upright": "balance",
+  "height": "balance",
+  "reach_term_weighted": "strike_guidance",
+  "touch_term_weighted": "strike_guidance",
+  "action_rate": "regularizer",
+  "joint_vel": "regularizer",
+  "torque": "regularizer",
+  "termination": "safety",
+}
+REWARD_TERMS = tuple(REWARD_TERM_GROUP)
+
+#: Terminal reasons this lane implements, in the order `_terminate` resolves
+#: them.  Truncation (`timeout_truncation`) is separate and is NOT in here.
+TERMINATION_TERMS = ("fall_height", "fall_tilt", "nonfinite_state")
+
 # The reward terms whose value is a *weight times a shaping kernel in [0, 1]*.
 # Mapping: receipt key -> (kernel key, weight attribute on TaskCfg).
 KERNEL_REWARD_TERMS = {
@@ -524,6 +585,26 @@ def reward_term_ceilings(cfg) -> dict:
     "torque": 0.0,
     "termination": 0.0,
   }
+
+
+def _assert_reward_registry_agrees() -> None:
+  """`REWARD_TERM_GROUP` must name exactly the terms the receipt prices.
+
+  Import-time on purpose.  Adding a reward term and forgetting to say which
+  Isaac group it belongs to is the exact failure the alignment ledger cannot
+  see from the outside: the ledger would keep reporting "mimic coverage = 0"
+  while a mimic term quietly existed.
+  """
+  priced = set(reward_term_ceilings(TaskCfg()))
+  declared = set(REWARD_TERM_GROUP)
+  if priced != declared:
+    raise RuntimeError(
+      "REWARD_TERM_GROUP and reward_term_ceilings disagree: "
+      f"only_priced={sorted(priced - declared)} "
+      f"only_declared={sorted(declared - priced)}")
+
+
+_assert_reward_registry_agrees()
 
 
 def reward_term_report(weighted_means: dict, cfg) -> dict:
@@ -604,6 +685,95 @@ def binary_contact_fields(*, probe_on: bool, touched_episodes: float,
   }
 
 
+#: Isaac's ActionBall run ends the episode on robot-vs-table contact
+#: (`robot_hit_table`, charged in the hard-safety union).  This lane has the
+#: table but no such guard.  Until it does, a run in which the robot touched
+#: the table is not a clean learning result -- it may have been paid for
+#: balance it bought by leaning on furniture that Isaac calls fatal.
+ROBOT_TABLE_CONTACT_KEY = "robot_table.fraction_of_episodes_with_a_robot_table_contact"
+
+
+def robot_table_contact_fields(*, probe_on: bool, touched_episodes: float,
+                               episodes_finished: float, substeps: float = 0.0,
+                               n_robot_geoms: int = 0) -> dict:
+  """The per-episode robot-vs-table contact block.  Pure.
+
+  Same "not measured is not zero" discipline as the ball block: an unmeasured
+  channel reports ``null``, never ``0.0``.  A missing denominator is the state
+  in which somebody reads "0" as "the robot never touched the table".
+  """
+  if not probe_on:
+    return {"probe": "OFF", "measured": False,
+            "fraction_of_episodes_with_a_robot_table_contact": None,
+            "reason": "no table geom in this scene, or the contact probe is off",
+            "isaac_twin": "robot_hit_table (terminal in the Isaac ActionBall run)"}
+  eps = float(episodes_finished)
+  if eps <= 0.0:
+    return {"probe": "ON", "measured": False,
+            "fraction_of_episodes_with_a_robot_table_contact": None,
+            "robot_table_contact_substeps": float(substeps),
+            "n_robot_collision_geoms": int(n_robot_geoms),
+            "reason": "no episode ended inside this window, so the rate has no "
+                      "denominator; this is not a contact rate of zero",
+            "isaac_twin": "robot_hit_table (terminal in the Isaac ActionBall run)"}
+  return {
+    "probe": "ON",
+    "measured": True,
+    "fraction_of_episodes_with_a_robot_table_contact": float(touched_episodes) / eps,
+    "episodes_with_a_robot_table_contact": float(touched_episodes),
+    "robot_table_contact_substeps": float(substeps),
+    "episodes_finished": eps,
+    "n_robot_collision_geoms": int(n_robot_geoms),
+    "terminal_here": False,
+    "isaac_twin": "robot_hit_table (terminal in the Isaac ActionBall run)",
+    "note": "本车道不因此终止,Isaac 会。非零就意味着这条曲线里含有 Isaac 判死的行为,"
+            "--report 会拒绝把它当学习结果。",
+  }
+
+
+def alignment_receipt_block() -> dict:
+  """The compact `isaac_alignment` block every receipt carries.
+
+  PLAIN LANGUAGE.  A curve produced by this lane is a statement about THIS
+  lane.  Whether it is also a statement about the Isaac A211/C211 run depends
+  on whether the two are asking the same question, and that is not something a
+  reader should have to reconstruct from two source trees at 2am.  So every
+  receipt carries the verdict, computed live at write time from both sides:
+  observation ABI, action decoder, termination union, reward groups, episode
+  shape, question distribution, and the rest (`isaac_alignment.py`).
+
+  Never raises.  A receipt that cannot resolve the ledger says so in the
+  receipt -- `available: false` plus the reason -- because a missing block and
+  a clean block must not look the same.
+  """
+  try:
+    import isaac_alignment as align
+
+    ledger = align.build_ledger()
+    return {
+      "available": True,
+      "kind": ledger["kind"],
+      "ledger_sha256": ledger["ledger_sha256"],
+      "isaac_repo_root": ledger["isaac_repo_root"],
+      "verdict_counts": ledger["verdict_counts"],
+      "blocking_axes": ledger["blocking_axes"],
+      "cross_engine_comparable": ledger["cross_engine_comparable"],
+      "bitwise_parity_is_never_a_valid_acceptance": True,
+      "rows": {k: {"declared": r["declared"], "observed": r["observed"],
+                   "human": r["human"]}
+               for k, r in ledger["rows"].items()},
+      "scope_sentence": (
+        "这条 run 的数字是**本车道内部**的陈述。只要 blocking_axes 非空,"
+        "它就不是 Isaac A211/C211 的结果,也不能拿去跟 Isaac 的曲线并排读。"),
+    }
+  except BaseException as exc:  # noqa: BLE001 -- receipts must survive this
+    return {"available": False, "error": repr(exc),
+            "cross_engine_comparable": False,
+            "scope_sentence": (
+              "对齐台账没算出来,所以这条 run 与 Isaac 的关系是**未知**,"
+              "不是'对齐'。")}
+
+
 def _dig(obj, dotted: str):
   """Follow a dotted path through nested dicts; ``None`` if anything is missing."""
   cur = obj
@@ -626,6 +796,37 @@ def _band(values) -> dict:
     return {"n": 0, "lo": None, "mean": None, "hi": None, "spread": None}
   return {"n": len(seen), "lo": min(seen), "mean": float(np.mean(seen)),
           "hi": max(seen), "spread": max(seen) - min(seen)}
+
+
+def _report_alignment_scope(runs: list, evals: list | None = None) -> dict:
+  """Per-receipt cross-engine scope, from each receipt's own ledger.  Pure."""
+  per = {}
+  for name, r in list(runs) + list(evals or []):
+    block = r.get("isaac_alignment")
+    if not isinstance(block, dict) or not block:
+      per[name] = {"ledger": None,
+                   "note": "receipt predates the alignment ledger; its "
+                           "relationship to the Isaac run is UNRECORDED, "
+                           "which is not the same as aligned"}
+      continue
+    per[name] = {"ledger": block.get("ledger_sha256"),
+                 "available": block.get("available"),
+                 "cross_engine_comparable": block.get("cross_engine_comparable"),
+                 "blocking_axes": block.get("blocking_axes")}
+  any_comparable = any(v.get("cross_engine_comparable") is True
+                       for v in per.values())
+  return {
+    "per_receipt": per,
+    "every_receipt_is_cross_engine_comparable": (
+      bool(per) and all(v.get("cross_engine_comparable") is True
+                        for v in per.values())),
+    "any_receipt_claims_comparability": any_comparable,
+    "sentence": (
+      "本报告是**本车道内部**的陈述:'接触率从 X 涨到 Y'说的是这条 mjlab "
+      "车道的球拍碰没碰到球。只要 per_receipt 里还有 blocking_axes,它就不是 "
+      "Isaac A211/C211 的结果。跨引擎对拍在任何情况下都只能是统计口径 —— "
+      "mujoco-warp 无 CPU 回退且实测非确定性,逐位一致不是更严的标准,是错的标准。"),
+  }
 
 
 class ReportRefused(RuntimeError):
@@ -669,6 +870,47 @@ def report_refusals(runs: list, baseline, evals: list | None = None) -> list:
                   "(pre-2026-08-06 receipt, or --no-contact-probe).  The "
                   "weighted `touch` term is not a substitute -- that swap is "
                   "the whole reason this gate exists"))
+  # The robot-vs-table channel.  Isaac's ActionBall run treats robot-table
+  # contact as terminal, in the same class as falling over; this lane has the
+  # table and no such guard, so a curve in which the robot touched it contains
+  # behaviour the reference run would have killed.  Installing the termination
+  # is a launch decision.  Refusing to report a contaminated curve is not.
+  for name, r in runs:
+    peak = _dig(r, "learning.robot_table_contact.peak_fraction_of_episodes")
+    if peak is None:
+      out.append((
+        "ROBOT_TABLE_CONTACT_NOT_MEASURED",
+        f"{name}: no robot-vs-table contact rate (pre-2026-08-06 receipt, "
+        "--no-contact-probe, or a scene with no table).  Isaac terminates on "
+        "this; unmeasured is not the same as zero"))
+    elif float(peak) > 0.0:
+      out.append((
+        "ROBOT_LEANED_ON_THE_TABLE",
+        f"{name}: the robot touched the table in up to {100.0 * float(peak):.2f}% "
+        "of episodes.  Isaac's ActionBall run ends the episode on exactly that "
+        "contact, so this curve contains behaviour the reference run forbids "
+        "and cannot be quoted as a learning result until the guard is installed "
+        "or the run is re-declared"))
+
+  # Cross-engine authority.  This does NOT refuse a within-lane report -- the
+  # contact rate versus the zero policy is a perfectly good statement about
+  # this lane and predates the ledger, so demanding a ledger from every receipt
+  # would break honest old evidence for no gain.  What it refuses is a receipt
+  # that ASSERTS it is comparable to the Isaac A211/C211 run while its own
+  # alignment ledger lists open blocking axes.  That combination is not a
+  # judgement call; it is a receipt contradicting itself.
+  for name, r in list(runs) + list(evals or []):
+    block = r.get("isaac_alignment")
+    if not isinstance(block, dict):
+      continue
+    blocking = block.get("blocking_axes") or []
+    if block.get("cross_engine_comparable") and blocking:
+      out.append((
+        "CLAIMS_ISAAC_COMPARABILITY_WITHOUT_EARNING_IT",
+        f"{name}: the receipt says cross_engine_comparable=true while its own "
+        f"alignment ledger still lists blocking axes {blocking}.  A number "
+        "from this lane is a statement about this lane until every one of "
+        "those is closed"))
   for name, e in (evals or []):
     if e.get("mode") != "ckpt":
       out.append(("EVAL_IS_NOT_A_CHECKPOINT_RUN",
@@ -853,9 +1095,7 @@ class A3ReadyBallVecEnv:
     # `touch: 0.21` next to `reach: 0.98` reads like two percentages -- it is
     # in fact `4.0 * exp(-(d/0.15)^2)` and `2.0 * exp(-d/0.8)`, ceilings 4.0
     # and 2.0.  The name now says which one it is.
-    self._rew_terms = ("alive", "pose", "upright", "height",
-                       "reach_term_weighted", "touch_term_weighted",
-                       "action_rate", "joint_vel", "torque", "termination")
+    self._rew_terms = REWARD_TERMS
     for k in self._rew_terms:
       self._acc["r_" + k] = torch.zeros((), device=self.device)
     self._cur_ret = torch.zeros(N, device=self.device)
@@ -872,6 +1112,7 @@ class A3ReadyBallVecEnv:
     # `fraction_of_episodes_with_a_racket_touch: null` rather than 0.
     self.count_contacts = bool(count_contacts)
     self._contact_ok = False
+    self._robot_table_ok = False
     if self.count_contacts:
       self._setup_contact_probe(mujoco)
 
@@ -979,6 +1220,35 @@ class A3ReadyBallVecEnv:
     self._acc["contact_ball_table_substeps"] = torch.zeros((), device=self.device)
     self._acc["ep_touched_racket"] = torch.zeros((), device=self.device)
     self._cur_touched = torch.zeros(self.num_envs, device=self.device)
+
+    # ---- the ROBOT-vs-table channel -----------------------------------
+    #
+    # PLAIN LANGUAGE.  Isaac's ActionBall run ends the episode when the robot
+    # touches the table (`robot_hit_table`, same class as falling over).  This
+    # lane has a table in the scene, lets the robot collide with it, and has no
+    # such guard -- so a policy here may lean on the table and be paid for the
+    # balance it buys.  Installing a hard termination is a launch decision, not
+    # a review edit; measuring it is not.  So this counts it, and
+    # `report_refusals` refuses to report a run whose robot ever did it.  That
+    # keeps the record and the block in the same change: a counter with no
+    # consequence is a counter nobody reads.
+    self._table_gid = int(table) if table >= 0 else -1
+    is_robot = torch.zeros(ngeom, dtype=torch.bool, device=self.device)
+    prefix = self.env.entity_prefix
+    floor = gid(court.FLOOR_GEOM)
+    n_robot_geoms = 0
+    for g_id in range(ngeom):
+      name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g_id) or ""
+      if name.startswith(prefix) and g_id != floor:
+        is_robot[g_id] = True
+        n_robot_geoms += 1
+    self._is_robot_geom = is_robot
+    self._n_robot_geoms = n_robot_geoms
+    self._robot_table_ok = (self._table_gid >= 0 and n_robot_geoms > 0)
+    if self._robot_table_ok:
+      self._acc["contact_robot_table_substeps"] = torch.zeros((), device=self.device)
+      self._acc["ep_robot_touched_table"] = torch.zeros((), device=self.device)
+      self._cur_robot_table = torch.zeros(self.num_envs, device=self.device)
 
   def _setup_capacity_probe(self) -> None:
     """Wire the engine's own overflow flags (the gate) plus reporting peaks.
@@ -1124,6 +1394,15 @@ class A3ReadyBallVecEnv:
     self._acc["contact_ball_table_substeps"] += tab.sum()
     w = self._con_world[:].long().clamp_(0, self.num_envs - 1)
     self._cur_touched.scatter_add_(0, w, hit.float())
+    if self._robot_table_ok:
+      # Same pass, same arrays: which rows are table-vs-robot rather than
+      # table-vs-ball.  Four more elementwise ops, no extra sync.
+      t0 = g0 == self._table_gid
+      t1 = g1 == self._table_gid
+      partner = torch.where(t0, g1, g0).long()
+      rt = valid & (t0 | t1) & self._is_robot_geom[partner]
+      self._acc["contact_robot_table_substeps"] += rt.sum()
+      self._cur_robot_table.scatter_add_(0, w, rt.float())
 
   def _rand(self, *shape, lo=0.0, hi=1.0):
     torch = self._torch
@@ -1250,22 +1529,44 @@ class A3ReadyBallVecEnv:
     cfg = self.cfg
     st = st or self._state()
     q = st["base_quat"]
-    lin_b = quat_rotate_inverse(q, st["base_lin_w"])
     d_ball_racket = st["ball_pos"] - st["racket"]
     d_ball_pelvis = st["ball_pos"] - st["base_pos"]
     d_racket_pelvis = st["racket"] - st["base_pos"]
-    obs = torch.cat([
-      lin_b * cfg.obs_scale_lin_vel,
-      st["base_ang_b"] * cfg.obs_scale_ang_vel,
-      st["proj_g"],
-      self._qpos_act() - self.q_ready.unsqueeze(0),
-      self._qvel_act() * cfg.obs_scale_joint_vel,
-      self.actions,
-      quat_rotate_inverse(q, d_ball_racket),
-      quat_rotate_inverse(q, st["ball_vel"]) * cfg.obs_scale_ball_vel,
-      quat_rotate_inverse(q, d_ball_pelvis),
-      quat_rotate_inverse(q, d_racket_pelvis),
-    ], dim=-1)
+    # Built from OBS_LAYOUT rather than an anonymous cat: the declared names
+    # ARE the observation order, so an auditor that reads OBS_LAYOUT is reading
+    # the live layout and not a hand copy of it.
+    rows = {
+      "base_lin_vel_body": quat_rotate_inverse(q, st["base_lin_w"])
+                           * cfg.obs_scale_lin_vel,
+      "base_ang_vel_body": st["base_ang_b"] * cfg.obs_scale_ang_vel,
+      "projected_gravity": st["proj_g"],
+      "joint_pos_rel_ready": self._qpos_act() - self.q_ready.unsqueeze(0),
+      "joint_vel_scaled": self._qvel_act() * cfg.obs_scale_joint_vel,
+      "actions": self.actions,
+      "ball_minus_racket_body": quat_rotate_inverse(q, d_ball_racket),
+      "ball_lin_vel_body_scaled": quat_rotate_inverse(q, st["ball_vel"])
+                                  * cfg.obs_scale_ball_vel,
+      "ball_minus_pelvis_body": quat_rotate_inverse(q, d_ball_pelvis),
+      "racket_minus_pelvis_body": quat_rotate_inverse(q, d_racket_pelvis),
+    }
+    missing = [n for n, _w in OBS_LAYOUT if n not in rows]
+    extra = [n for n in rows if n not in {a for a, _ in OBS_LAYOUT}]
+    if missing or extra:
+      raise RuntimeError(
+        "OBS_LAYOUT and the observation producers disagree: "
+        f"missing={missing} extra={extra}")
+    parts = []
+    for name, width in OBS_LAYOUT:
+      row = rows[name]
+      if int(row.shape[-1]) != int(width):
+        raise RuntimeError(
+          f"observation row {name!r} is {int(row.shape[-1])} wide, "
+          f"OBS_LAYOUT declares {int(width)}")
+      parts.append(row)
+    obs = torch.cat(parts, dim=-1)
+    if int(obs.shape[-1]) != OBS_WIDTH:
+      raise RuntimeError(
+        f"observation width {int(obs.shape[-1])} != declared {OBS_WIDTH}")
     obs = torch.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0)
     self._obs_buf = torch.clamp(obs, -cfg.obs_clip, cfg.obs_clip)
     return self._obs_buf
@@ -1414,6 +1715,9 @@ class A3ReadyBallVecEnv:
     if self._contact_ok:
       a["ep_touched_racket"] += ((self._cur_touched > 0).float() * df).sum()
       self._cur_touched *= (1.0 - df)
+    if self._robot_table_ok:
+      a["ep_robot_touched_table"] += ((self._cur_robot_table > 0).float() * df).sum()
+      self._cur_robot_table *= (1.0 - df)
 
   def pop_stats(self) -> dict:
     torch = self._torch
@@ -1440,8 +1744,19 @@ class A3ReadyBallVecEnv:
         "nonfinite_state": out["term_nonfinite"],
         "timeout_truncation": out["term_timeout"],
       },
+      # The alignment ledger counts this lane's terminal predicates from
+      # TERMINATION_TERMS.  Assert here rather than trusting the two to stay in
+      # step: a fourth terminal reason added to `_terminate` and not to the
+      # constant would make the ledger under-report the union it compares.
+      "termination_terms_declared": list(TERMINATION_TERMS),
       "ball_reserves": out["reserves"],
     }
+    reported = set(stats["terminations"]) - {"timeout_truncation"}
+    if reported != set(TERMINATION_TERMS):
+      raise RuntimeError(
+        "TERMINATION_TERMS does not describe the terminal reasons this env "
+        f"reports: declared={sorted(TERMINATION_TERMS)} "
+        f"reported={sorted(reported)}")
     stats.update(reward_term_report(
       {k: out["r_" + k] / steps for k in self._rew_terms}, self.cfg))
     if self._cap_ok:
@@ -1457,6 +1772,12 @@ class A3ReadyBallVecEnv:
       episodes_finished=out["ep_cnt"],
       racket_substeps=out.get("contact_ball_racket_substeps", 0.0),
       table_substeps=out.get("contact_ball_table_substeps", 0.0))
+    stats["robot_table"] = robot_table_contact_fields(
+      probe_on=self._robot_table_ok,
+      touched_episodes=out.get("ep_robot_touched_table", 0.0),
+      episodes_finished=out["ep_cnt"],
+      substeps=out.get("contact_robot_table_substeps", 0.0),
+      n_robot_geoms=getattr(self, "_n_robot_geoms", 0))
     return stats
 
   # ---- capacity receipt ---------------------------------------------------
@@ -1752,6 +2073,7 @@ def train(args) -> int:
       "scene": _safe(_scene_summary, env, sim_cfg, build_s, default={}),
       "agent": _safe(_agent_summary, env, args, task_cfg, records, default={}),
       "task_cfg": asdict(task_cfg),
+      "isaac_alignment": _safe(alignment_receipt_block, default={}),
       "capacity": capacity,
       "warp_stdout_overflow_scan": warp_warn,
       "throughput": _safe(_throughput_summary, records, env, args, default={}),
@@ -1986,6 +2308,7 @@ def evaluate(args) -> int:
       "env_steps_per_s": (getattr(env, "num_envs", 0) * args.eval_steps
                           / max(wall, 1e-9)),
       "capacity_gate": "ENFORCED" if gated else "NOT_GATED",
+      "isaac_alignment": _safe(alignment_receipt_block, default={}),
       "capacity": capacity,
       "warp_stdout_overflow_scan": warp_warn,
       "device_identity": device_id,
@@ -2157,6 +2480,7 @@ def _learning_summary(records) -> dict:
     "reward_terms_are_weighted_not_probabilities": True,
     "reward_terms_note": _NOT_A_PROBABILITY,
     "binary_contact_rate": _binary_contact_summary(records, k),
+    "robot_table_contact": _robot_table_summary(records),
     "reporting": {
       "headline_metric": BINARY_CONTACT_KEY,
       "headline_needs_a_zero_policy_baseline": True,
@@ -2170,6 +2494,31 @@ def _learning_summary(records) -> dict:
                "sample: this config gave touch = 0.21/0.46/0.59/0.61 on four "
                "identical tries, and the 0.21 is the one that got published."),
     },
+  }
+
+
+def _robot_table_summary(records) -> dict:
+  """Did the robot ever touch the table during this run?  Pure.
+
+  Reported as ``max`` over the curve, not ``last``: the question is not "is it
+  leaning on the table right now", it is "does this curve contain behaviour
+  Isaac would have terminated".  One iteration is enough to contaminate it.
+  """
+  curve = [_dig(r, ROBOT_TABLE_CONTACT_KEY) for r in records]
+  seen = [float(v) for v in curve if v is not None]
+  if not seen:
+    return {"measured": False, "peak_fraction_of_episodes": None,
+            "curve": curve,
+            "reason": "no table geom, probe off, or no episode ever ended",
+            "isaac_twin": "robot_hit_table (terminal in the Isaac ActionBall run)"}
+  return {
+    "measured": True,
+    "peak_fraction_of_episodes": max(seen),
+    "last_fraction_of_episodes": seen[-1],
+    "iterations_measured": len(seen),
+    "curve": curve,
+    "terminal_here": False,
+    "isaac_twin": "robot_hit_table (terminal in the Isaac ActionBall run)",
   }
 
 
@@ -2429,6 +2778,12 @@ def report(run_paths, zero_policy_path, out_path, eval_paths=None) -> int:
       "max_possible": _dig(runs[0][1], "learning.reward_terms_max_possible"),
       "warning": _NOT_A_PROBABILITY,
     },
+    # Mandatory scope line.  Everything above is a statement about THIS lane;
+    # this block says, from each receipt's own live ledger, whether it is also
+    # a statement about the Isaac A211/C211 run.  Receipts written before
+    # 2026-08-06 have no ledger and report `null` rather than a comfortable
+    # default -- "not recorded" and "aligned" must never render the same.
+    "isaac_alignment_scope": _report_alignment_scope(runs, evals),
   }
   # The deterministic evaluation, when it was handed over: same metric, same
   # scene, no exploration noise.  This is where "0.12% -> 49.2%/97.8%" came

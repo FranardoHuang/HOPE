@@ -228,6 +228,13 @@ def _good_run(name="TRAIN_s0", last=0.492):
         "fraction_of_episodes_with_a_racket_touch_first": 0.002,
         "fraction_of_episodes_with_a_racket_touch_last": last,
       },
+      # Isaac's ActionBall run ends the episode on robot-vs-table contact; this
+      # lane has the table and no such guard, so a reportable run has to have
+      # measured the channel and found nothing.  Added 2026-08-06 with the gate
+      # that reads it -- a receipt shape and the rule that judges it move
+      # together or the rule is judging a shape nobody writes.
+      "robot_table_contact": {"measured": True,
+                              "peak_fraction_of_episodes": 0.0},
       "reward_terms_last": {"touch_term_weighted": 0.21,
                             "reach_term_weighted": 0.98},
       "reward_terms_max_possible": {"touch_term_weighted": 4.0,
@@ -320,6 +327,31 @@ def test_a_zero_sample_capacity_verdict_cannot_be_reported(mod):
   codes = _codes(mod.report_refusals([_good_run("s0"), (name, r)],
                                      _good_baseline()))
   assert "RUN_HAS_NO_CAPACITY_PASS" in codes
+
+
+def test_a_run_whose_robot_touched_the_table_cannot_be_reported(mod):
+  """Isaac terminates on this contact; here it only contaminates the curve.
+
+  Deliberately a *tiny* rate: 1 episode in 4096.  A gate that only fired on an
+  obviously broken run would let the interesting case -- a policy that has
+  quietly learned to rest a hand on the table for balance -- straight through.
+  """
+  name, r = _good_run("s1")
+  r["learning"]["robot_table_contact"] = {
+    "measured": True, "peak_fraction_of_episodes": 1.0 / 4096.0}
+  codes = _codes(mod.report_refusals([_good_run("s0"), (name, r)],
+                                     _good_baseline()))
+  assert "ROBOT_LEANED_ON_THE_TABLE" in codes
+
+
+def test_a_run_that_never_measured_the_table_channel_is_refused(mod):
+  """Unmeasured must not read as zero -- the same rule as the ball channel."""
+  name, r = _good_run("s1")
+  del r["learning"]["robot_table_contact"]
+  codes = _codes(mod.report_refusals([_good_run("s0"), (name, r)],
+                                     _good_baseline()))
+  assert "ROBOT_TABLE_CONTACT_NOT_MEASURED" in codes
+  assert "ROBOT_LEANED_ON_THE_TABLE" not in codes
 
 
 def test_refusal_messages_name_the_run_and_stay_readable(mod):
