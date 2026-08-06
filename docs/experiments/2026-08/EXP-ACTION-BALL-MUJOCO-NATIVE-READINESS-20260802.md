@@ -1348,6 +1348,74 @@ worktree（`/workspace/franco/c211_rescope_BASELINE_20260806`），与改动树
 > 这一条由同轮另一位 agent 以 `mujoco_native/isaac_reference_envelope.py` 修复（直接读活值，
 > 不再留第四份手抄），并复用了本提交的 `isaac_live_constants` 求值器。
 
+#### 5.6.10 参考包络复刻错了类：抄的是父类的"两脚 + 两腕"，现役是子类的"只有两脚"（2026-08-06）
+
+**人话一句：** MuJoCo 复刻会在 Isaac 明确放行的**腕部位移**上把这一局掐掉，而且不会响。
+
+**这是 §5.6.9 那个形状的第四次，也是第一次抓到语义真的漂了**（前三次里 `5c4ced66` 的语义其实没漂，
+`5ed998f1` 漂了并已修，§5.6.9 那批常量值全都还对得上）。
+
+**事实链**（逐条核实过，行号以 `837e6af6` 为准）：
+
+1. `vec_env.py` 的 `PHASE_EE_BODY_NAMES` 是四个身体：`left/right_ankle_roll_Link` +
+   `left/right_wrist_yaw_Link`。那是父类 `HOPEDeployParityTerminationsCfg.ee_body_pos`
+   （`A3_FEET_BODIES + A3_HAND_BODIES`）。
+2. 这条 native 车道复刻的其实是**子类** `HOPEActionBallTerminationsCfg` —— 同一个文件里
+   `joint_qdes_forbidden` / `joint_actual_forbidden` 的 `source_config` 自己写着这个类名。
+   子类在 `635252f6` 把 `ee_body_pos` 覆写成 `list(A3_FEET_BODIES)`，**只剩双脚**。
+   覆写的理由记在码里：腕是挥拍要甩最远的那一端，`0.25 m` 的 z 包络套上去等于在惩罚要教的动作，
+   `build_1` V9 实测新策略几乎每次 reset 都在 `1.67` 步内被腕部 guard 掐掉。**这个覆写是对的，没动它。**
+3. 所以 `exact_phase_fidelity_reasons` 会对四个身体里任一个 `|dz| > 0.25` 触发 ——
+   在现役 kernel 放行的腕部位移上终止。
+4. **它不会响**：相位保真的 AST 指纹选择器只点名了
+   `HOPEActionBallTerminationsCfg|joint_qdes_forbidden,joint_actual_forbidden`，
+   `class_header` 只哈希装饰器/基类/关键字、不含类体，所以覆写从 `635252f6` 那天起
+   `EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256` **一个 bit 都没动过**。
+   （原来那行注释写着"包络已收窄到脚"，是错的：那次重钉真正的原因只有 `terminate=False`。已改正。）
+5. **现有测试也看不见**：它们给四个身体喂的是同一个数（`[0.0]*4` / `[x]*4`）——
+   和轴对齐盒那次同一个错误，同值向量对"包络看哪几个身体"完全是瞎的。
+6. 第四份手抄在磁带侧：`n1_ball_core._phase_sample_contract_fields` 写死 `len(body_order) != 4`。
+
+**没有在跑的错，是潜伏漂移。** 全仓没有任何 launcher 装 phase reference tape
+（`launch_mujoco_fixed_center_diagnostic.py` 有 `--phase-fidelity-reference-tape` 这个开关，
+但没有任何 config / 脚本传它），所以这条谓词今天只在测试里跑。
+
+**做法**（新增 `mujoco_native/isaac_reference_envelope.py`，复用 §5.6.9 的 `isaac_live_constants` 求值器）：
+
+| 改动 | 人话 |
+| --- | --- |
+| `PHASE_EE_BODY_NAMES` / `PHASE_EE_BODY_POS_Z_THRESHOLD_M` 改成**从活的 cfg 读值** | 不再留第五份手抄；子类覆写了就沿子类，没覆写就沿继承往上找，和 Python 自己解析一致 |
+| 指纹选择器加上 `ee_body_pos` | 以后有人再动这条覆写，`action_ball_config` 指纹会当场开火逼人重看 |
+| 新增"这个类声明了哪几条 term"的集合门 | 指纹按名字点名，**新加**一条终止项它天生看不见；集合门兜住新增/删除 |
+| body 名单必须全部出自活的 `A3_FEET_BODIES`/`A3_HAND_BODIES` | 大小写写错（`_link` vs `_Link`）这类 Isaac-only 拼法会被拦，个数检查看不出来 |
+| 磁带侧 `len != 4` 改成"跟活的 ActionBall 名单逐位比" | 个数对、顺序错（把腕当成脚）正是要拦的那种漂移 |
+| 收据自陈 `ee_body_order_mirrors_isaac_class` / `..._declared_by_isaac_class` / `..._source` / `live_declared_terms_compared` | 收据自己说清楚"我镜像的是哪个类、名单是读来的不是抄的" |
+
+**读活值 + 指纹门是一对，缺一不可**：读活值保证"人重钉指纹之后复刻是跟着动的"，
+指纹门保证"上游一动就必须有人来重钉"。单靠读活值会让上游放宽包络悄悄传导到复刻。
+
+**变异测试**（12 条新用例，全部构造成"粗一个档次的检查就抓不到"）：
+
+| 变异 | 为什么粗一档就抓不到 |
+| --- | --- |
+| **只改腕、不改脚**的位移（脚 `0.0`，腕超阈） | 现有测试四个格子喂同一个数，对这条完全是瞎的；修好后这个四长向量直接被拒 |
+| 只改现役覆写（`list(A3_FEET_BODIES)` → `+ A3_HAND_BODIES`）不改复刻 | 门必须拒绝：活值比对与指纹**双双**开火 |
+| 把覆写整条删掉（退回父类四个身体） | 指纹开火；且复刻读的是活值，会跟着变回四个身体，不会像 `5ed998f1` 那样停在原地 |
+| 只改覆写的 `threshold` `0.25` → `0.35` | 名单一字没动，只比名单的检查放行 |
+| 往 ActionBall 类里**新加**一条 `base_fell_tilt` 覆写 | 断言过指纹**确实一个 bit 没动**，只有声明项集合门抓得到 |
+| 从父类**删掉** `base_too_low` | 同上，反方向 |
+| 磁带 `ee_body_order` 顺序颠倒（个数不变） | 个数检查完全看不见 |
+| body 名单改成 `left_ankle_roll_link`（小写 `_link`） | 个数、集合大小、拼写几乎一样；IsaacLab 大小写敏感，MuJoCo 根本查不到这个 body |
+| `"body_names": _pick_bodies_at_runtime()` | 必须报 unreadable、fail closed，不得静默当"相等" |
+| 负对照：在 cfg 别处追加一个无关函数 | 语义选择器不该动；防止这批门变成"文件一改就红" |
+
+**收据。** pod1 worktree `/workspace/franco/eebody_20260806`（`837e6af6` + 本改动），
+`hope_isaac_venv`、`pytest -n 64`。基线对拍（同一棵 worktree，`git stash` 前后各跑一次，
+14 个模块 = 全部 `mujoco_native/tests` + 每个 import 过 `vec_env`/`n1_ball_core` 的模块）：
+`837e6af6` `415 passed`，本改动后 `428 passed`（`+13`，零回归）。同批重钉两枚：
+`EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256`（选择器新增 `ee_body_pos`）与
+`EXPECTED_N1_BALL_CORE_SOURCE_SHA256`（`n1_ball_core.py` 改了磁带校验）。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |

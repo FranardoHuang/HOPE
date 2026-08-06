@@ -55,6 +55,10 @@ def _question_payload(scene_sha: str) -> dict:
     )
 
 
+#: 人话:参考包络看几个身体由现役 Isaac 覆写说了算(现在是双脚),不写死 4。
+EE_BODIES = len(vec_env.PHASE_EE_BODY_NAMES)
+
+
 def _phase_reference_row(**overrides):
     row = {
         "motion_phase_context": "non_hold_swing_or_follow_through",
@@ -62,7 +66,11 @@ def _phase_reference_row(**overrides):
         "reference_terminations_enabled": True,
         "reference_anchor_pos_z_w_m": 0.9,
         "reference_anchor_projected_gravity_b_z": -1.0,
-        "reference_ee_body_pos_z_w_m": [0.1, 0.2, 0.3, 0.4],
+        # Distinct per body on purpose: a row that repeats one number cannot
+        # tell a correct body order from a shuffled one.
+        "reference_ee_body_pos_z_w_m": [
+            0.1 * (index + 1) for index in range(EE_BODIES)
+        ],
     }
     row.update(overrides)
     return row
@@ -421,24 +429,32 @@ def test_production_core_phase_sample_uses_live_native_body_state():
                 reference_terminations_enabled=True,
                 reference_anchor_pos_z_w_m=0.8,
                 reference_anchor_projected_gravity_b_z=-0.1,
-                reference_ee_body_pos_z_w_m=(0.3, 0.5, 0.7, 0.9),
+                # Reference and robot heights differ by a DIFFERENT amount per
+                # body, so a sample that read the wrong body would show up.
+                reference_ee_body_pos_z_w_m=tuple(
+                    0.3 + 0.2 * index for index in range(EE_BODIES)
+                ),
             ),
         ),
     )
     core.policy_tick = 0
     core.plant = SimpleNamespace(_pelvis_body_id=1)
-    core._phase_ee_body_ids = (2, 3, 4, 5)
-    xmat = np.zeros((6, 9), dtype=np.float64)
+    core._phase_ee_body_ids = tuple(2 + index for index in range(EE_BODIES))
+    rows = 2 + EE_BODIES
+    xmat = np.zeros((rows, 9), dtype=np.float64)
     xmat[1] = np.eye(3, dtype=np.float64).reshape(-1)
-    xpos = np.zeros((6, 3), dtype=np.float64)
+    xpos = np.zeros((rows, 3), dtype=np.float64)
     xpos[1, 2] = 0.5
-    xpos[2:, 2] = [0.1, 0.2, 0.3, 0.4]
+    xpos[2:, 2] = [0.1 * (index + 1) for index in range(EE_BODIES)]
     core.data = SimpleNamespace(xmat=xmat, xpos=xpos)
     sample = core._phase_fidelity_sample()
     assert sample["anchor_pos_z_error_m"] == pytest.approx(0.3)
     assert sample["anchor_projected_gravity_z_error_abs"] == pytest.approx(0.9)
     assert sample["ee_body_pos_z_error_m"] == pytest.approx(
-        [0.2, 0.3, 0.4, 0.5]
+        [
+            abs((0.3 + 0.2 * index) - 0.1 * (index + 1))
+            for index in range(EE_BODIES)
+        ]
     )
     assert vec_env.exact_phase_fidelity_reasons(sample) == (
         "anchor_pos",

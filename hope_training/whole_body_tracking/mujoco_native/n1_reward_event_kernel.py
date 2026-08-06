@@ -43,8 +43,10 @@ NATIVE_CONTACT_INVALID_REASONS = (
 EXPECTED_OBSERVED_OUTCOME_RESOLVER_SOURCE_SHA256 = (
     "c1b40201ab965650f68f903ff8684769b6a7b97ddad9c9018c27b4e8088af575"
 )
+# Repinned when the phase reference tape stopped hard-coding "four bodies" and
+# started comparing its body order against the live ActionBall envelope.
 EXPECTED_N1_BALL_CORE_SOURCE_SHA256 = (
-    "9a3dce4ec7675a931c7cb2c1a56c5418027a8bce251a5be721a90ec83de72040"
+    "f0095b1f07652e8d422282bb2c8c5b2f5d344bac9176ded387fbdddfd38944fa"
 )
 EXPECTED_PHYSICAL_BALL_SCENE_SOURCE_SHA256 = (
     "97776c6c60a44008aeb6e9f60b7332a5c71a5a109b3bcd6aed30172b5597995e"

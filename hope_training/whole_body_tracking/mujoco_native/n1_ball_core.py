@@ -32,6 +32,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
+from . import isaac_reference_envelope
 from . import physical_ball_scene
 from . import n1_reward_event_kernel
 from . import observed_outcome_resolver
@@ -188,13 +189,27 @@ def _phase_sample_contract_fields(
         or len(contexts) != 2
     ):
         raise N1BallCoreError("phase sample contract contexts differ")
+    # 人话:这里以前写死"必须是 4 个身体" —— 那是第四份手抄的包络宽度,而现役
+    # ActionBall 早就把包络收窄成只有双脚了。改成跟活的 Isaac 覆写对名单,不再对个数:
+    # 数对了但名字/顺序错了(比如把腕当成脚)是恰恰要拦的那种漂移。
+    try:
+        live_body_order = list(
+            isaac_reference_envelope.live_reference_envelope()["body_names"]
+        )
+    except isaac_reference_envelope.IsaacReferenceEnvelopeError as exc:
+        raise N1BallCoreError(
+            f"cannot read the live Isaac reference envelope body order: {exc}"
+        ) from exc
     if (
         not isinstance(body_order, list)
-        or len(body_order) != 4
-        or len(set(body_order)) != 4
         or any(not isinstance(name, str) or not name for name in body_order)
+        or body_order != live_body_order
     ):
-        raise N1BallCoreError("phase sample contract body order differs")
+        raise N1BallCoreError(
+            "phase sample contract body order differs from the live "
+            f"{isaac_reference_envelope.ACTION_BALL_TERMINATIONS_CLASS} "
+            f"envelope {live_body_order!r}"
+        )
     return contract_sha, tuple(contexts), tuple(body_order)
 
 

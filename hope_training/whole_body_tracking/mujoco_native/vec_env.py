@@ -28,6 +28,8 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from . import isaac_live_constants
+from . import isaac_reference_envelope
 from . import n1_ball_core
 from . import n1_reward_event_kernel
 from . import n1_scalar_reward
@@ -133,10 +135,12 @@ TERMINATION_SOURCE_A3_BODY_NAMES = (
     / "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/robots/agibot_a3.py"
 )
-# Repinned when the Isaac ActionBall actual-q hard edge moved to telemetry mode
-# (``terminate=False``) and the ActionBall reference envelope narrowed to the feet.
+# Repinned when the ActionBall selector grew ``ee_body_pos``.  人话:那条覆写从
+# 635252f6(把参考包络收窄成只有双脚)起就在源文件里,可它不在选择器点名的名单上,
+# 所以这个指纹一个 bit 都没动过 —— 上一行旧注释写着"包络已收窄"其实是错的,那次重钉
+# 真正的原因只有 ``terminate=False``。现在覆写进了名单,它再动指纹就会开火。
 EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256 = (
-    "34fa770e03b4dc15d63cef73ad946b306508e31dc3b38f2a15101f2e58813a2e"
+    "5e6f66e44758a42197edbbcf5ac024b5fefd027d756fc87c12ea200bb0095ce8"
 )
 EXPECTED_PHASE_BASE_CONFIG_SEMANTIC_AST_SHA256 = (
     "aefdf83d0dbd39144da07cb4c7bcb2eee59c552174e00b8d28747cdde992e49c"
@@ -160,13 +164,24 @@ JOINT_QDES_FORBIDDEN_MARGIN_FRACTION = 0.02
 JOINT_QDES_FINITE_PROJECTION_ENABLED = True
 PHASE_ANCHOR_POS_Z_THRESHOLD_M = 0.25
 PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD = 0.8
-PHASE_EE_BODY_POS_Z_THRESHOLD_M = 0.25
-PHASE_EE_BODY_NAMES = (
-    "left_ankle_roll_Link",
-    "right_ankle_roll_Link",
-    "left_wrist_yaw_Link",
-    "right_wrist_yaw_Link",
+#: 人话:这条 native 车道复刻的是 Isaac 的 ``HOPEActionBallTerminationsCfg``,
+#: 不是它的父类。父类的 ``ee_body_pos`` 看"两脚 + 两腕";ActionBall 子类把它收窄成
+#: **只有两脚** —— 腕是挥拍时要甩最远的那一端,0.25 m 的 z 包络套上去等于在惩罚我们
+#: 要教的动作(``build_1`` V9 实测新策略几乎每次 reset 都在 1.67 步内被腕部 guard
+#: 掐掉)。复刻以前抄的是父类那份四个身体的名单,于是它会在现役 kernel 明确放行的
+#: 腕部位移上终止。
+#:
+#: 下面这两行不是第四份手抄件,是**从活的 cfg 里读出来的值** —— 手抄这条路已经咬过
+#: 三次(5ed998f1 / 5c4ced66 / 本条)。上游改了这条 term,``EXPECTED_PHASE_CONFIG_
+#: SEMANTIC_AST_SHA256`` 会当场开火逼人重看,读活值保证人重钉指纹之后复刻是跟着动的。
+PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS = (
+    isaac_reference_envelope.ACTION_BALL_TERMINATIONS_CLASS
 )
+_ACTION_BALL_REFERENCE_ENVELOPE = isaac_reference_envelope.live_reference_envelope(
+    PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS
+)
+PHASE_EE_BODY_POS_Z_THRESHOLD_M = _ACTION_BALL_REFERENCE_ENVELOPE["threshold_m"]
+PHASE_EE_BODY_NAMES = _ACTION_BALL_REFERENCE_ENVELOPE["body_names"]
 PHASE_CONTEXTS = (
     "non_hold_swing_or_follow_through",
     "recovery_hold",
@@ -429,6 +444,125 @@ def _semantic_ast_sha256(path: Path, selectors: Sequence[tuple[str, str]]) -> st
     ).hexdigest()
 
 
+# --------------------------------------------------------------------------
+# Live-value parity for the hand-copied Isaac termination thresholds
+#
+# 人话:上面那批阈值(摔倒 0.7 rad、坐低 0.5 m、参考包络 0.25 m / 0.8、q_des 禁区
+# 的 0.0 rad + 2%、以及包络看哪几个身体)真源全在 Isaac 的 cfg 里,这里存的是副本。
+# 此前它们只被语义 AST 指纹罩着 —— 指纹只说"那几个节点的字节没动过",源文件一动,
+# 把指纹重钉成新值是一行的事,副本跟没跟上没人查。5ed998f1 就是这么让桌面终局的
+# 复刻停在原地两天的。下面这组检查直接把 Isaac 现在那几个数读出来逐个比值,
+# 所以"光重钉指纹"从今往后不再放行。
+# --------------------------------------------------------------------------
+
+#: Isaac module path -> live file, for names ``hope_env_cfg`` imports rather
+#: than assigns (``A3_FEET_BODIES``/``A3_HAND_BODIES``).
+_PHASE_LIVE_COMPANIONS = {
+    "whole_body_tracking.robots.agibot_a3": TERMINATION_SOURCE_A3_BODY_NAMES,
+}
+_DEPLOY_PARITY_CFG = isaac_reference_envelope.DEPLOY_PARITY_TERMINATIONS_CLASS
+_ACTION_BALL_CFG = PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS
+
+
+def mirrored_isaac_termination_entries() -> tuple:
+    """``(key, source, selector, mirrored_value)`` for every hand copy here.
+
+    Built on call, not at import, because the drift tests repoint
+    :data:`TERMINATION_SOURCE_CONFIG` at mutated copies.
+    """
+
+    config = TERMINATION_SOURCE_CONFIG
+    return (
+        (
+            "base_fell_tilt_limit_angle_rad",
+            config,
+            ("class_term_param", _DEPLOY_PARITY_CFG, "base_fell_tilt", "limit_angle"),
+            BASE_FELL_TILT_LIMIT_ANGLE_RAD,
+        ),
+        (
+            "base_too_low_minimum_height_m",
+            config,
+            ("class_term_param", _DEPLOY_PARITY_CFG, "base_too_low", "minimum_height"),
+            BASE_TOO_LOW_MINIMUM_HEIGHT_M,
+        ),
+        (
+            "phase_anchor_pos_z_threshold_m",
+            config,
+            ("class_term_param", _DEPLOY_PARITY_CFG, "anchor_pos", "threshold"),
+            PHASE_ANCHOR_POS_Z_THRESHOLD_M,
+        ),
+        (
+            "phase_anchor_ori_projected_gravity_z_threshold",
+            config,
+            ("class_term_param", _DEPLOY_PARITY_CFG, "anchor_ori", "threshold"),
+            PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD,
+        ),
+        # 人话:ActionBall 子类只把包络"看哪几个身体"改窄了,阈值没动。这一条就是
+        # 在盯这件事 —— 复刻用的是子类那个阈值,拿它去跟父类的比,只要哪一边单独
+        # 动了阈值,这道门就红。包络本身(名单 + 阈值)由
+        # ``isaac_reference_envelope`` 直接读活值比对,不在这张表里重复一遍。
+        (
+            "deploy_parity_ee_body_pos_z_threshold_m",
+            config,
+            ("class_term_param", _DEPLOY_PARITY_CFG, "ee_body_pos", "threshold"),
+            PHASE_EE_BODY_POS_Z_THRESHOLD_M,
+        ),
+        (
+            "joint_qdes_forbidden_margin_rad",
+            config,
+            (
+                "class_term_param",
+                _ACTION_BALL_CFG,
+                "joint_qdes_forbidden",
+                "margin_rad",
+            ),
+            JOINT_QDES_FORBIDDEN_MARGIN_RAD,
+        ),
+        (
+            "joint_qdes_forbidden_margin_fraction",
+            config,
+            (
+                "class_term_param",
+                _ACTION_BALL_CFG,
+                "joint_qdes_forbidden",
+                "margin_fraction",
+            ),
+            JOINT_QDES_FORBIDDEN_MARGIN_FRACTION,
+        ),
+    )
+
+
+def live_isaac_termination_constant_blockers() -> tuple:
+    """Every way this lane's termination semantics differ from the live Isaac ones.
+
+    Three questions, none of which a semantic AST digest can answer:
+
+    * do the hand-copied thresholds still equal the numbers Isaac ships?
+    * does the reference envelope this lane runs -- body names AND threshold --
+      still equal the ``HOPEActionBallTerminationsCfg`` override it mirrors?
+    * does that class still declare exactly the terms this lane knows about?
+      (人话:指纹的选择器按名字点名,新加一条终止项它一个 bit 都不会动。)
+    """
+
+    return (
+        isaac_live_constants.parity_blockers(
+            "phase_termination",
+            mirrored_isaac_termination_entries(),
+            companions=_PHASE_LIVE_COMPANIONS,
+        )
+        + isaac_reference_envelope.live_reference_envelope_blockers(
+            PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS,
+            config_path=TERMINATION_SOURCE_CONFIG,
+            body_names_path=TERMINATION_SOURCE_A3_BODY_NAMES,
+            mirrored_body_names=PHASE_EE_BODY_NAMES,
+            mirrored_threshold_m=PHASE_EE_BODY_POS_Z_THRESHOLD_M,
+        )
+        + isaac_reference_envelope.live_declared_term_blockers(
+            TERMINATION_SOURCE_CONFIG
+        )
+    )
+
+
 @lru_cache(maxsize=1)
 def _phase_fidelity_sample_contract_cached() -> dict[str, Any]:
     source_specs = (
@@ -443,10 +577,16 @@ def _phase_fidelity_sample_contract_cached() -> dict[str, Any]:
                     "ee_body_pos,base_fell_tilt,base_too_low,robot_hit_table",
                 ),
                 ("class_header", "HOPEActionBallTerminationsCfg"),
+                # 人话:``ee_body_pos`` 必须在这里点名。它是 ActionBall 子类**覆写**
+                # 父类的那一条,而覆写改变的正是复刻的语义;它此前不在名单里,所以
+                # 从 635252f6 把包络收窄成"只有双脚"那天起,这个指纹一个 bit 都没动过。
+                # 这个类里其余的项(``joint_*``)本来就在,新增/删除项由
+                # ``live_declared_term_blockers`` 兜底 —— 指纹按名字点名,天生看不见
+                # 一个还没人写下来的名字。
                 (
                     "class_assignments",
-                    "HOPEActionBallTerminationsCfg|joint_qdes_forbidden,"
-                    "joint_actual_forbidden",
+                    "HOPEActionBallTerminationsCfg|ee_body_pos,"
+                    "joint_qdes_forbidden,joint_actual_forbidden",
                 ),
             ),
             EXPECTED_PHASE_CONFIG_SEMANTIC_AST_SHA256,
@@ -523,6 +663,16 @@ def _phase_fidelity_sample_contract_cached() -> dict[str, Any]:
         sources[label] = {
             "semantic_ast_sha256": actual_sha256,
         }
+    # 人话:上面每个 label 只说"源文件那几个节点的字节跟我钉的一样"。这道门再把
+    # 复刻真正在跑的那几个数和那份 body 名单,跟 Isaac 现在写在 cfg 里的逐个比值,
+    # 并核对那个类到底声明了哪几条终止项 —— 重钉指纹满足不了其中任何一项。
+    constant_blockers = live_isaac_termination_constant_blockers()
+    if constant_blockers:
+        raise VecEnvContractError(
+            "this lane's Isaac termination semantics no longer equal the live "
+            "Isaac cfg (re-pinning the semantic AST SHA does not port them): "
+            + "; ".join(constant_blockers)
+        )
     payload = {
         "schema_version": 1,
         "kind": "a3_mujoco_phase_fidelity_sample_contract_v1",
@@ -549,6 +699,26 @@ def _phase_fidelity_sample_contract_cached() -> dict[str, Any]:
         "gating": ("verdict AND NOT in_hold AND reference_terminations_enabled"),
         "reason_order": list(EXACT_PHASE_FIDELITY_REASON_ORDER),
         "authority_sources": sources,
+        # Which Isaac class this lane reproduces, and how much of it was
+        # compared as VALUES against the live source rather than by AST digest.
+        # 人话:``ee_body_order`` 上面那份名单是从这个类里读出来的,不是抄的。
+        "ee_body_order_mirrors_isaac_class": PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS,
+        "ee_body_order_declared_by_isaac_class": (
+            _ACTION_BALL_REFERENCE_ENVELOPE["owner_class"]
+        ),
+        "ee_body_order_source": "live_isaac_class_term_param_value",
+        "live_constant_parity": (
+            "fall_guards_reference_envelope_thresholds_body_order_qdes_margins"
+        ),
+        "live_constant_parity_constants_compared": str(
+            len(mirrored_isaac_termination_entries())
+        ),
+        "live_declared_terms_compared": {
+            class_name: sorted(terms)
+            for class_name, terms in (
+                isaac_reference_envelope.DECLARED_TERMS.items()
+            )
+        },
     }
     payload["content_sha256"] = _sha256_json(payload)
     return payload
@@ -604,20 +774,24 @@ def exact_phase_fidelity_reasons(sample: Mapping[str, Any]) -> tuple[str, ...]:
         sample.get("anchor_projected_gravity_z_error_abs"),
         "anchor_projected_gravity_z_error_abs",
     )
+    # 人话:这里的宽度跟着现役包络走 —— ActionBall 只看双脚,所以喂四个数(旧的
+    # 两脚两腕)现在会被当场拒绝,而不是把腕的误差当成脚的误差用。
+    ee_width_message = (
+        "phase-fidelity ee body errors must be "
+        f"{len(PHASE_EE_BODY_NAMES)} finite non-negative values, one per live "
+        f"{PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS} envelope body "
+        f"{list(PHASE_EE_BODY_NAMES)}"
+    )
     try:
         ee_errors = np.asarray(sample.get("ee_body_pos_z_error_m"), dtype=np.float64)
     except (TypeError, ValueError) as exc:
-        raise VecEnvContractError(
-            "phase-fidelity ee body errors must be four finite non-negative values"
-        ) from exc
+        raise VecEnvContractError(ee_width_message) from exc
     if (
         ee_errors.shape != (len(PHASE_EE_BODY_NAMES),)
         or not np.isfinite(ee_errors).all()
         or np.any(ee_errors < 0.0)
     ):
-        raise VecEnvContractError(
-            "phase-fidelity ee body errors must be four finite non-negative values"
-        )
+        raise VecEnvContractError(ee_width_message)
     if in_hold or not enabled:
         return ()
     reasons: list[str] = []
@@ -3197,6 +3371,9 @@ __all__ = [
     "PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD",
     "PHASE_EE_BODY_POS_Z_THRESHOLD_M",
     "PHASE_EE_BODY_NAMES",
+    "PHASE_TERMINATIONS_MIRRORED_ISAAC_CLASS",
+    "live_isaac_termination_constant_blockers",
+    "mirrored_isaac_termination_entries",
     "JOINT_ACTUAL_FORBIDDEN_BOUNDS_TOLERANCE_RAD",
     "RewardContractMissing",
     "VecEnvContractError",

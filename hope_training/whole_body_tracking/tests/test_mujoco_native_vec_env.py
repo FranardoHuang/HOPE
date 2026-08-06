@@ -48,6 +48,23 @@ def _groups(offset: float = 0.0):
     }
 
 
+#: 人话:包络看几个身体由现役 Isaac 覆写说了算(现在是双脚),测试不再写死 4。
+EE_BODIES = len(vec_env.PHASE_EE_BODY_NAMES)
+
+
+def _ee_errors(**by_index):
+    """One error per live envelope body; unnamed slots stay at zero.
+
+    给每个身体不同的值是刻意的:轴对齐盒那次教训就是"四个格子喂同一个数"的检查
+    对包络到底看哪几个身体完全是瞎的。
+    """
+
+    errors = [0.0] * EE_BODIES
+    for index, value in by_index.items():
+        errors[int(index)] = value
+    return errors
+
+
 def _phase_sample(**overrides):
     sample = {
         "schema_version": 1,
@@ -57,7 +74,7 @@ def _phase_sample(**overrides):
         "reference_terminations_enabled": True,
         "anchor_pos_z_error_m": 0.0,
         "anchor_projected_gravity_z_error_abs": 0.0,
-        "ee_body_pos_z_error_m": [0.0, 0.0, 0.0, 0.0],
+        "ee_body_pos_z_error_m": _ee_errors(),
     }
     sample.update(overrides)
     return sample
@@ -413,7 +430,7 @@ def test_phase_fidelity_contract_and_predicate_are_strict_hold_aware_and_gated()
         anchor_projected_gravity_z_error_abs=(
             vec_env.PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD
         ),
-        ee_body_pos_z_error_m=[vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M] * 4,
+        ee_body_pos_z_error_m=[vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M] * EE_BODIES,
     )
     assert vec_env.exact_phase_fidelity_reasons(at_boundary) == ()
 
@@ -424,12 +441,13 @@ def test_phase_fidelity_contract_and_predicate_are_strict_hold_aware_and_gated()
         anchor_projected_gravity_z_error_abs=np.nextafter(
             vec_env.PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD, np.inf
         ),
-        ee_body_pos_z_error_m=[
-            0.0,
-            np.nextafter(vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M, np.inf),
-            0.0,
-            0.0,
-        ],
+        ee_body_pos_z_error_m=_ee_errors(
+            **{
+                str(EE_BODIES - 1): np.nextafter(
+                    vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M, np.inf
+                )
+            }
+        ),
     )
     assert vec_env.exact_phase_fidelity_reasons(above) == (
         "anchor_pos",
@@ -473,7 +491,14 @@ def test_phase_fidelity_contract_and_predicate_are_strict_hold_aware_and_gated()
             "keys differ",
         ),
         (_phase_sample(anchor_pos_z_error_m=np.nan), "finite and >=0"),
-        (_phase_sample(ee_body_pos_z_error_m=[0.0] * 3), "four finite"),
+        (
+            _phase_sample(ee_body_pos_z_error_m=[0.0] * (EE_BODIES + 1)),
+            "finite non-negative values",
+        ),
+        (
+            _phase_sample(ee_body_pos_z_error_m=[0.0] * (EE_BODIES - 1)),
+            "finite non-negative values",
+        ),
     ],
 )
 def test_phase_fidelity_sample_schema_fails_without_ledger_commit(sample, message):
@@ -799,12 +824,11 @@ def test_event_ledger_phase_fidelity_precedes_base_and_table_reason_order():
         anchor_projected_gravity_z_error_abs=np.nextafter(
             vec_env.PHASE_ANCHOR_ORI_PROJECTED_GRAVITY_Z_THRESHOLD, np.inf
         ),
-        ee_body_pos_z_error_m=[
-            np.nextafter(vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M, np.inf),
-            0.0,
-            0.0,
-            0.0,
-        ],
+        ee_body_pos_z_error_m=_ee_errors(
+            **{
+                "0": np.nextafter(vec_env.PHASE_EE_BODY_POS_Z_THRESHOLD_M, np.inf)
+            }
+        ),
     )
     result = vec_env.DiagnosticEventLedger(control_decimation=4).record_step(
         plant=_plant_row(
@@ -1429,7 +1453,7 @@ def test_phase_fidelity_runtime_sample_drives_only_matching_env_compact_reset():
                     in_hold=True,
                     anchor_pos_z_error_m=10.0,
                     anchor_projected_gravity_z_error_abs=10.0,
-                    ee_body_pos_z_error_m=[10.0] * 4,
+                    ee_body_pos_z_error_m=[10.0] * EE_BODIES,
                 )
             else:
                 row["phase_fidelity_sample"] = _phase_sample()
