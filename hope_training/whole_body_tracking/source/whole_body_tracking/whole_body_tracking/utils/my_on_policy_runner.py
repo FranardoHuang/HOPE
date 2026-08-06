@@ -1469,6 +1469,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         gradient: Mapping[str, object],
         policy: Mapping[str, object],
     ) -> dict:
+        # 现场重新解析一次参数化(_policy_std_abi 自己 fail-closed),用来核对
+        # 这条遥测有没有谎报 noise_std_type。解析不出来就当作不匹配,由下面的
+        # 硬门拒绝,而不是默默放行。
+        runtime_abi = self._policy_std_abi()
+        expected_noise_std_type = (
+            None if runtime_abi is None else runtime_abi["noise_std_type"]
+        )
         record = {
             "event": _REWARD_PPO_ECONOMY_EVENT,
             "schema_version": _REWARD_PPO_ECONOMY_SCHEMA_VERSION,
@@ -1502,7 +1509,22 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 "all_required_values_finite": True,
                 "reward_sum_closure": "PASS",
                 "post_advantage_zero_mean_unit_std": "PASS",
+                # 记录位,不是准入位。N1 vendor probe 收据(materialize_n1_vendor_probe_
+                # _gate_receipt.py)把它钉成 True,所以 N1 那条线照旧只收 log —— 那道门
+                # 一点没动。211 四格不同:action_ball_211_four_grid_contract.py 的两个
+                # sealed 探索包里,标准初始化那一包写死 noise_std_type="scalar",而
+                # 2026-08-05 起"四格全部取标准初始化这一包"。所以对 211 来说,要求
+                # noise_std_type=="log" 等于要求四格违反自己的封存合同。211 的真正下游
+                # 消费者 action_ball_4096x5_prelong_gate.py 根本不读这个字段,只读
+                # policy_std_min/mean/max。
                 "noise_std_type_log": policy.get("noise_std_type") == "log",
+                # 换上来的准入位:遥测不许谎报自己用的是哪套参数化。
+                "noise_std_type_matches_runtime_abi": (
+                    policy.get("noise_std_type") == expected_noise_std_type
+                ),
+                # 这条是真安全不变量,保持硬门。scalar 参数化下 std 是被直接优化的、
+                # 没有 exp() 兜底,所以"每个 update 都复查 std>0"从"冗余"变成唯一防线,
+                # 绝不能松。
                 "policy_std_strictly_positive": float(
                     policy["policy_std_min"]
                 )
@@ -1512,7 +1534,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         if not all(
             value is True
             for key, value in record["checks"].items()
-            if key not in {"reward_sum_closure", "post_advantage_zero_mean_unit_std"}
+            if key
+            not in {
+                "reward_sum_closure",
+                "post_advantage_zero_mean_unit_std",
+                "noise_std_type_log",
+            }
         ):
             raise RuntimeError("reward/PPO economy update did not pass all checks")
         print(

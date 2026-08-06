@@ -862,6 +862,61 @@ def test_reward_ppo_economy_still_refuses_an_unpartitioned_parameter(
         runner._run_reward_ppo_economy_optimizer(lambda: {})
 
 
+def _emit_economy(runner, *, noise_std_type, std_min=0.5):
+    return runner._emit_reward_ppo_economy_update(
+        ppo_update=1,
+        rollout={"reward": {}, "advantage": {}},
+        ppo={},
+        gradient={},
+        policy={
+            "noise_std_type": noise_std_type,
+            "policy_std_min": std_min,
+            "policy_std_mean": std_min,
+            "policy_std_max": std_min,
+        },
+    )
+
+
+# 人话:211 四格的封存合同(action_ball_211_four_grid_contract.py)规定标准初始化包
+# 用 scalar,2026-08-05 起四格全部取这一包。所以经济遥测必须收 scalar,不能再要求 log。
+@pytest.mark.parametrize("noise_std_type", ["scalar", "log"])
+def test_reward_ppo_economy_update_accepts_both_sealed_parameterizations(
+    runner_module, noise_std_type, capsys
+):
+    runner = _economy_runner(runner_module, _EconomyPolicy(noise_std_type))
+    record = _emit_economy(runner, noise_std_type=noise_std_type)
+
+    assert record["status"] == "PASS"
+    assert record["checks"]["noise_std_type_matches_runtime_abi"] is True
+    assert record["checks"]["policy_std_strictly_positive"] is True
+    # 记录位照旧如实反映参数化 —— N1 vendor probe 收据把它钉成 True,那条线仍然只收 log。
+    assert record["checks"]["noise_std_type_log"] is (noise_std_type == "log")
+    assert "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_UPDATE_JSON=" in capsys.readouterr().out
+
+
+# 人话:遥测谎报参数化必须被拒 —— 这是换上来的那道准入位,证明门没被换成摆设。
+@pytest.mark.parametrize(
+    "actual,claimed", [("scalar", "log"), ("log", "scalar")]
+)
+def test_reward_ppo_economy_update_refuses_a_mislabelled_parameterization(
+    runner_module, actual, claimed
+):
+    runner = _economy_runner(runner_module, _EconomyPolicy(actual))
+    with pytest.raises(RuntimeError, match="did not pass all checks"):
+        _emit_economy(runner, noise_std_type=claimed)
+
+
+# 人话:scalar 下 std 被直接优化、没有 exp() 兜底,所以 std>0 是唯一防线,必须照旧硬拒。
+@pytest.mark.parametrize("noise_std_type", ["scalar", "log"])
+@pytest.mark.parametrize("std_min", [0.0, -1.0e-6])
+def test_reward_ppo_economy_update_still_refuses_non_positive_std(
+    runner_module, noise_std_type, std_min
+):
+    runner = _economy_runner(runner_module, _EconomyPolicy(noise_std_type))
+    with pytest.raises(RuntimeError, match="did not pass all checks"):
+        _emit_economy(runner, noise_std_type=noise_std_type, std_min=std_min)
+
+
 # 人话:噪声参数一个都没有(既没 std 也没 log_std)时,ABI 权威自己就要 fail-closed,
 # 绝不能被当成"划分合法"放行。
 def test_reward_ppo_economy_refuses_a_policy_with_no_noise_parameter(runner_module):
