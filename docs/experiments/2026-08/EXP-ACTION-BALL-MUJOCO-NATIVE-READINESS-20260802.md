@@ -960,12 +960,26 @@ clamp/投影/罚三层已经处理的事。
 
 | | 下发的指令 | 离出生姿态 | 结果 |
 | --- | --- | --- | --- |
-| MuJoCo 那个 `1000/1000` | `hold_qdes`（站着不动） | max `.375` / rms `.137` rad | `0` 失败 |
-| Isaac oracle32 | **teacher frame 0** | **max `2.243` rad（右腕偏航 `128°`）** / rms `.659` rad，骨盆另差 `(.154, -.177, .177)` m | tick 级终止 |
+| MuJoCo 那个 `1000/1000` | `hold_qdes`（LP 解出的保持指令） | max `.375` / rms `.137` rad | `0` 失败 |
+| Isaac oracle32（等待期） | **机器人自己的出生关节角** | **`0`（就是它自己）** | `22.3` tick 后终止 |
+| MuJoCo 对照 `arm=teacher0` | teacher frame 0 | max `2.243` rad（右腕偏航 `128°`），骨盆另差 `(.154, -.177, .177)` m | **tick 1** 就撞 |
 
 在 MuJoCo 里用**同一出生状态、同一 plant、仓库自己的 guard** 补跑对照：`arm=hold` → `0/1` 失败、`30` tick 全过
 （复现了那个 `1000/1000`）；`arm=teacher0` → `1/1` 失败、**tick 1 就撞**，first-hit `left_hand_Link` vs `top`，
 精确 SAT `-7.2 mm`。**两个引擎在同一指令下给出同样结论，不一致不存在。**
+
+> **就地更正（同日，本节初稿的机制描述是错的）**：初稿把 Isaac 等待期下发的指令写成 teacher frame 0，
+> 因此把两边差异归结为"指令幅度不同"。**实测推翻**：等待期 `MotionCommand.joint_pos` 在 split-ready 模式下
+> 返回的是**机器人自己的出生关节角**，被 `_run_teacher_qdes_oracle` 原样当位置指令发下去，于是
+> `tau = kp*(q_des - q) - kd*qd = kp*0 - kd*0 = 0`，**31 个关节全零力矩**，从第 1 tick 起自由下坠。
+> 旧收据本身就写着这件事：`raw_action_max_abs = 16.575954` = 出生 `right_wrist_yaw` `1.2432 / action_scale .075`；
+> 若发的真是 teacher frame 0，上界只会是 `13.3354`。而且"发 teacher frame 0"对应的是 MuJoCo 那条
+> **tick 1 就撞**，与 Isaac 观测到的 `22.3` tick 对不上；**零力矩慢塌**才对得上。
+> 修复见 `9e4ffb5e`：等待期改发契约里 LP 解出的 `hold_qdes_joint_pos_rad`
+> （`kp*(hold_qdes - q_birth)` 与存档保持力矩逐项吻合到 `3e-15`，它就是重力补偿本身）。
+> 修复后平均集长 `22.31 -> 30.41` tick，集长对等待长度的斜率 `.32 -> 1.000`（每集恰好 `wait + 15`），
+> **死亡时钟从"出生就开始走"变成"揭示才开始走"，等待窗口从此是白拿的**。
+> 后续 `34f8cf25` 与 §5.6.6 记录了揭示阶跃假设同样被证伪、以及真正的根因。
 
 **keep-out 无罪，且不是过期结构。** oracle32 first-hit 台账 `32/32` 全部 `obstacle="top"`；把 pod 上所有存过
 `table_first_hit` 的证据文件扫全（A211 五个 run + A225 一个），**`192/192` 全是 `("top", "right_wrist_yaw_Link")`，
@@ -991,6 +1005,60 @@ keepout 记录数 `0`**。针对 Franco 2026-08-06「我不确定 `table_robot_k
 所以贴边的是出生姿态不是教师动作，任何让左臂前伸的瞬态都会立刻撞线 —— MuJoCo tick 1 撞的就是它。
 **但按 §5.6.4，`22.3` tick 与 build_1 第 0 迭代的 `23.1` 同量级，终止率本身不异常，因此不构成发车阻塞**；
 要压低撞桌率时，该动的是出生姿态而不是 guard，且必须走 fresh 臂、不与四格归因混变量。
+
+#### 5.6.6 真因：测量出来的运动学参考，不是能产生力矩的指令（2026-08-06）
+
+§5.6.5 修掉等待期的零力矩之后，`oracle32` 仍然 `robot_hit_table=32/32`，只是死因换了。本节记录后续两层，
+以及最终查到的根因。**两层假设都是被测量证伪的，不是被论证推翻的。**
+
+**第二层假设（已证伪）：揭示时的阶跃太大。** 揭示那一 tick `q_des` 从出生姿态直接跳到 teacher frame 0，
+右腕偏航差 `2.24` rad，PD 需求 `-44.9 N·m` 对限幅 `6.0`（`7.48x`），另有 3 个关节同时饱和，两膝
+`+247.6 / +225.1 N·m`。据此实现了 reveal bridge（`34f8cf25`）：把剩余差额按 `1/(frozen+1)` 逐步收敛，
+等分落在 clip 开始推进的那一刻。
+
+| | 加 ramp 前 | 加 ramp 后 |
+| --- | ---: | ---: |
+| `bridge_ramp_command_steps` | `0` | **`544`** |
+| `wait_hold_command_steps` | `461` | `461` |
+| `teacher_reference_command_steps` | `512` | **`0`** |
+| `reveal_reference_step_max_abs_rad` | — | `2.2226` |
+| 集长 min/mean/max | `20 / 30.41 / 40` | `21 / `**`31.41`**` / 41` |
+| 终止 | `robot_hit_table` `32/32` | `robot_hit_table` `32/32` |
+
+**把 `2.22` rad 从 1 步摊到约 35 步，只买到 1 个 tick。** 而 `teacher_reference_command_steps = 0`
+说出了旧收据说不出的一件事：**这一跑从未走到桥的另一端** —— 每一集都死在桥中间，约 35 tick 走到 17，
+指令才走完 `46%`。所以阶跃速度不是死因。**ramp 保留**：它本身是正确的仪器行为，而且正是它把
+"我们以为阶跃致命"变成了一个可测量的否定。
+
+**根因（与 §5.6.5 同一类，深一层）**：**一个测量出来的运动学参考，对受重力的双足机器人不是能产生力矩的指令。**
+等待期之所以能撑住，唯一原因是契约里带了 **LP 解出来的** hold `q_des`
+（`kp*(hold_qdes - q_birth)` 复现所需保持力矩：`right_hip_roll` `36.5`、`waist_pitch` `18.7`、
+`left_ankle_pitch` `15.7 N·m`）。**frame 0 没有对应物，clip 的任何后续帧也没有。**
+指令一旦离开 LP 解，保持力矩就衰减、机器人下沉，**而衰减速率几乎与指令移动快慢无关** ——
+这正是"只多活 1 tick"的机制解释。frame 0 的腿是非对称半蹲（膝 `.62/.52` vs 站立 `.25`），
+与 hold 差 `1.29/1.33` rad（`hip_pitch`）与 `.90/.99` rad（膝）。
+
+**两条早已在仓库里、一直被读成别的东西的旁证**：
+(1) §5.6.5 的 MuJoCo 单变量对照 —— 同出生状态、同 plant、同 guard，`arm=hold` `0/1` 失败跑满 30 tick，
+`arm=teacher0` **第 1 tick 就终止**。两个引擎一致，而且都与阶跃大小无关。
+(2) §12.3 的机械审计 `0/73` 准入，写明原因是「加速度权威、torque-speed 曲线和**逐帧逆动力学力矩**仍缺失」。
+**缺的那一项，正是开环位置回放这条 clip 所需要的东西。**
+
+**推论**：在存在逐帧可执行 `q_des`（或前馈重力/逆动力学力矩）之前，`oracle32` 的 `32/32` exact-strike 门
+**对任何 clip 都不可达**。这不是门太严，是**仪器提不出它被要求回答的那个问题**。
+正在按 MuJoCo `mj_inverse` 逐帧逆动力学补前馈的路线处理；若测得"即使有前馈这条 clip 也不可开环执行"，
+则应重新定义该证书的含义（闭环策略可达性证书 / 运动学可解性证书），**不得为让门通过而降低门**。
+
+**与 A 族无关的一条并列结论（C 族）**：`C211 oracle32` 跑的是**全新未训练策略**的 rollout
+（`run_live_policy_episodes` 调 `runner.get_inference_policy()`），而 launcher 要求
+`single_stroke == 32`、`robot_table_contact_count == 0`、并用错了 hard-termination union。
+**这一条是真的定错范围**，且本仓两处早有定论：§12.4（严格零只涵盖 `qdes-hard`/`actual-hard`/`nonfinite`
+三项，table/fall/too-low 属按阶段归因的行为证据）与 §8.3（「不以『必须零次』循环要求未开训 policy
+已经学会平衡」）；§5.6.4 的基线更直接 —— **build_1 第 0 迭代自己也过不了这个门**。
+正确词表（`STRICT_HARD_TERMINATION_UNION`、`PHYSICAL_FALL_REASONS`、`PHYSICAL_FALL_PHASES`、
+`TASK_WAIT_STARTED_COUNTER`/`TASK_REVEAL_REACHED_COUNTER`）就在同一文件里、且 `scale4096` 验证器已在消费，
+差的只是接线。**修法是让 oracle32 去消费 `scale4096` 已经在消费的那份守恒普查，对两类实现故障保持严格零 ——
+不是删检查。**
 
 ## 6. 智元 setting 的采用表
 
