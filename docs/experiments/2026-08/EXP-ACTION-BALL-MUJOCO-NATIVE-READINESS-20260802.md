@@ -1704,12 +1704,54 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
 以及 `status` 位。**尤其是 `status`**：桥没配起来时生产方返回
 `{"status": "not_configured", ...}`（`:3062-3065`），而严格消费方要求
 `status == "active_fail_closed"`——**接了线就是拒收，现在是静默放行**。
-**该做什么**：把 `_validate_reveal_bridge` 接进 `validate_semantic_updates`，同批加变异测试
-（把 `status` 改成 `not_configured` / 把任一权威 SHA 改一位 / 把某档 WAIT 的
-`reveal_count != start + terminal + censored`，三条都必须转红）。
 **为什么现在没做**：它会改变 gate 的拒绝面，而四格 `scale4096` 正在发；本轮不动正在跑的门。
 **这一条不能只当"清理遗留"读**——`_validate_reveal_bridge` 存在这件事本身，容易让人误以为
-"gate 已经严格消费 v3 了"。
+"gate 已经严格消费 v3 了"。`4c9cf280` 已在该函数 docstring 里写明"**尚未接线**"，
+读代码的人不会再被误导；但接线本身仍然欠着。
+
+**接线方案（2026-08-06 核实，可照着做；等 `scale4096` 落地后执行）。**
+先纠正一处措辞：**不需要"升版"**。`SEMANTIC_SCHEMA_VERSION`（`:63`）就是
+`_SEMANTICS.PRELONG_SEMANTICS_SCHEMA_VERSION`，而生产方那个常量**已经是 `3`**
+（`action_ball_prelong_semantics.py:27`），`_ordered_updates`（`:178-195`）逐行要求
+`schema_version == 3`。所以现役 gate 收的**本来就是 v3 行**，缺的只是"把 v3 多出来的那块字段
+读一读"。这是**纯增量的字段消费**，没有版本号要动，也没有第二个 v2 消费方要同批升。
+
+1. **改哪几行。** 在 `validate_semantic_updates`（`:1216`）的 `for index, row in enumerate(ordered)`
+   循环里，紧挨现有 `row.get("reward_groups")` 那一组取值之后，加一次调用：
+   把 `_validate_reveal_bridge(row.get("reveal_to_playback_bridge"), profile=row_profile,
+   update=index, previous_lifetime=<上一轮的 lifetime>, expected_authority=<第一轮返回的 authority>)`
+   的三个返回值分别接住。函数签名已经为跨 update 状态设计好了：`previous_lifetime`
+   第一轮传 `None`、之后传上一轮返回的第二个值（它内部按 WAIT 档做单调性比较），
+   `expected_authority` 第一轮传 `None`、之后传第一轮返回的 authority
+   （它内部做 `authority != expected_authority` 的整块相等比较，即"五个 update 的权威身份不许漂"）。
+   循环外把逐档 lifetime 汇总，塞进 `:1465` 那个 `return {...}` 的 `aggregate` 里
+   （建议键名 `reveal_to_playback_bridge`），这样收据能**自陈**这一步跑过了——
+   否则又是一个"只出结论、没人读"的位。
+2. **拒绝面会怎么变（这是本条唯一有风险的地方）。** 新增的硬拒收有四类：
+   (a) `status != "active_fail_closed"` —— **桥没配起来时生产方返回
+   `{"status": "not_configured"}`（`:3065`），接线当天这条就会把它拒掉**；
+   `require_bridge_telemetry` 默认 `True`（`:1673`），所以正常路径应当是 `:3285` 的
+   `active_fail_closed`，但"默认为真"和"每一格都真的配上了"是两回事，**接线前先拿一格
+   已落盘的 `scale4096` 收据实测一遍 `status` 到底是什么**，别在发射当天才发现。
+   (b) 七项权威 SHA / `wait_cohort_ticks` / `policy_dt_s == 0.02` 的逐项形状与相等；
+   (c) 每个 WAIT 档 `reveal = start + terminal + censored`，且 `reveal/start/terminal`
+   跨 update 单调不减，且整窗 `reveal_delta > 0`；
+   (d) `timing_at_reveal.reveal_count` 必须等于各档 reveal 之和。
+   `BRIDGE_WAIT_COHORTS = tuple(range(5, 26))`（`:106`）= 21 档，`_exact_keys` 是**精确键集**
+   不是子集，所以生产方**多写或少写一个字段都会拒**——这正是要的，但也意味着
+   producer/consumer 必须同一版本，接线的 commit 里要把两边的 SHA 一起钉。
+3. **需要哪些变异测试**（每条都必须能杀掉，且"粗一个档次的检查"要放过）：
+   - `status` 改 `not_configured`（其余字段全对）→ 必须红。粗版：只检查 `status` 存在。
+   - 任一权威 SHA 改一位十六进制 → 必须红。粗版：只检查长度 64。
+   - 某一档 WAIT 把 `censored_count` 减一、同时把 `reveal_count` 也减一
+     —— **该档自己仍然守恒**，但 `timing_at_reveal.reveal_count` 与各档之和对不上 → 必须红。
+     这条专门打"只逐档看守恒、不看跨块总和"的粗版。
+   - 第 3 个 update 把 `authority` 里某项换掉（前两个 update 一致）→ 必须红。
+     粗版：只校验第一个 update 的 authority。
+   - 某档 `start_count` 比上一 update 变小（其余守恒）→ 必须红。粗版：只看单 update 快照。
+4. **验收**：与本节 (C) 两条同样的做法——先跑 `test_action_ball_4096x5_prelong_gate.py`
+   取基线失败集，接线后逐条对拍；再把接线本身注释掉，确认上面五条变异**全部回绿**
+   （证明测试确实在测这道门，而不是在测别的东西）。
 
 **(B) `promotion_blocked` 这个结论位全仓没有任何消费者，也没有任何测试。**
 §5.6.2 第 10 条记着："把一个硬门改软时，记录与阻断必须同一次改完；只出计数器等于把护栏换成了
@@ -1743,6 +1785,19 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
   它的成本是一次 AST 解析，收益是"两个车道的动作顺序不许各走各的"。
   测试侧 `test_launch_action_ball_curriculum.py:504-505` 已经在给它写 fixture，
   说明当初是打算接的。**注意**：这是 N5 curriculum 车道，不是现役四格，所以优先级低于 (A)。
+  **2026-08-06 已接线并执行。** 三层复核把"有没有别人管着"问死了：
+  (i) **机制码**——`FRESH_ORDER_SOURCE` 不在 `RUNTIME_CODE_SOURCES`（`:158-172`）里，
+  所以那份 blob 连 SHA 都没人钉；两条车道确实有耦合（launcher 收
+  `fitted_ball_gate_receipt` 等四个 fitted-ball 输入），但走的是
+  `_verify_external_pin`，**只核 path+sha256、从不解析收据内容**，顺序永远读不到。
+  (ii) **实验史/文档**——`docs/operations/run_action_ball_curriculum_no_clobber.md:71`
+  白纸黑字写着 launcher "会交叉核对 …… committed `FRESH_N5_ORDER` ……"，
+  **这句话在接线之前是假的**；这正是"假护栏"最贵的形态：文档替一个没跑的检查背书。
+  (iii) **现役 argv**——N5 正式发射本身 fail-closed，所以这是潜伏漂移，不是在跑的错。
+  接法：在 `runtime_code_sha256[HOPE_COMMANDS_SOURCE]` 之后写
+  `runtime_code_sha256[FRESH_ORDER_SOURCE] = _require_fresh_order_sentinel(...)`——
+  一行同时做两件事：**跑检查**，并把该 blob 的 SHA 落进 launch claim，
+  让收据**自陈**这一步跑过了。变异测试见下方"变异证据"。
 - `launch_n1_vendor_baseline_diagnostic.py:1711` `_valid_table_guard_attribution_summary`：
   **判定接线，不删**，但要连它的生产方一起看。它要求 forensic 摘要三路自洽
   （`first_hit_total_count == terminal_count == table_count`、`category_counts` 与
@@ -1751,7 +1806,65 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
   `hope_commands.py:23455 _consume_table_guard_attribution_counts` /
   `:23514 _validate_table_guard_attribution_conservation`，**已经存在且有测试**
   （`test_reward_flags_mdp.py:365-409`）。差的就是 launcher 侧这一步接线。
-  **为什么现在没做**：`hope_commands.py` 此刻有另一条 workflow 在改，本轮不碰。
+  **2026-08-06 已接线并执行，且不需要碰 `hope_commands.py`。** 上一轮把这条挂在
+  "生产方在 `hope_commands.py`、本轮不碰"上，其实**挂错了地方**：launcher 读的不是
+  runtime 那份扁平计数器，而是 `materialize_n1_vendor_probe_gate_receipt.py:1150-1160`
+  归并出来的那块摘要，**字段名与本函数期待的完全一致**（`enabled` /
+  `first_hit_total_count` / `terminal_count` / `category_counts` / `phase_counts` /
+  `sparse_cell_total_count` / `conserves`）。所以接线只动 launcher 一个文件。
+  三层复核：
+  (i) **机制码**——runtime 那道
+  `_validate_table_guard_attribution_conservation` 确实 fail-closed，但它
+  `if not attribution: return` 早退，且比的是**活张量**；materializer 算出
+  `conserves` 之后**主动降级成 `telemetry_only`**（只对 `nonfinite != 0` 抛
+  `ReceiptRefused`）；launcher 原有那段（`:2185` 附近）只查 `telemetry_only is True`
+  与 `category_counts.nonfinite == 0`。**"收据里的账对不上"这件事，三处没有一处会拒。**
+  (ii) **实验史**——`test_n1_vendor_probe_gate_consumer.py` 的 pass-receipt fixture
+  就是活证据：每个 update `termination_reason_robot_hit_table_count = 1000`，
+  而 first-hit 账本全 `0`，`conserves` 是 `False`，
+  **`_validate_vendor_probe_gate_receipt` 照样返回 `vendor_n1_long_launch: True`**。
+  这个洞不是理论上的，它已经被测试固化下来了。
+  (iii) **现役 argv**——launcher 自己在 probe 阶段**强制追加**
+  `+task.table_contact_attribution_diagnostic=true` 且要求 exact-once、非 probe 阶段
+  必须缺席（`:1224-1231`）。所以 probe 收据里"有撞桌终止、账本却记 0"**只能是缺陷**，
+  不可能是"仪器没开"——`enabled/{"enabled": False}` 那条分支与这条 argv 规则同构。
+  接法：放在 `aggregate == recomputed_behavior` **之后**，这样传进去的 table 终止数是
+  **从逐 update 原始行重算出来的**，不是从待检摘要里读的；`categories`/`phases`
+  取 `gate_module._TABLE_ATTRIBUTION_*` 的**活值**，不手抄。
+  fixture 同批改成真守恒（1000 首击 = 1000 撞桌终止，落在
+  `strike` / `proxy_exact_overlap` 一格），"质量很差但账要平"这层语义保留。
+
+**(C-1) 变异证据：证明这两道门真会开火，而且"粗一个档次"的检查会漏。**
+只证明"加完不报错"等于没证明。四个变异**改的都是被测源码本身**，
+每个都必须让新测试转红（pod1，`/usr/bin/python3` + `pytest 9.1.1`）：
+
+| 变异 | 改法 | 结果 |
+| --- | --- | --- |
+| M1 门没接 | 删掉 `runtime_code_sha256[FRESH_ORDER_SOURCE] = _require_fresh_order_sentinel(...)` 这一句 | 转红 ✓ |
+| M2 门太粗 | 接着，但把 `tuple(raw) != ACTION_ORDER` 换成 `set(raw) != set(ACTION_ORDER)` | 转红 ✓ |
+| M3 门没接 | 把 `_valid_table_guard_attribution_summary(...)` 那次调用短路掉 | 转红 ✓ |
+| M4 门太粗 | 接着，但 `table_count` 改成读摘要自己的 `first_hit_total_count`（自证循环） | 转红 ✓ |
+
+M2/M4 是关键：两条测试的变异**故意造成"低一档的检查看不出来"**——
+M2 的变异只把五个动作里的两个**换位**（集合相同、长度相同，只有位置不同），
+M4 让摘要**内部完全自洽**、`conserves` 依旧写着 `True`，只是整体比真实撞桌终止少 5 笔。
+控制组（未变异）与四次变异后恢复的对照都跑过，均为绿。
+
+**(C-2) 独立重扫：本轮没有找到第六个。** 用 AST + 全仓 token 频次重扫
+（`1009` 个 `.py`、`19507` 个模块级 `def`、连嵌套共 `24698` 个 `def`），
+把**代码引用**（只数 `.py`）与**文档提及**（`.md`/`.json`/`.yaml`…）分开数——
+上一版把两者混在一起数，会因为本文反复讨论这些函数名而把它们的计数抬到 `>1`、
+**恰好把要找的东西藏起来**。判据：某个名字在全仓 `.py` 里只出现 `1` 次 = 除自己的 `def`
+外无人提及。这个数法对动态引用是安全的：`getattr(mod, "_validate_x")`、
+`importlib` 共享库的 `_FRAME0._validate_x` / `_L._validate_x`、
+`monkeypatch.setattr(M, "_validate_x", ...)` 里都含有那个字面标识符，计数都会 `>1`
+（`launch_action_ball_a211_four_arm_diagnostic.py` 同时被 C211 launcher 与 materializer
+当共享库用，单文件 AST 会假阳性，token 法不会）。
+把名字形状放宽到 `_validate_*` / `_require_*` / `_valid_*` / `_check_*` / `_assert_*` /
+`_verify_*` / `_reverify_*` / `_ensure_*` / `_reject_*` / `_forbid_*` / `_guard_*` /
+`_refuse_*` / `_enforce_*` / `_must_*` 之后，结果**仍然是这 5 个**，与本节原先登记的一致：
+(A) 一条、本条两条、canonical 车道两条。**"零调用点 gate 是系统性的"这个前提，
+在本轮复核下只成立到 5 个为止，没有第六个**。canonical 车道那两条维持"只登记不判决"。
 
 **(D) §5.6.3「尚未对齐、需单独裁决的」四条逐条现状。**
 

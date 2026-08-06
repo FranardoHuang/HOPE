@@ -2251,6 +2251,29 @@ def _validate_probe_gate_stage(
         )
     ):
         raise LaunchRefused("probe-gate behavior hard/nonfinite counters differ")
+    # ``aggregate`` is now proven equal to the per-update recomputation, so the
+    # table terminal count below is derived from the raw rows rather than from
+    # the summary block we are about to check.  The materializer computes
+    # ``conserves`` but publishes it as ``telemetry_only``; without this call
+    # a receipt whose first-hit ledger recorded none of its table terminals
+    # still authorizes the long launch.  The categories/phases come off the
+    # live gate module, not a transcription.
+    if not _valid_table_guard_attribution_summary(
+        table_attribution,
+        expected_stage=expected_stage,
+        table_count=sum(
+            value
+            for key, value in aggregate.items()
+            if key.startswith("termination_reason_")
+            and key.endswith("_count")
+            and "table" in key[len("termination_reason_") : -len("_count")]
+        ),
+        categories=tuple(gate_module._TABLE_ATTRIBUTION_CATEGORIES),
+        phases=tuple(gate_module._TABLE_ATTRIBUTION_PHASES),
+    ):
+        raise LaunchRefused(
+            "probe-gate table-guard attribution ledger does not conserve"
+        )
     push_diagnostic = stage.get("push_velocity_diagnostic")
     push_updates = (
         push_diagnostic.get("updates")

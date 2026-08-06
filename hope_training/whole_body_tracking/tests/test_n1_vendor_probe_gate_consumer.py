@@ -239,6 +239,11 @@ def _gate_module():
         _validate_joint_safety=M._validate_joint_safety,
         _validate_behavior=M._validate_behavior,
         _validate_push_velocity=M._validate_push_velocity,
+        # Bound to the live materializer constants, not retyped here: the
+        # launcher reads the table-attribution partition names off this module
+        # so that a rename on the producer side cannot pass unnoticed.
+        _TABLE_ATTRIBUTION_CATEGORIES=M._TABLE_ATTRIBUTION_CATEGORIES,
+        _TABLE_ATTRIBUTION_PHASES=M._TABLE_ATTRIBUTION_PHASES,
     )
 
 
@@ -619,15 +624,27 @@ def _stage(name: str) -> dict:
                         M._ENTRY_COUNT: 1,
                         M._ENTRY_NONFINITE: 0,
                         **{key: 0 for key in M._ENTRY_BUCKETS},
-                        "table_guard_first_hit_total_count": 0,
+                        # Poor quality, but the forensic ledger still has to
+                        # account for every table terminal: first-hit total,
+                        # category partition, phase partition and sparse cells
+                        # all equal the 1000 ``robot_hit_table`` terminals.
+                        "table_guard_first_hit_total_count": 1000,
                         **{
-                            f"table_guard_first_hit_category_{category}_count": 0
+                            f"table_guard_first_hit_category_{category}_count": (
+                                1000 if category == "proxy_exact_overlap" else 0
+                            )
                             for category in M._TABLE_ATTRIBUTION_CATEGORIES
                         },
                         **{
-                            f"table_guard_first_hit_phase_{phase}_count": 0
+                            f"table_guard_first_hit_phase_{phase}_count": (
+                                1000 if phase == "strike" else 0
+                            )
                             for phase in M._TABLE_ATTRIBUTION_PHASES
                         },
+                        (
+                            "table_guard_first_hit_cell_strike_"
+                            "proxy_exact_overlap_component_00_paddle_table_count"
+                        ): 1000,
                         "termination_reason_joint_actual_forbidden_count": 0,
                         "termination_reason_joint_qdes_forbidden_count": 0,
                         "termination_reason_robot_hit_table_count": 1000,
@@ -881,7 +898,7 @@ def test_exact_pass_receipt_is_recomputed_and_tamper_is_rejected(
         "within_telemetry_thresholds"
     ] is False
     assert behavior["reachability_and_failure_rates"]["telemetry_only"] is True
-    assert behavior["table_guard_attribution"]["conserves"] is False
+    assert behavior["table_guard_attribution"]["conserves"] is True
     assert behavior["table_guard_attribution"]["telemetry_only"] is True
     assert behavior["strike_window_entry_conservation"]["matches"] is False
     assert behavior["strike_window_entry_conservation"]["telemetry_only"] is True
@@ -918,6 +935,100 @@ def test_exact_pass_receipt_is_recomputed_and_tamper_is_rejected(
             spec={},
             payload={},
         )
+
+
+def _attribution_mutation(receipt: dict, mutate) -> dict:
+    """Deep-copy ``receipt`` and rewrite only its table-attribution summary.
+
+    The raw ``behavior.updates`` rows stay untouched, so the launcher's own
+    recomputation of the table terminal ledger still says 5 x 1000.  Every
+    mutation below therefore has to be caught by cross-checking the summary
+    against that recomputation -- not by re-reading the summary's own fields.
+    """
+
+    mutated = copy.deepcopy(receipt)
+    mutate(mutated["stages"]["probe"]["behavior"]["table_guard_attribution"])
+    return mutated
+
+
+def test_table_guard_attribution_ledger_must_conserve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The forensic first-hit ledger is a refusal, not a telemetry field.
+
+    Every mutation here keeps the summary block *internally* self-consistent
+    and leaves ``conserves`` claiming ``True``.  A checker one notch coarser --
+    one that recomputed the partitions from the summary, or that trusted the
+    published ``conserves`` bit -- passes all three.  Only comparing the
+    summary against the independently recomputed ``robot_hit_table`` terminals
+    kills them.
+    """
+
+    receipt = _receipt()
+    _install_validator_fixtures(monkeypatch, receipt)
+    baseline = L._validate_vendor_probe_gate_receipt(
+        tmp_path,
+        "7" * 40,
+        {"path": "configs/n1_vendor_probe_gate_20260731/pass.json", "sha256": "6" * 64},
+        spec={},
+        payload={},
+    )
+    assert baseline["authorization"]["vendor_n1_long_launch"] is True
+    attribution = receipt["stages"]["probe"]["behavior"][
+        "table_guard_attribution"
+    ]
+    assert attribution["first_hit_total_count"] == 5000
+    assert attribution["conserves"] is True
+
+    def undercount(summary: dict) -> None:
+        # Five table terminals never made it into the ledger.  Total, both
+        # partitions and the sparse cells are all lowered together, so the
+        # block still passes any self-consistency check and still advertises
+        # ``conserves: True``.
+        summary["first_hit_total_count"] = 4995
+        summary["terminal_count"] = 4995
+        summary["sparse_cell_total_count"] = 4995
+        summary["category_counts"]["proxy_exact_overlap"] = 4995
+        summary["phase_counts"]["strike"] = 4995
+
+    def cell_drift(summary: dict) -> None:
+        # Total and both partitions agree; only the sparse per-cell expansion
+        # lost a row.  A gate that stopped at category/phase would pass this.
+        summary["sparse_cell_total_count"] = 4999
+
+    def disabled_flag(summary: dict) -> None:
+        # The probe stage forces ``+task.table_contact_attribution_diagnostic
+        # =true`` exact-once, so a probe receipt may never report the ledger
+        # as switched off.
+        summary["enabled"] = False
+
+    for name, mutate in (
+        ("undercount", undercount),
+        ("cell_drift", cell_drift),
+        ("disabled_flag", disabled_flag),
+    ):
+        mutated = _attribution_mutation(receipt, mutate)
+        assert (
+            mutated["stages"]["probe"]["behavior"]["table_guard_attribution"][
+                "conserves"
+            ]
+            is True
+        ), name
+        _reseal(mutated)
+        _install_validator_fixtures(monkeypatch, mutated)
+        with pytest.raises(
+            L.LaunchRefused, match="table-guard attribution ledger does not conserve"
+        ):
+            L._validate_vendor_probe_gate_receipt(
+                tmp_path,
+                "7" * 40,
+                {
+                    "path": "configs/n1_vendor_probe_gate_20260731/pass.json",
+                    "sha256": "6" * 64,
+                },
+                spec={},
+                payload={},
+            )
 
 
 @pytest.mark.parametrize(

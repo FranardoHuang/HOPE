@@ -4369,6 +4369,15 @@ def prepare_launch_plan(spec_path_value: str | Path, stage: str) -> dict[str, An
     runtime_code_sha256[HOPE_COMMANDS_SOURCE] = (
         drain_operational_identity["runtime_source_sha256"]
     )
+    # The MuJoCo fitted-ball lane and this Isaac lane must agree on the action
+    # order bit for bit.  Nothing else compares them: this launcher pins the
+    # fitted-ball gate receipt by path+SHA only (``_verify_external_pin``) and
+    # never reads the order out of it, and ``FRESH_ORDER_SOURCE`` is not in
+    # ``RUNTIME_CODE_SOURCES``.  Recording the sentinel's blob digest here is
+    # how the launch spec self-reports that the comparison actually ran.
+    runtime_code_sha256[FRESH_ORDER_SOURCE] = _require_fresh_order_sentinel(
+        checkout, source_commit
+    )
     authority_canonical_sha, stage_evaluator_public_key = (
         _validate_stage_evaluator_authority(
             load_strict_json(

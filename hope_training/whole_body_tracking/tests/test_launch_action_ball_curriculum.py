@@ -1372,6 +1372,42 @@ def test_generic_launcher_rejects_fixed_v2_for_an_n5_source(
         M.prepare_launch_plan(launch_fixture.spec_path, "smoke")
 
 
+def test_fresh_n5_order_sentinel_rejects_a_reordered_mujoco_lane(
+    launch_fixture: LaunchFixture,
+) -> None:
+    """The two lanes must agree on the action order bit for bit.
+
+    The mutation keeps the *same five action ids* and only swaps two of them.
+    A set- or length-comparison passes it; only a positional comparison fails.
+    Nothing else in this launcher would notice: the fitted-ball gate receipt is
+    pinned by path+SHA and never parsed, and ``FRESH_ORDER_SOURCE`` is absent
+    from ``RUNTIME_CODE_SOURCES``.
+    """
+
+    source_path = launch_fixture.repo / M.FRESH_ORDER_SOURCE
+    plan = M.prepare_launch_plan(launch_fixture.spec_path, "smoke")
+    # The launch claim self-reports that the comparison ran, against the live
+    # bytes rather than a transcribed digest.
+    assert plan["canonical_payload"]["runtime_code_sha256"][
+        M.FRESH_ORDER_SOURCE
+    ] == M.sha256_file(source_path)
+
+    reordered = list(M.ACTION_ORDER)
+    reordered[0], reordered[1] = reordered[1], reordered[0]
+    assert set(reordered) == set(M.ACTION_ORDER)
+    assert len(reordered) == len(M.ACTION_ORDER)
+    assert tuple(reordered) != M.ACTION_ORDER
+    source_path.write_text(
+        f"{M.FRESH_ORDER_NAME} = {tuple(reordered)!r}\n", encoding="utf-8"
+    )
+    launch_fixture.commit_repo_change("permute the mujoco fresh-N5 order")
+
+    with pytest.raises(
+        M.LaunchRefused, match=f"stale {M.FRESH_ORDER_NAME}"
+    ):
+        M.prepare_launch_plan(launch_fixture.spec_path, "smoke")
+
+
 def test_plan_ignores_caller_git_path_and_repository_environment(
     launch_fixture: LaunchFixture,
     monkeypatch: pytest.MonkeyPatch,
