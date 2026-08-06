@@ -491,6 +491,34 @@ _ACTION_BALL_CONTACT_REJECTION_COUNTERS = (
     "virtual_contact_u_n_above_fit_reject_count",
 )
 _ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS = 64
+# The action-ball product line solves in exactly one direction mode: the answer
+# must lie on the frozen prototype's rotated direction.
+#
+# ``solve_proposals`` does not branch on this flag -- it always runs
+# ``_solve_fixed_direction_batch`` -- but its precondition
+# ``_validate_external_proposals`` refuses outright when the flag is false
+# ("solve_proposals is fixed-direction only"), so flipping it does not silently
+# reroute the solve; it kills every refill.  What it DOES do silently is make
+# the profile payload's ``"fixed_direction": True`` a false declaration.  The
+# value therefore lives here as one named covered constant that the payload, the
+# runtime construction and the boot cross-check all read, so the declaration and
+# the executed value cannot be edited apart.
+_ACTION_BALL_SOLVER_FIXED_DIRECTION = True
+# The ten venue-physics numbers the physics profile payload declares one by one
+# and the solver actually integrates with.  One tuple, two readers: the payload
+# builder and the runtime cross-check.
+_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES = (
+    "k_d",
+    "k_m",
+    "g",
+    "ball_radius",
+    "inertia_coeff",
+    "paddle_a_t",
+    "paddle_b_t",
+    "paddle_mu",
+    "paddle_e_g1",
+    "paddle_e_g2",
+)
 
 
 def _batched_host_scalar_values(values: Sequence[torch.Tensor]) -> tuple[float, ...]:
@@ -2131,18 +2159,7 @@ def action_ball_physics_profile_contract(
         },
         "virtual_ball_params": {
             name: float(getattr(prm, name))
-            for name in (
-                "k_d",
-                "k_m",
-                "g",
-                "ball_radius",
-                "inertia_coeff",
-                "paddle_a_t",
-                "paddle_b_t",
-                "paddle_mu",
-                "paddle_e_g1",
-                "paddle_e_g2",
-            )
+            for name in _ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES
         },
         "geometry_and_grading": {
             "table_surface_z_m": float(cfg.vb_table_surface_z),
@@ -2164,6 +2181,228 @@ def action_ball_physics_profile_contract(
     return {
         "payload": payload,
         "sha256": _action_ball_canonical_sha256(payload),
+    }
+
+
+def action_ball_declared_solver_knobs(cfg) -> dict:
+    """The executable solver knobs, in exactly the words the profile payload uses.
+
+    人话:这五个数既要**写进 pin 的 payload**,也要**真的喂给求解器**。它们只在
+    这里算一次:``action_ball_solver_profile_contract`` 把它写进 payload,
+    ``action_ball_assert_solver_runtime_matches_declaration`` 拿它去对活值。
+    期望值不允许出现第三份手抄 —— 手抄的那份迟早和代码分家,而分家的那一天
+    没有任何门会响。
+    """
+
+    return {
+        "n_iters": int(cfg.cq_n_iters),
+        "tol_m": float(cfg.cq_tol_m),
+        "global_speed_budget_mps": float(cfg.cq_speed_budget),
+        "max_external_proposal_rounds": int(cfg.cq_max_redraw_rounds),
+        "external_overdraw_multiplier": float(cfg.cq_overdraw),
+    }
+
+
+def action_ball_solver_cfg_from_declaration(cfg, continuous_question_cfg_type):
+    """Build the live ``ContinuousQuestionCfg`` from the declared knobs, nothing else.
+
+    人话:这是"把钉住的旋钮交给求解器"的**唯一一处映射**。它以前长在
+    ``_initialize_action_ball_runtime`` 那 1700 多行接线里,而那个函数以
+    "只是选绑哪种题源"为由被排除在语义面之外 —— 于是
+    ``tol_m=float(cfg.cq_tol_m) * 0.5`` 这种改法改得动答案却动不了 pin。
+    映射搬到这里、并进覆盖面,改一个字 pin 就动。
+    """
+
+    knobs = action_ball_declared_solver_knobs(cfg)
+    return continuous_question_cfg_type(
+        tol_m=knobs["tol_m"],
+        n_iters=knobs["n_iters"],
+        speed_budget=knobs["global_speed_budget_mps"],
+        max_redraw_rounds=knobs["max_external_proposal_rounds"],
+        fixed_direction=_ACTION_BALL_SOLVER_FIXED_DIRECTION,
+    )
+
+
+def action_ball_assert_solver_runtime_matches_declaration(
+    *,
+    solver_declaration: dict,
+    physics_declaration: dict,
+    solver_cfg,
+    prm,
+    planes,
+    rollout_h,
+    rollout_steps,
+    overdraw=None,
+    maximum_rounds=None,
+    diagnostic_unauthorized: bool = False,
+    call_site: str,
+) -> dict:
+    """Refuse unless every number the sealed profiles declare is the number the solver gets.
+
+    人话:pin 封的是"**声明的数字**";这个函数检查"**真正喂进求解器的数字**"和
+    声明一致。两者之间的传递线本身不在覆盖面里(它们住在那条 1700 多行的接线
+    函数里,而把整条接线塞进覆盖面会让每次改接线都作废题库),所以静态指纹读不出
+    ``fixed_direction=True -> False`` / ``tol_m * 0.5`` / ``speed_budget * 2``
+    这类改动。这里逐字段比,不等就 fail-closed。
+
+    这个函数本身**在覆盖面里**,三个入口点也在覆盖面里:删掉调用、放宽比较、
+    少比一个字段,任何一种都会动 pin,manifest 立刻对不上。
+
+    ``overdraw`` / ``maximum_rounds`` 只有 ``_action_ball_refill_pool_many``
+    这条路会用(另外两个入口点一次解完,不重抽),传 ``None`` 表示"本调用点不
+    使用它",返回的收据里会自陈到底比了哪几个字段。
+
+    Returns a small self-describing receipt: which call site ran the check, how
+    many fields it compared, and their names.  A gate that only reports a count
+    is a gate nobody can audit later.
+    """
+
+    from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
+        BALL_BIRTH_NET_MARGIN_M,
+        CONTACT_NORMAL_SPEED_MAX_MPS,
+        CONTACT_NORMAL_SPEED_MIN_MPS,
+    )
+
+    if not isinstance(solver_declaration, dict) or not isinstance(
+        physics_declaration, dict
+    ):
+        raise RuntimeError(
+            "action-ball solver runtime cross-check needs both sealed payloads"
+        )
+    if (
+        solver_declaration.get("kind")
+        != "whole_body_tracking.continuous_questions.solve_proposals"
+        or int(solver_declaration.get("schema_version", -1))
+        != _ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            "action-ball solver runtime cross-check was handed a payload that is "
+            "not the schema v"
+            f"{_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION} solver profile: "
+            f"kind={solver_declaration.get('kind')!r}, "
+            f"schema_version={solver_declaration.get('schema_version')!r}"
+        )
+    if (
+        physics_declaration.get("kind")
+        != "whole_body_tracking.action_ball.physics_and_scorer"
+    ):
+        raise RuntimeError(
+            "action-ball solver runtime cross-check was handed a payload that is "
+            "not the physics/scorer profile: "
+            f"kind={physics_declaration.get('kind')!r}"
+        )
+    solve = solver_declaration["solve"]
+    acceptance = solver_declaration["acceptance"]
+    fit = acceptance["contact_normal_speed_fit"]
+    geometry = physics_declaration["geometry_and_grading"]
+    diagnostic = bool(diagnostic_unauthorized)
+    surface_z, net_x, net_top_z = planes
+    # (name, what the sealed payload declares, what the solver is about to get)
+    comparisons = [
+        ("solver.fixed_direction", bool(solver_declaration["fixed_direction"]),
+         bool(solver_cfg.fixed_direction)),
+        ("solver.solve.n_iters", int(solve["n_iters"]), int(solver_cfg.n_iters)),
+        ("solver.solve.tol_m", float(solve["tol_m"]), float(solver_cfg.tol_m)),
+        ("solver.solve.global_speed_budget_mps",
+         float(solve["global_speed_budget_mps"]), float(solver_cfg.speed_budget)),
+        ("solver.solve.max_external_proposal_rounds",
+         int(solve["max_external_proposal_rounds"]),
+         int(solver_cfg.max_redraw_rounds)),
+        ("solver.acceptance.landing.tol_m",
+         float(acceptance["landing"]["tol_m"]), float(solver_cfg.tol_m)),
+        ("solver.acceptance.net.ball_center_net_top_z_m",
+         float(acceptance["net"]["ball_center_net_top_z_m"]), float(net_top_z)),
+        ("solver.acceptance.contact_normal_speed_fit.minimum_mps_inclusive",
+         float(fit["minimum_mps_inclusive"]), float(CONTACT_NORMAL_SPEED_MIN_MPS)),
+        ("solver.acceptance.contact_normal_speed_fit.maximum_mps_inclusive",
+         float(fit["maximum_mps_inclusive"]), float(CONTACT_NORMAL_SPEED_MAX_MPS)),
+        ("solver.acceptance.incoming_birth.net_margin_m",
+         float(acceptance["incoming_birth"]["net_margin_m"]),
+         float(BALL_BIRTH_NET_MARGIN_M)),
+        ("solver.integrator.h_s",
+         float(solver_declaration["integrator"]["h_s"]), float(rollout_h)),
+        ("solver.integrator.n_steps",
+         int(solver_declaration["integrator"]["n_steps"]), int(rollout_steps)),
+        ("physics.scorer_integrator.h_s",
+         float(physics_declaration["scorer_integrator"]["h_s"]), float(rollout_h)),
+        ("physics.scorer_integrator.n_steps",
+         int(physics_declaration["scorer_integrator"]["n_steps"]),
+         int(rollout_steps)),
+        ("physics.geometry_and_grading.ball_center_surface_z_m",
+         float(geometry["ball_center_surface_z_m"]), float(surface_z)),
+        ("physics.geometry_and_grading.net_x_m",
+         float(geometry["net_x_m"]), float(net_x)),
+        ("physics.geometry_and_grading.ball_center_net_top_z_m",
+         float(geometry["ball_center_net_top_z_m"]), float(net_top_z)),
+    ]
+    declared_params = physics_declaration["virtual_ball_params"]
+    for name in _ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES:
+        comparisons.append(
+            (
+                "physics.virtual_ball_params.%s" % name,
+                float(declared_params[name]),
+                float(getattr(prm, name)),
+            )
+        )
+    if overdraw is not None:
+        # A diagnostic (unauthorized) run is allowed exactly one departure from
+        # the declaration, and it is a named constant, not a free expression.
+        comparisons.append(
+            (
+                "solver.solve.external_overdraw_multiplier",
+                1.0 if diagnostic else float(solve["external_overdraw_multiplier"]),
+                float(overdraw),
+            )
+        )
+    if maximum_rounds is not None:
+        # A diagnostic run is allowed to raise the redraw budget to the named
+        # constant, so under that brand the effective bound may be either the
+        # declared one or that constant -- and nothing else.  A formal run has
+        # no exemption at all.
+        allowed_rounds = (
+            (
+                int(solve["max_external_proposal_rounds"]),
+                _ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS,
+            )
+            if diagnostic
+            else (int(solve["max_external_proposal_rounds"]),)
+        )
+        if int(maximum_rounds) in allowed_rounds:
+            effective_rounds_declared = int(maximum_rounds)
+        else:
+            effective_rounds_declared = allowed_rounds[0]
+        comparisons.append(
+            (
+                "solver.solve.max_external_proposal_rounds.effective",
+                effective_rounds_declared,
+                int(maximum_rounds),
+            )
+        )
+    drift = [
+        (name, declared, actual)
+        for name, declared, actual in comparisons
+        if type(declared) is not type(actual) or declared != actual
+    ]
+    if drift:
+        raise RuntimeError(
+            "action-ball solver runtime does not match the sealed profile it was "
+            f"admitted under (checked at {call_site}, "
+            f"diagnostic_unauthorized={diagnostic}, "
+            f"{len(drift)} of {len(comparisons)} fields drifted). The pin seals "
+            "the DECLARED numbers; this gate compares them to the numbers the "
+            "solver is actually handed, because the wiring in between is not "
+            "part of the semantic surface:\n  "
+            + "\n  ".join(
+                f"{name}: declared={declared!r} actual={actual!r}"
+                for name, declared, actual in drift
+            )
+        )
+    return {
+        "kind": "whole_body_tracking.action_ball.solver_runtime_declaration_check",
+        "call_site": str(call_site),
+        "diagnostic_unauthorized": diagnostic,
+        "compared_field_count": len(comparisons),
+        "compared_fields": [name for name, _declared, _actual in comparisons],
     }
 
 
@@ -2231,6 +2470,7 @@ def action_ball_solver_profile_contract(
         rejection_reasons.extend(
             COUNTER_RALLY_SOLVER_REJECTION_REASON_SCHEMA
         )
+    declared_knobs = action_ball_declared_solver_knobs(cfg)
     payload = {
         "schema_version": _ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION,
         "kind": "whole_body_tracking.continuous_questions.solve_proposals",
@@ -2254,7 +2494,7 @@ def action_ball_solver_profile_contract(
         },
         "physics_profile_sha256": str(physics_profile_sha256),
         "contact_geometry": dict(contact_geometry_contract),
-        "fixed_direction": True,
+        "fixed_direction": _ACTION_BALL_SOLVER_FIXED_DIRECTION,
         "batch_semantics": {
             "row_separable": True,
             "required_parity": (
@@ -2262,13 +2502,7 @@ def action_ball_solver_profile_contract(
             ),
             "resume_replay_grouping": "arbitrary_pending_receipt_batch",
         },
-        "solve": {
-            "n_iters": int(cfg.cq_n_iters),
-            "tol_m": float(cfg.cq_tol_m),
-            "global_speed_budget_mps": float(cfg.cq_speed_budget),
-            "max_external_proposal_rounds": int(cfg.cq_max_redraw_rounds),
-            "external_overdraw_multiplier": float(cfg.cq_overdraw),
-        },
+        "solve": dict(declared_knobs),
         "integrator": {
             "h_s": float(cfg.vb_rollout_h),
             "n_steps": int(cfg.vb_rollout_steps),
@@ -2314,13 +2548,20 @@ def action_ball_solver_profile_contract(
                 "definition": (
                     "-dot(v_ball_in-v_racket,selected_physical_B_face_normal)"
                 ),
+                # These three stay literal on purpose: the offline pinner mints
+                # this payload from a git revision's source text, so a builder
+                # that imported the live constants would mint a pin the pinned
+                # revision does not describe.  The declaration is instead held
+                # honest at runtime -- ``action_ball_assert_solver_runtime_
+                # matches_declaration`` compares each of them to the live
+                # constant before a question is drawn, and refuses on drift.
                 "minimum_mps_inclusive": 1.4,
                 "maximum_mps_inclusive": 7.2,
                 "rejection_reason": "contact_normal_speed_out_of_fit",
             },
             "landing": {
                 "predicate": "finite_first_descending_crossing_and_l2_error_strictly_below_tol",
-                "tol_m": float(cfg.cq_tol_m),
+                "tol_m": declared_knobs["tol_m"],
             },
             "net": {
                 "predicate": "finite_positive_x_crossing_and_ball_center_z_strictly_above_top",
@@ -2331,6 +2572,8 @@ def action_ball_solver_profile_contract(
                     "contact_x_w_plus_abs_v_in_x_times_ttc_linear_lower_"
                     "bound_at_or_beyond_net_plane_plus_margin"
                 ),
+                # Literal for the same reason as the contact-fit bounds above,
+                # and cross-checked against BALL_BIRTH_NET_MARGIN_M at runtime.
                 "net_margin_m": 0.05,
                 "rejection_reason": "ball_birth_not_beyond_net",
             },
@@ -5340,12 +5583,12 @@ class RacketTargetCommand(CommandTerm):
                 "which records the before/after and proves question identity "
                 "is unchanged.)"
             )
-        solver_cfg = ContinuousQuestionCfg(
-            tol_m=float(self.cfg.cq_tol_m),
-            n_iters=int(self.cfg.cq_n_iters),
-            speed_budget=float(self.cfg.cq_speed_budget),
-            max_redraw_rounds=int(self.cfg.cq_max_redraw_rounds),
-            fixed_direction=True,
+        # The mapping itself lives in a covered symbol on purpose: this used to be
+        # an inline constructor inside this 1700-line wiring function, which the
+        # semantic surface excludes, so `tol_m * 0.5` or `fixed_direction=False`
+        # changed every answer while leaving the pin untouched.
+        solver_cfg = action_ball_solver_cfg_from_declaration(
+            self.cfg, ContinuousQuestionCfg
         )
         prototypes = load_stroke_prototype_tensors(
             assets.prototype.resolved_path,
@@ -5812,6 +6055,25 @@ class RacketTargetCommand(CommandTerm):
             if diagnostic_unauthorized
             else int(self.cfg.cq_max_redraw_rounds)
         )
+        # Boot-time half of the declaration/actual cross-check.  The load-bearing
+        # half runs inside the three covered solve entry points, so deleting this
+        # call cannot open the hole -- but failing here means a bad wiring edit
+        # dies at boot instead of at the first refill.
+        solver_declaration_check = (
+            action_ball_assert_solver_runtime_matches_declaration(
+                solver_declaration=solver_contract["payload"],
+                physics_declaration=physics_contract["payload"],
+                solver_cfg=solver_cfg,
+                prm=prm,
+                planes=(surface_z, net_x, net_top_z),
+                rollout_h=float(self.cfg.vb_rollout_h),
+                rollout_steps=int(self.cfg.vb_rollout_steps),
+                overdraw=effective_cq_overdraw,
+                maximum_rounds=effective_cq_max_redraw_rounds,
+                diagnostic_unauthorized=diagnostic_unauthorized,
+                call_site="_initialize_action_ball_runtime",
+            )
+        )
         broker = ActionBirthBroker(
             bindings,
             pins,
@@ -5874,6 +6136,7 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_pool = pool
         self._action_ball_prototypes = prototypes
         self._action_ball_solver_cfg = solver_cfg
+        self._action_ball_solver_declaration_check = solver_declaration_check
         self._action_ball_prm = prm
         self._counter_rally_enabled = (
             counter_rally_objective is not None
@@ -6757,7 +7020,7 @@ class RacketTargetCommand(CommandTerm):
                 "implementation_source_sha256": dict(
                     self._action_ball_runtime_source_sha256
                 ),
-                "fixed_direction": True,
+                "fixed_direction": _ACTION_BALL_SOLVER_FIXED_DIRECTION,
                 "wrap_teleport": False,
             },
             "motion_admission": (
@@ -9117,6 +9380,27 @@ class RacketTargetCommand(CommandTerm):
             device=self.device,
         )
         surface_z, net_x, net_top_z = self._action_ball_planes
+        rollout_h = float(self.cfg.vb_rollout_h)
+        rollout_steps = int(self.cfg.vb_rollout_steps)
+        # Replay must be solved by the same numbers the pin declares, or a
+        # "pinned solver replay" that passes proves nothing.  overdraw/rounds are
+        # not consulted on this path (one solve, no redraw), so they are declared
+        # absent rather than compared against a value nobody uses.
+        action_ball_assert_solver_runtime_matches_declaration(
+            solver_declaration=self._action_ball_solver_contract["payload"],
+            physics_declaration=self._action_ball_physics_contract["payload"],
+            solver_cfg=self._action_ball_solver_cfg,
+            prm=self._action_ball_prm,
+            planes=(surface_z, net_x, net_top_z),
+            rollout_h=rollout_h,
+            rollout_steps=rollout_steps,
+            overdraw=None,
+            maximum_rounds=None,
+            diagnostic_unauthorized=bool(
+                getattr(self, "_action_ball_diagnostic_unauthorized", False)
+            ),
+            call_site="_action_ball_replay_emitted_tasks",
+        )
         result = solve_proposals(
             clip_ids,
             contact,
@@ -9131,8 +9415,8 @@ class RacketTargetCommand(CommandTerm):
             net_x=net_x,
             net_top_z=net_top_z,
             cfg=self._action_ball_solver_cfg,
-            h=float(self.cfg.vb_rollout_h),
-            n_steps=int(self.cfg.vb_rollout_steps),
+            h=rollout_h,
+            n_steps=rollout_steps,
         )
         if (
             tuple(result.ok.shape) != (len(canonical),)
@@ -9368,6 +9652,25 @@ class RacketTargetCommand(CommandTerm):
         else:
             effective_cq_overdraw = float(self.cfg.cq_overdraw)
         surface_z, net_x, net_top_z = self._action_ball_planes
+        rollout_h = float(self.cfg.vb_rollout_h)
+        rollout_steps = int(self.cfg.vb_rollout_steps)
+        # Every number below comes out of the boot wiring function, which the
+        # semantic surface excludes.  Compare it to the sealed profile before a
+        # single question is drawn: this call site is covered, so removing it
+        # moves the pin.
+        action_ball_assert_solver_runtime_matches_declaration(
+            solver_declaration=self._action_ball_solver_contract["payload"],
+            physics_declaration=self._action_ball_physics_contract["payload"],
+            solver_cfg=self._action_ball_solver_cfg,
+            prm=self._action_ball_prm,
+            planes=(surface_z, net_x, net_top_z),
+            rollout_h=rollout_h,
+            rollout_steps=rollout_steps,
+            overdraw=effective_cq_overdraw,
+            maximum_rounds=maximum_rounds,
+            diagnostic_unauthorized=diagnostic_unauthorized,
+            call_site="_action_ball_refill_pool_many",
+        )
         dtype = self._ref_racket_normal_raw_w_per_clip.dtype
         states = []
         seen_births = set()
@@ -9695,8 +9998,8 @@ class RacketTargetCommand(CommandTerm):
                 "net_x": net_x,
                 "net_top_z": net_top_z,
                 "cfg": self._action_ball_solver_cfg,
-                "h": float(self.cfg.vb_rollout_h),
-                "n_steps": int(self.cfg.vb_rollout_steps),
+                "h": rollout_h,
+                "n_steps": rollout_steps,
             }
             if target_source == "direct_ball":
                 from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
@@ -13109,6 +13412,25 @@ class RacketTargetCommand(CommandTerm):
             dtype=dtype,
             device=self.device,
         )
+        rollout_h = float(self.cfg.vb_rollout_h)
+        rollout_steps = int(self.cfg.vb_rollout_steps)
+        # The frozen evaluator solves once and never redraws, so overdraw and the
+        # redraw-round budget are declared absent here rather than compared.
+        action_ball_assert_solver_runtime_matches_declaration(
+            solver_declaration=self._action_ball_solver_contract["payload"],
+            physics_declaration=self._action_ball_physics_contract["payload"],
+            solver_cfg=self._action_ball_solver_cfg,
+            prm=self._action_ball_prm,
+            planes=(surface_z, net_x, net_top_z),
+            rollout_h=rollout_h,
+            rollout_steps=rollout_steps,
+            overdraw=None,
+            maximum_rounds=None,
+            diagnostic_unauthorized=bool(
+                getattr(self, "_action_ball_diagnostic_unauthorized", False)
+            ),
+            call_site="_action_ball_frozen_eval_solve",
+        )
         result = solve_proposals(
             clip_ids,
             contact,
@@ -13123,8 +13445,8 @@ class RacketTargetCommand(CommandTerm):
             net_x=net_x,
             net_top_z=net_top_z,
             cfg=self._action_ball_solver_cfg,
-            h=float(self.cfg.vb_rollout_h),
-            n_steps=int(self.cfg.vb_rollout_steps),
+            h=rollout_h,
+            n_steps=rollout_steps,
         )
         unknown_reasons = sorted(
             set(result.reason_counts) - known_reasons

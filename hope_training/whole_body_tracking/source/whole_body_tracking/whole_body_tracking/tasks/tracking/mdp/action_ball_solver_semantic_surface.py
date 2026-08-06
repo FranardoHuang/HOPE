@@ -15,17 +15,48 @@
   空行、换行位置、docstring 都不动它,而任何表达式/常量/字段顺序的改动都动它。
 * ``EXCLUDED`` 显式列出**有意排除**的符号,每一个都带一个理由码。排除是**列举
   式**的,不是默认放行。
-* 两道 fail-closed 的门(见 ``surface_blockers``)保证"覆盖面不小于它声称保护的
+* 三道 fail-closed 的门(见 ``surface_blockers``)保证"覆盖面不小于它声称保护的
   语义面":
   1. 五份纯求解器源文件(``FULLY_ENUMERATED_SOURCES``)里**每一个**符号都必须
      出现在 COVERED 或 EXCLUDED 里 —— 新加一个函数而不分类,直接拒绝启动。
   2. 任何被 COVERED 符号引用、且能解析到被钉文件里的名字,也必须已分类 ——
      入口开始调一个新助手函数而不分类,直接拒绝启动。
+  3. 排除理由里凡是**声称"这条路根本走不到它"**的那几种
+     (``UNREACHABLE_CLAIM_REASONS``),必须真的走不到 —— 一旦某个 COVERED 符号
+     引用了它,这条理由就是假话,直接拒绝启动。
 
 排除清单**不进指纹**。这正是本次收窄的目的:新增一个"存盘/记账/遥测"符号
 必须被显式分类(否则门开火),但分类完之后 pin 不动,训练不再被无关提交打断。
 把一个已覆盖符号挪进排除清单则一定会动 pin —— 因为它的摘要从 ``covered`` 里
 消失了。
+
+**指纹管不到的那一半:声明与实际之间。** pin 封的是"payload 里声明的数字";
+真正喂给求解器的数字要经过一条**传递线**,而那条线住在
+``RacketTargetCommand._initialize_action_ball_runtime``(1700 多行接线,理由码
+``runtime_wiring``)。把整条接线塞进覆盖面会让每次接线改动都作废题库,那就退回
+了本模块要解决的原问题;所以传递线换了个形状:
+
+* ``hope_commands.action_ball_declared_solver_knobs`` 是那五个旋钮的**唯一出处**,
+  payload 和自检读的是同一份(不许有第三份手抄的期望值);
+* ``hope_commands.action_ball_solver_cfg_from_declaration`` 是"旋钮 -> 求解器 cfg"
+  的**唯一一处映射**,窄到可以整个进覆盖面;
+* ``hope_commands.action_ball_assert_solver_runtime_matches_declaration`` 在
+  **三个入口点里**把封好的 payload 和活着的 ``solver_cfg`` / ``prm`` / 三个平面 /
+  rollout 参数逐字段比,不等就 fail-closed。入口点在覆盖面里,所以**删掉这次调用
+  本身也会动 pin**。
+
+反例(这三条改动以前全部逃逸,是本模块自己引入的净放宽):``tol_m`` 乘 0.5、
+``speed_budget`` 乘 2、``fixed_direction=True -> False``。
+
+前两条是**静默改答案**:题照出、答案变了,没有任何门会响。第三条不静默 ——
+``solve_proposals`` 的前置 ``_validate_external_proposals`` 会以
+"solve_proposals is fixed-direction only" 当场拒绝,整条 action-ball 路在第一次
+补池时硬崩(``generate`` 那条会分叉到 free-direction 的路**不是** action-ball
+在走的路,这一点必须说准)。但它同样是个真缺陷:pin 的 payload 里
+``"fixed_direction": True`` 这句**声明**变成了假话,而 pin 一动不动。
+
+门 3 管的是另外半边:``other_product_line``("action-ball 从不调用它")这类理由
+以前只是**写在这里的一句话**,没人验过。现在它是可执行的断言。
 
 指纹算法刻意不使用 ``ast.dump``:``ast.dump`` 的字段集合在 3.8→3.12 之间变过
 (``Index`` 包装、``type_params``),会让同一份源码在不同解释器上给出不同摘要。
@@ -88,7 +119,13 @@ EXCLUSION_REASONS: Dict[str, str] = {
     "runtime_wiring": (
         "Chooses which question source is bound (online solver / immutable tape / "
         "banded question bank) and constructs the adapters. That choice is already "
-        "pinned by the target-source branch plus the tape/bank SHA in cfg."
+        "pinned by the target-source branch plus the tape/bank SHA in cfg. This "
+        "exclusion does NOT say the wiring cannot move an answer -- it can, by "
+        "handing the solver a number other than the one the payload declares. "
+        "That is why every declared number is cross-checked against the live "
+        "object inside the covered entry points by "
+        "action_ball_assert_solver_runtime_matches_declaration; this exclusion is "
+        "only valid while that comparison stays fail-closed and stays called."
     ),
     "telemetry_and_counters": (
         "Notes, ledger payloads and rejection histograms. Reporting only; no "
@@ -142,6 +179,23 @@ EXCLUSION_REASONS: Dict[str, str] = {
     ),
 }
 
+#: Reason codes whose *text* asserts the symbol is never reached on the solve
+#: path.  That claim is machine-checkable, so gate 3 in ``surface_blockers``
+#: checks it instead of trusting the wording: if a covered symbol references one
+#: of these, the stated reason is false and the surface refuses to build.
+#:
+#: 人话:排除理由分两种。一种是"它根本不在这条路上"(可验证),一种是"它在路上
+#: 但改不了答案"(要人来判)。前者不许只靠命名 —— ``fixed_direction`` 那次事故
+#: 正是"一次编辑同时让声明和排除理由都变成假话",而假话的那半边恰好是可验证的
+#: 那一种。
+UNREACHABLE_CLAIM_REASONS = frozenset(
+    {
+        "other_product_line",
+        "stroke_selector",
+        "convenience_accessor",
+    }
+)
+
 # --------------------------------------------------------------------------- #
 # Covered symbols: the semantic surface itself.                                #
 # --------------------------------------------------------------------------- #
@@ -168,6 +222,29 @@ COVERED: Dict[str, Tuple[str, ...]] = {
         # from being invisible.
         "action_ball_solver_profile_contract",
         "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
+        # The declaration/actual bridge.  A payload number and the number the
+        # solver is handed are two different things, and the wiring between
+        # them lives in ``_initialize_action_ball_runtime`` -- 1700 lines this
+        # surface deliberately does NOT cover, because covering it would
+        # invalidate the question bank on every wiring edit.  These six symbols
+        # are the narrow, coverable replacement: one function owns the knob
+        # values, one owns the single mapping into ``ContinuousQuestionCfg``,
+        # one compares the sealed declaration against the live objects field by
+        # field, and three constants carry the values those three read.  All
+        # three solve entry points call the comparison, so removing the call
+        # moves this pin too.
+        "action_ball_declared_solver_knobs",
+        "action_ball_solver_cfg_from_declaration",
+        "action_ball_assert_solver_runtime_matches_declaration",
+        "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
+        # The named list of venue-physics numbers the cross-check walks: shrink
+        # it and the check silently stops comparing a parameter the solver
+        # integrates with.
+        "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
+        # The one departure from the declaration a diagnostic run is allowed to
+        # make. It is a constant so that "the diagnostic exemption" cannot be
+        # widened into a free expression without moving the pin.
+        "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS",
         # Which of the two solver paths a question takes.
         "RacketTargetCommand._counter_rally_enabled",
         # The executable knobs the payload declares numerically. Pinning the
@@ -669,10 +746,46 @@ def _referenced_names(node: Any) -> "set":
 
 
 # --------------------------------------------------------------------------- #
-# The two fail-closed coverage gates                                           #
+# The three fail-closed coverage gates                                         #
 # --------------------------------------------------------------------------- #
 def _declared_names(filename: str) -> "set":
     return set(COVERED.get(filename, ())) | set(EXCLUDED.get(filename, {}))
+
+
+def _excluded_symbols_referenced_by_covered(
+    digests: "Dict[str, Dict[str, str]]", nodes: "Dict[str, Dict[str, Any]]"
+) -> "Dict[Tuple[str, str], Tuple[str, ...]]":
+    """Which excluded symbols the covered closure actually touches, and from where.
+
+    Same bare-name over-approximation as the closure gate.  The result is used two
+    ways: gate 3 turns "this symbol is never called here" into an executable
+    claim, and the declaration publishes the rest so that the remaining
+    exclusions -- the ones that *are* reached but are argued not to move an
+    answer -- are visible to a reader instead of buried in this file.
+    """
+
+    reached: Dict[Tuple[str, str], set] = {}
+    for filename, covered in sorted(COVERED.items()):
+        for name in covered:
+            node = nodes.get(filename, {}).get(name)
+            if node is None:
+                continue
+            for referenced in sorted(_referenced_names(node)):
+                for other in PINNED_SOURCES:
+                    excluded = EXCLUDED.get(other, {})
+                    candidates = [referenced] if referenced in excluded else []
+                    candidates.extend(
+                        candidate
+                        for candidate in digests.get(other, {})
+                        if "." in candidate
+                        and candidate.rpartition(".")[2] == referenced
+                        and candidate in excluded
+                    )
+                    for candidate in candidates:
+                        reached.setdefault((other, candidate), set()).add(
+                            "%s:%s" % (filename, name)
+                        )
+    return {key: tuple(sorted(value)) for key, value in sorted(reached.items())}
 
 
 def surface_blockers(read_source: Callable[[str], str]) -> Tuple[str, ...]:
@@ -684,7 +797,9 @@ def surface_blockers(read_source: Callable[[str], str]) -> Tuple[str, ...]:
     * every reason code used by ``EXCLUDED`` is defined;
     * every symbol of the five fully enumerated solver sources is classified;
     * every name a covered symbol references that resolves into a pinned source
-      is classified too.
+      is classified too;
+    * every exclusion whose reason *claims* the symbol is off the solve path is
+      in fact unreachable from the covered closure.
 
     Anything else is a blocker, and the caller must refuse to boot.  A blocker is
     never "just log it": a surface that silently covers less than it claims is
@@ -766,6 +881,19 @@ def surface_blockers(read_source: Callable[[str], str]) -> Tuple[str, ...]:
                                     "referenced_symbol_unclassified:"
                                     f"{other}:{candidate}:from:{filename}:{name}"
                                 )
+
+    # Gate 3 -- an exclusion reason that claims "action-ball never calls it" has
+    # to be true.  Those reasons were written as prose and never checked; the
+    # ``fixed_direction`` accident is what showed that a sentence in this file
+    # is not evidence.  Reachability is, so it is computed.
+    reached = _excluded_symbols_referenced_by_covered(digests, nodes)
+    for (filename, name), callers in sorted(reached.items()):
+        reason = EXCLUDED[filename][name]
+        if reason in UNREACHABLE_CLAIM_REASONS:
+            blockers.append(
+                "exclusion_claims_unreachable_but_is_reached:"
+                f"{filename}:{name}:{reason}:from:{','.join(callers)}"
+            )
     return tuple(sorted(set(blockers)))
 
 
@@ -819,6 +947,13 @@ def semantic_surface_contract(read_source: Callable[[str], str]) -> dict:
                 "pinned_source_must_be_declared_covered_or_excluded"
             ),
             "exclusions_are_declared_by_name_and_reason_outside_this_digest": True,
+            "unreachability_claiming_exclusion_reasons": sorted(
+                UNREACHABLE_CLAIM_REASONS
+            ),
+            "declared_numbers_are_cross_checked_against_the_live_solver": (
+                "hope_commands.action_ball_assert_solver_runtime_matches_"
+                "declaration, called from every entry point above"
+            ),
         },
         "covered": {
             filename: dict(sorted(symbols.items()))
@@ -840,6 +975,15 @@ def semantic_surface_declaration(read_source: Callable[[str], str]) -> dict:
     used_reasons = sorted(
         {reason for reasons in EXCLUDED.values() for reason in reasons.values()}
     )
+    nodes = {
+        filename: _symbol_nodes(read_source(filename), filename=filename)
+        for filename in PINNED_SOURCES
+    }
+    digests = {
+        filename: symbol_digests(read_source(filename), filename=filename)
+        for filename in PINNED_SOURCES
+    }
+    reached = _excluded_symbols_referenced_by_covered(digests, nodes)
     return {
         "schema_version": SEMANTIC_SURFACE_SCHEMA_VERSION,
         "kind": SEMANTIC_SURFACE_KIND + ".declaration",
@@ -858,6 +1002,22 @@ def semantic_surface_declaration(read_source: Callable[[str], str]) -> dict:
         "exclusion_reasons": {
             reason: EXCLUSION_REASONS[reason] for reason in used_reasons
         },
+        # The audit half nobody could compute from the lists above: which of the
+        # excluded symbols the covered closure actually touches.  Everything here
+        # is an exclusion whose reason has to mean "reached, but cannot move an
+        # answer" -- the stronger claim.  Everything NOT here is unreachable from
+        # the closure, and for the reason codes in
+        # ``unreachability_claiming_exclusion_reasons`` that is enforced.
+        "excluded_but_reached_from_covered": {
+            "%s:%s" % (filename, name): {
+                "reason": EXCLUDED[filename][name],
+                "referenced_from": list(callers),
+            }
+            for (filename, name), callers in reached.items()
+        },
+        "unreachability_claiming_exclusion_reasons": sorted(
+            UNREACHABLE_CLAIM_REASONS
+        ),
         "entry_points": list(SEMANTIC_ENTRY_POINTS),
     }
 

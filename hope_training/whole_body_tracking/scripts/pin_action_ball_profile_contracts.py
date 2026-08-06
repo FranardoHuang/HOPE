@@ -524,6 +524,11 @@ def main() -> int:
             (
                 "_ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION",
                 "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
+                # Both payload builders read these instead of carrying their own
+                # copies of the numbers, so the offline pinner has to serve the
+                # live ones or it would mint a pin the runtime cannot reproduce.
+                "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
+                "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
             ),
         )
     )
@@ -533,6 +538,7 @@ def main() -> int:
         (
             "_action_ball_canonical_sha256",
             "_action_ball_sha256_file",
+            "action_ball_declared_solver_knobs",
             "action_ball_physics_profile_contract",
             "action_ball_solver_profile_contract",
         ),

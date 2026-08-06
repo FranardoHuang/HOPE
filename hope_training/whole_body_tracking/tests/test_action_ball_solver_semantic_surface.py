@@ -280,13 +280,120 @@ EQUISTRENGTH_MUTANTS = (
             )
         ],
     ),
+    # --- The declaration/actual bridge.  Before this batch each of the next
+    # nine edits changed the numbers the solver is handed (or disarmed the gate
+    # that checks them) while leaving the pin at c196cf79: the mapping lived
+    # inside ``_initialize_action_ball_runtime``, which the surface excludes.
     (
-        "declared_contact_normal_speed_minimum",
+        "solver_cfg_tolerance_halved_at_the_mapping",
         [
             (
                 "hope_commands.py",
-                '                "minimum_mps_inclusive": 1.4,',
-                '                "minimum_mps_inclusive": 0.05,',
+                '        tol_m=knobs["tol_m"],',
+                '        tol_m=knobs["tol_m"] * 0.5,',
+            )
+        ],
+    ),
+    (
+        "solver_cfg_speed_budget_doubled_at_the_mapping",
+        [
+            (
+                "hope_commands.py",
+                '        speed_budget=knobs["global_speed_budget_mps"],',
+                '        speed_budget=knobs["global_speed_budget_mps"] * 2.0,',
+            )
+        ],
+    ),
+    (
+        "declared_knob_n_iters_bumped",
+        [
+            (
+                "hope_commands.py",
+                '        "n_iters": int(cfg.cq_n_iters),',
+                '        "n_iters": int(cfg.cq_n_iters) + 5,',
+            )
+        ],
+    ),
+    (
+        "fixed_direction_flag_flipped",
+        [
+            (
+                "hope_commands.py",
+                "_ACTION_BALL_SOLVER_FIXED_DIRECTION = True",
+                "_ACTION_BALL_SOLVER_FIXED_DIRECTION = False",
+            )
+        ],
+    ),
+    (
+        "declaration_cross_check_comparison_disarmed",
+        [
+            (
+                "hope_commands.py",
+                "        if type(declared) is not type(actual) or declared != actual",
+                "        if False",
+            )
+        ],
+    ),
+    (
+        "declaration_cross_check_stops_comparing_the_redraw_budget",
+        [
+            (
+                "hope_commands.py",
+                "            overdraw=effective_cq_overdraw,\n"
+                "            maximum_rounds=maximum_rounds,\n"
+                "            diagnostic_unauthorized=diagnostic_unauthorized,\n"
+                '            call_site="_action_ball_refill_pool_many",',
+                "            overdraw=None,\n"
+                "            maximum_rounds=None,\n"
+                "            diagnostic_unauthorized=diagnostic_unauthorized,\n"
+                '            call_site="_action_ball_refill_pool_many",',
+            )
+        ],
+    ),
+    (
+        "declaration_cross_check_call_deleted_from_the_frozen_evaluator",
+        [
+            (
+                "hope_commands.py",
+                "        action_ball_assert_solver_runtime_matches_declaration(\n"
+                "            solver_declaration=self._action_ball_solver_contract"
+                '["payload"],\n'
+                "            physics_declaration=self._action_ball_physics_contract"
+                '["payload"],\n'
+                "            solver_cfg=self._action_ball_solver_cfg,\n"
+                "            prm=self._action_ball_prm,\n"
+                "            planes=(surface_z, net_x, net_top_z),\n"
+                "            rollout_h=rollout_h,\n"
+                "            rollout_steps=rollout_steps,\n"
+                "            overdraw=None,\n"
+                "            maximum_rounds=None,\n"
+                "            diagnostic_unauthorized=bool(\n"
+                '                getattr(self, "_action_ball_diagnostic_unauthorized"'
+                ", False)\n"
+                "            ),\n"
+                '            call_site="_action_ball_frozen_eval_solve",\n'
+                "        )\n",
+                "",
+            )
+        ],
+    ),
+    (
+        "cross_checked_virtual_ball_parameter_dropped",
+        [
+            (
+                "hope_commands.py",
+                '    "paddle_mu",\n    "paddle_e_g1",',
+                '    "paddle_e_g1",',
+            )
+        ],
+    ),
+    (
+        "diagnostic_redraw_round_exemption_widened",
+        [
+            (
+                "hope_commands.py",
+                "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS = 64",
+                "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS = 6400",
             )
         ],
     ),
@@ -439,13 +546,53 @@ def _historical_reader(revision):
     return read
 
 
-def test_real_commits_that_invalidated_the_whole_file_pin_are_now_transparent():
+#: Symbols the declaration/actual bridge ADDED TO THE SOURCE.  They do not exist
+#: at the four historical revisions below, so the historical comparison is
+#: evaluated with them removed -- explicitly, by name, from a list this file
+#: owns, so that "the historical test quietly stopped covering something" cannot
+#: happen without editing it.
+#:
+#: ``_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS`` is deliberately NOT
+#: here: this batch only added it to the coverage list, the constant itself has
+#: existed all along, so it can and should still be compared across revisions.
+COVERED_SYMBOLS_ADDED_BY_THE_DECLARATION_BRIDGE = {
+    "hope_commands.py": (
+        "action_ball_declared_solver_knobs",
+        "action_ball_solver_cfg_from_declaration",
+        "action_ball_assert_solver_runtime_matches_declaration",
+        "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
+        "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
+    )
+}
+
+
+def test_real_commits_that_invalidated_the_whole_file_pin_are_now_transparent(
+    monkeypatch,
+):
     """423f5409 -> eccb30cd -> 308db7f0 -> 3e64bea9 must all be the same pin.
 
     This is the ground truth for "was the narrowing real".  It is evaluated with
     today's surface module against those revisions' sources, so it also proves
     the covered symbol list is not tied to one snapshot of the tree.
+
+    The surface has since grown a declaration/actual bridge whose symbols did
+    not exist at those revisions, so they are removed for this comparison --
+    explicitly, by name, from a list this file owns.  Restricting silently (to
+    "whatever happens to exist at every revision") would let a future deletion
+    shrink the historical claim without anyone noticing.
     """
+
+    restricted = {}
+    for filename, covered in SURFACE.COVERED.items():
+        added = COVERED_SYMBOLS_ADDED_BY_THE_DECLARATION_BRIDGE.get(
+            filename, ()
+        )
+        for name in added:
+            assert name in covered, (filename, name)
+        restricted[filename] = tuple(
+            name for name in covered if name not in added
+        )
+    monkeypatch.setattr(SURFACE, "COVERED", restricted)
 
     digests = {}
     for revision, description in REAL_NARROWING_COMMITS:
@@ -567,6 +714,87 @@ def test_a_symbol_cannot_be_both_covered_and_excluded(monkeypatch):
         "symbol_both_covered_and_excluded:virtual_ball.py:flight_accel"
         in blockers
     )
+
+
+def test_an_unreachability_claiming_exclusion_that_is_reached_is_refused(
+    monkeypatch,
+):
+    """Gate 3: "action-ball never calls it" has to be true, not just written down.
+
+    This is the half of the ``fixed_direction`` accident that a symbol digest
+    cannot see.  ``other_product_line`` says the free-direction line is dead
+    code on this path; the moment a covered symbol reaches it, that sentence is
+    false and the surface must refuse rather than keep quoting itself.
+    """
+
+    reader = _mutated_reader(
+        [
+            (
+                "continuous_questions.py",
+                "\n    out, good, reasons = _solve_fixed_direction_batch(\n"
+                "        clip_ids=clip_ids, p_contact=p_contact,"
+                " v_ball_in=v_ball_in,\n",
+                "\n    _uniform_box(None, None, None, None)\n"
+                "    out, good, reasons = _solve_fixed_direction_batch(\n"
+                "        clip_ids=clip_ids, p_contact=p_contact,"
+                " v_ball_in=v_ball_in,\n",
+            )
+        ]
+    )
+    blockers = SURFACE.surface_blockers(reader)
+    assert any(
+        blocker.startswith(
+            "exclusion_claims_unreachable_but_is_reached:"
+            "continuous_questions.py:_uniform_box:other_product_line"
+        )
+        for blocker in blockers
+    ), blockers
+    with pytest.raises(SURFACE.SolverSemanticSurfaceError):
+        SURFACE.semantic_surface_contract(reader)
+
+
+def test_gate_three_only_polices_reasons_that_claim_unreachability():
+    """A reached exclusion whose reason does not claim unreachability is fine.
+
+    ``_action_ball_note`` (telemetry) really is called from a covered entry
+    point.  Its reason is "reporting only", not "never called", so it must not
+    be a blocker -- otherwise gate 3 would just be a second coverage gate with a
+    different name.
+    """
+
+    declaration = SURFACE.semantic_surface_declaration(_live_reader())
+    reached = declaration["excluded_but_reached_from_covered"]
+    assert (
+        "hope_commands.py:RacketTargetCommand._action_ball_note" in reached
+    ), sorted(reached)
+    assert SURFACE.surface_blockers(_live_reader()) == ()
+    for key, entry in reached.items():
+        assert entry["reason"] not in SURFACE.UNREACHABLE_CLAIM_REASONS, key
+
+
+def test_declaration_publishes_which_exclusions_the_closure_actually_reaches():
+    """The receipt has to say what it did NOT check, or it is not a receipt.
+
+    Everything in ``excluded_but_reached_from_covered`` is an exclusion resting
+    on the stronger claim "reached, but cannot move an answer".  Publishing the
+    set is what makes that claim auditable without re-deriving the call graph.
+    """
+
+    declaration = SURFACE.semantic_surface_declaration(_live_reader())
+    reached = declaration["excluded_but_reached_from_covered"]
+    assert reached, "the closure reaches at least the telemetry note helper"
+    for key, entry in reached.items():
+        filename, _, symbol = key.partition(":")
+        assert filename in SURFACE.PINNED_SOURCES
+        assert symbol in SURFACE.EXCLUDED[filename]
+        assert entry["reason"] == SURFACE.EXCLUDED[filename][symbol]
+        assert entry["referenced_from"], key
+    # Everything classified but unreached is absent, and that is the claim the
+    # unreachability reason codes rest on.
+    for filename, reasons in SURFACE.EXCLUDED.items():
+        for symbol, reason in reasons.items():
+            if reason in SURFACE.UNREACHABLE_CLAIM_REASONS:
+                assert "%s:%s" % (filename, symbol) not in reached
 
 
 def test_every_exclusion_reason_is_defined_and_used():

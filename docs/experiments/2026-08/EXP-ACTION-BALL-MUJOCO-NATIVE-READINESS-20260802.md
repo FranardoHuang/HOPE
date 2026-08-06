@@ -5243,7 +5243,8 @@ robot/right_hip_roll_collision      15
 `.../mdp/action_ball_solver_semantic_surface.py`（新增，只依赖 `ast`/`hashlib`/`json`，
 所以离线钉针脚本能像 runtime 一样把它 host-load 起来）。
 
-- **覆盖清单**：显式列出进指纹的 **198 个符号**，分布在 **6 份**源码
+- **覆盖清单**：显式列出进指纹的 **204 个符号**（初版 198，2026-08-07 补了 6 个，见
+  §9.2.10.1），分布在 **6 份**源码
   （`hope_commands.py` / `continuous_questions.py` / `racket_contact_geometry.py` /
   `stroke_adapt_torch.py` / **`strike_spec_torch.py`（第一次被钉进来）** / `virtual_ball.py`）。
   每个符号的摘要取的是"**剥掉 docstring、跨 Python 版本归一化后的 AST**"，
@@ -5256,11 +5257,16 @@ robot/right_hip_roll_collision      15
   `other_product_line` / `venue_parameter_loading` / `stroke_selector` / `swept_contact_grading` /
   `convenience_accessor` / `self_check_only` / `module_export_list` /
   `overapproximated_name_collision`）。**排除是列举式的，不是默认放行。**
-- **两道 fail-closed 的门**（`surface_blockers`，boot 时在比 SHA 之前先跑）：
+- **三道 fail-closed 的门**（`surface_blockers`，boot 时在比 SHA 之前先跑）：
   1. 五份纯求解器源码里**每一个**符号都必须出现在覆盖或排除清单里 ——
      新加一个函数不分类，直接拒绝启动；
   2. 任何被覆盖符号引用、且能解析到被钉文件里的名字，也必须已分类 ——
-     入口开始调一个新助手函数而不分类，直接拒绝启动。
+     入口开始调一个新助手函数而不分类，直接拒绝启动；
+  3. 排除理由里凡是**声称"这条路根本走不到它"**的那几种（`other_product_line` /
+     `stroke_selector` / `convenience_accessor`，见 `UNREACHABLE_CLAIM_REASONS`），
+     必须真的走不到 —— 某个覆盖符号一旦引用了它，这条理由就是假话，直接拒绝启动。
+     这道门是 2026-08-07 补的（§9.2.10.1）：排除理由分"它不在这条路上"（可验证）和
+     "它在路上但改不了答案"（要人判）两种，前者以前只是**写在文件里的一句话**。
 - **排除清单不进指纹**。这正是收窄的机制：新增一个"存盘/记账/遥测"符号必须被**显式分类**
   （门会开火），但分类完之后 pin 不动，训练不再被无关提交打断。
   反过来，把一个**已覆盖**符号挪出覆盖清单一定会动 pin，因为它的摘要从 payload 里消失了。
@@ -5297,8 +5303,9 @@ host-load 真源、逐符号比、fail-closed、收据自陈比了哪些符号 �
 
 现役 manifest 里那枚是**旧口径**算出来的，一定要迁移一次。迁移由
 `scripts/migrate_action_ball_solver_pin_to_semantic_surface.py` 做，它**自己会拒绝**：
-只有当"决定题目身份"和"决定答案"的每一个覆盖符号在新旧两个 revision 上逐字节相同、
+只有当"决定题目身份"和"决定答案"的每一个**覆盖**符号在新旧两个 revision 上逐字节相同、
 且只有 pin 自己的声明半边动了，它才肯出收据。
+（**作用域**：只比覆盖面里的符号。2026-08-07 修正了收据里那句越界的话，见 §9.2.10.2。）
 
 实跑收据：`configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/`
 `solver_pin_semantic_surface_migration.v1.7e85e97e6c1c.json`
@@ -5336,6 +5343,33 @@ prototype / manifest / bundle / lineage）文件名里带着自己的摘要，�
 拒绝；把 worktree 的 `flight_accel` 重力改成 `×1.05` 再迁移 →
 `this is not a re-signing: … {"virtual_ball.py": ["flight_accel"]}`，拒绝并**点名**。
 
+#### 9.2.10.2 那份迁移收据说了两句它没资格说的话（2026-08-07 就地改准）
+
+收据里原话是"**每一个**命名题目或计算答案的符号在两个 revision 上都相同"。两处越界：
+
+1. 它只比了**覆盖面里**的符号，95 条排除一个没比 —— 而排除清单正是本轮收窄的产物，
+   拿"没比"当"没变"的证据是循环论证。
+2. 它对**造产物的那套工具**结构性失明。**实测**：`fresh_tape_seed0_20260806_r1` 和
+   `v3pin_tape_seed0_20260807_r1` 两条 N1 tape 是在两个不同版本的 `training_contract.py`
+   上建的 —— `8c9eec4c33c54a94…` vs `c6608440c30e1b86…`，两份 build report 里白纸黑字
+   （`producer_contracts/*/payload/implementation_source_sha256/training_contract`），
+   而迁移脚本一个字都看不到，因为 `training_contract.py` 不在 `PINNED_SOURCES` 里。
+   emit 出来的题目数字确实一个没变（548 个 leaf 逐条对拍，64 个差异全是指针和封章，
+   `base_question_sha256 = 81eed5139b98` 两边一致），**所以结论不受影响 —— 但话要说准**。
+
+改法：`claim` 加作用域前缀（"Scoped to the symbols this surface COVERS"），新增
+`not_claimed` 三条、`coverage_this_receipt_does_not_check`（95 条排除逐个列名 + 为什么它们
+不是证据）、`producer_lineage_outside_this_pin`（四份生产工具在两个 revision 上的文件 SHA
+**测出来**写进去，动了就在 stderr 里喊一声）。
+
+**`training_contract.py` 该不该进某个 pin？——它已经在该在的 pin 里，且不该进 solver 语义面。**
+它不命名题目也不计算答案；五份纯求解器源码一个字都没提它；`hope_commands.py` 提到它
+（那是 task-first 训练合同那一摊，26k 行里的另一个 command term），但**没有任何覆盖符号**
+引用得到它 —— 这条现在是测试断言，不是判断。它真正的 pin 是 fixed-tape producer contract 的
+`implementation_source_sha256`，而那枚 sha **确实**跟着它动了
+（`7a91405c…` → `c6a08020…` 等五条 recipe 全动）。所以正确的说法是：
+**这枚 pin 在，而迁移收据以前假装自己也覆盖了它。**
+
 #### 回归账（pod1，两棵干净 worktree，都从 `61e71a34` 起）
 
 | 集合 | 基线 | 改后 |
@@ -5355,12 +5389,136 @@ prototype / manifest / bundle / lineage）文件名里带着自己的摘要，�
 - **R4**：语义面看得见 cfg 旋钮的**默认值**（本轮把 `cq_*` / `vb_rollout_*` / `mount_normal_sign`
   的声明纳入覆盖），但看不见"发射时用 YAML 覆盖了旋钮却没给钉针脚本 `--override`"。
   这是现存洞，本轮不改善也不恶化。
-- **R5**：`action_ball_solver_profile_contract` 里 `minimum_mps_inclusive: 1.4` /
-  `maximum_mps_inclusive: 7.2` 仍是**手抄的第二份**。本轮把这个函数**纳入了覆盖**，
-  所以"只改声明不改执行"或反过来都会动 pin —— 但两者是否**一致**仍然靠人看。
+- **R5**（2026-08-07 已关，见 §9.2.10.1）：`action_ball_solver_profile_contract` 里
+  `minimum_mps_inclusive: 1.4` / `maximum_mps_inclusive: 7.2` / `net_margin_m: 0.05`
+  仍然是**字面量**（离线钉针脚本按 git revision 的源码文本铸这份 payload，
+  builder 去 import 活体常量反而会铸出一枚"被钉的那个 revision 并不描述"的 pin），
+  但"两者是否一致"**不再靠人看**：boot 时
+  `action_ball_assert_solver_runtime_matches_declaration` 拿它们逐个和活体常量比，
+  不等就拒绝出题。
 - **R9**：打分侧（`_action_ball_exact_achieved_contact_state`、`torch_swept_selected_face_contact`、
   `classify_action_ball_contact`）被显式排除，理由码写进了收据。
   "题没变但分变了"仍然可能，那归 reward/grading 合同管，别指望 solver profile 拦。
+
+#### 9.2.10.1 上面那份收窄**自己漏了一个洞**：声明与实际之间那条传递线（2026-08-07 修，pod1 host-only）
+
+**人话先说**：pin 封的是"**payload 里声明的数字**"。真正喂给求解器的数字要经过一条
+**传递线**，而那条线住在 `RacketTargetCommand._initialize_action_ball_runtime` ——
+1731 行接线，以理由码 `runtime_wiring` 被排除，理由原文是"只是选绑哪种题源并构造 adapter"。
+**这句话不成立**：该函数里第 5343 行是**把被钉住的旋钮交给求解器的唯一一处映射**：
+
+```python
+solver_cfg = ContinuousQuestionCfg(
+    tol_m=float(self.cfg.cq_tol_m), n_iters=int(self.cfg.cq_n_iters),
+    speed_budget=float(self.cfg.cq_speed_budget),
+    max_redraw_rounds=int(self.cfg.cq_max_redraw_rounds),
+    fixed_direction=True)
+```
+
+旋钮的**默认值**是 covered、payload 里也声明了数字，**但这条传递线是自由的**。
+独立验收实测三条变异**全部逃逸**（blockers `[]`、pin 不变 `c196cf79`、boot 门放行），
+而**旧的整文件 SHA 三条全拦**：
+
+| 变异 | 旧口径（整文件 SHA） | 收窄后（本节修复前） | 真实后果 |
+| --- | --- | --- | --- |
+| `tol_m × 0.5` 且 `n_iters + 5` | 拦 | **逃逸** | 静默改答案 |
+| `speed_budget × 2.0` | 拦 | **逃逸** | 静默改答案 |
+| `fixed_direction=True → False` | 拦 | **逃逸** | 不静默：`solve_proposals` 的前置 `_validate_external_proposals` 当场拒("solve_proposals is fixed-direction only")，第一次补池硬崩；但 payload 里 `"fixed_direction": True` 这句**声明**变成假话而 pin 一动不动 |
+
+第三条要说准：`generate` 那条会分叉到 free-direction 的路**不是** action-ball 走的路
+（`solve_proposals` 无条件走 `_solve_fixed_direction_batch`）。它的伤害是"声明变假话"，
+不是"悄悄换了求解线路"。
+
+**这是本轮收窄自己引入的 fail-closed 净放宽，不是遗留问题。**
+
+**修法（三件，都窄到可以整个进覆盖面）**
+
+1. `action_ball_declared_solver_knobs(cfg)` —— 那五个旋钮的**唯一出处**。
+   `action_ball_solver_profile_contract` 拿它写 payload 的 `solve` 块，boot 自检拿它对活值。
+   期望值不允许有第三份手抄。
+2. `action_ball_solver_cfg_from_declaration(cfg, ContinuousQuestionCfg)` ——
+   "旋钮 → 求解器 cfg"的**唯一一处映射**。搬出 1731 行接线，进覆盖面，改一个字 pin 就动。
+3. `action_ball_assert_solver_runtime_matches_declaration(...)` —— 逐字段 fail-closed 自检：
+   把封好的 solver / physics payload 和**活着的** `solver_cfg`、`prm`、三个平面、
+   rollout `h`/`n_steps`、有效 overdraw / 重抽轮数比对，**31 个字段**，不等就拒绝。
+   诊断跑（`diagnostic_unauthorized`）只允许两处偏离，且两处都是**具名常量**
+   （overdraw `1.0`、`_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS`），
+   不是自由表达式。返回一份自陈收据：哪个调用点跑的、比了几个字段、字段名逐个列出。
+
+**载重的是调用点，不是 boot**：boot 里也调一次（坏接线死在启动而不是死在第一次补池），
+但真正堵死洞的是**三个入口点里各调一次** ——
+`_action_ball_refill_pool_many` / `_action_ball_replay_emitted_tasks` /
+`_action_ball_frozen_eval_solve` 都在覆盖面里，所以**把调用删掉这件事本身也会动 pin**。
+只放在 boot 里等于把门装在排除区，删掉不留痕。
+
+**同类洞系统性扫过一遍**（判据：payload 声明了一个值，而代码里存在一条把别的值喂进去的路径）。
+方法是机器扫，不是靠读：把三个入口点读的 `self.*` 属性全列出来，看哪些只由被排除的接线函数写。
+结果 —— `_action_ball_solver_cfg`、`_action_ball_effective_cq_overdraw`、
+`_action_ball_effective_cq_max_redraw_rounds`、`_action_ball_planes`、`_action_ball_prm`
+五个都是同一个病，现在全部进了自检的比对表；
+`integrator.h_s`/`n_steps` 三个入口点是直接读 `self.cfg` 的，本来就在覆盖面里（一并比，成本为零）。
+95 条排除逐条查了可达性：`stroke_selector` 那 7 个符号只被 `select_stroke_batch` 引用、
+`other_product_line` / `convenience_accessor` / `self_check_only` 都真的走不到 ——
+现在这条结论由**门 3** 执行，不再是一句话。反过来，**确实**被覆盖闭包碰到的排除符号
+（`_action_ball_note`、几个 `state_dict`/`load_state_dict`、几个同名碰撞）由
+`semantic_surface_declaration` 的新字段 `excluded_but_reached_from_covered` **逐条列出来**：
+它们靠的是更强的那句"够得着，但改不了答案"，读的人有权知道是哪几个。
+
+**变异测试（两边都做了）**
+
+- **必须拦（新增 9 条，原有 21 条里有 1 条随 payload 字面量改写替换掉，净 29 条）**：映射里 `tol_m × 0.5`、`speed_budget × 2.0`、
+  `declared_knobs` 里 `n_iters + 5`、`_ACTION_BALL_SOLVER_FIXED_DIRECTION` 翻 `False`、
+  把自检的比较式改成 `if False`、把 refill 的 `overdraw`/`maximum_rounds` 改成不比、
+  从 frozen evaluator 里整段删掉自检调用、从 `_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES`
+  里删掉 `paddle_mu`、诊断轮数常量 `64 → 6400`。**全部杀死。**
+- **运行时自检本身的变异（`test_action_ball_runtime_wiring.py` 净增 14 条）**：把三条逃逸变异
+  施加在**活对象**上（也就是"接线把别的数喂进来"这个真实形状），自检逐条报出字段名；
+  平面 `net_top_z` 漂 1 cm、`prm.paddle_mu × 1.5`、overdraw 翻倍、重抽轮数 +1、
+  三个 payload 字面量各自和活体常量分家 —— 全部拒绝并点名。
+- **必须放行（保住本轮收窄的目的）**：纯注释、纯 docstring、换行重排仍不动指纹；
+  `423f5409 → eccb30cd → 308db7f0 → 3e64bea9` 四个历史 revision 仍是**同一枚**指纹
+  （比较时按名字剔除本轮**新写进源码**的 5 个符号；`_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS`
+  一直都在，只是这次才进覆盖清单，所以照比不误。剔除名单写死在测试里，不是"取交集"，
+  否则将来删一个符号就能悄悄缩小这条历史断言）。
+
+**pin 因此第二次移动**（这是加覆盖必然的代价，不是回归）：
+
+| 项 | §9.2.10 落地时 | 本节落地后 |
+| --- | --- | --- |
+| `semantic_surface.sha256` | `59f03840b85fc47f…` | `5fb9e472bc5fe76c…` |
+| 覆盖符号数 | 198 | 204 |
+| `solver_profile_sha256` | `c196cf79001df76d…` | `dad9c1c853e4e77a…` |
+| `physics_profile_sha256` | `aa5c9085f9b48ca6…` | **不变**（`_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES` 这次重构逐字节等价） |
+
+#### 回归账（pod1，两棵独立 worktree，都从 `20303a3d` 起；解释器 `/workspace/hope_isaac_venv/bin/python`）
+
+| 集合 | 基线 | 改后 |
+| --- | --- | --- |
+| 受影响 82/83 个模块（逐模块单独起一个 pytest 进程；整目录一次跑会撞上几个测试自己装的合成包，那是既有现象） | `1683 passed / 19 failed / 31 skipped / 52 errors` | `1718 passed / 17 failed / 31 skipped / 52 errors` |
+| 直接改到的 5 个模块（surface / runtime-wiring / bundle-materializer / migrate-receipt / pinner） | `116 collected, 2 failed`（`0 skipped`） | **`145 passed`**（`0 failed / 0 skipped`） |
+
+`failed` 少的那 2 条是 `test_action_ball_runtime_wiring` 里**从 `d4e1e70c` 起就死了**的两条
+（`action_ball_solver_profile_contract` 加了 `semantic_surface` 必填参数，测试没跟着改，
+`TypeError` 直接崩）—— 一条死掉的护栏等于没有护栏，本轮顺手修好并给它们补了
+schema-v3 的冻结摘要与 `unadjudicated_whole_file_sha256` 断言。
+其余 17 个 failed 与 52 个 errors **逐模块逐条同名**，全部是改动前既有
+（`test_materialize_a3_vendor_identity_manifest` 的 19 个 error、
+若干模块整目录/合成包 collection error、两条 formal-authority 断言等）。**零回归。**
+`0 skipped` 这一格要连着解释器一起看：`1 skipped + 退出码 0` 看着全绿其实什么都没跑，
+所以这五个模块是**全跑全绿**，不是"跳过全绿"。
+
+另外一条顺带的自证：把本节的**注释和 docstring** 改完之后重新铸 pin，
+`solver_profile_sha256` 仍然是 `dad9c1c853e4e77a…` —— 收窄本身在这次改动里是活的。
+
+**因此：`configs/action_ball_n1_measured_20260807/` 那 18 份内容寻址产物现在是过期的**，
+A/C 四个 cell 在重签之前起不来 —— 流程与 `ac8430b0` / `64036cb1` 完全一样
+（离线 re-pinner `prepare` + `variants`，再重物化两条 lineage），**本轮没有做**。
+离线 re-pinner 的门是**对的**：它现在会点名拒绝
+"the template's sealed solver semantic surface … is not the live one"。
+`test_materialize_measured_action_ball_n1_bundle` 里那条不动点断言也因此改了口径 ——
+模板改成**当场用钉针脚本铸**，而不是读一份发出去的谱系文档：
+把"发出去的谱系此刻能不能启动"和"离线重签是不是不动点"捆在一条断言上，
+每次 pin 合法移动都会让后者莫名其妙地变红。
 
 ### 9.2.11 迁移做完了：离线重签这一步自己还是 v2，所以"重新物化"生不出能启动的 manifest（2026-08-07 落地并实跑验证）
 
@@ -5410,8 +5568,13 @@ v3 的 payload **根本没有这个键**。它封的是逐符号语义面，加�
 
 #### 这支函数此前一条测试都没有——这就是错法能活下来的原因
 
-现在五条。载重的一条是**不动点**断言：把活体 v3 文档喂进去，吐回来的
-`solver_profile_sha256` 必须**还是那一枚**（也就是 runtime 现算的那枚）。
+现在六条（2026-08-07 加了一条，见下）。载重的一条是**不动点**断言：把活体 v3 文档喂进去，
+吐回来的 `solver_profile_sha256` 必须**还是那一枚**（也就是 runtime 现算的那枚）。
+2026-08-07 把这条的模板从"读一份发出去的谱系文档"改成"**当场用钉针脚本铸**"，
+并把镜像源码放进临时根：原写法把"发出去的谱系此刻能不能启动"和"离线重签是不是不动点"
+捆在同一条断言上，于是每次 pin 合法移动（比如 §9.2.10.1）都会让后者莫名其妙地变红，
+红的原因跟它要测的东西无关。新增的第六条测的是**模板封着的语义面过期时必须点名拒绝**
+（`is not the live one`）—— 那正是每条谱系在重签完成之前所处的状态。
 拒绝那条的变异只动**一个覆盖符号的函数体**（`virtual_ball.flight_accel` 重力 `×1.05`），
 被钉源码清单、覆盖符号名、覆盖符号数**全都不变**——**粗一个档次的检查**
 （比个数、比名字、比文件清单）会直接放行。把旧行为塞回去，五条里**死两条**

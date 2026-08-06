@@ -7,6 +7,7 @@ import importlib.util
 import json
 import math
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -349,10 +350,39 @@ _MDP_REL = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/mdp"
 )
-_LIVE_V3_PINS_REL = (
-    "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/"
-    "action_ball_profile_pins.live.v2.5564d5b3c09d.json"
+#: The v3 pins document these tests re-seal is MINTED FROM THIS CHECKOUT rather
+#: than read out of a shipped lineage directory.
+#:
+#: 人话:这里以前直接读那份发出去的 pins 文档。那等于把"发出去的谱系此刻还能启动"
+#: 和"离线重签是个不动点"两件事捆在一起 —— 前者在每次 pin 合法移动之后都会暂时为假
+#: (要等 18 份内容寻址产物重新物化),于是后者这条真正的不变量就跟着变红,而红的原因
+#: 跟它要测的东西无关。现在模板是当场用钉针脚本铸的,这条不动点断言不会再因为
+#: 谱系没来得及重签而烂掉。
+_PINNER_REL = (
+    "hope_training/whole_body_tracking/scripts/"
+    "pin_action_ball_profile_contracts.py"
 )
+
+
+def _mint_live_v3_pins(destination: Path) -> Path:
+    """Mint a v3 pins document from the live checkout with the shipped pinner."""
+
+    out = destination / "live_pins.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_REPO_ROOT / _PINNER_REL),
+            "--repo-root",
+            str(_REPO_ROOT),
+            "--out",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return out
 # The union of what the re-pinner reads: the seven solver sources it digests, the
 # sixth adjudicated source that only the semantic surface pins, and the surface
 # module itself.
@@ -398,10 +428,10 @@ def _reseal(document: dict) -> dict:
 
 
 def _staged_v3_template(root: Path, mutate=None) -> Path:
-    """Copy the live v3 pins document into a scratch root, optionally mutated."""
+    """Mint a live v3 pins document into a scratch root, optionally mutated."""
 
     document = json.loads(
-        (_REPO_ROOT / _LIVE_V3_PINS_REL).read_text(encoding="utf-8")
+        _mint_live_v3_pins(root / "_minted").read_text(encoding="utf-8")
     )
     if mutate is not None:
         mutate(document)
@@ -417,18 +447,23 @@ def test_live_repin_of_a_v3_document_is_a_fixed_point_at_the_same_checkout(
 ):
     """The pin the offline producer mints must be the pin the runtime computes.
 
-    The live v3 pins document was minted by ``pin_action_ball_profile_contracts``
-    from this same checkout, and its ``solver_profile_sha256`` is what the boot
-    gate compares against.  Re-sealing it here must reproduce it exactly.  Before
-    the v3 branch existed this returned a different digest, because the payload
-    came back carrying a whole-file byte map the runtime never puts in.
+    The template is minted by ``pin_action_ball_profile_contracts`` from this
+    checkout -- the same producer whose ``solver_profile_sha256`` the boot gate
+    compares against -- and re-sealing it must reproduce it exactly.  Before the
+    v3 branch existed this returned a different digest, because the payload came
+    back carrying a whole-file byte map the runtime never puts in.
     """
 
-    template = _REPO_ROOT / _LIVE_V3_PINS_REL
+    # The re-pinner refuses a template from outside its root, so the live
+    # sources are mirrored into the scratch root byte for byte.  That is what
+    # makes this a fixed point rather than a copy: the pinner reads the repo,
+    # the re-pinner reads the mirror, and the two digests have to agree.
+    _mirror_repin_inputs(tmp_path)
+    template = _staged_v3_template(tmp_path)
     expected = json.loads(template.read_text(encoding="utf-8"))
     assert expected["solver_payload"]["schema_version"] == 3
 
-    document = _repin(_REPO_ROOT, template, tmp_path / "out")
+    document = _repin(tmp_path, template, tmp_path / "out")
 
     assert "implementation_source_sha256" not in document["solver_payload"]
     assert document["solver_payload"] == expected["solver_payload"]
@@ -539,4 +574,27 @@ def test_live_repin_refuses_a_solver_profile_schema_it_does_not_know(
 
     template = _staged_v3_template(tmp_path, mutate)
     with pytest.raises(module.BundleError, match="solver profile schema 4"):
+        _repin(tmp_path, template, tmp_path / "out")
+
+
+def test_live_repin_refuses_a_template_whose_sealed_surface_moved(tmp_path: Path):
+    """A stale sealed surface is a re-draw, not a re-seal, and is named as one.
+
+    This is the state every shipped lineage is in for exactly as long as it
+    takes to re-materialise it after a legitimate pin move: the template seals
+    the old surface, the live checkout computes a new one, and the re-pinner
+    must refuse by name rather than quietly absorb the drift (v2 absorbed it,
+    which is why manifests kept expiring).
+    """
+
+    _mirror_repin_inputs(tmp_path)
+
+    def mutate(document: dict) -> None:
+        stale = "0" * 64
+        document["solver_semantic_surface"]["sha256"] = stale
+        document["solver_payload"]["semantic_surface"]["sha256"] = stale
+        _reseal(document)
+
+    template = _staged_v3_template(tmp_path, mutate)
+    with pytest.raises(module.BundleError, match="is not the live one"):
         _repin(tmp_path, template, tmp_path / "out")

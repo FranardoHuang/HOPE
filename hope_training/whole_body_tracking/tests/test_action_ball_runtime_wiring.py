@@ -720,17 +720,55 @@ def _solver_cfg(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
-    canonical, build = _module_functions(
+#: A stand-in for the sealed per-symbol surface.  The solver profile only reads
+#: five fields out of it, so a fixture is enough here; the surface's own
+#: coverage gates are tested in test_action_ball_solver_semantic_surface.py.
+_FIXTURE_SEMANTIC_SURFACE = {
+    "payload": {
+        "kind": "whole_body_tracking.action_ball.solver_semantic_surface",
+        "schema_version": 1,
+        "symbol_digest_algorithm": "fixture",
+        "coverage_policy": {
+            "pinned_sources": [
+                "hope_commands.py",
+                "continuous_questions.py",
+            ]
+        },
+        "covered": {"hope_commands.py": {"a": "b", "c": "d"}},
+    },
+    "sha256": "9" * 64,
+}
+
+
+def _solver_profile_namespace():
+    """Namespace with the module's real schema version and direction constant.
+
+    Re-typing ``3`` here is how this test rotted for a whole schema bump: it
+    kept asserting against a v2 payload the shipped code had stopped building.
+    """
+
+    namespace = {"hashlib": hashlib, "json": json}
+    _module_assignments(
+        (
+            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
+            "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
+        ),
+        namespace,
+    )
+    return namespace
+
+
+def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract(
+    monkeypatch,
+):
+    namespace = _solver_profile_namespace()
+    canonical, knobs, build = _module_functions(
         (
             "_action_ball_canonical_sha256",
+            "action_ball_declared_solver_knobs",
             "action_ball_solver_profile_contract",
         ),
-        {
-            "hashlib": hashlib,
-            "json": json,
-            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION": 2,
-        },
+        namespace,
     )
     sources = {
         "hope_commands.py": "0" * 64,
@@ -749,20 +787,23 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
     contract = build(
         _solver_cfg(),
         physics_profile_sha256="4" * 64,
+        semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
         source_sha256=sources,
         contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
     )
     # Compatibility fence: adding the exact-N1 objective must not perturb the
     # ordinary N5/N73 solver receipt when the optional identity is absent.
-    # This digest was minted from the pre-counter payload represented by the
-    # fixed inputs above; keeping it literal catches even subtle key additions.
+    # This digest was minted from the schema-v3 payload represented by the fixed
+    # inputs above; keeping it literal catches even subtle key additions.
     assert contract["sha256"] == (
-        "c80a115826f7d9628230a2c709d4a36085297053d1b775005482ef3cbbc2975b"
+        "dd10cac3caabef5a4af744be65847d15de3b2b3adf1ea950dee71e97f1ac85b1"
     )
+    assert contract["payload"]["solve"] == knobs(_solver_cfg())
     assert contract == build(
         _solver_cfg(),
         physics_profile_sha256="4" * 64,
+        semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
         source_sha256=sources,
         contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
@@ -822,6 +863,7 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
     assert build(
         _solver_cfg(cq_speed_budget=3.3),
         physics_profile_sha256="4" * 64,
+        semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
         source_sha256=sources,
         contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
@@ -829,6 +871,7 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
     assert build(
         _solver_cfg(cq_overdraw=1.5),
         physics_profile_sha256="4" * 64,
+        semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
         source_sha256=sources,
         contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
@@ -840,8 +883,22 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
     assert build(
         _solver_cfg(),
         physics_profile_sha256="4" * 64,
+        semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
         source_sha256=sources,
         contact_geometry_contract=drifted_geometry,
+        net_top_z=0.9325,
+    )["sha256"] != contract["sha256"]
+    # A different sealed surface is a different solver profile: that binding is
+    # the entire point of schema v3.
+    assert build(
+        _solver_cfg(),
+        physics_profile_sha256="4" * 64,
+        semantic_surface={
+            "payload": dict(_FIXTURE_SEMANTIC_SURFACE["payload"]),
+            "sha256": "a" * 64,
+        },
+        source_sha256=sources,
+        contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
     )["sha256"] != contract["sha256"]
 
@@ -849,16 +906,13 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
 def test_counter_rally_solver_contract_appends_exact_ordered_rejections_and_identity(
     monkeypatch,
 ):
-    canonical, build = _module_functions(
+    canonical, _knobs, build = _module_functions(
         (
             "_action_ball_canonical_sha256",
+            "action_ball_declared_solver_knobs",
             "action_ball_solver_profile_contract",
         ),
-        {
-            "hashlib": hashlib,
-            "json": json,
-            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION": 2,
-        },
+        _solver_profile_namespace(),
     )
     counter_reasons = (
         "reverse_ray_not_opponent_bound",
@@ -895,6 +949,7 @@ def test_counter_rally_solver_contract_appends_exact_ordered_rejections_and_iden
     ordinary = build(
         _solver_cfg(),
         physics_profile_sha256="4" * 64,
+        semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
         source_sha256=ordinary_sources,
         contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
@@ -909,6 +964,7 @@ def test_counter_rally_solver_contract_appends_exact_ordered_rejections_and_iden
     counter = build(
         _solver_cfg(),
         physics_profile_sha256="4" * 64,
+        semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
         source_sha256=sources,
         contact_geometry_contract=geometry_contract,
         net_top_z=0.9325,
@@ -931,7 +987,14 @@ def test_counter_rally_solver_contract_appends_exact_ordered_rejections_and_iden
         "precheck_before_ordinary_solver": True,
         "selector_or_action_switching": False,
     }
-    assert counter["payload"]["implementation_source_sha256"] == sources
+    # v3 dropped the whole-file map for the six adjudicated solver sources; the
+    # counter-rally pair has never had a symbol-level adjudication, so it is the
+    # only thing left on a coarse whole-file pin -- and it says so by name.
+    assert counter["payload"]["unadjudicated_whole_file_sha256"] == {
+        "counter_rally.py": "7" * 64,
+        "counter_rally_torch.py": "8" * 64,
+    }
+    assert "implementation_source_sha256" not in counter["payload"]
     assert counter["sha256"] == canonical(counter["payload"])
     assert counter["sha256"] != ordinary["sha256"]
 
@@ -942,6 +1005,7 @@ def test_counter_rally_solver_contract_appends_exact_ordered_rejections_and_iden
         build(
             _solver_cfg(),
             physics_profile_sha256="4" * 64,
+            semantic_surface=_FIXTURE_SEMANTIC_SURFACE,
             source_sha256=sources,
             contact_geometry_contract=geometry_contract,
             net_top_z=0.9325,
@@ -1003,18 +1067,32 @@ def test_domain_authority_contract_pins_behavior_but_not_mutable_cursors():
 
 
 def test_physics_profile_includes_exact_venue_bytes_and_full_table_geometry(tmp_path):
+    namespace = {"hashlib": hashlib, "json": json, "Path": Path}
+    (param_names,) = _module_assignments(
+        ("_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",), namespace
+    )
+    namespace["_ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION"] = 1
     canonical, sha_file, build = _module_functions(
         (
             "_action_ball_canonical_sha256",
             "_action_ball_sha256_file",
             "action_ball_physics_profile_contract",
         ),
-        {
-            "hashlib": hashlib,
-            "json": json,
-            "Path": Path,
-            "_ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION": 1,
-        },
+        namespace,
+    )
+    # The ten declared venue numbers are one named tuple shared with the runtime
+    # cross-check; enumerating them again here would be a third copy.
+    assert param_names == (
+        "k_d",
+        "k_m",
+        "g",
+        "ball_radius",
+        "inertia_coeff",
+        "paddle_a_t",
+        "paddle_b_t",
+        "paddle_mu",
+        "paddle_e_g1",
+        "paddle_e_g2",
     )
     venue = tmp_path / "venue.yaml"
     venue.write_text("physics: exact\n", encoding="utf-8")
@@ -1022,20 +1100,7 @@ def test_physics_profile_includes_exact_venue_bytes_and_full_table_geometry(tmp_
         source_path=venue,
         **{
             name: float(index + 1) / 10.0
-            for index, name in enumerate(
-                (
-                    "k_d",
-                    "k_m",
-                    "g",
-                    "ball_radius",
-                    "inertia_coeff",
-                    "paddle_a_t",
-                    "paddle_b_t",
-                    "paddle_mu",
-                    "paddle_e_g1",
-                    "paddle_e_g2",
-                )
-            )
+            for index, name in enumerate(param_names)
         },
     )
     cfg = SimpleNamespace(
@@ -2406,6 +2471,19 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             ),
         ),
     }
+    # The refill entry point now cross-checks the sealed profile against the
+    # objects it is about to solve with, so the real check travels with it.
+    _module_assignments(
+        (
+            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
+            "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS",
+            "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
+        ),
+        namespace,
+    )
+    _module_functions(
+        ("action_ball_assert_solver_runtime_matches_declaration",), namespace
+    )
     module = ast.Module(
         body=[
             ast.ImportFrom(
@@ -2419,6 +2497,26 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     )
     ast.fix_missing_locations(module)
     exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    solver_knobs = {
+        "n_iters": 24,
+        "tol_m": 0.08,
+        "global_speed_budget_mps": 3.4,
+        "max_external_proposal_rounds": int(effective_rounds),
+        "external_overdraw_multiplier": 1.0,
+    }
+    ball_params = {
+        name: float(index + 1) / 10.0
+        for index, name in enumerate(
+            namespace["_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES"]
+        )
+    }
+    solver_cfg = SimpleNamespace(
+        tol_m=solver_knobs["tol_m"],
+        n_iters=solver_knobs["n_iters"],
+        speed_budget=solver_knobs["global_speed_budget_mps"],
+        max_redraw_rounds=solver_knobs["max_external_proposal_rounds"],
+        fixed_direction=True,
+    )
 
     runtime_module = types.ModuleType(
         "whole_body_tracking.tasks.tracking.mdp.action_ball_runtime"
@@ -2498,6 +2596,18 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     solver_module = types.ModuleType(
         "whole_body_tracking.tasks.tracking.mdp.continuous_questions"
     )
+    # The refill entry point's declaration cross-check reads these three live,
+    # so this stub serves them out of continuous_questions.py itself.
+    for _constant in (
+        "BALL_BIRTH_NET_MARGIN_M",
+        "CONTACT_NORMAL_SPEED_MIN_MPS",
+        "CONTACT_NORMAL_SPEED_MAX_MPS",
+    ):
+        setattr(
+            solver_module,
+            _constant,
+            _source_constant(CONTINUOUS_QUESTIONS_PATH, _constant),
+        )
     solver_calls = []
     observed_base_quat_rows = []
 
@@ -2702,7 +2812,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
 
     command = SimpleNamespace(
         cfg=SimpleNamespace(
-            cq_max_redraw_rounds=1,
+            cq_max_redraw_rounds=int(effective_rounds),
             cq_overdraw=1.0,
             vb_rollout_h=0.002,
             vb_rollout_steps=1000,
@@ -2715,7 +2825,34 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         _action_ball_bindings=(SimpleNamespace(action_uid=7),),
         _action_ball_solver_contract={
             "payload": {
+                "kind": (
+                    "whole_body_tracking.continuous_questions.solve_proposals"
+                ),
+                "schema_version": namespace[
+                    "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION"
+                ],
+                "fixed_direction": True,
+                "solve": dict(solver_knobs),
+                "integrator": {"h_s": 0.002, "n_steps": 1000},
                 "acceptance": {
+                        "landing": {"tol_m": solver_knobs["tol_m"]},
+                        "net": {"ball_center_net_top_z_m": 0.9325},
+                        "contact_normal_speed_fit": {
+                            "minimum_mps_inclusive": _source_constant(
+                                CONTINUOUS_QUESTIONS_PATH,
+                                "CONTACT_NORMAL_SPEED_MIN_MPS",
+                            ),
+                            "maximum_mps_inclusive": _source_constant(
+                                CONTINUOUS_QUESTIONS_PATH,
+                                "CONTACT_NORMAL_SPEED_MAX_MPS",
+                            ),
+                        },
+                        "incoming_birth": {
+                            "net_margin_m": _source_constant(
+                                CONTINUOUS_QUESTIONS_PATH,
+                                "BALL_BIRTH_NET_MARGIN_M",
+                            )
+                        },
                         "ordered_rejection_reason_schema": (
                             "no_landing",
                             "teacher_site_rate_geometry_unsolved",
@@ -2727,11 +2864,23 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 }
             }
         },
+        _action_ball_physics_contract={
+            "payload": {
+                "kind": "whole_body_tracking.action_ball.physics_and_scorer",
+                "virtual_ball_params": dict(ball_params),
+                "geometry_and_grading": {
+                    "ball_center_surface_z_m": 0.78,
+                    "net_x_m": 1.87,
+                    "ball_center_net_top_z_m": 0.9325,
+                },
+                "scorer_integrator": {"h_s": 0.002, "n_steps": 1000},
+            }
+        },
         _action_ball_sampler=sampler,
         _action_ball_reject_counts={7: {}},
         _action_ball_prototypes=object(),
-        _action_ball_prm=object(),
-        _action_ball_solver_cfg=object(),
+        _action_ball_prm=SimpleNamespace(**ball_params),
+        _action_ball_solver_cfg=solver_cfg,
         _action_ball_timing=((0.2, 1.0),),
         _action_ball_bundle=SimpleNamespace(
             profiles=(
@@ -3667,3 +3816,493 @@ def test_every_live_birth_receipt_declares_the_sampler_initial_center_law():
         # Legacy births carry no mixture at all and the receipt refuses the
         # flag there, so the sampler law is gated on the mixture being present.
         assert "sampler_birth.sampling_mixture is not None" in value
+
+
+# --------------------------------------------------------------------------- #
+# The declaration/actual bridge.                                              #
+#                                                                              #
+# 人话:pin 封的是 payload 里"声明的数字";真正喂给求解器的数字要经过一条传递线,   #
+# 而那条线住在 ``_initialize_action_ball_runtime``(语义面以 ``runtime_wiring``   #
+# 为由排除的 1700 多行)。下面这组测试盯的就是这条线:声明必须只有一个出处、       #
+# 映射必须只有一处、活值和声明必须逐字段相等,不等就 fail-closed。                #
+# --------------------------------------------------------------------------- #
+CONTINUOUS_QUESTIONS_PATH = COMMAND_PATH.with_name("continuous_questions.py")
+
+
+def _module_assignments(names, namespace):
+    """Execute named module-level assignments out of the shipped source.
+
+    Reading the real assignment beats re-typing its value in the test: a test
+    that carries its own copy of a constant stops being evidence the moment the
+    two disagree, which is the exact failure this whole area exists to stop.
+    """
+
+    wanted = set(names)
+    nodes = [
+        node
+        for node in TREE.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id in wanted
+            for target in node.targets
+        )
+    ]
+    found = {
+        target.id
+        for node in nodes
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert found >= wanted, wanted - found
+    module = ast.Module(body=nodes, type_ignores=[])
+    ast.fix_missing_locations(module)
+    exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    return tuple(namespace[name] for name in names)
+
+
+def _source_constant(path, name):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == name
+            for target in node.targets
+        ):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"{name} is not a module-level constant of {path}")
+
+
+def _install_continuous_questions_stub(monkeypatch):
+    """Serve the three covered acceptance constants out of their own source.
+
+    ``hope_commands`` reads them at call time so that the payload cannot carry a
+    stale hand-typed copy.  The test reads them the same way, for the same
+    reason.
+    """
+
+    module_name = "whole_body_tracking.tasks.tracking.mdp.continuous_questions"
+    stub = types.ModuleType(module_name)
+    for constant in (
+        "BALL_BIRTH_NET_MARGIN_M",
+        "CONTACT_NORMAL_SPEED_MIN_MPS",
+        "CONTACT_NORMAL_SPEED_MAX_MPS",
+    ):
+        setattr(
+            stub, constant, _source_constant(CONTINUOUS_QUESTIONS_PATH, constant)
+        )
+    monkeypatch.setitem(sys.modules, module_name, stub)
+    return stub
+
+
+@pytest.fixture
+def bridge(monkeypatch):
+    """The four covered symbols of the declaration/actual bridge, plus a stub cq.
+
+    ``continuous_questions`` is stubbed with values read out of its own source,
+    not with numbers typed here.
+    """
+
+    namespace = {"hashlib": hashlib, "json": json}
+    _module_assignments(
+        (
+            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
+            "_ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION",
+            "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS",
+            "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
+            "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
+        ),
+        namespace,
+    )
+    namespace["Path"] = Path
+    (
+        knobs,
+        build_cfg,
+        check,
+        solver_contract,
+        physics_contract,
+        canonical,
+        _sha_file,
+    ) = _module_functions(
+        (
+            "action_ball_declared_solver_knobs",
+            "action_ball_solver_cfg_from_declaration",
+            "action_ball_assert_solver_runtime_matches_declaration",
+            "action_ball_solver_profile_contract",
+            "action_ball_physics_profile_contract",
+            "_action_ball_canonical_sha256",
+            "_action_ball_sha256_file",
+        ),
+        namespace,
+    )
+    stub = _install_continuous_questions_stub(monkeypatch)
+    return SimpleNamespace(
+        knobs=knobs,
+        build_cfg=build_cfg,
+        check=check,
+        solver_contract=solver_contract,
+        physics_contract=physics_contract,
+        canonical=canonical,
+        constants=namespace,
+        cq=stub,
+    )
+
+
+class _FakeContinuousQuestionCfg:
+    def __init__(
+        self, *, tol_m, n_iters, speed_budget, max_redraw_rounds, fixed_direction
+    ):
+        self.tol_m = tol_m
+        self.n_iters = n_iters
+        self.speed_budget = speed_budget
+        self.max_redraw_rounds = max_redraw_rounds
+        self.fixed_direction = fixed_direction
+
+
+def _bridge_world(bridge, tmp_path, **cfg_overrides):
+    """One consistent (sealed payload, live object) pair, built the honest way."""
+
+    venue = tmp_path / "venue.yaml"
+    venue.write_text("physics: exact\n", encoding="utf-8")
+    prm = SimpleNamespace(
+        source_path=venue,
+        **{
+            name: float(index + 1) / 10.0
+            for index, name in enumerate(
+                bridge.constants["_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES"]
+            )
+        },
+    )
+    cfg = _valid_recipe(
+        vb_table_surface_z=0.76,
+        vb_min_landing_depth=0.15,
+        **cfg_overrides,
+    )
+    planes = (0.78, 1.87, 0.9325)
+    physics = bridge.physics_contract(
+        cfg,
+        prm,
+        repo_root=tmp_path,
+        surface_z=planes[0],
+        net_x=planes[1],
+        net_top_z=planes[2],
+        opponent_near_x=0.5,
+        opponent_far_x=3.24,
+        table_half_width=0.7625,
+    )
+    solver = bridge.solver_contract(
+        cfg,
+        physics_profile_sha256=physics["sha256"],
+        semantic_surface={
+            "payload": {
+                "kind": (
+                    "whole_body_tracking.action_ball.solver_semantic_surface"
+                ),
+                "schema_version": 1,
+                "symbol_digest_algorithm": "test",
+                "coverage_policy": {"pinned_sources": ["hope_commands.py"]},
+                "covered": {"hope_commands.py": {"a": "b"}},
+            },
+            "sha256": "9" * 64,
+        },
+        source_sha256={},
+        contact_geometry_contract={"payload": {}, "sha256": "6" * 64},
+        net_top_z=planes[2],
+    )
+    return SimpleNamespace(
+        cfg=cfg,
+        prm=prm,
+        planes=planes,
+        solver=solver,
+        physics=physics,
+        solver_cfg=bridge.build_cfg(cfg, _FakeContinuousQuestionCfg),
+    )
+
+
+def _run_check(bridge, world, **overrides):
+    kwargs = {
+        "solver_declaration": world.solver["payload"],
+        "physics_declaration": world.physics["payload"],
+        "solver_cfg": world.solver_cfg,
+        "prm": world.prm,
+        "planes": world.planes,
+        "rollout_h": float(world.cfg.vb_rollout_h),
+        "rollout_steps": int(world.cfg.vb_rollout_steps),
+        "overdraw": float(world.cfg.cq_overdraw),
+        "maximum_rounds": int(world.cfg.cq_max_redraw_rounds),
+        "diagnostic_unauthorized": False,
+        "call_site": "test",
+    }
+    kwargs.update(overrides)
+    return bridge.check(**kwargs)
+
+
+def test_declared_solver_knobs_are_the_only_source_of_the_payloads_solve_block(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    declared = bridge.knobs(world.cfg)
+    assert world.solver["payload"]["solve"] == declared
+    assert world.solver["payload"]["acceptance"]["landing"]["tol_m"] == (
+        declared["tol_m"]
+    )
+    # The two contact-fit bounds used to be hand-typed literals in the payload.
+    # They now read the live constants, so the declaration cannot go stale.
+    # These three stay literal in the payload (the offline pinner mints it from
+    # a git revision's source text), so what keeps them honest is the runtime
+    # cross-check, not the builder.  Assert both halves.
+    fit = world.solver["payload"]["acceptance"]["contact_normal_speed_fit"]
+    assert fit["minimum_mps_inclusive"] == bridge.cq.CONTACT_NORMAL_SPEED_MIN_MPS
+    assert fit["maximum_mps_inclusive"] == bridge.cq.CONTACT_NORMAL_SPEED_MAX_MPS
+    assert world.solver["payload"]["acceptance"]["incoming_birth"][
+        "net_margin_m"
+    ] == bridge.cq.BALL_BIRTH_NET_MARGIN_M
+    assert _run_check(bridge, world)["compared_field_count"] > 0
+    assert world.solver["payload"]["fixed_direction"] is (
+        bridge.constants["_ACTION_BALL_SOLVER_FIXED_DIRECTION"]
+    )
+
+
+def test_solver_cfg_mapping_carries_the_declared_knobs_and_nothing_else(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    declared = bridge.knobs(world.cfg)
+    assert world.solver_cfg.tol_m == declared["tol_m"]
+    assert world.solver_cfg.n_iters == declared["n_iters"]
+    assert world.solver_cfg.speed_budget == declared["global_speed_budget_mps"]
+    assert world.solver_cfg.max_redraw_rounds == (
+        declared["max_external_proposal_rounds"]
+    )
+    assert world.solver_cfg.fixed_direction is (
+        bridge.constants["_ACTION_BALL_SOLVER_FIXED_DIRECTION"]
+    )
+
+
+def test_runtime_cross_check_admits_the_honest_wiring_and_names_what_it_compared(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    receipt = _run_check(bridge, world)
+    assert receipt["call_site"] == "test"
+    assert receipt["diagnostic_unauthorized"] is False
+    assert receipt["compared_field_count"] == len(receipt["compared_fields"])
+    assert len(set(receipt["compared_fields"])) == len(
+        receipt["compared_fields"]
+    )
+    # Every declared number, not a sample of them.
+    for name in bridge.constants["_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES"]:
+        assert "physics.virtual_ball_params.%s" % name in receipt[
+            "compared_fields"
+        ]
+    for name in (
+        "solver.fixed_direction",
+        "solver.solve.n_iters",
+        "solver.solve.tol_m",
+        "solver.solve.global_speed_budget_mps",
+        "solver.solve.max_external_proposal_rounds",
+        "solver.solve.external_overdraw_multiplier",
+        "solver.solve.max_external_proposal_rounds.effective",
+        "solver.acceptance.net.ball_center_net_top_z_m",
+        "physics.geometry_and_grading.net_x_m",
+    ):
+        assert name in receipt["compared_fields"], name
+
+
+# The three mutations that escaped the per-symbol pin when the mapping lived
+# inline in the excluded wiring function.  Here they are applied to the LIVE
+# object only -- i.e. the wiring hands the solver something the sealed payload
+# does not declare -- which is precisely the shape a static digest cannot see.
+ESCAPED_WIRING_MUTATIONS = (
+    ("tol_m", 0.5, "solver.solve.tol_m"),
+    ("speed_budget", 2.0, "solver.solve.global_speed_budget_mps"),
+)
+
+
+@pytest.mark.parametrize(
+    "field,factor,expected_name",
+    ESCAPED_WIRING_MUTATIONS,
+    ids=[name for name, _, _ in ESCAPED_WIRING_MUTATIONS],
+)
+def test_runtime_cross_check_catches_a_scaled_solver_knob(
+    bridge, tmp_path, field, factor, expected_name
+):
+    world = _bridge_world(bridge, tmp_path)
+    setattr(world.solver_cfg, field, getattr(world.solver_cfg, field) * factor)
+    with pytest.raises(RuntimeError) as error:
+        _run_check(bridge, world)
+    assert expected_name in str(error.value)
+    assert "fields drifted" in str(error.value)
+
+
+def test_runtime_cross_check_catches_a_bumped_iteration_count(bridge, tmp_path):
+    world = _bridge_world(bridge, tmp_path)
+    world.solver_cfg.n_iters = world.solver_cfg.n_iters + 5
+    with pytest.raises(RuntimeError, match="solver.solve.n_iters"):
+        _run_check(bridge, world)
+
+
+def test_runtime_cross_check_catches_the_flipped_fixed_direction_flag(
+    bridge, tmp_path
+):
+    """The edit that made the declaration AND an exclusion reason false at once."""
+
+    world = _bridge_world(bridge, tmp_path)
+    world.solver_cfg.fixed_direction = False
+    with pytest.raises(RuntimeError, match="solver.fixed_direction"):
+        _run_check(bridge, world)
+
+
+def test_runtime_cross_check_catches_a_doctored_plane_and_ball_parameter(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    with pytest.raises(
+        RuntimeError, match="acceptance.net.ball_center_net_top_z_m"
+    ):
+        _run_check(
+            bridge,
+            world,
+            planes=(world.planes[0], world.planes[1], world.planes[2] + 0.01),
+        )
+    drifted = SimpleNamespace(
+        **{
+            name: getattr(world.prm, name)
+            for name in bridge.constants["_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES"]
+        }
+    )
+    drifted.paddle_mu = drifted.paddle_mu * 1.5
+    with pytest.raises(RuntimeError, match="virtual_ball_params.paddle_mu"):
+        _run_check(bridge, world, prm=drifted)
+
+
+def test_runtime_cross_check_catches_a_widened_overdraw_and_redraw_budget(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    with pytest.raises(RuntimeError, match="external_overdraw_multiplier"):
+        _run_check(bridge, world, overdraw=float(world.cfg.cq_overdraw) * 2.0)
+    with pytest.raises(
+        RuntimeError, match=r"max_external_proposal_rounds\.effective"
+    ):
+        _run_check(
+            bridge,
+            world,
+            maximum_rounds=int(world.cfg.cq_max_redraw_rounds) + 1,
+        )
+
+
+def test_the_diagnostic_exemption_is_exactly_two_named_constants(
+    bridge, tmp_path
+):
+    """A diagnostic run may depart from the declaration in two places only."""
+
+    world = _bridge_world(bridge, tmp_path)
+    rounds = bridge.constants[
+        "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS"
+    ]
+    _run_check(
+        bridge,
+        world,
+        diagnostic_unauthorized=True,
+        overdraw=1.0,
+        maximum_rounds=rounds,
+    )
+    # The exemption does not become a licence to hand over anything at all.
+    with pytest.raises(RuntimeError, match="external_overdraw_multiplier"):
+        _run_check(
+            bridge,
+            world,
+            diagnostic_unauthorized=True,
+            overdraw=1.5,
+            maximum_rounds=rounds,
+        )
+    with pytest.raises(RuntimeError, match="solver.solve.tol_m"):
+        _run_check(
+            bridge,
+            world,
+            diagnostic_unauthorized=True,
+            overdraw=1.0,
+            maximum_rounds=rounds,
+            solver_cfg=_FakeContinuousQuestionCfg(
+                tol_m=world.solver_cfg.tol_m * 0.5,
+                n_iters=world.solver_cfg.n_iters,
+                speed_budget=world.solver_cfg.speed_budget,
+                max_redraw_rounds=world.solver_cfg.max_redraw_rounds,
+                fixed_direction=world.solver_cfg.fixed_direction,
+            ),
+        )
+
+
+def test_runtime_cross_check_refuses_a_payload_that_is_not_the_sealed_profile(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    stale = dict(world.solver["payload"])
+    stale["schema_version"] = 2
+    with pytest.raises(RuntimeError, match="not the schema v"):
+        _run_check(bridge, world, solver_declaration=stale)
+    wrong_kind = dict(world.physics["payload"])
+    wrong_kind["kind"] = "something.else"
+    with pytest.raises(RuntimeError, match="not the physics/scorer profile"):
+        _run_check(bridge, world, physics_declaration=wrong_kind)
+
+
+def test_every_solve_entry_point_runs_the_cross_check_before_it_solves():
+    """The load-bearing half: the boot call is not the one that matters.
+
+    ``_initialize_action_ball_runtime`` is excluded from the semantic surface,
+    so a call placed only there could be deleted without moving the pin.  These
+    three methods are covered, so the call sites below are pinned.
+    """
+
+    for method in (
+        "_action_ball_refill_pool_many",
+        "_action_ball_replay_emitted_tasks",
+        "_action_ball_frozen_eval_solve",
+    ):
+        source = _method_source(method)
+        assert (
+            "action_ball_assert_solver_runtime_matches_declaration(" in source
+        ), method
+        assert f'call_site="{method}"' in source
+        check_at = source.index(
+            "action_ball_assert_solver_runtime_matches_declaration("
+        )
+        solve_at = source.index("solve_proposals(")
+        assert check_at < solve_at, (
+            f"{method} solves before it checks the declaration"
+        )
+
+
+@pytest.mark.parametrize(
+    "constant,field",
+    (
+        (
+            "CONTACT_NORMAL_SPEED_MIN_MPS",
+            "solver.acceptance.contact_normal_speed_fit.minimum_mps_inclusive",
+        ),
+        (
+            "CONTACT_NORMAL_SPEED_MAX_MPS",
+            "solver.acceptance.contact_normal_speed_fit.maximum_mps_inclusive",
+        ),
+        (
+            "BALL_BIRTH_NET_MARGIN_M",
+            "solver.acceptance.incoming_birth.net_margin_m",
+        ),
+    ),
+)
+def test_a_payload_literal_that_drifts_from_its_constant_is_refused(
+    bridge, tmp_path, monkeypatch, constant, field
+):
+    """The declaration may be a literal, but it may not become a lie.
+
+    The offline pinner mints this payload from a revision's source text, so the
+    builder cannot import the live constant.  What replaces that is this
+    comparison: change the constant without changing the declaration (or the
+    other way round) and the run refuses before it draws a question.
+    """
+
+    world = _bridge_world(bridge, tmp_path)
+    monkeypatch.setattr(bridge.cq, constant, getattr(bridge.cq, constant) + 1.0)
+    with pytest.raises(RuntimeError) as error:
+        _run_check(bridge, world)
+    assert field in str(error.value)
