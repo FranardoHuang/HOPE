@@ -62,8 +62,49 @@ TASK_RECEIPT_TIMING_AUTHORITY = (
     f"per_swing_task_receipt_v{TASK_RECEIPT_SCHEMA_VERSION}"
     "_exact_face_contact"
 )
+# 这两个数字**故意没有**跟着下面两块新增的必填字段一起 +1。理由:
+# ``_CONTRACT_DESCRIPTION["state_schemas"]`` 直接吃这两个常数,而
+# ``RUNTIME_CONTRACT_SHA256`` 是它的哈希 —— 那个 SHA 被盖进了**每一份**已经
+# 物化的 task receipt 和 immutable tape(configs/ 下上千个 .json)。动它等于
+# 让全部现存题带作废、A211/C211 的谱系全部要重新物化一遍。
+#
+# 而版本号在这里本来就不是那道防线:``_exact_mapping`` 对键集是精确相等,
+# 缺键和多键都拒。所以老存档喂新代码(缺 scope 牌子)、新存档喂老代码
+# (多一个牌子)**两个方向都已经 fail-closed**,报的还是一句指名道姓
+# "missing=[...] / unknown=[...]"。版本号 +1 只能把这句话换个措辞,
+# 换不来任何额外的安全性,却要付上面那个代价。
 BROKER_STATE_SCHEMA_VERSION = 4
 POOL_STATE_SCHEMA_VERSION = 3
+
+# 人话:broker 存盘也有两种"出生名单范围",同样要自陈。
+# ``complete`` = 名单覆盖 provider 发过的每一个出生下标(正式跑;以及
+#   immutable-N1 那条把完整历史另外补进来的 exact-resume 读口)。
+# ``live_envs_only`` = 诊断跑的活 broker。它**故意**每个 env 只留最新那一条
+#   consumed 收据(``_diagnostic_consumed_receipt_by_env``),所以第一次真
+#   reset 之后名单就不可能再"穷尽"provider 下标了。这种存档因此**不能**用来
+#   续跑 —— 被删掉的旧世代正是原检查要防的那个洞。载入端直接拒绝。
+BROKER_BIRTH_TRANSCRIPT_SCOPE_COMPLETE = "complete"
+BROKER_BIRTH_TRANSCRIPT_SCOPE_LIVE_ENVS = "live_envs_only"
+BROKER_BIRTH_TRANSCRIPT_SCOPES = (
+    BROKER_BIRTH_TRANSCRIPT_SCOPE_COMPLETE,
+    BROKER_BIRTH_TRANSCRIPT_SCOPE_LIVE_ENVS,
+)
+
+# 人话:池子存盘有两种"账本范围",存档里必须自陈是哪一种。
+# ``exact_per_birth`` = 正式跑。每次 refill 都把每条提案记进 2-bit lifecycle、
+#   per-birth 的 proposed/sample_assignments/transcript 哈希链,存盘时逐条对账。
+# ``diagnostic_live_births_only`` = 诊断快路(``diagnostic_unauthorized`` 且非
+#   fixed-view)。它**故意**不写那几本逐提案的账 —— 那正是这条快路存在的理由
+#   (见 ``_install_refill_batch_diagnostic`` 的注释:那些 JSON/SHA/dataclass
+#   成本每次 reset 都要付,却没人消费)。所以它存盘时对的是另一本它真写的账:
+#   聚合 ``PoolLedger`` + 采样高水位。两种范围的存档形状不同,载入端两个方向
+#   都要求牌子和本进程的模式相等 —— 不允许把其中一种当另一种读。
+POOL_STATE_SCOPE_EXACT = "exact_per_birth"
+POOL_STATE_SCOPE_DIAGNOSTIC = "diagnostic_live_births_only"
+POOL_STATE_SCOPES = (
+    POOL_STATE_SCOPE_EXACT,
+    POOL_STATE_SCOPE_DIAGNOSTIC,
+)
 MAX_ACTION_UID = (1 << 53) - 1
 MAX_COUNTER = (1 << 63) - 1
 SAMPLER_BIRTH_DRAW_COUNT = 3
@@ -5133,6 +5174,7 @@ class ActionBirthBroker:
 
     _STATE_KEYS = (
         "schema_version",
+        "birth_transcript_scope",
         "runtime_contract_sha256",
         "registry_sha256",
         "pins",
@@ -5551,6 +5593,7 @@ class ActionBirthBroker:
         *,
         sampler_birth_indices: Mapping[int, int],
         sampler_draw_ends: Mapping[int, int],
+        coverage: str = BROKER_BIRTH_TRANSCRIPT_SCOPE_COMPLETE,
     ) -> None:
         """Require broker receipts to exhaust every provider-issued birth.
 
@@ -5558,7 +5601,25 @@ class ActionBirthBroker:
         this coverage check, a re-signed checkpoint could delete an older
         env/generation receipt while retaining the provider state and final
         high-water, then reuse the deleted generation after restore.
+
+        ``coverage`` 决定用哪一种范围收口,**默认是完整覆盖**:
+
+        * ``complete`` —— 名单必须恰好是下标 ``0..high-water``。正式跑走这条;
+          immutable-N1 的 ``diagnostic_state_dict_with_consumed_history``
+          也走这条,因为它把完整历史另外补进来了,而且那条路是要**真续跑**的。
+        * ``live_envs_only`` —— 只有诊断跑的活 broker 走这条。它每个 env 只留
+          最新一条收据,穷尽性结构上就不成立。这里仍然强制:下标必须落在
+          ``0..high-water`` 之内、high-water 说发过出生就必须有收据、抽样
+          draw 计数照查;加上函数上方那条**无条件**的"同一条 sampler birth
+          不许出现两次"。换来的代价写进了存档牌子 ——
+          ``birth_transcript_scope=live_envs_only`` 的 broker 存档一律拒绝载入,
+          所以"删掉旧世代再复用"那条攻击路径根本没有落地的地方。
         """
+
+        if coverage not in BROKER_BIRTH_TRANSCRIPT_SCOPES:
+            raise ActionBallContractError(
+                f"unknown birth transcript coverage {coverage!r}"
+            )
 
         by_action: Dict[int, Dict[int, ActionBirthReceipt]] = {
             binding.action_uid: {} for binding in self._bindings
@@ -5595,6 +5656,19 @@ class ActionBirthBroker:
                     raise ActionBallContractError(
                         "birth transcript disagrees with empty provider "
                         "high-water"
+                    )
+                continue
+            if coverage == BROKER_BIRTH_TRANSCRIPT_SCOPE_LIVE_ENVS:
+                if (
+                    last_index < 0
+                    or last_draw_end < SAMPLER_BIRTH_DRAW_COUNT
+                    or not action_rows
+                    or min(action_rows) < 0
+                    or max(action_rows) > last_index
+                ):
+                    raise ActionBallContractError(
+                        "diagnostic birth transcript falls outside the "
+                        "provider-issued birth indices"
                     )
                 continue
             if (
@@ -6355,6 +6429,14 @@ class ActionBirthBroker:
                 for pending in self._pending.values()
             ),
         )
+        # 人话:诊断活 broker 每个 env 只留最新一条收据,所以它的名单不可能
+        # 穷尽 provider 下标 —— 第一次真 reset 之后就不行了。用它自己能证明的
+        # 那一档收口,并把这件事写进存档牌子(下面 payload 里),载入端据此拒绝。
+        transcript_scope = (
+            BROKER_BIRTH_TRANSCRIPT_SCOPE_LIVE_ENVS
+            if self._diagnostic_fast_path
+            else BROKER_BIRTH_TRANSCRIPT_SCOPE_COMPLETE
+        )
         try:
             if self._provider is None:
                 raise BirthProtocolError("birth provider is not bound")
@@ -6364,6 +6446,7 @@ class ActionBirthBroker:
                     self._last_sampler_birth_index
                 ),
                 sampler_draw_ends=self._last_sampler_draw_end,
+                coverage=transcript_scope,
             )
             for receipt in transcript:
                 self._provider.assert_issued_birth(receipt)
@@ -6389,6 +6472,7 @@ class ActionBirthBroker:
             raise
         payload: Dict[str, object] = {
             "schema_version": BROKER_STATE_SCHEMA_VERSION,
+            "birth_transcript_scope": transcript_scope,
             "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
             "registry_sha256": self._registry_sha256,
             "pins": self._pins.to_dict(),
@@ -6566,8 +6650,13 @@ class ActionBirthBroker:
             )
             raise
 
+        # 人话:这条读口把完整历史补进来了,上面也用 ``complete`` 收口过,
+        # 所以它出的存档是可以续跑的 —— 牌子照实写 ``complete``。
         payload: Dict[str, object] = {
             "schema_version": BROKER_STATE_SCHEMA_VERSION,
+            "birth_transcript_scope": (
+                BROKER_BIRTH_TRANSCRIPT_SCOPE_COMPLETE
+            ),
             "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
             "registry_sha256": self._registry_sha256,
             "pins": self._pins.to_dict(),
@@ -6711,6 +6800,24 @@ class ActionBirthBroker:
         if row["runtime_contract_sha256"] != RUNTIME_CONTRACT_SHA256:
             raise ActionBallContractError(
                 "birth broker runtime contract SHA mismatch"
+            )
+        # 人话:``live_envs_only`` 的存档没有证明过"名单穷尽 provider 下标",
+        # 而那条穷尽性正是用来堵"删掉一条旧世代收据、复用那个世代号"的。
+        # 所以这种存档只能当取证数据,不能拿来复原 broker。这里直说。
+        declared_transcript_scope = row["birth_transcript_scope"]
+        if declared_transcript_scope not in BROKER_BIRTH_TRANSCRIPT_SCOPES:
+            raise ActionBallContractError(
+                "unknown birth broker transcript scope "
+                f"{declared_transcript_scope!r}"
+            )
+        if (
+            declared_transcript_scope
+            == BROKER_BIRTH_TRANSCRIPT_SCOPE_LIVE_ENVS
+        ):
+            raise ActionBallContractError(
+                "a diagnostic live broker keeps only the newest receipt per "
+                "env, so its checkpoint never proved complete birth "
+                "coverage and cannot restore a broker; launch fresh"
             )
         declared_integrity = _sha256(
             row["integrity_sha256"], name="integrity_sha256"
@@ -7693,6 +7800,7 @@ class LazyActionTaskPool:
 
     _STATE_KEYS = (
         "schema_version",
+        "pool_state_scope",
         "runtime_contract_sha256",
         "registry_sha256",
         "pins",
@@ -8113,6 +8221,24 @@ class LazyActionTaskPool:
 
         if self._solver_delegates_birth_task_transcripts():
             return
+        # 人话:这是**单向**要求,不是相等。
+        #
+        # 诊断快路的池子结构上不写逐出生的 transcript 表
+        # (``_register_birth`` 写那张表的几行只在正式分支执行),所以下面
+        # 那套逐条对账对它无法进行 —— 以前会在 ``_expected_task_transcript_
+        # for_active_birth`` 里炸成一句看不懂的 ``KeyError: <uid>``。指名道姓
+        # 说清楚:诊断池子只能配自陈"transcript 归池子管"的 solver,真实的
+        # ``RacketTargetCommand`` 在诊断模式下正是这么设的。
+        #
+        # 反方向合法,所以不能写成相等:``BandedQuestionBankSolver`` 也把这面
+        # 旗子设成 True,而它配的是**正式**池子 —— 那种池子确实写了 transcript
+        # 表,只是题带 solver 自己不再留一份逐出生副本。
+        if self._diagnostic_fast_path:
+            raise ActionBallContractError(
+                "a diagnostic fast-path pool keeps no per-birth task "
+                "transcript, so its solver must declare "
+                "pool_owns_birth_task_transcripts=True"
+            )
 
         solver_state = self._solver_state()
         try:
@@ -8307,6 +8433,122 @@ class LazyActionTaskPool:
             raise ActionBallContractError(
                 "sample assignments must partition every lifecycle index"
             )
+
+    def _pool_state_scope(self) -> str:
+        """Name the ledger range this pool can actually prove at save time."""
+
+        return (
+            POOL_STATE_SCOPE_DIAGNOSTIC
+            if self._diagnostic_fast_path
+            else POOL_STATE_SCOPE_EXACT
+        )
+
+    def _assert_diagnostic_compact_tables_stay_empty(self) -> None:
+        """The diagnostic branch is only sound while it writes nothing here.
+
+        人话:下面这几本账,诊断快路一行都不写(``_register_birth`` 的
+        ``if not self._diagnostic_fast_path`` 分支、以及 ``_install_lifecycle_samples``
+        只有正式分支的调用点)。``_assert_diagnostic_ledger_invariants`` 正是
+        因为它们恒空,才有资格改用聚合台账对账。所以这里把"恒空"本身钉成一条
+        会开火的检查:哪天有人开始在诊断模式下写它们,这条先炸,而不是让存盘
+        安静地漏掉半本账。
+        """
+
+        for name, table in (
+            ("task_lifecycle", self._task_lifecycle),
+            ("proposed_by_birth", self._proposed_by_birth),
+            ("sample_assignments", self._sample_assignments),
+            (
+                "issued_task_transcript_sha256",
+                self._issued_task_transcript_sha256,
+            ),
+            ("retired_births", self._retired_births),
+        ):
+            if table:
+                raise ActionBallContractError(
+                    "diagnostic pool must not populate the per-proposal "
+                    f"table {name!r}; its checkpoint scope cannot prove it"
+                )
+
+    def _assert_diagnostic_ledger_invariants(self) -> None:
+        """Prove the diagnostic pool against the books it really writes.
+
+        人话:正式跑用 2-bit lifecycle 逐条对账;诊断快路没有那本账,但它每次
+        refill/issue/retire 都在维护聚合 ``PoolLedger`` 和采样高水位。这里把
+        ``_assert_compact_lifecycle_invariants`` 的每条等式翻译到那本聚合账上,
+        **全部是精确相等**,不是范围放宽:
+
+        * ``proposed == last_sample_index + 1``
+          —— 正式分支里 ``len(lifecycle) == last_sample_index + 1`` 且
+          ``ledger.proposed == len(lifecycle)``。同一条"采样带上每个下标恰好
+          对应一条提案"的不变式,换成累计计数器表达。
+        * ``admitted == issued + discarded + 活着的 pending``
+          —— 收进来的任务只有三种去向。退休时 ``_retire_many_diagnostic``
+          把 ``len(pending)`` 记进 ``discarded`` 并删掉队列,所以这条等式
+          跨退休依然成立。
+        * ``requests == issued`` —— 诊断路每发一个任务同时给两者 +1。
+        * ``proposed >= admitted``、``admitted >= refill_calls``
+          —— 每次 refill 至少收一条(收不到会在 issue 处 raise)。
+        """
+
+        self._assert_diagnostic_compact_tables_stay_empty()
+        for binding in self._bindings:
+            uid = binding.action_uid
+            ledger = self._ledger.get(uid, PoolLedger())
+            last_sample_index = self._last_sample_index.get(uid, -1)
+            if ledger.proposed != last_sample_index + 1:
+                raise ActionBallContractError(
+                    "diagnostic pool proposals must cover sample indices "
+                    "0..high-water"
+                )
+            active_pending = sum(
+                len(self._pending[uid][digest])
+                for digest in self._births.get(uid, {})
+            )
+            if (
+                ledger.admitted
+                != ledger.issued + ledger.discarded + active_pending
+            ):
+                raise ActionBallContractError(
+                    "diagnostic pool admitted tasks must equal issued plus "
+                    "discarded plus still-pending"
+                )
+            # ``requests == issued`` 和 ``proposed >= admitted >=
+            # issued + discarded`` 不在这里重查:``PoolLedger.__post_init__``
+            # 已经是它们的唯一真源,任何构造得出来的 ledger 都满足。上面那条
+            # 等式比 ``admitted >= issued + discarded`` 严格 —— 它把余下的
+            # 部分钉死在活着的 pending 队列上,所以留着。
+            if ledger.admitted < ledger.refill_calls:
+                raise ActionBallContractError(
+                    "diagnostic pool refill calls must each admit a task"
+                )
+            active_issued = sum(
+                self._cursor[uid][digest]
+                for digest in self._births.get(uid, {})
+            )
+            if active_issued > ledger.issued:
+                raise ActionBallContractError(
+                    "diagnostic pool active cursors exceed the issued ledger"
+                )
+
+    def _diagnostic_emitted_task_counts(self) -> Dict[int, int]:
+        """Cumulative admitted tasks per action, from the diagnostic ledger.
+
+        人话:这是诊断路版本的 ``_pool_emitted_task_counts``。后者把"活着的
+        出生 + 退休记录"加起来重建累计值,而诊断路根本不留退休记录,那个重建
+        每次真 reset 都会往下掉,跟 solver 侧终身单调的计数器必然对不上。
+        ``PoolLedger.admitted`` 是同一个量的直接累计:退休只加 ``discarded``,
+        从不减 ``admitted``。仍然是跨对象的独立对账 —— 池子这一侧在
+        ``_request_many_diagnostic`` 里累加,solver 那一侧在它自己的 refill
+        记账里累加。
+        """
+
+        return {
+            binding.action_uid: self._ledger.get(
+                binding.action_uid, PoolLedger()
+            ).admitted
+            for binding in self._bindings
+        }
 
     def _assert_compact_lifecycle_invariants(self) -> None:
         for binding in self._bindings:
@@ -9921,9 +10163,13 @@ class LazyActionTaskPool:
         return tuple(row[3] for row in validated)
 
     def state_dict(self) -> Dict[str, object]:
+        diagnostic = self._diagnostic_fast_path
         solver_state = self._solver_state()
         try:
-            self._assert_compact_lifecycle_invariants()
+            if diagnostic:
+                self._assert_diagnostic_ledger_invariants()
+            else:
+                self._assert_compact_lifecycle_invariants()
             for binding in self._bindings:
                 uid = binding.action_uid
                 expected = (
@@ -9935,10 +10181,16 @@ class LazyActionTaskPool:
                         "pool sample high-water differs from solver "
                         "authority"
                     )
-            if (
-                self._solver_emitted_task_counts()
-                != self._pool_emitted_task_counts()
-            ):
+            # 人话:两种范围对的是同一个量(累计收进来的任务数),只是取数的
+            # 那本账不同 —— 正式跑重建"活着的出生 + 退休记录",诊断跑读它每次
+            # refill 都在累加的聚合台账。诊断跑不留退休记录,用正式那本重建
+            # 会在每次真 reset 之后往下掉,而 solver 侧是终身单调的。
+            pool_counts = (
+                self._diagnostic_emitted_task_counts()
+                if diagnostic
+                else self._pool_emitted_task_counts()
+            )
+            if self._solver_emitted_task_counts() != pool_counts:
                 raise ActionBallContractError(
                     "pool admitted-task counts differ from solver authority"
                 )
@@ -9993,26 +10245,37 @@ class LazyActionTaskPool:
                 order = [
                     receipt.canonical_sha256 for receipt in pending
                 ]
-                birth_rows.append(
-                    {
-                        "birth": self._births[uid][
-                            birth_digest
-                        ].to_dict(),
-                        "cursor": self._cursor[uid][birth_digest],
+                # 人话:后三项是逐提案的账,诊断快路从不写(见
+                # ``_assert_diagnostic_compact_tables_stay_empty``)。存档里
+                # 不放它们,而不是放一个假的零值 —— 载入端靠 ``pool_state_scope``
+                # 牌子知道该期待哪种形状。
+                per_proposal_rows = (
+                    {}
+                    if diagnostic
+                    else {
                         "issued_task_transcript_sha256": (
                             self._issued_task_transcript_sha256[uid][
                                 birth_digest
                             ]
                         ),
-                        "refill_index": self._refill_index[uid][
-                            birth_digest
-                        ],
                         "proposed_count": self._proposed_by_birth[uid][
                             birth_digest
                         ],
                         "sample_assignments": _sample_assignment_rows(
                             self._sample_assignments[uid][birth_digest]
                         ),
+                    }
+                )
+                birth_rows.append(
+                    {
+                        "birth": self._births[uid][
+                            birth_digest
+                        ].to_dict(),
+                        "cursor": self._cursor[uid][birth_digest],
+                        "refill_index": self._refill_index[uid][
+                            birth_digest
+                        ],
+                        **per_proposal_rows,
                         "pending_order": order,
                         "pending_receipts": [
                             receipt.to_dict() for receipt in pending
@@ -10047,6 +10310,22 @@ class LazyActionTaskPool:
                     }
                 )
             lifecycle = self._task_lifecycle.get(uid, [])
+            # 人话:同上。诊断跑没有 2-bit lifecycle,存一条"长度 0"会把
+            # "这本账不存在"伪装成"这本账是空的",而此时高水位可能已经几百。
+            # 宁可不写这三项,让牌子说明形状。
+            lifecycle_rows = (
+                {}
+                if diagnostic
+                else {
+                    "lifecycle_sample_count": len(lifecycle),
+                    "lifecycle_2bit_base64": (
+                        _pack_lifecycle_2bit(lifecycle)
+                    ),
+                    "lifecycle_sha256": _task_lifecycle_sha256(
+                        uid, lifecycle
+                    ),
+                }
+            )
             actions.append(
                 {
                     "action_uid": uid,
@@ -10055,19 +10334,14 @@ class LazyActionTaskPool:
                     "last_sample_draw_end": self._last_sample_draw_end.get(
                         uid
                     ),
-                    "lifecycle_sample_count": len(lifecycle),
-                    "lifecycle_2bit_base64": (
-                        _pack_lifecycle_2bit(lifecycle)
-                    ),
-                    "lifecycle_sha256": _task_lifecycle_sha256(
-                        uid, lifecycle
-                    ),
+                    **lifecycle_rows,
                     "births": birth_rows,
                     "retired_births": retired_rows,
                 }
             )
         payload: Dict[str, object] = {
             "schema_version": POOL_STATE_SCHEMA_VERSION,
+            "pool_state_scope": self._pool_state_scope(),
             "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
             "registry_sha256": self._registry_sha256,
             "pins": self._pins.to_dict(),
@@ -10107,6 +10381,33 @@ class LazyActionTaskPool:
         if row["runtime_contract_sha256"] != RUNTIME_CONTRACT_SHA256:
             raise ActionBallContractError(
                 "lazy action pool runtime contract SHA mismatch"
+            )
+        # 人话:牌子必须是已知的两种之一,而且必须和本进程的模式相等 ——
+        # 两个方向都拒绝。诊断存档里没有逐提案那半本账,拿去喂正式池子会把
+        # 缺的那半本悄悄变成零;反过来把正式存档喂给诊断池子,那半本账会被
+        # 无声丢弃。两种都不许。
+        declared_scope = row["pool_state_scope"]
+        if declared_scope not in POOL_STATE_SCOPES:
+            raise ActionBallContractError(
+                "unknown lazy action pool state scope "
+                f"{declared_scope!r}"
+            )
+        expected_scope = self._pool_state_scope()
+        if declared_scope != expected_scope:
+            raise ActionBallContractError(
+                "lazy action pool state scope mismatch: checkpoint="
+                f"{declared_scope!r}, this pool={expected_scope!r}"
+            )
+        if declared_scope == POOL_STATE_SCOPE_DIAGNOSTIC:
+            # 人话:诊断存档故意不含逐提案的那半本账,所以它**不能**用来续跑。
+            # 这里直说,而不是让下面的解码在缺字段上炸出一句看不懂的 KeyError。
+            # 这与发射合同一致:A211/C211 这类跑自己就写着 resume_prohibited /
+            # fresh_only。存档仍然有用 —— 它承载权重与取证数据,只是不承载
+            # "从第 N 步接着跑"所需的池子历史。
+            raise ActionBallContractError(
+                "diagnostic live-births-only pool checkpoints keep no "
+                "per-proposal lifecycle, so they cannot restore a pool; "
+                "launch fresh"
             )
         declared_integrity = _sha256(
             row["integrity_sha256"], name="integrity_sha256"

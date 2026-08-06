@@ -2734,13 +2734,17 @@ def test_diagnostic_batch_birth_callbacks_match_scalar_fixed_tape_n5():
         task.to_dict() for task in scalar_tasks
     ]
     assert batched_solver.state_dict() == scalar_solver.state_dict()
-    # Diagnostic pools intentionally omit the formal compact lifecycle and
-    # cannot produce an exact-resume state_dict.  Assert the boundary on both
-    # sides instead of mixing a formal pool with diagnostic birth authority.
+    # 人话:这里两个池子配的是**不**自陈 "transcript 归池子管" 的 ``Solver``,
+    # 所以存盘时被指名拒绝。以前这条断言等的是
+    # "task lifecycle must cover sample indices" —— 那句话把一个**真 bug**
+    # 写成了预期行为:诊断跑因此一份 checkpoint 都存不下来,A211/C211 的
+    # scale4096 就是这么死在 update 0 的。诊断跑该有的边界是"存得下、但不许
+    # 续跑",不是"存不下"。配对正确时能存下来这件事,由
+    # ``test_action_ball_diagnostic_pool_checkpoint.py`` 用真池子真 broker 覆盖。
     for pool in (scalar_pool, batched_pool):
         with pytest.raises(
             R.ActionBallContractError,
-            match="task lifecycle must cover sample indices",
+            match="pool_owns_birth_task_transcripts",
         ):
             pool.state_dict()
     for name in (
@@ -3045,7 +3049,24 @@ def test_diagnostic_consumed_history_keeps_legacy_state_bytes_and_values():
     full_history = broker.diagnostic_state_dict_with_consumed_history(history)
     legacy_after = broker.state_dict()
 
-    assert full_history == legacy_before
+    # 人话:这两份载荷现在**故意**只差一个牌子(以及覆盖它的完整性哈希)。
+    # 以前它们逐字节相同 —— 那意味着"名单已证明穷尽"这件事在存档里没有任何
+    # 痕迹,一份活 broker 的存档和一份补齐了历史的存档长得一模一样。
+    # 活 broker 每个 env 只留最新一条收据,第一次真 reset 之后就不可能穷尽,
+    # 所以它自陈 ``live_envs_only`` 且拒绝载入;这条补历史的读口自陈
+    # ``complete``,可以续跑。除此之外的每一项仍然必须一模一样。
+    assert legacy_before["birth_transcript_scope"] == "live_envs_only"
+    assert full_history["birth_transcript_scope"] == "complete"
+    branded = {
+        key: value
+        for key, value in full_history.items()
+        if key not in ("birth_transcript_scope", "integrity_sha256")
+    }
+    assert branded == {
+        key: value
+        for key, value in legacy_before.items()
+        if key not in ("birth_transcript_scope", "integrity_sha256")
+    }
     assert legacy_after == legacy_before
     assert _canonical_json_bytes(legacy_after) == legacy_bytes_before
 
