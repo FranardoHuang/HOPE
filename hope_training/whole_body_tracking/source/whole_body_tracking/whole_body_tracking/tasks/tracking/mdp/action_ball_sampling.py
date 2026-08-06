@@ -63,6 +63,25 @@ _LARGEST_FLOAT_BELOW_ONE = float.fromhex("0x1.fffffffffffffp-1")
 _NORMAL = NormalDist()
 _DIAGNOSTIC_PREVALIDATED_SAMPLE_AUTHORITY = object()
 
+# Which per-birth/per-sample bookkeeping a sampler state actually contains.
+#
+# 人话:同一个 sampler 有两种"逐事件存档"的写法,状态包必须自己说清是哪一种。
+# ``exact_per_birth`` = 每个样本都有一行 sample->birth 的 assignment,并接进
+# ``assignment_head`` 哈希链,可以逐条重放。``diagnostic_live_births_only`` =
+# 诊断跑(``diagnostic_unauthorized=True``)**故意**一行 assignment 都不写、哈希链
+# 一步都不推(见 :meth:`ActionBallSampler.sample` 末尾那个 ``if not
+# self._diagnostic_fast_path:``),出生表也只保留"还活着的那些"(见
+# :meth:`ActionBallSampler.forget_diagnostic_births`)。
+#
+# 拿"故意空的 assignment 账"去证伪一个正常增长的 ``sample_count``,证伪的是对账
+# 范围,不是那个计数器。两种 scope 的状态包互不相认,所以这块牌子跟着状态一起签名。
+SAMPLER_TRANSCRIPT_SCOPE_EXACT = "exact_per_birth"
+SAMPLER_TRANSCRIPT_SCOPE_DIAGNOSTIC = "diagnostic_live_births_only"
+SAMPLER_TRANSCRIPT_SCOPES = (
+    SAMPLER_TRANSCRIPT_SCOPE_EXACT,
+    SAMPLER_TRANSCRIPT_SCOPE_DIAGNOSTIC,
+)
+
 ARM_KEYS = (
     "time_to_contact_lower",
     "time_to_contact_upper",
@@ -106,6 +125,7 @@ _STATE_KEYS = (
     "draws_per_birth",
     "draws_per_sample",
     "action_uids",
+    "transcript_scope",
     "per_action",
     "issued_births",
     "issued_sample_birth_indices",
@@ -4737,6 +4757,20 @@ class ActionBallSampler:
     def sample_count(self) -> int:
         return sum(self._sample_count_by_action.values())
 
+    @property
+    def transcript_scope(self) -> str:
+        """Name the per-event bookkeeping this sampler actually writes.
+
+        A reader must never have to infer this from "the assignment list
+        happens to be empty".  See :data:`SAMPLER_TRANSCRIPT_SCOPES`.
+        """
+
+        return (
+            SAMPLER_TRANSCRIPT_SCOPE_DIAGNOSTIC
+            if self._diagnostic_fast_path
+            else SAMPLER_TRANSCRIPT_SCOPE_EXACT
+        )
+
     def draw_count_for(self, action_uid: int) -> int:
         return self._rng_for(action_uid).draw_count
 
@@ -7069,7 +7103,66 @@ class ActionBallSampler:
             receipts.append(receipt)
         return tuple(receipts)
 
+    def _assert_live_only_action_ledger(self, action_uid: int) -> None:
+        """Audit a live-births-only action against the books it does keep.
+
+        ``diagnostic_unauthorized`` deliberately writes no ``sample -> birth``
+        assignment row and never advances the assignment hash chain, so the
+        exact spelling's ``len(assignments) == sample_count - retired`` is a
+        comparison against a ledger that has no producer in this mode.  The
+        counter itself is fine; the reconciliation was out of scope.
+
+        Same drift, different witness: every birth consumes exactly
+        ``DRAWS_PER_BIRTH`` draws and every sample exactly
+        ``DRAWS_PER_SAMPLE`` from the one per-action counter tape (both are
+        asserted at issue time), and diagnostic retirement is defined to leave
+        RNG and retired prefixes untouched.  So the action's draw count still
+        pins both counters exactly -- one extra or one missing sample moves it
+        by 18 and this raises.  ``load_state_dict`` audits the exact spelling
+        against this very same lattice.
+        """
+
+        indices = self._issued_sample_birth_indices_by_action[action_uid]
+        if indices:
+            raise RuntimeError(
+                "sampler declares live-births-only bookkeeping but retained "
+                "a per-sample assignment row"
+            )
+        if self._compaction_segments_by_action[action_uid]:
+            raise RuntimeError(
+                "sampler declares live-births-only bookkeeping but folded a "
+                "compaction segment"
+            )
+        if (
+            self._retired_birth_count_by_action[action_uid]
+            or self._retired_sample_count_by_action[action_uid]
+        ):
+            raise RuntimeError(
+                "live-births-only retirement must not advance a retired "
+                "birth/sample prefix"
+            )
+        birth_count = self._birth_count_by_action[action_uid]
+        births = self._issued_births_by_action[action_uid]
+        # Bounds, not a materialized ``set(range(birth_count))``: birth_count
+        # grows for the whole diagnostic run (4096 per reset generation) while
+        # the live map stays one row per environment.
+        if births and not (0 <= min(births) and max(births) < birth_count):
+            raise RuntimeError(
+                "retained live birth transcript references a birth index "
+                "this sampler never issued"
+            )
+        expected_draw_count = (
+            birth_count * DRAWS_PER_BIRTH
+            + self._sample_count_by_action[action_uid] * DRAWS_PER_SAMPLE
+        )
+        if self._rng_by_action[action_uid].draw_count != expected_draw_count:
+            raise RuntimeError(
+                "sample authority ledger is inconsistent with the action "
+                "draw tape"
+            )
+
     def state_dict(self) -> Dict[str, object]:
+        live_only = self._diagnostic_fast_path
         per_action = {}
         issued_sample_birth_indices = {}
         issued_births = {}
@@ -7082,38 +7175,46 @@ class ActionBallSampler:
             retired_sample_count = (
                 self._retired_sample_count_by_action[uid]
             )
-            if len(indices) != (
-                self._sample_count_by_action[uid]
-                - retired_sample_count
-            ):
-                raise RuntimeError(
-                    "sample authority ledger is inconsistent with "
-                    "retired/sample counts"
-                )
             births = self._issued_births_by_action[uid]
-            if set(births) != set(
-                range(
-                    retired_birth_count,
-                    self._birth_count_by_action[uid],
-                )
-            ):
-                raise RuntimeError(
-                    "retained birth transcript is inconsistent with "
-                    "retired/birth counts"
-                )
+            if live_only:
+                self._assert_live_only_action_ledger(uid)
+            else:
+                if len(indices) != (
+                    self._sample_count_by_action[uid]
+                    - retired_sample_count
+                ):
+                    raise RuntimeError(
+                        "sample authority ledger is inconsistent with "
+                        "retired/sample counts"
+                    )
+                if set(births) != set(
+                    range(
+                        retired_birth_count,
+                        self._birth_count_by_action[uid],
+                    )
+                ):
+                    raise RuntimeError(
+                        "retained birth transcript is inconsistent with "
+                        "retired/birth counts"
+                    )
             detached_indices = list(indices)
             issued_sample_birth_indices[str(uid)] = detached_indices
+            # Exact runs have just proved this key set *is*
+            # ``range(retired_birth_count, birth_count)``, so sorting the live
+            # keys emits byte-identical rows there; live-births-only runs hold
+            # the surviving subset of that same window.
             issued_births[str(uid)] = [
                 births[index].to_state_dict()
-                for index in range(
-                    retired_birth_count,
-                    self._birth_count_by_action[uid],
-                )
+                for index in sorted(births)
             ]
             segments = self._compaction_segments_by_action[uid]
             compaction_segments[str(uid)] = [
                 segment.to_state_dict() for segment in segments
             ]
+            # Live-births-only runs reach this with ``detached_indices`` proved
+            # empty just above, so the suffix head collapses to the retired
+            # head and this check reads exactly as "the chain never advanced" --
+            # the other half of that mode's claim.  Exact runs are unchanged.
             expected_assignment_head = (
                 self._assignment_suffix_head_sha256(
                     action_uid=uid,
@@ -7162,6 +7263,10 @@ class ActionBallSampler:
             "draws_per_birth": DRAWS_PER_BIRTH,
             "draws_per_sample": DRAWS_PER_SAMPLE,
             "action_uids": list(self.action_uids),
+            # Signed self-declaration of which per-event bookkeeping the rows
+            # below actually contain.  Never make a reader guess this from
+            # "issued_sample_birth_indices happens to be empty".
+            "transcript_scope": self.transcript_scope,
             "per_action": per_action,
             "issued_births": issued_births,
             "issued_sample_birth_indices": issued_sample_birth_indices,
@@ -7176,6 +7281,18 @@ class ActionBallSampler:
     def load_state_dict(self, state: object) -> None:
         """Strict, atomic restore; malformed or altered states change nothing."""
 
+        if (
+            isinstance(state, Mapping)
+            and "transcript_scope" not in state
+            and set(state) | {"transcript_scope"} == set(_STATE_KEYS)
+        ):
+            # 人话:老状态包没有这块牌子,读的人无法判断它那本 assignment 账是"故意空"
+            # 还是"丢了"。分不清就不许续跑。
+            raise ValueError(
+                "sampler state predates the transcript-scope brand and "
+                "cannot prove whether its per-sample assignment ledger is "
+                "intentionally empty; launch fresh"
+            )
         row = _exact_mapping(state, _STATE_KEYS, name="sampler state")
         payload = {key: row[key] for key in _STATE_KEYS[:-1]}
         integrity = row["integrity_sha256"]
@@ -7221,6 +7338,17 @@ class ActionBallSampler:
             != DRAWS_PER_SAMPLE
         ):
             raise ValueError("sampler state draws_per_sample mismatch")
+        declared_scope = row["transcript_scope"]
+        if declared_scope not in SAMPLER_TRANSCRIPT_SCOPES:
+            raise ValueError("sampler state has an unknown transcript scope")
+        if declared_scope != self.transcript_scope:
+            # 人话:诊断跑的状态包里根本没有逐样本 assignment 行,精确跑必须有;
+            # 两边互相不能续。宁可在这里明说,也不要让缺的那一半悄悄变成零。
+            raise ValueError(
+                "sampler state transcript scope mismatch: "
+                f"checkpoint={declared_scope!r}, this sampler is "
+                f"{self.transcript_scope!r}"
+            )
 
         raw_uids = row["action_uids"]
         if not isinstance(raw_uids, list):
@@ -7359,6 +7487,20 @@ class ActionBallSampler:
                     f"per_action[{uid}]."
                     "compaction_segment_head_sha256"
                 ),
+            )
+
+        if (
+            declared_scope == SAMPLER_TRANSCRIPT_SCOPE_DIAGNOSTIC
+            and any(counts[1] for counts in restored_counts.values())
+        ):
+            # 人话:这一档一行 sample->birth 都没记。样本数为 0 的状态包(不可变
+            # fixed-view 出生带就是这种)还能完整复原;一旦发过样本,它的样本权威
+            # 无从重放,精确续跑必须在这里红,而不是让缺的那一半悄悄变成零。
+            # A211/C211 那四格的发射合同本来就写着 resume_prohibited / fresh_only。
+            raise ValueError(
+                "live-births-only sampler state issued samples and therefore "
+                "has no per-sample assignment transcript to resume from; "
+                "launch fresh"
             )
 
         raw_issued = row["issued_births"]
@@ -8332,6 +8474,9 @@ __all__ = [
     "EpisodeBirthReceipt",
     "FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256",
     "FrozenEvaluationProposal",
+    "SAMPLER_TRANSCRIPT_SCOPES",
+    "SAMPLER_TRANSCRIPT_SCOPE_DIAGNOSTIC",
+    "SAMPLER_TRANSCRIPT_SCOPE_EXACT",
     "SamplerCompactionReceipt",
     "SamplerRetirePrefixBarrier",
     "SamplingMixture",
