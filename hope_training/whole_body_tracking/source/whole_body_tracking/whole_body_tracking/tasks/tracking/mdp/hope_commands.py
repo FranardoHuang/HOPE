@@ -442,6 +442,19 @@ _ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 2
 _ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION = 1
 _ACTION_BALL_DOMAIN_AUTHORITY_SCHEMA_VERSION = 1
 _ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 6
+# Which per-birth bookkeeping a checkpoint's solver state actually contains.
+#
+# 人话:同一份状态包有两种"逐出生存档"的写法,checkpoint 必须自己说清是哪一种。
+# ``exact_per_birth`` = 每个出生都有一行 provider_history 和一条任务 transcript 哈希链,
+# 可以逐条重放。``diagnostic_live_births_only`` = 诊断跑(非 fixed-view)故意只留"还活着的
+# 出生表",两本逐出生存档一行都不写 —— 见 ``_action_ball_retire_previous_births`` 里那段
+# 自陈注释。两者不能互相 resume,所以这个牌子要跟着状态一起签名落盘。
+_ACTION_BALL_TASK_TRANSCRIPT_SCOPE_EXACT = "exact_per_birth"
+_ACTION_BALL_TASK_TRANSCRIPT_SCOPE_DIAGNOSTIC = "diagnostic_live_births_only"
+_ACTION_BALL_TASK_TRANSCRIPT_SCOPES = (
+    _ACTION_BALL_TASK_TRANSCRIPT_SCOPE_EXACT,
+    _ACTION_BALL_TASK_TRANSCRIPT_SCOPE_DIAGNOSTIC,
+)
 _ACTION_BALL_LEDGER_NAMES = (
     "P",
     "A",
@@ -668,9 +681,20 @@ class _ActionBallPoolSolverAdapter:
         sample_highwater_for,
         state_getter,
         state_loader,
+        pool_owns_birth_task_transcripts,
     ) -> None:
         self.solver_contract_sha256 = str(solver_contract_sha256)
         self.state_owner_sha256 = str(state_owner_sha256)
+        if type(pool_owns_birth_task_transcripts) is not bool:
+            raise TypeError(
+                "pool_owns_birth_task_transcripts must be an exact boolean"
+            )
+        # 人话:这本"每个出生一条任务哈希链"的账,谁记?正常跑是求解器自己记,池子再
+        # 拿去对一遍。诊断跑(live-births-only)故意不记 —— 那就必须在这里说出来,让
+        # 池子改用自己那份紧凑的 root,而不是去问一本空账然后炸掉。
+        self.pool_owns_birth_task_transcripts = bool(
+            pool_owns_birth_task_transcripts
+        )
         self._solve = solve
         self._solve_many = solve_many
         self._assert_emitted_sample = assert_emitted_sample
@@ -6071,6 +6095,12 @@ class RacketTargetCommand(CommandTerm):
                 sample_highwater_for=self._action_ball_sampler.sample_highwater_for,
                 state_getter=self._action_ball_solver_mutable_state_dict,
                 state_loader=self._action_ball_load_solver_mutable_state,
+                # ``_action_ball_fixed_view_enabled`` is still False here and
+                # cannot become True on this branch: fixed view is bound only by
+                # the immutable-tape solver below.
+                pool_owns_birth_task_transcripts=bool(
+                    diagnostic_unauthorized
+                ),
             )
         else:
             from whole_body_tracking.tasks.tracking.mdp.action_ball_fixed_question_tape import (
@@ -7144,6 +7174,75 @@ class RacketTargetCommand(CommandTerm):
             )
         return transcripts, counts_by_uid
 
+    def _action_ball_birth_catalogs_are_live_only(self) -> bool:
+        """Whether this run deliberately keeps both per-birth catalogs empty.
+
+        人话:诊断跑(且不是 fixed-view)每次出生只写"还活着的出生表"
+        ``_action_ball_provider_births``,**故意**不写 ``_action_ball_provider_history``
+        和逐出生的任务 transcript —— 4096 个环境每次 reset 都要多两次哈希表写入加一次
+        sha256,而这两本存档在诊断跑里没有任何消费者。这条设计在
+        ``_action_ball_retire_previous_births`` 里有自陈注释。
+
+        凡是"拿这两本存档去对账"的地方都必须先问这个函数:在这个模式下它们空是对的,
+        拿空账去证伪一个正在正常增长的计数器,证伪的是对账范围,不是那个计数器。
+        """
+
+        return bool(self._action_ball_diagnostic_unauthorized) and not bool(
+            self._action_ball_fixed_view_enabled
+        )
+
+    def _action_ball_task_transcript_scope(self) -> str:
+        """Name the per-birth bookkeeping this run actually writes."""
+
+        return (
+            _ACTION_BALL_TASK_TRANSCRIPT_SCOPE_DIAGNOSTIC
+            if self._action_ball_birth_catalogs_are_live_only()
+            else _ACTION_BALL_TASK_TRANSCRIPT_SCOPE_EXACT
+        )
+
+    def _action_ball_online_solver_owns_admitted_task_counts(self) -> bool:
+        """Whether ``_action_ball_emitted_task_count_by_uid`` has a live producer.
+
+        Only the online proposal solver increments it.  A banded question bank
+        owns its own block counters and never calls the online refill callback,
+        so in that configuration this map must stay at zero forever.
+        """
+
+        return (
+            self._action_ball_banded_question_bank is None
+            and self._action_ball_immutable_tape is None
+        )
+
+    def _action_ball_admitted_proposal_row(self) -> list:
+        """Return the per-slot admitted-proposal ledger row ``A``."""
+
+        return [
+            int(value)
+            for value in self._action_ball_live_ledger()[
+                _ACTION_BALL_LEDGER_NAMES.index("A")
+            ]
+            .detach()
+            .cpu()
+            .tolist()
+        ]
+
+    def _action_ball_expected_admitted_task_counts_live_only(self) -> dict:
+        """Admitted-task counts a live-births-only run must be showing.
+
+        The per-birth transcript is intentionally absent here, so the check
+        moves to the ledger this mode does maintain: every admitted proposal
+        increments ``A`` in the same producer transaction that increments the
+        per-action admitted-task count.  Same drift, different witness.
+        """
+
+        if not self._action_ball_online_solver_owns_admitted_task_counts():
+            return {int(uid): 0 for uid in self._action_ball_bundle.action_uids}
+        admitted = self._action_ball_admitted_proposal_row()
+        return {
+            int(uid): admitted[slot]
+            for slot, uid in enumerate(self._action_ball_bundle.action_uids)
+        }
+
     def _action_ball_solver_mutable_state_dict(self) -> dict:
         """One exact state blob shared by domain, provider and solver protocol views."""
 
@@ -7189,8 +7288,34 @@ class RacketTargetCommand(CommandTerm):
                 }
             )
             transcript_counts[int(receipt.action_uid)] += int(count)
-        if transcript_counts != self._action_ball_emitted_task_count_by_uid:
-            raise RuntimeError("action-ball emitted task count cache drifted")
+        if self._action_ball_birth_catalogs_are_live_only():
+            # Both per-birth catalogs are deliberately empty in this mode, so
+            # reconciling the admitted-task counts against them would compare a
+            # live counter with a ledger that has no producer.  Fail closed on
+            # the two facts that are actually claimed here instead: the catalogs
+            # really are empty, and every admitted task has a matching admitted
+            # proposal.
+            if (
+                self._action_ball_provider_history
+                or self._action_ball_task_transcript_by_birth
+            ):
+                raise RuntimeError(
+                    "action-ball run declares live-births-only bookkeeping but "
+                    "wrote a per-birth provider-history/task-transcript row"
+                )
+            if (
+                self._action_ball_expected_admitted_task_counts_live_only()
+                != self._action_ball_emitted_task_count_by_uid
+            ):
+                raise RuntimeError(
+                    "action-ball admitted-task count disagrees with the "
+                    "admitted-proposal ledger"
+                )
+        elif transcript_counts != self._action_ball_emitted_task_count_by_uid:
+            raise RuntimeError(
+                "action-ball admitted-task count disagrees with the per-birth "
+                "task transcript"
+            )
         curriculum_state = self._action_ball_curriculum.state_dict()
         payload = {
             "schema_version": _ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION,
@@ -7205,6 +7330,10 @@ class RacketTargetCommand(CommandTerm):
             "solver_contract_sha256": self._action_ball_solver_contract["sha256"],
             "action_uids": list(self._action_ball_bundle.action_uids),
             "curriculum_state_sha256": curriculum_state["state_sha256"],
+            # Signed self-declaration of which per-birth bookkeeping the rows
+            # below actually contain.  A reader must never have to guess this
+            # from "provider_history happens to be empty".
+            "task_transcript_scope": self._action_ball_task_transcript_scope(),
             "sampler": self._action_ball_sampler.state_dict(),
             "exact_question_cache": (
                 None
@@ -7264,6 +7393,7 @@ class RacketTargetCommand(CommandTerm):
             "solver_contract_sha256",
             "action_uids",
             "curriculum_state_sha256",
+            "task_transcript_scope",
             "sampler",
             "exact_question_cache",
             "provider_births",
@@ -7274,6 +7404,18 @@ class RacketTargetCommand(CommandTerm):
             "solver_rejections",
             "integrity_sha256",
         }
+        if (
+            isinstance(state, dict)
+            and "task_transcript_scope" not in state
+            and set(state) | {"task_transcript_scope"} == expected
+        ):
+            # 人话:老状态包没有这块牌子,读的人无法判断它那两本逐出生存档是"故意空"
+            # 还是"丢了"。分不清就不许续跑。
+            raise ValueError(
+                "action-ball solver state predates the task-transcript scope "
+                "brand and cannot prove whether its per-birth catalogs are "
+                "intentionally empty; launch fresh"
+            )
         if not isinstance(state, dict) or set(state) != expected:
             raise ValueError("action-ball solver state has invalid keys")
         unsigned = {
@@ -7312,6 +7454,20 @@ class RacketTargetCommand(CommandTerm):
             != expected_curriculum_sha
         ):
             raise ValueError("action-ball mutable state immutable identity mismatch")
+        live_only = self._action_ball_birth_catalogs_are_live_only()
+        expected_scope = self._action_ball_task_transcript_scope()
+        if state["task_transcript_scope"] not in _ACTION_BALL_TASK_TRANSCRIPT_SCOPES:
+            raise ValueError(
+                "action-ball solver state has an unknown task-transcript scope"
+            )
+        if state["task_transcript_scope"] != expected_scope:
+            # 人话:诊断跑的存档里根本没有逐出生 transcript,精确跑必须有;两边互相
+            # 不能续。宁可在这里明说,也不要让缺的那一半悄悄变成零。
+            raise ValueError(
+                "action-ball solver state task-transcript scope mismatch: "
+                f"checkpoint={state['task_transcript_scope']!r}, this run "
+                f"requires {expected_scope!r}"
+            )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
             ActionBallSampler,
             BaseBirthReceipt,
@@ -7356,17 +7512,28 @@ class RacketTargetCommand(CommandTerm):
             staged_sampler=staged_sampler,
             curriculum=curriculum,
         )
-        for digest, provider in provider_births.items():
-            if (
-                provider_history.get(digest) != provider["runtime_birth"]
-                or BaseBirthReceipt.from_identity_receipt(
-                    provider_history[digest].sampler_identity_receipt()
-                )
-                != provider["sampler_birth"]
-            ):
+        if live_only:
+            # This scope claims both per-birth catalogs are empty.  Anything in
+            # them is drift, and an "active birth must appear in history" cross
+            # check has no history to consult.  The active births themselves are
+            # still fully re-proved against the staged sampler above.
+            if provider_history:
                 raise ValueError(
-                    "active action-ball provider birth is absent from exact history"
+                    "live-births-only action-ball solver state carries a "
+                    "per-birth provider-history row"
                 )
+        else:
+            for digest, provider in provider_births.items():
+                if (
+                    provider_history.get(digest) != provider["runtime_birth"]
+                    or BaseBirthReceipt.from_identity_receipt(
+                        provider_history[digest].sampler_identity_receipt()
+                    )
+                    != provider["sampler_birth"]
+                ):
+                    raise ValueError(
+                        "active action-ball provider birth is absent from exact history"
+                    )
         if staged_question_cache is not None and not set(
             staged_question_cache.active_birth_sha256s
         ).issubset(provider_births):
@@ -7398,20 +7565,26 @@ class RacketTargetCommand(CommandTerm):
             ):
                 raise ValueError("action-ball domain cursor row is invalid")
             domain_cursors[int(row[0])] = int(row[1])
-        history_counts = {
-            int(uid): sum(
-                receipt.action_uid == int(uid)
-                for receipt in provider_history.values()
-            )
-            for uid in self._action_ball_bundle.action_uids
-        }
-        if any(
-            domain_cursors[int(uid)] != history_counts[int(uid)]
-            for uid in self._action_ball_bundle.action_uids
-        ):
-            raise ValueError(
-                "action-ball domain cursor/provider assignment transcript diverged"
-            )
+        if not live_only:
+            history_counts = {
+                int(uid): sum(
+                    receipt.action_uid == int(uid)
+                    for receipt in provider_history.values()
+                )
+                for uid in self._action_ball_bundle.action_uids
+            }
+            if any(
+                domain_cursors[int(uid)] != history_counts[int(uid)]
+                for uid in self._action_ball_bundle.action_uids
+            ):
+                raise ValueError(
+                    "action-ball domain cursor/provider assignment transcript diverged"
+                )
+        # In the live-births-only scope the birth history that would anchor these
+        # cursors is intentionally empty.  The cursors keep an independent
+        # witness: ``ActionBirthBroker.load_state_dict`` re-reads
+        # ``domain_cursor_for`` and requires it to equal its own serialized
+        # ``domain_claim_counts`` before it commits.
         raw_proposals = state["proposal_ledger"]
         if not isinstance(raw_proposals, dict) or set(raw_proposals) != {"P", "A"}:
             raise ValueError("action-ball solver proposal_ledger has invalid keys")
@@ -7442,6 +7615,30 @@ class RacketTargetCommand(CommandTerm):
                     "immutable fixed-view mutable state contains task "
                     "receipts or rejected logical rows"
                 )
+        elif live_only:
+            # No per-birth transcript exists to rebuild these counts from, so
+            # the admitted-proposal ledger is the restored value rather than a
+            # second opinion about it.  Its independent witness lives one layer
+            # out: ``_action_ball_load_exact_resume_state_dict`` requires the
+            # top-level ``A`` row to equal the restored pool's ``admitted``.
+            if state["task_transcripts"] != []:
+                raise ValueError(
+                    "live-births-only action-ball solver state carries a "
+                    "per-birth task transcript row"
+                )
+            emitted_task_counts = (
+                {
+                    int(uid): proposal_rows["A"][slot]
+                    for slot, uid in enumerate(
+                        self._action_ball_bundle.action_uids
+                    )
+                }
+                if self._action_ball_online_solver_owns_admitted_task_counts()
+                else {
+                    int(uid): 0
+                    for uid in self._action_ball_bundle.action_uids
+                }
+            )
         elif any(
             emitted_task_counts[int(uid)] != proposal_rows["A"][slot]
             for slot, uid in enumerate(self._action_ball_bundle.action_uids)
@@ -7995,13 +8192,18 @@ class RacketTargetCommand(CommandTerm):
             "levels": levels,
             "rho": float(domain.rho),
         }
-        self._action_ball_provider_history[receipt_sha256] = receipt
-        self._action_ball_task_transcript_by_birth[
-            receipt_sha256
-        ] = (
-            0,
-            task_transcript_sha256(receipt_sha256, ()),
-        )
+        if not self._action_ball_birth_catalogs_are_live_only():
+            # The batched diagnostic provider deliberately skips both per-birth
+            # catalogs.  Which catalogs a run keeps is a property of the run, not
+            # of which provider entry point a batch happened to take, so this
+            # scalar seam has to make the same choice.
+            self._action_ball_provider_history[receipt_sha256] = receipt
+            self._action_ball_task_transcript_by_birth[
+                receipt_sha256
+            ] = (
+                0,
+                task_transcript_sha256(receipt_sha256, ()),
+            )
         return receipt
 
     def _action_ball_provide_births(self, requests):
@@ -8300,14 +8502,25 @@ class RacketTargetCommand(CommandTerm):
         sampler_birth = BaseBirthReceipt.from_identity_receipt(
             receipt.sampler_identity_receipt()
         )
+        # ``ActionBallSampler.assert_issued_birth`` above is the issuance proof:
+        # it re-derives the birth identity and requires an exact match against
+        # the sampler's live issued-birth transcript.  That transcript is
+        # maintained in every mode, including live-births-only.
         self._action_ball_sampler.assert_issued_birth(sampler_birth)
-        historical_receipt = self._action_ball_provider_history.get(
-            receipt.canonical_sha256
-        )
-        if historical_receipt != receipt:
-            raise RuntimeError(
-                "runtime birth is absent from the exact provider assignment transcript"
+        if self._action_ball_birth_catalogs_are_live_only():
+            if self._action_ball_provider_history:
+                raise RuntimeError(
+                    "action-ball run declares live-births-only bookkeeping but "
+                    "kept a provider assignment transcript"
+                )
+        else:
+            historical_receipt = self._action_ball_provider_history.get(
+                receipt.canonical_sha256
             )
+            if historical_receipt != receipt:
+                raise RuntimeError(
+                    "runtime birth is absent from the exact provider assignment transcript"
+                )
         provider = self._action_ball_provider_births.get(
             receipt.canonical_sha256
         )
@@ -8892,7 +9105,13 @@ class RacketTargetCommand(CommandTerm):
         )
 
     def _action_ball_emitted_task_count_for(self, action_uid: int) -> int:
-        """Pure O(1) transcript count queried by the task-pool authority."""
+        """Pure O(1) count of admitted tasks this solver has emitted for one action.
+
+        This is a live running counter, not a view over the per-birth task
+        transcript.  It is maintained in every mode, including the
+        live-births-only one where that transcript is deliberately never
+        written; do not describe it as a cache over the transcript.
+        """
 
         if type(action_uid) is not int or action_uid not in (
             self._action_ball_emitted_task_count_by_uid
@@ -8907,6 +9126,11 @@ class RacketTargetCommand(CommandTerm):
     ) -> tuple[int, str]:
         """Return the compact ordered admitted-task count/hash-chain root."""
 
+        if self._action_ball_birth_catalogs_are_live_only():
+            raise RuntimeError(
+                "live-births-only action-ball runs keep no solver-side per-birth "
+                "task transcript; the pool owns those roots"
+            )
         if (
             type(birth_sha256) is not str
             or birth_sha256 not in self._action_ball_provider_history
@@ -15317,6 +15541,16 @@ class RacketTargetCommand(CommandTerm):
 
         if strict is not True:
             raise ValueError("action-ball exact resume only supports strict=True")
+        if self._action_ball_birth_catalogs_are_live_only():
+            # 人话:这种跑法故意不写逐出生存档,所以它存下来的 checkpoint 本来就不含
+            # "精确续跑"需要的那半份材料。A211/C211 的发射合同自己也写着
+            # resume_prohibited / fresh_only。与其让缺的那半份悄悄变成零,不如在这里
+            # 直说:这类 checkpoint 只用于数据延续与取证,续跑请重开。
+            raise ValueError(
+                "action-ball live-births-only runs keep no per-birth provider "
+                "history or task transcript, so their checkpoints cannot serve "
+                "an exact resume; launch fresh"
+            )
         fixed_view = self._action_ball_fixed_view_enabled
         expected = {
             "schema_version",
@@ -15856,6 +16090,10 @@ class RacketTargetCommand(CommandTerm):
                 ),
                 state_getter=_staged_state,
                 state_loader=_staged_load,
+                # Exact resume is refused outright for live-births-only runs at
+                # the head of this method, so a staged solver reached here is
+                # always the solver-owned-transcript kind.
+                pool_owns_birth_task_transcripts=False,
             )
         else:
             from whole_body_tracking.tasks.tracking.mdp.action_ball_banded_question_bank import (

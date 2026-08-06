@@ -1355,6 +1355,7 @@ def test_pool_solver_adapter_delegates_4096_rows_to_one_batch_callback():
         sample_highwater_for=lambda _uid: (-1, 0),
         state_getter=lambda: {"cursor": 0},
         state_loader=lambda _state: None,
+        pool_owns_birth_task_transcripts=False,
     )
     result = adapter.solve_many(range(4096))
     assert result[0] == 0
@@ -1411,6 +1412,7 @@ def test_domain_provider_and_solver_views_share_one_exact_mutable_state_owner():
         sample_highwater_for=lambda _uid: (-1, 0),
         state_getter=state_getter,
         state_loader=state_loader,
+        pool_owns_birth_task_transcripts=False,
     )
     assert {
         domain.state_owner_sha256,
@@ -2156,6 +2158,10 @@ def test_retired_birth_history_rejects_resigned_runtime_assignment(monkeypatch):
         _action_ball_provider_history={
             receipt.canonical_sha256: receipt for receipt in births
         },
+        # This is the exact per-birth scope: the assignment transcript below is
+        # the authority.  Live-births-only runs keep no such transcript and are
+        # covered separately in test_action_ball_task_transcript_scope.py.
+        _action_ball_birth_catalogs_are_live_only=lambda: False,
     )
     namespace["_action_ball_assert_issued_birth"](command, births[0])
     namespace["_action_ball_assert_issued_birth"](command, births[1])
