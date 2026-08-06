@@ -951,15 +951,45 @@ clamp/投影/罚三层已经处理的事。
 噪声/速度较劲，不是重力。旁证：build_1 在 3437 iter 收敛态下 `Episode_Reward/rally_joint_qdes_saturation`
 仍为 `-.0994`，饱和惩罚在成熟策略上同样长期存在。**`±6 N·m` 不构成 ready pose 或硬件的否决理由。**
 
-**仍然成立、未被本节推翻的疑点**：build_1 的终止项集合里**没有** `robot_hit_table`（桌子是 ActionBall 才有的），
-它死于 `base_fell_tilt`；而我们是 `robot_hit_table=32/32`，且 MuJoCo 侧同一 split-ready hold 为
-`1000` 集 x `25` tick、`failure_count=0`。**问题不是"活得短"，而是"为什么是撞桌、且跨引擎不一致"**，
-按 §5.6.3 的口径单列待查。相关线索见 §12 段落中已记录的 `left_ankle_roll_Link` 对 keepout 的
-exact OBB-vs-AABB SAT overlap（换 world-root 解释不能复现，故当时未定为 live offender），
-以及已建成的 `table_contact_attribution_diagnostic` first-hit sidecar（导出 body/obstacle/
-blade-or-proxy/exact-vs-conservative）。**`table_robot_keepout` 本身是否仍有作用尚未确认**
-（Franco 2026-08-06：「我不确定是有用的」）；若查明真实桌面碰撞几何已覆盖同一区域、
-或它从未在合法轨迹上起过作用，则按"过期结构"清理，而不是保留后改几何。
+#### 5.6.5 `robot_hit_table=32/32` 结案：不是 keep-out 误判，也不存在跨引擎不一致（2026-08-06）
+
+本节先撤回本文档自己提出过的一个疑点。§5.6.4 初稿曾写「MuJoCo 侧同一 split-ready hold 为 `1000` 集 x `25` tick、
+`failure_count=0`，而 Isaac 是 `robot_hit_table=32/32`，故存在跨引擎不一致」。**这个对比是错的**：
+两边跑的根本不是同一件事。
+
+| | 下发的指令 | 离出生姿态 | 结果 |
+| --- | --- | --- | --- |
+| MuJoCo 那个 `1000/1000` | `hold_qdes`（站着不动） | max `.375` / rms `.137` rad | `0` 失败 |
+| Isaac oracle32 | **teacher frame 0** | **max `2.243` rad（右腕偏航 `128°`）** / rms `.659` rad，骨盆另差 `(.154, -.177, .177)` m | tick 级终止 |
+
+在 MuJoCo 里用**同一出生状态、同一 plant、仓库自己的 guard** 补跑对照：`arm=hold` → `0/1` 失败、`30` tick 全过
+（复现了那个 `1000/1000`）；`arm=teacher0` → `1/1` 失败、**tick 1 就撞**，first-hit `left_hand_Link` vs `top`，
+精确 SAT `-7.2 mm`。**两个引擎在同一指令下给出同样结论，不一致不存在。**
+
+**keep-out 无罪，且不是过期结构。** oracle32 first-hit 台账 `32/32` 全部 `obstacle="top"`；把 pod 上所有存过
+`table_first_hit` 的证据文件扫全（A211 五个 run + A225 一个），**`192/192` 全是 `("top", "right_wrist_yaw_Link")`，
+keepout 记录数 `0`**。针对 Franco 2026-08-06「我不确定 `table_robot_keepout` 是有用的」的三条查证：
+(1) 历史触发 `0` 次；(2) **不冗余** —— 真实桌子的物理体只有 `5 cm` 台面板，可视 USD 的物理层是整网格凸包
+（代码明确写了不用，会把自由空间填实），**桌底那块体积除 keepout 外没有任何碰撞体覆盖**；它在两个引擎里都是
+真实碰撞体（Isaac kinematic cuboid / MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；
+(3) **不挡合法站位** —— 只覆盖桌子自身投影 `x∈[.5, 3.24]`，机器人站在 `x=0`，出生姿态双脚离它 `137 mm`。
+来历是 2026-07-29 `a93ccf8f` 作为明确安全代理引入，不是调试残留。**结论：保留，删它没有证据支持。**
+
+**撞的"top"是代理余量打出来的，不是真接触。** 终止瞬间只有 `right_hand_pingpang_Link`（手+拍整体网格的粗包围盒）
+重叠：对**加了 `20 mm` 余量**的台面盒是 `-4.1 / -2.5 mm`（重叠），对**真实台面板**却是 `+24.2 / +20.7 mm`（净空）；
+真实拍叶 OBB 对真实台面板有 `+32.7 / +39.7 mm`。人话：**机器人离真桌子还有 2~4 厘米，拍子离桌面 3~4 厘米，
+一点没碰到**。这正是 guard docstring 自陈的行为（"can terminate before resolved physical contact"）。
+`20 mm` 余量是 fail-closed 门，未改动。
+
+**顺带证伪一条旧诊断**：曾记为「ready pose 不可达，机器人从未离开出生姿态」。用 r12 台账重算，终止瞬间拍体
+离**出生位姿** `.596 / .571 m`、离**教师 frame0** 也有 `.598 / .483 m` —— 它不但动了，还跑到两个端点都不在的
+位置，是欠阻尼过冲，不是没动。
+
+**真正值得记的脆弱点（不是 bug，暂不处理）**：出生姿态把**左手**停在离真实台面板只有 `32 mm`
+（对加余量盒 `12 mm`）的地方，而这是**非持拍手**；教师 frame0 自身很干净（最近间隙 `122 mm`）。
+所以贴边的是出生姿态不是教师动作，任何让左臂前伸的瞬态都会立刻撞线 —— MuJoCo tick 1 撞的就是它。
+**但按 §5.6.4，`22.3` tick 与 build_1 第 0 迭代的 `23.1` 同量级，终止率本身不异常，因此不构成发车阻塞**；
+要压低撞桌率时，该动的是出生姿态而不是 guard，且必须走 fresh 臂、不与四格归因混变量。
 
 ## 6. 智元 setting 的采用表
 
