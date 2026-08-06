@@ -334,3 +334,209 @@ def test_local_v4_bank_and_build_report_bind_the_frozen_action():
     assert report_pin["sha256"] == _sha(report)
     assert evidence["bank_action_row"]["hit_frame_50"] == 48
     assert evidence["build_report_action"]["racket_authority"] == "measured_channel"
+
+
+# --- the offline live re-pinner, and whether it speaks solver profile v3 ------
+#
+# 人话:`_materialize_live_profile_pins` 是"把 pins 模板重新按活体源码封章"的那一步。
+# v2 时代它往 solver payload 里塞七份源文件的整文件 SHA;v3 的 payload 里根本没有
+# 这个键(封的是逐符号语义面 + counter-rally 两份未裁定源码的整文件 SHA)。这支
+# 函数此前一条测试都没有,于是"多按一枚指纹"没人发现 —— 离线铸出的 pin 与 runtime
+# 现算的那枚永远差一个键,manifest 一进 boot 就崩。下面五条把这件事钉住。
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_MDP_REL = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp"
+)
+_LIVE_V3_PINS_REL = (
+    "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/"
+    "action_ball_profile_pins.live.v2.5564d5b3c09d.json"
+)
+# The union of what the re-pinner reads: the seven solver sources it digests, the
+# sixth adjudicated source that only the semantic surface pins, and the surface
+# module itself.
+_REPIN_INPUTS = (
+    "hope_commands.py",
+    "continuous_questions.py",
+    "racket_contact_geometry.py",
+    "stroke_adapt_torch.py",
+    "strike_spec_torch.py",
+    "virtual_ball.py",
+    "counter_rally.py",
+    "counter_rally_torch.py",
+    "action_ball_solver_semantic_surface.py",
+)
+
+
+def _mirror_repin_inputs(root: Path) -> Path:
+    mdp = root / _MDP_REL
+    mdp.mkdir(parents=True, exist_ok=True)
+    for name in _REPIN_INPUTS:
+        (mdp / name).write_bytes((_REPO_ROOT / _MDP_REL / name).read_bytes())
+    return mdp
+
+
+def _repin(root: Path, template: Path, destination: Path) -> dict:
+    path, digest = module._materialize_live_profile_pins(
+        root=root,
+        template_path=template,
+        template_expected_sha=_sha(template),
+        destination=destination,
+        output_relative=destination.name,
+    )
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert _sha(path) == digest
+    return document
+
+
+def _reseal(document: dict) -> dict:
+    document["solver_profile_sha256"] = module._canonical_payload_sha(
+        document["solver_payload"]
+    )
+    return document
+
+
+def _staged_v3_template(root: Path, mutate=None) -> Path:
+    """Copy the live v3 pins document into a scratch root, optionally mutated."""
+
+    document = json.loads(
+        (_REPO_ROOT / _LIVE_V3_PINS_REL).read_text(encoding="utf-8")
+    )
+    if mutate is not None:
+        mutate(document)
+    target = root / "pins.json"
+    target.write_text(
+        json.dumps(document, indent=1, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return target
+
+
+def test_live_repin_of_a_v3_document_is_a_fixed_point_at_the_same_checkout(
+    tmp_path: Path,
+):
+    """The pin the offline producer mints must be the pin the runtime computes.
+
+    The live v3 pins document was minted by ``pin_action_ball_profile_contracts``
+    from this same checkout, and its ``solver_profile_sha256`` is what the boot
+    gate compares against.  Re-sealing it here must reproduce it exactly.  Before
+    the v3 branch existed this returned a different digest, because the payload
+    came back carrying a whole-file byte map the runtime never puts in.
+    """
+
+    template = _REPO_ROOT / _LIVE_V3_PINS_REL
+    expected = json.loads(template.read_text(encoding="utf-8"))
+    assert expected["solver_payload"]["schema_version"] == 3
+
+    document = _repin(_REPO_ROOT, template, tmp_path / "out")
+
+    assert "implementation_source_sha256" not in document["solver_payload"]
+    assert document["solver_payload"] == expected["solver_payload"]
+    assert (
+        document["solver_profile_sha256"] == expected["solver_profile_sha256"]
+    )
+    assert (
+        document["solver_payload"]["semantic_surface"]["sha256"]
+        == document["solver_semantic_surface"]["sha256"]
+    )
+
+
+def test_live_repin_refuses_a_v3_payload_that_still_carries_the_v2_byte_map(
+    tmp_path: Path,
+):
+    """A hybrid document is exactly the shape the old code used to emit."""
+
+    _mirror_repin_inputs(tmp_path)
+
+    def mutate(document: dict) -> None:
+        document["solver_payload"]["implementation_source_sha256"] = dict(
+            document["solver_implementation_source_sha256"]
+        )
+        _reseal(document)
+
+    template = _staged_v3_template(tmp_path, mutate)
+    with pytest.raises(module.BundleError, match="not a v3 pin"):
+        _repin(tmp_path, template, tmp_path / "out")
+
+
+def test_live_repin_refuses_when_a_covered_solver_symbol_moved(tmp_path: Path):
+    """Refuse a re-seal that is really a re-draw, and name the migration script.
+
+    The mutation moves one covered symbol's body and nothing else: the pinned
+    source list, the covered symbol names and the covered symbol count are all
+    unchanged.  A check one notch coarser -- comparing counts, names or file
+    lists instead of the sealed per-symbol digest -- would wave this through.
+    """
+
+    mdp = _mirror_repin_inputs(tmp_path)
+    ball = mdp / "virtual_ball.py"
+    source = ball.read_text(encoding="utf-8")
+    needle = "a[..., 2] -= prm.g"
+    assert source.count(needle) == 1, "the mutation target moved; fix the test"
+    ball.write_text(source.replace(needle, needle + " * 1.05"), encoding="utf-8")
+
+    template = _staged_v3_template(tmp_path)
+    with pytest.raises(module.BundleError) as excinfo:
+        _repin(tmp_path, template, tmp_path / "out")
+    message = str(excinfo.value)
+    assert "migrate_action_ball_solver_pin_to_semantic_surface.py" in message
+    assert "re-drawing the questions" in message
+
+
+def test_live_repin_rereads_the_unadjudicated_counter_rally_bytes(
+    tmp_path: Path,
+):
+    """counter-rally is still whole-file pinned, so live bytes must win.
+
+    The runtime hashes these two files off the live checkout every boot.  If the
+    producer copied the template's values instead of re-reading, a counter-rally
+    edit would leave the manifest pinned to bytes that no longer exist and the
+    boot gate would reject it.
+    """
+
+    clean_root = tmp_path / "clean"
+    dirty_root = tmp_path / "dirty"
+    for root in (clean_root, dirty_root):
+        _mirror_repin_inputs(root)
+    dirty_rally = dirty_root / _MDP_REL / "counter_rally.py"
+    dirty_rally.write_bytes(
+        dirty_rally.read_bytes() + b"\n# offline re-pin liveness probe\n"
+    )
+
+    clean = _repin(clean_root, _staged_v3_template(clean_root), clean_root / "o")
+    dirty = _repin(dirty_root, _staged_v3_template(dirty_root), dirty_root / "o")
+
+    live_dirty_sha = hashlib.sha256(dirty_rally.read_bytes()).hexdigest()
+    assert (
+        dirty["solver_payload"]["unadjudicated_whole_file_sha256"][
+            "counter_rally.py"
+        ]
+        == live_dirty_sha
+    )
+    assert (
+        clean["solver_payload"]["unadjudicated_whole_file_sha256"][
+            "counter_rally.py"
+        ]
+        != live_dirty_sha
+    )
+    assert clean["solver_profile_sha256"] != dirty["solver_profile_sha256"]
+    # The semantic half is untouched: counter-rally has never been adjudicated
+    # symbol by symbol, which is exactly why it stays on the coarse pin.
+    assert (
+        clean["solver_payload"]["semantic_surface"]
+        == dirty["solver_payload"]["semantic_surface"]
+    )
+
+
+def test_live_repin_refuses_a_solver_profile_schema_it_does_not_know(
+    tmp_path: Path,
+):
+    _mirror_repin_inputs(tmp_path)
+
+    def mutate(document: dict) -> None:
+        document["solver_payload"]["schema_version"] = 4
+        _reseal(document)
+
+    template = _staged_v3_template(tmp_path, mutate)
+    with pytest.raises(module.BundleError, match="solver profile schema 4"):
+        _repin(tmp_path, template, tmp_path / "out")

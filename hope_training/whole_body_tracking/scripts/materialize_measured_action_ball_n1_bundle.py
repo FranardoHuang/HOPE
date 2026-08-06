@@ -217,13 +217,139 @@ def _materialize_live_profile_pins(
     document["contact_geometry"] = geometry_contract
     document["solver_implementation_source_sha256"] = source_sha
     solver["contact_geometry"] = geometry_contract
-    solver["implementation_source_sha256"] = source_sha
+    schema = solver.get("schema_version")
+    if schema == 2:
+        solver["implementation_source_sha256"] = source_sha
+    elif schema == 3:
+        _repin_v3_solver_payload(
+            mdp_dir=mdp_dir,
+            document=document,
+            solver=solver,
+            source_sha=source_sha,
+        )
+    else:
+        raise BundleError(
+            "profile-pins template carries solver profile schema %r; this "
+            "producer only knows how to re-seal v2 (whole-file byte map) and "
+            "v3 (per-symbol semantic surface)" % (schema,)
+        )
     document["solver_profile_sha256"] = _canonical_payload_sha(solver)
     raw = _canonical_bytes(document)
     digest = hashlib.sha256(raw).hexdigest()
     name = "action_ball_profile_pins.live.v1.%s.json" % digest[:12]
     _exclusive_write(destination / name, document)
     return destination / name, digest
+
+
+def _repin_v3_solver_payload(
+    *,
+    mdp_dir: Path,
+    document: dict,
+    solver: dict,
+    source_sha: dict,
+) -> None:
+    """Re-seal a schema-v3 solver payload the way the runtime builds it.
+
+    人话:v2 时代这支离线重签只做一件事 —— 把七份源文件的**整文件 SHA** 塞进
+    solver payload 再重新封章。v3 的 payload 里**根本没有这个键**:它封的是
+    逐符号语义面,加上 counter-rally 两份未裁定源码的整文件 SHA。继续按 v2 塞,
+    等于在密封件里多按一枚指纹 —— 离线铸出的 pin 与 runtime 现算的那枚永远差
+    一个键,manifest 一进 boot 就崩在 solver profile SHA mismatch 上。实测过:
+    同一份 v3 pins 文档,pinner 铸 ``c196cf79``,旧口径的这支函数铸 ``d26aaace``,
+    两个 payload 逐键只差 ``implementation_source_sha256``。
+
+    所以这里做三件事:
+      1. 从**活体**源码重建语义面(``semantic_surface_contract`` 自带两道
+         fail-closed 覆盖门,未分类的符号会让它直接拒绝);
+      2. 语义面**真的动过就拒绝重签** —— 那是改了题,不是换个章,必须走
+         ``scripts/migrate_action_ball_solver_pin_to_semantic_surface.py``,
+         由它证明题目身份没动并留下收据;
+      3. 只把 counter-rally 那两份未裁定源码的整文件 SHA 刷成活体值 ——
+         runtime 也是这么算的,不刷才会对不上。
+    """
+
+    if "implementation_source_sha256" in solver:
+        raise BundleError(
+            "profile-pins template declares solver profile schema 3 but still "
+            "carries the v2 whole-file byte map inside the sealed payload; "
+            "that document is not a v3 pin"
+        )
+    surface_module = _load_module(
+        "_measured_n1_live_solver_semantic_surface",
+        mdp_dir / "action_ball_solver_semantic_surface.py",
+    )
+
+    def read(filename: str) -> str:
+        return (mdp_dir / filename).read_text(encoding="utf-8")
+
+    try:
+        contract = surface_module.semantic_surface_contract(read)
+        declaration = surface_module.semantic_surface_declaration(read)
+    except Exception as exc:  # surface refuses to build -> refuse to re-pin
+        raise BundleError(
+            "live solver semantic surface refuses to build, so no pin can be "
+            "minted from this checkout: %s" % exc
+        ) from exc
+
+    declared = solver.get("semantic_surface")
+    if type(declared) is not dict:
+        raise BundleError(
+            "schema-3 solver payload lacks its sealed semantic_surface block"
+        )
+    if declared.get("sha256") != contract["sha256"]:
+        raise BundleError(
+            "the template's sealed solver semantic surface %r is not the live "
+            "one %r: a covered symbol moved, so this would be re-drawing the "
+            "questions rather than re-sealing them. Migrate it with "
+            "scripts/migrate_action_ball_solver_pin_to_semantic_surface.py, "
+            "which proves question identity is unchanged and leaves a receipt."
+            % (declared.get("sha256"), contract["sha256"])
+        )
+
+    unadjudicated = solver.get("unadjudicated_whole_file_sha256")
+    if type(unadjudicated) is not dict:
+        raise BundleError(
+            "schema-3 solver payload lacks unadjudicated_whole_file_sha256, "
+            "the coarse pin the counter-rally sources are still on"
+        )
+    unknown = sorted(set(unadjudicated) - set(source_sha))
+    if unknown:
+        raise BundleError(
+            "schema-3 solver payload pins unadjudicated sources this producer "
+            "does not read: %s" % ", ".join(unknown)
+        )
+
+    surface_payload = contract["payload"]
+    solver["semantic_surface"] = {
+        "kind": str(surface_payload["kind"]),
+        "schema_version": int(surface_payload["schema_version"]),
+        "symbol_digest_algorithm": str(
+            surface_payload["symbol_digest_algorithm"]
+        ),
+        "sha256": str(contract["sha256"]),
+        "pinned_sources": [
+            str(name)
+            for name in surface_payload["coverage_policy"]["pinned_sources"]
+        ],
+        "covered_symbol_count": sum(
+            len(symbols) for symbols in surface_payload["covered"].values()
+        ),
+    }
+    solver["unadjudicated_whole_file_sha256"] = {
+        name: str(source_sha[name]) for name in sorted(unadjudicated)
+    }
+    document["solver_semantic_surface"] = {
+        "sha256": contract["sha256"],
+        "payload": surface_payload,
+        "module_source_sha256": _sha256(
+            mdp_dir / "action_ball_solver_semantic_surface.py"
+        ),
+        "pinned_source_file_sha256": {
+            name: _sha256(mdp_dir / name)
+            for name in surface_module.PINNED_SOURCES
+        },
+    }
+    document["solver_semantic_surface_declaration"] = declaration
 
 
 def _strict_json(path: Path, *, label: str) -> dict[str, Any]:
