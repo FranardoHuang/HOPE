@@ -158,8 +158,16 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
         def __getitem__(self, key):
             return Tensor(self.data[key])
 
+        def to(self, *, dtype):
+            return Tensor(self.data.astype(dtype))
+
         def __sub__(self, other):
             return Tensor(self.data - other.data)
+
+        def __add__(self, other):
+            return Tensor(
+                self.data + (other.data if isinstance(other, Tensor) else other)
+            )
 
         def __truediv__(self, other):
             return Tensor(self.data / other.data)
@@ -170,11 +178,19 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
         def __or__(self, other):
             return Tensor(self.data | other.data)
 
+        def __invert__(self):
+            return Tensor(~self.data)
+
         def __gt__(self, other):
             return Tensor(self.data > other)
 
+        def __lt__(self, other):
+            return Tensor(self.data < other)
+
     fake_torch = _module(
         "torch",
+        long=np.dtype(np.int64),
+        any=lambda value: Tensor(np.any(value.data)),
         all=lambda value: Tensor(np.all(value.data)),
         isfinite=lambda value: Tensor(np.isfinite(value.data)),
         is_tensor=lambda value: isinstance(value, Tensor),
@@ -199,12 +215,19 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
     # the oracle's substitution is exercised, not stubbed away.
     hold_qdes = Tensor(np.full((1, 31), 0.5))
     wait_rows = {"value": True}
+    # Post-reveal the teacher stays frozen at frame 0 for this many more steps; the
+    # driver has to spread the split-ready -> frame 0 travel across them.  Zero is the
+    # "no window published" case, where a revealed row lands on the reference at once.
+    frozen_rows = {"value": 0}
     motion = SimpleNamespace(
         joint_pos=Tensor(np.full((1, 31), 0.25)),
         action_ball_diagnostic_split_ready_teacher=True,
         action_ball_split_ready_hold_command=lambda: (
             Tensor(np.array([wait_rows["value"]])),
             hold_qdes,
+        ),
+        action_ball_teacher_start_frozen_steps=lambda: Tensor(
+            np.array([frozen_rows["value"]], dtype=np.int64)
         ),
     )
     racket = SimpleNamespace(
@@ -430,14 +453,20 @@ def test_run_resets_once_then_preserves_32_episode_auto_reset_and_counters(
     }
     assert result["teacher_qdes"]["preclamp_max_abs_error_rad"] == 0.0
     # WAIT rows were driven by the hold q_des (0.5), revealed rows by the teacher
-    # reference (0.25); the two counts must partition every control step.
+    # reference (0.25).  This fake publishes no post-reveal frozen window, so no row
+    # is a bridge row and the receipt says so rather than implying one happened; the
+    # three counts must still partition every control step.
     assert result["teacher_qdes"]["wait_hold_command_steps"] == 4
+    assert result["teacher_qdes"]["bridge_ramp_command_steps"] == 0
     assert result["teacher_qdes"]["teacher_reference_command_steps"] == 60
     assert (
         result["teacher_qdes"]["wait_hold_command_steps"]
+        + result["teacher_qdes"]["bridge_ramp_command_steps"]
         + result["teacher_qdes"]["teacher_reference_command_steps"]
         == result["completion"]["control_steps"]
     )
+    # The reveal step this instrument did NOT send: hold q_des 0.5 -> reference 0.25.
+    assert result["teacher_qdes"]["reveal_reference_step_max_abs_rad"] == 0.25
     assert result["teacher_qdes"]["raw_action_max_abs"] == 0.5
     assert result["bindings"]["hard_contract_sha256"] == sha
     assert result["schema_version"] == 2
@@ -506,3 +535,165 @@ def test_oracle_steps_teacher_action_without_teleport_or_ppo():
     oracle_enable = run.index("teacher-q_des oracle enabled")
     assert oracle_enable < run.index("env = gym.make")
     assert "env_cfg.table_contact_attribution_diagnostic = True" in run
+
+
+def _ramp_fakes(monkeypatch):
+    """Minimal torch/motion doubles for the reveal-bridge command law."""
+
+    class T:
+        def __init__(self, value):
+            self.data = np.asarray(value)
+
+        @property
+        def shape(self):
+            return self.data.shape
+
+        @property
+        def dtype(self):
+            return self.data.dtype
+
+        @property
+        def device(self):
+            return "fake"
+
+        def sum(self):
+            return T(np.sum(self.data))
+
+        def item(self):
+            return self.data.item()
+
+        def to(self, *, dtype):
+            return T(self.data.astype(dtype))
+
+        def __getitem__(self, key):
+            return T(self.data[key])
+
+        def __add__(self, other):
+            return T(self.data + (other.data if isinstance(other, T) else other))
+
+        def __sub__(self, other):
+            return T(self.data - other.data)
+
+        def __truediv__(self, other):
+            return T(self.data / other.data)
+
+        def __and__(self, other):
+            return T(self.data & other.data)
+
+        def __invert__(self):
+            return T(~self.data)
+
+        def __gt__(self, other):
+            return T(self.data > other)
+
+        def __lt__(self, other):
+            return T(self.data < other)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        _module(
+            "torch",
+            long=np.dtype(np.int64),
+            bool=np.dtype(bool),
+            any=lambda value: T(np.any(value.data)),
+            all=lambda value: T(np.all(value.data)),
+            isfinite=lambda value: T(np.isfinite(value.data)),
+            is_tensor=lambda value: isinstance(value, T),
+            where=lambda condition, first, second: T(
+                np.where(condition.data, first.data, second.data)
+            ),
+        ),
+    )
+    return T
+
+
+def _ramp_motion(T, *, wait, frozen, hold):
+    return SimpleNamespace(
+        action_ball_split_ready_hold_command=lambda: (
+            T(np.array([wait])),
+            T(np.full((1, 3), hold)),
+        ),
+        action_ball_teacher_start_frozen_steps=lambda: T(
+            np.array([frozen], dtype=np.int64)
+        ),
+    )
+
+
+def test_wait_rows_command_the_hold_qdes_not_the_reference(train, monkeypatch):
+    T = _ramp_fakes(monkeypatch)
+    reference = T(np.full((1, 3), 0.25))
+    motion = _ramp_motion(T, wait=True, frozen=7, hold=0.5)
+
+    command, wait_rows, bridge_rows = train._teacher_qdes_oracle_control_command(
+        motion, reference, None
+    )
+
+    # The WAIT reference IS the birth pose; sending it commands zero torque.  A WAIT
+    # row is never a bridge row no matter what the frozen clock says.
+    assert np.allclose(command.data, 0.5)
+    assert (wait_rows, bridge_rows) == (1, 0)
+
+
+def test_reveal_ramp_lands_exactly_on_the_reference_when_the_window_closes(
+    train, monkeypatch
+):
+    T = _ramp_fakes(monkeypatch)
+    reference = T(np.full((1, 3), 2.0))
+    previous = None
+    sent = []
+    # 4 frozen steps left, counting down to 0 -- five revealed steps in the window.
+    for frozen in (4, 3, 2, 1, 0):
+        motion = _ramp_motion(T, wait=False, frozen=frozen, hold=0.0)
+        previous, _wait_rows, bridge_rows = train._teacher_qdes_oracle_control_command(
+            motion, reference, previous
+        )
+        sent.append(float(previous.data[0, 0]))
+        assert bridge_rows == (1 if frozen > 0 else 0)
+
+    # Equal increments -- a straight line from the hold q_des onto measured frame 0,
+    # with no step anywhere and no overshoot past it.
+    assert sent == pytest.approx([0.4, 0.8, 1.2, 1.6, 2.0])
+    # It lands on the reference EXACTLY as the clip starts advancing, so every later
+    # step is the raw teacher reference with no residue and no mode switch.
+    after = train._teacher_qdes_oracle_control_command(
+        _ramp_motion(T, wait=False, frozen=0, hold=0.0), reference, previous
+    )
+    assert after[0].data == pytest.approx(reference.data)
+    assert after[2] == 0
+
+
+def test_unpublished_window_degenerates_to_one_step_and_reports_zero_bridge_rows(
+    train, monkeypatch
+):
+    T = _ramp_fakes(monkeypatch)
+    reference = T(np.full((1, 3), 2.0))
+    motion = _ramp_motion(T, wait=False, frozen=0, hold=0.0)
+
+    command, _wait_rows, bridge_rows = train._teacher_qdes_oracle_control_command(
+        motion, reference, T(np.zeros((1, 3)))
+    )
+
+    # No window published: the driver cannot invent one, so it does what it always
+    # did -- but the receipt must not be able to claim a bridge happened.
+    assert command.data == pytest.approx(reference.data)
+    assert bridge_rows == 0
+
+
+def test_driver_refuses_a_frozen_clock_it_cannot_trust(train, monkeypatch):
+    T = _ramp_fakes(monkeypatch)
+    reference = T(np.full((1, 3), 2.0))
+
+    negative = _ramp_motion(T, wait=False, frozen=-1, hold=0.0)
+    with pytest.raises(RuntimeError, match="non-negative long row count"):
+        train._teacher_qdes_oracle_control_command(negative, reference, None)
+
+    floaty = _ramp_motion(T, wait=False, frozen=3, hold=0.0)
+    floaty.action_ball_teacher_start_frozen_steps = lambda: T(np.array([3.0]))
+    with pytest.raises(RuntimeError, match="non-negative long row count"):
+        train._teacher_qdes_oracle_control_command(floaty, reference, None)
+
+    missing = _ramp_motion(T, wait=False, frozen=3, hold=0.0)
+    del missing.action_ball_teacher_start_frozen_steps
+    with pytest.raises(RuntimeError, match="teacher-start frozen-step accessor"):
+        train._teacher_qdes_oracle_control_command(missing, reference, None)

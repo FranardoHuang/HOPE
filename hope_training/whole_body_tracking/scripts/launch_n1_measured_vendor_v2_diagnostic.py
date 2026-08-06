@@ -233,6 +233,8 @@ TEACHER_QDES_RECEIPT_KEYS = (
     "raw_action_max_abs",
     "teleport_used",
     "wait_hold_command_steps",
+    "bridge_ramp_command_steps",
+    "reveal_reference_step_max_abs_rad",
     "teacher_reference_command_steps",
 )
 TEACHER_CAPTURE_REJECTION_KEYS = (
@@ -1758,17 +1760,25 @@ def _validate_teacher_qdes_oracle(
             type(qdes.get(name)) not in (int, float)
             or not math.isfinite(float(qdes[name]))
             or qdes[name] < 0
-            for name in ("preclamp_max_abs_error_rad", "raw_action_max_abs")
+            for name in (
+                "preclamp_max_abs_error_rad",
+                "raw_action_max_abs",
+                "reveal_reference_step_max_abs_rad",
+            )
         )
-        # 人话:等待阶段发的是"保持 q_des",揭示后发老师姿态;两个计数必须
-        # 恰好把总步数分完,收据才说得清哪一步是被什么驱动的。
+        # 人话:等待阶段发的是"保持 q_des",揭示后的冻结窗内把指令铺到老师姿态,
+        # 窗口走完才是老师姿态本身;三个计数必须恰好把总步数分完,
+        # 收据才说得清哪一步是被什么驱动的。
         or any(
             type(qdes.get(name)) is not int or qdes[name] < 0
             for name in (
-                "wait_hold_command_steps", "teacher_reference_command_steps",
+                "wait_hold_command_steps",
+                "bridge_ramp_command_steps",
+                "teacher_reference_command_steps",
             )
         )
         or qdes["wait_hold_command_steps"]
+        + qdes["bridge_ramp_command_steps"]
         + qdes["teacher_reference_command_steps"]
         != completion["control_steps"]
         or type(capture) is not dict

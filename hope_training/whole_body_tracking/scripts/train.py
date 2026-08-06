@@ -7034,19 +7034,41 @@ def _make_c211_live_runtime_step_adapter(env, *, action_id: str):
     return adapter, restore, verify_after
 
 
-def _teacher_qdes_oracle_control_command(motion, reference):
+def _teacher_qdes_oracle_control_command(motion, reference, previous=None):
     """What the zero-PPO oracle actually SENDS this control step.
 
-    人话:等待阶段发"能撑住出生姿态的 q_des",任务揭示之后才发老师姿态。
-    参考姿态不是指令 —— 把它当指令发下去等于 PD 误差为零、扭矩为零、机器人塌。
+    人话:等待阶段发"能撑住出生姿态的 q_des";揭示之后,在老师还冻结在 frame0 的
+    那段窗口里把指令**铺**过去,窗口一走完就正好落在老师姿态上。
+    参考姿态不是指令 —— 原样发下去,等待期是零扭矩、揭示那一 tick 是一步 2.24 rad 的阶跃。
 
-    ``reference`` is ``motion.joint_pos``, the imitation reference.  During the
-    split-ready pre-task WAIT that reference IS the robot's own birth configuration,
-    so ``q_des = reference`` yields ``tau = kp * 0 - kd * 0 = 0`` on all 31 joints and
-    the plant free-falls out of its validated stance.  The dynamic-ready contract
-    ships the executable hold ``q_des`` for exactly this window; substitute it there
-    and leave every revealed row on the teacher reference.  Returns
-    ``(command, wait_row_count)``.
+    ``reference`` is ``motion.joint_pos``, the imitation REFERENCE.  Two separate
+    windows make it unusable as a raw command, and this oracle is an INSTRUMENT: it
+    must not inject a transient of its own making into the plant it is measuring.
+
+    1. During the split-ready pre-task WAIT the reference IS the robot's own birth
+       configuration, so ``q_des = reference`` yields ``tau = kp * 0 - kd * 0 = 0`` on
+       all 31 joints and the plant free-falls out of its validated stance.  The
+       dynamic-ready contract ships the executable hold ``q_des`` for exactly this
+       window.  (Fixed in 9e4ffb5e; unchanged here.)
+    2. At the atomic reveal the reference jumps to measured frame 0 in one tick --
+       ``2.2434 rad`` at ``right_wrist_yaw`` for ``take_061_unit04_bh``, plus a
+       ``.1766 m`` pelvis drop and ``.5171 rad`` of tilt (doc 5.6.2d).  Sending that as
+       a position step is not "replaying the teacher": no teacher frame contains it,
+       and the lane's own contract says the split-ready -> frame 0 gap is crossed over
+       a window (12.3) rather than by birthing at frame 0 (12.4 records direct frame 0
+       as REJECTED ``0/73``).  ``MotionCommand`` publishes exactly how long that window
+       still is -- the same counter the actor sees as ``time_to_teacher_start`` -- and
+       the reference stays frozen at frame 0 for all of it.
+
+    So a revealed row closes ``1 / (frozen_steps + 1)`` of its remaining gap each step.
+    That is a straight line onto the reference which lands on it EXACTLY when the clip
+    starts advancing, and it needs no window length measured up front: once
+    ``frozen_steps`` reaches zero the expression is identically ``reference``, so every
+    post-bridge step is the raw teacher reference with no mode switch and no residue.
+    A lane that publishes no window at reveal degenerates to today's single step, which
+    the receipt then reports as ``bridge_ramp_command_steps == 0`` rather than hiding.
+
+    Returns ``(command, wait_row_count, bridging_row_count)``.
     """
 
     import torch
@@ -7082,8 +7104,43 @@ def _teacher_qdes_oracle_control_command(motion, reference):
             "split-ready hold command must be one finite same-device q_des matching "
             "the teacher reference and one bool row mask"
         )
-    command = torch.where(wait[:, None], hold_qdes, reference)
-    return command, int(wait.sum().item())
+    frozen_steps = getattr(motion, "action_ball_teacher_start_frozen_steps", None)
+    if not callable(frozen_steps):
+        raise RuntimeError(
+            "teacher-q_des oracle requires the teacher-start frozen-step accessor"
+        )
+    frozen = frozen_steps()
+    if (
+        not torch.is_tensor(frozen)
+        or frozen.dtype != torch.long
+        or tuple(frozen.shape) != (reference.shape[0],)
+        or frozen.device != reference.device
+        or bool(torch.any(frozen < 0).item())
+    ):
+        raise RuntimeError(
+            "teacher-start frozen steps must be one non-negative long row count on "
+            "the teacher reference device"
+        )
+    # The WAIT hold is where a fresh episode starts from, and it is also what the reset
+    # bootstrap already installed into the action term, so an episode's first revealed
+    # step ramps from the pose the plant is actually holding.
+    start = hold_qdes if previous is None else previous
+    if (
+        not torch.is_tensor(start)
+        or tuple(start.shape) != tuple(reference.shape)
+        or start.dtype != reference.dtype
+        or start.device != reference.device
+        or not bool(torch.all(torch.isfinite(start)).item())
+    ):
+        raise RuntimeError(
+            "teacher-q_des oracle previous command must be one finite same-device "
+            "q_des matching the teacher reference"
+        )
+    span = (frozen + 1).to(dtype=reference.dtype)[:, None]
+    bridged = start + (reference - start) / span
+    command = torch.where(wait[:, None], hold_qdes, bridged)
+    bridging = (~wait) & (frozen > 0)
+    return command, int(wait.sum().item()), int(bridging.sum().item())
 
 
 def _run_teacher_qdes_oracle(
@@ -7180,6 +7237,12 @@ def _run_teacher_qdes_oracle(
     episode_exact = None
     episode_steps = total_steps = 0
     wait_hold_steps = 0
+    bridge_ramp_steps = 0
+    # The step this instrument would have injected had it sent the raw reference at
+    # reveal.  Reported so a reader can size the transient the ramp removed instead of
+    # having to trust that it existed.
+    avoided_reveal_step = 0.0
+    previous_command = None
     preclamp_max = raw_max = 0.0
     step_cap = episodes * (int(base.max_episode_length) + 1)
     submitted_teacher = None
@@ -7216,12 +7279,19 @@ def _run_teacher_qdes_oracle(
                 raise RuntimeError("teacher-q_des oracle exhausted the episode-horizon cap")
             reference = motion.joint_pos.detach().clone()
             # The WAIT-phase reference IS the birth pose, so sending it as q_des
-            # commands zero PD torque.  Send the contract's hold q_des instead for
-            # exactly those rows; revealed rows still get the teacher reference.
-            command, wait_rows = _teacher_qdes_oracle_control_command(
-                motion, reference
+            # commands zero PD torque; the reveal tick is a 2.24 rad position step.
+            # Neither is a teacher frame, so neither is replay -- see the helper.
+            command, wait_rows, bridge_rows = _teacher_qdes_oracle_control_command(
+                motion, reference, previous_command
             )
+            if previous_command is not None:
+                avoided_reveal_step = max(
+                    avoided_reveal_step,
+                    float((reference - previous_command).abs().max().item()),
+                )
             wait_hold_steps += 1 if wait_rows else 0
+            bridge_ramp_steps += 1 if bridge_rows else 0
+            previous_command = command
             submitted_teacher = command
             scale, offset = action._scale, action._offset
             raw = (command - offset) / scale
@@ -7287,7 +7357,9 @@ def _run_teacher_qdes_oracle(
                     None if not table_first_hits else table_first_hits[0]
                 ),
             })
-            episode_exact, episode_steps = None, 0
+            # The auto-reset put the plant back on its own hold q_des, so the next
+            # episode must ramp from there and not from where this one died.
+            episode_exact, episode_steps, previous_command = None, 0, None
     finally:
         restore_reset()
 
@@ -7432,16 +7504,21 @@ def _run_teacher_qdes_oracle(
             "projection_exposure_is_weight_independent": True,
         },
         "safety_exposure": limit_exposure,
-        # ``wait_hold_command_steps`` self-declares how many control steps were
-        # driven by the dynamic-ready hold q_des instead of the teacher reference.
-        # Without it a reader cannot tell an oracle that held its stance through the
-        # WAIT from one that commanded q_des == q and sagged.
+        # These three self-declare which of the driver's three windows produced each
+        # control step, so a reader never has to infer it.  Without
+        # ``wait_hold_command_steps`` an oracle that held its stance through the WAIT
+        # is indistinguishable from one that commanded q_des == q and sagged; without
+        # ``bridge_ramp_command_steps`` one that travelled the split-ready -> frame 0
+        # gap over the published window is indistinguishable from one that stepped it.
+        # ``reveal_reference_step_max_abs_rad`` sizes the step that was NOT sent.
         "teacher_qdes": {"control_step_denominator": total_steps,
                          "preclamp_max_abs_error_rad": preclamp_max,
                          "raw_action_max_abs": raw_max, "teleport_used": False,
                          "wait_hold_command_steps": wait_hold_steps,
+                         "bridge_ramp_command_steps": bridge_ramp_steps,
+                         "reveal_reference_step_max_abs_rad": avoided_reveal_step,
                          "teacher_reference_command_steps":
-                             total_steps - wait_hold_steps},
+                             total_steps - wait_hold_steps - bridge_ramp_steps},
         "episodes": rows,
     }
 

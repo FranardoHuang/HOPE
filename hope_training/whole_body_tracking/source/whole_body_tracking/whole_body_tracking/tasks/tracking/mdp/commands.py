@@ -3764,6 +3764,33 @@ class MotionCommand(CommandTerm):
             )
         return self._action_ball_safe_ready_wait_mask(), hold_qdes[self.clip_id]
 
+    def action_ball_teacher_start_frozen_steps(self) -> torch.Tensor:
+        """How many MORE control steps the teacher reference stays frozen.
+
+        人话:揭示之后老师还要在 frame0 上冻结几步 —— 这就是"桥接窗口"还剩多长。
+        谁在这段里驱动机器人,就该用它把指令铺开,而不是一步跨过去。
+
+        This is the integer form of the clock :attr:`teacher_start_wait_remaining_s`
+        already publishes to the actor, and it is the same counter
+        :meth:`_install_event_motion` writes at the atomic reveal
+        (``hold_counter = step.install_hold_steps``).  While it is positive
+        :attr:`joint_pos` returns measured frame 0 unchanged, so a driver that reads
+        it knows exactly how many steps it has to travel the split-ready -> frame 0
+        gap before the clip starts advancing.  Zero means the reference advances on
+        the next step: there is no window left and a command must already be there.
+
+        Returned per environment as ``torch.long``, same ordering as
+        :meth:`action_ball_split_ready_hold_command`.
+        """
+
+        if self.hold_counter.shape != (self.num_envs,):
+            raise RuntimeError(
+                "MotionCommand hold_counter must have one scalar per environment"
+            )
+        if self.hold_counter.dtype != torch.long:
+            raise RuntimeError("MotionCommand hold_counter must use torch.long steps")
+        return self.hold_counter.clamp_min(0)
+
     def _capture_action_ball_safe_ready_reference(self) -> None:
         """Freeze FK body targets after the physical safe-ready reset settles."""
 
