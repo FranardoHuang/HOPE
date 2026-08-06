@@ -2836,7 +2836,18 @@ skip 理由全是 `No module named 'hydra'`；同样三个模块在正式 venv �
 **课程 launcher 的 `53` 条护栏测试在那些对拍里一次都没执行过**。
 **该做的最小动作**：往 `hope_isaac_venv` 里装 `cryptography`，
 并把它写进依赖清单——一行 `pip install`，但要连"写下来"一起做。
-本轮没有代做，理由是那个 venv 是**多个 workflow 共用**的，装包会影响别人正在跑的东西。
+
+> **2026-08-07 已执行并复验**（本节写作时未做，理由是 venv 多 workflow 共用；实测该顾虑不成立，
+> `cryptography` 是纯新增依赖、不动任何已装包的版本）：
+> `hope_isaac_venv` 已装 `cryptography 50.0.0`，三件套现为 `cryptography / hydra / torch` 全 OK。
+> 立即在正式 venv 下重跑 `tests/test_launch_action_ball_curriculum.py`：**`58 passed`**
+> （此前是 `6 passed / 53 skipped`）。
+> **好消息是那 53 条本来就是绿的，所以这段盲区没有藏着回归**；但"我们对它们是瞎的"这件事本身是真的，
+> §5.6.2 之后所有用正式 venv 做的"全量对拍"都不覆盖这 53 条，**那些对拍的结论要按此打折**。
+> `/usr/bin/python3` 仍缺 `hydra`，所以"没有单一解释器能跑全"这句**依然成立**——
+> 真正收口要么给 `/usr/bin/python3` 装 hydra，要么明确规定护栏套件只在正式 venv 下跑并让 CI 强制。
+> **依赖清单那一半仍未做**（`cryptography` 至今没被任何 `requirements*.txt` / `*.toml` / `*.cfg` 声明），
+> 所以换一台机器/重建 venv 会原样复发。这半件事保留为待办，不要因为"pod 上现在能跑了"就当已完成。
 
 ###### 2.2 零调用点的门有第六个：`ActionBirthBroker.assert_known_generation`
 
