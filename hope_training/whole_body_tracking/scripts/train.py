@@ -19041,7 +19041,7 @@ def _run(cfg):
             + json.dumps(
                 {
                     **published,
-                    "closed_attempts": len(oracle["episodes"]),
+                    **oracle["rollout_census"],
                     "selected_rubber_hits": sum(
                         row["observed_selected_rubber_contact"]
                         ["selected_face_sweep_contact"]

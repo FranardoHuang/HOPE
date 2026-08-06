@@ -28,7 +28,7 @@ import tempfile
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 
-INPUT_KIND = "action_ball_c211_observed_oracle_bundle_v2"
+INPUT_KIND = "action_ball_c211_observed_oracle_bundle_v3"
 LIVE_EPISODE_KIND = "action_ball_c211_live_oracle_episode_v2"
 EPISODES = 32
 INCOMING_FIELDS = (
@@ -798,6 +798,7 @@ def collect_live_oracle_bundle(
 
     projected = []
     source_indices = set()
+    consumed = 0
     for value in observed:
         if type(value) is not dict:
             raise LiveOracleError("live episode source row must be a dict")
@@ -805,6 +806,7 @@ def collect_live_oracle_bundle(
         if type(source_index) is not int or source_index in source_indices:
             raise LiveOracleError("live source episode indices must be unique integers")
         source_indices.add(source_index)
+        consumed += 1
         episode = _project_live_episode(value, output_episode=len(projected))
         if episode is not None:
             projected.append(episode)
@@ -812,6 +814,15 @@ def collect_live_oracle_bundle(
             break
     if len(projected) != episodes:
         raise LiveOracleError("live source did not produce 32 closed TASK_ACTIVE attempts")
+    # WAIT-only resets are source facts that are deliberately excluded from the
+    # attempt denominator.  Excluded is not invisible: publish how many resets
+    # this rollout had to burn to reach its 32 closed attempts, so a reader can
+    # tell "3 of 32 fell" apart from "3 of 32 fell, after 300 WAIT deaths".
+    rollout_census = {
+        "source_episodes_consumed": consumed,
+        "wait_only_reset_excluded": consumed - len(projected),
+        "closed_attempts": len(projected),
+    }
     sample_indices = [row["sampler_sample_index"] for row in projected]
     sample_sha256 = [row["sampler_sample_sha256"] for row in projected]
     draw_intervals = [
@@ -836,7 +847,7 @@ def collect_live_oracle_bundle(
         raise LiveOracleError("actual selected-rubber hits exceed closed attempts")
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": INPUT_KIND,
         "diagnostic_unauthorized": True,
         "identity": identity_row,
@@ -844,6 +855,7 @@ def collect_live_oracle_bundle(
         "training_contract_path": str(contract_path),
         "runner_preflight_facts": dict(runner_preflight_facts),
         "question_contract": question_row,
+        "rollout_census": rollout_census,
         "episodes": projected,
     }
 

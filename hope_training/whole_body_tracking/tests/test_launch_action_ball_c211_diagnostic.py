@@ -685,6 +685,87 @@ def _result(
     return {"path": str(path), "sha256": _write(path, _sealed(unsigned))}
 
 
+def _terminal_rows(
+    terminations: "list[tuple[str, list[str]]] | None",
+) -> "list[tuple[str, list[str]]]":
+    """One (terminal_phase, termination_reasons) pair per closed attempt.
+
+    Default = the historical fixture: 32 clean single strokes.  Mutation tests
+    hand in falls / table hits / implementation-failure reasons instead.
+    """
+
+    rows = terminations or [
+        ("post_strike", ["action_ball_single_stroke_complete"]) for _ in range(32)
+    ]
+    assert len(rows) == 32
+    return [(phase, list(reasons)) for phase, reasons in rows]
+
+
+def _termination_ledger(rows: "list[tuple[str, list[str]]]") -> dict:
+    """Aggregate the same way the runtime producer does, from the rows alone."""
+
+    by_reason: dict = {}
+    phase_by_reason: dict = {
+        "post_strike": {},
+        "pre_strike_or_same_step_unknown": {},
+    }
+    for phase, reasons in rows:
+        for reason in reasons:
+            by_reason[reason] = by_reason.get(reason, 0) + 1
+            phase_by_reason[phase][reason] = phase_by_reason[phase].get(reason, 0) + 1
+    return {
+        "allowed_reason": "action_ball_single_stroke_complete",
+        "by_reason": by_reason,
+        "unexpected_by_reason": {
+            reason: count
+            for reason, count in by_reason.items()
+            if reason != "action_ball_single_stroke_complete"
+        },
+        "phase_by_reason": phase_by_reason,
+    }
+
+
+def _expected_termination_census(
+    rows: "list[tuple[str, list[str]]]", *, wait_only_reset_excluded: int = 0
+) -> dict:
+    """The self-describing block the oracle32 receipt must carry.
+
+    Deliberately recomputed here from the same rows the fixture wrote, so a
+    receipt that reports a prettier census than its own 32 episodes fails.
+    """
+
+    ledger = _termination_ledger(rows)
+    episodes_by_phase = {
+        "post_strike": 0,
+        "pre_strike_or_same_step_unknown": 0,
+    }
+    for phase, _reasons in rows:
+        episodes_by_phase[phase] += 1
+    return {
+        "closed_attempt_episodes": len(rows),
+        "source_episodes_consumed": len(rows) + wait_only_reset_excluded,
+        "wait_only_reset_excluded": wait_only_reset_excluded,
+        "episodes_by_terminal_phase": episodes_by_phase,
+        "terminal_reason_totals": ledger["by_reason"],
+        "terminal_reason_by_phase": ledger["phase_by_reason"],
+        "single_stroke_complete_count": ledger["by_reason"].get(
+            "action_ball_single_stroke_complete", 0
+        ),
+        "physical_fall_by_reason": {
+            reason: ledger["by_reason"].get(reason, 0)
+            for reason in launcher.PHYSICAL_FALL_REASONS
+        },
+        "robot_hit_table_count": ledger["by_reason"].get("robot_hit_table", 0),
+        "implementation_strict_zero": {
+            **{
+                name: ledger["by_reason"].get(name, 0)
+                for name in launcher.STRICT_HARD_TERMINATION_UNION
+            },
+            "projection_nonfinite_count": 0,
+        },
+    }
+
+
 def _raw_oracle(
     path: Path,
     *,
@@ -693,6 +774,9 @@ def _raw_oracle(
     recipe: dict,
     materialization: dict,
     policy: dict,
+    terminations: "list[tuple[str, list[str]]] | None" = None,
+    wait_only_reset_excluded: int = 0,
+    projection_nonfinite: int = 0,
 ) -> dict:
     params = path.parent / "params"
     params.mkdir(parents=True, exist_ok=True)
@@ -842,12 +926,13 @@ def _raw_oracle(
         "predicted_landing_xy_m": [1.0, 0.0],
         "source": "runtime_c225_achieved_flight_prediction_one_shot",
     }
+    rows = _terminal_rows(terminations)
     episodes = [
         {
             "episode": index,
             "control_steps": 1,
-            "terminal_phase": "post_strike",
-            "termination_reasons": ["action_ball_single_stroke_complete"],
+            "terminal_phase": rows[index][0],
+            "termination_reasons": list(rows[index][1]),
             "sampler_sample_index": index,
             "sampler_sample_sha256": hashlib.sha256(
                 ("runtime-sample-%d" % index).encode()
@@ -890,8 +975,8 @@ def _raw_oracle(
             {
                 "episode": index,
                 "control_steps": 1,
-                "terminal_phase": "post_strike",
-                "termination_reasons": ["action_ball_single_stroke_complete"],
+                "terminal_phase": rows[index][0],
+                "termination_reasons": list(rows[index][1]),
                 "sampler_sample_index": raw_episode["sampler_sample_index"],
                 "sampler_sample_sha256": raw_episode["sampler_sample_sha256"],
                 "sampler_draw_start": raw_episode["sampler_draw_start"],
@@ -912,11 +997,18 @@ def _raw_oracle(
                 "achieved_analytic_flight": copy.deepcopy(analytic_flight),
                 "predicted_outcome": copy.deepcopy(predicted_outcome),
                 "safety": {
+                    # Mirror the live adapter: per-episode hard counters are
+                    # exactly int(name in this episode's termination reasons).
                     "hard_termination_by_reason": {
-                        name: 0 for name in launcher.HARD_TERMINATION_UNION
+                        name: int(name in rows[index][1])
+                        for name in launcher.HARD_TERMINATION_UNION
                     },
-                    "robot_table_contact_count": 0,
-                    "projection_nonfinite_count": 0,
+                    "robot_table_contact_count": int(
+                        "robot_hit_table" in rows[index][1]
+                    ),
+                    "projection_nonfinite_count": (
+                        projection_nonfinite if index == 0 else 0
+                    ),
                     "projection_observed_sample_count": 1,
                     "qdes_observed_sample_count": 1,
                     "actual_observed_sample_count": 1,
@@ -928,8 +1020,13 @@ def _raw_oracle(
                 },
             }
         )
+    rollout_census = {
+        "source_episodes_consumed": 32 + wait_only_reset_excluded,
+        "wait_only_reset_excluded": wait_only_reset_excluded,
+        "closed_attempts": 32,
+    }
     observed = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": producer.INPUT_KIND,
         "diagnostic_unauthorized": True,
         "identity": {
@@ -941,11 +1038,13 @@ def _raw_oracle(
         "training_contract_path": str(hard_path),
         "runner_preflight_facts": json.loads(preflight_path.read_text())["facts"],
         "question_contract": launcher._question_contract(),
+        "rollout_census": dict(rollout_census),
         "episodes": observed_episodes,
     }
     _write(path.parent / launcher.C211_OBSERVED_BUNDLE_FILENAME, observed)
+    ledger = _termination_ledger(rows)
     unsigned = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": launcher.C211_RAW_ORACLE_KIND,
         "diagnostic_unauthorized": True,
         "bindings": bindings,
@@ -962,7 +1061,9 @@ def _raw_oracle(
         "completion": {
             "requested": 32,
             "terminal": 32,
-            "single_stroke": 32,
+            "single_stroke": ledger["by_reason"].get(
+                "action_ball_single_stroke_complete", 0
+            ),
             "control_steps": 32,
         },
         "episodes": episodes,
@@ -970,22 +1071,18 @@ def _raw_oracle(
             "status": "INELIGIBLE",
             "reason": "target_validity_000_contact_target_absent",
         },
-        "termination": {
-            "allowed_reason": "action_ball_single_stroke_complete",
-            "by_reason": {"action_ball_single_stroke_complete": 32},
-            "unexpected_by_reason": {},
-            "phase_by_reason": {
-                "post_strike": {"action_ball_single_stroke_complete": 32},
-                "pre_strike_or_same_step_unknown": {},
-            },
-        },
+        "rollout_census": dict(rollout_census),
+        "termination": copy.deepcopy(ledger),
         "safety": {
             "control_step_denominator": 32,
             "hard_termination_by_reason": {
-                name: 0 for name in launcher.HARD_TERMINATION_UNION
+                name: ledger["by_reason"].get(name, 0)
+                for name in launcher.HARD_TERMINATION_UNION
             },
-            "robot_table_contact_count": 0,
-            "projection_nonfinite_count": 0,
+            "robot_table_contact_count": ledger["by_reason"].get(
+                "robot_hit_table", 0
+            ),
+            "projection_nonfinite_count": projection_nonfinite,
             "projection_observed_sample_count": 32,
             "qdes_observed_sample_count": 32,
             "actual_observed_sample_count": 32,
@@ -1205,6 +1302,9 @@ def _chain(
     lineage: dict,
     *,
     recipe_id: str,
+    terminations: "list[tuple[str, list[str]]] | None" = None,
+    wait_only_reset_excluded: int = 0,
+    projection_nonfinite: int = 0,
 ):
     recipe = launcher._recipe_contract(recipe_id)
     planned = launcher._planned_materialization(
@@ -1280,12 +1380,15 @@ def _chain(
         recipe=recipe,
         materialization=materialization,
         policy=policy,
+        terminations=terminations,
+        wait_only_reset_excluded=wait_only_reset_excluded,
+        projection_nonfinite=projection_nonfinite,
     )
     observed_path = oracle_namespace / launcher.C211_OBSERVED_BUNDLE_FILENAME
     observed_document = json.loads(observed_path.read_text())
     oracle = _sealed(
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "kind": launcher.ORACLE32_KIND,
             "diagnostic_unauthorized": True,
             "verdict": "PASS",
@@ -1327,6 +1430,18 @@ def _chain(
             "control_step_denominator": 32,
             "selected_rubber_episode_denominator": 32,
             "actual_selected_rubber_contact_count": 32,
+            "termination_census": {
+                **_expected_termination_census(
+                    _terminal_rows(terminations),
+                    wait_only_reset_excluded=wait_only_reset_excluded,
+                ),
+                "implementation_strict_zero": {
+                    **_expected_termination_census(
+                        _terminal_rows(terminations)
+                    )["implementation_strict_zero"],
+                    "projection_nonfinite_count": projection_nonfinite,
+                },
+            },
         }
     )
     oracle_result = _result(
@@ -1369,6 +1484,9 @@ def _case(
     stage: str,
     recipe_id: str = launcher.C_OBS_NOISE_OFF_CELL_ID,
     allow_colocation: bool = False,
+    terminations: "list[tuple[str, list[str]]] | None" = None,
+    wait_only_reset_excluded: int = 0,
+    projection_nonfinite: int = 0,
 ):
     checkout = tmp_path / "checkout"
     checkout.mkdir(parents=True)
@@ -1384,6 +1502,9 @@ def _case(
         lineage_sha,
         lineage,
         recipe_id=recipe_id,
+        terminations=terminations,
+        wait_only_reset_excluded=wait_only_reset_excluded,
+        projection_nonfinite=projection_nonfinite,
     )
     root = (
         checkout
@@ -3013,6 +3134,272 @@ def test_resealed_raw_oracle_semantic_drift_is_rejected(
         launcher.build_plan(spec_path)
 
 
+# ---------------------------------------------------------------------------
+# oracle32 验收门重定范围 —— 2026-08-06
+#
+# 人话
+# ====
+# oracle32 跑的是**刚初始化、一步没训过**的 policy 的 32 集 rollout。旧门却要求它
+# "32/32 都打完一整拍、一次没摔、一次没碰桌",也就是要求一个未开训的策略已经会
+# 打乒乓球 —— 仓库自己在两处写着不该这么要求:
+#
+#   * §12.4:"bridge 的桌/跌倒/too-low 事件按 phase 作行为证据,
+#             qdes-hard/actual-hard/nonfinite 才是实现 strict-zero"
+#   * §8.3: "……不以『必须零次』循环要求未开训 policy 已经学会平衡"
+#   * §5.6.4:参考实现 build_1 自己第 0 迭代 mean_ep_len 只有 23 tick、
+#             iter 35..60 时 base_fell_tilt=1.00 —— 它自己也过不了旧门。
+#
+# 下面这组用例是这次重定范围的**变异测试**,三类各自独立:
+#   A. 等强:两类实现故障(qdes-hard / actual-hard / nonfinite)非零时**仍然拒绝**;
+#   B. 重定范围:未训练策略摔倒 / 碰桌**不再误拒**,而是被数出来写进收据;
+#   C. 普查守恒:阶段x原因的计数必须和 32 集逐集重数完全对上,收据不能自报好看的总数。
+# ---------------------------------------------------------------------------
+
+
+def _untrained_policy_terminations() -> "list[tuple[str, list[str]]]":
+    """A rollout that looks like a fresh policy: mostly falls, a few strokes.
+
+    20 falls before the strike, 5 falls that also hit the table on the way down,
+    3 table hits alone, 4 completed strokes.  Nothing here is an implementation
+    failure; every one of these is behaviour the policy has not learned yet.
+    """
+
+    rows: "list[tuple[str, list[str]]]" = []
+    rows += [("pre_strike_or_same_step_unknown", ["base_fell_tilt"])] * 20
+    rows += [
+        ("pre_strike_or_same_step_unknown", ["base_too_low", "robot_hit_table"])
+    ] * 5
+    rows += [("pre_strike_or_same_step_unknown", ["robot_hit_table"])] * 3
+    rows += [("post_strike", ["action_ball_single_stroke_complete"])] * 4
+    assert len(rows) == 32
+    return rows
+
+
+def test_untrained_policy_falls_and_table_hits_no_longer_refuse_oracle32(
+    tmp_path, monkeypatch
+):
+    """B. 重定范围:未训练策略摔倒/碰桌不再误拒,而且必须在收据上数出来。"""
+
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(
+        tmp_path,
+        stage="scale4096",
+        terminations=_untrained_policy_terminations(),
+        wait_only_reset_excluded=11,
+    )
+    payload = launcher.build_plan(spec_path)["canonical_payload"]
+    receipt = payload["materialization_inputs"]["oracle32_receipt"]
+    assert receipt["verdict"] == "PASS"
+    census = receipt["termination_census"]
+    # 收据自陈 telemetry:一眼能看出这一跑各阶段各死法分别多少集。
+    assert census["closed_attempt_episodes"] == 32
+    assert census["episodes_by_terminal_phase"] == {
+        "post_strike": 4,
+        "pre_strike_or_same_step_unknown": 28,
+    }
+    assert census["physical_fall_by_reason"] == {
+        "base_fell_tilt": 20,
+        "base_too_low": 5,
+    }
+    assert census["robot_hit_table_count"] == 8
+    assert census["single_stroke_complete_count"] == 4
+    assert census["implementation_strict_zero"] == {
+        "joint_actual_forbidden": 0,
+        "joint_qdes_forbidden": 0,
+        "projection_nonfinite_count": 0,
+    }
+    # 分母可见:32 次已关闭尝试之外,这一跑还烧掉了 11 次 WAIT 期猝死的复位。
+    assert census["wait_only_reset_excluded"] == 11
+    assert census["source_episodes_consumed"] == 43
+    assert (
+        census["closed_attempt_episodes"] + census["wait_only_reset_excluded"]
+        == census["source_episodes_consumed"]
+    )
+    # 各阶段各原因加起来等于总集数(多原因集按集计一次的口径见 by-phase 表)。
+    assert sum(census["episodes_by_terminal_phase"].values()) == 32
+    for reason, total in census["terminal_reason_totals"].items():
+        assert (
+            sum(
+                table.get(reason, 0)
+                for table in census["terminal_reason_by_phase"].values()
+            )
+            == total
+        )
+
+
+def test_the_old_all_32_single_stroke_shape_still_passes(tmp_path, monkeypatch):
+    """重定范围不是"换一个门":原来那份干净证据必须照样通过。"""
+
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, _lineage_doc = _case(tmp_path, stage="scale4096")
+    payload = launcher.build_plan(spec_path)["canonical_payload"]
+    census = payload["materialization_inputs"]["oracle32_receipt"][
+        "termination_census"
+    ]
+    assert census["single_stroke_complete_count"] == 32
+    assert census["physical_fall_by_reason"] == {
+        "base_fell_tilt": 0,
+        "base_too_low": 0,
+    }
+    assert census["robot_hit_table_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "reason", ("joint_qdes_forbidden", "joint_actual_forbidden")
+)
+def test_implementation_hard_termination_still_refuses_oracle32(
+    tmp_path, monkeypatch, reason
+):
+    """A. 等强:qdes-hard / actual-hard 只要出现一集就仍然拒绝。
+
+    这里刻意让**整条证据链内部自洽**(safety 账、termination 账、收据 census 全都
+    如实记了这一集),所以唯一能拒绝它的只可能是 strict-zero 规则本身,而不是某个
+    SHA 对不上。
+    """
+
+    _patch_plan_environment(monkeypatch)
+    rows = _untrained_policy_terminations()
+    rows[0] = ("pre_strike_or_same_step_unknown", [reason])
+    spec_path, _spec, _lineage_doc = _case(
+        tmp_path, stage="scale4096", terminations=rows
+    )
+    with pytest.raises(
+        launcher.LaunchRefused, match="implementation failure"
+    ):
+        launcher.build_plan(spec_path)
+
+
+def test_projection_nonfinite_still_refuses_oracle32(tmp_path, monkeypatch):
+    """A. 等强:投影里出现一次 NaN/Inf 就仍然拒绝。"""
+
+    _patch_plan_environment(monkeypatch)
+    spec_path, _spec, _lineage_doc = _case(
+        tmp_path,
+        stage="scale4096",
+        terminations=_untrained_policy_terminations(),
+        projection_nonfinite=1,
+    )
+    with pytest.raises(
+        launcher.LaunchRefused, match="implementation failure"
+    ):
+        launcher.build_plan(spec_path)
+
+
+@pytest.mark.parametrize(
+    "mutation,expected",
+    (
+        # 阶段x原因表少数一集 —— 守恒破了
+        (
+            lambda raw: raw["termination"]["phase_by_reason"][
+                "pre_strike_or_same_step_unknown"
+            ].__setitem__("base_fell_tilt", 19),
+            "termination ledger differs from its own 32 episodes",
+        ),
+        # 总账多报一集
+        (
+            lambda raw: raw["termination"]["by_reason"].__setitem__(
+                "base_fell_tilt", 21
+            ),
+            "termination ledger differs from its own 32 episodes",
+        ),
+        # 名单外账被抹平成空(旧门恰恰是靠"必须为空"放行的)
+        (
+            lambda raw: raw["termination"].__setitem__("unexpected_by_reason", {}),
+            "termination ledger differs from its own 32 episodes",
+        ),
+        # completion 自报 32 次完整挥拍,和 32 集对不上
+        (
+            lambda raw: raw["completion"].__setitem__("single_stroke", 32),
+            "single-stroke completion count differs",
+        ),
+        # safety 那条独立通道少报了摔倒
+        (
+            lambda raw: raw["safety"]["hard_termination_by_reason"].__setitem__(
+                "base_fell_tilt", 0
+            ),
+            "safety ledger differs from its own termination census",
+        ),
+        # safety 少报撞桌
+        (
+            lambda raw: raw["safety"].__setitem__("robot_table_contact_count", 0),
+            "safety ledger differs from its own termination census",
+        ),
+        # 出现一个词表外的终止名 —— 重定范围只放行已知的行为证据
+        (
+            lambda raw: raw["episodes"][0].__setitem__(
+                "termination_reasons", ["anchor_pos"]
+            ),
+            "known terminal-reason set",
+        ),
+        # 同一集重复列同一个原因
+        (
+            lambda raw: raw["episodes"][0].__setitem__(
+                "termination_reasons", ["base_fell_tilt", "base_fell_tilt"]
+            ),
+            "known terminal-reason set",
+        ),
+        # 一集没有任何终止原因
+        (
+            lambda raw: raw["episodes"][0].__setitem__("termination_reasons", []),
+            "known terminal-reason set",
+        ),
+        # WAIT 期被丢掉的复位数被抹掉 —— 分母不能悄悄消失
+        (
+            lambda raw: raw["rollout_census"].__setitem__(
+                "wait_only_reset_excluded", 0
+            ),
+            "rollout census does not close over its own resets",
+        ),
+        (
+            lambda raw: raw["rollout_census"].__setitem__("closed_attempts", 31),
+            "rollout census does not close over its own resets",
+        ),
+    ),
+)
+def test_oracle32_termination_census_must_conserve(
+    tmp_path, monkeypatch, mutation, expected
+):
+    """C. 普查守恒:任何一处聚合数字和 32 集逐集重数对不上就拒绝。"""
+
+    _patch_plan_environment(monkeypatch)
+    spec_path, spec, _lineage_doc = _case(
+        tmp_path,
+        stage="scale4096",
+        terminations=_untrained_policy_terminations(),
+        wait_only_reset_excluded=11,
+    )
+    _rewrite_oracle_raw(spec_path, spec, mutation)
+    with pytest.raises(launcher.LaunchRefused, match=expected):
+        launcher.build_plan(spec_path)
+
+
+def test_oracle32_strict_zero_scope_is_exactly_the_two_implementation_reasons():
+    """门盯的对象本身也要被钉住,免得哪天有人把摔倒悄悄加回 strict-zero。"""
+
+    assert launcher.STRICT_HARD_TERMINATION_UNION == (
+        "joint_actual_forbidden",
+        "joint_qdes_forbidden",
+    )
+    assert launcher.ORACLE_BEHAVIOR_TERMINATION_REASONS == (
+        "base_fell_tilt",
+        "base_too_low",
+        "robot_hit_table",
+    )
+    assert set(launcher.ORACLE_ALLOWED_TERMINATION_REASONS) == {
+        "action_ball_single_stroke_complete",
+        *launcher.HARD_TERMINATION_UNION,
+    }
+    # 行为证据 + 实现故障 = 硬终止并集,不重不漏。
+    assert set(launcher.ORACLE_BEHAVIOR_TERMINATION_REASONS) | set(
+        launcher.STRICT_HARD_TERMINATION_UNION
+    ) == set(launcher.HARD_TERMINATION_UNION)
+    assert not set(launcher.ORACLE_BEHAVIOR_TERMINATION_REASONS) & set(
+        launcher.STRICT_HARD_TERMINATION_UNION
+    )
+    # 这两项在同一个发射器里也被 scale4096 验收当作 strict zero 消费,同一套词表。
+    assert launcher.PHYSICAL_FALL_REASONS == ("base_fell_tilt", "base_too_low")
+
+
 def test_oracle_and_ppo_stages_are_no_longer_globally_blocked():
     assert launcher.BLOCKED_RUNTIME_STAGES == ()
     assert launcher.ORACLE_RUNTIME_DEPENDENCIES == ()
@@ -3063,9 +3450,12 @@ def _producer_bundle_from_oracle_fixture(spec: dict) -> dict:
                 "predicted_outcome": item["predicted_outcome"],
                 "safety": {
                     "hard_termination_by_reason": {
-                        name: 0 for name in launcher.HARD_TERMINATION_UNION
+                        name: int(name in item["termination_reasons"])
+                        for name in launcher.HARD_TERMINATION_UNION
                     },
-                    "robot_table_contact_count": 0,
+                    "robot_table_contact_count": int(
+                        "robot_hit_table" in item["termination_reasons"]
+                    ),
                     "projection_nonfinite_count": 0,
                     "projection_observed_sample_count": steps,
                     "qdes_observed_sample_count": steps,
@@ -3079,7 +3469,7 @@ def _producer_bundle_from_oracle_fixture(spec: dict) -> dict:
             }
         )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": producer.INPUT_KIND,
         "diagnostic_unauthorized": True,
         "identity": {
@@ -3091,6 +3481,7 @@ def _producer_bundle_from_oracle_fixture(spec: dict) -> dict:
         "training_contract_path": raw["training_contract_artifact"]["path"],
         "runner_preflight_facts": preflight["facts"],
         "question_contract": raw["question_contract"],
+        "rollout_census": copy.deepcopy(raw["rollout_census"]),
         "episodes": episodes,
     }
 
@@ -3152,6 +3543,9 @@ def test_observed_producer_sidecars_are_exactly_consumable(tmp_path, monkeypatch
     receipt["control_step_denominator"] = raw["completion"]["control_steps"]
     receipt["selected_rubber_episode_denominator"] = 32
     receipt["actual_selected_rubber_contact_count"] = 32
+    receipt["termination_census"] = _expected_termination_census(
+        [(row["terminal_phase"], row["termination_reasons"]) for row in raw["episodes"]]
+    )
     unsigned_receipt = dict(receipt)
     unsigned_receipt.pop("content_sha256")
     receipt["content_sha256"] = launcher.canonical_sha256(unsigned_receipt)

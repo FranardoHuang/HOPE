@@ -212,8 +212,20 @@ def test_live_bundle_excludes_wait_and_keeps_zero_hit_closed_attempts(tmp_path):
     assert set(payload) == {
         "schema_version", "kind", "diagnostic_unauthorized", "identity",
         "bindings", "training_contract_path", "runner_preflight_facts",
-        "question_contract", "episodes",
+        "question_contract", "rollout_census", "episodes",
     }
+    # 人话:这一跑一共开了 33 次,其中 1 次在 WAIT 里就死了、不算一次尝试。
+    # 被排除掉可以,被藏起来不行 —— 分母必须写在收据上。
+    assert payload["rollout_census"] == {
+        "source_episodes_consumed": 33,
+        "wait_only_reset_excluded": 1,
+        "closed_attempts": 32,
+    }
+    assert (
+        payload["rollout_census"]["closed_attempts"]
+        + payload["rollout_census"]["wait_only_reset_excluded"]
+        == payload["rollout_census"]["source_episodes_consumed"]
+    )
     P._validate_question(payload["question_contract"])
     _selected, selected_row_sha = P.build_selected_rubber(
         launch_claim_sha256=payload["bindings"]["oracle_launch_claim_sha256"],

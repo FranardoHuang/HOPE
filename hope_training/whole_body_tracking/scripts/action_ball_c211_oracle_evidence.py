@@ -25,11 +25,11 @@ import sys
 from typing import Any, Mapping, Sequence
 
 
-RAW_KIND = "action_ball_c211_oracle_raw_evidence_v2"
+RAW_KIND = "action_ball_c211_oracle_raw_evidence_v3"
 PREFLIGHT_KIND = "action_ball_c211_runner_preflight_evidence_v1"
 SELECTED_KIND = "action_ball_c211_selected_rubber_contact_evidence_v1"
-INPUT_KIND = "action_ball_c211_observed_oracle_bundle_v2"
-OUTPUT_KIND = "action_ball_c211_oracle_evidence_publication_v2"
+INPUT_KIND = "action_ball_c211_observed_oracle_bundle_v3"
+OUTPUT_KIND = "action_ball_c211_oracle_evidence_publication_v3"
 OBSERVED_BUNDLE_MARKER = "ACTION_BALL_C211_OBSERVED_ORACLE_BUNDLE_JSON"
 CLASSIFIER_CONTRACT = "runtime_contact_pair_selected_rubber_v1"
 PREFLIGHT_MARKER = "ACTION_BALL_C211_TRAINABILITY_PREFLIGHT_JSON"
@@ -651,6 +651,36 @@ def _validate_episode(value: Any, *, episode: int, selected_row_sha256: str) -> 
     return row
 
 
+def validate_rollout_census(value: Any, *, closed_attempts: int) -> dict[str, int]:
+    """Require the WAIT-only exclusion denominator to close over the rollout.
+
+    The 32 closed attempts are not the whole run: a reset that dies inside the
+    hidden WAIT never becomes an attempt and never reaches this evidence.  That
+    exclusion is legitimate, but it must stay countable, otherwise a clean-looking
+    32-episode census can hide an arbitrarily large pile of discarded resets.
+    """
+
+    row = _exact_dict(
+        value,
+        (
+            "source_episodes_consumed",
+            "wait_only_reset_excluded",
+            "closed_attempts",
+        ),
+        name="rollout census",
+    )
+    counts = {
+        key: _plain_int(row[key], name="rollout census " + key) for key in row
+    }
+    if (
+        counts["closed_attempts"] != closed_attempts
+        or counts["source_episodes_consumed"]
+        != counts["closed_attempts"] + counts["wait_only_reset_excluded"]
+    ):
+        raise EvidenceError("rollout census does not close over its own resets")
+    return counts
+
+
 def build_raw_oracle(
     *,
     bindings: Any,
@@ -661,6 +691,7 @@ def build_raw_oracle(
     episodes: Sequence[Any],
     selected_row_sha256: Sequence[str],
     observed_oracle_bundle_content_sha256: str,
+    rollout_census: Any,
 ) -> dict[str, Any]:
     binding = _exact_dict(bindings, SHA_KEYS, name="raw oracle bindings")
     for key in SHA_KEYS:
@@ -674,6 +705,7 @@ def build_raw_oracle(
         raise EvidenceError("raw oracle requires exactly 32 runtime episodes")
     if len(selected_row_sha256) != EPISODES:
         raise EvidenceError("selected-rubber row SHA denominator differs")
+    census = validate_rollout_census(rollout_census, closed_attempts=EPISODES)
 
     raw_episodes = []
     control_steps = 0
@@ -756,7 +788,7 @@ def build_raw_oracle(
         if key != "action_ball_single_stroke_complete"
     }
     unsigned = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": RAW_KIND,
         "diagnostic_unauthorized": True,
         "bindings": binding,
@@ -777,6 +809,7 @@ def build_raw_oracle(
             "status": "INELIGIBLE",
             "reason": "target_validity_000_contact_target_absent",
         },
+        "rollout_census": census,
         "termination": {
             "allowed_reason": "action_ball_single_stroke_complete",
             "by_reason": by_reason,
@@ -834,11 +867,12 @@ def publish_bundle(bundle: Any, *, namespace: Path) -> dict[str, Any]:
         "training_contract_path",
         "runner_preflight_facts",
         "question_contract",
+        "rollout_census",
         "episodes",
     )
     row = _exact_dict(bundle, keys, name="observed oracle bundle")
     if (
-        row["schema_version"] != 2
+        row["schema_version"] != 3
         or row["kind"] != INPUT_KIND
         or row["diagnostic_unauthorized"] is not True
     ):
@@ -926,6 +960,7 @@ def publish_bundle(bundle: Any, *, namespace: Path) -> dict[str, Any]:
         episodes=row["episodes"],
         selected_row_sha256=selected_rows,
         observed_oracle_bundle_content_sha256=canonical_sha256(row),
+        rollout_census=row["rollout_census"],
     )
     # Complete every semantic validation before the first sidecar write.  A
     # filesystem race can still spend part of the namespace, which is safe;
@@ -952,7 +987,7 @@ def publish_bundle(bundle: Any, *, namespace: Path) -> dict[str, Any]:
         raise EvidenceError("published selected-rubber pin differs")
     raw_pin = _publish_no_clobber(raw_path, raw)
     unsigned = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": OUTPUT_KIND,
         "diagnostic_unauthorized": True,
         "oracle_launch_claim_sha256": binding["oracle_launch_claim_sha256"],

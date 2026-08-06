@@ -1178,6 +1178,90 @@ worktree `/workspace/franco/s10_ff_20260806`（`33c9bdc3`）。**未跑 Isaac `o
 本节已经证明这条 clip 的开环回放必然失败且原因不在被测系统里，再跑一遍只会复现已知结果、
 并占住一张 GPU；要跑的是重定向修好之后的那一次。
 
+#### 5.6.8 `C211 oracle32` 验收门定错了范围：它要求一个没训过的策略已经会打球（2026-08-06）
+
+**这一条跟 §5.6.6/§5.6.7 是两件事。** 那两节说的是"机器人为什么摔"（参考轨迹不可执行，卡在腿）；
+本节说的是"摔了以后**发射器该不该拒绝这一跑**"。前者是被测系统的问题，后者是**量具**的问题。
+
+**症状。** `C211 oracle32` 跑的是 `runner.get_inference_policy()` —— 一个刚初始化、**一次 PPO 更新都没做过**
+的策略的 32 集 rollout（`action_ball_c211_live_oracle.run_live_policy_episodes`）。
+而 `launch_action_ball_c211_diagnostic.py` 的验收要求它表现得像已经训练好的：
+
+| 旧判据 | 人话 |
+| --- | --- |
+| `completion["single_stroke"] != 32` → 拒绝 | 32 集必须每集都打完一整拍 |
+| 每集 `termination_reasons != ["…single_stroke_complete"]` → 拒绝 | 任何一集只要不是"打完一拍"就拒绝 |
+| `by_reason != {"…single_stroke_complete": 32}` → 拒绝 | 同上，聚合口径再来一遍 |
+| `any(hard[name] != 0 for name in HARD_TERMINATION_UNION)` → 拒绝 | **摔倒/太低/撞桌也算"必须零次"** |
+| `safety["robot_table_contact_count"] != 0` → 拒绝 | 撞桌一次就拒绝 |
+
+**仓库自己在三处写着不该这么要求**：
+
+- **§12.4**：「bridge 的桌/跌倒/too-low 事件按 phase 作**行为证据**，
+  qdes-hard/actual-hard/nonfinite 才是实现 strict-zero」——严格零的集合只有三项。
+- **§8.3**：「fall/too-low/robot-hit-table 仍是真实 termination，但对初始 policy 是 behavioral evidence……
+  **不以『必须零次』循环要求未开训 policy 已经学会平衡**」。
+- **§5.6.4**：参考实现 build_1 自己第 0 迭代 `mean_episode_length ≈ 23` tick、iter `35..60` 时
+  `base_fell_tilt = 1.00`。**参考实现自己也过不了这个门。**
+
+而正确的词表**早就在同一个文件里**，并且同一个发射器的 `scale4096` 验收器已经在消费它：
+`STRICT_HARD_TERMINATION_UNION`（严格零那两项）、`PHYSICAL_FALL_REASONS`、`PHYSICAL_FALL_PHASES`。
+所以这不是"少了一个功能"，是**门指错了对象**。
+
+**改法：把门指到正确的对象上，不是删掉检查。**
+
+1. **严格零仍然是严格零，范围收到两类实现故障**：`joint_qdes_forbidden`、`joint_actual_forbidden`、
+   `projection_nonfinite_count`。任一非零 → `LaunchRefused`。等强，一个字没松。
+2. **摔倒 / 太低 / 撞桌改为按阶段计数上报**，不再拒绝。
+3. **新增一份守恒普查**：验收器不信收据自己写的总数，拿 32 集**逐集重数**一遍
+   （`_oracle_termination_census`），然后要求三条独立通道全部对上 ——
+   `termination.by_reason` / `termination.phase_by_reason` / `termination.unexpected_by_reason`（重数结果）、
+   `safety.hard_termination_by_reason` 与 `safety.robot_table_contact_count`（运行时另一条通道累加的结果）、
+   `completion.single_stroke`。任何一处对不上就拒绝。
+4. **终止原因词表收紧**：一集的原因集合必须非空、无重复、且**全部落在**
+   `{single_stroke_complete} ∪ HARD_TERMINATION_UNION` 里。重定范围只放行**已知的**行为证据；
+   一个没人认识的死法（例如 hold 期禁用的 `anchor_pos`）照旧拒绝。这一条是**净增**的护栏。
+5. **分母补上（净增）**：WAIT 期就死掉的复位既不算一次尝试、也不进这份证据 —— 这个排除是对的，
+   但它**以前完全不可见**。现在生产端（`collect_live_oracle_bundle`）发
+   `rollout_census = {source_episodes_consumed, wait_only_reset_excluded, closed_attempts}`，
+   一路带到收据，并要求 `closed + excluded == consumed`、`closed == 32`。
+   没有这一条，"32 集里只有 3 集摔倒"可能是从 300 次 WAIT 猝死里挑出来的。
+6. **收据自陈 telemetry**：`oracle32` 收据新增 `termination_census`，一眼能看出这一跑
+   各阶段各原因分别多少集、strict-zero 那三项各是多少、WAIT 排除了多少次 —— 而不是只有一个 `PASS`。
+
+**这不是在说 bridge 没问题。** 重定范围之后，一次 `32/32` 全摔的 oracle32 会 `PASS`，
+但它的收据上会白纸黑字写着 `base_fell_tilt: 32`、`single_stroke_complete_count: 0`。
+"这条 clip 能不能学"的裁决在 §5.6.6/§5.6.7 和训练里，不在发射器的准入门里；
+把它塞进准入门的结果只是**没有任何一跑能留下证据**。
+
+**受影响的 schema（同批全部升版，旧 artifact 一律 fail-closed 而不是被静默接受）**：
+`action_ball_c211_observed_oracle_bundle_v2 -> v3`、`action_ball_c211_oracle_raw_evidence_v2 -> v3`、
+`action_ball_c211_oracle_evidence_publication_v2 -> v3`、`action_ball_c211_oracle32_receipt_v2 -> v3`。
+
+**变异测试（10 个变异体，`0` 存活）。** 只加断言不算数：逐个把新门里的**某一条**守卫改成恒真，
+看有没有测试变红；一个删掉不变红的守卫就是死代码。harness 见本节收据。
+
+| 变异体 | 改动 | 变红的测试 |
+| --- | --- | --- |
+| M1 | `by_reason` 不再和逐集重数比 | 守恒用例 1 |
+| M2 | 阶段x原因表不再和逐集重数比 | 守恒用例 1 |
+| M3 | 去掉 qdes-hard/actual-hard/nonfinite 的 strict-zero | **等强用例 3**（两项硬终止 + nonfinite） |
+| M4 | 终止原因词表放开 | 词表用例 1 |
+| M5 | 不再要求 WAIT 排除数守恒 | 分母用例 2 |
+| M6 | safety 通道不再与终止普查交叉核对 | 守恒用例 2 |
+| M7 | **把旧的错范围门装回去** | **重定范围用例 1**（未训练策略摔倒/碰桌） |
+| M8 | 把旧的 `single_stroke != 32` 装回去 | 12 个 |
+| M9 | `completion.single_stroke` 不再与重数绑定 | 守恒用例 1 |
+| M10 | `unexpected_by_reason` 不再重算 | 守恒用例 1 |
+
+M7/M8 就是这次改动要消除的那个回归：**旧门一装回去，"未训练策略摔倒/碰桌"立刻被误拒。**
+M3 则证明重定范围没有降门槛：两类实现故障非零时，新门照旧拒绝。
+
+**收据。** pod1 worktree `/workspace/franco/c211_oracle32_rescope_20260806`（`de0641be` + 本改动），
+`hope_isaac_venv`、`pytest -n 64`。基线对拍（改动前 7 个模块）`475 passed in 9.69s`；
+改动后同 7 个模块 `475 passed in 9.12s`（新增用例后 C211 模块由 `154 -> 172`）；
+变异 harness `/tmp/mutate_c211_gate.py`，`10/10` 变异体被杀、`SURVIVING MUTANTS: none`。
+
 #### 5.6.9 手抄的 Isaac 常量改成读活值：指纹只证明"字节没动"，不证明"抄对了"（2026-08-06）
 
 **这是同一个形状的第三次。** 前两次分别是 `5ed998f1`（把桌面终局从广相 AABB 改成精确 SAT，
@@ -1784,7 +1868,13 @@ side 和球题单独计数。旧 Gate A/B `9–11/6–8 s/update` 单位与 work
 恰好5个 finite PPO updates，且 qdes/actual-hard/nonfinite 这些 implementation strict-zero 账为零。
 fall/too-low/robot-hit-table 仍是真实 termination，但对初始 policy 是 behavioral evidence：必须按
 hidden-wait/revealed-pre-strike/post-strike 分项，用 wait-start/reveal/nominal-strike 作分母并守恒，
-不以“必须零次”循环要求未开训 policy 已经学会平衡。全程还需 PID/UUID receipt 和
+不以“必须零次”循环要求未开训 policy 已经学会平衡。
+**这条口径 2026-08-06 才被真正执行到 `oracle32` 上**：在此之前 `C211 oracle32` 的验收器把
+fall/too-low/robot-hit-table 也当成必须零次，`scale4096` 那边却已经在按本段口径分项守恒 ——
+同一个发射器里两套口径。重定范围、守恒普查与收据自陈见 §5.6.8。
+`oracle32` 的阶段轴是它自己的两值口径（`post_strike` / `pre_strike_or_same_step_unknown`），
+因为 WAIT-only 复位根本不进那份证据；它们改成单独的 `wait_only_reset_excluded` 分母来记。
+全程还需 PID/UUID receipt 和
 `>=8192 MiB` min-free；
 速度结论另用10 warm-up+至少50 measured 的 exclusive profiler-off workload。
 exact `ad4ba3f4` 的历史 4096 B 在 scene/USD bootstrap 后 1808 s 无 PPO，同 commit A
@@ -3530,6 +3620,10 @@ policy 通过公开 teacher-start clock和 dense mimic学习非零 bridge。直�
 leg-only projection、4 s被动稳定和 `200/800` durability 都不得成为隐式 fallback。安全 termination
 保持不降级；bridge 的桌/跌倒/too-low事件按 phase 作行为证据，qdes-hard/actual-hard/nonfinite
 才是实现 strict-zero。
+
+> **2026-08-06 执行更正**：上面这句在 `C211 oracle32` 的验收器里**没有被执行** —— 它把摔倒/太低/撞桌
+> 也当成了"必须零次"，于是一个未开训的策略永远拿不到 oracle32。已按本节口径重定范围，
+> 并同批交付守恒普查、词表收紧、WAIT 排除分母和收据自陈 telemetry，见 §5.6.8。
 
 ## 13. 关闭条件
 

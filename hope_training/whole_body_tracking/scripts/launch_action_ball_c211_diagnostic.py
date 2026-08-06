@@ -91,8 +91,8 @@ C211_BUNDLE_KIND = "action_ball_c211_direct_ball_split_ready_bundle_v4"
 RECIPE_KIND = "action_ball_c211_matched_recipe_v3"
 MATERIALIZATION_KIND = "action_ball_c211_reward_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_c211_policy_materialization_v1"
-ORACLE32_KIND = "action_ball_c211_oracle32_receipt_v2"
-C211_RAW_ORACLE_KIND = "action_ball_c211_oracle_raw_evidence_v2"
+ORACLE32_KIND = "action_ball_c211_oracle32_receipt_v3"
+C211_RAW_ORACLE_KIND = "action_ball_c211_oracle_raw_evidence_v3"
 C211_RUNNER_PREFLIGHT_KIND = "action_ball_c211_runner_preflight_evidence_v1"
 C211_SELECTED_RUBBER_KIND = (
     "action_ball_c211_selected_rubber_contact_evidence_v1"
@@ -263,6 +263,26 @@ PHYSICAL_FALL_PHASES = (
 )
 TASK_WAIT_STARTED_COUNTER = "task_wait_started_count"
 TASK_REVEAL_REACHED_COUNTER = "task_reveal_reached_count"
+ORACLE_SINGLE_STROKE_REASON = "action_ball_single_stroke_complete"
+# oracle32 里一集只可能停在这两个阶段之一(WAIT-only 复位根本不进这份证据)。
+ORACLE_TERMINAL_PHASES = ("post_strike", "pre_strike_or_same_step_unknown")
+# 人话:oracle32 跑的是**刚初始化、一步没训过**的 policy。它被允许的死法只有两类 ——
+# 打完一整拍(single stroke),或者踩到五项硬安全终止之一。名单外的任何终止名
+# (比如 hold 期禁用的 anchor_pos,或者某人新加的一项)一律拒收。
+ORACLE_ALLOWED_TERMINATION_REASONS = (
+    ORACLE_SINGLE_STROKE_REASON,
+    *HARD_TERMINATION_UNION,
+)
+# 人话:这三项是"机器人没学会站着/挥拍",属于行为证据,按阶段计数上报,不拒收。
+# 另外两项(STRICT_HARD_TERMINATION_UNION)是"实现坏了",必须严格零。
+# §12.4 与 §8.3 都是这么写的,这里只是把门指到同一个对象上。
+ORACLE_BEHAVIOR_TERMINATION_REASONS = (*PHYSICAL_FALL_REASONS, "robot_hit_table")
+assert set(ORACLE_BEHAVIOR_TERMINATION_REASONS) | set(
+    STRICT_HARD_TERMINATION_UNION
+) == set(HARD_TERMINATION_UNION)
+assert not set(ORACLE_BEHAVIOR_TERMINATION_REASONS) & set(
+    STRICT_HARD_TERMINATION_UNION
+)
 PROHIBITED_HOLD_REFERENCE_TERMINATIONS = (
     "anchor_pos",
     "anchor_ori",
@@ -1964,6 +1984,75 @@ def _validate_c211_analytic_pair(flight_value: Any, prediction_value: Any, *, se
     return flight, prediction
 
 
+def _oracle_count(value: Any, *, name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise LaunchRefused(
+            "C211 raw oracle %s must be a nonnegative integer" % name
+        )
+    return value
+
+
+def _oracle_termination_reasons(value: Any, *, name: str) -> tuple[str, ...]:
+    """One episode's terminal reasons, restricted to the declared vocabulary.
+
+    人话:这一集为什么结束。允许"打完一拍"和五项硬安全终止;出现任何别的名字一律
+    拒收 —— 重定范围只放行**已知的**行为证据,不放行"没人认识的死法"。
+    """
+
+    if (
+        type(value) is not list
+        or not value
+        or any(type(reason) is not str for reason in value)
+        or len(set(value)) != len(value)
+        or any(
+            reason not in ORACLE_ALLOWED_TERMINATION_REASONS for reason in value
+        )
+    ):
+        raise LaunchRefused("%s is not one exact known terminal-reason set" % name)
+    return tuple(value)
+
+
+def _oracle_termination_census(
+    rows: Sequence[tuple[str, tuple[str, ...]]],
+) -> dict[str, Any]:
+    """Recount phase x reason from the per-episode rows and prove it conserves.
+
+    人话:不信收据自己写的总数,拿 32 集逐集重数一遍。之后每一个聚合数字(termination
+    账、safety 账、completion 账)都必须和这份重数对上,谁也不能自己报一个好看的总数。
+    """
+
+    by_reason: dict[str, int] = {}
+    phase_by_reason: dict[str, dict[str, int]] = {
+        phase: {} for phase in ORACLE_TERMINAL_PHASES
+    }
+    episodes_by_phase = {phase: 0 for phase in ORACLE_TERMINAL_PHASES}
+    for phase, reasons in rows:
+        episodes_by_phase[phase] += 1
+        for reason in reasons:
+            by_reason[reason] = by_reason.get(reason, 0) + 1
+            phase_by_reason[phase][reason] = (
+                phase_by_reason[phase].get(reason, 0) + 1
+            )
+    if sum(episodes_by_phase.values()) != len(rows):
+        raise LaunchRefused(
+            "C211 raw oracle phase census does not cover every episode"
+        )
+    for reason, total in by_reason.items():
+        if sum(
+            table.get(reason, 0) for table in phase_by_reason.values()
+        ) != total:
+            raise LaunchRefused(
+                "C211 raw oracle reason-by-phase census does not conserve for %s"
+                % reason
+            )
+    return {
+        "episodes": len(rows),
+        "episodes_by_phase": episodes_by_phase,
+        "by_reason": by_reason,
+        "phase_by_reason": phase_by_reason,
+    }
+
+
 def _validate_c211_raw_oracle(
     path: Path,
     *,
@@ -1997,6 +2086,7 @@ def _validate_c211_raw_oracle(
             "completion",
             "episodes",
             "desired_contact_metrics",
+            "rollout_census",
             "termination",
             "safety",
             "selected_rubber_contact_artifact",
@@ -2005,13 +2095,37 @@ def _validate_c211_raw_oracle(
         name="C211 raw oracle evidence",
     )
     if (
-        row["schema_version"] != 2
+        row["schema_version"] != 3
         or row["kind"] != C211_RAW_ORACLE_KIND
         or row["diagnostic_unauthorized"] is not True
     ):
         raise LaunchRefused("C211 raw oracle evidence schema differs")
     if row["observed_oracle_bundle_content_sha256"] != canonical_sha256(observed_bundle):
         raise LaunchRefused("C211 raw oracle is not bound to the observed live bundle")
+    # 人话:32 集"已关闭的挥拍"不是这一跑的全部。WAIT 期就死掉的复位既不算尝试、也
+    # 不进这份证据 —— 但它必须被数出来,否则"32 集里只有 3 集摔倒"可能是从 300 次
+    # WAIT 猝死里挑出来的。分母要看得见(§8.3:按 wait-start/reveal 作分母并守恒)。
+    rollout = _exact_dict(
+        row["rollout_census"],
+        (
+            "source_episodes_consumed",
+            "wait_only_reset_excluded",
+            "closed_attempts",
+        ),
+        name="C211 raw oracle rollout census",
+    )
+    rollout = {
+        key: _oracle_count(value, name="rollout census " + key)
+        for key, value in rollout.items()
+    }
+    if (
+        rollout["closed_attempts"] != 32
+        or rollout["source_episodes_consumed"]
+        != rollout["closed_attempts"] + rollout["wait_only_reset_excluded"]
+    ):
+        raise LaunchRefused(
+            "C211 raw oracle rollout census does not close over its own resets"
+        )
 
     hard_contract = _validate_c211_hard_contract(
         row["training_contract_artifact"],
@@ -2128,14 +2242,19 @@ def _validate_c211_raw_oracle(
         name="C211 raw oracle completion",
     )
     control_steps = completion["control_steps"]
+    single_stroke = completion["single_stroke"]
+    # 人话:oracle32 要的是"32 次已关闭的挥拍尝试跑完并留下证据",不是"未开训 policy
+    # 已经会打 32 次完整的球"。single_stroke 因此只做取值域检查,真数字下面用逐集
+    # 重数来核对(§8.3:不以"必须零次/必须满分"循环要求未开训 policy 已经学会)。
     if (
         completion["requested"] != 32
         or completion["terminal"] != 32
-        or completion["single_stroke"] != 32
+        or type(single_stroke) is not int
+        or not 0 <= single_stroke <= 32
         or type(control_steps) is not int
         or control_steps < 32
     ):
-        raise LaunchRefused("C211 raw oracle did not complete 32 single strokes")
+        raise LaunchRefused("C211 raw oracle did not close 32 terminal attempts")
 
     episodes = row["episodes"]
     if type(episodes) is not list or len(episodes) != 32:
@@ -2144,6 +2263,7 @@ def _validate_c211_raw_oracle(
     sample_indices: set[int] = set()
     sample_sha256: set[str] = set()
     draw_intervals: set[tuple[int, int]] = set()
+    census_rows: list[tuple[str, tuple[str, ...]]] = []
     for index, episode in enumerate(episodes):
         item = _exact_dict(
             episode,
@@ -2179,15 +2299,15 @@ def _validate_c211_raw_oracle(
         for field in INCOMING_BALL_FIELDS:
             _finite_vec3(actor[field], name="C211 actor %s" % field)
             _finite_vec3(critic[field], name="C211 critic %s" % field)
+        reasons = _oracle_termination_reasons(
+            item["termination_reasons"],
+            name="C211 raw oracle episode %d termination reasons" % index,
+        )
         if (
             item["episode"] != index
             or type(item["control_steps"]) is not int
             or item["control_steps"] <= 0
-            or item["terminal_phase"] not in (
-                "post_strike", "pre_strike_or_same_step_unknown"
-            )
-            or item["termination_reasons"]
-            != ["action_ball_single_stroke_complete"]
+            or item["terminal_phase"] not in ORACLE_TERMINAL_PHASES
             or type(item["sampler_sample_index"]) is not int
             or item["sampler_sample_index"] < 0
             or _B._sha256(
@@ -2231,8 +2351,10 @@ def _validate_c211_raw_oracle(
         ):
             raise LaunchRefused("C211 raw analytic row differs from pinned live bundle")
         episode_step_sum += item["control_steps"]
+        census_rows.append((item["terminal_phase"], reasons))
     if episode_step_sum != control_steps:
         raise LaunchRefused("C211 raw oracle episode/control-step ledger differs")
+    census = _oracle_termination_census(census_rows)
 
     termination = _exact_dict(
         row["termination"],
@@ -2240,18 +2362,31 @@ def _validate_c211_raw_oracle(
         name="C211 raw oracle termination",
     )
     phases = termination.get("phase_by_reason")
+    # 人话:发布出来的三张聚合表(总账 / 名单外账 / 阶段x原因账)必须和上面逐集重数
+    # 的结果逐字相等。这是"普查守恒" —— 收据不能自己报一个跟自己 32 行对不上的总数。
+    expected_unexpected = {
+        reason: count
+        for reason, count in census["by_reason"].items()
+        if reason != ORACLE_SINGLE_STROKE_REASON
+    }
     if (
-        termination.get("allowed_reason") != "action_ball_single_stroke_complete"
-        or termination.get("by_reason") != {"action_ball_single_stroke_complete": 32}
-        or termination.get("unexpected_by_reason") != {}
+        termination.get("allowed_reason") != ORACLE_SINGLE_STROKE_REASON
+        or termination.get("by_reason") != census["by_reason"]
+        or termination.get("unexpected_by_reason") != expected_unexpected
         or type(phases) is not dict
-        or set(phases) != {"post_strike", "pre_strike_or_same_step_unknown"}
-        or sum(
-            phase.get("action_ball_single_stroke_complete", 0)
-            for phase in phases.values() if type(phase) is dict
-        ) != 32
+        or set(phases) != set(ORACLE_TERMINAL_PHASES)
+        or any(
+            phases[phase] != census["phase_by_reason"][phase]
+            for phase in ORACLE_TERMINAL_PHASES
+        )
     ):
-        raise LaunchRefused("C211 raw oracle termination ledger differs")
+        raise LaunchRefused(
+            "C211 raw oracle termination ledger differs from its own 32 episodes"
+        )
+    if census["by_reason"].get(ORACLE_SINGLE_STROKE_REASON, 0) != single_stroke:
+        raise LaunchRefused(
+            "C211 raw oracle single-stroke completion count differs from its episodes"
+        )
 
     safety = _exact_dict(
         row["safety"],
@@ -2267,15 +2402,32 @@ def _validate_c211_raw_oracle(
         ),
         name="C211 raw oracle safety",
     )
-    hard = _exact_dict(
+    published_hard = _exact_dict(
         safety["hard_termination_by_reason"], HARD_TERMINATION_UNION,
         name="C211 raw oracle hard termination ledger",
     )
+    hard = {
+        name: _oracle_count(
+            published_hard[name], name="hard termination count %s" % name
+        )
+        for name in HARD_TERMINATION_UNION
+    }
+    table_contacts = _oracle_count(
+        safety["robot_table_contact_count"], name="robot table contact count"
+    )
+    nonfinite = _oracle_count(
+        safety["projection_nonfinite_count"], name="projection nonfinite count"
+    )
+    # 守恒:safety 那条独立通道(runtime 逐集 hard_termination_by_reason 累加)必须和
+    # termination 那条通道(逐集 termination_reasons 重数)给出同一组数字。两条通道
+    # 在运行时是分开写的,对不上就说明有一条在撒谎。
     if (
         safety["control_step_denominator"] != control_steps
-        or any(hard[name] != 0 for name in HARD_TERMINATION_UNION)
-        or safety["robot_table_contact_count"] != 0
-        or safety["projection_nonfinite_count"] != 0
+        or any(
+            hard[name] != census["by_reason"].get(name, 0)
+            for name in HARD_TERMINATION_UNION
+        )
+        or table_contacts != census["by_reason"].get("robot_hit_table", 0)
         or any(
             safety[key] != control_steps
             for key in (
@@ -2286,7 +2438,24 @@ def _validate_c211_raw_oracle(
             )
         )
     ):
-        raise LaunchRefused("C211 raw oracle safety denominator differs")
+        raise LaunchRefused(
+            "C211 raw oracle safety ledger differs from its own termination census"
+        )
+    # 人话:到这里才是"能不能放行"的判据,而且只看两类**实现故障** ——
+    #   * qdes-hard / actual-hard:指令或实测关节角越了硬边界,是控制实现坏了;
+    #   * nonfinite:投影里出了 NaN/Inf,是数值实现坏了。
+    # 摔倒 / 太低 / 撞桌**不在**这里,它们是未开训 policy 的行为证据,只上报计数
+    # (§12.4「qdes-hard/actual-hard/nonfinite 才是实现 strict-zero」;
+    #  §8.3「不以『必须零次』循环要求未开训 policy 已经学会平衡」)。
+    implementation_strict_zero = {
+        **{name: hard[name] for name in STRICT_HARD_TERMINATION_UNION},
+        "projection_nonfinite_count": nonfinite,
+    }
+    if any(count != 0 for count in implementation_strict_zero.values()):
+        raise LaunchRefused(
+            "C211 raw oracle observed a qdes-hard/actual-hard/nonfinite "
+            "implementation failure"
+        )
 
     teacher = _exact_dict(
         row["teacher_qdes"],
@@ -2317,6 +2486,23 @@ def _validate_c211_raw_oracle(
         "actual_selected_rubber_contact_count": selected[
             "actual_selected_rubber_contact_count"
         ],
+        # 人话:这一跑到底"32 集里各阶段各死法分别多少集",直接写进收据。
+        # 读的人不用去翻 32 行原始 JSON,也不用只看一个 PASS/FAIL。
+        "termination_census": {
+            "closed_attempt_episodes": census["episodes"],
+            "source_episodes_consumed": rollout["source_episodes_consumed"],
+            "wait_only_reset_excluded": rollout["wait_only_reset_excluded"],
+            "episodes_by_terminal_phase": census["episodes_by_phase"],
+            "terminal_reason_totals": census["by_reason"],
+            "terminal_reason_by_phase": census["phase_by_reason"],
+            "single_stroke_complete_count": single_stroke,
+            "physical_fall_by_reason": {
+                reason: census["by_reason"].get(reason, 0)
+                for reason in PHYSICAL_FALL_REASONS
+            },
+            "robot_hit_table_count": table_contacts,
+            "implementation_strict_zero": implementation_strict_zero,
+        },
     }
 
 
@@ -2379,11 +2565,12 @@ def _validate_oracle32(
             "control_step_denominator",
             "selected_rubber_episode_denominator",
             "actual_selected_rubber_contact_count",
+            "termination_census",
         ),
         name="C211 oracle32 receipt",
     )
     expected = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": ORACLE32_KIND,
         "diagnostic_unauthorized": True,
         "verdict": "PASS",
@@ -2459,6 +2646,7 @@ def _validate_oracle32(
         "actual_selected_rubber_contact_count": raw_facts[
             "actual_selected_rubber_contact_count"
         ],
+        "termination_census": raw_facts["termination_census"],
     }
     if any(row[key] != wanted for key, wanted in expected_raw.items()):
         raise LaunchRefused("C211 oracle32 receipt differs from parsed raw evidence")
@@ -4120,7 +4308,7 @@ def _runtime_oracle32_receipt(
     if raw_pin["sha256"] != raw_facts["file_sha256"]:
         raise LaunchRefused("C211 published raw-oracle file SHA differs")
     unsigned = {
-        "schema_version": 2,
+        "schema_version": 3,
         "kind": ORACLE32_KIND,
         "diagnostic_unauthorized": True,
         "verdict": "PASS",
@@ -4165,6 +4353,8 @@ def _runtime_oracle32_receipt(
         "actual_selected_rubber_contact_count": raw_facts[
             "actual_selected_rubber_contact_count"
         ],
+        # 收据自陈:这一跑各阶段各原因分别多少集,直接写在 PASS 旁边。
+        "termination_census": raw_facts["termination_census"],
     }
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
