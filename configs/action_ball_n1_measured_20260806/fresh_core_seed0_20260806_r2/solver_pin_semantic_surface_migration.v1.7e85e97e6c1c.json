@@ -1,0 +1,52 @@
+{
+ "content_addressed_artifacts_still_to_re_sign": "This receipt does not rewrite content-addressed artifacts (task receipts, immutable tape, prototype, manifest, bundle, lineage): their file names carry their own digests, so they must be re-materialised by the offline pipeline against the new pin. Their physical question identities do not move -- that is what the invariance evidence above certifies.",
+ "from_rev": "423f5409519492072a15de79fa94a989c80825cc",
+ "invariance_evidence": {
+  "claim": "Only the pin's own declaration half moved. Every symbol that names a question or computes an answer is identical at both revisions, and the ball physics and exact-face geometry digests are unchanged. This migration re-signs the lineage; it does not re-draw it.",
+  "contact_geometry_sha256": "2451e2fa1c29036d650d5ff4a1630a0d41c7ccb5730400270a2c69a6905ce29e",
+  "covered_symbols_compared": 198,
+  "covered_symbols_moved": {
+   "hope_commands.py": [
+    "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
+    "action_ball_solver_profile_contract"
+   ]
+  },
+  "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+  "question_identity_symbols_unchanged": {
+   "hope_commands.py": {
+    "_action_ball_canonical_sha256": "64c3cf96bd4a4b3b9e18a51fb4206f7acdbe0f81f29d90a1fa6dae358565434c",
+    "_action_ball_exact_question_payload": "42a9ec9de40fba8763507112d70cf6b35ee34e7422e7f5f6b082a9373da9e945",
+    "_action_ball_semantic_levels": "5033a5ea95b442158fff95a68c50c1e2d3ba610185a732659ddda09b6d0adff4"
+   }
+  }
+ },
+ "kind": "whole_body_tracking.action_ball.solver_pin_v2_to_v3_migration",
+ "pin_definition_after": "sha256 of a payload whose semantic_surface.sha256 is the digest of the docstring-stripped AST of every covered symbol across six solver sources, with an explicit reasoned exclusion list and two fail-closed coverage gates",
+ "pin_definition_before": "sha256 of a payload whose implementation_source_sha256 is the whole-file SHA-256 of five solver sources",
+ "schema_version": 1,
+ "semantic_surface": {
+  "covered_symbol_count": 198,
+  "pinned_sources": [
+   "hope_commands.py",
+   "continuous_questions.py",
+   "racket_contact_geometry.py",
+   "stroke_adapt_torch.py",
+   "strike_spec_torch.py",
+   "virtual_ball.py"
+  ],
+  "sha256": "59f03840b85fc47fae00bd3925de4f60a9db4853db385595a600bb06ac5bc577"
+ },
+ "solver_profile_schema_version_after": 3,
+ "solver_profile_schema_version_before": 2,
+ "solver_profile_sha256_after": "c196cf79001df76d5666b0a761a855b4a825fb6a058c9016ed9373a1cc3e8f42",
+ "solver_profile_sha256_before": "9d9a6d09f326d511e473a3db204c890473d4d528b2a57ef70862fbc92d72a0eb",
+ "stale_manifests": [
+  {
+   "file_sha256": "653670aed2461690c5fbe05f926e9bb7339188012993df0a2110e8d29b11a316",
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/take_061_unit04_bh.full.manifest.v3.653670aed246.json",
+   "solver_profile_sha256_after": "c196cf79001df76d5666b0a761a855b4a825fb6a058c9016ed9373a1cc3e8f42",
+   "solver_profile_sha256_before": "9d9a6d09f326d511e473a3db204c890473d4d528b2a57ef70862fbc92d72a0eb"
+  }
+ ],
+ "to_rev": "d4e1e70c018d079a610c5c56ee6ba5fcaa14077f"
+}

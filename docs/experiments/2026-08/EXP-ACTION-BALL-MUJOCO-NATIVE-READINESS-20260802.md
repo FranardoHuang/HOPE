@@ -5224,6 +5224,144 @@ robot/right_hip_roll_collision      15
   台账给出 `17` 条 `unverifiable`、`cross_engine_comparable=false`，并拒绝 comparability 主张。
   **"我读不到"从此不会长得像"我读了且对上了"。**
 
+### 9.2.10 solver profile pin 从"整文件字节"改成"逐符号语义面"（2026-08-07 落地，pod1 host-only）
+
+**人话先说**：那枚让训练在 boot 处硬崩的 `solver profile SHA mismatch`，根源不是有人改坏了题，
+而是**这枚锁根本分不清"改了求解器的数学"和"改了注释 / 改了 checkpoint 怎么存盘"**。
+它对五份源文件做整文件 SHA。于是三笔跟题目毫无关系的提交各自铸出一枚新锁，
+而一条正在跑的课程拿着自己的 manifest 就进不去门了。
+
+同一枚锁在另一个方向上还**不够严**：`strike_spec_torch.py` 里的定向逆解种子函数
+`_seed` / `_face_from_angles`，**不在任何一枚 pin 里**（不在 solver 的五份、不在 runtime 的十二份、
+也不在离线钉针脚本的七份）。而 `stroke_adapt_torch` 从它 import，定向逆解每一行都要过 `_seed`。
+上一轮实测过：改 `_seed` 的镜面律初值就能改掉答案，而 pin 纹丝不动。
+
+本轮把这枚锁**指准**，不是放松。
+
+#### 新锁是什么
+
+`.../mdp/action_ball_solver_semantic_surface.py`（新增，只依赖 `ast`/`hashlib`/`json`，
+所以离线钉针脚本能像 runtime 一样把它 host-load 起来）。
+
+- **覆盖清单**：显式列出进指纹的 **198 个符号**，分布在 **6 份**源码
+  （`hope_commands.py` / `continuous_questions.py` / `racket_contact_geometry.py` /
+  `stroke_adapt_torch.py` / **`strike_spec_torch.py`（第一次被钉进来）** / `virtual_ball.py`）。
+  每个符号的摘要取的是"**剥掉 docstring、跨 Python 版本归一化后的 AST**"，
+  所以注释、空行、换行位置、docstring 都不动它；任何表达式、常量、字段顺序的改动都动它。
+  刻意不用 `ast.dump`：它的字段集合在 3.8→3.12 之间变过（`Index` 包装、`type_params`），
+  同一份源码在不同解释器上会给出不同摘要。
+- **排除清单**：显式列出 **95 个**有意排除的符号，每一个带一个理由码，共 **14 种**理由
+  （`checkpoint_state_serialization` / `birth_audit_ledger` / `runtime_wiring` /
+  `telemetry_and_counters` / `grading_and_observation` / `question_production_sampling` /
+  `other_product_line` / `venue_parameter_loading` / `stroke_selector` / `swept_contact_grading` /
+  `convenience_accessor` / `self_check_only` / `module_export_list` /
+  `overapproximated_name_collision`）。**排除是列举式的，不是默认放行。**
+- **两道 fail-closed 的门**（`surface_blockers`，boot 时在比 SHA 之前先跑）：
+  1. 五份纯求解器源码里**每一个**符号都必须出现在覆盖或排除清单里 ——
+     新加一个函数不分类，直接拒绝启动；
+  2. 任何被覆盖符号引用、且能解析到被钉文件里的名字，也必须已分类 ——
+     入口开始调一个新助手函数而不分类，直接拒绝启动。
+- **排除清单不进指纹**。这正是收窄的机制：新增一个"存盘/记账/遥测"符号必须被**显式分类**
+  （门会开火），但分类完之后 pin 不动，训练不再被无关提交打断。
+  反过来，把一个**已覆盖**符号挪出覆盖清单一定会动 pin，因为它的摘要从 payload 里消失了。
+- **收据自陈**：离线 pins 文档新增 `solver_semantic_surface`（密封的 payload + SHA）和
+  `solver_semantic_surface_declaration`（覆盖了哪些符号、排除了哪些、每条理由的人话）。
+  "这枚 SHA 到底保护了什么"不用读源码就能回答。
+
+参考的是本仓已有的正确范式 `action_ball_211_abi.live_source_parity_blockers`：
+host-load 真源、逐符号比、fail-closed、收据自陈比了哪些符号 —— 不是又造一个整文件哈希的变体。
+
+`counter_rally.py` / `counter_rally_torch.py` **没有**做过符号级裁定，继续走整文件 SHA，
+并在 payload 里以 `unadjudicated_whole_file_sha256` 明说是"未裁定"。这是记账，不是放松。
+
+#### 变异测试：三类都做了
+
+- **等强（必须仍然拒绝）**：21 条变异，覆盖尽调列出的每一类"必须仍能抓到"的改动。
+  每条**先断言"这段文本确实在源码里出现过"再断言指纹变了** —— 上一轮 A7 就是 sed 没匹配上
+  被误记成"存活"，这次不许再发生。包括上一轮 pod 实测过的四条：
+  `strike_spec_torch._seed` 镜面律 `e0 0.5→0.93`（A3）、定点迭代 `3→1`（A4）、
+  `virtual_ball.flight_accel` 重力 `×1.05`（A5）、`TEACHER_RATE_BOUNDARY_ABS_TOL 5e-7→0.5`（A6），
+  以及 `CONTACT_NORMAL_SPEED_MIN_MPS 1.4→-1000`。还包括三条**在 payload 里根本没有被声明、
+  只靠代码存在**的裸字面量：`solver_field_contract` 的字段顺序、`pre_swing_wait <= 1.0`、
+  cycle-vs-horizon 的 `1.0e-12`。全部杀死。
+- **收窄有效（必须放行）**：纯注释、纯 docstring、换行重排都不动指纹。
+  更硬的一条：把**今天**的语义面模块拿去评估四个历史 revision ——
+  `423f5409`（现役 manifest 那枚 pin 铸造时的 revision）、`eccb30cd`、`308db7f0`（两笔
+  checkpoint 序列化作用域重构）、`3e64bea9`（纯注释）—— **四个指纹完全相同**。
+  旧口径下这四个 revision 是四枚不同的 pin。
+- **不许自我豁免**：往纯求解器源码里塞一个没分类的函数 → `symbol_unclassified` 拒绝；
+  让入口开始调一个没分类的助手 → `referenced_symbol_unclassified` 拒绝；
+  悄悄把一个符号移出覆盖清单 → pin 变；同一个符号既覆盖又排除 → 拒绝。
+
+#### 迁移：可审计，不静默
+
+现役 manifest 里那枚是**旧口径**算出来的，一定要迁移一次。迁移由
+`scripts/migrate_action_ball_solver_pin_to_semantic_surface.py` 做，它**自己会拒绝**：
+只有当"决定题目身份"和"决定答案"的每一个覆盖符号在新旧两个 revision 上逐字节相同、
+且只有 pin 自己的声明半边动了，它才肯出收据。
+
+实跑收据：`configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/`
+`solver_pin_semantic_surface_migration.v1.7e85e97e6c1c.json`
+
+| 项 | 迁移前 | 迁移后 |
+| --- | --- | --- |
+| `solver_payload.schema_version` | `2` | `3` |
+| pin 口径 | 五份源文件的整文件 SHA-256 | 六份源码里 198 个符号的语义面摘要 |
+| `solver_profile_sha256` | `9d9a6d09f326d511…` | `c196cf79001df76d…` |
+| `semantic_surface.sha256` | 无 | `59f03840b85fc47f…` |
+| `physics_profile_sha256` | `aa5c9085f9b48ca6…` | **不变** |
+| `contact_geometry.sha256` | `2451e2fa1c29036d…` | **不变** |
+
+**为什么这次迁移不改变题目身份**（收据里逐条列了，不是嘴上说）：
+- 比对了 **198 个**覆盖符号，只有 **2 个**动了，都是这枚 pin 自己的声明半边：
+  `action_ball_solver_profile_contract` 和 `_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION`。
+- 三个"给题目取名字"的函数摘要**逐字节相同**：`_action_ball_exact_question_payload`
+  = `42a9ec9de40f…`、`_action_ball_semantic_levels` = `5033a5ea95b4…`、
+  `_action_ball_canonical_sha256` = `64c3cf96bd4a…`。
+- 球的物理和精确面接触几何两枚 SHA 不变。
+- `423f5409..d4e1e70c` 之间碰过 mdp 目录的提交只有四笔：`eccb30cd`、`308db7f0`、`16b842d8`、
+  `3e64bea9`，加上本轮这笔。这就是"只有 2 个符号动"的原因。
+
+**所以这是重签名，不是重画题。** 内容寻址的那 13 份产物（task receipt / immutable tape /
+prototype / manifest / bundle / lineage）文件名里带着自己的摘要，必须由离线流水线按新 pin
+重新物化 —— 但**物理题目身份不动**，这正是上面那份收据认证的东西。
+迁移脚本**不会**去偷偷改写它们；它只负责把"可以重签"这件事连同证据一起立字据。
+
+新的 v3 pins 文档已随收据落在同一目录：
+`action_ball_profile_pins.live.v2.5564d5b3c09d.json`
+（`source_authority = external_exact_commit_subset_blob_map_v1`，绑定 `d4e1e70c`）。
+
+迁移脚本的门也做了变异验收，三次都真的开火：
+`--from-rev origin/main` 与 `--from-rev 739ba275` → 覆盖符号在其中一个 revision 上不存在，
+拒绝；把 worktree 的 `flight_accel` 重力改成 `×1.05` 再迁移 →
+`this is not a re-signing: … {"virtual_ball.py": ["flight_accel"]}`，拒绝并**点名**。
+
+#### 回归账（pod1，两棵干净 worktree，都从 `61e71a34` 起）
+
+| 集合 | 基线 | 改后 |
+| --- | --- | --- |
+| 窄集 12 模块（pin/manifest/stage-evidence/launcher/materializer/adapter/bootstrap + 新增变异模块） | `2 failed / 330 passed / 19 errors` | `2 failed / 365 passed / 19 errors` |
+| 宽集 11 模块（curriculum/admission/table-obstacle/lineage/fitted-ball/train-wiring 等） | `17 failed / 349 passed / 9 skipped` | `17 failed / 349 passed / 9 skipped` |
+
+两组的失败与 error **名字逐条相同**，全部是改动前既有（`test_materialize_a3_vendor_identity_manifest`
+的 19 个 error、`test_audit_action_ball_cross_engine_physics` 与
+`test_mujoco_teacher_motion_native_ball_diagnostic` 各 1 个 formal-authority 断言等）。零回归。
+
+#### 还没关的洞（明写，别当成已解决）
+
+- **R2**：`action_ball_runtime.derive_action_teacher_timing` 家族算 teacher rate 与 pre-swing wait，
+  solver payload 的四条拒绝理由直接来自它，但**该文件仍不在语义面里**。
+  它现有的 `RUNTIME_CONTRACT_SHA256` 是对一段手写声明取 sha，数学改了它照样不动。
+- **R4**：语义面看得见 cfg 旋钮的**默认值**（本轮把 `cq_*` / `vb_rollout_*` / `mount_normal_sign`
+  的声明纳入覆盖），但看不见"发射时用 YAML 覆盖了旋钮却没给钉针脚本 `--override`"。
+  这是现存洞，本轮不改善也不恶化。
+- **R5**：`action_ball_solver_profile_contract` 里 `minimum_mps_inclusive: 1.4` /
+  `maximum_mps_inclusive: 7.2` 仍是**手抄的第二份**。本轮把这个函数**纳入了覆盖**，
+  所以"只改声明不改执行"或反过来都会动 pin —— 但两者是否**一致**仍然靠人看。
+- **R9**：打分侧（`_action_ball_exact_achieved_contact_state`、`torch_swept_selected_face_contact`、
+  `classify_action_ball_contact`）被显式排除，理由码写进了收据。
+  "题没变但分变了"仍然可能，那归 reward/grading 合同管，别指望 solver profile 拦。
+
 ### 9.2 MuJoCo 顺序
 
 - **MuJoCo core 现在并行做**：pin mjlab/runtime，实现 MJCF/scene/plant、action/delay、deterministic
