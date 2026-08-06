@@ -5244,7 +5244,7 @@ robot/right_hip_roll_collision      15
 所以离线钉针脚本能像 runtime 一样把它 host-load 起来）。
 
 - **覆盖清单**：显式列出进指纹的 **204 个符号**（初版 198，2026-08-07 补了 6 个，见
-  §9.2.10.1），分布在 **6 份**源码
+  §9.2.10.2），分布在 **6 份**源码
   （`hope_commands.py` / `continuous_questions.py` / `racket_contact_geometry.py` /
   `stroke_adapt_torch.py` / **`strike_spec_torch.py`（第一次被钉进来）** / `virtual_ball.py`）。
   每个符号的摘要取的是"**剥掉 docstring、跨 Python 版本归一化后的 AST**"，
@@ -5265,7 +5265,7 @@ robot/right_hip_roll_collision      15
   3. 排除理由里凡是**声称"这条路根本走不到它"**的那几种（`other_product_line` /
      `stroke_selector` / `convenience_accessor`，见 `UNREACHABLE_CLAIM_REASONS`），
      必须真的走不到 —— 某个覆盖符号一旦引用了它，这条理由就是假话，直接拒绝启动。
-     这道门是 2026-08-07 补的（§9.2.10.1）：排除理由分"它不在这条路上"（可验证）和
+     这道门是 2026-08-07 补的（§9.2.10.2）：排除理由分"它不在这条路上"（可验证）和
      "它在路上但改不了答案"（要人判）两种，前者以前只是**写在文件里的一句话**。
 - **排除清单不进指纹**。这正是收窄的机制：新增一个"存盘/记账/遥测"符号必须被**显式分类**
   （门会开火），但分类完之后 pin 不动，训练不再被无关提交打断。
@@ -5305,7 +5305,7 @@ host-load 真源、逐符号比、fail-closed、收据自陈比了哪些符号 �
 `scripts/migrate_action_ball_solver_pin_to_semantic_surface.py` 做，它**自己会拒绝**：
 只有当"决定题目身份"和"决定答案"的每一个**覆盖**符号在新旧两个 revision 上逐字节相同、
 且只有 pin 自己的声明半边动了，它才肯出收据。
-（**作用域**：只比覆盖面里的符号。2026-08-07 修正了收据里那句越界的话，见 §9.2.10.2。）
+（**作用域**：只比覆盖面里的符号。2026-08-07 修正了收据里那句越界的话，见 §9.2.10.1。）
 
 实跑收据：`configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/`
 `solver_pin_semantic_surface_migration.v1.7e85e97e6c1c.json`
@@ -5343,7 +5343,7 @@ prototype / manifest / bundle / lineage）文件名里带着自己的摘要，�
 拒绝；把 worktree 的 `flight_accel` 重力改成 `×1.05` 再迁移 →
 `this is not a re-signing: … {"virtual_ball.py": ["flight_accel"]}`，拒绝并**点名**。
 
-#### 9.2.10.2 那份迁移收据说了两句它没资格说的话（2026-08-07 就地改准）
+#### 9.2.10.1 那份迁移收据说了两句它没资格说的话（2026-08-07 就地改准）
 
 收据里原话是"**每一个**命名题目或计算答案的符号在两个 revision 上都相同"。两处越界：
 
@@ -5389,7 +5389,7 @@ prototype / manifest / bundle / lineage）文件名里带着自己的摘要，�
 - **R4**：语义面看得见 cfg 旋钮的**默认值**（本轮把 `cq_*` / `vb_rollout_*` / `mount_normal_sign`
   的声明纳入覆盖），但看不见"发射时用 YAML 覆盖了旋钮却没给钉针脚本 `--override`"。
   这是现存洞，本轮不改善也不恶化。
-- **R5**（2026-08-07 已关，见 §9.2.10.1）：`action_ball_solver_profile_contract` 里
+- **R5**（2026-08-07 已关，见 §9.2.10.2）：`action_ball_solver_profile_contract` 里
   `minimum_mps_inclusive: 1.4` / `maximum_mps_inclusive: 7.2` / `net_margin_m: 0.05`
   仍然是**字面量**（离线钉针脚本按 git revision 的源码文本铸这份 payload，
   builder 去 import 活体常量反而会铸出一枚"被钉的那个 revision 并不描述"的 pin），
@@ -5400,7 +5400,7 @@ prototype / manifest / bundle / lineage）文件名里带着自己的摘要，�
   `classify_action_ball_contact`）被显式排除，理由码写进了收据。
   "题没变但分变了"仍然可能，那归 reward/grading 合同管，别指望 solver profile 拦。
 
-#### 9.2.10.1 上面那份收窄**自己漏了一个洞**：声明与实际之间那条传递线（2026-08-07 修，pod1 host-only）
+#### 9.2.10.2 上面那份收窄**自己漏了一个洞**：声明与实际之间那条传递线（2026-08-07 修，pod1 host-only）
 
 **人话先说**：pin 封的是"**payload 里声明的数字**"。真正喂给求解器的数字要经过一条
 **传递线**，而那条线住在 `RacketTargetCommand._initialize_action_ball_runtime` ——
@@ -5572,7 +5572,7 @@ v3 的 payload **根本没有这个键**。它封的是逐符号语义面，加�
 吐回来的 `solver_profile_sha256` 必须**还是那一枚**（也就是 runtime 现算的那枚）。
 2026-08-07 把这条的模板从"读一份发出去的谱系文档"改成"**当场用钉针脚本铸**"，
 并把镜像源码放进临时根：原写法把"发出去的谱系此刻能不能启动"和"离线重签是不是不动点"
-捆在同一条断言上，于是每次 pin 合法移动（比如 §9.2.10.1）都会让后者莫名其妙地变红，
+捆在同一条断言上，于是每次 pin 合法移动（比如 §9.2.10.2）都会让后者莫名其妙地变红，
 红的原因跟它要测的东西无关。新增的第六条测的是**模板封着的语义面过期时必须点名拒绝**
 （`is not the live one`）—— 那正是每条谱系在重签完成之前所处的状态。
 拒绝那条的变异只动**一个覆盖符号的函数体**（`virtual_ball.flight_accel` 重力 `×1.05`），
