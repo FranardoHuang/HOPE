@@ -643,12 +643,25 @@ def validate_profile_pins(
         raw.get("solver_implementation_source_sha256"),
         "profile_pins.solver_implementation_source_sha256",
     )
-    payload_source = _mapping(
-        solver_payload.get("implementation_source_sha256"),
-        "solver_payload.implementation_source_sha256",
+    # Solver profile v3: the payload seals the per-symbol semantic surface, so
+    # the payload/document closure is checked on that surface.  The byte map is
+    # still validated below against the checkout -- it is the provenance record
+    # the external commit binding reopens, not the question identity.
+    payload_surface = _mapping(
+        solver_payload.get("semantic_surface"),
+        "solver_payload.semantic_surface",
     )
-    if dict(source_map) != dict(payload_source):
-        raise GateError("solver implementation source map drifted from solver payload")
+    document_surface = _mapping(
+        raw.get("solver_semantic_surface"),
+        "profile_pins.solver_semantic_surface",
+    )
+    if payload_surface.get("sha256") != document_surface.get("sha256"):
+        raise GateError("solver semantic surface drifted from solver payload")
+    if (
+        payload_surface.get("kind")
+        != "whole_body_tracking.action_ball.solver_semantic_surface"
+    ):
+        raise GateError("solver payload does not bind a semantic surface")
     for name, digest in source_map.items():
         _nonempty_string(name, "solver source name")
         _require_sha(digest, f"solver source {name}")

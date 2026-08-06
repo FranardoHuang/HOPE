@@ -766,9 +766,20 @@ def _verify_profile_pins(
             "counter-rally profile pins must bind the exact seven "
             "implementation sources"
         )
-    if solver_payload.get("implementation_source_sha256") != source_hashes:
+    # Solver profile v3: the payload binds the per-symbol semantic surface.  The
+    # byte map above is still re-verified against the checkout below -- it is the
+    # provenance record -- but it is no longer what the payload seals.
+    payload_surface = solver_payload.get("semantic_surface")
+    document_surface = document.get("solver_semantic_surface")
+    if (
+        type(payload_surface) is not dict
+        or type(document_surface) is not dict
+        or payload_surface.get("sha256") != document_surface.get("sha256")
+        or payload_surface.get("kind")
+        != "whole_body_tracking.action_ball.solver_semantic_surface"
+    ):
         raise N1ContactBundleError(
-            "solver payload implementation hashes differ from profile pins"
+            "solver payload semantic surface differs from profile pins"
         )
     for filename, declared in source_hashes.items():
         if (

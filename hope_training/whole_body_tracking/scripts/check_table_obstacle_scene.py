@@ -2791,18 +2791,23 @@ def _load_profile_contract(
             "manifest/profile solver or physics payload SHA does not close"
         )
     source_map = profile.get("solver_implementation_source_sha256")
-    payload_source_map = solver_payload.get(
-        "implementation_source_sha256"
-    )
+    # Solver profile v3: the sealed payload binds the per-symbol semantic
+    # surface, not the byte map.  The byte map stays in the document as the
+    # provenance record and is still re-verified against the checkout below.
+    payload_surface = solver_payload.get("semantic_surface")
+    document_surface = profile.get("solver_semantic_surface")
     if (
         not isinstance(source_map, Mapping)
-        or not isinstance(payload_source_map, Mapping)
-        or dict(source_map) != dict(payload_source_map)
+        or not isinstance(payload_surface, Mapping)
+        or not isinstance(document_surface, Mapping)
+        or payload_surface.get("sha256") != document_surface.get("sha256")
         or tuple(sorted(source_map))
         != tuple(sorted(_ACTION_BALL_SOLVER_SOURCE_NAMES))
     ):
         raise TableSmokeReceiptError(
-            "ActionBall profile pins must bind the exact five solver sources"
+            "ActionBall profile pins must bind the exact five solver sources "
+            "and close their solver payload against the document's semantic "
+            "surface"
         )
     solver_sources: list[tuple[str, _FileSnapshot]] = []
     for name in _ACTION_BALL_SOLVER_SOURCE_NAMES:

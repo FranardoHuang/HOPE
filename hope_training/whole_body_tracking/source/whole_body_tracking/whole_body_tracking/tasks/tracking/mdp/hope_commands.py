@@ -66,6 +66,9 @@ from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import (
     select_questions,
     validate_runtime_motion_contract,
 )
+from whole_body_tracking.tasks.tracking.mdp import (
+    action_ball_solver_semantic_surface as solver_semantic_surface,
+)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -438,7 +441,13 @@ _TASK_FIRST_UNSAFE_TERMINATIONS = (
 
 _ACTION_BALL_STATE_SCHEMA_VERSION = 8
 _ACTION_BALL_STATE_KIND = "whole_body_tracking.RacketTargetCommand.action_ball"
-_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 2
+# v3 replaced the whole-file SHA of five solver sources with a per-symbol
+# semantic surface (``action_ball_solver_semantic_surface``).  v2 could not tell
+# "the solver maths changed" from "a comment changed" or "checkpoint
+# serialisation was re-scoped", so it hard-failed boots that asked exactly the
+# same questions; it was also blind to ``strike_spec_torch.py``, which every
+# fixed-direction inverse solve runs through and which was in no pin at all.
+_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 3
 _ACTION_BALL_PHYSICS_PROFILE_SCHEMA_VERSION = 1
 _ACTION_BALL_DOMAIN_AUTHORITY_SCHEMA_VERSION = 1
 _ACTION_BALL_SOLVER_STATE_SCHEMA_VERSION = 6
@@ -2162,13 +2171,25 @@ def action_ball_solver_profile_contract(
     cfg,
     *,
     physics_profile_sha256: str,
+    semantic_surface: dict,
     source_sha256: dict,
     contact_geometry_contract: dict,
     net_top_z: float,
     counter_rally_objective_profile_sha256: str | None = None,
     counter_rally_venue_physics_sha256: str | None = None,
 ) -> dict:
-    """Build the versioned fixed-action solver receipt from executable knobs and code bytes."""
+    """Build the versioned fixed-action solver receipt from executable knobs and code.
+
+    ``semantic_surface`` is the sealed per-symbol surface built by
+    ``action_ball_solver_semantic_surface.semantic_surface_contract``.  It, not a
+    whole-file digest, is what this profile binds for the five adjudicated solver
+    sources plus ``strike_spec_torch.py``.
+
+    ``source_sha256`` is still required, but only the counter-rally pair enters
+    the payload from it: those two files have never had a symbol-level
+    adjudication, so they stay on the coarse whole-file pin and say so under
+    ``unadjudicated_whole_file_sha256``.
+    """
 
     counter_rally = counter_rally_objective_profile_sha256 is not None
     if counter_rally != (counter_rally_venue_physics_sha256 is not None):
@@ -2176,17 +2197,17 @@ def action_ball_solver_profile_contract(
             "counter-rally solver contract requires objective and venue-physics "
             "SHA together"
         )
-    implementation_names = [
-        "hope_commands.py",
-        "continuous_questions.py",
-        "stroke_adapt_torch.py",
-        "virtual_ball.py",
-        "racket_contact_geometry.py",
-    ]
-    if counter_rally:
-        implementation_names.extend(
-            ("counter_rally.py", "counter_rally_torch.py")
+    surface_payload = semantic_surface["payload"]
+    if (
+        surface_payload["kind"]
+        != "whole_body_tracking.action_ball.solver_semantic_surface"
+    ):
+        raise ValueError(
+            "action-ball solver profile requires the solver semantic surface"
         )
+    unadjudicated_names = (
+        ("counter_rally.py", "counter_rally_torch.py") if counter_rally else ()
+    )
     rejection_reasons = [
         "no_landing",
         "resid_gt_tol",
@@ -2213,9 +2234,23 @@ def action_ball_solver_profile_contract(
     payload = {
         "schema_version": _ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION,
         "kind": "whole_body_tracking.continuous_questions.solve_proposals",
-        "implementation_source_sha256": {
-            name: str(source_sha256[name])
-            for name in implementation_names
+        "semantic_surface": {
+            "kind": str(surface_payload["kind"]),
+            "schema_version": int(surface_payload["schema_version"]),
+            "symbol_digest_algorithm": str(
+                surface_payload["symbol_digest_algorithm"]
+            ),
+            "sha256": str(semantic_surface["sha256"]),
+            "pinned_sources": [
+                str(name)
+                for name in surface_payload["coverage_policy"]["pinned_sources"]
+            ],
+            "covered_symbol_count": sum(
+                len(symbols) for symbols in surface_payload["covered"].values()
+            ),
+        },
+        "unadjudicated_whole_file_sha256": {
+            name: str(source_sha256[name]) for name in unadjudicated_names
         },
         "physics_profile_sha256": str(physics_profile_sha256),
         "contact_geometry": dict(contact_geometry_contract),
@@ -5262,9 +5297,18 @@ class RacketTargetCommand(CommandTerm):
             name: runtime_sources[name]
             for name in solver_source_names
         }
+        # Fails closed on its own before the SHA is even compared: if a symbol in
+        # a pinned solver source is neither covered nor explicitly excluded, or a
+        # covered symbol started calling something unclassified, the surface
+        # refuses to build.  A pin whose coverage is smaller than the semantics
+        # it claims to protect is worse than no pin.
+        solver_surface = solver_semantic_surface.semantic_surface_contract(
+            solver_semantic_surface.source_reader_for_directory(module_dir)
+        )
         solver_contract = action_ball_solver_profile_contract(
             self.cfg,
             physics_profile_sha256=physics_contract["sha256"],
+            semantic_surface=solver_surface,
             source_sha256=solver_sources,
             contact_geometry_contract=contact_geometry_contract,
             net_top_z=net_top_z,
@@ -5280,10 +5324,21 @@ class RacketTargetCommand(CommandTerm):
             ),
         )
         if solver_contract["sha256"] != manifest.solver_profile_sha256:
+            surface_declaration = solver_contract["payload"]["semantic_surface"]
             raise ValueError(
                 "action-ball solver profile SHA mismatch: "
                 f"manifest={manifest.solver_profile_sha256}, "
-                f"runtime={solver_contract['sha256']}"
+                f"runtime={solver_contract['sha256']} "
+                "(this profile is schema v"
+                f"{_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION}: it binds a "
+                "per-symbol semantic surface, not whole-file SHAs. Its live "
+                f"surface is {surface_declaration['sha256']} over "
+                f"{surface_declaration['covered_symbol_count']} symbols in "
+                f"{len(surface_declaration['pinned_sources'])} sources. A "
+                "manifest minted against schema v2 must be migrated with "
+                "scripts/migrate_action_ball_solver_pin_to_semantic_surface.py, "
+                "which records the before/after and proves question identity "
+                "is unchanged.)"
             )
         solver_cfg = ContinuousQuestionCfg(
             tol_m=float(self.cfg.cq_tol_m),

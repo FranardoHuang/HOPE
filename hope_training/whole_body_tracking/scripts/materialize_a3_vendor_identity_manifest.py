@@ -87,6 +87,12 @@ PROFILE_TOP_LEVEL_KEYS = frozenset(
         "venue_yaml_sha256",
         "planes",
         "solver_implementation_source_sha256",
+        # Solver profile v3: the fail-closed solver identity is the per-symbol
+        # semantic surface, and the pins document must carry both the sealed
+        # surface and its self-describing declaration (what is covered, what is
+        # deliberately excluded and why).
+        "solver_semantic_surface",
+        "solver_semantic_surface_declaration",
         "contact_geometry",
         "counter_rally",
         "physics_profile_sha256",
@@ -419,9 +425,20 @@ def _validate_profile_pins(
         raise IdentityManifestRepinError(
             "profile solver source map differs from the exact source commit"
         )
-    if solver_payload.get("implementation_source_sha256") != source_map:
+    # Solver profile v3: the sealed payload binds the per-symbol semantic
+    # surface, not the byte map.  The byte map above stays as provenance for the
+    # commit-binding gates; this check is what closes payload against document.
+    payload_surface = solver_payload.get("semantic_surface")
+    document_surface = profile.get("solver_semantic_surface")
+    if (
+        type(payload_surface) is not dict
+        or type(document_surface) is not dict
+        or payload_surface.get("sha256") != document_surface.get("sha256")
+        or payload_surface.get("kind")
+        != "whole_body_tracking.action_ball.solver_semantic_surface"
+    ):
         raise IdentityManifestRepinError(
-            "solver payload source map differs from the exact source commit"
+            "solver payload semantic surface differs from the profile pins"
         )
     authority = dict(PROFILE_AUTHORITY)
     authority["source_blob_map_sha256"] = _canonical_ascii_sha256(source_map)

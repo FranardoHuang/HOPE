@@ -1362,9 +1362,16 @@ def test_isaac_table_pose_obb_v4_uses_real_registered_action_ball_task_id(
             admission._canonical_json_bytes(contact_geometry_payload)
         ).hexdigest(),
     }
+    # Solver profile v3: the sealed payload binds the per-symbol semantic
+    # surface; the byte map stays in the document as provenance.
+    semantic_surface = {
+        "kind": "whole_body_tracking.action_ball.solver_semantic_surface",
+        "schema_version": 1,
+        "sha256": hashlib.sha256(b"fixture semantic surface").hexdigest(),
+    }
     solver_payload = {
         "kind": "fixture.solver",
-        "implementation_source_sha256": solver_source_map,
+        "semantic_surface": semantic_surface,
         "contact_geometry": contact_geometry,
     }
     physics_payload = {
@@ -1386,6 +1393,9 @@ def test_isaac_table_pose_obb_v4_uses_real_registered_action_ball_task_id(
             "solver_profile_sha256": solver_profile_sha,
                 "physics_profile_sha256": physics_profile_sha,
                 "solver_implementation_source_sha256": solver_source_map,
+                "solver_semantic_surface": {
+                    "sha256": semantic_surface["sha256"]
+                },
                 "contact_geometry": contact_geometry,
         },
     )

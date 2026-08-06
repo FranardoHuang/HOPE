@@ -482,9 +482,16 @@ def _sealed_table_receipt(bindings):
         name: "f" * 64
         for name in PRODUCER._ACTION_BALL_SOLVER_SOURCE_NAMES
     }
+    # Solver profile v3: the payload seals a per-symbol semantic surface, and
+    # the profile document publishes the same surface SHA.
+    semantic_surface = {
+        "kind": "whole_body_tracking.action_ball.solver_semantic_surface",
+        "schema_version": 1,
+        "sha256": "a" * 64,
+    }
     solver_payload = {
         "kind": "fixture.solver",
-        "implementation_source_sha256": source_map,
+        "semantic_surface": semantic_surface,
     }
     physics_payload = {"kind": "fixture.physics"}
     solver_sha = PRODUCER.canonical_sha256(solver_payload)
@@ -511,6 +518,7 @@ def _sealed_table_receipt(bindings):
         "solver_profile_sha256": solver_sha,
         "physics_profile_sha256": physics_sha,
         "solver_implementation_source_sha256": source_map,
+        "solver_semantic_surface": {"sha256": semantic_surface["sha256"]},
     }
     manifest_document = {
         "solver_profile_sha256": solver_sha,

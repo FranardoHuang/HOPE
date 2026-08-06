@@ -2219,8 +2219,12 @@ def _validate_table_rows(
         or set(source_map) != _ACTION_BALL_SOLVER_SOURCE_NAMES
         or (
             type(solver_payload) is not dict
-            or solver_payload.get("implementation_source_sha256")
-            != source_map
+            # Solver profile v3: the payload seals a per-symbol semantic surface
+            # instead of the byte map; the byte map stays in the document.
+            or type(solver_payload.get("semantic_surface")) is not dict
+            or type(profile_document.get("solver_semantic_surface")) is not dict
+            or solver_payload["semantic_surface"].get("sha256")
+            != profile_document["solver_semantic_surface"].get("sha256")
         )
     ):
         raise EvidenceError(

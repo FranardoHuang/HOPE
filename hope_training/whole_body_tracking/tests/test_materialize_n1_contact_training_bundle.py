@@ -60,6 +60,8 @@ def _make_repo(tmp_path: Path, action_id: str) -> dict[str, object]:
         "action_ball_curriculum.py",
         "action_ball_sampling.py",
         "action_ball_profile_adapter.py",
+        # Solver profile v3: the pinner reads the per-symbol semantic surface.
+        "action_ball_solver_semantic_surface.py",
     )
     for name in (*source_names, "action_ball_manifest.py"):
         _copy(mdp_source / name, mdp_target / name)

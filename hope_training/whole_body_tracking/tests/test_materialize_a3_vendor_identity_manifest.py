@@ -96,6 +96,13 @@ SOLVER_SOURCES = (
     "counter_rally.py",
     "counter_rally_torch.py",
 )
+# Solver profile v3 reads these two as well: the per-symbol semantic surface
+# module, and the fixed-direction seed source it newly pins.  They are not part
+# of the seven-name byte map the profile document publishes.
+SEMANTIC_SURFACE_SOURCES = (
+    "action_ball_solver_semantic_surface.py",
+    "strike_spec_torch.py",
+)
 
 
 def _sha(raw: bytes) -> str:
@@ -169,7 +176,7 @@ def base_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
         MDP_REL / "action_ball_manifest.py",
         repo / MDP_REL / "action_ball_manifest.py",
     )
-    for filename in SOLVER_SOURCES:
+    for filename in SOLVER_SOURCES + SEMANTIC_SURFACE_SOURCES:
         _copy_head_blob(MDP_REL / filename, repo / MDP_REL / filename)
     _copy_head_blob(TABLE_GEOMETRY_REL, repo / TABLE_GEOMETRY_REL)
     _copy_head_blob(VENUE_REL, repo / VENUE_REL)

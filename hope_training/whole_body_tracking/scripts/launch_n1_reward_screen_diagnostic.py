@@ -1162,10 +1162,24 @@ def _validate_bundle(
     if (
         type(source_hashes) is not dict
         or set(source_hashes) != set(SOLVER_IMPLEMENTATION_SOURCES)
-        or solver_payload.get("implementation_source_sha256") != source_hashes
     ):
         raise LaunchRefused(
             "N1 profile must bind the exact seven solver implementation sources"
+        )
+    # Solver profile v3: the payload seals a per-symbol semantic surface, so the
+    # launch gate closes payload against document on that surface instead of on
+    # the byte map (the byte map above remains the provenance record).
+    payload_surface = solver_payload.get("semantic_surface")
+    document_surface = profile_document.get("solver_semantic_surface")
+    if (
+        type(payload_surface) is not dict
+        or type(document_surface) is not dict
+        or payload_surface.get("sha256") != document_surface.get("sha256")
+        or payload_surface.get("kind")
+        != "whole_body_tracking.action_ball.solver_semantic_surface"
+    ):
+        raise LaunchRefused(
+            "N1 solver payload semantic surface differs from the profile pins"
         )
     for filename in SOLVER_IMPLEMENTATION_SOURCES:
         source_sha = _sha256(

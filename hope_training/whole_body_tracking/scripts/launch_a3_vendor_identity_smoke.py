@@ -715,8 +715,11 @@ def _validate_bootstrap_repin_documents(
         != GEOMETRY_PAYLOAD_SHA256
         or profile.get("solver_implementation_source_sha256")
         != dict(source_map)
-        or solver_payload.get("implementation_source_sha256")
-        != dict(source_map)
+        # Solver profile v3: the payload seals a per-symbol semantic surface.
+        or type(solver_payload.get("semantic_surface")) is not dict
+        or type(profile.get("solver_semantic_surface")) is not dict
+        or solver_payload["semantic_surface"].get("sha256")
+        != profile["solver_semantic_surface"].get("sha256")
         or solver_payload.get("physics_profile_sha256")
         != PHYSICS_PROFILE_SHA256
         or solver_payload.get("contact_geometry") != geometry

@@ -29,6 +29,14 @@ SOLVER_SOURCES = (
     "counter_rally.py",
     "counter_rally_torch.py",
 )
+# Solver profile v3 pins a per-symbol semantic surface, so the pinner also reads
+# the surface module and ``strike_spec_torch.py`` (whose fixed-direction seed
+# every inverse solve runs through and which used to be in no pin at all).  They
+# are not in the seven-name byte map the document publishes as provenance.
+SEMANTIC_SURFACE_SOURCES = (
+    "action_ball_solver_semantic_surface.py",
+    "strike_spec_torch.py",
+)
 
 
 def _copy_minimal_repo(tmp_path: Path) -> Path:
@@ -36,7 +44,7 @@ def _copy_minimal_repo(tmp_path: Path) -> Path:
     source_mdp = REPO_ROOT / MDP_REL
     target_mdp = root / MDP_REL
     target_mdp.mkdir(parents=True)
-    for name in SOLVER_SOURCES:
+    for name in SOLVER_SOURCES + SEMANTIC_SURFACE_SOURCES:
         shutil.copy2(source_mdp / name, target_mdp / name)
 
     target_geometry = root / TABLE_GEOMETRY_REL
@@ -99,6 +107,16 @@ def test_real_cli_pins_exact_face_payload_and_all_seven_sources(tmp_path):
 
 
 def test_real_cli_rejects_tampered_declared_geometry_payload_sha(tmp_path):
+    """Appending a second, lying GEOMETRY_SOURCE_SHA256 must not mint a pin.
+
+    Two independent refusals now cover this, and either is a pass: the geometry
+    self-seal check ("the declared SHA does not match the canonical payload"),
+    and -- reached first, because the semantic surface is built before the
+    contract -- the surface's duplicate-definition refusal.  A file that defines
+    the same symbol twice cannot be digested per symbol without silently picking
+    a winner, so the surface refuses instead of guessing.
+    """
+
     root = _copy_minimal_repo(tmp_path)
     geometry_source = root / MDP_REL / "racket_contact_geometry.py"
     with geometry_source.open("a", encoding="utf-8") as handle:
@@ -106,10 +124,15 @@ def test_real_cli_rejects_tampered_declared_geometry_payload_sha(tmp_path):
 
     result = _run(root)
     assert result.returncode != 0
+    output = result.stdout + result.stderr
     assert (
-        "GEOMETRY_SOURCE_SHA256 does not match its canonical "
-        "GEOMETRY_SOURCE_PAYLOAD"
-    ) in (result.stdout + result.stderr)
+        (
+            "GEOMETRY_SOURCE_SHA256 does not match its canonical "
+            "GEOMETRY_SOURCE_PAYLOAD"
+        )
+        in output
+        or "defines GEOMETRY_SOURCE_SHA256 more than once" in output
+    ), output
 
 
 def test_source_rev_uses_historical_contracts_not_worktree(tmp_path):

@@ -232,9 +232,18 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "payload_sha256": contact_geometry_sha,
         "kind": "exact_face_contact_v2",
     }
+    # Solver profile v3: the payload seals a per-symbol semantic surface and the
+    # document publishes the same surface SHA next to the byte map.
+    semantic_surface = {
+        "kind": "whole_body_tracking.action_ball.solver_semantic_surface",
+        "schema_version": 1,
+        "sha256": hashlib.sha256(b"fixture-semantic-surface").hexdigest(),
+        "covered_symbol_count": 3,
+        "pinned_sources": ["hope_commands.py"],
+    }
     solver_payload = {
         "solver": "fixture",
-        "implementation_source_sha256": source_hashes,
+        "semantic_surface": semantic_surface,
         "contact_geometry": contact_geometry,
     }
     physics_payload = {"physics": "fixture"}
@@ -256,6 +265,7 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "geometry": table_geometry_payload,
         "contact_geometry": contact_geometry,
         "solver_implementation_source_sha256": source_hashes,
+        "solver_semantic_surface": {"sha256": semantic_surface["sha256"]},
         "solver_profile_sha256": solver_profile_sha,
         "physics_profile_sha256": physics_profile_sha,
     }

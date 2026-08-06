@@ -6173,9 +6173,10 @@ def _validate_fresh_n5_fitted_ball_receipt(
     source_map = profile_pins.get(
         "solver_implementation_source_sha256"
     )
-    payload_source_map = solver_payload.get(
-        "implementation_source_sha256"
-    )
+    # Solver profile v3: the payload seals the per-symbol semantic surface; the
+    # byte map stays in the document as provenance for the commit-binding gates.
+    payload_surface = solver_payload.get("semantic_surface")
+    document_surface = profile_pins.get("solver_semantic_surface")
     if (
         solver_profile_sha != manifest.get("solver_profile_sha256")
         or solver_profile_sha
@@ -6188,12 +6189,11 @@ def _validate_fresh_n5_fitted_ball_receipt(
         or physics_profile_sha
         != profile_pins.get("physics_profile_sha256")
         or not isinstance(source_map, Mapping)
-        or dict(source_map)
-        != (
-            dict(payload_source_map)
-            if isinstance(payload_source_map, Mapping)
-            else None
-        )
+        or not isinstance(payload_surface, Mapping)
+        or not isinstance(document_surface, Mapping)
+        or payload_surface.get("sha256") != document_surface.get("sha256")
+        or payload_surface.get("kind")
+        != "whole_body_tracking.action_ball.solver_semantic_surface"
         or frozenset(source_map) != _ACTION_BALL_SOLVER_SOURCE_NAMES
         or physical_manifest["racket_geometry_contract"][
             "geometry_source_sha256"
@@ -6764,9 +6764,10 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
     source_map = profile_pins.get(
         "solver_implementation_source_sha256"
     )
-    payload_source_map = solver_payload.get(
-        "implementation_source_sha256"
-    )
+    # Solver profile v3: the payload seals the per-symbol semantic surface; the
+    # byte map stays in the document as provenance for the commit-binding gates.
+    payload_surface = solver_payload.get("semantic_surface")
+    document_surface = profile_pins.get("solver_semantic_surface")
     if (
         profile_contract["solver_profile_sha256"]
         != solver_profile_sha
@@ -6781,8 +6782,11 @@ def _validate_fresh_n5_isaac_table_smoke_receipt(
         or manifest.get("physics_profile_sha256")
         != physics_profile_sha
         or not isinstance(source_map, Mapping)
-        or not isinstance(payload_source_map, Mapping)
-        or dict(source_map) != dict(payload_source_map)
+        or not isinstance(payload_surface, Mapping)
+        or not isinstance(document_surface, Mapping)
+        or payload_surface.get("sha256") != document_surface.get("sha256")
+        or payload_surface.get("kind")
+        != "whole_body_tracking.action_ball.solver_semantic_surface"
         or frozenset(source_map) != _ACTION_BALL_SOLVER_SOURCE_NAMES
         or contact_geometry_sha
         == source_map["racket_contact_geometry.py"]

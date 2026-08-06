@@ -61,6 +61,7 @@ SOLVER_SOURCES = (
     "counter_rally.py",
     "counter_rally_torch.py",
 )
+SEMANTIC_SURFACE_SOURCE = "action_ball_solver_semantic_surface.py"
 COUNTER_RALLY_MODULE = (
     "whole_body_tracking.tasks.tracking.mdp.counter_rally"
 )
@@ -273,6 +274,74 @@ def _load_contact_geometry_contract(
         "payload": payload,
         "sha256": computed_sha256,
         "source_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _load_semantic_surface(repo_root: Path, source_rev: str | None) -> dict:
+    """Build the per-symbol solver semantic surface from one revision.
+
+    人话:这里做的和 boot 时一模一样 —— 把被钉的六份源码按符号切开、只对
+    "决定题目/答案" 的那些符号取摘要。整文件字节不再进 solver profile,所以
+    一次纯注释提交、一次 checkpoint 序列化重构不会再作废这枚 pin;反过来
+    ``strike_spec_torch.py`` 的定向逆解种子第一次被钉进来了。
+
+    The surface module imports only ``ast``/``hashlib``/``json``, so it loads on
+    a bare host exactly like the runtime loads it inside Isaac.
+    """
+
+    relative = f"{MDP_REL}/{SEMANTIC_SURFACE_SOURCE}"
+    raw = (
+        _git_blob_bytes(repo_root, source_rev, relative)
+        if source_rev
+        else (repo_root / relative).read_bytes()
+    )
+    module_name = "_pin_action_ball_solver_semantic_surface"
+    module = types.ModuleType(module_name)
+    module.__file__ = (
+        f"{source_rev}:{relative}" if source_rev else str(repo_root / relative)
+    )
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
+    try:
+        exec(compile(raw, module.__file__, "exec"), module.__dict__)
+        sources: dict = {}
+
+        def read(filename: str) -> str:
+            if filename not in sources:
+                rel = f"{MDP_REL}/{filename}"
+                blob = (
+                    _git_blob_bytes(repo_root, source_rev, rel)
+                    if source_rev
+                    else (repo_root / rel).read_bytes()
+                )
+                sources[filename] = blob.decode("utf-8")
+            return sources[filename]
+
+        blockers = module.surface_blockers(read)
+        if blockers:
+            raise SystemExit(
+                "action-ball solver semantic surface does not cover what it "
+                "claims; refusing to mint a pin:\n  " + "\n  ".join(blockers)
+            )
+        contract = module.semantic_surface_contract(read)
+        declaration = module.semantic_surface_declaration(read)
+    finally:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+    return {
+        "contract": contract,
+        "declaration": declaration,
+        "module_source_sha256": hashlib.sha256(raw).hexdigest(),
+        "pinned_source_file_sha256": {
+            name: (
+                _git_blob_sha256(repo_root, source_rev, f"{MDP_REL}/{name}")
+                if source_rev
+                else _sha256_file(repo_root / MDP_REL / name)
+            )
+            for name in module.PINNED_SOURCES
+        },
     }
 
 
@@ -571,6 +640,13 @@ def main() -> int:
             for name in SOLVER_SOURCES
         }
 
+    semantic_surface = _load_semantic_surface(repo_root, source_rev)
+    for name, digest in semantic_surface["pinned_source_file_sha256"].items():
+        if name in source_sha256 and source_sha256[name] != digest:
+            raise SystemExit(
+                f"solver source {name} changed while the profile was pinned"
+            )
+
     contact_geometry = _load_contact_geometry_contract(
         repo_root,
         source_rev,
@@ -596,6 +672,7 @@ def main() -> int:
         solver = namespace["action_ball_solver_profile_contract"](
             cfg,
             physics_profile_sha256=physics["sha256"],
+            semantic_surface=semantic_surface["contract"],
             source_sha256=source_sha256,
             contact_geometry_contract={
                 "payload": contact_geometry["payload"],
@@ -634,6 +711,23 @@ def main() -> int:
             "net_top_z": net_top_z,
         },
         "solver_implementation_source_sha256": source_sha256,
+        # Provenance only: which bytes this pin was minted from.  The
+        # fail-closed identity is ``solver_payload.semantic_surface.sha256``.
+        # The two are deliberately different things -- byte digests are what the
+        # external commit-binding gates reopen from git, symbol digests are what
+        # decides whether the questions changed.
+        "solver_semantic_surface": {
+            "sha256": semantic_surface["contract"]["sha256"],
+            "payload": semantic_surface["contract"]["payload"],
+            "module_source_sha256": semantic_surface["module_source_sha256"],
+            "pinned_source_file_sha256": semantic_surface[
+                "pinned_source_file_sha256"
+            ],
+        },
+        # The self-describing half: what this pin covers, what it deliberately
+        # does not, and why.  Without it "which symbols does this SHA protect"
+        # is only answerable by reading the source module.
+        "solver_semantic_surface_declaration": semantic_surface["declaration"],
         "contact_geometry": {
             "payload": contact_geometry["payload"],
             "sha256": contact_geometry["sha256"],
