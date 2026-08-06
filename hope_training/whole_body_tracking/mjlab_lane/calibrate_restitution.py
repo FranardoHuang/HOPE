@@ -70,11 +70,35 @@ the **rebound height ratio**, ``e = sqrt(h_rebound / h)``.  With
 not a fit.  ``mujoco_warp`` batches ``geom_solref`` per world, so one GPU run
 sweeps the whole (parameter x impact-speed) grid at once.
 
+HOW THE RESULT IS GRADED
+------------------------
+``--confirm`` is the mode that claims "the ball bounces right", so it is the
+mode that is allowed to say NO.  It exits non-zero when a gate fires.  Four
+gates, in plain language:
+
+* **e_within_field_band** -- every bounce sits inside what the venue
+  measurement can resolve.  A *sanity floor*, deliberately labelled as weak:
+  the band is 0.0235 wide against a simulator spread of order 1e-4.
+* **e_mean_matches_authority** -- the inversion still lands on 0.9215.
+* **impact_speed_spread_is_integrator_artefact_only** -- how far ``e`` moves
+  across ``v_n`` 1.0-4.5 m/s.  The contact is designed to be speed-independent,
+  so what is left is the Euler step, with the closed form ``dt^2*ieff*imp*k``.
+  **This is the gate that catches a wrong ``k``.**
+* **e_vs_v_n_slope_within_venue_ci** -- no invented speed dependence.
+
+The last two need the impact-speed envelope actually swept.  A single drop
+height reports ``NOT_MEASURED`` for them, and **NOT_MEASURED is not a pass**
+(exit 5).
+
 Usage
 -----
   python calibrate_restitution.py --sweep          # response surface + solve
   python calibrate_restitution.py --confirm        # single param, e(v_n) curve
   python calibrate_restitution.py --spin-probe     # tangential grip a_t check
+
+  # mutation test: the shipped k must pass, 10x k must fail
+  python calibrate_restitution.py --confirm --calibrated-b --k 1000    # -> 0
+  python calibrate_restitution.py --confirm --calibrated-b --k 10000   # -> 4
 """
 
 from __future__ import annotations
@@ -88,13 +112,83 @@ from dataclasses import dataclass, asdict
 import numpy as np
 
 # --------------------------------------------------------------------------
-# Measured authority (configs/ball_physics_venue.yaml + the OptiTrack refit).
+# Measured authority and the acceptance gates.
+#
+# PROVENANCE.  Every number below is traceable to a line in this repo.  Nothing
+# here is "handed down".
+#
+#   E_TABLE_MEASURED  0.9215
+#     `configs/ball_physics_venue.yaml` -> `contact.table.e_eff`.  58 gated
+#     table bounces over v_n 1.0-4.5 m/s.  The same block states the forensics
+#     estimator over all 218 bounces (0.925, CI95 [0.920, 0.937]) and an
+#     explicit "+- 0.005 systematic".
+#   E_TABLE_OPTITRACK 0.9102
+#     `configs/ball_physics_optitrack_20260730.yaml` -> `contact.table.e_eff`
+#     note: independent rig, pure-bounce drag-corrected estimator, n = 20,
+#     CI95 [0.8825, 0.9311].  That CI *contains* the venue value; the venue
+#     value is the one that ships, so it is the one we invert.
+#   E_FIELD_SIGMA     0.005
+#     the venue fit's own stated systematic on table `e` (same yaml block).
+#     This is a *field* sigma.  It is ~1400x the simulator's world-to-world
+#     sigma (measured 3.5e-6), which is exactly why the simulator's own spread
+#     must never be used to size an acceptance band.
+#   E_ITTF_BAND       (0.876, 0.931)
+#     quoted in `configs/ball_physics_optitrack_20260730.yaml` and
+#     `docs/ball_physics_optitrack_20260730.md`.
+#   E_SLOPE_CI_PER_M_S (-0.007, +0.018) per m/s
+#     venue F3 after the contact-time fix: "flat, slope +0.005/m/s
+#     CI [-0.007, +0.018]" (same yaml block; `docs/ball_physics_fit_report.md`
+#     F3 row quotes the companion figures e_n 0.920, MAD 0.03 at n = 58).
+#
+# WHERE THE OLD (0.88, 0.93) CAME FROM: **UNCONFIRMED -- OPEN**.
+#   The incumbent band's only comment was "acceptance band handed down for this
+#   task".  Searched: the introducing commit (3d2fce66) and its message, every
+#   `configs/*.yaml`, `docs/ball_physics*`, and the experiment record.  No
+#   source states who set it or from which measurement.  It is numerically the
+#   ITTF band (0.876, 0.931) rounded inward to two decimals, which is the
+#   obvious reconstruction -- but that is a RECONSTRUCTION, not a citation.  Do
+#   not promote it to a source without evidence.
 # --------------------------------------------------------------------------
 E_TABLE_MEASURED = 0.9215          # venue, 58 gated bounces, v_n 1.0-4.5 m/s
 E_TABLE_OPTITRACK = 0.9102         # independent rig, CI95 [0.8825, 0.9311]
-E_ACCEPT = (0.88, 0.93)            # acceptance band handed down for this task
 A_T_TABLE_MEASURED = 0.369         # tangential grip gain (OptiTrack 101 bounces)
 V_N_ENVELOPE = (1.0, 4.5)          # validated normal-impact-speed range, m/s
+
+E_FIELD_SIGMA = 0.005              # VENUE systematic on e -- a field sigma
+E_ACCEPT_N_SIGMA = 3.0
+E_ITTF_BAND = (0.876, 0.931)
+E_ACCEPT_INCUMBENT = (0.88, 0.93)  # the unprovenanced band this replaces
+
+_E_LO = E_TABLE_MEASURED - E_ACCEPT_N_SIGMA * E_FIELD_SIGMA   # 0.9065
+_E_HI = E_TABLE_MEASURED + E_ACCEPT_N_SIGMA * E_FIELD_SIGMA   # 0.9365
+# A fail-closed gate is never allowed to loosen, so each edge is clamped inward
+# against the incumbent.  Only the lower edge actually moves (0.88 -> 0.9065);
+# the upper stays at the incumbent 0.93, which is also the ITTF ceiling 0.931
+# rounded in.  Width 0.05 -> 0.0235.
+E_ACCEPT = (max(_E_LO, E_ACCEPT_INCUMBENT[0]),
+            min(_E_HI, E_ACCEPT_INCUMBENT[1]))
+
+# THE BAND ABOVE IS A PHYSICS SANITY FLOOR AND NOTHING MORE.  0.0235 wide
+# against a simulator sigma of 3.5e-6 is still ~6,800 sim-sigma, so it cannot
+# detect a mis-parameterised contact.  Proof, from the shipped k-mutation
+# battery: multiplying the contact stiffness k by 10 moves e by at most 0.0043
+# from the authority, which any field-sized band still passes.  The gates that
+# CAN fail are below, and they are sized by the inversion's own derived
+# precision instead of by the field.
+#
+# One rule sets both: **the calibration's own error budget must sit at least 3x
+# INSIDE the field's stated systematic**, so that no calibration artefact can
+# be mistaken for -- or hide inside -- a real measured effect.
+E_CAL_TOL = E_FIELD_SIGMA / 3.0    # 1.667e-3
+E_MEAN_TOL = E_CAL_TOL             # |e_mean - authority|
+E_SPREAD_TOL = E_CAL_TOL           # e_max - e_min across the v_n envelope
+E_SLOPE_CI_PER_M_S = (-0.007, 0.018)
+
+# A slope or a spread only means something if the run actually swept the
+# envelope.  Below this coverage the two envelope gates report NOT_MEASURED --
+# which is NOT a pass.
+E_MIN_DISTINCT_IMPACT_SPEEDS = 8
+E_COVERAGE_FRACTION = 0.90         # of V_N_ENVELOPE's 3.5 m/s span
 
 BALL_RADIUS = 0.02
 BALL_MASS = 0.0034
@@ -128,12 +222,15 @@ BALL_FRICTION = (1.0, 0.005, 0.0001)
 #     k       e spread     resting penetration
 #     3e2     0.00078          0.68 mm
 #     1e3     0.00090          0.43 mm     <- adopted
-#     3e3     0.00191          0.18 mm
-#     1e4     0.00710          0.054 mm
-#     3e4     0.02234          0.018 mm    (e_max 0.9312 leaves the accept band)
+#     3e3     0.00191          0.18 mm     (spread gate: marginal, 1.15x over)
+#     1e4     0.00710          0.054 mm    (spread gate: FAIL, 4.3x over)
+#     3e4     0.02234          0.018 mm    (spread gate: FAIL; also e_max
+#                                           0.9312 leaves the accept band)
 #
 # 1e3 keeps the scatter at +-0.0005 -- two orders below the measurement's own
-# CI width -- while a resting ball sinks only 2.1% of its radius.
+# CI width -- while a resting ball sinks only 2.1% of its radius.  The "spread
+# gate" annotations are `E_SPREAD_TOL` above; the incumbent (0.88, 0.93) band
+# passed BOTH 1e3 and 1e4, which is what made it an empty test.
 DEFAULT_K = 1.0e3
 
 # One measured Newton step on top of the analytic seed.  The closed form assumes
@@ -208,6 +305,294 @@ def kb_to_solref(k: float, b: float, dmax: float = DMAX) -> tuple[float, float]:
 
 def solref_to_kb(s0: float, s1: float, dmax: float = DMAX) -> tuple[float, float]:
     return (-s0 / (dmax * dmax), -s1 / dmax)
+
+
+# --------------------------------------------------------------------------
+# The acceptance verdict.  Shared by this script and by a3_court_env.py so the
+# two receipts cannot drift apart.
+# --------------------------------------------------------------------------
+
+
+def effective_impedance(mu: float | None = None, imp: float = DMAX,
+                        condim: int = 3, cone: str = "pyramidal") -> float:
+    """``ieff`` for the cone actually in use.
+
+    The *elliptic* branch never folds ``mu`` into the normal channel, so it
+    behaves like ``condim == 1`` for restitution purposes.
+    """
+    mu_v = BALL_FRICTION[0] if mu is None else float(mu)
+    if cone == "elliptic":
+        return pyramidal_effective_impedance(mu_v, imp, condim=1)
+    return pyramidal_effective_impedance(mu_v, imp, condim=condim)
+
+
+def discretization_spread(k: float = DEFAULT_K, mu: float | None = None,
+                          imp: float = DMAX, dt: float = TIMESTEP,
+                          condim: int = 3, cone: str = "pyramidal") -> float:
+    """Full width of the impact-speed spread the Euler step alone produces.
+
+    The contact is first *seen* penetrating by ``d ~ U(0, |v|dt]``, and ``d``
+    enters ``e`` through the stiffness term as ``dt*ieff*imp*k*d/|v|``.  Sweep
+    ``d`` over its whole uniform range and ``e`` sweeps ``dt^2*ieff*imp*k``.
+
+    In plain language: **this is not physics, it is the integrator.**  It is
+    the same number whatever ball or table you use, it scales linearly with
+    ``k``, and it is the statistic ``E_SPREAD_TOL`` polices.  Measured against
+    the shipped battery it is exact: predicted 9.025e-4 at ``k = 1e3``,
+    observed ``e_max - e_min = 8.98e-4``.
+    """
+    return dt * dt * effective_impedance(mu, imp, condim, cone) * imp * float(k)
+
+
+def _gate(name: str, plain: str, verdict: str, **extra) -> dict:
+    out = {"gate": name, "plain": plain, "verdict": verdict}
+    out.update(extra)
+    return out
+
+
+def restitution_verdict(e_values, v_n_values, *, k: float = DEFAULT_K,
+                        mu: float | None = None, imp: float = DMAX,
+                        dt: float = TIMESTEP, condim: int = 3,
+                        cone: str = "pyramidal", n_worlds: int | None = None,
+                        context: str = "") -> dict:
+    """Grade a batch of measured bounces against the field authority.
+
+    Returns a self-describing receipt: every gate carries its own statistic,
+    its own limit, its own provenance and a one-line plain-language reading, so
+    the JSON can be read without this source file.
+
+    ``verdict`` is one of ``PASS`` / ``FAIL`` / ``NOT_MEASURED``.
+    **``NOT_MEASURED`` is not a pass.**  A run that never swept the impact-speed
+    envelope has not tested the two gates that can actually fail, and says so.
+    """
+    e = np.asarray(e_values, dtype=np.float64).ravel()
+    v = np.asarray(v_n_values, dtype=np.float64).ravel()
+    if v.size != e.size:
+        v = np.full(e.size, np.nan)
+    finite = np.isfinite(e)
+    e, v = e[finite], v[finite]
+    n_worlds = int(n_worlds if n_worlds is not None else e.size)
+
+    ieff = effective_impedance(mu, imp, condim, cone)
+    predicted_spread = discretization_spread(k, mu, imp, dt, condim, cone)
+
+    provenance = {
+        "authority_e": E_TABLE_MEASURED,
+        "authority_source": "configs/ball_physics_venue.yaml :: "
+                            "contact.table.e_eff -- 58 gated bounces, "
+                            "v_n 1.0-4.5 m/s",
+        "independent_rig_e": E_TABLE_OPTITRACK,
+        "independent_rig_source": "configs/ball_physics_optitrack_20260730.yaml"
+                                  " :: contact.table.e_eff note -- n=20, "
+                                  "CI95 [0.8825, 0.9311], contains the venue "
+                                  "value",
+        "field_sigma": E_FIELD_SIGMA,
+        "field_sigma_source": "the venue fit's own stated '+- 0.005 "
+                              "systematic' on table e (same yaml block)",
+        "accept_band": list(E_ACCEPT),
+        "accept_band_rule": f"authority +- {E_ACCEPT_N_SIGMA:g} field sigma, "
+                            "each edge clamped inward against the incumbent "
+                            f"{list(E_ACCEPT_INCUMBENT)} so no fail-closed "
+                            "gate loosens",
+        "accept_band_replaced": list(E_ACCEPT_INCUMBENT),
+        "accept_band_replaced_provenance": "UNCONFIRMED -- OPEN. The incumbent "
+                                           "comment said only 'handed down'; "
+                                           "no repo source names an origin. "
+                                           "Numerically it is the ITTF band "
+                                           f"{list(E_ITTF_BAND)} rounded "
+                                           "inward, but that is a "
+                                           "reconstruction, not a citation.",
+        "ittf_band": list(E_ITTF_BAND),
+        "slope_ci_per_m_s": list(E_SLOPE_CI_PER_M_S),
+        "slope_ci_source": "venue F3 after the contact-time fix: 'flat, slope "
+                           "+0.005/m/s CI [-0.007, +0.018]'",
+        "calibration_tolerance": E_CAL_TOL,
+        "calibration_tolerance_rule": "field sigma / 3 -- the calibration's "
+                                      "own error budget must sit at least 3x "
+                                      "inside the field's stated systematic, "
+                                      "so no calibration artefact can be "
+                                      "mistaken for a real measured effect",
+    }
+
+    if e.size == 0:
+        return {
+            "verdict": "NOT_MEASURED",
+            "verdict_plain": "no bounce was recorded at all, so nothing was "
+                             "tested; this is NOT a pass",
+            "context": context,
+            "gates": [],
+            "failed_gates": [],
+            "not_measured_gates": ["all"],
+            "provenance": provenance,
+            "independent_samples": {
+                "n_worlds": n_worlds,
+                "n_bounces_analysed": 0,
+                "worlds_are_not_independent_samples": True,
+            },
+        }
+
+    e_mean = float(e.mean())
+    e_min, e_max = float(e.min()), float(e.max())
+    e_spread = e_max - e_min
+    e_bias = e_mean - E_TABLE_MEASURED
+
+    v_finite = v[np.isfinite(v)]
+    distinct = int(np.unique(np.round(v_finite, 9)).size) if v_finite.size else 0
+    span = float(v_finite.max() - v_finite.min()) if v_finite.size else 0.0
+    envelope_span = V_N_ENVELOPE[1] - V_N_ENVELOPE[0]
+    covered = (distinct >= E_MIN_DISTINCT_IMPACT_SPEEDS
+               and span >= E_COVERAGE_FRACTION * envelope_span)
+
+    gates: list[dict] = []
+
+    # 1 -- physics sanity floor.  Weak by construction; say so in the receipt.
+    band_ok = bool(np.all((e >= E_ACCEPT[0]) & (e <= E_ACCEPT[1])))
+    gates.append(_gate(
+        "e_within_field_band",
+        "every bounce lands inside what the venue measurement can resolve. "
+        "This is a SANITY FLOOR, not evidence of a good inversion: the band is "
+        f"{E_ACCEPT[1] - E_ACCEPT[0]:.4f} wide against a simulator spread of "
+        "order 1e-4, so a badly mis-parameterised contact still passes it.",
+        "PASS" if band_ok else "FAIL",
+        statistic={"e_min": e_min, "e_max": e_max},
+        limit=list(E_ACCEPT),
+        band_width=E_ACCEPT[1] - E_ACCEPT[0],
+        worlds_outside=int(np.count_nonzero(
+            (e < E_ACCEPT[0]) | (e > E_ACCEPT[1]))),
+    ))
+
+    # 2 -- the inversion still lands on the authority.
+    bias_ok = abs(e_bias) <= E_MEAN_TOL
+    gates.append(_gate(
+        "e_mean_matches_authority",
+        "the mean bounce still lands on the venue number to within a third of "
+        "the venue's own systematic. Reads a calibration drift, not a physics "
+        "claim.",
+        "PASS" if bias_ok else "FAIL",
+        statistic={"e_mean": e_mean, "bias_vs_authority": e_bias},
+        limit=E_MEAN_TOL,
+        bias_in_field_sigma=e_bias / E_FIELD_SIGMA,
+    ))
+
+    # 3 -- the impact-speed spread is still integrator noise and nothing more.
+    #
+    # The statistic is max(measured, closed form) on purpose.  The *measured*
+    # range grows with how many drop heights you sample -- 8 heights under-read
+    # the true range -- so a sparse sweep could hide a big k.  The *closed form*
+    # is sample-size independent but was derived for the bare geom contact and
+    # under-reads the court scene by ~1.5x.  Each covers the other's blind spot,
+    # so the gate takes the worse of the two.
+    e_spread_gated = max(e_spread, predicted_spread)
+    if covered:
+        spread_verdict = "PASS" if e_spread_gated <= E_SPREAD_TOL else "FAIL"
+        spread_reason = ""
+    else:
+        spread_verdict = "NOT_MEASURED"
+        spread_reason = (
+            f"the run swept {distinct} distinct impact speed(s) over "
+            f"{span:.3f} m/s; the envelope is {V_N_ENVELOPE[0]}-"
+            f"{V_N_ENVELOPE[1]} m/s and this gate needs at least "
+            f"{E_MIN_DISTINCT_IMPACT_SPEEDS} distinct speeds covering "
+            f"{E_COVERAGE_FRACTION:.0%} of it. At one drop height the observed "
+            "spread is mujoco-warp non-determinism, not the impact-speed "
+            "artefact this gate polices.")
+    gates.append(_gate(
+        "impact_speed_spread_is_integrator_artefact_only",
+        "how much e moves across the validated impact-speed envelope. The "
+        "contact is designed to be speed-independent, so whatever is left is "
+        "the Euler step seeing the ball at a random penetration -- a closed "
+        "form, dt^2*ieff*imp*k. THIS IS THE GATE THAT CATCHES A WRONG k. The "
+        "statistic is the worse of the measured range and the closed form: a "
+        "sparse sweep under-reads the range, and the closed form under-reads "
+        "the court scene, so neither alone is fail-closed.",
+        spread_verdict,
+        statistic={"e_spread_gated": e_spread_gated,
+                   "e_spread_measured": e_spread,
+                   "e_spread_closed_form": predicted_spread},
+        limit=E_SPREAD_TOL,
+        predicted_from_closed_form=predicted_spread,
+        predicted_over_limit_x=predicted_spread / E_SPREAD_TOL,
+        measured_over_limit_x=e_spread / E_SPREAD_TOL,
+        k_used=float(k), ieff=ieff,
+        not_measured_reason=spread_reason or None,
+    ))
+
+    # 4 -- no manufactured velocity dependence.
+    slope = None
+    if covered and e.size > 2:
+        slope = float(np.polyfit(v, e, 1)[0])
+        slope_verdict = ("PASS" if E_SLOPE_CI_PER_M_S[0] <= slope
+                         <= E_SLOPE_CI_PER_M_S[1] else "FAIL")
+        slope_reason = ""
+    else:
+        slope_verdict = "NOT_MEASURED"
+        slope_reason = (
+            "a slope needs more than one drop height. With a single impact "
+            "speed there is no slope to report -- and reporting 0.0 would be "
+            "read as 'measured, and flat', which is a different claim.")
+    gates.append(_gate(
+        "e_vs_v_n_slope_within_venue_ci",
+        "the simulator must not invent a speed dependence the venue did not "
+        "measure. The venue measured e flat in v_n; its own CI is the limit.",
+        slope_verdict,
+        statistic={"slope_per_m_s": slope},
+        limit=list(E_SLOPE_CI_PER_M_S),
+        v_n_span_measured=[float(v_finite.min()), float(v_finite.max())]
+        if v_finite.size else None,
+        v_n_envelope=list(V_N_ENVELOPE),
+        not_measured_reason=slope_reason or None,
+    ))
+
+    failed = [g["gate"] for g in gates if g["verdict"] == "FAIL"]
+    unmeasured = [g["gate"] for g in gates if g["verdict"] == "NOT_MEASURED"]
+    if failed:
+        verdict = "FAIL"
+        plain = ("at least one acceptance gate fired; the ball's bounce is not "
+                 "the calibrated one")
+    elif unmeasured:
+        verdict = "NOT_MEASURED"
+        plain = ("nothing failed, but the gates that can actually fail were "
+                 "never exercised -- this run is NOT evidence that the ball "
+                 "bounce is verified")
+    else:
+        verdict = "PASS"
+        plain = ("every gate ran and passed over the full validated "
+                 "impact-speed envelope")
+
+    return {
+        "verdict": verdict,
+        "verdict_plain": plain,
+        "context": context,
+        "gates": gates,
+        "failed_gates": failed,
+        "not_measured_gates": unmeasured,
+        "provenance": provenance,
+        "summary": {
+            "e_mean": e_mean, "e_min": e_min, "e_max": e_max,
+            "e_spread": e_spread, "bias_vs_authority": e_bias,
+            "slope_per_m_s": slope,
+            "envelope_covered": bool(covered),
+        },
+        "independent_samples": {
+            "n_worlds": n_worlds,
+            "n_bounces_analysed": int(e.size),
+            "n_distinct_impact_speeds": distinct,
+            "worlds_are_not_independent_samples": True,
+            "independent_dof_for_e_mean": 1,
+            "independent_conditions_for_e_vs_v_n": distinct,
+            "what_varies_between_worlds_at_one_drop_height":
+                "mujoco-warp scheduling non-determinism only -- no measurement "
+                "noise, no parameter sampling, no random seed enters this "
+                "probe",
+            "plain":
+                f"{n_worlds} worlds is {n_worlds} repeats of a deterministic "
+                "drop, not "
+                f"{n_worlds} samples. The mean has ONE independent degree of "
+                "freedom however many worlds run; only the number of DISTINCT "
+                "impact speeds buys information, and only about the e-vs-v_n "
+                "curve. Do not quote a standard error computed over worlds.",
+        },
+    }
 
 
 # --------------------------------------------------------------------------
@@ -555,6 +940,12 @@ def mode_confirm(args) -> dict:
                 np.nanmax(np.abs(np.array([b_.e_height for b_ in bc]) - e_h))),
         }
 
+    verdict = restitution_verdict(
+        e_h, v_n, k=k, mu=args.mu, condim=args.condim, cone=args.cone,
+        n_worlds=len(bounces),
+        context=f"calibrate_restitution --confirm, k={k:g}, b={b:g}, "
+                f"cone={args.cone}, {len(bounces)} drop heights")
+
     return {
         "k": k, "b": b, "solref": [s0, s1], "solimp": list(BALL_SOLIMP),
         "friction": [args.mu if args.mu is not None else BALL_FRICTION[0],
@@ -565,9 +956,11 @@ def mode_confirm(args) -> dict:
         "e_height_mean": float(np.nanmean(e_h)),
         "e_height_min": float(np.nanmin(e_h)),
         "e_height_max": float(np.nanmax(e_h)),
+        "e_height_spread": float(np.nanmax(e_h) - np.nanmin(e_h)),
         "e_height_slope_per_m_s": float(slope),
         "e_height_at_v_n_3": float(slope * 3.0 + intercept),
         "in_accept_band": bool(np.all((e_h >= E_ACCEPT[0]) & (e_h <= E_ACCEPT[1]))),
+        "restitution_acceptance": verdict,
         "penetration_max_mm": float(1e3 * max(x.penetration_max_m for x in bounces)),
         "dwell_steps_max": int(max(x.dwell_steps for x in bounces)),
         "cpu_crosscheck": cpu,
@@ -652,10 +1045,7 @@ def mode_validate(args) -> dict:
 
 
 def _ieff(args) -> float:
-    mu = args.mu if args.mu is not None else BALL_FRICTION[0]
-    if args.cone == "elliptic":
-        return pyramidal_effective_impedance(mu, condim=1)
-    return pyramidal_effective_impedance(mu, condim=args.condim)
+    return effective_impedance(args.mu, condim=args.condim, cone=args.cone)
 
 
 def mode_rest(args) -> dict:
@@ -706,22 +1096,41 @@ def main(argv=None) -> int:
                    help="emit an explicit <pair> carrying this friction-row "
                         "solref; only the elliptic cone reads it")
     p.add_argument("--cpu-crosscheck", action="store_true")
+    p.add_argument("--calibrated-b", action="store_true",
+                   help="use the SHIPPED b recipe (analytic seed + the one "
+                        "measured correction) instead of the bare analytic "
+                        "seed; this is what a3_court_env.py actually runs, so "
+                        "it is what a mutation test must mutate against")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--json-out", default=None)
     args = p.parse_args(argv)
 
     mu_eff = args.mu if args.mu is not None else BALL_FRICTION[0]
     if args.b is None:
-        args.b = analytic_seed_b(E_TABLE_MEASURED, args.k, mu=mu_eff,
-                                 condim=args.condim)
+        if args.calibrated_b:
+            args.b = calibrated_b(E_TABLE_MEASURED, args.k, mu=mu_eff)
+        else:
+            args.b = analytic_seed_b(E_TABLE_MEASURED, args.k, mu=mu_eff,
+                                     condim=args.condim)
 
     payload: dict = {
         "measured_authority": {
             "e_table_venue": E_TABLE_MEASURED,
             "e_table_optitrack": E_TABLE_OPTITRACK,
             "accept_band": list(E_ACCEPT),
+            "accept_band_replaced": list(E_ACCEPT_INCUMBENT),
+            "accept_band_rule": f"authority +- {E_ACCEPT_N_SIGMA:g} x field "
+                                f"sigma {E_FIELD_SIGMA:g}, clamped inward "
+                                "against the incumbent so nothing loosens",
+            "field_sigma": E_FIELD_SIGMA,
+            "calibration_tolerance": E_CAL_TOL,
+            "e_mean_tolerance": E_MEAN_TOL,
+            "e_spread_tolerance": E_SPREAD_TOL,
+            "slope_ci_per_m_s": list(E_SLOPE_CI_PER_M_S),
             "v_n_envelope": list(V_N_ENVELOPE),
             "a_t_table": A_T_TABLE_MEASURED,
+            "b_recipe": "calibrated_b (shipped)" if args.calibrated_b
+            else "analytic_seed_b",
         },
         "analytic": {
             "formula": "e = ieff*b*dt - 1 + 0.5*dt^2*ieff*imp*k",
@@ -740,25 +1149,62 @@ def main(argv=None) -> int:
             "solref_used": list(kb_to_solref(args.k, args.b)),
             "e_predicted": predict_e(args.b, args.k, mu_eff,
                                      condim=args.condim),
+            "impact_speed_spread_predicted": discretization_spread(
+                args.k, args.mu, condim=args.condim, cone=args.cone),
         },
     }
-    if args.sweep:
-        payload["sweep"] = mode_sweep(args)
-    if args.confirm:
-        payload["confirm"] = mode_confirm(args)
-    if args.spin_probe:
-        payload["spin_probe"] = mode_spin(args)
-    if args.validate_model:
-        payload["validate_model"] = mode_validate(args)
-    if args.rest:
-        payload["rest"] = mode_rest(args)
+    rc = 0
+    try:
+        if args.sweep:
+            payload["sweep"] = mode_sweep(args)
+        if args.confirm:
+            payload["confirm"] = mode_confirm(args)
+        if args.spin_probe:
+            payload["spin_probe"] = mode_spin(args)
+        if args.validate_model:
+            payload["validate_model"] = mode_validate(args)
+        if args.rest:
+            payload["rest"] = mode_rest(args)
+    except BaseException as exc:                       # noqa: BLE001
+        # A run that dies still has to leave a receipt behind, otherwise the
+        # only runs without evidence are the ones that needed it most.
+        payload["status"] = "crashed"
+        payload["error"] = f"{type(exc).__name__}: {exc}"
+        if args.json_out:
+            with open(args.json_out, "w") as fh:
+                fh.write(json.dumps(payload, indent=2, default=str))
+        raise
+
+    # Fail-closed.  `--confirm` is the mode that claims "the ball bounces
+    # right", so it is the mode that must be able to say NO.  PASS is the only
+    # verdict that exits 0: NOT_MEASURED is not a pass.
+    conf = payload.get("confirm")
+    if conf is not None:
+        acc = conf["restitution_acceptance"]
+        payload["status"] = f"restitution_{acc['verdict'].lower()}"
+        payload["restitution_verdict"] = acc["verdict"]
+        if acc["verdict"] == "FAIL":
+            rc = 4
+        elif acc["verdict"] == "NOT_MEASURED":
+            rc = 5
+    else:
+        payload["status"] = "no_confirm_mode_no_restitution_verdict"
 
     text = json.dumps(payload, indent=2, default=str)
     print(text)
     if args.json_out:
         with open(args.json_out, "w") as fh:
             fh.write(text)
-    return 0
+    if rc:
+        print(f"RESTITUTION_ACCEPTANCE {payload['restitution_verdict']}: "
+              f"{payload['confirm']['restitution_acceptance']['verdict_plain']}",
+              file=sys.stderr)
+        for g in payload["confirm"]["restitution_acceptance"]["gates"]:
+            if g["verdict"] != "PASS":
+                print(f"  [{g['verdict']}] {g['gate']}: "
+                      f"stat={g['statistic']} limit={g['limit']}",
+                      file=sys.stderr)
+    return rc
 
 
 if __name__ == "__main__":

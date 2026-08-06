@@ -34,10 +34,29 @@ therefore a pure translation away::
 That offset is exactly ``-(P1_STAND_X, P1_STAND_Y, FLOOR_Z)`` from
 ``geometry.py``, so it is derived, not typed in twice.
 
+THE BOUNCE RECEIPT GRADES ITSELF
+--------------------------------
+The bounce block carries a ``restitution_acceptance`` verdict from
+``calibrate_restitution.restitution_verdict`` -- the same gates the calibration
+script uses, so the two receipts cannot drift apart.  Two things to know:
+
+* a run at a **single drop height** reports ``NOT_MEASURED`` for the two gates
+  that can actually fail (impact-speed spread, e-vs-v_n slope), and the overall
+  verdict is then ``NOT_MEASURED``.  **That is not a pass.**  The slope field is
+  ``null``, never ``0.0`` -- a written-in zero reads downstream as "measured,
+  and flat", which is a claim a single-height run did not make.
+* ``FAIL`` exits 3.  ``NOT_MEASURED`` does not block, because a capacity census
+  never claimed to measure the bounce; it just may not be cited as evidence.
+
 Usage
 -----
   python a3_court_env.py --verify --no-bench
   python a3_court_env.py --nworld 4096 --steps 500 --bounce-steps 900
+
+  # measure e across the validated impact-speed envelope (this is the run that
+  # turns the slope from NOT_MEASURED into a number)
+  python a3_court_env.py --nworld 4096 --ctrl zero --height-sweep 1.0 4.5 \
+      --bounce-steps 1400 --steps 200
 """
 
 from __future__ import annotations
@@ -769,6 +788,10 @@ def run(env, pose: dict, ball_pos_hope, steps: int, warmup: int,
     dev = sim.device
     bj = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, BALL_JOINT)
     b_q, b_v = int(m.jnt_qposadr[bj]), int(m.jnt_dofadr[bj])
+    # Read the cone off the BUILT model, not off a CLI string -- the effective
+    # impedance (and therefore the predicted spread) depends on it.
+    env_cone = ("elliptic" if int(m.opt.cone)
+                == int(mujoco.mjtCone.mjCONE_ELLIPTIC) else "pyramidal")
 
     qpos0, qvel0, idx = ready_qpos(env, pose)
     ball_scene = hope_to_scene(ball_pos_hope)
@@ -788,6 +811,18 @@ def run(env, pose: dict, ball_pos_hope, steps: int, warmup: int,
     else:
         drop_h = np.full(sim.num_envs, float(ball_scene[2] - rest_z))
     ball_z0 = torch.as_tensor(rest_z + drop_h, dtype=torch.float32, device=dev)
+
+    # Fall + rebound has to fit inside the traced window or the apex is never
+    # bracketed and `e` reads low.  Say so up front; the per-world bracketing
+    # check below is the fail-closed half.
+    _t_needed = (math.sqrt(2.0 * float(drop_h.max()) / 9.81)
+                 * (1.0 + cal.E_TABLE_MEASURED) + 0.05)
+    _steps_needed = int(math.ceil(_t_needed / env.physics_dt))
+    if bounce_steps < _steps_needed:
+        print(f"[a3_court_env] WARNING: --bounce-steps {bounce_steps} is short "
+              f"for a {float(drop_h.max()):.3f} m drop; need >= "
+              f"{_steps_needed}. Worlds whose apex is not bracketed will be "
+              f"DROPPED from the restitution statistics, not silently biased.")
 
     def reset():
         sim.data.qpos[:] = q0.unsqueeze(0).expand(sim.num_envs, -1)
@@ -855,39 +890,95 @@ def run(env, pose: dict, ball_pos_hope, steps: int, warmup: int,
     bz = ball_z.cpu().numpy().astype(np.float64)
     pz = pelvis_z.cpu().numpy().astype(np.float64)
     e_per_world, apex_per_world, pen_per_world, vn_per_world = [], [], [], []
+    n_never_touched = n_never_left = n_unbracketed = 0
     for w in range(bz.shape[1]):
         z = bz[:, w]
         inside = z < rest_z
         ii = np.nonzero(inside)[0]
         if ii.size == 0:
+            n_never_touched += 1
             continue
         i0 = int(ii[0])
         aft = np.nonzero(~inside[i0:])[0]
         if aft.size == 0:
+            n_never_left += 1
             continue
         i1 = i0 + int(aft[0])
         pen_per_world.append(float(rest_z - z[i0:i1].min()))
         nxt = np.nonzero(inside[i1:])[0]
         i2 = i1 + int(nxt[0]) if nxt.size else len(z)
-        apex = float(z[i1:i2].max())
+        seg = z[i1:i2]
+        # The apex has to be BRACKETED.  If the trace stops while the ball is
+        # still rising, max(seg) is a lower bound and `e` silently reads low --
+        # exactly the kind of "measured" number that is not a measurement.
+        if seg.size == 0 or (i2 >= len(z) and int(seg.argmax()) == seg.size - 1):
+            n_unbracketed += 1
+            continue
+        apex = float(seg.max())
         apex_per_world.append(apex)
         e_per_world.append(math.sqrt(max(apex - rest_z, 0.0) / drop_h[w]))
         vn_per_world.append(math.sqrt(2 * 9.81 * drop_h[w]))
     e_arr = np.asarray(e_per_world)
     vn_arr = np.asarray(vn_per_world)
 
+    distinct_vn = int(np.unique(np.round(vn_arr, 9)).size) if vn_arr.size else 0
+    slope_measurable = (
+        vn_arr.size > 2
+        and distinct_vn >= cal.E_MIN_DISTINCT_IMPACT_SPEEDS
+        and float(vn_arr.max() - vn_arr.min())
+        >= cal.E_COVERAGE_FRACTION * (cal.V_N_ENVELOPE[1] - cal.V_N_ENVELOPE[0])
+    )
+    if slope_measurable:
+        slope_val: float | None = float(np.polyfit(vn_arr, e_arr, 1)[0])
+        slope_status = "MEASURED"
+        slope_why = None
+    else:
+        # NEVER emit 0.0 here.  A written-in zero is read downstream as
+        # "measured, and the slope is flat", which is a claim this run did not
+        # make.  null + NOT_MEASURED is the honest pair.
+        slope_val = None
+        slope_status = "NOT_MEASURED"
+        slope_why = (
+            f"the run used {distinct_vn} distinct drop height(s) spanning "
+            f"{float(vn_arr.max() - vn_arr.min()) if vn_arr.size else 0.0:.3f}"
+            f" m/s of impact speed. A slope over the validated envelope "
+            f"{cal.V_N_ENVELOPE[0]}-{cal.V_N_ENVELOPE[1]} m/s needs at least "
+            f"{cal.E_MIN_DISTINCT_IMPACT_SPEEDS} distinct speeds covering "
+            f"{cal.E_COVERAGE_FRACTION:.0%} of it. Re-run with --height-sweep "
+            f"{cal.V_N_ENVELOPE[0]} {cal.V_N_ENVELOPE[1]}.")
+
+    acceptance = cal.restitution_verdict(
+        # dt comes from the built sim, not from the calibration constant: the
+        # integrator artefact scales with dt^2, so a changed timestep must move
+        # the gate with it.
+        e_arr, vn_arr, k=BALL_K, mu=BALL_MU, cone=env_cone,
+        dt=float(env.physics_dt), n_worlds=int(bz.shape[1]),
+        context=f"a3_court_env bounce probe, {bz.shape[1]} worlds, "
+                f"cone={env_cone}, "
+                + ("height-sweep" if slope_measurable else "single drop height"))
+
     pelvis_drop = pz[-1] - pz[0]
     bounce = {
         "drop_height_m": [float(drop_h.min()), float(drop_h.max())],
         "impact_v_n_m_s": [float(vn_arr.min()), float(vn_arr.max())]
         if vn_arr.size else None,
-        "e_vs_v_n_slope_per_m_s": float(np.polyfit(vn_arr, e_arr, 1)[0])
-        if vn_arr.size > 2 and float(vn_arr.max() - vn_arr.min()) > 1e-6
-        else 0.0,
+        "e_vs_v_n_slope_per_m_s": slope_val,
+        "e_vs_v_n_slope_status": slope_status,
+        "e_vs_v_n_slope_not_measured_reason": slope_why,
+        "n_distinct_impact_speeds": distinct_vn,
         "worlds_with_a_bounce": int(e_arr.size),
         "worlds_total": int(bz.shape[1]),
+        "worlds_never_touched_table": n_never_touched,
+        "worlds_never_separated": n_never_left,
+        "worlds_apex_not_bracketed": n_unbracketed,
         "e_mean": float(e_arr.mean()) if e_arr.size else float("nan"),
         "e_std": float(e_arr.std()) if e_arr.size else float("nan"),
+        "e_std_meaning": (
+            "spread across DISTINCT impact speeds -- a response curve, not a "
+            "sampling error" if distinct_vn > 1 else
+            "mujoco-warp scheduling non-determinism between identical worlds; "
+            "it is NOT a measurement uncertainty and must not be used to size "
+            "an acceptance band"),
         "e_min": float(e_arr.min()) if e_arr.size else float("nan"),
         "e_max": float(e_arr.max()) if e_arr.size else float("nan"),
         "e_in_accept_band_all_worlds": bool(
@@ -895,6 +986,7 @@ def run(env, pose: dict, ball_pos_hope, steps: int, warmup: int,
                                   & (e_arr <= cal.E_ACCEPT[1]))),
         "accept_band": list(cal.E_ACCEPT),
         "measured_authority_e": cal.E_TABLE_MEASURED,
+        "restitution_acceptance": acceptance,
         "penetration_max_mm": float(1e3 * max(pen_per_world))
         if pen_per_world else float("nan"),
         "ball_z_final_hope": float(bz[-1].mean() - HOPE_TO_SCENE[2]),
@@ -995,7 +1087,12 @@ def main(argv=None) -> int:
     p.add_argument("--height-sweep", type=float, nargs=2, default=None,
                    metavar=("V_N_LO", "V_N_HI"),
                    help="give every world its own drop height so one batched "
-                        "run measures e across the impact-speed envelope")
+                        "run measures e across the impact-speed envelope. "
+                        "Without this the e-vs-v_n slope is reported as null / "
+                        "NOT_MEASURED, never as 0.0. Use "
+                        "`--height-sweep 1.0 4.5 --bounce-steps 1400` to cover "
+                        "the validated envelope; the 1.032 m drop at v_n=4.5 "
+                        "needs ~930 steps just to reach its apex")
     p.add_argument("--json-out", type=Path, default=None)
     args = p.parse_args(argv)
 
@@ -1070,6 +1167,20 @@ def main(argv=None) -> int:
     if b is not None and (b["worlds_with_nan"] or b["worlds_with_inf"]
                           or not b["constraint_headroom_ok"]):
         return 2
+    # Restitution.  FAIL blocks; NOT_MEASURED does not block a capacity run
+    # that never claimed to measure the bounce, but it is never PASS and the
+    # receipt says so out loud.
+    bo = payload.get("bounce")
+    if bo is not None:
+        acc = bo["restitution_acceptance"]
+        print(f"[a3_court_env] restitution acceptance = {acc['verdict']}: "
+              f"{acc['verdict_plain']}")
+        for g in acc["gates"]:
+            if g["verdict"] != "PASS":
+                print(f"[a3_court_env]   [{g['verdict']}] {g['gate']}: "
+                      f"stat={g['statistic']} limit={g['limit']}")
+        if acc["verdict"] == "FAIL":
+            return 3
     return 0
 
 
