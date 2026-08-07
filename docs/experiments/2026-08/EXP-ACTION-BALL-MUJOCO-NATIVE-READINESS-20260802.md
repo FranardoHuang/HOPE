@@ -4152,7 +4152,7 @@ skip 理由全是 `No module named 'hydra'`；同样三个模块在正式 venv �
 
 | 函数 | 位置 | 代码命中 | 文档命中 | 状态 |
 | --- | --- | --- | --- | --- |
-| `_validate_reveal_bridge` | `action_ball_4096x5_prelong_gate.py:685` | 1 | 6 | **2026-08-07 已接线并配 7 条变异测试（§5.6.22）** |
+| `_validate_reveal_bridge` | `action_ball_4096x5_prelong_gate.py:685` | 1 | 6 | **2026-08-07 已接线并配 7 条变异测试（§5.6.22）**；**2026-08-08 第一次碰真数据就拒了跑完的 C0/C1，两条门自己有问题，已修（§5.6.27）** |
 | `_validate_artifact_path_hash` | `canonical_motion_bank_gate.py:3905` | 1 | 1 | 已登记，只登记不判决 |
 | `_reverify_receipt_contact_source_files` | `canonical_neutral_ready.py:3907` | 1 | 1 | 已登记，只登记不判决 |
 | ~~**`assert_known_generation`**~~ | ~~`mdp/action_ball_runtime.py:6390`~~ | 1 | 0 | **2026-08-07 已删除，见 §9.2.13** |
@@ -5665,6 +5665,165 @@ registry 的 30 枚 path+sha 钉逐个复核，只有 1 枚漂（还不是 rewar
   ——新 worktree 里 `logs/rsl_rl/<experiment>/` 不存在，建完目录重跑即过；记在这里省下一次重踩。
 - **本轮一行代码、一份产物都没改**，所以没有"改动 vs 基线"的对拍要做；
   上面所有数字都是在 `17f4bae7` 的干净 worktree 上读出来的。
+
+#### 5.6.27 揭示->回放桥接线后第一次开火：拦下来的两件事，一件是浮点、一件是过期的门（2026-08-08）
+
+**一句话**：`scale4096` 四格终局验收被拒的那条 `teacher_rate min/mean/max are unordered`，
+**不是数据坏，是门自己不可能被满足**；顺着它往下清，同一个函数里还有第二道门是
+**四个提交之前就已经被裁定取消、但没扫到**的。两条都改了，A/C 两族同一份改动。
+
+##### 1. 现场：门第一次真跑，就把跑完的两格全拒了
+
+C0/C1 都跑满 5/5 个 update（`terminal_kind=clean_completion`），然后被拒。
+`_validate_reveal_bridge` 是 2026-08-07（`39953498`）才接进 `validate_semantic_updates` 的，
+在那之前**零调用点** —— 每个 update 都在写这本账，从来没人读。所以这是它第一次开火。
+
+##### 2. 定性：min > mean 还是 mean > max，差多少
+
+把真实 `run.log`（`/workspace/franco/fourcell_20260808/…/c0_scale4096_s19r1/run.log`）里
+update 0 那条记录的三个数打出来（离线读日志，没占 GPU）：
+
+| 字段 | min | mean | max | 结论 |
+| --- | --- | --- | --- | --- |
+| `teacher_rate` | `0.9990914883334084` | `0.9990914883334086` | `0.9990914883334084` | `min == max` 逐位相等，`mean` 高 **1 ULP** |
+| `scaled_t_hit_s` | `0.9608729642981773` | `0.9608729642981775` | `0.9608729642981773` | 同上，高 **2 ULP** |
+
+**不是个别档**：C0 和 C1 各 5 个 update，**10 条记录全部**在这三个浮点字段上有 1~5 ULP 的
+越界（最坏 5 ULP ≈ `1.1e-15`）。两个整数刻度字段（`time_to_contact_tick`、
+`expected_bridge_ticks`）一次都没越界 —— 它们是精确的。
+
+> 顺带回答一个问的问题：这五个计时字段**不是按 21 个 WAIT 档各存一组**的。
+> 21 个 WAIT 档在 `lifetime_conservation.wait_cohorts` 那个块里（逐档守恒 + 跨 update 单调，
+> 真数据全过）；计时字段是**整窗一组**，分母就是 `reveal_count`（update 0 是 3690）。
+
+##### 3. 三层查证生产方：三个数同一批样本，问题出在"和不等于逐项相加"
+
+`utils/action_ball_prelong_semantics.py`：
+
+- `_bridge_timing_sum` / `_bridge_timing_min` / `_bridge_timing_max` 三个累加器**用同一个
+  `reveal_column` 掩码、在同一处更新**（约 2370 行）。所以**不存在**"min/max 跨 update 累计、
+  mean 只算本 update"那种口径错配 —— 那个猜想排除了，三个数确实是一批样本。
+- `min`/`max` 走 `torch.minimum` / `torch.maximum`：**次序统计量**，只有比较没有算术，精确。
+- `mean` 是 `total / timing_count`，而 `total` 是**逐 policy tick `add_` 上去的 float64 累加器**。
+
+于是：当一个 update 里所有揭示样本取值相同（单 clip 的 `teacher_rate` 对 4096 个环境就是同一个
+常数，此时 `min == max` 逐位相等），`sum/count` 几乎不可能正好落回那个值。
+**这是算术事实，换任何写法都消不掉**，也就是说原来那条零容差的 `min <= mean <= max`
+在退化分布上**本来就不可能被满足**。
+
+- "空样本填默认值"那个形状**这里没有**：`timing_count == 0` 时生产方写的是 `None`，
+  门的 `_finite_number` 照样 fail closed。不是"没观测到所以记 0"。
+
+##### 4. 处理一：缝只给 mean，min/max 之间照旧零容差
+
+改的不是"把阈值调松"，是**把一条检查拆成两条**，因为那三个数根本不是一类东西：
+
+- `min > max` —— **零容差，一个 ULP 都不放**。两个都是原样本值，没有算术，倒挂只可能是
+  取样集不同。这条比原来更严（原来它被裹在一个复合条件里）。
+- `mean` 落在 `[min - 缝, max + 缝]` —— 缝 = `256 ULP × max(|min|,|max|)`，按量级缩放。
+
+缝宽的来历（不是拍脑袋）：累加链长 ≈ 每 update 24 tick × 5 update，加上每次 batch 内
+4096 元素树形归约约 12 层，量级 ~`1.3e2` 次舍入，理论最坏 ~`1.3e2` ULP；实测 10 条真收据最坏
+5 ULP。取 256 比理论最坏留 2 倍、比实测留 50 倍，同时仍比任何**语义上的**乱序
+（`1e-3` 起）紧 4 个数量级以上。**实跑核对：真数据只用掉缝的 1.0%**（收据里自陈，见下）。
+
+**记录与阻断同批**：收据每档新增 `mean_slack_fraction_used`，写明这一档实际用掉多少缝。
+接近 1 就该回头看生产方，而不是继续放宽。
+
+##### 5. 处理二：桥里那条硬边是**四个提交之前就已经取消**的门，漏网了
+
+修完浮点，同一批真数据在 update 2 上撞出第二道门：`bridge safety values are inconsistent`。
+拆开看，六个子条件里响的是 `minimum_physical_hard_gap_rad < 0`：
+
+| 格 | update | 实测值 |
+| --- | --- | --- |
+| C0 | 2 | `-0.00026083` rad |
+| C1 | 2 | `-0.00022596` rad |
+
+这个**不是浮点噪声**（`2.6e-4` 比 ULP 大 12 个数量级），是真事：实际关节越过机械硬限位 0.26 mrad。
+生产方那里 `hard_gap = min(q - 下限, 上限 - q)`，取的是**实际 q**。
+
+而 Franco 2026-08-07 的**裁定三**（`24254020`）已经就这件事拍过板：
+**实际-q 硬超限照记不照拦**，当时把 `actual_hard_edge_event_count` /
+`actual_hard_terminal_count` 从 pre-long gate 与 four-grid barrier 的 STRICT_ZERO 名单挪进
+`REPORTED_HARD_EDGE_COUNTERS`，并且"验收改看深度不看频率"。
+
+**桥这块漏网了，因为它当时还是零调用点的死代码** —— 裁定扫过了活检查，没扫到它。
+它讲的是同一个物理事实，只是从"次数"换成了"深度"。所以按同一条裁定处理：出 WARN、
+一路抬到 gate 结果顶层的 `warnings`、值本身留在收据里，**不拒收**。
+
+**取消 != 静默删除**：`hard_gap` 照旧过 `_finite_number`，缺失/非数/非有限**照样 fail closed**，
+只是它的**取值**不再阻断。安全自洽那五条（root min>max、余弦越界、滑移 max<mean 等）**原样保留**。
+
+##### 6. 变异测试：两个方向都钉住，每条都构造成"粗一个档次会放行"
+
+pod `/workspace/hope_isaac_venv/bin/python`（**Python 3.10.18**）实跑，每次都是真改文件再重跑：
+
+| 变异（把门改粗/改错） | 结果 | 被哪条抓住 |
+| --- | --- | --- |
+| M1 退回原版零容差 `min<=mean<=max` | **35 条红** | 全线 —— 真收据的形状根本过不去 |
+| M2 把 mean 的缝放粗到 `1e-9` 相对 | 2 条红 | `…mean_outside_min_max_by_more_than_rounding…` |
+| M3 偷懒：把缝**同时**套在 min/max 上 | 1 条红 | `…min_above_max_is_refused_even_by_a_single_ulp` |
+| M4 用固定绝对 epsilon 代替按量级缩放 | 1 条红 | `…mean_slack_scales_with_magnitude…` |
+| M5 静默删掉硬边 WARN | 2 条红 | 两条硬边收据门 |
+| M6 不做处理二，硬边继续阻断 | 2 条红 | 两条硬边收据门 |
+
+M1 的 35 条红是最强的一条证据：**因为夹具也一并改成了真值**。
+`prelong_bridge_fixture.py` 原来把 `teacher_rate` 写成 `1.0/1.0/1.0` —— 数学上完美有序，
+于是这条检查在测试里**永远是绿的**，一碰真数据就把跑完的两格全拒。夹具扮演生产方，
+就得带上生产方真有的浮点行为；现在它带的是 C0 update 0 的实测三元组。
+**这正是"指纹不等于语义一致"的又一个实例：夹具长得像收据，但保护的是一个不存在的世界。**
+
+##### 7. 把这个函数的每一条硬拒对着真数据过了一遍（免得下一轮再一条条撞）
+
+用 `sys.settrace` 对 10 条真桥记录做行覆盖，再 AST 枚举函数里每一条
+`raise PreLongGateRefused` 及其守卫条件：
+
+**34 条硬拒：32 条被真数据走到并通过，0 条误报，剩 2 条从没被触及**：
+
+| 从没被触及的 | 为什么 | 什么时候会碰上 |
+| --- | --- | --- |
+| `A211 bridge income is not progress-only` | 这批日志全是 C211 | **A 族跑到 `scale4096` 时**（今天还没跑到，见下） |
+| `bridge mimic … empty errors differ` | 真数据每个 mimic 项都有有限误差，`finite_errors == 0` 那支没进过 | 某一项全零核时 |
+
+也就是说：**除了这两条，桥里所有硬拒都已经被真数据验证过一遍**，
+下一轮不会再一条一条撞。（不含 `_exact_keys` / `_finite_number` / `_counter` / `_sha256`
+这些共享形状助手 —— 它们被所有字段走了无数遍。）
+
+##### 8. A/C 同批同形，两道 parity 门未触发
+
+改动全在**共享**的 `action_ball_4096x5_prelong_gate.py` 与**共享**夹具里，
+A/C 两族拿的是同一份，没有一个 launcher argv、一片 Hydra 叶子被动过。
+`53040fb0` 的两道门实跑确认：`test_action_ball_211_ac_family_config_parity.py` +
+`test_action_ball_211_launcher_shared_constants.py` **169 passed, 0 skipped**。
+
+另外记一笔现状：**A 族今天还没跑到 `scale4096`** ——
+`a211_four_arm_diagnostic` 下只有 `materialize` / `recipe`（`oracle32` 两次都是
+`DIAGNOSTIC_UNAUTHORIZED`）。所以上面 §2 的 ULP 证据全部来自 C 族；
+但这两条修的都是**与 profile 无关**的共享代码路径，A 族跑到时会走同一条。
+
+##### 9. 实跑数字
+
+- 离线复现与验证：`/workspace/franco/bridge_ulp_20260808`（本轮自己 fork 的 worktree，
+  `git worktree add … 2dcde6b8 --detach`，没有拷 `logs/`）。**全程没占 GPU** ——
+  只读日志文本。GPU0=yikang、GPU1=别的 session 的 probe、GPU2=mjlab，全程未碰。
+- 修前：10 条真记录里 update 0 就被拒（两格都是）。修后：**10 条全过**，
+  最坏只用掉缝的 **1.0%**（C0 update 3 `scaled_t_hit_s`）、**0.9%**（C1 update 2 `pre_swing_wait_s`）。
+- 测试（`/workspace/hope_isaac_venv/bin/python`，**Python 3.10.18**，`-rs`）：
+  桥/门/生产方/两个 launcher 六个模块 **638 passed, 0 skipped**；
+  加上两道 parity 门共 **807 passed, 0 skipped**。
+- 新增 8 条测试（4 条计时顺序 + 4 条硬边收据），全部配了"粗一档就过不了"的变异证据。
+
+##### 10. 一条留给下一轮的诚实提醒
+
+本轮这两条**都是"门错了"**，但性质不同，别混成一件事：
+
+- 处理一是**门在数值上不可满足** —— 它验的东西对，写法错，任何正确的生产方都过不去。
+- 处理二是**门的适用范围过期** —— 它验的东西已经被裁定不该阻断，只是裁定没扫到死代码。
+
+两条都**不是**"因为它挡路所以判它错"：处理一有 10 条真收据 + 算术必然性，
+处理二有四个提交之前的白纸黑字裁定。**接线一个长期零调用点的检查，等于第一次做验收；
+写它的时候脑子里那份"应该长这样"的假设，要拿真数据一条条对过。**
 
 ## 6. 智元 setting 的采用表
 

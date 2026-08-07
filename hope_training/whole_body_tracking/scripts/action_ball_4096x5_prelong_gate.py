@@ -19,6 +19,7 @@ import argparse
 import importlib.util
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
@@ -217,6 +218,37 @@ BRIDGE_CAUCHY_MIMIC_TERMS = (
     "motion_racket_normal",
     "motion_racket_long_axis",
 )
+
+# ``mean`` 相对 ``min``/``max`` 允许的浮点缝隙,单位是"最后一位"(ULP)。
+#
+# 为什么必须留缝(2026-08-08 实测):生产方把 ``min``/``max`` 当**次序统计量**记 ——
+# 直接从样本里挑出来的原值,只有比较没有算术,所以这两个数是精确的。``mean`` 不是:
+# 它是 ``_bridge_timing_sum / count``,而那个 sum 是逐 policy tick 往 float64 累加器
+# 上 ``add_`` 出来的。当一个 update 里所有揭示样本取值相同时(单 clip 的
+# ``teacher_rate`` / ``scaled_t_hit_s`` 天然如此,此时 ``min`` 与 ``max`` 逐位相等),
+# ``sum/count`` 几乎不可能正好落回那个值,必然溢出 [min, max] 若干 ULP。
+# 这不是数据坏,是"和不等于逐项相加"的算术事实,换任何写法都消不掉。
+#
+# 缝宽怎么定的(不是拍脑袋的阈值):累加链长 ≈ 每 update 24 tick × 5 update,
+# 加上每次 batch 内 4096 元素的树形归约(约 12 层),量级 ~1.3e2 次舍入,
+# 理论最坏 ~1.3e2 ULP。实测 10 条真收据(C0/C1 × 5 update)最大 5 ULP。
+# 取 256:比理论最坏留 2 倍余量、比实测留 50 倍;同时仍比任何**语义上的**乱序
+# (取样集不同 / 跨 update 混口径 / 字段错位,量级 1e-3 起)紧 4 个数量级以上。
+# 换句话说这条缝只放过算术噪声,放不过"三个数不是一批样本算的"。
+BRIDGE_TIMING_MEAN_SLACK_ULPS = 256.0
+_DOUBLE_EPS = sys.float_info.epsilon
+
+
+def _bridge_timing_mean_slack(minimum: float, maximum: float) -> float:
+    """``mean`` 越过 ``min``/``max`` 时允许的绝对缝隙,按这一档的量级缩放。
+
+    用 ``max(|min|, |max|)`` 而不是 ``|mean|`` 当尺度:桥的五个计时字段全是非负量
+    (门下面还会再验一次 ``min >= 0``),所以样本里最大的那个绝对值就是求和舍入
+    误差的上界尺度。全零样本时尺度为 0、缝也为 0 —— 零之和精确等于零,不需要缝。
+    """
+
+    scale = max(abs(minimum), abs(maximum))
+    return BRIDGE_TIMING_MEAN_SLACK_ULPS * _DOUBLE_EPS * scale
 
 # 接线之后这三张表就是承重的,所以在导入期跟生产方对一次**活值**——不是文件 SHA。
 # 指纹只能证明"字节没动",证明不了"两边说的是同一件事"(见 §5.6.13 的同型教训)。
@@ -1428,10 +1460,23 @@ def _validate_reveal_bridge(
         maximum = _finite_number(
             stats.get("max"), name=f"semantic update {update} bridge {field} max"
         )
-        if not minimum <= mean <= maximum:
+        # ``min`` 与 ``max`` 都是次序统计量(原样本值,无算术),它们之间**零容差**:
+        # ``min > max`` 只可能是两边来自不同的取样集,这条一个 ULP 都不放。
+        if minimum > maximum:
             raise PreLongGateRefused(
-                f"semantic update {update} bridge {field} min/mean/max are unordered"
+                f"semantic update {update} bridge {field} min exceeds max"
             )
+        # ``mean`` 是 sum/count,带累加舍入,只给它一条按量级缩放的缝。
+        # 缝的来历与"为什么不能零容差"见 ``BRIDGE_TIMING_MEAN_SLACK_ULPS``。
+        slack = _bridge_timing_mean_slack(minimum, maximum)
+        if mean < minimum - slack or mean > maximum + slack:
+            raise PreLongGateRefused(
+                f"semantic update {update} bridge {field} mean is outside min/max"
+            )
+        # 收据自陈:这一档实际用掉了多少缝。0 表示 mean 干净地落在 [min,max] 内;
+        # 接近 1 表示快撞上缝的边,该回头看生产方而不是继续放宽。
+        excursion = max(minimum - mean, mean - maximum, 0.0)
+        timing_slack_used = 0.0 if slack <= 0.0 else excursion / slack
         lower_bound = 0.0 if field == "pre_swing_wait_s" else 0.0
         if minimum < lower_bound or (
             field != "pre_swing_wait_s" and minimum <= 0.0
@@ -1445,7 +1490,12 @@ def _validate_reveal_bridge(
             raise PreLongGateRefused(
                 f"semantic update {update} bridge {field} bounds are not ticks"
             )
-        timing_summary[field] = {"mean": mean, "min": minimum, "max": maximum}
+        timing_summary[field] = {
+            "mean": mean,
+            "min": minimum,
+            "max": maximum,
+            "mean_slack_fraction_used": timing_slack_used,
+        }
 
     window = _exact_keys(
         bridge.get("window"),
@@ -1690,9 +1740,24 @@ def _validate_reveal_bridge(
         name=f"semantic update {update} bridge foot slip max",
         nonnegative=True,
     )
+    # 上面六个数里,``hard_gap`` 与其余五个**不是一类东西**,所以拒收面也不该一样。
+    # 其余五条验的是"这份收据自身自洽"(min 不能大于 max、余弦必须在 [-1,1] 里……),
+    # 不自洽只可能是记账写错了 —— 那是接线故障,照拒。
+    #
+    # ``minimum_physical_hard_gap_rad`` 验的是**行为**:它等于
+    # ``min(q - 下限, 上限 - q)``,取的是**实际** q 对机械硬限位的余量,负值就是
+    # "这一跑里实际关节越过了硬限位多深"。Franco 2026-08-07 的裁定三(``24254020``)
+    # 已经就这件事拍过板:实际-q 硬超限**照记不照拦** —— 当时把
+    # ``actual_hard_edge_event_count`` / ``actual_hard_terminal_count`` 从 STRICT_ZERO
+    # 挪进了 ``REPORTED_HARD_EDGE_COUNTERS``,并且"验收改看深度不看频率"。
+    # 这里漏网了,因为 ``_validate_reveal_bridge`` 当时还是零调用点的死代码,
+    # 裁定扫过了活检查、没扫到它。它讲的是同一个物理事实,只是从"次数"换成了"深度",
+    # 所以照裁定三处理:出 WARN、进收据,不拒收。
+    #
+    # **取消阻断 != 允许它消失**:``hard_gap`` 上面已经过了 ``_finite_number``,
+    # 缺失/非数/非有限照样 fail closed;这里只是不再让它的**取值**阻断这一跑。
     if (
-        hard_gap < 0.0
-        or root_min > root_max
+        root_min > root_max
         or not -1.0 <= upright <= 1.0
         or root_speed < 0.0
         or not 0.0 <= foot_contact <= 1.0
@@ -1701,6 +1766,14 @@ def _validate_reveal_bridge(
         raise PreLongGateRefused(
             f"semantic update {update} bridge safety values are inconsistent"
         )
+    hard_edge_warnings = (
+        [
+            f"WARN actual-q hard edge observed in reveal bridge: semantic update "
+            f"{update} minimum_physical_hard_gap_rad={hard_gap!r}"
+        ]
+        if hard_gap < 0.0
+        else []
+    )
     _nonempty_string(
         safety.get("sampling_semantics"),
         name=f"semantic update {update} bridge safety semantics",
@@ -1728,6 +1801,9 @@ def _validate_reveal_bridge(
                 "mean_foot_contact_fraction": foot_contact,
                 "mean_foot_slip_speed_mps": foot_slip_mean,
                 "maximum_foot_slip_speed_mps": foot_slip_max,
+                # 收据自陈:这一步不阻断,但必须留下"当时看到了没有"的明账。
+                "actual_hard_edge_blocking": False,
+                "actual_hard_edge_warnings": hard_edge_warnings,
             },
         },
         lifetime,
@@ -2039,6 +2115,14 @@ def validate_semantic_updates(
                     {"wait_ticks": wait, **bridge_lifetime[wait]}
                     for wait in BRIDGE_WAIT_COHORTS
                 ],
+                # 「WARN 必进摘要」:桥窗口里看到的实际-q 硬超限照裁定三不阻断,
+                # 但要一路抬到 gate 结果顶层的 ``warnings``,不许埋在 per_update 里。
+                "actual_hard_edge_blocking": False,
+                "actual_hard_edge_warnings": [
+                    warning
+                    for summary in bridge_summaries
+                    for warning in summary["safety"]["actual_hard_edge_warnings"]
+                ],
                 "per_update": bridge_summaries,
             },
         },
@@ -2100,8 +2184,14 @@ def validate_prelong_gate(
         "opportunity_semantics": semantics,
         "survival_denominators": survival,
         "safety": {**safety, "unknown_attribution_count": 0},
-        # 「WARN 必进摘要」:硬边观测直接抬到 gate 结果的顶层,不埋在 safety 子树里。
-        "warnings": list(safety["actual_hard_edge_warnings"]),
+        # 「WARN 必进摘要」:硬边观测直接抬到 gate 结果的顶层,不埋在子树里。
+        # 两个来源:整跑的安全计数器,以及揭示->回放桥窗口里的实际-q 硬边深度。
+        "warnings": [
+            *safety["actual_hard_edge_warnings"],
+            *semantics["aggregate"]["reveal_to_playback_bridge"][
+                "actual_hard_edge_warnings"
+            ],
+        ],
         "authorization": "pre_long_terminal_telemetry_only",
     }
 

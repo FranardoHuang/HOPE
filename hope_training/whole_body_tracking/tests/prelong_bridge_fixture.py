@@ -155,7 +155,20 @@ def reveal_bridge(update: int, *, profile: str) -> dict[str, Any]:
             "reveal_count": total_reveal_count(update),
             "fields": {
                 "time_to_contact_tick": {"mean": 91.0, "min": 88.0, "max": 95.0},
-                "teacher_rate": {"mean": 1.0, "min": 1.0, "max": 1.0},
+                # 这三个数是 2026-08-08 C0 ``scale4096`` update 0 的**实测**三元组,
+                # 不是手写的整数。``min`` 与 ``max`` 逐位相等(单 clip 的 teacher_rate
+                # 对全 4096 环境是同一个常数),而 ``mean`` 是 ``sum/count`` 累加出来的,
+                # 高出 1 ULP。
+                #
+                # 为什么 fixture 必须长这样:原来这里写的是 ``1.0/1.0/1.0`` —— 数学上
+                # 完美有序,于是"min<=mean<=max"那条零容差检查在测试里**永远是绿的**,
+                # 而它一碰真数据就把 5/5 跑完的 C0/C1 全拒了。fixture 扮演生产方,
+                # 就得带上生产方真有的浮点行为,否则它保护的是一个不存在的世界。
+                "teacher_rate": {
+                    "mean": 0.9990914883334086,
+                    "min": 0.9990914883334084,
+                    "max": 0.9990914883334084,
+                },
                 "scaled_t_hit_s": {"mean": 1.82, "min": 1.80, "max": 1.84},
                 "pre_swing_wait_s": {
                     "mean": 0.6923799138976297,

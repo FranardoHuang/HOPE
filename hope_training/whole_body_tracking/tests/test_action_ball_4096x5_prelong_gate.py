@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -1017,6 +1018,214 @@ def test_bridge_playback_start_count_may_not_regress_between_updates():
         cohort["censored_count"],
     ) >= 0
     with pytest.raises(GATE.PreLongGateRefused, match="lifetime regressed"):
+        GATE.validate_semantic_updates(rows)
+
+
+# --------------------------------------------------------------------------
+# 计时三元组 min/mean/max 的顺序。2026-08-08 这条检查第一次碰真数据就把 5/5 跑完的
+# C0/C1 全拒了,原因不是数据坏:``min``/``max`` 是次序统计量(原样本值,无算术),
+# ``mean`` 却是逐 tick 累加的 ``sum/count``。样本全同的那些档上 ``min == max`` 逐位
+# 相等,而 ``sum/count`` 必然溢出一两个 ULP。所以缝只给 mean,min/max 之间照旧零容差。
+# --------------------------------------------------------------------------
+
+
+def _timing(row, field):
+    return _bridge(row)["timing_at_reveal"]["fields"][field]
+
+
+def _next_up(value):
+    """比 ``value`` 大**恰好一个 ULP** 的下一个 float64(仅用于正有限值)。
+
+    不走 ``math.nextafter``:host 上跑 pytest 的还是 Python 3.8,那个函数 3.9 才有。
+    正数的 IEEE-754 位模式随取值单调,所以整数位 +1 就是下一个可表示值。
+    """
+
+    bits = struct.unpack("<q", struct.pack("<d", value))[0]
+    return struct.unpack("<d", struct.pack("<q", bits + 1))[0]
+
+
+def test_bridge_mean_may_sit_a_few_ulps_outside_min_max():
+    """真收据的形状:退化分布上 ``sum/count`` 溢出 [min,max] 一两个 ULP 是算术必然。
+
+    粗版(也就是 2026-08-08 之前的原版):``min <= mean <= max`` 零容差 ——
+    那样下面这份**实测**三元组会被拒,而它正是 C0/C1 被拦在门外的那一份。
+    """
+
+    rows = _semantics()
+    for row in rows:
+        stats = _timing(row, "teacher_rate")
+        # fixture 已经带着实测值;这里把"它确实是乱序的"钉死,免得哪天有人把
+        # fixture 改回漂亮整数,这条测试就变成自证了。
+        assert stats["min"] == stats["max"]
+        assert stats["mean"] > stats["max"]
+
+    accepted = GATE.validate_semantic_updates(rows)
+
+    # 记录与阻断同一批:收下之后收据要自陈用掉了多少缝,而不是只留一个 PASS。
+    used = accepted["aggregate"]["reveal_to_playback_bridge"]["per_update"][0][
+        "timing_at_reveal"
+    ]["teacher_rate"]["mean_slack_fraction_used"]
+    assert 0.0 < used < 0.05
+
+
+def test_bridge_mean_outside_min_max_by_more_than_rounding_is_still_refused():
+    """等强:真的乱序照拒。构造成"粗一个档次的检查会放行"。
+
+    粗版:拿 ``1e-9`` 这种"够近了"的相对容差当缝 —— 那样下面这个 1e-11 的偏差
+    会被放行。而 1e-11 不可能是舍入:它比 float64 在这条累加链上的理论最坏误差
+    (~1.3e2 ULP,约 3e-14)还大三个数量级,只可能来自"三个数不是一批样本算的"。
+    """
+
+    rows = _semantics()
+    for row in rows:
+        stats = _timing(row, "scaled_t_hit_s")
+        stats["mean"] = stats["max"] * (1.0 + 1.0e-11)
+
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="scaled_t_hit_s mean is outside min/max"
+    ):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_bridge_min_above_max_is_refused_even_by_a_single_ulp():
+    """min/max 之间一个 ULP 都不放 —— 这条是"没有被顺手放宽"的证据。
+
+    粗版:把给 mean 的那条缝**同时**套在 min/max 上(最省事的写法就是这样) ——
+    那样下面这个 1 ULP 的倒挂会被放行。但 min/max 没有算术,倒挂只可能是
+    两边取样集不同,不是噪声。
+    """
+
+    rows = _semantics()
+    for row in rows:
+        stats = _timing(row, "scaled_t_hit_s")
+        # 抬 min 到刚好高过 max 一个 ULP,同时把 mean 一起抬上去,
+        # 这样先撞上的必然是 min>max 那条,而不是 mean 那条。
+        bumped = _next_up(stats["max"])
+        stats["min"] = bumped
+        stats["mean"] = bumped
+
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="scaled_t_hit_s min exceeds max"
+    ):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_bridge_mean_slack_scales_with_magnitude_and_is_not_a_flat_epsilon():
+    """缝是按量级缩放的,不是一个拍死的绝对 epsilon。
+
+    粗版:用固定绝对缝(比如 ``1e-13``) —— 那样同一个 1e-14 的绝对偏差在
+    ``scaled_t_hit_s``(量级 ~1.8)和 ``pre_swing_wait_s``(这里压到 ~1e-3)上
+    会被一视同仁地放行。但求和舍入误差随样本量级走:1e-14 对 1.8 是噪声,
+    对 1e-3 是它自身的 1e-11,不可能是舍入。
+    """
+
+    excursion = 1.0e-14
+
+    # 大量级:1e-14 落在缝内,收下。
+    rows = _semantics()
+    for row in rows:
+        stats = _timing(row, "scaled_t_hit_s")
+        stats["mean"] = stats["max"] + excursion
+    GATE.validate_semantic_updates(rows)
+
+    # 小量级:同样的 1e-14,拒。
+    rows = _semantics()
+    for row in rows:
+        stats = _timing(row, "pre_swing_wait_s")
+        stats["min"] = stats["max"] = 1.0e-3
+        stats["mean"] = 1.0e-3 + excursion
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="pre_swing_wait_s mean is outside min/max"
+    ):
+        GATE.validate_semantic_updates(rows)
+
+
+# --------------------------------------------------------------------------
+# 桥窗口里的实际-q 机械硬边。Franco 2026-08-07 裁定三(``24254020``)已经拍板
+# "照记不照拦",当时把 ``actual_hard_edge_*`` 计数从 STRICT_ZERO 挪走;
+# 桥这块因为还是零调用点的死代码而漏网,2026-08-08 接线后才第一次开火。
+# 同一个物理事实,只是从"次数"换成了"深度",按同一条裁定处理。
+# --------------------------------------------------------------------------
+
+
+def _safety(row):
+    return _bridge(row)["window"]["safety"]
+
+
+def test_bridge_actual_q_hard_edge_is_reported_not_blocking():
+    """负的硬边余量 = 实际关节越过机械硬限位。出 WARN、进收据,但不拒收。"""
+
+    rows = _semantics()
+    _safety(rows[2])["minimum_physical_hard_gap_rad"] = -0.0002608299255371094
+
+    accepted = GATE.validate_semantic_updates(rows)
+    bridge = accepted["aggregate"]["reveal_to_playback_bridge"]
+
+    assert bridge["actual_hard_edge_blocking"] is False
+    assert len(bridge["actual_hard_edge_warnings"]) == 1
+    assert "semantic update 2" in bridge["actual_hard_edge_warnings"][0]
+    # 值本身也要留在收据里,不能只留一句 WARN。
+    assert bridge["per_update"][2]["safety"][
+        "minimum_physical_hard_gap_rad"
+    ] == -0.0002608299255371094
+
+
+def test_bridge_hard_edge_warning_reaches_the_top_level_summary():
+    """「WARN 必进摘要」:不许埋在 per_update 里等人去翻。"""
+
+    accepted = GATE.validate_prelong_gate(
+        log_text=_log(),
+        checkpoint_acceptance=_checkpoint_acceptance(),
+        semantic_updates=_semantics(),
+    )
+    assert accepted["warnings"] == []
+
+    rows = _semantics()
+    _safety(rows[2])["minimum_physical_hard_gap_rad"] = -0.0002608299255371094
+    accepted = GATE.validate_prelong_gate(
+        log_text=_log(),
+        checkpoint_acceptance=_checkpoint_acceptance(),
+        semantic_updates=rows,
+    )
+
+    assert any(
+        "actual-q hard edge observed in reveal bridge" in warning
+        for warning in accepted["warnings"]
+    )
+
+
+def test_cancelling_the_hard_edge_block_did_not_let_the_number_disappear():
+    """"取消 != 静默删除":值不再阻断,但缺失/非有限照样 fail closed。
+
+    粗版:把这条检查整个删掉 —— 那样下面两种畸形收据都会被当成"没有硬边"收下。
+    """
+
+    rows = _semantics()
+    for row in rows:
+        del _safety(row)["minimum_physical_hard_gap_rad"]
+    with pytest.raises(GATE.PreLongGateRefused, match="bridge safety fields differ"):
+        GATE.validate_semantic_updates(rows)
+
+    rows = _semantics()
+    for row in rows:
+        _safety(row)["minimum_physical_hard_gap_rad"] = "-0.0003"
+    with pytest.raises(GATE.PreLongGateRefused, match="bridge hard gap"):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_bridge_safety_self_consistency_is_still_blocking():
+    """等强:被挪走的只有硬边**取值**那一条,自洽性五条照旧拒收。
+
+    粗版:把整个 safety 一致性块跟着硬边一起松掉 —— 那样 root min>max 会被放行。
+    """
+
+    rows = _semantics()
+    for row in rows:
+        safety = _safety(row)
+        safety["minimum_root_height_m"] = safety["maximum_root_height_m"] + 0.01
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="bridge safety values are inconsistent"
+    ):
         GATE.validate_semantic_updates(rows)
 
 
