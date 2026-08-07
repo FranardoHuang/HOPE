@@ -7894,6 +7894,12 @@ ActionBall env，自然也没算 solver profile。
 （顺带：票面把配对对象写成 `a225`，实际那条测试叫
 `test_plan_claim_is_a211_fresh_and_denies_retired_lineage`，仓库里没有 a225 版本。）
 
+> **2026-08-07 独立验收就地更正：括号里"仓库里没有 a225 版本"这半句不成立。**
+> 仓库里有多个 a225 测试模块（例如
+> `hope_training/whole_body_tracking/tests/test_action_ball_a225_trainability.py`），
+> 拿它跟修之前那条配对，同样把它打红（`3/12`）。结论不变——那条测试跟谁配对都会红——
+> 但"不存在"这个理由是错的。复跑收据见 §9.2.15.5。
+
 #### 9.2.14.2 真病因：窗口 43 µs，时钟刻度 1 ms
 
 被测代码 `_read_open_fd_snapshot`（`scripts/audit_motion_schema2_table_net_clearance.py:155`）
@@ -8244,6 +8250,229 @@ pre-long gate / 四格 authority / 两个发射器建模块内调用图，以"�
 **这一节没有改任何生产代码**，只增测试文档。`a970a58a` 的三处终局编号出处、
 `solver_profile_sha256` 那族 pin、§9.2.12 刚重签的 18 份内容寻址产物，一个字都没碰，
 不需要重铸任何东西。
+
+### 9.2.16 三条"做完了"的独立验收：主结论都成立，但每条都漏了同一件事的另一半（2026-08-07，pod1 host-only，全程未占 GPU）
+
+**人话一句：** 同一天有三条 workflow 各自报"做完了"。这一节不是转述他们的收据，是**在自己的两棵树上从头重跑一遍**：
+接了线的就改回没接线的样子看测试红不红；说"已经有别的机制管"的就去查那个机制是不是真在跑；
+说"没人调用"的就自己再搜一遍；说"不再抖了"的就自己配对跑十几遍。
+
+结论：**三条的主结论都成立**。但每一条都漏了同一类东西——**一件事的另一半没人管**。
+本轮把其中两个半边补上了（各配变异测试，共 `6` 条新测试），第三个是既有问题、只登记。
+另外顺手记一个会让**任何**变异测试自证的坑：我自己踩了一次，收据在 9.2.16.6。
+
+#### 9.2.16.0 怎么验的
+
+两棵**互相独立**的 pod worktree，都从 `/workspace/codexschema/nohope` 上
+`git worktree add --detach 559b95f4`：`/workspace/franco/verify_20260807/wt`（跑变异）与
+`.../wt2`（跑 flake 与扫描器）。解释器**只用** `/workspace/hope_isaac_venv/bin/python`
+（Python `3.10.18` / pytest `9.1.1`）—— `/usr/bin/python3` 缺 hydra，会静默跳 17 条，
+"`1 skipped` + 退出码 `0`"看着全绿其实什么都没跑。`CUDA_VISIBLE_DEVICES=` 纯 CPU；
+`PYTHONDONTWRITEBYTECODE=1`（理由见 9.2.16.6）。下面每个数字都写了 skip 数。
+
+**验收基线是 `559b95f4`**（下面每个数字都在这个提交上取的）。写这一节时分支已经被别的 workflow
+推到 `3a045948`（那批改动给同一道门加了 `+202` 行），所以本轮**新增的两个测试模块又在 `3a045948`
+上重跑并重做了变异**：`16 passed / 0 skipped`；把 import 期那段检查换成 `pass` → 2 条红，
+把"活着那批出生"的证人循环删掉 → 1 条红，还原后 `16 passed`。**结论在两个提交上都成立。**
+
+**全程只读已提交的 HEAD。** 工作区里同时有别的 workflow 在改
+`action_ball_4096x5_prelong_gate.py` / `train.py` / `hope_rewards.py` / 两个 211 launcher
+（那道门当时的未提交改动是"取消实际-q 硬超限拒收、改成只记账"），本轮一律不含这些在途改动。
+
+#### 9.2.16.1 (a) 揭示->回放那道门：接线是真的接上了
+
+| 树的状态 | 四个相关模块（gate + A/C launcher + 生产方） | 结果 |
+| --- | --- | --- |
+| HEAD `559b95f4` 原样 | 同上 | **`447 passed / 0 skipped`** |
+| 只把 `action_ball_4096x5_prelong_gate.py` 退回 `39953498^`（接线前那一版） | 同上 | **`11 failed / 436 passed`** |
+| 再退回 HEAD | 同上 | **`447 passed / 0 skipped`** |
+
+那 11 条红的**正是**新加的 7 个测试函数（SHA 那条参数化 5 档，`7 + 4 = 11`），
+第一条报的就是 `KeyError: 'reveal_to_playback_bridge'` —— 接线前收据里根本没有这一块。
+**"改回接线前必须红、改回来必须绿"这条验收通过。**
+
+粗化判别力也自己重做了一遍（改的是**生产文件**，跑完按 SHA 校验还原）：
+
+| 粗化 | 改了什么 | 红的是 |
+| --- | --- | --- |
+| V1 | SHA 只量长度 `64`，不管是不是小写十六进制 | 那 5 档参数化，其余 71 绿 |
+| V2 | 逐档"寿命不许倒退"改成"不许为负" | `..._playback_start_count_may_not_regress...` 一条 |
+| V3 | `status` 只要求有值 | `..._status_must_be_active_fail_closed` 一条 |
+| V4 | 去掉"timing 的 reveal 总数 == 逐档 reveal 之和" | `..._cohort_may_conserve_and_still_miss_the_reveal_total` 一条 |
+| **V5** | **权威身份跨 update 只比 `profile` 一个字段**（不是整块） | `..._authority_may_not_drift_after_the_first_update` 一条 |
+
+**V5 不在原报告的清单里**，是本轮新造的：原报告那条是"整段删掉"，删掉当然会红；
+V5 是"留着但只比一个字段"，才是字面意义上的"粗一个档次"。它照样只杀那一条。
+**判别力成立，不是"反正全红了"。**
+
+#### 9.2.16.2 (a) 漏掉的另一半：新加的那条 import 期活值对表，自己零证据
+
+接线那一批还加了一条 **import 期**检查：门里的 21 个 WAIT 档位、mimic 项集合、
+哪些 mimic 项走 Cauchy 核，必须逐一等于生产方 `action_ball_prelong_semantics.py` 的**活值**，
+对不上就 `RuntimeError`，模块导都导不进来。它是承重的（档位错位 → 逐档守恒式照样成立、
+但比的是错档号；核函数归类漂了 → 会拒掉正确收据或放过错的）。
+
+它确实会响：把 `BRIDGE_WAIT_COHORTS` 改成 `range(5, 25)`，导入立刻
+`RuntimeError: pre-long gate reveal-bridge contract differs from the semantic producer`。
+
+**但它当时零测试。** 把那整段 `if ... raise RuntimeError` 换成 `pass`，
+四个相关模块 **`447 passed`，一条都不红**。这条新护栏哪天被人顺手删掉，没有人会知道。
+
+**已补**：新增 `hope_training/whole_body_tracking/tests/test_action_ball_prelong_gate_producer_contract.py`（`3` 条）。
+做法是把源码里的常量改窄一档（一条改 WAIT 档位、一条把某项 mimic 挪出 Cauchy 名单），
+在新命名空间里重新 `exec`（`__file__` 仍指真文件，所以照样按路径找得到生产方），必须抛那句原话；
+再用没改过的同一份源码 `exec` 一次作**控制组**。
+变异复核：把那段检查换成 `pass` → **2 条红（两条"必须拒"）、控制组那条仍绿**，
+不是"整个模块一起红"。锚点找不到时测试会用明确的原话喊出来，不会退化成空跑。
+
+刻意**没有**写进 `test_action_ball_4096x5_prelong_gate.py`：本轮期间那个文件的未提交改动
+从 `+418` 行变到 `+372` 行（别的 workflow 正在大改），单开一个模块不跟他们抢同一片字节。
+
+#### 9.2.16.3 (b) 删掉的那道门：那个"别的机制"确实在跑，而且比报告说的还靠前
+
+报告说"存档载入时会逐份过 `assert_consumed_birth`"。三层查下来，这句**成立，而且说少了**：
+
+1. **机制码**：`assert_consumed_birth` 有**三个**调用点。`action_ball_runtime.py:8727` 在
+   `_validate_birth` 里；`:11122` 管存档里**还活着**的出生；`:11125` 管存档里**已退役**的出生。
+2. **现役调用链**：`_validate_birth` 被 `request_many`(`:9494`) 与 `_request_many_diagnostic`(`:9183`) 调用，
+   而 `request_many` 的生产调用方是 `hope_commands.py:12427` —— **每一次要题都会过这道门**，
+   不是只在续跑载入时走一次。存档那两处的生产调用方是 `hope_commands.py:16943 / :17414`。
+3. **实跑**：七个变异体逐个改生产文件、跑完还原（SHA 校验），基线与还原后都是 `13 passed / 0 skipped`。
+
+| 变异 | 改了什么 | 红的是 |
+| --- | --- | --- |
+| N1 | 删掉存档载入时对**已退役**出生的证人 | `..._cannot_invent_a_generation_the_broker_never_issued` 一条 |
+| N2 | 把 `assert_consumed_birth` **削到被删那道门的强度**（保留"代次到了"，去掉"收据就是那一份"） | `..._the_deleted_gate_would_have_waved_a_content_swap_through` 一条 |
+| N3 | 把 `assert_known_generation` 原样加回来 | `..._the_coarse_gate_is_gone_and_the_owner_is_still_here` 一条 |
+| N4 | 去掉 broker 的 `consumed <= last` | 参数化那条 3 格全红 |
+| N5 | 去掉 `retired generation ledger differs...` 那句同源自证 | `..._bumping_only_the_retired_ledger...` 一条 |
+| **N6** | **只删掉存档载入时对"还活着"那批出生的证人**（退役那半留着） | **补测试之前：一条都没红** |
+| **N7** | 精确收据比对只留 `consumed_receipt != birth`，去掉代次那半 | 一条都没红（**不是洞，见下**） |
+
+N1--N5 一一对应，**其中 N2 就是"粗一个档次就过不了"的正面证据**：把现役那道门削成死门的强度，
+测试立刻红。**"删掉 `assert_known_generation` 而不是接上它"这个判决成立。**
+
+#### 9.2.16.4 (b) 漏掉的另一半：`load_state_dict` 里挨着的两个循环，只有一个有人管
+
+`LazyActionTaskPool.load_state_dict` 里是**两个**紧挨着的循环：一个把存档里**还活着**的出生
+（`births`）、一个把**已退役**的出生（`retired_births`）逐份交给 broker 那个证人。
+上一轮的测试只钉了退役那一半。**把活着那一半的整个循环删掉（N6），全部 26 个相关测试模块
+`851 passed / 15 failed / 0 skipped / 0 errors` 一条都不动**（那 15 条红是本轮之前就红的，见 9.2.16.7）。
+
+**已补**：`test_action_ball_retirement_provenance.py` 加 `3` 条（`10 passed` → `13 passed`）：
+
+- 一条老实的活出生存档能载入（控制组，防"红是因为哪都跑不通"）；
+- 一条**自洽的**伪造必须被 `assert_consumed_birth` 按原话拒 ——
+  同一份存档里指回这份出生的东西全部跟着改签（收据里复制的 `reset_generation` / `birth_sha256`、
+  收据自己的 canonical SHA、`pending_order`、`seen_sha256`、整包 integrity），
+  所以解码期那一串"存档自己前后一致"的检查全部通过，只剩"问 broker 发没发过"能拆穿它；
+- 一条证明红的确实来自这个证人：把证人换成空函数后，伪造改由 solver 那本提案账拦
+  （原话变成 `task was not emitted by exact solver`），而老实存档在证人被拔掉时仍能载入。
+
+补完之后 **N6 只杀那一条新测试**，其余 12 条仍绿。
+
+**N7 不是洞，是冗余；这里把理由写下来，而不是拿一条测试假装。** 非诊断路径下
+`consumed_receipt` 按 `(env_id, reset_generation)` 取，取得到就说明那一代次被 `_consume` 过，
+而 `_consume` 同一步就把 `_consumed_generation[env]` 推到该代次；诊断路径下按 env 取最新一份，
+相等即说明那份就是它。所以"收据相等"蕴含"代次到了"，代次那半永远不会单独触发。
+它是带保险丝的写法，不是可被利用的缺口 —— **没有**测试，也不该硬造一条。
+
+**谱系代价复核**：`configs/a3_vendor_runtime_authority_*`（`8` 个目录、`15` 个文件、`30` 处）
+按文件名把 `action_ball_runtime.py` 钉在 `8f2fe8c7…`；而**在本轮之前**（`c1b5ca10`）该文件已是
+`8dcae9be…`，本轮之后是 `eb36095f…`。**这个钉子早就对不上，不是这次弄坏的**，与原报告一致。
+
+#### 9.2.16.5 (c) 零调用点复查 与 (d) flake 复跑
+
+**(c) 零调用点**（自己搜一遍，排除 `.claude/worktrees/`）：
+`assert_known_generation` 全仓已无 `def`（只剩测试里那个当变异体用的复刻、和文档里的提及）；
+`_validate_reveal_bridge` 是 `def` + **1 个真调用点**；
+`_validate_artifact_path_hash`（`canonical_motion_bank_gate.py:3905`）与
+`_reverify_receipt_contact_source_files`（`canonical_neutral_ready.py:3907`）**仍然只有 `def` 自己**。
+另外独立跑了那份扫描器（`scripts/audit_zero_call_site_gates.py`，在干净 HEAD 的 wt2 上）：
+`--self-test` 通过；全仓扫 `1022` 个 `.py` / `1960` 个门形状 `def`，**零调用点剩 `2` 个**，
+正是上面那两个。**"剩 2 个"成立。**
+
+**(d) flake**：同一棵干净树，**不用** `-p no:randomly`、不固定顺序、不 sleep，每档跑 12 次。
+
+| 档 | 跑什么 | 通过 |
+| --- | --- | --- |
+| A | 修好的那条 + `test_plan_claim_is_a211_fresh_and_denies_retired_lineage` | **12/12** |
+| A2 | 修好的两条 L1 + 上面那条 a211 | **12/12** |
+| B | 修好的那条 + `test_action_ball_a225_trainability.py` 整模块 | **12/12** |
+| C | **退回修之前**那条，单独跑 | 5/12 |
+| D | 退回修之前那条 + a211 那条 | **2/12** |
+| E | 退回修之前那条 + a225 那个模块 | 3/12 |
+
+失败原话每次都是 `Failed: DID NOT RAISE TableNetError`，与报告认定的病因（断言压在一条
+受内核时间戳刻度支配的告警上）一致。**"修好了"成立；"票面写的『只有配对才失败』不成立"也成立**
+（单独跑本来就 5/12）。
+
+另外独立做了一次"新测试是不是真的更强"的变异：把审计脚本改成
+**SHA 仍按 fd 字节校验、但交给下游的 `FileSnapshot.data` 改成 `path.read_bytes()`**
+（这是一次真实的"换路径就换了消费字节"的回归，而且**不抛任何异常**）——
+新测试 **10/10 全部抓到**，还原后 5/5 全绿。
+
+> **就地更正 §9.2.14 末尾那句**："票面把配对对象写成 `a225`，仓库里没有 a225 版本"——
+> **这半句不成立**。仓库里有好几个 a225 测试模块，
+> `hope_training/whole_body_tracking/tests/test_action_ball_a225_trainability.py` 就是一个，
+> 拿它配对同样能把旧版那条打红（上表 E 档 3/12）。结论不变（那条测试跟谁配对都会红），
+> 但"不存在"这个理由是错的。
+
+#### 9.2.16.6 一个会让变异测试自证的坑：同长度改动 + 同一秒还原 = `__pycache__` 里留着变种
+
+本轮我自己踩了一次，如实记下来，因为它会**静默地**把变异测试变成自证：
+
+我做过一次 `sed -i` 把 `range(5, 26)` 改成 `range(5, 25)`（**字节长度完全相同**），
+跑完用 `cp` 把备份盖回去。之后 `test_launch_action_ball_c211_diagnostic.py` **收集期直接炸**，
+报的正是那条 import 期检查。查下来：`.pyc` 头里记的源文件 `(mtime, size)` 是
+`(1786106737, 81424)`，和还原后的源文件**一模一样** —— `sed` 与 `cp` 落在同一秒内、长度又没变，
+于是 Python 认为缓存有效，继续用**变种**的字节码。直接 import 那道门的路径当时恰好各自重编过
+所以没露馅，只有经 `importlib` 从源文件加载的 c211 链踩到了。
+`find . -name __pycache__ -prune -exec rm -rf {} +` 之后同一条命令 `174 passed`。
+
+**本轮所有变异数字都是清完缓存并 `PYTHONDONTWRITEBYTECODE=1` 之后重跑的**，
+9.2.16.1 / 9.2.16.3 两张表都是重跑后的值（与首轮逐条一致，说明那两张表没受影响）。
+
+**给后来人的规矩**：跑"改生产文件 → 跑 → 还原"这类变异，要么每次在一次性副本上改，
+要么 `PYTHONDONTWRITEBYTECODE=1` 并先清 `__pycache__`。
+**只对比 SHA 证明"文件还原了"是不够的** —— 还原的是源文件，跑的是字节码。
+
+#### 9.2.16.7 全量对拍
+
+`hope_training/whole_body_tracking/tests` + `tests` 两个目录整包，同一棵树、同一解释器、
+`-p no:randomly -n 12 --continue-on-collection-errors`：
+
+| | before（HEAD `559b95f4` 原样） | after（+ 本轮 6 条新测试） |
+| --- | --- | --- |
+| passed | `10138` | `10143` |
+| failed | `267` | `268` |
+| **skipped** | **`132`** | **`132`** |
+| errors | `19` | `19` |
+| 用时 | `877.52 s` | `886.86 s` |
+
+`+5 passed / +1 failed` 而不是 `+6 passed`：失败集合逐条 diff，**唯一多出来的那条**是
+`test_canonical_motion_compile_cli.py::test_signal_after_atomic_publication_waits_for_identity_then_cleans`，
+与本轮无关。在**干净 HEAD 的另一棵树**上单独跑它 10 次：`9/10` 通过 —— **它本身就是一条 flake**，
+已登记进待办。`10138 + 6 - 1 = 10143` 恰好对上。`19` 个 error 前后逐条相同
+（全是 `test_materialize_a3_vendor_identity_manifest.py` 的 vendor-identity 类，先于本轮）。
+
+受影响面窄一档的那份（全仓 grep 出的 `26` 个提到 `action_ball_runtime` / `ActionBirthBroker` 的模块）：
+`15 failed / 851 passed / 0 skipped / 0 errors`，失败集合是 2 条 `frozen_canonical_sha` +
+13 条 `train.py` actor 合同族，**全部先于本轮就红**，与上一轮报告列的集合逐条相同
+（上一轮报的 `2 errors` 本轮已不存在，那两个模块现在能收集了）。
+
+`tests/test_motion_backhand_loop_b_table_net_clearance.py` 在干净 HEAD 上 `10 failed / 38 passed`
+—— 与 §9.2.14 的说法一致，是冻结几何钉子与现役 `geometry.py` 漂了，不是本轮引入。
+
+#### 9.2.16.8 这一节没做什么
+
+1. **没碰** `hope_rewards.py` / `commands.py` / `train.py` / 两个 211 launcher /
+   `action_ball_4096x5_prelong_gate.py` / `test_action_ball_4096x5_prelong_gate.py` ——
+   本轮期间有别的 workflow 正在改它们。所有验收都跑在**已提交的 HEAD** 上。
+2. **没判** canonical 车道剩下那两个零调用点的门，仍是"只登记不判决"。
+3. **没修** `test_motion_backhand_loop_b_table_net_clearance.py` 那 10 条既有的红，
+   也**没修**上面新发现的 `test_signal_after_atomic_publication_waits_for_identity_then_cleans` 那条 flake。
+4. **没有**把 9.2.16.6 那条 `__pycache__` 规矩写成任何脚本或护栏，只写进了文档。
 
 ## 10. N1 直接到完整 73 的门
 

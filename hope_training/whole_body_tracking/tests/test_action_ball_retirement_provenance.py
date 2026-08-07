@@ -103,6 +103,113 @@ def test_checkpoint_cannot_invent_a_generation_the_broker_never_issued():
         _exact_pool(broker).load_state_dict(forged)
 
 
+def _live_checkpoint():
+    """env0 gen1:reserve -> consume -> request,**不退役** —— 存档里是一份活着的出生。"""
+
+    broker, _provider = T._broker(1)
+    birth = T._reserve(broker, env_id=0, generation=1)
+    T._consume(broker, birth)
+    pool = _exact_pool(broker)
+    pool.request(birth, swing_generation=0)
+    state = deepcopy(pool.state_dict())
+    assert state["pool_state_scope"] == R.POOL_STATE_SCOPE_EXACT
+    assert state["actions"][0]["births"], "这份存档必须真的带一份活着的出生"
+    assert not state["actions"][0]["retired_births"], (
+        "这一条要的是'还没退役'那一半,退役那一半上面已经有人管了"
+    )
+    return broker, state, birth
+
+
+def _forge_unissued_live_birth(state, birth, *, generation):
+    """把那份**还活着**的出生整体改写成一个 broker 从没发过的代次。
+
+    伪造者是自洽的:同一份存档里指回这份出生的东西全部跟着改签(收据里
+    复制的 ``reset_generation`` / ``birth_sha256``、收据自己的 canonical
+    SHA、``pending_order``、``seen_sha256``、整包 integrity),所以解码期
+    那一串"存档自己前后一致"的检查全部通过。剩下唯一能拆穿它的,就是去问
+    broker 有没有发过这一份。
+    """
+
+    forged_birth = replace(birth, reset_generation=generation)
+    forged = deepcopy(state)
+    row = forged["actions"][0]["births"][0]
+    row["birth"] = forged_birth.to_dict()
+    remap = {}
+    reissued = []
+    for receipt_row in row["pending_receipts"]:
+        receipt = R.ActionBallTaskReceipt.from_dict(receipt_row)
+        new = replace(
+            receipt,
+            birth_sha256=forged_birth.canonical_sha256,
+            reset_generation=forged_birth.reset_generation,
+        )
+        remap[receipt.canonical_sha256] = new.canonical_sha256
+        reissued.append(new.to_dict())
+    row["pending_receipts"] = reissued
+    row["pending_order"] = [
+        remap.get(digest, digest) for digest in row["pending_order"]
+    ]
+    row["seen_sha256"] = sorted(
+        remap.get(digest, digest) for digest in row["seen_sha256"]
+    )
+    forged["integrity_sha256"] = T._integrity(forged)
+    return forged, forged_birth
+
+
+def test_live_checkpoint_round_trips():
+    """同上:先证明这条路本来是通的,免得下面的红色是'哪都跑不通'。"""
+
+    broker, state, _birth = _live_checkpoint()
+    _exact_pool(broker).load_state_dict(deepcopy(state))
+
+
+def test_checkpoint_cannot_invent_a_live_birth_the_broker_never_issued():
+    """存档里**还活着**的那批出生,也要逐份过 broker 这个证人。
+
+    2026-08-07 独立验收补的一条。``load_state_dict`` 里挨着的是两个循环:
+    一个把 ``births``(还活着的)、一个把 ``retired_births``(已退役的)
+    逐份交给 ``assert_consumed_birth``。原来只有退役那一半有测试 ——
+    把活着那一半的循环整个删掉,当时全部 26 个相关测试模块
+    (851 passed)没有一条会变红。这条补上。
+    """
+
+    broker, state, birth = _live_checkpoint()
+    forged, _forged_birth = _forge_unissued_live_birth(
+        state, birth, generation=2
+    )
+    with pytest.raises(
+        R.BirthProtocolError,
+        match="birth is not the env's exact consumed generation",
+    ):
+        _exact_pool(broker).load_state_dict(forged)
+
+
+def test_the_live_half_refusal_also_comes_from_the_broker_witness():
+    """同样防"其实是别的解码器顺手抓到的"。
+
+    拔掉证人之后伪造仍然红,但原话换成了 solver 那本提案账
+    (``task was not emitted by exact solver``);老实存档在证人被拔掉时
+    仍然载入成功,所以上一条的红不是"哪都跑不通"。
+    """
+
+    broker, state, birth = _live_checkpoint()
+    forged, _forged_birth = _forge_unissued_live_birth(
+        state, birth, generation=2
+    )
+    saved = R.ActionBirthBroker.assert_consumed_birth
+    try:
+        R.ActionBirthBroker.assert_consumed_birth = (
+            lambda self, birth: None
+        )
+        with pytest.raises(
+            ValueError, match="task was not emitted by exact solver"
+        ):
+            _exact_pool(broker).load_state_dict(forged)
+        _exact_pool(broker).load_state_dict(deepcopy(state))
+    finally:
+        R.ActionBirthBroker.assert_consumed_birth = saved
+
+
 def test_bumping_only_the_retired_ledger_is_caught_by_the_same_load():
     """只动台账、不动记录 —— 这一条是同源自证那一步抓的,记下它的原话。"""
 
