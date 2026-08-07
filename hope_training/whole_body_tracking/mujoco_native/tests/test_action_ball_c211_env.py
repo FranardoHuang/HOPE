@@ -1275,13 +1275,32 @@ def _c211_action_rate(current, previous):
 
 
 def test_c211_action_rate_responds_to_two_different_action_sequences():
-    """该动的要动:两个不同的动作序列 -> 两个不同的数。"""
+    """该动的要动:两个不同的动作序列 -> 两个不同的数。
+
+    第二组故意取 ``build_1`` 谱系的两个真实工作点(开局 ``||Δa||² = 63.1``、收敛 ``10.8``,
+    差 5.8 倍),它们**双双在退役档位 9.0 之上** —— 谁把封顶塞回来,这两个点会塌成同一个
+    数,本条立刻红。第一组(0.31 vs 31)是跨档位的,封顶下仍然不等,单靠它抓不住封顶。
+    """
 
     small = _c211_action_rate(np.full(31, 0.1), np.zeros(31))
     large = _c211_action_rate(np.full(31, 1.0), np.zeros(31))
     assert small["raw_reward"] != large["raw_reward"]
     assert large["raw_reward"] > small["raw_reward"]
     assert small["post_policy_dt_reward"] > large["post_policy_dt_reward"]  # 都是负数
+
+    def _at(sq_norm):
+        step = math.sqrt(sq_norm / 31.0)
+        return _c211_action_rate(np.full(31, step), np.zeros(31))
+
+    early = _at(63.1)      # build_1 iter 4
+    converged = _at(10.8)  # build_1 21896 iter
+    assert early["raw_reward"] != converged["raw_reward"]
+    assert early["raw_reward"] == pytest.approx(63.1, rel=1e-9)
+    assert converged["raw_reward"] == pytest.approx(10.8, rel=1e-9)
+    # 学平之后每步便宜 5.8 倍 —— 这就是 build_1 靠它爬出去的那台引擎。
+    assert (
+        early["post_policy_dt_reward"] / converged["post_policy_dt_reward"]
+    ) == pytest.approx(63.1 / 10.8, rel=1e-9)
 
 
 def test_c211_action_rate_is_bitwise_identical_on_the_same_sequence():
