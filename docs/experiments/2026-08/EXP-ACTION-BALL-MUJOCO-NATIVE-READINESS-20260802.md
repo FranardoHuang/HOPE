@@ -5466,10 +5466,77 @@ pod1 `/workspace/hope_isaac_venv/bin/python`（**Python 3.10.18**，唯一能跑
 **新增失败 0 条，消失失败 0 条，两边失败集合逐条相同。** 多出来的 9 个 pass 是本轮新增的
 变异测试（该动的要动 / 同序列逐位相同 / 无天花板 / 权重复现 build_1 实测剂量 / 不许影子实现）。
 
-**基线本就红的那 10 条**（detached worktree 上的既有失败，与本轮无关，点名如下）：
-9 条挂在 `hope_rewards.py:63` 的 `RuntimeError: reward eligibility requires pre_strike or strike_window`
+**基线本就红的那 12 条**（detached worktree 上的既有失败，与本轮无关，点名如下）：
+**11** 条挂在 `hope_rewards.py:63` 的 `RuntimeError: reward eligibility requires pre_strike or strike_window`
 （`test_v2_reward_terms.py` 的 deferred-prize / strike-capture / legal-base / virtual-landing / climb-mode 族），
 1 条是 `test_reward_flags_overrides.py:3033` 的 `assert 9 == 7`（YAML 声明计数）。
+
+> **就地更正（2026-08-08，同日复核）：上面这段原写"10 条 / 9 条 + 1 条"，与它自己那张
+> 表里的 `12 failed` 对不上。** 逐条数过：`test_v2_reward_terms.py` 上是 **11** 条同一个
+> `hope_rewards.py:63` 的 `RuntimeError`（`pytest --tb=line | sort | uniq -c` 给出 `11`），
+> 加 `test_reward_flags_overrides.py` 那 1 条，正好 `12`。表没错，是这段分项写漏了 2 条。
+
+**第二份独立对拍（同日，另一棵 worktree、另一个基线点、13 文件清单逐字如下）。**
+上面那份的基线取在 `7b3bc9ba`；这份把基线换成**落地提交的真实父提交** `d7e44c75`，
+用的是同一个解释器、同样 `CUDA_VISIBLE_DEVICES=` 纯 CPU：
+
+| 树 | 版本 | 结果 | skip |
+| --- | --- | --- | --- |
+| `arate_20260808_wt` | `d7e44c75`（落地提交的父） | `12 failed, 1016 passed` | **0** |
+| `arate_20260808_wt` | `4683840e`（落地提交 + 表格修复） | `12 failed, 1025 passed` | **0** |
+
+清单：`test_v2_reward_terms` / `test_reward_flags_overrides` / `test_reward_flags_mdp` /
+`test_action_ball_prelong_semantics` / `test_action_ball_reward_causal_prelaunch` /
+`test_materialize_action_ball_reward_ppo_economy_receipt` / `test_action_ball_4096x5_prelong_gate` /
+`test_action_ball_task_config` / `test_action_ball_211_four_grid_prelong_barrier` /
+`test_action_ball_211_isaac_four_grid` / `test_action_ball_211_launcher_shared_constants` /
+`mujoco_native/tests/test_action_ball_c211_env` / `mujoco_native/tests/test_mirrored_constant_registry`。
+
+**失败集合两边逐条相同、`+9` 个 pass 全部是本轮新增的变异测试。** 这份清单里显式包含了
+`test_action_ball_211_launcher_shared_constants` 与 `test_action_ball_211_isaac_four_grid`
+——就是 §7 说的那两道"只差 obs 和 reward"的门，实跑证明本轮改名没有惊动它们。
+
+##### 9. 逐 update 的预测账（把 §6 那个聚合数拆开）
+
+§6 给的是聚合区间 `8.85 ~ 8.95`。下面把它按 update 拆开，输入只有两组：
+post-`24254020` 的 C0 实测（`u0` 该项占罚金 `48.9%`、是全部正收入的 `1.75×`；
+`u4` 占 `46.4%`、是正收入的 `1.92×`，`|负|/正 = 4.139`，去掉该项 `2.219`），
+以及新剂量 `0.1 × 63.1 × dt 0.02 × 98304 = 12406.0`（旧的是 `3538.945`，`3.51×`）。
+
+| | 正收入/步 | 其余罚金/步 | 旧 `action_rate`/步 | **新** `action_rate`/步 | 旧 `\|负\|/正` | **新** `\|负\|/正` | `build_1` 同 iter 实测带 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| C0 `u0` | `+0.02057` | `−0.03762` | `−0.036` | **`−0.1262`** | `3.58` | **`7.96`** | iter 0：`5.35` / `9.27` |
+| C0 `u4` | `+0.01874` | `−0.04159` | `−0.036` | **`−0.1262`** | `4.139` | **`8.95`** | iter 4：`6.93` / `10.87` |
+
+**两端都落在 `build_1` 同一迭代的实测带里**（`u0` 的 `7.96 ∈ [5.35, 9.27]`，
+`u4` 的 `8.95 ∈ [6.93, 10.87]`）。而且**负罚金总额我们仍然比它轻**：
+新的 `−0.1678/步` vs `build_1` iter 4 的 `−0.2102 / −0.3908`。
+
+三件必须一起说清楚、不许只报好消息的：
+
+1. **`|负|/正` 变差了一倍多**（`4.139 → 8.95`）。这不是副作用，是"把 3.5 倍的欠付补上"
+   的直接结果。判据不是"比值要小"，是"比值要落在同等策略水平的参照带里" —— §5.6.20
+   已经裁过：**比值本身不构成动权重的理由**，拿它跟收敛态比是单位没对齐。
+2. **该项占我们罚金的份额会到 `75.2%`**，高于 `build_1` 早期的 `32~60%`。原因不在它涨了，
+   在 `24254020` 之后**其余罚金塌得更多**（qdes 轴从 `−0.2333/步` 掉到 `−0.019~−0.031`）。
+   份额高于带这件事**留在台账上**，等第一份长跑的实测账回来再判要不要动。
+3. **真正的缺口在正收入这一侧，本轮不碰。** 我们 `+0.0187/步`，`build_1` 收敛 `+0.0926/0.0982`
+   （`5×`）。它的比值穿过 `1.0` 靠的是**两条腿**：`action_rate` 衰减 `5.2~5.8×`（本轮买回来的）
+   **加上**正收入长 `5×`（收入分层塌成一层，另账）。只买回一条腿不会让比值自己下去。
+
+##### 10. 交接：这次改价让哪些已铸产物过期
+
+`EXPECTED_EFFECTIVE_REWARD_SHA256` 变了（`b096b79c…a59d` → `41631955…53d7`），
+所以**所有按旧配方铸出来的内容寻址产物都对不上新活值**，下一次发车前必须重铸：
+
+- `configs/` 下 **18 份**含 `action_rate_clamped` 的已铸产物（`a3_vendor_runtime_authority_*`
+  的 `*.shared_ready.training_contract.json` 与 `n1_reward_economy_*/reward_economy.v1.json`）。
+  **它们是历史收据，不要就地改**——按日期新开一轮重铸，旧的原样留档。
+- 四格 `A0/A1/C0/C1` 的 `materialize → recipe` 两级要重跑；`oracle32 / scale4096` 随之重跑。
+  materializer 会**主动拒收**旧 SHA（`reward term ... weight drifted` / SHA 不符），
+  所以这一步不会被静默跳过。
+- 已经跑完的 `s15r1` 那批读数（`|负|/正 = 14.37~17.90`）是 `24254020` **之前**的，
+  §9 那张表用的是 `24254020` **之后**的 C0 实测；两批不要混用。
 
 ## 6. 智元 setting 的采用表
 
