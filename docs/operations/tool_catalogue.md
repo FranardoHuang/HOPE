@@ -69,7 +69,8 @@
 | --- | --- | --- | --- |
 | `canonical_motion_compile_cli.py` | 编译入口。**过了它不授权训练/部署/硬件** | 2 | 工序 |
 | `materialize_a3_stable_upper_motion.py` | A3 upper 保留 head/arm 与腰动作增量，把腰 ready/lower/root 重建到 runtime stable stand；**拍位变化后必须重绑球题** | 2 | [工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
-| `materialize_a3_dynamic_ready_contract.py` | 把动作 frame-0 physical ready 与低增益 A3 plant 所需 hold qdes 分开；用 exact MuJoCo ground LP 给候选，**仍须 Isaac nominal-hold 验证才可训练** | 1 | [工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
+| `materialize_a3_dynamic_ready_contract.py` | 把动作 frame-0 physical ready 与低增益 A3 plant 所需 hold qdes 分开；用 exact MuJoCo ground LP 给候选，**仍须 Isaac nominal-hold 验证才可训练**。2026-08-07：hold LP 无解时的拒绝改成会自陈（哪个关节、差多少 `N·m`、要多大 `q_des`、卡的是电机还是 `kp × 行程`），门本身一格没松；`--physical-birth-composition-mode projected_teacher_frame0_grounded` 那条支路的 "failure baseline" 标注**理由已换**——不再是 `0/73` 悬空（已推翻），而是腰的保持增益不够，见 §5.6.7「十二」 | 1 | [工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
+| `audit_position_hold_authority.py` | **未授权诊断**：位置指令撑不撑得住某个姿态。只对地面永远使不上力的那 `19` 个非腿关节说话（对它们 `tau` 唯一等于 `qfrc_bias`），把"增益不够"和"关节已站在可发指令包络之外"分开命名。支持单帧 / 整条 clip / 整库 / 现役 ready artifact | 0 | §5.6.7「十二」 |
 | `canonical_motion_bank_gate.py` | **独立复核器**——编译器不许给自己发证，必须从 exact bytes 重算 | 2 | 工序 |
 | `canonical_mujoco_dynamics_gate.py` | 逆动力学筛查。浮动基 fail-closed：λ 未定则 τ 未定，那 31 行只叫 `joint_effort_proxy` | 2 | 工序 |
 | `canonical_face_manifold.py` | 七关节有符号拍面流形，保持 site 世界位置 | 2 | 工序 |

@@ -2343,9 +2343,26 @@ Franco 说的"hold 住 frame 0 仍然需要重力补偿，那是物理不是缺�
 
 **收据。** pod1 `/workspace/hope_isaac_venv/bin/python`（`python 3.10.18` / `mujoco 3.10.0` /
 `scipy 1.15.3` / `numpy 1.26.4`），`CUDA_VISIBLE_DEVICES=` 纯 CPU；
-自建 worktree `/workspace/franco/birth_20260807`（`559b95f4`）；
+自建 worktree `/workspace/franco/birth_20260807`（`559b95f4`），
+基线对照 worktree `/workspace/franco/birth_base_20260807`（同一 commit，未打补丁）；
 报告 `/workspace/franco/birth_out_20260807/hold_authority_take061.json`（`57` 帧 + 现役 artifact）与
 `hold_authority_lib_f0.json`（全库 `73` 条 frame 0）。
+
+**整包对拍**（`hope_training/whole_body_tracking/tests` 全跑，同一解释器、`-p no:randomly`
+`--continue-on-collection-errors`，两棵树各跑一遍；两棵树的三个改动文件在跑之前逐字节核过 SHA-256）：
+
+| | 基线 `birth_base_20260807`（未打补丁） | 本条 `birth_20260807` |
+| --- | --- | --- |
+| 结果 | `123 failed, 7501 passed, 62 skipped, 19 errors`（`35:44`） | `123 failed, **7517** passed, 62 skipped, 19 errors`（`33:23`） |
+
+**`failed` / `skipped` / `errors` 三项逐位相同，`passed` 恰好多 `16`** —— 正好是新增的那一个测试文件，
+没有一条别的动过。那 `123 failed / 19 errors` 是**基线本来就有的**：两棵树都是 detached worktree，
+一批 artifact/vendor-identity 测试要求干净 checkout 与特定 commit，本条不碰它们。
+另外两个受影响模块单独再跑一遍：`test_materialize_a3_dynamic_ready_contract.py` `35 passed`（与基线同数）、
+`test_audit_position_hold_authority.py` `16 passed`，`0 skipped`；
+A/C 同族门 `test_action_ball_211_ac_family_config_parity.py` `23 passed / 0 skipped`。
+拒绝路径在**最终字节**上又实跑一次确认：消息与上面引的那段逐字相同，且**没有产出任何 artifact**（fail-closed）。
+
 **未跑 Isaac、未占 GPU、未写任何 artifact、未放宽任何门限、未退役任何结构。**
 
 #### 5.6.8 `C211 oracle32` 验收门定错了范围：它要求一个没训过的策略已经会打球（2026-08-06）

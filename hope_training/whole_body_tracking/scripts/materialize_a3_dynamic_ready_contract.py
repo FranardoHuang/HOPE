@@ -17,8 +17,13 @@ Two fail-closed ready-source branches are supported:
   content-pinned numerical ready without inheriting its historical model/hold
   claims.  The measured-frame0 projection mode instead preserves the exact
   root, every non-leg joint, and racket-site FK while solving only leg12 and an
-  algorithmic common support-edge shift.  That leg-only path remains a failure
-  baseline.  The whole-body mode releases root z/roll/pitch plus all 31 joints,
+  algorithmic common support-edge shift.  That leg-only path is still a failure
+  baseline, but 2026-08-07 changed WHY (doc 5.6.7 sections eleven and twelve):
+  its static geometry, ground LP and support margin now all pass -- what refuses
+  it is the hold LP, because holding measured frame 0 needs -49.155 N*m at
+  ``waist_pitch`` and this plant's position command tops out near -26 N*m even
+  at the mechanical stop.  The refusal below names that.
+  The whole-body mode releases root z/roll/pitch plus all 31 joints,
   first accepts exact measured frame 0 unchanged if all physical gates pass;
   otherwise it maximizes the worst physical safety slack, then locks that
   safety floor before minimizing measured-frame0 root/joint/racket error.
@@ -149,6 +154,235 @@ _PHYSX_CONTROL_POSITION_LIMIT_SELECTED_JOINT_NAMES = (
 
 class DynamicReadyMaterializationError(RuntimeError):
     """The requested dynamic-ready artifact cannot be produced exactly."""
+
+
+# 人话:有一批关节,地面永远帮不上忙 —— 脚不在它们的子树里,所以脚底的支撑力
+# 在这些关节上产生的力矩恒为零。腰、双臂、脖子都属于这一类。对这些关节,
+# "撑住这个姿态需要多大力矩"根本没有解算自由度:它**就等于** `qfrc_bias`。
+# 于是 hold LP 说"无解"时,可以不猜:先看这些关节的 `qfrc_bias` 落没落在
+# 位置指令能产生的力矩区间里,落在外面就是**唯一且充分**的原因,并且能直接
+# 报出差多少 N·m、需要多大的 q_des、以及边界是电机限幅还是 `kp × 行程`。
+CONTACT_FREE_HOLD_TORQUE_SEMANTICS = (
+    "floor_contacts_cannot_load_these_rows_so_tau_equals_qfrc_bias_exactly"
+)
+
+
+def contact_free_actuated_rows(model, actuated_dof_indices) -> np.ndarray:
+    """Which actuated rows no floor contact can ever load, on this exact model.
+
+    A DoF is contact-free when neither foot body sits in the sub-tree the DoF
+    moves.  MuJoCo answers that directly: build the translational Jacobian of
+    each foot body and keep the rows whose column is exactly zero.  Returned as
+    a boolean mask aligned to ``actuated_dof_indices``.
+    """
+
+    import mujoco  # noqa: PLC0415
+
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    rows = np.asarray(actuated_dof_indices, np.int64)
+    loaded = np.zeros(int(model.nv), bool)
+    for body_name in grounded.FOOT_BODY_NAMES:
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if body_id < 0:
+            raise DynamicReadyMaterializationError(
+                f"exact MJCF has no foot body {body_name!r}"
+            )
+        jacp = np.zeros((3, int(model.nv)), np.float64)
+        mujoco.mj_jacBodyCom(model, data, jacp, None, body_id)
+        loaded |= np.any(jacp != 0.0, axis=0)
+    return ~loaded[rows]
+
+
+def contact_free_hold_torque_shortfall(
+    *,
+    joint_names: Sequence[str],
+    contact_free: np.ndarray,
+    required_nm: np.ndarray,
+    tau_lower_nm: np.ndarray,
+    tau_upper_nm: np.ndarray,
+    kp: np.ndarray,
+    ready_q_rad: np.ndarray,
+    executed_qdes_lower_rad: np.ndarray,
+    executed_qdes_upper_rad: np.ndarray,
+    motor_effort_nm: np.ndarray,
+) -> list[dict[str, Any]]:
+    """Name every contact-free row whose required hold torque is unreachable.
+
+    All arrays are in runtime joint order.  ``required_nm`` is ``qfrc_bias`` on
+    the actuated rows at the candidate pose with zero velocity and zero
+    acceleration; for a contact-free row that value IS the holding torque, so a
+    row listed here is a sufficient, non-negotiable reason the static hold LP
+    has no solution -- no other row can trade against it.
+    """
+
+    names = [str(name) for name in joint_names]
+    size = len(names)
+    arrays = {
+        "contact_free": np.asarray(contact_free, bool),
+        "required_nm": np.asarray(required_nm, np.float64),
+        "tau_lower_nm": np.asarray(tau_lower_nm, np.float64),
+        "tau_upper_nm": np.asarray(tau_upper_nm, np.float64),
+        "kp": np.asarray(kp, np.float64),
+        "ready_q_rad": np.asarray(ready_q_rad, np.float64),
+        "executed_qdes_lower_rad": np.asarray(executed_qdes_lower_rad, np.float64),
+        "executed_qdes_upper_rad": np.asarray(executed_qdes_upper_rad, np.float64),
+        "motor_effort_nm": np.asarray(motor_effort_nm, np.float64),
+    }
+    for label, value in arrays.items():
+        if value.shape != (size,):
+            raise DynamicReadyMaterializationError(
+                f"contact-free hold attribution {label} must have one entry per joint"
+            )
+    out: list[dict[str, Any]] = []
+    for index, name in enumerate(names):
+        if not bool(arrays["contact_free"][index]):
+            continue
+        need = float(arrays["required_nm"][index])
+        low = float(arrays["tau_lower_nm"][index])
+        high = float(arrays["tau_upper_nm"][index])
+        gain = float(arrays["kp"][index])
+        q_now = float(arrays["ready_q_rad"][index])
+        qdes_low = float(arrays["executed_qdes_lower_rad"][index])
+        qdes_high = float(arrays["executed_qdes_upper_rad"][index])
+        # 人话:先分清两件完全不同的事。
+        #  (甲) 关节本身已经站在可发指令的 q_des 包络**之外** —— 这时连"零力矩"
+        #       都发不出来,区间是空的,毛病在姿态/限位,不在增益。
+        #  (乙) 关节在包络里,但 `kp × 还能走多远` 撑不出需要的力矩 —— 毛病在增益。
+        # 混在一起报会把人引到错误的修法上,所以这里各有各的名字。
+        outside = not (qdes_low <= q_now <= qdes_high)
+        if not outside and low <= need <= high:
+            continue
+        record = {
+            "joint": name,
+            "required_hold_torque_nm": need,
+            "reachable_torque_interval_nm": [low, high],
+            "kp": gain,
+            "motor_effort_limit_nm": float(arrays["motor_effort_nm"][index]),
+            "pose_q_rad": q_now,
+            "executed_qdes_interval_rad": [qdes_low, qdes_high],
+            "semantics": CONTACT_FREE_HOLD_TORQUE_SEMANTICS,
+        }
+        if gain > 0.0:
+            record["qdes_that_would_be_needed_rad"] = float(need / gain + q_now)
+        if outside:
+            record["binding_side"] = "pose_outside_executed_qdes_envelope"
+            record["binding_authority"] = "pose_outside_executed_qdes_envelope"
+            # 人话:这一档没有"差多少 N·m"这个数 —— 可达区间本身是空的。
+            # 写 `None` 而不是 `NaN`,收据才能是合法 JSON(报告用 allow_nan=False)。
+            record["shortfall_nm"] = None
+            record["pose_outside_envelope_by_rad"] = (
+                q_now - qdes_low if q_now < qdes_low else q_now - qdes_high
+            )
+        else:
+            record["binding_side"] = "lower" if need < low else "upper"
+            record["shortfall_nm"] = need - (low if need < low else high)
+            edge = low if need < low else high
+            record["binding_authority"] = (
+                "motor_effort_limit"
+                if abs(abs(edge) - float(arrays["motor_effort_nm"][index])) <= 1.0e-9
+                else "kp_times_available_qdes_travel"
+            )
+        out.append(record)
+    return out
+
+
+def _contact_free_hold_refusal_text(records: Sequence[Mapping[str, Any]]) -> str:
+    """One human-readable line per unreachable contact-free row."""
+
+    parts = []
+    for record in records:
+        low, high = record["reachable_torque_interval_nm"]
+        needed = record.get("qdes_that_would_be_needed_rad")
+        qlo, qhi = record["executed_qdes_interval_rad"]
+        if record["binding_side"] == "pose_outside_executed_qdes_envelope":
+            parts.append(
+                f"{record['joint']} sits at q={record['pose_q_rad']:+.4f} rad, which is "
+                f"{abs(record['pose_outside_envelope_by_rad']):.4f} rad outside the "
+                f"executed q_des envelope [{qlo:+.4f}, {qhi:+.4f}] rad, so no command "
+                "reaches even zero torque there"
+            )
+            continue
+        text = (
+            f"{record['joint']} needs {record['required_hold_torque_nm']:+.3f} N*m "
+            f"but a position command can only reach [{low:+.3f}, {high:+.3f}] N*m "
+            f"(short {abs(record['shortfall_nm']):.3f} N*m, limited by "
+            f"{record['binding_authority']}, kp={record['kp']:g}, "
+            f"motor limit {record['motor_effort_limit_nm']:g} N*m"
+        )
+        if needed is not None:
+            text += (
+                f"; it would need q_des={needed:+.4f} rad and the executed "
+                f"envelope is [{qlo:+.4f}, {qhi:+.4f}] rad"
+            )
+        parts.append(text + ")")
+    return "; ".join(parts)
+
+
+STATIC_HOLD_REFUSAL_PREFIX = (
+    "no static double-support hold exists inside the executed qdes envelope"
+)
+
+
+def static_hold_required_generalized_force(model, qpos) -> np.ndarray:
+    """``qfrc_bias`` at ``qpos`` with zero velocity and zero acceleration."""
+
+    import mujoco  # noqa: PLC0415
+
+    data = mujoco.MjData(model)
+    data.qpos[:] = np.asarray(qpos, np.float64)
+    data.qvel[:] = 0.0
+    data.qacc[:] = 0.0
+    mujoco.mj_forward(model, data)
+    return np.array(data.qfrc_bias, np.float64)
+
+
+def _static_hold_refusal_message(
+    *,
+    backend,
+    qpos,
+    actuated: np.ndarray,
+    model_row_for_runtime: np.ndarray,
+    plant: Mapping[str, Any],
+    ready_q: np.ndarray,
+    executed_qdes_lower: np.ndarray,
+    executed_qdes_upper: np.ndarray,
+    hold_tau_lower_model: np.ndarray,
+    hold_tau_upper_model: np.ndarray,
+) -> str:
+    """Turn an opaque infeasible hold LP into a named, numeric refusal."""
+
+    try:
+        contact_free_rows = contact_free_actuated_rows(backend.model, actuated)
+        bias = static_hold_required_generalized_force(backend.model, qpos)
+    except Exception as exc:  # noqa: BLE001
+        return (
+            f"{STATIC_HOLD_REFUSAL_PREFIX}; the contact-free attribution itself "
+            f"could not be computed ({type(exc).__name__}: {exc})"
+        )
+    rows = np.asarray(model_row_for_runtime, np.int64)
+    records = contact_free_hold_torque_shortfall(
+        joint_names=list(plant["joint_names"]),
+        contact_free=contact_free_rows[rows],
+        required_nm=bias[np.asarray(actuated, np.int64)][rows],
+        tau_lower_nm=np.asarray(hold_tau_lower_model, np.float64)[rows],
+        tau_upper_nm=np.asarray(hold_tau_upper_model, np.float64)[rows],
+        kp=np.asarray(plant["kp"], np.float64),
+        ready_q_rad=np.asarray(ready_q, np.float64),
+        executed_qdes_lower_rad=np.asarray(executed_qdes_lower, np.float64),
+        executed_qdes_upper_rad=np.asarray(executed_qdes_upper, np.float64),
+        motor_effort_nm=np.asarray(plant["effort"], np.float64),
+    )
+    if not records:
+        return (
+            f"{STATIC_HOLD_REFUSAL_PREFIX}; every contact-free row is inside its "
+            "reachable torque interval, so the binding constraint is on the "
+            "ground-loaded rows or the friction cone"
+        )
+    return (
+        f"{STATIC_HOLD_REFUSAL_PREFIX}: "
+        + _contact_free_hold_refusal_text(records)
+    )
 
 
 def _remove_pinned_snapshots(paths: list[Path]) -> None:
@@ -4277,8 +4511,22 @@ def _materialize(args: argparse.Namespace) -> dict[str, Any]:
             lp_objective=LP_OBJECTIVE,
         )
     if not solution.feasible:
+        # 人话:光说"没有解"没人能修。腰/臂/头这些关节地面根本使不上力,
+        # 它们要多大力矩是唯一确定的,所以这里直接把"哪个关节、差多少 N·m、
+        # 需要多大 q_des、卡的是电机还是 kp×行程"一并报出来。查不出来时才退回旧话。
         raise DynamicReadyMaterializationError(
-            "no static double-support hold exists inside the executed qdes envelope"
+            _static_hold_refusal_message(
+                backend=backend,
+                qpos=qpos,
+                actuated=np.asarray(actuated, np.int64),
+                model_row_for_runtime=model_row_for_runtime,
+                plant=plant,
+                ready_q=ready_q,
+                executed_qdes_lower=executed_qdes_lower,
+                executed_qdes_upper=executed_qdes_upper,
+                hold_tau_lower_model=hold_tau_lower_model,
+                hold_tau_upper_model=hold_tau_upper_model,
+            )
         )
     contact_normals = np.asarray(
         solution.report.get("normal_force_per_contact_n", ()), np.float64
