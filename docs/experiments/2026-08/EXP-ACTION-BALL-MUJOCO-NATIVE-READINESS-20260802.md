@@ -5963,6 +5963,166 @@ target_source=direct_ball, target_recipe=outcome_dense_only
 - 本轮只验到 `recipe` 段起得来。`oracle32` / `scale4096` 两段**没跑**，
   它们各自的门是否还有别的过期指针，本轮没有证据。
 
+### 9.2.12 第三次重签：语义面涨到 210 个符号，18 份产物一次铸完，C0 实跑过了 boot 门（2026-08-07 落地并实跑验证）
+
+**人话先说**：§9.2.10.3 修完四条逃逸之后，求解器语义面**又动了一次**——这次是最后一次。
+封在产物里的还是 `59f03840…`／`198` 个符号，活体已经是 `d293eed4…`／`210` 个，
+于是 `solver_profile_sha256` 从 `c196cf79…` 变成 `3af6c505…`，18 份内容寻址产物全部过期，
+四个格子一个都开不了机。本节把它们**一次性**重铸完（刻意不铸两遍：要重铸的那两个函数
+本身就在覆盖面里），并且实跑 C0 到 `recipe` 段确认真的过了那道门。
+**注意标题说的是 C0**：A 族只重签了谱系，本轮一格都没实跑。
+
+#### 先把数字对齐：中途那个 `204` 不是终值
+
+| 口径 | 语义面 SHA | 覆盖符号数 | `solver_profile_sha256` | 这数从哪来 |
+| --- | --- | --- | --- | --- |
+| 上一轮**封在产物里**的 | `59f03840b85f…` | `198` | `c196cf79001d…` | 读 `…/v3pin_core_seed0_20260807_r1/action_ball_profile_pins.live.v1.553ef7d14f3c.json` |
+| `3a72ea5b` / `f880b5df` 现算 | `5fb9e472bc5f…` | `204` | `dad9c1c853e4…` | 钉针脚本 `--source-rev` 现铸，两个 revision 同值 |
+| `42232b84` 现算（**本轮铸的就是它**） | `d293eed44748…` | `210` | `3af6c505f9ed…` | 钉针脚本 `--source-rev 42232b84` 现铸 |
+
+中间那一行说明产物**在 §9.2.10.3 之前就已经过期了**：`3a72ea5b` 的声明桥加了 5 个覆盖符号、
+另有 1 个重新分类，`198 → 204`；`42232b84` 的四条逃逸修复再加 6 个，`204 → 210`。
+所以"逃逸修完再铸"这个顺序是对的——先铸就要铸两遍，而中间那枚 `dad9c1c853e4…`
+**从来没有被任何产物封过**。
+
+第一行只能读、不能重铸：现在的钉针脚本要读
+`_ACTION_BALL_SOLVER_FIXED_DIRECTION` / `_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES` 两个常量，
+它们是 `3a72ea5b` 才加的，所以在 `28175559` 上跑会直接报
+`missing module constants` 而不是铸出一枚假 pin。**这是它拒绝，不是我们抄数。**
+
+#### 迁移脚本被跑了，它**拒绝**了，我们把拒绝原样登出来而不是把门放宽
+
+`migrate_action_ball_solver_pin_to_semantic_surface.py` 在本轮 checkout 上跑了
+（`--from-rev 423f5409`，`--to-rev 42232b84`），退出码 `1`，原话是：
+
+```
+a covered symbol is missing at one of the two revisions and is not on the
+allowed-introduction list, so the invariance claim cannot be checked:
+{'hope_commands.py': ['action_ball_live_answer_input_digest',
+ 'action_ball_answer_input_contract', '_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION',
+ '_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS',
+ 'action_ball_assert_solver_adapter_binds_these_entry_points',
+ '_ActionBallPoolSolverAdapter.action_ball_bound_entry_points']}
+```
+
+它后面还有第二道会拒的：**三个覆盖的求解入口动了**——
+`_action_ball_refill_pool_many`、`_action_ball_frozen_eval_solve`、
+`_action_ball_replay_emitted_tasks`，因为它们现在在求解前要先调用两份新合同。
+
+**这不是脚本坏了，是它在正确工作。** 它认证的是"纯换章"：schema v2→v3、除了 pin 自己的
+声明半边之外没有覆盖符号动过。本轮**根本不是那件事**——我们故意改了求解入口（加了拒绝）
+并加了 6 个覆盖符号，所以那条静态不变性断言按构造就是假的，它照实说了。
+
+**允许清单一个字没加。** 把 `_action_ball_refill_pool_many` 加进 `ALLOWED_MOVED_SYMBOLS`
+等于**预先批准**那个唯一负责抽题的符号，正好是这道门存在的反面。
+台账里 `migration_gate` 一节把脚本的拒绝原文、以及**用脚本自己的常量重算出来的**
+introduced／moved／refused 三张表一起登出来——不是第三份手抄。
+
+#### 那三个动了的符号到底有没有改答案：拿活值判，不拿论证判
+
+静态摘要分不清"加了一句拒绝"和"改了一步计算"，所以静态层面这题无解。能判的是活值：
+**tape 就是跑 `_action_ball_refill_pool_many` 产出来的**，而
+`offline_n1_tape_build_report` 里 `base_question_sha256` 前后都是 `81eed5139b98…`，
+在它自陈的 **18 个**位置上逐个比过。抽题没动，这是量出来的。
+
+另外两条同向证据，都是逐叶字段比出来的：
+
+- 两份 pin 模板（上一轮的 `5564d5b3c09d` 与本轮的 `9a909b56d9b6`）之间，
+  共有键里**只有 20 个叶字段不同，全部在 solver 一侧**；
+  `cfg`（每一个旋钮）、`physics_profile_sha256`（`aa5c9085…`）、
+  exact-face contact geometry 摘要**逐字节相同**。
+- pins 文档只增不减：`leaf_fields_only_before_count == 0`，
+  多出来的 553 个键就是新增覆盖符号的逐符号摘要。
+
+**反话也要明写**：每份 task receipt 的 `canonical_sha256` **都变了**，
+而且永远会变——它按构造就封着 solver pin。拿它当"题目没变"的证据就是引错了字段；
+拿它当"题目变了"的证据同样是引错了字段。台账的
+`what_this_does_and_does_not_claim` 把这句写进了文件里。
+
+#### 漏没漏是数出来的：14 处 pin 副本、56 条指针、三次全树扫描
+
+- **pin 副本 14 处**，分布在**两个字段名**下：`solver_profile_sha256`（6 处：两份 pins、bundle、
+  contact_alignment、manifest、prototype）与 `solver_sha256`（8 处：5 份 target receipt、
+  base question receipt、immutable tape、tape build report）。
+  仍带着退役 pin 的位置：**0 处**。
+- **指针链 56 条**（新四个目录里每一个 `{path, sha256}` 对）全部解析成功，`broken: 0`。
+  `A211` 谱系同批重签——上一轮差点漏掉它，漏了就是下一次开 A 格的硬崩。
+- **三次扫描**，因为任何一次单独都有洞：按**退役摘要**扫（漏掉只写路径不写 SHA 的引用）、
+  按**退役完整路径**扫（漏掉只写 SHA 的，也漏掉把路径拆成两行字符串的）、
+  按**退役目录名**扫（专门补上一条——`tests/test_migrate_action_ball_solver_pin_receipt.py`
+  正好把路径拆在目录边界上，`git grep` 整条路径看不见它）。
+  三次合计 **`unresolved_live_reference_count: 0`**。
+
+#### 拆成两笔提交不是洁癖，是被门逼的
+
+`materialize_action_ball_c211_lineage.py` **拒绝脏树**，
+`materialize_action_ball_a211_lineage.py` 还额外**拒绝未跟踪的 action manifest**。
+所以顺序只能是：core+tape 先落一笔提交（`c35747e9`），谱系才铸得出来、落第二笔（`f39e7869`）；
+台账另落第三笔（`92fa48a7`，这一笔是为了好读，不是被门逼的）。
+两条谱系的 `--source-commit` 都是 `c35747e9`，
+而 `c35747e9` 的求解器源码与 `42232b84` 逐字节相同。
+
+#### 实跑验证：C0 到 `recipe` 段真的过了那道门
+
+pod1 GPU1，worktree `s11_cells_c_20260807`（干净，`92fa48a7`），
+`materialize` → `recipe` 两段都 `EXIT=0`、`terminal_kind = clean_completion`，
+两段 run.log 里 `solver profile SHA mismatch` 与 `Traceback` 命中数**都是 0**。
+运行时自陈那行：
+
+```
+[RacketTargetCommand] action-ball runtime bound: actions=1, mobility=no_move,
+manifest=12031a74be708b53…, sampler=03d8a77968134b61…,
+solver=3af6c505f9ed2333…, physics=aa5c9085f9b48ca6…,
+target_source=direct_ball, target_recipe=outcome_dense_only
+```
+
+`manifest` 和 `solver` 都是本轮新铸的那两枚，`physics` 没动。
+
+#### 反向对照：拿退役谱系发车，同一个 HEAD 上必须崩
+
+光看"新的能跑"证明不了是重签起的作用——也可能那道门根本没在看。所以同一个 worktree、
+同一个 HEAD、同一份 spec，只把 `lineage` 换回**退役**的那份
+（`a327854762…`，封着 `c196cf79`），`recipe` 段的 run.log 里是：
+
+```
+File ".../mdp/hope_commands.py", line 5894, in _initialize_action_ball_runtime
+    raise ValueError(
+ValueError: action-ball solver profile SHA mismatch:
+manifest=c196cf79001df76d…, runtime=3af6c505f9ed2333…
+(… Its live surface is d293eed4… over 210 symbols in 6 sources. …)
+```
+
+门是活的，报的两个数正是本节表里的那两个。顺带更正一个行号：这道门在本轮 HEAD 上是
+`hope_commands.py:5894`（`_initialize_action_ball_runtime` 里），
+早前记的 `5568` 已经漂掉了；判据本身没变。
+
+**这条对照没有退出码可报**：拒绝之后 Kit 进程挂在 shutdown 上不退（run.log 停在 `04:06`，
+到 `04:28` 一个字没长），最后是按纪律 `readlink /proc/<pid>/cwd` 确认属于自己之后
+`kill` 掉自己的两个 pgid（`319832` / `321315`）收的场，GPU1 已清空。
+所以这条的证据是 **run.log 里的那个 `ValueError`**，不是退出码——写清楚免得有人去引一个不存在的数。
+崩溃后 Kit 不退这件事是既有行为，不是本轮引入的。
+
+#### 顺带查实的一件事：`materialize` 段**不碰**这道门，所以它不能当开机验证
+
+上面那条反向对照第一次跑的时候只跑了 `materialize` 段，结果是
+**`EXIT=0`、`CELL_OK`**——拿着**退役**谱系也一样绿。原因是 `materialize` 段压根没构造
+ActionBall env，自然也没算 solver profile。
+**只跑 `materialize` 绿了就宣布"开机没问题"是假收据。**
+真正开机的是 `recipe` 段——"runtime bound"那行和上面那个 `ValueError` 都只在
+`recipe` 的 log 里出现。本节的正向验证因此报的是 `materialize` **和** `recipe` 两段。
+
+#### 还没关的洞（本轮，别当成已解决）
+
+- 本轮只验到 `recipe` 段。`oracle32` / `scale4096` 两段**没跑**，
+  它们各自的门是否还有别的过期指针，本轮没有证据。
+  `scale4096` 另有已知的独立阻断（§5.6.19），与本轮重签无关。
+- A 族只重签了谱系，**一格都没实跑**。"A 族也能开机"本轮没有证据，只有"指针不再断链"。
+- 迁移脚本目前只会讲 v2→v3 这一种故事。**真正的 v3→v3 重签它认证不了**，
+  本轮是靠"活值 + 逐叶字段"补的证据。要让它以后能认证这一类，得给它一个
+  "覆盖符号确实动了、但只加了拒绝"的判据——而那个判据必须自己能被变异测试打红，
+  否则就是把门写松。本轮**没做**，只把缺口写在这里。
+- §9.2.10.3 记的 R10 / R11 两个洞照旧没关。
+
 ### 9.2 MuJoCo 顺序
 
 - **MuJoCo core 现在并行做**：pin mjlab/runtime，实现 MJCF/scene/plant、action/delay、deterministic
