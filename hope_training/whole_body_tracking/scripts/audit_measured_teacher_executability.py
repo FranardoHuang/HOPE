@@ -43,7 +43,7 @@ import copy
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -60,9 +60,51 @@ SUPPORT_BAND_M = 6.0e-3
 # 给到 1e-9 仍然是"完全一致"的量级,不给它偷偷漂的空间。
 HOLD_ANCHOR_TOLERANCE_NM = 1.0e-9
 
+# 地面 LP(`GroundContactConfig`)对"踩到地"的窗口:低于 -2 mm 算穿透、高于 +2 mm 算悬空。
+# 两只脚必须同时落在这 4 mm 里,所以两只脚之间的高度差超过 4 mm 时,**任何刚体平移都救不了**。
+# 这两个数是从 `canonical_torque_path_topp.GroundContactConfig` 的默认值抄过来的判据,
+# 本工具只用来报"能不能靠平移修好",不参与任何准入。
+LP_CONTACT_GAP_TOLERANCE_M = 2.0e-3
+LP_PENETRATION_TOLERANCE_M = 2.0e-3
+
 
 class ExecutabilityAuditError(RuntimeError):
     """本审计的任何 fail-closed 拒绝。"""
+
+
+def _collision_sole_geoms(
+    *,
+    geom_bodyid: np.ndarray,
+    geom_type: np.ndarray,
+    geom_contype: np.ndarray,
+    geom_conaffinity: np.ndarray,
+    body_ids: Sequence[int],
+    mesh_type: int,
+) -> list[int]:
+    """脚底顶点只能取**会碰撞**的那块网格。
+
+    人话:A3 的每个 ankle_roll 上挂着两个 mesh —— 一个 collision(`contype=1 conaffinity=7`),
+    一个纯视觉(`contype=0 conaffinity=0`)。视觉网格比 collision 网格**低 1.12 mm**。
+    把视觉网格算进来,"离地"会少报 1.12 mm、"压地"会多报 1.12 mm;而 MuJoCo 的接触检测、
+    以及产出 WAIT `hold_qdes` 的那套地面 LP,用的都是 collision 网格
+    (`canonical_torque_path_topp` 选 geom 的条件就是 `contype != 0 and conaffinity != 0`)。
+    两边必须问同一块几何,否则报出来的毫米数没人能跟 LP 的判定对上。
+    """
+
+    selected = [
+        int(geom)
+        for geom in range(int(np.asarray(geom_bodyid).shape[0]))
+        if int(geom_bodyid[geom]) in set(int(body) for body in body_ids)
+        and int(geom_type[geom]) == int(mesh_type)
+        and int(geom_contype[geom]) != 0
+        and int(geom_conaffinity[geom]) != 0
+    ]
+    if not selected:
+        raise ExecutabilityAuditError(
+            "MJCF exposes no collidable ankle-roll sole meshes; refusing to measure "
+            "sole clearance against geometry MuJoCo does not collide"
+        )
+    return selected
 
 
 def _savgol(values: np.ndarray, window: int, poly: int) -> np.ndarray:
@@ -189,22 +231,25 @@ class _Plant:
         )
         self.inverse_model = inverse
         self.inverse_data = mujoco.MjData(inverse)
-        self.sole_geoms: list[int] = []
-        for side in ("left", "right"):
-            body = mujoco.mj_name2id(
-                model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_ankle_roll_Link"
-            )
-            self.sole_geoms += [
-                geom
-                for geom in range(model.ngeom)
-                if int(model.geom_bodyid[geom]) == body
-                and int(model.geom_type[geom]) == mujoco.mjtGeom.mjGEOM_MESH
-            ]
-        if not self.sole_geoms:
-            raise ExecutabilityAuditError("MJCF exposes no ankle-roll sole meshes")
         self.ankle_bodies = [
             mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_ankle_roll_Link")
             for side in ("left", "right")
+        ]
+        if any(body < 0 for body in self.ankle_bodies):
+            raise ExecutabilityAuditError("MJCF is missing an ankle-roll body")
+        self.sole_geoms_by_foot = [
+            _collision_sole_geoms(
+                geom_bodyid=np.asarray(model.geom_bodyid),
+                geom_type=np.asarray(model.geom_type),
+                geom_contype=np.asarray(model.geom_contype),
+                geom_conaffinity=np.asarray(model.geom_conaffinity),
+                body_ids=(body,),
+                mesh_type=int(mujoco.mjtGeom.mjGEOM_MESH),
+            )
+            for body in self.ankle_bodies
+        ]
+        self.sole_geoms = [
+            geom for foot in self.sole_geoms_by_foot for geom in foot
         ]
 
     def qpos(self, root_pos: np.ndarray, root_quat: np.ndarray, joints: np.ndarray) -> np.ndarray:
@@ -227,31 +272,47 @@ class _Plant:
             raise ExecutabilityAuditError("inverse dynamics returned non-finite force")
         return force
 
+    def _sole_vertices_world(self, geom: int) -> np.ndarray:
+        mesh = int(self.model.geom_dataid[geom])
+        start = int(self.model.mesh_vertadr[mesh])
+        count = int(self.model.mesh_vertnum[mesh])
+        verts = np.asarray(self.model.mesh_vert[start : start + count], np.float64)
+        rot = np.asarray(self.data.geom_xmat[geom], np.float64).reshape(3, 3)
+        return verts @ rot.T + np.asarray(self.data.geom_xpos[geom], np.float64)
+
     def ground_geometry(self, qpos: np.ndarray) -> dict:
-        """一帧的鞋底离地高度、支撑多边形和质心裕度。"""
+        """一帧的鞋底离地高度、支撑多边形和质心裕度。
+
+        质心裕度报**两个**,因为它们回答的不是同一个问题:
+
+        * ``com_support_margin_m`` —— 按 ``SUPPORT_BAND_M`` 取真实接触带。参考帧要是悬在空中、
+          或者两只脚不共面,这条"接触带"就只剩一条边,裕度会因此变负。它衡量的是**这一帧照原样**
+          站不站得住。
+        * ``com_footprint_margin_m`` —— 拿两只脚**完整鞋底**在地面上的投影当多边形。它等价于问
+          "要是重定向把两只脚都放平踩实,质心在不在两脚之间"。两者差很多时,失衡是**重定向没踩地**
+          的下游后果,不是动捕对象自己站不稳。
+        """
 
         self.data.qpos[:] = qpos
         self.data.qvel[:] = 0.0
         self.mujoco.mj_forward(self.model, self.data)
         self.mujoco.mj_comPos(self.model, self.data)
         com = np.asarray(self.data.subtree_com[0], np.float64)
-        world_by_geom = []
-        for geom in self.sole_geoms:
-            mesh = int(self.model.geom_dataid[geom])
-            start = int(self.model.mesh_vertadr[mesh])
-            count = int(self.model.mesh_vertnum[mesh])
-            verts = np.asarray(self.model.mesh_vert[start : start + count], np.float64)
-            rot = np.asarray(self.data.geom_xmat[geom], np.float64).reshape(3, 3)
-            world_by_geom.append(verts @ rot.T + np.asarray(self.data.geom_xpos[geom], np.float64))
-        lowest = min(float(rows[:, 2].min()) for rows in world_by_geom)
-        support = np.vstack(
-            [rows[rows[:, 2] <= lowest + SUPPORT_BAND_M] for rows in world_by_geom]
-        )
+        by_foot = [
+            np.vstack([self._sole_vertices_world(geom) for geom in foot])
+            for foot in self.sole_geoms_by_foot
+        ]
+        per_foot_lowest = [float(rows[:, 2].min()) for rows in by_foot]
+        lowest = min(per_foot_lowest)
+        support = np.vstack([rows[rows[:, 2] <= lowest + SUPPORT_BAND_M] for rows in by_foot])
         hull = _convex_hull_2d(support[:, :2])
+        footprint = _convex_hull_2d(np.vstack(by_foot)[:, :2])
         ankles = [np.asarray(self.data.xpos[body], np.float64) for body in self.ankle_bodies]
         return {
             "sole_lowest_vertex_z_m": lowest,
+            "sole_lowest_vertex_z_by_foot_m": per_foot_lowest,
             "com_support_margin_m": _hull_margin(com[:2], hull),
+            "com_footprint_margin_m": _hull_margin(com[:2], footprint),
             "stance_width_m": float(np.linalg.norm(ankles[0][:2] - ankles[1][:2])),
             "com_xy_m": com[:2].tolist(),
         }
@@ -382,8 +443,33 @@ def audit(
 
     ground_rows = [plant.ground_geometry(qpos[t]) for t in range(frames)]
     sole = np.array([row["sole_lowest_vertex_z_m"] for row in ground_rows])
+    by_foot = np.array([row["sole_lowest_vertex_z_by_foot_m"] for row in ground_rows])
     margin = np.array([row["com_support_margin_m"] for row in ground_rows])
+    footprint_margin = np.array([row["com_footprint_margin_m"] for row in ground_rows])
     stance = np.array([row["stance_width_m"] for row in ground_rows])
+
+    # "整条 clip 悬空 1 cm,那把它整体压下去 1 cm 不就好了?" —— 这里把那个反问算成一道判据。
+    # 一次刚体竖直平移 d 要让每一帧的两只脚都落进 LP 的接触窗口,需要
+    #   max(两脚较高者) - d <= +gap   且   min(两脚较低者) - d >= -penetration
+    # 解出来的 d 区间为空,就说明"平移一下"这条修法在几何上不存在,问题不是高度约定。
+    highest_foot = float(by_foot.max())
+    lowest_foot = float(by_foot.min())
+    shift_upper = lowest_foot + LP_PENETRATION_TOLERANCE_M
+    shift_lower = highest_foot - LP_CONTACT_GAP_TOLERANCE_M
+    rigid_shift = {
+        "semantics": (
+            "is there ONE constant vertical offset that puts both feet inside the ground LP's "
+            "[-penetration, +gap] window on every frame"
+        ),
+        "lp_contact_gap_tolerance_m": LP_CONTACT_GAP_TOLERANCE_M,
+        "lp_penetration_tolerance_m": LP_PENETRATION_TOLERANCE_M,
+        "required_shift_lower_bound_m": shift_lower,
+        "required_shift_upper_bound_m": shift_upper,
+        "feasible": bool(shift_lower <= shift_upper),
+        "max_left_minus_right_mm": float(
+            np.abs(by_foot[:, 0] - by_foot[:, 1]).max() * 1000.0
+        ),
+    }
 
     ready = artifact["physical_ready"]
     birth_geometry = plant.ground_geometry(
@@ -411,13 +497,19 @@ def audit(
             "filter_sensitivity": sensitivity,
         },
         "q2_ground_contact": {
+            "geometry_measured": "ankle-roll COLLISION meshes only (contype!=0 and conaffinity!=0)",
             "sole_lowest_vertex_z_mm": {
                 "clip_min": float(sole.min() * 1000.0),
                 "clip_max": float(sole.max() * 1000.0),
                 "clip_frame0": float(sole[0] * 1000.0),
                 "birth": float(birth_geometry["sole_lowest_vertex_z_m"] * 1000.0),
+                "clip_left_min": float(by_foot[:, 0].min() * 1000.0),
+                "clip_left_max": float(by_foot[:, 0].max() * 1000.0),
+                "clip_right_min": float(by_foot[:, 1].min() * 1000.0),
+                "clip_right_max": float(by_foot[:, 1].max() * 1000.0),
             },
             "frames_with_no_floor_contact": int((sole > 2.0e-3).sum()),
+            "single_rigid_vertical_shift": rigid_shift,
         },
         "q3_static_balance": {
             "com_support_margin_mm": {
@@ -427,7 +519,19 @@ def audit(
                 "clip_frame0": float(margin[0] * 1000.0),
                 "birth": float(birth_geometry["com_support_margin_m"] * 1000.0),
             },
+            "com_footprint_margin_mm": {
+                "semantics": (
+                    "CoM vs the convex hull of BOTH complete soles projected on the floor, i.e. "
+                    "the margin a retarget that actually planted both feet flat would have"
+                ),
+                "clip_min": float(footprint_margin.min() * 1000.0),
+                "clip_max": float(footprint_margin.max() * 1000.0),
+                "clip_mean": float(footprint_margin.mean() * 1000.0),
+                "clip_frame0": float(footprint_margin[0] * 1000.0),
+                "birth": float(birth_geometry["com_footprint_margin_m"] * 1000.0),
+            },
             "frames_com_outside_support": int((margin < 0.0).sum()),
+            "frames_com_outside_footprint": int((footprint_margin < 0.0).sum()),
             "support_band_m": SUPPORT_BAND_M,
         },
         "q4_stance_gap": {
@@ -486,14 +590,23 @@ def main(argv: list[str] | None = None) -> int:
         f"\n  1 力矩:最吃紧的是 {torque['joint']},{torque['max_abs_tau_nm']:.1f} N*m 对限幅 "
         f"{torque['effort_limit_nm']:.1f}({torque['max_utilisation_fraction'] * 100:.0f}%),"
         f"超限帧 {torque['frames_over_limit']}"
-        f"\n  2 踩地:鞋底离地 {ground['sole_lowest_vertex_z_mm']['clip_min']:.1f}~"
-        f"{ground['sole_lowest_vertex_z_mm']['clip_max']:.1f} mm,"
+        f"\n  2 踩地:鞋底离地 左 {ground['sole_lowest_vertex_z_mm']['clip_left_min']:.1f}~"
+        f"{ground['sole_lowest_vertex_z_mm']['clip_left_max']:.1f} mm / "
+        f"右 {ground['sole_lowest_vertex_z_mm']['clip_right_min']:.1f}~"
+        f"{ground['sole_lowest_vertex_z_mm']['clip_right_max']:.1f} mm,"
         f"{ground['frames_with_no_floor_contact']}/{report['clip']['frames']} 帧没接触地板"
-        f"(出生姿态 {ground['sole_lowest_vertex_z_mm']['birth']:.1f} mm)"
+        f"(出生姿态 {ground['sole_lowest_vertex_z_mm']['birth']:.1f} mm);"
+        f"两脚最大高差 {ground['single_rigid_vertical_shift']['max_left_minus_right_mm']:.1f} mm,"
+        f"整体平移能否修好:"
+        f"{'能' if ground['single_rigid_vertical_shift']['feasible'] else '不能(平移救不了)'}"
         f"\n  3 站稳:质心裕度 {balance['com_support_margin_mm']['clip_min']:.1f}~"
         f"{balance['com_support_margin_mm']['clip_max']:.1f} mm,"
         f"{balance['frames_com_outside_support']}/{report['clip']['frames']} 帧质心在支撑面外"
-        f"(出生姿态 {balance['com_support_margin_mm']['birth']:+.1f} mm)"
+        f"(出生姿态 {balance['com_support_margin_mm']['birth']:+.1f} mm);"
+        f"换成「两脚放平踩实」的鞋底footprint,裕度 "
+        f"{balance['com_footprint_margin_mm']['clip_min']:+.1f}~"
+        f"{balance['com_footprint_margin_mm']['clip_max']:+.1f} mm,"
+        f"出界 {balance['frames_com_outside_footprint']}/{report['clip']['frames']} 帧"
         f"\n  4 站姿:clip {stance['clip_stance_width_m']['frame0']:.3f} m vs 出生 "
         f"{stance['birth_stance_width_m']:.3f} m,差 {stance['gap_m']:.3f} m",
         file=sys.stderr,

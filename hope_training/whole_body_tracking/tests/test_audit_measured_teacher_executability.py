@@ -107,6 +107,48 @@ def test_hold_anchor_refuses_when_the_archived_torque_drifts(perturbation):
         )
 
 
+_MESH = 7  # mujoco.mjtGeom.mjGEOM_MESH; 抄成常数,免得为了这几行去 import mujoco。
+
+
+def _a3_like_ankle_geoms():
+    """A3 每只脚两块 mesh:先视觉(不碰撞)后 collision。顺序和真模型一致。"""
+
+    # geom:            0 floor   1 visual-L  2 coll-L   3 visual-R  4 coll-R  5 非 mesh
+    return {
+        "geom_bodyid": np.array([0, 26, 26, 32, 32, 26]),
+        "geom_type": np.array([0, _MESH, _MESH, _MESH, _MESH, 6]),
+        "geom_contype": np.array([0, 0, 1, 0, 1, 1]),
+        "geom_conaffinity": np.array([7, 0, 7, 0, 7, 7]),
+        "mesh_type": _MESH,
+    }
+
+
+def test_sole_selection_takes_the_collision_mesh_and_not_the_visual_one():
+    # 视觉网格比 collision 网格低 1.12 mm,选错了整份离地读数就跟 LP 对不上。
+    assert _MOD._collision_sole_geoms(body_ids=(26, 32), **_a3_like_ankle_geoms()) == [2, 4]
+
+
+def test_sole_selection_refuses_when_only_visual_meshes_exist():
+    # 变异测试:把 collision 属性抹掉,必须拒绝出数,而不是悄悄退回视觉网格。
+    rows = _a3_like_ankle_geoms()
+    rows["geom_contype"] = np.zeros_like(rows["geom_contype"])
+    with pytest.raises(ExecutabilityAuditError, match="collidable ankle-roll sole meshes"):
+        _MOD._collision_sole_geoms(body_ids=(26, 32), **rows)
+
+
+def test_sole_selection_refuses_a_geom_that_collides_with_nothing():
+    # conaffinity=0 的 mesh 谁也碰不到,拿它量"踩没踩到地"是自欺。
+    rows = _a3_like_ankle_geoms()
+    rows["geom_conaffinity"] = np.zeros_like(rows["geom_conaffinity"])
+    with pytest.raises(ExecutabilityAuditError):
+        _MOD._collision_sole_geoms(body_ids=(26, 32), **rows)
+
+
+def test_sole_selection_ignores_non_mesh_collision_geoms_on_the_same_body():
+    # 第 5 个 geom 挂在同一个 body 上、也会碰撞,但它不是 mesh:顶点枚举对它没有意义。
+    assert 5 not in _MOD._collision_sole_geoms(body_ids=(26, 32), **_a3_like_ankle_geoms())
+
+
 def test_hold_anchor_refuses_non_finite_archives():
     kp = np.array([100.0, 250.0, 20.0])
     birth = np.array([0.1, -0.2, 0.3])
