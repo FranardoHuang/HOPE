@@ -5648,10 +5648,21 @@ registry 的 30 枚 path+sha 钉逐个复核，只有 1 枚漂（还不是 rewar
 
 ##### 7. 顺带确认的两件事
 
-- **四格 A0/C0 的 `recipe` 阶段在新配方下是能过 boot 门的**：并行 worker 的 s19 队列
-  （commit `2dcde6b8`）实跑 `C0 materialize/recipe/oracle32 = EXIT 0`、
-  `A0 materialize/recipe = EXIT 0`。`2dcde6b8 → 17f4bae7` 的差集只有动捕 npz、
-  `configs/a3p_p1_0807_*`、两支动作物化脚本和 legacy 目录，**没有一个文件是 reward 配方的输入**。
+- **四格 A0/C0 的 `recipe` 阶段在新配方下确实能过 boot 门 —— 本轮自己在 HEAD 上跑过一遍，
+  不是引用别人的**。干净 worktree `/workspace/franco/remint_20260808` @ `17f4bae7`，GPU1
+  （等它空出来才起，`gpu1 clear after 630s`；GPU0=yikang、GPU2=mjlab 全程未碰），
+  只跑 `materialize → recipe` 两级（`oracle32 / scale4096 / long` 一律没跑）：
+
+  | 格 | materialize | recipe | 吐出来的活值配方 sha |
+  | --- | --- | --- | --- |
+  | `C0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off` | `EXIT 0`（48 s） | `EXIT 0`（53 s） | `5d876e1bac865277…` |
+  | `A0-base-safety-standard-init-sigma1p0-proprio-obs-noise-off` | `EXIT 0`（47 s） | `EXIT 0`（54 s） | `0e633996af4790bb…` |
+
+  这两个 sha 与并行 worker 在 `2dcde6b8` 上跑出来的**逐位相同**，
+  等于把"`2dcde6b8 → 17f4bae7` 那段差集（动捕 npz、`configs/a3p_p1_0807_*`、
+  两支动作物化脚本、legacy 目录）不是 reward 配方的输入"这句话**量出来了**，而不是看 diff 推的。
+  第一次起还吃了一记 `REFUSED: namespace parent must be an existing real directory`
+  ——新 worktree 里 `logs/rsl_rl/<experiment>/` 不存在，建完目录重跑即过；记在这里省下一次重踩。
 - **本轮一行代码、一份产物都没改**，所以没有"改动 vs 基线"的对拍要做；
   上面所有数字都是在 `17f4bae7` 的干净 worktree 上读出来的。
 
