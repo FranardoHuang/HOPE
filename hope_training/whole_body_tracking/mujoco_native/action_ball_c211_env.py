@@ -47,6 +47,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from . import action_ball_211_abi as abi
+from . import isaac_live_constants
 from . import n1_ball_core
 from . import n1_reward_event_kernel
 from . import physical_ball_scene
@@ -79,6 +80,25 @@ C211_UPRIGHT_STD = math.sqrt(0.2)
 # 换回上游无封顶的 `action_rate_l2`(权重 -0.1)。C 族与 A 族同批同形,所以这里的封顶
 # 常数一并删掉 —— 镜像里留一个 Isaac 侧已经不读的 clamp,正是"指纹对上、语义早漂"的那类债。
 C211_ACTION_RATE_POST_DT_WEIGHT = -0.1
+# 2026-08-08:下面这四条以前是写死在 `_c211_isaac_synonymous_prior_terms()` 函数体里的
+# 裸字面量,而且同一个数在本文件里抄了两遍(奖励表一遍、收据表一遍)。抬成模块常量有两个
+# 理由,都不是整洁癖:
+#   1. `mirrored_constant_registry` 只看得见**模块级**常量,函数体里的字面量对它是隐形的
+#      —— 14 条镜像权重里 13 条一直不在任何门的视野内。
+#   2. 抬上来之后才能挂 `mirrored_isaac_reward_weight_entries()`,把它们和 Isaac 现役值
+#      逐个比值(见该函数)。
+# **注意这里的"Isaac 现役值"是发车解析后的那一份,不是 cfg 类体里声明的那一份。**
+# 类体声明与真正生效的权重不是一回事:`upright_exp` 类体是 `0.0`,reward_pack=v2 把它设成
+# `0.25`;`motion_*` 类体是 `1.0`,YAML `motion_scale=0.15` 再乘一道。只读类体会读出错的数。
+#
+# `C211_UPRIGHT_EXP_MANAGER_WEIGHT` 修正记录:本镜像原写 `1.0`,那是 2026-08-04 层级对齐
+# **之前**的价。那天 `_REWARD_PACK_V2_DIRECT` 把它从 `1.0` 改成 `0.25`(理由:每步无条件
+# 发钱、无 task_valid 掩码,500 步折扣 +1.9869 压过 task-valid mimic 预算 1.77331),
+# Isaac 侧改了,这份镜像没跟。这里同步成 Isaac 的现役值,不是新的定价决定。
+C211_UPRIGHT_EXP_MANAGER_WEIGHT = 0.25
+C211_BASE_ANG_VEL_XY_MANAGER_WEIGHT = -0.05
+C211_BASE_LIN_VEL_Z_MANAGER_WEIGHT = -0.5
+C211_JOINT_VEL_MANAGER_WEIGHT = -1.0e-4
 C211_RACKET_LONG_AXIS_LOCAL = np.asarray(
     (math.sqrt(0.5), 0.0, math.sqrt(0.5)), dtype=np.float64
 )
@@ -191,6 +211,219 @@ C211_UNAVAILABLE_ISAAC_REWARD_TERMS = (
     },
 )
 C211_CROSS_ENGINE_REWARD_SEMANTIC_GAPS: tuple[dict[str, str], ...] = tuple()
+
+# ---------------------------------------------------------------------------
+# 镜像权重 vs Isaac 现役权重:逐个比值,不比指纹
+# ---------------------------------------------------------------------------
+#
+# 背景(2026-08-08):本文件把 14 条 Isaac-synonymous 先验项的权重抄了一份,而在此之前
+# **没有任何东西在比这份手抄跟 Isaac 现役值一不一样**。收据里确实钉了
+# `reward_pack_resolver_source_sha256 = sha256(train.py)`,但那是整文件字节指纹:
+# train.py 几乎每天都因为无关原因变一次,这个数天天变、没有任何消费者读它、也没有任何
+# 门会因为它拒收。结果就是 2026-08-04 Isaac 把 `upright_exp` 从 `1.0` 重定价到 `0.25`,
+# 这份镜像整整四天没跟上,而所有的门都是绿的。
+#
+# 这张表照 `table_termination.mirrored_isaac_constant_entries()` 的同一形状建,
+# 走同一个 `isaac_live_constants.parity_blockers()`。**它比的是发车解析后的活值**:
+#
+#   * reward_pack=v2 会直接改写 RewTerm.weight(train.py `_apply_reward_pack`),
+#     所以在包里的项,权威是包那一行,不是 cfg 类体;
+#   * 不在包里、也没有 YAML 权重键的项,权威才是 cfg 类体的 `weight=`。
+#
+# C211 的 YAML 链(C211Learnability -> A3VendorV2 -> A3VendorV1 -> ActionBall)在
+# `HOPEPingPongActionBall.yaml` 上设了 `reward_pack: v2`,所以这两层都生效。
+ISAAC_REWARD_PACK_TABLE = "_REWARD_PACK_V2_DIRECT"
+
+#: C211 的 RewardsCfg 继承链,由后往前后写后赢。影子检查扫的就是这一串。
+ISAAC_C211_REWARD_CFG_CHAIN = (
+    "HOPERewardsCfg",
+    "HOPEDeployParityRewardsCfg",
+    "HOPEVirtualBallRewardsCfg",
+    "HOPEActionBallRewardsCfg",
+    "HOPEActionBallC211RewardsCfg",
+)
+
+#: ``term -> 声明它的那个类``。影子检查要求该项在整条链里**只**由这个类声明。
+ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS = (
+    ("base_ang_vel_xy", "HOPEDeployParityRewardsCfg"),
+    ("base_lin_vel_z", "HOPEDeployParityRewardsCfg"),
+    ("joint_vel", "HOPEDeployParityRewardsCfg"),
+)
+
+#: 权威是 reward_pack=v2 那张表的项。``upright_exp`` 的 cfg 类体是 `0.0`,
+#: 只读类体会读出一个根本不会生效的数 —— 这正是这条镜像漂了四天没人发现的原因。
+ISAAC_PACK_SOURCED_PRIOR_WEIGHTS = ("upright_exp", "action_rate_l2")
+
+#: 这轮**没有**做成活值比对的那 9 条,以及卡在哪。写在这里而不是留白,是因为
+#: "没比"和"比过了"必须长得不一样。
+#:
+#: 这里**只写项名和权威路径,不写数值** —— 再抄一份数字进来,就是给这个文件添第四份
+#: 手抄件,而"手抄件默认已漂"正是这一整节存在的理由。真在收的那个数看收据里的
+#: ``implemented_terms``。
+#:
+#: 共同的卡点:这 9 条的权威都要过一道 Hydra YAML(``rewards.motion_scale`` 或
+#: ``rewards.motion_racket_*_weight``),而 ``isaac_live_constants`` 的求值器只读
+#: Python AST。要闭掉它,得让求值器会解析 Hydra 的 defaults 链并按后写后赢合成 —— 那是
+#: 另一批活,不在这一批里假装做完。
+C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED = (
+    {
+        "term": "motion_global_anchor_ori",
+        "resolution": "RewardsCfg.motion_global_anchor_ori.weight x YAML rewards.motion_scale",
+        "blocked_on": "authority_passes_through_a_hydra_yaml_defaults_chain_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_body_pos",
+        "resolution": "HOPEDeployParityRewardsCfg.motion_body_pos.weight x YAML rewards.motion_scale",
+        "blocked_on": "authority_passes_through_a_hydra_yaml_defaults_chain_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_body_ori",
+        "resolution": "HOPEDeployParityRewardsCfg.motion_body_ori.weight x YAML rewards.motion_scale",
+        "blocked_on": "authority_passes_through_a_hydra_yaml_defaults_chain_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_body_lin_vel",
+        "resolution": "HOPEDeployParityRewardsCfg.motion_body_lin_vel.weight x YAML rewards.motion_scale",
+        "blocked_on": "authority_passes_through_a_hydra_yaml_defaults_chain_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_body_ang_vel",
+        "resolution": "HOPEDeployParityRewardsCfg.motion_body_ang_vel.weight x YAML rewards.motion_scale",
+        "blocked_on": "authority_passes_through_a_hydra_yaml_defaults_chain_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_racket_position",
+        "resolution": "YAML rewards.motion_racket_position_weight (cfg class weight is 0.0)",
+        "blocked_on": "authority_is_a_hydra_yaml_key_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_racket_velocity",
+        "resolution": "YAML rewards.motion_racket_velocity_weight (cfg class weight is 0.0)",
+        "blocked_on": "authority_is_a_hydra_yaml_key_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_racket_normal",
+        "resolution": "YAML rewards.motion_racket_normal_weight (cfg class weight is 0.0)",
+        "blocked_on": "authority_is_a_hydra_yaml_key_this_python_ast_evaluator_cannot_read",
+    },
+    {
+        "term": "motion_racket_long_axis",
+        "resolution": "YAML rewards.motion_racket_long_axis_weight (cfg class weight is 0.0)",
+        "blocked_on": "authority_is_a_hydra_yaml_key_this_python_ast_evaluator_cannot_read",
+    },
+)
+
+
+#: ``term -> 本模块真正收的那个权重``。值一律是上面那几个模块常量本身,不是第二份手抄
+#: —— 这份表和奖励内核必须引用同一个符号,否则它就是"第三份手抄"。
+#: `test_mirrored_prior_weights_match_what_the_kernel_charges` 会拿内核跑出来的
+#: `manager_weight` 逐条对这张表,所以"引用同一个符号"这句话是被机器检的。
+_MIRRORED_PRIOR_WEIGHTS = {
+    "upright_exp": C211_UPRIGHT_EXP_MANAGER_WEIGHT,
+    "base_ang_vel_xy": C211_BASE_ANG_VEL_XY_MANAGER_WEIGHT,
+    "base_lin_vel_z": C211_BASE_LIN_VEL_Z_MANAGER_WEIGHT,
+    "joint_vel": C211_JOINT_VEL_MANAGER_WEIGHT,
+    "action_rate_l2": C211_ACTION_RATE_POST_DT_WEIGHT,
+}
+
+
+def _mirrored_prior_weight(term: str) -> float:
+    try:
+        return float(_MIRRORED_PRIOR_WEIGHTS[term])
+    except KeyError as exc:  # pragma: no cover - table/selector drift
+        raise C211EnvError(
+            f"C211 reward weight parity lists {term!r} but this module has no "
+            "mirrored constant for it"
+        ) from exc
+
+
+def mirrored_isaac_reward_weight_entries() -> tuple:
+    """``(key, source, selector, mirrored_value)`` for every live-compared weight.
+
+    Built on call, not at import: the drift tests repoint the module-level
+    source paths at mutated copies.
+    """
+
+    entries: list[tuple] = []
+    for term, class_name in ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS:
+        entries.append(
+            (
+                f"reward_weight:{term}",
+                HOPE_ENV_CFG_PY,
+                ("class_term_weight", class_name, term),
+                _mirrored_prior_weight(term),
+            )
+        )
+    for term in ISAAC_PACK_SOURCED_PRIOR_WEIGHTS:
+        entries.append(
+            (
+                f"reward_weight:{term}",
+                TRAIN_PY,
+                ("pair_table_value", ISAAC_REWARD_PACK_TABLE, term),
+                _mirrored_prior_weight(term),
+            )
+        )
+    return tuple(entries)
+
+
+def live_isaac_reward_weight_blockers() -> tuple:
+    """Every mirrored reward weight that no longer equals its live Isaac value.
+
+    Two independent failures are reported, not one:
+
+    * a mirrored weight that differs from the live Isaac weight; and
+    * a term that a *later* class in the C211 RewardsCfg chain has started to
+      re-declare, which would make the single-class selector answer with a
+      shadowed value.  Without this second check a downstream override would
+      leave the gate green while the two lanes charge different prices.
+    """
+
+    blockers: list[str] = []
+    # 覆盖面先自检:14 条实现项里,每一条要么在"比过了"那批、要么在"没比"那批。
+    # 少了一条就是第三种状态 —— 没人比、也没人记 —— 那正是这道门要消灭的东西。
+    compared = {term for term, _c in ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS}
+    compared |= set(ISAAC_PACK_SOURCED_PRIOR_WEIGHTS)
+    declared = {row["term"] for row in C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED}
+    overlap = sorted(compared & declared)
+    if overlap:
+        blockers.append(
+            "c211_reward_weight_term_is_both_compared_and_declared_uncompared:"
+            f"{overlap}"
+        )
+    unaccounted = sorted(
+        set(C211_IMPLEMENTED_ISAAC_PRIOR_TERM_NAMES) - compared - declared
+    )
+    if unaccounted:
+        blockers.append(
+            "c211_reward_weight_term_neither_compared_nor_declared_uncompared:"
+            f"{unaccounted}"
+        )
+    unknown = sorted((compared | declared) - set(C211_IMPLEMENTED_ISAAC_PRIOR_TERM_NAMES))
+    if unknown:
+        blockers.append(
+            f"c211_reward_weight_term_is_not_an_implemented_prior_term:{unknown}"
+        )
+    for term, class_name in ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS:
+        try:
+            declaring = isaac_live_constants.declaring_classes(
+                HOPE_ENV_CFG_PY, ISAAC_C211_REWARD_CFG_CHAIN, term
+            )
+        except isaac_live_constants.IsaacLiveConstantError as exc:
+            blockers.append(f"c211_reward_weight_chain_unreadable:{term}:{exc}")
+            continue
+        if declaring != (class_name,):
+            blockers.append(
+                f"c211_reward_weight_shadowed:{term}:selector_reads={class_name} "
+                f"but_the_c211_chain_declares_it_in={list(declaring)}"
+            )
+    try:
+        entries = mirrored_isaac_reward_weight_entries()
+    except C211EnvError as exc:
+        return tuple(blockers) + (f"c211_reward_weight_mirror_self_inconsistent:{exc}",)
+    return tuple(blockers) + isaac_live_constants.parity_blockers(
+        "c211_reward_weight", entries
+    )
+
 
 FORMAL_BLOCKERS = (
     "c211_split_ready_physical_birth_cross_engine_parity_unmeasured",
@@ -571,7 +804,7 @@ def _c211_isaac_synonymous_prior_terms(
     terms = {
         "upright_exp": _prior_term(
             raw_reward=math.exp(-upright_error_sq / (C211_UPRIGHT_STD**2)),
-            manager_weight=1.0,
+            manager_weight=C211_UPRIGHT_EXP_MANAGER_WEIGHT,
             details={
                 "projected_gravity_xy_squared": upright_error_sq,
                 "std": C211_UPRIGHT_STD,
@@ -580,17 +813,17 @@ def _c211_isaac_synonymous_prior_terms(
         ),
         "base_ang_vel_xy": _prior_term(
             raw_reward=base_ang_vel_xy_raw,
-            manager_weight=-0.05,
+            manager_weight=C211_BASE_ANG_VEL_XY_MANAGER_WEIGHT,
             details={"formula": "sum(base_ang_vel_body_xy^2)"},
         ),
         "base_lin_vel_z": _prior_term(
             raw_reward=base_lin_vel_z_raw,
-            manager_weight=-0.5,
+            manager_weight=C211_BASE_LIN_VEL_Z_MANAGER_WEIGHT,
             details={"formula": "base_inertial_COM_lin_vel_body_z^2"},
         ),
         "joint_vel": _prior_term(
             raw_reward=joint_vel_raw,
-            manager_weight=-1.0e-4,
+            manager_weight=C211_JOINT_VEL_MANAGER_WEIGHT,
             details={"formula": "sum(joint_velocity^2)"},
         ),
         "action_rate_l2": _prior_term(
@@ -3184,6 +3417,24 @@ class MujocoC211DiagnosticVecEnv:
     ) -> dict[str, Any]:
         """Reopen and bind every source used by the C211 task scalar."""
 
+        # 第一件事,在任何运行时依赖之前:镜像里收的那几个奖励权重,跟 Isaac 现役
+        # (发车解析后)的那几个,逐个比值。
+        #
+        # 人话:收据里那个 `reward_pack_resolver_source_sha256` 只说"train.py 的字节跟
+        # 上次一样"。train.py 天天因为无关原因变,那个数天天变,没有任何消费者读它、也没有
+        # 任何门会因为它拒收 —— 2026-08-04 `upright_exp` 从 1.0 重定价到 0.25,这份镜像
+        # 四天没跟上,就是从这个缝里过去的。重钉指纹满足不了下面这道门。
+        #
+        # 放在最前面是有意的:它是纯静态检查,不需要 torch、不需要 native ABI。价钱不对就
+        # 别往下走了,后面所有的收据都会带着一个错的经济账。
+        weight_blockers = live_isaac_reward_weight_blockers()
+        if weight_blockers:
+            raise C211EnvError(
+                "C211 mirrored Isaac reward weights no longer equal the live "
+                "Isaac values (re-pinning train.py's file digest does not port "
+                "them): " + "; ".join(weight_blockers)
+            )
+
         try:
             import torch
         except ImportError as exc:
@@ -3375,23 +3626,23 @@ class MujocoC211DiagnosticVecEnv:
         implemented_prior_terms = [
             {
                 "term": "upright_exp",
-                "manager_weight": 1.0,
+                "manager_weight": C211_UPRIGHT_EXP_MANAGER_WEIGHT,
                 "params": {"std": C211_UPRIGHT_STD},
                 "source": "live_root_rotation_projected_gravity_body",
             },
             {
                 "term": "base_ang_vel_xy",
-                "manager_weight": -0.05,
+                "manager_weight": C211_BASE_ANG_VEL_XY_MANAGER_WEIGHT,
                 "source": "live_root_body_frame_angular_velocity_xy",
             },
             {
                 "term": "base_lin_vel_z",
-                "manager_weight": -0.5,
+                "manager_weight": C211_BASE_LIN_VEL_Z_MANAGER_WEIGHT,
                 "source": "live_root_inertial_COM_velocity_body_z",
             },
             {
                 "term": "joint_vel",
-                "manager_weight": -1.0e-4,
+                "manager_weight": C211_JOINT_VEL_MANAGER_WEIGHT,
                 "source": "live_MuJoCo_joint_dof_velocity",
             },
             {
@@ -3575,6 +3826,21 @@ class MujocoC211DiagnosticVecEnv:
                     VENDOR_V2_TASK_YAML
                 ),
                 "c211_task_yaml_sha256": _sha256_file(C211_TASK_YAML),
+                # 谁被逐个比过值、谁只是被钉了指纹,收据自己说清楚,不让读的人猜。
+                "live_reward_weight_parity": {
+                    "compared_terms": sorted(
+                        key.split(":", 1)[1]
+                        for key, _s, _sel, _v in mirrored_isaac_reward_weight_entries()
+                    ),
+                    "authority": (
+                        "launch_resolved_weight_reward_pack_v2_overrides_cfg_class_body"
+                    ),
+                    "shadow_checked_cfg_chain": list(ISAAC_C211_REWARD_CFG_CHAIN),
+                    "not_live_compared": [
+                        dict(row)
+                        for row in C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED
+                    ],
+                },
             },
             "runtime_bindings": {
                 "event_sources": event_rows,
@@ -4548,9 +4814,16 @@ __all__ = [
     "C211_TARGET_RECIPE",
     "C211_REWARD_SCOPE",
     "C211_UNAVAILABLE_ISAAC_REWARD_TERMS",
+    "C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED",
     "FORMAL_BLOCKERS",
+    "ISAAC_C211_REWARD_CFG_CHAIN",
+    "ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS",
+    "ISAAC_PACK_SOURCED_PRIOR_WEIGHTS",
+    "ISAAC_REWARD_PACK_TABLE",
     "SAFE_READY_AUTHORITY_STATUS",
     "TRACKED_BODY_NAMES",
+    "live_isaac_reward_weight_blockers",
+    "mirrored_isaac_reward_weight_entries",
     "C211EnvError",
     "C211ObservationProducer",
     "C211TaskAuthority",

@@ -225,15 +225,19 @@ def test_a_renamed_upstream_source_file_is_refused(tmp_path, monkeypatch):
 
 
 def test_debt_without_a_written_plan_is_refused(monkeypatch):
+    # 2026-08-08:样本从 C211_ACTION_RATE_POST_DT_WEIGHT 换成 C211_UPRIGHT_STD ——
+    # 前者已经从 MIRRORED_TODO 升级成 LIVE_VALUE_COMPARED(走 c211_reward_weight
+    # provider),不再是"欠债"的样本了。这条测试要的是一个**还在欠**的常量。
+    example = "action_ball_c211_env.C211_UPRIGHT_STD"
+    assert example in registry.OPEN_MIRROR_DEBT
     trimmed = {
         key: value
         for key, value in registry.OPEN_MIRROR_DEBT.items()
-        if key != "action_ball_c211_env.C211_ACTION_RATE_POST_DT_WEIGHT"
+        if key != example
     }
     monkeypatch.setattr(registry, "OPEN_MIRROR_DEBT", trimmed)
     assert any(
-        "mirrored_todo_without_a_written_plan:"
-        "action_ball_c211_env.C211_ACTION_RATE_POST_DT_WEIGHT" in item
+        f"mirrored_todo_without_a_written_plan:{example}" in item
         for item in registry.registry_blockers()
     )
 

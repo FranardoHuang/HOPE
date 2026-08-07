@@ -504,3 +504,309 @@ def test_the_table_guard_gate_fires_on_a_synthetic_blocker(monkeypatch):
     )
     with pytest.raises(term.TableTerminationContractError, match="synthetic_table"):
         term.verify_isaac_source_authority()
+
+
+# ---------------------------------------------------------------------------
+# C211 奖励权重:镜像 vs Isaac 现役值(2026-08-08 新增)
+#
+# 这一组的由来是一次真事故,不是假想:2026-08-04 Isaac 把 ``upright_exp`` 从 1.0
+# 重定价到 0.25(`_REWARD_PACK_V2_DIRECT`),``action_ball_c211_env`` 那份手抄权重
+# 四天没跟上,而所有的门都是绿的 —— 因为当时唯一"看着"这件事的东西是收据里的
+# ``reward_pack_resolver_source_sha256 = sha256(train.py)``:整文件指纹,天天变,
+# 没有任何消费者读它,也没有任何门会因为它拒收。
+#
+# 每条变异都做成"粗一个档次的检查照样通过",并且**在同一条测试里先把那个粗检查
+# 断言成过得去**,再要求活值门变红。
+# ---------------------------------------------------------------------------
+
+from mujoco_native import action_ball_c211_env as c211  # noqa: E402
+
+
+HOPE_ENV_CFG = c211.HOPE_ENV_CFG_PY
+TRAIN_PY = c211.TRAIN_PY
+
+
+def _repoint_cfg(monkeypatch, path: Path) -> None:
+    monkeypatch.setattr(c211, "HOPE_ENV_CFG_PY", path)
+
+
+def _repoint_train(monkeypatch, path: Path) -> None:
+    monkeypatch.setattr(c211, "TRAIN_PY", path)
+
+
+def test_c211_reward_weight_mirror_is_green_on_the_real_sources():
+    assert c211.live_isaac_reward_weight_blockers() == ()
+
+
+def test_the_pack_is_the_authority_not_the_cfg_class_body():
+    """`upright_exp` 的类体是 0.0,现役是 0.25 —— 读错一层就会得出相反结论。
+
+    这条把"为什么要读 reward_pack 那一层"钉死:如果哪天有人把选择器改回
+    ``class_term_weight``,它读到的是 0.0,而镜像收的是 0.25,本条立刻红。
+    """
+
+    class_body = live.live_value(
+        HOPE_ENV_CFG, ("class_term_weight", "HOPEDeployParityRewardsCfg", "upright_exp")
+    )
+    launch_resolved = live.live_value(
+        TRAIN_PY, ("pair_table_value", c211.ISAAC_REWARD_PACK_TABLE, "upright_exp")
+    )
+    assert class_body == 0.0
+    assert launch_resolved == 0.25
+    assert c211._MIRRORED_PRIOR_WEIGHTS["upright_exp"] == launch_resolved
+
+
+def test_isaac_repricing_upright_exp_again_turns_the_mirror_red(tmp_path, monkeypatch):
+    """重放 08-04 那次事故:Isaac 动了,镜像没动。
+
+    粗检查(项数不变、项名不变、0.25 这个字面量在 train.py 里还有别的出处)全部
+    照样通过 —— 这三条都在下面断言过。
+    """
+
+    mutated = _mutated(
+        tmp_path,
+        TRAIN_PY,
+        '("upright_exp", 0.25),',
+        '("upright_exp", 1.0),',
+        "train_upright.py",
+    )
+    text = mutated.read_text(encoding="utf-8")
+    assert text.count('("action_rate_l2", -0.1),') == 1     # 其余行没动
+    assert "0.25" in text                                   # 这个数在文件里还在
+    _repoint_train(monkeypatch, mutated)
+
+    blockers = c211.live_isaac_reward_weight_blockers()
+    assert any("upright_exp" in item and "live=1.0" in item for item in blockers), (
+        blockers
+    )
+
+
+def test_swapping_two_weights_between_terms_turns_the_mirror_red(tmp_path, monkeypatch):
+    """把 base_ang_vel_xy 和 base_lin_vel_z 的权重对调。
+
+    和不变(-0.55)、排序后的多重集不变、项数不变 —— 三条粗检查在下面逐条断言过,
+    它们全过。只有逐项比值抓得住。
+    """
+
+    text = HOPE_ENV_CFG.read_text(encoding="utf-8")
+    # 锚点必须带上行尾注释才唯一:同样这两行在 HOPEHitterPureRewardsCfg 里还有一份
+    # 逐字相同的拷贝(那个类不在 C211 链上)。这本身就是影子检查存在的理由。
+    ang = (
+        "base_ang_vel_xy = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)"
+        "  # roll/pitch rate"
+    )
+    lin = (
+        "base_lin_vel_z = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5)"
+        "  # vertical bob"
+    )
+    assert text.count(ang) == 1 and text.count(lin) == 1
+    swapped = text.replace(ang, "@@ANG@@").replace(lin, "@@LIN@@")
+    swapped = swapped.replace(
+        "@@ANG@@", "base_ang_vel_xy = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.5)"
+    ).replace(
+        "@@LIN@@", "base_lin_vel_z = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.05)"
+    )
+    mutated = tmp_path / "hope_env_cfg_swapped.py"
+    mutated.write_text(swapped, encoding="utf-8")
+    _repoint_cfg(monkeypatch, mutated)
+
+    live_now = {
+        term_name: live.live_value(
+            mutated, ("class_term_weight", class_name, term_name)
+        )
+        for term_name, class_name in c211.ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS
+    }
+    mirrored = {
+        term_name: c211._MIRRORED_PRIOR_WEIGHTS[term_name]
+        for term_name, _c in c211.ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS
+    }
+    # 粗检查全过:
+    assert len(live_now) == len(mirrored)
+    assert sum(live_now.values()) == pytest.approx(sum(mirrored.values()))
+    assert sorted(live_now.values()) == pytest.approx(sorted(mirrored.values()))
+
+    blockers = c211.live_isaac_reward_weight_blockers()
+    assert any("base_ang_vel_xy" in item for item in blockers), blockers
+    assert any("base_lin_vel_z" in item for item in blockers), blockers
+
+
+def test_a_downstream_class_shadowing_the_term_turns_the_mirror_red(
+    tmp_path, monkeypatch
+):
+    """C211 类里新增一条同名 RewTerm,**值故意写成和现在一模一样**。
+
+    所以逐项比值这一层完全过得去(下面断言过:选择器读到的还是 -1.0e-4)。
+    抓住它的只有影子检查 —— 没有它,以后任何人在下游改这个权重,门都会绿着放行。
+    """
+
+    anchor = "class HOPEActionBallC211RewardsCfg(HOPEActionBallRewardsCfg):"
+    mutated = _mutated(
+        tmp_path,
+        HOPE_ENV_CFG,
+        anchor,
+        anchor
+        + "\n    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1.0e-4)  # shadow",
+        "hope_env_cfg_shadow.py",
+    )
+    _repoint_cfg(monkeypatch, mutated)
+
+    # 值这一层过得去:选择器指的那个类没动。
+    assert live.live_value(
+        mutated, ("class_term_weight", "HOPEDeployParityRewardsCfg", "joint_vel")
+    ) == pytest.approx(-1.0e-4)
+    assert live.parity_blockers(
+        "probe", c211.mirrored_isaac_reward_weight_entries()
+    ) == ()
+
+    blockers = c211.live_isaac_reward_weight_blockers()
+    assert any(
+        item.startswith("c211_reward_weight_shadowed:joint_vel") for item in blockers
+    ), blockers
+
+
+def test_a_deleted_pack_row_refuses_instead_of_falling_back(tmp_path, monkeypatch):
+    """把 ``action_rate_l2`` 那一行从包里删掉。
+
+    这条是陷阱题:``action_rate_l2`` 的 cfg 类体权重**也是 -0.1**
+    (``tracking_env_cfg.RewardsCfg``)。任何"包里没有就退回类体"的读法都会宣布
+    "对齐",而事实是这一项已经不再由包定价了。必须拒绝,不许猜。
+    """
+
+    mutated = _mutated(
+        tmp_path,
+        TRAIN_PY,
+        '    ("action_rate_l2", -0.1),\n',
+        "",
+        "train_no_action_rate.py",
+    )
+    _repoint_train(monkeypatch, mutated)
+
+    blockers = c211.live_isaac_reward_weight_blockers()
+    assert any(
+        "action_rate_l2" in item and "unreadable" in item for item in blockers
+    ), blockers
+
+
+def test_a_row_the_reader_cannot_parse_refuses_instead_of_skipping(
+    tmp_path, monkeypatch
+):
+    """包里混进一行不是 ``(name, value)`` 的东西 -> 拒绝,不是跳过。
+
+    跳过是最坏的失败模式:被跳过的那一行完全可能就是要找的那一行。
+    """
+
+    mutated = _mutated(
+        tmp_path,
+        TRAIN_PY,
+        '    ("upright_exp", 0.25),',
+        '    ("upright_exp", 0.25, "note"),',
+        "train_bad_row.py",
+    )
+    _repoint_train(monkeypatch, mutated)
+
+    blockers = c211.live_isaac_reward_weight_blockers()
+    assert any("upright_exp" in item and "unreadable" in item for item in blockers), (
+        blockers
+    )
+
+
+def test_the_c211_reward_contract_refuses_on_a_synthetic_weight_blocker(monkeypatch):
+    """记录与阻断同一批:门必须真的拦,不能只往收据里写一行。"""
+
+    monkeypatch.setattr(
+        c211, "live_isaac_reward_weight_blockers", lambda: ("synthetic_weight_drift",)
+    )
+    env = object.__new__(c211.MujocoC211DiagnosticVecEnv)
+    with pytest.raises(c211.C211EnvError, match="synthetic_weight_drift"):
+        env._build_reward_contract(None)
+
+
+# ---------------------------------------------------------------------------
+# A211 侧那两条:同一个机制,同样要能变红
+# ---------------------------------------------------------------------------
+
+from mujoco_native import action_ball_a211_env as a211  # noqa: E402
+
+
+def test_a211_reward_weight_mirror_is_green_on_the_real_sources():
+    assert a211.live_isaac_reward_weight_blockers() == ()
+
+
+def test_isaac_repricing_racket_progress_turns_the_a211_mirror_red(
+    tmp_path, monkeypatch
+):
+    """`racket_progress` 是 A 族"够球"那条腿的价钱,改了没人看就是又一次 upright_exp。
+
+    锚点带上行尾的 params 才唯一:HOPEHitterPureRewardsCfg 里有一条同名的 weight=0.0
+    (那个类不在 C211/A211 的链上)—— 又一个影子检查存在的理由。
+    """
+
+    old = (
+        "racket_progress = RewTerm(func=mdp.racket_progress, weight=10.0, "
+        'params={"command_name": "racket_target"})'
+    )
+    mutated = _mutated(
+        tmp_path,
+        HOPE_ENV_CFG,
+        old,
+        old.replace("weight=10.0", "weight=2.5"),
+        "hope_env_cfg_progress.py",
+    )
+    monkeypatch.setattr(c211, "HOPE_ENV_CFG_PY", mutated)
+
+    blockers = a211.live_isaac_reward_weight_blockers()
+    assert any(
+        "racket_progress" in item and "live=2.5" in item for item in blockers
+    ), blockers
+
+
+def test_a211_shadowing_racket_progress_is_caught_even_at_the_same_value(
+    tmp_path, monkeypatch
+):
+    anchor = "class HOPEActionBallC211RewardsCfg(HOPEActionBallRewardsCfg):"
+    mutated = _mutated(
+        tmp_path,
+        HOPE_ENV_CFG,
+        anchor,
+        anchor
+        + "\n    racket_progress = RewTerm(func=mdp.racket_progress, weight=10.0,"
+        ' params={"command_name": "racket_target"})  # shadow',
+        "hope_env_cfg_progress_shadow.py",
+    )
+    monkeypatch.setattr(c211, "HOPE_ENV_CFG_PY", mutated)
+
+    # 值这一层完全过得去:
+    assert live.parity_blockers(
+        "probe", a211.mirrored_isaac_reward_weight_entries()
+    ) == ()
+
+    blockers = a211.live_isaac_reward_weight_blockers()
+    assert any(
+        item.startswith("a211_reward_weight_shadowed:racket_progress")
+        for item in blockers
+    ), blockers
+
+
+def test_every_implemented_c211_prior_term_is_either_compared_or_declared():
+    """14 条实现项不许有第三种状态:没人比、也没人记。
+
+    把一条从"没比"名单里删掉 —— 名单还是合法的 dict、其余 8 条一字不动,任何
+    "名单格式对不对"式的检查都会放行。只有覆盖面自检抓得住。
+    """
+
+    assert c211.live_isaac_reward_weight_blockers() == ()
+    trimmed = tuple(
+        row
+        for row in c211.C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED
+        if row["term"] != "motion_racket_normal"
+    )
+    assert len(trimmed) == len(c211.C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED) - 1
+    assert all(set(row) == {"term", "resolution", "blocked_on"} for row in trimmed)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(c211, "C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED", trimmed)
+        blockers = c211.live_isaac_reward_weight_blockers()
+    assert any(
+        "neither_compared_nor_declared_uncompared" in item
+        and "motion_racket_normal" in item
+        for item in blockers
+    ), blockers

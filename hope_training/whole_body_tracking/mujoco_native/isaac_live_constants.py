@@ -45,6 +45,15 @@ SELECTOR_KINDS = (
     #   -> the ``params={...}`` dict of the ``return DoneTerm(...)`` inside
     #      that function -> the value stored under ``"margin"``.
     "function_return_param",
+    # ("class_term_weight", "HOPERewardsCfg", "base_ang_vel_xy")
+    #   -> ``ClassDef.body`` assignment ``base_ang_vel_xy = RewTerm(...,
+    #      weight=-0.05)`` -> ``-0.05``.  This is the ``weight=`` keyword, not a
+    #      ``params={...}`` entry, so ``class_term_param`` cannot reach it.
+    "class_term_weight",
+    # ("pair_table_value", "_REWARD_PACK_V2_DIRECT", "upright_exp")
+    #   -> the module-level ``(("name", value), ...)`` table -> the ``value``
+    #      stored beside that exact name.  The name must appear exactly once.
+    "pair_table_value",
 )
 
 
@@ -241,11 +250,88 @@ def _dict_entry(node: ast.Dict, key: str, description: str) -> ast.AST:
     return _unique(matches, f"{description} key {key!r}")
 
 
+@lru_cache(maxsize=16)
+def _class_index(path_text: str) -> dict:
+    """``class name -> [ClassDef, ...]`` for the whole module, walked once.
+
+    Built once per source because the callers ask about a handful of classes
+    each: ``hope_env_cfg.py`` is ~4k lines and a per-question ``ast.walk`` cost
+    ~220 ms per env construction.  The list (not the node) is kept so a
+    duplicated class name still fails ``_unique`` instead of silently picking
+    one.
+    """
+
+    index: dict = {}
+    for node in ast.walk(_parse_module(path_text)):
+        if isinstance(node, ast.ClassDef):
+            index.setdefault(node.name, []).append(node)
+    return index
+
+
+def _class_node(path_text: str, class_name: str) -> ast.ClassDef:
+    return _unique(
+        _class_index(path_text).get(class_name, []), f"class {class_name!r}"
+    )
+
+
+def _class_attribute_call(
+    path_text: str, class_name: str, attribute: str
+) -> ast.AST:
+    class_node = _class_node(path_text, class_name)
+    attributes = [
+        node.value
+        for node in class_node.body
+        if attribute in _assign_targets(node) and getattr(node, "value", None)
+    ]
+    return _unique(attributes, f"{class_name}.{attribute}")
+
+
+def _call_keyword(call: ast.AST, name: str, description: str) -> ast.AST:
+    if not isinstance(call, ast.Call):
+        raise IsaacLiveConstantError(f"{description} is not a term constructor call")
+    matches = [
+        keyword.value for keyword in call.keywords if keyword.arg == name
+    ]
+    return _unique(matches, f"{description} {name}=")
+
+
 def _selected_node(path_text: str, selector: Sequence[Any]) -> ast.AST:
     kind = selector[0] if selector else None
     if kind not in SELECTOR_KINDS:
         raise IsaacLiveConstantError(f"unsupported live selector kind {kind!r}")
     tree = _parse_module(path_text)
+    if kind == "class_term_weight":
+        _kind, class_name, attribute = selector
+        return _call_keyword(
+            _class_attribute_call(path_text, class_name, attribute),
+            "weight",
+            f"{class_name}.{attribute}",
+        )
+    if kind == "pair_table_value":
+        _kind, table_name, key = selector
+        assignments = _module_level_assignments(path_text)
+        if table_name not in assignments:
+            raise IsaacLiveConstantError(
+                f"live module table {table_name!r} is absent or rebound"
+            )
+        table = assignments[table_name]
+        if not isinstance(table, (ast.Tuple, ast.List)):
+            raise IsaacLiveConstantError(
+                f"live module table {table_name!r} is not a literal tuple/list"
+            )
+        matches: list[ast.AST] = []
+        for element in table.elts:
+            if not isinstance(element, (ast.Tuple, ast.List)) or len(element.elts) != 2:
+                # A row this reader cannot understand must never be silently
+                # skipped: it could be the very row that holds the key.
+                raise IsaacLiveConstantError(
+                    f"live module table {table_name!r} has a row that is not a "
+                    "2-element (name, value) pair"
+                )
+            stored_key = element.elts[0]
+            if isinstance(stored_key, ast.Constant) and stored_key.value == key:
+                matches.append(element.elts[1])
+        return _unique(matches, f"{table_name} entry {key!r}")
     if kind == "assignment":
         _kind, name = selector
         assignments = _module_level_assignments(path_text)
@@ -256,18 +342,7 @@ def _selected_node(path_text: str, selector: Sequence[Any]) -> ast.AST:
         return assignments[name]
     if kind == "class_term_param":
         _kind, class_name, attribute, param = selector
-        classes = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef) and node.name == class_name
-        ]
-        class_node = _unique(classes, f"class {class_name!r}")
-        attributes = [
-            node.value
-            for node in class_node.body
-            if attribute in _assign_targets(node) and getattr(node, "value", None)
-        ]
-        call = _unique(attributes, f"{class_name}.{attribute}")
+        call = _class_attribute_call(path_text, class_name, attribute)
         return _dict_entry(
             _params_dict(call, f"{class_name}.{attribute}"),
             param,
@@ -308,6 +383,36 @@ def live_value(
     return _normalize(resolver.evaluate(_selected_node(path_text, selector)))
 
 
+def declaring_classes(
+    source_path: Any, class_names: Sequence[str], attribute: str
+) -> tuple[str, ...]:
+    """Which of ``class_names`` declare ``attribute`` in their own class body.
+
+    A ``class_term_weight`` selector names ONE class.  If a later class in the
+    same cfg inheritance chain re-declares that term, the selector keeps
+    answering with the shadowed value and the parity check reports "aligned"
+    about a weight that is no longer the one that runs.  Callers pass the whole
+    chain here and refuse anything but the single class they expect, so adding
+    an override downstream breaks the gate instead of sneaking past it.
+    """
+
+    path_text = str(Path(source_path))
+    index = _class_index(path_text)
+    found: list[str] = []
+    for name in class_names:
+        if name not in index:
+            raise IsaacLiveConstantError(
+                f"live cfg class {name!r} is absent from {path_text}"
+            )
+        class_node = _class_node(path_text, name)
+        if any(
+            attribute in _assign_targets(node) and getattr(node, "value", None)
+            for node in class_node.body
+        ):
+            found.append(name)
+    return tuple(found)
+
+
 def parity_blockers(
     prefix: str,
     entries: Sequence[Sequence[Any]],
@@ -342,6 +447,7 @@ def clear_caches() -> None:
     """Drop the parsed-source caches (tests repoint the sources at tmp files)."""
 
     _parse_module.cache_clear()
+    _class_index.cache_clear()
     _module_level_assignments.cache_clear()
     _import_from_bindings.cache_clear()
 

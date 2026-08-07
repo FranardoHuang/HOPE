@@ -216,7 +216,26 @@ def _reason_order_values() -> dict:
     return {"active_order": live_order, "hard_order": hard}
 
 
+def _a211_reward_weight_values() -> dict:
+    module = importlib.import_module(f"{PACKAGE}.action_ball_a211_env")
+    return _entry_values(module.mirrored_isaac_reward_weight_entries())
+
+
+def _c211_reward_weight_values() -> dict:
+    """``reward_weight:<term> -> mirrored weight`` for the live-compared subset.
+
+    The keys keep the ``reward_weight:`` prefix the entries themselves use, so
+    a registry line names the exact entry the parity check compares — there is
+    no second naming scheme to drift.
+    """
+
+    module = importlib.import_module(f"{PACKAGE}.action_ball_c211_env")
+    return _entry_values(module.mirrored_isaac_reward_weight_entries())
+
+
 LIVE_VALUE_PROVIDERS = {
+    "a211_reward_weight": _a211_reward_weight_values,
+    "c211_reward_weight": _c211_reward_weight_values,
     "phase_termination": _phase_termination_values,
     "table_guard": _table_guard_values,
     "native_source_digest": _native_source_digest_values,
@@ -241,14 +260,22 @@ OPEN_MIRROR_DEBT = {
         "('class_term_param', <RewardsCfg>, 'upright_exp', 'std') 注册。",
         "放宽求值器白名单会扩大'猜'的面,这轮的定调是收紧不放宽,不在同一批里做。",
     ),
-    "action_ball_c211_env.C211_ACTION_RATE_POST_DT_WEIGHT": (
-        "train.py :: _REWARD_PACK_V2_DIRECT 的 ('action_rate_l2', -0.1)",
-        "值是纯字面量,求值器现在就读得出;缺的是给 c211_env 建一张和 "
-        "table_termination 同款的 mirrored_isaac_constant_entries 表并接到它的收据上。",
-        "c211_env 的 Isaac 侧奖励镜像不止这一条(见下面两条),要做就一次做完整张表,"
-        "这轮的预算给了终止顺序那条链。"
-        "(2026-08-08 更名:原 C211_ACTION_RATE_CLAMP 随封顶版一起退役 —— 上游 "
-        "action_rate_l2 没有 value_clamp,再挂一条 clamp 的镜像债就是在镜像一个不存在的东西。)",
+    # 2026-08-08 已还清:C211_ACTION_RATE_POST_DT_WEIGHT 连同另外四条权重一起改成
+    # LIVE_VALUE_COMPARED,走 c211_reward_weight provider ->
+    # action_ball_c211_env.mirrored_isaac_reward_weight_entries()。上一版这条债写的修法
+    # (建一张 table_termination 同款的表)就是照着做的。同批发现:同一张手抄表里的
+    # upright_exp 从 2026-08-04 起就是错的(1.0,Isaac 现役 0.25),四天没有任何门看见 ——
+    # 这正是这条债不该再拖一轮的实证。
+    "action_ball_a211_env.A211_BASE_POSITION_WEIGHT": (
+        "cfg 类体 HOPEHitterRewardsCfg/父类的 base_position.weight,再被 YAML "
+        "rewards.base_position_weight 改写(HOPEPingPongActionBall.yaml 给 1.5,"
+        "A211/C211 叶子各自改写成 0.0)",
+        "要让 isaac_live_constants 会读 Hydra:按 defaults 链展开、后写后赢地合成出"
+        "发车时那一份 rewards 映射,然后按 ('yaml_reward_weight', <leaf>, "
+        "'base_position') 注册。同一个能力一次能闭掉 C 族那 9 条 motion_*。",
+        "这一批只做了 Python AST 那一层的活值比对。Hydra 合成要连 defaults 顺序、"
+        "@_here_ 语义、包展开一起做对,做半截比不做更危险 —— 会给一个'比过了'的假象。"
+        "在它落地之前,这条明写成债,不假装比过。",
     ),
     "action_ball_c211_env.TRACKED_BODY_NAMES": (
         "Isaac 的 motion 跟踪 body 名单(命令侧,不在 terminations 里)",
@@ -259,9 +286,12 @@ OPEN_MIRROR_DEBT = {
     "action_ball_c211_env.C211_IMPLEMENTED_ISAAC_PRIOR_TERM_NAMES": (
         "hope_env_cfg.py :: HOPERewardsCfg 里这 14 条 RewTerm 的名字与顺序",
         "复用 isaac_reference_envelope 那套 live_declared_terms / 顺序推导,"
-        "把它指到 RewardsCfg 的继承链上 —— 和终止项这条链是同一个机制。",
-        "奖励项的类链比终止项长且有 weight=0.0 的'默认跳过'语义,"
-        "要先想清楚'声明了但权重为零'算不算实现,这轮不带着未定义的语义上门。",
+        "把它指到 RewardsCfg 的继承链上(链本身已经在 action_ball_c211_env."
+        "ISAAC_C211_REWARD_CFG_CHAIN 里写死并被影子检查用着)。",
+        "2026-08-08 更新:'weight=0.0 算不算实现'这个问题现在有答案了,而且答案说明"
+        "光看类体是错的 —— upright_exp 类体就是 0.0,发车时 reward_pack=v2 把它改写成 "
+        "0.25。所以名单/顺序这条也必须按**发车解析后**的权重来判,不能按类体判;"
+        "而解析要走 Hydra YAML 链,和下面那 9 条权重卡在同一处。等 YAML 侧的读法先落地。",
     ),
     "action_ball_c211_env.C211_RACKET_LONG_AXIS_LOCAL": (
         "Isaac 侧球拍长轴的局部方向(racket_contact_geometry / hope_rewards)",
@@ -330,9 +360,17 @@ CLASSIFICATION: dict = {
         "A211_NET_SIGMA_M": (_N, ""),
         "A211_LANDING_SIGMA_M": (_N, ""),
         "A211_LANDING_LEGAL_BASE_FRAC": (_N, ""),
-        "A211_BASE_POSITION_WEIGHT": (_N, ""),
+        # 2026-08-08 改档:这两条本来挂 NOT_MIRRORED("这条车道自己的词汇,没有 Isaac
+        # 孪生体")—— 那是写错的,它们都是 Isaac 值的手抄件。值今天核对下来是对的,
+        # 但分类错会让它们永远不进任何门的视野,C 族 upright_exp 就是这么漂了四天的。
+        "A211_BASE_POSITION_WEIGHT": (_T, ""),
         "A211_BASE_POSITION_STD_M": (_N, ""),
-        "A211_RACKET_PROGRESS_WEIGHT": (_N, ""),
+        "A211_RACKET_PROGRESS_WEIGHT": (
+            _L,
+            "a211_reward_weight:reward_weight:racket_progress",
+        ),
+        "A211_RACKET_PROGRESS_CFG_CLASS": (_N, ""),
+        "A211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED": (_N, ""),
         "A211_RACKET_PROGRESS_POTENTIAL_CAP_M": (_N, ""),
         "COUNTER_RALLY_PY": (_P, ""),
         "COUNTER_RALLY_TORCH_PY": (_P, ""),
@@ -359,7 +397,26 @@ CLASSIFICATION: dict = {
         "C211_ROLLOUT_H_S": (_N, ""),
         "C211_ROLLOUT_STEPS": (_N, ""),
         "C211_UPRIGHT_STD": (_T, ""),
-        "C211_ACTION_RATE_POST_DT_WEIGHT": (_T, ""),
+        "C211_ACTION_RATE_POST_DT_WEIGHT": (
+            _L,
+            "c211_reward_weight:reward_weight:action_rate_l2",
+        ),
+        "C211_UPRIGHT_EXP_MANAGER_WEIGHT": (
+            _L,
+            "c211_reward_weight:reward_weight:upright_exp",
+        ),
+        "C211_BASE_ANG_VEL_XY_MANAGER_WEIGHT": (
+            _L,
+            "c211_reward_weight:reward_weight:base_ang_vel_xy",
+        ),
+        "C211_BASE_LIN_VEL_Z_MANAGER_WEIGHT": (
+            _L,
+            "c211_reward_weight:reward_weight:base_lin_vel_z",
+        ),
+        "C211_JOINT_VEL_MANAGER_WEIGHT": (
+            _L,
+            "c211_reward_weight:reward_weight:joint_vel",
+        ),
         "C211_RACKET_LONG_AXIS_LOCAL": (_T, ""),
         "VIRTUAL_BALL_PY": (_P, ""),
         "VENUE_PHYSICS_YAML": (_P, ""),
@@ -376,6 +433,18 @@ CLASSIFICATION: dict = {
         "RIGHT_WRIST_BODY_NAME": (_N, ""),
         "MIMIC_BODY_NAMES": (_M, ""),
         "C211_IMPLEMENTED_ISAAC_PRIOR_TERM_NAMES": (_T, ""),
+        # 下面五条是奖励权重活值对账的**路由表**,不是被镜像的值本身:
+        # 选择器要指的 Isaac 符号名 / 类链 / 哪条项走哪条权威。抄错了不会静默 ——
+        # 选择器读不到就 fail closed(`..._live_value_unreadable`),类链对不上就
+        # 影子检查开火。与 table_termination.ISAAC_TABLE_TERM_FACTORY 同一档。
+        "ISAAC_REWARD_PACK_TABLE": (_N, ""),
+        "ISAAC_C211_REWARD_CFG_CHAIN": (_N, ""),
+        "ISAAC_CLASS_SOURCED_PRIOR_WEIGHTS": (_N, ""),
+        "ISAAC_PACK_SOURCED_PRIOR_WEIGHTS": (_N, ""),
+        # 只有项名和"卡在哪",**不含任何权重数值**(含了就是第四份手抄件)。
+        "C211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED": (_N, ""),
+        # 这张表的值一律是上面那几个模块常量本身,不是第二份抄写。
+        "_MIRRORED_PRIOR_WEIGHTS": (_M, ""),
         "C211_UNAVAILABLE_ISAAC_REWARD_TERMS": (_N, ""),
         "C211_CROSS_ENGINE_REWARD_SEMANTIC_GAPS": (_N, ""),
         "FORMAL_BLOCKERS": (_N, ""),

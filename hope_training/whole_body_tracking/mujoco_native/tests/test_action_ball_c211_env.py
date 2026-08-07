@@ -1210,8 +1210,14 @@ def test_isaac_synonymous_prior_raw_terms_weights_and_nonwrist_body_mask():
     ):
         assert terms[name]["raw_reward"] == pytest.approx(1.0)
     assert c211.RIGHT_WRIST_BODY_NAME not in terms["motion_body_pos"]["body_names"]
+    # 这几个权重在这里是**独立手写**的,故意不引用被测模块的常量 —— 引用了就等于让被测
+    # 对象给自己判分。它是"这条经济账应该长什么样"的第二份陈述。
     expected = (
-        1.0 * 1.0
+        # 2026-08-08:upright_exp 从 1.0 改成 0.25。Isaac 侧 2026-08-04 就在
+        # `_REWARD_PACK_V2_DIRECT` 里重定价了(理由:每步无条件发钱,500 步折扣 1.9869
+        # 压过 task-valid mimic 预算 1.77331),这份 MuJoCo 镜像四天没跟上。这里同步的
+        # 是 Isaac 的现役价,不是新的定价决定。
+        1.0 * 0.25
         + 25.0 * -0.05
         + 4.0 * -0.5
         + 31.0 * -1.0e-4
@@ -1224,6 +1230,20 @@ def test_isaac_synonymous_prior_raw_terms_weights_and_nonwrist_body_mask():
     assert row["total_post_policy_dt_reward"] == pytest.approx(expected)
 
 
+def test_mirrored_prior_weights_match_what_the_kernel_charges():
+    """活值对账表引用的常量,必须就是奖励内核真正收的那个价。
+
+    人话:``_MIRRORED_PRIOR_WEIGHTS`` 是给 live parity 门看的那张表。如果它和内核
+    实际收的价能对不上,那门就是在给**另一个数**发合格证 —— 也就是又多了一份手抄。
+    这条测试把两边接起来,所以"引用同一个符号"这句话是被机器检的,不是注释里的承诺。
+    """
+
+    terms = _c211_prior_terms(np.ones(31), np.zeros(31))
+    assert set(c211._MIRRORED_PRIOR_WEIGHTS) <= set(terms)
+    for name, mirrored in c211._MIRRORED_PRIOR_WEIGHTS.items():
+        assert terms[name]["manager_weight"] == pytest.approx(float(mirrored)), name
+
+
 # --------------------------------------------------------------------------------------------- #
 # 一阶平滑罚:C 族镜像的变异测试 + A/C 同形对拍(2026-08-08 Franco 裁定二第二条)
 #
@@ -1233,6 +1253,12 @@ def test_isaac_synonymous_prior_raw_terms_weights_and_nonwrist_body_mask():
 # --------------------------------------------------------------------------------------------- #
 def _c211_action_rate(current, previous):
     """只取 action_rate_l2 那一项的 raw,其余输入固定成不影响该项的哑元。"""
+
+    return _c211_prior_terms(current, previous)["action_rate_l2"]
+
+
+def _c211_prior_terms(current, previous):
+    """整张先验项表,输入固定成不影响 action_rate_l2 的哑元。"""
 
     n_bodies = len(c211.TRACKED_BODY_NAMES)
     rotations = np.repeat(np.eye(3)[None, :, :], n_bodies, axis=0)
@@ -1271,7 +1297,7 @@ def _c211_action_rate(current, previous):
         current_action=np.asarray(current, dtype=np.float64),
         previous_action=np.asarray(previous, dtype=np.float64),
     )
-    return row["terms"]["action_rate_l2"]
+    return row["terms"]
 
 
 def test_c211_action_rate_responds_to_two_different_action_sequences():

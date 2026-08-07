@@ -35,6 +35,7 @@ import numpy as np
 
 from . import action_ball_211_abi as abi
 from . import action_ball_c211_env as shared
+from . import isaac_live_constants
 from . import trainer
 
 
@@ -63,6 +64,78 @@ A211_BASE_POSITION_WEIGHT = 0.0
 A211_BASE_POSITION_STD_M = 0.20
 A211_RACKET_PROGRESS_WEIGHT = 10.0
 A211_RACKET_PROGRESS_POTENTIAL_CAP_M = 4.65
+
+# ---------------------------------------------------------------------------
+# A 族自己那两条镜像权重的活值对账(2026-08-08)
+# ---------------------------------------------------------------------------
+#
+# `A211_RACKET_PROGRESS_WEIGHT` / `A211_BASE_POSITION_WEIGHT` 是 Isaac 值的手抄件,
+# 但在 mirrored_constant_registry 里一直挂着 NOT_MIRRORED —— 那一档的定义是"这条车道
+# 自己的词汇,没有 Isaac 孪生体可漂"。它们有孪生体。分类写错不会让今天的数变错(这两个
+# 值今天核对下来是对的),但它会让这两条**永远不进任何门的视野** —— C 族的 upright_exp
+# 就是这么漂了四天的。
+#
+# racket_progress 的权威是 cfg 类体(不在 reward_pack 里,也没有 YAML 权重键),所以
+# 现在就能逐个比值。base_position 的权威是 YAML(ActionBall.yaml 给 1.5,A211 叶子改写
+# 成 0.0),和 C 族那 9 条卡在同一处,登记成明写的债,不假装比过。
+A211_RACKET_PROGRESS_CFG_CLASS = "HOPEDeployParityRewardsCfg"
+
+#: 见 C211 侧同名说明:只写项名与权威路径,不写数值,免得再添一份手抄件。
+A211_REWARD_WEIGHT_PARITY_NOT_LIVE_COMPARED = (
+    {
+        "term": "base_position",
+        "resolution": (
+            "YAML rewards.base_position_weight "
+            "(HOPEPingPongActionBall.yaml 1.5 -> A211 leaf overrides it)"
+        ),
+        "blocked_on": (
+            "authority_is_a_hydra_yaml_key_this_python_ast_evaluator_cannot_read"
+        ),
+    },
+)
+
+
+def mirrored_isaac_reward_weight_entries() -> tuple:
+    """A 族自己那份 ``(key, source, selector, mirrored)``,和 C 族同形。"""
+
+    return (
+        (
+            "reward_weight:racket_progress",
+            shared.HOPE_ENV_CFG_PY,
+            (
+                "class_term_weight",
+                A211_RACKET_PROGRESS_CFG_CLASS,
+                "racket_progress",
+            ),
+            float(A211_RACKET_PROGRESS_WEIGHT),
+        ),
+    )
+
+
+def live_isaac_reward_weight_blockers() -> tuple:
+    """A 族镜像权重里,和 Isaac 现役值对不上的那些(含影子检查)。"""
+
+    blockers: list[str] = []
+    try:
+        declaring = isaac_live_constants.declaring_classes(
+            shared.HOPE_ENV_CFG_PY,
+            shared.ISAAC_C211_REWARD_CFG_CHAIN,
+            "racket_progress",
+        )
+    except isaac_live_constants.IsaacLiveConstantError as exc:
+        blockers.append(f"a211_reward_weight_chain_unreadable:racket_progress:{exc}")
+    else:
+        if declaring != (A211_RACKET_PROGRESS_CFG_CLASS,):
+            blockers.append(
+                "a211_reward_weight_shadowed:racket_progress:selector_reads="
+                f"{A211_RACKET_PROGRESS_CFG_CLASS} but_the_chain_declares_it_in="
+                f"{list(declaring)}"
+            )
+    return tuple(blockers) + isaac_live_constants.parity_blockers(
+        "a211_reward_weight", mirrored_isaac_reward_weight_entries()
+    )
+
+
 COUNTER_RALLY_PY = (
     shared.C211_TRAINABILITY_PY.parent / "mdp/counter_rally.py"
 )
@@ -1112,6 +1185,14 @@ class MujocoA211DiagnosticVecEnv(shared.MujocoC211DiagnosticVecEnv):
             self._suppress_next_racket_progress[index] = True
 
     def _build_reward_contract(self, task: A211TaskAuthority) -> dict[str, Any]:
+        # A 族自己那份镜像权重也要逐个比值。父类那道门只管 C 族共享的那 5 条;
+        # 不在这儿加一道,A211_RACKET_PROGRESS_WEIGHT 就还是没人看。
+        weight_blockers = live_isaac_reward_weight_blockers()
+        if weight_blockers:
+            raise shared.C211EnvError(
+                "A211 mirrored Isaac reward weights no longer equal the live "
+                "Isaac values: " + "; ".join(weight_blockers)
+            )
         # Reuse the live event/geometry/source checks, then replace every C task
         # claim before the contract is exposed or hashed.
         payload = super()._build_reward_contract(task)
