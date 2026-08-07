@@ -90,5 +90,65 @@
     "what_is_actually_still_missing": [
       "the pose-dependent 2x2 Jacobian for the three parallel pairs (waist roll/pitch, left ankle pitch/roll, right ankle pitch/roll) -- this is mechanism geometry, it is NOT derivable from anything we hold, and it is the only remaining vendor gap for mechanical admission"
     ]
+  },
+  "wrist_torque_decomposition": {
+    "prompted_by": "Franco: the wrist is usually the whipped end of the chain, so it may not need to generate much torque itself",
+    "verdict": "confirmed, and it changes what the wrist 'violations' mean",
+    "method": "per frame, tau_wrist split into gravity, Coriolis/centrifugal, own-acceleration and cross-coupling by re-running mj_inverse with the other terms zeroed; 12 clips",
+    "right_wrist_pitch_joint": {
+      "peak_abs_torque_nm": 13.028,
+      "at_that_frame": {
+        "gravity": -0.341,
+        "coriolis_centrifugal": 12.728,
+        "own_acceleration": -0.389,
+        "cross_coupling": 1.03
+      },
+      "mean_share_of_abs_total": {
+        "gravity": 0.343,
+        "coriolis": 0.925,
+        "own_acceleration": 0.138,
+        "cross_coupling": 0.366
+      }
+    },
+    "right_wrist_yaw_joint": {
+      "peak_abs_torque_nm": 4.733,
+      "mean_share_of_abs_total": {
+        "gravity": 0.589,
+        "coriolis": 0.956,
+        "own_acceleration": 0.189,
+        "cross_coupling": 0.56
+      }
+    },
+    "left_wrist_pitch_joint": {
+      "peak_abs_torque_nm": 3.506,
+      "mean_share_of_abs_total": {
+        "gravity": 0.885,
+        "coriolis": 0.19,
+        "own_acceleration": 0.051,
+        "cross_coupling": 0.409
+      }
+    },
+    "left_wrist_yaw_joint": {
+      "peak_abs_torque_nm": 3.349,
+      "mean_share_of_abs_total": {
+        "gravity": 0.872,
+        "coriolis": 0.492,
+        "own_acceleration": 0.103,
+        "cross_coupling": 0.457
+      }
+    },
+    "interpretation": {
+      "the_wrist_is_not_driving": "own-acceleration accounts for 5-19% of wrist torque; the motor is not producing the swing",
+      "right_wrist_is_resisting_centrifugal": "98% of the right wrist's peak is the centrifugal term from the racket being carried on a fast arm",
+      "left_wrist_is_holding_against_gravity": "the left arm barely moves, so its wrist torque is mostly static hold plus being dragged",
+      "what_the_violation_actually_says": "not 'the motors cannot drive this motion' but 'holding this exact wrist angle against the swing exceeds the wrist motor'. A real whip lets the wrist lag and snap; the retarget prescribes a rigid wrist trajectory instead, so the motor pays the full reaction",
+      "where_the_fix_belongs": "at the retarget or controller level -- allowing wrist compliance -- rather than rejecting the source motion, which the source human clearly performed",
+      "caveat": "something must still resist the centrifugal load or the wrist runs to its limit; compliance changes the magnitude, it does not remove the requirement"
+    }
+  },
+  "parallel_jacobian_deferred": {
+    "decision": "Franco: skip the Jacobian for now, those joints should be strong enough",
+    "consequence": "the six waist and ankle joints stay UNKNOWN and are never asserted to pass; mechanical admission therefore cannot be fully closed on 31 of 31 joints",
+    "recorded_as_an_assumption_not_a_result": true
   }
 }
