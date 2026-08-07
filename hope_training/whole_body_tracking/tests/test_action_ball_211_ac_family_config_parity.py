@@ -346,14 +346,30 @@ _LINEAGE = {
 }
 
 
+def _family_lineage(module) -> dict:
+    """每族一份 lineage —— 真实工件本来就是两份不同的文件。
+
+    2026-08-08 起 argv 的 ``task=`` 不再从模块常量取,而是从 lineage 自己钉的
+    ``task_profile`` 取(选哪一档随机性是发射时的显式选择,lineage 记录它)。
+    所以这份夹具也必须每族一份,否则等于让两族共用一片叶子。
+    """
+
+    return {
+        **_LINEAGE,
+        "task_profile": module._DRL.task_profile_id(
+            module.TASK_FAMILY, module._DRL.DEFAULT_LEVEL
+        ),
+    }
+
+
 def matched_family_argv() -> "tuple[list[str], list[str]]":
     """两族在同一份输入、同一格(噪声关)下真正会发出的 argv。"""
 
     arm = A._arm_contract(A.A_OBS_NOISE_OFF_CELL_ID)
     recipe = C._recipe_contract(C.C_OBS_NOISE_OFF_CELL_ID)
     return (
-        A._training_argv(_SPEC, _LINEAGE, arm),
-        C._training_argv(_SPEC, _LINEAGE, recipe),
+        A._training_argv(_SPEC, _family_lineage(A), arm),
+        C._training_argv(_SPEC, _family_lineage(C), recipe),
     )
 
 

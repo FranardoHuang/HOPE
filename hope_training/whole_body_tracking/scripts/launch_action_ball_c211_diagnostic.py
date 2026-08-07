@@ -49,6 +49,7 @@ TASK_WAIT_FILE = (
     / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/action_ball_task_wait.py"
 )
 A211_LAUNCHER_FILE = SCRIPT_DIR / "launch_action_ball_a211_four_arm_diagnostic.py"
+DR_LAUNCH_LEVELS_FILE = SCRIPT_DIR / "action_ball_211_dr_launch_levels.py"
 
 
 def _load_helper(name: str, path: Path):
@@ -72,13 +73,21 @@ _P = _load_helper("_c211_4096x5_prelong_gate", PRELONG_GATE_FILE)
 _S = _load_helper("_c211_4096x5_prelong_semantics", PRELONG_SEMANTICS_FILE)
 _W = _load_helper("_c211_task_wait_schedule", TASK_WAIT_FILE)
 _FRAME0 = _load_helper("_c211_shared_frame0_authority", A211_LAUNCHER_FILE)
+_DRL = _load_helper("_a211_c211_dr_launch_levels", DR_LAUNCH_LEVELS_FILE)
 
 LaunchRefused = _B.LaunchRefused
 
-SCHEMA_VERSION = 2
-SPEC_KIND = "action_ball_c211_diagnostic_spec_v2"
-CLAIM_KIND = "action_ball_c211_diagnostic_claim_v2"
-LINEAGE_KIND = "action_ball_c211_direct_ball_split_ready_lineage_v4"
+TASK_FAMILY = "C211"
+# 2026-08-08 v2 -> v3:spec 新增必填的 ``dr_launch_level``,claim/收据新增
+# ``dr_launch_level_contract``(档名 + 六条随机性轴的**实际取值**)。A211 同批同形。
+SCHEMA_VERSION = 3
+SPEC_KIND = "action_ball_c211_diagnostic_spec_v3"
+CLAIM_KIND = "action_ball_c211_diagnostic_claim_v3"
+# 默认档(DR-L0)的 lineage kind。**解析结果,不是新的硬钉常量。**
+LINEAGE_KIND = _DRL.lineage_kind(TASK_FAMILY, _DRL.DEFAULT_LEVEL)
+assert LINEAGE_KIND == "action_ball_c211_direct_ball_split_ready_lineage_v4", (
+    LINEAGE_KIND
+)
 C211_BUNDLE_KIND = "action_ball_c211_direct_ball_split_ready_bundle_v4"
 # 2026-08-05 v1 -> v2:recipe 合同新增 exploration_axis / actor_init_mode /
 # four_sigma_hard_inner_gate_applies 三键,schema 随之 1 -> 2,kind 同批改名,
@@ -185,7 +194,11 @@ CRITIC_WIDTH = 319
 TRAINABILITY_CONTRACT = "action_ball_c211_fixed_midpoint_learnability_v2"
 ACTOR_NORMALIZER_IDENTITY = "action_ball_c211_actor_norm_v2"
 CRITIC_NORMALIZER_IDENTITY = "action_ball_c211_critic_norm_v1"
-TASK_PROFILE_ID = "HOPEPingPongActionBallC211VendorV2N1DRL0Learnability"
+# 默认档(DR-L0)的 task profile。解析结果,不是硬钉常量。
+TASK_PROFILE_ID = _DRL.task_profile_id(TASK_FAMILY, _DRL.DEFAULT_LEVEL)
+assert TASK_PROFILE_ID == (
+    "HOPEPingPongActionBallC211VendorV2N1DRL0Learnability"
+), TASK_PROFILE_ID
 GYM_TASK_ID = "HOPE-PingPong-ActionBall-C211Learnability-AgibotA3-v0"
 TARGET_SEMANTICS = "c211_incoming_ball_p_v_spin_outcome_dense_v1"
 # [2026-08-06 载体错配核查结论: 对运行时无害, 只影响被记录的标定数字]
@@ -433,10 +446,17 @@ TASK_WAIT_SOURCE = (
 KIT_LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
-TASK_PROFILE_SOURCE = (
+TASK_PROFILE_SOURCE = _DRL.task_profile_source(TASK_FAMILY, _DRL.DEFAULT_LEVEL)
+assert TASK_PROFILE_SOURCE == (
     "hope_training/whole_body_tracking/cfg/task/"
     "HOPEPingPongActionBallC211VendorV2N1DRL0Learnability.yaml"
+), TASK_PROFILE_SOURCE
+DR_LAUNCH_LEVELS_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "action_ball_211_dr_launch_levels.py"
 )
+DR_L1_TASK_PROFILE_SOURCE = _DRL.task_profile_source(TASK_FAMILY, _DRL.DR_LEVEL_L1)
+DR_L1_MANIFEST_SOURCE = _DRL.manifest_source(_DRL.DR_LEVEL_L1)
 RETAINED_TASK_PROFILE_PARENT_SOURCE = (
     "hope_training/whole_body_tracking/cfg/task/"
     "HOPEPingPongActionBallC211VendorV2N1Learnability.yaml"
@@ -508,9 +528,12 @@ RUNTIME_SOURCE_PATHS = (
     (C211_LIVE_ORACLE_SOURCE, "C211 live runtime oracle adapter"),
     (TRAINING_CONTRACT_SOURCE, "dynamic-ready policy contract"),
     (TASK_WAIT_SOURCE, "pre-task wait schedule contract"),
+    (DR_LAUNCH_LEVELS_SOURCE, "ActionBall A211/C211 DR launch-level authority"),
     (TASK_PROFILE_SOURCE, "C211 DR-L0 task profile"),
+    (DR_L1_TASK_PROFILE_SOURCE, "C211 DR-L1 task profile"),
     (RETAINED_TASK_PROFILE_PARENT_SOURCE, "C211 inherited task-profile parent"),
     (_FRAME0.DR_L0_MANIFEST_SOURCE, "ActionBall DR-L0 launch manifest"),
+    (DR_L1_MANIFEST_SOURCE, "ActionBall DR-L1 launch manifest"),
     (C211_CONTRACT_SOURCE, "C211 trainability contract"),
     (C211_ENV_SOURCE, "C211 environment config"),
     (C211_REWARD_SOURCE, "C211 causal reward functions"),
@@ -1064,10 +1087,22 @@ def _verify_c211_runtime_authorities(checkout: Path) -> None:
 
 
 def _validate_lineage(
-    checkout: Path, commit: str, value: Any
+    checkout: Path, commit: str, value: Any, *, level: str | None = None
 ) -> dict[str, Any]:
-    """Validate direct-ball C211 with separate physical and teacher births."""
+    """Validate direct-ball C211 with separate physical and teacher births.
 
+    ``level`` 选中这一跑跑的是哪一档随机性。省略 = 默认档(DR-L0),解析结果与
+    本模块历史上那两个硬钉常量逐字相同。A211 同批同形。
+    """
+
+    level = _DRL.DEFAULT_LEVEL if level is None else level
+    try:
+        level = _DRL.validate_level(level)
+        expected_lineage_kind = _DRL.lineage_kind(TASK_FAMILY, level)
+        expected_task_profile = _DRL.task_profile_id(TASK_FAMILY, level)
+        _DRL.preflight_launchable(level)
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(str(exc)) from exc
     pin, row = _tracked_json(checkout, commit, value, name="C211 lineage")
     _verify_c211_runtime_authorities(checkout)
     row = _exact_dict(
@@ -1113,7 +1148,7 @@ def _validate_lineage(
     _assert_c211_only(row, name="C211 lineage")
     expected = {
         "schema_version": 4,
-        "kind": LINEAGE_KIND,
+        "kind": expected_lineage_kind,
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
@@ -1121,7 +1156,7 @@ def _validate_lineage(
         "trainability_contract": TRAINABILITY_CONTRACT,
         "actor_normalizer_identity": ACTOR_NORMALIZER_IDENTITY,
         "critic_normalizer_identity": CRITIC_NORMALIZER_IDENTITY,
-        "task_profile": TASK_PROFILE_ID,
+        "task_profile": expected_task_profile,
         "gym_task": GYM_TASK_ID,
         "target_semantics": TARGET_SEMANTICS,
         "curriculum_scope": _curriculum_scope_contract(),
@@ -1257,11 +1292,14 @@ def _validate_lineage(
         "teacher_frame0_artifact": pins["teacher_frame0_artifact"],
     }
     try:
-        dr_l0_manifest = _FRAME0._dr_l0_manifest_binding(
-            checkout,
-            commit,
-            family="C",
-            task_profile=TASK_PROFILE_ID,
+        dr_l0_manifest, dr_launch_level_contract = (
+            _FRAME0._dr_level_manifest_binding(
+                checkout,
+                commit,
+                family="C",
+                task_profile=expected_task_profile,
+                level=level,
+            )
         )
     except _FRAME0.LaunchRefused as exc:
         raise LaunchRefused(str(exc)) from exc
@@ -1310,11 +1348,13 @@ def _validate_lineage(
     except _FRAME0.LaunchRefused as exc:
         raise LaunchRefused(str(exc)) from exc
     if row["dr_l0_manifest"] != dr_l0_manifest:
-        raise LaunchRefused("C211 DR-L0 lineage binding differs")
+        raise LaunchRefused("C211 DR lineage binding differs")
     return {
         **expected,
         **pins,
         "dr_l0_manifest": dr_l0_manifest,
+        "dr_launch_level": level,
+        "dr_launch_level_contract": dr_launch_level_contract,
         "teacher_frame0_artifact_content_sha256": teacher["content_sha256"],
         "initial_center_timing_authority": timing,
         "split_ready_reset_wait_authority": reset_wait,
@@ -3531,6 +3571,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
             "predecessor_result",
             "four_grid_scale4096_receipt",
             "stage",
+            "dr_launch_level",
             "num_envs",
             "max_iterations",
             "save_interval",
@@ -3566,6 +3607,12 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
     if type(commit) is not str or _B.COMMIT_RE.fullmatch(commit) is None:
         raise LaunchRefused("source.commit_sha must be exact lowercase 40-hex")
     python = _isaac_python_entry(source["isaac_python"])
+    # 选哪一档随机性是**发射时的显式选择**,不再是模块级常量。形状校验在这里,
+    # 档位到 profile / manifest / 六条轴取值的解析在 _validate_lineage 里用活值算。
+    try:
+        _DRL.validate_level(row["dr_launch_level"])
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(str(exc)) from exc
     stage = row["stage"]
     if stage not in BUDGETS:
         raise LaunchRefused(
@@ -3643,6 +3690,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
             else None
         ),
         "stage": stage,
+        "dr_launch_level": row["dr_launch_level"],
         "num_envs": actual_budget[0],
         "max_iterations": actual_budget[1],
         "save_interval": actual_budget[2],
@@ -3749,7 +3797,8 @@ def _training_argv(
     argv = [
         spec["source"]["isaac_python"],
         str(wbt / "scripts/train.py"),
-        "task=%s" % TASK_PROFILE_ID,
+        # 选中档位解析出来的 profile。DR-L0 时与历史字面量逐字相同。
+        "task=%s" % lineage["task_profile"],
         "algo=ppo",
         "headless=true",
         "logger=tensorboard",
@@ -3874,7 +3923,9 @@ def _training_argv(
     return argv
 
 
-def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
+def _output_contract(
+    spec: Mapping[str, Any], lineage: Mapping[str, Any]
+) -> dict[str, Any]:
     stage = spec["stage"]
     runtime_blocked = stage in BLOCKED_RUNTIME_STAGES
     profile_contract = _update_profile_contract(os.environ)
@@ -3906,6 +3957,9 @@ def _output_contract(spec: Mapping[str, Any]) -> dict[str, Any]:
         # Existing finite/long stages do not implement the matched
         # profiler-off A->C->C->A speed gate.  scale4096 additionally carries
         # the five-update pre-long evidence ledger and is never rate evidence.
+        # 这一跑到底开了哪几条随机性:档名 + 六条轴的**实际取值**。A211 同批同形。
+        "dr_launch_level": lineage["dr_launch_level"],
+        "dr_launch_level_contract": lineage["dr_launch_level_contract"],
         "speed_benchmark_eligible": False,
         "rate_evidence_eligible": False,
         "rate_evidence_isolation": rate_isolation,
@@ -4032,6 +4086,21 @@ def _admission_training_argv(
     return _training_argv(spec, row["lineage"], row["recipe"])
 
 
+def _admission_output_contract(
+    spec: Mapping[str, Any], payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """收据里的档位自陈来自 claim 自己带的 lineage,而不是重新解析一次。
+
+    A211 同批同形:``_output_contract`` 现在需要 lineage(它才知道这一跑选的是
+    哪一档、六条轴各是什么值),共址复核路径必须从 payload 的 bundle 里取。
+    """
+
+    bundle = payload.get("bundle")
+    if type(bundle) is not dict or type(bundle.get("lineage")) is not dict:
+        raise LaunchRefused("C211 co-resident claim lineage is malformed")
+    return _output_contract(spec, bundle["lineage"])
+
+
 _ADMISSION = _A.VendorV2GPUAdmission(
     base=_B,
     schema_version=SCHEMA_VERSION,
@@ -4049,6 +4118,7 @@ _ADMISSION = _A.VendorV2GPUAdmission(
     validate_spec=_validate_spec,
     output_contract=_output_contract,
     training_argv=_admission_training_argv,
+    output_contract_from_payload=_admission_output_contract,
     physical_reservation_registry=True,
     forbidden_namespace_experiment_names=(
         "agibot_a3_action_ball_measured_vendor_v2_n1_diagnostic",
@@ -4103,12 +4173,14 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     source = _B._verify_clean_source(checkout, commit)
     runtime_sources = _runtime_sources(checkout, commit)
     runtime_assets = _B._validate_runtime_asset_environment()
-    lineage = _validate_lineage(checkout, commit, spec["lineage"])
+    lineage = _validate_lineage(
+        checkout, commit, spec["lineage"], level=spec["dr_launch_level"]
+    )
     recipe = _recipe_contract(spec["recipe_id"])
     inputs = _materialization_inputs(
         spec, recipe=recipe, lineage=lineage
     )
-    output_contract = _output_contract(spec)
+    output_contract = _output_contract(spec, lineage)
     bundle = {
         "lineage": lineage,
         "recipe": recipe,
@@ -4175,7 +4247,9 @@ def _revalidate_claim_payload(
     if _runtime_sources(checkout, commit) != payload["runtime_sources"]:
         raise LaunchRefused("runtime source identity drifted")
     _B._validate_runtime_asset_claim(payload["runtime_assets"])
-    lineage = _validate_lineage(checkout, commit, spec["lineage"])
+    lineage = _validate_lineage(
+        checkout, commit, spec["lineage"], level=spec["dr_launch_level"]
+    )
     recipe = _recipe_contract(spec["recipe_id"])
     expected_bundle = {
         "lineage": lineage,
@@ -4191,11 +4265,25 @@ def _revalidate_claim_payload(
     expected_inputs = _materialization_inputs(
         spec, recipe=recipe, lineage=lineage
     )
+    # 收据自陈的档位块必须与重新解析的结果逐字段相同。下面那句 output_contract
+    # 整体比对当然也会发现差异,但它只会报一句 "output contract drifted";这一道
+    # 先跑,是为了让"这份 claim 谎报了自己开了哪几条随机性"有一个自己的名字。
+    # A211 同批同形。
+    stored_output = payload.get("output_contract")
+    try:
+        _DRL.validate_declared(
+            (stored_output or {}).get("dr_launch_level_contract"),
+            resolved=lineage["dr_launch_level_contract"],
+        )
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(
+            "claimed DR launch level self-report differs: %s" % exc
+        ) from exc
     if (
         payload["spec"] != spec
         or payload["bundle"] != expected_bundle
         or payload["materialization_inputs"] != expected_inputs
-        or payload["output_contract"] != _output_contract(spec)
+        or payload["output_contract"] != _output_contract(spec, lineage)
         or payload["boot_marker"] != payload["output_contract"]["boot_marker"]
         or payload["training_argv"] != _training_argv(spec, lineage, recipe)
     ):
@@ -4817,6 +4905,7 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
             name="four-grid scale4096 receipt",
         ),
         "stage": args.stage,
+        "dr_launch_level": args.dr_level,
         "num_envs": budget[0],
         "max_iterations": budget[1],
         "save_interval": budget[2],
@@ -4854,6 +4943,16 @@ def _parser() -> argparse.ArgumentParser:
     template.add_argument("--lineage-path", required=True)
     template.add_argument("--lineage-sha256", required=True)
     template.add_argument("--stage", choices=STAGE_ORDER, required=True)
+    # 选哪一档随机性。默认 dr_l0 = 现役四格那一档,解析结果与本旗标出现之前逐字相同。
+    # dr_l1 会解析到 DR-L1 的 profile / manifest / finalizer 合同,并在 lineage 那一步
+    # 明确停车(那一档还没 materialize 过自己的 lineage,清单写在拒收信息里)。
+    template.add_argument(
+        "--dr-level",
+        default=_DRL.DEFAULT_LEVEL,
+        choices=tuple(_DRL.LEVELS),
+        help="domain-randomization level for this launch (default: %s)"
+        % _DRL.DEFAULT_LEVEL,
+    )
     template.add_argument("--materialization-result-path")
     template.add_argument("--materialization-result-sha256")
     template.add_argument("--recipe-result-path")

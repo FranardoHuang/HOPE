@@ -60,6 +60,7 @@ TASK_WAIT_FILE = (
     SCRIPT_DIR.parent
     / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/action_ball_task_wait.py"
 )
+DR_LAUNCH_LEVELS_FILE = SCRIPT_DIR / "action_ball_211_dr_launch_levels.py"
 
 
 def _load_helper(name: str, path: Path):
@@ -81,13 +82,24 @@ _Q = _load_helper("_a211_c211_four_grid_prelong_barrier", FOUR_GRID_BARRIER_FILE
 _P = _load_helper("_a211_4096x5_prelong_gate", PRELONG_GATE_FILE)
 _S = _load_helper("_a211_4096x5_prelong_semantics", PRELONG_SEMANTICS_FILE)
 _W = _load_helper("_a211_task_wait_schedule", TASK_WAIT_FILE)
+_DRL = _load_helper("_a211_c211_dr_launch_levels", DR_LAUNCH_LEVELS_FILE)
 
 LaunchRefused = _B.LaunchRefused
 
-SCHEMA_VERSION = 2
-SPEC_KIND = "action_ball_a211_four_arm_diagnostic_spec_v2"
-CLAIM_KIND = "action_ball_a211_four_arm_diagnostic_claim_v2"
-LINEAGE_KIND = "action_ball_a211_split_ready_online_question_dr_l0_lineage_v5"
+TASK_FAMILY = "A211"
+# 2026-08-08 v2 -> v3:spec 新增必填的 ``dr_launch_level``,claim/收据新增
+# ``dr_launch_level_contract``(档名 + 六条随机性轴的**实际取值**)。旧的 v2 spec
+# 不带这块自陈,放它冒充新 spec 等于让读者无法判断这一跑到底开了哪几条随机性,
+# 所以同批改名 —— 拒收一份旧 spec 好过接受一份说不清自己开了什么的 spec。
+SCHEMA_VERSION = 3
+SPEC_KIND = "action_ball_a211_four_arm_diagnostic_spec_v3"
+CLAIM_KIND = "action_ball_a211_four_arm_diagnostic_claim_v3"
+# 默认档(DR-L0)的 lineage kind。**这是解析结果,不是新的硬钉常量**:选档由
+# spec 的 dr_launch_level 决定,下面的断言只保证默认档解析出来与历史字面量逐字相同。
+LINEAGE_KIND = _DRL.lineage_kind(TASK_FAMILY, _DRL.DEFAULT_LEVEL)
+assert LINEAGE_KIND == (
+    "action_ball_a211_split_ready_online_question_dr_l0_lineage_v5"
+), LINEAGE_KIND
 MATERIALIZATION_KIND = "action_ball_a211_arm_materialization_v1"
 POLICY_MATERIALIZATION_KIND = "action_ball_a211_policy_recipe_materialization_v1"
 ORACLE32_KIND = "action_ball_a211_oracle32_receipt_v1"
@@ -189,7 +201,11 @@ CRITIC_WIDTH = 319
 TRAINABILITY_CONTRACT = "action_ball_a211_fixed_question_learnability_v2"
 ACTOR_NORMALIZER_IDENTITY = "action_ball_a211_actor_norm_v2"
 CRITIC_NORMALIZER_IDENTITY = "action_ball_a211_critic_norm_v1"
-TASK_PROFILE_ID = "HOPEPingPongActionBallA211VendorV2N1DRL0Learnability"
+# 默认档(DR-L0)的 task profile。同上:解析结果,不是硬钉常量。
+TASK_PROFILE_ID = _DRL.task_profile_id(TASK_FAMILY, _DRL.DEFAULT_LEVEL)
+assert TASK_PROFILE_ID == (
+    "HOPEPingPongActionBallA211VendorV2N1DRL0Learnability"
+), TASK_PROFILE_ID
 GYM_TASK_ID = "HOPE-PingPong-ActionBall-A211Learnability-AgibotA3-v0"
 TARGET_SEMANTICS = "a211_desired_contact_v1"
 ACTION_ID = "take_061_unit04_bh"
@@ -389,18 +405,28 @@ TASK_WAIT_SOURCE = (
 KIT_LAUNCHER_SOURCE = (
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
-TASK_PROFILE_SOURCE = (
+TASK_PROFILE_SOURCE = _DRL.task_profile_source(TASK_FAMILY, _DRL.DEFAULT_LEVEL)
+assert TASK_PROFILE_SOURCE == (
     "hope_training/whole_body_tracking/cfg/task/"
     "HOPEPingPongActionBallA211VendorV2N1DRL0Learnability.yaml"
-)
+), TASK_PROFILE_SOURCE
 RETAINED_TASK_PROFILE_PARENT_SOURCE = (
     "hope_training/whole_body_tracking/cfg/task/"
     "HOPEPingPongActionBallA211VendorV2N1Learnability.yaml"
 )
-DR_L0_MANIFEST_SOURCE = (
+DR_LAUNCH_LEVELS_SOURCE = (
+    "hope_training/whole_body_tracking/scripts/"
+    "action_ball_211_dr_launch_levels.py"
+)
+DR_L0_MANIFEST_SOURCE = _DRL.manifest_source(_DRL.DEFAULT_LEVEL)
+assert DR_L0_MANIFEST_SOURCE == (
     "configs/action_ball_n1_measured_20260803/"
     "action_ball_211_dr_l0_learnability_candidate.v1.json"
-)
+), DR_L0_MANIFEST_SOURCE
+# 非默认档的 profile / manifest 也必须进 provenance 钉子表:选中它们时发射器会
+# 真的读这些文件,读了却不钉 = 让未被 provenance 覆盖的字节参与决策。
+DR_L1_TASK_PROFILE_SOURCE = _DRL.task_profile_source(TASK_FAMILY, _DRL.DR_LEVEL_L1)
+DR_L1_MANIFEST_SOURCE = _DRL.manifest_source(_DRL.DR_LEVEL_L1)
 A211_CONTRACT_SOURCE = (
     "hope_training/whole_body_tracking/source/whole_body_tracking/"
     "whole_body_tracking/tasks/tracking/action_ball_a211_trainability.py"
@@ -459,9 +485,12 @@ RUNTIME_SOURCE_PATHS = (
     (OLD_VALIDATOR_SOURCE, "oracle32 acceptance validator"),
     (TRAINING_CONTRACT_SOURCE, "dynamic-ready policy contract"),
     (TASK_WAIT_SOURCE, "pre-task wait schedule contract"),
+    (DR_LAUNCH_LEVELS_SOURCE, "ActionBall A211/C211 DR launch-level authority"),
     (TASK_PROFILE_SOURCE, "A211 DR-L0 task profile"),
+    (DR_L1_TASK_PROFILE_SOURCE, "A211 DR-L1 task profile"),
     (RETAINED_TASK_PROFILE_PARENT_SOURCE, "A211 inherited task-profile parent"),
     (DR_L0_MANIFEST_SOURCE, "ActionBall DR-L0 launch manifest"),
+    (DR_L1_MANIFEST_SOURCE, "ActionBall DR-L1 launch manifest"),
     (A211_CONTRACT_SOURCE, "A211 trainability contract"),
     (A211_ENV_SOURCE, "A211 environment config"),
     (A211_REGISTRY_SOURCE, "A211 Gym registration"),
@@ -1406,6 +1435,120 @@ def _initial_center_timing_authority(
     return {**unsigned, "claim_sha256": canonical_sha256(unsigned)}
 
 
+def _dr_level_manifest_binding(
+    checkout: Path,
+    commit: str,
+    *,
+    family: str,
+    task_profile: str,
+    level: str,
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Bind one DR leaf to the exact resolved training finalizer bytes.
+
+    人话:这是**两档共用**的一份实现。选哪一档由调用方传进来的 ``level`` 决定,
+    档位对应的 profile 名 / 候选 manifest 路径 / finalizer 合同全部从
+    ``action_ball_211_dr_launch_levels`` 这一份权威里查 —— 发射器里不再有第二处
+    "DR-L0 长什么样"的手抄。
+
+    返回两块:
+      * ``binding`` —— 五键的 lineage 绑定块,**逐字保持历史形状**。lineage 工件里
+        钉的就是这五个键,改形状会让所有已 materialize 的 lineage 当场作废。
+      * ``level_block`` —— 收据用的自陈块:档名 + 六条轴的**实际取值**。
+    """
+
+    if family not in ("A", "C"):
+        raise LaunchRefused("DR family must be A or C")
+    try:
+        level = _DRL.validate_level(level)
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(str(exc)) from exc
+    task_family = "%s211" % family
+    manifest_source = _DRL.manifest_source(level)
+    manifest_name = "ActionBall %s launch manifest" % level.upper().replace("_", "-")
+    pin, path = _B._verify_tracked_file(
+        checkout,
+        commit,
+        {
+            "path": manifest_source,
+            "sha256": _B.sha256_file(checkout / manifest_source),
+        },
+        name=manifest_name,
+    )
+    manifest = _B._strict_json_bytes(path.read_bytes(), name=manifest_name)
+    try:
+        training_contract = _OLD._load_training_contract_module(checkout)
+        ramp = _DRL.default_start_pose_ramp(training_contract, level)
+        resolved = _DRL.contract_payload(
+            training_contract, level, start_pose_ramp=ramp
+        )
+        contract_sha256 = _DRL.contract_sha256(
+            training_contract, level, start_pose_ramp=ramp
+        )
+    except Exception as exc:
+        raise LaunchRefused(
+            "cannot resolve the code-owned %s finalizer contract" % level
+        ) from exc
+    authorization = manifest.get("authorization")
+    resolved_manifest = manifest.get("resolved_finalizer_contract")
+    blockers = manifest.get("runtime_integration_blockers")
+    if (
+        manifest.get("schema_version") != 1
+        or manifest.get("kind") != _DRL.manifest_kind(level)
+        or manifest.get("identity") != _DRL.manifest_identity(level)
+        or manifest.get("status") != _DRL.manifest_status(level)
+        # 一档自称"已经可以发"就不许还挂着未解决的 runtime blocker;反过来,
+        # 一档还没 materialize lineage 就必须把 blocker 写出来 —— 空清单等于谎报。
+        or type(blockers) is not list
+        or (blockers != []) is _DRL.lineage_materialized(level)
+        or type(authorization) is not dict
+        or authorization.get("diagnostic_unauthorized") is not True
+        or authorization.get("formal") is not False
+        or authorization.get("runtime_launch") is not True
+        or manifest.get("task_profiles", {}).get(family)
+        != _DRL.task_profile_source(task_family, level)
+        or manifest.get("parent_profiles", {}).get(family)
+        != _DRL.parent_task_profile_id(task_family)
+        or task_profile != _DRL.task_profile_id(task_family, level)
+        or type(resolved_manifest) is not dict
+        or resolved_manifest.get("contract_sha256") != contract_sha256
+        or resolved_manifest.get("hard_contract_identity")
+        != _DRL.hard_contract_identity(level)
+        or type(resolved) is not dict
+        or resolved.get("identity")
+        != resolved_manifest.get("hard_contract_identity")
+        or canonical_sha256(resolved) != contract_sha256
+    ):
+        raise LaunchRefused("%s manifest/finalizer binding differs" % level)
+    try:
+        level_block = _DRL.resolve(
+            level,
+            family=task_family,
+            contract_payload_document=resolved,
+            manifest_document=manifest,
+            contract_sha256=contract_sha256,
+            manifest_file_sha256=pin["sha256"],
+        )
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(str(exc)) from exc
+    if level_block["task_profile"] != task_profile:
+        raise LaunchRefused("%s resolved task profile differs" % level)
+    # 反方向再核一次:这个 profile 名自己属于哪一档。正向("这一档解析成哪个名字")
+    # 上面已经比过;两个方向都对上才排除"名字看起来像、其实来自别处"。
+    try:
+        if _DRL.level_of_task_profile(task_profile) != level:
+            raise LaunchRefused("%s task profile belongs to another level" % level)
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(str(exc)) from exc
+    binding = {
+        "path": pin["path"],
+        "file_sha256": pin["sha256"],
+        "contract_sha256": contract_sha256,
+        "hard_contract_identity": resolved["identity"],
+        "task_profile": task_profile,
+    }
+    return binding, level_block
+
+
 def _dr_l0_manifest_binding(
     checkout: Path,
     commit: str,
@@ -1413,67 +1556,20 @@ def _dr_l0_manifest_binding(
     family: str,
     task_profile: str,
 ) -> dict[str, str]:
-    """Bind one DR-L0 leaf to the exact resolved training finalizer bytes."""
+    """DR-L0 的 lineage 绑定块 —— materializer 与 C211 发射器共用的旧入口。
 
-    if family not in ("A", "C"):
-        raise LaunchRefused("DR-L0 family must be A or C")
-    pin, path = _B._verify_tracked_file(
+    保留这个名字与这个返回形状:两个 materializer 脚本和 C211 发射器都在调它,
+    而 lineage 工件里钉的就是它返回的那五个键。它现在只是通用实现的一层薄壳。
+    """
+
+    binding, _level_block = _dr_level_manifest_binding(
         checkout,
         commit,
-        {
-            "path": DR_L0_MANIFEST_SOURCE,
-            "sha256": _B.sha256_file(checkout / DR_L0_MANIFEST_SOURCE),
-        },
-        name="ActionBall DR-L0 launch manifest",
+        family=family,
+        task_profile=task_profile,
+        level=_DRL.DEFAULT_LEVEL,
     )
-    manifest = _B._strict_json_bytes(
-        path.read_bytes(), name="ActionBall DR-L0 launch manifest"
-    )
-    try:
-        training_contract = _OLD._load_training_contract_module(checkout)
-        resolved = training_contract.action_ball_dr_l0_contract_payload()
-        contract_sha256 = training_contract.action_ball_dr_l0_contract_sha256()
-    except Exception as exc:
-        raise LaunchRefused(
-            "cannot resolve the code-owned DR-L0 finalizer contract"
-        ) from exc
-    authorization = manifest.get("authorization")
-    resolved_manifest = manifest.get("resolved_finalizer_contract")
-    if (
-        manifest.get("schema_version") != 1
-        or manifest.get("kind")
-        != "action_ball_211_dr_l0_learnability_candidate"
-        or manifest.get("identity")
-        != "action_ball_211_dr_l0_learnability_candidate_v1"
-        or manifest.get("status") != "BOUND_FRESH_DIAGNOSTIC_LAUNCH"
-        or manifest.get("runtime_integration_blockers") != []
-        or type(authorization) is not dict
-        or authorization.get("diagnostic_unauthorized") is not True
-        or authorization.get("formal") is not False
-        or authorization.get("runtime_launch") is not True
-        or manifest.get("task_profiles", {}).get(family)
-        != TASK_PROFILE_SOURCE.replace(
-            "A211VendorV2N1DRL0", "%s211VendorV2N1DRL0" % family
-        )
-        or manifest.get("parent_profiles", {}).get(family)
-        != task_profile.replace("DRL0Learnability", "Learnability")
-        or type(resolved_manifest) is not dict
-        or resolved_manifest.get("contract_sha256") != contract_sha256
-        or resolved_manifest.get("hard_contract_identity")
-        != "action_ball_dr_l0_exact_all_off_v1"
-        or type(resolved) is not dict
-        or resolved.get("identity")
-        != resolved_manifest.get("hard_contract_identity")
-        or canonical_sha256(resolved) != contract_sha256
-    ):
-        raise LaunchRefused("DR-L0 manifest/finalizer binding differs")
-    return {
-        "path": pin["path"],
-        "file_sha256": pin["sha256"],
-        "contract_sha256": contract_sha256,
-        "hard_contract_identity": resolved["identity"],
-        "task_profile": task_profile,
-    }
+    return binding
 
 
 def _validate_teacher_frame0_artifact(
@@ -1762,10 +1858,24 @@ def _split_ready_reset_wait_semantics(
 
 
 def _validate_lineage(
-    checkout: Path, commit: str, value: Any
+    checkout: Path, commit: str, value: Any, *, level: str | None = None
 ) -> dict[str, Any]:
-    """Validate the active split-ready A lineage without retired tape births."""
+    """Validate the active split-ready A lineage without retired tape births.
 
+    ``level`` 选中这一跑跑的是哪一档随机性。省略 = 默认档(DR-L0),解析结果与
+    本模块历史上那两个硬钉常量逐字相同。
+    """
+
+    level = _DRL.DEFAULT_LEVEL if level is None else level
+    try:
+        level = _DRL.validate_level(level)
+        expected_lineage_kind = _DRL.lineage_kind(TASK_FAMILY, level)
+        expected_task_profile = _DRL.task_profile_id(TASK_FAMILY, level)
+        # 一档没有 materialize 过 lineage 就在这里明确停车,并把清单原样报出来。
+        # 这与"解析不出来"是两种失败,收据里必须能分辨。
+        _DRL.preflight_launchable(level)
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(str(exc)) from exc
     pin, row = _tracked_json(checkout, commit, value, name="A211 lineage")
     row = _exact_dict(
         row,
@@ -1799,14 +1909,14 @@ def _validate_lineage(
     _assert_no_retired_contract(row, name="A211 lineage")
     expected = {
         "schema_version": 5,
-        "kind": LINEAGE_KIND,
+        "kind": expected_lineage_kind,
         "actor_contract": ACTOR_CONTRACT,
         "actor_width": ACTOR_WIDTH,
         "critic_contract": CRITIC_CONTRACT,
         "critic_width": CRITIC_WIDTH,
         "trainability_contract": TRAINABILITY_CONTRACT,
         "actor_layout_identity": _actor_layout_identity(),
-        "task_profile": TASK_PROFILE_ID,
+        "task_profile": expected_task_profile,
         "gym_task": GYM_TASK_ID,
         "target_semantics": TARGET_SEMANTICS,
         "runtime_target_contract": _runtime_target_contract(),
@@ -1871,15 +1981,21 @@ def _validate_lineage(
         motion_sha256=pins["motion"]["sha256"],
         initial_center_timing_authority=timing,
     )
-    dr_l0_manifest = _dr_l0_manifest_binding(
-        checkout, commit, family="A", task_profile=TASK_PROFILE_ID
+    dr_l0_manifest, dr_launch_level_contract = _dr_level_manifest_binding(
+        checkout,
+        commit,
+        family="A",
+        task_profile=expected_task_profile,
+        level=level,
     )
     if row["dr_l0_manifest"] != dr_l0_manifest:
-        raise LaunchRefused("A211 DR-L0 lineage binding differs")
+        raise LaunchRefused("A211 DR lineage binding differs")
     return {
         **expected,
         **pins,
         "dr_l0_manifest": dr_l0_manifest,
+        "dr_launch_level": level,
+        "dr_launch_level_contract": dr_launch_level_contract,
         "teacher_frame0_artifact_content_sha256": teacher["content_sha256"],
         "initial_center_timing_authority": timing,
         "split_ready_reset_wait_authority": reset_wait,
@@ -3471,6 +3587,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
             "predecessor_result",
             "four_grid_scale4096_receipt",
             "stage",
+            "dr_launch_level",
             "num_envs",
             "max_iterations",
             "save_interval",
@@ -3505,6 +3622,13 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
         raise LaunchRefused("source.commit_sha must be exact lowercase 40-hex")
     python = _isaac_python_entry(source["isaac_python"])
     arm = _arm_contract(row["arm_id"])
+    # 选哪一档随机性是**发射时的显式选择**,不再是模块级常量。这里只做"是不是一个
+    # 已注册的档"的形状校验;这一档到底解析成哪份 profile / 哪份 manifest / 六条轴
+    # 各是什么值,由 _validate_lineage -> _dr_level_manifest_binding 用活值算出来。
+    try:
+        _DRL.validate_level(row["dr_launch_level"])
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(str(exc)) from exc
     stage = row["stage"]
     if stage not in BUDGETS:
         raise LaunchRefused("stage must be materialize, recipe, oracle32, smoke, probe512, long512, scale4096, or long4096")
@@ -3611,6 +3735,7 @@ def _validate_spec(document: Any, *, claimed: bool = False) -> dict[str, Any]:
         "predecessor_result": row["predecessor_result"],
         "four_grid_scale4096_receipt": four_grid_receipt,
         "stage": stage,
+        "dr_launch_level": row["dr_launch_level"],
         "num_envs": actual_budget[0],
         "max_iterations": actual_budget[1],
         "save_interval": actual_budget[2],
@@ -3672,7 +3797,8 @@ def _training_argv(spec: Mapping[str, Any], lineage: Mapping[str, Any], arm: Map
     argv = [
         spec["source"]["isaac_python"],
         str(wbt / "scripts/train.py"),
-        "task=%s" % TASK_PROFILE_ID,
+        # 选中档位解析出来的 profile。DR-L0 时与历史字面量逐字相同。
+        "task=%s" % lineage["task_profile"],
         "algo=ppo",
         "headless=true",
         "logger=tensorboard",
@@ -3826,6 +3952,11 @@ def _output_contract(
         "teacher_reveal_semantics": "measured_frame0_with_public_countdown",
         "passive_hold_after_reveal_required": False,
         "dr_l0_manifest": lineage["dr_l0_manifest"],
+        # 这一跑到底开了哪几条随机性:档名 + 六条轴的**实际取值**。只写档名的收据
+        # 读者无法复算,所以这里整块写出去(_dr_level_manifest_binding 解析,
+        # _DRL.validate_declared 负责在复核时拒收谎报)。
+        "dr_launch_level": lineage["dr_launch_level"],
+        "dr_launch_level_contract": lineage["dr_launch_level_contract"],
         # No current finite/long stage implements the required matched
         # profiler-off A->C->C->A benchmark.  In particular, scale4096 owns a
         # five-update heavy pre-long ledger and can never be speed evidence.
@@ -4323,7 +4454,9 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     source = _B._verify_clean_source(checkout, commit)
     runtime_sources = _runtime_sources(checkout, commit)
     runtime_assets = _B._validate_runtime_asset_environment()
-    lineage = _validate_lineage(checkout, commit, spec["lineage"])
+    lineage = _validate_lineage(
+        checkout, commit, spec["lineage"], level=spec["dr_launch_level"]
+    )
     arm = _arm_contract(spec["arm_id"])
     materialization = (
         _planned_materialization(arm=arm, lineage=lineage)
@@ -4459,7 +4592,22 @@ def _revalidate_claim_payload(
     if _runtime_sources(checkout, commit) != payload["runtime_sources"]:
         raise LaunchRefused("runtime source identity drifted")
     _B._validate_runtime_asset_claim(payload["runtime_assets"])
-    lineage = _validate_lineage(checkout, commit, spec["lineage"])
+    lineage = _validate_lineage(
+        checkout, commit, spec["lineage"], level=spec["dr_launch_level"]
+    )
+    # 收据自陈的档位块必须与重新解析的结果逐字段相同。下面那句 output_contract
+    # 整体比对当然也会发现差异,但它只会报一句 "output contract drifted";这一道
+    # 先跑,是为了让"这份 claim 谎报了自己开了哪几条随机性"有一个自己的名字。
+    stored_output = payload.get("output_contract")
+    try:
+        _DRL.validate_declared(
+            (stored_output or {}).get("dr_launch_level_contract"),
+            resolved=lineage["dr_launch_level_contract"],
+        )
+    except _DRL.DrLaunchLevelError as exc:
+        raise LaunchRefused(
+            "claimed DR launch level self-report differs: %s" % exc
+        ) from exc
     arm = _arm_contract(spec["arm_id"])
     materialization = (
         _planned_materialization(arm=arm, lineage=lineage)
@@ -4994,6 +5142,7 @@ def _write_template(args: argparse.Namespace) -> dict[str, Any]:
             }
         ),
         "stage": args.stage,
+        "dr_launch_level": args.dr_level,
         "num_envs": budget[0],
         "max_iterations": budget[1],
         "save_interval": budget[2],
@@ -5041,6 +5190,16 @@ def _parser() -> argparse.ArgumentParser:
     template.add_argument("--four-grid-scale4096-receipt-path")
     template.add_argument("--four-grid-scale4096-receipt-sha256")
     template.add_argument("--stage", required=True, choices=tuple(BUDGETS))
+    # 选哪一档随机性。默认 dr_l0 = 现役四格那一档,解析结果与本旗标出现之前逐字相同。
+    # dr_l1 会解析到 DR-L1 的 profile / manifest / finalizer 合同,并在 lineage 那一步
+    # 明确停车(那一档还没 materialize 过自己的 lineage,清单写在拒收信息里)。
+    template.add_argument(
+        "--dr-level",
+        default=_DRL.DEFAULT_LEVEL,
+        choices=tuple(_DRL.LEVELS),
+        help="domain-randomization level for this launch (default: %s)"
+        % _DRL.DEFAULT_LEVEL,
+    )
     template.add_argument("--gpu-index", required=True, type=int)
     template.add_argument("--gpu-uuid", required=True)
     template.add_argument("--owner", required=True)

@@ -43,9 +43,27 @@ GPU_ROLES = {
 A_EXPERIMENT_NAME = "agibot_a3_action_ball_a211_four_arm_diagnostic"
 C_EXPERIMENT_NAME = "agibot_a3_action_ball_c211_diagnostic"
 ALLOWED_CLAIM_KINDS = (
+    "action_ball_a211_four_arm_diagnostic_claim_v3",
+    "action_ball_c211_diagnostic_claim_v3",
+)
+# 2026-08-08:DR 档位入口把两个发射器的 spec/claim 从 v2 提到 v3
+# (claim 新增 `dr_launch_level` 与逐轴自陈)。
+#
+# 下面这张退役表**必须留着**,而且和上面那张同批改。原因是这一段扫描问的问题是
+# "这一格是不是已经被占过",不是"这份 claim 能不能用来发车":
+#   * 只认 v3 = 磁盘上已有的 v2 claim 变成看不见,于是可以在已经花掉的 namespace
+#     上重发 —— 那是**放宽**一道 fail-closed 门,不是升级;
+#   * 认 v2 但不认 v3 = 新 claim 会被报成 "invalid launch claim",一句看不懂的拒收。
+# 所以两版都认,并且版本号与 kind 必须成对匹配(见 _CLAIM_VERSION_BY_KIND),
+# 不许 v2 的版本号配 v3 的名字。
+RETIRED_CLAIM_KINDS = (
     "action_ball_a211_four_arm_diagnostic_claim_v2",
     "action_ball_c211_diagnostic_claim_v2",
 )
+_CLAIM_VERSION_BY_KIND = {
+    **{kind: 3 for kind in ALLOWED_CLAIM_KINDS},
+    **{kind: 2 for kind in RETIRED_CLAIM_KINDS},
+}
 # 2026-08-05 第二轴改版(第二次,exp §5.6.2d):探索包定死为四格共用的标准初始化 +
 # sigma 1.0,第二轴换成本体感观测噪声开关,cell_id 随之改名。
 # 卡角色未变:gpu0 = A 对,gpu1 = C 对,gpu2 留给 MuJoCo(本 preflight 仍要求它是空的)。
@@ -1005,20 +1023,20 @@ def _target_parent(checkout: Path, experiment_name: str) -> Path:
 
 
 def _refuse_existing_scale_claims(checkout: Path) -> None:
-    for family, experiment_name, selector_key, allowed_cells, claim_kind in (
+    for family, experiment_name, selector_key, allowed_cells, claim_kinds in (
         (
             "A211",
             A_EXPERIMENT_NAME,
             "arm_id",
             tuple(row[1] for row in TARGET_SPECS[:2]),
-            ALLOWED_CLAIM_KINDS[0],
+            (ALLOWED_CLAIM_KINDS[0], RETIRED_CLAIM_KINDS[0]),
         ),
         (
             "C211",
             C_EXPERIMENT_NAME,
             "recipe_id",
             tuple(row[1] for row in TARGET_SPECS[2:]),
-            ALLOWED_CLAIM_KINDS[1],
+            (ALLOWED_CLAIM_KINDS[1], RETIRED_CLAIM_KINDS[1]),
         ),
     ):
         root = _target_parent(checkout, experiment_name)
@@ -1068,8 +1086,9 @@ def _refuse_existing_scale_claims(checkout: Path) -> None:
             if (
                 type(outer["schema_version"]) is not int
                 or isinstance(outer["schema_version"], bool)
-                or outer["schema_version"] != 2
-                or outer["kind"] != claim_kind
+                or outer["kind"] not in claim_kinds
+                or outer["schema_version"]
+                != _CLAIM_VERSION_BY_KIND[outer["kind"]]
                 or type(payload) is not dict
                 or outer["launch_claim_sha256"] != canonical_sha256(payload)
                 or type(payload.get("spec")) is not dict
@@ -1370,6 +1389,9 @@ def produce_receipt(
             "source": source_at_cut,
             "writer_policy": {
                 "allowed_claim_kinds": list(ALLOWED_CLAIM_KINDS),
+                "retired_claim_kinds_still_counted_as_spent": list(
+                    RETIRED_CLAIM_KINDS
+                ),
                 "observed_live_writers": [],
             },
             "gpus": gpu_rows,
@@ -1514,11 +1536,16 @@ def _validate_document(
         )
     policy = _exact_dict(
         row["writer_policy"],
-        ("allowed_claim_kinds", "observed_live_writers"),
+        (
+            "allowed_claim_kinds",
+            "retired_claim_kinds_still_counted_as_spent",
+            "observed_live_writers",
+        ),
         name="transition writer policy",
     )
     if policy != {
         "allowed_claim_kinds": list(ALLOWED_CLAIM_KINDS),
+        "retired_claim_kinds_still_counted_as_spent": list(RETIRED_CLAIM_KINDS),
         "observed_live_writers": [],
     }:
         raise TransitionPreflightRefused("transition writer policy differs")

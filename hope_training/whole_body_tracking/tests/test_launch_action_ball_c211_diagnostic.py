@@ -46,6 +46,35 @@ _DR_L0_BINDING = {
     "hard_contract_identity": "action_ball_dr_l0_exact_all_off_v1",
     "task_profile": launcher.TASK_PROFILE_ID,
 }
+# 收据里的档位自陈块。刻意用**真的 DR-L0 payload + 真的候选 manifest** 解析出来,
+# 而不是在这里手写一个假块。A211 同批同形。
+_DR_L0_LEVEL_BLOCK = launcher._DRL.resolve(
+    launcher._DRL.DEFAULT_LEVEL,
+    family="C211",
+    contract_payload_document=_DR_L0_PAYLOAD,
+    manifest_document=json.loads(
+        (
+            Path(__file__).resolve().parents[3]
+            / launcher._FRAME0.DR_L0_MANIFEST_SOURCE
+        ).read_text(encoding="utf-8")
+    ),
+    contract_sha256=_DR_L0_CONTRACT_SHA256,
+    manifest_file_sha256="d" * 64,
+)
+
+
+def _dr_level_lineage_stub() -> dict:
+    """``_output_contract`` 需要的最小 lineage 片段:只有档位自陈这两键。
+
+    这些用例问的是 profiling / 共址,不是 DR 档位;但收据里的档位自陈是从 lineage
+    来的,所以这里给一份真的默认档解析块,而不是 ``{}``。
+    """
+
+    return {
+        "dr_launch_level": launcher._DRL.DEFAULT_LEVEL,
+        "dr_launch_level_contract": copy.deepcopy(_DR_L0_LEVEL_BLOCK),
+    }
+
 
 PRODUCER_SCRIPT = SCRIPT.parent / "action_ball_c211_oracle_evidence.py"
 PRODUCER_SPEC = importlib.util.spec_from_file_location(
@@ -1490,6 +1519,7 @@ def _case(
     terminations: "list[tuple[str, list[str]]] | None" = None,
     wait_only_reset_excluded: int = 0,
     projection_nonfinite: int = 0,
+    dr_level: str = launcher._DRL.DEFAULT_LEVEL,
 ):
     checkout = tmp_path / "checkout"
     checkout.mkdir(parents=True)
@@ -1546,6 +1576,7 @@ def _case(
             else None
         ),
         "stage": stage,
+        "dr_launch_level": dr_level,
         "num_envs": budget[0],
         "max_iterations": budget[1],
         "save_interval": budget[2],
@@ -1622,6 +1653,15 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         launcher._FRAME0,
         "_dr_l0_manifest_binding",
         lambda checkout, commit, *, family, task_profile: dict(_DR_L0_BINDING),
+    )
+
+    def _dr_level_binding(checkout, commit, *, family, task_profile, level):
+        # 只有默认档才有 stub;计划路径真选了别的档,这里就该炸而不是悄悄发默认档。
+        assert level == launcher._DRL.DEFAULT_LEVEL, level
+        return dict(_DR_L0_BINDING), copy.deepcopy(_DR_L0_LEVEL_BLOCK)
+
+    monkeypatch.setattr(
+        launcher._FRAME0, "_dr_level_manifest_binding", _dr_level_binding
     )
     monkeypatch.setattr(
         launcher._B,
@@ -3812,7 +3852,7 @@ def test_c211_update_profile_switch_is_exact_claim_bound_and_non_speed(
     monkeypatch.setenv(launcher.UPDATE_PROFILE_ENV, "1")
     _spec_path, spec, _lineage = _case(tmp_path, stage="materialize")
     normalized = launcher._validate_spec(spec)
-    profile = launcher._output_contract(normalized)["update_profile"]
+    profile = launcher._output_contract(normalized, _dr_level_lineage_stub())["update_profile"]
     assert profile["forwarded_value"] == "1"
     assert profile["mode"] == "profile_on_attribution_only"
     assert profile["speed_evidence_eligible"] is False
@@ -3823,10 +3863,12 @@ def test_c211_update_profile_switch_is_exact_claim_bound_and_non_speed(
         allow_colocation=True,
     )
     with pytest.raises(launcher.LaunchRefused, match="exclusive GPU claim"):
-        launcher._output_contract(launcher._validate_spec(colocated))
+        launcher._output_contract(
+            launcher._validate_spec(colocated), _dr_level_lineage_stub()
+        )
 
     monkeypatch.setenv(launcher.UPDATE_PROFILE_ENV, "0")
-    off = launcher._output_contract(normalized)["update_profile"]
+    off = launcher._output_contract(normalized, _dr_level_lineage_stub())["update_profile"]
     assert off["forwarded_value"] == "0"
     assert off["mode"] == "explicit_profiler_off"
     assert off != profile
@@ -3903,7 +3945,9 @@ def test_default_empty_gpu_and_scale_long_colocation_are_sealed(tmp_path):
     normalized = launcher._validate_spec(spec)
     assert normalized["gpu"]["require_empty"] is True
     assert normalized[launcher.COLOCATION_SPEC_KEY] is False
-    default_output = launcher._output_contract(normalized)
+    default_output = launcher._output_contract(
+        normalized, _dr_level_lineage_stub()
+    )
     assert default_output["speed_benchmark_eligible"] is False
     assert default_output["rate_evidence_eligible"] is False
     assert default_output["rate_evidence_isolation"] == (
@@ -3916,7 +3960,7 @@ def test_default_empty_gpu_and_scale_long_colocation_are_sealed(tmp_path):
     normalized = launcher._validate_spec(colocated)
     assert normalized["gpu"]["require_empty"] is False
     assert normalized[launcher.COLOCATION_SPEC_KEY] is True
-    output = launcher._output_contract(normalized)
+    output = launcher._output_contract(normalized, _dr_level_lineage_stub())
     assert output["speed_benchmark_eligible"] is False
     assert output["rate_evidence_eligible"] is False
     assert output["rate_evidence_isolation"] == "excluded_colocated_diagnostic"
@@ -3927,7 +3971,7 @@ def test_default_empty_gpu_and_scale_long_colocation_are_sealed(tmp_path):
         tmp_path / "colocated-scale", stage="scale4096", allow_colocation=True
     )
     scale_output = launcher._output_contract(
-        launcher._validate_spec(colocated_scale)
+        launcher._validate_spec(colocated_scale), _dr_level_lineage_stub()
     )
     assert scale_output["speed_benchmark_eligible"] is False
     assert scale_output["rate_evidence_eligible"] is False
@@ -3937,7 +3981,7 @@ def test_default_empty_gpu_and_scale_long_colocation_are_sealed(tmp_path):
         tmp_path / "exclusive-scale", stage="scale4096"
     )
     exclusive_scale = launcher._output_contract(
-        launcher._validate_spec(exclusive_scale_spec)
+        launcher._validate_spec(exclusive_scale_spec), _dr_level_lineage_stub()
     )
     assert exclusive_scale["speed_benchmark_eligible"] is False
     assert exclusive_scale["rate_evidence_eligible"] is False

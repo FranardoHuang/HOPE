@@ -330,7 +330,21 @@ def test_target_namespaces_must_be_unique_and_have_exact_family_parent(harness):
         _produce(harness, namespaces=wrong_parent)
 
 
-def test_existing_scale_claim_in_another_namespace_blocks_first_scale_receipt(harness):
+@pytest.mark.parametrize(
+    "kind",
+    (P.ALLOWED_CLAIM_KINDS[0], P.RETIRED_CLAIM_KINDS[0]),
+    ids=("current_v3", "retired_v2"),
+)
+def test_existing_scale_claim_in_another_namespace_blocks_first_scale_receipt(
+    harness, kind
+):
+    """"这一格已经被占过"必须对新旧两版 claim 都成立。
+
+    2026-08-08 DR 档位入口把 claim 从 v2 提到 v3。如果这段扫描只认新版,磁盘上
+    已有的 v2 claim 就变成看不见 —— 于是可以在已经花掉的 namespace 上重发。
+    那是放宽一道 fail-closed 门,所以两版都要挡。
+    """
+
     namespace = harness["a_root"] / "already-spent-scale"
     namespace.mkdir()
     payload = {
@@ -343,8 +357,8 @@ def test_existing_scale_claim_in_another_namespace_blocks_first_scale_receipt(ha
     _rewrite_canonical(
         namespace / "launch_claim.json",
         {
-            "schema_version": 2,
-            "kind": P.ALLOWED_CLAIM_KINDS[0],
+            "schema_version": P._CLAIM_VERSION_BY_KIND[kind],
+            "kind": kind,
             "launch_claim_sha256": claim_sha,
             "canonical_payload": payload,
         },
@@ -353,6 +367,26 @@ def test_existing_scale_claim_in_another_namespace_blocks_first_scale_receipt(ha
         _produce(harness)
     assert not harness["output"].exists()
     assert harness["state"]["query_order"] == []
+
+
+def test_a_claim_whose_version_and_kind_disagree_is_refused_as_invalid(harness):
+    """认两版不等于随便配:v2 的版本号挂 v3 的名字必须当场拒。"""
+
+    namespace = harness["a_root"] / "mismatched-claim"
+    namespace.mkdir()
+    payload = {"spec": {"stage": "scale4096", "arm_id": P.TARGET_SPECS[0][1]}}
+    _rewrite_canonical(
+        namespace / "launch_claim.json",
+        {
+            "schema_version": 2,
+            "kind": P.ALLOWED_CLAIM_KINDS[0],
+            "launch_claim_sha256": P.canonical_sha256(payload),
+            "canonical_payload": payload,
+        },
+    )
+    with pytest.raises(P.TransitionPreflightRefused, match="invalid launch claim"):
+        _produce(harness)
+    assert not harness["output"].exists()
 
 
 def test_lock_conflict_releases_earlier_locks_and_writes_nothing(harness):

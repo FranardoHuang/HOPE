@@ -878,10 +878,14 @@ def test_receipt_validator_rejects_resealed_self_report_drift(tmp_path: Path):
 
 # 两个发射器的真实常量,刻意手写字面量(不从被测模块反推)。
 # 与真发射器的等值由下面的 surface 测试当场核对。
-CLAIM_SCHEMA_VERSION = 2
+# 2026-08-08 v2 -> v3:DR 档位入口给 spec/claim 加了必填的 `dr_launch_level`
+# 与逐轴自陈。下面 test_the_stand_in_launchers_ask_the_real_launchers_for_exactly_these_names
+# 会把这个数字与两个真发射器的 SCHEMA_VERSION 对齐 —— 那条断言就是为了让这种
+# 手抄副本不许落后。
+CLAIM_SCHEMA_VERSION = 3
 CLAIM_KINDS = {
-    "A211": "action_ball_a211_four_arm_diagnostic_claim_v2",
-    "C211": "action_ball_c211_diagnostic_claim_v2",
+    "A211": "action_ball_a211_four_arm_diagnostic_claim_v3",
+    "C211": "action_ball_c211_diagnostic_claim_v3",
 }
 RESULT_KINDS = {
     "A211": "action_ball_a211_four_arm_diagnostic_launch_result_v1",

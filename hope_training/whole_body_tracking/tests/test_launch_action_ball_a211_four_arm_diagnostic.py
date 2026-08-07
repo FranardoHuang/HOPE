@@ -45,6 +45,21 @@ _DR_L0_BINDING = {
     "hard_contract_identity": "action_ball_dr_l0_exact_all_off_v1",
     "task_profile": launcher.TASK_PROFILE_ID,
 }
+# 收据里的档位自陈块。刻意用**真的 DR-L0 payload + 真的候选 manifest** 解析出来,
+# 而不是在这里手写一个假块 —— 手写的假块会让"收据自陈与实际取值一致"这条检查
+# 变成自证。
+_DR_L0_LEVEL_BLOCK = launcher._DRL.resolve(
+    launcher._DRL.DEFAULT_LEVEL,
+    family="A211",
+    contract_payload_document=_DR_L0_PAYLOAD,
+    manifest_document=json.loads(
+        (
+            Path(__file__).resolve().parents[3] / launcher.DR_L0_MANIFEST_SOURCE
+        ).read_text(encoding="utf-8")
+    ),
+    contract_sha256=_DR_L0_CONTRACT_SHA256,
+    manifest_file_sha256="d" * 64,
+)
 
 
 class _FakeTensor:
@@ -713,7 +728,14 @@ def _generated_chain(tmp_path: Path, arm_id: str, lineage_sha: str):
     )
 
 
-def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = False):
+def _case(
+    tmp_path: Path,
+    *,
+    arm_id: str,
+    stage: str,
+    allow_colocation: bool = False,
+    dr_level: str = launcher._DRL.DEFAULT_LEVEL,
+):
     checkout = tmp_path / "checkout"
     checkout.mkdir(parents=True)
     python = tmp_path / "python"
@@ -783,6 +805,7 @@ def _case(tmp_path: Path, *, arm_id: str, stage: str, allow_colocation: bool = F
             else None
         ),
         "stage": stage,
+        "dr_launch_level": dr_level,
         "num_envs": budget[0],
         "max_iterations": budget[1],
         "save_interval": budget[2],
@@ -837,6 +860,15 @@ def _patch_plan_environment(monkeypatch: pytest.MonkeyPatch):
         launcher,
         "_dr_l0_manifest_binding",
         lambda checkout, commit, *, family, task_profile: dict(_DR_L0_BINDING),
+    )
+
+    def _dr_level_binding(checkout, commit, *, family, task_profile, level):
+        # 只有默认档才有 stub;计划路径真选了别的档,这里就该炸而不是悄悄发默认档。
+        assert level == launcher._DRL.DEFAULT_LEVEL, level
+        return dict(_DR_L0_BINDING), copy.deepcopy(_DR_L0_LEVEL_BLOCK)
+
+    monkeypatch.setattr(
+        launcher, "_dr_level_manifest_binding", _dr_level_binding
     )
     monkeypatch.setattr(
         launcher._B, "_validate_runtime_asset_environment", lambda: {"kind": "test_runtime_assets"}
@@ -1580,6 +1612,10 @@ def test_a211_update_profile_switch_is_exact_claim_bound_and_non_speed(
         **lineage,
         "teacher_frame0_artifact_content_sha256": "1" * 64,
         "split_ready_reset_wait_authority": {"claim_sha256": "2" * 64},
+        # 收据里的档位自陈由 lineage 携带;这条用例问的是 profiling,不是档位,
+        # 但块本身用真的默认档解析结果,不是一个假的占位。
+        "dr_launch_level": launcher._DRL.DEFAULT_LEVEL,
+        "dr_launch_level_contract": copy.deepcopy(_DR_L0_LEVEL_BLOCK),
     }
     profile = launcher._output_contract(normalized, lineage)["update_profile"]
     assert profile["forwarded_value"] == "1"
@@ -1599,6 +1635,8 @@ def test_a211_update_profile_switch_is_exact_claim_bound_and_non_speed(
                 **colocated_lineage,
                 "teacher_frame0_artifact_content_sha256": "1" * 64,
                 "split_ready_reset_wait_authority": {"claim_sha256": "2" * 64},
+                "dr_launch_level": launcher._DRL.DEFAULT_LEVEL,
+                "dr_launch_level_contract": copy.deepcopy(_DR_L0_LEVEL_BLOCK),
             },
         )
 

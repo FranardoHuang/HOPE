@@ -95,6 +95,12 @@ MUST_MATCH = (
     "COLOCATED_STAGES",
     "COLOCATION_SPEC_KEY",
     "CRITIC_WIDTH",
+    # DR 档位入口(2026-08-08):权威模块的路径 / 钉子、DR-L1 的候选 manifest、
+    # 可选档位表与默认档。这五项是**共享事实**——两族必须提供同一套选项,
+    # 否则 "A 选 dr_l1、C 还只能 dr_l0" 会变成一个没人拦得住的实验分叉。
+    "DR_LAUNCH_LEVELS_FILE",
+    "DR_LAUNCH_LEVELS_SOURCE",
+    "DR_L1_MANIFEST_SOURCE",
     "EXACT_GROUP_FILE",
     "FOUR_GRID_BARRIER_FILE",
     "FOUR_GRID_BARRIER_SOURCE",
@@ -141,6 +147,9 @@ MUST_DIFFER = (
     "CLAIM_KIND",
     "CRITIC_CONTRACT",
     "CRITIC_NORMALIZER_IDENTITY",
+    # 每族的 DR-L1 task profile 各一份,与 TASK_PROFILE_SOURCE 同理:合流 = 两族
+    # 跑同一片叶子。
+    "DR_L1_TASK_PROFILE_SOURCE",
     "EXPERIMENT_NAME",
     "GYM_TASK_ID",
     "LAUNCHER_SOURCE",
@@ -155,6 +164,7 @@ MUST_DIFFER = (
     "SCALE4096_TERMINAL_ACCEPTANCE_KIND",
     "SPEC_KIND",
     "TARGET_SEMANTICS",
+    "TASK_FAMILY",
     "TASK_PROFILE_ID",
     "TASK_PROFILE_SOURCE",
     "TRAINABILITY_CONTRACT",
