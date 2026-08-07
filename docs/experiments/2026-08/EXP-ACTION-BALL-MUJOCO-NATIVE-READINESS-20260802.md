@@ -4737,12 +4737,14 @@ termination_reason_joint_qdes_forbidden  = 0     termination_reason_joint_actual
 
 **回归账（解释器 `/workspace/hope_isaac_venv/bin/python` = Python 3.10.18，12 个直接相关模块）：**
 
-* 基线 `559b95f4`：**3 failed / 752 passed / 0 skipped**
-* 本节落地后：**3 failed / 775 passed / 0 skipped**
+* 开工时的基线 `559b95f4`：**3 failed / 752 passed / 0 skipped**；同一批文件改完后 **3 failed / 775 passed / 0 skipped**
+* 落地提交的**真实父提交** `34674c0e`（并行 workflow 中途插进来的一条，给四格 barrier 加了 1152 行测试）：
+  **3 failed / 848 passed / 0 skipped**；本节提交 `bc08543a`（**直接 checkout 已推送的那份，不是本地工作区**）：
+  **3 failed / 871 passed / 0 skipped**
 
-两边**同样的 3 条失败**，全在 `test_audit_reward_run.py`，与本节无关
+两组对拍**同样的 3 条失败**，全在 `test_audit_reward_run.py`，与本节无关
 （`soft_limit_recipe_params` 与 `negative_reward_semantics`，属于并行 workflow 的「裁定二」限位调价那条线）。
-净增 23 条通过，**skip 数两边都是 0**。
+两组都是**净增 23 条通过、skip 数两边都是 0**。
 
 **没关的洞（别当成已解决）：**
 
