@@ -154,7 +154,104 @@ def _shared():
         "dynamic_ready_nominal_receipt_content_sha256": "5" * 64,
         "teacher_frame0_artifact_file_sha256": "6" * 64,
         "teacher_frame0_artifact_content_sha256": "7" * 64,
-        "split_ready_reset_wait_claim_sha256": "8" * 64,
+        "split_ready_reset_wait_family_invariant_sha256": (
+            barrier.family_invariant_reset_wait_sha256(_reset_wait("A"))
+        ),
+    }
+
+
+# 现役 split_ready_reset_wait_authority 的真实形状(从 pod 上 A0/C0 的 launch_claim.json
+# 抄下来的字段集合与族标签取值)。两族只在 family / timing_mode / receipt.path 上不同,
+# 以及由它们派生的两颗 claim_sha256。
+def _reset_wait(family: str):
+    assert family in ("A", "C")
+    timing_mode = "a_online_solver" if family == "A" else "c_direct_ball"
+    recipe = "current_lm" if family == "A" else "outcome_dense_only"
+    timing = {
+        "action_manifest": {
+            "path": "configs/core/take_061_unit04_bh.full.manifest.v3.json",
+            "sha256": "a" * 64,
+        },
+        "claim_sha256": ("b" if family == "A" else "c") * 64,
+        "family": family,
+        "literal_center_question_sha256": "d" * 64,
+        "physics_profile_sha256": "e" * 64,
+        "receipt": {
+            "content_sha256": "f" * 64,
+            "path": "configs/tape/%s.target.task_receipt.v5.json" % recipe,
+            "sha256": "0" * 63 + "1",
+        },
+        "sample_receipt_sha256": "0" * 63 + "2",
+        "sampling_profile_sha256": "0" * 63 + "3",
+        "solver_profile_sha256": "0" * 63 + "4",
+        "timing_mode": timing_mode,
+    }
+    return {
+        "bridge_learning_signal": "dense_mimic_after_task_reveal",
+        "claim_sha256": ("8" if family == "A" else "9") * 64,
+        "control_decimation": 4,
+        "diagnostic_unauthorized": True,
+        "dynamic_ready": {
+            "content_sha256": "3" * 64,
+            "sha256": "2" * 64,
+        },
+        "hidden_wait_required_physics_steps": 100,
+        "hidden_wait_required_policy_steps": 25,
+        "initial_center_timing_authority": timing,
+        "kind": "action_ball_a211_split_ready_reset_wait_gate_v1",
+        "nominal_hold_receipt": {
+            "content_sha256": "5" * 64,
+            "sha256": "4" * 64,
+        },
+        "observed_physics_steps": 240,
+        "observed_policy_steps": 60,
+        "passive_hold_after_reveal_required": False,
+        "physical_reset_source": "dynamic_ready.physical_ready",
+        "policy_dt_s": 0.02,
+        "schema_version": 1,
+        "teacher_physical_birth_separated": True,
+        "teacher_source": "measured_motion.frame0",
+        "time_to_teacher_start_at_reveal_s": 0.6923799138976297,
+    }
+
+
+def _lineage_for_family(family: str):
+    shared = {
+        "motion_sha256": barrier._F.CANONICAL_MOTION_SHA256,
+        "dynamic_ready_artifact_file_sha256": "2" * 64,
+        "dynamic_ready_nominal_receipt_file_sha256": "4" * 64,
+        "teacher_frame0_artifact_file_sha256": "6" * 64,
+        "teacher_frame0_artifact_content_sha256": "7" * 64,
+    }
+    return {
+        "motion": {"path": "motion.npz", "sha256": shared["motion_sha256"]},
+        "dynamic_ready_artifact": {
+            "path": "ready.json",
+            "sha256": shared["dynamic_ready_artifact_file_sha256"],
+        },
+        "dynamic_ready_nominal_receipt": {
+            "path": "hold.json",
+            "sha256": shared["dynamic_ready_nominal_receipt_file_sha256"],
+        },
+        "teacher_frame0_artifact": {
+            "path": "teacher.json",
+            "sha256": shared["teacher_frame0_artifact_file_sha256"],
+        },
+        "teacher_frame0_artifact_content_sha256": shared[
+            "teacher_frame0_artifact_content_sha256"
+        ],
+        "split_ready_reset_wait_authority": _reset_wait(family),
+    }
+
+
+def _payload_for_shared(expected):
+    return {
+        "spec": {"source": {"commit_sha": expected["source_commit_sha"]}},
+        "bundle": {
+            "isaac_four_grid_manifest": {
+                "content_sha256": expected["four_grid_manifest_content_sha256"]
+            }
+        },
     }
 
 
@@ -287,52 +384,193 @@ def test_prelong_binding_must_preserve_nonzero_behavioral_counts_and_none_cutoff
 
 def test_shared_binding_uses_split_ready_and_runtime_sampler_manifest_only():
     expected = _shared()
-    lineage = {
-        "motion": {"path": "motion.npz", "sha256": expected["motion_sha256"]},
-        "dynamic_ready_artifact": {
-            "path": "ready.json",
-            "sha256": expected["dynamic_ready_artifact_file_sha256"],
-        },
-        "dynamic_ready_nominal_receipt": {
-            "path": "hold.json",
-            "sha256": expected[
-                "dynamic_ready_nominal_receipt_file_sha256"
-            ],
-        },
-        "teacher_frame0_artifact": {
-            "path": "teacher.json",
-            "sha256": expected["teacher_frame0_artifact_file_sha256"],
-        },
-        "teacher_frame0_artifact_content_sha256": expected[
-            "teacher_frame0_artifact_content_sha256"
-        ],
-        "split_ready_reset_wait_authority": {
-            "dynamic_ready": {
-                "content_sha256": expected[
-                    "dynamic_ready_artifact_content_sha256"
-                ]
-            },
-            "nominal_hold_receipt": {
-                "content_sha256": expected[
-                    "dynamic_ready_nominal_receipt_content_sha256"
-                ]
-            },
-            "claim_sha256": expected["split_ready_reset_wait_claim_sha256"],
-        },
-    }
-    payload = {
-        "spec": {"source": {"commit_sha": expected["source_commit_sha"]}},
-        "bundle": {
-            "isaac_four_grid_manifest": {
-                "content_sha256": expected[
-                    "four_grid_manifest_content_sha256"
-                ]
-            }
-        },
-    }
-    assert barrier._shared_binding(lineage, payload) == expected
+    lineage = _lineage_for_family("A")
+    payload = _payload_for_shared(expected)
+    observed = barrier._shared_binding(lineage, payload)
+    assert set(observed) == set(expected)
+    assert (
+        observed["split_ready_reset_wait_family_invariant_sha256"]
+        == barrier.family_invariant_reset_wait_sha256(
+            lineage["split_ready_reset_wait_authority"]
+        )
+    )
+    for key in expected:
+        if key == "split_ready_reset_wait_family_invariant_sha256":
+            continue
+        assert observed[key] == expected[key]
     assert "immutable_tape" not in repr(expected)
     assert "exact_zero_handoff" not in repr(expected)
+    # 这项现在是本模块现算的抹族 digest,不再是 lineage 里那颗 claim_sha256。
+    assert (
+        observed["split_ready_reset_wait_family_invariant_sha256"]
+        != lineage["split_ready_reset_wait_authority"]["claim_sha256"]
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 抹族 digest:该拦的仍拦、误拦的不再拦
+# --------------------------------------------------------------------------- #
+def test_family_labels_alone_no_longer_split_the_shared_reset_wait_binding():
+    """A 格与 C 格只差族标签时,同一份物理复位/WAIT 权威必须比得相等。
+
+    这是修复前**永远过不去**的那一条:两族的 claim_sha256 因为嵌着 family/timing_mode/
+    receipt 文件名而在任何正确网格上都不相等。
+    """
+
+    a = _reset_wait("A")
+    c = _reset_wait("C")
+    assert a["claim_sha256"] != c["claim_sha256"]
+    assert a != c
+    assert barrier.family_invariant_reset_wait_sha256(
+        a
+    ) == barrier.family_invariant_reset_wait_sha256(c)
+
+    a_binding = barrier._shared_binding(
+        _lineage_for_family("A"), _payload_for_shared(_shared())
+    )
+    c_binding = barrier._shared_binding(
+        _lineage_for_family("C"), _payload_for_shared(_shared())
+    )
+    assert a_binding == c_binding
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(
+            lambda row: row.update(hidden_wait_required_policy_steps=26),
+            id="hidden_wait_policy_steps",
+        ),
+        pytest.param(
+            lambda row: row.update(hidden_wait_required_physics_steps=104),
+            id="hidden_wait_physics_steps",
+        ),
+        pytest.param(lambda row: row.update(control_decimation=5), id="decimation"),
+        pytest.param(lambda row: row.update(policy_dt_s=0.05), id="policy_dt"),
+        pytest.param(
+            lambda row: row.update(time_to_teacher_start_at_reveal_s=0.5),
+            id="reveal_countdown",
+        ),
+        pytest.param(
+            lambda row: row.update(passive_hold_after_reveal_required=True),
+            id="passive_hold",
+        ),
+        pytest.param(
+            lambda row: row.update(physical_reset_source="frame0"),
+            id="physical_reset_source",
+        ),
+        pytest.param(
+            lambda row: row["dynamic_ready"].update(content_sha256="9" * 64),
+            id="dynamic_ready_content",
+        ),
+        pytest.param(
+            lambda row: row["nominal_hold_receipt"].update(sha256="9" * 64),
+            id="nominal_hold_file",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"]["action_manifest"].update(
+                sha256="9" * 64
+            ),
+            id="action_manifest_sha",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"]["action_manifest"].update(
+                path="configs/stale_core/manifest.json"
+            ),
+            id="action_manifest_path",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"].update(
+                solver_profile_sha256="9" * 64
+            ),
+            id="solver_profile",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"].update(
+                physics_profile_sha256="9" * 64
+            ),
+            id="physics_profile",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"].update(
+                sampling_profile_sha256="9" * 64
+            ),
+            id="sampling_profile",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"].update(
+                sample_receipt_sha256="9" * 64
+            ),
+            id="sample_receipt",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"].update(
+                literal_center_question_sha256="9" * 64
+            ),
+            id="literal_center_question",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"]["receipt"].update(
+                sha256="9" * 64
+            ),
+            id="task_receipt_file",
+        ),
+        pytest.param(
+            lambda row: row["initial_center_timing_authority"]["receipt"].update(
+                content_sha256="9" * 64
+            ),
+            id="task_receipt_content",
+        ),
+    ],
+)
+def test_reset_wait_digest_still_separates_every_non_family_difference(mutate):
+    """粗一档就过不了:族标签之外的任何一处不同,抹族 digest 仍然必须分开。"""
+
+    baseline = _reset_wait("A")
+    mutated = _reset_wait("C")
+    mutate(mutated)
+    assert barrier.family_invariant_reset_wait_sha256(
+        baseline
+    ) != barrier.family_invariant_reset_wait_sha256(mutated)
+
+
+def test_reset_wait_digest_refuses_unknown_or_missing_fields():
+    extra = _reset_wait("A")
+    extra["a_brand_new_switch"] = True
+    with pytest.raises(barrier.BarrierRefused):
+        barrier.family_invariant_reset_wait_sha256(extra)
+
+    missing = _reset_wait("A")
+    missing.pop("control_decimation")
+    with pytest.raises(barrier.BarrierRefused):
+        barrier.family_invariant_reset_wait_sha256(missing)
+
+    timing_extra = _reset_wait("A")
+    timing_extra["initial_center_timing_authority"]["new_pin_sha256"] = "9" * 64
+    with pytest.raises(barrier.BarrierRefused):
+        barrier.family_invariant_reset_wait_sha256(timing_extra)
+
+    receipt_extra = _reset_wait("A")
+    receipt_extra["initial_center_timing_authority"]["receipt"]["extra"] = 1
+    with pytest.raises(barrier.BarrierRefused):
+        barrier.family_invariant_reset_wait_sha256(receipt_extra)
+
+
+def test_shared_binding_scope_self_reports_what_was_excluded_and_why():
+    scope = barrier.SHARED_BINDING_SCOPE
+    assert scope["compared_byte_equal_across_all_four_cells"] == list(
+        barrier.SHARED_BINDING_KEYS
+    )
+    projection = scope["reset_wait_projection"]
+    assert projection["digest_key"] in barrier.SHARED_BINDING_KEYS
+    assert projection["family_scoped_fields_excluded"] == list(
+        barrier.RESET_WAIT_FAMILY_SCOPED_FIELDS
+    )
+    assert projection["exclusion_reason"].strip()
+    # 自陈的"仍然要求逐字节相同"清单必须真的还在 digest 里。
+    for entry in projection["still_required_byte_equal_inside_the_digest"]:
+        assert entry not in barrier.RESET_WAIT_FAMILY_SCOPED_FIELDS
+    assert "split_ready_reset_wait_claim_sha256" not in barrier.SHARED_BINDING_KEYS
 
 
 def _write(path: Path, value) -> str:
@@ -385,8 +623,8 @@ def test_all_four_pass_builds_one_exact_long_only_receipt(tmp_path: Path):
     assert document["status"] == "PASS"
     assert document["authorization"] == "long4096_launch_barrier_only"
     assert document["scale_budget"] == [4096, 5, 1]
-    assert document["schema_version"] == 3
-    assert document["kind"].endswith("_v3")
+    assert document["schema_version"] == 4
+    assert document["kind"].endswith("_v4")
     assert document["terminal_acceptance_policy"] == (
         barrier.TERMINAL_ACCEPTANCE_POLICY
     )
@@ -501,7 +739,7 @@ def test_shared_source_or_ready_sha_mismatch_is_refused(tmp_path: Path):
 
     audits = _audits(tmp_path)
     audits[barrier._F.CELL_IDS[-1]]["shared_binding"][
-        "split_ready_reset_wait_claim_sha256"
+        "split_ready_reset_wait_family_invariant_sha256"
     ] = "e" * 64
     with pytest.raises(barrier.BarrierRefused, match="shared concrete"):
         barrier.document_from_audits(audits)

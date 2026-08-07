@@ -21,8 +21,11 @@ FOUR_GRID_FILE = SCRIPT_DIR / "action_ball_211_four_grid_contract.py"
 A_LAUNCHER_FILE = SCRIPT_DIR / "launch_action_ball_a211_four_arm_diagnostic.py"
 C_LAUNCHER_FILE = SCRIPT_DIR / "launch_action_ball_c211_diagnostic.py"
 
-SCHEMA_VERSION = 3
-KIND = "action_ball_211_four_grid_scale4096_aggregate_receipt_v3"
+# v4 (2026-08-07):shared_binding 的最后一项从 lineage 抄来的
+# split_ready_reset_wait_claim_sha256 换成本模块现算的抹族 digest,并新增
+# shared_binding_scope 自陈块。旧 v3 收据无法与新文档比较,故改 kind。
+SCHEMA_VERSION = 4
+KIND = "action_ball_211_four_grid_scale4096_aggregate_receipt_v4"
 AUTHORIZATION = "long4096_launch_barrier_only"
 SCALE_BUDGET = [4096, 5, 1]
 PHYSICAL_FALL_REASONS = ("base_fell_tilt", "base_too_low")
@@ -139,8 +142,124 @@ SHARED_BINDING_KEYS = (
     "dynamic_ready_nominal_receipt_content_sha256",
     "teacher_frame0_artifact_file_sha256",
     "teacher_frame0_artifact_content_sha256",
-    "split_ready_reset_wait_claim_sha256",
+    # 2026-08-07:这一项**不再**是 lineage 里那颗 split_ready_reset_wait_authority
+    # .claim_sha256,而是本模块现算的"抹掉族标签之后的同一颗物理复位/WAIT 权威"。
+    # 见 RESET_WAIT_FAMILY_SCOPED_FIELDS 的说明。
+    "split_ready_reset_wait_family_invariant_sha256",
 )
+
+# --------------------------------------------------------------------------- #
+# 物理复位 / RESET_WAIT 权威的"抹族"投影
+# --------------------------------------------------------------------------- #
+# 人话:这道门原本要求四格的 split_ready_reset_wait_authority.claim_sha256 逐字节相同。
+# 想证的事是对的 —— 四格必须是同一个物理复位、同一份 dynamic-ready、同一张 WAIT 时刻表、
+# 同一道初始中心题。但它钉错了量:那颗 claim_sha256 覆盖的对象里嵌着
+# initial_center_timing_authority,而后者按设计带着族标签(family="A"/"C"、
+# timing_mode="a_online_solver"/"c_direct_ball"),连 task receipt 的**文件名**也带着
+# 各自的 target recipe 前缀(current_lm.* / outcome_dense_only.*,两份文件字节完全相同)。
+# 所以 A 格与 C 格的这颗 sha **在任何情况下都不可能相等**,四格聚合永远过不去。
+#
+# 现在改成:把这三处族标签投影掉之后再算一颗 sha,四格比这颗。被投影掉的字段逐条列在
+# 收据里(SHARED_BINDING_SCOPE),不是悄悄删检查;投影之外的一切 —— 包括
+# hidden_wait 步数、control_decimation、policy_dt、dynamic_ready/nominal_hold 的
+# content sha、reveal 时刻、以及 initial_center_timing_authority 里的
+# action_manifest(路径与 sha)、solver_profile_sha256、physics_profile_sha256、
+# sampling_profile_sha256、sample_receipt_sha256、literal_center_question_sha256、
+# receipt.sha256 / receipt.content_sha256 —— 仍然要求四格逐字节相同,一个字都没放松。
+RESET_WAIT_KEYS = (
+    "bridge_learning_signal",
+    "claim_sha256",
+    "control_decimation",
+    "diagnostic_unauthorized",
+    "dynamic_ready",
+    "hidden_wait_required_physics_steps",
+    "hidden_wait_required_policy_steps",
+    "initial_center_timing_authority",
+    "kind",
+    "nominal_hold_receipt",
+    "observed_physics_steps",
+    "observed_policy_steps",
+    "passive_hold_after_reveal_required",
+    "physical_reset_source",
+    "policy_dt_s",
+    "schema_version",
+    "teacher_physical_birth_separated",
+    "teacher_source",
+    "time_to_teacher_start_at_reveal_s",
+)
+INITIAL_CENTER_TIMING_KEYS = (
+    "action_manifest",
+    "claim_sha256",
+    "family",
+    "literal_center_question_sha256",
+    "physics_profile_sha256",
+    "receipt",
+    "sample_receipt_sha256",
+    "sampling_profile_sha256",
+    "solver_profile_sha256",
+    "timing_mode",
+)
+# 唯一允许 A 格与 C 格不同的三处(外加两颗由它们派生的 claim_sha256)。
+RESET_WAIT_FAMILY_SCOPED_FIELDS = (
+    "claim_sha256",
+    "initial_center_timing_authority.claim_sha256",
+    "initial_center_timing_authority.family",
+    "initial_center_timing_authority.receipt.path",
+    "initial_center_timing_authority.timing_mode",
+)
+RESET_WAIT_RECEIPT_KEYS = ("content_sha256", "path", "sha256")
+# 收据自陈:这道门到底比了什么、故意没比什么、为什么。不写在注释里,写进被签名的文档。
+SHARED_BINDING_SCOPE = {
+    "schema_version": 1,
+    "kind": "action_ball_211_four_grid_shared_binding_scope_v1",
+    "compared_byte_equal_across_all_four_cells": list(SHARED_BINDING_KEYS),
+    "reset_wait_projection": {
+        "digest_key": "split_ready_reset_wait_family_invariant_sha256",
+        "digest_input": (
+            "the whole split_ready_reset_wait_authority object, with the "
+            "family-scoped fields below projected out, canonical-JSON hashed by "
+            "this module"
+        ),
+        "family_scoped_fields_excluded": list(RESET_WAIT_FAMILY_SCOPED_FIELDS),
+        "exclusion_reason": (
+            "A211 and C211 tag the same physical reset / WAIT authority with their "
+            "own family letter, timing mode and task-receipt filename prefix; the "
+            "two receipt files are byte-identical.  Requiring the enclosing "
+            "claim_sha256 to be equal was unsatisfiable for any correct grid."
+        ),
+        "still_required_byte_equal_inside_the_digest": [
+            "control_decimation",
+            "policy_dt_s",
+            "hidden_wait_required_policy_steps",
+            "hidden_wait_required_physics_steps",
+            "observed_policy_steps",
+            "observed_physics_steps",
+            "time_to_teacher_start_at_reveal_s",
+            "physical_reset_source",
+            "teacher_source",
+            "teacher_physical_birth_separated",
+            "passive_hold_after_reveal_required",
+            "bridge_learning_signal",
+            "dynamic_ready.sha256",
+            "dynamic_ready.content_sha256",
+            "nominal_hold_receipt.sha256",
+            "nominal_hold_receipt.content_sha256",
+            "initial_center_timing_authority.action_manifest.path",
+            "initial_center_timing_authority.action_manifest.sha256",
+            "initial_center_timing_authority.literal_center_question_sha256",
+            "initial_center_timing_authority.physics_profile_sha256",
+            "initial_center_timing_authority.solver_profile_sha256",
+            "initial_center_timing_authority.sampling_profile_sha256",
+            "initial_center_timing_authority.sample_receipt_sha256",
+            "initial_center_timing_authority.receipt.sha256",
+            "initial_center_timing_authority.receipt.content_sha256",
+        ],
+        "unknown_field_policy": (
+            "refuse: an unlisted key in either object fails the barrier so a new "
+            "field must be classified shared or family-scoped before aggregating"
+        ),
+    },
+}
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -426,6 +545,36 @@ def _pin(value: Any, *, name: str) -> tuple[dict[str, str], Path]:
     return {"path": path_text, "sha256": digest}, Path(path_text)
 
 
+def family_invariant_reset_wait_sha256(reset_wait: Mapping[str, Any]) -> str:
+    """Digest the split-ready reset/WAIT authority with the family labels removed.
+
+    Fail-closed on schema drift: an unknown field in either the reset/WAIT object or
+    its embedded initial-center timing authority is refused rather than silently
+    folded into (or out of) the digest.  A new field must be explicitly classified as
+    shared or family-scoped before the grid can aggregate again.
+    """
+
+    row = _exact(reset_wait, RESET_WAIT_KEYS, name="split-ready reset/WAIT authority")
+    timing = _exact(
+        row["initial_center_timing_authority"],
+        INITIAL_CENTER_TIMING_KEYS,
+        name="initial-center timing authority",
+    )
+    receipt = _exact(
+        timing["receipt"], RESET_WAIT_RECEIPT_KEYS, name="initial-center timing receipt"
+    )
+    # 抹掉族标签,其余原样进 digest。receipt 的 sha256/content_sha256 留下 ——
+    # 两族的 task receipt 文件字节相同,只有文件名带各自的 target recipe 前缀。
+    timing["receipt"] = {
+        key: receipt[key] for key in RESET_WAIT_RECEIPT_KEYS if key != "path"
+    }
+    for key in ("claim_sha256", "family", "timing_mode"):
+        timing.pop(key)
+    row["initial_center_timing_authority"] = timing
+    row.pop("claim_sha256")
+    return canonical_sha256(row)
+
+
 def _shared_binding(lineage: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, str]:
     artifact = lineage.get("dynamic_ready_artifact")
     receipt = lineage.get("dynamic_ready_nominal_receipt")
@@ -458,7 +607,9 @@ def _shared_binding(lineage: Mapping[str, Any], payload: Mapping[str, Any]) -> d
         "teacher_frame0_artifact_content_sha256": lineage.get(
             "teacher_frame0_artifact_content_sha256"
         ),
-        "split_ready_reset_wait_claim_sha256": reset_wait.get("claim_sha256"),
+        "split_ready_reset_wait_family_invariant_sha256": (
+            family_invariant_reset_wait_sha256(reset_wait)
+        ),
     }
     return _validate_shared_binding(row)
 
@@ -775,7 +926,14 @@ def document_from_audits(audits: Mapping[str, Any]) -> dict[str, Any]:
     ]
     shared = rows[0]["shared_binding"]
     if any(row["shared_binding"] != shared for row in rows[1:]):
-        raise BarrierRefused("aggregate shared concrete source/ready binding differs")
+        raise BarrierRefused(
+            "aggregate shared concrete source/ready binding differs (compared keys: "
+            "%s; family-scoped reset/WAIT fields excluded from the digest: %s)"
+            % (
+                ", ".join(SHARED_BINDING_KEYS),
+                ", ".join(RESET_WAIT_FAMILY_SCOPED_FIELDS),
+            )
+        )
     if len({row["scale_result"]["sha256"] for row in rows}) != 4:
         raise BarrierRefused("aggregate scale result is duplicated")
     if len({row["launch_claim_sha256"] for row in rows}) != 4:
@@ -804,6 +962,7 @@ def document_from_audits(audits: Mapping[str, Any]) -> dict[str, Any]:
         "authorized_layout": dict(AUTHORIZED_LAYOUT),
         "transition_invariant": copy.deepcopy(TRANSITION_INVARIANT),
         "shared_binding": shared,
+        "shared_binding_scope": copy.deepcopy(SHARED_BINDING_SCOPE),
         "cells": cells,
     }
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
@@ -858,6 +1017,7 @@ def validate_receipt(
             "authorized_layout",
             "transition_invariant",
             "shared_binding",
+            "shared_binding_scope",
             "cells",
             "content_sha256",
         ),
