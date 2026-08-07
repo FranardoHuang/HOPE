@@ -125,12 +125,25 @@
   },
   "isaac_articulation_abi": {
     "status": "NOT_VERIFIED",
-    "attempts": 2,
-    "failure_mode": "the AppLauncher(headless=True) probe hung during Isaac Sim startup both times; the log stops at the P2P bandwidth matrix and the process was killed by its 1200 s timeout without emitting a single result line",
-    "not_an_asset_defect_evidence": "convert_urdf.py drives the same Isaac Sim stack and completed in about a minute on the same asset, so the hang is in the probe harness, not in the model",
-    "fallback_attempted": "reading the generated USD with pxr outside the app, abandoned because pxr ships inside Isaac Sim's extension layout and is not importable standalone from this venv",
-    "what_stands_in_the_meantime": "static ABI checks on the normalized URDF: the 31 movable joints equal configs/a3_runtime_articulation_joint_order.txt as a set, their document order equals configs/a3_gmr_dof_pos_joint_order.txt, and all 32 configs/a3_runtime_body_order.txt names are present as links",
-    "required_next": "re-run the articulation probe through IsaacLab's own launcher wiring (e.g. an isaaclab.sh-driven script) rather than a bare AppLauncher, and confirm num_joints==31 / num_bodies==32 with runtime ordering"
+    "attempts": 4,
+    "failure_mode": "every probe variant hung inside Isaac Sim after startup and was killed by its own timeout without emitting a result line",
+    "variants_tried": [
+      "bare AppLauncher(headless=True)",
+      "AppLauncher(args_cli) with add_app_launcher_args, matching convert_urdf.py",
+      "the same, mirroring scripts/tutorials/01_assets/run_articulation.py structure (GroundPlaneCfg + DomeLightCfg + set_camera_view, SimulationCfg without dt)",
+      "reading the USD with pxr outside the app -- abandoned, pxr only exists inside Isaac Sim's extension layout"
+    ],
+    "attribution": {
+      "conclusion": "the probe script is at fault; neither the 0807 asset nor Isaac Sim on this Pod is implicated",
+      "evidence": [
+        "IsaacLab's own scripts/tutorials/01_assets/run_articulation.py runs to steady simulation on the same venv, same GPU, same Pod (520 log lines, repeated 'Resetting robot state')",
+        "the SAME probe script hangs identically on the previous in-service agibot_a3 asset, which has been imported successfully before -- so the hang does not depend on which asset is loaded"
+      ],
+      "hypothesis_tested_and_refuted": "that the 313,284-face gripper base_link.stl was stalling PhysX convex cooking; refuted because the old asset, which has no such mesh, hangs the same way",
+      "remaining_difference_to_the_working_demo": "the demo spawns a stock USD from the IsaacLab asset root; the probe spawns a locally converted USD with configuration/ sublayers via UsdFileCfg"
+    },
+    "what_stands_in_the_meantime": "convert_urdf.py consumed the whole 0807 URDF and produced the USD, plus static ABI checks on the normalized URDF: the 31 movable joints equal configs/a3_runtime_articulation_joint_order.txt as a set, their document order equals configs/a3_gmr_dof_pos_joint_order.txt, and all 32 configs/a3_runtime_body_order.txt names are present as links",
+    "required_next": "fix the probe, not the asset: spawn via the same path an IsaacLab task config uses (UrdfFileCfg through the robot cfg, or an InteractiveScene) rather than UsdFileCfg on a converted file, then confirm num_joints==31 / num_bodies==32 in runtime order"
   },
   "not_verified": [
     "Isaac articulation load: 31-DOF / 32-body readback in runtime order",
@@ -139,5 +152,50 @@
     "motion-bank revalidation on the new plant",
     "standing hold, self-collision and table-collision screens",
     "anything about hardware"
-  ]
+  ],
+  "joint_limit_and_default_pose_audit": {
+    "why_recorded_here": "a parallel session asked whether the swap moves the standing-pose-vs-limit envelope; it does not, and the numbers belong with the swap evidence",
+    "hard_limits_0409_to_0807": {
+      "joints_compared": 31,
+      "fields": [
+        "lower",
+        "upper",
+        "effort",
+        "velocity"
+      ],
+      "differences": 0,
+      "max_abs_difference": 0.0,
+      "conclusion": "bit-identical, so pp_joint_limits.hpp and every envelope/bandwidth/dose number built on it survive the swap unchanged"
+    },
+    "pp_joint_limits_hpp_cross_check": {
+      "path": "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/a3_pingpong/pp_joint_limits.hpp",
+      "joints_over_5e-6": 0,
+      "max_abs_difference_rad": 4.15e-06,
+      "note": "the residual is the header's own 5-decimal rounding, not drift"
+    },
+    "default_joint_pos_untouched_by_this_swap": true,
+    "eight_percent_envelope_check": {
+      "rule": "default must lie inside [lower + 8% of range, upper - 8% of range]",
+      "joints_outside": 2,
+      "failures": {
+        "left_shoulder_roll_joint": {
+          "default": 0.12,
+          "lower": -0.0873,
+          "upper": 2.618,
+          "percent_to_lower": 7.66
+        },
+        "right_shoulder_roll_joint": {
+          "default": -0.12,
+          "lower": -2.618,
+          "upper": 0.0873,
+          "percent_to_upper": 7.66
+        }
+      },
+      "next_closest_passing": {
+        "knee_joints": 14.09
+      },
+      "pre_existing_not_swap_induced": true
+    },
+    "grounding_measurements_need_recomputation": "yes: both ankle_pitch lateral offsets went +-1.5 mm to 0, which is on the foot chain, so a sink/knee-angle grounding measured on the previous plant does not transfer"
+  }
 }
