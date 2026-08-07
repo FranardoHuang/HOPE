@@ -212,7 +212,7 @@
 - A211 launcher 已补上真正的 `scale4096 -> long4096` terminal gate：不再只看“5 update/
   save interval=1”声明，而是绑定 exact `model_4.pt` 的 path/size/inode/SHA/iteration/
   （2026-08-07 更正：跑满 5 个 update 的**末位**存档是 `model_4.pt`/`iter=4`，
-  原文写的 `model_5.pt` 不存在，那道门因此从未可能通过；见 EXP §9.2.13）
+  原文写的 `model_5.pt` 不存在，那道门因此从未可能通过；见 EXP §5.6.21）
   launch claim，用 CPU `weights_only` 加载并递归审计 model、optimizer、双 normalizer 全 tensor
   finite；同时重算恰好5个 update 的 actual-hard/table/nonfinite 计数，long 前再重算
   逐字匹配。host launcher 回归=`82 passed`，exact Pod 尚待新 safe-reset 解除后运行。

@@ -3635,6 +3635,151 @@ SHA。属于 Franco 的判断题，本轮不背着发射的人做。**
   S4（`:1571`）、S6（`:1581`）、S7（`:1586`）；触发率验收线
   `docs/research/design_audit_and_speedup_20260729.md:172-180`。
 
+#### 5.6.21 §5.6.19 交接的那道门：checkpoint 与 claim 两条口径修完,露出第四条（2026-08-07 落地并实跑验证）
+
+**人话一句：** §5.6.19 把 `SCALE4096_EXIT=2` 的三条"验收门与生产方口径从来没对过"列成判断题
+交了出去。本节把其中两条做完：**修法是"把门瞄准",不是删门也不是调松**——严格程度一个字没动,
+只是原来指着一个**在任何预算下都不存在的文件**。实跑证明这两条真的过了：拒收理由从
+`exact checkpoint is missing` 变成了**它后面那道检查**的理由。同时露出第四条口径不一致
+（发射器要一族这个诊断跑从不发射的遥测),本节**只定位、不修**,理由见末尾。
+
+**D1（结构性差一格,A/C 同病）。** RSL-RL `OnPolicyRunner.learn` 的
+`for it in range(start_iter, tot_iter)` 在**循环体内**做
+`self.current_learning_iteration = it`（venv 里那份 `rsl_rl_lib 2.3.1` 的 `:264`,
+仓内 vendored 那份 `:295` 同形）,循环结束后的收尾存盘（`:286` / `:321`）用的就是那个末值。
+所以跑满 N 个 update 落盘的是 `model_0..model_{N-1}.pt`,**`model_N.pt` 在任何预算下都不存在**。
+这不是"预算写错了",是**门指错了对象**：`expected_updates` 是预算,`expected_updates - 1` 才是
+末位编号。实测 `torch.load(model_4.pt)["iter"] == 4`。
+
+修法（三处消费方,一处出处）：
+
+| 位置 | 修前 | 修后 |
+| --- | --- | --- |
+| `action_ball_4096x5_prelong_gate.py` | 无 | 新增 `TERMINAL_CHECKPOINT_ITERATION = EXPECTED_UPDATES - 1` / `TERMINAL_CHECKPOINT_FILENAME`,**两族唯一出处** |
+| `launch_action_ball_{a211,c211}_*.py` | 各自手抄 `model_%d.pt % expected_updates`、`iter != expected_updates` | 走 `_terminal_checkpoint_iteration()`：从共享出处取,并当场核对"这个编号确实是自己预算的末位、文件名与编号没脱钩",对不上 `LaunchRefused` |
+| `action_ball_211_four_grid_prelong_barrier.py` | `_audit_cell:815` 手抄 `!= 5`,聚合字段名 `model_5`,收据里两个 `5` | 全部走 `TERMINAL_MODEL_ITERATION`;字段改名 `terminal_model`,kind/schema 升 `v4 → v5` |
+
+`_audit_cell:815` 那处是**第三份手抄**,`s15r1` 之前没有任何测试碰过它（现存测试全部从
+`_audits()` 直接造行,绕过 `_audit_cell`）。升 kind 的代价为零：这道门从没通过过,
+**世上不存在任何一份 v4 聚合收据**。
+
+**A/C 一起修的理由。** Franco 2026-08-07 的口径是"A 和 C 除了 obs 和 reward 之外应当处处相同"。
+这个差一格两族逐字同形,只修 C 就是亲手造出他正在担心的那种不一致。
+
+**D2（checkpoint 里根本没有 launch claim）——缺的接线不在发射器,在 trainer。**
+§5.6.19 的表格第三行给了三种可能收口方式,其中"让发射器把 claim override 加进 `training_argv`"
+**走不通**,两个独立理由：
+
+1. `train.py` 自己明文禁止诊断跑消费正式 launch claim
+   （`diagnostic ActionBall training cannot consume a formal launch-claim action-set identity`）,
+   而 `training_launch_claim_path` 与 `training_launch_claim_sha256` 必须成对出现;
+2. claim 的 canonical payload 里**就有 `training_argv`**,把 claim 塞进 argv = 让 argv 的哈希
+   包含 argv 自己的哈希,**自指循环**。
+
+真实情况是：两个发射器**早就**在 exec 那一刻把 claim 放进环境变量
+`HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256`（C211 `:4454` / A211 `:4513`,正是为了绕开上面第 2 条）,
+而 `train.py` 只在**同时**配了 `n1_vendor_diagnostic_stage` 和
+`vendor_runtime_training_contract_sha256` 时才去读它——诊断跑这两个 key 一个都发不了。
+于是 runner 的 `training_launch_claim_sha256` 恒为 `None`,`my_on_policy_runner.py:2435` 的
+`is not None` 从不成立,infos 里永远没有那个键。
+
+所以补的是 trainer 的**准入**：`target_mode=action_ball` 且
+`action_ball_diagnostic_unauthorized=true` 时也读 exec 边界那个值。**仍然不是"看见环境变量就信"**：
+不满足准入时那个环境变量连读都不读（别处残留的同名变量不能炸掉无关的正式跑）;两边都在
+且不一致当场炸;准入位必须是**真 bool**。这条只多做一件事——让 checkpoint 自陈它是哪一次
+发射产出的;它不解锁任何正式路径（frozen-eval identity / runtime bootstrap receipt 由
+`diagnostic_unauthorized` 单独把门,与这个值无关,`_validated_runtime_bootstrap_binding`
+对诊断跑照旧返回 `{}`）。
+
+**测试：这道门此前零测试,所以是从零写。**
+新增 `tests/test_action_ball_4096x5_terminal_index.py`（19 例)。它**不手抄那个 4**：
+读**能找到的每一份** RSL-RL `on_policy_runner.py` 活源码（pod 上是 venv 里装的
+`rsl_rl_lib 2.3.1`,host 上是仓内 vendored 那份;一份都看不到时 fail closed）,用 AST 核对
+四件事——起点从 0、赋值在循环体内、循环外没有第二次赋值、收尾存盘用的就是这个属性——
+然后**真的跑一遍**同形状的 `for it in range(0, N)` 取末值。另核对 A/C 两族同一个答案、
+决定终局编号的那份源码在两边的 `RUNTIME_SOURCE_PATHS` 钉子表里、以及 claim 没有进 argv。
+
+**变异证据（pod1,`/workspace/hope_isaac_venv/bin/python`,worktree
+`/workspace/franco/gate_offby1_20260807`,均为真文件改动后重跑）。**
+
+该拦的仍拦（7/7 被杀）：
+
+| 变异 | 实测 |
+| --- | --- |
+| M1 共享常量退回 `EXPECTED_UPDATES` | import 期 fail closed（barrier 的自检);把那条自检也去掉后 → `test_shared_gate_constants_match_the_live_rsl_rl_convention` 等 **4 failed** |
+| M2 C211 重新手抄 `model_%d.pt % expected_updates` | C211 launcher 模块 **1 failed** |
+| M3 A211 重新比 `iter == expected_updates` | A211 launcher 模块 **1 failed** |
+| M4 barrier 终局编号退回手抄 `5` | barrier 模块 **红** |
+| M5 `train.py` 撤掉诊断 claim 接线（回到恒 `None`) | completion 模块 **1 failed** |
+| M6 `train.py` 改成"看见环境变量就信" | completion 模块 **1 failed**（准入没被放宽） |
+| M7 `train.py` 把 claim 布尔挪回消费之后 | completion 模块 **1 failed** |
+
+pin 读的是活源码,不是手抄（4/4 被杀）：把 venv 里那份 `rsl_rl` 复制出来改成
+"赋值挪出循环 / `it + 1` / 收尾存盘改用循环变量 / 循环后再赋一次",四种都被
+`_terminal_iteration_from_live_source` 当场拒;未变异的活源码算出 **4**。
+
+误拦的不再拦：`iter=4` 的正常产物通过;同一批里 `iter=5`（旧门自己要的数字）、
+`iter=3`（少跑一格）、claim 缺失、claim 错配四种仍然 `LaunchRefused`。
+
+**端到端收据（pod1 GPU1,四阶段全新跑,worktree `gate_offby1_20260807`）。**
+
+| 轮次 | commit | materialize | recipe | oracle32 | scale4096 |
+| --- | --- | --- | --- | --- | --- |
+| `s15r1`（修之前,§5.6.19 的下一轮） | `92fa48a7` | `0` | `0` | `0` | `2`——`REFUSED: C211 scale4096 exact checkpoint is missing`,而 `model_0..4.pt` 其实全在 |
+| `s16r1`（本节） | `a970a58a` | `0` | `0` | `0` | `2`——**理由换了**：`REFUSED: C211 scale4096 reward-safety counters lacks exactly 5 contiguous terminal updates` |
+
+**"理由换了"就是本节两条修好的live 证据**：那两条检查排在 reward-safety 计数之前
+（checkpoint 定位 → `weights_only` 加载 → `iter`/claim 绑定 → 各族计数),门走过去了才可能报后面的。
+直接读产物再确认一遍（`/workspace/franco/verify_live_s16r1.py`,解释器同上):
+
+```
+claim               = 12b2f1519fdb4ac10d1da6c44ffe41317000b7c4b0d99ebf8315a994886f50a9
+argv elements       = 71        argv 里出现 claim = 没有(无自哈希循环)
+argv launch_claim 键 = 没有
+checkpoints         = model_0.pt .. model_4.pt        (没有 model_5.pt)
+model_4.pt  iter=4  claim_in_infos=True  matches_launch_claim=True
+```
+
+`iter=4` 正是修后这道门要的末位;`claim_in_infos=True` 是 `s15r1` 里**根本不存在的键**。
+五份 checkpoint 每一份都带上了发射身份。
+
+**回归账。** 直接相关的 9 个模块（prelong-gate / terminal-index / four-grid-barrier /
+两个 launcher / n1-completion / ac-parity / shared-constants / isaac-four-grid）:
+**`714 passed / 0 failed / 0 skipped`**。同一批在 `ffdca6af` 上是 `133 failed / 493 passed` ——
+那是并行 workflow 的 frozen-term 门（`ba52baea`）落地时没跟着改 A211/C211 两个 launcher 测试的
+economy 夹具（`motion` 写死 `1.0`,正好撞在新门上）。本轮顺手把那两处夹具改成逐 update 变化,
+否则本节的门连正例都跑不起来。
+
+**露出来的第四条口径不一致（本节只定位,不修 —— 交接）。**
+
+`REFUSED: ... reward-safety counters lacks exactly 5 contiguous terminal updates` 来自
+`launch_action_ball_c211_diagnostic.py:3022`（A211 `:2597` 同形）：它要 5 行
+`HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=`（事件 `hope_reward_safety_transition_update`）。
+实测 `s16r1` 的 `run.log` 里这个前缀 **0 行** —— 而且 `s15r1` 的两格逐字相同,**这与本节的改动无关**：
+
+| 前缀 | s15r1 | s16r1 |
+| --- | --- | --- |
+| `HOPE_JOINT_SAFETY_UPDATE_JSON=` / `HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON=` / `HOPE_EXACT_BEHAVIOR_UPDATE_JSON=` / `HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_UPDATE_JSON=` / `HOPE_ACTION_BALL_4096X5_PRELONG_SEMANTICS_UPDATE_JSON=` / `HOPE_POLICY_STD_UPDATE_JSON=` / `HOPE_PUSH_VELOCITY_DIAGNOSTIC_UPDATE_JSON=` | 各 5 | 各 5 |
+| `HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=` 及同族的 `HOPE_EFFECTIVE_REWARD_*_UPDATE_JSON=` | **0** | **0** |
+
+出处是同一个形状：`my_on_policy_runner.py:9007` 那三条只在
+`prepared_reward_evidence is not None` 时才打印,而它由 `:6235` 的
+`if reward_activation_ledger is not None:` 决定 —— 诊断跑没有这本账,所以整族遥测**从不发射**。
+和 D2 一样是"门要的东西这条路本来就不产",但**判断题不一样**：D2 的答案明确（claim 本来就在
+exec 边界躺着,只是没人读),这一条要先回答"**诊断跑到底该不该有 reward activation ledger**"——
+该有就接线,不该有就把这道门的适用范围改成只管正式跑。**两种都要连记录与阻断一起改**,
+所以本节不替发射的人做判断,只把证据摆在这里。
+
+**还没关的洞（本轮,别当成已解决）。**
+
+- **`scale4096` 仍然 `EXIT=2`**,只是理由前进了一格(见上)。`long4096` 本轮**没有发**。
+- **A 族一格都没实跑 `scale4096`。** A211 的同名门与 C211 逐字同形、同批修、同批变异,
+  但"A 族也能跑到终局验收"本轮**没有实跑证据**。
+- `_audit_cell`（四格聚合的 per-cell 审计）**仍然零测试覆盖**,本轮只把它里面的手抄 `5` 换成
+  共享常量;它的其他分支照旧只有 import 期的常量自检兜底。
+- 本节只证明了这道门的**前两段**（终局 checkpoint 的身份、发射身份绑定）能被真实产物满足;
+  "整道 `scale4096 → long4096` 门能通过"仍然**没有证据**。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |
