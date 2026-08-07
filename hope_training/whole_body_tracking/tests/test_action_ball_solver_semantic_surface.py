@@ -59,6 +59,25 @@ def _live_surface_sha256() -> str:
     return SURFACE.semantic_surface_contract(_live_reader())["sha256"]
 
 
+def _covered_digests(reader):
+    """The covered symbol digests alone, with the coverage gates NOT run.
+
+    Used to show what a digest can and cannot see: an edit that rebinds which
+    method runs leaves every one of these byte-identical, which is exactly why
+    a gate outside the digest has to exist.
+    """
+
+    return {
+        filename: {
+            name: SURFACE.symbol_digests(
+                reader(filename), filename=filename
+            )[name]
+            for name in covered
+        }
+        for filename, covered in SURFACE.COVERED.items()
+    }
+
+
 def _mutated_reader(replacements):
     """A reader that serves the live sources with textual replacements applied.
 
@@ -360,6 +379,20 @@ EQUISTRENGTH_MUTANTS = (
                 '["payload"],\n'
                 "            physics_declaration=self._action_ball_physics_contract"
                 '["payload"],\n'
+                "            answer_input_declaration=(\n"
+                "                self._action_ball_answer_input_contract"
+                '["payload"]\n'
+                "            ),\n"
+                "            expected_solver_profile_sha256=(\n"
+                "                self._action_ball_manifest."
+                "solver_profile_sha256\n"
+                "            ),\n"
+                "            expected_prototype_file_sha256=(\n"
+                "                self._action_ball_manifest.prototype.sha256\n"
+                "            ),\n"
+                "            prototypes=self._action_ball_prototypes,\n"
+                "            reference_normal_rows=self._ref_racket_normal_raw_"
+                "w_per_clip,\n"
                 "            solver_cfg=self._action_ball_solver_cfg,\n"
                 "            prm=self._action_ball_prm,\n"
                 "            planes=(surface_z, net_x, net_top_z),\n"
@@ -416,6 +449,116 @@ EQUISTRENGTH_MUTANTS = (
                 "hope_commands.py",
                 "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 3",
                 "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION = 4",
+            )
+        ],
+    ),
+    # --- The second batch of escapes: the two solver ARGUMENTS, and the gate's
+    # own identity.  Each of these edits used to leave the pin at 5fb9e472.
+    (
+        "answer_input_digest_stops_covering_a_prototype_column",
+        [
+            (
+                "hope_commands.py",
+                '    "speed_min",\n    "speed_max",\n    "v_star_cap",',
+                '    "speed_min",\n    "v_star_cap",',
+            )
+        ],
+    ),
+    (
+        "answer_input_digest_stops_covering_the_reference_normal_rows",
+        [
+            (
+                "hope_commands.py",
+                "    columns.append(reference_normal_rows.reshape(-1)"
+                ".to(torch.float64))",
+                "    columns.append(reference_normal_rows.reshape(-1)"
+                ".to(torch.float64) * 0.0)",
+            )
+        ],
+    ),
+    (
+        "answer_input_contract_stops_anchoring_face_sign_to_the_manifest",
+        [
+            (
+                "hope_commands.py",
+                "    if live_signs != expected_signs:",
+                "    if False:",
+            )
+        ],
+    ),
+    (
+        "declaration_cross_check_stops_recomputing_the_sealed_payload_sha",
+        [
+            (
+                "hope_commands.py",
+                '        ("solver.payload.canonical_sha256",\n'
+                "         str(expected_solver_profile_sha256),\n"
+                "         _action_ball_canonical_sha256(solver_declaration)),",
+                '        ("solver.payload.canonical_sha256",\n'
+                "         str(expected_solver_profile_sha256),\n"
+                "         str(expected_solver_profile_sha256)),",
+            )
+        ],
+    ),
+    (
+        "declaration_cross_check_stops_comparing_the_live_answer_inputs",
+        [
+            (
+                "hope_commands.py",
+                '        ("answer_inputs.live_digest_sha256",\n'
+                '         str(answer_input_declaration["live_digest_sha256"]),\n'
+                '         str(live_answer_inputs["sha256"])),',
+                "",
+            )
+        ],
+    ),
+    (
+        "adapter_identity_attestation_disarmed",
+        [
+            (
+                "hope_commands.py",
+                "    if drift:\n        raise RuntimeError(\n"
+                '            "action-ball pool solver adapter does not hold the '
+                'covered entry "',
+                "    if False:\n        raise RuntimeError(\n"
+                '            "action-ball pool solver adapter does not hold the '
+                'covered entry "',
+            )
+        ],
+    ),
+    (
+        "adapter_identity_attestation_call_deleted_from_the_refill_entry_point",
+        [
+            (
+                "hope_commands.py",
+                "        action_ball_assert_solver_adapter_binds_these_entry_"
+                "points(\n"
+                "            adapter=self._action_ball_pool_solver,\n"
+                "            expected={\n"
+                '                "solve": self._action_ball_refill_pool,\n'
+                '                "solve_many": self._action_ball_refill_pool_'
+                "many,\n"
+                '                "assert_emitted_sample": (\n'
+                "                    self._action_ball_assert_emitted_sample\n"
+                "                ),\n"
+                '                "assert_emitted_tasks": self._action_ball_'
+                "assert_emitted_tasks,\n"
+                '                "emitted_task_count_for": (\n'
+                "                    self._action_ball_emitted_task_count_for\n"
+                "                ),\n"
+                '                "task_transcript_for_birth": (\n'
+                "                    self._action_ball_task_transcript_for_"
+                "birth\n"
+                "                ),\n"
+                '                "assert_proposal_assignments": (\n'
+                "                    self._action_ball_assert_proposal_"
+                "assignments\n"
+                "                ),\n"
+                "            },\n"
+                '            call_site="_action_ball_refill_pool_many",\n'
+                "            required=True,\n"
+                "        )\n",
+                "",
             )
         ],
     ),
@@ -562,6 +705,14 @@ COVERED_SYMBOLS_ADDED_BY_THE_DECLARATION_BRIDGE = {
         "action_ball_assert_solver_runtime_matches_declaration",
         "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
         "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
+        # The second batch: the two solver ARGUMENTS no payload declared
+        # (``protos`` / ``ref_normal``) and the adapter-identity attestation.
+        "action_ball_live_answer_input_digest",
+        "action_ball_answer_input_contract",
+        "_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION",
+        "_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS",
+        "action_ball_assert_solver_adapter_binds_these_entry_points",
+        "_ActionBallPoolSolverAdapter.action_ball_bound_entry_points",
     )
 }
 
@@ -795,6 +946,166 @@ def test_declaration_publishes_which_exclusions_the_closure_actually_reaches():
         for symbol, reason in reasons.items():
             if reason in SURFACE.UNREACHABLE_CLAIM_REASONS:
                 assert "%s:%s" % (filename, symbol) not in reached
+
+
+# --------------------------------------------------------------------------- #
+# 4. Gate 4: the producer of a solver ARGUMENT may not be unclassified.        #
+# --------------------------------------------------------------------------- #
+def test_the_reference_normal_producer_must_stay_classified(monkeypatch):
+    """``_ensure_reference_strike_state`` was in neither list, and that was a hole.
+
+    It builds ``self._ref_racket_normal_raw_w_per_clip``, which the covered
+    entry points hand straight to ``solve_proposals`` as ``ref_normal``.
+    Rotating those rows changes every answer.  Gates 1--3 could never reach it:
+    the covered symbols mention the ATTRIBUTE name, never the method that
+    writes it.  Un-classify it here and the surface must refuse.
+    """
+
+    shrunk = dict(SURFACE.EXCLUDED["hope_commands.py"])
+    removed = shrunk.pop(
+        "RacketTargetCommand._ensure_reference_strike_state"
+    )
+    assert removed == "reference_strike_state_production"
+    monkeypatch.setattr(
+        SURFACE,
+        "EXCLUDED",
+        {**SURFACE.EXCLUDED, "hope_commands.py": shrunk},
+    )
+    blockers = SURFACE.surface_blockers(_live_reader())
+    assert (
+        "attribute_producer_unclassified:hope_commands.py:"
+        "RacketTargetCommand._ensure_reference_strike_state:writes:"
+        "_ref_racket_normal_raw_w_per_clip"
+    ) in blockers, blockers
+    with pytest.raises(SURFACE.SolverSemanticSurfaceError):
+        SURFACE.semantic_surface_contract(_live_reader())
+
+
+def test_a_brand_new_unclassified_writer_of_a_solver_argument_is_refused():
+    """The general shape, not just the one instance that was already there."""
+
+    reader = _mutated_reader(
+        [
+            (
+                "hope_commands.py",
+                "    def _ensure_reference_strike_state(self):",
+                "    def _smuggled_reference_normal_tweak(self):\n"
+                "        self._ref_racket_normal_raw_w_per_clip = None\n\n"
+                "    def _ensure_reference_strike_state(self):",
+            )
+        ]
+    )
+    blockers = SURFACE.surface_blockers(reader)
+    assert any(
+        blocker.startswith(
+            "attribute_producer_unclassified:hope_commands.py:"
+            "RacketTargetCommand._smuggled_reference_normal_tweak"
+        )
+        for blocker in blockers
+    ), blockers
+    with pytest.raises(SURFACE.SolverSemanticSurfaceError):
+        SURFACE.semantic_surface_contract(reader)
+
+
+def test_the_exclusion_that_can_move_an_answer_says_so_in_its_own_words():
+    """An exclusion reason that hides the truth is worse than no exclusion.
+
+    ``reference_strike_state_production`` is the one entry on the list whose
+    symbol CAN change an answer.  Its reason text has to say that out loud, name
+    what holds it honest instead, and name the residual as an open hole -- the
+    same shape ``runtime_wiring`` already uses.  This test reads the emitted
+    strings, not the intent.
+    """
+
+    reason = SURFACE.EXCLUSION_REASONS["reference_strike_state_production"]
+    assert "ref_normal" in reason
+    assert "open hole" in reason
+    assert "R10" in reason
+    declaration = SURFACE.semantic_surface_declaration(_live_reader())
+    entry = declaration["attribute_producers"][
+        "hope_commands.py:RacketTargetCommand._ensure_reference_strike_state"
+    ]
+    assert entry["classification"] == "reference_strike_state_production"
+    assert "_ref_racket_normal_raw_w_per_clip" in entry["writes"]
+
+
+# --------------------------------------------------------------------------- #
+# 5. Gate 5: a digest proves a body did not change, not that it is what runs.  #
+# --------------------------------------------------------------------------- #
+def test_rebinding_a_solve_entry_point_to_an_uncovered_method_is_refused():
+    """Escape 1, exactly as measured: the digest does not move, the gate fires.
+
+    The wiring binds ``solve_many=`` to a method only the excluded region names.
+    No covered symbol changed, so ``semantic_surface`` is byte-identical -- this
+    test asserts that too, because the point is that the digest CANNOT see it.
+    """
+
+    reader = _mutated_reader(
+        [
+            (
+                "hope_commands.py",
+                "                solve_many=self._action_ball_refill_pool_many,",
+                "                solve_many=self._action_ball_smuggled_many,",
+            )
+        ]
+    )
+    blockers = SURFACE.surface_blockers(reader)
+    # The line number is part of the blocker so a reader can find the site; it
+    # is deliberately not asserted, because pinning it here would make every
+    # unrelated edit above that line fail this test for the wrong reason.
+    assert any(
+        blocker.startswith("pool_solver_binding_undeclared:hope_commands.py:")
+        and blocker.endswith(
+            ":solve_many:self._action_ball_smuggled_many"
+        )
+        for blocker in blockers
+    ), blockers
+    with pytest.raises(SURFACE.SolverSemanticSurfaceError):
+        SURFACE.semantic_surface_contract(reader)
+    # And every covered digest is byte-identical -- that is the whole point.
+    # The pin proves these bodies did not change; the gate is what proves they
+    # are still what runs.
+    assert _covered_digests(reader) == _covered_digests(_live_reader())
+
+
+def test_dropping_a_policed_adapter_slot_entirely_is_refused():
+    """Omitting the keyword is not a way around the allow-list."""
+
+    reader = _mutated_reader(
+        [
+            (
+                "hope_commands.py",
+                "                solve=self._action_ball_refill_pool,\n",
+                "",
+            )
+        ]
+    )
+    blockers = SURFACE.surface_blockers(reader)
+    assert any(
+        blocker.startswith("pool_solver_binding_absent:hope_commands.py")
+        and blocker.endswith(":solve")
+        for blocker in blockers
+    ), blockers
+
+
+def test_every_declared_pool_solver_binding_is_actually_used():
+    """An allow-list entry nobody binds is a hole waiting to be filled.
+
+    The list is not in the digest, so a stale entry costs nothing to leave
+    behind -- and a stale entry is exactly a pre-approved rebinding target.
+    """
+
+    live = set(
+        SURFACE.semantic_surface_declaration(_live_reader())[
+            "pool_solver_bindings"
+        ].values()
+    )
+    declared = {
+        text
+        for texts in SURFACE.POOL_SOLVER_BINDINGS.values()
+        for text in texts
+    }
+    assert declared == live, declared.symmetric_difference(live)
 
 
 def test_every_exclusion_reason_is_defined_and_used():

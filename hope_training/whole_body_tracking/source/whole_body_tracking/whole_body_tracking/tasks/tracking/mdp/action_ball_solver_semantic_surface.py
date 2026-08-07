@@ -15,7 +15,7 @@
   空行、换行位置、docstring 都不动它,而任何表达式/常量/字段顺序的改动都动它。
 * ``EXCLUDED`` 显式列出**有意排除**的符号,每一个都带一个理由码。排除是**列举
   式**的,不是默认放行。
-* 三道 fail-closed 的门(见 ``surface_blockers``)保证"覆盖面不小于它声称保护的
+* 五道 fail-closed 的门(见 ``surface_blockers``)保证"覆盖面不小于它声称保护的
   语义面":
   1. 五份纯求解器源文件(``FULLY_ENUMERATED_SOURCES``)里**每一个**符号都必须
      出现在 COVERED 或 EXCLUDED 里 —— 新加一个函数而不分类,直接拒绝启动。
@@ -24,6 +24,17 @@
   3. 排除理由里凡是**声称"这条路根本走不到它"**的那几种
      (``UNREACHABLE_CLAIM_REASONS``),必须真的走不到 —— 一旦某个 COVERED 符号
      引用了它,这条理由就是假话,直接拒绝启动。
+  4. 凡是**写了某个 COVERED 符号读的实例属性**的符号,也必须已分类。门 2 按
+     "引用到的名字"做闭包,而覆盖符号读的是属性名
+     (``self._ref_racket_normal_raw_w_per_clip``)、不是产它的方法名
+     (``_ensure_reference_strike_state``),所以闭包**永远够不着产出者**。
+     ``ref_normal`` 是 ``solve_proposals`` 的入参、旋转它就能改掉每一个答案,
+     而它的产出者以前既不在 COVERED 也不在 EXCLUDED。
+  5. ``_ActionBallPoolSolverAdapter`` 的 ``solve``/``solve_many``/三个断言槽位
+     只能绑 ``POOL_SOLVER_BINDINGS`` 列举过的表达式,且一个槽都不许缺。
+     这道门补的是**内容指纹的固有边界**:指纹能证明"这几个函数体没变",
+     证明不了"跑的就是这几个函数体"。改绑到一个未覆盖、只被排除区引用的方法,
+     指纹纹丝不动 —— 而那个方法接管了整条出题路。
 
 排除清单**不进指纹**。这正是本次收窄的目的:新增一个"存盘/记账/遥测"符号
 必须被显式分类(否则门开火),但分类完之后 pin 不动,训练不再被无关提交打断。
@@ -72,6 +83,45 @@ from typing import Any, Callable, Dict, Iterable, Mapping, Sequence, Tuple
 SEMANTIC_SURFACE_SCHEMA_VERSION = 1
 SEMANTIC_SURFACE_KIND = "whole_body_tracking.action_ball.solver_semantic_surface"
 SYMBOL_DIGEST_ALGORITHM = "docstring_stripped_version_normalized_ast_sha256_v1"
+
+#: Protocol slots of ``_ActionBallPoolSolverAdapter`` whose bound callable decides
+#: what actually runs when the pool asks for questions, together with every
+#: expression the pinned sources are allowed to bind into them.
+#:
+#: 人话:这条清单补的是**内容指纹的固有边界**。指纹能证明"这几个函数体没变",
+#: 证明不了"跑的就是这几个函数体" —— 接线在被排除的那段里把 ``solve=`` 改绑到一个
+#: 未覆盖、不跑自检的方法,指纹**纹丝不动**(新方法只被排除区引用,门 2 的闭包
+#: 够不着它)。把覆盖面越扩越大解决不了它,所以这里直接把**绑定表达式本身**列举掉:
+#: 出现一个没列的绑法就拒绝启动。清单不进指纹,所以加一条合法绑法不作废题库,
+#: 但加这一条必须是有意识的一次编辑。
+#:
+#: 运行时那半边(改绑之后还假装调覆盖入口)由
+#: ``hope_commands.action_ball_assert_solver_adapter_binds_these_entry_points``
+#: 负责。两半缺一不可:一个没跑的函数没法自己举手。
+POOL_SOLVER_ADAPTER = "_ActionBallPoolSolverAdapter"
+POOL_SOLVER_BINDINGS: Dict[str, Tuple[str, ...]] = {
+    "solve": (
+        "self._action_ball_refill_pool",
+        # exact-resume staging refuses every live solve outright
+        "_staged_forbidden",
+    ),
+    "solve_many": (
+        "self._action_ball_refill_pool_many",
+        "lambda(4b6166ee85673f86b6a023edc9c711fd)",
+    ),
+    "assert_emitted_tasks": (
+        "self._action_ball_assert_emitted_tasks",
+        "_staged_assert_tasks",
+    ),
+    "assert_emitted_sample": (
+        "self._action_ball_assert_emitted_sample",
+        "_staged_assert_sample",
+    ),
+    "assert_proposal_assignments": (
+        "self._action_ball_assert_proposal_assignments",
+        "_staged_assert_proposal_assignments",
+    ),
+}
 
 #: The three call-graph entry points that define "turning a drawn question into
 #: accept/reject plus the answer".  They are documented here because the covered
@@ -171,6 +221,23 @@ EXCLUSION_REASONS: Dict[str, str] = {
         "__all__ re-export bookkeeping. Renaming an export cannot change an answer; "
         "the exported callables are themselves classified."
     ),
+    "reference_strike_state_production": (
+        "Derives the per-clip reference racket/base strike state from the pinned "
+        "motion clips. Read this one twice: it is NOT the usual 'cannot move an "
+        "answer' exclusion. One of its outputs -- the raw per-clip face-normal "
+        "table -- is handed to solve_proposals as ``ref_normal``, and rotating "
+        "those rows changes every answer (scaling them does not; the solver "
+        "renormalizes). It is excluded because covering it would drag the entire "
+        "reference-FK family (strike-frame selection, body-state readout, mount "
+        "offset, and its diagnostic report text) into the digest and invalidate "
+        "every question bank on an unrelated edit. What holds it honest instead "
+        "is the live-value gate: the covered solve entry points re-derive a "
+        "digest of the exact ref_normal rows they are about to hand the solver "
+        "and refuse on drift, so nothing can rewrite the table after it is "
+        "sealed. The derivation ITSELF is still outside the digest -- that is a "
+        "named open hole (R10 in the experiment doc), not a solved problem, and "
+        "this exclusion is only valid while it stays named."
+    ),
     "overapproximated_name_collision": (
         "The closure gate resolves references by bare name on purpose, so an "
         "unrelated symbol that happens to share a name with an attribute used on "
@@ -237,6 +304,20 @@ COVERED: Dict[str, Tuple[str, ...]] = {
         "action_ball_solver_cfg_from_declaration",
         "action_ball_assert_solver_runtime_matches_declaration",
         "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
+        # ``protos`` and ``ref_normal`` are ARGUMENTS of solve_proposals, not
+        # symbols, so no digest can see them.  These four are the executable
+        # answer to that: one seals the live tensors (and re-asserts what the
+        # manifest anchors -- family order, face signs, enabled), one re-derives
+        # the digest from the live tensors at every solve, and the column list is
+        # explicit so dropping a column moves the pin.
+        "action_ball_live_answer_input_digest",
+        "action_ball_answer_input_contract",
+        "_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION",
+        "_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS",
+        # "the pin proves these bodies did not change; it cannot prove they are
+        # what runs".  This pair is the runtime half of that proof.
+        "action_ball_assert_solver_adapter_binds_these_entry_points",
+        "_ActionBallPoolSolverAdapter.action_ball_bound_entry_points",
         # The named list of venue-physics numbers the cross-check walks: shrink
         # it and the check silently stops comparing a parameter the solver
         # integrates with.
@@ -483,6 +564,7 @@ EXCLUDED: Dict[str, Dict[str, str]] = {
         "RacketTargetCommand._action_ball_task_transcript_scope": "checkpoint_state_serialization",
         # --- per-birth audit ledger
         "RacketTargetCommand._action_ball_provide_birth": "birth_audit_ledger",
+        "RacketTargetCommand._action_ball_provide_births": "birth_audit_ledger",
         "RacketTargetCommand._action_ball_assert_issued_birth": "birth_audit_ledger",
         "RacketTargetCommand._action_ball_task_transcript_for_birth": "birth_audit_ledger",
         "RacketTargetCommand._action_ball_emitted_task_count_for": "birth_audit_ledger",
@@ -496,6 +578,11 @@ EXCLUDED: Dict[str, Dict[str, str]] = {
         "RacketTargetCommand._action_ball_decode_provider_births": "birth_audit_ledger",
         "RacketTargetCommand._action_ball_decode_provider_history": "birth_audit_ledger",
         "RacketTargetCommand._action_ball_decode_task_transcripts": "birth_audit_ledger",
+        # --- the producer of one solver ARGUMENT.  Read its reason code: it is
+        # the one exclusion on this list that can move an answer and says so.
+        "RacketTargetCommand._ensure_reference_strike_state": (
+            "reference_strike_state_production"
+        ),
         # --- wiring
         "RacketTargetCommand._initialize_action_ball_runtime": "runtime_wiring",
         "_ActionBallPoolSolverAdapter.__init__": "runtime_wiring",
@@ -519,6 +606,15 @@ EXCLUDED: Dict[str, Dict[str, str]] = {
         # --- misc plumbing reached by bare-name over-approximation
         "_action_ball_sha256_file": "telemetry_and_counters",
         "_action_ball_strict_json_bytes": "telemetry_and_counters",
+        # ``RacketTargetCommand.racket_normal_w`` is the ACHIEVED racket normal
+        # this command publishes every step; the covered replay reads
+        # ``receipt.racket_normal_w``, the DEMANDED one on a task receipt.  Two
+        # different objects, one attribute name, so gate 4's bare-name matching
+        # pulls the achieved-state writer in.  Named here rather than special-
+        # cased in the gate.
+        "RacketTargetCommand._compute_racket_state": (
+            "overapproximated_name_collision"
+        ),
         "RacketTargetCommand.cfg": "overapproximated_name_collision",
         "RacketTargetCommand.command": "overapproximated_name_collision",
         "RacketTargetCommand.__init__": "overapproximated_name_collision",
@@ -727,6 +823,98 @@ def _symbol_nodes(source: str, *, filename: str) -> "Dict[str, Any]":
     return nodes
 
 
+def _binding_expression_text(node: Any) -> str:
+    """A version-stable, restricted rendering of one keyword argument expression.
+
+    ``ast.unparse`` is 3.9+, and the host test environment is 3.8, so the two
+    shapes that actually appear (``self.method`` / ``name``) are rendered by
+    hand and everything else falls back to the version-normalized digest used
+    for symbols.  A rendering that silently collapsed two different expressions
+    to the same text would make the binding allow-list meaningless, so the
+    fallback carries the node type as well.
+    """
+
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return "%s.%s" % (_binding_expression_text(node.value), node.attr)
+    return "%s(%s)" % (type(node).__name__.lower(), _symbol_digest(node)[:32])
+
+
+def _assignment_target_attributes(target: Any) -> "set":
+    """Attribute names one assignment target writes, in place included.
+
+    ``ast.walk`` is deliberately not used: it would descend into a subscript's
+    INDEX expression, so ``self._by_uid[key.action_uid] = row`` would read as
+    "this symbol writes ``action_uid``" and the gate would fill up with noise.
+    ``self.x[i] = v`` on the other hand really does write ``x`` -- in place, the
+    one shape a value digest taken earlier cannot see -- so a subscript's value
+    is followed and its slice is not.
+    """
+
+    names = set()
+    stack = [target]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Attribute):
+            names.add(node.attr)
+            stack.append(node.value)
+        elif isinstance(node, ast.Subscript):
+            stack.append(node.value)
+        elif isinstance(node, (ast.Tuple, ast.List)):
+            stack.extend(node.elts)
+        elif isinstance(node, ast.Starred):
+            stack.append(node.value)
+    return names
+
+
+def _assigned_attribute_names(node: Any) -> "set":
+    """Every ``self.x = ...`` / ``self.x[i] = ...`` attribute one symbol writes.
+
+    人话:门 2 按**引用的名字**做闭包,而覆盖符号读的是实例属性名
+    (``self._ref_racket_normal_raw_w_per_clip``),不是产它的那个方法名
+    (``_ensure_reference_strike_state``)。于是"产答案输入的那个函数"可以既不在
+    COVERED 也不在 EXCLUDED —— 闭包永远够不着它。这就是门 4 要补的那一格。
+    """
+
+    names = set()
+    for sub in ast.walk(node):
+        targets = []
+        if isinstance(sub, ast.Assign):
+            targets = list(sub.targets)
+        elif isinstance(sub, (ast.AugAssign, ast.AnnAssign)):
+            targets = [sub.target]
+        elif isinstance(sub, ast.For):
+            targets = [sub.target]
+        elif isinstance(sub, ast.With):
+            targets = [
+                item.optional_vars
+                for item in sub.items
+                if item.optional_vars is not None
+            ]
+        for target in targets:
+            names |= _assignment_target_attributes(target)
+    return names
+
+
+def _read_attribute_names(node: Any) -> "set":
+    """Every attribute name one symbol reads.
+
+    Deliberately NOT "reads and does not write": a covered symbol that also
+    assigns the attribute is itself one of its producers and is classified by
+    construction, so subtracting the written set could only ever hide a
+    producer.  Over-approximation is the safe direction here too.
+    """
+
+    names = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Attribute) and isinstance(
+            getattr(sub, "ctx", None), ast.Load
+        ):
+            names.add(sub.attr)
+    return names
+
+
 def _referenced_names(node: Any) -> "set":
     """Every bare name and attribute name mentioned inside one symbol.
 
@@ -786,6 +974,80 @@ def _excluded_symbols_referenced_by_covered(
                             "%s:%s" % (filename, name)
                         )
     return {key: tuple(sorted(value)) for key, value in sorted(reached.items())}
+
+
+def _attribute_producers(
+    digests: "Dict[str, Dict[str, str]]", nodes: "Dict[str, Dict[str, Any]]"
+) -> "Dict[str, Dict[str, Tuple[str, ...]]]":
+    """Which symbols write the instance attributes the covered closure reads.
+
+    Returns ``{filename: {symbol: (attribute, ...)}}``.  ``self.foo`` is matched
+    by bare attribute name, the same over-approximation gates 1--3 already use:
+    it can demand that an unrelated same-named writer be classified, never the
+    reverse.
+    """
+
+    read: "Dict[str, set]" = {}
+    for filename, covered in sorted(COVERED.items()):
+        for name in covered:
+            node = nodes.get(filename, {}).get(name)
+            if node is None:
+                continue
+            read.setdefault(filename, set()).update(_read_attribute_names(node))
+    interesting = set()
+    for names in read.values():
+        interesting |= names
+    producers: "Dict[str, Dict[str, Tuple[str, ...]]]" = {}
+    for filename in PINNED_SOURCES:
+        for name, node in sorted(nodes.get(filename, {}).items()):
+            written = _assigned_attribute_names(node) & interesting
+            if written:
+                producers.setdefault(filename, {})[name] = tuple(
+                    sorted(written)
+                )
+    return producers
+
+
+def _pool_solver_adapter_call_sites(source: str, *, filename: str):
+    tree = ast.parse(source, filename=filename)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == POOL_SOLVER_ADAPTER
+        ):
+            yield node
+
+
+def _pool_solver_binding_sites(source: str, *, filename: str):
+    """Every ``(line, slot, expression)`` bound into a pool solver adapter."""
+
+    for node in _pool_solver_adapter_call_sites(source, filename=filename):
+        site = "line%d" % int(getattr(node, "lineno", 0))
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                # ``**kwargs`` would make the binding unreadable from the AST,
+                # which is exactly the shape this gate must refuse.
+                yield site, "solve", "**kwargs"
+                continue
+            yield site, str(keyword.arg), _binding_expression_text(
+                keyword.value
+            )
+
+
+def _pool_solver_binding_gaps(source: str, *, filename: str):
+    """Adapter constructions that simply omit a slot this file polices."""
+
+    for node in _pool_solver_adapter_call_sites(source, filename=filename):
+        site = "line%d" % int(getattr(node, "lineno", 0))
+        present = {
+            str(keyword.arg)
+            for keyword in node.keywords
+            if keyword.arg is not None
+        }
+        for slot in sorted(POOL_SOLVER_BINDINGS):
+            if slot not in present:
+                yield site, slot
 
 
 def surface_blockers(read_source: Callable[[str], str]) -> Tuple[str, ...]:
@@ -894,6 +1156,48 @@ def surface_blockers(read_source: Callable[[str], str]) -> Tuple[str, ...]:
                 "exclusion_claims_unreachable_but_is_reached:"
                 f"{filename}:{name}:{reason}:from:{','.join(callers)}"
             )
+
+    # Gate 4 -- producer closure over instance attributes.
+    #
+    # Gates 1 and 2 both key on NAMES a covered symbol mentions.  A covered entry
+    # point mentions ``self._ref_racket_normal_raw_w_per_clip``; it never
+    # mentions ``_ensure_reference_strike_state``, the method that computes those
+    # rows and hands them to solve_proposals as ``ref_normal``.  So that producer
+    # sat in neither list -- an unclassified symbol on the answer path, which is
+    # a hole all by itself.  Anything that writes an attribute a covered symbol
+    # reads has to be classified.
+    for filename, producers in sorted(
+        _attribute_producers(digests, nodes).items()
+    ):
+        declared = _declared_names(filename)
+        for name, attributes in sorted(producers.items()):
+            if name not in declared:
+                blockers.append(
+                    "attribute_producer_unclassified:"
+                    f"{filename}:{name}:writes:{','.join(sorted(attributes))}"
+                )
+
+    # Gate 5 -- the pool solver adapter may only be handed callables this file
+    # lists.  A digest proves a function body did not change; it cannot prove
+    # that body is what runs, and the rebinding edit lives in excluded wiring.
+    for filename in PINNED_SOURCES:
+        for site, slot, text in _pool_solver_binding_sites(
+            read_source(filename), filename=filename
+        ):
+            allowed = POOL_SOLVER_BINDINGS.get(slot)
+            if allowed is None:
+                continue
+            if text not in allowed:
+                blockers.append(
+                    "pool_solver_binding_undeclared:"
+                    f"{filename}:{site}:{slot}:{text}"
+                )
+        for site, missing in _pool_solver_binding_gaps(
+            read_source(filename), filename=filename
+        ):
+            blockers.append(
+                f"pool_solver_binding_absent:{filename}:{site}:{missing}"
+            )
     return tuple(sorted(set(blockers)))
 
 
@@ -950,9 +1254,25 @@ def semantic_surface_contract(read_source: Callable[[str], str]) -> dict:
             "unreachability_claiming_exclusion_reasons": sorted(
                 UNREACHABLE_CLAIM_REASONS
             ),
+            "attribute_producer_closure": (
+                "every_symbol_that_writes_an_instance_attribute_a_covered_"
+                "symbol_reads_must_be_declared_covered_or_excluded"
+            ),
+            "pool_solver_binding_allow_list": (
+                "the_adapter_slots_that_decide_what_actually_runs_may_only_be_"
+                "bound_to_expressions_this_surface_enumerates"
+            ),
             "declared_numbers_are_cross_checked_against_the_live_solver": (
                 "hope_commands.action_ball_assert_solver_runtime_matches_"
                 "declaration, called from every entry point above"
+            ),
+            "solver_arguments_are_cross_checked_against_the_live_tensors": (
+                "hope_commands.action_ball_live_answer_input_digest, re-derived "
+                "from the live protos/ref_normal at every covered entry point"
+            ),
+            "entry_points_attest_the_adapter_holds_them": (
+                "hope_commands.action_ball_assert_solver_adapter_binds_these_"
+                "entry_points"
             ),
         },
         "covered": {
@@ -1018,6 +1338,34 @@ def semantic_surface_declaration(read_source: Callable[[str], str]) -> dict:
         "unreachability_claiming_exclusion_reasons": sorted(
             UNREACHABLE_CLAIM_REASONS
         ),
+        # Gate 4's audit half: which symbols write the attributes the covered
+        # closure reads, and how each of them is classified.  A reader who wants
+        # to know "what else can move an answer without moving this pin" starts
+        # here -- ``reference_strike_state_production`` is the one that can.
+        "attribute_producers": {
+            "%s:%s" % (filename, name): {
+                "writes": list(attributes),
+                "classification": (
+                    "covered"
+                    if name in COVERED.get(filename, ())
+                    else EXCLUDED[filename][name]
+                ),
+            }
+            for filename, producers in sorted(
+                _attribute_producers(digests, nodes).items()
+            )
+            for name, attributes in sorted(producers.items())
+        },
+        # Gate 5's audit half: every expression the pinned sources bind into the
+        # slots that decide what actually runs.
+        "pool_solver_bindings": {
+            "%s:%s:%s" % (filename, site, slot): text
+            for filename in PINNED_SOURCES
+            for site, slot, text in _pool_solver_binding_sites(
+                read_source(filename), filename=filename
+            )
+            if slot in POOL_SOLVER_BINDINGS
+        },
         "entry_points": list(SEMANTIC_ENTRY_POINTS),
     }
 

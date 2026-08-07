@@ -519,6 +519,43 @@ _ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES = (
     "paddle_e_g1",
     "paddle_e_g2",
 )
+_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION = 1
+# Every numeric column of the stroke-prototype table.
+#
+# 人话:``protos`` 是 ``solve_proposals`` 的**入参**,不是符号 —— 逐符号指纹看不见
+# 它。接线只要在所有 boot 检查之后写一句 ``prototypes.speed_max.mul_(1.5)`` /
+# ``face_sign.neg_()`` / 一个保范数的 ``v_hat_b`` 旋转,题照出、答案全变,而
+# pin 一动不动。``StrokePrototypeTensors.derived_sha256`` 帮不上忙:它是**加载时**
+# 对那份 JSON 记录取的摘要,之后没有任何人从活张量重算过。
+#
+# 这里列的是**整张表**而不是"求解路径今天读的那四列",因为"今天读哪几列"本身
+# 会变:少列一列,等于给未来的一次改动留一个静默口子。列是显式的,删一列就动 pin。
+_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS = (
+    "family_sign",
+    "v_hat_b",
+    "elevation_deg",
+    "speed_nominal",
+    "speed_min",
+    "speed_max",
+    "v_star_cap",
+    "v_dir_tol_deg",
+    "t_prepare",
+    "t_prepare_min",
+    "t_prepare_max",
+    "band_b_x",
+    "band_b_y",
+    "band_z_w",
+    "slack_b_xy",
+    "slack_z_w",
+    "p_contact_b",
+    "n_hat_b",
+    "face_sign",
+    "priority",
+    "enabled",
+    "strike_phase",
+    "contact_frame",
+    "contact_window",
+)
 
 
 def _batched_host_scalar_values(values: Sequence[torch.Tensor]) -> tuple[float, ...]:
@@ -742,6 +779,25 @@ class _ActionBallPoolSolverAdapter:
         self._sample_highwater_for = sample_highwater_for
         self._state_getter = state_getter
         self._state_loader = state_loader
+
+    def action_ball_bound_entry_points(self) -> dict:
+        """Name every callable the pool will actually invoke through this adapter.
+
+        人话:这个方法存在的唯一理由是让**覆盖面里的入口点**能当场问一句
+        "你手里握的到底是谁"。改绑 ``solve=``/``solve_many=`` 到一个未覆盖的方法
+        不会动语义面指纹(新方法只被排除区引用,闭包门够不着),所以静态指纹看不住
+        绑定,只能由运行时自证。
+        """
+
+        return {
+            "solve": self._solve,
+            "solve_many": self._solve_many,
+            "assert_emitted_sample": self._assert_emitted_sample,
+            "assert_emitted_tasks": self._assert_emitted_tasks,
+            "emitted_task_count_for": self._emitted_task_count_for,
+            "task_transcript_for_birth": self._task_transcript_for_birth,
+            "assert_proposal_assignments": self._assert_proposal_assignments,
+        }
 
     def __call__(self, request):
         return self._solve(request)
@@ -2223,10 +2279,220 @@ def action_ball_solver_cfg_from_declaration(cfg, continuous_question_cfg_type):
     )
 
 
+def action_ball_live_answer_input_digest(
+    *, prototypes, reference_normal_rows
+) -> dict:
+    """Digest the exact answer-bearing tensors the solver is about to be handed.
+
+    人话:这份摘要每次都**从活张量重算**。加载时算过一次的那份
+    (``derived_sha256``)对 JSON 记录取,不是对活张量取,所以任何"加载之后再原地
+    改一下"的写法它都看不见 —— 而 ``protos`` 和 ``ref_normal`` 都是入参,逐符号
+    指纹同样看不见。
+
+    只做一次主机传输:所有列先在设备上拼成一条 float64 向量再取回,不然一次补池就
+    要多几十次 GPU 同步。float32/long/bool 转 float64 都是精确的,所以"省同步"没有
+    换来"少看见一个比特"。
+    """
+
+    columns = []
+    layout = []
+    for name in _ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS:
+        tensor = getattr(prototypes, name)
+        layout.append([str(name), [int(size) for size in tensor.shape]])
+        columns.append(tensor.reshape(-1).to(torch.float64))
+    layout.append(
+        [
+            "reference_normal_raw_w_per_clip",
+            [int(size) for size in reference_normal_rows.shape],
+        ]
+    )
+    columns.append(reference_normal_rows.reshape(-1).to(torch.float64))
+    values = torch.cat(columns).detach().cpu().tolist()
+    payload = {
+        "schema_version": _ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION,
+        "kind": "whole_body_tracking.action_ball.live_answer_inputs",
+        "layout": layout,
+        "motion_ids": [str(value) for value in prototypes.motion_ids],
+        "families": [str(value) for value in prototypes.families],
+        "values": [float(value) for value in values],
+    }
+    return {
+        "sha256": _action_ball_canonical_sha256(payload),
+        "layout": layout,
+        "reference_normal_row_count": int(reference_normal_rows.shape[0]),
+    }
+
+
+def action_ball_answer_input_contract(
+    *,
+    prototypes,
+    reference_normal_rows,
+    manifest_prototype_sha256: str,
+    manifest_prototype_scope: str,
+    manifest_families,
+    manifest_face_signs,
+    global_speed_budget_mps: float,
+) -> dict:
+    """Seal the solver's answer-bearing inputs, and anchor what the manifest anchors.
+
+    人话:两件事,一件也不能少。
+
+    1. **锚**:原型表里有几列的正确值是 manifest 说了算的(每个动作的家族、
+       击球面符号、以及"这个动作还开着")。这几条检查以前长在那条被排除的接线里,
+       删掉一行没人知道;现在它们在覆盖面里,删一个字 pin 就动。
+       ``face_sign`` 尤其要紧 —— 把每个答案的物理拍面翻过来只要一句
+       ``face_sign.neg_()``,而 manifest 里逐动作写着它应该是 +1 还是 -1。
+    2. **封**:把活张量此刻的摘要连同它的出处(原型文件 SHA、JSON 记录摘要、
+       scope)一起封住,交给三个入口点每次出题前重算比对。
+
+    锚管"封之前就被改过",封管"封之后又被改过"。两者都不管的那一块 ——
+    ``stroke_prototypes_torch.load_stroke_prototype_tensors`` 自己怎么把 JSON 变成
+    张量 —— 不在语义面里,这是一个**具名的开口**,别当它已经关上了。
+    """
+
+    families = tuple(str(value) for value in manifest_families)
+    if tuple(str(value) for value in prototypes.families) != families:
+        raise ValueError(
+            "action-ball prototype family order differs from manifest: "
+            f"prototype={tuple(prototypes.families)!r}, manifest={families!r}"
+        )
+    if not bool(prototypes.enabled.all()):
+        raise ValueError(
+            "action-ball manifest contains a disabled solver prototype"
+        )
+    live_signs = tuple(
+        int(round(float(value)))
+        for value in prototypes.face_sign.detach().cpu().tolist()
+    )
+    expected_signs = tuple(int(value) for value in manifest_face_signs)
+    if live_signs != expected_signs:
+        raise ValueError(
+            f"action-ball prototype face signs differ: prototype={live_signs}, "
+            f"manifest={expected_signs}"
+        )
+    if bool(
+        (
+            prototypes.speed_min
+            > float(global_speed_budget_mps) + 1.0e-9
+        ).any()
+    ):
+        raise ValueError(
+            "action-ball prototype speed_min exceeds cq_speed_budget; the global "
+            "deploy speed cap leaves that action no feasible fixed-direction "
+            "speed interval"
+        )
+    if str(prototypes.file_sha256) != str(manifest_prototype_sha256):
+        raise ValueError(
+            "action-ball prototype file sha256 differs from the manifest: "
+            f"loaded={prototypes.file_sha256}, "
+            f"manifest={manifest_prototype_sha256}"
+        )
+    live = action_ball_live_answer_input_digest(
+        prototypes=prototypes,
+        reference_normal_rows=reference_normal_rows,
+    )
+    payload = {
+        "schema_version": _ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION,
+        "kind": "whole_body_tracking.action_ball.sealed_answer_inputs",
+        "prototype_file_sha256": str(manifest_prototype_sha256),
+        "prototype_derived_sha256": str(prototypes.derived_sha256),
+        "prototype_scope": str(manifest_prototype_scope),
+        "manifest_face_signs": list(expected_signs),
+        "manifest_families": list(families),
+        "live_digest_sha256": str(live["sha256"]),
+        "layout": live["layout"],
+        "reference_normal_row_count": int(live["reference_normal_row_count"]),
+    }
+    return {
+        "payload": payload,
+        "sha256": _action_ball_canonical_sha256(payload),
+    }
+
+
+def action_ball_assert_solver_adapter_binds_these_entry_points(
+    *, adapter, expected: dict, call_site: str, required: bool
+) -> dict:
+    """Refuse unless the pool is about to call exactly these bound methods.
+
+    人话:这道断言补的是**内容指纹的固有边界**。pin 能证明"这三个函数体没变",
+    证明不了"跑的就是这三个函数体"。接线在被排除的那段里把
+    ``_ActionBallPoolSolverAdapter`` 的 ``solve=``/``solve_many=`` 改绑到一个
+    未覆盖、不跑自检的方法,语义面指纹**纹丝不动**(那个新方法只被排除区引用,
+    闭包门够不着它)。把覆盖面越扩越大解决不了这件事,所以改成**运行时自证身份**:
+    覆盖面里的入口点当场问适配器一句"你手里握的是不是我",不是就拒。
+
+    这半边管"改绑之后还假装调我";另外半边(改绑之后干脆不调我)由语义面的
+    ``POOL_SOLVER_BINDINGS`` 静态门管 —— 一个没跑的函数没法自己举手。
+
+    ``required=False`` 只用在两个也会在不可变题带 / 题库题源下跑的入口点上:
+    那两种题源根本不构造这个适配器,它们的身份由自己的 tape/bank SHA 钉住。
+    """
+
+    holder = getattr(adapter, "action_ball_bound_entry_points", None)
+    if holder is None:
+        if required:
+            raise RuntimeError(
+                "action-ball pool solver cannot state which callables it holds "
+                f"(checked at {call_site}); this entry point only runs on the "
+                "online-solver path, where the pool solver must be the exact "
+                "adapter that binds it"
+            )
+        return {
+            "kind": (
+                "whole_body_tracking.action_ball.solver_adapter_binding_check"
+            ),
+            "call_site": str(call_site),
+            "attested": False,
+            "attested_slots": [],
+        }
+    bound = holder()
+    drift = []
+    if set(bound) != set(expected):
+        drift.append(
+            "slot set: bound=%r expected=%r"
+            % (sorted(bound), sorted(expected))
+        )
+    for name in sorted(expected):
+        want = expected[name]
+        got = bound.get(name)
+        # Identity first, then "the same bound method of the same object".
+        # Comparing only ``__func__``/``__self__`` would silently pass for any
+        # pair of plain objects (both attributes are absent, so both read
+        # ``None``), which is exactly the shape a smuggled callable has.
+        same = got is want or (
+            getattr(got, "__func__", None) is not None
+            and getattr(got, "__func__", None)
+            is getattr(want, "__func__", None)
+            and getattr(got, "__self__", None)
+            is getattr(want, "__self__", None)
+        )
+        if not same:
+            drift.append(f"{name}: bound={got!r} expected={want!r}")
+    if drift:
+        raise RuntimeError(
+            "action-ball pool solver adapter does not hold the covered entry "
+            f"points (checked at {call_site}). The per-symbol pin proves these "
+            "function BODIES are unchanged; it cannot prove they are what runs, "
+            "because the binding lives in excluded wiring. This is that "
+            "proof:\n  " + "\n  ".join(drift)
+        )
+    return {
+        "kind": "whole_body_tracking.action_ball.solver_adapter_binding_check",
+        "call_site": str(call_site),
+        "attested": True,
+        "attested_slots": sorted(expected),
+    }
+
+
 def action_ball_assert_solver_runtime_matches_declaration(
     *,
     solver_declaration: dict,
     physics_declaration: dict,
+    answer_input_declaration: dict,
+    expected_solver_profile_sha256: str,
+    expected_prototype_file_sha256: str,
+    prototypes,
+    reference_normal_rows,
     solver_cfg,
     prm,
     planes,
@@ -2248,6 +2514,19 @@ def action_ball_assert_solver_runtime_matches_declaration(
     这个函数本身**在覆盖面里**,三个入口点也在覆盖面里:删掉调用、放宽比较、
     少比一个字段,任何一种都会动 pin,manifest 立刻对不上。
 
+    **它自己也要被验一次身份。** 以前这里只看 ``kind`` 和 ``schema_version``,
+    从不重算 ``_action_ball_canonical_sha256(solver_declaration)`` 去和
+    ``manifest.solver_profile_sha256`` 对。于是接线只要在铸造之后**同时**改
+    payload 和活 cfg(两行),四个调用点全部放行 —— 29 个字段照过。现在两份
+    payload 各自重算摘要:solver 的对 manifest(内容寻址、由 launcher 的
+    ``action_ball_manifest_sha256`` 钉住),physics 的对 solver payload 里自陈的
+    ``physics_profile_sha256``。改 payload 就必须连 manifest 一起伪造。
+
+    ``protos`` 和 ``ref_normal`` 也在比对表里,而且摘要是**从活张量重算**的:
+    这两个是 ``solve_proposals`` 的入参,以前两份 payload 都没声明它们、29 项
+    自检也没比过它们,于是 ``speed_max.mul_(1.5)`` / ``face_sign.neg_()`` /
+    一个保范数的 ``v_hat_b`` 旋转全都能静默改答案。
+
     ``overdraw`` / ``maximum_rounds`` 只有 ``_action_ball_refill_pool_many``
     这条路会用(另外两个入口点一次解完,不重抽),传 ``None`` 表示"本调用点不
     使用它",返回的收据里会自陈到底比了哪几个字段。
@@ -2263,11 +2542,27 @@ def action_ball_assert_solver_runtime_matches_declaration(
         CONTACT_NORMAL_SPEED_MIN_MPS,
     )
 
-    if not isinstance(solver_declaration, dict) or not isinstance(
-        physics_declaration, dict
+    if (
+        not isinstance(solver_declaration, dict)
+        or not isinstance(physics_declaration, dict)
+        or not isinstance(answer_input_declaration, dict)
     ):
         raise RuntimeError(
-            "action-ball solver runtime cross-check needs both sealed payloads"
+            "action-ball solver runtime cross-check needs all three sealed "
+            "payloads"
+        )
+    if (
+        answer_input_declaration.get("kind")
+        != "whole_body_tracking.action_ball.sealed_answer_inputs"
+        or int(answer_input_declaration.get("schema_version", -1))
+        != _ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            "action-ball solver runtime cross-check was handed a payload that "
+            "is not the schema v"
+            f"{_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION} sealed answer inputs: "
+            f"kind={answer_input_declaration.get('kind')!r}, "
+            f"schema_version={answer_input_declaration.get('schema_version')!r}"
         )
     if (
         solver_declaration.get("kind")
@@ -2297,8 +2592,36 @@ def action_ball_assert_solver_runtime_matches_declaration(
     geometry = physics_declaration["geometry_and_grading"]
     diagnostic = bool(diagnostic_unauthorized)
     surface_z, net_x, net_top_z = planes
+    live_answer_inputs = action_ball_live_answer_input_digest(
+        prototypes=prototypes,
+        reference_normal_rows=reference_normal_rows,
+    )
     # (name, what the sealed payload declares, what the solver is about to get)
     comparisons = [
+        # The gate's own identity.  Without these two rows the whole comparison
+        # is "does this payload agree with itself", which a two-line wiring edit
+        # satisfies trivially.
+        ("solver.payload.canonical_sha256",
+         str(expected_solver_profile_sha256),
+         _action_ball_canonical_sha256(solver_declaration)),
+        ("physics.payload.canonical_sha256",
+         str(solver_declaration["physics_profile_sha256"]),
+         _action_ball_canonical_sha256(physics_declaration)),
+        # The two solver arguments no payload used to declare at all.
+        ("answer_inputs.prototype_file_sha256",
+         str(expected_prototype_file_sha256), str(prototypes.file_sha256)),
+        ("answer_inputs.sealed_prototype_file_sha256",
+         str(expected_prototype_file_sha256),
+         str(answer_input_declaration["prototype_file_sha256"])),
+        ("answer_inputs.prototype_derived_sha256",
+         str(answer_input_declaration["prototype_derived_sha256"]),
+         str(prototypes.derived_sha256)),
+        ("answer_inputs.live_digest_sha256",
+         str(answer_input_declaration["live_digest_sha256"]),
+         str(live_answer_inputs["sha256"])),
+        ("answer_inputs.reference_normal_row_count",
+         int(answer_input_declaration["reference_normal_row_count"]),
+         int(live_answer_inputs["reference_normal_row_count"])),
         ("solver.fixed_direction", bool(solver_declaration["fixed_direction"]),
          bool(solver_cfg.fixed_direction)),
         ("solver.solve.n_iters", int(solve["n_iters"]), int(solver_cfg.n_iters)),
@@ -5597,10 +5920,21 @@ class RacketTargetCommand(CommandTerm):
             expected_sha256=manifest.prototype.sha256,
             expected_motion_ids=action_order,
         )
-        if prototypes.families != manifest_families:
-            raise ValueError("action-ball prototype family order differs from manifest")
-        if not bool(prototypes.enabled.all()):
-            raise ValueError("action-ball manifest contains a disabled solver prototype")
+        # The manifest-anchored half of "the solver was handed the right
+        # prototypes" lives in a covered symbol on purpose: these three checks
+        # used to sit inline in this excluded wiring function, where deleting a
+        # line -- or adding one that mutates the table afterwards -- moved no
+        # pin at all.  It also seals the live tensors so the three covered solve
+        # entry points can re-derive the digest and refuse on drift.
+        answer_input_contract = action_ball_answer_input_contract(
+            prototypes=prototypes,
+            reference_normal_rows=self._ref_racket_normal_raw_w_per_clip,
+            manifest_prototype_sha256=manifest.prototype.sha256,
+            manifest_prototype_scope=manifest.prototype.scope,
+            manifest_families=manifest_families,
+            manifest_face_signs=manifest_signs,
+            global_speed_budget_mps=float(self.cfg.cq_speed_budget),
+        )
         proto_phases = tuple(
             float(value) for value in prototypes.strike_phase.detach().cpu().tolist()
         )
@@ -5631,26 +5965,6 @@ class RacketTargetCommand(CommandTerm):
                 f"runtime_contact_frames={runtime_contact_frames}, "
                 f"prototype_phases={proto_phases}, runtime_phases={phases}"
             )
-        proto_signs = tuple(
-            int(round(float(value)))
-            for value in prototypes.face_sign.detach().cpu().tolist()
-        )
-        if proto_signs != manifest_signs:
-            raise ValueError(
-                f"action-ball prototype face signs differ: prototype={proto_signs}, "
-                f"manifest={manifest_signs}"
-            )
-        if bool(
-            (
-                prototypes.speed_min
-                > float(self.cfg.cq_speed_budget) + 1.0e-9
-            ).any()
-        ):
-            raise ValueError(
-                "action-ball prototype speed_min exceeds cq_speed_budget; the global deploy "
-                "speed cap leaves that action no feasible fixed-direction speed interval"
-            )
-
         profile_keys = tuple(
             ActionProfileKey(
                 action_uid=uid,
@@ -6063,6 +6377,13 @@ class RacketTargetCommand(CommandTerm):
             action_ball_assert_solver_runtime_matches_declaration(
                 solver_declaration=solver_contract["payload"],
                 physics_declaration=physics_contract["payload"],
+                answer_input_declaration=answer_input_contract["payload"],
+                expected_solver_profile_sha256=manifest.solver_profile_sha256,
+                expected_prototype_file_sha256=manifest.prototype.sha256,
+                prototypes=prototypes,
+                reference_normal_rows=(
+                    self._ref_racket_normal_raw_w_per_clip
+                ),
                 solver_cfg=solver_cfg,
                 prm=prm,
                 planes=(surface_z, net_x, net_top_z),
@@ -6135,6 +6456,7 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_broker = broker
         self._action_ball_pool = pool
         self._action_ball_prototypes = prototypes
+        self._action_ball_answer_input_contract = answer_input_contract
         self._action_ball_solver_cfg = solver_cfg
         self._action_ball_solver_declaration_check = solver_declaration_check
         self._action_ball_prm = prm
@@ -7807,8 +8129,14 @@ class RacketTargetCommand(CommandTerm):
             initial_center_single_question=(
                 self.cfg.action_ball_initial_center_single_question
             ),
+            # 人话:这块牌子决定这个采样器**记不记**逐出生的账,活采样器是按
+            # ``action_ball_diagnostic_unauthorized`` 建的,存档里也签着那块牌子。
+            # 这里以前传的是 ``_action_ball_fixed_view_enabled`` —— 另一个布尔,
+            # 两者在"诊断跑但不是 fixed view"时正好相反,于是回滚/续跑一走到这里
+            # 就被 sampler 的 scope 牌子当场拒(checkpoint=diagnostic,本采样器
+            # =exact)。同文件另外五处建采样器/broker/pool 用的都是这一个。
             diagnostic_unauthorized=(
-                self._action_ball_fixed_view_enabled
+                self._action_ball_diagnostic_unauthorized
             ),
         )
         staged_sampler.load_state_dict(state["sampler"])
@@ -9386,9 +9714,42 @@ class RacketTargetCommand(CommandTerm):
         # "pinned solver replay" that passes proves nothing.  overdraw/rounds are
         # not consulted on this path (one solve, no redraw), so they are declared
         # absent rather than compared against a value nobody uses.
+        action_ball_assert_solver_adapter_binds_these_entry_points(
+            adapter=self._action_ball_pool_solver,
+            expected={
+                "solve": self._action_ball_refill_pool,
+                "solve_many": self._action_ball_refill_pool_many,
+                "assert_emitted_sample": (
+                    self._action_ball_assert_emitted_sample
+                ),
+                "assert_emitted_tasks": self._action_ball_assert_emitted_tasks,
+                "emitted_task_count_for": (
+                    self._action_ball_emitted_task_count_for
+                ),
+                "task_transcript_for_birth": (
+                    self._action_ball_task_transcript_for_birth
+                ),
+                "assert_proposal_assignments": (
+                    self._action_ball_assert_proposal_assignments
+                ),
+            },
+            call_site="_action_ball_replay_emitted_tasks",
+            required=False,
+        )
         action_ball_assert_solver_runtime_matches_declaration(
             solver_declaration=self._action_ball_solver_contract["payload"],
             physics_declaration=self._action_ball_physics_contract["payload"],
+            answer_input_declaration=(
+                self._action_ball_answer_input_contract["payload"]
+            ),
+            expected_solver_profile_sha256=(
+                self._action_ball_manifest.solver_profile_sha256
+            ),
+            expected_prototype_file_sha256=(
+                self._action_ball_manifest.prototype.sha256
+            ),
+            prototypes=self._action_ball_prototypes,
+            reference_normal_rows=self._ref_racket_normal_raw_w_per_clip,
             solver_cfg=self._action_ball_solver_cfg,
             prm=self._action_ball_prm,
             planes=(surface_z, net_x, net_top_z),
@@ -9658,9 +10019,42 @@ class RacketTargetCommand(CommandTerm):
         # semantic surface excludes.  Compare it to the sealed profile before a
         # single question is drawn: this call site is covered, so removing it
         # moves the pin.
+        action_ball_assert_solver_adapter_binds_these_entry_points(
+            adapter=self._action_ball_pool_solver,
+            expected={
+                "solve": self._action_ball_refill_pool,
+                "solve_many": self._action_ball_refill_pool_many,
+                "assert_emitted_sample": (
+                    self._action_ball_assert_emitted_sample
+                ),
+                "assert_emitted_tasks": self._action_ball_assert_emitted_tasks,
+                "emitted_task_count_for": (
+                    self._action_ball_emitted_task_count_for
+                ),
+                "task_transcript_for_birth": (
+                    self._action_ball_task_transcript_for_birth
+                ),
+                "assert_proposal_assignments": (
+                    self._action_ball_assert_proposal_assignments
+                ),
+            },
+            call_site="_action_ball_refill_pool_many",
+            required=True,
+        )
         action_ball_assert_solver_runtime_matches_declaration(
             solver_declaration=self._action_ball_solver_contract["payload"],
             physics_declaration=self._action_ball_physics_contract["payload"],
+            answer_input_declaration=(
+                self._action_ball_answer_input_contract["payload"]
+            ),
+            expected_solver_profile_sha256=(
+                self._action_ball_manifest.solver_profile_sha256
+            ),
+            expected_prototype_file_sha256=(
+                self._action_ball_manifest.prototype.sha256
+            ),
+            prototypes=self._action_ball_prototypes,
+            reference_normal_rows=self._ref_racket_normal_raw_w_per_clip,
             solver_cfg=self._action_ball_solver_cfg,
             prm=self._action_ball_prm,
             planes=(surface_z, net_x, net_top_z),
@@ -13416,9 +13810,42 @@ class RacketTargetCommand(CommandTerm):
         rollout_steps = int(self.cfg.vb_rollout_steps)
         # The frozen evaluator solves once and never redraws, so overdraw and the
         # redraw-round budget are declared absent here rather than compared.
+        action_ball_assert_solver_adapter_binds_these_entry_points(
+            adapter=self._action_ball_pool_solver,
+            expected={
+                "solve": self._action_ball_refill_pool,
+                "solve_many": self._action_ball_refill_pool_many,
+                "assert_emitted_sample": (
+                    self._action_ball_assert_emitted_sample
+                ),
+                "assert_emitted_tasks": self._action_ball_assert_emitted_tasks,
+                "emitted_task_count_for": (
+                    self._action_ball_emitted_task_count_for
+                ),
+                "task_transcript_for_birth": (
+                    self._action_ball_task_transcript_for_birth
+                ),
+                "assert_proposal_assignments": (
+                    self._action_ball_assert_proposal_assignments
+                ),
+            },
+            call_site="_action_ball_frozen_eval_solve",
+            required=False,
+        )
         action_ball_assert_solver_runtime_matches_declaration(
             solver_declaration=self._action_ball_solver_contract["payload"],
             physics_declaration=self._action_ball_physics_contract["payload"],
+            answer_input_declaration=(
+                self._action_ball_answer_input_contract["payload"]
+            ),
+            expected_solver_profile_sha256=(
+                self._action_ball_manifest.solver_profile_sha256
+            ),
+            expected_prototype_file_sha256=(
+                self._action_ball_manifest.prototype.sha256
+            ),
+            prototypes=self._action_ball_prototypes,
+            reference_normal_rows=self._ref_racket_normal_raw_w_per_clip,
             solver_cfg=self._action_ball_solver_cfg,
             prm=self._action_ball_prm,
             planes=(surface_z, net_x, net_top_z),

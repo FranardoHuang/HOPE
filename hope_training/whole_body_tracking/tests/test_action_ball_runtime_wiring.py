@@ -2464,8 +2464,12 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     refill_many = _method("_action_ball_refill_pool_many")
     namespace = {
         "math": math,
+        "hashlib": hashlib,
+        "json": json,
         "torch": SimpleNamespace(
             long="long",
+            cat=_host_cat,
+            float64="float64",
             tensor=lambda values, dtype=None, device=None: _FakeTensor(
                 values, dtype=dtype
             ),
@@ -2478,11 +2482,20 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
             "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS",
             "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
+            "_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION",
+            "_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS",
         ),
         namespace,
     )
     _module_functions(
-        ("action_ball_assert_solver_runtime_matches_declaration",), namespace
+        (
+            "action_ball_assert_solver_runtime_matches_declaration",
+            "action_ball_assert_solver_adapter_binds_these_entry_points",
+            "action_ball_live_answer_input_digest",
+            "action_ball_answer_input_contract",
+            "_action_ball_canonical_sha256",
+        ),
+        namespace,
     )
     module = ast.Module(
         body=[
@@ -2810,6 +2823,84 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     def note(_slot, name, amount):
         notes[name] += amount
 
+    physics_payload = {
+        "kind": "whole_body_tracking.action_ball.physics_and_scorer",
+        "virtual_ball_params": dict(ball_params),
+        "geometry_and_grading": {
+            "ball_center_surface_z_m": 0.78,
+            "net_x_m": 1.87,
+            "ball_center_net_top_z_m": 0.9325,
+        },
+        "scorer_integrator": {"h_s": 0.002, "n_steps": 1000},
+    }
+    solver_payload = {
+        "kind": (
+            "whole_body_tracking.continuous_questions.solve_proposals"
+        ),
+        "schema_version": namespace[
+            "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION"
+        ],
+        "fixed_direction": True,
+        "physics_profile_sha256": namespace[
+            "_action_ball_canonical_sha256"
+        ](physics_payload),
+        "solve": dict(solver_knobs),
+        "integrator": {"h_s": 0.002, "n_steps": 1000},
+        "acceptance": {
+            "landing": {"tol_m": solver_knobs["tol_m"]},
+            "net": {"ball_center_net_top_z_m": 0.9325},
+            "contact_normal_speed_fit": {
+                "minimum_mps_inclusive": _source_constant(
+                    CONTINUOUS_QUESTIONS_PATH,
+                    "CONTACT_NORMAL_SPEED_MIN_MPS",
+                ),
+                "maximum_mps_inclusive": _source_constant(
+                    CONTINUOUS_QUESTIONS_PATH,
+                    "CONTACT_NORMAL_SPEED_MAX_MPS",
+                ),
+            },
+            "incoming_birth": {
+                "net_margin_m": _source_constant(
+                    CONTINUOUS_QUESTIONS_PATH,
+                    "BALL_BIRTH_NET_MARGIN_M",
+                )
+            },
+            "ordered_rejection_reason_schema": (
+                "no_landing",
+                "teacher_site_rate_geometry_unsolved",
+                "teacher_rate_out_of_bounds",
+                "pre_swing_wait_out_of_bounds",
+                "cycle_exceeds_episode_horizon",
+                "ball_birth_not_beyond_net",
+            ),
+        },
+    }
+    prototypes = _fake_prototypes(
+        namespace["_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS"],
+        face_signs=(1.0,),
+    )
+    reference_normal_rows = _HostRows([0.0, 1.0, 0.0], (1, 3))
+    answer_inputs = namespace["action_ball_answer_input_contract"](
+        prototypes=prototypes,
+        reference_normal_rows=reference_normal_rows,
+        manifest_prototype_sha256=prototypes.file_sha256,
+        manifest_prototype_scope="upper",
+        manifest_families=prototypes.families,
+        manifest_face_signs=(1,),
+        global_speed_budget_mps=solver_knobs["global_speed_budget_mps"],
+    )
+    adapter_slots = {
+        name: SimpleNamespace(slot=name)
+        for name in (
+            "solve",
+            "solve_many",
+            "assert_emitted_sample",
+            "assert_emitted_tasks",
+            "emitted_task_count_for",
+            "task_transcript_for_birth",
+            "assert_proposal_assignments",
+        )
+    }
     command = SimpleNamespace(
         cfg=SimpleNamespace(
             cq_max_redraw_rounds=int(effective_rounds),
@@ -2819,66 +2910,45 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         ),
         device="cpu",
         _action_ball_planes=(0.78, 1.87, 0.9325),
-        _ref_racket_normal_raw_w_per_clip=_FakeTensor(
-            [(0.0, 1.0, 0.0)], dtype="float"
-        ),
+        _ref_racket_normal_raw_w_per_clip=reference_normal_rows,
         _action_ball_bindings=(SimpleNamespace(action_uid=7),),
-        _action_ball_solver_contract={
-            "payload": {
-                "kind": (
-                    "whole_body_tracking.continuous_questions.solve_proposals"
-                ),
-                "schema_version": namespace[
-                    "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION"
-                ],
-                "fixed_direction": True,
-                "solve": dict(solver_knobs),
-                "integrator": {"h_s": 0.002, "n_steps": 1000},
-                "acceptance": {
-                        "landing": {"tol_m": solver_knobs["tol_m"]},
-                        "net": {"ball_center_net_top_z_m": 0.9325},
-                        "contact_normal_speed_fit": {
-                            "minimum_mps_inclusive": _source_constant(
-                                CONTINUOUS_QUESTIONS_PATH,
-                                "CONTACT_NORMAL_SPEED_MIN_MPS",
-                            ),
-                            "maximum_mps_inclusive": _source_constant(
-                                CONTINUOUS_QUESTIONS_PATH,
-                                "CONTACT_NORMAL_SPEED_MAX_MPS",
-                            ),
-                        },
-                        "incoming_birth": {
-                            "net_margin_m": _source_constant(
-                                CONTINUOUS_QUESTIONS_PATH,
-                                "BALL_BIRTH_NET_MARGIN_M",
-                            )
-                        },
-                        "ordered_rejection_reason_schema": (
-                            "no_landing",
-                            "teacher_site_rate_geometry_unsolved",
-                            "teacher_rate_out_of_bounds",
-                            "pre_swing_wait_out_of_bounds",
-                            "cycle_exceeds_episode_horizon",
-                            "ball_birth_not_beyond_net",
-                        )
-                }
-            }
-        },
-        _action_ball_physics_contract={
-            "payload": {
-                "kind": "whole_body_tracking.action_ball.physics_and_scorer",
-                "virtual_ball_params": dict(ball_params),
-                "geometry_and_grading": {
-                    "ball_center_surface_z_m": 0.78,
-                    "net_x_m": 1.87,
-                    "ball_center_net_top_z_m": 0.9325,
-                },
-                "scorer_integrator": {"h_s": 0.002, "n_steps": 1000},
-            }
-        },
+        _action_ball_manifest=SimpleNamespace(
+            solver_profile_sha256=namespace["_action_ball_canonical_sha256"](
+                solver_payload
+            ),
+            prototype=SimpleNamespace(sha256=prototypes.file_sha256),
+        ),
+        _action_ball_pool_solver=SimpleNamespace(
+            action_ball_bound_entry_points=lambda: dict(adapter_slots)
+        ),
+        _action_ball_refill_pool=adapter_slots["solve"],
+        # The method under test is exec'd standalone here, so the object it
+        # attests about itself is the same sentinel the adapter holds.  That the
+        # SHIPPED wiring binds the real method is asserted separately, from the
+        # source text, by ``test_every_solve_entry_point_attests_the_adapter_
+        # before_it_solves`` plus the surface's binding allow-list.
+        _action_ball_refill_pool_many=adapter_slots["solve_many"],
+        _action_ball_assert_emitted_sample=adapter_slots[
+            "assert_emitted_sample"
+        ],
+        _action_ball_assert_emitted_tasks=adapter_slots[
+            "assert_emitted_tasks"
+        ],
+        _action_ball_emitted_task_count_for=adapter_slots[
+            "emitted_task_count_for"
+        ],
+        _action_ball_task_transcript_for_birth=adapter_slots[
+            "task_transcript_for_birth"
+        ],
+        _action_ball_assert_proposal_assignments=adapter_slots[
+            "assert_proposal_assignments"
+        ],
+        _action_ball_solver_contract={"payload": solver_payload},
+        _action_ball_physics_contract={"payload": physics_payload},
+        _action_ball_answer_input_contract=answer_inputs,
         _action_ball_sampler=sampler,
         _action_ball_reject_counts={7: {}},
-        _action_ball_prototypes=object(),
+        _action_ball_prototypes=prototypes,
         _action_ball_prm=SimpleNamespace(**ball_params),
         _action_ball_solver_cfg=solver_cfg,
         _action_ball_timing=((0.2, 1.0),),
@@ -3901,7 +3971,7 @@ def bridge(monkeypatch):
     not with numbers typed here.
     """
 
-    namespace = {"hashlib": hashlib, "json": json}
+    namespace = {"hashlib": hashlib, "json": json, "torch": _FAKE_TORCH}
     _module_assignments(
         (
             "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION",
@@ -3909,6 +3979,8 @@ def bridge(monkeypatch):
             "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS",
             "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
             "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES",
+            "_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION",
+            "_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS",
         ),
         namespace,
     )
@@ -3921,6 +3993,9 @@ def bridge(monkeypatch):
         physics_contract,
         canonical,
         _sha_file,
+        live_answer_inputs,
+        answer_input_contract,
+        adapter_check,
     ) = _module_functions(
         (
             "action_ball_declared_solver_knobs",
@@ -3930,6 +4005,9 @@ def bridge(monkeypatch):
             "action_ball_physics_profile_contract",
             "_action_ball_canonical_sha256",
             "_action_ball_sha256_file",
+            "action_ball_live_answer_input_digest",
+            "action_ball_answer_input_contract",
+            "action_ball_assert_solver_adapter_binds_these_entry_points",
         ),
         namespace,
     )
@@ -3941,8 +4019,117 @@ def bridge(monkeypatch):
         solver_contract=solver_contract,
         physics_contract=physics_contract,
         canonical=canonical,
+        live_answer_inputs=live_answer_inputs,
+        answer_input_contract=answer_input_contract,
+        adapter_check=adapter_check,
         constants=namespace,
         cq=stub,
+    )
+
+
+class _HostRows:
+    """Just enough tensor for the answer-input digest to run on a host.
+
+    The digest is a pure host computation over exact float64 rows, so nothing
+    here approximates a real tensor: it implements exactly the five operations
+    ``action_ball_live_answer_input_digest`` and ``action_ball_answer_input_
+    contract`` perform, and nothing else.  A fake that quietly returned
+    plausible numbers for an operation the shipped code does not do would make
+    every assertion below meaningless.
+    """
+
+    def __init__(self, values, shape, dtype="float"):
+        self._values = [float(value) for value in values]
+        self.shape = tuple(int(size) for size in shape)
+        self.dtype = dtype
+        expected = 1
+        for size in self.shape:
+            expected *= size
+        assert expected == len(self._values), (self.shape, len(self._values))
+
+    def _rows(self):
+        if len(self.shape) == 1:
+            return list(self._values)
+        width = self.shape[1]
+        return [
+            tuple(self._values[row * width : (row + 1) * width])
+            for row in range(self.shape[0])
+        ]
+
+    def index_select(self, _dim, indices):
+        rows = self._rows()
+        return _FakeTensor(
+            [rows[index] for index in indices.values], dtype=self.dtype
+        )
+
+    def reshape(self, flat):
+        assert flat == -1, flat
+        return _HostRows(self._values, (len(self._values),))
+
+    def to(self, dtype):
+        assert dtype == "float64", dtype
+        return self
+
+    def detach(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def tolist(self):
+        return list(self._values)
+
+    def all(self):
+        return all(self._values)
+
+    def any(self):
+        return any(self._values)
+
+    def __gt__(self, other):
+        return _HostRows(
+            [1.0 if value > float(other) else 0.0 for value in self._values],
+            self.shape,
+        )
+
+
+def _host_cat(parts):
+    values = []
+    for part in parts:
+        values.extend(part.tolist())
+    return _HostRows(values, (len(values),))
+
+
+_FAKE_TORCH = SimpleNamespace(cat=_host_cat, float64="float64")
+
+
+def _fake_prototypes(column_names, *, face_signs=(1.0,), scale=1.0):
+    """A prototype table whose every declared column is present and distinct."""
+
+    count = len(face_signs)
+    columns = {}
+    for index, name in enumerate(column_names):
+        width = 3 if name in ("v_hat_b", "p_contact_b", "n_hat_b") else 1
+        width = 2 if name in ("band_b_x", "band_b_y", "band_z_w",
+                              "contact_window") else width
+        values = [
+            float(index + 1) * 0.125 + float(cell) * 0.03125
+            for cell in range(count * width)
+        ]
+        shape = (count,) if width == 1 else (count, width)
+        columns[name] = _HostRows(values, shape)
+    columns["face_sign"] = _HostRows(
+        [float(sign) for sign in face_signs], (count,)
+    )
+    columns["enabled"] = _HostRows([1.0] * count, (count,))
+    columns["speed_min"] = _HostRows(
+        [2.5 * float(scale)] * count, (count,)
+    )
+    return SimpleNamespace(
+        motion_ids=tuple("clip%d" % index for index in range(count)),
+        families=tuple("forehand" for _ in range(count)),
+        file_sha256="e" * 64,
+        derived_sha256="f" * 64,
+        **columns,
     )
 
 
@@ -4007,12 +4194,29 @@ def _bridge_world(bridge, tmp_path, **cfg_overrides):
         contact_geometry_contract={"payload": {}, "sha256": "6" * 64},
         net_top_z=planes[2],
     )
+    prototypes = _fake_prototypes(
+        bridge.constants["_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS"],
+        face_signs=(1.0,),
+    )
+    reference_normal_rows = _HostRows([0.0, 1.0, 0.0], (1, 3))
+    answer_inputs = bridge.answer_input_contract(
+        prototypes=prototypes,
+        reference_normal_rows=reference_normal_rows,
+        manifest_prototype_sha256=prototypes.file_sha256,
+        manifest_prototype_scope="upper",
+        manifest_families=prototypes.families,
+        manifest_face_signs=(1,),
+        global_speed_budget_mps=float(cfg.cq_speed_budget),
+    )
     return SimpleNamespace(
         cfg=cfg,
         prm=prm,
         planes=planes,
         solver=solver,
         physics=physics,
+        prototypes=prototypes,
+        reference_normal_rows=reference_normal_rows,
+        answer_inputs=answer_inputs,
         solver_cfg=bridge.build_cfg(cfg, _FakeContinuousQuestionCfg),
     )
 
@@ -4021,6 +4225,11 @@ def _run_check(bridge, world, **overrides):
     kwargs = {
         "solver_declaration": world.solver["payload"],
         "physics_declaration": world.physics["payload"],
+        "answer_input_declaration": world.answer_inputs["payload"],
+        "expected_solver_profile_sha256": world.solver["sha256"],
+        "expected_prototype_file_sha256": world.prototypes.file_sha256,
+        "prototypes": world.prototypes,
+        "reference_normal_rows": world.reference_normal_rows,
         "solver_cfg": world.solver_cfg,
         "prm": world.prm,
         "planes": world.planes,
@@ -4244,6 +4453,326 @@ def test_runtime_cross_check_refuses_a_payload_that_is_not_the_sealed_profile(
     wrong_kind["kind"] = "something.else"
     with pytest.raises(RuntimeError, match="not the physics/scorer profile"):
         _run_check(bridge, world, physics_declaration=wrong_kind)
+
+
+#: The exact number of fields the cross-check compares on the refill path.
+#:
+#: 人话:这个数字是**手钉**的,而且必须是手钉的。以前那条断言只写
+#: ``compared_field_count == len(compared_fields)`` —— 自己和自己比,少比一个字段
+#: 它永远不会红,文档里那个"31 个字段"也就一直错着没人发现。改这道门就必须
+#: 连着这个数字一起改,那正是"改门要连证据一起改"的意思。
+#:
+#: 补池那条路多比 overdraw 与重抽轮数两项;另外两个入口点一次解完、不重抽,
+#: 所以少那两项。
+REFILL_PATH_COMPARED_FIELD_COUNT = 36
+SINGLE_SOLVE_COMPARED_FIELD_COUNT = 34
+
+
+def test_the_compared_field_count_is_pinned_to_an_exact_number(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    receipt = _run_check(bridge, world)
+    assert receipt["compared_field_count"] == REFILL_PATH_COMPARED_FIELD_COUNT
+    assert len(receipt["compared_fields"]) == (
+        REFILL_PATH_COMPARED_FIELD_COUNT
+    )
+    single = _run_check(bridge, world, overdraw=None, maximum_rounds=None)
+    assert single["compared_field_count"] == (
+        SINGLE_SOLVE_COMPARED_FIELD_COUNT
+    )
+    # The two the refill path adds, and only those two.
+    assert set(receipt["compared_fields"]) - set(
+        single["compared_fields"]
+    ) == {
+        "solver.solve.external_overdraw_multiplier",
+        "solver.solve.max_external_proposal_rounds.effective",
+    }
+
+
+def test_the_cross_check_recomputes_the_sealed_payload_digest(
+    bridge, tmp_path
+):
+    """Escape 4: change the payload AND the live object, and 29 fields agreed.
+
+    The gate used to check only ``kind`` and ``schema_version``, so wiring that
+    doctored the sealed payload after it was minted -- two lines -- passed every
+    field.  It now re-derives the payload's canonical SHA and compares it to the
+    manifest's, which a wiring edit cannot forge without also forging the
+    content-addressed manifest.
+    """
+
+    world = _bridge_world(bridge, tmp_path)
+    doctored = json.loads(json.dumps(world.solver["payload"]))
+    doctored["solve"]["tol_m"] = float(doctored["solve"]["tol_m"]) * 0.5
+    live = _FakeContinuousQuestionCfg(
+        tol_m=doctored["solve"]["tol_m"],
+        n_iters=world.solver_cfg.n_iters,
+        speed_budget=world.solver_cfg.speed_budget,
+        max_redraw_rounds=world.solver_cfg.max_redraw_rounds,
+        fixed_direction=world.solver_cfg.fixed_direction,
+    )
+    with pytest.raises(RuntimeError) as error:
+        _run_check(
+            bridge,
+            world,
+            solver_declaration=doctored,
+            solver_cfg=live,
+        )
+    # Every per-number field agrees; only the payload's own identity does not.
+    assert "solver.payload.canonical_sha256" in str(error.value)
+    assert "solver.solve.tol_m" not in str(error.value)
+
+
+def test_the_cross_check_recomputes_the_physics_payload_digest(
+    bridge, tmp_path
+):
+    world = _bridge_world(bridge, tmp_path)
+    doctored = json.loads(json.dumps(world.physics["payload"]))
+    doctored["venue_source"]["path"] = "somewhere/else.yaml"
+    with pytest.raises(
+        RuntimeError, match=r"physics\.payload\.canonical_sha256"
+    ):
+        _run_check(bridge, world, physics_declaration=doctored)
+
+
+# Escapes 2 and 3, measured: each of these mutates a LIVE tensor after the boot
+# checks, exactly where ``self._action_ball_prototypes = prototypes`` sits, and
+# each one used to change every answer with no gate anywhere.
+LIVE_ANSWER_INPUT_MUTATIONS = (
+    ("speed_max_scaled_up", "speed_max", 1.5),
+    ("speed_min_scaled_down", "speed_min", 0.5),
+    ("v_hat_b_rotated_norm_preserving", "v_hat_b", -1.0),
+)
+
+
+@pytest.mark.parametrize(
+    "label,column,factor",
+    LIVE_ANSWER_INPUT_MUTATIONS,
+    ids=[label for label, _, _ in LIVE_ANSWER_INPUT_MUTATIONS],
+)
+def test_the_cross_check_catches_a_prototype_column_mutated_after_sealing(
+    bridge, tmp_path, label, column, factor
+):
+    world = _bridge_world(bridge, tmp_path)
+    original = getattr(world.prototypes, column)
+    setattr(
+        world.prototypes,
+        column,
+        _HostRows(
+            [value * factor for value in original.tolist()], original.shape
+        ),
+    )
+    with pytest.raises(
+        RuntimeError, match=r"answer_inputs\.live_digest_sha256"
+    ):
+        _run_check(bridge, world)
+
+
+def test_the_cross_check_catches_a_rotated_reference_normal_table(
+    bridge, tmp_path
+):
+    """Escape 3.  Scaling is invisible on purpose -- the solver renormalizes."""
+
+    world = _bridge_world(bridge, tmp_path)
+    with pytest.raises(
+        RuntimeError, match=r"answer_inputs\.live_digest_sha256"
+    ):
+        _run_check(
+            bridge,
+            world,
+            reference_normal_rows=_HostRows([1.0, 0.0, 0.0], (1, 3)),
+        )
+
+
+def test_the_seal_refuses_a_face_sign_the_manifest_does_not_declare(
+    bridge, tmp_path
+):
+    """``face_sign.neg_()`` flips the physical hitting face of every answer.
+
+    This one is anchored, not merely sealed: the manifest declares each action's
+    mount normal sign, so flipping the column BEFORE the seal is refused too.
+    The three checks doing that anchoring used to live inline in the excluded
+    wiring function, where deleting a line moved no pin.
+    """
+
+    flipped = _fake_prototypes(
+        bridge.constants["_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS"],
+        face_signs=(-1.0,),
+    )
+    with pytest.raises(ValueError, match="prototype face signs differ"):
+        bridge.answer_input_contract(
+            prototypes=flipped,
+            reference_normal_rows=_HostRows([0.0, 1.0, 0.0], (1, 3)),
+            manifest_prototype_sha256=flipped.file_sha256,
+            manifest_prototype_scope="upper",
+            manifest_families=flipped.families,
+            manifest_face_signs=(1,),
+            global_speed_budget_mps=30.0,
+        )
+
+
+def test_the_seal_refuses_a_prototype_file_the_manifest_does_not_pin(
+    bridge, tmp_path
+):
+    prototypes = _fake_prototypes(
+        bridge.constants["_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS"]
+    )
+    with pytest.raises(ValueError, match="prototype file sha256 differs"):
+        bridge.answer_input_contract(
+            prototypes=prototypes,
+            reference_normal_rows=_HostRows([0.0, 1.0, 0.0], (1, 3)),
+            manifest_prototype_sha256="a" * 64,
+            manifest_prototype_scope="upper",
+            manifest_families=prototypes.families,
+            manifest_face_signs=(1,),
+            global_speed_budget_mps=30.0,
+        )
+
+
+def test_the_live_digest_covers_every_declared_prototype_column(
+    bridge, tmp_path
+):
+    """Change any one column and the digest moves.  No column is decorative."""
+
+    world = _bridge_world(bridge, tmp_path)
+    baseline = bridge.live_answer_inputs(
+        prototypes=world.prototypes,
+        reference_normal_rows=world.reference_normal_rows,
+    )["sha256"]
+    for column in bridge.constants[
+        "_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS"
+    ]:
+        original = getattr(world.prototypes, column)
+        bumped = _HostRows(
+            [value + 1.0 for value in original.tolist()], original.shape
+        )
+        setattr(world.prototypes, column, bumped)
+        try:
+            moved = bridge.live_answer_inputs(
+                prototypes=world.prototypes,
+                reference_normal_rows=world.reference_normal_rows,
+            )["sha256"]
+        finally:
+            setattr(world.prototypes, column, original)
+        assert moved != baseline, column
+
+
+class _FakeBoundMethod:
+    def __init__(self, owner, name):
+        self.__self__ = owner
+        self.__func__ = name
+
+
+class _FakePoolSolverAdapter:
+    def __init__(self, slots):
+        self._slots = dict(slots)
+
+    def action_ball_bound_entry_points(self):
+        return dict(self._slots)
+
+
+def _adapter_slots(owner):
+    return {
+        name: _FakeBoundMethod(owner, name)
+        for name in (
+            "solve",
+            "solve_many",
+            "assert_emitted_sample",
+            "assert_emitted_tasks",
+            "emitted_task_count_for",
+            "task_transcript_for_birth",
+            "assert_proposal_assignments",
+        )
+    }
+
+
+def test_the_entry_point_refuses_when_the_adapter_holds_someone_else(bridge):
+    """Escape 1: rebind ``solve_many`` and the per-symbol digest does not move.
+
+    The pin proves these three function bodies are unchanged; it cannot prove
+    they are what runs, because the binding lives in excluded wiring and the
+    smuggled method is referenced only from there.  So the entry point asks.
+    """
+
+    owner = object()
+    slots = _adapter_slots(owner)
+    expected = dict(slots)
+    receipt = bridge.adapter_check(
+        adapter=_FakePoolSolverAdapter(slots),
+        expected=expected,
+        call_site="test",
+        required=True,
+    )
+    assert receipt["attested"] is True
+    assert receipt["attested_slots"] == sorted(expected)
+
+    rebound = dict(slots)
+    rebound["solve_many"] = _FakeBoundMethod(owner, "_smuggled_refill_many")
+    with pytest.raises(RuntimeError, match="does not hold the covered entry"):
+        bridge.adapter_check(
+            adapter=_FakePoolSolverAdapter(rebound),
+            expected=expected,
+            call_site="test",
+            required=True,
+        )
+
+    # Dropping a slot is refused too, not silently accepted as "fewer to check".
+    dropped = dict(slots)
+    del dropped["assert_emitted_tasks"]
+    with pytest.raises(RuntimeError, match="slot set"):
+        bridge.adapter_check(
+            adapter=_FakePoolSolverAdapter(dropped),
+            expected=expected,
+            call_site="test",
+            required=True,
+        )
+
+
+def test_a_solver_that_cannot_state_its_bindings_is_refused_where_required(
+    bridge,
+):
+    """The tape/bank solvers never construct this adapter, and say so by absence.
+
+    ``required=True`` is used only on the entry point that can run on no other
+    path, so "no bindings to state" there means the wiring swapped the object
+    out entirely.
+    """
+
+    expected = _adapter_slots(object())
+    with pytest.raises(RuntimeError, match="cannot state which callables"):
+        bridge.adapter_check(
+            adapter=SimpleNamespace(),
+            expected=expected,
+            call_site="test",
+            required=True,
+        )
+    receipt = bridge.adapter_check(
+        adapter=SimpleNamespace(),
+        expected=expected,
+        call_site="test",
+        required=False,
+    )
+    assert receipt["attested"] is False
+
+
+def test_every_solve_entry_point_attests_the_adapter_before_it_solves():
+    for method, required in (
+        ("_action_ball_refill_pool_many", "required=True"),
+        ("_action_ball_replay_emitted_tasks", "required=False"),
+        ("_action_ball_frozen_eval_solve", "required=False"),
+    ):
+        source = _method_source(method)
+        assert (
+            "action_ball_assert_solver_adapter_binds_these_entry_points("
+            in source
+        ), method
+        assert required in source, method
+        attest_at = source.index(
+            "action_ball_assert_solver_adapter_binds_these_entry_points("
+        )
+        solve_at = source.index("solve_proposals(")
+        assert attest_at < solve_at, method
 
 
 def test_every_solve_entry_point_runs_the_cross_check_before_it_solves():
