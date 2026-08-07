@@ -53,5 +53,42 @@
   "authorization": {
     "training_authorized": false,
     "promotion_authorized": false
+  },
+  "verification_after_review": {
+    "prompted_by": "Franco asked whether motions previously inside the envelope had suddenly become impossible, and to re-check the arithmetic",
+    "premise_correction": "there was no 'previously inside the envelope'. The earlier mechanical-admission tool has a torque_speed slot but it is a stub that only emits 'unavailable' (audit_measured_racket_mechanical_admission.py:354-360); it never computed a torque. This result is new information, not a reversal",
+    "independent_checks": {
+      "mj_inverse_vs_mj_rne_static_gravity": "max difference 0.000e+00 N*m over all 31 joints",
+      "hand_check_head_pitch_static_gravity": "mj_inverse -0.3210 N*m vs m*g*lever 0.3086 N*m",
+      "conclusion": "the torque pipeline is correct"
+    },
+    "artifact_found_and_removed": {
+      "what": "head_pitch and head_yaw are frozen at exactly 0 across all 73 clips (|q| range 0.000000)",
+      "why_it_inflated_the_count": "a frozen head still needs torque to stay rigid while the torso swings, and PFP41 is only 6 N*m, so head_pitch appeared as the top violator in 40 clips -- an artifact of the retarget freezing the head, not a real requirement, since a real head would move",
+      "effect_on_the_headline": "53 of 73 clips before, 52 of 73 after excluding both frozen head joints",
+      "verdict": "the finding is robust; the head artifact changes one clip"
+    }
+  },
+  "acceleration_limits_are_derivable_not_missing": {
+    "prompted_by": "Franco asked whether acceleration limits can be derived, and whether the underlying quantity is really torque",
+    "answer": "yes on both counts; asking the vendor for an authoritative joint acceleration limit was a category error on my part",
+    "derivation": "a_max(q, qdot) = (tau_max(|qdot|) - |bias(q, qdot)|) / M_eff(q)",
+    "why_no_vendor_constant_exists": "M_eff is the pose-dependent effective inertia and bias is the pose- and velocity-dependent gravity plus Coriolis term, so the achievable acceleration is a field over the state, not a number a motor datasheet can carry",
+    "worked_example": {
+      "clip": "hope_Take_058_unit02_FH",
+      "frame": 40,
+      "right_wrist_pitch_joint": {
+        "M_eff": 0.0048,
+        "abs_bias_nm": 4.509,
+        "tau_max_nm": 6.0,
+        "a_max_rad_s2": 309.3,
+        "a_actual_rad_s2": 297.8,
+        "fraction_used": 0.963,
+        "note": "75% of this motor's torque is spent holding against gravity and Coriolis before any acceleration is commanded"
+      }
+    },
+    "what_is_actually_still_missing": [
+      "the pose-dependent 2x2 Jacobian for the three parallel pairs (waist roll/pitch, left ankle pitch/roll, right ankle pitch/roll) -- this is mechanism geometry, it is NOT derivable from anything we hold, and it is the only remaining vendor gap for mechanical admission"
+    ]
   }
 }
