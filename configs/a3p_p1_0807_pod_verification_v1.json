@@ -19,8 +19,30 @@
   "mujoco_cpu_compile": {
     "status": "PASS",
     "compile_seconds": 0.25,
-    "dimensions": {"nq": 38, "nv": 37, "nu": 31, "nbody": 33, "njnt": 32, "ngeom": 117, "nmesh": 92, "nsensor": 105, "nkey": 1, "nsite": 6},
-    "incumbent_dimensions": {"nq": 38, "nv": 37, "nu": 31, "nbody": 33, "njnt": 32, "ngeom": 79, "nmesh": 74, "nsensor": 105, "nkey": 1, "nsite": 6},
+    "dimensions": {
+      "nq": 38,
+      "nv": 37,
+      "nu": 31,
+      "nbody": 33,
+      "njnt": 32,
+      "ngeom": 117,
+      "nmesh": 92,
+      "nsensor": 105,
+      "nkey": 1,
+      "nsite": 6
+    },
+    "incumbent_dimensions": {
+      "nq": 38,
+      "nv": 37,
+      "nu": 31,
+      "nbody": 33,
+      "njnt": 32,
+      "ngeom": 79,
+      "nmesh": 74,
+      "nsensor": 105,
+      "nkey": 1,
+      "nsite": 6
+    },
     "abi_identical_to_incumbent": {
       "joint_names_and_order": true,
       "body_names_and_order": true,
@@ -46,7 +68,11 @@
     "total_mass_note": "differs from the URDF unique-link total 57.60001015 by 1.1e-5 kg, inherited from the incumbent MJCF's 6-significant-figure mass rounding on the 25 bodies this derivation did not rewrite",
     "keyframe_stand_loads": true,
     "contacts_at_keyframe": 3,
-    "right_racket_site_world_m": [0.108939, -0.255571, 0.701544]
+    "right_racket_site_world_m": [
+      0.108939,
+      -0.255571,
+      0.701544
+    ]
   },
   "mujoco_warp_gpu": {
     "status": "PASS",
@@ -71,7 +97,10 @@
         "new_vs_incumbent_pct": 1.8
       },
       "caveat": "an earlier separate-run measurement gave 8.665 vs 6.163 ms/step for the same two models; absolute numbers move a lot because GPU0 carries an unrelated training job, so only the back-to-back same-process comparison above is trustworthy",
-      "collision_geom_count": {"new": 57, "incumbent": 38}
+      "collision_geom_count": {
+        "new": 57,
+        "incumbent": 38
+      }
     }
   },
   "isaac_urdf_to_usd": {
@@ -80,15 +109,31 @@
     "usd_produced": true,
     "importer_name_sanitisation": {
       "count": 8,
-      "entities": ["left_link4-1", "left_link7-1", "left_link11-1", "left_link14-1", "left_joint4-1", "left_joint7-1", "left_joint11-1", "left_joint14-1"],
+      "entities": [
+        "left_link4-1",
+        "left_link7-1",
+        "left_link11-1",
+        "left_link14-1",
+        "left_joint4-1",
+        "left_joint7-1",
+        "left_joint11-1",
+        "left_joint14-1"
+      ],
       "impact": "none on the ABI: all eight are gripper entities behind fixed joints, so --merge-joints removes them before they become articulation bodies or DOFs; the producer already aliases the corresponding mesh FILENAMES, only the link/joint name strings are sanitised by the importer itself"
-    }
+    },
+    "what_this_does_and_does_not_prove": "the converter consumed the full URDF and wrote a.usd plus configuration/{base,physics,sensor}.usd and config.yaml, so the delivery parses, its meshes all resolve, and the importer accepted the kinematic tree -- this is the same step that surfaced the 0803 defects on a Pod. It does NOT prove the resulting articulation exposes 31 DOFs and 32 bodies in the runtime order."
   },
   "isaac_articulation_abi": {
-    "status": "IN_FLIGHT",
-    "note": "Isaac Sim articulation load and 31-joint/32-body ABI comparison was still running when this receipt was written; do not read the PASS above as covering it"
+    "status": "NOT_VERIFIED",
+    "attempts": 2,
+    "failure_mode": "the AppLauncher(headless=True) probe hung during Isaac Sim startup both times; the log stops at the P2P bandwidth matrix and the process was killed by its 1200 s timeout without emitting a single result line",
+    "not_an_asset_defect_evidence": "convert_urdf.py drives the same Isaac Sim stack and completed in about a minute on the same asset, so the hang is in the probe harness, not in the model",
+    "fallback_attempted": "reading the generated USD with pxr outside the app, abandoned because pxr ships inside Isaac Sim's extension layout and is not importable standalone from this venv",
+    "what_stands_in_the_meantime": "static ABI checks on the normalized URDF: the 31 movable joints equal configs/a3_runtime_articulation_joint_order.txt as a set, their document order equals configs/a3_gmr_dof_pos_joint_order.txt, and all 32 configs/a3_runtime_body_order.txt names are present as links",
+    "required_next": "re-run the articulation probe through IsaacLab's own launcher wiring (e.g. an isaaclab.sh-driven script) rather than a bare AppLauncher, and confirm num_joints==31 / num_bodies==32 with runtime ordering"
   },
   "not_verified": [
+    "Isaac articulation load: 31-DOF / 32-body readback in runtime order",
     "cross-engine Isaac/MuJoCo parity at matched q",
     "MuJoCo identity v3 (no minting entry point exists in the repo)",
     "motion-bank revalidation on the new plant",
