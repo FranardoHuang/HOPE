@@ -1,0 +1,933 @@
+{
+ "artifacts": [
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/action_ball_profile_pins.live.v1.3c38b06d718a.json",
+    "sha256": "3c38b06d718a700031941dd828ceb669c7c8a6910e25176df81d41587925b1fe"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/action_ball_profile_pins.live.v1.553ef7d14f3c.json",
+    "sha256": "553ef7d14f3caa1aadc2314ad9de071db3f391028ddefd23ed75f212a325f764"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 1032,
+   "leaf_field_count_before": 839,
+   "leaf_fields_changed": [
+    "solver_implementation_source_sha256.hope_commands.py",
+    "solver_payload.semantic_surface.covered_symbol_count",
+    "solver_payload.semantic_surface.sha256",
+    "solver_profile_sha256",
+    "solver_semantic_surface.module_source_sha256",
+    "solver_semantic_surface.payload.covered.hope_commands.py.RacketTargetCommand._action_ball_frozen_eval_solve",
+    "solver_semantic_surface.payload.covered.hope_commands.py.RacketTargetCommand._action_ball_refill_pool_many",
+    "solver_semantic_surface.payload.covered.hope_commands.py.RacketTargetCommand._action_ball_replay_emitted_tasks",
+    "solver_semantic_surface.payload.covered.hope_commands.py.action_ball_solver_profile_contract",
+    "solver_semantic_surface.pinned_source_file_sha256.hope_commands.py",
+    "solver_semantic_surface.sha256",
+    "solver_semantic_surface_declaration.covered.hope_commands.py[13]",
+    "solver_semantic_surface_declaration.covered.hope_commands.py[14]",
+    "solver_semantic_surface_declaration.covered.hope_commands.py[15]",
+    "solver_semantic_surface_declaration.covered.hope_commands.py[16]",
+    "solver_semantic_surface_declaration.covered.hope_commands.py[17]",
+    "solver_semantic_surface_declaration.covered_symbol_count",
+    "solver_semantic_surface_declaration.exclusion_reasons.runtime_wiring",
+    "solver_semantic_surface_declaration.sha256",
+    "source_authority.source_blob_map_sha256"
+   ],
+   "leaf_fields_only_after_count": 193,
+   "leaf_fields_only_before_count": 0,
+   "role": "offline_profile_pins",
+   "shape_change_is_expected_because": "this document IS the pin: it carries one digest per covered symbol, and the escape fixes in 42232b84 added 6 covered symbols on top of the 6 the declaration bridge added earlier, so the table grew from 198 rows to 210. No row disappeared (leaf_fields_only_before_count == 0)."
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.fixed_source.v3.bfd5bafba066.json",
+    "sha256": "bfd5bafba066495ebff597a56cb4df4e440137721e8df09c0d49d495cacd1e21"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.fixed_source.v3.bfd5bafba066.json",
+    "sha256": "bfd5bafba066495ebff597a56cb4df4e440137721e8df09c0d49d495cacd1e21"
+   },
+   "bytes_identical": true,
+   "leaf_field_count_after": 159,
+   "leaf_field_count_before": 159,
+   "leaf_fields_changed": [],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "fixed_source_manifest"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.measured_prepared_core.v1.d31463c5cb53.json",
+    "sha256": "d31463c5cb532f007a5eaa1393dd2d108b837710850408741396e6e1a4eade27"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.measured_prepared_core.v1.6d2dd4357be2.json",
+    "sha256": "6d2dd4357be22067aa973bee8ffdfec7629f03a178a8afe127d46d7f2eb6abe8"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 77,
+   "leaf_field_count_before": 77,
+   "leaf_fields_changed": [
+    "core_contact_bundle.path",
+    "core_contact_bundle.sha256",
+    "fixed_n1_source_manifest.path"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "prepared_core"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.bundle.v2.1fb899150daf.json",
+    "sha256": "1fb899150dafafff3ef9776d2ea6d76ffea8cd270b007ab3e9464fda158b2912"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.bundle.v2.ac01406510a8.json",
+    "sha256": "ac01406510a893aebbec058499f2316a84dce4a561e1a03b3208162e59829d39"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 43,
+   "leaf_field_count_before": 43,
+   "leaf_fields_changed": [
+    "contact_alignment.path",
+    "contact_alignment.sha256",
+    "manifest.path",
+    "manifest.sha256",
+    "profile_pins.path",
+    "profile_pins.sha256",
+    "profile_pins.solver_profile_sha256",
+    "prototype.path",
+    "prototype.sha256",
+    "source_manifest.path"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "core_contact_bundle"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.contact_alignment.v1.180771bad6e4.json",
+    "sha256": "180771bad6e46720ca15bbdc7f859d4dea65745ef17f46909d8be0551a863d1c"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.contact_alignment.v1.7bfa82a14290.json",
+    "sha256": "7bfa82a142909232d4f44e1a34953f9c13885a2f36287de2158eba191f4ae346"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 63,
+   "leaf_field_count_before": 63,
+   "leaf_fields_changed": [
+    "profile_pins.path",
+    "profile_pins.sha256",
+    "profile_pins.solver_profile_sha256",
+    "source_manifest.path"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "contact_alignment"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.12031a74be70.json",
+    "sha256": "12031a74be708b5330c31a5255a45f9860c72fbf7d6a0b6be1ac2f83bb932ce5"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.bb65ca3f3a8e.json",
+    "sha256": "bb65ca3f3a8e7cb151a183d28951bf6ca1316a16df790f9b7928c69c3edc7c8a"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 182,
+   "leaf_field_count_before": 182,
+   "leaf_fields_changed": [
+    "prototype.path",
+    "prototype.sha256",
+    "solver_profile_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "action_manifest"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.prototype.v2.08d227b4c979.json",
+    "sha256": "08d227b4c979032c174da9bfe8cd1a68e2809bbe6b7d8bf35efbc9af436e9858"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.prototype.v2.e4035986c163.json",
+    "sha256": "e4035986c1631fe394337f01bc0d60f2b23caeec0c23add9715c126e24dd4495"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 152,
+   "leaf_field_count_before": 152,
+   "leaf_fields_changed": [
+    "provenance.full_solver_admission_preflight.execution.implementation_source_sha256.action_ball_sampling",
+    "provenance.full_solver_admission_preflight.sampling_support_overlay.runtime_manifest.path",
+    "provenance.profile_pins.path",
+    "provenance.profile_pins.sha256",
+    "provenance.profile_pins.solver_profile_sha256",
+    "provenance.source_manifest.path"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "stroke_prototype"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/offline_n1_tape_build_report.v1.39f2ec48fe90.json",
+    "sha256": "39f2ec48fe9090b28ef9c8b99abccfaec6655a3bb8512c955d640f6d8271f23f"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/offline_n1_tape_build_report.v1.58eb977b1566.json",
+    "sha256": "58eb977b1566555e219f73d25dbd9288ff884e7728b9ebf2ea1750d6629e970b"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 548,
+   "leaf_field_count_before": 548,
+   "leaf_fields_changed": [
+    "base_question.artifact.path",
+    "base_question.artifact.sha256",
+    "base_question.task_receipt_canonical_sha256",
+    "prepared_core.path",
+    "prepared_core.sha256",
+    "producer_contracts.common.dynamic_ready_birth.payload.runtime_binding_sha256",
+    "producer_contracts.common.dynamic_ready_birth.sha256",
+    "producer_contracts.common.landing_spin_task.payload.manifest_sha256",
+    "producer_contracts.common.landing_spin_task.sha256",
+    "producer_contracts.desired_contact.analytic_full.payload.dynamic_ready_source.runtime_binding_sha256",
+    "producer_contracts.desired_contact.analytic_full.payload.prepared_core_sha256",
+    "producer_contracts.desired_contact.analytic_full.sha256",
+    "producer_contracts.desired_contact.analytic_no_velocity.payload.dynamic_ready_source.runtime_binding_sha256",
+    "producer_contracts.desired_contact.analytic_no_velocity.payload.prepared_core_sha256",
+    "producer_contracts.desired_contact.analytic_no_velocity.sha256",
+    "producer_contracts.desired_contact.current_lm.payload.dynamic_ready_source.runtime_binding_sha256",
+    "producer_contracts.desired_contact.current_lm.payload.prepared_core_sha256",
+    "producer_contracts.desired_contact.current_lm.sha256",
+    "producer_contracts.desired_contact.outcome_dense_only.payload.dynamic_ready_source.runtime_binding_sha256",
+    "producer_contracts.desired_contact.outcome_dense_only.payload.prepared_core_sha256",
+    "producer_contracts.desired_contact.outcome_dense_only.sha256",
+    "producer_contracts.desired_contact.teacher_pos_face_no_velocity.payload.dynamic_ready_source.runtime_binding_sha256",
+    "producer_contracts.desired_contact.teacher_pos_face_no_velocity.payload.prepared_core_sha256",
+    "producer_contracts.desired_contact.teacher_pos_face_no_velocity.sha256",
+    "source_identity.manifest_sha256",
+    "source_identity.solver_sha256",
+    "tape.all_target_lineage.analytic_full.tape_canonical_sha256",
+    "tape.all_target_lineage.analytic_full.target_producer_sha256",
+    "tape.all_target_lineage.analytic_no_velocity.tape_canonical_sha256",
+    "tape.all_target_lineage.analytic_no_velocity.target_producer_sha256",
+    "tape.all_target_lineage.current_lm.tape_canonical_sha256",
+    "tape.all_target_lineage.current_lm.target_producer_sha256",
+    "tape.all_target_lineage.outcome_dense_only.tape_canonical_sha256",
+    "tape.all_target_lineage.outcome_dense_only.target_producer_sha256",
+    "tape.all_target_lineage.teacher_pos_face_no_velocity.tape_canonical_sha256",
+    "tape.all_target_lineage.teacher_pos_face_no_velocity.target_producer_sha256",
+    "tape.artifact.path",
+    "tape.artifact.sha256",
+    "tape.canonical_sha256",
+    "target_receipts.analytic_full.artifact.path",
+    "target_receipts.analytic_full.artifact.sha256",
+    "target_receipts.analytic_full.target_producer_sha256",
+    "target_receipts.analytic_full.task_receipt_canonical_sha256",
+    "target_receipts.analytic_no_velocity.artifact.path",
+    "target_receipts.analytic_no_velocity.artifact.sha256",
+    "target_receipts.analytic_no_velocity.target_producer_sha256",
+    "target_receipts.analytic_no_velocity.task_receipt_canonical_sha256",
+    "target_receipts.current_lm.artifact.path",
+    "target_receipts.current_lm.artifact.sha256",
+    "target_receipts.current_lm.target_producer_sha256",
+    "target_receipts.current_lm.task_receipt_canonical_sha256",
+    "target_receipts.outcome_dense_only.artifact.path",
+    "target_receipts.outcome_dense_only.artifact.sha256",
+    "target_receipts.outcome_dense_only.target_producer_sha256",
+    "target_receipts.outcome_dense_only.task_receipt_canonical_sha256",
+    "target_receipts.teacher_pos_face_no_velocity.artifact.path",
+    "target_receipts.teacher_pos_face_no_velocity.artifact.sha256",
+    "target_receipts.teacher_pos_face_no_velocity.target_producer_sha256",
+    "target_receipts.teacher_pos_face_no_velocity.task_receipt_canonical_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "tape_build_report"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/immutable_n1_tape.v1.420ed3a42099.json",
+    "sha256": "420ed3a420991d82d5acc7f9c073ef61d667aa2c152a89f7a2b277623071678d"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/immutable_n1_tape.v1.d4bfae8454b4.json",
+    "sha256": "d4bfae8454b469ecc6b0f7db15c269e375b64dd937f51c47b65ff6a1e9bc0299"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 633,
+   "leaf_field_count_before": 633,
+   "leaf_fields_changed": [
+    "canonical_sha256",
+    "source_task_receipt.birth_sha256",
+    "source_task_receipt.canonical_sha256",
+    "source_task_receipt.domain_authority_sha256",
+    "source_task_receipt.domain_claim_sha256",
+    "source_task_receipt.manifest_sha256",
+    "source_task_receipt.registry_sha256",
+    "source_task_receipt.solver_sha256",
+    "targets.analytic_full.producer_sha256",
+    "targets.analytic_no_velocity.producer_sha256",
+    "targets.current_lm.producer_sha256",
+    "targets.outcome_dense_only.producer_sha256",
+    "targets.teacher_pos_face_no_velocity.producer_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "immutable_tape"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/base_question.task_receipt.v5.cab1b2ad8db0.json",
+    "sha256": "cab1b2ad8db025c57472c0951e7d1ab8f0e205d7ed37ce6f2402014149dff9c9"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/base_question.task_receipt.v5.f9b81255722d.json",
+    "sha256": "f9b81255722d4d8383c5d2182912c0fe2cc679d11f645fa6ad1c5536e36c3c08"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 227,
+   "leaf_field_count_before": 227,
+   "leaf_fields_changed": [
+    "birth_sha256",
+    "canonical_sha256",
+    "domain_authority_sha256",
+    "domain_claim_sha256",
+    "manifest_sha256",
+    "registry_sha256",
+    "solver_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "task_receipt_base_question"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/outcome_dense_only.target.task_receipt.v5.cab1b2ad8db0.json",
+    "sha256": "cab1b2ad8db025c57472c0951e7d1ab8f0e205d7ed37ce6f2402014149dff9c9"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/outcome_dense_only.target.task_receipt.v5.f9b81255722d.json",
+    "sha256": "f9b81255722d4d8383c5d2182912c0fe2cc679d11f645fa6ad1c5536e36c3c08"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 227,
+   "leaf_field_count_before": 227,
+   "leaf_fields_changed": [
+    "birth_sha256",
+    "canonical_sha256",
+    "domain_authority_sha256",
+    "domain_claim_sha256",
+    "manifest_sha256",
+    "registry_sha256",
+    "solver_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "task_receipt_outcome_dense_only"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/current_lm.target.task_receipt.v5.cab1b2ad8db0.json",
+    "sha256": "cab1b2ad8db025c57472c0951e7d1ab8f0e205d7ed37ce6f2402014149dff9c9"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/current_lm.target.task_receipt.v5.f9b81255722d.json",
+    "sha256": "f9b81255722d4d8383c5d2182912c0fe2cc679d11f645fa6ad1c5536e36c3c08"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 227,
+   "leaf_field_count_before": 227,
+   "leaf_fields_changed": [
+    "birth_sha256",
+    "canonical_sha256",
+    "domain_authority_sha256",
+    "domain_claim_sha256",
+    "manifest_sha256",
+    "registry_sha256",
+    "solver_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "task_receipt_current_lm"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/analytic_full.target.task_receipt.v5.836e1accb2fa.json",
+    "sha256": "836e1accb2fad51009a794b2271922c6a30ef06ce781d1f99db7e8f1ab8818c6"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/analytic_full.target.task_receipt.v5.0c2638e94f1d.json",
+    "sha256": "0c2638e94f1d1b76fd479187cd1a648a2de6cf8062e9267e7e540b6bd362935d"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 227,
+   "leaf_field_count_before": 227,
+   "leaf_fields_changed": [
+    "birth_sha256",
+    "canonical_sha256",
+    "domain_authority_sha256",
+    "domain_claim_sha256",
+    "manifest_sha256",
+    "registry_sha256",
+    "solver_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "task_receipt_analytic_full"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/analytic_no_velocity.target.task_receipt.v5.836e1accb2fa.json",
+    "sha256": "836e1accb2fad51009a794b2271922c6a30ef06ce781d1f99db7e8f1ab8818c6"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/analytic_no_velocity.target.task_receipt.v5.0c2638e94f1d.json",
+    "sha256": "0c2638e94f1d1b76fd479187cd1a648a2de6cf8062e9267e7e540b6bd362935d"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 227,
+   "leaf_field_count_before": 227,
+   "leaf_fields_changed": [
+    "birth_sha256",
+    "canonical_sha256",
+    "domain_authority_sha256",
+    "domain_claim_sha256",
+    "manifest_sha256",
+    "registry_sha256",
+    "solver_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "task_receipt_analytic_no_velocity"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/teacher_pos_face_no_velocity.target.task_receipt.v5.553d3c7b22fa.json",
+    "sha256": "553d3c7b22fab0328f9761cc29e9fbb3bb22d89e2c563113953353e975ef06fe"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/teacher_pos_face_no_velocity.target.task_receipt.v5.e2514862d60a.json",
+    "sha256": "e2514862d60a3f0e3efe60a5d2e0c9dd3c8054acf98da0efe69c25b17b348968"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 227,
+   "leaf_field_count_before": 227,
+   "leaf_fields_changed": [
+    "birth_sha256",
+    "canonical_sha256",
+    "domain_authority_sha256",
+    "domain_claim_sha256",
+    "manifest_sha256",
+    "registry_sha256",
+    "solver_sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "task_receipt_teacher_pos_face_no_velocity"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/c211_lineage_escapefix_20260807/c211_direct_ball_split_ready_bundle.v4.json",
+    "sha256": "60792587b672534256e1ce1fde9ea59d53754b7cac0ea4e5f2f703bea4e1284a"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_bundle.v4.json",
+    "sha256": "722e9d1c4d9801128ca3b989a653aa481be21c1052cab13e0db22833f0744604"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 58,
+   "leaf_field_count_before": 58,
+   "leaf_fields_changed": [
+    "action_manifest.path",
+    "action_manifest.sha256",
+    "content_sha256",
+    "initial_center_task_receipt.path",
+    "initial_center_task_receipt.sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "c211_bundle"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/c211_lineage_escapefix_20260807/c211_direct_ball_split_ready_lineage.v4.json",
+    "sha256": "b774364757984f17e074c7c7f9299008360d4023bdbd7a3efb0b2c4d8f9613fb"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_lineage.v4.json",
+    "sha256": "a327854762011a098065bc05131f9c68210fcd6cec9930650df8e9366db9de99"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 62,
+   "leaf_field_count_before": 62,
+   "leaf_fields_changed": [
+    "action_manifest.path",
+    "action_manifest.sha256",
+    "bundle.path",
+    "bundle.sha256",
+    "initial_center_task_receipt.path",
+    "initial_center_task_receipt.sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "c211_lineage"
+  },
+  {
+   "after": {
+    "path": "configs/action_ball_n1_measured_20260807/a211_lineage_escapefix_20260807/a211_split_ready_lineage.v5.json",
+    "sha256": "1d06d0950f2eb8d0cc7c2ccd34d2d77f4f1bdcdb1daf4c4d4a6cebd463f4a050"
+   },
+   "before": {
+    "path": "configs/action_ball_n1_measured_20260807/a211_lineage_20260807/a211_split_ready_lineage.v5.json",
+    "sha256": "5454e024e3f578d341dc4b238d4daefe4fd570f678c164aa8bbc2502dfc313cd"
+   },
+   "bytes_identical": false,
+   "leaf_field_count_after": 138,
+   "leaf_field_count_before": 138,
+   "leaf_fields_changed": [
+    "action_manifest.path",
+    "action_manifest.sha256",
+    "initial_center_task_receipt.path",
+    "initial_center_task_receipt.sha256"
+   ],
+   "leaf_fields_only_after_count": 0,
+   "leaf_fields_only_before_count": 0,
+   "role": "a211_lineage"
+  }
+ ],
+ "code_commit": "42232b84ce2b4ab5b980d871520b24a66dc41e8a",
+ "covered_symbol_count_after": 210,
+ "covered_symbol_count_before": 198,
+ "kind": "whole_body_tracking.action_ball.solver_pin_re_signing_ledger",
+ "migration_gate": {
+  "exit_code": 1,
+  "recomputed_with_the_scripts_own_constants": {
+   "covered_symbols_introduced_and_allowed": {
+    "hope_commands.py": [
+     "action_ball_declared_solver_knobs",
+     "action_ball_solver_cfg_from_declaration",
+     "action_ball_assert_solver_runtime_matches_declaration",
+     "_ACTION_BALL_SOLVER_FIXED_DIRECTION",
+     "_ACTION_BALL_VIRTUAL_BALL_PARAM_NAMES"
+    ]
+   },
+   "covered_symbols_introduced_and_refused": {
+    "hope_commands.py": [
+     "action_ball_live_answer_input_digest",
+     "action_ball_answer_input_contract",
+     "_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION",
+     "_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS",
+     "action_ball_assert_solver_adapter_binds_these_entry_points",
+     "_ActionBallPoolSolverAdapter.action_ball_bound_entry_points"
+    ]
+   },
+   "covered_symbols_moved": {
+    "hope_commands.py": [
+     "RacketTargetCommand._action_ball_refill_pool_many",
+     "RacketTargetCommand._action_ball_frozen_eval_solve",
+     "RacketTargetCommand._action_ball_replay_emitted_tasks",
+     "action_ball_solver_profile_contract",
+     "_ACTION_BALL_SOLVER_PROFILE_SCHEMA_VERSION"
+    ]
+   },
+   "covered_symbols_moved_and_refused": {
+    "hope_commands.py": [
+     "RacketTargetCommand._action_ball_frozen_eval_solve",
+     "RacketTargetCommand._action_ball_refill_pool_many",
+     "RacketTargetCommand._action_ball_replay_emitted_tasks"
+    ]
+   },
+   "from_rev": "423f5409519492072a15de79fa94a989c80825cc",
+   "question_identity_symbols_byte_identical": {
+    "hope_commands.py:_action_ball_canonical_sha256": true,
+    "hope_commands.py:_action_ball_exact_question_payload": true,
+    "hope_commands.py:_action_ball_semantic_levels": true
+   },
+   "to_rev": "42232b84ce2b4ab5b980d871520b24a66dc41e8a"
+  },
+  "refusal_text": "a covered symbol is missing at one of the two revisions and is not on the allowed-introduction list, so the invariance claim cannot be checked: {'hope_commands.py': ['action_ball_live_answer_input_digest', 'action_ball_answer_input_contract', '_ACTION_BALL_ANSWER_INPUT_SCHEMA_VERSION', '_ACTION_BALL_ANSWER_INPUT_PROTOTYPE_COLUMNS', 'action_ball_assert_solver_adapter_binds_these_entry_points', '_ActionBallPoolSolverAdapter.action_ball_bound_entry_points']}",
+  "tool": "hope_training/whole_body_tracking/scripts/migrate_action_ball_solver_pin_to_semantic_surface.py",
+  "verdict": "REFUSED",
+  "what_it_can_and_cannot_certify": "The script certifies a pure re-signing: schema v2 -> v3 with no covered symbol moving except the pin's own declaration half. This round is not that. The escape fixes deliberately changed three covered solve entry points (they now call two new contracts) and added six covered symbols, so the static invariance claim the script checks is false by construction and it says so.",
+  "why_it_was_run_anyway": "It is the only tool that certifies a re-signing, so it was run rather than skipped, and its refusal is published rather than worked around. Its allow-lists were NOT edited: widening ALLOWED_MOVED_SYMBOLS to admit _action_ball_refill_pool_many would pre-approve the one symbol that draws the questions, which is the opposite of what the gate is for.",
+  "why_the_moved_symbols_did_not_move_an_answer": "The three refused movers are _action_ball_refill_pool_many, _action_ball_frozen_eval_solve and _action_ball_replay_emitted_tasks -- the three covered solve entry points. Each moved because it now calls action_ball_assert_solver_adapter_binds_these_entry_points and action_ball_answer_input_contract before solving. A static digest cannot tell an added refusal from an added computation, which is why the gate refuses. The live-value evidence is what settles it: the tape is produced by running _action_ball_refill_pool_many, and base_question_sha256 came out byte-identical, so the draw did not move. That is a measurement, not an argument."
+ },
+ "pin_census": {
+  "field_names": [
+   "solver_profile_sha256",
+   "solver_sha256"
+  ],
+  "note": "Where the live pin is written, under both field names it travels under. A re-sign that misses one of these boots into a SHA mismatch.",
+  "site_count": 14,
+  "sites": [
+   {
+    "field": "solver_profile_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/action_ball_profile_pins.live.v1.3c38b06d718a.json"
+   },
+   {
+    "field": "solver_profile_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/action_ball_profile_pins.live.v2.9a909b56d9b6.json"
+   },
+   {
+    "field": "profile_pins.solver_profile_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.bundle.v2.1fb899150daf.json"
+   },
+   {
+    "field": "profile_pins.solver_profile_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.contact_alignment.v1.180771bad6e4.json"
+   },
+   {
+    "field": "solver_profile_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.12031a74be70.json"
+   },
+   {
+    "field": "provenance.profile_pins.solver_profile_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.prototype.v2.08d227b4c979.json"
+   },
+   {
+    "field": "solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/analytic_full.target.task_receipt.v5.836e1accb2fa.json"
+   },
+   {
+    "field": "solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/analytic_no_velocity.target.task_receipt.v5.836e1accb2fa.json"
+   },
+   {
+    "field": "solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/base_question.task_receipt.v5.cab1b2ad8db0.json"
+   },
+   {
+    "field": "solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/current_lm.target.task_receipt.v5.cab1b2ad8db0.json"
+   },
+   {
+    "field": "source_task_receipt.solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/immutable_n1_tape.v1.420ed3a42099.json"
+   },
+   {
+    "field": "source_identity.solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/offline_n1_tape_build_report.v1.39f2ec48fe90.json"
+   },
+   {
+    "field": "solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/outcome_dense_only.target.task_receipt.v5.cab1b2ad8db0.json"
+   },
+   {
+    "field": "solver_sha256",
+    "path": "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/teacher_pos_face_no_velocity.target.task_receipt.v5.553d3c7b22fa.json"
+   }
+  ],
+  "sites_still_carrying_the_retired_pin": []
+ },
+ "plain_language": "第三次重签。修完四条语义面逃逸(42232b84)之后,求解器语义面从 198 个符号涨到 210 个,solver_profile_sha256 跟着从 c196cf79 变成 3af6c505,于是上一轮封着旧指纹的 18 份产物全部开不了机。这份台账记的是一对一的重签:哪份换了哪份、每份里面到底哪些字段动了、以及证明题目没被重抽的那次测量。它不声称本轮只动了印章 -- 覆盖符号确实动了,下面 migration_gate 一节把动了哪些逐个列出来。",
+ "pointer_chain_check": {
+  "broken": [],
+  "note": "Every {path, sha256} pointer inside the four new directories was resolved against the file it names. This is what catches a lineage left pointing at the previous round.",
+  "pointers_checked": 56
+ },
+ "producer_commands": [
+  "pin_action_ball_profile_contracts.py --source-rev 42232b84 --out configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/action_ball_profile_pins.live.v2.9a909b56d9b6.json",
+  "materialize_measured_action_ball_n1_bundle.py prepare --profile-pins configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/action_ball_profile_pins.live.v2.9a909b56d9b6.json --output-dir configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1",
+  "materialize_action_ball_n1_fixed_tape_variants.py --prepared-core-bundle configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.measured_prepared_core.v1.d31463c5cb53.json --seed 0 --output-dir configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1",
+  "materialize_action_ball_c211_lineage.py --action-manifest-path configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.12031a74be70.json --initial-center-task-receipt-path configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/outcome_dense_only.target.task_receipt.v5.cab1b2ad8db0.json --bundle-output configs/action_ball_n1_measured_20260807/c211_lineage_escapefix_20260807/c211_direct_ball_split_ready_bundle.v4.json --output configs/action_ball_n1_measured_20260807/c211_lineage_escapefix_20260807/c211_direct_ball_split_ready_lineage.v4.json",
+  "materialize_action_ball_a211_lineage.py --action-manifest-path configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.12031a74be70.json --initial-center-task-receipt-path configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/current_lm.target.task_receipt.v5.cab1b2ad8db0.json --output configs/action_ball_n1_measured_20260807/a211_lineage_escapefix_20260807/a211_split_ready_lineage.v5.json"
+ ],
+ "producer_commit": "c35747e9d4ea1724f8bea17f885b2af74ffc1b70",
+ "producer_commit_note": "The core and tape were minted at 42232b84 and had to be committed before the two lineage producers would run: both refuse a dirty checkout and an untracked action manifest. producer_commit is therefore the commit that carries the core and tape, and its solver sources are byte-identical to 42232b84.",
+ "profile_pins_template": {
+  "leaf_fields_that_differ_from_the_previous_template": [
+   "solver_implementation_source_sha256.hope_commands.py",
+   "solver_payload.semantic_surface.covered_symbol_count",
+   "solver_payload.semantic_surface.sha256",
+   "solver_profile_sha256",
+   "solver_semantic_surface.module_source_sha256",
+   "solver_semantic_surface.payload.covered.hope_commands.py.RacketTargetCommand._action_ball_frozen_eval_solve",
+   "solver_semantic_surface.payload.covered.hope_commands.py.RacketTargetCommand._action_ball_refill_pool_many",
+   "solver_semantic_surface.payload.covered.hope_commands.py.RacketTargetCommand._action_ball_replay_emitted_tasks",
+   "solver_semantic_surface.payload.covered.hope_commands.py.action_ball_solver_profile_contract",
+   "solver_semantic_surface.pinned_source_file_sha256.hope_commands.py",
+   "solver_semantic_surface.sha256",
+   "solver_semantic_surface_declaration.covered.hope_commands.py[13]",
+   "solver_semantic_surface_declaration.covered.hope_commands.py[14]",
+   "solver_semantic_surface_declaration.covered.hope_commands.py[15]",
+   "solver_semantic_surface_declaration.covered.hope_commands.py[16]",
+   "solver_semantic_surface_declaration.covered.hope_commands.py[17]",
+   "solver_semantic_surface_declaration.covered_symbol_count",
+   "solver_semantic_surface_declaration.exclusion_reasons.runtime_wiring",
+   "solver_semantic_surface_declaration.sha256",
+   "source_authority.source_blob_map_sha256"
+  ],
+  "minted_by": "scripts/pin_action_ball_profile_contracts.py --source-rev 42232b84",
+  "path": "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/action_ball_profile_pins.live.v2.9a909b56d9b6.json",
+  "previous_round_template": {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/action_ball_profile_pins.live.v2.5564d5b3c09d.json",
+   "sha256": "5564d5b3c09d873a6c2681a427271dde72e81b40cffb908999625df4784cc77c"
+  },
+  "sha256": "9a909b56d9b660d31a828b25c08e24087fb6bc9fb55754b6149af68e7c8b7af2"
+ },
+ "question_identity": {
+  "base_question_sha256_after": "81eed5139b98b96a00f1198bef6cf743f557eaf5395d2e6efff692cc49867cbc",
+  "base_question_sha256_before": "81eed5139b98b96a00f1198bef6cf743f557eaf5395d2e6efff692cc49867cbc",
+  "statement_sites_compared": [
+   "base_question.base_question_sha256",
+   "producer_contracts.common.landing_spin_task.payload.base_question_sha256",
+   "producer_contracts.desired_contact.analytic_full.payload.base_question_sha256",
+   "producer_contracts.desired_contact.analytic_no_velocity.payload.base_question_sha256",
+   "producer_contracts.desired_contact.current_lm.payload.base_question_sha256",
+   "producer_contracts.desired_contact.outcome_dense_only.payload.base_question_sha256",
+   "producer_contracts.desired_contact.teacher_pos_face_no_velocity.payload.base_question_sha256",
+   "tape.all_target_lineage.analytic_full.base_question_sha256",
+   "tape.all_target_lineage.analytic_no_velocity.base_question_sha256",
+   "tape.all_target_lineage.current_lm.base_question_sha256",
+   "tape.all_target_lineage.outcome_dense_only.base_question_sha256",
+   "tape.all_target_lineage.teacher_pos_face_no_velocity.base_question_sha256",
+   "tape.base_question_sha256",
+   "target_receipts.analytic_full.base_question_sha256",
+   "target_receipts.analytic_no_velocity.base_question_sha256",
+   "target_receipts.current_lm.base_question_sha256",
+   "target_receipts.outcome_dense_only.base_question_sha256",
+   "target_receipts.teacher_pos_face_no_velocity.base_question_sha256"
+  ],
+  "unchanged": true,
+  "what_this_does_and_does_not_claim": "CLAIMS: base_question_sha256 is the identity of the drawn question and it did not move, at all 18 sites that state it. The physics profile digest, the exact-face contact geometry digest and every cfg knob are byte-identical between the two pin templates. DOES NOT CLAIM: that nothing in the solver changed -- covered symbols did move and migration_gate lists them. DOES NOT CLAIM anything from canonical_sha256: every task receipt's canonical_sha256 moved, and it always will, because it seals the solver pin by construction; it is not evidence in either direction. DOES NOT CLAIM anything about the excluded half of the semantic surface, or about open holes R10 and R11."
+ },
+ "residual_references_to_retired_digests": [
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/action_ball_profile_pins.live.v2.5564d5b3c09d.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/solver_pin_semantic_surface_migration.v1.7e85e97e6c1c.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/a211_lineage_20260807/a211_split_ready_lineage.v5.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_bundle.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_lineage.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/solver_pin_v3_re_signing_ledger.v1.bfe7f6bc3a8f.json",
+   "reason": "previous_round_ledger_records_its_own_before_and_after"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/action_ball_profile_pins.live.v1.553ef7d14f3c.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/solver_pin_semantic_surface_migration.v1.cce63a1bac8c.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.bundle.v2.ac01406510a8.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.contact_alignment.v1.7bfa82a14290.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.bb65ca3f3a8e.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.prototype.v2.e4035986c163.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.measured_prepared_core.v1.6d2dd4357be2.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/analytic_full.target.task_receipt.v5.0c2638e94f1d.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/analytic_no_velocity.target.task_receipt.v5.0c2638e94f1d.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/base_question.task_receipt.v5.f9b81255722d.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/current_lm.target.task_receipt.v5.f9b81255722d.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/immutable_n1_tape.v1.d4bfae8454b4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/offline_n1_tape_build_report.v1.58eb977b1566.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/outcome_dense_only.target.task_receipt.v5.f9b81255722d.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/teacher_pos_face_no_velocity.target.task_receipt.v5.e2514862d60a.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  }
+ ],
+ "residual_references_to_retired_directories": [
+  {
+   "path": "configs/action_ball_n1_measured_20260806/a211_lineage_20260806/a211_split_ready_lineage.v5.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/c211_lineage_20260806/c211_direct_ball_split_ready_bundle.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/c211_lineage_20260806/c211_direct_ball_split_ready_lineage.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/solver_pin_semantic_surface_migration.v1.7e85e97e6c1c.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/take_061_unit04_bh.full.bundle.v2.95152c0f3880.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/take_061_unit04_bh.full.contact_alignment.v1.51081372106c.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/take_061_unit04_bh.full.manifest.v3.653670aed246.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/take_061_unit04_bh.full.prototype.v2.c93b3c5e0a49.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_core_seed0_20260806_r2/take_061_unit04_bh.measured_prepared_core.v1.af5f6887807e.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260806/fresh_tape_seed0_20260806_r1/offline_n1_tape_build_report.v1.091b3d189dde.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/a211_lineage_20260807/a211_split_ready_lineage.v5.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_bundle.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_lineage.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/solver_pin_v3_re_signing_ledger.v1.bfe7f6bc3a8f.json",
+   "reason": "previous_round_ledger_records_its_own_before_and_after"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/solver_pin_semantic_surface_migration.v1.cce63a1bac8c.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.bundle.v2.ac01406510a8.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.contact_alignment.v1.7bfa82a14290.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.bb65ca3f3a8e.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.prototype.v2.e4035986c163.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.measured_prepared_core.v1.6d2dd4357be2.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/offline_n1_tape_build_report.v1.58eb977b1566.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "docs/PROGRESS.md",
+   "reason": "experiment_narrative_recording_what_happened"
+  },
+  {
+   "path": "docs/experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md",
+   "reason": "experiment_narrative_recording_what_happened"
+  },
+  {
+   "path": "hope_training/whole_body_tracking/tests/test_migrate_action_ball_solver_pin_receipt.py",
+   "reason": "test_pins_a_historical_fact_about_a_shipped_artifact"
+  }
+ ],
+ "residual_references_to_retired_paths": [
+  {
+   "path": "configs/action_ball_n1_measured_20260807/a211_lineage_20260807/a211_split_ready_lineage.v5.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_bundle.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/c211_lineage_20260807/c211_direct_ball_split_ready_lineage.v4.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/solver_pin_v3_re_signing_ledger.v1.bfe7f6bc3a8f.json",
+   "reason": "previous_round_ledger_records_its_own_before_and_after"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.bundle.v2.ac01406510a8.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.contact_alignment.v1.7bfa82a14290.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.bb65ca3f3a8e.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.full.prototype.v2.e4035986c163.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_core_seed0_20260807_r1/take_061_unit04_bh.measured_prepared_core.v1.6d2dd4357be2.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  },
+  {
+   "path": "configs/action_ball_n1_measured_20260807/v3pin_tape_seed0_20260807_r1/offline_n1_tape_build_report.v1.58eb977b1566.json",
+   "reason": "superseded_round_left_in_place_as_history"
+  }
+ ],
+ "round": "escapefix_20260807",
+ "schema_version": 1,
+ "semantic_surface_sha256_after": "d293eed4474846bc2b7e9974d456500d9fbd8658c83cfde780e8a973d0e78486",
+ "semantic_surface_sha256_before": "59f03840b85fc47fae00bd3925de4f60a9db4853db385595a600bb06ac5bc577",
+ "solver_profile_sha256_after": "3af6c505f9ed2333c1d46deca0499e95854d9528ba5656c3606c6fee461f82bb",
+ "solver_profile_sha256_before": "c196cf79001df76d5666b0a761a855b4a825fb6a058c9016ed9373a1cc3e8f42",
+ "sweep_note": "Three sweeps, because each one alone has a hole. The digest sweep misses a caller that names a retired file by path and never repeats its SHA. The path sweep misses a caller that embeds a SHA with no path, and also misses a path literal split across two source lines. The directory sweep catches that last class but is coarse. All three run over tracked files (git grep), so an untracked launcher spec sitting on a pod is outside all of them -- that is exactly why the boot verification is a separate receipt and not an inference from this one.",
+ "unresolved_live_reference_count": 0
+}
