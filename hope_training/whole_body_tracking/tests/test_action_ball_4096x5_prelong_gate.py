@@ -145,15 +145,79 @@ def _groups(update):
     }
 
 
+def _joint_safety(update, *, formal=True):
+    """每一跑的 joint-safety 收据都自陈它属于哪种 reward 证据体制。"""
+
+    if formal:
+        return GATE.JOINT_SAFETY_PREFIX + json.dumps(
+            {
+                "event": GATE.FORMAL_JOINT_SAFETY_EVENT,
+                "schema_version": 2,
+                "status": GATE.FORMAL_JOINT_SAFETY_STATUS,
+                "ppo_update": update,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    return GATE.JOINT_SAFETY_PREFIX + json.dumps(
+        {
+            "event": GATE.DIAGNOSTIC_JOINT_SAFETY_EVENT,
+            "schema_version": 1,
+            "status": GATE.DIAGNOSTIC_JOINT_SAFETY_STATUS,
+            "ppo_update": update,
+            "formal_authority": False,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _reward_safety(update):
+    return "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=" + json.dumps(
+        {
+            "event": "hope_reward_safety_transition_update",
+            "schema_version": 2,
+            "ppo_update": update,
+            "coverage": "complete_update",
+            "terminal_transitions": [],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def _log():
+    """一份**正式跑**的日志:它有 reward activation ledger,所以那一族全在。"""
+
     lines = []
     for update in range(5):
         lines.extend(
             (
+                _joint_safety(update, formal=True),
                 GATE.ECONOMY_PREFIX
                 + json.dumps(_economy(update), sort_keys=True, separators=(",", ":")),
                 GATE.GROUP_PREFIX
                 + json.dumps(_groups(update), sort_keys=True, separators=(",", ":")),
+                _reward_safety(update),
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _diagnostic_log():
+    """一份**诊断跑**的日志:结构上就没有 reward activation ledger 那一族。
+
+    对照实测(pod1 ``c0_scale4096_s16r1/run.log``):economy / semantics / joint-safety
+    各 5 行,``HOPE_EFFECTIVE_REWARD_*`` 与 ``HOPE_REWARD_SAFETY_TRANSITION_`` 各 0 行。
+    """
+
+    lines = []
+    for update in range(5):
+        lines.extend(
+            (
+                _joint_safety(update, formal=False),
+                GATE.ECONOMY_PREFIX
+                + json.dumps(_economy(update), sort_keys=True, separators=(",", ":")),
             )
         )
     return "\n".join(lines) + "\n"
@@ -1158,3 +1222,188 @@ def test_cli_reports_structured_blocker_when_semantic_input_is_absent(
     assert output["status"] == "BLOCKED"
     assert output["diagnostic_unauthorized"] is True
     assert output["reason"].startswith("MISSING_PRODUCER:")
+
+
+# ---------------------------------------------------------------------------
+# reward activation ledger 的适用范围:诊断跑没有这本账,正式跑必须有
+# ---------------------------------------------------------------------------
+# 变异证据分两类,必须同时成立:
+#   * 正式跑缺那 5 行 -> 仍然拒收(等强,重定范围没有把正式跑的门放松);
+#   * 诊断跑没有这本账 -> 不再误拒(重定范围确实起作用);
+# 外加一条:收据必须自陈它走的是哪条分支。
+
+
+def test_regime_comes_from_the_run_receipt_not_from_a_caller_claim():
+    assert (
+        GATE.classify_reward_evidence_regime(_log())
+        == GATE.REWARD_EVIDENCE_REGIME_FORMAL
+    )
+    assert (
+        GATE.classify_reward_evidence_regime(_diagnostic_log())
+        == GATE.REWARD_EVIDENCE_REGIME_DIAGNOSTIC
+    )
+
+
+def test_regime_cannot_be_established_without_a_joint_safety_receipt():
+    stripped = "\n".join(
+        line
+        for line in _log().splitlines()
+        if not line.startswith(GATE.JOINT_SAFETY_PREFIX)
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="cannot be established"):
+        GATE.classify_reward_evidence_regime(stripped + "\n")
+
+
+def test_a_run_may_not_declare_two_reward_evidence_regimes_at_once():
+    hybrid = _diagnostic_log() + _joint_safety(0, formal=True) + "\n"
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="exactly one reward-evidence"
+    ):
+        GATE.classify_reward_evidence_regime(hybrid)
+
+
+@pytest.mark.parametrize(
+    "prefix", GATE.REWARD_ACTIVATION_LEDGER_REQUIRED_PREFIXES
+)
+def test_formal_run_missing_the_five_markers_is_still_refused(prefix):
+    """等强:重定范围之后,正式跑缺这一族任何一条仍然拒收。"""
+
+    dropped = "\n".join(
+        line for line in _log().splitlines() if not line.startswith(prefix)
+    )
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="lacks exactly 5 markers"
+    ):
+        GATE.reward_activation_evidence_scope(log_text=dropped + "\n")
+
+    partial = "\n".join(
+        line
+        for line in _log().splitlines()
+        if not (line.startswith(prefix) and '"ppo_update":4' in line)
+    )
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="lacks exactly 5 markers"
+    ):
+        GATE.reward_activation_evidence_scope(log_text=partial + "\n")
+
+
+def test_formal_run_missing_reward_activation_evidence_still_fails_the_gate():
+    dropped = "\n".join(
+        line
+        for line in _log().splitlines()
+        if not line.startswith("HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=")
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="lacks exactly 5 markers"):
+        GATE.validate_prelong_gate(
+            log_text=dropped + "\n",
+            checkpoint_acceptance=_checkpoint_acceptance(),
+            semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+        )
+
+
+def test_diagnostic_run_is_no_longer_refused_for_evidence_it_cannot_produce():
+    """重定范围有效:诊断跑 0 行不再是拒收理由。"""
+
+    scope = GATE.reward_activation_evidence_scope(log_text=_diagnostic_log())
+    assert scope["regime"] == GATE.REWARD_EVIDENCE_REGIME_DIAGNOSTIC
+    assert scope["applicable"] is False
+    assert scope["required_rows_per_prefix"] == 0
+    assert set(scope["observed_rows_per_prefix"]) == set(
+        GATE.REWARD_ACTIVATION_LEDGER_PREFIXES
+    )
+    assert all(
+        count == 0 for count in scope["observed_rows_per_prefix"].values()
+    )
+    assert (
+        scope["strict_zero_counter_source"]
+        == "exact_behavior_termination_reason_counters"
+    )
+
+
+@pytest.mark.parametrize("prefix", GATE.REWARD_ACTIVATION_LEDGER_PREFIXES)
+def test_diagnostic_run_may_not_mint_formal_reward_evidence(prefix):
+    """阻断的另一半:诊断跑一旦发出这一族,同样拒收 —— 不是静默跳过。"""
+
+    polluted = _diagnostic_log() + prefix + json.dumps({"ppo_update": 0}) + "\n"
+    with pytest.raises(
+        GATE.PreLongGateRefused,
+        match="diagnostic run emitted formal reward-activation evidence",
+    ):
+        GATE.reward_activation_evidence_scope(log_text=polluted)
+
+
+def test_receipt_self_declares_which_branch_it_took():
+    formal = GATE.validate_prelong_gate(
+        log_text=_log(),
+        checkpoint_acceptance=_checkpoint_acceptance(),
+        semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+    )
+    formal_scope = formal["reward_activation_evidence_scope"]
+    assert formal_scope["kind"] == GATE.REWARD_EVIDENCE_SCOPE_KIND
+    assert formal_scope["regime"] == GATE.REWARD_EVIDENCE_REGIME_FORMAL
+    assert formal_scope["applicable"] is True
+    assert formal_scope["required_rows_per_prefix"] == 5
+    assert formal["reward_group_income"]["updates"]
+
+    diagnostic = GATE.validate_prelong_gate(
+        log_text=_diagnostic_log(),
+        checkpoint_acceptance=_checkpoint_acceptance(),
+        semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+    )
+    diagnostic_scope = diagnostic["reward_activation_evidence_scope"]
+    assert diagnostic["status"] == "PASS"
+    assert diagnostic_scope["regime"] == GATE.REWARD_EVIDENCE_REGIME_DIAGNOSTIC
+    assert diagnostic_scope["applicable"] is False
+    # 「不适用」必须写在收据里,而不是让 group income 悄悄变成空。
+    assert diagnostic["reward_group_income"]["applicable"] is False
+    assert (
+        diagnostic["reward_group_income"]["reward_activation_evidence_scope"]
+        == diagnostic_scope
+    )
+    assert "reward activation ledger" in diagnostic_scope["reason"]
+
+
+def test_diagnostic_branch_does_not_weaken_anything_else_in_the_gate():
+    """重定范围只摘掉这一族;economy / semantics / 存档那几段照旧硬。"""
+
+    without_economy = "\n".join(
+        line
+        for line in _diagnostic_log().splitlines()
+        if not line.startswith(GATE.ECONOMY_PREFIX)
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="exactly 5"):
+        GATE.validate_prelong_gate(
+            log_text=without_economy + "\n",
+            checkpoint_acceptance=_checkpoint_acceptance(),
+            semantic_updates=_semantics(
+                contacts=0, closed=9, flight_denominator=0
+            ),
+        )
+    with pytest.raises(GATE.PreLongGateRefused, match="MISSING_PRODUCER"):
+        GATE.validate_prelong_gate(
+            log_text=_diagnostic_log(),
+            checkpoint_acceptance=_checkpoint_acceptance(),
+            semantic_updates=None,
+        )
+    broken = _checkpoint_acceptance()
+    broken["checkpoint"]["embedded_iteration"] = 5
+    with pytest.raises(GATE.PreLongGateRefused):
+        GATE.validate_prelong_gate(
+            log_text=_diagnostic_log(),
+            checkpoint_acceptance=broken,
+            semantic_updates=_semantics(
+                contacts=0, closed=9, flight_denominator=0
+            ),
+        )
+
+
+def test_required_and_observed_only_prefixes_are_disjoint_and_complete():
+    """名单不能自己漂:必需集与只记录集不重叠,并集就是全族。"""
+
+    required = set(GATE.REWARD_ACTIVATION_LEDGER_REQUIRED_PREFIXES)
+    observed_only = set(GATE.REWARD_ACTIVATION_LEDGER_OBSERVED_PREFIXES)
+    assert not required & observed_only
+    assert required | observed_only == set(
+        GATE.REWARD_ACTIVATION_LEDGER_PREFIXES
+    )
+    assert GATE.GROUP_PREFIX in required

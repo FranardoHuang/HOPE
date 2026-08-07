@@ -98,8 +98,12 @@ C211_SELECTED_RUBBER_KIND = (
     "action_ball_c211_selected_rubber_contact_evidence_v1"
 )
 RESULT_KIND = "action_ball_c211_diagnostic_launch_result_v1"
+# 2026-08-07 v2 -> v3:收据新增 reward_activation_evidence_scope /
+# terminal_transition_source / behavior_strict_hard_* 四键 —— 「这一跑属于哪种
+# reward 证据体制、那三项严格零计数到底是从哪一族读来的」从此写在收据里。
+# v2 收据不带这块自陈,放它冒充新收据等于让读者无法判断数字的出处,所以同批改名。
 SCALE4096_TERMINAL_ACCEPTANCE_KIND = (
-    "action_ball_c211_scale4096_terminal_acceptance_v2"
+    "action_ball_c211_scale4096_terminal_acceptance_v3"
 )
 # Retired 2026-08-05: FRAME0_EXACT_ARTIFACT_KIND / FRAME0_EXACT_RECEIPT_KIND /
 # FRAME0_EXACT_SOURCE_KIND deleted with _validate_retired_exact_frame0_lineage;
@@ -2994,13 +2998,41 @@ def _audit_scale4096_terminal(
             subtree, name=label, torch_module=torch_module
         )
 
+    # 这一跑属于哪种 reward 证据体制,由它自己的 joint-safety 收据自陈,不由发射器
+    # 断言(见 action_ball_4096x5_prelong_gate 里那段三层查证)。诊断发射器只审诊断跑;
+    # 正式跑的终局审计在 audit_reward_run.py 那条链上,不从这里借道。
+    try:
+        log_text = log_raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LaunchRefused("C211 scale4096 run log is not UTF-8") from exc
+    # 先定体制、再算范围:体制不对就当场拒,别让"正式跑缺证据"的理由盖住
+    # "这台发射器根本不该审正式跑"这条更早的事实。
+    try:
+        reward_evidence_regime = _P.classify_reward_evidence_regime(log_text)
+    except _P.PreLongGateRefused as exc:
+        raise LaunchRefused(
+            "C211 scale4096 reward-evidence regime is undetermined: %s" % exc
+        ) from exc
+    if reward_evidence_regime != _P.REWARD_EVIDENCE_REGIME_DIAGNOSTIC:
+        raise LaunchRefused(
+            "C211 scale4096 terminal audit only accepts diagnostic runs; "
+            "observed reward-evidence regime %s" % reward_evidence_regime
+        )
+    try:
+        reward_evidence_scope = _P.reward_activation_evidence_scope(
+            log_text=log_text, expected_updates=expected_updates
+        )
+    except _P.PreLongGateRefused as exc:
+        raise LaunchRefused(
+            "C211 scale4096 reward-activation evidence scope rejected: %s" % exc
+        ) from exc
     joint_rows = _ordered_terminal_events(
         _terminal_json_events(
             log_raw,
-            prefix="HOPE_JOINT_SAFETY_UPDATE_JSON=",
+            prefix=_P.JOINT_SAFETY_PREFIX,
             name="joint-safety counter",
         ),
-        event="hope_joint_safety_diagnostic_compact_update",
+        event=_P.DIAGNOSTIC_JOINT_SAFETY_EVENT,
         schema_version=1,
         expected_updates=expected_updates,
         name="joint-safety counters",
@@ -3016,16 +3048,23 @@ def _audit_scale4096_terminal(
         expected_updates=expected_updates,
         name="actual-hard counters",
     )
-    reward_rows = _ordered_terminal_events(
-        _terminal_json_events(
-            log_raw,
-            prefix="HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=",
-            name="reward-safety counter",
-        ),
-        event="hope_reward_safety_transition_update",
-        schema_version=2,
-        expected_updates=expected_updates,
-        name="reward-safety counters",
+    # reward-safety 这一族由正式 reward activation ledger 铸,诊断跑结构上不产。
+    # 适用就照旧要满 5 行(强度不变);不适用就是明账 0 行,而它承担的三项严格零
+    # 计数改由 exact-behavior 的 termination_reason_* 供给 —— 不是记 0 跳过。
+    reward_rows = (
+        _ordered_terminal_events(
+            _terminal_json_events(
+                log_raw,
+                prefix="HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=",
+                name="reward-safety counter",
+            ),
+            event="hope_reward_safety_transition_update",
+            schema_version=2,
+            expected_updates=expected_updates,
+            name="reward-safety counters",
+        )
+        if reward_evidence_scope["applicable"]
+        else []
     )
     behavior_rows = _ordered_terminal_events(
         _terminal_json_events(
@@ -3043,8 +3082,7 @@ def _audit_scale4096_terminal(
     for index, row in enumerate(joint_rows):
         totals = row.get("counter_totals")
         if (
-            row.get("status")
-            != "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+            row.get("status") != _P.DIAGNOSTIC_JOINT_SAFETY_STATUS
             or type(totals) is not dict
             or "actual_hard_edge_events" not in totals
         ):
@@ -3146,12 +3184,21 @@ def _audit_scale4096_terminal(
     }
     table_contact_by_phase = {phase: 0 for phase in PHYSICAL_FALL_PHASES}
     behavior_table_contact_count = 0
+    # exact-behavior 的 termination_reason_* 是**每个活跃终止项一格**的固定 ABI,
+    # 诊断跑照发。这两格就是 reward-safety 不在场时那三项严格零计数的真实出处。
+    behavior_strict_hard_by_reason = {
+        reason: 0 for reason in STRICT_HARD_TERMINATION_UNION
+    }
     for index, row in enumerate(behavior_rows):
         counters = row.get("counters")
         required_balance_counters = {
             TASK_WAIT_STARTED_COUNTER,
             TASK_REVEAL_REACHED_COUNTER,
             "termination_reason_robot_hit_table_count",
+            *(
+                f"termination_reason_{reason}_count"
+                for reason in STRICT_HARD_TERMINATION_UNION
+            ),
             *(
                 f"termination_reason_{reason}_count"
                 for reason in PHYSICAL_FALL_REASONS
@@ -3226,20 +3273,67 @@ def _audit_scale4096_terminal(
         behavior_table_contact_count += table_total
         for phase, count in table_phase_counts.items():
             table_contact_by_phase[phase] += count
+        for reason in STRICT_HARD_TERMINATION_UNION:
+            behavior_strict_hard_by_reason[reason] += _plain_counter(
+                counters[f"termination_reason_{reason}_count"],
+                name=f"{reason} terminal count",
+            )
         for key, value in counters.items():
             if "nonfinite" in key:
                 behavior_nonfinite_count += _plain_counter(
                     value, name="exact-behavior %s" % key
                 )
 
-    if behavior_fall_by_reason != reward_fall_by_reason:
-        raise LaunchRefused(
-            "C211 scale4096 physical-fall behavior and terminal-transition counts differ"
-        )
-    if behavior_table_contact_count != table_contact_count:
-        raise LaunchRefused(
-            "C211 scale4096 table-contact behavior and terminal-transition counts differ"
-        )
+    # 每个 reason 各数各的,和为「至少有一项硬终止」的**上界**(同一集同时踩两项时
+    # 会被数两次)。严格零这条性质不受影响:和为 0 当且仅当并集为 0。
+    behavior_strict_hard_reason_sum = sum(
+        behavior_strict_hard_by_reason.values()
+    )
+    if reward_evidence_scope["applicable"]:
+        # 正式跑:两族都在,逐项对账,谁漂了都拒。
+        if behavior_fall_by_reason != reward_fall_by_reason:
+            raise LaunchRefused(
+                "C211 scale4096 physical-fall behavior and terminal-transition counts differ"
+            )
+        if behavior_table_contact_count != table_contact_count:
+            raise LaunchRefused(
+                "C211 scale4096 table-contact behavior and terminal-transition counts differ"
+            )
+        if (
+            behavior_strict_hard_by_reason["joint_qdes_forbidden"]
+            != joint_qdes_terminal_count
+            or behavior_strict_hard_by_reason["joint_actual_forbidden"]
+            != joint_actual_terminal_count
+        ):
+            raise LaunchRefused(
+                "C211 scale4096 joint-forbidden behavior and terminal-transition counts differ"
+            )
+        terminal_transition_source = "reward_safety_transition_markers"
+    else:
+        # 诊断跑:reward-safety 一族不在场,上面三项对账**两侧只剩一侧**,做不成。
+        # 于是把它们的取值整体改由 exact-behavior 供给,并在收据里写清这一点 ——
+        # 不允许出现「没观测到所以写 0」的数字。
+        reward_fall_by_reason = dict(behavior_fall_by_reason)
+        table_contact_count = behavior_table_contact_count
+        joint_qdes_terminal_count = behavior_strict_hard_by_reason[
+            "joint_qdes_forbidden"
+        ]
+        joint_actual_terminal_count = behavior_strict_hard_by_reason[
+            "joint_actual_forbidden"
+        ]
+        strict_hard_termination_count = behavior_strict_hard_reason_sum
+        terminal_transition_source = _P.DIAGNOSTIC_STRICT_ZERO_SOURCE_PREFIX
+        # 守恒普查:重新取源之后,收据里那三个数必须跟它们自己的逐项出处对得上。
+        # 这条挡的是「换了出处却漏接一项」——那样收据会报一个跟自己 5 行遥测
+        # 对不上的总数,正是 oracle32 那次重定范围明令禁止的假收据。
+        if (
+            joint_qdes_terminal_count + joint_actual_terminal_count
+            != strict_hard_termination_count
+        ):
+            raise LaunchRefused(
+                "C211 scale4096 re-sourced strict-hard counters do not conserve "
+                "against their exact-behavior reasons"
+            )
     safety = {
         "observed_ppo_updates": expected_updates,
         "actual_hard_edge_event_count": actual_hard_edge_count,
@@ -3258,14 +3352,11 @@ def _audit_scale4096_terminal(
         "task_reveal_reached_by_update": task_reveal_reached_by_update,
         "task_reveal_reached_count": sum(task_reveal_reached_by_update),
     }
-    strict_zero_keys = (
-        "actual_hard_edge_event_count",
-        "actual_hard_terminal_count",
-        "joint_qdes_forbidden_terminal_count",
-        "joint_actual_forbidden_terminal_count",
-        "strict_hard_termination_count",
-        "nonfinite_count",
-    )
+    # 「哪几项必须严格零」是 pre-long gate 与四格 barrier 已经共用的一条策略,
+    # 这里原来是它的**第三份手抄**。手抄的代价是真实的:同一条策略改了两处、
+    # 漏了这一处,发射器就会在 barrier 还没看到这一跑之前先把它拒掉,另外两处
+    # 的修改等于没生效。现在直接读共享出处,谁改都一起改。
+    strict_zero_keys = tuple(_P.STRICT_ZERO_SAFETY_COUNTERS)
     if any(safety[key] != 0 for key in strict_zero_keys):
         raise LaunchRefused(
             "C211 scale4096 observed joint-qdes/joint-actual/nonfinite implementation counters are nonzero"
@@ -3293,6 +3384,15 @@ def _audit_scale4096_terminal(
         "launch_claim_sha256": launch_claim_sha256,
         "run_log": log_artifact,
         "checkpoint": checkpoint_acceptance,
+        # 收据自陈走了哪条分支。它**不放进** ``safety_counters``:那份 16 键
+        # producer schema 被四格 barrier 的 ``_exact`` 逐键钉死,是两族共享的
+        # 契约面;体制声明是范围说明,不是安全计数,放在这一层。
+        # 四格聚合仍然拿得到它:pre-long gate 的结果里也有同一块,而 barrier 把
+        # 那份结果整体做了内容寻址(``prelong_gate.content_sha256``)。
+        "reward_activation_evidence_scope": reward_evidence_scope,
+        "terminal_transition_source": terminal_transition_source,
+        "behavior_strict_hard_by_reason": behavior_strict_hard_by_reason,
+        "behavior_strict_hard_reason_sum": behavior_strict_hard_reason_sum,
         "safety_counters": safety,
         "prelong_gate": prelong_gate,
     }

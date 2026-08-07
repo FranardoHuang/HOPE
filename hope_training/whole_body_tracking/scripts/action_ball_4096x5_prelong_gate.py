@@ -51,6 +51,75 @@ PRELONG_PROFILES = (PROFILE_A211, PROFILE_C211)
 ECONOMY_PREFIX = "HOPE_ACTION_BALL_REWARD_PPO_ECONOMY_UPDATE_JSON="
 GROUP_PREFIX = "HOPE_EFFECTIVE_REWARD_BY_ACTION_UPDATE_JSON="
 
+# ---------------------------------------------------------------------------
+# 诊断跑 / 正式跑:reward activation ledger 那一族证据的适用范围
+# ---------------------------------------------------------------------------
+# 人话:下面这一族遥测(``HOPE_EFFECTIVE_REWARD_*`` /
+# ``HOPE_REWARD_SAFETY_TRANSITION_`` / ``HOPE_REWARD_EPISODE_SEGMENTED_CLOSURE_``)
+# **只有正式跑才会发**。诊断跑按设计根本不建那本 reward activation ledger,所以
+# 「诊断跑缺这几行」不是跑坏了,是这条证据在诊断跑里**结构上不存在**。
+#
+# 三层查证(2026-08-07,别再重查一遍):
+#   1. 它是什么 —— ``utils/effective_reward_recipe.py`` 里的
+#      ``ActionBoundRewardEvidenceLedger`` / ``EffectiveRewardActivationLedger``。
+#      它是一笔**两段式提交**:optimizer 之前 prepare,落一份 durable artifact,
+#      optimizer 成功后 commit,再 acknowledge。它给 PPO 上了一道证据栅栏,
+#      并铸出可晋级(promotable)的正式收据。
+#   2. 正式跑拿它做什么 —— 把 PPO 钉在 RewardManager 缓存合同上,并生成
+#      ``audit_reward_run.py`` 那条正式审计链要读的四种事件。
+#   3. 诊断跑不给它是有意还是遗漏 —— **有意**。
+#      ``my_on_policy_runner._effective_reward_activation_task_kind()`` 对
+#      ``action_ball_diagnostic_unauthorized`` 的跑直接 ``return None``,注释原话是
+#      "Diagnostic reward screens deliberately cannot mint formal evidence or
+#      promotion authority";引入提交是 ``790714b3``
+#      "train(n1): keep formal audits off diagnostic PPO"(2026-07-29)。
+#      而且诊断跑另有一本**替代**账(``reward_ppo_economy_ledger`` → ``ECONOMY_PREFIX``),
+#      运行时还有一道硬门明确禁止两本账并存:
+#      "reward/PPO economy diagnostic cannot share a formal Reward ledger"。
+#      所以「给诊断跑接上正式账」不是补一处遗漏,而是推翻一条有名有姓的设计裁定,
+#      并且会当场撞上那道互斥门。
+#
+# 因此这里做的是**重定范围**,不是放松:
+#   * 正式跑 —— 照旧要求满 ``EXPECTED_UPDATES`` 行(等强,缺一行仍然拒收);
+#   * 诊断跑 —— 明确标注「不适用」,并且**必须是 0 行**:诊断跑一旦发出这一族,
+#     说明它越权铸了正式证据,同样拒收。记录与阻断同批,不是静默跳过。
+JOINT_SAFETY_PREFIX = "HOPE_JOINT_SAFETY_UPDATE_JSON="
+# 两种体制各自的 joint-safety 收据事件名(活值出处:my_on_policy_runner 的
+# ``_JOINT_SAFETY_EVENT`` 与 ``_commit_diagnostic_joint_safety_update``)。
+# 每一跑的 joint-safety 收据都自陈自己属于哪一种,所以体制不用外部声明,直接从
+# 产物里读 —— 这也是收据能自陈走了哪条分支的原因。
+FORMAL_JOINT_SAFETY_EVENT = "hope_joint_safety_update"
+DIAGNOSTIC_JOINT_SAFETY_EVENT = "hope_joint_safety_diagnostic_compact_update"
+FORMAL_JOINT_SAFETY_STATUS = "optimizer_committed_and_ledger_acknowledged"
+DIAGNOSTIC_JOINT_SAFETY_STATUS = (
+    "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+)
+REWARD_EVIDENCE_REGIME_FORMAL = "formal_reward_activation_ledger"
+REWARD_EVIDENCE_REGIME_DIAGNOSTIC = "diagnostic_no_reward_activation_ledger"
+# 正式跑里**被阻断**的两条:今天已经有消费方在读,重定范围之后强度不变。
+REWARD_ACTIVATION_LEDGER_REQUIRED_PREFIXES = (
+    GROUP_PREFIX,
+    "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=",
+)
+# 同族另外两条:只**记录**行数,不新增阻断。它们的发射条件比上面两条更窄
+# (upper_safe 正式跑就不发 per-action/closure),这里不借重定范围之机偷偷加严。
+REWARD_ACTIVATION_LEDGER_OBSERVED_PREFIXES = (
+    "HOPE_EFFECTIVE_REWARD_ACTIVATION_UPDATE_JSON=",
+    "HOPE_REWARD_EPISODE_SEGMENTED_CLOSURE_UPDATE_JSON=",
+)
+REWARD_ACTIVATION_LEDGER_PREFIXES = (
+    *REWARD_ACTIVATION_LEDGER_REQUIRED_PREFIXES,
+    *REWARD_ACTIVATION_LEDGER_OBSERVED_PREFIXES,
+)
+REWARD_EVIDENCE_SCOPE_KIND = "action_ball_reward_activation_evidence_scope_v1"
+# 诊断跑里,这三项严格零安全计数改由哪一族供给。**不是**"没观测到所以记 0" ——
+# 那正是 oracle32 那次重定范围明令禁止的假收据。
+DIAGNOSTIC_STRICT_ZERO_SOURCE_PREFIX = "HOPE_EXACT_BEHAVIOR_UPDATE_JSON="
+DIAGNOSTIC_STRICT_ZERO_SOURCE_COUNTERS = (
+    "termination_reason_joint_qdes_forbidden_count",
+    "termination_reason_joint_actual_forbidden_count",
+)
+
 # Bind directly to the producer instead of maintaining a second hand-written
 # schema/counter catalogue in the gate.
 _SEMANTICS_SOURCE = (
@@ -235,6 +304,116 @@ def _ordered_updates(
                 f"{name} updates must be contiguous 0..{EXPECTED_UPDATES - 1}"
             )
     return list(rows)
+
+
+def classify_reward_evidence_regime(log_text: str) -> str:
+    """Read the run's own joint-safety receipts to decide which regime it ran in.
+
+    人话:不接受外部声明「我是诊断跑」。每个 PPO update 的 joint-safety 收据里都写着
+    自己是正式账还是诊断紧凑账;这里只认那份自陈。一跑里两种混着出现 = 拒收。
+    """
+
+    if type(log_text) is not str:
+        raise PreLongGateRefused("run log text must be a string")
+    rows = _marker_rows(log_text, prefix=JOINT_SAFETY_PREFIX, name="joint-safety")
+    if not rows:
+        raise PreLongGateRefused(
+            "run log has no joint-safety receipt, so its reward-evidence regime "
+            "cannot be established"
+        )
+    observed = {
+        (row.get("event"), row.get("status"))
+        for row in rows
+    }
+    formal = {(FORMAL_JOINT_SAFETY_EVENT, FORMAL_JOINT_SAFETY_STATUS)}
+    diagnostic = {
+        (DIAGNOSTIC_JOINT_SAFETY_EVENT, DIAGNOSTIC_JOINT_SAFETY_STATUS)
+    }
+    if observed == formal:
+        return REWARD_EVIDENCE_REGIME_FORMAL
+    if observed == diagnostic:
+        return REWARD_EVIDENCE_REGIME_DIAGNOSTIC
+    raise PreLongGateRefused(
+        "joint-safety receipts do not declare exactly one reward-evidence "
+        "regime; observed %r" % (sorted(map(repr, observed)),)
+    )
+
+
+def reward_activation_evidence_scope(
+    *, log_text: str, expected_updates: int = EXPECTED_UPDATES
+) -> dict[str, Any]:
+    """Decide whether the reward-activation evidence family applies to this run.
+
+    Formal runs keep the original strength: every required prefix must carry
+    exactly ``expected_updates`` markers.  Diagnostic runs never build the
+    ledger, so the family is declared **not applicable** — and must be
+    completely absent, because a diagnostic screen emitting formal evidence
+    would mean it minted promotion authority it is not allowed to have.
+    """
+
+    if type(expected_updates) is not int or expected_updates < 1:
+        raise PreLongGateRefused(
+            "reward-activation evidence scope needs a positive update budget"
+        )
+    regime = classify_reward_evidence_regime(log_text)
+    observed_rows = {
+        prefix: len(
+            _marker_rows(
+                log_text, prefix=prefix, name="reward-activation evidence"
+            )
+        )
+        for prefix in REWARD_ACTIVATION_LEDGER_PREFIXES
+    }
+    if regime == REWARD_EVIDENCE_REGIME_FORMAL:
+        applicable = True
+        required_rows_per_prefix = expected_updates
+        for prefix in REWARD_ACTIVATION_LEDGER_REQUIRED_PREFIXES:
+            if observed_rows[prefix] != expected_updates:
+                raise PreLongGateRefused(
+                    "formal run reward-activation evidence %s lacks exactly %d "
+                    "markers; got %d"
+                    % (prefix, expected_updates, observed_rows[prefix])
+                )
+        reason = (
+            "formal run: the reward activation ledger is live, so its terminal "
+            "evidence is required"
+        )
+        strict_zero_source = "reward_safety_transition_markers"
+    else:
+        applicable = False
+        required_rows_per_prefix = 0
+        for prefix, count in sorted(observed_rows.items()):
+            if count != 0:
+                raise PreLongGateRefused(
+                    "diagnostic run emitted formal reward-activation evidence "
+                    "%s (%d markers); a diagnostic screen may not mint "
+                    "promotion authority" % (prefix, count)
+                )
+        reason = (
+            "这一跑没有 reward activation ledger(诊断跑按设计不建这本账,见 "
+            "my_on_policy_runner._effective_reward_activation_task_kind 与提交 "
+            "790714b3),因此 reward-activation 族终局证据不适用;它承担的严格零"
+            "安全计数改由 %s 的 %s 供给,不是当作 0 跳过。"
+            % (
+                DIAGNOSTIC_STRICT_ZERO_SOURCE_PREFIX,
+                ", ".join(DIAGNOSTIC_STRICT_ZERO_SOURCE_COUNTERS),
+            )
+        )
+        strict_zero_source = "exact_behavior_termination_reason_counters"
+    return {
+        "schema_version": 1,
+        "kind": REWARD_EVIDENCE_SCOPE_KIND,
+        "regime": regime,
+        "applicable": applicable,
+        "reason": reason,
+        "required_prefixes": list(REWARD_ACTIVATION_LEDGER_REQUIRED_PREFIXES),
+        "observed_only_prefixes": list(
+            REWARD_ACTIVATION_LEDGER_OBSERVED_PREFIXES
+        ),
+        "required_rows_per_prefix": required_rows_per_prefix,
+        "observed_rows_per_prefix": dict(sorted(observed_rows.items())),
+        "strict_zero_counter_source": strict_zero_source,
+    }
 
 
 def validate_checkpoint_audit(checkpoint: Mapping[str, Any]) -> dict[str, Any]:
@@ -1845,7 +2024,24 @@ def validate_prelong_gate(
         checkpoint_acceptance.get("safety_counters", {})
     )
     economy = validate_economy_updates(log_text)
-    group_income = validate_group_income_updates(log_text)
+    # Reward-group income is minted by the formal reward activation ledger, so
+    # it shares the ledger's applicability.  The scope block below is emitted
+    # either way: a diagnostic run must be able to show, in its own receipt,
+    # that this evidence was declared not applicable rather than skipped.
+    reward_evidence_scope = reward_activation_evidence_scope(log_text=log_text)
+    group_income = (
+        validate_group_income_updates(log_text)
+        if reward_evidence_scope["applicable"]
+        else {
+            "updates": [],
+            "applicable": False,
+            "reward_activation_evidence_scope": reward_evidence_scope,
+            "eligibility_boundary": (
+                "reward-group income is minted by the formal reward activation "
+                "ledger; this run has none, so no group-income claim is made"
+            ),
+        }
+    )
     semantics = validate_semantic_updates(semantic_updates)
     survival = validate_survival_denominators(
         safety=safety,
@@ -1860,6 +2056,10 @@ def validate_prelong_gate(
         "ppo_updates": EXPECTED_UPDATES,
         "checkpoint": checkpoint,
         "optimizer_health": economy,
+        # 收据自陈走了哪条分支:这一跑属于哪种 reward 证据体制、这一族要不要、
+        # 实际读到几行。诊断跑读到 0 行不再是"沉默的跳过",而是写进 PASS 收据里的
+        # 一条明账。
+        "reward_activation_evidence_scope": reward_evidence_scope,
         "reward_group_income": group_income,
         "opportunity_semantics": semantics,
         "survival_denominators": survival,

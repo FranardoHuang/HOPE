@@ -297,3 +297,29 @@ def test_the_211_abi_widths_have_one_value_across_every_owner():
         "c211_oracle_evidence": (evidence.ACTOR_WIDTH, evidence.CRITIC_WIDTH),
     }
     assert set(owners.values()) == {(211, 319)}, owners
+
+
+def test_neither_launcher_hand_copies_the_strict_zero_safety_policy():
+    """严格零名单只有一份出处;发射器不许再抄第三遍。
+
+    2026-08-07:这三处(pre-long gate / 四格 barrier / 两个发射器)原来各写一份。
+    改策略时改了前两处、漏掉发射器,发射器就会在 barrier 还没看到这一跑之前先把它
+    拒掉 —— 另外两处的修改等于没生效。这条门盯的就是那种漏改。
+    """
+
+    for module, path in (
+        (A, SCRIPTS / "launch_action_ball_a211_four_arm_diagnostic.py"),
+        (C, SCRIPTS / "launch_action_ball_c211_diagnostic.py"),
+    ):
+        source = path.read_text(encoding="utf-8")
+        assert (
+            "strict_zero_keys = tuple(_P.STRICT_ZERO_SAFETY_COUNTERS)" in source
+        ), "%s no longer reads the shared strict-zero policy" % path.name
+        # 手抄的特征串:名单里的项以字面量出现在发射器自己写的元组里。
+        assert '\n        "actual_hard_edge_event_count",\n' not in source
+        assert '\n        "joint_qdes_forbidden_terminal_count",\n' not in source
+        # 两族读的是同一份共享策略,不是各读各的。
+        assert (
+            tuple(module._P.STRICT_ZERO_SAFETY_COUNTERS)
+            == tuple(C._P.STRICT_ZERO_SAFETY_COUNTERS)
+        )

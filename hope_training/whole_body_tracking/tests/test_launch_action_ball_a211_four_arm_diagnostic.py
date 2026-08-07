@@ -291,39 +291,14 @@ def _prelong_marker_lines(update: int) -> list[str]:
             "policy_std_max": 0.03,
         },
     }
-    groups = {
-        "event": "hope_effective_reward_activation_by_action_update",
-        "schema_version": 2,
-        "ppo_update": update,
-        "actions": [
-            {
-                "action_id": launcher.TEACHER_ID,
-                "reward_groups": [
-                    {
-                        "group": "motion",
-                        "eligibility": (
-                            "reward_manager_evaluated_active_group_terms"
-                        ),
-                        "eligible_sample_count": 98304,
-                        "weighted_sum": 4.0,
-                    },
-                    {
-                        "group": "task",
-                        "eligibility": (
-                            "reward_manager_evaluated_active_group_terms"
-                        ),
-                        "eligible_sample_count": 98304,
-                        "weighted_sum": 0.0,
-                    },
-                ],
-            }
-        ],
-    }
+    # 2026-08-07:这份夹具原来还发一行 ``GROUP_PREFIX``(reward-by-action)。
+    # 那一族只有**正式跑**才产 —— 诊断跑按设计不建 reward activation ledger,
+    # 实测 s15r1 / s16r1 的 run.log 里它是 0 行。夹具里留着它等于把一份
+    # 现实中不存在的混血日志当成正例,这正是这道门被误设计成"诊断跑必须交出
+    # 正式证据"的原因。改成照实模拟诊断跑。
     return [
         launcher._P.ECONOMY_PREFIX
         + json.dumps(economy, sort_keys=True, separators=(",", ":")),
-        launcher._P.GROUP_PREFIX
-        + json.dumps(groups, sort_keys=True, separators=(",", ":")),
         launcher._S.prelong_semantics_marker_line(
             ppo_update=update,
             counters=counters,
@@ -2795,18 +2770,8 @@ def _scale4096_terminal_artifacts(tmp_path: Path):
                     sort_keys=True,
                     separators=(",", ":"),
                 ),
-                "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON="
-                + json.dumps(
-                    {
-                        "event": "hope_reward_safety_transition_update",
-                        "schema_version": 2,
-                        "ppo_update": update,
-                        "coverage": "complete_update",
-                        "terminal_transitions": [],
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
+                # 2026-08-07:``HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=`` 从这份
+                # 诊断夹具里删掉 —— 诊断跑结构上不产它(见 _prelong_marker_lines 的注释)。
                 "HOPE_EXACT_BEHAVIOR_UPDATE_JSON="
                 + json.dumps(
                     {
@@ -2816,6 +2781,9 @@ def _scale4096_terminal_artifacts(tmp_path: Path):
                         "counters": {
                             "task_wait_started_count": 12,
                             "task_reveal_reached_count": 10,
+                            # reward-safety 不在场时,这两格就是那三项严格零计数的出处。
+                            "termination_reason_joint_qdes_forbidden_count": 0,
+                            "termination_reason_joint_actual_forbidden_count": 0,
                             "termination_reason_base_fell_tilt_count": 0,
                             "termination_reason_base_fell_tilt_hidden_wait_count": 0,
                             "termination_reason_base_fell_tilt_revealed_pre_strike_count": 0,
@@ -3110,17 +3078,18 @@ def test_scale4096_terminal_gate_rejects_observed_safety_event(
                 ]
             elif (
                 counter_kind in {"joint_qdes", "joint_actual"}
-                and prefix == "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON"
+                and prefix == "HOPE_EXACT_BEHAVIOR_UPDATE_JSON"
             ):
-                row["terminal_transitions"] = [
-                    {
-                        "termination_terms": [
-                            "joint_qdes_forbidden"
-                            if counter_kind == "joint_qdes"
-                            else "joint_actual_forbidden"
-                        ]
-                    }
-                ]
+                # 2026-08-07:这两条注入原来打在
+                # ``HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON=`` 上,而诊断跑
+                # 结构上不产那一族 —— 注入等于打空气,门看起来还在,其实拦不住
+                # 任何东西。重定范围之后这两项严格零计数的真实出处是 exact-behavior
+                # 的 ``termination_reason_*_count``,注入就打在那里。
+                row["counters"][
+                    "termination_reason_joint_qdes_forbidden_count"
+                    if counter_kind == "joint_qdes"
+                    else "termination_reason_joint_actual_forbidden_count"
+                ] = 1
             elif counter_kind == "nonfinite" and prefix == "HOPE_EXACT_BEHAVIOR_UPDATE_JSON":
                 row["counters"]["ready_nonfinite_value_count"] = 1
         rewritten.append(
@@ -3650,3 +3619,133 @@ def test_hard_wait_contract_is_the_shape_training_contract_actually_emits():
     text = SCRIPT.read_text(encoding="utf-8")
     assert '"task_wait_contract": _hard_wait_contract(),' in text
     assert '"action_ball_task_wait_contract"' not in text
+
+
+# ---------------------------------------------------------------------------
+# reward activation ledger 的适用范围(A 族发射器侧;与 C 族同批同形)
+# ---------------------------------------------------------------------------
+
+
+def _rewrite_terminal_log(log_path, mutate):
+    rewritten = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        prefix, separator, payload = line.partition("=")
+        if separator and prefix.startswith("HOPE_"):
+            row = json.loads(payload)
+            if mutate(prefix, row):
+                line = prefix + "=" + json.dumps(
+                    row, sort_keys=True, separators=(",", ":")
+                )
+        rewritten.append(line)
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+
+def test_scale4096_terminal_audit_self_declares_the_diagnostic_branch(
+    tmp_path, monkeypatch
+):
+    """收据必须写清:这一跑属于哪种 reward 证据体制、那三个数从哪一族读来。"""
+
+    checkout, namespace, claim, _path, checkpoint, _log = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    acceptance = _audit_terminal_fixture(
+        checkout, namespace, claim, checkpoint, monkeypatch
+    )
+    scope = acceptance["reward_activation_evidence_scope"]
+    assert scope["kind"] == launcher._P.REWARD_EVIDENCE_SCOPE_KIND
+    assert scope["regime"] == launcher._P.REWARD_EVIDENCE_REGIME_DIAGNOSTIC
+    assert scope["applicable"] is False
+    assert all(
+        count == 0 for count in scope["observed_rows_per_prefix"].values()
+    )
+    assert (
+        acceptance["terminal_transition_source"]
+        == launcher._P.DIAGNOSTIC_STRICT_ZERO_SOURCE_PREFIX
+    )
+    assert acceptance["behavior_strict_hard_by_reason"] == {
+        reason: 0 for reason in launcher.STRICT_HARD_TERMINATION_UNION
+    }
+    assert acceptance["behavior_strict_hard_reason_sum"] == 0
+    assert (
+        acceptance["prelong_gate"]["gate"]["reward_activation_evidence_scope"]
+        == scope
+    )
+    assert (
+        acceptance["prelong_gate"]["gate"]["reward_group_income"]["applicable"]
+        is False
+    )
+
+
+def test_scale4096_terminal_audit_refuses_a_formal_run_log(
+    tmp_path, monkeypatch
+):
+    """诊断发射器只审诊断跑;正式跑的终局审计不从这里借道。"""
+
+    checkout, namespace, claim, _path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+
+    def make_formal(prefix, row):
+        if prefix + "=" != launcher._P.JOINT_SAFETY_PREFIX:
+            return False
+        row["event"] = launcher._P.FORMAL_JOINT_SAFETY_EVENT
+        row["status"] = launcher._P.FORMAL_JOINT_SAFETY_STATUS
+        return True
+
+    _rewrite_terminal_log(log_path, make_formal)
+    with pytest.raises(
+        launcher.LaunchRefused, match="only accepts diagnostic runs"
+    ):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
+
+
+def test_scale4096_terminal_audit_refuses_diagnostic_run_minting_formal_evidence(
+    tmp_path, monkeypatch
+):
+    """阻断的另一半:诊断跑发出了它不该有的正式证据,同样拒收。"""
+
+    checkout, namespace, claim, _path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    log_path.write_text(
+        log_path.read_text(encoding="utf-8")
+        + "HOPE_REWARD_SAFETY_TRANSITION_UPDATE_JSON="
+        + json.dumps({"ppo_update": 0})
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        launcher.LaunchRefused,
+        match="scope rejected: diagnostic run emitted formal reward-activation evidence",
+    ):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
+
+
+def test_diagnostic_branch_still_refuses_joint_forbidden_from_exact_behavior(
+    tmp_path, monkeypatch
+):
+    """该拦的仍拦:出处换了,但"实现坏了"仍然当场拒收 —— 而且理由指向严格零。"""
+
+    checkout, namespace, claim, _path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+
+    def inject(prefix, row):
+        if prefix != "HOPE_EXACT_BEHAVIOR_UPDATE_JSON" or row.get(
+            "ppo_update"
+        ) != 0:
+            return False
+        row["counters"]["termination_reason_joint_actual_forbidden_count"] = 3
+        return True
+
+    _rewrite_terminal_log(log_path, inject)
+    with pytest.raises(
+        launcher.LaunchRefused, match="implementation counters are nonzero"
+    ):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
