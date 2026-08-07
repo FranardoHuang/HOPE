@@ -3,6 +3,12 @@
 > **2026-08-04：本页已退役，不是当前 A211/C211 发车工序。**同一双足/地面/支撑门下的73条
 > direct measured-frame0 physical-birth 扫描结果为 `0/73`。旧 wrapper 的 exact Pod raw FAIL
 > 只保留为 counterexample/provenance；不得用本页命令生成或补签 current lineage。
+>
+> **2026-08-07/08 更正退役理由（结论不变，理由换了两次，别照旧理由推）**：那个 `0/73` 数的是
+> **全库共有的一个 `~1 cm` 悬空**，接地补完之后 `sole_floor + double_support` 变成 `70/73`
+> （§5.6.7「十一」）。但**退役结论仍然成立**，因为接地之后还有一道门：hold LP 拒绝——撑住接地后的
+> frame 0，`waist_pitch` 需要 `-49.155 N·m`，策略增益的位置指令最多出 `-21.704`（`226.5%`）。
+> **现在挡路的是腰的保持增益，不是脚**；出路与代价见 §5.6.7「十二」「十三」，**等 Franco 拍板前本页不复活**。
 
 当前合同把 physical reset 与 teacher authority 分开：physical reset 消费 tracked split-ready artifact
 `ab6b7e41…d38069`，其关节速度逐字节为零；`60 policy tick / 240 physics substep / 1.2 s` hold
