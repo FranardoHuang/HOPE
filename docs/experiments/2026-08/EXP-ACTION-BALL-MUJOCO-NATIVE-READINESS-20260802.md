@@ -6111,6 +6111,22 @@ ActionBall env，自然也没算 solver profile。
 真正开机的是 `recipe` 段——"runtime bound"那行和上面那个 `ValueError` 都只在
 `recipe` 的 log 里出现。本节的正向验证因此报的是 `materialize` **和** `recipe` 两段。
 
+#### 回归账（pod1，`/workspace/hope_isaac_venv/bin/python`，**不是** `/usr/bin/python3`）
+
+本轮**一行代码都没改**，只产出 `configs/` 下的产物和这一节文档，所以回归的意义是
+"新产物有没有踩到某条会扫 `configs/` 的测试"。
+
+| 集合 | 结果 |
+| --- | --- |
+| 重铸前（`42232b84`），7 个模块 | `200 passed`，**`0 skipped`**，退出 `0` |
+| 重铸后（`f39e7869`），同 7 个模块 **+** `test_migrate_action_ball_solver_pin_receipt.py` | `206 passed`，**`0 skipped`**，退出 `0` |
+
+`+6` 全部来自新加进来的那个模块，不是行为变化。**skip 数写清是因为
+`1 skipped` + 退出 `0` 看着像绿的、其实什么都没跑**；两次都是 `0 skipped`。
+最后那个模块特意加进来跑，是因为它按名字引用了一份**退役**的 tape build report
+（`…/v3pin_tape_seed0_20260807_r1/offline_n1_tape_build_report.v1.58eb977b1566.json`）——
+旧谱系原地保留，所以它照常通过；哪天有人清理旧目录，它会第一个红。
+
 #### 还没关的洞（本轮，别当成已解决）
 
 - 本轮只验到 `recipe` 段。`oracle32` / `scale4096` 两段**没跑**，
