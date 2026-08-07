@@ -7985,6 +7985,124 @@ contact/event latch；只能程序驱动球或“有一个 scene”不能关闭�
 迁到 MuJoCo 会减少 PhysX-policy -> MuJoCo-policy 的二次迁移，但不会自动消灭 simulator overfit；最终仍需
 独立 heldout evaluator、vendor Gate 和硬件证据。
 
+### 9.2.15 四格聚合的入口函数 `_audit_cell` 一直是零覆盖：测试从它的出口造数据（2026-08-07 落地，pod1 host-only，无 GPU）
+
+**人话**：四格 scale4096 聚合收据的每一格，都要先过
+`action_ball_211_four_grid_prelong_barrier.py` 里的 `_audit_cell` —— 它负责打开这一格的
+launch claim、重算摘要、核对 selector/来源/GPU/产出契约、复审运行期安全罚价、验安全台账、
+验 pre-long 门、验终局 checkpoint，最后拼出一行审计记录。
+
+它到今天为止**一行都没被跑过**。现存的 barrier 测试全部调用文件里那个 `_audits()` 夹具，
+直接手写"已经审计完的行"喂给下游的 `document_from_audits`。也就是说测试是从
+`_audit_cell` 的**出口**那一侧开始造数据，被测函数本身被整个跳过。
+
+这不是"覆盖率低一点"，是一类**系统性的形状**：上一轮那句手抄的
+`filename_iteration != 5`（跑满 5 个 update 之后落盘的末位其实是 `model_4.pt` / `iter=4`，
+差一格）正是这样活下来的 —— 它写在 `_audit_cell` 里，而没有任何测试经过 `_audit_cell`。
+`a970a58a` 把那个 5 换成了共享常量，但**测试仍然是零**。本轮补的就是这一块。
+
+#### 补了什么
+
+只动一个文件：`hope_training/whole_body_tracking/tests/test_action_ball_211_four_grid_prelong_barrier.py`
+（`54 -> 150` 条）。新增的一组一律走 `barrier._audit_cell` / `build_receipt_document` /
+`validate_receipt` 的真实路径：真的落一份 scale4096 结果文件、真的落一份 `launch_claim.json`、
+真的让 `_audit_cell` 自己去读、去比、去重算摘要。
+
+两族发射器用替身 —— `modules=` 本来就是现役注入点，`build_receipt_document` 和
+`validate_receipt` 都把它透传给 `_audit_cell`。替身只做**发射器该做的解析**（pin↔文件绑定、
+canonical JSON、把 payload 拆成 spec/lineage/selector），**不做任何 `_audit_cell` 自己的判断**；
+所以下面每一条拒收都必须是 `_audit_cell` 出的。替身刻意只装本族那三个名字
+（A 装 `_validate_predecessor_result` 一族、C 装 `_validate_scale_predecessor` 一族），
+分派错了就是 AttributeError，不会被"两边都有"糊过去。
+
+覆盖到的拒收面 42 条（每条 A/C 各跑一遍 = 84 个 case），按面分组：
+launch claim 文件本身 5 条、selector/来源/GPU/产出契约 14 条、发射器与 pre-long 的安全词表 3 条、
+终局安全台账 4 条、pre-long 门与安全台账的绑定 5 条、终局 checkpoint 7 条、四格共享绑定 4 条。
+每条都是"同一份夹具先当正例过一遍，再变异一处必须被拒"，且变异一律构造成
+**粗一个档次的检查会放行**（每条 param 上都写了那一档是什么）。
+
+另外补了四件以前没人验过的事：
+
+1. **`_audit_cell` 的出口形状与 `_validate_audit_row` 的入口形状对得上** —— 以前全靠人眼。
+2. **`_audits()` 这份手抄副本被钉回真值** —— 副本一旦漂了，那一堆"从 `_audits()` 造行"的
+   老用例就会开始给一个不存在的形状发合格证。
+3. **`_family_modules()` 不再是零覆盖** —— 这是同一个病的最深一层：`modules=` 在测试里
+   永远被注入，于是现役唯一加载真发射器的地方全仓没人跑过，没人验过真模块到底给不给得出
+   `_audit_cell` 要的那一面。现在 AST 抓出 `_audit_cell` / `_claim_for_result` /
+   `_reaudit_runtime_safety_reward_economy` 里每一个 `module.<名字>`，逐个断言真发射器与替身
+   都有，且对方族的名字**不在**这一边。
+4. **barrier 手抄的 `STRICT_ZERO_SAFETY_KEYS` 与活 pre-long gate 的
+   `STRICT_ZERO_SAFETY_COUNTERS` 直接比活值** —— 这两份一旦漂开，四格聚合会**每一格都拒收**。
+
+#### 变异测试：老那 54 条对 19 个变异里的 18 个是瞎的
+
+在 pod1 clean worktree `/workspace/franco/auditcell_20260807`（`559b95f4`，无 GPU）上，
+把 `_audit_cell` / `_claim_for_result` / `_validate_prelong_behavioral_binding` 逐个改粗一档，
+分别用**新套件**和**老那 54 条**跑：
+
+| 变异（把严格度降一档） | 新套件 | 老 54 条 |
+| --- | --- | --- |
+| M1 两个迭代号只比"互相自洽"，不比共享常量（**上一轮真实存在过的那一档**） | 杀 2 | 全绿 |
+| M2 `require_empty` 改真值判断 | 杀 2 | 全绿 |
+| M3 共址 opt-in 改真值判断 | 杀 2 | 全绿 |
+| M4 `all_tensors_finite` 改真值判断 | 杀 2 | 全绿 |
+| M5 `tensor_groups` 只判类型不判非空 | 杀 2 | 全绿 |
+| M6 安全词表比集合不比顺序 | 杀 4 | 全绿 |
+| M6b strict-zero 词表"是子集就行" | 杀 2 | 全绿 |
+| M7 checkout 比 normpath 之后的值 | 杀 2 | 全绿 |
+| M8 claim 摘要不再重算 payload | 杀 3 | 全绿 |
+| M9 pre-long 分母只比总数 | 杀 2 | 全绿 |
+| M10 acceptance cutoff 改真值判断 | 杀 3 | 杀 1 |
+| M11 predecessor"形状合法就行" | 杀 2 | 全绿 |
+| M12 selector 只比 `A0`/`C1` 那个标签 | 杀 2 | 全绿 |
+| M13 GPU index 只判"在 (0,1) 里" | 杀 2 | 全绿 |
+| M14 rate/speed 两个排除位改真值判断 | 杀 4 | 全绿 |
+| M15 claim 与结果的 namespace 不再要求一致 | 杀 2 | 全绿 |
+| M16 claim 与结果的 stage 不再要求一致 | 杀 2 | 全绿 |
+| M17 审计行少一个键 | 杀 7 | 全绿 |
+| M18 pre-long 绑定直接不接线 | 杀 10 | 全绿 |
+| M19（对照，语义等价的改写：审计行回显 checkpoint 里的迭代号） | 存活（应当） | 全绿 |
+
+19 个真变异 **19/19 被新套件杀**；老那 54 条只对 M10 有反应，那是因为
+`_validate_prelong_behavioral_binding` 本来就有一条直接调用的用例。**其余 18 个对老套件完全隐形**。
+M19 是故意放的对照 —— 它语义等价（上面的检查已经保证两个迭代号等于共享常量），存活是对的，
+说明这套用例没有过拟合到实现细节。
+
+#### 回归账（解释器与 skip 数写清）
+
+解释器 `/workspace/hope_isaac_venv/bin/python`（Python 3.10.18），pod1 clean worktree
+`/workspace/franco/auditcell_20260807` @ `559b95f4`，host-only、不占 GPU。
+
+六个相关模块（barrier / terminal-index / prelong gate / 两个发射器共享常量 / 四格 authority /
+A-C family parity）：
+
+* 基线（改动前）：**336 passed, 0 skipped**
+* 本轮之后：**432 passed, 0 skipped**（+96）
+* barrier 单模块：`54 -> 150`
+
+#### 顺带扫出来的:同一批里还有没有别的"测试绕过被测函数"
+
+判据是"某个函数有拒收逻辑，但所有测试都从它的下游或上游造数据"。做法是对 barrier /
+pre-long gate / 四格 authority / 两个发射器建模块内调用图，以"被任何测试文件点过名的函数"
+为入口取闭包，再看哪些带 `*Refused` 的函数落在闭包外。
+
+* `action_ball_211_four_grid_prelong_barrier.py`、`action_ball_4096x5_prelong_gate.py`、
+  `action_ball_211_four_grid_contract.py`：本轮之后**没有**带拒收的函数落在闭包外。
+  pre-long gate 那批 `validate_safety_audit` / `validate_survival_denominators` /
+  `_validate_reveal_bridge` 虽然测试里不点名，但都从 `validate_prelong_gate`（上游入口）
+  真的跑到 —— 那是正常的端到端覆盖，不是本节说的绕过。
+* `launch_action_ball_a211_four_arm_diagnostic.py` 的
+  `_validate_frame0_live_safety_evidence`（3 处 `LaunchRefused`）：**全仓零调用点、零测试**。
+  C211 那边 2026-08-05 的注释写着"shim 已退役，底层权威仍在 A211"，但 A211 这边也没人叫它。
+  这既是又一个零调用点的门，也是一处 A/C 不对称（C 删了、A 留了个死的）。
+  本轮**不动它**，另开一条单独裁定 —— 改门要连证据一起改，不许顺手删。
+* `_admission_training_argv`（A/C 各一个）是扫描的假阳性：它在模块级作为
+  `training_argv=` 绑定进 admission，不是死代码。
+
+**这一节没有改任何生产代码**，只增测试文档。`a970a58a` 的三处终局编号出处、
+`solver_profile_sha256` 那族 pin、§9.2.12 刚重签的 18 份内容寻址产物，一个字都没碰，
+不需要重铸任何东西。
+
 ## 10. N1 直接到完整 73 的门
 
 “一个动作能学就全上”精确定义为：N1 通过后，允许**完整 73 catalog**进入 MuJoCo 训练实验；它不
