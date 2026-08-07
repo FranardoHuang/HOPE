@@ -9940,7 +9940,54 @@ proprioceptive_observation_noise_channels =
 残差层面的安慰是有的（`configs/a3p_p1_0807_retarget_attempt_v1.json`：73 条 clip × 18 道门，
 两盘**零门差异**，p95 残差最大动 0.11°/0.82 mm，约 1% 门预算），但**"题目相近"不等于"题目相同"**。
 
-#### 9.2.17.8 这一节没做什么
+#### 9.2.17.8 回归账，以及 registry 那枚漂了的钉：它**一条测试都没红**，这比"红 5 条"更糟
+
+**回归账**（pod1，worktree `/workspace/franco/bankswap_20260808` @ `766ccf91`，干净；
+解释器 `/workspace/hope_isaac_venv/bin/python`（Python 3.10.18），**不是** `/usr/bin/python3`；
+`CUDA_VISIBLE_DEVICES=` 空，**全程未占 GPU**；`-q -rs -p no:randomly -n 16`）：
+
+| 集合 | 结果 |
+| --- | --- |
+| 8 个模块：四格合同 / DR-L0N 噪声 / A-C 配置对等 / 两个 211 launcher / 核心物化器 / A211 谱系物化器 / vendor action registry | **`427 passed`，`0 skipped`**，退出 `0`（36.8 s） |
+
+本轮一行代码都没改，所以这份回归的意义是**基线**，不是"改动 vs 基线"。
+
+**然后是那枚钉。** 交接说 `a3_vendor_action_registry.py` 的 `identity_repin_producer`
+钉着 `materialize_a3_vendor_identity_manifest.py @ b90bac5f30d8…`，而该文件已经变成
+`ab7f8fdb0d53…`，并说这会**红 5 条测试**。
+
+**漂移是真的，逐位复算过**：`scripts/materialize_a3_vendor_identity_manifest.py` 活值
+`ab7f8fdb0d532b3f0c1f51d9c50e366b235e3195eaae5363bab0df80d8910bb6`；
+钉在 `scripts/a3_vendor_action_registry.py:85`（`bh_loop_c`）和 `:161`（`bh_block`）的是
+`b90bac5f30d801b02e4c074a95ae207493214d91938d91890590a7c1aeeb801a`。
+
+**但"红 5 条"这个数不成立，真实是红 0 条 —— 而这正是坏消息。**
+把 registry 的 15 个 `ArtifactPin` 字段 × 2 个 action = **30 枚钉逐个对磁盘解析**，
+结果是 **30 枚解析、2 枚漂**，两枚都是 `identity_repin_producer`。
+而 `tests/test_a3_vendor_action_registry.py:98-111` 那个"对磁盘验摘要"的循环
+**只遍历 6 个字段名**：
+
+```
+runtime_authority_receipt, dynamic_ready_candidate, nominal_hold_receipt,
+contact_bundle, fixed_domain_initial_receipt, reward_economy_receipt
+```
+
+`identity_repin_producer` **不在里面**。15 个字段里有 **9 个**（`stable_motion`、
+`stable_source_manifest`、`stable_source_prototype`、`identity_repin_producer`、
+`identity_prototype`、`identity_repin_receipt`、`identity_manifest`、
+`required_identity_manifest`、`runtime_contract`）**从来没有被对磁盘验过** ——
+30 枚钉里 18 枚在这道门的视野之外。所以 `427 passed` 不是"钉没漂"，是**没人看**。
+
+**同一件事的另一半**：`tests/test_launch_a3_vendor_identity_smoke.py:112-122` 造夹具时
+把 `b90bac5f30d8…` **手抄了一遍**。所以就算把 `identity_repin_producer` 加进那 6 个字段，
+这条测试也会跟退役值达成一致 —— 又是"夹具自己造契约"那个形状，和 reward 配方那枚钉
+（`17f5e30d`）一模一样。**修的时候两处必须同批**：把 9 个字段补进解析循环，
+并把夹具的期望值改成从 registry 现取而不是手抄。
+
+**结论口径**：这枚钉与动作库无关，本轮不修（不在授权范围内，且有并行 workflow 在动这批文件），
+但把数字更正在案：**不是"会红 5 条"，是"一条都不会红，因为这类钉有 60% 没人验"。**
+
+#### 9.2.17.9 这一节没做什么
 
 1. **没铸任何产物**，一份都没有。理由见 9.2.17.3。
 2. **没改任何活代码**——9.2.17.2 那张表是清点，不是改动。
@@ -9948,6 +9995,8 @@ proprioceptive_observation_noise_channels =
 4. **没跑** `oracle32 / scale4096 / long4096`，也没跑 MuJoCo-GPU（mjlab）那两格——
    本轮的 GPU 证据只覆盖 Isaac 侧 A1/C1 的 `materialize → recipe`。
 5. **没碰** GPU0（yikang）与 GPU2（mjlab），也**没 kill** GPU1 上并行 session 的进程。
+6. **没修** 9.2.17.8 那枚 registry 漂钉，也**没补**那 9 个从没被对磁盘验过的字段 ——
+   本轮期间有并行 workflow 在改这批文件，且它与动作库无关。只更正了数字并写清修法。
 
 ## 10. N1 直接到完整 73 的门
 
