@@ -63,7 +63,16 @@ def _checkpoint_acceptance():
     }
 
 
-def _economy(update):
+def _economy(update, *, terms=None):
+    # 注:``motion`` 逐 update 变化是**故意**的。本夹具原本把它写成五个 update 恒等于
+    # ``1.0`` —— 那正是 s15r1 里 ``action_rate_clamped`` 的形状,而旧版门对它毫无意见。
+    # ``action_rate_clamped`` 在这里保持逐位相同,用来走"已申报常数"的放行路径。
+    if terms is None:
+        terms = {
+            "motion": 1.0 + 0.25 * update,
+            "task": 0.0,
+            "action_rate_clamped": -3538.945068,
+        }
     return {
         "event": "hope_action_ball_reward_ppo_economy_update",
         "schema_version": 1,
@@ -76,8 +85,8 @@ def _economy(update):
         },
         "reward": {
             "explained_variance": 0.1,
-            "per_term_weighted_dt_sum": {"motion": 1.0, "task": 0.0},
-            "per_term_eligible_denominator": {"motion": 98304, "task": 98304},
+            "per_term_weighted_dt_sum": dict(terms),
+            "per_term_eligible_denominator": {name: 98304 for name in terms},
         },
         "ppo": {
             "learning_rate": 1.0e-4,
@@ -371,6 +380,135 @@ def test_gate_rejects_nonfinite_or_invalid_optimizer_health(
         )
     with pytest.raises(GATE.PreLongGateRefused, match=match):
         GATE.validate_economy_updates("\n".join(rows))
+
+
+# --------------------------------------------------------------------------- #
+# 常数奖励项:该拦的要拦,误拦的不许拦
+# --------------------------------------------------------------------------- #
+# 背景:s15r1 的 C0/C1 两格、五个 update,``action_rate_clamped`` 全部是逐位相同的
+# ``-3538.945068``(``raw_sum = 884736 = 98304 x 9``,每个样本恒等于 ``value_clamp=9.0``)。
+# 旧版这道门只查"收入是有限数 + 分母是全 rollout",对"整窗没动过"零意见。
+
+
+def _economy_log(per_update_terms):
+    lines = []
+    for update, terms in enumerate(per_update_terms):
+        lines.append(
+            GATE.ECONOMY_PREFIX
+            + json.dumps(
+                _economy(update, terms=terms), sort_keys=True, separators=(",", ":")
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def test_undeclared_constant_nonzero_reward_term_is_refused():
+    """该拦的:一个没申报过的项整窗吐同一个非零数 -> 拒收。"""
+
+    log = _economy_log(
+        [{"motion": 1.0 + 0.25 * update, "mystery_cost": -7.5} for update in range(5)]
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="mystery_cost"):
+        GATE.validate_economy_updates(log)
+
+
+def test_declared_constant_reward_term_passes_and_self_reports():
+    """误拦的不许拦:已申报机制的饱和项照常放行,且机制进收据。"""
+
+    result = GATE.validate_economy_updates(_log())
+    signal = result["reward_term_signal"]
+    frozen = {row["term"]: row for row in signal["frozen_nonzero_terms"]}
+    assert set(frozen) == {"action_rate_clamped"}
+    assert frozen["action_rate_clamped"]["weighted_dt_sum_every_update"] == -3538.945068
+    assert "value_clamp" in frozen["action_rate_clamped"]["declared_mechanism"]
+    assert "policy_std_max" in frozen["action_rate_clamped"]["declared_ends_when"]
+    assert signal["always_zero_terms"] == ["task"]
+    assert signal["varying_term_count"] == 1
+
+
+def test_always_zero_reward_term_is_reported_but_never_blocking():
+    """恒零不是拒收理由:一次一球未碰的冒烟里 target/outcome 层本来就该是零。"""
+
+    log = _economy_log(
+        [
+            {"motion": 1.0 + 0.25 * update, "virtual_landing": 0.0, "racket_progress": 0.0}
+            for update in range(5)
+        ]
+    )
+    signal = GATE.validate_economy_updates(log)["reward_term_signal"]
+    assert signal["always_zero_terms"] == ["racket_progress", "virtual_landing"]
+    assert signal["always_zero_is_blocking"] is False
+
+
+def test_one_ulp_of_movement_is_not_frozen():
+    """粗一档就过不了:改用容差比较的变体会把只差 1 ulp 的项误判成常数。"""
+
+    # math.nextafter 是 py3.9+;host pytest 仍是 py3.8,所以用 struct 手工挪一个 ulp。
+    import struct
+
+    base = -3538.945068
+    bits = struct.unpack("<Q", struct.pack("<d", base))[0]
+    moved = struct.unpack("<d", struct.pack("<Q", bits + 1))[0]
+    assert moved != base and abs(moved - base) < 1.0e-9
+    log = _economy_log(
+        [
+            {
+                "motion": 1.0 + 0.25 * update,
+                "undeclared_but_moving": base if update else moved,
+            }
+            for update in range(5)
+        ]
+    )
+    signal = GATE.validate_economy_updates(log)["reward_term_signal"]
+    assert signal["frozen_nonzero_terms"] == []
+    assert "undeclared_but_moving" not in signal["always_zero_terms"]
+
+
+def test_a_term_that_only_wakes_up_on_the_last_update_is_not_frozen():
+    """粗一档就过不了:只对比前两个 update 的变体会把这一项误判成常数并拒收。"""
+
+    log = _economy_log(
+        [
+            {
+                "motion": 1.0 + 0.25 * update,
+                "late_waker": 0.0 if update < 4 else -5.5,
+            }
+            for update in range(5)
+        ]
+    )
+    signal = GATE.validate_economy_updates(log)["reward_term_signal"]
+    assert signal["frozen_nonzero_terms"] == []
+    assert signal["always_zero_terms"] == []
+
+
+def test_reward_term_set_must_not_change_between_updates():
+    per_update = [{"motion": 1.0 + 0.25 * update} for update in range(5)]
+    per_update[3]["surprise"] = -1.0
+    with pytest.raises(GATE.PreLongGateRefused, match="term set differs"):
+        GATE.validate_economy_updates(_economy_log(per_update))
+
+
+def test_blanked_constant_declaration_fails_closed(monkeypatch):
+    """静默把申报清空 = 把白名单变成免检,必须炸。"""
+
+    monkeypatch.setitem(
+        GATE.DECLARED_CONSTANT_REWARD_TERMS,
+        "action_rate_clamped",
+        {"mechanism": "", "ends_when": ""},
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="empty mechanism"):
+        GATE.validate_economy_updates(_log())
+
+
+def test_income_inversion_is_reported_not_blocked():
+    """记录:安全层被排除在层级会计之外,收据里至少要有"最大单项成本 vs 全部正收入"。"""
+
+    inversion = GATE.validate_economy_updates(_log())["income_inversion"]
+    assert [row["ppo_update"] for row in inversion] == [0, 1, 2, 3, 4]
+    assert inversion[0]["largest_cost_term"] == "action_rate_clamped"
+    assert inversion[0]["positive_income_sum"] == pytest.approx(1.0)
+    assert inversion[0]["largest_cost_over_positive_income"] == pytest.approx(3538.945068)
+    assert inversion[0]["net_weighted_dt_sum"] == pytest.approx(-3537.945068)
 
 
 def test_task_invalid_reward_or_denominator_must_be_zero():

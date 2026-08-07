@@ -531,6 +531,157 @@ def validate_survival_denominators(
     }
 
 
+# 人话:一个奖励项如果在整个五-update 窗口里**逐位**吐同一个数,它就没有给策略任何可学的
+# 信号 —— 它只是给每个样本加了一个常数。常数并不是无害的:每步一个负常数会让"早点终止"
+# 严格优于"多活一步",所以一个既在收费、又没有信号的项,正好是把经济推向自杀的那一类。
+#
+# 现役实例:``action_rate_clamped`` 在 s15r1 的 C0/C1 两格、五个 update 上全是逐位相同的
+# ``-3538.945068``(``raw_sum = 884736 = 98304 x 9``,即每个样本恒等于 ``value_clamp``)。
+# 这不是实现 bug,是 ``action_rate_l2_clamped`` 的封顶被打满:31 维、std=1.0 的新策略
+# ``E||Δa||² = 2 x 31 x std² = 62``,远在 ``9.0`` 之上,所以**每个**样本都被削到天花板。
+# 旧版本的这道门只检查每项收入"是有限数"和分母对不对,因此它对"这一项从头到尾没动过"
+# 完全没有意见 —— 连本模块自己的测试夹具都把 ``motion`` 写成五个 update 恒等于 ``1.0``。
+#
+# 允许一个项常数的唯一方式,是在下表里写清两件事:**是什么机制让它常数**,以及**这个常数
+# 在什么条件下结束**。没写在表里的常数非零项一律拒收(fail closed)。
+#
+# 为什么不顺手把"恒零"也拒掉:A211 的 target/outcome 项在一次一球未碰的 5-update 冒烟里
+# 本来就该恒零,拒掉它等于要求一个没训过的策略已经会打球(§5.6.8 同型的"门定错范围")。
+# 恒零项如实进收据,不进拒收。
+DECLARED_CONSTANT_REWARD_TERMS = {
+    "action_rate_clamped": {
+        "mechanism": (
+            "action_rate_l2_clamped(value_clamp=9.0) is saturated: a fresh 31-D Gaussian "
+            "policy at std 1.0 has E||da||^2 = 2 * 31 * std^2 = 62 >> 9.0, so every rollout "
+            "sample is clipped to the ceiling and the term is a constant per-step offset."
+        ),
+        "ends_when": (
+            "policy_std_max falls to roughly sqrt(9.0 / (2 * 31)) = 0.381, where ||da||^2 "
+            "starts landing below value_clamp and the term regains sample-to-sample variation."
+        ),
+        "carries_no_learning_signal_while_constant": True,
+    },
+}
+
+
+def _validate_declared_constant_reward_terms() -> None:
+    """Refuse a silently blanked declaration table.
+
+    A future "soft delete" that empties ``mechanism``/``ends_when`` would turn the
+    allowlist into a blanket exemption without touching the refusal code path.
+    """
+
+    for term, declaration in DECLARED_CONSTANT_REWARD_TERMS.items():
+        if type(term) is not str or not term:
+            raise PreLongGateRefused("declared constant reward term names must be strings")
+        if not isinstance(declaration, Mapping):
+            raise PreLongGateRefused(
+                f"declared constant reward term {term} has no declaration object"
+            )
+        for field in ("mechanism", "ends_when"):
+            text = declaration.get(field)
+            if type(text) is not str or not text.strip():
+                raise PreLongGateRefused(
+                    f"declared constant reward term {term} has an empty {field}"
+                )
+
+
+def _reward_term_signal_ledger(
+    per_update_terms: Sequence[Mapping[str, float]],
+) -> dict[str, Any]:
+    """Report every term's cross-update variation and refuse undeclared frozen ones.
+
+    Comparison is exact float equality against the first update, not a tolerance:
+    a term that moves by a single float32 ulp between updates *is* responding to the
+    policy and must not be reported as frozen.
+    """
+
+    _validate_declared_constant_reward_terms()
+    names = sorted(per_update_terms[0])
+    frozen_nonzero: list[dict[str, Any]] = []
+    always_zero: list[str] = []
+    varying: list[str] = []
+    undeclared: list[str] = []
+    for name in names:
+        values = [row[name] for row in per_update_terms]
+        first = values[0]
+        constant = all(value == first for value in values)
+        if not constant:
+            varying.append(name)
+            continue
+        if first == 0.0:
+            always_zero.append(name)
+            continue
+        declaration = DECLARED_CONSTANT_REWARD_TERMS.get(name)
+        if declaration is None:
+            undeclared.append(name)
+            continue
+        frozen_nonzero.append(
+            {
+                "term": name,
+                "weighted_dt_sum_every_update": first,
+                "declared_mechanism": declaration["mechanism"],
+                "declared_ends_when": declaration["ends_when"],
+            }
+        )
+    if undeclared:
+        raise PreLongGateRefused(
+            "reward term(s) %s are bitwise identical and non-zero across all %d updates: "
+            "an undeclared constant reward term charges a price while carrying no learning "
+            "signal; declare its mechanism in DECLARED_CONSTANT_REWARD_TERMS or fix the term"
+            % (", ".join(sorted(undeclared)), len(per_update_terms))
+        )
+    return {
+        "semantics": (
+            "per_term_weighted_dt_sum compared by exact equality across every observed "
+            "update; frozen means the term returned the identical total each time"
+        ),
+        "term_count": len(names),
+        "varying_term_count": len(varying),
+        "frozen_nonzero_terms": frozen_nonzero,
+        "always_zero_terms": always_zero,
+        "always_zero_is_blocking": False,
+        "always_zero_rationale": (
+            "a pre-long smoke with no ball contact is expected to pay exactly zero on the "
+            "target/outcome tier; refusing it would demand an untrained policy already hit"
+        ),
+    }
+
+
+def _income_inversion_ledger(
+    per_update_terms: Sequence[Mapping[str, float]],
+) -> list[dict[str, Any]]:
+    """Report the largest single cost against the whole positive income, per update.
+
+    §5.4 item 6 requires that regularization/safety terms never swamp the three main
+    tiers, but the pre-long taxonomy deliberately excludes the safety tier from its
+    group accounting (``PRELONG_EXCLUDED_SAFETY_TERM_WEIGHTS``), so no receipt has ever
+    carried the comparison.  This block is report-only: pricing is a design decision.
+    """
+
+    ledger = []
+    for index, terms in enumerate(per_update_terms):
+        positive = sum(value for value in terms.values() if value > 0.0)
+        negatives = [(value, name) for name, value in terms.items() if value < 0.0]
+        if negatives:
+            worst_value, worst_name = min(negatives)
+        else:
+            worst_value, worst_name = 0.0, None
+        ledger.append(
+            {
+                "ppo_update": index,
+                "positive_income_sum": positive,
+                "largest_cost_term": worst_name,
+                "largest_cost_weighted_dt_sum": worst_value,
+                "largest_cost_over_positive_income": (
+                    abs(worst_value) / positive if positive > 0.0 else None
+                ),
+                "net_weighted_dt_sum": sum(terms.values()),
+            }
+        )
+    return ledger
+
+
 def validate_economy_updates(log_text: str) -> dict[str, Any]:
     rows = _ordered_updates(
         _marker_rows(log_text, prefix=ECONOMY_PREFIX, name="reward/PPO economy"),
@@ -539,6 +690,7 @@ def validate_economy_updates(log_text: str) -> dict[str, Any]:
         name="reward/PPO economy",
     )
     summaries = []
+    per_update_terms: list[dict[str, float]] = []
     for index, row in enumerate(rows):
         if row.get("status") != "PASS" or row.get("gate") != {
             "num_envs": NUM_ENVS,
@@ -563,12 +715,21 @@ def validate_economy_updates(log_text: str) -> dict[str, Any]:
             or set(weighted) != set(denominators)
         ):
             raise PreLongGateRefused(f"reward/PPO economy update {index} term ledger differs")
+        term_incomes: dict[str, float] = {}
         for term in weighted:
-            _finite_number(weighted[term], name=f"update {index} term {term} income")
+            term_incomes[term] = _finite_number(
+                weighted[term], name=f"update {index} term {term} income"
+            )
             if denominators[term] != ROLLOUT_SAMPLES_PER_UPDATE:
                 raise PreLongGateRefused(
                     f"update {index} term {term} is not the existing whole-rollout denominator"
                 )
+        # The cross-update signal ledger below can only compare a stable term set.
+        if per_update_terms and set(term_incomes) != set(per_update_terms[0]):
+            raise PreLongGateRefused(
+                f"reward/PPO economy update {index} term set differs from update 0"
+            )
+        per_update_terms.append(term_incomes)
         learning_rate = _finite_number(
             ppo.get("learning_rate"), name=f"update {index} learning_rate", nonnegative=True
         )
@@ -608,7 +769,11 @@ def validate_economy_updates(log_text: str) -> dict[str, Any]:
                 "term_count": len(weighted),
             }
         )
-    return {"updates": summaries}
+    return {
+        "updates": summaries,
+        "reward_term_signal": _reward_term_signal_ledger(per_update_terms),
+        "income_inversion": _income_inversion_ledger(per_update_terms),
+    }
 
 
 def validate_group_income_updates(log_text: str) -> dict[str, Any]:
