@@ -59,6 +59,39 @@ _REQUIRED = (
 )
 
 
+def _feasible_clamp(
+    axis: str, budget_clamp: float, p95: float, weight_magnitude: float, early_income: float
+) -> float:
+    """Refuse a value clamp that sits at or below the term's own operating p95.
+
+    人话:封顶这条规则原本的意思是"削掉最离谱的那 5%",所以 ``min(预算档, p95)`` 里
+    **必须是预算档更大**才说得通。反过来——预算档 <= p95——意思是这个权重下的预算根本
+    容不下这条项的正常工作区,于是 ``min()`` 会安静地返回预算档,而**整条分布都在天花板
+    之上**:每个样本都被削成同一个数,该项对动作的导数恒为 0,它只剩"每步收一笔固定
+    过路费"的作用。一个既在收费、又没有信号的项,正是把经济推向"早点摔死"的那一类。
+
+    这不是假想:``action_rate`` 这条轴 2026-07-26 出表时就撞上了这个分支
+    (early_income 1.8 / 0.2 = 9.0 <= 名义 p95 10.0 -> 冻结成 ``value_clamp = 9.0``),
+    而实测工作区是 ``||Δa||² = 63``(build_1 iter 4)到 ``10.8``(收敛),从头到尾在
+    9.0 之上,该项因此在 s15r1 上逐位恒等于封顶值。
+
+    正确的处置是**降权重**而不是削值:预算约束 ``|w| x 工作点 <= early_income``
+    在工作点 = p95 处解出的权重,才是这条预算规则在该轴上真正能给的剂量。
+    """
+
+    if not math.isfinite(p95) or p95 <= 0.0:
+        raise ValueError(f"measured[{axis}_sq_p95] must be a positive finite number")
+    if budget_clamp <= p95:
+        raise ValueError(
+            f"{axis} value clamp is infeasible at |w|={weight_magnitude}: the budget cap "
+            f"{budget_clamp:.4g} sits at or below the measured p95 {p95:.4g}, so every "
+            f"rollout sample would be clipped to the ceiling and the term would carry no "
+            f"gradient at all — a constant per-step toll, not a penalty. Lower the weight "
+            f"instead: |w| <= early_income/p95 = {early_income/p95:.4g}."
+        )
+    return min(budget_clamp, p95)
+
+
 def calibrate(measured: dict) -> dict:
     """按定权公式把实测量换算成冻结权重表。全程 fail-loud:缺键/非有限/出range 直接炸。
 
@@ -116,8 +149,12 @@ def calibrate(measured: dict) -> dict:
     clamp_rate = early_income / 0.2          # action_rate weight -0.2
     clamp_acc = early_income / 0.05          # action_acc weight -0.05
     # p95 若低于 clamp,clamp 取 p95(不放松到没意义)
-    clamp_rate = min(clamp_rate, float(measured["action_rate_sq_p95"]))
-    clamp_acc = min(clamp_acc, float(measured["action_acc_sq_p95"]))
+    clamp_rate = _feasible_clamp(
+        "action_rate", clamp_rate, float(measured["action_rate_sq_p95"]), 0.2, early_income
+    )
+    clamp_acc = _feasible_clamp(
+        "action_acc", clamp_acc, float(measured["action_acc_sq_p95"]), 0.05, early_income
+    )
 
     return {
         "motion_lineage": lineage.strip(),

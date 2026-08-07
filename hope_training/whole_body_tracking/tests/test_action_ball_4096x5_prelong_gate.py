@@ -67,15 +67,22 @@ def _checkpoint_acceptance():
     }
 
 
-def _economy(update, *, terms=None):
-    # 注:``motion`` 逐 update 变化是**故意**的。本夹具原本把它写成五个 update 恒等于
-    # ``1.0`` —— 那正是 s15r1 里 ``action_rate_clamped`` 的形状,而旧版门对它毫无意见。
-    # ``action_rate_clamped`` 在这里保持逐位相同,用来走"已申报常数"的放行路径。
+def _economy(update, *, terms=None, policy=None):
+    # 注:``motion`` 与 ``action_rate_clamped`` 逐 update 变化都是**故意**的。本夹具原本
+    # 把两项都写成五个 update 恒等于同一个数 —— 那正是 s15r1 的病灶形状,而把病灶写进
+    # 默认夹具会让这个模块里的每一条测试都默认接受它。默认夹具现在是一份**健康**的跑,
+    # 冻结项另有专门的测试(见下面"常数奖励项"一节)。
     if terms is None:
         terms = {
             "motion": 1.0 + 0.25 * update,
             "task": 0.0,
-            "action_rate_clamped": -3538.945068,
+            "action_rate_clamped": -3538.945068 + 1.5 * update,
+        }
+    if policy is None:
+        policy = {
+            "policy_std_min": 0.01,
+            "policy_std_mean": 0.02,
+            "policy_std_max": 0.03,
         }
     return {
         "event": "hope_action_ball_reward_ppo_economy_update",
@@ -98,11 +105,7 @@ def _economy(update, *, terms=None):
             "clip_fraction": 0.2,
         },
         "gradient": {"pre_clip_total_grad_norm": 0.5},
-        "policy": {
-            "policy_std_min": 0.01,
-            "policy_std_mean": 0.02,
-            "policy_std_max": 0.03,
-        },
+        "policy": dict(policy),
     }
 
 
@@ -392,18 +395,52 @@ def test_gate_rejects_nonfinite_or_invalid_optimizer_health(
 # 背景:s15r1 的 C0/C1 两格、五个 update,``action_rate_clamped`` 全部是逐位相同的
 # ``-3538.945068``(``raw_sum = 884736 = 98304 x 9``,每个样本恒等于 ``value_clamp=9.0``)。
 # 旧版这道门只查"收入是有限数 + 分母是全 rollout",对"整窗没动过"零意见。
+#
+# 2026-08-07:豁免不再是一段自述,而是一条要拿收据核对的断言 —— 申报必须指名收据里的
+# 哪个量、朝哪个方向、越过哪个阈值才解冻,门再看那个量在窗内是不是真的朝阈值走。
+# 现役 ``action_rate_clamped`` 那条申报正是被这条新规矩证伪的(std 在涨),所以
+# ``DECLARED_CONSTANT_REWARD_TERMS`` 现在是空表:没有任何项拿着豁免。
 
 
-def _economy_log(per_update_terms):
+def _falls_to_declaration(**overrides):
+    """一条格式合法的申报:std 掉到 0.381 就解冻。"""
+
+    declaration = {
+        "mechanism": "value_clamp is saturated at the fresh policy's action scale",
+        "ends_when": "policy_std_max falls to 0.381",
+        "ends_when_metric": "policy_std_max",
+        "ends_when_threshold": 0.381,
+        "ends_when_direction": "falls_to",
+        "carries_no_learning_signal_while_constant": True,
+    }
+    declaration.update(overrides)
+    return declaration
+
+
+def _economy_log(per_update_terms, per_update_policy=None):
     lines = []
     for update, terms in enumerate(per_update_terms):
+        policy = None if per_update_policy is None else per_update_policy[update]
         lines.append(
             GATE.ECONOMY_PREFIX
             + json.dumps(
-                _economy(update, terms=terms), sort_keys=True, separators=(",", ":")
+                _economy(update, terms=terms, policy=policy),
+                sort_keys=True,
+                separators=(",", ":"),
             )
         )
     return "\n".join(lines) + "\n"
+
+
+def _std_series(values):
+    return [
+        {
+            "policy_std_min": value - 0.002,
+            "policy_std_mean": value - 0.001,
+            "policy_std_max": value,
+        }
+        for value in values
+    ]
 
 
 def test_undeclared_constant_nonzero_reward_term_is_refused():
@@ -416,18 +453,96 @@ def test_undeclared_constant_nonzero_reward_term_is_refused():
         GATE.validate_economy_updates(log)
 
 
-def test_declared_constant_reward_term_passes_and_self_reports():
-    """误拦的不许拦:已申报机制的饱和项照常放行,且机制进收据。"""
+def test_no_reward_term_currently_holds_a_constant_exemption():
+    """现役表必须是空的:``action_rate_clamped`` 那条申报已被自己的收据证伪。
 
-    result = GATE.validate_economy_updates(_log())
-    signal = result["reward_term_signal"]
+    它当初写的解冻条件是 ``policy_std_max`` 掉到 ``0.381``;s15r1 两格实测
+    ``1.00198 -> 1.00729`` / ``1.00191 -> 1.00661``,五个 update 一路在涨。
+    唯一已知能打球的 ``build_1`` 收敛后 ``||Δa||²`` 还有 ``10.8~12.05``,仍在
+    ``value_clamp=9.0`` 之上 —— 这个封顶全程焊死,不是"暂时饱和"。
+    """
+
+    assert GATE.DECLARED_CONSTANT_REWARD_TERMS == {}
+
+
+def test_declared_constant_reward_term_passes_and_self_reports(monkeypatch):
+    """误拦的不许拦:申报机制**且解冻条件确实在逼近**的饱和项照常放行,并进收据。"""
+
+    monkeypatch.setitem(
+        GATE.DECLARED_CONSTANT_REWARD_TERMS, "saturated_term", _falls_to_declaration()
+    )
+    log = _economy_log(
+        [{"motion": 1.0 + 0.25 * update, "saturated_term": -3538.945068, "task": 0.0}
+         for update in range(5)],
+        _std_series([1.00, 0.92, 0.81, 0.66, 0.49]),
+    )
+    signal = GATE.validate_economy_updates(log)["reward_term_signal"]
     frozen = {row["term"]: row for row in signal["frozen_nonzero_terms"]}
-    assert set(frozen) == {"action_rate_clamped"}
-    assert frozen["action_rate_clamped"]["weighted_dt_sum_every_update"] == -3538.945068
-    assert "value_clamp" in frozen["action_rate_clamped"]["declared_mechanism"]
-    assert "policy_std_max" in frozen["action_rate_clamped"]["declared_ends_when"]
+    assert set(frozen) == {"saturated_term"}
+    assert frozen["saturated_term"]["weighted_dt_sum_every_update"] == -3538.945068
+    assert "value_clamp" in frozen["saturated_term"]["declared_mechanism"]
+    audit = frozen["saturated_term"]["declared_end_condition_audit"]
+    assert audit["metric"] == "policy_std_max"
+    assert audit["first_observed"] == pytest.approx(1.00)
+    assert audit["last_observed"] == pytest.approx(0.49)
     assert signal["always_zero_terms"] == ["task"]
     assert signal["varying_term_count"] == 1
+
+
+def test_declared_constant_is_refused_when_its_exit_is_receding(monkeypatch):
+    """该拦的:解冻条件在**后退**的申报 = 永久死项,豁免作废。
+
+    这就是 s15r1 的实测形状,``policy_std_max`` 逐 update 逐位取自那两格的 C0 序列。
+    """
+
+    monkeypatch.setitem(
+        GATE.DECLARED_CONSTANT_REWARD_TERMS, "action_rate_clamped", _falls_to_declaration()
+    )
+    log = _economy_log(
+        [{"motion": 1.0 + 0.25 * update, "action_rate_clamped": -3538.945068}
+         for update in range(5)],
+        _std_series(
+            [1.0019794702529907, 1.0036075115203857, 1.0048182010650635,
+             1.0059711933135986, 1.0072904825210571]
+        ),
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="away from the threshold"):
+        GATE.validate_economy_updates(log)
+
+
+def test_declared_constant_is_refused_when_its_exit_already_happened(monkeypatch):
+    """该拦的:解冻条件**已经满足**而项还没解冻 -> 申报被自己的收据打脸。"""
+
+    monkeypatch.setitem(
+        GATE.DECLARED_CONSTANT_REWARD_TERMS, "action_rate_clamped", _falls_to_declaration()
+    )
+    log = _economy_log(
+        [{"motion": 1.0 + 0.25 * update, "action_rate_clamped": -3538.945068}
+         for update in range(5)],
+        _std_series([1.00, 0.90, 0.70, 0.50, 0.30]),
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="already 0.3"):
+        GATE.validate_economy_updates(log)
+
+
+def test_declaration_must_name_a_metric_the_receipt_actually_carries(monkeypatch):
+    """该拦的:结束条件指向收据里没有的量 = 回到无人核对的自述。"""
+
+    for bad in (
+        {"ends_when_metric": "mean_episode_length"},
+        {"ends_when_metric": None},
+        {"ends_when_direction": "eventually"},
+        {"ends_when_threshold": "0.381"},
+        {"ends_when_threshold": float("inf")},
+        {"ends_when_threshold": True},
+    ):
+        monkeypatch.setitem(
+            GATE.DECLARED_CONSTANT_REWARD_TERMS,
+            "action_rate_clamped",
+            _falls_to_declaration(**bad),
+        )
+        with pytest.raises(GATE.PreLongGateRefused):
+            GATE.validate_economy_updates(_log())
 
 
 def test_always_zero_reward_term_is_reported_but_never_blocking():
@@ -498,7 +613,7 @@ def test_blanked_constant_declaration_fails_closed(monkeypatch):
     monkeypatch.setitem(
         GATE.DECLARED_CONSTANT_REWARD_TERMS,
         "action_rate_clamped",
-        {"mechanism": "", "ends_when": ""},
+        _falls_to_declaration(mechanism="", ends_when=""),
     )
     with pytest.raises(GATE.PreLongGateRefused, match="empty mechanism"):
         GATE.validate_economy_updates(_log())
@@ -513,6 +628,9 @@ def test_income_inversion_is_reported_not_blocked():
     assert inversion[0]["positive_income_sum"] == pytest.approx(1.0)
     assert inversion[0]["largest_cost_over_positive_income"] == pytest.approx(3538.945068)
     assert inversion[0]["net_weighted_dt_sum"] == pytest.approx(-3537.945068)
+    # 夹具里这一项逐 update +1.5,所以最后一格的成本比第一格轻 6.0 —— 一个**活着**的
+    # 罚项本来就该这样动;冻结形状归上面那几条专门的测试。
+    assert inversion[4]["largest_cost_weighted_dt_sum"] == pytest.approx(-3532.945068)
 
 
 def test_task_invalid_reward_or_denominator_must_be_zero():

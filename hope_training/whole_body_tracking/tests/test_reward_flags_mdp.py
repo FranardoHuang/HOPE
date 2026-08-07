@@ -250,6 +250,19 @@ _racket_contact_geometry_mod = _load(
 setattr(
     sys.modules[_PKG], "racket_contact_geometry", _racket_contact_geometry_mod
 )
+# 同一条边:``hope_commands.py`` 走的是 ``from ...mdp import
+# action_ball_solver_semantic_surface``(d4e1e70c 起),而合成父包没有 ``__path__``,
+# 所以子模块必须像上面那样手工挂上去,否则整个共享夹具在 import 期就炸,
+# 依赖它的每个测试模块一起变成"收集失败",而不是失败的断言。
+_solver_semantic_surface_mod = _load(
+    f"{_PKG}.action_ball_solver_semantic_surface",
+    "action_ball_solver_semantic_surface.py",
+)
+setattr(
+    sys.modules[_PKG],
+    "action_ball_solver_semantic_surface",
+    _solver_semantic_surface_mod,
+)
 commands_mod = _load(f"{_PKG}.commands", "commands.py")
 rewards_mod = _load(f"{_PKG}.rewards", "rewards.py")
 terminations_mod = _load(f"{_PKG}.terminations", "terminations.py")

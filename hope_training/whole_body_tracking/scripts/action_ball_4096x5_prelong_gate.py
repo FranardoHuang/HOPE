@@ -564,30 +564,42 @@ def validate_survival_denominators(
 # 允许一个项常数的唯一方式,是在下表里写清两件事:**是什么机制让它常数**,以及**这个常数
 # 在什么条件下结束**。没写在表里的常数非零项一律拒收(fail closed)。
 #
+# 2026-08-07 收紧一档:光写"什么条件下结束"是**一句没人核对的承诺**。
+# ``action_rate_clamped`` 那条申报写的是"等 policy_std_max 掉到 0.381 就会解冻",
+# 而同一份收据里 s15r1 两格的 ``policy_std_max`` 是
+# ``1.00198 -> 1.00729``(C0)/ ``1.00191 -> 1.00661``(C1)—— **五个 update 一路在涨**,
+# 因为 entropy_coef=0.01 的自适应 KL 就是在把 std 往上推。承诺的解冻点不但没靠近,
+# 还在后退。真正的参照更狠:唯一已知能打球的实现 ``build_1`` 训到 21896 iter 收敛时,
+# ``action_rate`` 每步仍是 ``-0.0216~-0.0241`` = 权重 -0.1 x dt 0.02 反推
+# ``||Δa||² = 10.8~12.05``,**仍在 9.0 之上** —— 也就是说这个封顶从第 0 步到收敛
+# 全程焊死,"会结束"这件事在这条谱系上根本不发生。
+#
+# 所以申报现在必须把结束条件写成**收据里真有的那个量**(``ends_when_metric`` /
+# ``ends_when_threshold`` / ``ends_when_direction``),门会拿观测窗自己核对:
+#   * 那个量在窗内朝阈值反方向走 -> 申报被证伪,拒收;
+#   * 那个量已经越过阈值、项却还是常数 -> 申报被证伪,拒收;
+#   * 朝阈值走 -> 放行,并把量的首末值写进收据。
+# 这样"暂时饱和"和"永久死项"就不再靠自述区分。
+#
 # 为什么不顺手把"恒零"也拒掉:A211 的 target/outcome 项在一次一球未碰的 5-update 冒烟里
 # 本来就该恒零,拒掉它等于要求一个没训过的策略已经会打球(§5.6.8 同型的"门定错范围")。
 # 恒零项如实进收据,不进拒收。
-DECLARED_CONSTANT_REWARD_TERMS = {
-    "action_rate_clamped": {
-        "mechanism": (
-            "action_rate_l2_clamped(value_clamp=9.0) is saturated: a fresh 31-D Gaussian "
-            "policy at std 1.0 has E||da||^2 = 2 * 31 * std^2 = 62 >> 9.0, so every rollout "
-            "sample is clipped to the ceiling and the term is a constant per-step offset."
-        ),
-        "ends_when": (
-            "policy_std_max falls to roughly sqrt(9.0 / (2 * 31)) = 0.381, where ||da||^2 "
-            "starts landing below value_clamp and the term regains sample-to-sample variation."
-        ),
-        "carries_no_learning_signal_while_constant": True,
-    },
-}
+_ENDS_WHEN_DIRECTIONS = ("falls_to", "rises_to")
+
+#: 结束条件可以引用的收据字段,必须是 ``policy`` 块里逐 update 都在的那三个标量。
+#: 不许引用一个收据里不存在的量 —— 那等于回到无人核对的自述。
+_ENDS_WHEN_METRICS = ("policy_std_min", "policy_std_mean", "policy_std_max")
+
+DECLARED_CONSTANT_REWARD_TERMS: dict[str, dict[str, Any]] = {}
 
 
 def _validate_declared_constant_reward_terms() -> None:
-    """Refuse a silently blanked declaration table.
+    """Refuse a silently blanked or unfalsifiable declaration table.
 
     A future "soft delete" that empties ``mechanism``/``ends_when`` would turn the
-    allowlist into a blanket exemption without touching the refusal code path.
+    allowlist into a blanket exemption without touching the refusal code path.  The
+    telemetry triple is required for the same reason: an end condition that names no
+    receipt field can never be contradicted by the run it exempts.
     """
 
     for term, declaration in DECLARED_CONSTANT_REWARD_TERMS.items():
@@ -597,6 +609,27 @@ def _validate_declared_constant_reward_terms() -> None:
             raise PreLongGateRefused(
                 f"declared constant reward term {term} has no declaration object"
             )
+        metric = declaration.get("ends_when_metric")
+        if metric not in _ENDS_WHEN_METRICS:
+            raise PreLongGateRefused(
+                f"declared constant reward term {term} must end on one of "
+                f"{', '.join(_ENDS_WHEN_METRICS)}, got {metric!r}"
+            )
+        direction = declaration.get("ends_when_direction")
+        if direction not in _ENDS_WHEN_DIRECTIONS:
+            raise PreLongGateRefused(
+                f"declared constant reward term {term} needs ends_when_direction in "
+                f"{_ENDS_WHEN_DIRECTIONS}, got {direction!r}"
+            )
+        threshold = declaration.get("ends_when_threshold")
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            raise PreLongGateRefused(
+                f"declared constant reward term {term} needs a numeric ends_when_threshold"
+            )
+        if not math.isfinite(float(threshold)):
+            raise PreLongGateRefused(
+                f"declared constant reward term {term} ends_when_threshold must be finite"
+            )
         for field in ("mechanism", "ends_when"):
             text = declaration.get(field)
             if type(text) is not str or not text.strip():
@@ -605,8 +638,52 @@ def _validate_declared_constant_reward_terms() -> None:
                 )
 
 
+def _audit_declared_end_condition(
+    term: str,
+    declaration: Mapping[str, Any],
+    per_update_policy: Sequence[Mapping[str, float]],
+) -> dict[str, Any]:
+    """Check a constant term's declared end condition against the run's own telemetry.
+
+    人话:申报说"等 X 掉到 T 这项就会解冻"。这里就拿收据里的 X 逐 update 核对。
+    只有"X 正在朝 T 走"才算这个常数是暂时的;X 在后退、或者 X 已经越过 T 而项
+    还是常数,都说明申报是错的,那这个豁免就不该给。
+    """
+
+    metric = declaration["ends_when_metric"]
+    threshold = float(declaration["ends_when_threshold"])
+    direction = declaration["ends_when_direction"]
+    series = [float(row[metric]) for row in per_update_policy]
+    first, last = series[0], series[-1]
+    reached = last <= threshold if direction == "falls_to" else last >= threshold
+    if reached:
+        raise PreLongGateRefused(
+            "declared constant reward term %s claims it unfreezes once %s %s %g, but %s is "
+            "already %g at the last observed update and the term is still bitwise constant: "
+            "the declared end condition is satisfied and nothing unfroze"
+            % (term, metric, direction.replace("_", " "), threshold, metric, last)
+        )
+    approaching = last < first if direction == "falls_to" else last > first
+    if not approaching:
+        raise PreLongGateRefused(
+            "declared constant reward term %s claims it unfreezes once %s %s %g, but %s moved "
+            "%g -> %g across the observed window — away from the threshold, not toward it: a "
+            "saturation whose declared exit is receding is a permanently dead term, not a "
+            "temporary offset"
+            % (term, metric, direction.replace("_", " "), threshold, metric, first, last)
+        )
+    return {
+        "metric": metric,
+        "threshold": threshold,
+        "direction": direction,
+        "first_observed": first,
+        "last_observed": last,
+    }
+
+
 def _reward_term_signal_ledger(
     per_update_terms: Sequence[Mapping[str, float]],
+    per_update_policy: Sequence[Mapping[str, float]],
 ) -> dict[str, Any]:
     """Report every term's cross-update variation and refuse undeclared frozen ones.
 
@@ -641,6 +718,9 @@ def _reward_term_signal_ledger(
                 "weighted_dt_sum_every_update": first,
                 "declared_mechanism": declaration["mechanism"],
                 "declared_ends_when": declaration["ends_when"],
+                "declared_end_condition_audit": _audit_declared_end_condition(
+                    name, declaration, per_update_policy
+                ),
             }
         )
     if undeclared:
@@ -710,6 +790,7 @@ def validate_economy_updates(log_text: str) -> dict[str, Any]:
     )
     summaries = []
     per_update_terms: list[dict[str, float]] = []
+    per_update_policy: list[dict[str, float]] = []
     for index, row in enumerate(rows):
         if row.get("status") != "PASS" or row.get("gate") != {
             "num_envs": NUM_ENVS,
@@ -776,6 +857,13 @@ def validate_economy_updates(log_text: str) -> dict[str, Any]:
         )
         if not 0.0 < std_min <= std_mean <= std_max:
             raise PreLongGateRefused(f"update {index} policy std is not positive and ordered")
+        per_update_policy.append(
+            {
+                "policy_std_min": std_min,
+                "policy_std_mean": std_mean,
+                "policy_std_max": std_max,
+            }
+        )
         summaries.append(
             {
                 "ppo_update": index,
@@ -790,7 +878,9 @@ def validate_economy_updates(log_text: str) -> dict[str, Any]:
         )
     return {
         "updates": summaries,
-        "reward_term_signal": _reward_term_signal_ledger(per_update_terms),
+        "reward_term_signal": _reward_term_signal_ledger(
+            per_update_terms, per_update_policy
+        ),
         "income_inversion": _income_inversion_ledger(per_update_terms),
     }
 

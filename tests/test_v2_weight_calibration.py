@@ -29,8 +29,12 @@ def _nominal(**over):
         "k_eff_normal": 0.165,
         "T_c_steps": 46.3,
         "window_steps": 13,
-        "action_rate_sq_p95": 10.0,
-        "action_acc_sq_p95": 40.0,
+        # 07-26 原夹具写的是 10.0 / 40.0,两个都 >= 各自的预算档(9.0 / 36.0),
+        # 也就是说名义配方本身是不可行的 —— 见
+        # test_a_clamp_at_or_below_the_operating_p95_is_refused。名义夹具改成可行值,
+        # 让"取较小者"这条规则还有happy path可测。
+        "action_rate_sq_p95": 4.0,
+        "action_acc_sq_p95": 20.0,
         "p_legal_target": 0.7,
         "E_land_value_per_legal": 0.8,
         "motion_lineage": "v4rg_runtime_order_v3",
@@ -70,12 +74,58 @@ def test_ordering_holds_across_measured_ranges():
 
 
 def test_clamp_takes_min_of_budget_and_p95():
-    # 早期收入地板 = 0.4×4.5 = 1.8;预算上限 clamp_rate = 1.8/0.2 = 9.0 < p95 10 → 取 9.0
+    # 早期收入地板 = 0.4×4.5 = 1.8;预算上限 clamp_rate = 1.8/0.2 = 9.0 > p95 4 → 取 4.0
     fr = calibrate(_nominal())["frozen"]
-    assert fr["action_rate_value_clamp"] == pytest.approx(9.0, abs=0.01)
-    # p95 更小时取 p95
-    fr2 = calibrate(_nominal(action_rate_sq_p95=4.0))["frozen"]
-    assert fr2["action_rate_value_clamp"] == pytest.approx(4.0, abs=0.01)
+    assert fr["action_rate_value_clamp"] == pytest.approx(4.0, abs=0.01)
+    assert fr["action_acc_value_clamp"] == pytest.approx(20.0, abs=0.01)
+    # p95 更靠近预算档但仍在其下 → 仍取 p95
+    fr2 = calibrate(_nominal(action_rate_sq_p95=8.9))["frozen"]
+    assert fr2["action_rate_value_clamp"] == pytest.approx(8.9, abs=0.01)
+
+
+def test_a_clamp_at_or_below_the_operating_p95_is_refused():
+    """该拦的:预算档掉到工作区 p95 之下 = 整条分布都在天花板上 = 死项。
+
+    这条不是假想。2026-07-26 出表时 ``action_rate`` 走的就是这个分支:
+    ``early_income/|w| = 1.8/0.2 = 9.0`` vs 名义 p95 ``10.0``,``min()`` 安静地返回 9.0,
+    冻结成 ``value_clamp = 9.0`` 并一路进了 18 份内容寻址合同。实测工作区
+    (build_1,唯一已知能打球的实现)是 ``||Δa||² = 63.1``(iter 4)到 ``10.8``(收敛),
+    **全程在 9.0 之上**,于是 s15r1 两格五个 update 的 raw_sum 逐位等于 ``98304 × 9``。
+    """
+
+    # (甲)当年那份名义输入
+    with pytest.raises(ValueError, match="infeasible"):
+        calibrate(_nominal(action_rate_sq_p95=10.0))
+    # (乙)build_1 实测的工作区,差得更远
+    with pytest.raises(ValueError, match="infeasible"):
+        calibrate(_nominal(action_rate_sq_p95=63.1))
+    # (丙)相等也算不可行:p95 恰好等于预算档 = 至少 5% 的样本贴着天花板
+    with pytest.raises(ValueError, match="infeasible"):
+        calibrate(_nominal(action_rate_sq_p95=9.0))
+    # (丁)二阶轴同规矩,预算档 1.8/0.05 = 36.0
+    with pytest.raises(ValueError, match="infeasible"):
+        calibrate(_nominal(action_acc_sq_p95=36.0))
+    # 误拦的不许拦:比预算档低一点点就该照常出表
+    assert calibrate(_nominal(action_acc_sq_p95=35.9))["frozen"][
+        "action_acc_value_clamp"
+    ] == pytest.approx(35.9, abs=0.01)
+
+
+def test_refusal_names_the_weight_that_would_have_been_feasible():
+    """拒收不能只说"不行":要给出这条预算规则在实测工作点上真正能给的剂量。"""
+
+    with pytest.raises(ValueError) as excinfo:
+        calibrate(_nominal(action_rate_sq_p95=63.1))
+    message = str(excinfo.value)
+    assert "Lower the weight" in message
+    assert "0.02853" in message or "0.0285" in message  # 1.8 / 63.1
+
+
+def test_p95_inputs_must_be_positive():
+    with pytest.raises(ValueError, match="action_rate_sq_p95"):
+        calibrate(_nominal(action_rate_sq_p95=0.0))
+    with pytest.raises(ValueError, match="action_acc_sq_p95"):
+        calibrate(_nominal(action_acc_sq_p95=-1.0))
 
 
 def test_lineage_tag_is_mandatory_and_passes_through():

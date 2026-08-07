@@ -493,6 +493,79 @@ def test_action_rate_clamped_matches_builtin_below_and_caps_above():
 
 
 # --------------------------------------------------------------------------------------------- #
+# 封顶档位是不是**落在真实工作区里**——上面那条只证明代码按 min() 算对了,它对
+# "档位选错、于是整条曲线都在天花板上"零意见。这一组把参照工作区写死成数字。
+#
+# 参照工作区来自唯一已知能打球的实现 build_1(BerkeleyPingPong/hope_wbc,dongc_1):
+#   * iter 4    action_rate = -0.1262/步(post-dt),weight -0.1 x dt 0.02
+#                 -> ||Δa||² = 0.1262 / 0.002 = 63.1  (= 2 x 31 x std² ,std≈1.0)
+#   * 收敛(21896 iter) action_rate = -0.0216~-0.0241/步 -> ||Δa||² = 10.8~12.05
+# 也就是说 build_1 从开局到收敛,||Δa||² 一路 63 -> 11,**从没进过 9.0 以下**。
+# 我们现役 value_clamp = 9.0 因此在整条谱系上恒饱和(s15r1 实测 raw_sum = 98304 x 9)。
+# --------------------------------------------------------------------------------------------- #
+BUILD1_ACTION_RATE_SQ_EARLY = 63.1        # iter 4
+BUILD1_ACTION_RATE_SQ_CONVERGED = 10.8    # 21896 iter,取两跑里更低的那个
+LIVE_ACTION_RATE_VALUE_CLAMP = 9.0        # hope_env_cfg.py :: HOPERewardsCfg.action_rate_clamped
+
+
+def _action_rate_env(per_joint_step, n_joints=31):
+    """构造一个 ||Δa||² = n_joints * per_joint_step² 的两步动作序列。"""
+
+    prev = torch.zeros(1, n_joints)
+    cur = torch.full((1, n_joints), per_joint_step)
+    mgr = types.SimpleNamespace(action=cur, prev_action=prev)
+    return types.SimpleNamespace(action_manager=mgr)
+
+
+def _action_rate_value(sq_norm, clamp, n_joints=31):
+    env = _action_rate_env(math.sqrt(sq_norm / n_joints), n_joints)
+    return hope_rewards_mod.action_rate_l2_clamped(env, value_clamp=clamp)[0].item()
+
+
+def test_action_rate_is_deterministic_on_the_same_sequence():
+    """同一个序列喂两次 -> 逐位相同。响应性测试的对照组,先排除随机性。"""
+
+    for clamp in (LIVE_ACTION_RATE_VALUE_CLAMP, 128.0):
+        first = _action_rate_value(BUILD1_ACTION_RATE_SQ_EARLY, clamp)
+        second = _action_rate_value(BUILD1_ACTION_RATE_SQ_EARLY, clamp)
+        assert first == second
+
+
+def test_live_clamp_is_dead_across_build1s_entire_operating_range():
+    """该拦的:现役档位下,开局与收敛这两个差 5.8 倍的动作序列吐**同一个数**。
+
+    这就是 s15r1 里那项焊死的机制。这条断言故意写成"必须相等"——它一旦变成不相等,
+    说明 value_clamp 已经被抬到工作区之上,那时候要红的是它,提醒把参照数字一起更新。
+    """
+
+    early = _action_rate_value(BUILD1_ACTION_RATE_SQ_EARLY, LIVE_ACTION_RATE_VALUE_CLAMP)
+    converged = _action_rate_value(
+        BUILD1_ACTION_RATE_SQ_CONVERGED, LIVE_ACTION_RATE_VALUE_CLAMP
+    )
+    assert early == converged == pytest.approx(LIVE_ACTION_RATE_VALUE_CLAMP, abs=1e-6)
+    assert BUILD1_ACTION_RATE_SQ_CONVERGED > LIVE_ACTION_RATE_VALUE_CLAMP
+
+
+def test_a_clamp_above_the_operating_range_restores_responsiveness():
+    """误拦的不再拦:把档位抬到工作区之上,两个不同序列必须给出不同的数,且顺序正确。"""
+
+    clamp = 128.0  # > build_1 开局的 63.1
+    early = _action_rate_value(BUILD1_ACTION_RATE_SQ_EARLY, clamp)
+    converged = _action_rate_value(BUILD1_ACTION_RATE_SQ_CONVERGED, clamp)
+    assert early != converged
+    assert early == pytest.approx(BUILD1_ACTION_RATE_SQ_EARLY, rel=1e-6)
+    assert converged == pytest.approx(BUILD1_ACTION_RATE_SQ_CONVERGED, rel=1e-6)
+    assert early > converged  # 抖得越狠罚得越多 —— 这正是被封顶抹掉的那个梯度
+
+
+def test_clamp_still_caps_a_genuine_outlier():
+    """粗一档就过不了:抬档位不等于取消封顶,离谱的一帧仍然被削平。"""
+
+    clamp = 128.0
+    assert _action_rate_value(4.0e4, clamp) == pytest.approx(clamp, abs=1e-6)
+
+
+# --------------------------------------------------------------------------------------------- #
 # virtual_landing 延付制(v2.2 修订:重生刷分漏洞的解)— 逐步推演
 # --------------------------------------------------------------------------------------------- #
 def _vb_env_with_clock(n=1):
