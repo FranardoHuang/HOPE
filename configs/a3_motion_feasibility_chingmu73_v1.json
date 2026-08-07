@@ -1,0 +1,370 @@
+{
+  "kind": "a3_motion_feasibility_v1",
+  "motion": "/workspace/franco/a3p0807_tn_20260808/bank/chingmu73_measured_a3p0807_20260808",
+  "clips": 73,
+  "verdicts": {
+    "OK_FOR_JUDGED_JOINTS": 4,
+    "BLOCKED": 69
+  },
+  "capture_brief": {
+    "pose_out_of_range": {
+      "remedy": "the POSE itself is outside the joint's usable range -- adjust stance, grip, table height or ready position; swinging slower will not help",
+      "joints": {
+        "right_wrist_yaw_joint": {
+          "clips": 65,
+          "worst": "0.1623 rad (9.3 deg) past the soft limit",
+          "phases": {
+            "pre_hit": 50,
+            "hit": 8,
+            "post_hit": 7
+          }
+        },
+        "right_shoulder_pitch_joint": {
+          "clips": 52,
+          "worst": "0.2880 rad (16.5 deg) past the soft limit",
+          "phases": {
+            "post_hit": 41,
+            "pre_hit": 11
+          }
+        },
+        "left_ankle_roll_joint": {
+          "clips": 22,
+          "worst": "0.0349 rad (2.0 deg) past the soft limit",
+          "phases": {
+            "pre_hit": 13,
+            "hit": 2,
+            "post_hit": 7
+          }
+        },
+        "right_ankle_roll_joint": {
+          "clips": 19,
+          "worst": "0.0201 rad (1.2 deg) past the soft limit",
+          "phases": {
+            "pre_hit": 14,
+            "hit": 1,
+            "post_hit": 4
+          }
+        },
+        "right_elbow_joint": {
+          "clips": 19,
+          "worst": "0.0971 rad (5.6 deg) past the soft limit",
+          "phases": {
+            "post_hit": 19
+          }
+        },
+        "right_shoulder_yaw_joint": {
+          "clips": 18,
+          "worst": "0.1551 rad (8.9 deg) past the soft limit",
+          "phases": {
+            "post_hit": 14,
+            "pre_hit": 4
+          }
+        },
+        "waist_pitch_joint": {
+          "clips": 9,
+          "worst": "0.0454 rad (2.6 deg) past the soft limit",
+          "phases": {
+            "pre_hit": 3,
+            "post_hit": 5,
+            "hit": 1
+          }
+        },
+        "waist_roll_joint": {
+          "clips": 7,
+          "worst": "0.0148 rad (0.8 deg) past the soft limit",
+          "phases": {
+            "post_hit": 5,
+            "pre_hit": 1,
+            "hit": 1
+          }
+        }
+      }
+    },
+    "speed_over_limit": {
+      "remedy": "this segment moves faster than the joint can turn -- shorten the backswing or slow the tempo through this part of the stroke",
+      "joints": {
+        "right_shoulder_pitch_joint": {
+          "clips": 14,
+          "worst": "|speed| is 1.00x the joint limit",
+          "phases": {
+            "hit": 7,
+            "pre_hit": 3,
+            "post_hit": 4
+          }
+        },
+        "waist_pitch_joint": {
+          "clips": 9,
+          "worst": "|speed| is 1.09x the joint limit",
+          "phases": {
+            "post_hit": 9
+          }
+        },
+        "waist_yaw_joint": {
+          "clips": 9,
+          "worst": "|speed| is 1.13x the joint limit",
+          "phases": {
+            "post_hit": 9
+          }
+        },
+        "right_wrist_pitch_joint": {
+          "clips": 2,
+          "worst": "|speed| is 1.01x the joint limit",
+          "phases": {
+            "pre_hit": 2
+          }
+        },
+        "right_shoulder_roll_joint": {
+          "clips": 1,
+          "worst": "|speed| is 1.03x the joint limit",
+          "phases": {
+            "hit": 1
+          }
+        }
+      }
+    },
+    "parallel_unjudged": {
+      "remedy": "a parallel 2x2 mechanism whose motor-space torque needs a pose-dependent Jacobian we do not hold -- not judged, and never reported as passing",
+      "joints": {
+        "left_ankle_pitch_joint": {
+          "clips": 73,
+          "worst": "parallel pair left_ankle",
+          "phases": {
+            "n/a": 73
+          }
+        },
+        "left_ankle_roll_joint": {
+          "clips": 73,
+          "worst": "parallel pair left_ankle",
+          "phases": {
+            "n/a": 73
+          }
+        },
+        "right_ankle_pitch_joint": {
+          "clips": 73,
+          "worst": "parallel pair right_ankle",
+          "phases": {
+            "n/a": 73
+          }
+        },
+        "right_ankle_roll_joint": {
+          "clips": 73,
+          "worst": "parallel pair right_ankle",
+          "phases": {
+            "n/a": 73
+          }
+        },
+        "waist_pitch_joint": {
+          "clips": 73,
+          "worst": "parallel pair waist",
+          "phases": {
+            "n/a": 73
+          }
+        },
+        "waist_roll_joint": {
+          "clips": 73,
+          "worst": "parallel pair waist",
+          "phases": {
+            "n/a": 73
+          }
+        }
+      }
+    },
+    "torque_reaction_limited": {
+      "remedy": "the joint is being flung or dragged: gravity, centrifugal or coupling dominates, so the torque is a REACTION to the rest of the body. Do not tell the performer to move this joint less. Either allow the joint to comply instead of tracking rigidly, or slow the PARENT segment that is throwing it",
+      "joints": {
+        "left_wrist_pitch_joint": {
+          "clips": 23,
+          "worst": "14.14 N*m against a 6.00 N*m envelope at 0.04 rad/s (2.36x); dominant term coupling at 80%, own-acceleration 1%",
+          "phases": {
+            "post_hit": 19,
+            "pre_hit": 2,
+            "hit": 2
+          }
+        },
+        "left_wrist_yaw_joint": {
+          "clips": 23,
+          "worst": "6.16 N*m against a 6.00 N*m envelope at 0.03 rad/s (1.03x); dominant term coupling at 125%, own-acceleration 2%",
+          "phases": {
+            "post_hit": 20,
+            "hit": 3
+          }
+        },
+        "right_wrist_pitch_joint": {
+          "clips": 14,
+          "worst": "8.58 N*m against a 6.00 N*m envelope at 7.94 rad/s (1.43x); dominant term coriolis at 103%, own-acceleration 17%",
+          "phases": {
+            "pre_hit": 9,
+            "post_hit": 2,
+            "hit": 3
+          }
+        },
+        "left_shoulder_roll_joint": {
+          "clips": 13,
+          "worst": "69.89 N*m against a 60.00 N*m envelope at 0.44 rad/s (1.16x); dominant term coupling at 61%, own-acceleration 16%",
+          "phases": {
+            "post_hit": 13
+          }
+        },
+        "right_wrist_yaw_joint": {
+          "clips": 11,
+          "worst": "8.25 N*m against a 6.00 N*m envelope at 7.43 rad/s (1.37x); dominant term coriolis at 110%, own-acceleration 14%",
+          "phases": {
+            "hit": 8,
+            "post_hit": 3
+          }
+        },
+        "left_shoulder_yaw_joint": {
+          "clips": 7,
+          "worst": "43.24 N*m against a 34.80 N*m envelope at 0.48 rad/s (1.24x); dominant term coriolis at 59%, own-acceleration 10%",
+          "phases": {
+            "post_hit": 6,
+            "hit": 1
+          }
+        },
+        "left_elbow_joint": {
+          "clips": 1,
+          "worst": "57.41 N*m against a 34.80 N*m envelope at 0.15 rad/s (1.65x); dominant term coupling at 53%, own-acceleration 6%",
+          "phases": {
+            "hit": 1
+          }
+        },
+        "left_shoulder_pitch_joint": {
+          "clips": 1,
+          "worst": "73.06 N*m against a 60.00 N*m envelope at 0.09 rad/s (1.22x); dominant term coupling at 65%, own-acceleration 16%",
+          "phases": {
+            "hit": 1
+          }
+        }
+      }
+    },
+    "frozen_joint_artifact": {
+      "remedy": "the retarget froze this joint, and holding it rigid against the body's swing costs torque -- this is a pipeline artifact, not something the performer did. Capture this joint's real motion, or accept it is not a capture finding",
+      "joints": {
+        "head_pitch_joint": {
+          "clips": 29,
+          "worst": "14.75 N*m against a 6.00 N*m envelope at 0.00 rad/s (2.46x); dominant term coupling at 103%, own-acceleration 0%",
+          "phases": {
+            "post_hit": 21,
+            "pre_hit": 1,
+            "hit": 7
+          }
+        }
+      }
+    },
+    "torque_drive_limited": {
+      "remedy": "the joint's OWN acceleration dominates the torque, so the motor genuinely cannot drive this segment -- reduce the angular acceleration here, i.e. make the direction change less abrupt",
+      "joints": {
+        "right_shoulder_pitch_joint": {
+          "clips": 4,
+          "worst": "418.83 N*m against a 60.00 N*m envelope at 6.07 rad/s (6.98x); dominant term coriolis at 164%, own-acceleration 112%",
+          "phases": {
+            "post_hit": 3,
+            "pre_hit": 1
+          }
+        },
+        "right_shoulder_roll_joint": {
+          "clips": 2,
+          "worst": "62.88 N*m against a 60.00 N*m envelope at 0.93 rad/s (1.05x); dominant term coriolis at 193%, own-acceleration 56%",
+          "phases": {
+            "post_hit": 1,
+            "hit": 1
+          }
+        },
+        "waist_yaw_joint": {
+          "clips": 1,
+          "worst": "297.38 N*m against a 220.00 N*m envelope at 7.68 rad/s (1.35x); dominant term own at 178%, own-acceleration 178%",
+          "phases": {
+            "post_hit": 1
+          }
+        },
+        "right_shoulder_yaw_joint": {
+          "clips": 1,
+          "worst": "37.43 N*m against a 34.80 N*m envelope at 2.07 rad/s (1.08x); dominant term coupling at 56%, own-acceleration 52%",
+          "phases": {
+            "hit": 1
+          }
+        }
+      }
+    }
+  },
+  "per_clip_verdicts": {
+    "hope_Take_058_unit02_FH.npz": "BLOCKED",
+    "hope_Take_058_unit03_FH.npz": "BLOCKED",
+    "hope_Take_058_unit04_FH.npz": "BLOCKED",
+    "hope_Take_058_unit05_FH.npz": "BLOCKED",
+    "hope_Take_058_unit06_FH.npz": "BLOCKED",
+    "hope_Take_058_unit07_FH.npz": "BLOCKED",
+    "hope_Take_058_unit08_FH.npz": "BLOCKED",
+    "hope_Take_058_unit11_FH.npz": "BLOCKED",
+    "hope_Take_058_unit12_FH.npz": "BLOCKED",
+    "hope_Take_058_unit13_FH.npz": "BLOCKED",
+    "hope_Take_058_unit14_FH.npz": "BLOCKED",
+    "hope_Take_059_unit01_FH.npz": "BLOCKED",
+    "hope_Take_059_unit03_FH.npz": "BLOCKED",
+    "hope_Take_060_unit00_BH.npz": "BLOCKED",
+    "hope_Take_060_unit01_BH.npz": "BLOCKED",
+    "hope_Take_060_unit02_BH.npz": "BLOCKED",
+    "hope_Take_060_unit04_BH.npz": "BLOCKED",
+    "hope_Take_060_unit05_BH.npz": "BLOCKED",
+    "hope_Take_060_unit06_BH.npz": "OK_FOR_JUDGED_JOINTS",
+    "hope_Take_060_unit07_BH.npz": "BLOCKED",
+    "hope_Take_060_unit08_BH.npz": "BLOCKED",
+    "hope_Take_060_unit09_BH.npz": "BLOCKED",
+    "hope_Take_060_unit10_BH.npz": "BLOCKED",
+    "hope_Take_060_unit11_BH.npz": "BLOCKED",
+    "hope_Take_060_unit12_BH.npz": "BLOCKED",
+    "hope_Take_060_unit13_BH.npz": "BLOCKED",
+    "hope_Take_061_unit00_BH.npz": "BLOCKED",
+    "hope_Take_061_unit02_BH.npz": "BLOCKED",
+    "hope_Take_061_unit04_BH.npz": "OK_FOR_JUDGED_JOINTS",
+    "hope_Take_061_unit05_BH.npz": "BLOCKED",
+    "hope_Take_061_unit06_BH.npz": "BLOCKED",
+    "hope_Take_061_unit07_BH.npz": "BLOCKED",
+    "hope_Take_061_unit08_BH.npz": "BLOCKED",
+    "hope_Take_061_unit09_BH.npz": "BLOCKED",
+    "hope_Take_061_unit10_BH.npz": "BLOCKED",
+    "hope_Take_061_unit11_BH.npz": "BLOCKED",
+    "hope_Take_061_unit12_BH.npz": "BLOCKED",
+    "hope_Take_061_unit13_BH.npz": "BLOCKED",
+    "hope_Take_061_unit14_BH.npz": "BLOCKED",
+    "hope_Take_061_unit15_BH.npz": "BLOCKED",
+    "hope_Take_061_unit16_BH.npz": "BLOCKED",
+    "hope_Take_061_unit17_BH.npz": "BLOCKED",
+    "hope_Take_061_unit18_BH.npz": "BLOCKED",
+    "hope_Take_061_unit19_BH.npz": "BLOCKED",
+    "hope_Take_061_unit20_BH.npz": "BLOCKED",
+    "hope_Take_061_unit21_BH.npz": "BLOCKED",
+    "hope_Take_061_unit22_BH.npz": "BLOCKED",
+    "hope_Take_061_unit24_BH.npz": "BLOCKED",
+    "hope_Take_061_unit25_BH.npz": "BLOCKED",
+    "hope_Take_062_unit00_BH.npz": "BLOCKED",
+    "hope_Take_062_unit01_BH.npz": "BLOCKED",
+    "hope_Take_062_unit02_BH.npz": "BLOCKED",
+    "hope_Take_062_unit04_BH.npz": "BLOCKED",
+    "hope_Take_062_unit05_BH.npz": "BLOCKED",
+    "hope_Take_062_unit06_BH.npz": "BLOCKED",
+    "hope_Take_062_unit07_BH.npz": "BLOCKED",
+    "hope_Take_062_unit08_BH.npz": "BLOCKED",
+    "hope_Take_062_unit09_BH.npz": "BLOCKED",
+    "hope_Take_062_unit10_BH.npz": "BLOCKED",
+    "hope_Take_062_unit11_BH.npz": "BLOCKED",
+    "hope_Take_063_unit00_BH.npz": "BLOCKED",
+    "hope_Take_063_unit01_BH.npz": "BLOCKED",
+    "hope_Take_063_unit02_BH.npz": "BLOCKED",
+    "hope_Take_063_unit03_BH.npz": "BLOCKED",
+    "hope_Take_063_unit04_BH.npz": "BLOCKED",
+    "hope_Take_063_unit05_BH.npz": "BLOCKED",
+    "hope_Take_064_unit00_BH.npz": "BLOCKED",
+    "hope_Take_064_unit02_BH.npz": "BLOCKED",
+    "hope_Take_064_unit03_BH.npz": "BLOCKED",
+    "hope_Take_064_unit04_BH.npz": "BLOCKED",
+    "hope_Take_064_unit05_BH.npz": "OK_FOR_JUDGED_JOINTS",
+    "hope_Take_064_unit06_BH.npz": "BLOCKED",
+    "hope_Take_064_unit07_FH.npz": "OK_FOR_JUDGED_JOINTS"
+  },
+  "schema_version": 1,
+  "manifest_type": "a3_motion_feasibility_chingmu73_v1",
+  "tool": "hope_training/whole_body_tracking/scripts/analyze_motion_feasibility.py",
+  "briefing": "docs/operations/capture_session_briefing_20260808.md",
+  "scope_note": "analysed at stride 4; torque terms are pinned-base with contacts disabled, so a clean clip is necessary but not sufficient, and the six parallel waist/ankle joints are never asserted to pass"
+}
