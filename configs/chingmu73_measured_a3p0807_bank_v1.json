@@ -1,0 +1,429 @@
+{
+  "schema_version": 1,
+  "manifest_type": "chingmu73_measured_a3p0807_bank_v1",
+  "bank_id": "chingmu73_measured_a3p0807_20260808",
+  "what_this_is": "the 73-clip measured-racket bank re-solved on the 0807 A3P-P1 plant, so it is consistent with the runtime default that agibot_a3.py now points at",
+  "supersedes_for_the_new_plant": "assets/motions/chingmu73_measured_v4_20260803 (same sources, solved on the 0409 plant)",
+  "sources": {
+    "unchanged_from_v4": true,
+    "evidence": "every clip's measured_racket_source_sha256 is the value the v4 bank pins; only the plant differs",
+    "unit_npz_root": "/workspace/yikang/chingmu_gmr/units on Pod1",
+    "body_retarget_pkl_root": "/workspace/yikang/chingmu_gmr/chingmu_a3_units_v2 on Pod1"
+  },
+  "plant": {
+    "key": "a3p_p1_0807",
+    "mjcf_sha256": "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1",
+    "model_set_manifest": "configs/a3p_p1_0807_model_set_v1.json"
+  },
+  "tools": {
+    "solver": {
+      "path": "hope_training/whole_body_tracking/scripts/legacy/solve_chingmu_canonical_racket_full_phase.v4d_20260803.py",
+      "sha256": "d6d6bfddb518e3809a1a39ee1fe0779703d8539370b1041ee82e56267f057af5",
+      "note": "the recovered v4-era solver, used pristine on 0409 and with a two-entry MJCF allowlist on 0807; the tracked current solver is a later, stricter tool and admits only 19 of 73"
+    },
+    "materializer": {
+      "path": "hope_training/whole_body_tracking/scripts/materialize_measured_racket_motion_npz.py",
+      "v4_pinned_sha256": "34cf0f4c91c5ed80235413dde0982bb05a24bf59708f889eea9e710dc1399fe4",
+      "modified_here": "MJCF pin became a two-plant allowlist; the v4 bytes remain recoverable from git history"
+    },
+    "auditor": {
+      "path": "hope_training/whole_body_tracking/scripts/audit_materialized_measured_racket_npz.py",
+      "v4_pinned_sha256": "ddcb90b3e81c10981b2498095c7701f43c8c28e2f98496726fbc58aa64fcddfa",
+      "modified_here": "same allowlist change"
+    }
+  },
+  "denominators": {
+    "clips": 73,
+    "solver_admitted": 73,
+    "materialized": 73,
+    "audited": 73,
+    "audit_all_gates_true": 73
+  },
+  "control_against_the_old_plant": {
+    "design": "the same sources, venv, solver and inputs were also run on the 0409 plant; only the MJCF varies",
+    "solver_admitted_0409": 73,
+    "audit_all_gates_true_0409": 73,
+    "solver_gate_differences_between_plants": 0,
+    "audit_gate_differences_between_plants": 0,
+    "residual_movement": "p95 residuals move by at most 0.11 deg (face, gate 10 deg) and 0.82 mm (position, gate 50 mm), about 1% of gate budget",
+    "conclusion": "the plant swap is benign for retargeting, measured on all 73 clips rather than extrapolated from one"
+  },
+  "closure": {
+    "file_count": 73,
+    "total_bytes": 11099719,
+    "sha256": "1a6a2f579e765af11711348f4ffdb58eed30821f847cd5062052ab493e83cd2a",
+    "files": [
+      {
+        "path": "hope_Take_058_unit02_FH.npz",
+        "bytes": 202779,
+        "sha256": "765afa4a6a590e1f9d4949cf7a054235d0c25f347907fee584f06f16dcb941b2"
+      },
+      {
+        "path": "hope_Take_058_unit03_FH.npz",
+        "bytes": 173559,
+        "sha256": "9c8a468c54406a2dd879cc30099138451367d420ca56e42500888779474faca2"
+      },
+      {
+        "path": "hope_Take_058_unit04_FH.npz",
+        "bytes": 193039,
+        "sha256": "56187d61a81dcdc50f685020080ee691eedd9f3f6921028a5e6646ab5f27bf55"
+      },
+      {
+        "path": "hope_Take_058_unit05_FH.npz",
+        "bytes": 191091,
+        "sha256": "e85ada8ed5ede939c489ee8dd889e96fe525da71717772b61a42f1e95b172360"
+      },
+      {
+        "path": "hope_Take_058_unit06_FH.npz",
+        "bytes": 204727,
+        "sha256": "127044280b6a1d27dd562265ac299d82d3144b4277bdeacc69a737979d86addc"
+      },
+      {
+        "path": "hope_Take_058_unit07_FH.npz",
+        "bytes": 194987,
+        "sha256": "8012dae231ea03133a7ae17e0a9143a0034f9d3518a7c8c3200a227a6ddfafee"
+      },
+      {
+        "path": "hope_Take_058_unit08_FH.npz",
+        "bytes": 181351,
+        "sha256": "2c593c9263ea285aedef0b8a4b2f53a91719bebd4861ff40e27f72df13fb5d4c"
+      },
+      {
+        "path": "hope_Take_058_unit11_FH.npz",
+        "bytes": 185247,
+        "sha256": "3ada5ee7a3571640822f704ce9b7b37abc82914dcdfb330bdd56172f0c3fa9b5"
+      },
+      {
+        "path": "hope_Take_058_unit12_FH.npz",
+        "bytes": 194987,
+        "sha256": "190a6982833dff65dc5a160336f53f8deebdb671e743d2e92b1ef0bd0f1ea3c5"
+      },
+      {
+        "path": "hope_Take_058_unit13_FH.npz",
+        "bytes": 173559,
+        "sha256": "6ea642c2165fe5db189b9043711011f1810f22f4c31cc18eea57970f5c902299"
+      },
+      {
+        "path": "hope_Take_058_unit14_FH.npz",
+        "bytes": 183299,
+        "sha256": "b68381fa90ebcd4e9ec2f0523be084d3056c08074f81e2cb14b2d8eeaebe3a8e"
+      },
+      {
+        "path": "hope_Take_059_unit01_FH.npz",
+        "bytes": 177455,
+        "sha256": "c8c2d32ed35c58daba6c7fc7f97289669611c76fffc312a81d8a0e00f4df975b"
+      },
+      {
+        "path": "hope_Take_059_unit03_FH.npz",
+        "bytes": 189143,
+        "sha256": "4e58e20dd25ea5c3f2dcbf7fe41e1bce56fed0ea9f5bc8c28df6f407fb3eb9ad"
+      },
+      {
+        "path": "hope_Take_060_unit00_BH.npz",
+        "bytes": 157975,
+        "sha256": "bf9ed8c2cbc5a9ac7d3de953fe67258b05026ba9f14327b152b0e2d5d92ea45e"
+      },
+      {
+        "path": "hope_Take_060_unit01_BH.npz",
+        "bytes": 183299,
+        "sha256": "ca3c1e8eecf37046b98c98d5180f56120806efda53bf5535a632347ff6dfe5d9"
+      },
+      {
+        "path": "hope_Take_060_unit02_BH.npz",
+        "bytes": 161871,
+        "sha256": "271b7fd55f36bf93cb770ecd1315b8346db800e8740e465b5718bb852f6d024c"
+      },
+      {
+        "path": "hope_Take_060_unit04_BH.npz",
+        "bytes": 85899,
+        "sha256": "94c61e9faa974b25a383979291d38175df8352b5a6e01b38e83731723de4992b"
+      },
+      {
+        "path": "hope_Take_060_unit05_BH.npz",
+        "bytes": 119015,
+        "sha256": "5d4a0f593773db35143e110224093bc6866709fec2aa91e813144d966e6f46b4"
+      },
+      {
+        "path": "hope_Take_060_unit06_BH.npz",
+        "bytes": 136547,
+        "sha256": "6cc2eb787a9491fcc07f9877a9ebd4ed1ac5fc5dcb1f22cef518afb471fd32c9"
+      },
+      {
+        "path": "hope_Take_060_unit07_BH.npz",
+        "bytes": 134599,
+        "sha256": "d8125f0d800c81be1d1ab6e2e3d5fd048f4ef1adef717c70ba9f55915948db56"
+      },
+      {
+        "path": "hope_Take_060_unit08_BH.npz",
+        "bytes": 152131,
+        "sha256": "9e696eb9695858fdade08a8fb88457f4fa1368e378ab7321296e12f1984dffd0"
+      },
+      {
+        "path": "hope_Take_060_unit09_BH.npz",
+        "bytes": 144339,
+        "sha256": "593f8798eeb57193d31a55e2dad54e4ecf7d714762fab80f1f782b0a7815228a"
+      },
+      {
+        "path": "hope_Take_060_unit10_BH.npz",
+        "bytes": 163819,
+        "sha256": "44dda9acae49f80aff8d72279b84950d3b8bb36b30cff7827cc93e3f90b51b13"
+      },
+      {
+        "path": "hope_Take_060_unit11_BH.npz",
+        "bytes": 167715,
+        "sha256": "982292e03f49b8937c815ca9c6b4bdf5203636d81e9c6c1b1d41ae63b91a67c4"
+      },
+      {
+        "path": "hope_Take_060_unit12_BH.npz",
+        "bytes": 126807,
+        "sha256": "52c45422f3306a3a4171eed7b5cd276b5755fc64a64f5356c5516ec9963630fa"
+      },
+      {
+        "path": "hope_Take_060_unit13_BH.npz",
+        "bytes": 191091,
+        "sha256": "50a9041a76bbe5a1087c720cda231923ce1c4709162d5e86a36fb876602c17ac"
+      },
+      {
+        "path": "hope_Take_061_unit00_BH.npz",
+        "bytes": 167715,
+        "sha256": "f5e50a2fe7506ba7e61d0133bd3fe105139954ebc4eb1a13d10b035a10d85b1e"
+      },
+      {
+        "path": "hope_Take_061_unit02_BH.npz",
+        "bytes": 105379,
+        "sha256": "5e73bd7a049b7d2b03877352135b5cf18d411b5ca58eb8420df38c426bd4497d"
+      },
+      {
+        "path": "hope_Take_061_unit04_BH.npz",
+        "bytes": 126807,
+        "sha256": "c7eb9af036b5f47b62f3e646d68e4fc8523c433a79d0fc037981407b4d7918a7"
+      },
+      {
+        "path": "hope_Take_061_unit05_BH.npz",
+        "bytes": 140443,
+        "sha256": "635f67733b2046fc7e9382b5bfa75939545d3d64ac7bdbe091c3308f962ed3e5"
+      },
+      {
+        "path": "hope_Take_061_unit06_BH.npz",
+        "bytes": 196935,
+        "sha256": "925662d6e4b0c69ee401410bd575fe9e41a8bb0e0cf8243a5084336cce3b81b4"
+      },
+      {
+        "path": "hope_Take_061_unit07_BH.npz",
+        "bytes": 83951,
+        "sha256": "49dbda922bf44e9ec1da42fc91658f6c815aad3e1ec31a814c70ff1d47e9455e"
+      },
+      {
+        "path": "hope_Take_061_unit08_BH.npz",
+        "bytes": 126807,
+        "sha256": "e9f5601841fa6673e586cbfe1c160fa7c5f2c8f1268c3edde252bfbb9ffea6b6"
+      },
+      {
+        "path": "hope_Take_061_unit09_BH.npz",
+        "bytes": 249531,
+        "sha256": "ea931ff4f8b623bbe9ac6b65d5fd005324c2ee8ae287e57352e68b67f8fd8fc4"
+      },
+      {
+        "path": "hope_Take_061_unit10_BH.npz",
+        "bytes": 68367,
+        "sha256": "3eea835b297a0991fb53dd9492949335482910a4e3780542d03dc892282d8718"
+      },
+      {
+        "path": "hope_Take_061_unit11_BH.npz",
+        "bytes": 132651,
+        "sha256": "8aa6a5ff6b6aca4ae9d0b5f25cbc9fd9579bc593de3725602145c438586ccf92"
+      },
+      {
+        "path": "hope_Take_061_unit12_BH.npz",
+        "bytes": 117067,
+        "sha256": "4db348d9665e845e46d8779a59a0f6a6fa11e13342d88250ae3cddb0671143c6"
+      },
+      {
+        "path": "hope_Take_061_unit13_BH.npz",
+        "bytes": 111223,
+        "sha256": "1e56beb87fa99003d28c4fbcdfd6203edb0d902f1e0fefb2968d729e889b0eb6"
+      },
+      {
+        "path": "hope_Take_061_unit14_BH.npz",
+        "bytes": 130703,
+        "sha256": "ff8f4287d7eaeb7a4b68d85e6e5681715d0f9635440f26e314e6062badbf9b10"
+      },
+      {
+        "path": "hope_Take_061_unit15_BH.npz",
+        "bytes": 202779,
+        "sha256": "ce31cc11270c260f9e4aad150b626cf27306f50068cfcd58ea4498616a565673"
+      },
+      {
+        "path": "hope_Take_061_unit16_BH.npz",
+        "bytes": 130703,
+        "sha256": "53e39aaa7aa04cc8b3f38b70cc180e457c60b5040814e542718dc9a3fa41d104"
+      },
+      {
+        "path": "hope_Take_061_unit17_BH.npz",
+        "bytes": 126807,
+        "sha256": "c77c33593e9893a08d389f33e106f9892d8a343c677a51b15377a9e54a15280f"
+      },
+      {
+        "path": "hope_Take_061_unit18_BH.npz",
+        "bytes": 80055,
+        "sha256": "2cd54af112946ca7a6dc4374239fcaac15bd35b9363033ebfc4d4d012a7ff024"
+      },
+      {
+        "path": "hope_Take_061_unit19_BH.npz",
+        "bytes": 111223,
+        "sha256": "79822ca88e4ce08f41a74d9e3687eac0e8b3d457ba4df79ff1dabcf0388995e9"
+      },
+      {
+        "path": "hope_Take_061_unit20_BH.npz",
+        "bytes": 128755,
+        "sha256": "364426430291cbab9cb21c34faaca216a31d6733cb2e237b10191ae777cabe46"
+      },
+      {
+        "path": "hope_Take_061_unit21_BH.npz",
+        "bytes": 126807,
+        "sha256": "7f357babf428ef25a2c59759535ae6b479e05acc71db721754a435638072e508"
+      },
+      {
+        "path": "hope_Take_061_unit22_BH.npz",
+        "bytes": 169663,
+        "sha256": "ce427ac21ad458f7d8c4d105a35f7bf42b109f972c461a06e272994dfbf5cd1b"
+      },
+      {
+        "path": "hope_Take_061_unit24_BH.npz",
+        "bytes": 191091,
+        "sha256": "7cf088bef54e6893cc1c38b695b29195ba1db1f12f3f382b43a3a644eac82de9"
+      },
+      {
+        "path": "hope_Take_061_unit25_BH.npz",
+        "bytes": 93691,
+        "sha256": "5709606f7e147e34fdd9fa3486ffba00987b8fa554b5f63073d356c9bc4fd5cf"
+      },
+      {
+        "path": "hope_Take_062_unit00_BH.npz",
+        "bytes": 152131,
+        "sha256": "37855ab61e60cadb0aec991a98ea7ac2c1f5fd214ccd466f29cb15e9cdb4c5a3"
+      },
+      {
+        "path": "hope_Take_062_unit01_BH.npz",
+        "bytes": 150183,
+        "sha256": "bde34829485a9b14b3853069e8fa64d96aa96ca8ed1cfa9005967c17085c5dbe"
+      },
+      {
+        "path": "hope_Take_062_unit02_BH.npz",
+        "bytes": 120963,
+        "sha256": "a1ff0d8824502212da89ba4125157c3676fed6de9baf9ebd73e0551116e71398"
+      },
+      {
+        "path": "hope_Take_062_unit04_BH.npz",
+        "bytes": 126807,
+        "sha256": "60b27e4848146ff3831dc73e97d58e46e02274ab74ef5f63686aec97d4277ec3"
+      },
+      {
+        "path": "hope_Take_062_unit05_BH.npz",
+        "bytes": 154079,
+        "sha256": "e43788aa27bf5561903697cb4daaf4b8c79243f0bacf527f6c2c2a20b7252fde"
+      },
+      {
+        "path": "hope_Take_062_unit06_BH.npz",
+        "bytes": 128755,
+        "sha256": "5acf2f938097149879759298064d10a1afdca6644e88b81c06aeb256dd862424"
+      },
+      {
+        "path": "hope_Take_062_unit07_BH.npz",
+        "bytes": 183299,
+        "sha256": "e112f03a227f27e22ddc7c77ec86741dc0b8bb6175c89796d00bc62d235e8c49"
+      },
+      {
+        "path": "hope_Take_062_unit08_BH.npz",
+        "bytes": 72263,
+        "sha256": "260728e440a9591ab382d6dbb079724eb6f057f6c3590597a639cc99b4ca70c8"
+      },
+      {
+        "path": "hope_Take_062_unit09_BH.npz",
+        "bytes": 130703,
+        "sha256": "e101939313ea2d3c5ef7ae94c7caa7bd8f9519ebe2e85a3288b671036c6aa293"
+      },
+      {
+        "path": "hope_Take_062_unit10_BH.npz",
+        "bytes": 200831,
+        "sha256": "9491f80cbcec38c8f64c0af013159095cf454e2d13fef085ae5ba4d635caf326"
+      },
+      {
+        "path": "hope_Take_062_unit11_BH.npz",
+        "bytes": 274855,
+        "sha256": "a841fa43224a18b295927cc325341b3a83169f990ffc0efd66e2c7a8f5d6da6c"
+      },
+      {
+        "path": "hope_Take_063_unit00_BH.npz",
+        "bytes": 140443,
+        "sha256": "149072c17e838a3251036e1a1abb54a14b68cbe777bba96d2058ca80aa92c253"
+      },
+      {
+        "path": "hope_Take_063_unit01_BH.npz",
+        "bytes": 91743,
+        "sha256": "a5f33b2c4b1fe12534d0bd2bda70469f98655fbb4ca2be6c3e77e29aab6fee3a"
+      },
+      {
+        "path": "hope_Take_063_unit02_BH.npz",
+        "bytes": 163819,
+        "sha256": "47fccf6b0970397095bb7df78d8611b2f7148e4e167ce0312ed247f0103e3329"
+      },
+      {
+        "path": "hope_Take_063_unit03_BH.npz",
+        "bytes": 239791,
+        "sha256": "f06ec643b6348fa0e066fbdf6321ba0e3d4c33180b5582469f94a028558489d0"
+      },
+      {
+        "path": "hope_Take_063_unit04_BH.npz",
+        "bytes": 218363,
+        "sha256": "94e1bbc453f85cb00c7c35f85e08b78f04a06cf767b1ccc6f8e96152524111a1"
+      },
+      {
+        "path": "hope_Take_063_unit05_BH.npz",
+        "bytes": 200831,
+        "sha256": "50f4b7a7aaba57765b10371b0eb46ff4b66e60d59c4b6e42d77388f337636726"
+      },
+      {
+        "path": "hope_Take_064_unit00_BH.npz",
+        "bytes": 124859,
+        "sha256": "2cf48ccf0505793b11e1a6dac298ee7775b59d2852705a2e953d5e8a699bdedd"
+      },
+      {
+        "path": "hope_Take_064_unit02_BH.npz",
+        "bytes": 136547,
+        "sha256": "eda28d3944f2afc7fa94091de2f7fbf85bc881e0fc54eda9aaa757e73fac9e2d"
+      },
+      {
+        "path": "hope_Take_064_unit03_BH.npz",
+        "bytes": 91743,
+        "sha256": "349cee0906cd803c223c9a737028db8d622f2562d675dfe1dae0daba1220f038"
+      },
+      {
+        "path": "hope_Take_064_unit04_BH.npz",
+        "bytes": 167715,
+        "sha256": "be737c95fbe37e966407989b459d3321a1eb5644001457ba5769abcf9bff24f7"
+      },
+      {
+        "path": "hope_Take_064_unit05_BH.npz",
+        "bytes": 87847,
+        "sha256": "7a187ed5b91f018bb0c86ab5e6bd7fbc17219cc881f5f5eda4d2a20c7d2ceb43"
+      },
+      {
+        "path": "hope_Take_064_unit06_BH.npz",
+        "bytes": 124859,
+        "sha256": "8cb148cb2203626f2790c121ba7e48fb28b08fec7557461ba3be550ad9fded8f"
+      },
+      {
+        "path": "hope_Take_064_unit07_FH.npz",
+        "bytes": 126807,
+        "sha256": "f5ce5e22c007d3faddccd182d492a0d5015610603dc785969d085893d462d717"
+      }
+    ]
+  },
+  "authorization": {
+    "diagnostic_unauthorized": true,
+    "training_authorized": false,
+    "deployment_authorized": false,
+    "note": "this bank is now consistent with the runtime plant, which the v4 bank no longer is; it has NOT been through the mechanical-admission or bank-promotion gates"
+  }
+}

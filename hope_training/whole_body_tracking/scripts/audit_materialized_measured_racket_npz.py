@@ -31,9 +31,14 @@ ROBOT_BUTT_TO_BLADE_AXIS_LOCAL = np.asarray(
 ROBOT_RIGID_VISUAL_MESH_SHA256 = (
     "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
 )
-EXPECTED_MJCF_SHA256 = (
-    "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
-)
+# A plant is admissible only if its MJCF appears here.  Keyed rather than a bare set so a
+# receipt can say WHICH plant produced a bank instead of only that some known one did.
+KNOWN_MJCF_SHA256 = {
+    "a3t2p5_0409": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "a3p_p1_0807": "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1",
+}
+# Kept so existing importers keep resolving to the plant the v4 bank was built against.
+EXPECTED_MJCF_SHA256 = KNOWN_MJCF_SHA256["a3t2p5_0409"]
 
 
 def _percentiles(values: np.ndarray) -> dict[str, float]:
@@ -111,10 +116,10 @@ def audit(
     uid: str,
 ) -> dict:
     actual_model_sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
-    if actual_model_sha256 != EXPECTED_MJCF_SHA256:
+    if actual_model_sha256 not in KNOWN_MJCF_SHA256.values():
         raise MaterializationError(
-            "canonical MJCF SHA-256 changed: "
-            f"expected {EXPECTED_MJCF_SHA256}, got {actual_model_sha256}"
+            "MJCF is not a known plant: "
+            f"got {actual_model_sha256}, known are {sorted(KNOWN_MJCF_SHA256.values())}"
         )
     try:
         import mujoco
