@@ -2351,17 +2351,23 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
     # ledger): command clipping must not hide inertial actual-joint intrusion, while actual-q
     # tracking must not hide an exploitative command that happens not to be realized yet.
     #
-    # At policy_dt=0.02, weight -5 and floor 0.25 charge at least -0.025 per intruding joint per
-    # channel per step.  A one-joint micro-intrusion sustained for one second costs -1.25 in one
-    # channel (-2.5 if both command and plant persist); a full-depth joint costs at most -0.10 per
-    # channel per step.  The impossible single-step maximum (31 joints, both channels) is -6.2;
-    # immutable hard termination remains the safety backstop.
+    # 2026-08-07 Franco 裁定二(形状照开源对齐)后的口径 —— 四处一起变,不能只改权重号码:
+    #   1. 核函数:``1-exp(-4u)`` 封顶 1 -> **软限位处磨圆的开源 L1 hinge**,尾部斜率恒 1 rad/rad、无上界。
+    #   2. 地板:不删,**挪到机械硬限位**。软带内因此完全连续,反利用性质靠硬限位那个不连续点保住。
+    #   3. 带宽:``margin_frac`` 0.05 -> **0.02**。旧值恰好等于护栏的投影内沿,被钳关节正好压在
+    #      带外沿上,``intrusion`` 由浮点舍入决定(实测 29/31 个关节命中);0.02 让带边离开 clamp 边。
+    #   4. 量纲:每关节归一 [0,1] -> **rad**。所以权重不能沿用 -5,必须换成开源 rad 口径的数。
+    # 形状基准 = **我们自己的上游 BeyondMimic**(``tracking_env_cfg.py`` 里那条 ``joint_limit``
+    # = ``mdp.joint_pos_limits`` @ 全 31 关节,上游权重与我们这里采纳的是同一个数),
+    # 与 IsaacLab / mjlab-tracking / unitree-mimic 四家逐字同核、同 -10、同全关节。
+    # 交叉验证:build_1 收敛态全身越软限位总量 0.003 rad,-10 x 0.003 x dt = -0.0006/步,
+    # 与它日志里 ``Episode_Reward/joint_limit`` 实测逐位吻合。
     qdes_limit_barrier = RewTerm(
         func=mdp.qdes_limit_barrier_v2,
-        weight=-5.0,
+        weight=-10.0,
         params={
             "action_name": "joint_pos",
-            "margin_frac": 0.08,
+            "margin_frac": 0.02,
             "penalty_floor": 0.25,
         },
     )
@@ -2370,7 +2376,7 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
         weight=1.0,
         params={
             "action_name": "joint_pos",
-            "margin_frac": 0.08,
+            "margin_frac": 0.02,
             "penalty_floor": 0.25,
         },
     )
@@ -2378,27 +2384,26 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
     # reset.  This independent cost teaches the actor to keep its mean/noise inside that envelope;
     # the existing q_des barrier above still shapes the *executed* target near its soft edge.
     #
-    # With shape_rate 4, a 10%-of-envelope projection costs 0.330 before weighting.  At
-    # policy_dt=0.02 and the adopted weight -5 that is -0.033 per affected joint-step; the
-    # asymptotic maximum is -0.10 per joint-step.  Since all 31 joints are summed, -5 is the
-    # conservative main-run dose that cannot easily swamp early imitation/hit income.  A -20
-    # strong-dose comparison may be preregistered separately; it is not tonight's default.
+    # 2026-08-07 裁定二:核换成同一族的开源线性尾巴(见 hope_rewards 的 docstring),
+    # ``knee_frac=0.05`` 让折角落在一个 barrier 带宽处,``d > c`` 之后每多 1 rad 就多罚 1 个单位。
+    # 权重 -5 -> **-1**:同等策略水平(我们 u4 vs build_1 iter 2--4)下,本项每步剂量落在
+    # ``-0.027 ~ -0.099``,而 build_1 当时整条 qdes 轴是 ``-0.0635/步`` —— 同量级,不再是 3.5 倍。
     qdes_projection_penalty = RewTerm(
         func=mdp.qdes_projection_penalty,
-        weight=-5.0,
+        weight=-1.0,
         params={
             "action_name": "joint_pos",
-            "shape_rate": 4.0,
+            "knee_frac": 0.05,
         },
     )
-    # Override Isaac Lab's inherited ``joint_pos_limits`` tail: that legacy term is exactly zero
-    # until actual q has already crossed the soft limit, so it cannot prevent "grazing" the band.
+    # 这条就是上游 BeyondMimic 的 ``joint_pos_limits``,只是限位处的折角被磨圆(见 kernel docstring)。
+    # ``margin_frac -> 0`` 时逐点退回开源原式;权重 ``-10`` 与上游/mjlab-tracking/unitree-mimic 同值。
     joint_limit = RewTerm(
         func=mdp.actual_joint_limit_barrier_v2,
-        weight=-5.0,
+        weight=-10.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-            "margin_frac": 0.08,
+            "margin_frac": 0.02,
             "penalty_floor": 0.25,
             "expected_joint_count": 31,
         },
@@ -2408,7 +2413,7 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
         weight=1.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-            "margin_frac": 0.08,
+            "margin_frac": 0.02,
             "penalty_floor": 0.25,
             "expected_joint_count": 31,
         },

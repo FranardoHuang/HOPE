@@ -1231,6 +1231,16 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 "pre_advantage_reward_semantics": (
                     "ppo_storage_reward_after_timeout_bootstrap"
                 ),
+                # 2026-08-07 裁定一的前置:深度遥测必须落到 run.log 的 economy JSON 里。
+                # 机制层每步都在算这些数,但在此之前从来没有一个消费方把它们写进收据,
+                # 于是"38% 的样本各罚 1 个关节"和"1.2% 的样本各罚 31 个"根本分不开 ——
+                # 而按深度验收的前提正是先能读到深度。只读快照,不清零,与既有 Live/ 消费方并存。
+                "joint_limit_depth": self._reward_ppo_economy_depth_telemetry(),
+                "joint_limit_depth_semantics": (
+                    "max_intrusion_depth_frac is in band widths: 1.0 sits exactly on "
+                    "the soft limit and >1.0 has already crossed it; projection "
+                    "distances are fractions of the target-envelope span"
+                ),
             },
             "advantage": {
                 "pre_normalization_mean_std_min_max": pre_advantage,
@@ -1240,6 +1250,16 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 "normalization_population": "whole_rollout_98304_samples",
             },
         }
+
+    def _reward_ppo_economy_depth_telemetry(self):
+        """Snapshot the qdes/actual depth counters for the economy receipt."""
+
+        from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+            peek_qdes_depth_telemetry,
+        )
+
+        env = getattr(self.env, "unwrapped", self.env)
+        return peek_qdes_depth_telemetry(env)
 
     @staticmethod
     def _economy_gradient_norm(parameters) -> torch.Tensor:

@@ -123,6 +123,16 @@ def _producer_prelong_binding(safety):
                 "strict_zero_counters": {
                     key: safety[key] for key in barrier.STRICT_ZERO_SAFETY_KEYS
                 },
+                # 2026-08-07 裁定三:硬边观测两侧必须逐位一致,而且两侧都要自陈"不阻断"。
+                "actual_hard_edge_counters": {
+                    key: safety[key] for key in barrier.REPORTED_HARD_EDGE_KEYS
+                },
+                "actual_hard_edge_blocking": False,
+                "actual_hard_edge_warnings": [
+                    "WARN actual-q hard edge observed: %s=%d" % (key, safety[key])
+                    for key in sorted(barrier.REPORTED_HARD_EDGE_KEYS)
+                    if safety[key] != 0
+                ],
                 "task_wait_started_by_update": safety[
                     "task_wait_started_by_update"
                 ],
@@ -293,6 +303,8 @@ def _audits(tmp_path: Path):
                 "all_tensors_finite": True,
             },
             "safety_counters": _producer_safety(),
+            # 2026-08-07 裁定三:硬边观测抬到每格顶层的摘要行(全零时是空列表)。
+            "warnings": [],
             "safety_reward_economy": dict(
                 barrier.EXPECTED_SAFETY_REWARD_ECONOMY
             ),
@@ -634,11 +646,13 @@ def test_all_four_pass_builds_one_exact_long_only_receipt(tmp_path: Path):
         barrier.TERMINAL_ACCEPTANCE_POLICY
     )
     # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0。
+    # 2026-08-07 裁定二(exp §5.6.22):限位三项换开源 rad 口径 -> -10 / -1 / -10。
+    # 旧 -5 是"每关节归一 [0,1]"口径,与新数不可比,不是同一把尺子上的调价。
     assert document["safety_reward_economy"] == {
         "death_penalty": -10.0,
-        "qdes_limit": -5.0,
-        "qdes_projection": -5.0,
-        "joint_limit": -5.0,
+        "qdes_limit": -10.0,
+        "qdes_projection": -1.0,
+        "joint_limit": -10.0,
     }
     assert [row["cell_id"] for row in document["cells"]] == list(
         barrier._F.CELL_IDS

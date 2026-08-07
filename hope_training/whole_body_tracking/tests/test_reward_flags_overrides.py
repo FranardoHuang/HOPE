@@ -3143,8 +3143,9 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
             # 权威是 train.py 的 _REWARD_PACK_V2_DIRECT 与 HOPEPingPongActionBall.yaml:151。
             "death_penalty": -10.0,
             "table_hit_penalty": 0.0,
-            "qdes_limit_barrier": -5.0,
-            "joint_limit": -5.0,
+            # 2026-08-07 裁定二:核/量纲换开源 rad 口径,权重随之 -5 -> -10。
+            "qdes_limit_barrier": -10.0,
+            "joint_limit": -10.0,
         }
     )
     assert R.racket_position.params["std"] == pytest.approx(0.075)
@@ -3152,22 +3153,22 @@ def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
     assert R.racket_normal.params["std"] == pytest.approx(0.262)
     # 0.08 -> 0.05:HOPEPingPongActionBall.yaml:169 的显式键,唯一权威在那份 yaml 的注释里
     #(barrier 带宽必须 <= pre-apply guard 的 0.05*span 投影内缩量,否则是护栏自造底噪)。
-    assert R.qdes_limit_barrier.params["margin_frac"] == pytest.approx(0.05)
+    assert R.qdes_limit_barrier.params["margin_frac"] == pytest.approx(0.02)
     assert R.qdes_limit_barrier_probe.weight == pytest.approx(1.0)
     # 探针必须与实罚同带宽,否则运行期直接炸(不是慢性偏差):
     # hope_rewards.py:2910 在同一步里比对两者的 (action_name, margin_frac, penalty_floor)
     # 签名,不一致就 raise "probe and RewardTerm used different parameters in one step"。
     # train.py:14012-14013 靠 params.clear()+update(实罚 params) 保证这一点;
     # 0.08 -> 0.05 之后这条配对没有任何测试钉住,补一条,免得日后有人只改一边。
-    assert R.qdes_limit_barrier_probe.params["margin_frac"] == pytest.approx(0.05)
+    assert R.qdes_limit_barrier_probe.params["margin_frac"] == pytest.approx(0.02)
     assert (
         R.qdes_limit_barrier_probe.params == R.qdes_limit_barrier.params
     ), "qdes barrier 探针与实罚的 params 必须逐键相等(运行期签名校验)"
     # actual-q 通道必须跟着一起走到 0.05。train.py 的 v2 硬合同逐字段比对两条通道的
     # weight/margin_frac/penalty_floor,只改 q_des 一边 = 开机即 RuntimeError
     #("qdes/actual soft-limit barrier v2 margin_frac must match exactly")。
-    assert R.joint_limit.params["margin_frac"] == pytest.approx(0.05)
-    assert R.actual_joint_limit_barrier_probe.params["margin_frac"] == pytest.approx(0.05)
+    assert R.joint_limit.params["margin_frac"] == pytest.approx(0.02)
+    assert R.actual_joint_limit_barrier_probe.params["margin_frac"] == pytest.approx(0.02)
     assert R.actual_joint_limit_barrier_probe.weight == pytest.approx(1.0)
     assert R.joint_limit.params["margin_frac"] == R.qdes_limit_barrier.params["margin_frac"]
     assert R.joint_limit.weight == R.qdes_limit_barrier.weight
@@ -3219,7 +3220,7 @@ def _soft_limit_v2_contract_fixture(monkeypatch):
     asset_cfg = _NS(name="robot", joint_ids=slice(None))
     rewards = _NS(
         qdes_limit_barrier=_Term(
-            weight=-5.0,
+            weight=-10.0,
             func=qdes_limit_barrier_v2,
             params={"action_name": "joint_pos", **shared},
         ),
@@ -3229,7 +3230,7 @@ def _soft_limit_v2_contract_fixture(monkeypatch):
             params={"action_name": "joint_pos", **shared},
         ),
         joint_limit=_Term(
-            weight=-5.0,
+            weight=-10.0,
             func=actual_joint_limit_barrier_v2,
             params={
                 "asset_cfg": asset_cfg,
@@ -3271,16 +3272,23 @@ def test_soft_limit_v2_training_contract_binds_real_callables_and_two_channels(
         ".actual_joint_limit_barrier_v2_probe"
     )
     for key, expected in (
-        ("weight", -5.0),
+        ("weight", -10.0),
         ("margin_frac", 0.08),
         ("penalty_floor", 0.25),
-        ("shape_rate", 4.0),
         ("stance_eps", 0.005),
         ("margin_floor", 0.005),
-        ("per_joint_cap", 1.0),
     ):
         assert qdes[key] == pytest.approx(expected)
         assert actual[key] == pytest.approx(expected)
+    # 2026-08-07 裁定二:新核**没有每关节上限**,语义面必须自陈 rad 口径与线性尾。
+    for key, expected in (
+        ("per_joint_cap", None),
+        ("kernel_unit", "radian"),
+        ("tail", "linear_unbounded_slope_one_per_radian"),
+    ):
+        assert qdes[key] == expected
+        assert actual[key] == expected
+    assert "shape_rate" not in qdes and "shape_rate" not in actual
     assert qdes["aggregation"] == actual["aggregation"] == "sum_all_31_joints"
     assert qdes["gate"] == actual["gate"] == "dense_every_control_step"
 

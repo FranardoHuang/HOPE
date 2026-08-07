@@ -58,17 +58,31 @@ PRODUCER_SAFETY_KEYS = (
     "task_reveal_reached_by_update",
     "task_reveal_reached_count",
 )
+# 2026-08-07 Franco 裁定三:实际-q 机械硬边从"拒收条件"降级为"照记不照拦"。
+# 逐条留下的理由与 pre-long gate 里的 STRICT_ZERO_SAFETY_COUNTERS 注释一致 ——
+# 留下的四条验的是数值/接线健康(NaN、terminate=False 有没有退化),不是可学会的行为。
 STRICT_ZERO_SAFETY_KEYS = (
-    "actual_hard_edge_event_count",
-    "actual_hard_terminal_count",
     "joint_qdes_forbidden_terminal_count",
     "joint_actual_forbidden_terminal_count",
     "strict_hard_termination_count",
     "nonfinite_count",
 )
+REPORTED_HARD_EDGE_KEYS = (
+    "actual_hard_edge_event_count",
+    "actual_hard_terminal_count",
+)
 TERMINAL_ACCEPTANCE_POLICY = {
     "implementation_safety": {
         "required_zero_counters": list(STRICT_ZERO_SAFETY_KEYS),
+    },
+    "actual_q_hard_edge": {
+        "reported_counters": list(REPORTED_HARD_EDGE_KEYS),
+        "blocking": False,
+        "acceptance": (
+            "measured and summarised, never a refusal reason: build_1's own "
+            "actual_q_hard_limit_audit is identically zero only after learning, "
+            "so a five-update fresh policy cannot be asked for it (Franco 2026-08-07)"
+        ),
     },
     "behavioral_terminations": {
         "reasons": [*PHYSICAL_FALL_REASONS, "robot_hit_table"],
@@ -92,11 +106,12 @@ TERMINAL_ACCEPTANCE_POLICY = {
 # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0(post-dt -6.0 -> -0.2)。
 # 本表是 four-grid manifest matched_contract.soft_weights 的第三份手抄;文件尾部
 # (_F 载入之后)加了一道等值断言,今后任何一份漂了都会在 import 期就炸,不必等 launch。
+# 2026-08-07 Franco 裁定二:限位三项换开源 rad 口径,权重随之 -5 -> -10 / -10 / -1。
 EXPECTED_SAFETY_REWARD_ECONOMY = {
     "death_penalty": -10.0,
-    "qdes_limit": -5.0,
-    "qdes_projection": -5.0,
-    "joint_limit": -5.0,
+    "qdes_limit": -10.0,
+    "qdes_projection": -1.0,
+    "joint_limit": -10.0,
 }
 # 运行期 RewardManager 的项名与 selector 的 soft_weights 键名不同,但值必须逐一相等。
 # 原本是把同一组价格手抄成第二份常量;改为按固定键名映射推导,两份副本漂移的可能被消除。
@@ -384,6 +399,14 @@ def _validate_terminal_safety(value: Any) -> dict[str, Any]:
             raise BarrierRefused(
                 "terminal implementation safety counter %s is nonzero" % key
             )
+    # 裁定三:硬边计数照样必须存在且是合法非负整数,但它的值不再阻断。
+    hard_edge_warnings = []
+    for key in REPORTED_HARD_EDGE_KEYS:
+        observed = _counter(row[key], name="terminal %s" % key)
+        if observed != 0:
+            hard_edge_warnings.append(
+                "WARN actual-q hard edge observed: %s=%d" % (key, observed)
+            )
 
     raw_reason_phase = _exact(
         row["physical_fall_by_reason_phase"],
@@ -440,6 +463,7 @@ def _validate_terminal_safety(value: Any) -> dict[str, Any]:
             )
         update_lists[prefix] = updates
 
+    _ = hard_edge_warnings  # 摘要文本由 _actual_hard_edge_warnings() 现算,不进这份严格键集
     return {
         **copy.deepcopy(row),
         "physical_fall_by_reason_phase": reason_phase,
@@ -447,6 +471,16 @@ def _validate_terminal_safety(value: Any) -> dict[str, Any]:
         "task_wait_started_by_update": update_lists["task_wait_started"],
         "task_reveal_reached_by_update": update_lists["task_reveal_reached"],
     }
+
+
+def _actual_hard_edge_warnings(safety: Mapping[str, Any]) -> list[str]:
+    """裁定三的摘要行:硬边非零就出 WARN,但永远不是拒收理由。"""
+
+    return [
+        "WARN actual-q hard edge observed: %s=%d" % (key, int(safety[key]))
+        for key in sorted(REPORTED_HARD_EDGE_KEYS)
+        if int(safety[key]) != 0
+    ]
 
 
 def _validate_prelong_behavioral_binding(
@@ -467,6 +501,17 @@ def _validate_prelong_behavioral_binding(
     if type(gate_safety) is not dict:
         raise BarrierRefused("pre-long gate safety ledger is missing")
     expected_strict = {key: safety[key] for key in STRICT_ZERO_SAFETY_KEYS}
+    expected_hard_edge = {key: safety[key] for key in REPORTED_HARD_EDGE_KEYS}
+    # 裁定三:两侧对同一份硬边观测必须逐位一致,而且两侧都必须自陈"它不阻断"。
+    if (
+        gate_safety.get("actual_hard_edge_counters") != expected_hard_edge
+        or gate_safety.get("actual_hard_edge_blocking") is not False
+        or gate_safety.get("actual_hard_edge_warnings")
+        != _actual_hard_edge_warnings(safety)
+    ):
+        raise BarrierRefused(
+            "pre-long gate and aggregate actual-q hard-edge telemetry differ"
+        )
     if (
         gate_safety.get("strict_zero_counters") != expected_strict
         or gate_safety.get("task_wait_started_by_update")
@@ -801,6 +846,8 @@ def _audit_cell(
         or tuple(module.PHYSICAL_FALL_PHASES) != PHYSICAL_FALL_PHASES
         or tuple(module._P.STRICT_ZERO_SAFETY_COUNTERS)
         != STRICT_ZERO_SAFETY_KEYS
+        or tuple(module._P.REPORTED_HARD_EDGE_COUNTERS)
+        != REPORTED_HARD_EDGE_KEYS
     ):
         raise BarrierRefused(
             "%s launcher/pre-long safety schema differs from aggregate policy"
@@ -842,6 +889,8 @@ def _audit_cell(
             "all_tensors_finite": True,
         },
         "safety_counters": safety,
+        # 「WARN 必进摘要」:硬边观测抬到每格审计行的顶层,不埋在 safety_counters 里。
+        "warnings": _actual_hard_edge_warnings(safety),
         "safety_reward_economy": safety_reward_economy,
         "prelong_gate": {
             "status": "PASS",
@@ -869,6 +918,7 @@ def _validate_audit_row(value: Any, *, expected_cell: str) -> dict[str, Any]:
             "terminal_acceptance_content_sha256",
             "terminal_model",
             "safety_counters",
+            "warnings",
             "safety_reward_economy",
             "prelong_gate",
             "shared_binding",

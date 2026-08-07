@@ -1011,14 +1011,20 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     ).tolist() == [False, False]
 
     values = hope_rewards_mod.qdes_projection_penalty(
-        env, action_name="joint_pos", shape_rate=4.0
+        env, action_name="joint_pos", knee_frac=0.05
     )
     assert values[0].item() > 0.0
     assert values[1].item() > values[0].item()
-    expected = 1.0 - torch.exp(
-        -4.0 * torch.tensor([0.3 / 1.8, 1.1 / 1.8])
+    # 2026-08-07 裁定二:核换成开源那条线性尾巴的光滑版(单位 rad,不再归一、不再封顶)。
+    # c = knee_frac * 包络跨度 = 0.05 * 1.8 = 0.09;两个距离 0.3 / 1.1 都在折角之外,
+    # 所以两条都落在**线性尾**上,斜率恒 1 rad/rad。
+    knee_rad = 0.05 * 1.8
+    expected = torch.tensor(
+        [0.3 - 0.5 * knee_rad, 1.1 - 0.5 * knee_rad]
     )
-    assert values.tolist() == pytest.approx(expected.tolist())
+    assert values.tolist() == pytest.approx(expected.tolist(), rel=1.0e-6)
+    # 尾部无上界、梯度不衰减:多要 0.8 rad 就正好多罚 0.8。
+    assert values[1].item() - values[0].item() == pytest.approx(0.8, rel=1.0e-5)
 
     # Explicit zero uses a unit RewardManager weight plus the objective dose
     # inside the callable.  It must return exact zero while preserving the
@@ -1026,14 +1032,14 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     zero_values = hope_rewards_mod.qdes_projection_penalty(
         env,
         action_name="joint_pos",
-        shape_rate=4.0,
+        knee_frac=0.05,
         objective_weight=0.0,
     )
     assert zero_values.tolist() == [0.0, 0.0]
     ablation_magnitude = hope_rewards_mod.qdes_projection_penalty(
         env,
         action_name="joint_pos",
-        shape_rate=4.0,
+        knee_frac=0.05,
         objective_weight=-2.5,
     )
     assert ablation_magnitude.tolist() == pytest.approx(
@@ -1245,10 +1251,13 @@ def test_action_ball_nonfinite_request_has_finite_projection_reward_before_reset
     assert torch.all(torch.isfinite(action.processed_actions))
     assert torch.all(torch.isfinite(action.nominal_projected_qdes))
     value = hope_rewards_mod.qdes_projection_penalty(
-        env, action_name="joint_pos", shape_rate=4.0
+        env, action_name="joint_pos", knee_frac=0.05
     )
     assert torch.isfinite(value).all()
-    assert value.item() == pytest.approx(1.0 - math.exp(-4.0))
+    # 非有限提案用"一整个包络跨度"当有限替身:d = span,落在线性尾上 -> span - c/2。
+    # 它必须是**有限**的(真正的安全后果由 DoneTerm 独立保留),但在新核下不再封顶在 1。
+    span = action.nominal_projection_span[0, 0].item()
+    assert value.item() == pytest.approx(span - 0.5 * 0.05 * span, rel=1.0e-6)
     counters = getattr(
         env, hope_rewards_mod._QDES_PROJECTION_ACTIVATION_ATTR
     )

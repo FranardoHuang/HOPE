@@ -345,10 +345,14 @@ def _build_canonical_manifest() -> dict:
             # 原值是合法上台折扣下界 3.33209 的 180%,"打成一次再摔"净亏;外部三库与 build_1
             # 均无 death penalty 这一项。joint_actual_forbidden 改 telemetry 后本项触发面已从
             # "唯一死因"塌回"摔倒/撞桌/NaN"。
+    # 2026-08-07 Franco 裁定二(形状照开源对齐):三条限位罚的核与量纲一起换成开源 rad 口径
+    # (限位处磨圆的 L1 hinge、尾部线性无上界、地板退役),旧 -5 作用在归一 [0,1] 上、与新数不可比。
+    # 采纳值:qdes/actual 两条 barrier 取上游 BeyondMimic 同族的 -10;投影罚取 -1
+    # (同等策略水平下每步 -0.027~-0.099,与 build_1 当时整条 qdes 轴 -0.0635 同量级)。
             "death_penalty": -10.0,
-            "qdes_limit": -5.0,
-            "qdes_projection": -5.0,
-            "joint_limit": -5.0,
+            "qdes_limit": -10.0,
+            "qdes_projection": -1.0,
+            "joint_limit": -10.0,
         },
         "actor_hidden_dims": [512, 256, 128],
         "critic_hidden_dims": [512, 256, 128],
@@ -611,5 +615,9 @@ def cell_for_family(cell_id: Any, task_family: Any) -> dict:
 # dr_level_identity 五键;schema 3 -> 4、kind v3 -> v4。故 content seal 随之更新。
 # 旧值 1bc1df34...1ca 只代签本次换轴之前的字节;更旧的 960fed56...c6e0 与
 # 823d6d88...0709 分别只代签再往前两次改动之前的字节。
-if CONTENT_SHA256 != "803144ef571bdca1543df8aa12a85ece06156df96ff119b93726ed1e3626445a":
+#
+# 2026-08-07 重钉(第四次):Franco 裁定二把三条限位罚的核/量纲换成开源 rad 口径,
+# soft_weights 的 qdes_limit / joint_limit -5 -> -10、qdes_projection -5 -> -1。
+# 旧值 803144ef...445a 只代签本次改价之前的字节。
+if CONTENT_SHA256 != "b31d894ea45010985f79abfacec97e723decca18d23784c6159cf017f4e5f44e":
     raise RuntimeError("formal A211/C211 Isaac four-grid manifest drifted")

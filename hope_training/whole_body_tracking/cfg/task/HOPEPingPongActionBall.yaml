@@ -156,36 +156,47 @@ rewards:
   prestrike_waist_twist_weight: 0.0
   pre_strike_foot_slip_weight: 0.0
   # Soft-limit v2 has two separately receipted channels: clamp-applied q_des and realized actual q.
-  # Both use a 0.25 nonzero floor at any positive intrusion plus a monotone bounded ramp, so the
-  # policy cannot graze the band at near-zero cost.  With policy_dt=0.02, the adopted -5 dose is
-  # at least -0.025 / intruding joint / channel / step and at most -0.10 at full depth.  One second
-  # of a persistent one-joint micro-intrusion costs -1.25 in one channel; a one-step all-31-joint
-  # two-channel maximum is -6.2.  Hard termination remains the immutable safety backstop.
-  # ``joint_limit`` is the actual-q channel on this
-  # ActionBall leaf (not Isaac Lab's legacy past-the-soft-limit-only tail).
-  qdes_limit_barrier_weight: -5.0
+  #
+  # 2026-08-07 Franco 裁定二(形状照开源对齐,不要自创)。人话三句:
+  #   1. 原来"刚踩进带里就先扣 0.25、越深反而越省"的形状是我们自创的,四个开源库都没有;
+  #      现在换成**开源那条 `joint_pos_limits`**——越过软限位每多 1 rad 就多罚 1 个单位、没有上限,
+  #      只是限位处那个折角用一个带宽的 Huber 磨圆了(带宽 -> 0 时逐点退回开源原式)。
+  #   2. 地板不删,**挪到机械硬限位**:软带里(可恢复区)完全连续,不再有"踩一下就先扣 0.25";
+  #      反利用性质由硬限位那个不连续点保住 —— 不存在"一串正违规、罚金却趋于零"的路径。
+  #   3. 带宽 0.05 -> 0.02。旧值与护栏的投影内沿同为 0.05,被钳关节正好压在带外沿上,
+  #      intrusion 变成掷硬币(实测 29/31 关节的 m_eff 恰等于 clamp 内缩)。
+  #   4. 量纲从"每关节归一 [0,1]"变成 **rad**,所以权重号码必须换 —— 旧 -5 与新数不可比。
+  # 形状与权重基准 = **我们自己的上游 BeyondMimic**
+  # (`tracking_env_cfg.py`: `joint_limit = RewTerm(func=mdp.joint_pos_limits, weight=-10.0,
+  #  params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])})`),
+  # 与 IsaacLab / mjlab-tracking / unitree_rl_lab-mimic 四家逐字同核、同 -10、同全关节。
+  # 剂量交叉验证(同等策略水平):build_1 收敛态全身越软限位总量 0.003 rad
+  # -> -10 x 0.003 x 0.02 = -0.0006/步,与它日志逐位吻合;早期峰值 -0.0040/步。
+  qdes_limit_barrier_weight: -10.0
   # 人话:这条罚"命令值离限位多近"。带宽必须比投影包络窄,否则罚的是护栏自己放进去的位置。
   #
-  # 2026-08-04 修 0.08 -> 0.05。原值构造上保证永久底噪:pre-apply guard 会把越界目标投影进
-  # [lower + 0.05*span, upper - 0.05*span](hope_actions.py:4984-4996,inset 常数 0.05 在 :1234),
-  # 于是任何被投影/被刹车钳住的关节,其 processed q_des 必然落在 d = 0.05*span 处;而 barrier
-  # 带宽 0.08 > 0.05 -> intrusion = (0.08-0.05)/0.08 = 0.375 -> per-joint 0.8435
-  # -> post-dt -0.0844/关节/步,是该项理论上限 -0.10 的 84%。3 个关节被钳就是 -0.25/步,
-  # 吃掉窗内全部 dense 收入 0.575/步 的 44% —— 而这不是策略放进去的,它躲不掉。
-  # 取 0.05 让 barrier 带外沿正好接上投影包络内沿:包络内的合法目标零罚,真正越界仍由
-  # qdes_projection_penalty(罚投影前超出量)与 joint_limit(罚实际 q 靠限位多近)两条覆盖。
-  qdes_limit_barrier_margin_frac: 0.05
-  joint_limit_weight: -5.0
+  # 人话:这条罚"命令值离限位多近"。带宽必须**严格窄于**投影包络内沿,否则罚的是护栏自己
+  # 放进去的位置。
+  #
+  # 2026-08-04 先从 0.08 修到 0.05:pre-apply guard 把越界目标投影进
+  # [lower + 0.05*span, upper - 0.05*span](hope_actions.py:4512-4517,inset 常数 0.05 在 :1234),
+  # 0.08 > 0.05 时被钳关节恒扣 -0.0844/关节/步,策略躲不掉。
+  # 2026-08-07 再从 0.05 修到 **0.02**:0.05 只是把底噪从"必然发生"换成"由浮点舍入决定"——
+  # 带外沿与被钳落点**恰好同一点**(实测 31 个关节里 29 个的 m_eff 正好等于 0.05),
+  # intrusion 成了掷硬币。0.02 让带边真正离开 clamp 边:被钳关节零罚,而"实际 q 冲过投影
+  # 内沿继续贴限位"仍在 0.02 带内照罚,越过软限位后按开源线性尾巴计价。
+  qdes_limit_barrier_margin_frac: 0.02
+  joint_limit_weight: -10.0
   # 人话:实际值通道的带宽必须和上面命令值通道一模一样 —— 它们盯的是同一条限位带,
   # 只是一个看命令、一个看关节真到哪。train.py 的 v2 硬合同逐字段比对两条通道的
   # weight/margin_frac/penalty_floor,只改一边开机即拒(RuntimeError: qdes/actual soft-limit
   # barrier v2 margin_frac must match exactly)。
   #
-  # 同一条 0.05 的理由在这条通道上一字不改地成立:护栏把命令投影到 d = 0.05*span 后,PD 会把
-  # 实际 q 拉到同一位置(barrier 两条通道都读 soft_joint_pos_limits),于是 0.08 带宽下被钳关节
-  # 的实际角同样恒扣 -0.0844/关节/步,同样由护栏自己造成、策略无法规避。真正的越界(实际 q
-  # 冲过投影内沿继续贴限位)在 0.05 带内照罚,硬终止仍是安全底线。
-  joint_limit_margin_frac: 0.05
+  # 同一条理由在这条通道上一字不改地成立:护栏把命令投影到 d = 0.05*span 后,PD 会把实际 q
+  # 拉到同一位置(两条通道都读 soft_joint_pos_limits),所以带宽只要 >= 0.05 就是在罚护栏自己
+  # 造成的位置。0.02 之后:被钳关节零罚;实际 q 真的冲进 0.02 带内照罚;越过软限位按开源
+  # 线性尾巴计价;撞到机械硬限位再叠一个 penalty_floor 的不连续地板作反利用兜底。
+  joint_limit_margin_frac: 0.02
   # Unlike DeployParity, action-ball exposes a real base task through HITTER's native +2 channel.
   base_position_weight: 1.5
   base_position_std: 0.20

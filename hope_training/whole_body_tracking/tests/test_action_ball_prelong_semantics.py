@@ -368,12 +368,12 @@ def test_exact_a211_and_c211_nonzero_term_sets_are_frozen():
     assert c211["outcome"] == {"virtual_landing": 700.0}
     assert SEMANTICS.PRELONG_EXCLUDED_SAFETY_TERM_WEIGHTS == {
         "death_penalty": -10.0,
-        "joint_limit": -5.0,
-        "qdes_limit_barrier": -5.0,
+        "joint_limit": -10.0,
+        "qdes_limit_barrier": -10.0,
         "qdes_projection_penalty": -1.0,
     }
     assert SEMANTICS.PRELONG_REQUIRED_TERM_PARAMS == {
-        "qdes_projection_penalty": {"objective_weight": -5.0}
+        "qdes_projection_penalty": {"objective_weight": -1.0}
     }
     a_callables = SEMANTICS.expected_prelong_callable_names(
         SEMANTICS.PRELONG_PROFILE_A211
@@ -494,7 +494,7 @@ class _FakeRewardCfg:
         self.func = reward_func
         self.params = {}
         if name == "qdes_projection_penalty":
-            self.params["objective_weight"] = -5.0
+            self.params["objective_weight"] = -1.0
         if name in {
             "motion_global_anchor_ori",
             "motion_body_pos",

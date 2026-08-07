@@ -2562,8 +2562,12 @@ def qdes_limit_barrier(
 # comment above says these terms are "explicitly versioned", but the number was
 # never read: no receipt, telemetry key or contract ever emitted it, so it
 # versioned nothing.  The v1/v2 split is carried by the callable names alone.
+# 2026-08-07 Franco 裁定二:地板不删,**挪位置** —— 从"踩进软带就先扣"挪到"撞上机械硬限位才扣"。
+# 软带内因此完全连续(反利用性质靠硬限位那个不连续点保住),而可恢复区不再有掷硬币式的底噪。
 _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR = 0.25
-_SOFT_LIMIT_BARRIER_V2_SHAPE_RATE = 4.0
+# 采纳带宽 0.02:必须**严格小于**护栏的投影内沿 0.05,否则带外沿正好压在被钳关节的落点上,
+# intrusion 由浮点舍入决定(2026-08-07 实测 29/31 个关节的 m_eff 恰等于 0.05)。
+_SOFT_LIMIT_BARRIER_V2_DEFAULT_MARGIN_FRAC = 0.02
 _QDES_LIMIT_BARRIER_V2_ACTIVATION_ATTR = "_hope_qdes_limit_barrier_v2_activation_counters"
 _QDES_LIMIT_BARRIER_V2_OBSERVED_STEP_ATTR = "_hope_qdes_limit_barrier_v2_observed_step"
 _QDES_LIMIT_BARRIER_V2_ACTIVE_STEP_ATTR = "_hope_qdes_limit_barrier_v2_active_step"
@@ -2588,7 +2592,10 @@ _SOFT_LIMIT_BARRIER_V2_ACTIVE_COUNT = "reward_enabled_sample_count"
 # after the nominal projection has been computed.
 # ``_QDES_PROJECTION_SCHEMA_VERSION = 1`` was deleted 2026-08-06 for the same
 # reason as the barrier-v2 one above: declared, never emitted, never read.
-_QDES_PROJECTION_DEFAULT_SHAPE_RATE = 4.0
+# 2026-08-07 Franco 裁定二:核函数从 ``1-exp(-4d)``(每关节封顶 1、深处梯度衰减 40 倍)
+# 换成开源那条**线性尾巴**的光滑版。``knee_frac`` 是 Huber 折角处的距离,按投影包络跨度取比例;
+# 0.05 = 一个 barrier 带宽,让三条罚项在"每弧度多少钱"这一个尺子上可比。
+_QDES_PROJECTION_DEFAULT_KNEE_FRAC = 0.05
 _QDES_PROJECTION_ACTIVATION_ATTR = "_hope_qdes_projection_activation_counters"
 _QDES_PROJECTION_OBSERVED_STEP_ATTR = "_hope_qdes_projection_observed_step"
 _QDES_PROJECTION_SIGNATURE_ATTR = "_hope_qdes_projection_signature"
@@ -2618,15 +2625,68 @@ def _validate_soft_limit_barrier_v2_scalars(
     penalty_floor = float(penalty_floor)
     if not math.isfinite(margin_frac) or not 0.0 < margin_frac < 0.5:
         raise ValueError(f"{term_name} margin_frac must be finite and in (0, 0.5)")
-    if not math.isfinite(penalty_floor) or not 0.0 < penalty_floor < 1.0:
-        raise ValueError(f"{term_name} penalty_floor must be finite and in (0, 1)")
+    # 2026-08-07:下界从开区间放宽到 0.0 —— 采纳值就是 0.0(见 _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR)。
+    if not math.isfinite(penalty_floor) or not 0.0 <= penalty_floor < 1.0:
+        raise ValueError(f"{term_name} penalty_floor must be finite and in [0, 1)")
     return margin_frac, penalty_floor
+
+
+def _soft_limit_barrier_v2_hard_limits(
+    hard_limits: torch.Tensor,
+    *,
+    num_envs: int,
+    reference: torch.Tensor,
+    term_name: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Unpack the mechanical hard limits used only by the anti-exploitation floor."""
+
+    if not torch.is_tensor(hard_limits):
+        raise RuntimeError(
+            f"{term_name} requires runtime articulation joint_pos_limits for the "
+            "hard-edge anti-exploitation floor"
+        )
+    if hard_limits.ndim == 2 and tuple(hard_limits.shape) == (
+        _QDES_LIMIT_BARRIER_JOINT_COUNT,
+        2,
+    ):
+        hard_lower = hard_limits[:, 0]
+        hard_upper = hard_limits[:, 1]
+    elif (
+        hard_limits.ndim == 3
+        and tuple(hard_limits.shape)[1:] == (_QDES_LIMIT_BARRIER_JOINT_COUNT, 2)
+        and tuple(hard_limits.shape)[0] in (1, num_envs)
+    ):
+        hard_lower = hard_limits[:, :, 0]
+        hard_upper = hard_limits[:, :, 1]
+    else:
+        raise RuntimeError(
+            f"{term_name} requires joint_pos_limits shaped [31,2], [1,31,2], "
+            "or [num_envs,31,2]"
+        )
+    if hard_lower.device != reference.device:
+        raise RuntimeError(
+            f"{term_name} requires joint_pos_limits on the position device"
+        )
+    hard_valid = torch.all(
+        torch.isfinite(hard_lower)
+        & torch.isfinite(hard_upper)
+        & hard_upper.gt(hard_lower)
+    )
+    if hard_valid.device.type == "cpu":
+        if not bool(hard_valid):
+            raise RuntimeError(
+                f"{term_name} requires finite mechanical limits with lo < hi"
+            )
+    else:
+        torch._assert_async(hard_valid)
+    return hard_lower, hard_upper
 
 
 def _soft_limit_barrier_v2_kernel(
     positions: torch.Tensor,
     limits: torch.Tensor,
     default_joint_pos: torch.Tensor,
+    hard_limits: torch.Tensor,
     *,
     margin_frac: float,
     penalty_floor: float,
@@ -2634,20 +2694,37 @@ def _soft_limit_barrier_v2_kernel(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return ``(sum barrier, normalized per-joint intrusion)`` for one position source.
 
-    For every joint, using the stance-exempt margin from qbar v1::
+    2026-08-07 Franco 裁定二(形状照开源对齐)后的数学。人话三句:
 
-        d       = min(q-lo, hi-q) / (hi-lo)
-        m_eff   = min(margin_frac, d(default_q) - 0.005)
-        u       = relu(m_eff-d) / m_eff
-        ramp(u) = (1-exp(-4*clamp(u,0,1))) / (1-exp(-4))
-        b(u)    = 0                              if u == 0
-                  floor + (1-floor)*ramp(u)      if u > 0
-        value   = sum_j b(u_j)
+    1. **这就是四个开源库那条 ``joint_pos_limits``,只是把软限位处那个折角磨圆了。**
+       越过软限位以后每多 1 rad 就多罚 1 个单位,和 IsaacLab / BeyondMimic / mjlab /
+       unitree_rl_lab 逐字一致(线性、无上界、SUM、带外死区、不做相位门控)。
+    2. **软带里不再有不连续的地板** —— 旧版"踩进带里先扣 0.25"是我们自创的,四家都没有,
+       而且带边恰好压在护栏的投影内沿上(29/31 个关节的 ``m_eff`` 与 clamp 内缩同为 0.05),
+       于是 ``intrusion`` 变成掷硬币:1 ulp 的浮点抖动就要付 0.25,策略躲不掉。
+    3. **地板挪到机械硬限位。** 反利用性质因此保住:不存在"一串正违规、罚金却趋于零"的路径,
+       但那个不连续点现在落在真正的安全兜底处(撞到机械边),而不是落在可恢复的软带里。
 
-    The discontinuous positive floor is intentional: there is no sequence of positive
-    intrusions whose charge tends to zero.  Above the edge, the term is monotone and capped at
-    one per joint.  SUM aggregation keeps a single unsafe joint undiluted and exposes multi-joint
-    exploitation linearly.
+    对每个关节,``span = hi-lo``(软限位跨度),沿用 qbar v1 的站姿豁免带宽::
+
+        m_eff  = min(margin_frac, d(default_q) - 0.005)        # 无量纲
+        b      = m_eff * span                                   # 带宽,rad
+        g      = min(q-lo, hi-q)                                # 到最近软限位的带符号距离,rad
+        x      = b - g        # x<=0 带外;x=b 正好压在软限位上;x>b 已越过软限位 (x-b = 越限量)
+        ramp(x)= x^2 / (2b)   if 0 < x <= b     # 带内二次,x=0 处值与斜率都是 0(连续、C1)
+                 x - b/2      if x >  b         # 尾部线性,斜率恒 1 rad/rad,**无上界**
+        hard   = relu(hard_lo-q) + relu(q-hard_hi)     # 只有撞到机械边才 > 0
+        value  = 0                                     if x <= 0
+                 ramp(x) + penalty_floor*b*(hard>0)    if x >  0
+        return   sum_j value_j
+
+    ``margin_frac -> 0`` 时逐点退回开源的纯 L1 hinge;这是"选定形状基准 = 我们自己的上游
+    BeyondMimic(= IsaacLab ``joint_pos_limits``)"之后唯一的偏离,理由见上面第 2、3 条。
+
+    单位是 **rad**,和开源同一口径,所以权重可以直接照抄(BeyondMimic / mjlab-tracking /
+    unitree_rl_lab-mimic 的全身版都是 ``-10``,全 31 关节)。旧版把每关节归一到 [0,1] 再配
+    ``-5``,与开源的 ``-10`` **不可比** —— 这正是 2026-08-07 三方对账里"权重对上了、
+    经济没对上"的那处。
     """
 
     margin_frac, penalty_floor = _validate_soft_limit_barrier_v2_scalars(
@@ -2730,14 +2807,36 @@ def _soft_limit_barrier_v2_kernel(
     else:
         torch._assert_async(stance_valid)
 
+    hard_lower, hard_upper = _soft_limit_barrier_v2_hard_limits(
+        hard_limits,
+        num_envs=num_envs,
+        reference=positions,
+        term_name=term_name,
+    )
+
     distance = torch.minimum(positions - lower, upper - positions) / span
+    # ``intrusion`` 的定义一个字没改(带外 0、软限位处 1、越限后 >1),所以既有的深度遥测
+    # (intrusion_joint_count / max_intrusion_depth_frac)口径与历史逐跑可比。
     intrusion = torch.relu(margin_eff - distance) / margin_eff
-    unit_depth = torch.clamp(intrusion, max=1.0)
-    denominator = -math.expm1(-_SOFT_LIMIT_BARRIER_V2_SHAPE_RATE)
-    ramp = -torch.expm1(-_SOFT_LIMIT_BARRIER_V2_SHAPE_RATE * unit_depth) / denominator
+    band_rad = margin_eff * span
+    depth_rad = intrusion * band_rad
+    ramp = torch.where(
+        intrusion <= 1.0,
+        depth_rad * depth_rad / (2.0 * band_rad),
+        depth_rad - 0.5 * band_rad,
+    )
+    # 反利用地板:唯一的不连续点,只在真正撞到机械硬限位时出现(2026-08-07 裁定)。
+    hard_excess = torch.relu(hard_lower - positions) + torch.relu(
+        positions - hard_upper
+    )
+    floor_rad = torch.where(
+        hard_excess > 0.0,
+        penalty_floor * band_rad,
+        torch.zeros_like(band_rad).expand_as(ramp),
+    )
     per_joint = torch.where(
         intrusion > 0.0,
-        penalty_floor + (1.0 - penalty_floor) * ramp,
+        ramp + floor_rad,
         torch.zeros_like(ramp),
     )
     return torch.sum(per_joint, dim=-1), intrusion
@@ -2746,7 +2845,7 @@ def _soft_limit_barrier_v2_kernel(
 def _qdes_limit_barrier_v2_values(
     env: ManagerBasedRLEnv,
     action_name: str = "joint_pos",
-    margin_frac: float = 0.08,
+    margin_frac: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_MARGIN_FRAC,
     penalty_floor: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if action_name != "joint_pos":
@@ -2782,6 +2881,7 @@ def _qdes_limit_barrier_v2_values(
         processed,
         getattr(data, "soft_joint_pos_limits", None),
         getattr(data, "default_joint_pos", None),
+        getattr(data, "joint_pos_limits", None),
         margin_frac=margin_frac,
         penalty_floor=penalty_floor,
         term_name="qdes_limit_barrier_v2",
@@ -2791,7 +2891,7 @@ def _qdes_limit_barrier_v2_values(
 def _actual_joint_limit_barrier_v2_values(
     env: ManagerBasedRLEnv,
     asset_cfg,
-    margin_frac: float = 0.08,
+    margin_frac: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_MARGIN_FRAC,
     penalty_floor: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR,
     expected_joint_count: int = 31,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -2827,6 +2927,7 @@ def _actual_joint_limit_barrier_v2_values(
         getattr(data, "joint_pos", None),
         getattr(data, "soft_joint_pos_limits", None),
         getattr(data, "default_joint_pos", None),
+        getattr(data, "joint_pos_limits", None),
         margin_frac=margin_frac,
         penalty_floor=penalty_floor,
         term_name="actual_joint_limit_barrier_v2",
@@ -2952,7 +3053,7 @@ def _record_soft_limit_barrier_v2_activation(
 def qdes_limit_barrier_v2_probe(
     env: ManagerBasedRLEnv,
     action_name: str = "joint_pos",
-    margin_frac: float = 0.08,
+    margin_frac: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_MARGIN_FRAC,
     penalty_floor: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR,
 ) -> torch.Tensor:
     """Measure the floor-bearing processed-q_des barrier while returning exact zero."""
@@ -2974,7 +3075,7 @@ def qdes_limit_barrier_v2_probe(
 def qdes_limit_barrier_v2(
     env: ManagerBasedRLEnv,
     action_name: str = "joint_pos",
-    margin_frac: float = 0.08,
+    margin_frac: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_MARGIN_FRAC,
     penalty_floor: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR,
 ) -> torch.Tensor:
     """Penalize every processed q_des soft-band intrusion with a nonzero per-joint floor."""
@@ -2993,24 +3094,28 @@ def qdes_limit_barrier_v2(
     return values
 
 
-def _validate_qdes_projection_shape_rate(shape_rate: float) -> float:
-    if isinstance(shape_rate, bool):
-        raise ValueError("qdes_projection_penalty shape_rate must be finite and > 0")
+def _validate_qdes_projection_knee_frac(knee_frac: float) -> float:
+    if isinstance(knee_frac, bool):
+        raise ValueError(
+            "qdes_projection_penalty knee_frac must be finite and in (0, 0.5)"
+        )
     try:
-        shape_rate = float(shape_rate)
+        knee_frac = float(knee_frac)
     except (TypeError, ValueError) as exc:
         raise ValueError(
-            "qdes_projection_penalty shape_rate must be finite and > 0"
+            "qdes_projection_penalty knee_frac must be finite and in (0, 0.5)"
         ) from exc
-    if not math.isfinite(shape_rate) or shape_rate <= 0.0:
-        raise ValueError("qdes_projection_penalty shape_rate must be finite and > 0")
-    return shape_rate
+    if not math.isfinite(knee_frac) or not 0.0 < knee_frac < 0.5:
+        raise ValueError(
+            "qdes_projection_penalty knee_frac must be finite and in (0, 0.5)"
+        )
+    return knee_frac
 
 
 def _qdes_projection_penalty_values(
     env: ManagerBasedRLEnv,
     action_name: str = "joint_pos",
-    shape_rate: float = _QDES_PROJECTION_DEFAULT_SHAPE_RATE,
+    knee_frac: float = _QDES_PROJECTION_DEFAULT_KNEE_FRAC,
 ) -> tuple[
     torch.Tensor,
     torch.Tensor,
@@ -3020,20 +3125,31 @@ def _qdes_projection_penalty_values(
     torch.Tensor,
     torch.Tensor,
 ]:
-    """Return bounded projection cost and its per-joint causal evidence.
+    """Return the unbounded-tail projection cost and its per-joint causal evidence.
 
-    For each joint, ``d = abs(pre_clamp_qdes - nominal_projection) / envelope_span`` and
-    ``cost = 1 - exp(-shape_rate * d)``.  Thus an in-envelope request is exactly zero, every
-    finite additional overshoot is strictly more expensive, and an arbitrarily large proposal
-    stays bounded below one per joint.  Non-finite proposals receive a finite near-maximal cost
-    here and remain terminal in the DoneTerm.
+    2026-08-07 Franco 裁定二后的数学。人话:**要得越出格越贵,而且贵得没有上限**;
+    只有在"刚出格一点点"的那一小段才便宜,免得刚学会挥拍就被一脚踩死。
+
+    对每个关节,``d = abs(pre_clamp_qdes - nominal_projection)``(单位 rad,不再除以跨度),
+    ``c = knee_frac * envelope_span``(折角距离,rad)::
+
+        cost = d^2 / (2c)   if d <= c        # 二次,d=0 处值与斜率都是 0
+               d - c/2      if d >  c        # 线性,斜率恒 1 rad/rad,**无上界**
+
+    包络内的请求恒零;越出格越贵是严格单调的;**深处的梯度不再衰减** ——
+    旧核 ``1-exp(-4d)`` 在 ``d=0.92`` 处的梯度只剩边界处的 1/40,railed 的关节几乎感觉不到
+    往回拉的力,这正是"浅处罚太重、深处罚太轻"的机制。非有限提案在这里拿一个有限的
+    大额代价(一整个包络跨度),它真正的安全后果仍由 DoneTerm 独立保留。
+
+    单位与 ``_soft_limit_barrier_v2_kernel`` 一致(rad),两条罚项因此在"每弧度多少钱"
+    这一个尺子上可比:``joint_limit`` 的尾部斜率是 ``|weight|``/rad,本项也是。
     """
 
     if action_name != "joint_pos":
         raise ValueError(
             "qdes_projection_penalty action_name must be exactly 'joint_pos'"
         )
-    shape_rate = _validate_qdes_projection_shape_rate(shape_rate)
+    knee_frac = _validate_qdes_projection_knee_frac(knee_frac)
     action = env.action_manager.get_term(action_name)
     projection_enabled = getattr(
         action, "finite_preclamp_qdes_projection_enabled", False
@@ -3111,8 +3227,16 @@ def _qdes_projection_penalty_values(
     safe_pre_qdes = torch.where(
         nonfinite_joint, safe_projected + safe_span, pre_qdes
     )
+    # ``distance`` 仍然是"占包络跨度的比例"(遥测口径不变、与历史逐跑可比);
+    # 计价用的是它的弧度值 ``distance_rad``。
     distance = torch.abs(safe_pre_qdes - safe_projected) / safe_span
-    per_joint = -torch.expm1(-shape_rate * distance)
+    distance_rad = distance * safe_span
+    knee_rad = knee_frac * safe_span
+    per_joint = torch.where(
+        distance <= knee_frac,
+        distance_rad * distance_rad / (2.0 * knee_rad),
+        distance_rad - 0.5 * knee_rad,
+    )
     valid_joint = valid.unsqueeze(-1)
     per_joint = torch.where(valid_joint, per_joint, torch.zeros_like(per_joint))
     distance = torch.where(valid_joint, distance, torch.zeros_like(distance))
@@ -3301,7 +3425,7 @@ def _record_qdes_projection_activation(
 def qdes_projection_penalty(
     env: ManagerBasedRLEnv,
     action_name: str = "joint_pos",
-    shape_rate: float = _QDES_PROJECTION_DEFAULT_SHAPE_RATE,
+    knee_frac: float = _QDES_PROJECTION_DEFAULT_KNEE_FRAC,
     objective_weight: float | None = None,
 ) -> torch.Tensor:
     """Penalize projection distance and always expose the unweighted causal dose.
@@ -3313,7 +3437,7 @@ def qdes_projection_penalty(
     the same unweighted counters, and returns exact zero reward.
     """
 
-    shape_rate = _validate_qdes_projection_shape_rate(shape_rate)
+    knee_frac = _validate_qdes_projection_knee_frac(knee_frac)
     if objective_weight is not None:
         if type(objective_weight) not in (int, float):
             raise ValueError(
@@ -3339,7 +3463,7 @@ def qdes_projection_penalty(
         upper_projected_joint,
         nonfinite_sample,
     ) = (
-        _qdes_projection_penalty_values(env, action_name, shape_rate)
+        _qdes_projection_penalty_values(env, action_name, knee_frac)
     )
     _record_qdes_projection_activation(
         env,
@@ -3349,7 +3473,7 @@ def qdes_projection_penalty(
         lower_projected_joint,
         upper_projected_joint,
         nonfinite_sample,
-        signature=(action_name, shape_rate),
+        signature=(action_name, knee_frac),
     )
     if objective_weight is None:
         return values
@@ -3362,7 +3486,7 @@ def qdes_projection_penalty(
 def actual_joint_limit_barrier_v2_probe(
     env: ManagerBasedRLEnv,
     asset_cfg,
-    margin_frac: float = 0.08,
+    margin_frac: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_MARGIN_FRAC,
     penalty_floor: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR,
     expected_joint_count: int = 31,
 ) -> torch.Tensor:
@@ -3385,7 +3509,7 @@ def actual_joint_limit_barrier_v2_probe(
 def actual_joint_limit_barrier_v2(
     env: ManagerBasedRLEnv,
     asset_cfg,
-    margin_frac: float = 0.08,
+    margin_frac: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_MARGIN_FRAC,
     penalty_floor: float = _SOFT_LIMIT_BARRIER_V2_DEFAULT_FLOOR,
     expected_joint_count: int = 31,
 ) -> torch.Tensor:
@@ -3403,6 +3527,58 @@ def actual_joint_limit_barrier_v2(
         signature=(float(margin_frac), float(penalty_floor), expected_joint_count),
     )
     return values
+
+
+def peek_qdes_depth_telemetry(env: ManagerBasedRLEnv) -> dict[str, float] | None:
+    """Read the qdes/actual depth counters **without clearing them**.
+
+    2026-08-07 Franco 裁定一(验收判据看深度不看频率)的前置。人话:这些数机制层每一步都在算,
+    但从来没往 ``run.log`` 的 economy JSON 里吐过一次 —— 于是"``qdes_limit_barrier`` 现在是
+    38% 的样本各罚 1 个关节,还是 1.2% 的样本各罚 31 个"根本判不出来,而这两种情况的处置完全相反。
+    更要紧的是:**没有深度就没法按深度验收**。
+
+    与 :func:`consume_qdes_limit_barrier_activation_counters` 的区别只有一条:本函数是只读的,
+    不清零、不要求两条通道都在同一步被观测过,因此可以和既有的 ``Live/`` 消费方并存。
+    没有任何一路计数器存在时返回 ``None``(例如非 ActionBall 任务)。
+    """
+
+    result: dict[str, float] = {}
+    projection_state = getattr(env, _QDES_PROJECTION_ACTIVATION_ATTR, None)
+    if isinstance(projection_state, dict):
+        observed = projection_state[_QDES_PROJECTION_OBSERVED_COUNT]
+        joint_counts = projection_state[_QDES_PROJECTION_JOINT_COUNT]
+        result["projection_observed_sample_count"] = int(observed.item())
+        result["projection_sample_count"] = int(
+            projection_state[_QDES_PROJECTION_SAMPLE_COUNT].item()
+        )
+        result["projection_joint_count"] = int(joint_counts.sum().item())
+        result["projection_normalized_distance_sum"] = float(
+            projection_state[_QDES_PROJECTION_DISTANCE_SUM].sum().item()
+        )
+        result["projection_max_normalized_distance"] = float(
+            projection_state[_QDES_PROJECTION_MAX_DISTANCE].item()
+        )
+    for prefix, attr_name in (
+        ("qdes", _QDES_LIMIT_BARRIER_V2_ACTIVATION_ATTR),
+        ("actual", _ACTUAL_LIMIT_BARRIER_V2_ACTIVATION_ATTR),
+    ):
+        state = getattr(env, attr_name, None)
+        if not isinstance(state, dict):
+            continue
+        result[f"{prefix}_observed_sample_count"] = int(
+            state[_SOFT_LIMIT_BARRIER_V2_OBSERVED_COUNT].item()
+        )
+        result[f"{prefix}_intrusion_sample_count"] = int(
+            state[_SOFT_LIMIT_BARRIER_V2_INTRUSION_SAMPLE_COUNT].item()
+        )
+        result[f"{prefix}_intrusion_joint_count"] = int(
+            state[_SOFT_LIMIT_BARRIER_V2_INTRUSION_JOINT_COUNT].item()
+        )
+        # 深度口径:1.0 = 正好压在软限位上,>1.0 = 已经越过软限位(单位是带宽的倍数)。
+        result[f"{prefix}_max_intrusion_depth_frac"] = float(
+            state[_SOFT_LIMIT_BARRIER_V2_MAX_INTRUSION].item()
+        )
+    return result or None
 
 
 def consume_qdes_limit_barrier_activation_counters(

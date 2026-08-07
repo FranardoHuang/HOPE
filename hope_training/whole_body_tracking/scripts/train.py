@@ -3061,11 +3061,15 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
             raise _OverrideError(
                 f"[train.py] Stage-1 unrelated task reward {name} must be absent"
             )
+    # 2026-08-07 裁定二:三条限位罚的核与量纲一起换成开源 rad 口径,权重号码必须跟着换 ——
+    # 旧 -5 作用在每关节归一 [0,1] 上,新 -10/-1 作用在 rad 上,两者不可比。Stage-1 与 ActionBall
+    # 共用同一个 kernel(HOPEStage1NaturalClipRewardsCfg 继承 HOPEActionBallRewardsCfg),
+    # 所以这里跟着走不是给 Stage-1 单独调价,而是不让它继承一个换了单位的旧号码。
     expected_common_weights = {
         "death_penalty": -300.0,
-        "qdes_limit_barrier": -5.0,
-        "joint_limit": -5.0,
-        "qdes_projection_penalty": -5.0,
+        "qdes_limit_barrier": -10.0,
+        "joint_limit": -10.0,
+        "qdes_projection_penalty": -1.0,
         "action_rate_clamped": -0.2,
         "action_rate_l2": 0.0,
         "action_acc_l2": 0.0,
@@ -5181,14 +5185,21 @@ _QDES_LIMIT_BARRIER_FORMULA = (
     "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-0.005)"
 )
 
+# 2026-08-07 Franco 裁定二(形状照开源对齐):核换成"限位处磨圆的开源 L1 hinge",
+# 单位从每关节归一 [0,1] 变成 rad,地板退役(采纳 0.0)。数学与语义面必须同批换 ——
+# 旧公式串的 sidecar 不能静默续到新数学上。
 _SOFT_LIMIT_BARRIER_V2_FORMULA = (
-    "sum(where(u>0,penalty_floor+(1-penalty_floor)*"
-    "(1-exp(-shape_rate*clamp(u,0,1)))/(1-exp(-shape_rate)),0));"
-    "u=relu(m_eff-min(q-lo,hi-q)/(hi-lo))/m_eff;"
+    "sum(where(x>0,penalty_floor*b+(1-penalty_floor)*"
+    "where(x<=b,x*x/(2*b),x-b/2),0));"
+    "x=b-min(q-lo,hi-q);b=m_eff*(hi-lo);"
     "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-stance_eps);"
     "require_all(m_eff>margin_floor)"
 )
-_SOFT_LIMIT_BARRIER_V2_SHAPE_RATE = 4.0
+_SOFT_LIMIT_BARRIER_V2_KERNEL_UNIT = "radian"
+_SOFT_LIMIT_BARRIER_V2_TAIL = "linear_unbounded_slope_one_per_radian"
+_SOFT_LIMIT_BARRIER_V2_SHAPE_BASELINE = (
+    "isaaclab_joint_pos_limits_l1_hinge_with_huber_knee_of_width_b"
+)
 _SOFT_LIMIT_BARRIER_V2_STANCE_EPS = 0.005
 _SOFT_LIMIT_BARRIER_V2_MARGIN_FLOOR = 0.005
 
@@ -5221,10 +5232,10 @@ def _qdes_projection_penalty_contract(env_cfg) -> dict:
     if not isinstance(params, dict):
         raise RuntimeError("rewards.qdes_projection_penalty.params must be a mapping")
     if params.get("action_name") != "joint_pos" or float(
-        params.get("shape_rate", float("nan"))
-    ) != 4.0:
+        params.get("knee_frac", float("nan"))
+    ) != 0.05:
         raise RuntimeError(
-            "rewards.qdes_projection_penalty must bind joint_pos and shape_rate=4.0"
+            "rewards.qdes_projection_penalty must bind joint_pos and knee_frac=0.05"
         )
     has_objective_weight = "objective_weight" in params
     raw_objective_weight = params.get("objective_weight", manager_weight)
@@ -5254,7 +5265,10 @@ def _qdes_projection_penalty_contract(env_cfg) -> dict:
         "hypothetical_unweighted_penalty": "projection_penalty_value_sum",
         "per_joint_exposure": True,
         "action_name": "joint_pos",
-        "shape_rate": 4.0,
+        "knee_frac": 0.05,
+        "kernel_unit": "radian",
+        "tail": "linear_unbounded_slope_one_per_radian",
+        "per_joint_cap": None,
     }
 
 
@@ -5423,9 +5437,9 @@ def _qdes_limit_barrier_reward_contract(env_cfg, runtime_facts: dict) -> dict | 
                 "action_name, margin_frac, penalty_floor"
             )
         penalty_floor = _finite_soft_limit_v2_param(params, "penalty_floor")
-        if not 0.0 < penalty_floor < 1.0:
+        if not 0.0 <= penalty_floor < 1.0:
             raise RuntimeError(
-                "qdes_limit_barrier_v2 penalty_floor must be in (0, 1)"
+                "qdes_limit_barrier_v2 penalty_floor must be in [0, 1)"
             )
         return {
             "schema_version": 2,
@@ -5439,7 +5453,9 @@ def _qdes_limit_barrier_reward_contract(env_cfg, runtime_facts: dict) -> dict | 
             "weight": weight,
             "margin_frac": margin_frac,
             "penalty_floor": penalty_floor,
-            "shape_rate": _SOFT_LIMIT_BARRIER_V2_SHAPE_RATE,
+            "kernel_unit": _SOFT_LIMIT_BARRIER_V2_KERNEL_UNIT,
+            "tail": _SOFT_LIMIT_BARRIER_V2_TAIL,
+            "shape_baseline": _SOFT_LIMIT_BARRIER_V2_SHAPE_BASELINE,
             "stance_eps": _SOFT_LIMIT_BARRIER_V2_STANCE_EPS,
             "margin_floor": _SOFT_LIMIT_BARRIER_V2_MARGIN_FLOOR,
             "action_name": "joint_pos",
@@ -5450,7 +5466,7 @@ def _qdes_limit_barrier_reward_contract(env_cfg, runtime_facts: dict) -> dict | 
             "default_stance_source": "articulation.data.default_joint_pos",
             "formula": _SOFT_LIMIT_BARRIER_V2_FORMULA,
             "aggregation": "sum_all_31_joints",
-            "per_joint_cap": 1.0,
+            "per_joint_cap": None,
             "gate": "dense_every_control_step",
         }
 
@@ -5543,7 +5559,7 @@ def _actual_joint_limit_barrier_reward_contract(
         )
     margin_frac = _finite_soft_limit_v2_param(params, "margin_frac")
     penalty_floor = _finite_soft_limit_v2_param(params, "penalty_floor")
-    if not 0.0 < margin_frac < 0.5 or not 0.0 < penalty_floor < 1.0:
+    if not 0.0 < margin_frac < 0.5 or not 0.0 <= penalty_floor < 1.0:
         raise RuntimeError(
             "actual-q soft-limit barrier v2 margin_frac/penalty_floor are invalid"
         )
@@ -5569,7 +5585,9 @@ def _actual_joint_limit_barrier_reward_contract(
         "weight": float(weight),
         "margin_frac": margin_frac,
         "penalty_floor": penalty_floor,
-        "shape_rate": _SOFT_LIMIT_BARRIER_V2_SHAPE_RATE,
+        "kernel_unit": _SOFT_LIMIT_BARRIER_V2_KERNEL_UNIT,
+        "tail": _SOFT_LIMIT_BARRIER_V2_TAIL,
+        "shape_baseline": _SOFT_LIMIT_BARRIER_V2_SHAPE_BASELINE,
         "stance_eps": _SOFT_LIMIT_BARRIER_V2_STANCE_EPS,
         "margin_floor": _SOFT_LIMIT_BARRIER_V2_MARGIN_FLOOR,
         "asset_name": "robot",
@@ -5580,7 +5598,7 @@ def _actual_joint_limit_barrier_reward_contract(
         "default_stance_source": "articulation.data.default_joint_pos",
         "formula": _SOFT_LIMIT_BARRIER_V2_FORMULA,
         "aggregation": "sum_all_31_joints",
-        "per_joint_cap": 1.0,
+        "per_joint_cap": None,
         "gate": "dense_every_control_step",
     }
     for key in ("weight", "margin_frac", "penalty_floor"):
@@ -15296,8 +15314,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(
                 isinstance(_projection_term.params, dict)
                 and _projection_term.params.get("action_name") == "joint_pos"
-                and float(_projection_term.params.get("shape_rate", float("nan")))
-                == 4.0,
+                and float(_projection_term.params.get("knee_frac", float("nan")))
+                == 0.05,
                 "rewards.qdes_projection_penalty.params",
             )
             # Isaac Lab prunes zero-weight RewardTerms before calling them.  Use

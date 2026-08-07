@@ -352,6 +352,107 @@ def test_gate_accepts_exact_five_updates_and_preserves_zero_over_c():
     )
 
 
+# --------------------------------------------------------------------------------------------- #
+# 2026-08-07 Franco 裁定三:实际-q 机械硬边"照记不照拦"
+# --------------------------------------------------------------------------------------------- #
+def test_actual_q_hard_edge_is_measured_reported_and_never_blocking():
+    """制造一次真实的实际-q 硬越限:遥测必须记到、收据里看得见、而且**不再阻断**。
+
+    依据是 build_1 自己的 ``actual_q_hard_limit_audit`` 从 iter 20 起恒 0 ——
+    策略学会之后本来就不硬越限,拿它去卡一个 5 个 update 的新策略只会拒收正常的跑。
+    """
+
+    acceptance = _checkpoint_acceptance()
+    acceptance["safety_counters"]["actual_hard_edge_event_count"] = 7
+    acceptance["safety_counters"]["actual_hard_terminal_count"] = 3
+    result = GATE.validate_prelong_gate(
+        log_text=_log(),
+        checkpoint_acceptance=acceptance,
+        semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+    )
+    # 不阻断
+    assert result["status"] == "PASS"
+    # 记到了,而且是逐位的原值,不是一个布尔
+    assert result["safety"]["actual_hard_edge_counters"] == {
+        "actual_hard_edge_event_count": 7,
+        "actual_hard_terminal_count": 3,
+    }
+    assert result["safety"]["actual_hard_edge_blocking"] is False
+    # 「WARN 必进摘要」:抬到 gate 结果顶层,不埋在 safety 子树里
+    assert result["warnings"] == [
+        "WARN actual-q hard edge observed: actual_hard_edge_event_count=7",
+        "WARN actual-q hard edge observed: actual_hard_terminal_count=3",
+    ]
+    # 而且它不能悄悄混进 strict-zero 集合
+    assert "actual_hard_edge_event_count" not in result["safety"]["strict_zero_counters"]
+
+
+def test_zero_hard_edge_still_reports_an_empty_warning_list():
+    result = GATE.validate_prelong_gate(
+        log_text=_log(),
+        checkpoint_acceptance=_checkpoint_acceptance(),
+        semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+    )
+    assert result["warnings"] == []
+    assert result["safety"]["actual_hard_edge_counters"] == {
+        "actual_hard_edge_event_count": 0,
+        "actual_hard_terminal_count": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "actual_hard_edge_event_count",
+        "actual_hard_terminal_count",
+    ),
+)
+def test_hard_edge_counter_may_stop_blocking_but_may_not_go_missing(name):
+    """取消阻断 != 允许它消失。缺失/畸形照样 fail closed。"""
+
+    acceptance = _checkpoint_acceptance()
+    acceptance["safety_counters"].pop(name)
+    with pytest.raises(GATE.PreLongGateRefused):
+        GATE.validate_prelong_gate(
+            log_text=_log(),
+            checkpoint_acceptance=acceptance,
+            semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+        )
+    acceptance = _checkpoint_acceptance()
+    acceptance["safety_counters"][name] = -1
+    with pytest.raises(GATE.PreLongGateRefused):
+        GATE.validate_prelong_gate(
+            log_text=_log(),
+            checkpoint_acceptance=acceptance,
+            semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+        )
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "joint_qdes_forbidden_terminal_count",
+        "joint_actual_forbidden_terminal_count",
+        "strict_hard_termination_count",
+        "nonfinite_count",
+    ),
+)
+def test_the_four_implementation_counters_still_block(name):
+    """变异测试:如果有人把这四条也一并"放宽",这里必须红。
+
+    它们验的是数值健康与"terminate=False 有没有退化回 reset",不是可学会的行为。
+    """
+
+    acceptance = _checkpoint_acceptance()
+    acceptance["safety_counters"][name] = 1
+    with pytest.raises(GATE.PreLongGateRefused):
+        GATE.validate_prelong_gate(
+            log_text=_log(),
+            checkpoint_acceptance=acceptance,
+            semantic_updates=_semantics(contacts=0, closed=9, flight_denominator=0),
+        )
+
+
 def test_c211_gate_requires_strike_signal_but_not_initial_contact_or_outcome():
     result = GATE.validate_prelong_gate(
         log_text=_log(),
@@ -1077,17 +1178,10 @@ def test_fall_and_too_low_are_reported_but_not_zero_tolerance_in_finite_gate():
     assert behavior["base_fell_tilt"]["acceptance_threshold"] is None
 
 
-@pytest.mark.parametrize(
-    "counter",
-    (
-        "actual_hard_edge_event_count",
-        "actual_hard_terminal_count",
-        "joint_qdes_forbidden_terminal_count",
-        "joint_actual_forbidden_terminal_count",
-        "strict_hard_termination_count",
-        "nonfinite_count",
-    ),
-)
+# 2026-08-07 Franco 裁定三:两条实际-q 硬边计数器已从这份 zero-tolerance 名单里移出,
+# 改由上面的 test_actual_q_hard_edge_is_measured_reported_and_never_blocking 覆盖。
+# 这里直接读生产常量,免得名单在源码里改了、测试还抄着旧的六条。
+@pytest.mark.parametrize("counter", GATE.STRICT_ZERO_SAFETY_COUNTERS)
 def test_every_strict_safety_counter_remains_zero_tolerance(counter):
     checkpoint = _checkpoint_acceptance()
     checkpoint["safety_counters"][counter] = 1
@@ -1097,6 +1191,24 @@ def test_every_strict_safety_counter_remains_zero_tolerance(counter):
             checkpoint_acceptance=checkpoint,
             semantic_updates=_semantics(),
         )
+
+
+def test_strict_zero_set_is_exactly_the_four_implementation_counters():
+    """名单本身是被裁定过的对象,所以它必须被逐字钉住,不能默默增删。"""
+
+    assert GATE.STRICT_ZERO_SAFETY_COUNTERS == (
+        "joint_qdes_forbidden_terminal_count",
+        "joint_actual_forbidden_terminal_count",
+        "strict_hard_termination_count",
+        "nonfinite_count",
+    )
+    assert GATE.REPORTED_HARD_EDGE_COUNTERS == (
+        "actual_hard_edge_event_count",
+        "actual_hard_terminal_count",
+    )
+    assert not set(GATE.STRICT_ZERO_SAFETY_COUNTERS) & set(
+        GATE.REPORTED_HARD_EDGE_COUNTERS
+    )
 
 
 def test_reason_by_phase_and_reveal_denominators_fail_closed():

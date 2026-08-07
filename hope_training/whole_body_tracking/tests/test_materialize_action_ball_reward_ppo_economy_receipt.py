@@ -101,12 +101,20 @@ def _r6_contract_from_r5(action_id: str, *, log_std: bool = True):
     adopted = {
         "death_penalty": -300.0,
         "virtual_landing": 500.0,
-        "qdes_limit_barrier": -5.0,
-        "joint_limit": -5.0,
+        # 2026-08-07 裁定二:核/量纲换开源 rad 口径,权重随之 -5 -> -10。
+        "qdes_limit_barrier": -10.0,
+        "joint_limit": -10.0,
+    }
+    adopted_params = {
+        # 2026-08-07 裁定二/附加条:带宽 0.05(= 护栏投影内沿)-> 0.02,让带边离开 clamp 边。
+        "qdes_limit_barrier": {"margin_frac": 0.02, "penalty_floor": 0.25},
+        "joint_limit": {"margin_frac": 0.02, "penalty_floor": 0.25},
     }
     for term in reward["terms"]:
         if term["name"] in adopted:
             term["weight"] = adopted[term["name"]]
+        if term["name"] in adopted_params:
+            term["params"].update(adopted_params[term["name"]])
     reward_payload = {
         "schema_version": reward["schema_version"],
         "terms": reward["terms"],
@@ -262,8 +270,10 @@ def test_receipt_binds_exact_reward_scale_ppo_and_runtime_sources(
     assert bounds == {
         "virtual_landing_one_shot": (0.0, 10.0),
         "hard_death_one_shot": (-6.0, 0.0),
-        "qdes_limit_barrier_per_step": (-3.1, 0.0),
-        "actual_joint_limit_barrier_per_step": (-3.1, 0.0),
+        # 新核没有每关节上限,所以这两条不再是 31*weight*dt;
+        # 现在的界是"物理上够得到的最大值"(部署钳位 / 机械硬限位)。
+        "qdes_limit_barrier_per_step": (-0.185103, 0.0),
+        "actual_joint_limit_barrier_per_step": (-1.306002, 0.0),
         "action_rate_clamped_per_step": (-0.036, 0.0),
         "racket_position_fine_per_step": (0.0, 0.08),
         "racket_position_coarse_per_step": (0.0, 0.02),

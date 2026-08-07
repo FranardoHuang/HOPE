@@ -85,9 +85,12 @@ rewards:
   # The parent has a real table term even at zero weight.  Null the override before train.py
   # applies reward keys because this object-free leaf removes that term entirely.
   table_hit_penalty_weight: null
-  qdes_limit_barrier_weight: -5.0
-  qdes_limit_barrier_margin_frac: 0.08
-  joint_limit_weight: -5.0
+  # 2026-08-07 裁定二:共用的 soft-limit kernel 换成开源 rad 口径(限位处磨圆的 L1 hinge、
+  # 无上界线性尾、地板退役)。旧 -5 作用在每关节归一 [0,1] 上,与新单位不可比,
+  # 故跟着换成开源同族的 -10;带宽同步 0.08 -> 0.05,与 ActionBall 两条通道一致。
+  qdes_limit_barrier_weight: -10.0
+  qdes_limit_barrier_margin_frac: 0.02
+  joint_limit_weight: -10.0
   action_acc_weight: 0.0
 
 racket:

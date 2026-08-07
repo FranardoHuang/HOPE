@@ -154,13 +154,28 @@ if (
 ):
     raise RuntimeError("pre-long gate semantic producer contract is malformed")
 
+# 2026-08-07 Franco 裁定三:**取消实际-q 硬超限那条门**(不是删遥测)。
+# 依据是 build_1 的 ``Episode_Termination/actual_q_hard_limit_audit`` 从 iter 20 起恒 0 ——
+# 策略学会之后本来就不硬越限,这条轴买不到东西,却会在 5 个 update 的新策略上直接拒收。
+#
+# 留在 STRICT_ZERO 里的四条**不是**"硬超限",逐条说明为什么留:
+#   * joint_qdes_forbidden_terminal_count —— ActionBall 投影模式下它只对 NaN/Inf 的 q_des 触发。
+#     那是数值 bug,不是学得会的行为。
+#   * joint_actual_forbidden_terminal_count —— 这条**必须**是 0,因为该 DoneTerm 已配成
+#     ``terminate=False``;它一旦非零,说明"只记账不 reset"的接线退化回了 reset。
+#     它验的是我们自己的接线,不是机器人的行为。
+#   * strict_hard_termination_count / nonfinite_count —— 同样是实现层数值健康。
 STRICT_ZERO_SAFETY_COUNTERS = (
-    "actual_hard_edge_event_count",
-    "actual_hard_terminal_count",
     "joint_qdes_forbidden_terminal_count",
     "joint_actual_forbidden_terminal_count",
     "strict_hard_termination_count",
     "nonfinite_count",
+)
+# 实际-q 机械硬边:**照记不照拦**。计数进收据、非零时进摘要 WARN,
+# 但不再让这一跑被拒收。"取消 != 静默删除"。
+REPORTED_HARD_EDGE_COUNTERS = (
+    "actual_hard_edge_event_count",
+    "actual_hard_terminal_count",
 )
 PHYSICAL_FALL_REASONS = ("base_fell_tilt", "base_too_low")
 BEHAVIORAL_TERMINATION_REASONS = (
@@ -465,6 +480,17 @@ def validate_safety_audit(safety: Mapping[str, Any]) -> dict[str, Any]:
         raise PreLongGateRefused(
             "joint-qdes/joint-actual/nonfinite implementation counters are nonzero"
         )
+    # 裁定三:硬边计数仍然必须**存在且是合法非负整数**(缺失/畸形照样拒收),
+    # 只是它的值不再阻断。
+    hard_edge = {
+        name: _counter(safety.get(name), name=f"safety {name}")
+        for name in REPORTED_HARD_EDGE_COUNTERS
+    }
+    hard_edge_warnings = [
+        f"WARN actual-q hard edge observed: {name}={value}"
+        for name, value in sorted(hard_edge.items())
+        if value != 0
+    ]
 
     by_reason = {
         reason: _counter(
@@ -573,6 +599,9 @@ def validate_safety_audit(safety: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "observed_ppo_updates": EXPECTED_UPDATES,
         "strict_zero_counters": strict,
+        "actual_hard_edge_counters": hard_edge,
+        "actual_hard_edge_blocking": False,
+        "actual_hard_edge_warnings": hard_edge_warnings,
         "balance_termination_counts": {
             "by_reason": by_reason,
             "by_reason_phase": by_reason_phase,
@@ -2064,6 +2093,8 @@ def validate_prelong_gate(
         "opportunity_semantics": semantics,
         "survival_denominators": survival,
         "safety": {**safety, "unknown_attribution_count": 0},
+        # 「WARN 必进摘要」:硬边观测直接抬到 gate 结果的顶层,不埋在 safety 子树里。
+        "warnings": list(safety["actual_hard_edge_warnings"]),
         "authorization": "pre_long_terminal_telemetry_only",
     }
 

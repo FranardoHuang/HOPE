@@ -40,12 +40,12 @@ def qdes_projection_penalty():
     """Stable callable identity for the dependency-light reward receipt."""
 
 
-def _projection_cfg(weight=-5.0):
+def _projection_cfg(weight=-1.0):
     cfg = _make_env_cfg()
     cfg.rewards.qdes_projection_penalty = _Term(
         weight=weight,
         func=qdes_projection_penalty,
-        params={"action_name": "joint_pos", "shape_rate": 4.0},
+        params={"action_name": "joint_pos", "knee_frac": 0.05},
     )
     return cfg
 
@@ -64,7 +64,7 @@ def _projection_only_receipt(cfg):
 
 def test_absent_override_preserves_source_default_and_emits_no_marker():
     cfg, applied = _apply_projection({})
-    assert cfg.rewards.qdes_projection_penalty.weight == -5.0
+    assert cfg.rewards.qdes_projection_penalty.weight == -1.0
     assert not any("qdes_projection_penalty" in marker for marker in applied)
 
 
@@ -104,7 +104,7 @@ def test_wrong_type_nonfinite_and_out_of_range_weights_fail_without_mutation(wei
             {"rewards": {"qdes_projection_penalty_weight": weight}},
             cfg=cfg,
         )
-    assert cfg.rewards.qdes_projection_penalty.weight == -5.0
+    assert cfg.rewards.qdes_projection_penalty.weight == -1.0
 
 
 def test_missing_term_and_unknown_keys_fail_loudly():
@@ -132,7 +132,7 @@ def test_effective_receipt_tracks_nonzero_dose_and_zero_control_changes_sha():
     baseline = _projection_cfg()
     baseline_receipt = _projection_only_receipt(baseline)
     assert baseline_receipt["terms"][0]["name"] == "qdes_projection_penalty"
-    assert baseline_receipt["terms"][0]["weight"] == -5.0
+    assert baseline_receipt["terms"][0]["weight"] == -1.0
 
     treatment, _ = _apply_projection(
         {"rewards": {"qdes_projection_penalty_weight": -2.5}}
@@ -169,7 +169,12 @@ def test_zero_control_has_explicit_action_ball_contract_pin():
         "hypothetical_unweighted_penalty": "projection_penalty_value_sum",
         "per_joint_exposure": True,
         "action_name": "joint_pos",
-        "shape_rate": 4.0,
+        # 2026-08-07 裁定二:核换成开源那条线性尾巴,合同的语义面必须跟着换 ——
+        # 旧公式串/旧参数名的 sidecar 不能静默续到新数学上。
+        "knee_frac": 0.05,
+        "kernel_unit": "radian",
+        "tail": "linear_unbounded_slope_one_per_radian",
+        "per_joint_cap": None,
     }
 
     source = inspect.getsource(train_mod._build_training_hard_contract)

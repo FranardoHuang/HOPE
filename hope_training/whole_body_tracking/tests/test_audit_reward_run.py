@@ -94,10 +94,11 @@ def _recipe():
                 "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
                 "actual_joint_limit_barrier_v2"
             ),
-            "weight": -5.0,
+            "weight": -10.0,
             "params": {
                 "asset_cfg": {"name": "robot"},
-                "margin_frac": 0.08,
+                # 2026-08-07 裁定二/附加条:带宽 -> 0.02,权重换开源 rad 口径 -> -10。
+                "margin_frac": 0.02,
                 "penalty_floor": 0.25,
                 "expected_joint_count": 31,
             },
@@ -108,11 +109,12 @@ def _recipe():
                 "whole_body_tracking.tasks.tracking.mdp.hope_rewards."
                 "qdes_limit_barrier_v2"
             ),
-            "weight": -5.0,
+            "weight": -10.0,
             "params": {
                 "action_name": "joint_pos",
-                # 2026-08-05 带宽对齐(exp §5.6 第 9 条):qdes 通道 0.08 -> 0.05。
-                "margin_frac": 0.05,
+                # 2026-08-05 带宽对齐 0.08 -> 0.05;2026-08-07 裁定二再 -> 0.02
+                # (0.05 恰等于护栏投影内沿,带边与被钳落点同点,intrusion 成了掷硬币)。
+                "margin_frac": 0.02,
                 "penalty_floor": 0.25,
             },
         },
@@ -123,8 +125,8 @@ def _recipe():
                 "qdes_limit_barrier_probe"
             ),
             "weight": 1.0,
-            # train.py 把 term 的 params 整份拷给 probe,所以 probe 也跟到 0.05。
-            "params": {"action_name": "joint_pos", "margin_frac": 0.05},
+            # train.py 把 term 的 params 整份拷给 probe,所以 probe 也跟到 0.02。
+            "params": {"action_name": "joint_pos", "margin_frac": 0.02},
         },
         {
             "name": "racket_position",
@@ -181,13 +183,13 @@ def _activation():
                 "actual_joint_limit_barrier_v2"
             ),
             "role": "objective",
-            "weight": -5.0,
+            "weight": -10.0,
             "recipe_term_sha256": _sha(_recipe()["terms"][1]),
             "observed_environment_step_count": 3,
             "observed_sample_count": 6,
             "nonzero_sample_count": 2,
             "weighted_sum": -0.3,
-            "raw_sum": 3.0,
+            "raw_sum": 1.5,
             "raw_recovery": (
                 "validated_weighted_eq_raw_times_weight_times_step_dt"
             ),
@@ -202,13 +204,13 @@ def _activation():
                 "qdes_limit_barrier_v2"
             ),
             "role": "objective",
-            "weight": -5.0,
+            "weight": -10.0,
             "recipe_term_sha256": _sha(_recipe()["terms"][2]),
             "observed_environment_step_count": 3,
             "observed_sample_count": 6,
             "nonzero_sample_count": 2,
             "weighted_sum": -0.3,
-            "raw_sum": 3.0,
+            "raw_sum": 1.5,
             "raw_recovery": (
                 "validated_weighted_eq_raw_times_weight_times_step_dt"
             ),
@@ -482,8 +484,8 @@ def _per_action(recipe, manifest_sha):
                 "reward_groups": a_groups,
                 "terms": [
                     _term("death_penalty", 3, 2, 2.0, -0.4),
-                    _term("joint_limit", 3, 1, 1.0, -0.1),
-                    _term("qdes_limit_barrier", 3, 1, 1.0, -0.1),
+                    _term("joint_limit", 3, 1, 0.5, -0.1),
+                    _term("qdes_limit_barrier", 3, 1, 0.5, -0.1),
                     _term("qdes_limit_barrier_probe", 3, 0, 0.0, 0.0),
                     _term("racket_position", 3, 1, 2.0, 0.16),
                 ],
@@ -497,8 +499,8 @@ def _per_action(recipe, manifest_sha):
                 "reward_groups": b_groups,
                 "terms": [
                     _term("death_penalty", 3, 1, 1.0, -0.2),
-                    _term("joint_limit", 3, 1, 2.0, -0.2),
-                    _term("qdes_limit_barrier", 3, 1, 2.0, -0.2),
+                    _term("joint_limit", 3, 1, 1.0, -0.2),
+                    _term("qdes_limit_barrier", 3, 1, 1.0, -0.2),
                     _term("qdes_limit_barrier_probe", 3, 0, 0.0, 0.0),
                     _term("racket_position", 3, 1, 1.0, 0.08),
                 ],
@@ -619,7 +621,7 @@ def _safety(recipe, manifest_sha):
                 "observed_sample_count": 3,
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
-                "raw_sum": 1.0,
+                "raw_sum": 0.5,
                 "weighted_sum": -0.1,
                 "terminated_active_sample_count": 1,
                 "step_dt_s": 0.02,
@@ -633,7 +635,7 @@ def _safety(recipe, manifest_sha):
                 "observed_sample_count": 3,
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
-                "raw_sum": 1.0,
+                "raw_sum": 0.5,
                 "weighted_sum": -0.1,
                 "terminated_active_sample_count": 0,
                 "step_dt_s": 0.02,
@@ -647,7 +649,7 @@ def _safety(recipe, manifest_sha):
                 "observed_sample_count": 3,
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
-                "raw_sum": 2.0,
+                "raw_sum": 1.0,
                 "weighted_sum": -0.2,
                 "terminated_active_sample_count": 0,
                 "step_dt_s": 0.02,
@@ -661,7 +663,7 @@ def _safety(recipe, manifest_sha):
                 "observed_sample_count": 3,
                 "eligible_sample_count": 3,
                 "active_sample_count": 1,
-                "raw_sum": 2.0,
+                "raw_sum": 1.0,
                 "weighted_sum": -0.2,
                 "terminated_active_sample_count": 0,
                 "step_dt_s": 0.02,
@@ -1263,6 +1265,7 @@ def test_complete_artifact_set_passes_but_is_not_called_isaac_evidence(tmp_path)
     )
 
     assert report["status"] == "PASS"
+    
     assert report["failures"] == []
     assert report["summary"]["per_action_available"] is True
     assert report["summary"]["negative_semantics_available"] is True

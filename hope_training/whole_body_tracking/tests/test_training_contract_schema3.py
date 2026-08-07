@@ -691,10 +691,12 @@ def test_soft_limit_env0_selection_uses_rank_not_num_envs_vs_num_joints():
     assert facts["qdes_joint_pos_limits"][30] == [-1.0, 1.0]
 
 
+# 2026-08-07 Franco 裁定二:核换成"软限位处磨圆的开源 L1 hinge",单位 rad、尾部线性无上界、
+# 地板挪到机械硬限位。公式串与数学必须同批换 —— 旧串的 sidecar 不能静默续到新数学上。
 _SOFT_LIMIT_V2_FORMULA = (
-    "sum(where(u>0,penalty_floor+(1-penalty_floor)*"
-    "(1-exp(-shape_rate*clamp(u,0,1)))/(1-exp(-shape_rate)),0));"
-    "u=relu(m_eff-min(q-lo,hi-q)/(hi-lo))/m_eff;"
+    "sum(where(x>0,penalty_floor*b+(1-penalty_floor)*"
+    "where(x<=b,x*x/(2*b),x-b/2),0));"
+    "x=b-min(q-lo,hi-q);b=m_eff*(hi-lo);"
     "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-stance_eps);"
     "require_all(m_eff>margin_floor)"
 )
@@ -712,10 +714,14 @@ def _schema3_soft_limit_v2_contract():
         "enabled": True,
         "probe_enabled": True,
         "activation_ledger": "weight_independent_control_step_counters",
-        "weight": -5.0,
-        "margin_frac": 0.08,
+        "weight": -10.0,
+        "margin_frac": 0.02,
         "penalty_floor": 0.25,
-        "shape_rate": 4.0,
+        "kernel_unit": "radian",
+        "tail": "linear_unbounded_slope_one_per_radian",
+        "shape_baseline": (
+            "isaaclab_joint_pos_limits_l1_hinge_with_huber_knee_of_width_b"
+        ),
         "stance_eps": 0.005,
         "margin_floor": 0.005,
         "joint_count": 31,
@@ -724,7 +730,7 @@ def _schema3_soft_limit_v2_contract():
         "default_stance_source": "articulation.data.default_joint_pos",
         "formula": _SOFT_LIMIT_V2_FORMULA,
         "aggregation": "sum_all_31_joints",
-        "per_joint_cap": 1.0,
+        "per_joint_cap": None,
         "gate": "dense_every_control_step",
     }
     contract["qdes_limit_barrier_reward"] = {

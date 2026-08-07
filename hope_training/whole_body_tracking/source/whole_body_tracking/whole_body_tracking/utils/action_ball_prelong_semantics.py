@@ -161,10 +161,11 @@ PRELONG_EXCLUDED_SAFETY_TERM_WEIGHTS = {
     # 未来收入),其最大单步罚 post-dt ≈ -0.2。取 -10 -> post-dt -0.2 = 上台下界的 6%。
     # 另:joint_actual_forbidden 已改 terminate=False,本项触发面从"唯一死因"塌回
     # "摔倒/撞桌/NaN"。详见 exp §5.6 第 7 条。
+    # 2026-08-07 裁定二:两条 barrier 改开源 rad 口径 -> -10(旧 -5 是归一 [0,1] 口径,不可比)。
     "death_penalty": -10.0,
-    "joint_limit": -5.0,
-    "qdes_limit_barrier": -5.0,
-    # The admitted scientific dose is carried by params.objective_weight=-5.0;
+    "joint_limit": -10.0,
+    "qdes_limit_barrier": -10.0,
+    # The admitted scientific dose is carried by params.objective_weight;
     # RewardManager deliberately retains a fixed -1.0 exposure weight.
     "qdes_projection_penalty": -1.0,
 }
@@ -176,8 +177,9 @@ PRELONG_EXCLUDED_PROBE_TERM_WEIGHTS = {
 }
 
 PRELONG_REQUIRED_TERM_PARAMS = {
+    # 2026-08-07 裁定二:核换成开源线性尾巴(rad 口径)后重算的采纳剂量,-5.0 -> -1.0。
     "qdes_projection_penalty": {
-        "objective_weight": -5.0,
+        "objective_weight": -1.0,
     },
 }
 

@@ -456,12 +456,16 @@ def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
     # 权威在 HOPEPingPongActionBall.yaml:151;这里是它的 Hydra 组合断言副本。
     assert task.rewards.death_penalty_weight == pytest.approx(-10.0)
     assert task.rewards.table_hit_penalty_weight == pytest.approx(0.0)
-    assert task.rewards.qdes_limit_barrier_weight == pytest.approx(-5.0)
-    # 0.08 -> 0.05：barrier 带宽必须 <= pre-apply guard 的投影包络内缩量（0.05*span），
-    # 否则任何被投影/被刹车钳住的关节恒落在带内，构造上每步扣 -0.0844（理论上限的 84%），
-    # 而这是护栏自己放进去的位置，策略无法规避。详见 exp §5.6 偏离记录第 9 条。
-    assert task.rewards.qdes_limit_barrier_margin_frac == pytest.approx(0.05)
-    assert task.rewards.joint_limit_weight == pytest.approx(-5.0)
+    # 2026-08-07 Franco 裁定二（exp §5.6.24）:核与量纲一起换成开源 rad 口径
+    # （软限位处磨圆的 IsaacLab/BeyondMimic L1 hinge、尾部线性无上界、地板挪到机械硬限位），
+    # 所以权重号码必须跟着换 —— 旧 -5 作用在每关节归一 [0,1] 上，与 -10 不可比。
+    assert task.rewards.qdes_limit_barrier_weight == pytest.approx(-10.0)
+    # 0.08 -> 0.05 -> 0.02：带宽必须**严格窄于** pre-apply guard 的投影包络内缩量（0.05*span）。
+    # 取 0.05 时带外沿与被钳关节的落点恰好同点（31 个关节里 29 个的 m_eff 正好命中），
+    # intrusion 由 1 ulp 浮点抖动决定；0.02 让带边真正离开 clamp 边，被钳关节确定性零罚。
+    assert task.rewards.qdes_limit_barrier_margin_frac == pytest.approx(0.02)
+    assert task.rewards.qdes_limit_barrier_margin_frac < 0.05
+    assert task.rewards.joint_limit_weight == pytest.approx(-10.0)
     assert task.actions.qdes_clamp is True
 
     assert task.motion.canonical_ready_mode is True

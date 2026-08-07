@@ -27,23 +27,41 @@ ENV_CFG = (
 )
 ACTION_BALL_YAML = ROOT / "cfg/task/HOPEPingPongActionBall.yaml"
 JOINTS = list(hope_rewards_mod._A3_RUNTIME_JOINT_ORDER)
-# 2026-08-05 层级对齐(exp §5.6 第 9 条):两条 soft-limit v2 通道的带宽一起 0.08 -> 0.05
-#(q_des 的 qdes_limit_barrier_margin_frac 与 actual-q 的 joint_limit_margin_frac)。
-MARGIN = 0.05
+# 2026-08-05 层级对齐(exp §5.6 第 9 条):两条 soft-limit v2 通道的带宽一起 0.08 -> 0.05。
+# 2026-08-07 Franco 裁定二/附加条:再从 0.05 -> 0.02。0.05 恰好等于护栏的投影内沿,
+# 带外沿与被钳关节的落点是同一点(实测 31 个关节里 29 个的 m_eff 正好命中),
+# intrusion 由浮点舍入决定;0.02 让带边真正离开 clamp 边。
+MARGIN = 0.02
+# 地板没有删,是**挪到机械硬限位**:软带内连续,反利用性质由硬限位那个不连续点保住。
 FLOOR = 0.25
+WEIGHT = -10.0
+PROJECTION_WEIGHT = -1.0
+# 测试夹具的软限位是 [-1,1](span=2),硬限位取 soft/0.9 居中 => [-10/9, 10/9]。
+SOFT_LO, SOFT_HI = -1.0, 1.0
+HARD_LO, HARD_HI = -10.0 / 9.0, 10.0 / 9.0
+SPAN = SOFT_HI - SOFT_LO
+BAND = MARGIN * SPAN
 
 
 def _env(num_envs: int = 2):
     limits = torch.stack(
         (
-            torch.full((num_envs, 31), -1.0),
-            torch.full((num_envs, 31), 1.0),
+            torch.full((num_envs, 31), SOFT_LO),
+            torch.full((num_envs, 31), SOFT_HI),
+        ),
+        dim=-1,
+    )
+    hard_limits = torch.stack(
+        (
+            torch.full((num_envs, 31), HARD_LO),
+            torch.full((num_envs, 31), HARD_HI),
         ),
         dim=-1,
     )
     data = types.SimpleNamespace(
         joint_names=list(JOINTS),
         soft_joint_pos_limits=limits,
+        joint_pos_limits=hard_limits,
         default_joint_pos=torch.zeros(num_envs, 31),
         joint_pos=torch.zeros(num_envs, 31),
     )
@@ -63,47 +81,129 @@ def _env(num_envs: int = 2):
     return env, action, data, asset_cfg
 
 
-def test_v2_is_zero_outside_band_and_any_positive_intrusion_pays_floor():
-    env, action, _, _ = _env(2)
-    action.processed_actions[0, 0] = 0.83  # upper soft-band edge is q=0.84
-    action.processed_actions[1, 0] = 0.840001
+def _expected(depth_rad: float, *, hard_excess: float = 0.0) -> float:
+    """The adopted kernel, written out independently of the implementation."""
+
+    if depth_rad <= 0.0:
+        return 0.0
+    if depth_rad <= BAND:
+        value = depth_rad * depth_rad / (2.0 * BAND)
+    else:
+        value = depth_rad - 0.5 * BAND
+    if hard_excess > 0.0:
+        value += FLOOR * BAND
+    return value
+
+
+def test_v2_is_zero_outside_band_and_continuous_at_the_band_edge():
+    """人话:带外一分不收,而且刚踩进带里的那一步**不再是一个台阶**。
+
+    这条就是"地板挪走"的验收点。旧核在带边是 0 -> 0.25 的跳变,所以贴着带边的 1 ulp
+    浮点抖动也要付钱;新核在带边值和斜率都是 0。
+    """
+
+    edge = SOFT_HI - BAND
+    env, action, _, _ = _env(3)
+    action.processed_actions[0, 0] = edge - 1.0e-4
+    action.processed_actions[1, 0] = edge + 1.0e-5
+    action.processed_actions[2, 0] = edge + 1.0e-2
     values = hope_rewards_mod.qdes_limit_barrier_v2(env)
     assert values[0].item() == 0.0
-    assert values[1].item() >= FLOOR
+    # 连续:刚过带边的收费必须比一个 FLOOR 台阶小若干个数量级。
+    # 旧核在这一点是 0 -> FLOOR 的跳变,这条断言当时必然红。
+    assert 0.0 < values[1].item() < FLOOR * BAND * 1.0e-4
+    assert values[2].item() == pytest.approx(_expected(1.0e-2), rel=1.0e-4)
 
 
-def test_v2_ramp_is_monotone_bounded_and_sum_aggregated():
+def test_v2_tail_is_linear_unbounded_and_matches_open_source_slope():
+    """人话:越过软限位以后,每多 1 rad 就多罚 1 个单位 —— 和 IsaacLab 的 joint_pos_limits 同价。
+
+    旧核每关节封顶 1,深处梯度衰减到边界处的 1/40;这条测试就是那件事的反面。
+    """
+
+    # 全部落在机械硬限位之内(HARD_HI - SOFT_HI = 0.1111),这样测的是纯尾巴,
+    # 不混进硬限位那个反利用地板。
     env, action, _, _ = _env(4)
-    for row, q in enumerate((0.840001, 0.88, 0.92, 1.0)):
-        action.processed_actions[row, 3] = q
+    excesses = (0.0, 0.02, 0.05, 0.08)
+    for row, excess in enumerate(excesses):
+        action.processed_actions[row, 3] = SOFT_HI + excess
     values = hope_rewards_mod.qdes_limit_barrier_v2(env)
-    assert FLOOR <= values[0].item() < values[1].item() < values[2].item() < values[3].item()
-    assert values[3].item() == pytest.approx(1.0, abs=1.0e-6)
-
+    for row, excess in enumerate(excesses):
+        assert values[row].item() == pytest.approx(
+            _expected(BAND + excess), rel=1.0e-6
+        )
+    # 尾部斜率恒为 1 rad/rad:没有上界,也不衰减 —— 深处和浅处一模一样。
+    assert values[2].item() - values[1].item() == pytest.approx(0.03, rel=1.0e-5)
+    assert values[3].item() - values[2].item() == pytest.approx(0.03, rel=1.0e-5)
+    # 无上界:再走 10 rad 仍然线性增长,不封顶在 1。
     env2, action2, _, _ = _env(1)
-    action2.processed_actions[0, [2, 5, 19]] = 1.0
-    summed = hope_rewards_mod.qdes_limit_barrier_v2(env2)
-    assert summed.item() == pytest.approx(3.0, abs=1.0e-6)
-    action2.processed_actions[:] = 20.0
-    bounded = hope_rewards_mod.qdes_limit_barrier_v2(env2)
-    assert bounded.item() == pytest.approx(31.0, abs=1.0e-5)
+    action2.processed_actions[0, 3] = SOFT_HI + 10.0
+    assert hope_rewards_mod.qdes_limit_barrier_v2(env2).item() == pytest.approx(
+        _expected(BAND + 10.0, hard_excess=1.0), rel=1.0e-6
+    )
+
+
+def test_v2_anti_exploitation_floor_sits_on_the_mechanical_hard_edge():
+    """人话:反利用地板没删,是挪到"撞上机械边"那一点。
+
+    2026-08-07 裁定三取消的是实际-q 硬超限的**阻断**,不是这条兜底的定价。
+    """
+
+    env, action, _, _ = _env(2)
+    just_inside = HARD_HI - 1.0e-6
+    just_outside = HARD_HI + 1.0e-6
+    action.processed_actions[0, 7] = just_inside
+    action.processed_actions[1, 7] = just_outside
+    values = hope_rewards_mod.qdes_limit_barrier_v2(env)
+    step = values[1].item() - values[0].item()
+    # 不连续点存在,而且大小就是 FLOOR*BAND —— "不存在一串正违规而罚金趋于零的路径"。
+    assert step == pytest.approx(FLOOR * BAND, rel=1.0e-3)
+    assert values[0].item() == pytest.approx(
+        _expected(BAND + (just_inside - SOFT_HI)), rel=1.0e-6
+    )
+
+
+def test_v2_sum_aggregation_is_undiluted():
+    env, action, _, _ = _env(1)
+    action.processed_actions[0, [2, 5, 19]] = SOFT_HI + 0.05
+    summed = hope_rewards_mod.qdes_limit_barrier_v2(env)
+    assert summed.item() == pytest.approx(3.0 * _expected(BAND + 0.05), rel=1.0e-5)
+    single = _env(1)
+    single[1].processed_actions[0, 2] = SOFT_HI + 0.05
+    one = hope_rewards_mod.qdes_limit_barrier_v2(single[0])
+    # SUM,不是 mean、不是 top-k:三个关节就是单关节的三倍,一分不稀释。
+    assert summed.item() == pytest.approx(3.0 * one.item(), rel=1.0e-5)
+
+
+def test_v2_margin_must_stay_inside_the_projection_envelope_inset():
+    """人话:带宽必须**严格小于**护栏投影内沿 0.05,否则被钳关节正好压在带边上。
+
+    这是 2026-08-07 那条"29/31 个关节的 m_eff 恰等于 clamp 内缩"的回归门。
+    """
+
+    projection_inset = 0.05
+    assert MARGIN < projection_inset
+    clamped = SOFT_HI - projection_inset * SPAN
+    env, action, _, _ = _env(1)
+    action.processed_actions[0, :] = clamped
+    assert hope_rewards_mod.qdes_limit_barrier_v2(env).item() == 0.0
 
 
 def test_v2_stance_exemption_is_free_but_moving_toward_limit_is_not():
     env, action, data, _ = _env(2)
-    # d(default) = 0.03, therefore m_eff = 0.025 after the 0.005 breathing gap.
-    data.default_joint_pos[:, 5] = -0.94
-    action.processed_actions[0, 5] = -0.94
-    action.processed_actions[1, 5] = -0.950001
+    # d(default) = 0.015,因此 m_eff = 0.010 (0.005 的呼吸间隙之后),带宽 = 0.020 rad。
+    data.default_joint_pos[:, 5] = -0.97
+    action.processed_actions[0, 5] = -0.97
+    action.processed_actions[1, 5] = -0.99
     values = hope_rewards_mod.qdes_limit_barrier_v2(env)
     assert values[0].item() == 0.0
-    assert values[1].item() >= FLOOR
+    assert values[1].item() > 0.0
 
 
 def test_qdes_and_actual_q_activate_as_distinct_objectives():
     env, action, data, asset_cfg = _env(2)
-    action.processed_actions[0, 7] = 0.90
-    data.joint_pos[1, 9] = -0.90
+    action.processed_actions[0, 7] = 0.99
+    data.joint_pos[1, 9] = -0.99
     qdes = hope_rewards_mod.qdes_limit_barrier_v2(env)
     actual = hope_rewards_mod.actual_joint_limit_barrier_v2(env, asset_cfg)
     assert qdes[0].item() > 0.0 and qdes[1].item() == 0.0
@@ -112,8 +212,8 @@ def test_qdes_and_actual_q_activate_as_distinct_objectives():
 
 def test_v2_probes_are_zero_and_ledger_keeps_qdes_actual_separate():
     env, action, data, asset_cfg = _env(2)
-    action.processed_actions[0, 1] = 0.90
-    data.joint_pos[1, 2] = -0.90
+    action.processed_actions[0, 1] = 0.99
+    data.joint_pos[1, 2] = -0.99
     assert torch.equal(
         hope_rewards_mod.qdes_limit_barrier_v2_probe(env), torch.zeros(2)
     )
@@ -170,9 +270,10 @@ def test_v2_activation_state_corruption_fails_closed():
     (
         ("margin_frac", 0.0, r"\(0, 0.5\)"),
         ("margin_frac", 0.5, r"\(0, 0.5\)"),
-        ("penalty_floor", 0.0, r"\(0, 1\)"),
-        ("penalty_floor", 1.0, r"\(0, 1\)"),
-        ("penalty_floor", math.nan, r"\(0, 1\)"),
+        # 2026-08-07:地板下界改成闭区间(0.0 是合法的"不要硬边地板"消融),上界不变。
+        ("penalty_floor", -0.001, r"\[0, 1\)"),
+        ("penalty_floor", 1.0, r"\[0, 1\)"),
+        ("penalty_floor", math.nan, r"\[0, 1\)"),
     ),
 )
 def test_v2_invalid_scalars_fail_closed(source, field, value, match):
@@ -195,7 +296,12 @@ def test_action_ball_config_uses_v2_callables_and_separate_probe_terms():
     assert "func=mdp.actual_joint_limit_barrier_v2," in block
     assert "func=mdp.actual_joint_limit_barrier_v2_probe," in block
     assert block.count('"penalty_floor": 0.25') == 4
-    assert block.count("weight=-5.0") == 3  # qdes, actual-q, projection
+    assert block.count('"margin_frac": 0.02') == 4
+    # 2026-08-07 裁定二:两条 barrier 换开源 rad 口径 -> -10;投影罚重算剂量 -> -1。
+    assert block.count("weight=-10.0") == 2  # qdes, actual-q
+    assert block.count("weight=-1.0") == 1  # projection
+    assert "weight=-5.0" not in block
+    assert '"knee_frac": 0.05' in block
     for term_name in (
         "qdes_limit_barrier_probe",
         "actual_joint_limit_barrier_probe",
@@ -208,10 +314,12 @@ def test_action_ball_config_uses_v2_callables_and_separate_probe_terms():
 def test_adopted_scale_and_generic_death_invariants_are_pinned():
     task = yaml.safe_load(ACTION_BALL_YAML.read_text(encoding="utf-8"))
     rewards = task["rewards"]
-    assert rewards["qdes_limit_barrier_weight"] == pytest.approx(-5.0)
-    assert rewards["joint_limit_weight"] == pytest.approx(-5.0)
-    # 2026-08-05 带宽对齐(exp §5.6 第 9 条):两条通道一起 0.08 -> 0.05。v2 硬合同要求
-    # q_des / actual-q 通道逐字段同权同带宽,所以这里断言的是"相等"本身,不只是数值。
+    # 2026-08-07 Franco 裁定二:核/量纲换成开源 rad 口径,权重号码必须跟着换。
+    # 旧 -5 作用在每关节归一 [0,1] 上,与新数**不可比**;-10 是上游 BeyondMimic /
+    # mjlab-tracking / unitree_rl_lab-mimic 全身版的同一个数。
+    assert rewards["qdes_limit_barrier_weight"] == pytest.approx(WEIGHT)
+    assert rewards["joint_limit_weight"] == pytest.approx(WEIGHT)
+    # v2 硬合同要求 q_des / actual-q 通道逐字段同权同带宽,所以断言的是"相等"本身。
     assert rewards["qdes_limit_barrier_margin_frac"] == pytest.approx(MARGIN)
     assert rewards["joint_limit_margin_frac"] == pytest.approx(MARGIN)
     assert (
@@ -219,24 +327,149 @@ def test_adopted_scale_and_generic_death_invariants_are_pinned():
     )
     assert rewards["joint_limit_weight"] == rewards["qdes_limit_barrier_weight"]
     # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0(post-dt -6.0 -> -0.2)。
-    # 权威在 HOPEPingPongActionBall.yaml:151;本文件读那份 yaml,是它的算术副本。
     assert rewards["death_penalty_weight"] == pytest.approx(-10.0)
     assert rewards["table_hit_penalty_weight"] == pytest.approx(0.0)
 
+    # 带宽必须严格窄于护栏的投影内沿,否则罚的是护栏自己放进去的位置。
+    assert rewards["qdes_limit_barrier_margin_frac"] < 0.05
+
     policy_dt = 0.02
-    floor_step_per_joint_channel = abs(-5.0 * policy_dt * FLOOR)
-    full_step_per_joint_channel = abs(-5.0 * policy_dt)
-    max_two_channel_step = 31 * 2 * full_step_per_joint_channel
-    hard_death = abs(-10.0 * policy_dt)
+    # 开源交叉验证:build_1 收敛态全身越软限位总量 0.003 rad。同一个核、同一个权重,
+    # 每步剂量必须重现它日志里的 -0.0006。这条是"同等策略水平交叉验证"的回归门:
+    # 权重、量纲、dt 任何一个搞错一档,这个数就差一个数量级。
+    build1_converged_excess_rad = 0.003
+    assert abs(WEIGHT) * build1_converged_excess_rad * policy_dt == pytest.approx(
+        0.0006, abs=1.0e-9
+    )
+    # build_1 早期峰值 -0.0040/步 对应 0.02 rad 的全身越限量。
+    assert abs(WEIGHT) * 0.02 * policy_dt == pytest.approx(0.0040, abs=1.0e-9)
+    # 一个关节整整越出软限位 0.10 rad,单步单关节 -0.02;没有上界,再深就线性再涨。
+    assert abs(WEIGHT) * 0.10 * policy_dt == pytest.approx(0.02, abs=1.0e-12)
     landing_max = 500.0 * policy_dt
-    assert floor_step_per_joint_channel == pytest.approx(0.025)
-    assert full_step_per_joint_channel == pytest.approx(0.10)
-    assert max_two_channel_step == pytest.approx(6.2)
-    # 对齐后 death 不再压过 soft 限位通道:6.0 -> 0.2,与 max_two_channel_step 6.2 的量级
-    # 关系整个翻转(原本 death 约等于两通道满额,现在只有它的 3%)。这正是 §5.6 想要的次序。
-    assert hard_death == pytest.approx(0.2)
     assert landing_max == pytest.approx(10.0)
-    assert 50 * floor_step_per_joint_channel == pytest.approx(1.25)
+    assert abs(-10.0 * policy_dt) == pytest.approx(0.2)
+
+
+def test_projection_penalty_adopted_dose_is_the_recomputed_one():
+    """裁定二:核换了就必须重算剂量,不能沿用 -5。"""
+
+    source = ENV_CFG.read_text(encoding="utf-8")
+    start = source.index("qdes_projection_penalty = RewTerm(")
+    block = source[start : source.index("\n    )", start)]
+    assert "weight=-1.0," in block
+    assert '"knee_frac": 0.05,' in block
+    assert "shape_rate" not in block
+
+
+# --------------------------------------------------------------------------------------------- #
+# 2026-08-07 裁定一的前置:深度遥测必须真的能被读到
+# --------------------------------------------------------------------------------------------- #
+def test_depth_telemetry_is_readable_and_does_not_clear_itself():
+    """人话:按深度验收的前提是先能读到深度。
+
+    这些计数器机制层每步都在算,但在此之前没有任何消费方把它们写进收据。
+    ``peek_*`` 是只读的:连读两次必须给出同一份数,不能像 ``consume_*`` 那样清零。
+    """
+
+    env, action, data, asset_cfg = _env(2)
+    action.processed_actions[0, 4] = SOFT_HI + 0.03
+    data.joint_pos[1, 6] = -(SOFT_HI + 0.01)
+    hope_rewards_mod.qdes_limit_barrier_v2(env)
+    hope_rewards_mod.actual_joint_limit_barrier_v2(env, asset_cfg)
+
+    first = hope_rewards_mod.peek_qdes_depth_telemetry(env)
+    assert first is not None
+    assert first["qdes_observed_sample_count"] == 2
+    assert first["qdes_intrusion_joint_count"] == 1
+    assert first["actual_intrusion_joint_count"] == 1
+    # 深度口径:1.0 = 正好压在软限位上,>1.0 = 已经越过软限位(单位是带宽的倍数)。
+    assert first["qdes_max_intrusion_depth_frac"] == pytest.approx(
+        (BAND + 0.03) / BAND, rel=1.0e-4
+    )
+    assert first["actual_max_intrusion_depth_frac"] == pytest.approx(
+        (BAND + 0.01) / BAND, rel=1.0e-4
+    )
+    # 只读:再读一次必须逐位相同。
+    assert hope_rewards_mod.peek_qdes_depth_telemetry(env) == first
+
+
+def test_depth_telemetry_is_absent_rather_than_faked_when_nothing_ran():
+    env, _, _, _ = _env(1)
+    assert hope_rewards_mod.peek_qdes_depth_telemetry(env) is None
+
+
+def test_runner_writes_the_depth_block_into_the_economy_receipt():
+    """变异测试:如果有人把 economy JSON 里的深度块删了,这里必须红。"""
+
+    runner = (
+        ROOT
+        / "source/whole_body_tracking/whole_body_tracking/utils/my_on_policy_runner.py"
+    ).read_text(encoding="utf-8")
+    assert '"joint_limit_depth": self._reward_ppo_economy_depth_telemetry()' in runner
+    assert "peek_qdes_depth_telemetry" in runner
+    assert '"joint_limit_depth_semantics"' in runner
+
+
+def test_economy_receipt_raw_bounds_are_recomputed_from_the_urdf_not_hand_copied():
+    """从 URDF + 站姿 + 采纳带宽重算两条通道的可达上界,和收据里的常数对拍。
+
+    收据里那两个数是"物理上够得到的最大值",不是核的每关节上限 —— 新核没有上限。
+    """
+
+    import xml.etree.ElementTree as ET
+
+    urdf = ROOT.parent.parent / "agi/URDF/a3_t2d5/urdf/model.urdf"
+    if not urdf.exists():  # pragma: no cover - asset not present in this checkout
+        pytest.skip("A3 URDF is not present in this checkout")
+    defaults = {
+        "hip_pitch": -0.1311, "knee": 0.2468, "ankle_pitch": -0.1204,
+        "shoulder_pitch": 0.3, "elbow": 0.8,
+    }
+    exact = {
+        "left_hip_roll_joint": 0.0056, "right_hip_roll_joint": -0.0056,
+        "left_hip_yaw_joint": -0.0348, "right_hip_yaw_joint": 0.0348,
+        "left_ankle_roll_joint": -0.0078, "right_ankle_roll_joint": 0.0078,
+        "left_shoulder_roll_joint": 0.12, "right_shoulder_roll_joint": -0.12,
+    }
+    qdes_total = 0.0
+    actual_total = 0.0
+    count = 0
+    for joint in ET.parse(str(urdf)).getroot().iter("joint"):
+        limit = joint.find("limit")
+        if limit is None:
+            continue
+        count += 1
+        name = joint.get("name")
+        hard_lo, hard_hi = float(limit.get("lower")), float(limit.get("upper"))
+        hard_span = hard_hi - hard_lo
+        mid, half = 0.5 * (hard_lo + hard_hi), 0.45 * hard_span
+        soft_lo, soft_hi = mid - half, mid + half
+        soft_span = soft_hi - soft_lo
+        default = exact.get(name, 0.0)
+        if name not in exact:
+            for suffix, value in defaults.items():
+                if name.endswith(suffix + "_joint"):
+                    default = value
+        d_default = min(default - soft_lo, soft_hi - default) / soft_span
+        m_eff = min(MARGIN, d_default - 0.005)
+        band = m_eff * soft_span
+        qdes_total += 0.5 * band
+        actual_total += 0.5 * band + 0.05 * hard_span + FLOOR * band
+    assert count == 31
+
+    receipt = (
+        ROOT / "scripts/materialize_action_ball_reward_ppo_economy_receipt.py"
+    ).read_text(encoding="utf-8")
+    namespace: dict = {}
+    for line in receipt.splitlines():
+        if line.startswith(("_QDES_LIMIT_BARRIER_RAW_MAX", "_ACTUAL_LIMIT_BARRIER_RAW_MAX")):
+            exec(line, namespace)  # noqa: S102 - two float literals from our own file
+    assert namespace["_QDES_LIMIT_BARRIER_RAW_MAX"] == pytest.approx(
+        qdes_total, abs=1.0e-5
+    )
+    assert namespace["_ACTUAL_LIMIT_BARRIER_RAW_MAX"] == pytest.approx(
+        actual_total, abs=1.0e-5
+    )
 
 
 # --------------------------------------------------------------------------------------------- #

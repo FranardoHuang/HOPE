@@ -118,16 +118,19 @@ ADOPTED_POLICY_DT_S = 0.02
 # 2026-08-05 层级对齐(exp §5.6 第 7 条):-300.0 -> -10.0,post-dt -6.0 -> -0.2。
 ADOPTED_DEATH_WEIGHT = -10.0
 ADOPTED_DEATH_PER_EVENT = -0.2
-ADOPTED_SOFT_LIMIT_WEIGHT = -5.0
+# 2026-08-07 Franco 裁定二:核/量纲换成开源 rad 口径后重定的采纳权重(旧 -5 是归一 [0,1] 口径)。
+ADOPTED_SOFT_LIMIT_WEIGHT = -10.0
 # 2026-08-05 带宽对齐(exp §5.6 第 9 条):0.08 -> 0.05,让 barrier 带外沿接上 pre-apply guard
 # 的投影包络内沿。两个通道一起改:v2 硬合同(train.py _actual_joint_limit_barrier_reward_contract)
 # 逐字段要求 qdes/actual 两条通道的 weight/margin_frac/penalty_floor 完全相同 —— 它们是同一条
 # 限位带的两个记账观察者。首版只改 qdes 一边(此表曾写 joint_limit: 0.08),理由是"actual-q 不
 # 经过投影",但那条理由不成立:护栏把命令投影到 d = 0.05*span 后 PD 会把实际 q 拉到同一位置,
 # 两条通道都读 soft_joint_pos_limits,底噪一模一样;而且那样配置开机即被硬合同拒绝。
+# 2026-08-07:0.05 恰等于护栏的投影内沿,带外沿与被钳落点是同一点,intrusion 成了掷硬币;
+# 采纳值改为 0.02,严格窄于内沿。
 ADOPTED_SOFT_LIMIT_MARGIN_FRAC_BY_TERM = {
-    "joint_limit": 0.05,
-    "qdes_limit_barrier": 0.05,
+    "joint_limit": 0.02,
+    "qdes_limit_barrier": 0.02,
 }
 ADOPTED_SOFT_LIMIT_PENALTY_FLOOR = 0.25
 ADOPTED_SOFT_LIMIT_MAX_JOINTS = 31
@@ -3676,7 +3679,7 @@ def _validate_safety_transitions(
             audit.fail(
                 "soft_limit_recipe_params",
                 "recipe term {!r} does not bind the adopted {}-margin/"
-                "0.25-floor 31-joint contract".format(
+                "hard-edge-floor 31-joint contract".format(
                     name, ADOPTED_SOFT_LIMIT_MARGIN_FRAC_BY_TERM[name]
                 ),
             )

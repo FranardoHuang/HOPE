@@ -4255,7 +4255,8 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
             "schema_version", "enabled", "probe_enabled", "term_name",
             "probe_term_name", "term_callable", "probe_callable",
             "activation_ledger", "weight", "margin_frac", "penalty_floor",
-            "shape_rate", "stance_eps", "margin_floor", "action_name",
+            "kernel_unit", "tail", "shape_baseline",
+            "stance_eps", "margin_floor", "action_name",
             "joint_count", "joint_order", "position_source",
             "position_limit_source", "default_stance_source", "formula",
             "aggregation", "per_joint_cap", "gate",
@@ -4316,9 +4317,10 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
             barrier["penalty_floor"],
             name="qdes_limit_barrier_reward.penalty_floor",
         )
-        if not 0.0 < penalty_floor < 1.0:
+        # 2026-08-07 裁定二:地板退役,采纳 0.0,故下界放宽到闭区间。
+        if not 0.0 <= penalty_floor < 1.0:
             raise ValueError(
-                "schema-3 qdes_limit_barrier_reward penalty_floor must be in (0, 1)"
+                "schema-3 qdes_limit_barrier_reward penalty_floor must be in [0, 1)"
             )
         expected = {
             "term_name": "qdes_limit_barrier",
@@ -4333,7 +4335,11 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
             ),
             "action_name": "joint_pos",
             "activation_ledger": "weight_independent_control_step_counters",
-            "shape_rate": 4.0,
+            "kernel_unit": "radian",
+            "tail": "linear_unbounded_slope_one_per_radian",
+            "shape_baseline": (
+                "isaaclab_joint_pos_limits_l1_hinge_with_huber_knee_of_width_b"
+            ),
             "stance_eps": 0.005,
             "margin_floor": 0.005,
             "joint_order": "runtime_articulation_identity",
@@ -4341,14 +4347,14 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
             "position_limit_source": "articulation.data.soft_joint_pos_limits",
             "default_stance_source": "articulation.data.default_joint_pos",
             "formula": (
-                "sum(where(u>0,penalty_floor+(1-penalty_floor)*"
-                "(1-exp(-shape_rate*clamp(u,0,1)))/(1-exp(-shape_rate)),0));"
-                "u=relu(m_eff-min(q-lo,hi-q)/(hi-lo))/m_eff;"
+                "sum(where(x>0,penalty_floor*b+(1-penalty_floor)*"
+                "where(x<=b,x*x/(2*b),x-b/2),0));"
+                "x=b-min(q-lo,hi-q);b=m_eff*(hi-lo);"
                 "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-stance_eps);"
                 "require_all(m_eff>margin_floor)"
             ),
             "aggregation": "sum_all_31_joints",
-            "per_joint_cap": 1.0,
+            "per_joint_cap": None,
             "gate": "dense_every_control_step",
         }
     for key, value in expected.items():
@@ -4374,7 +4380,8 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
             "schema_version", "enabled", "probe_enabled", "term_name",
             "probe_term_name", "term_callable", "probe_callable",
             "activation_ledger", "weight", "margin_frac", "penalty_floor",
-            "shape_rate", "stance_eps", "margin_floor", "asset_name",
+            "kernel_unit", "tail", "shape_baseline",
+            "stance_eps", "margin_floor", "asset_name",
             "joint_count", "joint_order", "position_source",
             "position_limit_source", "default_stance_source", "formula",
             "aggregation", "per_joint_cap", "gate",
@@ -4408,7 +4415,7 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
         actual["penalty_floor"],
         name="actual_joint_limit_barrier_reward.penalty_floor",
     )
-    if not 0.0 < actual_margin < 0.5 or not 0.0 < actual_floor < 1.0:
+    if not 0.0 < actual_margin < 0.5 or not 0.0 <= actual_floor < 1.0:
         raise ValueError(
             "schema-3 actual_joint_limit_barrier_reward parameters are invalid"
         )
@@ -4424,7 +4431,11 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
             "actual_joint_limit_barrier_v2_probe"
         ),
         "activation_ledger": "weight_independent_control_step_counters",
-        "shape_rate": 4.0,
+        "kernel_unit": "radian",
+        "tail": "linear_unbounded_slope_one_per_radian",
+        "shape_baseline": (
+            "isaaclab_joint_pos_limits_l1_hinge_with_huber_knee_of_width_b"
+        ),
         "stance_eps": 0.005,
         "margin_floor": 0.005,
         "asset_name": "robot",
@@ -4435,7 +4446,7 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
         "default_stance_source": "articulation.data.default_joint_pos",
         "formula": expected["formula"],
         "aggregation": "sum_all_31_joints",
-        "per_joint_cap": 1.0,
+        "per_joint_cap": None,
         "gate": "dense_every_control_step",
     }
     for key, value in actual_expected.items():

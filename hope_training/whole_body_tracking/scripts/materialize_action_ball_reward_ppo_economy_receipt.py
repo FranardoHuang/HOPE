@@ -60,8 +60,10 @@ EXPECTED_RSL_RL_DISTRIBUTION = "rsl-rl-lib"
 EXPECTED_RSL_RL_VERSION = "2.3.1"
 REWARD_GLOBAL_SCALAR = 1.0
 POLICY_STEP_DT_S = 0.02
+# 2026-08-07 Franco 裁定二重钉:限位三项换开源 rad 口径(qdes/actual barrier -5 -> -10)。
+# 旧值 845d75b4...ff02 只代签本次改价之前的字节。
 EXPECTED_EFFECTIVE_REWARD_SHA256 = (
-    "845d75b4f409725e9dfc7070b1070a6dd6385486c79a6c5a1aec60c41c42ff02"
+    "b096b79c403b770e4e0e687f1d35ed5256b777377248cfca0a8856b164b2a59d"
 )
 RUNTIME_GATE_NUM_ENVS = 4096
 RUNTIME_GATE_UPDATES = 5
@@ -487,6 +489,24 @@ def _bound_row(
     }
 
 
+# 2026-08-07 Franco 裁定二(形状照开源对齐):soft-limit kernel 从"每关节封顶 1 的归一化 ramp"
+# 换成开源那条 rad 口径、尾部线性无上界的 hinge。**核本身没有每关节上限了**,所以这两个
+# raw_max 不再是 31,而是"物理上够得到的最大值":
+#   * q_des 通道:部署钳位保证 processed q_des 不会越过软限位 -> 每关节深度 <= 带宽 b,
+#     值 <= b/2,合计 sum_j 0.5*m_eff_j*soft_span_j = 0.925513 rad。
+#     (ActionBall 上这个通道实际恒为 0:护栏的投影内沿 0.05 严格大于带宽 0.02,
+#      被钳关节根本进不了带里。它在 ActionBall 上是一条零价的遥测通道。)
+#   * 实际-q 通道:q 由机械硬限位兜底 -> 每关节越限量 <= 0.05*hard_span(soft=0.9*hard 居中),
+#     值 <= b/2 + 0.05*hard_span_j + penalty_floor*b_j,合计 6.530010 rad。
+# 两个常数由 agi/URDF/a3_t2d5/urdf/model.urdf 的 31 条 limit 与
+# robots/agibot_a3.py 的 default_joint_pos / soft_joint_pos_limit_factor=0.9 推出,
+# margin_frac=0.02、penalty_floor=0.25、stance_eps=0.005;
+# test_materialize_action_ball_reward_ppo_economy_receipt 里有一条从 URDF 重算的断言,
+# 任何一边漂了都会红。
+_QDES_LIMIT_BARRIER_RAW_MAX = 0.925513
+_ACTUAL_LIMIT_BARRIER_RAW_MAX = 6.530010
+
+
 def _theoretical_weighted_dt_bounds(
     reward_payload: Mapping[str, Any], *, step_dt_s: float
 ) -> list[dict[str, Any]]:
@@ -503,15 +523,15 @@ def _theoretical_weighted_dt_bounds(
     _require_term(
         terms,
         "qdes_limit_barrier",
-        weight=-5.0,
-        params_subset={"margin_frac": 0.08, "penalty_floor": 0.25},
+        weight=-10.0,
+        params_subset={"margin_frac": 0.02, "penalty_floor": 0.25},
     )
     _require_term(
         terms,
         "joint_limit",
-        weight=-5.0,
+        weight=-10.0,
         params_subset={
-            "margin_frac": 0.08,
+            "margin_frac": 0.02,
             "penalty_floor": 0.25,
             "expected_joint_count": 31,
         },
@@ -561,8 +581,8 @@ def _theoretical_weighted_dt_bounds(
     arithmetic = {
         "landing": 500.0 * step_dt_s,
         "death": -300.0 * step_dt_s,
-        "qdes_limit": -5.0 * 31.0 * step_dt_s,
-        "actual_limit": -5.0 * 31.0 * step_dt_s,
+        "qdes_limit": -10.0 * _QDES_LIMIT_BARRIER_RAW_MAX * step_dt_s,
+        "actual_limit": -10.0 * _ACTUAL_LIMIT_BARRIER_RAW_MAX * step_dt_s,
         "action_rate": -0.2 * 9.0 * step_dt_s,
         "fine": 4.0 * step_dt_s,
         "coarse": 1.0 * step_dt_s,
@@ -574,8 +594,8 @@ def _theoretical_weighted_dt_bounds(
     expected = {
         "landing": 10.0,
         "death": -6.0,
-        "qdes_limit": -3.1,
-        "actual_limit": -3.1,
+        "qdes_limit": -0.185103,
+        "actual_limit": -1.306002,
         "action_rate": -0.036,
         "fine": 0.08,
         "coarse": 0.02,
@@ -585,7 +605,8 @@ def _theoretical_weighted_dt_bounds(
         "imitation": 0.08,
     }
     for key, value in arithmetic.items():
-        if not math.isclose(value, expected[key], rel_tol=0.0, abs_tol=1.0e-12):
+        tolerance = 1.0e-6 if key in ("qdes_limit", "actual_limit") else 1.0e-12
+        if not math.isclose(value, expected[key], rel_tol=0.0, abs_tol=tolerance):
             raise ReceiptRefused(f"theoretical reward bound {key!r} drifted")
 
     return [
@@ -613,20 +634,28 @@ def _theoretical_weighted_dt_bounds(
             name="qdes_limit_barrier_per_step",
             members=("qdes_limit_barrier",),
             raw_min=0.0,
-            raw_max=31.0,
-            weighted_dt_min=-3.1,
+            raw_max=_QDES_LIMIT_BARRIER_RAW_MAX,
+            weighted_dt_min=-0.185103,
             weighted_dt_max=0.0,
-            semantics="sum of bounded processed-qdes per-joint soft-band intrusions",
+            semantics=(
+                "radian sum of processed-qdes soft-band depth; the kernel itself has "
+                "no per-joint cap, this bound is the reachable one (the deploy clamp "
+                "keeps processed q_des inside the soft limits, so depth <= band width)"
+            ),
             source_loci=("mdp/hope_rewards.py:qdes_limit_barrier_v2",),
         ),
         _bound_row(
             name="actual_joint_limit_barrier_per_step",
             members=("joint_limit",),
             raw_min=0.0,
-            raw_max=31.0,
-            weighted_dt_min=-3.1,
+            raw_max=_ACTUAL_LIMIT_BARRIER_RAW_MAX,
+            weighted_dt_min=-1.306002,
             weighted_dt_max=0.0,
-            semantics="sum of bounded actual-q per-joint soft-band intrusions",
+            semantics=(
+                "radian sum of actual-q soft-band depth plus the unbounded linear "
+                "tail; the reachable bound comes from the mechanical hard limits, "
+                "not from a per-joint cap in the kernel"
+            ),
             source_loci=("mdp/hope_rewards.py:actual_joint_limit_barrier_v2",),
         ),
         _bound_row(
