@@ -10113,6 +10113,221 @@ runbook 的 `6b2c7c66…` **STALE**（`42232b84` 那次重签把它换掉了）�
    它**实际装的是** 9.2.17.8 那一节（回归基线 + registry 漂钉）。
    该提交已经推送，按纪律不 amend，在此登记更正。
 
+### 9.2.18 把 A211/C211 接上 MuJoCo GPU 回路：能接的只有一条，而那一条底下压着一个漂了四天的 4 倍价（2026-08-08，pod1 host-only，全程未占 GPU）
+
+**人话（先看这四句）**
+
+1. **差异表不用重造**，§9.2.9 那 `17` 轴今天在 HEAD 上当场重跑过，仍然是
+   `5` 对齐 / `10` 要紧差异 / `2` 有理由差异,一条没变。
+2. 那 `10` 条要紧差异里,**没有一条是"接线就能接上"的**:要么卡在 measured teacher /
+   question solver / motion command manager 这种**本车道造不出的产物**,要么是
+   "一行就能改、但会改训练分布"的**发车决定**。这是 §9.2.9 六已经写过的结论,今天复核成立。
+3. **但有第十一条,§9.2.9 没数进去,而它恰恰是能接的那条**:两条车道对"Isaac 的奖励权重
+   到底是多少"这个问题,**读的层级都是错的** —— 读的是 cfg 类体里声明的那一份,而真正
+   生效的是**发车解析后**的那一份。
+4. 顺着这条查下去,查到一个真的错值:MuJoCo 侧 C 族镜像的 `upright_exp` 权重是 `1.0`,
+   Isaac 现役是 `0.25`,**差 4 倍,从 2026-08-04 起漂了四天,期间所有的门都是绿的**。
+
+#### 9.2.18.1 (a) 差异表:§9.2.9 那张今天仍然作数,原样复用
+
+在 HEAD `766ccf91` 的干净 worktree 上重跑 `mjlab_lane/isaac_alignment.py`
+(`/workspace/mjlab_venv/bin/python`,Python 3.12):
+
+```
+axes : 17    aligned : 5    divergent_blocking : 10    divergent_declared : 2
+unverifiable : 0            cross-engine comparable : False
+```
+
+与 §9.2.9 一致。**所以本轮没有重造差异表**,按票面要求直接复用。
+配套的 `mjlab_lane/tests/test_isaac_alignment.py` **`21 passed / 0 skipped`**。
+
+顺带就地改准一处**手抄错的第二份拷贝**:台账里 vendor 动作解码上界那句写的是
+`0.647 rad / 腰偏航`,活值是 `0.6875 rad / 髋偏航·髋俯仰`。同一句话在
+`a3_train_ppo.py` 的 docstring 里 08-06 已经按活值改过(该文件第 `118--126` 行还留着
+"原写 0.647,活值读出来纠正"的记录),**台账这一行当时漏了**。
+一处改准、另一处没跟,正是本 session 反复栽的第二个形状。
+
+#### 9.2.18.2 (b) 按"影响跨引擎结论可比性"排序之后,能接的到底有几条
+
+票面点名的四条(观测 ABI、动作空间、终止 union、reward 组),逐条查完的裁定:
+
+| 轴 | 能不能接 | 卡在哪 / 为什么不接 |
+| --- | --- | --- |
+| actor `211` / critic `319` 观测 ABI | **不能** | 需要 measured teacher artifact(`teacher_joint_pos/vel`、三组 racket-site heading)+ 在线 question solver;critic 还需要 Isaac 的 motion command manager 才有 `command 62` / `body_pos 42` / `body_ori 84`。造一个形状对、内容零填充的 `211` 就是**假对齐层**,明确不做 |
+| 动作空间 / `action_scale` | **技术上一个 flag** | vendor 模式已实现且逐关节对过活值(`31/31`);把默认从 flat 改成 vendor 会让新 run 与既有 `103` 条 flat 收据不可比 —— **发车决定,不替 Franco 定** |
+| 终止 union | **部分已在,其余不能** | `robot_hit_table` 已经"测得到 + 会拒绝"(§9.2.9 三),装成硬终止会改训练分布,是发车决定;参考包络三条(`anchor_pos`/`anchor_ori`/`ee_body_pos`)需要 motion reference,**没有** |
+| reward 组(mimic/strike/target/outcome) | **不能** | 分别卡在 measured teacher、question packet、analytic outcome evaluator |
+| **reward 权重的"权威层级"** | **能,而且本轮接了** | 见下。这一条 §9.2.9 没单独立轴,但它不需要任何产物、也不是发车决定 —— 纯粹是**两边都在问错一层** |
+
+**所以本轮 (b) 的实际产出只有最后一行。** 把前四条再推一遍只会重新推导出 §9.2.9 六
+已经写过的同一份结论;真正没人做过、且做得动的,是权威层级这一条。
+
+#### 9.2.18.3 权威层级:类体声明的权重 ≠ 真正生效的权重
+
+Isaac 侧一条 reward 项的权重要经过**三层**才落地:
+
+```
+cfg 类继承链的 weight=   ->   YAML rewards.* 键(含 motion_scale 这种乘法)   ->   reward_pack=v2 直接改写
+```
+
+`train.py :: _expand_reward_pack`(`13510` 起)里那句是**赋值**,不是默认值:
+`getattr(R, name).weight = float(weight)`(`13588`)。所以在包里的项,包是最终权威。
+
+C211 的 YAML 链(`C211Learnability -> A3VendorV2 -> A3VendorV1 -> ActionBall`)
+在 `HOPEPingPongActionBall.yaml` 上设了 `reward_pack: v2`,**三层全部生效**。
+
+这一层区分不是学术问题,它直接决定读出来的数对不对:
+
+| 项 | cfg 类体声明 | 发车真正生效 | 差 |
+| --- | --- | --- | --- |
+| `upright_exp` | `0.0` | **`0.25`**(pack) | 只读类体会读出一个**根本不会生效**的数 |
+| `motion_body_pos` | `1.0` | **`0.15`**(× YAML `motion_scale=0.15`) | `6.7` 倍 |
+| `motion_racket_position` | `0.0` | **`0.20`**(YAML 键) | 只读类体会以为这项不存在 |
+
+**两条车道都读错了这一层。** mjlab 台账的 `_probe_reward_surface` 只比项名与锚点,
+所以它的裁定没被污染(而且该行的 `caveat` 里本来就写着这句),但 MuJoCo 侧的镜像是**比数值**的
+—— 它错得很具体。
+
+#### 9.2.18.4 查到的真错值:`upright_exp` 差 4 倍,漂了四天
+
+`mujoco_native/action_ball_c211_env.py` 那份自称
+`action_ball_c211_partial_isaac_synonymous_reward_v3` 的镜像里:
+
+```
+mirror  upright_exp = 1.0          Isaac 现役 = 0.25        (差 4 倍)
+```
+
+`0.25` 是 **2026-08-04 层级对齐**那次定的价,理由写在 `train.py:13363-13376`:
+`upright_exp=1.0` 每步无条件发钱、无 `task_valid` 掩码、RESET_WAIT 内照付,
+`500` 步 `gamma=.99` 折扣 `+1.9869` **压过** task-valid mimic 预算 `1.77331`(`112%`)
+和 accepted window `1.85151`(`107%`)—— 即"站着不动"比"学动作"挣得多。
+改成 `0.25` 后折扣 `+0.4967`,回到辅助项该在的位置。
+
+**Isaac 侧改了,这份 MuJoCo 镜像没跟。** A 族通过
+`from . import action_ball_c211_env as shared` 吃的是同一份,所以**两族都受影响**。
+
+其余 `13` 条逐条核对下来**都对**(含 08-08 刚落地的 `action_rate_l2 = -0.1`,票面
+点名要核实的那一条 —— 它确实同步了)。所以本轮**只**同步了 `upright_exp` 这一个数,
+而且它是同步 Franco 08-04 已经做过的定价决定,**不是新的定价决定**。
+
+#### 9.2.18.5 为什么四天没人看见:唯一在"看"的是一个天天变的整文件指纹
+
+`14` 条镜像权重里,**`13` 条是写死在 `_c211_isaac_synonymous_prior_terms()` 函数体里的
+裸字面量**,而且同一个数在本文件里**抄了两遍**(奖励表一遍、收据表一遍,相距 `2800` 行)。
+`mirrored_constant_registry` 只看得见**模块级**常量 —— 函数体里的字面量对它是隐形的。
+
+唯一"看着"这件事的东西是收据里这一行:
+
+```
+"reward_pack_resolver_source_sha256": _sha256_file(TRAIN_PY)
+```
+
+`train.py` 有 `19270` 行,几乎每天都因为无关原因变一次,这个数就天天变。
+全仓 grep,**没有任何消费者读它**,也没有任何门会因为它拒收。
+**它是"只出计数器没人读"的一个标本,而且比一般的更坏:它出的还是一个天天报警的计数器。**
+
+这与 §9.2.17.8 同一天独立发现的形状是同一个:那边是 `30` 枚 `ArtifactPin` 里 `18` 枚
+从没被对磁盘验过(`60%` 没人看),这边是 `14` 条权重里 `13` 条不在任何门的视野内。
+**两处都不是"门判错了",是"门根本没看这一格"。**
+
+#### 9.2.18.6 改法:照 `table_termination` 那道已经交过学费的门的同一形状
+
+`table_termination.py:508-512` 那段注释把这件事说清楚过了:
+"上面三道门只说源文件的字节跟我钉的一样。源文件一动,把这三行重钉成新值是一行的事,
+而这个文件顶部那几个手抄常量跟没跟上,过去没有任何机制在看。"
+`OPEN_MIRROR_DEBT` 里 `C211_ACTION_RATE_POST_DT_WEIGHT` 那条债的"怎么修"栏,
+写的也正是"给 c211_env 建一张和 `table_termination` 同款的表"。本轮就是把它做了。
+
+- **抬成模块常量并逐个比活值**:`upright_exp` / `base_ang_vel_xy` / `base_lin_vel_z` /
+  `joint_vel` / `action_rate_l2` 五条,走 `mirrored_isaac_reward_weight_entries()` +
+  `isaac_live_constants.parity_blockers()`。A 族的 `racket_progress` 一并接上。
+- **比的是发车解析后那一层**:在包里的项(`upright_exp` / `action_rate_l2`)指向
+  `_REWARD_PACK_V2_DIRECT`,不在包里也没有 YAML 键的项才指向 cfg 类体。
+- **求值器加两种选择器**,都 fail closed:
+  `class_term_weight`(RewTerm 的 `weight=` 关键字,`class_term_param` 够不到它)与
+  `pair_table_value`(读 `(name, value)` 表;**遇到读不懂的行是拒绝,不是跳过** ——
+  跳过是最坏的失败模式,被跳过的那行完全可能就是要找的那行)。
+- **影子检查**:选择器只指一个类。若 C211 继承链上有下游类开始重声明同名项,
+  单类选择器会继续拿被遮住的旧值报"对齐"。`declaring_classes()` 扫全链,
+  只认唯一那个类,否则开火。这不是假想:`base_ang_vel_xy` / `base_lin_vel_z` 在
+  `HOPEHitterPureRewardsCfg` 里各有一份**逐字相同**的拷贝(那个类不在 C211 链上),
+  连写变异测试的锚点都得带上行尾注释才唯一;`racket_progress` 在那个类里也有一份,
+  只是权重是 `0.0` 而不是 `10.0` —— 即"同名项在别处取着另一个值"这件事本来就在发生。
+- **覆盖面自检**:`14` 条实现项必须要么在"比过了"那批、要么在"明写没比"那批,
+  **不许有第三种状态**(没人比、也没人记)。
+- **记录与阻断同一批**:门放在 `_build_reward_contract` **最前面**(纯静态检查,
+  不需要 torch、不需要 native ABI),不一致直接拒收;收据同时写明谁被比过、谁没有、卡在哪。
+
+#### 9.2.18.7 (c) 接不动的,以及为什么
+
+- **剩下 `9` 条 `motion_*` 权重**:权威都要过一道 Hydra YAML
+  (`rewards.motion_scale` 或 `rewards.motion_racket_*_weight`),而
+  `isaac_live_constants` 的求值器只读 Python AST。要闭掉它得让求值器会展开 Hydra 的
+  defaults 链并按后写后赢合成 —— **那要连 defaults 顺序、`@_here_` 语义、包展开一起做对,
+  做半截比不做更危险:会给一个"比过了"的假象。** 登记成明写的债,不假装比过。
+  同一个能力一次能顺带闭掉 A 族的 `A211_BASE_POSITION_WEIGHT`。
+- **那 9 条的"没比"名单里只写项名和权威路径,不写数值** —— 再抄一份数字进去,
+  就是给这个文件添**第四份**手抄件。
+- **§9.2.9 六列的那批**(`211`/`319` ABI、mimic/target/outcome 三组、参考包络三条终止、
+  WAIT/揭示结构、球的接触模型、摔倒阈值 / 动作解码默认 / 撞桌硬终止 / 复位随机化)
+  今天复核**结论不变**,不重复列。
+
+#### 9.2.18.8 变异测试:`13` 条,每条都先证明"粗一个档次的检查照样通过"
+
+全部在 tmp 拷贝上跑,本仓源文件不动。每条**先断言粗检查确实过得去**,再断言门变红。
+
+| 变异 | 粗检查为什么抓不到(测试里逐条断言过) | 结果 |
+| --- | --- | --- |
+| 重放 08-04 那次重定价(`0.25 -> 1.0`) | 包的行数不变、项名不变、`0.25` 这个字面量在 `train.py` 里还有别的出处 | `upright_exp` 变红 ✅ |
+| 两条权重对调(`base_ang_vel_xy` ↔ `base_lin_vel_z`) | **和不变**(`-0.55`)、**排序后多重集不变**、**项数不变** | 两条都变红 ✅ |
+| 下游类重声明 `joint_vel`,**值写成一模一样** | 逐项比值这一层**完全过得去**(测试里断言 `parity_blockers() == ()`) | 只有影子检查抓得住 ✅ |
+| 同上,`racket_progress`(A 族) | 同上 | 影子检查开火 ✅ |
+| 删掉包里 `("action_rate_l2", -0.1)` 那一行 | **陷阱题**:它的 cfg 类体值**也是 `-0.1`**,任何"包里没有就退回类体"的读法都会宣布"对齐" | 拒绝作答,不猜 ✅ |
+| 包里混进一行非二元组 | "名单格式对不对"式的检查会放行 | 拒绝,不跳过 ✅ |
+| "没比"名单少一条 | 名单仍是合法 dict、其余 8 条一字不动 | 覆盖面自检开火 ✅ |
+| 合成 blocker 注入 `_build_reward_contract` | —— | 真的拒收,不是只写收据 ✅ |
+| 选择器指错层(读类体的 `0.0` 而不是包的 `0.25`) | —— | 该测试把"为什么必须读包那一层"钉死 ✅ |
+
+另加一条**闭环**测试:`_MIRRORED_PRIOR_WEIGHTS` 里的每个值,必须等于奖励内核跑出来
+真正收的 `manager_weight`。没有它,这张对账表就可能在给**另一个数**发合格证 ——
+也就是又多了一份手抄。
+
+#### 9.2.18.9 回归账
+
+pod1 独立 worktree `/workspace/franco/mjwire_20260808` @ `766ccf91`,**全程 host-only,
+未占任何 GPU**(GPU0 = yikang、GPU1 = 我们自己的四格、GPU2 = mjlab,都没碰)。
+`-q -rs -p no:randomly`,`PYTHONDONTWRITEBYTECODE=1`。
+
+| 集合 | 解释器 | 基线(干净 `766ccf91`) | 本轮 |
+| --- | --- | --- | --- |
+| `mujoco_native/tests/` + `test_mujoco_native_isaac_live_constants.py` | `hope_isaac_venv` (3.10.18) | **`233 passed / 0 failed / 0 skipped`** | **`246 passed / 0 failed / 0 skipped`**(`+13` 新增) |
+| 8 个相关 Isaac 模块(C211 oracle/launcher/物化器、A/C 配置对等、A211 谱系与四臂发射器、reward flag 覆盖) | `hope_isaac_venv` (3.10.18) | **`648 passed / 1 failed`** | **`648 passed / 1 failed`**(逐位相同) |
+| `mjlab_lane/tests/` | `mjlab_venv` (3.12) | — | **`21 passed / 0 skipped`** |
+
+那 `1` 条红是 `tests/test_reward_flags_overrides.py:3036`,**基线上就红**
+(`assert 9 == 7`,一个 YAML 声明面的计数),与本轮无关,本轮也没修。
+
+**门的运行代价**(实测):冷启 `179.7 ms`(解析 `train.py` `19270` 行 + `hope_env_cfg.py`),
+**每个进程只付一次**(`_build_reward_contract` 在构造时调一次)。
+热路径原本 `223 ms`/次(每次问一个类都 `ast.walk` 整棵树,C+A 两族共 `14` 趟),
+加了 `_class_index` 缓存后是 **`0.46 ms`**。
+
+#### 9.2.18.10 这一节没做什么
+
+1. **没有把 A211/C211 的任务搬到 mjlab GPU 车道上**。搬不动的理由在 9.2.18.2 那张表里
+   逐条写着,和 §9.2.9 六一致。**"MuJoCo GPU 的 A/C"今天仍然不存在。**
+2. **没有造任何对齐层**。零填充一个形状对的 `211` 会让台账变绿而语义全假,明确不做。
+3. **没跑训练,也没占 GPU2**。本轮改的是 Isaac / MuJoCo-CPU 侧的活值对账,
+   在 mjlab GPU 上跑一趟不会经过这段代码,所以那种 smoke 不构成证据,没跑。
+4. **没改任何 reward 权重的定价**。`upright_exp` 那一个数是把镜像同步到 Franco
+   08-04 已经做过的决定上,不是新决定;其余 `13` 条一个字没动。
+5. **没读 Hydra YAML**,所以那 `9` 条 `motion_*` 与 A 族 `base_position` 仍然只是
+   "明写没比",不是"比过了"。
+6. **没碰**别的 session 正在改的那批文件(`action_ball_curriculum.py`、两个 launcher、
+   `build_action_ball_manifest.py` 等),提交只 stage 了本轮这 8 个文件。
+7. **没修** §9.2.17.8 那枚 registry 漂钉,也没补那 9 个从没被对磁盘验过的字段 ——
+   那是另一条待办,但它和本节是**同一个病**:钉了指纹,没人比值。
+
 ## 10. N1 直接到完整 73 的门
 
 “一个动作能学就全上”精确定义为：N1 通过后，允许**完整 73 catalog**进入 MuJoCo 训练实验；它不
