@@ -33,6 +33,21 @@
 ``RUNTIME_SOURCE_PATHS`` 并算进 launch claim。新引一个共享模块,就必须同批把它加进两边
 的 tracked-source 钉子表,否则等于让一个未被 provenance 覆盖的文件参与决策——那是**放宽**
 fail-closed 门。要做就连钉子表和 claim 测试一起做,别只搬常量。
+
+2026-08-07:这道门原来是"默认放行"的
+=====================================
+上面那两张表是**点名清单**:只有被点到的名字才会被核对。实测两个发射器共有 92 个
+模块级常量,清单只盖到 70 个,**22 个自动逃逸** —— 其中 19 个今天恰好还相同,也就是
+19 条没人拦的共享事实。这正是本仓反复出现的形状:清单默认放行,新增一个键就白拿一张
+免检通行证。
+
+所以本轮把默认翻过来:**两个发射器都有的常量,默认必须逐字相同**;允许不同的必须写进
+``ALLOWED_TO_DIFFER`` 并附一句理由。反向也有门 —— 清单里的条目必须**今天确实还在不同**,
+已经对齐了还留着就是一个永久敞开的洞。
+
+``MUST_MATCH`` / ``MUST_DIFFER`` 两张老表保留,但职责收窄成两件扫描做不到的事:
+"这些名字不许消失"(删掉一个共享常量,扫描是看不见的)和"这几个身份键**必须**不同"
+(只是"允许"不同还不够强)。
 """
 
 from __future__ import annotations
@@ -144,6 +159,92 @@ MUST_DIFFER = (
     "TASK_PROFILE_SOURCE",
     "TRAINABILITY_CONTRACT",
 )
+
+
+# 允许不同的名字 —— 显式点名 + 理由。**其余一律必须相同**(见下面的扫描门)。
+# MUST_DIFFER 里的每一条都在这里,因为"必须不同"当然蕴含"允许不同";另外三条是
+# MUST_DIFFER 覆盖不到、但确实该不同的基础设施量。
+ALLOWED_TO_DIFFER: dict = dict(
+    [(name, "arm identity: 合流即两族 checkpoint/lineage 互装") for name in MUST_DIFFER]
+    + [
+        (
+            "BUDGETS",
+            "A 多出 smoke/probe512/long512 三个失败诊断阶段(发射器 docstring 明说"
+            "不能替代 scale 终局收据);四格正式阶段的预算仍由 four-grid 的 "
+            "formal_budgets 单一真源核对",
+        ),
+        (
+            "RUNTIME_SOURCE_PATHS",
+            "每族 launch claim 钉的是自己那条链上的文件,本来就不是同一份清单",
+        ),
+        (
+            "_ADMISSION",
+            "每个发射器各自实例化的 GPU admission 活对象,身份天然不同",
+        ),
+    ]
+)
+
+
+def _module_level_constants(module) -> dict:
+    """模块级、非可调用、非模块、非类的名字 —— 也就是"常量"。"""
+
+    import types
+
+    output = {}
+    for name, value in vars(module).items():
+        if name.startswith("__"):
+            continue
+        if callable(value) or isinstance(value, (type, types.ModuleType)):
+            continue
+        output[name] = value
+    return output
+
+
+def test_every_shared_constant_matches_unless_it_is_listed_with_a_reason():
+    """默认关闭的扫描门:两族共有的常量,不在清单上就必须逐字相同。
+
+    这条门存在的理由就是"新增一个键不许自动逃逸" —— 加常量的人如果只加在一边、
+    或者两边加了不同的值,这里会直接红,而不用等谁想起来去更新 MUST_MATCH。
+    """
+
+    shared = set(_module_level_constants(A)) & set(_module_level_constants(C))
+    drifted = sorted(
+        name
+        for name in shared
+        if name not in ALLOWED_TO_DIFFER and getattr(A, name) != getattr(C, name)
+    )
+    assert not drifted, (
+        "这些常量两个发射器都有但取值不同。要么对齐,要么写进 ALLOWED_TO_DIFFER "
+        "并说明为什么它必须是每族各一份:%r" % drifted
+    )
+
+
+def test_no_allowed_to_differ_entry_is_stale():
+    """清单里每一条今天必须确实还在不同;对齐了还留着 = 永久敞开的洞。"""
+
+    stale = sorted(
+        name
+        for name in ALLOWED_TO_DIFFER
+        if hasattr(A, name) and hasattr(C, name) and getattr(A, name) == getattr(C, name)
+    )
+    assert not stale, (
+        "这些名字已经在两族对齐了,请把它们从 ALLOWED_TO_DIFFER 删掉,否则将来它们"
+        "再漂就没人拦:%r" % stale
+    )
+
+
+def test_allowed_to_differ_covers_must_differ_and_carries_reasons():
+    assert set(MUST_DIFFER) <= set(ALLOWED_TO_DIFFER)
+    for name, reason in ALLOWED_TO_DIFFER.items():
+        assert isinstance(reason, str) and len(reason.strip()) >= 8, (name, reason)
+
+
+@pytest.mark.parametrize("name", tuple(MUST_MATCH) + tuple(MUST_DIFFER))
+def test_named_shared_constant_never_disappears_from_either_launcher(name):
+    """扫描门看不见"某个共享常量被删了";这条负责那件事。"""
+
+    assert hasattr(A, name), "A211 launcher lost %s" % name
+    assert hasattr(C, name), "C211 launcher lost %s" % name
 
 
 @pytest.mark.parametrize("name", MUST_MATCH)
