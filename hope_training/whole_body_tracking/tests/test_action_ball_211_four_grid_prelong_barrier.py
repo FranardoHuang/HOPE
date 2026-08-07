@@ -281,10 +281,14 @@ def _audits(tmp_path: Path):
             "lineage_sha256": ("%x" % (index + 4)) * 64,
             "terminal_acceptance_content_sha256": ("%x" % (index + 5))
             * 64,
-            "model_5": {
+            # 跑满 5 个 update 之后落盘的末位是 model_4.pt / iter=4(RSL-RL 的
+            # 迭代变量在循环体内取 0..N-1)。这里和上面的 safety 一样刻意写死字面量,
+            # 不从被测模块反推;这个 4 由 test_action_ball_4096x5_terminal_index.py
+            # 直接读 RSL-RL 活源码钉住。
+            "terminal_model": {
                 "sha256": ("%x" % (index + 6)) * 64,
-                "filename_iteration": 5,
-                "embedded_iteration": 5,
+                "filename_iteration": 4,
+                "embedded_iteration": 4,
                 "all_tensors_finite": True,
             },
             "safety_counters": _producer_safety(),
@@ -623,8 +627,8 @@ def test_all_four_pass_builds_one_exact_long_only_receipt(tmp_path: Path):
     assert document["status"] == "PASS"
     assert document["authorization"] == "long4096_launch_barrier_only"
     assert document["scale_budget"] == [4096, 5, 1]
-    assert document["schema_version"] == 4
-    assert document["kind"].endswith("_v4")
+    assert document["schema_version"] == 5
+    assert document["kind"].endswith("_v5")
     assert document["terminal_acceptance_policy"] == (
         barrier.TERMINAL_ACCEPTANCE_POLICY
     )
@@ -755,7 +759,25 @@ def test_shared_source_or_ready_sha_mismatch_is_refused(tmp_path: Path):
 @pytest.mark.parametrize(
     "field,mutate",
     (
-        ("model_5", lambda row: row["model_5"].__setitem__("all_tensors_finite", False)),
+        (
+            "terminal_model",
+            lambda row: row["terminal_model"].__setitem__(
+                "all_tensors_finite", False
+            ),
+        ),
+        # 差一格的旧手抄:声称末位是 model_5/iter=5 的收据必须被拒。
+        (
+            "terminal_model_off_by_one",
+            lambda row: row["terminal_model"].update(
+                {"filename_iteration": 5, "embedded_iteration": 5}
+            ),
+        ),
+        (
+            "terminal_model_filename_only",
+            lambda row: row["terminal_model"].__setitem__(
+                "filename_iteration", 5
+            ),
+        ),
         ("safety", lambda row: row["safety_counters"].__setitem__("nonfinite_count", 1)),
         (
             "safety_price",

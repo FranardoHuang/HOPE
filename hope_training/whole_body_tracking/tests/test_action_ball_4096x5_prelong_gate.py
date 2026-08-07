@@ -21,10 +21,14 @@ SPEC.loader.exec_module(GATE)
 
 
 def _checkpoint_acceptance():
+    # 跑满 5 个 update 之后落盘的末位是 model_4.pt / iter=4:RSL-RL 的迭代变量
+    # 在循环体内取 0..N-1,收尾存盘用的就是那个末值。这里刻意写死字面量 4 而不是
+    # 从被测模块读常量(那样只会自证);字面量本身由
+    # test_action_ball_4096x5_terminal_index.py 直接读 RSL-RL 活源码钉住。
     return {
         "checkpoint": {
-            "filename_iteration": 5,
-            "embedded_iteration": 5,
+            "filename_iteration": 4,
+            "embedded_iteration": 4,
             "load_mode": "torch_weights_only",
             "all_tensors_finite": True,
             "tensor_groups": {
@@ -851,6 +855,23 @@ def test_checkpoint_audit_requires_all_finite_nonempty_state_groups():
     acceptance = _checkpoint_acceptance()
     del acceptance["checkpoint"]["tensor_groups"]["optimizer"]
     with pytest.raises(GATE.PreLongGateRefused, match="tensor-group coverage"):
+        GATE.validate_checkpoint_audit(acceptance["checkpoint"])
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("filename_iteration", "embedded_iteration"),
+)
+@pytest.mark.parametrize("wrong", (5, 3))
+def test_checkpoint_audit_binds_the_last_written_iteration_not_the_budget(
+    field, wrong
+):
+    """跑满 5 个 update 的末位是 4;5(旧的差一格手抄)和 3(少跑一格)都要被拒。"""
+
+    acceptance = _checkpoint_acceptance()
+    assert acceptance["checkpoint"][field] == 4
+    acceptance["checkpoint"][field] = wrong
+    with pytest.raises(GATE.PreLongGateRefused, match="model_4.pt, embedded iter=4"):
         GATE.validate_checkpoint_audit(acceptance["checkpoint"])
 
 

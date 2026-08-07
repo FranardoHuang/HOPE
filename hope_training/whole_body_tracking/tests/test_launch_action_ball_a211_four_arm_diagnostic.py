@@ -259,7 +259,13 @@ def _prelong_marker_lines(update: int) -> list[str]:
         },
         "reward": {
             "explained_variance": 0.1,
-            "per_term_weighted_dt_sum": {"motion": 1.0, "task": 0.0},
+            # ``motion`` 逐 update 变化是**故意**的:2026-08-07 起 pre-long gate 会拒收
+            # "整窗逐位相同且非零"的未申报奖励项(见 DECLARED_CONSTANT_REWARD_TERMS)。
+            # 本夹具原本写死 1.0,那正好撞在那道门上。
+            "per_term_weighted_dt_sum": {
+                "motion": 1.0 + 0.25 * update,
+                "task": 0.0,
+            },
             "per_term_eligible_denominator": {
                 "motion": 98304,
                 "task": 98304,
@@ -372,11 +378,12 @@ def _terminal_acceptance_fixture():
             "launch_claim_sha256": "1" * 64,
             "run_log": {"path": "/fixture/run.log", "size_bytes": 1, "sha256": "2" * 64},
             "checkpoint": {
-                "path": "/fixture/model_5.pt",
+                "path": "/fixture/model_4.pt",
                 "size_bytes": 1,
                 "sha256": "3" * 64,
-                "filename_iteration": 5,
-                "embedded_iteration": 5,
+                # 跑满 5 个 update 的末位是 model_4.pt / iter=4。
+                "filename_iteration": 4,
+                "embedded_iteration": 4,
                 "map_location": "cpu",
                 "load_mode": "torch_weights_only",
                 "tensor_groups": {},
@@ -2722,9 +2729,11 @@ def _scale4096_terminal_artifacts(tmp_path: Path):
     )
     run_dir.mkdir()
     claim_sha = "a" * 64
-    checkpoint_path = run_dir / "model_5.pt"
+    # 跑满 5 个 update 之后落盘的末位是 model_4.pt / iter=4(RSL-RL 的迭代变量在
+    # 循环体内取 0..N-1)。字面量由 test_action_ball_4096x5_terminal_index.py 钉住。
+    checkpoint_path = run_dir / "model_4.pt"
     checkpoint = {
-        "iter": 5,
+        "iter": 4,
         "infos": {"training_launch_claim_sha256": claim_sha},
         "model_state_dict": {"weight": _FakeTensor([1.0, 1.0])},
         "optimizer_state_dict": {"state": {0: {"momentum": _FakeTensor([1.0, 1.0])}}},
@@ -2847,7 +2856,9 @@ def test_scale4096_terminal_checkpoint_and_safety_gate_accepts_valid_case(
         checkout, namespace, claim, _checkpoint, monkeypatch
     )
     assert acceptance["checkpoint"]["path"] == str(checkpoint_path)
-    assert acceptance["checkpoint"]["embedded_iteration"] == 5
+    # 跑满 5 个 update 之后落盘的末位是 model_4.pt / iter=4。
+    assert acceptance["checkpoint"]["embedded_iteration"] == 4
+    assert acceptance["checkpoint"]["filename_iteration"] == 4
     assert acceptance["checkpoint"]["load_mode"] == "torch_weights_only"
     assert acceptance["checkpoint"]["all_tensors_finite"] is True
     assert acceptance["prelong_gate"]["semantic_update_count"] == 5
@@ -3003,13 +3014,38 @@ def test_scale4096_terminal_checkpoint_gate_rejects_nonfinite_tensor(
         )
 
 
+@pytest.mark.parametrize(
+    "wrong_iteration",
+    # 5 = 2026-08-07 之前那道差一格的门自己要的数字(预算而不是末位);
+    # 3 = 真少跑了一格。两者都必须被拒。
+    (5, 3),
+)
 def test_scale4096_terminal_checkpoint_gate_rejects_wrong_iteration(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, wrong_iteration
 ):
     checkout, namespace, claim, checkpoint_path, checkpoint, _log = (
         _scale4096_terminal_artifacts(tmp_path)
     )
-    checkpoint["iter"] = 4
+    checkpoint["iter"] = wrong_iteration
+    with pytest.raises(launcher.LaunchRefused, match="iteration/launch-claim"):
+        _audit_terminal_fixture(
+            checkout, namespace, claim, checkpoint, monkeypatch
+        )
+
+
+@pytest.mark.parametrize("mode", ("missing", "mismatched"))
+def test_scale4096_terminal_checkpoint_gate_requires_the_launch_claim(
+    tmp_path, monkeypatch, mode
+):
+    """存档必须自陈它是哪一次发射产出的:键缺失或对不上都要拒。"""
+
+    checkout, namespace, claim, _checkpoint_path, checkpoint, _log = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    if mode == "missing":
+        checkpoint["infos"].pop("training_launch_claim_sha256")
+    else:
+        checkpoint["infos"]["training_launch_claim_sha256"] = "b" * 64
     with pytest.raises(launcher.LaunchRefused, match="iteration/launch-claim"):
         _audit_terminal_fixture(
             checkout, namespace, claim, checkpoint, monkeypatch

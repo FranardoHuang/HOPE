@@ -140,6 +140,7 @@ def test_effective_claim_reads_environment_only_for_complete_vendor_identity(tra
     assert resolve(
         diagnostic_stage_present=True,
         vendor_contract_present=True,
+        diagnostic_action_ball=False,
         configured_sha256=None,
         exec_boundary_sha256=SHA_A,
     ) == SHA_A
@@ -151,9 +152,88 @@ def test_effective_claim_reads_environment_only_for_complete_vendor_identity(tra
         assert resolve(
             diagnostic_stage_present=stage_present,
             vendor_contract_present=contract_present,
+            diagnostic_action_ball=False,
             configured_sha256=None,
             exec_boundary_sha256="malformed ambient value must not be read",
         ) is None
+
+
+def test_effective_claim_also_binds_the_diagnostic_action_ball_exec_boundary(train):
+    """诊断 ActionBall 没有正式 claim 路径,它的 claim 只能从 exec 边界的环境变量拿。
+
+    两个 211 发射器都不发 ``n1_vendor_diagnostic_stage`` /
+    ``vendor_runtime_training_contract_sha256``(诊断跑发不了),所以在 2026-08-07
+    之前这个值恒为 None,checkpoint 的 infos 里永远没有 launch claim 键 —— 而发射器的
+    scale4096 终局验收门恰恰要比对它。
+    """
+
+    resolve = train._resolve_effective_n1_vendor_training_launch_claim_sha256
+    assert resolve(
+        diagnostic_stage_present=False,
+        vendor_contract_present=False,
+        diagnostic_action_ball=True,
+        configured_sha256=None,
+        exec_boundary_sha256=SHA_A,
+    ) == SHA_A
+    # 同一个进程两边都给,且一致 -> 仍然是那个值;不一致 -> 当场炸。
+    assert resolve(
+        diagnostic_stage_present=False,
+        vendor_contract_present=False,
+        diagnostic_action_ball=True,
+        configured_sha256=SHA_A,
+        exec_boundary_sha256=SHA_A,
+    ) == SHA_A
+    with pytest.raises(ValueError, match="SHAs differ"):
+        resolve(
+            diagnostic_stage_present=False,
+            vendor_contract_present=False,
+            diagnostic_action_ball=True,
+            configured_sha256=SHA_A,
+            exec_boundary_sha256=SHA_B,
+        )
+    with pytest.raises(ValueError, match="64 lowercase hex"):
+        resolve(
+            diagnostic_stage_present=False,
+            vendor_contract_present=False,
+            diagnostic_action_ball=True,
+            configured_sha256=None,
+            exec_boundary_sha256="not a digest",
+        )
+    # 不是诊断 ActionBall、又没有完整 vendor 身份时,环境变量连读都不读。
+    assert resolve(
+        diagnostic_stage_present=False,
+        vendor_contract_present=False,
+        diagnostic_action_ball=False,
+        configured_sha256=None,
+        exec_boundary_sha256="malformed ambient value must not be read",
+    ) is None
+    # 这个准入位必须是真 bool,不接受 1/"true"/对象这种“看着像真”的东西。
+    for impostor in (1, "true", object()):
+        with pytest.raises(TypeError, match="exact bool"):
+            resolve(
+                diagnostic_stage_present=False,
+                vendor_contract_present=False,
+                diagnostic_action_ball=impostor,
+                configured_sha256=None,
+                exec_boundary_sha256=SHA_A,
+            )
+
+
+def test_diagnostic_action_ball_claim_is_computed_before_it_is_consumed(train):
+    """``diagnostic_launch`` 必须在解析 claim 之前算出来,否则又变回恒 None。
+
+    这条门看的是 train.py 的真实语句顺序:布尔的赋值必须早于把它喂给 resolver 的那次
+    调用,并且 resolver 拿到的就是那个布尔。
+    """
+
+    source = TRAIN_PATH.read_text(encoding="utf-8")
+    assignment = source.index("    diagnostic_launch = action_ball_launch_requested and (")
+    consumption = source.index("            diagnostic_action_ball=diagnostic_launch,")
+    assert assignment < consumption
+    # 旧代码在 action_ball_launch_requested 分支里第二次赋值 diagnostic_launch;
+    # 留着会让上面的顺序保证失效(claim 用的是尚未定型的值)。
+    assert source.count("    diagnostic_launch = ") == 1
+    assert source.count("diagnostic_action_ball=diagnostic_launch,") == 1
 
 
 def test_runner_and_completion_share_one_effective_vendor_claim_source():

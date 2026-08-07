@@ -2469,6 +2469,32 @@ def _prelong_terminal_gate_binding(
     return {**unsigned, "content_sha256": canonical_sha256(unsigned)}
 
 
+def _terminal_checkpoint_iteration(expected_updates: int) -> int:
+    """Return the iteration index of the LAST checkpoint a finished run writes.
+
+    人话:「跑满 5 个 update」的最后一份存档叫 ``model_4.pt``、里面的 ``iter`` 是 4,
+    不是 5 —— RSL-RL 的迭代变量在循环体内取 ``0..N-1``,收尾存盘用的就是那个末值。
+    这道门以前拿 ``expected_updates`` 当文件名和 ``iter``,**任何预算下都不可能满足**。
+
+    终局编号只有 ``_P``(A211/C211 共用的 pre-long gate)一处定义,这里不再手抄;
+    但仍然当场把它和本发射器自己的预算对一遍,免得两边各改各的还互相不知道。
+    """
+
+    terminal = _P.TERMINAL_CHECKPOINT_ITERATION
+    if (
+        type(expected_updates) is not int
+        or expected_updates < 1
+        or _P.EXPECTED_UPDATES != expected_updates
+        or terminal != expected_updates - 1
+        or _P.TERMINAL_CHECKPOINT_FILENAME != "model_%d.pt" % terminal
+    ):
+        raise LaunchRefused(
+            "A211 scale4096 budget and the shared pre-long terminal "
+            "checkpoint index disagree"
+        )
+    return terminal
+
+
 def _audit_scale4096_terminal(
     *,
     checkout: Path,
@@ -2485,6 +2511,7 @@ def _audit_scale4096_terminal(
     """
 
     expected_updates = BUDGETS["scale4096"][1]
+    terminal_iteration = _terminal_checkpoint_iteration(expected_updates)
     log_path = namespace / "run.log"
     log_raw, log_artifact = _stable_artifact_bytes(
         log_path, name="A211 scale4096 terminal run log", max_bytes=512 << 20
@@ -2492,7 +2519,7 @@ def _audit_scale4096_terminal(
     run_dir = _checkpoint_run_dir(
         log_raw=log_raw, checkout=checkout, namespace=namespace
     )
-    checkpoint_path = run_dir / ("model_%d.pt" % expected_updates)
+    checkpoint_path = run_dir / _P.TERMINAL_CHECKPOINT_FILENAME
     checkpoint_raw, checkpoint_artifact = _stable_artifact_bytes(
         checkpoint_path,
         name="A211 scale4096 exact checkpoint",
@@ -2519,7 +2546,7 @@ def _audit_scale4096_terminal(
     infos = checkpoint.get("infos")
     if (
         type(embedded_iteration) is not int
-        or embedded_iteration != expected_updates
+        or embedded_iteration != terminal_iteration
         or type(infos) is not dict
         or infos.get("training_launch_claim_sha256") != launch_claim_sha256
     ):
@@ -2818,7 +2845,7 @@ def _audit_scale4096_terminal(
         )
     checkpoint_acceptance = {
         **checkpoint_artifact,
-        "filename_iteration": expected_updates,
+        "filename_iteration": terminal_iteration,
         "embedded_iteration": embedded_iteration,
         "map_location": "cpu",
         "load_mode": "torch_weights_only",

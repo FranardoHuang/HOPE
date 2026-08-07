@@ -92,7 +92,10 @@ death `-6`，所以 live gate 必须单独报告 `legal_landing ∧ post_contact
 不得把合法上台后摔倒的正净事件收入冒充 safety PASS。
 完整逐项定义见 [successor PRE-LONG checklist](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md#122-pre-long-基础闭包2026-08-03)。
 其中 `scale4096 -> long4096` 不再信任“已保存”声明：launcher 必须在 checkout-bound RSL
-run 中找到 exact `model_5.pt`，绑定 path/size/inode/SHA/文件名与内嵌 iteration/
+run 中找到 exact `model_4.pt`（跑满 5 个 update 之后落盘的**末位**是 `model_{N-1}.pt`；
+2026-08-07 之前这道门写的是 `model_5.pt`，那个文件在任何预算下都不存在，见
+[EXP §9.2.13](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)），
+绑定 path/size/inode/SHA/文件名与内嵌 iteration/
 launch-claim，只用 CPU `torch.load(weights_only=True)` 读取，递归检查 model、optimizer、
 actor normalizer、critic normalizer 所有 tensor finite；同时从恰好5个连续 update 重算
 qdes-hard/actual-hard/nonfinite 三项 implementation strict-zero。fall/base-too-low/robot-hit-table 仍是

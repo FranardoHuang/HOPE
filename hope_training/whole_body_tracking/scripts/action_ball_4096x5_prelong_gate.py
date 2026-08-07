@@ -25,6 +25,19 @@ from typing import Any, Mapping, Optional, Sequence
 
 NUM_ENVS = 4096
 EXPECTED_UPDATES = 5
+# 人话:跑满 N 个 PPO update 之后,最后一份存档的编号是 N-1,不是 N。
+#
+# RSL-RL 的 ``OnPolicyRunner.learn`` 用 ``for it in range(start_iter, start_iter +
+# num_learning_iterations)`` 迭代,并且在**循环体内**执行
+# ``self.current_learning_iteration = it``;循环结束后的收尾存盘用的就是这个末值。
+# 所以 ``num_learning_iterations = N`` 且 ``save_interval = 1`` 时,落盘的是
+# ``model_0.pt .. model_{N-1}.pt`` —— ``model_N.pt`` 这个文件在任何预算下都不存在。
+#
+# 这条常量是 A211/C211 两族**唯一**的终局编号出处:发射器不再各自手抄一份
+# ``model_%d.pt % EXPECTED_UPDATES``。见 tests/test_action_ball_4096x5_terminal_index.py,
+# 那份测试直接读 vendored RSL-RL 的活源码核对这个约定,而不是再抄第三遍。
+TERMINAL_CHECKPOINT_ITERATION = EXPECTED_UPDATES - 1
+TERMINAL_CHECKPOINT_FILENAME = "model_%d.pt" % TERMINAL_CHECKPOINT_ITERATION
 ROLLOUT_STEPS_PER_UPDATE = 24
 ROLLOUT_SAMPLES_PER_UPDATE = NUM_ENVS * ROLLOUT_STEPS_PER_UPDATE
 ROLLOUT_SAMPLES_FIVE_UPDATE_AGGREGATE = (
@@ -208,13 +221,15 @@ def validate_checkpoint_audit(checkpoint: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(checkpoint, Mapping):
         raise PreLongGateRefused("checkpoint audit is missing")
     if (
-        checkpoint.get("filename_iteration") != EXPECTED_UPDATES
-        or checkpoint.get("embedded_iteration") != EXPECTED_UPDATES
+        checkpoint.get("filename_iteration") != TERMINAL_CHECKPOINT_ITERATION
+        or checkpoint.get("embedded_iteration") != TERMINAL_CHECKPOINT_ITERATION
         or checkpoint.get("all_tensors_finite") is not True
         or checkpoint.get("load_mode") != "torch_weights_only"
     ):
         raise PreLongGateRefused(
-            "checkpoint audit must bind model_5, embedded iter=5, and finite weights-only load"
+            "checkpoint audit must bind %s, embedded iter=%d, and finite "
+            "weights-only load"
+            % (TERMINAL_CHECKPOINT_FILENAME, TERMINAL_CHECKPOINT_ITERATION)
         )
     groups = checkpoint.get("tensor_groups")
     if not isinstance(groups, Mapping) or set(groups) != set(REQUIRED_CHECKPOINT_GROUPS):
@@ -229,7 +244,11 @@ def validate_checkpoint_audit(checkpoint: Mapping[str, Any]) -> dict[str, Any]:
         if tensors == 0 or elements == 0:
             raise PreLongGateRefused(f"checkpoint {name} tensor audit is empty")
         summary[name] = {"tensor_count": tensors, "element_count": elements}
-    return {"iteration": EXPECTED_UPDATES, "all_tensors_finite": True, "groups": summary}
+    return {
+        "iteration": TERMINAL_CHECKPOINT_ITERATION,
+        "all_tensors_finite": True,
+        "groups": summary,
+    }
 
 
 def validate_safety_audit(safety: Mapping[str, Any]) -> dict[str, Any]:

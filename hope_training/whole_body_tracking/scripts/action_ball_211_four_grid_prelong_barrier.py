@@ -18,14 +18,20 @@ from typing import Any, Callable, Mapping, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 FOUR_GRID_FILE = SCRIPT_DIR / "action_ball_211_four_grid_contract.py"
+PRELONG_GATE_FILE = SCRIPT_DIR / "action_ball_4096x5_prelong_gate.py"
 A_LAUNCHER_FILE = SCRIPT_DIR / "launch_action_ball_a211_four_arm_diagnostic.py"
 C_LAUNCHER_FILE = SCRIPT_DIR / "launch_action_ball_c211_diagnostic.py"
 
 # v4 (2026-08-07):shared_binding 的最后一项从 lineage 抄来的
 # split_ready_reset_wait_claim_sha256 换成本模块现算的抹族 digest,并新增
 # shared_binding_scope 自陈块。旧 v3 收据无法与新文档比较,故改 kind。
-SCHEMA_VERSION = 4
-KIND = "action_ball_211_four_grid_scale4096_aggregate_receipt_v4"
+# v5 (2026-08-07):字段 model_5 改名 terminal_model,里面两个迭代号不再手抄 5,
+# 改由 pre-long gate 的 TERMINAL_CHECKPOINT_ITERATION 驱动 —— 跑满 5 个 update
+# 之后落盘的末位是 model_4.pt/iter=4,原来那个 5 是差一格的手抄。字段名变了,
+# 旧 v4 文档无法与新文档逐字比较,故改 kind。(实际上 scale4096 从没通过过发射器
+# 的终局验收门,所以世上没有任何一份 v4 聚合收据。)
+SCHEMA_VERSION = 5
+KIND = "action_ball_211_four_grid_scale4096_aggregate_receipt_v5"
 AUTHORIZATION = "long4096_launch_barrier_only"
 SCALE_BUDGET = [4096, 5, 1]
 PHYSICAL_FALL_REASONS = ("base_fell_tilt", "base_too_low")
@@ -279,6 +285,14 @@ def _load(name: str, path: Path):
 
 
 _F = _load("_action_ball_211_barrier_grid", FOUR_GRID_FILE)
+# 终局 checkpoint 的编号只有 pre-long gate 一处定义(RSL-RL 跑满 N 个 update 之后
+# 落盘的末位是 model_{N-1}.pt)。这里跟着载入,不再手抄 "model_5"/5/5。
+_P = _load("_action_ball_211_barrier_prelong_gate", PRELONG_GATE_FILE)
+TERMINAL_MODEL_ITERATION = _P.TERMINAL_CHECKPOINT_ITERATION
+if TERMINAL_MODEL_ITERATION != _P.EXPECTED_UPDATES - 1:  # pragma: no cover
+    raise BarrierRefused(
+        "pre-long terminal checkpoint index is not the last of EXPECTED_UPDATES"
+    )
 
 # 2026-08-05(exp §5.6):EXPECTED_SAFETY_REWARD_ECONOMY 必须逐字等于 four-grid manifest 的
 # matched_contract.soft_weights。它写在 _F 载入之前(常量区),没法直接推导,所以在这里补一道
@@ -798,8 +812,8 @@ def _audit_cell(
     gate = terminal["prelong_gate"]
     _validate_prelong_behavioral_binding(gate, safety=safety)
     if (
-        checkpoint.get("filename_iteration") != 5
-        or checkpoint.get("embedded_iteration") != 5
+        checkpoint.get("filename_iteration") != TERMINAL_MODEL_ITERATION
+        or checkpoint.get("embedded_iteration") != TERMINAL_MODEL_ITERATION
         or checkpoint.get("all_tensors_finite") is not True
         or type(checkpoint.get("tensor_groups")) is not dict
         or not checkpoint["tensor_groups"]
@@ -821,10 +835,10 @@ def _audit_cell(
         },
         "lineage_sha256": lineage["lineage_sha256"],
         "terminal_acceptance_content_sha256": terminal["content_sha256"],
-        "model_5": {
+        "terminal_model": {
             "sha256": checkpoint["sha256"],
-            "filename_iteration": 5,
-            "embedded_iteration": 5,
+            "filename_iteration": TERMINAL_MODEL_ITERATION,
+            "embedded_iteration": TERMINAL_MODEL_ITERATION,
             "all_tensors_finite": True,
         },
         "safety_counters": safety,
@@ -853,7 +867,7 @@ def _validate_audit_row(value: Any, *, expected_cell: str) -> dict[str, Any]:
             "gpu",
             "lineage_sha256",
             "terminal_acceptance_content_sha256",
-            "model_5",
+            "terminal_model",
             "safety_counters",
             "safety_reward_economy",
             "prelong_gate",
@@ -889,17 +903,17 @@ def _validate_audit_row(value: Any, *, expected_cell: str) -> dict[str, Any]:
     ):
         _sha(row[key], name="aggregate %s" % key, nonzero=True)
     model = _exact(
-        row["model_5"],
+        row["terminal_model"],
         ("sha256", "filename_iteration", "embedded_iteration", "all_tensors_finite"),
-        name="aggregate model_5",
+        name="aggregate terminal model",
     )
     if (
-        model["filename_iteration"] != 5
-        or model["embedded_iteration"] != 5
+        model["filename_iteration"] != TERMINAL_MODEL_ITERATION
+        or model["embedded_iteration"] != TERMINAL_MODEL_ITERATION
         or model["all_tensors_finite"] is not True
     ):
-        raise BarrierRefused("aggregate model_5 identity differs")
-    _sha(model["sha256"], name="aggregate model_5 SHA", nonzero=True)
+        raise BarrierRefused("aggregate terminal model identity differs")
+    _sha(model["sha256"], name="aggregate terminal model SHA", nonzero=True)
     safety = _validate_terminal_safety(row["safety_counters"])
     if row["safety_reward_economy"] != EXPECTED_SAFETY_REWARD_ECONOMY:
         raise BarrierRefused("aggregate safety reward economy differs")

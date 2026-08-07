@@ -433,7 +433,13 @@ def _prelong_marker_lines(update: int) -> list[str]:
         },
         "reward": {
             "explained_variance": 0.1,
-            "per_term_weighted_dt_sum": {"motion": 1.0, "task": 0.0},
+            # ``motion`` 逐 update 变化是**故意**的:2026-08-07 起 pre-long gate 会拒收
+            # "整窗逐位相同且非零"的未申报奖励项(见 DECLARED_CONSTANT_REWARD_TERMS)。
+            # 本夹具原本写死 1.0,那正好撞在那道门上。
+            "per_term_weighted_dt_sum": {
+                "motion": 1.0 + 0.25 * update,
+                "task": 0.0,
+            },
             "per_term_eligible_denominator": {
                 "motion": 98304,
                 "task": 98304,
@@ -1124,9 +1130,11 @@ def _scale4096_terminal_fixture(tmp_path: Path, checkout: Path):
         + "-DIAGNOSTIC_UNAUTHORIZED"
     )
     run_dir.mkdir()
-    checkpoint_path = run_dir / "model_5.pt"
+    # 跑满 5 个 update 之后落盘的末位是 model_4.pt / iter=4(RSL-RL 的迭代变量在
+    # 循环体内取 0..N-1)。字面量由 test_action_ball_4096x5_terminal_index.py 钉住。
+    checkpoint_path = run_dir / "model_4.pt"
     checkpoint = {
-        "iter": 5,
+        "iter": 4,
         "infos": {"training_launch_claim_sha256": "1" * 64},
         "model_state_dict": {"weight": _FakeTensor([1.0, 1.0])},
         "optimizer_state_dict": {
@@ -1234,8 +1242,8 @@ def _scale4096_terminal_fixture(tmp_path: Path, checkout: Path):
         "path": str(checkpoint_path),
         "size_bytes": checkpoint_path.stat().st_size,
         "sha256": hashlib.sha256(checkpoint_path.read_bytes()).hexdigest(),
-        "filename_iteration": 5,
-        "embedded_iteration": 5,
+        "filename_iteration": 4,
+        "embedded_iteration": 4,
         "map_location": "cpu",
         "load_mode": "torch_weights_only",
         "tensor_groups": {
@@ -2257,12 +2265,13 @@ def _audit_scale_terminal(
     )
 
 
-def test_scale4096_terminal_audit_accepts_exact_model5_and_five_updates(
+def test_scale4096_terminal_audit_accepts_terminal_model_and_five_updates(
     tmp_path, monkeypatch
 ):
     acceptance = _audit_scale_terminal(tmp_path, monkeypatch)
-    assert Path(acceptance["checkpoint"]["path"]).name == "model_5.pt"
-    assert acceptance["checkpoint"]["embedded_iteration"] == 5
+    assert Path(acceptance["checkpoint"]["path"]).name == "model_4.pt"
+    assert acceptance["checkpoint"]["embedded_iteration"] == 4
+    assert acceptance["checkpoint"]["filename_iteration"] == 4
     assert acceptance["checkpoint"]["map_location"] == "cpu"
     assert acceptance["checkpoint"]["load_mode"] == "torch_weights_only"
     assert set(acceptance["checkpoint"]["tensor_groups"]) == {
@@ -2296,7 +2305,7 @@ def test_scale4096_terminal_audit_accepts_exact_model5_and_five_updates(
     }
 
 
-def test_scale4096_terminal_audit_rejects_missing_exact_model5(
+def test_scale4096_terminal_audit_rejects_missing_terminal_model(
     tmp_path, monkeypatch
 ):
     def remove_checkpoint(path, _checkpoint):
@@ -2310,13 +2319,22 @@ def test_scale4096_terminal_audit_rejects_missing_exact_model5(
         )
 
 
-@pytest.mark.parametrize("binding", ("iteration", "claim"))
+@pytest.mark.parametrize(
+    "binding",
+    # iteration_budget = 5 是 2026-08-07 之前那道差一格的门自己要的数字(预算 5 而不是
+    # 末位 4);iteration_short = 3 是真少跑了一格。两者都必须被拒。
+    ("iteration_budget", "iteration_short", "claim", "claim_missing"),
+)
 def test_scale4096_terminal_audit_rejects_wrong_checkpoint_binding(
     tmp_path, monkeypatch, binding
 ):
     def mutate_binding(_path, checkpoint):
-        if binding == "iteration":
-            checkpoint["iter"] = 4
+        if binding == "iteration_budget":
+            checkpoint["iter"] = 5
+        elif binding == "iteration_short":
+            checkpoint["iter"] = 3
+        elif binding == "claim_missing":
+            checkpoint["infos"].pop("training_launch_claim_sha256")
         else:
             checkpoint["infos"]["training_launch_claim_sha256"] = "2" * 64
 
@@ -2583,7 +2601,7 @@ def test_long_plan_seals_true_c211_question_and_fresh_state(tmp_path, monkeypatc
         "terminal_kind"
     ] == "clean_completion"
     predecessor = payload["materialization_inputs"]["predecessor_result"]
-    assert Path(predecessor["finite_model_artifact"]["path"]).name == "model_5.pt"
+    assert Path(predecessor["finite_model_artifact"]["path"]).name == "model_4.pt"
     assert predecessor["safety_counters"]["observed_ppo_updates"] == 5
     assert predecessor["prelong_gate"]["semantic_update_count"] == 5
     assert predecessor["prelong_gate"]["gate"]["status"] == "PASS"

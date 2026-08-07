@@ -272,17 +272,46 @@ def _resolve_effective_n1_vendor_training_launch_claim_sha256(
     *,
     diagnostic_stage_present: bool,
     vendor_contract_present: bool,
+    diagnostic_action_ball: bool,
     configured_sha256,
     exec_boundary_sha256,
 ):
-    """Read the exec-only claim solely for a fully configured vendor run."""
+    """Bind whichever launch claim this process was actually started under.
 
-    if not (diagnostic_stage_present and vendor_contract_present):
-        return configured_sha256
-    return _resolve_n1_vendor_completion_launch_claim_sha256(
-        configured_sha256=configured_sha256,
-        exec_boundary_sha256=exec_boundary_sha256,
-    )
+    人话:诊断跑(A211/C211 四格)**没法**用正式那套 ``training_launch_claim_path``
+    —— 下面 ``diagnostic ActionBall training cannot consume a formal launch-claim
+    action-set identity`` 那条检查明文禁止,而且发射器把
+    ``action_ball_diagnostic_unauthorized=true`` 钉死在 argv 里。它反而是在 exec 那一刻
+    把自己的 claim SHA 放进环境变量 ``HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256`` 交给我们的
+    (走环境变量而不是 argv,正是为了不制造"argv 哈希包含 argv 自己哈希"的自指循环)。
+
+    以前这个值只在**同时**配了 ``n1_vendor_diagnostic_stage`` 和
+    ``vendor_runtime_training_contract_sha256`` 时才会被读。两个诊断发射器一个都不发,
+    于是 runner 的 ``training_launch_claim_sha256`` 恒为 None,checkpoint 的 infos 里
+    永远没有那个键 —— 而发射器的 scale4096 终局验收门恰恰要比对它。缺的是接线,不是门。
+
+    所以现在多一条准入:**本次确实是诊断 ActionBall** 时也读 exec 边界那个值。
+    仍然不是"看见环境变量就信" —— 不满足任何一条准入时,那个环境变量连读都不读,
+    免得别处残留的一个同名变量把无关的正式跑炸掉(见
+    ``test_effective_claim_reads_environment_only_for_...``)。两边都在且不一致仍然当场炸
+    (``_resolve_n1_vendor_completion_launch_claim_sha256`` 里那条)。
+
+    这条**只**多做一件事:让 checkpoint 的 infos 自陈它是哪一次发射产出的,
+    好让发射器的 scale4096 终局验收门比得成。它不解锁任何正式路径 —— 正式那块
+    (frozen-eval identity / runtime bootstrap receipt)由
+    ``action_ball_diagnostic_unauthorized`` 单独把门,和这个值无关。
+    """
+
+    if type(diagnostic_action_ball) is not bool:
+        raise TypeError("diagnostic_action_ball must be an exact bool")
+    if diagnostic_action_ball or (
+        diagnostic_stage_present and vendor_contract_present
+    ):
+        return _resolve_n1_vendor_completion_launch_claim_sha256(
+            configured_sha256=configured_sha256,
+            exec_boundary_sha256=exec_boundary_sha256,
+        )
+    return configured_sha256
 
 
 def _emit_n1_vendor_training_completion(payload) -> None:
@@ -17948,10 +17977,26 @@ def _run(cfg):
     n1_vendor_contract_present = _contains_key(
         cfg, "vendor_runtime_training_contract_sha256"
     )
+    action_ball_launch_requested = (
+        str(getattr(_launch_racket_cfg, "target_mode", ""))
+        == "action_ball"
+    )
+    # 诊断 ActionBall 走的是与正式路线互斥的那条道(下面
+    # "cannot consume a formal launch-claim action-set identity"),它的 claim 只能从
+    # exec 边界的环境变量拿。这个布尔要在解析 claim 之前算出来。
+    diagnostic_launch = action_ball_launch_requested and (
+        getattr(
+            _launch_racket_cfg,
+            "action_ball_diagnostic_unauthorized",
+            False,
+        )
+        is True
+    )
     effective_training_launch_claim_sha256 = (
         _resolve_effective_n1_vendor_training_launch_claim_sha256(
             diagnostic_stage_present=n1_vendor_diagnostic_stage_present,
             vendor_contract_present=n1_vendor_contract_present,
+            diagnostic_action_ball=diagnostic_launch,
             configured_sha256=training_launch_claim_sha256,
             exec_boundary_sha256=os.environ.get(
                 "HOPE_N1_DIAGNOSTIC_LAUNCH_CLAIM_SHA256"
@@ -17959,11 +18004,6 @@ def _run(cfg):
         )
     )
     action_set_identity = None
-    action_ball_launch_requested = (
-        str(getattr(_launch_racket_cfg, "target_mode", ""))
-        == "action_ball"
-    )
-    diagnostic_launch = False
     if training_launch_claim_path is not None and action_ball_launch_requested:
         try:
             action_set_identity = (
@@ -17989,14 +18029,6 @@ def _run(cfg):
             flush=True,
         )
     if action_ball_launch_requested:
-        diagnostic_launch = (
-            getattr(
-                _launch_racket_cfg,
-                "action_ball_diagnostic_unauthorized",
-                False,
-            )
-            is True
-        )
         if diagnostic_launch and action_set_identity is not None:
             raise RuntimeError(
                 "diagnostic ActionBall training cannot consume a formal "
