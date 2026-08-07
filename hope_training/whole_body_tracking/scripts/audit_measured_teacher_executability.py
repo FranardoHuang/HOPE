@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -52,9 +53,24 @@ import numpy as np
 DIFFERENTIATION_MODES: tuple[str, ...] = ("raw", "sg5_2", "sg7_2", "sg9_3", "sg13_3")
 DEFAULT_MODE = "sg7_2"
 
-# 鞋底顶点低于"该脚最低点 + 这个带宽"才算支撑点。带宽取 6 mm:比 LP 的 2 mm 接触判据宽,
-# 免得把"能站住但被判定悬空"错报成"站不住"。
+# 鞋底顶点低于"**该脚自己**最低点 + 这个带宽"才算这只脚的支撑点。带宽取 6 mm:
+# 比 LP 的 2 mm 接触判据宽,免得把"能站住但被判定悬空"错报成"站不住"。
+#
+# 「该脚自己」这四个字是 2026-08-07 修掉的一个真 bug。原来的写法把带宽锚在**两只脚合起来**
+# 的最低顶点上,于是较高那只脚能不能进支撑多边形,取决于左右脚差多少毫米,而不取决于
+# 它到底踩没踩到地:左右差 `4.8 mm` 时只捞到它最底下 `1.2 mm` 的一条边,半个多边形塌成
+# 一条线;差超过 `6 mm` 时它整只脚消失。产出的裕度于是变成负数,并被读成"质心出支撑区"——
+# 而真相是**量具把多边形算塌了**。变异证据:只把左脚鞋底顶点下移 `4.86 mm`(机器人姿态、
+# 质心、关节角一律不动),现役规则的裕度从 `-11.95` 跳到 `+26.37 mm`。
 SUPPORT_BAND_M = 6.0e-3
+
+# 一只脚"算不算踩在地上",用的是它**自己**最低碰撞顶点落不落在地面 LP 的窗口里
+# (下面那两个 LP 容差,不另立一套判据)。两只脚都不在窗口里 = 没有支撑多边形可言,
+# 这时报 ``None`` 加一个具名状态,**不报一个负数假装质心出界**。
+#
+# 支撑多边形的最小宽度低于这个值就叫"退化":几何上它是一条线,任何"有符号裕度"都没有意义。
+# 取 0.1 mm —— 比鞋底网格顶点坐标的量级小三个数量级,只会抓真正塌掉的那种。
+DEGENERATE_SUPPORT_WIDTH_M = 1.0e-4
 
 # 锚点容差:`kp*(hold_qdes - q_birth)` 与存档保持力矩的允许偏差。存档实测是 3e-15,
 # 给到 1e-9 仍然是"完全一致"的量级,不给它偷偷漂的空间。
@@ -185,6 +201,137 @@ def _hull_margin(point: np.ndarray, hull: np.ndarray) -> float:
     return best
 
 
+def _hull_area(hull: np.ndarray) -> float:
+    """凸包面积(平方米);少于三个顶点就是 0。"""
+
+    if hull.shape[0] < 3:
+        return 0.0
+    x = hull[:, 0]
+    y = hull[:, 1]
+    return 0.5 * abs(
+        float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+    )
+
+
+def _hull_minimum_width(hull: np.ndarray) -> float:
+    """凸包的最小宽度(米):沿每条边方向投影,取最薄的那一档。
+
+    这是判"多边形有没有塌成一条线"的那把尺。塌掉的多边形上,任何"有符号裕度"
+    都不是物理量,只是量具的产物,所以本工具遇到它时报 ``None`` 而不是报一个负数。
+    """
+
+    if hull.shape[0] < 3:
+        return 0.0
+    best = float("inf")
+    count = hull.shape[0]
+    for index in range(count):
+        a = hull[index]
+        edge = hull[(index + 1) % count] - a
+        length = float(np.linalg.norm(edge))
+        if length < 1.0e-12:
+            continue
+        normal = np.array([edge[1], -edge[0]], dtype=np.float64) / length
+        offsets = (hull - a) @ normal
+        best = min(best, float(offsets.max() - offsets.min()))
+    return 0.0 if not math.isfinite(best) else best
+
+
+def support_polygon(
+    by_foot: Sequence[np.ndarray],
+    com_floor_xy: np.ndarray,
+    *,
+    band_m: float = SUPPORT_BAND_M,
+    contact_gap_tolerance_m: float | None = None,
+    penetration_tolerance_m: float | None = None,
+) -> dict[str, Any]:
+    """从两只脚的鞋底顶点建支撑多边形,并**说清楚它是不是能用**。
+
+    规则(2026-08-07 改)——
+
+    * 每只脚的支撑点取**它自己**最低顶点 + ``band_m``,不再锚在两只脚合起来的最低点上;
+    * 一只脚只有在**它自己**最低顶点落进地面 LP 窗口(``[-penetration, +gap]``)时才参与
+      建多边形。悬在空中的脚不贡献支撑点 —— 这一条以前是漏的,于是"整条 clip 悬空 1 cm"
+      也照样能算出一个支撑多边形来;
+    * 建出来的多边形若少于三个顶点、或最小宽度低于 ``DEGENERATE_SUPPORT_WIDTH_M``,
+      **不出裕度数字**,出一个具名状态。
+
+    返回 ``margin_m`` 为 ``None`` 时,``status`` 说明原因,调用方不得把它当成"质心出界"。
+    """
+
+    if contact_gap_tolerance_m is None:
+        contact_gap_tolerance_m = LP_CONTACT_GAP_TOLERANCE_M
+    if penetration_tolerance_m is None:
+        penetration_tolerance_m = LP_PENETRATION_TOLERANCE_M
+    rows = [np.asarray(foot, np.float64) for foot in by_foot]
+    if len(rows) != 2 or any(foot.ndim != 2 or foot.shape[1] != 3 for foot in rows):
+        raise ExecutabilityAuditError(
+            "support polygon needs exactly two (N, 3) sole vertex arrays"
+        )
+    lowest = [float(foot[:, 2].min()) for foot in rows]
+    on_floor = [
+        bool(-float(penetration_tolerance_m) <= value <= float(contact_gap_tolerance_m))
+        for value in lowest
+    ]
+    bands = [
+        foot[foot[:, 2] <= value + float(band_m)]
+        for foot, value in zip(rows, lowest)
+    ]
+    per_foot_hulls = [_convex_hull_2d(band[:, :2]) for band in bands]
+    contributing = [index for index in (0, 1) if on_floor[index]]
+    detail: dict[str, Any] = {
+        "band_rule": (
+            "each foot's OWN lowest collision vertex + band; only feet whose own "
+            "lowest vertex lies inside the ground-LP window contribute"
+        ),
+        "band_m": float(band_m),
+        "contact_gap_tolerance_m": float(contact_gap_tolerance_m),
+        "penetration_tolerance_m": float(penetration_tolerance_m),
+        "degenerate_support_width_m": DEGENERATE_SUPPORT_WIDTH_M,
+        "foot_lowest_vertex_z_m": lowest,
+        "foot_on_floor": on_floor,
+        "foot_support_vertex_count": [int(band.shape[0]) for band in bands],
+        "foot_support_hull_min_width_m": [
+            _hull_minimum_width(hull) for hull in per_foot_hulls
+        ],
+        "foot_support_hull_area_m2": [_hull_area(hull) for hull in per_foot_hulls],
+        "contributing_feet": contributing,
+    }
+    if not contributing:
+        detail.update(
+            {
+                "status": "NO_FOOT_ON_FLOOR",
+                "hull_floor_xy_m": [],
+                "hull_vertex_count": 0,
+                "hull_area_m2": 0.0,
+                "hull_minimum_width_m": 0.0,
+                "margin_m": None,
+            }
+        )
+        return detail
+    support = np.vstack([bands[index] for index in contributing])
+    hull = _convex_hull_2d(support[:, :2])
+    width = _hull_minimum_width(hull)
+    detail.update(
+        {
+            "hull_floor_xy_m": hull.tolist(),
+            "hull_vertex_count": int(hull.shape[0]),
+            "hull_area_m2": _hull_area(hull),
+            "hull_minimum_width_m": width,
+        }
+    )
+    if hull.shape[0] < 3 or width < DEGENERATE_SUPPORT_WIDTH_M:
+        detail["status"] = "DEGENERATE_SUPPORT_POLYGON"
+        detail["margin_m"] = None
+        return detail
+    detail["status"] = (
+        "DOUBLE_SUPPORT" if len(contributing) == 2 else "SINGLE_FOOT_SUPPORT"
+    )
+    detail["margin_m"] = _hull_margin(
+        np.asarray(com_floor_xy, np.float64)[:2], hull
+    )
+    return detail
+
+
 class _Plant:
     """Isaac 等效的 MuJoCo plant,外加它的逆动力学副本(约束关掉)。"""
 
@@ -285,9 +432,10 @@ class _Plant:
 
         质心裕度报**两个**,因为它们回答的不是同一个问题:
 
-        * ``com_support_margin_m`` —— 按 ``SUPPORT_BAND_M`` 取真实接触带。参考帧要是悬在空中、
-          或者两只脚不共面,这条"接触带"就只剩一条边,裕度会因此变负。它衡量的是**这一帧照原样**
-          站不站得住。
+        * ``com_support_margin_m`` —— 只用**真的踩在地上**的那些脚,按每只脚自己的接触带建
+          多边形(见 :func:`support_polygon`)。它衡量的是**这一帧照原样**站不站得住。
+          没有脚落地、或者多边形塌成一条线时,这一项是 ``None``,原因写在
+          ``support_polygon.status`` 里 —— **不出一个负数冒充"质心出支撑区"**。
         * ``com_footprint_margin_m`` —— 拿两只脚**完整鞋底**在地面上的投影当多边形。它等价于问
           "要是重定向把两只脚都放平踩实,质心在不在两脚之间"。两者差很多时,失衡是**重定向没踩地**
           的下游后果,不是动捕对象自己站不稳。
@@ -304,14 +452,14 @@ class _Plant:
         ]
         per_foot_lowest = [float(rows[:, 2].min()) for rows in by_foot]
         lowest = min(per_foot_lowest)
-        support = np.vstack([rows[rows[:, 2] <= lowest + SUPPORT_BAND_M] for rows in by_foot])
-        hull = _convex_hull_2d(support[:, :2])
+        polygon = support_polygon(by_foot, com[:2])
         footprint = _convex_hull_2d(np.vstack(by_foot)[:, :2])
         ankles = [np.asarray(self.data.xpos[body], np.float64) for body in self.ankle_bodies]
         return {
             "sole_lowest_vertex_z_m": lowest,
             "sole_lowest_vertex_z_by_foot_m": per_foot_lowest,
-            "com_support_margin_m": _hull_margin(com[:2], hull),
+            "com_support_margin_m": polygon["margin_m"],
+            "support_polygon": polygon,
             "com_footprint_margin_m": _hull_margin(com[:2], footprint),
             "stance_width_m": float(np.linalg.norm(ankles[0][:2] - ankles[1][:2])),
             "com_xy_m": com[:2].tolist(),
@@ -444,9 +592,19 @@ def audit(
     ground_rows = [plant.ground_geometry(qpos[t]) for t in range(frames)]
     sole = np.array([row["sole_lowest_vertex_z_m"] for row in ground_rows])
     by_foot = np.array([row["sole_lowest_vertex_z_by_foot_m"] for row in ground_rows])
-    margin = np.array([row["com_support_margin_m"] for row in ground_rows])
+    # 支撑裕度可能是 ``None``(没脚落地 / 多边形退化)。那些帧**不算"质心出支撑区"**,
+    # 它们单独进 ``support_polygon_status_counts``,否则量具的失效会被读成机器人的失衡。
+    margin_defined = [
+        float(row["com_support_margin_m"])
+        for row in ground_rows
+        if row["com_support_margin_m"] is not None
+    ]
     footprint_margin = np.array([row["com_footprint_margin_m"] for row in ground_rows])
     stance = np.array([row["stance_width_m"] for row in ground_rows])
+    status_counts: dict[str, int] = {}
+    for row in ground_rows:
+        key = str(row["support_polygon"]["status"])
+        status_counts[key] = status_counts.get(key, 0) + 1
 
     # "整条 clip 悬空 1 cm,那把它整体压下去 1 cm 不就好了?" —— 这里把那个反问算成一道判据。
     # 一次刚体竖直平移 d 要让每一帧的两只脚都落进 LP 的接触窗口,需要
@@ -513,11 +671,35 @@ def audit(
         },
         "q3_static_balance": {
             "com_support_margin_mm": {
-                "clip_min": float(margin.min() * 1000.0),
-                "clip_max": float(margin.max() * 1000.0),
-                "clip_mean": float(margin.mean() * 1000.0),
-                "clip_frame0": float(margin[0] * 1000.0),
-                "birth": float(birth_geometry["com_support_margin_m"] * 1000.0),
+                "semantics": (
+                    "CoM vs the polygon built from the feet that are ACTUALLY on the "
+                    "floor, each foot banded from its OWN lowest collision vertex; "
+                    "reported only for frames whose polygon is defined and "
+                    "non-degenerate -- a frame with no defined polygon is NOT counted "
+                    "as CoM-outside-support"
+                ),
+                "frames_with_defined_polygon": len(margin_defined),
+                "clip_min": (
+                    float(min(margin_defined) * 1000.0) if margin_defined else None
+                ),
+                "clip_max": (
+                    float(max(margin_defined) * 1000.0) if margin_defined else None
+                ),
+                "clip_mean": (
+                    float(sum(margin_defined) / len(margin_defined) * 1000.0)
+                    if margin_defined
+                    else None
+                ),
+                "clip_frame0": (
+                    None
+                    if ground_rows[0]["com_support_margin_m"] is None
+                    else float(ground_rows[0]["com_support_margin_m"] * 1000.0)
+                ),
+                "birth": (
+                    None
+                    if birth_geometry["com_support_margin_m"] is None
+                    else float(birth_geometry["com_support_margin_m"] * 1000.0)
+                ),
             },
             "com_footprint_margin_mm": {
                 "semantics": (
@@ -530,9 +712,17 @@ def audit(
                 "clip_frame0": float(footprint_margin[0] * 1000.0),
                 "birth": float(birth_geometry["com_footprint_margin_m"] * 1000.0),
             },
-            "frames_com_outside_support": int((margin < 0.0).sum()),
+            "frames_com_outside_support": sum(
+                1 for value in margin_defined if value < 0.0
+            ),
+            "frames_support_polygon_undefined": frames - len(margin_defined),
+            "support_polygon_status_counts": status_counts,
+            "birth_support_polygon_status": str(
+                birth_geometry["support_polygon"]["status"]
+            ),
             "frames_com_outside_footprint": int((footprint_margin < 0.0).sum()),
             "support_band_m": SUPPORT_BAND_M,
+            "degenerate_support_width_m": DEGENERATE_SUPPORT_WIDTH_M,
         },
         "q4_stance_gap": {
             "clip_stance_width_m": {
@@ -556,6 +746,12 @@ def audit(
         },
         "feedforward_command": envelope,
     }
+
+
+def _mm(value: float | None) -> str:
+    """支撑裕度可能没有定义;摘要里就得写「未定义」,不能印一个 0 或者一个负数。"""
+
+    return "未定义" if value is None else f"{value:+.1f}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -599,10 +795,14 @@ def main(argv: list[str] | None = None) -> int:
         f"两脚最大高差 {ground['single_rigid_vertical_shift']['max_left_minus_right_mm']:.1f} mm,"
         f"整体平移能否修好:"
         f"{'能' if ground['single_rigid_vertical_shift']['feasible'] else '不能(平移救不了)'}"
-        f"\n  3 站稳:质心裕度 {balance['com_support_margin_mm']['clip_min']:.1f}~"
-        f"{balance['com_support_margin_mm']['clip_max']:.1f} mm,"
-        f"{balance['frames_com_outside_support']}/{report['clip']['frames']} 帧质心在支撑面外"
-        f"(出生姿态 {balance['com_support_margin_mm']['birth']:+.1f} mm);"
+        f"\n  3 站稳:质心裕度 {_mm(balance['com_support_margin_mm']['clip_min'])}~"
+        f"{_mm(balance['com_support_margin_mm']['clip_max'])} mm,"
+        f"{balance['frames_com_outside_support']}/{report['clip']['frames']} 帧质心在支撑面外;"
+        f"另有 {balance['frames_support_polygon_undefined']}/{report['clip']['frames']} 帧"
+        f"**根本建不出支撑多边形**(状态计数 {balance['support_polygon_status_counts']},"
+        f"这些帧不算「出界」)"
+        f"(出生姿态 {_mm(balance['com_support_margin_mm']['birth'])} mm / "
+        f"{balance['birth_support_polygon_status']});"
         f"换成「两脚放平踩实」的鞋底footprint,裕度 "
         f"{balance['com_footprint_margin_mm']['clip_min']:+.1f}~"
         f"{balance['com_footprint_margin_mm']['clip_max']:+.1f} mm,"
