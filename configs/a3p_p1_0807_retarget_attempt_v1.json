@@ -2,7 +2,7 @@
   "schema_version": 1,
   "manifest_type": "a3p_p1_0807_retarget_attempt_v1",
   "question": "does swapping the plant to 0807 change the measured-racket retarget?",
-  "answer": "no, on every clip that solves: all 18 gates identical, residuals mostly slightly better",
+  "answer": "no: on all 73 clips every gate is identical between plants, and residuals move by about 1% of gate budget",
   "experiment_design": {
     "controlled": "same source bytes, same venv, same solver, same inputs; only the MJCF/URDF pair varies",
     "why": "the v4 bank was produced in an unknown environment, so re-solving the 0409 baseline here is the only way to attribute a difference to the plant rather than to the toolchain",
@@ -26,31 +26,70 @@
     ],
     "gates_false_note": "these are the known v4 mechanical-admission failures; identical on both plants, so not swap-induced",
     "residual_deltas_0409_to_0807": {
-      "velocity_direction_deg.max": [0.757167148, 0.393724348],
-      "face_deg.max": [0.0508302329, 0.0453789993],
-      "post_hit.so3_deg.max": [0.031053983, 0.0238697704],
-      "velocity_direction_deg.p95": [0.0953247724, 0.113392335]
+      "velocity_direction_deg.max": [
+        0.757167148,
+        0.393724348
+      ],
+      "face_deg.max": [
+        0.0508302329,
+        0.0453789993
+      ],
+      "post_hit.so3_deg.max": [
+        0.031053983,
+        0.0238697704
+      ],
+      "velocity_direction_deg.p95": [
+        0.0953247724,
+        0.113392335
+      ]
     },
     "verdict": "the swap is benign for the retarget; every residual stays orders of magnitude inside its gate"
   },
   "full_bank_rebuild": {
-    "status": "BLOCKED",
-    "attempted": "73 clips x 2 plants with the tracked solver's default knobs (margin 0.01, velocity 0.90, acceleration 250)",
-    "result": {"plant_0409_admitted": 19, "plant_0807_admitted": 17, "of": 73},
-    "agreement": "70 of 74 clips succeed-or-fail identically on both plants, so the admission rate is a solver property, not a plant property",
-    "dominant_failure": "dynamic motion bounds are infeasible (103 of 105 failures)",
-    "root_cause": {
-      "finding": "the tracked solver is NOT the one that produced the v4 bank and cannot reproduce its 73/73 admission",
-      "evidence": [
-        "assets/motions/chingmu73_measured_v4_20260803/COMPLETION_MANIFEST.json pins solver sha256 d6d6bfdd...57af5",
-        "the tracked script has been committed exactly once, at 6091688188...68e6c, so d6d6bfdd never existed in this repo's history",
-        "all ~120 copies on Pod1 are 6091688188...; d6d6bfdd is present nowhere on the pod either",
-        "docs/operations/setup_local_sync.md sets SCRIPT_ROOT=$OUTPUT_ROOT, i.e. v4 ran a pod-local script copy that was never tracked",
-        "the recorded v4 invocation also predates the current CLI: it passes no --manifest, --catalog or --urdf"
-      ],
-      "knob_sweep": "margin/velocity/acceleration were swept on a failing clip; only effectively disabling the dynamic bounds (velocity 1.0, acceleration 1e5, margin 0.0) admits it, which is not what v4 did"
+    "status": "DONE",
+    "solver": "the recovered v4d, pristine on 0409; on 0807 an otherwise identical copy whose single MJCF SHA constant became a two-entry allowlist",
+    "clips": 73,
+    "admitted": {
+      "plant_0409": 73,
+      "plant_0807": 73
     },
-    "what_this_does_not_mean": "it is not evidence against the 0807 plant; the same solver admits 19 vs 17 of 73 on the two plants and agrees on 70 of 74 clips"
+    "failures": 0,
+    "reproduces_v4": "73/73 on 0409 matches the v4 bank's own admission, which is what confirms this is the right tool",
+    "gate_comparison": {
+      "clips_compared": 73,
+      "gates_per_clip": 18,
+      "gate_differences_between_plants": 0,
+      "verdict": "every gate lands identically on both plants for every clip"
+    },
+    "residual_movement": {
+      "note": "residuals move slightly, mostly worse in count but negligible in size against the gate budgets",
+      "face_deg_p95": {
+        "better": 13,
+        "worse": 60,
+        "max_change_deg": 0.1102,
+        "gate_deg": 10
+      },
+      "so3_deg_p95": {
+        "better": 12,
+        "worse": 61,
+        "max_change_deg": 0.1064,
+        "gate_deg": 10
+      },
+      "position_m_p95": {
+        "better": 10,
+        "worse": 63,
+        "max_change_m": 0.0008233,
+        "gate_m": 0.05
+      },
+      "velocity_direction_deg_p95": {
+        "better": 32,
+        "worse": 41,
+        "max_change_deg": 1.26
+      },
+      "worst_case_as_fraction_of_gate": "about 1% of the face/so3 budget and 1.6% of the position budget"
+    },
+    "outputs_on_pod": "/workspace/franco/a3p0807_retarget_20260807/v4out/{0409,0807}/*.pkl and *.report.json",
+    "not_yet_done": "materialize_measured_racket_motion_npz + audit_materialized_measured_racket_npz have not been run, so no npz bank has been written and no bank receipt minted"
   },
   "solver_change_made_here": {
     "file": "hope_training/whole_body_tracking/scripts/solve_chingmu_canonical_racket_full_phase.py",
@@ -67,5 +106,35 @@
   "next_step_options": [
     "recover or re-derive the v4-era solver behaviour, then rebuild the bank on 0807",
     "accept the tracked solver as the new authority, rebuild the bank on 0807 at whatever admission it gives, and re-sign the bank gates against that denominator"
-  ]
+  ],
+  "CORRECTION_20260808": "the first version of this receipt concluded the bank rebuild was BLOCKED because the v4-era solver 'exists in neither the git history nor any copy on the pod'. Both halves were wrong: the search covered only reachable git commits (not dangling objects) and only Pod1 (not Pod2). The solver was recovered from both, byte-verified, and the full 73-clip rebuild then succeeded.",
+  "solver_recovery": {
+    "pinned_sha256": "d6d6bfddb518e3809a1a39ee1fe0779703d8539370b1041ee82e56267f057af5",
+    "found_in_two_independent_places": [
+      "git dangling blob 0f03b6284e643f64c79db909b526c38a694c5b70 -- it had been committed and then rebased or amended away, so it is unreachable from any branch but still in the object store",
+      "/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j/ on POD2 -- the v4d working root, which is intact there"
+    ],
+    "both_byte_verified_against_the_pin": true,
+    "now_tracked_at": "hope_training/whole_body_tracking/scripts/legacy/solve_chingmu_canonical_racket_full_phase.v4d_20260803.py",
+    "why_tracked": "a dangling object is one git gc from gone and pod storage is not an archive",
+    "difference_from_the_current_solver": {
+      "lines": [
+        895,
+        1260
+      ],
+      "cli_args": [
+        10,
+        13
+      ],
+      "reads_a_urdf": [
+        false,
+        true
+      ],
+      "has_constrained_frame_bounds": [
+        false,
+        true
+      ],
+      "consequence": "the newer solver adds a per-frame reachability check; that check, not the plant, is what cut admission to 19 of 73"
+    }
+  }
 }
