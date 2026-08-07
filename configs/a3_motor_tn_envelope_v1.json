@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "manifest_type": "a3_motor_tn_envelope_v1",
+  "what_this_is": "the A3 motor torque-speed envelope and the joint-to-motor map, which is the authority mechanical admission needs and did not have",
+  "redistribution": {
+    "curves_and_tables_shareable": true,
+    "raw_bench_data_shareable": false,
+    "vendor_statement": "Agibot: the raw data may not be open-sourced, the curves may",
+    "consequence": "the 20 raw bench CSVs stay in gitignored vendor_assets/agibot/a3_motor_tn_reference_20260804/; only the derived envelope, summary, joint map and training limits are tracked here",
+    "raw_intake_closure_sha256": "ca18b0df4390f935c9960832d1a150e07ee21b2bc080a3f0fa38efb9524756ee",
+    "raw_file_count": 35
+  },
+  "provenance": {
+    "package": "a3_motor_tn_reference",
+    "vendor_prepared_utc_date": "2026-08-04",
+    "vendor_baseline": "main@5eeb16f",
+    "source_doc": "A3-T2-效率map (Feishu)",
+    "coverage": "5 motor families x 2 units x forward+reverse = 20 bench CSVs",
+    "units": "output shaft after the reducer; speed rad/s (raw CSV is RPM), torque N*m",
+    "sha256sums_verified": true
+  },
+  "envelope_model": {
+    "form": "two-segment, symmetric in sign, queried on abs(speed)",
+    "formula": [
+      "v <= vb            -> T_limit = T0",
+      "vb < v < vz        -> T_limit = T0 * (vz - v) / (vz - vb)",
+      "v >= vz            -> T_limit = 0"
+    ],
+    "families": {
+      "PFP110": {
+        "plateau_torque_nm": 305.0,
+        "plateau_end_rad_s": 9.42477796076938,
+        "zero_torque_rad_s": 16.755160819145562
+      },
+      "PFP93": {
+        "plateau_torque_nm": 220.0,
+        "plateau_end_rad_s": 10.471975511965976,
+        "zero_torque_rad_s": 17.80235837034216
+      },
+      "PFP78": {
+        "plateau_torque_nm": 60.0,
+        "plateau_end_rad_s": 16.755160819145562,
+        "zero_torque_rad_s": 23.03834612632515
+      },
+      "PFP59": {
+        "plateau_torque_nm": 34.8,
+        "plateau_end_rad_s": 13.613568165555769,
+        "zero_torque_rad_s": 16.755160819145562
+      },
+      "PFP41": {
+        "plateau_torque_nm": 6.0,
+        "plateau_end_rad_s": 20.94395102393195,
+        "zero_torque_rad_s": 26.17993877991494
+      }
+    },
+    "note": "this describes MOTOR capability and does not replace a joint's own effort limit; for serial joints the usable torque is the smaller of the two"
+  },
+  "joint_coverage": {
+    "total_joints": 31,
+    "serial_directly_checkable": 25,
+    "parallel_needs_jacobian": 6,
+    "parallel_pairs": {
+      "waist": [
+        "waist_roll_joint",
+        "waist_pitch_joint"
+      ],
+      "left_ankle": [
+        "left_ankle_pitch_joint",
+        "left_ankle_roll_joint"
+      ],
+      "right_ankle": [
+        "right_ankle_pitch_joint",
+        "right_ankle_roll_joint"
+      ]
+    },
+    "parallel_caveat": "waist and both ankles are 2x2 parallel mechanisms; joint_velocity = J*motor_velocity and motor_torque = J^T*joint_torque with a pose-dependent J that this package does not supply, so their T-N cannot be checked in joint space"
+  },
+  "independent_limits_are_not_an_envelope": {
+    "explanation": "the training config's effort_limit_sim and velocity_limit_sim are INDEPENDENT, drawing a rectangle whose corner necessarily lies outside the coupled curve; a corner outside the envelope is the documented picture, not a defect",
+    "why_it_matters": "admission must test the actual per-frame (speed, torque) pair against the curve, not compare the two corner numbers"
+  },
+  "tracked_files": {
+    "a3_joint_motor_mapping.csv": "6251b3fbe97e037ffaaa7c05c22be5e1f2bcc42bcb47eefdd623bab0e82ffd3e",
+    "conservative_tn_envelope_summary.csv": "4ac60bc9d57fb1ca3cd5e93ddf9bb1357f7dafbe7feb85daa5949afb1d3c0710",
+    "current_conservative_tn_envelope.csv": "8f9dceb90eaf42aaefbebabfe65e8e53cf4d2a9e027f199f0677582bfea7ab26",
+    "current_training_independent_tn_limits.csv": "ed85eacbbb015493e8990b87abac4762bcb0fad939f10067df2770f856d8af2f"
+  }
+}

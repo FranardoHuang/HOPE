@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "manifest_type": "a3_motor_tn_bank_audit_v1",
+  "bank": "assets/motions/chingmu73_measured_a3p0807_20260808",
+  "plant": "a3p_pingpong_0807 (configs/a3p_p1_0807_model_set_v1.json)",
+  "authority": "configs/a3_motor_tn_envelope_v1.json",
+  "clips": 73,
+  "serial_joints_checked_per_clip": 25,
+  "clips_with_any_serial_joint_over_envelope": 53,
+  "joint_over_envelope_clip_counts": {
+    "head_pitch_joint": 40,
+    "left_wrist_yaw_joint": 36,
+    "left_wrist_pitch_joint": 35,
+    "right_wrist_pitch_joint": 29,
+    "left_shoulder_roll_joint": 24,
+    "right_wrist_yaw_joint": 22,
+    "right_shoulder_pitch_joint": 9,
+    "left_shoulder_yaw_joint": 7,
+    "waist_yaw_joint": 5,
+    "right_shoulder_yaw_joint": 4,
+    "left_shoulder_pitch_joint": 4,
+    "left_elbow_joint": 3,
+    "right_shoulder_roll_joint": 1
+  },
+  "parallel_joints_not_judged": [
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+    "waist_pitch_joint",
+    "waist_roll_joint"
+  ],
+  "worst_ratio": {
+    "max": 6.875597594324673,
+    "median": 1.61871201095551,
+    "min": 0.542460424403419
+  },
+  "method": {
+    "torque": "MuJoCo mj_inverse per frame; contacts disabled; qacc central-differenced from stored joint_vel at 50 Hz",
+    "base": "floating base pinned at the stand keyframe because the bank stores no root state",
+    "envelope": "two-segment conservative motor envelope, queried on abs(joint speed)"
+  },
+  "three_wrong_intermediate_results_and_why": [
+    "with contacts enabled the feet were driven through the MJCF floor and contact forces landed in qfrc_inverse, reading 41,934 N*m on a 6 N*m wrist -- physically impossible, caught before reporting",
+    "disabling contacts but calling mj_forward AFTER writing qacc silently overwrote the target acceleration, so the audit measured passive motion and every peak collapsed to a few percent of capacity",
+    "correct order is mj_forward, then write qacc, then mj_inverse; magnitudes then land where a swing should put them (right elbow 20.3 N*m at 5.63 rad/s against a 34.8 N*m plateau)"
+  ],
+  "interpretation": {
+    "what_is_now_available": "the two mechanical-admission blockers that said the JUDGING data did not exist are closed: the vendor supplied the torque-speed curves and this tool supplies per-frame inverse-dynamics torque",
+    "what_the_result_says": "53 of 73 clips push at least one serial joint past its motor envelope, dominated by head_pitch (40 clips), left_wrist_yaw (36) and left_wrist_pitch (35) -- all PFP41 and PFP59, the smallest motors",
+    "what_it_does_not_say": "nothing about the six parallel waist and ankle joints, which need a pose-dependent Jacobian the vendor package does not supply; and a pinned base biases absolute torque, so a clean clip here is necessary but not sufficient"
+  },
+  "authorization": {
+    "training_authorized": false,
+    "promotion_authorized": false
+  }
+}

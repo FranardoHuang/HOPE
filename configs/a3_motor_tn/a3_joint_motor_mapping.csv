@@ -1,0 +1,32 @@
+sdk_index_31,policy_index_29,joint_name,body_group,motor_family,topology,parallel_pair,relation_note
+0,0,waist_yaw_joint,waist,PFP93,serial,,one joint to one motor
+1,1,waist_roll_joint,waist,PFP78,parallel,waist,shares two PFP78 motors with waist_pitch_joint through pose-dependent 2x2 Jacobian
+2,2,waist_pitch_joint,waist,PFP78,parallel,waist,shares two PFP78 motors with waist_roll_joint through pose-dependent 2x2 Jacobian
+3,,head_yaw_joint,head,PFP41,serial,,one joint to one motor; excluded from 29-DOF policy view
+4,,head_pitch_joint,head,PFP41,serial,,one joint to one motor; excluded from 29-DOF policy view
+5,3,left_shoulder_pitch_joint,left_arm,PFP78,serial,,one joint to one motor
+6,4,left_shoulder_roll_joint,left_arm,PFP78,serial,,one joint to one motor
+7,5,left_shoulder_yaw_joint,left_arm,PFP59,serial,,one joint to one motor
+8,6,left_elbow_joint,left_arm,PFP59,serial,,one joint to one motor
+9,7,left_wrist_roll_joint,left_arm,PFP59,serial,,one joint to one motor
+10,8,left_wrist_pitch_joint,left_arm,PFP41,serial,,one joint to one motor
+11,9,left_wrist_yaw_joint,left_arm,PFP41,serial,,one joint to one motor
+12,10,right_shoulder_pitch_joint,right_arm,PFP78,serial,,one joint to one motor
+13,11,right_shoulder_roll_joint,right_arm,PFP78,serial,,one joint to one motor
+14,12,right_shoulder_yaw_joint,right_arm,PFP59,serial,,one joint to one motor
+15,13,right_elbow_joint,right_arm,PFP59,serial,,one joint to one motor
+16,14,right_wrist_roll_joint,right_arm,PFP59,serial,,one joint to one motor
+17,15,right_wrist_pitch_joint,right_arm,PFP41,serial,,one joint to one motor
+18,16,right_wrist_yaw_joint,right_arm,PFP41,serial,,one joint to one motor
+19,17,left_hip_pitch_joint,left_leg,PFP93,serial,,one joint to one motor
+20,18,left_hip_roll_joint,left_leg,PFP93,serial,,one joint to one motor
+21,19,left_hip_yaw_joint,left_leg,PFP93,serial,,one joint to one motor
+22,20,left_knee_joint,left_leg,PFP110,serial,,one joint to one motor
+23,21,left_ankle_pitch_joint,left_leg,PFP78,parallel,left_ankle,shares two PFP78 motors with left_ankle_roll_joint through pose-dependent 2x2 Jacobian
+24,22,left_ankle_roll_joint,left_leg,PFP78,parallel,left_ankle,shares two PFP78 motors with left_ankle_pitch_joint through pose-dependent 2x2 Jacobian
+25,23,right_hip_pitch_joint,right_leg,PFP93,serial,,one joint to one motor
+26,24,right_hip_roll_joint,right_leg,PFP93,serial,,one joint to one motor
+27,25,right_hip_yaw_joint,right_leg,PFP93,serial,,one joint to one motor
+28,26,right_knee_joint,right_leg,PFP110,serial,,one joint to one motor
+29,27,right_ankle_pitch_joint,right_leg,PFP78,parallel,right_ankle,shares two PFP78 motors with right_ankle_roll_joint through pose-dependent 2x2 Jacobian
+30,28,right_ankle_roll_joint,right_leg,PFP78,parallel,right_ankle,shares two PFP78 motors with right_ankle_pitch_joint through pose-dependent 2x2 Jacobian

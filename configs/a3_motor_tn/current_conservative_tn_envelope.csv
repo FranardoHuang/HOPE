@@ -1,0 +1,16 @@
+family,point_index,region,speed_rad_s,speed_rpm,torque_nm,point_source
+PFP110,0,constant_torque,0.0,0.0,305.000,constructed_zero_speed
+PFP110,1,constant_torque,9.42477796076938,90.0,305.000,conservative_plateau_breakpoint
+PFP110,2,linear_derating,16.755160819145562,160.0,0.000,conservative_zero_torque
+PFP93,0,constant_torque,0.0,0.0,220.000,constructed_zero_speed
+PFP93,1,constant_torque,10.471975511965976,100.0,220.000,conservative_plateau_breakpoint
+PFP93,2,linear_derating,17.80235837034216,170.0,0.000,conservative_zero_torque
+PFP78,0,constant_torque,0.0,0.0,60.000,constructed_zero_speed
+PFP78,1,constant_torque,16.755160819145562,160.0,60.000,conservative_plateau_breakpoint
+PFP78,2,linear_derating,23.03834612632515,220.0,0.000,conservative_zero_torque
+PFP59,0,constant_torque,0.0,0.0,34.800,constructed_zero_speed
+PFP59,1,constant_torque,13.613568165555769,130.0,34.800,conservative_plateau_breakpoint
+PFP59,2,linear_derating,16.755160819145562,160.0,0.000,conservative_zero_torque
+PFP41,0,constant_torque,0.0,0.0,6.000,constructed_zero_speed
+PFP41,1,constant_torque,20.94395102393195,200.0,6.000,conservative_plateau_breakpoint
+PFP41,2,linear_derating,26.17993877991494,250.0,0.000,conservative_zero_torque

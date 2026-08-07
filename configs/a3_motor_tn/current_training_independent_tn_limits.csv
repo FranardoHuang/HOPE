@@ -1,0 +1,10 @@
+family,joint_group,plot_label,torque_limit_nm,speed_limit_rad_s,speed_limit_rpm,topology,source_config
+PFP110,left/right knee,knees,320.0,14.660765716752367,140.0,serial,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP93,left/right hip pitch/roll/yaw + waist yaw,hips + waist yaw,220.0,12.042771838760874,115.0,serial,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP78,left/right shoulder pitch/roll,shoulder p/r,60.0,13.613568165555769,130.0,serial,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP78,left/right ankle pitch,ankle pitch,118.2,10.8,103.132403124,parallel_joint_side,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP78,left/right ankle roll,ankle roll,54.75,19.37,184.969874861,parallel_joint_side,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP78,waist roll,waist roll,46.0,22.7,216.769032491,parallel_joint_side,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP78,waist pitch,waist pitch,115.0,9.24785,88.310462428,parallel_joint_side,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP59,left/right shoulder yaw + elbow + wrist roll,shoulder y/elbow/wrist r,24.0,15.707963267948966,150.0,serial,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
+PFP41,left/right wrist pitch/yaw,wrist p/y,6.0,12.775810124598491,122.0,serial,gear_sonic/envs/manager_env/robots/a3.py::A3_CYLINDER_CFG
