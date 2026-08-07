@@ -5538,6 +5538,123 @@ post-`24254020` 的 C0 实测（`u0` 该项占罚金 `48.9%`、是全部正收�
 - 已经跑完的 `s15r1` 那批读数（`|负|/正 = 14.37~17.90`）是 `24254020` **之前**的，
   §9 那张表用的是 `24254020` **之后**的 C0 实测；两批不要混用。
 
+#### 5.6.26 接 §5.6.25 §10 去重铸，先卡在一件事上：那枚"新指纹"本身不是活值（2026-08-08 清点）
+
+**人话先说**：上一节交接说"18 份产物过期了，下一次发车前必须重铸"。去铸之前先按规矩
+**复算了一遍旧值**，结果发现要拿来当靶子的那个新号码 `41631955…53d7` **不是活代码算出来的**
+——它是**一份手改的测试夹具**算出来的，而那份夹具漏抄了 `24254020`（08-07 限位那次）改的
+**三项**。所以现在往下铸，铸出来的东西会跟这枚靶子对不上；而把靶子改对，
+**改的是这条谱系的身份**，那要先报告再动。**本轮因此只清点、只出证据，一份产物都没铸。**
+
+##### 1. 清点：现在到底有几处还挂着退役配方，分别在什么名字底下
+
+`git grep` 全树（排除 `logs/`），按"能不能影响下一次启动"分四类：
+
+| 类 | 处数 | 位置 | 说明 |
+| --- | ---: | --- | --- |
+| **活代码里的价目钉** | **3**（+1 支线） | `materialize_action_ball_reward_ppo_economy_receipt.py:73` `EXPECTED_EFFECTIVE_REWARD_SHA256` = `41631955…`；`launch_n1_vendor_baseline_diagnostic.py:165` `STATIC_EFFECTIVE_REWARD_RECIPE_SHA256` = `845d75b4…`；`launch_a3_vendor_identity_smoke.py:88` `EXPECTED_REWARD_RECIPE_SHA256` = `845d75b4…`；支线 `MONOTONIC_FRESH_CANARY_EFFECTIVE_REWARD_RECIPE_SHA256` = `ce910ac2…` | **同一条谱系的同一份配方，三个不同字段名，装着两个不同的号码**，而活值是第三个。后两个是**硬启动门**（`if reward_sha != …: raise LaunchRefused`），所以 vendor-V1 那两支发射器**今天已经启动不了** |
+| **在役产物里封着的配方** | **3 份** | `configs/a3_vendor_runtime_authority_20260802_r9/{bh_loop_c,bh_block}.shared_ready.training_contract.json`、`configs/n1_reward_economy_20260802_r9/reward_economy.v1.json` | 被 `a3_vendor_action_registry.py` 按 path+sha 钉住，是在役的那三份 |
+| **留档产物** | **15 份** | `a3_vendor_runtime_authority_{20260731,_r2,_r4,20260801_r5,_r6,_r7,20260802_r8}` 的契约 + `n1_reward_economy_{20260801_r7,20260802_r8}` | 历史收据，按 §10 的规矩**原样留档，不就地改** |
+| **夹具（会把漂移遮住的那层）** | **3 个模块** | `tests/test_materialize_action_ball_reward_ppo_economy_receipt.py` 的 `_r6_contract_from_r5`（那张手抄的 `adopted` / `adopted_params` 表）、`tests/test_launch_n1_vendor_baseline_diagnostic.py`、`tests/test_launch_a3_vendor_identity_smoke.py` | 见 §4：正是它让"指纹对上了"而语义没对上 |
+
+18 = 3 在役 + 15 留档，和 §10 那个数对得上。**另有一处同谱系的过期钉不是 reward 引起的**，
+顺手记在这里：registry 的 `identity_repin_producer` 钉 `b90bac5f…`，
+而 `materialize_a3_vendor_identity_manifest.py` 在 `d4e1e70c`（上一轮 solver-pin v3）动过，
+现在是 `ab7f8fdb…`。**上一轮重铸漏了这一处** —— 又是一次"改一份就暴露一份没跟上的"。
+
+##### 2. 复算收据：两条链都当场复现出来了，不是拿别人的数
+
+pod1 `/workspace/hope_isaac_venv/bin/python`（Python 3.10.18），`CUDA_VISIBLE_DEVICES=` 纯 CPU，
+干净 worktree `/workspace/franco/remint_20260808` @ `17f4bae7`，**未占 GPU、未写任何 artifact**：
+
+| 链 | 输入 | 算出来 | 和当时钉的比 |
+| --- | --- | --- | --- |
+| **真产物链** | 在役 r9 两份契约里的 `effective_reward_recipe`，按 `_reward_receipt_payload` 的规范化取 sha256 | `845d75b4f409725e…`（两个 action_id 相同，30 项） | **逐位相同**（自陈 `sha256`、顶层 `effective_reward_recipe_sha256` 三处一致） |
+| **夹具链** | r5 契约 + 手抄 `adopted` 表 + 08-08 换项，同一套规范化 | `41631955ece024ce…`（两个 action_id 相同，30 项） | **逐位相同**，就是现在钉在物化器里的那个 |
+
+**两条链都复现得出来，所以下面这句不是推测**：这枚在役的新号码，出处是**夹具那条链**，
+不是**真产物那条链**。往前追：`845d75b4`（08-02）是最后一次由**真的物化契约**产生的值；
+`b096b79c`（08-07 限位那次）和 `41631955`（08-08 一阶平滑这次）都是在夹具上算的。
+
+##### 3. 活值对拍：新号码和活代码差在三项、五个叶字段
+
+活值取自**真的一次 Isaac 启动**（并行 worker 的 s19 队列，commit `2dcde6b8`，
+A0 `materialize` 阶段吐出的 `a211_effective_reward_recipe.json`，41 项，`sha 0e633996…`；
+C0 同阶段 `5d876e1b…`）——不是读代码推的：
+
+| 项 | 夹具（= 在役钉 `41631955`） | **活值（实跑）** | 何时漂的 |
+| --- | --- | --- | --- |
+| `action_rate_l2` | `-0.1`，`{}` | `-0.1`，`{}` | 对上 |
+| `qdes_limit_barrier` | `-10.0`，`margin_frac 0.02` | 同 | 对上 |
+| `joint_limit` | `-10.0`，`margin_frac 0.02` | 同 | 对上 |
+| **`qdes_projection_penalty`** | **`-5.0`**，`{shape_rate: 4.0}` | **`-1.0`**，`{knee_frac: 0.05, objective_weight: -1.0}` | `24254020` |
+| **`qdes_limit_barrier_probe`** | `margin_frac` **`0.08`** | `margin_frac` **`0.02`** | `24254020` |
+| **`actual_joint_limit_barrier_probe`** | `margin_frac` **`0.08`** | `margin_frac` **`0.02`** | `24254020` |
+
+**漏的是同一件事的另一半**：`24254020` 那次同时改了主项和投影罚、也把两条 probe 的带宽跟着改了，
+而 08-07 重钉时手抄的 `adopted` / `adopted_params` 只覆盖了 `qdes_limit_barrier` 和 `joint_limit`
+两条主项。08-08 这次在那份已经漏了三项的夹具上继续往下算，于是把漏抄一并继承了。
+
+**这个对拍用的是 A211 剖面**，vendor-V1 的剖面项数不同（30 vs 41）。但这三项来自
+`HOPEActionBallRewardsCfg`，`HOPEPingPongActionBallA3VendorV1.yaml` 的 `rewards:` 段
+**只设了 `action_acc_weight` / `racket_position_coarse_weight` / `racket_position_coarse_std`**，
+一个字都没碰这三项，所以漂移同样落在 vendor-V1 上。**唯一能定这个数的仍然是 vendor-V1 自己启动一次**
+——这一条是本轮**没做到**的（见 §6）。
+
+##### 4. 门是好的：物化器当场拒收，测试却是绿的
+
+在干净 worktree 里对**真的在役 r9 产物**跑一次 `--verify`：
+
+```
+REFUSED: effective reward recipe differs from the adopted common coarse+fine recipe
+```
+
+同一棵树上，四个直接相关的测试模块 `154 passed`，**没有一条是因为 reward 红的**
+（红的 5 条全在 identity-smoke，原因是 §1 末尾那处 `identity_repin_producer` 过期钉）。
+**这就是"指纹不等于语义一致"的现场**：夹具自己造一份带新配方的契约再去校验，
+于是**真产物已经对不上了，测试还是绿的**。文件级指纹也一样看不见——
+registry 的 30 枚 path+sha 钉逐个复核，只有 1 枚漂（还不是 reward 那件事），
+因为**漂的是文件内容里的语义，不是文件本身有没有被换掉**。
+
+##### 5. 题目身份：没动，而且这次本来就动不了
+
+`base_question_sha256` 在最近两轮 tape build report（`v3pin_tape_seed0_20260807_r1`、
+`escapefix_tape_seed0_20260807_r1`）里都是 **`81eed5139b98…`**，与上一轮一致。
+更强的一条：**reward 配方根本不是抽题的输入** —— 全树扫 `action_rate_clamped`，
+命中只落在上面那 18 份契约/收据里，**tape / bundle / manifest 谱系一处都没有**。
+所以这次改价在构造上就碰不到题目身份。
+
+**反话也写清楚**：本轮**没有**铸任何产物，所以"`canonical_sha256` 会不会动"这句话
+现在无从谈起；一旦真的开铸，**封着 recipe 的那些 `canonical_sha256` 必然会动**，
+那是构造决定的，**不能拿它当"题变了"的证据，也不能拿它当"题没变"的证据**。
+
+##### 6. 为什么停在这里，以及下一步的顺序
+
+停下来的理由只有一条：**靶子不对，铸出来的东西也不会对**。真按流程铸，产物会带着活值配方
+（第四个号码），而物化器手里的靶子是夹具那个，照样拒收。要往下走必须先把靶子改对，
+而"把 `EXPECTED_EFFECTIVE_REWARD_SHA256` 改成别的值"= 改这条谱系声称自己在跑哪份配方，
+**那是身份问题，先报告再动**。
+
+**正确顺序（下一轮照这个走）**：
+
+1. **实跑一次 `HOPEPingPongActionBallA3VendorV1`**，把 vendor-V1 的活值配方 sha 拿到手。
+   **不许再用夹具推** —— 夹具就是这次出事的地方。
+2. 三个字段名下的钉**一起改**（`EXPECTED_EFFECTIVE_REWARD_SHA256` /
+   `STATIC_EFFECTIVE_REWARD_RECIPE_SHA256` / `EXPECTED_REWARD_RECIPE_SHA256`，
+   外加 canary 支线那枚），并且**把夹具从"手抄一张 adopted 表"改成"从真契约取"**，
+   否则下一次改价还会漏。
+3. 顺手补上 `identity_repin_producer` 那枚过期钉。
+4. 然后才按 §10 的规矩**新开一轮日期目录**重铸 r9 那三份在役产物，旧的原样留档。
+
+##### 7. 顺带确认的两件事
+
+- **四格 A0/C0 的 `recipe` 阶段在新配方下是能过 boot 门的**：并行 worker 的 s19 队列
+  （commit `2dcde6b8`）实跑 `C0 materialize/recipe/oracle32 = EXIT 0`、
+  `A0 materialize/recipe = EXIT 0`。`2dcde6b8 → 17f4bae7` 的差集只有动捕 npz、
+  `configs/a3p_p1_0807_*`、两支动作物化脚本和 legacy 目录，**没有一个文件是 reward 配方的输入**。
+- **本轮一行代码、一份产物都没改**，所以没有"改动 vs 基线"的对拍要做；
+  上面所有数字都是在 `17f4bae7` 的干净 worktree 上读出来的。
+
 ## 6. 智元 setting 的采用表
 
 | 轴 | 下一版选择 | 状态/健康门 |
