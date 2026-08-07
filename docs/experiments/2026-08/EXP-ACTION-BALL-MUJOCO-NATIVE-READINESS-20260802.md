@@ -9717,6 +9717,238 @@ N1--N5 一一对应，**其中 N2 就是"粗一个档次就过不了"的正面�
    也**没修**上面新发现的 `test_signal_after_atomic_publication_waits_for_identity_then_cleans` 那条 flake。
 4. **没有**把 9.2.16.6 那条 `__pycache__` 规矩写成任何脚本或护栏，只写进了文档。
 
+### 9.2.17 切 0807 新盘 + 0808 新动作库：噪声开那一档两格都实跑过了 boot 门；重铸**没做**，卡在两份 GPU 出生证据（2026-08-08，pod1 GPU1）
+
+**人话先说四句。**
+
+1. **机器人（plant）其实早就换完了**——`82ee3ae8` 已经把 `agibot_a3.py` 的默认资产指到 0807，
+   本轮不需要"切"，只需要核实。真正没换的是**动作库**：现役谱系仍然指着
+   `assets/motions/chingmu73_measured_v4_20260803/`，而新库
+   `assets/motions/chingmu73_measured_a3p0807_20260808/` 已经在树里了。
+2. **噪声开的那一档（A1/C1）今天就能开机**——本轮在 HEAD 上实跑过，两格 `materialize → recipe`
+   全部 `EXIT 0`。**它不需要另一套 profile/lineage/artifact**，与 A0/C0 共用同一份谱系；
+   开关是发车时选格子决定的。所以"噪声必须开"这件事**不构成任何新的重铸工作量**。
+3. **重铸本轮没有做，而且是故意的。** 换库会让两份**Isaac 出生证据**过期
+   （split-ready 动态就绪 artifact + nominal-hold 收据），它们各自绑着旧库的 npz 摘要，
+   而核心物化器要求它们 `dynamic_ready_status == "PASS"` 才肯往下走。
+   这两份只能由 GPU 跑出来，本轮没有跑。**铸一半 = 下次还得重铸一遍，违反"只铸一次"。**
+4. **题目身份这次一定会变**，见下面「题目身份」小节，别把它当成没变。
+
+#### 9.2.17.1 落点核实（三层查，不按提交标题猜）
+
+| 东西 | 落点 | 怎么核的 |
+| --- | --- | --- |
+| 新 plant（MuJoCo） | `agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3p_pingpong_0807/a3p_pingpong_0807.xml`，SHA `7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1` | 与 `configs/a3p_p1_0807_pod_verification_v1.json` 的 `mujoco_root_sha256`、`configs/chingmu73_measured_a3p0807_bank_v1.json` 的 `plant.mjcf_sha256` 三处同值 |
+| 新 plant（Isaac） | `assets/agibot_a3p_p1_0807_v1/urdf/model.urdf`，由 `agibot_a3.py:48` 的 `AGIBOT_A3_ASSET_ROOT` 指向 | 读活代码，不读提交标题；**已经是默认，本轮无需改** |
+| 新动作库 | `assets/motions/chingmu73_measured_a3p0807_20260808/`，73 条 npz，闭包 SHA `1a6a2f579e765af1…` | `configs/chingmu73_measured_a3p0807_bank_v1.json` 的 `closure` |
+| 本轮那一条 | `hope_Take_061_unit04_BH.npz`：旧 `aab1953b9a857d0a…` → 新 `c7eb9af036b5f47b…` | 本机 `shasum -a 256` 直接量 |
+| 力矩-转速权威 | `configs/a3_motor_tn/*` + `configs/a3_motor_tn_envelope_v1.json`，审计工具 `scripts/audit_bank_motor_tn_envelope.py` | 它是**审计侧**权威，**不进** A/C 发车链；四格谱系一处都不引它 |
+
+#### 9.2.17.2 影响面：三次扫描，最危险的那一处三次都扫不到
+
+按老规矩扫三遍（按摘要、按完整路径、按目录名），排除 `logs/`。合计 **214 处路径命中 / 约 180 个文件**。
+三遍各自补到的洞都真实存在：只带摘要不带路径的有 3 个文件（其中就有四格合同本身），
+把路径拆在目录边界上的有 1 个（`mujoco_native/tests/test_action_ball_c211_env.py`，
+`git grep` 整条路径看不见它——和上一轮 `test_migrate_action_ball_solver_pin_receipt.py` 同一个形状）。
+
+**活代码里的钉（漏一个就是硬崩）：**
+
+| 位置 | 常量 | 漏了会怎样 |
+| --- | --- | --- |
+| `scripts/action_ball_211_four_grid_contract.py:184` | `CANONICAL_MOTION_SHA256` | `action_ball_211_four_grid_prelong_barrier.py:686` 会拒掉**每一个** C211/A211 发车 |
+| `scripts/materialize_measured_action_ball_n1_bundle.py:70-79` | `ACTION_FACTS`（`motion_path` 拆成两行 + `motion_sha256`） | 核心物化器根本铸不出新 bundle |
+| `scripts/materialize_action_ball_n1_fixed_tape_variants.py:44-48` | `MOTION_PATH` / `MOTION_SHA256` | 磁带在读文件算哈希那一步就死 |
+| `scripts/launch_n1_measured_vendor_v2_diagnostic.py:146-150` | `MOTION_PATH` / `MOTION_SHA256` | VendorV2 诊断发车被拒 |
+| `tasks/tracking/stage1_natural_clip_contract.py:29-75` | 三条 Stage-1 车道，**另外三条 clip** 的路径+摘要 | import 期权威，训练/发车/进度台账都读它；而且它还带 `frame_count`/`strike_frame`/`cycle_seconds`，**不是只换摘要就完事** |
+
+**最危险的一处，三次扫描全都看不见**：
+`scripts/launch_action_ball_a211_four_arm_diagnostic.py:124-132` 手抄了三份**下游 artifact 的文件摘要**——
+`SPLIT_READY_DYNAMIC_ARTIFACT_SHA256 = ab6b7e41…`、`SPLIT_READY_NOMINAL_HOLD_SHA256 = c8b92a28…`、
+`SPLIT_READY_TEACHER_FRAME0_ARTIFACT_SHA256 = ad17d984…`，在 `:1945-1950` 判等，不等就
+`raise LaunchRefused("A211 split-ready authority bytes differ")`。
+这三个常量里**没有动捕摘要**，所以按动捕扫怎么扫都扫不到它；
+但这三份 artifact 的**内容里**都封着旧库的 `aab1953b…`，一重铸它们文件摘要就变，A211 直接起不来。
+`launch_action_ball_c211_diagnostic.py:75` 把 A211 launcher 当模块 import，`:1199-1206` 用的就是这三个常量，
+所以 **C 族也一起崩，而且 C 族没有自己的副本可改——改 A 那一处两族一起好**。
+上一轮的教训是"A211 的指针链差点被漏掉"；这一轮它换了个形状又出现了一次：
+**这次不是指针漏了，是指针指向的东西的摘要被手抄进了活代码。**
+
+**产物侧**：现役四个目录里，一个事实（这条动捕）用了**五个不同字段名**存：
+`motion.path`/`motion.sha256`（嵌套）、`motion_path`/`motion_sha256`（平铺）、`npz_sha256`，
+以及 `offline_n1_tape_build_report` 里一个**光叫 `motion`** 的裸字段
+（`materialize_action_ball_n1_fixed_tape_variants.py:1243` 写的）——
+任何按 `*_sha256` 结尾做的机械改写都会静默漏掉它。
+指针链：C211 谱系 8 条指针**过期 7 条**，A211 谱系 7 条**过期 6 条**；
+唯一干净的是 `dr_l0_manifest`，而它偏偏用 `file_sha256`/`contract_sha256` 而不是 `sha256`——
+按 `"sha256"` 键写的机械改写器会跳过它（这次跳对了，下次不一定）。
+
+**顺带查实的一条好消息**：全树没有一处路径与摘要**互相矛盾**的钉，
+也没有任何一处带着"既不是 v4 也不是 0808"的孤儿摘要。35 对相邻的 v4 路径+摘要全是 `aab1953b…`，零例外。
+
+#### 9.2.17.3 为什么本轮**不铸**：卡在两份只能由 GPU 产出的出生证据
+
+`materialize_measured_action_ball_n1_bundle.py prepare` 的合同要求
+"dynamic-ready artifact 与 nominal-hold receipt 必须点名**这个** action 和**这条** motion SHA"，
+并在 `:1305` 硬判 `prepared["claims"]["dynamic_ready_status"] != "PASS"` 就拒。现役这两份是：
+
+- `configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json`（`kind = agibot_a3_action_dynamic_ready_candidate_v2`，内容里 3 处旧摘要、2 处旧路径）
+- 同目录 `take061.robust20n.nominal_hold.v1.json`（`kind = isaac_action_ball_nominal_hold_v1`，顶层 `motion_sha256 = aab1953b…`，正文带 5 张 Isaac 截图的 SHA）
+
+第二份按构造就是一次**真实 Isaac 启动**的产物（截图、逐 tick 安全 telemetry、终止原因），
+不是离线能算出来的东西。第三份 `take_061_unit04_bh.frame0_exact.v1.json` 同理绑着旧摘要。
+`--offline-core-only-without-dynamic-ready` 这条旁路会把状态写成 `BLOCKED_EXTERNAL_EVIDENCE`，
+于是 `finalize` 与两个谱系物化器都过不去——**它是给"证据还没有"的场景留的，不是给"证据过期了"用的。**
+
+所以本轮的判断是：**先不铸**。理由和 `17f5e30d` 那次一样——
+靶子不齐就往下铸，铸出来的东西下一轮还得再铸一遍，而纪律是"只铸一次"。
+
+**要铸需要按这个顺序，缺一不可（本轮已核实每一步的工具与入口，未执行）：**
+
+1. 新库缺 `BANK_IMPORT_RECEIPT.json`。三个活的消费者要它：
+   `materialize_measured_action_ball_n1_bundle.py:879`、`build_action_ball_manifest.py:530`
+   （两处都判 `kind == "chingmu73_measured_racket_schema_v4_repo_import"`）、
+   `audit_measured_racket_mechanical_admission.py:431,527-528`（读它并钉它的摘要）。
+   现役 prepared-core 还按 `{path, sha256}` 钉着 v4 那一份的 `e6f0283f…`。
+   **注意那个 `kind` 里的 "v4" 是 schema 版本，不是库版本**——新库的收据要**保留同一个 kind 串**，
+   改成 `..._a3p0807_...` 会让三处判等一起拒。全树扫过：`_v4_` / `schema_v4` 这类命中里，
+   有 5 处是 schema 版本（`materialize_a3_dynamic_ready_contract.py:66`、
+   `build_action_ball_manifest.py:530`、`materialize_action_ball_a211_lineage.py:496`、
+   `check_table_obstacle_scene.py:750,897`），**一处都不该跟着库改**。
+   还有两处是彻底的假阳性：两支 mujoco_native 发射器里的
+   `"phase_aware_measured_v4_teacher": True` 是**开关名**，不是库引用。
+2. `build_action_ball_manifest.py build` → 新的 73 条源清单 + buildreport。
+3. `audit_measured_racket_mechanical_admission.py --bank <新库>` → 机械准入。
+4. `audit_materialized_measured_racket_npz.py` → 这一条的拍面 FK 审计（11 道门）。
+5. **GPU**：重出 dynamic-ready v2 + nominal-hold 收据 + frame0_exact artifact。
+6. `pin_action_ball_profile_contracts.py --source-rev <新提交>` → 新 pin 模板。
+7. `prepare` → 磁带 → C211/A211 两条谱系（两个谱系物化器都**拒脏树**，
+   A211 还额外拒未跟踪的 action manifest，所以顺序上必须先落一笔提交）。
+8. 同批改掉 9.2.17.2 表里的活代码钉，**包括** `launch_action_ball_a211_four_arm_diagnostic.py:124-132`
+   那三个手抄摘要。
+
+#### 9.2.17.4 噪声开的那一档：两格都实跑过了 boot 门
+
+干净 detached worktree `/workspace/franco/bankswap_20260808` @ `766ccf91`，GPU1
+（GPU0 = yikang 的 `phase114_v2_prep15`、GPU2 = mjlab，全程未碰；GPU1 上另有一个并行 session 的
+`remint_20260808` 在跑，等它空出来才起，**没有 kill 任何不属于自己的进程**）。
+只跑 `materialize → recipe` 两级，`oracle32 / scale4096 / long` 一律没跑。
+
+| 格 | materialize | recipe | 活值 effective reward sha | 项数 |
+| --- | --- | --- | --- | --- |
+| `C1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on` | `EXIT 0`（45 s） | `EXIT 0`（57 s） | `5d876e1bac865277…` | 29 |
+| `A1-base-safety-standard-init-sigma1p0-proprio-obs-noise-on` | `EXIT 0`（47 s） | `EXIT 0`（57 s） | `0e633996af4790bb…` | 41 |
+
+两格 `terminal_kind = clean_completion`。运行时自陈那行（C1）：
+
+```
+[RacketTargetCommand] action-ball runtime bound: actions=1, mobility=no_move,
+manifest=12031a74be708b53…, sampler=03d8a77968134b61…,
+solver=3af6c505f9ed2333…, physics=aa5c9085f9b48ca6…,
+target_source=direct_ball, target_recipe=outcome_dense_only
+```
+
+**发车前可核的那个字段在哪**（这是要点，别再靠"应该开了"）：
+`<namespace>/launch_claim.json` 的 `canonical_payload.bundle.recipe`（C 族）/
+`canonical_payload.bundle.arm`（A 族）里逐字段写着：
+
+```
+policy_observation_corruption = True
+dr_level_identity              = action_ball_dr_l0n_plant_all_off_proprio_obs_noise_on_v1
+observation_noise_axis         = policy_observation_corruption_on_proprioceptive_channels_only
+task_channel_observation_noise = False
+proprioceptive_observation_noise_channels =
+    {base_ang_vel_body: [-0.2, 0.2], joint_pos: [-0.01, 0.01], joint_vel: [-0.5, 0.5]}
+```
+
+同一份 claim 里的 `isaac_four_grid_manifest.cells[*]` 仍然四格都在（`cells[0]`/`cells[2]` 是 off、
+`cells[1]`/`cells[3]` 是 on）——**那是共用的合同表，不是本格的取值**。
+只有 `bundle.recipe` / `bundle.arm` 那一份才是本格真正跑的。引错了字段会得到相反的结论。
+
+**噪声开这一档不需要任何新产物**：`launch_action_ball_c211_diagnostic.py:1637-1660` 的判据是
+"谱系绑的是**共用的 DR-L0 leaf**，真正跑哪一档由本格 cell 决定"，
+噪声开时它去要 `action_ball_dr_l0n` 那份 payload（由 `training_contract.py:4939`
+`action_ball_dr_l0n_contract_payload()` **现算**，不是磁盘上的 artifact），
+并要求另一档的键**不存在**。所以 A1/C1 与 A0/C0 **共用同一条谱系、同一份 dr_l0_manifest**。
+**结论：噪声开那一档的 profile / lineage / artifact 全齐，一样都不缺。**
+
+**顺带量出来的一件事**：`effective reward sha` 在 C1 与 C0、A1 与 A0 之间**逐位相同**
+（C0/A0 的值取自并行 session 在 `0f5fb0dd` 记录的那一跑）。变的是 `recipe_contract_sha256`
+（C0 `935246ebcd75e433…` → C1 `dc760b21f2a11ec9…`），它封的是格身份与 DR 档。
+**噪声是观测侧的事，不进 reward 配方**——这句话现在是量出来的，不是推的。
+
+#### 9.2.17.5 reward 配方那枚钉：本轮取到的是 A/C 族的活值，**不是** VendorV1 那一枚
+
+`17f5e30d` 判过：`EXPECTED_EFFECTIVE_REWARD_SHA256 = 41631955…53d7` 出自**测试夹具**那条链，
+不是活代码。本轮补两条独立佐证，都来自真实 Isaac 启动（不是夹具、不是手抄）：
+
+- A1/C1 两跑的 `runtime_soft_weights` 里 `qdes_projection_penalty = -1.0`——
+  与夹具链的 `-5.0` 不符，与活值一致。
+- 两跑的 `runtime_effective_reward_sha256` 是 `5d876e1b…`（C，29 项）/ `0e633996…`（A，41 项）。
+
+**但必须把话说死，免得下一轮又用错链**：这两个数**不能**去填
+`EXPECTED_EFFECTIVE_REWARD_SHA256` / `STATIC_EFFECTIVE_REWARD_RECIPE_SHA256` /
+`EXPECTED_REWARD_RECIPE_SHA256` 那三处。那三处钉的是 **VendorV1 / n1-baseline** 族的配方
+（`launch_n1_vendor_baseline_diagnostic.py:165`、`launch_a3_vendor_identity_smoke.py:88`、
+`materialize_action_ball_reward_ppo_economy_receipt.py:73`），**30 项**，与 A/C 的 29 / 41 项
+不是同一个对象。要拿它的活值，必须实跑一次 `HOPEPingPongActionBallA3VendorV1`——**本轮没跑**。
+"复算证明复现的是活值那条链"这条纪律的正确用法就是这个：**先确认自己复现的是哪条链**。
+
+**这枚钉不挡 A/C**：三处常量里没有一处被两个 211 launcher 引用，
+而 A1/C1 刚刚在 HEAD 上开机成功，这是活证据而不是论证。它挡的是那两支 VendorV1 发射器。
+
+#### 9.2.17.6 腰的保持增益：新盘上结论不变，而且**落点就是本轮核实的那一份**
+
+另一轮独立重算给的结论（本轮**没有重跑**，只核落点）：
+现役盘 `waist_pitch` 需求 `-49.1546 N·m`、包络内只到 `-21.7037`、顶死机械限位 `-26.0146`；
+新盘同一帧需求 `-49.8872`、缺口 `28.16`（机械限位下仍缺 `23.85`）。全库 73 条 frame 0 两盘同为 **72/73 撑不住**。
+
+**落点核实（这是唯一要我确认的事，结论：是同一份）**：
+`/workspace/franco_waisthold_20260808/out_0807_0808_f0.json` 自陈
+`mjcf_sha256 = 7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1`、
+`npz = assets/motions/chingmu73_measured_a3p0807_20260808/hope_Take_061_unit04_BH.npz`、
+`npz_sha256 = c7eb9af036b5f47b62f3e646d68e4fc8523c433a79d0fc037981407b4d7918a7`——
+与 9.2.17.1 表里的两个落点**逐位相同**。
+
+**顺带排掉一个本来会成立的质疑**：那一跑的 `grounding.requested = False`（脚离地约 1.3–1.8 cm），
+而旧盘那个 `-49.1546` 是"接地后"的数，看起来口径不同。**实际不影响**：
+同目录的 `out_0409_v4_f0.json`（接地）与 `out_0409_v4_f0_ungrounded.json`（不接地）
+在 `waist_pitch` 上给出**逐位相同**的 `required_torque_qfrc_bias_Nm = -49.15464109801158`，
+原因是接地只动 12 个腿关节，而脚的雅可比在这 19 行"contact-free"需求上恰好是 0
+（该跑自陈 `leg_perturbation_max_abs_change_on_contact_free_rows_Nm = 1.42e-14`）。
+**所以两盘的对比是同口径的**，这一条不用重算。
+
+#### 9.2.17.7 题目身份：这次**一定会变**，别粉饰
+
+上几轮重签时反复引用"`base_question_sha256 = 81eed5139b98…` 没动"来证明题目身份没变。
+**这一轮不能这么引。** 上几轮变的是求解器语义面/reward 配方，那些**不是抽题的输入**；
+这一轮换的是**动捕本身**——题面里 `time_to_contact`、教师投影、接触对齐全部由这条 clip 算出来，
+`base_question_sha256` **按构造必然会动**。
+
+具体会变的三层（重铸时必须逐层量，不能只报一个数）：
+
+1. **`base_question_sha256`**——抽题输入变了，会动。上几轮"它没动"的那句话本轮**作废**。
+2. **每份 task receipt 的 `canonical_sha256`**——按构造封着上游，必动。
+   （它两个方向都不能当证据：既不能说"变了所以题变了"，也不能说"没变所以题没变"。）
+3. **不会变的那一个，也要写清楚免得有人拿它当"没变"的证据**：谱系 `action_uid = 5527597793770800`
+   是 `materialize_measured_action_ball_n1_bundle.py:71` 的**硬编码常量**，不从动捕派生，
+   换库之后它**照样是这个数**。它证明的是"还是同一个 action 槽位"，
+   **不是**"还是同一道题"。
+
+跨轮可比性的代价，直说：**0808 之后的任何一格，与 0808 之前跑过的所有格子，题目不是同一道。**
+所以旧格的曲线只能当"同一个任务族的历史参考"，**不能与新格同图比较、不能算 delta**。
+这正是"可以直接用新的模型和动作"这句授权本身的代价——它是对的，但它有价格，价格就是这一条。
+残差层面的安慰是有的（`configs/a3p_p1_0807_retarget_attempt_v1.json`：73 条 clip × 18 道门，
+两盘**零门差异**，p95 残差最大动 0.11°/0.82 mm，约 1% 门预算），但**"题目相近"不等于"题目相同"**。
+
+#### 9.2.17.8 这一节没做什么
+
+1. **没铸任何产物**，一份都没有。理由见 9.2.17.3。
+2. **没改任何活代码**——9.2.17.2 那张表是清点，不是改动。
+3. **没跑** VendorV1，所以那三处 reward 钉的活值本轮**没有**取到。
+4. **没跑** `oracle32 / scale4096 / long4096`，也没跑 MuJoCo-GPU（mjlab）那两格——
+   本轮的 GPU 证据只覆盖 Isaac 侧 A1/C1 的 `materialize → recipe`。
+5. **没碰** GPU0（yikang）与 GPU2（mjlab），也**没 kill** GPU1 上并行 session 的进程。
+
 ## 10. N1 直接到完整 73 的门
 
 “一个动作能学就全上”精确定义为：N1 通过后，允许**完整 73 catalog**进入 MuJoCo 训练实验；它不
