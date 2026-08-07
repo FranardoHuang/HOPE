@@ -111,3 +111,109 @@ candidate 升为 future primary/pre-long plant，必须在 exact closure 上补�
 
 全部闭合前，manifest 保持 `canonical_runtime=false / training_authorized=false /
 deployment_authorized=false / hardware_authorized=false`。
+
+## 2026-08-06 v2 decision: the 9 mm is a delivery defect, not a design change
+
+上一版把 `right_elbow_joint` 的 `9.013878 mm` 记成 vendor 的真实几何改动。**这个判定是错的**，
+本节推翻它并落成 v2。
+
+**人话**：这次交付表面上是"左手换成 OP3 夹爪"，但它其实是整条基线换代（robot name 从
+`0000014503_A3T2.5-URDF-std-pingpang-0409` 变成 `A3-P1-URDF-std-0717`），顺带把右肘的一个
+坐标写错了一个零。
+
+### 四条独立证据
+
+1. **零件没改**（最硬的一条）：交付与现役共有的 44 个 mesh **全部 SHA-256 逐字节相同**，含
+   `right_shoulder_yaw_Link` —— 它就是定义这个 origin 的父件、带着肘部安装面。安装面挪 9 mm
+   而父件 CAD 一个字节没变，物理上讲不通。
+2. **交付自己的惯量说这两个肘是同一个件的镜像**：`left_elbow_link` 与 `right_elbow_link`
+   质量完全相等（Δ = `0.000 g`），质心在 y-镜像下残差 x 方向 `0.0745 mm`、总体 `0.19 mm`。
+   零件级镜像残差是 0.1 mm 量级，而两者 mount origin 的 x 差 `9 mm` —— **90 倍以上**，
+   单看 x 分量是 **120 倍**。
+   （注：两件的三角剖分不同，顶点数不等，所以这条依据的是交付的惯量张量，不是逐点比网格。）
+3. **对称**：同一份交付里 `left_elbow_joint` 仍是 `x=0.01`，只有右肘是 `0.001`；现役 plant
+   两边都是 `0.01`。新版是**造出**不对称，不是修正不对称。
+4. **装配（旁证）**：把 `right_elbow_Link` 按候选 origin 放到 `right_shoulder_yaw_Link` 上量
+   AABB 重叠 x，左臂基准 `76.221 mm`；右臂 `x=0.01` 得 `75.353 mm`（差 0.87 mm），右臂交付值
+   `x=0.001` 得 `84.353 mm`（差 8.13 mm）。四对上肢零件的 AABB 左右镜像容差实测 `1.26 mm`。
+
+同一方法确认 `z` 的改动是**真修复**：右臂 `z=-0.1325` 的重叠 `75.979` 比 `z=-0.133` 的 `75.479`
+更贴近左臂的 `76.129`。旧 plant 的右 `z=-0.133` / 左 `z=-0.1325` 才是错的。
+
+### Adopt
+
+- **Adopt:** 铸 `v2`（`assets/agibot_a3_p1_0803_31d_v2/` + `configs/a3_p1_0803_31d_v2.json`），
+  = v1 + 一条声明式 mirror-symmetry 覆盖：`right_elbow_joint` `x` 恢复 `0.01`，保留交付的
+  `z=-0.1325`。v2 的 URDF 与 v1 逐行 diff **恰好两行**（robot name + 那一个 origin），
+  100 个 mesh 逐字节相同。
+- **Adopt:** 覆盖是 `provisional_pending_vendor_confirmation`。交付自带的 joint workbook
+  **也写 `0.001`**，说明缺陷在上游 CAD 而非 URDF 导出，因此项目本地打补丁**不免除上报义务**。
+  manifest 以 `reproduces_delivered_joint_origins_exactly=false` 与
+  `mirror_symmetry_correction_vendor_confirmed=false` 自陈。
+- **Adopt:** 其余交付差异**全部原样接受**，不动：`right_hip_roll_joint` 的 `x -0.0011 → 0`
+  （真对称化修复）、五个 link 的质量/质心/惯量（torso `-1.181 kg`、两个 elbow `→0.670`、
+  两个 shoulder_roll `→0.901`）。
+- **Adopt:** v1 目录与其同字节 Pod import receipt **冻结**。`require_isolated_successor_root`
+  现在硬拒写入 v1，`pod_import_verified` 对 v2 求值为 `false`，v2 的 `pod_import_receipt` 为
+  `null`、`status=host_static_candidate_pod_import_pending`。v1 的证据不继承。
+
+### Reject
+
+- **Reject:** 直接改 v1、或让 v2 复用 v1 的 Pod receipt。
+- **Reject:** 把五个 link 的质量改动或 `right_hip_roll` 也"修"掉 —— 没有证据支持，只有 elbow x
+  有三条独立证据。
+- **Reject:** 因为打了补丁就不向厂商提问。
+
+### 后果
+
+拍心 `q=0` 偏移（orientation 三者全同）：
+
+| 对比 | position delta |
+| --- | --- |
+| raw 交付 vs 现役 | `9.013878 mm` |
+| v2 vs raw 交付 | `9.000000 mm`（= 声明的覆盖量） |
+| **v2 vs 现役** | **`0.500000 mm`** |
+
+`0.5 mm` 仍是 `racket_fk_ref.py:177` PASS 门槛 `1e-4 m` 的 5 倍，也是重定向自身 full-phase p95
+`6.403e-05 m` 的 7.8 倍。**动作库仍必须在 successor 上重跑 audit**；变化的是量级——占拍面半宽
+从 `14%` 降到 `0.77%`，所以"确定要重新重定向"降级为"要先量、大概率不用重做"。
+
+### 护栏与变异测试
+
+`apply_mirror_symmetry_corrections` 在改任何字节之前逐条断言前提：被改关节的交付 `xyz`、
+交付 `rpy`、镜像基准关节的 `xyz`、只动哪一个分量、幅度是多少。实测变异：
+
+| 变异 | 结果 |
+| --- | --- |
+| 厂商重出 `x=0.002` | BLOCKED（premise drifted） |
+| 厂商自己修好 `x=0.01` | BLOCKED（premise drifted，需人工撤销覆盖） |
+| 厂商改 `z=-0.133` | BLOCKED |
+| 镜像基准 `left_elbow` 漂到 `0.02` | BLOCKED |
+| `right_elbow` rpy 变 | BLOCKED |
+| 合同偷偷多改 `z` 却仍声明只改 `x` | BLOCKED |
+| 合同谎报 `correction_m=0` | BLOCKED |
+| 交付里偷改 `right_knee` origin | BLOCKED（`verify_raw_closure` 层，`total_bytes` 不符） |
+| 写进 v1 / 现役 `agibot_a3` | BLOCKED |
+
+注意第二行：**厂商把它修好了，脚本也会拒绝**。这是有意的——覆盖必须被人工撤销，不能静默
+变成 no-op。
+
+### 复现
+
+```bash
+python3 scripts/prepare_a3_p1_0803_31d_asset.py
+python3 scripts/prepare_a3_p1_0803_31d_asset.py --check
+python3 -m pytest tests/test_prepare_a3_p1_0803_31d_asset.py -q
+```
+
+Observed 2026-08-06：`PREPARED` closure `0cb41604…b221`、URDF `4dc4ee9d…76d6`；`--check` `PASS`；
+`17 passed`（host py3.8）。
+
+### 仍未闭合（v2 不改变这些）
+
+MuJoCo 侧仍完全未动：`a3_pingpong.xml` 仍钉在旧 plant，需手改 `right_elbow_Link` 的 `z`、
+`right_hip_roll_Link` 的 `x`、五个 `<inertial>`，再铸 identity v3 并跑 cross-engine parity。
+`racket_fk_ref.py:67` 与 `pp_racket_fk.hpp:91` 两处手抄 elbow 常量仍是旧值，且
+`pp_parity_test.cpp` 的 golden 由 Python 侧同一常量生成，两边一起漂仍会 PASS —— 改常量时必须
+连这个失明的 parity 测试一起修。厂商待答问题见
+[0803 交付核实清单](../../interfaces/a3_p1_0803_vendor_questions.md)。

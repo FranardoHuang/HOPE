@@ -91,7 +91,21 @@ The same package now also contains a first-pass table-tennis physics/visualizati
 - `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v1/`: ignored,
   non-canonical 0803 vendor-body 31-action candidate generated from the private raw intake by
   `scripts/prepare_a3_p1_0803_31d_asset.py`; exact tracked diff/closure is
-  `configs/a3_p1_0803_31d_v1.json`. It is not the current runtime pointer.
+  `configs/a3_p1_0803_31d_v1.json`. It is not the current runtime pointer. Frozen: it is the
+  only build whose bytes the Pod IsaacLab import receipt covers, so the producer refuses to
+  write into it.
+- `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3_p1_0803_31d_v2/`: ignored,
+  the current candidate the producer builds by default. Plain words: same delivery as v1, plus
+  one declared fix — the 0803 delivery puts `right_elbow_joint` 9 mm off the mirror of the left
+  arm, which no delivered mesh supports, so v2 restores `x=0.01` and keeps everything else the
+  vendor sent. Tracked receipt `configs/a3_p1_0803_31d_v2.json`; the correction is provisional
+  until Agibot confirms it, and v1's Pod evidence explicitly does not transfer to v2.
+- `source/whole_body_tracking/whole_body_tracking/assets/agibot_a3p_p1_0807_v1/`: ignored, the
+  2026-08-07 A3P-P1 Isaac candidate. Plain words: the vendor's corrected robot, with the left
+  OmniPicker3 gripper welded shut at q=0 so the 31-action policy ABI is untouched. Built by
+  `scripts/prepare_a3p_p1_0807_model_set.py` from the bundle
+  `vendor_assets/agibot/A3P-P1-32dof-0807-OP3+pingpang/`; tracked receipt
+  `configs/a3p_p1_0807_model_set_v1.json`. Never imported by Isaac Lab on this host.
 - `scripts/play_table_tennis.py`: visualization/headless smoke runner for the table-tennis scene.
 
 Ball-physics fitting (2026-07-03):

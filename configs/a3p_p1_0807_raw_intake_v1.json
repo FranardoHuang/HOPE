@@ -1,0 +1,1851 @@
+{
+  "schema_version": 1,
+  "manifest_type": "a3p_p1_0807_op3_pingpang_raw_intake_v1",
+  "bundle_id": "a3p_p1_32dof_0807_op3_pingpang",
+  "assembled_not_a_vendor_closure": true,
+  "assembly_note": "the vendor shipped a meshless URDF plus a gripper-only ROS2 package; every resolvable mesh reference is served by the 2026-08-03 delivery's meshes, byte-for-byte, and the OmniPicker3 package adds no new geometry",
+  "producer": {
+    "path": "scripts/intake_a3p_p1_0807_bundle.py",
+    "sha256": "5ee6ca54d10b62de5ed7010e88e774c38ff8c95341502e10d53a43341b971573"
+  },
+  "delivered_inputs": {
+    "urdf": {
+      "delivered_basename": "A3P-P1-32dof-0807-OP3+pingpang_20260807_083135.urdf",
+      "sha256": "2860dd4fc63675ba699925e24528a7ca9d4f895b7a7016d12f2cc64f993eab82",
+      "bytes": 63134
+    },
+    "omnipicker3_package": {
+      "delivered_name": "OmniPicker3-T1-0324-T1.5-close-ROS2",
+      "closure": {
+        "file_count": 35,
+        "total_bytes": 27046426,
+        "sha256": "630d92f78779bb72a12a30def94cd818784775efe4420bf4c1fae45409d2449b",
+        "files": [
+          {
+            "path": "CMakeLists.txt",
+            "bytes": 803,
+            "sha256": "1dd6c2f3ae1d81dc0dff45df161f280f570b37735efb32da39721a1ee1919040"
+          },
+          {
+            "path": "MANIFEST.sha256",
+            "bytes": 3002,
+            "sha256": "1fdac12c3b35b695a33227acd95b50de2186176a016e011bb4356b8dd625ddd9"
+          },
+          {
+            "path": "README.md",
+            "bytes": 3283,
+            "sha256": "eeb6b1e6bb03dcb60e1af4086098f49a9b7c186d26a6058436ec6161ddf82b8f"
+          },
+          {
+            "path": "config/display.rviz",
+            "bytes": 1871,
+            "sha256": "f3845d56a7a5119ce838feaac1c268317846a9d97ccf0b40c349a6fbcbf2edd1"
+          },
+          {
+            "path": "config/joint_names_OmniPicker3-T1-0324-T1.5.yaml",
+            "bytes": 334,
+            "sha256": "d0bc1bfe3e8789987c655b69bd2910aad5c1bd1ea5373cc3852b450b805c6b32"
+          },
+          {
+            "path": "export.log",
+            "bytes": 775,
+            "sha256": "48121e5d1bceb3c8de861c7b311da1a5f24a4279dff70b0fd1de403e016a3727"
+          },
+          {
+            "path": "launch/display.launch.py",
+            "bytes": 3198,
+            "sha256": "5fbd73d283139c5f012cf65fa96d2803d129c415dbb39402811d0ca3628f1b2c"
+          },
+          {
+            "path": "meshes/Link1.STL",
+            "bytes": 431084,
+            "sha256": "593a38f646d66b3dfe1291a8264752fe79969e9635b5360d945990a84d3f5e61"
+          },
+          {
+            "path": "meshes/Link10.STL",
+            "bytes": 2736784,
+            "sha256": "ac97efed1308739460b445c79835aa138f1781f582d31b757312da61c9f48593"
+          },
+          {
+            "path": "meshes/Link11-1.STL",
+            "bytes": 78384,
+            "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93"
+          },
+          {
+            "path": "meshes/Link11.STL",
+            "bytes": 117484,
+            "sha256": "589a1bee8d117ee1f7273177b9dc6c8404e5b69c9691d1ca1aa585064759fa0c"
+          },
+          {
+            "path": "meshes/Link13.STL",
+            "bytes": 1807184,
+            "sha256": "dcdaebcc4e1877ac1a18baa242bae3786a38b7ee146a69a6dc06192ba6e7b60c"
+          },
+          {
+            "path": "meshes/Link14-1.STL",
+            "bytes": 8084,
+            "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057"
+          },
+          {
+            "path": "meshes/Link14.STL",
+            "bytes": 24784,
+            "sha256": "57eb5a33e9838302684e6f95dc7935c2bd2ac2b14ca995355aa49e6160de6137"
+          },
+          {
+            "path": "meshes/Link15.STL",
+            "bytes": 537484,
+            "sha256": "5ad689b721874d889f83b5c45ee7dd8f82e7801c56914535905c50a967036991"
+          },
+          {
+            "path": "meshes/Link17.STL",
+            "bytes": 8084,
+            "sha256": "edf81e946df0f7b4bc3f03b68169901386820601b6552447e01e1c229f0f1519"
+          },
+          {
+            "path": "meshes/Link18.STL",
+            "bytes": 8084,
+            "sha256": "545f191f8651534235e03b5619a6d08accd0e7e6378da8db955f5849b8533bc7"
+          },
+          {
+            "path": "meshes/Link2.STL",
+            "bytes": 117484,
+            "sha256": "66759d871c83e13f6f5616675fdb415a7a6bb55b4e155150ecfca0435c7eb827"
+          },
+          {
+            "path": "meshes/Link3.STL",
+            "bytes": 2736784,
+            "sha256": "3ecae58b274bde3fef1236b31a8ad90b1893e436dc1a1ebbdd3f8591c14afe3e"
+          },
+          {
+            "path": "meshes/Link4-1.STL",
+            "bytes": 78384,
+            "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701"
+          },
+          {
+            "path": "meshes/Link4.STL",
+            "bytes": 117484,
+            "sha256": "6f79446aba4f676bd5db0964d7a975729953225f2925dd3a5ebd0dbe118a3574"
+          },
+          {
+            "path": "meshes/Link6.STL",
+            "bytes": 1807184,
+            "sha256": "856b1410ef1e77b1e7e8af58aef6b2632a465a439e5d85be1869998c1fe93341"
+          },
+          {
+            "path": "meshes/Link7-1.STL",
+            "bytes": 8084,
+            "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3"
+          },
+          {
+            "path": "meshes/Link7.STL",
+            "bytes": 24784,
+            "sha256": "bc291d229344a5956143dff4fe0f0ff1026ddc93e0155d99aae1a851c50bb2d6"
+          },
+          {
+            "path": "meshes/Link8.STL",
+            "bytes": 537484,
+            "sha256": "ba02a6b72054edb9085bbebd1eece25edac1c4b43f89dcc1effe042f3b90c19a"
+          },
+          {
+            "path": "meshes/Link9.STL",
+            "bytes": 117484,
+            "sha256": "ec6dfb0053ee6ae95402268f58f308b75a2ec2694d8a8ef60241c7829629dbcb"
+          },
+          {
+            "path": "meshes/base_link.STL",
+            "bytes": 15664284,
+            "sha256": "4b1b9c1f7d87484d2f3a2b3ead2c89989bf42aa700e67b288a6575cf9a1e6edc"
+          },
+          {
+            "path": "package.xml",
+            "bytes": 1088,
+            "sha256": "92ae933622df19521d996660ef21dc2cf71cea2b209f1ecd0feb2a75d1376008"
+          },
+          {
+            "path": "scripts/gripper_slider.py",
+            "bytes": 8569,
+            "sha256": "cf7be8e180c5cae60986f5541c8bd317747f524704606775d712ce8d9c126b42"
+          },
+          {
+            "path": "scripts/linkage_joint_state_publisher.py",
+            "bytes": 2146,
+            "sha256": "01c57397c53bfa75d5c26240ac9b9427acdaa7961837ff3e2dd2d07aeb807afd"
+          },
+          {
+            "path": "scripts/linkage_kinematics.py",
+            "bytes": 7176,
+            "sha256": "e6c51e2fedeccf7eb5c725aaa36cf65268ba3a7261762bea75f0b420ac097b7f"
+          },
+          {
+            "path": "scripts/rviz_interactive_control.py",
+            "bytes": 4169,
+            "sha256": "72e289ef61cc6569979c5ba94750a6fef220680c845119f99aa2d9ddbcc63b5c"
+          },
+          {
+            "path": "test/test_model.py",
+            "bytes": 13750,
+            "sha256": "f4ec5dafe26d92ae76c332547956f6caaf73659babb4773d2d092b102b5b794c"
+          },
+          {
+            "path": "urdf/OmniPicker3-T1-0324-T1.5.csv",
+            "bytes": 8657,
+            "sha256": "85d85e2d2018a3d3f4642a1398a251241c045ad21f6d533ddc16a07ec054c286"
+          },
+          {
+            "path": "urdf/OmniPicker3-T1-0324-T1.5.urdf",
+            "bytes": 20725,
+            "sha256": "c3f2419117bed58993b56601121dd168b056dbe6339c1258f074f907db36bddb"
+          }
+        ]
+      }
+    }
+  },
+  "mesh_provenance": {
+    "distinct_reference_count": 124,
+    "resolved_count": 104,
+    "source_package_histogram": {
+      "A3-P1-32dof-0803-BerkeleyPingpang-90deg": 104
+    },
+    "case_exact_count": 22,
+    "case_mismatched_count": 82,
+    "predecessor_intake_manifest_path": "configs/a3_p1_0803_raw_intake_v1.json",
+    "predecessor_intake_manifest_sha256": "bf56217cf8aa448a0cea868fb4c01c977152217797e4b3917fc6f9048f9c6688",
+    "predecessor_meshes_unused_by_0807": [
+      "left_hand_Link.stl",
+      "left_hand_Link_collision.stl",
+      "right_hand_Link.stl",
+      "right_hand_Link_collision.stl"
+    ],
+    "per_reference": {
+      "Link1.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link1.stl",
+        "case_exact": true,
+        "sha256": "593a38f646d66b3dfe1291a8264752fe79969e9635b5360d945990a84d3f5e61",
+        "bytes": 431084
+      },
+      "Link10.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link10.stl",
+        "case_exact": true,
+        "sha256": "ac97efed1308739460b445c79835aa138f1781f582d31b757312da61c9f48593",
+        "bytes": 2736784
+      },
+      "Link11-1.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link11-1.stl",
+        "case_exact": true,
+        "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93",
+        "bytes": 78384
+      },
+      "Link11.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link11.stl",
+        "case_exact": true,
+        "sha256": "589a1bee8d117ee1f7273177b9dc6c8404e5b69c9691d1ca1aa585064759fa0c",
+        "bytes": 117484
+      },
+      "Link13.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link13.stl",
+        "case_exact": true,
+        "sha256": "dcdaebcc4e1877ac1a18baa242bae3786a38b7ee146a69a6dc06192ba6e7b60c",
+        "bytes": 1807184
+      },
+      "Link14-1.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link14-1.stl",
+        "case_exact": true,
+        "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057",
+        "bytes": 8084
+      },
+      "Link14.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link14.stl",
+        "case_exact": true,
+        "sha256": "57eb5a33e9838302684e6f95dc7935c2bd2ac2b14ca995355aa49e6160de6137",
+        "bytes": 24784
+      },
+      "Link15.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link15.stl",
+        "case_exact": true,
+        "sha256": "5ad689b721874d889f83b5c45ee7dd8f82e7801c56914535905c50a967036991",
+        "bytes": 537484
+      },
+      "Link17.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link17.stl",
+        "case_exact": true,
+        "sha256": "edf81e946df0f7b4bc3f03b68169901386820601b6552447e01e1c229f0f1519",
+        "bytes": 8084
+      },
+      "Link18.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link18.stl",
+        "case_exact": true,
+        "sha256": "545f191f8651534235e03b5619a6d08accd0e7e6378da8db955f5849b8533bc7",
+        "bytes": 8084
+      },
+      "Link2.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link2.stl",
+        "case_exact": true,
+        "sha256": "66759d871c83e13f6f5616675fdb415a7a6bb55b4e155150ecfca0435c7eb827",
+        "bytes": 117484
+      },
+      "Link3.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link3.stl",
+        "case_exact": true,
+        "sha256": "3ecae58b274bde3fef1236b31a8ad90b1893e436dc1a1ebbdd3f8591c14afe3e",
+        "bytes": 2736784
+      },
+      "Link4-1.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link4-1.stl",
+        "case_exact": true,
+        "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701",
+        "bytes": 78384
+      },
+      "Link4.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link4.stl",
+        "case_exact": true,
+        "sha256": "6f79446aba4f676bd5db0964d7a975729953225f2925dd3a5ebd0dbe118a3574",
+        "bytes": 117484
+      },
+      "Link6.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link6.stl",
+        "case_exact": true,
+        "sha256": "856b1410ef1e77b1e7e8af58aef6b2632a465a439e5d85be1869998c1fe93341",
+        "bytes": 1807184
+      },
+      "Link7-1.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link7-1.stl",
+        "case_exact": true,
+        "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3",
+        "bytes": 8084
+      },
+      "Link7.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link7.stl",
+        "case_exact": true,
+        "sha256": "bc291d229344a5956143dff4fe0f0ff1026ddc93e0155d99aae1a851c50bb2d6",
+        "bytes": 24784
+      },
+      "Link8.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link8.stl",
+        "case_exact": true,
+        "sha256": "ba02a6b72054edb9085bbebd1eece25edac1c4b43f89dcc1effe042f3b90c19a",
+        "bytes": 537484
+      },
+      "Link9.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "Link9.stl",
+        "case_exact": true,
+        "sha256": "ec6dfb0053ee6ae95402268f58f308b75a2ec2694d8a8ef60241c7829629dbcb",
+        "bytes": 117484
+      },
+      "base_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "base_link.stl",
+        "case_exact": true,
+        "sha256": "4b1b9c1f7d87484d2f3a2b3ead2c89989bf42aa700e67b288a6575cf9a1e6edc",
+        "bytes": 15664284
+      },
+      "head_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "head_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "5f23bb1a26e7436753dd5cf8b410efb67443d9e68998b6f124d06404eb20d0f8",
+        "bytes": 603684
+      },
+      "head_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "head_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "5f23bb1a26e7436753dd5cf8b410efb67443d9e68998b6f124d06404eb20d0f8",
+        "bytes": 603684
+      },
+      "head_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "head_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "f0a3259568522b89f7e7145a9d8a566c958c69a07023e0d10845a0118c450385",
+        "bytes": 123784
+      },
+      "head_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "head_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "f0a3259568522b89f7e7145a9d8a566c958c69a07023e0d10845a0118c450385",
+        "bytes": 123784
+      },
+      "imu_in_pelvis_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "imu_in_pelvis_Link.stl",
+        "case_exact": false,
+        "sha256": "abc3fda9643325e551b85007d0f3072c4299b2d3874504b6594ae601ad52ff80",
+        "bytes": 555484
+      },
+      "imu_in_pelvis_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "imu_in_pelvis_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "abc3fda9643325e551b85007d0f3072c4299b2d3874504b6594ae601ad52ff80",
+        "bytes": 555484
+      },
+      "imu_in_torso_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "imu_in_torso_Link.stl",
+        "case_exact": false,
+        "sha256": "f895a472b6a33e0742d66c585ab6360baef96504b2522ce4b9598fbf4b8f2a02",
+        "bytes": 555484
+      },
+      "imu_in_torso_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "imu_in_torso_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "f895a472b6a33e0742d66c585ab6360baef96504b2522ce4b9598fbf4b8f2a02",
+        "bytes": 555484
+      },
+      "left_ankle_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_ankle_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "c9050125b942b942448e085126bae2c55ff0ae7bf45b40a9b5156c6f876f4c67",
+        "bytes": 219384
+      },
+      "left_ankle_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_ankle_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "c9050125b942b942448e085126bae2c55ff0ae7bf45b40a9b5156c6f876f4c67",
+        "bytes": 219384
+      },
+      "left_ankle_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_ankle_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "80e37cb823d703e36b584325e842e501110aa2c6b2d83eaad865d6a0b6a95770",
+        "bytes": 344884
+      },
+      "left_ankle_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_ankle_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "80e37cb823d703e36b584325e842e501110aa2c6b2d83eaad865d6a0b6a95770",
+        "bytes": 344884
+      },
+      "left_elbow_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_elbow_Link.stl",
+        "case_exact": false,
+        "sha256": "61b9ca8581fbbc97d4f654c4d09548be92c46022d72fdfb2075b83619845a012",
+        "bytes": 219684
+      },
+      "left_elbow_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_elbow_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "61b9ca8581fbbc97d4f654c4d09548be92c46022d72fdfb2075b83619845a012",
+        "bytes": 219684
+      },
+      "left_hip_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_hip_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "fd4118aadb5349e673158bb567411623594a4a0aad5e45f6fe7a282ad84657f3",
+        "bytes": 180084
+      },
+      "left_hip_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_hip_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "fd4118aadb5349e673158bb567411623594a4a0aad5e45f6fe7a282ad84657f3",
+        "bytes": 180084
+      },
+      "left_hip_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_hip_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "a1fb76dae3648f88f9faccc481ca9fafbee92fef68ca1afae0863c93fdad5711",
+        "bytes": 129684
+      },
+      "left_hip_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_hip_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "a1fb76dae3648f88f9faccc481ca9fafbee92fef68ca1afae0863c93fdad5711",
+        "bytes": 129684
+      },
+      "left_hip_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_hip_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "614fce16f3b1b4cb6937d0dc3370cbe08aa9427b1fef81fcca3a0305236b3e79",
+        "bytes": 281784
+      },
+      "left_hip_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_hip_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "614fce16f3b1b4cb6937d0dc3370cbe08aa9427b1fef81fcca3a0305236b3e79",
+        "bytes": 281784
+      },
+      "left_knee_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_knee_Link.stl",
+        "case_exact": false,
+        "sha256": "5a44c5cff46a8eee52b67eccbe50fdfdb153d5fdcb753b20f29ec80b70f52702",
+        "bytes": 166784
+      },
+      "left_knee_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_knee_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "5a44c5cff46a8eee52b67eccbe50fdfdb153d5fdcb753b20f29ec80b70f52702",
+        "bytes": 166784
+      },
+      "left_knee_shell_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_knee_shell_Link.stl",
+        "case_exact": false,
+        "sha256": "63f10d761fa8752bcf4054afd7f250b05b6345d4d2030570fcb8cff6750566a3",
+        "bytes": 28384
+      },
+      "left_knee_shell_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_knee_shell_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "63f10d761fa8752bcf4054afd7f250b05b6345d4d2030570fcb8cff6750566a3",
+        "bytes": 28384
+      },
+      "left_shoulder_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_shoulder_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "cfbd0aff0a2a2606ff5d76f295d21deb4c59ed2bb7773c2a20c73cd50382e7a5",
+        "bytes": 131684
+      },
+      "left_shoulder_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_shoulder_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "cfbd0aff0a2a2606ff5d76f295d21deb4c59ed2bb7773c2a20c73cd50382e7a5",
+        "bytes": 131684
+      },
+      "left_shoulder_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_shoulder_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "8f4d5afb87e7e99bf514e2f29e9b5505361d2d1796eccad85fd4b03f642c18d4",
+        "bytes": 216284
+      },
+      "left_shoulder_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_shoulder_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "8f4d5afb87e7e99bf514e2f29e9b5505361d2d1796eccad85fd4b03f642c18d4",
+        "bytes": 216284
+      },
+      "left_shoulder_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_shoulder_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "d3747ec7eb12b516cc32253e1a464546eabf6907aefa701375c86ad1e3baedb8",
+        "bytes": 149484
+      },
+      "left_shoulder_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_shoulder_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "d3747ec7eb12b516cc32253e1a464546eabf6907aefa701375c86ad1e3baedb8",
+        "bytes": 149484
+      },
+      "left_wrist_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_wrist_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "eb0ecf59d6636f29245df24c561c16c4226712b05538adbab7b247186a07c594",
+        "bytes": 114384
+      },
+      "left_wrist_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_wrist_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "eb0ecf59d6636f29245df24c561c16c4226712b05538adbab7b247186a07c594",
+        "bytes": 114384
+      },
+      "left_wrist_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_wrist_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "408a268c8db30154f4ccbe739cc8e1baba1cf1f2d1cfae2d22d4a9e25e193ecb",
+        "bytes": 131184
+      },
+      "left_wrist_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_wrist_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "408a268c8db30154f4ccbe739cc8e1baba1cf1f2d1cfae2d22d4a9e25e193ecb",
+        "bytes": 131184
+      },
+      "left_wrist_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_wrist_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "e6b69e3eb9bb7f14c55568cabf6be8d4ca883afed143774aed626089b8e6919d",
+        "bytes": 140384
+      },
+      "left_wrist_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "left_wrist_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "e6b69e3eb9bb7f14c55568cabf6be8d4ca883afed143774aed626089b8e6919d",
+        "bytes": 140384
+      },
+      "pelvis_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pelvis_link.stl",
+        "case_exact": true,
+        "sha256": "162899b2ba775cbdff24a7ded7908b057aae559326715eae7d6aee220578907f",
+        "bytes": 222584
+      },
+      "pelvis_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pelvis_link_collision.stl",
+        "case_exact": true,
+        "sha256": "162899b2ba775cbdff24a7ded7908b057aae559326715eae7d6aee220578907f",
+        "bytes": 222584
+      },
+      "pingbang_ball_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pingbang_ball_Link.stl",
+        "case_exact": false,
+        "sha256": "21c39c9f6112304776f4eadf7439193163a814b59391790df027ff5aa8249c93",
+        "bytes": 117684
+      },
+      "pingbang_ball_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pingbang_ball_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "21c39c9f6112304776f4eadf7439193163a814b59391790df027ff5aa8249c93",
+        "bytes": 117684
+      },
+      "pingpang_black_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pingpang_black_Link.stl",
+        "case_exact": false,
+        "sha256": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
+        "bytes": 8984
+      },
+      "pingpang_black_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pingpang_black_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b",
+        "bytes": 8984
+      },
+      "pingpang_red_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pingpang_red_Link.stl",
+        "case_exact": false,
+        "sha256": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842",
+        "bytes": 8984
+      },
+      "pingpang_red_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "pingpang_red_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842",
+        "bytes": 8984
+      },
+      "right_ankle_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_ankle_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "52b5a191e5d753687dc1b4f455d5b8ab89d10a36a4d03a5dfc14f17af5060421",
+        "bytes": 219384
+      },
+      "right_ankle_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_ankle_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "52b5a191e5d753687dc1b4f455d5b8ab89d10a36a4d03a5dfc14f17af5060421",
+        "bytes": 219384
+      },
+      "right_ankle_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_ankle_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "e89922f499d521eb761437c794f69fbe288b7cdc81bbad25456b26d178f23138",
+        "bytes": 345284
+      },
+      "right_ankle_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_ankle_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "e89922f499d521eb761437c794f69fbe288b7cdc81bbad25456b26d178f23138",
+        "bytes": 345284
+      },
+      "right_elbow_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_elbow_Link.stl",
+        "case_exact": false,
+        "sha256": "9f93d63f2e52338a130394d10a4283eaf05b9ba887a7e016499432fff05e1b51",
+        "bytes": 219284
+      },
+      "right_elbow_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_elbow_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "9f93d63f2e52338a130394d10a4283eaf05b9ba887a7e016499432fff05e1b51",
+        "bytes": 219284
+      },
+      "right_hand_pingpang_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hand_pingpang_Link.stl",
+        "case_exact": false,
+        "sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd",
+        "bytes": 512984
+      },
+      "right_hand_pingpang_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hand_pingpang_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd",
+        "bytes": 512984
+      },
+      "right_hip_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hip_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "47dfd37c80c8a898989f3ed699198518c9969b898d6344b59e34909e40676b78",
+        "bytes": 180284
+      },
+      "right_hip_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hip_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "47dfd37c80c8a898989f3ed699198518c9969b898d6344b59e34909e40676b78",
+        "bytes": 180284
+      },
+      "right_hip_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hip_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "5b97fae6df26f0312cf004693447ec59e3a2adbd64729dc5d776fd11b28d8d9b",
+        "bytes": 130584
+      },
+      "right_hip_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hip_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "5b97fae6df26f0312cf004693447ec59e3a2adbd64729dc5d776fd11b28d8d9b",
+        "bytes": 130584
+      },
+      "right_hip_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hip_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "95c79979b7a59ae28c202595e78c54fd2dddf4ae4bd4e2b1a4698edeb31505ae",
+        "bytes": 279184
+      },
+      "right_hip_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_hip_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "95c79979b7a59ae28c202595e78c54fd2dddf4ae4bd4e2b1a4698edeb31505ae",
+        "bytes": 279184
+      },
+      "right_knee_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_knee_Link.stl",
+        "case_exact": false,
+        "sha256": "a38730630346bd7824f601eebb786040662d4d7e56dbb2276c97b3c8a12ee8d3",
+        "bytes": 166184
+      },
+      "right_knee_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_knee_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "a38730630346bd7824f601eebb786040662d4d7e56dbb2276c97b3c8a12ee8d3",
+        "bytes": 166184
+      },
+      "right_knee_shell_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_knee_shell_Link.stl",
+        "case_exact": false,
+        "sha256": "6e50c44846fa9a5d3f4a5ca97d7f209e2fea3e852fcc33685ff4653d3d865444",
+        "bytes": 26484
+      },
+      "right_knee_shell_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_knee_shell_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "6e50c44846fa9a5d3f4a5ca97d7f209e2fea3e852fcc33685ff4653d3d865444",
+        "bytes": 26484
+      },
+      "right_shoulder_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_shoulder_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "00d0d7e5875f4bb95a4f8898aa7bbbd9fa5efe72f3024bf1ccf363363486937b",
+        "bytes": 132084
+      },
+      "right_shoulder_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_shoulder_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "00d0d7e5875f4bb95a4f8898aa7bbbd9fa5efe72f3024bf1ccf363363486937b",
+        "bytes": 132084
+      },
+      "right_shoulder_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_shoulder_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "e6942f99c627322b791f5f718c9be90e28d1f7892585cab69f71e856fa1cbec2",
+        "bytes": 216384
+      },
+      "right_shoulder_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_shoulder_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "e6942f99c627322b791f5f718c9be90e28d1f7892585cab69f71e856fa1cbec2",
+        "bytes": 216384
+      },
+      "right_shoulder_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_shoulder_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "f3d0de35358f1d12220e34796688a4b3298b78100214036928f04aa0ccfa3d34",
+        "bytes": 149184
+      },
+      "right_shoulder_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_shoulder_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "f3d0de35358f1d12220e34796688a4b3298b78100214036928f04aa0ccfa3d34",
+        "bytes": 149184
+      },
+      "right_wrist_pitch_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_wrist_pitch_Link.stl",
+        "case_exact": false,
+        "sha256": "fef914302ca535f9ec32e45089111b55b8cacdc50ffd3d12cbd54d501c234037",
+        "bytes": 102984
+      },
+      "right_wrist_pitch_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_wrist_pitch_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "fef914302ca535f9ec32e45089111b55b8cacdc50ffd3d12cbd54d501c234037",
+        "bytes": 102984
+      },
+      "right_wrist_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_wrist_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "5a510f657a264c7f3a876ba84a9f4e3b65e7fc4a1feec2bee5fab299232e1ed3",
+        "bytes": 132284
+      },
+      "right_wrist_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_wrist_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "5a510f657a264c7f3a876ba84a9f4e3b65e7fc4a1feec2bee5fab299232e1ed3",
+        "bytes": 132284
+      },
+      "right_wrist_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_wrist_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "1b96ef7f1618fd7565c7e0f9beeef2e56efe30d078837f89aae68dbb94c24bf6",
+        "bytes": 140384
+      },
+      "right_wrist_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "right_wrist_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "1b96ef7f1618fd7565c7e0f9beeef2e56efe30d078837f89aae68dbb94c24bf6",
+        "bytes": 140384
+      },
+      "std_head_stereo_camera_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "std_head_stereo_camera_Link.stl",
+        "case_exact": false,
+        "sha256": "f2fa1cd39eb29c7d385890bd1111b53cb26257eb6804bc2141fb180f44a739f4",
+        "bytes": 1332384
+      },
+      "std_head_stereo_camera_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "std_head_stereo_camera_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "f2fa1cd39eb29c7d385890bd1111b53cb26257eb6804bc2141fb180f44a739f4",
+        "bytes": 1332384
+      },
+      "torso_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "torso_Link.stl",
+        "case_exact": false,
+        "sha256": "aac4aec2ae0db71731d8570c4a62ef1beb3217096533fc5d4caa976617266290",
+        "bytes": 898384
+      },
+      "torso_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "torso_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "aac4aec2ae0db71731d8570c4a62ef1beb3217096533fc5d4caa976617266290",
+        "bytes": 898384
+      },
+      "torso_shell_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "torso_shell_Link.stl",
+        "case_exact": false,
+        "sha256": "71088af2d9f92a02165512d7949652c7fc35155d2625ac2fa82d0d5b389535e1",
+        "bytes": 402784
+      },
+      "torso_shell_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "torso_shell_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "71088af2d9f92a02165512d7949652c7fc35155d2625ac2fa82d0d5b389535e1",
+        "bytes": 402784
+      },
+      "waist_roll_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "waist_roll_Link.stl",
+        "case_exact": false,
+        "sha256": "447bc2d680ce58b7d5f8ac4cfedaf22538217ffaed3ce28a1a56eb5667225e0e",
+        "bytes": 1893884
+      },
+      "waist_roll_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "waist_roll_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "447bc2d680ce58b7d5f8ac4cfedaf22538217ffaed3ce28a1a56eb5667225e0e",
+        "bytes": 1893884
+      },
+      "waist_yaw_link.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "waist_yaw_Link.stl",
+        "case_exact": false,
+        "sha256": "b302eca1d9426b8de8ce2e9404389b846183a8c8197da717a6922cb5d86dda94",
+        "bytes": 2902934
+      },
+      "waist_yaw_link_collision.stl": {
+        "source_package": "A3-P1-32dof-0803-BerkeleyPingpang-90deg",
+        "source_basename": "waist_yaw_Link_collision.stl",
+        "case_exact": false,
+        "sha256": "b302eca1d9426b8de8ce2e9404389b846183a8c8197da717a6922cb5d86dda94",
+        "bytes": 2902934
+      }
+    }
+  },
+  "unresolved_gripper_collision_references": {
+    "count": 20,
+    "references": [
+      "Link10_collision.stl",
+      "Link11-1_collision.stl",
+      "Link11_collision.stl",
+      "Link13_collision.stl",
+      "Link14-1_collision.stl",
+      "Link14_collision.stl",
+      "Link15_collision.stl",
+      "Link17_collision.stl",
+      "Link18_collision.stl",
+      "Link1_collision.stl",
+      "Link2_collision.stl",
+      "Link3_collision.stl",
+      "Link4-1_collision.stl",
+      "Link4_collision.stl",
+      "Link6_collision.stl",
+      "Link7-1_collision.stl",
+      "Link7_collision.stl",
+      "Link8_collision.stl",
+      "Link9_collision.stl",
+      "base_link_collision.stl"
+    ],
+    "materialised_in_this_bundle": false,
+    "downstream_policy": "the asset producer materialises each as a byte copy of its visual counterpart under the recorded vendor confirmation; never fabricated here",
+    "vendor_confirmation": {
+      "schema_version": 1,
+      "statement": "gripper collision geometry is identical to the gripper visual geometry",
+      "received_utc_date": "2026-08-07",
+      "channel": "relayed_by_project_owner_from_vendor",
+      "written_evidence_on_file": false,
+      "scope": "the twenty left OmniPicker3 gripper links only",
+      "consequence": "the twenty absent *_collision.stl references may be materialised downstream as byte copies of the corresponding visual mesh; this replaces the 0803 collision-disabled contract",
+      "still_unconfirmed": "gripper joint coupling model, neutral/home pose, and the eight placeholder finger limits (lower=-2 upper=2 effort=1 velocity=1) remain unanswered"
+    }
+  },
+  "omnipicker3_cross_check": {
+    "mesh_count": 20,
+    "all_byte_identical_to_bundled_meshes": true,
+    "adds_new_geometry": false,
+    "meshes": [
+      {
+        "basename": "Link1.STL",
+        "sha256": "593a38f646d66b3dfe1291a8264752fe79969e9635b5360d945990a84d3f5e61",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link10.STL",
+        "sha256": "ac97efed1308739460b445c79835aa138f1781f582d31b757312da61c9f48593",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link11-1.STL",
+        "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link11.STL",
+        "sha256": "589a1bee8d117ee1f7273177b9dc6c8404e5b69c9691d1ca1aa585064759fa0c",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link13.STL",
+        "sha256": "dcdaebcc4e1877ac1a18baa242bae3786a38b7ee146a69a6dc06192ba6e7b60c",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link14-1.STL",
+        "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link14.STL",
+        "sha256": "57eb5a33e9838302684e6f95dc7935c2bd2ac2b14ca995355aa49e6160de6137",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link15.STL",
+        "sha256": "5ad689b721874d889f83b5c45ee7dd8f82e7801c56914535905c50a967036991",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link17.STL",
+        "sha256": "edf81e946df0f7b4bc3f03b68169901386820601b6552447e01e1c229f0f1519",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link18.STL",
+        "sha256": "545f191f8651534235e03b5619a6d08accd0e7e6378da8db955f5849b8533bc7",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link2.STL",
+        "sha256": "66759d871c83e13f6f5616675fdb415a7a6bb55b4e155150ecfca0435c7eb827",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link3.STL",
+        "sha256": "3ecae58b274bde3fef1236b31a8ad90b1893e436dc1a1ebbdd3f8591c14afe3e",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link4-1.STL",
+        "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link4.STL",
+        "sha256": "6f79446aba4f676bd5db0964d7a975729953225f2925dd3a5ebd0dbe118a3574",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link6.STL",
+        "sha256": "856b1410ef1e77b1e7e8af58aef6b2632a465a439e5d85be1869998c1fe93341",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link7-1.STL",
+        "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link7.STL",
+        "sha256": "bc291d229344a5956143dff4fe0f0ff1026ddc93e0155d99aae1a851c50bb2d6",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link8.STL",
+        "sha256": "ba02a6b72054edb9085bbebd1eece25edac1c4b43f89dcc1effe042f3b90c19a",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "Link9.STL",
+        "sha256": "ec6dfb0053ee6ae95402268f58f308b75a2ec2694d8a8ef60241c7829629dbcb",
+        "matches_bundled_mesh": true
+      },
+      {
+        "basename": "base_link.STL",
+        "sha256": "4b1b9c1f7d87484d2f3a2b3ead2c89989bf42aa700e67b288a6575cf9a1e6edc",
+        "matches_bundled_mesh": true
+      }
+    ]
+  },
+  "structure": {
+    "robot_name": "A3P-P1-32dof-0807-OP3+pingpang",
+    "link_element_count": 64,
+    "unique_link_name_count": 63,
+    "duplicate_link_names": [
+      "imu_in_pelvis_link"
+    ],
+    "joint_count": 62,
+    "movable_joint_count": 40,
+    "body_movable_joint_count": 31,
+    "gripper_movable_joint_count": 9,
+    "mimic_joint_count": 0,
+    "transmission_count": 0,
+    "dynamics_element_count": 0,
+    "fixed_joints_with_illegal_axis": [],
+    "nonfinite_rgba_values": [
+      "nan nan nan nan"
+    ],
+    "unique_link_total_mass_kg": 57.60001015416003
+  },
+  "fixed_since_predecessor": {
+    "right_elbow_joint_origin_x": {
+      "predecessor": "0.001 0 -0.1325",
+      "delivered": "0.01 0 -0.1325",
+      "note": "vendor adopted the project's mirror-symmetry diagnosis at source"
+    },
+    "illegal_axis_on_fixed_joints": {
+      "predecessor_count": 5,
+      "delivered_count": 0
+    },
+    "ankle_pitch_lateral_asymmetry": {
+      "predecessor_left_y": "0.00150000000138195",
+      "predecessor_right_y": "-0.001499999998404",
+      "delivered_y": "0",
+      "note": "1.5 mm per foot; a real geometry change, not rounding"
+    }
+  },
+  "still_present_defects": [
+    "duplicate_imu_in_pelvis_link_definition",
+    "nan_rgba_geometryless_visual_on_left_base_footprint",
+    "case_mismatched_mesh_references",
+    "hyphenated_usd_unsafe_gripper_mesh_basenames",
+    "no_gripper_coupling_authority",
+    "no_joint_dynamics_or_actuator_data"
+  ],
+  "bundle": {
+    "path": "vendor_assets/agibot/A3P-P1-32dof-0807-OP3+pingpang",
+    "path_git_ignored": true,
+    "urdf_path": "urdf/A3P-P1-32dof-0807-OP3+pingpang_20260807_083135.urdf",
+    "closure": {
+      "file_count": 140,
+      "total_bytes": 84144596,
+      "sha256": "db90230a544e048a2e35f311ffe86d5d6e7f78f54badf8604c80372718467af6",
+      "files": [
+        {
+          "path": "meshes/Link1.stl",
+          "bytes": 431084,
+          "sha256": "593a38f646d66b3dfe1291a8264752fe79969e9635b5360d945990a84d3f5e61"
+        },
+        {
+          "path": "meshes/Link10.stl",
+          "bytes": 2736784,
+          "sha256": "ac97efed1308739460b445c79835aa138f1781f582d31b757312da61c9f48593"
+        },
+        {
+          "path": "meshes/Link11-1.stl",
+          "bytes": 78384,
+          "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93"
+        },
+        {
+          "path": "meshes/Link11.stl",
+          "bytes": 117484,
+          "sha256": "589a1bee8d117ee1f7273177b9dc6c8404e5b69c9691d1ca1aa585064759fa0c"
+        },
+        {
+          "path": "meshes/Link13.stl",
+          "bytes": 1807184,
+          "sha256": "dcdaebcc4e1877ac1a18baa242bae3786a38b7ee146a69a6dc06192ba6e7b60c"
+        },
+        {
+          "path": "meshes/Link14-1.stl",
+          "bytes": 8084,
+          "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057"
+        },
+        {
+          "path": "meshes/Link14.stl",
+          "bytes": 24784,
+          "sha256": "57eb5a33e9838302684e6f95dc7935c2bd2ac2b14ca995355aa49e6160de6137"
+        },
+        {
+          "path": "meshes/Link15.stl",
+          "bytes": 537484,
+          "sha256": "5ad689b721874d889f83b5c45ee7dd8f82e7801c56914535905c50a967036991"
+        },
+        {
+          "path": "meshes/Link17.stl",
+          "bytes": 8084,
+          "sha256": "edf81e946df0f7b4bc3f03b68169901386820601b6552447e01e1c229f0f1519"
+        },
+        {
+          "path": "meshes/Link18.stl",
+          "bytes": 8084,
+          "sha256": "545f191f8651534235e03b5619a6d08accd0e7e6378da8db955f5849b8533bc7"
+        },
+        {
+          "path": "meshes/Link2.stl",
+          "bytes": 117484,
+          "sha256": "66759d871c83e13f6f5616675fdb415a7a6bb55b4e155150ecfca0435c7eb827"
+        },
+        {
+          "path": "meshes/Link3.stl",
+          "bytes": 2736784,
+          "sha256": "3ecae58b274bde3fef1236b31a8ad90b1893e436dc1a1ebbdd3f8591c14afe3e"
+        },
+        {
+          "path": "meshes/Link4-1.stl",
+          "bytes": 78384,
+          "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701"
+        },
+        {
+          "path": "meshes/Link4.stl",
+          "bytes": 117484,
+          "sha256": "6f79446aba4f676bd5db0964d7a975729953225f2925dd3a5ebd0dbe118a3574"
+        },
+        {
+          "path": "meshes/Link6.stl",
+          "bytes": 1807184,
+          "sha256": "856b1410ef1e77b1e7e8af58aef6b2632a465a439e5d85be1869998c1fe93341"
+        },
+        {
+          "path": "meshes/Link7-1.stl",
+          "bytes": 8084,
+          "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3"
+        },
+        {
+          "path": "meshes/Link7.stl",
+          "bytes": 24784,
+          "sha256": "bc291d229344a5956143dff4fe0f0ff1026ddc93e0155d99aae1a851c50bb2d6"
+        },
+        {
+          "path": "meshes/Link8.stl",
+          "bytes": 537484,
+          "sha256": "ba02a6b72054edb9085bbebd1eece25edac1c4b43f89dcc1effe042f3b90c19a"
+        },
+        {
+          "path": "meshes/Link9.stl",
+          "bytes": 117484,
+          "sha256": "ec6dfb0053ee6ae95402268f58f308b75a2ec2694d8a8ef60241c7829629dbcb"
+        },
+        {
+          "path": "meshes/base_link.stl",
+          "bytes": 15664284,
+          "sha256": "4b1b9c1f7d87484d2f3a2b3ead2c89989bf42aa700e67b288a6575cf9a1e6edc"
+        },
+        {
+          "path": "meshes/head_pitch_link.stl",
+          "bytes": 603684,
+          "sha256": "5f23bb1a26e7436753dd5cf8b410efb67443d9e68998b6f124d06404eb20d0f8"
+        },
+        {
+          "path": "meshes/head_pitch_link_collision.stl",
+          "bytes": 603684,
+          "sha256": "5f23bb1a26e7436753dd5cf8b410efb67443d9e68998b6f124d06404eb20d0f8"
+        },
+        {
+          "path": "meshes/head_yaw_link.stl",
+          "bytes": 123784,
+          "sha256": "f0a3259568522b89f7e7145a9d8a566c958c69a07023e0d10845a0118c450385"
+        },
+        {
+          "path": "meshes/head_yaw_link_collision.stl",
+          "bytes": 123784,
+          "sha256": "f0a3259568522b89f7e7145a9d8a566c958c69a07023e0d10845a0118c450385"
+        },
+        {
+          "path": "meshes/imu_in_pelvis_link.stl",
+          "bytes": 555484,
+          "sha256": "abc3fda9643325e551b85007d0f3072c4299b2d3874504b6594ae601ad52ff80"
+        },
+        {
+          "path": "meshes/imu_in_pelvis_link_collision.stl",
+          "bytes": 555484,
+          "sha256": "abc3fda9643325e551b85007d0f3072c4299b2d3874504b6594ae601ad52ff80"
+        },
+        {
+          "path": "meshes/imu_in_torso_link.stl",
+          "bytes": 555484,
+          "sha256": "f895a472b6a33e0742d66c585ab6360baef96504b2522ce4b9598fbf4b8f2a02"
+        },
+        {
+          "path": "meshes/imu_in_torso_link_collision.stl",
+          "bytes": 555484,
+          "sha256": "f895a472b6a33e0742d66c585ab6360baef96504b2522ce4b9598fbf4b8f2a02"
+        },
+        {
+          "path": "meshes/left_ankle_pitch_link.stl",
+          "bytes": 219384,
+          "sha256": "c9050125b942b942448e085126bae2c55ff0ae7bf45b40a9b5156c6f876f4c67"
+        },
+        {
+          "path": "meshes/left_ankle_pitch_link_collision.stl",
+          "bytes": 219384,
+          "sha256": "c9050125b942b942448e085126bae2c55ff0ae7bf45b40a9b5156c6f876f4c67"
+        },
+        {
+          "path": "meshes/left_ankle_roll_link.stl",
+          "bytes": 344884,
+          "sha256": "80e37cb823d703e36b584325e842e501110aa2c6b2d83eaad865d6a0b6a95770"
+        },
+        {
+          "path": "meshes/left_ankle_roll_link_collision.stl",
+          "bytes": 344884,
+          "sha256": "80e37cb823d703e36b584325e842e501110aa2c6b2d83eaad865d6a0b6a95770"
+        },
+        {
+          "path": "meshes/left_elbow_link.stl",
+          "bytes": 219684,
+          "sha256": "61b9ca8581fbbc97d4f654c4d09548be92c46022d72fdfb2075b83619845a012"
+        },
+        {
+          "path": "meshes/left_elbow_link_collision.stl",
+          "bytes": 219684,
+          "sha256": "61b9ca8581fbbc97d4f654c4d09548be92c46022d72fdfb2075b83619845a012"
+        },
+        {
+          "path": "meshes/left_hip_pitch_link.stl",
+          "bytes": 180084,
+          "sha256": "fd4118aadb5349e673158bb567411623594a4a0aad5e45f6fe7a282ad84657f3"
+        },
+        {
+          "path": "meshes/left_hip_pitch_link_collision.stl",
+          "bytes": 180084,
+          "sha256": "fd4118aadb5349e673158bb567411623594a4a0aad5e45f6fe7a282ad84657f3"
+        },
+        {
+          "path": "meshes/left_hip_roll_link.stl",
+          "bytes": 129684,
+          "sha256": "a1fb76dae3648f88f9faccc481ca9fafbee92fef68ca1afae0863c93fdad5711"
+        },
+        {
+          "path": "meshes/left_hip_roll_link_collision.stl",
+          "bytes": 129684,
+          "sha256": "a1fb76dae3648f88f9faccc481ca9fafbee92fef68ca1afae0863c93fdad5711"
+        },
+        {
+          "path": "meshes/left_hip_yaw_link.stl",
+          "bytes": 281784,
+          "sha256": "614fce16f3b1b4cb6937d0dc3370cbe08aa9427b1fef81fcca3a0305236b3e79"
+        },
+        {
+          "path": "meshes/left_hip_yaw_link_collision.stl",
+          "bytes": 281784,
+          "sha256": "614fce16f3b1b4cb6937d0dc3370cbe08aa9427b1fef81fcca3a0305236b3e79"
+        },
+        {
+          "path": "meshes/left_knee_link.stl",
+          "bytes": 166784,
+          "sha256": "5a44c5cff46a8eee52b67eccbe50fdfdb153d5fdcb753b20f29ec80b70f52702"
+        },
+        {
+          "path": "meshes/left_knee_link_collision.stl",
+          "bytes": 166784,
+          "sha256": "5a44c5cff46a8eee52b67eccbe50fdfdb153d5fdcb753b20f29ec80b70f52702"
+        },
+        {
+          "path": "meshes/left_knee_shell_link.stl",
+          "bytes": 28384,
+          "sha256": "63f10d761fa8752bcf4054afd7f250b05b6345d4d2030570fcb8cff6750566a3"
+        },
+        {
+          "path": "meshes/left_knee_shell_link_collision.stl",
+          "bytes": 28384,
+          "sha256": "63f10d761fa8752bcf4054afd7f250b05b6345d4d2030570fcb8cff6750566a3"
+        },
+        {
+          "path": "meshes/left_shoulder_pitch_link.stl",
+          "bytes": 131684,
+          "sha256": "cfbd0aff0a2a2606ff5d76f295d21deb4c59ed2bb7773c2a20c73cd50382e7a5"
+        },
+        {
+          "path": "meshes/left_shoulder_pitch_link_collision.stl",
+          "bytes": 131684,
+          "sha256": "cfbd0aff0a2a2606ff5d76f295d21deb4c59ed2bb7773c2a20c73cd50382e7a5"
+        },
+        {
+          "path": "meshes/left_shoulder_roll_link.stl",
+          "bytes": 216284,
+          "sha256": "8f4d5afb87e7e99bf514e2f29e9b5505361d2d1796eccad85fd4b03f642c18d4"
+        },
+        {
+          "path": "meshes/left_shoulder_roll_link_collision.stl",
+          "bytes": 216284,
+          "sha256": "8f4d5afb87e7e99bf514e2f29e9b5505361d2d1796eccad85fd4b03f642c18d4"
+        },
+        {
+          "path": "meshes/left_shoulder_yaw_link.stl",
+          "bytes": 149484,
+          "sha256": "d3747ec7eb12b516cc32253e1a464546eabf6907aefa701375c86ad1e3baedb8"
+        },
+        {
+          "path": "meshes/left_shoulder_yaw_link_collision.stl",
+          "bytes": 149484,
+          "sha256": "d3747ec7eb12b516cc32253e1a464546eabf6907aefa701375c86ad1e3baedb8"
+        },
+        {
+          "path": "meshes/left_wrist_pitch_link.stl",
+          "bytes": 114384,
+          "sha256": "eb0ecf59d6636f29245df24c561c16c4226712b05538adbab7b247186a07c594"
+        },
+        {
+          "path": "meshes/left_wrist_pitch_link_collision.stl",
+          "bytes": 114384,
+          "sha256": "eb0ecf59d6636f29245df24c561c16c4226712b05538adbab7b247186a07c594"
+        },
+        {
+          "path": "meshes/left_wrist_roll_link.stl",
+          "bytes": 131184,
+          "sha256": "408a268c8db30154f4ccbe739cc8e1baba1cf1f2d1cfae2d22d4a9e25e193ecb"
+        },
+        {
+          "path": "meshes/left_wrist_roll_link_collision.stl",
+          "bytes": 131184,
+          "sha256": "408a268c8db30154f4ccbe739cc8e1baba1cf1f2d1cfae2d22d4a9e25e193ecb"
+        },
+        {
+          "path": "meshes/left_wrist_yaw_link.stl",
+          "bytes": 140384,
+          "sha256": "e6b69e3eb9bb7f14c55568cabf6be8d4ca883afed143774aed626089b8e6919d"
+        },
+        {
+          "path": "meshes/left_wrist_yaw_link_collision.stl",
+          "bytes": 140384,
+          "sha256": "e6b69e3eb9bb7f14c55568cabf6be8d4ca883afed143774aed626089b8e6919d"
+        },
+        {
+          "path": "meshes/pelvis_link.stl",
+          "bytes": 222584,
+          "sha256": "162899b2ba775cbdff24a7ded7908b057aae559326715eae7d6aee220578907f"
+        },
+        {
+          "path": "meshes/pelvis_link_collision.stl",
+          "bytes": 222584,
+          "sha256": "162899b2ba775cbdff24a7ded7908b057aae559326715eae7d6aee220578907f"
+        },
+        {
+          "path": "meshes/pingbang_ball_link.stl",
+          "bytes": 117684,
+          "sha256": "21c39c9f6112304776f4eadf7439193163a814b59391790df027ff5aa8249c93"
+        },
+        {
+          "path": "meshes/pingbang_ball_link_collision.stl",
+          "bytes": 117684,
+          "sha256": "21c39c9f6112304776f4eadf7439193163a814b59391790df027ff5aa8249c93"
+        },
+        {
+          "path": "meshes/pingpang_black_link.stl",
+          "bytes": 8984,
+          "sha256": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b"
+        },
+        {
+          "path": "meshes/pingpang_black_link_collision.stl",
+          "bytes": 8984,
+          "sha256": "5f0e772ea9ed81e5b70f5dfb4ded49f9d269c54c893249857209f85168361b1b"
+        },
+        {
+          "path": "meshes/pingpang_red_link.stl",
+          "bytes": 8984,
+          "sha256": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842"
+        },
+        {
+          "path": "meshes/pingpang_red_link_collision.stl",
+          "bytes": 8984,
+          "sha256": "94182ec1c7c64db8c5ec7ce5f9aad44d427f433a6aae5cf23aa655e077633842"
+        },
+        {
+          "path": "meshes/right_ankle_pitch_link.stl",
+          "bytes": 219384,
+          "sha256": "52b5a191e5d753687dc1b4f455d5b8ab89d10a36a4d03a5dfc14f17af5060421"
+        },
+        {
+          "path": "meshes/right_ankle_pitch_link_collision.stl",
+          "bytes": 219384,
+          "sha256": "52b5a191e5d753687dc1b4f455d5b8ab89d10a36a4d03a5dfc14f17af5060421"
+        },
+        {
+          "path": "meshes/right_ankle_roll_link.stl",
+          "bytes": 345284,
+          "sha256": "e89922f499d521eb761437c794f69fbe288b7cdc81bbad25456b26d178f23138"
+        },
+        {
+          "path": "meshes/right_ankle_roll_link_collision.stl",
+          "bytes": 345284,
+          "sha256": "e89922f499d521eb761437c794f69fbe288b7cdc81bbad25456b26d178f23138"
+        },
+        {
+          "path": "meshes/right_elbow_link.stl",
+          "bytes": 219284,
+          "sha256": "9f93d63f2e52338a130394d10a4283eaf05b9ba887a7e016499432fff05e1b51"
+        },
+        {
+          "path": "meshes/right_elbow_link_collision.stl",
+          "bytes": 219284,
+          "sha256": "9f93d63f2e52338a130394d10a4283eaf05b9ba887a7e016499432fff05e1b51"
+        },
+        {
+          "path": "meshes/right_hand_pingpang_link.stl",
+          "bytes": 512984,
+          "sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+        },
+        {
+          "path": "meshes/right_hand_pingpang_link_collision.stl",
+          "bytes": 512984,
+          "sha256": "442ff2ecb82d3da481f1500d8a788192ba7d8bc2969f4d8c9d98266ea116b4dd"
+        },
+        {
+          "path": "meshes/right_hip_pitch_link.stl",
+          "bytes": 180284,
+          "sha256": "47dfd37c80c8a898989f3ed699198518c9969b898d6344b59e34909e40676b78"
+        },
+        {
+          "path": "meshes/right_hip_pitch_link_collision.stl",
+          "bytes": 180284,
+          "sha256": "47dfd37c80c8a898989f3ed699198518c9969b898d6344b59e34909e40676b78"
+        },
+        {
+          "path": "meshes/right_hip_roll_link.stl",
+          "bytes": 130584,
+          "sha256": "5b97fae6df26f0312cf004693447ec59e3a2adbd64729dc5d776fd11b28d8d9b"
+        },
+        {
+          "path": "meshes/right_hip_roll_link_collision.stl",
+          "bytes": 130584,
+          "sha256": "5b97fae6df26f0312cf004693447ec59e3a2adbd64729dc5d776fd11b28d8d9b"
+        },
+        {
+          "path": "meshes/right_hip_yaw_link.stl",
+          "bytes": 279184,
+          "sha256": "95c79979b7a59ae28c202595e78c54fd2dddf4ae4bd4e2b1a4698edeb31505ae"
+        },
+        {
+          "path": "meshes/right_hip_yaw_link_collision.stl",
+          "bytes": 279184,
+          "sha256": "95c79979b7a59ae28c202595e78c54fd2dddf4ae4bd4e2b1a4698edeb31505ae"
+        },
+        {
+          "path": "meshes/right_knee_link.stl",
+          "bytes": 166184,
+          "sha256": "a38730630346bd7824f601eebb786040662d4d7e56dbb2276c97b3c8a12ee8d3"
+        },
+        {
+          "path": "meshes/right_knee_link_collision.stl",
+          "bytes": 166184,
+          "sha256": "a38730630346bd7824f601eebb786040662d4d7e56dbb2276c97b3c8a12ee8d3"
+        },
+        {
+          "path": "meshes/right_knee_shell_link.stl",
+          "bytes": 26484,
+          "sha256": "6e50c44846fa9a5d3f4a5ca97d7f209e2fea3e852fcc33685ff4653d3d865444"
+        },
+        {
+          "path": "meshes/right_knee_shell_link_collision.stl",
+          "bytes": 26484,
+          "sha256": "6e50c44846fa9a5d3f4a5ca97d7f209e2fea3e852fcc33685ff4653d3d865444"
+        },
+        {
+          "path": "meshes/right_shoulder_pitch_link.stl",
+          "bytes": 132084,
+          "sha256": "00d0d7e5875f4bb95a4f8898aa7bbbd9fa5efe72f3024bf1ccf363363486937b"
+        },
+        {
+          "path": "meshes/right_shoulder_pitch_link_collision.stl",
+          "bytes": 132084,
+          "sha256": "00d0d7e5875f4bb95a4f8898aa7bbbd9fa5efe72f3024bf1ccf363363486937b"
+        },
+        {
+          "path": "meshes/right_shoulder_roll_link.stl",
+          "bytes": 216384,
+          "sha256": "e6942f99c627322b791f5f718c9be90e28d1f7892585cab69f71e856fa1cbec2"
+        },
+        {
+          "path": "meshes/right_shoulder_roll_link_collision.stl",
+          "bytes": 216384,
+          "sha256": "e6942f99c627322b791f5f718c9be90e28d1f7892585cab69f71e856fa1cbec2"
+        },
+        {
+          "path": "meshes/right_shoulder_yaw_link.stl",
+          "bytes": 149184,
+          "sha256": "f3d0de35358f1d12220e34796688a4b3298b78100214036928f04aa0ccfa3d34"
+        },
+        {
+          "path": "meshes/right_shoulder_yaw_link_collision.stl",
+          "bytes": 149184,
+          "sha256": "f3d0de35358f1d12220e34796688a4b3298b78100214036928f04aa0ccfa3d34"
+        },
+        {
+          "path": "meshes/right_wrist_pitch_link.stl",
+          "bytes": 102984,
+          "sha256": "fef914302ca535f9ec32e45089111b55b8cacdc50ffd3d12cbd54d501c234037"
+        },
+        {
+          "path": "meshes/right_wrist_pitch_link_collision.stl",
+          "bytes": 102984,
+          "sha256": "fef914302ca535f9ec32e45089111b55b8cacdc50ffd3d12cbd54d501c234037"
+        },
+        {
+          "path": "meshes/right_wrist_roll_link.stl",
+          "bytes": 132284,
+          "sha256": "5a510f657a264c7f3a876ba84a9f4e3b65e7fc4a1feec2bee5fab299232e1ed3"
+        },
+        {
+          "path": "meshes/right_wrist_roll_link_collision.stl",
+          "bytes": 132284,
+          "sha256": "5a510f657a264c7f3a876ba84a9f4e3b65e7fc4a1feec2bee5fab299232e1ed3"
+        },
+        {
+          "path": "meshes/right_wrist_yaw_link.stl",
+          "bytes": 140384,
+          "sha256": "1b96ef7f1618fd7565c7e0f9beeef2e56efe30d078837f89aae68dbb94c24bf6"
+        },
+        {
+          "path": "meshes/right_wrist_yaw_link_collision.stl",
+          "bytes": 140384,
+          "sha256": "1b96ef7f1618fd7565c7e0f9beeef2e56efe30d078837f89aae68dbb94c24bf6"
+        },
+        {
+          "path": "meshes/std_head_stereo_camera_link.stl",
+          "bytes": 1332384,
+          "sha256": "f2fa1cd39eb29c7d385890bd1111b53cb26257eb6804bc2141fb180f44a739f4"
+        },
+        {
+          "path": "meshes/std_head_stereo_camera_link_collision.stl",
+          "bytes": 1332384,
+          "sha256": "f2fa1cd39eb29c7d385890bd1111b53cb26257eb6804bc2141fb180f44a739f4"
+        },
+        {
+          "path": "meshes/torso_link.stl",
+          "bytes": 898384,
+          "sha256": "aac4aec2ae0db71731d8570c4a62ef1beb3217096533fc5d4caa976617266290"
+        },
+        {
+          "path": "meshes/torso_link_collision.stl",
+          "bytes": 898384,
+          "sha256": "aac4aec2ae0db71731d8570c4a62ef1beb3217096533fc5d4caa976617266290"
+        },
+        {
+          "path": "meshes/torso_shell_link.stl",
+          "bytes": 402784,
+          "sha256": "71088af2d9f92a02165512d7949652c7fc35155d2625ac2fa82d0d5b389535e1"
+        },
+        {
+          "path": "meshes/torso_shell_link_collision.stl",
+          "bytes": 402784,
+          "sha256": "71088af2d9f92a02165512d7949652c7fc35155d2625ac2fa82d0d5b389535e1"
+        },
+        {
+          "path": "meshes/waist_roll_link.stl",
+          "bytes": 1893884,
+          "sha256": "447bc2d680ce58b7d5f8ac4cfedaf22538217ffaed3ce28a1a56eb5667225e0e"
+        },
+        {
+          "path": "meshes/waist_roll_link_collision.stl",
+          "bytes": 1893884,
+          "sha256": "447bc2d680ce58b7d5f8ac4cfedaf22538217ffaed3ce28a1a56eb5667225e0e"
+        },
+        {
+          "path": "meshes/waist_yaw_link.stl",
+          "bytes": 2902934,
+          "sha256": "b302eca1d9426b8de8ce2e9404389b846183a8c8197da717a6922cb5d86dda94"
+        },
+        {
+          "path": "meshes/waist_yaw_link_collision.stl",
+          "bytes": 2902934,
+          "sha256": "b302eca1d9426b8de8ce2e9404389b846183a8c8197da717a6922cb5d86dda94"
+        },
+        {
+          "path": "urdf/A3P-P1-32dof-0807-OP3+pingpang_20260807_083135.urdf",
+          "bytes": 63134,
+          "sha256": "2860dd4fc63675ba699925e24528a7ca9d4f895b7a7016d12f2cc64f993eab82"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/CMakeLists.txt",
+          "bytes": 803,
+          "sha256": "1dd6c2f3ae1d81dc0dff45df161f280f570b37735efb32da39721a1ee1919040"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/MANIFEST.sha256",
+          "bytes": 3002,
+          "sha256": "1fdac12c3b35b695a33227acd95b50de2186176a016e011bb4356b8dd625ddd9"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/README.md",
+          "bytes": 3283,
+          "sha256": "eeb6b1e6bb03dcb60e1af4086098f49a9b7c186d26a6058436ec6161ddf82b8f"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/config/display.rviz",
+          "bytes": 1871,
+          "sha256": "f3845d56a7a5119ce838feaac1c268317846a9d97ccf0b40c349a6fbcbf2edd1"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/config/joint_names_OmniPicker3-T1-0324-T1.5.yaml",
+          "bytes": 334,
+          "sha256": "d0bc1bfe3e8789987c655b69bd2910aad5c1bd1ea5373cc3852b450b805c6b32"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/export.log",
+          "bytes": 775,
+          "sha256": "48121e5d1bceb3c8de861c7b311da1a5f24a4279dff70b0fd1de403e016a3727"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/launch/display.launch.py",
+          "bytes": 3198,
+          "sha256": "5fbd73d283139c5f012cf65fa96d2803d129c415dbb39402811d0ca3628f1b2c"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link1.STL",
+          "bytes": 431084,
+          "sha256": "593a38f646d66b3dfe1291a8264752fe79969e9635b5360d945990a84d3f5e61"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link10.STL",
+          "bytes": 2736784,
+          "sha256": "ac97efed1308739460b445c79835aa138f1781f582d31b757312da61c9f48593"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link11-1.STL",
+          "bytes": 78384,
+          "sha256": "d8491333ae49477c63e212fe8035386997fb30e2577403c89a1e9a504e014a93"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link11.STL",
+          "bytes": 117484,
+          "sha256": "589a1bee8d117ee1f7273177b9dc6c8404e5b69c9691d1ca1aa585064759fa0c"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link13.STL",
+          "bytes": 1807184,
+          "sha256": "dcdaebcc4e1877ac1a18baa242bae3786a38b7ee146a69a6dc06192ba6e7b60c"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link14-1.STL",
+          "bytes": 8084,
+          "sha256": "080d88aaedaacedc4bf4c3fddd2548808e581e9566ad44a2a67c2ca04297b057"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link14.STL",
+          "bytes": 24784,
+          "sha256": "57eb5a33e9838302684e6f95dc7935c2bd2ac2b14ca995355aa49e6160de6137"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link15.STL",
+          "bytes": 537484,
+          "sha256": "5ad689b721874d889f83b5c45ee7dd8f82e7801c56914535905c50a967036991"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link17.STL",
+          "bytes": 8084,
+          "sha256": "edf81e946df0f7b4bc3f03b68169901386820601b6552447e01e1c229f0f1519"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link18.STL",
+          "bytes": 8084,
+          "sha256": "545f191f8651534235e03b5619a6d08accd0e7e6378da8db955f5849b8533bc7"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link2.STL",
+          "bytes": 117484,
+          "sha256": "66759d871c83e13f6f5616675fdb415a7a6bb55b4e155150ecfca0435c7eb827"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link3.STL",
+          "bytes": 2736784,
+          "sha256": "3ecae58b274bde3fef1236b31a8ad90b1893e436dc1a1ebbdd3f8591c14afe3e"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link4-1.STL",
+          "bytes": 78384,
+          "sha256": "79cb05cc7a625b9e549dcbbe33fa01d231b4a55ce1d9e3ca228ac6a3b5f10701"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link4.STL",
+          "bytes": 117484,
+          "sha256": "6f79446aba4f676bd5db0964d7a975729953225f2925dd3a5ebd0dbe118a3574"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link6.STL",
+          "bytes": 1807184,
+          "sha256": "856b1410ef1e77b1e7e8af58aef6b2632a465a439e5d85be1869998c1fe93341"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link7-1.STL",
+          "bytes": 8084,
+          "sha256": "f1bf07b88d409ad8b45652778962bd02d78f9670f68ff284fa2d90082e269db3"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link7.STL",
+          "bytes": 24784,
+          "sha256": "bc291d229344a5956143dff4fe0f0ff1026ddc93e0155d99aae1a851c50bb2d6"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link8.STL",
+          "bytes": 537484,
+          "sha256": "ba02a6b72054edb9085bbebd1eece25edac1c4b43f89dcc1effe042f3b90c19a"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/Link9.STL",
+          "bytes": 117484,
+          "sha256": "ec6dfb0053ee6ae95402268f58f308b75a2ec2694d8a8ef60241c7829629dbcb"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/meshes/base_link.STL",
+          "bytes": 15664284,
+          "sha256": "4b1b9c1f7d87484d2f3a2b3ead2c89989bf42aa700e67b288a6575cf9a1e6edc"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/package.xml",
+          "bytes": 1088,
+          "sha256": "92ae933622df19521d996660ef21dc2cf71cea2b209f1ecd0feb2a75d1376008"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/scripts/gripper_slider.py",
+          "bytes": 8569,
+          "sha256": "cf7be8e180c5cae60986f5541c8bd317747f524704606775d712ce8d9c126b42"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/scripts/linkage_joint_state_publisher.py",
+          "bytes": 2146,
+          "sha256": "01c57397c53bfa75d5c26240ac9b9427acdaa7961837ff3e2dd2d07aeb807afd"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/scripts/linkage_kinematics.py",
+          "bytes": 7176,
+          "sha256": "e6c51e2fedeccf7eb5c725aaa36cf65268ba3a7261762bea75f0b420ac097b7f"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/scripts/rviz_interactive_control.py",
+          "bytes": 4169,
+          "sha256": "72e289ef61cc6569979c5ba94750a6fef220680c845119f99aa2d9ddbcc63b5c"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/test/test_model.py",
+          "bytes": 13750,
+          "sha256": "f4ec5dafe26d92ae76c332547956f6caaf73659babb4773d2d092b102b5b794c"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/urdf/OmniPicker3-T1-0324-T1.5.csv",
+          "bytes": 8657,
+          "sha256": "85d85e2d2018a3d3f4642a1398a251241c045ad21f6d533ddc16a07ec054c286"
+        },
+        {
+          "path": "vendor_packages/OmniPicker3-T1-0324-T1.5-close-ROS2/urdf/OmniPicker3-T1-0324-T1.5.urdf",
+          "bytes": 20725,
+          "sha256": "c3f2419117bed58993b56601121dd168b056dbe6339c1258f074f907db36bddb"
+        }
+      ]
+    }
+  }
+}

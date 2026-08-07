@@ -9,6 +9,13 @@ collision meshes are never fabricated; only the twenty absent gripper collision
 elements are disabled and recorded.  The tool restores the established mixed-
 case A3 body-name ABI and never changes the current ``assets/agibot_a3`` runtime
 asset.
+
+``v2`` adds one -- and only one -- declared correction to delivered geometry: the
+0803 delivery breaks left/right mirror symmetry at ``right_elbow_joint`` in a way
+no delivered mesh supports (see ``MIRROR_SYMMETRY_CORRECTION_CONTRACT``).  This is
+a project-owned, evidence-backed, provisional deviation from raw, not a claim that
+the vendor agrees.  ``v1`` and its Pod import receipt stay untouched on disk and in
+``configs/a3_p1_0803_31d_v1.json``; its Pod evidence explicitly does not transfer.
 """
 
 from __future__ import annotations
@@ -35,6 +42,8 @@ RAW_INTAKE_MANIFEST = REPO_ROOT / "configs" / "a3_p1_0803_raw_intake_v1.json"
 DEFAULT_SOURCE_ROOT = (
     REPO_ROOT / "vendor_assets" / "agibot" / "A3-P1-32dof-0803-BerkeleyPingpang-90deg"
 )
+ASSET_VERSION = "v2"
+PREDECESSOR_VERSION = "v1"
 DEFAULT_OUTPUT_ROOT = (
     REPO_ROOT
     / "hope_training"
@@ -43,10 +52,14 @@ DEFAULT_OUTPUT_ROOT = (
     / "whole_body_tracking"
     / "whole_body_tracking"
     / "assets"
-    / "agibot_a3_p1_0803_31d_v1"
+    / f"agibot_a3_p1_0803_31d_{ASSET_VERSION}"
 )
 ACTIVE_ASSET_ROOT = DEFAULT_OUTPUT_ROOT.parent / "agibot_a3"
-DEFAULT_SUCCESSOR_MANIFEST = REPO_ROOT / "configs" / "a3_p1_0803_31d_v1.json"
+DEFAULT_SUCCESSOR_MANIFEST = REPO_ROOT / "configs" / f"a3_p1_0803_31d_{ASSET_VERSION}.json"
+PREDECESSOR_MANIFEST = REPO_ROOT / "configs" / f"a3_p1_0803_31d_{PREDECESSOR_VERSION}.json"
+PREDECESSOR_OUTPUT_ROOT = (
+    DEFAULT_OUTPUT_ROOT.parent / f"agibot_a3_p1_0803_31d_{PREDECESSOR_VERSION}"
+)
 RUNTIME_JOINT_ORDER = REPO_ROOT / "configs" / "a3_runtime_articulation_joint_order.txt"
 RUNTIME_BODY_ORDER = REPO_ROOT / "configs" / "a3_runtime_body_order.txt"
 GMR_JOINT_ORDER = REPO_ROOT / "configs" / "a3_gmr_dof_pos_joint_order.txt"
@@ -104,8 +117,70 @@ USD_SAFE_MESH_ALIASES = {
     "Link11-1.stl": "Link11_1.stl",
 }
 USD_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-POD_VERIFIED_CLOSURE_SHA256 = "73a47e85fd96150c9b27e9601cae892e850b055c3cb9ddf0e77c504ac1188f08"
-POD_VERIFIED_URDF_SHA256 = "2f15df8a97004ee230098a89b0c6009bead9c75401b7a9c4bb738e6ff5622535"
+V1_POD_VERIFIED_CLOSURE_SHA256 = "73a47e85fd96150c9b27e9601cae892e850b055c3cb9ddf0e77c504ac1188f08"
+V1_POD_VERIFIED_URDF_SHA256 = "2f15df8a97004ee230098a89b0c6009bead9c75401b7a9c4bb738e6ff5622535"
+
+# One declared, evidence-backed correction to delivered geometry.  Keyed by joint;
+# every field is asserted against the raw delivery before the rewrite is applied,
+# so a re-delivery that changes any of them fails loudly instead of being absorbed.
+MIRROR_SYMMETRY_ORIGIN_CORRECTIONS = {
+    "right_elbow_joint": {
+        "raw_origin_xyz": "0.001 0 -0.1325",
+        "raw_origin_rpy": "0 0 0",
+        "corrected_origin_xyz": "0.01 0 -0.1325",
+        "corrected_component": "x",
+        "correction_m": 0.009,
+        "mirror_reference_joint": "left_elbow_joint",
+        "mirror_reference_origin_xyz": "0.01 0 -0.1325",
+        "predecessor_origin_xyz": "0.00999999997356363 0 -0.132999999990091",
+        "retained_delivered_component": (
+            "z=-0.1325 is kept from the delivery; it is the vendor's genuine repair of a "
+            "predecessor left/right z asymmetry (old right z=-0.133 vs left z=-0.1325)"
+        ),
+    },
+}
+MIRROR_SYMMETRY_CORRECTION_CONTRACT = {
+    "schema_version": 1,
+    "authority": "project_owned_geometry_correction_20260806",
+    "status": "provisional_pending_vendor_confirmation",
+    "claim_scope": (
+        "project-owned repair of a delivery-internal inconsistency; NOT a vendor-confirmed "
+        "value, NOT a claim that the delivered CAD is wrong at source, and NOT transferable "
+        "to hardware without vendor reply"
+    ),
+    "vendor_question_open": True,
+    "workbook_agrees_with_raw_urdf": True,
+    "workbook_agreement_note": (
+        "the delivered joint workbook also states x=0.001, so the defect is upstream of URDF "
+        "emission and must still be reported even though the project patches it locally"
+    ),
+    "evidence": (
+        "(1) no delivered part geometry moved: all 44 meshes shared with the predecessor are "
+        "byte-identical by SHA-256, including right_shoulder_yaw_Link (the parent whose "
+        "mounting face defines this origin) and right_elbow_Link, so a 9 mm shift of the "
+        "elbow on the upper arm has no counterpart in the shipped CAD; "
+        "(2) the delivery's own inertials say the two elbow parts are one mirrored part: "
+        "left_elbow_link and right_elbow_link have identical mass (delta 0.000 g) and their "
+        "centres of mass agree under the y-mirror to 0.0745 mm in x and 0.19 mm overall, so "
+        "the 9 mm x asymmetry between their mount origins is ~90x the part-level mirror "
+        "residual and ~120x it in the x component alone; "
+        "(3) left_elbow_joint keeps x=0.01 in this same delivery and the predecessor plant "
+        "carries x=0.01 on both arms, so the delivery introduces the asymmetry rather than "
+        "correcting one; "
+        "(4) corroborating, an axis-aligned-bounding-box mating check of right_elbow_Link "
+        "against right_shoulder_yaw_Link reproduces the left arm's x overlap to 0.87 mm at "
+        "x=0.01 but misses it by 8.13 mm at the delivered x=0.001. "
+        "Note the parts are NOT identical at tessellation level (differing vertex counts), so "
+        "(2) rests on the delivered inertial tensors, not on point-to-point mesh comparison"
+    ),
+    "not_corrected": (
+        "right_hip_roll_joint x -0.0011 -> 0 and the five changed link inertials are accepted "
+        "from the delivery unchanged; only the mirror-breaking elbow x is corrected"
+    ),
+}
+EXPECTED_CORRECTED_VS_RAW_RACKET_DELTA_M = 0.009000000000000008
+EXPECTED_CORRECTED_VS_PREDECESSOR_RACKET_DELTA_M = 0.0004999999900224823
+EXPECTED_RAW_VS_PREDECESSOR_RACKET_DELTA_M = 0.009013878161711154
 REQUIRED_RACKET_MESHES = {
     "right_hand_pingpang_Link.stl",
     "pingpang_red_Link.stl",
@@ -236,6 +311,12 @@ def require_isolated_successor_root(output_root: Path, source_root: Optional[Pat
         raise AssetError(
             "refusing to use the current runtime asset or a child path as successor output: "
             f"{output_root}"
+        )
+    resolved_predecessor = PREDECESSOR_OUTPUT_ROOT.resolve(strict=False)
+    if resolved_output == resolved_predecessor or resolved_predecessor in resolved_output.parents:
+        raise AssetError(
+            "refusing to use the Pod-verified predecessor asset or a child path as successor "
+            f"output: {output_root}"
         )
     if source_root is not None:
         resolved_source = source_root.resolve(strict=False)
@@ -420,6 +501,81 @@ def validate_importer_safe_axes_and_meshes(root: ET.Element) -> None:
         raise AssetError(f"USD-unsafe retained mesh basenames: {invalid_mesh_basenames}")
 
 
+def apply_mirror_symmetry_corrections(root: ET.Element) -> list[dict[str, Any]]:
+    """Apply declared mirror-symmetry origin corrections, asserting every premise first.
+
+    Each premise -- the raw value being corrected, the raw rpy, the mirror reference
+    joint's value, which single component moves, and by how much -- is checked against
+    the contract before anything is written.  A re-delivery that silently changes any
+    of them fails here rather than being absorbed into the successor.
+    """
+
+    joints = {joint.get("name"): joint for joint in root.findall("joint")}
+    applied = []
+    for name, spec in sorted(MIRROR_SYMMETRY_ORIGIN_CORRECTIONS.items()):
+        joint = joints.get(name)
+        if joint is None:
+            raise AssetError(f"mirror-symmetry correction target is absent: {name}")
+        origin = joint.find("origin")
+        if origin is None:
+            raise AssetError(f"mirror-symmetry correction target has no origin: {name}")
+        if origin.get("xyz") != spec["raw_origin_xyz"]:
+            raise AssetError(
+                f"mirror-symmetry correction premise drifted for {name}: delivered origin xyz "
+                f"is {origin.get('xyz')!r}, contract expects {spec['raw_origin_xyz']!r}"
+            )
+        if origin.get("rpy") != spec["raw_origin_rpy"]:
+            raise AssetError(
+                f"mirror-symmetry correction premise drifted for {name}: delivered origin rpy "
+                f"is {origin.get('rpy')!r}, contract expects {spec['raw_origin_rpy']!r}"
+            )
+        mirror_name = spec["mirror_reference_joint"]
+        mirror = joints.get(mirror_name)
+        mirror_origin = None if mirror is None else mirror.find("origin")
+        if mirror_origin is None or mirror_origin.get("xyz") != spec["mirror_reference_origin_xyz"]:
+            raise AssetError(
+                f"mirror reference origin drifted for {mirror_name}: "
+                f"{None if mirror_origin is None else mirror_origin.get('xyz')!r}, "
+                f"contract expects {spec['mirror_reference_origin_xyz']!r}"
+            )
+        raw_values = [float(value) for value in spec["raw_origin_xyz"].split()]
+        corrected_values = [float(value) for value in spec["corrected_origin_xyz"].split()]
+        changed = [
+            axis
+            for axis, before, after in zip("xyz", raw_values, corrected_values)
+            if before != after
+        ]
+        if changed != [spec["corrected_component"]]:
+            raise AssetError(
+                f"mirror-symmetry correction for {name} changes {changed}, contract declares "
+                f"only {spec['corrected_component']!r}"
+            )
+        delta = math.dist(raw_values, corrected_values)
+        if not math.isclose(delta, spec["correction_m"], rel_tol=0.0, abs_tol=1e-15):
+            raise AssetError(
+                f"mirror-symmetry correction magnitude for {name} is {delta}, contract "
+                f"declares {spec['correction_m']}"
+            )
+        origin.set("xyz", spec["corrected_origin_xyz"])
+        applied.append(
+            {
+                "joint": name,
+                "delivered_origin_xyz": spec["raw_origin_xyz"],
+                "corrected_origin_xyz": spec["corrected_origin_xyz"],
+                "origin_rpy_unchanged": spec["raw_origin_rpy"],
+                "corrected_component": spec["corrected_component"],
+                "correction_m": delta,
+                "mirror_reference_joint": mirror_name,
+                "mirror_reference_origin_xyz": spec["mirror_reference_origin_xyz"],
+                "predecessor_origin_xyz": spec["predecessor_origin_xyz"],
+                "retained_delivered_component": spec["retained_delivered_component"],
+                "axis_unchanged": True,
+                "limit_unchanged": True,
+            }
+        )
+    return applied
+
+
 def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, dict[str, Any]]:
     root = copy.deepcopy(raw_root)
     gripper_joint_names, gripper_link_names = descendants_for_joint(root, GRIPPER_MOUNT_JOINT)
@@ -503,8 +659,9 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
                 raise AssetError(f"retained joint {joint.get('name')} references removed link {raw_name}")
             endpoint.set("link", link_name_map[raw_name])
 
-    root.set("name", "A3-P1-0803-BerkeleyPingpang-31action-normalized-v1")
+    root.set("name", f"A3-P1-0803-BerkeleyPingpang-31action-normalized-{ASSET_VERSION}")
 
+    mirror_symmetry_corrections = apply_mirror_symmetry_corrections(root)
     malformed_fixed_axis_normalizations = normalize_malformed_fixed_axes(root)
     mesh_reference_rewrites, removed_missing_collisions = normalize_mesh_references(root, source_meshes)
     if len(removed_missing_collisions) != EXPECTED_MISSING_GRIPPER_COLLISION_COUNT:
@@ -539,8 +696,20 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
     }
     for item in malformed_fixed_axis_normalizations:
         raw_semantics["joints"][item["joint"]]["axis"] = None
+    # Fold in the declared corrections so the equality below still proves that nothing
+    # ELSE moved: every other origin, every axis, every limit, and every retained inertial.
+    for item in mirror_symmetry_corrections:
+        expected_origin = raw_semantics["joints"][item["joint"]]["origin"]
+        if expected_origin is None or expected_origin["attrib"].get("xyz") != item["delivered_origin_xyz"]:
+            raise AssetError(
+                f"declared correction does not match the raw semantics snapshot for {item['joint']}"
+            )
+        expected_origin["attrib"]["xyz"] = item["corrected_origin_xyz"]
     if raw_semantics != output_semantics:
-        raise AssetError("normalization changed retained body inertials or joint origin/axis/limit semantics")
+        raise AssetError(
+            "normalization changed retained body inertials or joint origin/axis/limit semantics "
+            "beyond the declared mirror-symmetry corrections"
+        )
     normalized_mass = link_mass_kg(root)
     if not math.isclose(
         normalized_mass, EXPECTED_NORMALIZED_UNIQUE_LINK_MASS_KG, rel_tol=0.0, abs_tol=1e-12
@@ -594,6 +763,8 @@ def normalize(raw_root: ET.Element, source_meshes: Path) -> tuple[ET.Element, di
             "raw_occurrence_fingerprint_sha256": duplicate_sha,
         },
         "link_name_map": link_name_map,
+        "mirror_symmetry_corrections": mirror_symmetry_corrections,
+        "mirror_symmetry_correction_contract": MIRROR_SYMMETRY_CORRECTION_CONTRACT,
         "mesh_reference_policy": "rewrite to delivered case-exact basenames, replace USD-unsafe hyphens with deterministic underscore aliases, copy only referenced bytes, and explicitly disable only the twenty absent left-gripper collision elements",
         "mesh_reference_rewrites": mesh_reference_rewrites,
         "usd_safe_mesh_aliases": usd_safe_mesh_aliases,
@@ -863,9 +1034,28 @@ def racket_fk_lineage_contract(source_root: Path, normalized_root: ET.Element) -
     active_frame = zero_coordinate_link_frame(active_root, "pingpang_red_Link")
     normalized_raw = _frame_delta(normalized_frame, raw_frame)
     normalized_active = _frame_delta(normalized_frame, active_frame)
-    if normalized_raw["position_norm_m"] > 1e-12 or normalized_raw["rotation_matrix_max_abs"] > 1e-12:
-        raise AssetError(f"normalization moved the raw official racket site: {normalized_raw}")
-    expected_predecessor_delta = 0.009013878161711154
+    raw_active = _frame_delta(raw_frame, active_frame)
+    # The successor no longer reproduces the raw racket world site: the declared
+    # mirror-symmetry elbow correction moves it, by exactly the correction, with no
+    # rotation.  Anything else moving it is a bug.
+    if not math.isclose(
+        normalized_raw["position_norm_m"],
+        EXPECTED_CORRECTED_VS_RAW_RACKET_DELTA_M,
+        rel_tol=0.0,
+        abs_tol=1e-15,
+    ) or normalized_raw["rotation_matrix_max_abs"] > 1e-12:
+        raise AssetError(
+            "corrected/raw official racket-site q0 delta is not the declared mirror-symmetry "
+            f"correction: {normalized_raw}"
+        )
+    if not math.isclose(
+        raw_active["position_norm_m"],
+        EXPECTED_RAW_VS_PREDECESSOR_RACKET_DELTA_M,
+        rel_tol=0.0,
+        abs_tol=1e-15,
+    ) or raw_active["rotation_matrix_max_abs"] > 1e-12:
+        raise AssetError(f"raw/current official racket-site q0 delta drifted: {raw_active}")
+    expected_predecessor_delta = EXPECTED_CORRECTED_VS_PREDECESSOR_RACKET_DELTA_M
     if not math.isclose(
         normalized_active["position_norm_m"],
         expected_predecessor_delta,
@@ -883,14 +1073,34 @@ def racket_fk_lineage_contract(source_root: Path, normalized_root: ET.Element) -
     return {
         "right_hand_and_paddle_link_inertials_exact_current": True,
         "right_racket_fixed_joint_semantics_exact_current": True,
-        "normalized_preserves_raw_right_chain_and_site_for_all_common_q": True,
+        "normalized_preserves_raw_right_chain_and_site_for_all_common_q": False,
+        "normalized_right_chain_deviates_from_raw_only_by_declared_corrections": True,
+        "declared_correction_is_a_rigid_translation_at_every_q": True,
+        "declared_correction_rationale": (
+            "the correction is a constant translation in an upstream parent frame and the "
+            "upstream rotation is orthonormal, so the racket-site displacement norm is the "
+            "same at every joint configuration, and orientation is untouched"
+        ),
         "normalized_vs_raw_q0": normalized_raw,
+        "expected_normalized_vs_raw_q0_position_delta_m": (
+            EXPECTED_CORRECTED_VS_RAW_RACKET_DELTA_M
+        ),
+        "raw_vs_current_q0": raw_active,
+        "expected_raw_vs_current_q0_position_delta_m": (
+            EXPECTED_RAW_VS_PREDECESSOR_RACKET_DELTA_M
+        ),
         "successor_vs_current_q0": normalized_active,
         "successor_world_site_requires_new_motion_fk_revalidation": (
             normalized_active["position_norm_m"] > 1e-12
             or normalized_active["rotation_matrix_max_abs"] > 1e-12
         ),
         "expected_successor_vs_current_q0_position_delta_m": expected_predecessor_delta,
+        "motion_bank_revalidation_note": (
+            "the correction shrinks the successor-vs-current racket-site offset from "
+            "9.013878 mm to 0.500000 mm, but 0.5 mm still exceeds the racket FK parity gate "
+            "(1e-4 m) and the retarget's own full-phase p95 blade-centre precision, so the "
+            "motion bank must still be re-audited on the successor before any training claim"
+        ),
         "tracked_current_reference_urdf_path": relative_path(ACTIVE_REFERENCE_URDF),
         "tracked_current_reference_urdf_sha256": sha256_path(ACTIVE_REFERENCE_URDF),
     }
@@ -917,9 +1127,11 @@ def build_manifest(
     if missing_runtime_bodies:
         raise AssetError(f"normalized asset misses runtime body ABI names: {missing_runtime_bodies}")
 
+    # v1's Pod receipt is bound to v1's exact bytes.  v2 changes those bytes by design,
+    # so this evaluates False and the receipt is withheld rather than inherited.
     pod_import_verified = (
-        observed_closure["sha256"] == POD_VERIFIED_CLOSURE_SHA256
-        and sha256_path(output_root / "urdf" / "model.urdf") == POD_VERIFIED_URDF_SHA256
+        observed_closure["sha256"] == V1_POD_VERIFIED_CLOSURE_SHA256
+        and sha256_path(output_root / "urdf" / "model.urdf") == V1_POD_VERIFIED_URDF_SHA256
     )
     pod_import_receipt = None
     if pod_import_verified:
@@ -953,8 +1165,24 @@ def build_manifest(
     return {
         "schema_version": 2,
         "manifest_type": "agibot_a3_p1_0803_31action_normalized_asset_v1",
-        "asset_id": "a3_p1_0803_berkeley_pingpang_31action_normalized_v1",
+        "asset_id": f"a3_p1_0803_berkeley_pingpang_31action_normalized_{ASSET_VERSION}",
         "candidate_role": "future_primary_successor_candidate_not_current_runtime",
+        "predecessor": {
+            "asset_id": (
+                "a3_p1_0803_berkeley_pingpang_31action_normalized_" f"{PREDECESSOR_VERSION}"
+            ),
+            "manifest_path": relative_path(PREDECESSOR_MANIFEST),
+            "manifest_sha256": sha256_path(PREDECESSOR_MANIFEST),
+            "asset_path": relative_path(PREDECESSOR_OUTPUT_ROOT),
+            "relationship": "same raw delivery, plus the declared mirror-symmetry corrections",
+            "pod_import_evidence_transfers": False,
+            "pod_import_evidence_note": (
+                "the predecessor Pod IsaacLab import receipt is bound to closure "
+                f"{V1_POD_VERIFIED_CLOSURE_SHA256} and URDF {V1_POD_VERIFIED_URDF_SHA256}; "
+                "this asset deliberately differs in bytes, so that receipt proves nothing "
+                "about it and a fresh Pod import is required"
+            ),
+        },
         "status": (
             "pod_import_verified_short_step_diagnostic_standing_pending"
             if pod_import_verified
@@ -992,6 +1220,7 @@ def build_manifest(
             "runtime_body_names_all_present": True,
         },
         "project_gripper_lock_contract": PROJECT_GRIPPER_LOCK_CONTRACT,
+        "mirror_symmetry_correction_contract": MIRROR_SYMMETRY_CORRECTION_CONTRACT,
         "right_racket_contract": {
             **racket_contract(normalized_root, output_root / "meshes"),
             "fk_lineage": racket_fk_lineage_contract(source_root, normalized_root),
@@ -1003,6 +1232,9 @@ def build_manifest(
             "materialization_authorized": True,
             "project_q0_gripper_lock_authorized": True,
             "missing_gripper_collision_elements_explicitly_disabled": True,
+            "reproduces_delivered_joint_origins_exactly": False,
+            "mirror_symmetry_correction_applied": True,
+            "mirror_symmetry_correction_vendor_confirmed": False,
             "pod_isaac_import_verified": pod_import_verified,
             "racket_local_contract_verified": True,
             "standing_pose_verified": False,

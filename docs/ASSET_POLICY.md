@@ -133,6 +133,21 @@ exact；但新 `right_elbow_joint` origin 令共同 `q=0` 的 world paddle centr
 `9.013878 mm`。所以“local right racket unchanged”只授权 candidate construction，不授权复用旧
 动作的 world-FK/retarget receipt；切换前必须在 successor 上重跑 full-phase audit。
 
+2026-08-06 项目裁决：那 `9.013878 mm` 里的 `9.0 mm` 是交付自身的左右不对称缺陷，不是设计
+改动。**人话**：同一份交付里左肘还是 `x=0.01`，只有右肘变成 `0.001`；而右上臂和右肘的 mesh
+与现役逐字节相同（44/44 SHA-256 一致），零件根本没改。因此
+[`configs/a3_p1_0803_31d_v2.json`](../configs/a3_p1_0803_31d_v2.json) 在 v1 基础上只加一条
+**声明式项目覆盖**：`right_elbow_joint` 的 `x` 恢复为 `0.01`，保留交付修好的 `z=-0.1325`
+（那一条是真修复：旧右 `-0.133` vs 旧左 `-0.1325`）。其余全部沿用交付，包括
+`right_hip_roll_joint` 的 `1.1 mm` 对称化和五个 link 的质量/质心/惯量改动。
+
+该覆盖是 **provisional**：交付自带的 joint workbook 也写 `0.001`，说明缺陷在上游 CAD，必须
+向厂商上报，manifest 里 `mirror_symmetry_correction_vendor_confirmed=false` 且
+`reproduces_delivered_joint_origins_exactly=false` 自陈这一点。覆盖后 successor 相对现役的
+paddle centre 偏移从 `9.013878 mm` 降到 `0.500000 mm` —— 仍超 `1e-4 m` 的 racket FK 门，
+**动作库照样要重跑 audit**，只是从"确定作废"变成"要量一下"。v1 目录与其 Pod receipt 冻结不
+动，producer 会拒绝写入。
+
 Generated Isaac training asset:
 
 - `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` is generated from the tracked ping-pong URDF package by `scripts/prepare_a3_isaac_asset.py`. It is ignored to avoid committing duplicate copied meshes.
@@ -216,3 +231,38 @@ sha256),丢失即无法复现任何在跑 run。题库(bank npz)仍不入库—�
 `bh_block_upper_qvel_fix_v1.npz` 及各自 `*.receipt.json` 也属于该例外：它们是 exact A3
 上对 two upper 动作做的 qvel-only 一致性修复，体积小且直接作为 N=1 训练输入；receipt
 固定输入、A3 模型与输出 SHA，不能只保留在 Pod 临时目录。
+
+
+## 2026-08-07 A3P-P1 双引擎模型集
+
+厂商在 0807 重发了 `A3P-P1-32dof-0807-OP3+pingpang`，**采纳了项目对 `right_elbow_joint` 的镜像
+对称判定**（`x` 由 `0.001` 改回 `0.01`），并额外修掉 5 个 fixed 关节上的非法 `<axis>` 与两个
+`ankle_pitch` 的 ±1.5 mm 侧向不对称。**人话**：0803 那条项目补丁（v2）就此退役——它的值被源头
+确认了，两者拍心只差 5 µm。v2 仍然保留在仓库里作为历史记录，不删。
+
+这次交付**不是一个自洽的包**：URDF 不含任何网格，`OmniPicker3-T1-0324-T1.5-close-ROS2` 只含
+20 个夹爪视觉网格，124 个引用里 104 个只能回到 0803 包里取（且 82 个大小写不符）。因此
+[`intake_a3p_p1_0807_bundle.py`](../scripts/intake_a3p_p1_0807_bundle.py) 拼装出一个
+**project-assembled bundle**（不是 vendor closure），逐文件记录来源包与 SHA-256，并把网格落成
+URDF 要求的精确大小写，使其在 Linux 上零失配。OmniPicker3 的 20 个网格与 0803 逐字节相同，
+**不新增任何几何**。
+
+厂商口头确认"夹爪碰撞几何等同视觉几何"。这条**已写进 intake 收据**，并显式标注
+`written_evidence_on_file=false` / `channel=relayed_by_project_owner_from_vendor`。据此，0803 的
+collision-disabled 合同被 `GRIPPER_COLLISION_EQUALS_VISUAL_CONTRACT` 取代：20 个碰撞网格按字节
+复制自对应视觉网格，复制后逐个 SHA 校验相等。**这仍不是书面确认**，收据自陈这一点。
+
+[`prepare_a3p_p1_0807_model_set.py`](../scripts/prepare_a3p_p1_0807_model_set.py) 从同一个 bundle
+同时产出两套：Isaac 资产 `agibot_a3p_p1_0807_v1/`，以及新版本化 MJCF
+`model/a3p_pingpong_0807/a3p_pingpong_0807.xml`。现役 `a3_pingpong.xml` **一个字节都不改**（它被
+4 处 SHA 钉死），派生前先校验其 SHA 未漂。MJCF 只动几何：8 个 `<body pos>`（4 个真改动 + 4 个
+取整）与 7 个 `<inertial>`；armature/damping/frictionloss/31 个 actuator/33 个凸包/球拍面代理/
+site/sensor/keyframe/contact-exclude **全部逐字保留**。左夹爪不新增 body 或 joint——质量并入
+`left_wrist_yaw_Link`（`0.280678 → 0.846940 kg`），20 个网格作为该 body 自身的 geom 挂在 q=0
+位姿上，因此 32-body / 31-actuator ABI 与 keyframe 宽度全部不变。
+
+**未验证边界（收据自陈）**：本机既无 Isaac Lab 也无 `mujoco`/`mujoco_warp`，两套输出都只做了
+结构与 ABI 校验。`isaac_import_verified` / `mujoco_compile_verified` / `mujoco_warp_load_verified` /
+`cross_engine_parity_verified` / `training_authorized` 全为 `false`。GPU lane 入口是
+`A3_PINGPONG_XML` 环境变量（`mjlab_lane/a3_plant_env.py` 的 `default_xml()` 不做 hash 校验），
+所以不需要 identity v3 就能导入；identity v3 只有在要重新进入 CPU 侧四个 fail-closed 证据门时才必须。

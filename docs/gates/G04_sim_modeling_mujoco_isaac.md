@@ -68,9 +68,26 @@ Done:
   20-step finite，但不证明 safe-ready 或训练。现役 `assets/agibot_a3/` pointer 未修改。
 - 0803 raw/normalized 的 official paddle-centre local transform 与四个右拍 mesh bytes 均和现役
   exact；normalized 对 raw successor 的 right-chain FK exact。但 0803 `right_elbow_joint` origin
-  真变化使共同 `q=0` 拍心相对现役移动 `9.013878 mm`（orientation 相同），所以旧 measured-v4
+  变化使共同 `q=0` 拍心相对现役移动 `9.013878 mm`（orientation 相同），所以旧 measured-v4
   retarget/FK receipt 不能代签 successor。
   详见 [0803 31-action 归一化记录](../experiments/2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md)。
+- **2026-08-06 更正**：上一条里的 `9.013878 mm` 曾被记为 vendor 的"真变化"，这个判定是错的。
+  其中 `9.0 mm` 是交付自身的左右不对称缺陷 —— 同一份交付里 `left_elbow_joint` 仍是 `x=0.01`，
+  只有右肘变成 `0.001`；`right_shoulder_yaw_Link`/`right_elbow_Link` 与现役逐字节相同
+  （44/44 mesh SHA-256 一致），零件没改，所以是数字错不是设计改。真变化只有 `z`：右肘
+  `-0.133 → -0.1325`，把旧的左右 `z` 不对称修好了。
+  [`a3_p1_0803_31d_v2.json`](../../configs/a3_p1_0803_31d_v2.json) 用一条声明式覆盖恢复
+  `x=0.01`、保留 `z=-0.1325`，successor 相对现役的拍心偏移降到 `0.500000 mm`。
+  **仍超 `1e-4 m` 的 racket FK 门，动作库 audit 不能免。** 覆盖 provisional：交付的 joint
+  workbook 也写 `0.001`，缺陷在上游 CAD，须向厂商上报；v1 及其同字节 Pod receipt 冻结不动。
+- **2026-08-07 结案**：厂商在 `A3P-P1-32dof-0807-OP3+pingpang` 里把 `right_elbow_joint` 的 `x`
+  改回 `0.01`，与项目 v2 补丁的拍心只差 `5 µm`（坐标取整）。项目补丁退役，v2 保留为历史记录。
+  0807 同时修掉 5 个非法 `<axis>` 与两个 `ankle_pitch` 的 ±1.5 mm 不对称；仍未修重复 imu link、
+  NaN visual、82 处网格大小写、夹爪耦合模型。0807 拍心相对现役 0409 为 `0.502087 mm`，
+  **仍超 `1e-4 m` 门，动作库 audit 不能免**。双引擎模型集见
+  [`configs/a3p_p1_0807_model_set_v1.json`](../../configs/a3p_p1_0807_model_set_v1.json)：
+  新 MJCF `model/a3p_pingpong_0807/`（现役 `a3_pingpong.xml` 未改），Isaac 资产
+  `agibot_a3p_p1_0807_v1/`。两者均**未在本机编译/导入过**，`mujoco_compile_verified=false`。
 
 - 2026-08-03 选中 `Take_061_unit04_BH` 的 measured-paddle→URDF official-site 重定向是全57帧
   position/point-velocity/signed-face/long-axis 约束，不是 strike-window-only；最大残差为

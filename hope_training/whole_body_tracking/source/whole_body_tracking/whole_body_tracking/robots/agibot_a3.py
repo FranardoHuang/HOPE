@@ -29,12 +29,28 @@ from isaaclab.assets.articulation import ArticulationCfg
 from whole_body_tracking.assets import ASSET_DIR
 
 ##
-# Asset path — the OFFICIAL Agibot A3 ping-pong URDF (copied from agi/URDF/A3T2.5-URDF-std-pingpang/
-# into assets/agibot_a3/, reimplement.md step 12). Isaac Lab spawns the URDF directly (as the G1
-# config does with ``UrdfFileCfg``); for the MuJoCo/mjlab path use the official a3_pingpong.xml MJCF.
+# Asset path — the OFFICIAL Agibot A3 ping-pong URDF. Isaac Lab spawns the URDF directly (as the G1
+# config does with ``UrdfFileCfg``); for the MuJoCo/mjlab path use the matching MJCF.
+#
+# 2026-08-07: the default moved to the A3P-P1 0807 delivery (tracked source package
+# agi/URDF/A3P-P1-32dof-0807-OP3-pingpang/, generated asset assets/agibot_a3p_p1_0807_v1/,
+# receipt configs/a3p_p1_0807_model_set_v1.json). Plain words: this is the vendor's corrected
+# robot — right elbow origin fixed, both ankle offsets symmetrised, torso re-weighed after a
+# material error — with the left OmniPicker3 gripper welded shut at q=0 so the 31-action policy
+# ABI is byte-identical to before.
+#
+# READ THIS BEFORE USING A MOTION FILE: the racket site sits 0.502 mm from where the previous
+# plant put it, which is 5x the racket-FK gate. Every .npz retargeted against the previous plant
+# is therefore stale — its baked body_pos_w and the new plant disagree, and
+# tasks/tracking/mdp/commands.py loads body_pos_w verbatim rather than re-deriving it. Motions
+# must be re-solved on this plant before any training claim; see the 0807 experiment record.
 ##
-AGIBOT_A3_ASSET_ROOT = f"{ASSET_DIR}/agibot_a3"
+AGIBOT_A3_ASSET_ROOT = f"{ASSET_DIR}/agibot_a3p_p1_0807_v1"
 AGIBOT_A3_URDF_PATH = f"{AGIBOT_A3_ASSET_ROOT}/urdf/model.urdf"  # official Agibot A3 ping-pong URDF
+
+# The plant this default replaced, kept resolvable so a bisect or an old-motion replay can point
+# back at it without guessing the path.
+AGIBOT_A3_PREVIOUS_ASSET_ROOT = f"{ASSET_DIR}/agibot_a3"
 
 ##
 # Body / joint name constants (real names from the A3 ping-pong URDF). The rest of the HOPE

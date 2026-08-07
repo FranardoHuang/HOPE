@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "manifest_type": "a3p_p1_0807_pod_verification_v1",
+  "subject": {
+    "model_set_manifest_path": "configs/a3p_p1_0807_model_set_v1.json",
+    "mujoco_root_sha256": "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1",
+    "isaac_urdf_relative_path": "urdf/model.urdf",
+    "note": "this receipt covers exactly these bytes; regenerate the model set and it no longer applies"
+  },
+  "environment": {
+    "pod": "Pod1 44d3379e8680",
+    "observed_utc_date": "2026-08-07",
+    "gpu": "NVIDIA GeForce RTX 5090 (used CUDA_VISIBLE_DEVICES=1; GPU0 was running an unrelated phase114 training job and was not touched)",
+    "mujoco_venv": "/workspace/mjlab_venv (mujoco 3.10.0, mujoco_warp present, warp 1.16.0)",
+    "isaac_venv": "/workspace/hope_isaac_venv",
+    "isaac_lab": "/workspace/IsaacLab",
+    "transfer_integrity": "aggregate SHA-256 over the sorted per-file digests matched host and pod for both the MJCF directory and the Isaac asset"
+  },
+  "mujoco_cpu_compile": {
+    "status": "PASS",
+    "compile_seconds": 0.25,
+    "dimensions": {"nq": 38, "nv": 37, "nu": 31, "nbody": 33, "njnt": 32, "ngeom": 117, "nmesh": 92, "nsensor": 105, "nkey": 1, "nsite": 6},
+    "incumbent_dimensions": {"nq": 38, "nv": 37, "nu": 31, "nbody": 33, "njnt": 32, "ngeom": 79, "nmesh": 74, "nsensor": 105, "nkey": 1, "nsite": 6},
+    "abi_identical_to_incumbent": {
+      "joint_names_and_order": true,
+      "body_names_and_order": true,
+      "actuator_names_and_order": true
+    },
+    "tuning_identical_to_incumbent": {
+      "dof_armature": true,
+      "dof_damping": true,
+      "dof_frictionloss": true,
+      "actuator_ctrlrange": true
+    },
+    "body_mass_deltas_kg": {
+      "pelvis_link": 0.02,
+      "torso_Link": -1.180936,
+      "left_shoulder_roll_Link": 0.010514,
+      "left_elbow_Link": -0.042044,
+      "left_wrist_yaw_Link": 0.566262,
+      "right_shoulder_roll_Link": 0.010831,
+      "right_elbow_Link": -0.041878
+    },
+    "body_mass_delta_count": 7,
+    "total_mass_kg": 57.600021,
+    "total_mass_note": "differs from the URDF unique-link total 57.60001015 by 1.1e-5 kg, inherited from the incumbent MJCF's 6-significant-figure mass rounding on the 25 bodies this derivation did not rewrite",
+    "keyframe_stand_loads": true,
+    "contacts_at_keyframe": 3,
+    "right_racket_site_world_m": [0.108939, -0.255571, 0.701544]
+  },
+  "mujoco_warp_gpu": {
+    "status": "PASS",
+    "steps_executed": 50,
+    "all_state_finite": true,
+    "root_height_after_50_steps_m": 1.065946,
+    "noslip_handling": {
+      "raw_put_model_fails": true,
+      "error": "NotImplementedError: noslip solver not implemented.",
+      "pre_existing_not_introduced_here": true,
+      "explanation": "the incumbent a3_pingpong.xml carries the same <option noslip_iterations=\"3\"> and fails identically; mjlab's MjSpec.attach() drops the child <option> so noslip never reaches warp in the real lane",
+      "repo_reference": "hope_training/whole_body_tracking/mjlab_lane/a3_court_env.py:652-658 registers this exact divergence, quote: 'MuJoCo Warp implements no noslip pass.'",
+      "reproduction_method": "set m.opt.noslip_iterations = 0 before put_model, mirroring what attach() does"
+    },
+    "performance": {
+      "measured_on_a_contended_pod": true,
+      "back_to_back_same_process": {
+        "new_model_ms_per_step": 11.694,
+        "gripper_collision_disabled_ms_per_step": 11.69,
+        "incumbent_ms_per_step": 11.485,
+        "gripper_collision_cost_pct": 0.0,
+        "new_vs_incumbent_pct": 1.8
+      },
+      "caveat": "an earlier separate-run measurement gave 8.665 vs 6.163 ms/step for the same two models; absolute numbers move a lot because GPU0 carries an unrelated training job, so only the back-to-back same-process comparison above is trustworthy",
+      "collision_geom_count": {"new": 57, "incumbent": 38}
+    }
+  },
+  "isaac_urdf_to_usd": {
+    "status": "PASS",
+    "converter": "/workspace/IsaacLab/scripts/tools/convert_urdf.py --merge-joints --headless",
+    "usd_produced": true,
+    "importer_name_sanitisation": {
+      "count": 8,
+      "entities": ["left_link4-1", "left_link7-1", "left_link11-1", "left_link14-1", "left_joint4-1", "left_joint7-1", "left_joint11-1", "left_joint14-1"],
+      "impact": "none on the ABI: all eight are gripper entities behind fixed joints, so --merge-joints removes them before they become articulation bodies or DOFs; the producer already aliases the corresponding mesh FILENAMES, only the link/joint name strings are sanitised by the importer itself"
+    }
+  },
+  "isaac_articulation_abi": {
+    "status": "IN_FLIGHT",
+    "note": "Isaac Sim articulation load and 31-joint/32-body ABI comparison was still running when this receipt was written; do not read the PASS above as covering it"
+  },
+  "not_verified": [
+    "cross-engine Isaac/MuJoCo parity at matched q",
+    "MuJoCo identity v3 (no minting entry point exists in the repo)",
+    "motion-bank revalidation on the new plant",
+    "standing hold, self-collision and table-collision screens",
+    "anything about hardware"
+  ]
+}
