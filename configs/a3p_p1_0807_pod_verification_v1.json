@@ -175,27 +175,27 @@
     },
     "default_joint_pos_untouched_by_this_swap": true,
     "eight_percent_envelope_check": {
-      "rule": "default must lie inside [lower + 8% of range, upper - 8% of range]",
-      "joints_outside": 2,
-      "failures": {
-        "left_shoulder_roll_joint": {
-          "default": 0.12,
-          "lower": -0.0873,
-          "upper": 2.618,
-          "percent_to_lower": 7.66
-        },
-        "right_shoulder_roll_joint": {
-          "default": -0.12,
-          "lower": -2.618,
-          "upper": 0.0873,
-          "percent_to_upper": 7.66
-        }
+      "what_0_08_actually_is": "margin_frac in _qdes_limit_barrier_values (hope_rewards.py:2294), the soft-limit barrier REWARD's guard band -- not a hard gate and not an admission criterion",
+      "basis_correction": "the barrier uses the SOFT limits (soft_joint_pos_limit_factor=0.9, shrunk about the range midpoint), not the URDF hard limits",
+      "stance_is_exempt_by_design": "hope_rewards.py:2301 sets m_j = min(margin_frac, d_default_j - STANCE_EPS) with STANCE_EPS=0.005 (:2277), so a joint whose default stance already sits closer than 8% to a soft limit gets a NARROWER guard band rather than a standing penalty",
+      "d_default_percent_soft_range": {
+        "left_shoulder_roll_joint": 2.96,
+        "right_shoulder_roll_joint": 2.96,
+        "left_knee_joint": 10.1,
+        "right_knee_joint": 10.1
       },
-      "next_closest_passing": {
-        "knee_joints": 14.09
-      },
-      "pre_existing_not_swap_induced": true
+      "joints_below_8_percent": 2,
+      "of_total": 31,
+      "verdict": "not a defect and not bad vendor data: the two shoulder_roll joints simply run a ~2.5% guard band instead of 8%, which the code was written to accommodate",
+      "swap_neutral": "hard limits are bit-identical across 0409->0807 on all 31 joints (max abs difference 0.0) and the defaults were not touched, so this swap neither creates nor fixes it"
     },
-    "grounding_measurements_need_recomputation": "yes: both ankle_pitch lateral offsets went +-1.5 mm to 0, which is on the foot chain, so a sink/knee-angle grounding measured on the previous plant does not transfer"
+    "grounding_measurements_need_recomputation": "yes: both ankle_pitch lateral offsets went +-1.5 mm to 0, which is on the foot chain, so a sink/knee-angle grounding measured on the previous plant does not transfer",
+    "CORRECTION_20260807": "the first version of this block computed the stance margin against the URDF HARD limits and reported two joints at 7.66%, framed as being outside an 8% envelope. Both the basis and the framing were wrong and are replaced below."
+  },
+  "motion_source_availability": {
+    "CORRECTION_20260807": "an earlier claim that none of the v4 bank's source files could be found (reported as 0/73) was wrong -- it searched for *.pkl in the wrong subtrees",
+    "result": "73 of 73 measured_racket_source_sha256 values pinned by assets/motions/chingmu73_measured_v4_20260803 resolve",
+    "location": "/workspace/yikang/chingmu_gmr/units/*.npz on Pod1, dated 2026-07-26",
+    "consequence": "the re-retarget can hold the source bytes fixed and vary only the plant, so any residual difference is attributable to the 0807 geometry alone"
   }
 }
