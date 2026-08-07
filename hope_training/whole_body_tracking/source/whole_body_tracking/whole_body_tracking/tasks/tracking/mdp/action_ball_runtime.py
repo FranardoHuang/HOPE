@@ -6358,7 +6358,23 @@ class ActionBirthBroker:
     def assert_consumed_birth(
         self, birth: ActionBirthReceipt
     ) -> None:
-        """Fail unless Racket has consumed this exact committed birth."""
+        """Fail unless Racket has consumed this exact committed birth.
+
+        人话:这也是"存档里的退役来历"唯一的独立证人。``LazyActionTaskPool``
+        的退役台账(``retired_generations``)只跟存档里自己的退役记录对得上
+        (``load_state_dict`` 里那句 "retired generation ledger differs from
+        compact retired birth records"),那一步是同源自证;真正把它钉在
+        broker transcript 上的,是同一个 ``load_state_dict`` 里逐条对每份
+        retired birth 调用本方法。
+
+        2026-08-07 删掉了旁边一个零调用点的 ``assert_known_generation``
+        ——它只问"这个 env/代次 broker 发过吗",而本方法问"这就是那一代次
+        broker 记下的**那一份**收据吗"。前者会放过"代次是真的、内容被换过"
+        的伪造,后者不会;而 broker 自己的 ``load_state_dict`` 又强制
+        consumed <= last("consumed generation exceeds last generation"),
+        所以本方法通过时前者必然通过。留着它只会诱导后来人接一道更粗的门。
+        变异证据见 ``tests/test_action_ball_retirement_provenance.py``。
+        """
 
         if not isinstance(birth, ActionBirthReceipt):
             raise ActionBallContractError(
@@ -6385,26 +6401,6 @@ class ActionBirthBroker:
         ):
             raise BirthProtocolError(
                 "birth is not the env's exact consumed generation"
-            )
-
-    def assert_known_generation(
-        self, *, env_id: int, reset_generation: int
-    ) -> None:
-        """Fail unless the broker transcript has reached this generation.
-
-        This deliberately accepts an older already-consumed generation: pool
-        retirement can lag behind a subsequent true reset, but a checkpoint
-        must never invent retirement provenance for an env/generation the
-        broker has not issued.
-        """
-
-        env = _plain_int(env_id, name="env_id")
-        generation = _plain_int(
-            reset_generation, name="reset_generation", minimum=1
-        )
-        if self._last_generation.get(env, 0) < generation:
-            raise BirthProtocolError(
-                "generation is absent from the birth broker transcript"
             )
 
     def state_dict(self) -> Dict[str, object]:
@@ -11093,6 +11089,11 @@ class LazyActionTaskPool:
                     ),
                     retired.birth.reset_generation,
                 )
+        # 人话:这一步只证明"存档自己前后一致"—— 台账和退役记录同源,谁伪造
+        # 都能一起改。存档的退役来历真正的证人在下面:每份 retired birth 都要
+        # 过 broker 的 ``assert_consumed_birth``,而 broker 那半份存档又被
+        # ``birth_authority_state_sha256`` 钉住、并在它自己的 load 里让
+        # provider 逐条复核。别把这一句当成来历校验。
         if retired_generations != expected_retired_generations:
             raise ActionBallContractError(
                 "retired generation ledger differs from compact retired "

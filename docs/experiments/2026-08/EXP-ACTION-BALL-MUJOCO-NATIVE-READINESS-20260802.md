@@ -2660,6 +2660,9 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
 下面按「后果 x 静默失败可能性」排序，**只列真影响判读的**。
 
 **(A) `4096x5` 共享 gate 至今不读 `reveal_to_playback_bridge`——而生产方每个 update 都在出它。**
+> **2026-08-07 结案：已接线，见 §5.6.22。** 下面这段保留为接线前的现状记录。
+> 同轮还纠正了一条会让它被误杀的前提：这块记录跟 `bridge_ramp_command_steps` 是两样东西，
+> 「出生改成 frame 0 之后阶跃归零」退役的是那条 ramp，不是这块账（对照表在 §5.6.22 一）。
 `action_ball_4096x5_prelong_gate.py` 的严格 v3 消费方 `_validate_reveal_bridge`（`:685`）
 **全仓零调用点**：整个文件里 `reveal_to_playback_bridge` 只出现在它自己的 docstring（`:698`）。
 真正跑的 `validate_semantic_updates`（`:1216`）逐字段 `row.get(...)`，**不要求键集合精确**，
@@ -2767,6 +2770,7 @@ MuJoCo `motion_table_robot_keepout` `conaffinity=7`），不是纯判据；它�
 > 同轮把零调用点普查重跑了一遍，**代码引用与文档提及分开计数**（上一遍混在一起，
 > 而本文档正好按名字讨论这些函数，反而抬高了计数、盖住了要找的东西），结论仍是五个，没有第六个。
 > `_validate_reveal_bridge`（(A) 那条）**仍然是零调用点**，是本文档目前唯一真开着的那个口。
+> （**2026-08-07 就地更正：这句已过期，该函数当天接线，见 §5.6.22。**）
 
 全仓扫了 `scripts/` 与 `mujoco_native/` 的
 `4736` 个模块级 `def`（token 频次索引法：把全仓 `.py` 的标识符出现次数建索引，
@@ -2873,7 +2877,10 @@ M4 让摘要**内部完全自洽**、`conserves` 依旧写着 `True`，只是整
 > 并且把 `def` 的收集范围从模块级放宽到含嵌套（即类里的方法也算），
 > 扫出第六个：`ActionBirthBroker.assert_known_generation`
 > （`mdp/action_ball_runtime.py:6390`，全仓 `.py` 命中 `1` 次、文档命中 `0` 次）。
-> 判决与证据见 §5.6.18 二.2。
+> 判决与证据见 §5.6.18 二.2 —— **该判决已于 2026-08-07 改判：删除，不是接线。见 §9.2.13。**
+> 那次扫描本身**没有落盘**；方法学现在固定在
+> `scripts/audit_zero_call_site_gates.py`（自带 `--self-test`，证明老做法会漏公开方法）
+> 和 `tests/test_audit_zero_call_site_gates.py`。
 
 **(C-3) 上面那四条变异证据，只在 `/usr/bin/python3` 下有效——别拿正式 venv 复现。**
 `test_launch_action_ball_curriculum.py` 全模块 `59` 条，在 `/workspace/hope_isaac_venv`
@@ -3603,6 +3610,7 @@ missed 说三道全是零调用点——写的时候成立。**本节写作过�
 **把代码引用与文档提及分开计数**——上一遍混在一起，而本文档正好按名字讨论这些函数，
 把它们的计数抬高、恰好盖住了要找的东西），结论仍是同样五个，没有第六个。
 **`_validate_reveal_bridge` 仍是零调用点**，且同轮已把逐步接线方案写进 §5.6.13 (A)。
+（**2026-08-07 就地更正：当天已按该方案接线，见 §5.6.22；本行只作接线前的记录。**）
 **裁决：前两条已闭；第三条是本文档目前唯一真开着的那个口，见 B1。**
 
 **矛盾 5：推撞该先做什么。**
@@ -3819,12 +3827,22 @@ skip 理由全是 `No module named 'hydra'`；同样三个模块在正式 venv �
 
 | 函数 | 位置 | 代码命中 | 文档命中 | 状态 |
 | --- | --- | --- | --- | --- |
-| `_validate_reveal_bridge` | `action_ball_4096x5_prelong_gate.py:685` | 1 | 6 | 已登记，仍开着 |
+| `_validate_reveal_bridge` | `action_ball_4096x5_prelong_gate.py:685` | 1 | 6 | **2026-08-07 已接线并配 7 条变异测试（§5.6.22）** |
 | `_validate_artifact_path_hash` | `canonical_motion_bank_gate.py:3905` | 1 | 1 | 已登记，只登记不判决 |
 | `_reverify_receipt_contact_source_files` | `canonical_neutral_ready.py:3907` | 1 | 1 | 已登记，只登记不判决 |
-| **`assert_known_generation`** | **`mdp/action_ball_runtime.py:6390`** | **1** | **0** | **本轮新发现** |
+| ~~**`assert_known_generation`**~~ | ~~`mdp/action_ball_runtime.py:6390`~~ | 1 | 0 | **2026-08-07 已删除，见 §9.2.13** |
 
-（原五个里的另外两个已于 `8a6554c7` 接线，所以现在剩四个。）
+（原五个里的另外两个已于 `8a6554c7` 接线，所以现在剩四个；本条删除后剩三个。）
+
+> **2026-08-07 就地更正：下面这段"自证循环"的判断被实跑推翻了一半，判决也随之改了。**
+> 下文说"没有任何一处拿 broker 的 transcript 当第二个证人"——**这句是错的**。
+> `LazyActionTaskPool.load_state_dict` 在那句自证的下面十几行，就把**每一份**
+> retired birth 拿去过 broker 的 `assert_consumed_birth`（`action_ball_runtime.py:11125`）。
+> 拿活对象实跑：伪造一条 broker 从没发过的代次的退役记录，正是被这一句拒的
+> （`birth is not the env's exact consumed generation`）。
+> 而且这道死门**比它粗一档**——只问"代次发过吗"，会放过"代次真、内容假"的伪造。
+> **所以判决从"登记不接线"改成"删除"**，并配了 6 个变异体（5 红 1 诚实地没红）。
+> 全部证据见 §9.2.13。下文保留原样，作为"当时是怎么判错的"的记录。
 
 **它是什么。** 它自己的 docstring 写着："a checkpoint must never invent retirement
 provenance for an env/generation the broker has not issued"——
@@ -3950,7 +3968,10 @@ pod1 当时同时还有别的 workflow 在跑套件，`load average` 一度到 `
 ##### 七、这一节没做什么
 
 1. **没有接 `_validate_reveal_bridge`**：按本轮交代该文件不动。方案已审完可照做，见六。
-2. **没有接 `assert_known_generation`**：新发现，属于 exact-resume/broker 车道，见二.2。
+   （**2026-08-07 就地更正：已照该方案接线，见 §5.6.22。**）
+2. ~~**没有接 `assert_known_generation`**：新发现，属于 exact-resume/broker 车道，见二.2。~~
+   **2026-08-07 就地更正：已判决——不是"接线"而是"删除"，理由是它比同一条链上
+   已经在跑的 `assert_consumed_birth` 粗一个档次，接上去是降级。见 §9.2.13。**
 3. **没有往共用 venv 里装 `cryptography`**：会影响别的 workflow 正在跑的东西，见二.1。
 4. **没有替 canonical 车道那两条零调用点的门下判决**：仍是"只登记不判决"，
    需要有人带着 canonical 动作库那条车道的上下文来判。
@@ -4494,6 +4515,93 @@ exec 边界躺着,只是没人读),这一条要先回答"**诊断跑到底该不
   共享常量;它的其他分支照旧只有 import 期的常量自检兜底。
 - 本节只证明了这道门的**前两段**（终局 checkpoint 的身份、发射身份绑定）能被真实产物满足;
   "整道 `scale4096 → long4096` 门能通过"仍然**没有证据**。
+
+#### 5.6.22 `_validate_reveal_bridge` 接线落地；顺带纠正一条会让它被误杀的前提（2026-08-07）
+
+**人话一句：** §5.6.13 (A) 那个"写好了但全仓没人调"的严格消费方，现在真的在跑了；
+接线之前先查了一件可能让整件事作废的事（"出生改成 frame 0，这块记录是不是就该退役"），
+**答案是不该退役，而且那条推论本身建立在一次名字撞车上。**
+
+**一、先查那个可能作废它的前提：`reveal bridge` 与 `bridge ramp` 是两样东西。**
+
+退役理由原话是："`34f8cf25` 加 reveal bridge 是为了摊平揭示时的 `2.243 rad` 阶跃；
+出生若等于 frame 0，阶跃按构造归零，这东西就没有存在理由。" **前半句对，后半句挂错了对象。**
+仓库里叫"bridge"的是两个不相干的东西：
+
+| | 那条 **ramp** | 这块 **`reveal_to_playback_bridge`** 记录 |
+| --- | --- | --- |
+| 在哪 | `scripts/train.py:7269 / :7547` 的 teacher-q_des oracle，收据字段 `bridge_ramp_command_steps`；消费方是 `launch_n1_measured_vendor_v2_diagnostic.py:236/1776` | 生产方 `action_ball_prelong_semantics.py:3283-3311`；消费方就是 `_validate_reveal_bridge` |
+| 干什么 | 把揭示那一 tick 的 `q_des` 阶跃按 `1/(frozen+1)` 摊到约 `35` 步 | 记揭示→回放开始那段窗口的账 |
+| 内容 | 一个位置指令的插值 | `5..25` 共 `21` 个 WAIT 档的 `揭示 = 开始回放 + 开始前终止 + 截断`、七项权威 SHA 跨 `5` 个 update 不许漂、隐藏等待期 task 收入必须恰为 `0`、逐 mimic 项核函数/分母/收入、窗口内边界安全量 |
+| 出生改成 frame 0 之后 | **失去存在理由**（§「九」6 说的就是它） | **一条检查都不失效**：六个块没有一个引用出生姿态或阶跃幅度，改的只是 `pre_swing_wait_s` / `timing_contract_sha256` 这些**取值** |
+
+而且它**反而更承重**：阶跃这个借口消失之后，回放开始前的每一次死亡都是纯平衡/plant 故障，
+而这是唯一按 WAIT 档把它们数出来的账。
+
+**二、顺带把"出生改 frame 0"这条改动的现状查了三层**（因为它是本条的前置）：
+①**机制码**：`materialize_action_ball_a211_frame0_exact_artifact.py` 在，
+但 `docs/operations/tool_catalogue.md:128` 仍标 `SUPERSEDED / COUNTEREXAMPLE`、`launch_authorized=false`；
+②**实验史裁定**：§12.4 的 `0/73` 退役判决已被「十」4 实测重开（接地后两门口径 `70/73`），
+但那一节自己写着"重判要连 artifact 重铸一起走，本轮不代签"，§「九」6 写"本轮不动，只出方案"，
+§「九」8 写"换出生姿态牵连 deploy 动作零点，这一步不能由 subagent 代签"；
+③**现役代码**：`git log` 里只有 `c1b5ca10`（重定向接地收尾），
+`commands.py` / split-ready artifact / lineage **一处未动**。
+**裁定：它是一份待 Franco 签字 + 待重铸 4 份 artifact 的方案，不是即将落地的改动**；
+即便落地，按"一"也不动这块记录。**所以走接线，不走退役。**
+
+**三、接线前的两条硬前置，都查了。**
+- **没有在跑的 `scale4096`**：pod1 无 `train.py` / `launch_action_ball` 进程，
+  GPU 上唯一的 python 是别人的 `usd_check.py`（`1392 MiB`）。
+- **`not_configured` 在生产上产不出来**：`require_bridge_telemetry` 默认 `True`，
+  全仓三处传 `False` 全在 `test_action_ball_prelong_semantics.py`，零个生产调用方
+  （这是 §5.6.13 (A) 那条就地更正的复核，结论不变）。
+
+**四、改了什么。**
+1. `validate_semantic_updates`（`action_ball_4096x5_prelong_gate.py`）逐 update 调
+   `_validate_reveal_bridge`，跨 update 串 `previous_lifetime` / `expected_authority`；
+   汇总写进 `aggregate.reveal_to_playback_bridge`（带七项权威 SHA、WAIT 档表、
+   末轮逐档寿命、逐 update 摘要）——**记录与阻断同一批**，收据自陈这一步跑过了。
+2. 导入期新增一条**活值**对表：gate 的 `BRIDGE_WAIT_COHORTS` / `BRIDGE_MIMIC_TERMS` /
+   `BRIDGE_CAUCHY_MIMIC_TERMS` 必须等于生产方的 `_PRELONG_BRIDGE_WAIT_COHORTS` /
+   `_PRELONG_MIMIC_EXP_TERMS ∪ _PRELONG_MIMIC_CAUCHY_TERMS` / `_PRELONG_MIMIC_CAUCHY_TERMS`。
+   **不钉文件 SHA**——指纹只证明字节没动。`BRIDGE_TIMING_FIELDS` 对不上（生产方那份是实例属性），
+   靠 `_exact_keys` 的精确键集在运行时兜底，这一点写进注释而不是假装已覆盖。
+3. 夹具只留一份 `tests/prelong_bridge_fixture.py`，共享 gate 与 A/C 两个 launcher 的测试共用；
+   字段名/档位/核函数归类从**生产方**取活值，不手抄。
+
+**五、拒绝面变了什么（这是唯一有风险的地方）。** 新增硬拒四类，与 §5.6.13 (A) 方案一致：
+`status != active_fail_closed`；七项权威 SHA / `wait_cohort_ticks` / `policy_dt_s == 0.02`
+的形状与跨 update 相等；每档守恒 + `reveal/start/terminal` 跨 update 单调不减 + 整窗有新揭示；
+`timing_at_reveal.reveal_count` 等于各档 reveal 之和。
+另外 `_exact_keys` 是精确键集，生产方多写或少写一个字段都会拒 —— 所以两边必须同版本，
+这也是本条把上面第 2 点那道活值对表一起加进来的原因。
+**代价**：`action_ball_4096x5_prelong_gate.py` 是两个 211 launcher 的 `PRELONG_GATE_SOURCE`，
+改它会挪动 launch claim 里那个源 SHA（运行时现算，没有存量期望值被打破）；
+`solver_profile_sha256` 不含这个文件，所以对 solver pin 零代价。
+
+**六、验收（`/workspace/hope_isaac_venv/bin/python`，pod1 CPU，`-p no:randomly`）。**
+- 四个直接相关模块（共享 gate + A/C launcher + 生产方）：基线 **`436 passed / 0 skipped`**，
+  接线后 **`447 passed / 0 skipped`**，`+11` **恰好**是新增的 `7` 个测试函数
+  （其中 SHA 那条参数化 `5` 档），无一条旧测试变红。
+- **变异测试真的在测这道门**：把门逐条改粗一档再跑，红的**只**是对应那一条：
+
+| 粗一档改法 | 该红的 | 实测 |
+| --- | --- | --- |
+| 消费方整段变成 no-op（= 接线前的语义） | 全部 | `11 failed` |
+| SHA 只量长度 `64`，不管十六进制/大小写 | 那 `5` 档 | `5 failed, 6 passed` |
+| 只逐档看守恒，不看跨块总和 | 跨块那条 | `1 failed, 10 passed` |
+| 只校验第一个 update 的 authority | 漂移那条 | `1 failed, 10 passed` |
+| 只看单 update 快照，不做跨 update 单调性 | 回退那条 | `1 failed, 10 passed` |
+| `status` 只要求"有值" | `not_configured` 那条 | `1 failed, 10 passed` |
+
+（夹具里的假 SHA 特意带字母：全数字的假 SHA 会让"改一位成大写"变成空操作，
+那样这条变异测试就成了自证。）
+- 收据：pod1 `/workspace/franco/rvbridge_20260807/{base,wt}`（`base` = 本地 HEAD，
+  `wt` = `base` + 本条改动），日志与探针在同目录 `out/` 与 `coarsen_probe.py`。
+  **未跑 Isaac，未占 GPU。**
+
+**七、没做什么。** 没有改任何阈值、没有改生产方、没有替"出生改 frame 0"下判决
+（那条要 Franco 签字，见二）、没有发任何 `scale4096`。
 
 ## 6. 智元 setting 的采用表
 
@@ -7478,6 +7586,131 @@ ActionBall env，自然也没算 solver profile。
   "覆盖符号确实动了、但只加了拒绝"的判据——而那个判据必须自己能被变异测试打红，
   否则就是把门写松。本轮**没做**，只把缺口写在这里。
 - §9.2.10.3 记的 R10 / R11 两个洞照旧没关。
+
+### 9.2.13 第六个零调用点的门判了：`assert_known_generation` 删掉，不是接线（2026-08-07）
+
+**人话一句：** §5.6.18 二.2 把它挂起来时给的理由是"存档的退役来历没人管，是自证循环"。
+**这句话错了一半，而错的那一半正好是判决所依赖的那一半。** 拿活对象实跑之后：
+那个"自证循环"只是**第一步**，紧接着的第二步就把每份退役记录拿去问了 broker——
+也就是二.2 说"没有任何一处"的那个第二证人。而且**现役那道门比这道死门严一档**：
+这道死门只问"这个 env 的这一代次你发过吗"，会放过"代次是真的、内容被换过"的伪造。
+所以接上去是**降级**，不是加固。**删掉，并把"为什么不许加回来"写成变异测试。**
+
+#### 三层查证，逐层给活证据
+
+跑法：pod1 `/workspace/franco/wt_gate40_20260807`（HEAD `c1b5ca10` 的干净 worktree），
+解释器 `/workspace/hope_isaac_venv/bin/python`（`cryptography 50.0.0` + `hydra` 都在，
+所以本节所有数字**`0 skipped`**），只用 CPU（`CUDA_VISIBLE_DEVICES=""`）。
+
+**(1) 机制码：存档的退役来历一共有几个证人。** 用真的 `ActionBirthBroker` +
+真的 `LazyActionTaskPool` 跑完整旅程（预约→提交→消费→发任务→真 reset 退休→存盘），
+再逐层伪造：
+
+| 伪造 | 结果 | 谁拦的 |
+| --- | --- | --- |
+| 只把 `retired_generations` 台账从 `[[0,1]]` 改成 `[[0,7]]` | 拒 | `retired generation ledger differs from compact retired birth records`（同源自证那一步） |
+| 整条退役记录改写成 broker 从没发过的 gen2（收据重算 canonical SHA、transcript 重算、integrity 重签） | 拒 | **`BirthProtocolError: birth is not the env's exact consumed generation`** —— 即 `assert_consumed_birth`，`action_ball_runtime.py:11122/11125` |
+| 同上，但先把 `assert_consumed_birth` 变异成空函数 | 仍拒 | `ValueError: proposal sample was not assigned to exact birth/refill`（solver 那本提案账，第三个证人） |
+| 同上变异 + 老实存档 | 载入成功 | 控制组：变异体本身没有把老实的路也弄红 |
+
+**所以二.2 那句"没有任何一处拿 broker 的 transcript 当第二个证人"是被推翻的**，
+第二个证人就在同一个 `load_state_dict` 里、那句自证的下面十几行。
+二.2 说对的那一半是：`retired_generations != expected_retired_generations` 那一句
+**确实**只证明存档自己前后一致。已在源码那一行补了人话注释说明它不是来历校验。
+
+**(2) 它比现役那道门粗一档 —— 这是删而不是接的真正理由。** 同一个 broker 上：
+
+- 给它一份"贴着 env0 gen1 标签、内容其实是另一格出生"的收据：
+  被删的那道门**放行**（代次是真的），`assert_consumed_birth` **拒绝**。
+- 反过来，凡是 `assert_consumed_birth` 放行的 `(env, 代次)`，被删那道门必然也放行：
+  broker 自己的 `load_state_dict` 有一句 `consumed generation exceeds last generation`
+  （`action_ball_runtime.py:6990`），三种方向的伪造（consumed 超前、last 退后、
+  consumed 有而 last 无该行）**全部被拒**。所以 `consumed <= last` 在跨进程续跑下也成立，
+  删它**没有丢掉任何拦截面**。
+
+**(3) 实验史 / 现役 argv：** 它是 `6b13e0ff`（07-27 那个 WIP 大快照）带进来的，
+从落地起就没有调用方。全仓搜索排除 `.claude/worktrees/` 后，字面量、字符串、
+`getattr`/`hasattr`、`commands.py:3371-3377` 那张动态方法名清单
+（只列 `binding_for_slot` / `reserve_many_true_reset` / `pending_receipt` /
+`commit_many_true_reset` / `state_dict` / `load_state_dict`，**没有它**）、
+`test_action_ball_motion_batch_handoff.py:43` 那个 `__getattr__` 转发壳、以及 docs，
+命中的只有 `def` 那一处和本文件里这场判决自己的 4 次提及。
+
+#### 变异测试：六个变异体，五个转红，一个诚实地没转红
+
+新模块 `hope_training/whole_body_tracking/tests/test_action_ball_retirement_provenance.py`，
+`10 passed / 0 skipped`。变异是**改生产文件**再跑，不是改测试：
+
+| 变异 | 改了什么 | 转红的测试 |
+| --- | --- | --- |
+| M1 | 删掉 pool 载入时对每份 retired birth 的 `assert_consumed_birth` | `test_checkpoint_cannot_invent_a_generation_the_broker_never_issued` |
+| M2 | 把 `assert_consumed_birth` **削成被删那道门的强度**（保留"代次到了"，去掉"就是这一份收据"） | `test_the_deleted_gate_would_have_waved_a_content_swap_through` |
+| M3 | 把 `assert_known_generation` 原样加回来 | `test_the_coarse_gate_is_gone_and_the_owner_is_still_here` |
+| M4 | 去掉 broker 的 `consumed generation exceeds last generation` | 参数化那条的 **3 格全红** |
+| M5 | 去掉 `retired generation ledger differs...` 那一句 | `test_bumping_only_the_retired_ledger_is_caught_by_the_same_load` |
+| M6 | 把收据比对削成"只比 SHA 的前 2 个十六进制字符" | **没转红** |
+
+**M2 就是 Franco 那条"粗一个档次的检查就过不了"的正面证据**：把现役那道门削到
+死门的强度，测试立刻红。M1–M5 每个变异**一一对应**杀掉一条测试，没有一条是
+"反正全红了"。
+
+**M6 要如实记：本轮的变异套件盖不住"截断哈希"这一档粗化。** 原因是要打红它得
+构造一个前 2 字符碰撞的 SHA，按需构造不出来。这不是本次判决的形状（本次判决的形状
+是 M2），但**它是这套变异测试的已知盲区**，别把"六个变异全过"当成"任意粗化都拦得住"。
+
+#### 回归账（pod1，`/workspace/hope_isaac_venv/bin/python`，`-n 16`，`-p no:randomly`）
+
+受影响模块 = 全仓 `tests` 里提到 `action_ball_runtime` 或 `ActionBirthBroker` 的 **26 个**。
+
+| | before（HEAD `c1b5ca10` 原样） | after（本轮改动） |
+| --- | --- | --- |
+| passed | `811` | `821` |
+| failed | `15` | `15` |
+| errors | `2` | `2` |
+| **skipped** | **`0`** | **`0`** |
+
+**失败/错误集合逐条相同**（`test_frozen_canonical_sha_*` 两条、`train.py` actor 合同
+那一族 13 条、`test_action_ball_fixed_view_motion.py` 与 `test_action_ball_motion_birth.py`
+两个收集期 ERROR），**全部是先于本轮就红的**。`+10 passed` 恰好是新模块那 10 条。
+
+#### 谱系代价：零
+
+`action_ball_runtime.py` 的文件 SHA 目前是 `8dcae9be…`，**全仓没有任何产物记着它**。
+唯一按文件名钉它的是 `configs/a3_vendor_runtime_authority_202607*/…training_contract.json`
+那 8 个目录，它们记的是 `8f2fe8c7…`——**在本轮之前就已经和 HEAD 对不上了**，
+本轮不新增这个问题。活着的 N1/A211/C211 谱系（`configs/action_ball_n1_measured_20260803/`）
+**根本不钉这个文件**。另外 `RUNTIME_CONTRACT_SHA256` 是
+`_sha256_json(_CONTRACT_DESCRIPTION)`（一份声明字典的哈希），**不是文件字节的哈希**，
+所以删一个方法不会动它，已有 checkpoint 的兼容性不受影响。
+
+#### 顺带：把"上一轮为什么会漏"这件事修在方法学上，不是修在结果上
+
+上一轮那份扫描**根本没有落盘**（全仓找不到脚本或测试），所以"它现在能不能扫到公开方法"
+这个问题的答案是"它不存在"。补了两件：
+
+- `scripts/audit_zero_call_site_gates.py`：把方法学固定下来——名字形状**公开与带下划线
+  都收**、`def` 用 `ast.walk` **收嵌套**、排除 `.claude/worktrees/`、判据用 token 频次
+  （这样 `getattr` / `monkeypatch.setattr` / `importlib` 共享库那些形式不会被当成没人用）。
+  它自带 `--self-test`：同一份 fixture 喂给**上一轮那个做法**（只认带下划线、只收模块级），
+  老做法只看见 1 个，新做法看见 3 个——**如果哪天老做法也看见 3 个，自检自己会红**，
+  因为那说明这条自检失去了判别力。
+- `tests/test_audit_zero_call_site_gates.py`（`22 passed`）：只钉方法学，**不钉结果**。
+  钉结果要维护一张允许名单，每加一道门改一次，那是仪式。这里测的是那两条真会重犯的：
+  公开形状认不认、嵌套 `def` 收不收；外加"别人 worktree 里的调用点不许算数"和
+  反向判别力（加一个本仓调用点就不该再报）。全仓扫描本身**不进套件**（要读一千多个文件，
+  而且它的输出是给人判决用的），手动跑。
+
+在本轮改动之后跑一次全仓：`1020` 个 `.py`、`1959` 个门形状 `def`、
+零调用点**剩 3 个**——`_validate_reveal_bridge`、`_validate_artifact_path_hash`、
+`_reverify_receipt_contact_source_files`，与 §5.6.18 二.2 那张表去掉本条后完全一致。
+
+#### 这一节没做什么
+
+1. **没碰** `hope_rewards.py` / `commands.py` / `train.py` / 两个 211 launcher —— 本轮有三条
+   别的 workflow 在改它们。本轮只读它们（`commands.py:3371` 那张动态方法名清单、
+   `hope_commands.py:17331/17340` 的 exact-resume 校验、`train.py:9042` 的源码 SHA 映射）。
+2. **没接** `_validate_reveal_bridge`（剩下三个里唯一判过的那个），按分工那是另一条待办。
+3. **没补** M6 那一档（截断哈希）的变异证据，理由见上。
 
 ### 9.2 MuJoCo 顺序
 
