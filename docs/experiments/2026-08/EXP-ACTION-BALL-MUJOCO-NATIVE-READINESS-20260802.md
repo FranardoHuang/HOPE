@@ -2155,6 +2155,17 @@ bank 的 `joint_pos` 存的是 **float32**；重定向把关节顶到限位、�
 测试：`test_audit_measured_teacher_executability.py` 基线 `14 passed / 0 skipped` →
 本条 `22 passed / 0 skipped`；新增 `test_ground_measured_clip_to_floor.py` `19 passed / 0 skipped`
 （都在 `hope_isaac_venv`，`CUDA_VISIBLE_DEVICES=` 纯 CPU）。
+**整包对拍**（`hope_training/whole_body_tracking/tests` 全跑，同一解释器、`-p no:randomly`
+`--continue-on-collection-errors`，两棵树各跑一遍）：
+
+| | 基线 `gnd_base_20260807`（未打补丁） | 本条 `gnd_20260807` |
+| --- | --- | --- |
+| 结果 | `376 failed, 6913 passed, 62 skipped, 28 errors`（`32:27`） | `376 failed, **6940** passed, 62 skipped, 28 errors`（`34:06`） |
+
+**`failed` / `skipped` / `errors` 三项逐位相同，`passed` 恰好多 `27`** ——
+`8`（审计变异测试新增）`+ 19`（接地工具新测试），没有一条别的动过。
+那 `376 failed / 28 errors` 是**基线本来就有的**：这两棵树都是 detached worktree，
+一批 artifact/vendor-identity 测试要求干净 checkout 与特定 commit，本条不碰它们。
 四元数不动点另跑一次穷举:bank 里全部 `5107` 个 root 四元数都收敛到不动点，
 与朴素归一化的最大差 `2.31e-16`（一个最低位）。
 **未跑 Isaac、未占 GPU、未写任何 artifact、未放宽任何门限**；
@@ -7703,6 +7714,7 @@ ActionBall env，自然也没算 solver profile。
 在本轮改动之后跑一次全仓：`1020` 个 `.py`、`1959` 个门形状 `def`、
 零调用点**剩 3 个**——`_validate_reveal_bridge`、`_validate_artifact_path_hash`、
 `_reverify_receipt_contact_source_files`，与 §5.6.18 二.2 那张表去掉本条后完全一致。
+（**2026-08-07 同日就地更正：`_validate_reveal_bridge` 当天已接线（§5.6.22），所以现在剩 2 个。**）
 
 #### 这一节没做什么
 
@@ -7710,6 +7722,7 @@ ActionBall env，自然也没算 solver profile。
    别的 workflow 在改它们。本轮只读它们（`commands.py:3371` 那张动态方法名清单、
    `hope_commands.py:17331/17340` 的 exact-resume 校验、`train.py:9042` 的源码 SHA 映射）。
 2. **没接** `_validate_reveal_bridge`（剩下三个里唯一判过的那个），按分工那是另一条待办。
+   （**2026-08-07 同日就地更正：那条待办当天已做完，见 §5.6.22。**）
 3. **没补** M6 那一档（截断哈希）的变异证据，理由见上。
 
 ### 9.2.14 L1 证书"换路径不能换字节"那条测试：报的病因是错的，真病因是内核文件时间戳只有 1 ms 刻度（2026-08-07 落地，pod1 host-only，无 GPU）
