@@ -1,0 +1,1547 @@
+{
+  "clips": [
+    {
+      "T": 96,
+      "clip_id": 0,
+      "family": "FH",
+      "hit_frame_50": 52,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=76ab9f67fbebf84ddda377d344acd7019e1329ba24bfea97904074c8390c848c",
+      "name": "take058_unit02_fh",
+      "npz": "clips/take058_unit02_fh.npz",
+      "phase": 0.547368421,
+      "rally_yaw_deg": 20.92,
+      "sha256": "edf25948bb13c6a8c37c788321054b8448dd8b8eb5c7afa083df6014a59fdbb1",
+      "station_xy_hope_m": [
+        -0.61141563,
+        -0.86302684
+      ],
+      "uid": "Take_058_unit02_FH",
+      "warnings": [],
+      "yaw_norm_deg": -5.42
+    },
+    {
+      "T": 81,
+      "clip_id": 1,
+      "family": "FH",
+      "hit_frame_50": 38,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=72ad02e78776884b76433254f0847ea69d2f41b349de5eacdfb5909540c203eb",
+      "name": "take058_unit03_fh",
+      "npz": "clips/take058_unit03_fh.npz",
+      "phase": 0.475,
+      "rally_yaw_deg": 20.89,
+      "sha256": "8ae9c9548e36ba16f3cea3d3f5f74027e9bfccd5adf9ee426de125bf75d61ad3",
+      "station_xy_hope_m": [
+        -0.53676805,
+        -0.71919501
+      ],
+      "uid": "Take_058_unit03_FH",
+      "warnings": [],
+      "yaw_norm_deg": -3.165
+    },
+    {
+      "T": 91,
+      "clip_id": 2,
+      "family": "FH",
+      "hit_frame_50": 49,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=062c1df257f82dfcf9b5e6148753caca59930c05d66da82c3b4cc47bce629fcf",
+      "name": "take058_unit04_fh",
+      "npz": "clips/take058_unit04_fh.npz",
+      "phase": 0.544444444,
+      "rally_yaw_deg": 18.68,
+      "sha256": "6b60255f0530e50b9d37f863d3f9c1b68bd25d35c8dd6bfc54a52bd045a89a7d",
+      "station_xy_hope_m": [
+        -0.5792551,
+        -0.7661862100000001
+      ],
+      "uid": "Take_058_unit04_FH",
+      "warnings": [],
+      "yaw_norm_deg": -2.863
+    },
+    {
+      "T": 90,
+      "clip_id": 3,
+      "family": "FH",
+      "hit_frame_50": 48,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=993e1d311ed9d8af10a5af837bb37eb4eb9b7124e78d27a2b06e4b8357577ada",
+      "name": "take058_unit05_fh",
+      "npz": "clips/take058_unit05_fh.npz",
+      "phase": 0.539325843,
+      "rally_yaw_deg": 26.09,
+      "sha256": "016e4c680bbcdeccea76fe9bcac31af1c42427c4d19be9261dbed0c9a5610978",
+      "station_xy_hope_m": [
+        -0.60435648,
+        -0.7272147699999999
+      ],
+      "uid": "Take_058_unit05_FH",
+      "warnings": [],
+      "yaw_norm_deg": -1.884
+    },
+    {
+      "T": 97,
+      "clip_id": 4,
+      "family": "FH",
+      "hit_frame_50": 55,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=8c708fa0187f63bea381f619b8aa5fb69ebb2bea28265caff3fa002f01ce154a",
+      "name": "take058_unit06_fh",
+      "npz": "clips/take058_unit06_fh.npz",
+      "phase": 0.572916667,
+      "rally_yaw_deg": 23.27,
+      "sha256": "6bcd2a9792be236d3b3f911e3b7dbcfdb84b588232b5bf76368fa5e9fe6ac67a",
+      "station_xy_hope_m": [
+        -0.60523203,
+        -0.7530440500000001
+      ],
+      "uid": "Take_058_unit06_FH",
+      "warnings": [],
+      "yaw_norm_deg": -6.23
+    },
+    {
+      "T": 92,
+      "clip_id": 5,
+      "family": "FH",
+      "hit_frame_50": 48,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=b03a26e05db286eedf5b6676571ece0012855cd5cb3d5ee7d620619b1e38c589",
+      "name": "take058_unit07_fh",
+      "npz": "clips/take058_unit07_fh.npz",
+      "phase": 0.527472527,
+      "rally_yaw_deg": 16.65,
+      "sha256": "6490159ac633803559390edab893bacfcd5af9be8a25a7318aa60bf769ea227f",
+      "station_xy_hope_m": [
+        -0.62619797,
+        -0.7680599100000001
+      ],
+      "uid": "Take_058_unit07_FH",
+      "warnings": [],
+      "yaw_norm_deg": -4.852
+    },
+    {
+      "T": 85,
+      "clip_id": 6,
+      "family": "FH",
+      "hit_frame_50": 36,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=bf95e656db6ed30ad825fff723054e1b9558de2ea3a46db750fd47872296736d",
+      "name": "take058_unit08_fh",
+      "npz": "clips/take058_unit08_fh.npz",
+      "phase": 0.428571429,
+      "rally_yaw_deg": 14.88,
+      "sha256": "266e582ebabc49f824f8591bfa6d8333a02756fa3f16f4169c06dd3cde4af8c0",
+      "station_xy_hope_m": [
+        -0.55405043,
+        -0.7313592800000001
+      ],
+      "uid": "Take_058_unit08_FH",
+      "warnings": [],
+      "yaw_norm_deg": -7.881
+    },
+    {
+      "T": 87,
+      "clip_id": 7,
+      "family": "FH",
+      "hit_frame_50": 48,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=258c8b49d7e2d226e17c7deb488d3dde1eb5098714dbdc5f7111d98d1ec18019",
+      "name": "take058_unit11_fh",
+      "npz": "clips/take058_unit11_fh.npz",
+      "phase": 0.558139535,
+      "rally_yaw_deg": 14.19,
+      "sha256": "fef66ef3f2f54b9e9341738ad0aa65523676bbf573cfc3cabbcf3cd4444a5ef8",
+      "station_xy_hope_m": [
+        -0.66668569,
+        -0.7946684500000001
+      ],
+      "uid": "Take_058_unit11_FH",
+      "warnings": [],
+      "yaw_norm_deg": -10.649
+    },
+    {
+      "T": 92,
+      "clip_id": 8,
+      "family": "FH",
+      "hit_frame_50": 44,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=18f6f12335e086b10f43739309d1b70e763f99584b549cdf93fad417450b8587",
+      "name": "take058_unit12_fh",
+      "npz": "clips/take058_unit12_fh.npz",
+      "phase": 0.483516484,
+      "rally_yaw_deg": 8.23,
+      "sha256": "380ae334309dea99e2cf38b36d2e164f3dd9cfee5cd84d50ebf8f3ee3e176e9b",
+      "station_xy_hope_m": [
+        -0.6641410000000001,
+        -0.76472156
+      ],
+      "uid": "Take_058_unit12_FH",
+      "warnings": [],
+      "yaw_norm_deg": -6.176
+    },
+    {
+      "T": 81,
+      "clip_id": 9,
+      "family": "FH",
+      "hit_frame_50": 40,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=3e4b9118859598d0e956b7b0d7141a25dbfbbc3933a754f93860bb14d07a8255",
+      "name": "take058_unit13_fh",
+      "npz": "clips/take058_unit13_fh.npz",
+      "phase": 0.5,
+      "rally_yaw_deg": 28.87,
+      "sha256": "37cd308ed771037b5c006290a3a17c4c026faa39af95e04aa62b780e0da3c56a",
+      "station_xy_hope_m": [
+        -0.76759742,
+        -0.68521665
+      ],
+      "uid": "Take_058_unit13_FH",
+      "warnings": [],
+      "yaw_norm_deg": 4.761
+    },
+    {
+      "T": 86,
+      "clip_id": 10,
+      "family": "FH",
+      "hit_frame_50": 42,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=a8a785ee195c12bd8cc336d6a4686bf201e0d1233fe50b647c0083f90a1436e9",
+      "name": "take058_unit14_fh",
+      "npz": "clips/take058_unit14_fh.npz",
+      "phase": 0.494117647,
+      "rally_yaw_deg": 16.8,
+      "sha256": "947a7d0d6f60f0cce0f01ffc2ee00b4d50a292e308fcc810751657a02f39dbcf",
+      "station_xy_hope_m": [
+        -0.64363605,
+        -0.70144052
+      ],
+      "uid": "Take_058_unit14_FH",
+      "warnings": [],
+      "yaw_norm_deg": -5.267
+    },
+    {
+      "T": 83,
+      "clip_id": 11,
+      "family": "FH",
+      "hit_frame_50": 37,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=d648782e7f65340f6e9c401838bf370abe39c7054bbfb8e6b61895c9b1f0617f",
+      "name": "take059_unit01_fh",
+      "npz": "clips/take059_unit01_fh.npz",
+      "phase": 0.451219512,
+      "rally_yaw_deg": 14.21,
+      "sha256": "aba21d2e0fca0ff77ffef9477bd9e81d10b01f295887c671fe4ac7f440391842",
+      "station_xy_hope_m": [
+        -0.54029327,
+        -0.49528779
+      ],
+      "uid": "Take_059_unit01_FH",
+      "warnings": [],
+      "yaw_norm_deg": -17.009
+    },
+    {
+      "T": 89,
+      "clip_id": 12,
+      "family": "FH",
+      "hit_frame_50": 45,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=1c5532797d787fbe07387c9a6cc3514775b73737fba3f77d8f05fc110b23eda0",
+      "name": "take059_unit03_fh",
+      "npz": "clips/take059_unit03_fh.npz",
+      "phase": 0.511363636,
+      "rally_yaw_deg": 13.09,
+      "sha256": "2b1641217a03dd93f8f4fa931f66c2ea22bdfcd6a4f3ba9c1ba6dde7b7704c60",
+      "station_xy_hope_m": [
+        -0.61774032,
+        -0.91305695
+      ],
+      "uid": "Take_059_unit03_FH",
+      "warnings": [],
+      "yaw_norm_deg": -9.528
+    },
+    {
+      "T": 73,
+      "clip_id": 13,
+      "family": "BH",
+      "hit_frame_50": 41,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=cbdef5da654fa16541c45e443256d0a57ab6828bb784ee206b7945122d407cf9",
+      "name": "take060_unit00_bh",
+      "npz": "clips/take060_unit00_bh.npz",
+      "phase": 0.569444444,
+      "rally_yaw_deg": -12.01,
+      "sha256": "9e529212d1151e08d8863b4b7b04039233f4485bf66cc40bf834dee585841479",
+      "station_xy_hope_m": [
+        -0.7499994200000001,
+        -0.6241145
+      ],
+      "uid": "Take_060_unit00_BH",
+      "warnings": [],
+      "yaw_norm_deg": -10.041
+    },
+    {
+      "T": 86,
+      "clip_id": 14,
+      "family": "BH",
+      "hit_frame_50": 56,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=70662915e7d766f4e2aa2e7e6891cd2ac1875316f2e9ca82aed0040d6776718d",
+      "name": "take060_unit01_bh",
+      "npz": "clips/take060_unit01_bh.npz",
+      "phase": 0.658823529,
+      "rally_yaw_deg": -14.34,
+      "sha256": "54745c5b6533cc33cbf3394d25c183718e4191233d79b2903f8e16ecf1ddfc37",
+      "station_xy_hope_m": [
+        -0.71582312,
+        -0.55676432
+      ],
+      "uid": "Take_060_unit01_BH",
+      "warnings": [],
+      "yaw_norm_deg": -10.671
+    },
+    {
+      "T": 75,
+      "clip_id": 15,
+      "family": "BH",
+      "hit_frame_50": 42,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=51a2ad9144a61e372e3709b7698d777fb1080578ad336b3be17092f983d6f970",
+      "name": "take060_unit02_bh",
+      "npz": "clips/take060_unit02_bh.npz",
+      "phase": 0.567567568,
+      "rally_yaw_deg": -13.47,
+      "sha256": "9480afb62b006e42a10d71fe3740eda7af0dc95307abefdf1b09895e25db119f",
+      "station_xy_hope_m": [
+        -0.59792908,
+        -0.49839421
+      ],
+      "uid": "Take_060_unit02_BH",
+      "warnings": [],
+      "yaw_norm_deg": -12.013
+    },
+    {
+      "T": 36,
+      "clip_id": 16,
+      "family": "BH",
+      "hit_frame_50": 14,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=5ba68fc8ca46b196c4c899198e9d90439caeff770fd1cc7032def1c9c9fc65fa",
+      "name": "take060_unit04_bh",
+      "npz": "clips/take060_unit04_bh.npz",
+      "phase": 0.4,
+      "rally_yaw_deg": -6.9,
+      "sha256": "7e104a7021747d0b2f6602cc6becad0b3398eac14ddf38a2952642d9ce75efc4",
+      "station_xy_hope_m": [
+        -0.70588208,
+        -0.53761666
+      ],
+      "uid": "Take_060_unit04_BH",
+      "warnings": [
+        "duration 0.70s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -9.4
+    },
+    {
+      "T": 53,
+      "clip_id": 17,
+      "family": "BH",
+      "hit_frame_50": 39,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=a8d2ddf9354e8a0d8425dab7ac1fc0cb305bf58c1abf03561ee5ffdb23ee451d",
+      "name": "take060_unit05_bh",
+      "npz": "clips/take060_unit05_bh.npz",
+      "phase": 0.75,
+      "rally_yaw_deg": -16.47,
+      "sha256": "795fdf8e30f4cc106a9ee4f196c28b18a40b5ac2516f42ac6d6fb357c39f3140",
+      "station_xy_hope_m": [
+        -0.6634700499999999,
+        -0.53835229
+      ],
+      "uid": "Take_060_unit05_BH",
+      "warnings": [],
+      "yaw_norm_deg": -15.518
+    },
+    {
+      "T": 62,
+      "clip_id": 18,
+      "family": "BH",
+      "hit_frame_50": 53,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=c662dc8f5abab51e6605fd3c304675fdcbe47b5c7ac7e4785ede1b7cc645a8eb",
+      "name": "take060_unit06_bh",
+      "npz": "clips/take060_unit06_bh.npz",
+      "phase": 0.868852459,
+      "rally_yaw_deg": -21.55,
+      "sha256": "995f83d8d0798acb202294cb0e411fde787eb53476876c7a8f4f7067a32e3396",
+      "station_xy_hope_m": [
+        -0.67143964,
+        -0.5381783
+      ],
+      "uid": "Take_060_unit06_BH",
+      "warnings": [],
+      "yaw_norm_deg": -23.08
+    },
+    {
+      "T": 61,
+      "clip_id": 19,
+      "family": "BH",
+      "hit_frame_50": 52,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=d0eadbb272b349162227fadc9bea9eae77a8dab58b4676d7f95a8e04b72b0f1e",
+      "name": "take060_unit07_bh",
+      "npz": "clips/take060_unit07_bh.npz",
+      "phase": 0.866666667,
+      "rally_yaw_deg": -22.48,
+      "sha256": "362ecaa53dbe13a02e7eca81707085b25a7b19b748e86976324f3c767bcb984c",
+      "station_xy_hope_m": [
+        -0.6857975999999999,
+        -0.56284507
+      ],
+      "uid": "Take_060_unit07_BH",
+      "warnings": [],
+      "yaw_norm_deg": -25.612
+    },
+    {
+      "T": 70,
+      "clip_id": 20,
+      "family": "BH",
+      "hit_frame_50": 48,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=e08722f03afcc9443208b176e1aa9dda358ef60711b26aea726e3da793c89109",
+      "name": "take060_unit08_bh",
+      "npz": "clips/take060_unit08_bh.npz",
+      "phase": 0.695652174,
+      "rally_yaw_deg": -26.3,
+      "sha256": "a208811fb2be5aaeec7fb1b6a5b98d5c8a6139e57f48d48429e6c7a407c33094",
+      "station_xy_hope_m": [
+        -0.66239532,
+        -0.56569275
+      ],
+      "uid": "Take_060_unit08_BH",
+      "warnings": [
+        "real-ball unit coverage 99%"
+      ],
+      "yaw_norm_deg": -27.847
+    },
+    {
+      "T": 66,
+      "clip_id": 21,
+      "family": "BH",
+      "hit_frame_50": 36,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=ea50176fc6392cf3141dee50cb7287258325ee1882b9d5612a5ed404ec7de8c7",
+      "name": "take060_unit09_bh",
+      "npz": "clips/take060_unit09_bh.npz",
+      "phase": 0.553846154,
+      "rally_yaw_deg": -19.03,
+      "sha256": "6d6ff7621267a2bbcb20aeeedba719a10a6b6e6a49eeee9586f78031762073f1",
+      "station_xy_hope_m": [
+        -0.62500988,
+        -0.56605673
+      ],
+      "uid": "Take_060_unit09_BH",
+      "warnings": [],
+      "yaw_norm_deg": -21.53
+    },
+    {
+      "T": 76,
+      "clip_id": 22,
+      "family": "BH",
+      "hit_frame_50": 31,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=f83109b728eaeb5f1e32a748b93a80cd301d26b736b825e456931c801f5d4091",
+      "name": "take060_unit10_bh",
+      "npz": "clips/take060_unit10_bh.npz",
+      "phase": 0.413333333,
+      "rally_yaw_deg": -9.15,
+      "sha256": "2f384320b78acb3f8057062d7cd5266eaaf49ff1ebaa271113d11a0cee2037b3",
+      "station_xy_hope_m": [
+        -0.60698449,
+        -0.5458016099999999
+      ],
+      "uid": "Take_060_unit10_BH",
+      "warnings": [],
+      "yaw_norm_deg": -12.756
+    },
+    {
+      "T": 78,
+      "clip_id": 23,
+      "family": "BH",
+      "hit_frame_50": 63,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=fa560b3f2e0cb26cd26fa7e33f4a8e94c70cbf78d71a4a424e760ba39c3b0147",
+      "name": "take060_unit11_bh",
+      "npz": "clips/take060_unit11_bh.npz",
+      "phase": 0.818181818,
+      "rally_yaw_deg": -3.36,
+      "sha256": "eb3cd68755d07cbd361b8a8d96dcb85676cc29e5d14b8bfd74a195b638b95022",
+      "station_xy_hope_m": [
+        -0.6515127,
+        -0.5480410299999999
+      ],
+      "uid": "Take_060_unit11_BH",
+      "warnings": [
+        "real-ball unit coverage 99%"
+      ],
+      "yaw_norm_deg": -7.485
+    },
+    {
+      "T": 57,
+      "clip_id": 24,
+      "family": "BH",
+      "hit_frame_50": 39,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=132c24d93484cd21f331b6b15e6e0ef4c48e1f09e115b92443cd0a7a2bcc2889",
+      "name": "take060_unit12_bh",
+      "npz": "clips/take060_unit12_bh.npz",
+      "phase": 0.696428571,
+      "rally_yaw_deg": -22.31,
+      "sha256": "1f67b376468d163c3b33da2beb552f88e5518360a818169a2daf903f453d55d6",
+      "station_xy_hope_m": [
+        -0.6155821300000001,
+        -0.5573408
+      ],
+      "uid": "Take_060_unit12_BH",
+      "warnings": [],
+      "yaw_norm_deg": -24.957
+    },
+    {
+      "T": 90,
+      "clip_id": 25,
+      "family": "BH",
+      "hit_frame_50": 39,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=24180dc95e0a9a1ae10ff3a21eed20fb3262c816b89048971a9591930ade2049",
+      "name": "take060_unit13_bh",
+      "npz": "clips/take060_unit13_bh.npz",
+      "phase": 0.438202247,
+      "rally_yaw_deg": -20.35,
+      "sha256": "ab5802b169197b686a675f9bc6e1e7e1435144d5b16190d20951ff340ef6de39",
+      "station_xy_hope_m": [
+        -0.62512431,
+        -0.57455109
+      ],
+      "uid": "Take_060_unit13_BH",
+      "warnings": [],
+      "yaw_norm_deg": -19.619
+    },
+    {
+      "T": 78,
+      "clip_id": 26,
+      "family": "BH",
+      "hit_frame_50": 38,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=ae7e213ec11ec59dfa3db454d4489e7523354d76b3861ea52ca2256fcad05f58",
+      "name": "take061_unit00_bh",
+      "npz": "clips/take061_unit00_bh.npz",
+      "phase": 0.493506494,
+      "rally_yaw_deg": -6.78,
+      "sha256": "0e70f41d52e496b0797b464cdf7f9f1b3db6e4edeb324573e476f3131cbe818b",
+      "station_xy_hope_m": [
+        -0.74437749,
+        -0.63055755
+      ],
+      "uid": "Take_061_unit00_BH",
+      "warnings": [],
+      "yaw_norm_deg": -7.619
+    },
+    {
+      "T": 46,
+      "clip_id": 27,
+      "family": "BH",
+      "hit_frame_50": 15,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=b4ffce068f72a36aaa4c4428fb5bede64cd2ea44d8d4c9c2176add7ba5b9817e",
+      "name": "take061_unit02_bh",
+      "npz": "clips/take061_unit02_bh.npz",
+      "phase": 0.333333333,
+      "rally_yaw_deg": -10.51,
+      "sha256": "eddf4881ea3173c741467c6f7aba454b9a7e48c786dcb55cc2b37a462cb43839",
+      "station_xy_hope_m": [
+        -0.7384447799999999,
+        -0.45604273
+      ],
+      "uid": "Take_061_unit02_BH",
+      "warnings": [],
+      "yaw_norm_deg": -9.212
+    },
+    {
+      "T": 57,
+      "clip_id": 28,
+      "family": "BH",
+      "hit_frame_50": 48,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=61765b1f4b1282eb2d6c7f757570f7244dd26981a2bff2a1d67eb50dd0af8543",
+      "name": "take061_unit04_bh",
+      "npz": "clips/take061_unit04_bh.npz",
+      "phase": 0.857142857,
+      "rally_yaw_deg": -25.64,
+      "sha256": "b604c69301f55990e042ad85d85f0221b9271b6f446d736d2fbe7b51bb75b4ff",
+      "station_xy_hope_m": [
+        -0.69223234,
+        -0.47722119
+      ],
+      "uid": "Take_061_unit04_BH",
+      "warnings": [],
+      "yaw_norm_deg": -22.803
+    },
+    {
+      "T": 64,
+      "clip_id": 29,
+      "family": "BH",
+      "hit_frame_50": 52,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=0b28be7780200311a8f39b167e7ba5f05f93245089a9665c6aa7454128a04440",
+      "name": "take061_unit05_bh",
+      "npz": "clips/take061_unit05_bh.npz",
+      "phase": 0.825396825,
+      "rally_yaw_deg": -25.0,
+      "sha256": "34aae3986792dc4a98224415e9cd4181ce4dcb4f01b58c0245fd6635b3c2b856",
+      "station_xy_hope_m": [
+        -0.70045703,
+        -0.50443171
+      ],
+      "uid": "Take_061_unit05_BH",
+      "warnings": [],
+      "yaw_norm_deg": -23.63
+    },
+    {
+      "T": 93,
+      "clip_id": 30,
+      "family": "BH",
+      "hit_frame_50": 48,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=1016c4176eadd6b2e2416afad3203699ce02ea4c1c1a900582b331814864f483",
+      "name": "take061_unit06_bh",
+      "npz": "clips/take061_unit06_bh.npz",
+      "phase": 0.52173913,
+      "rally_yaw_deg": -21.44,
+      "sha256": "0d7081d80046775aa593a30ee0646d5289d8c81382c84863520523f9a5fea2ee",
+      "station_xy_hope_m": [
+        -0.66554808,
+        -0.43694629999999995
+      ],
+      "uid": "Take_061_unit06_BH",
+      "warnings": [
+        "real-ball unit coverage 99%"
+      ],
+      "yaw_norm_deg": -23.503
+    },
+    {
+      "T": 35,
+      "clip_id": 31,
+      "family": "BH",
+      "hit_frame_50": 12,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=dba5656aee557374ca3353989ab68c1af68dbc84e60c5ebf9f7e859bccaa51d8",
+      "name": "take061_unit07_bh",
+      "npz": "clips/take061_unit07_bh.npz",
+      "phase": 0.352941176,
+      "rally_yaw_deg": -5.02,
+      "sha256": "2f35bce9929ac5d89505f67a7f878240a9224e257882913d742c46cf8ad2e915",
+      "station_xy_hope_m": [
+        -0.6681288999999999,
+        -0.49040119
+      ],
+      "uid": "Take_061_unit07_BH",
+      "warnings": [
+        "duration 0.68s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -9.204
+    },
+    {
+      "T": 57,
+      "clip_id": 32,
+      "family": "BH",
+      "hit_frame_50": 36,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=51e31daa542daa520607454e74a78888c682ae0c1c9712f3f7e1da2a45f2bbed",
+      "name": "take061_unit08_bh",
+      "npz": "clips/take061_unit08_bh.npz",
+      "phase": 0.642857143,
+      "rally_yaw_deg": -11.36,
+      "sha256": "e0040af8827d86c5d4dcd7e143dce13bbb68db8826c7081d103880fb49dab3db",
+      "station_xy_hope_m": [
+        -0.63323718,
+        -0.47754232
+      ],
+      "uid": "Take_061_unit08_BH",
+      "warnings": [],
+      "yaw_norm_deg": -14.056
+    },
+    {
+      "T": 120,
+      "clip_id": 33,
+      "family": "BH",
+      "hit_frame_50": 35,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=c5b07ec8fd6e0905885933d9f5775f5f839661130c20cfb8fee2ed7fe460190a",
+      "name": "take061_unit09_bh",
+      "npz": "clips/take061_unit09_bh.npz",
+      "phase": 0.294117647,
+      "rally_yaw_deg": -9.75,
+      "sha256": "249d6b05aef403024adb9af643384867f24700237aee649413c1e078405bb9a0",
+      "station_xy_hope_m": [
+        -0.64814921,
+        -0.47004584
+      ],
+      "uid": "Take_061_unit09_BH",
+      "warnings": [
+        "2 hits in extended window; using first in-unit hit"
+      ],
+      "yaw_norm_deg": -14.844
+    },
+    {
+      "T": 27,
+      "clip_id": 34,
+      "family": "BH",
+      "hit_frame_50": 14,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=07188115af05ff01fc71fd2914f87ee3ae76e527896cc061b0b2d104b6a40996",
+      "name": "take061_unit10_bh",
+      "npz": "clips/take061_unit10_bh.npz",
+      "phase": 0.538461538,
+      "rally_yaw_deg": -34.62,
+      "sha256": "9181dd0f106c0f824b958131488227510c529169b42281202514a63324e3630a",
+      "station_xy_hope_m": [
+        -0.5078545299999999,
+        -0.54094191
+      ],
+      "uid": "Take_061_unit10_BH",
+      "warnings": [
+        "real-ball unit coverage 96%",
+        "duration 0.52s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -37.832
+    },
+    {
+      "T": 60,
+      "clip_id": 35,
+      "family": "BH",
+      "hit_frame_50": 28,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=719cb32e33f409f0c0ae9a513a52382427fd49845038b50402bec60ae4b1c2f2",
+      "name": "take061_unit11_bh",
+      "npz": "clips/take061_unit11_bh.npz",
+      "phase": 0.474576271,
+      "rally_yaw_deg": -4.84,
+      "sha256": "2d68bdbc4694456c90bb2fcb82ca0bef2174f7e2a329313de977d0f307df67e3",
+      "station_xy_hope_m": [
+        -0.60648022,
+        -0.44576144999999995
+      ],
+      "uid": "Take_061_unit11_BH",
+      "warnings": [],
+      "yaw_norm_deg": -3.197
+    },
+    {
+      "T": 52,
+      "clip_id": 36,
+      "family": "BH",
+      "hit_frame_50": 27,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=38d6240c8a1d45fdda7470fd177eb3a11d9e92f3736826df991f34a28c787caa",
+      "name": "take061_unit12_bh",
+      "npz": "clips/take061_unit12_bh.npz",
+      "phase": 0.529411765,
+      "rally_yaw_deg": -10.41,
+      "sha256": "a989a4e0f14a25338ccde0db8f856eda9754355f0ca538a8a503d5dad85d0ea5",
+      "station_xy_hope_m": [
+        -0.65663207,
+        -0.54365573
+      ],
+      "uid": "Take_061_unit12_BH",
+      "warnings": [],
+      "yaw_norm_deg": -14.74
+    },
+    {
+      "T": 49,
+      "clip_id": 37,
+      "family": "BH",
+      "hit_frame_50": 35,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=0361da858670d5aa15f774653471dd83e763a9186293d2684f350b9af1df7feb",
+      "name": "take061_unit13_bh",
+      "npz": "clips/take061_unit13_bh.npz",
+      "phase": 0.729166667,
+      "rally_yaw_deg": -12.78,
+      "sha256": "af440cbe2d5899299fd576ee38dce7bd2a132323e2105630a28cb64e187704c9",
+      "station_xy_hope_m": [
+        -0.6988932800000001,
+        -0.49230866
+      ],
+      "uid": "Take_061_unit13_BH",
+      "warnings": [],
+      "yaw_norm_deg": -16.123
+    },
+    {
+      "T": 59,
+      "clip_id": 38,
+      "family": "BH",
+      "hit_frame_50": 47,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=e5a06110600aa0ebc14ed7db912a08eb33f1f53f7cf4527d199dbc6dd246dd2e",
+      "name": "take061_unit14_bh",
+      "npz": "clips/take061_unit14_bh.npz",
+      "phase": 0.810344828,
+      "rally_yaw_deg": -24.06,
+      "sha256": "a1c8d7be9043249b7af1afb953b8eebaaa18dcf088bb058ed8bd04bd02702861",
+      "station_xy_hope_m": [
+        -0.6928927,
+        -0.48836568
+      ],
+      "uid": "Take_061_unit14_BH",
+      "warnings": [],
+      "yaw_norm_deg": -23.696
+    },
+    {
+      "T": 96,
+      "clip_id": 39,
+      "family": "BH",
+      "hit_frame_50": 49,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=3387749d01a829883eae3b2f03b44c3baa1251e55639cec601b03298e514f65e",
+      "name": "take061_unit15_bh",
+      "npz": "clips/take061_unit15_bh.npz",
+      "phase": 0.515789474,
+      "rally_yaw_deg": -26.13,
+      "sha256": "476db8cabb9d00c300f88f7b2e2e7846d4802a126fac98a1da499a4762fdeebf",
+      "station_xy_hope_m": [
+        -0.72161799,
+        -0.50073527
+      ],
+      "uid": "Take_061_unit15_BH",
+      "warnings": [],
+      "yaw_norm_deg": -24.785
+    },
+    {
+      "T": 59,
+      "clip_id": 40,
+      "family": "BH",
+      "hit_frame_50": 14,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=89c316f439c4e29b45da794cb4d7680a4b04da604874421a1dde3c4550de44b6",
+      "name": "take061_unit16_bh",
+      "npz": "clips/take061_unit16_bh.npz",
+      "phase": 0.24137931,
+      "rally_yaw_deg": -5.82,
+      "sha256": "9d656e968c3ba9969107d81efbfa4a89818265c851943a45e427837c420537a6",
+      "station_xy_hope_m": [
+        -0.7075319,
+        -0.50624084
+      ],
+      "uid": "Take_061_unit16_BH",
+      "warnings": [],
+      "yaw_norm_deg": -10.946
+    },
+    {
+      "T": 57,
+      "clip_id": 41,
+      "family": "BH",
+      "hit_frame_50": 11,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=3c4bbc5a6c808ca11a5bece7e696cbb3fda6c31b82f77188a509742b034d8e9d",
+      "name": "take061_unit17_bh",
+      "npz": "clips/take061_unit17_bh.npz",
+      "phase": 0.196428571,
+      "rally_yaw_deg": -9.16,
+      "sha256": "717f52201ce30757d1fe3a6b2e7a18f5e628022d5f366a5682e440c135c62d8c",
+      "station_xy_hope_m": [
+        -0.71396244,
+        -0.51177312
+      ],
+      "uid": "Take_061_unit17_BH",
+      "warnings": [],
+      "yaw_norm_deg": -12.086
+    },
+    {
+      "T": 33,
+      "clip_id": 42,
+      "family": "BH",
+      "hit_frame_50": 12,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=84afd61354733ae6d20f8635e6fb8145f7f7aa42f7fdba0d884867da1e6c9ab4",
+      "name": "take061_unit18_bh",
+      "npz": "clips/take061_unit18_bh.npz",
+      "phase": 0.375,
+      "rally_yaw_deg": -7.27,
+      "sha256": "70840fed42db02cf209113b753a839f4fa2f7a48ea9fe2c1e341621aab7541cf",
+      "station_xy_hope_m": [
+        -0.7317176999999999,
+        -0.50742215
+      ],
+      "uid": "Take_061_unit18_BH",
+      "warnings": [
+        "duration 0.64s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -10.348
+    },
+    {
+      "T": 49,
+      "clip_id": 43,
+      "family": "BH",
+      "hit_frame_50": 37,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=d35a03b74c6850df1f450342d5d40cd0da2f6a1811eccbef4ecdebd8804cec56",
+      "name": "take061_unit19_bh",
+      "npz": "clips/take061_unit19_bh.npz",
+      "phase": 0.770833333,
+      "rally_yaw_deg": -11.92,
+      "sha256": "559387de9e852d35c9bcf74ccc7a4baa132a595847cf1d5fa453eb9d118ddd90",
+      "station_xy_hope_m": [
+        -0.68693391,
+        -0.53174326
+      ],
+      "uid": "Take_061_unit19_BH",
+      "warnings": [
+        "real-ball unit coverage 98%"
+      ],
+      "yaw_norm_deg": -15.756
+    },
+    {
+      "T": 58,
+      "clip_id": 44,
+      "family": "BH",
+      "hit_frame_50": 44,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=88b11dc4238d49f89aca55aa4444087cfa5fad5c9ac574017847b8fde9c3202c",
+      "name": "take061_unit20_bh",
+      "npz": "clips/take061_unit20_bh.npz",
+      "phase": 0.771929825,
+      "rally_yaw_deg": -21.97,
+      "sha256": "736d0d39d063da07b1df4319aef02e477d8581ad67bb562a6828400e2dd64039",
+      "station_xy_hope_m": [
+        -0.68165814,
+        -0.52532583
+      ],
+      "uid": "Take_061_unit20_BH",
+      "warnings": [
+        "real-ball unit coverage 98%"
+      ],
+      "yaw_norm_deg": -26.586
+    },
+    {
+      "T": 57,
+      "clip_id": 45,
+      "family": "BH",
+      "hit_frame_50": 45,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=2813540dd047c2e3a5612dbae91e477a71560e08943ff404fb56685c44968ee1",
+      "name": "take061_unit21_bh",
+      "npz": "clips/take061_unit21_bh.npz",
+      "phase": 0.803571429,
+      "rally_yaw_deg": -25.88,
+      "sha256": "b72c8e8a2353f355ea8094684a7509686c9bf508b98ff465981e56d72057e125",
+      "station_xy_hope_m": [
+        -0.69341257,
+        -0.51299334
+      ],
+      "uid": "Take_061_unit21_BH",
+      "warnings": [
+        "real-ball unit coverage 98%"
+      ],
+      "yaw_norm_deg": -26.851
+    },
+    {
+      "T": 79,
+      "clip_id": 46,
+      "family": "BH",
+      "hit_frame_50": 44,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=96cc71845c0e6721357bd67281172b4714d745136b54186f6b160357cdfe5cf0",
+      "name": "take061_unit22_bh",
+      "npz": "clips/take061_unit22_bh.npz",
+      "phase": 0.564102564,
+      "rally_yaw_deg": -24.38,
+      "sha256": "532d0287926527a9e64276e87259f65c31b90dbc9bca558562e35706bc6fcced",
+      "station_xy_hope_m": [
+        -0.68559769,
+        -0.49125693
+      ],
+      "uid": "Take_061_unit22_BH",
+      "warnings": [],
+      "yaw_norm_deg": -29.528
+    },
+    {
+      "T": 90,
+      "clip_id": 47,
+      "family": "BH",
+      "hit_frame_50": 42,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=6176a50fb4e9f20563439b516724902f09c898f0c762048c19a62195caffa033",
+      "name": "take061_unit24_bh",
+      "npz": "clips/take061_unit24_bh.npz",
+      "phase": 0.471910112,
+      "rally_yaw_deg": -25.12,
+      "sha256": "897a1d2fc61f2a2c5b154d91410b43c97d1d970d699ba80bce9e08ecdab83eae",
+      "station_xy_hope_m": [
+        -0.7155031099999999,
+        -0.47825341
+      ],
+      "uid": "Take_061_unit24_BH",
+      "warnings": [
+        "real-ball unit coverage 99%"
+      ],
+      "yaw_norm_deg": -28.587
+    },
+    {
+      "T": 40,
+      "clip_id": 48,
+      "family": "BH",
+      "hit_frame_50": 12,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=cd4e404ebda4128924d65fac00381ab42f9d0965a3add7cf0f33aa398efeeb08",
+      "name": "take061_unit25_bh",
+      "npz": "clips/take061_unit25_bh.npz",
+      "phase": 0.307692308,
+      "rally_yaw_deg": -10.46,
+      "sha256": "dbc85abaee49f1302f86be38c8534a7ab04070b3f1910577a33443c0724f0760",
+      "station_xy_hope_m": [
+        -0.7207079000000001,
+        -0.53303637
+      ],
+      "uid": "Take_061_unit25_BH",
+      "warnings": [
+        "duration 0.78s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -14.52
+    },
+    {
+      "T": 70,
+      "clip_id": 49,
+      "family": "BH",
+      "hit_frame_50": 40,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=fd276183d7b1d681fcc7790a735525858b6010eee660825bbc25ee1e9a79a86f",
+      "name": "take062_unit00_bh",
+      "npz": "clips/take062_unit00_bh.npz",
+      "phase": 0.579710145,
+      "rally_yaw_deg": -7.33,
+      "sha256": "fd36bc7dc8cf80064e39d69e5342d760b599a79a383b420e61d5ee0500764a43",
+      "station_xy_hope_m": [
+        -0.66498853,
+        -0.67186559
+      ],
+      "uid": "Take_062_unit00_BH",
+      "warnings": [],
+      "yaw_norm_deg": -8.595
+    },
+    {
+      "T": 69,
+      "clip_id": 50,
+      "family": "BH",
+      "hit_frame_50": 32,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=73d1469336ab06fa7816a12ba3b97d40a833d6f12b50d968f8f6522fb8bd289c",
+      "name": "take062_unit01_bh",
+      "npz": "clips/take062_unit01_bh.npz",
+      "phase": 0.470588235,
+      "rally_yaw_deg": -13.02,
+      "sha256": "8f94e7b272819a05bd025f489a1d01ef715d4df3d309775efe50c1294b57b80b",
+      "station_xy_hope_m": [
+        -0.6686719600000001,
+        -0.5123735899999999
+      ],
+      "uid": "Take_062_unit01_BH",
+      "warnings": [
+        "local vs venue v_in delta 1.09 m/s"
+      ],
+      "yaw_norm_deg": -12.002
+    },
+    {
+      "T": 54,
+      "clip_id": 51,
+      "family": "BH",
+      "hit_frame_50": 27,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=01c7cd4a428819dee50342bc1c7e4ae6ee76970c535bb788a42550420259c07e",
+      "name": "take062_unit02_bh",
+      "npz": "clips/take062_unit02_bh.npz",
+      "phase": 0.509433962,
+      "rally_yaw_deg": -2.38,
+      "sha256": "c39b6d157db6bb2aa14160029b8c80761bd68e39b9d230fb1ae28cccef6ccd96",
+      "station_xy_hope_m": [
+        -0.65057564,
+        -0.5139934199999999
+      ],
+      "uid": "Take_062_unit02_BH",
+      "warnings": [],
+      "yaw_norm_deg": -9.117
+    },
+    {
+      "T": 57,
+      "clip_id": 52,
+      "family": "BH",
+      "hit_frame_50": 47,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=4f9537ae61ea9c493304d1b47471678c4afabda7203745a8536f1d2a2a0d0a1e",
+      "name": "take062_unit04_bh",
+      "npz": "clips/take062_unit04_bh.npz",
+      "phase": 0.839285714,
+      "rally_yaw_deg": -31.17,
+      "sha256": "296f695fe32b2b05d4e5a741cac69be42026046b6517ed5627e765a32f0efa5d",
+      "station_xy_hope_m": [
+        -0.6656356200000001,
+        -0.46681657
+      ],
+      "uid": "Take_062_unit04_BH",
+      "warnings": [
+        "real-ball unit coverage 98%"
+      ],
+      "yaw_norm_deg": -31.352
+    },
+    {
+      "T": 71,
+      "clip_id": 53,
+      "family": "BH",
+      "hit_frame_50": 50,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=5861ae37eb0f95028a70df3e2c8294d1d91516bbdf9e1dba886b6b6d622e37a2",
+      "name": "take062_unit05_bh",
+      "npz": "clips/take062_unit05_bh.npz",
+      "phase": 0.714285714,
+      "rally_yaw_deg": -26.98,
+      "sha256": "0e56c9febef90e5e8a09dc577647ac83e276638727cbd5e4320954dd7f1bf517",
+      "station_xy_hope_m": [
+        -0.6714121299999999,
+        -0.48562191
+      ],
+      "uid": "Take_062_unit05_BH",
+      "warnings": [],
+      "yaw_norm_deg": -30.294
+    },
+    {
+      "T": 58,
+      "clip_id": 54,
+      "family": "BH",
+      "hit_frame_50": 38,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=c448fb40c5e905afae28aa201edc5a89ab457103e04db726f82543daf78c2d13",
+      "name": "take062_unit06_bh",
+      "npz": "clips/take062_unit06_bh.npz",
+      "phase": 0.666666667,
+      "rally_yaw_deg": -15.34,
+      "sha256": "d01a4bbb147249d3ba0b05402246f890631d4b68f3ee051ac37aefd962c28c51",
+      "station_xy_hope_m": [
+        -0.6203849300000001,
+        -0.51046282
+      ],
+      "uid": "Take_062_unit06_BH",
+      "warnings": [],
+      "yaw_norm_deg": -17.934
+    },
+    {
+      "T": 86,
+      "clip_id": 55,
+      "family": "BH",
+      "hit_frame_50": 38,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=75d32b16bc0381657d361ec53d0c1bcbd8f0afcce88fb3c355745c13fb6c8160",
+      "name": "take062_unit07_bh",
+      "npz": "clips/take062_unit07_bh.npz",
+      "phase": 0.447058824,
+      "rally_yaw_deg": -20.33,
+      "sha256": "9fa586e123b6582c5662947e9d839c9d8947da2026e11925afd8aaf5f966bb1c",
+      "station_xy_hope_m": [
+        -0.63455635,
+        -0.51860123
+      ],
+      "uid": "Take_062_unit07_BH",
+      "warnings": [],
+      "yaw_norm_deg": -20.08
+    },
+    {
+      "T": 29,
+      "clip_id": 56,
+      "family": "BH",
+      "hit_frame_50": 10,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=27aee8ffdbe0066d4a6387843d88fb0110b28774e0419136cd3c8d67ee6f875f",
+      "name": "take062_unit08_bh",
+      "npz": "clips/take062_unit08_bh.npz",
+      "phase": 0.357142857,
+      "rally_yaw_deg": -6.81,
+      "sha256": "ab05600bb84cf3f74d00c6f742c89ac657ec8fbf51081c3726f5dd6b5b6895de",
+      "station_xy_hope_m": [
+        -0.70997816,
+        -0.53393887
+      ],
+      "uid": "Take_062_unit08_BH",
+      "warnings": [
+        "duration 0.56s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -12.429
+    },
+    {
+      "T": 59,
+      "clip_id": 57,
+      "family": "BH",
+      "hit_frame_50": 39,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=a1b924f06fffd9ffcb7942f943cd0e4da4dc1c4e2dfed1ffbebe70b3f9933b97",
+      "name": "take062_unit09_bh",
+      "npz": "clips/take062_unit09_bh.npz",
+      "phase": 0.672413793,
+      "rally_yaw_deg": -17.6,
+      "sha256": "1148fa1458b2c90ce8cac7a2c25d01bba40afd5336677d14217a51d6a377d27f",
+      "station_xy_hope_m": [
+        -0.64684138,
+        -0.58383511
+      ],
+      "uid": "Take_062_unit09_BH",
+      "warnings": [],
+      "yaw_norm_deg": -18.883
+    },
+    {
+      "T": 95,
+      "clip_id": 58,
+      "family": "BH",
+      "hit_frame_50": 42,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=977e7ac69542a594de5c97eea71dae2e45b227afbaed2467ac72b95b69a88c4a",
+      "name": "take062_unit10_bh",
+      "npz": "clips/take062_unit10_bh.npz",
+      "phase": 0.446808511,
+      "rally_yaw_deg": -15.88,
+      "sha256": "e58a65f34d8604dc7536bbf17c9e7104539ebc4df7d19f6a8b73a80f36d0d68a",
+      "station_xy_hope_m": [
+        -0.63029679,
+        -0.53234054
+      ],
+      "uid": "Take_062_unit10_BH",
+      "warnings": [],
+      "yaw_norm_deg": -20.335
+    },
+    {
+      "T": 133,
+      "clip_id": 59,
+      "family": "BH",
+      "hit_frame_50": 74,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=aaf33f7034f68d3232ba3c82404d246197361cb29c67af7eb153301266e8b3c8",
+      "name": "take062_unit11_bh",
+      "npz": "clips/take062_unit11_bh.npz",
+      "phase": 0.560606061,
+      "rally_yaw_deg": -18.17,
+      "sha256": "fd4d4dbeb7236cdc767e576ed7d4bbb6428d9f581557d054485d5158b9b3fd3f",
+      "station_xy_hope_m": [
+        -0.6754153700000001,
+        -0.52149926
+      ],
+      "uid": "Take_062_unit11_BH",
+      "warnings": [
+        "real-ball unit coverage 88%"
+      ],
+      "yaw_norm_deg": -16.683
+    },
+    {
+      "T": 64,
+      "clip_id": 60,
+      "family": "BH",
+      "hit_frame_50": 28,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=6bb7be1420a9b29130f5994fda8020dd1aa4033f6ee3b5e61c99ef20415c8a5d",
+      "name": "take063_unit00_bh",
+      "npz": "clips/take063_unit00_bh.npz",
+      "phase": 0.444444444,
+      "rally_yaw_deg": -6.81,
+      "sha256": "4cb44d8828410183dc31d4008dee1d8201ff3a3aa5b29e881339ac71dddf7071",
+      "station_xy_hope_m": [
+        -0.70478932,
+        -0.53893506
+      ],
+      "uid": "Take_063_unit00_BH",
+      "warnings": [],
+      "yaw_norm_deg": -6.717
+    },
+    {
+      "T": 39,
+      "clip_id": 61,
+      "family": "BH",
+      "hit_frame_50": 27,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=a165d0779f910c4bc3a5c13d6b780d2e0c963ff81abe02e6619b895c362fbbdd",
+      "name": "take063_unit01_bh",
+      "npz": "clips/take063_unit01_bh.npz",
+      "phase": 0.710526316,
+      "rally_yaw_deg": -8.93,
+      "sha256": "b46fbf2d020cb1c3ff7e99bcd3df561bddb3a39f9293e5f11f5772edb6b19f1f",
+      "station_xy_hope_m": [
+        -0.68167944,
+        -0.48307214000000004
+      ],
+      "uid": "Take_063_unit01_BH",
+      "warnings": [
+        "real-ball unit coverage 98%",
+        "duration 0.76s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -8.362
+    },
+    {
+      "T": 76,
+      "clip_id": 62,
+      "family": "BH",
+      "hit_frame_50": 52,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=1a91218f2e8e8e1ee685bf79fe7bef353923cfa3c0bb8558ee953a63017957ae",
+      "name": "take063_unit02_bh",
+      "npz": "clips/take063_unit02_bh.npz",
+      "phase": 0.693333333,
+      "rally_yaw_deg": -22.06,
+      "sha256": "fa76e7645baabced9d6029fe8073f482c549f36afdfeb17148401458e488ce36",
+      "station_xy_hope_m": [
+        -0.70591249,
+        -0.5205036599999999
+      ],
+      "uid": "Take_063_unit02_BH",
+      "warnings": [],
+      "yaw_norm_deg": -26.719
+    },
+    {
+      "T": 115,
+      "clip_id": 63,
+      "family": "BH",
+      "hit_frame_50": 35,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=e8bc69dda95884710083df6318db6b0d130fee4658dad363be6d01722f29df52",
+      "name": "take063_unit03_bh",
+      "npz": "clips/take063_unit03_bh.npz",
+      "phase": 0.307017544,
+      "rally_yaw_deg": -14.05,
+      "sha256": "0d4d200e32fcb99779394a2b65af897e54067dbe22d8e6ec3132bea2c230e61d",
+      "station_xy_hope_m": [
+        -0.634186,
+        -0.5592153799999999
+      ],
+      "uid": "Take_063_unit03_BH",
+      "warnings": [
+        "real-ball unit coverage 99%"
+      ],
+      "yaw_norm_deg": -17.287
+    },
+    {
+      "T": 104,
+      "clip_id": 64,
+      "family": "BH",
+      "hit_frame_50": 35,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=13e8019e965d4e25c25274c29a69e6bf725ac40a8e624a0401e238c37f735216",
+      "name": "take063_unit04_bh",
+      "npz": "clips/take063_unit04_bh.npz",
+      "phase": 0.339805825,
+      "rally_yaw_deg": -14.39,
+      "sha256": "53f42f40eb98966b9ca0baee90a7c0db452a6d7ee2ffcbd0703f1ba13f915fd6",
+      "station_xy_hope_m": [
+        -0.63615705,
+        -0.55393107
+      ],
+      "uid": "Take_063_unit04_BH",
+      "warnings": [
+        "real-ball unit coverage 99%"
+      ],
+      "yaw_norm_deg": -18.018
+    },
+    {
+      "T": 95,
+      "clip_id": 65,
+      "family": "BH",
+      "hit_frame_50": 46,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=a2d456512ef7857219bb6c336e566498484362885f21a0c9cf086cea9c7f3632",
+      "name": "take063_unit05_bh",
+      "npz": "clips/take063_unit05_bh.npz",
+      "phase": 0.489361702,
+      "rally_yaw_deg": -27.72,
+      "sha256": "91c66f85857cf4e8d0be01ae8821ff944f863bb83ab467633938d2b11a75db7e",
+      "station_xy_hope_m": [
+        -0.6579703499999999,
+        -0.55563695
+      ],
+      "uid": "Take_063_unit05_BH",
+      "warnings": [
+        "real-ball unit coverage 92%"
+      ],
+      "yaw_norm_deg": -24.612
+    },
+    {
+      "T": 56,
+      "clip_id": 66,
+      "family": "BH",
+      "hit_frame_50": 25,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=e0b47fa6a51e345f3cdea480e8f04e644101894f0349295b2ba2ce82ab71715d",
+      "name": "take064_unit00_bh",
+      "npz": "clips/take064_unit00_bh.npz",
+      "phase": 0.454545455,
+      "rally_yaw_deg": -10.42,
+      "sha256": "e9b5d78f15c3e46493b73ef242dc534970ccad24e114c91c4925c1398adb9fcc",
+      "station_xy_hope_m": [
+        -0.7465453200000001,
+        -0.57166264
+      ],
+      "uid": "Take_064_unit00_BH",
+      "warnings": [],
+      "yaw_norm_deg": -9.248
+    },
+    {
+      "T": 62,
+      "clip_id": 67,
+      "family": "BH",
+      "hit_frame_50": 11,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=1b1ea276f5e1af745c362163e93fbfe7c0a3291124df120ddfccfd02bee0c944",
+      "name": "take064_unit02_bh",
+      "npz": "clips/take064_unit02_bh.npz",
+      "phase": 0.180327869,
+      "rally_yaw_deg": -8.78,
+      "sha256": "ec1208125f99891779ac8bef1f2ba5c1abe848135bc021905be8cd406b2244ae",
+      "station_xy_hope_m": [
+        -0.69631445,
+        -0.43417900000000004
+      ],
+      "uid": "Take_064_unit02_BH",
+      "warnings": [],
+      "yaw_norm_deg": -10.429
+    },
+    {
+      "T": 39,
+      "clip_id": 68,
+      "family": "BH",
+      "hit_frame_50": 10,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=c8f620391c915d9e45a91542328157bc1c981475291ece44bbc253a12096d473",
+      "name": "take064_unit03_bh",
+      "npz": "clips/take064_unit03_bh.npz",
+      "phase": 0.263157895,
+      "rally_yaw_deg": -8.61,
+      "sha256": "f968f6bcdd93ec32dfab47dfd1e870002c870077cb0cd5b7831e628bfb688f22",
+      "station_xy_hope_m": [
+        -0.6758294100000001,
+        -0.48523882
+      ],
+      "uid": "Take_064_unit03_BH",
+      "warnings": [
+        "duration 0.76s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -12.942
+    },
+    {
+      "T": 78,
+      "clip_id": 69,
+      "family": "BH",
+      "hit_frame_50": 32,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=98770d5815f968fda8da2d2ba5ffd94a2c63e159a27d2e656e8731033e74d6dd",
+      "name": "take064_unit04_bh",
+      "npz": "clips/take064_unit04_bh.npz",
+      "phase": 0.415584416,
+      "rally_yaw_deg": -18.65,
+      "sha256": "cb451265d56a767bfe303c98cf5b1c9361db82ad28813f4f665e7f1d8f4005c6",
+      "station_xy_hope_m": [
+        -0.63635095,
+        -0.52462631
+      ],
+      "uid": "Take_064_unit04_BH",
+      "warnings": [],
+      "yaw_norm_deg": -18.434
+    },
+    {
+      "T": 37,
+      "clip_id": 70,
+      "family": "BH",
+      "hit_frame_50": 14,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=c1728980a9788b6e5c45f3a12886d0bef037f3d044ef6fd50befd15858ca3f1a",
+      "name": "take064_unit05_bh",
+      "npz": "clips/take064_unit05_bh.npz",
+      "phase": 0.388888889,
+      "rally_yaw_deg": -13.57,
+      "sha256": "b446f7fa4f546f26b9b553664c125d80f49877d83996d14e9e6229a4d66fde19",
+      "station_xy_hope_m": [
+        -0.64080936,
+        -0.54577553
+      ],
+      "uid": "Take_064_unit05_BH",
+      "warnings": [
+        "duration 0.72s outside [0.8, 4.0]"
+      ],
+      "yaw_norm_deg": -17.168
+    },
+    {
+      "T": 56,
+      "clip_id": 71,
+      "family": "BH",
+      "hit_frame_50": 34,
+      "mount_normal_sign": -1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=fd86dbae0c406e6293cfd51caf2be15e31fe88c4feaf3aa8d5db6b32a1a92cc3",
+      "name": "take064_unit06_bh",
+      "npz": "clips/take064_unit06_bh.npz",
+      "phase": 0.618181818,
+      "rally_yaw_deg": -13.44,
+      "sha256": "04a673f9bd7c34e80ac89e94767cd0d789f6e05c9c3c8240ed83743e4f584055",
+      "station_xy_hope_m": [
+        -0.61645168,
+        -0.54585273
+      ],
+      "uid": "Take_064_unit06_BH",
+      "warnings": [],
+      "yaw_norm_deg": -17.382
+    },
+    {
+      "T": 57,
+      "clip_id": 72,
+      "family": "FH",
+      "hit_frame_50": 36,
+      "mount_normal_sign": 1,
+      "mount_normal_sign_source": "measured-hit-signed-face-discovery-v1;report_sha256=113e9e5aece84f11551c8f9e8447a7ed273126f1594ff2f84bee4537d24128af",
+      "name": "take064_unit07_fh",
+      "npz": "clips/take064_unit07_fh.npz",
+      "phase": 0.642857143,
+      "rally_yaw_deg": -8.15,
+      "sha256": "9a1fc12021bc6790e5f2312adaaf7ddd0650fb9d09a1dae5fa026c0eac966502",
+      "station_xy_hope_m": [
+        -0.62577664,
+        -0.55161234
+      ],
+      "uid": "Take_064_unit07_FH",
+      "warnings": [],
+      "yaw_norm_deg": -12.659
+    }
+  ],
+  "excluded": [
+    "Take_085_unit00_FH"
+  ],
+  "generated": "2026-07-28",
+  "n_clips": 73,
+  "order_note": "clip_id = index = motion_file order = clip_names order = bank clip_order",
+  "sign_authority": {
+    "discovery_report_kind": "chingmu_canonical_racket_full_phase_retarget_v3",
+    "discovery_report_schema_version": 3,
+    "flipped_uids": [
+      "Take_060_unit00_BH",
+      "Take_060_unit02_BH",
+      "Take_060_unit06_BH",
+      "Take_060_unit07_BH",
+      "Take_061_unit04_BH",
+      "Take_061_unit10_BH",
+      "Take_062_unit09_BH",
+      "Take_063_unit03_BH",
+      "Take_064_unit05_BH",
+      "Take_064_unit07_FH"
+    ],
+    "kind": "chingmu73_measured_hit_robot_face_sign_map_v1",
+    "new_counts": {
+      "+1": 22,
+      "-1": 51
+    },
+    "old_counts": {
+      "+1": 14,
+      "-1": 59
+    },
+    "schema_version": 1,
+    "sign_map_sha256": "7ed446a81c869497c662becee2150ce5cced3b2e343f0722d74da0927f289c01",
+    "source_catalog_sha256": "e10ed18597cc9cf21a19ab2b53d36e99cc61dfb9d20dec56299dee4cacfa1e55"
+  },
+  "sign_override_note": "family-default/FK-era signs superseded by per-action measured signed-hit-face discovery; production retarget must consume this pinned map"
+}

@@ -1,0 +1,5702 @@
+{
+ "schema": "chingmu_manifest_v1",
+ "generated_utc": "2026-07-27T17:00:50.388915Z",
+ "converter_validation": {
+  "Take_058_unit07_FH": "pass (v1 pkl -> reference npz: pos max|diff| 0.0 m, quat 0.045 deg, joint 0.038 deg)",
+  "Take_060_unit09_BH": "pass (v1 pkl -> reference npz: bit-exact except quat metric 0.047 deg)",
+  "note": "batch converts chingmu_a3_units_v2 pkls (different bytes from the v1 pair the references were built from)"
+ },
+ "fit_validation": {
+  "v_in_err_vs_meta_ms": {
+   "Take_058_unit07_FH": 0.0001,
+   "Take_060_unit09_BH": 0.0002
+  },
+  "v_out_err_vs_meta_ms": {
+   "Take_058_unit07_FH": 0.0002,
+   "Take_060_unit09_BH": 0.0003
+  },
+  "channel": "one-sided FD of ball_synth at hit (venue-fit lineage)"
+ },
+ "frame_contract": "pkl 120Hz +6-frame head pad -> 50Hz (n_out=round(dur*50)+1); hit50=round((hit_pkl+6)*50/120); npz frame +X = robot initial heading (per-unit yaw_norm_deg); z=0 floor",
+ "units": [
+  {
+   "uid": "Take_058_unit02_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit02_FH.npz",
+   "npz_sha256": "edf25948bb13c6a8c37c788321054b8448dd8b8eb5c7afa083df6014a59fdbb1",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit02_FH.pkl",
+   "source_pkl_sha256": "832428debc82ed948c163af5ee08029b522b02c8acce008297e6700e6e115be6",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit02_FH.ball.npz",
+   "T": 96,
+   "fps": 50,
+   "duration_s": 1.9,
+   "hit_frame_ball_120": 120,
+   "hit_frame_pkl_120": 120,
+   "hit_frame_src120": 126,
+   "hit_frame_50": 52,
+   "strike_phase": 0.5474,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.61141563,
+    -0.86302684
+   ],
+   "yaw_before_deg": 5.42,
+   "yaw_norm_deg": -5.42,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.334,
+    -1.081,
+    -1.6981
+   ],
+   "v_out_fit_hope_ms": [
+    3.7609,
+    1.862,
+    2.3178
+   ],
+   "ball_pos_hit_hope_m": [
+    0.1481,
+    -1.3156,
+    0.2263
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.2304,
+     -1.0188,
+     -1.7777
+    ],
+    "rms_resid_m": 0.00829,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     3.9461,
+     2.1225,
+     2.0198
+    ],
+    "rms_resid_m": 0.00537,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1447,
+   "v_out_local_vs_venue_ms": 0.437,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit03_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit03_FH.npz",
+   "npz_sha256": "8ae9c9548e36ba16f3cea3d3f5f74027e9bfccd5adf9ee426de125bf75d61ad3",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit03_FH.pkl",
+   "source_pkl_sha256": "94410c2cd87b78afe5a8f5e1965a465243e9544dd41d43d54e1c54cf8abeec15",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit03_FH.ball.npz",
+   "T": 81,
+   "fps": 50,
+   "duration_s": 1.6,
+   "hit_frame_ball_120": 84,
+   "hit_frame_pkl_120": 84,
+   "hit_frame_src120": 90,
+   "hit_frame_50": 38,
+   "strike_phase": 0.475,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.53676805,
+    -0.71919501
+   ],
+   "yaw_before_deg": 3.165,
+   "yaw_norm_deg": -3.165,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.62,
+    -1.383,
+    -1.1931
+   ],
+   "v_out_fit_hope_ms": [
+    4.2428,
+    1.8939,
+    2.9807
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0188,
+    -1.4767,
+    0.2042
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.3974,
+     -1.2429,
+     -1.1775
+    ],
+    "rms_resid_m": 0.00683,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.2891,
+     1.9117,
+     2.6726
+    ],
+    "rms_resid_m": 0.00965,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.2635,
+   "v_out_local_vs_venue_ms": 0.3121,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit04_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit04_FH.npz",
+   "npz_sha256": "6b60255f0530e50b9d37f863d3f9c1b68bd25d35c8dd6bfc54a52bd045a89a7d",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit04_FH.pkl",
+   "source_pkl_sha256": "27aa60f6ac3bd9f9babdc3d11e9e3b1fd3afc43ef5b50092c8299970072d230f",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit04_FH.ball.npz",
+   "T": 91,
+   "fps": 50,
+   "duration_s": 1.8,
+   "hit_frame_ball_120": 111,
+   "hit_frame_pkl_120": 111,
+   "hit_frame_src120": 117,
+   "hit_frame_50": 49,
+   "strike_phase": 0.5444,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.5792551,
+    -0.7661862100000001
+   ],
+   "yaw_before_deg": 2.863,
+   "yaw_norm_deg": -2.863,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.503,
+    -0.897,
+    -1.2991
+   ],
+   "v_out_fit_hope_ms": [
+    4.5658,
+    1.8029,
+    2.7407
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.2438,
+    -1.3192,
+    0.2896
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.2902,
+     -0.9041,
+     -1.3002
+    ],
+    "rms_resid_m": 0.00667,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.5204,
+     1.8389,
+     2.3948
+    ],
+    "rms_resid_m": 0.0083,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.2129,
+   "v_out_local_vs_venue_ms": 0.3508,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit05_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit05_FH.npz",
+   "npz_sha256": "016e4c680bbcdeccea76fe9bcac31af1c42427c4d19be9261dbed0c9a5610978",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit05_FH.pkl",
+   "source_pkl_sha256": "e43e0d6daf62c019ba6999485ab4493583c9324bfbf6ed68fe98806265df26f3",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit05_FH.ball.npz",
+   "T": 90,
+   "fps": 50,
+   "duration_s": 1.78,
+   "hit_frame_ball_120": 110,
+   "hit_frame_pkl_120": 110,
+   "hit_frame_src120": 116,
+   "hit_frame_50": 48,
+   "strike_phase": 0.5393,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.60435648,
+    -0.7272147699999999
+   ],
+   "yaw_before_deg": 1.884,
+   "yaw_norm_deg": -1.884,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.491,
+    -1.153,
+    -1.3241
+   ],
+   "v_out_fit_hope_ms": [
+    4.3098,
+    2.2889,
+    3.2137
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.1541,
+    -1.5139,
+    0.2869
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.3691,
+     -1.124,
+     -1.3424
+    ],
+    "rms_resid_m": 0.01193,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.1649,
+     2.1846,
+     2.8817
+    ],
+    "rms_resid_m": 0.00822,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1266,
+   "v_out_local_vs_venue_ms": 0.377,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit06_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit06_FH.npz",
+   "npz_sha256": "6bcd2a9792be236d3b3f911e3b7dbcfdb84b588232b5bf76368fa5e9fe6ac67a",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit06_FH.pkl",
+   "source_pkl_sha256": "630e6de873a4354a2b99e29f0800b614883527adac698fbf2897f18181229e08",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit06_FH.ball.npz",
+   "T": 97,
+   "fps": 50,
+   "duration_s": 1.92,
+   "hit_frame_ball_120": 125,
+   "hit_frame_pkl_120": 125,
+   "hit_frame_src120": 131,
+   "hit_frame_50": 55,
+   "strike_phase": 0.5729,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.60523203,
+    -0.7530440500000001
+   ],
+   "yaw_before_deg": 6.23,
+   "yaw_norm_deg": -6.23,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.173,
+    -1.209,
+    -1.6011
+   ],
+   "v_out_fit_hope_ms": [
+    4.4878,
+    2.5389,
+    2.4877
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.1192,
+    -1.4893,
+    0.2651
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.0691,
+     -1.171,
+     -1.6712
+    ],
+    "rms_resid_m": 0.01101,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.4767,
+     2.4619,
+     2.1864
+    ],
+    "rms_resid_m": 0.00862,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.131,
+   "v_out_local_vs_venue_ms": 0.3112,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit07_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit07_FH.npz",
+   "npz_sha256": "6490159ac633803559390edab893bacfcd5af9be8a25a7318aa60bf769ea227f",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit07_FH.pkl",
+   "source_pkl_sha256": "4ae25e422ad7f5fdeab23af57092de2b82730c0f7892b97b37dbe3f11ea9aa04",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit07_FH.ball.npz",
+   "T": 92,
+   "fps": 50,
+   "duration_s": 1.82,
+   "hit_frame_ball_120": 109,
+   "hit_frame_pkl_120": 109,
+   "hit_frame_src120": 115,
+   "hit_frame_50": 48,
+   "strike_phase": 0.5275,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.62619797,
+    -0.7680599100000001
+   ],
+   "yaw_before_deg": 4.852,
+   "yaw_norm_deg": -4.852,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -1.798,
+    -0.965,
+    -1.8261
+   ],
+   "v_out_fit_hope_ms": [
+    3.5959,
+    1.4169,
+    2.1968
+   ],
+   "ball_pos_hit_hope_m": [
+    0.2911,
+    -1.1695,
+    0.1946
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -1.6341,
+     -0.9536,
+     -1.838
+    ],
+    "rms_resid_m": 0.00648,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     3.8799,
+     1.6124,
+     1.9701
+    ],
+    "rms_resid_m": 0.00482,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1647,
+   "v_out_local_vs_venue_ms": 0.4126,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit08_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit08_FH.npz",
+   "npz_sha256": "266e582ebabc49f824f8591bfa6d8333a02756fa3f16f4169c06dd3cde4af8c0",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit08_FH.pkl",
+   "source_pkl_sha256": "b2c1b4bc0c5a6ec67309e306f63297fb30397edafe1bd3873cc954b8c61a4d70",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit08_FH.ball.npz",
+   "T": 85,
+   "fps": 50,
+   "duration_s": 1.68,
+   "hit_frame_ball_120": 81,
+   "hit_frame_pkl_120": 81,
+   "hit_frame_src120": 87,
+   "hit_frame_50": 36,
+   "strike_phase": 0.4286,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.55405043,
+    -0.7313592800000001
+   ],
+   "yaw_before_deg": 7.881,
+   "yaw_norm_deg": -7.881,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.716,
+    -0.932,
+    -0.9801
+   ],
+   "v_out_fit_hope_ms": [
+    4.1379,
+    1.736,
+    2.5688
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.163,
+    -1.207,
+    0.2416
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.4853,
+     -0.9023,
+     -0.9924
+    ],
+    "rms_resid_m": 0.01019,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.5189,
+     1.886,
+     2.2917
+    ],
+    "rms_resid_m": 0.00702,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.2329,
+   "v_out_local_vs_venue_ms": 0.4944,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit11_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit11_FH.npz",
+   "npz_sha256": "fef66ef3f2f54b9e9341738ad0aa65523676bbf573cfc3cabbcf3cd4444a5ef8",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit11_FH.pkl",
+   "source_pkl_sha256": "5e93a797e2873e12fa8d28714cc72e2c93d9ab2416b836ab3fbead6ae793ecb8",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit11_FH.ball.npz",
+   "T": 87,
+   "fps": 50,
+   "duration_s": 1.72,
+   "hit_frame_ball_120": 109,
+   "hit_frame_pkl_120": 109,
+   "hit_frame_src120": 115,
+   "hit_frame_50": 48,
+   "strike_phase": 0.5581,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.66668569,
+    -0.7946684500000001
+   ],
+   "yaw_before_deg": 10.649,
+   "yaw_norm_deg": -10.649,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -1.986,
+    -0.946,
+    -1.5371
+   ],
+   "v_out_fit_hope_ms": [
+    5.2018,
+    2.4079,
+    1.9298
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.3203,
+    -1.3432,
+    0.2225
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -1.729,
+     -0.7717,
+     -1.5353
+    ],
+    "rms_resid_m": 0.00593,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.2826,
+     2.5255,
+     1.6092
+    ],
+    "rms_resid_m": 0.0084,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3106,
+   "v_out_local_vs_venue_ms": 0.3509,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit12_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit12_FH.npz",
+   "npz_sha256": "380ae334309dea99e2cf38b36d2e164f3dd9cfee5cd84d50ebf8f3ee3e176e9b",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit12_FH.pkl",
+   "source_pkl_sha256": "9194aa4521c3d1e9e3599c59969af361fb5d6103ccc39c9dbab857f5833f3b40",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit12_FH.ball.npz",
+   "T": 92,
+   "fps": 50,
+   "duration_s": 1.82,
+   "hit_frame_ball_120": 99,
+   "hit_frame_pkl_120": 99,
+   "hit_frame_src120": 105,
+   "hit_frame_50": 44,
+   "strike_phase": 0.4835,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6641410000000001,
+    -0.76472156
+   ],
+   "yaw_before_deg": 6.176,
+   "yaw_norm_deg": -6.176,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.356,
+    -0.908,
+    -0.9391
+   ],
+   "v_out_fit_hope_ms": [
+    6.0118,
+    1.5439,
+    1.6398
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.4755,
+    -1.1631,
+    0.3395
+   ],
+   "real_synth_anchor_gap_m": 2e-05,
+   "v_in_local_fit": {
+    "v": [
+     -1.9236,
+     -0.8279,
+     -0.9638
+    ],
+    "rms_resid_m": 0.00482,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.7465,
+     1.437,
+     2.0935
+    ],
+    "rms_resid_m": 0.00756,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4405,
+   "v_out_local_vs_venue_ms": 0.5364,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit13_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit13_FH.npz",
+   "npz_sha256": "37cd308ed771037b5c006290a3a17c4c026faa39af95e04aa62b780e0da3c56a",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit13_FH.pkl",
+   "source_pkl_sha256": "ceeb4968f4154fdd74d038b328b9da39f8801e73e2604d302b8a3c23783639c0",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit13_FH.ball.npz",
+   "T": 81,
+   "fps": 50,
+   "duration_s": 1.6,
+   "hit_frame_ball_120": 89,
+   "hit_frame_pkl_120": 89,
+   "hit_frame_src120": 95,
+   "hit_frame_50": 40,
+   "strike_phase": 0.5,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.76759742,
+    -0.68521665
+   ],
+   "yaw_before_deg": -4.761,
+   "yaw_norm_deg": 4.761,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.394,
+    -0.812,
+    -1.4881
+   ],
+   "v_out_fit_hope_ms": [
+    4.8838,
+    2.1859,
+    2.5247
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.1745,
+    -1.3782,
+    0.2445
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.2724,
+     -0.7818,
+     -1.536
+    ],
+    "rms_resid_m": 0.00958,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.8475,
+     2.0659,
+     2.2142
+    ],
+    "rms_resid_m": 0.00696,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1342,
+   "v_out_local_vs_venue_ms": 0.3349,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_058_unit14_FH",
+   "take": "Take_058",
+   "family": "FH",
+   "npz": "clips/hope_Take_058_unit14_FH.npz",
+   "npz_sha256": "947a7d0d6f60f0cce0f01ffc2ee00b4d50a292e308fcc810751657a02f39dbcf",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_058_unit14_FH.pkl",
+   "source_pkl_sha256": "7903a49827bb2bbf0086c4f29234f2e486564dd76ce8858bfbaf8654781896f2",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_058_unit14_FH.ball.npz",
+   "T": 86,
+   "fps": 50,
+   "duration_s": 1.7,
+   "hit_frame_ball_120": 94,
+   "hit_frame_pkl_120": 94,
+   "hit_frame_src120": 100,
+   "hit_frame_50": 42,
+   "strike_phase": 0.4941,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.64363605,
+    -0.70144052
+   ],
+   "yaw_before_deg": 5.267,
+   "yaw_norm_deg": -5.267,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.628,
+    -1.126,
+    -1.2671
+   ],
+   "v_out_fit_hope_ms": [
+    4.5968,
+    1.8639,
+    2.7537
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.222,
+    -1.319,
+    0.2416
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.3945,
+     -0.97,
+     -1.2738
+    ],
+    "rms_resid_m": 0.00701,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.6175,
+     1.9416,
+     2.3095
+    ],
+    "rms_resid_m": 0.01232,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.2809,
+   "v_out_local_vs_venue_ms": 0.4515,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_059_unit01_FH",
+   "take": "Take_059",
+   "family": "FH",
+   "npz": "clips/hope_Take_059_unit01_FH.npz",
+   "npz_sha256": "aba21d2e0fca0ff77ffef9477bd9e81d10b01f295887c671fe4ac7f440391842",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_059_unit01_FH.pkl",
+   "source_pkl_sha256": "066c3de280018831e9633c0d7e1938514b772ceb35b05a26847629deec0a4463",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_059_unit01_FH.ball.npz",
+   "T": 83,
+   "fps": 50,
+   "duration_s": 1.64,
+   "hit_frame_ball_120": 83,
+   "hit_frame_pkl_120": 83,
+   "hit_frame_src120": 89,
+   "hit_frame_50": 37,
+   "strike_phase": 0.4512,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.54029327,
+    -0.49528779
+   ],
+   "yaw_before_deg": 17.009,
+   "yaw_norm_deg": -17.009,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.22,
+    -1.248,
+    -1.2771
+   ],
+   "v_out_fit_hope_ms": [
+    4.1889,
+    2.5389,
+    2.5938
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0068,
+    -1.5585,
+    0.1967
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.1077,
+     -1.1386,
+     -1.312
+    ],
+    "rms_resid_m": 0.01234,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.5511,
+     2.9723,
+     2.1572
+    ],
+    "rms_resid_m": 0.00844,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1606,
+   "v_out_local_vs_venue_ms": 0.7139,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_059_unit03_FH",
+   "take": "Take_059",
+   "family": "FH",
+   "npz": "clips/hope_Take_059_unit03_FH.npz",
+   "npz_sha256": "2b1641217a03dd93f8f4fa931f66c2ea22bdfcd6a4f3ba9c1ba6dde7b7704c60",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_059_unit03_FH.pkl",
+   "source_pkl_sha256": "e421e71ef5e7d301b70a5f77c23fa3afa531308ba2977b8c5a271f96e9ee4f72",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_059_unit03_FH.ball.npz",
+   "T": 89,
+   "fps": 50,
+   "duration_s": 1.76,
+   "hit_frame_ball_120": 102,
+   "hit_frame_pkl_120": 102,
+   "hit_frame_src120": 108,
+   "hit_frame_50": 45,
+   "strike_phase": 0.5114,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.61774032,
+    -0.91305695
+   ],
+   "yaw_before_deg": 9.528,
+   "yaw_norm_deg": -9.528,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.17,
+    -0.975,
+    -1.6241
+   ],
+   "v_out_fit_hope_ms": [
+    4.5988,
+    1.9159,
+    2.3678
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.2186,
+    -1.2965,
+    0.2387
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.0049,
+     -0.9556,
+     -1.687
+    ],
+    "rms_resid_m": 0.00788,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.903,
+     2.0804,
+     1.9444
+    ],
+    "rms_resid_m": 0.00564,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1778,
+   "v_out_local_vs_venue_ms": 0.5466,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit00_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit00_BH.npz",
+   "npz_sha256": "9e529212d1151e08d8863b4b7b04039233f4485bf66cc40bf834dee585841479",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit00_BH.pkl",
+   "source_pkl_sha256": "39870be05da77bdf65a2808ed06d89b4bd6c557800c69106ff11977691e4aad9",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit00_BH.ball.npz",
+   "T": 73,
+   "fps": 50,
+   "duration_s": 1.44,
+   "hit_frame_ball_120": 93,
+   "hit_frame_pkl_120": 93,
+   "hit_frame_src120": 99,
+   "hit_frame_50": 41,
+   "strike_phase": 0.5694,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.7499994200000001,
+    -0.6241145
+   ],
+   "yaw_before_deg": 10.041,
+   "yaw_norm_deg": -10.041,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.055,
+    0.103,
+    0.7479
+   ],
+   "v_out_fit_hope_ms": [
+    5.4468,
+    -0.187,
+    1.9608
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0007,
+    -0.3764,
+    0.2883
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.0643,
+     -0.0422,
+     0.216
+    ],
+    "rms_resid_m": 0.00607,
+    "n_used": 26,
+    "window": [
+     -25,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.4837,
+     -0.182,
+     2.1354
+    ],
+    "rms_resid_m": 0.0101,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5514,
+   "v_out_local_vs_venue_ms": 0.1786,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit01_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit01_BH.npz",
+   "npz_sha256": "54745c5b6533cc33cbf3394d25c183718e4191233d79b2903f8e16ecf1ddfc37",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit01_BH.pkl",
+   "source_pkl_sha256": "31cc3173ecfb36cda915ff0d8e284245384b6a8f4ce7002c444139291bdfe4a6",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit01_BH.ball.npz",
+   "T": 86,
+   "fps": 50,
+   "duration_s": 1.7,
+   "hit_frame_ball_120": 129,
+   "hit_frame_pkl_120": 129,
+   "hit_frame_src120": 135,
+   "hit_frame_50": 56,
+   "strike_phase": 0.6588,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.71582312,
+    -0.55676432
+   ],
+   "yaw_before_deg": 10.671,
+   "yaw_norm_deg": -10.671,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -1.356,
+    -0.069,
+    0.6619
+   ],
+   "v_out_fit_hope_ms": [
+    4.2449,
+    -0.272,
+    2.3578
+   ],
+   "ball_pos_hit_hope_m": [
+    0.2339,
+    -0.4364,
+    0.1239
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -1.3473,
+     -0.0184,
+     0.1763
+    ],
+    "rms_resid_m": 0.00731,
+    "n_used": 16,
+    "window": [
+     -15,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.1626,
+     -0.3269,
+     2.2468
+    ],
+    "rms_resid_m": 0.00536,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4883,
+   "v_out_local_vs_venue_ms": 0.1487,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit02_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit02_BH.npz",
+   "npz_sha256": "9480afb62b006e42a10d71fe3740eda7af0dc95307abefdf1b09895e25db119f",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit02_BH.pkl",
+   "source_pkl_sha256": "7a2e104032a6aa17dcd8cd0234614854470f90224c6307b7dc8618caf37c4ec0",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit02_BH.ball.npz",
+   "T": 75,
+   "fps": 50,
+   "duration_s": 1.48,
+   "hit_frame_ball_120": 96,
+   "hit_frame_pkl_120": 96,
+   "hit_frame_src120": 102,
+   "hit_frame_50": 42,
+   "strike_phase": 0.5676,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.59792908,
+    -0.49839421
+   ],
+   "yaw_before_deg": 12.013,
+   "yaw_norm_deg": -12.013,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.266,
+    0.168,
+    0.0989
+   ],
+   "v_out_fit_hope_ms": [
+    4.9819,
+    -0.127,
+    1.7818
+   ],
+   "ball_pos_hit_hope_m": [
+    0.1659,
+    -0.4187,
+    0.2341
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.1915,
+     0.166,
+     -0.4291
+    ],
+    "rms_resid_m": 0.00647,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.1671,
+     -0.0568,
+     1.8641
+    ],
+    "rms_resid_m": 0.00765,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5332,
+   "v_out_local_vs_venue_ms": 0.2145,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit04_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit04_BH.npz",
+   "npz_sha256": "7e104a7021747d0b2f6602cc6becad0b3398eac14ddf38a2952642d9ce75efc4",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit04_BH.pkl",
+   "source_pkl_sha256": "fc992c3c97b953bd70bdef1ad88cd808fc8919fda8db6d64d635f68fe7288f01",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit04_BH.ball.npz",
+   "T": 36,
+   "fps": 50,
+   "duration_s": 0.7,
+   "hit_frame_ball_120": 27,
+   "hit_frame_pkl_120": 27,
+   "hit_frame_src120": 33,
+   "hit_frame_50": 14,
+   "strike_phase": 0.4,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.70588208,
+    -0.53761666
+   ],
+   "yaw_before_deg": 9.4,
+   "yaw_norm_deg": -9.4,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.234,
+    -0.129,
+    0.2069
+   ],
+   "v_out_fit_hope_ms": [
+    5.8548,
+    0.256,
+    0.9618
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0622,
+    -0.4716,
+    0.2473
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.6505,
+     -0.1637,
+     0.147
+    ],
+    "rms_resid_m": 0.01202,
+    "n_used": 24,
+    "window": [
+     -23,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.8328,
+     0.3582,
+     1.0146
+    ],
+    "rms_resid_m": 0.00899,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4222,
+   "v_out_local_vs_venue_ms": 0.1171,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "duration 0.70s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_060_unit05_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit05_BH.npz",
+   "npz_sha256": "795fdf8e30f4cc106a9ee4f196c28b18a40b5ac2516f42ac6d6fb357c39f3140",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit05_BH.pkl",
+   "source_pkl_sha256": "c410332d06d0e307b933dd88b17903224e5508a9f4f9438d684e7c3e8292dade",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit05_BH.ball.npz",
+   "T": 53,
+   "fps": 50,
+   "duration_s": 1.04,
+   "hit_frame_ball_120": 88,
+   "hit_frame_pkl_120": 88,
+   "hit_frame_src120": 94,
+   "hit_frame_50": 39,
+   "strike_phase": 0.75,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6634700499999999,
+    -0.53835229
+   ],
+   "yaw_before_deg": 15.518,
+   "yaw_norm_deg": -15.518,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.4229,
+    -0.005,
+    1.3499
+   ],
+   "v_out_fit_hope_ms": [
+    5.6848,
+    -0.094,
+    2.2917
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0291,
+    -0.4008,
+    0.2347
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.7836,
+     -0.0019,
+     1.7265
+    ],
+    "rms_resid_m": 0.00868,
+    "n_used": 12,
+    "window": [
+     -11,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.395,
+     -0.0749,
+     2.1992
+    ],
+    "rms_resid_m": 0.01061,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.742,
+   "v_out_local_vs_venue_ms": 0.3048,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit06_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit06_BH.npz",
+   "npz_sha256": "995f83d8d0798acb202294cb0e411fde787eb53476876c7a8f4f7067a32e3396",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit06_BH.pkl",
+   "source_pkl_sha256": "090a0523eeb09c88758d08759663f85b893b80238e30a1efeef6edb9d17571fc",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit06_BH.ball.npz",
+   "T": 62,
+   "fps": 50,
+   "duration_s": 1.22,
+   "hit_frame_ball_120": 121,
+   "hit_frame_pkl_120": 121,
+   "hit_frame_src120": 127,
+   "hit_frame_50": 53,
+   "strike_phase": 0.8689,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.67143964,
+    -0.5381783
+   ],
+   "yaw_before_deg": 23.08,
+   "yaw_norm_deg": -23.08,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.097,
+    0.002,
+    0.5549
+   ],
+   "v_out_fit_hope_ms": [
+    5.7608,
+    0.154,
+    1.5468
+   ],
+   "ball_pos_hit_hope_m": [
+    0.1019,
+    -0.5057,
+    0.295
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.0045,
+     -0.0166,
+     0.7268
+    ],
+    "rms_resid_m": 0.0057,
+    "n_used": 22,
+    "window": [
+     -21,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.7317,
+     0.1023,
+     1.5066
+    ],
+    "rms_resid_m": 0.00782,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1961,
+   "v_out_local_vs_venue_ms": 0.0716,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit07_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit07_BH.npz",
+   "npz_sha256": "362ecaa53dbe13a02e7eca81707085b25a7b19b748e86976324f3c767bcb984c",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit07_BH.pkl",
+   "source_pkl_sha256": "c88d31834fa80af70b2b911ca170d55bf2d7ff183233eb6a2adaaad3ca132558",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit07_BH.ball.npz",
+   "T": 61,
+   "fps": 50,
+   "duration_s": 1.2,
+   "hit_frame_ball_120": 120,
+   "hit_frame_pkl_120": 120,
+   "hit_frame_src120": 126,
+   "hit_frame_50": 52,
+   "strike_phase": 0.8667,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6857975999999999,
+    -0.56284507
+   ],
+   "yaw_before_deg": 25.612,
+   "yaw_norm_deg": -25.612,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.359,
+    0.019,
+    0.5979
+   ],
+   "v_out_fit_hope_ms": [
+    5.8208,
+    0.319,
+    1.0848
+   ],
+   "ball_pos_hit_hope_m": [
+    0.134,
+    -0.5109,
+    0.2533
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.4766,
+     -0.0386,
+     0.2513
+    ],
+    "rms_resid_m": 0.00852,
+    "n_used": 24,
+    "window": [
+     -23,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.7419,
+     0.1542,
+     1.1434
+    ],
+    "rms_resid_m": 0.01131,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3705,
+   "v_out_local_vs_venue_ms": 0.1919,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit08_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit08_BH.npz",
+   "npz_sha256": "a208811fb2be5aaeec7fb1b6a5b98d5c8a6139e57f48d48429e6c7a407c33094",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit08_BH.pkl",
+   "source_pkl_sha256": "45e58447138c7d7bdf2b67b8fae7247b56ad7fa94600b0bfcf27151daa5b7c73",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit08_BH.ball.npz",
+   "T": 70,
+   "fps": 50,
+   "duration_s": 1.38,
+   "hit_frame_ball_120": 110,
+   "hit_frame_pkl_120": 110,
+   "hit_frame_src120": 116,
+   "hit_frame_50": 48,
+   "strike_phase": 0.6957,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.66239532,
+    -0.56569275
+   ],
+   "yaw_before_deg": 27.847,
+   "yaw_norm_deg": -27.847,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.9219,
+    0.047,
+    1.0239
+   ],
+   "v_out_fit_hope_ms": [
+    6.0768,
+    0.164,
+    1.2908
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0745,
+    -0.4507,
+    0.2124
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.873,
+     -0.0023,
+     0.5178
+    ],
+    "rms_resid_m": 0.00739,
+    "n_used": 19,
+    "window": [
+     -18,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.9859,
+     0.2166,
+     1.3838
+    ],
+    "rms_resid_m": 0.00686,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5108,
+   "v_out_local_vs_venue_ms": 0.1403,
+   "ball_coverage_unit": 0.988,
+   "ball_coverage_pre30": 0.935,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ]
+  },
+  {
+   "uid": "Take_060_unit09_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit09_BH.npz",
+   "npz_sha256": "6d6ff7621267a2bbcb20aeeedba719a10a6b6e6a49eeee9586f78031762073f1",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit09_BH.pkl",
+   "source_pkl_sha256": "a0bde9dcdc58799d702c7e0099260c4f86b006271b1da1e4094790fc081d0acc",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit09_BH.ball.npz",
+   "T": 66,
+   "fps": 50,
+   "duration_s": 1.3,
+   "hit_frame_ball_120": 80,
+   "hit_frame_pkl_120": 80,
+   "hit_frame_src120": 86,
+   "hit_frame_50": 36,
+   "strike_phase": 0.5538,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.62500988,
+    -0.56605673
+   ],
+   "yaw_before_deg": 21.53,
+   "yaw_norm_deg": -21.53,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.7509,
+    -0.199,
+    1.0219
+   ],
+   "v_out_fit_hope_ms": [
+    5.6588,
+    0.247,
+    2.1418
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0182,
+    -0.5371,
+    0.2155
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.3126,
+     -0.1962,
+     1.5016
+    ],
+    "rms_resid_m": 0.00498,
+    "n_used": 13,
+    "window": [
+     -12,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.5276,
+     0.284,
+     2.2434
+    ],
+    "rms_resid_m": 0.00884,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.6498,
+   "v_out_local_vs_venue_ms": 0.17,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit10_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit10_BH.npz",
+   "npz_sha256": "2f384320b78acb3f8057062d7cd5266eaaf49ff1ebaa271113d11a0cee2037b3",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit10_BH.pkl",
+   "source_pkl_sha256": "4c279a2a564a596fbb23f8b924852c7bd6c49486f034c188bf082b3f1c8ff9ea",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit10_BH.ball.npz",
+   "T": 76,
+   "fps": 50,
+   "duration_s": 1.5,
+   "hit_frame_ball_120": 68,
+   "hit_frame_pkl_120": 68,
+   "hit_frame_src120": 74,
+   "hit_frame_50": 31,
+   "strike_phase": 0.4133,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.60698449,
+    -0.5458016099999999
+   ],
+   "yaw_before_deg": 12.756,
+   "yaw_norm_deg": -12.756,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.0899,
+    0.007,
+    0.9459
+   ],
+   "v_out_fit_hope_ms": [
+    6.2638,
+    0.395,
+    1.0408
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0573,
+    -0.4371,
+    0.221
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.4768,
+     -0.0282,
+     1.1942
+    ],
+    "rms_resid_m": 0.01028,
+    "n_used": 14,
+    "window": [
+     -13,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.135,
+     0.2849,
+     1.4242
+    ],
+    "rms_resid_m": 0.00737,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.6624,
+   "v_out_local_vs_venue_ms": 0.4192,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit11_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit11_BH.npz",
+   "npz_sha256": "eb3cd68755d07cbd361b8a8d96dcb85676cc29e5d14b8bfd74a195b638b95022",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit11_BH.pkl",
+   "source_pkl_sha256": "ad7e637fbef6dd87c0707ea4d3033da6a0e393290f6505454f6cd5119f75766e",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit11_BH.ball.npz",
+   "T": 78,
+   "fps": 50,
+   "duration_s": 1.54,
+   "hit_frame_ball_120": 146,
+   "hit_frame_pkl_120": 146,
+   "hit_frame_src120": 152,
+   "hit_frame_50": 63,
+   "strike_phase": 0.8182,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6515127,
+    -0.5480410299999999
+   ],
+   "yaw_before_deg": 7.485,
+   "yaw_norm_deg": -7.485,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.2549,
+    -0.168,
+    1.4268
+   ],
+   "v_out_fit_hope_ms": [
+    6.8867,
+    0.497,
+    1.6017
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0319,
+    -0.4674,
+    0.2211
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.1776,
+     -0.1153,
+     0.9019
+    ],
+    "rms_resid_m": 0.00898,
+    "n_used": 16,
+    "window": [
+     -15,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.5472,
+     0.4568,
+     1.5934
+    ],
+    "rms_resid_m": 0.00566,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5332,
+   "v_out_local_vs_venue_ms": 0.342,
+   "ball_coverage_unit": 0.989,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ]
+  },
+  {
+   "uid": "Take_060_unit12_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit12_BH.npz",
+   "npz_sha256": "1f67b376468d163c3b33da2beb552f88e5518360a818169a2daf903f453d55d6",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit12_BH.pkl",
+   "source_pkl_sha256": "8b5ff0e5d6b6ffb597820b39d748d438c0de78ec0ad9801594016cb14d0456c3",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit12_BH.ball.npz",
+   "T": 57,
+   "fps": 50,
+   "duration_s": 1.12,
+   "hit_frame_ball_120": 88,
+   "hit_frame_pkl_120": 88,
+   "hit_frame_src120": 94,
+   "hit_frame_50": 39,
+   "strike_phase": 0.6964,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6155821300000001,
+    -0.5573408
+   ],
+   "yaw_before_deg": 24.957,
+   "yaw_norm_deg": -24.957,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.1699,
+    -0.533,
+    0.6429
+   ],
+   "v_out_fit_hope_ms": [
+    6.3188,
+    0.292,
+    1.4228
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0803,
+    -0.5359,
+    0.2253
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.2682,
+     -0.4742,
+     0.1276
+    ],
+    "rms_resid_m": 0.01156,
+    "n_used": 24,
+    "window": [
+     -23,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0819,
+     0.352,
+     1.4919
+    ],
+    "rms_resid_m": 0.00921,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5278,
+   "v_out_local_vs_venue_ms": 0.2539,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_060_unit13_BH",
+   "take": "Take_060",
+   "family": "BH",
+   "npz": "clips/hope_Take_060_unit13_BH.npz",
+   "npz_sha256": "ab5802b169197b686a675f9bc6e1e7e1435144d5b16190d20951ff340ef6de39",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_060_unit13_BH.pkl",
+   "source_pkl_sha256": "003fa401fd9e1e9f3937c234e7723ea2f19694f8bdf0cde25e1dd13b3b7d71dd",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_060_unit13_BH.ball.npz",
+   "T": 90,
+   "fps": 50,
+   "duration_s": 1.78,
+   "hit_frame_ball_120": 87,
+   "hit_frame_pkl_120": 87,
+   "hit_frame_src120": 93,
+   "hit_frame_50": 39,
+   "strike_phase": 0.4382,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.62512431,
+    -0.57455109
+   ],
+   "yaw_before_deg": 19.619,
+   "yaw_norm_deg": -19.619,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.474,
+    -0.095,
+    0.4349
+   ],
+   "v_out_fit_hope_ms": [
+    5.3198,
+    -0.068,
+    1.5878
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0099,
+    -0.5146,
+    0.254
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.6874,
+     -0.0997,
+     0.6925
+    ],
+    "rms_resid_m": 0.00966,
+    "n_used": 19,
+    "window": [
+     -18,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.1732,
+     0.0007,
+     1.8882
+    ],
+    "rms_resid_m": 0.00834,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3346,
+   "v_out_local_vs_venue_ms": 0.3413,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit00_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit00_BH.npz",
+   "npz_sha256": "0e70f41d52e496b0797b464cdf7f9f1b3db6e4edeb324573e476f3131cbe818b",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit00_BH.pkl",
+   "source_pkl_sha256": "e9e587639207a34bd7e769aa29080cffcc2c1c5e0b3de29e28421af448fe91d5",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit00_BH.ball.npz",
+   "T": 78,
+   "fps": 50,
+   "duration_s": 1.54,
+   "hit_frame_ball_120": 85,
+   "hit_frame_pkl_120": 85,
+   "hit_frame_src120": 91,
+   "hit_frame_50": 38,
+   "strike_phase": 0.4935,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.74437749,
+    -0.63055755
+   ],
+   "yaw_before_deg": 7.619,
+   "yaw_norm_deg": -7.619,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.122,
+    0.058,
+    0.7739
+   ],
+   "v_out_fit_hope_ms": [
+    6.0418,
+    0.088,
+    2.0997
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0183,
+    -0.3113,
+    0.2306
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.1826,
+     0.0001,
+     0.2383
+    ],
+    "rms_resid_m": 0.00469,
+    "n_used": 23,
+    "window": [
+     -22,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.7801,
+     0.1034,
+     2.3963
+    ],
+    "rms_resid_m": 0.00899,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5421,
+   "v_out_local_vs_venue_ms": 0.3958,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit02_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit02_BH.npz",
+   "npz_sha256": "eddf4881ea3173c741467c6f7aba454b9a7e48c786dcb55cc2b37a462cb43839",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit02_BH.pkl",
+   "source_pkl_sha256": "7d6cb8bb4d76a243c30c849a34bf146deecad323f52f3670d0aff87d6a9ffdf8",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit02_BH.ball.npz",
+   "T": 46,
+   "fps": 50,
+   "duration_s": 0.9,
+   "hit_frame_ball_120": 29,
+   "hit_frame_pkl_120": 29,
+   "hit_frame_src120": 35,
+   "hit_frame_50": 15,
+   "strike_phase": 0.3333,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.7384447799999999,
+    -0.45604273
+   ],
+   "yaw_before_deg": 9.212,
+   "yaw_norm_deg": -9.212,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.014,
+    -0.218,
+    0.1689
+   ],
+   "v_out_fit_hope_ms": [
+    5.1489,
+    -0.117,
+    1.4848
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0576,
+    -0.3837,
+    0.2807
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.3493,
+     -0.2691,
+     0.2125
+    ],
+    "rms_resid_m": 0.01219,
+    "n_used": 26,
+    "window": [
+     -25,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.2001,
+     -0.0461,
+     1.6063
+    ],
+    "rms_resid_m": 0.00808,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.342,
+   "v_out_local_vs_venue_ms": 0.1497,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit04_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit04_BH.npz",
+   "npz_sha256": "b604c69301f55990e042ad85d85f0221b9271b6f446d736d2fbe7b51bb75b4ff",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit04_BH.pkl",
+   "source_pkl_sha256": "f3697fc8b34657687dac792966426041c6de17ba0561fa23329dab1830cbde7e",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit04_BH.ball.npz",
+   "T": 57,
+   "fps": 50,
+   "duration_s": 1.12,
+   "hit_frame_ball_120": 109,
+   "hit_frame_pkl_120": 109,
+   "hit_frame_src120": 115,
+   "hit_frame_50": 48,
+   "strike_phase": 0.8571,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.69223234,
+    -0.47722119
+   ],
+   "yaw_before_deg": 22.803,
+   "yaw_norm_deg": -22.803,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.02,
+    -0.129,
+    0.2399
+   ],
+   "v_out_fit_hope_ms": [
+    5.3209,
+    -0.264,
+    1.1878
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0919,
+    -0.4586,
+    0.2916
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.2844,
+     -0.1191,
+     0.4514
+    ],
+    "rms_resid_m": 0.00682,
+    "n_used": 24,
+    "window": [
+     -23,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.2305,
+     -0.249,
+     1.1992
+    ],
+    "rms_resid_m": 0.00562,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3387,
+   "v_out_local_vs_venue_ms": 0.0923,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit05_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit05_BH.npz",
+   "npz_sha256": "34aae3986792dc4a98224415e9cd4181ce4dcb4f01b58c0245fd6635b3c2b856",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit05_BH.pkl",
+   "source_pkl_sha256": "5dd68824f3165d94b199593e0b6f06df99b5553392794904b6ed127b09c4d67b",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit05_BH.ball.npz",
+   "T": 64,
+   "fps": 50,
+   "duration_s": 1.26,
+   "hit_frame_ball_120": 120,
+   "hit_frame_pkl_120": 120,
+   "hit_frame_src120": 126,
+   "hit_frame_50": 52,
+   "strike_phase": 0.8254,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.70045703,
+    -0.50443171
+   ],
+   "yaw_before_deg": 23.63,
+   "yaw_norm_deg": -23.63,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.8089,
+    0.397,
+    1.3999
+   ],
+   "v_out_fit_hope_ms": [
+    6.0198,
+    -0.144,
+    1.9168
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0362,
+    -0.361,
+    0.2293
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.8658,
+     0.3169,
+     0.9306
+    ],
+    "rms_resid_m": 0.00798,
+    "n_used": 17,
+    "window": [
+     -16,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.8464,
+     -0.1632,
+     1.9007
+    ],
+    "rms_resid_m": 0.0085,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4794,
+   "v_out_local_vs_venue_ms": 0.1752,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit06_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit06_BH.npz",
+   "npz_sha256": "0d7081d80046775aa593a30ee0646d5289d8c81382c84863520523f9a5fea2ee",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit06_BH.pkl",
+   "source_pkl_sha256": "bc32aef3ea20384130eee68f9d651a22befd2b70a9aa89f557781de60cc20148",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit06_BH.ball.npz",
+   "T": 93,
+   "fps": 50,
+   "duration_s": 1.84,
+   "hit_frame_ball_120": 109,
+   "hit_frame_pkl_120": 109,
+   "hit_frame_src120": 115,
+   "hit_frame_50": 48,
+   "strike_phase": 0.5217,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.66554808,
+    -0.43694629999999995
+   ],
+   "yaw_before_deg": 23.503,
+   "yaw_norm_deg": -23.503,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.7649,
+    0.122,
+    1.0969
+   ],
+   "v_out_fit_hope_ms": [
+    6.3558,
+    0.229,
+    0.8348
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0457,
+    -0.4453,
+    0.2497
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.7537,
+     0.0273,
+     0.6064
+    ],
+    "rms_resid_m": 0.00963,
+    "n_used": 20,
+    "window": [
+     -19,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.1432,
+     0.255,
+     1.2441
+    ],
+    "rms_resid_m": 0.00631,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4996,
+   "v_out_local_vs_venue_ms": 0.462,
+   "ball_coverage_unit": 0.991,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ]
+  },
+  {
+   "uid": "Take_061_unit07_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit07_BH.npz",
+   "npz_sha256": "2f35bce9929ac5d89505f67a7f878240a9224e257882913d742c46cf8ad2e915",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit07_BH.pkl",
+   "source_pkl_sha256": "857806078c016ce4e3d52dbc77b5e8c59674d58d043ae741eecbf7c84a797b1b",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit07_BH.ball.npz",
+   "T": 35,
+   "fps": 50,
+   "duration_s": 0.68,
+   "hit_frame_ball_120": 24,
+   "hit_frame_pkl_120": 24,
+   "hit_frame_src120": 30,
+   "hit_frame_50": 12,
+   "strike_phase": 0.3529,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6681288999999999,
+    -0.49040119
+   ],
+   "yaw_before_deg": 9.204,
+   "yaw_norm_deg": -9.204,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.311,
+    -0.132,
+    0.5489
+   ],
+   "v_out_fit_hope_ms": [
+    6.1798,
+    0.452,
+    1.3138
+   ],
+   "ball_pos_hit_hope_m": [
+    0.07,
+    -0.4848,
+    0.2483
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.6568,
+     -0.1908,
+     0.6733
+    ],
+    "rms_resid_m": 0.01182,
+    "n_used": 20,
+    "window": [
+     -19,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.9134,
+     0.5179,
+     1.3674
+    ],
+    "rms_resid_m": 0.00519,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3722,
+   "v_out_local_vs_venue_ms": 0.2796,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "duration 0.68s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_061_unit08_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit08_BH.npz",
+   "npz_sha256": "e0040af8827d86c5d4dcd7e143dce13bbb68db8826c7081d103880fb49dab3db",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit08_BH.pkl",
+   "source_pkl_sha256": "94eba1a449b2928cac29a17f0fc3421aece98b9c785f78e094b7376b1b9c7816",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit08_BH.ball.npz",
+   "T": 57,
+   "fps": 50,
+   "duration_s": 1.12,
+   "hit_frame_ball_120": 80,
+   "hit_frame_pkl_120": 80,
+   "hit_frame_src120": 86,
+   "hit_frame_50": 36,
+   "strike_phase": 0.6429,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.63323718,
+    -0.47754232
+   ],
+   "yaw_before_deg": 14.056,
+   "yaw_norm_deg": -14.056,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.591,
+    -0.194,
+    0.4859
+   ],
+   "v_out_fit_hope_ms": [
+    6.3708,
+    0.3,
+    1.3328
+   ],
+   "ball_pos_hit_hope_m": [
+    0.091,
+    -0.4439,
+    0.2834
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.5095,
+     -0.1964,
+     0.3253
+    ],
+    "rms_resid_m": 0.01157,
+    "n_used": 24,
+    "window": [
+     -23,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.16,
+     0.3155,
+     1.3864
+    ],
+    "rms_resid_m": 0.00574,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1801,
+   "v_out_local_vs_venue_ms": 0.218,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit09_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit09_BH.npz",
+   "npz_sha256": "249d6b05aef403024adb9af643384867f24700237aee649413c1e078405bb9a0",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit09_BH.pkl",
+   "source_pkl_sha256": "ae9a1f63725eb3e9e742cea305210b089fedeea27ca9529dc3cd90404443f486",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit09_BH.ball.npz",
+   "T": 120,
+   "fps": 50,
+   "duration_s": 2.38,
+   "hit_frame_ball_120": 79,
+   "hit_frame_pkl_120": 79,
+   "hit_frame_src120": 85,
+   "hit_frame_50": 35,
+   "strike_phase": 0.2941,
+   "n_hits_ext": 2,
+   "station_xy_hope_m": [
+    -0.64814921,
+    -0.47004584
+   ],
+   "yaw_before_deg": 14.844,
+   "yaw_norm_deg": -14.844,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.8249,
+    -0.227,
+    0.6639
+   ],
+   "v_out_fit_hope_ms": [
+    6.2228,
+    0.555,
+    0.5068
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0047,
+    -0.4758,
+    0.2314
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.9662,
+     -0.2775,
+     0.2767
+    ],
+    "rms_resid_m": 0.01087,
+    "n_used": 22,
+    "window": [
+     -21,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0846,
+     0.5185,
+     0.9449
+    ],
+    "rms_resid_m": 0.00609,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4152,
+   "v_out_local_vs_venue_ms": 0.4608,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "2 hits in extended window; using first in-unit hit"
+   ]
+  },
+  {
+   "uid": "Take_061_unit10_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit10_BH.npz",
+   "npz_sha256": "9181dd0f106c0f824b958131488227510c529169b42281202514a63324e3630a",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit10_BH.pkl",
+   "source_pkl_sha256": "e85ea1c1a28b6e82643a3bc3447162a7568f3c15cac8e9b083b92d8318673624",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit10_BH.ball.npz",
+   "T": 27,
+   "fps": 50,
+   "duration_s": 0.52,
+   "hit_frame_ball_120": 27,
+   "hit_frame_pkl_120": 27,
+   "hit_frame_src120": 33,
+   "hit_frame_50": 14,
+   "strike_phase": 0.5385,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.5078545299999999,
+    -0.54094191
+   ],
+   "yaw_before_deg": 37.832,
+   "yaw_norm_deg": -37.832,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -0.92,
+    -0.376,
+    -1.3671
+   ],
+   "v_out_fit_hope_ms": [
+    2.7069,
+    0.152,
+    2.1488
+   ],
+   "ball_pos_hit_hope_m": [
+    0.1286,
+    -0.5728,
+    0.2746
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -0.9467,
+     -0.4158,
+     -1.6032
+    ],
+    "rms_resid_m": 0.01356,
+    "n_used": 31,
+    "window": [
+     -30,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     12.9743,
+     1.0974,
+     1.2627
+    ],
+    "rms_resid_m": 0.55321,
+    "n_used": 17,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 0.895
+   },
+   "v_in_local_vs_venue_ms": 0.2409,
+   "v_out_local_vs_venue_ms": 10.3488,
+   "ball_coverage_unit": 0.965,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 96%",
+    "duration 0.52s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_061_unit11_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit11_BH.npz",
+   "npz_sha256": "2d68bdbc4694456c90bb2fcb82ca0bef2174f7e2a329313de977d0f307df67e3",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit11_BH.pkl",
+   "source_pkl_sha256": "9d0a778543ec4fa4c82f6353f07ddd4349a43f37892ac7f1a716e9272c60d954",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit11_BH.ball.npz",
+   "T": 60,
+   "fps": 50,
+   "duration_s": 1.18,
+   "hit_frame_ball_120": 61,
+   "hit_frame_pkl_120": 61,
+   "hit_frame_src120": 67,
+   "hit_frame_50": 28,
+   "strike_phase": 0.4746,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.60648022,
+    -0.44576144999999995
+   ],
+   "yaw_before_deg": 3.197,
+   "yaw_norm_deg": -3.197,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.6509,
+    -0.029,
+    0.6079
+   ],
+   "v_out_fit_hope_ms": [
+    5.6688,
+    -0.163,
+    1.7798
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0513,
+    -0.3834,
+    0.2965
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.1403,
+     0.0142,
+     0.8319
+    ],
+    "rms_resid_m": 0.00468,
+    "n_used": 21,
+    "window": [
+     -20,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.7347,
+     -0.0845,
+     1.9287
+    ],
+    "rms_resid_m": 0.00879,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5593,
+   "v_out_local_vs_venue_ms": 0.1808,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit12_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit12_BH.npz",
+   "npz_sha256": "a989a4e0f14a25338ccde0db8f856eda9754355f0ca538a8a503d5dad85d0ea5",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit12_BH.pkl",
+   "source_pkl_sha256": "94481681a9643dab87cb86de04499e051213f3210c29da1ef1961da49c1c507b",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit12_BH.ball.npz",
+   "T": 52,
+   "fps": 50,
+   "duration_s": 1.02,
+   "hit_frame_ball_120": 58,
+   "hit_frame_pkl_120": 58,
+   "hit_frame_src120": 64,
+   "hit_frame_50": 27,
+   "strike_phase": 0.5294,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.65663207,
+    -0.54365573
+   ],
+   "yaw_before_deg": 14.74,
+   "yaw_norm_deg": -14.74,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.5269,
+    0.056,
+    1.2998
+   ],
+   "v_out_fit_hope_ms": [
+    5.9698,
+    0.452,
+    1.3258
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0899,
+    -0.4505,
+    0.1997
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.7839,
+     -0.031,
+     1.7733
+    ],
+    "rms_resid_m": 0.00545,
+    "n_used": 10,
+    "window": [
+     -9,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0545,
+     0.5002,
+     1.4288
+    ],
+    "rms_resid_m": 0.01234,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.8853,
+   "v_out_local_vs_venue_ms": 0.1418,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit13_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit13_BH.npz",
+   "npz_sha256": "af440cbe2d5899299fd576ee38dce7bd2a132323e2105630a28cb64e187704c9",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit13_BH.pkl",
+   "source_pkl_sha256": "0f41fab30d20f43edb02e68fc909bb8222b7ba7e6539432b85c7bf534fcc81d8",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit13_BH.ball.npz",
+   "T": 49,
+   "fps": 50,
+   "duration_s": 0.96,
+   "hit_frame_ball_120": 78,
+   "hit_frame_pkl_120": 78,
+   "hit_frame_src120": 84,
+   "hit_frame_50": 35,
+   "strike_phase": 0.7292,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6988932800000001,
+    -0.49230866
+   ],
+   "yaw_before_deg": 16.123,
+   "yaw_norm_deg": -16.123,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.3039,
+    -0.05,
+    0.5679
+   ],
+   "v_out_fit_hope_ms": [
+    6.4107,
+    0.374,
+    2.2787
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0011,
+    -0.337,
+    0.2114
+   ],
+   "real_synth_anchor_gap_m": 2e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.2143,
+     -0.1028,
+     0.1154
+    ],
+    "rms_resid_m": 0.01257,
+    "n_used": 23,
+    "window": [
+     -22,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.1275,
+     0.3719,
+     2.2657
+    ],
+    "rms_resid_m": 0.00721,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4643,
+   "v_out_local_vs_venue_ms": 0.2835,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit14_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit14_BH.npz",
+   "npz_sha256": "a1c8d7be9043249b7af1afb953b8eebaaa18dcf088bb058ed8bd04bd02702861",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit14_BH.pkl",
+   "source_pkl_sha256": "c44f21da803b65dd189f1b7688ba6d18a38612d9cf8cfb21d0f64b3add43519a",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit14_BH.ball.npz",
+   "T": 59,
+   "fps": 50,
+   "duration_s": 1.16,
+   "hit_frame_ball_120": 106,
+   "hit_frame_pkl_120": 106,
+   "hit_frame_src120": 112,
+   "hit_frame_50": 47,
+   "strike_phase": 0.8103,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6928927,
+    -0.48836568
+   ],
+   "yaw_before_deg": 23.696,
+   "yaw_norm_deg": -23.696,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.6079,
+    -0.092,
+    1.1899
+   ],
+   "v_out_fit_hope_ms": [
+    6.1008,
+    -0.039,
+    1.5398
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0333,
+    -0.3644,
+    0.2742
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.5351,
+     -0.2075,
+     0.7043
+    ],
+    "rms_resid_m": 0.00708,
+    "n_used": 20,
+    "window": [
+     -19,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0384,
+     -0.034,
+     1.5156
+    ],
+    "rms_resid_m": 0.01086,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5044,
+   "v_out_local_vs_venue_ms": 0.0671,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit15_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit15_BH.npz",
+   "npz_sha256": "476db8cabb9d00c300f88f7b2e2e7846d4802a126fac98a1da499a4762fdeebf",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit15_BH.pkl",
+   "source_pkl_sha256": "bd52817e22363c27e79839465df8f24101d14ae8c845883c659cb1a674957601",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit15_BH.ball.npz",
+   "T": 96,
+   "fps": 50,
+   "duration_s": 1.9,
+   "hit_frame_ball_120": 111,
+   "hit_frame_pkl_120": 111,
+   "hit_frame_src120": 117,
+   "hit_frame_50": 49,
+   "strike_phase": 0.5158,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.72161799,
+    -0.50073527
+   ],
+   "yaw_before_deg": 24.785,
+   "yaw_norm_deg": -24.785,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.0059,
+    0.414,
+    0.6229
+   ],
+   "v_out_fit_hope_ms": [
+    6.3558,
+    -0.149,
+    0.8038
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0191,
+    -0.2334,
+    0.287
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.0814,
+     0.4647,
+     0.1689
+    ],
+    "rms_resid_m": 0.00866,
+    "n_used": 27,
+    "window": [
+     -26,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.2183,
+     0.0009,
+     1.1082
+    ],
+    "rms_resid_m": 0.00636,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.463,
+   "v_out_local_vs_venue_ms": 0.3661,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit16_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit16_BH.npz",
+   "npz_sha256": "9d656e968c3ba9969107d81efbfa4a89818265c851943a45e427837c420537a6",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit16_BH.pkl",
+   "source_pkl_sha256": "60de9890a80ec70f61de9fd2e4806636afed7bb57bcfb2ec02199f287a5325e6",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit16_BH.ball.npz",
+   "T": 59,
+   "fps": 50,
+   "duration_s": 1.16,
+   "hit_frame_ball_120": 27,
+   "hit_frame_pkl_120": 27,
+   "hit_frame_src120": 33,
+   "hit_frame_50": 14,
+   "strike_phase": 0.2414,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.7075319,
+    -0.50624084
+   ],
+   "yaw_before_deg": 10.946,
+   "yaw_norm_deg": -10.946,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.153,
+    -0.526,
+    -0.0681
+   ],
+   "v_out_fit_hope_ms": [
+    6.8227,
+    0.612,
+    1.2138
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0054,
+    -0.5844,
+    0.2605
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.5057,
+     -0.5517,
+     -0.0718
+    ],
+    "rms_resid_m": 0.00918,
+    "n_used": 28,
+    "window": [
+     -27,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.5141,
+     0.6002,
+     1.4889
+    ],
+    "rms_resid_m": 0.00983,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3537,
+   "v_out_local_vs_venue_ms": 0.4136,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit17_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit17_BH.npz",
+   "npz_sha256": "717f52201ce30757d1fe3a6b2e7a18f5e628022d5f366a5682e440c135c62d8c",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit17_BH.pkl",
+   "source_pkl_sha256": "0705f775a4ad79cba4560171c12b1b587f652348b986fbad5989e4d28019b9c2",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit17_BH.ball.npz",
+   "T": 57,
+   "fps": 50,
+   "duration_s": 1.12,
+   "hit_frame_ball_120": 20,
+   "hit_frame_pkl_120": 20,
+   "hit_frame_src120": 26,
+   "hit_frame_50": 11,
+   "strike_phase": 0.1964,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.71396244,
+    -0.51177312
+   ],
+   "yaw_before_deg": 12.086,
+   "yaw_norm_deg": -12.086,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.7829,
+    -0.026,
+    0.6999
+   ],
+   "v_out_fit_hope_ms": [
+    6.9917,
+    0.357,
+    1.4107
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0409,
+    -0.4584,
+    0.2271
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.2226,
+     -0.1058,
+     0.9358
+    ],
+    "rms_resid_m": 0.01261,
+    "n_used": 17,
+    "window": [
+     -16,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.6654,
+     0.349,
+     1.722
+    ],
+    "rms_resid_m": 0.01453,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5053,
+   "v_out_local_vs_venue_ms": 0.451,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit18_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit18_BH.npz",
+   "npz_sha256": "70840fed42db02cf209113b753a839f4fa2f7a48ea9fe2c1e341621aab7541cf",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit18_BH.pkl",
+   "source_pkl_sha256": "381b9d40c077b7110494b0ed5bb6ffebaa404fd9c019960cf99b21a42b546278",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit18_BH.ball.npz",
+   "T": 33,
+   "fps": 50,
+   "duration_s": 0.64,
+   "hit_frame_ball_120": 22,
+   "hit_frame_pkl_120": 22,
+   "hit_frame_src120": 28,
+   "hit_frame_50": 12,
+   "strike_phase": 0.375,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.7317176999999999,
+    -0.50742215
+   ],
+   "yaw_before_deg": 10.348,
+   "yaw_norm_deg": -10.348,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.384,
+    -0.202,
+    0.6069
+   ],
+   "v_out_fit_hope_ms": [
+    6.6058,
+    0.355,
+    1.1248
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0142,
+    -0.4819,
+    0.2696
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.7884,
+     -0.2121,
+     0.7262
+    ],
+    "rms_resid_m": 0.00995,
+    "n_used": 20,
+    "window": [
+     -19,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.4175,
+     0.394,
+     1.2768
+    ],
+    "rms_resid_m": 0.00718,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4218,
+   "v_out_local_vs_venue_ms": 0.2451,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "duration 0.64s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_061_unit19_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit19_BH.npz",
+   "npz_sha256": "559387de9e852d35c9bcf74ccc7a4baa132a595847cf1d5fa453eb9d118ddd90",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit19_BH.pkl",
+   "source_pkl_sha256": "6d6fcb9d96f220598d942adb830772852d8cc7cebb76827059a8e5a7a9a970ac",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit19_BH.ball.npz",
+   "T": 49,
+   "fps": 50,
+   "duration_s": 0.96,
+   "hit_frame_ball_120": 82,
+   "hit_frame_pkl_120": 82,
+   "hit_frame_src120": 88,
+   "hit_frame_50": 37,
+   "strike_phase": 0.7708,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.68693391,
+    -0.53174326
+   ],
+   "yaw_before_deg": 15.756,
+   "yaw_norm_deg": -15.756,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.1509,
+    -0.016,
+    1.4348
+   ],
+   "v_out_fit_hope_ms": [
+    6.6988,
+    0.449,
+    0.8038
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0056,
+    -0.349,
+    0.2432
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.0637,
+     0.0422,
+     0.9039
+    ],
+    "rms_resid_m": 0.00954,
+    "n_used": 17,
+    "window": [
+     -16,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.5049,
+     0.3629,
+     0.8336
+    ],
+    "rms_resid_m": 0.00729,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5412,
+   "v_out_local_vs_venue_ms": 0.2142,
+   "ball_coverage_unit": 0.982,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ]
+  },
+  {
+   "uid": "Take_061_unit20_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit20_BH.npz",
+   "npz_sha256": "736d0d39d063da07b1df4319aef02e477d8581ad67bb562a6828400e2dd64039",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit20_BH.pkl",
+   "source_pkl_sha256": "08d2e868cf38c8e4283b39c3957d18adffb2bacf258bb2c63d28e922bb1a8e5d",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit20_BH.ball.npz",
+   "T": 58,
+   "fps": 50,
+   "duration_s": 1.14,
+   "hit_frame_ball_120": 100,
+   "hit_frame_pkl_120": 100,
+   "hit_frame_src120": 106,
+   "hit_frame_50": 44,
+   "strike_phase": 0.7719,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.68165814,
+    -0.52532583
+   ],
+   "yaw_before_deg": 26.586,
+   "yaw_norm_deg": -26.586,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.4149,
+    -0.381,
+    1.0938
+   ],
+   "v_out_fit_hope_ms": [
+    6.6927,
+    0.54,
+    1.2368
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0786,
+    -0.3564,
+    0.1781
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.5362,
+     -0.3184,
+     0.5484
+    ],
+    "rms_resid_m": 0.00687,
+    "n_used": 17,
+    "window": [
+     -16,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.3851,
+     0.4806,
+     1.2954
+    ],
+    "rms_resid_m": 0.00881,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5623,
+   "v_out_local_vs_venue_ms": 0.3188,
+   "ball_coverage_unit": 0.977,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ]
+  },
+  {
+   "uid": "Take_061_unit21_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit21_BH.npz",
+   "npz_sha256": "b72c8e8a2353f355ea8094684a7509686c9bf508b98ff465981e56d72057e125",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit21_BH.pkl",
+   "source_pkl_sha256": "a755148202328cc1533edd480a85eb2f23b3fa85ab727a136bb5ef36a581204f",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit21_BH.ball.npz",
+   "T": 57,
+   "fps": 50,
+   "duration_s": 1.12,
+   "hit_frame_ball_120": 103,
+   "hit_frame_pkl_120": 103,
+   "hit_frame_src120": 109,
+   "hit_frame_50": 45,
+   "strike_phase": 0.8036,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.69341257,
+    -0.51299334
+   ],
+   "yaw_before_deg": 26.851,
+   "yaw_norm_deg": -26.851,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.9249,
+    -0.162,
+    0.6929
+   ],
+   "v_out_fit_hope_ms": [
+    5.4818,
+    0.093,
+    1.2098
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0031,
+    -0.2696,
+    0.2549
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.0081,
+     -0.1686,
+     0.2088
+    ],
+    "rms_resid_m": 0.00434,
+    "n_used": 24,
+    "window": [
+     -23,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     4.8684,
+     0.0821,
+     1.3618
+    ],
+    "rms_resid_m": 0.18242,
+    "n_used": 16,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 0.842
+   },
+   "v_in_local_vs_venue_ms": 0.4912,
+   "v_out_local_vs_venue_ms": 0.6321,
+   "ball_coverage_unit": 0.977,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ]
+  },
+  {
+   "uid": "Take_061_unit22_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit22_BH.npz",
+   "npz_sha256": "532d0287926527a9e64276e87259f65c31b90dbc9bca558562e35706bc6fcced",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit22_BH.pkl",
+   "source_pkl_sha256": "ef5438022be6d29082a8399746402d3e415cf2fcb73ce5bcccbe41209c043da8",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit22_BH.ball.npz",
+   "T": 79,
+   "fps": 50,
+   "duration_s": 1.56,
+   "hit_frame_ball_120": 100,
+   "hit_frame_pkl_120": 100,
+   "hit_frame_src120": 106,
+   "hit_frame_50": 44,
+   "strike_phase": 0.5641,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.68559769,
+    -0.49125693
+   ],
+   "yaw_before_deg": 29.528,
+   "yaw_norm_deg": -29.528,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.4519,
+    -0.283,
+    1.4068
+   ],
+   "v_out_fit_hope_ms": [
+    6.5178,
+    0.587,
+    0.4958
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.043,
+    -0.485,
+    0.2278
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.4131,
+     -0.2398,
+     0.8857
+    ],
+    "rms_resid_m": 0.00721,
+    "n_used": 16,
+    "window": [
+     -15,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.4164,
+     0.5567,
+     0.8307
+    ],
+    "rms_resid_m": 0.00898,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5244,
+   "v_out_local_vs_venue_ms": 0.3512,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_061_unit24_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit24_BH.npz",
+   "npz_sha256": "897a1d2fc61f2a2c5b154d91410b43c97d1d970d699ba80bce9e08ecdab83eae",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit24_BH.pkl",
+   "source_pkl_sha256": "580b0f5c1181fcc96c2c0aed9ec050947de4d11b9847c3b2000df177ce07c30f",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit24_BH.ball.npz",
+   "T": 90,
+   "fps": 50,
+   "duration_s": 1.78,
+   "hit_frame_ball_120": 96,
+   "hit_frame_pkl_120": 96,
+   "hit_frame_src120": 102,
+   "hit_frame_50": 42,
+   "strike_phase": 0.4719,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.7155031099999999,
+    -0.47825341
+   ],
+   "yaw_before_deg": 28.587,
+   "yaw_norm_deg": -28.587,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.5059,
+    -0.061,
+    1.4118
+   ],
+   "v_out_fit_hope_ms": [
+    6.5538,
+    0.397,
+    1.1088
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.1006,
+    -0.3256,
+    0.244
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.4935,
+     -0.033,
+     0.8756
+    ],
+    "rms_resid_m": 0.00821,
+    "n_used": 18,
+    "window": [
+     -17,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.1818,
+     0.3592,
+     1.5888
+    ],
+    "rms_resid_m": 0.00983,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5371,
+   "v_out_local_vs_venue_ms": 0.6084,
+   "ball_coverage_unit": 0.99,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ]
+  },
+  {
+   "uid": "Take_061_unit25_BH",
+   "take": "Take_061",
+   "family": "BH",
+   "npz": "clips/hope_Take_061_unit25_BH.npz",
+   "npz_sha256": "dbc85abaee49f1302f86be38c8534a7ab04070b3f1910577a33443c0724f0760",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_061_unit25_BH.pkl",
+   "source_pkl_sha256": "e2107b7372d0115a9710fc38bb443f398778007a30abd091ecbaa2c3a91f5aea",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_061_unit25_BH.ball.npz",
+   "T": 40,
+   "fps": 50,
+   "duration_s": 0.78,
+   "hit_frame_ball_120": 22,
+   "hit_frame_pkl_120": 22,
+   "hit_frame_src120": 28,
+   "hit_frame_50": 12,
+   "strike_phase": 0.3077,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.7207079000000001,
+    -0.53303637
+   ],
+   "yaw_before_deg": 14.52,
+   "yaw_norm_deg": -14.52,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.433,
+    -0.466,
+    0.2559
+   ],
+   "v_out_fit_hope_ms": [
+    5.7918,
+    0.411,
+    1.1868
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0097,
+    -0.6046,
+    0.235
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.0707,
+     -0.5804,
+     0.2526
+    ],
+    "rms_resid_m": 0.01632,
+    "n_used": 23,
+    "window": [
+     -22,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.8458,
+     0.5075,
+     1.2881
+    ],
+    "rms_resid_m": 0.00778,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.6479,
+   "v_out_local_vs_venue_ms": 0.15,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "duration 0.78s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_062_unit00_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit00_BH.npz",
+   "npz_sha256": "fd36bc7dc8cf80064e39d69e5342d760b599a79a383b420e61d5ee0500764a43",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit00_BH.pkl",
+   "source_pkl_sha256": "ddb22a8ca6a5e99cc79c18925a385ad42fd3f1fa0f91ba4b0cf166c5f93d51ae",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit00_BH.ball.npz",
+   "T": 70,
+   "fps": 50,
+   "duration_s": 1.38,
+   "hit_frame_ball_120": 91,
+   "hit_frame_pkl_120": 91,
+   "hit_frame_src120": 97,
+   "hit_frame_50": 40,
+   "strike_phase": 0.5797,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.66498853,
+    -0.67186559
+   ],
+   "yaw_before_deg": 8.595,
+   "yaw_norm_deg": -8.595,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.3539,
+    -0.2,
+    0.8929
+   ],
+   "v_out_fit_hope_ms": [
+    5.9098,
+    0.13,
+    1.8628
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0045,
+    -0.3218,
+    0.2265
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.4049,
+     -0.118,
+     0.3977
+    ],
+    "rms_resid_m": 0.00464,
+    "n_used": 21,
+    "window": [
+     -20,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.8893,
+     0.1984,
+     1.9546
+    ],
+    "rms_resid_m": 0.00726,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5045,
+   "v_out_local_vs_venue_ms": 0.1163,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_062_unit01_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit01_BH.npz",
+   "npz_sha256": "8f94e7b272819a05bd025f489a1d01ef715d4df3d309775efe50c1294b57b80b",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit01_BH.pkl",
+   "source_pkl_sha256": "6f2c0db2a96a4b381e77faeb257a41104bf27701711c065fff404b5b2cdfd1b1",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit01_BH.ball.npz",
+   "T": 69,
+   "fps": 50,
+   "duration_s": 1.36,
+   "hit_frame_ball_120": 71,
+   "hit_frame_pkl_120": 71,
+   "hit_frame_src120": 77,
+   "hit_frame_50": 32,
+   "strike_phase": 0.4706,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6686719600000001,
+    -0.5123735899999999
+   ],
+   "yaw_before_deg": 12.002,
+   "yaw_norm_deg": -12.002,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.8039,
+    -0.279,
+    0.9549
+   ],
+   "v_out_fit_hope_ms": [
+    5.2468,
+    -0.093,
+    2.2378
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0121,
+    -0.4569,
+    0.278
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -2.8387,
+     -0.229,
+     1.4586
+    ],
+    "rms_resid_m": 0.00738,
+    "n_used": 16,
+    "window": [
+     -15,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.3648,
+     -0.0081,
+     2.2577
+    ],
+    "rms_resid_m": 0.00608,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 1.0899,
+   "v_out_local_vs_venue_ms": 0.1467,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "local vs venue v_in delta 1.09 m/s"
+   ]
+  },
+  {
+   "uid": "Take_062_unit02_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit02_BH.npz",
+   "npz_sha256": "c39b6d157db6bb2aa14160029b8c80761bd68e39b9d230fb1ae28cccef6ccd96",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit02_BH.pkl",
+   "source_pkl_sha256": "d16aa0f8c9a7dda39efbe90c1eaa0fa0f21f2e0cbd623dc6704c90d76d09d391",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit02_BH.ball.npz",
+   "T": 54,
+   "fps": 50,
+   "duration_s": 1.06,
+   "hit_frame_ball_120": 58,
+   "hit_frame_pkl_120": 58,
+   "hit_frame_src120": 64,
+   "hit_frame_50": 27,
+   "strike_phase": 0.5094,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.65057564,
+    -0.5139934199999999
+   ],
+   "yaw_before_deg": 9.117,
+   "yaw_norm_deg": -9.117,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.8289,
+    0.253,
+    0.4209
+   ],
+   "v_out_fit_hope_ms": [
+    6.1168,
+    0.723,
+    0.7588
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0443,
+    -0.4076,
+    0.2188
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.5302,
+     0.2442,
+     0.4658
+    ],
+    "rms_resid_m": 0.01351,
+    "n_used": 21,
+    "window": [
+     -20,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.2708,
+     0.6128,
+     0.8529
+    ],
+    "rms_resid_m": 0.00766,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3022,
+   "v_out_local_vs_venue_ms": 0.2114,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_062_unit04_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit04_BH.npz",
+   "npz_sha256": "296f695fe32b2b05d4e5a741cac69be42026046b6517ed5627e765a32f0efa5d",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit04_BH.pkl",
+   "source_pkl_sha256": "a59de917a72b4d82e9822022784b6ac53573261788e2e2c5a74cbb6e43909c05",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit04_BH.ball.npz",
+   "T": 57,
+   "fps": 50,
+   "duration_s": 1.12,
+   "hit_frame_ball_120": 106,
+   "hit_frame_pkl_120": 106,
+   "hit_frame_src120": 112,
+   "hit_frame_50": 47,
+   "strike_phase": 0.8393,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6656356200000001,
+    -0.46681657
+   ],
+   "yaw_before_deg": 31.352,
+   "yaw_norm_deg": -31.352,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.6619,
+    -0.315,
+    1.3969
+   ],
+   "v_out_fit_hope_ms": [
+    5.6818,
+    0.018,
+    1.3708
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0493,
+    -0.3272,
+    0.2656
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.7394,
+     -0.2915,
+     0.8793
+    ],
+    "rms_resid_m": 0.0069,
+    "n_used": 18,
+    "window": [
+     -17,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.6848,
+     0.0191,
+     1.3102
+    ],
+    "rms_resid_m": 0.00935,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5238,
+   "v_out_local_vs_venue_ms": 0.0607,
+   "ball_coverage_unit": 0.985,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ]
+  },
+  {
+   "uid": "Take_062_unit05_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit05_BH.npz",
+   "npz_sha256": "0e56c9febef90e5e8a09dc577647ac83e276638727cbd5e4320954dd7f1bf517",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit05_BH.pkl",
+   "source_pkl_sha256": "b014112380094a80ed18b1653d85626ef8aa64979ff60fe037f02f73f0bb2eef",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit05_BH.ball.npz",
+   "T": 71,
+   "fps": 50,
+   "duration_s": 1.4,
+   "hit_frame_ball_120": 114,
+   "hit_frame_pkl_120": 114,
+   "hit_frame_src120": 120,
+   "hit_frame_50": 50,
+   "strike_phase": 0.7143,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6714121299999999,
+    -0.48562191
+   ],
+   "yaw_before_deg": 30.294,
+   "yaw_norm_deg": -30.294,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.7629,
+    0.057,
+    0.6979
+   ],
+   "v_out_fit_hope_ms": [
+    5.7958,
+    0.336,
+    1.4778
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0598,
+    -0.4208,
+    0.2059
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.7528,
+     0.0505,
+     0.2096
+    ],
+    "rms_resid_m": 0.00436,
+    "n_used": 22,
+    "window": [
+     -21,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.6209,
+     0.2368,
+     1.5518
+    ],
+    "rms_resid_m": 0.0071,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4884,
+   "v_out_local_vs_venue_ms": 0.2143,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_062_unit06_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit06_BH.npz",
+   "npz_sha256": "d01a4bbb147249d3ba0b05402246f890631d4b68f3ee051ac37aefd962c28c51",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit06_BH.pkl",
+   "source_pkl_sha256": "1d07fee1698ccbdc80a7b921104cf2bba1d486964afa22b915ea662a08288970",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit06_BH.ball.npz",
+   "T": 58,
+   "fps": 50,
+   "duration_s": 1.14,
+   "hit_frame_ball_120": 84,
+   "hit_frame_pkl_120": 84,
+   "hit_frame_src120": 90,
+   "hit_frame_50": 38,
+   "strike_phase": 0.6667,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6203849300000001,
+    -0.51046282
+   ],
+   "yaw_before_deg": 17.934,
+   "yaw_norm_deg": -17.934,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.8849,
+    -0.237,
+    1.3858
+   ],
+   "v_out_fit_hope_ms": [
+    6.1318,
+    0.278,
+    1.3938
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0281,
+    -0.4339,
+    0.2308
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.9602,
+     -0.1895,
+     0.7873
+    ],
+    "rms_resid_m": 0.00563,
+    "n_used": 18,
+    "window": [
+     -17,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.9339,
+     0.3452,
+     1.6334
+    ],
+    "rms_resid_m": 0.02333,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.6051,
+   "v_out_local_vs_venue_ms": 0.318,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_062_unit07_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit07_BH.npz",
+   "npz_sha256": "9fa586e123b6582c5662947e9d839c9d8947da2026e11925afd8aaf5f966bb1c",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit07_BH.pkl",
+   "source_pkl_sha256": "d22d4e6d1a1f1850551cafba6d4198ffbfcf3736773a566ef0d7e78d32a3ed44",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit07_BH.ball.npz",
+   "T": 86,
+   "fps": 50,
+   "duration_s": 1.7,
+   "hit_frame_ball_120": 85,
+   "hit_frame_pkl_120": 85,
+   "hit_frame_src120": 91,
+   "hit_frame_50": 38,
+   "strike_phase": 0.4471,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.63455635,
+    -0.51860123
+   ],
+   "yaw_before_deg": 20.08,
+   "yaw_norm_deg": -20.08,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.8879,
+    0.098,
+    1.3019
+   ],
+   "v_out_fit_hope_ms": [
+    6.1198,
+    -0.027,
+    1.2548
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0527,
+    -0.3453,
+    0.2701
+   ],
+   "real_synth_anchor_gap_m": 1e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.8424,
+     0.0599,
+     0.8188
+    ],
+    "rms_resid_m": 0.01239,
+    "n_used": 20,
+    "window": [
+     -19,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.9933,
+     0.0478,
+     1.6027
+    ],
+    "rms_resid_m": 0.00764,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4867,
+   "v_out_local_vs_venue_ms": 0.3777,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_062_unit08_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit08_BH.npz",
+   "npz_sha256": "ab05600bb84cf3f74d00c6f742c89ac657ec8fbf51081c3726f5dd6b5b6895de",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit08_BH.pkl",
+   "source_pkl_sha256": "698a26bf0d3b640f59f33eeaf35f7ead6215927602f2341d69dbf9de55f07042",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit08_BH.ball.npz",
+   "T": 29,
+   "fps": 50,
+   "duration_s": 0.56,
+   "hit_frame_ball_120": 18,
+   "hit_frame_pkl_120": 18,
+   "hit_frame_src120": 24,
+   "hit_frame_50": 10,
+   "strike_phase": 0.3571,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.70997816,
+    -0.53393887
+   ],
+   "yaw_before_deg": 12.429,
+   "yaw_norm_deg": -12.429,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.1569,
+    -0.152,
+    0.8689
+   ],
+   "v_out_fit_hope_ms": [
+    6.4617,
+    0.636,
+    1.6687
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0019,
+    -0.5784,
+    0.2228
+   ],
+   "real_synth_anchor_gap_m": 2e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.5211,
+     -0.2486,
+     1.0729
+    ],
+    "rms_resid_m": 0.00951,
+    "n_used": 16,
+    "window": [
+     -15,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.4433,
+     0.6317,
+     1.7661
+    ],
+    "rms_resid_m": 0.02914,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4284,
+   "v_out_local_vs_venue_ms": 0.0992,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "duration 0.56s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_062_unit09_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit09_BH.npz",
+   "npz_sha256": "1148fa1458b2c90ce8cac7a2c25d01bba40afd5336677d14217a51d6a377d27f",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit09_BH.pkl",
+   "source_pkl_sha256": "b02d8e6276a1e2deb1d76e505adde755d3398f6dfa4c59106efa304a55d5c9eb",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit09_BH.ball.npz",
+   "T": 59,
+   "fps": 50,
+   "duration_s": 1.16,
+   "hit_frame_ball_120": 87,
+   "hit_frame_pkl_120": 87,
+   "hit_frame_src120": 93,
+   "hit_frame_50": 39,
+   "strike_phase": 0.6724,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.64684138,
+    -0.58383511
+   ],
+   "yaw_before_deg": 18.883,
+   "yaw_norm_deg": -18.883,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -4.0379,
+    -0.192,
+    0.5239
+   ],
+   "v_out_fit_hope_ms": [
+    5.2518,
+    0.118,
+    1.4528
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0634,
+    -0.4468,
+    0.2122
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.0419,
+     -0.1479,
+     -0.051
+    ],
+    "rms_resid_m": 0.00973,
+    "n_used": 25,
+    "window": [
+     -24,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.053,
+     0.1026,
+     1.4967
+    ],
+    "rms_resid_m": 0.00456,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5766,
+   "v_out_local_vs_venue_ms": 0.2042,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_062_unit10_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit10_BH.npz",
+   "npz_sha256": "e58a65f34d8604dc7536bbf17c9e7104539ebc4df7d19f6a8b73a80f36d0d68a",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit10_BH.pkl",
+   "source_pkl_sha256": "9994ba036a040b83f6a5fc2a8d86e552aeb618a6eb107beacd8f2156b491a058",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit10_BH.ball.npz",
+   "T": 95,
+   "fps": 50,
+   "duration_s": 1.88,
+   "hit_frame_ball_120": 94,
+   "hit_frame_pkl_120": 94,
+   "hit_frame_src120": 100,
+   "hit_frame_50": 42,
+   "strike_phase": 0.4468,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.63029679,
+    -0.53234054
+   ],
+   "yaw_before_deg": 20.335,
+   "yaw_norm_deg": -20.335,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.6139,
+    -0.136,
+    1.5448
+   ],
+   "v_out_fit_hope_ms": [
+    5.6988,
+    0.444,
+    1.6758
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0067,
+    -0.4484,
+    0.2616
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.6936,
+     -0.0953,
+     1.0945
+    ],
+    "rms_resid_m": 0.00533,
+    "n_used": 17,
+    "window": [
+     -16,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.5645,
+     0.4039,
+     2.169
+    ],
+    "rms_resid_m": 0.00615,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4592,
+   "v_out_local_vs_venue_ms": 0.5128,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_062_unit11_BH",
+   "take": "Take_062",
+   "family": "BH",
+   "npz": "clips/hope_Take_062_unit11_BH.npz",
+   "npz_sha256": "fd4d4dbeb7236cdc767e576ed7d4bbb6428d9f581557d054485d5158b9b3fd3f",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_062_unit11_BH.pkl",
+   "source_pkl_sha256": "df51fdce5b6fd266fef8b71432e4cacd31bae924e400233ad8aa984aac42719e",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_062_unit11_BH.ball.npz",
+   "T": 133,
+   "fps": 50,
+   "duration_s": 2.64,
+   "hit_frame_ball_120": 172,
+   "hit_frame_pkl_120": 172,
+   "hit_frame_src120": 178,
+   "hit_frame_50": 74,
+   "strike_phase": 0.5606,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6754153700000001,
+    -0.52149926
+   ],
+   "yaw_before_deg": 16.683,
+   "yaw_norm_deg": -16.683,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.371,
+    -0.137,
+    0.5849
+   ],
+   "v_out_fit_hope_ms": [
+    6.2578,
+    -0.162,
+    0.9798
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0862,
+    -0.4724,
+    0.2724
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.4033,
+     -0.0354,
+     0.0827
+    ],
+    "rms_resid_m": 0.00976,
+    "n_used": 27,
+    "window": [
+     -26,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.8072,
+     -0.1771,
+     1.3681
+    ],
+    "rms_resid_m": 0.01075,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.5134,
+   "v_out_local_vs_venue_ms": 0.595,
+   "ball_coverage_unit": 0.881,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 88%"
+   ]
+  },
+  {
+   "uid": "Take_063_unit00_BH",
+   "take": "Take_063",
+   "family": "BH",
+   "npz": "clips/hope_Take_063_unit00_BH.npz",
+   "npz_sha256": "4cb44d8828410183dc31d4008dee1d8201ff3a3aa5b29e881339ac71dddf7071",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_063_unit00_BH.pkl",
+   "source_pkl_sha256": "7c912b389b145069b2e1dfed2e8ebb46b7e810217629df6009c9155d5fab9de4",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_063_unit00_BH.ball.npz",
+   "T": 64,
+   "fps": 50,
+   "duration_s": 1.26,
+   "hit_frame_ball_120": 62,
+   "hit_frame_pkl_120": 62,
+   "hit_frame_src120": 68,
+   "hit_frame_50": 28,
+   "strike_phase": 0.4444,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.70478932,
+    -0.53893506
+   ],
+   "yaw_before_deg": 6.717,
+   "yaw_norm_deg": -6.717,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.036,
+    0.094,
+    0.2339
+   ],
+   "v_out_fit_hope_ms": [
+    5.3828,
+    -0.009,
+    2.3218
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0243,
+    -0.2077,
+    0.2165
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.3375,
+     0.0958,
+     0.2227
+    ],
+    "rms_resid_m": 0.00914,
+    "n_used": 22,
+    "window": [
+     -21,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.5701,
+     0.0902,
+     2.4532
+    ],
+    "rms_resid_m": 0.00696,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3017,
+   "v_out_local_vs_venue_ms": 0.2494,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_063_unit01_BH",
+   "take": "Take_063",
+   "family": "BH",
+   "npz": "clips/hope_Take_063_unit01_BH.npz",
+   "npz_sha256": "b46fbf2d020cb1c3ff7e99bcd3df561bddb3a39f9293e5f11f5772edb6b19f1f",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_063_unit01_BH.pkl",
+   "source_pkl_sha256": "87a78f4e0c95286e5dfb490dbec5c6824d61bb05839672ffa7d3b6fa6f8e4e1a",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_063_unit01_BH.ball.npz",
+   "T": 39,
+   "fps": 50,
+   "duration_s": 0.76,
+   "hit_frame_ball_120": 59,
+   "hit_frame_pkl_120": 59,
+   "hit_frame_src120": 65,
+   "hit_frame_50": 27,
+   "strike_phase": 0.7105,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.68167944,
+    -0.48307214000000004
+   ],
+   "yaw_before_deg": 8.362,
+   "yaw_norm_deg": -8.362,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.7999,
+    -0.346,
+    0.6579
+   ],
+   "v_out_fit_hope_ms": [
+    6.0408,
+    -0.06,
+    1.3008
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0027,
+    -0.4682,
+    0.2551
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.2459,
+     -0.3807,
+     0.9198
+    ],
+    "rms_resid_m": 0.01134,
+    "n_used": 18,
+    "window": [
+     -17,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0884,
+     -0.146,
+     1.4096
+    ],
+    "rms_resid_m": 0.03529,
+    "n_used": 17,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 0.895
+   },
+   "v_in_local_vs_venue_ms": 0.6138,
+   "v_out_local_vs_venue_ms": 0.1466,
+   "ball_coverage_unit": 0.976,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 98%",
+    "duration 0.76s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_063_unit02_BH",
+   "take": "Take_063",
+   "family": "BH",
+   "npz": "clips/hope_Take_063_unit02_BH.npz",
+   "npz_sha256": "fa76e7645baabced9d6029fe8073f482c549f36afdfeb17148401458e488ce36",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_063_unit02_BH.pkl",
+   "source_pkl_sha256": "70a9d436f0f8dcf9703331c2dc7ee7bc06dd699e82eb623720c2b2dbe7b5cd6f",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_063_unit02_BH.ball.npz",
+   "T": 76,
+   "fps": 50,
+   "duration_s": 1.5,
+   "hit_frame_ball_120": 119,
+   "hit_frame_pkl_120": 119,
+   "hit_frame_src120": 125,
+   "hit_frame_50": 52,
+   "strike_phase": 0.6933,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.70591249,
+    -0.5205036599999999
+   ],
+   "yaw_before_deg": 26.719,
+   "yaw_norm_deg": -26.719,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.7969,
+    0.1,
+    0.7119
+   ],
+   "v_out_fit_hope_ms": [
+    6.2478,
+    0.509,
+    1.8577
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0586,
+    -0.4864,
+    0.216
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.8988,
+     0.1852,
+     0.2622
+    ],
+    "rms_resid_m": 0.01201,
+    "n_used": 22,
+    "window": [
+     -21,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0662,
+     0.4688,
+     2.0113
+    ],
+    "rms_resid_m": 0.00844,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4689,
+   "v_out_local_vs_venue_ms": 0.2412,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_063_unit03_BH",
+   "take": "Take_063",
+   "family": "BH",
+   "npz": "clips/hope_Take_063_unit03_BH.npz",
+   "npz_sha256": "0d4d200e32fcb99779394a2b65af897e54067dbe22d8e6ec3132bea2c230e61d",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_063_unit03_BH.pkl",
+   "source_pkl_sha256": "b1fb36caeaf09d592530061f74d847fedb0a38e5e141ddb7206104fa2b4446f3",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_063_unit03_BH.ball.npz",
+   "T": 115,
+   "fps": 50,
+   "duration_s": 2.28,
+   "hit_frame_ball_120": 79,
+   "hit_frame_pkl_120": 79,
+   "hit_frame_src120": 85,
+   "hit_frame_50": 35,
+   "strike_phase": 0.307,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.634186,
+    -0.5592153799999999
+   ],
+   "yaw_before_deg": 17.287,
+   "yaw_norm_deg": -17.287,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.715,
+    -0.343,
+    0.2429
+   ],
+   "v_out_fit_hope_ms": [
+    5.8818,
+    0.333,
+    1.6138
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0825,
+    -0.4927,
+    0.2647
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.5252,
+     -0.3425,
+     0.6471
+    ],
+    "rms_resid_m": 0.00685,
+    "n_used": 21,
+    "window": [
+     -20,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.6046,
+     0.3779,
+     1.9218
+    ],
+    "rms_resid_m": 0.00843,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4465,
+   "v_out_local_vs_venue_ms": 0.4168,
+   "ball_coverage_unit": 0.985,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ]
+  },
+  {
+   "uid": "Take_063_unit04_BH",
+   "take": "Take_063",
+   "family": "BH",
+   "npz": "clips/hope_Take_063_unit04_BH.npz",
+   "npz_sha256": "53f42f40eb98966b9ca0baee90a7c0db452a6d7ee2ffcbd0703f1ba13f915fd6",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_063_unit04_BH.pkl",
+   "source_pkl_sha256": "276da9108f9b7b54f80b8648210e4370ede114760012999c1fe15d8be47ff4f7",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_063_unit04_BH.ball.npz",
+   "T": 104,
+   "fps": 50,
+   "duration_s": 2.06,
+   "hit_frame_ball_120": 78,
+   "hit_frame_pkl_120": 78,
+   "hit_frame_src120": 84,
+   "hit_frame_50": 35,
+   "strike_phase": 0.3398,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.63615705,
+    -0.55393107
+   ],
+   "yaw_before_deg": 18.018,
+   "yaw_norm_deg": -18.018,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.7199,
+    -0.183,
+    0.5069
+   ],
+   "v_out_fit_hope_ms": [
+    6.2428,
+    0.396,
+    1.3428
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0867,
+    -0.4067,
+    0.258
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.751,
+     -0.1544,
+     0.3009
+    ],
+    "rms_resid_m": 0.00882,
+    "n_used": 24,
+    "window": [
+     -23,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.8745,
+     0.3034,
+     1.7177
+    ],
+    "rms_resid_m": 0.00984,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.2103,
+   "v_out_local_vs_venue_ms": 0.5336,
+   "ball_coverage_unit": 0.992,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ]
+  },
+  {
+   "uid": "Take_063_unit05_BH",
+   "take": "Take_063",
+   "family": "BH",
+   "npz": "clips/hope_Take_063_unit05_BH.npz",
+   "npz_sha256": "91c66f85857cf4e8d0be01ae8821ff944f863bb83ab467633938d2b11a75db7e",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_063_unit05_BH.pkl",
+   "source_pkl_sha256": "ce06d592e26821d86cd12a6a6482439ddb27ff5228ce607043b6d06ef3676a3c",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_063_unit05_BH.ball.npz",
+   "T": 95,
+   "fps": 50,
+   "duration_s": 1.88,
+   "hit_frame_ball_120": 105,
+   "hit_frame_pkl_120": 105,
+   "hit_frame_src120": 111,
+   "hit_frame_50": 46,
+   "strike_phase": 0.4894,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6579703499999999,
+    -0.55563695
+   ],
+   "yaw_before_deg": 24.612,
+   "yaw_norm_deg": -24.612,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.105,
+    -0.201,
+    0.5129
+   ],
+   "v_out_fit_hope_ms": [
+    4.8179,
+    -0.262,
+    1.6168
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.0339,
+    -0.4341,
+    0.2834
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.3383,
+     -0.259,
+     0.5617
+    ],
+    "rms_resid_m": 0.00916,
+    "n_used": 22,
+    "window": [
+     -21,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.0636,
+     -0.2521,
+     1.6792
+    ],
+    "rms_resid_m": 0.00436,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.2453,
+   "v_out_local_vs_venue_ms": 0.2537,
+   "ball_coverage_unit": 0.923,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "real-ball unit coverage 92%"
+   ]
+  },
+  {
+   "uid": "Take_064_unit00_BH",
+   "take": "Take_064",
+   "family": "BH",
+   "npz": "clips/hope_Take_064_unit00_BH.npz",
+   "npz_sha256": "e9b5d78f15c3e46493b73ef242dc534970ccad24e114c91c4925c1398adb9fcc",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_064_unit00_BH.pkl",
+   "source_pkl_sha256": "fdf7d629a296b60f31fb5388ba1bc5762a60b7bcf79b9c9dfce41631d252ac62",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_064_unit00_BH.ball.npz",
+   "T": 56,
+   "fps": 50,
+   "duration_s": 1.1,
+   "hit_frame_ball_120": 53,
+   "hit_frame_pkl_120": 53,
+   "hit_frame_src120": 59,
+   "hit_frame_50": 25,
+   "strike_phase": 0.4545,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.7465453200000001,
+    -0.57166264
+   ],
+   "yaw_before_deg": 9.248,
+   "yaw_norm_deg": -9.248,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.038,
+    0.041,
+    0.4239
+   ],
+   "v_out_fit_hope_ms": [
+    5.7888,
+    -0.118,
+    1.9068
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0461,
+    -0.2817,
+    0.2511
+   ],
+   "real_synth_anchor_gap_m": 4e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.3353,
+     -0.0231,
+     0.5888
+    ],
+    "rms_resid_m": 0.00514,
+    "n_used": 20,
+    "window": [
+     -19,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.86,
+     -0.0384,
+     2.059
+    ],
+    "rms_resid_m": 0.00695,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.346,
+   "v_out_local_vs_venue_ms": 0.186,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_064_unit02_BH",
+   "take": "Take_064",
+   "family": "BH",
+   "npz": "clips/hope_Take_064_unit02_BH.npz",
+   "npz_sha256": "ec1208125f99891779ac8bef1f2ba5c1abe848135bc021905be8cd406b2244ae",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_064_unit02_BH.pkl",
+   "source_pkl_sha256": "a860c304f461527b7cb1bf779724247f7d684393c24a5afb507b78245419f27b",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_064_unit02_BH.ball.npz",
+   "T": 62,
+   "fps": 50,
+   "duration_s": 1.22,
+   "hit_frame_ball_120": 21,
+   "hit_frame_pkl_120": 21,
+   "hit_frame_src120": 27,
+   "hit_frame_50": 11,
+   "strike_phase": 0.1803,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.69631445,
+    -0.43417900000000004
+   ],
+   "yaw_before_deg": 10.429,
+   "yaw_norm_deg": -10.429,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.4429,
+    -0.101,
+    0.8339
+   ],
+   "v_out_fit_hope_ms": [
+    5.8318,
+    0.168,
+    1.4738
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0632,
+    -0.4538,
+    0.2473
+   ],
+   "real_synth_anchor_gap_m": 7e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.5665,
+     -0.1188,
+     0.8981
+    ],
+    "rms_resid_m": 0.00396,
+    "n_used": 18,
+    "window": [
+     -17,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.637,
+     -0.0141,
+     1.8682
+    ],
+    "rms_resid_m": 0.00909,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1404,
+   "v_out_local_vs_venue_ms": 0.4761,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_064_unit03_BH",
+   "take": "Take_064",
+   "family": "BH",
+   "npz": "clips/hope_Take_064_unit03_BH.npz",
+   "npz_sha256": "f968f6bcdd93ec32dfab47dfd1e870002c870077cb0cd5b7831e628bfb688f22",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_064_unit03_BH.pkl",
+   "source_pkl_sha256": "932ca92a0f8b52bec53343da4df8d2adfef494ef184733a936aa47c1fb50256b",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_064_unit03_BH.ball.npz",
+   "T": 39,
+   "fps": 50,
+   "duration_s": 0.76,
+   "hit_frame_ball_120": 19,
+   "hit_frame_pkl_120": 19,
+   "hit_frame_src120": 25,
+   "hit_frame_50": 10,
+   "strike_phase": 0.2632,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.6758294100000001,
+    -0.48523882
+   ],
+   "yaw_before_deg": 12.942,
+   "yaw_norm_deg": -12.942,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -2.644,
+    -0.079,
+    1.1379
+   ],
+   "v_out_fit_hope_ms": [
+    5.8298,
+    0.442,
+    1.5078
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0022,
+    -0.6121,
+    0.2647
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.0118,
+     -0.1345,
+     1.3515
+    ],
+    "rms_resid_m": 0.01261,
+    "n_used": 16,
+    "window": [
+     -15,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0908,
+     0.3986,
+     1.6202
+    ],
+    "rms_resid_m": 0.02786,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.429,
+   "v_out_local_vs_venue_ms": 0.2875,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "duration 0.76s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_064_unit04_BH",
+   "take": "Take_064",
+   "family": "BH",
+   "npz": "clips/hope_Take_064_unit04_BH.npz",
+   "npz_sha256": "cb451265d56a767bfe303c98cf5b1c9361db82ad28813f4f665e7f1d8f4005c6",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_064_unit04_BH.pkl",
+   "source_pkl_sha256": "4e30d1be584b03aa6bb0cc27b0b05f479d8e518b6fa13ec8c99638c4bc581589",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_064_unit04_BH.ball.npz",
+   "T": 78,
+   "fps": 50,
+   "duration_s": 1.54,
+   "hit_frame_ball_120": 71,
+   "hit_frame_pkl_120": 71,
+   "hit_frame_src120": 77,
+   "hit_frame_50": 32,
+   "strike_phase": 0.4156,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.63635095,
+    -0.52462631
+   ],
+   "yaw_before_deg": 18.434,
+   "yaw_norm_deg": -18.434,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.873,
+    -0.027,
+    0.0419
+   ],
+   "v_out_fit_hope_ms": [
+    6.4138,
+    -0.024,
+    0.9838
+   ],
+   "ball_pos_hit_hope_m": [
+    0.085,
+    -0.4214,
+    0.2597
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.6853,
+     -0.071,
+     0.2191
+    ],
+    "rms_resid_m": 0.00787,
+    "n_used": 25,
+    "window": [
+     -24,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.117,
+     -0.037,
+     1.3382
+    ],
+    "rms_resid_m": 0.00843,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.2618,
+   "v_out_local_vs_venue_ms": 0.4624,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_064_unit05_BH",
+   "take": "Take_064",
+   "family": "BH",
+   "npz": "clips/hope_Take_064_unit05_BH.npz",
+   "npz_sha256": "b446f7fa4f546f26b9b553664c125d80f49877d83996d14e9e6229a4d66fde19",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_064_unit05_BH.pkl",
+   "source_pkl_sha256": "76276f22fa65fec876a545b5bef6fd3aa96a05e9cfcbbc4653fec0808ac33580",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_064_unit05_BH.ball.npz",
+   "T": 37,
+   "fps": 50,
+   "duration_s": 0.72,
+   "hit_frame_ball_120": 28,
+   "hit_frame_pkl_120": 28,
+   "hit_frame_src120": 34,
+   "hit_frame_50": 14,
+   "strike_phase": 0.3889,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.64080936,
+    -0.54577553
+   ],
+   "yaw_before_deg": 17.168,
+   "yaw_norm_deg": -17.168,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.163,
+    -0.057,
+    0.0449
+   ],
+   "v_out_fit_hope_ms": [
+    6.0858,
+    0.383,
+    1.4768
+   ],
+   "ball_pos_hit_hope_m": [
+    0.1309,
+    -0.5252,
+    0.2406
+   ],
+   "real_synth_anchor_gap_m": 3e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.3449,
+     -0.0528,
+     0.1125
+    ],
+    "rms_resid_m": 0.00686,
+    "n_used": 25,
+    "window": [
+     -24,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.0035,
+     0.4081,
+     1.6578
+    ],
+    "rms_resid_m": 0.00985,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.1941,
+   "v_out_local_vs_venue_ms": 0.2004,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "duration 0.72s outside [0.8, 4.0]"
+   ]
+  },
+  {
+   "uid": "Take_064_unit06_BH",
+   "take": "Take_064",
+   "family": "BH",
+   "npz": "clips/hope_Take_064_unit06_BH.npz",
+   "npz_sha256": "04a673f9bd7c34e80ac89e94767cd0d789f6e05c9c3c8240ed83743e4f584055",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_064_unit06_BH.pkl",
+   "source_pkl_sha256": "6ee285442e6dbda7473360d7fb91717e6ac71049f8280598b68bba3ce552e2cf",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_064_unit06_BH.ball.npz",
+   "T": 56,
+   "fps": 50,
+   "duration_s": 1.1,
+   "hit_frame_ball_120": 76,
+   "hit_frame_pkl_120": 76,
+   "hit_frame_src120": 82,
+   "hit_frame_50": 34,
+   "strike_phase": 0.6182,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.61645168,
+    -0.54585273
+   ],
+   "yaw_before_deg": 17.382,
+   "yaw_norm_deg": -17.382,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.8779,
+    -0.266,
+    0.3509
+   ],
+   "v_out_fit_hope_ms": [
+    6.7487,
+    0.465,
+    1.5707
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0569,
+    -0.5548,
+    0.2057
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -4.0326,
+     -0.2985,
+     -0.1053
+    ],
+    "rms_resid_m": 0.00662,
+    "n_used": 25,
+    "window": [
+     -24,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     6.6143,
+     0.5123,
+     1.752
+    ],
+    "rms_resid_m": 0.01119,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.4828,
+   "v_out_local_vs_venue_ms": 0.2306,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_064_unit07_FH",
+   "take": "Take_064",
+   "family": "FH",
+   "npz": "clips/hope_Take_064_unit07_FH.npz",
+   "npz_sha256": "9a1fc12021bc6790e5f2312adaaf7ddd0650fb9d09a1dae5fa026c0eac966502",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_064_unit07_FH.pkl",
+   "source_pkl_sha256": "ab040f1ccb0b88dfe4f6a69e77810ceb7c26e3095e20f104c7cf40614d564e81",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_064_unit07_FH.ball.npz",
+   "T": 57,
+   "fps": 50,
+   "duration_s": 1.12,
+   "hit_frame_ball_120": 80,
+   "hit_frame_pkl_120": 80,
+   "hit_frame_src120": 86,
+   "hit_frame_50": 36,
+   "strike_phase": 0.6429,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.62577664,
+    -0.55161234
+   ],
+   "yaw_before_deg": 12.659,
+   "yaw_norm_deg": -12.659,
+   "world_z0": "floor",
+   "retime_factor": 1.0,
+   "v_in_fit_hope_ms": [
+    -3.555,
+    -0.235,
+    0.2019
+   ],
+   "v_out_fit_hope_ms": [
+    6.0938,
+    0.481,
+    1.8168
+   ],
+   "ball_pos_hit_hope_m": [
+    0.1467,
+    -0.5557,
+    0.2465
+   ],
+   "real_synth_anchor_gap_m": 6e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.4344,
+     -0.2324,
+     -0.0763
+    ],
+    "rms_resid_m": 0.00772,
+    "n_used": 28,
+    "window": [
+     -27,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     5.9316,
+     0.5439,
+     1.93
+    ],
+    "rms_resid_m": 0.0082,
+    "n_used": 19,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 1.0
+   },
+   "v_in_local_vs_venue_ms": 0.3032,
+   "v_out_local_vs_venue_ms": 0.2076,
+   "ball_coverage_unit": 1.0,
+   "ball_coverage_pre30": 1.0,
+   "warnings": []
+  },
+  {
+   "uid": "Take_085_unit00_FH",
+   "take": "Take_085",
+   "family": "FH",
+   "npz": "clips/hope_Take_085_unit00_FH.npz",
+   "npz_sha256": "2defd1ba55d67dbde2ca76c227b1a6c2ea458fe2461fea37436dab34a1bac823",
+   "source_pkl": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/Take_085_unit00_FH.pkl",
+   "source_pkl_sha256": "0c3e484f7a5be3db06d24b5db903459b7d245a0f64b040934336736a1134373b",
+   "ball_npz": "/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2/ball_ext/Take_085_unit00_FH.ball.npz",
+   "T": 248,
+   "fps": 50,
+   "duration_s": 4.94,
+   "hit_frame_ball_120": 250,
+   "hit_frame_pkl_120": 280,
+   "hit_frame_src120": 286,
+   "hit_frame_50": 119,
+   "strike_phase": 0.4818,
+   "n_hits_ext": 1,
+   "station_xy_hope_m": [
+    -0.56024316,
+    -0.8644806300000001
+   ],
+   "yaw_before_deg": 4.16,
+   "yaw_norm_deg": -4.16,
+   "world_z0": "floor",
+   "retime_factor": 1.12,
+   "v_in_fit_hope_ms": [
+    -4.2389,
+    1.183,
+    2.2118
+   ],
+   "v_out_fit_hope_ms": [
+    6.8158,
+    -0.806,
+    0.4858
+   ],
+   "ball_pos_hit_hope_m": [
+    0.0302,
+    -0.4234,
+    0.258
+   ],
+   "real_synth_anchor_gap_m": 5e-05,
+   "v_in_local_fit": {
+    "v": [
+     -3.9406,
+     1.1779,
+     1.5165
+    ],
+    "rms_resid_m": 0.02443,
+    "n_used": 15,
+    "window": [
+     -14,
+     0
+    ],
+    "coverage": 1.0
+   },
+   "v_out_local_fit": {
+    "v": [
+     7.1504,
+     -0.9581,
+     1.1922
+    ],
+    "rms_resid_m": 0.03386,
+    "n_used": 17,
+    "window": [
+     0,
+     18
+    ],
+    "coverage": 0.895
+   },
+   "v_in_local_vs_venue_ms": 0.7566,
+   "v_out_local_vs_venue_ms": 0.7963,
+   "ball_coverage_unit": 0.676,
+   "ball_coverage_pre30": 1.0,
+   "warnings": [
+    "n_unit 524 != pkl frames 587",
+    "local v_in fit rms 2.4 cm",
+    "real-ball unit coverage 68%",
+    "retime_factor 1.12 (ball physics not retimed)",
+    "duration 4.94s outside [0.8, 4.0]"
+   ]
+  }
+ ],
+ "failures": []
+}

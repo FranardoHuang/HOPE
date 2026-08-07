@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "manifest_type": "chingmu73_measured_a3p0807_completion_v1",
+  "bank_id": "chingmu73_measured_a3p0807_20260808",
+  "denominators": {
+    "clips": 73,
+    "solver_admitted": 73,
+    "materialized": 73,
+    "audit_all_gates_true": 73,
+    "mechanically_admitted": 0
+  },
+  "mechanical_admission": {
+    "verdict": "FAIL",
+    "admitted": 0,
+    "of": 73,
+    "identical_to_v4_baseline_except_one_counter": true,
+    "reason_counts_this_bank": {
+      "joint_position_limit_violation": 55,
+      "stored_joint_velocity_limit_violation": 20,
+      "finite_difference_joint_velocity_limit_violation": 39,
+      "authoritative_joint_acceleration_limits_unavailable": 73,
+      "authoritative_torque_speed_curves_unavailable": 73,
+      "per_frame_inverse_dynamics_joint_torque_unavailable": 73
+    },
+    "reason_counts_v4_baseline": {
+      "joint_position_limit_violation": 55,
+      "stored_joint_velocity_limit_violation": 20,
+      "finite_difference_joint_velocity_limit_violation": 37,
+      "authoritative_joint_acceleration_limits_unavailable": 73,
+      "authoritative_torque_speed_curves_unavailable": 73,
+      "per_frame_inverse_dynamics_joint_torque_unavailable": 73
+    },
+    "only_difference": "finite_difference_joint_velocity_limit_violation 37 -> 39 (+2 clips)",
+    "blocking_class_1_missing_vendor_authority": {
+      "reasons": [
+        "authoritative_joint_acceleration_limits_unavailable",
+        "authoritative_torque_speed_curves_unavailable",
+        "per_frame_inverse_dynamics_joint_torque_unavailable"
+      ],
+      "affects": "73 of 73, on both banks",
+      "meaning": "these say the data needed to JUDGE the motion does not exist, not that the motion is bad; no amount of re-solving changes them",
+      "unblocked_by": "the still-open vendor question on joint acceleration limits, torque-speed curves and reducer ratios (docs/interfaces/a3_p1_0803_vendor_questions.md)"
+    },
+    "blocking_class_2_real_violations": {
+      "joint_position_limit_violation": [
+        55,
+        55
+      ],
+      "finite_difference_joint_velocity_limit_violation": [
+        37,
+        39
+      ],
+      "stored_joint_velocity_limit_violation": [
+        20,
+        20
+      ],
+      "note": "[v4/0409, this bank/0807]; the source motions exceed the envelope, which predates the swap"
+    },
+    "conclusion": "the plant swap is neutral to mechanical admission; the bank fails for the same reasons v4 did, and the dominant blocker is a vendor data gap rather than the robot or the retarget"
+  },
+  "authorization": {
+    "diagnostic_unauthorized": true,
+    "training_authorized": false,
+    "deployment_authorized": false
+  }
+}

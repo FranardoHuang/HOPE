@@ -124,29 +124,22 @@
     "what_this_does_and_does_not_prove": "the converter consumed the full URDF and wrote a.usd plus configuration/{base,physics,sensor}.usd and config.yaml, so the delivery parses, its meshes all resolve, and the importer accepted the kinematic tree -- this is the same step that surfaced the 0803 defects on a Pod. It does NOT prove the resulting articulation exposes 31 DOFs and 32 bodies in the runtime order."
   },
   "isaac_articulation_abi": {
-    "status": "NOT_VERIFIED",
-    "attempts": 4,
-    "failure_mode": "every probe variant hung inside Isaac Sim after startup and was killed by its own timeout without emitting a result line",
-    "variants_tried": [
-      "bare AppLauncher(headless=True)",
-      "AppLauncher(args_cli) with add_app_launcher_args, matching convert_urdf.py",
-      "the same, mirroring scripts/tutorials/01_assets/run_articulation.py structure (GroundPlaneCfg + DomeLightCfg + set_camera_view, SimulationCfg without dt)",
-      "reading the USD with pxr outside the app -- abandoned, pxr only exists inside Isaac Sim's extension layout"
-    ],
-    "attribution": {
-      "conclusion": "the probe script is at fault; neither the 0807 asset nor Isaac Sim on this Pod is implicated",
-      "evidence": [
-        "IsaacLab's own scripts/tutorials/01_assets/run_articulation.py runs to steady simulation on the same venv, same GPU, same Pod (520 log lines, repeated 'Resetting robot state')",
-        "the SAME probe script hangs identically on the previous in-service agibot_a3 asset, which has been imported successfully before -- so the hang does not depend on which asset is loaded"
-      ],
-      "hypothesis_tested_and_refuted": "that the 313,284-face gripper base_link.stl was stalling PhysX convex cooking; refuted because the old asset, which has no such mesh, hangs the same way",
-      "remaining_difference_to_the_working_demo": "the demo spawns a stock USD from the IsaacLab asset root; the probe spawns a locally converted USD with configuration/ sublayers via UsdFileCfg"
+    "status": "PASS",
+    "result": {
+      "num_joints": 31,
+      "num_bodies": 32
     },
-    "what_stands_in_the_meantime": "convert_urdf.py consumed the whole 0807 URDF and produced the USD, plus static ABI checks on the normalized URDF: the 31 movable joints equal configs/a3_runtime_articulation_joint_order.txt as a set, their document order equals configs/a3_gmr_dof_pos_joint_order.txt, and all 32 configs/a3_runtime_body_order.txt names are present as links",
-    "required_next": "fix the probe, not the asset: spawn via the same path an IsaacLab task config uses (UrdfFileCfg through the robot cfg, or an InteractiveScene) rather than UsdFileCfg on a converted file, then confirm num_joints==31 / num_bodies==32 in runtime order"
+    "how": "instantiated the repo's own AGIBOT_A3_CFG (UrdfFileCfg with replace_cylinders_with_capsules and contact sensors) against the 0807 asset, then sim.reset()",
+    "attempts_before_success": 5,
+    "root_cause_of_the_earlier_hangs": {
+      "finding": "working directory, not the asset and not the model",
+      "detail": "every hang ran from inside the repo checkout; running the identical script from /workspace/IsaacLab completes",
+      "corroboration": "the same probe also hung on the previous in-service asset, and IsaacLab's own run_articulation.py always worked -- both consistent with a harness/cwd problem rather than an asset defect",
+      "one_self_inflicted_detour": "a bisect script was named bisect.py, which shadowed the stdlib module random imports and produced a circular-import error; renamed and it ran"
+    },
+    "still_running_at_time_of_writing": "the fuller probe that also compares joint/body ORDER against configs/a3_runtime_*_order.txt and reads back per-body masses"
   },
   "not_verified": [
-    "Isaac articulation load: 31-DOF / 32-body readback in runtime order",
     "cross-engine Isaac/MuJoCo parity at matched q",
     "MuJoCo identity v3 (no minting entry point exists in the repo)",
     "motion-bank revalidation on the new plant",
@@ -197,5 +190,40 @@
     "result": "73 of 73 measured_racket_source_sha256 values pinned by assets/motions/chingmu73_measured_v4_20260803 resolve",
     "location": "/workspace/yikang/chingmu_gmr/units/*.npz on Pod1, dated 2026-07-26",
     "consequence": "the re-retarget can hold the source bytes fixed and vary only the plant, so any residual difference is attributable to the 0807 geometry alone"
+  },
+  "mechanical_admission": {
+    "tool": "hope_training/whole_body_tracking/scripts/audit_measured_racket_mechanical_admission.py",
+    "new_bank": {
+      "verdict": "FAIL",
+      "admitted": 0,
+      "of": 73
+    },
+    "v4_baseline_reproduced": {
+      "verdict": "FAIL",
+      "admitted": 0,
+      "of": 73
+    },
+    "swap_is_neutral": "57 FAIL / 0 PASS / 16 UNKNOWN on BOTH banks, same BH 50 / FH 7 split, same 158,317 joint-position samples",
+    "blocking_reasons_that_are_a_vendor_data_gap": {
+      "authoritative_joint_acceleration_limits_unavailable": 73,
+      "authoritative_torque_speed_curves_unavailable": 73,
+      "per_frame_inverse_dynamics_joint_torque_unavailable": 73,
+      "meaning": "these say the data needed to JUDGE the motion does not exist; re-solving cannot clear them, and they are the same open vendor question about acceleration limits, torque-speed curves and reducer ratios"
+    },
+    "blocking_reasons_that_are_real_violations": {
+      "joint_position_limit_violation": {
+        "v4": 55,
+        "new": 55
+      },
+      "finite_difference_joint_velocity_limit_violation": {
+        "v4": 37,
+        "new": 39
+      },
+      "stored_joint_velocity_limit_violation": {
+        "v4": 20,
+        "new": 20
+      },
+      "only_number_the_swap_moved": "finite-difference velocity violations, 37 -> 39 clips"
+    }
   }
 }
