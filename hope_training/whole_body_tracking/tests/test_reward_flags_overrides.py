@@ -2595,9 +2595,9 @@ _PACK_V2_WEIGHTS = {
     "virtual_pass_net": 0.0,
     "virtual_landing": 500.0,
     "virtual_spin": 0.0,
-    # 值封顶平滑(fresh 自杀区间解;冻结档位)
-    "action_rate_l2": 0.0,
-    "action_rate_clamped": -0.2,
+    # 2026-08-08:一阶平滑照开源改形状 —— 封顶版下岗,换回上游无封顶的 action_rate_l2 -0.1
+    "action_rate_l2": -0.1,
+    "action_rate_clamped": 0.0,
     "action_acc_l2": -0.05,
     "death_penalty": -10.0,
 }
@@ -2698,8 +2698,8 @@ def test_vendor_bang_bang_explicitly_disables_action_acc_only():
         {"rewards": {"reward_pack": "v2", "action_acc_weight": 0.0}}
     )
     assert env_cfg.rewards.action_acc_l2.weight == pytest.approx(0.0)
-    assert env_cfg.rewards.action_rate_l2.weight == pytest.approx(0.0)
-    assert env_cfg.rewards.action_rate_clamped.weight == pytest.approx(-0.2)
+    assert env_cfg.rewards.action_rate_l2.weight == pytest.approx(-0.1)
+    assert env_cfg.rewards.action_rate_clamped.weight == pytest.approx(0.0)
     assert "rewards.action_acc_l2.weight=0.0" in applied
     assert any(
         "rewards.action_acc_weight explicitly set" in row
@@ -2750,14 +2750,17 @@ def test_settle_delay_flag_translates_and_defaults_off():
                 "racket": {"adaptive_sigma": True}})
 
 
-def test_reward_pack_v2_strips_unclamped_action_rate_with_marker():
-    # v2 用封顶版;谱系基线普遍带 action_rate_weight → 包剥离+记账,不拒收(防双计费)
+def test_reward_pack_v2_strips_task_yaml_action_rate_with_marker():
+    # 一阶平滑的唯一定价点是包本身(action_rate_l2 = -0.1)。谱系基线普遍也带
+    # action_rate_weight → 包剥离该键 + 记账,不拒收:两处可改的号码等于没有真源,
+    # 而 2026-08-08 的定价推导只对包里那个数负责。这里故意喂一个 -0.2(旧封顶档位的
+    # 号码),证明它**没有**赢 —— 剥离前后活值都必须是包的 -0.1。
     env_cfg, applied = _apply(
         {"rewards": {"reward_pack": "v2", "action_rate_weight": -0.2},
          "racket": {"adaptive_sigma": True}}
     )
-    assert env_cfg.rewards.action_rate_l2.weight == 0.0
-    assert env_cfg.rewards.action_rate_clamped.weight == pytest.approx(-0.2)
+    assert env_cfg.rewards.action_rate_l2.weight == pytest.approx(-0.1)
+    assert env_cfg.rewards.action_rate_clamped.weight == pytest.approx(0.0)
     assert any("action_rate_weight" in m and "dropped" in m for m in applied)
 
 

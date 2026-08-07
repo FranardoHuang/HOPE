@@ -75,7 +75,10 @@ C211_LANDING_OFF_TABLE_FRAC = 0.5
 C211_ROLLOUT_H_S = 0.01
 C211_ROLLOUT_STEPS = 100
 C211_UPRIGHT_STD = math.sqrt(0.2)
-C211_ACTION_RATE_CLAMP = 9.0
+# 2026-08-08 Franco 裁定(一阶平滑照开源对齐):Isaac 侧的 `action_rate_clamped` 退役,
+# 换回上游无封顶的 `action_rate_l2`(权重 -0.1)。C 族与 A 族同批同形,所以这里的封顶
+# 常数一并删掉 —— 镜像里留一个 Isaac 侧已经不读的 clamp,正是"指纹对上、语义早漂"的那类债。
+C211_ACTION_RATE_POST_DT_WEIGHT = -0.1
 C211_RACKET_LONG_AXIS_LOCAL = np.asarray(
     (math.sqrt(0.5), 0.0, math.sqrt(0.5)), dtype=np.float64
 )
@@ -133,7 +136,7 @@ C211_IMPLEMENTED_ISAAC_PRIOR_TERM_NAMES = (
     "base_ang_vel_xy",
     "base_lin_vel_z",
     "joint_vel",
-    "action_rate_clamped",
+    "action_rate_l2",
     "motion_global_anchor_ori",
     "motion_body_pos",
     "motion_body_ori",
@@ -458,8 +461,8 @@ def _c211_isaac_synonymous_prior_terms(
     base_ang_vel_xy_raw = float(np.sum(np.square(root_ang_body[:2])))
     base_lin_vel_z_raw = float(root_lin_body[2] ** 2)
     joint_vel_raw = float(np.sum(np.square(qd)))
-    action_rate_unclamped = float(np.sum(np.square(action - previous)))
-    action_rate_raw = min(action_rate_unclamped, C211_ACTION_RATE_CLAMP)
+    # 上游 isaaclab `action_rate_l2` 逐字:sum((a_t - a_{t-1})^2),raw 动作、SUM、无上界。
+    action_rate_raw = float(np.sum(np.square(action - previous)))
 
     anchor_rotation_error = _rotation_error_magnitude(
         teacher.get("global_anchor_rotation"),
@@ -590,13 +593,13 @@ def _c211_isaac_synonymous_prior_terms(
             manager_weight=-1.0e-4,
             details={"formula": "sum(joint_velocity^2)"},
         ),
-        "action_rate_clamped": _prior_term(
+        "action_rate_l2": _prior_term(
             raw_reward=action_rate_raw,
-            manager_weight=-0.2,
+            manager_weight=C211_ACTION_RATE_POST_DT_WEIGHT,
             details={
-                "unclamped_raw_reward": action_rate_unclamped,
-                "value_clamp": C211_ACTION_RATE_CLAMP,
-                "formula": "min(sum((action-prev_action)^2),value_clamp)",
+                "formula": "sum((action-prev_action)^2)",
+                "upstream": "isaaclab.envs.mdp.rewards.action_rate_l2",
+                "value_clamp": None,
             },
         ),
         "motion_global_anchor_ori": _prior_term(
@@ -3392,9 +3395,9 @@ class MujocoC211DiagnosticVecEnv:
                 "source": "live_MuJoCo_joint_dof_velocity",
             },
             {
-                "term": "action_rate_clamped",
-                "manager_weight": -0.2,
-                "params": {"value_clamp": C211_ACTION_RATE_CLAMP},
+                "term": "action_rate_l2",
+                "manager_weight": C211_ACTION_RATE_POST_DT_WEIGHT,
+                "params": {},
                 "source": "raw_actor_action_minus_previous_raw_actor_action",
             },
             {

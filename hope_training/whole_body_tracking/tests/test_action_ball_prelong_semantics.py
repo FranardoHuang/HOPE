@@ -307,7 +307,7 @@ def test_exact_a211_and_c211_nonzero_term_sets_are_frozen():
         "base_ang_vel_xy",
         "base_lin_vel_z",
         "joint_vel",
-        "action_rate_clamped",
+        "action_rate_l2",
     }
     common_mimic = {
         "motion_global_anchor_ori",

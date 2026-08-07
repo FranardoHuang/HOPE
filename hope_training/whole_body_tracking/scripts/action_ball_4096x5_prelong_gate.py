@@ -814,6 +814,13 @@ def validate_survival_denominators(
 # 为什么不顺手把"恒零"也拒掉:A211 的 target/outcome 项在一次一球未碰的 5-update 冒烟里
 # 本来就该恒零,拒掉它等于要求一个没训过的策略已经会打球(§5.6.8 同型的"门定错范围")。
 # 恒零项如实进收据,不进拒收。
+# 2026-08-08 结案:上面那条现役实例已经不再是现役 —— Franco 裁定"超限形状照开源对齐",
+# ``action_rate_clamped`` 退役(weight 0 = IsaacLab 直接跳过),一阶平滑换回上游无封顶的
+# ``action_rate_l2`` −0.1(BeyondMimic / mjlab-tracking / unitree_rl_lab-mimic 三家同值同形)。
+# 无封顶的 raw 随 ‖Δa‖² = 2σ²·χ²₃₁ 逐 update 变动,所以它不再是常数项,也就不需要任何申报。
+# **本表因此仍然是空的,而且这道门一行没改** —— 它是把这件事逼出来的那道门,不是被它绕开的。
+# 下面这套申报机制原样留着:下一个想"申报一个常数项"的人仍然要写出机制、写出收据里真有的
+# 那个量、并接受门用观测窗核对。见 exp §5.6.25。
 _ENDS_WHEN_DIRECTIONS = ("falls_to", "rises_to")
 
 #: 结束条件可以引用的收据字段,必须是 ``policy`` 块里逐 update 都在的那三个标量。

@@ -77,7 +77,7 @@ def _checkpoint_acceptance():
 
 
 def _economy(update, *, terms=None, policy=None):
-    # 注:``motion`` 与 ``action_rate_clamped`` 逐 update 变化都是**故意**的。本夹具原本
+    # 注:``motion`` 与 ``action_rate_l2`` 逐 update 变化都是**故意**的。本夹具原本
     # 把两项都写成五个 update 恒等于同一个数 —— 那正是 s15r1 的病灶形状,而把病灶写进
     # 默认夹具会让这个模块里的每一条测试都默认接受它。默认夹具现在是一份**健康**的跑,
     # 冻结项另有专门的测试(见下面"常数奖励项"一节)。
@@ -85,7 +85,7 @@ def _economy(update, *, terms=None, policy=None):
         terms = {
             "motion": 1.0 + 0.25 * update,
             "task": 0.0,
-            "action_rate_clamped": -3538.945068 + 1.5 * update,
+            "action_rate_l2": -3538.945068 + 1.5 * update,
         }
     if policy is None:
         policy = {
@@ -629,15 +629,36 @@ def test_undeclared_constant_nonzero_reward_term_is_refused():
 
 
 def test_no_reward_term_currently_holds_a_constant_exemption():
-    """现役表必须是空的:``action_rate_clamped`` 那条申报已被自己的收据证伪。
+    """现役表必须是空的 —— 而且**结案方式是修机制,不是发豁免**。
 
-    它当初写的解冻条件是 ``policy_std_max`` 掉到 ``0.381``;s15r1 两格实测
-    ``1.00198 -> 1.00729`` / ``1.00191 -> 1.00661``,五个 update 一路在涨。
+    ``action_rate_clamped`` 当初写的解冻条件是 ``policy_std_max`` 掉到 ``0.381``;
+    s15r1 两格实测 ``1.00198 -> 1.00729`` / ``1.00191 -> 1.00661``,五个 update 一路在涨。
     唯一已知能打球的 ``build_1`` 收敛后 ``||Δa||²`` 还有 ``10.8~12.05``,仍在
     ``value_clamp=9.0`` 之上 —— 这个封顶全程焊死,不是"暂时饱和"。
+
+    2026-08-08 结案:该项退役(weight 0),一阶平滑换回上游无封顶的 ``action_rate_l2``
+    −0.1。所以本表仍然是空的:**没有任何项拿着豁免,这道门一行没改。**
     """
 
     assert GATE.DECLARED_CONSTANT_REWARD_TERMS == {}
+
+
+def test_the_s15r1_frozen_shape_is_still_refused_verbatim():
+    """通用护栏仍然有效:把 s15r1 那条逐位常数原样喂回去,门必须照样拒收。
+
+    这是 (d) 那条"确认它仍然有效"的可执行版本 —— 数值逐位取自 s15r1 的 C0/C1
+    (``-3538.945068`` = ``98304 x 9.0 x 0.2 x 0.02``),项名用旧名字,因为万一有人
+    把封顶版复活,门要以完全相同的方式拦住他。
+    """
+
+    log = _economy_log(
+        [
+            {"motion": 1.0 + 0.25 * update, "action_rate_clamped": -3538.945068}
+            for update in range(5)
+        ]
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="action_rate_clamped"):
+        GATE.validate_economy_updates(log)
 
 
 def test_declared_constant_reward_term_passes_and_self_reports(monkeypatch):
@@ -799,7 +820,7 @@ def test_income_inversion_is_reported_not_blocked():
 
     inversion = GATE.validate_economy_updates(_log())["income_inversion"]
     assert [row["ppo_update"] for row in inversion] == [0, 1, 2, 3, 4]
-    assert inversion[0]["largest_cost_term"] == "action_rate_clamped"
+    assert inversion[0]["largest_cost_term"] == "action_rate_l2"
     assert inversion[0]["positive_income_sum"] == pytest.approx(1.0)
     assert inversion[0]["largest_cost_over_positive_income"] == pytest.approx(3538.945068)
     assert inversion[0]["net_weighted_dt_sum"] == pytest.approx(-3537.945068)

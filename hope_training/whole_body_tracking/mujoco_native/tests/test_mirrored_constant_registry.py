@@ -228,12 +228,12 @@ def test_debt_without_a_written_plan_is_refused(monkeypatch):
     trimmed = {
         key: value
         for key, value in registry.OPEN_MIRROR_DEBT.items()
-        if key != "action_ball_c211_env.C211_ACTION_RATE_CLAMP"
+        if key != "action_ball_c211_env.C211_ACTION_RATE_POST_DT_WEIGHT"
     }
     monkeypatch.setattr(registry, "OPEN_MIRROR_DEBT", trimmed)
     assert any(
         "mirrored_todo_without_a_written_plan:"
-        "action_ball_c211_env.C211_ACTION_RATE_CLAMP" in item
+        "action_ball_c211_env.C211_ACTION_RATE_POST_DT_WEIGHT" in item
         for item in registry.registry_blockers()
     )
 

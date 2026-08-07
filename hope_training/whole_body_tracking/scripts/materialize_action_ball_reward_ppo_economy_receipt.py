@@ -60,10 +60,18 @@ EXPECTED_RSL_RL_DISTRIBUTION = "rsl-rl-lib"
 EXPECTED_RSL_RL_VERSION = "2.3.1"
 REWARD_GLOBAL_SCALAR = 1.0
 POLICY_STEP_DT_S = 0.02
-# 2026-08-07 Franco 裁定二重钉:限位三项换开源 rad 口径(qdes/actual barrier -5 -> -10)。
-# 旧值 845d75b4...ff02 只代签本次改价之前的字节。
+# 2026-08-08 Franco 裁定(一阶平滑照开源对齐)重钉:封顶版 `action_rate_clamped`
+# (-0.2 / value_clamp 9.0)退役,换成上游 `action_rate_l2` -0.1、无 params。项数仍是 30。
+# 旧值 b096b79c...a59d 只代签本次改价之前的字节(它自己是 08-07 限位那次重钉的,
+# 再往前是 845d75b4...ff02)。
+#
+# **这个数是算出来的,不是抄来的。** 重钉前先用同一条流水线复算了旧值:拿两个 action_id 的
+# r5 契约、叠上 08-07 那张 `adopted` 表、按 `_reward_receipt_payload` 的规范化(sort_keys、
+# separators=(",",":")、allow_nan=False)取 sha256 —— 逐位得到 `b096b79c...a59d`,与当时钉的
+# 值相同。**先证明能复现旧值,再在同一条流水线上生成新值**,这样换的是"活值的指纹",
+# 不是"一个换过的号码"。新值两个 action_id 各自算出来也相同(收据要求两族共用一份配方)。
 EXPECTED_EFFECTIVE_REWARD_SHA256 = (
-    "b096b79c403b770e4e0e687f1d35ed5256b777377248cfca0a8856b164b2a59d"
+    "41631955ece024ce957d79ac759f1bf88b62e6af7bb1217191b04d93efbf53d7"
 )
 RUNTIME_GATE_NUM_ENVS = 4096
 RUNTIME_GATE_UPDATES = 5
@@ -475,6 +483,11 @@ def _bound_row(
     weighted_dt_max: float,
     semantics: str,
     source_loci: Sequence[str],
+    # 2026-08-08:大多数行的 raw_max 是**可达上界**(核自带上限,或由机械限位/部署钳位兜底)。
+    # ``action_rate_l2`` 换成开源无封顶形状之后不是这一类 —— 它的 raw 没有上界,写进来的数
+    # 是"在发射时的探索 σ 下的工作区包络"。收据必须自陈这个区别,否则读的人会把一个
+    # 期望值当成最坏值去做预算。
+    evidence_class: str = "reviewed_analytic_assumption",
 ) -> dict[str, Any]:
     return {
         "name": name,
@@ -484,7 +497,7 @@ def _bound_row(
         "weighted_dt_min": weighted_dt_min,
         "weighted_dt_max": weighted_dt_max,
         "semantics": semantics,
-        "evidence_class": "reviewed_analytic_assumption",
+        "evidence_class": evidence_class,
         "source_loci": list(source_loci),
     }
 
@@ -505,6 +518,18 @@ def _bound_row(
 # 任何一边漂了都会红。
 _QDES_LIMIT_BARRIER_RAW_MAX = 0.925513
 _ACTUAL_LIMIT_BARRIER_RAW_MAX = 6.530010
+
+# 2026-08-08 Franco 裁定(一阶平滑照开源对齐):``action_rate_l2`` 是上游 isaaclab 的
+# `sum((a_t − a_{t−1})²)`,**没有任何上界** —— raw 动作是未截断的高斯样本
+# (`ClampedJointPositionAction` 只钳 q_des,`ActionManager._action` 存的是原始动作)。
+# 所以下面这个数**不是可达上界,是工作区包络**,收据里也必须这么自陈:
+#   * 解析式:31 维、相邻两步独立采样 ⇒ ‖Δa‖² = 2σ²·χ²₃₁,均值 2×31×σ²;
+#     现役 σ 实测 1.001(s15r1 五个 update 的 policy_std_mean)⇒ 均值 62.1;
+#   * 实测式:build_1(唯一已知能打到球的同底盘配方,同 31 维、σ 同为 1.0)在 iter 4
+#     的 `action_rate` = -0.1262 / -0.1264 每步,按 weight -0.1 × dt 0.02 反推 ‖Δa‖² = 63.1。
+# 两条独立路径差 1.6%(差值 = 均值漂移项 |μ_t − μ_{t−1}|² ≈ 1.0),取实测的 63.1。
+# 收敛端参照:build_1 训到 21896 iter 时 ‖Δa‖² 掉到 10.8~12.05 ⇒ 每步 -0.0216~-0.0241。
+_ACTION_RATE_L2_RAW_OPERATING_ENVELOPE = 63.1
 
 
 def _theoretical_weighted_dt_bounds(
@@ -536,12 +561,10 @@ def _theoretical_weighted_dt_bounds(
             "expected_joint_count": 31,
         },
     )
-    _require_term(
-        terms,
-        "action_rate_clamped",
-        weight=-0.2,
-        params_subset={"value_clamp": 9.0},
-    )
+    # 2026-08-08 裁定:一阶平滑改用上游那条**无封顶**的 action_rate_l2,权重 -0.1
+    # (BeyondMimic / mjlab-tracking / unitree_rl_lab-mimic 三家逐字同值同形)。
+    # 它没有 params —— 上游签名就是 `action_rate_l2(env)`,不许在这里凭空要一个键。
+    _require_term(terms, "action_rate_l2", weight=-0.1)
     _require_term(
         terms,
         "racket_position",
@@ -583,7 +606,7 @@ def _theoretical_weighted_dt_bounds(
         "death": -300.0 * step_dt_s,
         "qdes_limit": -10.0 * _QDES_LIMIT_BARRIER_RAW_MAX * step_dt_s,
         "actual_limit": -10.0 * _ACTUAL_LIMIT_BARRIER_RAW_MAX * step_dt_s,
-        "action_rate": -0.2 * 9.0 * step_dt_s,
+        "action_rate": -0.1 * _ACTION_RATE_L2_RAW_OPERATING_ENVELOPE * step_dt_s,
         "fine": 4.0 * step_dt_s,
         "coarse": 1.0 * step_dt_s,
         "velocity": 0.5 * step_dt_s,
@@ -596,7 +619,7 @@ def _theoretical_weighted_dt_bounds(
         "death": -6.0,
         "qdes_limit": -0.185103,
         "actual_limit": -1.306002,
-        "action_rate": -0.036,
+        "action_rate": -0.1262,
         "fine": 0.08,
         "coarse": 0.02,
         "velocity": 0.01,
@@ -659,14 +682,26 @@ def _theoretical_weighted_dt_bounds(
             source_loci=("mdp/hope_rewards.py:actual_joint_limit_barrier_v2",),
         ),
         _bound_row(
-            name="action_rate_clamped_per_step",
-            members=("action_rate_clamped",),
+            name="action_rate_l2_per_step",
+            members=("action_rate_l2",),
             raw_min=0.0,
-            raw_max=9.0,
-            weighted_dt_min=-0.036,
+            raw_max=_ACTION_RATE_L2_RAW_OPERATING_ENVELOPE,
+            weighted_dt_min=-0.1 * _ACTION_RATE_L2_RAW_OPERATING_ENVELOPE * 0.02,
             weighted_dt_max=0.0,
-            semantics="clamped squared first action difference",
-            source_loci=("mdp/hope_rewards.py:action_rate_l2_clamped",),
+            semantics=(
+                "unbounded squared first action difference (upstream IsaacLab "
+                "action_rate_l2, SUM over 31 raw action dims, no value cap). "
+                "raw_max is NOT a reachable ceiling: it is the operating envelope "
+                "E||da||^2 = 2*31*sigma^2 at the launched exploration sigma ~= 1.0, "
+                "cross-validated against build_1 iter 4 (-0.1262/step at weight "
+                "-0.1 and dt 0.02 => ||da||^2 = 63.1). Individual samples exceed it; "
+                "the dose decays as sigma^2 (build_1 converged: ||da||^2 = 10.8-12.05)"
+            ),
+            evidence_class="measured_operating_envelope_not_a_reachable_cap",
+            source_loci=(
+                "isaaclab/envs/mdp/rewards.py:action_rate_l2",
+                "tasks/tracking/tracking_env_cfg.py:237",
+            ),
         ),
         _bound_row(
             name="racket_position_fine_per_step",

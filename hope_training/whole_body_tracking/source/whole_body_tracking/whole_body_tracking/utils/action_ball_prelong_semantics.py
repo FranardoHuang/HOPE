@@ -104,7 +104,9 @@ _COMMON_SCIENTIFIC_TERM_WEIGHTS = {
         "base_ang_vel_xy": -0.05,
         "base_lin_vel_z": -0.5,
         "joint_vel": -1.0e-4,
-        "action_rate_clamped": -0.2,
+        # 2026-08-08:封顶版下岗(σ=1.0 下 100% 时间在 clamp 上、零梯度),换回上游那条
+        # 无封顶的 action_rate_l2 −0.1(BeyondMimic / mjlab / unitree-mimic 三家同值)。
+        "action_rate_l2": -0.1,
     },
     "mimic": {
         "motion_global_anchor_ori": 0.075,
@@ -196,7 +198,9 @@ _COMMON_EXPECTED_CALLABLE_NAMES = {
     "base_ang_vel_xy": "ang_vel_xy_l2",
     "base_lin_vel_z": "lin_vel_z_l2",
     "joint_vel": "joint_vel_l2",
-    "action_rate_clamped": "action_rate_l2_clamped",
+    # 上游 isaaclab 的 callable,不是我们自己的 —— 这是"形状照开源"的最强形式:
+    # 我们连实现都不写第二份(见 mdp/__init__.py 的 `from isaaclab.envs.mdp import *`)。
+    "action_rate_l2": "action_rate_l2",
     "motion_global_anchor_ori": "motion_global_anchor_orientation_error_exp",
     "motion_body_pos": "motion_body_pos_swing_only",
     "motion_body_ori": "motion_body_ori_swing_only",

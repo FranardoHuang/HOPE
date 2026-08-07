@@ -1189,10 +1189,14 @@ def test_isaac_synonymous_prior_raw_terms_weights_and_nonwrist_body_mask():
     assert terms["base_ang_vel_xy"]["raw_reward"] == pytest.approx(25.0)
     assert terms["base_lin_vel_z"]["raw_reward"] == pytest.approx(4.0)
     assert terms["joint_vel"]["raw_reward"] == pytest.approx(31.0)
-    assert terms["action_rate_clamped"]["unclamped_raw_reward"] == pytest.approx(
-        31.0
+    # 2026-08-08:一阶平滑照开源改形状 —— 上游 isaaclab action_rate_l2 无封顶。
+    # 31 维、每维差 1.0 ⇒ raw = 31.0(旧封顶版会把它削成 9.0,该断言当时必红)。
+    assert terms["action_rate_l2"]["raw_reward"] == pytest.approx(31.0)
+    assert terms["action_rate_l2"]["value_clamp"] is None
+    assert terms["action_rate_l2"]["manager_weight"] == pytest.approx(-0.1)
+    assert terms["action_rate_l2"]["post_policy_dt_reward"] == pytest.approx(
+        -0.1 * 31.0 * 0.02
     )
-    assert terms["action_rate_clamped"]["raw_reward"] == pytest.approx(9.0)
     for name in (
         "motion_global_anchor_ori",
         "motion_body_pos",
@@ -1211,13 +1215,103 @@ def test_isaac_synonymous_prior_raw_terms_weights_and_nonwrist_body_mask():
         + 25.0 * -0.05
         + 4.0 * -0.5
         + 31.0 * -1.0e-4
-        + 9.0 * -0.2
+        + 31.0 * -0.1          # 2026-08-08:无封顶 action_rate_l2(旧封顶版是 9.0 * -0.2)
         + 1.0 * 0.075
         + 4.0 * 0.15
         + 3.0 * 0.20
         + 1.0 * 0.10
     ) * c211.C211_POLICY_DT_S
     assert row["total_post_policy_dt_reward"] == pytest.approx(expected)
+
+
+# --------------------------------------------------------------------------------------------- #
+# 一阶平滑罚:C 族镜像的变异测试 + A/C 同形对拍(2026-08-08 Franco 裁定二第二条)
+#
+# 现役形状 = 上游 isaaclab ``action_rate_l2`` = ``sum((a_t − a_{t−1})²)``,无封顶。
+# 这里测的是 C 族真在跑的那份实现(MuJoCo lane),并且逐位对拍上游公式 —— 两族"除了
+# obs 和 reward 之外都一样"这条纪律,在 reward 这一项上要求的正是**同形同价**。
+# --------------------------------------------------------------------------------------------- #
+def _c211_action_rate(current, previous):
+    """只取 action_rate_l2 那一项的 raw,其余输入固定成不影响该项的哑元。"""
+
+    n_bodies = len(c211.TRACKED_BODY_NAMES)
+    rotations = np.repeat(np.eye(3)[None, :, :], n_bodies, axis=0)
+    zeros3 = np.zeros((n_bodies, 3))
+    long_axis = c211.C211_RACKET_LONG_AXIS_LOCAL.copy()
+    live = {
+        "root_rotation": np.eye(3),
+        "root_ang_vel_w": np.zeros(3),
+        "root_lin_vel_w": np.zeros(3),
+        "qd": np.zeros(31),
+        "body_pos": zeros3.copy(),
+        "body_rotation": rotations.copy(),
+        "body_lin_vel_w": zeros3.copy(),
+        "body_ang_vel_w": zeros3.copy(),
+        "anchor_rotation": np.eye(3),
+        "racket_pos": np.zeros(3),
+        "racket_velocity": np.zeros(3),
+        "racket_normal": np.asarray((0.0, 1.0, 0.0)),
+        "racket_long_axis": long_axis,
+    }
+    teacher = {
+        "body_pos": zeros3.copy(),
+        "body_rotation": rotations.copy(),
+        "body_lin_vel_w": zeros3.copy(),
+        "body_ang_vel_w": zeros3.copy(),
+        "anchor_rotation": np.eye(3),
+        "global_anchor_rotation": np.eye(3),
+        "racket_pos": np.zeros(3),
+        "racket_velocity": np.zeros(3),
+        "racket_normal": np.asarray((0.0, 1.0, 0.0)),
+        "racket_long_axis": long_axis,
+    }
+    row = c211._c211_isaac_synonymous_prior_terms(
+        live=live,
+        teacher=teacher,
+        current_action=np.asarray(current, dtype=np.float64),
+        previous_action=np.asarray(previous, dtype=np.float64),
+    )
+    return row["terms"]["action_rate_l2"]
+
+
+def test_c211_action_rate_responds_to_two_different_action_sequences():
+    """该动的要动:两个不同的动作序列 -> 两个不同的数。"""
+
+    small = _c211_action_rate(np.full(31, 0.1), np.zeros(31))
+    large = _c211_action_rate(np.full(31, 1.0), np.zeros(31))
+    assert small["raw_reward"] != large["raw_reward"]
+    assert large["raw_reward"] > small["raw_reward"]
+    assert small["post_policy_dt_reward"] > large["post_policy_dt_reward"]  # 都是负数
+
+
+def test_c211_action_rate_is_bitwise_identical_on_the_same_sequence():
+    """对照组:同一个序列喂两次 -> 逐位相同。"""
+
+    first = _c211_action_rate(np.full(31, 0.37), np.full(31, -0.11))
+    second = _c211_action_rate(np.full(31, 0.37), np.full(31, -0.11))
+    assert first["raw_reward"] == second["raw_reward"]
+    assert first["post_policy_dt_reward"] == second["post_policy_dt_reward"]
+
+
+def test_c211_action_rate_matches_the_upstream_formula_and_has_no_ceiling():
+    """A/C 同形:逐位等于上游 ``sum((a−a_prev)²)``,并且没有任何天花板。
+
+    粗一档就过不了:重新引入 9.0(旧封顶档位)会让第二组塌到 9.0,该断言立刻红。
+    """
+
+    for current, previous in (
+        (np.full(31, 1.0), np.zeros(31)),          # 31.0,旧档位下会被削成 9.0
+        (np.full(31, 0.2), np.full(31, -0.3)),     # 31*0.25 = 7.75,旧档位下不变
+        (np.full(31, 10.0), np.zeros(31)),         # 3100.0,离谱一帧照实付
+    ):
+        upstream = float(np.sum(np.square(current - previous)))
+        assert _c211_action_rate(current, previous)["raw_reward"] == pytest.approx(
+            upstream, rel=1e-12
+        )
+    # 线性无上界:输入的平方范数翻 100 倍,输出就翻 100 倍。
+    base = _c211_action_rate(np.full(31, 1.0), np.zeros(31))["raw_reward"]
+    scaled = _c211_action_rate(np.full(31, 10.0), np.zeros(31))["raw_reward"]
+    assert scaled / base == pytest.approx(100.0, rel=1e-12)
 
 
 @pytest.mark.parametrize(
@@ -1332,7 +1426,7 @@ def test_wait_keeps_isaac_prior_but_masks_task_and_ignores_fixed_center_scalar(
         "base_ang_vel_xy",
         "base_lin_vel_z",
         "joint_vel",
-        "action_rate_clamped",
+        "action_rate_l2",
         "motion_body_pos",
         "motion_body_ori",
         "motion_body_lin_vel",

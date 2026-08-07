@@ -116,7 +116,16 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
             ("pre_strike_foot_slip", "HOPE stability", "prestrike_foot_slip"),
             ("joint_torques", "BeyondMimic regularization", "joint_torque"),
             ("action_rate_l2", "BeyondMimic regularization", "action_rate"),
-            ("action_rate_clamped", "MJLab-aligned", "clamped_action_rate"),
+            # 2026-08-08 就地更正:这条的出处标签原本写的是 "MJLab-aligned",**是错的**。
+            # 四家开源逐字读过(IsaacLab 2.1.0 `envs/mdp/rewards.py:245-247` /
+            # BeyondMimic / mjlab-tracking / unitree_rl_lab-mimic),**没有任何一家有值封顶**,
+            # 全是无上界的 `sum((a_t - a_{t-1})^2)` @ -1e-1 —— 包括 mjlab 本身。
+            # 封顶版是我们自己加的,所以出处只能写我们自己。这正是"指纹对上不等于语义对上":
+            # 项名对得上 MJLab,形状从来没对上过,而这张表把没对上的那部分写成了对上。
+            # 该项 2026-08-08 起 weight=0(退役,IsaacLab 直接跳过),条目保留是因为 cfg 里
+            # 还有这个 RewTerm;真源见 hope_rewards.py::action_rate_l2_clamped 的 docstring。
+            ("action_rate_clamped", "HOPE-only (retired 2026-08-08; no upstream has a "
+             "value cap)", "clamped_action_rate"),
             ("action_acc_l2", "MJLab", "action_acceleration"),
             ("undesired_contacts", "BeyondMimic regularization", "undesired_contact"),
             ("foot_slip_sq", "MJLab", "stance_foot_slip"),

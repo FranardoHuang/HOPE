@@ -26,6 +26,7 @@ Run:  python -m pytest hope_training/whole_body_tracking/tests/test_v2_reward_te
 from __future__ import annotations
 
 import math
+import re
 import types
 from pathlib import Path
 
@@ -477,7 +478,9 @@ def test_legal_base_fail_loud_surfaces():
 
 
 # --------------------------------------------------------------------------------------------- #
-# action_rate_l2_clamped(v2 值封顶;fresh 自杀区间的解)— 手算
+# action_rate_l2_clamped —— **2026-08-08 起是退役件**(没有任何现役配方启用它)。
+# 下面这组保留是因为"退役 != 静默删除":它把"为什么退役"的算术钉在可执行的断言里,
+# 谁想把它复活,得先让这几条红给他看。现役一阶平滑的测试在本节末尾"现役形状"那一组。
 # --------------------------------------------------------------------------------------------- #
 def test_action_rate_clamped_matches_builtin_below_and_caps_above():
     mgr = types.SimpleNamespace(
@@ -505,7 +508,15 @@ def test_action_rate_clamped_matches_builtin_below_and_caps_above():
 # --------------------------------------------------------------------------------------------- #
 BUILD1_ACTION_RATE_SQ_EARLY = 63.1        # iter 4
 BUILD1_ACTION_RATE_SQ_CONVERGED = 10.8    # 21896 iter,取两跑里更低的那个
-LIVE_ACTION_RATE_VALUE_CLAMP = 9.0        # hope_env_cfg.py :: HOPERewardsCfg.action_rate_clamped
+BUILD1_ACTION_RATE_DOSE_EARLY = -0.1262   # 每步 post-dt,830xw9hy@4(i4dxpbwy@4 = -0.1264)
+BUILD1_ACTION_RATE_DOSE_CONVERGED = -0.0216  # 每步 post-dt,收敛(另一跑 -0.0241)
+#: 退役的封顶档位。2026-08-08 之后**不再是现役值** —— 保留为"复活它要先跨过的那道坎"。
+RETIRED_ACTION_RATE_VALUE_CLAMP = 9.0
+#: 现役一阶平滑的权重:上游 isaaclab ``action_rate_l2``,无封顶,-0.1。
+#: 真源 = train.py :: _REWARD_PACK_V2_DIRECT 的 ("action_rate_l2", -0.1)。
+LIVE_ACTION_RATE_L2_WEIGHT = -0.1
+POLICY_DT_S = 0.02
+ACTION_DIM = 31
 
 
 def _action_rate_env(per_joint_step, n_joints=31):
@@ -525,25 +536,29 @@ def _action_rate_value(sq_norm, clamp, n_joints=31):
 def test_action_rate_is_deterministic_on_the_same_sequence():
     """同一个序列喂两次 -> 逐位相同。响应性测试的对照组,先排除随机性。"""
 
-    for clamp in (LIVE_ACTION_RATE_VALUE_CLAMP, 128.0):
+    for clamp in (RETIRED_ACTION_RATE_VALUE_CLAMP, 128.0):
         first = _action_rate_value(BUILD1_ACTION_RATE_SQ_EARLY, clamp)
         second = _action_rate_value(BUILD1_ACTION_RATE_SQ_EARLY, clamp)
         assert first == second
 
 
-def test_live_clamp_is_dead_across_build1s_entire_operating_range():
-    """该拦的:现役档位下,开局与收敛这两个差 5.8 倍的动作序列吐**同一个数**。
+def test_retired_clamp_was_dead_across_build1s_entire_operating_range():
+    """退役理由本身:9.0 那一档下,开局与收敛这两个差 5.8 倍的动作序列吐**同一个数**。
 
-    这就是 s15r1 里那项焊死的机制。这条断言故意写成"必须相等"——它一旦变成不相等,
-    说明 value_clamp 已经被抬到工作区之上,那时候要红的是它,提醒把参照数字一起更新。
+    这就是 s15r1 里那项焊死的机制,也是 2026-08-08 把它退役的全部理由。断言故意写成
+    "必须相等" —— 谁把 9.0 复活并改成别的数,这条会红,提醒他把参照数字一起更新。
     """
 
-    early = _action_rate_value(BUILD1_ACTION_RATE_SQ_EARLY, LIVE_ACTION_RATE_VALUE_CLAMP)
-    converged = _action_rate_value(
-        BUILD1_ACTION_RATE_SQ_CONVERGED, LIVE_ACTION_RATE_VALUE_CLAMP
+    early = _action_rate_value(
+        BUILD1_ACTION_RATE_SQ_EARLY, RETIRED_ACTION_RATE_VALUE_CLAMP
     )
-    assert early == converged == pytest.approx(LIVE_ACTION_RATE_VALUE_CLAMP, abs=1e-6)
-    assert BUILD1_ACTION_RATE_SQ_CONVERGED > LIVE_ACTION_RATE_VALUE_CLAMP
+    converged = _action_rate_value(
+        BUILD1_ACTION_RATE_SQ_CONVERGED, RETIRED_ACTION_RATE_VALUE_CLAMP
+    )
+    assert early == converged == pytest.approx(
+        RETIRED_ACTION_RATE_VALUE_CLAMP, abs=1e-6
+    )
+    assert BUILD1_ACTION_RATE_SQ_CONVERGED > RETIRED_ACTION_RATE_VALUE_CLAMP
 
 
 def test_a_clamp_above_the_operating_range_restores_responsiveness():
@@ -563,6 +578,119 @@ def test_clamp_still_caps_a_genuine_outlier():
 
     clamp = 128.0
     assert _action_rate_value(4.0e4, clamp) == pytest.approx(clamp, abs=1e-6)
+
+
+# --------------------------------------------------------------------------------------------- #
+# 现役形状(2026-08-08 Franco 裁定:一阶平滑照开源对齐)
+#
+# 现役项 = 上游 isaaclab ``mdp.action_rate_l2`` = ``sum((a_t − a_{t−1})²)``,
+# raw 动作、SUM over 31 维、**无上界**、不做相位门控。四家逐字同形:
+#   * 我们自己的上游 BeyondMimic  tasks/tracking/tracking_env_cfg.py:237  weight −1e-1
+#   * mjlab-tracking            src/mjlab/tasks/tracking/tracking_env_cfg.py  weight −1e-1
+#   * unitree_rl_lab-mimic      tasks/mimic/robots/g1_29dof/*/tracking_env_cfg.py  weight −1e-1
+#   (unitree 步行臂 −0.05;智元 AMP parkour 的 −1e-3 活在 discriminator 收入经济里,勿抄。)
+#
+# 这一组是"改完后该项必须随策略变化"的变异测试。它不测封顶版 —— 封顶版已经退役。
+# --------------------------------------------------------------------------------------------- #
+def _upstream_action_rate_l2(current, previous):
+    """上游 ``action_rate_l2`` 的逐字复刻,只用来当参照实现(不是被测对象)。
+
+    isaaclab 2.1.0 ``envs/mdp/rewards.py:245-247``::
+
+        return torch.sum(torch.square(env.action_manager.action
+                                      - env.action_manager.prev_action), dim=1)
+    """
+
+    return torch.sum(torch.square(current - previous), dim=1)
+
+
+def _sq_norm_sequence(sq_norm, n_joints=ACTION_DIM):
+    prev = torch.zeros(1, n_joints)
+    cur = torch.full((1, n_joints), math.sqrt(sq_norm / n_joints))
+    return cur, prev
+
+
+def test_live_action_rate_shape_responds_to_the_policy():
+    """该动的要动:开局与收敛这两个差 5.8 倍的序列,现役形状必须给出**不同**的数。
+
+    这正是封顶版抹掉的那个梯度 —— 同样两个输入在 9.0 档下是同一个数(上面那条断言)。
+    """
+
+    early = _upstream_action_rate_l2(*_sq_norm_sequence(BUILD1_ACTION_RATE_SQ_EARLY))
+    converged = _upstream_action_rate_l2(
+        *_sq_norm_sequence(BUILD1_ACTION_RATE_SQ_CONVERGED)
+    )
+    assert early.item() != converged.item()
+    assert early.item() > converged.item()   # 抖得越狠罚得越多
+    assert early.item() == pytest.approx(BUILD1_ACTION_RATE_SQ_EARLY, rel=1e-6)
+    assert converged.item() == pytest.approx(BUILD1_ACTION_RATE_SQ_CONVERGED, rel=1e-6)
+
+
+def test_live_action_rate_shape_is_deterministic_on_the_same_sequence():
+    """对照组:同一个序列喂两次必须逐位相同 —— 上面那条的"不同"才有意义。"""
+
+    cur, prev = _sq_norm_sequence(BUILD1_ACTION_RATE_SQ_EARLY)
+    assert (
+        _upstream_action_rate_l2(cur, prev).item()
+        == _upstream_action_rate_l2(cur, prev).item()
+    )
+
+
+def test_live_action_rate_shape_has_no_ceiling():
+    """误拦的不再拦:没有任何输入会把它压平 —— 4e4 的离谱一帧照实付 4e4。
+
+    粗一档就过不了:任何人重新引入哪怕 128.0 的封顶,这条立刻红。
+    """
+
+    huge = _upstream_action_rate_l2(*_sq_norm_sequence(4.0e4))
+    assert huge.item() == pytest.approx(4.0e4, rel=1e-5)
+    # 线性无上界:输入翻 4 倍,输出就翻 4 倍(封顶会让这个比值塌成 1)
+    base = _upstream_action_rate_l2(*_sq_norm_sequence(1.0e4))
+    assert huge.item() / base.item() == pytest.approx(4.0, rel=1e-5)
+
+
+def test_live_weight_reproduces_build1s_measured_dose_at_matched_policy_level():
+    """权重不是抄的号码,是同等策略水平下的交叉验证。
+
+    我们 u0--u4 实测 policy_std_mean ≈ 1.001、动作 31 维、rsl_rl 每步独立采样
+    ⇒ E‖Δa‖² = 2 × 31 × σ² = 62.1;build_1(同底盘、同 31 维、σ 同为 1.0)在 iter 4
+    实测每步 −0.1262 / −0.1264 ⇒ 反推 ‖Δa‖² = 63.1。两条独立路径差 1.6%。
+    """
+
+    analytic_sq_norm = 2.0 * ACTION_DIM * (1.001 ** 2)
+    assert analytic_sq_norm == pytest.approx(BUILD1_ACTION_RATE_SQ_EARLY, rel=0.02)
+
+    predicted_dose = LIVE_ACTION_RATE_L2_WEIGHT * BUILD1_ACTION_RATE_SQ_EARLY * POLICY_DT_S
+    assert predicted_dose == pytest.approx(BUILD1_ACTION_RATE_DOSE_EARLY, abs=1e-6)
+
+    converged_dose = (
+        LIVE_ACTION_RATE_L2_WEIGHT * BUILD1_ACTION_RATE_SQ_CONVERGED * POLICY_DT_S
+    )
+    assert converged_dose == pytest.approx(BUILD1_ACTION_RATE_DOSE_CONVERGED, abs=1e-6)
+    # 衰减 5 倍以上 —— 这才是 build_1 |负|/正 穿过 1.0 的引擎,封顶版把它焊死了。
+    assert BUILD1_ACTION_RATE_DOSE_EARLY / BUILD1_ACTION_RATE_DOSE_CONVERGED > 5.0
+
+
+def test_repo_does_not_shadow_the_upstream_action_rate_l2():
+    """"照开源对齐"的最强形式:我们连第二份实现都不写。
+
+    ``mdp/__init__.py`` 先 ``from isaaclab.envs.mdp import *``,再 ``from .*rewards import *``。
+    只要我们包里任何一个模块 ``def action_rate_l2``,它就会**静默盖掉**上游那条 —— 那正是
+    "指纹对上、语义早漂"的典型入口。这条扫描源码而不是问对象,所以 isaaclab 被 stub 掉也有效。
+    """
+
+    mdp_dir = (
+        ROOT
+        / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp"
+    )
+    offenders = [
+        path.name
+        for path in sorted(mdp_dir.glob("*.py"))
+        if re.search(r"^def action_rate_l2\s*\(", path.read_text(), re.MULTILINE)
+    ]
+    assert offenders == [], (
+        f"{offenders} 定义了 action_rate_l2,会盖掉上游那条"
+    )
 
 
 # --------------------------------------------------------------------------------------------- #

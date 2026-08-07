@@ -115,6 +115,23 @@ def _r6_contract_from_r5(action_id: str, *, log_std: bool = True):
             term["weight"] = adopted[term["name"]]
         if term["name"] in adopted_params:
             term["params"].update(adopted_params[term["name"]])
+    # 2026-08-08 裁定(一阶平滑照开源对齐):封顶版 `action_rate_clamped` 退役,换成上游那条
+    # 无封顶的 `action_rate_l2` -0.1。这不是"改一个权重"——上面那张 `adopted` 表只能改活着
+    # 的项,而这次是**换项**:名字、callable、params、weight 四样一起变。
+    #   * 换项而不是"把封顶版权重改成 0":`_reward_receipt_payload` 明令拒收 weight==0 的项
+    #     ("is zero but listed as active"),所以退役件必须从收据里消失,不能留一条零权重的尸体;
+    #   * params 清空:上游签名就是 `action_rate_l2(env)`,没有 `value_clamp` 这个键;
+    #   * callable 走 `isaaclab.envs.mdp.rewards.*`,与本收据里其它五条上游项
+    #     (base_ang_vel_xy / base_lin_vel_z / joint_torques / joint_vel / undesired_contacts)同款;
+    #   * 名字仍然排在 `actual_joint_limit_barrier_probe` 前面("action" < "actual"),
+    #     所以收据的"必须字典序且唯一"那道校验不受影响,项数仍是 30。
+    for term in reward["terms"]:
+        if term["name"] == "action_rate_clamped":
+            term["name"] = "action_rate_l2"
+            term["callable"] = "isaaclab.envs.mdp.rewards.action_rate_l2"
+            term["params"] = {}
+            term["weight"] = -0.1
+    reward["terms"].sort(key=lambda term: term["name"])
     reward_payload = {
         "schema_version": reward["schema_version"],
         "terms": reward["terms"],
@@ -274,7 +291,10 @@ def test_receipt_binds_exact_reward_scale_ppo_and_runtime_sources(
         # 现在的界是"物理上够得到的最大值"(部署钳位 / 机械硬限位)。
         "qdes_limit_barrier_per_step": (-0.185103, 0.0),
         "actual_joint_limit_barrier_per_step": (-1.306002, 0.0),
-        "action_rate_clamped_per_step": (-0.036, 0.0),
+        # 2026-08-08:封顶版下岗,换回上游无封顶的 action_rate_l2 -0.1。这条不再是
+        # "可达上界",而是发射时探索 σ≈1.0 下的工作区包络 63.1(build_1 iter 4 实测反推),
+        # -0.1 x 63.1 x dt 0.02 = -0.1262 —— 与 build_1 同 iter 的 -0.1262/-0.1264 同价。
+        "action_rate_l2_per_step": (-0.1262, 0.0),
         "racket_position_fine_per_step": (0.0, 0.08),
         "racket_position_coarse_per_step": (0.0, 0.02),
         "racket_velocity_per_step": (0.0, 0.01),

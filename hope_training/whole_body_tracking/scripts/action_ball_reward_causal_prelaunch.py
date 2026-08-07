@@ -815,7 +815,7 @@ def _setup_action_rate(env: Any, term_cfg: Any) -> ProbeSetup:
     current = env.action_manager.action
     previous = env.action_manager.prev_action
     slots = [
-        TensorSlot("clamped_action_rate", current),
+        TensorSlot("action_rate", current),
         TensorSlot("action_rate.fixed_previous", previous),
     ]
 
@@ -832,7 +832,7 @@ def _setup_action_rate(env: Any, term_cfg: Any) -> ProbeSetup:
         slots,
         baseline,
         worse,
-        ("clamped_action_rate",),
+        ("action_rate",),
         "zero first difference -> one-axis unit first difference",
     )
 
@@ -1270,7 +1270,7 @@ _SETUP_BY_TERM: dict[str, Callable[[Any, Any], ProbeSetup]] = {
     "base_position": lambda e, c: _setup_racket(e, c, "base_position"),
     "racket_progress": lambda e, c: _setup_racket(e, c, "racket_progress"),
     "virtual_landing": _setup_virtual_landing,
-    "action_rate_clamped": _setup_action_rate,
+    "action_rate_l2": _setup_action_rate,
     "action_acc_l2": _setup_action_acc,
     "qdes_limit_barrier": _setup_qdes_limit,
     "joint_limit": _setup_actual_limit,
@@ -1456,13 +1456,13 @@ def _callable_raw_abs_bound(
         if type(count) is int and count > 0:
             return float(count), "sum_of_expected_joint_count_per_joint_unit_caps"
         return None, "expected_joint_count_missing"
-    if name == "action_rate_clamped":
-        clamp = params.get("value_clamp")
-        if type(clamp) in (int, float) and not isinstance(clamp, bool):
-            clamp = float(clamp)
-            if math.isfinite(clamp) and clamp > 0.0:
-                return clamp, "callable_value_clamp"
-        return None, "value_clamp_missing_or_invalid"
+    if name == "action_rate_l2":
+        # 2026-08-08:上游 isaaclab `action_rate_l2` 没有任何上界 —— raw 动作是未截断的
+        # 高斯样本(`ClampedJointPositionAction` 只钳 q_des,`ActionManager._action` 是原始
+        # 动作)。这里必须返回 None,和下面 `action_acc_l2` 无 clamp 时同路;编一个"单位上界"
+        # 就是在给预算表塞一个证不出来的数。工作区包络(σ≈1.0 下 63.1)属于收据,不属于
+        # "可达上界"这一栏。
+        return None, "unbounded_first_difference_matching_upstream_action_rate_l2"
     if name == "action_acc_l2":
         clamp = params.get("value_clamp")
         if type(clamp) in (int, float) and not isinstance(clamp, bool):

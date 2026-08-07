@@ -241,13 +241,14 @@ OPEN_MIRROR_DEBT = {
         "('class_term_param', <RewardsCfg>, 'upright_exp', 'std') 注册。",
         "放宽求值器白名单会扩大'猜'的面,这轮的定调是收紧不放宽,不在同一批里做。",
     ),
-    "action_ball_c211_env.C211_ACTION_RATE_CLAMP": (
-        "hope_env_cfg.py :: HOPERewardsCfg.action_rate_clamped "
-        "params={'value_clamp': 9.0}",
+    "action_ball_c211_env.C211_ACTION_RATE_POST_DT_WEIGHT": (
+        "train.py :: _REWARD_PACK_V2_DIRECT 的 ('action_rate_l2', -0.1)",
         "值是纯字面量,求值器现在就读得出;缺的是给 c211_env 建一张和 "
         "table_termination 同款的 mirrored_isaac_constant_entries 表并接到它的收据上。",
         "c211_env 的 Isaac 侧奖励镜像不止这一条(见下面两条),要做就一次做完整张表,"
-        "这轮的预算给了终止顺序那条链。",
+        "这轮的预算给了终止顺序那条链。"
+        "(2026-08-08 更名:原 C211_ACTION_RATE_CLAMP 随封顶版一起退役 —— 上游 "
+        "action_rate_l2 没有 value_clamp,再挂一条 clamp 的镜像债就是在镜像一个不存在的东西。)",
     ),
     "action_ball_c211_env.TRACKED_BODY_NAMES": (
         "Isaac 的 motion 跟踪 body 名单(命令侧,不在 terminations 里)",
@@ -358,7 +359,7 @@ CLASSIFICATION: dict = {
         "C211_ROLLOUT_H_S": (_N, ""),
         "C211_ROLLOUT_STEPS": (_N, ""),
         "C211_UPRIGHT_STD": (_T, ""),
-        "C211_ACTION_RATE_CLAMP": (_T, ""),
+        "C211_ACTION_RATE_POST_DT_WEIGHT": (_T, ""),
         "C211_RACKET_LONG_AXIS_LOCAL": (_T, ""),
         "VIRTUAL_BALL_PY": (_P, ""),
         "VENUE_PHYSICS_YAML": (_P, ""),

@@ -294,7 +294,7 @@ def test_expected_adopted_action_ball_objectives_have_reviewed_mutations():
         "virtual_landing",
         "joint_torques",
         "arm_torque_saturation",
-        "action_rate_clamped",
+        "action_rate_l2",
         "action_acc_l2",
         "undesired_contacts",
         "foot_slip_sq",

@@ -82,7 +82,7 @@ discriminator/task 公式、是否乘 `dt`、normalization 全部未知,所以"�
 
 | 项 | 智元(raw) | build_1 | exp 裁定 | **现役** |
 |---|---|---|---|---|
-| `action_rate` | `-1e-3`(AMP 经济,**勿抄**) | `-0.10` | 保留封顶版 | `action_rate_l2 = 0`,`action_rate_clamped = -0.2` |
+| `action_rate` | `-1e-3`(AMP 经济,**勿抄**) | `-0.10` | ~~保留封顶版~~ → **2026-08-08 裁定:照开源改形状,封顶版退役** | **`action_rate_l2 = -0.1`,`action_rate_clamped = 0`(退役)**。<br>**就地更正**:本行原写"保留封顶版 / `action_rate_l2 = 0`,`action_rate_clamped = -0.2`",并在 §正文里说我们是"四家唯一"带值钳的 —— 唯一一家和其他三家不一样,通常不是我们发现了什么,是我们漂了。逐字复核四家(IsaacLab 2.1.0 `envs/mdp/rewards.py:245-247` / BeyondMimic `tracking_env_cfg.py:237` / mjlab-tracking / unitree_rl_lab-mimic):**一个封顶都没有,四家都是 `-1e-1`**;我们仓库的 `tracking_env_cfg.py:237` 本来就继承着这个 `-0.1`。封顶的原始理由(早期净流为负 ⇒ 摔死最优)**已被证伪**:带着封顶今天**仍然**是摔死最优(`V_继续 -2.50` vs `V_死 -0.20`),它只把倍数从 `32×` 压到 `12.5×`、从未改变符号;而 `build_1` 坐得更深(无 death penalty、净流负 3--5 倍)照样学会。详见 [exp §5.6.25](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) |
 | `action_acc` | — | — | — | `0.0`(`A3VendorV1` 显式压包) |
 | 关节限位 | `dof_pos_limits -2.0` | `joint_limit -10` | 双通道 barrier,带宽必须 `0.05` | **2026-08-07 裁定二后**:`qdes_limit_barrier -10` / `joint_limit -10`,两条带宽都 `0.02`(改一边开机即拒);核已换成上游 BeyondMimic = IsaacLab `joint_pos_limits` 的 rad 口径线性尾巴(无上界、软带内连续、地板挪到机械硬限位)。**旧 `-5` 是"每关节归一 [0,1]"口径,与这里的 `-10` 不可比**;详见 [exp §5.6.24](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) |
 | 力矩 | `torque_limits -0.01`(>90% 限值才罚) | `joint_torques -3e-5`;`arm_torque_saturation 0` | **形状值得借**,但先解决隐式 PD 力矩可观测性 | `joint_torques -3e-5`;饱和项强制清零 |

@@ -3070,8 +3070,12 @@ def _finalize_stage1_natural_clip_training_cfg(env_cfg, task, applied) -> None:
         "qdes_limit_barrier": -10.0,
         "joint_limit": -10.0,
         "qdes_projection_penalty": -1.0,
-        "action_rate_clamped": -0.2,
-        "action_rate_l2": 0.0,
+        # 2026-08-08 裁定:一阶平滑罚照开源改形状 —— 封顶版下岗(σ=1.0 下 100% 时间在
+        # clamp 上、梯度处处为零),换回上游无封顶的 action_rate_l2 −0.1(BeyondMimic /
+        # mjlab-tracking / unitree_rl_lab-mimic 三家逐字同值)。Stage-1 与 ActionBall 共用
+        # 同一份 cfg 血统,这里跟着走是为了不让它继承一个已经退役的号码。
+        "action_rate_clamped": 0.0,
+        "action_rate_l2": -0.1,
         "action_acc_l2": 0.0,
     }
     for name, expected_weight in expected_common_weights.items():
@@ -13383,9 +13387,27 @@ _REWARD_PACK_V2_DIRECT = (
     ("virtual_landing", 500.0),          # r6 economy: +10/event at policy_dt=0.02
     ("virtual_spin", 0.0),               # 弧圈类动作自带旋转,minimize 先验打架动作身份;
                                          # 遥测保留;落点预测本就旋转感知(RK4 含 Magnus)
-    # 值封顶平滑(fresh 自杀区间的解,冻结表档位):无封顶 action_rate_l2 归零,换封顶版。
-    ("action_rate_l2", 0.0),
-    ("action_rate_clamped", -0.2),
+    # 一阶动作平滑罚。2026-08-08 Franco 裁定二(形状照开源对齐)的第二条落地:
+    # **封顶版下岗,换回上游那条无封顶的 action_rate_l2,权重 −0.1。**
+    #
+    # 形状基准:isaaclab `mdp.action_rate_l2` = `sum((a_t − a_{t−1})²)`,raw 动作、SUM、
+    # 无上界、不做相位门控。我们自己的上游 BeyondMimic(`tracking_env_cfg.py:237`)、
+    # mjlab-tracking、unitree_rl_lab-mimic(g1_29dof)三家的模仿臂**都是这条,都是 −0.1**;
+    # unitree 步行臂 −0.05;智元 AMP parkour 的 −1e-3 活在 discriminator 收入经济里,勿抄。
+    #
+    # 权重从 −0.2(配封顶用)重算到 −0.1 的推导(同等策略水平交叉验证,两边都还不会击球):
+    #   1. 我们 u0--u4 实测 policy std ≈ 1.001,动作 31 维,rsl_rl 每步独立采样
+    #      ⇒ E‖Δa‖² = 2×31×σ² = 62.1 ⇒ 每步剂量 = 0.1 × 62.1 × dt 0.02 = **−0.1242**。
+    #   2. build_1(唯一已知能打到球的同底盘配方,σ 同为 1.0、同 31 维)在 iter 4 实测
+    #      `action_rate` = **−0.1262 / −0.1264 每步** ⇒ 反推 ‖Δa‖² = 63.1。
+    #      预测与实测差 1.6%(差值就是均值漂移项 |μ_t − μ_{t−1}|² ≈ 1.0)。
+    #   3. 所以 −0.1 不是抄一个号码,是"同一个物理量、同一个量纲、同一个策略水平下
+    #      付同一个价"。旧 −0.2 之所以看起来更狠却付得更少(−0.036/步,轻 3.5 倍),
+    #      纯粹是封顶把它削掉了。
+    # 衰减(这才是要的东西):build_1 收敛时 ‖Δa‖² 掉到 10.8~12.05 ⇒ 每步 −0.0216~−0.0241,
+    # 5.2~5.8 倍衰减。这条衰减正是它 |负|/正 穿过 1.0 的引擎;封顶版把引擎焊死了。
+    ("action_rate_l2", -0.1),
+    ("action_rate_clamped", 0.0),
     # 统一硬安全终止价:fall/table/hard-qdes/hard-actual 只收一次。
     # 具名原因只分账,不叠加第二份罚。
     #
@@ -13588,15 +13610,16 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
     _require(_acc is not None, "rewards.action_acc_l2 (reward_pack=v2 value clamp)")
     _acc.params["value_clamp"] = 36.0
     applied.append("rewards.action_acc_l2.params.value_clamp=36.0 (reward_pack=v2)")
-    # v2 用封顶版平滑:任务 YAML 谱系基线普遍带 action_rate_weight(如 DeployParity -0.10),
-    # 包在此【剥离】该键并记账(防双计费;不 raise——基线键不是用户矛盾配方,legacy 语义
-    # 要保留请显式 reward_pack=v1)。剥离后 DIRECT 的 action_rate_l2=0 + action_rate_clamped
-    # 生效,封顶平滑单一计费。
+    # 一阶平滑的**唯一**定价点是上面的 DIRECT 表(action_rate_l2 = -0.1)。任务 YAML 谱系
+    # 基线普遍也带 action_rate_weight(如 DeployParity -0.10),包在此【剥离】该键并记账,
+    # 让"包里那一个数"成为唯一真源 —— 否则同一条项会有两处可改的号码,而 2026-08-08 的
+    # 定价推导(见 DIRECT 表注释)只对包里那个数负责。不 raise:基线键不是用户矛盾配方,
+    # 要 legacy 语义请显式 reward_pack=v1。
     if _get(rw, "action_rate_weight") is not None:
         dropped = merged.pop("action_rate_weight", None)
         applied.append(
-            f"rewards.action_rate_weight={dropped!r} dropped (reward_pack=v2 uses "
-            "value-clamped action_rate_clamped; declare reward_pack=v1 for legacy)"
+            f"rewards.action_rate_weight={dropped!r} dropped (reward_pack=v2 prices "
+            "action_rate_l2 at -0.1 in the pack itself; declare reward_pack=v1 for legacy)"
         )
     # sigma 体系(07-26 Franco 裁决:adaptive sigma 在新体系退役)——早期采集不靠质量核
     # (模仿+站正+progress+landing 是收入主链),晚期精度由 capture/legal 门与落点核管;
