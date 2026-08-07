@@ -1924,7 +1924,11 @@ def test_oracle2_output_is_cross_bound_to_claim_and_hard_contract(
                 "hypothetical_unweighted_penalty": "projection_penalty_value_sum",
                 "per_joint_exposure": True,
                 "action_name": "joint_pos",
-                "shape_rate": 4.0,
+                # 2026-08-07 裁定二:核换开源线性尾巴,语义面参数名/口径随之更换。
+                "knee_frac": 0.05,
+                "kernel_unit": "radian",
+                "tail": "linear_unbounded_slope_one_per_radian",
+                "per_joint_cap": None,
             },
         },
     }

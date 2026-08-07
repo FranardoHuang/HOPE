@@ -517,12 +517,15 @@ def _arm(
 # A0 关(DR-L0,现状)、A1 开(DR-L0N,plant 与 L0 逐字节相同,只有三路本体感通道带噪)。
 # 两格其余设定逐字节相同。
 # 本表是 four-grid manifest 的手抄副本,_arm_contract() 逐字段比对两者,不同步就 LaunchRefused。
+# 2026-08-07 Franco 裁定二(exp §5.6.24):限位三项的核与量纲一起换成开源 rad 口径,
+# 权重号码随之 qdes_limit/joint_limit -5 -> -10、qdes_projection -5 -> -1。
+# 旧 -5 作用在"每关节归一 [0,1]"上,与新数不可比,这不是同一把尺子上的调价。
 ARMS: Mapping[str, dict[str, Any]] = {
     ARM_IDS[0]: _arm(
         -10.0,
-        -5.0,
-        -5.0,
-        -5.0,
+        -10.0,
+        -1.0,
+        -10.0,
         "metrics_only",
         "fixed",
         1.0e-4,
@@ -530,9 +533,9 @@ ARMS: Mapping[str, dict[str, Any]] = {
     ),
     ARM_IDS[1]: _arm(
         -10.0,
-        -5.0,
-        -5.0,
-        -5.0,
+        -10.0,
+        -1.0,
+        -10.0,
         "metrics_only",
         "fixed",
         1.0e-4,

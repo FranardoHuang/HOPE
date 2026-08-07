@@ -366,11 +366,12 @@ def test_four_grid_cells_match_every_non_registered_setting():
     assert all(A.BUDGETS[stage] == C.BUDGETS[stage] for stage in C.STAGE_ORDER)
     assert matched["seed"] == 0
     # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0。
+    # 2026-08-07 裁定二(exp §5.6.24):限位三项换开源 rad 口径 -> -10 / -1 / -10。
     assert matched["soft_weights"] == {
         "death_penalty": -10.0,
-        "qdes_limit": -5.0,
-        "qdes_projection": -5.0,
-        "joint_limit": -5.0,
+        "qdes_limit": -10.0,
+        "qdes_projection": -1.0,
+        "joint_limit": -10.0,
     }
     source = matched["runtime_question_source"]
     assert source["action_id"] == A.ACTION_ID == C.ACTION_ID

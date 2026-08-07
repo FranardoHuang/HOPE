@@ -1330,11 +1330,12 @@ def _chain(
             "runtime_effective_reward_sha256": "3" * 64,
             "runtime_effective_reward_term_count": 12,
             # 2026-08-05 层级对齐(exp §5.6 第 7 条):death -300.0 -> -10.0。
+            # 2026-08-07 裁定二(exp §5.6.24):限位三项换开源 rad 口径。
             "runtime_soft_weights": {
                 "death_penalty": -10.0,
-                "joint_limit": -5.0,
-                "qdes_limit_barrier": -5.0,
-                "qdes_projection_penalty": -5.0,
+                "joint_limit": -10.0,
+                "qdes_limit_barrier": -10.0,
+                "qdes_projection_penalty": -1.0,
             },
         }
     )
@@ -2387,9 +2388,12 @@ def test_scale4096_terminal_audit_rejects_nonfinite_checkpoint_tensor(
         )
 
 
+# 2026-08-07 Franco 裁定三(exp §5.6.24):``hard`` 已从这份"注入即拒收"名单里移出 ——
+# 实际-q 机械硬边改成"照记不照拦"。新行为由下面的
+# test_scale4096_terminal_audit_reports_actual_hard_edge_without_rejecting 覆盖。
 @pytest.mark.parametrize(
     "counter_kind",
-    ("hard", "joint_qdes", "joint_actual", "nonfinite"),
+    ("joint_qdes", "joint_actual", "nonfinite"),
 )
 def test_scale4096_terminal_audit_rejects_wrong_safety_telemetry(
     tmp_path, monkeypatch, counter_kind
@@ -2445,6 +2449,37 @@ def test_scale4096_terminal_audit_rejects_wrong_safety_telemetry(
         _audit_scale_terminal(
             tmp_path, monkeypatch, log_mutation=inject_wrong_counter
         )
+
+
+def test_scale4096_terminal_audit_reports_actual_hard_edge_without_rejecting(
+    tmp_path, monkeypatch
+):
+    """裁定三的 C 族变异测试:硬边遥测记到、收据可见、不再阻断。"""
+
+    def inject_hard_edge(log_path):
+        rewritten = []
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            prefix, separator, payload = line.partition("=")
+            if not separator or not prefix.startswith("HOPE_"):
+                rewritten.append(line)
+                continue
+            row = json.loads(payload)
+            if (
+                row.get("ppo_update") == 0
+                and prefix == "HOPE_JOINT_SAFETY_UPDATE_JSON"
+            ):
+                row["counter_totals"]["actual_hard_edge_events"] = 1
+            rewritten.append(
+                prefix
+                + "="
+                + json.dumps(row, sort_keys=True, separators=(",", ":"))
+            )
+        log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+
+    acceptance = _audit_scale_terminal(
+        tmp_path, monkeypatch, log_mutation=inject_hard_edge
+    )
+    assert acceptance["safety_counters"]["actual_hard_edge_event_count"] == 1
 
 
 def test_scale4096_terminal_audit_reports_physical_fall_without_rejecting_finite(

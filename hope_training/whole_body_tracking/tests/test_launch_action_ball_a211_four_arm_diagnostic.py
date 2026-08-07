@@ -1156,8 +1156,9 @@ def test_two_formal_a211_grid_cells_are_exact():
     # 2026-08-05 第二轴改版(第二次,exp §5.6.2d):四格共用 fixed lr1e-4 与标准初始化 +
     # sigma 1.0 + scalar;唯一差异是本体感观测噪声开关(A0 关 / A1 开)。
     expected = {
-        launcher.ARM_IDS[0]: (-10.0, -5.0, "metrics_only", "fixed", 1e-4),
-        launcher.ARM_IDS[1]: (-10.0, -5.0, "metrics_only", "fixed", 1e-4),
+        # 2026-08-07 裁定二(exp §5.6.24):qdes_limit 换开源 rad 口径 -5 -> -10。
+        launcher.ARM_IDS[0]: (-10.0, -10.0, "metrics_only", "fixed", 1e-4),
+        launcher.ARM_IDS[1]: (-10.0, -10.0, "metrics_only", "fixed", 1e-4),
     }
     assert tuple(launcher.ARMS) == launcher.ARM_IDS
     for arm_id, values in expected.items():
@@ -1210,7 +1211,7 @@ def test_two_formal_a211_grid_cells_are_exact():
     assert noise_off["arm_contract_sha256"] != noise_on["arm_contract_sha256"]
     assert all(
         arm["reference_guard_mode"] == "metrics_only"
-        and set(arm["soft_weights"].values()) == {-10.0, -5.0}
+        and set(arm["soft_weights"].values()) == {-10.0, -1.0}
         for arm in launcher.ARMS.values()
     )
     manifest = launcher._isaac_four_grid_manifest()
@@ -3052,9 +3053,12 @@ def test_scale4096_terminal_gate_rejects_missing_safety_counters(
         )
 
 
+# 2026-08-07 Franco 裁定三(exp §5.6.24):``actual_hard`` 已从这份"注入即拒收"名单里移出 ——
+# 实际-q 机械硬边改成"照记不照拦"。它的新行为由下面的
+# test_scale4096_terminal_gate_reports_actual_hard_edge_without_rejecting 覆盖。
 @pytest.mark.parametrize(
     "counter_kind",
-    ("actual_hard", "joint_qdes", "joint_actual", "nonfinite"),
+    ("joint_qdes", "joint_actual", "nonfinite"),
 )
 def test_scale4096_terminal_gate_rejects_observed_safety_event(
     tmp_path, counter_kind, monkeypatch
@@ -3102,6 +3106,43 @@ def test_scale4096_terminal_gate_rejects_observed_safety_event(
         _audit_terminal_fixture(
             checkout, namespace, claim, checkpoint, monkeypatch
         )
+
+
+def test_scale4096_terminal_gate_reports_actual_hard_edge_without_rejecting(
+    tmp_path, monkeypatch
+):
+    """裁定三的变异测试:制造一次真实的实际-q 硬越限。
+
+    遥测必须记到、收据里看得见,而且**这一跑不再被拒收**。
+    依据是 build_1 自己的 ``actual_q_hard_limit_audit`` 从 iter 20 起恒 0 ——
+    策略学会之后本来就不硬越限,拿它去卡 5 个 update 的新策略只会拒收正常的跑。
+    """
+
+    checkout, namespace, claim, _checkpoint_path, checkpoint, log_path = (
+        _scale4096_terminal_artifacts(tmp_path)
+    )
+    rewritten = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        prefix, separator, payload = line.partition("=")
+        if not separator or not prefix.startswith("HOPE_"):
+            rewritten.append(line)
+            continue
+        row = json.loads(payload)
+        if (
+            row.get("ppo_update") == 0
+            and prefix == "HOPE_JOINT_SAFETY_UPDATE_JSON"
+        ):
+            row["counter_totals"]["actual_hard_edge_events"] = 1
+        rewritten.append(
+            prefix + "=" + json.dumps(row, sort_keys=True, separators=(",", ":"))
+        )
+    log_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    acceptance = _audit_terminal_fixture(
+        checkout, namespace, claim, checkpoint, monkeypatch
+    )
+    # 记到了,而且是逐位原值
+    assert acceptance["safety_counters"]["actual_hard_edge_event_count"] == 1
+    # 而且它没有把这一跑拒收:上面的调用要是抛 LaunchRefused,这行根本到不了。
 
 
 def test_scale4096_terminal_gate_reports_physical_fall_without_rejecting_finite(
