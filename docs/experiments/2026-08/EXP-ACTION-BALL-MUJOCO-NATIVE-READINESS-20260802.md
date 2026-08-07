@@ -9929,10 +9929,14 @@ proprioceptive_observation_noise_channels =
 1. **`base_question_sha256`**——抽题输入变了，会动。上几轮"它没动"的那句话本轮**作废**。
 2. **每份 task receipt 的 `canonical_sha256`**——按构造封着上游，必动。
    （它两个方向都不能当证据：既不能说"变了所以题变了"，也不能说"没变所以题没变"。）
-3. **不会变的那一个，也要写清楚免得有人拿它当"没变"的证据**：谱系 `action_uid = 5527597793770800`
-   是 `materialize_measured_action_ball_n1_bundle.py:71` 的**硬编码常量**，不从动捕派生，
-   换库之后它**照样是这个数**。它证明的是"还是同一个 action 槽位"，
-   **不是**"还是同一道题"。
+3. **`action_uid`：会变，而且它有两份、会互相打架。**
+   `materialize_measured_action_ball_n1_bundle.py:71` 的
+   `ACTION_FACTS["action_uid"] = 5527597793770800` 是**硬编码常量**，换库不会自己变；
+   但清单侧是**派生**的——`build_action_ball_manifest.py:1362` 调
+   `derive_action_ball_action_uid(action_id, family, motion_sha256)`，换库后实测变成
+   **`2552478955674699`**。两者在 `materialize_measured_action_ball_n1_bundle.py:644` 判等，
+   不等就拒。**详见 9.2.17.10 末尾那一节**（本条已按那里的实测就地更正过一次：
+   初稿只写了"硬编码常量所以不会变"，那只说对了一半）。
 
 跨轮可比性的代价，直说：**0808 之后的任何一格，与 0808 之前跑过的所有格子，题目不是同一道。**
 所以旧格的曲线只能当"同一个任务族的历史参考"，**不能与新格同图比较、不能算 delta**。
@@ -9987,6 +9991,111 @@ contact_bundle, fixed_domain_initial_receipt, reward_economy_receipt
 **结论口径**：这枚钉与动作库无关，本轮不修（不在授权范围内，且有并行 workflow 在动这批文件），
 但把数字更正在案：**不是"会红 5 条"，是"一条都不会红，因为这类钉有 60% 没人验"。**
 
+#### 9.2.17.10 新库那四份前置产物全部做出来了（CPU，未占 GPU），并且撞出一个会让 `prepare` 直接拒收的硬拦路
+
+pod1，worktree `/workspace/franco/bankswap_20260808` @ `766ccf91`（**全程保持干净**，未提交未推送），
+产物全部落在 checkout 之外的 `/workspace/franco/bankswap_out_20260808/`；
+解释器**全部**是 `/workspace/hope_isaac_venv/bin/python`（3.10.18，mujoco 3.10.0、numpy 1.26.4、scipy 1.15.3），
+`CUDA_VISIBLE_DEVICES=` 空，**一块 GPU 都没占**。逐条 argv / 退出码 / 输出 SHA 记在
+`bankswap_out_20260808/RUN_LOG.json`。
+
+| # | 产物 | 状态 | 输出 SHA-256 |
+| --- | --- | --- | --- |
+| 1 | 新库 `BANK_IMPORT_RECEIPT.json` | DONE | `01995ac4a6150898…` |
+| 2 | `Take_061_unit04_BH` 拍面 FK 审计（新盘） | DONE，**11 道门全 true** | `9a7ca2854217e8d8…` |
+| 3 | 新库全库机械准入审计 | DONE（退出 `2` = 观测到硬失败，是它的正常语义） | `b1ab074dc5cb506e…` |
+| 4 | 新库 ActionBall 源清单 + buildreport | DONE，**73 条，零门开火** | 文件 `4177928a098d0a0c…` / canonical `c726a6c50d7dcc75…` |
+
+**1. `BANK_IMPORT_RECEIPT.json` 没有生产者——这是查出来的，不是猜的。**
+全树 `git grep`（含 `scripts/legacy/`）只找到**消费者**，没有任何脚本写它。
+再往前一层查清了 v4 那份**是怎么来的**：它的 `actions[]` / `denominators` / `created_utc` /
+`authorization` / `source_manifest` 是 v4 `COMPLETION_MANIFEST.json` 的**逐字节切片**——手工切出来的。
+这条路对新库**走不通**，因为新库的 `COMPLETION_MANIFEST.json` 结构完全不同，**根本没有 `actions[]`**。
+所以本轮另写了 `derive_bank_import_receipt.py` 机械派生，任一交叉校验对不上就 fail-closed：
+`frames` 取自 **npz `joint_pos.shape[0]`**（与 catalog `T`、manifest `T` 三方对拍），
+`robot_mount_normal_sign` 取自 **npz 自身字段**（与 catalog 对拍），
+`sha256` **重新哈希 npz 字节**（与 `chingmu73_measured_a3p0807_bank_v1.json` 的 `closure.files[]` 对拍）。
+**一个数都没从 v4 那份抄。**
+
+派生完再与 v4 逐字段比对，"源没变"这句话因此是**量出来的**：
+`sha256` **73/73 全不同**；`clip_id` / `file` / `frames` / `hit_frame_50` / `uid` /
+`robot_mount_normal_sign` **73/73 逐位相同**；11 个 denominator 全部与 v4 逐位相同（而且是重算的，不是抄的）；
+两个库的 `SOURCE_MANIFEST.json` 与 `SOURCE_CLIP_ORDER.json` **逐字节相同**。
+
+**2. 机械准入：`COMPLETION_MANIFEST` 那六个数，六个全部复现。**
+
+| reason | 收据声称 | 本轮复现 |
+| --- | --- | --- |
+| `joint_position_limit_violation` | 55 | **55** |
+| `stored_joint_velocity_limit_violation` | 20 | **20** |
+| `finite_difference_joint_velocity_limit_violation` | 39 | **39** |
+| 三条 `*_unavailable` | 73 / 73 / 73 | **73 / 73 / 73** |
+
+**本轮这条 clip 自己的账要单独说**：`take_061_unit04_bh` 是
+`mechanical_verdict = UNKNOWN` / `kinematic_limit_verdict = PASS`。
+关节位置 0 违规（最小归一化余量 `0.1404`，最紧的是 `right_ankle_roll_joint` @ frame 14）、
+关节速度 0 违规（存储峰值比 `0.606`、有限差分 `0.611`）。
+**它没有任何一条真实包络违规**，挡它的完全是那三条"判它所需的数据不存在"的厂商缺口。
+这与 §9.2.17.6 的腰那条是**两回事**，别混：腰那条是"撑不住"，这条是"没法判"。
+
+**3. 求解器 pin：runbook 里那个数是退役值，不能抄。**
+`docs/operations/setup_local_sync.md` 的 v4 命令写着 `--solver-profile-sha256 6b2c7c669bfa…`。
+本轮按钉针脚本自己的规矩，在 HEAD 上跑 `pin_action_ball_profile_contracts.py --source-rev HEAD` **现铸**，
+它**逐字节复现**了在役的 `action_ball_profile_pins.live.v2.9a909b56d9b6.json`——
+这就是"复算证明复现的是活值那条链"该有的样子。于是：
+runbook 的 `6b2c7c66…` **STALE**（`42232b84` 那次重签把它换掉了），
+本轮用的是活值 `3af6c505f9ed2333…`；`physics` 侧 `aa5c9085f9b48ca6…` 重铸后同值，**确认稳定**。
+
+**4. 新清单 vs v4 清单的逐字段差**：`action_id` / `family` / `mount_normal_sign` / `strike_phase` /
+`reference_t_hit_s` / `reference_t_cycle_s` / `reaction_margin_s` / `teacher_rate_*` **73/73 相同**；
+`motion_path` / `motion_sha256` / `action_uid` **73/73 全变**；
+`reference_racket_site_speed_mps` 11 条、`ball_profile` 4 条在浮点噪声量级上变
+（中位数 `2.1469600 → 2.1469598`）。两条 WARN 与 v4 build **是同一批 UID，逐个相同**。
+
+##### 撞出来的硬拦路：`action_uid` 会变，而它在两个地方各有一份，**会互相打架**
+
+这一条**更正 §9.2.17.7 里我自己写错的那半句**（已就地改掉，不留矛盾段落）：
+
+- `materialize_measured_action_ball_n1_bundle.py:71` 的 `ACTION_FACTS["action_uid"] = 5527597793770800`
+  **是硬编码常量**，换库不会自己变——这半句是对的。
+- 但清单侧**不是**常量：`build_action_ball_manifest.py:1362` 调
+  `derive_action_ball_action_uid(action_id, family, motion_sha256)`，
+  而该函数的 docstring 写得明明白白：*"a manifest cannot … replace its motion bytes while keeping an old
+  wire identity"*。所以换库之后这条 action 的 uid 是
+  **`5527597793770800` → `2552478955674699`**（本轮新清单里实测的值）。
+- 两者**会打架**：`materialize_measured_action_ball_n1_bundle.py:644` 硬判
+  `source_identity["action_uid"] != action_uid` 就拒。
+  **换库而不同批改 `ACTION_FACTS["action_uid"]`，`prepare` 第一步就 fail-closed。**
+
+所以 §9.2.17.3 那张八步单子要补一条：第 7 步之前，`ACTION_FACTS` 要改的**不止 `motion_path`/`motion_sha256`，
+还有 `action_uid`**。而且这一条同时把题目身份的话说死了：
+**wire identity 按设计就会变**，这不是副作用，是 `derive_action_ball_action_uid` 的设计意图。
+
+##### 顺带查实的三件事，下一轮会撞上
+
+1. **仓库自己编译不了 0807 的 MJCF。** 逐字报错：
+   `ValueError: Error: Error opening file 'meshes/pelvis_link.STL'`。
+   `agi/A3_MuJoCo_Sim/.../a3p_pingpong_0807/` 里只有 `a3p_pingpong_0807.xml` 和一个把 `meshes/`
+   全部忽略掉的 `.gitignore`。本轮是从 pod 上另一个工作根**补齐 94 个文件**并逐个对
+   `configs/a3p_p1_0807_model_set_v1.json` 的 `mujoco.closure` 验过（SHA + 字节数 + 总计 25389870，零多余）才跑起来的。
+   **任何人在干净 checkout 上重跑新盘 FK 审计都会先撞这一记。**
+2. **v4 那条链在 HEAD 上已经不可复现了。** v4 `COMPLETION_MANIFEST` 钉的 `canonical_mjcf` 是 `2ab1cd31bff…`，
+   而 `agi/.../a3_pingpong/a3_pingpong.xml` 在 `766ccf91` 上是 `70c4fd6534f…`。
+   **能在 HEAD 上复现的只有 0807 那条。** 顺带说明：`configs/a3p_p1_0807_model_set_v1.json` 里
+   `compiled_with_mujoco: false` / `required_next: 在带 MuJoCo 的 pod 上编译` 这一条，本轮**顺手完成了**
+   （MJCF 载入并在 73 条 × 5107 帧上 FK 干净）。
+3. **0807 的 73 份求解器报告在仓库外**：`/workspace/franco/a3p0807_retarget_20260807/v4out/0807/*.report.json`
+   （73 份全 `admitted:true`、全门 true、MJCF 钉 `7bbda723…`；该工作根 `bank/0807` 下的 73 条 npz
+   与仓库里的**逐字节相同**）。那个临时目录一旦被清，`solver_admitted` / `solver_all_gates_true`
+   就**再也算不回来**——新库自己的 `COMPLETION_MANIFEST` 只写了 `solver_admitted: 73`，
+   **压根没写 `solver_all_gates_true`**。
+   同一个工作根下还有另一套**更严格**的求解器输出（`out/0807`，73 条只出了 17 份、`admitted:false`），
+   **别把那套误当成本库的求解器报告**——本库是用 legacy `v4d` 求解器建的，
+   `configs/chingmu73_measured_a3p0807_bank_v1.json` 的 `tools.solver` 写着。
+
+**这四份产物本轮一份都没有提交进仓库。** 它们是重铸的**输入**，而重铸本身仍然卡在
+§9.2.17.3 那两份 GPU 出生证据上；先落输入再落不了后半段，等于把"只铸一次"拆成两次。
+
 #### 9.2.17.9 这一节没做什么
 
 1. **没铸任何产物**，一份都没有。理由见 9.2.17.3。
@@ -9997,6 +10106,12 @@ contact_bundle, fixed_domain_initial_receipt, reward_economy_receipt
 5. **没碰** GPU0（yikang）与 GPU2（mjlab），也**没 kill** GPU1 上并行 session 的进程。
 6. **没修** 9.2.17.8 那枚 registry 漂钉，也**没补**那 9 个从没被对磁盘验过的字段 ——
    本轮期间有并行 workflow 在改这批文件，且它与动作库无关。只更正了数字并写清修法。
+7. **没把** 9.2.17.10 那四份新库前置产物提交进仓库 —— 它们是重铸的输入，
+   而重铸卡在两份 GPU 出生证据上；先落输入再落不了后半段，等于把"只铸一次"拆成两次。
+8. **提交元数据勘误**：`454acc4f` 那一笔的**标题写错了**，它显示的是 `0f5fb0dd` 的标题
+   （一个并行 session 留在 `.git` 里的待用消息被 `git commit` 捡了去）。
+   它**实际装的是** 9.2.17.8 那一节（回归基线 + registry 漂钉）。
+   该提交已经推送，按纪律不 amend，在此登记更正。
 
 ## 10. N1 直接到完整 73 的门
 
