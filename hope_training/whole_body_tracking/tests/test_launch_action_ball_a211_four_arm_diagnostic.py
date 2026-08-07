@@ -21,6 +21,14 @@ launcher = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = launcher
 SPEC.loader.exec_module(launcher)
 
+# 共享 gate 自 2026-08-07 起严格消费 ``reveal_to_playback_bridge``,夹具只有一份。
+_BRIDGE_SPEC = importlib.util.spec_from_file_location(
+    "prelong_bridge_fixture",
+    Path(__file__).resolve().parent / "prelong_bridge_fixture.py",
+)
+BRIDGE = importlib.util.module_from_spec(_BRIDGE_SPEC)
+_BRIDGE_SPEC.loader.exec_module(BRIDGE)
+
 _TRAINING_CONTRACT = launcher._OLD._load_training_contract_module(
     Path(__file__).resolve().parents[3]
 )
@@ -320,6 +328,9 @@ def _prelong_marker_lines(update: int) -> list[str]:
             ppo_update=update,
             counters=counters,
             profile=launcher._S.PRELONG_PROFILE_A211,
+            bridge_telemetry=BRIDGE.reveal_bridge(
+                update, profile=launcher._S.PRELONG_PROFILE_A211
+            ),
         ),
     ]
 

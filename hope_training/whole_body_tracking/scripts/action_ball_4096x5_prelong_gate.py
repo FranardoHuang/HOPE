@@ -134,6 +134,28 @@ BRIDGE_CAUCHY_MIMIC_TERMS = (
     "motion_racket_long_axis",
 )
 
+# 接线之后这三张表就是承重的,所以在导入期跟生产方对一次**活值**——不是文件 SHA。
+# 指纹只能证明"字节没动",证明不了"两边说的是同一件事"(见 §5.6.13 的同型教训)。
+# 各自漂了会怎样:
+#   * WAIT 档位错位 -> 逐档守恒式照样成立,但比的是错档号,拒绝面整体走形;
+#   * exp/cauchy 归类不一致 -> 核函数字符串检查会拒掉正确收据,或放过错的;
+#   * mimic 项集合不一致 -> 生产方少写一项时长度才对不上,拒绝理由会指错地方。
+# ``BRIDGE_TIMING_FIELDS`` 对不上——生产方那份 ``_bridge_timing_names`` 是实例属性,
+# 导入期取不到;它靠 ``_exact_keys`` 的精确键集在运行时兜底(少一项/多一项都会拒)。
+if (
+    BRIDGE_WAIT_COHORTS != tuple(_SEMANTICS._PRELONG_BRIDGE_WAIT_COHORTS)
+    or set(BRIDGE_MIMIC_TERMS)
+    != (
+        set(_SEMANTICS._PRELONG_MIMIC_EXP_TERMS)
+        | set(_SEMANTICS._PRELONG_MIMIC_CAUCHY_TERMS)
+    )
+    or set(BRIDGE_CAUCHY_MIMIC_TERMS)
+    != set(_SEMANTICS._PRELONG_MIMIC_CAUCHY_TERMS)
+):
+    raise RuntimeError(
+        "pre-long gate reveal-bridge contract differs from the semantic producer"
+    )
+
 
 class PreLongGateRefused(ValueError):
     """Raised when terminal evidence is absent, malformed, or unsafe."""
@@ -966,13 +988,24 @@ def _validate_reveal_bridge(
 ) -> tuple[dict[str, Any], dict[int, dict[str, int]], dict[str, Any]]:
     """Strictly consume one schema-v3 reveal-to-playback bridge record.
 
-    **尚未接线(2026-08-06 核实):本函数全仓零调用点。**
-    别把它读成"本 gate 已经严格消费 v3" —— 现役 gate 仍按 schema-v2 走,A launcher 在第 84
-    项 fail-closed 拒的也是 v2 那条路。生产方 ``utils/action_ball_prelong_semantics.py``
-    确实已经产出 ``reveal_to_playback_bridge``,消费方就差这一步接线。
-    接线是独立一步(见 docs/experiments/2026-08/
-    EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md 的"把 shared gate 升级为严格消费
-    v3"一条),不是清理能顺手做的:它会改变 gate 的拒绝面。
+    **已接线(2026-08-07)。** ``validate_semantic_updates`` 逐 update 调用本函数;
+    三个返回值依次是「本 update 的收据摘要」「逐 WAIT 档寿命(下一 update 的比较基准)」
+    「权威身份(第一个 update 之后不许漂)」,汇总后写进
+    ``aggregate.reveal_to_playback_bridge``,收据自陈这一步真跑过了。
+
+    人话:这块记录管的是**揭示那一刻到 clip 真正开始推进之间**那段窗口的账 ——
+    ``5..25`` 共 21 个 WAIT 档各自 `揭示 = 开始回放 + 开始前就终止 + 被截断`、
+    七项权威 SHA 跨 5 个 update 不许漂、隐藏等待期的 task 收入必须恰好是 `0`、
+    逐 mimic 项的核函数/分母/收入、以及这段窗口内的边界安全量。
+
+    **别把它和 ``bridge_ramp_command_steps`` 混成一件事。** 那条 ramp(`34f8cf25`)
+    在 ``scripts/train.py`` 的 teacher-q_des oracle 里,作用是把揭示那一 tick 的
+    ``2.24 rad`` 阶跃摊到约 `35` 步(§5.6.6 实测:只多活 `1` tick)。**ramp 的存废跟着
+    「出生姿态要不要改成 frame 0」走;本记录不跟** —— 它的六个块没有一个引用出生姿态
+    或阶跃幅度。出生改成(接地后的)frame 0 只会换掉这里的**取值**
+    (``pre_swing_wait_s`` / ``timing_contract_sha256`` 等),一条**检查**都不会失效;
+    反而更承重,因为阶跃这个借口没了之后,回放开始前的每一次死亡都是纯平衡/plant 故障,
+    而这是唯一按 WAIT 档把它们数出来的账。
     """
 
     bridge = _exact_keys(
@@ -1516,6 +1549,9 @@ def validate_semantic_updates(
         group: 0 for group in REQUIRED_OPPORTUNITY_REWARD_GROUPS
     }
     profile: Optional[str] = None
+    bridge_summaries: list[dict[str, Any]] = []
+    bridge_lifetime: Optional[dict[int, dict[str, int]]] = None
+    bridge_authority: Optional[dict[str, Any]] = None
     for index, row in enumerate(ordered):
         row_profile = row.get("profile")
         if type(row_profile) is not str or row_profile not in PRELONG_PROFILES:
@@ -1545,6 +1581,18 @@ def validate_semantic_updates(
             )
         ):
             raise PreLongGateRefused(f"semantic update {index} opportunity sections are missing")
+        # 揭示->回放那段窗口的账。第一个 update 没有比较基准(两个 None),之后逐 update
+        # 用上一轮的逐档寿命做单调性比较、用第一轮的 authority 做整块相等比较。
+        bridge_summary, bridge_lifetime, observed_authority = _validate_reveal_bridge(
+            row.get("reveal_to_playback_bridge"),
+            profile=row_profile,
+            update=index,
+            previous_lifetime=bridge_lifetime,
+            expected_authority=bridge_authority,
+        )
+        if bridge_authority is None:
+            bridge_authority = observed_authority
+        bridge_summaries.append(bridge_summary)
         if (
             window.get("num_envs") != NUM_ENVS
             or window.get("rollout_steps_per_env") != ROLLOUT_STEPS_PER_UPDATE
@@ -1754,6 +1802,29 @@ def validate_semantic_updates(
                     "eligible_denominator": aggregate_group_denominators[group],
                 }
                 for group in REQUIRED_OPPORTUNITY_REWARD_GROUPS
+            },
+            # 收据自陈:这一步不是"只出结论、没人读"的位。authority 里带着七项权威 SHA
+            # 与 WAIT 档表,读收据的人不必回头翻代码就知道这一跑的桥绑在哪份合同上。
+            "reveal_to_playback_bridge": {
+                "consumed_semantics": (
+                    "every schema-v3 reveal-to-playback bridge block was strictly "
+                    "consumed: exact key sets, active fail-closed status, per-WAIT "
+                    "lifetime conservation and cross-update monotonicity, one "
+                    "unchanging authority identity, and the hidden-WAIT income rule"
+                ),
+                "updates_consumed": len(bridge_summaries),
+                "authority": bridge_authority,
+                "cumulative_reveal_count": bridge_summaries[-1][
+                    "cumulative_reveal_count"
+                ],
+                "newly_revealed_count": sum(
+                    summary["reveal_count_delta"] for summary in bridge_summaries
+                ),
+                "final_wait_cohort_lifetime": [
+                    {"wait_ticks": wait, **bridge_lifetime[wait]}
+                    for wait in BRIDGE_WAIT_COHORTS
+                ],
+                "per_update": bridge_summaries,
             },
         },
     }

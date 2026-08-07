@@ -19,6 +19,15 @@ assert SPEC is not None and SPEC.loader is not None
 GATE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GATE)
 
+# 揭示->回放那块记录的夹具只有一份(A/C launcher 的终局门测试共用同一份),见模块 docstring。
+_BRIDGE_SPEC = importlib.util.spec_from_file_location(
+    "prelong_bridge_fixture",
+    Path(__file__).resolve().parent / "prelong_bridge_fixture.py",
+)
+assert _BRIDGE_SPEC is not None and _BRIDGE_SPEC.loader is not None
+BRIDGE = importlib.util.module_from_spec(_BRIDGE_SPEC)
+_BRIDGE_SPEC.loader.exec_module(BRIDGE)
+
 
 def _checkpoint_acceptance():
     # 跑满 5 个 update 之后落盘的末位是 model_4.pt / iter=4:RSL-RL 的迭代变量
@@ -194,6 +203,7 @@ def _semantic(
             "actual_contact_numerator": contacts,
         },
         "achieved_flight": {"eligible_denominator": flight_denominator},
+        "reveal_to_playback_bridge": BRIDGE.reveal_bridge(update, profile=profile),
         "reward_groups": [
             {
                 "group": "balance",
@@ -702,6 +712,147 @@ def test_semantic_window_and_denominator_conservation_are_fail_closed(
     mutation(rows[2])
     with pytest.raises(GATE.PreLongGateRefused, match=match):
         GATE.validate_semantic_updates(rows)
+
+
+# --------------------------------------------------------------------------
+# 揭示->回放桥(``reveal_to_playback_bridge``)。2026-08-07 之前这块记录**没有任何
+# 消费方**:生产方每个 update 都在写,而门逐字段 ``row.get(...)`` 又不要求键集合精确,
+# 所以带桥的行被原样收下、一个字段都没被看过。下面每条都刻意构造成
+# "粗一个档次的检查会放行" —— 注释里写清粗版长什么样。
+# --------------------------------------------------------------------------
+
+
+def _bridge(row):
+    return row["reveal_to_playback_bridge"]
+
+
+def test_a_row_carrying_no_reveal_bridge_no_longer_passes_silently():
+    """接线前的现状本身:v3 行把桥写成 ``null`` 也能过。现在必须拒。"""
+
+    rows = _semantics()
+    for row in rows:
+        row["reveal_to_playback_bridge"] = None
+
+    with pytest.raises(GATE.PreLongGateRefused, match="reveal bridge fields differ"):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_bridge_status_must_be_active_fail_closed():
+    """粗版:只要求 ``status`` 是个非空字符串 —— 那样 ``not_configured`` 会被放行。"""
+
+    rows = _semantics()
+    for row in rows:
+        _bridge(row)["status"] = "not_configured"
+
+    assert all(
+        isinstance(_bridge(row)["status"], str) and _bridge(row)["status"]
+        for row in rows
+    )
+    with pytest.raises(GATE.PreLongGateRefused, match="not active fail-closed"):
+        GATE.validate_semantic_updates(rows)
+
+
+@pytest.mark.parametrize("field", sorted(BRIDGE.AUTHORITY_SHA256))
+def test_bridge_authority_sha_must_be_lowercase_hex(field):
+    """粗版:只量长度 64 —— 那样把一位改成大写会被放行,而跨 update 的相等比较就废了。"""
+
+    rows = _semantics()
+    for row in rows:
+        authority = _bridge(row)["authority"]
+        authority[field] = authority[field][:-1] + authority[field][-1].upper()
+
+    assert all(_bridge(row)["authority"][field] != BRIDGE.AUTHORITY_SHA256[field] for row in rows)
+    assert all(len(_bridge(row)["authority"][field]) == 64 for row in rows)
+    with pytest.raises(GATE.PreLongGateRefused, match="must be lowercase SHA-256"):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_bridge_cohort_may_conserve_and_still_miss_the_reveal_total():
+    """粗版:只逐档看守恒 —— 那样"某档少一次揭示、同时少一次截断"会被放行。"""
+
+    rows = _semantics()
+    for row in rows:
+        cohort = _bridge(row)["lifetime_conservation"]["wait_cohorts"][0]
+        cohort["reveal_count"] -= 1
+        cohort["censored_count"] -= 1
+
+    for row in rows:
+        for cohort in _bridge(row)["lifetime_conservation"]["wait_cohorts"]:
+            assert cohort["reveal_count"] == (
+                cohort["playback_start_count"]
+                + cohort["terminal_before_start_count"]
+                + cohort["censored_count"]
+            )
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="bridge timing/reveal counts differ"
+    ):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_bridge_authority_may_not_drift_after_the_first_update():
+    """粗版:只校验第一个 update 的 authority —— 那样第 3 个 update 换合同会被放行。"""
+
+    rows = _semantics()
+    _bridge(rows[2])["authority"]["question_sha256"] = "6f" * 32
+
+    assert _bridge(rows[0])["authority"]["question_sha256"] == (
+        BRIDGE.AUTHORITY_SHA256["question_sha256"]
+    )
+    assert all(
+        len(_bridge(row)["authority"][name]) == 64
+        and _bridge(row)["authority"][name].islower()
+        for row in rows
+        for name in BRIDGE.AUTHORITY_SHA256
+    )
+    with pytest.raises(
+        GATE.PreLongGateRefused, match="authority drifted across updates"
+    ):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_bridge_playback_start_count_may_not_regress_between_updates():
+    """粗版:只看单 update 快照 —— 那样"某档开始回放数比上一轮少"会被放行。"""
+
+    rows = _semantics()
+    cohort = _bridge(rows[3])["lifetime_conservation"]["wait_cohorts"][0]
+    previous = _bridge(rows[2])["lifetime_conservation"]["wait_cohorts"][0]
+    regressed = previous["playback_start_count"] - 1
+    cohort["censored_count"] += cohort["playback_start_count"] - regressed
+    cohort["playback_start_count"] = regressed
+
+    assert cohort["reveal_count"] == (
+        cohort["playback_start_count"]
+        + cohort["terminal_before_start_count"]
+        + cohort["censored_count"]
+    )
+    assert min(
+        cohort["playback_start_count"],
+        cohort["terminal_before_start_count"],
+        cohort["censored_count"],
+    ) >= 0
+    with pytest.raises(GATE.PreLongGateRefused, match="lifetime regressed"):
+        GATE.validate_semantic_updates(rows)
+
+
+def test_accepted_receipt_self_reports_the_bridge_it_consumed():
+    """记录与阻断同一批:门通过时,收据必须自陈它读过这块桥,而不是只留一个结论位。"""
+
+    bridge = GATE.validate_semantic_updates(_semantics())["aggregate"][
+        "reveal_to_playback_bridge"
+    ]
+
+    assert bridge["updates_consumed"] == 5
+    assert bridge["authority"]["wait_cohort_ticks"] == list(GATE.BRIDGE_WAIT_COHORTS)
+    assert bridge["authority"]["policy_dt_s"] == 0.02
+    assert bridge["cumulative_reveal_count"] == BRIDGE.total_reveal_count(4)
+    assert bridge["newly_revealed_count"] == BRIDGE.total_reveal_count(4)
+    assert [row["wait_ticks"] for row in bridge["final_wait_cohort_lifetime"]] == list(
+        GATE.BRIDGE_WAIT_COHORTS
+    )
+    assert bridge["final_wait_cohort_lifetime"][0]["reveal"] == (
+        BRIDGE.cohort_counts(4, 0)["reveal_count"]
+    )
+    assert len(bridge["per_update"]) == 5
 
 
 def test_semantic_markers_require_exactly_five_contiguous_updates():
