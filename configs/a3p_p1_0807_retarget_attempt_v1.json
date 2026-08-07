@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "manifest_type": "a3p_p1_0807_retarget_attempt_v1",
+  "question": "does swapping the plant to 0807 change the measured-racket retarget?",
+  "answer": "no, on every clip that solves: all 18 gates identical, residuals mostly slightly better",
+  "experiment_design": {
+    "controlled": "same source bytes, same venv, same solver, same inputs; only the MJCF/URDF pair varies",
+    "why": "the v4 bank was produced in an unknown environment, so re-solving the 0409 baseline here is the only way to attribute a difference to the plant rather than to the toolchain",
+    "venv": "/workspace/mjlab_venv (mujoco 3.10.0, scipy 1.18.0, numpy 2.4.6) on Pod1",
+    "cpu_only": "the solver uses CPU MuJoCo and scipy.minimize; no GPU was taken"
+  },
+  "inputs_located": {
+    "unit_npz_and_json": "/workspace/yikang/chingmu_gmr/units/ -- 73/73 pinned measured_racket_source_sha256 resolve",
+    "body_retarget_pkl": "/workspace/yikang/chingmu_gmr/chingmu_a3_units_v2/ -- matches the manifest's source_pkl_sha256; the path in docs/operations/setup_local_sync.md (chingmu_retarget/chingmu_a3_units_v2) has moved",
+    "manifest": "assets/motions/chingmu73_20260728/chingmu_manifest_v1.json",
+    "catalog": "assets/motions/chingmu73_measured_v4_20260803/SOURCE_CLIP_ORDER.json",
+    "joint_order_contract": "configs/a3_joint_order_bijection_v1.json plus the two order .txt files it resolves repo-relative"
+  },
+  "single_clip_control": {
+    "uid": "Take_058_unit02_FH",
+    "gates_total": 18,
+    "gates_identical_across_plants": 18,
+    "gates_false_on_both": [
+      "all_source_joints_acceleration_le_diagnostic_proxy",
+      "all_source_joints_inside_urdf_soft_position_bounds"
+    ],
+    "gates_false_note": "these are the known v4 mechanical-admission failures; identical on both plants, so not swap-induced",
+    "residual_deltas_0409_to_0807": {
+      "velocity_direction_deg.max": [0.757167148, 0.393724348],
+      "face_deg.max": [0.0508302329, 0.0453789993],
+      "post_hit.so3_deg.max": [0.031053983, 0.0238697704],
+      "velocity_direction_deg.p95": [0.0953247724, 0.113392335]
+    },
+    "verdict": "the swap is benign for the retarget; every residual stays orders of magnitude inside its gate"
+  },
+  "full_bank_rebuild": {
+    "status": "BLOCKED",
+    "attempted": "73 clips x 2 plants with the tracked solver's default knobs (margin 0.01, velocity 0.90, acceleration 250)",
+    "result": {"plant_0409_admitted": 19, "plant_0807_admitted": 17, "of": 73},
+    "agreement": "70 of 74 clips succeed-or-fail identically on both plants, so the admission rate is a solver property, not a plant property",
+    "dominant_failure": "dynamic motion bounds are infeasible (103 of 105 failures)",
+    "root_cause": {
+      "finding": "the tracked solver is NOT the one that produced the v4 bank and cannot reproduce its 73/73 admission",
+      "evidence": [
+        "assets/motions/chingmu73_measured_v4_20260803/COMPLETION_MANIFEST.json pins solver sha256 d6d6bfdd...57af5",
+        "the tracked script has been committed exactly once, at 6091688188...68e6c, so d6d6bfdd never existed in this repo's history",
+        "all ~120 copies on Pod1 are 6091688188...; d6d6bfdd is present nowhere on the pod either",
+        "docs/operations/setup_local_sync.md sets SCRIPT_ROOT=$OUTPUT_ROOT, i.e. v4 ran a pod-local script copy that was never tracked",
+        "the recorded v4 invocation also predates the current CLI: it passes no --manifest, --catalog or --urdf"
+      ],
+      "knob_sweep": "margin/velocity/acceleration were swept on a failing clip; only effectively disabling the dynamic bounds (velocity 1.0, acceleration 1e5, margin 0.0) admits it, which is not what v4 did"
+    },
+    "what_this_does_not_mean": "it is not evidence against the 0807 plant; the same solver admits 19 vs 17 of 73 on the two plants and agrees on 70 of 74 clips"
+  },
+  "solver_change_made_here": {
+    "file": "hope_training/whole_body_tracking/scripts/solve_chingmu_canonical_racket_full_phase.py",
+    "change": "the two single-value MJCF/URDF SHA pins became KNOWN_PLANTS, a keyed allowlist; the report now records which plant key was used",
+    "why_not_a_loosening": "a plant is admissible only if its MJCF and URDF appear under the SAME key, so an unknown model or a mismatched pair from two plants is still refused",
+    "mutation_tested": {
+      "0409 mjcf + 0409 urdf": "admitted as a3t2p5_0409",
+      "0807 mjcf + 0807 urdf": "admitted as a3p_p1_0807",
+      "0807 mjcf + 0409 urdf": "BLOCKED",
+      "unknown mjcf": "BLOCKED"
+    },
+    "pre_existing_test_failure": "test_chingmu_canonical_racket_solver.py is 1 failed / 14 passed both before and after this change; the failure is numpy._core unpickling on the py3.8 host"
+  },
+  "next_step_options": [
+    "recover or re-derive the v4-era solver behaviour, then rebuild the bank on 0807",
+    "accept the tracked solver as the new authority, rebuild the bank on 0807 at whatever admission it gives, and re-sign the bank gates against that denominator"
+  ]
+}

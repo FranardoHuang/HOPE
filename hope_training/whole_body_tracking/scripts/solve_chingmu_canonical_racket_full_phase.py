@@ -32,12 +32,24 @@ import numpy as np
 FPS = 120.0
 SITE_NAME = "right_racket"
 EXPECTED_SITE_POS = np.array([0.21021, 0.032078, 0.032036], dtype=np.float64)
-EXPECTED_MJCF_SHA256 = (
-    "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
-)
-EXPECTED_URDF_SHA256 = (
-    "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
-)
+# A plant is admissible only if BOTH its MJCF and its URDF appear under the same key here, so an
+# unknown model, or a mismatched MJCF/URDF pair from two different plants, is still refused.  The
+# report records which key was used, which is what makes a plant-only comparison auditable.
+KNOWN_PLANTS = {
+    "a3t2p5_0409": {
+        "mjcf": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+        "urdf": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae",
+        "note": "the plant every bank through chingmu73_measured_v4_20260803 was solved against",
+    },
+    "a3p_p1_0807": {
+        "mjcf": "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1",
+        "urdf": "15c83f5f3beea71350583143aef4d622d5219df65a0bed9a660a0edb7d388d09",
+        "note": "configs/a3p_p1_0807_model_set_v1.json; racket site 0.502 mm from the 0409 plant",
+    },
+}
+# Kept so existing importers of these names keep resolving to the plant v4 was solved against.
+EXPECTED_MJCF_SHA256 = KNOWN_PLANTS["a3t2p5_0409"]["mjcf"]
+EXPECTED_URDF_SHA256 = KNOWN_PLANTS["a3t2p5_0409"]["urdf"]
 ROBOT_BUTT_TO_BLADE_AXIS_LOCAL = np.asarray(
     [1.0 / math.sqrt(2.0), 0.0, 1.0 / math.sqrt(2.0)], dtype=np.float64
 )
@@ -519,16 +531,20 @@ def solve_one(
     acceleration_proxy_rad_s2: Optional[float] = DEFAULT_ACCELERATION_PROXY_RAD_S2,
 ) -> dict[str, Any]:
     actual_model_sha256 = _sha256(model_path)
-    if actual_model_sha256 != EXPECTED_MJCF_SHA256:
-        raise RetargetError(
-            "canonical MJCF SHA-256 changed: "
-            f"expected {EXPECTED_MJCF_SHA256}, got {actual_model_sha256}"
-        )
     actual_urdf_sha256 = _sha256(urdf_path)
-    if actual_urdf_sha256 != EXPECTED_URDF_SHA256:
+    plant_key = next(
+        (
+            key
+            for key, plant in KNOWN_PLANTS.items()
+            if plant["mjcf"] == actual_model_sha256 and plant["urdf"] == actual_urdf_sha256
+        ),
+        None,
+    )
+    if plant_key is None:
         raise RetargetError(
-            "canonical URDF SHA-256 changed: "
-            f"expected {EXPECTED_URDF_SHA256}, got {actual_urdf_sha256}"
+            "MJCF/URDF pair is not a known plant: got mjcf "
+            f"{actual_model_sha256}, urdf {actual_urdf_sha256}; known plants are "
+            + ", ".join(f"{k} (mjcf {v['mjcf'][:12]}…, urdf {v['urdf'][:12]}…)" for k, v in KNOWN_PLANTS.items())
         )
     try:
         import mujoco
@@ -952,6 +968,7 @@ def solve_one(
         "kind": "chingmu_canonical_racket_full_phase_retarget_v4",
         "action_id": uid,
         "sources": {
+            "plant": {"key": plant_key, "mjcf_sha256": actual_model_sha256, "urdf_sha256": actual_urdf_sha256},
             "input_pkl": {"path": str(pkl_path), "sha256": input_pkl_sha256},
             "unit_npz": {"path": str(unit_npz_path), "sha256": _sha256(unit_npz_path)},
             "unit_json": {"path": str(unit_json_path), "sha256": _sha256(unit_json_path)},
