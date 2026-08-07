@@ -575,15 +575,22 @@ def test_contract_change_during_read_fails_closed(tmp_path: Path, monkeypatch):
     path.write_text('{"schema_version": 2}\n', encoding="utf-8")
     expected = H.sha256_file(path)
     original_read_bytes = Path.read_bytes
+    mutated: list[Path] = []
 
+    # ``Path.read_bytes`` is a process-wide primitive: the hook must fire for this
+    # one fixture file and nothing else.  Unscoped, it would append a byte to every
+    # file anybody reads while it is installed -- including repository files.
     def mutating_read_bytes(self: Path) -> bytes:
         payload = original_read_bytes(self)
-        self.write_bytes(payload + b" ")
+        if self == path:
+            self.write_bytes(payload + b" ")
+            mutated.append(self)
         return payload
 
     monkeypatch.setattr(Path, "read_bytes", mutating_read_bytes)
     with pytest.raises(H.HarnessError, match="changed while"):
         H.load_bound_json(path, expected)
+    assert mutated == [path], "拦截没有生效,这条测试是空的"
 
 
 @pytest.mark.parametrize(

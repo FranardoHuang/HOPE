@@ -787,32 +787,100 @@ def test_l1_certificate_must_authorize_table_net(tmp_path):
         TABLE_NET.validate_vendor_l1_certificate(plan)
 
 
+class _ModuleScopedOs:
+    """A stand-in ``os`` that only one module under test can see.
+
+    人话:有些测试要在"读文件"这一步插一手才能演出攻击。但绝不能把整个进程的
+    ``os.read`` 换掉 —— 同一个 pytest 进程里别的测试、别的库读文件时也会撞进这个
+    钩子,结果就会随执行顺序变(那正是本文件旧版本 flake 的病根之一)。这里只替换
+    被测脚本自己模块命名空间里的 ``os`` 这个名字,别人看到的仍然是真 ``os``。
+    """
+
+    def __init__(self, real_os, **overrides) -> None:
+        self.__dict__.update(overrides)
+        self.__dict__["_real_os"] = real_os
+
+    def __getattr__(self, name: str):  # only for names we did not override
+        return getattr(self.__dict__["_real_os"], name)
+
+
 def test_l1_certificate_path_swap_cannot_change_consumed_bytes(monkeypatch, tmp_path):
+    """证书已经 open 之后再换路径下的文件,消费到的字节必须还是原来那个 inode 的。
+
+    人话:验证器打开证书拿到 fd 之后、读第一个字节之前,把该路径改名藏起来,再在同名
+    路径上摆一份被改过的证书。因为读走的是 fd 不是路径,消费到的字节、算出的 SHA、
+    解析出的证书内容都必须是原始那一份。
+
+    这条判定不依赖任何时间戳:交换发生在 fstat 基线之前,所以"元数据漂移"告警本来就
+    不该响;唯一可判定的就是"消费到的字节"本身,而那正是这条护栏的名字。
+    (旧版本断言的是 rename 顺带改了 st_ctime_ns 从而触发漂移告警 —— 但本机 /tmp 的
+    内核文件时间戳只有 1 ms 刻度,而 write→rename 整个窗口只有约 43 µs,所以 200 次里
+    有 196 次时间戳根本没变、告警不响,测试随机红。见 exp §9.2.13。)
+    """
+
+    plan = _plan()
+    original = _synthetic_l1_certificate(plan)
+    path = _bind_synthetic_certificate(tmp_path, plan, original)
+    original_bytes = path.read_bytes()
+    original_sha = plan["frozen_vendor_l1"]["certificate"]["sha256"]
+    forged = json.loads(json.dumps(original))
+    forged["runtime"] = {"forged_after_sha_check": True}
+    forged_bytes = json.dumps(forged, sort_keys=True).encode("utf-8")
+    assert forged_bytes != original_bytes
+    real_open_fd_snapshot = TABLE_NET._read_open_fd_snapshot
+    swapped: list[Path] = []
+
+    def swap_path_then_read(fd: int, opened: Path, label: str, **kwargs):
+        if not swapped and Path(opened) == path:
+            path.rename(tmp_path / "held-original.json")
+            path.write_bytes(forged_bytes)
+            swapped.append(path)
+        return real_open_fd_snapshot(fd, opened, label, **kwargs)
+
+    monkeypatch.setattr(TABLE_NET, "_read_open_fd_snapshot", swap_path_then_read)
+    cert, snapshot = TABLE_NET.validate_vendor_l1_certificate(plan)
+    # 攻击确实落地了(否则这条测试是空的)
+    assert swapped == [path]
+    assert path.read_bytes() == forged_bytes
+    # 但消费到的字节没有跟着路径走
+    assert snapshot.data == original_bytes
+    assert snapshot.sha256 == original_sha
+    assert snapshot.size == len(original_bytes)
+    assert snapshot.inode != path.stat().st_ino
+    assert cert["runtime"] == {"synthetic": True}
+    assert "forged_after_sha_check" not in json.dumps(cert, sort_keys=True)
+
+
+def test_l1_certificate_inode_mutated_mid_read_fails_closed(monkeypatch, tmp_path):
+    """读到一半有人往同一个 inode 上追加字节,必须当场失败,不许把变长的内容收下。
+
+    人话:这条守的是另一半 —— 攻击者不换路径,直接改同一个文件。判定用"文件大小变了",
+    大小是整数不是时间戳,所以是确定的,不会像旧版本那样被内核时间戳的 1 ms 刻度赌输赢。
+    拦截只装在被测模块自己的 ``os`` 上(见 ``_ModuleScopedOs``),不碰全局 ``os.read``。
+    """
+
     plan = _plan()
     original = _synthetic_l1_certificate(plan)
     path = _bind_synthetic_certificate(tmp_path, plan, original)
     original_inode = path.stat().st_ino
-    forged = json.loads(json.dumps(original))
-    forged["runtime"] = {"forged_after_sha_check": True}
-    forged_bytes = json.dumps(forged, sort_keys=True).encode("utf-8")
+    original_size = path.stat().st_size
     real_read = os.read
-    swapped = False
+    appended: list[int] = []
 
-    def swap_then_read(fd: int, count: int) -> bytes:
-        nonlocal swapped
-        if not swapped and os.fstat(fd).st_ino == original_inode:
-            swapped = True
-            path.rename(tmp_path / "held-original.json")
-            path.write_bytes(forged_bytes)
+    def append_then_read(fd: int, count: int) -> bytes:
+        if not appended and os.fstat(fd).st_ino == original_inode:
+            with open(path, "ab") as handle:
+                handle.write(b" ")
+            appended.append(fd)
         return real_read(fd, count)
 
-    monkeypatch.setattr(TABLE_NET.os, "read", swap_then_read)
+    monkeypatch.setattr(TABLE_NET, "os", _ModuleScopedOs(os, read=append_then_read))
     with pytest.raises(TABLE_NET.TableNetError, match="changed during immutable read"):
         TABLE_NET.validate_vendor_l1_certificate(plan)
-    assert swapped is True
-    assert json.loads(path.read_text(encoding="utf-8"))["runtime"] == {
-        "forged_after_sha_check": True
-    }
+    assert appended, "拦截没有生效,这条测试是空的"
+    assert os.read is real_read, "全局 os.read 被换掉了 —— 会污染同进程的其它测试"
+    assert path.stat().st_ino == original_inode
+    assert path.stat().st_size == original_size + 1
 
 
 def test_contract_cannot_claim_continuous_time_or_weaken_hard_gate(tmp_path):

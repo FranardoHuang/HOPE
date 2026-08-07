@@ -7712,6 +7712,179 @@ ActionBall env，自然也没算 solver profile。
 2. **没接** `_validate_reveal_bridge`（剩下三个里唯一判过的那个），按分工那是另一条待办。
 3. **没补** M6 那一档（截断哈希）的变异证据，理由见上。
 
+### 9.2.14 L1 证书"换路径不能换字节"那条测试：报的病因是错的，真病因是内核文件时间戳只有 1 ms 刻度（2026-08-07 落地，pod1 host-only，无 GPU）
+
+**人话**：有条测试是"验证器已经打开证书之后，有人把那个路径下的文件掉包，验证器读到的
+字节必须还是原来那一份"。它一直时红时绿。交上来的病因是"它把整个进程的 `os.read` 换掉了，
+会被同进程里别的测试的 fd 抢跑"。**这个说法不成立**。真病因是它断言错了东西：它断言的不是
+"字节没变"，而是"改名顺带把 `st_ctime_ns` 改了、于是元数据漂移告警响了"——而这条告警响不响，
+是在跟内核的文件时间戳刻度赌博。
+
+#### 9.2.14.1 先证伪交上来的病因
+
+按票面复现（pod1，`/workspace/hope_isaac_venv/bin/python` = Python 3.10.18 / pytest 9.1.1，
+干净 worktree `/workspace/codexschema/nohope_l1flake_20260807` @ `c1b5ca10`）：
+
+| 跑法 | 通过次数 |
+| --- | --- |
+| 只跑 `test_l1_certificate_path_swap_cannot_change_consumed_bytes` | **4 / 10** |
+| 与 `test_plan_claim_is_a211_fresh_and_denies_retired_lineage` 配对跑 | **2 / 10** |
+
+票面写的是"单独跑必过、配对跑必失败"。实测**两种跑法都会红**，只是配对时更容易红（配对跑得更快）。
+所以它跟执行顺序、跟别的测试的 fd 都没关系——**它自己单独跑就是个抛硬币**。
+
+插桩看活值也证实：钩子每一次都正确命中了证书那个 inode（`swapped` 每次都是 `True`），
+从来没有被别的 fd "抢跑"过。变的不是钩子，是**被测代码那条告警响不响**。
+
+（顺带：票面把配对对象写成 `a225`，实际那条测试叫
+`test_plan_claim_is_a211_fresh_and_denies_retired_lineage`，仓库里没有 a225 版本。）
+
+#### 9.2.14.2 真病因：窗口 43 µs，时钟刻度 1 ms
+
+被测代码 `_read_open_fd_snapshot`（`scripts/audit_motion_schema2_table_net_clearance.py:155`）
+在读前后各 `fstat` 一次，比较
+`(st_dev, st_ino, st_mode, st_size, st_mtime_ns, st_ctime_ns)`。
+旧测试用 `path.rename(...)` 做掉包——**改名只动得了 `st_ctime_ns` 这一项**。
+
+在 pod1 的 `/tmp`（overlay）上实测 200 次"写文件 → open → rename → fstat"：
+
+- **196 / 200 次 `st_ctime_ns` 前后完全相同**；
+- 变了的那 4 次，差值只有 `999999 ns` 或 `1000000 ns`；
+- 另测 300 次连续写只落出 **18 个不同的 `st_mtime_ns`**，步长同样是 1 ms。
+
+也就是说**内核给文件时间戳用的是粗时钟，刻度 1 ms**；而从"写下证书"到"rename 掉包"整个窗口
+中位数只有 **43 µs**。绝大多数情况下 rename 落在同一个毫秒刻度里，`st_ctime_ns` 一个数都不变，
+告警当然不响，验证器正常返回，`pytest.raises` 就报 `DID NOT RAISE`。
+
+**这不是被测代码的漏洞。** 读走的是 fd 不是路径，掉包本来就改不了消费到的字节——这才是这条护栏
+真正的保证。旧测试断言的是这条保证的一个**偶然副作用**，而那个副作用受时钟精度支配。
+
+#### 9.2.14.3 改法：断言那句护栏自己的名字，而不是它的副作用
+
+`tests/test_motion_backhand_loop_b_table_net_clearance.py` 改一处、加两处：
+
+1. `test_l1_certificate_path_swap_cannot_change_consumed_bytes`（同名保留）
+   —— 注入点从"全局 `os.read`"换成"被测模块自己的 `_read_open_fd_snapshot`"，
+   并且**只对证书那一个路径生效**。掉包发生在 `fstat` 基线之前，所以元数据告警**确定不会响**，
+   剩下唯一可判定的就是"消费到的字节"本身。断言改成：
+   `snapshot.data` / `snapshot.sha256` / `snapshot.size` 全等于原始那一份，
+   解析出的 `cert["runtime"]` 里没有伪造标记，同时确认 `path` 上确实已经是伪造字节（否则测试是空的）。
+   **零时间戳依赖。**
+2. 新增 `test_l1_certificate_inode_mutated_mid_read_fails_closed`
+   —— 补上另一半：攻击者不换路径，直接往同一个 inode 上追加字节。
+   判定用 `st_size`（整数，不是时间戳），所以确定会触发
+   `inode/metadata changed during immutable read`。
+   拦截走新加的 `_ModuleScopedOs`：**只替换被测模块命名空间里的 `os` 这个名字**，
+   全局 `os.read` 一个字节都不碰（测试里直接断言 `os.read is real_read`）。
+3. `_ModuleScopedOs` 是个小壳：覆盖的名字走覆盖，其余全部 `__getattr__` 转发给真 `os`。
+
+**没有用 `-p no:randomly`、没有固定顺序、没有跳过配对、没有 sleep。**
+
+#### 9.2.14.4 变异测试：等强，而且比旧版更强
+
+在 `scripts/audit_motion_schema2_table_net_clearance.py` 上打三个真回归（跑完即还原）：
+
+| 变异 | 内容 | 结果 |
+| --- | --- | --- |
+| M1 | SHA 仍按 fd 字节校验（所以不会报错），但交给下游的 `FileSnapshot.data` 改成 `path.read_bytes()` | **只有换路径那条红** ✅ |
+| M2 | 整个读改成走路径 `path.read_bytes()`，不走 fd | **两条都红** ✅ |
+| M3 | 把中途漂移的身份元组从 6 项砍成 `(st_dev, st_ino)`（粗一个档次） | **只有 inode 篡改那条红** ✅ |
+
+未变异基线：`2 passed`；三个变异各自还原后复跑：`2 passed`。
+
+**M1 是关键的那个**：它是一次真实的"换路径导致消费字节变了"，但它**不抛异常**——
+任何"只问有没有报错"的粗测试都看不见它。把改之前那条测试原封不动搬过来对着 M1 跑：
+
+| 旧测试 | 通过次数 |
+| --- | --- |
+| 对着**未变异**的源码 | 16 / 20（本该 20/20；这 4 次红就是抛硬币） |
+| 对着 **M1 变异**的源码 | **13 / 20 —— 真回归有 65% 的概率溜过去** |
+
+所以这次不是"把测试改弱好让它绿"，是**旧测试根本拦不住它自己名字上写的那个回归**，
+新测试拦得住。
+
+#### 9.2.14.5 稳定性收据
+
+配对跑（a211 那条 + q50 那条 + 新旧两条 L1），`/workspace/hope_isaac_venv/bin/python`：
+
+- **12 / 12 全绿**（每次 `4 passed`，约 1.0 s）。
+- 整模块交叉跑、正反顺序各若干次，L1 两条从未再红。
+
+#### 9.2.14.6 与基线对拍
+
+解释器 `/workspace/hope_isaac_venv/bin/python`（3.10.18，pytest 9.1.1），
+四个受影响模块：`test_motion_backhand_loop_b_table_net_clearance` /
+`test_run_gate3_first_tick_harness` / `test_run_phase1_q50_persistent_supervisor` /
+`test_launch_action_ball_a211_four_arm_diagnostic`。
+
+| | 结果 | skipped |
+| --- | --- | --- |
+| 改之前（同一 worktree，只把这两个测试文件还原） | `11 failed, 233 passed` | **0** |
+| 改之后 | `10 failed, 235 passed` | **0** |
+
+失败集合逐条 diff，**唯一的差别就是少了 `test_l1_certificate_path_swap_cannot_change_consumed_bytes` 这一行**；
+其余 10 条前后完全一致。用例总数 244 → 245（+1 = 新增那条）。
+
+那 10 条**是既有的红、与本轮无关**：它们全部来自
+`scripts/audit_motion_schema2_table_net_clearance.py` 里对 `geometry.py` 的冻结几何源钉子
+与当前源码漂了（样例报错：`build_net_post_cfg post height formula changed`）。
+这是内容漂移，需要单独裁决，**本轮没碰**，记在这里。
+
+#### 9.2.14.7 顺带扫的：还有谁在无差别改全局 I/O 原语
+
+扫 `tests/` 和 `hope_training/whole_body_tracking/tests/` 里所有
+`monkeypatch.setattr(<模块或类>, <I/O 原语>, ...)`。**结论：真会随顺序变结果的只有这一条**，
+其余按危险度排：
+
+**已一并修（1 处）**
+
+- `tests/test_run_gate3_first_tick_harness.py:579` `test_contract_change_during_read_fails_closed`
+  —— 它把 `Path.read_bytes` 换成一个**无条件**在读完之后往 `self` 追加一个空格的钩子。
+  钩子挂上期间，**任何人**读任何文件都会被就地改写，包括仓库里的文件。
+  已加 `if self == path` 限定 + `assert mutated == [path]`（拦截没生效就说测试是空的）。
+  变异测试证明没改弱：把 `load_bound_json` 的身份元组砍成 `(st_dev, st_ino)`（粗一档），
+  这条测试**仍然红**；未变异 / 还原后都是 `1 passed`。
+
+**留着的（有作用域限定，或只罩住一次调用，不会随顺序变，但记账）**
+
+- `tests/test_run_phase1_q50_persistent_supervisor.py:255` 把 `os.environ` 整个换成普通 `dict`
+  —— 只罩住一次 `_require_invoking_environment` 调用；但期间任何 `os.environ[...] = x` 不会
+  同步到真环境（不走 `putenv`）。窗口极短，暂不动。
+- `hope_training/whole_body_tracking/tests/test_post_swing_teacher.py:431`
+  把 `Path.read_text` 换成**无条件抛异常**——罩住一次 `_load` 调用。
+  期间任何无关的文本读都会炸，且报错信息会误导（说成"收据被重新打开了"）。
+- `hope_training/whole_body_tracking/tests/test_canonical_frame_identity.py:606`
+  `Path.read_bytes` 计数器统计的是**全进程**的读，只是恰好罩住一次调用。
+- 三处 `builtins.__import__` 钩子
+  （`test_motion_backhand_loop_b_table_net_clearance.py:249`、
+  `test_action_ball_update_profiler.py:453`、`test_full_scene_probe_runtime.py:768`）
+  —— 都正确转发给 `original_import`，都只罩住一次调用。
+- `test_exact_resume_state.py:1804` 的 `os.kill`、
+  `test_launch_action_ball_a211_four_arm_diagnostic.py:3435` 的 `os.execve`
+  —— 全局但窗口极短，且这两个原语在窗口内没有别的调用者。
+- 已经限定好的（无需动）：`test_canonical_motion_markers.py:129`、
+  `test_run_ready_to_strike_join_ladder_stage2.py:1770`、
+  `test_launch_action_ball_curriculum.py:1949`、
+  `test_launch_n1_measured_vendor_v2_diagnostic.py:939`、
+  `test_run_phase1_q50_persistent_supervisor.py:504/549`。
+
+**明确待办（本轮没做）**：上面"留着的"那一档目前是靠"窗口短"活着，不是靠机制。
+真要根治，得给测试层一个统一的"作用域内替换某模块的 I/O 名字"工具
+（`_ModuleScopedOs` 是第一个雏形），并把这几处迁过去。本轮只落了雏形，**没有推广**。
+
+#### 9.2.14.8 票面另外两条的裁定
+
+票面还点了 `test_launch_observes_exact_exec_and_duplicate_is_no_clobber` 和
+`test_plan_claim_is_a211_fresh_and_denies_retired_lineage`，说"单独跑在两棵树上都通过"。
+实测这两条**根本没有 monkeypatch 全局 I/O 原语**（前者压根没用 monkeypatch，走真 fork/exec），
+在上面 12 次配对跑里**每次都绿**。它们只是当初和那条 flake 同批被观察到，**没有病**。
+
+#### 这一节没做什么
+
+1. **没碰** `hope_rewards.py` / `commands.py` / `train.py` / 两个 211 launcher。
+2. **没修**那 10 条既有的几何源钉子红（§9.2.14.6），那是另一条待办。
+3. **没有**把 `_ModuleScopedOs` 推广到 §9.2.14.7 列的其余几处。
+
 ### 9.2 MuJoCo 顺序
 
 - **MuJoCo core 现在并行做**：pin mjlab/runtime，实现 MJCF/scene/plant、action/delay、deterministic
