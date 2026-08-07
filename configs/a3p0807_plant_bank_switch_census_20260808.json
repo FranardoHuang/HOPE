@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "kind": "a3p0807_plant_and_bank_switch_census_v1",
+  "what_this_is": "the pre-switch census for moving the ActionBall A211/C211 lineages onto the 0807 A3P-P1 plant and the 73-clip bank re-solved on it; it is a census and an adjudication, NOT a re-mint - no content-addressed artifact was produced by this round",
+  "diagnostic_unauthorized": true,
+  "authorization": {
+    "training_authorized": false,
+    "promotion_authorized": false,
+    "deployment_authorized": false,
+    "artifacts_minted_this_round": 0
+  },
+  "relation_to_the_parallel_round": {
+    "other_receipt": "docs/experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md section 9.2.17, landed as commit ac776a5c",
+    "agreement": "same three headline conclusions: the plant default already moved at 82ee3ae8, the bank did not, and this round must not mint",
+    "not_duplicated_here": "that round's most dangerous pin - launch_action_ball_a211_four_arm_diagnostic.py:124-132 hand-copies the file digests of three downstream artifacts, so re-minting them makes A211 LaunchRefused and C211 falls with it - is accepted in full and not restated",
+    "what_this_receipt_adds": [
+      "the waist question recomputed from scratch across four plant x bank combinations and all 73 clips, with the retired-side baseline reproduced to the digit first; 9.2.17.6 verified the landing points and reused the earlier single-clip number rather than re-running",
+      "a second pin that all three of that round's scans structurally cannot see, because it pins the robot and not the motion: A3_RUNTIME_USD_BUNDLE_SHA256",
+      "the correction that follows from it - the A1/C1 EXIT 0 recorded in 9.2.17.4 was booted against the retired 0409 USD, so the count of boots on the 0807 plant is still zero",
+      "the three-layer proof that BANK_IMPORT_RECEIPT.json has no producer anywhere"
+    ]
+  },
+  "environment": {
+    "host": "pod1",
+    "worktree": "/workspace/franco/plantswap_20260808",
+    "commit": "766ccf91476dcbe60cf9ee4c29ba8500b3a4d6da",
+    "interpreter": "/workspace/hope_isaac_venv/bin/python",
+    "python_version": "3.10.18",
+    "gpu_used": "none for the census and the hold audits (CUDA_VISIBLE_DEVICES empty); one refused launcher plan touched no GPU"
+  },
+
+  "landing_points": {
+    "plant": {
+      "status": "already the repo default since 82ee3ae8",
+      "isaac_asset_root_constant": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py:48 AGIBOT_A3_ASSET_ROOT",
+      "isaac_asset_dir": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3p_p1_0807_v1",
+      "isaac_asset_dir_git_ignored": true,
+      "isaac_urdf_sha256": "15c83f5f3beea71350583143aef4d622d5219df65a0bed9a660a0edb7d388d09",
+      "mujoco_mjcf": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3p_pingpong_0807/a3p_pingpong_0807.xml",
+      "mujoco_mjcf_sha256": "7bbda723f339bdf252a20622afa7a7d53a6fca97464252c66c6e1a45199bcae1",
+      "mujoco_mesh_dir_git_ignored": true,
+      "receipt": "configs/a3p_p1_0807_model_set_v1.json",
+      "retired_plant": {
+        "constant": "AGIBOT_A3_PREVIOUS_ASSET_ROOT",
+        "isaac_asset_dir": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3",
+        "mujoco_mjcf": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+        "mujoco_mjcf_sha256": "70c4fd6534f259d12990cef731cfdf8f8557f92fd0ca81cc4fc1c75a39336c0a"
+      }
+    },
+    "bank": {
+      "dir": "assets/motions/chingmu73_measured_a3p0807_20260808",
+      "clips": 73,
+      "sidecars_present": ["COMPLETION_MANIFEST.json", "SOURCE_CLIP_ORDER.json", "SOURCE_MANIFEST.json"],
+      "sidecar_absent": "BANK_IMPORT_RECEIPT.json",
+      "receipt": "configs/chingmu73_measured_a3p0807_bank_v1.json",
+      "retired_bank_dir": "assets/motions/chingmu73_measured_v4_20260803",
+      "lineage_clip": {
+        "file": "hope_Take_061_unit04_BH.npz",
+        "retired_sha256": "aab1953b9a857d0a7663a92d85fe4de5bd1d991d22249aa3d4d22ce7ef9fdd8e",
+        "new_sha256": "c7eb9af036b5f47b62f3e646d68e4fc8523c433a79d0fc037981407b4d7918a7"
+      }
+    },
+    "torque_speed_authority": {
+      "artifacts": [
+        "configs/a3_motor_tn/a3_joint_motor_mapping.csv",
+        "configs/a3_motor_tn/current_conservative_tn_envelope.csv",
+        "configs/a3_motor_tn/conservative_tn_envelope_summary.csv",
+        "configs/a3_motor_tn/current_training_independent_tn_limits.csv",
+        "configs/a3_motor_tn_envelope_v1.json",
+        "configs/a3_motor_tn_bank_audit_a3p0807_v1.json"
+      ],
+      "how_it_is_wired": "it is NOT wired into training",
+      "consumers_found": [
+        "hope_training/whole_body_tracking/scripts/audit_bank_motor_tn_envelope.py",
+        "hope_training/whole_body_tracking/scripts/analyze_motion_feasibility.py"
+      ],
+      "runtime_source_tree_consumers": 0,
+      "meaning": "the torque-speed package is an offline audit input only; switching plant or bank does not change any runtime behaviour through it, and nothing downstream of it needs re-minting"
+    }
+  },
+
+  "waist_hold_recheck_on_the_new_plant": {
+    "question": "does the 0807 plant plus the re-solved bank make teacher frame 0 statically holdable by a position command, i.e. does it retire the pending Franco decision on birth pose",
+    "answer": "no",
+    "tool": "hope_training/whole_body_tracking/scripts/audit_position_hold_authority.py (the repo's own tool, not a re-implementation)",
+    "runtime_contract": "configs/a3_vendor_runtime_authority_20260802_r9/bh_loop_c.shared_ready.training_contract.json",
+    "frames": "frame 0 of every clip",
+    "baseline_reproduction": {
+      "combo": "retired plant + retired bank",
+      "library_holdable": 1,
+      "library_not_holdable": 72,
+      "lineage_clip_worst_shortfall_nm": 27.45095728956565,
+      "matches_prior_verdict": "f246d501 recorded waist_pitch needing -49.15464109801158 N*m against an executable -21.704, i.e. a 27.451 N*m shortfall, and 72 of 73 frame 0 poses unholdable; both reproduce here to the digit, which is what certifies this run is on the live chain"
+    },
+    "four_combos": [
+      {"plant": "0409", "bank": "v4_20260803", "holdable": 1, "not_holdable": 72, "library_worst_shortfall_nm": 32.2325100968227, "lineage_clip_shortfall_nm": 27.45095728956565},
+      {"plant": "0807", "bank": "v4_20260803", "holdable": 1, "not_holdable": 72, "library_worst_shortfall_nm": 30.806134180751684, "lineage_clip_shortfall_nm": 28.175814280342024},
+      {"plant": "0409", "bank": "a3p0807_20260808", "holdable": 1, "not_holdable": 72, "library_worst_shortfall_nm": 32.243073145270614, "lineage_clip_shortfall_nm": 27.43687899090763},
+      {"plant": "0807", "bank": "a3p0807_20260808", "holdable": 1, "not_holdable": 72, "library_worst_shortfall_nm": 30.820616819268153, "lineage_clip_shortfall_nm": 28.1607989232577}
+    ],
+    "per_joint_counts_identical_across_all_four": {
+      "gain_short": {"waist_pitch_joint": 66, "waist_roll_joint": 18, "right_shoulder_pitch_joint": 4, "right_wrist_yaw_joint": 1},
+      "outside_envelope": {"right_wrist_yaw_joint": 41, "right_shoulder_pitch_joint": 17, "right_elbow_joint": 6, "waist_pitch_joint": 5, "right_shoulder_yaw_joint": 2}
+    },
+    "conclusion": "the plant swap and the bank re-solve are both neutral to this question. On the lineage clip the shortfall gets marginally WORSE, 27.451 -> 28.161 N*m. Nothing here unlocks the A family; birth-at-frame-0 remains a Franco decision on the four routes already tabled.",
+    "outputs": [
+      "/workspace/franco/plantswap_out/hold_old_plant_old_bank.json",
+      "/workspace/franco/plantswap_out/hold_new_plant_old_bank.json",
+      "/workspace/franco/plantswap_out/hold_old_plant_new_bank.json",
+      "/workspace/franco/plantswap_out/hold_new_plant_new_bank.json"
+    ]
+  },
+
+  "in_service_closure_census": {
+    "method": "walk every {path, sha256} pair transitively from the two in-service lineage roots that the live launch specs name, resolve each, and scan every string for the retiring bank directory, the retiring clip SHA and the retiring plant",
+    "roots": [
+      "configs/action_ball_n1_measured_20260807/a211_lineage_escapefix_20260807/a211_split_ready_lineage.v5.json",
+      "configs/action_ball_n1_measured_20260807/c211_lineage_escapefix_20260807/c211_direct_ball_split_ready_lineage.v4.json"
+    ],
+    "files_in_closure": 28,
+    "files_in_closure_inside_the_repo": 19,
+    "pointer_count": 62,
+    "broken_pointers": 0,
+    "files_carrying_the_retiring_motion_identity": 11,
+    "field_occurrences": 22,
+    "distinct_leaf_field_names": ["motion_path", "motion_sha256", "npz_sha256", "path", "sha256"],
+    "the_shapes_that_hide": [
+      "the prototype carries it a third time under /scopes/full/0/npz_sha256, a leaf name that neither of the other two shapes uses",
+      "the dynamic-ready artifact carries it five times under four different field paths, one of which only names the bank directory and never the SHA",
+      "two of the five tape target receipts are in the closure and three are not, so a scan of the tape directory alone over- or under-counts depending on which end you start from"
+    ],
+    "per_file": {
+      "configs/action_ball_n1_measured_20260807/a211_lineage_escapefix_20260807/a211_split_ready_lineage.v5.json": ["/motion/path", "/motion/sha256"],
+      "configs/action_ball_n1_measured_20260807/c211_lineage_escapefix_20260807/c211_direct_ball_split_ready_lineage.v4.json": ["/motion/path", "/motion/sha256"],
+      "configs/action_ball_n1_measured_20260807/c211_lineage_escapefix_20260807/c211_direct_ball_split_ready_bundle.v4.json": ["/motion/path", "/motion/sha256"],
+      "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.fixed_source.v3.bfd5bafba066.json": ["/actions/0/motion_path", "/actions/0/motion_sha256"],
+      "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.manifest.v3.12031a74be70.json": ["/actions/0/motion_path", "/actions/0/motion_sha256"],
+      "configs/action_ball_n1_measured_20260807/escapefix_core_seed0_20260807_r1/take_061_unit04_bh.full.prototype.v2.08d227b4c979.json": ["/provenance/motion/path", "/provenance/motion/sha256", "/scopes/full/0/npz_sha256"],
+      "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/current_lm.target.task_receipt.v5.cab1b2ad8db0.json": ["/motion_sha256"],
+      "configs/action_ball_n1_measured_20260807/escapefix_tape_seed0_20260807_r1/outcome_dense_only.target.task_receipt.v5.cab1b2ad8db0.json": ["/motion_sha256"],
+      "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json": ["/ready_source/measured_retarget_l0_evidence/motion_sha256", "/sources/measured_bank_receipt/path", "/sources/stable_motion/path", "/sources/stable_motion/sha256", "/teacher_reference/motion_sha256"],
+      "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.robust20n.nominal_hold.v1.json": ["/motion_sha256"],
+      "configs/action_ball_n1_measured_20260803/a211_frame0_exact_20260803/take_061_unit04_bh.frame0_exact.v1.json": ["/motion_sha256"]
+    },
+    "live_code_pin_outside_the_closure": {
+      "hope_training/whole_body_tracking/scripts/materialize_measured_action_ball_n1_bundle.py:70 ACTION_FACTS": "motion_path, motion_sha256, reference_t_hit_s, reference_t_cycle_s, reference_racket_site_speed_mps, strike_phase - the last four are motion-derived and would have to be recomputed, not just re-typed",
+      "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/stage1_natural_clip_contract.py": "three Stage-1 lanes pin retired-bank paths and SHAs; separate lane, not in the A/C closure, but it goes stale the same way",
+      "hope_training/whole_body_tracking/scripts/audit_measured_racket_mechanical_admission.py:104 _default_urdf()": "still defaults to the RETIRED URDF package agi/URDF/A3T2.5-URDF-std-pingpang; an audit run that does not pass --urdf silently judges the new bank against the old robot"
+    }
+  },
+
+  "the_pointer_chain_that_would_have_been_missed": {
+    "name": "the ActionBall launchers pin the pre-converted USD of the RETIRED plant, by SHA, in code",
+    "where": "hope_training/whole_body_tracking/scripts/launch_n1_reward_screen_diagnostic.py:118 A3_RUNTIME_USD_BUNDLE_SHA256, enforced at :1845 _validate_runtime_asset_paths and required at :1905 _validate_runtime_asset_environment; launch_action_ball_a211_four_arm_diagnostic.py and launch_action_ball_c211_diagnostic.py both execute this same base module",
+    "what_it_pins": {
+      ".asset_hash": "3816a1a4bbca423e575650b6d6065f5141a7c840b02dd30c72d4278a225ed499",
+      "config.yaml": "3e35ad4c3ef7c21a10ce413be3ce28777bb83afee4b63fc245b30bd59a9818c2",
+      "configuration/model_base.usd": "8e521141bfee4274b8a2369d382cdd8aac9bb1cfcae5bfa480666a1935a7fb42",
+      "configuration/model_physics.usd": "5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981",
+      "configuration/model_sensor.usd": "c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a",
+      "model.usd": "1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c"
+    },
+    "live_check": "all six files under /workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7 hash to exactly those values, so the pin is live and satisfied",
+    "which_robot_it_actually_is": "that bundle's config.yaml records asset_path = .../whole_body_tracking/assets/agibot_a3/urdf/model.urdf and 'Generated by UrdfConverter on 2026-07-17 at 19:19:04' - it is the RETIRED 0409 plant",
+    "why_it_wins": "robots/agibot_a3.py:182 returns UsdFileCfg(usd_path=$HOPE_AGIBOT_A3_USD_PATH) when the variable is set and never reaches the URDF branch, so the AGIBOT_A3_ASSET_ROOT constant that 82ee3ae8 moved to 0807 is dead code in this lane",
+    "and_it_is_mandatory": "removing the variable does not fall back to the URDF - the launcher refuses at plan time. Observed live in this round: 'PLAN_FAILED stage=materialize rc=2 / REFUSED: HOPE_AGIBOT_A3_USD_PATH must be a normalized absolute path'",
+    "live_argv_evidence": "the two four-cell runs in flight on this pod at the time of the census (/workspace/franco/remint_20260808 and /workspace/franco/bankswap_20260808, the latter at this same HEAD 766ccf91) both carry HOPE_AGIBOT_A3_USD_PATH=/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/model.usd in /proc/<pid>/environ",
+    "consequence": "no ActionBall A211/C211 cell has ever booted the 0807 plant, and none can until this pin is re-cut. Re-minting the lineage onto the new bank before that would produce artifacts describing a robot the launcher then refuses to load - i.e. it would have to be minted twice.",
+    "what_the_pin_does_not_check": "nothing in the gate compares the USD to AGIBOT_A3_URDF_PATH or to configs/a3p_p1_0807_model_set_v1.json. It is a byte-integrity pin on a cache, not an identity pin on a plant - fingerprint present, semantics unchecked."
+  },
+
+  "why_this_round_minted_nothing": {
+    "rule_followed": "mint once, and only through the repo's own materializers with no gate bypassed",
+    "blocker_1_missing_producer": {
+      "input": "assets/motions/<bank>/BANK_IMPORT_RECEIPT.json, kind chingmu73_measured_racket_schema_v4_repo_import",
+      "needed_by": ["materialize_measured_action_ball_n1_bundle.py:879", "materialize_a3_dynamic_ready_contract.py:66", "build_action_ball_manifest.py:530", "audit_measured_racket_mechanical_admission.py:431"],
+      "present_for": ["chingmu73_measured_v3_20260802", "chingmu73_measured_v4_20260803"],
+      "absent_for": "chingmu73_measured_a3p0807_20260808",
+      "three_layer_absence_check": {
+        "mechanism_code": "git grep over the tree finds only consumers and test fixtures; no script writes this file",
+        "experiment_history": "the v4 copy arrives as a committed blob in 303fc321 'action-ball: add measured fixed-target N1 core'; no commit shows a tool emitting it",
+        "live_pod": "grep for the kind string across every /workspace/franco checkout returns the same three consumers and one test, no writer"
+      },
+      "meaning": "the bank swap cannot be completed with existing tooling. Producing this receipt means writing a new materializer, which needs its own gate and mutation tests, and that is a change to propose rather than to slip in under a switch."
+    },
+    "blocker_2_live_evidence_artifacts": {
+      "artifacts": [
+        "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json",
+        "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/take061.robust20n.nominal_hold.v1.json"
+      ],
+      "why_they_are_in_the_way": "both pin the retiring clip SHA, and the core materializer cross-checks them against ACTION_FACTS, so neither can survive the swap. The dynamic-ready one also pins the missing BANK_IMPORT_RECEIPT. The nominal-hold one is a live Isaac probe receipt, so re-producing it needs a Kit boot - and that boot would run on the retired plant until blocker 3 is cleared.",
+      "rebuild_depth": "the swap therefore starts one level deeper than the 18-artifact re-mint of 2026-08-07: bank import receipt -> per-clip audit -> mechanical audit -> dynamic-ready -> Isaac nominal hold -> core -> tape -> A211 lineage -> C211 lineage + bundle"
+    },
+    "blocker_3_plant_pin": "see the_pointer_chain_that_would_have_been_missed - minting before the USD pin is re-cut guarantees a second mint",
+    "not_a_blocker": {
+      "mechanical_admission_of_the_new_clip": "audit_measured_racket_mechanical_admission.py on assets/motions/chingmu73_measured_a3p0807_20260808/hope_Take_061_unit04_BH.npz with --urdf pointing at the 0807 model.urdf returns overall_verdict UNKNOWN, exit 1, reasons exactly the three class-1 vendor-data-gap reasons and no hard position or velocity violation - the same standing the v4 clip had, so --allow-mechanical-unknown-diagnostic still applies and this is not what stops the swap"
+    }
+  },
+
+  "question_identity": {
+    "changed_by_this_round": false,
+    "will_change_when_the_swap_lands": true,
+    "why": "the lineage clip's bytes change (aab1953b -> c7eb9af0), and the clip is an input to the prepared core, the contact alignment and the base question. ACTION_FACTS additionally carries four motion-derived numbers - reference_t_hit_s 0.96, reference_t_cycle_s 1.12, reference_racket_site_speed_mps 1.8901338577270508, strike_phase 0.8571 - which are re-measured from the new bytes rather than copied.",
+    "what_that_costs": "base_question_sha256 is currently 81eed5139b98... across the last two tape build reports. After the swap it is a different question, so readings taken before and after are not comparable arm-to-arm; any cross-round claim has to be re-baselined, not carried over.",
+    "not_yet_measurable": "the exact new base_question_sha256 cannot be quoted until the core and tape are actually built, and nothing was built here"
+  },
+
+  "regression": {
+    "interpreter": "/workspace/hope_isaac_venv/bin/python (3.10.18)",
+    "invocation": "pytest -q -p no:cacheprovider -p no:randomly -rs -n 16",
+    "modules": [
+      "tests/test_materialize_measured_action_ball_n1_bundle.py",
+      "tests/test_materialize_action_ball_a211_lineage.py",
+      "tests/test_launch_action_ball_a211_four_arm_diagnostic.py",
+      "tests/test_launch_action_ball_c211_diagnostic.py",
+      "tests/test_audit_measured_racket_mechanical_admission.py",
+      "tests/test_agibot_a3_vendor_training_authority.py",
+      "tests/test_launch_n1_reward_screen_diagnostic.py"
+    ],
+    "result": "419 passed, 0 skipped, 69.16s",
+    "meaning": "this round changed no code, so the number is a baseline at 766ccf91 for the next round to diff against, not evidence that anything was fixed"
+  },
+
+  "next_round_order": [
+    "1. re-cut the plant: convert the 0807 URDF to USD once, re-cut A3_RUNTIME_USD_BUNDLE_SHA256 and its test fixture together, and add the identity check the pin is missing (compare the bundle against configs/a3p_p1_0807_model_set_v1.json, not just against six hashes). Mutation test both directions: the 0409 bundle must be refused, the 0807 bundle must be admitted.",
+    "2. boot-verify A0 and C0 recipe on the re-cut plant with the CURRENT bank, so the plant change is isolated from the bank change",
+    "3. propose and land a BANK_IMPORT_RECEIPT producer, or get a ruling that the 0808 bank may carry a hand-built one",
+    "4. re-produce dynamic-ready and the Isaac nominal hold on the new plant and new clip",
+    "5. only then mint core -> tape -> A211 -> C211, once, in a new dated directory, leaving 20260807 as archive",
+    "6. record the new base_question_sha256 and mark the cross-round comparability break explicitly"
+  ]
+}
