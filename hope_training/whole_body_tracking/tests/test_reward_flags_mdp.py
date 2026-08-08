@@ -322,6 +322,13 @@ def test_stage1_object_free_safety_union_or_and_fail_loud_contract():
         hope_rewards_mod.stage1_object_free_safety_terminated(malformed, names)
 
 
+#: The table guard owns this number; read it rather than keeping a copy that
+#: silently disagrees the next time the plant changes.
+_TABLE_GUARD_COMPONENTS = _load(
+    f"{_PKG}.terminations", "terminations.py"
+)._A3_COLLISION_PROXY_COMPONENT_COUNT
+
+
 def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     command = hope_commands_mod.RacketTargetCommand.__new__(
         hope_commands_mod.RacketTargetCommand
@@ -331,8 +338,12 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     command._recover_from_clip = torch.tensor([-1, -1, -1, 0, -1])
     command.strike_window = torch.tensor([False, True, False, False, False])
     command.pre_strike = torch.tensor([True, True, False, True, True])
-    component_ids = tuple(f"component:{index}" for index in range(43))
-    owner_names = tuple(f"owner_{index}" for index in range(43))
+    component_ids = tuple(
+        f"component:{index}" for index in range(_TABLE_GUARD_COMPONENTS)
+    )
+    owner_names = tuple(
+        f"owner_{index}" for index in range(_TABLE_GUARD_COMPONENTS)
+    )
     obstacle_roles = ("top", "keepout", "net", "post_left", "post_right")
     # Production creates and books the dense ledger on the inference-mode physics path, then
     # consumes it from the normal-mode PPO logger.  Preserve that cross-mode lifecycle here.
@@ -347,9 +358,11 @@ def test_table_guard_first_hit_ledger_conserves_cells_categories_and_phases():
     assert torch.is_inference(counts)
     assert counts.dtype == torch.long
     assert counts.device.type == "cpu"
-    assert tuple(counts.shape) == (4, 3, 45, 5)
+    # Item rows: one per proxy component, plus the independent blade row and
+    # the non-finite row.
+    assert tuple(counts.shape) == (4, 3, _TABLE_GUARD_COMPONENTS + 2, 5)
 
-    component_broad = torch.zeros(5, 43, 5, dtype=torch.bool)
+    component_broad = torch.zeros(5, _TABLE_GUARD_COMPONENTS, 5, dtype=torch.bool)
     component_exact = torch.zeros_like(component_broad)
     blade_broad = torch.zeros(5, 5, dtype=torch.bool)
     blade_exact = torch.zeros_like(blade_broad)
@@ -434,8 +447,12 @@ def test_table_guard_oracle_first_hit_export_is_sidecar_with_honest_gaps():
     command._recover_from_clip = torch.tensor([-1])
     command.strike_window = torch.tensor([True])
     command.pre_strike = torch.tensor([True])
-    component_ids = tuple(f"component:{index}" for index in range(43))
-    owner_names = tuple(f"owner_{index}" for index in range(43))
+    component_ids = tuple(
+        f"component:{index}" for index in range(_TABLE_GUARD_COMPONENTS)
+    )
+    owner_names = tuple(
+        f"owner_{index}" for index in range(_TABLE_GUARD_COMPONENTS)
+    )
     obstacle_roles = ("top", "keepout", "net", "post_left", "post_right")
     command.cfg = types.SimpleNamespace(racket_body_name="racket")
     command.robot = types.SimpleNamespace(
@@ -456,7 +473,7 @@ def test_table_guard_oracle_first_hit_export_is_sidecar_with_honest_gaps():
         command.set_table_guard_oracle_first_hit_context(
             episode=3, control_step=5
         )
-    component_broad = torch.zeros(1, 43, 5, dtype=torch.bool)
+    component_broad = torch.zeros(1, _TABLE_GUARD_COMPONENTS, 5, dtype=torch.bool)
     component_exact = torch.zeros_like(component_broad)
     component_broad[0, 2, 1] = True
     component_exact[0, 2, 1] = True
