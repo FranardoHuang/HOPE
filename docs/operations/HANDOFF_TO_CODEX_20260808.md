@@ -421,7 +421,54 @@ Stage-1 clip lane 按摘要挑 `strike_phase`、`_audit_cell` 的测试覆盖等
 
 ---
 
-## 9. 一句话
+## 9. 接手那个正在跑的 `long4096`（交接时活着）
+
+**这是交接时唯一还没有答案的东西，也是三天里第一次真正的长跑。请接手它。**
+
+| | |
+| --- | --- |
+| 进程 | pod1 PID **`2522439`**，GPU1（`5555 MiB`） |
+| run_name | `c1_long1000_s24r1-DIAGNOSTIC_UNAUTHORIZED` |
+| worktree | `/workspace/franco/c1run_20260808` |
+| 预算 | `num_envs=4096`、`max_iterations=1000`、`save_interval=100`（会落 10 份 checkpoint） |
+| 解释器 | `/workspace/hope_isaac_venv/bin/python` |
+| 磁盘 | 交接时 `12G` 可用（62% 已用）—— **10 份 checkpoint 会吃掉不少，盯着** |
+
+**从现役 argv 逐项核实过的配置**（这份是真值，不要去读收据里的 `isaac_four_grid_manifest.cells[*]`，
+那是共享合同表会给出相反答案）：
+
+- **噪声开**：`task.domain_rand.policy_observation_corruption=true` ✓（Franco 要求的）
+- **本轮重定价后的 reward**：`qdes_projection_penalty_weight=-1.0`、`qdes_limit_barrier_weight=-10.0`、
+  `joint_limit_weight=-10.0`、`death_penalty_weight=-10.0`
+- **C 族身份**：`target_source=direct_ball`、`target_recipe=outcome_dense_only`、
+  `target_validity_mask=[false,false,false]`
+- **策略**：`init_noise_std=1.0`、`noise_std_type=scalar`、`actor/critic=[512,256,128]`
+- **PPO**：`learning_rate=0.0001`、`schedule=fixed`（**注意是 fixed 不是 adaptive**）、
+  `entropy_coef=0.01`、`clip_param=0.2`、`num_learning_epochs=5`、`num_mini_batches=4`
+- **动作库**：`chingmu73_measured_v4_20260803`（**旧库**）—— 即"**新机器人 + 旧动作库**"，
+  拍点 site 已移 `0.5014 / 0.5028 mm`，**这批读数不能直接和换库后的比**
+- **DR 其余全关**：`stable_ready_plant=true`、`startup_physics_material=false`、
+  `startup_joint_default_pos=false`、`push.enable=false`、`control_step_action_delay=0/0`
+
+**读数**：pod 上 `readings_s23.py`（最新那份；另有 `readings_s20.py` / `readings3_20260808.py`）。
+
+**要盯的五条信号（§6 有 build_1 的参照值）**：`mean_episode_length` 有没有先降后升、
+`|负|/正` 有没有往 `1.0` 以下走、**`action_rate_l2` 有没有在衰减**（最关键）、
+接触计数有没有从零起来、有没有 NaN / 发散。
+
+**一个具体的未决问题，这条长跑能回答它**：C 的 `4096×5` 那轮接触计数全零。
+击球 tick 在**第 91 步**而 `4096×5` 只有 120 步，所以"步数不够"字面上不成立；
+老师够不到球也已被排除（接触点是构造的，距离恒等于 `0.0`）。
+**剩下的解释是"没有 episode 活到第 91 步"** —— 需要读 C 收据里的 `termination_census`
+（`base_fell_tilt` / `base_too_low` / `robot_hit_table`，都是只计数不阻断的）来坐实。
+**这条长跑跑到几百迭代之后，如果 `mean_episode_length` 起来了、接触计数跟着从零起来，就自证了。**
+
+**运维**：GPU0 是 yikang 的 `phase114_v2_prep15`（PID `1249374`），**不许碰**；GPU2 归 mjlab。
+看门狗**用 iteration 计数推进判活，不要用日志字节数** —— 长跑正常就是很久没有阶段性输出。
+
+---
+
+## 10. 一句话
 
 **门要真的在拦对的东西，但门不是目的。** 目的是让 policy 有个能学的环境。
 三天的教训浓缩成一句：**核对了容易核对的那一层，就以为把难的也核对了** —— 而最难核对的那一层，
