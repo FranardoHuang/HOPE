@@ -4712,6 +4712,10 @@ def check_spawned(env, env_cfg):
         if tuple(getattr(env_cfg, "table_pair_contact_sensor_names", ()) or ()):
             _fail("full pose guard unexpectedly owns pair-filtered sensors")
         action = env.unwrapped.action_manager.get_term("joint_pos")
+        from whole_body_tracking.tasks.tracking.mdp.terminations import (
+            _A3_COLLISION_PROXY_COMPONENT_COUNT as A3_TABLE_GUARD_COMPONENT_COUNT,
+        )
+
         params = action._resolved_table_contact_params()
         prepared = getattr(
             action, "_table_contact_prepared_pose_guard", None
@@ -4732,12 +4736,13 @@ def check_spawned(env, env_cfg):
                 str(runtime_receipt.get("bundle_tree_sha256", ""))
             )
             is None
-            or int(prepared._component_indices.shape[0]) != 43
+            or int(prepared._component_indices.shape[0])
+            != A3_TABLE_GUARD_COMPONENT_COUNT
             or int(prepared._aabb_lo.shape[0]) != 5
         ):
             _fail(
                 "spawned ActionBall pose guard is not fully prepared against "
-                "the live USD/articulation/43-component/5-obstacle contract"
+                "the live USD/articulation/62-component/5-obstacle contract"
             )
         pose_guard_row = {
             "component_roles": list(TABLE_COMPONENT_ROLES),
@@ -4857,17 +4862,23 @@ def contact_smoke(env, env_cfg):
             "contact smoke runtime differs from the exact zero-sensor "
             "five-component × 32-body pose-OBB contract"
         )
+    from whole_body_tracking.tasks.tracking.mdp.terminations import (
+        _A3_COLLISION_PROXY_COMPONENT_COUNT as A3_TABLE_GUARD_COMPONENT_COUNT,
+    )
+
     params = action._resolved_table_contact_params()
     prepared = getattr(action, "_table_contact_prepared_pose_guard", None)
     if (
         params.get("full_table_assembly") is not True
         or prepared is None
-        or int(prepared._component_indices.shape[0]) != 43
+        or int(prepared._component_indices.shape[0])
+            != A3_TABLE_GUARD_COMPONENT_COUNT
         or int(prepared._aabb_lo.shape[0]) != 5
     ):
         _fail(
-            "contact smoke pose guard was not prepared against 43 collision "
-            "components and five table boxes"
+            "contact smoke pose guard was not prepared against "
+            f"{A3_TABLE_GUARD_COMPONENT_COUNT} collision components and five "
+            "table boxes"
         )
     print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_runtime_done", flush=True)
 
@@ -6861,6 +6872,13 @@ def main():
                 )
                 contact_physics_steps = contact_smoke(env, env_cfg)
                 contact = _results["contact_smoke"]
+                # Isaac is already up at this point, so the guard module is
+                # safe to import; read its pin instead of copying the number.
+                from whole_body_tracking.tasks.tracking.mdp.terminations import (
+                    _A3_COLLISION_PROXY_COMPONENT_COUNT
+                    as A3_TABLE_GUARD_COMPONENT_COUNT,
+                )
+
                 probes = contact["probes"]
                 cfg_result = _results["cfg"]
                 spawned = _results["spawned"]
@@ -6894,7 +6912,7 @@ def main():
                         and spawned.get(
                             "full_table_pose_obb_guard", {}
                         ).get("collision_component_count")
-                        == 43
+                        == A3_TABLE_GUARD_COMPONENT_COUNT
                         and spawned.get(
                             "full_table_pose_obb_guard", {}
                         ).get("obstacle_count")

@@ -23898,11 +23898,17 @@ class RacketTargetCommand(CommandTerm):
         non-zero cells into ordinary exact-behavior counters.
         """
 
+        # Read the count from the guard that owns the pin instead of keeping a
+        # second copy of it here; deferred so module import order is untouched.
+        from whole_body_tracking.tasks.tracking.mdp.terminations import (
+            _A3_COLLISION_PROXY_COMPONENT_COUNT as A3_TABLE_GUARD_COMPONENT_COUNT,
+        )
+
         component_ids = tuple(component_ids)
         component_owner_names = tuple(component_owner_names)
         obstacle_roles = tuple(obstacle_roles)
         if (
-            len(component_ids) != 43
+            len(component_ids) != A3_TABLE_GUARD_COMPONENT_COUNT
             or len(component_owner_names) != len(component_ids)
             or len(set(component_ids)) != len(component_ids)
             or any(not isinstance(value, str) or not value for value in component_ids)
@@ -23914,7 +23920,9 @@ class RacketTargetCommand(CommandTerm):
             != ("top", "keepout", "net", "post_left", "post_right")
         ):
             raise RuntimeError(
-                "table-guard attribution requires 43 pinned components and five ordered obstacles"
+                "table-guard attribution requires "
+                f"{A3_TABLE_GUARD_COMPONENT_COUNT} pinned components and five "
+                "ordered obstacles"
             )
         schema = (component_ids, component_owner_names, obstacle_roles)
         existing = getattr(self, "_table_guard_attribution_schema", None)
@@ -23925,7 +23933,7 @@ class RacketTargetCommand(CommandTerm):
                 )
             return
         self._table_guard_attribution_schema = schema
-        # Item rows: 0..42 proxy components, 43 independent blade, 44 non-finite.
+        # Item rows: 0..N-1 proxy components, N independent blade, N+1 non-finite.
         self._table_guard_attribution_counts = torch.zeros(
             (
                 len(_TABLE_GUARD_ATTRIBUTION_PHASES),
