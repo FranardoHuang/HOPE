@@ -48,6 +48,8 @@ import subprocess
 import sys
 from typing import Any, Iterable, Mapping, Sequence
 
+import yaml
+
 
 SCHEMA_VERSION = 1
 SPEC_KIND = "n1_reward_screen_diagnostic_spec_v1"
@@ -115,20 +117,64 @@ SOLVER_IMPLEMENTATION_SOURCES = (
 # generated USD closure.  Pin the reviewed Pod runtime copy by every file that
 # the root USD references; a model.usd-only check is not a complete asset
 # identity.  Tests may replace these constants with fixture bytes.
+#
+# 2026-08-08: re-cut onto the 0807 A3P-P1 plant.  The values below until today
+# pinned a bundle the UrdfConverter produced on 2026-07-17 from
+# ``assets/agibot_a3`` -- the RETIRED 0409 robot.  All six hashes still matched
+# their files, so the pin never fired, and because ``robots/agibot_a3.py`` takes
+# the ``UsdFileCfg`` branch the moment ``HOPE_AGIBOT_A3_USD_PATH`` is set, every
+# ActionBall cell kept booting the old robot no matter which plant the repo
+# said was current.  Plain words: these six hashes only ever proved the cache
+# had not been edited.  They could not prove it was a cache OF THIS ROBOT --
+# any robot's USD hashes just as well.  ``_validate_a3_plant_identity`` below
+# adds the missing half; do not re-cut one without the other.
 A3_RUNTIME_USD_BUNDLE_SHA256: Mapping[str, str] = {
-    ".asset_hash": "3816a1a4bbca423e575650b6d6065f5141a7c840b02dd30c72d4278a225ed499",
-    "config.yaml": "3e35ad4c3ef7c21a10ce413be3ce28777bb83afee4b63fc245b30bd59a9818c2",
+    ".asset_hash": "a78a2f8fb207cbf479cc1b308cf9d3c58e1a55eb7da9dbc2caf34be697e9c993",
+    "config.yaml": "f349c3f4d80a915f5ca3ce53d49785dfd7e6eeca2645dcd7b402d4d8a2288eb9",
     "configuration/model_base.usd": (
-        "8e521141bfee4274b8a2369d382cdd8aac9bb1cfcae5bfa480666a1935a7fb42"
+        "108a4b45b96a8db8396d3a8feb995481c5db87efcde80066e6347ed494e658fc"
     ),
     "configuration/model_physics.usd": (
-        "5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981"
+        "390cf66cc052ea697e88e9ef0131bf7e2eee96e70c35c0861e1ce33d363747f5"
     ),
     "configuration/model_sensor.usd": (
-        "c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a"
+        "4e16201f146db3240b8a0082ae14e3aca41255a75812c5331bf8f4e39701355c"
     ),
-    "model.usd": "1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c",
+    "model.usd": "13e5ecfe02238fbf1d20c13ed7177e18ed93d84bca8e0a592b6605f7fb85f351",
 }
+
+##
+# Plant identity for the pinned USD cache.
+#
+# Three facts have to agree, and no two of them are copies of each other:
+#
+#   1. the live robot module in the launched checkout says which asset package
+#      Isaac will actually spawn (read out of the source, not restated here);
+#   2. the checkout's own plant receipt names that same package and declares a
+#      URDF digest, and the URDF on disk is re-hashed against that declaration;
+#   3. IsaacLab's ``.asset_hash``, recomputed from the bundle's ``config.yaml``
+#      plus those exact URDF bytes, equals the digest stored inside the bundle.
+#
+# (3) is the one that makes this an identity pin rather than a name match: it
+# is a derivation proof.  It can only hold if this USD cache was produced by
+# that converter configuration from that URDF's bytes, so a cache built from a
+# different robot fails it even if every other string is doctored to agree.
+##
+A3_PLANT_RECEIPT_RELATIVE = "configs/a3p_p1_0807_model_set_v1.json"
+A3_PLANT_RECEIPT_MANIFEST_TYPE = "a3p_p1_0807_dual_engine_model_set_v1"
+A3_PLANT_ASSET_ROOT_NAME = "agibot_a3p_p1_0807_v1"
+A3_PLANT_SOURCE_URDF_SHA256 = (
+    "15c83f5f3beea71350583143aef4d622d5219df65a0bed9a660a0edb7d388d09"
+)
+# ``robots/agibot_a3.py`` line: AGIBOT_A3_ASSET_ROOT = f"{ASSET_DIR}/<name>".
+A3_PLANT_ASSET_ROOT_RE = re.compile(
+    r'^AGIBOT_A3_ASSET_ROOT\s*=\s*f"\{ASSET_DIR\}/(?P<name>[A-Za-z0-9._-]+)"[ \t]*$',
+    re.MULTILINE,
+)
+# isaaclab/sim/converters/asset_converter_base.py::_config_to_hash drops these
+# three path keys before hashing the configuration.
+A3_ASSET_HASH_EXCLUDED_CONFIG_KEYS = ("asset_path", "usd_dir", "usd_file_name")
+A3_PLANT_IDENTITY_KIND = "a3_plant_identity_v1"
 PRIVATE_OPENGL_DIRECTORY = (
     "/workspace/franco/runtime_assets/libopengl_noble_1_7_0/"
     "usr/lib/x86_64-linux-gnu"
@@ -1837,8 +1883,209 @@ def _validate_private_loader_library(
     }
 
 
+def _plant_identity_checkout(checkout: Path | None) -> Path:
+    """The tree whose plant the pinned USD cache has to belong to.
+
+    Callers that know which checkout the spec selected pass it.  The fallback is
+    the checkout that owns this running module, which every launcher reusing
+    this file is started from.
+    """
+
+    if checkout is not None:
+        return checkout
+    return Path(__file__).resolve().parents[3]
+
+
+def _recompute_isaaclab_asset_hash(
+    config: Mapping[str, Any], urdf_path: Path
+) -> str:
+    """Redo IsaacLab's ``.asset_hash`` offline, without importing Isaac.
+
+    Byte-compatible on purpose with
+    ``isaaclab/sim/converters/asset_converter_base.py::_config_to_hash``: MD5
+    over ``json.dumps`` of the converter configuration with the three path keys
+    removed, then over the source asset file in 64 KiB chunks.  Reproducing it
+    here is what lets plan time say "this cache came out of that URDF" without
+    booting Kit.
+    """
+
+    payload = dict(config)
+    for key in A3_ASSET_HASH_EXCLUDED_CONFIG_KEYS:
+        payload.pop(key, None)
+    digest = hashlib.md5()
+    digest.update(json.dumps(payload).encode())
+    try:
+        with open(urdf_path, "rb") as handle:
+            while True:
+                chunk = handle.read(65536)
+                if not chunk:
+                    break
+                digest.update(chunk)
+    except OSError as exc:
+        raise LaunchRefused(f"A3 plant URDF cannot be read: {exc}") from exc
+    return digest.hexdigest()
+
+
+def _validate_a3_plant_identity(
+    bundle_root: Path, checkout: Path | None = None
+) -> dict[str, Any]:
+    """Prove the pinned USD cache is a cache of the plant this checkout runs.
+
+    The six-file SHA pin answers "are these the reviewed bytes".  It cannot
+    answer "are these the reviewed ROBOT", and between the 0807 plant landing
+    and 2026-08-08 that gap was live: the pinned bundle was the retired 0409
+    robot while the repo had already moved on, and nothing refused it.
+
+    Every refusal below is a different way for the plant and its cache to have
+    drifted apart, and the returned receipt states which fields were compared
+    and what they held, so a reader does not have to re-derive it.
+    """
+
+    root = _plant_identity_checkout(checkout)
+
+    # 1. Which asset package does the live spawner actually name?  Read it out
+    #    of the source that Isaac imports rather than restating it here, so a
+    #    plant pointer that moves without a re-cut is refused instead of eyed.
+    robot_source = root / LEGACY_ROBOT_SOURCE
+    try:
+        robot_text = robot_source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise LaunchRefused(
+            f"A3 robot source {LEGACY_ROBOT_SOURCE} cannot be read: {exc}"
+        ) from exc
+    named_roots = A3_PLANT_ASSET_ROOT_RE.findall(robot_text)
+    if len(named_roots) != 1:
+        raise LaunchRefused(
+            "A3 robot source must declare exactly one AGIBOT_A3_ASSET_ROOT, "
+            f"found {len(named_roots)}"
+        )
+    live_asset_root = named_roots[0]
+    if live_asset_root != A3_PLANT_ASSET_ROOT_NAME:
+        raise LaunchRefused(
+            "A3 plant pointer moved without re-cutting the USD pin: "
+            f"{LEGACY_ROBOT_SOURCE} spawns {live_asset_root} but the pinned "
+            f"USD bundle was converted from {A3_PLANT_ASSET_ROOT_NAME}"
+        )
+
+    # 2. The checkout's own plant receipt, and the URDF it declares.
+    receipt_path = root / A3_PLANT_RECEIPT_RELATIVE
+    _stable_regular_file(receipt_path, name="A3 plant receipt")
+    try:
+        receipt = _strict_json_bytes(
+            receipt_path.read_bytes(), name="A3 plant receipt"
+        )
+    except OSError as exc:
+        raise LaunchRefused(f"A3 plant receipt cannot be read: {exc}") from exc
+    if receipt.get("manifest_type") != A3_PLANT_RECEIPT_MANIFEST_TYPE:
+        raise LaunchRefused(
+            "A3 plant receipt is not the reviewed dual-engine model set: "
+            f"manifest_type={receipt.get('manifest_type')!r}"
+        )
+    isaac = receipt.get("isaac")
+    if type(isaac) is not dict:
+        raise LaunchRefused("A3 plant receipt carries no isaac section")
+    declared_asset = _relative_path(
+        isaac.get("asset_path"), name="A3 plant receipt isaac.asset_path"
+    )
+    declared_urdf = _relative_path(
+        isaac.get("urdf_path"), name="A3 plant receipt isaac.urdf_path"
+    )
+    declared_sha = _sha256(
+        isaac.get("urdf_sha256"), name="A3 plant receipt isaac.urdf_sha256"
+    )
+    declared_asset_name = declared_asset.rsplit("/", 1)[-1]
+    if declared_asset_name != A3_PLANT_ASSET_ROOT_NAME:
+        raise LaunchRefused(
+            "A3 plant receipt names a different asset package than the live "
+            f"spawner: receipt={declared_asset_name}, "
+            f"spawner={A3_PLANT_ASSET_ROOT_NAME}"
+        )
+    if declared_sha != A3_PLANT_SOURCE_URDF_SHA256:
+        raise LaunchRefused(
+            "A3 plant moved without re-converting the USD cache: receipt URDF "
+            f"sha256={declared_sha} but the pinned bundle was cut against "
+            f"{A3_PLANT_SOURCE_URDF_SHA256}"
+        )
+
+    # 3. The URDF on disk, re-hashed rather than taken on the receipt's word.
+    source_relative = f"{declared_asset}/{declared_urdf}"
+    urdf_path = root / source_relative
+    _stable_regular_file(urdf_path, name="A3 plant URDF")
+    observed_urdf_sha = sha256_file(urdf_path)
+    if observed_urdf_sha != declared_sha:
+        raise LaunchRefused(
+            f"A3 plant URDF {source_relative} differs from its own receipt: "
+            f"receipt={declared_sha}, worktree={observed_urdf_sha}"
+        )
+
+    # 4. What the converter itself recorded about the file it read.
+    config_path = bundle_root / "config.yaml"
+    try:
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise LaunchRefused(
+            f"A3 runtime USD config.yaml cannot be read: {exc}"
+        ) from exc
+    if type(config) is not dict:
+        raise LaunchRefused("A3 runtime USD config.yaml is not a mapping")
+    recorded_asset_path = config.get("asset_path")
+    if type(recorded_asset_path) is not str or not recorded_asset_path:
+        raise LaunchRefused("A3 runtime USD config.yaml declares no asset_path")
+    if not recorded_asset_path.endswith(f"/{source_relative}"):
+        raise LaunchRefused(
+            "A3 runtime USD bundle was converted from a different robot: "
+            f"config.yaml asset_path={recorded_asset_path} is not "
+            f"{source_relative}"
+        )
+
+    # 5. The derivation proof.  Everything above compares names; this compares
+    #    bytes to bytes through IsaacLab's own hash, so a cache of a different
+    #    robot fails here even with every string doctored to agree.
+    asset_hash_path = bundle_root / ".asset_hash"
+    try:
+        stored_asset_hash = asset_hash_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise LaunchRefused(
+            f"A3 runtime USD .asset_hash cannot be read: {exc}"
+        ) from exc
+    recomputed_asset_hash = _recompute_isaaclab_asset_hash(config, urdf_path)
+    if recomputed_asset_hash != stored_asset_hash:
+        raise LaunchRefused(
+            "A3 runtime USD cache was not converted from this plant: IsaacLab "
+            f"asset hash over {source_relative} recomputes to "
+            f"{recomputed_asset_hash} but the bundle stores {stored_asset_hash}"
+        )
+
+    return {
+        "kind": A3_PLANT_IDENTITY_KIND,
+        "compared": [
+            "live_spawner_asset_root_vs_pin",
+            "plant_receipt_manifest_type",
+            "plant_receipt_asset_root_vs_live_spawner",
+            "plant_receipt_urdf_sha256_vs_pin",
+            "worktree_urdf_sha256_vs_plant_receipt",
+            "bundle_config_asset_path_vs_plant_receipt",
+            "bundle_isaaclab_asset_hash_vs_rederived_from_worktree_urdf",
+        ],
+        "checkout": str(root),
+        "robot_source": LEGACY_ROBOT_SOURCE,
+        "live_spawner_asset_root": live_asset_root,
+        "plant_receipt": A3_PLANT_RECEIPT_RELATIVE,
+        "plant_receipt_manifest_type": A3_PLANT_RECEIPT_MANIFEST_TYPE,
+        "source_urdf_relative": source_relative,
+        "source_urdf_sha256": observed_urdf_sha,
+        "bundle_config_asset_path": recorded_asset_path,
+        "isaaclab_asset_hash": stored_asset_hash,
+        "isaaclab_asset_hash_rederived": recomputed_asset_hash,
+    }
+
+
 def _validate_runtime_asset_paths(
-    usd_path: Path, opengl_directory: Path, glu_directory: Path
+    usd_path: Path,
+    opengl_directory: Path,
+    glu_directory: Path,
+    *,
+    checkout: Path | None = None,
 ) -> dict[str, Any]:
     """Recheck the runtime tree; concurrent local maintenance is prohibited."""
 
@@ -1867,6 +2114,7 @@ def _validate_runtime_asset_paths(
             "sha256": actual_sha,
             "size_bytes": int(info.st_size),
         }
+    plant_identity = _validate_a3_plant_identity(bundle_root, checkout)
     opengl = _validate_private_loader_library(
         opengl_directory,
         expected_directory=PRIVATE_OPENGL_DIRECTORY,
@@ -1896,13 +2144,16 @@ def _validate_runtime_asset_paths(
             "path": str(usd_path),
             "bundle_root": str(bundle_root),
             "files": files,
+            "plant_identity": plant_identity,
         },
         "private_opengl": opengl,
         "private_glu": glu,
     }
 
 
-def _validate_runtime_asset_environment() -> dict[str, Any]:
+def _validate_runtime_asset_environment(
+    *, checkout: Path | None = None
+) -> dict[str, Any]:
     """Resolve the reviewed external assets from the plan-time environment."""
 
     if os.environ.get("HOPE_URDF_IMPORTER_NO_UI") != "1":
@@ -1932,10 +2183,13 @@ def _validate_runtime_asset_environment() -> dict[str, Any]:
             name="private GLU LD_LIBRARY_PATH entry",
             must_exist=True,
         ),
+        checkout=checkout,
     )
 
 
-def _validate_runtime_asset_claim(value: Any) -> dict[str, Any]:
+def _validate_runtime_asset_claim(
+    value: Any, *, checkout: Path | None = None
+) -> dict[str, Any]:
     """Re-hash the exact paths sealed into a launch claim."""
 
     if type(value) is not dict:
@@ -1980,20 +2234,23 @@ def _validate_runtime_asset_claim(value: Any) -> dict[str, Any]:
             name="claimed private GLU root",
             must_exist=True,
         ),
+        checkout=checkout,
     )
     if observed != value:
         raise LaunchRefused("runtime asset pins drifted after plan")
     return observed
 
 
-def _runtime_asset_exec_environment(value: Any) -> dict[str, str]:
+def _runtime_asset_exec_environment(
+    value: Any, *, checkout: Path | None = None
+) -> dict[str, str]:
     """Recheck paths just before exec and return the claim-owned environment.
 
     The Pod runtime tree must remain quiescent throughout the launch window;
     concurrent local writers or runtime-asset maintenance are prohibited.
     """
 
-    runtime_assets = _validate_runtime_asset_claim(value)
+    runtime_assets = _validate_runtime_asset_claim(value, checkout=checkout)
     return {
         "HOPE_URDF_IMPORTER_NO_UI": runtime_assets["urdf_importer_no_ui"],
         "HOPE_AGIBOT_A3_USD_PATH": runtime_assets["a3_preconverted_usd"]["path"],
@@ -2038,7 +2295,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
     commit = spec["source"]["commit_sha"]
     source = _verify_clean_source(checkout, commit)
     runtime_sources = _validate_runtime_sources(checkout, commit)
-    runtime_assets = _validate_runtime_asset_environment()
+    runtime_assets = _validate_runtime_asset_environment(checkout=checkout)
     bundle = _validate_bundle(
         checkout,
         commit,
@@ -2261,7 +2518,9 @@ def _internal_exec(claim_path: Path, expected_sha: str, lock_fd: int) -> int:
     runtime = _validate_runtime_sources(checkout, spec["source"]["commit_sha"])
     if runtime != payload["runtime_sources"]:
         raise LaunchRefused("runtime source identity drifted after namespace claim")
-    runtime_assets = _validate_runtime_asset_claim(payload.get("runtime_assets"))
+    runtime_assets = _validate_runtime_asset_claim(
+        payload.get("runtime_assets"), checkout=checkout
+    )
     bundle = _validate_bundle(
         checkout,
         spec["source"]["commit_sha"],
@@ -2346,7 +2605,7 @@ def launch(plan: dict[str, Any], *, confirm_claim: str) -> dict[str, Any]:
     # Repeat clean-source validation immediately before taking mutable state.
     _verify_clean_source(checkout, spec["source"]["commit_sha"])
     _validate_runtime_asset_claim(
-        plan["canonical_payload"].get("runtime_assets")
+        plan["canonical_payload"].get("runtime_assets"), checkout=checkout
     )
     lock_fd = _open_gpu_lock(Path(spec["gpu"]["lock_path"]))
     namespace: Path | None = None

@@ -2600,8 +2600,10 @@ def test_host_plan_binds_vendor_profile_and_single_gpu_layout(
     )
     monkeypatch.setattr(
         L._B,
+        # ``**_kw`` because the base ``build_plan`` binds the plant-identity
+        # check to the selected checkout via ``checkout=``.
         "_validate_runtime_asset_environment",
-        lambda: {"fixture": True},
+        lambda **_kw: {"fixture": True},
     )
     monkeypatch.setattr(
         L._B,

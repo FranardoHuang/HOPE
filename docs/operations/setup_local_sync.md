@@ -379,6 +379,23 @@ converter in every process. If the variable is unset or empty, the existing robo
 importer remains the fallback. This cache is an ignored runtime optimization, not a Git asset; this
 simple restore path does not require a hash or receipt.
 
+#### 但 ActionBall 那条通路不是可选的，而且从 2026-08-08 起会验身份
+
+人话：A211 / C211 / N1 reward-screen 这几个发射器**必须**设 `HOPE_AGIBOT_A3_USD_PATH`
+（不设直接拒收，不会退回 URDF），并且现在会检查这份缓存**到底是哪个机器人的缓存**，
+而不只是"字节没被改过"。
+
+- 现役缓存：`/workspace/franco/runtime_assets/a3p0807_preconverted_usd_13e5ecfe/model.usd`
+  （2026-08-07 从 0807 A3P-P1 URDF 转出）。上一份 `a3_preconverted_usd_1b3fecd7` 是
+  **退役的 0409 机器人**，现在会被拒。
+- 发射用的 checkout 里**必须有** 0807 URDF
+  （`.../assets/agibot_a3p_p1_0807_v1/urdf/model.urdf`，59 KB，不需要 mesh）：
+  门要拿它现场重算 IsaacLab 的 `.asset_hash`，以此证明这份 USD 确实是这副 URDF 转出来的。
+  拿不出 plant 就不能声称在跑这个 plant。
+- 换 plant 的唯一合法路径是**重转 + 重切**：改
+  `launch_n1_reward_screen_diagnostic.py` 里的 `A3_RUNTIME_USD_BUNDLE_SHA256`
+  与 `A3_PLANT_*` 常量，两者必须同批。只改一半会被拒。
+
 ### Signed-face epoch-1 v6 and superseded v6r1 private evidence
 
 The epoch-1 source commit and production v6 control were created after the tracked `882fea4` source

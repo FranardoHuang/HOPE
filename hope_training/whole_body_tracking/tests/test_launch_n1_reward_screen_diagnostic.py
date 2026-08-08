@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 
 
 SCRIPT = (
@@ -44,6 +45,84 @@ def _write(path: Path, value) -> dict[str, str]:
     }
 
 
+def _converter_config(urdf_path: Path) -> dict:
+    """A UrdfConverterCfg dump shaped like the one IsaacLab leaves in a bundle."""
+
+    return {
+        "asset_path": str(urdf_path),
+        "usd_dir": None,
+        "usd_file_name": None,
+        "force_usd_conversion": False,
+        "make_instanceable": True,
+        "fix_base": False,
+        "link_density": 0.0,
+        "merge_fixed_joints": True,
+        "collider_type": "convex_hull",
+        "self_collision": False,
+        "replace_cylinders_with_capsules": True,
+        "activate_contact_sensors": True,
+    }
+
+
+def _isaaclab_asset_hash(config: dict, urdf_bytes: bytes) -> str:
+    """The upstream ``.asset_hash`` recipe, spelled out once for the fixtures.
+
+    isaaclab/sim/converters/asset_converter_base.py::_config_to_hash — MD5 over
+    ``json.dumps`` of the converter config minus the three path keys, then over
+    the source asset bytes.
+    """
+
+    payload = dict(config)
+    for key in ("asset_path", "usd_dir", "usd_file_name"):
+        payload.pop(key, None)
+    digest = hashlib.md5()
+    digest.update(json.dumps(payload).encode())
+    digest.update(urdf_bytes)
+    return digest.hexdigest()
+
+
+def _write_usd_bundle(
+    bundle_root: Path, *, urdf_path: Path, urdf_bytes: bytes, config: dict | None = None
+) -> dict[str, str]:
+    """Write a plausible pre-converted USD bundle and return its six SHAs.
+
+    Only ``config.yaml`` and ``.asset_hash`` carry meaning; the USD payloads are
+    opaque bytes, exactly as the gate treats them.
+    """
+
+    config = _converter_config(urdf_path) if config is None else config
+    contents = {
+        "config.yaml": yaml.safe_dump(config, sort_keys=False).encode("utf-8"),
+        ".asset_hash": _isaaclab_asset_hash(config, urdf_bytes).encode("utf-8"),
+        "model.usd": b"fixture root usd\n",
+        "configuration/model_base.usd": b"fixture base usd\n",
+        "configuration/model_physics.usd": b"fixture physics usd\n",
+        "configuration/model_sensor.usd": b"fixture sensor usd\n",
+    }
+    hashes: dict[str, str] = {}
+    for relative, raw in contents.items():
+        path = bundle_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        hashes[relative] = hashlib.sha256(raw).hexdigest()
+    return hashes
+
+
+def _plant_asset_relative(asset_root_name: str) -> str:
+    return (
+        "hope_training/whole_body_tracking/source/whole_body_tracking/"
+        f"whole_body_tracking/assets/{asset_root_name}"
+    )
+
+
+def _robot_source_text(asset_root_name: str) -> str:
+    return (
+        "# exact legacy robot fixture\n"
+        f'AGIBOT_A3_ASSET_ROOT = f"{{ASSET_DIR}}/{asset_root_name}"\n'
+        'AGIBOT_A3_URDF_PATH = f"{AGIBOT_A3_ASSET_ROOT}/urdf/model.urdf"\n'
+    )
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -70,7 +149,9 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     launcher_path.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
     train_path.write_text("# train\n", encoding="utf-8")
     task_path.write_text("name: test\n", encoding="utf-8")
-    robot_path.write_text("# exact legacy robot fixture\n", encoding="utf-8")
+    robot_path.write_text(
+        _robot_source_text(L.A3_PLANT_ASSET_ROOT_NAME), encoding="utf-8"
+    )
     monkeypatch.setattr(
         L,
         "LEGACY_ROBOT_SOURCE_SHA256",
@@ -80,15 +161,35 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     launcher_path.chmod(0o755)
     kit_path.chmod(0o755)
 
+    # The plant closure the runtime USD cache has to belong to: the URDF the
+    # live spawner names, and the checkout's receipt for it.
+    plant_asset_relative = _plant_asset_relative(L.A3_PLANT_ASSET_ROOT_NAME)
+    plant_urdf_relative = "urdf/model.urdf"
+    plant_urdf = repo / plant_asset_relative / plant_urdf_relative
+    plant_urdf.parent.mkdir(parents=True, exist_ok=True)
+    plant_urdf_bytes = b"<robot name='fixture_a3p_p1_0807'/>\n"
+    plant_urdf.write_bytes(plant_urdf_bytes)
+    plant_urdf_sha = hashlib.sha256(plant_urdf_bytes).hexdigest()
+    monkeypatch.setattr(L, "A3_PLANT_SOURCE_URDF_SHA256", plant_urdf_sha)
+    plant_receipt_path = repo / L.A3_PLANT_RECEIPT_RELATIVE
+    plant_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    plant_receipt = {
+        "schema_version": 1,
+        "manifest_type": L.A3_PLANT_RECEIPT_MANIFEST_TYPE,
+        "isaac": {
+            "asset_path": plant_asset_relative,
+            "urdf_path": plant_urdf_relative,
+            "urdf_sha256": plant_urdf_sha,
+        },
+    }
+    plant_receipt_path.write_bytes(_canonical(plant_receipt))
+
     runtime_root = tmp_path / "runtime_assets"
     usd_root = runtime_root / "a3_preconverted_usd"
-    usd_hashes = {}
-    for relative in L.A3_RUNTIME_USD_BUNDLE_SHA256:
-        path = usd_root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        raw = f"fixture A3 USD closure: {relative}\n".encode("utf-8")
-        path.write_bytes(raw)
-        usd_hashes[relative] = hashlib.sha256(raw).hexdigest()
+    usd_hashes = _write_usd_bundle(
+        usd_root, urdf_path=plant_urdf, urdf_bytes=plant_urdf_bytes
+    )
+    assert set(usd_hashes) == set(L.A3_RUNTIME_USD_BUNDLE_SHA256)
     opengl_root = runtime_root / "private_opengl"
     opengl_root.mkdir(parents=True)
     opengl_library = opengl_root / L.PRIVATE_OPENGL_LIBRARY
@@ -487,6 +588,16 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "glu_root": glu_root,
         "glu_library": glu_library,
         "make_spec": make_spec,
+        "runtime_root": runtime_root,
+        "usd_root": usd_root,
+        "robot_path": robot_path,
+        "plant_urdf": plant_urdf,
+        "plant_urdf_bytes": plant_urdf_bytes,
+        "plant_urdf_sha256": plant_urdf_sha,
+        "plant_asset_relative": plant_asset_relative,
+        "plant_urdf_relative": plant_urdf_relative,
+        "plant_receipt_path": plant_receipt_path,
+        "plant_receipt": plant_receipt,
     }
 
 
@@ -709,13 +820,241 @@ def test_plan_binds_complete_external_a3_runtime_asset_closure(exact_repo):
         L.build_plan(path)
 
 
+def test_plan_receipt_states_which_plant_the_usd_cache_belongs_to(exact_repo):
+    """The admitted case, and the receipt has to say what it compared."""
+
+    _spec, path = exact_repo["make_spec"]()
+    payload = L.build_plan(path)["canonical_payload"]
+    identity = payload["runtime_assets"]["a3_preconverted_usd"]["plant_identity"]
+
+    assert identity["kind"] == L.A3_PLANT_IDENTITY_KIND
+    assert identity["compared"] == [
+        "live_spawner_asset_root_vs_pin",
+        "plant_receipt_manifest_type",
+        "plant_receipt_asset_root_vs_live_spawner",
+        "plant_receipt_urdf_sha256_vs_pin",
+        "worktree_urdf_sha256_vs_plant_receipt",
+        "bundle_config_asset_path_vs_plant_receipt",
+        "bundle_isaaclab_asset_hash_vs_rederived_from_worktree_urdf",
+    ]
+    assert identity["checkout"] == str(exact_repo["repo"])
+    assert identity["robot_source"] == L.LEGACY_ROBOT_SOURCE
+    assert identity["live_spawner_asset_root"] == L.A3_PLANT_ASSET_ROOT_NAME
+    assert identity["plant_receipt"] == L.A3_PLANT_RECEIPT_RELATIVE
+    assert identity["source_urdf_relative"] == (
+        f"{exact_repo['plant_asset_relative']}/{exact_repo['plant_urdf_relative']}"
+    )
+    assert identity["source_urdf_sha256"] == exact_repo["plant_urdf_sha256"]
+    assert identity["bundle_config_asset_path"] == str(exact_repo["plant_urdf"])
+    assert (
+        identity["isaaclab_asset_hash"]
+        == identity["isaaclab_asset_hash_rederived"]
+    )
+    assert (
+        identity["isaaclab_asset_hash"]
+        == (exact_repo["usd_root"] / ".asset_hash").read_text().strip()
+    )
+
+
+def test_usd_cache_of_the_retired_plant_is_refused_even_when_restamped(
+    exact_repo, monkeypatch
+):
+    """The exact way this gate was fooled: convert the OLD robot, re-stamp all six.
+
+    Two flavours, because only the second one shows the byte pin is not doing
+    the work.  In (a) the bundle honestly records the retired asset package.  In
+    (b) the recorded path is doctored to name the current package, so every
+    string in the bundle agrees with the checkout — and it is still refused,
+    because the cache's own IsaacLab digest cannot be re-derived from this
+    plant's URDF.
+    """
+
+    # The retired plant lives outside the launched checkout, exactly as the real
+    # one did: the bundle was cut in a checkout that is long gone, and the gate
+    # never opens the path config.yaml records.
+    retired_urdf_bytes = b"<robot name='fixture_retired_0409'/>\n"
+    retired_urdf = (
+        exact_repo["runtime_root"]
+        / "retired_checkout"
+        / _plant_asset_relative("agibot_a3")
+        / exact_repo["plant_urdf_relative"]
+    )
+    retired_urdf.parent.mkdir(parents=True, exist_ok=True)
+    retired_urdf.write_bytes(retired_urdf_bytes)
+
+    # (a) honest bundle for the retired robot, six hashes freshly stamped.
+    honest_root = exact_repo["runtime_root"] / "retired_usd_honest"
+    honest_hashes = _write_usd_bundle(
+        honest_root, urdf_path=retired_urdf, urdf_bytes=retired_urdf_bytes
+    )
+    monkeypatch.setattr(L, "A3_RUNTIME_USD_BUNDLE_SHA256", honest_hashes)
+    monkeypatch.setenv(
+        "HOPE_AGIBOT_A3_USD_PATH", str(honest_root / "model.usd")
+    )
+    _spec, path = exact_repo["make_spec"]()
+    with pytest.raises(
+        L.LaunchRefused, match="converted from a different robot"
+    ):
+        L.build_plan(path)
+
+    # (b) same retired cache, but config.yaml now claims the current plant.
+    doctored_config = _converter_config(exact_repo["plant_urdf"])
+    doctored_root = exact_repo["runtime_root"] / "retired_usd_doctored"
+    doctored_hashes = _write_usd_bundle(
+        doctored_root,
+        urdf_path=exact_repo["plant_urdf"],
+        urdf_bytes=retired_urdf_bytes,
+        config=doctored_config,
+    )
+    monkeypatch.setattr(L, "A3_RUNTIME_USD_BUNDLE_SHA256", doctored_hashes)
+    monkeypatch.setenv(
+        "HOPE_AGIBOT_A3_USD_PATH", str(doctored_root / "model.usd")
+    )
+    _spec, path = exact_repo["make_spec"]()
+    with pytest.raises(
+        L.LaunchRefused, match="was not converted from this plant"
+    ):
+        L.build_plan(path)
+
+
+def test_usd_cache_byte_tamper_is_still_refused_beside_the_identity_check(
+    exact_repo,
+):
+    """The old strength has to survive the new one: bytes still get re-hashed."""
+
+    _spec, path = exact_repo["make_spec"]()
+    L.build_plan(path)
+
+    base = exact_repo["usd_root"] / "configuration/model_base.usd"
+    base.write_bytes(base.read_bytes() + b"tamper")
+    with pytest.raises(
+        L.LaunchRefused, match="model_base.usd SHA differs"
+    ):
+        L.build_plan(path)
+
+
+def test_plant_pointer_moved_without_recutting_the_cache_is_refused(
+    exact_repo, monkeypatch
+):
+    """Move the plant in the live spawner only; the cache is now stale."""
+
+    _spec, path = exact_repo["make_spec"]()
+    L.build_plan(path)
+
+    exact_repo["robot_path"].write_text(
+        _robot_source_text("agibot_a3p_p1_0901_v9"), encoding="utf-8"
+    )
+    # Let the unrelated historical-robot byte pin follow the edit, so this test
+    # reaches the plant check instead of stopping one gate earlier.
+    monkeypatch.setattr(
+        L,
+        "LEGACY_ROBOT_SOURCE_SHA256",
+        hashlib.sha256(exact_repo["robot_path"].read_bytes()).hexdigest(),
+    )
+    _git(exact_repo["repo"], "add", L.LEGACY_ROBOT_SOURCE)
+    _git(exact_repo["repo"], "commit", "-qm", "move the plant pointer")
+    spec, path = exact_repo["make_spec"]()
+    spec["source"]["commit_sha"] = _git(exact_repo["repo"], "rev-parse", "HEAD")
+    path.write_bytes(_canonical(spec))
+
+    with pytest.raises(
+        L.LaunchRefused, match="plant pointer moved without re-cutting"
+    ):
+        L.build_plan(path)
+
+
+def test_plant_urdf_that_drifts_from_its_own_receipt_is_refused(exact_repo):
+    """The receipt is not taken on its word; the URDF on disk is re-hashed."""
+
+    _spec, path = exact_repo["make_spec"]()
+    L.build_plan(path)
+
+    exact_repo["plant_urdf"].write_bytes(b"<robot name='silently_edited'/>\n")
+    _git(exact_repo["repo"], "add", ".")
+    _git(exact_repo["repo"], "commit", "-qm", "edit the plant URDF in place")
+    spec, path = exact_repo["make_spec"]()
+    spec["source"]["commit_sha"] = _git(exact_repo["repo"], "rev-parse", "HEAD")
+    path.write_bytes(_canonical(spec))
+
+    with pytest.raises(
+        L.LaunchRefused, match="differs from its own receipt"
+    ):
+        L.build_plan(path)
+
+
+def test_plant_receipt_that_is_not_the_reviewed_model_set_is_refused(exact_repo):
+    _spec, path = exact_repo["make_spec"]()
+    L.build_plan(path)
+
+    receipt = copy.deepcopy(exact_repo["plant_receipt"])
+    receipt["manifest_type"] = "some_other_model_set_v9"
+    exact_repo["plant_receipt_path"].write_bytes(_canonical(receipt))
+    _git(exact_repo["repo"], "add", ".")
+    _git(exact_repo["repo"], "commit", "-qm", "swap the plant receipt kind")
+    spec, path = exact_repo["make_spec"]()
+    spec["source"]["commit_sha"] = _git(exact_repo["repo"], "rev-parse", "HEAD")
+    path.write_bytes(_canonical(spec))
+
+    with pytest.raises(
+        L.LaunchRefused, match="not the reviewed dual-engine model set"
+    ):
+        L.build_plan(path)
+
+
+def test_plant_receipt_urdf_digest_must_match_the_pin_the_cache_was_cut_against(
+    exact_repo,
+):
+    """A new plant with a new URDF cannot ride the old cache's pin."""
+
+    _spec, path = exact_repo["make_spec"]()
+    L.build_plan(path)
+
+    successor_bytes = b"<robot name='fixture_a3p_p1_next'/>\n"
+    exact_repo["plant_urdf"].write_bytes(successor_bytes)
+    receipt = copy.deepcopy(exact_repo["plant_receipt"])
+    receipt["isaac"]["urdf_sha256"] = hashlib.sha256(successor_bytes).hexdigest()
+    exact_repo["plant_receipt_path"].write_bytes(_canonical(receipt))
+    _git(exact_repo["repo"], "add", ".")
+    _git(exact_repo["repo"], "commit", "-qm", "land a successor plant")
+    spec, path = exact_repo["make_spec"]()
+    spec["source"]["commit_sha"] = _git(exact_repo["repo"], "rev-parse", "HEAD")
+    path.write_bytes(_canonical(spec))
+
+    with pytest.raises(
+        L.LaunchRefused, match="moved without re-converting the USD cache"
+    ):
+        L.build_plan(path)
+
+
+def test_isaaclab_asset_hash_recipe_matches_the_upstream_three_dropped_keys():
+    """The derivation proof only works if it mirrors IsaacLab exactly."""
+
+    assert L.A3_ASSET_HASH_EXCLUDED_CONFIG_KEYS == (
+        "asset_path",
+        "usd_dir",
+        "usd_file_name",
+    )
+    urdf_bytes = b"<robot name='x'/>\n"
+    config = _converter_config(Path("/somewhere/urdf/model.urdf"))
+    expected = _isaaclab_asset_hash(config, urdf_bytes)
+    # The two path keys that are dropped must not move the digest, and the
+    # payload bytes must.
+    moved = dict(config)
+    moved["asset_path"] = "/elsewhere/urdf/model.urdf"
+    assert _isaaclab_asset_hash(moved, urdf_bytes) == expected
+    assert _isaaclab_asset_hash(config, urdf_bytes + b" ") != expected
+    coarser = dict(config)
+    coarser["merge_fixed_joints"] = not config["merge_fixed_joints"]
+    assert _isaaclab_asset_hash(coarser, urdf_bytes) != expected
+
+
 def test_runtime_asset_open_gl_tamper_and_soname_drift_fail_closed(exact_repo):
     _spec, path = exact_repo["make_spec"]()
     runtime = L.build_plan(path)["canonical_payload"]["runtime_assets"]
 
     exact_repo["opengl_library"].write_bytes(b"tampered OpenGL\n")
     with pytest.raises(L.LaunchRefused, match="OpenGL library SHA differs"):
-        L._validate_runtime_asset_claim(runtime)
+        L._validate_runtime_asset_claim(runtime, checkout=exact_repo["repo"])
 
     exact_repo["opengl_library"].write_bytes(b"fixture private OpenGL\n")
     soname = exact_repo["opengl_root"] / L.PRIVATE_OPENGL_SONAME
@@ -723,7 +1062,7 @@ def test_runtime_asset_open_gl_tamper_and_soname_drift_fail_closed(exact_repo):
     (exact_repo["opengl_root"] / "wrong-library.so").write_bytes(b"wrong\n")
     soname.symlink_to("wrong-library.so")
     with pytest.raises(L.LaunchRefused, match="OpenGL soname"):
-        L._validate_runtime_asset_claim(runtime)
+        L._validate_runtime_asset_claim(runtime, checkout=exact_repo["repo"])
 
 
 @pytest.mark.parametrize("mode", ("missing", "reversed", "tail"))
@@ -759,19 +1098,23 @@ def test_runtime_asset_old_v1_or_missing_opengl_claim_is_refused(exact_repo):
     old.pop("loader_library_path")
 
     with pytest.raises(L.LaunchRefused, match="malformed|schema-v2"):
-        L._validate_runtime_asset_claim(old)
+        L._validate_runtime_asset_claim(old, checkout=exact_repo["repo"])
 
     missing_integrity = copy.deepcopy(runtime)
     missing_integrity.pop("integrity_model")
     with pytest.raises(L.LaunchRefused, match="malformed"):
-        L._validate_runtime_asset_claim(missing_integrity)
+        L._validate_runtime_asset_claim(
+            missing_integrity, checkout=exact_repo["repo"]
+        )
 
 
 def test_runtime_asset_exec_environment_is_exactly_claim_owned(exact_repo):
     _spec, path = exact_repo["make_spec"]()
     runtime = L.build_plan(path)["canonical_payload"]["runtime_assets"]
 
-    assert L._runtime_asset_exec_environment(runtime) == {
+    assert L._runtime_asset_exec_environment(
+        runtime, checkout=exact_repo["repo"]
+    ) == {
         "HOPE_URDF_IMPORTER_NO_UI": "1",
         "HOPE_AGIBOT_A3_USD_PATH": runtime["a3_preconverted_usd"]["path"],
         "LD_LIBRARY_PATH": runtime["loader_library_path"],
