@@ -1385,7 +1385,7 @@ def _termination_blocker_receipt_cached() -> dict[str, Any]:
                 "callables_semantic_ast_sha256"
             ],
             "predicate": (
-                "43 pinned component OBBs plus live racket OBB conservatively "
+                "62 pinned component OBBs plus live racket OBB conservatively "
                 "broadened to world AABBs against five inflated table AABBs"
             ),
             "sample_timing": "after_each_physics_substep",

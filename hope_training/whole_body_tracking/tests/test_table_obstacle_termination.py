@@ -735,31 +735,43 @@ def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
     assert configured.count("right_wrist_yaw_Link") == 1
 
 
-def test_collision_proxy_artifact_binds_43_components_32_bodies_and_pinned_usd(
+def test_collision_proxy_artifact_binds_62_components_32_bodies_and_pinned_usd(
     term_mod,
 ):
     artifact = REPO / COLLISION_PROXY_PATH
     payload = artifact.read_bytes()
     assert hashlib.sha256(payload).hexdigest() == COLLISION_PROXY_SHA256
     document = json.loads(payload)
-    assert document["component_count"] == 43
+    assert document["component_count"] == 62
     assert tuple(document["body_order"]) == tuple(BODIES)
     assert {
         component["owner_body_name"]
         for component in document["components"]
     } == set(BODIES)
+    assert document["source_urdf"]["path"] == (
+        "agi/URDF/A3P-P1-32dof-0807-OP3-pingpang/urdf/model.urdf"
+    )
     assert document["source_urdf"]["sha256"] == (
-        "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
+        "15c83f5f3beea71350583143aef4d622d5219df65a0bed9a660a0edb7d388d09"
     )
     assert document["runtime_usd_bundle"]["bundle_tree_sha256"] == (
-        "716487dfdf02a5973f78263f0ae8a09e4680c04159e57dbe20796b7825dbeb4d"
+        "365ba37edd5e5e1d4fac22f2cbb3ec871ead7bb49aeadb50161ef523a9ae6747"
+    )
+    # The 0807 plant's 20 OmniPicker3 gripper links are the whole reason this
+    # count moved from 43; the artifact declares them and the guard requires it.
+    assert document["left_gripper_source_links"] == list(
+        term_mod._A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS
+    )
+    assert len(document["left_gripper_source_links"]) == 20
+    assert document["plant_identity"]["isaaclab_asset_hash"] == (
+        "676efde5febed3c0fde0f2ad59650cdf"
     )
     owners, centers, axes = term_mod._load_table_collision_proxy_artifact(
         str(artifact),
         COLLISION_PROXY_SHA256,
         tuple(BODIES),
     )
-    assert len(owners) == len(centers) == len(axes) == 43
+    assert len(owners) == len(centers) == len(axes) == 62
     assert set(owners) == set(range(32))
     assert sum(
         document["body_order"][owner] == "right_wrist_yaw_Link"
@@ -839,6 +851,13 @@ def test_live_runtime_usd_validator_binds_exact_tree_once(
     )
     monkeypatch.setattr(
         term_mod, "_A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256", tree_sha256
+    )
+    # This test is about the six-file tree pin only.  The derivation proof gets
+    # its own test below; a synthetic bundle cannot satisfy it by construction.
+    monkeypatch.setattr(
+        term_mod,
+        "_verify_live_bundle_is_a_cache_of_this_plant",
+        lambda bundle_root: "stubbed",
     )
     term_mod._verify_loaded_runtime_usd_bundle.cache_clear()
     model_path = str((root / "model.usd").resolve())
@@ -1114,11 +1133,11 @@ LOGICAL_BODIES = (
 )
 WATCHED = [BODIES.index(name) for name in LOGICAL_BODIES[:3]]
 COLLISION_PROXY_PATH = (
-    "configs/a3_table_collision_proxy_20260731/"
+    "configs/a3_table_collision_proxy_a3p0807_20260808/"
     "a3_table_collision_components.v1.json"
 )
 COLLISION_PROXY_SHA256 = (
-    "23e2f5b30bbba909f1123dc41f6c010354122b9837b4ef133a1c285a2cd78ca8"
+    "896a5c96f5e16f266067841d72c1009e058eccf42850fff2f1c22ee46bda8b96"
 )
 EXACT_SENSOR_NAMES = [
     "table_top_robot_contact",
@@ -1236,7 +1255,7 @@ def _call(term_mod, env, **overrides):
         # real artifact, body-name, dtype and pose validation.
         term_mod._verify_loaded_runtime_usd_bundle = (
             lambda _path: (
-                "716487dfdf02a5973f78263f0ae8a09e4680c04159e57dbe20796b7825dbeb4d"
+                "365ba37edd5e5e1d4fac22f2cbb3ec871ead7bb49aeadb50161ef523a9ae6747"
             )
         )
     try:
@@ -1538,9 +1557,9 @@ def test_full_assembly_caches_component_geometry_and_blade_local_axes(term_mod):
     expected_axes = torch.diag(
         torch.tensor([0.082, 0.008, 0.082], dtype=torch.float32)
     )
-    assert component_indices.shape == (43,)
-    assert component_centers.shape == (43, 3)
-    assert component_local_axes.shape == (43, 3, 3)
+    assert component_indices.shape == (62,)
+    assert component_centers.shape == (62, 3)
+    assert component_local_axes.shape == (62, 3, 3)
     assert torch.equal(blade_local_axes, expected_axes)
 
     component_ptr = component_local_axes.data_ptr()

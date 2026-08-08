@@ -19,9 +19,10 @@ from mujoco_native import table_termination as term  # noqa: E402
 
 
 def _synthetic_components() -> term.CollisionComponents:
-    owners = np.zeros(43, dtype=np.int64)
-    centers = np.zeros((43, 3), dtype=np.float64)
-    axes = np.tile(np.eye(3, dtype=np.float64)[None, :, :] * 0.01, (43, 1, 1))
+    count = term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
+    owners = np.zeros(count, dtype=np.int64)
+    centers = np.zeros((count, 3), dtype=np.float64)
+    axes = np.tile(np.eye(3, dtype=np.float64)[None, :, :] * 0.01, (count, 1, 1))
     return term.CollisionComponents(
         owner_indices=owners,
         local_centers_m=centers,
@@ -107,7 +108,9 @@ def test_terminal_is_exact_sat_not_the_retired_world_aabb_broad_phase():
         "cij,ckj->cki", owner_rotation, components.local_half_axes_m
     )
     world_half = np.abs(rotated_axes).sum(axis=1) + term.COMPONENT_WORLD_AABB_GUARD_M
-    broad = np.ones((43, 5), dtype=bool)
+    broad = np.ones(
+        (term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT, 5), dtype=bool
+    )
     for axis in range(3):
         broad &= (
             ((centre + world_half)[:, axis, None] >= lo[None, :, axis])
@@ -170,7 +173,9 @@ def test_numpy_guard_verdict_equals_the_live_isaac_terminal_kernel():
             "cij,ckj->cki", owner_rotation, components.local_half_axes_m
         )
         half = np.abs(axes).sum(axis=1) + term.COMPONENT_WORLD_AABB_GUARD_M
-        broad = np.ones((43, 5), dtype=bool)
+        broad = np.ones(
+            (term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT, 5), dtype=bool
+        )
         for axis in range(3):
             broad &= (
                 ((centre + half)[:, axis, None] >= lo[None, :, axis])
@@ -203,7 +208,11 @@ def test_numpy_guard_verdict_equals_the_live_isaac_terminal_kernel():
         # near-top corner of the table slab.  Poses drawn uniformly over the
         # court all overlap something, which never separates the two rules.
         positions = np.full((32, 3), 50.0, dtype=np.float64)
-        owner = int(components.owner_indices[trial % 43])
+        owner = int(
+            components.owner_indices[
+                trial % term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
+            ]
+        )
         positions[owner] = rng.uniform((0.36, -0.30, 0.60), (0.62, 0.30, 0.92))
         quats = rng.normal(size=(32, 4))
         quats /= np.linalg.norm(quats, axis=-1, keepdims=True)
@@ -274,9 +283,18 @@ def test_exact_sources_artifact_and_table_geometry_are_reopened_and_pinned():
         "live_constant_parity_constants_compared": "7",
     }
     components = term.load_collision_components()
-    assert components.owner_indices.shape == (43,)
-    assert components.local_centers_m.shape == (43, 3)
-    assert components.local_half_axes_m.shape == (43, 3, 3)
+    assert components.owner_indices.shape == (
+        term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT,
+    )
+    assert components.local_centers_m.shape == (
+        term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT,
+        3,
+    )
+    assert components.local_half_axes_m.shape == (
+        term.EXPECTED_COLLISION_PROXY_COMPONENT_COUNT,
+        3,
+        3,
+    )
     assert components.artifact_sha256 == term.EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256
 
     scene_module = single_env._load_table_scene_module()

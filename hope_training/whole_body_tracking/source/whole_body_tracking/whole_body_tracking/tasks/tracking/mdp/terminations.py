@@ -23,42 +23,101 @@ from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
 from whole_body_tracking.tasks.tracking.mdp.rewards import _get_body_indexes
 
 
+# 2026-08-08: re-cut onto the 0807 A3P-P1 plant, and upgraded from byte
+# integrity to an identity proof.
+#
+# Until today these were the retired 0409 robot's digests -- the third copy of
+# them in the repository -- and they were the reason ``oracle32`` refused the
+# moment the launcher started spawning the 0807 plant.  That refusal was
+# correct.  But re-cutting six digests only ever restores the old, weak claim:
+# "this USD cache was not edited".  It cannot say "this cache is a cache of the
+# robot whose collision volumes this guard is testing", and any robot's USD
+# satisfies it equally well.
+#
+# ``_rederive_isaaclab_asset_hash`` below closes that gap the same way the
+# launcher does: IsaacLab's own ``.asset_hash`` is recomputed from the live
+# bundle's converter configuration plus the bytes of the tracked plant URDF the
+# collision proxy was materialized from, and must equal the digest the bundle
+# stores.  Names can be doctored; a cache converted from a different robot
+# cannot survive that.  Do not re-cut one half without the other.
+_A3_COLLISION_PROXY_SOURCE_URDF_RELATIVE = (
+    "agi/URDF/A3P-P1-32dof-0807-OP3-pingpang/urdf/model.urdf"
+)
 _A3_COLLISION_PROXY_SOURCE_URDF_SHA256 = (
-    "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae"
+    "15c83f5f3beea71350583143aef4d622d5219df65a0bed9a660a0edb7d388d09"
+)
+_A3_COLLISION_PROXY_ISAACLAB_ASSET_HASH = "676efde5febed3c0fde0f2ad59650cdf"
+# isaaclab/sim/converters/asset_converter_base.py::_config_to_hash drops these
+# three path keys before hashing the converter configuration.
+_A3_COLLISION_PROXY_ASSET_HASH_EXCLUDED_CONFIG_KEYS = (
+    "asset_path",
+    "usd_dir",
+    "usd_file_name",
+)
+_A3_COLLISION_PROXY_PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v1"
+_A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME = "agibot_a3p_p1_0807_v1"
+_A3_COLLISION_PROXY_COMPONENT_COUNT = 62
+# The 20 OmniPicker3 left-gripper collision links.  The 0409 plant carried one
+# coarse ``left_hand_link`` placeholder box here; the 0807 plant carries the
+# real gripper, and its volume enters this guard for the first time.  Naming
+# the links makes a later "cleanup" that drops them a refusal rather than a
+# quietly smaller component count.
+_A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS = (
+    "left_base_link",
+    "left_link1",
+    "left_link10",
+    "left_link11",
+    "left_link11-1",
+    "left_link13",
+    "left_link14",
+    "left_link14-1",
+    "left_link15",
+    "left_link17",
+    "left_link18",
+    "left_link2",
+    "left_link3",
+    "left_link4",
+    "left_link4-1",
+    "left_link6",
+    "left_link7",
+    "left_link7-1",
+    "left_link8",
+    "left_link9",
 )
 _A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256 = (
-    "716487dfdf02a5973f78263f0ae8a09e4680c04159e57dbe20796b7825dbeb4d"
+    "365ba37edd5e5e1d4fac22f2cbb3ec871ead7bb49aeadb50161ef523a9ae6747"
 )
+_A3_COLLISION_PROXY_RUNTIME_USD_TOTAL_FILE_BYTES = 60519988
 _A3_COLLISION_PROXY_RUNTIME_USD_FILES = (
     (
         ".asset_hash",
-        "3816a1a4bbca423e575650b6d6065f5141a7c840b02dd30c72d4278a225ed499",
+        "a78a2f8fb207cbf479cc1b308cf9d3c58e1a55eb7da9dbc2caf34be697e9c993",
         32,
     ),
     (
         "config.yaml",
-        "3e35ad4c3ef7c21a10ce413be3ce28777bb83afee4b63fc245b30bd59a9818c2",
-        1689,
+        "f349c3f4d80a915f5ca3ce53d49785dfd7e6eeca2645dcd7b402d4d8a2288eb9",
+        1685,
     ),
     (
         "configuration/model_base.usd",
-        "8e521141bfee4274b8a2369d382cdd8aac9bb1cfcae5bfa480666a1935a7fb42",
-        21882690,
+        "108a4b45b96a8db8396d3a8feb995481c5db87efcde80066e6347ed494e658fc",
+        60504873,
     ),
     (
         "configuration/model_physics.usd",
-        "5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981",
-        11164,
+        "390cf66cc052ea697e88e9ef0131bf7e2eee96e70c35c0861e1ce33d363747f5",
+        11078,
     ),
     (
         "configuration/model_sensor.usd",
-        "c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a",
-        682,
+        "4e16201f146db3240b8a0082ae14e3aca41255a75812c5331bf8f4e39701355c",
+        687,
     ),
     (
         "model.usd",
-        "1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c",
-        1636,
+        "13e5ecfe02238fbf1d20c13ed7177e18ed93d84bca8e0a592b6605f7fb85f351",
+        1633,
     ),
 )
 _TABLE_GUARD_OBSTACLE_ROLES = (
@@ -102,6 +161,113 @@ def action_ball_diagnostic_single_stroke_complete(
     return complete
 
 
+def _resolve_repo_relative_file(relative: str, *, name: str) -> Path:
+    """Resolve one tracked repo-relative file without picking a shadow copy."""
+
+    configured = Path(relative)
+    candidates = [
+        Path.cwd() / configured,
+        *(parent / configured for parent in Path(__file__).resolve().parents),
+    ]
+    matches: list[Path] = []
+    for candidate in candidates:
+        if candidate.is_file():
+            resolved = candidate.resolve()
+            if resolved not in matches:
+                matches.append(resolved)
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"robot_hit_table {name} must resolve to exactly one tracked file: "
+            f"{relative!r} -> {[str(path) for path in matches]}"
+        )
+    return matches[0]
+
+
+def _rederive_isaaclab_asset_hash(config: dict, urdf_path: Path) -> str:
+    """Redo IsaacLab's ``.asset_hash`` offline, without importing Kit.
+
+    Byte-compatible on purpose with
+    ``isaaclab/sim/converters/asset_converter_base.py::_config_to_hash``: MD5
+    over ``json.dumps`` of the converter configuration with the three path keys
+    removed, then over the source asset file in 64 KiB chunks.
+    """
+
+    payload = dict(config)
+    for key in _A3_COLLISION_PROXY_ASSET_HASH_EXCLUDED_CONFIG_KEYS:
+        payload.pop(key, None)
+    digest = hashlib.md5()
+    digest.update(json.dumps(payload).encode())
+    with open(urdf_path, "rb") as handle:
+        while True:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_live_bundle_is_a_cache_of_this_plant(bundle_root: Path) -> str:
+    """Prove the live USD bundle was converted from the proxied plant URDF.
+
+    The six-file digest pin above answers "are these the reviewed bytes".  This
+    answers the question that actually matters to a collision proxy: "are these
+    bytes a cache of the robot whose collision volumes I am about to test?".
+    The answer is a derivation, not a name match -- the converter configuration
+    the bundle stores, plus the tracked URDF the proxy was materialized from,
+    have to reproduce the digest the converter itself wrote.
+    """
+
+    import yaml
+
+    urdf_path = _resolve_repo_relative_file(
+        _A3_COLLISION_PROXY_SOURCE_URDF_RELATIVE, name="plant URDF"
+    )
+    observed_urdf_sha256 = hashlib.sha256(urdf_path.read_bytes()).hexdigest()
+    if observed_urdf_sha256 != _A3_COLLISION_PROXY_SOURCE_URDF_SHA256:
+        raise RuntimeError(
+            "robot_hit_table plant URDF differs from the collision proxy pin: "
+            f"{observed_urdf_sha256} != {_A3_COLLISION_PROXY_SOURCE_URDF_SHA256}"
+        )
+    try:
+        config = yaml.safe_load(
+            (bundle_root / "config.yaml").read_text(encoding="ascii")
+        )
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise RuntimeError(
+            "robot_hit_table live USD bundle config.yaml cannot be read"
+        ) from exc
+    if not isinstance(config, dict):
+        raise RuntimeError(
+            "robot_hit_table live USD bundle config.yaml is not a mapping"
+        )
+    recorded_asset_path = config.get("asset_path")
+    if (
+        not isinstance(recorded_asset_path, str)
+        or f"/{_A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME}/"
+        not in recorded_asset_path
+    ):
+        raise RuntimeError(
+            "robot_hit_table live USD bundle was converted from a different "
+            f"asset package: config.yaml asset_path={recorded_asset_path!r}"
+        )
+    stored = (bundle_root / ".asset_hash").read_text(encoding="ascii").strip()
+    rederived = _rederive_isaaclab_asset_hash(config, urdf_path)
+    if rederived != stored:
+        raise RuntimeError(
+            "robot_hit_table live USD bundle is not a cache of the proxied "
+            f"plant: IsaacLab asset hash over "
+            f"{_A3_COLLISION_PROXY_SOURCE_URDF_RELATIVE} recomputes to "
+            f"{rederived} but the bundle stores {stored}"
+        )
+    if stored != _A3_COLLISION_PROXY_ISAACLAB_ASSET_HASH:
+        raise RuntimeError(
+            "robot_hit_table live USD bundle .asset_hash differs from the "
+            f"reviewed pin: {stored} != "
+            f"{_A3_COLLISION_PROXY_ISAACLAB_ASSET_HASH}"
+        )
+    return stored
+
+
 @lru_cache(maxsize=8)
 def _verify_loaded_runtime_usd_bundle(
     model_usd_path: str,
@@ -114,6 +280,12 @@ def _verify_loaded_runtime_usd_bundle(
     describe one USD while the live articulation uses another.  This function
     is cached by the resolved absolute ``model.usd`` path and never runs in the
     physics-step hot path.
+
+    Two claims are made, and they are not the same claim.  Every byte of the
+    six-file tree matches its pin -- integrity.  And the tree re-derives to
+    IsaacLab's stored ``.asset_hash`` from the tracked plant URDF this proxy
+    measures -- identity.  Integrity alone was what let a retired robot's cache
+    pass for months.
     """
 
     if not isinstance(model_usd_path, str) or not model_usd_path:
@@ -189,6 +361,7 @@ def _verify_loaded_runtime_usd_bundle(
         raise RuntimeError(
             "robot_hit_table live USD bundle tree SHA differs from collision proxy"
         )
+    _verify_live_bundle_is_a_cache_of_this_plant(bundle_root)
     return tree_sha256
 
 
@@ -1002,19 +1175,57 @@ def _load_table_collision_proxy_artifact(
     ]
     if (
         not isinstance(source_urdf, dict)
+        or source_urdf.get("path")
+        != _A3_COLLISION_PROXY_SOURCE_URDF_RELATIVE
         or source_urdf.get("sha256")
         != _A3_COLLISION_PROXY_SOURCE_URDF_SHA256
         or not isinstance(runtime_usd, dict)
         or runtime_usd.get("bundle_tree_sha256")
         != _A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256
         or runtime_usd.get("file_count") != 6
-        or runtime_usd.get("total_file_bytes") != 21897893
+        or runtime_usd.get("total_file_bytes")
+        != _A3_COLLISION_PROXY_RUNTIME_USD_TOTAL_FILE_BYTES
         or runtime_usd.get("symlinks_forbidden") is not True
         or runtime_usd.get("files") != expected_runtime_files
     ):
         raise RuntimeError(
             "robot_hit_table collision proxy does not bind the reviewed vendor "
             "URDF and exact six-file Pod runtime USD bundle"
+        )
+    # The artifact must carry its own derivation proof, and that proof must name
+    # the same plant the live bundle re-derives to.  Without this the artifact
+    # would only be pinned to a USD tree by digest, which is exactly the claim
+    # that failed to notice a retired robot.
+    plant_identity = document.get("plant_identity")
+    if (
+        not isinstance(plant_identity, dict)
+        or plant_identity.get("kind")
+        != _A3_COLLISION_PROXY_PLANT_IDENTITY_KIND
+        or plant_identity.get("plant_asset_root_name")
+        != _A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME
+        or plant_identity.get("isaaclab_asset_hash")
+        != _A3_COLLISION_PROXY_ISAACLAB_ASSET_HASH
+        or plant_identity.get("isaaclab_asset_hash_excluded_config_keys")
+        != list(_A3_COLLISION_PROXY_ASSET_HASH_EXCLUDED_CONFIG_KEYS)
+    ):
+        raise RuntimeError(
+            "robot_hit_table collision proxy carries no derivation proof "
+            "tying it to the reviewed A3 plant"
+        )
+    converter_config = plant_identity.get("converter_config_yaml")
+    if (
+        not isinstance(converter_config, str)
+        or hashlib.sha256(converter_config.encode("ascii")).hexdigest()
+        != plant_identity.get("converter_config_sha256")
+        or plant_identity.get("converter_config_sha256")
+        != dict(
+            (path, sha256)
+            for path, sha256, _size in _A3_COLLISION_PROXY_RUNTIME_USD_FILES
+        )["config.yaml"]
+    ):
+        raise RuntimeError(
+            "robot_hit_table collision proxy converter configuration is not "
+            "the pinned bundle's config.yaml"
         )
     content_sha256 = document.get("content_sha256")
     if not _is_lower_sha256(content_sha256):
@@ -1036,7 +1247,7 @@ def _load_table_collision_proxy_artifact(
     components = document.get("components")
     if (
         not isinstance(components, list)
-        or len(components) != 43
+        or len(components) != _A3_COLLISION_PROXY_COMPONENT_COUNT
         or document.get("component_count") != len(components)
     ):
         raise RuntimeError(
@@ -1052,6 +1263,7 @@ def _load_table_collision_proxy_artifact(
     centers = []
     half_axes = []
     owner_coverage = set()
+    source_links = set()
     for component in components:
         if not isinstance(component, dict):
             raise RuntimeError(
@@ -1059,6 +1271,7 @@ def _load_table_collision_proxy_artifact(
             )
         component_id = component.get("component_id")
         owner_name = component.get("owner_body_name")
+        source_links.add(component.get("source_link_name"))
         center = component.get("local_center_owner_m")
         axes = component.get("local_half_axes_owner_m")
         mesh_sha = component.get("mesh_sha256")
@@ -1114,6 +1327,16 @@ def _load_table_collision_proxy_artifact(
         raise RuntimeError(
             "robot_hit_table collision proxy components must be unique, "
             "canonically ordered, and cover every A3 rigid body"
+        )
+    missing_gripper = sorted(
+        set(_A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS) - source_links
+    )
+    if missing_gripper or document.get("left_gripper_source_links") != list(
+        _A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS
+    ):
+        raise RuntimeError(
+            "robot_hit_table collision proxy omits left OmniPicker3 gripper "
+            f"collision links: {missing_gripper}"
         )
     return tuple(owner_indices), tuple(centers), tuple(half_axes)
 

@@ -78,16 +78,11 @@ def _repin_table_config(monkeypatch, path: Path) -> None:
     """Do the careless author's re-pin for them: the SHA gate now passes."""
 
     monkeypatch.setattr(term, "ISAAC_TERMINATION_CONFIG", path)
+    # Read the live selector list; a fourth hand-copy of it here is exactly the
+    # drift this file exists to catch.
     repinned = term._semantic_ast_sha256(
         path,
-        (
-            ("assignment", "TABLE_HIT_FORCE_THRESHOLD_N"),
-            ("assignment", "TABLE_HIT_MARGIN_M"),
-            ("function", "table_hit_done_term"),
-            ("class_header", DEPLOY_PARITY_CFG),
-            ("class_assignments", f"{DEPLOY_PARITY_CFG}|robot_hit_table"),
-            ("class_header", ACTION_BALL_CFG),
-        ),
+        term.ISAAC_TERMINATION_CONFIG_SELECTORS,
         "repin",
     )
     monkeypatch.setattr(
@@ -256,9 +251,9 @@ def test_repinned_proxy_artifact_repointing_is_still_refused(tmp_path, monkeypat
     mutated = _mutated(
         tmp_path,
         ISAAC_CONFIG,
-        '    "configs/a3_table_collision_proxy_20260731/"\n'
+        '    "configs/a3_table_collision_proxy_a3p0807_20260808/"\n'
         '    "a3_table_collision_components.v1.json"',
-        '    "configs/a3_table_collision_proxy_20260731/"\n'
+        '    "configs/a3_table_collision_proxy_a3p0807_20260808/"\n'
         '    "a3_table_collision_components.v2.json"',
         "hope_env_cfg.py",
     )

@@ -1,6 +1,6 @@
 """Exact native-MuJoCo port of the Isaac ActionBall robot/table guard.
 
-The Isaac rule is a pose keep-out, not a resolved-contact test: 43 pinned robot
+The Isaac rule is a pose keep-out, not a resolved-contact test: 62 pinned robot
 collision-component OBBs and one live racket-blade OBB are compared with the
 five inflated table-assembly AABBs at every physics substep.  Broadening each
 OBB to a world AABB is only the PREFILTER; the verdict is the exact 15-axis
@@ -35,7 +35,7 @@ ISAAC_TERMINATION_CONFIG = (
     "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
 )
 EXPECTED_ISAAC_TERMINATION_CONFIG_SEMANTIC_AST_SHA256 = (
-    "0bb1f1bfd33587cfd937a05cfcf9e0be3471a6ab7e8d5e59926e86b113dfb3ed"
+    "d61000bf62ac236be84a4eebfe69d67c4f957e206b61e08b4943352bed70a9aa"
 )
 ISAAC_TERMINATION_CALLABLES = (
     REPO_ROOT
@@ -43,13 +43,38 @@ ISAAC_TERMINATION_CALLABLES = (
     "whole_body_tracking/tasks/tracking/mdp/terminations.py"
 )
 EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256 = (
-    "406aff4ce015622c79b8a2a6c61028209d7062bf07eac6296f8c963092af1f34"
+    "3efe6e78372c0f4b38c7fc5f7b479cb7dfd71ff73206816e4ec680dac2344558"
+)
+#: Hoisted so the re-pin helpers in the tests read the live selector list
+#: instead of keeping a fourth hand-copy of it.  A selector added here is
+#: covered everywhere at once.
+ISAAC_TERMINATION_CONFIG_SELECTORS = (
+    ("assignment", "TABLE_HIT_FORCE_THRESHOLD_N"),
+    ("assignment", "TABLE_HIT_MARGIN_M"),
+    # The proxy pointer belongs in this slice: swapping which artifact the
+    # guard reads swaps the robot the guard believes in.
+    ("assignment", "TABLE_COLLISION_PROXY_ARTIFACT_PATH"),
+    ("assignment", "TABLE_COLLISION_PROXY_ARTIFACT_SHA256"),
+    ("function", "table_hit_done_term"),
+    ("class_header", "HOPEDeployParityTerminationsCfg"),
+    ("class_assignments", "HOPEDeployParityTerminationsCfg|robot_hit_table"),
+    ("class_header", "HOPEActionBallTerminationsCfg"),
 )
 ISAAC_TERMINATION_CALLABLE_SELECTORS = (
+    ("assignment", "_A3_COLLISION_PROXY_SOURCE_URDF_RELATIVE"),
     ("assignment", "_A3_COLLISION_PROXY_SOURCE_URDF_SHA256"),
+    ("assignment", "_A3_COLLISION_PROXY_ISAACLAB_ASSET_HASH"),
+    ("assignment", "_A3_COLLISION_PROXY_ASSET_HASH_EXCLUDED_CONFIG_KEYS"),
+    ("assignment", "_A3_COLLISION_PROXY_PLANT_IDENTITY_KIND"),
+    ("assignment", "_A3_COLLISION_PROXY_PLANT_ASSET_ROOT_NAME"),
+    ("assignment", "_A3_COLLISION_PROXY_COMPONENT_COUNT"),
+    ("assignment", "_A3_COLLISION_PROXY_LEFT_GRIPPER_SOURCE_LINKS"),
     ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_TREE_SHA256"),
+    ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_TOTAL_FILE_BYTES"),
     ("assignment", "_A3_COLLISION_PROXY_RUNTIME_USD_FILES"),
     ("assignment", "_TABLE_GUARD_OBSTACLE_ROLES"),
+    ("function", "_rederive_isaaclab_asset_hash"),
+    ("function", "_verify_live_bundle_is_a_cache_of_this_plant"),
     ("function", "geometric_table_contact_hit_mask"),
     ("class", "TableGuardAttribution"),
     ("function", "_obb_aabb_sat_overlap"),
@@ -90,11 +115,100 @@ EXPECTED_PORTABLE_MUJOCO_IDENTITY_SHA256 = (
 )
 COLLISION_PROXY_ARTIFACT = (
     REPO_ROOT
-    / "configs/a3_table_collision_proxy_20260731/"
+    / "configs/a3_table_collision_proxy_a3p0807_20260808/"
     "a3_table_collision_components.v1.json"
 )
 EXPECTED_COLLISION_PROXY_ARTIFACT_SHA256 = (
-    "23e2f5b30bbba909f1123dc41f6c010354122b9837b4ef133a1c285a2cd78ca8"
+    "896a5c96f5e16f266067841d72c1009e058eccf42850fff2f1c22ee46bda8b96"
+)
+EXPECTED_COLLISION_PROXY_COMPONENT_COUNT = 62
+##
+# Plant identity for the collision proxy.
+#
+# Until 2026-08-08 this lane checked the artifact's file digest, schema, body
+# order, self-sealed content digest, component count, finiteness and coverage
+# -- and never opened the ``source_urdf`` or ``runtime_usd_bundle`` blocks the
+# artifact writes about itself, although the Isaac lane did.  That asymmetry
+# was not a style difference: it meant a proxy of a different robot, correctly
+# sealed, would have been accepted here and refused there.
+#
+# The two lanes now ask the same question, in the form each can answer.  This
+# lane has no Pod USD bundle, so it re-derives IsaacLab's ``.asset_hash`` from
+# the converter configuration the artifact carries plus the tracked plant URDF
+# on disk.  Same derivation, same verdict, no bundle required.
+##
+PLANT_SOURCE_URDF = (
+    REPO_ROOT / "agi/URDF/A3P-P1-32dof-0807-OP3-pingpang/urdf/model.urdf"
+)
+EXPECTED_PLANT_SOURCE_URDF_RELATIVE = (
+    "agi/URDF/A3P-P1-32dof-0807-OP3-pingpang/urdf/model.urdf"
+)
+EXPECTED_PLANT_SOURCE_URDF_SHA256 = (
+    "15c83f5f3beea71350583143aef4d622d5219df65a0bed9a660a0edb7d388d09"
+)
+EXPECTED_RUNTIME_USD_BUNDLE_TREE_SHA256 = (
+    "365ba37edd5e5e1d4fac22f2cbb3ec871ead7bb49aeadb50161ef523a9ae6747"
+)
+EXPECTED_RUNTIME_USD_TOTAL_FILE_BYTES = 60519988
+#: The same six rows the Isaac gate compares, in the same canonical order.
+EXPECTED_RUNTIME_USD_FILES = [
+    {
+        "path": ".asset_hash",
+        "sha256": "a78a2f8fb207cbf479cc1b308cf9d3c58e1a55eb7da9dbc2caf34be697e9c993",
+        "size": 32,
+    },
+    {
+        "path": "config.yaml",
+        "sha256": "f349c3f4d80a915f5ca3ce53d49785dfd7e6eeca2645dcd7b402d4d8a2288eb9",
+        "size": 1685,
+    },
+    {
+        "path": "configuration/model_base.usd",
+        "sha256": "108a4b45b96a8db8396d3a8feb995481c5db87efcde80066e6347ed494e658fc",
+        "size": 60504873,
+    },
+    {
+        "path": "configuration/model_physics.usd",
+        "sha256": "390cf66cc052ea697e88e9ef0131bf7e2eee96e70c35c0861e1ce33d363747f5",
+        "size": 11078,
+    },
+    {
+        "path": "configuration/model_sensor.usd",
+        "sha256": "4e16201f146db3240b8a0082ae14e3aca41255a75812c5331bf8f4e39701355c",
+        "size": 687,
+    },
+    {
+        "path": "model.usd",
+        "sha256": "13e5ecfe02238fbf1d20c13ed7177e18ed93d84bca8e0a592b6605f7fb85f351",
+        "size": 1633,
+    },
+]
+EXPECTED_ISAACLAB_ASSET_HASH = "676efde5febed3c0fde0f2ad59650cdf"
+EXPECTED_PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v1"
+EXPECTED_PLANT_ASSET_ROOT_NAME = "agibot_a3p_p1_0807_v1"
+ASSET_HASH_EXCLUDED_CONFIG_KEYS = ("asset_path", "usd_dir", "usd_file_name")
+# The 20 OmniPicker3 left-gripper collision links the 0807 plant introduces.
+EXPECTED_LEFT_GRIPPER_SOURCE_LINKS = (
+    "left_base_link",
+    "left_link1",
+    "left_link10",
+    "left_link11",
+    "left_link11-1",
+    "left_link13",
+    "left_link14",
+    "left_link14-1",
+    "left_link15",
+    "left_link17",
+    "left_link18",
+    "left_link2",
+    "left_link3",
+    "left_link4",
+    "left_link4-1",
+    "left_link6",
+    "left_link7",
+    "left_link7-1",
+    "left_link8",
+    "left_link9",
 )
 EXPECTED_ACTION_BALL_TABLE_GEOMETRY_SHA256 = (
     "f6aab7524a3b6583ae7ced8da8b2b5d9d1bbe0ea0c72b3b688fefaf6ff66cc6a"
@@ -463,17 +577,7 @@ def verify_isaac_source_authority() -> dict[str, str]:
 
     config_sha = _semantic_ast_sha256(
         ISAAC_TERMINATION_CONFIG,
-        (
-            ("assignment", "TABLE_HIT_FORCE_THRESHOLD_N"),
-            ("assignment", "TABLE_HIT_MARGIN_M"),
-            ("function", "table_hit_done_term"),
-            ("class_header", "HOPEDeployParityTerminationsCfg"),
-            (
-                "class_assignments",
-                "HOPEDeployParityTerminationsCfg|robot_hit_table",
-            ),
-            ("class_header", "HOPEActionBallTerminationsCfg"),
-        ),
+        ISAAC_TERMINATION_CONFIG_SELECTORS,
         "Isaac robot/table termination config",
     )
     callable_sha = _semantic_ast_sha256(
@@ -531,7 +635,7 @@ def verify_isaac_source_authority() -> dict[str, str]:
 
 
 def _owner_frame_contract(mujoco: Any, model: Any) -> dict[str, Any]:
-    """Serialize the exact local frames that give the 43 OBB rows meaning."""
+    """Serialize the exact local frames that give the 62 OBB rows meaning."""
 
     body_ids: list[int] = []
     for name in TABLE_CONTACT_BODY_NAMES:
@@ -723,6 +827,133 @@ class CollisionComponents:
     content_sha256: str
 
 
+def _rederive_isaaclab_asset_hash(config: Mapping[str, Any], urdf_path: Path) -> str:
+    """Redo IsaacLab's ``.asset_hash`` offline; no Isaac, no Kit, no bundle.
+
+    Byte-compatible with
+    ``isaaclab/sim/converters/asset_converter_base.py::_config_to_hash``: MD5
+    over ``json.dumps`` of the converter configuration with the three path keys
+    removed, then over the source asset file in 64 KiB chunks.
+    """
+
+    payload = dict(config)
+    for key in ASSET_HASH_EXCLUDED_CONFIG_KEYS:
+        payload.pop(key, None)
+    digest = hashlib.md5()
+    digest.update(json.dumps(payload).encode())
+    with open(urdf_path, "rb") as handle:
+        while True:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_collision_proxy_plant_identity(document: Mapping[str, Any]) -> None:
+    """Read the two blocks this lane used to skip, and finish the derivation.
+
+    ``source_urdf`` and ``runtime_usd_bundle`` are the artifact's own claims
+    about which robot it measured; the plant URDF on disk is re-hashed rather
+    than taken on the artifact's word, and IsaacLab's asset hash is recomputed
+    from the carried converter configuration plus those exact bytes.  A proxy
+    of any other robot fails the last step no matter how consistent the rest
+    of the document is.
+    """
+
+    import yaml
+
+    source_urdf = document.get("source_urdf")
+    if (
+        not isinstance(source_urdf, dict)
+        or source_urdf.get("path") != EXPECTED_PLANT_SOURCE_URDF_RELATIVE
+        or source_urdf.get("sha256") != EXPECTED_PLANT_SOURCE_URDF_SHA256
+    ):
+        raise TableTerminationContractError(
+            "collision proxy does not name the reviewed A3 plant URDF"
+        )
+    try:
+        observed = hashlib.sha256(PLANT_SOURCE_URDF.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise TableTerminationContractError(
+            "collision proxy plant URDF cannot be read"
+        ) from exc
+    if observed != EXPECTED_PLANT_SOURCE_URDF_SHA256:
+        raise TableTerminationContractError(
+            "collision proxy plant URDF on disk differs from its own pin"
+        )
+
+    runtime_usd = document.get("runtime_usd_bundle")
+    if (
+        not isinstance(runtime_usd, dict)
+        or runtime_usd.get("bundle_tree_sha256")
+        != EXPECTED_RUNTIME_USD_BUNDLE_TREE_SHA256
+        or runtime_usd.get("file_count") != 6
+        or runtime_usd.get("total_file_bytes")
+        != EXPECTED_RUNTIME_USD_TOTAL_FILE_BYTES
+        or runtime_usd.get("symlinks_forbidden") is not True
+    ):
+        raise TableTerminationContractError(
+            "collision proxy does not bind the reviewed six-file runtime USD tree"
+        )
+    bundle_files = runtime_usd.get("files")
+    if bundle_files != EXPECTED_RUNTIME_USD_FILES:
+        raise TableTerminationContractError(
+            "collision proxy runtime USD file map differs from the six-file pin"
+        )
+    config_sha_in_bundle = {
+        str(row["path"]): str(row["sha256"]) for row in bundle_files
+    }["config.yaml"]
+
+    identity = document.get("plant_identity")
+    if (
+        not isinstance(identity, dict)
+        or identity.get("kind") != EXPECTED_PLANT_IDENTITY_KIND
+        or identity.get("plant_asset_root_name") != EXPECTED_PLANT_ASSET_ROOT_NAME
+        or identity.get("isaaclab_asset_hash") != EXPECTED_ISAACLAB_ASSET_HASH
+        or identity.get("isaaclab_asset_hash_excluded_config_keys")
+        != list(ASSET_HASH_EXCLUDED_CONFIG_KEYS)
+    ):
+        raise TableTerminationContractError(
+            "collision proxy carries no derivation proof for the reviewed plant"
+        )
+    config_text = identity.get("converter_config_yaml")
+    if (
+        not isinstance(config_text, str)
+        or hashlib.sha256(config_text.encode("ascii")).hexdigest()
+        != identity.get("converter_config_sha256")
+        or identity.get("converter_config_sha256") != config_sha_in_bundle
+    ):
+        raise TableTerminationContractError(
+            "collision proxy converter configuration is not the pinned config.yaml"
+        )
+    try:
+        config = yaml.safe_load(config_text)
+    except yaml.YAMLError as exc:
+        raise TableTerminationContractError(
+            "collision proxy converter configuration is not YAML"
+        ) from exc
+    if not isinstance(config, dict) or f"/{EXPECTED_PLANT_ASSET_ROOT_NAME}/" not in str(
+        config.get("asset_path")
+    ):
+        raise TableTerminationContractError(
+            "collision proxy converter configuration names a different asset package"
+        )
+    rederived = _rederive_isaaclab_asset_hash(config, PLANT_SOURCE_URDF)
+    if rederived != EXPECTED_ISAACLAB_ASSET_HASH:
+        raise TableTerminationContractError(
+            "collision proxy is not derived from the reviewed plant: IsaacLab "
+            f"asset hash recomputes to {rederived}, pinned "
+            f"{EXPECTED_ISAACLAB_ASSET_HASH}"
+        )
+    if document.get("left_gripper_source_links") != list(
+        EXPECTED_LEFT_GRIPPER_SOURCE_LINKS
+    ):
+        raise TableTerminationContractError(
+            "collision proxy does not declare the 20 left OmniPicker3 gripper links"
+        )
+
+
 @lru_cache(maxsize=4)
 def _load_collision_components_cached(
     artifact_path: str, expected_file_sha256: str
@@ -768,13 +999,18 @@ def _load_collision_components_cached(
     ).encode("ascii")
     if hashlib.sha256(canonical).hexdigest() != content_sha:
         raise TableTerminationContractError("collision proxy content SHA mismatch")
+    _verify_collision_proxy_plant_identity(document)
     components = document.get("components")
     if (
         not isinstance(components, list)
-        or len(components) != 43
-        or document.get("component_count") != 43
+        or len(components) != EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
+        or document.get("component_count")
+        != EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
     ):
-        raise TableTerminationContractError("collision proxy must contain 43 components")
+        raise TableTerminationContractError(
+            "collision proxy must contain "
+            f"{EXPECTED_COLLISION_PROXY_COMPONENT_COUNT} components"
+        )
     body_index = {name: index for index, name in enumerate(TABLE_CONTACT_BODY_NAMES)}
     component_ids = []
     owner_indices = []
@@ -813,11 +1049,20 @@ def _load_collision_components_cached(
         owner_coverage.add(str(owner))
     if (
         component_ids != sorted(component_ids)
-        or len(set(component_ids)) != 43
+        or len(set(component_ids)) != EXPECTED_COLLISION_PROXY_COMPONENT_COUNT
         or owner_coverage != set(TABLE_CONTACT_BODY_NAMES)
     ):
         raise TableTerminationContractError(
             "collision proxy components are not canonical or body-complete"
+        )
+    missing_gripper = sorted(
+        set(EXPECTED_LEFT_GRIPPER_SOURCE_LINKS)
+        - {str(row.get("source_link_name")) for row in components}
+    )
+    if missing_gripper:
+        raise TableTerminationContractError(
+            "collision proxy omits left OmniPicker3 gripper collision links: "
+            f"{missing_gripper}"
         )
     arrays = (
         np.asarray(owner_indices, dtype=np.int64),
@@ -983,9 +1228,12 @@ def geometric_robot_table_hit(
     if (
         positions.shape != (32, 3)
         or rotations.shape != (32, 3, 3)
-        or components.owner_indices.shape != (43,)
-        or components.local_centers_m.shape != (43, 3)
-        or components.local_half_axes_m.shape != (43, 3, 3)
+        or components.owner_indices.shape
+        != (EXPECTED_COLLISION_PROXY_COMPONENT_COUNT,)
+        or components.local_centers_m.shape
+        != (EXPECTED_COLLISION_PROXY_COMPONENT_COUNT, 3)
+        or components.local_half_axes_m.shape
+        != (EXPECTED_COLLISION_PROXY_COMPONENT_COUNT, 3, 3)
         or lo.shape != (5, 3)
         or hi.shape != (5, 3)
         or type(racket_body_index) is not int
@@ -1015,7 +1263,9 @@ def geometric_robot_table_hit(
     component_half += COMPONENT_WORLD_AABB_GUARD_M
     component_lo = component_center - component_half
     component_hi = component_center + component_half
-    component_broad = np.ones((43, 5), dtype=bool)
+    component_broad = np.ones(
+        (EXPECTED_COLLISION_PROXY_COMPONENT_COUNT, 5), dtype=bool
+    )
     for axis in range(3):
         component_broad &= (
             (component_hi[:, axis, None] >= lo[None, :, axis])

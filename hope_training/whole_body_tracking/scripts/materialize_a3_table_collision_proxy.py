@@ -10,6 +10,14 @@ The resulting artifact is data, not a hand-tuned safety margin.  Each component
 OBB contains every vertex of the collision mesh from which it was derived.
 Runtime may conservatively broaden the rotated OBB to a world AABB, but must
 never shrink these materialized half axes.
+
+The tool also refuses to launder an unverified USD cache.  ``--runtime-usd-
+bundle-root`` used to be checked only against six hard-coded digests, which
+proves the bundle was not edited and proves nothing about which robot it is a
+cache of.  ``_plant_identity`` now re-derives IsaacLab's own ``.asset_hash``
+from the bundle's converter configuration plus the exact URDF bytes measured
+in this run, and carries that configuration into the artifact so any later
+reader can redo the derivation without the Pod bundle in hand.
 """
 
 from __future__ import annotations
@@ -22,14 +30,14 @@ import math
 import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SOURCE_ROOT = (
-    REPO_ROOT / "agi" / "URDF" / "A3T2.5-URDF-std-pingpang"
+    REPO_ROOT / "agi" / "URDF" / "A3P-P1-32dof-0807-OP3-pingpang"
 )
-DEFAULT_SOURCE_URDF = DEFAULT_SOURCE_ROOT / "urdf" / "URDF-JOINT-LINK.urdf"
+DEFAULT_SOURCE_URDF = DEFAULT_SOURCE_ROOT / "urdf" / "model.urdf"
 DEFAULT_BODY_ORDER_SOURCE = (
     REPO_ROOT
     / "hope_training"
@@ -46,40 +54,95 @@ DEFAULT_BODY_ORDER_SOURCE = (
 DEFAULT_OUTPUT = (
     REPO_ROOT
     / "configs"
-    / "a3_table_collision_proxy_20260731"
+    / "a3_table_collision_proxy_a3p0807_20260808"
     / "a3_table_collision_components.v1.json"
 )
 SCHEMA_VERSION = 1
 ARTIFACT_TYPE = "a3_table_collision_component_obb_v1"
 PINNED_RUNTIME_USD_BUNDLE_TREE_SHA256 = (
-    "716487dfdf02a5973f78263f0ae8a09e4680c04159e57dbe20796b7825dbeb4d"
+    "365ba37edd5e5e1d4fac22f2cbb3ec871ead7bb49aeadb50161ef523a9ae6747"
 )
+PINNED_RUNTIME_USD_TOTAL_FILE_BYTES = 60519988
 PINNED_RUNTIME_USD_FILES = {
     ".asset_hash": (
-        "3816a1a4bbca423e575650b6d6065f5141a7c840b02dd30c72d4278a225ed499",
+        "a78a2f8fb207cbf479cc1b308cf9d3c58e1a55eb7da9dbc2caf34be697e9c993",
         32,
     ),
     "config.yaml": (
-        "3e35ad4c3ef7c21a10ce413be3ce28777bb83afee4b63fc245b30bd59a9818c2",
-        1689,
+        "f349c3f4d80a915f5ca3ce53d49785dfd7e6eeca2645dcd7b402d4d8a2288eb9",
+        1685,
     ),
     "configuration/model_base.usd": (
-        "8e521141bfee4274b8a2369d382cdd8aac9bb1cfcae5bfa480666a1935a7fb42",
-        21882690,
+        "108a4b45b96a8db8396d3a8feb995481c5db87efcde80066e6347ed494e658fc",
+        60504873,
     ),
     "configuration/model_physics.usd": (
-        "5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981",
-        11164,
+        "390cf66cc052ea697e88e9ef0131bf7e2eee96e70c35c0861e1ce33d363747f5",
+        11078,
     ),
     "configuration/model_sensor.usd": (
-        "c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a",
-        682,
+        "4e16201f146db3240b8a0082ae14e3aca41255a75812c5331bf8f4e39701355c",
+        687,
     ),
     "model.usd": (
-        "1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c",
-        1636,
+        "13e5ecfe02238fbf1d20c13ed7177e18ed93d84bca8e0a592b6605f7fb85f351",
+        1633,
     ),
 }
+
+##
+# Plant identity for the USD bundle this artifact is allowed to describe.
+#
+# Until 2026-08-08 the block above was the whole story, and the whole story was
+# not enough.  Six SHA-256 values prove "nobody edited these bytes".  They do
+# not prove "these bytes are a conversion of the robot this artifact measures",
+# and that gap was live: the pinned bundle was the retired 0409 robot's cache,
+# this producer hashed a URDF two hundred lines later and never compared the
+# two, and the resulting tracked artifact was believed by both engines.
+#
+# The three names below are compared, and then ``PINNED_ISAACLAB_ASSET_HASH``
+# is RE-DERIVED: IsaacLab's own ``.asset_hash`` recipe, run offline over the
+# bundle's converter configuration plus the exact URDF bytes this run measured
+# geometry from.  Names can be doctored; that derivation cannot.  A bundle
+# converted from any other robot fails it.
+##
+PLANT_RECEIPT_RELATIVE = "configs/a3p_p1_0807_model_set_v1.json"
+PLANT_RECEIPT_MANIFEST_TYPE = "a3p_p1_0807_dual_engine_model_set_v1"
+PLANT_ASSET_ROOT_NAME = "agibot_a3p_p1_0807_v1"
+PINNED_SOURCE_URDF_SHA256 = (
+    "15c83f5f3beea71350583143aef4d622d5219df65a0bed9a660a0edb7d388d09"
+)
+PINNED_ISAACLAB_ASSET_HASH = "676efde5febed3c0fde0f2ad59650cdf"
+# isaaclab/sim/converters/asset_converter_base.py::_config_to_hash drops these
+# three path keys before hashing the converter configuration.
+ASSET_HASH_EXCLUDED_CONFIG_KEYS = ("asset_path", "usd_dir", "usd_file_name")
+PLANT_IDENTITY_KIND = "a3_collision_proxy_plant_identity_v1"
+# The 20 OmniPicker3 left-gripper collision links.  They enter the table guard
+# for the first time with the 0807 plant, and a later "cleanup" that quietly
+# drops them would silently re-open the volume they occupy.  Naming them here
+# makes that deletion a refusal instead of a smaller number.
+LEFT_GRIPPER_SOURCE_LINKS = (
+    "left_base_link",
+    "left_link1",
+    "left_link10",
+    "left_link11",
+    "left_link11-1",
+    "left_link13",
+    "left_link14",
+    "left_link14-1",
+    "left_link15",
+    "left_link17",
+    "left_link18",
+    "left_link2",
+    "left_link3",
+    "left_link4",
+    "left_link4-1",
+    "left_link6",
+    "left_link7",
+    "left_link7-1",
+    "left_link8",
+    "left_link9",
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -95,7 +158,8 @@ def _parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Reviewed six-file Pod USD root.  Formal generation and --check "
-            "both revalidate every byte and the canonical tree digest."
+            "both revalidate every byte, the canonical tree digest, and the "
+            "IsaacLab derivation proof tying the cache to the measured URDF."
         ),
     )
     parser.add_argument(
@@ -275,6 +339,165 @@ def _bounds(
     return center, half
 
 
+def _recompute_isaaclab_asset_hash(
+    config: Mapping[str, Any], urdf_path: Path
+) -> str:
+    """Redo IsaacLab's ``.asset_hash`` offline, without importing Isaac.
+
+    Byte-compatible on purpose with
+    ``isaaclab/sim/converters/asset_converter_base.py::_config_to_hash``: MD5
+    over ``json.dumps`` of the converter configuration with the three path keys
+    removed, then over the source asset file in 64 KiB chunks.  Reproducing it
+    here is what lets this producer say "that USD cache came out of THIS URDF"
+    while it still has the URDF open.
+    """
+
+    payload = dict(config)
+    for key in ASSET_HASH_EXCLUDED_CONFIG_KEYS:
+        payload.pop(key, None)
+    digest = hashlib.md5()
+    digest.update(json.dumps(payload).encode())
+    with open(urdf_path, "rb") as handle:
+        while True:
+            chunk = handle.read(65536)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _plant_identity(
+    source_urdf: Path,
+    source_urdf_sha256: str,
+    mesh_receipts: Mapping[str, str],
+    bundle_root: Path,
+) -> dict[str, object]:
+    """Prove the pinned USD bundle is a conversion OF the URDF measured here.
+
+    Everything before step 5 compares names and digests that a determined
+    editor could restate.  Step 5 compares bytes to bytes through IsaacLab's
+    own hash and is the reason this block is an identity proof rather than a
+    second opinion about file integrity.  The converter configuration is
+    carried into the artifact verbatim so a consumer with no access to the Pod
+    bundle -- the MuJoCo lane, or a reviewer on a laptop -- can redo step 5
+    from the repository alone.
+    """
+
+    import yaml  # local: the geometry half of this tool has no YAML dependency
+
+    receipt_path = REPO_ROOT / PLANT_RECEIPT_RELATIVE
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_bytes.decode("utf-8"))
+
+    # 1. The checkout's own plant receipt, and the asset package it names.
+    if receipt.get("manifest_type") != PLANT_RECEIPT_MANIFEST_TYPE:
+        raise ValueError(
+            "A3 plant receipt is not the reviewed dual-engine model set: "
+            f"manifest_type={receipt.get('manifest_type')!r}"
+        )
+    isaac = receipt.get("isaac")
+    if not isinstance(isaac, dict):
+        raise ValueError("A3 plant receipt carries no isaac section")
+    declared_asset = str(isaac.get("asset_path") or "")
+    declared_urdf = str(isaac.get("urdf_path") or "")
+    declared_sha = str(isaac.get("urdf_sha256") or "")
+    if declared_asset.rsplit("/", 1)[-1] != PLANT_ASSET_ROOT_NAME:
+        raise ValueError(
+            "A3 plant receipt names a different asset package than the pin: "
+            f"{declared_asset!r}"
+        )
+    if declared_sha != PINNED_SOURCE_URDF_SHA256:
+        raise ValueError(
+            "A3 plant moved without re-cutting the collision proxy: receipt "
+            f"URDF sha256={declared_sha} but the pin is "
+            f"{PINNED_SOURCE_URDF_SHA256}"
+        )
+
+    # 2. The URDF this run actually measured geometry from is that same URDF.
+    if source_urdf_sha256 != PINNED_SOURCE_URDF_SHA256:
+        raise ValueError(
+            "collision proxy source URDF is not the pinned plant URDF: "
+            f"{source_urdf_sha256} != {PINNED_SOURCE_URDF_SHA256}"
+        )
+
+    # 3. Every collision mesh used here is byte-identical to the same-named
+    #    file in the receipt's asset closure.  ``.asset_hash`` covers the URDF
+    #    text only, so without this the meshes would be unbound.
+    closure = {
+        str(row["path"]): str(row["sha256"])
+        for row in isaac["closure"]["files"]
+    }
+    source_root = source_urdf.parents[1]
+    checked = 0
+    for repo_relative_mesh, mesh_sha in sorted(mesh_receipts.items()):
+        relative = (
+            (REPO_ROOT / repo_relative_mesh).relative_to(source_root).as_posix()
+        )
+        if closure.get(relative) != mesh_sha:
+            raise ValueError(
+                "collision mesh is absent from or differs inside the A3 plant "
+                f"receipt closure: {relative}"
+            )
+        checked += 1
+
+    # 4. What the converter itself recorded about the file it read.
+    config_bytes = (bundle_root / "config.yaml").read_bytes()
+    config_text = config_bytes.decode("ascii")
+    config = yaml.safe_load(config_text)
+    if not isinstance(config, dict):
+        raise ValueError("A3 runtime USD config.yaml is not a mapping")
+    recorded_asset_path = str(config.get("asset_path") or "")
+    source_relative = f"{declared_asset}/{declared_urdf}"
+    if not recorded_asset_path.endswith(f"/{source_relative}"):
+        raise ValueError(
+            "A3 runtime USD bundle was converted from a different robot: "
+            f"config.yaml asset_path={recorded_asset_path} is not "
+            f"{source_relative}"
+        )
+
+    # 5. The derivation proof.
+    stored_asset_hash = (
+        (bundle_root / ".asset_hash").read_text(encoding="ascii").strip()
+    )
+    recomputed = _recompute_isaaclab_asset_hash(config, source_urdf)
+    if recomputed != stored_asset_hash:
+        raise ValueError(
+            "A3 runtime USD cache was not converted from the URDF this proxy "
+            f"measures: IsaacLab asset hash recomputes to {recomputed} but the "
+            f"bundle stores {stored_asset_hash}"
+        )
+    if stored_asset_hash != PINNED_ISAACLAB_ASSET_HASH:
+        raise ValueError(
+            "A3 runtime USD .asset_hash differs from the reviewed pin: "
+            f"{stored_asset_hash} != {PINNED_ISAACLAB_ASSET_HASH}"
+        )
+
+    return {
+        "compared": [
+            "plant_receipt_manifest_type",
+            "plant_receipt_asset_root_vs_pin",
+            "plant_receipt_urdf_sha256_vs_pin",
+            "measured_source_urdf_sha256_vs_pin",
+            "measured_collision_meshes_vs_plant_receipt_closure",
+            "bundle_config_asset_path_vs_plant_receipt",
+            "bundle_isaaclab_asset_hash_vs_rederived_from_measured_urdf",
+        ],
+        "converter_config_asset_path": recorded_asset_path,
+        "converter_config_sha256": _sha256_bytes(config_bytes),
+        "converter_config_yaml": config_text,
+        "isaaclab_asset_hash": stored_asset_hash,
+        "isaaclab_asset_hash_excluded_config_keys": list(
+            ASSET_HASH_EXCLUDED_CONFIG_KEYS
+        ),
+        "kind": PLANT_IDENTITY_KIND,
+        "mesh_closure_files_checked": checked,
+        "plant_asset_root_name": PLANT_ASSET_ROOT_NAME,
+        "plant_receipt_manifest_type": PLANT_RECEIPT_MANIFEST_TYPE,
+        "plant_receipt_path": PLANT_RECEIPT_RELATIVE,
+        "plant_receipt_sha256": _sha256_bytes(receipt_bytes),
+    }
+
+
 def _runtime_usd_binding(bundle_root: Path) -> dict[str, object]:
     entries = [
         {"path": path, "sha256": values[0], "size": values[1]}
@@ -285,7 +508,7 @@ def _runtime_usd_binding(bundle_root: Path) -> dict[str, object]:
     tree_sha256 = _sha256_bytes(_canonical_json_bytes(entries))
     if (
         file_count != 6
-        or total_file_bytes != 21897893
+        or total_file_bytes != PINNED_RUNTIME_USD_TOTAL_FILE_BYTES
         or tree_sha256 != PINNED_RUNTIME_USD_BUNDLE_TREE_SHA256
     ):
         raise ValueError("embedded A3 runtime USD bundle receipt is inconsistent")
@@ -477,23 +700,42 @@ def _artifact(
     if any(count <= 0 for count in owner_counts.values()):
         missing = [name for name, count in owner_counts.items() if count <= 0]
         raise ValueError(f"runtime A3 bodies lack collision components: {missing}")
+    observed_gripper_links = sorted(
+        {
+            str(row["source_link_name"])
+            for row in components
+            if str(row["source_link_name"]) in set(LEFT_GRIPPER_SOURCE_LINKS)
+        }
+    )
+    if tuple(observed_gripper_links) != LEFT_GRIPPER_SOURCE_LINKS:
+        raise ValueError(
+            "A3 left OmniPicker3 gripper collision links are not all "
+            "materialized: missing "
+            f"{sorted(set(LEFT_GRIPPER_SOURCE_LINKS) - set(observed_gripper_links))}"
+        )
     components.sort(key=lambda row: str(row["component_id"]))
+    source_urdf_sha256 = _sha256_bytes(source_urdf.read_bytes())
+    bundle_root = runtime_usd_bundle_root.expanduser().resolve(strict=True)
     content: dict[str, object] = {
         "artifact_type": ARTIFACT_TYPE,
         "body_order": list(order),
         "component_count": len(components),
         "components": components,
+        "left_gripper_source_links": list(LEFT_GRIPPER_SOURCE_LINKS),
         "mesh_receipts": [
             {"path": path, "sha256": mesh_receipts[path]}
             for path in sorted(mesh_receipts)
         ],
+        "plant_identity": _plant_identity(
+            source_urdf, source_urdf_sha256, mesh_receipts, bundle_root
+        ),
         "runtime_usd_bundle": _runtime_usd_binding(
             runtime_usd_bundle_root
         ),
         "schema_version": SCHEMA_VERSION,
         "source_urdf": {
             "path": source_urdf.relative_to(REPO_ROOT).as_posix(),
-            "sha256": _sha256_bytes(source_urdf.read_bytes()),
+            "sha256": source_urdf_sha256,
         },
     }
     content["content_sha256"] = _sha256_bytes(_canonical_json_bytes(content))
