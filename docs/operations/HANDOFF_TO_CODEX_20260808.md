@@ -302,12 +302,20 @@ BeyondMimic 那套的含义是：**模仿奖励在击球帧打满 = 策略复现
 ### 5.1 能跑的
 
 - **C 族**：`materialize → recipe → oracle32` 在 0807 新机器人上全绿（`oracle32 EXIT=0`，263 s）。
-  正在跑 `scale4096 → long4096`（1000 迭代）。**这是三天来第一次真正的长跑。**
+  1000 迭代的长跑**正在跑并且在学**（交接时 iter 192/1000，五条信号全对 —— 读数和两道被判为
+  适用范围问题的门都在 **§9**）。**这是三天来第一次真正的长跑。**
+  注意它**不是** gated `long4096`：`scale4096` 被 pre-long 门拒了、`long4096` 的四格 barrier 结构上到不了，
+  两条的判词在 §9.2。
 - **MuJoCo GPU（mjlab lane）**：4096 env 回路跑通过，容量门改成读引擎自己的 `d.overflow` 9 位粘性掩码。
 
 ### 5.2 卡着的
 
 - **A 族**：`oracle32` 停在**自己的验收指标**（32/32 击球前 `robot_hit_table`），不是停在门。
+  A0/A1 都已在 `fa727be6` 上重跑过（s23r2），读数完全如预期，`exact_strike` 分母为 0；
+  顺带确认 `7f3a3dc8` 生效了 —— A0 现在能跑到自己的判决，不再死在守卫外那个 43 的硬编码上。
+  **一条新读数把病因收窄了**：A 族 `teacher_qdes.preclamp_max_abs_error_rad = 1.19e-07`、
+  软限位侵入计数为 **0** —— 也就是说 **A 的失败是纯几何的，不是控制问题也不是限位问题**
+  （对照 C1 是 `1.81 rad` 且被硬夹）。
   真因：**一个测量出来的运动学参考，对受重力的双足机器人不是能产生力矩的指令**。
   WAIT 能撑住只因为契约带了 **LP 解出来的 hold `q_des`**，而 frame 0 及之后每一帧都没有对应物。
   §12.3 早就点名缺的就是**逐帧逆动力学力矩**。
@@ -432,7 +440,8 @@ Stage-1 clip lane 按摘要挑 `strike_phase`、`_audit_cell` 的测试覆盖等
 | worktree | `/workspace/franco/c1run_20260808` |
 | 预算 | `num_envs=4096`、`max_iterations=1000`、`save_interval=100`（会落 10 份 checkpoint） |
 | 解释器 | `/workspace/hope_isaac_venv/bin/python` |
-| 磁盘 | 交接时 `12G` 可用（62% 已用）—— **10 份 checkpoint 会吃掉不少，盯着** |
+| 磁盘 | checkpoint 落在 **`/workspace`（`122G` 可用）**，不是根 overlay（那只有 `12G`）。10 份 ×140 MB ≈ 1.5 GB，**不构成风险** |
+| 交接时进度 | `iter 192/1000`，`~15 s/iter`，剩余 ≈ 3.4 h |
 
 **从现役 argv 逐项核实过的配置**（这份是真值，不要去读收据里的 `isaac_four_grid_manifest.cells[*]`，
 那是共享合同表会给出相反答案）：
@@ -450,18 +459,70 @@ Stage-1 clip lane 按摘要挑 `strike_phase`、`_audit_cell` 的测试覆盖等
 - **DR 其余全关**：`stable_ready_plant=true`、`startup_physics_material=false`、
   `startup_joint_default_pos=false`、`push.enable=false`、`control_step_action_delay=0/0`
 
-**读数**：pod 上 `readings_s23.py`（最新那份；另有 `readings_s20.py` / `readings3_20260808.py`）。
+**继续读数**（曲线，第二个参数是采样间隔）：
 
-**要盯的五条信号（§6 有 build_1 的参照值）**：`mean_episode_length` 有没有先降后升、
-`|负|/正` 有没有往 `1.0` 以下走、**`action_rate_l2` 有没有在衰减**（最关键）、
-接触计数有没有从零起来、有没有 NaN / 发散。
+```bash
+/workspace/hope_isaac_venv/bin/python /workspace/franco/s24_curve.py /workspace/franco/s24_long_s24r1_train.log 50
+```
 
-**一个具体的未决问题，这条长跑能回答它**：C 的 `4096×5` 那轮接触计数全零。
-击球 tick 在**第 91 步**而 `4096×5` 只有 120 步，所以"步数不够"字面上不成立；
-老师够不到球也已被排除（接触点是构造的，距离恒等于 `0.0`）。
-**剩下的解释是"没有 episode 活到第 91 步"** —— 需要读 C 收据里的 `termination_census`
-（`base_fell_tilt` / `base_too_low` / `robot_hit_table`，都是只计数不阻断的）来坐实。
-**这条长跑跑到几百迭代之后，如果 `mean_episode_length` 起来了、接触计数跟着从零起来，就自证了。**
+| 训练日志 | `/workspace/franco/s24_long_s24r1_train.log` |
+| --- | --- |
+| checkpoint | `/workspace/franco/c1run_20260808/logs/rsl_rl/agibot_a3_action_ball_c211_diagnostic/2026-08-08_17-51-16_c1_long1000_s24r1-DIAGNOSTIC_UNAUTHORIZED/` —— **注意直跑落在仓库根的 `logs/`，不在 `hope_training/` 下面** |
+| 自陈收据 | `/workspace/franco/s24_long_s24r1.selfreport.json` |
+| 全量读数脚本 | `readings_s23.py`（最新那份；另有 `readings_s20.py` / `readings3_20260808.py`） |
+
+### 9.1 交接时已有的读数：**它在学**
+
+五条要盯的信号（§6 有 build_1 的参照值）**到 iter 159 全部朝对的方向走，没有 NaN、没有发散**：
+
+| iter | `mean_episode_length` | `mean_reward` | `action_rate_l2` | `\|负\|/正` |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 47.09 | −7.61 | −0.4762 | 9.53 |
+| 25 | 13.41 | −2.54 | −0.1993 | 10.39（峰） |
+| 50 | **9.26（谷）** | −1.52 | −0.1041 | 8.62 |
+| 100 | 10.02 | −1.00 | −0.0632 | 5.38 |
+| 159 | 11.87 | −0.71 | **−0.0464** | **3.45** |
+
+- **`action_rate_l2` 的衰减活过来了**：`−0.476 → −0.0464`，走完 90%。这正是退掉 `value_clamp=9.0`
+  要买的东西 —— 封顶时它 100% 饱和、梯度恒为零。按加权分解，整个经济的改善几乎是它一个人扛的
+  （`−15108 → −5365`，第二名 `qdes_projection_penalty` 只贡献 `+1326`）。
+- **先降后升：有。** 谷底在 iter 50，之后单调回升。build_1 是 iter 35–60 塌到 5.0 —— **同一相位、同一时间窗**。
+  build_1 的大反弹在 iter 300–377，我们还没到那儿。
+- **`|负|/正` 在走但还没破 1.0**：`10.39 → 3.45` 单调下降。同 iter 参照 `830xw9hy` 是 6.93–7.12、
+  `i4dxpbwy` 是 10.87–11.05 —— **我们已经低于两条 build_1**。
+- **两头都在改善**，不是靠冻住不动骗分：正收入 `2033 → 2288`，负收入 `18816 → 10871`。
+- 比值可信度交叉验证过：console 表算出的值与 economy JSON 的 `per_term_weighted_dt_sum`
+  独立算出的对得上（iter 60: `7.690 vs 7.689`；iter 100: `5.376 vs 5.386`）。
+
+**那个未决问题有答案了**：C 的 `4096×5` 接触全零 **不是环境不可学，是策略活不到任务窗口**。
+`strike_opportunity` 早期 `0 → 5` 之后回零，`pre_strike_physical_fall_rate = 0.9996`，
+episode 只有 ~12 步而击球 tick 在第 91 步。**这就是盆地底部该有的样子** ——
+所以接下来该盯的是 episode 长度能不能追上 91，而不是再去查接触计数为什么是零。
+
+**另外两件这一跑顺带证实的事**：
+
+1. **今天一整天的桌面碰撞工作，在训练里是个非事件**：`robot_hit_table` 占 16810 次终止里的 **3 次（0.018%）**，
+   摔倒（`base_fell_tilt`）占 **99.98%**。桌子不是当前的死因。
+2. **吞吐是个真问题，但不是这一跑的问题**：GPU 利用率只有 **7%**，瓶颈是 episode 只有 ~12 步造成的
+   **reset 风暴**（`qdes` 采集尽调里那个"采集慢 = reset 风暴"是同一个形状）。按 ~15 s/iter 折算，
+   Franco 的 **2 万–2.5 万 iter 目标要 ~100 小时**。episode 长起来之后这个数会自己改善，
+   但如果没改善，**这是发全矩阵之前必须先解决的**。
+
+### 9.2 这一跑路上又撞到两道门，都判为适用范围问题（没改代码，记账）
+
+两条都属于 §3.1 那六类里的第四类 **"给正式跑设计的门被套在诊断跑上"**，请一并纳入 §3.1.1 的排查：
+
+1. **`long4096` 结构上到不了**。它要 `four_grid_scale4096_receipt`，而
+   `action_ball_211_four_grid_prelong_barrier.py` 要求**四格全过**（A0/A1/C0/C1）、且两个 A 格必须钉在物理 GPU0。
+   本轮只跑一格、GPU0 是 yikang 的、A 族预期停在自己的验收 —— **这道门和 C1 能不能学没有半点关系**。
+   处置：用 gated `scale4096` 的 argv **原样**发直跑，只改三个字段
+   （`max_iterations` 5→1000、`save_interval` 1→100、`run_name`），脚本自己断言只改了这三个，
+   自陈收据 `/workspace/franco/s24_long_s24r1.selfreport.json` 写明它**不是** gated `long4096` 以及为什么。
+2. **`scale4096` 被 pre-long 门拒了**（`EXIT=2`，`action_ball_4096x5_prelong_gate.py:691`）：
+   它要求**五个 update 每一个**（含 update 0）都有非零的 TASK_ACTIVE / reveal / nominal-strike /
+   closed-swing 分母。**冷启动策略在头一个 24 步 rollout 里不可能完成一次挥拍。**
+   核过这不是"任务从不激活"：strike opportunity 在五个 update 里是 **0 → 0 → 0 → 7 → 36**，
+   任务确实起来了，只是不在 update 0。
 
 **运维**：GPU0 是 yikang 的 `phase114_v2_prep15`（PID `1249374`），**不许碰**；GPU2 归 mjlab。
 看门狗**用 iteration 计数推进判活，不要用日志字节数** —— 长跑正常就是很久没有阶段性输出。
