@@ -20,7 +20,7 @@ HOST NOTE: needs torch for the Isaac half, so it does NOT run on the py3.8
 host.  Run it on a pod checkout::
 
     python -m pytest \
-      hope_training/whole_body_tracking/tests/test_a3_collision_proxy_plant_identity.py -q
+      hope_training/whole_body_tracking/tests/test_table_proxy_plant_identity.py -q
 """
 
 from __future__ import annotations
@@ -41,6 +41,10 @@ WBT_ROOT = REPO / "hope_training" / "whole_body_tracking"
 if str(WBT_ROOT) not in sys.path:
     sys.path.insert(0, str(WBT_ROOT))
 
+# Named to sort AFTER ``test_table_obstacle_termination`` on purpose: this
+# module reuses that one's isaaclab stub and table-tennis package install, and
+# importing it earlier in a full-suite run reorders those global installs for
+# every other module that shares them.
 from test_table_obstacle_termination import (  # noqa: E402
     BODIES,
     COLLISION_PROXY_PATH,
