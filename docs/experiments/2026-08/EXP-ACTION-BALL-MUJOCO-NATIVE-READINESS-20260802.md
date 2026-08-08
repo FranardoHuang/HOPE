@@ -10328,6 +10328,332 @@ pod1 独立 worktree `/workspace/franco/mjwire_20260808` @ `766ccf91`,**全程 h
 7. **没修** §9.2.17.8 那枚 registry 漂钉,也没补那 9 个从没被对磁盘验过的字段 ——
    那是另一条待办,但它和本节是**同一个病**:钉了指纹,没人比值。
 
+### 9.2.19 两条"接完了"的独立验收：14 条变异我自己从零重跑，四格一个字节没动；两处**理由**要更正（2026-08-08，pod1，全程 host-only，未占任何 GPU）
+
+**人话（先看这五句）**
+
+1. 两条接线（`04434abd` DR 档位入口 / `9e69239c` MuJoCo 镜像权重活值对账）的**主结论都成立**。
+   我没有沿用它们任何一行验收脚本，自己在两棵新 worktree 上重做了一遍。
+2. **14 条变异，14 条全部致命**：拆掉机制 → 指定的测试必红；装回去 → 必绿。
+   没有一条是"检查恒真、变异自证"的那种假变异（怎么证的见本节 3）。
+   （构成：DR 档位那 7 条**全部**重跑；MuJoCo 那 13 条里挑了最吃劲、最可能空转的 **6 条**重跑；
+   外加**我自己加的 1 条** —— 而那一条推翻了一段写在代码注释里的理由。）
+3. **四格归因洁净没被破坏，而且是逐字节的**：两族发车 argv 的整串摘要、四格权威的
+   `content_sha256`、`TASK_PROFILE_ID` / `TASK_PROFILE_SOURCE` / `LINEAGE_KIND` /
+   `DR_L0_MANIFEST_SOURCE` —— 改动前后**逐位相同**。
+4. **两处"理由"要更正**（两条都不影响已落地的代码，只影响下一个人会相信什么）：
+   一处把"其实已经能做的事"说成了"另一批活"；一处把一道门的失败模式**说反了**。
+5. **全量对拍零回归**（数字见本节 6）。
+
+---
+
+#### 1. 怎么验的：不复用它们的脚本，也不复用它们的 worktree
+
+| | |
+| --- | --- |
+| 机器 / 解释器 | pod1，`/workspace/hope_isaac_venv/bin/python`（Python 3.10.18），mjlab 那一条用 `/workspace/mjlab_venv/bin/python` |
+| GPU | **一张都没占**。GPU0 = yikang 的 `phase114_v2_prep15`、GPU1 = 我们自己的四格 `scale4096`（s20r1）、GPU2 空着也没用 |
+| worktree | 三棵全新的：`audit_head_20260808`（HEAD `04434abd`）、`audit_base_20260808`（同一 HEAD 上把 `04434abd` 与 `9e69239c` 两枚 **revert 掉**）、`audit_mut_20260808`（变异用） |
+| 基线口径 | **不是**"上一个干净提交"，是"HEAD 减掉这两枚提交"。中间还夹着别的 session 的 `993a52f6`，用旧提交当基线会把别人的活算到这两枚头上 |
+| pytest | `-q -rs -p no:randomly -p no:cacheprovider --tb=no -rf`，`PYTHONDONTWRITEBYTECODE=1`，串行 |
+
+两枚 revert 都干净落地（`git revert --no-commit`，无冲突），所以 head 与 base 的差就是这两枚提交本身。
+
+---
+
+#### 2. 变异复跑：14 条，14 条全红
+
+（MuJoCo 那 13 条我没有全跑 —— 挑了 6 条：一条历史真事故重放、一条"和与多重集都不变"的对调、
+一条"值逐位相同"的影子、一条陷阱题、一条覆盖面、一条"记录与阻断同批"。
+没跑的 7 条是它们自带夹具的形状检查，风险面比上面这 6 条低。）
+
+**DR 档位入口（`04434abd`）—— 7 条**
+
+| | 拆掉什么 | 实测 | 红的是谁 |
+| --- | --- | --- | --- |
+| M1 | 候选 manifest 与代码侧 payload 的**逐字段对拍**（`if declared_axis[k] != resolved[k]` → `if False`） | `39 passed` → **`5 failed / 34 passed`** | 五条轴各一条（`physics_material` / `add_joint_default_pos` / `base_com` / `randomize_link_mass` / `randomize_pd_gains`） |
+| M2 | 收据只查封印、不逐字段回比（`if declared != resolved` → `if False`） | → **`2 failed / 37 passed`** | `test_a_resealed_lie_is_still_refused`（改完值把封印也算对）、`test_a_receipt_with_blanked_axes_is_refused` |
+| M3 | 两档只比档名（逐轴比对换成空集） | → **`1 failed / 38 passed`** | 反退化那条 |
+| M4 | `_validate_lineage` 忽略传进来的档、永远解析默认档 | `184 passed` → **`1 failed`** | A211 的 DR-L1 停车用例 |
+| M5 | 去掉斜坡的 `ramp_steps` / `hold_clock_owner` 对拍 | → **`2 failed / 37 passed`** | 斜坡漂移那两条（第三条由另一道独立摘要门挡着，仍绿 —— 也就是斜坡有两道互不依赖的门） |
+| M6 | preflight 永远放行 | `362 passed` → **`3 failed`** | 清单那条 + 两族各一条停车用例 |
+| M7 | DR-L0 的 profile 中缀飘一个字母（`DRL0` → `DRL0b`） | `518 passed` → **`4 errors`** | 发射器**导入期**就炸，测试根本收集不起来 |
+
+**MuJoCo 镜像权重（`9e69239c`）—— 6 条**（每条都先断言"粗一档次的检查照样过"，见本节 3）
+
+| | 拆掉什么 | 实测 |
+| --- | --- | --- |
+| N1 | 在 `train.py` 里**重放 08-04 那次真事故**（`upright_exp` 包里的值改回 `1.0`） | `246 passed` → **`16 failed`**（含 `test_c211_reward_weight_mirror_is_green_on_the_real_sources` 与 10 条环境构造用例 —— 门是真的拦，不是只记一笔） |
+| N2 | 把 `base_ang_vel_xy` 与 `base_lin_vel_z` 两个权重**对调** | → **`14 failed`**（含专门那条 `test_swapping_two_weights_between_terms_turns_the_mirror_red`） |
+| N3 | 让链上更靠后的类**用一模一样的值**重声明 `joint_vel` | → **`12 failed`**（影子检查开火：逐项比值这层完全过得去） |
+| N5 | 删掉包里 `("action_rate_l2", -0.1)` 那一行（**陷阱题**：类体值也是 `-0.1`） | → **`15 failed`**（含 `test_a_deleted_pack_row_refuses_instead_of_falling_back` —— 拒绝作答，不许猜） |
+| N7 | "没比"名单少一行 | → **`12 failed`**（覆盖面自检开火） |
+| N8 | 门只记不拦（`weight_blockers = ()`） | → **`1 failed`** |
+
+**外加一条我自己加的（不在它们的清单里）**：把 `action_ball_211_transition_preflight.py` 那段扫描
+改回"只认 v3"。见本节 5(b) —— 这条的结果**推翻了它们写在代码注释与测试 docstring 里的理由**。
+
+**另外我直接问了一次入口本身**（不走它们的测试）：拿一个**根本不存在的** lineage 路径去调
+两个发射器的 `_validate_lineage(..., level="dr_l1")`：
+
+* 两族都当场拒，报的是**三条清单原文**（缺 lineage 工件 / 缺 reward 与 policy recipe /
+  四格权威装不下 DR-L1），**一个字节的磁盘都没读**（不存在的文件从没被打开）；
+* 同样的调用不带 `level`（= 默认 DR-L0）则**继续往下走**，最后死在 `No such file`。
+
+这证明了两件事：DR-L1 的入口是真通的（不是摆设），而且"入口没接"和"入口通了但那一档还没
+materialize"在收据里是两种能分辨的失败 —— 这正是它们声称做到的那件事。
+
+---
+
+#### 3. 怎么排除"检查恒真、变异自证"（本 session 栽过的第 1 类坑）
+
+三件事分别查过：
+
+1. **两个 DR 档没有被喂成同一份值。** 夹具读的是磁盘上**两份不同的 tracked manifest**
+   （L0 那份在 `configs/action_ball_n1_measured_20260803/`，L1 那份在 `.../20260805/`），
+   加上 `training_contract` 里两个不同的 payload builder。M3 证明了这一点是**被机器守着**的：
+   把逐轴比对拆成空集，反退化那条立刻红。
+2. **两边引擎没有被喂成同一个数。** N1/N2/N3 我都**先断言粗一档的审计照样通过**再要求门变红：
+   N1 里包的行数没变、项名没变、`0.25` 这个字面量在文件里还有别的出处；
+   N2 里两个权重的**和不变、排序后的多重集不变、项名不变**；
+   N3 里下游那份声明的值与上游**逐位相同**。三组粗检查我在测试里逐条 `assert` 过是 `True`，门仍然红。
+3. **DR-L0 那张冻结表不是从今天的代码抄回来的**，是改动之前发射器里的原文。
+   我另外做了一次**跨 worktree**的核对（本节 4），不依赖那张表。
+
+---
+
+#### 4. 四格归因洁净：逐字节，跨 worktree 对拍
+
+不看它们的测试，直接在 base（revert 掉两枚提交）与 head 两棵树里各跑一遍，比活值：
+
+| 量 | base | head |
+| --- | --- | --- |
+| A 族发车 argv 里的 `task=` | `HOPEPingPongActionBallA211VendorV2N1DRL0Learnability` | **同** |
+| C 族发车 argv 里的 `task=` | `HOPEPingPongActionBallC211VendorV2N1DRL0Learnability` | **同** |
+| A 族**整串 argv** 的 sha256（前 16 位） | `e9651d03c3494e1b` | **同** |
+| C 族**整串 argv** 的 sha256（前 16 位） | `8daab6ee6049521e` | **同** |
+| 四格权威 `CONTENT_SHA256` | `b31d894ea45010985f79abfacec97e723decca18d23784c6159cf017f4e5f44e` | **同** |
+
+再把两个发射器**全部**模块级大写常量各导出一份逐行 diff，差的只有这几类，一条不多：
+
+* `SCHEMA_VERSION 2→3`、`SPEC_KIND`/`CLAIM_KIND` `v2→v3`；
+* 新名字 `TASK_FAMILY` / `DR_LAUNCH_LEVELS_SOURCE` / `DR_L1_TASK_PROFILE_SOURCE` / `DR_L1_MANIFEST_SOURCE`；
+* `RUNTIME_SOURCE_PATHS` 多了三行钉子（档位权威、DR-L1 profile、DR-L1 manifest）；
+* 各种 `*_FILE` 绝对路径（两棵 worktree 目录名不同，属预期）。
+
+**`TASK_PROFILE_ID` / `TASK_PROFILE_SOURCE` / `LINEAGE_KIND` / `DR_L0_MANIFEST_SOURCE` 根本没出现在 diff 里 —— 也就是逐字节没动。**
+`53040fb0` 那两道"只差 obs 和 reward"的门在 HEAD 上实跑：连同档位入口与共享常量清单一起 **`368 passed`**。
+
+---
+
+#### 5. 两处理由要更正
+
+**(a)〔把"已经能做的事"说成了"另一批活"〕那 9 条 `motion_*` 权重的活值比对，不需要新造能力。**
+
+`9e69239c` 的自陈是：剩下 9 条 `motion_*` 与 A 族 `base_position` 之所以只能"明写没比"，
+是因为"权威要过一道 Hydra YAML，而 `isaac_live_constants` 的求值器只读 Python AST，
+要闭掉得让它展开 defaults 链……是另一批活"。
+
+**前半句成立，后半句不成立。** 仓库里**已经有**一份这样的解析器，而且是被 hydra 亲自核对过的：
+`hope_training/whole_body_tracking/tests/test_action_ball_211_ac_family_config_parity.py`
+里的 `resolve_task_profile()`（`53040fb0` 落地，只依赖 PyYAML，配套
+`test_local_resolver_and_overlay_reproduce_hydra` 在有 hydra 的环境里逐字段核对自己和 hydra 的结果）。
+我在 HEAD 上直接调它，两族 DR-L0 叶子都当场解析出来了：
+
+```
+chain: /base/env_base → /base/sim_base → /base/randomization_base → HOPEPingPongHitter
+     → HOPEPingPongActionBall → …A3VendorV1 → …A3VendorV2 → …N1Learnability → …N1DRL0Learnability
+rewards.motion_scale = 0.15
+rewards.motion_racket_position_weight = 0.2   motion_racket_velocity_weight = 0.2
+rewards.motion_racket_normal_weight   = 0.2   motion_racket_long_axis_weight = 0.1
+```
+
+—— 正好就是那 9 条缺的两样东西。合成规则也已经查清、不含未知量：
+`train.py` 的 `_apply_reward_overrides` 先吃 per-term 的 `motion_<t>_weight` 覆盖，
+再把 `motion_scale` 乘到六个 `motion_*` 上（term 为 `None` 的跳过）；
+这 9 条**一条都不在** `_REWARD_PACK_V2_DIRECT` 里，所以没有第三层改写。
+
+**所以正确的归档是"还差一步"，不是"接不动"。** 工作量是"把那 85 行解析器
+（`_profile_path` / `_split_ref` / `_deep_merge` / `_read_profile` / `resolve_task_profile` / `profile_chain`）
+从测试模块提成共享件、再写一条 `class weight × motion_scale` 的合成器"，不是"新建一套 Hydra 求值能力"。
+（提出来是必须的：那个测试模块在导入期会 `_load` 两个发射器，生产代码不能直接 import 它。）
+它们把这条写进"接不动"，是**把没做的事包装成了做不到**——虽然是善意的（怕做半截给一个假的"比过了"）。
+
+**(b)〔失败模式说反了〕`transition_preflight` 那段扫描，"只认 v3"并不会让旧 claim 变成看不见。**
+
+`04434abd` 在 `scripts/action_ball_211_transition_preflight.py` 里新增了 `RETIRED_CLAIM_KINDS`，
+理由写的是（代码注释与测试 docstring 两处都这么写）：
+"只认 v3 会让磁盘上的旧 v2 claim 变成看不见 —— 于是可以在已经花掉的 namespace 上重发，
+那是放宽一道 fail-closed 门"。
+
+**实测不是这样。** 我把那段扫描改回只认 v3，然后在磁盘上放一份 v2 的 `launch_claim.json`：
+它**照样拒**，只是拒的措辞从 `"scale4096 was already claimed before this preflight"`
+变成 `"experiment root contains an invalid launch claim"`。看代码也印证：
+`outer["kind"] not in claim_kinds` 走的是 `raise TransitionPreflightRefused`，**不是 `continue`**。
+
+**结论：这次改动本身是对的**（把一次"整个 preflight 报错中止"改成"这一格记为已占用"，
+措辞准确、行为更可用），**但它不是在补一个洞** —— 严格说它是**略微放宽**（原来会硬中止）。
+配套的那条测试也是真的（`match="already claimed"`，只认 v3 时会因为措辞对不上而红，我实测过），
+只是它验证的东西和 docstring 说的不是一回事。
+**为什么值得写下来**：下一个人如果照这句话去设计新门，会以为"不认识的 kind 会被跳过"，
+而这个前提是假的。
+
+**(c)〔顺手记一条，不阻塞〕DR-L1 候选 manifest 的 `runtime_integration_blockers` 现在过期了。**
+`configs/action_ball_n1_measured_20260805/action_ball_211_dr_l1_restored_plant_candidate.v1.json`
+里那条唯一的 blocker 原文仍然是"两个 launcher 还硬绑 `dr_l0_lineage_v5` 与 `DR_L0_MANIFEST_SOURCE`"——
+`04434abd` 之后**这半句已经不成立了**（发射器改成解析、DR-L1 的 profile 与 manifest 都进了钉子表），
+真正还缺的只有"materialize 出这一档自己的 lineage"。
+发射器读这个字段时**只检查它空不空**（未 materialize 的档必须非空、已 materialize 的档必须为空），
+不看内容，所以这条过期文本今天不挡任何事 —— 但它就是"记录与阻断不同批"里"记录那一半没跟上"的样子。
+下次给 materializer 加 `--dr-level` 时顺手改准即可。
+
+---
+
+#### 6. 全量对拍：零回归
+
+同机、同解释器、同参数、同一时刻并行跑；测试集 = `hope_training/whole_body_tracking/tests`
+\+ `hope_training/whole_body_tracking/mujoco_native/tests`。
+
+| | base（HEAD 减两枚提交） | head（`04434abd`） |
+| --- | --- | --- |
+| 结果 | `122 failed / 7893 passed / **53 skipped** / 19 errors`（`37:00`） | `122 failed / **7955** passed / **53 skipped** / 19 errors`（`37:02`） |
+| 失败集合逐条 `comm` | 两侧各 `122` 条，**新增 0、消失 0** | |
+| 出错数 / 跳过数 | `19` / `53` | `19` / `53`（两侧相同） |
+
+**通过数 `+62`，正好等于新增用例数**：新模块 `test_action_ball_211_dr_launch_levels.py` `39` 条
+\+ 共享常量清单扩表 `10` 条（`146 → 156`，5 个新名字 × 2 条参数化门）
+\+ MuJoCo 侧 `13` 条（`233 → 246`：12 条变异 + 1 条闭环）。**零回归。**
+
+口径如实标注：这一轮我用的是 `-rf`（只列失败），它盖掉了同一条命令里的 `-rs`，
+所以**跳过的 53 条我只对了个数、没有逐条列原因**；`19` 个 collection error 同样是按数对的（两侧都是 19）。
+失败那 122 条是逐条名字比对过的。
+
+针对性复核（最终字节，HEAD 上）：
+
+* 档位入口 + 共享常量 + A/C 配置对等 + 四格 barrier 四个模块：**`368 passed`**
+* `mujoco_native/tests` + `test_mujoco_native_isaac_live_constants.py`：**`246 passed / 0 skipped`**
+* `tests/test_action_ball_211_transition_preflight.py`：**`34 passed`**
+* mjlab 侧差异表（`/workspace/mjlab_venv/bin/python` 现跑 `isaac_alignment.build_ledger()`）：
+  `17 轴 = 5 aligned / 10 divergent_blocking / 2 divergent_declared / 0 unverifiable`，
+  `cross_engine_comparable = False`，`blocking_axes` 十条逐字与 §9.2.9 / §9.2.18 相同。
+
+---
+
+#### 7. "接不动"逐条核：一条是"其实能做"，其余都成立
+
+| 谁说的 | 说的什么 | 我的裁定 | 依据 |
+| --- | --- | --- | --- |
+| drl1 | 两个 materializer 今天只产 DR-L0 lineage，没有 `--dr-level` | **成立** | 两个文件里 `dr_level` 零命中，只有 `dr_l0_manifest` |
+| drl1 | DR-L1 **按定义**进不了四格 | **成立** | `action_ball_211_four_grid_contract.py` 是内容封印的（`validate_manifest` 要求与唯一权威**逐字相等**），`matched_contract.start_pose_ramp` 钉死 `None`，DR 身份只封了 L0/L0N，`_require_one_registered_difference_axis` 硬性要求同族两格只在 obs-noise 五键上不同 |
+| drl1 | train.py 侧 DR-L1 运行时合同早就落过、本轮一行未动 | **成立** | `_ACTION_BALL_DR_L1_RUNTIME_ATTR` 全历史只被 `4420345a` 碰过 |
+| mujoco-ac | actor 211 / critic 319 观测 ABI 接不动 | **成立** | 差异表 `actor_observation_abi` / `critic_observation_abi` 都是 `divergent_blocking`，`closable_by` 点名 measured teacher artifact + 在线 question solver + Isaac motion command manager |
+| mujoco-ac | mimic/strike/target/outcome 四组 reward、参考包络三条终止、WAIT/揭示结构、球的接触模型 | **成立** | 同上，`reward_surface` / `termination_union` / `ball_contact_model` 三轴都是 `divergent_blocking` |
+| mujoco-ac | 四条一行就能改但会改训练分布的（动作解码默认、摔倒阈值、撞桌硬终止、复位随机化） | **成立，而且它们自己也没把这叫"接不动"** | 差异表里 `fall_thresholds` 的 `closable_by` 原文就是"把两个数改成活值即可……属发车决定" |
+| mujoco-ac | 剩下 9 条 `motion_*` + A 族 `base_position` 卡在 Hydra，是另一批活 | **不成立 → 改判"还差一步"** | 见本节 5(a) |
+| mujoco-ac | 本提交之前铸的 MuJoCo 收据带旧经济，但仓里没有 committed 产物钉死这个 sha | **成立** | 全仓 `git grep` `reward_contract_sha256`，committed 的只有 `configs/mujoco_c_lite_20260803/…receipt.v1.json` 一份，而它是 `c_lite` 那条另一套 reward（motion/balance 都固定为 0），且那个 sha 全仓**只在它自己那个文件里出现一次**，没有任何消费者 |
+
+---
+
+#### 8. 发车决策单（给 Franco）
+
+##### A. 现在就能发的
+
+| 发什么 | 占哪张卡 | 多久 | 备注 |
+| --- | --- | --- | --- |
+| **什么都不用重发。** 正在 GPU1 上跑的四格 `scale4096`（s20r1）**不受这两枚提交影响** | — | — | 本节 4 已证：argv 逐字节相同 |
+| **把 frame-0 出生那条"零改动"支路真跑一次**：`materialize_a3_dynamic_ready_contract.py --physical-birth-composition-mode whole_body_safe_teacher_frame0_grounded` | **不占卡**（纯 CPU，numpy + mujoco，不 import Isaac） | 一次 materialize | 这是「十三」标价表里的 (v)，**至今没人跑过**。零 plant 改动、零增益改动，跑完就知道现役 `2.243 rad` 那个揭示阶跃还能压到多小 —— 这个数会直接改变下面 C.1 该怎么选。**唯一需要你点头的点：它会铸一份新的 `dynamic_ready` artifact** |
+
+##### B. 还差一步的
+
+| 差什么 | 谁做 | 占卡 | 多久 |
+| --- | --- | --- | --- |
+| **发一格 DR-L1**：① 给两个 materializer 加 `--dr-level`，产 DR-L1 lineage（kind 名字发射器已预留、会逐字核对） | subagent | **不占** | 30–60 min |
+| ② DR-L1 的 reward recipe 与 dynamic-ready policy recipe 重新 materialize（按档内容寻址，DR-L0 的产物不能代签） | subagent | **要一张卡**（GPU2 空着，别碰 GPU0/GPU1） | 两族 20–40 min |
+| **闭掉那 9 条 `motion_*` + A 族 `base_position` 的活值比对**：把 `resolve_task_profile()` 从测试模块提成共享件，写一条 `class weight × motion_scale` 的合成器 | subagent | **不占** | 2–4 h（含变异测试） |
+| **重出 spec**：`04434abd` 把 spec/claim 从 v2 提到 v3、`dr_launch_level` 变必填。磁盘上已生成的 v2 spec 不能再重放 | subagent | **不占** | 分钟级，但**下次同步 pod 到新 HEAD 之后必须先做** |
+
+##### C. 需要你拍板的
+
+**C.1〔最大的一条〕出生改成 frame 0 = 要不要动腰的保持增益**
+
+事实（`81379ea2` + 「十四」独立复算，两轮逐位吻合）：
+接地后的 frame 0，`waist_pitch` 撑住要 `-49.155 N·m`，现役这套增益的**位置指令**最多发得出 `-21.704`；
+把 5% 投影内沿和 2% 硬内沿全丢掉、指令顶死到机械限位也只有 `-26.014`。
+**电机不是瓶颈**（限幅 118.2，只用 41.6%），卡的是 `kp × 指令还能走的行程`。
+
+**你问的那个问题（"真机在策略接管期间会不会切增益"）的答案是：会，而且是一个真实的运行模式** ——
+但这个"会"帮不上我们想要的那个忙：
+
+| 厂商在哪切 | 什么时候 | 保持的是什么姿态 |
+| --- | --- | --- |
+| `pp_policy.hpp:1362` planner STATIC-stand 闩锁 | **策略正在跑**、两拍之间、`level==0` 且已回站位 | `q_des` 在 `0.8 s` 内 ramp 到 **ONNX 的 `default_q`**（`planner_static_gain_scale` 默认 `1.0` = 官方 `400/500/500` 逐字节） |
+| `main.cpp:2738` `--auto-start` warmup | 开跑前 N 个 tick | 策略算出来的 `q_des`，用站立增益发，到点自己切回 `a3_kps` |
+| `main.cpp:2989` `kPdStand` / `:3323` teleop 兜底 | 上电起身 / 数据源丢失 | `a3_default_angles` |
+
+这三行我**自己打开厂商源码核过**（不是转抄「十三」）：
+`agi/a3_deploy_example/.../a3_policy_parameters.hpp` 里 `a3_kps` 腰是 `85 / 50 / 50`、
+`a3_pd_stand_kps` 腰是 `400 / 500 / 500`；
+`.../a3_pingpong/pp_policy.hpp` 的 planner-static 分支原文就是
+`if (cfg_.planner_static_gain_scale == 1.0) { cmd.kp = official_kp_sdk_; ... } // default: official gains VERBATIM`，
+而它 ramp 过去的目标是 `nominal_q_sdk_`（注释写明 `== a3_default_angles`）。
+
+**所以"切不了"是假的，"切了就能保持 frame 0"也是假的。** 厂商每一次切增益，保持的都是**它自己的零点姿态**，
+而且代码注释写明静态站立**不会主动平衡**，所以闩锁挂了三道前置。用站立增益去保持一个动捕运动员的预备架势，
+厂商从来没这么干过。
+
+**真正的代价在第二层**：`action_scale = 0.25 × 力矩上限 / kp` 是厂商公式。
+`kp 50 → 500`，`waist_pitch` 的动作尺度从 `0.59` 掉到 `0.059`。**切增益就是切动作语义**，
+除非把 `action_scale` 钉死不动 —— 那就脱离厂商公式了。
+
+五条路的价（「十三」实测，我核过口径，未重跑）：
+
+| | 做法 | 代价 |
+| --- | --- | --- |
+| (i) | 等待期站立增益、揭示时切回 | 切换瞬间腰上凭空少 `27.451 N·m`，倒 `0.1 rad` 要 `114–144 ms`；指令侧同时跳 `-0.336 rad`；且动作语义随之变 |
+| (ii) | 腿取 frame 0、腰/臂取"能撑住的最近姿态" | 数学有解、工程无解（支撑边投影直接失败 / 激活自碰撞）；负担来自髋（前折 `81°`），手臂只能调 `±4 N·m` |
+| (iii) | 换全库唯一撑得住的那条 clip 当首发 | 它 frame 0 已用掉 `89.6%` 腰权限，整条 `70` 帧里只有 `12` 帧撑得住 |
+| (iv) | **只把腰的 `kp` 提上去，`50 → 150`** | 本条 clip 从 `0/57` 变 **`57/57`**；全库 frame 0 从 `1/73` 到 `32/73`（再往上加没用，剩下 41 条是右腕站在包络外，另一种病）。代价：腰的动作尺度除以 3、`contract` 的 `kp` 不再逐位等于厂商 `a3_kps`、下游 SHA 全部重签。参考量级：`150` 是厂商站立那套 `500` 的 `30%` |
+| (v) | **先跑上面 A 那条零改动支路** | 零 plant 改动、零增益改动、不占卡。先拿到数再决定要不要动 (i)/(iv) |
+
+**建议的问法**：先做 A 的 (v)，拿到"揭示阶跃还能压多小"这个数，再在 (i) 与 (iv) 之间选。
+(iv) 是唯一一条能让"出生 = frame 0"这句话在整条 clip 上都成立的路，但它同时改了动作尺度，
+按 `EXP-V2-REWARD-FREEZE §0.13` 属于"动资产默认值"那一类，必须由你拍。
+
+**C.2 `upright_exp` 从 `1.0` 同步到 `0.25`（已落地在 `9e69239c`）**
+这是把 MuJoCo 镜像同步到你 08-04 在 Isaac 侧已经做过的定价决定上，**不是新定价**。
+但它确实改了 MuJoCo-native 那条车道的奖励经济。要么确认，要么回滚。其余 13 条一个字没动。
+
+**C.3 mjlab 那四条一行就能改、但会让新旧收据不可比的**
+动作解码默认 `flat → vendor`（vendor 模式已实现且逐关节对过活值 31/31）、
+摔倒阈值（Isaac `40° / 0.5 m` vs 本车道 `60° / 0.70 m`）、
+`robot_hit_table` 装成硬终止（目前"测得到 + 会拒收"但不是护栏）、
+复位随机化（本车道多了一份四格里没有的）。每条在差异表里都写了 `closable_by`。
+
+**C.4 DR-L1 首档 `start_pose_ramp` 的终点取值**
+现值 x `-1.0 m` / y `±1.2625 m` / yaw `±30°`，是该 action manifest `base_spawn_min/max` 的 `3.2–3.3` 倍，
+而 manifest 顶层写的是 `mobility_mode: "no_move"` —— **这两者之间今天没有任何校验**。
+另外 `ramp_steps 96000` 是挂钟驱动，而 §6.1 要求支撑集扩张走 competence 驱动 + 可逆回退。
+两条都属于"改随机性幅度 / 改课程口径"，不由 subagent 拍。
+
+**C.5 顺手记一条（不阻塞）**
+`left/right_shoulder_roll` 的动作零点是 `±0.12 rad`，而执行 `q_des` 包络内沿是 `±0.1697` ——
+**动作零点站在自己发得出去的范围之外**，`action = 0` 发下去会被投影一刀。今天不挡任何事，
+但它和 C.1 是同一族问题（"出生姿态必须发得出去"）。
+
+---
+
+#### 9. 收据 / 本轮没做什么
+
+* worktree：`/workspace/franco/audit_{head,base,mut}_20260808`，全部 `git worktree add --detach 04434abd`；
+  变异跑完逐条还原，收工时 `git status --porcelain` 为空。
+* 变异原始输出：`/workspace/franco/audit_out_20260808/mutations.json`、`mutations_mj.json`、
+  `mut_batch2.jsonl`、`mut_mj.jsonl`；常量对拍：`consts_base.json` / `consts_head.json`。
+* **未占任何 GPU**（三张卡全程没碰）、**未跑 Isaac 训练**、**未铸任何 artifact**、**未放宽任何门限**、
+  **未改任何 reward 权重**。
+* **未重跑**「十三」那五条路的实测数（我核的是口径与出处，数值沿用 `81379ea2` +「十四」两轮已逐位吻合的结果）。
+* 别的 session 正在改的文件（`action_ball_curriculum.py`、`build_action_ball_manifest.py`、
+  `launch_n1_reward_screen_diagnostic.py` 等）一行没碰；本节写进 exp 时也只入库了自己这一段。
+
 ## 10. N1 直接到完整 73 的门
 
 “一个动作能学就全上”精确定义为：N1 通过后，允许**完整 73 catalog**进入 MuJoCo 训练实验；它不
