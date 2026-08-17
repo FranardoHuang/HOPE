@@ -12,7 +12,9 @@
   PPO/WAL之前继续fail closed：schema-3 exact validator发现`runtime_execution_facts()`没有为FullMDP
   ActionEpoch actor物化live 399-D critic block；日志SHA=`9e6b066c…35b8a2`，namespace不重试。
   窄修只新增exact live critic layout消费和398-D反例，不新增owner/receipt/gate；schema专项=
-  `145 passed`。见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
+  `145 passed`，Pod1 host联合wiring=`283 passed,1 deselected`。后续fix3 wrapper在任何guard/log/run前
+  因磁盘跌破20GiB以RC70退出且不重试；仅删除6个Git可重建、无live-ref checkout，实收约2.73GB，
+  未碰checkpoint、主日志、资产或foreign进程。见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
 
 - 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/Python3.11/RSL3环境上的两次fresh FullMDP canary
   均完整构造229/399-D observation和20-term Reward，并依次暴露两个PPO/WAL前迁移首错：manager cfg
