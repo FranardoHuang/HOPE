@@ -20286,6 +20286,9 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         validate_action_ball_c211_wrapped_env,
     )
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
+    from whole_body_tracking.utils.action_ball_full_mdp_rsl3_adapter import (
+        ActionBallFullMdpRsl3Runner,
+    )
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
     from whole_body_tracking.utils.training_contract import (
         checkpoint_contract_lineage_exact,
@@ -21537,7 +21540,14 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
                         )
                     )
 
-    runner = OnPolicyRunner(
+    runner_type = (
+        ActionBallFullMdpRsl3Runner
+        if action_ball_full_mdp_runtime_owner is not None
+        and action_ball_full_mdp_pre_gym_binding.run_mode
+        == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        else OnPolicyRunner
+    )
+    runner = runner_type(
         env,
         agent_cfg.to_dict(),
         log_dir=log_dir,
