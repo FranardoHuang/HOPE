@@ -65,8 +65,8 @@ deployment、真机或物理安全。
 | 2 | `PASS` | FullMDP lifecycle 重基线到 IsaacLab 8320；exact Kit cfg、train wiring 和 focused union 通过 | 不再维护 2.1 lifecycle |
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
-| 5 | `HOLD-first-code` | 两次Pod1 fresh canary均穿过完整env/Reward构造后在PPO/WAL前停止：先是8320 manager cfg dict（`40c6631…5051b9f`），修复commit `5ccc1c9d`后是schema-3仍把FullMDP finite-`q_des`误判为legacy ActionBall-only（`dba73962…e5e99a1`）。两个namespace均已消费且不重试 | exact互斥FullMDP schema身份 + fresh commit |
-| 6 | `NEXT-fresh-fix2` | 第二窄修只允许exact target/obs/229/399、diagnostic/no-save runtime marker；legacy authorization/delay或partial identity均拒，dependency-light `144 passed` | 提交/push后新Git root、新namespace再跑A `2×2` |
+| 5 | `HOLD-first-code` | 三次Pod1 fresh canary均穿过完整env/Reward构造后在PPO/WAL前停止：8320 manager cfg dict（`40c6631…5051b9f`）；legacy schema-3误拒FullMDP finite-`q_des`（`dba73962…e5e99a1`）；修复后 exact validator 又揭示 runtime facts 从未把已安装的399-D FullMDP critic写入hard contract（`9e6b066c…35b8a2`）。三个namespace均已消费且不重试 | 只在真实ActionEpoch actor下从live critic manager物化399-D事实 |
+| 6 | `NEXT-fresh-fix3` | 第三窄修复用现有runtime fact writer，要求live critic唯一term=`action_epoch`且exact399-D；398-D反例拒绝。dependency-light schema=`145 passed`，联合wiring（排除本机无法import Isaac/Warp的真实模块用例）=`283 passed, 1 deselected` | 提交/push后新Git root、新namespace再跑A `2×2` |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `HOLD-producers` | MuJoCo 已有 Plant/R05→M04 packed boundary，但缺真实 vector observation/reward/termination/reset lineage 13类producer | producer-first实现后才 `learn(1)` |
@@ -77,20 +77,21 @@ deployment、真机或物理安全。
 最近消费、不得重试的 Pod1 GPU1 wrapper：
 
 ```text
-.codex-tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix1_pod1_gpu1_20260818.sh
-SHA256=367b8494a5a290cfc797d11f27912669353f68aa2fc95de92eda12d39511c550
+.codex-tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix2_pod1_gpu1_20260818.sh
+SHA256=9bae14fa58ec6949fae2c015368d6cb2eabf8de5a3779a57a829a34fd4189934
 ```
 
 远端副本：
 
 ```text
-/tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix1_pod1_gpu1_20260818.sh
+/tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix2_pod1_gpu1_20260818.sh
 ```
 
 它要求 exact approval、clean Git HEAD、Isaac/IsaacLab/asset identity、至少 20 GiB workspace、GPU1 queue
 与 Kit 双锁；拿锁后再次确认物理 GPU UUID、显存和 zero compute PID，才以 no-clobber 创建 guard/log。
-它已自然RC1并保留SHA=`dba73962…e5e99a1`日志，不能重试、清理或重新签名。修复只能以新commit、
-新Git root、新namespace和新wrapper执行；下一份wrapper在fix2 commit和测试完成前不冻结。
+它已自然RC1并保留SHA=`9e6b066c…35b8a2`日志，不能重试、清理或重新签名。首错不是新的
+Reward/physics问题，而是schema-3 runtime fact writer漏写live 399-D critic layout；修复只能以新commit、
+新Git root、新namespace和新wrapper执行；下一份wrapper在fix3 commit和测试完成前不冻结。
 
 ## 6. A1000 同进程里程碑
 

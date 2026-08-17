@@ -21,8 +21,11 @@ adapter。真实Kit N=2 reset/readback已过；Pod1 GPU1 fresh A canary进一步
 229/399-D observation与20-term Reward，但在PPO/WAL前因IsaacLab8320 manager cfg的`dict` API与旧
 history consumer不匹配而RC1（日志SHA=`40c6631…5051b9f`）。这是迁移首错，不是Reward或学习反例；
 其exact-dict修复后的第二个fresh namespace又在PPO/WAL前暴露schema-3把FullMDP finite-`q_des`
-误判成legacy ActionBall-only（日志SHA=`dba73962…e5e99a1`）。这仍是迁移合同首错，不是Reward或
-学习反例；修复后仍须fresh `2×2`，随后同进程A1000在20/50/100/200/500/1000只读趋势。
+误判成legacy ActionBall-only（日志SHA=`dba73962…e5e99a1`）。第二窄修后第三个fresh namespace继续
+在同一structural boundary fail closed：live manager已安装229/399-D，但runtime fact writer漏掉
+FullMDP critic block，故exact validator拒绝（日志SHA=`9e6b066c…35b8a2`）。这三项都是按真实调用顺序
+剥出的环境迁移/合同接线错误，没有一次进入optimizer或产生WAL，不是Reward或学习反例。第三修只让
+code-owned ActionEpoch actor从live critic manager写唯一399-D事实；仍须fresh `2×2`，随后同进程A1000在20/50/100/200/500/1000只读趋势。
 2/5/14/60 update只回答工程链，不回答可学性。
 
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery

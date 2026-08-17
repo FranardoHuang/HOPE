@@ -10,11 +10,14 @@ reset均通过；selected generation `[1,1] -> [2,1]`、peer row不变、observa
 `PENDING fsync -> destructive owner ACK -> EPOCH_ACK fsync -> stdout`；direct测试覆盖成功顺序、
 optimizer异常和PENDING fsync失败。Pod1 GPU1 fresh canary已真实穿过env/manager构造，得到229/399-D
 observation和20-term Reward；随后在PPO/WAL前暴露IsaacLab8320 API首错：manager cfg为`dict`，旧
-history consumer仍访问`.policy`，日志SHA=`40c6631…5051b9f`。窄修的dependency-light测试为
-`143 passed`；其fresh fix-run又在PPO/WAL前命中第二个迁移首错：schema-3仍把FullMDP finite-`q_des`
-投影判成legacy ActionBall-only，日志SHA=`dba73962…e5e99a1`。两次都没有optimizer或WAL行。
-当前窄修要求FullMDP exact target/obs/229/399、diagnostic/no-save marker并拒legacy authorization混入；
-下一次fresh run、A1000趋势、contact/outcome/recovery分母和C family仍`未测`，所以Gate不晋级。环境和下一条命令见
+history consumer仍访问`.policy`，日志SHA=`40c6631…5051b9f`。其fresh fix-run又在PPO/WAL前命中
+第二个迁移首错：schema-3仍把FullMDP finite-`q_des`投影判成legacy ActionBall-only，日志SHA=
+`dba73962…e5e99a1`。第二窄修把FullMDP exact target/obs/229/399、diagnostic/no-save identity与legacy
+authorization隔离后，第三个fresh namespace由该validator揭示真正遗漏：live observation graph已是
+229/399-D，但`runtime_execution_facts()`只为Stage1/A211/C211写critic事实，FullMDP hard contract没有
+399-D critic block，日志SHA=`9e6b066c…35b8a2`。三次均没有optimizer或WAL行。当前修复只在exact
+ActionEpoch actor下读取live critic manager，并要求唯一`action_epoch=399D`；dependency-light=
+`145 passed`。下一次fresh run、A1000趋势、contact/outcome/recovery分母和C family仍`未测`，所以Gate不晋级。环境和下一条命令见
 [唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)与
 [环境身份合同](../operations/action_ball_isaac51_environment_identity_20260818.md)。
 

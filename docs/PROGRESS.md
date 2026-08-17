@@ -8,6 +8,12 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: Pod1第三个fresh FullMDP A canary在完整229/399-D manager、Reward20和policy bootstrap之后、
+  PPO/WAL之前继续fail closed：schema-3 exact validator发现`runtime_execution_facts()`没有为FullMDP
+  ActionEpoch actor物化live 399-D critic block；日志SHA=`9e6b066c…35b8a2`，namespace不重试。
+  窄修只新增exact live critic layout消费和398-D反例，不新增owner/receipt/gate；schema专项=
+  `145 passed`。见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
+
 - 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/Python3.11/RSL3环境上的两次fresh FullMDP canary
   均完整构造229/399-D observation和20-term Reward，并依次暴露两个PPO/WAL前迁移首错：manager cfg
   的8320 `dict` API（日志SHA=`40c6631…5051b9f`）与schema-3仍把FullMDP finite-`q_des`误判为

@@ -321,6 +321,13 @@ _ACTION_BALL_C211_CRITIC_OBS_LAYOUT = (
     ("time_to_teacher_start", 1),
     ("task_valid", 1),
 )
+_ACTION_BALL_FULL_MDP_ACTOR_OBS_CONTRACT = (
+    "action_ball_full_mdp_action_epoch_v1"
+)
+_ACTION_BALL_FULL_MDP_CRITIC_OBS_CONTRACT = (
+    "action_ball_full_mdp_action_epoch_critic_v1"
+)
+_ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT = (("action_epoch", 399),)
 
 
 def _action_ball_211_wait_contract_facts() -> dict:
@@ -2651,6 +2658,29 @@ def runtime_execution_facts(
             "contact_target_absent": True,
             "c225_reward_contract": _action_ball_c225_reward_contract_facts(),
             **_action_ball_211_trainability_facts(cfg, family="C211"),
+        }
+    elif actor_contract_name == _ACTION_BALL_FULL_MDP_ACTOR_OBS_CONTRACT:
+        critic_names, critic_dims, critic_total = _observation_group_layout(
+            env, "critic"
+        )
+        if (
+            tuple(zip(critic_names, critic_dims))
+            != _ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT
+            or critic_total
+            != sum(
+                dim for _name, dim in _ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT
+            )
+        ):
+            raise RuntimeError(
+                "full-MDP ActionEpoch critic observation contract mismatch: "
+                f"expected={_ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT!r} actual="
+                f"{tuple(zip(critic_names, critic_dims))!r} total={critic_total}"
+            )
+        critic_facts = {
+            "critic_obs_contract": _ACTION_BALL_FULL_MDP_CRITIC_OBS_CONTRACT,
+            "critic_obs_total_dim": critic_total,
+            "critic_obs_term_names": critic_names,
+            "critic_obs_term_dims": critic_dims,
         }
 
     motion = env.command_manager.get_term("motion")

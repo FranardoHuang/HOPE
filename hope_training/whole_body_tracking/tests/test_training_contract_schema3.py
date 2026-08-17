@@ -376,6 +376,46 @@ def test_runtime_contract_extracts_actual_execution_values():
     assert facts["motion_clip_fps"] == [50.0, 50.0]
 
 
+def test_runtime_contract_carries_exact_full_mdp_critic_layout():
+    env = _env(joints=31)
+    env.observation_manager.active_terms = {
+        "policy": ["action_epoch"],
+        "critic": ["action_epoch"],
+    }
+    env.observation_manager.group_obs_term_dim = {
+        "policy": [(229,)],
+        "critic": [(399,)],
+    }
+    env.observation_manager.group_obs_dim = {
+        "policy": (229,),
+        "critic": (399,),
+    }
+    env.observation_manager.cfg["policy"] = SimpleNamespace(
+        history_length=None,
+        to_dict=lambda: {"action_epoch": {"history_length": 0}},
+    )
+    actor = SimpleNamespace(
+        name="action_ball_full_mdp_action_epoch_v1",
+        obs_mode="action_ball_full_mdp",
+        total_dim=229,
+        terms=(_Term("action_epoch", 229),),
+    )
+
+    facts = TC.runtime_execution_facts(env, actor)
+
+    assert facts["critic_obs_contract"] == (
+        "action_ball_full_mdp_action_epoch_critic_v1"
+    )
+    assert facts["critic_obs_total_dim"] == 399
+    assert facts["critic_obs_term_names"] == ["action_epoch"]
+    assert facts["critic_obs_term_dims"] == [399]
+
+    env.observation_manager.group_obs_term_dim["critic"] = [(398,)]
+    env.observation_manager.group_obs_dim["critic"] = (398,)
+    with pytest.raises(RuntimeError, match="ActionEpoch critic observation"):
+        TC.runtime_execution_facts(env, actor)
+
+
 def test_runtime_contract_rejects_pre_8320_observation_cfg_shape():
     env = _env()
     env.observation_manager.cfg = SimpleNamespace(policy=_PolicyCfg())
