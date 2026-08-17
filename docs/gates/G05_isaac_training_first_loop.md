@@ -8,8 +8,11 @@ Isaac Sim 5.1、IsaacLab `8320e0be…`、Python3.11、RSL-RL3.1.2/TensorDict；�
 reset均通过；selected generation `[1,1] -> [2,1]`、peer row不变、observation/reward finite。
 训练路径复用 upstream RSL3 `OnPolicyRunner.learn()`，只在零参数`alg.update()`外接
 `PENDING fsync -> destructive owner ACK -> EPOCH_ACK fsync -> stdout`；direct测试覆盖成功顺序、
-optimizer异常和PENDING fsync失败。真实`2 env × 2 update`仍等Pod2 GPU0自然空闲，A1000学习趋势、
-contact/outcome/recovery分母和C family均`未测`，所以Gate不晋级。环境和下一条命令见
+optimizer异常和PENDING fsync失败。Pod1 GPU1 fresh canary已真实穿过env/manager构造，得到229/399-D
+observation和20-term Reward；随后在PPO/WAL前暴露IsaacLab8320 API首错：manager cfg为`dict`，旧
+history consumer仍访问`.policy`，日志SHA=`40c6631…5051b9f`。窄修的dependency-light测试为
+`143 passed`，但fresh fix-run、A1000学习趋势、contact/outcome/recovery分母和C family仍`未测`，
+所以Gate不晋级。环境和下一条命令见
 [唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)与
 [环境身份合同](../operations/action_ball_isaac51_environment_identity_20260818.md)。
 

@@ -2028,7 +2028,7 @@ def test_legacy_hard_contract_rejects_either_full_mdp_mode():
             )
 
 
-def test_run_source_has_both_real_callsites_and_no_config_supplied_factory():
+def test_run_source_has_real_callsites_exact_runner_selection_and_no_config_factory():
     source = inspect.getsource(train_mod._run_with_environment_close_owner)
     tree = ast.parse(source)
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
@@ -2052,9 +2052,22 @@ def test_run_source_has_both_real_callsites_and_no_config_supplied_factory():
     runner_calls = [
         node
         for node in calls
-        if isinstance(node.func, ast.Name) and node.func.id == "OnPolicyRunner"
+        if isinstance(node.func, ast.Name) and node.func.id == "runner_type"
     ]
     assert len(runner_calls) == 1
+    runner_type_assignments = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "runner_type"
+    ]
+    assert len(runner_type_assignments) == 1
+    runner_choice = runner_type_assignments[0].value
+    assert isinstance(runner_choice, ast.IfExp)
+    assert ast.unparse(runner_choice.body) == "ActionBallFullMdpRsl3Runner"
+    assert ast.unparse(runner_choice.orelse) == "OnPolicyRunner"
     runner_keywords = {
         keyword.arg: ast.unparse(keyword.value)
         for keyword in runner_calls[0].keywords
@@ -2087,7 +2100,7 @@ def test_run_source_has_both_real_callsites_and_no_config_supplied_factory():
     contract_index = source.index(
         "_finalize_action_ball_full_mdp_hard_contract("
     )
-    runner_index = source.index("runner = OnPolicyRunner(")
+    runner_index = source.index("runner = runner_type(")
     assert (
         resolve_index
         < parse_index

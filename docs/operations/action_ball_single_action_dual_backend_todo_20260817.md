@@ -37,7 +37,8 @@ deployment、真机或物理安全。
 - Git 管理代码；忽略的机器人 USD/大模型只作为外部资产，以源路径和 SHA-256 绑定。
 - FullMDP 使用 upstream RSL3 `OnPolicyRunner.learn()`；只在零参数 `alg.update()` 外包一层
   `PENDING fsync -> owner ACK -> EPOCH_ACK fsync -> stdout`。
-- 第一条真实训练为 Pod2 GPU0、family A、`N=2 × 2 update`；成功后启动一个不重启的 A1000。
+- 第一条真实训练已按 Franco 新调度切到 Pod1 空卡；源码仍由 Git exact commit 下载，family A
+  `N=2 × 2 update` 成功后才启动一个不重启的 A1000。
 - A1000 在 20/50/100/200/500/1000 只读里程碑，不因“看起来不好”自动停止。
 
 ### 延后
@@ -64,31 +65,32 @@ deployment、真机或物理安全。
 | 2 | `PASS` | FullMDP lifecycle 重基线到 IsaacLab 8320；exact Kit cfg、train wiring 和 focused union 通过 | 不再维护 2.1 lifecycle |
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
-| 5 | `WAIT-resource` | Pod2 GPU0 当前被 foreign 6144-env run 占用；GPU1/2也在用，禁止共驻、signal、kill或换卡 | GPU0自然空闲后一次执行 A `2×2` |
-| 6 | `NEXT` | A `2×2` 若自然 RC0，立即用 fresh namespace 启动同进程 A1000 | 读六个里程碑 |
+| 5 | `HOLD-first-code` | Pod1 exact 5.1/8320/RSL3、Git HEAD、USD与GPU1均通过；fresh canary完整构造229/399 observation与20-term Reward后，在PPO/WAL前因`observation_manager.cfg`已是8320 `dict`、旧consumer仍读`.policy`而RC1。日志SHA=`40c6631…5051b9f`，namespace已消费且不重试 | exact dict consumer + 反例 + fresh commit |
+| 6 | `NEXT-fresh-fix` | 窄修只把history consumer迁到exact `cfg["policy"]`，dependency-light `143 passed`；不得借机加版本兼容层 | 提交/push后新Git root、新namespace再跑A `2×2` |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `HOLD-producers` | MuJoCo 已有 Plant/R05→M04 packed boundary，但缺真实 vector observation/reward/termination/reset lineage 13类producer | producer-first实现后才 `learn(1)` |
-| 10 | `PASS-capacity` | Pod2 `/workspace` 当前约 73 GB free，足够此次 canary/A1000；Pod1归Jiayi，不写、不清、不发车 | 仅清理本任务命名空间 |
+| 10 | `PASS-cleanup / HOLD-retention` | Pod1缓存清理只删除无live-ref的`__pycache__/.pytest_cache`和一个旧verify scratch，free由约16.53GB增至24GB级；未碰foreign PID、checkpoint、日志或资产。长跑仍须监控foreign checkpoint增长 | fresh canary前重验至少20GiB；A1000另钉retention |
 
 ## 5. 下一条命令
 
-冷启动 wrapper：
+已消费、不得重试的首条 Pod1 GPU1 wrapper：
 
 ```text
-.codex-tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_pod2_gpu0_20260818.sh
-SHA256=d4b294f740047b261f7b3c73fe0f3495463f9414996a1b462bf415b3ce1ef61f
+.codex-tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_pod1_gpu1_20260818.sh
+SHA256=33dc6cf50ae5a454dedebf43e0d8a2a09c49d221e3a7940b533922cb8c3015db
 ```
 
 远端副本：
 
 ```text
-/tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_pod2_gpu0_20260818.sh
+/tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_pod1_gpu1_20260818.sh
 ```
 
-它要求 exact approval、clean Git HEAD、Isaac/IsaacLab/asset identity、至少 20 GiB workspace、GPU0 queue
+它要求 exact approval、clean Git HEAD、Isaac/IsaacLab/asset identity、至少 20 GiB workspace、GPU1 queue
 与 Kit 双锁；拿锁后再次确认物理 GPU UUID、显存和 zero compute PID，才以 no-clobber 创建 guard/log。
-失败不 retry、不清理、不 signal。GPU0 busy 时不得执行或消费 namespace。
+它已自然RC1并保留日志，不能重试、清理或重新签名。修复只能以新commit、新Git root、新namespace和
+新wrapper执行；下一份wrapper在fix commit和测试完成前不冻结。
 
 ## 6. A1000 同进程里程碑
 
@@ -129,6 +131,7 @@ journal、checkpoint schema 和重复证明 gate。核心闭包约 14.9 万行�
 ## 8. 存储边界
 
 “超过 500 GB”是 Pod `/workspace` 配额，不是本机 repo；本机 `nohope` 约 1.56 GiB。本机已按
-quarantine→`git fsck` 回收约 470 MB。Pod1当前归Jiayi，任何 cache/scratch/log都不动。Pod2只允许
-删除本任务自有、无 live fd/cwd、已保留证据且能精确重建的 namespace；外部资产、foreign run、
-canonical logs和单副本证据不能按大小直接删。
+quarantine→`git fsck` 回收约 470 MB。2026-08-18 Pod1切回执行后，只删除6,902个可重建且无live-ref的
+`__pycache__/.pytest_cache`与旧`fullmdp-verify2.pdvCeV` scratch；观测free从约16.53GB升到24GB级。
+外部资产、foreign run、checkpoint、canonical logs和单副本证据仍不能按大小直接删；每次fresh run
+前重验磁盘增长和至少20GiB余量。

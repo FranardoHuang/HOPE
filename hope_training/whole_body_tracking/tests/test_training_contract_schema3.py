@@ -164,7 +164,7 @@ def _env(
         active_terms={"policy": ["foo", "bar"]},
         group_obs_term_dim={"policy": [(2,), (1,)]},
         group_obs_dim={"policy": (3,)},
-        cfg=SimpleNamespace(policy=_PolicyCfg()),
+        cfg={"policy": _PolicyCfg()},
     )
     joint_pos_cfg = SimpleNamespace(
         use_default_offset=True,
@@ -196,7 +196,7 @@ def _command_env(command_func):
     env.observation_manager.active_terms = {"policy": ["command"]}
     env.observation_manager.group_obs_term_dim = {"policy": [(62,)]}
     env.observation_manager.group_obs_dim = {"policy": (62,)}
-    env.observation_manager.cfg.policy = SimpleNamespace(
+    env.observation_manager.cfg["policy"] = SimpleNamespace(
         history_length=None,
         to_dict=lambda: {"command": {"history_length": 0}},
     )
@@ -374,6 +374,13 @@ def test_runtime_contract_extracts_actual_execution_values():
     assert facts["anchor_body_index"] == 1
     assert facts["motion_segment_lengths"] == [11, 13]
     assert facts["motion_clip_fps"] == [50.0, 50.0]
+
+
+def test_runtime_contract_rejects_pre_8320_observation_cfg_shape():
+    env = _env()
+    env.observation_manager.cfg = SimpleNamespace(policy=_PolicyCfg())
+    with pytest.raises(RuntimeError, match="exact dict with a policy group"):
+        TC.runtime_execution_facts(env, _ActorContract())
 
 
 def test_runtime_projection_fact_is_true_only_and_runtime_verified():

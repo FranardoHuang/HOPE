@@ -17,8 +17,11 @@
 
 Jiayi/build_2的可复现说明与Pod2实机证明，旧Isaac4.5/RSL2和新Isaac5.1/RSL3不是等价学习环境。
 因此采用精确5.1/8320/RSL3栈，并将FullMDP训练面缩成upstream RSL3 loop加一枚optimizer-boundary
-adapter。真实Kit N=2 reset/readback已过；A `2×2`只等GPU0自然空闲，随后同进程A1000在
-20/50/100/200/500/1000只读趋势。2/5/14/60 update只回答工程链，不回答可学性。
+adapter。真实Kit N=2 reset/readback已过；Pod1 GPU1 fresh A canary进一步证明真实环境能安装
+229/399-D observation与20-term Reward，但在PPO/WAL前因IsaacLab8320 manager cfg的`dict` API与旧
+history consumer不匹配而RC1（日志SHA=`40c6631…5051b9f`）。这是迁移首错，不是Reward或学习反例；
+窄修后仍须fresh `2×2`，随后同进程A1000在20/50/100/200/500/1000只读趋势。2/5/14/60 update只回答
+工程链，不回答可学性。
 
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery
 分母、termination reason和episode length；到1000后才区分权重失衡、触发率不足、分母错误或环境不可学。

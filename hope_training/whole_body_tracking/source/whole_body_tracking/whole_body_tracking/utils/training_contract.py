@@ -2426,7 +2426,12 @@ def _policy_layout(env) -> tuple[list[str], list[int], int]:
 
 
 def _observation_history_lengths(env, names: list[str]) -> list[int]:
-    group_cfg = env.observation_manager.cfg.policy
+    manager_cfg = env.observation_manager.cfg
+    if type(manager_cfg) is not dict or "policy" not in manager_cfg:
+        raise RuntimeError(
+            "IsaacLab 8320 observation-manager cfg must be an exact dict with a policy group"
+        )
+    group_cfg = manager_cfg["policy"]
     if group_cfg.history_length is not None:
         return [int(group_cfg.history_length)] * len(names)
     cfg_by_name = group_cfg.to_dict()
