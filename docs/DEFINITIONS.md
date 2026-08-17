@@ -18,6 +18,13 @@
 
 ## 当前训练与判卷术语
 
+- **FullMDP RSL3 adapter / FullMDP RSL3优化边界适配器**：不复制RSL-RL3 rollout/storage/env-step，
+  只包住真实零参数`alg.update()`，把FullMDP的pre-optimizer freeze、post-update summary、durable WAL与
+  destructive ACK按一次性顺序接入。它不是新trainer、checkpoint或安全证明。
+- **A1000 / family A千轮早期趋势长跑**：同一fresh进程、同一seed和Reward连续完成1000个PPO update，
+  在20/50/100/200/500/1000只读日志/WAL/TensorBoard；节点不重启、不改配置。它回答早期学习趋势，
+  仍是`diagnostic_unauthorized`，不是formal promotion或可恢复长跑。
+
 | 术语 | 人话 |
 | --- | --- |
 | `setting` | 一整套可复现配方：动作、观测、reward、题库、plant、训练方法和裁决尺必须一起指定。只换一项就是新 setting。 |

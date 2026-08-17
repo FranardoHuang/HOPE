@@ -7,11 +7,30 @@
 - 执行者：Codex
 - 复核/决策负责人：Franco
 - 本 successor 最高证据等级：`E1`；历史 negative-control 另有 `E3` 诊断，不传递为新系统 E3
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-04
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-18
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
-[`origin/main` 的 `NOW`](../../NOW.md)。本分支同时保留 `L194` legacy fixed-question
+[`origin/main` 的 `NOW`](../../NOW.md)。
+
+## 2026-08-18 科学裁决：先真实运行，不再扩骨架
+
+Jiayi/build_2的可复现说明与Pod2实机证明，旧Isaac4.5/RSL2和新Isaac5.1/RSL3不是等价学习环境。
+因此采用精确5.1/8320/RSL3栈，并将FullMDP训练面缩成upstream RSL3 loop加一枚optimizer-boundary
+adapter。真实Kit N=2 reset/readback已过；A `2×2`只等GPU0自然空闲，随后同进程A1000在
+20/50/100/200/500/1000只读趋势。2/5/14/60 update只回答工程链，不回答可学性。
+
+本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery
+分母、termination reason和episode length；到1000后才区分权重失衡、触发率不足、分母错误或环境不可学。
+历史C曲线中action penalty负正比约`10.39 -> 3.45`及episode-length谷底恢复只作为待观察模式，
+不能直接复制权重。EXP只保留这类假设、指标、结果和裁决；命令、锁和namespace状态只在
+[唯一执行 TODO](../../operations/action_ball_single_action_dual_backend_todo_20260817.md)记录。
+
+MuJoCo M05骨架因没有真实`step/reset`成功路径已撤回。MuJoCo A/C当前只到Plant/R05→M04 packed
+boundary，仍缺13类真实semantic producer；在211/319 observation、Reward、termination、masked-reset
+lineage进入既有VecEnv前，不写新的root/receipt/schema，也不声称接近GPU训练。
+
+本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`
 225/318-D prototype，以及当前 fresh `A211/C211` 211/319-D successor。A211/C211 从
 actor 删除 raw `teacher_base_now_world(15)`，在 actor/critic 末尾新增原子

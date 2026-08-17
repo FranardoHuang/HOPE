@@ -8,6 +8,14 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: FullMDP 已从旧 Isaac 4.5/RSL-RL2 执行面迁到 Jiayi/build_2 的精确
+  Isaac Sim 5.1、IsaacLab `8320e0be…`、Python3.11、RSL-RL3.1.2 栈。代码通过 clean Git branch
+  传到 Pod2；真实 Kit N=2 canonical reset 与 forced selected reset通过。FullMDP 不再移植
+  14.6k行旧runner，而复用 upstream RSL3 loop，仅新增397行 optimizer-boundary/WAL adapter；
+  host direct=`3 passed`。Pod2 GPU0 当前有 foreign 6144-env run，故 A `2 env × 2 update` 只完成
+  no-clobber冷准备，等待自然空闲，不共驻、不signal。执行状态、长跑节点与MuJoCo producer blocker
+  见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
+
 - 2026-08-06: 过期结构清理**第二轮**。再扫一遍全仓（AST 取定义 + 全仓原文引用计数，含字符串／
   `getattr`／`importlib`／docs／yaml／json；另加一遍模块级字面量常量的跨文件相等聚类），删掉 8 处
   零调用点结构，其中两处是**已经漂了的镜像**：`LazyActionTaskPool._refill`（129 行，`request()`

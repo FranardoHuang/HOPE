@@ -2,6 +2,14 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-18 producer-first更正（Gate 仍 `Partial`）：**一次M05 root骨架尝试只把真实
+Plant/MotionBank/R05/M04构造到一起，但`step/reset`仍fail-closed，属于HANDOFF禁止的zero-callpoint
+债务，已完整撤回。现有MuJoCo API只闭合Plant/R05→M04 packed boundary；真实vector receipt仍缺
+211/319 observation、Reward、termination和masked-reset lineage等13类核心producer。下一步不再加
+root/receipt/schema，而是把这些producer接入既有semantic composer，能真实产出VecEnv step后才允许
+GPU `learn(1) -> drain -> learn(1)`。Isaac A先跑不代表MuJoCo parity，MuJoCo A/C距离真实运行仍明显
+更远，见[唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)。
+
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
 可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory

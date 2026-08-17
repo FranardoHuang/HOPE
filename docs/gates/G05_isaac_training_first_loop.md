@@ -2,6 +2,17 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-18 FullMDP Isaac5.1/RSL3 分支证据（Gate 仍 `Partial`）：**附件与 Pod2 实机共同锁定
+Isaac Sim 5.1、IsaacLab `8320e0be…`、Python3.11、RSL-RL3.1.2/TensorDict；旧4.5/2.1/RSL2
+不能作为等价基线。FullMDP lifecycle 已按8320重基线，真实Kit N=2 canonical reset和forced selected
+reset均通过；selected generation `[1,1] -> [2,1]`、peer row不变、observation/reward finite。
+训练路径复用 upstream RSL3 `OnPolicyRunner.learn()`，只在零参数`alg.update()`外接
+`PENDING fsync -> destructive owner ACK -> EPOCH_ACK fsync -> stdout`；direct测试覆盖成功顺序、
+optimizer异常和PENDING fsync失败。真实`2 env × 2 update`仍等Pod2 GPU0自然空闲，A1000学习趋势、
+contact/outcome/recovery分母和C family均`未测`，所以Gate不晋级。环境和下一条命令见
+[唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)与
+[环境身份合同](../operations/action_ball_isaac51_environment_identity_20260818.md)。
+
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
 部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
 历史 225/318-D Stage1 V2 和 194/318-D fixed-question 只保留证据账；当前 branch
