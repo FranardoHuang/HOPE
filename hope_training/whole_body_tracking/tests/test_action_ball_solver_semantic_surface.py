@@ -598,8 +598,7 @@ NARROWING_CONTROLS = (
         [
             (
                 "continuous_questions.py",
-                '    """Solve exact externally supplied ball proposals once,'
-                " with no sampling or redraw.",
+                '    """Solve exact external proposals without observing a tensor on the host.',
                 '    """MUTATED DOCSTRING that says something entirely different'
                 " about this function.",
             )
@@ -689,16 +688,40 @@ def _historical_reader(revision):
     return read
 
 
-#: Symbols the declaration/actual bridge ADDED TO THE SOURCE.  They do not exist
-#: at the four historical revisions below, so the historical comparison is
-#: evaluated with them removed -- explicitly, by name, from a list this file
-#: owns, so that "the historical test quietly stopped covering something" cannot
-#: happen without editing it.
+#: Covered symbols added after the four historical narrowing revisions.  They
+#: do not exist at those revisions, so the historical comparison is evaluated
+#: with them removed -- explicitly, by name, from a list this file owns, so
+#: that "the historical test quietly stopped covering something" cannot happen
+#: without editing it.  This is only a historical-source evolution map: every
+#: listed name must still be covered by today's live semantic surface.
 #:
 #: ``_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS`` is deliberately NOT
 #: here: this batch only added it to the coverage list, the constant itself has
 #: existed all along, so it can and should still be compared across revisions.
-COVERED_SYMBOLS_ADDED_BY_THE_DECLARATION_BRIDGE = {
+COVERED_SYMBOLS_ADDED_AFTER_HISTORICAL_REVISIONS = {
+    "continuous_questions.py": (
+        "DeviceProposalSolveResult",
+        "DeviceProposalSolveResult.p_contact",
+        "DeviceProposalSolveResult.v_racket",
+        "DeviceProposalSolveResult.n_racket",
+        "DeviceProposalSolveResult.v_ball_in",
+        "DeviceProposalSolveResult.w_ball_in",
+        "DeviceProposalSolveResult.aim_xy",
+        "DeviceProposalSolveResult.ok",
+        "DeviceProposalSolveResult.resid_m",
+        "DeviceProposalSolveResult.attempted_v_ball_in",
+        "DeviceProposalSolveResult.producer_fault_bits",
+        "DeviceProposalSolveResult.proposals",
+        "PRODUCER_FAULT_NONFINITE_PROPOSAL",
+        "PRODUCER_FAULT_REFERENCE_NORMAL",
+        "PRODUCER_FAULT_BASE_QUATERNION",
+        "PRODUCER_FAULT_ACTION_RANGE",
+        "PRODUCER_FAULT_PROTOTYPE_DIRECTION",
+        "PRODUCER_FAULT_PROTOTYPE_SPEED",
+        "PRODUCER_FAULT_PROTOTYPE_FACE_SIGN",
+        "PRODUCER_FAULT_MASK",
+        "solve_proposals_device",
+    ),
     "hope_commands.py": (
         "action_ball_declared_solver_knobs",
         "action_ball_solver_cfg_from_declaration",
@@ -735,7 +758,7 @@ def test_real_commits_that_invalidated_the_whole_file_pin_are_now_transparent(
 
     restricted = {}
     for filename, covered in SURFACE.COVERED.items():
-        added = COVERED_SYMBOLS_ADDED_BY_THE_DECLARATION_BRIDGE.get(
+        added = COVERED_SYMBOLS_ADDED_AFTER_HISTORICAL_REVISIONS.get(
             filename, ()
         )
         for name in added:
@@ -766,6 +789,58 @@ def test_real_commits_that_invalidated_the_whole_file_pin_are_now_transparent(
 # --------------------------------------------------------------------------- #
 def test_live_checkout_has_no_coverage_blockers():
     assert SURFACE.surface_blockers(_live_reader()) == ()
+
+
+def test_device_proposal_boundary_is_covered_not_excluded():
+    required = {
+        "DeviceProposalSolveResult",
+        "DeviceProposalSolveResult.p_contact",
+        "DeviceProposalSolveResult.v_racket",
+        "DeviceProposalSolveResult.n_racket",
+        "DeviceProposalSolveResult.v_ball_in",
+        "DeviceProposalSolveResult.w_ball_in",
+        "DeviceProposalSolveResult.aim_xy",
+        "DeviceProposalSolveResult.ok",
+        "DeviceProposalSolveResult.resid_m",
+        "DeviceProposalSolveResult.attempted_v_ball_in",
+        "DeviceProposalSolveResult.producer_fault_bits",
+        "DeviceProposalSolveResult.proposals",
+        "PRODUCER_FAULT_NONFINITE_PROPOSAL",
+        "PRODUCER_FAULT_REFERENCE_NORMAL",
+        "PRODUCER_FAULT_BASE_QUATERNION",
+        "PRODUCER_FAULT_ACTION_RANGE",
+        "PRODUCER_FAULT_PROTOTYPE_DIRECTION",
+        "PRODUCER_FAULT_PROTOTYPE_SPEED",
+        "PRODUCER_FAULT_PROTOTYPE_FACE_SIGN",
+        "PRODUCER_FAULT_MASK",
+        "solve_proposals_device",
+    }
+    covered = set(SURFACE.COVERED["continuous_questions.py"])
+    excluded = set(SURFACE.EXCLUDED["continuous_questions.py"])
+    assert required <= covered
+    assert required.isdisjoint(excluded)
+
+
+def test_fresh_racket_protocol_and_drain_name_collisions_are_explicit():
+    """Fresh runtime plumbing must not be mislabelled as solver mathematics."""
+
+    excluded = SURFACE.EXCLUDED["hope_commands.py"]
+    assert excluded[
+        "RacketTargetCommand._initialize_action_ball_full_mdp_racket_protocol_state"
+    ] == "fresh_full_mdp_runtime_protocol"
+    for symbol in (
+        "_ActionBallContinuousRacketPreparedPpoDrainPack.pack",
+        "_ActionBallContinuousRacketPreparedPpoDrainPack.authority",
+    ):
+        assert excluded[symbol] == "overapproximated_name_collision"
+
+    declaration = SURFACE.semantic_surface_declaration(_live_reader())
+    reached = declaration["excluded_but_reached_from_covered"]
+    assert (
+        "hope_commands.py:"
+        "RacketTargetCommand._initialize_action_ball_full_mdp_racket_protocol_state"
+        not in reached
+    )
 
 
 def test_new_symbol_in_a_fully_enumerated_source_is_refused():
@@ -880,16 +955,16 @@ def test_an_unreachability_claiming_exclusion_that_is_reached_is_refused(
 
     reader = _mutated_reader(
         [
-            (
-                "continuous_questions.py",
-                "\n    out, good, reasons = _solve_fixed_direction_batch(\n"
-                "        clip_ids=clip_ids, p_contact=p_contact,"
-                " v_ball_in=v_ball_in,\n",
-                "\n    _uniform_box(None, None, None, None)\n"
-                "    out, good, reasons = _solve_fixed_direction_batch(\n"
-                "        clip_ids=clip_ids, p_contact=p_contact,"
-                " v_ball_in=v_ball_in,\n",
-            )
+                (
+                    "continuous_questions.py",
+                    "\n    out, good, reasons = _solve_fixed_direction_batch(\n"
+                    "        clip_ids=safe_clip_ids,\n"
+                    "        p_contact=safe_p_contact,\n",
+                    "\n    _uniform_box(None, None, None, None)\n"
+                    "    out, good, reasons = _solve_fixed_direction_batch(\n"
+                    "        clip_ids=safe_clip_ids,\n"
+                    "        p_contact=safe_p_contact,\n",
+                )
         ]
     )
     blockers = SURFACE.surface_blockers(reader)

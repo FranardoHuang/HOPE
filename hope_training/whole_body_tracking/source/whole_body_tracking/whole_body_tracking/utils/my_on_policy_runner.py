@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections import namedtuple
 import hashlib
+import importlib
 import importlib.metadata as importlib_metadata
 import io
 import json
@@ -13,7 +15,8 @@ import stat
 import sys
 import tempfile
 import time
-from typing import Dict, Mapping, Optional, Tuple
+from types import MappingProxyType
+from typing import Callable, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -110,6 +113,557 @@ _EXACT_RESUME_TELEMETRY_KEYS = (
     "wandb_run_id",
     "wandb_run_name",
 )
+
+_ACTION_BALL_R10_RUNNER_SCHEMA_VERSION = 1
+_ACTION_BALL_R10_RUNNER_HANDOFF_KIND = (
+    "action_ball_r10_isaac_runner_boundary_handoff_v1"
+)
+_ACTION_BALL_R10_RUNNER_SAVE_AUTHORITY_KIND = (
+    "action_ball_r10_isaac_runner_save_authority_v1"
+)
+_ACTION_BALL_R10_COLD_RESTORE_CAPSULE_KIND = (
+    "action_ball_r10_isaac_runner_cold_restore_capsule_v1"
+)
+_ACTION_BALL_R10_RUNNER_INTEGRATION_STATUS = "ISAAC_RUNNER_ADAPTER_ONLY_HOLD"
+_ACTION_BALL_R10_RUNNER_OWNER_IDS = (
+    "trainer.policy",
+    "trainer.optimizer_schedule",
+    "trainer.normalizer.actor",
+    "trainer.normalizer.critic",
+    "trainer.rollout_frontier",
+)
+_ACTION_BALL_FULL_MDP_DRAIN_OWNER_ORDER = (
+    "r05_runtime",
+    "motion",
+    "racket",
+    "physical_ball",
+    "r06_landing_outcome",
+    "r03_strike_fact",
+    "r07_recovery",
+)
+_ACTION_BALL_FULL_MDP_DRAIN_CHECKPOINT_KIND = (
+    "action_ball_full_mdp_ppo_drain_checkpoint_v1"
+)
+_ACTION_BALL_FULL_MDP_FORMAL_MODE = "formal"
+_ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE = (
+    "single_action_lean"
+)
+_ACTION_BALL_EPOCH_UPDATE_ACK_TELEMETRY_SCHEMA_VERSION = 10
+_ACTION_BALL_EPOCH_UPDATE_ACK_TELEMETRY_KIND = (
+    "action_ball_epoch_optimizer_update_ack_telemetry_v10"
+)
+_ActionBallFullMdpRunnerDrainChronology = namedtuple(
+    "_ActionBallFullMdpRunnerDrainChronology",
+    (
+        "global_receipt",
+        "update_index",
+        "completed_environment_steps",
+        "optimizer_returned",
+        "post_update_acknowledged",
+        "operation_sequence",
+        "drain_sequence",
+        "projection",
+        "telemetry_emitted",
+    ),
+    module=__name__,
+)
+
+ActionBallR10ColdRestoreCapsule = namedtuple(
+    "ActionBallR10ColdRestoreCapsule",
+    (
+        "schema_version",
+        "kind",
+        "checkpoint_bytes",
+        "expected_external_pins",
+    ),
+    module=__name__,
+)
+ActionBallR10ColdRestoreCapsule.__doc__ = (
+    "Externally pinned bytes admitted before RSL-RL asks for observations. "
+    "There is deliberately no path fallback or checkpoint-owned pin source."
+)
+
+ActionBallR10RunnerBoundaryHandoff = namedtuple(
+    "ActionBallR10RunnerBoundaryHandoff",
+    (
+        "schema_version",
+        "kind",
+        "integration_status",
+        "runtime_wiring",
+        "continuation_authorized",
+        "completed_update_index",
+        "next_learning_iteration",
+        "storage_step",
+        "transition_empty",
+        "environment_step_in_flight",
+        "completed_environment_steps",
+        "actor_normalizer_calls",
+        "critic_normalizer_calls",
+        "final_normalized_actor_observations",
+        "final_normalized_critic_observations",
+        "recurrent_frontier",
+        "recurrent_actor_state",
+        "recurrent_critic_state",
+        "runner_frontier_sha256",
+    ),
+    module=__name__,
+)
+ActionBallR10RunnerBoundaryHandoff.__doc__ = (
+    "Detached runner frontier handed to the opt-in full-MDP adapter."
+)
+
+ActionBallR10RunnerSaveAuthority = namedtuple(
+    "ActionBallR10RunnerSaveAuthority",
+    (
+        "schema_version",
+        "kind",
+        "family",
+        "immutable_pins",
+        "boundary",
+        "runner_join_claims",
+    ),
+    module=__name__,
+)
+ActionBallR10RunnerSaveAuthority.__doc__ = (
+    "One adapter decision to seal the complete registry at this boundary."
+)
+
+
+def _action_ball_r10_module():
+    """Import the dependency-light pure seam only for an explicit R10 lane."""
+
+    return importlib.import_module("action_ball_full_mdp_checkpoint")
+
+
+def _action_ball_full_mdp_lean_runtime_module():
+    """Import the exact diagnostic epoch owner only for its explicit lane."""
+
+    return importlib.import_module(
+        "whole_body_tracking.tasks.tracking.mdp."
+        "action_ball_full_mdp_lean_runtime"
+    )
+
+
+def _action_ball_full_mdp_durable_wal_module():
+    return importlib.import_module(
+        "whole_body_tracking.utils.action_ball_full_mdp_durable_wal"
+    )
+
+
+def _action_ball_full_mdp_canonical_sha256(value: object) -> str:
+    """Canonicalize the runner writer without accepting another writer's root."""
+
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _action_ball_r10_clone_tree(value: object) -> object:
+    """Detach tensors and containers without accepting arbitrary pickle types."""
+
+    if torch.is_tensor(value):
+        return value.detach().clone()
+    if type(value) is dict:
+        return {
+            key: _action_ball_r10_clone_tree(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, Mapping):
+        return {
+            key: _action_ball_r10_clone_tree(child)
+            for key, child in value.items()
+        }
+    if type(value) is tuple:
+        return tuple(_action_ball_r10_clone_tree(child) for child in value)
+    if type(value) is list:
+        return [_action_ball_r10_clone_tree(child) for child in value]
+    if value is None or type(value) in (bool, int, float, str, bytes):
+        return value
+    raise RuntimeError(
+        "R10 runner state contains unsupported clone type "
+        f"{type(value).__module__}.{type(value).__qualname__}"
+    )
+
+
+def _action_ball_r10_torch_save_bytes(value: object) -> bytes:
+    """Serialize a validated tensor tree; the outer R10 package pins the bytes."""
+
+    stream = io.BytesIO()
+    torch.save(value, stream)
+    return stream.getvalue()
+
+
+def _action_ball_r10_torch_load_bytes(value: object) -> object:
+    if type(value) is not bytes or not value:
+        raise RuntimeError("R10 runner owner payload must be non-empty exact bytes")
+    try:
+        return torch.load(
+            io.BytesIO(value),
+            map_location="cpu",
+            weights_only=True,
+        )
+    except Exception as exc:
+        raise RuntimeError("R10 runner owner payload failed safe tensor loading") from exc
+
+
+def _action_ball_r10_validate_hidden_tree(value: object, *, label: str) -> None:
+    if torch.is_tensor(value):
+        if (
+            value.numel() <= 0
+            or not value.is_floating_point()
+            or not bool(torch.isfinite(value).all())
+        ):
+            raise RuntimeError(f"R10 {label} hidden tensor is invalid")
+        return
+    if type(value) is tuple and value:
+        for index, child in enumerate(value):
+            _action_ball_r10_validate_hidden_tree(
+                child, label=f"{label}[{index}]"
+            )
+        return
+    raise RuntimeError(f"R10 {label} hidden state has an unsupported shape")
+
+
+def _action_ball_r10_validate_frontier_payload(
+    value: object,
+    *,
+    expected_update_index: Optional[int] = None,
+) -> dict:
+    """Validate the saved normalized frontier without touching a live runner."""
+
+    if type(value) is not dict:
+        raise RuntimeError("R10 rollout frontier payload must be an exact dict")
+    required = {
+        "schema_version",
+        "kind",
+        "completed_update_index",
+        "next_learning_iteration",
+        "num_envs",
+        "num_steps_per_env",
+        "storage_step",
+        "transition_empty",
+        "completed_environment_steps",
+        "actor_normalizer_calls",
+        "critic_normalizer_calls",
+        "privileged_obs_type",
+        "final_normalized_actor_observations",
+        "final_normalized_critic_observations",
+        "recurrent_frontier",
+        "recurrent_actor_state",
+        "recurrent_critic_state",
+        "runner_frontier_sha256",
+    }
+    if set(value) != required:
+        raise RuntimeError(
+            "R10 rollout frontier keys differ: "
+            f"missing={sorted(required - set(value))} "
+            f"extra={sorted(set(value) - required)}"
+        )
+    if (
+        type(value["schema_version"]) is not int
+        or value["schema_version"] != _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION
+        or value["kind"] != "action_ball_r10_trainer_rollout_frontier_v1"
+    ):
+        raise RuntimeError("R10 rollout frontier schema/kind differs")
+    completed = value["completed_update_index"]
+    next_iteration = value["next_learning_iteration"]
+    if (
+        type(completed) is not int
+        or completed < 0
+        or type(next_iteration) is not int
+        or next_iteration != completed + 1
+    ):
+        raise RuntimeError("R10 rollout frontier update identity differs")
+    if expected_update_index is not None and completed != expected_update_index:
+        raise RuntimeError("R10 rollout frontier differs from checkpoint boundary")
+    num_envs = value["num_envs"]
+    num_steps = value["num_steps_per_env"]
+    if (
+        type(num_envs) is not int
+        or num_envs <= 0
+        or type(num_steps) is not int
+        or num_steps <= 0
+        or type(value["completed_environment_steps"]) is not int
+        or value["completed_environment_steps"] != num_steps
+        or type(value["actor_normalizer_calls"]) is not int
+        or value["actor_normalizer_calls"] != num_steps
+        or type(value["critic_normalizer_calls"]) is not int
+        or value["critic_normalizer_calls"] != num_steps
+    ):
+        raise RuntimeError("R10 rollout frontier step/normalizer accounting differs")
+    if value["storage_step"] != 0 or type(value["storage_step"]) is not int:
+        raise RuntimeError("R10 rollout frontier storage is not empty")
+    if value["transition_empty"] is not True:
+        raise RuntimeError("R10 rollout transition is not empty")
+    if value["privileged_obs_type"] != "critic":
+        raise RuntimeError("R10 rollout frontier lacks an explicit critic group")
+    actor = value["final_normalized_actor_observations"]
+    critic = value["final_normalized_critic_observations"]
+    for label, tensor in (("actor", actor), ("critic", critic)):
+        if (
+            not torch.is_tensor(tensor)
+            or tensor.ndim != 2
+            or tensor.shape[0] <= 0
+            or tensor.shape[1] <= 0
+            or not tensor.is_floating_point()
+            or not bool(torch.isfinite(tensor).all())
+        ):
+            raise RuntimeError(
+                f"R10 final normalized {label} observations are invalid"
+            )
+    if actor.shape[0] != critic.shape[0]:
+        raise RuntimeError("R10 actor/critic frontier world counts differ")
+    if actor.shape[0] != num_envs:
+        raise RuntimeError("R10 rollout frontier num_envs differs")
+    r10 = _action_ball_r10_module()
+    recurrent = value["recurrent_frontier"]
+    if recurrent not in (
+        r10.RecurrentFrontierStatus.SEALED.value,
+        r10.RecurrentFrontierStatus.NOT_APPLICABLE.value,
+    ) or type(recurrent) is not str:
+        raise RuntimeError("R10 recurrent frontier status differs")
+    actor_hidden = value["recurrent_actor_state"]
+    critic_hidden = value["recurrent_critic_state"]
+    if recurrent == r10.RecurrentFrontierStatus.NOT_APPLICABLE.value:
+        if actor_hidden is not None or critic_hidden is not None:
+            raise RuntimeError("non-recurrent R10 frontier retains hidden state")
+    elif actor_hidden is None or critic_hidden is None:
+        raise RuntimeError("recurrent R10 frontier is missing hidden state")
+    else:
+        _action_ball_r10_validate_hidden_tree(actor_hidden, label="actor")
+        _action_ball_r10_validate_hidden_tree(critic_hidden, label="critic")
+    digest = value["runner_frontier_sha256"]
+    if (
+        type(digest) is not str
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise RuntimeError("R10 runner frontier SHA-256 is invalid")
+    unhashed = {key: child for key, child in value.items() if key != "runner_frontier_sha256"}
+    if MotionOnPolicyRunner._exact_resume_tree_sha256(unhashed) != digest:
+        raise RuntimeError("R10 runner frontier content SHA-256 differs")
+    return value
+
+
+class _ActionBallR10EnvMethodGuard:
+    """Temporarily replace reset/get-observations on wrapper and unwrapped env."""
+
+    def __init__(self, env: object) -> None:
+        targets = []
+        for candidate in (env, getattr(env, "unwrapped", None)):
+            if candidate is not None and all(candidate is not current for current in targets):
+                targets.append(candidate)
+        self._targets = tuple(targets)
+        self._patches = []
+
+    def _patch(self, target: object, name: str, replacement: object) -> None:
+        if not hasattr(target, name):
+            return
+        namespace = getattr(target, "__dict__", None)
+        had_instance_value = isinstance(namespace, dict) and name in namespace
+        prior = namespace[name] if had_instance_value else getattr(target, name)
+        try:
+            setattr(target, name, replacement)
+        except Exception as exc:
+            raise RuntimeError(
+                f"R10 cold restore cannot guard env.{name}"
+            ) from exc
+        self._patches.append((target, name, had_instance_value, prior))
+
+    def install_initial_observation_shim(
+        self,
+        actor: torch.Tensor,
+        critic: torch.Tensor,
+    ) -> Callable[[], int]:
+        calls = {"count": 0}
+
+        def get_saved_frontier():
+            calls["count"] += 1
+            if calls["count"] != 1:
+                raise RuntimeError(
+                    "R10 cold construction requested observations more than once"
+                )
+            return (
+                actor.detach().clone(),
+                {
+                    "observations": {
+                        "critic": critic.detach().clone(),
+                    }
+                },
+            )
+
+        def reset_forbidden(*_args, **_kwargs):
+            raise RuntimeError("R10 cold construction forbids env.reset()")
+
+        def step_forbidden(*_args, **_kwargs):
+            raise RuntimeError("R10 cold construction forbids env.step()")
+
+        try:
+            for target in self._targets:
+                self._patch(target, "get_observations", get_saved_frontier)
+                self._patch(target, "reset", reset_forbidden)
+                self._patch(target, "step", step_forbidden)
+        except BaseException:
+            self.close()
+            raise
+        return lambda: calls["count"]
+
+    def install_restore_guards(self) -> None:
+        def getter_forbidden(*_args, **_kwargs):
+            raise RuntimeError("R10 cold restore forbids env.get_observations()")
+
+        def reset_forbidden(*_args, **_kwargs):
+            raise RuntimeError("R10 cold restore forbids env.reset()")
+
+        def step_forbidden(*_args, **_kwargs):
+            raise RuntimeError("R10 cold restore forbids env.step()")
+
+        try:
+            for target in self._targets:
+                self._patch(target, "get_observations", getter_forbidden)
+                self._patch(target, "reset", reset_forbidden)
+                self._patch(target, "step", step_forbidden)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        failures = []
+        for target, name, had_instance_value, prior in reversed(self._patches):
+            try:
+                if had_instance_value:
+                    setattr(target, name, prior)
+                else:
+                    delattr(target, name)
+            except BaseException as exc:
+                failures.append(
+                    f"{name}:{type(exc).__module__}."
+                    f"{type(exc).__qualname__}"
+                )
+        self._patches.clear()
+        if failures:
+            raise RuntimeError(
+                "R10 env method guard could not restore methods: "
+                + ",".join(failures)
+            )
+
+
+class _ActionBallR10TrainerOwner:
+    """Typed pure-seam owner for one runner-controlled mutation domain."""
+
+    def __init__(
+        self,
+        *,
+        descriptor: object,
+        mutation_version: int,
+        state_getter: Callable[[], object],
+        state_validator: Callable[[object], object],
+        state_installer: Callable[[object], None],
+        join_claims: Tuple[object, ...],
+        poison: Callable[[str], None],
+    ) -> None:
+        if type(mutation_version) is not int or mutation_version < 0:
+            raise RuntimeError("R10 trainer owner mutation version is invalid")
+        self.descriptor = descriptor
+        self._mutation_version = mutation_version
+        self._state_getter = state_getter
+        self._state_validator = state_validator
+        self._state_installer = state_installer
+        self._join_claims = join_claims
+        self._poison = poison
+        self._token_authority = object()
+
+    def mutation_version(self) -> int:
+        return self._mutation_version
+
+    def live_digest(self) -> str:
+        state = self._state_getter()
+        return MotionOnPolicyRunner._exact_resume_tree_sha256(state)
+
+    def freeze(self, boundary) -> object:
+        r10 = _action_ball_r10_module()
+        boundary_digest = r10.boundary_sha256(boundary)
+        nonce = hashlib.sha256(
+            (
+                self.descriptor.owner_id
+                + ":"
+                + str(self._mutation_version)
+                + ":"
+                + boundary_digest
+                + ":"
+                + self.live_digest()
+            ).encode("ascii")
+        ).hexdigest()
+        return r10.OwnerFreezeReceipt(
+            owner_id=self.descriptor.owner_id,
+            descriptor_sha256=r10.descriptor_sha256(self.descriptor),
+            boundary_sha256=boundary_digest,
+            mutation_version=self._mutation_version,
+            seal_nonce_sha256=nonce,
+        )
+
+    def export_sealed(self, receipt) -> object:
+        r10 = _action_ball_r10_module()
+        state = self._state_getter()
+        self._state_validator(state)
+        return r10.make_opaque_owner_state(
+            descriptor=self.descriptor,
+            receipt=receipt,
+            live_digest_sha256=MotionOnPolicyRunner._exact_resume_tree_sha256(
+                state
+            ),
+            payload=_action_ball_r10_torch_save_bytes(state),
+            join_claims=self._join_claims,
+        )
+
+    def prepare_restore(
+        self,
+        envelope,
+        immutable_pins,
+        owner_root_sha256: str,
+    ) -> object:
+        del immutable_pins
+        r10 = _action_ball_r10_module()
+        staged = _action_ball_r10_torch_load_bytes(envelope.payload)
+        self._state_validator(staged)
+        baseline = _action_ball_r10_torch_save_bytes(self._state_getter())
+        token_state = {
+            "authority": self._token_authority,
+            "staged": staged,
+            "baseline": baseline,
+            "baseline_version": self._mutation_version,
+            "target_version": envelope.mutation_version,
+        }
+        return r10.PreparedRestoreToken(
+            owner_id=self.descriptor.owner_id,
+            descriptor_sha256=r10.descriptor_sha256(self.descriptor),
+            checkpoint_owner_root_sha256=owner_root_sha256,
+            opaque_token=token_state,
+        )
+
+    def _token_state(self, token) -> dict:
+        value = token.opaque_token
+        if type(value) is not dict or value.get("authority") is not self._token_authority:
+            raise RuntimeError("R10 trainer restore token authority differs")
+        return value
+
+    def commit_restore(self, token) -> None:
+        state = self._token_state(token)
+        self._state_installer(state["staged"])
+        self._mutation_version = state["target_version"]
+
+    def rollback_restore(self, token) -> None:
+        state = self._token_state(token)
+        baseline = _action_ball_r10_torch_load_bytes(state["baseline"])
+        self._state_installer(baseline)
+        self._mutation_version = state["baseline_version"]
+
+    def poison_restore(self, reason: str) -> None:
+        self._poison(reason)
 
 
 def _mask_action_ball_211_wait_after_normalization(
@@ -340,6 +894,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         training_contract_lineage_exact: bool = False,
         training_launch_claim_sha256: Optional[str] = None,
         require_exact_resume_state: bool = False,
+        action_ball_r10_checkpoint_adapter: object = None,
+        action_ball_r10_cold_restore_capsule: object = None,
+        action_ball_full_mdp_runtime_owner: object = None,
+        action_ball_full_mdp_run_mode: object = None,
     ):
         if type(require_exact_resume_state) is not bool:
             raise TypeError("require_exact_resume_state must be a bool")
@@ -347,14 +905,260 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise TypeError(
                 "training_contract_lineage_exact must be an exact bool"
             )
+        full_mdp_enabled = action_ball_full_mdp_runtime_owner is not None
+        r10_requested = action_ball_r10_checkpoint_adapter is not None
+        if action_ball_full_mdp_run_mode is None:
+            # Preserve the already-reviewed formal constructor ABI.  The new
+            # diagnostic exception is never inferred: owner-without-R10 must
+            # carry its exact explicit mode.
+            full_mdp_run_mode = (
+                _ACTION_BALL_FULL_MDP_FORMAL_MODE
+                if full_mdp_enabled and r10_requested
+                else None
+            )
+        elif type(action_ball_full_mdp_run_mode) is not str:
+            raise TypeError("fresh full-MDP run mode must be an exact string")
+        else:
+            full_mdp_run_mode = action_ball_full_mdp_run_mode
+        if full_mdp_run_mode not in {
+            None,
+            _ACTION_BALL_FULL_MDP_FORMAL_MODE,
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE,
+        }:
+            raise RuntimeError("fresh full-MDP run mode is unsupported")
+        if full_mdp_run_mode is None and (full_mdp_enabled or r10_requested):
+            raise RuntimeError(
+                "fresh full-MDP runner requires the runtime owner and R10 "
+                "checkpoint adapter together"
+            )
+        if full_mdp_run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE and (
+            not full_mdp_enabled or not r10_requested
+        ):
+            raise RuntimeError(
+                "formal fresh full-MDP runner requires the runtime owner and "
+                "R10 checkpoint adapter together"
+            )
+        if full_mdp_run_mode == (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ) and (not full_mdp_enabled or r10_requested):
+            raise RuntimeError(
+                "single_action_lean requires one runtime owner and forbids "
+                "the R10 checkpoint adapter"
+            )
+        if (
+            full_mdp_run_mode
+            == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+            and action_ball_r10_cold_restore_capsule is not None
+        ):
+            raise RuntimeError(
+                "single_action_lean forbids a cold-restore capsule"
+            )
+        runtime_env = getattr(env, "unwrapped", env)
+        if (
+            full_mdp_run_mode
+            == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+            and (
+                type(getattr(runtime_env, "num_envs", None)) is not int
+                or runtime_env.num_envs <= 0
+            )
+        ):
+            raise RuntimeError(
+                "single_action_lean requires positive exact-int num_envs"
+            )
+        full_mdp_lean_runtime_module = None
+        full_mdp_lean_epoch_owner = None
+        full_mdp_lean_shot_slot_capacity = None
+        if full_mdp_run_mode == (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ):
+            full_mdp_lean_runtime_module = (
+                _action_ball_full_mdp_lean_runtime_module()
+            )
+            lean_owner_type = getattr(
+                full_mdp_lean_runtime_module,
+                "ActionBallFullMdpLeanRuntimeOwner",
+                None,
+            )
+            lean_summary_type = getattr(
+                full_mdp_lean_runtime_module,
+                "ActionEpochPpoBoundarySummary",
+                None,
+            )
+            if (
+                type(lean_owner_type) is not type
+                or type(lean_summary_type) is not type
+                or type(action_ball_full_mdp_runtime_owner)
+                is not lean_owner_type
+            ):
+                raise RuntimeError(
+                    "single_action_lean requires the exact code-owned lean "
+                    "runtime owner"
+                )
+            full_mdp_lean_epoch_owner = getattr(
+                action_ball_full_mdp_runtime_owner, "epoch_owner", None
+            )
+            epoch_module = getattr(full_mdp_lean_runtime_module, "epoch_v1", None)
+            epoch_owner_type = getattr(epoch_module, "ActionEpochOwner", None)
+            if (
+                type(epoch_owner_type) is not type
+                or type(full_mdp_lean_epoch_owner) is not epoch_owner_type
+                or getattr(full_mdp_lean_epoch_owner, "num_envs", None)
+                != runtime_env.num_envs
+                or getattr(action_ball_full_mdp_runtime_owner, "_ppo_drain", None)
+                is not action_ball_full_mdp_runtime_owner
+            ):
+                raise RuntimeError(
+                    "single_action_lean requires one exact ActionEpoch owner "
+                    "and no compatibility drain"
+                )
+            full_mdp_lean_shot_slot_capacity = getattr(
+                full_mdp_lean_epoch_owner, "shot_slot_capacity", None
+            )
+            if (
+                type(full_mdp_lean_shot_slot_capacity) is not int
+                or full_mdp_lean_shot_slot_capacity != 1
+            ):
+                raise RuntimeError(
+                    "single_action_lean ActionEpoch shot capacity differs"
+                )
+        full_mdp_callbacks = None
+        full_mdp_prepare_summary_callback = None
+        full_mdp_drain_owner = None
+        full_mdp_projection_callback = None
+        if full_mdp_enabled:
+            callback_names = (
+                "require_healthy",
+                "prepare_pre_optimizer_ppo_boundary",
+                "mark_optimizer_returned",
+                "acknowledge_post_update",
+                "poison_optimizer_boundary",
+            )
+            full_mdp_callbacks = tuple(
+                getattr(action_ball_full_mdp_runtime_owner, name, None)
+                for name in callback_names
+            )
+            missing = tuple(
+                name
+                for name, callback in zip(callback_names, full_mdp_callbacks)
+                if not callable(callback)
+            )
+            if missing:
+                raise RuntimeError(
+                    "fresh full-MDP runtime owner lacks exact runner callbacks: "
+                    + ",".join(missing)
+                )
+            if any(
+                getattr(callback, "__self__", None)
+                is not action_ball_full_mdp_runtime_owner
+                for callback in full_mdp_callbacks
+            ):
+                raise RuntimeError(
+                    "fresh full-MDP runner callbacks are not exact methods of "
+                    "the supplied runtime owner"
+                )
+            if full_mdp_run_mode == (
+                _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+            ):
+                full_mdp_prepare_summary_callback = getattr(
+                    action_ball_full_mdp_runtime_owner,
+                    "prepare_post_update_summary",
+                    None,
+                )
+                if (
+                    not callable(full_mdp_prepare_summary_callback)
+                    or getattr(
+                        full_mdp_prepare_summary_callback, "__self__", None
+                    )
+                    is not action_ball_full_mdp_runtime_owner
+                ):
+                    raise RuntimeError(
+                        "single_action_lean lean owner lacks its exact "
+                        "prepare_post_update_summary method"
+                    )
+                durable_ack = getattr(
+                    action_ball_full_mdp_runtime_owner,
+                    "_record_durable_epoch_ack_span",
+                    None,
+                )
+                if (
+                    not callable(durable_ack)
+                    or getattr(durable_ack, "__self__", None)
+                    is not action_ball_full_mdp_runtime_owner
+                ):
+                    raise RuntimeError(
+                        "single_action_lean lean owner lacks its exact durable ACK latch"
+                    )
+            # This runs before the upstream constructor can request the first
+            # observation.  An already-poisoned owner must never be laundered
+            # into a newly constructed trainer.
+            full_mdp_callbacks[0]()
         validated_launch_claim = None
         if training_launch_claim_sha256 is not None:
             validated_launch_claim = validate_training_launch_claim_sha256(
                 training_launch_claim_sha256
             )
-        runtime_env = getattr(env, "unwrapped", env)
         runtime_cfg = getattr(runtime_env, "cfg", None)
         runtime_obs_mode = str(getattr(runtime_cfg, "obs_mode", "") or "")
+        if full_mdp_enabled:
+            lease = getattr(
+                runtime_env, "action_ball_full_mdp_runtime_lease", None
+            )
+            drain_getter = getattr(
+                runtime_env, "action_ball_full_mdp_ppo_drain_owner", None
+            )
+            owner_env = getattr(
+                action_ball_full_mdp_runtime_owner,
+                "full_mdp_runtime_env",
+                runtime_env,
+            )
+            owner_lease = getattr(
+                action_ball_full_mdp_runtime_owner,
+                "full_mdp_runtime_lease",
+                lease,
+            )
+            if lease is None or not callable(drain_getter):
+                raise RuntimeError(
+                    "fresh full-MDP runner lacks the lease-bound global drain owner"
+                )
+            if getattr(drain_getter, "__self__", None) is not runtime_env:
+                raise RuntimeError(
+                    "fresh full-MDP global drain getter is not bound to the "
+                    "exact runtime environment"
+                )
+            if owner_env is not runtime_env or owner_lease is not lease:
+                raise RuntimeError(
+                    "fresh full-MDP runtime owner/env lease binding differs"
+                )
+            full_mdp_drain_owner = drain_getter(lease)
+            if full_mdp_run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE:
+                full_mdp_projection_callback = getattr(
+                    full_mdp_drain_owner,
+                    "require_owned_runner_frontier_projection",
+                    None,
+                )
+                if not callable(full_mdp_projection_callback):
+                    raise RuntimeError(
+                        "formal fresh full-MDP drain lacks the runner frontier "
+                        "projection callback"
+                    )
+                if (
+                    getattr(full_mdp_projection_callback, "__self__", None)
+                    is not full_mdp_drain_owner
+                ):
+                    raise RuntimeError(
+                        "formal fresh full-MDP runner frontier projection is not "
+                        "bound to the exact global drain owner"
+                    )
+            if (
+                full_mdp_run_mode
+                == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+                and full_mdp_drain_owner
+                is not action_ball_full_mdp_runtime_owner
+            ):
+                raise RuntimeError(
+                    "single_action_lean env installed a foreign or "
+                    "compatibility PPO drain"
+                )
         if runtime_obs_mode in {
             "action_ball_a225",
             "action_ball_c225",
@@ -364,7 +1168,79 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise RuntimeError(
                 f"legacy {runtime_obs_mode} is not consumable by the fresh A211/C211 runner ABI"
             )
-        super().__init__(env, train_cfg, log_dir, device)
+        r10_registry = None
+        r10_verified_checkpoint = None
+        r10_cold_frontier = None
+        r10_construction_guard = None
+        r10_construction_shim_calls = None
+        if (
+            action_ball_r10_checkpoint_adapter is not None
+            or action_ball_r10_cold_restore_capsule is not None
+        ):
+            self._action_ball_r10_validate_opt_in_lane(
+                runtime_obs_mode=runtime_obs_mode,
+                require_exact_resume_state=require_exact_resume_state,
+                training_contract_schema_version=training_contract_schema_version,
+                training_contract_sha256=training_contract_sha256,
+                log_dir=log_dir,
+                adapter=action_ball_r10_checkpoint_adapter,
+                capsule=action_ball_r10_cold_restore_capsule,
+            )
+            self._action_ball_r10_validate_adapter_api_authority(
+                action_ball_r10_checkpoint_adapter,
+                training_launch_claim_sha256=validated_launch_claim,
+            )
+            r10_registry = self._action_ball_r10_adapter_registry(
+                action_ball_r10_checkpoint_adapter
+            )
+            if action_ball_r10_cold_restore_capsule is not None:
+                (
+                    r10_verified_checkpoint,
+                    r10_cold_frontier,
+                ) = self._action_ball_r10_preflight_cold_capsule(
+                    runtime_obs_mode=runtime_obs_mode,
+                    runtime_num_envs=getattr(runtime_env, "num_envs", None),
+                    runtime_num_steps_per_env=(
+                        train_cfg.get("num_steps_per_env")
+                        if type(train_cfg) is dict
+                        else None
+                    ),
+                    training_contract_sha256=training_contract_sha256,
+                    registry=r10_registry,
+                    capsule=action_ball_r10_cold_restore_capsule,
+                )
+                r10_construction_guard = _ActionBallR10EnvMethodGuard(env)
+                r10_construction_shim_calls = (
+                    r10_construction_guard.install_initial_observation_shim(
+                        r10_cold_frontier[
+                            "final_normalized_actor_observations"
+                        ],
+                        r10_cold_frontier[
+                            "final_normalized_critic_observations"
+                        ],
+                    )
+                )
+        try:
+            super().__init__(env, train_cfg, log_dir, device)
+        finally:
+            if r10_construction_guard is not None:
+                r10_construction_guard.close()
+        if full_mdp_run_mode == (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ):
+            # Upstream persists at iteration zero and again after learn().
+            # A diagnostic no-save lane therefore cannot merely rely on a
+            # large save_interval.  Suppressing its presentation/log writer is
+            # what keeps ordinary completion away from every save call; the
+            # checkpoint method itself remains a second fail-closed guard.
+            self.disable_logs = True
+        if (
+            r10_construction_shim_calls is not None
+            and r10_construction_shim_calls() != 1
+        ):
+            raise RuntimeError(
+                "R10 cold construction did not consume exactly one saved observation shim"
+            )
         if runtime_obs_mode == "action_ball_a211":
             # Import the Isaac task contract only for its dedicated leaf.  This
             # preserves dependency-light runner/receipt audits for every other
@@ -429,11 +1305,2925 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise ValueError(
                 "require_exact_resume_state requires a training-contract binding"
             )
-        # Formal and explicitly diagnostic task-first/action-ball checkpoints both require
-        # complete optimizer/RNG/command-state restoration.  Formal evidence eligibility is a
-        # separate lineage bit: diagnostic runs bind and restore an exact state envelope while
-        # remaining lineage=0 forever.
-        self._validate_task_first_exact_resume_terms()
+        # A fresh single_action_lean construction has no checkpoint
+        # adapter/capsule and cannot save.  Do not require resume hooks merely
+        # because a future load *could* be called: load() below is the exact
+        # resume-intent boundary and rechecks before reading checkpoint bytes.
+        # Formal and legacy exact-resume construction remains unchanged.
+        if full_mdp_run_mode != (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ):
+            self._validate_task_first_exact_resume_terms()
+        self._action_ball_r10_checkpoint_adapter = None
+        self._action_ball_r10_registry = None
+        self._action_ball_r10_runtime_poisoned = False
+        self._action_ball_r10_poison_reason = None
+        self._action_ball_r10_last_boundary_handoff = None
+        self._action_ball_r10_last_publication = None
+        self._action_ball_r10_last_publish_result = None
+        self._action_ball_r10_restore_receipt = None
+        self._action_ball_r10_restore_complete_callback = None
+        self._action_ball_r10_restore_completion_attempted = False
+        self._action_ball_r10_restore_owners = None
+        self._action_ball_r10_restore_poison_attempted_owner_ids = ()
+        self._action_ball_r10_restore_poison_failures = ()
+        self._action_ball_r10_frontier_payload = None
+        self._action_ball_r10_restored_initial_frontier = None
+        self._action_ball_full_mdp_runtime_owner = (
+            action_ball_full_mdp_runtime_owner
+        )
+        self._action_ball_full_mdp_run_mode = full_mdp_run_mode
+        self._action_ball_full_mdp_runtime_owner_identity = (
+            action_ball_full_mdp_runtime_owner
+        )
+        self._action_ball_full_mdp_runtime_owner_type = (
+            None
+            if action_ball_full_mdp_runtime_owner is None
+            else type(action_ball_full_mdp_runtime_owner)
+        )
+        self._action_ball_full_mdp_runtime_env_identity = (
+            runtime_env if full_mdp_enabled else None
+        )
+        self._action_ball_full_mdp_runtime_lease_identity = (
+            lease if full_mdp_enabled else None
+        )
+        self._action_ball_full_mdp_drain_getter_callback = (
+            drain_getter if full_mdp_enabled else None
+        )
+        self._action_ball_full_mdp_drain_owner = full_mdp_drain_owner
+        self._action_ball_full_mdp_drain_owner_identity = full_mdp_drain_owner
+        self._action_ball_full_mdp_drain_owner_type = (
+            None if full_mdp_drain_owner is None else type(full_mdp_drain_owner)
+        )
+        self._action_ball_full_mdp_lean_runtime_module = (
+            full_mdp_lean_runtime_module
+        )
+        self._action_ball_full_mdp_lean_epoch_owner_identity = (
+            full_mdp_lean_epoch_owner
+        )
+        self._action_ball_full_mdp_lean_shot_slot_capacity = (
+            full_mdp_lean_shot_slot_capacity
+        )
+        self._action_ball_full_mdp_family = None
+        self._action_ball_full_mdp_projection_callback = (
+            full_mdp_projection_callback
+        )
+        self._action_ball_full_mdp_drain_device = (
+            None
+            if not full_mdp_enabled
+            else torch.device(getattr(runtime_env, "device", device))
+        )
+        self._action_ball_full_mdp_require_healthy_callback = (
+            None if full_mdp_callbacks is None else full_mdp_callbacks[0]
+        )
+        self._action_ball_full_mdp_prepare_callback = (
+            None if full_mdp_callbacks is None else full_mdp_callbacks[1]
+        )
+        self._action_ball_full_mdp_mark_optimizer_callback = (
+            None if full_mdp_callbacks is None else full_mdp_callbacks[2]
+        )
+        self._action_ball_full_mdp_ack_callback = (
+            None if full_mdp_callbacks is None else full_mdp_callbacks[3]
+        )
+        self._action_ball_full_mdp_prepare_summary_callback = (
+            full_mdp_prepare_summary_callback
+        )
+        self._action_ball_full_mdp_poison_callback = (
+            None if full_mdp_callbacks is None else full_mdp_callbacks[4]
+        )
+        self._action_ball_full_mdp_durable_ack_callback = (
+            None
+            if full_mdp_run_mode != _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+            else action_ball_full_mdp_runtime_owner._record_durable_epoch_ack_span
+        )
+        self._action_ball_full_mdp_boundary_active = False
+        self._action_ball_full_mdp_boundary_prepared = None
+        self._action_ball_full_mdp_boundary_poisoned = False
+        self._action_ball_full_mdp_boundary_poison_reason = None
+        self._action_ball_full_mdp_boundary_poison_callback_failure = None
+        self._action_ball_full_mdp_active_drain_chronology = None
+        self._action_ball_full_mdp_last_drain_chronology = None
+        self._action_ball_full_mdp_durable_wal_path = None
+        self._action_ball_full_mdp_durable_wal_identity = None
+        self._action_ball_full_mdp_durable_wal_size = None
+        self._action_ball_full_mdp_durable_wal_segment_id = None
+        self._action_ball_r10_owner_mutation_versions = {
+            owner_id: 0 for owner_id in _ACTION_BALL_R10_RUNNER_OWNER_IDS
+        }
+        if action_ball_r10_checkpoint_adapter is not None:
+            self.bind_action_ball_r10_checkpoint_adapter(
+                action_ball_r10_checkpoint_adapter,
+                _prevalidated_registry=r10_registry,
+            )
+        if r10_verified_checkpoint is not None:
+            self._action_ball_r10_restore_cold_checkpoint(
+                verified_checkpoint=r10_verified_checkpoint,
+                capsule=action_ball_r10_cold_restore_capsule,
+                cold_frontier=r10_cold_frontier,
+            )
+
+    @staticmethod
+    def _action_ball_r10_validate_opt_in_lane(
+        *,
+        runtime_obs_mode: str,
+        require_exact_resume_state: bool,
+        training_contract_schema_version: object,
+        training_contract_sha256: object,
+        log_dir: object,
+        adapter: object,
+        capsule: object,
+    ) -> None:
+        """Reject accidental use outside the exact admitted ActionBall lanes."""
+
+        if adapter is None:
+            raise RuntimeError("R10 cold restore requires an explicit full-MDP adapter")
+        if runtime_obs_mode not in (
+            "action_ball_a211",
+            "action_ball_c211",
+            "action_ball_full_mdp",
+        ):
+            raise RuntimeError(
+                "R10 runner adapter is restricted to exact A211/C211/full-MDP"
+            )
+        if require_exact_resume_state is not True or log_dir is None:
+            raise RuntimeError(
+                "R10 runner adapter requires the strict exact-resume training contract"
+            )
+        if (
+            type(training_contract_schema_version) is not int
+            or type(training_contract_sha256) is not str
+            or training_contract_schema_version
+            != TRAINING_CONTRACT_SCHEMA_VERSION
+            or len(training_contract_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in training_contract_sha256
+            )
+        ):
+            raise RuntimeError("R10 runner adapter requires an immutable contract pin")
+        if capsule is not None and type(capsule) is not ActionBallR10ColdRestoreCapsule:
+            raise RuntimeError("R10 cold restore capsule has the wrong typed schema")
+
+    @staticmethod
+    def _action_ball_r10_adapter_registry(adapter: object):
+        r10 = _action_ball_r10_module()
+        if r10.RUNTIME_WIRING is not False:
+            raise RuntimeError("R10 pure seam unexpectedly claims runtime wiring")
+        provider = getattr(adapter, "action_ball_r10_registry", None)
+        if not callable(provider):
+            raise RuntimeError("R10 adapter lacks action_ball_r10_registry()")
+        registry = provider()
+        r10.validate_r10_owner_registry(
+            registry,
+            engine=r10.OwnerEngine.ISAAC,
+        )
+        return registry
+
+    @staticmethod
+    def _action_ball_r10_validate_adapter_api_authority(
+        adapter: object,
+        *,
+        training_launch_claim_sha256: object,
+    ) -> Callable[[object], object]:
+        """Cross-pin the frozen adapter to these loaded runner source bytes."""
+
+        adapter_module = importlib.import_module(
+            "action_ball_full_mdp_env_checkpoint_adapter"
+        )
+        authority_type = getattr(
+            adapter_module,
+            "RunnerCheckpointApiAuthority",
+            None,
+        )
+        authority = getattr(adapter, "_runner_api", None)
+        try:
+            runner_source = pathlib.Path(__file__).resolve(strict=True)
+            if not runner_source.is_file():
+                raise OSError("runner source is not a regular file")
+            runner_source_sha256 = hashlib.sha256(
+                runner_source.read_bytes()
+            ).hexdigest()
+        except OSError as exc:
+            raise RuntimeError("R10 cannot bind loaded runner source bytes") from exc
+        if (
+            type(authority_type) is not type
+            or type(authority) is not authority_type
+            or authority.schema_version
+            != getattr(adapter_module, "SCHEMA_VERSION", None)
+            or type(authority.schema_version) is not int
+            or authority.kind
+            != "action_ball_r10_runner_checkpoint_api_authority_v1"
+            or authority.source_sha256 != runner_source_sha256
+            or type(authority.source_sha256) is not str
+            or training_launch_claim_sha256 is None
+            or authority.training_launch_claim_sha256
+            != training_launch_claim_sha256
+            or authority.boundary_handoff_type
+            is not ActionBallR10RunnerBoundaryHandoff
+            or authority.save_authority_type
+            is not ActionBallR10RunnerSaveAuthority
+        ):
+            raise RuntimeError(
+                "R10 adapter runner API/source authority differs from loaded runner"
+            )
+        callback = getattr(adapter, "action_ball_r10_restore_complete", None)
+        if not callable(callback):
+            raise RuntimeError(
+                "R10 adapter lacks action_ball_r10_restore_complete()"
+            )
+        return callback
+
+    @staticmethod
+    def _action_ball_r10_preflight_cold_capsule(
+        *,
+        runtime_obs_mode: str,
+        runtime_num_envs: object,
+        runtime_num_steps_per_env: object,
+        training_contract_sha256: object,
+        registry: object,
+        capsule: ActionBallR10ColdRestoreCapsule,
+    ) -> Tuple[object, dict]:
+        """Verify every external pin before RSL-RL can call the live getter."""
+
+        if runtime_obs_mode == "action_ball_full_mdp":
+            raise RuntimeError(
+                "fresh full-MDP R10 cold restore remains fail-closed until its "
+                "dynamic observation/noise frontier is durably owned"
+            )
+
+        if (
+            capsule.schema_version != _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION
+            or type(capsule.schema_version) is not int
+            or capsule.kind != _ACTION_BALL_R10_COLD_RESTORE_CAPSULE_KIND
+            or type(capsule.checkpoint_bytes) is not bytes
+            or not capsule.checkpoint_bytes
+        ):
+            raise RuntimeError("R10 cold restore capsule schema/kind/bytes differ")
+        r10 = _action_ball_r10_module()
+        verified = r10.verify_checkpoint_candidate(
+            capsule.checkpoint_bytes,
+            expected_external_pins=capsule.expected_external_pins,
+            expected_registry=registry,
+        )
+        expected_family = (
+            r10.PolicyFamily.A
+            if runtime_obs_mode == "action_ball_a211"
+            else r10.PolicyFamily.C
+        )
+        if (
+            verified.engine is not r10.OwnerEngine.ISAAC
+            or verified.family is not expected_family
+        ):
+            raise RuntimeError("R10 cold checkpoint engine/family differs from runner")
+        if verified.immutable_pins.contract_sha256 != training_contract_sha256:
+            raise RuntimeError("R10 cold checkpoint differs from runner contract pin")
+        by_owner = {state.owner_id: state for state in verified.owner_states}
+        envelope = by_owner.get("trainer.rollout_frontier")
+        if envelope is None:
+            raise RuntimeError("R10 cold checkpoint lacks trainer.rollout_frontier")
+        frontier = _action_ball_r10_validate_frontier_payload(
+            _action_ball_r10_torch_load_bytes(envelope.payload),
+            expected_update_index=verified.boundary.update_index,
+        )
+        if (
+            type(runtime_num_envs) is not int
+            or runtime_num_envs <= 0
+            or frontier["num_envs"] != runtime_num_envs
+            or type(runtime_num_steps_per_env) is not int
+            or runtime_num_steps_per_env <= 0
+            or frontier["num_steps_per_env"] != runtime_num_steps_per_env
+            or tuple(world.world_id for world in verified.boundary.worlds)
+            != tuple(range(runtime_num_envs))
+        ):
+            raise RuntimeError(
+                "R10 cold checkpoint rollout/world identity differs from runner"
+            )
+        expected_actor_width = (
+            _A211_ACTOR_WIDTH
+            if runtime_obs_mode == "action_ball_a211"
+            else _C211_ACTOR_WIDTH
+        )
+        expected_critic_width = (
+            _A211_CRITIC_WIDTH
+            if runtime_obs_mode == "action_ball_a211"
+            else _C211_CRITIC_WIDTH
+        )
+        if (
+            frontier["final_normalized_actor_observations"].shape[1]
+            != expected_actor_width
+            or frontier["final_normalized_critic_observations"].shape[1]
+            != expected_critic_width
+        ):
+            raise RuntimeError("R10 cold frontier observation widths differ")
+        return verified, frontier
+
+    def bind_action_ball_r10_checkpoint_adapter(
+        self,
+        adapter: object,
+        *,
+        _prevalidated_registry: object = None,
+    ) -> None:
+        """One-shot opt-in; absence preserves the historical runner path."""
+
+        if getattr(self, "_action_ball_r10_checkpoint_adapter", None) is not None:
+            raise RuntimeError("R10 checkpoint adapter is already bound")
+        runtime_env = getattr(self.env, "unwrapped", self.env)
+        runtime_cfg = getattr(runtime_env, "cfg", None)
+        runtime_obs_mode = str(getattr(runtime_cfg, "obs_mode", "") or "")
+        self._action_ball_r10_validate_opt_in_lane(
+            runtime_obs_mode=runtime_obs_mode,
+            require_exact_resume_state=self.require_exact_resume_state,
+            training_contract_schema_version=self.training_contract_schema_version,
+            training_contract_sha256=self.training_contract_sha256,
+            log_dir=self.log_dir,
+            adapter=adapter,
+            capsule=None,
+        )
+        restore_complete_callback = (
+            self._action_ball_r10_validate_adapter_api_authority(
+                adapter,
+                training_launch_claim_sha256=(
+                    self.training_launch_claim_sha256
+                ),
+            )
+        )
+        expected_target_mode = (
+            "action_ball_full_mdp"
+            if runtime_obs_mode == "action_ball_full_mdp"
+            else "action_ball"
+        )
+        if self._strict_exact_resume_target_mode() != expected_target_mode:
+            raise RuntimeError(
+                "R10 runner adapter target_mode differs from its exact observation lane"
+            )
+        registry = (
+            _prevalidated_registry
+            if _prevalidated_registry is not None
+            else self._action_ball_r10_adapter_registry(adapter)
+        )
+        r10 = _action_ball_r10_module()
+        r10.validate_r10_owner_registry(
+            registry,
+            engine=r10.OwnerEngine.ISAAC,
+        )
+        for name in (
+            "action_ball_r10_complete_owners",
+            "action_ball_r10_restore_complete",
+            "action_ball_r10_post_update_authority",
+            "action_ball_r10_publish",
+        ):
+            if not callable(getattr(adapter, name, None)):
+                raise RuntimeError(f"R10 adapter lacks {name}()")
+        if getattr(self.alg, "rnd", None) is not None:
+            raise RuntimeError("R10 runner adapter does not yet own RND state")
+        if getattr(self.alg, "lr_scheduler", None) is not None:
+            raise RuntimeError(
+                "R10 runner adapter found an unowned scheduler object"
+            )
+        self._action_ball_r10_checkpoint_adapter = adapter
+        self._action_ball_r10_registry = registry
+        self._action_ball_r10_restore_complete_callback = (
+            restore_complete_callback
+        )
+
+    def _action_ball_r10_require_healthy(self) -> None:
+        if getattr(self, "_action_ball_r10_runtime_poisoned", False):
+            raise RuntimeError(
+                "R10 runner runtime is poisoned; retry is forbidden: "
+                + str(getattr(self, "_action_ball_r10_poison_reason", None))
+            )
+
+    def _action_ball_r10_poison(self, reason: str) -> None:
+        self._action_ball_r10_runtime_poisoned = True
+        if self._action_ball_r10_poison_reason is None:
+            self._action_ball_r10_poison_reason = str(reason)
+
+    def _action_ball_full_mdp_require_healthy(self) -> None:
+        """Require the exact construction-bound owner before mutation."""
+
+        owner = getattr(self, "_action_ball_full_mdp_runtime_owner", None)
+        if owner is None:
+            return
+        if getattr(self, "_action_ball_full_mdp_boundary_poisoned", False):
+            raise RuntimeError(
+                "fresh full-MDP optimizer boundary is poisoned; retry is "
+                "forbidden and checkpoint is forbidden: "
+                + str(
+                    getattr(
+                        self,
+                        "_action_ball_full_mdp_boundary_poison_reason",
+                        None,
+                    )
+                )
+            )
+        if type(owner) is not getattr(
+            self, "_action_ball_full_mdp_runtime_owner_type", None
+        ) or owner is not getattr(
+            self, "_action_ball_full_mdp_runtime_owner_identity", None
+        ):
+            raise RuntimeError("fresh full-MDP runtime owner identity changed")
+        runtime_env = getattr(
+            self, "_action_ball_full_mdp_runtime_env_identity", None
+        )
+        lease = getattr(
+            self, "_action_ball_full_mdp_runtime_lease_identity", None
+        )
+        drain_getter = getattr(
+            self, "_action_ball_full_mdp_drain_getter_callback", None
+        )
+        drain_owner = getattr(
+            self, "_action_ball_full_mdp_drain_owner_identity", None
+        )
+        if (
+            runtime_env is None
+            or lease is None
+            or not callable(drain_getter)
+            or getattr(drain_getter, "__self__", None) is not runtime_env
+            or drain_getter(lease) is not drain_owner
+            or type(drain_owner)
+            is not getattr(self, "_action_ball_full_mdp_drain_owner_type", None)
+        ):
+            raise RuntimeError(
+                "fresh full-MDP lease-bound global drain identity changed"
+            )
+        if getattr(self, "_action_ball_full_mdp_run_mode", None) == (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ):
+            module = getattr(
+                self, "_action_ball_full_mdp_lean_runtime_module", None
+            )
+            epoch_owner = getattr(
+                self,
+                "_action_ball_full_mdp_lean_epoch_owner_identity",
+                None,
+            )
+            if (
+                module is None
+                or type(owner)
+                is not getattr(module, "ActionBallFullMdpLeanRuntimeOwner", None)
+                or drain_owner is not owner
+                or getattr(owner, "epoch_owner", None) is not epoch_owner
+                or type(epoch_owner)
+                is not getattr(
+                    getattr(module, "epoch_v1", None),
+                    "ActionEpochOwner",
+                    None,
+                )
+            ):
+                raise RuntimeError(
+                    "single_action_lean lean owner/epoch identity changed"
+                )
+        callback = getattr(
+            self, "_action_ball_full_mdp_require_healthy_callback", None
+        )
+        if not callable(callback):
+            raise RuntimeError(
+                "fresh full-MDP runtime owner health callback is unavailable"
+            )
+        try:
+            callback()
+        except BaseException as exc:
+            self._action_ball_full_mdp_boundary_poisoned = True
+            self._action_ball_full_mdp_boundary_poison_reason = (
+                "runtime owner health check failed: "
+                f"{type(exc).__module__}.{type(exc).__qualname__}"
+            )
+            raise RuntimeError(
+                "fresh full-MDP runtime owner is unhealthy; retry is "
+                "forbidden and checkpoint is forbidden"
+            ) from exc
+
+    def _action_ball_full_mdp_poison_optimizer_boundary(
+        self,
+        prepared: object,
+        *,
+        update_index: int,
+        reason: str,
+    ) -> None:
+        """Poison once without allowing a broken callback to mask the cause."""
+
+        if getattr(self, "_action_ball_full_mdp_boundary_poisoned", False):
+            return
+        self._action_ball_full_mdp_boundary_poisoned = True
+        self._action_ball_full_mdp_boundary_poison_reason = str(reason)
+        callback = getattr(
+            self, "_action_ball_full_mdp_poison_callback", None
+        )
+        if not callable(callback):
+            self._action_ball_full_mdp_boundary_poison_callback_failure = (
+                "poison callback unavailable"
+            )
+            return
+        try:
+            callback(
+                prepared,
+                update_index=update_index,
+                reason=str(reason),
+            )
+        except BaseException as exc:
+            self._action_ball_full_mdp_boundary_poison_callback_failure = (
+                f"{type(exc).__module__}.{type(exc).__qualname__}"
+            )
+
+    def _action_ball_full_mdp_require_checkpointable(self) -> None:
+        """Forbid every checkpoint after or during an uncertain boundary."""
+
+        if getattr(self, "_action_ball_full_mdp_runtime_owner", None) is None:
+            return
+        if getattr(self, "_action_ball_full_mdp_run_mode", None) == (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ):
+            owner = self._action_ball_full_mdp_runtime_owner
+            capture = getattr(owner, "_capture_private_carry_for_save", None)
+            if not callable(capture) or getattr(capture, "__self__", None) is not owner:
+                raise RuntimeError("single_action_lean private carry preflight is unavailable")
+            capture()
+            raise RuntimeError(
+                "single_action_lean private carry cannot authorize persistence"
+            )
+        if getattr(self, "_action_ball_full_mdp_boundary_poisoned", False):
+            raise RuntimeError(
+                "fresh full-MDP optimizer boundary is poisoned; checkpoint "
+                "is forbidden"
+            )
+        if getattr(self, "_action_ball_full_mdp_boundary_active", False):
+            raise RuntimeError(
+                "fresh full-MDP optimizer boundary is active; checkpoint is "
+                "forbidden before acknowledgement"
+            )
+        self._action_ball_full_mdp_require_healthy()
+
+    @staticmethod
+    def _action_ball_full_mdp_projection_primitives(
+        projection: object,
+    ) -> dict:
+        """Read only the global owner's documented clone-only primitives."""
+
+        names = (
+            "schema_version",
+            "kind",
+            "num_envs",
+            "device_type",
+            "device_index",
+            "owner_order",
+            "schema_identity",
+            "next_update_index",
+            "operation_sequence",
+            "drain_sequence",
+            "last_completed_environment_steps",
+            "mutation_version_highwaters",
+            "update_index",
+            "completed_environment_steps",
+        )
+        try:
+            return {name: getattr(projection, name) for name in names}
+        except BaseException as exc:
+            raise RuntimeError(
+                "fresh full-MDP runner frontier projection surface differs"
+            ) from exc
+
+    def _action_ball_full_mdp_preflight_durable_wal(self) -> pathlib.Path:
+        """Create the per-rank append-only WAL and fsync its directory."""
+
+        if getattr(self, "_action_ball_full_mdp_run_mode", None) != (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ):
+            raise RuntimeError(
+                "typed ActionEpoch durable WAL is restricted to the lean lane"
+            )
+        log_dir = getattr(self, "log_dir", None)
+        if type(log_dir) is not str or not log_dir:
+            raise RuntimeError("typed ActionEpoch durable WAL requires log_dir")
+        parent_directory = pathlib.Path(log_dir)
+        parent_stat = os.lstat(parent_directory)
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise RuntimeError(
+                "typed ActionEpoch durable WAL log_dir is not an exact directory"
+            )
+        rank = self._joint_safety_rank()
+        directory = parent_directory / "action_ball_epoch_durable_wal"
+        path = directory / f"rank_{rank:04d}.jsonl"
+        installed = getattr(
+            self, "_action_ball_full_mdp_durable_wal_path", None
+        )
+        if installed is not None:
+            if type(installed) is not pathlib.PosixPath or installed != path:
+                raise RuntimeError(
+                    "typed ActionEpoch durable WAL rank/path changed"
+                )
+            flags = os.O_RDWR | os.O_APPEND
+            if hasattr(os, "O_CLOEXEC"):
+                flags |= os.O_CLOEXEC
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(path, flags)
+            try:
+                file_stat = os.fstat(fd)
+                expected_identity = getattr(
+                    self,
+                    "_action_ball_full_mdp_durable_wal_identity",
+                    None,
+                )
+                expected_size = getattr(
+                    self,
+                    "_action_ball_full_mdp_durable_wal_size",
+                    None,
+                )
+                if (
+                    not stat.S_ISREG(file_stat.st_mode)
+                    or (file_stat.st_dev, file_stat.st_ino)
+                    != expected_identity
+                    or type(expected_size) is not int
+                    or expected_size < 0
+                    or file_stat.st_size != expected_size
+                    or (
+                        expected_size > 0
+                        and os.pread(fd, 1, expected_size - 1) != b"\n"
+                    )
+                ):
+                    raise RuntimeError(
+                        "typed ActionEpoch durable WAL inode/content frontier changed"
+                    )
+            except BaseException:
+                try:
+                    os.close(fd)
+                except BaseException:
+                    pass
+                raise
+            else:
+                os.close(fd)
+            return installed
+
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory_stat = os.lstat(directory)
+        if not stat.S_ISDIR(directory_stat.st_mode):
+            raise RuntimeError(
+                "typed ActionEpoch durable WAL directory is not a directory"
+            )
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_CLOEXEC"):
+            flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(path, flags, 0o600)
+        try:
+            file_stat = os.fstat(fd)
+            if not stat.S_ISREG(file_stat.st_mode):
+                raise RuntimeError(
+                    "typed ActionEpoch durable WAL path is not a regular file"
+                )
+            os.fsync(fd)
+        except BaseException:
+            try:
+                os.close(fd)
+            except BaseException:
+                pass
+            raise
+        else:
+            os.close(fd)
+
+        directory_flags = os.O_RDONLY
+        if hasattr(os, "O_DIRECTORY"):
+            directory_flags |= os.O_DIRECTORY
+        if hasattr(os, "O_CLOEXEC"):
+            directory_flags |= os.O_CLOEXEC
+        directory_fd = os.open(directory, directory_flags)
+        try:
+            os.fsync(directory_fd)
+        except BaseException:
+            try:
+                os.close(directory_fd)
+            except BaseException:
+                pass
+            raise
+        else:
+            os.close(directory_fd)
+
+        parent_fd = os.open(parent_directory, directory_flags)
+        try:
+            os.fsync(parent_fd)
+        except BaseException:
+            try:
+                os.close(parent_fd)
+            except BaseException:
+                pass
+            raise
+        else:
+            os.close(parent_fd)
+        self._action_ball_full_mdp_durable_wal_path = path
+        self._action_ball_full_mdp_durable_wal_identity = (
+            file_stat.st_dev,
+            file_stat.st_ino,
+        )
+        self._action_ball_full_mdp_durable_wal_size = 0
+        self._action_ball_full_mdp_durable_wal_segment_id = (
+            f"{file_stat.st_dev:x}:{file_stat.st_ino:x}"
+        )
+        return path
+
+    def _action_ball_full_mdp_encode_durable_pending_ack(
+        self,
+        record: dict,
+        *,
+        update_index: int,
+        completed_environment_steps: int,
+    ) -> tuple[bytes, bytes]:
+        """Canonicalize stdout telemetry and its pre-destructive-ACK row."""
+
+        if type(record) is not dict:
+            raise RuntimeError("typed ActionEpoch pending summary is not a dict")
+        if (
+            record.get("ppo_update") != update_index
+            or record.get("completed_environment_steps")
+            != completed_environment_steps
+        ):
+            raise RuntimeError("typed ActionEpoch pending chronology differs")
+        return _action_ball_full_mdp_durable_wal_module().encode_pending(
+            segment_id=self._action_ball_full_mdp_durable_wal_segment_id,
+            rank=self._joint_safety_rank(),
+            telemetry=record,
+        )
+
+    def _action_ball_full_mdp_append_durable_wal(
+        self,
+        path: pathlib.Path,
+        line: bytes,
+    ) -> tuple[int, int]:
+        """Append, flush, fsync, and close one exact WAL line before ACK."""
+
+        if (
+            type(path) is not pathlib.PosixPath
+            or path
+            is not getattr(self, "_action_ball_full_mdp_durable_wal_path", None)
+            or type(line) is not bytes
+            or not line.endswith(b"\n")
+            or line.count(b"\n") != 1
+        ):
+            raise RuntimeError("typed ActionEpoch durable WAL append ABI differs")
+        handle = open(path, "ab", buffering=0)
+        try:
+            file_stat = os.fstat(handle.fileno())
+            expected_size = getattr(
+                self, "_action_ball_full_mdp_durable_wal_size", None
+            )
+            if (
+                not stat.S_ISREG(file_stat.st_mode)
+                or (file_stat.st_dev, file_stat.st_ino)
+                != getattr(
+                    self,
+                    "_action_ball_full_mdp_durable_wal_identity",
+                    None,
+                )
+                or type(expected_size) is not int
+                or expected_size < 0
+                or file_stat.st_size != expected_size
+            ):
+                raise RuntimeError(
+                    "typed ActionEpoch durable WAL file identity changed"
+                )
+            written = handle.write(line)
+            if type(written) is not int or written != len(line):
+                raise OSError(
+                    "typed ActionEpoch durable WAL append was a short write"
+                )
+            handle.flush()
+            if os.fstat(handle.fileno()).st_size != expected_size + len(line):
+                raise RuntimeError(
+                    "typed ActionEpoch durable WAL append frontier changed"
+                )
+            os.fsync(handle.fileno())
+        except BaseException:
+            try:
+                current = os.fstat(handle.fileno())
+                if (
+                    type(expected_size) is int
+                    and current.st_size > expected_size
+                    and (current.st_dev, current.st_ino)
+                    == self._action_ball_full_mdp_durable_wal_identity
+                ):
+                    os.ftruncate(handle.fileno(), expected_size)
+            except BaseException:
+                pass
+            try:
+                handle.close()
+            except BaseException:
+                pass
+            raise
+        else:
+            handle.close()
+        end = expected_size + len(line)
+        self._action_ball_full_mdp_durable_wal_size = end
+        return expected_size, end
+
+    def _action_ball_full_mdp_prepare_epoch_ack_record(
+        self,
+        summary: object,
+        *,
+        update_index: int,
+        completed_environment_steps: int,
+    ) -> dict:
+        """Purely validate and encode-ready project the still-pending summary."""
+
+        module = getattr(self, "_action_ball_full_mdp_lean_runtime_module", None)
+        summary_type = getattr(module, "ActionEpochPpoBoundarySummary", None)
+        frontier_type = getattr(module, "EpochDrainFrontier", None)
+        active = getattr(
+            self, "_action_ball_full_mdp_active_drain_chronology", None
+        )
+        if (
+            type(summary_type) is not type
+            or type(frontier_type) is not type
+            or type(summary) is not summary_type
+            or type(getattr(summary, "frontier", None)) is not frontier_type
+            or type(active) is not _ActionBallFullMdpRunnerDrainChronology
+            or active.update_index != update_index
+            or active.completed_environment_steps != completed_environment_steps
+            or active.optimizer_returned is not True
+            or active.post_update_acknowledged is not False
+            or active.telemetry_emitted is not False
+        ):
+            raise RuntimeError(
+                "diagnostic epoch ACK summary is foreign, stale, or duplicated"
+            )
+        frontier = summary.frontier
+        device = getattr(self, "_action_ball_full_mdp_drain_device", None)
+        expected_slots = getattr(
+            self, "_action_ball_full_mdp_lean_shot_slot_capacity", None
+        )
+        exact_ints = (
+            frontier.num_envs,
+            frontier.shot_slot_capacity,
+            frontier.update_index,
+            frontier.next_update_index,
+            frontier.completed_environment_steps,
+            frontier.operation_sequence,
+            frontier.drain_sequence,
+            frontier.start_commit,
+            frontier.end_commit,
+        )
+        if (
+            any(type(value) is not int or value < 0 for value in exact_ints)
+            or frontier.schema_version != 10
+            or frontier.kind != "action_ball_epoch_ppo_boundary_summary_v10"
+            or frontier.num_envs != int(self.env.num_envs)
+            or frontier.shot_slot_capacity != expected_slots
+            or not isinstance(device, torch.device)
+            or frontier.device_type != device.type
+            or frontier.device_index != device.index
+            or frontier.update_index != update_index
+            or frontier.next_update_index != update_index + 1
+            or frontier.completed_environment_steps != completed_environment_steps
+            or frontier.end_commit < frontier.start_commit
+            or frontier.diagnostic_unauthorized is not True
+        ):
+            raise RuntimeError(
+                "diagnostic epoch ACK frontier differs from runner chronology"
+            )
+        previous = getattr(
+            self, "_action_ball_full_mdp_last_drain_chronology", None
+        )
+        if previous is None:
+            exact = (
+                frontier.operation_sequence == 1
+                and frontier.drain_sequence == 1
+                and frontier.start_commit == 0
+            )
+        else:
+            previous_summary = previous.projection
+            previous_frontier = getattr(previous_summary, "frontier", None)
+            exact = (
+                type(previous_summary) is summary_type
+                and type(previous_frontier) is frontier_type
+                and previous.post_update_acknowledged is True
+                and previous.telemetry_emitted is True
+                and update_index == previous.update_index + 1
+                and completed_environment_steps
+                == previous.completed_environment_steps
+                + int(self.env.num_envs) * int(self.num_steps_per_env)
+                and frontier.operation_sequence == previous.operation_sequence + 1
+                and frontier.drain_sequence == previous.drain_sequence + 1
+                and frontier.start_commit == previous_frontier.end_commit
+            )
+        if not exact:
+            raise RuntimeError(
+                "diagnostic epoch ACK frontier did not advance exactly once"
+            )
+
+        completed_type = getattr(
+            getattr(module, "drain_v2", None),
+            "CompletedActionEpochShot",
+            None,
+        )
+        terminal_shot_type = getattr(
+            getattr(module, "drain_v2", None),
+            "TerminalActionEpochShot",
+            None,
+        )
+        evidence_type = getattr(
+            getattr(module, "drain_v2", None),
+            "ActionEpochShotEvidence",
+            None,
+        )
+        lifecycle_flags = getattr(
+            getattr(module, "drain_v2", None),
+            "SHOT_LIFECYCLE_FLAGS",
+            None,
+        )
+        completed = getattr(summary, "completed_shots", None)
+        common_integer_fields = (
+            "env_row",
+            "slot_index",
+            "reset_generation",
+            "ball_generation",
+            "action_uid",
+            "action_slot",
+            "shot_index",
+            "task_identity",
+            "outcome_identity",
+            "ball_identity",
+            "motion_close_reason",
+            "settlement_step",
+            "payment_step",
+        )
+
+        def encode_evidence(evidence):
+            if (
+                type(evidence_type) is not type
+                or type(lifecycle_flags) is not tuple
+                or type(evidence) is not evidence_type
+            ):
+                raise RuntimeError("diagnostic shot-evidence telemetry ABI differs")
+            integer_names = (
+                "lifecycle_bits", "r03_valid_bits", "r03_source_step",
+                "physical_valid_bits",
+                "physical_actor_pair_contact_source_step", "r06_valid_bits",
+                "r06_outcome_code", "r06_predicate_bits", "r07_valid_bits",
+                "r07_qualified_source_step",
+                "r07_first_ready_source_step",
+            )
+            value = {name: getattr(evidence, name) for name in integer_names}
+            if tuple(evidence.__dataclass_fields__) != integer_names or any(
+                type(item) is not int for item in value.values()
+            ):
+                raise RuntimeError("diagnostic shot-evidence telemetry ABI differs")
+            lifecycle = {
+                name: bool(value["lifecycle_bits"] & (1 << ordinal))
+                for ordinal, name in enumerate(lifecycle_flags)
+            }
+            if (
+                value["lifecycle_bits"] < 0
+                or value["lifecycle_bits"] >> len(lifecycle_flags)
+            ):
+                raise RuntimeError("diagnostic shot-evidence telemetry values differ")
+            return {
+                **value,
+                "lifecycle": lifecycle,
+                "contact_face": {"availability": "not_produced"},
+                "recovery_horizon": {"availability": "not_produced"},
+            }
+
+        def encode_shot(shot, *, terminal: bool):
+            expected_type = terminal_shot_type if terminal else completed_type
+            if type(expected_type) is not type or type(shot) is not expected_type:
+                raise RuntimeError("diagnostic shot telemetry ABI differs")
+            integers = {
+                name: getattr(shot, name) for name in common_integer_fields
+            }
+            family = shot.stroke_family
+            attributed = shot.action_attribution_valid
+            target_x_m = shot.target_x_m
+            target_y_m = shot.target_y_m
+            evidence = encode_evidence(shot.evidence)
+            lifecycle = evidence["lifecycle"]
+            if (
+                any(type(value) is not int for value in integers.values())
+                or type(target_x_m) is not float
+                or type(target_y_m) is not float
+                or type(family) is not str
+                or type(attributed) is not bool
+                or (family in ("forehand", "backhand")) is not attributed
+                or family not in ("unknown", "forehand", "backhand")
+                or not math.isfinite(target_x_m)
+                or not math.isfinite(target_y_m)
+                or not 0 <= integers["env_row"] < frontier.num_envs
+                or not 0 <= integers["slot_index"] < expected_slots
+                or integers["reset_generation"] < 0
+                or integers["ball_generation"] < 0
+                or integers["action_uid"] <= 0
+                or integers["action_slot"] < 0
+                or integers["shot_index"] <= 0
+                or integers["task_identity"] <= 0
+                or integers["outcome_identity"] <= 0
+                or integers["ball_identity"] <= 0
+                or integers["motion_close_reason"] not in (-1, 1, 2)
+                or integers["settlement_step"] < -1
+                or integers["payment_step"] < -1
+                or (integers["payment_step"] >= 0 and integers["settlement_step"] < 0)
+                or (integers["payment_step"] >= 0
+                    and integers["payment_step"] < integers["settlement_step"])
+                or lifecycle["reveal_committed"] is not True
+                or lifecycle["motion_closed"]
+                != (integers["motion_close_reason"] != -1)
+                or lifecycle["outcome_settled"]
+                != (integers["settlement_step"] >= 0)
+                or lifecycle["payment_recorded"]
+                != (integers["payment_step"] >= 0)
+            ):
+                raise RuntimeError("diagnostic shot telemetry values differ")
+            return {
+                **integers,
+                "target_x_m": target_x_m if lifecycle["physical_launched"] else None,
+                "target_y_m": target_y_m if lifecycle["physical_launched"] else None,
+                "stroke_family": family,
+                "action_attribution_valid": attributed,
+                "evidence": evidence,
+            }
+
+        completed_rows = []
+        if type(completed_type) is not type or type(completed) is not tuple:
+            raise RuntimeError("diagnostic completed-shot telemetry ABI differs")
+        for shot in completed:
+            row = encode_shot(shot, terminal=False)
+            retirement_step = shot.retirement_step
+            if (
+                type(retirement_step) is not int
+                or row["motion_close_reason"] not in (1, 2)
+                or row["settlement_step"] < 0
+                or row["payment_step"] < row["settlement_step"]
+                or retirement_step < row["payment_step"]
+                or not all(row["evidence"]["lifecycle"][name] for name in (
+                    "physical_launched", "outcome_settled", "payment_recorded",
+                ))
+            ):
+                raise RuntimeError(
+                    "diagnostic completed-shot telemetry values differ"
+                )
+            completed_rows.append({**row, "retirement_step": retirement_step})
+        lifecycle = summary.lifecycle
+        lifecycle_values = tuple(
+            getattr(lifecycle, name)
+            for name in (
+                "playback_started_rows", "closed_unplayed_rows",
+                "physical_launch_rows", "outcome_settled_rows",
+                "payment_recorded_rows", "retired_rows", "terminal_shot_rows",
+            )
+        ) if type(lifecycle) is getattr(
+            getattr(module, "drain_v2", None), "LifecycleEdgeCounts", None
+        ) else ()
+        if (
+            len(lifecycle_values) != 7
+            or any(type(value) is not int or value < 0 for value in lifecycle_values)
+            or len(completed) != lifecycle.retired_rows
+        ):
+            raise RuntimeError("diagnostic completed-shot retirement differs")
+
+        terminal_shots = getattr(summary, "terminal_shots", None)
+        terminal_shot_rows = []
+        if type(terminal_shot_type) is not type or type(terminal_shots) is not tuple:
+            raise RuntimeError("diagnostic terminal-shot telemetry ABI differs")
+        for shot in terminal_shots:
+            row = encode_shot(shot, terminal=True)
+            reset_values = {
+                name: getattr(shot, name)
+                for name in (
+                    "reset_generation_after", "reset_common_step",
+                    "reset_episode_tick", "reset_reason_bits",
+                )
+            }
+            if (
+                any(type(value) is not int for value in reset_values.values())
+                or reset_values["reset_generation_after"] <= row["reset_generation"]
+                or reset_values["reset_common_step"] < 1
+                or reset_values["reset_episode_tick"] < 1
+                or reset_values["reset_reason_bits"] == 0
+                or reset_values["reset_reason_bits"] & ~31
+            ):
+                raise RuntimeError("diagnostic terminal-shot telemetry values differ")
+            terminal_shot_rows.append({**row, **reset_values})
+        if (
+            type(lifecycle.terminal_shot_rows) is not int
+            or lifecycle.terminal_shot_rows < 0
+            or len(terminal_shots) != lifecycle.terminal_shot_rows
+        ):
+            raise RuntimeError("diagnostic terminal-shot count differs")
+
+        opportunity_type = getattr(
+            getattr(module, "drain_v2", None), "D05ActionOpportunity", None
+        )
+        settlement = summary.settlement
+        opportunities = getattr(summary, "action_opportunities", None)
+        opportunity_rows = []
+        if type(opportunity_type) is not type or type(opportunities) is not tuple:
+            raise RuntimeError("diagnostic action-opportunity telemetry ABI differs")
+        for row in opportunities:
+            if type(row) is not opportunity_type:
+                raise RuntimeError("diagnostic action-opportunity telemetry ABI differs")
+            integers = (row.env_row, row.slot_index, row.action_uid, row.action_slot)
+            flags = (
+                row.attribution_valid, row.selected, row.accepted,
+                row.censored, row.rejected, row.deferred,
+            )
+            if (
+                any(type(value) is not int for value in integers)
+                or any(type(value) is not bool for value in flags)
+                or not 0 <= row.env_row < frontier.num_envs
+                or not 0 <= row.slot_index < expected_slots
+                or sum(flags[2:]) != 1
+                or (not row.selected and not row.censored)
+                or type(row.stroke_family) is not str
+                or (row.stroke_family in ("forehand", "backhand")) is not row.attribution_valid
+                or row.stroke_family not in ("unknown", "forehand", "backhand")
+            ):
+                raise RuntimeError("diagnostic action-opportunity telemetry values differ")
+            opportunity_rows.append({name: getattr(row, name) for name in row.__dataclass_fields__})
+        settlement_values = (
+            settlement.transactions, settlement.due_rows, settlement.selected_rows, settlement.accepted,
+            settlement.censored, settlement.rejected, settlement.deferred, settlement.not_ready,
+        )
+        if (
+            type(settlement) is not getattr(
+                getattr(module, "drain_v2", None), "D05SettlementCounts", None
+            )
+            or any(type(value) is not int or value < 0 for value in settlement_values)
+            or settlement_values[1:7] != (
+                len(opportunities),
+                *(sum(getattr(row, field) for row in opportunities) for field in (
+                    "selected", "accepted", "censored", "rejected", "deferred",
+                )),
+            )
+            or settlement.not_ready != settlement.deferred
+        ):
+            raise RuntimeError("diagnostic action-opportunity settlement differs")
+
+        reset_type = getattr(
+            getattr(module, "drain_v2", None),
+            "ResetTelemetry",
+            None,
+        )
+        terminal_resets = getattr(summary, "terminal_resets", None)
+        reset_fields = (
+            "env_row",
+            "reset_generation",
+            "common_step",
+            "episode_tick",
+            "reason_bits",
+        )
+        terminal_reset_rows = []
+        if type(reset_type) is not type or type(terminal_resets) is not tuple:
+            raise RuntimeError("diagnostic terminal-reset telemetry ABI differs")
+        for reset in terminal_resets:
+            if type(reset) is not reset_type:
+                raise RuntimeError(
+                    "diagnostic terminal-reset telemetry ABI differs"
+                )
+            integers = {name: getattr(reset, name) for name in reset_fields}
+            if (
+                any(type(value) is not int for value in integers.values())
+                or not 0 <= integers["env_row"] < frontier.num_envs
+                or integers["reset_generation"] < 1
+                or integers["common_step"] < 1
+                or integers["episode_tick"] < 1
+                or integers["reason_bits"] == 0
+                or integers["reason_bits"] & ~31
+            ):
+                raise RuntimeError(
+                    "diagnostic terminal-reset telemetry values differ"
+                )
+            terminal_reset_rows.append(integers)
+
+        reset_reason_counts = {
+            "terminal_reset_reason_time_out_count": 0,
+            "terminal_reset_reason_base_fell_tilt_count": 0,
+            "terminal_reset_reason_base_too_low_count": 0,
+            "terminal_reset_reason_joint_qdes_forbidden_count": 0,
+            "terminal_reset_reason_robot_hit_table_count": 0,
+        }
+        for reset in terminal_reset_rows:
+            for name, bit in zip(reset_reason_counts, (1, 2, 4, 8, 16)):
+                reset_reason_counts[name] += int(bool(reset["reason_bits"] & bit))
+        reset_index = {
+            (
+                reset["env_row"], reset["reset_generation"],
+                reset["common_step"], reset["episode_tick"],
+                reset["reason_bits"],
+            )
+            for reset in terminal_reset_rows
+        }
+        if (
+            len({
+                (
+                    row["env_row"], row["slot_index"],
+                    *(row[name] for name in (
+                        "reset_generation", "ball_generation", "action_uid",
+                        "action_slot", "shot_index", "task_identity",
+                        "outcome_identity", "ball_identity",
+                    )),
+                )
+                for row in terminal_shot_rows
+            }) != len(terminal_shot_rows)
+            or any(
+                (
+                    row["env_row"], row["reset_generation_after"],
+                    row["reset_common_step"], row["reset_episode_tick"],
+                    row["reset_reason_bits"],
+                ) not in reset_index
+                for row in terminal_shot_rows
+            )
+        ):
+            raise RuntimeError("diagnostic terminal-shot/reset relationship differs")
+        closure_keys = [
+            (
+                row["env_row"], row["slot_index"],
+                *(row[name] for name in (
+                    "reset_generation", "ball_generation", "action_uid",
+                    "action_slot", "shot_index", "task_identity",
+                    "outcome_identity", "ball_identity",
+                )),
+            )
+            for row in (*completed_rows, *terminal_shot_rows)
+        ]
+        if len(set(closure_keys)) != len(closure_keys):
+            raise RuntimeError("diagnostic shot closure identity differs")
+
+        commits = summary.reveal_commit
+        faults = summary.owner_faults
+        continuation = summary.continuation
+        lean_rewards = importlib.import_module(
+            "whole_body_tracking.tasks.tracking.mdp."
+            "action_ball_full_mdp_lean_rewards"
+        )
+        milestone = summary.milestone.as_json(
+            tuple(lean_rewards.MANAGER_NAMES)
+        )
+        record = {
+            "schema_version": (
+                _ACTION_BALL_EPOCH_UPDATE_ACK_TELEMETRY_SCHEMA_VERSION
+            ),
+            "kind": _ACTION_BALL_EPOCH_UPDATE_ACK_TELEMETRY_KIND,
+            "diagnostic_unauthorized": True,
+            "ppo_update": update_index,
+            "completed_environment_steps": completed_environment_steps,
+            "epoch_operation_sequence": frontier.operation_sequence,
+            "epoch_drain_sequence": frontier.drain_sequence,
+            "epoch_commit_start": frontier.start_commit,
+            "epoch_commit_end": frontier.end_commit,
+            "shot_slot_capacity": frontier.shot_slot_capacity,
+            "d05_transactions": settlement.transactions,
+            "d05_due_rows": settlement.due_rows,
+            "d05_selected_rows": settlement.selected_rows,
+            "d05_accepted_rows": settlement.accepted,
+            "d05_censored_rows": settlement.censored,
+            "d05_rejected_rows": settlement.rejected,
+            "d05_deferred_rows": settlement.deferred,
+            "d05_not_ready_rows": settlement.not_ready,
+            "motion_committed_rows": commits.motion_committed_rows,
+            "racket_committed_rows": commits.racket_committed_rows,
+            "r05_committed_rows": commits.r05_committed_rows,
+            "playback_started_rows": lifecycle.playback_started_rows,
+            "closed_unplayed_rows": lifecycle.closed_unplayed_rows,
+            "physical_launch_rows": lifecycle.physical_launch_rows,
+            "outcome_settled_rows": lifecycle.outcome_settled_rows,
+            "payment_recorded_rows": lifecycle.payment_recorded_rows,
+            "retired_rows": lifecycle.retired_rows,
+            "terminal_shot_rows": lifecycle.terminal_shot_rows,
+            "attributed_fault_rows": faults.attributed_fault_rows,
+            "active_before": continuation.active_before,
+            "active_after": continuation.active_after,
+            "awaiting_playback_after": continuation.awaiting_playback_after,
+            "awaiting_outcome_after": continuation.awaiting_outcome_after,
+            "awaiting_payment_after": continuation.awaiting_payment_after,
+            "action_opportunities": opportunity_rows,
+            "completed_shots": completed_rows,
+            "terminal_shots": terminal_shot_rows,
+            "terminal_resets": terminal_reset_rows,
+            "terminal_reset_rows": len(terminal_reset_rows),
+            "milestone": milestone,
+            **reset_reason_counts,
+        }
+        return record
+
+    def _action_ball_full_mdp_consume_epoch_ack_summary(
+        self,
+        summary: object,
+        *,
+        update_index: int,
+        completed_environment_steps: int,
+        canonical_ack_json: bytes,
+    ) -> dict:
+        """Install chronology after owner ACK and mirror exact durable content."""
+
+        module = getattr(self, "_action_ball_full_mdp_lean_runtime_module", None)
+        summary_type = getattr(module, "ActionEpochPpoBoundarySummary", None)
+        frontier_type = getattr(module, "EpochDrainFrontier", None)
+        active = getattr(
+            self, "_action_ball_full_mdp_active_drain_chronology", None
+        )
+        frontier = getattr(summary, "frontier", None)
+        if (
+            type(summary_type) is not type
+            or type(frontier_type) is not type
+            or type(summary) is not summary_type
+            or type(frontier) is not frontier_type
+            or type(active) is not _ActionBallFullMdpRunnerDrainChronology
+            or active.update_index != update_index
+            or active.completed_environment_steps != completed_environment_steps
+            or active.optimizer_returned is not True
+            or active.post_update_acknowledged is not False
+            or active.telemetry_emitted is not False
+            or type(canonical_ack_json) is not bytes
+            or not canonical_ack_json
+        ):
+            raise RuntimeError(
+                "diagnostic epoch ACK install chronology is foreign or stale"
+            )
+        try:
+            decoded = json.loads(canonical_ack_json.decode("utf-8"))
+        except BaseException as exc:
+            raise RuntimeError(
+                "diagnostic epoch ACK canonical JSON changed after durability"
+            ) from exc
+        if (
+            type(decoded) is not dict
+            or decoded.get("schema_version")
+            != _ACTION_BALL_EPOCH_UPDATE_ACK_TELEMETRY_SCHEMA_VERSION
+            or decoded.get("kind")
+            != _ACTION_BALL_EPOCH_UPDATE_ACK_TELEMETRY_KIND
+            or decoded.get("ppo_update") != update_index
+            or decoded.get("completed_environment_steps")
+            != completed_environment_steps
+            or decoded.get("epoch_operation_sequence")
+            != frontier.operation_sequence
+            or decoded.get("epoch_drain_sequence") != frontier.drain_sequence
+            or decoded.get("epoch_commit_start") != frontier.start_commit
+            or decoded.get("epoch_commit_end") != frontier.end_commit
+        ):
+            raise RuntimeError(
+                "diagnostic epoch ACK canonical JSON chronology differs"
+            )
+        chronology = active._replace(
+            post_update_acknowledged=True,
+            operation_sequence=frontier.operation_sequence,
+            drain_sequence=frontier.drain_sequence,
+            projection=summary,
+            telemetry_emitted=False,
+        )
+        self._action_ball_full_mdp_active_drain_chronology = chronology
+        self._action_ball_full_mdp_last_drain_chronology = chronology
+        marker_line = (
+            "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON="
+            + canonical_ack_json.decode("utf-8")
+            + "\n"
+        )
+        written = sys.stdout.write(marker_line)
+        if type(written) is not int or written != len(marker_line):
+            raise OSError("diagnostic epoch ACK stdout was a short write")
+        sys.stdout.flush()
+        chronology = chronology._replace(telemetry_emitted=True)
+        self._action_ball_full_mdp_active_drain_chronology = chronology
+        self._action_ball_full_mdp_last_drain_chronology = chronology
+        return decoded
+
+    @staticmethod
+    def _action_ball_full_mdp_validate_drain_schema_identity(
+        schema_identity: object,
+    ) -> tuple:
+        """Validate, but never derive, the exact global-owner drain schema.
+
+        Scalar and per-environment fields retain their legacy three-tuple ABI.
+        A bounded journal is admitted only as the global drain owner's exact
+        four-tuple ``(name, "fixed", minimum, fixed_width)``.  In particular,
+        the runner must not infer, flatten, truncate, or otherwise manufacture
+        a width from ``num_envs`` or from any payload observed later.
+        """
+
+        if type(schema_identity) is not tuple:
+            raise RuntimeError(
+                "fresh full-MDP drain schema identity owner order differs"
+            )
+        owner_order = []
+        for owner_record in schema_identity:
+            if type(owner_record) is not tuple or len(owner_record) != 2:
+                raise RuntimeError(
+                    "fresh full-MDP drain schema identity differs"
+                )
+            owner_id, fields = owner_record
+            if (
+                type(owner_id) is not str
+                or not owner_id
+                or type(fields) is not tuple
+                or not fields
+            ):
+                raise RuntimeError(
+                    "fresh full-MDP drain schema identity differs"
+                )
+            owner_order.append(owner_id)
+            for field in fields:
+                if type(field) is not tuple or len(field) not in (3, 4):
+                    raise RuntimeError(
+                        "fresh full-MDP drain schema field identity differs"
+                    )
+                name, cardinality, minimum = field[:3]
+                if (
+                    type(name) is not str
+                    or not name
+                    or type(cardinality) is not str
+                    or cardinality not in ("scalar", "per_env", "fixed")
+                    or type(minimum) is not int
+                    or minimum < 0
+                ):
+                    raise RuntimeError(
+                        "fresh full-MDP drain schema field identity differs"
+                    )
+                if cardinality == "fixed":
+                    if (
+                        len(field) != 4
+                        or type(field[3]) is not int
+                        or field[3] <= 0
+                    ):
+                        raise RuntimeError(
+                            "fresh full-MDP drain fixed schema width differs"
+                        )
+                elif len(field) != 3:
+                    raise RuntimeError(
+                        "fresh full-MDP drain non-fixed schema has a foreign width"
+                    )
+        if tuple(owner_order) != _ACTION_BALL_FULL_MDP_DRAIN_OWNER_ORDER:
+            raise RuntimeError(
+                "fresh full-MDP drain schema identity owner order differs"
+            )
+        return schema_identity
+
+    def _action_ball_full_mdp_validate_projection(
+        self,
+        projection: object,
+        *,
+        receipt: object,
+        update_index: int,
+        completed_environment_steps: int,
+    ) -> dict:
+        """Join global primitives against chronology witnessed by this runner."""
+
+        if projection is None or receipt is None:
+            raise RuntimeError(
+                "fresh full-MDP runner frontier lacks an ACKed receipt projection"
+            )
+        value = self._action_ball_full_mdp_projection_primitives(projection)
+        device = getattr(self, "_action_ball_full_mdp_drain_device", None)
+        expected_completed = (
+            (int(update_index) + 1)
+            * int(self.env.num_envs)
+            * int(self.num_steps_per_env)
+        )
+        if (
+            type(update_index) is not int
+            or update_index < 0
+            or type(completed_environment_steps) is not int
+            or completed_environment_steps != expected_completed
+            or type(value["schema_version"]) is not int
+            or value["schema_version"] != 1
+            or value["kind"] != _ACTION_BALL_FULL_MDP_DRAIN_CHECKPOINT_KIND
+            or type(value["num_envs"]) is not int
+            or value["num_envs"] != int(self.env.num_envs)
+            or not isinstance(device, torch.device)
+            or value["device_type"] != device.type
+            or value["device_index"] != device.index
+            or value["owner_order"]
+            != _ACTION_BALL_FULL_MDP_DRAIN_OWNER_ORDER
+            or type(value["next_update_index"]) is not int
+            or value["next_update_index"] != update_index + 1
+            or type(value["operation_sequence"]) is not int
+            or value["operation_sequence"] <= 0
+            or type(value["drain_sequence"]) is not int
+            or value["drain_sequence"] <= 0
+            or type(value["last_completed_environment_steps"]) is not int
+            or value["last_completed_environment_steps"]
+            != completed_environment_steps
+            or type(value["update_index"]) is not int
+            or value["update_index"] != update_index
+            or type(value["completed_environment_steps"]) is not int
+            or value["completed_environment_steps"]
+            != completed_environment_steps
+        ):
+            raise RuntimeError(
+                "fresh full-MDP runner/global drain frontier chronology differs"
+            )
+        self._action_ball_full_mdp_validate_drain_schema_identity(
+            value["schema_identity"]
+        )
+        highwaters = value["mutation_version_highwaters"]
+        if (
+            type(highwaters) is not tuple
+            or tuple(owner_id for owner_id, _version in highwaters)
+            != _ACTION_BALL_FULL_MDP_DRAIN_OWNER_ORDER
+            or any(
+                type(version) is not int or version < 0
+                for _owner_id, version in highwaters
+            )
+        ):
+            raise RuntimeError(
+                "fresh full-MDP drain mutation highwaters differ"
+            )
+        previous = getattr(
+            self, "_action_ball_full_mdp_last_drain_chronology", None
+        )
+        if (
+            previous is not None
+            and value["schema_identity"]
+            != self._action_ball_full_mdp_projection_primitives(
+                previous.projection
+            )["schema_identity"]
+        ):
+            raise RuntimeError(
+                "fresh full-MDP drain schema identity drifted between updates"
+            )
+        if previous is None:
+            if (
+                value["operation_sequence"] != update_index + 1
+                or value["drain_sequence"] != update_index + 1
+            ):
+                raise RuntimeError(
+                    "fresh full-MDP runner drain chronology lacks its exact "
+                    "restored-or-initial frontier"
+                )
+        elif (
+            previous.post_update_acknowledged is not True
+            or update_index != previous.update_index + 1
+            or completed_environment_steps
+            != previous.completed_environment_steps
+            + int(self.env.num_envs) * int(self.num_steps_per_env)
+            or value["operation_sequence"] != previous.operation_sequence + 1
+            or value["drain_sequence"] != previous.drain_sequence + 1
+        ):
+            raise RuntimeError(
+                "fresh full-MDP runner drain sequence did not advance exactly once"
+            )
+        return value
+
+    def _action_ball_full_mdp_capture_acknowledged_projection(
+        self,
+        *,
+        receipt: object,
+        update_index: int,
+        completed_environment_steps: int,
+    ) -> None:
+        """Retain the legacy formal projection path only for R10 checkpoints."""
+
+        callback = getattr(
+            self, "_action_ball_full_mdp_projection_callback", None
+        )
+        drain_owner = getattr(
+            self, "_action_ball_full_mdp_drain_owner_identity", None
+        )
+        active = getattr(
+            self, "_action_ball_full_mdp_active_drain_chronology", None
+        )
+        if (
+            getattr(self, "_action_ball_full_mdp_run_mode", None)
+            != _ACTION_BALL_FULL_MDP_FORMAL_MODE
+            or not callable(callback)
+            or getattr(callback, "__self__", None) is not drain_owner
+            or type(active) is not _ActionBallFullMdpRunnerDrainChronology
+            or active.global_receipt is not receipt
+            or active.update_index != update_index
+            or active.completed_environment_steps != completed_environment_steps
+            or active.optimizer_returned is not True
+            or active.post_update_acknowledged is not False
+        ):
+            raise RuntimeError(
+                "formal fresh full-MDP ACK chronology is absent or stale"
+            )
+        projection = callback(receipt)
+        value = self._action_ball_full_mdp_validate_projection(
+            projection,
+            receipt=receipt,
+            update_index=update_index,
+            completed_environment_steps=completed_environment_steps,
+        )
+        chronology = active._replace(
+            post_update_acknowledged=True,
+            operation_sequence=value["operation_sequence"],
+            drain_sequence=value["drain_sequence"],
+            projection=projection,
+        )
+        self._action_ball_full_mdp_active_drain_chronology = chronology
+        self._action_ball_full_mdp_last_drain_chronology = chronology
+
+    def action_ball_full_mdp_runner_ppo_drain_frontier(
+        self,
+        boundary: object,
+    ) -> str:
+        """Independent trainer writer for the ACKed PPO-drain frontier."""
+
+        self._action_ball_full_mdp_require_checkpointable()
+        r10 = _action_ball_r10_module()
+        if type(boundary) is not r10.CheckpointBoundary:
+            raise RuntimeError(
+                "fresh full-MDP runner frontier requires an exact R10 boundary"
+            )
+        r10.validate_checkpoint_boundary(boundary)
+        chronology = getattr(
+            self, "_action_ball_full_mdp_last_drain_chronology", None
+        )
+        handoff = getattr(self, "_action_ball_r10_last_boundary_handoff", None)
+        if (
+            type(chronology) is not _ActionBallFullMdpRunnerDrainChronology
+            or chronology.optimizer_returned is not True
+            or chronology.post_update_acknowledged is not True
+            or chronology.global_receipt is None
+            or chronology.projection is None
+            or type(handoff) is not ActionBallR10RunnerBoundaryHandoff
+            or handoff.completed_update_index != chronology.update_index
+            or handoff.next_learning_iteration != chronology.update_index + 1
+            or handoff.completed_environment_steps
+            != int(self.num_steps_per_env)
+            or boundary.update_index != chronology.update_index
+            or boundary.rollout_storage_empty is not True
+            or boundary.optimizer_in_flight is not False
+            or boundary.gae_in_flight is not False
+        ):
+            raise RuntimeError(
+                "fresh full-MDP runner frontier lacks the exact post-update chronology"
+            )
+        callback = self._action_ball_full_mdp_projection_callback
+        repeated = callback(chronology.global_receipt)
+        if repeated is not chronology.projection:
+            raise RuntimeError(
+                "fresh full-MDP drain projection identity changed on repeat validation"
+            )
+        value = self._action_ball_full_mdp_projection_primitives(repeated)
+        if value != self._action_ball_full_mdp_projection_primitives(
+            chronology.projection
+        ):
+            raise RuntimeError(
+                "fresh full-MDP drain projection primitives changed"
+            )
+        payload = {
+            "schema_version": value["schema_version"],
+            "kind": value["kind"],
+            "num_envs": value["num_envs"],
+            "device_type": value["device_type"],
+            "device_index": value["device_index"],
+            "owner_order": value["owner_order"],
+            "schema_identity": value["schema_identity"],
+            "checkpoint_boundary_sha256": r10.boundary_sha256(boundary),
+            "next_update_index": value["next_update_index"],
+            "operation_sequence": value["operation_sequence"],
+            "drain_sequence": value["drain_sequence"],
+            "last_completed_environment_steps": value[
+                "last_completed_environment_steps"
+            ],
+            "mutation_version_highwaters": value[
+                "mutation_version_highwaters"
+            ],
+        }
+        return _action_ball_full_mdp_canonical_sha256(payload)
+
+    def _action_ball_r10_broadcast_restore_poison(
+        self,
+        owners: object,
+        *,
+        reason: str,
+    ) -> None:
+        """Attempt every registered poison callback without short-circuiting."""
+
+        self._action_ball_r10_poison(reason)
+        registry = self._action_ball_r10_registry
+        attempted = []
+        failures = []
+        if (
+            registry is None
+            or type(owners) is not tuple
+            or len(owners) != len(registry.owner_ids)
+        ):
+            failures.append("owner tuple unavailable or incomplete")
+        else:
+            for owner_id, owner in zip(registry.owner_ids, owners):
+                attempted.append(owner_id)
+                try:
+                    callback = getattr(owner, "poison_restore", None)
+                    if not callable(callback):
+                        raise RuntimeError("poison_restore is not callable")
+                    callback(reason)
+                except BaseException as exc:
+                    failures.append(
+                        f"{owner_id}:{type(exc).__module__}."
+                        f"{type(exc).__qualname__}"
+                    )
+        self._action_ball_r10_restore_poison_attempted_owner_ids = tuple(
+            attempted
+        )
+        self._action_ball_r10_restore_poison_failures = tuple(failures)
+
+    @staticmethod
+    def _action_ball_r10_type_identity(value: object) -> str:
+        return f"{type(value).__module__}.{type(value).__qualname__}"
+
+    def _action_ball_r10_complete_owners(
+        self,
+        *,
+        operation: str,
+        runner_owners: Mapping[str, object],
+        verified_checkpoint: object = None,
+    ) -> Tuple[object, ...]:
+        adapter = self._action_ball_r10_checkpoint_adapter
+        provider = adapter.action_ball_r10_complete_owners
+        result = provider(
+            operation=operation,
+            runner_owners=MappingProxyType(dict(runner_owners)),
+            verified_checkpoint=verified_checkpoint,
+        )
+        registry = self._action_ball_r10_registry
+        if type(result) is not tuple or len(result) != len(registry.owner_ids):
+            raise RuntimeError("R10 adapter returned an incomplete owner tuple")
+        if len({id(owner) for owner in result}) != len(result):
+            raise RuntimeError("R10 adapter returned aliased owner objects")
+        for expected_id, owner in zip(registry.owner_ids, result):
+            descriptor = getattr(owner, "descriptor", None)
+            if descriptor != registry.descriptor(expected_id):
+                raise RuntimeError(
+                    f"R10 adapter owner descriptor differs for {expected_id}"
+                )
+            if expected_id in runner_owners and owner is not runner_owners[expected_id]:
+                raise RuntimeError(
+                    f"R10 adapter replaced runner-owned state {expected_id}"
+                )
+        return result
+
+    @staticmethod
+    def _action_ball_r10_validate_module_state_dict(
+        saved: object,
+        current: Mapping[str, object],
+        *,
+        label: str,
+    ) -> None:
+        if not isinstance(saved, Mapping):
+            raise RuntimeError(f"R10 {label} state_dict must be a mapping")
+        if tuple(saved) != tuple(current):
+            raise RuntimeError(f"R10 {label} state_dict keys/order differ")
+        for name, current_value in current.items():
+            saved_value = saved[name]
+            if not torch.is_tensor(current_value) or not torch.is_tensor(saved_value):
+                raise RuntimeError(f"R10 {label}.{name} is not a tensor")
+            if (
+                tuple(saved_value.shape) != tuple(current_value.shape)
+                or saved_value.dtype != current_value.dtype
+            ):
+                raise RuntimeError(f"R10 {label}.{name} tensor ABI differs")
+            if (
+                saved_value.is_floating_point()
+                and not bool(torch.isfinite(saved_value).all())
+            ):
+                raise RuntimeError(f"R10 {label}.{name} is non-finite")
+
+    def _action_ball_r10_policy_state(self) -> dict:
+        policy = getattr(getattr(self, "alg", None), "policy", None)
+        state_getter = getattr(policy, "state_dict", None)
+        if not callable(state_getter):
+            raise RuntimeError("R10 trainer.policy lacks state_dict()")
+        recurrent = getattr(policy, "is_recurrent", None)
+        if type(recurrent) is not bool:
+            raise RuntimeError("R10 policy is_recurrent must be an exact bool")
+        training = getattr(policy, "training", None)
+        if type(training) is not bool:
+            raise RuntimeError("R10 policy training mode must be an exact bool")
+        return {
+            "schema_version": _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION,
+            "kind": "action_ball_r10_trainer_policy_v1",
+            "policy_type": self._action_ball_r10_type_identity(policy),
+            "is_recurrent": recurrent,
+            "policy_training": training,
+            "std_abi": self._policy_std_abi(),
+            "model_state_dict": state_getter(),
+        }
+
+    def _action_ball_r10_validate_policy_state(self, value: object) -> dict:
+        required = {
+            "schema_version",
+            "kind",
+            "policy_type",
+            "is_recurrent",
+            "policy_training",
+            "std_abi",
+            "model_state_dict",
+        }
+        if type(value) is not dict or set(value) != required:
+            raise RuntimeError("R10 trainer.policy payload keys differ")
+        policy = self.alg.policy
+        if (
+            type(value["schema_version"]) is not int
+            or value["schema_version"] != _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION
+            or value["kind"] != "action_ball_r10_trainer_policy_v1"
+            or value["policy_type"] != self._action_ball_r10_type_identity(policy)
+            or type(value["is_recurrent"]) is not bool
+            or value["is_recurrent"] is not getattr(policy, "is_recurrent", None)
+            or type(value["policy_training"]) is not bool
+            or value["std_abi"] != self._policy_std_abi()
+        ):
+            raise RuntimeError("R10 trainer.policy ABI differs")
+        self._action_ball_r10_validate_module_state_dict(
+            value["model_state_dict"],
+            policy.state_dict(),
+            label="trainer.policy",
+        )
+        return value
+
+    def _action_ball_r10_install_policy_state(self, value: object) -> None:
+        state = self._action_ball_r10_validate_policy_state(value)
+        self.alg.policy.load_state_dict(state["model_state_dict"], strict=True)
+        self.alg.policy.train(state["policy_training"])
+
+    def _action_ball_r10_optimizer_state(self) -> dict:
+        algorithm = getattr(self, "alg", None)
+        optimizer = getattr(algorithm, "optimizer", None)
+        if type(optimizer) is not torch.optim.Adam:
+            raise RuntimeError("R10 RSL 2.3.1 lane requires exact torch.optim.Adam")
+        if getattr(algorithm, "rnd", None) is not None:
+            raise RuntimeError("R10 trainer owner does not support RND state")
+        if getattr(algorithm, "lr_scheduler", None) is not None:
+            raise RuntimeError(
+                "R10 found a real lr_scheduler object without a typed owner"
+            )
+        schedule = getattr(algorithm, "schedule", None)
+        learning_rate = getattr(algorithm, "learning_rate", None)
+        desired_kl = getattr(algorithm, "desired_kl", None)
+        if type(schedule) is not str or not schedule:
+            raise RuntimeError("R10 PPO inline schedule is invalid")
+        if (
+            type(learning_rate) not in (int, float)
+            or not math.isfinite(float(learning_rate))
+            or float(learning_rate) <= 0.0
+        ):
+            raise RuntimeError("R10 PPO learning_rate is invalid")
+        if desired_kl is not None and (
+            type(desired_kl) not in (int, float)
+            or not math.isfinite(float(desired_kl))
+            or float(desired_kl) <= 0.0
+        ):
+            raise RuntimeError("R10 PPO desired_kl is invalid")
+        group_lrs = tuple(
+            float(group.get("lr"))
+            if isinstance(group, Mapping)
+            and type(group.get("lr")) in (int, float)
+            and math.isfinite(float(group.get("lr")))
+            and float(group.get("lr")) > 0.0
+            else float("nan")
+            for group in optimizer.param_groups
+        )
+        if not group_lrs or any(
+            not math.isfinite(value) or value != float(learning_rate)
+            for value in group_lrs
+        ):
+            raise RuntimeError("R10 optimizer group LR differs from PPO learning_rate")
+        return {
+            "schema_version": _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION,
+            "kind": "action_ball_r10_trainer_optimizer_schedule_v1",
+            "algorithm_type": self._action_ball_r10_type_identity(algorithm),
+            "optimizer_type": self._action_ball_r10_type_identity(optimizer),
+            "scheduler_representation": "rsl_rl_2_3_1_inline_schedule_and_lr",
+            "schedule": schedule,
+            "desired_kl": None if desired_kl is None else float(desired_kl),
+            "learning_rate": float(learning_rate),
+            "param_group_lrs": group_lrs,
+            "optimizer_state_dict": optimizer.state_dict(),
+        }
+
+    def _action_ball_r10_validate_optimizer_state(
+        self,
+        value: object,
+        *,
+        require_complete_adam: bool = True,
+    ) -> dict:
+        required = {
+            "schema_version",
+            "kind",
+            "algorithm_type",
+            "optimizer_type",
+            "scheduler_representation",
+            "schedule",
+            "desired_kl",
+            "learning_rate",
+            "param_group_lrs",
+            "optimizer_state_dict",
+        }
+        if type(value) is not dict or set(value) != required:
+            raise RuntimeError("R10 trainer.optimizer_schedule payload keys differ")
+        current = self._action_ball_r10_optimizer_state()
+        for key in (
+            "schema_version",
+            "kind",
+            "algorithm_type",
+            "optimizer_type",
+            "scheduler_representation",
+            "schedule",
+            "desired_kl",
+        ):
+            if value[key] != current[key] or type(value[key]) is not type(current[key]):
+                raise RuntimeError(f"R10 trainer.optimizer_schedule {key} differs")
+        learning_rate = value["learning_rate"]
+        group_lrs = value["param_group_lrs"]
+        if (
+            type(learning_rate) is not float
+            or not math.isfinite(learning_rate)
+            or learning_rate <= 0.0
+            or type(group_lrs) is not tuple
+            or len(group_lrs) != len(self.alg.optimizer.param_groups)
+            or any(type(item) is not float or item != learning_rate for item in group_lrs)
+        ):
+            raise RuntimeError("R10 trainer.optimizer_schedule LR frontier differs")
+        optimizer_state = value["optimizer_state_dict"]
+        if require_complete_adam:
+            self._validate_required_adam_state(
+                optimizer_state,
+                prefix="R10 trainer.optimizer_schedule",
+                expected_learning_rate=learning_rate,
+            )
+        elif not isinstance(optimizer_state, dict) or set(optimizer_state) != {
+            "state",
+            "param_groups",
+        }:
+            raise RuntimeError("R10 baseline optimizer state is malformed")
+        return value
+
+    def _action_ball_r10_install_optimizer_state(
+        self,
+        value: object,
+        *,
+        require_complete_adam: bool = False,
+    ) -> None:
+        state = self._action_ball_r10_validate_optimizer_state(
+            value,
+            require_complete_adam=require_complete_adam,
+        )
+        self.alg.optimizer.load_state_dict(state["optimizer_state_dict"])
+        self.alg.schedule = state["schedule"]
+        self.alg.desired_kl = state["desired_kl"]
+        self.alg.learning_rate = state["learning_rate"]
+        for group, saved_lr in zip(
+            self.alg.optimizer.param_groups,
+            state["param_group_lrs"],
+        ):
+            group["lr"] = saved_lr
+
+    def _action_ball_r10_normalizer_state(self, role: str) -> dict:
+        attribute, normalizer, aliases = self._resolve_runtime_normalizer(role)
+        if attribute is None or not is_empirical_normalizer(normalizer):
+            raise RuntimeError(f"R10 requires an empirical {role} normalizer")
+        if type(getattr(normalizer, "training", None)) is not bool:
+            raise RuntimeError(f"R10 {role} normalizer training mode is invalid")
+        state = normalizer.state_dict()
+        self._validate_empirical_normalizer_state(
+            role=role,
+            attribute_name=attribute,
+            normalizer=normalizer,
+        )
+        return {
+            "schema_version": _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION,
+            "kind": f"action_ball_r10_trainer_normalizer_{role}_v1",
+            "role": role,
+            "attribute_name": attribute,
+            "aliases": aliases,
+            "normalizer_type": self._action_ball_r10_type_identity(normalizer),
+            "normalizer_training": normalizer.training,
+            "state_dict": state,
+        }
+
+    def _action_ball_r10_validate_normalizer_state(
+        self,
+        role: str,
+        value: object,
+    ) -> dict:
+        required = {
+            "schema_version",
+            "kind",
+            "role",
+            "attribute_name",
+            "aliases",
+            "normalizer_type",
+            "normalizer_training",
+            "state_dict",
+        }
+        if type(value) is not dict or set(value) != required:
+            raise RuntimeError(f"R10 trainer.normalizer.{role} payload keys differ")
+        current = self._action_ball_r10_normalizer_state(role)
+        for key in (
+            "schema_version",
+            "kind",
+            "role",
+            "attribute_name",
+            "aliases",
+            "normalizer_type",
+        ):
+            if value[key] != current[key] or type(value[key]) is not type(current[key]):
+                raise RuntimeError(f"R10 trainer.normalizer.{role} {key} differs")
+        if type(value["normalizer_training"]) is not bool:
+            raise RuntimeError(f"R10 trainer.normalizer.{role} mode differs")
+        self._action_ball_r10_validate_module_state_dict(
+            value["state_dict"],
+            current["state_dict"],
+            label=f"trainer.normalizer.{role}",
+        )
+        return value
+
+    def _action_ball_r10_install_normalizer_state(
+        self,
+        role: str,
+        value: object,
+    ) -> None:
+        state = self._action_ball_r10_validate_normalizer_state(role, value)
+        _attribute, normalizer, _aliases = self._resolve_runtime_normalizer(role)
+        normalizer.load_state_dict(state["state_dict"], strict=True)
+        normalizer.train(state["normalizer_training"])
+
+    def _action_ball_r10_recurrent_state(self) -> Tuple[object, object, object]:
+        r10 = _action_ball_r10_module()
+        policy = self.alg.policy
+        recurrent = getattr(policy, "is_recurrent", None)
+        if type(recurrent) is not bool:
+            raise RuntimeError("R10 policy recurrent ABI is invalid")
+        if not recurrent:
+            return r10.RecurrentFrontierStatus.NOT_APPLICABLE, None, None
+        getter = getattr(policy, "get_hidden_states", None)
+        if not callable(getter):
+            raise RuntimeError("R10 recurrent policy lacks get_hidden_states()")
+        hidden = getter()
+        if type(hidden) is not tuple or len(hidden) != 2:
+            raise RuntimeError("R10 recurrent policy returned an invalid hidden pair")
+        actor_hidden, critic_hidden = hidden
+        _action_ball_r10_validate_hidden_tree(actor_hidden, label="actor")
+        _action_ball_r10_validate_hidden_tree(critic_hidden, label="critic")
+        return (
+            r10.RecurrentFrontierStatus.SEALED,
+            _action_ball_r10_clone_tree(actor_hidden),
+            _action_ball_r10_clone_tree(critic_hidden),
+        )
+
+    @staticmethod
+    def _action_ball_r10_tree_to_device(value: object, device: object) -> object:
+        if torch.is_tensor(value):
+            return value.detach().to(device=device).clone()
+        if type(value) is tuple:
+            return tuple(
+                MotionOnPolicyRunner._action_ball_r10_tree_to_device(child, device)
+                for child in value
+            )
+        if value is None:
+            return None
+        raise RuntimeError("R10 hidden state contains an unsupported device tree")
+
+    def _action_ball_r10_install_recurrent_state(
+        self,
+        status: str,
+        actor_hidden: object,
+        critic_hidden: object,
+    ) -> None:
+        r10 = _action_ball_r10_module()
+        policy = self.alg.policy
+        recurrent = getattr(policy, "is_recurrent", None)
+        if status == r10.RecurrentFrontierStatus.NOT_APPLICABLE.value:
+            if recurrent is not False or actor_hidden is not None or critic_hidden is not None:
+                raise RuntimeError("R10 non-recurrent frontier differs from live policy")
+            return
+        if status != r10.RecurrentFrontierStatus.SEALED.value or recurrent is not True:
+            raise RuntimeError("R10 recurrent frontier differs from live policy")
+        _action_ball_r10_validate_hidden_tree(actor_hidden, label="actor")
+        _action_ball_r10_validate_hidden_tree(critic_hidden, label="critic")
+        memory_a = getattr(policy, "memory_a", None)
+        memory_c = getattr(policy, "memory_c", None)
+        if not callable(getattr(memory_a, "reset", None)) or not callable(
+            getattr(memory_c, "reset", None)
+        ):
+            raise RuntimeError("R10 recurrent policy lacks typed memory owners")
+        memory_a.reset(
+            hidden_states=self._action_ball_r10_tree_to_device(
+                actor_hidden, self.device
+            )
+        )
+        memory_c.reset(
+            hidden_states=self._action_ball_r10_tree_to_device(
+                critic_hidden, self.device
+            )
+        )
+
+    @staticmethod
+    def _action_ball_r10_transition_empty(transition: object) -> bool:
+        expected = {
+            "observations",
+            "privileged_observations",
+            "actions",
+            "privileged_actions",
+            "rewards",
+            "dones",
+            "values",
+            "actions_log_prob",
+            "action_mean",
+            "action_sigma",
+            "hidden_states",
+            "rnd_state",
+        }
+        namespace = getattr(transition, "__dict__", None)
+        return (
+            type(namespace) is dict
+            and set(namespace) == expected
+            and all(value is None for value in namespace.values())
+        )
+
+    def _action_ball_r10_frontier_from_handoff(
+        self,
+        handoff: ActionBallR10RunnerBoundaryHandoff,
+    ) -> dict:
+        value = {
+            "schema_version": _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION,
+            "kind": "action_ball_r10_trainer_rollout_frontier_v1",
+            "completed_update_index": handoff.completed_update_index,
+            "next_learning_iteration": handoff.next_learning_iteration,
+            "num_envs": int(self.env.num_envs),
+            "num_steps_per_env": int(self.num_steps_per_env),
+            "storage_step": handoff.storage_step,
+            "transition_empty": handoff.transition_empty,
+            "completed_environment_steps": handoff.completed_environment_steps,
+            "actor_normalizer_calls": handoff.actor_normalizer_calls,
+            "critic_normalizer_calls": handoff.critic_normalizer_calls,
+            "privileged_obs_type": "critic",
+            "final_normalized_actor_observations": (
+                handoff.final_normalized_actor_observations.detach().clone()
+            ),
+            "final_normalized_critic_observations": (
+                handoff.final_normalized_critic_observations.detach().clone()
+            ),
+            "recurrent_frontier": handoff.recurrent_frontier.value,
+            "recurrent_actor_state": _action_ball_r10_clone_tree(
+                handoff.recurrent_actor_state
+            ),
+            "recurrent_critic_state": _action_ball_r10_clone_tree(
+                handoff.recurrent_critic_state
+            ),
+        }
+        value["runner_frontier_sha256"] = self._exact_resume_tree_sha256(value)
+        if value["runner_frontier_sha256"] != handoff.runner_frontier_sha256:
+            raise RuntimeError("R10 handoff/frontier SHA-256 differs")
+        return _action_ball_r10_validate_frontier_payload(
+            value,
+            expected_update_index=handoff.completed_update_index,
+        )
+
+    def _action_ball_r10_frontier_state(self) -> dict:
+        value = self._action_ball_r10_frontier_payload
+        if type(value) is not dict:
+            raise RuntimeError("R10 trainer.rollout_frontier is not installed")
+        return value
+
+    def _action_ball_r10_validate_frontier_state(self, value: object) -> dict:
+        state = _action_ball_r10_validate_frontier_payload(value)
+        if (
+            state["num_envs"] != int(self.env.num_envs)
+            or state["num_steps_per_env"] != int(self.num_steps_per_env)
+            or state["privileged_obs_type"] != getattr(
+                self, "privileged_obs_type", None
+            )
+        ):
+            raise RuntimeError("R10 trainer.rollout_frontier runner ABI differs")
+        runtime_obs_mode = getattr(
+            getattr(getattr(self.env, "unwrapped", self.env), "cfg", None),
+            "obs_mode",
+            None,
+        )
+        if runtime_obs_mode == "action_ball_full_mdp":
+            expected_widths = tuple(
+                int(
+                    self._resolve_runtime_normalizer(role)[1]
+                    .state_dict()["mean"]
+                    .numel()
+                )
+                for role in ("actor", "critic")
+            )
+        else:
+            expected_widths = (
+                _A211_ACTOR_WIDTH,
+                _A211_CRITIC_WIDTH,
+            ) if runtime_obs_mode == "action_ball_a211" else (
+                _C211_ACTOR_WIDTH,
+                _C211_CRITIC_WIDTH,
+            )
+        if (
+            state["final_normalized_actor_observations"].shape[1]
+            != expected_widths[0]
+            or state["final_normalized_critic_observations"].shape[1]
+            != expected_widths[1]
+        ):
+            raise RuntimeError("R10 trainer.rollout_frontier widths differ")
+        live_recurrent = getattr(self.alg.policy, "is_recurrent", None)
+        r10 = _action_ball_r10_module()
+        if (
+            live_recurrent is True
+            and state["recurrent_frontier"]
+            != r10.RecurrentFrontierStatus.SEALED.value
+        ) or (
+            live_recurrent is False
+            and state["recurrent_frontier"]
+            != r10.RecurrentFrontierStatus.NOT_APPLICABLE.value
+        ):
+            raise RuntimeError("R10 trainer.rollout_frontier recurrence differs")
+        return state
+
+    def _action_ball_r10_install_frontier_state(self, value: object) -> None:
+        if (
+            type(value) is dict
+            and value.get("kind")
+            == "action_ball_r10_trainer_rollout_frontier_baseline_v1"
+        ):
+            required = {
+                "schema_version",
+                "kind",
+                "current_learning_iteration",
+                "recurrent_frontier",
+                "recurrent_actor_state",
+                "recurrent_critic_state",
+            }
+            if (
+                set(value) != required
+                or value.get("schema_version")
+                != _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION
+                or type(value.get("current_learning_iteration")) is not int
+            ):
+                raise RuntimeError("R10 rollback frontier baseline differs")
+            self.current_learning_iteration = value["current_learning_iteration"]
+            if value["recurrent_frontier"] == "UNINITIALIZED_INTERNAL":
+                policy = self.alg.policy
+                if getattr(policy, "is_recurrent", None) is not True:
+                    raise RuntimeError("R10 rollback recurrence baseline differs")
+                policy.memory_a.reset()
+                policy.memory_c.reset()
+            else:
+                self._action_ball_r10_install_recurrent_state(
+                    value["recurrent_frontier"],
+                    value["recurrent_actor_state"],
+                    value["recurrent_critic_state"],
+                )
+            self._action_ball_r10_frontier_payload = value
+            self._action_ball_r10_restored_initial_frontier = None
+            return
+        state = self._action_ball_r10_validate_frontier_state(value)
+        self._action_ball_r10_install_recurrent_state(
+            state["recurrent_frontier"],
+            state["recurrent_actor_state"],
+            state["recurrent_critic_state"],
+        )
+        self.current_learning_iteration = state["next_learning_iteration"]
+        self._action_ball_r10_frontier_payload = state
+        self._action_ball_r10_restored_initial_frontier = {
+            "actor": state["final_normalized_actor_observations"].detach().clone(),
+            "critic": state["final_normalized_critic_observations"].detach().clone(),
+            "consumed": False,
+        }
+
+    def _action_ball_r10_frontier_baseline(self) -> dict:
+        r10 = _action_ball_r10_module()
+        recurrent = getattr(self.alg.policy, "is_recurrent", None)
+        if recurrent is False:
+            status = r10.RecurrentFrontierStatus.NOT_APPLICABLE.value
+            actor_hidden = None
+            critic_hidden = None
+        elif recurrent is True:
+            hidden = self.alg.policy.get_hidden_states()
+            if type(hidden) is not tuple or len(hidden) != 2:
+                raise RuntimeError("R10 cold baseline recurrent ABI differs")
+            if hidden[0] is None and hidden[1] is None:
+                actor_hidden = None
+                critic_hidden = None
+                status = "UNINITIALIZED_INTERNAL"
+            elif hidden[0] is None or hidden[1] is None:
+                raise RuntimeError("R10 cold baseline hidden pair is partial")
+            else:
+                actor_hidden = _action_ball_r10_clone_tree(hidden[0])
+                critic_hidden = _action_ball_r10_clone_tree(hidden[1])
+                status = r10.RecurrentFrontierStatus.SEALED.value
+        else:
+            raise RuntimeError("R10 cold baseline policy recurrence differs")
+        return {
+            "schema_version": _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION,
+            "kind": "action_ball_r10_trainer_rollout_frontier_baseline_v1",
+            "current_learning_iteration": int(self.current_learning_iteration),
+            "recurrent_frontier": status,
+            "recurrent_actor_state": actor_hidden,
+            "recurrent_critic_state": critic_hidden,
+        }
+
+    def _action_ball_r10_validate_runner_join_claims(
+        self,
+        claims_by_owner: object,
+        *,
+        runner_frontier_sha256: str,
+        ppo_drain_frontier_sha256: Optional[str] = None,
+    ) -> Dict[str, Tuple[object, ...]]:
+        r10 = _action_ball_r10_module()
+        if type(claims_by_owner) is not dict or set(claims_by_owner) != set(
+            _ACTION_BALL_R10_RUNNER_OWNER_IDS
+        ):
+            raise RuntimeError("R10 runner join-claim owner surface differs")
+        expected_ids = {
+            owner_id: tuple(
+                spec.join_id
+                for spec in r10.R10_GLOBAL_JOIN_SPECS
+                if owner_id in spec.owner_ids
+            )
+            for owner_id in _ACTION_BALL_R10_RUNNER_OWNER_IDS
+        }
+        checked = {}
+        for owner_id in _ACTION_BALL_R10_RUNNER_OWNER_IDS:
+            claims = claims_by_owner[owner_id]
+            if type(claims) is not tuple or tuple(
+                getattr(claim, "join_id", None) for claim in claims
+            ) != expected_ids[owner_id]:
+                raise RuntimeError(f"R10 join-claim surface differs for {owner_id}")
+            for claim in claims:
+                if type(claim) is not r10.OwnerJoinClaim:
+                    raise RuntimeError(f"R10 join claim type differs for {owner_id}")
+                digest = claim.value_sha256
+                if (
+                    type(digest) is not str
+                    or len(digest) != 64
+                    or any(character not in "0123456789abcdef" for character in digest)
+                ):
+                    raise RuntimeError(f"R10 join claim digest differs for {owner_id}")
+                if (
+                    claim.join_id == "trainer_update_frontier"
+                    and digest != runner_frontier_sha256
+                ):
+                    raise RuntimeError(
+                        f"R10 trainer update frontier differs for {owner_id}"
+                    )
+            if (
+                owner_id == "trainer.rollout_frontier"
+                and ppo_drain_frontier_sha256 is not None
+            ):
+                if (
+                    type(ppo_drain_frontier_sha256) is not str
+                    or len(ppo_drain_frontier_sha256) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in ppo_drain_frontier_sha256
+                    )
+                ):
+                    raise RuntimeError(
+                        "R10 runner PPO-drain frontier digest is invalid"
+                    )
+                claims = tuple(
+                    r10.OwnerJoinClaim(
+                        claim.join_id,
+                        (
+                            ppo_drain_frontier_sha256
+                            if claim.join_id == "ppo_drain_frontier"
+                            else claim.value_sha256
+                        ),
+                    )
+                    for claim in claims
+                )
+            checked[owner_id] = tuple(claims)
+        return checked
+
+    def _action_ball_r10_build_trainer_owners(
+        self,
+        *,
+        mutation_versions: Mapping[str, int],
+        join_claims: Mapping[str, Tuple[object, ...]],
+    ) -> Dict[str, _ActionBallR10TrainerOwner]:
+        if set(mutation_versions) != set(_ACTION_BALL_R10_RUNNER_OWNER_IDS):
+            raise RuntimeError("R10 runner mutation-version surface differs")
+        registry = self._action_ball_r10_registry
+        getters = {
+            "trainer.policy": self._action_ball_r10_policy_state,
+            "trainer.optimizer_schedule": self._action_ball_r10_optimizer_state,
+            "trainer.normalizer.actor": lambda: self._action_ball_r10_normalizer_state(
+                "actor"
+            ),
+            "trainer.normalizer.critic": lambda: self._action_ball_r10_normalizer_state(
+                "critic"
+            ),
+            "trainer.rollout_frontier": self._action_ball_r10_frontier_state,
+        }
+        validators = {
+            "trainer.policy": self._action_ball_r10_validate_policy_state,
+            "trainer.optimizer_schedule": self._action_ball_r10_validate_optimizer_state,
+            "trainer.normalizer.actor": lambda value: self._action_ball_r10_validate_normalizer_state(
+                "actor", value
+            ),
+            "trainer.normalizer.critic": lambda value: self._action_ball_r10_validate_normalizer_state(
+                "critic", value
+            ),
+            "trainer.rollout_frontier": self._action_ball_r10_validate_frontier_state,
+        }
+        installers = {
+            "trainer.policy": self._action_ball_r10_install_policy_state,
+            "trainer.optimizer_schedule": self._action_ball_r10_install_optimizer_state,
+            "trainer.normalizer.actor": lambda value: self._action_ball_r10_install_normalizer_state(
+                "actor", value
+            ),
+            "trainer.normalizer.critic": lambda value: self._action_ball_r10_install_normalizer_state(
+                "critic", value
+            ),
+            "trainer.rollout_frontier": self._action_ball_r10_install_frontier_state,
+        }
+        return {
+            owner_id: _ActionBallR10TrainerOwner(
+                descriptor=registry.descriptor(owner_id),
+                mutation_version=mutation_versions[owner_id],
+                state_getter=getters[owner_id],
+                state_validator=validators[owner_id],
+                state_installer=installers[owner_id],
+                join_claims=join_claims[owner_id],
+                poison=self._action_ball_r10_poison,
+            )
+            for owner_id in _ACTION_BALL_R10_RUNNER_OWNER_IDS
+        }
+
+    def _action_ball_r10_validate_restore_completion_receipt(
+        self,
+        receipt: object,
+        *,
+        verified_checkpoint: object,
+    ) -> None:
+        r10 = _action_ball_r10_module()
+        registry = self._action_ball_r10_registry
+        if (
+            type(receipt) is not r10.RestoreReceipt
+            or receipt.schema_version != r10.SCHEMA_VERSION
+            or type(receipt.schema_version) is not int
+            or receipt.kind
+            != "action_ball_full_mdp_checkpoint_restore_receipt_v1"
+            or receipt.integration_status != r10.INTEGRATION_STATUS
+            or receipt.runtime_wiring is not False
+            or receipt.continuation_authorized is not False
+            or receipt.owner_root_sha256
+            != verified_checkpoint.owner_root_sha256
+            or receipt.prepared_owner_ids != registry.owner_ids
+            or receipt.committed_owner_ids != registry.owner_ids
+            or receipt.all_prepared_before_first_commit is not True
+            or receipt.runtime_poisoned is not False
+            or receipt.retry_permitted is not False
+        ):
+            raise RuntimeError(
+                "R10 cold restore completion receipt differs from the exact "
+                "21-owner transaction"
+            )
+
+    def _action_ball_r10_complete_cold_restore(
+        self,
+        *,
+        receipt: object,
+        owners: Tuple[object, ...],
+        verified_checkpoint: object,
+        cold_frontier: Mapping[str, object],
+    ) -> None:
+        """One-shot handoff from the pure coordinator to the env adapter."""
+
+        if self._action_ball_r10_restore_completion_attempted:
+            poison_owners = self._action_ball_r10_restore_owners
+            if poison_owners is None:
+                poison_owners = owners
+            self._action_ball_r10_broadcast_restore_poison(
+                poison_owners,
+                reason="R10 cold restore completion was attempted more than once",
+            )
+            raise RuntimeError(
+                "R10 cold restore completion retry is forbidden"
+            )
+        self._action_ball_r10_restore_completion_attempted = True
+        self._action_ball_r10_restore_owners = owners
+        try:
+            self._action_ball_r10_validate_restore_completion_receipt(
+                receipt,
+                verified_checkpoint=verified_checkpoint,
+            )
+            if (
+                self.current_learning_iteration
+                != verified_checkpoint.boundary.update_index + 1
+                or self._action_ball_r10_frontier_payload[
+                    "runner_frontier_sha256"
+                ]
+                != cold_frontier["runner_frontier_sha256"]
+            ):
+                raise RuntimeError(
+                    "R10 cold restore committed a mismatched trainer frontier"
+                )
+            callback = self._action_ball_r10_restore_complete_callback
+            if not callable(callback):
+                raise RuntimeError(
+                    "R10 cold restore completion callback is unavailable"
+                )
+            callback_result = callback(receipt)
+            if callback_result is not None:
+                raise RuntimeError(
+                    "R10 cold restore completion callback returned data"
+                )
+        except BaseException as exc:
+            self._action_ball_r10_broadcast_restore_poison(
+                owners,
+                reason=(
+                    "R10 cold restore completion failed; retry is forbidden: "
+                    f"{type(exc).__module__}.{type(exc).__qualname__}"
+                ),
+            )
+            raise RuntimeError(
+                "R10 cold restore completion failed; retry is forbidden"
+            ) from exc
+        self._action_ball_r10_restore_receipt = receipt
+
+    def _action_ball_r10_restore_cold_checkpoint(
+        self,
+        *,
+        verified_checkpoint: object,
+        capsule: ActionBallR10ColdRestoreCapsule,
+        cold_frontier: dict,
+    ) -> None:
+        """Commit all 21 owners without sampling or resetting the live env."""
+
+        if self._action_ball_r10_restore_completion_attempted:
+            owners = self._action_ball_r10_restore_owners
+            self._action_ball_r10_broadcast_restore_poison(
+                owners,
+                reason=(
+                    "R10 cold restore transaction was attempted more than "
+                    "once"
+                ),
+            )
+            raise RuntimeError("R10 cold restore retry is forbidden")
+        self._action_ball_r10_require_healthy()
+        if getattr(self, "_action_ball_resume_reset_pending", False):
+            raise RuntimeError("R10 cold restore cannot inherit the legacy reset path")
+        storage = getattr(self.alg, "storage", None)
+        if type(getattr(storage, "step", None)) is not int or storage.step != 0:
+            raise RuntimeError("R10 cold restore requires fresh empty rollout storage")
+        if not self._action_ball_r10_transition_empty(self.alg.transition):
+            raise RuntimeError("R10 cold restore requires a fresh empty transition")
+        self._action_ball_r10_frontier_payload = (
+            self._action_ball_r10_frontier_baseline()
+        )
+        states_by_owner = {
+            state.owner_id: state for state in verified_checkpoint.owner_states
+        }
+        claims = self._action_ball_r10_validate_runner_join_claims(
+            {
+                owner_id: states_by_owner[owner_id].join_claims
+                for owner_id in _ACTION_BALL_R10_RUNNER_OWNER_IDS
+            },
+            runner_frontier_sha256=cold_frontier["runner_frontier_sha256"],
+        )
+        runner_owners = self._action_ball_r10_build_trainer_owners(
+            mutation_versions=self._action_ball_r10_owner_mutation_versions,
+            join_claims=claims,
+        )
+        guard = _ActionBallR10EnvMethodGuard(self.env)
+        guard.install_restore_guards()
+        normalizer_guards = []
+        owners = None
+
+        def forbid_normalizer_forward(_module, _inputs):
+            raise RuntimeError("R10 cold restore forbids normalizer.forward()")
+
+        try:
+            for role in ("actor", "critic"):
+                _attribute, normalizer, _aliases = self._resolve_runtime_normalizer(
+                    role
+                )
+                registrar = getattr(normalizer, "register_forward_pre_hook", None)
+                if not callable(registrar):
+                    raise RuntimeError(
+                        f"R10 cold restore cannot guard {role} normalizer"
+                    )
+                normalizer_guards.append(registrar(forbid_normalizer_forward))
+            owners = self._action_ball_r10_complete_owners(
+                operation="cold_restore",
+                runner_owners=runner_owners,
+                verified_checkpoint=verified_checkpoint,
+            )
+            r10 = _action_ball_r10_module()
+            coordinator = r10.CheckpointRestoreCoordinator(
+                engine=r10.OwnerEngine.ISAAC,
+                registry=self._action_ball_r10_registry,
+                owners=owners,
+            )
+            receipt = coordinator.restore(
+                capsule.checkpoint_bytes,
+                expected_external_pins=capsule.expected_external_pins,
+            )
+            self._action_ball_r10_complete_cold_restore(
+                receipt=receipt,
+                owners=owners,
+                verified_checkpoint=verified_checkpoint,
+                cold_frontier=cold_frontier,
+            )
+        except BaseException:
+            if not self._action_ball_r10_runtime_poisoned:
+                if owners is None:
+                    self._action_ball_r10_poison(
+                        "R10 cold restore failed before owner completion; "
+                        "retry is forbidden"
+                    )
+                else:
+                    self._action_ball_r10_broadcast_restore_poison(
+                        owners,
+                        reason=(
+                            "R10 cold restore failed; retry is forbidden"
+                        ),
+                    )
+            raise
+        finally:
+            cleanup_failures = []
+            for handle in reversed(normalizer_guards):
+                try:
+                    handle.remove()
+                except BaseException as exc:
+                    cleanup_failures.append(
+                        "normalizer hook:"
+                        f"{type(exc).__module__}.{type(exc).__qualname__}"
+                    )
+            try:
+                guard.close()
+            except BaseException as exc:
+                cleanup_failures.append(
+                    "environment guard:"
+                    f"{type(exc).__module__}.{type(exc).__qualname__}"
+                )
+            if cleanup_failures:
+                reason = (
+                    "R10 cold restore guard cleanup failed; retry is "
+                    "forbidden: "
+                    + ",".join(cleanup_failures)
+                )
+                if owners is None:
+                    self._action_ball_r10_poison(reason)
+                else:
+                    self._action_ball_r10_broadcast_restore_poison(
+                        owners,
+                        reason=reason,
+                    )
+                raise RuntimeError(reason)
+        for owner_id in _ACTION_BALL_R10_RUNNER_OWNER_IDS:
+            self._action_ball_r10_owner_mutation_versions[owner_id] = (
+                states_by_owner[owner_id].mutation_version
+            )
+
+    def _action_ball_r10_validate_save_authority(
+        self,
+        value: object,
+        *,
+        handoff: ActionBallR10RunnerBoundaryHandoff,
+    ) -> Tuple[object, Dict[str, Tuple[object, ...]]]:
+        if type(value) is not ActionBallR10RunnerSaveAuthority:
+            raise RuntimeError("R10 adapter returned an untyped save authority")
+        if (
+            type(value.schema_version) is not int
+            or value.schema_version != _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION
+            or value.kind != _ACTION_BALL_R10_RUNNER_SAVE_AUTHORITY_KIND
+        ):
+            raise RuntimeError("R10 save authority schema/kind differs")
+        r10 = _action_ball_r10_module()
+        runtime_obs_mode = getattr(
+            getattr(getattr(self.env, "unwrapped", self.env), "cfg", None),
+            "obs_mode",
+            None,
+        )
+        if runtime_obs_mode == "action_ball_full_mdp":
+            retained_family = getattr(
+                self, "_action_ball_full_mdp_family", None
+            )
+            if type(value.family) is not r10.PolicyFamily or (
+                retained_family is not None
+                and value.family is not retained_family
+            ):
+                raise RuntimeError("R10 save authority family differs")
+            if retained_family is None:
+                self._action_ball_full_mdp_family = value.family
+        else:
+            expected_family = (
+                r10.PolicyFamily.A
+                if runtime_obs_mode == "action_ball_a211"
+                else r10.PolicyFamily.C
+            )
+            if value.family is not expected_family:
+                raise RuntimeError("R10 save authority family differs")
+        pins = value.immutable_pins
+        if type(pins) is not r10.ImmutableCheckpointPins:
+            raise RuntimeError("R10 save authority immutable pins have the wrong type")
+        for label, digest in (
+            ("code", pins.code_sha256),
+            ("config", pins.config_sha256),
+            ("contract", pins.contract_sha256),
+        ):
+            if (
+                type(digest) is not str
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise RuntimeError(f"R10 save authority {label} pin is invalid")
+        if pins.contract_sha256 != self.training_contract_sha256:
+            raise RuntimeError(
+                "R10 save authority contract pin differs from the runner contract"
+            )
+        r10.validate_checkpoint_boundary(value.boundary)
+        if tuple(world.world_id for world in value.boundary.worlds) != tuple(
+            range(int(self.env.num_envs))
+        ):
+            raise RuntimeError("R10 save authority world identity differs from runner")
+        if (
+            value.boundary.update_index != handoff.completed_update_index
+            or value.boundary.rollout_storage_empty is not True
+            or value.boundary.actor_frontier_sealed is not True
+            or value.boundary.critic_frontier_sealed is not True
+            or value.boundary.recurrent_frontier is not handoff.recurrent_frontier
+        ):
+            raise RuntimeError("R10 save authority boundary differs from runner")
+        claims = self._action_ball_r10_validate_runner_join_claims(
+            value.runner_join_claims,
+            runner_frontier_sha256=handoff.runner_frontier_sha256,
+            ppo_drain_frontier_sha256=(
+                self.action_ball_full_mdp_runner_ppo_drain_frontier(
+                    value.boundary
+                )
+            ),
+        )
+        return value, claims
+
+    def _action_ball_r10_seal_post_update(
+        self,
+        handoff: ActionBallR10RunnerBoundaryHandoff,
+    ) -> object:
+        """Ask the full adapter whether this exact boundary should be sealed."""
+
+        self._action_ball_r10_require_healthy()
+        self._action_ball_r10_last_boundary_handoff = handoff
+        frontier = self._action_ball_r10_frontier_from_handoff(handoff)
+        self._action_ball_r10_frontier_payload = frontier
+        authority = (
+            self._action_ball_r10_checkpoint_adapter.action_ball_r10_post_update_authority(
+                handoff
+            )
+        )
+        if authority is None:
+            return None
+        authority, claims = self._action_ball_r10_validate_save_authority(
+            authority,
+            handoff=handoff,
+        )
+        versions = {
+            owner_id: handoff.next_learning_iteration
+            for owner_id in _ACTION_BALL_R10_RUNNER_OWNER_IDS
+        }
+        runner_owners = self._action_ball_r10_build_trainer_owners(
+            mutation_versions=versions,
+            join_claims=claims,
+        )
+        owners = self._action_ball_r10_complete_owners(
+            operation="seal",
+            runner_owners=runner_owners,
+        )
+        r10 = _action_ball_r10_module()
+        publication = r10.seal_checkpoint_candidate(
+            engine=r10.OwnerEngine.ISAAC,
+            family=authority.family,
+            immutable_pins=authority.immutable_pins,
+            registry=self._action_ball_r10_registry,
+            boundary=authority.boundary,
+            owners=owners,
+        )
+        if (
+            publication.runtime_wiring is not False
+            or publication.continuation_authorized is not False
+        ):
+            raise RuntimeError("R10 pure publication forged continuation authority")
+        publish_result = (
+            self._action_ball_r10_checkpoint_adapter.action_ball_r10_publish(
+                publication=publication,
+                handoff=handoff,
+            )
+        )
+        self._action_ball_r10_last_publication = publication
+        self._action_ball_r10_last_publish_result = publish_result
+        self._action_ball_r10_owner_mutation_versions.update(versions)
+        return publication
+
+    def _action_ball_r10_capture_post_update_handoff(
+        self,
+        *,
+        completed_update_index: int,
+        tracker: dict,
+    ) -> ActionBallR10RunnerBoundaryHandoff:
+        """Validate the real RSL boundary and detach its next-rollout frontier."""
+
+        storage = getattr(self.alg, "storage", None)
+        storage_step = getattr(storage, "step", None)
+        if type(storage_step) is not int or storage_step != 0:
+            raise RuntimeError("R10 post-update rollout storage is not empty")
+        if storage is not tracker.get("storage_object"):
+            raise RuntimeError("R10 PPO replaced rollout storage during update")
+        transition_empty = self._action_ball_r10_transition_empty(
+            getattr(self.alg, "transition", None)
+        )
+        if not transition_empty:
+            raise RuntimeError("R10 post-update transition is not empty")
+        if (
+            tracker.get("environment_step_in_flight") is not False
+            or tracker.get("gae_in_flight") is not False
+            or tracker.get("optimizer_in_flight") is not False
+            or tracker.get("gae_complete") is not True
+        ):
+            raise RuntimeError("R10 post-update phase still has in-flight state")
+        environment_steps = (
+            tracker["completed_environment_steps"]
+            - tracker["environment_steps_at_boundary"]
+        )
+        actor_calls = (
+            tracker["actor_normalizer_calls"]
+            - tracker["actor_calls_at_boundary"]
+        )
+        critic_calls = (
+            tracker["critic_normalizer_calls"]
+            - tracker["critic_calls_at_boundary"]
+        )
+        if (
+            environment_steps != int(self.num_steps_per_env)
+            or actor_calls != int(self.num_steps_per_env)
+            or critic_calls != int(self.num_steps_per_env)
+        ):
+            raise RuntimeError(
+                "R10 rollout step/normalizer counts do not match num_steps_per_env"
+            )
+        actor = tracker.get("last_normalized_actor")
+        critic = tracker.get("last_compute_returns_critic")
+        hooked_critic = tracker.get("last_normalized_critic")
+        if (
+            not torch.is_tensor(actor)
+            or not torch.is_tensor(critic)
+            or not torch.is_tensor(hooked_critic)
+            or not torch.equal(critic, hooked_critic)
+        ):
+            raise RuntimeError("R10 final normalized actor/critic frontier differs")
+        recurrent_status, actor_hidden, critic_hidden = (
+            self._action_ball_r10_recurrent_state()
+        )
+        completed = int(completed_update_index)
+        next_iteration = completed + 1
+        digest_input = {
+            "schema_version": _ACTION_BALL_R10_RUNNER_SCHEMA_VERSION,
+            "kind": "action_ball_r10_trainer_rollout_frontier_v1",
+            "completed_update_index": completed,
+            "next_learning_iteration": next_iteration,
+            "num_envs": int(self.env.num_envs),
+            "num_steps_per_env": int(self.num_steps_per_env),
+            "storage_step": storage_step,
+            "transition_empty": transition_empty,
+            "completed_environment_steps": environment_steps,
+            "actor_normalizer_calls": actor_calls,
+            "critic_normalizer_calls": critic_calls,
+            "privileged_obs_type": "critic",
+            "final_normalized_actor_observations": actor.detach().clone(),
+            "final_normalized_critic_observations": critic.detach().clone(),
+            "recurrent_frontier": recurrent_status.value,
+            "recurrent_actor_state": _action_ball_r10_clone_tree(actor_hidden),
+            "recurrent_critic_state": _action_ball_r10_clone_tree(critic_hidden),
+        }
+        digest = self._exact_resume_tree_sha256(digest_input)
+        handoff = ActionBallR10RunnerBoundaryHandoff(
+            schema_version=_ACTION_BALL_R10_RUNNER_SCHEMA_VERSION,
+            kind=_ACTION_BALL_R10_RUNNER_HANDOFF_KIND,
+            integration_status=_ACTION_BALL_R10_RUNNER_INTEGRATION_STATUS,
+            runtime_wiring=False,
+            continuation_authorized=False,
+            completed_update_index=completed,
+            next_learning_iteration=next_iteration,
+            storage_step=storage_step,
+            transition_empty=transition_empty,
+            environment_step_in_flight=False,
+            completed_environment_steps=environment_steps,
+            actor_normalizer_calls=actor_calls,
+            critic_normalizer_calls=critic_calls,
+            final_normalized_actor_observations=digest_input[
+                "final_normalized_actor_observations"
+            ],
+            final_normalized_critic_observations=digest_input[
+                "final_normalized_critic_observations"
+            ],
+            recurrent_frontier=recurrent_status,
+            recurrent_actor_state=digest_input["recurrent_actor_state"],
+            recurrent_critic_state=digest_input["recurrent_critic_state"],
+            runner_frontier_sha256=digest,
+        )
+        self._action_ball_r10_seal_post_update(handoff)
+        tracker["environment_steps_at_boundary"] = tracker[
+            "completed_environment_steps"
+        ]
+        tracker["actor_calls_at_boundary"] = tracker[
+            "actor_normalizer_calls"
+        ]
+        tracker["critic_calls_at_boundary"] = tracker[
+            "critic_normalizer_calls"
+        ]
+        tracker["gae_complete"] = False
+        tracker["last_compute_returns_critic"] = None
+        restored = self._action_ball_r10_restored_initial_frontier
+        if type(restored) is dict and restored.get("consumed") is True:
+            self._action_ball_r10_restored_initial_frontier = None
+        return handoff
 
     @staticmethod
     def _normalizer_aliases(role: str) -> Tuple[str, ...]:
@@ -2435,6 +6225,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         accidentally saving a weaker resume contract.
         """
 
+        self._action_ball_full_mdp_require_checkpointable()
+
         if infos is None:
             infos = {}
         elif not isinstance(infos, dict):
@@ -2861,6 +6653,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         ):
             raise ValueError("invalid curriculum control checkpoint identity")
+        if getattr(self, "_action_ball_full_mdp_run_mode", None) == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE:
+            self._action_ball_full_mdp_require_checkpointable()
         root = pathlib.Path(self.log_dir) / "curriculum_control"
         root.mkdir(parents=True, exist_ok=True)
         namespace = root / (
@@ -3821,7 +7615,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             == "stage1_natural_clip_paddle_world"
         ):
             return "stage1_natural_clip"
-        return mode if mode in ("task_first", "action_ball") else None
+        return mode if mode in (
+            "task_first",
+            "action_ball",
+            "action_ball_full_mdp",
+        ) else None
 
     def _action_ball_diagnostic_unauthorized(self) -> bool:
         """Return whether this is the fixed-domain, non-promotable N1 screen."""
@@ -3886,6 +7684,75 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 "diagnostic task requires an explicitly compact joint-safety producer"
             )
         return True
+
+    def _full_mdp_diagnostic_joint_safety_compact_evidence(self) -> bool:
+        """Bind only the exact fresh full-MDP diagnostic safety drain.
+
+        Fresh full-MDP shares the compact action-ledger representation, but it
+        does not own the legacy ActionBall actual-limit attribution or push
+        ledgers.  Keep this predicate separate so enabling the typed
+        prepare/acknowledge transaction cannot manufacture those auxiliary
+        consumers or their zero-valued records.
+        """
+
+        if self._strict_exact_resume_target_mode() != "action_ball_full_mdp":
+            return False
+        run_mode = getattr(self, "_action_ball_full_mdp_run_mode", None)
+        if run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE:
+            # Formal full-MDP must never inherit the non-promotable compact
+            # representation from its diagnostic sibling.
+            return False
+        if run_mode != _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE:
+            raise RuntimeError(
+                "fresh full-MDP compact joint-safety evidence requires the "
+                "exact single_action_lean runner binding"
+            )
+        self._action_ball_full_mdp_require_healthy()
+        env = getattr(self.env, "unwrapped", self.env)
+        if env is not getattr(
+            self, "_action_ball_full_mdp_runtime_env_identity", None
+        ):
+            raise RuntimeError(
+                "fresh full-MDP compact joint-safety environment identity changed"
+            )
+        commands = getattr(getattr(env, "cfg", None), "commands", None)
+        racket = (
+            None
+            if commands is None
+            else getattr(commands, "racket_target", None)
+        )
+        diagnostic = getattr(
+            racket, "action_ball_diagnostic_unauthorized", False
+        )
+        if type(diagnostic) is not bool:
+            raise RuntimeError(
+                "fresh full-MDP action_ball_diagnostic_unauthorized must be "
+                "an exact boolean"
+            )
+        if diagnostic is not True:
+            raise RuntimeError(
+                "single_action_lean requires unauthorized fresh full-MDP "
+                "joint-safety evidence"
+            )
+        term = self._bind_joint_safety_action_term(required=True)
+        if (
+            getattr(
+                term, "_joint_safety_diagnostic_compact_evidence", None
+            )
+            is not True
+        ):
+            raise RuntimeError(
+                "single_action_lean requires an explicitly compact "
+                "fresh full-MDP joint-safety producer"
+            )
+        return True
+
+    def _diagnostic_joint_safety_compact_update_evidence(self) -> bool:
+        """Select compact two-phase update evidence without widening auxiliaries."""
+
+        if self._strict_exact_resume_target_mode() == "action_ball_full_mdp":
+            return self._full_mdp_diagnostic_joint_safety_compact_evidence()
+        return self._diagnostic_joint_safety_compact_evidence()
 
     def _effective_reward_activation_task_kind(self) -> Optional[str]:
         """Return the two task leaves with a verified RewardManager ledger adapter."""
@@ -4040,6 +7907,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             return "action-ball"
         if mode == "stage1_natural_clip":
             return "stage1-natural-clip"
+        if mode == "action_ball_full_mdp":
+            return "action-ball-full-mdp"
         return "task-first"
 
     def _task_first_exact_resume_required(self) -> bool:
@@ -5802,10 +9671,22 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         都拒绝,绝不把 actor-only checkpoint 静默解释成 warm start。Action-ball 的 load
         只恢复内存状态；首次 simulator true reset 延迟到 learn(),避免 load 本身采样。
         """
+        if getattr(self, "_action_ball_full_mdp_run_mode", None) == (
+            _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+        ):
+            raise RuntimeError(
+                "single_action_lean forbids checkpoint load"
+            )
         immutable_checkpoint_bytes = kwargs.pop(
             "_formal_immutable_checkpoint_bytes", None
         )
         strict_resume = bool(getattr(self, "require_exact_resume_state", False))
+        if strict_resume:
+            # Calling load(), rather than a caller-authored constructor flag,
+            # is the exact proof that checkpoint/resume was requested.  Fail
+            # before opening or applying any checkpoint when a live command
+            # lacks the paired explicit-state hooks.
+            self._validate_task_first_exact_resume_terms()
         formal_safe_resume = (
             strict_resume
             and self._formal_action_ball_runtime_bootstrap_required()
@@ -5988,6 +9869,41 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         不会被执行,第一次信号同样没反应,那种情况仍然只有 SIGKILL 能救。)
         """
         self._install_action_ball_211_wait_normalizer_masks()
+        r10_enabled = (
+            getattr(self, "_action_ball_r10_checkpoint_adapter", None)
+            is not None
+        )
+        full_mdp_enabled = (
+            getattr(self, "_action_ball_full_mdp_runtime_owner", None)
+            is not None
+        )
+        full_mdp_run_mode = getattr(
+            self, "_action_ball_full_mdp_run_mode", None
+        )
+        expected_r10 = (
+            full_mdp_enabled
+            and full_mdp_run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE
+        )
+        if r10_enabled != expected_r10 or (
+            full_mdp_enabled
+            and full_mdp_run_mode
+            not in {
+                _ACTION_BALL_FULL_MDP_FORMAL_MODE,
+                _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE,
+            }
+        ):
+            raise RuntimeError(
+                "fresh full-MDP runner lost its exact mode/runtime-owner/R10 "
+                "construction binding"
+            )
+        if full_mdp_enabled:
+            self._action_ball_full_mdp_require_healthy()
+        if r10_enabled:
+            self._action_ball_r10_require_healthy()
+            if getattr(self, "_action_ball_resume_reset_pending", False):
+                raise RuntimeError(
+                    "R10 runner adapter refuses the legacy reset-on-resume path"
+                )
         action_ball_update_profile_requested = False
         raw_update_profile = os.environ.get(
             "HOPE_ACTION_BALL_UPDATE_PROFILE"
@@ -6149,6 +10065,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 unwrapped_env,
                 task_kind="action_ball",
                 expected_environment_step_count=self.num_steps_per_env,
+                batch_host_validation_at_update=True,
             )
             if prelong_expected_recipe_sha256 is not None:
                 from whole_body_tracking.utils.action_ball_prelong_semantics import (
@@ -6172,7 +10089,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         # compact device aggregate instead of materializing formal per-step
         # identity transcripts and durable receipt files.
         diagnostic_joint_safety = (
-            self._diagnostic_joint_safety_compact_evidence()
+            self._diagnostic_joint_safety_compact_update_evidence()
         )
         joint_safety_action_term = self._bind_joint_safety_action_term(
             required=(
@@ -6180,6 +10097,43 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 or diagnostic_joint_safety
             )
         )
+
+        r10_tracker = None
+        original_r10_compute_returns = None
+        if r10_enabled:
+            if (
+                getattr(self, "training_type", None) != "rl"
+                or getattr(self, "privileged_obs_type", None) != "critic"
+            ):
+                raise RuntimeError("R10 runner adapter requires PPO with critic observations")
+            storage = getattr(self.alg, "storage", None)
+            if type(getattr(storage, "step", None)) is not int or storage.step != 0:
+                raise RuntimeError("R10 learn entry requires empty rollout storage")
+            if not self._action_ball_r10_transition_empty(
+                getattr(self.alg, "transition", None)
+            ):
+                raise RuntimeError("R10 learn entry requires an empty transition")
+            original_r10_compute_returns = getattr(
+                self.alg, "compute_returns", None
+            )
+            if not callable(original_r10_compute_returns):
+                raise RuntimeError("R10 PPO lacks compute_returns()")
+            r10_tracker = {
+                "storage_object": storage,
+                "environment_step_in_flight": False,
+                "completed_environment_steps": 0,
+                "environment_steps_at_boundary": 0,
+                "actor_normalizer_calls": 0,
+                "critic_normalizer_calls": 0,
+                "actor_calls_at_boundary": None,
+                "critic_calls_at_boundary": None,
+                "last_normalized_actor": None,
+                "last_normalized_critic": None,
+                "last_compute_returns_critic": None,
+                "gae_in_flight": False,
+                "gae_complete": False,
+                "optimizer_in_flight": False,
+            }
 
         original_update = getattr(self.alg, "update", None)
         if not callable(original_update):
@@ -6228,14 +10182,114 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         # loop rather than copying a version-sensitive implementation here.
         next_rollout_step = int(self.current_learning_iteration)
 
+        def r10_compute_returns(last_critic_observations, *args, **kwargs):
+            if r10_tracker["gae_in_flight"] or r10_tracker["gae_complete"]:
+                raise RuntimeError("R10 compute_returns phase re-entered")
+            if not torch.is_tensor(last_critic_observations):
+                raise RuntimeError("R10 compute_returns critic frontier is not a tensor")
+            r10_tracker["gae_in_flight"] = True
+            r10_tracker["last_compute_returns_critic"] = (
+                last_critic_observations.detach().clone()
+            )
+            try:
+                result = original_r10_compute_returns(
+                    last_critic_observations, *args, **kwargs
+                )
+            except BaseException:
+                r10_tracker["last_compute_returns_critic"] = None
+                raise
+            else:
+                r10_tracker["gae_complete"] = True
+                return result
+            finally:
+                r10_tracker["gae_in_flight"] = False
+
+        def call_original_update(*args, **kwargs):
+            if r10_enabled:
+                if r10_tracker["optimizer_in_flight"]:
+                    raise RuntimeError("R10 PPO optimizer phase re-entered")
+                r10_tracker["optimizer_in_flight"] = True
+            try:
+                result = original_update(*args, **kwargs)
+            finally:
+                if r10_enabled:
+                    r10_tracker["optimizer_in_flight"] = False
+            if full_mdp_enabled:
+                prepared = getattr(
+                    self, "_action_ball_full_mdp_boundary_prepared", None
+                )
+                if prepared is None:
+                    raise RuntimeError(
+                        "fresh full-MDP optimizer returned without an active boundary"
+                    )
+                self._action_ball_full_mdp_mark_optimizer_callback(
+                    prepared,
+                    update_index=next_rollout_step,
+                )
+                active = getattr(
+                    self,
+                    "_action_ball_full_mdp_active_drain_chronology",
+                    None,
+                )
+                if (
+                    type(active)
+                    is not _ActionBallFullMdpRunnerDrainChronology
+                    or active.global_receipt is not prepared
+                    or active.update_index != next_rollout_step
+                    or active.optimizer_returned is not False
+                ):
+                    raise RuntimeError(
+                        "fresh full-MDP optimizer return chronology differs"
+                    )
+                self._action_ball_full_mdp_active_drain_chronology = (
+                    active._replace(optimizer_returned=True)
+                )
+            return result
+
         def update_with_rollout_boundary(*args, **kwargs):
             nonlocal next_rollout_step
+            full_mdp_prepared = None
+            full_mdp_wal_path = None
+            full_mdp_pending_summary = None
+            full_mdp_ack_json = None
+            full_mdp_pending_span = None
             prepared_joint_safety = None
             prepared_reward_evidence = None
             reward_artifact = None
             economy_activation = None
             economy_rollout = None
             prepared_prelong_semantics = None
+            if r10_enabled:
+                storage = getattr(self.alg, "storage", None)
+                if (
+                    storage is not r10_tracker["storage_object"]
+                    or type(getattr(storage, "step", None)) is not int
+                    or storage.step != int(self.num_steps_per_env)
+                    or r10_tracker["environment_step_in_flight"] is not False
+                    or r10_tracker["gae_in_flight"] is not False
+                    or r10_tracker["gae_complete"] is not True
+                    or r10_tracker["actor_calls_at_boundary"] is None
+                    or r10_tracker["critic_calls_at_boundary"] is None
+                    or (
+                        r10_tracker["completed_environment_steps"]
+                        - r10_tracker["environment_steps_at_boundary"]
+                    )
+                    != int(self.num_steps_per_env)
+                    or (
+                        r10_tracker["actor_normalizer_calls"]
+                        - r10_tracker["actor_calls_at_boundary"]
+                    )
+                    != int(self.num_steps_per_env)
+                    or (
+                        r10_tracker["critic_normalizer_calls"]
+                        - r10_tracker["critic_calls_at_boundary"]
+                    )
+                    != int(self.num_steps_per_env)
+                    or not self._action_ball_r10_transition_empty(
+                        getattr(self.alg, "transition", None)
+                    )
+                ):
+                    raise RuntimeError("R10 pre-update rollout/GAE boundary differs")
             if joint_safety_action_term is not None:
                 # Freeze and validate before PPO may consume the rollout. Formal
                 # tasks durably publish the full identity-bound receipt;
@@ -6308,105 +10362,326 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     prepared_reward_evidence,
                     step=next_rollout_step,
                 )
-            if reward_ppo_economy_ledger is not None:
+            if full_mdp_enabled:
                 if args or kwargs:
                     raise RuntimeError(
-                        "reward/PPO economy requires the zero-argument PPO update ABI"
+                        "fresh full-MDP requires the zero-argument PPO update ABI"
                     )
-                economy_activation = reward_ppo_economy_ledger.prepare_update(
-                    next_rollout_step
-                )
-                economy_rollout = self._prepare_reward_ppo_economy_rollout(
-                    activation=economy_activation,
-                    ppo_update=next_rollout_step,
-                )
-                if prelong_semantics_ledger is not None:
-                    prepared_prelong_semantics = (
-                        prelong_semantics_ledger.prepare_update(
-                            next_rollout_step
+                if getattr(
+                    self, "_action_ball_full_mdp_boundary_active", False
+                ):
+                    raise RuntimeError(
+                        "fresh full-MDP PPO boundary was re-entered"
+                    )
+                self._action_ball_full_mdp_require_healthy()
+                self._action_ball_full_mdp_boundary_active = True
+                try:
+                    if self._action_ball_full_mdp_run_mode == (
+                        _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+                    ):
+                        full_mdp_wal_path = (
+                            self._action_ball_full_mdp_preflight_durable_wal()
+                        )
+                    full_mdp_prepared = (
+                        self._action_ball_full_mdp_prepare_callback(
+                            update_index=next_rollout_step,
+                            completed_environment_steps=(
+                                (int(next_rollout_step) + 1)
+                                * int(self.env.num_envs)
+                                * int(self.num_steps_per_env)
+                            ),
                         )
                     )
-                result, economy_gradient = (
-                    self._run_reward_ppo_economy_optimizer(original_update)
-                )
-            else:
-                result = original_update(*args, **kwargs)
-            # Read the trainable parameter after optimizer.step().  RSL-RL's
-            # cached action distribution was constructed before that step and
-            # can otherwise hide a newly negative scalar std for one rollout.
-            policy_std_record = self._emit_policy_std_update(
-                ppo_update=next_rollout_step
-            )
-            if reward_ppo_economy_ledger is not None:
-                if policy_std_record is None:
-                    raise RuntimeError(
-                        "reward/PPO economy lacks post-update policy std telemetry"
+                    if full_mdp_prepared is None:
+                        raise RuntimeError(
+                            "fresh full-MDP prepare returned no opaque boundary"
+                        )
+                    self._action_ball_full_mdp_boundary_prepared = (
+                        full_mdp_prepared
                     )
-                economy_ppo = self._reward_ppo_economy_post_update(result)
-                reward_ppo_economy_ledger.acknowledge_update(
-                    economy_activation
+                    completed_rows = (
+                        (int(next_rollout_step) + 1)
+                        * int(self.env.num_envs)
+                        * int(self.num_steps_per_env)
+                    )
+                    self._action_ball_full_mdp_active_drain_chronology = (
+                        _ActionBallFullMdpRunnerDrainChronology(
+                            global_receipt=full_mdp_prepared,
+                            update_index=next_rollout_step,
+                            completed_environment_steps=completed_rows,
+                            optimizer_returned=False,
+                            post_update_acknowledged=False,
+                            operation_sequence=None,
+                            drain_sequence=None,
+                            projection=None,
+                            telemetry_emitted=False,
+                        )
+                    )
+                except BaseException as exc:
+                    reason = (
+                        "fresh full-MDP pre-optimizer drain failed; retry is "
+                        "forbidden: "
+                        f"{type(exc).__module__}.{type(exc).__qualname__}"
+                    )
+                    self._action_ball_full_mdp_poison_optimizer_boundary(
+                        full_mdp_prepared,
+                        update_index=next_rollout_step,
+                        reason=reason,
+                    )
+                    raise RuntimeError(reason) from exc
+            try:
+                if reward_ppo_economy_ledger is not None:
+                    if args or kwargs:
+                        raise RuntimeError(
+                            "reward/PPO economy requires the zero-argument PPO update ABI"
+                        )
+                    economy_activation = reward_ppo_economy_ledger.prepare_update(
+                        next_rollout_step
+                    )
+                    economy_rollout = self._prepare_reward_ppo_economy_rollout(
+                        activation=economy_activation,
+                        ppo_update=next_rollout_step,
+                    )
+                    if prelong_semantics_ledger is not None:
+                        prepared_prelong_semantics = (
+                            prelong_semantics_ledger.prepare_update(
+                                next_rollout_step
+                            )
+                        )
+                    if r10_enabled or full_mdp_enabled:
+                        result, economy_gradient = (
+                            self._run_reward_ppo_economy_optimizer(
+                                call_original_update
+                            )
+                        )
+                    else:
+                        result, economy_gradient = (
+                            self._run_reward_ppo_economy_optimizer(original_update)
+                        )
+                else:
+                    if r10_enabled or full_mdp_enabled:
+                        result = call_original_update(*args, **kwargs)
+                    else:
+                        result = original_update(*args, **kwargs)
+                if full_mdp_enabled and self._action_ball_full_mdp_run_mode == (
+                    _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+                ):
+                    active = getattr(
+                        self,
+                        "_action_ball_full_mdp_active_drain_chronology",
+                        None,
+                    )
+                    prepare_summary = getattr(
+                        self,
+                        "_action_ball_full_mdp_prepare_summary_callback",
+                        None,
+                    )
+                    if (
+                        type(active)
+                        is not _ActionBallFullMdpRunnerDrainChronology
+                        or active.global_receipt is not full_mdp_prepared
+                        or active.optimizer_returned is not True
+                        or active.post_update_acknowledged is not False
+                        or not callable(prepare_summary)
+                        or type(full_mdp_wal_path) is not pathlib.PosixPath
+                    ):
+                        raise RuntimeError(
+                            "fresh full-MDP pending-summary chronology differs"
+                        )
+                    full_mdp_pending_summary = prepare_summary(
+                        full_mdp_prepared,
+                        update_index=next_rollout_step,
+                    )
+                    pending_record = (
+                        self._action_ball_full_mdp_prepare_epoch_ack_record(
+                            full_mdp_pending_summary,
+                            update_index=next_rollout_step,
+                            completed_environment_steps=(
+                                active.completed_environment_steps
+                            ),
+                        )
+                    )
+                    full_mdp_ack_json, full_mdp_wal_line = (
+                        self._action_ball_full_mdp_encode_durable_pending_ack(
+                            pending_record,
+                            update_index=next_rollout_step,
+                            completed_environment_steps=(
+                                active.completed_environment_steps
+                            ),
+                        )
+                    )
+                    full_mdp_pending_span = (
+                        self._action_ball_full_mdp_append_durable_wal(
+                        full_mdp_wal_path,
+                        full_mdp_wal_line,
+                        )
+                    )
+                    acknowledged = self._action_ball_full_mdp_ack_callback(
+                        full_mdp_prepared,
+                        full_mdp_pending_summary,
+                        update_index=next_rollout_step,
+                    )
+                    if acknowledged is not full_mdp_pending_summary:
+                        raise RuntimeError(
+                            "fresh full-MDP destructive ACK changed summary identity"
+                        )
+                    epoch_ack_line = (
+                        _action_ball_full_mdp_durable_wal_module().encode_epoch_ack(
+                            pending_line=full_mdp_wal_line,
+                            pending_byte_start=full_mdp_pending_span[0],
+                            pending_byte_end=full_mdp_pending_span[1],
+                        )
+                    )
+                    full_mdp_epoch_ack_span = self._action_ball_full_mdp_append_durable_wal(
+                        full_mdp_wal_path, epoch_ack_line
+                    )
+                    self._action_ball_full_mdp_durable_ack_callback(
+                        acknowledged,
+                        update_index=next_rollout_step,
+                        segment_id=self._action_ball_full_mdp_durable_wal_segment_id,
+                        rank=self._joint_safety_rank(),
+                        pending_byte_start=full_mdp_pending_span[0],
+                        pending_byte_end=full_mdp_pending_span[1],
+                        ack_byte_start=full_mdp_epoch_ack_span[0],
+                        ack_byte_end=full_mdp_epoch_ack_span[1],
+                    )
+                    self._action_ball_full_mdp_consume_epoch_ack_summary(
+                        acknowledged,
+                        update_index=next_rollout_step,
+                        completed_environment_steps=(
+                            active.completed_environment_steps
+                        ),
+                        canonical_ack_json=full_mdp_ack_json,
+                    )
+                    self._action_ball_full_mdp_boundary_prepared = None
+                    self._action_ball_full_mdp_boundary_active = False
+                # Read the trainable parameter after optimizer.step().  RSL-RL's
+                # cached action distribution was constructed before that step and
+                # can otherwise hide a newly negative scalar std for one rollout.
+                policy_std_record = self._emit_policy_std_update(
+                    ppo_update=next_rollout_step
                 )
-                self._emit_reward_ppo_economy_update(
-                    ppo_update=next_rollout_step,
-                    rollout=economy_rollout,
-                    ppo=economy_ppo,
-                    gradient=economy_gradient,
-                    policy=policy_std_record,
-                )
-            reward_optimizer_commit = None
-            if prepared_reward_evidence is not None:
-                reward_optimizer_commit = (
-                    self._persist_reward_evidence_optimizer_commit(
-                        step=next_rollout_step,
-                        rank=reward_rank,
+                if reward_ppo_economy_ledger is not None:
+                    if policy_std_record is None:
+                        raise RuntimeError(
+                            "reward/PPO economy lacks post-update policy std telemetry"
+                        )
+                    economy_ppo = self._reward_ppo_economy_post_update(result)
+                    reward_ppo_economy_ledger.acknowledge_update(
+                        economy_activation
+                    )
+                    self._emit_reward_ppo_economy_update(
+                        ppo_update=next_rollout_step,
+                        rollout=economy_rollout,
+                        ppo=economy_ppo,
+                        gradient=economy_gradient,
+                        policy=policy_std_record,
+                    )
+                reward_optimizer_commit = None
+                if prepared_reward_evidence is not None:
+                    reward_optimizer_commit = (
+                        self._persist_reward_evidence_optimizer_commit(
+                            step=next_rollout_step,
+                            rank=reward_rank,
+                            artifact=reward_artifact,
+                        )
+                    )
+                if prepared_joint_safety is not None:
+                    if diagnostic_joint_safety:
+                        self._commit_diagnostic_joint_safety_update(
+                            prepared_joint_safety
+                        )
+                    else:
+                        self._commit_joint_safety_update(prepared_joint_safety)
+                if prepared_reward_evidence is not None:
+                    if reward_ledger_is_action_bound:
+                        reward_activation_ledger.acknowledge_update(
+                            prepared_reward_evidence
+                        )
+                    else:
+                        reward_activation_ledger.acknowledge_update(
+                            prepared_reward_evidence["activation"]
+                        )
+                    self._emit_reward_evidence_update(
+                        prepared_reward_evidence,
                         artifact=reward_artifact,
+                        optimizer_commit=reward_optimizer_commit,
+                        encoder=reward_activation_json,
                     )
+                self._notify_command_terms_rollout_end(next_rollout_step)
+                if full_mdp_enabled and self._action_ball_full_mdp_run_mode != (
+                    _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+                ):
+                    acknowledged = self._action_ball_full_mdp_ack_callback(
+                        full_mdp_prepared,
+                        update_index=next_rollout_step,
+                    )
+                    active = getattr(
+                        self,
+                        "_action_ball_full_mdp_active_drain_chronology",
+                        None,
+                    )
+                    if (
+                        type(active)
+                        is not _ActionBallFullMdpRunnerDrainChronology
+                    ):
+                        raise RuntimeError(
+                            "fresh full-MDP ACK lost runner chronology"
+                        )
+                    self._action_ball_full_mdp_capture_acknowledged_projection(
+                        receipt=full_mdp_prepared,
+                        update_index=next_rollout_step,
+                        completed_environment_steps=(
+                            active.completed_environment_steps
+                        ),
+                    )
+                    self._action_ball_full_mdp_boundary_prepared = None
+                    self._action_ball_full_mdp_boundary_active = False
+                if r10_enabled:
+                    self._action_ball_r10_capture_post_update_handoff(
+                        completed_update_index=next_rollout_step,
+                        tracker=r10_tracker,
+                    )
+                # Frozen evaluation is deliberately sequenced after the Reward
+                # activation and joint-safety two-phase commits.  It may persist
+                # control checkpoints or perform a fenced global reset, but it can
+                # never change which evidence the just-completed PPO update used.
+                # It remains inside the same full-MDP failure domain: after an
+                # optimizer acknowledgement there is no rollback, so every later
+                # boundary-service failure must poison the owner and forbid retry.
+                self._service_action_ball_frozen_evaluation(
+                    next_rollout_step
                 )
-            if prepared_joint_safety is not None:
-                if diagnostic_joint_safety:
-                    self._commit_diagnostic_joint_safety_update(
-                        prepared_joint_safety
+                if prelong_semantics_ledger is not None:
+                    # Emit only after every required post-optimizer commit and
+                    # boundary service succeeds.  Flush before destructive
+                    # acknowledgement so a BrokenPipe cannot silently consume the
+                    # sole terminal marker.
+                    prelong_ack = (
+                        prelong_semantics_ledger.prepare_acknowledgement(
+                            prepared_prelong_semantics
+                        )
                     )
-                else:
-                    self._commit_joint_safety_update(prepared_joint_safety)
-            if prepared_reward_evidence is not None:
-                if reward_ledger_is_action_bound:
-                    reward_activation_ledger.acknowledge_update(
-                        prepared_reward_evidence
+                    prelong_marker_line = prelong_ack.marker_line
+                    print(prelong_marker_line, flush=True)
+                    acknowledged_line = prelong_ack.consume()
+                    if acknowledged_line != prelong_marker_line:
+                        raise RuntimeError(
+                            "pre-long marker changed during acknowledgement"
+                        )
+            except BaseException as exc:
+                if full_mdp_enabled:
+                    reason = (
+                        "fresh full-MDP optimizer/post-boundary failed; retry "
+                        "is forbidden and checkpoint is forbidden: "
+                        f"{type(exc).__module__}.{type(exc).__qualname__}"
                     )
-                else:
-                    reward_activation_ledger.acknowledge_update(
-                        prepared_reward_evidence["activation"]
+                    self._action_ball_full_mdp_poison_optimizer_boundary(
+                        full_mdp_prepared,
+                        update_index=next_rollout_step,
+                        reason=reason,
                     )
-                self._emit_reward_evidence_update(
-                    prepared_reward_evidence,
-                    artifact=reward_artifact,
-                    optimizer_commit=reward_optimizer_commit,
-                    encoder=reward_activation_json,
-                )
-            self._notify_command_terms_rollout_end(next_rollout_step)
-            # Frozen evaluation is deliberately sequenced after the Reward
-            # activation and joint-safety two-phase commits.  It may persist
-            # control checkpoints or perform a fenced global reset, but it can
-            # never change which evidence the just-completed PPO update used.
-            self._service_action_ball_frozen_evaluation(
-                next_rollout_step
-            )
-            if prelong_semantics_ledger is not None:
-                # Emit only after every required post-optimizer commit and
-                # boundary service succeeds.  Flush before destructive
-                # acknowledgement so a BrokenPipe cannot silently consume the
-                # sole terminal marker.
-                prelong_ack = prelong_semantics_ledger.prepare_acknowledgement(
-                    prepared_prelong_semantics
-                )
-                prelong_marker_line = prelong_ack.marker_line
-                print(prelong_marker_line, flush=True)
-                acknowledged_line = prelong_ack.consume()
-                if acknowledged_line != prelong_marker_line:
-                    raise RuntimeError(
-                        "pre-long marker changed during acknowledgement"
-                    )
+                raise
             next_rollout_step += 1
             return result
 
@@ -6448,11 +10723,44 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 raise
             return result
 
+        r10_original_env_step = None
+
+        def step_with_r10_boundary_tracking(*args, **kwargs):
+            if r10_tracker["environment_step_in_flight"]:
+                raise RuntimeError("R10 environment step re-entered")
+            r10_tracker["environment_step_in_flight"] = True
+            try:
+                result = r10_original_env_step(*args, **kwargs)
+            except BaseException:
+                raise
+            else:
+                r10_tracker["completed_environment_steps"] += 1
+                return result
+            finally:
+                r10_tracker["environment_step_in_flight"] = False
+
+        def capture_r10_normalized_actor(_module, _inputs, output):
+            if not torch.is_tensor(output) or output.ndim != 2:
+                raise RuntimeError("R10 actor normalizer output is invalid")
+            r10_tracker["actor_normalizer_calls"] += 1
+            r10_tracker["last_normalized_actor"] = output.detach().clone()
+
+        def capture_r10_normalized_critic(_module, _inputs, output):
+            if not torch.is_tensor(output) or output.ndim != 2:
+                raise RuntimeError("R10 critic normalizer output is invalid")
+            r10_tracker["critic_normalizer_calls"] += 1
+            r10_tracker["last_normalized_critic"] = output.detach().clone()
+
         self._rollout_update_wrapper_active = True
         reward_activation_step_wrapper_active = False
+        r10_env_step_wrapper_active = False
+        r10_compute_returns_wrapper_active = False
+        r10_normalizer_hook_handles = []
         initial_observation_wrapper_active = False
         original_get_observations = None
         action_ball_update_profiler = None
+        learn_primary_error = None
+        self._learn_cleanup_secondary_failures = ()
         try:
             if action_ball_update_profile_requested:
                 from whole_body_tracking.utils.action_ball_update_profiler import (
@@ -6475,7 +10783,48 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             ):
                 self.env.step = step_with_reward_activation
                 reward_activation_step_wrapper_active = True
-            if self._action_ball_211_wait_mask_required():
+            if r10_enabled:
+                if init_at_random_ep_len:
+                    raise RuntimeError(
+                        "R10 exact continuation forbids random initial episode lengths"
+                    )
+                for role, hook in (
+                    ("actor", capture_r10_normalized_actor),
+                    ("critic", capture_r10_normalized_critic),
+                ):
+                    _attribute, normalizer, _aliases = (
+                        self._resolve_runtime_normalizer(role)
+                    )
+                    registrar = getattr(normalizer, "register_forward_hook", None)
+                    if not callable(registrar):
+                        raise RuntimeError(
+                            f"R10 cannot observe the {role} normalizer frontier"
+                        )
+                    r10_normalizer_hook_handles.append(registrar(hook))
+                r10_original_env_step = getattr(self.env, "step", None)
+                if not callable(r10_original_env_step):
+                    raise RuntimeError("R10 runner requires callable env.step()")
+                self.env.step = step_with_r10_boundary_tracking
+                r10_env_step_wrapper_active = True
+                self.alg.compute_returns = r10_compute_returns
+                r10_compute_returns_wrapper_active = True
+            r10_initial_frontier_required = (
+                self._action_ball_211_wait_mask_required()
+                or (
+                    r10_enabled
+                    and getattr(
+                        getattr(
+                            getattr(self.env, "unwrapped", self.env),
+                            "cfg",
+                            None,
+                        ),
+                        "obs_mode",
+                        None,
+                    )
+                    == "action_ball_full_mdp"
+                )
+            )
+            if r10_initial_frontier_required:
                 original_get_observations = getattr(
                     self.env, "get_observations", None
                 )
@@ -6484,10 +10833,62 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         "fresh ActionBall211 requires env.get_observations()"
                     )
 
-                def get_normalized_initial_observations():
-                    return self._normalize_action_ball_211_initial_observations(
-                        original_get_observations()
-                    )
+                if r10_enabled:
+
+                    def get_normalized_initial_observations():
+                        if r10_tracker["actor_calls_at_boundary"] is not None:
+                            raise RuntimeError(
+                                "R10 upstream requested initial observations more than once"
+                            )
+                        restored = self._action_ball_r10_restored_initial_frontier
+                        if type(restored) is dict:
+                            if restored.get("consumed") is not False:
+                                raise RuntimeError(
+                                    "R10 restored normalized frontier was already consumed"
+                                )
+                            restored["consumed"] = True
+                            result = (
+                                restored["actor"].detach().clone(),
+                                {
+                                    "observations": {
+                                        "critic": restored["critic"].detach().clone(),
+                                    }
+                                },
+                            )
+                        else:
+                            if self._action_ball_211_wait_mask_required():
+                                result = self._normalize_action_ball_211_initial_observations(
+                                    original_get_observations()
+                                )
+                            else:
+                                raw_actor, raw_extras = original_get_observations()
+                                raw_critic = raw_extras["observations"]["critic"]
+                                result = (
+                                    self.obs_normalizer(
+                                        raw_actor.to(self.device)
+                                    ),
+                                    {
+                                        "observations": {
+                                            "critic": self.privileged_obs_normalizer(
+                                                raw_critic.to(self.device)
+                                            )
+                                        }
+                                    },
+                                )
+                        r10_tracker["actor_calls_at_boundary"] = r10_tracker[
+                            "actor_normalizer_calls"
+                        ]
+                        r10_tracker["critic_calls_at_boundary"] = r10_tracker[
+                            "critic_normalizer_calls"
+                        ]
+                        return result
+
+                else:
+
+                    def get_normalized_initial_observations():
+                        return self._normalize_action_ball_211_initial_observations(
+                            original_get_observations()
+                        )
 
                 # Upstream calls this getter exactly at the rollout initial
                 # boundary.  Subsequent actor/critic observations flow through
@@ -6500,21 +10901,104 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 num_learning_iterations=num_learning_iterations,
                 init_at_random_ep_len=init_at_random_ep_len,
             )
+        except BaseException as exc:
+            learn_primary_error = exc
+            if r10_enabled:
+                self._action_ball_r10_poison(
+                    "R10 learn boundary failed; exact retry is forbidden: "
+                    + f"{type(exc).__module__}.{type(exc).__qualname__}: {exc}"
+                )
+            raise
         finally:
-            self.alg.update = original_update
+            cleanup_failures = []
+
+            def cleanup(label, operation):
+                try:
+                    operation()
+                except BaseException as cleanup_exc:
+                    cleanup_failures.append((label, cleanup_exc))
+
+            cleanup(
+                "restore_alg_update",
+                lambda: setattr(self.alg, "update", original_update),
+            )
+            if r10_compute_returns_wrapper_active:
+                cleanup(
+                    "restore_alg_compute_returns",
+                    lambda: setattr(
+                        self.alg,
+                        "compute_returns",
+                        original_r10_compute_returns,
+                    ),
+                )
             if initial_observation_wrapper_active:
-                self.env.get_observations = original_get_observations
+                cleanup(
+                    "restore_env_get_observations",
+                    lambda: setattr(
+                        self.env,
+                        "get_observations",
+                        original_get_observations,
+                    ),
+                )
+            if r10_env_step_wrapper_active:
+                cleanup(
+                    "restore_r10_env_step",
+                    lambda: setattr(self.env, "step", r10_original_env_step),
+                )
+            for index, handle in enumerate(
+                reversed(r10_normalizer_hook_handles)
+            ):
+                cleanup(
+                    f"remove_r10_normalizer_hook_{index}",
+                    handle.remove,
+                )
             if action_ball_update_profiler is not None:
-                action_ball_update_profiler.close()
-                self._action_ball_update_profiler = None
+                cleanup(
+                    "close_action_ball_update_profiler",
+                    action_ball_update_profiler.close,
+                )
+                cleanup(
+                    "clear_action_ball_update_profiler",
+                    lambda: setattr(
+                        self, "_action_ball_update_profiler", None
+                    ),
+                )
             if reward_activation_step_wrapper_active:
-                self.env.step = original_env_step
+                cleanup(
+                    "restore_reward_env_step",
+                    lambda: setattr(self.env, "step", original_env_step),
+                )
             if reward_ledger_is_action_bound:
-                reward_activation_ledger.close()
-            self._rollout_update_wrapper_active = False
-            self._boundary_stop_requested = None
+                cleanup(
+                    "close_reward_activation_ledger",
+                    reward_activation_ledger.close,
+                )
+            cleanup(
+                "clear_rollout_update_wrapper",
+                lambda: setattr(self, "_rollout_update_wrapper_active", False),
+            )
+            cleanup(
+                "clear_boundary_stop_callback",
+                lambda: setattr(self, "_boundary_stop_requested", None),
+            )
             for signum, handler in previous_handlers.items():
-                signal.signal(signum, handler)
+                cleanup(
+                    f"restore_signal_{signum}",
+                    lambda signum=signum, handler=handler: signal.signal(
+                        signum, handler
+                    ),
+                )
+            self._learn_cleanup_secondary_failures = tuple(
+                (
+                    label,
+                    f"{type(cleanup_exc).__module__}."
+                    f"{type(cleanup_exc).__qualname__}: {cleanup_exc}",
+                )
+                for label, cleanup_exc in cleanup_failures
+            )
+            if cleanup_failures and learn_primary_error is None:
+                cleanup_exc = cleanup_failures[0][1]
+                raise cleanup_exc.with_traceback(cleanup_exc.__traceback__)
 
     @staticmethod
     def _action_ball_profile_reset_reason_counters(
@@ -7050,8 +11534,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise RuntimeError(
                 "joint-safety requires the exact action/articulation joint-name order"
             )
-        joint_names = tuple(str(name) for name in names)
-        if any(not name for name in joint_names) or len(set(joint_names)) != joint_count:
+        if any(type(name) is not str or not name for name in names):
+            raise RuntimeError(
+                "joint-safety joint-name order must contain exact non-empty strings"
+            )
+        joint_names = tuple(names)
+        if len(set(joint_names)) != joint_count:
             raise RuntimeError(
                 "joint-safety joint-name order must be non-empty and unique"
             )
@@ -9152,7 +13640,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         dense transcripts or publish formal receipt files on every PPO update.
         """
 
-        if not self._diagnostic_joint_safety_compact_evidence():
+        if not self._diagnostic_joint_safety_compact_update_evidence():
             raise RuntimeError(
                 "compact diagnostic joint-safety path requires an unauthorized "
                 "task with an explicitly compact producer"
@@ -9294,6 +13782,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             boolean=True,
         )
 
+        actual_edge_from_minimum_gap = minimum_lower.le(0.0) | minimum_upper.le(
+            0.0
+        )
         checks = torch.stack(
             (
                 torch.all(policy_steps.eq(expected_steps)),
@@ -9318,6 +13809,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         torch.any(actual_hard_counts.gt(0), dim=1)
                     )
                 ),
+                torch.all(actual_hard_counts.ge(0)),
+                torch.all(
+                    actual_hard_counts.gt(0).eq(
+                        actual_edge_from_minimum_gap
+                    )
+                ),
             )
         )
         aggregate_values = torch.stack(
@@ -9334,11 +13831,23 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         ).to(dtype=torch.float64)
         minimum_gap = torch.minimum(minimum_lower, minimum_upper).amin().reshape(1)
+        # This is the sole compact-evidence D2H.  Keep the already-produced
+        # env-by-joint count and side-specific minima in the same packed copy
+        # as the aggregate checks/totals; never re-read the environment or
+        # simulator to localize an edge after the producer is frozen.
+        localization_values = torch.cat(
+            (
+                actual_hard_counts.reshape(-1).to(dtype=torch.float64),
+                minimum_lower.reshape(-1).to(dtype=torch.float64),
+                minimum_upper.reshape(-1).to(dtype=torch.float64),
+            )
+        )
         packed = torch.cat(
             (
                 checks.to(dtype=torch.float64),
                 aggregate_values,
                 minimum_gap.to(dtype=torch.float64),
+                localization_values,
             )
         ).detach().to(device="cpu").tolist()
         check_names = (
@@ -9352,6 +13861,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             "minimum_hard_upper_gap",
             "hard_crossing_latch",
             "actual_hard_edge_latch",
+            "actual_hard_edge_joint_count_nonnegative",
+            "actual_hard_edge_count_gap_equivalence",
         )
         failed = [
             name
@@ -9401,6 +13912,83 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             "substep_crossing_events",
             "actual_hard_edge_events",
         )
+        minimum_gap_index = len(check_names) + len(total_names)
+        localization_offset = minimum_gap_index + 1
+        localization_cell_count = num_envs * joint_count
+        localization_end = localization_offset + 3 * localization_cell_count
+        if len(packed) != localization_end:
+            raise RuntimeError(
+                "diagnostic joint-safety localization packed length differs"
+            )
+        localized_counts = packed[
+            localization_offset : localization_offset
+            + localization_cell_count
+        ]
+        localized_lower = packed[
+            localization_offset
+            + localization_cell_count : localization_offset
+            + 2 * localization_cell_count
+        ]
+        localized_upper = packed[
+            localization_offset
+            + 2 * localization_cell_count : localization_end
+        ]
+        joint_names = contract.get("joint_names")
+        if (
+            type(joint_names) is not tuple
+            or len(joint_names) != joint_count
+            or any(type(name) is not str or not name for name in joint_names)
+            or len(set(joint_names)) != joint_count
+        ):
+            raise RuntimeError(
+                "diagnostic joint-safety localization lost exact joint order"
+            )
+        localization_rows = []
+        side_names = ("lower", "upper")
+        for env_row in range(num_envs):
+            for joint_index, joint_name in enumerate(joint_names):
+                flat_index = env_row * joint_count + joint_index
+                raw_count = localized_counts[flat_index]
+                count = int(raw_count)
+                if (
+                    isinstance(raw_count, bool)
+                    or not math.isfinite(float(raw_count))
+                    or float(count) != float(raw_count)
+                    or count < 0
+                ):
+                    raise RuntimeError(
+                        "diagnostic joint-safety localization count is invalid"
+                    )
+                side_gaps = (
+                    float(localized_lower[flat_index]),
+                    float(localized_upper[flat_index]),
+                )
+                if any(not math.isfinite(gap) for gap in side_gaps):
+                    raise RuntimeError(
+                        "diagnostic joint-safety localization gap is non-finite"
+                    )
+                observed_sides = tuple(
+                    side
+                    for side, gap in zip(side_names, side_gaps)
+                    if gap <= 0.0
+                )
+                if (count > 0) != bool(observed_sides):
+                    raise RuntimeError(
+                        "diagnostic joint-safety localization count/gap differs"
+                    )
+                for side, gap in zip(side_names, side_gaps):
+                    if gap > 0.0:
+                        continue
+                    localization_rows.append(
+                        {
+                            "env_row": env_row,
+                            "joint_index": joint_index,
+                            "joint_name": joint_name,
+                            "side": side,
+                            "joint_readback_count_either_side": count,
+                            "minimum_signed_hard_gap_rad": gap,
+                        }
+                    )
         record = {
             "event": "hope_joint_safety_diagnostic_compact_update",
             "schema_version": 1,
@@ -9415,7 +14003,18 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 name: int(value)
                 for name, value in zip(total_names, totals)
             },
-            "minimum_hard_gap_rad": float(packed[-1]),
+            "minimum_hard_gap_rad": float(packed[minimum_gap_index]),
+            "actual_hard_edge_localization": {
+                "kind": "joint_safety_actual_hard_edge_localization_v1",
+                "schema_version": 1,
+                "count_semantics": (
+                    "per-env-joint readbacks at either mechanical side; "
+                    "repeated on each observed side and not a per-side count"
+                ),
+                "joint_order": list(joint_names),
+                "side_order": list(side_names),
+                "rows": localization_rows,
+            },
             "terminal_archive_count": 0,
             "identity_bound_policy_step_count": 0,
             "formal_authority": False,
@@ -9690,7 +14289,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         step = self._joint_safety_int(step, name="PPO update", minimum=0)
         if getattr(self, "_joint_safety_consumed_step", None) == step:
             return getattr(self, "_joint_safety_consumed_record", None)
-        if self._diagnostic_joint_safety_compact_evidence():
+        if self._diagnostic_joint_safety_compact_update_evidence():
             prepared = self._prepare_diagnostic_joint_safety_update(
                 step, expected_action_term=expected_action_term
             )

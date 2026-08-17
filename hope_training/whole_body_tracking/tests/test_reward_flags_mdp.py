@@ -233,44 +233,61 @@ def _load(dotted, filename):
     return mod
 
 
-_install_isaaclab_stub()
-_PKG = "whole_body_tracking.tasks.tracking.mdp"
-for _p in ("whole_body_tracking", "whole_body_tracking.tasks", "whole_body_tracking.tasks.tracking", _PKG):
-    sys.modules.setdefault(_p, types.ModuleType(_p))
-_load(f"{_PKG}.event_timing", "event_timing.py")
-_load(f"{_PKG}.post_swing_teacher", "post_swing_teacher.py")
-planner_revision_mod = _load(f"{_PKG}.planner_revision", "planner_revision.py")
-_racket_contact_geometry_mod = _load(
-    f"{_PKG}.racket_contact_geometry", "racket_contact_geometry.py"
-)
-# ``_load`` executes a real source file under its canonical dotted name, but unlike the
-# regular import machinery it does not attach the child to our synthetic parent package.
-# Production code uses ``from . import racket_contact_geometry`` lazily, so make that package
-# edge explicit in the shared isolated-module harness as well.
-setattr(
-    sys.modules[_PKG], "racket_contact_geometry", _racket_contact_geometry_mod
-)
-# 同一条边:``hope_commands.py`` 走的是 ``from ...mdp import
-# action_ball_solver_semantic_surface``(d4e1e70c 起),而合成父包没有 ``__path__``,
-# 所以子模块必须像上面那样手工挂上去,否则整个共享夹具在 import 期就炸,
-# 依赖它的每个测试模块一起变成"收集失败",而不是失败的断言。
-_solver_semantic_surface_mod = _load(
-    f"{_PKG}.action_ball_solver_semantic_surface",
-    "action_ball_solver_semantic_surface.py",
-)
-setattr(
-    sys.modules[_PKG],
-    "action_ball_solver_semantic_surface",
-    _solver_semantic_surface_mod,
-)
-commands_mod = _load(f"{_PKG}.commands", "commands.py")
-rewards_mod = _load(f"{_PKG}.rewards", "rewards.py")
-terminations_mod = _load(f"{_PKG}.terminations", "terminations.py")
-_load(f"{_PKG}.stage1_question_bank", "stage1_question_bank.py")
-hope_commands_mod = _load(f"{_PKG}.hope_commands", "hope_commands.py")
-hope_rewards_mod = _load(f"{_PKG}.hope_rewards", "hope_rewards.py")
-hope_observations_mod = _load(f"{_PKG}.hope_observations", "hope_observations.py")
-hope_actions_mod = _load(f"{_PKG}.hope_actions", "hope_actions.py")
+_ISAACLAB_PREFIX = "isaaclab."
+_PREEXISTING_ISAACLAB_MODULES = {
+    name: module
+    for name, module in sys.modules.items()
+    if name == "isaaclab" or name.startswith(_ISAACLAB_PREFIX)
+}
+try:
+    _install_isaaclab_stub()
+    _PKG = "whole_body_tracking.tasks.tracking.mdp"
+    for _p in ("whole_body_tracking", "whole_body_tracking.tasks", "whole_body_tracking.tasks.tracking", _PKG):
+        sys.modules.setdefault(_p, types.ModuleType(_p))
+    _load(f"{_PKG}.event_timing", "event_timing.py")
+    _load(f"{_PKG}.post_swing_teacher", "post_swing_teacher.py")
+    planner_revision_mod = _load(f"{_PKG}.planner_revision", "planner_revision.py")
+    _racket_contact_geometry_mod = _load(
+        f"{_PKG}.racket_contact_geometry", "racket_contact_geometry.py"
+    )
+    # ``_load`` executes a real source file under its canonical dotted name, but unlike the
+    # regular import machinery it does not attach the child to our synthetic parent package.
+    # Production code uses ``from . import racket_contact_geometry`` lazily, so make that package
+    # edge explicit in the shared isolated-module harness as well.
+    setattr(
+        sys.modules[_PKG], "racket_contact_geometry", _racket_contact_geometry_mod
+    )
+    # 同一条边:``hope_commands.py`` 走的是 ``from ...mdp import
+    # action_ball_solver_semantic_surface``(d4e1e70c 起),而合成父包没有 ``__path__``,
+    # 所以子模块必须像上面那样手工挂上去,否则整个共享夹具在 import 期就炸,
+    # 依赖它的每个测试模块一起变成"收集失败",而不是失败的断言。
+    _solver_semantic_surface_mod = _load(
+        f"{_PKG}.action_ball_solver_semantic_surface",
+        "action_ball_solver_semantic_surface.py",
+    )
+    setattr(
+        sys.modules[_PKG],
+        "action_ball_solver_semantic_surface",
+        _solver_semantic_surface_mod,
+    )
+    commands_mod = _load(f"{_PKG}.commands", "commands.py")
+    rewards_mod = _load(f"{_PKG}.rewards", "rewards.py")
+    terminations_mod = _load(f"{_PKG}.terminations", "terminations.py")
+    _load(f"{_PKG}.stage1_question_bank", "stage1_question_bank.py")
+    hope_commands_mod = _load(f"{_PKG}.hope_commands", "hope_commands.py")
+    hope_rewards_mod = _load(f"{_PKG}.hope_rewards", "hope_rewards.py")
+    hope_observations_mod = _load(f"{_PKG}.hope_observations", "hope_observations.py")
+    hope_actions_mod = _load(f"{_PKG}.hope_actions", "hope_actions.py")
+finally:
+    # This is a collection-time unit-test harness, not a process-wide Isaac Lab
+    # replacement.  Leaving these doubles in ``sys.modules`` makes a later real
+    # import (for example ``isaaclab.utils.noise``) resolve through a fake
+    # non-package and turns otherwise independent tests into order-dependent
+    # collection/execution failures.
+    for _name in tuple(sys.modules):
+        if _name == "isaaclab" or _name.startswith(_ISAACLAB_PREFIX):
+            sys.modules.pop(_name)
+    sys.modules.update(_PREEXISTING_ISAACLAB_MODULES)
 
 
 # --------------------------------------------------------------------------------------------- #

@@ -32,11 +32,13 @@ import json
 import math
 import os
 import stat
+import sys
 import torch
 from collections.abc import Sequence
-from dataclasses import MISSING
+from dataclasses import MISSING, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
 
 from isaaclab.assets import Articulation
 from isaaclab.managers import CommandTerm, CommandTermCfg
@@ -53,7 +55,17 @@ from isaaclab.utils.math import (
 )
 
 from whole_body_tracking.tasks.tracking.mdp.commands import (
+    ActionBallContinuousMotionObservationView,
     MotionCommand,
+    MotionLoader,
+    _arm_disabled_time_resampling_fast_path_after_resample,
+    _bind_disabled_time_resampling_fast_path,
+    _compute_without_disabled_time_resampling_scan,
+    _poison_disabled_time_resampling_fast_path_on_drift,
+    _revoke_disabled_time_resampling_fast_path_on_timer_drift,
+    _split_ready_nonloop_wrap_scan_is_impossible,
+    _tensor_identity_version_receipt,
+    _tensor_matches_identity_version_receipt,
     resolve_clip_family_is_forehand,
 )
 from whole_body_tracking.tasks.tracking.mdp.planner_revision import (
@@ -430,6 +442,106 @@ _STRIKE_WINDOW_ENTRY_DISTANCE_BUCKET_COUNTERS = tuple(
     for name in _STRIKE_WINDOW_ENTRY_DISTANCE_BIN_NAMES
 )
 
+# Longitudinal learning evidence at the authoritative ActionBall strike tick.  Unlike the
+# historical racket-*target* distance above, this measures the achieved URDF paddle centre against
+# the immutable incoming-ball centre propagated to the nominal contact endpoint.  The fixed bins
+# resolve the physical ball/site offset and the active Cauchy bridge width (0.15 m) without making
+# one run's histogram depend on a tunable reward parameter.  Equality belongs to the lower bin.
+_EXACT_STRIKE_PADDLE_BALL_DISTANCE_BIN_EDGES_M = (
+    0.025,
+    0.050,
+    0.075,
+    0.100,
+    0.150,
+    0.200,
+    0.300,
+    0.500,
+)
+_EXACT_STRIKE_PADDLE_BALL_DISTANCE_BIN_NAMES = (
+    "le_0p025m",
+    "gt_0p025m_le_0p050m",
+    "gt_0p050m_le_0p075m",
+    "gt_0p075m_le_0p100m",
+    "gt_0p100m_le_0p150m",
+    "gt_0p150m_le_0p200m",
+    "gt_0p200m_le_0p300m",
+    "gt_0p300m_le_0p500m",
+    "gt_0p500m",
+)
+_EXACT_STRIKE_PADDLE_BALL_DISTANCE_COUNT = (
+    "exact_strike_paddle_ball_distance_m_count"
+)
+_EXACT_STRIKE_PADDLE_BALL_DISTANCE_SUM = (
+    "exact_strike_paddle_ball_distance_m_sum"
+)
+_EXACT_STRIKE_PADDLE_BALL_DISTANCE_SUM_SQ = (
+    "exact_strike_paddle_ball_distance_m_sum_sq"
+)
+_EXACT_STRIKE_PADDLE_BALL_DISTANCE_NONFINITE_COUNT = (
+    "exact_strike_paddle_ball_distance_m_nonfinite_count"
+)
+_EXACT_STRIKE_PADDLE_BALL_DISTANCE_BUCKET_COUNTERS = tuple(
+    f"exact_strike_paddle_ball_distance_m_{name}_count"
+    for name in _EXACT_STRIKE_PADDLE_BALL_DISTANCE_BIN_NAMES
+)
+
+# Immediate post-contact and landing aggregates share the metric tokens in
+# utils/action_ball_learning_trend.py.  Every numeric row carries both sum and squared-sum so an
+# offline fixed-step report can reconstruct a mean and variance without touching the live run.
+_CAPTURE_V_PLUS_METRICS = (
+    "capture_v_plus_world_x_mps",
+    "capture_v_plus_world_y_mps",
+    "capture_v_plus_world_z_mps",
+    "capture_v_plus_speed_mps",
+)
+_CAPTURE_W_PLUS_METRICS = (
+    "capture_w_plus_world_x_radps",
+    "capture_w_plus_world_y_radps",
+    "capture_w_plus_world_z_radps",
+    "capture_w_plus_norm_radps",
+)
+_CAPTURE_W_PLUS_TOPSPIN_METRIC = "capture_w_plus_topspin_radps"
+# Diagnostic definition of a usable horizontal outgoing direction.  This fixed threshold is not a
+# reward/config knob: it only prevents the mathematically undefined zero-horizontal-speed axis from
+# being persisted as finite zero topspin.
+_CAPTURE_TOPSPIN_AXIS_MIN_HORIZONTAL_SPEED_MPS = 1.0e-6
+_CAPTURE_LANDING_METRICS = (
+    "capture_landing_env_x_m",
+    "capture_landing_env_y_m",
+    "capture_landing_dx_m",
+    "capture_landing_dy_m",
+    "capture_landing_error_m",
+)
+
+
+def _action_ball_outgoing_topspin(
+    v_plus: torch.Tensor,
+    w_plus: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return the existing signed topspin value plus an explicit axis-valid mask.
+
+    The value expression is intentionally byte-for-byte the historical runtime calculation.
+    ``axis_valid`` is diagnostic-only and requires a finite horizontal velocity whose norm exceeds
+    the one declared threshold above; a stationary/vertical outgoing ball has no topspin axis.
+    """
+
+    d_xy = v_plus[:, :2]
+    horizontal_speed = torch.linalg.norm(
+        d_xy, dim=-1, keepdim=True
+    )
+    d_hat = d_xy / (horizontal_speed + 1.0e-9)
+    topspin = -w_plus[:, 0] * d_hat[:, 1] + w_plus[:, 1] * d_hat[:, 0]
+    horizontal_speed = horizontal_speed.squeeze(-1)
+    axis_valid = (
+        torch.isfinite(d_xy).all(dim=-1)
+        & torch.isfinite(horizontal_speed)
+        & (
+            horizontal_speed
+            > _CAPTURE_TOPSPIN_AXIS_MIN_HORIZONTAL_SPEED_MPS
+        )
+    )
+    return topspin, axis_valid
+
 _TASK_FIRST_STATE_SCHEMA_VERSION = 2
 _TASK_FIRST_STATE_KIND = "whole_body_tracking.RacketTargetCommand.task_first"
 _TASK_FIRST_OUTCOME_NAMES = ("attempts", "successes", "unsafe_failures")
@@ -733,6 +845,775 @@ def _action_ball_pack_diagnostic_install_rows(
     return host_tensor.to(device=device)
 
 
+_ACTION_BALL_CONTINUOUS_RACKET_DRAIN_SOURCE_SHA256 = (
+    "674d4d1ab6c7f1ac7f8b6a0c32e25003d2c5ee784921dedb5e43cb29fc35122e"
+)
+_ACTION_BALL_CONTINUOUS_RACKET_DRAIN_ACK_AUTHORITY_API_SHA256 = (
+    "f759474e1576a151b37939d128b0ae2c58b02f4cf90007353b41fadad03d902d"
+)
+_ACTION_BALL_CONTINUOUS_RACKET_DRAIN_OWNER_KIND = "racket"
+_ACTION_BALL_CONTINUOUS_RACKET_DRAIN_FIELD_NAMES = (
+    "mutation_version",
+    "fault_count",
+    "invariant_count",
+    "terminal_resolution_total",
+)
+# Fresh full-MDP deliberately exposes no command-term exact-resume hooks yet.
+# R10 still needs a clone-only checkpoint projection over every installed
+# destination/registry plus the globally ACKed drain frontier; serializing the
+# narrow chronology below alone would be a false exact-resume claim.
+_ACTION_BALL_FULL_MDP_RACKET_EXACT_RESUME_SUPPORTED = False
+_ACTION_BALL_FULL_MDP_RACKET_EXACT_RESUME_STATUS = (
+    "HOLD_UNTIL_R10_OWNS_RACKET_DESTINATIONS_AND_DRAIN_FRONTIER"
+)
+_ACTION_BALL_CONTINUOUS_RACKET_SELECTED_RESET_AUTHORITY_API_SHA256 = (
+    "c643f27ea31c10af530c335292a5d936cbe4f1b6c384c50635e5075e2d53270c"
+)
+
+
+@dataclass(eq=False, repr=False)
+class _ActionBallContinuousRacketPreparedPpoDrainPack:
+    """Private exact lease for one owner-minted global drain pack."""
+
+    pack: object
+    authority: object
+    update_index: int
+    completed_environment_steps: int
+    mutation_version: int
+    terminal_resolution_total: int
+    source_tensor_receipts: tuple[tuple[object, ...], ...]
+    expected_values: tuple[int, int, int, int]
+    stage: str = "prepared"
+
+
+class ActionBallContinuousRacketObservationHold(RuntimeError):
+    """The Racket leaf cannot authenticate the production R08 current task."""
+
+
+class ActionBallContinuousRacketHotRevealHold(RuntimeError):
+    """The Racket leaf lacks one exact authority needed by Device-R05 reveal."""
+
+
+class ActionBallContinuousRacketSelectedRubberHold(RuntimeError):
+    """Racket cannot yet publish production selected-rubber flight truth."""
+
+
+class ActionBallContinuousRacketStrikeFactHold(RuntimeError):
+    """Fresh R03 lacks Device-R05's exact current full-key/shot identity."""
+
+
+_ACTION_BALL_FULL_MDP_RUBBER_INACTIVE = -1
+_ACTION_BALL_FULL_MDP_RUBBER_RED = 0
+_ACTION_BALL_FULL_MDP_RUBBER_BLACK = 1
+
+
+class _OpaqueActionBallFullMdpRacketSelectedRubberCapability:
+    """Non-constructible identity for one exact current N×K rubber view."""
+
+    __slots__ = ()
+
+    def __new__(cls):
+        del cls
+        raise TypeError("Racket selected-rubber capabilities are owner-issued")
+
+    def __copy__(self):
+        raise TypeError("Racket selected-rubber capabilities cannot be copied")
+
+    def __deepcopy__(self, memo: object):
+        del memo
+        raise TypeError("Racket selected-rubber capabilities cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("Racket selected-rubber capabilities cannot be serialized")
+
+    def __reduce_ex__(self, protocol: int):
+        del protocol
+        raise TypeError("Racket selected-rubber capabilities cannot be serialized")
+
+
+class ActionBallFullMdpRacketSelectedRubberToken(
+    _OpaqueActionBallFullMdpRacketSelectedRubberCapability
+):
+    """Empty process-local capability for a Racket-owned current projection."""
+
+    __slots__ = ()
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallFullMdpRacketSelectedRubberView:
+    """Clone-only selected-face truth for every Physical flight slot.
+
+    A dataclass instance is not authority.  The production PhysX consumer must
+    receive a token from Racket and validate that exact token against Racket's
+    retained current publication.  ``expected_rubber`` uses the scene ABI:
+    inactive=-1, red outer face=0, black outer face=1.
+    """
+
+    token: ActionBallFullMdpRacketSelectedRubberToken
+    racket_owner: object
+    publication_identity: object
+    publication_sequence: int
+    physical_owner_mutation_version: int
+    active_mask: torch.Tensor
+    expected_rubber: torch.Tensor
+    full_key_sha256: torch.Tensor
+    ball_generation: torch.Tensor
+    flight_slot: torch.Tensor
+    reset_generation: torch.Tensor
+    swing_generation: torch.Tensor
+    action_uid: torch.Tensor
+    action_slot: torch.Tensor
+    task_receipt_sha256: torch.Tensor
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallFullMdpActionEpochSelectedRubberView:
+    """Direct current selected-face grid for the lean Physical transaction.
+
+    This view is data, not a portable capability.  It exists only because the
+    no-argument Racket method below re-reads Physical's active allocation and
+    the construction-bound ActionEpoch in the same call.  The scene consumes
+    it immediately; no token, receipt, digest, caller mask, or caller-selected
+    slot participates in face attribution.
+    """
+
+    racket_owner: object
+    physical_owner: object
+    epoch_owner: object
+    active_mask: torch.Tensor
+    expected_rubber: torch.Tensor
+
+
+def _action_ball_full_mdp_expected_rubber_from_action_slot(
+    action_slot: torch.Tensor,
+    active_mask: torch.Tensor,
+    mount_normal_sign_by_action: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Map Racket's admitted action slot to the physical red/black face.
+
+    This is a tensor kernel, not an authority issuer.  It deliberately returns
+    the invalid-row mask next to the numeric mapping so a future production
+    publisher cannot turn a clamped slot into a trusted face.  No host read or
+    device-to-host transfer is performed here.
+    """
+
+    if (
+        not torch.is_tensor(action_slot)
+        or action_slot.dtype != torch.int64
+        or not torch.is_tensor(active_mask)
+        or active_mask.dtype != torch.bool
+        or tuple(active_mask.shape) != tuple(action_slot.shape)
+        or active_mask.device != action_slot.device
+        or not torch.is_tensor(mount_normal_sign_by_action)
+        or mount_normal_sign_by_action.dtype != torch.int8
+        or mount_normal_sign_by_action.device != action_slot.device
+        or mount_normal_sign_by_action.ndim != 1
+        or mount_normal_sign_by_action.numel() < 1
+    ):
+        raise ValueError("full-MDP selected-rubber tensor ABI differs")
+    invalid = active_mask & (
+        (action_slot < 0)
+        | (action_slot >= mount_normal_sign_by_action.shape[0])
+    )
+    safe_slot = action_slot.clamp(
+        min=0, max=mount_normal_sign_by_action.shape[0] - 1
+    )
+    selected_sign = mount_normal_sign_by_action[safe_slot]
+    sign_invalid = active_mask & (
+        (selected_sign != 1) & (selected_sign != -1)
+    )
+    invalid = invalid | sign_invalid
+    rubber = torch.where(
+        active_mask,
+        torch.where(
+            selected_sign == 1,
+            torch.full_like(selected_sign, _ACTION_BALL_FULL_MDP_RUBBER_RED),
+            torch.full_like(selected_sign, _ACTION_BALL_FULL_MDP_RUBBER_BLACK),
+        ),
+        torch.full_like(
+            selected_sign, _ACTION_BALL_FULL_MDP_RUBBER_INACTIVE
+        ),
+    )
+    return rubber.to(dtype=torch.int8), invalid
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class RacketActionReferenceStaticTableProjection:
+    """Clone-only all-action table from the construction-sealed FK source.
+
+    This is cold data, not an authority receipt.  It exposes exactly the rows
+    retained by the closure-private registry after successful construction and
+    accepts no cadence, tensor, digest, builder, or caller-authored witness.
+    """
+
+    reference_racket_site_position_w_m: torch.Tensor
+    reference_racket_quat_wxyz: torch.Tensor
+    reference_racket_angular_velocity_w_radps: torch.Tensor
+    reference_racket_site_velocity_w_mps: torch.Tensor
+    reference_raw_face_normal_w: torch.Tensor
+    reference_reach_offset_xy_m: torch.Tensor
+    reference_base_root_quat_wxyz: torch.Tensor
+    diagnostic_unauthorized: bool = True
+    runtime_integrated: bool = False
+    launch_authorized: bool = False
+
+
+def _make_racket_action_reference_cold_registry(
+    exact_builder: object,
+):
+    """Return a closure-private source store, not another receipt/authority.
+
+    The retained tensors never become attributes of Racket or a returned
+    object.  Consumers can receive only selected clones, so they cannot mutate
+    both a fact and a co-located "witness" to make the alteration self-attest.
+    The strong owner reference deliberately gives the store the same lifetime
+    as its one constructed command; no id can be reused while a row exists.
+    """
+
+    records: dict[
+        int,
+        tuple[
+            object,
+            MotionCommand,
+            MotionLoader,
+            tuple[torch.Tensor, ...],
+        ],
+    ] = {}
+
+    def require_record(
+        owner: object,
+        motion_owner: MotionCommand,
+        motion_loader: MotionLoader,
+    ) -> tuple[torch.Tensor, ...]:
+        record = records.get(id(owner))
+        if (
+            record is None
+            or record[0] is not owner
+            or record[1] is not motion_owner
+            or record[2] is not motion_loader
+        ):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket action reference awaits its construction-sealed cold source"
+            )
+        return record[3]
+
+    def is_installed(
+        owner: object,
+        motion_owner: MotionCommand,
+        motion_loader: MotionLoader,
+    ) -> bool:
+        record = records.get(id(owner))
+        if record is None:
+            return False
+        if (
+            record[0] is owner
+            and record[1] is motion_owner
+            and record[2] is motion_loader
+        ):
+            return True
+        raise ActionBallContinuousRacketHotRevealHold(
+            "cold Racket action reference source may not be rebound"
+        )
+
+    def seal_from_exact_source(
+        owner: object,
+        motion_owner: MotionCommand,
+        motion_loader: MotionLoader,
+    ) -> None:
+        if records.get(id(owner)) is not None:
+            if is_installed(owner, motion_owner, motion_loader):
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "cold Racket action reference source is already sealed"
+                )
+            return
+        if type(owner) is not RacketTargetCommand:
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference requires exact RacketTargetCommand"
+            )
+        if not callable(exact_builder):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference exact builder is absent"
+            )
+        fk_rows = exact_builder(owner, motion_owner, motion_loader)
+        if type(fk_rows) is not tuple or len(fk_rows) != 7:
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference exact builder row set differs"
+            )
+        action_count = int(motion_loader.num_segments)
+        rows = fk_rows
+        for value, width in zip(rows, (4, 3, 3, 3, 2, 3, 4)):
+            if (
+                type(value) is not torch.Tensor
+                or value.dtype != torch.float32
+                or value.device != torch.device(owner.device)
+                or tuple(value.shape) != (action_count, width)
+                or not value.is_contiguous()
+            ):
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "cold Racket action reference FK row differs"
+                )
+        records[id(owner)] = (
+            owner,
+            motion_owner,
+            motion_loader,
+            tuple(value.detach().clone() for value in rows),
+        )
+
+    def project_all(
+        owner: object,
+        motion_owner: MotionCommand,
+        motion_loader: MotionLoader,
+    ) -> tuple[torch.Tensor, ...]:
+        rows = require_record(owner, motion_owner, motion_loader)
+        return tuple(value.detach().clone() for value in rows)
+
+    def public_methods() -> tuple[object, object]:
+        return is_installed, project_all
+
+    def install_from_exact_construction(
+        owner: object,
+        motion_owner: MotionCommand,
+        motion_loader: MotionLoader,
+    ) -> None:
+        """One exact-source callpoint; accepts no facts, witness, or digest."""
+
+        seal_from_exact_source(owner, motion_owner, motion_loader)
+
+    return public_methods, install_from_exact_construction
+
+
+def _bind_racket_action_reference_cold_reader(
+    project_static_table_method: object,
+    initialize_method: object,
+    cold_public: object,
+) -> tuple[object, object]:
+    """Lexically bind the closure reader; class attributes are not authority.
+
+    The small wrappers intentionally have only the public ABI parameters.  A
+    monkeypatch of a discoverable class attribute therefore cannot substitute
+    a fake reader, while the implementation receives the one reader produced
+    alongside its construction-sealed registry.
+    """
+
+    if (
+        not callable(project_static_table_method)
+        or not callable(initialize_method)
+    ):
+        raise TypeError("Racket action reference methods differ")
+    if not callable(cold_public):
+        raise TypeError("Racket action reference cold reader differs")
+
+    def initialize(self: object) -> None:
+        initialize_method(self, cold_public)
+
+    def project_static_table(
+        self: object,
+    ) -> RacketActionReferenceStaticTableProjection:
+        return project_static_table_method(self, cold_public)
+
+    project_static_table.__name__ = (
+        "project_action_ball_full_mdp_racket_action_reference_static_table"
+    )
+    project_static_table.__qualname__ = (
+        "RacketTargetCommand."
+        "project_action_ball_full_mdp_racket_action_reference_static_table"
+    )
+    initialize.__name__ = (
+        "initialize_action_ball_full_mdp_racket_action_reference_cold"
+    )
+    initialize.__qualname__ = (
+        "RacketTargetCommand.initialize_action_ball_full_mdp_racket_action_reference_cold"
+    )
+    return project_static_table, initialize
+
+
+class _OpaqueActionBallContinuousRacketObservationCapability:
+    """Unconstructible, uncopyable process-local key for one Racket snapshot."""
+
+    __slots__ = ()
+
+    def __new__(cls):
+        del cls
+        raise TypeError(
+            "continuous Racket observation capabilities are owner-issued"
+        )
+
+    def __copy__(self):
+        raise TypeError(
+            "continuous Racket observation capabilities cannot be copied"
+        )
+
+    def __deepcopy__(self, memo: object):
+        del memo
+        raise TypeError(
+            "continuous Racket observation capabilities cannot be copied"
+        )
+
+    def __reduce__(self):
+        raise TypeError(
+            "continuous Racket observation capabilities cannot be serialized"
+        )
+
+    def __reduce_ex__(self, protocol: int):
+        del protocol
+        raise TypeError(
+            "continuous Racket observation capabilities cannot be serialized"
+        )
+
+
+class ActionBallContinuousRacketObservationToken(
+    _OpaqueActionBallContinuousRacketObservationCapability
+):
+    """Empty opaque identity for one retained installed-task publication."""
+
+    __slots__ = ()
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousRacketObservationView:
+    """Clone-only Racket facts after exact owner/current-task validation.
+
+    This leaf deliberately does not invent Device-R05's independent shot index
+    or claim that its task digest is the global current-task authority.  The
+    future R08 join must compare this view with the exact Device-R05 current
+    projection before any fact becomes policy-visible.
+    """
+
+    racket_owner: object
+    publication_identity: object
+    publication_sequence: int
+    common_step: int
+    reset_generation: torch.Tensor
+    swing_generation: torch.Tensor
+    scheduled_ordinal: torch.Tensor
+    action_uid: torch.Tensor
+    action_slot: torch.Tensor
+    task_identity: torch.Tensor
+    task_valid: torch.Tensor
+    landing_target_xy_table: torch.Tensor
+    desired_position_w: torch.Tensor
+    desired_velocity_w: torch.Tensor
+    desired_face_normal_w: torch.Tensor
+    desired_base_xy_w: torch.Tensor
+    ball_contact_target_w: torch.Tensor
+    face_center_velocity_target_w: torch.Tensor
+    command_quaternion_wxyz: torch.Tensor
+    incoming_velocity_w: torch.Tensor
+    incoming_spin_w: torch.Tensor
+    time_to_contact_s: torch.Tensor
+
+
+@dataclass(eq=False, repr=False)
+class _ActionBallContinuousRacketObservationRecord:
+    """Owner-private immutable-by-convention record behind one empty token."""
+
+    token: ActionBallContinuousRacketObservationToken
+    publication_identity: object
+    publication_sequence: int
+    common_step: int
+    mutation_version: int
+    values: dict[str, torch.Tensor]
+    stage: str = "issued"
+
+
+def _action_ball_continuous_sha256_hex(value: object, *, label: str) -> str:
+    """Return one exact lowercase SHA-256 or fail before owner mutation."""
+
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{label} is not one lowercase SHA-256")
+    return value
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousRacketSelectedResetStage:
+    """Opaque owner-minted selected-reset stage with no tensor aliases."""
+
+    _owner_nonce: object
+    serial: int
+    owner_mutation_version: int
+    logical_committed_target_root_sha256_before: str
+    stage_sha256: str
+
+
+@dataclass(eq=False, repr=False)
+class _ActionBallContinuousRacketSelectedResetRecord:
+    """Owner-private reset facts; never returned as a caller capability."""
+
+    stage: ActionBallContinuousRacketSelectedResetStage
+    prepared_true_reset: object
+    prepared_identity: object
+    selected_mask: torch.Tensor
+    reset_generation_before: torch.Tensor
+    reset_generation_after: torch.Tensor
+    strike_fact_owner: object | None
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousRacketPrevalidatedSelectedReset:
+    """Opaque fully materialized Racket reset lease."""
+
+    _owner_nonce: object
+    serial: int
+    stage_sha256: str
+
+
+@dataclass(eq=False, repr=False)
+class _ActionBallContinuousRacketSealedSelectedResetAfterImage:
+    """Owner-private, prevalidated writes consumed after the top arm point.
+
+    Every operation that can reject a tensor layout runs before this object is
+    installed.  The later commit therefore has one job: consume this exact
+    owner-private object, copy its already-built full after-images, and advance
+    chronology.  In particular it must not discover a new validation failure
+    after the global reset transaction has crossed its irreversible R06 arm.
+
+    There is deliberately no Tensor ``_version`` receipt here.  These tensors
+    are all retained or written by this same Racket owner, so such a seal would
+    only authenticate the writer against itself and would reject legitimate
+    inference tensors, which do not expose version counters.  Device-R05 facts
+    are instead cloned at prepare, generation algebra is re-derived against the
+    live Racket row at arm, and the sole global drain consumes the resulting
+    device fault/chronology row independently.
+    """
+
+    prevalidated: ActionBallContinuousRacketPrevalidatedSelectedReset
+    stage: ActionBallContinuousRacketSelectedResetStage
+    swaps: tuple[tuple[str, torch.Tensor, torch.Tensor], ...]
+    mutation_version_after: int
+    logical_root_after: str
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousRacketSelectedResetCommitToken:
+    """Opaque proof that the local reset settlement image was published.
+
+    This capability says nothing about leaf health.  A device validation fault
+    still commits the owner-issued selected rows to their safe tombstones; the
+    durable fault bit is then rejected by the sole global PPO drain before the
+    next optimizer boundary.
+    """
+
+    _owner_nonce: object
+    serial: int
+    stage_sha256: str
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousRacketSelectedResetCompletionToken:
+    """Opaque local ACK minted only after exact Device-R05-last.
+
+    This token intentionally contains no selected-environment mapping, reset
+    generations, portable digest, or public chronology.  The top reset owner
+    must validate it through the construction-bound Racket validator together
+    with the exact ``DeviceR05PreparedTrueReset`` capability, then mint the
+    sole global reset receipt after all four leaves agree.  Neither token is a
+    success receipt: device health remains an independent drain-owned fact.
+    """
+
+    _owner_nonce: object
+    _completion_identity: object
+
+
+# This is the complete device-owned Racket tombstone surface between a true
+# reset and the later Q0 reveal.  The operation never samples or publishes a
+# new question.  Tensor names, not their current values, are part of the reset
+# stage root so an optional/legacy destination cannot silently disappear.
+_ACTION_BALL_CONTINUOUS_RACKET_SELECTED_RESET_TOMBSTONES = (
+    ("_action_ball_task_valid", "zero"),
+    ("_action_ball_task_wait_total_ticks", "zero"),
+    ("_action_ball_task_wait_elapsed_ticks", "zero"),
+    ("_action_ball_action_uid", "negative_one"),
+    ("_action_ball_action_slot", "negative_one"),
+    ("_action_ball_full_mdp_racket_task_identity", "negative_one"),
+    ("_action_ball_full_mdp_racket_outcome_shot_index", "negative_one"),
+    ("_action_ball_full_mdp_racket_ball_generation", "negative_one"),
+    ("_action_ball_full_mdp_racket_outcome_identity", "negative_one"),
+    ("_action_ball_full_mdp_racket_ball_identity", "negative_one"),
+    ("_action_ball_reset_generation", "increment_one"),
+    ("_action_ball_swing_generation", "negative_one"),
+    ("_action_ball_attempt_active", "zero"),
+    ("_action_ball_attempt_action", "negative_one"),
+    ("_action_ball_attempt_legal", "zero"),
+    ("_action_ball_attempt_hit", "zero"),
+    ("_action_ball_resume_reset_exclusion", "zero"),
+    ("_prev_motion_steps", "negative_one"),
+    ("racket_target_pos_w", "zero"),
+    ("racket_target_vel_w", "zero"),
+    ("racket_target_normal_w", "zero"),
+    ("target_normal_cmd", "zero"),
+    ("base_target_pos_w", "zero"),
+    ("swing_sign", "zero"),
+    ("time_to_strike", "zero"),
+    ("pre_strike", "zero"),
+    ("strike_window", "zero"),
+    ("strike_window_pos", "zero"),
+    ("strike_window_wide", "zero"),
+    ("_post_strike_elapsed_s", "zero"),
+    ("_post_strike_elapsed_valid", "zero"),
+    ("_exact_fired", "zero"),
+    ("_action_ball_ball_contact_target_w", "zero"),
+    ("_action_ball_face_center_velocity_target_w", "zero"),
+    ("_action_ball_racket_command_quat_w", "identity_quaternion"),
+    ("_action_ball_prev_racket_site_w", "zero"),
+    ("_action_ball_prev_racket_quat_w", "identity_quaternion"),
+    ("_action_ball_prev_racket_site_velocity_w", "zero"),
+    ("_action_ball_prev_racket_angular_velocity_w", "zero"),
+    ("_action_ball_prev_attempt_action", "negative_one"),
+    ("_action_ball_prev_reset_generation", "negative_one"),
+    ("_action_ball_prev_swing_generation", "negative_one"),
+    ("_action_ball_prev_contact_valid", "zero"),
+    ("vb_vel_in_w", "zero"),
+    ("vb_spin_in_w", "zero"),
+    ("vb_fired", "zero"),
+    ("_action_ball_strike_fact_source_step", "negative_one"),
+    ("_action_ball_strike_fact_exact_eligibility", "zero"),
+    ("vb_landing_xy", "zero"),
+    ("vb_landing_valid", "zero"),
+    ("vb_on_opponent", "zero"),
+    ("vb_depth_ok", "zero"),
+    ("vb_net_z", "zero"),
+    ("vb_net_clear", "zero"),
+    ("vb_net_crossed", "zero"),
+    ("vb_topspin", "zero"),
+    ("vb_spin_out_norm", "zero"),
+    ("_vb_target_xy_per_env", "zero"),
+    ("_counter_rally_return_direction_env_xy", "zero"),
+    ("_counter_rally_target_baseline_speed_mps", "zero"),
+    ("_counter_rally_reward_terms", "zero"),
+    ("_counter_rally_accepted", "zero"),
+    ("_counter_rally_legal_first_landing", "zero"),
+    ("_counter_rally_primary_reason_code", "negative_one"),
+    ("_previous_in_hold", "zero"),
+    ("_hold_start_yaw", "zero"),
+    ("_hold_edge_pending", "one"),
+    ("racket_progress", "zero"),
+    ("_progress_reset_mask", "one"),
+    ("_strike_window_entry_armed", "one"),
+    ("_swing_start_pending", "one"),
+    ("_action_ball_reference_term_center_latch", "one"),
+    ("station_anchor_pos_w", "zero"),
+)
+
+
+def _action_ball_continuous_tensor_receipt(
+    value: torch.Tensor,
+) -> tuple[object, ...]:
+    """Seal one tensor by exact object/storage/layout/version without D2H."""
+
+    if not torch.is_tensor(value):
+        raise TypeError("continuous Racket staging value must be a tensor")
+    return (
+        value,
+        id(value),
+        int(value.untyped_storage().data_ptr()),
+        int(value.data_ptr()),
+        int(value._version),
+        tuple(value.shape),
+        tuple(value.stride()),
+        int(value.storage_offset()),
+        value.dtype,
+        value.device,
+    )
+
+
+def _action_ball_continuous_tensor_matches_receipt(
+    value: torch.Tensor,
+    receipt: tuple[object, ...],
+) -> bool:
+    """Return whether a private staging tensor retained exact identity/version."""
+
+    return (
+        type(receipt) is tuple
+        and len(receipt) == 10
+        and receipt[0] is value
+        and id(value) == receipt[1]
+        and int(value.untyped_storage().data_ptr()) == receipt[2]
+        and int(value.data_ptr()) == receipt[3]
+        and int(value._version) == receipt[4]
+        and tuple(value.shape) == receipt[5]
+        and tuple(value.stride()) == receipt[6]
+        and int(value.storage_offset()) == receipt[7]
+        and value.dtype == receipt[8]
+        and value.device == receipt[9]
+    )
+
+
+def _action_ball_continuous_tensor_matches_receipt_layout(
+    value: torch.Tensor,
+    receipt: tuple[object, ...],
+) -> bool:
+    """Match exact storage/layout while leaving numeric drift to a device gate.
+
+    Selected reset treats live reset-generation value drift as a durable
+    device fault that must still settle to a safe tombstone.  It therefore
+    authenticates this one destination's object/storage/layout here and checks
+    its values against Device-R05's private clone in the device batch below.
+    Other destinations continue to require an unchanged mutation version.
+    """
+
+    return (
+        type(receipt) is tuple
+        and len(receipt) == 10
+        and receipt[0] is value
+        and id(value) == receipt[1]
+        and int(value.untyped_storage().data_ptr()) == receipt[2]
+        and int(value.data_ptr()) == receipt[3]
+        and tuple(value.shape) == receipt[5]
+        and tuple(value.stride()) == receipt[6]
+        and int(value.storage_offset()) == receipt[7]
+        and value.dtype == receipt[8]
+        and value.device == receipt[9]
+    )
+
+
+def _action_ball_continuous_tensor_epoch_sha256(
+    named_receipts: tuple[tuple[str, tuple[object, ...]], ...],
+) -> str:
+    """Digest exact process-local tensor epochs without exporting numeric data."""
+
+    rows = []
+    for name, receipt in named_receipts:
+        if (
+            type(name) is not str
+            or not name
+            or type(receipt) is not tuple
+            or len(receipt) != 10
+            or not _action_ball_continuous_tensor_matches_receipt(
+                receipt[0], receipt
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket tensor epoch receipt differs"
+            )
+        rows.append(
+            {
+                "name": name,
+                "python_object_id": receipt[1],
+                "storage_data_ptr": receipt[2],
+                "data_ptr": receipt[3],
+                "version": receipt[4],
+                "shape": list(receipt[5]),
+                "stride": list(receipt[6]),
+                "storage_offset": receipt[7],
+                "dtype": str(receipt[8]),
+                "device": str(receipt[9]),
+            }
+        )
+    if not rows:
+        raise RuntimeError("continuous Racket tensor epoch is empty")
+    return _action_ball_canonical_sha256(
+        {
+            "schema_version": 1,
+            "kind": "action_ball_continuous_racket_tensor_epoch_v1",
+            "rows": rows,
+        }
+    )
+
+
 class _ActionBallPoolSolverAdapter:
     """Stateful protocol adapter required by ``LazyActionTaskPool``.
 
@@ -1025,6 +1906,11 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
             "('phase_gated', 'metrics_only'); "
             f"got {reference_guard_mode!r}"
         )
+    if target_mode == "action_ball_full_mdp":
+        # The fresh task has a different construction owner.  In particular,
+        # it must not be admitted by (or rejected for failing) the legacy
+        # manifest/sampler/analytic-ball launch recipe below.
+        return
     if target_mode != "action_ball":
         if reference_guard_mode != "phase_gated":
             raise ValueError(
@@ -3427,23 +4313,66 @@ class RacketTargetCommand(CommandTerm):
         _assert_task_first_recipe_is_coherent(cfg)
         _assert_action_ball_recipe_is_coherent(cfg)
         super().__init__(cfg, env)
+        _bind_disabled_time_resampling_fast_path(self)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
-        self._task_first_enabled = str(getattr(cfg, "target_mode", "")) == "task_first"
-        self._action_ball_enabled = str(getattr(cfg, "target_mode", "")) == "action_ball"
-        (
-            self._action_ball_target_source,
-            self._action_ball_target_recipe,
-            self._action_ball_target_validity_mask,
-            self._action_ball_target_observation_noise,
-        ) = _action_ball_target_recipe_contract(cfg)
-        self._action_ball_reuse_exact_question = (
-            _action_ball_question_reuse_contract(
-                cfg,
-                source=self._action_ball_target_source,
-            )
+        target_mode = str(getattr(cfg, "target_mode", ""))
+        self._task_first_enabled = target_mode == "task_first"
+        # The fresh full-MDP command is intentionally not an alias for the
+        # legacy host/portable ActionBall producer.  It reuses only the
+        # fixed-shape command tensors allocated by this CommandTerm; its
+        # question, reset, reveal, drain and checkpoint authorities are the
+        # construction-bound Device-R05 graph below.
+        self._action_ball_enabled = target_mode == "action_ball"
+        self._action_ball_full_mdp_enabled = (
+            target_mode == "action_ball_full_mdp"
         )
-        if not self._action_ball_enabled and (
+        configured_strike_fact_device = bool(
+            getattr(cfg, "action_ball_strike_fact_device_enabled", False)
+        )
+        # Fresh full-MDP R03 is a construction-owned child of this exact
+        # Racket command.  It is not an optional YAML feature and it must not
+        # be replaced by a second coordinator assembled by the runtime
+        # factory.  The legacy ActionBall path retains its explicit flag.
+        self._action_ball_strike_fact_device_enabled = (
+            configured_strike_fact_device
+            or self._action_ball_full_mdp_enabled
+        )
+        if (
+            self._action_ball_strike_fact_device_enabled
+            and not (
+                self._action_ball_enabled
+                or self._action_ball_full_mdp_enabled
+            )
+        ):
+            raise ValueError(
+                "action_ball_strike_fact_device_enabled is ActionBall-only"
+            )
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is True:
+            # These compatibility attributes are read by common reward/obs
+            # code, but they carry no sampler authority in the fresh mode.
+            self._action_ball_target_source = "device_r05"
+            self._action_ball_target_recipe = "device_r05_selected_slice"
+            self._action_ball_target_validity_mask = (True, True, True)
+            self._action_ball_target_observation_noise = False
+            self._action_ball_reuse_exact_question = False
+        else:
+            (
+                self._action_ball_target_source,
+                self._action_ball_target_recipe,
+                self._action_ball_target_validity_mask,
+                self._action_ball_target_observation_noise,
+            ) = _action_ball_target_recipe_contract(cfg)
+            self._action_ball_reuse_exact_question = (
+                _action_ball_question_reuse_contract(
+                    cfg,
+                    source=self._action_ball_target_source,
+                )
+            )
+        if not (
+            self._action_ball_enabled
+            or self._action_ball_full_mdp_enabled
+        ) and (
             self._action_ball_target_source != "online_solver"
             or self._action_ball_target_recipe != "current_lm"
             or self._action_ball_target_validity_mask != (True, True, True)
@@ -3544,6 +4473,7 @@ class RacketTargetCommand(CommandTerm):
             or self._cq_enabled
             or self._task_first_enabled
             or self._action_ball_enabled
+            or self._action_ball_full_mdp_enabled
         ):
             raise ValueError(
                 "RacketTargetCommandCfg.face_command=True requires a producer that WRITES "
@@ -3584,7 +4514,10 @@ class RacketTargetCommand(CommandTerm):
             bool(cfg.virtual_ball)
             and not str(cfg.question_bank or "").strip()
             and not self._cq_enabled
-            and not self._action_ball_enabled
+            and not (
+                self._action_ball_enabled
+                or self._action_ball_full_mdp_enabled
+            )
             and not bool(getattr(cfg, "allow_unbanked_landing_rewards", False))
         ):
             raise ValueError(
@@ -3759,6 +4692,89 @@ class RacketTargetCommand(CommandTerm):
         self.vb_vel_in_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.vb_spin_in_w = torch.zeros(self.num_envs, 3, device=self.device)
         self.vb_fired = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # Owner-side wiring for the device-resident same-transition strike
+        # fact.  Legacy ActionBall keeps this optional; fresh full-MDP always
+        # constructs exactly one R03 under this causal Racket writer.  Its
+        # publication still fails before mutation until Device-R05 supplies
+        # the exact current full-key/shot identity.
+        self._action_ball_strike_fact_device_coordinator = None
+        self._action_ball_strike_fact_task_key = None
+        self._action_ball_strike_fact_key_ints = None
+        self._action_ball_strike_fact_key_digests = None
+        self._action_ball_strike_fact_source_step = None
+        self._action_ball_strike_fact_exact_eligibility = None
+        self._action_ball_strike_fact_target_validity = None
+        self._action_ball_strike_fact_mutation_mask = None
+        self._action_ball_strike_fact_expected_publish_step = None
+        if self._action_ball_strike_fact_device_enabled:
+            from .action_ball_strike_fact_device import (
+                ActionBallStrikeFactDeviceCoordinator,
+                DeviceActionTaskKey,
+                OBSERVATION_PROJECTION_MODE_FRESH_FULL_MDP,
+                OBSERVATION_PROJECTION_MODE_LEGACY_DIAGNOSTIC,
+            )
+
+            key_ints = {
+                "env_id": torch.arange(
+                    self.num_envs, dtype=torch.int64, device=self.device
+                ),
+                "reset_generation": torch.zeros(
+                    self.num_envs, dtype=torch.int64, device=self.device
+                ),
+                "swing_generation": torch.full(
+                    (self.num_envs,), -1, dtype=torch.int64, device=self.device
+                ),
+                "action_uid": torch.zeros(
+                    self.num_envs, dtype=torch.int64, device=self.device
+                ),
+                "action_slot": torch.full(
+                    (self.num_envs,), -1, dtype=torch.int64, device=self.device
+                ),
+            }
+            key_digests = {
+                name: torch.zeros(
+                    (self.num_envs, 32),
+                    dtype=torch.uint8,
+                    device=self.device,
+                )
+                for name in (
+                    "birth_sha256",
+                    "sample_sha256",
+                    "task_sha256",
+                )
+            }
+            self._action_ball_strike_fact_key_ints = key_ints
+            self._action_ball_strike_fact_key_digests = key_digests
+            self._action_ball_strike_fact_task_key = DeviceActionTaskKey(
+                **key_ints, **key_digests
+            )
+            self._action_ball_strike_fact_source_step = torch.full(
+                (self.num_envs,), -1, dtype=torch.int64, device=self.device
+            )
+            self._action_ball_strike_fact_exact_eligibility = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._action_ball_strike_fact_target_validity = torch.full(
+                (self.num_envs,),
+                all(self._action_ball_target_validity_mask),
+                dtype=torch.bool,
+                device=self.device,
+            )
+            self._action_ball_strike_fact_mutation_mask = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._action_ball_strike_fact_device_coordinator = (
+                ActionBallStrikeFactDeviceCoordinator(
+                    num_envs=self.num_envs,
+                    device=self.device,
+                    dtype=self.racket_target_pos_w.dtype,
+                    observation_projection_mode=(
+                        OBSERVATION_PROJECTION_MODE_FRESH_FULL_MDP
+                        if self._action_ball_full_mdp_enabled
+                        else OBSERVATION_PROJECTION_MODE_LEGACY_DIAGNOSTIC
+                    ),
+                )
+            )
         self.metrics["action_ball_target_face_compatible_at_strike"] = torch.zeros(
             self.num_envs, device=self.device
         )
@@ -4009,6 +5025,14 @@ class RacketTargetCommand(CommandTerm):
                 self._sparse_reward_eligibility_counters[f"{_name}_{_family}"] = torch.zeros(
                     (), dtype=torch.long, device=self.device
                 )
+        # Fixed diagnostic histogram edges are materialized exactly once per command instance.
+        # The strike hot path reuses this tensor by identity; it never constructs or transfers a
+        # fresh device tensor while collecting rollout evidence.
+        self._exact_strike_paddle_ball_distance_bin_edges_m_t = torch.tensor(
+            _EXACT_STRIKE_PADDLE_BALL_DISTANCE_BIN_EDGES_M,
+            dtype=self.racket_target_pos_w.dtype,
+            device=self.device,
+        )
         # Exact per-PPO-update behavior ledger.  Event counters and ready-phase denominators are
         # integer, sums are float64, and nothing decays.  The runner consumes this transaction
         # together with the sparse strike ledger once per update, so two disjoint 100-update
@@ -4669,7 +5693,7 @@ class RacketTargetCommand(CommandTerm):
         # the first subsequent strike-window tick books one racket-target distance and disarms it.
         # The latch deliberately survives PPO ledger consumption and is exact-resume state, so a
         # rollout-window/checkpoint boundary cannot count the same swing twice.
-        if self._action_ball_enabled:
+        if self._action_ball_enabled or self._action_ball_full_mdp_enabled:
             self._strike_window_entry_armed = torch.ones(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
@@ -4803,6 +5827,13 @@ class RacketTargetCommand(CommandTerm):
             # ``env.command_manager``.  ActionBall needs the already-built
             # motion term, so its cross-term binding must wait until the first
             # post-construction reset/update (or hard-contract query).
+            self._action_ball_runtime_initialized = False
+            self._action_ball_runtime_initializing = False
+        elif self._action_ball_full_mdp_enabled:
+            # No legacy manifest, sampler, host receipt graph, analytic ball,
+            # portable R05 owner, or ActionBall exact-resume envelope is
+            # constructed here.  The top owner binds the fresh device leaf
+            # after every manager-owned tensor already exists.
             self._action_ball_runtime_initialized = False
             self._action_ball_runtime_initializing = False
 
@@ -7531,6 +8562,3521 @@ class RacketTargetCommand(CommandTerm):
                 "action-ball task ref is stale or belongs to another generation"
             )
         return receipt
+
+
+    def _initialize_action_ball_full_mdp_racket_protocol_state(self) -> None:
+        """Allocate only fresh device leaf state; never legacy host runtime."""
+
+        if getattr(
+            self,
+            "_action_ball_continuous_racket_owner_nonce",
+            None,
+        ) is not None:
+            raise RuntimeError("fresh full-MDP Racket state is already initialized")
+        if bool(getattr(self, "_action_ball_enabled", False)):
+            raise RuntimeError(
+                "legacy ActionBall cannot enter the full-MDP device binder"
+            )
+        # The legacy host runtime used to allocate these rows as a side effect
+        # of loading a manifest.  The fresh mode must never load that runtime,
+        # but selected reset and the future Device-R05 reveal still need the
+        # same fixed-shape device destinations.  Allocate only those leaf-owned
+        # tombstones here.  Common command tensors were already constructed by
+        # ``__init__`` and are deliberately not recreated.
+        float_dtype = self.racket_target_pos_w.dtype
+        device = torch.device(self.device)
+        fresh_tombstones = (
+            ("_action_ball_task_valid", (self.num_envs,), torch.bool, 0),
+            (
+                "_action_ball_task_wait_total_ticks",
+                (self.num_envs,),
+                torch.int64,
+                0,
+            ),
+            (
+                "_action_ball_task_wait_elapsed_ticks",
+                (self.num_envs,),
+                torch.int64,
+                0,
+            ),
+            ("_action_ball_action_uid", (self.num_envs,), torch.int64, -1),
+            ("_action_ball_action_slot", (self.num_envs,), torch.int64, -1),
+            (
+                "_action_ball_reset_generation",
+                (self.num_envs,),
+                torch.int64,
+                0,
+            ),
+            (
+                "_action_ball_swing_generation",
+                (self.num_envs,),
+                torch.int64,
+                -1,
+            ),
+            ("_action_ball_attempt_active", (self.num_envs,), torch.bool, 0),
+            (
+                "_action_ball_attempt_action",
+                (self.num_envs,),
+                torch.int64,
+                -1,
+            ),
+            ("_action_ball_attempt_legal", (self.num_envs,), torch.bool, 0),
+            ("_action_ball_attempt_hit", (self.num_envs,), torch.bool, 0),
+            (
+                "_action_ball_resume_reset_exclusion",
+                (self.num_envs,),
+                torch.bool,
+                0,
+            ),
+            (
+                "_counter_rally_return_direction_env_xy",
+                (self.num_envs, 2),
+                float_dtype,
+                0,
+            ),
+            (
+                "_counter_rally_target_baseline_speed_mps",
+                (self.num_envs,),
+                float_dtype,
+                0,
+            ),
+            (
+                "_counter_rally_reward_terms",
+                (self.num_envs, 5),
+                float_dtype,
+                0,
+            ),
+            ("_counter_rally_accepted", (self.num_envs,), torch.bool, 0),
+            (
+                "_counter_rally_legal_first_landing",
+                (self.num_envs,),
+                torch.bool,
+                0,
+            ),
+            (
+                "_counter_rally_primary_reason_code",
+                (self.num_envs,),
+                torch.int64,
+                -1,
+            ),
+            (
+                "_action_ball_reference_term_center_latch",
+                (self.num_envs,),
+                torch.bool,
+                1,
+            ),
+        )
+        for name, shape, dtype, fill in fresh_tombstones:
+            existing = getattr(self, name, None)
+            if existing is not None:
+                if (
+                    not torch.is_tensor(existing)
+                    or tuple(existing.shape) != shape
+                    or existing.dtype != dtype
+                    or existing.device != device
+                ):
+                    raise RuntimeError(
+                        "fresh full-MDP Racket tombstone surface differs: "
+                        f"{name}"
+                    )
+                continue
+            value = torch.full(shape, fill, dtype=dtype, device=device)
+            setattr(self, name, value)
+        self._action_ball_task_wait_last_advance_step = -1
+        self._counter_rally_enabled = False
+        self._action_ball_continuous_racket_owner_nonce = object()
+        self._action_ball_continuous_racket_mutation_version = 0
+        version_device = torch.zeros(
+            (1,), dtype=torch.int64, device=self.device
+        )
+        self._action_ball_continuous_racket_mutation_version_device = (
+            version_device
+        )
+        # Compatibility-only attribute for older snapshots/tests.  It is not
+        # an authority: this Racket owner both writes the device chronology and
+        # would mint any Tensor-version receipt for it.  The independent global
+        # drain consumes the actual device value instead.
+        self._action_ball_continuous_racket_mutation_version_device_receipt = None
+        self._action_ball_continuous_racket_logical_target_root_sha256 = (
+            _action_ball_canonical_sha256(
+                {
+                    "schema_version": 1,
+                    "kind": (
+                        "action_ball_full_mdp_racket_"
+                        "uninitialized_device_target_tombstone_v1"
+                    ),
+                }
+            )
+        )
+
+        self._action_ball_continuous_racket_terminal_epoch_committed = False
+        self._action_ball_continuous_racket_observation_scheduled_ordinal = (
+            torch.full(
+                (self.num_envs,), -1, dtype=torch.int64, device=self.device
+            )
+        )
+        self._action_ball_continuous_racket_observation_task_identity = (
+            torch.zeros(
+                (self.num_envs, 32), dtype=torch.uint8, device=self.device
+            )
+        )
+        self._action_ball_full_mdp_racket_task_identity = torch.full(
+            (self.num_envs,), -1, dtype=torch.int64, device=self.device
+        )
+        self._action_ball_full_mdp_racket_outcome_shot_index = torch.full(
+            (self.num_envs,), -1, dtype=torch.int64, device=self.device
+        )
+        self._action_ball_full_mdp_racket_ball_generation = torch.full(
+            (self.num_envs,), -1, dtype=torch.int64, device=self.device
+        )
+        self._action_ball_full_mdp_racket_outcome_identity = torch.full(
+            (self.num_envs,), -1, dtype=torch.int64, device=self.device
+        )
+        self._action_ball_full_mdp_racket_ball_identity = torch.full(
+            (self.num_envs,), -1, dtype=torch.int64, device=self.device
+        )
+        self._action_ball_continuous_racket_observation_d05_validator = None
+        self._action_ball_continuous_racket_observation_publication_sequence = 0
+        self._action_ball_continuous_racket_observation_current_token = None
+        self._action_ball_continuous_racket_observation_records = {}
+        self._action_ball_continuous_racket_poisoned = False
+        self._action_ball_continuous_racket_poison_reason = None
+        self._action_ball_continuous_racket_terminal_resolution_total = 0
+        self._action_ball_continuous_racket_terminal_resolution_total_device = (
+            torch.zeros((1,), dtype=torch.int64, device=self.device)
+        )
+        self._action_ball_continuous_racket_terminal_resolution_total_device_receipt = (
+            _action_ball_continuous_tensor_receipt(
+                self._action_ball_continuous_racket_terminal_resolution_total_device
+            )
+        )
+        self._action_ball_continuous_racket_drain_fault_count_device = (
+            torch.zeros((1,), dtype=torch.int64, device=self.device)
+        )
+        self._action_ball_continuous_racket_drain_invariant_count_device = (
+            torch.zeros((1,), dtype=torch.int64, device=self.device)
+        )
+        self._action_ball_continuous_racket_active_ppo_drain_pack = None
+        self._action_ball_continuous_racket_drain_poisoned = False
+        self._action_ball_continuous_racket_drain_poison_reason = None
+        self._action_ball_continuous_racket_drain_last_update_index = -1
+        self._action_ball_continuous_racket_drain_last_completed_environment_steps = -1
+        self._action_ball_continuous_racket_drain_sequence = 0
+        self._action_ball_continuous_racket_drain_last_acknowledged_mutation_version = (
+            -1
+        )
+        self._action_ball_continuous_racket_drain_authority = None
+        self._action_ball_continuous_racket_drain_last_acknowledged_receipt = None
+        self._action_ball_continuous_racket_checkpoint_live_epoch_receipts = None
+        self._action_ball_continuous_racket_checkpoint_live_join_required = True
+        self._action_ball_continuous_racket_checkpoint_requires_drain_ack = False
+        self._action_ball_continuous_racket_selected_reset_authority = None
+        self._action_ball_continuous_racket_selected_reset_prepared_validator = None
+        self._action_ball_continuous_racket_selected_reset_r05_validator = None
+        self._action_ball_continuous_racket_selected_reset_source_sha256 = None
+        self._action_ball_continuous_racket_selected_reset_diagnostic = False
+        self._action_ball_continuous_racket_selected_reset_next_serial = 0
+        for name in (
+            "_action_ball_continuous_racket_selected_reset_stage",
+            "_action_ball_continuous_racket_selected_reset_record",
+            "_action_ball_continuous_racket_selected_reset_prevalidated",
+            "_action_ball_continuous_racket_selected_reset_sealed_afterimage",
+            "_action_ball_continuous_racket_selected_reset_commit_token",
+            "_action_ball_continuous_racket_selected_reset_completion",
+            "_action_ball_continuous_racket_selected_reset_completion_prepared",
+        ):
+            setattr(self, name, None)
+        self._action_ball_full_mdp_device_r05_owner = None
+        self._action_ball_full_mdp_racket_epoch_owner = None
+        self._action_ball_full_mdp_r03_writer_active = False
+        self._action_ball_full_mdp_racket_physical_owner = None
+        self._action_ball_full_mdp_racket_mount_sign_table = None
+        self._action_ball_full_mdp_racket_selected_rubber_sequence = 0
+        self._action_ball_full_mdp_racket_selected_rubber_token = None
+        self._action_ball_full_mdp_racket_selected_rubber_view = None
+        self._action_ball_continuous_fresh_racket_time_left_receipt = None
+        self._action_ball_continuous_fresh_racket_lane_bound = True
+
+    def _bind_action_ball_full_mdp_fresh_racket_resample_timer(self) -> None:
+        """Seal the inherited timer for the writer-free fresh command lane."""
+
+        time_left = getattr(self, "time_left", None)
+        receipt = _tensor_identity_version_receipt(time_left)
+        if (
+            type(time_left) is not torch.Tensor
+            or not time_left.is_floating_point()
+            or time_left.device != torch.device(self.device)
+            or tuple(time_left.shape) != (self.num_envs,)
+            or not time_left.is_contiguous()
+            or receipt is None
+        ):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "fresh Racket requires its exact inherited resample timer"
+            )
+        # The lean lane has no legacy timer/resample writer.  Materialize the
+        # impossible-expiry sentinel once at cold graph binding, then retain
+        # the exact tensor object/version across policy ticks.  D05 remains the
+        # only writer of Racket task, target, and timing business state.
+        time_left.copy_(torch.full_like(time_left, float("inf")))
+        receipt = _tensor_identity_version_receipt(time_left)
+        if receipt is None:
+            raise ActionBallContinuousRacketHotRevealHold(
+                "fresh Racket inherited resample timer became unsealable"
+            )
+        self._action_ball_continuous_fresh_racket_time_left_receipt = receipt
+
+    def bind_action_ball_full_mdp_racket_staging(
+        self,
+        device_r05_owner: object,
+    ) -> None:
+        """Construction-bind the fresh Device-R05 Racket leaf only.
+
+        Device-R05's exact current-task/current-shot observation ABI is not
+        frozen yet.  Consequently this production binder is a construction
+        HOLD before it mints genesis authority or writes any Racket state.
+        Focused tests may exercise the private Racket publication core, but
+        that is deliberately not a production graph closure.
+        """
+
+        if not bool(
+            getattr(self, "_action_ball_full_mdp_enabled", False)
+        ) or bool(getattr(self, "_action_ball_enabled", False)):
+            raise RuntimeError(
+                "full-MDP Racket staging requires target_mode=action_ball_full_mdp"
+            )
+        if device_r05_owner is None:
+            raise TypeError("fresh Racket requires one Device-R05 owner")
+        import action_ball_continuous_runtime_transaction_device as device_r05
+
+        if type(device_r05_owner) is not device_r05.DeviceR05Owner:
+            raise TypeError(
+                "fresh Racket requires the exact Device-R05 owner type"
+            )
+        current_projection = getattr(
+            device_r05_owner,
+            "action_ball_current_observation_projection",
+            None,
+        )
+        current_validator = getattr(
+            device_r05_owner,
+            "require_owned_action_ball_current_observation_projection",
+            None,
+        )
+        current_abi_frozen = (
+            callable(current_projection)
+            and callable(current_validator)
+            and getattr(current_projection, "__self__", None)
+            is device_r05_owner
+            and getattr(current_validator, "__self__", None)
+            is device_r05_owner
+            and getattr(current_projection, "__func__", None)
+            is vars(device_r05.DeviceR05Owner).get(
+                "action_ball_current_observation_projection"
+            )
+            and getattr(current_validator, "__func__", None)
+            is vars(device_r05.DeviceR05Owner).get(
+                "require_owned_action_ball_current_observation_projection"
+            )
+        )
+        if not current_abi_frozen:
+            # Device-R05's independent current-task/shot identity ABI is not
+            # frozen yet.  This is a production construction HOLD, before the
+            # genesis capability is minted or any Racket destination is copied.
+            # A focused Racket fixture may exercise the private publication
+            # core, but it cannot bypass this binder or claim graph closure.
+            raise ActionBallContinuousRacketObservationHold(
+                "fresh Racket production binding awaits the exact Device-R05 "
+                "current-observation projection/validator ABI"
+            )
+        current = getattr(
+            self, "_action_ball_full_mdp_device_r05_owner", None
+        )
+        if current is device_r05_owner:
+            return
+        if current is not None:
+            raise RuntimeError("fresh Racket Device-R05 owner may not be rebound")
+        project_genesis = getattr(
+            device_r05_owner, "project_owned_genesis_for_child", None
+        )
+        validate_genesis = getattr(
+            device_r05_owner, "require_owned_genesis_projection", None
+        )
+        if (
+            not callable(project_genesis)
+            or not callable(validate_genesis)
+            or getattr(project_genesis, "__self__", None)
+            is not device_r05_owner
+            or getattr(project_genesis, "__func__", None)
+            is not device_r05.DeviceR05Owner.project_owned_genesis_for_child
+            or getattr(validate_genesis, "__self__", None)
+            is not device_r05_owner
+            or getattr(validate_genesis, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_genesis_projection
+        ):
+            raise TypeError("fresh Racket Device-R05 genesis API differs")
+        genesis_capability = project_genesis(owner_kind="racket")
+        genesis = validate_genesis(
+            genesis_capability,
+            owner_kind="racket",
+        )
+        r05_reset_generation = getattr(genesis, "reset_generation", None)
+        if (
+            type(genesis) is not device_r05.DeviceR05GenesisView
+            or getattr(genesis, "device_r05_owner", None)
+            is not device_r05_owner
+            or getattr(genesis, "owner_kind", None) != "racket"
+            or getattr(genesis, "world_reset_identity", None) is None
+            or not torch.is_tensor(r05_reset_generation)
+            or r05_reset_generation.dtype != torch.int64
+            or r05_reset_generation.device != torch.device(self.device)
+            or tuple(r05_reset_generation.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "fresh Racket Device-R05 genesis generation differs"
+            )
+        required = (
+            "project_owned_genesis_for_child",
+            "require_owned_genesis_projection",
+            "require_owned_prepared_true_reset",
+            "require_owned_true_reset_receipt",
+            "require_owned_terminal_claim_for_child",
+            "require_owned_terminal_receipt_for_child",
+        )
+        if any(
+            not callable(getattr(device_r05_owner, name, None))
+            for name in required
+        ):
+            raise TypeError("fresh Racket Device-R05 API surface differs")
+        if not bool(
+            getattr(self, "_action_ball_continuous_fresh_racket_lane_bound", False)
+        ):
+            self._initialize_action_ball_full_mdp_racket_protocol_state()
+        elif getattr(
+            self, "_action_ball_continuous_racket_owner_nonce", None
+        ) is None:
+            self._initialize_action_ball_full_mdp_racket_protocol_state()
+        # Construction-time device copy only: the Racket reset-generation
+        # destination must begin on the exact Device-R05 genesis frontier.
+        # Keeping a clone avoids a shared-writer alias while letting the later
+        # prepared-reset projection prove every selected increment.
+        self._action_ball_reset_generation.copy_(r05_reset_generation)
+        self._action_ball_full_mdp_device_r05_owner = device_r05_owner
+        self._action_ball_continuous_racket_observation_d05_validator = (
+            current_validator
+        )
+
+    def bind_action_ball_full_mdp_racket_epoch_sources(
+        self,
+        device_r05_owner: object,
+        epoch_owner: object,
+    ) -> None:
+        """Construction-bind the lean D05/epoch pair for the hot writer.
+
+        The binding carries no receipt, hash, or caller-authored verdict.  D05
+        remains the sole source of selected task rows and ``ActionEpochOwner``
+        remains the sole fixed-order writer coordinator.  This narrow binder
+        deliberately bypasses the legacy observation-receipt graph.
+        """
+
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket epoch binding requires action_ball_full_mdp"
+            )
+        if bool(getattr(self, "_action_ball_enabled", False)):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket epoch binding rejects legacy ActionBall state"
+            )
+        import action_ball_continuous_runtime_transaction_device as device_r05
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_full_mdp_epoch as epoch,
+        )
+
+        if type(device_r05_owner) is not device_r05.DeviceR05Owner:
+            raise TypeError("Racket epoch binding requires exact Device-R05 owner")
+        if type(epoch_owner) is not epoch.ActionEpochOwner:
+            raise TypeError("Racket epoch binding requires exact ActionEpoch owner")
+        if (
+            getattr(device_r05_owner, "_num_envs", None) != self.num_envs
+            or torch.device(getattr(device_r05_owner, "_device", "cpu"))
+            != torch.device(self.device)
+            or epoch_owner.num_envs != self.num_envs
+            or epoch_owner.shot_slot_capacity < 1
+            or epoch_owner.device != torch.device(self.device)
+        ):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket epoch sources differ in N, slot capacity, or device"
+            )
+        accepted_rows = getattr(
+            device_r05_owner, "require_owned_action_epoch_accepted", None
+        )
+        if (
+            not callable(accepted_rows)
+            or getattr(accepted_rows, "__self__", None) is not device_r05_owner
+            or getattr(accepted_rows, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_action_epoch_accepted
+        ):
+            raise TypeError("Racket epoch binding requires exact D05 ACCEPT-row API")
+        current_d05 = getattr(self, "_action_ball_full_mdp_device_r05_owner", None)
+        current_epoch = getattr(
+            self, "_action_ball_full_mdp_racket_epoch_owner", None
+        )
+        if current_d05 is device_r05_owner and current_epoch is epoch_owner:
+            return
+        if current_d05 is not None or current_epoch is not None:
+            raise RuntimeError("Racket epoch sources may not be rebound")
+        project_genesis = getattr(
+            device_r05_owner, "project_owned_genesis_for_child", None
+        )
+        require_genesis = getattr(
+            device_r05_owner, "require_owned_genesis_projection", None
+        )
+        if (
+            not callable(project_genesis)
+            or not callable(require_genesis)
+            or getattr(project_genesis, "__self__", None) is not device_r05_owner
+            or getattr(project_genesis, "__func__", None)
+            is not device_r05.DeviceR05Owner.project_owned_genesis_for_child
+            or getattr(require_genesis, "__self__", None) is not device_r05_owner
+            or getattr(require_genesis, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_genesis_projection
+        ):
+            raise TypeError("Racket epoch binding requires exact D05 genesis API")
+        # The real full-MDP CommandTerm deliberately leaves this fresh leaf
+        # cold until the unique top owner has constructed D05 and ActionEpoch.
+        # Initialize only after both exact sources and their callable seams
+        # passed validation, but before consuming D05's one-shot genesis view.
+        if not bool(
+            getattr(self, "_action_ball_continuous_fresh_racket_lane_bound", False)
+        ):
+            self._initialize_action_ball_full_mdp_racket_protocol_state()
+        elif getattr(
+            self, "_action_ball_continuous_racket_owner_nonce", None
+        ) is None:
+            self._initialize_action_ball_full_mdp_racket_protocol_state()
+        reset_destination = getattr(self, "_action_ball_reset_generation", None)
+        if (
+            not torch.is_tensor(reset_destination)
+            or reset_destination.dtype != torch.int64
+            or reset_destination.device != torch.device(self.device)
+            or tuple(reset_destination.shape) != (self.num_envs,)
+        ):
+            raise TypeError(
+                "Racket epoch binding requires exact reset-generation destination"
+            )
+        genesis_capability = project_genesis(owner_kind="racket")
+        genesis = require_genesis(genesis_capability, owner_kind="racket")
+        reset_generation = getattr(genesis, "reset_generation", None)
+        if (
+            type(genesis) is not device_r05.DeviceR05GenesisView
+            or genesis.device_r05_owner is not device_r05_owner
+            or genesis.owner_kind != "racket"
+            or genesis.world_reset_identity is None
+            or not torch.is_tensor(reset_generation)
+            or reset_generation.dtype != torch.int64
+            or reset_generation.device != torch.device(self.device)
+            or tuple(reset_generation.shape) != (self.num_envs,)
+        ):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket epoch D05 genesis projection differs"
+            )
+        reset_destination.copy_(reset_generation)
+        self._bind_action_ball_full_mdp_fresh_racket_resample_timer()
+        self._action_ball_full_mdp_device_r05_owner = device_r05_owner
+        self._action_ball_full_mdp_racket_epoch_owner = epoch_owner
+
+    @torch.no_grad()
+    def commit_action_ball_full_mdp_racket_epoch_rows(self, token: object) -> None:
+        """Install Racket's full-N D05 ACCEPT after-image exactly once.
+
+        The opaque transaction and ACCEPT classification remain owned by D05
+        and ActionEpoch.  Racket derives no row index or verdict: it consumes
+        the exact full-N candidate view, combines its shared typed shot-key
+        validity with ``task_valid``, and preserves every non-accepted row via
+        device ``where`` after-images.  The 27-float Racket slice and 5-float
+        Motion timing slice are the only numeric inputs; the Physical slice is
+        deliberately outside this writer.
+        """
+
+        if bool(getattr(self, "_action_ball_continuous_racket_poisoned", False)):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket epoch writer is poisoned"
+            )
+        d05_owner = getattr(self, "_action_ball_full_mdp_device_r05_owner", None)
+        epoch_owner = getattr(
+            self, "_action_ball_full_mdp_racket_epoch_owner", None
+        )
+        import action_ball_continuous_runtime_transaction_device as device_r05
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_full_mdp_epoch as epoch,
+        )
+
+        accepted_rows = getattr(
+            d05_owner, "require_owned_action_epoch_accepted", None
+        )
+        if (
+            type(d05_owner) is not device_r05.DeviceR05Owner
+            or type(epoch_owner) is not epoch.ActionEpochOwner
+            or not callable(accepted_rows)
+            or getattr(accepted_rows, "__self__", None) is not d05_owner
+            or getattr(accepted_rows, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_action_epoch_accepted
+        ):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket epoch writer lost its exact construction sources"
+            )
+
+        try:
+            # D05 is the sole public ACCEPT-row authority.  Its exact method
+            # joins this opaque token to Epoch's transient writer window before
+            # returning the typed full-N after-image; Racket has no second
+            # phase/mask accessor and derives no caller verdict.
+            accepted = accepted_rows(token, owner_kind="racket")
+            if (
+                type(accepted) is not device_r05.DeviceR05AcceptedRowsView
+                or accepted.transaction is not token
+                or type(accepted.identity) is not epoch.EpochIdentityPayload
+                or type(accepted.clocks) is not epoch.EpochClockPayload
+                or type(accepted.task) is not epoch.EpochTaskPayload
+            ):
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "Racket D05 ACCEPT view authority differs"
+                )
+
+            device = torch.device(self.device)
+            n = self.num_envs
+            shot_shape = (n, 1)
+            task = accepted.task
+            required_rows = (
+                (accepted.publication_ordinal, torch.int64, shot_shape),
+                (accepted.target_xy_m, torch.float32, (n, 1, 2)),
+                (accepted.identity.scheduled_ordinal, torch.int64, shot_shape),
+                (accepted.identity.target_generation, torch.int64, shot_shape),
+                (accepted.identity.selected_cell, torch.int64, shot_shape),
+                (accepted.identity.candidate_identity, torch.int64, shot_shape),
+                (accepted.clocks.reveal_tick, torch.int64, shot_shape),
+                (accepted.clocks.contact_tick, torch.int64, shot_shape),
+                (accepted.clocks.launch_tick, torch.int64, shot_shape),
+                (accepted.clocks.deadline_tick, torch.int64, shot_shape),
+                (accepted.clocks.next_reveal_tick, torch.int64, shot_shape),
+                (task.task_f32, torch.float32, (n, 1, epoch.TASK_F32_WIDTH)),
+                (task.task_valid, torch.bool, shot_shape),
+                (accepted.rng_counter, torch.int64, shot_shape),
+            )
+            if any(
+                type(value) is not torch.Tensor
+                or value.dtype != dtype
+                or value.device != device
+                or tuple(value.shape) != shape
+                or not value.is_contiguous()
+                for value, dtype, shape in required_rows
+            ):
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "Racket D05 ACCEPT tensor ABI differs"
+                )
+            try:
+                key = epoch.row_identity.require_action_epoch_shot_key(
+                    accepted.identity.shot_key,
+                    shape=shot_shape,
+                    device=device,
+                    label="Racket D05 ACCEPT shot key",
+                )
+            except Exception as exc:
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "Racket D05 ACCEPT shot-key ABI differs"
+                ) from exc
+            origins = getattr(
+                getattr(self._env, "scene", None), "env_origins", None
+            )
+            if (
+                type(origins) is not torch.Tensor
+                or origins.device != device
+                or origins.dtype != self.racket_target_pos_w.dtype
+                or tuple(origins.shape) != (n, 3)
+                or not origins.is_contiguous()
+            ):
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "Racket epoch writer requires exact live environment origins"
+                )
+
+            write_mask = (
+                epoch.row_identity.action_epoch_shot_key_valid(key)
+                & task.task_valid
+            )[:, 0]
+            motion_image = task.task_f32[:, 0, : epoch.MOTION_TASK_F32_WIDTH]
+            racket_image = task.task_f32[
+                :,
+                0,
+                epoch.MOTION_TASK_F32_WIDTH : (
+                    epoch.MOTION_TASK_F32_WIDTH + epoch.RACKET_TASK_F32_WIDTH
+                ),
+            ]
+            initial_tts = motion_image[:, 0].to(dtype=self.time_to_strike.dtype)
+            tts_abs = initial_tts.abs()
+            pos_window_s = self.cfg.strike_window_pos_s
+            wide_window_s = self.cfg.strike_window_wide_s
+
+            def install(destination: torch.Tensor, values: torch.Tensor) -> None:
+                mask = write_mask
+                while mask.ndim < destination.ndim:
+                    mask = mask.unsqueeze(-1)
+                destination.copy_(torch.where(mask, values, destination))
+
+            install(self.racket_target_pos_w, origins + racket_image[:, 0:3])
+            install(self.racket_target_vel_w, racket_image[:, 3:6])
+            install(self.racket_target_normal_w, racket_image[:, 6:9])
+            install(self.target_normal_cmd, racket_image[:, 6:9])
+            install(
+                self._action_ball_ball_contact_target_w,
+                origins + racket_image[:, 9:12],
+            )
+            install(
+                self._action_ball_face_center_velocity_target_w,
+                racket_image[:, 12:15],
+            )
+            install(
+                self._action_ball_racket_command_quat_w,
+                racket_image[:, 15:19],
+            )
+            install(
+                self.base_target_pos_w,
+                origins[:, :2] + racket_image[:, 19:21],
+            )
+            install(self.vb_vel_in_w, racket_image[:, 21:24])
+            install(self.vb_spin_in_w, racket_image[:, 24:27])
+
+            # Bind every field of the one portable shot key explicitly.  The
+            # layout carries env row; no env_id, digest or publication ordinal
+            # is promoted into business identity here.
+            install(self._action_ball_reset_generation, key.reset_generation[:, 0])
+            install(
+                self._action_ball_full_mdp_racket_ball_generation,
+                key.ball_generation[:, 0],
+            )
+            install(self._action_ball_swing_generation, key.ball_generation[:, 0])
+            install(self._action_ball_action_uid, key.action_uid[:, 0])
+            install(self._action_ball_action_slot, key.action_slot[:, 0])
+            install(
+                self._action_ball_full_mdp_racket_outcome_shot_index,
+                key.shot_index[:, 0],
+            )
+            install(
+                self._action_ball_full_mdp_racket_task_identity,
+                key.task_identity[:, 0],
+            )
+            install(
+                self._action_ball_full_mdp_racket_outcome_identity,
+                key.outcome_identity[:, 0],
+            )
+            install(
+                self._action_ball_full_mdp_racket_ball_identity,
+                key.ball_identity[:, 0],
+            )
+            install(
+                self._action_ball_continuous_racket_observation_scheduled_ordinal,
+                accepted.identity.scheduled_ordinal[:, 0],
+            )
+            install(self._action_ball_task_valid, task.task_valid[:, 0])
+            install(
+                self._action_ball_attempt_active,
+                torch.ones_like(write_mask),
+            )
+            install(self._action_ball_attempt_action, key.action_slot[:, 0])
+            install(
+                self._action_ball_attempt_legal,
+                torch.zeros_like(write_mask),
+            )
+            install(
+                self._action_ball_attempt_hit,
+                torch.zeros_like(write_mask),
+            )
+            install(self.time_to_strike, initial_tts)
+            install(self.pre_strike, initial_tts > 0.0)
+            install(
+                self.strike_window,
+                tts_abs <= float(self.cfg.strike_window_s),
+            )
+            install(
+                self.strike_window_pos,
+                tts_abs
+                <= float(
+                    self.cfg.strike_window_s
+                    if pos_window_s is None
+                    else pos_window_s
+                ),
+            )
+            install(
+                self.strike_window_wide,
+                tts_abs
+                <= float(
+                    self.cfg.strike_window_s
+                    if wide_window_s is None
+                    else wide_window_s
+                ),
+            )
+            install(
+                self._counter_rally_reward_terms,
+                torch.zeros_like(self._counter_rally_reward_terms),
+            )
+            install(
+                self._counter_rally_accepted,
+                torch.zeros_like(write_mask),
+            )
+            install(
+                self._counter_rally_legal_first_landing,
+                torch.zeros_like(write_mask),
+            )
+            install(
+                self._counter_rally_primary_reason_code,
+                torch.full_like(key.action_slot[:, 0], -1),
+            )
+            install(
+                self._action_ball_prev_contact_valid,
+                torch.zeros_like(write_mask),
+            )
+        except BaseException:
+            if getattr(
+                self, "_action_ball_continuous_racket_poison_reason", None
+            ) is None:
+                self._action_ball_continuous_racket_poison_reason = (
+                    "action_epoch_racket_writer_failure"
+                )
+            self._poison_action_ball_continuous_racket_child()
+            raise
+
+    @torch.no_grad()
+    def _build_action_ball_full_mdp_racket_action_reference_cold_rows(
+        self,
+        motion_command: MotionCommand,
+        loader: MotionLoader,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Pure cold MotionLoader -> Racket FK rows; installs no state.
+
+        This is the production-shaped extraction seam, separated from the
+        legacy reference-target builder because that builder also prints and
+        runs target/table/return gates after installing mutable caches.  A
+        failed construction here cannot leave a half-ready Racket cache.
+        """
+
+        if motion_command is not self._motion():
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference Motion binding differs"
+            )
+        action_count = int(loader.num_segments)
+        quat_rows = torch.zeros(
+            action_count, 4, dtype=torch.float32, device=self.device
+        )
+        omega_rows = torch.zeros(
+            action_count, 3, dtype=torch.float32, device=self.device
+        )
+        velocity_rows = torch.zeros_like(omega_rows)
+        raw_normal_rows = torch.zeros_like(omega_rows)
+        reach_offset_xy_rows = torch.zeros(
+            action_count, 2, dtype=torch.float32, device=self.device
+        )
+        site_position_rows = torch.zeros_like(omega_rows)
+        base_root_quat_rows = torch.zeros_like(quat_rows)
+        window = max(1, int(self.cfg.clean_strike_vel_window))
+        if not bool(self.cfg.clean_reference_strike_velocity):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference requires centered-FD site velocity"
+            )
+        dt = float(self._env.step_dt)
+        if not math.isfinite(dt) or dt <= 0.0:
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference requires positive finite step_dt"
+            )
+        for action_slot in range(action_count):
+            strike_step, _phase, seg_start, seg_len = self._strike_frame_for_clip(
+                loader, action_slot
+            )
+            seg_end = seg_start + seg_len - 1
+            if self._racket_mode == "body":
+                _pos, quat, _lin, omega = self._reference_body_state(
+                    loader,
+                    strike_step,
+                    self._racket_body_index,
+                    require_ang_vel=True,
+                )
+            else:
+                wrist_pos, wrist_quat, _wrist_lin, wrist_omega = (
+                    self._reference_body_state(
+                        loader,
+                        strike_step,
+                        self._wrist_body_index,
+                        require_ang_vel=True,
+                    )
+                )
+                del wrist_pos
+                quat = quat_mul(
+                    wrist_quat.unsqueeze(0), self._mount_quat[0:1]
+                ).squeeze(0)
+                omega = wrist_omega
+            if omega is None:
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "cold Racket action reference angular velocity is absent"
+                )
+            velocity = (
+                self._ref_racket_pos_at(
+                    loader,
+                    strike_step + window,
+                    clip_start=seg_start,
+                    clip_end=seg_end,
+                )
+                - self._ref_racket_pos_at(
+                    loader,
+                    strike_step - window,
+                    clip_start=seg_start,
+                    clip_end=seg_end,
+                )
+            ) / (2.0 * window * dt)
+            raw_normal = matrix_from_quat(quat.unsqueeze(0))[
+                0, :, self.cfg.mount_normal_axis
+            ]
+            raw_normal = raw_normal / (
+                torch.linalg.vector_norm(raw_normal) + 1.0e-6
+            )
+            contact_position = self._ref_racket_pos_at(
+                loader,
+                strike_step,
+                clip_start=seg_start,
+                clip_end=seg_end,
+            )
+            base_position, base_root_quat, _base_lin_vel, _base_ang_vel = (
+                self._reference_body_state(loader, strike_step, 0)
+            )
+            reach_offset_xy = contact_position[:2] - base_position[:2]
+            quat_rows[action_slot].copy_(quat)
+            omega_rows[action_slot].copy_(omega)
+            velocity_rows[action_slot].copy_(velocity)
+            raw_normal_rows[action_slot].copy_(raw_normal)
+            reach_offset_xy_rows[action_slot].copy_(reach_offset_xy)
+            site_position_rows[action_slot].copy_(contact_position)
+            base_root_quat_rows[action_slot].copy_(base_root_quat)
+        return (
+            quat_rows.contiguous(),
+            omega_rows.contiguous(),
+            velocity_rows.contiguous(),
+            raw_normal_rows.contiguous(),
+            reach_offset_xy_rows.contiguous(),
+            site_position_rows.contiguous(),
+            base_root_quat_rows.contiguous(),
+        )
+
+    @torch.no_grad()
+    def project_action_ball_full_mdp_racket_action_reference_static_table(
+        self,
+        _cold_public: object,
+    ) -> RacketActionReferenceStaticTableProjection:
+        """Return clone-only all-action rows from the sealed cold source."""
+
+        if not bool(getattr(self, "_action_ball_full_mdp_enabled", False)):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket static action table requires action_ball_full_mdp"
+            )
+        if bool(getattr(self, "_action_ball_enabled", False)):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket static action table rejects legacy ActionBall state"
+            )
+        motion_command = getattr(self, "_motion_term", None)
+        if type(motion_command) is not MotionCommand:
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket static action table awaits the exact bound MotionCommand"
+            )
+        loader = getattr(motion_command, "motion", None)
+        if (
+            type(loader) is not MotionLoader
+            or getattr(loader, "kinematics_contract_exact", None) is not True
+            or getattr(loader, "num_segments", None) is None
+        ):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket static action table requires exact schema-2 MotionLoader FK"
+            )
+        if not callable(_cold_public):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "Racket static action table cold reader is absent"
+            )
+        (
+            quat,
+            omega,
+            site_velocity,
+            raw_normal,
+            reach_offset_xy,
+            site_position,
+            base_root_quat,
+        ) = _cold_public()[1](self, motion_command, loader)
+        return RacketActionReferenceStaticTableProjection(
+            reference_racket_site_position_w_m=site_position,
+            reference_racket_quat_wxyz=quat,
+            reference_racket_angular_velocity_w_radps=omega,
+            reference_racket_site_velocity_w_mps=site_velocity,
+            reference_raw_face_normal_w=raw_normal,
+            reference_reach_offset_xy_m=reach_offset_xy,
+            reference_base_root_quat_wxyz=base_root_quat,
+        )
+
+    @torch.no_grad()
+    def initialize_action_ball_full_mdp_racket_action_reference_cold(
+        self,
+        _cold_public: object,
+    ) -> None:
+        """Materialize the immutable per-action FK table off the hot path.
+
+        The extractor is a pure local MotionLoader/Racket FK computation.  It
+        does not reuse the legacy mutable reference-target cache, run target
+        return gates, or install any state until every row validates.  It mints
+        no receipt and accepts no caller tensor/profile.  Callers must never
+        invoke this from physics/reward/observation/optimizer/D05 callbacks.
+        """
+
+        if not bool(getattr(self, "_action_ball_full_mdp_enabled", False)):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference requires action_ball_full_mdp"
+            )
+        if bool(getattr(self, "_action_ball_enabled", False)):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference rejects legacy ActionBall state"
+            )
+        motion_command = self._motion()
+        if type(motion_command) is not MotionCommand:
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference awaits exact MotionCommand"
+            )
+        loader = getattr(motion_command, "motion", None)
+        if (
+            type(loader) is not MotionLoader
+            or getattr(loader, "kinematics_contract_exact", None) is not True
+        ):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference requires exact schema-2 MotionLoader FK"
+            )
+        if not callable(_cold_public):
+            raise ActionBallContinuousRacketHotRevealHold(
+                "cold Racket action reference reader is absent"
+            )
+        if _cold_public()[0](
+            self, motion_command, loader
+        ):
+            return
+        self._install_action_ball_full_mdp_racket_action_reference_cold_source(
+            motion_command, loader
+        )
+
+    # Freeze the exact builder identity at class definition.  The second
+    # closure becomes the one exact construction callpoint itself: it accepts
+    # no rows, proof tensor, digest, or caller builder.  In particular there is
+    # no separately published ``seal`` helper that tests/callers can combine
+    # with a monkeypatched production builder.
+    (
+        _action_ball_full_mdp_racket_action_reference_cold_public_methods,
+        _install_action_ball_full_mdp_racket_action_reference_cold_source,
+    ) = _make_racket_action_reference_cold_registry(
+        _build_action_ball_full_mdp_racket_action_reference_cold_rows
+    )
+    (
+        project_action_ball_full_mdp_racket_action_reference_static_table,
+        initialize_action_ball_full_mdp_racket_action_reference_cold,
+    ) = _bind_racket_action_reference_cold_reader(
+        project_action_ball_full_mdp_racket_action_reference_static_table,
+        initialize_action_ball_full_mdp_racket_action_reference_cold,
+        _action_ball_full_mdp_racket_action_reference_cold_public_methods,
+    )
+
+    def bind_action_ball_full_mdp_racket_selected_rubber_physical_owner(
+        self,
+        physical_owner: object,
+    ) -> None:
+        """Construction-bind the sole Physical N×K lifecycle source.
+
+        Racket owns which mounted face an admitted action selects.  It does not
+        own flight activity, keys, generations, or slots.  Those facts must
+        come directly from the exact Physical owner; accepting a caller mask,
+        digest, or diagnostic scene projection here would only check caller
+        self-consistency and cannot authorize PhysX attribution.
+        """
+
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_physical_flight_device as physical,
+        )
+
+        if not bool(getattr(self, "_action_ball_full_mdp_enabled", False)):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber Physical binding requires action_ball_full_mdp"
+            )
+        if type(physical_owner) is not physical.ActionBallPhysicalFlightDeviceOwner:
+            raise TypeError(
+                "selected-rubber authority requires the exact Physical owner"
+            )
+        allocation = getattr(
+            physical_owner, "action_epoch_physics_fact_allocation", None
+        )
+        require_allocation = getattr(
+            physical_owner,
+            "require_owned_action_epoch_physics_fact_allocation",
+            None,
+        )
+        if (
+            not callable(allocation)
+            or not callable(require_allocation)
+            or getattr(allocation, "__self__", None) is not physical_owner
+            or getattr(allocation, "__func__", None)
+            is not vars(physical.ActionBallPhysicalFlightDeviceOwner).get(
+                "action_epoch_physics_fact_allocation"
+            )
+            or getattr(require_allocation, "__self__", None) is not physical_owner
+            or getattr(require_allocation, "__func__", None)
+            is not vars(physical.ActionBallPhysicalFlightDeviceOwner).get(
+                "require_owned_action_epoch_physics_fact_allocation"
+            )
+            or getattr(physical_owner, "num_envs", None) != self.num_envs
+            or torch.device(getattr(physical_owner, "device", "cpu"))
+            != torch.device(self.device)
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber Physical owner API or device differs"
+            )
+        current = getattr(
+            self, "_action_ball_full_mdp_racket_physical_owner", None
+        )
+        if current is physical_owner:
+            return
+        if current is not None:
+            raise RuntimeError("selected-rubber Physical owner may not be rebound")
+        signs_cfg = tuple(
+            getattr(self.cfg, "mount_normal_sign_per_clip", ()) or ()
+        )
+        if signs_cfg:
+            sign_values = tuple(int(value) for value in signs_cfg)
+        else:
+            motion_owner = self._motion()
+            action_count = getattr(
+                getattr(motion_owner, "motion", None), "num_segments", None
+            )
+            if type(action_count) is not int or action_count < 1:
+                raise ActionBallContinuousRacketSelectedRubberHold(
+                    "selected-rubber cold action count is absent"
+                )
+            sign_values = tuple(
+                int(self.cfg.mount_normal_sign) for _ in range(action_count)
+            )
+        if not sign_values or any(value not in (-1, 1) for value in sign_values):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber cold mount-sign table differs"
+            )
+        sign_table = torch.tensor(
+            sign_values, dtype=torch.int8, device=torch.device(self.device)
+        ).contiguous()
+        if getattr(
+            self, "_action_ball_full_mdp_racket_mount_sign_table", None
+        ) is not None:
+            raise RuntimeError("selected-rubber mount-sign table may not be rebound")
+        self._action_ball_full_mdp_racket_mount_sign_table = sign_table
+        self._action_ball_full_mdp_racket_physical_owner = physical_owner
+
+    @torch.no_grad()
+    def action_ball_full_mdp_action_epoch_selected_rubber_view(
+        self,
+    ) -> ActionBallFullMdpActionEpochSelectedRubberView:
+        """Derive the exact live Physical K-grid face from bound owners only.
+
+        Physical owns which environment occupies which flight slot and keeps
+        its allocation view active only inside ``launch_action_epoch``.
+        ActionEpoch owns the immutable current action identity.  Racket owns
+        the cold mount-sign table.  Joining those three sources here prevents
+        a scene/caller supplied mask, slot, face, digest, or verdict from
+        becoming attribution authority.
+        """
+
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber view requires action_ball_full_mdp"
+            )
+        if getattr(self, "_action_ball_enabled", False) is True:
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber view rejects legacy ActionBall"
+            )
+        if getattr(self, "_action_ball_continuous_racket_poisoned", False) is True:
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber view rejects poisoned Racket"
+            )
+        physical_owner = getattr(
+            self, "_action_ball_full_mdp_racket_physical_owner", None
+        )
+        epoch_owner = getattr(
+            self, "_action_ball_full_mdp_racket_epoch_owner", None
+        )
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_full_mdp_epoch as epoch,
+            action_ball_physical_flight_device as physical,
+        )
+
+        allocation_method = getattr(
+            physical_owner, "action_epoch_physics_fact_allocation", None
+        )
+        require_method = getattr(
+            physical_owner,
+            "require_owned_action_epoch_physics_fact_allocation",
+            None,
+        )
+        if (
+            type(physical_owner) is not physical.ActionBallPhysicalFlightDeviceOwner
+            or type(epoch_owner) is not epoch.ActionEpochOwner
+            or getattr(physical_owner, "_action_epoch_owner", None) is not epoch_owner
+            or not callable(allocation_method)
+            or not callable(require_method)
+            or getattr(allocation_method, "__self__", None) is not physical_owner
+            or getattr(allocation_method, "__func__", None)
+            is not (
+                physical.ActionBallPhysicalFlightDeviceOwner.
+                action_epoch_physics_fact_allocation
+            )
+            or getattr(require_method, "__self__", None) is not physical_owner
+            or getattr(require_method, "__func__", None)
+            is not (
+                physical.ActionBallPhysicalFlightDeviceOwner.
+                require_owned_action_epoch_physics_fact_allocation
+            )
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber construction owners differ"
+            )
+        try:
+            allocation = require_method(allocation_method())
+        except BaseException as exc:
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber Physical allocation is inactive or stale"
+            ) from exc
+        if (
+            type(allocation) is not physical.ActionEpochPhysicsFactAllocationProjection
+            or allocation.physical_owner is not physical_owner
+            or allocation.epoch_owner is not epoch_owner
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber Physical allocation owner differs"
+            )
+
+        active = allocation.active_mask
+        shape = (self.num_envs, physical_owner.flight_capacity)
+        required = (
+            (active, torch.bool),
+            (allocation.flight_slot, torch.int64),
+            (allocation.ball_generation, torch.int64),
+            (allocation.action_uid, torch.int64),
+            (allocation.reset_generation, torch.int64),
+            (allocation.action_slot, torch.int64),
+            (allocation.task_identity, torch.int64),
+        )
+        if any(
+            type(value) is not torch.Tensor
+            or value.dtype != dtype
+            or value.device != torch.device(self.device)
+            or tuple(value.shape) != shape
+            or not value.is_contiguous()
+            for value, dtype in required
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber Physical allocation ABI differs"
+            )
+        record = epoch_owner.current()
+        slot = record.current_task_slot
+        slot_capacity = record.phase.shape[1]
+        slot_valid = slot.ge(0) & slot.lt(slot_capacity)
+        safe_slot = slot.clamp(min=0, max=slot_capacity - 1)
+        index = safe_slot[:, None]
+
+        def selected(value: torch.Tensor) -> torch.Tensor:
+            return torch.gather(value, 1, index).squeeze(1)
+
+        phase = selected(record.phase)
+        epoch_active = phase.eq(epoch.PHASE_REVEAL_COMMITTED) | phase.eq(
+            epoch.PHASE_LAUNCH_SETTLED
+        )
+        expected_action_uid = selected(record.identity.action_uid)[:, None]
+        expected_action_slot = selected(record.identity.action_slot)[:, None]
+        expected_task_identity = selected(record.identity.task_identity)[:, None]
+        expected_reset_generation = record.reset_generation[:, None]
+        epoch_mismatch = active & (
+            ~slot_valid[:, None]
+            | ~epoch_active[:, None]
+            | allocation.action_uid.ne(expected_action_uid)
+            | allocation.action_slot.ne(expected_action_slot)
+            | allocation.task_identity.ne(expected_task_identity)
+            | allocation.reset_generation.ne(expected_reset_generation)
+            | allocation.ball_generation.lt(0)
+        )
+        fixed_slot_grid = torch.arange(
+            physical_owner.flight_capacity,
+            dtype=torch.int64,
+            device=torch.device(self.device),
+        ).unsqueeze(0).expand(shape)
+        allocation_mismatch = active & allocation.flight_slot.ne(fixed_slot_grid)
+
+        sign_table = getattr(
+            self, "_action_ball_full_mdp_racket_mount_sign_table", None
+        )
+        if (
+            type(sign_table) is not torch.Tensor
+            or sign_table.dtype != torch.int8
+            or sign_table.device != torch.device(self.device)
+            or sign_table.ndim != 1
+            or sign_table.shape[0] < 1
+            or not sign_table.is_contiguous()
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "ActionEpoch selected-rubber cold mount-sign table is absent"
+            )
+        rubber, rubber_bad = _action_ball_full_mdp_expected_rubber_from_action_slot(
+            allocation.action_slot, active, sign_table
+        )
+        invalid = epoch_mismatch | allocation_mismatch | rubber_bad
+        torch._assert_async(
+            torch.all(~invalid),
+            "ActionEpoch selected-rubber allocation lost its exact owner identity",
+        )
+        return ActionBallFullMdpActionEpochSelectedRubberView(
+            racket_owner=self,
+            physical_owner=physical_owner,
+            epoch_owner=epoch_owner,
+            active_mask=active.detach().clone(),
+            expected_rubber=rubber.detach().clone(),
+        )
+
+    def publish_action_ball_full_mdp_selected_rubber_authority(
+        self,
+    ) -> ActionBallFullMdpRacketSelectedRubberToken:
+        """Publish exact current selected-rubber truth or HOLD before mutation.
+
+        The only successful publication joins Racket's retained installed
+        action/task/generation image with the directly bound Physical N×K
+        lifecycle/key/generation/slot image.  The fresh hot Racket writer is
+        not reachable yet, so a production call currently stops before token,
+        sequence, or registry mutation instead of manufacturing a success from
+        tombstones or a caller-authored hash.
+        """
+
+        if bool(
+            getattr(self, "_action_ball_continuous_racket_poisoned", False)
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber authority cannot publish from poisoned Racket"
+            )
+        if (
+            getattr(self, "_action_ball_full_mdp_device_r05_owner", None) is None
+            or not bool(
+                getattr(
+                    self,
+                    "_action_ball_continuous_racket_terminal_epoch_committed",
+                    False,
+                )
+            )
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber authority awaits a real Device-R05 ACCEPT "
+                "commit in the fresh Racket hot writer"
+            )
+        physical_owner = getattr(
+            self, "_action_ball_full_mdp_racket_physical_owner", None
+        )
+        if physical_owner is None:
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber authority has no exact bound Physical owner"
+            )
+        if torch.device(self.device).type != "cpu":
+            # CUDA cannot authorize a mutation by launching an async assert and
+            # continuing.  The production path must consume the same packed
+            # D05/global-boundary row that gates the other four writers; until
+            # that causal join exists, stop before snapshot clones or token
+            # publication rather than adding a hidden D2H synchronization.
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber CUDA publication awaits the packed global "
+                "boundary; no async assert may authorize this publication"
+            )
+
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_physical_flight_device as physical,
+        )
+
+        snapshot = physical_owner.scene_snapshot()
+        if (
+            type(snapshot) is not physical.PhysicalFlightSceneSnapshotNK
+            or type(snapshot.owner_mutation_version) is not int
+            or snapshot.owner_mutation_version < 0
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber Physical snapshot is stale or foreign"
+            )
+        shape = tuple(snapshot.published_to_runtime.shape)
+        if (
+            len(shape) != 2
+            or shape[0] != self.num_envs
+            or tuple(snapshot.outcome_key_sha256.shape) != shape + (32,)
+            or tuple(snapshot.ball_generation.shape) != shape
+            or snapshot.published_to_runtime.dtype != torch.bool
+            or snapshot.outcome_key_sha256.dtype != torch.uint8
+            or snapshot.ball_generation.dtype != torch.int64
+            or snapshot.published_to_runtime.device != torch.device(self.device)
+            or snapshot.outcome_key_sha256.device != torch.device(self.device)
+            or snapshot.ball_generation.device != torch.device(self.device)
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber Physical N×K snapshot ABI differs"
+            )
+        active = snapshot.published_to_runtime & ~snapshot.physically_parked
+        if bool(
+            torch.any(
+                active
+                & (
+                    snapshot.owner_fault
+                    | torch.eq(snapshot.outcome_key_sha256, 0).all(dim=-1)
+                    | (snapshot.ball_generation < 0)
+                )
+            )
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber Physical active identity is untrusted"
+            )
+
+        action_slot_env = self._action_ball_action_slot
+        action_uid_env = self._action_ball_action_uid
+        reset_generation_env = self._action_ball_reset_generation
+        swing_generation_env = self._action_ball_swing_generation
+        task_sha_env = self._action_ball_continuous_racket_observation_task_identity
+        task_valid_env = self._action_ball_task_valid
+        if any(
+            not torch.is_tensor(value)
+            for value in (
+                action_slot_env,
+                action_uid_env,
+                reset_generation_env,
+                swing_generation_env,
+                task_sha_env,
+                task_valid_env,
+            )
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber retained Racket identity surface is absent"
+            )
+        k = shape[1]
+        action_slot = action_slot_env.unsqueeze(1).expand(shape)
+        action_uid = action_uid_env.unsqueeze(1).expand(shape)
+        reset_generation = reset_generation_env.unsqueeze(1).expand(shape)
+        swing_generation = swing_generation_env.unsqueeze(1).expand(shape)
+        task_sha = task_sha_env.unsqueeze(1).expand(shape + (32,))
+        retained_bad = active & (
+            ~task_valid_env.unsqueeze(1)
+            | (action_slot < 0)
+            | (action_uid < 0)
+            | (reset_generation < 1)
+            | (swing_generation < 0)
+            | torch.eq(task_sha, 0).all(dim=-1)
+            | (snapshot.ball_generation != swing_generation)
+        )
+        sign_table = torch.tensor(
+            tuple(int(value) for value in self._action_ball_mount_signs),
+            dtype=torch.int8,
+            device=self.device,
+        )
+        rubber, rubber_bad = _action_ball_full_mdp_expected_rubber_from_action_slot(
+            action_slot, active, sign_table
+        )
+        if bool(torch.any(retained_bad | rubber_bad)):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber Racket/Physical installed identity join differs"
+            )
+
+        flight_slot = torch.arange(
+            k, dtype=torch.int64, device=self.device
+        ).unsqueeze(0).expand(shape)
+        sequence = getattr(
+            self, "_action_ball_full_mdp_racket_selected_rubber_sequence", None
+        )
+        if type(sequence) is not int or sequence < 0:
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber publication chronology differs"
+            )
+        token = object.__new__(ActionBallFullMdpRacketSelectedRubberToken)
+        view = ActionBallFullMdpRacketSelectedRubberView(
+            token=token,
+            racket_owner=self,
+            publication_identity=object(),
+            publication_sequence=sequence + 1,
+            physical_owner_mutation_version=snapshot.owner_mutation_version,
+            active_mask=active.detach().clone(),
+            expected_rubber=rubber.detach().clone(),
+            full_key_sha256=snapshot.outcome_key_sha256.detach().clone(),
+            ball_generation=snapshot.ball_generation.detach().clone(),
+            flight_slot=flight_slot.detach().clone(),
+            reset_generation=reset_generation.detach().clone(),
+            swing_generation=swing_generation.detach().clone(),
+            action_uid=action_uid.detach().clone(),
+            action_slot=action_slot.detach().clone(),
+            task_receipt_sha256=task_sha.detach().clone(),
+        )
+        self._action_ball_full_mdp_racket_selected_rubber_sequence = sequence + 1
+        self._action_ball_full_mdp_racket_selected_rubber_token = token
+        self._action_ball_full_mdp_racket_selected_rubber_view = view
+        return token
+
+    def require_owned_action_ball_full_mdp_selected_rubber_authority(
+        self,
+        token: object,
+    ) -> ActionBallFullMdpRacketSelectedRubberView:
+        """Validate the exact current token and return fresh clone-only tensors."""
+
+        current = getattr(
+            self, "_action_ball_full_mdp_racket_selected_rubber_token", None
+        )
+        view = getattr(
+            self, "_action_ball_full_mdp_racket_selected_rubber_view", None
+        )
+        if (
+            type(token) is not ActionBallFullMdpRacketSelectedRubberToken
+            or token is not current
+            or type(view) is not ActionBallFullMdpRacketSelectedRubberView
+            or view.token is not token
+            or view.racket_owner is not self
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber authority is stale, foreign, or replayed"
+            )
+        physical_owner = getattr(
+            self, "_action_ball_full_mdp_racket_physical_owner", None
+        )
+        if physical_owner is None:
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber authority lost its bound Physical owner"
+            )
+        current_physical = physical_owner.scene_snapshot()
+        current_active = (
+            current_physical.published_to_runtime
+            & ~current_physical.physically_parked
+        )
+        if (
+            current_physical.owner_mutation_version
+            != view.physical_owner_mutation_version
+            or not torch.equal(
+                current_active, view.active_mask
+            )
+            or not torch.equal(
+                current_physical.outcome_key_sha256, view.full_key_sha256
+            )
+            or not torch.equal(
+                current_physical.ball_generation, view.ball_generation
+            )
+        ):
+            raise ActionBallContinuousRacketSelectedRubberHold(
+                "selected-rubber Physical lifecycle changed after publication"
+            )
+        return ActionBallFullMdpRacketSelectedRubberView(
+            token=token,
+            racket_owner=self,
+            publication_identity=view.publication_identity,
+            publication_sequence=view.publication_sequence,
+            physical_owner_mutation_version=view.physical_owner_mutation_version,
+            active_mask=view.active_mask.detach().clone(),
+            expected_rubber=view.expected_rubber.detach().clone(),
+            full_key_sha256=view.full_key_sha256.detach().clone(),
+            ball_generation=view.ball_generation.detach().clone(),
+            flight_slot=view.flight_slot.detach().clone(),
+            reset_generation=view.reset_generation.detach().clone(),
+            swing_generation=view.swing_generation.detach().clone(),
+            action_uid=view.action_uid.detach().clone(),
+            action_slot=view.action_slot.detach().clone(),
+            task_receipt_sha256=view.task_receipt_sha256.detach().clone(),
+        )
+
+    def _action_ball_continuous_racket_observation_source(
+        self,
+    ) -> dict[str, torch.Tensor]:
+        """Validate and return the retained installed-task Racket surface.
+
+        The per-environment task digest and scheduled ordinal are deliberately
+        separate owner-private retained fields.  They are not reconstructed
+        from numeric destinations, and this leaf never manufactures Device-
+        R05's independent shot index.  The fresh reveal writer must install
+        these fields before the production observation binder can be opened.
+        """
+
+        device = torch.device(self.device)
+        n = self.num_envs
+        specifications = {
+            "reset_generation": (
+                "_action_ball_reset_generation",
+                (n,),
+                torch.int64,
+            ),
+            "swing_generation": (
+                "_action_ball_swing_generation",
+                (n,),
+                torch.int64,
+            ),
+            "scheduled_ordinal": (
+                "_action_ball_continuous_racket_observation_scheduled_ordinal",
+                (n,),
+                torch.int64,
+            ),
+            "action_uid": ("_action_ball_action_uid", (n,), torch.int64),
+            "action_slot": ("_action_ball_action_slot", (n,), torch.int64),
+            "task_identity": (
+                "_action_ball_continuous_racket_observation_task_identity",
+                (n, 32),
+                torch.uint8,
+            ),
+            "task_valid": ("_action_ball_task_valid", (n,), torch.bool),
+            "landing_target_xy_table": (
+                "_vb_target_xy_per_env", (n, 2), self.racket_target_pos_w.dtype,
+            ),
+            "desired_position_w": (
+                "racket_target_pos_w", (n, 3), self.racket_target_pos_w.dtype,
+            ),
+            "desired_velocity_w": (
+                "racket_target_vel_w", (n, 3), self.racket_target_pos_w.dtype,
+            ),
+            "desired_face_normal_w": (
+                "target_normal_cmd", (n, 3), self.racket_target_pos_w.dtype,
+            ),
+            "desired_base_xy_w": (
+                "base_target_pos_w", (n, 2), self.racket_target_pos_w.dtype,
+            ),
+            "ball_contact_target_w": (
+                "_action_ball_ball_contact_target_w",
+                (n, 3),
+                self.racket_target_pos_w.dtype,
+            ),
+            "face_center_velocity_target_w": (
+                "_action_ball_face_center_velocity_target_w",
+                (n, 3),
+                self.racket_target_pos_w.dtype,
+            ),
+            "command_quaternion_wxyz": (
+                "_action_ball_racket_command_quat_w",
+                (n, 4),
+                self.racket_target_pos_w.dtype,
+            ),
+            "incoming_velocity_w": (
+                "vb_vel_in_w", (n, 3), self.racket_target_pos_w.dtype,
+            ),
+            "incoming_spin_w": (
+                "vb_spin_in_w", (n, 3), self.racket_target_pos_w.dtype,
+            ),
+            "time_to_contact_s": (
+                "time_to_strike", (n,), self.racket_target_pos_w.dtype,
+            ),
+        }
+        values: dict[str, torch.Tensor] = {}
+        for public_name, (private_name, shape, dtype) in specifications.items():
+            value = getattr(self, private_name, None)
+            if (
+                not torch.is_tensor(value)
+                or tuple(value.shape) != shape
+                or value.dtype != dtype
+                or value.device != device
+            ):
+                raise ActionBallContinuousRacketObservationHold(
+                    "continuous Racket retained observation field differs: "
+                    f"{private_name}"
+                )
+            values[public_name] = value
+
+        # An invalid/hidden row may still be at its construction tombstone.
+        # Only rows that this owner calls installed must carry a complete
+        # retained identity.  The future R08 join still has to compare those
+        # rows with Device-R05/Motion; Racket does not self-certify that join.
+        identity_invalid = values["task_valid"] & (
+            (values["reset_generation"] < 1)
+            | (values["swing_generation"] < 0)
+            | (values["scheduled_ordinal"] < 0)
+            | (values["action_uid"] < 0)
+            | (values["action_slot"] < 0)
+            | ~torch.any(values["task_identity"] != 0, dim=1)
+        )
+        if bool(torch.any(identity_invalid)):
+            raise RuntimeError(
+                "continuous Racket retained installed-task identity is incomplete"
+            )
+        numeric_names = (
+            "landing_target_xy_table",
+            "desired_position_w",
+            "desired_velocity_w",
+            "desired_face_normal_w",
+            "desired_base_xy_w",
+            "ball_contact_target_w",
+            "face_center_velocity_target_w",
+            "command_quaternion_wxyz",
+            "incoming_velocity_w",
+            "incoming_spin_w",
+            "time_to_contact_s",
+        )
+        if any(
+            not bool(torch.isfinite(values[name]).all())
+            for name in numeric_names
+        ):
+            raise RuntimeError(
+                "continuous Racket retained observation numerics are nonfinite"
+            )
+        return values
+
+    def _publish_action_ball_continuous_racket_observation_for_test(
+        self,
+    ) -> ActionBallContinuousRacketObservationToken:
+        """Mint a focused-test publication without claiming Device-R05 closure.
+
+        This seam is intentionally private and refuses any owner that completed
+        the production Device-R05 binder.  It proves this leaf's clone/stale/
+        replay behavior only; it is not a production writer callpoint.
+        """
+
+        if (
+            getattr(self, "_action_ball_full_mdp_device_r05_owner", None)
+            is not None
+            or getattr(
+                self,
+                "_action_ball_continuous_racket_observation_d05_validator",
+                None,
+            )
+            is not None
+        ):
+            raise RuntimeError(
+                "continuous Racket test observation seam cannot replace the "
+                "production Device-R05 join"
+            )
+        common_step = getattr(self._env, "common_step_counter", None)
+        mutation_version = getattr(
+            self, "_action_ball_continuous_racket_mutation_version", None
+        )
+        sequence = getattr(
+            self,
+            "_action_ball_continuous_racket_observation_publication_sequence",
+            None,
+        )
+        records = getattr(
+            self, "_action_ball_continuous_racket_observation_records", None
+        )
+        if (
+            type(common_step) is not int
+            or common_step < 0
+            or type(mutation_version) is not int
+            or mutation_version < 0
+            or type(sequence) is not int
+            or sequence < 0
+            or type(records) is not dict
+        ):
+            raise RuntimeError(
+                "continuous Racket observation publication chronology differs"
+            )
+        values = self._action_ball_continuous_racket_observation_source()
+        next_sequence = sequence + 1
+        publication_identity = object()
+        token = object.__new__(ActionBallContinuousRacketObservationToken)
+        record = _ActionBallContinuousRacketObservationRecord(
+            token=token,
+            publication_identity=publication_identity,
+            publication_sequence=next_sequence,
+            common_step=common_step,
+            mutation_version=mutation_version,
+            values={
+                name: value.detach().clone() for name, value in values.items()
+            },
+        )
+        old = getattr(
+            self, "_action_ball_continuous_racket_observation_current_token", None
+        )
+        if old is not None:
+            old_record = records.get(old)
+            if type(old_record) is _ActionBallContinuousRacketObservationRecord:
+                old_record.stage = "stale"
+        records.clear()
+        records[token] = record
+        self._action_ball_continuous_racket_observation_publication_sequence = (
+            next_sequence
+        )
+        self._action_ball_continuous_racket_observation_current_token = token
+        return token
+
+    def action_ball_continuous_racket_observation_projection(
+        self,
+    ) -> ActionBallContinuousRacketObservationToken:
+        """Return the retained empty R08 token or fail on the unfrozen D05 ABI."""
+
+        d05_owner = getattr(
+            self, "_action_ball_full_mdp_device_r05_owner", None
+        )
+        d05_validator = getattr(
+            self,
+            "_action_ball_continuous_racket_observation_d05_validator",
+            None,
+        )
+        if d05_owner is None or not callable(d05_validator):
+            raise ActionBallContinuousRacketObservationHold(
+                "continuous Racket production observation awaits the exact "
+                "Device-R05 current identity ABI"
+            )
+        # The callback signature and exact current view are intentionally not
+        # guessed here.  Once Device-R05 freezes them, this method must invoke
+        # that exact owner-issued projection before returning the Racket token.
+        raise ActionBallContinuousRacketObservationHold(
+            "continuous Racket production Device-R05 current identity callback "
+            "is not frozen"
+        )
+
+    def require_owned_action_ball_continuous_racket_observation_projection(
+        self,
+        token: ActionBallContinuousRacketObservationToken,
+    ) -> ActionBallContinuousRacketObservationView:
+        """Authenticate the current token and return fresh clone-only tensors."""
+
+        records = getattr(
+            self, "_action_ball_continuous_racket_observation_records", None
+        )
+        record = (
+            records.get(token)
+            if type(records) is dict
+            and type(token) is ActionBallContinuousRacketObservationToken
+            else None
+        )
+        current = getattr(
+            self, "_action_ball_continuous_racket_observation_current_token", None
+        )
+        if (
+            type(token) is not ActionBallContinuousRacketObservationToken
+            or type(record) is not _ActionBallContinuousRacketObservationRecord
+            or record.token is not token
+            or token is not current
+            or record.stage != "issued"
+            or record.publication_sequence
+            != getattr(
+                self,
+                "_action_ball_continuous_racket_observation_publication_sequence",
+                None,
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket observation token is forged, replayed, or stale"
+            )
+        if (
+            getattr(self, "_action_ball_full_mdp_device_r05_owner", None)
+            is not None
+            or getattr(
+                self,
+                "_action_ball_continuous_racket_observation_d05_validator",
+                None,
+            )
+            is not None
+        ):
+            raise ActionBallContinuousRacketObservationHold(
+                "continuous Racket production observation cannot validate "
+                "current identity before the exact Device-R05 ABI is frozen"
+            )
+        common_step = getattr(self._env, "common_step_counter", None)
+        mutation_version = getattr(
+            self, "_action_ball_continuous_racket_mutation_version", None
+        )
+        current_values = self._action_ball_continuous_racket_observation_source()
+        if (
+            common_step != record.common_step
+            or mutation_version != record.mutation_version
+            or any(
+                not torch.equal(current_values[name], retained)
+                for name, retained in record.values.items()
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket observation token has stale current task or numerics"
+            )
+        view = ActionBallContinuousRacketObservationView(
+            racket_owner=self,
+            publication_identity=record.publication_identity,
+            publication_sequence=record.publication_sequence,
+            common_step=record.common_step,
+            **{
+                name: value.detach().clone()
+                for name, value in record.values.items()
+            },
+        )
+        record.stage = "consumed"
+        self._action_ball_continuous_racket_observation_current_token = None
+        return view
+
+    def require_owned_action_ball_continuous_racket_observation(
+        self,
+        token: ActionBallContinuousRacketObservationToken,
+    ) -> ActionBallContinuousRacketObservationView:
+        """R08 exact-provider-table spelling for the projection validator."""
+
+        return self.require_owned_action_ball_continuous_racket_observation_projection(
+            token
+        )
+
+    def bind_action_ball_continuous_racket_selected_reset(
+        self,
+        r05_owner: object,
+        *,
+        prepared_reset_validator,
+        r05_receipt_validator,
+        authority_source_sha256: str | None = None,
+        diagnostic: bool = False,
+    ) -> None:
+        """Construction-bind the exact Device-R05 selected-reset authority.
+
+        The only admitted validators are Device-R05's frozen
+        ``require_owned_prepared_true_reset`` and
+        ``require_owned_true_reset_receipt`` capabilities.  The deprecated
+        source-hash argument grants no authority.  Production uses exact owner
+        and bound-method identity; explicit diagnostic fixtures remain
+        non-authoritative test doubles.
+        """
+
+        if not bool(
+            getattr(
+                self,
+                "_action_ball_continuous_fresh_racket_lane_bound",
+                False,
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket selected reset requires the fresh lane"
+            )
+        import action_ball_continuous_runtime_transaction_device as device_r05
+
+        if r05_owner is None:
+            raise TypeError(
+                "continuous Racket selected reset authority is required"
+            )
+        if (
+            not callable(prepared_reset_validator)
+            or not callable(r05_receipt_validator)
+            or getattr(prepared_reset_validator, "__self__", None)
+            is not r05_owner
+            or getattr(r05_receipt_validator, "__self__", None)
+            is not r05_owner
+        ):
+            raise TypeError(
+                "continuous Racket selected reset requires exact Device-R05 validators"
+            )
+        if type(diagnostic) is not bool:
+            raise TypeError(
+                "continuous Racket selected reset diagnostic flag must be exact"
+            )
+        if diagnostic is False and (
+            type(r05_owner) is not device_r05.DeviceR05Owner
+            or getattr(prepared_reset_validator, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_prepared_true_reset
+            or getattr(r05_receipt_validator, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_true_reset_receipt
+            or not bool(getattr(self, "_action_ball_full_mdp_enabled", False))
+            or getattr(self, "_action_ball_full_mdp_device_r05_owner", None)
+            is not r05_owner
+        ):
+            raise RuntimeError(
+                "Racket selected reset lacks exact Device-R05 methods and binder"
+            )
+        del authority_source_sha256
+        current = self._action_ball_continuous_racket_selected_reset_authority
+        if current is not None:
+            if (
+                current is r05_owner
+                and getattr(
+                    self._action_ball_continuous_racket_selected_reset_prepared_validator,
+                    "__self__",
+                    None,
+                )
+                is r05_owner
+                and getattr(
+                    self._action_ball_continuous_racket_selected_reset_prepared_validator,
+                    "__func__",
+                    None,
+                )
+                is getattr(prepared_reset_validator, "__func__", None)
+                and getattr(
+                    self._action_ball_continuous_racket_selected_reset_r05_validator,
+                    "__self__",
+                    None,
+                )
+                is r05_owner
+                and getattr(
+                    self._action_ball_continuous_racket_selected_reset_r05_validator,
+                    "__func__",
+                    None,
+                )
+                is getattr(r05_receipt_validator, "__func__", None)
+                and self._action_ball_continuous_racket_selected_reset_diagnostic
+                is diagnostic
+            ):
+                return
+            raise RuntimeError(
+                "continuous Racket selected reset authority may not be rebound"
+            )
+        self._action_ball_continuous_racket_selected_reset_authority = r05_owner
+        self._action_ball_continuous_racket_selected_reset_prepared_validator = (
+            prepared_reset_validator
+        )
+        self._action_ball_continuous_racket_selected_reset_r05_validator = (
+            r05_receipt_validator
+        )
+        self._action_ball_continuous_racket_selected_reset_source_sha256 = (
+            None
+        )
+        self._action_ball_continuous_racket_selected_reset_diagnostic = (
+            diagnostic
+        )
+
+    def _action_ball_continuous_racket_selected_reset_destinations(
+        self,
+    ) -> tuple[tuple[str, str, torch.Tensor], ...]:
+        """Return the complete fixed-shape device tombstone surface."""
+
+        rows = []
+        for name, disposition in (
+            _ACTION_BALL_CONTINUOUS_RACKET_SELECTED_RESET_TOMBSTONES
+        ):
+            value = getattr(self, name, None)
+            if (
+                not torch.is_tensor(value)
+                or value.ndim < 1
+                or value.shape[0] != self.num_envs
+                or value.device != torch.device(self.device)
+            ):
+                raise RuntimeError(
+                    "continuous Racket selected-reset destination differs: "
+                    f"{name}"
+                )
+            if disposition == "identity_quaternion" and (
+                value.ndim != 2 or value.shape[1] != 4
+            ):
+                raise RuntimeError(
+                    "continuous Racket selected-reset quaternion destination differs"
+                )
+            rows.append((name, disposition, value))
+        return tuple(rows)
+
+    def _action_ball_continuous_racket_require_strike_fact_reset_idle(
+        self,
+    ) -> object | None:
+        """Return the exact construction-bound fresh R03 reset child.
+
+        Fresh full-MDP always constructs R03 under this Racket writer and the
+        factory cold-binds both owners to one ActionEpoch.  Selected reset must
+        therefore join that independent writer, not reject merely because the
+        feature is enabled and not silently clear only Racket-local mirrors.
+        Legacy/diagnostic R03 has no such transaction and remains outside this
+        production reset path.
+        """
+
+        if not bool(
+            getattr(
+                self,
+                "_action_ball_strike_fact_device_enabled",
+                False,
+            )
+        ):
+            return None
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
+            raise RuntimeError(
+                "continuous Racket selected reset requires the fresh R03 owner"
+            )
+        from .action_ball_strike_fact_device import (
+            ActionBallStrikeFactDeviceCoordinator,
+            OBSERVATION_PROJECTION_MODE_FRESH_FULL_MDP,
+        )
+
+        owner = getattr(
+            self, "_action_ball_strike_fact_device_coordinator", None
+        )
+        epoch_owner = getattr(
+            self, "_action_ball_full_mdp_racket_epoch_owner", None
+        )
+        if (
+            type(owner) is not ActionBallStrikeFactDeviceCoordinator
+            or getattr(owner, "_observation_projection_mode", None)
+            != OBSERVATION_PROJECTION_MODE_FRESH_FULL_MDP
+            or owner.action_epoch_owner is not epoch_owner
+            or getattr(owner, "_epoch_racket_owner", None) is not self
+            or any(
+                getattr(owner, name, None) is not None
+                for name in (
+                    "_epoch_arm_identity",
+                    "_epoch_arm_source_step",
+                    "_epoch_arm_mask",
+                    "_epoch_arm_vectors",
+                    "_epoch_arm_validity",
+                    "_epoch_arm_shot_key",
+                    "_epoch_arm_slot",
+                    "_epoch_arm_d05_identity",
+                    "_active_full_mdp_reward_publication",
+                    "_active_pre_optimizer_pack",
+                )
+            )
+            or owner.pre_optimizer_poisoned
+            or getattr(
+                self,
+                "_action_ball_strike_fact_expected_publish_step",
+                None,
+            )
+            is not None
+        ):
+            raise RuntimeError(
+                "continuous Racket selected reset requires one settled exact fresh R03 owner"
+            )
+        return owner
+
+    @staticmethod
+    def _action_ball_continuous_racket_reset_fill(
+        destination: torch.Tensor,
+        disposition: str,
+    ) -> torch.Tensor:
+        """Create one full-shape tombstone without inspecting device values."""
+
+        if disposition == "zero":
+            return torch.zeros_like(destination)
+        if disposition == "one":
+            return torch.ones_like(destination)
+        if disposition == "negative_one":
+            return torch.full_like(destination, -1)
+        if disposition == "increment_one":
+            if destination.dtype == torch.bool or destination.is_floating_point():
+                raise RuntimeError(
+                    "continuous Racket selected-reset generation destination differs"
+                )
+            return torch.clamp(
+                destination,
+                max=torch.iinfo(destination.dtype).max - 1,
+            ) + torch.ones_like(destination)
+        if disposition == "identity_quaternion":
+            result = torch.zeros_like(destination)
+            result[:, 0] = 1
+            return result
+        raise RuntimeError(
+            "continuous Racket selected-reset disposition is unknown"
+        )
+
+    def stage_action_ball_continuous_racket_selected_reset(
+        self,
+        prepared_true_reset: object,
+    ) -> ActionBallContinuousRacketSelectedResetStage:
+        """Validate one Device-R05 prepare and retain device-only reset facts."""
+
+        if self._action_ball_continuous_racket_poisoned:
+            raise RuntimeError("continuous Racket child owner is poisoned")
+        if (
+            self._action_ball_continuous_racket_selected_reset_authority
+            is None
+            or not callable(
+                self._action_ball_continuous_racket_selected_reset_prepared_validator
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket selected reset has no bound authority"
+            )
+        retained_completion = (
+            self._action_ball_continuous_racket_selected_reset_completion
+        )
+        retained_completion_prepared = (
+            self._action_ball_continuous_racket_selected_reset_completion_prepared
+        )
+        if (
+            retained_completion is not None
+            or retained_completion_prepared is not None
+        ):
+            # The top owner alone consumes this ACK after joining all four
+            # leaves.  A new reset may never erase it as a side effect of
+            # staging; retain both identities verbatim for that consumer.
+            raise RuntimeError(
+                "continuous Racket selected reset has an unconsumed completion"
+            )
+        if (
+            self._action_ball_continuous_racket_selected_reset_stage
+            is not None
+            or self._action_ball_continuous_racket_selected_reset_prevalidated
+            is not None
+            or self._action_ball_continuous_racket_selected_reset_commit_token
+            is not None
+            or self._action_ball_continuous_racket_active_ppo_drain_pack
+            is not None
+        ):
+            raise RuntimeError(
+                "continuous Racket has an open reveal or selected-reset epoch"
+            )
+        strike_fact_owner = (
+            self._action_ball_continuous_racket_require_strike_fact_reset_idle()
+        )
+        try:
+            projection = (
+                self._action_ball_continuous_racket_selected_reset_prepared_validator(
+                    prepared_true_reset,
+                    owner_kind="racket",
+                )
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "continuous Racket selected-reset Device-R05 prepare is not owner-issued"
+            ) from exc
+        if not self._action_ball_continuous_racket_selected_reset_diagnostic:
+            import action_ball_continuous_runtime_transaction_device as device_r05
+
+            if type(projection) is not (
+                device_r05.DeviceR05PreparedTrueResetProjection
+            ):
+                raise RuntimeError(
+                    "continuous Racket selected-reset projection type differs"
+                )
+        selected_mask = getattr(projection, "selected_mask", None)
+        generation_before = getattr(projection, "generation_before", None)
+        generation_after = getattr(projection, "generation_after", None)
+        if (
+            getattr(projection, "prepared_true_reset", None)
+            is not prepared_true_reset
+            or getattr(projection, "owner_kind", None) != "racket"
+            or getattr(projection, "prepared_identity", None) is None
+            or getattr(projection, "reset_event_identity", None) is None
+            or not torch.is_tensor(generation_before)
+            or not torch.is_tensor(generation_after)
+            or generation_before.dtype != torch.int64
+            or generation_after.dtype != torch.int64
+            or generation_before.device != torch.device(self.device)
+            or generation_after.device != torch.device(self.device)
+            or tuple(generation_before.shape) != (self.num_envs,)
+            or tuple(generation_after.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset projection differs"
+            )
+        if (
+            not torch.is_tensor(selected_mask)
+            or selected_mask.shape != (self.num_envs,)
+            or selected_mask.dtype != torch.bool
+            or selected_mask.device != torch.device(self.device)
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset device selection differs"
+            )
+        destinations = (
+            self._action_ball_continuous_racket_selected_reset_destinations()
+        )
+        logical_root = _action_ball_continuous_sha256_hex(
+            self._action_ball_continuous_racket_logical_target_root_sha256,
+            label="Racket logical committed-target root",
+        )
+        serial = (
+            self._action_ball_continuous_racket_selected_reset_next_serial
+        )
+        mutation_version = self._action_ball_continuous_racket_mutation_version
+        if (
+            type(serial) is not int
+            or serial < 0
+            or type(mutation_version) is not int
+            or not 0 <= mutation_version < (1 << 63) - 1
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset chronology differs"
+            )
+        stage_sha256 = _action_ball_canonical_sha256(
+            {
+                "schema_version": 1,
+                "kind": "action_ball_continuous_racket_selected_reset_stage_v1",
+                "serial": serial,
+                "owner_mutation_version": mutation_version,
+                "logical_committed_target_root_sha256_before": logical_root,
+                "ordered_tombstones": [
+                    {"name": name, "disposition": disposition}
+                    for name, disposition, _value in destinations
+                ],
+            }
+        )
+        # Clone every Device-R05 tensor immediately.  The projection is
+        # caller-visible, but the retained reset facts and their storage are
+        # owner-private; the opaque stage returned below contains no Tensor.
+        # Do not mint Tensor-version receipts for the clones or Racket-owned
+        # destinations: that same-writer seal rejects inference tensors and
+        # proves no independent reset fact.
+        selected_mask = selected_mask.detach().clone()
+        generation_before = generation_before.detach().clone()
+        generation_after = generation_after.detach().clone()
+        stage = ActionBallContinuousRacketSelectedResetStage(
+            _owner_nonce=self._action_ball_continuous_racket_owner_nonce,
+            serial=serial,
+            owner_mutation_version=mutation_version,
+            logical_committed_target_root_sha256_before=logical_root,
+            stage_sha256=stage_sha256,
+        )
+        record = _ActionBallContinuousRacketSelectedResetRecord(
+            stage=stage,
+            prepared_true_reset=prepared_true_reset,
+            prepared_identity=projection.prepared_identity,
+            selected_mask=selected_mask,
+            reset_generation_before=generation_before,
+            reset_generation_after=generation_after,
+            strike_fact_owner=strike_fact_owner,
+        )
+        self._action_ball_continuous_racket_selected_reset_next_serial = (
+            serial + 1
+        )
+        self._action_ball_continuous_racket_selected_reset_stage = stage
+        self._action_ball_continuous_racket_selected_reset_record = record
+        return stage
+
+    prepare_action_ball_continuous_racket_selected_reset = (
+        stage_action_ball_continuous_racket_selected_reset
+    )
+
+    # The constructed top owner uses the same short verb as the physical/R06
+    # leaves.  Keep the long class-qualified verb for diagnostics and focused
+    # ownership tests while exposing one symmetric integration seam.
+    prepare_selected_reset = (
+        stage_action_ball_continuous_racket_selected_reset
+    )
+
+    def _validate_action_ball_continuous_racket_selected_reset_stage(
+        self,
+        stage: ActionBallContinuousRacketSelectedResetStage,
+    ) -> None:
+        """Authenticate one current reset stage without a host synchronization."""
+
+        record = self._action_ball_continuous_racket_selected_reset_record
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or type(stage)
+            is not ActionBallContinuousRacketSelectedResetStage
+            or self._action_ball_continuous_racket_selected_reset_stage
+            is not stage
+            or type(record)
+            is not _ActionBallContinuousRacketSelectedResetRecord
+            or record.stage is not stage
+            or stage._owner_nonce
+            is not self._action_ball_continuous_racket_owner_nonce
+            or self._action_ball_continuous_racket_mutation_version
+            != stage.owner_mutation_version
+            or self._action_ball_continuous_racket_logical_target_root_sha256
+            != stage.logical_committed_target_root_sha256_before
+            or not torch.is_tensor(record.selected_mask)
+            or record.selected_mask.dtype != torch.bool
+            or record.selected_mask.device != torch.device(self.device)
+            or tuple(record.selected_mask.shape) != (self.num_envs,)
+            or not torch.is_tensor(record.reset_generation_before)
+            or not torch.is_tensor(record.reset_generation_after)
+            or record.reset_generation_before.dtype != torch.int64
+            or record.reset_generation_after.dtype != torch.int64
+            or record.reset_generation_before.device != torch.device(self.device)
+            or record.reset_generation_after.device != torch.device(self.device)
+            or tuple(record.reset_generation_before.shape) != (self.num_envs,)
+            or tuple(record.reset_generation_after.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset stage is forged or stale"
+            )
+        if (
+            self._action_ball_continuous_racket_require_strike_fact_reset_idle()
+            is not record.strike_fact_owner
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset R03 owner drifted"
+            )
+        destinations = (
+            self._action_ball_continuous_racket_selected_reset_destinations()
+        )
+        expected_stage_sha256 = _action_ball_canonical_sha256(
+            {
+                "schema_version": 1,
+                "kind": "action_ball_continuous_racket_selected_reset_stage_v1",
+                "serial": stage.serial,
+                "owner_mutation_version": stage.owner_mutation_version,
+                "logical_committed_target_root_sha256_before": (
+                    stage.logical_committed_target_root_sha256_before
+                ),
+                "ordered_tombstones": [
+                    {"name": name, "disposition": disposition}
+                    for name, disposition, _value in destinations
+                ],
+            }
+        )
+        if expected_stage_sha256 != stage.stage_sha256:
+            raise RuntimeError(
+                "continuous Racket selected-reset stage root mutated"
+            )
+
+    def finalize_action_ball_continuous_racket_selected_reset(
+        self,
+        stage: ActionBallContinuousRacketSelectedResetStage,
+    ) -> ActionBallContinuousRacketPrevalidatedSelectedReset:
+        """Prebuild every masked after-image before the pure commit."""
+
+        record = self._action_ball_continuous_racket_selected_reset_record
+        if (
+            type(stage)
+            is not ActionBallContinuousRacketSelectedResetStage
+            or self._action_ball_continuous_racket_selected_reset_stage
+            is not stage
+            or type(record)
+            is not _ActionBallContinuousRacketSelectedResetRecord
+            or record.stage is not stage
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset stage is forged or stale"
+            )
+        try:
+            self._validate_action_ball_continuous_racket_selected_reset_stage(
+                stage
+            )
+        except BaseException:
+            # An exact current handle plus failed validation is owner-state
+            # drift, not a caller typo.  Retain the first durable fault and do
+            # not permit this reset epoch to retry.
+            self._poison_action_ball_continuous_racket_child()
+            raise
+        if (
+            self._action_ball_continuous_racket_selected_reset_prevalidated
+            is not None
+            or self._action_ball_continuous_racket_selected_reset_sealed_afterimage
+            is not None
+        ):
+            raise RuntimeError(
+                "continuous Racket selected reset is already prevalidated"
+            )
+        mask = record.selected_mask
+        reset_generation = self._action_ball_reset_generation
+        if reset_generation.dtype != torch.int64:
+            raise RuntimeError(
+                "continuous Racket selected-reset generation destination differs"
+            )
+        # Device-resident validation is a settlement fault, not a rollback
+        # gate.  Once Device-R05 has issued the selected mask, leaving an old
+        # task/target reachable is less safe than completing the tombstone
+        # cleanup.  Record the durable fault in the same stream, then prebuild
+        # the owner-issued selected reset regardless.  The opaque child/global
+        # reset capabilities deliberately make no health claim; the sole
+        # global drain rejects this bit before the next optimizer boundary.
+        # The device result cannot be observed here without an extra D2H.  Mark
+        # the checkpoint frontier conservatively before evaluating it.  Even a
+        # later precommit abort must cross the sole global drain once: only its
+        # exact ACK proves that this device validation produced no fault row.
+        self._action_ball_continuous_racket_checkpoint_requires_drain_ack = True
+        int64_max = torch.iinfo(torch.int64).max
+        generation_increment_allowed = (
+            (~mask) | (record.reset_generation_before < int64_max)
+        )
+        incremented_generation = torch.clamp(
+            record.reset_generation_before,
+            max=int64_max - 1,
+        ) + torch.ones_like(record.reset_generation_before)
+        safe_generation_after = torch.where(
+            mask & (record.reset_generation_before < int64_max),
+            incremented_generation,
+            record.reset_generation_before,
+        )
+        validation_ok = (
+            torch.any(mask)
+            & torch.all(
+                reset_generation == record.reset_generation_before
+            )
+            & torch.all(generation_increment_allowed)
+            & torch.all(
+                record.reset_generation_after
+                == safe_generation_after
+            )
+        )
+        validation_fault = (~validation_ok).to(dtype=torch.int64).reshape(1)
+        self._action_ball_continuous_racket_drain_fault_count_device.bitwise_or_(
+            validation_fault
+        )
+        swaps = []
+        for name, disposition, destination in (
+            self._action_ball_continuous_racket_selected_reset_destinations()
+        ):
+            if name == "_action_ball_reset_generation":
+                # Never publish an authority-provided wrapped generation on
+                # the settlement path.  A mismatch is already in the same
+                # device fault row above; the safe after-image saturates at
+                # MAX so a selected task cannot alias an old generation.
+                fill = safe_generation_after
+            else:
+                fill = self._action_ball_continuous_racket_reset_fill(
+                    destination, disposition
+                )
+            expanded_mask = mask.reshape(
+                (self.num_envs,) + (1,) * (destination.ndim - 1)
+            )
+            after = torch.where(expanded_mask, fill, destination)
+            swaps.append((name, destination, after))
+        mutation_version_after = stage.owner_mutation_version + 1
+        prevalidated = ActionBallContinuousRacketPrevalidatedSelectedReset(
+            _owner_nonce=self._action_ball_continuous_racket_owner_nonce,
+            serial=stage.serial,
+            stage_sha256=stage.stage_sha256,
+        )
+        logical_root_after = _action_ball_canonical_sha256(
+            {
+                "schema_version": 1,
+                "kind": (
+                    "action_ball_continuous_racket_"
+                    "selected_reset_tombstone_v1"
+                ),
+                "parent_root_sha256": (
+                    stage.logical_committed_target_root_sha256_before
+                ),
+                "selected_reset_stage_sha256": stage.stage_sha256,
+                "owner_mutation_version": stage.owner_mutation_version + 1,
+            }
+        )
+        self._action_ball_continuous_racket_selected_reset_sealed_afterimage = (
+            _ActionBallContinuousRacketSealedSelectedResetAfterImage(
+                prevalidated=prevalidated,
+                stage=stage,
+                swaps=tuple(swaps),
+                mutation_version_after=mutation_version_after,
+                logical_root_after=logical_root_after,
+            )
+        )
+        self._action_ball_continuous_racket_selected_reset_prevalidated = (
+            prevalidated
+        )
+        return prevalidated
+
+    arm_prevalidated_action_ball_continuous_racket_selected_reset = (
+        finalize_action_ball_continuous_racket_selected_reset
+    )
+
+    arm_prevalidated_selected_reset = (
+        finalize_action_ball_continuous_racket_selected_reset
+    )
+
+    def abort_prevalidated_action_ball_continuous_racket_selected_reset(
+        self,
+        value: (
+            ActionBallContinuousRacketSelectedResetStage
+            | ActionBallContinuousRacketPrevalidatedSelectedReset
+        ),
+    ) -> None:
+        """Release an exact precommit lease without changing live tensors."""
+
+        stage = self._action_ball_continuous_racket_selected_reset_stage
+        prevalidated = (
+            self._action_ball_continuous_racket_selected_reset_prevalidated
+        )
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or stage is None
+            or not (value is stage or value is prevalidated)
+            or self._action_ball_continuous_racket_selected_reset_commit_token
+            is not None
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset abort requires its exact precommit handle"
+            )
+        self._action_ball_continuous_racket_selected_reset_stage = None
+        self._action_ball_continuous_racket_selected_reset_record = None
+        self._action_ball_continuous_racket_selected_reset_prevalidated = None
+        self._action_ball_continuous_racket_selected_reset_sealed_afterimage = (
+            None
+        )
+
+    abort_prevalidated_selected_reset = (
+        abort_prevalidated_action_ball_continuous_racket_selected_reset
+    )
+
+    def commit_prevalidated_action_ball_continuous_racket_selected_reset(
+        self,
+        prevalidated: ActionBallContinuousRacketPrevalidatedSelectedReset,
+    ) -> ActionBallContinuousRacketSelectedResetCommitToken:
+        """Publish only prebuilt device after-images; failure is poison-only."""
+
+        stage = self._action_ball_continuous_racket_selected_reset_stage
+        active = (
+            self._action_ball_continuous_racket_selected_reset_prevalidated
+        )
+        sealed = (
+            self._action_ball_continuous_racket_selected_reset_sealed_afterimage
+        )
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or type(prevalidated)
+            is not ActionBallContinuousRacketPrevalidatedSelectedReset
+            or prevalidated is not active
+            or prevalidated._owner_nonce
+            is not self._action_ball_continuous_racket_owner_nonce
+            or stage is None
+            or prevalidated.serial != stage.serial
+            or prevalidated.stage_sha256 != stage.stage_sha256
+            or type(sealed)
+            is not _ActionBallContinuousRacketSealedSelectedResetAfterImage
+            or sealed.prevalidated is not prevalidated
+            or sealed.stage is not stage
+            or self._action_ball_continuous_racket_selected_reset_commit_token
+            is not None
+        ):
+            self._poison_action_ball_continuous_racket_child()
+            raise RuntimeError(
+                "continuous Racket selected-reset prevalidated token differs"
+            )
+        try:
+            # No tensor/receipt validator belongs below the top-level
+            # irreversible arm.  All such work happened before ``sealed`` was
+            # published; this loop merely consumes the owner-private copies.
+            for _name, destination, after in sealed.swaps:
+                destination.copy_(after)
+            self._action_ball_continuous_racket_mutation_version_device.add_(1)
+            self._action_ball_continuous_racket_mutation_version = (
+                sealed.mutation_version_after
+            )
+            self._action_ball_continuous_racket_logical_target_root_sha256 = (
+                sealed.logical_root_after
+            )
+            token = ActionBallContinuousRacketSelectedResetCommitToken(
+                _owner_nonce=self._action_ball_continuous_racket_owner_nonce,
+                serial=stage.serial,
+                stage_sha256=stage.stage_sha256,
+            )
+            self._action_ball_continuous_racket_selected_reset_commit_token = (
+                token
+            )
+            return token
+        except BaseException:
+            self._poison_action_ball_continuous_racket_child()
+            raise
+
+    commit_prevalidated_selected_reset = (
+        commit_prevalidated_action_ball_continuous_racket_selected_reset
+    )
+
+    def require_owned_selected_reset_commit(
+        self,
+        commit_token: object,
+        *,
+        expected_prepared_true_reset: object,
+    ) -> ActionBallContinuousRacketSelectedResetCommitToken:
+        """Repeatably validate Racket's exact pre-R05 child commit identity."""
+
+        stage = self._action_ball_continuous_racket_selected_reset_stage
+        record = self._action_ball_continuous_racket_selected_reset_record
+        retained = (
+            self._action_ball_continuous_racket_selected_reset_commit_token
+        )
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or type(commit_token)
+            is not ActionBallContinuousRacketSelectedResetCommitToken
+            or commit_token is not retained
+            or commit_token._owner_nonce
+            is not self._action_ball_continuous_racket_owner_nonce
+            or stage is None
+            or type(record)
+            is not _ActionBallContinuousRacketSelectedResetRecord
+            or record.stage is not stage
+            or record.prepared_true_reset is not expected_prepared_true_reset
+            or commit_token.serial != stage.serial
+            or commit_token.stage_sha256 != stage.stage_sha256
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset commit token is stale or foreign"
+            )
+        return commit_token
+
+    def complete_action_ball_continuous_racket_selected_reset_after_r05(
+        self,
+        commit_token: ActionBallContinuousRacketSelectedResetCommitToken,
+        r05_receipt: object,
+    ) -> ActionBallContinuousRacketSelectedResetCompletionToken:
+        """Validate exact Device-R05-last and mint one opaque local ACK."""
+
+        stage = self._action_ball_continuous_racket_selected_reset_stage
+        record = self._action_ball_continuous_racket_selected_reset_record
+        active = (
+            self._action_ball_continuous_racket_selected_reset_commit_token
+        )
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or type(commit_token)
+            is not ActionBallContinuousRacketSelectedResetCommitToken
+            or commit_token is not active
+            or commit_token._owner_nonce
+            is not self._action_ball_continuous_racket_owner_nonce
+            or stage is None
+            or type(record)
+            is not _ActionBallContinuousRacketSelectedResetRecord
+            or record.stage is not stage
+            or commit_token.serial != stage.serial
+            or commit_token.stage_sha256 != stage.stage_sha256
+            or not callable(
+                self._action_ball_continuous_racket_selected_reset_r05_validator
+            )
+            or self._action_ball_continuous_racket_selected_reset_completion
+            is not None
+        ):
+            self._poison_action_ball_continuous_racket_child()
+            raise RuntimeError(
+                "continuous Racket selected-reset completion token is stale or foreign"
+            )
+        try:
+            owned = (
+                self._action_ball_continuous_racket_selected_reset_r05_validator(
+                    r05_receipt,
+                    expected_prepared_true_reset=(
+                        record.prepared_true_reset
+                    ),
+                )
+            )
+        except Exception as exc:
+            self._poison_action_ball_continuous_racket_child()
+            raise RuntimeError(
+                "continuous Racket R05 selected-reset receipt is stale or foreign"
+            ) from exc
+        if owned is not r05_receipt:
+            self._poison_action_ball_continuous_racket_child()
+            raise RuntimeError(
+                "continuous Racket R05 selected-reset acknowledgement differs"
+            )
+        completion = ActionBallContinuousRacketSelectedResetCompletionToken(
+            _owner_nonce=self._action_ball_continuous_racket_owner_nonce,
+            _completion_identity=object(),
+        )
+        self._action_ball_continuous_racket_selected_reset_stage = None
+        self._action_ball_continuous_racket_selected_reset_record = None
+        self._action_ball_continuous_racket_selected_reset_prevalidated = None
+        self._action_ball_continuous_racket_selected_reset_sealed_afterimage = (
+            None
+        )
+        self._action_ball_continuous_racket_selected_reset_commit_token = None
+        self._action_ball_continuous_racket_selected_reset_completion = completion
+        self._action_ball_continuous_racket_selected_reset_completion_prepared = (
+            record.prepared_true_reset
+        )
+        return completion
+
+    def require_owned_selected_reset_completion(
+        self,
+        completion: object,
+        *,
+        expected_prepared_true_reset: object,
+    ) -> ActionBallContinuousRacketSelectedResetCompletionToken:
+        """Repeatably validate the latest exact opaque Racket reset ACK."""
+
+        retained = self._action_ball_continuous_racket_selected_reset_completion
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or type(completion)
+            is not ActionBallContinuousRacketSelectedResetCompletionToken
+            or completion is not retained
+            or completion._owner_nonce
+            is not self._action_ball_continuous_racket_owner_nonce
+            or expected_prepared_true_reset
+            is not self._action_ball_continuous_racket_selected_reset_completion_prepared
+        ):
+            raise RuntimeError(
+                "continuous Racket selected-reset completion token is stale or foreign"
+            )
+        return completion
+
+    def consume_owned_selected_reset_completion(
+        self,
+        completion: object,
+        *,
+        expected_prepared_true_reset: object,
+    ) -> ActionBallContinuousRacketSelectedResetCompletionToken:
+        """Let the top owner consume the exact validated Racket ACK once."""
+
+        owned = self.require_owned_selected_reset_completion(
+            completion,
+            expected_prepared_true_reset=expected_prepared_true_reset,
+        )
+        self._action_ball_continuous_racket_selected_reset_completion = None
+        self._action_ball_continuous_racket_selected_reset_completion_prepared = (
+            None
+        )
+        return owned
+
+    complete_selected_reset_after_r05 = (
+        complete_action_ball_continuous_racket_selected_reset_after_r05
+    )
+
+
+    def _action_ball_reject_legacy_fresh_lane(self, operation: str) -> None:
+        """Fail before a legacy producer mutates fresh continuous owner state."""
+
+        if type(operation) is not str or not operation:
+            raise TypeError("fresh continuous Racket operation must be named")
+        if bool(
+            getattr(
+                self,
+                "_action_ball_continuous_fresh_racket_lane_bound",
+                False,
+            )
+        ):
+            raise RuntimeError(
+                "fresh continuous Racket lane rejects legacy "
+                f"{operation}; use the Device-R05/ActionEpoch row transaction"
+            )
+
+
+    def _poison_action_ball_continuous_racket_child(self) -> None:
+        """Sticky-poison one Racket owner protocol violation."""
+
+        self._action_ball_continuous_racket_poisoned = True
+        fault_count = getattr(
+            self,
+            "_action_ball_continuous_racket_drain_fault_count_device",
+            None,
+        )
+        if (
+            torch.is_tensor(fault_count)
+            and fault_count.dtype == torch.int64
+            and tuple(fault_count.shape) == (1,)
+        ):
+            # This is the durable device witness exported by the next global
+            # drain (if the process is still auditable).  It is deliberately a
+            # sticky bit: once fail-stop is entered, no later path may clear it.
+            fault_count.fill_(1)
+        active_drain = getattr(
+            self,
+            "_action_ball_continuous_racket_active_ppo_drain_pack",
+            None,
+        )
+        if type(active_drain) is _ActionBallContinuousRacketPreparedPpoDrainPack:
+            active_drain.stage = "poisoned"
+        if getattr(
+            self,
+            "_action_ball_continuous_racket_poison_reason",
+            None,
+        ) is None:
+            self._action_ball_continuous_racket_poison_reason = (
+                "internal_racket_owner_protocol_violation"
+            )
+        self._action_ball_continuous_racket_terminal_epoch_committed = False
+        self._action_ball_continuous_racket_selected_reset_stage = None
+        self._action_ball_continuous_racket_selected_reset_record = None
+        self._action_ball_continuous_racket_selected_reset_prevalidated = None
+        self._action_ball_continuous_racket_selected_reset_sealed_afterimage = (
+            None
+        )
+        self._action_ball_continuous_racket_selected_reset_commit_token = None
+        self._action_ball_continuous_racket_selected_reset_completion = None
+        self._action_ball_continuous_racket_selected_reset_completion_prepared = (
+            None
+        )
+
+
+    def poison_global_reveal_epoch(self, reason: str) -> None:
+        """Idempotently fail-stop this leaf without obstructing peer poison."""
+
+        if bool(
+            getattr(
+                self,
+                "_action_ball_continuous_racket_poisoned",
+                False,
+            )
+        ):
+            return
+        self._action_ball_continuous_racket_poison_reason = (
+            reason
+            if type(reason) is str and bool(reason.strip())
+            else "invalid_global_reveal_poison_reason"
+        )
+        self._poison_action_ball_continuous_racket_child()
+
+    @staticmethod
+    def _action_ball_continuous_racket_exact_drain_index(
+        value: object,
+        *,
+        label: str,
+    ) -> int:
+        if type(value) is not int or value < 0:
+            raise RuntimeError(f"continuous Racket {label} must be nonnegative int")
+        return value
+
+    def _action_ball_continuous_racket_drain_leaf_idle(self) -> bool:
+        return not any(
+            value is not None
+            for value in (
+                getattr(
+                    self,
+                    "_action_ball_continuous_racket_observation_current_token",
+                    None,
+                ),
+                self._action_ball_continuous_racket_selected_reset_stage,
+                self._action_ball_continuous_racket_selected_reset_prevalidated,
+                self._action_ball_continuous_racket_selected_reset_commit_token,
+                self._action_ball_continuous_racket_selected_reset_completion,
+            )
+        )
+
+    def _action_ball_continuous_racket_checkpoint_live_tensor_receipts(
+        self,
+    ) -> tuple[tuple[str, tuple[object, ...]], ...]:
+        """Seal the actual Racket destination epoch without a host read.
+
+        Mutation-version equality alone cannot detect an in-place write that
+        stores the same numeric value.  R10 therefore retains the exact
+        object/storage/layout/Torch-version epoch for the complete selected-
+        reset surface plus the four drain-owned device counters.  These are
+        observations of the real live tensors, not a parallel counter or a
+        caller-supplied snapshot.
+        """
+
+        destinations = tuple(
+            (name, value)
+            for name, _disposition, value in (
+                self._action_ball_continuous_racket_selected_reset_destinations()
+            )
+        ) + (
+            (
+                "_action_ball_continuous_racket_mutation_version_device",
+                self._action_ball_continuous_racket_mutation_version_device,
+            ),
+            (
+                "_action_ball_continuous_racket_terminal_resolution_total_device",
+                self._action_ball_continuous_racket_terminal_resolution_total_device,
+            ),
+            (
+                "_action_ball_continuous_racket_drain_fault_count_device",
+                self._action_ball_continuous_racket_drain_fault_count_device,
+            ),
+            (
+                "_action_ball_continuous_racket_drain_invariant_count_device",
+                self._action_ball_continuous_racket_drain_invariant_count_device,
+            ),
+        )
+        names = tuple(name for name, _value in destinations)
+        if len(set(names)) != len(names):
+            raise RuntimeError(
+                "continuous Racket checkpoint live tensor inventory aliases a name"
+            )
+        return tuple(
+            (name, _action_ball_continuous_tensor_receipt(value))
+            for name, value in destinations
+        )
+
+    def current_checkpoint_mutation_projection(
+        self,
+        boundary: object,
+        owner_kind: str,
+    ) -> object:
+        """Project Racket's live version only from its latest exact global ACK.
+
+        This is the construction-bound R10 leaf callback.  It deliberately
+        accepts neither a caller mutation number nor a drain receipt.  The
+        exact global-drain authority/receipt pair was retained only after that
+        authority's leaf ACK callback succeeded.  A cold restore retains the
+        portable last-ACK/debt chronology but clears these process identities,
+        so it must complete a new global drain join before this callback can
+        authorize publication.
+        """
+
+        try:
+            import action_ball_full_mdp_checkpoint as checkpoint
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_ppo_drain as drain,
+            )
+        except (ImportError, ModuleNotFoundError):
+            import action_ball_full_mdp_checkpoint as checkpoint
+            import action_ball_full_mdp_ppo_drain as drain
+
+        if owner_kind != _ACTION_BALL_CONTINUOUS_RACKET_DRAIN_OWNER_KIND:
+            raise RuntimeError("continuous Racket R10 leaf role differs")
+        if type(boundary) is not checkpoint.CheckpointBoundary:
+            raise RuntimeError(
+                "continuous Racket R10 projection requires the exact checkpoint boundary"
+            )
+        checkpoint.validate_checkpoint_boundary(boundary)
+
+        authority = self._action_ball_continuous_racket_drain_authority
+        receipt = (
+            self._action_ball_continuous_racket_drain_last_acknowledged_receipt
+        )
+        retained_epoch = (
+            self._action_ball_continuous_racket_checkpoint_live_epoch_receipts
+        )
+        mutation_version = self._action_ball_continuous_racket_mutation_version
+        acknowledged_mutation = (
+            self._action_ball_continuous_racket_drain_last_acknowledged_mutation_version
+        )
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or self._action_ball_continuous_racket_drain_poisoned
+            or self._action_ball_continuous_racket_active_ppo_drain_pack is not None
+            or not self._action_ball_continuous_racket_drain_leaf_idle()
+            or self._action_ball_continuous_racket_checkpoint_requires_drain_ack
+            or self._action_ball_continuous_racket_checkpoint_live_join_required
+            or type(authority) is not drain.LeafDevicePackAuthority
+            or type(receipt) is not drain.PreOptimizerPpoBoundaryReceipt
+            or receipt.acknowledged is not True
+            or receipt.update_index
+            != self._action_ball_continuous_racket_drain_last_update_index
+            or receipt.completed_environment_steps
+            != self._action_ball_continuous_racket_drain_last_completed_environment_steps
+            or receipt.drain_sequence
+            != self._action_ball_continuous_racket_drain_sequence
+            or receipt.num_envs != self.num_envs
+            or boundary.update_index != receipt.update_index
+            or type(mutation_version) is not int
+            or type(acknowledged_mutation) is not int
+            or mutation_version != acknowledged_mutation
+            or type(retained_epoch) is not tuple
+            or not retained_epoch
+            or any(
+                type(named) is not tuple
+                or len(named) != 2
+                or type(named[0]) is not str
+                or not _action_ball_continuous_tensor_matches_receipt(
+                    getattr(self, named[0], None), named[1]
+                )
+                for named in retained_epoch
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket R10 projection lacks its exact latest global ACK, idle epoch, or live join"
+            )
+        racket_rows = tuple(
+            row
+            for row in receipt.owner_rows
+            if row.owner_kind
+            == _ACTION_BALL_CONTINUOUS_RACKET_DRAIN_OWNER_KIND
+        )
+        if (
+            len(racket_rows) != 1
+            or self._action_ball_continuous_racket_drain_owner_row_values(
+                racket_rows[0]
+            )[0]
+            != mutation_version
+        ):
+            raise RuntimeError(
+                "continuous Racket R10 projection differs from its ACKed owner row"
+            )
+        return checkpoint.PpoDrainLeafLiveMutationProjection(
+            schema_version=1,
+            kind="action_ball_r10_leaf_live_mutation_projection_v1",
+            owner_kind=_ACTION_BALL_CONTINUOUS_RACKET_DRAIN_OWNER_KIND,
+            mutation_version=mutation_version,
+        )
+
+    def _action_ball_continuous_racket_exact_resume_protocol_state(self) -> dict:
+        """Return only chronology covered by an exact healthy global drain ACK.
+
+        This helper remains legacy/future protocol plumbing.  Fresh full-MDP
+        intentionally installs no public exact-resume hooks
+        (``exact_resume_supported=False``, integration ``HOLD``) until R10
+        also owns every Racket destination/registry.  Keeping this inner schema
+        fail-closed prevents a future hookup from checkpointing a settlement
+        fault or any post-ACK mutation and restoring its device fault bit as
+        zero.
+        """
+
+        if (
+            self._action_ball_continuous_racket_active_ppo_drain_pack is not None
+            or not self._action_ball_continuous_racket_drain_leaf_idle()
+            or self._action_ball_continuous_racket_poisoned
+            or self._action_ball_continuous_racket_drain_poisoned
+        ):
+            raise RuntimeError(
+                "continuous Racket checkpoint crossed an in-flight reset/drain epoch"
+            )
+        acknowledged_mutation = (
+            self._action_ball_continuous_racket_drain_last_acknowledged_mutation_version
+        )
+        if (
+            type(acknowledged_mutation) is not int
+            or acknowledged_mutation
+            != self._action_ball_continuous_racket_mutation_version
+            or self._action_ball_continuous_racket_checkpoint_requires_drain_ack
+        ):
+            raise RuntimeError(
+                "continuous Racket checkpoint lacks the exact globally ACKed "
+                "mutation frontier"
+            )
+        values = (
+            self._action_ball_continuous_racket_mutation_version,
+            self._action_ball_continuous_racket_terminal_resolution_total,
+            self._action_ball_continuous_racket_drain_last_update_index,
+            self._action_ball_continuous_racket_drain_last_completed_environment_steps,
+            self._action_ball_continuous_racket_drain_sequence,
+        )
+        if any(type(value) is not int for value in values):
+            raise RuntimeError(
+                "continuous Racket exact-resume protocol chronology differs"
+            )
+        return {
+            "schema_version": 2,
+            "kind": (
+                "whole_body_tracking.RacketTargetCommand."
+                "continuous_protocol_exact_resume_v2"
+            ),
+            "mutation_version": values[0],
+            "drain_last_acknowledged_mutation_version": (
+                acknowledged_mutation
+            ),
+            "terminal_resolution_total": values[1],
+            "drain_last_update_index": values[2],
+            "drain_last_completed_environment_steps": values[3],
+            "drain_sequence": values[4],
+            "selected_reset_next_serial": (
+                self._action_ball_continuous_racket_selected_reset_next_serial
+            ),
+            "drain_poisoned": (
+                self._action_ball_continuous_racket_drain_poisoned
+            ),
+            "drain_poison_reason": (
+                self._action_ball_continuous_racket_drain_poison_reason
+            ),
+        }
+
+    @staticmethod
+    def _action_ball_continuous_racket_stage_exact_resume_protocol_state(
+        state: object,
+    ) -> dict:
+        expected = {
+            "schema_version",
+            "kind",
+            "mutation_version",
+            "drain_last_acknowledged_mutation_version",
+            "terminal_resolution_total",
+            "drain_last_update_index",
+            "drain_last_completed_environment_steps",
+            "drain_sequence",
+            "selected_reset_next_serial",
+            "drain_poisoned",
+            "drain_poison_reason",
+        }
+        if (
+            type(state) is not dict
+            or set(state) != expected
+            or state["schema_version"] != 2
+            or state["kind"]
+            != (
+                "whole_body_tracking.RacketTargetCommand."
+                "continuous_protocol_exact_resume_v2"
+            )
+        ):
+            raise ValueError(
+                "continuous Racket exact-resume protocol schema differs"
+            )
+        for name in (
+            "mutation_version",
+            "drain_last_acknowledged_mutation_version",
+            "terminal_resolution_total",
+            "drain_sequence",
+            "selected_reset_next_serial",
+        ):
+            if type(state[name]) is not int or state[name] < 0:
+                raise ValueError(
+                    f"continuous Racket exact-resume {name} differs"
+                )
+        if (
+            state["drain_last_acknowledged_mutation_version"]
+            != state["mutation_version"]
+        ):
+            raise ValueError(
+                "continuous Racket exact-resume mutation lacks its global "
+                "drain ACK frontier"
+            )
+        for name in (
+            "drain_last_update_index",
+            "drain_last_completed_environment_steps",
+        ):
+            if type(state[name]) is not int or state[name] < -1:
+                raise ValueError(
+                    f"continuous Racket exact-resume {name} differs"
+                )
+        if (
+            type(state["drain_poisoned"]) is not bool
+            or not (
+                state["drain_poison_reason"] is None
+                or type(state["drain_poison_reason"]) is str
+            )
+            or (
+                state["drain_poisoned"]
+                and not bool(state["drain_poison_reason"])
+            )
+            or (
+                not state["drain_poisoned"]
+                and state["drain_poison_reason"] is not None
+            )
+        ):
+            raise ValueError(
+                "continuous Racket exact-resume drain poison state differs"
+            )
+        return dict(state)
+
+    def prepare_pre_optimizer_ppo_boundary_device_pack(
+        self,
+        *,
+        authority: object,
+        update_index: int,
+        completed_environment_steps: int,
+    ) -> object:
+        """Mint Racket's int64 row inside the sole global drain prepare."""
+
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or self._action_ball_continuous_racket_drain_poisoned
+        ):
+            raise RuntimeError("continuous Racket PPO drain owner is poisoned")
+        update = self._action_ball_continuous_racket_exact_drain_index(
+            update_index,
+            label="PPO drain update_index",
+        )
+        completed = self._action_ball_continuous_racket_exact_drain_index(
+            completed_environment_steps,
+            label="PPO drain completed_environment_steps",
+        )
+        if (
+            update <= self._action_ball_continuous_racket_drain_last_update_index
+            or completed
+            <= self._action_ball_continuous_racket_drain_last_completed_environment_steps
+            or self._action_ball_continuous_racket_active_ppo_drain_pack
+            is not None
+            or not self._action_ball_continuous_racket_drain_leaf_idle()
+            or getattr(authority, "owner_kind", None)
+            != _ACTION_BALL_CONTINUOUS_RACKET_DRAIN_OWNER_KIND
+            or tuple(getattr(authority, "field_names", ()))
+            != _ACTION_BALL_CONTINUOUS_RACKET_DRAIN_FIELD_NAMES
+            or getattr(authority, "expected_width", None)
+            != len(_ACTION_BALL_CONTINUOUS_RACKET_DRAIN_FIELD_NAMES)
+            or (
+                getattr(
+                    self,
+                    "_action_ball_continuous_racket_drain_authority",
+                    None,
+                )
+                is not None
+                and getattr(
+                    self,
+                    "_action_ball_continuous_racket_drain_authority",
+                    None,
+                )
+                is not authority
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket global PPO drain prepare differs"
+            )
+        mint = getattr(authority, "mint_device_pack", None)
+        require_owned_ack = getattr(authority, "require_owned_ack", None)
+        try:
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_ppo_drain as drain,
+            )
+        except (ImportError, ModuleNotFoundError):
+            import action_ball_full_mdp_ppo_drain as drain
+        if (
+            type(authority) is not drain.LeafDevicePackAuthority
+            or not callable(mint)
+            or getattr(mint, "__self__", None) is not authority
+            or getattr(mint, "__func__", None)
+            is not drain.LeafDevicePackAuthority.mint_device_pack
+            or not callable(require_owned_ack)
+            or getattr(require_owned_ack, "__self__", None) is not authority
+            or getattr(require_owned_ack, "__func__", None)
+            is not drain.LeafDevicePackAuthority.require_owned_ack
+        ):
+            raise RuntimeError(
+                "continuous Racket global PPO drain authority API differs"
+            )
+        device_version = (
+            self._action_ball_continuous_racket_mutation_version_device
+        )
+        fault_count = (
+            self._action_ball_continuous_racket_drain_fault_count_device
+        )
+        terminal_total = (
+            self._action_ball_continuous_racket_terminal_resolution_total_device
+        )
+        if (
+            any(
+                not torch.is_tensor(value)
+                for value in (device_version, fault_count, terminal_total)
+            )
+            or any(
+                value.dtype != torch.int64
+                for value in (device_version, fault_count, terminal_total)
+            )
+            or any(
+                value.device != torch.device(self.device)
+                for value in (device_version, fault_count, terminal_total)
+            )
+            or any(
+                tuple(value.shape) != (1,)
+                for value in (device_version, fault_count, terminal_total)
+            )
+            or not _action_ball_continuous_tensor_matches_receipt(
+                terminal_total,
+                self._action_ball_continuous_racket_terminal_resolution_total_device_receipt,
+            )
+        ):
+            raise RuntimeError(
+                "continuous Racket device chronology drifted before PPO drain"
+            )
+        mutation_version = (
+            self._action_ball_continuous_racket_mutation_version
+        )
+        terminal_resolution_total = (
+            self._action_ball_continuous_racket_terminal_resolution_total
+        )
+        if (
+            type(mutation_version) is not int
+            or type(terminal_resolution_total) is not int
+            or mutation_version < 0
+            or terminal_resolution_total < 0
+        ):
+            raise RuntimeError(
+                "continuous Racket PPO drain host chronology differs"
+            )
+        # A real device chronology relation, not a decorative constant.
+        # ``terminal_total`` counts selected environments while
+        # ``device_version`` counts committed batches; cross-owner equality
+        # is checked at the sole seven-leaf global drain.
+        invariant_failure = (
+            (device_version < 0)
+            | (terminal_total < 0)
+        )
+        invariant_count = torch.where(
+            invariant_failure,
+            torch.ones_like(device_version),
+            torch.zeros_like(device_version),
+        )
+        values = torch.cat(
+            (
+                device_version,
+                fault_count,
+                invariant_count,
+                terminal_total,
+            )
+        ).contiguous()
+        source_receipts = tuple(
+            _action_ball_continuous_tensor_receipt(value)
+            for value in (device_version, fault_count, terminal_total)
+        )
+        pack = mint(leaf=self, values=values)
+        self._action_ball_continuous_racket_active_ppo_drain_pack = (
+            _ActionBallContinuousRacketPreparedPpoDrainPack(
+                pack=pack,
+                authority=authority,
+                update_index=update,
+                completed_environment_steps=completed,
+                mutation_version=mutation_version,
+                terminal_resolution_total=terminal_resolution_total,
+                source_tensor_receipts=source_receipts,
+                expected_values=(
+                    mutation_version,
+                    0,
+                    0,
+                    terminal_resolution_total,
+                ),
+            )
+        )
+        return pack
+
+    def abort_pre_optimizer_ppo_boundary_device_pack(
+        self,
+        *,
+        pack: object,
+    ) -> None:
+        """Release one exact pre-transfer pack without business mutation."""
+
+        active = self._action_ball_continuous_racket_active_ppo_drain_pack
+        if (
+            self._action_ball_continuous_racket_poisoned
+            or self._action_ball_continuous_racket_drain_poisoned
+            or type(active)
+            is not _ActionBallContinuousRacketPreparedPpoDrainPack
+            or active.stage != "prepared"
+            or pack is not active.pack
+        ):
+            raise RuntimeError(
+                "continuous Racket PPO drain abort pack is stale or foreign"
+            )
+        if (
+            self._action_ball_continuous_racket_mutation_version
+            != active.mutation_version
+            or self._action_ball_continuous_racket_terminal_resolution_total
+            != active.terminal_resolution_total
+            or any(
+                not _action_ball_continuous_tensor_matches_receipt(
+                    receipt[0], receipt
+                )
+                for receipt in active.source_tensor_receipts
+            )
+        ):
+            self.poison_pre_optimizer_ppo_boundary(
+                reason=(
+                    "continuous Racket mutated during global PPO drain prepare"
+                )
+            )
+            raise RuntimeError(
+                "continuous Racket PPO drain pre-transfer image drifted"
+            )
+        active.stage = "aborted"
+        self._action_ball_continuous_racket_active_ppo_drain_pack = None
+
+    @staticmethod
+    def _action_ball_continuous_racket_drain_owner_row_values(
+        owner_row: object,
+    ) -> tuple[int, int, int, int]:
+        if (
+            getattr(owner_row, "owner_kind", None)
+            != _ACTION_BALL_CONTINUOUS_RACKET_DRAIN_OWNER_KIND
+        ):
+            raise RuntimeError("continuous Racket drain owner row kind differs")
+        values = getattr(owner_row, "values", None)
+        if type(values) is not tuple:
+            raise RuntimeError("continuous Racket drain owner row differs")
+        names = []
+        scalars = []
+        for item in values:
+            if (
+                type(item) is not tuple
+                or len(item) != 2
+                or type(item[0]) is not str
+                or type(item[1]) is not int
+            ):
+                raise RuntimeError(
+                    "continuous Racket drain owner row contains non-scalars"
+                )
+            names.append(item[0])
+            scalars.append(item[1])
+        if tuple(names) != _ACTION_BALL_CONTINUOUS_RACKET_DRAIN_FIELD_NAMES:
+            raise RuntimeError("continuous Racket drain owner row schema differs")
+        return tuple(scalars)
+
+    def acknowledge_pre_optimizer_ppo_boundary(
+        self,
+        *,
+        pack: object,
+        receipt: object,
+        owner_row: object,
+    ) -> None:
+        """Acknowledge the exact pack/row after the one global D2H."""
+
+        active = self._action_ball_continuous_racket_active_ppo_drain_pack
+        try:
+            if (
+                type(active)
+                is not _ActionBallContinuousRacketPreparedPpoDrainPack
+            ):
+                raise RuntimeError(
+                    "continuous Racket PPO drain acknowledgement has no active pack"
+                )
+            # This construction-bound callback is the first receipt/row
+            # consumer.  It proves the exact current coordinator, leaf, pack,
+            # receipt, decoded row and optimizer-return window; equal facts
+            # from a foreign real coordinator are not authority.
+            active.authority.require_owned_ack(
+                leaf=self,
+                pack=pack,
+                receipt=receipt,
+                owner_row=owner_row,
+            )
+            try:
+                from whole_body_tracking.tasks.tracking.mdp import (
+                    action_ball_full_mdp_ppo_drain as drain,
+                )
+            except (ImportError, ModuleNotFoundError):
+                # Focused Isaac tests load ``mdp`` through a minimal module
+                # shim rather than the package.  The source directory is on
+                # sys.path there, so this resolves the same file/class once.
+                import action_ball_full_mdp_ppo_drain as drain
+
+            if (
+                self._action_ball_continuous_racket_poisoned
+                or self._action_ball_continuous_racket_drain_poisoned
+                or active.stage != "prepared"
+                or pack is not active.pack
+                or type(receipt) is not drain.PreOptimizerPpoBoundaryReceipt
+                or type(owner_row) is not drain.OwnerDrainRow
+                or not any(
+                    row is owner_row for row in receipt.owner_rows
+                )
+                or receipt.acknowledged
+                or receipt.num_envs != self.num_envs
+                or type(getattr(receipt, "update_index", None)) is not int
+                or receipt.update_index != active.update_index
+                or type(
+                    getattr(receipt, "completed_environment_steps", None)
+                )
+                is not int
+                or receipt.completed_environment_steps
+                != active.completed_environment_steps
+                or getattr(receipt, "device_to_host_transfers", None) != 1
+                or type(getattr(receipt, "drain_sequence", None)) is not int
+                or receipt.drain_sequence
+                != self._action_ball_continuous_racket_drain_sequence + 1
+            ):
+                raise RuntimeError(
+                    "continuous Racket PPO drain acknowledgement differs"
+                )
+            row = self._action_ball_continuous_racket_drain_owner_row_values(
+                owner_row
+            )
+            if row != active.expected_values:
+                raise RuntimeError(
+                    "continuous Racket PPO drain row differs from prepared pack"
+                )
+            if (
+                self._action_ball_continuous_racket_mutation_version
+                != active.mutation_version
+                or self._action_ball_continuous_racket_terminal_resolution_total
+                != active.terminal_resolution_total
+                or any(
+                    not _action_ball_continuous_tensor_matches_receipt(
+                        source_receipt[0], source_receipt
+                    )
+                    for source_receipt in active.source_tensor_receipts
+                )
+            ):
+                raise RuntimeError(
+                    "continuous Racket mutated after PPO drain prepare"
+                )
+        except BaseException as exc:
+            self.poison_pre_optimizer_ppo_boundary(
+                reason=(
+                    "continuous Racket PPO drain acknowledgement failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            )
+            raise
+        self._action_ball_continuous_racket_drain_last_update_index = (
+            active.update_index
+        )
+        self._action_ball_continuous_racket_drain_last_completed_environment_steps = (
+            active.completed_environment_steps
+        )
+        self._action_ball_continuous_racket_drain_sequence = receipt.drain_sequence
+        self._action_ball_continuous_racket_drain_last_acknowledged_mutation_version = (
+            active.mutation_version
+        )
+        # Retain the causal writer and the actual live tensor epoch.  The
+        # public receipt is not yet marked ACKed inside this leaf callback;
+        # the global owner flips that same object only after all seven leaves
+        # return successfully.  A foreign real coordinator can therefore not
+        # replace the process-local authority merely by reproducing equal row
+        # values.
+        self._action_ball_continuous_racket_drain_authority = active.authority
+        self._action_ball_continuous_racket_drain_last_acknowledged_receipt = (
+            receipt
+        )
+        self._action_ball_continuous_racket_checkpoint_live_epoch_receipts = (
+            self._action_ball_continuous_racket_checkpoint_live_tensor_receipts()
+        )
+        self._action_ball_continuous_racket_checkpoint_live_join_required = False
+        self._action_ball_continuous_racket_checkpoint_requires_drain_ack = False
+        active.stage = "acknowledged"
+        self._action_ball_continuous_racket_active_ppo_drain_pack = None
+
+    def poison_pre_optimizer_ppo_boundary(self, *, reason: str) -> None:
+        """Idempotently fail-stop Racket after an irreversible drain failure."""
+
+        if self._action_ball_continuous_racket_drain_poisoned:
+            return
+        self._action_ball_continuous_racket_drain_poisoned = True
+        self._action_ball_continuous_racket_drain_poison_reason = (
+            reason
+            if type(reason) is str and bool(reason.strip())
+            else "invalid_continuous_racket_ppo_drain_poison_reason"
+        )
+        self._poison_action_ball_continuous_racket_child()
+
 
     def action_ball_shared_state_sha256(self) -> str | None:
         """Return the canonical digest covering Racket's complete shared checkpoint."""
@@ -11301,6 +15847,378 @@ class RacketTargetCommand(CommandTerm):
             return (*result, unattributed)
         return result
 
+    def _action_ball_strike_fact_pack_task_refs(
+        self, refs: tuple
+    ) -> object | None:
+        """Pack exact receipt refs before the live task-install transaction.
+
+        This is a reset/wrap host boundary, not a policy-step hot path.  The
+        source objects must be the exact runtime ``ActionTaskReceiptRef`` type;
+        a fixed-view identity, UID tuple, or shortened digest is never accepted
+        as a substitute.
+        """
+
+        if not self._action_ball_strike_fact_device_enabled:
+            return None
+        if self._action_ball_fixed_view_enabled:
+            raise RuntimeError(
+                "same-transition strike facts require full "
+                "ActionTaskReceiptRef rows; immutable fixed-view tasks have "
+                "no receipt refs"
+            )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+            ActionTaskReceiptRef,
+        )
+        from .action_ball_strike_fact import PackedActionTaskReceiptRef
+        from .action_ball_strike_fact_device import DeviceActionTaskKey
+
+        if not refs or any(type(ref) is not ActionTaskReceiptRef for ref in refs):
+            raise RuntimeError(
+                "same-transition strike fact install requires exact full "
+                "ActionTaskReceiptRef rows"
+            )
+        packed = PackedActionTaskReceiptRef.from_receipt_refs(
+            refs, device=self.device
+        )
+        return DeviceActionTaskKey.from_mapping(packed.to_mapping())
+
+    def _action_ball_strike_fact_commit_task_key(
+        self, ids: torch.Tensor, packed_key: object | None
+    ) -> None:
+        """Commit one validated selected-row key into the all-env device key."""
+
+        if not self._action_ball_strike_fact_device_enabled:
+            if packed_key is not None:
+                raise RuntimeError(
+                    "disabled strike-fact owner received a packed task key"
+                )
+            return
+        from .action_ball_strike_fact_device import DeviceActionTaskKey
+
+        if not isinstance(packed_key, DeviceActionTaskKey):
+            raise RuntimeError(
+                "strike-fact task install lost its full device task key"
+            )
+        rows = ids.shape[0]
+        if any(
+            getattr(packed_key, name).shape != (rows,)
+            for name in (
+                "env_id",
+                "reset_generation",
+                "swing_generation",
+                "action_uid",
+                "action_slot",
+            )
+        ) or any(
+            getattr(packed_key, name).shape != (rows, 32)
+            for name in (
+                "birth_sha256",
+                "sample_sha256",
+                "task_sha256",
+            )
+        ):
+            raise RuntimeError(
+                "selected strike-fact task key has an invalid fixed shape"
+            )
+        for name, destination in self._action_ball_strike_fact_key_ints.items():
+            destination.index_copy_(0, ids, getattr(packed_key, name))
+        for name, destination in (
+            self._action_ball_strike_fact_key_digests.items()
+        ):
+            destination.index_copy_(0, ids, getattr(packed_key, name))
+
+    def _action_ball_strike_fact_close_before_task_mutation(
+        self, ids: torch.Tensor, *, mutation: str
+    ) -> None:
+        """Fail-close device rows before reset/wrap/task identity mutation."""
+
+        if not self._action_ball_strike_fact_device_enabled:
+            return
+        if type(mutation) is not str or not mutation:
+            raise TypeError("strike-fact task mutation must be named")
+        outstanding_step = self._action_ball_strike_fact_expected_publish_step
+        reset_mask = self._action_ball_strike_fact_mutation_mask
+        reset_mask.zero_()
+        reset_mask.index_fill_(0, ids, True)
+        # Reset first while the old key is still intact.  ARMED/PENDING rows
+        # become sticky device faults; fully paid rows close cleanly.
+        self._action_ball_strike_fact_device_coordinator.reset(reset_mask)
+        self._action_ball_strike_fact_exact_eligibility.masked_fill_(
+            reset_mask, False
+        )
+        self._action_ball_strike_fact_source_step.masked_fill_(reset_mask, -1)
+        for name, tensor in self._action_ball_strike_fact_key_ints.items():
+            if name != "env_id":
+                tensor.masked_fill_(reset_mask, -1 if name in (
+                    "swing_generation", "action_slot"
+                ) else 0)
+        for tensor in self._action_ball_strike_fact_key_digests.values():
+            tensor.masked_fill_(reset_mask.unsqueeze(-1), 0)
+        self._action_ball_strike_fact_expected_publish_step = None
+        if outstanding_step is not None:
+            raise RuntimeError(
+                f"{mutation} attempted before strike-fact DoneTerm sealed "
+                f"source_step={outstanding_step}"
+            )
+
+    def _capture_action_ball_single_exact_eligibility(
+        self, exact_strike: torch.Tensor
+    ) -> None:
+        """Latch the existing one-shot exact mask for the next transition."""
+
+        if self._action_ball_strike_fact_device_enabled:
+            self._action_ball_strike_fact_exact_eligibility.copy_(
+                exact_strike
+            )
+
+    def _arm_action_ball_strike_fact_for_next_transition(self) -> None:
+        """Arm the current immutable task for the next physics transition.
+
+        ManagerBasedRLEnv calls CommandManager only after the current Reward
+        and reset seams.  Therefore ``common_step_counter + 1`` is the unique
+        next post-physics DoneTerm source step.  This method runs after both
+        the normal and disabled-resampling CommandTerm compute paths.
+        """
+
+        if not self._action_ball_strike_fact_device_enabled:
+            return
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is True:
+            from .action_ball_strike_fact_device import EpochR03RacketIdentity
+
+            source_step = getattr(self._env, "common_step_counter", None)
+            if type(source_step) is not int or source_step < 0:
+                raise RuntimeError(
+                    "fresh R03 arm requires a non-negative integer common step"
+                )
+            next_source_step = source_step + 1
+            source = self._action_ball_strike_fact_source_step
+            source.fill_(next_source_step)
+            if self._action_ball_full_mdp_r03_writer_active:
+                raise RuntimeError("fresh R03 Racket writer is reentrant")
+            self._action_ball_full_mdp_r03_writer_active = True
+            try:
+                self._action_ball_strike_fact_device_coordinator.arm_action_epoch_strike_fact_v1(
+                    source_step=source,
+                    racket_identity=EpochR03RacketIdentity(
+                        reset_generation=self._action_ball_reset_generation,
+                        action_uid=self._action_ball_action_uid,
+                        action_slot=self._action_ball_action_slot,
+                        task_identity=(
+                            self._action_ball_full_mdp_racket_task_identity
+                        ),
+                    ),
+                    racket_owner=self,
+                    target_position=self.racket_target_pos_w,
+                    target_velocity=self.racket_target_vel_w,
+                    target_face_normal=self.target_normal_cmd,
+                    ball_position=self._action_ball_ball_contact_target_w,
+                    ball_velocity=self.vb_vel_in_w,
+                )
+            finally:
+                self._action_ball_full_mdp_r03_writer_active = False
+            self._action_ball_strike_fact_expected_publish_step = next_source_step
+            return
+        if self._action_ball_fixed_view_enabled:
+            raise RuntimeError(
+                "cannot arm same-transition strike facts from a receipt-free "
+                "immutable fixed view"
+            )
+        if self._action_ball_strike_fact_expected_publish_step is not None:
+            raise RuntimeError(
+                "previous strike-fact transition did not reach its DoneTerm publisher"
+            )
+        common_step = getattr(self._env, "common_step_counter", None)
+        if type(common_step) is not int or common_step < 0:
+            raise RuntimeError(
+                "strike-fact arm requires a non-negative integer common step"
+            )
+        source_step = common_step + 1
+        self._action_ball_strike_fact_source_step.fill_(source_step)
+        self._action_ball_strike_fact_device_coordinator.arm(
+            self._action_ball_strike_fact_exact_eligibility,
+            source_step=self._action_ball_strike_fact_source_step,
+            task_key=self._action_ball_strike_fact_task_key,
+            target_position=self.racket_target_pos_w,
+            target_velocity=self.racket_target_vel_w,
+            target_face_normal=self.target_normal_cmd,
+            ball_position=self._action_ball_ball_contact_target_w,
+            ball_velocity=self.vb_vel_in_w,
+            validity=self._action_ball_strike_fact_target_validity,
+        )
+        self._action_ball_strike_fact_expected_publish_step = source_step
+
+    def _arm_action_ball_strike_fact_after_initial_reset(self) -> None:
+        """Cover the one pre-physics transition with no preceding Reward seam.
+
+        IsaacLab's public ``reset()`` performs CommandManager.reset and then
+        observations; it does not call CommandManager.compute.  The initial
+        full reset therefore arms source step one after its complete task
+        install.  Every later transition remains owned by the normal
+        post-Reward compute tail above.
+        """
+
+        if not self._action_ball_strike_fact_device_enabled:
+            return
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is True:
+            # Full-MDP genesis has not revealed an ActionEpoch task during
+            # CommandTerm's initial reset.  The lean top owner performs the
+            # unique arm only after D05 settlement returns; arming here would
+            # bind tombstones or reenter a non-existent epoch.
+            return
+        common_step = getattr(self._env, "common_step_counter", None)
+        if (
+            common_step == 0
+            and self._action_ball_strike_fact_expected_publish_step is None
+        ):
+            self._arm_action_ball_strike_fact_for_next_transition()
+
+    def arm_action_ball_full_mdp_epoch_strike_fact(self) -> None:
+        """Arm the bound R03 after D05 reveal and before the next physics.
+
+        This helper accepts no mask, identity, step, or verdict from the top
+        owner.  The Racket leaf owns the exact one-shot eligibility, live task
+        integers, targets, and the manager's next-transition clock; R03 joins
+        them to its independently bound current ActionEpoch after the D05
+        coordinator operation has returned.
+        """
+
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
+            raise ActionBallContinuousRacketStrikeFactHold(
+                "epoch R03 arm is full-MDP-only"
+            )
+        self._arm_action_ball_strike_fact_for_next_transition()
+
+    def require_active_action_epoch_r03_writer(self) -> None:
+        """Require the exact scalar Racket call stack around an R03 mutation."""
+
+        if (
+            getattr(self, "_action_ball_full_mdp_r03_writer_active", False)
+            is not True
+        ):
+            raise ActionBallContinuousRacketStrikeFactHold(
+                "R03 mutation is outside the active Racket writer callback"
+            )
+
+    def action_ball_full_mdp_r03_owner(self) -> object:
+        """Return the one R03 child constructed by this exact Racket owner.
+
+        The full-MDP factory may retrieve this object; it must not construct a
+        parallel coordinator or accept one supplied by a launcher.  This
+        getter grants no publication authority and cannot bypass the missing
+        Device-R05 current full-key/shot projection.
+        """
+
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
+            raise ActionBallContinuousRacketStrikeFactHold(
+                "fresh R03 owner is available only in action_ball_full_mdp"
+            )
+        from .action_ball_strike_fact_device import (
+            ActionBallStrikeFactDeviceCoordinator,
+            OBSERVATION_PROJECTION_MODE_FRESH_FULL_MDP,
+        )
+
+        owner = getattr(
+            self, "_action_ball_strike_fact_device_coordinator", None
+        )
+        if (
+            type(owner) is not ActionBallStrikeFactDeviceCoordinator
+            or getattr(owner, "_observation_projection_mode", None)
+            != OBSERVATION_PROJECTION_MODE_FRESH_FULL_MDP
+        ):
+            raise ActionBallContinuousRacketStrikeFactHold(
+                "Racket lost its exact fresh R03 child"
+            )
+        return owner
+
+    def publish_action_ball_full_mdp_epoch_strike_fact(
+        self, *, source_step: int
+    ) -> None:
+        """Top-owner final-substep seam for the once-per-control R03 write."""
+
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is not True:
+            raise ActionBallContinuousRacketStrikeFactHold(
+                "epoch R03 post-physics publication is full-MDP-only"
+            )
+        self.publish_action_ball_strike_fact_for_reward(
+            source_step=source_step
+        )
+
+    def publish_action_ball_strike_fact_for_reward(
+        self, *, source_step: int
+    ) -> None:
+        """Publish exact post-physics FK to R03 and its bound ActionEpoch."""
+
+        if not self._action_ball_strike_fact_device_enabled:
+            raise RuntimeError(
+                "strike-fact DoneTerm is installed while its Racket owner is disabled"
+            )
+        if (
+            type(source_step) is not int
+            or source_step
+            != self._action_ball_strike_fact_expected_publish_step
+        ):
+            raise RuntimeError(
+                "strike-fact DoneTerm source step differs from the armed transition"
+            )
+        if getattr(self, "_action_ball_full_mdp_enabled", False) is True:
+            from .action_ball_strike_fact_device import EpochR03RacketIdentity
+
+            coordinator = self.action_ball_full_mdp_r03_owner()
+            epoch_owner = getattr(
+                self, "_action_ball_full_mdp_racket_epoch_owner", None
+            )
+            if coordinator.action_epoch_owner is not epoch_owner:
+                raise ActionBallContinuousRacketStrikeFactHold(
+                    "fresh R03 and Racket lost their common ActionEpoch owner"
+                )
+            (
+                achieved_position,
+                _achieved_quaternion,
+                achieved_velocity,
+                achieved_raw_face_normal,
+                _achieved_signed_face_normal,
+            ) = self._racket_fk()
+            source = self._action_ball_strike_fact_source_step
+            if self._action_ball_full_mdp_r03_writer_active:
+                raise RuntimeError("fresh R03 Racket writer is reentrant")
+            self._action_ball_full_mdp_r03_writer_active = True
+            try:
+                coordinator.publish_action_epoch_strike_fact_v1(
+                    racket_owner=self,
+                    source_step=source,
+                    racket_identity=EpochR03RacketIdentity(
+                        reset_generation=self._action_ball_reset_generation,
+                        action_uid=self._action_ball_action_uid,
+                        action_slot=self._action_ball_action_slot,
+                        task_identity=(
+                            self._action_ball_full_mdp_racket_task_identity
+                        ),
+                    ),
+                    achieved_position=achieved_position,
+                    achieved_velocity=achieved_velocity,
+                    achieved_face_normal=achieved_raw_face_normal,
+                )
+            finally:
+                self._action_ball_full_mdp_r03_writer_active = False
+            self._action_ball_strike_fact_expected_publish_step = None
+            return
+        (
+            achieved_position,
+            _achieved_quaternion,
+            achieved_velocity,
+            achieved_raw_face_normal,
+            _achieved_signed_face_normal,
+        ) = self._racket_fk()
+        self._action_ball_strike_fact_device_coordinator.publish(
+            self._action_ball_strike_fact_exact_eligibility,
+            source_step=self._action_ball_strike_fact_source_step,
+            task_key=self._action_ball_strike_fact_task_key,
+            achieved_position=achieved_position,
+            achieved_velocity=achieved_velocity,
+            achieved_face_normal=achieved_raw_face_normal,
+        )
+        self._action_ball_strike_fact_expected_publish_step = None
+
     def _action_ball_close_attempts(
         self,
         ids: torch.Tensor,
@@ -11309,6 +16227,13 @@ class RacketTargetCommand(CommandTerm):
         active_host_env_ids=None,
     ) -> None:
         """Close prior installed attempts before any replacement task is requested."""
+
+        self._action_ball_strike_fact_close_before_task_mutation(
+            ids,
+            mutation=(
+                "ActionBall true reset" if true_reset else "ActionBall wrap"
+            ),
+        )
 
         installed_active = self._action_ball_attempt_active[ids]
         resume_exclusion_state = getattr(
@@ -11671,6 +16596,8 @@ class RacketTargetCommand(CommandTerm):
     ) -> tuple | None:
         """Single mutation seam for one fully validated task+ball env batch."""
 
+        self._action_ball_reject_legacy_fresh_lane("direct task install")
+
         if len(host_env_ids) != len(ids):
             raise RuntimeError(
                 "action-ball install host id batch length mismatch"
@@ -11691,6 +16618,20 @@ class RacketTargetCommand(CommandTerm):
         diagnostic_task_refs = (
             tuple(receipt.task_ref() for receipt in receipts)
             if self._action_ball_diagnostic_unauthorized
+            else None
+        )
+        strike_fact_task_refs = None
+        if self._action_ball_strike_fact_device_enabled:
+            strike_fact_task_refs = (
+                diagnostic_task_refs
+                if diagnostic_task_refs is not None
+                else tuple(receipt.task_ref() for receipt in receipts)
+            )
+        packed_strike_fact_key = (
+            self._action_ball_strike_fact_pack_task_refs(
+                strike_fact_task_refs
+            )
+            if strike_fact_task_refs is not None
             else None
         )
         dtype = self.racket_target_pos_w.dtype
@@ -11975,7 +16916,9 @@ class RacketTargetCommand(CommandTerm):
                 if counter_rally_identities is None
                 else counter_rally_identities[row_index]
             )
-
+        self._action_ball_strike_fact_commit_task_key(
+            ids, packed_strike_fact_key
+        )
         # Replace only freshly installed rows so actor and reward views do not
         # observe a fake one-frame strike or Motion's pending sentinel.
         self.time_to_strike[ids] = initial_tts
@@ -12013,6 +16956,16 @@ class RacketTargetCommand(CommandTerm):
     ) -> None:
         """Install one immutable row-zero view without task materialization."""
 
+        self._action_ball_reject_legacy_fresh_lane(
+            "fixed-view direct task install"
+        )
+
+        if self._action_ball_strike_fact_device_enabled:
+            raise RuntimeError(
+                "same-transition strike facts require a full "
+                "ActionTaskReceiptRef; immutable fixed-view install is "
+                "receipt-free"
+            )
         if not self._action_ball_fixed_view_enabled:
             raise RuntimeError(
                 "immutable fixed-view install used outside its authority"
@@ -12208,6 +17161,8 @@ class RacketTargetCommand(CommandTerm):
         n: int,
     ) -> None:
         """Consume the selected action birth, issue its solved ball, then install atomically."""
+
+        self._action_ball_reject_legacy_fresh_lane("task sampler")
 
         if not self._action_ball_enabled:
             raise RuntimeError("action-ball sampler called while target_mode is not action_ball")
@@ -12853,6 +17808,9 @@ class RacketTargetCommand(CommandTerm):
             )
         ids = torch.arange(
             self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._action_ball_strike_fact_close_before_task_mutation(
+            ids, mutation="ActionBall global drain"
         )
         active = self._action_ball_attempt_active.clone()
         slots = self._action_ball_attempt_action.clone()
@@ -14182,6 +19140,15 @@ class RacketTargetCommand(CommandTerm):
         if not rows or len(rows) != len(env_ids):
             raise RuntimeError(
                 "frozen evaluator install requires equal non-empty rows/envs"
+            )
+        if self._action_ball_strike_fact_device_enabled:
+            self._action_ball_strike_fact_close_before_task_mutation(
+                env_ids, mutation="ActionBall frozen-evaluator replacement"
+            )
+            raise RuntimeError(
+                "frozen evaluator replacement has no full "
+                "ActionTaskReceiptRef binding for the same-transition "
+                "strike-fact owner"
             )
         if self._physical is None or (
             self._physical.cross_engine_truth_capability
@@ -16125,6 +21092,16 @@ class RacketTargetCommand(CommandTerm):
             "runtime_latches": runtime_latches_state,
             "last_rollout_step": self._action_ball_last_rollout_step,
         }
+        if bool(
+            getattr(
+                self,
+                "_action_ball_continuous_fresh_racket_lane_bound",
+                False,
+            )
+        ):
+            payload["continuous_protocol"] = (
+                self._action_ball_continuous_racket_exact_resume_protocol_state()
+            )
         if fixed_view_state is not None:
             payload["fixed_view"] = fixed_view_state
         if self._action_ball_adaptive_sigma_active():
@@ -16404,6 +21381,15 @@ class RacketTargetCommand(CommandTerm):
             expected.add("adaptive_sigma")
         if fixed_view:
             expected.add("fixed_view")
+        continuous_protocol_bound = bool(
+            getattr(
+                self,
+                "_action_ball_continuous_fresh_racket_lane_bound",
+                False,
+            )
+        )
+        if continuous_protocol_bound:
+            expected.add("continuous_protocol")
         if not isinstance(state, dict) or set(state) != expected:
             raise ValueError(
                 f"action-ball exact-resume keys must be exactly {sorted(expected)}"
@@ -16444,6 +21430,13 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_stage_runtime_latches_exact_state(
                 state["runtime_latches"]
             )
+        )
+        staged_continuous_protocol = (
+            self._action_ball_continuous_racket_stage_exact_resume_protocol_state(
+                state["continuous_protocol"]
+            )
+            if continuous_protocol_bound
+            else None
         )
         staged_fixed_view_state = None
         if fixed_view:
@@ -17542,6 +22535,59 @@ class RacketTargetCommand(CommandTerm):
         self._strike_window_entry_armed.copy_(
             staged_strike_window_entry_armed
         )
+        if staged_continuous_protocol is not None:
+            self._action_ball_continuous_racket_mutation_version = (
+                staged_continuous_protocol["mutation_version"]
+            )
+            self._action_ball_continuous_racket_mutation_version_device.fill_(
+                staged_continuous_protocol["mutation_version"]
+            )
+            self._action_ball_continuous_racket_mutation_version_device_receipt = None
+            self._action_ball_continuous_racket_terminal_resolution_total = (
+                staged_continuous_protocol["terminal_resolution_total"]
+            )
+            self._action_ball_continuous_racket_terminal_resolution_total_device.fill_(
+                staged_continuous_protocol["terminal_resolution_total"]
+            )
+            self._action_ball_continuous_racket_terminal_resolution_total_device_receipt = (
+                _action_ball_continuous_tensor_receipt(
+                    self._action_ball_continuous_racket_terminal_resolution_total_device
+                )
+            )
+            self._action_ball_continuous_racket_drain_last_update_index = (
+                staged_continuous_protocol["drain_last_update_index"]
+            )
+            self._action_ball_continuous_racket_drain_last_completed_environment_steps = (
+                staged_continuous_protocol[
+                    "drain_last_completed_environment_steps"
+                ]
+            )
+            self._action_ball_continuous_racket_drain_sequence = (
+                staged_continuous_protocol["drain_sequence"]
+            )
+            self._action_ball_continuous_racket_drain_last_acknowledged_mutation_version = (
+                staged_continuous_protocol[
+                    "drain_last_acknowledged_mutation_version"
+                ]
+            )
+            # Portable chronology survives cold restore; process-local global
+            # drain authority/receipt and tensor epochs do not.  A fresh
+            # seven-leaf ACK must rejoin them before R10 may read this leaf.
+            self._action_ball_continuous_racket_drain_authority = None
+            self._action_ball_continuous_racket_drain_last_acknowledged_receipt = None
+            self._action_ball_continuous_racket_checkpoint_live_epoch_receipts = None
+            self._action_ball_continuous_racket_checkpoint_live_join_required = True
+            self._action_ball_continuous_racket_checkpoint_requires_drain_ack = False
+            self._action_ball_continuous_racket_selected_reset_next_serial = (
+                staged_continuous_protocol["selected_reset_next_serial"]
+            )
+            self._action_ball_continuous_racket_drain_poisoned = (
+                staged_continuous_protocol["drain_poisoned"]
+            )
+            self._action_ball_continuous_racket_drain_poison_reason = (
+                staged_continuous_protocol["drain_poison_reason"]
+            )
+            self._action_ball_continuous_racket_active_ppo_drain_pack = None
         self._action_ball_last_rollout_step = last_step
         if staged_adaptive_sigma is not None:
             self._action_ball_commit_adaptive_sigma_state(
@@ -19684,6 +24730,15 @@ class RacketTargetCommand(CommandTerm):
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
+        if self._action_ball_full_mdp_enabled:
+            # Fresh targets are written only by the atomic D05 Racket child.
+            # Falling through would silently sample an unrelated legacy
+            # uniform target before that writer exists.
+            raise ActionBallContinuousRacketHotRevealHold(
+                "fresh full-MDP resample awaits the Device-R05 Racket writer"
+            )
+        if self._action_ball_enabled:
+            self._action_ball_reject_legacy_fresh_lane("resample/wrap producer")
         # A true reset or wrap can install new action-ball timing under the same manager step
         # token.  Never let the following update consume a pre-resample metrics handoff.
         self._invalidate_strike_timing_metrics_handoff()
@@ -19924,6 +24979,8 @@ class RacketTargetCommand(CommandTerm):
         # parks until time_to_strike enters the serve horizon (metrics-only; no reward/obs effect).
         if self._physical is not None:
             self._physical.on_resample(env_ids)
+        if not self._resample_is_wrap:
+            self._arm_action_ball_strike_fact_after_initial_reset()
 
     def _racket_fk(
         self,
@@ -20890,7 +25947,88 @@ class RacketTargetCommand(CommandTerm):
         self.strike_window_pos = self.strike_window if _pos_s is None else (_tts_abs <= float(_pos_s))
         self.strike_window_wide = self.strike_window if _wide_s is None else (_tts_abs <= float(_wide_s))
 
+    def compute(self, dt: float):
+        fresh_lane = getattr(
+            self,
+            "_action_ball_continuous_fresh_racket_lane_bound",
+            False,
+        ) is True
+        if fresh_lane:
+            if not _tensor_matches_identity_version_receipt(
+                getattr(self, "time_left", None),
+                getattr(
+                    self,
+                    "_action_ball_continuous_fresh_racket_time_left_receipt",
+                    None,
+                ),
+            ):
+                self.poison_global_reveal_epoch(
+                    "fresh Racket inherited resample timer drifted"
+                )
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "fresh Racket inherited resample timer drifted"
+                )
+            # Preserve IsaacLab's metric/timer/update order.  Expiry is
+            # impossible because the construction-bound timer is literal
+            # infinity, while the legacy resampler is intentionally a fresh
+            # lane tombstone and D05 owns every live command/timing write.
+            self._update_metrics()
+            self.time_left -= dt
+            receipt = _tensor_identity_version_receipt(self.time_left)
+            if receipt is None:
+                self.poison_global_reveal_epoch(
+                    "fresh Racket inherited resample timer became unsealable"
+                )
+                raise ActionBallContinuousRacketHotRevealHold(
+                    "fresh Racket inherited resample timer became unsealable"
+                )
+            self._action_ball_continuous_fresh_racket_time_left_receipt = (
+                receipt
+            )
+            self._update_command()
+            return
+        fast_path_complete = _compute_without_disabled_time_resampling_scan(
+            self, dt
+        )
+        if not fast_path_complete:
+            super().compute(dt)
+        # Both branches have now completed _update_metrics followed by
+        # _update_command.  ManagerBasedRLEnv is after Reward here, so this
+        # single tail owns the arm for the next physics transition.
+        # The fresh lane instead settles D05 after CommandManager returns and
+        # only then arms R03 from the newly current ActionEpoch.  Arming here
+        # would bind the previous epoch on both command zero and reveal ticks.
+        self._arm_action_ball_strike_fact_for_next_transition()
+
+    def _resample(self, env_ids: Sequence[int]):
+        _poison_disabled_time_resampling_fast_path_on_drift(self)
+        _revoke_disabled_time_resampling_fast_path_on_timer_drift(self)
+        super()._resample(env_ids)
+        _arm_disabled_time_resampling_fast_path_after_resample(
+            self, env_ids
+        )
+
+    def _motion_wrap_ids_for_target_resample(self, motion):
+        """Return true motion-wrap rows, skipping only the proven-empty lane."""
+
+        if _split_ready_nonloop_wrap_scan_is_impossible(motion):
+            return torch.empty(0, dtype=torch.long, device=self.device)
+        if hasattr(motion, "just_resampled"):
+            return torch.where(motion.just_resampled)[0]
+        return torch.where(motion.time_steps < self._prev_motion_steps)[0]
+
     def _update_command(self):
+        if getattr(
+            self,
+            "_action_ball_continuous_fresh_racket_lane_bound",
+            False,
+        ) is True:
+            # D05/ActionEpoch callbacks are the sole writers of every fresh
+            # Racket command/timing buffer.  CommandManager still invokes this
+            # hook at genesis and on every policy step; its fresh behavior is
+            # deliberately a write-free no-op before legacy initialization,
+            # wrap detection, target sampling, or task mutation can run.
+            return
         self._ensure_action_ball_runtime_initialized()
         motion = self._motion()
         # Normal CommandTerm order consumes the phase-aligned metrics refresh exactly once.  A direct
@@ -20918,8 +26056,7 @@ class RacketTargetCommand(CommandTerm):
                 motion.event_current_clip_id[event_ids],
                 motion.event_current_bank_row[event_ids],
             )
-        wrapped = torch.where(motion.just_resampled)[0] if hasattr(motion, "just_resampled") else \
-            torch.where(motion.time_steps < self._prev_motion_steps)[0]
+        wrapped = self._motion_wrap_ids_for_target_resample(motion)
         if len(wrapped) > 0:
             # Wrap path: a wrapped env passed its strike frame alive (strike < seg end), so no
             # pre-strike fall is counted — the flag only gates fall accounting inside
@@ -22659,6 +27796,209 @@ class RacketTargetCommand(CommandTerm):
         )
         self._diagnostic_hold_recovery_metric_scalars = ()
 
+    def _book_action_ball_learning_trend(
+        self,
+        *,
+        exact_strike: torch.Tensor,
+        nominal_ball_center_w: torch.Tensor,
+        capture: torch.Tensor,
+        v_plus: torch.Tensor,
+        w_plus: torch.Tensor,
+        topspin: torch.Tensor,
+        topspin_axis_valid: torch.Tensor,
+        landing_xy: torch.Tensor,
+        landing_valid: torch.Tensor,
+        landing_target_xy: torch.Tensor,
+    ) -> None:
+        """Accumulate one update's causal learning ladder without leaving the device.
+
+        The proximity cohort is the task-valid, active nominal strike tick, whether or not contact
+        occurs.  Immediate ball state uses the actual selected-rubber ``capture`` gate rather than
+        the later legal-return subset.  Landing values are a second-stage cohort: existing
+        ``virtual_capture_count`` is the denominator for landing validity, while these values are
+        conditioned on an existing valid landing and a finite frozen target.  This method is
+        instrumentation-only; no reward, observation, reset, sampler or phase state reads it.
+
+        The runner persists consumed counters once per completed PPO update.  They are not yet
+        exact-resume durable inside an in-flight update: formal checkpoint ordering precedes logger
+        consumption and this pending ledger is not part of the exact command state.  No resume
+        claim may bridge that gap until ordering plus state round-trip are fixed and tested.
+        """
+
+        ledger = self._ensure_exact_behavior_decision_counters()
+        active = self._action_ball_attempt_active.detach().bool()
+        task_valid = self._action_ball_task_valid.detach().bool()
+        nominal = exact_strike.detach().bool() & active & task_valid
+
+        paddle_center_w = self.racket_pos_w.detach()
+        nominal_ball_center_w = nominal_ball_center_w.detach()
+        paddle_ball_distance = torch.linalg.vector_norm(
+            paddle_center_w - nominal_ball_center_w,
+            dim=-1,
+        )
+        distance_finite = (
+            nominal
+            & torch.isfinite(paddle_center_w).all(dim=-1)
+            & torch.isfinite(nominal_ball_center_w).all(dim=-1)
+            & torch.isfinite(paddle_ball_distance)
+        )
+        distance_nonfinite = nominal & ~distance_finite
+        safe_distance = torch.where(
+            distance_finite,
+            paddle_ball_distance,
+            torch.zeros_like(paddle_ball_distance),
+        )
+        safe_distance_f64 = safe_distance.to(dtype=torch.float64)
+        ledger[_EXACT_STRIKE_PADDLE_BALL_DISTANCE_COUNT].add_(
+            distance_finite.sum(dtype=torch.long)
+        )
+        ledger[_EXACT_STRIKE_PADDLE_BALL_DISTANCE_NONFINITE_COUNT].add_(
+            distance_nonfinite.sum(dtype=torch.long)
+        )
+        ledger[_EXACT_STRIKE_PADDLE_BALL_DISTANCE_SUM].add_(
+            safe_distance_f64.sum()
+        )
+        ledger[_EXACT_STRIKE_PADDLE_BALL_DISTANCE_SUM_SQ].add_(
+            torch.square(safe_distance_f64).sum()
+        )
+
+        # Offset bucket ids by one so every excluded row falls into a disposable zero bucket.  One
+        # bincount produces the complete fixed histogram; no per-bin host predicate is evaluated.
+        distance_bucket = torch.bucketize(
+            safe_distance,
+            self._exact_strike_paddle_ball_distance_bin_edges_m_t,
+            right=False,
+        )
+        encoded_bucket = torch.where(
+            distance_finite,
+            distance_bucket + 1,
+            torch.zeros_like(distance_bucket),
+        )
+        distance_histogram = torch.bincount(
+            encoded_bucket,
+            minlength=len(_EXACT_STRIKE_PADDLE_BALL_DISTANCE_BUCKET_COUNTERS)
+            + 1,
+        )[1:]
+        for counter_name, increment in zip(
+            _EXACT_STRIKE_PADDLE_BALL_DISTANCE_BUCKET_COUNTERS,
+            distance_histogram.unbind(),
+        ):
+            ledger[counter_name].add_(increment)
+
+        capture_cohort = capture.detach().bool() & active & task_valid
+
+        def book_vector(
+            metric_names: tuple[str, ...],
+            values: torch.Tensor,
+            cohort: torch.Tensor,
+            *,
+            finite_count_name: str,
+            nonfinite_count_name: str,
+        ) -> torch.Tensor:
+            values = values.detach()
+            finite = cohort & torch.isfinite(values).all(dim=-1)
+            selected = torch.where(
+                finite.unsqueeze(-1),
+                values,
+                torch.zeros_like(values),
+            ).to(dtype=torch.float64)
+            sums = selected.sum(dim=0)
+            sums_sq = torch.square(selected).sum(dim=0)
+            ledger[finite_count_name].add_(finite.sum(dtype=torch.long))
+            ledger[nonfinite_count_name].add_(
+                (cohort & ~finite).sum(dtype=torch.long)
+            )
+            for metric_name, value_sum, value_sum_sq in zip(
+                metric_names,
+                sums.unbind(),
+                sums_sq.unbind(),
+            ):
+                ledger[f"{metric_name}_sum"].add_(value_sum)
+                ledger[f"{metric_name}_sum_sq"].add_(value_sum_sq)
+            return finite
+
+        v_plus = v_plus.detach()
+        v_plus_speed = torch.linalg.vector_norm(v_plus, dim=-1, keepdim=True)
+        v_plus_finite = book_vector(
+            _CAPTURE_V_PLUS_METRICS,
+            torch.cat((v_plus, v_plus_speed), dim=-1),
+            capture_cohort,
+            finite_count_name="capture_v_plus_finite_count",
+            nonfinite_count_name="capture_v_plus_nonfinite_count",
+        )
+        w_plus = w_plus.detach()
+        w_plus_norm = torch.linalg.vector_norm(w_plus, dim=-1, keepdim=True)
+        w_plus_finite = book_vector(
+            _CAPTURE_W_PLUS_METRICS,
+            torch.cat((w_plus, w_plus_norm), dim=-1),
+            capture_cohort,
+            finite_count_name="capture_w_plus_finite_count",
+            nonfinite_count_name="capture_w_plus_nonfinite_count",
+        )
+
+        # Topspin is signed.  Its axis comes from v_plus, so both post-contact vectors must be
+        # finite; storing abs(topspin) here would erase the backspin/topspin distinction.
+        topspin = topspin.detach()
+        topspin_axis_valid = topspin_axis_valid.detach().bool()
+        topspin_axis_invalid = (
+            capture_cohort
+            & v_plus_finite
+            & w_plus_finite
+            & ~topspin_axis_valid
+        )
+        topspin_finite = (
+            capture_cohort
+            & v_plus_finite
+            & w_plus_finite
+            & topspin_axis_valid
+            & torch.isfinite(topspin)
+        )
+        topspin_other_nonfinite = (
+            capture_cohort
+            & ~topspin_finite
+            & ~topspin_axis_invalid
+        )
+        safe_topspin = torch.where(
+            topspin_finite,
+            topspin,
+            torch.zeros_like(topspin),
+        ).to(dtype=torch.float64)
+        ledger["capture_w_plus_topspin_finite_count"].add_(
+            topspin_finite.sum(dtype=torch.long)
+        )
+        ledger["capture_w_plus_topspin_axis_invalid_count"].add_(
+            topspin_axis_invalid.sum(dtype=torch.long)
+        )
+        ledger["capture_w_plus_topspin_nonfinite_count"].add_(
+            topspin_other_nonfinite.sum(dtype=torch.long)
+        )
+        ledger[f"{_CAPTURE_W_PLUS_TOPSPIN_METRIC}_sum"].add_(
+            safe_topspin.sum()
+        )
+        ledger[f"{_CAPTURE_W_PLUS_TOPSPIN_METRIC}_sum_sq"].add_(
+            torch.square(safe_topspin).sum()
+        )
+
+        landing_xy = landing_xy.detach()
+        landing_target_xy = landing_target_xy.detach()
+        landing_delta = landing_xy - landing_target_xy
+        landing_error = torch.linalg.vector_norm(
+            landing_delta,
+            dim=-1,
+            keepdim=True,
+        )
+        landing_values = torch.cat(
+            (landing_xy, landing_delta, landing_error),
+            dim=-1,
+        )
+        book_vector(
+            _CAPTURE_LANDING_METRICS,
+            landing_values,
+            capture_cohort & landing_valid.detach().bool(),
+            finite_count_name="capture_landing_xy_finite_count",
+            nonfinite_count_name="capture_landing_xy_nonfinite_count",
+        )
+
     def _vb_evaluate(
         self,
         exact_strike: torch.Tensor,
@@ -23252,9 +28592,34 @@ class RacketTargetCommand(CommandTerm):
             net_clear = fitted_net_clear
         # Outgoing topspin component about t_hat = z_hat x d_hat of the outgoing horizontal
         # direction (Ace-style): omega . t_hat = -w_x*d_y + w_y*d_x.
-        d_xy = v_plus[:, :2]
-        d_hat = d_xy / (torch.linalg.norm(d_xy, dim=-1, keepdim=True) + 1e-9)
-        topspin = -w_plus[:, 0] * d_hat[:, 1] + w_plus[:, 1] * d_hat[:, 0]
+        if self._action_ball_enabled:
+            topspin, topspin_axis_valid = _action_ball_outgoing_topspin(
+                v_plus,
+                w_plus,
+            )
+            self._book_action_ball_learning_trend(
+                exact_strike=exact_strike,
+                nominal_ball_center_w=ball_end_w,
+                capture=gate,
+                v_plus=v_plus,
+                w_plus=w_plus,
+                topspin=topspin,
+                topspin_axis_valid=topspin_axis_valid,
+                landing_xy=land["land_xy"],
+                landing_valid=land["land_valid"],
+                landing_target_xy=self._vb_target_xy_per_env,
+            )
+        else:
+            # Preserve the historical non-ActionBall path without paying for the diagnostic
+            # axis-validity kernels used only by the future ActionBall evidence producer.
+            d_xy = v_plus[:, :2]
+            d_hat = d_xy / (
+                torch.linalg.norm(d_xy, dim=-1, keepdim=True) + 1e-9
+            )
+            topspin = (
+                -w_plus[:, 0] * d_hat[:, 1]
+                + w_plus[:, 1] * d_hat[:, 0]
+            )
 
         # One-shot caches consumed by hope_rewards.virtual_* THIS step.
         self.vb_fired = gate
@@ -24434,6 +29799,18 @@ class RacketTargetCommand(CommandTerm):
                 _STRIKE_WINDOW_ENTRY_DISTANCE_COUNT,
                 _STRIKE_WINDOW_ENTRY_DISTANCE_NONFINITE_COUNT,
                 *_STRIKE_WINDOW_ENTRY_DISTANCE_BUCKET_COUNTERS,
+                _EXACT_STRIKE_PADDLE_BALL_DISTANCE_COUNT,
+                _EXACT_STRIKE_PADDLE_BALL_DISTANCE_NONFINITE_COUNT,
+                *_EXACT_STRIKE_PADDLE_BALL_DISTANCE_BUCKET_COUNTERS,
+                "capture_v_plus_finite_count",
+                "capture_v_plus_nonfinite_count",
+                "capture_w_plus_finite_count",
+                "capture_w_plus_nonfinite_count",
+                "capture_w_plus_topspin_finite_count",
+                "capture_w_plus_topspin_axis_invalid_count",
+                "capture_w_plus_topspin_nonfinite_count",
+                "capture_landing_xy_finite_count",
+                "capture_landing_xy_nonfinite_count",
             ):
                 if name not in ledger:
                     ledger[name] = torch.zeros(
@@ -24543,13 +29920,28 @@ class RacketTargetCommand(CommandTerm):
         ):
             if name not in ledger:
                 ledger[name] = torch.zeros((), dtype=torch.float64, device=self.device)
-        if (
-            getattr(self, "_action_ball_enabled", False)
-            and _STRIKE_WINDOW_ENTRY_DISTANCE_SUM not in ledger
-        ):
-            ledger[_STRIKE_WINDOW_ENTRY_DISTANCE_SUM] = torch.zeros(
-                (), dtype=torch.float64, device=self.device
-            )
+        if getattr(self, "_action_ball_enabled", False):
+            for name in (
+                _STRIKE_WINDOW_ENTRY_DISTANCE_SUM,
+                _EXACT_STRIKE_PADDLE_BALL_DISTANCE_SUM,
+                _EXACT_STRIKE_PADDLE_BALL_DISTANCE_SUM_SQ,
+            ):
+                if name not in ledger:
+                    ledger[name] = torch.zeros(
+                        (), dtype=torch.float64, device=self.device
+                    )
+            for metric_name in (
+                *_CAPTURE_V_PLUS_METRICS,
+                *_CAPTURE_W_PLUS_METRICS,
+                _CAPTURE_W_PLUS_TOPSPIN_METRIC,
+                *_CAPTURE_LANDING_METRICS,
+            ):
+                for suffix in ("sum", "sum_sq"):
+                    name = f"{metric_name}_{suffix}"
+                    if name not in ledger:
+                        ledger[name] = torch.zeros(
+                            (), dtype=torch.float64, device=self.device
+                        )
 
         termination_manager = getattr(self._env, "termination_manager", None)
         for term_name in tuple(getattr(termination_manager, "active_terms", ())):
@@ -25597,6 +30989,11 @@ class RacketTargetCommand(CommandTerm):
             # first origin, the normal exact clip strike is accepted and is the sole arming event.
             exact_strike = exact_strike & motion.event_exact_strike_allowed
             motion.record_event_exact_strike(torch.where(exact_strike)[0])
+        # This is the existing single exact opportunity after every task-valid,
+        # retiming and event-scheduler one-shot gate.  The Racket compute tail
+        # binds this exact device bitset to the next physics transition; it
+        # never re-derives eligibility from a later target or clock.
+        self._capture_action_ball_single_exact_eligibility(exact_strike)
         (
             pos_target_eligible,
             vel_target_eligible,
@@ -26728,6 +32125,13 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # Immutable fixed-question ablations require False: otherwise an invalid zero-filled target
     # position can be repopulated by ObsTerm noise after the accessor returns.
     action_ball_target_observation_noise: bool = True
+    # Owner-side seam for the full-key, same-transition exact-strike fact.
+    # This is deliberately default-off: enabling it is valid only in a
+    # constructed env that also installs the unique post-physics DoneTerm, all
+    # nine named RewardTerm consumers, and the runner boundary/checkpoint
+    # hooks.  Receipt-free immutable fixed views are rejected rather than
+    # assigned a synthetic task identity.
+    action_ball_strike_fact_device_enabled: bool = False
 
     # reference_perturbed perturbation (final half-extents; scaled 0->1 by the curriculum below).
     ref_perturb_pos: tuple[float, float, float] = (0.15, 0.20, 0.15)  # m, per-axis half-range

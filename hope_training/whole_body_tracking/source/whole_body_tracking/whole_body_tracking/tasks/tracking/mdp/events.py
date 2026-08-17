@@ -12,6 +12,42 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
+def reset_action_ball_full_mdp_robot_to_default(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> None:
+    """Reset selected fresh full-MDP robot rows without sampling RNG.
+
+    The articulation's materialized defaults are the plant-state source.  In
+    particular, ``default_joint_pos`` already contains any startup-only
+    calibration randomization, so this reset must not reconstruct a nominal
+    pose from config literals or a motion clip.  ``env_ids=None`` is rejected:
+    the native reset callpoint must always provide its explicit selected rows.
+    """
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    if (
+        type(env_ids) is not torch.Tensor
+        or env_ids.ndim != 1
+        or env_ids.dtype != torch.int64
+        or env_ids.device != torch.device(asset.device)
+    ):
+        raise ValueError(
+            "fresh full-MDP robot reset requires selected int64 env_ids "
+            "on the articulation device"
+        )
+
+    root_state = asset.data.default_root_state[env_ids].clone()
+    root_state[:, :3] += env.scene.env_origins[env_ids]
+    root_state[:, 7:] = 0.0
+    joint_pos = asset.data.default_joint_pos[env_ids].clone()
+    joint_vel = torch.zeros_like(asset.data.default_joint_vel[env_ids])
+
+    asset.write_root_state_to_sim(root_state, env_ids=env_ids)
+    asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+
+
 def randomize_joint_default_pos(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,

@@ -21,6 +21,7 @@ Run:  python -m pytest hope_training/whole_body_tracking/tests/test_ground_plant
 from __future__ import annotations
 
 import importlib.util
+import sys
 import types
 from pathlib import Path
 
@@ -609,6 +610,78 @@ def test_contract_reader_still_fails_closed_without_the_finalizer_proof():
     setattr(cfg3, train_mod._ACTION_BALL_DR_L0_RUNTIME_ATTR, tampered)
     with pytest.raises(RuntimeError, match="differs from its canonical payload"):
         train_mod._ground_plant_contract(cfg3)
+
+
+def test_fresh_full_mdp_contract_uses_installed_reset_only_event_graph(monkeypatch):
+    cfg = _ground_env_cfg()
+    del cfg.events.physics_material
+    expected_reset = object()
+    mdp_module = types.ModuleType("whole_body_tracking.tasks.tracking.mdp")
+    mdp_module.reset_action_ball_full_mdp_robot_to_default = expected_reset
+    monkeypatch.setitem(
+        sys.modules, "whole_body_tracking.tasks.tracking.mdp", mdp_module
+    )
+
+    class _EventManager:
+        active_terms = {"reset": ["action_ball_full_mdp_robot_reset"]}
+
+        def __init__(self, *, func=expected_reset, mode="reset", params=None):
+            self.term_cfg = _NS(
+                func=func,
+                mode=mode,
+                params={"asset_cfg": _NS(name="robot")} if params is None else params,
+            )
+
+        def get_term_cfg(self, name):
+            assert name == "action_ball_full_mdp_robot_reset"
+            return self.term_cfg
+
+    block = train_mod._ground_plant_contract(
+        cfg,
+        fresh_full_mdp_event_manager=_EventManager(),
+    )
+    assert block["robot_material_randomization_absent"] is True
+    assert block["robot_material_static_friction_range"] is None
+    assert block["robot_material_dynamic_friction_range"] is None
+    TC._validate_ground_plant_contract({"ground_plant": block})
+
+    with pytest.raises(RuntimeError, match="installed reset-only Event graph"):
+        manager = _EventManager()
+        manager.active_terms = {
+            "reset": [
+                "action_ball_full_mdp_robot_reset",
+                "physics_material",
+            ]
+        }
+        train_mod._ground_plant_contract(
+            cfg,
+            fresh_full_mdp_event_manager=manager,
+        )
+    with pytest.raises(RuntimeError, match="exact reset-mode graph"):
+        manager = _EventManager()
+        manager.active_terms = {
+            "startup": ["action_ball_full_mdp_robot_reset"]
+        }
+        train_mod._ground_plant_contract(
+            cfg,
+            fresh_full_mdp_event_manager=manager,
+        )
+    for manager in (
+        _EventManager(func=object()),
+        _EventManager(mode="startup"),
+        _EventManager(params={"asset_cfg": _NS(name="table")}),
+        _EventManager(
+            params={
+                "asset_cfg": _NS(name="robot"),
+                "material_range": (0.3, 1.6),
+            }
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="deterministic robot-reset contract"):
+            train_mod._ground_plant_contract(
+                cfg,
+                fresh_full_mdp_event_manager=manager,
+            )
 
 
 def test_contract_reader_refuses_authored_robot_material_under_dr_l0():

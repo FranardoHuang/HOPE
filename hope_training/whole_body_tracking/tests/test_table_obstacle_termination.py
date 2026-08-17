@@ -132,15 +132,30 @@ def test_kernel_threshold_is_a_strict_inequality(term_mod, frame):
             pos, force, torch.zeros(1, 3), lo_t, hi_t, 1.0)) is want
 
 
-def test_filtered_kernel_nonfinite_force_fails_safe(term_mod):
-    force_matrix = torch.tensor(
+def test_live_blade_geometry_has_contact_clear_and_nonfinite_counterexamples(
+    term_mod, frame
+):
+    lo, hi = frame.table_top_aabb_env(NEAR_X, SURFACE_Z, margin=MARGIN)
+    wrist_pos = torch.tensor(
         [
-            [[[0.0, 0.0, 0.0]]],
-            [[[float("nan"), 0.0, 0.0]]],
+            [NEAR_X - 0.19, 0.0, SURFACE_Z],
+            [NEAR_X - 0.40, 0.0, SURFACE_Z],
+            [float("nan"), 0.0, SURFACE_Z],
         ],
         dtype=torch.float32,
     )
-    assert term_mod.filtered_contact_hit_mask(force_matrix, 1.0).tolist() == [False, True]
+    wrist_quat = torch.zeros((3, 4), dtype=torch.float32)
+    wrist_quat[:, 0] = 1.0
+    got = term_mod.racket_blade_table_overlap_mask(
+        wrist_pos,
+        wrist_quat,
+        torch.zeros((3, 3), dtype=torch.float32),
+        torch.tensor(lo, dtype=torch.float32),
+        torch.tensor(hi, dtype=torch.float32),
+        torch.tensor((0.206194, 0.025474, 0.028020), dtype=torch.float32),
+        torch.diag(torch.tensor((0.082, 0.008, 0.082), dtype=torch.float32)),
+    )
+    assert got.tolist() == [True, False, True]
 
 
 def test_body_alignment_is_by_name_not_position(term_mod):
@@ -436,6 +451,351 @@ def test_geometric_component_obb_tracks_live_body_rotation(term_mod):
         racket_blade_local_half_axes_m=blade_axes,
     )
     assert got.tolist() == [True, False]
+
+
+def _retired_sparse_sat_reference(
+    obb_center, obb_half_axes, aabb_lo, aabb_hi, broad_phase
+):
+    """Exact pre-optimization gather/scatter SAT retained as a test oracle."""
+
+    result = torch.zeros_like(broad_phase)
+    candidate = torch.nonzero(broad_phase, as_tuple=False)
+    env_index, obb_index, box_index = candidate.unbind(dim=1)
+    pair_center = obb_center[env_index, obb_index]
+    pair_half_axes = obb_half_axes[env_index, obb_index]
+    box_center = 0.5 * (aabb_lo + aabb_hi)
+    box_half = 0.5 * (aabb_hi - aabb_lo)
+    delta = box_center[box_index] - pair_center
+    axis_norm = torch.linalg.vector_norm(pair_half_axes, dim=-1)
+    safe_norm = torch.clamp(
+        axis_norm, min=torch.finfo(pair_center.dtype).tiny
+    )
+    obb_unit_axes = pair_half_axes / safe_norm[..., None]
+    overlap = torch.ones(
+        (candidate.shape[0],), dtype=torch.bool, device=obb_center.device
+    )
+
+    def apply_axis(axis):
+        separation = torch.abs(torch.sum(delta * axis, dim=-1))
+        obb_radius = torch.sum(
+            torch.abs(
+                torch.sum(pair_half_axes * axis[:, None, :], dim=-1)
+            ),
+            dim=-1,
+        )
+        box_radius = torch.sum(
+            box_half[box_index] * torch.abs(axis), dim=-1
+        )
+        overlap.logical_and_(separation <= obb_radius + box_radius)
+
+    world_axes = torch.eye(
+        3, dtype=obb_center.dtype, device=obb_center.device
+    )
+    for world_axis in range(3):
+        apply_axis(world_axes[world_axis].expand_as(pair_center))
+    for obb_axis in range(3):
+        axis = obb_unit_axes[:, obb_axis, :]
+        apply_axis(axis)
+        for world_axis in range(3):
+            apply_axis(
+                torch.cross(
+                    axis,
+                    world_axes[world_axis].expand_as(pair_center),
+                    dim=-1,
+                )
+            )
+    result[env_index, obb_index, box_index] = overlap
+    return result
+
+
+@pytest.mark.parametrize("candidate_mode", ["none", "sparse", "all"])
+def test_dense_mask_sat_is_bitwise_retired_sparse_parity(
+    term_mod, candidate_mode
+):
+    """No/sparse/all candidate layouts preserve every exact SAT verdict."""
+
+    obb_center = torch.tensor(
+        [
+            [[0.0, 0.0, 0.0], [1.2, 0.0, 0.0]],
+            [[0.5, 0.5, 0.0], [float("nan"), 0.0, 0.0]],
+        ],
+        dtype=torch.float32,
+    )
+    angle = math.pi / 4.0
+    diagonal = torch.tensor(
+        [
+            [math.cos(angle), math.sin(angle), 0.0],
+            [-0.05 * math.sin(angle), 0.05 * math.cos(angle), 0.0],
+            [0.0, 0.0, 0.05],
+        ],
+        dtype=torch.float32,
+    )
+    axis_aligned = torch.diag(torch.tensor([0.5, 0.25, 0.1]))
+    obb_half_axes = torch.stack(
+        (axis_aligned, diagonal, diagonal, axis_aligned), dim=0
+    ).reshape(2, 2, 3, 3)
+    aabb_lo = torch.tensor(
+        [[-0.5, -0.25, -0.1], [0.45, 0.45, -0.05], [2.0, 2.0, 2.0]],
+        dtype=torch.float32,
+    )
+    aabb_hi = torch.tensor(
+        [[0.5, 0.25, 0.1], [0.55, 0.55, 0.05], [2.1, 2.1, 2.1]],
+        dtype=torch.float32,
+    )
+    if candidate_mode == "none":
+        broad = torch.zeros(2, 2, 3, dtype=torch.bool)
+    elif candidate_mode == "all":
+        broad = torch.ones(2, 2, 3, dtype=torch.bool)
+    else:
+        broad = torch.tensor(
+            [
+                [[True, False, False], [False, True, False]],
+                [[False, True, False], [False, False, True]],
+            ]
+        )
+    expected = _retired_sparse_sat_reference(
+        obb_center, obb_half_axes, aabb_lo, aabb_hi, broad
+    )
+    actual = term_mod._obb_aabb_sat_overlap(
+        obb_center,
+        obb_half_axes,
+        aabb_lo,
+        aabb_hi,
+        broad_phase=broad,
+    )
+    assert torch.equal(actual, expected)
+    assert not bool(torch.any(actual & ~broad))
+
+
+def test_dense_mask_sat_keeps_exact_edge_touch_and_has_no_dynamic_compaction(
+    term_mod,
+):
+    """SAT remains closed at touching edges and ships no dynamic-shape gather."""
+
+    obb_center = torch.tensor([[[0.0, 0.0, 0.0]]], dtype=torch.float32)
+    obb_half_axes = torch.eye(3, dtype=torch.float32).reshape(1, 1, 3, 3)
+    aabb_lo = torch.tensor([[1.0, -0.25, -0.25]], dtype=torch.float32)
+    aabb_hi = torch.tensor([[1.5, 0.25, 0.25]], dtype=torch.float32)
+    broad = torch.ones(1, 1, 1, dtype=torch.bool)
+    assert term_mod._obb_aabb_sat_overlap(
+        obb_center,
+        obb_half_axes,
+        aabb_lo,
+        aabb_hi,
+        broad_phase=broad,
+    ).tolist() == [[[True]]]
+
+    source_path = pathlib.Path(term_mod.__file__)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_obb_aabb_sat_overlap"
+    )
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "torch"
+        and node.func.attr in {"nonzero", "where"}
+        for node in ast.walk(function)
+    )
+
+
+def test_geometric_guard_fuses_component_and_blade_sat_once(
+    term_mod, monkeypatch
+):
+    """One sample keeps both channels but launches a single dense SAT chain."""
+
+    original = term_mod._obb_aabb_sat_overlap
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(tuple(args[0].shape))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(term_mod, "_obb_aabb_sat_overlap", counted)
+    body_pos = torch.tensor(
+        [
+            [[0.0, 0.0, 0.0]],
+            [[1.0, 0.0, 0.0]],
+            [[2.0, 0.0, 0.0]],
+        ],
+        dtype=torch.float32,
+    )
+    body_quat = torch.zeros(3, 1, 4, dtype=torch.float32)
+    body_quat[..., 0] = 1.0
+    component_indices = torch.tensor([0], dtype=torch.long)
+    component_center = torch.zeros(1, 3, dtype=torch.float32)
+    component_axes = torch.diag(torch.full((3,), 0.05)).unsqueeze(0)
+    aabb_lo = torch.tensor(
+        [[-0.04, -0.04, -0.04], [1.16, -0.04, -0.04]],
+        dtype=torch.float32,
+    )
+    aabb_hi = torch.tensor(
+        [[0.04, 0.04, 0.04], [1.24, 0.04, 0.04]],
+        dtype=torch.float32,
+    )
+    blade_center = torch.tensor([0.20, 0.0, 0.0], dtype=torch.float32)
+    blade_axes = torch.diag(
+        torch.tensor([0.05, 0.01, 0.05], dtype=torch.float32)
+    )
+    got = term_mod.geometric_table_contact_hit_mask(
+        body_pos,
+        body_quat,
+        torch.zeros(3, 3),
+        component_indices,
+        component_center,
+        component_axes,
+        aabb_lo,
+        aabb_hi,
+        racket_body_index=0,
+        racket_blade_center_offset_wrist_m=blade_center,
+        racket_blade_local_half_axes_m=blade_axes,
+    )
+    assert got.tolist() == [True, True, False]
+    assert calls == [(3, 2, 3)]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires Pod CUDA")
+def test_cuda_fixed_pose_tape_dense_fused_done_reason_counter_parity(
+    term_mod, monkeypatch
+):
+    """Four substeps preserve terminal, attribution and sticky evidence bitwise."""
+
+    from test_reward_flags_mdp import hope_actions_mod
+
+    device = torch.device("cuda:0")
+    env_count = 256
+    row = torch.arange(env_count, device=device, dtype=torch.float32)
+    base_pos = torch.zeros(env_count, 2, 3, device=device)
+    base_pos[:, 0, 0] = torch.remainder(row, 101.0) * 0.01 - 0.50
+    base_pos[:, 0, 1] = torch.remainder(row, 79.0) * 0.01 - 0.40
+    base_pos[:, 0, 2] = torch.remainder(row, 23.0) * 0.01 + 0.64
+    base_pos[:, 1] = base_pos[:, 0]
+    base_pos[:, 1, 0] -= 0.18
+    angle = torch.remainder(row, 37.0) * 0.01
+    body_quat = torch.zeros(env_count, 2, 4, device=device)
+    body_quat[..., 0] = torch.cos(angle[:, None] * 0.5)
+    body_quat[..., 3] = torch.sin(angle[:, None] * 0.5)
+    origins = torch.zeros(env_count, 3, device=device)
+    component_indices = torch.tensor([0, 1], dtype=torch.long, device=device)
+    component_centers = torch.zeros(2, 3, device=device)
+    component_axes = torch.stack(
+        (
+            torch.diag(torch.tensor([0.08, 0.03, 0.05], device=device)),
+            torch.diag(torch.tensor([0.06, 0.04, 0.04], device=device)),
+        )
+    )
+    aabb_lo = torch.tensor(
+        [
+            [-0.02, -0.80, 0.69],
+            [0.45, -0.82, 0.00],
+            [0.48, -0.02, 0.74],
+            [0.48, -0.82, 0.74],
+            [0.48, 0.80, 0.74],
+        ],
+        device=device,
+    )
+    aabb_hi = torch.tensor(
+        [
+            [2.76, 0.80, 0.78],
+            [2.80, 0.82, 0.70],
+            [2.78, 0.02, 0.94],
+            [0.52, -0.78, 0.94],
+            [0.52, 0.82, 0.94],
+        ],
+        device=device,
+    )
+    blade_center = torch.tensor([0.20, 0.0, 0.0], device=device)
+    blade_axes = torch.diag(
+        torch.tensor([0.082, 0.008, 0.082], device=device)
+    )
+    shifts = (0.00, 0.04, -0.02, 0.06)
+
+    def sample(kernel):
+        monkeypatch.setattr(term_mod, "_obb_aabb_sat_overlap", kernel)
+        transcript = []
+        for substep, shift in enumerate(shifts):
+            pose = base_pos.clone()
+            pose[..., 0] += shift
+            if substep == 2:
+                pose[7, 0, 0] = float("nan")
+            evidence = term_mod.geometric_table_contact_attribution(
+                pose,
+                body_quat,
+                origins,
+                component_indices,
+                component_centers,
+                component_axes,
+                aabb_lo,
+                aabb_hi,
+                racket_body_index=1,
+                racket_blade_center_offset_wrist_m=blade_center,
+                racket_blade_local_half_axes_m=blade_axes,
+            )
+            transcript.append(
+                tuple(value.detach().clone() for value in evidence)
+            )
+        torch.cuda.synchronize()
+        return transcript
+
+    def sparse_kernel(center, axes, lo, hi, *, broad_phase=None):
+        if broad_phase is None:
+            broad_phase = torch.ones(
+                center.shape[0],
+                center.shape[1],
+                lo.shape[0],
+                dtype=torch.bool,
+                device=center.device,
+            )
+        return _retired_sparse_sat_reference(
+            center, axes, lo, hi, broad_phase
+        )
+
+    dense_kernel = term_mod._obb_aabb_sat_overlap
+    expected = sample(sparse_kernel)
+    actual = sample(dense_kernel)
+    assert all(
+        torch.equal(old_field, new_field)
+        for old_step, new_step in zip(expected, actual)
+        for old_field, new_field in zip(old_step, new_step)
+    )
+
+    def latch_from(transcript):
+        latch = hope_actions_mod._PhysicsSubstepTableContactLatch(
+            num_envs=env_count,
+            expected_apply_calls=4,
+            device=device,
+            quarantine_stale_sensor_after_reset=False,
+        )
+        latch.begin_policy_step()
+        latch.record_apply(None)
+        for substep in range(3):
+            latch.record_apply(transcript[substep][0])
+        sticky = latch.finalize(transcript[3][0]).detach().clone()
+        # Terminal reason and every downstream counter are functions of these
+        # exact pair fields; preserve their fixed ordering in one transcript.
+        counters = torch.stack(
+            tuple(
+                torch.stack(
+                    (
+                        fields[0].sum(),
+                        fields[2].sum(),
+                        fields[4].sum(),
+                        fields[5].sum(),
+                    )
+                )
+                for fields in transcript
+            )
+        )
+        return sticky, counters
+
+    expected_sticky, expected_counters = latch_from(expected)
+    actual_sticky, actual_counters = latch_from(actual)
+    assert torch.equal(actual_sticky, expected_sticky)
+    assert torch.equal(actual_counters, expected_counters)
 
 
 def test_sat_attribution_rejects_rotated_world_aabb_corner_false_positive(
@@ -965,15 +1325,15 @@ def test_action_ball_reuses_whole_body_sensor_without_pair_filtered_views():
     for stale_name in (wrist_sensor_name, *sensor_names):
         assert getattr(env_cfg.scene, stale_name) is None
 
-    # A late full→legacy override recreates only the historic one-body wrist source.
+    # A late full-to-legacy override recreates one unfiltered wrist clock.
     env_cfg.table_robot_keepout = False
     env_cfg.table_obstacle_prims = five_obstacles[:1]
     namespace["attach_table_contact_sensor"](env_cfg)
     assert env_cfg.table_pair_contact_sensor_names == (wrist_sensor_name,)
     assert tuple(
         getattr(env_cfg.scene, wrist_sensor_name).filter_prim_paths_expr
-    ) == five_obstacles[:1]
-    for stale_name in set(sensor_names) - {wrist_sensor_name}:
+    ) == ()
+    for stale_name in sensor_names:
         assert getattr(env_cfg.scene, stale_name) is None
 
 
@@ -1190,7 +1550,7 @@ def _env(
         "racket_table_contact": _FilteredSensor(
             filtered_force,
             "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link",
-            (EXACT_SOURCE_PRIMS[0],),
+            (),
         )
     }
     for role, sensor_name, source_prim in zip(
@@ -1278,24 +1638,43 @@ def test_racket_inside_the_table_terminates(term_mod, frame):
     assert bool(_call(term_mod, _env(pos, force))) is True
 
 
-def test_filtered_racket_contact_terminates_with_wrist_origin_outside_table(term_mod):
+def test_legacy_blade_only_contact_terminates_and_clear_blade_does_not(term_mod):
+    """Live blade geometry covers the fixed-child offset without pair-filter data."""
+
+    def result(wrist_x):
+        pos = [[
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.1],
+            [wrist_x, 0.0, SURFACE_Z],
+            [0.0, 0.1, 0.05],
+        ]]
+        return bool(_call(term_mod, _env(pos, [[[0, 0, 0]] * 4])))
+
+    assert result(NEAR_X - 0.19) is True
+    assert result(NEAR_X - 0.40) is False
+
+
+def test_blade_geometry_terminates_with_wrist_origin_outside_table(term_mod):
     """The 21 cm racket offset may touch the near edge while the wrist origin is still outside."""
     wrist_before_near_edge = [NEAR_X - 0.10, 0.10, SURFACE_Z]
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1], wrist_before_near_edge,
             [0.0, 0.1, 0.05]]]
-    # The broad stream sees the same contact but cannot attribute it to the table, and its wrist
-    # origin correctly fails the table AABB.  The filtered pair supplies that missing identity.
+    # The broad stream sees force but its wrist origin correctly fails the
+    # table AABB.  The live blade OBB supplies the missing fixed-child offset.
     broad_force = [[[0, 0, 0], [0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0]]]
     filtered_force = [[[[0.0, 0.0, 120.0]]]]
     assert bool(_call(term_mod, _env(pos, broad_force, filtered_force))) is True
 
 
-def test_wrist_origin_outside_without_filtered_contact_does_not_terminate(term_mod):
-    wrist_before_near_edge = [NEAR_X - 0.10, 0.10, SURFACE_Z]
+def test_retired_filtered_force_cannot_terminate_a_clear_blade(term_mod):
+    wrist_before_near_edge = [NEAR_X - 0.40, 0.10, SURFACE_Z]
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1], wrist_before_near_edge,
             [0.0, 0.1, 0.05]]]
     broad_force = [[[0, 0, 0], [0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0]]]
-    assert bool(_call(term_mod, _env(pos, broad_force))) is False
+    retired_filtered_force = [[[[0.0, 0.0, 120.0]]]]
+    assert bool(
+        _call(term_mod, _env(pos, broad_force, retired_filtered_force))
+    ) is False
 
 
 def test_a_legal_swing_does_not_terminate(term_mod, frame):
@@ -1319,7 +1698,7 @@ def test_falling_onto_the_floor_is_not_a_table_hit(term_mod, frame):
 
 def test_under_the_slab_is_the_documented_gap(term_mod, frame):
     """Legacy top-only mode keeps its documented under-slab behavior."""
-    pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1], [NEAR_X + 0.25, 0.0, 0.60], [0.0, 0.1, 0.05]]]
+    pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1], [NEAR_X + 0.25, 0.0, 0.57], [0.0, 0.1, 0.05]]]
     force = [[[0, 0, 0], [0, 0, 0], [0.0, 0.0, 120.0], [0.0, 0.0, 400.0]]]
     assert bool(_call(term_mod, _env(pos, force))) is False
 
@@ -1660,11 +2039,10 @@ def test_missing_force_stream_fails_loud(term_mod):
         _call(term_mod, env)
 
 
-def test_missing_filtered_force_stream_fails_loud(term_mod):
+def test_retired_filtered_force_stream_is_not_a_verdict_source(term_mod):
     env = _env([[[0.0, 0.0, 1.0]] * 4], [[[0, 0, 0]] * 4])
     env.scene.sensors["racket_table_contact"].data.force_matrix_w = None
-    with pytest.raises(RuntimeError, match="force_matrix_w"):
-        _call(term_mod, env)
+    assert bool(_call(term_mod, env)) is False
 
 
 def test_apply_table_obstacle_only_binds_scene_entities_installed_in_each_mode():

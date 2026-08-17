@@ -17,6 +17,7 @@ Default usage trains one unified forehand+backhand policy by passing two referen
 one policy can condition on which clip/target family it is currently imitating.
 """
 
+from dataclasses import MISSING, dataclass
 import math
 
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -341,9 +342,10 @@ TABLE_CONTACT_BODY_NAMES = (
     "left_wrist_yaw_Link",
     "right_wrist_yaw_Link",
 )
-#: Preserve the historic wrist sensor name for legacy top-only tasks.  ActionBall's full table
-#: assembly deliberately installs no pair-filtered sensor; it uses live articulation pose plus
-#: conservative geometry.
+#: Legacy wrist sensor name.  It carries no pair filters: the pinned GPU
+#: backend cannot filter a dynamic wrist against IsaacLab's static table
+#: cuboid.  Legacy substep chronology may read its timestamp, but table
+#: attribution uses live blade/table geometry.
 TABLE_CONTACT_SENSOR_NAME = "racket_table_contact"
 TABLE_CONTACT_SENSOR_PRIM = "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
 TABLE_FULL_CONTACT_SENSOR_ROLES = (
@@ -655,42 +657,42 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
 
 
 def attach_table_contact_sensor(env_cfg) -> None:
-    """Attach only the legacy top-only wrist pair sensor.
+    """Attach only an unfiltered legacy wrist clock when needed.
 
-    ActionBall's full assembly deliberately installs *no* filtered ``ContactSensor``.  The pinned
-    GPU backend expands five table sources by 32 robot filter expressions, emits invalid
-    ``force_matrix_w`` data and makes 4096-environment construction/collection prohibitively
-    expensive.  Full assembly instead reads live articulation pose and performs a conservative
-    device-side geometric keep-out.
+    The pinned GPU backend emits no usable filtered force for the static table
+    cuboid (and the former full assembly matrix was also prohibitively
+    expensive).  The DoneTerm consumes live body force plus blade/table
+    geometry instead.  Legacy action guards retain a second independently
+    updated sensor clock, without asking the backend for an unsupported static
+    collider filter.  Full assembly needs no sensor clock.
     """
 
     filter_prims = tuple(getattr(env_cfg, "table_obstacle_prims", ()))
     if not filter_prims:
         raise RuntimeError("table contact sensor cannot be attached without a table obstacle prim")
-    full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
     previous_sensor_names = tuple(
         getattr(env_cfg, "table_pair_contact_sensor_names", ())
     )
+    full_assembly = bool(getattr(env_cfg, "table_robot_keepout", False))
     sensor_names = () if full_assembly else (TABLE_CONTACT_SENSOR_NAME,)
     for stale_sensor_name in set(previous_sensor_names) - set(sensor_names):
         if getattr(env_cfg.scene, stale_sensor_name, None) is not None:
             setattr(env_cfg.scene, stale_sensor_name, None)
-    if full_assembly:
-        # Retire configs created by an older class-level/default-on pass even when the old run did
-        # not publish ``table_pair_contact_sensor_names`` yet.
-        for stale_sensor_name in (
-            TABLE_CONTACT_SENSOR_NAME,
-            *TABLE_FULL_CONTACT_SENSOR_NAMES,
-        ):
-            if getattr(env_cfg.scene, stale_sensor_name, None) is not None:
-                setattr(env_cfg.scene, stale_sensor_name, None)
-    else:
+    # Retire configs created by an older class-level/default-on pass even when
+    # the old run did not publish ``table_pair_contact_sensor_names`` yet.
+    for stale_sensor_name in (
+        TABLE_CONTACT_SENSOR_NAME,
+        *TABLE_FULL_CONTACT_SENSOR_NAMES,
+    ):
+        if getattr(env_cfg.scene, stale_sensor_name, None) is not None:
+            setattr(env_cfg.scene, stale_sensor_name, None)
+    if not full_assembly:
         setattr(
             env_cfg.scene,
             TABLE_CONTACT_SENSOR_NAME,
             ContactSensorCfg(
                 prim_path=TABLE_CONTACT_SENSOR_PRIM,
-                filter_prim_paths_expr=list(filter_prims),
+                filter_prim_paths_expr=[],
                 update_period=0.0,
             ),
         )
@@ -718,7 +720,7 @@ def table_hit_done_term():
     component geometry: a stance foot remains far from every table AABB, while a foot actually
     entering the floor-to-slab keep-out is correctly terminal.
 
-    Legacy top-only tasks keep the broad-origin plus exact-wrist combination.  ActionBall uses a
+    Legacy top-only tasks keep broad body-force attribution plus exact live blade/table geometry.  ActionBall uses a
     conservative articulation-pose collision-component-OBB/table-AABB keep-out without reading
     contact sensors.  Its conservative broad phase can terminate before resolved physical contact
     and must be reported as a keep-out violation, not contact truth.  The merged wrist/racket body
@@ -732,6 +734,8 @@ def table_hit_done_term():
         func=mdp.robot_hit_table,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[A3_NON_FOOT_BODY_REGEX]),
+            # Compatibility clock only.  Its filter list is empty and its
+            # force matrix is never a table-attribution fact.
             "filtered_sensor_cfg": SceneEntityCfg(TABLE_CONTACT_SENSOR_NAME),
             # ``ManagerTermBase`` resolves every SceneEntityCfg in ``params`` eagerly, including
             # fields ignored by the selected mode.  Keep inactive-mode bindings empty so legacy
@@ -2451,8 +2455,6 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
             "expected_joint_count": 31,
         },
     )
-
-
 @configclass
 class HOPEActionBallC211RewardsCfg(HOPEActionBallRewardsCfg):
     """C211-only reward surface with no desired-contact target consumer.
@@ -2528,10 +2530,10 @@ class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
     )
     # 人话:关节撞到机械硬限位这件事继续全量观测、继续记账、继续卡晋级,但不再当场把这一局掐掉。
     #
-    # ``terminate=False`` matches the vendor-aligned ``build_1`` arm, whose same-quantity DoneTerm
-    # ``actual_q_hard_limit_telemetry`` always returns False ("intentionally not a PPO episode
-    # termination, matching the Unitree training structure") and routes hard-edge events to
-    # checkpoint NO-GO evidence only.  Deterministic replay on this branch showed 7/7 episodes
+    # ``terminate=False`` is an explicit ActionBall learnability choice; it must not be attributed
+    # to build_1.  The build_1 formal source receipt at d7dcbdf4 wires its actual-q hard-limit
+    # function as a real DoneTerm.  Here hard-edge events remain checkpoint NO-GO evidence while
+    # the policy is allowed to recover.  Deterministic replay on this branch showed 7/7 episodes
     # terminated by this term at ticks 69--88, every one of them before the nominal strike tick,
     # so the strike/landing layers never became eligible at all -- the CaT (arXiv:2403.18765)
     # "binary termination => identically zero return" ablation, reproduced.  The measured teacher
@@ -2610,6 +2612,751 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
         )
         self.actions.joint_pos.table_contact_guard_expected_decimation = 4
         self.terminations.robot_hit_table.params["require_substep_latch"] = True
+
+
+ACTION_BALL_FULL_MDP_REWARD_TEMPLATE_KIND = (
+    "action_ball_full_mdp_reward_manager_template_v2"
+)
+ACTION_BALL_FULL_MDP_REWARD_TEMPLATE_STATUS = "HOLD_NUMERIC_AUTHORITY_UNMATERIALIZED"
+ACTION_BALL_FULL_MDP_WEIGHT_SOURCE = "numeric_authority"
+ACTION_BALL_FULL_MDP_FIXED_WEIGHT_SOURCE = "fixed_manager_contract"
+ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE = "fixed_common_dense_contract"
+
+
+@dataclass(frozen=True)
+class ActionBallFullMdpRewardTermTemplate:
+    """One non-executable RewardManager term descriptor.
+
+    Except for R07's manager-side identity multiplier, this type deliberately
+    contains no numeric weight.  The runtime factory must replace the entire
+    template with real ``RewardTermCfg`` objects from one validated numeric
+    authority before Isaac constructs RewardManager.  Supplying convenient
+    shell values here would create an accidental manual/default training path.
+    """
+
+    manager_name: str
+    payment_consumer: str
+    owner_role: str
+    func: object
+    weight_source: str
+    manager_weight: float | None
+    manager_weight_path: str | None = None
+    scale_source: str | None = None
+    owner_weight_source: str | None = None
+    fixed_func_params: tuple = ()
+    scheduled_for_a: bool = True
+    scheduled_for_c: bool = True
+    manager_weight_must_be_positive: bool = True
+
+
+ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = (
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name=name,
+        payment_consumer=f"r03:{name}",
+        owner_role="r03_owner",
+        func=func,
+        weight_source=ACTION_BALL_FULL_MDP_WEIGHT_SOURCE,
+        manager_weight=None,
+        manager_weight_path=(
+            "selected_numeric_parameters.manager_weights.ordered_ten."
+            f"{name}"
+        ),
+        scale_source=(
+            "selected_numeric_parameters."
+            f"strike_kernel_profiles.{name}.scale"
+        ),
+    )
+    for name, func in (
+        ("racket_position", mdp.r03_racket_position),
+        ("racket_velocity", mdp.r03_racket_velocity),
+        ("racket_normal", mdp.r03_racket_normal),
+        ("racket_position_coarse", mdp.r03_racket_position_coarse),
+        ("racket_velocity_coarse", mdp.r03_racket_velocity_coarse),
+        ("racket_normal_coarse", mdp.r03_racket_normal_coarse),
+        ("racket_position_precision", mdp.r03_racket_position_precision),
+        ("racket_velocity_precision", mdp.r03_racket_velocity_precision),
+        ("racket_normal_precision", mdp.r03_racket_normal_precision),
+        ("paddle_center_proximity", mdp.r03_paddle_center_proximity),
+    )
+)
+ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = tuple(
+    ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
+) + (
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name="physical_selected_contact",
+        payment_consumer="physical:physical_selected_contact",
+        owner_role="physical_owner",
+        func=mdp.physical_selected_contact,
+        weight_source=ACTION_BALL_FULL_MDP_WEIGHT_SOURCE,
+        manager_weight=None,
+        manager_weight_path=(
+            "selected_numeric_parameters.manager_weights.selected_contact"
+        ),
+    ),
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name="common_on_table_outcome",
+        payment_consumer="r06:common_on_table_outcome",
+        owner_role="r06_owner",
+        func=mdp.r06_common_on_table_outcome,
+        weight_source=ACTION_BALL_FULL_MDP_WEIGHT_SOURCE,
+        manager_weight=None,
+        manager_weight_path=(
+            "selected_numeric_parameters.manager_weights.on_table"
+        ),
+    ),
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name="post_contact_placement_guidance",
+        payment_consumer="r06:post_contact_placement_guidance",
+        owner_role="r06_owner",
+        func=mdp.r06_post_contact_placement_guidance,
+        weight_source=ACTION_BALL_FULL_MDP_WEIGHT_SOURCE,
+        manager_weight=None,
+        manager_weight_path=(
+            "selected_numeric_parameters.manager_weights.placement"
+        ),
+        owner_weight_source="c10_owner_bound_treatment_gain_a1_c0",
+    ),
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name="common_recovery_reward_v1",
+        payment_consumer="r07:common_recovery_reward_v1",
+        owner_role="r07_owner",
+        func=mdp.r07_continuous_recovery,
+        weight_source=ACTION_BALL_FULL_MDP_FIXED_WEIGHT_SOURCE,
+        manager_weight=1.0,
+        owner_weight_source=(
+            "selected_numeric_parameters.manager_weights.recovery."
+            "recovery_pose"
+        ),
+        fixed_func_params=(("manager_weight", 1.0),),
+    ),
+)
+ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES = tuple(
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name=name,
+        payment_consumer=f"common_dense:{name}",
+        owner_role="motion_owner",
+        func=func,
+        weight_source=ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE,
+        manager_weight=weight,
+        fixed_func_params=(("command_name", "motion"), ("std", std)),
+    )
+    for name, func, weight, std in (
+        ("motion_global_anchor_pos", mdp.motion_global_anchor_position_error_exp, 0.5, 0.3),
+        ("motion_global_anchor_ori", mdp.motion_global_anchor_orientation_error_exp, 0.5, 0.4),
+        ("motion_body_pos", mdp.motion_relative_body_position_error_exp, 1.0, 0.3),
+        ("motion_body_ori", mdp.motion_relative_body_orientation_error_exp, 1.0, 0.4),
+        ("motion_body_lin_vel", mdp.motion_global_body_linear_velocity_error_exp, 1.0, 1.0),
+        ("motion_body_ang_vel", mdp.motion_global_body_angular_velocity_error_exp, 1.0, 3.14),
+    )
+)
+ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = (
+    ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
+    + ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
+)
+ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER = tuple(
+    term.manager_name for term in ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
+)
+
+
+@configclass
+class HOPEActionBallFullMdpRewardsCfg:
+    """Fail-closed twenty-term template, not a RewardManager config.
+
+    This object is intentionally composed during ordinary registration so the
+    exact callable/order/owner contract is inspectable without constructing a
+    simulator.  It contains no executable ``RewardTermCfg``.  The unique
+    runtime factory seam must atomically replace it with materialized terms;
+    passing this template to RewardManager is a construction error.
+    """
+
+    schema_version: int = 2
+    kind: str = ACTION_BALL_FULL_MDP_REWARD_TEMPLATE_KIND
+    status: str = ACTION_BALL_FULL_MDP_REWARD_TEMPLATE_STATUS
+    numeric_authority_sha256: str = ""
+    launch_authorized: bool = False
+    terms: tuple = ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
+
+
+ACTION_BALL_FULL_MDP_TERMINATION_MANAGER_ORDER = (
+    "fresh_pre_reward_publish",
+    "time_out",
+    "base_fell_tilt",
+    "base_too_low",
+    "joint_qdes_forbidden",
+    "robot_hit_table",
+)
+
+
+@configclass
+class HOPEActionBallFullMdpTerminationsCfg:
+    """Fresh publisher plus real episode timeout and absolute safety exits."""
+
+    # This term publishes R03/R07 through the exact top reward graph and never
+    # requests a timeout.  It must precede every RewardTerm in the same control
+    # transition, including a transition that subsequently terminates.
+    fresh_pre_reward_publish = DoneTerm(
+        func=mdp.fresh_full_mdp_pre_reward_done_term,
+        time_out=False,
+    )
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+    base_fell_tilt = DoneTerm(
+        func=mdp.bad_orientation,
+        time_out=False,
+        params={"limit_angle": 0.7},
+    )
+    base_too_low = DoneTerm(
+        func=mdp.root_height_below_minimum,
+        time_out=False,
+        params={"minimum_height": 0.5},
+    )
+    joint_qdes_forbidden = DoneTerm(
+        func=mdp.pre_clamp_qdes_forbidden_zone,
+        time_out=False,
+        params={
+            "action_name": "joint_pos",
+            "limit_source": "joint_pos_limits",
+            "margin_rad": 0.0,
+            "margin_fraction": 0.02,
+        },
+    )
+    robot_hit_table = table_hit_done_term()
+
+
+@configclass
+class HOPEActionBallFullMdpEventsCfg:
+    """Fresh-only deterministic articulation reset at Isaac's native seam.
+
+    This is deliberately not a ``HOPEEventCfg`` or ``EventCfg`` subclass:
+    fresh full-MDP rollout 0 is nominal, so none of their startup material,
+    joint-default, CoM, link-mass or actuator-gain randomizers may reach the
+    EventManager.
+    """
+
+    action_ball_full_mdp_robot_reset = EventTerm(
+        func=mdp.reset_action_ball_full_mdp_robot_to_default,
+        mode="reset",
+        params={"asset_cfg": SceneEntityCfg("robot")},
+    )
+
+
+def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
+    """Return structural template drift without pretending it is materialized."""
+
+    if type(value) is not HOPEActionBallFullMdpRewardsCfg:
+        return ("reward_template_exact_type_differs",)
+    blockers = []
+    expected_public = {
+        "schema_version",
+        "kind",
+        "status",
+        "numeric_authority_sha256",
+        "launch_authorized",
+        "terms",
+    }
+    actual_public = {name for name in vars(value) if not name.startswith("_")}
+    if actual_public != expected_public:
+        blockers.append("reward_template_public_surface_differs")
+    if value.schema_version != 2:
+        blockers.append("reward_template_schema_version_differs")
+    if value.kind != ACTION_BALL_FULL_MDP_REWARD_TEMPLATE_KIND:
+        blockers.append("reward_template_kind_differs")
+    if value.status != ACTION_BALL_FULL_MDP_REWARD_TEMPLATE_STATUS:
+        blockers.append("reward_template_status_differs")
+    if value.numeric_authority_sha256 != "":
+        blockers.append("self_asserted_numeric_authority_forbidden")
+    if value.launch_authorized is not False:
+        blockers.append("self_asserted_launch_authority_forbidden")
+    if type(value.terms) is not tuple or len(value.terms) != 20:
+        blockers.append("reward_template_term_count_differs")
+        return tuple(blockers)
+    for actual, expected in zip(value.terms, ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES):
+        if type(actual) is not ActionBallFullMdpRewardTermTemplate:
+            blockers.append("reward_template_term_type_differs")
+            continue
+        if actual != expected:
+            blockers.append(f"reward_template_term_differs:{expected.manager_name}")
+    if tuple(term.manager_name for term in value.terms) != (
+        ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER
+    ):
+        blockers.append("reward_template_manager_order_differs")
+    if tuple(term.payment_consumer for term in value.terms[:14]) != mdp.ORDERED_CONSUMERS:
+        blockers.append("reward_template_payment_order_differs")
+    if tuple(term.payment_consumer for term in value.terms[14:]) != tuple(
+        f"common_dense:{term.manager_name}"
+        for term in ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
+    ):
+        blockers.append("reward_template_common_dense_order_differs")
+    for term in value.terms[:13]:
+        if (
+            term.weight_source != ACTION_BALL_FULL_MDP_WEIGHT_SOURCE
+            or term.manager_weight is not None
+            or type(term.manager_weight_path) is not str
+            or not term.manager_weight_path.startswith(
+                "selected_numeric_parameters.manager_weights."
+            )
+        ):
+            blockers.append(f"unmaterialized_numeric_weight_present:{term.manager_name}")
+    recovery = value.terms[13]
+    if (
+        recovery.weight_source != ACTION_BALL_FULL_MDP_FIXED_WEIGHT_SOURCE
+        or recovery.manager_weight != 1.0
+        or recovery.manager_weight_path is not None
+        or recovery.fixed_func_params != (("manager_weight", 1.0),)
+    ):
+        blockers.append("r07_manager_weight_contract_differs")
+    placement = value.terms[12]
+    if (
+        not placement.scheduled_for_a
+        or not placement.scheduled_for_c
+        or not placement.manager_weight_must_be_positive
+        or placement.owner_weight_source != "c10_owner_bound_treatment_gain_a1_c0"
+    ):
+        blockers.append("placement_common_positive_shell_contract_differs")
+    return tuple(dict.fromkeys(blockers))
+
+
+def require_action_ball_full_mdp_reward_manager_materialized(value) -> None:
+    """Reject the inspectable template before any RewardManager construction."""
+
+    blockers = action_ball_full_mdp_reward_template_blockers(value)
+    if blockers:
+        raise RuntimeError(
+            "fresh full-MDP Reward template drift: " + ",".join(blockers)
+        )
+    raise RuntimeError(
+        "fresh full-MDP RewardManager construction HOLD: numeric authority "
+        "has not atomically materialized the twenty RewardTermCfg objects"
+    )
+
+
+ACTION_BALL_FULL_MDP_TARGET_MODE = "action_ball_full_mdp"
+ACTION_BALL_FULL_MDP_OBS_MODE = "action_ball_full_mdp"
+ACTION_BALL_FULL_MDP_PARENT_KIND = "action_ball_full_mdp_parent_v1"
+ACTION_BALL_FULL_MDP_COMPONENT_REGISTRY_KIND = (
+    "action_ball_full_mdp_runtime_components_v1"
+)
+ACTION_BALL_FULL_MDP_COMPONENT_ROLES = (
+    "r05_owner",
+    "device_r05_owner",
+    "motion_owner",
+    "racket_owner",
+    "r06_owner",
+    "physical_owner",
+    "r03_owner",
+    "r07_owner",
+    "ppo_drain_owner",
+)
+# This is a deliberately narrow bootstrap authority for the first disposable
+# no-save N=2 diagnostic.  It is code-owned so the scene exists before Isaac
+# constructs the env; it is not a capacity receipt and cannot authorize a
+# formal run.  Formal launch must replace this with the externally pinned
+# capacity receipt already required by the physical-flight contract.
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_FLIGHT_CAPACITY = 2
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_CAPACITY_AUTHORITY_KIND = (
+    "action_ball_full_mdp_code_owned_diagnostic_n2_capacity_v1"
+)
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_MOTION_PROFILE_KIND = (
+    "whole_body_tracking.action_ball_continuous_motion_projection_v1"
+)
+ACTION_BALL_FULL_MDP_CONSTRUCTION_BLOCKERS = (
+    "fresh Racket command producer remains HOLD",
+    "common observation/critic/provider ABI remains R08 HOLD",
+    "immutable common A/C motion source and receipt are not launch-bound",
+    "K=2 scene capacity is diagnostic code-owned, not formal launch authority",
+    "nine distinct runtime components are not construction-installed",
+    "C10 family payment authority is not minted from the exact EnvCfg role",
+    "twenty-term RewardManager numeric authority is not materialized",
+)
+
+
+def _attach_action_ball_full_mdp_diagnostic_n2_scene(env_cfg):
+    """Install the one code-owned pre-env scene needed by the N=2 smoke.
+
+    The scene module's receipt-consuming builder is intentionally not used:
+    no production capacity receipt exists at cfg construction time, and a cfg
+    must not mint one to validate itself.  The diagnostic spec has no receipt
+    digest field; ``env_cfg.action_ball_full_mdp_capacity_receipt_sha256``
+    stays empty and launch authorization stays false.
+    """
+
+    import yaml as _yaml
+
+    from whole_body_tracking.tasks.tracking.config.agibot_a3 import (
+        action_ball_full_mdp_ball_scene as _full_scene,
+    )
+    from whole_body_tracking.tasks.tracking.mdp.virtual_ball import (
+        default_venue_yaml_path,
+    )
+
+    with open(default_venue_yaml_path(), "r") as fh:
+        ball = _yaml.safe_load(fh)["ball"]
+
+    capacity = ACTION_BALL_FULL_MDP_DIAGNOSTIC_FLIGHT_CAPACITY
+    spec = _full_scene.ActionBallFullMdpDiagnosticBallSceneSpec(
+        schema_version=_full_scene.SCHEMA_VERSION,
+        kind=_full_scene.DIAGNOSTIC_SCENE_SPEC_KIND,
+        capacity_authority_kind=(
+            ACTION_BALL_FULL_MDP_DIAGNOSTIC_CAPACITY_AUTHORITY_KIND
+        ),
+        formal_capacity_receipt_sha256=None,
+        flight_capacity=capacity,
+        scene_entity_names=tuple(
+            f"{_full_scene.SCENE_ENTITY_PREFIX}{slot:03d}"
+            for slot in range(capacity)
+        ),
+        prim_paths=tuple(
+            f"{{ENV_REGEX_NS}}/{_full_scene.SCENE_PRIM_PREFIX}{slot:03d}"
+            for slot in range(capacity)
+        ),
+        ball_radius_m=float(ball["radius"]),
+        ball_mass_kg=float(ball["mass"]),
+        park_position_env_m=_full_scene.PARK_POSITION_ENV_M,
+        collision_enabled=True,
+        gravity_enabled=True,
+    )
+    attached = _full_scene.attach_action_ball_full_mdp_ball_scene(
+        env_cfg,
+        spec=spec,
+    )
+    if attached != spec.scene_entity_names:
+        raise RuntimeError("fresh full-MDP diagnostic scene attachment differs")
+    env_cfg.action_ball_full_mdp_ball_scene_spec = spec
+    env_cfg.action_ball_full_mdp_scene_spec_sha256 = spec.canonical_sha256
+    return spec
+
+
+def _attach_action_ball_full_mdp_diagnostic_motion_profile(env_cfg):
+    """Install the cadence mapping before CommandManager constructs Motion.
+
+    The cfg retains only the immutable mapping: Isaac configclass deep-copies
+    configuration values and must never copy an opaque authority.  The later
+    code-owned factory rebuilds one parent authority off-side, requires its
+    mapping to equal this one, and binds it only in the final commit window.
+    Source digests are diagnostic provenance, not launch evidence.
+    """
+
+    import action_ball_motion_cadence_device as _cadence
+
+    parent, receipt, profile = (
+        _cadence.build_action_ball_full_mdp_diagnostic_motion_profile()
+    )
+    if (
+        type(parent) is not _cadence.DiagnosticMotionParentScheduleAuthority
+        or type(receipt) is not _cadence.DiagnosticMotionProfileReceipt
+        or type(profile) is not dict
+        or profile.get("kind")
+        != ACTION_BALL_FULL_MDP_DIAGNOSTIC_MOTION_PROFILE_KIND
+        or _cadence.DIAGNOSTIC_UNAUTHORIZED is not True
+        or _cadence.RUNTIME_INTEGRATED is not False
+        or _cadence.LAUNCH_AUTHORIZED is not False
+    ):
+        raise RuntimeError(
+            "fresh full-MDP diagnostic Motion profile constructor differs"
+        )
+    env_cfg.commands.motion.action_ball_continuous_motion_cadence = dict(
+        profile
+    )
+    return profile
+
+
+def _attach_action_ball_full_mdp_diagnostic_motion_catalog(env_cfg):
+    """Install the exact code-owned 73-action table before CommandManager.
+
+    The returned metadata is diagnostic source membership only.  MotionCommand
+    re-reads it at its real construction callpoint and gives the existing
+    MotionLoader immutable byte snapshots.  No catalog field is a formal
+    admission, reset authority or first-reveal receipt.
+    """
+
+    from whole_body_tracking.tasks.tracking.mdp import commands as _commands
+
+    motion = env_cfg.commands.motion
+    racket = env_cfg.commands.racket_target
+    # Isaac configclass deep-copies dataclass defaults before a derived
+    # post-init can inspect them.  deepcopy(MISSING) is another instance of
+    # the same sentinel type, not the singleton, so identity here would reject
+    # the legitimate default.  Exact type still rejects every caller path.
+    if (
+        type(motion.motion_file) is not type(MISSING)
+        or motion.action_ball_full_mdp_diagnostic_catalog is not None
+    ):
+        raise RuntimeError(
+            "fresh full-MDP diagnostic catalog rejects caller-authored motion input"
+        )
+    table = _commands.load_action_ball_full_mdp_diagnostic_catalog_table()
+    motion.motion_file = table.motion_files
+    motion.clip_family_per_clip = table.clip_family_per_clip
+    racket.strike_phase_per_clip = table.strike_phase_per_clip
+    racket.mount_normal_sign_per_clip = table.mount_normal_sign_per_clip
+    racket.motion_teacher_racket_source = "measured_channel"
+    motion.action_ball_full_mdp_diagnostic_catalog = (
+        _commands.ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND
+    )
+    try:
+        _commands.require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
+            motion,
+            racket,
+            table=table,
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            "fresh full-MDP diagnostic catalog attachment differs"
+        ) from exc
+    return table
+
+
+@configclass
+class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
+    HOPEPingPongActionBallAgibotA3EnvCfg
+):
+    """Common fresh full-MDP config seam; never a legacy ActionBall alias.
+
+    This class intentionally remains unregistered.  The two registered leaf
+    types below own the A/C role in code.  The current class is a truthful
+    configuration/registration closure, not a claim that the runtime can yet
+    construct.  It installs exactly two balls for the first disposable no-save
+    diagnostic, without pretending that this code constant is a production
+    capacity receipt; no fake owner, caller factory, or legacy ``pb_ball`` is
+    installed here.  During a real construction, the command/scene factories
+    must create all nine exact owners and call
+    ``env.install_action_ball_full_mdp_runtime_components(...)`` exactly once
+    while ``ManagerBasedRLEnv.__init__`` is still constructing managers.
+
+    Observation width and the numeric Reward profile remain deliberately
+    unfrozen until R08/R03.  A and C share one inspectable, non-executable
+    twenty-term Reward template; the factory must replace it atomically from
+    one numeric authority before RewardManager construction.  The later C10
+    owner may derive only the post-contact placement role from the exact
+    registered leaf type.
+    """
+
+    obs_mode: str = ACTION_BALL_FULL_MDP_OBS_MODE
+    # This inherited ActionBall flag must be false from the start of the parent
+    # ``__post_init__``.  Otherwise the legacy robot-only volume is briefly
+    # constructed before being removed and can be mistaken for fresh scene
+    # ownership by a later construction hook.
+    table_robot_keepout: bool = False
+    action_ball_full_mdp_parent_kind: str = ACTION_BALL_FULL_MDP_PARENT_KIND
+    action_ball_full_mdp_family_role: str = "UNBOUND"
+    action_ball_full_mdp_component_registry_kind: str = (
+        ACTION_BALL_FULL_MDP_COMPONENT_REGISTRY_KIND
+    )
+    action_ball_full_mdp_component_roles: tuple = (
+        ACTION_BALL_FULL_MDP_COMPONENT_ROLES
+    )
+    action_ball_full_mdp_scene_owner_field: str = (
+        "action_ball_full_mdp_physical_scene_port"
+    )
+    action_ball_full_mdp_scene_spec_sha256: str = ""
+    action_ball_full_mdp_capacity_receipt_sha256: str = ""
+    action_ball_full_mdp_scene_capacity: int = 0
+    action_ball_full_mdp_scene_capacity_authority_kind: str = "UNBOUND"
+    action_ball_full_mdp_ball_scene_spec = None
+    action_ball_full_mdp_runtime_construction_status: str = "HOLD"
+    action_ball_full_mdp_construction_blockers: tuple = (
+        ACTION_BALL_FULL_MDP_CONSTRUCTION_BLOCKERS
+    )
+    events: HOPEActionBallFullMdpEventsCfg = HOPEActionBallFullMdpEventsCfg()
+
+    def __post_init__(self):
+        # Fail before any inherited cfg construction when the only robot asset
+        # that can expose distinct red/black PhysX collider headers is absent,
+        # redirected, partial, or no longer reconstructs from its enclosed
+        # reviewed sources.  This integrity check is construction-only; it
+        # neither replaces live contact evidence nor grants launch authority.
+        from whole_body_tracking.tasks.tracking.config.agibot_a3 import (
+            action_ball_full_mdp_split_asset as _split_asset,
+        )
+
+        diagnostic_usd = (
+            _split_asset.require_action_ball_full_mdp_split_asset()
+        )
+
+        # AgibotA3FlatEnvCfg retargets ``events.base_com`` while constructing
+        # its ordinary task cfg.  Give that parent-only setup a disposable
+        # EventCfg, then restore the structurally separate fresh event surface
+        # before any Manager can be constructed.  No parent event term crosses
+        # this cfg-construction seam.
+        fresh_events = self.events
+        self.events = EventCfg()
+        try:
+            super().__post_init__()
+        finally:
+            self.events = fresh_events
+
+        # One fresh episode must retain the same Motion cadence through the
+        # first deferred reveal, four accepted shots, and the fourth shot's
+        # retirement at the following reveal.  The inherited 10 s / 500-tick
+        # horizon resets that state before the sequence can exist; 30 s is the
+        # narrow whole-second horizon above the 1467-tick retirement boundary.
+        self.episode_length_s = 30.0
+        racket = self.commands.racket_target
+        motion = self.commands.motion
+
+        # The fresh diagnostic consumes real selected-rubber PhysX headers.
+        # Therefore its robot must be the derived split-collider USD selected
+        # before this cfg was imported; the ordinary 0807 conversion merges
+        # both faces into one collision shape and cannot answer the question.
+        # Asset reconstruction above is not runtime identity: independently
+        # require that the robot spawn retained that exact selected model.
+        # The later scene installer must still prove concrete live prims and
+        # subscriptions before it can publish any contact fact.
+        robot_spawn = getattr(getattr(self.scene, "robot", None), "spawn", None)
+        if getattr(robot_spawn, "usd_path", None) != diagnostic_usd:
+            raise RuntimeError(
+                "fresh full-MDP robot spawn did not retain the selected split-rubber USD"
+            )
+
+        # A separate target-mode identity is load-bearing.  Treating this as
+        # legacy ``action_ball`` would silently reactivate the one-shot sampler,
+        # analytic scorer and old hard-contract path.
+        racket.target_mode = ACTION_BALL_FULL_MDP_TARGET_MODE
+        self.obs_mode = ACTION_BALL_FULL_MDP_OBS_MODE
+
+        # Fresh physical ownership is the capacity-derived K-body scene port.
+        # Keep every legacy one-ball/analytic instrument disabled; construction
+        # remains HOLD until the real scene spec and owner registry arrive.
+        self.physical_ball = False
+        racket.physical_ball = False
+        racket.physical_ball_impulse = False
+        racket.shadow_ball = False
+        racket.shadow_table = False
+        racket.virtual_ball = False
+        racket.vb_metrics_only = False
+
+        # The full-table keep-out volume was built for a robot-only analytic
+        # ball task and would physically occupy the fresh ball flight volume.
+        # Retain the real table top/contact instrumentation, but remove that
+        # incompatible proxy before a K-body scene can be attached.
+        self.table_robot_keepout = False
+        apply_table_obstacle(self)
+
+        # Isaac materializes scene entities while constructing the base env,
+        # so this cannot be deferred to the later runtime-owner factory seam.
+        # Install the disposable N=2 plant now and keep the absence of a real
+        # capacity receipt explicit.
+        scene_spec = _attach_action_ball_full_mdp_diagnostic_n2_scene(self)
+        self.action_ball_full_mdp_scene_capacity = scene_spec.flight_capacity
+        self.action_ball_full_mdp_scene_capacity_authority_kind = (
+            ACTION_BALL_FULL_MDP_DIAGNOSTIC_CAPACITY_AUTHORITY_KIND
+        )
+        self.action_ball_full_mdp_capacity_receipt_sha256 = ""
+
+        # N=2 is the environment/plant capacity, not the action count.  The
+        # full diagnostic loads all 73 ordered measured actions.  These clips
+        # are professional captures, not ready-to-ready loops, so the old N=1
+        # physical-ready -> measured-frame0 bridge is intentionally inapplicable.
+        # D05/the hot Motion epoch still own first reveal and recovery; until
+        # they are installed construction remains HOLD.
+        racket.action_ball_diagnostic_unauthorized = True
+        motion.action_ball_diagnostic_split_ready_teacher = False
+        motion.action_ball_single_stroke_timeout_enabled = False
+        motion.canonical_ready_mode = False
+        # The fresh schedule/hot epoch owns all waits and clip selection.  Do
+        # not inherit random legacy hold/RSI/reset mechanisms merely because
+        # canonical_ready_mode is correctly false for professional captures.
+        motion.balanced_clip_sampling = True
+        motion.stand_start_prob = 1.0
+        motion.stand_start_yaw_range = (0.0, 0.0)
+        motion.hold_steps_range = (0, 0)
+        motion.stand_start_min_hold = 0
+        motion.post_swing_start_prob = 0.0
+        motion.post_swing_min_hold = 0
+        motion.wrap_teleport = False
+        motion.clip_switch_prob = 0.0
+        motion.event_timing_mode = "disabled"
+        motion.speed_scale_range = (1.0, 1.0)
+        motion.speed_scale_per_clip = None
+        motion.stagger_initial_clock = False
+        motion.stagger_hold_max_steps = 0
+        motion.rsi_skip_settle_frames = 0
+        motion.planner_revision_enabled = False
+        motion.joint_position_range = (0.0, 0.0)
+        motion.pose_range = {
+            axis: (0.0, 0.0)
+            for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+        }
+        motion.velocity_range = dict(motion.pose_range)
+        catalog = _attach_action_ball_full_mdp_diagnostic_motion_catalog(self)
+        if len(catalog.action_order) != 73:
+            raise RuntimeError(
+                "fresh full-MDP diagnostic catalog action count differs"
+            )
+
+        # This mapping must exist before CommandManager parses MotionCommandCfg.
+        # Do not bind the live Motion owner while later stages
+        # (question/Physical/reward) can still HOLD.
+        motion_profile = _attach_action_ball_full_mdp_diagnostic_motion_profile(
+            self
+        )
+        if (
+            motion.action_ball_continuous_motion_cadence
+            != motion_profile
+        ):
+            raise RuntimeError(
+                "fresh full-MDP diagnostic Motion profile attachment differs"
+            )
+
+        # Fresh Motion keeps the reviewed ready -> measured-frame0 bridge but
+        # never turns one completed stroke into an episode timeout.
+        motion.action_ball_diagnostic_split_ready_teacher = False
+        motion.action_ball_single_stroke_timeout_enabled = False
+
+        # The inherited A3 cfg setup needs temporary legacy reward/termination
+        # objects only while it retargets SceneEntityCfg fields; no Manager
+        # exists in that pure construction phase.  Replace both whole objects
+        # last.  The numeric factory will later replace only the Reward template
+        # atomically; no inherited reward or termination term survives at the
+        # Manager-construction boundary.
+        self.terminations = HOPEActionBallFullMdpTerminationsCfg()
+        apply_table_obstacle(self)
+        self.rewards = HOPEActionBallFullMdpRewardsCfg()
+        blockers = action_ball_full_mdp_reward_template_blockers(self.rewards)
+        if blockers:
+            raise RuntimeError(
+                "fresh full-MDP Reward template construction drift: "
+                + ",".join(blockers)
+            )
+
+
+@configclass
+class HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg(
+    HOPEPingPongActionBallFullMdpAgibotA3EnvCfg
+):
+    """Fresh family A role; numeric placement gain is C10-owned, not a field."""
+
+    action_ball_full_mdp_family_role: str = "A"
+
+
+@configclass
+class HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg(
+    HOPEPingPongActionBallFullMdpAgibotA3EnvCfg
+):
+    """Fresh family C role; numeric placement gain is C10-owned, not a field."""
+
+    action_ball_full_mdp_family_role: str = "C"
+
+
+def action_ball_full_mdp_family_role(env_cfg) -> str:
+    """Resolve the family only from one exact registered EnvCfg type.
+
+    YAML repeats the human-readable role so launch receipts can cross-check
+    intent, but it is not payment authority.  A later C10 constructor consumes
+    this exact-type projection and mints the opaque A=1/C=0 authority.
+    """
+
+    roles = {
+        HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg: "A",
+        HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg: "C",
+    }
+    resolved = roles.get(type(env_cfg))
+    if resolved is None:
+        raise RuntimeError(
+            "fresh full-MDP family requires one exact registered EnvCfg type"
+        )
+    if getattr(env_cfg, "action_ball_full_mdp_family_role", None) != resolved:
+        raise RuntimeError("fresh full-MDP EnvCfg family role was rewritten")
+    return resolved
 
 
 @configclass
@@ -3200,6 +3947,290 @@ class HOPEActionBallC211TrainableObservationsCfg(
     critic: ActionBallC211CriticCfg = ActionBallC211CriticCfg()
 
 
+ACTION_BALL_STRIKE_FACT_SUCCESSOR_MODE = "device_sealed_same_transition"
+ACTION_BALL_STRIKE_FACT_SUCCESSOR_REQUEST_FLAG = (
+    "action_ball_strike_fact_successor"
+)
+ACTION_BALL_STRIKE_FACT_SUCCESSOR_DONE_TERM = (
+    "action_ball_strike_fact_publish"
+)
+ACTION_BALL_STRIKE_FACT_SUCCESSOR_RECEIPT_ATTR = (
+    "_action_ball_strike_fact_successor_receipt"
+)
+ACTION_BALL_FULL_MDP_PARENT_MARKER_ATTR = (
+    "action_ball_full_mdp_parent_marker"
+)
+ACTION_BALL_STRIKE_FACT_PHYSICAL_VALIDITY_SOURCE_ATTR = (
+    "action_ball_strike_fact_physical_task_validity_source"
+)
+ACTION_BALL_STRIKE_FACT_POST_DT_BUDGET_RECEIPT_ATTR = (
+    "action_ball_strike_fact_post_dt_budget_receipt"
+)
+ACTION_BALL_STRIKE_FACT_CONSUMER_ABI_RECEIPT_ATTR = (
+    "action_ball_strike_fact_ordered_consumer_abi_receipt"
+)
+
+# These construction anchors deliberately remain unfrozen.  A config value cannot
+# self-authorize by copying a plausible marker or SHA: construction stays HOLD
+# until reviewed code pins all three authorities and a later change installs a
+# real constructor.  In particular, the legacy three-column target-component
+# mask and the historical 3/11-tick reward weights are not substitutes.
+ACTION_BALL_FULL_MDP_PARENT_MARKER_SHA256 = None
+ACTION_BALL_STRIKE_FACT_PHYSICAL_VALIDITY_SCHEMA_SHA256 = None
+ACTION_BALL_STRIKE_FACT_POST_DT_BUDGET_SHA256 = None
+ACTION_BALL_STRIKE_FACT_CONSUMER_ABI_SHA256 = None
+
+_LEGACY_ACTION_BALL_WINDOW_GUIDE_WEIGHTS = (
+    ("racket_position", 4.6),
+    ("racket_velocity", 0.575),
+    ("racket_normal", 0.575),
+    ("racket_position_coarse", 11.5),
+    ("racket_velocity_coarse", 11.5),
+    ("racket_normal_coarse", 5.75),
+    ("racket_position_precision", 0.575),
+    ("racket_velocity_precision", 0.2875),
+    ("racket_normal_precision", 0.575),
+)
+_ACTION_BALL_STRIKE_FACT_COMMON_REWARD = (
+    "c225_strike_ball_paddle_center_proximity"
+)
+
+
+def _action_ball_strike_fact_declares_attr(obj, name: str) -> bool:
+    namespace = getattr(obj, "__dict__", None)
+    if isinstance(namespace, dict) and name in namespace:
+        return True
+    return any(
+        name in getattr(base, "__dict__", {}) for base in type(obj).__mro__
+    )
+
+
+def _action_ball_strike_fact_declared_value(obj, name: str, default=None):
+    namespace = getattr(obj, "__dict__", None)
+    if isinstance(namespace, dict) and name in namespace:
+        return namespace[name]
+    for base in type(obj).__mro__:
+        base_namespace = getattr(base, "__dict__", {})
+        if name in base_namespace:
+            return base_namespace[name]
+    return default
+
+
+def _action_ball_strike_fact_declared_items(obj) -> tuple[tuple[str, object], ...]:
+    items = {}
+    for base in reversed(type(obj).__mro__):
+        items.update(getattr(base, "__dict__", {}))
+    namespace = getattr(obj, "__dict__", None)
+    if isinstance(namespace, dict):
+        items.update(namespace)
+    return tuple(items.items())
+
+
+def _action_ball_strike_fact_finite_number(value):
+    if type(value) not in (int, float):
+        return None
+    try:
+        numeric = float(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def action_ball_strike_fact_successor_construction_blockers(
+    env_cfg,
+) -> tuple[str, ...]:
+    """Return the immutable HOLD reasons for the not-yet-frozen constructor.
+
+    This audit is intentionally read-only and has no success path.  It records
+    why a current A/C config, a single-side mutation, or a forged receipt cannot
+    be upgraded into the fresh full-MDP lineage.  A future implementation must
+    replace this validator only after the common parent, dedicated physical
+    validity authority, ordered consumer ABI, and post-dt one-shot budget are
+    content-bound in code.
+    """
+
+    blockers = []
+
+    if ACTION_BALL_FULL_MDP_PARENT_MARKER_SHA256 is None:
+        blockers.append("fresh_parent_authority_unfrozen")
+    if not _action_ball_strike_fact_declares_attr(
+        env_cfg, ACTION_BALL_FULL_MDP_PARENT_MARKER_ATTR
+    ):
+        blockers.append("fresh_parent_marker_missing")
+    else:
+        blockers.append("fresh_parent_marker_untrusted")
+
+    commands = _action_ball_strike_fact_declared_value(env_cfg, "commands")
+    command_cfg = (
+        None
+        if commands is None
+        else _action_ball_strike_fact_declared_value(commands, "racket_target")
+    )
+    target_mode = (
+        None
+        if command_cfg is None
+        else _action_ball_strike_fact_declared_value(
+            command_cfg, "target_mode"
+        )
+    )
+    if type(target_mode) is not str or target_mode != "action_ball":
+        blockers.append("action_ball_command_owner_missing")
+    else:
+        if _action_ball_strike_fact_declared_value(
+            command_cfg, "action_ball_strike_fact_device_enabled", False
+        ) is not False:
+            blockers.append("partial_device_coordinator_activation_forbidden")
+        # Never read this legacy desired-contact component mask as the new
+        # physical/task fact.  Merely having 111 instead of 000 grants no
+        # successor authority.
+        if _action_ball_strike_fact_declares_attr(
+            command_cfg, "action_ball_target_validity_mask"
+        ):
+            blockers.append(
+                "legacy_target_component_mask_not_physical_validity"
+            )
+        if ACTION_BALL_STRIKE_FACT_PHYSICAL_VALIDITY_SCHEMA_SHA256 is None:
+            blockers.append("physical_task_validity_authority_unfrozen")
+        if not _action_ball_strike_fact_declares_attr(
+            command_cfg,
+            ACTION_BALL_STRIKE_FACT_PHYSICAL_VALIDITY_SOURCE_ATTR,
+        ):
+            blockers.append("physical_task_validity_source_missing")
+        else:
+            blockers.append("physical_task_validity_source_untrusted")
+
+    if ACTION_BALL_STRIKE_FACT_POST_DT_BUDGET_SHA256 is None:
+        blockers.append("post_dt_budget_authority_unfrozen")
+    if not _action_ball_strike_fact_declares_attr(
+        env_cfg, ACTION_BALL_STRIKE_FACT_POST_DT_BUDGET_RECEIPT_ATTR
+    ):
+        blockers.append("post_dt_budget_receipt_missing")
+    else:
+        blockers.append("post_dt_budget_receipt_untrusted")
+
+    # Schema-2 device order (nine stable guide indices, then proximity) is the
+    # current portable authority.  A future constructor must content-bind that
+    # exact ordered tuple; set equality or a tier/proximity-first reorder is a
+    # different ABI and requires an explicit schema migration.
+    if ACTION_BALL_STRIKE_FACT_CONSUMER_ABI_SHA256 is None:
+        blockers.append("ordered_consumer_abi_authority_unfrozen")
+    if not _action_ball_strike_fact_declares_attr(
+        env_cfg, ACTION_BALL_STRIKE_FACT_CONSUMER_ABI_RECEIPT_ATTR
+    ):
+        blockers.append("ordered_consumer_abi_receipt_missing")
+    else:
+        blockers.append("ordered_consumer_abi_receipt_untrusted")
+
+    env_mode = _action_ball_strike_fact_declared_value(
+        env_cfg, "strike_guidance_eligibility_mode"
+    )
+    if env_mode is not None and (
+        type(env_mode) is not str
+        or env_mode == ACTION_BALL_STRIKE_FACT_SUCCESSOR_MODE
+    ):
+        blockers.append("partial_strike_reward_wiring_forbidden")
+
+    rewards = _action_ball_strike_fact_declared_value(env_cfg, "rewards")
+    if rewards is None:
+        blockers.append("strike_reward_config_missing")
+    else:
+        legacy_weights_match = True
+        nonpositive_or_missing = False
+        for name, legacy_weight in _LEGACY_ACTION_BALL_WINDOW_GUIDE_WEIGHTS:
+            term = _action_ball_strike_fact_declared_value(rewards, name)
+            value = (
+                None
+                if term is None
+                else _action_ball_strike_fact_declared_value(term, "weight")
+            )
+            numeric = _action_ball_strike_fact_finite_number(value)
+            if numeric != legacy_weight:
+                legacy_weights_match = False
+            if numeric is None or numeric <= 0.0:
+                nonpositive_or_missing = True
+        if legacy_weights_match:
+            blockers.append("legacy_3_11_tick_weight_table_forbidden")
+        if nonpositive_or_missing:
+            blockers.append("zero_or_skipped_strike_consumer_forbidden")
+
+        common = _action_ball_strike_fact_declared_value(
+            rewards, _ACTION_BALL_STRIKE_FACT_COMMON_REWARD
+        )
+        common_weight = (
+            None
+            if common is None
+            else _action_ball_strike_fact_declared_value(common, "weight")
+        )
+        common_numeric = _action_ball_strike_fact_finite_number(common_weight)
+        if common_numeric == 240.0:
+            blockers.append("legacy_proximity_weight_240_forbidden")
+        if common is None:
+            blockers.append("common_proximity_consumer_missing")
+        elif common_numeric is None or common_numeric <= 0.0:
+            blockers.append("zero_or_skipped_strike_consumer_forbidden")
+
+        for _, term in _action_ball_strike_fact_declared_items(rewards):
+            params = _action_ball_strike_fact_declared_value(term, "params")
+            if isinstance(params, dict) and type(params) is not dict:
+                blockers.append("partial_strike_reward_wiring_forbidden")
+                break
+            if type(params) is not dict:
+                continue
+            eligibility_present = "eligibility_mode" in params
+            strike_fact_present = "strike_fact_mode" in params
+            eligibility_mode = params.get("eligibility_mode")
+            strike_fact_mode = params.get("strike_fact_mode")
+            if (
+                (
+                    eligibility_present
+                    and (
+                        type(eligibility_mode) is not str
+                        or eligibility_mode
+                        == ACTION_BALL_STRIKE_FACT_SUCCESSOR_MODE
+                    )
+                )
+                or (
+                    strike_fact_present
+                    and (
+                        type(strike_fact_mode) is not str
+                        or strike_fact_mode
+                        == ACTION_BALL_STRIKE_FACT_SUCCESSOR_MODE
+                    )
+                )
+                or "strike_fact_consumer_name" in params
+            ):
+                blockers.append("partial_strike_reward_wiring_forbidden")
+                break
+
+    terminations = _action_ball_strike_fact_declared_value(
+        env_cfg, "terminations"
+    )
+    if terminations is not None and _action_ball_strike_fact_declares_attr(
+        terminations, ACTION_BALL_STRIKE_FACT_SUCCESSOR_DONE_TERM
+    ):
+        blockers.append("partial_strike_publisher_wiring_forbidden")
+    if _action_ball_strike_fact_declares_attr(
+        env_cfg, ACTION_BALL_STRIKE_FACT_SUCCESSOR_RECEIPT_ATTR
+    ):
+        blockers.append("self_asserted_successor_receipt_forbidden")
+
+    return tuple(dict.fromkeys(blockers))
+
+
+def validate_action_ball_strike_fact_successor_construction(env_cfg) -> None:
+    """Fail closed until all fresh full-MDP construction authorities exist."""
+
+    blockers = action_ball_strike_fact_successor_construction_blockers(env_cfg)
+    if not blockers:
+        raise RuntimeError(
+            "strike-fact successor constructor is intentionally unavailable; "
+            "a reviewed constructor must replace the HOLD validator"
+        )
+    raise RuntimeError(
+        "strike-fact successor construction HOLD: " + ",".join(blockers)
+    )
+
+
 def validate_action_ball_211_trainability(
     env_cfg, *, entrypoint: str = "unspecified"
 ) -> None:
@@ -3273,6 +4304,13 @@ class HOPEPingPongActionBallA211AgibotA3EnvCfg(
 
     obs_mode: str = "action_ball_a211"
     action_ball_211_construction_only: bool = True
+    # Consumer-side candidate only.  The historical A211 source keeps the
+    # original 3-tick tight / 11-tick wide window-integrated payments.  This
+    # field can configure all nine terms for dependency-light diagnostics, but
+    # train.py launch-blocks exact mode while Isaac's current-step exact fact is
+    # published after RewardManager and no durable eligible/payment ledger is
+    # joined at the runner.
+    strike_guidance_eligibility_mode: str = "window_integrated"
     observations: HOPEActionBallA211ObservationsCfg = (
         HOPEActionBallA211ObservationsCfg()
     )
@@ -3287,6 +4325,39 @@ class HOPEPingPongActionBallA211AgibotA3EnvCfg(
         command_cfg.action_ball_task_wait_max_wait_ticks = 25
         command_cfg.action_ball_task_wait_episode_horizon_ticks = 500
         command_cfg.action_ball_task_wait_required_active_ticks = 200
+        mode = self.strike_guidance_eligibility_mode
+        supported_modes = {
+            mdp.STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+            mdp.STRIKE_GUIDANCE_ELIGIBILITY_EXACT_ONE_SHOT,
+        }
+        if mode not in supported_modes:
+            raise ValueError(
+                "strike_guidance_eligibility_mode must be one of "
+                f"{sorted(supported_modes)!r}, got {mode!r}"
+            )
+        if mode == mdp.STRIKE_GUIDANCE_ELIGIBILITY_EXACT_ONE_SHOT:
+            # One config switch owns the complete A guidance family: primary
+            # position/velocity/face, their broad companions, and the three
+            # fixed precision overlays.  Default mode deliberately does not
+            # mutate any reward params or values.
+            for term_name in (
+                "racket_position",
+                "racket_velocity",
+                "racket_normal",
+                "racket_position_coarse",
+                "racket_velocity_coarse",
+                "racket_normal_coarse",
+                "racket_position_precision",
+                "racket_velocity_precision",
+                "racket_normal_precision",
+            ):
+                term = getattr(self.rewards, term_name, None)
+                if term is None:
+                    raise RuntimeError(
+                        "exact-strike A guidance requires reward term "
+                        f"{term_name!r}"
+                    )
+                term.params["eligibility_mode"] = mode
         _validate_action_ball_211_wait_schedule_cfg(self)
 
 

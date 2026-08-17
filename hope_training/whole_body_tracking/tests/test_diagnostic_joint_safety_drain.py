@@ -28,7 +28,7 @@ def test_diagnostic_action_ball_drains_joint_safety_without_reward_authority(
         diagnostic_compact_evidence=True
     )
     if stage1_natural_clip:
-        env.cfg.obs_mode = "stage1_natural_clip"
+        env.cfg.obs_mode = "stage1_natural_clip_paddle_world"
         env.cfg.commands.racket_target.target_mode = "reference_perturbed"
 
     class ForbiddenRewardLedger:

@@ -197,6 +197,13 @@ EXCLUSION_REASONS: Dict[str, str] = {
         "action-ball never calls it; the solver profile kind is literally "
         "whole_body_tracking.continuous_questions.solve_proposals."
     ),
+    "fresh_full_mdp_runtime_protocol": (
+        "Initializes the separate target_mode='action_ball_full_mdp' device "
+        "leaf protocol and forces its legacy counter-rally lane off. The "
+        "covered portable action-ball solver entry points never call this "
+        "initializer; the fresh DeviceQuestionAuthority calls the separately "
+        "covered solve_proposals_device boundary instead."
+    ),
     "venue_parameter_loading": (
         "Parses the venue YAML. The ten parsed numbers are written into the "
         "physics profile payload one by one, so a parser change already moves the "
@@ -258,6 +265,7 @@ EXCLUSION_REASONS: Dict[str, str] = {
 UNREACHABLE_CLAIM_REASONS = frozenset(
     {
         "other_product_line",
+        "fresh_full_mdp_runtime_protocol",
         "stroke_selector",
         "convenience_accessor",
     }
@@ -351,6 +359,14 @@ COVERED: Dict[str, Tuple[str, ...]] = {
         "_R_FACE",
         "_R_CONTACT_ENVELOPE",
         "_CONTINUOUS_REASONS",
+        "PRODUCER_FAULT_NONFINITE_PROPOSAL",
+        "PRODUCER_FAULT_REFERENCE_NORMAL",
+        "PRODUCER_FAULT_BASE_QUATERNION",
+        "PRODUCER_FAULT_ACTION_RANGE",
+        "PRODUCER_FAULT_PROTOTYPE_DIRECTION",
+        "PRODUCER_FAULT_PROTOTYPE_SPEED",
+        "PRODUCER_FAULT_PROTOTYPE_FACE_SIGN",
+        "PRODUCER_FAULT_MASK",
         "BALL_BIRTH_NET_MARGIN_M",
         "BALL_BIRTH_REJECTION_REASON",
         "ball_birth_x_lower_bound_m",
@@ -383,6 +399,18 @@ COVERED: Dict[str, Tuple[str, ...]] = {
         "ProposalLedger.resid_m",
         "ProposalLedger.ref_normal",
         "ProposalLedger.base_quat",
+        "DeviceProposalSolveResult",
+        "DeviceProposalSolveResult.p_contact",
+        "DeviceProposalSolveResult.v_racket",
+        "DeviceProposalSolveResult.n_racket",
+        "DeviceProposalSolveResult.v_ball_in",
+        "DeviceProposalSolveResult.w_ball_in",
+        "DeviceProposalSolveResult.aim_xy",
+        "DeviceProposalSolveResult.ok",
+        "DeviceProposalSolveResult.resid_m",
+        "DeviceProposalSolveResult.attempted_v_ball_in",
+        "DeviceProposalSolveResult.producer_fault_bits",
+        "DeviceProposalSolveResult.proposals",
         "ProposalHostPacket",
         "ProposalHostPacket.reason_codes",
         "ProposalHostPacket.admitted",
@@ -413,6 +441,7 @@ COVERED: Dict[str, Tuple[str, ...]] = {
         "_solve_fixed_direction_batch",
         "_validate_external_proposals",
         "_diagnostic_prevalidated_external_proposals",
+        "solve_proposals_device",
         "solve_proposals",
         "_solve_proposals_diagnostic_host_only",
     ),
@@ -621,6 +650,60 @@ EXCLUDED: Dict[str, Dict[str, str]] = {
         "_ActionBallBirthProviderAdapter.__init__": "overapproximated_name_collision",
         "_ActionBallDomainAuthorityAdapter.__init__": "overapproximated_name_collision",
         "_ActionBallDrainResetRuntimeSource.__init__": "overapproximated_name_collision",
+        # Fresh full-MDP allocates a separate device-leaf protocol surface and
+        # never enters the three covered portable solver entry points.  This is
+        # deliberately not called ``other_product_line``: that existing reason
+        # specifically means the free-direction ``target_mode='solved'`` lane.
+        "RacketTargetCommand._initialize_action_ball_full_mdp_racket_protocol_state": (
+            "fresh_full_mdp_runtime_protocol"
+        ),
+        "_bind_racket_action_reference_cold_reader": (
+            "fresh_full_mdp_runtime_protocol"
+        ),
+        # The closure gate matches attributes by bare name.  These fresh-only
+        # row views/static-table projections therefore collide with legacy
+        # solver receipt fields even though the objects never enter that path.
+        "ActionBallContinuousRacketObservationView.action_slot": (
+            "overapproximated_name_collision"
+        ),
+        "ActionBallContinuousRacketObservationView.action_uid": (
+            "overapproximated_name_collision"
+        ),
+        "ActionBallContinuousRacketObservationView.swing_generation": (
+            "overapproximated_name_collision"
+        ),
+        "ActionBallContinuousRacketObservationView.time_to_contact_s": (
+            "overapproximated_name_collision"
+        ),
+        "ActionBallFullMdpRacketSelectedRubberView.action_slot": (
+            "overapproximated_name_collision"
+        ),
+        "ActionBallFullMdpRacketSelectedRubberView.action_uid": (
+            "overapproximated_name_collision"
+        ),
+        "ActionBallFullMdpRacketSelectedRubberView.swing_generation": (
+            "overapproximated_name_collision"
+        ),
+        "RacketActionReferenceStaticTableProjection.diagnostic_unauthorized": (
+            "overapproximated_name_collision"
+        ),
+        "RacketActionReferenceStaticTableProjection.reference_racket_angular_velocity_w_radps": (
+            "overapproximated_name_collision"
+        ),
+        "RacketActionReferenceStaticTableProjection.reference_racket_quat_wxyz": (
+            "overapproximated_name_collision"
+        ),
+        "_ActionBallContinuousRacketObservationRecord.values": (
+            "overapproximated_name_collision"
+        ),
+        # Drain records collide by bare attribute name with the solver path,
+        # but are not read by the question solver.
+        "_ActionBallContinuousRacketPreparedPpoDrainPack.pack": (
+            "overapproximated_name_collision"
+        ),
+        "_ActionBallContinuousRacketPreparedPpoDrainPack.authority": (
+            "overapproximated_name_collision"
+        ),
     },
     "continuous_questions.py": {
         "generate": "other_product_line",

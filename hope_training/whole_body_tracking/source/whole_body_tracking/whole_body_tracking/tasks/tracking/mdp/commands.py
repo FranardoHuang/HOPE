@@ -7,10 +7,12 @@ import math
 import numpy as np
 import os
 import stat
+import struct
 import torch
 from collections.abc import Sequence
-from dataclasses import MISSING
+from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation
@@ -54,6 +56,13 @@ from whole_body_tracking.tasks.tracking.mdp.planner_revision import (
     PhaseGovernorProfile,
 )
 
+try:
+    import action_ball_full_mdp_row_identity as _ACTION_BALL_ROW_IDENTITY
+except ImportError:  # pragma: no cover - installed package import
+    from whole_body_tracking import (
+        action_ball_full_mdp_row_identity as _ACTION_BALL_ROW_IDENTITY,
+    )
+
 
 def _stand_start_yaw_samples(yaw_range, count: int, device):
     """Return stand-start yaw samples, or ``None`` for the byte-identical [0, 0] default.
@@ -78,6 +87,1142 @@ _CANONICAL_REGISTRY_RUNTIME_MODULE = None
 # 这里不能写普通 import,必须和 canonical registry 一样按仓库路径加载真字节。
 _TRAINING_CONTRACT_RUNTIME_MODULE = None
 _ACTION_BALL_RUNTIME_MODULE = None
+
+
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND = (
+    "action_ball_full_mdp_code_owned_diagnostic_catalog_v1"
+)
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = 73
+
+ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE = 0
+ACTION_BALL_CONTINUOUS_MOTION_CLOSE_PLAYED_SUFFIX = 1
+ACTION_BALL_CONTINUOUS_MOTION_CLOSE_UNPLAYED = 2
+
+
+@dataclass(frozen=True)
+class ActionBallFullMdpDiagnosticCatalogTable:
+    """Cold metadata table for the one disposable full-MDP catalog.
+
+    This is neither a receipt nor motion admission.  It only keeps the exact
+    fields that the existing Motion/Racket constructors consume in one order.
+    The live Motion constructor still snapshots and adopts the NPZ bytes, and
+    formal launch remains unavailable.
+    """
+
+    manifest_file_sha256: str
+    manifest_canonical_sha256: str
+    action_order: tuple[str, ...]
+    action_uids: tuple[int, ...]
+    motion_files: tuple[str, ...]
+    motion_sha256: tuple[str, ...]
+    clip_family_per_clip: tuple[str, ...]
+    strike_phase_per_clip: tuple[float, ...]
+    mount_normal_sign_per_clip: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class ActionBallFullMdpCompletedActionFrame0Reference:
+    """Device-only Motion frame-0 recovery reference for R07.
+
+    Genesis IDLE uses Motion's code-owned upcoming schedule while carrying a
+    neutral shot key.  Only the epoch-owned completed lifecycle carries an
+    exact full shot key and selects that completed action.  This is a
+    clone-only Motion projection, not an admission token.  Callers cannot
+    supply an action, verdict, suffix receipt, or graph-cycle handle.
+    """
+
+    motion_owner: object
+    epoch_owner: object
+    epoch_version: int
+    cadence_tick: torch.Tensor
+    shot_key: _ACTION_BALL_ROW_IDENTITY.ActionEpochShotKey
+    reference_kind: torch.Tensor
+    reference_action_slot: torch.Tensor
+    reference_action_uid: torch.Tensor
+    root_position_m: torch.Tensor
+    root_orientation_wxyz: torch.Tensor
+    joint_position_rad: torch.Tensor
+    body_position_m: torch.Tensor
+    body_orientation_wxyz: torch.Tensor
+    station_anchor_xy_m: torch.Tensor
+    validity: torch.Tensor
+    producer_fault_bits: torch.Tensor
+
+
+def load_action_ball_full_mdp_diagnostic_catalog_table(
+) -> ActionBallFullMdpDiagnosticCatalogTable:
+    """Re-read the code-pinned v4 catalog and all 73 motion bytes.
+
+    The manifest provides diagnostic source membership only.  In particular,
+    this function never asks the metadata-only manifest schema for formal
+    admission and does not load the retired five-row prototype as a runtime
+    action table.
+    """
+
+    import action_ball_full_mdp_diagnostic_action_timing as _timing
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_manifest as _manifest,
+    )
+
+    repo_root = Path(__file__).resolve().parents[8]
+    manifest_path = (
+        repo_root / _timing.PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH
+    ).resolve()
+    try:
+        manifest_path.relative_to(repo_root)
+        loaded = _manifest.load_action_ball_manifest(
+            manifest_path,
+            expected_sha256=(
+                _timing.PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256
+            ),
+            verify_referenced_assets=False,
+            require_formal_admission=False,
+        )
+    except Exception as exc:
+        raise ValueError(
+            "code-owned full-MDP diagnostic catalog is absent or changed"
+        ) from exc
+    if (
+        loaded.canonical_sha256
+        != _timing.PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256
+        or loaded.manifest.schema_version != _manifest.SCHEMA_VERSION
+    ):
+        raise ValueError(
+            "code-owned full-MDP diagnostic catalog schema/content changed"
+        )
+
+    actions = loaded.manifest.actions
+    action_order = tuple(loaded.manifest.action_order)
+    if (
+        len(actions) != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
+        or len(action_order)
+        != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
+        or action_order != tuple(action.action_id for action in actions)
+    ):
+        raise ValueError(
+            "code-owned full-MDP diagnostic catalog is not the exact 73-row order"
+        )
+
+    motion_files: list[str] = []
+    motion_sha256: list[str] = []
+    for slot, action in enumerate(actions):
+        candidate = repo_root.joinpath(*Path(action.motion_path).parts)
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(repo_root)
+            mode = resolved.stat().st_mode
+            payload = resolved.read_bytes()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError(
+                f"diagnostic catalog motion[{slot}] is absent or escapes the repository"
+            ) from exc
+        digest = hashlib.sha256(payload).hexdigest()
+        if not stat.S_ISREG(mode) or digest != action.motion_sha256:
+            raise ValueError(
+                f"diagnostic catalog motion[{slot}] bytes differ"
+            )
+        motion_files.append(str(resolved))
+        motion_sha256.append(digest)
+
+    return ActionBallFullMdpDiagnosticCatalogTable(
+        manifest_file_sha256=loaded.file_sha256,
+        manifest_canonical_sha256=loaded.canonical_sha256,
+        action_order=action_order,
+        action_uids=tuple(int(action.action_uid) for action in actions),
+        motion_files=tuple(motion_files),
+        motion_sha256=tuple(motion_sha256),
+        clip_family_per_clip=tuple(action.family for action in actions),
+        strike_phase_per_clip=tuple(
+            float(action.strike_phase) for action in actions
+        ),
+        mount_normal_sign_per_clip=tuple(
+            float(action.mount_normal_sign) for action in actions
+        ),
+    )
+
+
+def require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
+    motion_cfg: object,
+    racket_cfg: object,
+    *,
+    table: ActionBallFullMdpDiagnosticCatalogTable | None = None,
+) -> ActionBallFullMdpDiagnosticCatalogTable:
+    """Require the exact cfg fields consumed by Motion and Racket.
+
+    This is a structural equality check, not an authority.  Callers cannot
+    supply a path or digest to the table loader; the optional ``table`` only
+    lets the code-owned constructor and live command validate the same frozen
+    value without a third filesystem pass.
+    """
+
+    if table is None:
+        table = load_action_ball_full_mdp_diagnostic_catalog_table()
+    if type(table) is not ActionBallFullMdpDiagnosticCatalogTable:
+        raise ValueError("full-MDP diagnostic catalog table type differs")
+    if (
+        getattr(motion_cfg, "action_ball_full_mdp_diagnostic_catalog", None)
+        != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND
+        or tuple(getattr(motion_cfg, "motion_file", ()) or ())
+        != table.motion_files
+        or tuple(getattr(motion_cfg, "clip_family_per_clip", ()) or ())
+        != table.clip_family_per_clip
+        or tuple(getattr(racket_cfg, "strike_phase_per_clip", ()) or ())
+        != table.strike_phase_per_clip
+        or tuple(
+            getattr(racket_cfg, "mount_normal_sign_per_clip", ()) or ()
+        )
+        != table.mount_normal_sign_per_clip
+        or str(getattr(racket_cfg, "motion_teacher_racket_source", ""))
+        != "measured_channel"
+    ):
+        raise ValueError(
+            "fresh full-MDP Motion/Racket cfg differs from the code-owned "
+            "73-action diagnostic catalog"
+        )
+    return table
+
+
+_ACTION_BALL_CONTINUOUS_MOTION_PROFILE_KIND = (
+    "whole_body_tracking.action_ball_continuous_motion_projection_v1"
+)
+_ACTION_BALL_CONTINUOUS_MOTION_CLOCK_KIND = "episode_tick_v1"
+_ACTION_BALL_CONTINUOUS_READY_REFERENCE_KIND = (
+    "completed_action_frame0_zero_velocity_v1"
+)
+_ACTION_BALL_R07_REFERENCE_BOOTSTRAP_UPCOMING_ACTION_FRAME0 = 1
+_ACTION_BALL_R07_REFERENCE_COMPLETED_ACTION_FRAME0 = 2
+ACTION_BALL_CONTINUOUS_MOTION_PHASES = (
+    "pre_reveal_hidden",
+    "active_opportunity",
+    "post_deadline_suffix",
+    "recovery_hidden",
+    "ready_hold",
+    "recovery_unavailable",
+    "infrastructure_invalid",
+)
+_ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE = {
+    name: index for index, name in enumerate(ACTION_BALL_CONTINUOUS_MOTION_PHASES)
+}
+ACTION_BALL_CONTINUOUS_CANONICAL_PHASES = (
+    "prepare_visible",
+    "swing",
+    "follow_through",
+    "recover_hidden",
+    "ready_hold",
+)
+_ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE = {
+    name: index
+    for index, name in enumerate(ACTION_BALL_CONTINUOUS_CANONICAL_PHASES)
+}
+ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE = 0
+ACTION_BALL_CONTINUOUS_CANONICAL_SWING = 1
+ACTION_BALL_CONTINUOUS_CANONICAL_FOLLOW_THROUGH = 2
+ACTION_BALL_CONTINUOUS_CANONICAL_RECOVER_HIDDEN = 3
+ACTION_BALL_CONTINUOUS_CANONICAL_READY_HOLD = 4
+_ACTION_BALL_CONTINUOUS_R05_SOURCE_SHA256 = (
+    "82d71c987e51cf4b5940744b124b36f9055d7a655af5e2279e2a6841cb1077dc"
+)
+_ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_SOURCE_SHA256 = (
+    "a5762b2e4838a3bdc58c2a30822467d27e4fb1006a37fcc3faf3948f7c2c24fe"
+)
+_ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_ROW_INTEGRITY_SCHEMA_SHA256 = (
+    "cfc212a4ef2fd2078df99114c28f55df93b0605e0a126049b24b07fc636b16aa"
+)
+_ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256 = (
+    "4e715720b741991905d7c6cf8aa5ddf6c5a1e617773b6132aa33368468736cdd"
+)
+_ACTION_BALL_CONTINUOUS_TERMINAL_BOUNDARY_AUTHORITY_DOMAIN = (
+    "action_ball_full_mdp_reveal_boundary"
+)
+_ACTION_BALL_CONTINUOUS_MOTION_FAULT_NAME = (
+    "motion_selected_preflight_rejected"
+)
+_ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT = 1
+# The fresh question chronology is a different owner domain from the cadence
+# close deadline.  ``12`` is the frozen ordinary construction reason for a
+# candidate whose physical final segment cannot contain one complete Motion
+# tick; it is telemetry, not an infrastructure fault.
+_ACTION_BALL_MOTION_QUESTION_NO_COMPLETE_HORIZON = 12
+_ACTION_BALL_MOTION_QUESTION_FAULT_NONFINITE = 1 << 48
+_ACTION_BALL_MOTION_QUESTION_FAULT_UNATTRIBUTABLE = 1 << 49
+_ACTION_BALL_MOTION_QUESTION_FAULT_TICK_OVERFLOW = 1 << 50
+# This bit is intentionally outside Motion's declared fault schema.  It is
+# used only to make an unattributable owner-integrity mismatch poison the
+# packed boundary instead of laundering that mismatch into a valid CENSOR.
+_ACTION_BALL_CONTINUOUS_MOTION_UNATTRIBUTABLE_BIT = 2
+# Exact AST-source-segment surface hash of the construction-bound top reset
+# authority.  This is deliberately not a full-file hash: the top and all four
+# children can pin the three authority methods without a cyclic source pin.
+# A diagnostic fixture may omit the hash only when it explicitly binds with
+# ``diagnostic=True``; production must present this exact surface identity.
+_ACTION_BALL_CONTINUOUS_MOTION_SELECTED_RESET_AUTHORITY_API_SHA256 = (
+    "c54c56ecc5fce051dfadd3e2bb6d90d68acedd3c7095c88508c704ac052da6da"
+)
+_ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_KIND = (
+    "action_ball_continuous_motion_fresh_checkpoint_v1"
+)
+_ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_SCHEMA_VERSION = 6
+_ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS = (
+    ("sequence_active", "_action_ball_continuous_sequence_active", False),
+    ("control_tick", "_action_ball_continuous_episode_step", False),
+    ("scheduled_ordinal", "_action_ball_continuous_scheduled_ordinal", False),
+    ("reveal_tick", "_action_ball_continuous_current_reveal_step", False),
+    ("deadline_tick", "_action_ball_continuous_current_deadline_step", False),
+    ("next_reveal_tick", "_action_ball_continuous_next_reveal_step", False),
+    ("last_closed_ordinal", "_action_ball_continuous_last_closed_ordinal", False),
+    ("opportunities_consumed", "_action_ball_continuous_opportunities_consumed", True),
+    ("policy_opportunities_created", "_action_ball_continuous_policy_opportunities_created", True),
+    ("infrastructure_censors_consumed", "_action_ball_continuous_infrastructure_censors_consumed", True),
+    ("current_policy_opportunity", "_action_ball_continuous_current_policy_opportunity", False),
+    ("motion_active", "_action_ball_continuous_motion_active", False),
+    ("suffix_complete", "_action_ball_continuous_suffix_complete", False),
+    ("ready_reference_active", "_action_ball_continuous_ready_reference_active", False),
+    ("ready_at_reveal", "_action_ball_continuous_ready_at_reveal", False),
+    ("reveal_due", "_action_ball_continuous_reveal_due", False),
+    ("deadline_due", "_action_ball_continuous_deadline_due", False),
+    ("recovery_unavailable", "_action_ball_continuous_recovery_unavailable", False),
+    ("task_commit_pending", "_action_ball_continuous_task_commit_pending", False),
+    ("task_commit_missed", "_action_ball_continuous_task_commit_missed", False),
+    ("task_committed", "_action_ball_continuous_task_committed", False),
+    ("motion_release_pending", "_action_ball_continuous_motion_release_pending", False),
+    ("motion_release_missed", "_action_ball_continuous_motion_release_missed", False),
+    ("legacy_phase", "_action_ball_continuous_phase", True),
+    ("canonical_phase", "_action_ball_continuous_canonical_phase", True),
+    ("canonical_phase_start_tick", "_action_ball_continuous_canonical_phase_start_tick", False),
+    ("task_identity", "_action_ball_continuous_canonical_task_identity", False),
+    ("cadence_identity", "_action_ball_continuous_canonical_cadence_identity", False),
+    ("action_uid", "_action_ball_continuous_canonical_action_uid", False),
+    ("shot_index", "_action_ball_continuous_canonical_shot_index", False),
+    ("outcome_identity", "_action_ball_continuous_canonical_outcome_identity", False),
+    ("task_receipt_sha256", "_action_ball_continuous_canonical_task_receipt_sha256", True),
+    ("cadence_receipt_sha256", "_action_ball_continuous_canonical_cadence_receipt_sha256", True),
+    ("candidate_identity", "_action_ball_continuous_canonical_candidate_identity", False),
+    ("contact_tick", "_action_ball_continuous_canonical_contact_tick", False),
+    ("launch_tick", "_action_ball_continuous_canonical_launch_tick", False),
+    ("chosen_horizon_tick", "_action_ball_continuous_canonical_chosen_horizon_tick", False),
+    ("task_close_tick", "_action_ball_continuous_canonical_task_close_tick", False),
+    ("task_valid", "_action_ball_continuous_canonical_task_valid", False),
+    ("timing_active", "_action_ball_task_timing_active", False),
+    ("playback_started", "_action_ball_continuous_canonical_playback_started", False),
+    ("pending_elapsed_s", "_action_ball_task_pending_elapsed_s", True),
+    ("task_age_s", "_action_ball_task_age_s", True),
+    ("time_to_contact_s", "_action_ball_time_to_contact_s", True),
+    ("teacher_rate", "_action_ball_teacher_rate", True),
+    ("scaled_t_hit_s", "_action_ball_scaled_t_hit_s", True),
+    ("scaled_t_cycle_s", "_action_ball_scaled_t_cycle_s", True),
+    ("pre_swing_wait_s", "_action_ball_pre_swing_wait_s", True),
+    ("reset_generation", "_action_ball_reset_generation", True),
+    ("swing_generation", "_action_ball_swing_generation", True),
+    ("action_slot", "clip_id", True),
+    ("teacher_time_step", "time_steps", True),
+    ("teacher_time_step_f", "time_steps_f", True),
+    ("teacher_speed_scale", "speed_scale", True),
+    ("teacher_hold_counter", "hold_counter", True),
+    ("reset_pending", "_action_ball_continuous_motion_reset_pending", False),
+)
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionProjection:
+    """Isolated current-tick snapshot published by the Motion command.
+
+    Every tensor is a detached clone.  Consumers may therefore retain or even
+    accidentally mutate their snapshot without aliasing Motion's live owner
+    buffers.  This type deliberately has no task, target, inbound-ball or
+    future-question field.
+    """
+
+    common_step: int
+    episode_tick: torch.Tensor
+    reveal_due: torch.Tensor
+    closed_mask: torch.Tensor
+    close_reason: torch.Tensor
+    deadline_due: torch.Tensor
+    scheduled_ordinal: torch.Tensor
+    reveal_tick: torch.Tensor
+    deadline_tick: torch.Tensor
+    next_reveal_tick: torch.Tensor
+    ready_at_reveal: torch.Tensor
+    motion_active: torch.Tensor
+    ready_reference_active: torch.Tensor
+    suffix_complete: torch.Tensor
+    reset_generation: torch.Tensor
+    swing_generation: torch.Tensor
+
+
+class ActionBallContinuousMotionObservationToken:
+    """Opaque registry key for one already-published Motion observation."""
+
+    __slots__ = ()
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionObservationView:
+    """Clone-only current Motion chronology used by the fresh R08 owner.
+
+    The five-state lifecycle is independently written by Motion.  It is never
+    derived from the legacy seven-state diagnostic phase, and none of the
+    tensors aliases live owner storage.
+    """
+
+    motion_owner: object
+    publication_identity: object
+    common_step: int
+    control_tick: torch.Tensor
+    phase: torch.Tensor
+    phase_start_tick: torch.Tensor
+    phase_elapsed_tick: torch.Tensor
+    reveal_tick: torch.Tensor
+    deadline_tick: torch.Tensor
+    next_reveal_tick: torch.Tensor
+    reset_generation: torch.Tensor
+    swing_generation: torch.Tensor
+    scheduled_ordinal: torch.Tensor
+    action_slot: torch.Tensor
+    task_identity: torch.Tensor
+    cadence_identity: torch.Tensor
+    action_uid: torch.Tensor
+    task_receipt_sha256: torch.Tensor
+    cadence_receipt_sha256: torch.Tensor
+    candidate_identity: torch.Tensor
+    contact_tick: torch.Tensor
+    launch_tick: torch.Tensor
+    chosen_horizon_tick: torch.Tensor
+    task_close_tick: torch.Tensor
+    task_valid: torch.Tensor
+    timing_active: torch.Tensor
+    playback_started: torch.Tensor
+    pending_elapsed_s: torch.Tensor
+    task_age_s: torch.Tensor
+    time_to_contact_s: torch.Tensor
+    time_to_contact_remaining_s: torch.Tensor
+    teacher_rate: torch.Tensor
+    scaled_t_hit_s: torch.Tensor
+    scaled_t_cycle_s: torch.Tensor
+    pre_swing_wait_s: torch.Tensor
+    time_to_teacher_start_remaining_s: torch.Tensor
+    time_to_next_reveal_s: torch.Tensor
+
+
+class ActionBallMotionQuestionChronologyReceipt:
+    """Opaque Motion-owned exact contact/launch chronology capability."""
+
+    __slots__ = ()
+
+    def __new__(cls):
+        del cls
+        raise TypeError("Motion question chronology receipts are owner-issued")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        del name, value
+        raise AttributeError("Motion question chronology receipts are immutable")
+
+    def __copy__(self):
+        raise TypeError("Motion question chronology receipts cannot be copied")
+
+    def __deepcopy__(self, memo: object):
+        del memo
+        raise TypeError("Motion question chronology receipts cannot be copied")
+
+    def __reduce__(self):
+        raise TypeError("Motion question chronology receipts cannot be serialized")
+
+    def __reduce_ex__(self, protocol: int):
+        del protocol
+        raise TypeError("Motion question chronology receipts cannot be serialized")
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallMotionQuestionChronologyView:
+    """Clone-only exact question chronology produced by Motion.
+
+    ``contact_tick`` is derived from the immutable task receipt and the real
+    control tick.  ``deadline_tick`` is deliberately absent: cadence close is
+    another fact with another purpose and must never be substituted for exact
+    contact.  Candidate-keyed physical horizons come from the independent
+    Physical numerical owner and remain bound to its opaque receipt.
+    """
+
+    motion_owner: object
+    chronology_identity: object
+    selected_env_index: torch.Tensor
+    current_tick: torch.Tensor
+    candidate_identity: torch.Tensor
+    contact_tick: torch.Tensor
+    earliest_launch_tick: torch.Tensor
+    launch_tick: torch.Tensor
+    chosen_horizon_s: torch.Tensor
+    action_uid: torch.Tensor
+    action_slot: torch.Tensor
+    task_identity: torch.Tensor
+    cadence_identity: torch.Tensor
+    task_receipt_sha256: torch.Tensor
+    motion_task_f32: torch.Tensor
+    construction_reason: torch.Tensor
+    producer_fault: torch.Tensor
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class _ActionBallMotionQuestionChronologyRecord:
+    chronology_identity: object
+    physical_horizon_owner: object
+    physical_horizon_receipt: object
+    selected_env_index: torch.Tensor
+    current_tick: torch.Tensor
+    candidate_identity: torch.Tensor
+    contact_tick: torch.Tensor
+    earliest_launch_tick: torch.Tensor
+    launch_tick: torch.Tensor
+    chosen_horizon_s: torch.Tensor
+    action_uid: torch.Tensor
+    action_slot: torch.Tensor
+    task_identity: torch.Tensor
+    cadence_identity: torch.Tensor
+    task_receipt_sha256: torch.Tensor
+    motion_task_f32: torch.Tensor
+    construction_reason: torch.Tensor
+    producer_fault: torch.Tensor
+
+
+class ActionBallMotionQuestionProductionHold(RuntimeError):
+    """The owner boundary is real, but the complete production ABI is not."""
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousTaskCommitToken:
+    """Single-use Motion token returned only after complete staged validation."""
+
+    _owner_nonce: object
+    serial: int
+    common_step: int
+    env_ids: tuple[int, ...]
+    scheduled_ordinals: tuple[int, ...]
+    episode_ticks: tuple[int, ...]
+    reveal_ticks: tuple[int, ...]
+    deadline_ticks: tuple[int, ...]
+    next_reveal_ticks: tuple[int, ...]
+    reset_generations: tuple[int, ...]
+    swing_generations: tuple[int, ...]
+    task_refs: tuple[object, ...]
+    _timing_rows: tuple[tuple[float, ...], ...]
+    _active_task_refs_before: tuple[object, ...]
+    _committed_task_refs_before: tuple[object, ...]
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionStage:
+    """Private Motion child staged against one exact unarmed R05 preview.
+
+    All fields are host authorities or detached construction material.  The
+    token is not a policy opportunity, does not expose a live tensor alias,
+    and cannot publish Motion state.  ``finalize`` is the only phase allowed
+    to allocate device after-images.
+    """
+
+    _owner_nonce: object
+    serial: int
+    owner_mutation_version: int
+    common_step: int
+    reveal_final_preview_schema_version: int
+    reveal_final_preview_sha256: str
+    all_owner_install_root_sha256: str
+    prepared_batch_sha256: str
+    env_ids: tuple[int, ...]
+    scheduled_ordinals: tuple[int, ...]
+    episode_ticks: tuple[int, ...]
+    reveal_ticks: tuple[int, ...]
+    deadline_ticks: tuple[int, ...]
+    next_reveal_ticks: tuple[int, ...]
+    reset_generations: tuple[int, ...]
+    swing_generations: tuple[int, ...]
+    action_slots: tuple[int, ...]
+    ready_at_reveal: tuple[bool, ...]
+    runtime_task_refs: tuple[object, ...]
+    runtime_task_receipts: tuple[object, ...]
+    runtime_task_receipt_sha256s: tuple[str, ...]
+    timing_after_image_sha256: str
+    motion_child_token_root_sha256: str
+    _timing_rows: tuple[tuple[float, ...], ...]
+    _timing_f32_le: bytes
+    _prearm_payload_json: bytes
+    _reveal_final_public_token: object
+    _reveal_final_private_token: object
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionPrearmedInstall:
+    """Opaque retained token for one fully materialized Motion leaf."""
+
+    _owner_nonce: object
+    serial: int
+    owner_mutation_version: int
+    reveal_final_preview_schema_version: int
+    reveal_final_preview_sha256: str
+    selected_env_ids: tuple[int, ...]
+    canonical_sha256: str
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionArmedInstall:
+    """Opaque single-use identity emitted after the exact global row check."""
+
+    _owner_nonce: object
+    serial: int
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionCensoredInstall:
+    """Opaque terminal identity for one owner-issued global CENSOR."""
+
+    _owner_nonce: object
+    serial: int
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionChildTerminalToken:
+    """Opaque proof that Motion copied its prevalidated child after-image."""
+
+    _owner_nonce: object
+    serial: int
+    decision: str
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionSelectedResetStage:
+    """Opaque, owner-minted reset stage with no live Motion writes."""
+
+    _owner_nonce: object
+    serial: int
+    owner_mutation_version: int
+    stage_sha256: str
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionSelectedResetPrevalidated:
+    """Opaque reset handle after every fallible after-image check."""
+
+    _owner_nonce: object
+    serial: int
+    stage_sha256: str
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionSelectedResetChildTerminalToken:
+    """Opaque proof that Motion copied its prevalidated reset after-image."""
+
+    _owner_nonce: object
+    serial: int
+    stage_sha256: str
+
+
+@dataclass(frozen=True, eq=False, repr=False)
+class ActionBallContinuousMotionSelectedResetCompletionToken:
+    """Opaque single-use Motion ACK minted only after exact Device-R05-last."""
+
+    _owner_nonce: object
+    serial: int
+    stage_sha256: str
+
+
+@dataclass
+class _ActionBallContinuousMotionGlobalDrainLease:
+    """Private pre-transfer lease for the sole global PPO boundary."""
+
+    pack: object
+    authority: object
+    update_index: int
+    completed_environment_steps: int
+    owner_mutation_version: int
+    terminal_resolution_total: int
+    expected_values: tuple[int, int, int, int]
+    source_tensor_receipts: tuple[tuple[torch.Tensor, int], ...]
+    stage: str = "prepared"
+
+
+@dataclass(frozen=True)
+class ActionBallContinuousMotionCommitReceipt:
+    """Typed ACCEPT/CENSOR chronology emitted by the Motion child."""
+
+    schema_version: int
+    kind: str
+    decision: str
+    reveal_final_preview_sha256: str
+    global_boundary_receipt_sha256: str
+    global_boundary_packet_sha256: str
+    motion_child_token_root_sha256: str
+    prepared_r05_terminal_claim_sha256: str
+    expected_r05_terminal_kind: str
+    expected_r05_terminal_sha256: str
+    timing_after_image_sha256: str
+    selected_env_ids: tuple[int, ...]
+    owner_mutation_version_before: int
+    owner_mutation_version_after: int
+    installed_count: int
+    censored_count: int
+    policy_opportunity_created: bool
+    runtime_integrated: bool
+    launch_authorized: bool
+
+    @property
+    def canonical_sha256(self) -> str:
+        payload = {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "decision": self.decision,
+            "reveal_final_preview_sha256": (
+                self.reveal_final_preview_sha256
+            ),
+            "global_boundary_receipt_sha256": (
+                self.global_boundary_receipt_sha256
+            ),
+            "global_boundary_packet_sha256": (
+                self.global_boundary_packet_sha256
+            ),
+            "motion_child_token_root_sha256": (
+                self.motion_child_token_root_sha256
+            ),
+            "prepared_r05_terminal_claim_sha256": (
+                self.prepared_r05_terminal_claim_sha256
+            ),
+            "expected_r05_terminal_kind": self.expected_r05_terminal_kind,
+            "expected_r05_terminal_sha256": (
+                self.expected_r05_terminal_sha256
+            ),
+            "timing_after_image_sha256": self.timing_after_image_sha256,
+            "selected_env_ids": list(self.selected_env_ids),
+            "owner_mutation_version_before": (
+                self.owner_mutation_version_before
+            ),
+            "owner_mutation_version_after": (
+                self.owner_mutation_version_after
+            ),
+            "installed_count": self.installed_count,
+            "censored_count": self.censored_count,
+            "policy_opportunity_created": self.policy_opportunity_created,
+            "runtime_integrated": self.runtime_integrated,
+            "launch_authorized": self.launch_authorized,
+        }
+        return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+@dataclass(frozen=True)
+class ActionBallContinuousMotionCensorReceipt:
+    """Typed zero-policy-opportunity Motion chronology for global CENSOR."""
+
+    schema_version: int
+    kind: str
+    decision: str
+    reveal_final_preview_sha256: str
+    global_boundary_receipt_sha256: str
+    global_boundary_packet_sha256: str
+    motion_child_token_root_sha256: str
+    prepared_r05_terminal_claim_sha256: str
+    expected_r05_terminal_kind: str
+    expected_r05_terminal_sha256: str
+    selected_env_ids: tuple[int, ...]
+    owner_mutation_version_before: int
+    owner_mutation_version_after: int
+    censored_count: int
+    policy_opportunity_created: bool
+    runtime_integrated: bool
+    launch_authorized: bool
+
+    @property
+    def canonical_sha256(self) -> str:
+        payload = {
+            "schema_version": self.schema_version,
+            "kind": self.kind,
+            "decision": self.decision,
+            "reveal_final_preview_sha256": (
+                self.reveal_final_preview_sha256
+            ),
+            "global_boundary_receipt_sha256": (
+                self.global_boundary_receipt_sha256
+            ),
+            "global_boundary_packet_sha256": (
+                self.global_boundary_packet_sha256
+            ),
+            "motion_child_token_root_sha256": (
+                self.motion_child_token_root_sha256
+            ),
+            "prepared_r05_terminal_claim_sha256": (
+                self.prepared_r05_terminal_claim_sha256
+            ),
+            "expected_r05_terminal_kind": self.expected_r05_terminal_kind,
+            "expected_r05_terminal_sha256": (
+                self.expected_r05_terminal_sha256
+            ),
+            "selected_env_ids": list(self.selected_env_ids),
+            "owner_mutation_version_before": (
+                self.owner_mutation_version_before
+            ),
+            "owner_mutation_version_after": (
+                self.owner_mutation_version_after
+            ),
+            "censored_count": self.censored_count,
+            "policy_opportunity_created": self.policy_opportunity_created,
+            "runtime_integrated": self.runtime_integrated,
+            "launch_authorized": self.launch_authorized,
+        }
+        return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def _parse_action_ball_continuous_motion_profile(value):
+    """Validate one Motion-side projection of the external C01/C02 contract.
+
+    This is deliberately not a fourth schedule authority.  Its self-hash only
+    detects mutable-config drift; a fresh runtime cannot reset or advance until
+    the independently retained C01 continuous-contract and C02 recovery-
+    contract identities bind this exact timing projection.  It contains no
+    target, ball, solver or Reward fields and cannot authorize those owners.
+    ``None`` remains the literal legacy path.
+    """
+
+    if value is None:
+        return None
+    if type(value) is not dict:
+        raise ValueError(
+            "action_ball_continuous_motion_cadence must be one exact mapping"
+        )
+    expected = {
+        "schema_version",
+        "kind",
+        "clock_kind",
+        "continuous_contract_authority_sha256",
+        "recovery_contract_authority_sha256",
+        "ready_reference_kind",
+        "canonical_sha256",
+    }
+    if set(value) != expected:
+        raise ValueError(
+            "action_ball_continuous_motion_cadence keys differ: "
+            f"missing={sorted(expected - set(value))!r}, "
+            f"unknown={sorted(set(value) - expected)!r}"
+        )
+    payload = {key: value[key] for key in expected - {"canonical_sha256"}}
+    if value["schema_version"] != 1:
+        raise ValueError(
+            "action_ball_continuous_motion_cadence schema_version differs"
+        )
+    if value["kind"] != _ACTION_BALL_CONTINUOUS_MOTION_PROFILE_KIND:
+        raise ValueError("action_ball continuous Motion profile kind differs")
+    if value["clock_kind"] != _ACTION_BALL_CONTINUOUS_MOTION_CLOCK_KIND:
+        raise ValueError("action_ball continuous Motion clock kind differs")
+    if (
+        value["ready_reference_kind"]
+        != _ACTION_BALL_CONTINUOUS_READY_REFERENCE_KIND
+    ):
+        raise ValueError(
+            "action_ball continuous Motion ready-reference kind differs"
+        )
+    for name in (
+        "continuous_contract_authority_sha256",
+        "recovery_contract_authority_sha256",
+        "canonical_sha256",
+    ):
+        digest = value[name]
+        if (
+            type(digest) is not str
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+        ):
+            raise ValueError(f"{name} must be one lowercase SHA-256")
+    actual_sha256 = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    if value["canonical_sha256"] != actual_sha256:
+        raise ValueError(
+            "action_ball continuous Motion profile canonical SHA-256 differs"
+        )
+    # Retain a private copy so a mutable Hydra/config mapping cannot rewrite
+    # the parent-authority pins after construction.  Timing itself arrives only
+    # through the external binding below and is absent from this profile.
+    return MappingProxyType(dict(value))
+
+
+# ``CommandTerm.compute`` performs a device-side ``time_left <= 0`` followed by
+# ``nonzero`` on every policy tick.  These command terms use the exact
+# 1e9-second pair as the repository's declared "time resampling disabled"
+# sentinel: resets and explicit manager resamples own command replacement.
+# Keep the optimization local to that exact, construction-bound contract.  If
+# a mutable config drifts after construction, callers fall back to IsaacLab's
+# complete implementation on the very next tick.
+_TIME_RESAMPLING_DISABLED_RANGE_S = (1.0e9, 1.0e9)
+
+
+def _has_exact_disabled_time_resampling_contract(cfg) -> bool:
+    raw = getattr(cfg, "resampling_time_range", None)
+    if isinstance(raw, (str, bytes)):
+        return False
+    try:
+        values = tuple(raw)
+    except TypeError:
+        return False
+    if len(values) != 2:
+        return False
+    if any(type(value) not in (int, float) for value in values):
+        return False
+    return tuple(float(value) for value in values) == (
+        _TIME_RESAMPLING_DISABLED_RANGE_S
+    )
+
+
+def _bind_disabled_time_resampling_fast_path(command) -> None:
+    """Bind the construction-time half of the immutable fast-path contract."""
+
+    command._disabled_time_resampling_fast_path_bound = (
+        _has_exact_disabled_time_resampling_contract(command.cfg)
+    )
+    # This is a one-way eligibility latch.  A shorter runtime range can create
+    # a shorter ``time_left`` through the base resampler; changing the config
+    # back to the sentinel must never make that state look sentinel-origin
+    # again.  A newly constructed non-sentinel command is likewise ineligible
+    # for its entire lifetime.
+    command._disabled_time_resampling_fast_path_poisoned = (
+        not command._disabled_time_resampling_fast_path_bound
+    )
+    # ``CommandTerm.__init__`` creates an all-zero timer.  The first real
+    # manager reset is what writes the sentinel-origin timer; before that, the
+    # base compute must retain authority so an accidental early tick performs
+    # the same immediate resample as IsaacLab.
+    command._disabled_time_resampling_fast_path_armed = False
+    command._disabled_time_resampling_timer_receipt = None
+
+
+def _poison_disabled_time_resampling_fast_path_on_drift(command) -> None:
+    """Permanently revoke the fast path after any observed contract drift."""
+
+    if (
+        getattr(command, "_disabled_time_resampling_fast_path_bound", False)
+        is True
+        and not _has_exact_disabled_time_resampling_contract(command.cfg)
+    ):
+        command._disabled_time_resampling_fast_path_poisoned = True
+        command._disabled_time_resampling_fast_path_armed = False
+        command._disabled_time_resampling_timer_receipt = None
+
+
+def _tensor_identity_version_receipt(tensor):
+    """Return host-only tensor identity/version proof, or ``None``."""
+
+    if not torch.is_tensor(tensor):
+        return None
+    try:
+        version = tensor._version
+    except RuntimeError:
+        return None
+    if type(version) is not int:
+        return None
+    # Retain the object itself rather than only ``id(tensor)``.  That closes
+    # Python object-id reuse after an off-lane replacement without reading any
+    # tensor value or synchronizing the device.
+    return (tensor, version)
+
+
+def _tensor_matches_identity_version_receipt(tensor, receipt) -> bool:
+    """Check a host-only receipt without invoking tensor value equality."""
+
+    if not isinstance(receipt, tuple) or len(receipt) != 2:
+        return False
+    expected_tensor, expected_version = receipt
+    if expected_tensor is not tensor:
+        return False
+    current = _tensor_identity_version_receipt(tensor)
+    return current is not None and current[1] == expected_version
+
+
+def _revoke_disabled_time_resampling_fast_path_on_timer_drift(
+    command,
+) -> None:
+    """Disarm when ``time_left`` was replaced or modified off-lane."""
+
+    if getattr(
+        command,
+        "_disabled_time_resampling_fast_path_armed",
+        False,
+    ) is not True:
+        return
+    if not _tensor_matches_identity_version_receipt(
+        getattr(command, "time_left", None),
+        getattr(
+            command, "_disabled_time_resampling_timer_receipt", None
+        ),
+    ):
+        command._disabled_time_resampling_fast_path_armed = False
+        command._disabled_time_resampling_timer_receipt = None
+
+
+def _resample_scope_covers_all_envs(command, env_ids) -> bool:
+    """Recognize the exact ordered all-environment reset scope.
+
+    Full CUDA tensors are copied only at this resample/reset boundary.  The
+    per-tick hot path performs no device reduction or readback.
+    """
+
+    if isinstance(env_ids, slice):
+        start, stop, step = env_ids.indices(command.num_envs)
+        return start == 0 and stop == command.num_envs and step == 1
+    if torch.is_tensor(env_ids):
+        if (
+            env_ids.ndim != 1
+            or env_ids.numel() != command.num_envs
+            # The manager's authoritative reset IDs are int64.  Reject every
+            # other dtype fail-closed, including legacy uint8 masks.
+            or env_ids.dtype != torch.long
+        ):
+            return False
+        rows = env_ids.detach().to(device="cpu", dtype=torch.long).tolist()
+    else:
+        try:
+            rows = list(env_ids)
+        except TypeError:
+            return False
+        if (
+            len(rows) != command.num_envs
+            or any(type(value) is not int for value in rows)
+        ):
+            return False
+    if rows != list(range(command.num_envs)):
+        return False
+    return True
+
+
+def _arm_disabled_time_resampling_fast_path_after_resample(
+    command, env_ids
+) -> None:
+    """Arm only after a successful full reset wrote sentinel-origin timers."""
+
+    if (
+        getattr(command, "_disabled_time_resampling_fast_path_bound", False)
+        is True
+        and getattr(
+            command,
+            "_disabled_time_resampling_fast_path_poisoned",
+            True,
+        )
+        is False
+        and _has_exact_disabled_time_resampling_contract(command.cfg)
+    ):
+        already_armed = getattr(
+            command,
+            "_disabled_time_resampling_fast_path_armed",
+            False,
+        ) is True
+        if already_armed or _resample_scope_covers_all_envs(
+            command, env_ids
+        ):
+            receipt = _tensor_identity_version_receipt(
+                getattr(command, "time_left", None)
+            )
+            if receipt is not None:
+                command._disabled_time_resampling_fast_path_armed = True
+                command._disabled_time_resampling_timer_receipt = receipt
+
+
+def _disabled_time_resampling_fast_path_active(command) -> bool:
+    """Return true only while both bound and live config contracts agree."""
+
+    _revoke_disabled_time_resampling_fast_path_on_timer_drift(command)
+    if (
+        getattr(command, "_disabled_time_resampling_fast_path_bound", False)
+        is not True
+        or getattr(
+            command,
+            "_disabled_time_resampling_fast_path_poisoned",
+            True,
+        )
+        is not False
+        or getattr(
+            command,
+            "_disabled_time_resampling_fast_path_armed",
+            False,
+        )
+        is not True
+    ):
+        return False
+    # Read the mutable config once.  A false result is committed to the
+    # one-way latch in the same branch, so a later sentinel value cannot revive
+    # eligibility after an observed drift.
+    if not _has_exact_disabled_time_resampling_contract(command.cfg):
+        command._disabled_time_resampling_fast_path_poisoned = True
+        command._disabled_time_resampling_fast_path_armed = False
+        command._disabled_time_resampling_timer_receipt = None
+        return False
+    return True
+
+
+def _compute_without_disabled_time_resampling_scan(command, dt: float) -> bool:
+    """Run the exact base ordering without the impossible expiry scan.
+
+    The administrative ``time_left`` clock still receives the same subtraction
+    as IsaacLab.  Only ``(time_left <= 0).nonzero()`` and its resample branch are
+    omitted under the exact disabled sentinel, so metrics, command updates and
+    any code which snapshots ``time_left`` retain their previous values.
+    """
+
+    if not _disabled_time_resampling_fast_path_active(command):
+        return False
+    command._update_metrics()
+    command.time_left -= dt
+    receipt = _tensor_identity_version_receipt(command.time_left)
+    command._disabled_time_resampling_timer_receipt = receipt
+    if receipt is None:
+        command._disabled_time_resampling_fast_path_armed = False
+    command._update_command()
+    return True
+
+
+def _split_ready_nonloop_wrap_scan_is_impossible(motion) -> bool:
+    """Prove that ``Motion.just_resampled`` has no writer on this tick path.
+
+    This is deliberately stronger than merely checking the diagnostic flag.
+    The non-looping N=1 ActionBall binding, disabled event scheduler, singleton
+    clip, completion latch and exact boolean mask must all still be present.
+    Any runtime/config mutation drops back to the historical scan.
+    """
+
+    if (
+        getattr(motion, "action_ball_diagnostic_split_ready_teacher", None)
+        is not True
+        or getattr(
+            motion,
+            "action_ball_single_stroke_timeout_enabled",
+            None,
+        )
+        is not True
+        or getattr(motion, "_action_ball_birth_broker", None) is None
+        or getattr(motion, "_multiseg", None) is not False
+        or getattr(motion, "_event_scheduler", None) is not None
+        or type(getattr(getattr(motion, "motion", None), "num_segments", None))
+        is not int
+        or motion.motion.num_segments != 1
+    ):
+        return False
+    wrapped = getattr(motion, "just_resampled", None)
+    completion = getattr(
+        motion, "_action_ball_single_stroke_complete", None
+    )
+    token = getattr(
+        getattr(motion, "_env", None),
+        "common_step_counter",
+        None,
+    )
+    receipt = getattr(motion, "_split_ready_empty_wrap_receipt", None)
+    return (
+        torch.is_tensor(wrapped)
+        and wrapped.dtype == torch.bool
+        and tuple(wrapped.shape) == (motion.num_envs,)
+        and torch.is_tensor(completion)
+        and completion.dtype == torch.bool
+        and tuple(completion.shape) == (motion.num_envs,)
+        and type(token) is int
+        and isinstance(receipt, tuple)
+        and len(receipt) == 2
+        and receipt[0] == token
+        and _tensor_matches_identity_version_receipt(
+            wrapped, receipt[1]
+        )
+    )
 
 
 class MotionLoader:
@@ -869,7 +2014,7 @@ class MotionCommand(CommandTerm):
     cfg: MotionCommandCfg
     _EXACT_RESUME_STATE_KIND = "whole_body_tracking.MotionCommand"
     _EXACT_RESUME_STATE_SCHEMA_VERSION = 2
-    _ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION = 4
+    _ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION = 5
     _ACTION_BALL_INT64_MAX = (1 << 63) - 1
     # A measured source whose first three poses are bitwise static can carry a
     # tiny frame-0 angular-velocity residue from float64 quaternion arithmetic
@@ -879,6 +2024,7 @@ class MotionCommand(CommandTerm):
 
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
+        _bind_disabled_time_resampling_fast_path(self)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
         self.robot_anchor_body_index = self.robot.body_names.index(self.cfg.anchor_body_name)
@@ -902,6 +2048,26 @@ class MotionCommand(CommandTerm):
             )
         self.action_ball_diagnostic_split_ready_teacher = (
             diagnostic_split_ready_teacher
+        )
+        single_stroke_timeout_enabled = getattr(
+            self.cfg,
+            "action_ball_single_stroke_timeout_enabled",
+            False,
+        )
+        if type(single_stroke_timeout_enabled) is not bool:
+            raise ValueError(
+                "action_ball_single_stroke_timeout_enabled must be an exact boolean"
+            )
+        if (
+            single_stroke_timeout_enabled
+            and not diagnostic_split_ready_teacher
+        ):
+            raise ValueError(
+                "action_ball_single_stroke_timeout_enabled requires "
+                "action_ball_diagnostic_split_ready_teacher=true"
+            )
+        self.action_ball_single_stroke_timeout_enabled = (
+            single_stroke_timeout_enabled
         )
         self._canonical_motion_registry = None
         self._canonical_motion_admission = None
@@ -931,6 +2097,99 @@ class MotionCommand(CommandTerm):
                 "action_ball_diagnostic_unauthorized must be an exact boolean"
             )
         self._canonical_diagnostic_unauthorized = diagnostic_unauthorized
+        diagnostic_catalog = getattr(
+            self.cfg, "action_ball_full_mdp_diagnostic_catalog", None
+        )
+        self._action_ball_full_mdp_diagnostic_catalog_table = None
+        if diagnostic_catalog is not None:
+            env_cfg = getattr(env, "cfg", None)
+            # A module/name pair can be forged by an unrelated class.  Import
+            # the already initialized cfg module at this live constructor
+            # boundary and require one of its two exact registered leaf types.
+            from whole_body_tracking.tasks.tracking.config.agibot_a3 import (
+                hope_env_cfg as _hope_env_cfg,
+            )
+
+            exact_env_cfg_types = (
+                _hope_env_cfg.HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg,
+                _hope_env_cfg.HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg,
+            )
+            env_commands_cfg = getattr(env_cfg, "commands", None)
+            env_motion_cfg = getattr(env_commands_cfg, "motion", None)
+            racket_cfg = getattr(env_commands_cfg, "racket_target", None)
+            if (
+                diagnostic_catalog
+                != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND
+                or type(env_cfg) not in exact_env_cfg_types
+                # ManagerBase deliberately deep-copies its cfg before term
+                # construction.  Require both that source and this adopted
+                # copy below; object identity would reject every real
+                # CommandManager construction and is not a trust boundary.
+                or type(env_motion_cfg) is not type(self.cfg)
+                or str(getattr(racket_cfg, "target_mode", ""))
+                != "action_ball_full_mdp"
+                or diagnostic_unauthorized is not True
+                or canonical_ready_mode is not False
+                or diagnostic_split_ready_teacher is not False
+                or single_stroke_timeout_enabled is not False
+                or getattr(self.cfg, "action_ball_dynamic_ready", None)
+                is not None
+                or getattr(self.cfg, "allow_legacy_link_origin_velocity", None)
+                is not False
+                or getattr(self.cfg, "balanced_clip_sampling", None) is not True
+                or getattr(self.cfg, "stand_start_prob", None) != 1.0
+                or tuple(getattr(self.cfg, "stand_start_yaw_range", ()))
+                != (0.0, 0.0)
+                or tuple(getattr(self.cfg, "hold_steps_range", ())) != (0, 0)
+                or getattr(self.cfg, "stand_start_min_hold", None) != 0
+                or getattr(self.cfg, "post_swing_start_prob", None) != 0.0
+                or getattr(self.cfg, "post_swing_min_hold", None) != 0
+                or getattr(self.cfg, "wrap_teleport", None) is not False
+                or getattr(self.cfg, "clip_switch_prob", None) != 0.0
+                or getattr(self.cfg, "event_timing_mode", None)
+                != EVENT_TIMING_MODE_DISABLED
+                or tuple(getattr(self.cfg, "speed_scale_range", ()))
+                != (1.0, 1.0)
+                or getattr(self.cfg, "speed_scale_per_clip", None) is not None
+                or getattr(self.cfg, "stagger_initial_clock", None) is not False
+                or getattr(self.cfg, "stagger_hold_max_steps", None) != 0
+                or getattr(self.cfg, "rsi_skip_settle_frames", None) != 0
+                or getattr(self.cfg, "planner_revision_enabled", None) is not False
+                or tuple(getattr(self.cfg, "joint_position_range", ()))
+                != (0.0, 0.0)
+                or any(
+                    tuple(getattr(self.cfg, name, {}).get(axis, ()))
+                    != (0.0, 0.0)
+                    for name in ("pose_range", "velocity_range")
+                    for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+                )
+            ):
+                raise ValueError(
+                    "full-MDP diagnostic catalog is restricted to the exact fresh "
+                    "diagnostic EnvCfg and cannot enable canonical/split-ready semantics"
+                )
+            table = load_action_ball_full_mdp_diagnostic_catalog_table()
+            if (
+                require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
+                    env_motion_cfg,
+                    racket_cfg,
+                    table=table,
+                )
+                is not table
+                or require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
+                    self.cfg,
+                    racket_cfg,
+                    table=table,
+                )
+                is not table
+                or self._motion_files != table.motion_files
+                or self._motion_file_sha256 != table.motion_sha256
+            ):
+                raise ValueError(
+                    "fresh full-MDP Motion/Racket table differs from the code-owned "
+                    "73-action diagnostic catalog"
+                )
+            self._action_ball_full_mdp_diagnostic_catalog_table = table
         # 起点扰动斜坡必须在 canonical-ready 复位守卫之前解析:那道守卫要知道
         # "非零的静态种子是不是有一条已声明的 ramp 在背书"。
         self._configure_start_pose_ramp()
@@ -942,7 +2201,13 @@ class MotionCommand(CommandTerm):
                 "canonical_ready_mode=true and "
                 "action_ball_diagnostic_unauthorized=true"
             )
-        if self.canonical_ready_mode and diagnostic_unauthorized:
+        if self._action_ball_full_mdp_diagnostic_catalog_table is not None:
+            # The capture clips are not ready-to-ready loops.  This branch
+            # owns only immutable adoption of their exact current bytes; D05
+            # and the hot Motion epoch remain responsible for first reveal and
+            # recovery, and formal/reset authority remains absent.
+            self._motion_payloads = self._snapshot_diagnostic_motion_bytes()
+        elif self.canonical_ready_mode and diagnostic_unauthorized:
             # Franco 2026-07-28 approved DIAGNOSTIC bypass: skip the registry
             # trust chain only.  The physical canonical-ready clip contract
             # (_validate_canonical_ready_clips) and the reset-curricula guard
@@ -985,6 +2250,33 @@ class MotionCommand(CommandTerm):
                 self.cfg.allow_legacy_link_origin_velocity
             ),
         )
+        if self._action_ball_full_mdp_diagnostic_catalog_table is not None:
+            table = self._action_ball_full_mdp_diagnostic_catalog_table
+            if (
+                int(self.motion.num_segments)
+                != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
+                or self.motion.kinematics_contract_exact is not True
+                or self.motion.measured_racket_available is not True
+                or tuple(
+                    float(value)
+                    for value in (
+                        self.motion.measured_racket_mount_normal_sign_per_clip
+                    )
+                )
+                != table.mount_normal_sign_per_clip
+                or type(self._motion_payloads) is not tuple
+                or len(self._motion_payloads)
+                != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
+                or tuple(
+                    hashlib.sha256(value).hexdigest()
+                    for value in self._motion_payloads
+                )
+                != table.motion_sha256
+            ):
+                raise ValueError(
+                    "fresh full-MDP diagnostic MotionLoader did not adopt the exact "
+                    "73-row schema-2/measured-racket catalog"
+                )
         if (
             bool(
                 getattr(
@@ -1018,12 +2310,23 @@ class MotionCommand(CommandTerm):
                 "action_ball_diagnostic_split_ready_teacher requires one "
                 "validated action_ball_dynamic_ready binding"
             )
-        if self.action_ball_diagnostic_split_ready_teacher:
+        if (
+            self.action_ball_diagnostic_split_ready_teacher
+            and self.action_ball_single_stroke_timeout_enabled
+        ):
             print(
                 "[MotionCommand] WARN measured N=1 split-ready diagnostic: "
                 "true reset uses binding physical_ready; the non-looping "
                 "teacher remains the immutable motion timeline and terminates "
                 "after one complete stroke",
+                flush=True,
+            )
+        elif self.action_ball_diagnostic_split_ready_teacher:
+            print(
+                "[MotionCommand] WARN measured N=1 split-ready bridge: "
+                "single-stroke completion timeout is disabled, so clip-cycle "
+                "rows may enter the existing natural-wrap path; this switch "
+                "alone does not establish recovery or continuous-task semantics",
                 flush=True,
             )
         expected_fps = 1.0 / float(env.step_dt)
@@ -1297,6 +2600,10 @@ class MotionCommand(CommandTerm):
         # command to resample its target. Replaces a time_steps<prev heuristic that fails when a clip
         # wrap jumps the index to a HIGHER segment start (forehand->backhand on the concatenated axis).
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # Host-owned same-tick proof published only after the split-ready
+        # non-loop writer has completed the full Motion update.  Racket never
+        # infers emptiness from static mode flags alone.
+        self._split_ready_empty_wrap_receipt = None
         # Pre-swing hold state (see cfg.hold_steps_range): while hold_counter > 0 the reference
         # clock is frozen at the swing's first frame ("waiting for the ball"). _update_command
         # decrements it. in_hold is exposed for rewards/metrics.
@@ -1388,6 +2695,7 @@ class MotionCommand(CommandTerm):
                 num_envs=self.num_envs,
                 device=self.device,
             )
+        self._configure_action_ball_continuous_motion_cadence()
         # A8: post-swing initial-state ring buffer (root state stored ORIGIN-RELATIVE in [:3] so a
         # snapshot from env B can seed env A; quats/velocities/joints are origin-invariant).
         # Tensors are allocated lazily at first capture (dof count comes from live robot data).
@@ -1531,6 +2839,34 @@ class MotionCommand(CommandTerm):
             self.metrics["event_question_infeasible"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics["event_deadline_due"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics["event_opportunities_consumed"] = torch.zeros(self.num_envs, device=self.device)
+        if self.action_ball_continuous_motion_enabled:
+            self.metrics["action_ball_continuous_phase"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+            self.metrics["action_ball_continuous_reveal_due"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+            self.metrics["action_ball_continuous_deadline_due"] = torch.zeros(
+                self.num_envs, device=self.device
+            )
+            self.metrics[
+                "action_ball_continuous_recovery_unavailable"
+            ] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[
+                "action_ball_continuous_task_commit_missed"
+            ] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[
+                "action_ball_continuous_motion_release_missed"
+            ] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[
+                "action_ball_continuous_opportunities_consumed"
+            ] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[
+                "action_ball_continuous_policy_opportunities_created"
+            ] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics[
+                "action_ball_continuous_infrastructure_censors_consumed"
+            ] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_anchor_rot_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos_mean_abs"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_pos_max_abs"] = torch.zeros(self.num_envs, device=self.device)
@@ -1543,6 +2879,8367 @@ class MotionCommand(CommandTerm):
             self.metrics[f"robot_anchor_pos_{axis}"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics[f"reference_anchor_lin_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics[f"robot_anchor_lin_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
+
+    def _configure_action_ball_continuous_motion_cadence(self) -> None:
+        """Allocate the default-off Motion half of the fresh successor clock."""
+
+        profile = _parse_action_ball_continuous_motion_profile(
+            getattr(
+                self.cfg,
+                "action_ball_continuous_motion_cadence",
+                None,
+            )
+        )
+        self._action_ball_continuous_motion_profile = profile
+        self._action_ball_continuous_ready_authority = None
+        self._action_ball_continuous_parent_authority_binding = None
+        self._action_ball_continuous_schedule_projection = None
+        if profile is None:
+            return
+        conflicts = []
+        if (
+            not self.canonical_ready_mode
+            and self._action_ball_full_mdp_diagnostic_catalog_table is None
+        ):
+            conflicts.append("canonical_ready_mode must be true")
+        if self.action_ball_single_stroke_timeout_enabled:
+            conflicts.append(
+                "action_ball_single_stroke_timeout_enabled must be false"
+            )
+        if bool(self.cfg.wrap_teleport):
+            conflicts.append("wrap_teleport must be false")
+        if float(self.cfg.clip_switch_prob) != 0.0:
+            conflicts.append("clip_switch_prob must be zero")
+        if bool(self.cfg.stagger_initial_clock):
+            conflicts.append("stagger_initial_clock must be false")
+        if self.retiming_active:
+            conflicts.append("reference retiming must be disabled")
+        if self.planner_revision_enabled:
+            conflicts.append("planner revision clock must be disabled")
+        if self._event_timing_mode != EVENT_TIMING_MODE_DISABLED:
+            conflicts.append("legacy event_timing_mode must be disabled")
+        if int(getattr(self.cfg, "rsi_skip_settle_frames", 0)) != 0:
+            conflicts.append("rsi_skip_settle_frames must be zero")
+        if conflicts:
+            raise ValueError(
+                "action_ball_continuous_motion_cadence conflicts: "
+                + "; ".join(conflicts)
+            )
+
+        n = self.num_envs
+        long_options = {"dtype": torch.long, "device": self.device}
+        bool_options = {"dtype": torch.bool, "device": self.device}
+        self._action_ball_continuous_sequence_active = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_episode_step = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_scheduled_ordinal = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_current_reveal_step = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_current_deadline_step = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_next_reveal_step = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_last_closed_ordinal = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_opportunities_consumed = torch.zeros(
+            n, **long_options
+        )
+        self._action_ball_continuous_policy_opportunities_created = (
+            torch.zeros(n, **long_options)
+        )
+        self._action_ball_continuous_infrastructure_censors_consumed = (
+            torch.zeros(n, **long_options)
+        )
+        self._action_ball_continuous_current_policy_opportunity = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_motion_active = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_suffix_complete = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_ready_reference_active = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_ready_at_reveal = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_reveal_due = torch.zeros(
+            n, **bool_options
+        )
+        # These two row-aligned buffers are one-tick Motion facts.  They do
+        # not carry task/outcome/ball identity and do not replace ActionEpoch's
+        # lifecycle.  The after-command owner joins this edge to the epoch's
+        # own current row before any later D05 prepare.
+        self._action_ball_continuous_closed_mask = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_close_reason = torch.full(
+            (n,), ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE, **long_options
+        )
+        self._action_ball_continuous_deadline_due = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_recovery_unavailable = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_task_commit_pending = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_task_commit_missed = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_task_committed = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_motion_release_pending = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_motion_release_missed = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_committed_task_refs = [None] * n
+        self._action_ball_continuous_commit_owner_nonce = object()
+        self._action_ball_continuous_next_commit_token_serial = 0
+        self._action_ball_continuous_prepared_task_commit = None
+        self._action_ball_continuous_prepared_task_commit_receipts = None
+        self._action_ball_continuous_current_projection = None
+        # R08 owns a separate, exact five-state chronology.  These buffers are
+        # not initialized from the legacy seven-state phase and are not public
+        # tensor aliases.  The observation token is a capability into the
+        # owner-private record below; the clone-only view is minted only by
+        # the exact validator.
+        self._action_ball_continuous_observation_owner_nonce = object()
+        self._action_ball_continuous_observation_publication_identity = None
+        self._action_ball_continuous_observation_token = None
+        self._action_ball_continuous_observation_record = None
+        self._action_ball_continuous_observation_common_step = None
+        self._action_ball_continuous_canonical_phase = torch.full(
+            (n,),
+            _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE[
+                "recover_hidden"
+            ],
+            **long_options,
+        )
+        self._action_ball_continuous_canonical_phase_start_tick = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_task_identity = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_cadence_identity = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_action_uid = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_shot_index = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_outcome_identity = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_task_receipt_sha256 = torch.zeros(
+            (n, 32), dtype=torch.uint8, device=self.device
+        )
+        self._action_ball_continuous_canonical_cadence_receipt_sha256 = torch.zeros(
+            (n, 32), dtype=torch.uint8, device=self.device
+        )
+        self._action_ball_continuous_canonical_candidate_identity = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_contact_tick = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_launch_tick = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_chosen_horizon_tick = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_task_close_tick = torch.full(
+            (n,), -1, **long_options
+        )
+        self._action_ball_continuous_canonical_task_valid = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_canonical_playback_started = torch.zeros(
+            n, **bool_options
+        )
+        self._action_ball_continuous_r07_ready_owner = None
+        self._action_ball_continuous_r07_ready_validator = None
+        self._action_ball_continuous_r07_ready_projection = None
+        # Production all-owner Motion leaf state is initialized only when an
+        # exact R05 owner is explicitly bound.  Keeping this false preserves
+        # the isolated scheduler-baseline tests without allowing those legacy
+        # APIs into the constructed production path.
+        self._action_ball_continuous_fresh_motion_lane_bound = False
+        self._action_ball_continuous_transaction_module = None
+        self._action_ball_continuous_transaction_owner = None
+        # Production reveal ingress is a separate Device-R05 capability
+        # family.  The portable owner above remains diagnostic compatibility
+        # only; the two binders are deliberately mutually exclusive.
+        self._action_ball_continuous_motion_device_r05_owner = None
+        # The lean diagnostic path has one construction-bound epoch owner.
+        # It is a direct writer-order coordinator, not a receipt or a second
+        # source of task truth.  Binding is deliberately separate from the
+        # Device-R05 genesis join so factories cannot silently synthesize an
+        # epoch while constructing Motion.
+        self._action_ball_full_mdp_motion_epoch_owner = None
+        # Exact question chronology capabilities are Motion-owned and retain
+        # the independent Physical horizon capability that supplied the
+        # candidate-keyed maximum complete segment.  They are deliberately
+        # separate from the cadence-close deadline state above.
+        self._action_ball_motion_question_owner_nonce = object()
+        self._action_ball_motion_question_records = {}
+        self._action_ball_continuous_motion_boundary_module = None
+        self._action_ball_continuous_motion_boundary_owner = None
+        self._action_ball_continuous_motion_boundary_lane = None
+        self._action_ball_continuous_motion_boundary_source_sha256 = None
+        self._action_ball_continuous_motion_child_token_authority = None
+        self._action_ball_continuous_motion_boundary_fault_schema = None
+        self._action_ball_continuous_motion_owner_nonce = None
+        self._action_ball_continuous_motion_next_serial = 0
+        self._action_ball_continuous_motion_mutation_version = 0
+        self._action_ball_continuous_motion_device_mutation_version = None
+        self._action_ball_continuous_motion_stage = None
+        self._action_ball_continuous_motion_prearmed_install = None
+        self._action_ball_continuous_motion_prearmed_accept_swaps = None
+        self._action_ball_continuous_motion_prearmed_censor_swaps = None
+        self._action_ball_continuous_motion_prearmed_accept_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_censor_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_accept_refs = None
+        self._action_ball_continuous_motion_prearmed_boundary_row = None
+        self._action_ball_continuous_motion_armed_install = None
+        self._action_ball_continuous_motion_censored_install = None
+        self._action_ball_continuous_motion_armed_swaps = None
+        self._action_ball_continuous_motion_armed_refs = None
+        self._action_ball_continuous_motion_commit_receipt = None
+        self._action_ball_continuous_motion_terminal_claim = None
+        self._action_ball_continuous_motion_terminal_expectations = None
+        self._action_ball_continuous_motion_terminal_token = None
+        self._action_ball_continuous_motion_terminal_epoch_committed = False
+        # Fresh selected reset is a different capability family from reveal.
+        # In particular, none of the reveal child tokens above can be reused
+        # to enter or complete this state machine.
+        self._action_ball_continuous_motion_selected_reset_authority = None
+        self._action_ball_continuous_motion_selected_reset_prepare_validator = None
+        self._action_ball_continuous_motion_selected_reset_r05_validator = None
+        self._action_ball_continuous_motion_selected_reset_r05_owner = None
+        self._action_ball_continuous_motion_selected_reset_authority_api_sha256 = (
+            None
+        )
+        self._action_ball_continuous_motion_selected_reset_diagnostic = False
+        self._action_ball_continuous_motion_selected_reset_owner_nonce = None
+        self._action_ball_continuous_motion_selected_reset_next_serial = 0
+        self._action_ball_continuous_motion_selected_reset_stage = None
+        self._action_ball_continuous_motion_selected_reset_prepared_true_reset = None
+        self._action_ball_continuous_motion_selected_reset_selected_mask = None
+        self._action_ball_continuous_motion_selected_reset_generation_before = None
+        self._action_ball_continuous_motion_selected_reset_generation_after = None
+        self._action_ball_continuous_motion_selected_reset_generation_overflow_fault = (
+            None
+        )
+        self._action_ball_continuous_motion_selected_reset_prevalidated = None
+        self._action_ball_continuous_motion_selected_reset_swaps = None
+        self._action_ball_continuous_motion_selected_reset_version_after = None
+        self._action_ball_continuous_motion_selected_reset_terminal_token = None
+        self._action_ball_continuous_motion_selected_reset_completion_token = None
+        self._action_ball_continuous_motion_selected_reset_completion_prepared = None
+        self._action_ball_continuous_motion_selected_reset_committed = False
+        self._action_ball_continuous_motion_poisoned = False
+        self._action_ball_continuous_motion_poison_reason = None
+        self._action_ball_continuous_motion_fault_count_device = None
+        self._action_ball_continuous_motion_terminal_resolution_total = 0
+        self._action_ball_continuous_motion_terminal_resolution_total_device = None
+        self._action_ball_continuous_motion_global_drain_active = None
+        self._action_ball_continuous_motion_global_drain_sequence = 0
+        self._action_ball_continuous_motion_global_drain_last_update = -1
+        self._action_ball_continuous_motion_global_drain_last_completed_steps = -1
+        self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version = -1
+        self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
+        self._action_ball_continuous_motion_global_drain_poisoned = False
+        self._action_ball_continuous_motion_global_drain_poison_reason = None
+        self._action_ball_continuous_fresh_time_left_receipt = None
+        # Published only after the complete Motion update for this manager
+        # tick.  A later Command can therefore distinguish the declared
+        # Motion->Racket ordering from a swapped or stale call.
+        self._action_ball_continuous_published_common_step = None
+        self._action_ball_continuous_phase = torch.full(
+            (n,),
+            _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE["pre_reveal_hidden"],
+            **long_options,
+        )
+        # A selected reset deliberately leaves legacy host task references
+        # untouched.  This device bit makes those references unreachable until
+        # a later accepted reveal atomically installs the new task identity.
+        self._action_ball_continuous_motion_reset_pending = torch.zeros(
+            n, **bool_options
+        )
+
+    @property
+    def action_ball_continuous_motion_enabled(self) -> bool:
+        return (
+            getattr(
+                self,
+                "_action_ball_continuous_motion_profile",
+                None,
+            )
+            is not None
+        )
+
+    def _action_ball_continuous_public_tensor(
+        self, value: torch.Tensor, *, name: str
+    ) -> torch.Tensor:
+        """Never export a writable live alias from the production leaf."""
+
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation=f"{name} read"
+            )
+            return value.detach().clone()
+        return value
+
+    @property
+    def action_ball_continuous_motion_phase(self) -> torch.Tensor:
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_continuous_phase,
+            name="phase",
+        )
+
+    @property
+    def action_ball_continuous_reveal_due(self) -> torch.Tensor:
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_continuous_reveal_due,
+            name="reveal-due",
+        )
+
+    @property
+    def action_ball_continuous_deadline_due(self) -> torch.Tensor:
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_continuous_deadline_due,
+            name="deadline-due",
+        )
+
+    @property
+    def action_ball_continuous_recovery_unavailable(self) -> torch.Tensor:
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_continuous_recovery_unavailable,
+            name="recovery-unavailable",
+        )
+
+    def bind_action_ball_continuous_ready_authority(
+        self, ready: torch.Tensor
+    ) -> None:
+        """Bind the future recovery conjunction without owning its formula.
+
+        The shared boolean remains owned by the recovery/plant authority.  A
+        missing binding is fail-closed (not ready); Motion never invents a
+        weighted readiness score from its own imitation errors.
+        """
+
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        if (
+            not torch.is_tensor(ready)
+            or ready.dtype != torch.bool
+            or tuple(ready.shape) != (self.num_envs,)
+            or ready.device != torch.device(self.device)
+        ):
+            raise ValueError(
+                "continuous ready authority must be one bool tensor on Motion's device"
+            )
+        current = self._action_ball_continuous_ready_authority
+        if current is not None and current is not ready:
+            raise RuntimeError(
+                "continuous ready authority may be bound exactly once"
+            )
+        self._action_ball_continuous_ready_authority = ready
+
+    def bind_action_ball_continuous_r07_ready_projection(
+        self,
+        r07_owner: object,
+        *,
+        require_owned_ready_projection: object,
+    ) -> None:
+        """Bind the sole dwell-qualified R07 readiness capability.
+
+        The legacy shared bool above remains diagnostic compatibility.  The
+        fresh five-state lifecycle never consumes it: READY_HOLD requires an
+        owner-issued projection, exact validator and stable owner identity.
+        """
+
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "continuous R07 ready projection requires fresh cadence"
+            )
+        if (
+            r07_owner is None
+            or not callable(require_owned_ready_projection)
+            or getattr(require_owned_ready_projection, "__self__", None)
+            is not r07_owner
+        ):
+            raise TypeError(
+                "continuous R07 readiness requires an owner-bound validator"
+            )
+        current = self._action_ball_continuous_r07_ready_owner
+        if current is not None:
+            if (
+                current is not r07_owner
+                or getattr(
+                    self._action_ball_continuous_r07_ready_validator,
+                    "__func__",
+                    None,
+                )
+                is not getattr(
+                    require_owned_ready_projection, "__func__", None
+                )
+            ):
+                raise RuntimeError(
+                    "continuous R07 ready projection may not be rebound"
+                )
+            return
+        self._action_ball_continuous_r07_ready_owner = r07_owner
+        self._action_ball_continuous_r07_ready_validator = (
+            require_owned_ready_projection
+        )
+
+    def install_action_ball_continuous_r07_ready_projection(
+        self, projection: object
+    ) -> None:
+        """Retain one current-tick, owner-validated R07 readiness capability."""
+
+        validator = self._action_ball_continuous_r07_ready_validator
+        if validator is None:
+            raise RuntimeError(
+                "continuous R07 ready projection is not construction-bound"
+            )
+        try:
+            view = validator(projection, owner_kind="motion")
+        except Exception as exc:
+            raise RuntimeError(
+                "continuous R07 readiness projection is not owner-issued"
+            ) from exc
+        if (
+            getattr(view, "owner_kind", None) != "motion"
+            or getattr(view, "ready_projection", None) is not projection
+            or getattr(view, "ready_identity", None) is None
+            or not torch.is_tensor(getattr(view, "ready", None))
+            or view.ready.dtype != torch.bool
+            or tuple(view.ready.shape) != (self.num_envs,)
+            or view.ready.device != torch.device(self.device)
+            or not torch.is_tensor(getattr(view, "control_tick", None))
+            or view.control_tick.dtype != torch.int64
+            or tuple(view.control_tick.shape) != (self.num_envs,)
+            or view.control_tick.device != torch.device(self.device)
+        ):
+            raise RuntimeError(
+                "continuous R07 readiness projection shape differs"
+            )
+        # Retain the opaque capability, never the clone returned to this call.
+        # The command update revalidates it at the actual chronology write.
+        self._action_ball_continuous_r07_ready_projection = projection
+
+    def bind_action_ball_continuous_parent_authorities(
+        self,
+        *,
+        continuous_contract_authority_sha256,
+        recovery_contract_authority_sha256,
+        frozen_at_step,
+        sequence_origin_step,
+        first_reveal_step,
+        cadence_steps,
+        deadline_offset_steps,
+        upcoming_action_slot=None,
+        upcoming_action_uid=None,
+    ) -> None:
+        """Bind the external C01/C02 identities and their timing projection.
+
+        The profile's canonical hash is only an integrity checksum.  The
+        target/task owner must retain the C01 contract authority and the
+        recovery owner must retain the C02 authority, then jointly bind the
+        exact clock values those parents authorized before the first reset.
+        This seam intentionally performs no target or ball installation.
+        """
+
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        continuous_sha256 = self._action_ball_sha256(
+            continuous_contract_authority_sha256,
+            name="continuous_contract_authority_sha256",
+        )
+        recovery_sha256 = self._action_ball_sha256(
+            recovery_contract_authority_sha256,
+            name="recovery_contract_authority_sha256",
+        )
+        projection = {
+            "frozen_at_step": self._action_ball_plain_int(
+                frozen_at_step, name="frozen_at_step"
+            ),
+            "sequence_origin_step": self._action_ball_plain_int(
+                sequence_origin_step, name="sequence_origin_step"
+            ),
+            "first_reveal_step": self._action_ball_plain_int(
+                first_reveal_step, name="first_reveal_step"
+            ),
+            "cadence_steps": self._action_ball_plain_int(
+                cadence_steps, name="cadence_steps", minimum=1
+            ),
+            "deadline_offset_steps": self._action_ball_plain_int(
+                deadline_offset_steps,
+                name="deadline_offset_steps",
+                minimum=1,
+            ),
+        }
+        if upcoming_action_slot is not None or upcoming_action_uid is not None:
+            projection["upcoming_action_slot"] = self._action_ball_plain_int(
+                upcoming_action_slot,
+                name="upcoming_action_slot",
+            )
+            projection["upcoming_action_uid"] = self._action_ball_plain_int(
+                upcoming_action_uid,
+                name="upcoming_action_uid",
+                minimum=1,
+            )
+            action_uids = (
+                self._action_ball_continuous_code_owned_action_uids()
+            )
+            if (
+                not isinstance(action_uids, tuple)
+                or projection["upcoming_action_slot"] >= len(action_uids)
+                or action_uids[projection["upcoming_action_slot"]]
+                != projection["upcoming_action_uid"]
+            ):
+                raise RuntimeError(
+                    "external continuous upcoming action identity differs"
+                )
+        if not (
+            projection["sequence_origin_step"]
+            <= projection["frozen_at_step"]
+            < projection["first_reveal_step"]
+        ):
+            raise ValueError(
+                "external continuous schedule must freeze before first reveal"
+            )
+        if (
+            projection["deadline_offset_steps"]
+            >= projection["cadence_steps"]
+        ):
+            raise ValueError(
+                "external continuous deadline offset must be smaller than cadence"
+            )
+        profile = self._action_ball_continuous_motion_profile
+        if (
+            continuous_sha256
+            != profile["continuous_contract_authority_sha256"]
+            or recovery_sha256
+            != profile["recovery_contract_authority_sha256"]
+        ):
+            raise RuntimeError(
+                "continuous Motion profile differs from external C01/C02 authority"
+            )
+        immutable_projection = MappingProxyType(projection)
+        binding = (
+            profile,
+            immutable_projection,
+            continuous_sha256,
+            recovery_sha256,
+        )
+        current = self._action_ball_continuous_parent_authority_binding
+        if current is not None and current != binding:
+            raise RuntimeError(
+                "continuous Motion external C01/C02 authority may not drift"
+            )
+        if current is not None:
+            return
+        self._action_ball_continuous_schedule_projection = (
+            immutable_projection
+        )
+        self._action_ball_continuous_parent_authority_binding = binding
+
+    def _require_action_ball_continuous_parent_authorities(self) -> None:
+        binding = self._action_ball_continuous_parent_authority_binding
+        if (
+            binding is None
+            or binding[0] is not self._action_ball_continuous_motion_profile
+            or binding[1]
+            is not self._action_ball_continuous_schedule_projection
+        ):
+            raise RuntimeError(
+                "continuous Motion cadence requires external C01/C02 authority binding"
+            )
+
+    def _action_ball_continuous_motion_leaf_is_active(self) -> bool:
+        return any(
+            value is not None
+            for value in (
+                getattr(self, "_action_ball_continuous_motion_stage", None),
+                getattr(
+                    self,
+                    "_action_ball_continuous_motion_prearmed_install",
+                    None,
+                ),
+                getattr(
+                    self,
+                    "_action_ball_continuous_motion_armed_install",
+                    None,
+                ),
+                getattr(
+                    self,
+                    "_action_ball_continuous_motion_censored_install",
+                    None,
+                ),
+            )
+        )
+
+    def _action_ball_continuous_motion_selected_reset_is_active(self) -> bool:
+        return any(
+            value is not None
+            for value in (
+                getattr(
+                    self,
+                    "_action_ball_continuous_motion_selected_reset_stage",
+                    None,
+                ),
+                getattr(
+                    self,
+                    "_action_ball_continuous_motion_selected_reset_prevalidated",
+                    None,
+                ),
+                getattr(
+                    self,
+                    "_action_ball_continuous_motion_selected_reset_terminal_token",
+                    None,
+                ),
+                getattr(
+                    self,
+                    "_action_ball_continuous_motion_selected_reset_completion_token",
+                    None,
+                ),
+            )
+        )
+
+    def _require_action_ball_continuous_motion_leaf_idle(
+        self, *, operation: str
+    ) -> None:
+        """Protect the production owner while one private leaf is retained."""
+
+        if not getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            return
+        if self._action_ball_continuous_motion_poisoned:
+            raise RuntimeError(
+                f"continuous Motion child owner is poisoned during {operation}"
+            )
+        if self._action_ball_continuous_motion_leaf_is_active():
+            raise RuntimeError(
+                f"continuous Motion {operation} is forbidden while its leaf lease is active"
+            )
+        if self._action_ball_continuous_motion_selected_reset_is_active():
+            raise RuntimeError(
+                f"continuous Motion {operation} is forbidden while its selected-reset lease is active"
+            )
+        if getattr(
+            self,
+            "_action_ball_continuous_motion_global_drain_active",
+            None,
+        ) is not None:
+            raise RuntimeError(
+                f"continuous Motion {operation} is forbidden while its global drain lease is active"
+            )
+        if (
+            self._action_ball_continuous_motion_mutation_version
+            >= self._ACTION_BALL_INT64_MAX
+        ):
+            raise RuntimeError(
+                "continuous Motion owner mutation version would overflow int64"
+            )
+
+    def _increment_action_ball_continuous_motion_mutation_version(
+        self,
+    ) -> None:
+        """Advance the host/device high-water after one complete live mutation."""
+
+        if not getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            return
+        next_version = (
+            self._action_ball_continuous_motion_mutation_version + 1
+        )
+        if next_version > self._ACTION_BALL_INT64_MAX:
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion owner mutation version overflowed int64"
+            )
+        self._action_ball_continuous_motion_device_mutation_version.add_(1)
+        self._action_ball_continuous_motion_mutation_version = next_version
+        self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
+
+    def _legacy_clear_action_ball_continuous_committed_refs(
+        self, ids: torch.Tensor
+    ) -> None:
+        """Legacy-only host-list reset; production never enters this D2H path."""
+
+        for env_id in ids.detach().cpu().tolist():
+            self._action_ball_continuous_committed_task_refs[int(env_id)] = None
+
+    def _reset_action_ball_continuous_motion_cadence(
+        self, env_ids: torch.Tensor
+    ) -> None:
+        """Start a fresh sequence clock after a real episode reset only."""
+
+        if not self.action_ball_continuous_motion_enabled:
+            return
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="true reset"
+            )
+            raise RuntimeError(
+                "legacy Motion cadence reset is tombstoned for the fresh selected-reset lane"
+            )
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="true reset"
+        )
+        self._require_action_ball_continuous_parent_authorities()
+        ids = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.device
+        ).reshape(-1)
+        schedule = self._action_ball_continuous_schedule_projection
+        origin = int(schedule["sequence_origin_step"])
+        self._action_ball_continuous_sequence_active[ids] = True
+        # The first command update publishes ``sequence_origin_step``.  Reset
+        # itself is outside the policy-tick tape.
+        self._action_ball_continuous_episode_step[ids] = origin - 1
+        self._action_ball_continuous_scheduled_ordinal[ids] = -1
+        self._action_ball_continuous_current_reveal_step[ids] = -1
+        self._action_ball_continuous_current_deadline_step[ids] = -1
+        self._action_ball_continuous_next_reveal_step[ids] = int(
+            schedule["first_reveal_step"]
+        )
+        self._action_ball_continuous_last_closed_ordinal[ids] = -1
+        self._action_ball_continuous_opportunities_consumed[ids] = 0
+        self._action_ball_continuous_policy_opportunities_created[ids] = 0
+        self._action_ball_continuous_infrastructure_censors_consumed[ids] = 0
+        self._action_ball_continuous_current_policy_opportunity[ids] = False
+        self._action_ball_continuous_motion_active[ids] = False
+        self._action_ball_continuous_suffix_complete[ids] = False
+        self._action_ball_continuous_ready_reference_active[ids] = True
+        self._action_ball_continuous_ready_at_reveal[ids] = False
+        self._action_ball_continuous_reveal_due[ids] = False
+        self._action_ball_continuous_closed_mask[ids] = False
+        self._action_ball_continuous_close_reason[ids] = (
+            ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE
+        )
+        self._action_ball_continuous_deadline_due[ids] = False
+        self._action_ball_continuous_recovery_unavailable[ids] = False
+        self._action_ball_continuous_task_commit_pending[ids] = False
+        self._action_ball_continuous_task_commit_missed[ids] = False
+        self._action_ball_continuous_task_committed[ids] = False
+        self._action_ball_continuous_motion_release_pending[ids] = False
+        self._action_ball_continuous_motion_release_missed[ids] = False
+        # Prepared tokens are policy-tick capabilities and never cross a true
+        # reset.  Revocation is metadata only; no task/history/simulator state
+        # is cleared here.
+        self._action_ball_continuous_prepared_task_commit = None
+        self._action_ball_continuous_prepared_task_commit_receipts = None
+        self._action_ball_continuous_current_projection = None
+        self._action_ball_continuous_published_common_step = None
+        self._invalidate_action_ball_continuous_observation_publication()
+        if not getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._legacy_clear_action_ball_continuous_committed_refs(ids)
+        self._action_ball_continuous_phase[ids] = (
+            _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                "pre_reveal_hidden"
+            ]
+        )
+        self._action_ball_continuous_canonical_phase[ids] = (
+            _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE[
+                "recover_hidden"
+            ]
+        )
+        self._action_ball_continuous_canonical_phase_start_tick[ids] = (
+            origin - 1
+        )
+        self._action_ball_continuous_canonical_task_identity[ids] = -1
+        self._action_ball_continuous_canonical_cadence_identity[ids] = -1
+        self._action_ball_continuous_canonical_action_uid[ids] = -1
+        self._action_ball_continuous_canonical_shot_index[ids] = -1
+        self._action_ball_continuous_canonical_outcome_identity[ids] = -1
+        self._action_ball_continuous_canonical_task_receipt_sha256[ids] = 0
+        self._action_ball_continuous_canonical_cadence_receipt_sha256[ids] = 0
+        self._action_ball_continuous_canonical_candidate_identity[ids] = -1
+        self._action_ball_continuous_canonical_contact_tick[ids] = -1
+        self._action_ball_continuous_canonical_launch_tick[ids] = -1
+        self._action_ball_continuous_canonical_chosen_horizon_tick[ids] = -1
+        self._action_ball_continuous_canonical_task_close_tick[ids] = -1
+        self._action_ball_continuous_canonical_task_valid[ids] = False
+        self._action_ball_continuous_canonical_playback_started[ids] = False
+        self._invalidate_action_ball_continuous_observation_publication()
+        self._hold_action_ball_continuous_ready_reference()
+        self._increment_action_ball_continuous_motion_mutation_version()
+
+    def _hold_action_ball_continuous_ready_reference(self) -> None:
+        """Publish completed-action frame 0 with every reference velocity zero.
+
+        Only command/reference tensors change.  This method deliberately has
+        no simulator, action-manager, history, reset or termination writer.
+        """
+
+        if not self.action_ball_continuous_motion_enabled:
+            return
+        ready = self._action_ball_continuous_ready_reference_active
+        ready_steps = self.motion.seg_start[self.clip_id]
+        self.time_steps.copy_(torch.where(ready, ready_steps, self.time_steps))
+        self.time_steps_f.copy_(
+            torch.where(
+                ready,
+                ready_steps.to(dtype=self.time_steps_f.dtype),
+                self.time_steps_f,
+            )
+        )
+        self.speed_scale.copy_(
+            torch.where(ready, torch.zeros_like(self.speed_scale), self.speed_scale)
+        )
+        self.hold_counter.copy_(
+            torch.where(ready, torch.ones_like(self.hold_counter), self.hold_counter)
+        )
+        if "in_hold" in self.metrics:
+            self.metrics["in_hold"] = torch.where(
+                ready,
+                torch.ones_like(self.metrics["in_hold"]),
+                self.metrics["in_hold"],
+            )
+
+    def _action_ball_continuous_event_rows(
+        self,
+        env_ids,
+        scheduled_ordinals,
+        *,
+        operation: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        self._require_action_ball_continuous_parent_authorities()
+        raw_ids = torch.as_tensor(env_ids, device=self.device)
+        raw_ordinals = torch.as_tensor(scheduled_ordinals, device=self.device)
+        for name, value in (("env_ids", raw_ids), ("scheduled_ordinals", raw_ordinals)):
+            if value.dtype == torch.bool or value.is_floating_point() or value.is_complex():
+                raise ValueError(f"continuous Motion {name} must use an integer dtype")
+        ids = raw_ids.to(dtype=torch.long).reshape(-1)
+        ordinals = raw_ordinals.to(dtype=torch.long).reshape(-1)
+        if len(ids) == 0 or len(ids) != len(ordinals):
+            raise ValueError(
+                f"continuous Motion {operation} requires equal non-empty rows"
+            )
+        if (
+            len(torch.unique(ids)) != len(ids)
+            or bool((ids < 0).any())
+            or bool((ids >= self.num_envs).any())
+        ):
+            raise ValueError(
+                f"continuous Motion {operation} env ids are invalid"
+            )
+        return ids, ordinals
+
+    def _require_action_ball_continuous_current_publication(
+        self,
+        *,
+        operation: str,
+    ) -> int:
+        """Reject a consumer running before Motion in this manager tick."""
+
+        common_step = getattr(self._env, "common_step_counter", None)
+        if (
+            type(common_step) is not int
+            or common_step < 0
+            or self._action_ball_continuous_published_common_step
+            != common_step
+        ):
+            raise RuntimeError(
+                f"continuous Motion {operation} is stale or Command order is swapped"
+            )
+        return common_step
+
+    def _action_ball_continuous_canonical_ready(self) -> torch.Tensor:
+        """Validate and clone the current dwell-qualified R07 ready lane."""
+
+        projection = self._action_ball_continuous_r07_ready_projection
+        validator = self._action_ball_continuous_r07_ready_validator
+        if projection is None or validator is None:
+            # Production stays HOLD until R07 exposes its registry-backed
+            # child projection; a caller bool is deliberately not a fallback.
+            return torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        try:
+            view = validator(projection, owner_kind="motion")
+        except Exception as exc:
+            raise RuntimeError(
+                "continuous R07 readiness projection became stale"
+            ) from exc
+        ready = getattr(view, "ready", None)
+        control_tick = getattr(view, "control_tick", None)
+        if (
+            getattr(view, "ready_projection", None) is not projection
+            or getattr(view, "owner_kind", None) != "motion"
+            or not torch.is_tensor(ready)
+            or ready.dtype != torch.bool
+            or tuple(ready.shape) != (self.num_envs,)
+            or ready.device != torch.device(self.device)
+            or not torch.is_tensor(control_tick)
+            or control_tick.dtype != torch.int64
+            or tuple(control_tick.shape) != (self.num_envs,)
+            or control_tick.device != torch.device(self.device)
+            or not torch.equal(
+                control_tick,
+                self._action_ball_continuous_episode_step,
+            )
+        ):
+            raise RuntimeError(
+                "continuous R07 readiness chronology differs from Motion"
+            )
+        return ready.clone()
+
+    def _invalidate_action_ball_continuous_observation_publication(self) -> None:
+        self._action_ball_continuous_observation_publication_identity = None
+        self._action_ball_continuous_observation_token = None
+        self._action_ball_continuous_observation_record = None
+        self._action_ball_continuous_observation_common_step = None
+
+    def _transition_action_ball_continuous_canonical_phase(
+        self,
+        next_phase: torch.Tensor,
+    ) -> None:
+        if (
+            not torch.is_tensor(next_phase)
+            or next_phase.dtype != torch.int64
+            or tuple(next_phase.shape) != (self.num_envs,)
+            or next_phase.device != torch.device(self.device)
+        ):
+            raise RuntimeError(
+                "continuous canonical phase after-image shape differs"
+            )
+        changed = next_phase != self._action_ball_continuous_canonical_phase
+        self._action_ball_continuous_canonical_phase_start_tick.copy_(
+            torch.where(
+                changed,
+                self._action_ball_continuous_episode_step,
+                self._action_ball_continuous_canonical_phase_start_tick,
+            )
+        )
+        self._action_ball_continuous_canonical_phase.copy_(next_phase)
+
+    def _advance_action_ball_continuous_canonical_lifecycle(
+        self,
+        *,
+        motion_active_before: torch.Tensor,
+        suffix_due: torch.Tensor,
+        closed_without_playback: torch.Tensor,
+    ) -> None:
+        """Advance the independent exact five-state lifecycle once.
+
+        This writer consumes task/teacher chronology only.  Physical ball
+        launch is intentionally absent: late launch affects ball_state_valid
+        at the downstream Physical+R06 join, never Motion phase.
+        """
+
+        # Portable/legacy cadence has no authority to write R08.  The exact
+        # Device-R05 construction binding is the minimum owner fact even for
+        # recovery/ready transitions.
+        if self._action_ball_continuous_motion_device_r05_owner is None:
+            return
+        current = self._action_ball_continuous_canonical_phase
+        next_phase = current.clone()
+        active = self._action_ball_continuous_sequence_active
+        task_valid = self._action_ball_continuous_canonical_task_valid
+        # R07 validation is the only fallible owner call.  Resolve it before
+        # constructing or applying any Motion after-image.
+        ready = self._action_ball_continuous_canonical_ready()
+        timing = self._action_ball_task_timing_active & task_valid
+        teacher_left_frame0 = self.time_steps.gt(
+            self.motion.seg_start[self.clip_id]
+        )
+        teacher_started = (
+            timing
+            & teacher_left_frame0
+            & (
+                self._action_ball_task_age_s + 1.0e-12
+                >= self._action_ball_pre_swing_wait_s
+            )
+        )
+        playback_after = self._action_ball_continuous_canonical_playback_started
+        epoch_owner = self._action_ball_full_mdp_motion_epoch_owner
+        if epoch_owner is not None:
+            # The scalar compatibility ``record.epoch`` deliberately remains
+            # -1 in the row-wise lane.  Epoch pulls Motion's exact full-key
+            # mask below; an IDLE, foreign or stale row produces an empty
+            # event without becoming caller-authored selection authority.
+            published = epoch_owner.publish_motion_playback_started(owner=self)
+            published_started = published.motion_playback_started[:, 0]
+            teacher_started &= published_started
+            playback_after = playback_after | published_started
+        else:
+            playback_after = playback_after | teacher_started
+        lifecycle_close = self._action_ball_continuous_current_deadline_step
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            lifecycle_close = (
+                self._action_ball_continuous_canonical_task_close_tick
+            )
+        swing = (
+            teacher_started
+            & (
+                (current == ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE)
+                | (current == ACTION_BALL_CONTINUOUS_CANONICAL_SWING)
+            )
+            & (self._action_ball_continuous_episode_step <= lifecycle_close)
+        )
+        follow = (
+            task_valid
+            & playback_after
+            & (
+                (current == ACTION_BALL_CONTINUOUS_CANONICAL_SWING)
+                | (current == ACTION_BALL_CONTINUOUS_CANONICAL_FOLLOW_THROUGH)
+                | (
+                    (current == ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE)
+                    & teacher_started
+                )
+            )
+            & (self._action_ball_continuous_episode_step >= lifecycle_close)
+            & motion_active_before
+            & ~suffix_due
+        )
+
+        next_phase = torch.where(
+            swing,
+            torch.full_like(
+                next_phase,
+                _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE["swing"],
+            ),
+            next_phase,
+        )
+        next_phase = torch.where(
+            follow,
+            torch.full_like(
+                next_phase,
+                _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE[
+                    "follow_through"
+                ],
+            ),
+            next_phase,
+        )
+        hidden = (
+            active
+            & (
+                closed_without_playback
+                | suffix_due
+                | ~task_valid
+            )
+        )
+        task_valid_after = task_valid & ~hidden
+        playback_after &= ~hidden
+        task_identity_after = (
+            torch.where(
+                hidden,
+                torch.full_like(
+                    self._action_ball_continuous_canonical_task_identity, -1
+                ),
+                self._action_ball_continuous_canonical_task_identity,
+            )
+        )
+        cadence_identity_after = (
+            torch.where(
+                hidden,
+                torch.full_like(
+                    self._action_ball_continuous_canonical_cadence_identity, -1
+                ),
+                self._action_ball_continuous_canonical_cadence_identity,
+            )
+        )
+        scalar_identity_after = tuple(
+            torch.where(hidden, torch.full_like(destination, -1), destination)
+            for destination in (
+                self._action_ball_continuous_canonical_action_uid,
+                self._action_ball_continuous_canonical_shot_index,
+                self._action_ball_continuous_canonical_outcome_identity,
+                self._action_ball_continuous_canonical_candidate_identity,
+                self._action_ball_continuous_canonical_contact_tick,
+                self._action_ball_continuous_canonical_launch_tick,
+                self._action_ball_continuous_canonical_chosen_horizon_tick,
+                self._action_ball_continuous_canonical_task_close_tick,
+            )
+        )
+        sha_after = tuple(
+            torch.where(hidden.unsqueeze(1), torch.zeros_like(destination), destination)
+            for destination in (
+                self._action_ball_continuous_canonical_task_receipt_sha256,
+                self._action_ball_continuous_canonical_cadence_receipt_sha256,
+            )
+        )
+        next_phase = torch.where(
+            hidden,
+            torch.full_like(
+                next_phase,
+                _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE[
+                    "recover_hidden"
+                ],
+            ),
+            next_phase,
+        )
+        hidden_now = active & ~task_valid_after
+        next_phase = torch.where(
+            hidden_now & ready,
+            torch.full_like(
+                next_phase,
+                _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE["ready_hold"],
+            ),
+            next_phase,
+        )
+        next_phase = torch.where(
+            hidden_now & ~ready,
+            torch.full_like(
+                next_phase,
+                _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE[
+                    "recover_hidden"
+                ],
+            ),
+            next_phase,
+        )
+        # No fallible owner operation may follow this application block.
+        self._action_ball_continuous_canonical_task_valid.copy_(task_valid_after)
+        self._action_ball_continuous_canonical_playback_started.copy_(playback_after)
+        self._action_ball_continuous_canonical_task_identity.copy_(task_identity_after)
+        self._action_ball_continuous_canonical_cadence_identity.copy_(cadence_identity_after)
+        for destination, after in zip(
+            (
+                self._action_ball_continuous_canonical_action_uid,
+                self._action_ball_continuous_canonical_shot_index,
+                self._action_ball_continuous_canonical_outcome_identity,
+                self._action_ball_continuous_canonical_candidate_identity,
+                self._action_ball_continuous_canonical_contact_tick,
+                self._action_ball_continuous_canonical_launch_tick,
+                self._action_ball_continuous_canonical_chosen_horizon_tick,
+                self._action_ball_continuous_canonical_task_close_tick,
+            ),
+            scalar_identity_after,
+        ):
+            destination.copy_(after)
+        for destination, after in zip(
+            (
+                self._action_ball_continuous_canonical_task_receipt_sha256,
+                self._action_ball_continuous_canonical_cadence_receipt_sha256,
+            ),
+            sha_after,
+        ):
+            destination.copy_(after)
+        self._transition_action_ball_continuous_canonical_phase(next_phase)
+
+    def _publish_action_ball_continuous_observation(self) -> None:
+        """Seal one owner-private post-update snapshot; no host observation."""
+
+        if self._action_ball_continuous_motion_device_r05_owner is None:
+            self._invalidate_action_ball_continuous_observation_publication()
+            return
+        common_step = getattr(self._env, "common_step_counter", None)
+        if type(common_step) is not int or common_step < 0:
+            raise RuntimeError(
+                "continuous Motion observation requires manager common step"
+            )
+        publication_identity = object()
+        token = ActionBallContinuousMotionObservationToken()
+
+        def snapshot(value: torch.Tensor) -> torch.Tensor:
+            return value.detach().clone()
+
+        phase_elapsed = torch.clamp(
+            self._action_ball_continuous_episode_step
+            - self._action_ball_continuous_canonical_phase_start_tick,
+            min=0,
+        )
+        time_to_contact_remaining = (
+            self._action_ball_time_to_contact_s
+            - self._action_ball_task_age_s
+        )
+        time_to_teacher_start_remaining = torch.clamp(
+            self._action_ball_pre_swing_wait_s
+            - self._action_ball_task_age_s,
+            min=0.0,
+        )
+        time_to_next_reveal = (
+            self._action_ball_continuous_next_reveal_step
+            - self._action_ball_continuous_episode_step
+        ).to(dtype=self._action_ball_task_age_s.dtype) * float(
+            self._env.step_dt
+        )
+        record = {
+            "publication_identity": publication_identity,
+            "common_step": common_step,
+            "control_tick": snapshot(self._action_ball_continuous_episode_step),
+            "phase": snapshot(self._action_ball_continuous_canonical_phase),
+            "phase_start_tick": snapshot(
+                self._action_ball_continuous_canonical_phase_start_tick
+            ),
+            "phase_elapsed_tick": snapshot(phase_elapsed),
+            "reveal_tick": snapshot(
+                self._action_ball_continuous_current_reveal_step
+            ),
+            "deadline_tick": snapshot(
+                self._action_ball_continuous_current_deadline_step
+            ),
+            "next_reveal_tick": snapshot(
+                self._action_ball_continuous_next_reveal_step
+            ),
+            "reset_generation": snapshot(self._action_ball_reset_generation),
+            "swing_generation": snapshot(self._action_ball_swing_generation),
+            "scheduled_ordinal": snapshot(
+                self._action_ball_continuous_scheduled_ordinal
+            ),
+            "action_slot": snapshot(self.clip_id),
+            "task_identity": snapshot(
+                self._action_ball_continuous_canonical_task_identity
+            ),
+            "cadence_identity": snapshot(
+                self._action_ball_continuous_canonical_cadence_identity
+            ),
+            "action_uid": snapshot(
+                self._action_ball_continuous_canonical_action_uid
+            ),
+            "task_receipt_sha256": snapshot(
+                self._action_ball_continuous_canonical_task_receipt_sha256
+            ),
+            "cadence_receipt_sha256": snapshot(
+                self._action_ball_continuous_canonical_cadence_receipt_sha256
+            ),
+            "candidate_identity": snapshot(
+                self._action_ball_continuous_canonical_candidate_identity
+            ),
+            "contact_tick": snapshot(
+                self._action_ball_continuous_canonical_contact_tick
+            ),
+            "launch_tick": snapshot(
+                self._action_ball_continuous_canonical_launch_tick
+            ),
+            "chosen_horizon_tick": snapshot(
+                self._action_ball_continuous_canonical_chosen_horizon_tick
+            ),
+            "task_close_tick": snapshot(
+                self._action_ball_continuous_canonical_task_close_tick
+            ),
+            "task_valid": snapshot(
+                self._action_ball_continuous_canonical_task_valid
+            ),
+            "timing_active": snapshot(self._action_ball_task_timing_active),
+            "playback_started": snapshot(
+                self._action_ball_continuous_canonical_playback_started
+            ),
+            "pending_elapsed_s": snapshot(
+                self._action_ball_task_pending_elapsed_s
+            ),
+            "task_age_s": snapshot(self._action_ball_task_age_s),
+            "time_to_contact_s": snapshot(self._action_ball_time_to_contact_s),
+            "time_to_contact_remaining_s": snapshot(
+                time_to_contact_remaining
+            ),
+            "teacher_rate": snapshot(self._action_ball_teacher_rate),
+            "scaled_t_hit_s": snapshot(self._action_ball_scaled_t_hit_s),
+            "scaled_t_cycle_s": snapshot(self._action_ball_scaled_t_cycle_s),
+            "pre_swing_wait_s": snapshot(self._action_ball_pre_swing_wait_s),
+            "time_to_teacher_start_remaining_s": snapshot(
+                time_to_teacher_start_remaining
+            ),
+            "time_to_next_reveal_s": snapshot(time_to_next_reveal),
+        }
+        self._action_ball_continuous_observation_publication_identity = (
+            publication_identity
+        )
+        self._action_ball_continuous_observation_token = token
+        self._action_ball_continuous_observation_record = record
+        self._action_ball_continuous_observation_common_step = common_step
+
+    def action_ball_continuous_motion_observation_projection(
+        self,
+    ) -> ActionBallContinuousMotionObservationToken:
+        """Return the already-published opaque R08 token without side effects."""
+
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="observation projection"
+        )
+        common_step = self._require_action_ball_continuous_current_publication(
+            operation="observation projection"
+        )
+        token = self._action_ball_continuous_observation_token
+        record = self._action_ball_continuous_observation_record
+        if (
+            type(token) is not ActionBallContinuousMotionObservationToken
+            or type(record) is not dict
+            or self._action_ball_continuous_observation_common_step
+            != common_step
+        ):
+            raise RuntimeError(
+                "continuous Motion observation was not published this tick"
+            )
+        return token
+
+    def issue_current_r05_cadence_if_due(
+        self,
+    ) -> ActionBallContinuousMotionObservationToken | None:
+        """Return this tick's Motion token only on the frozen reveal cadence.
+
+        ``None`` is the ordinary non-due result.  The decision uses only the
+        manager's host common-step chronology and the construction-frozen
+        cadence integers; it never observes a device bool or accepts a caller
+        verdict.  The returned object is the existing Motion-owned opaque
+        observation token, not a new receipt.
+        """
+
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="conditional R05 cadence issue"
+        )
+        common_step = self._require_action_ball_continuous_current_publication(
+            operation="conditional R05 cadence issue"
+        )
+        schedule = self._action_ball_continuous_schedule_projection
+        if not isinstance(schedule, MappingProxyType):
+            raise RuntimeError(
+                "conditional R05 cadence issue lacks the frozen schedule"
+            )
+        try:
+            origin = int(schedule["sequence_origin_step"])
+            first = int(schedule["first_reveal_step"])
+            cadence = int(schedule["cadence_steps"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "conditional R05 cadence schedule fields differ"
+            ) from exc
+        if origin < 0 or first < origin or cadence < 1:
+            raise RuntimeError(
+                "conditional R05 cadence schedule values differ"
+            )
+        control_tick = origin + common_step
+        if control_tick < first or (control_tick - first) % cadence:
+            return None
+        return self.action_ball_continuous_motion_observation_projection()
+
+    def require_owned_action_ball_continuous_motion_observation(
+        self,
+        token: ActionBallContinuousMotionObservationToken,
+    ) -> ActionBallContinuousMotionObservationView:
+        """Validate one current opaque token and return a clone-only view."""
+
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="observation validation"
+        )
+        common_step = self._require_action_ball_continuous_current_publication(
+            operation="observation validation"
+        )
+        record = self._action_ball_continuous_observation_record
+        if (
+            type(token) is not ActionBallContinuousMotionObservationToken
+            or token is not self._action_ball_continuous_observation_token
+            or type(record) is not dict
+            or record.get("publication_identity")
+            is not self._action_ball_continuous_observation_publication_identity
+            or record.get("common_step") != common_step
+        ):
+            raise RuntimeError(
+                "continuous Motion observation token is forged or stale"
+            )
+        return ActionBallContinuousMotionObservationView(
+            motion_owner=self,
+            **{
+                name: value.clone() if torch.is_tensor(value) else value
+                for name, value in record.items()
+            },
+        )
+
+    def _action_ball_continuous_motion_checkpoint_payload(self) -> dict:
+        """Materialize the fresh Motion owner's complete mid-task state.
+
+        This is intentionally a child payload, not the legacy Motion resume
+        contract that expects an immediate full reset.  Every tensor that can
+        change the next cadence, teacher reference or R08 projection lives in
+        this one independently rooted schema.
+        """
+
+        self._require_action_ball_continuous_canonical_checkpoint_complete()
+        acknowledged_mutation = (
+            self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version
+        )
+        if (
+            type(acknowledged_mutation) is not int
+            or acknowledged_mutation
+            != self._action_ball_continuous_motion_mutation_version
+            or self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack
+        ):
+            raise RuntimeError(
+                "continuous Motion checkpoint lacks the exact globally ACKed mutation frontier"
+            )
+        tensors = {
+            field_name: self._exact_resume_cpu_tensor(getattr(self, attr_name))
+            for field_name, attr_name, _nonnegative
+            in _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
+        }
+        tensor_payload = {
+            name: value.tolist() for name, value in tensors.items()
+        }
+        payload = {
+            "checkpoint_kind": (
+                _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_KIND
+            ),
+            "schema_version": (
+                _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_SCHEMA_VERSION
+            ),
+            "phase": "IDLE",
+            "owner_mutation_version": (
+                self._action_ball_continuous_motion_mutation_version
+            ),
+            "device_owner_mutation_version": [
+                self._action_ball_continuous_motion_mutation_version
+            ],
+            "next_serial": self._action_ball_continuous_motion_next_serial,
+            "selected_reset_next_serial": (
+                self._action_ball_continuous_motion_selected_reset_next_serial
+            ),
+            "terminal_resolution_total": (
+                self._action_ball_continuous_motion_terminal_resolution_total
+            ),
+            "fault_count_device": (
+                self._action_ball_continuous_motion_fault_count_device.detach()
+                .cpu()
+                .tolist()
+            ),
+            "global_drain_sequence": (
+                self._action_ball_continuous_motion_global_drain_sequence
+            ),
+            "global_drain_last_update": (
+                self._action_ball_continuous_motion_global_drain_last_update
+            ),
+            "global_drain_last_completed_steps": (
+                self._action_ball_continuous_motion_global_drain_last_completed_steps
+            ),
+            "global_drain_last_acknowledged_mutation_version": (
+                acknowledged_mutation
+            ),
+            "checkpoint_requires_global_drain_ack": False,
+            "published_common_step": (
+                # A publication frontier without its opaque capability would
+                # let an exact-resume consumer confuse restored bytes with a
+                # post-update publication.  Both frontiers are revoked.
+                None
+            ),
+            "observation_common_step": (
+                # The getter token is an owner-private capability, not
+                # serializable authority.  Restore preserves the publication
+                # frontier but requires a fresh post-update publication.
+                None
+            ),
+            "tensors": tensor_payload,
+            "poisoned": False,
+        }
+        return {
+            **payload,
+            "device_owner_mutation_version": self._exact_resume_cpu_tensor(
+                self._action_ball_continuous_motion_device_mutation_version
+            ),
+            "terminal_resolution_total_device": self._exact_resume_cpu_tensor(
+                self._action_ball_continuous_motion_terminal_resolution_total_device
+            ),
+            "fault_count_device": self._exact_resume_cpu_tensor(
+                self._action_ball_continuous_motion_fault_count_device
+            ),
+            "tensors": tensors,
+            "canonical_sha256": hashlib.sha256(
+                _canonical_json_bytes(payload)
+            ).hexdigest(),
+        }
+
+    def _require_action_ball_continuous_canonical_checkpoint_complete(
+        self,
+    ) -> None:
+        """Fail closed when an active R08 row lacks exact continuation facts."""
+
+        phase = self._action_ball_continuous_canonical_phase
+        active = phase <= ACTION_BALL_CONTINUOUS_CANONICAL_FOLLOW_THROUGH
+        if not bool(torch.any(active)):
+            return
+        action_slot = self.clip_id
+        start = self.motion.seg_start[action_slot]
+        playback = self._action_ball_continuous_canonical_playback_started
+        receipt_identity_complete = torch.ones_like(active)
+        if not self._action_ball_continuous_fresh_motion_lane_bound:
+            receipt_identity_complete = torch.any(
+                self._action_ball_continuous_canonical_task_receipt_sha256 != 0,
+                dim=1,
+            ) & torch.any(
+                self._action_ball_continuous_canonical_cadence_receipt_sha256 != 0,
+                dim=1,
+            )
+        task_close_complete = torch.ones_like(active)
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            task_close_complete = (
+                self._action_ball_continuous_canonical_task_close_tick
+                >= self._action_ball_continuous_current_reveal_step
+            ) & (
+                self._action_ball_continuous_canonical_task_close_tick
+                < self._action_ball_continuous_next_reveal_step
+            )
+        complete = (
+            self._action_ball_continuous_canonical_task_valid
+            & self._action_ball_task_timing_active
+            & (self._action_ball_continuous_canonical_task_identity > 0)
+            & (self._action_ball_continuous_canonical_cadence_identity > 0)
+            & (self._action_ball_continuous_canonical_action_uid > 0)
+            & (self._action_ball_continuous_canonical_shot_index > 0)
+            & (self._action_ball_continuous_canonical_outcome_identity > 0)
+            & receipt_identity_complete
+            & (self._action_ball_continuous_canonical_candidate_identity > 0)
+            & (self._action_ball_continuous_canonical_launch_tick >= 0)
+            & (
+                self._action_ball_continuous_canonical_contact_tick
+                > self._action_ball_continuous_canonical_launch_tick
+            )
+            & (
+                self._action_ball_continuous_canonical_chosen_horizon_tick
+                == self._action_ball_continuous_canonical_contact_tick
+                - self._action_ball_continuous_canonical_launch_tick
+            )
+            & task_close_complete
+            & torch.isfinite(self._action_ball_task_pending_elapsed_s)
+            & (self._action_ball_task_pending_elapsed_s >= 0)
+            & torch.isfinite(self._action_ball_task_age_s)
+            & (self._action_ball_task_age_s >= 0)
+            & torch.isfinite(self._action_ball_time_to_contact_s)
+            & (self._action_ball_time_to_contact_s > 0)
+            & torch.isfinite(self._action_ball_teacher_rate)
+            & (self._action_ball_teacher_rate > 0)
+            & torch.isfinite(self._action_ball_scaled_t_hit_s)
+            & (self._action_ball_scaled_t_hit_s > 0)
+            & torch.isfinite(self._action_ball_scaled_t_cycle_s)
+            & (self._action_ball_scaled_t_cycle_s > 0)
+            & torch.isfinite(self._action_ball_pre_swing_wait_s)
+            & (self._action_ball_pre_swing_wait_s >= 0)
+            & (self._action_ball_continuous_canonical_phase_start_tick >= 0)
+            & (
+                self._action_ball_continuous_canonical_phase_start_tick
+                <= self._action_ball_continuous_episode_step
+            )
+            & torch.where(
+                phase == ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE,
+                ~playback,
+                playback & (self.time_steps > start),
+            )
+        )
+        if bool(torch.any(active & ~complete)):
+            raise RuntimeError(
+                "Motion active canonical checkpoint lacks exact mid-task identity/timing"
+            )
+
+    def _prepare_action_ball_continuous_motion_checkpoint(
+        self, leaf: object
+    ) -> dict:
+        """Purely parse one fresh mid-task Motion leaf before any write."""
+
+        expected = {
+            "checkpoint_kind",
+            "schema_version",
+            "phase",
+            "owner_mutation_version",
+            "device_owner_mutation_version",
+            "next_serial",
+            "selected_reset_next_serial",
+            "terminal_resolution_total",
+            "terminal_resolution_total_device",
+            "fault_count_device",
+            "global_drain_sequence",
+            "global_drain_last_update",
+            "global_drain_last_completed_steps",
+            "global_drain_last_acknowledged_mutation_version",
+            "checkpoint_requires_global_drain_ack",
+            "published_common_step",
+            "observation_common_step",
+            "tensors",
+            "poisoned",
+            "canonical_sha256",
+        }
+        if type(leaf) is not dict or set(leaf) != expected:
+            raise ValueError(
+                "Motion fresh checkpoint fields differ from schema"
+            )
+        exact_nonnegative_scalars = (
+            "owner_mutation_version",
+            "next_serial",
+            "selected_reset_next_serial",
+            "terminal_resolution_total",
+            "global_drain_sequence",
+        )
+        if (
+            leaf["checkpoint_kind"]
+            != _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_KIND
+            or leaf["schema_version"]
+            != _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_SCHEMA_VERSION
+            or leaf["phase"] != "IDLE"
+            or leaf["poisoned"] is not False
+            or any(
+                type(leaf[name]) is not int or leaf[name] < 0
+                for name in exact_nonnegative_scalars
+            )
+            or any(
+                leaf[name] > self._ACTION_BALL_INT64_MAX
+                for name in (
+                    "owner_mutation_version",
+                    "terminal_resolution_total",
+                )
+            )
+            or type(leaf["global_drain_last_update"]) is not int
+            or leaf["global_drain_last_update"] < -1
+            or type(leaf["global_drain_last_completed_steps"]) is not int
+            or leaf["global_drain_last_completed_steps"] < -1
+            or type(leaf["global_drain_last_acknowledged_mutation_version"])
+            is not int
+            or leaf["global_drain_last_acknowledged_mutation_version"]
+            != leaf["owner_mutation_version"]
+            or leaf["checkpoint_requires_global_drain_ack"] is not False
+            or (
+                (leaf["global_drain_sequence"] == 0)
+                != (leaf["global_drain_last_update"] == -1)
+            )
+            or (
+                (leaf["global_drain_sequence"] == 0)
+                != (leaf["global_drain_last_completed_steps"] == -1)
+            )
+            or any(
+                value is not None
+                and (type(value) is not int or value < 0)
+                for value in (
+                    leaf["published_common_step"],
+                    leaf["observation_common_step"],
+                )
+            )
+            or leaf["published_common_step"] is not None
+            or (
+                leaf["observation_common_step"] is not None
+            )
+            or type(leaf["canonical_sha256"]) is not str
+            or len(leaf["canonical_sha256"]) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in leaf["canonical_sha256"]
+            )
+        ):
+            raise ValueError("Motion fresh checkpoint metadata is invalid")
+
+        device_version = self._validate_exact_resume_tensor(
+            leaf["device_owner_mutation_version"],
+            name="action_ball.continuous_motion.device_version",
+            shape=(1,),
+            dtype=torch.int64,
+            nonnegative=True,
+        )
+        terminal_total_device = self._validate_exact_resume_tensor(
+            leaf["terminal_resolution_total_device"],
+            name="action_ball.continuous_motion.terminal_total",
+            shape=(1,),
+            dtype=torch.int64,
+            nonnegative=True,
+        )
+        fault_count_device = self._validate_exact_resume_tensor(
+            leaf["fault_count_device"],
+            name="action_ball.continuous_motion.fault_count",
+            shape=(1,),
+            dtype=torch.int64,
+            nonnegative=True,
+        )
+        if (
+            device_version.tolist()
+            != [leaf["owner_mutation_version"]]
+            or terminal_total_device.tolist()
+            != [leaf["terminal_resolution_total"]]
+        ):
+            raise ValueError(
+                "Motion fresh checkpoint scalar/device frontier differs"
+            )
+
+        raw_tensors = leaf["tensors"]
+        expected_tensor_fields = {
+            field_name
+            for field_name, _attr_name, _nonnegative
+            in _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
+        }
+        if (
+            type(raw_tensors) is not dict
+            or set(raw_tensors) != expected_tensor_fields
+        ):
+            raise ValueError(
+                "Motion fresh checkpoint tensor fields differ"
+            )
+        tensors = {}
+        for field_name, attr_name, nonnegative in (
+            _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
+        ):
+            live = getattr(self, attr_name)
+            tensors[field_name] = self._validate_exact_resume_tensor(
+                raw_tensors[field_name],
+                name=f"action_ball.continuous_motion.{field_name}",
+                shape=tuple(live.shape),
+                dtype=live.dtype,
+                nonnegative=nonnegative,
+            )
+
+        canonical_phase = tensors["canonical_phase"]
+        legacy_phase = tensors["legacy_phase"]
+        task_valid = tensors["task_valid"]
+        timing_active = tensors["timing_active"]
+        playback_started = tensors["playback_started"]
+        sequence_active = tensors["sequence_active"]
+        control_tick = tensors["control_tick"]
+        phase_start_tick = tensors["canonical_phase_start_tick"]
+        scheduled_ordinal = tensors["scheduled_ordinal"]
+        reveal_tick = tensors["reveal_tick"]
+        deadline_tick = tensors["deadline_tick"]
+        next_reveal_tick = tensors["next_reveal_tick"]
+        last_closed_ordinal = tensors["last_closed_ordinal"]
+        opportunities_consumed = tensors["opportunities_consumed"]
+        active_canonical = canonical_phase <= ACTION_BALL_CONTINUOUS_CANONICAL_FOLLOW_THROUGH
+        expected_last_closed = torch.where(
+            control_tick >= deadline_tick,
+            scheduled_ordinal,
+            scheduled_ordinal - 1,
+        )
+        expected_opportunities_consumed = scheduled_ordinal + (
+            control_tick >= deadline_tick
+        ).to(dtype=scheduled_ordinal.dtype)
+        contact_clock_matches = torch.isclose(
+            (
+                tensors["contact_tick"] - control_tick
+            ).to(dtype=tensors["time_to_contact_s"].dtype)
+            * float(self._env.step_dt),
+            tensors["time_to_contact_s"] - tensors["task_age_s"],
+            rtol=0.0,
+            atol=float(self._env.step_dt) * 0.5 + 1.0e-6,
+        )
+        action_uid_matches_slot = torch.zeros_like(active_canonical)
+        try:
+            code_owned_action_uids = (
+                self._action_ball_continuous_code_owned_action_uids()
+            )
+        except RuntimeError:
+            code_owned_action_uids = ()
+        if code_owned_action_uids:
+            action_uids = torch.as_tensor(
+                code_owned_action_uids,
+                dtype=tensors["action_uid"].dtype,
+            )
+            valid_slot = tensors["action_slot"] < len(action_uids)
+            action_uid_matches_slot = valid_slot & (
+                tensors["action_uid"]
+                == action_uids[
+                    torch.clamp(
+                        tensors["action_slot"],
+                        min=0,
+                        max=max(len(action_uids) - 1, 0),
+                    )
+                ]
+            )
+        receipt_identity_complete = torch.ones_like(active_canonical)
+        if not self._action_ball_continuous_fresh_motion_lane_bound:
+            receipt_identity_complete = torch.any(
+                tensors["task_receipt_sha256"] != 0, dim=1
+            ) & torch.any(
+                tensors["cadence_receipt_sha256"] != 0, dim=1
+            )
+        task_close_complete = torch.ones_like(active_canonical)
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            task_close_complete = (
+                tensors["task_close_tick"] >= tensors["reveal_tick"]
+            ) & (
+                tensors["task_close_tick"] < tensors["next_reveal_tick"]
+            )
+        complete_identity = (
+            (tensors["task_identity"] > 0)
+            & (tensors["cadence_identity"] > 0)
+            & (tensors["action_uid"] > 0)
+            & receipt_identity_complete
+            & (tensors["candidate_identity"] > 0)
+            & action_uid_matches_slot
+            & contact_clock_matches
+            & (tensors["launch_tick"] >= 0)
+            & (tensors["contact_tick"] > tensors["launch_tick"])
+            & (
+                tensors["chosen_horizon_tick"]
+                == tensors["contact_tick"] - tensors["launch_tick"]
+            )
+            & task_close_complete
+        )
+        if (
+            bool(
+                (
+                    canonical_phase
+                    >= len(ACTION_BALL_CONTINUOUS_CANONICAL_PHASES)
+                ).any()
+            )
+            or bool(
+                (legacy_phase >= len(ACTION_BALL_CONTINUOUS_MOTION_PHASES)).any()
+            )
+            or bool((phase_start_tick > control_tick).any())
+            or bool(
+                (
+                    active_canonical
+                    & (
+                        ~sequence_active
+                        | (control_tick < 0)
+                        | (phase_start_tick < 0)
+                        | (scheduled_ordinal < 0)
+                        | (reveal_tick < 0)
+                        | (reveal_tick > control_tick)
+                        | (deadline_tick < reveal_tick)
+                        | (next_reveal_tick <= deadline_tick)
+                        | (last_closed_ordinal != expected_last_closed)
+                        | (
+                            opportunities_consumed
+                            != expected_opportunities_consumed
+                        )
+                    )
+                ).any()
+            )
+            or bool(
+                (
+                    task_valid
+                    & (
+                        (tensors["task_identity"] < 0)
+                        | (tensors["cadence_identity"] < 0)
+                        | ~timing_active
+                    )
+                ).any()
+            )
+            or bool((playback_started & ~task_valid).any())
+            or bool(
+                (
+                    (canonical_phase <= 2)
+                    & ~task_valid
+                ).any()
+            )
+            or bool(
+                (
+                    (canonical_phase >= 3)
+                    & task_valid
+                ).any()
+            )
+            or bool(
+                (
+                    (canonical_phase == 0)
+                    & (
+                        playback_started
+                        | (phase_start_tick != reveal_tick)
+                        | (control_tick >= deadline_tick)
+                    )
+                ).any()
+            )
+            or bool(
+                (
+                    (canonical_phase == 1)
+                    & (
+                        ~playback_started
+                        | (phase_start_tick < reveal_tick)
+                        | (control_tick >= deadline_tick)
+                    )
+                ).any()
+            )
+            or bool(
+                (
+                    (canonical_phase == 2)
+                    & (
+                        ~playback_started
+                        | (phase_start_tick != deadline_tick)
+                        | (control_tick < deadline_tick)
+                    )
+                ).any()
+            )
+            or bool((active_canonical & ~complete_identity).any())
+            or bool(
+                (
+                    active_canonical
+                    & (
+                        ~torch.isfinite(tensors["pending_elapsed_s"])
+                        | ~torch.isfinite(tensors["task_age_s"])
+                        | ~torch.isfinite(tensors["time_to_contact_s"])
+                        | ~torch.isfinite(tensors["teacher_rate"])
+                        | ~torch.isfinite(tensors["scaled_t_hit_s"])
+                        | ~torch.isfinite(tensors["scaled_t_cycle_s"])
+                        | ~torch.isfinite(tensors["pre_swing_wait_s"])
+                        | (tensors["pending_elapsed_s"] < 0)
+                        | (tensors["task_age_s"] < 0)
+                        | (tensors["time_to_contact_s"] <= 0)
+                        | (tensors["teacher_rate"] <= 0)
+                        | (tensors["scaled_t_hit_s"] <= 0)
+                        | (tensors["scaled_t_cycle_s"] <= 0)
+                        | (tensors["pre_swing_wait_s"] < 0)
+                    )
+                ).any()
+            )
+            or bool(
+                (
+                    tensors["action_slot"]
+                    >= int(self.motion.num_segments)
+                ).any()
+            )
+        ):
+            raise ValueError(
+                "Motion fresh checkpoint lifecycle invariants differ"
+            )
+        canonical_payload = {
+            "checkpoint_kind": leaf["checkpoint_kind"],
+            "schema_version": leaf["schema_version"],
+            "phase": leaf["phase"],
+            "owner_mutation_version": leaf["owner_mutation_version"],
+            "device_owner_mutation_version": [
+                leaf["owner_mutation_version"]
+            ],
+            "next_serial": leaf["next_serial"],
+            "selected_reset_next_serial": leaf[
+                "selected_reset_next_serial"
+            ],
+            "terminal_resolution_total": leaf[
+                "terminal_resolution_total"
+            ],
+            "fault_count_device": fault_count_device.tolist(),
+            "global_drain_sequence": leaf["global_drain_sequence"],
+            "global_drain_last_update": leaf[
+                "global_drain_last_update"
+            ],
+            "global_drain_last_completed_steps": leaf[
+                "global_drain_last_completed_steps"
+            ],
+            "global_drain_last_acknowledged_mutation_version": leaf[
+                "global_drain_last_acknowledged_mutation_version"
+            ],
+            "checkpoint_requires_global_drain_ack": leaf[
+                "checkpoint_requires_global_drain_ack"
+            ],
+            "published_common_step": leaf["published_common_step"],
+            "observation_common_step": leaf["observation_common_step"],
+            "tensors": {
+                name: value.tolist() for name, value in tensors.items()
+            },
+            "poisoned": leaf["poisoned"],
+        }
+        if hashlib.sha256(
+            _canonical_json_bytes(canonical_payload)
+        ).hexdigest() != leaf["canonical_sha256"]:
+            raise ValueError("Motion fresh checkpoint root differs")
+        return {
+            **{
+                name: leaf[name]
+                for name in (
+                    "owner_mutation_version",
+                    "next_serial",
+                    "selected_reset_next_serial",
+                    "terminal_resolution_total",
+                    "global_drain_sequence",
+                    "global_drain_last_update",
+                    "global_drain_last_completed_steps",
+                    "global_drain_last_acknowledged_mutation_version",
+                    "checkpoint_requires_global_drain_ack",
+                    "published_common_step",
+                    "observation_common_step",
+                )
+            },
+            "device_owner_mutation_version": device_version,
+            "terminal_resolution_total_device": terminal_total_device,
+            "fault_count_device": fault_count_device,
+            "tensors": tensors,
+        }
+
+    def action_ball_continuous_current_projection(
+        self,
+    ) -> ActionBallContinuousMotionProjection:
+        """Return Motion's already-sealed current-tick projection.
+
+        ``common_step`` is the publication tick, not a second cadence.  A
+        caller before Motion, or one retaining the prior tick, fails instead
+        of seeing a plausible but stale reveal mask.  This consumer never
+        clones live Motion state: the publication writer sealed the snapshot
+        before any downstream owner could run.
+        """
+
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "action-ball continuous Motion cadence is not enabled"
+            )
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="projection"
+        )
+        self._require_action_ball_continuous_parent_authorities()
+        common_step = self._require_action_ball_continuous_current_publication(
+            operation="projection",
+        )
+        cached = self._action_ball_continuous_current_projection
+        if (
+            type(cached) is not ActionBallContinuousMotionProjection
+            or cached.common_step != common_step
+        ):
+            raise RuntimeError(
+                "continuous Motion current projection was not sealed by publication"
+            )
+        self._require_action_ball_continuous_projection_current(cached)
+        return self._clone_action_ball_continuous_projection(cached)
+
+    def _seal_action_ball_continuous_current_projection(
+        self,
+        common_step: int,
+    ) -> None:
+        """Eagerly freeze current Motion facts at the owner publication point."""
+
+        if (
+            type(common_step) is not int
+            or common_step < 0
+            or self._action_ball_continuous_published_common_step != common_step
+            or self._action_ball_continuous_current_projection is not None
+        ):
+            raise RuntimeError(
+                "continuous Motion current projection seal chronology differs"
+            )
+
+        def snapshot(value: torch.Tensor) -> torch.Tensor:
+            return value.detach().clone()
+
+        projection = ActionBallContinuousMotionProjection(
+            common_step=common_step,
+            episode_tick=snapshot(
+                self._action_ball_continuous_episode_step
+            ),
+            reveal_due=snapshot(
+                self._action_ball_continuous_reveal_due
+            ),
+            closed_mask=snapshot(
+                self._action_ball_continuous_closed_mask
+            ),
+            close_reason=snapshot(
+                self._action_ball_continuous_close_reason
+            ),
+            deadline_due=snapshot(
+                self._action_ball_continuous_deadline_due
+            ),
+            scheduled_ordinal=snapshot(
+                self._action_ball_continuous_scheduled_ordinal
+            ),
+            reveal_tick=snapshot(
+                self._action_ball_continuous_current_reveal_step
+            ),
+            deadline_tick=snapshot(
+                self._action_ball_continuous_current_deadline_step
+            ),
+            next_reveal_tick=snapshot(
+                self._action_ball_continuous_next_reveal_step
+            ),
+            ready_at_reveal=snapshot(
+                self._action_ball_continuous_ready_at_reveal
+            ),
+            motion_active=snapshot(
+                self._action_ball_continuous_motion_active
+            ),
+            ready_reference_active=snapshot(
+                self._action_ball_continuous_ready_reference_active
+            ),
+            suffix_complete=snapshot(
+                self._action_ball_continuous_suffix_complete
+            ),
+            reset_generation=snapshot(
+                self._action_ball_reset_generation
+            ),
+            swing_generation=snapshot(
+                self._action_ball_swing_generation
+            ),
+        )
+        self._action_ball_continuous_current_projection = projection
+
+    @staticmethod
+    def _clone_action_ball_continuous_projection(
+        projection: ActionBallContinuousMotionProjection,
+    ) -> ActionBallContinuousMotionProjection:
+        """Give each consumer an isolated copy of the sealed full-N row."""
+
+        def snapshot(value: torch.Tensor) -> torch.Tensor:
+            return value.detach().clone()
+
+        return ActionBallContinuousMotionProjection(
+            common_step=projection.common_step,
+            episode_tick=snapshot(projection.episode_tick),
+            reveal_due=snapshot(projection.reveal_due),
+            closed_mask=snapshot(projection.closed_mask),
+            close_reason=snapshot(projection.close_reason),
+            deadline_due=snapshot(projection.deadline_due),
+            scheduled_ordinal=snapshot(projection.scheduled_ordinal),
+            reveal_tick=snapshot(projection.reveal_tick),
+            deadline_tick=snapshot(projection.deadline_tick),
+            next_reveal_tick=snapshot(projection.next_reveal_tick),
+            ready_at_reveal=snapshot(projection.ready_at_reveal),
+            motion_active=snapshot(projection.motion_active),
+            ready_reference_active=snapshot(
+                projection.ready_reference_active
+            ),
+            suffix_complete=snapshot(projection.suffix_complete),
+            reset_generation=snapshot(projection.reset_generation),
+            swing_generation=snapshot(projection.swing_generation),
+        )
+
+    def _require_action_ball_continuous_projection_current(
+        self,
+        projection: ActionBallContinuousMotionProjection,
+    ) -> None:
+        """Require Motion's sealed snapshot for the current manager tick."""
+
+        common_step = getattr(self._env, "common_step_counter", None)
+        if (
+            type(projection) is not ActionBallContinuousMotionProjection
+            or self._action_ball_continuous_current_projection is not projection
+            or type(common_step) is not int
+            or common_step != projection.common_step
+            or self._action_ball_continuous_published_common_step
+            != projection.common_step
+        ):
+            raise RuntimeError(
+                "continuous Motion projection is stale or Command order is swapped"
+            )
+
+    def _action_ball_continuous_require_full_reveal_batch(
+        self,
+        ids: torch.Tensor,
+        ordinals: torch.Tensor,
+        *,
+        operation: str,
+    ) -> None:
+        """Require one sorted, complete batch over every pending reveal row."""
+
+        expected = torch.where(
+            self._action_ball_continuous_reveal_due
+        )[0]
+        if not torch.equal(ids, expected):
+            raise RuntimeError(
+                f"continuous Motion {operation} must cover the complete "
+                "strictly ordered reveal batch"
+            )
+        admissible = (
+            self._action_ball_continuous_task_commit_pending[ids]
+            & ~self._action_ball_continuous_task_committed[ids]
+            & ~self._action_ball_continuous_motion_active[ids]
+        )
+        if not bool(admissible.all()):
+            raise RuntimeError(
+                f"continuous Motion {operation} reveal batch is not fully admissible"
+            )
+        if not bool(
+            torch.eq(
+                self._action_ball_continuous_scheduled_ordinal[ids],
+                ordinals,
+            ).all()
+        ):
+            raise RuntimeError(
+                f"continuous Motion {operation} ordinal differs from the current reveal"
+            )
+
+    def _action_ball_continuous_require_full_release_batch(
+        self,
+        ids: torch.Tensor,
+        ordinals: torch.Tensor,
+    ) -> None:
+        """Require one sorted, complete release over every ready commit."""
+
+        expected = torch.where(
+            self._action_ball_continuous_reveal_due
+            & self._action_ball_continuous_ready_at_reveal
+        )[0]
+        if not torch.equal(ids, expected):
+            raise RuntimeError(
+                "continuous Motion playback release is not a ready committed "
+                "reveal or complete strictly ordered ready batch"
+            )
+        admissible = (
+            self._action_ball_continuous_task_committed[ids]
+            & self._action_ball_continuous_motion_release_pending[ids]
+            & ~self._action_ball_continuous_motion_active[ids]
+        )
+        if not bool(admissible.all()):
+            raise RuntimeError(
+                "continuous Motion playback release is not a ready committed reveal"
+            )
+        if not bool(
+            torch.eq(
+                self._action_ball_continuous_scheduled_ordinal[ids],
+                ordinals,
+            ).all()
+        ):
+            raise RuntimeError(
+                "continuous Motion playback release ordinal differs from the current reveal"
+            )
+
+    def _action_ball_continuous_commit_tensor_receipts(
+        self,
+    ) -> tuple[tuple[object, int], ...]:
+        tensors = (
+            self._action_ball_continuous_episode_step,
+            self._action_ball_continuous_scheduled_ordinal,
+            self._action_ball_continuous_current_reveal_step,
+            self._action_ball_continuous_current_deadline_step,
+            self._action_ball_continuous_next_reveal_step,
+            self._action_ball_continuous_reveal_due,
+            self._action_ball_continuous_task_commit_pending,
+            self._action_ball_continuous_task_committed,
+            self._action_ball_continuous_motion_active,
+            self._action_ball_continuous_ready_at_reveal,
+            self._action_ball_continuous_motion_release_pending,
+            self._action_ball_continuous_ready_reference_active,
+            self._action_ball_continuous_suffix_complete,
+            self._action_ball_reset_generation,
+            self._action_ball_swing_generation,
+            self.clip_id,
+            self._action_ball_task_pending_elapsed_s,
+            self._action_ball_task_age_s,
+            self._action_ball_time_to_contact_s,
+            self._action_ball_teacher_rate,
+            self._action_ball_scaled_t_hit_s,
+            self._action_ball_scaled_t_cycle_s,
+            self._action_ball_pre_swing_wait_s,
+            self._action_ball_task_timing_active,
+        )
+        receipts = tuple(
+            _tensor_identity_version_receipt(tensor) for tensor in tensors
+        )
+        if any(receipt is None for receipt in receipts):
+            raise RuntimeError(
+                "continuous Motion cannot seal commit tensor receipts"
+            )
+        return receipts
+
+    def _validate_action_ball_continuous_full_suffix_window(
+        self,
+        *,
+        env_id: int,
+        timing: dict[str, float],
+        task_age_s: float,
+    ) -> None:
+        """Prove a ready row's complete suffix closes before next reveal."""
+
+        gap_steps = int(
+            self._action_ball_continuous_next_reveal_step[env_id].item()
+            - self._action_ball_continuous_episode_step[env_id].item()
+        )
+        cycle_total_s = float(
+            timing["pre_swing_wait_s"] + timing["scaled_t_cycle_s"]
+        )
+        age_s = float(task_age_s)
+        if not math.isfinite(age_s) or age_s < 0.0:
+            raise RuntimeError(
+                "continuous Motion task age is invalid for suffix admission"
+            )
+        # Timing checks cycle-due before each increment.  The last check that
+        # may latch ready before the next reveal therefore sees age
+        # A + (gap - 2) * dt.  Completing on the reveal tick is too late:
+        # readiness is sampled before timing advances in that update.
+        latest_pre_reveal_age_s = (
+            age_s + (gap_steps - 2) * float(self._env.step_dt)
+        )
+        if (
+            gap_steps < 2
+            or latest_pre_reveal_age_s + 1.0e-12 < cycle_total_s
+        ):
+            raise RuntimeError(
+                "continuous Motion full suffix cannot complete before "
+                "the next frozen scheduled reveal"
+            )
+
+    @staticmethod
+    def _action_ball_continuous_motion_sha256(
+        value: object, *, label: str
+    ) -> str:
+        if (
+            type(value) is not str
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError(f"{label} is not one lowercase SHA-256")
+        return value
+
+    def bind_action_ball_continuous_motion_staging(
+        self, transaction_owner: object
+    ) -> None:
+        """Bind the legacy portable-R05 diagnostic Motion lane."""
+
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "continuous Motion staging requires the fresh cadence"
+            )
+        if self._action_ball_continuous_motion_device_r05_owner is not None:
+            raise RuntimeError(
+                "portable Motion staging cannot coexist with Device-R05 reveal ingress"
+            )
+        import action_ball_continuous_runtime_transaction as transaction
+
+        if (
+            type(transaction_owner)
+            is not transaction.ContinuousRuntimeTransactionOwner
+        ):
+            raise TypeError(
+                "continuous Motion staging requires the exact pure R05 owner"
+            )
+        transaction_path = Path(transaction.__file__).resolve()
+        transaction_source_sha256 = hashlib.sha256(
+            transaction_path.read_bytes()
+        ).hexdigest()
+        if _ACTION_BALL_CONTINUOUS_R05_SOURCE_SHA256 is None:
+            raise RuntimeError(
+                "continuous Motion staging R05 final source pin is pending"
+            )
+        if (
+            transaction_source_sha256
+            != _ACTION_BALL_CONTINUOUS_R05_SOURCE_SHA256
+        ):
+            raise RuntimeError(
+                "continuous Motion staging R05 source pin differs"
+            )
+        if (
+            transaction.INTEGRATION_STATUS != "PRE_INTEGRATION_HOLD"
+            or transaction.RUNTIME_WIRING_CONNECTED is not False
+        ):
+            raise RuntimeError(
+                "continuous Motion staging cannot reinterpret R05 status"
+            )
+        current = self._action_ball_continuous_transaction_owner
+        if current is not None and current is not transaction_owner:
+            raise RuntimeError(
+                "continuous Motion transaction owner may not be rebound"
+            )
+        if current is transaction_owner:
+            return
+        self._action_ball_continuous_transaction_module = transaction
+        self._action_ball_continuous_transaction_owner = transaction_owner
+        self._action_ball_continuous_motion_owner_nonce = object()
+        self._action_ball_continuous_motion_next_serial = 0
+        self._action_ball_continuous_motion_mutation_version = 0
+        self._action_ball_continuous_motion_device_mutation_version = (
+            torch.zeros(1, dtype=torch.int64, device=self.device)
+        )
+        self._action_ball_continuous_motion_boundary_fault_schema = None
+        self._action_ball_continuous_motion_stage = None
+        self._action_ball_continuous_motion_prearmed_install = None
+        self._action_ball_continuous_motion_prearmed_accept_swaps = None
+        self._action_ball_continuous_motion_prearmed_censor_swaps = None
+        self._action_ball_continuous_motion_prearmed_accept_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_censor_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_accept_refs = None
+        self._action_ball_continuous_motion_prearmed_boundary_row = None
+        self._action_ball_continuous_motion_armed_install = None
+        self._action_ball_continuous_motion_censored_install = None
+        self._action_ball_continuous_motion_armed_swaps = None
+        self._action_ball_continuous_motion_armed_refs = None
+        self._action_ball_continuous_motion_commit_receipt = None
+        self._action_ball_continuous_motion_terminal_claim = None
+        self._action_ball_continuous_motion_terminal_expectations = None
+        self._action_ball_continuous_motion_terminal_token = None
+        self._action_ball_continuous_motion_terminal_epoch_committed = False
+        self._action_ball_continuous_motion_poisoned = False
+        self._action_ball_continuous_motion_poison_reason = None
+        self._action_ball_continuous_motion_fault_count_device = torch.zeros(
+            1, dtype=torch.int64, device=self.device
+        )
+        self._action_ball_continuous_motion_terminal_resolution_total = 0
+        self._action_ball_continuous_motion_terminal_resolution_total_device = (
+            torch.zeros(1, dtype=torch.int64, device=self.device)
+        )
+        self._action_ball_continuous_motion_global_drain_active = None
+        self._action_ball_continuous_motion_global_drain_sequence = 0
+        self._action_ball_continuous_motion_global_drain_last_update = -1
+        self._action_ball_continuous_motion_global_drain_last_completed_steps = -1
+        self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version = -1
+        self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
+        self._action_ball_continuous_motion_global_drain_poisoned = False
+        self._action_ball_continuous_motion_global_drain_poison_reason = None
+        self._action_ball_continuous_fresh_motion_lane_bound = True
+
+    def bind_action_ball_continuous_motion_device_r05_reveal(
+        self,
+        device_r05_owner: object,
+    ) -> None:
+        """Construction-bind production reveal to one exact Device-R05 owner.
+
+        This binder does not import, construct, or retain the portable R05
+        owner.  The later hot stage may therefore receive only an opaque
+        Device-R05 preview and its owner-issued child projections.  Keeping
+        this capability family mutually exclusive with the compatibility
+        binder makes a factory mistake fail at construction, before any
+        preview or live Motion write exists.
+        """
+
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError(
+                "Device-R05 Motion reveal requires the fresh cadence"
+            )
+        import action_ball_continuous_runtime_transaction_device as device_r05
+
+        required_methods = (
+            "project_owned_genesis_for_child",
+            "require_owned_genesis_projection",
+            "require_owned_action_epoch_accepted",
+            "require_owned_terminal_claim_for_child",
+            "require_owned_terminal_receipt_for_child",
+        )
+        if (
+            type(device_r05_owner) is not device_r05.DeviceR05Owner
+            or any(
+                not callable(getattr(device_r05_owner, name, None))
+                or getattr(
+                    getattr(device_r05_owner, name), "__self__", None
+                )
+                is not device_r05_owner
+                or getattr(
+                    getattr(device_r05_owner, name), "__func__", None
+                )
+                is not getattr(device_r05.DeviceR05Owner, name, None)
+                for name in required_methods
+            )
+        ):
+            raise TypeError(
+                "Motion hot reveal requires the exact Device-R05 child API"
+            )
+        if self._action_ball_continuous_transaction_owner is not None:
+            raise RuntimeError(
+                "Device-R05 Motion reveal cannot coexist with portable R05 staging"
+            )
+        current = self._action_ball_continuous_motion_device_r05_owner
+        if current is device_r05_owner:
+            return
+        if current is not None or self._action_ball_continuous_fresh_motion_lane_bound:
+            raise RuntimeError(
+                "Device-R05 Motion reveal owner may not be rebound"
+            )
+
+        schedule = self._action_ball_continuous_schedule_projection
+        if not isinstance(schedule, MappingProxyType):
+            raise RuntimeError(
+                "Motion hot reveal genesis lacks the cold-bound parent schedule"
+            )
+        try:
+            origin = int(schedule["sequence_origin_step"])
+            first_reveal = int(schedule["first_reveal_step"])
+            upcoming_action_slot = int(schedule["upcoming_action_slot"])
+            upcoming_action_uid = int(schedule["upcoming_action_uid"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "Motion hot reveal genesis parent schedule differs"
+            ) from exc
+        code_owned_action_uids = (
+            self._action_ball_continuous_code_owned_action_uids()
+        )
+        if (
+            origin < 0
+            or first_reveal <= origin
+            or upcoming_action_slot < 0
+            or upcoming_action_slot >= len(code_owned_action_uids)
+            or code_owned_action_uids[upcoming_action_slot]
+            != upcoming_action_uid
+        ):
+            raise RuntimeError(
+                "Motion hot reveal genesis parent schedule values differ"
+            )
+
+        # Device-R05 is constructed from the independent world-reset
+        # chronology, while the legacy broker initializes Motion's destination
+        # tensor to zero.  Join those two sole-writer initial states exactly
+        # once, through the registry-backed genesis capability, before the top
+        # closes Device-R05's construction window.  This is initialization of
+        # Motion's own destination chronology, not a same-writer echo gate.
+        try:
+            genesis_projection = (
+                device_r05_owner.project_owned_genesis_for_child(
+                    owner_kind="motion"
+                )
+            )
+            genesis_view = device_r05_owner.require_owned_genesis_projection(
+                genesis_projection,
+                owner_kind="motion",
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Motion hot reveal lacks the owner-issued Device-R05 genesis join"
+            ) from exc
+        reset_generation = getattr(genesis_view, "reset_generation", None)
+        if (
+            type(genesis_view) is not device_r05.DeviceR05GenesisView
+            or getattr(genesis_view, "device_r05_owner", None)
+            is not device_r05_owner
+            or getattr(genesis_view, "owner_kind", None) != "motion"
+            or getattr(genesis_view, "world_reset_identity", None) is None
+            or not torch.is_tensor(reset_generation)
+            or reset_generation.dtype != torch.int64
+            or reset_generation.device != torch.device(self.device)
+            or tuple(reset_generation.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "Motion hot reveal Device-R05 genesis projection differs"
+            )
+
+        # The fresh full-MDP constructor deliberately has no legacy birth
+        # broker.  Allocate Motion's own reset/swing and task-timing
+        # destinations exactly once, only after the owner-issued genesis has
+        # passed.  A legacy broker may already have allocated the same Motion-
+        # owned tensors; that path is validated and retained byte-for-byte.
+        fresh_buffer_specs = (
+            ("_action_ball_reset_generation", torch.int64),
+            ("_action_ball_swing_generation", torch.int64),
+            ("_action_ball_task_timing_active", torch.bool),
+            ("_action_ball_task_pending_elapsed_s", torch.float64),
+            ("_action_ball_task_age_s", torch.float64),
+            ("_action_ball_time_to_contact_s", torch.float64),
+            ("_action_ball_teacher_rate", torch.float64),
+            ("_action_ball_scaled_t_hit_s", torch.float64),
+            ("_action_ball_scaled_t_cycle_s", torch.float64),
+            ("_action_ball_pre_swing_wait_s", torch.float64),
+        )
+        retained_fresh_buffers = tuple(
+            getattr(self, name, None) for name, _dtype in fresh_buffer_specs
+        )
+        allocate_fresh_buffers = all(
+            value is None for value in retained_fresh_buffers
+        )
+        if allocate_fresh_buffers:
+            retained_fresh_buffers = tuple(
+                torch.zeros(
+                    self.num_envs,
+                    dtype=dtype,
+                    device=self.device,
+                )
+                for _name, dtype in fresh_buffer_specs
+            )
+        elif any(value is None for value in retained_fresh_buffers):
+            raise RuntimeError(
+                "Motion fresh owner buffers are only partially initialized"
+            )
+        if any(
+            type(value) is not torch.Tensor
+            or value.dtype != dtype
+            or value.device != torch.device(self.device)
+            or tuple(value.shape) != (self.num_envs,)
+            for value, (_name, dtype) in zip(
+                retained_fresh_buffers, fresh_buffer_specs
+            )
+        ):
+            raise RuntimeError("Motion fresh owner buffer shape differs")
+        fresh_buffers = {
+            name: value
+            for (name, _dtype), value in zip(
+                fresh_buffer_specs, retained_fresh_buffers
+            )
+        }
+        time_left = getattr(self, "time_left", None)
+        time_left_receipt = _tensor_identity_version_receipt(time_left)
+        if (
+            type(time_left) is not torch.Tensor
+            or not time_left.is_floating_point()
+            or time_left.device != torch.device(self.device)
+            or tuple(time_left.shape) != (self.num_envs,)
+            or not time_left.is_contiguous()
+            or time_left_receipt is None
+        ):
+            raise RuntimeError(
+                "Motion fresh genesis requires its exact inherited resample timer"
+            )
+
+        # The independent reset genesis is the first whole-environment reset;
+        # no selected-reset callback follows it.  Materialize the complete
+        # cadence/reference after-image from the already cold-bound parent
+        # schedule before publishing any destination or sealing the fresh
+        # lane.  Thus policy tick 0 is ordinary and tick ``first_reveal`` is
+        # the first D05 opportunity.  This is deliberately not routed through
+        # the tombstoned legacy reset API.
+        def full(value: torch.Tensor, fill_value) -> torch.Tensor:
+            return torch.full_like(value, fill_value)
+
+        upcoming_slots = full(self.clip_id, upcoming_action_slot)
+        ready_steps = self.motion.seg_start[upcoming_slots]
+        replacements = (
+            (time_left, full(time_left, float("inf"))),
+            (self.clip_id, upcoming_slots),
+            (
+                self._action_ball_continuous_sequence_active,
+                full(self._action_ball_continuous_sequence_active, True),
+            ),
+            (
+                self._action_ball_continuous_episode_step,
+                full(self._action_ball_continuous_episode_step, origin - 1),
+            ),
+            (
+                self._action_ball_continuous_scheduled_ordinal,
+                full(self._action_ball_continuous_scheduled_ordinal, -1),
+            ),
+            (
+                self._action_ball_continuous_current_reveal_step,
+                full(self._action_ball_continuous_current_reveal_step, -1),
+            ),
+            (
+                self._action_ball_continuous_current_deadline_step,
+                full(self._action_ball_continuous_current_deadline_step, -1),
+            ),
+            (
+                self._action_ball_continuous_next_reveal_step,
+                full(
+                    self._action_ball_continuous_next_reveal_step,
+                    first_reveal,
+                ),
+            ),
+            (
+                self._action_ball_continuous_last_closed_ordinal,
+                full(self._action_ball_continuous_last_closed_ordinal, -1),
+            ),
+            (
+                self._action_ball_continuous_opportunities_consumed,
+                full(self._action_ball_continuous_opportunities_consumed, 0),
+            ),
+            (
+                self._action_ball_continuous_policy_opportunities_created,
+                full(
+                    self._action_ball_continuous_policy_opportunities_created,
+                    0,
+                ),
+            ),
+            (
+                self._action_ball_continuous_infrastructure_censors_consumed,
+                full(
+                    self._action_ball_continuous_infrastructure_censors_consumed,
+                    0,
+                ),
+            ),
+            (
+                self._action_ball_continuous_current_policy_opportunity,
+                full(
+                    self._action_ball_continuous_current_policy_opportunity,
+                    False,
+                ),
+            ),
+            (
+                self._action_ball_continuous_motion_active,
+                full(self._action_ball_continuous_motion_active, False),
+            ),
+            (
+                self._action_ball_continuous_suffix_complete,
+                full(self._action_ball_continuous_suffix_complete, False),
+            ),
+            (
+                self._action_ball_continuous_ready_reference_active,
+                full(
+                    self._action_ball_continuous_ready_reference_active,
+                    True,
+                ),
+            ),
+            (
+                self._action_ball_continuous_ready_at_reveal,
+                full(self._action_ball_continuous_ready_at_reveal, False),
+            ),
+            (
+                self._action_ball_continuous_reveal_due,
+                full(self._action_ball_continuous_reveal_due, False),
+            ),
+            (
+                self._action_ball_continuous_deadline_due,
+                full(self._action_ball_continuous_deadline_due, False),
+            ),
+            (
+                self._action_ball_continuous_recovery_unavailable,
+                full(self._action_ball_continuous_recovery_unavailable, False),
+            ),
+            (
+                self._action_ball_continuous_task_commit_pending,
+                full(self._action_ball_continuous_task_commit_pending, False),
+            ),
+            (
+                self._action_ball_continuous_task_commit_missed,
+                full(self._action_ball_continuous_task_commit_missed, False),
+            ),
+            (
+                self._action_ball_continuous_task_committed,
+                full(self._action_ball_continuous_task_committed, False),
+            ),
+            (
+                self._action_ball_continuous_motion_release_pending,
+                full(
+                    self._action_ball_continuous_motion_release_pending,
+                    False,
+                ),
+            ),
+            (
+                self._action_ball_continuous_motion_release_missed,
+                full(
+                    self._action_ball_continuous_motion_release_missed,
+                    False,
+                ),
+            ),
+            (
+                self._action_ball_continuous_phase,
+                full(
+                    self._action_ball_continuous_phase,
+                    _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                        "pre_reveal_hidden"
+                    ],
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_phase,
+                full(
+                    self._action_ball_continuous_canonical_phase,
+                    _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE[
+                        "recover_hidden"
+                    ],
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_phase_start_tick,
+                full(
+                    self._action_ball_continuous_canonical_phase_start_tick,
+                    origin - 1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_task_identity,
+                full(
+                    self._action_ball_continuous_canonical_task_identity,
+                    -1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_cadence_identity,
+                full(
+                    self._action_ball_continuous_canonical_cadence_identity,
+                    -1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_action_uid,
+                full(self._action_ball_continuous_canonical_action_uid, -1),
+            ),
+            (
+                self._action_ball_continuous_canonical_shot_index,
+                full(self._action_ball_continuous_canonical_shot_index, -1),
+            ),
+            (
+                self._action_ball_continuous_canonical_outcome_identity,
+                full(
+                    self._action_ball_continuous_canonical_outcome_identity,
+                    -1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_task_receipt_sha256,
+                full(
+                    self._action_ball_continuous_canonical_task_receipt_sha256,
+                    0,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_cadence_receipt_sha256,
+                full(
+                    self._action_ball_continuous_canonical_cadence_receipt_sha256,
+                    0,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_candidate_identity,
+                full(
+                    self._action_ball_continuous_canonical_candidate_identity,
+                    -1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_contact_tick,
+                full(
+                    self._action_ball_continuous_canonical_contact_tick,
+                    -1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_launch_tick,
+                full(self._action_ball_continuous_canonical_launch_tick, -1),
+            ),
+            (
+                self._action_ball_continuous_canonical_chosen_horizon_tick,
+                full(
+                    self._action_ball_continuous_canonical_chosen_horizon_tick,
+                    -1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_task_close_tick,
+                full(
+                    self._action_ball_continuous_canonical_task_close_tick,
+                    -1,
+                ),
+            ),
+            (
+                self._action_ball_continuous_canonical_task_valid,
+                full(self._action_ball_continuous_canonical_task_valid, False),
+            ),
+            (
+                self._action_ball_continuous_canonical_playback_started,
+                full(
+                    self._action_ball_continuous_canonical_playback_started,
+                    False,
+                ),
+            ),
+            (
+                fresh_buffers["_action_ball_task_timing_active"],
+                full(
+                    fresh_buffers["_action_ball_task_timing_active"], False
+                ),
+            ),
+            (
+                fresh_buffers["_action_ball_task_pending_elapsed_s"],
+                full(
+                    fresh_buffers["_action_ball_task_pending_elapsed_s"],
+                    0.0,
+                ),
+            ),
+            (
+                fresh_buffers["_action_ball_task_age_s"],
+                full(fresh_buffers["_action_ball_task_age_s"], 0.0),
+            ),
+            (
+                fresh_buffers["_action_ball_time_to_contact_s"],
+                full(fresh_buffers["_action_ball_time_to_contact_s"], 0.0),
+            ),
+            (
+                fresh_buffers["_action_ball_teacher_rate"],
+                full(fresh_buffers["_action_ball_teacher_rate"], 0.0),
+            ),
+            (
+                fresh_buffers["_action_ball_scaled_t_hit_s"],
+                full(fresh_buffers["_action_ball_scaled_t_hit_s"], 0.0),
+            ),
+            (
+                fresh_buffers["_action_ball_scaled_t_cycle_s"],
+                full(fresh_buffers["_action_ball_scaled_t_cycle_s"], 0.0),
+            ),
+            (
+                fresh_buffers["_action_ball_pre_swing_wait_s"],
+                full(fresh_buffers["_action_ball_pre_swing_wait_s"], 0.0),
+            ),
+            (
+                self._action_ball_continuous_motion_reset_pending,
+                full(self._action_ball_continuous_motion_reset_pending, False),
+            ),
+            (
+                fresh_buffers["_action_ball_reset_generation"],
+                reset_generation.clone(),
+            ),
+            (
+                fresh_buffers["_action_ball_swing_generation"],
+                full(fresh_buffers["_action_ball_swing_generation"], 0),
+            ),
+            (self.time_steps, ready_steps.clone()),
+            (
+                self.time_steps_f,
+                ready_steps.to(dtype=self.time_steps_f.dtype),
+            ),
+            (self.speed_scale, full(self.speed_scale, 0.0)),
+            (self.hold_counter, full(self.hold_counter, 1)),
+        )
+        if "in_hold" in self.metrics:
+            replacements = (
+                *replacements,
+                (
+                    self.metrics["in_hold"],
+                    full(self.metrics["in_hold"], 1.0),
+                ),
+            )
+        if allocate_fresh_buffers:
+            for name, value in fresh_buffers.items():
+                setattr(self, name, value)
+            self._action_ball_active_task_refs = [None] * self.num_envs
+            self._action_ball_diagnostic_pending_row_count = 0
+        for destination, after_image in replacements:
+            destination.copy_(after_image)
+        self._action_ball_continuous_prepared_task_commit = None
+        self._action_ball_continuous_prepared_task_commit_receipts = None
+        self._action_ball_continuous_current_projection = None
+        self._action_ball_continuous_published_common_step = None
+        self._invalidate_action_ball_continuous_observation_publication()
+        self._action_ball_continuous_motion_device_r05_owner = device_r05_owner
+        self._action_ball_continuous_motion_owner_nonce = object()
+        self._action_ball_continuous_motion_next_serial = 0
+        self._action_ball_continuous_motion_mutation_version = 0
+        self._action_ball_continuous_motion_device_mutation_version = (
+            torch.zeros(1, dtype=torch.int64, device=self.device)
+        )
+        self._action_ball_continuous_motion_poisoned = False
+        self._action_ball_continuous_motion_poison_reason = None
+        self._action_ball_continuous_motion_fault_count_device = torch.zeros(
+            1, dtype=torch.int64, device=self.device
+        )
+        self._action_ball_continuous_motion_terminal_resolution_total = 0
+        self._action_ball_continuous_motion_terminal_resolution_total_device = (
+            torch.zeros(1, dtype=torch.int64, device=self.device)
+        )
+        self._action_ball_continuous_motion_global_drain_active = None
+        self._action_ball_continuous_motion_global_drain_sequence = 0
+        self._action_ball_continuous_motion_global_drain_last_update = -1
+        self._action_ball_continuous_motion_global_drain_last_completed_steps = -1
+        self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version = -1
+        self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
+        self._action_ball_continuous_motion_global_drain_poisoned = False
+        self._action_ball_continuous_motion_global_drain_poison_reason = None
+        self._action_ball_continuous_fresh_time_left_receipt = (
+            _tensor_identity_version_receipt(time_left)
+        )
+        self._action_ball_continuous_fresh_motion_lane_bound = True
+
+    def bind_action_ball_full_mdp_motion_epoch_owner(
+        self,
+        epoch_owner: object,
+    ) -> None:
+        """Construction-bind the one lean epoch that orders Motion writes.
+
+        The epoch does not prove any Motion fact.  Device-R05 remains the sole
+        selected-task producer; the epoch only fixes the irreversible writer
+        order and owns the packed mutation log.
+        """
+
+        if self._action_ball_continuous_motion_device_r05_owner is None:
+            raise RuntimeError(
+                "Motion epoch binding requires its exact Device-R05 owner first"
+            )
+        current = self._action_ball_full_mdp_motion_epoch_owner
+        if current is epoch_owner:
+            return
+        if current is not None:
+            raise RuntimeError("Motion epoch owner may not be rebound")
+        try:
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_epoch as epoch,
+            )
+        except ImportError:
+            import action_ball_full_mdp_epoch as epoch
+
+        required_methods = (
+            "current",
+            "bind_d05_accept_writers",
+            "settle_d05_transaction",
+            "require_active_d05_accepted_rows",
+        )
+        if (
+            type(epoch_owner) is not epoch.ActionEpochOwner
+            or getattr(epoch, "row_identity", None)
+            is not _ACTION_BALL_ROW_IDENTITY
+            or epoch_owner.num_envs != self.num_envs
+            or epoch_owner.shot_slot_capacity != 1
+            or epoch_owner.device != torch.device(self.device)
+            or epoch_owner.poisoned
+            # The independent reset authority publishes the canonical genesis
+            # IDLE before D05 constructs and binds its children.  Therefore the
+            # fresh factory arrives at exactly one committed genesis row, not
+            # an empty pre-genesis owner.  Shot/reveal work has not begun.
+            or epoch_owner.commit_head != 1
+            or epoch_owner.drain_frontier != 0
+            or any(
+                not callable(getattr(epoch_owner, name, None))
+                or getattr(getattr(epoch_owner, name), "__self__", None)
+                is not epoch_owner
+                or getattr(getattr(epoch_owner, name), "__func__", None)
+                is not getattr(epoch.ActionEpochOwner, name, None)
+                for name in required_methods
+            )
+        ):
+            raise TypeError(
+                "Motion epoch binding requires one fresh exact ActionEpochOwner"
+            )
+        bind_playback = getattr(epoch_owner, "bind_motion_playback_owner", None)
+        if (
+            not callable(bind_playback)
+            or getattr(bind_playback, "__self__", None) is not epoch_owner
+            or getattr(bind_playback, "__func__", None)
+            is not getattr(epoch.ActionEpochOwner, "bind_motion_playback_owner", None)
+        ):
+            raise TypeError(
+                "Motion epoch binding requires the exact playback-transition ABI"
+            )
+        bind_playback(self)
+        self._action_ball_full_mdp_motion_epoch_owner = epoch_owner
+
+    def action_epoch_playback_transition_mask(
+        self,
+        kind: str,
+        record: object,
+    ) -> torch.Tensor:
+        """Derive one packed playback transition solely from Motion state.
+
+        The construction-bound epoch calls this exact method; no caller mask
+        or verdict exists.  The returned fixed ``[N, S]`` tensor is safe for a
+        named empty packed chronology entry and never requires a device-to-host
+        decision.
+        """
+
+        epoch_owner = self._action_ball_full_mdp_motion_epoch_owner
+        if epoch_owner is None or self._action_ball_continuous_motion_poisoned:
+            raise RuntimeError("Motion playback transition owner is unavailable")
+        try:
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_epoch as epoch,
+            )
+        except ImportError:
+            import action_ball_full_mdp_epoch as epoch
+        row_identity = _ACTION_BALL_ROW_IDENTITY
+        if (
+            type(epoch_owner) is not epoch.ActionEpochOwner
+            or type(record) is not epoch.ActionEpochRecord
+            or type(kind) is not str
+            or kind != epoch.MOTION_PLAYBACK_STARTED
+        ):
+            raise RuntimeError("Motion playback transition ABI differs")
+        current = epoch_owner.current()
+        if record.version != current.version:
+            raise RuntimeError("Motion playback transition epoch became stale")
+        device = torch.device(self.device)
+        n = self.num_envs
+        s = epoch_owner.shot_slot_capacity
+        if s != 1:
+            raise RuntimeError("Motion playback requires the exact single action slot")
+        slots = self._action_ball_full_mdp_motion_exact_tensor(
+            record.current_task_slot,
+            name="playback.current_task_slot",
+            device=device,
+            dtype=torch.int64,
+            shape=(n,),
+        )
+        # The accepted single-action ABI has exactly one slot.  Read that
+        # fixed column directly: clamping a damaged task slot back to zero
+        # would turn corruption into apparent authority, and a per-tick
+        # full-N arange would add allocation without representing semantics.
+        row_slot_active = slots.eq(0)
+        phase = record.phase[:, 0]
+        selected = record.selected_mask[:, 0]
+        retained_key = row_identity.ActionEpochShotKey(
+            reset_generation=self._action_ball_reset_generation[:, None],
+            ball_generation=self._action_ball_swing_generation[:, None],
+            action_uid=self._action_ball_continuous_canonical_action_uid[:, None],
+            action_slot=self.clip_id[:, None],
+            shot_index=self._action_ball_continuous_canonical_shot_index[:, None],
+            task_identity=(
+                self._action_ball_continuous_canonical_task_identity[:, None]
+            ),
+            outcome_identity=(
+                self._action_ball_continuous_canonical_outcome_identity[:, None]
+            ),
+            ball_identity=(
+                self._action_ball_continuous_canonical_cadence_identity[:, None]
+            ),
+        )
+        public_key = row_identity.require_action_epoch_shot_key(
+            record.identity.shot_key,
+            shape=(n, s),
+            device=device,
+            label="Motion playback public shot_key",
+        )
+        retained_key = row_identity.require_action_epoch_shot_key(
+            retained_key,
+            shape=(n, s),
+            device=device,
+            label="Motion playback retained shot_key",
+        )
+        full_key_matches = (
+            row_identity.action_epoch_shot_key_valid(public_key)
+            & row_identity.action_epoch_shot_key_valid(retained_key)
+            & row_identity.action_epoch_shot_key_equal(public_key, retained_key)
+        )[:, 0]
+        teacher_left_frame0 = self.time_steps.gt(
+            self.motion.seg_start[self.clip_id]
+        )
+        rows = (
+            row_slot_active
+            & selected
+            & phase.eq(epoch.PHASE_REVEAL_COMMITTED)
+            & full_key_matches
+            & self._action_ball_continuous_canonical_task_valid
+            & self._action_ball_task_timing_active
+            & self._action_ball_continuous_motion_active
+            & ~self._action_ball_continuous_canonical_playback_started
+            & teacher_left_frame0
+            & (
+                self._action_ball_task_age_s + 1.0e-12
+                >= self._action_ball_pre_swing_wait_s
+            )
+        )
+        return rows[:, None].contiguous()
+
+    @staticmethod
+    def _action_ball_full_mdp_motion_exact_tensor(
+        value: object,
+        *,
+        name: str,
+        device: torch.device,
+        dtype: torch.dtype,
+        shape: tuple[int, ...],
+    ) -> torch.Tensor:
+        if (
+            type(value) is not torch.Tensor
+            or value.device != device
+            or value.dtype is not dtype
+            or tuple(value.shape) != shape
+            or not value.is_contiguous()
+        ):
+            raise RuntimeError(
+                f"Motion epoch {name} must be contiguous {dtype} on "
+                f"{device} with shape {shape}"
+            )
+        return value
+
+    def commit_action_ball_full_mdp_motion_epoch_rows(
+        self,
+        token: object,
+    ) -> None:
+        """Install D05's exact full-N ACCEPT after-image under epoch ordering.
+
+        The caller supplies only D05's opaque transaction token.  D05 derives
+        and masks the accepted rows from its private candidate; Motion neither
+        accepts a row selector nor rereads ActionEpoch's public phase table.
+        ActionEpoch owns the corresponding ``WRITES_COMMITTED:motion`` event,
+        so an empty callback creates no second Motion transaction counter.
+        """
+
+        # The pre-D05 snapshots stop being current at the writer barrier.  A
+        # successful outer settlement republishes and eagerly seals the exact
+        # same-tick after-image only after every D05 writer has returned.
+        self._invalidate_action_ball_continuous_observation_publication()
+        self._action_ball_continuous_current_projection = None
+        try:
+            self._commit_action_ball_full_mdp_motion_epoch_rows_impl(token)
+        except BaseException:
+            self.poison_global_reveal_epoch(
+                "motion_epoch_hot_reveal_post_start_failure"
+            )
+            raise
+
+    def _commit_action_ball_full_mdp_motion_epoch_rows_impl(
+        self,
+        token: object,
+    ) -> None:
+        """Validate the typed view and perform only full-N masked copies."""
+
+        device_r05_owner = self._action_ball_continuous_motion_device_r05_owner
+        epoch_owner = self._action_ball_full_mdp_motion_epoch_owner
+        if device_r05_owner is None or epoch_owner is None:
+            raise RuntimeError(
+                "Motion epoch rows require exact Device-R05 and epoch bindings"
+            )
+        if self._action_ball_continuous_motion_poisoned or epoch_owner.poisoned:
+            raise RuntimeError("Motion epoch row owner is poisoned")
+        try:
+            import action_ball_continuous_runtime_transaction_device as device_r05
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_epoch as epoch,
+            )
+        except ImportError:
+            import action_ball_continuous_runtime_transaction_device as device_r05
+            import action_ball_full_mdp_epoch as epoch
+        row_identity = _ACTION_BALL_ROW_IDENTITY
+
+        if type(device_r05_owner) is not device_r05.DeviceR05Owner:
+            raise RuntimeError("Motion epoch Device-R05 owner type differs")
+        if type(epoch_owner) is not epoch.ActionEpochOwner:
+            raise RuntimeError("Motion epoch owner type differs")
+        accepted = device_r05_owner.require_owned_action_epoch_accepted(
+            token, owner_kind="motion"
+        )
+        if (
+            type(accepted) is not device_r05.DeviceR05AcceptedRowsView
+            or accepted.transaction is not token
+            or type(accepted.identity) is not epoch.EpochIdentityPayload
+            or type(accepted.clocks) is not epoch.EpochClockPayload
+            or type(accepted.task) is not epoch.EpochTaskPayload
+        ):
+            raise RuntimeError("Motion epoch accepted-row view differs")
+
+        device = torch.device(self.device)
+        n = self.num_envs
+        shape = (n, 1)
+
+        def exact(
+            value: object,
+            *,
+            name: str,
+            dtype: torch.dtype,
+            suffix: tuple[int, ...] = (),
+        ) -> torch.Tensor:
+            return self._action_ball_full_mdp_motion_exact_tensor(
+                value,
+                name=name,
+                device=device,
+                dtype=dtype,
+                shape=(*shape, *suffix),
+            )
+
+        key = row_identity.require_action_epoch_shot_key(
+            accepted.identity.shot_key,
+            shape=shape,
+            device=device,
+            label="Motion accepted shot_key",
+        )
+        for name in (
+            "scheduled_ordinal",
+            "target_generation",
+            "selected_cell",
+            "candidate_identity",
+        ):
+            exact(
+                getattr(accepted.identity, name),
+                name="identity." + name,
+                dtype=torch.int64,
+            )
+        for name in (
+            "reveal_tick",
+            "contact_tick",
+            "launch_tick",
+            "deadline_tick",
+            "next_reveal_tick",
+        ):
+            exact(
+                getattr(accepted.clocks, name),
+                name="clocks." + name,
+                dtype=torch.int64,
+            )
+        timing_grid = exact(
+            accepted.task.task_f32,
+            name="task.task_f32",
+            dtype=torch.float32,
+            suffix=(epoch.TASK_F32_WIDTH,),
+        )
+        task_valid_grid = exact(
+            accepted.task.task_valid,
+            name="task.task_valid",
+            dtype=torch.bool,
+        )
+        exact(
+            accepted.publication_ordinal,
+            name="publication_ordinal",
+            dtype=torch.int64,
+        )
+        exact(
+            accepted.target_xy_m,
+            name="target_xy_m",
+            dtype=torch.float32,
+            suffix=(2,),
+        )
+        exact(
+            accepted.rng_counter,
+            name="rng_counter",
+            dtype=torch.int64,
+        )
+
+        # D05 has already neutralized every non-ACCEPT row.  Combining its
+        # typed task-valid bit with the shared full-key predicate is the only
+        # Motion write mask; no compact row list or caller verdict exists.
+        write_rows = (
+            row_identity.action_epoch_shot_key_valid(key)
+            & task_valid_grid
+        )[:, 0]
+        timing = timing_grid[:, 0, :epoch.MOTION_TASK_F32_WIDTH]
+        false_rows = torch.zeros(n, dtype=torch.bool, device=device)
+        true_rows = torch.ones(n, dtype=torch.bool, device=device)
+        zero_f32 = torch.zeros(n, dtype=torch.float32, device=device)
+        legacy_phase = torch.full(
+            (n,),
+            _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                "active_opportunity"
+            ],
+            dtype=torch.int64,
+            device=device,
+        )
+        canonical_phase = torch.full(
+            (n,),
+            ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE,
+            dtype=torch.int64,
+            device=device,
+        )
+        task_identity = key.task_identity[:, 0]
+        # This legacy-named local field has always retained D05's ball
+        # identity.  Scheduled/publication ordinal is deliberately separate.
+        cadence_identity = key.ball_identity[:, 0]
+        action_uid = key.action_uid[:, 0]
+        shot_index = key.shot_index[:, 0]
+        outcome_identity = key.outcome_identity[:, 0]
+        candidate_identity = accepted.identity.candidate_identity[:, 0]
+        reveal_tick = accepted.clocks.reveal_tick[:, 0]
+        contact_tick = accepted.clocks.contact_tick[:, 0]
+        launch_tick = accepted.clocks.launch_tick[:, 0]
+        deadline_tick = accepted.clocks.deadline_tick[:, 0]
+
+        accepted_values = (
+            (self._action_ball_task_pending_elapsed_s, zero_f32),
+            (self._action_ball_task_age_s, zero_f32),
+            (self._action_ball_time_to_contact_s, timing[:, 0]),
+            (self._action_ball_teacher_rate, timing[:, 1]),
+            (self._action_ball_scaled_t_hit_s, timing[:, 2]),
+            (self._action_ball_scaled_t_cycle_s, timing[:, 3]),
+            (self._action_ball_pre_swing_wait_s, timing[:, 4]),
+            (self._action_ball_task_timing_active, true_rows),
+            (self._action_ball_continuous_task_commit_pending, false_rows),
+            (self._action_ball_continuous_task_commit_missed, false_rows),
+            (self._action_ball_continuous_task_committed, true_rows),
+            (self._action_ball_continuous_motion_reset_pending, false_rows),
+            (self._action_ball_continuous_motion_release_pending, false_rows),
+            (self._action_ball_continuous_motion_release_missed, false_rows),
+            (self._action_ball_continuous_motion_active, true_rows),
+            (self._action_ball_continuous_suffix_complete, false_rows),
+            (self._action_ball_continuous_ready_reference_active, false_rows),
+            (self._action_ball_continuous_phase, legacy_phase),
+            (self._action_ball_continuous_current_policy_opportunity, true_rows),
+            (
+                self._action_ball_continuous_policy_opportunities_created,
+                self._action_ball_continuous_policy_opportunities_created + 1,
+            ),
+            (self._action_ball_continuous_canonical_phase, canonical_phase),
+            (self._action_ball_continuous_canonical_phase_start_tick, reveal_tick),
+            (self._action_ball_continuous_canonical_task_identity, task_identity),
+            (
+                self._action_ball_continuous_canonical_cadence_identity,
+                cadence_identity,
+            ),
+            (self._action_ball_continuous_canonical_action_uid, action_uid),
+            (self._action_ball_continuous_canonical_shot_index, shot_index),
+            (
+                self._action_ball_continuous_canonical_outcome_identity,
+                outcome_identity,
+            ),
+            (
+                self._action_ball_continuous_canonical_candidate_identity,
+                candidate_identity,
+            ),
+            (
+                self._action_ball_continuous_canonical_contact_tick,
+                contact_tick,
+            ),
+            (
+                self._action_ball_continuous_canonical_launch_tick,
+                launch_tick,
+            ),
+            (
+                self._action_ball_continuous_canonical_chosen_horizon_tick,
+                contact_tick - launch_tick,
+            ),
+            (
+                self._action_ball_continuous_canonical_task_close_tick,
+                deadline_tick,
+            ),
+            (self._action_ball_continuous_canonical_task_valid, true_rows),
+            (
+                self._action_ball_continuous_canonical_playback_started,
+                false_rows,
+            ),
+        )
+
+        swaps = []
+        for destination, value in accepted_values:
+            row_mask = write_rows.reshape(
+                (n,) + (1,) * (destination.ndim - 1)
+            )
+            swaps.append(
+                (
+                    destination,
+                    torch.where(
+                        row_mask,
+                        value.to(dtype=destination.dtype),
+                        destination,
+                    ),
+                )
+            )
+        for destination, after_image in swaps:
+            destination.copy_(after_image)
+
+    def publish_action_ball_full_mdp_post_d05_observation(self) -> None:
+        """Publish Motion only after the complete three-writer D05 commit.
+
+        The Motion writer invalidates the pre-D05 observation and current-row
+        projection at its barrier.  D05 invokes this no-argument owner method
+        only after ``settle_d05_transaction`` has returned from every writer,
+        so downstream owners receive one same-tick row-wise after-image.
+        """
+
+        try:
+            self._publish_action_ball_full_mdp_post_d05_observation_impl()
+        except BaseException:
+            # A failed post-write publication must never leave a partially
+            # installed or stale capability visible to Physical.
+            self._invalidate_action_ball_continuous_observation_publication()
+            self._action_ball_continuous_current_projection = None
+            self.poison_global_reveal_epoch(
+                "motion_post_d05_observation_publication_failed"
+            )
+            raise
+
+    def _publish_action_ball_full_mdp_post_d05_observation_impl(self) -> None:
+        device_r05_owner = self._action_ball_continuous_motion_device_r05_owner
+        epoch_owner = self._action_ball_full_mdp_motion_epoch_owner
+        if device_r05_owner is None or epoch_owner is None:
+            raise RuntimeError(
+                "post-D05 Motion observation requires exact owner bindings"
+            )
+        if self._action_ball_continuous_motion_poisoned or epoch_owner.poisoned:
+            raise RuntimeError("post-D05 Motion observation owner is poisoned")
+        try:
+            import action_ball_continuous_runtime_transaction_device as device_r05
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_epoch as epoch,
+            )
+        except ImportError:
+            import action_ball_continuous_runtime_transaction_device as device_r05
+            import action_ball_full_mdp_epoch as epoch
+
+        if (
+            type(device_r05_owner) is not device_r05.DeviceR05Owner
+            or type(epoch_owner) is not epoch.ActionEpochOwner
+        ):
+            raise RuntimeError("post-D05 Motion owner type differs")
+        if any(
+            value is not None
+            for value in (
+                self._action_ball_continuous_observation_publication_identity,
+                self._action_ball_continuous_observation_token,
+                self._action_ball_continuous_observation_record,
+                self._action_ball_continuous_observation_common_step,
+            )
+        ):
+            raise RuntimeError(
+                "post-D05 Motion observation was already published"
+            )
+        common_step = self._require_action_ball_continuous_current_publication(
+            operation="post-D05 observation publication"
+        )
+        if getattr(self._env, "common_step_counter", None) != common_step:
+            raise RuntimeError("post-D05 Motion publication tick drifted")
+
+        # Both publications clone owner state before exposing it.  Neither
+        # one rereads ActionEpoch's row table as a second ACCEPT authority.
+        self._publish_action_ball_continuous_observation()
+        self._seal_action_ball_continuous_current_projection(common_step)
+
+    def project_action_ball_full_mdp_recovery_ready_reference(
+        self,
+    ) -> ActionBallFullMdpCompletedActionFrame0Reference:
+        """Clone Motion's owner-selected recovery-ready frame-0 reference.
+
+        Canonical genesis IDLE uses Motion's already scheduled upcoming
+        ``clip_id`` and immutable action table, paired with a neutral shot key.
+        Only the typed completed lifecycle uses the epoch-selected action and
+        its exact full eight-field shot key.  REJECT/DEFER/CENSOR are event
+        classifications and are deliberately not inspected here; the current
+        carry lifecycle remains the sole authority.  The caller supplies
+        neither a slot nor a validity verdict, and no live robot pose, zero
+        tensor or current-position self-reference can become the target.
+        Reference velocities are literal zero by contract.
+        """
+
+        epoch_owner = self._action_ball_full_mdp_motion_epoch_owner
+        if epoch_owner is None:
+            raise RuntimeError("Motion frame-0 reference requires its bound epoch")
+        if self._action_ball_continuous_motion_poisoned or epoch_owner.poisoned:
+            raise RuntimeError("Motion frame-0 reference owner is poisoned")
+        try:
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_epoch as epoch,
+            )
+            from whole_body_tracking.robots.agibot_a3 import A3_UPPER_TRACKED
+        except ImportError:
+            import action_ball_full_mdp_epoch as epoch
+            from whole_body_tracking.robots.agibot_a3 import A3_UPPER_TRACKED
+
+        if type(epoch_owner) is not epoch.ActionEpochOwner:
+            raise RuntimeError("Motion frame-0 epoch owner type differs")
+        record = epoch_owner.current()
+        if type(record) is not epoch.ActionEpochRecord:
+            raise RuntimeError("Motion frame-0 epoch publication type differs")
+
+        device = torch.device(self.device)
+        n = self.num_envs
+        schedule = self._action_ball_continuous_schedule_projection
+        if not isinstance(schedule, MappingProxyType):
+            raise RuntimeError("Motion frame-0 reference lacks its parent schedule")
+        upcoming_action_slot = schedule.get("upcoming_action_slot")
+        upcoming_action_uid = schedule.get("upcoming_action_uid")
+        motion_clip_id = self._action_ball_full_mdp_motion_exact_tensor(
+            self.clip_id,
+            name="frame0.action_slot",
+            device=device,
+            dtype=torch.int64,
+            shape=(n,),
+        )
+        current_slot = self._action_ball_full_mdp_motion_exact_tensor(
+            record.current_task_slot,
+            name="frame0.epoch.current_task_slot",
+            device=device,
+            dtype=torch.int64,
+            shape=(n,),
+        )
+        code_owned_action_uids = (
+            self._action_ball_continuous_code_owned_action_uids()
+        )
+        if tuple(self.cfg.body_names)[0] != self.robot.body_names[0]:
+            raise RuntimeError("Motion frame-0 action/root binding differs")
+        ordered_body_names = tuple(A3_UPPER_TRACKED)
+        configured_body_names = tuple(self.cfg.body_names)
+        if (
+            not ordered_body_names
+            or len(set(ordered_body_names)) != len(ordered_body_names)
+            or any(name not in configured_body_names for name in ordered_body_names)
+        ):
+            raise RuntimeError("Motion frame-0 A3 upper-body order is unavailable")
+        body_slots = torch.tensor(
+            [configured_body_names.index(name) for name in ordered_body_names],
+            dtype=torch.int64,
+            device=device,
+        )
+        action_uids = torch.as_tensor(
+            code_owned_action_uids,
+            dtype=torch.int64,
+            device=device,
+        )
+        if (
+            tuple(action_uids.shape) != (self.motion.num_segments,)
+            or action_uids.device != device
+            or action_uids.dtype != torch.int64
+        ):
+            raise RuntimeError("Motion frame-0 action UID table differs")
+
+        if epoch_owner.shot_slot_capacity != 1:
+            raise RuntimeError("Motion frame-0 reference requires one action slot")
+        current_slot_valid = current_slot.eq(0)
+        lifecycle = record.recovery_reference_lifecycle_masks()
+        if type(lifecycle) is not epoch.RecoveryReferenceLifecycleMasks:
+            raise RuntimeError("Motion frame-0 epoch lifecycle type differs")
+        lifecycle_upcoming = self._action_ball_full_mdp_motion_exact_tensor(
+            lifecycle.upcoming,
+            name="frame0.epoch.lifecycle.upcoming",
+            device=device,
+            dtype=torch.bool,
+            shape=(n, epoch_owner.shot_slot_capacity),
+        )
+        lifecycle_completed = self._action_ball_full_mdp_motion_exact_tensor(
+            lifecycle.completed,
+            name="frame0.epoch.lifecycle.completed",
+            device=device,
+            dtype=torch.bool,
+            shape=(n, epoch_owner.shot_slot_capacity),
+        )
+        lifecycle_disjoint = ~(lifecycle_upcoming & lifecycle_completed)
+        upcoming_reference = lifecycle_upcoming[:, 0]
+        completed_reference = lifecycle_completed[:, 0]
+        selected_phase = record.phase[:, 0]
+        selected = record.selected_mask[:, 0]
+        row_identity = _ACTION_BALL_ROW_IDENTITY
+        public_key = row_identity.require_action_epoch_shot_key(
+            record.identity.shot_key,
+            shape=(n, 1),
+            device=device,
+            label="Motion frame-0 public shot_key",
+        )
+        public_key_valid = row_identity.action_epoch_shot_key_valid(public_key)[
+            :, 0
+        ]
+        public_key_neutral = public_key.reset_generation[:, 0].eq(-1)
+        for key_field in fields(row_identity.ActionEpochShotKey)[1:]:
+            public_key_neutral = public_key_neutral & getattr(
+                public_key, key_field.name
+            )[:, 0].eq(-1)
+        empty_key = row_identity.empty_action_epoch_shot_key(
+            (n,), device=device
+        )
+        reference_shot_key = row_identity.ActionEpochShotKey(
+            **{
+                key_field.name: torch.where(
+                    completed_reference,
+                    getattr(public_key, key_field.name)[:, 0],
+                    getattr(empty_key, key_field.name),
+                ).contiguous()
+                for key_field in fields(row_identity.ActionEpochShotKey)
+            }
+        )
+        epoch_action_slot = public_key.action_slot[:, 0]
+        selected_action_slot = torch.where(
+            upcoming_reference,
+            motion_clip_id,
+            torch.where(
+                completed_reference,
+                epoch_action_slot,
+                torch.full_like(epoch_action_slot, -1),
+            ),
+        )
+        action_slot_valid = (
+            selected_action_slot.ge(0)
+            & selected_action_slot.lt(self.motion.num_segments)
+        )
+        safe_action_slot = torch.clamp(
+            selected_action_slot,
+            min=0,
+            max=self.motion.num_segments - 1,
+        )
+        safe_motion_clip_id = torch.clamp(
+            motion_clip_id,
+            min=0,
+            max=self.motion.num_segments - 1,
+        )
+        starts = self.motion.seg_start[safe_action_slot]
+        root_position = (
+            self.motion.body_pos_w[starts, 0]
+            + self._env.scene.env_origins
+        )
+        root_orientation = self.motion.body_quat_w[starts, 0]
+        joint_position = self.motion.joint_pos[starts]
+        body_position = (
+            self.motion.body_pos_w[starts][:, body_slots]
+            + self._env.scene.env_origins[:, None, :]
+        )
+        body_orientation = self.motion.body_quat_w[starts][:, body_slots]
+        epoch_action_uid = public_key.action_uid[:, 0]
+        selected_uid = torch.where(
+            upcoming_reference,
+            action_uids[safe_motion_clip_id],
+            torch.where(
+                completed_reference,
+                epoch_action_uid,
+                torch.full_like(epoch_action_uid, -1),
+            ),
+        )
+        completed_identity_valid = (
+            action_slot_valid
+            & public_key_valid
+            & selected_action_slot.eq(motion_clip_id)
+            & selected_uid.eq(action_uids[safe_action_slot])
+        )
+        upcoming_schedule_identity_valid = (
+            action_slot_valid
+            & action_uids[safe_action_slot].gt(0)
+            & motion_clip_id.eq(upcoming_action_slot)
+            & selected_action_slot.eq(upcoming_action_slot)
+            & action_uids[safe_action_slot].eq(upcoming_action_uid)
+        )
+        bootstrap_owner_valid = (
+            current_slot_valid
+            & upcoming_reference
+            & lifecycle_disjoint[:, 0]
+            & ~selected
+            & selected_phase.eq(epoch.PHASE_IDLE)
+            & public_key_neutral
+            & upcoming_schedule_identity_valid
+        )
+        completed_owner_valid = (
+            current_slot_valid
+            & selected
+            & completed_reference
+            & lifecycle_disjoint[:, 0]
+            & completed_identity_valid
+        )
+        owner_valid = bootstrap_owner_valid | completed_owner_valid
+        numeric_valid = (
+            torch.isfinite(root_position).all(dim=1)
+            & torch.isfinite(root_orientation).all(dim=1)
+            & torch.isfinite(joint_position).all(dim=1)
+            & torch.isfinite(body_position).reshape(n, -1).all(dim=1)
+            & torch.isfinite(body_orientation).reshape(n, -1).all(dim=1)
+        )
+        validity = owner_valid & numeric_valid
+        producer_fault_bits = (
+            (~owner_valid).to(dtype=torch.int64)
+            | ((~numeric_valid).to(dtype=torch.int64) << 1)
+        )
+        reference_kind = torch.where(
+            upcoming_reference,
+            torch.full_like(
+                selected_phase,
+                _ACTION_BALL_R07_REFERENCE_BOOTSTRAP_UPCOMING_ACTION_FRAME0,
+            ),
+            torch.where(
+                completed_reference,
+                torch.full_like(
+                    selected_phase,
+                    _ACTION_BALL_R07_REFERENCE_COMPLETED_ACTION_FRAME0,
+                ),
+                torch.zeros_like(selected_phase),
+            ),
+        )
+        return ActionBallFullMdpCompletedActionFrame0Reference(
+            motion_owner=self,
+            epoch_owner=epoch_owner,
+            epoch_version=record.version,
+            cadence_tick=(
+                self._action_ball_continuous_episode_step.detach().clone()
+            ),
+            shot_key=reference_shot_key.clone(),
+            reference_kind=reference_kind.detach().clone(),
+            reference_action_slot=selected_action_slot.detach().clone(),
+            reference_action_uid=selected_uid.detach().clone(),
+            root_position_m=root_position.detach().clone(),
+            root_orientation_wxyz=root_orientation.detach().clone(),
+            joint_position_rad=joint_position.detach().clone(),
+            body_position_m=body_position.detach().clone(),
+            body_orientation_wxyz=body_orientation.detach().clone(),
+            station_anchor_xy_m=root_position[:, :2].detach().clone(),
+            validity=validity.detach().clone(),
+            producer_fault_bits=producer_fault_bits.detach().clone(),
+        )
+
+    def project_action_ball_full_mdp_completed_action_frame0_reference(
+        self,
+    ) -> ActionBallFullMdpCompletedActionFrame0Reference:
+        """Compatibility name for the same owner-derived frame-0 producer."""
+
+        return self.project_action_ball_full_mdp_recovery_ready_reference()
+
+    @staticmethod
+    def _clone_action_ball_motion_question_view(
+        record: _ActionBallMotionQuestionChronologyRecord,
+        *,
+        motion_owner: object,
+    ) -> ActionBallMotionQuestionChronologyView:
+        return ActionBallMotionQuestionChronologyView(
+            motion_owner=motion_owner,
+            chronology_identity=record.chronology_identity,
+            selected_env_index=record.selected_env_index.clone(),
+            current_tick=record.current_tick.clone(),
+            candidate_identity=record.candidate_identity.clone(),
+            contact_tick=record.contact_tick.clone(),
+            earliest_launch_tick=record.earliest_launch_tick.clone(),
+            launch_tick=record.launch_tick.clone(),
+            chosen_horizon_s=record.chosen_horizon_s.clone(),
+            action_uid=record.action_uid.clone(),
+            action_slot=record.action_slot.clone(),
+            task_identity=record.task_identity.clone(),
+            cadence_identity=record.cadence_identity.clone(),
+            task_receipt_sha256=record.task_receipt_sha256.clone(),
+            motion_task_f32=record.motion_task_f32.clone(),
+            construction_reason=record.construction_reason.clone(),
+            producer_fault=record.producer_fault.clone(),
+        )
+
+    def issue_action_ball_motion_question_chronology(
+        self,
+        *,
+        selected_env_index: torch.Tensor,
+        candidate_identity: torch.Tensor,
+        runtime_task_receipts: tuple,
+        physical_horizon_owner: object,
+        physical_horizon_receipt: object,
+    ) -> ActionBallMotionQuestionChronologyReceipt:
+        """Quantize real task contact requirements against Physical maxima.
+
+        Cadence deadline is intentionally not an input.  A zero complete-tick
+        horizon is ordinary construction reason 12; corrupt/non-attributable
+        chronology remains a producer fault.  This capability is useful for
+        negative production integration today, but cannot authorize D05 while
+        its child projection omits the exact fields retained here.
+        """
+
+        if not self.action_ball_continuous_motion_enabled:
+            raise RuntimeError("Motion question chronology requires fresh cadence")
+        runtime = self._action_ball_runtime_module_bound
+        import action_ball_physical_question_device as physical
+
+        if (
+            runtime is None
+            or type(selected_env_index) is not torch.Tensor
+            or selected_env_index.dtype is not torch.int64
+            or selected_env_index.device != torch.device(self.device)
+            or selected_env_index.ndim != 1
+            or selected_env_index.numel() < 1
+            or not selected_env_index.is_contiguous()
+            or type(runtime_task_receipts) is not tuple
+            or len(runtime_task_receipts) != selected_env_index.numel()
+        ):
+            raise TypeError("Motion chronology requires aligned exact task rows")
+        if (
+            type(physical_horizon_owner) is not physical.PhysicalQuestionNumericCore
+            or type(physical_horizon_receipt)
+            is not physical.PhysicalQuestionHorizonReceipt
+            or getattr(
+                getattr(physical_horizon_owner, "project_horizon_for_test", None),
+                "__self__",
+                None,
+            )
+            is not physical_horizon_owner
+            or getattr(
+                getattr(physical_horizon_owner, "project_horizon_for_test", None),
+                "__func__",
+                None,
+            )
+            is not physical.PhysicalQuestionNumericCore.project_horizon_for_test
+        ):
+            raise TypeError("Motion chronology requires the exact Physical horizon owner")
+        horizon = physical_horizon_owner.project_horizon_for_test(
+            physical_horizon_receipt
+        )
+        if type(horizon) is not physical.PhysicalQuestionHorizonView:
+            raise RuntimeError("Physical horizon owner returned a foreign view")
+
+        candidate = horizon.candidate_identity
+        max_ticks = horizon.max_feasible_motion_ticks
+        reason = horizon.construction_reason
+        physical_fault = horizon.producer_fault
+        k = selected_env_index.numel()
+        if (
+            type(candidate_identity) is not torch.Tensor
+            or candidate_identity.dtype is not torch.int64
+            or candidate_identity.device != torch.device(self.device)
+            or not candidate_identity.is_contiguous()
+            or candidate_identity.ndim != 2
+            or candidate_identity.shape[0] != k
+            or type(candidate) is not torch.Tensor
+            or candidate.dtype is not torch.int64
+            or candidate.device != torch.device(self.device)
+            or tuple(candidate.shape) != tuple(candidate_identity.shape)
+            or type(max_ticks) is not torch.Tensor
+            or max_ticks.dtype is not torch.int64
+            or max_ticks.device != torch.device(self.device)
+            or tuple(max_ticks.shape) != tuple(candidate.shape)
+            or type(reason) is not torch.Tensor
+            or reason.dtype is not torch.int64
+            or tuple(reason.shape) != tuple(candidate.shape)
+            or type(physical_fault) is not torch.Tensor
+            or physical_fault.dtype is not torch.int64
+            or tuple(physical_fault.shape) != tuple(candidate.shape)
+        ):
+            raise TypeError("Motion chronology Physical horizon tensor ABI differs")
+
+        step_dt = float(self._env.step_dt)
+        if not math.isfinite(step_dt) or step_dt <= 0.0:
+            raise RuntimeError("Motion chronology control dt must be finite and positive")
+        expected_env = []
+        contact_delta = []
+        action_uid = []
+        action_slot = []
+        task_sha = []
+        motion_task = []
+        for receipt in runtime_task_receipts:
+            if type(receipt) is not runtime.ActionBallTaskReceipt:
+                raise TypeError("Motion chronology requires exact ActionBallTaskReceipt")
+            canonical = runtime.ActionBallTaskReceipt.from_dict(receipt.to_dict())
+            if canonical != receipt:
+                raise RuntimeError("Motion chronology task receipt failed round-trip")
+            delta = int(round(float(receipt.time_to_contact_s) / step_dt))
+            if delta < 1:
+                raise RuntimeError("Motion chronology contact requirement has no full tick")
+            if receipt.contact_time_step_s is not None:
+                if (
+                    float(receipt.contact_time_step_s) != step_dt
+                    or receipt.time_to_contact_tick != delta
+                ):
+                    raise RuntimeError("task receipt tick geometry differs from Motion")
+            expected_env.append(receipt.env_id)
+            contact_delta.append(delta)
+            action_uid.append(receipt.action_uid)
+            action_slot.append(receipt.action_slot)
+            task_sha.append(list(bytes.fromhex(receipt.canonical_sha256)))
+            motion_task.append(
+                [
+                    receipt.time_to_contact_s,
+                    receipt.teacher_rate,
+                    receipt.scaled_t_hit_s,
+                    receipt.scaled_t_cycle_s,
+                    receipt.pre_swing_wait_s,
+                ]
+            )
+
+        expected_env_device = torch.tensor(
+            expected_env, dtype=torch.int64, device=self.device
+        )
+        candidate_mismatch = candidate.ne(candidate_identity)
+        row_unattributable = selected_env_index.ne(expected_env_device)
+        current_tick = self._action_ball_continuous_episode_step[
+            selected_env_index
+        ].clone()
+        delta_device = torch.tensor(
+            contact_delta, dtype=torch.int64, device=self.device
+        )
+        max_i64 = torch.iinfo(torch.int64).max
+        overflow = current_tick.gt(max_i64 - delta_device)
+        contact_tick = torch.where(
+            overflow,
+            torch.full_like(current_tick, max_i64),
+            current_tick + delta_device,
+        ).contiguous()
+        bounded_contact = torch.clamp(contact_tick, min=0).unsqueeze(1)
+        chosen_ticks = torch.minimum(
+            torch.clamp(max_ticks, min=0), bounded_contact
+        ).contiguous()
+        launch_tick = (contact_tick.unsqueeze(1) - chosen_ticks).contiguous()
+        has_horizon = chosen_ticks.gt(0) & physical_fault.eq(0)
+        construction_reason = torch.where(
+            has_horizon,
+            torch.full_like(reason, -1),
+            torch.where(
+                physical_fault.eq(0),
+                torch.full_like(reason, _ACTION_BALL_MOTION_QUESTION_NO_COMPLETE_HORIZON),
+                reason,
+            ),
+        ).contiguous()
+        task_identity = self._action_ball_continuous_canonical_task_identity[
+            selected_env_index
+        ].clone()
+        cadence_identity = self._action_ball_continuous_canonical_cadence_identity[
+            selected_env_index
+        ].clone()
+        unattributable = (
+            row_unattributable
+            | task_identity.le(0)
+            | cadence_identity.le(0)
+            | candidate_mismatch.any(dim=1)
+        ).unsqueeze(1)
+        producer_fault = physical_fault.clone()
+        producer_fault = torch.where(
+            unattributable,
+            torch.bitwise_or(
+                producer_fault,
+                torch.full_like(
+                    producer_fault,
+                    _ACTION_BALL_MOTION_QUESTION_FAULT_UNATTRIBUTABLE,
+                ),
+            ),
+            producer_fault,
+        )
+        producer_fault = torch.where(
+            overflow.unsqueeze(1),
+            torch.bitwise_or(
+                producer_fault,
+                torch.full_like(
+                    producer_fault,
+                    _ACTION_BALL_MOTION_QUESTION_FAULT_TICK_OVERFLOW,
+                ),
+            ),
+            producer_fault,
+        ).contiguous()
+        chosen_horizon_s = (
+            chosen_ticks.to(torch.float32) * step_dt
+        ).contiguous()
+        finite_horizon = torch.isfinite(chosen_horizon_s)
+        producer_fault = torch.where(
+            finite_horizon,
+            producer_fault,
+            torch.bitwise_or(
+                producer_fault,
+                torch.full_like(
+                    producer_fault,
+                    _ACTION_BALL_MOTION_QUESTION_FAULT_NONFINITE,
+                ),
+            ),
+        ).contiguous()
+
+        receipt = object.__new__(ActionBallMotionQuestionChronologyReceipt)
+        record = _ActionBallMotionQuestionChronologyRecord(
+            chronology_identity=object(),
+            physical_horizon_owner=physical_horizon_owner,
+            physical_horizon_receipt=physical_horizon_receipt,
+            selected_env_index=selected_env_index.clone(),
+            current_tick=current_tick,
+            candidate_identity=candidate.clone(),
+            contact_tick=contact_tick,
+            earliest_launch_tick=launch_tick.clone(),
+            launch_tick=launch_tick,
+            chosen_horizon_s=chosen_horizon_s,
+            action_uid=torch.tensor(action_uid, dtype=torch.int64, device=self.device),
+            action_slot=torch.tensor(action_slot, dtype=torch.int64, device=self.device),
+            task_identity=task_identity,
+            cadence_identity=cadence_identity,
+            task_receipt_sha256=torch.tensor(
+                task_sha, dtype=torch.uint8, device=self.device
+            ).contiguous(),
+            motion_task_f32=torch.tensor(
+                motion_task, dtype=torch.float32, device=self.device
+            ).contiguous(),
+            construction_reason=construction_reason,
+            producer_fault=producer_fault,
+        )
+        self._action_ball_motion_question_records[receipt] = record
+        return receipt
+
+    def require_owned_action_ball_motion_question_chronology(
+        self,
+        receipt: object,
+    ) -> ActionBallMotionQuestionChronologyView:
+        """Validate one Motion capability and publish clone-only exact fields."""
+
+        if type(receipt) is not ActionBallMotionQuestionChronologyReceipt:
+            raise TypeError("Motion question chronology receipt type differs")
+        record = self._action_ball_motion_question_records.get(receipt)
+        if record is None:
+            raise RuntimeError("Motion question chronology receipt is foreign")
+        # Re-projecting proves that the independently owned Physical receipt is
+        # still live; no same-writer hash is accepted as a substitute.
+        record.physical_horizon_owner.project_horizon_for_test(
+            record.physical_horizon_receipt
+        )
+        return self._clone_action_ball_motion_question_view(
+            record, motion_owner=self
+        )
+
+    def stage_action_ball_continuous_motion_device_r05_reveal(
+        self,
+        prepared_reveal: object,
+        *,
+        question_chronology: object,
+    ) -> None:
+        """Validate real Device-R05 ingress and then HOLD on its incomplete ABI."""
+
+        owner = self._action_ball_continuous_motion_device_r05_owner
+        if owner is None:
+            raise RuntimeError("Motion production hot stage has no Device-R05 owner")
+        child = owner.require_owned_prepared_reveal_for_child(
+            prepared_reveal, owner_kind="motion"
+        )
+        chronology = self.require_owned_action_ball_motion_question_chronology(
+            question_chronology
+        )
+        if (
+            getattr(child, "owner_kind", None) != "motion"
+            or getattr(child, "prepared_reveal", None) is not prepared_reveal
+            or getattr(child, "numeric_f32", None) is None
+            or chronology.motion_owner is not self
+        ):
+            raise RuntimeError("Motion production hot projection differs")
+        missing = tuple(
+            name
+            for name in (
+                "action_uid",
+                "task_receipt_sha256",
+                "cadence_receipt_sha256",
+                "contact_tick",
+                "launch_tick",
+                "chosen_horizon_ticks",
+                "physical_question_receipt_identity",
+            )
+            if getattr(child, name, None) is None
+        )
+        if missing:
+            raise ActionBallMotionQuestionProductionHold(
+                "Device-R05 Motion child projection lacks exact "
+                + ", ".join(missing)
+                + "; canonical R08 remains HOLD"
+            )
+        # Positive PREPARE publication is intentionally deferred until the
+        # owner-issued terminal ACCEPT receipt exists.  A preview, even with
+        # complete fields, is not a completion fact.
+        raise ActionBallMotionQuestionProductionHold(
+            "canonical PREPARE waits for the exact Device-R05 ACCEPT terminal receipt"
+        )
+
+    def bind_action_ball_continuous_motion_selected_reset(
+        self,
+        r05_owner: object,
+        *,
+        prepared_reset_validator: object,
+        r05_receipt_validator: object,
+        authority_source_sha256: str | None = None,
+        diagnostic: bool = False,
+    ) -> None:
+        """Construction-bind the sole Device-R05 selected-reset authority.
+
+        ``authority_source_sha256`` is a deprecated call-site compatibility
+        argument and grants no authority.  Production admits only the exact
+        Device-R05 owner and its two exact bound methods; explicit diagnostic
+        fixtures remain non-authoritative test doubles.
+        """
+
+        if not self._action_ball_continuous_fresh_motion_lane_bound:
+            raise RuntimeError(
+                "Motion selected reset requires bound production staging"
+            )
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="selected-reset bind"
+        )
+        import action_ball_continuous_runtime_transaction_device as device_r05
+
+        if (
+            r05_owner is None
+            or not callable(prepared_reset_validator)
+            or not callable(r05_receipt_validator)
+            or getattr(prepared_reset_validator, "__self__", None) is not r05_owner
+            or getattr(r05_receipt_validator, "__self__", None) is not r05_owner
+        ):
+            raise TypeError(
+                "Motion selected reset requires exact reset and Device-R05 authorities"
+            )
+        if type(diagnostic) is not bool:
+            raise TypeError("Motion selected-reset diagnostic flag must be exact bool")
+        if diagnostic is False and (
+            type(r05_owner) is not device_r05.DeviceR05Owner
+            or getattr(prepared_reset_validator, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_prepared_true_reset
+            or getattr(r05_receipt_validator, "__func__", None)
+            is not device_r05.DeviceR05Owner.require_owned_true_reset_receipt
+            or self._action_ball_continuous_motion_device_r05_owner is not r05_owner
+        ):
+            raise RuntimeError(
+                "Motion selected reset lacks its exact Device-R05 reveal binder"
+            )
+        del authority_source_sha256
+        prepared_identity = (
+            getattr(prepared_reset_validator, "__self__", None),
+            getattr(prepared_reset_validator, "__func__", None),
+        )
+        r05_identity = (
+            getattr(r05_receipt_validator, "__self__", None),
+            getattr(r05_receipt_validator, "__func__", None),
+        )
+        current = self._action_ball_continuous_motion_selected_reset_authority
+        if current is not None:
+            if (
+                current is not r05_owner
+                or (
+                    getattr(
+                        self._action_ball_continuous_motion_selected_reset_prepare_validator,
+                        "__self__",
+                        None,
+                    ),
+                    getattr(
+                        self._action_ball_continuous_motion_selected_reset_prepare_validator,
+                        "__func__",
+                        None,
+                    ),
+                )
+                != prepared_identity
+                or (
+                    getattr(
+                        self._action_ball_continuous_motion_selected_reset_r05_validator,
+                        "__self__",
+                        None,
+                    ),
+                    getattr(
+                        self._action_ball_continuous_motion_selected_reset_r05_validator,
+                        "__func__",
+                        None,
+                    ),
+                )
+                != r05_identity
+                or self._action_ball_continuous_motion_selected_reset_diagnostic
+                is not diagnostic
+            ):
+                raise RuntimeError(
+                    "Motion selected-reset authority may not be rebound"
+                )
+            return
+        self._action_ball_continuous_motion_selected_reset_authority = r05_owner
+        self._action_ball_continuous_motion_selected_reset_r05_owner = r05_owner
+        self._action_ball_continuous_motion_selected_reset_prepare_validator = (
+            prepared_reset_validator
+        )
+        self._action_ball_continuous_motion_selected_reset_r05_validator = (
+            r05_receipt_validator
+        )
+        self._action_ball_continuous_motion_selected_reset_authority_api_sha256 = (
+            None
+        )
+        self._action_ball_continuous_motion_selected_reset_diagnostic = diagnostic
+        self._action_ball_continuous_motion_selected_reset_owner_nonce = object()
+
+    def _clear_action_ball_continuous_motion_selected_reset(self) -> None:
+        self._action_ball_continuous_motion_selected_reset_stage = None
+        self._action_ball_continuous_motion_selected_reset_prepared_true_reset = None
+        self._action_ball_continuous_motion_selected_reset_selected_mask = None
+        self._action_ball_continuous_motion_selected_reset_generation_before = None
+        self._action_ball_continuous_motion_selected_reset_generation_after = None
+        self._action_ball_continuous_motion_selected_reset_generation_overflow_fault = (
+            None
+        )
+        self._action_ball_continuous_motion_selected_reset_prevalidated = None
+        self._action_ball_continuous_motion_selected_reset_swaps = None
+        self._action_ball_continuous_motion_selected_reset_version_after = None
+        self._action_ball_continuous_motion_selected_reset_terminal_token = None
+        self._action_ball_continuous_motion_selected_reset_committed = False
+
+    def prepare_action_ball_continuous_motion_selected_reset(
+        self, prepared_true_reset: object
+    ) -> ActionBallContinuousMotionSelectedResetStage:
+        """Mint a reset stage without changing live Motion state."""
+
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="selected-reset prepare"
+        )
+        validator = (
+            self._action_ball_continuous_motion_selected_reset_prepare_validator
+        )
+        if validator is None:
+            raise RuntimeError("Motion selected-reset authority is not bound")
+        try:
+            claim = validator(prepared_true_reset, owner_kind="motion")
+        except Exception as exc:
+            raise RuntimeError(
+                "Motion selected-reset Device-R05 prepare is not owner-issued"
+            ) from exc
+        selected_mask = getattr(claim, "selected_mask", None)
+        generation_before = getattr(claim, "generation_before", None)
+        generation_after = getattr(claim, "generation_after", None)
+        generation_overflow_fault = getattr(
+            claim, "generation_overflow_fault", None
+        )
+        if (
+            getattr(claim, "prepared_true_reset", None)
+            is not prepared_true_reset
+            or getattr(claim, "owner_kind", None) != "motion"
+            or getattr(claim, "prepared_identity", None) is None
+            or getattr(claim, "reset_event_identity", None) is None
+            or not torch.is_tensor(selected_mask)
+            or selected_mask.dtype != torch.bool
+            or selected_mask.device != torch.device(self.device)
+            or tuple(selected_mask.shape) != (self.num_envs,)
+            or not torch.is_tensor(generation_before)
+            or not torch.is_tensor(generation_after)
+            or generation_before.dtype != torch.int64
+            or generation_after.dtype != torch.int64
+            or generation_before.device != torch.device(self.device)
+            or generation_after.device != torch.device(self.device)
+            or tuple(generation_before.shape) != (self.num_envs,)
+            or tuple(generation_after.shape) != (self.num_envs,)
+            or not torch.is_tensor(generation_overflow_fault)
+            or generation_overflow_fault.dtype != torch.bool
+            or generation_overflow_fault.device != torch.device(self.device)
+            or tuple(generation_overflow_fault.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "Motion selected-reset selection claim differs"
+            )
+        # Device-R05 publishes clone-only tensors and the production top owner
+        # has already joined them against Env and ActionEpoch in its sole
+        # packed preflight.  Snapshot them again so a diagnostic validator
+        # cannot mutate Motion's private lease after returning.  Do not use
+        # Tensor._version as authority here: inference tensors deliberately
+        # have no version counter, and an identity/version receipt would only
+        # prove same-writer object stability rather than the reset fact.  Arm
+        # below independently re-derives the after-generation from Motion's
+        # own live generation and records any mismatch in the global drain.
+        selected_mask = selected_mask.detach().clone()
+        generation_before = generation_before.detach().clone()
+        generation_after = generation_after.detach().clone()
+        generation_overflow_fault = (
+            generation_overflow_fault.detach().clone()
+        )
+        serial = self._action_ball_continuous_motion_selected_reset_next_serial
+        payload = {
+            "schema_version": 1,
+            "kind": "action_ball_continuous_motion_selected_reset_stage_v1",
+            "serial": serial,
+            "owner_mutation_version": (
+                self._action_ball_continuous_motion_mutation_version
+            ),
+        }
+        stage = ActionBallContinuousMotionSelectedResetStage(
+            _owner_nonce=(
+                self._action_ball_continuous_motion_selected_reset_owner_nonce
+            ),
+            serial=serial,
+            owner_mutation_version=(
+                self._action_ball_continuous_motion_mutation_version
+            ),
+            stage_sha256=hashlib.sha256(
+                _canonical_json_bytes(payload)
+            ).hexdigest(),
+        )
+        self._action_ball_continuous_motion_selected_reset_next_serial = serial + 1
+        self._action_ball_continuous_motion_selected_reset_stage = stage
+        self._action_ball_continuous_motion_selected_reset_prepared_true_reset = (
+            prepared_true_reset
+        )
+        self._action_ball_continuous_motion_selected_reset_selected_mask = (
+            selected_mask
+        )
+        self._action_ball_continuous_motion_selected_reset_generation_before = (
+            generation_before
+        )
+        self._action_ball_continuous_motion_selected_reset_generation_after = (
+            generation_after
+        )
+        self._action_ball_continuous_motion_selected_reset_generation_overflow_fault = (
+            generation_overflow_fault
+        )
+        return stage
+
+    def arm_prevalidated_action_ball_continuous_motion_selected_reset(
+        self, stage: ActionBallContinuousMotionSelectedResetStage
+    ) -> ActionBallContinuousMotionSelectedResetPrevalidated:
+        """Finish every fallible check and materialize device after-images."""
+
+        active = self._action_ball_continuous_motion_selected_reset_stage
+        selected = (
+            self._action_ball_continuous_motion_selected_reset_selected_mask
+        )
+        generation_before = (
+            self._action_ball_continuous_motion_selected_reset_generation_before
+        )
+        generation_after = (
+            self._action_ball_continuous_motion_selected_reset_generation_after
+        )
+        generation_overflow_fault = (
+            self._action_ball_continuous_motion_selected_reset_generation_overflow_fault
+        )
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or type(stage) is not ActionBallContinuousMotionSelectedResetStage
+            or stage is not active
+            or stage._owner_nonce
+            is not self._action_ball_continuous_motion_selected_reset_owner_nonce
+            or self._action_ball_continuous_motion_selected_reset_prevalidated
+            is not None
+            or self._action_ball_continuous_motion_selected_reset_terminal_token
+            is not None
+            or self._action_ball_continuous_motion_mutation_version
+            != stage.owner_mutation_version
+        ):
+            raise RuntimeError(
+                "Motion selected-reset stage is forged or stale"
+            )
+        schedule = self._action_ball_continuous_schedule_projection
+        if schedule is None:
+            raise RuntimeError(
+                "Motion selected reset requires the frozen cadence projection"
+            )
+        origin = int(schedule["sequence_origin_step"])
+        first_reveal = int(schedule["first_reveal_step"])
+        ready_steps = self.motion.seg_start[self.clip_id]
+        # Device validation is evidence for the sole global PPO drain, never
+        # asynchronous authorization for the synchronous copies below.  A
+        # bad generation claim (including MAX) must still settle every
+        # selected Motion row to its safe tombstone so no stale task remains
+        # reachable.  Compute the only non-wrapping after-image locally:
+        # selected MAX stays MAX, while selected rows with room advance once.
+        expected_overflow = selected & (
+            generation_before == self._ACTION_BALL_INT64_MAX
+        )
+        safe_increment = (
+            selected & ~expected_overflow
+        ).to(dtype=torch.int64)
+        safe_generation_after = generation_before + safe_increment
+        validation_ok = (
+            torch.any(selected)
+            & torch.all(
+                generation_before == self._action_ball_reset_generation
+            )
+            & torch.all(
+                generation_overflow_fault == expected_overflow
+            )
+            & torch.all(generation_after == safe_generation_after)
+        )
+        validation_fault = (
+            (~validation_ok) | torch.any(generation_overflow_fault)
+        ).to(dtype=torch.int64).reshape(1)
+        fault_count = self._action_ball_continuous_motion_fault_count_device
+        if (
+            not torch.is_tensor(fault_count)
+            or fault_count.dtype != torch.int64
+            or fault_count.device != torch.device(self.device)
+            or tuple(fault_count.shape) != (1,)
+        ):
+            raise RuntimeError(
+                "Motion selected-reset device fault counter differs"
+            )
+        fault_count.bitwise_or_(validation_fault)
+        # Even a clean validation is a device fact until the exact global
+        # drain ACKs it.  Portable checkpoint materialization may not promote
+        # that unobserved fact into fresh-process truth.
+        self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
+
+        def full(value: torch.Tensor, fill_value) -> torch.Tensor:
+            return torch.full_like(value, fill_value)
+
+        replacements = (
+            (self._action_ball_continuous_sequence_active, full(self._action_ball_continuous_sequence_active, True)),
+            (self._action_ball_continuous_episode_step, full(self._action_ball_continuous_episode_step, origin - 1)),
+            (self._action_ball_continuous_scheduled_ordinal, full(self._action_ball_continuous_scheduled_ordinal, -1)),
+            (self._action_ball_continuous_current_reveal_step, full(self._action_ball_continuous_current_reveal_step, -1)),
+            (self._action_ball_continuous_current_deadline_step, full(self._action_ball_continuous_current_deadline_step, -1)),
+            (self._action_ball_continuous_next_reveal_step, full(self._action_ball_continuous_next_reveal_step, first_reveal)),
+            (self._action_ball_continuous_last_closed_ordinal, full(self._action_ball_continuous_last_closed_ordinal, -1)),
+            (self._action_ball_continuous_opportunities_consumed, full(self._action_ball_continuous_opportunities_consumed, 0)),
+            (self._action_ball_continuous_policy_opportunities_created, full(self._action_ball_continuous_policy_opportunities_created, 0)),
+            (self._action_ball_continuous_infrastructure_censors_consumed, full(self._action_ball_continuous_infrastructure_censors_consumed, 0)),
+            (self._action_ball_continuous_current_policy_opportunity, full(self._action_ball_continuous_current_policy_opportunity, False)),
+            (self._action_ball_continuous_motion_active, full(self._action_ball_continuous_motion_active, False)),
+            (self._action_ball_continuous_suffix_complete, full(self._action_ball_continuous_suffix_complete, False)),
+            (self._action_ball_continuous_ready_reference_active, full(self._action_ball_continuous_ready_reference_active, True)),
+            (self._action_ball_continuous_ready_at_reveal, full(self._action_ball_continuous_ready_at_reveal, False)),
+            (self._action_ball_continuous_reveal_due, full(self._action_ball_continuous_reveal_due, False)),
+            (self._action_ball_continuous_closed_mask, full(self._action_ball_continuous_closed_mask, False)),
+            (self._action_ball_continuous_close_reason, full(self._action_ball_continuous_close_reason, ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE)),
+            (self._action_ball_continuous_deadline_due, full(self._action_ball_continuous_deadline_due, False)),
+            (self._action_ball_continuous_recovery_unavailable, full(self._action_ball_continuous_recovery_unavailable, False)),
+            (self._action_ball_continuous_task_commit_pending, full(self._action_ball_continuous_task_commit_pending, False)),
+            (self._action_ball_continuous_task_commit_missed, full(self._action_ball_continuous_task_commit_missed, False)),
+            (self._action_ball_continuous_task_committed, full(self._action_ball_continuous_task_committed, False)),
+            (self._action_ball_continuous_motion_release_pending, full(self._action_ball_continuous_motion_release_pending, False)),
+            (self._action_ball_continuous_motion_release_missed, full(self._action_ball_continuous_motion_release_missed, False)),
+            (self._action_ball_continuous_phase, full(self._action_ball_continuous_phase, _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE["pre_reveal_hidden"])),
+            (self._action_ball_continuous_canonical_phase, full(self._action_ball_continuous_canonical_phase, _ACTION_BALL_CONTINUOUS_CANONICAL_PHASE_CODE["recover_hidden"])),
+            (self._action_ball_continuous_canonical_phase_start_tick, full(self._action_ball_continuous_canonical_phase_start_tick, origin - 1)),
+            (self._action_ball_continuous_canonical_task_identity, full(self._action_ball_continuous_canonical_task_identity, -1)),
+            (self._action_ball_continuous_canonical_cadence_identity, full(self._action_ball_continuous_canonical_cadence_identity, -1)),
+            (self._action_ball_continuous_canonical_action_uid, full(self._action_ball_continuous_canonical_action_uid, -1)),
+            (self._action_ball_continuous_canonical_shot_index, full(self._action_ball_continuous_canonical_shot_index, -1)),
+            (self._action_ball_continuous_canonical_outcome_identity, full(self._action_ball_continuous_canonical_outcome_identity, -1)),
+            (self._action_ball_continuous_canonical_task_receipt_sha256, full(self._action_ball_continuous_canonical_task_receipt_sha256, 0)),
+            (self._action_ball_continuous_canonical_cadence_receipt_sha256, full(self._action_ball_continuous_canonical_cadence_receipt_sha256, 0)),
+            (self._action_ball_continuous_canonical_candidate_identity, full(self._action_ball_continuous_canonical_candidate_identity, -1)),
+            (self._action_ball_continuous_canonical_contact_tick, full(self._action_ball_continuous_canonical_contact_tick, -1)),
+            (self._action_ball_continuous_canonical_launch_tick, full(self._action_ball_continuous_canonical_launch_tick, -1)),
+            (self._action_ball_continuous_canonical_chosen_horizon_tick, full(self._action_ball_continuous_canonical_chosen_horizon_tick, -1)),
+            (self._action_ball_continuous_canonical_task_close_tick, full(self._action_ball_continuous_canonical_task_close_tick, -1)),
+            (self._action_ball_continuous_canonical_task_valid, full(self._action_ball_continuous_canonical_task_valid, False)),
+            (self._action_ball_continuous_canonical_playback_started, full(self._action_ball_continuous_canonical_playback_started, False)),
+            (self._action_ball_task_timing_active, full(self._action_ball_task_timing_active, False)),
+            (self._action_ball_task_pending_elapsed_s, full(self._action_ball_task_pending_elapsed_s, 0.0)),
+            (self._action_ball_task_age_s, full(self._action_ball_task_age_s, 0.0)),
+            (self._action_ball_time_to_contact_s, full(self._action_ball_time_to_contact_s, 0.0)),
+            (self._action_ball_teacher_rate, full(self._action_ball_teacher_rate, 0.0)),
+            (self._action_ball_scaled_t_hit_s, full(self._action_ball_scaled_t_hit_s, 0.0)),
+            (self._action_ball_scaled_t_cycle_s, full(self._action_ball_scaled_t_cycle_s, 0.0)),
+            (self._action_ball_pre_swing_wait_s, full(self._action_ball_pre_swing_wait_s, 0.0)),
+            (self._action_ball_continuous_motion_reset_pending, full(self._action_ball_continuous_motion_reset_pending, True)),
+            (self._action_ball_reset_generation, safe_generation_after),
+            (self._action_ball_swing_generation, full(self._action_ball_swing_generation, 0)),
+            (self.time_steps, ready_steps),
+            (self.time_steps_f, ready_steps.to(dtype=self.time_steps_f.dtype)),
+            (self.speed_scale, full(self.speed_scale, 0.0)),
+            (self.hold_counter, full(self.hold_counter, 1)),
+        )
+        if "in_hold" in self.metrics:
+            replacements = (
+                *replacements,
+                (self.metrics["in_hold"], full(self.metrics["in_hold"], 1.0)),
+            )
+        swaps = tuple(
+            (
+                destination,
+                torch.where(
+                    selected.reshape(
+                        (self.num_envs,)
+                        + (1,) * (destination.ndim - 1)
+                    ),
+                    replacement,
+                    destination,
+                ),
+            )
+            for destination, replacement in replacements
+        )
+        swaps = (
+            *swaps,
+            (
+                self._action_ball_continuous_motion_device_mutation_version,
+                torch.full_like(
+                    self._action_ball_continuous_motion_device_mutation_version,
+                    stage.owner_mutation_version + 1,
+                ),
+            ),
+        )
+        token = ActionBallContinuousMotionSelectedResetPrevalidated(
+            _owner_nonce=(
+                self._action_ball_continuous_motion_selected_reset_owner_nonce
+            ),
+            serial=stage.serial,
+            stage_sha256=stage.stage_sha256,
+        )
+        self._action_ball_continuous_motion_selected_reset_swaps = swaps
+        self._action_ball_continuous_motion_selected_reset_version_after = (
+            stage.owner_mutation_version + 1
+        )
+        self._action_ball_continuous_motion_selected_reset_prevalidated = token
+        return token
+
+    def abort_prevalidated_action_ball_continuous_motion_selected_reset(
+        self,
+        value: (
+            ActionBallContinuousMotionSelectedResetStage
+            | ActionBallContinuousMotionSelectedResetPrevalidated
+        ),
+    ) -> None:
+        """Drop an exact precommit reset lease; live Motion bytes stay intact."""
+
+        stage = self._action_ball_continuous_motion_selected_reset_stage
+        prevalidated = (
+            self._action_ball_continuous_motion_selected_reset_prevalidated
+        )
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or stage is None
+            or not (value is stage or value is prevalidated)
+            or self._action_ball_continuous_motion_selected_reset_committed
+            or self._action_ball_continuous_motion_selected_reset_terminal_token
+            is not None
+        ):
+            raise RuntimeError(
+                "Motion selected-reset abort requires its exact precommit handle"
+            )
+        self._clear_action_ball_continuous_motion_selected_reset()
+
+    def commit_prevalidated_action_ball_continuous_motion_selected_reset(
+        self,
+        prevalidated: ActionBallContinuousMotionSelectedResetPrevalidated,
+    ) -> ActionBallContinuousMotionSelectedResetChildTerminalToken:
+        """Pure device copy; retain the reset debt until R05-last ACK."""
+
+        stage = self._action_ball_continuous_motion_selected_reset_stage
+        active = self._action_ball_continuous_motion_selected_reset_prevalidated
+        swaps = self._action_ball_continuous_motion_selected_reset_swaps
+        version_after = (
+            self._action_ball_continuous_motion_selected_reset_version_after
+        )
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or type(prevalidated)
+            is not ActionBallContinuousMotionSelectedResetPrevalidated
+            or prevalidated is not active
+            or stage is None
+            or prevalidated._owner_nonce
+            is not self._action_ball_continuous_motion_selected_reset_owner_nonce
+            or prevalidated.serial != stage.serial
+            or prevalidated.stage_sha256 != stage.stage_sha256
+            or self._action_ball_continuous_motion_selected_reset_committed
+            or not isinstance(swaps, tuple)
+            or version_after != stage.owner_mutation_version + 1
+        ):
+            self.poison_global_reveal_epoch(
+                "motion_selected_reset_commit_handle_invalid"
+            )
+            raise RuntimeError(
+                "Motion selected-reset prevalidated handle is forged or stale"
+            )
+        # The private after-images cannot escape between arm and this immediate
+        # opaque-handle commit.  The commit phase intentionally contains no
+        # fallible same-writer seal; it is only device copies.
+        terminal = ActionBallContinuousMotionSelectedResetChildTerminalToken(
+            _owner_nonce=(
+                self._action_ball_continuous_motion_selected_reset_owner_nonce
+            ),
+            serial=stage.serial,
+            stage_sha256=stage.stage_sha256,
+        )
+        try:
+            for destination, after_image in swaps:
+                destination.copy_(after_image)
+            self._action_ball_continuous_motion_mutation_version = version_after
+            self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
+            self._action_ball_continuous_prepared_task_commit = None
+            self._action_ball_continuous_prepared_task_commit_receipts = None
+            self._action_ball_continuous_current_projection = None
+            self._action_ball_continuous_published_common_step = None
+            # R07 readiness is one whole-batch next-policy-tick capability.
+            # A selected reset changes Motion chronology after the preceding
+            # post-physics publication, so no row of that mixed-epoch handle
+            # remains consumable.  The independent R07 producer installs a
+            # fresh handle after the next real post-physics boundary.
+            self._action_ball_continuous_r07_ready_projection = None
+            self._invalidate_action_ball_continuous_observation_publication()
+            self._action_ball_continuous_motion_selected_reset_terminal_token = (
+                terminal
+            )
+            self._action_ball_continuous_motion_selected_reset_committed = True
+            return terminal
+        except BaseException:
+            self.poison_global_reveal_epoch(
+                "motion_selected_reset_device_commit_failed"
+            )
+            raise
+
+    def complete_action_ball_continuous_motion_selected_reset_after_r05(
+        self,
+        child_terminal_token: ActionBallContinuousMotionSelectedResetChildTerminalToken,
+        r05_reset_receipt: object,
+    ) -> ActionBallContinuousMotionSelectedResetCompletionToken:
+        """Validate Device-R05-last exactly, then mint one opaque child ACK."""
+
+        stage = self._action_ball_continuous_motion_selected_reset_stage
+        retained = (
+            self._action_ball_continuous_motion_selected_reset_terminal_token
+        )
+        validator = self._action_ball_continuous_motion_selected_reset_r05_validator
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or not self._action_ball_continuous_motion_selected_reset_committed
+            or type(child_terminal_token)
+            is not ActionBallContinuousMotionSelectedResetChildTerminalToken
+            or child_terminal_token is not retained
+            or stage is None
+            or child_terminal_token._owner_nonce
+            is not self._action_ball_continuous_motion_selected_reset_owner_nonce
+            or child_terminal_token.serial != stage.serial
+            or child_terminal_token.stage_sha256 != stage.stage_sha256
+            or validator is None
+        ):
+            self.poison_global_reveal_epoch(
+                "motion_selected_reset_completion_handle_invalid"
+            )
+            raise RuntimeError(
+                "Motion selected-reset completion is stale or duplicated"
+            )
+        try:
+            owned = validator(
+                r05_reset_receipt,
+                expected_prepared_true_reset=(
+                    self._action_ball_continuous_motion_selected_reset_prepared_true_reset
+                ),
+            )
+        except Exception as exc:
+            self.poison_global_reveal_epoch(
+                "motion_selected_reset_r05_ack_invalid"
+            )
+            raise RuntimeError(
+                "Motion selected-reset R05 receipt is not owner-issued"
+            ) from exc
+        if owned is not r05_reset_receipt:
+            self.poison_global_reveal_epoch(
+                "motion_selected_reset_r05_ack_differs"
+            )
+            raise RuntimeError(
+                "Motion selected-reset R05 acknowledgement differs"
+            )
+        completion = ActionBallContinuousMotionSelectedResetCompletionToken(
+            _owner_nonce=(
+                self._action_ball_continuous_motion_selected_reset_owner_nonce
+            ),
+            serial=stage.serial,
+            stage_sha256=stage.stage_sha256,
+        )
+        prepared_true_reset = (
+            self._action_ball_continuous_motion_selected_reset_prepared_true_reset
+        )
+        self._clear_action_ball_continuous_motion_selected_reset()
+        self._action_ball_continuous_motion_selected_reset_completion_token = (
+            completion
+        )
+        self._action_ball_continuous_motion_selected_reset_completion_prepared = (
+            prepared_true_reset
+        )
+        return completion
+
+    def require_owned_selected_reset_commit(
+        self,
+        commit_token: object,
+        *,
+        expected_prepared_true_reset: object,
+    ) -> ActionBallContinuousMotionSelectedResetChildTerminalToken:
+        """Repeatably validate the exact retained pre-R05 Motion commit."""
+
+        retained = (
+            self._action_ball_continuous_motion_selected_reset_terminal_token
+        )
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or not self._action_ball_continuous_motion_selected_reset_committed
+            or type(commit_token)
+            is not ActionBallContinuousMotionSelectedResetChildTerminalToken
+            or commit_token is not retained
+            or commit_token._owner_nonce
+            is not self._action_ball_continuous_motion_selected_reset_owner_nonce
+            or expected_prepared_true_reset
+            is not self._action_ball_continuous_motion_selected_reset_prepared_true_reset
+        ):
+            raise RuntimeError(
+                "Motion selected-reset commit token is stale or foreign"
+            )
+        return commit_token
+
+    def require_owned_selected_reset_completion(
+        self,
+        completion: object,
+        *,
+        expected_prepared_true_reset: object,
+    ) -> ActionBallContinuousMotionSelectedResetCompletionToken:
+        """Top-owner validation of the latest exact opaque Motion ACK."""
+
+        retained = (
+            self._action_ball_continuous_motion_selected_reset_completion_token
+        )
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or type(completion)
+            is not ActionBallContinuousMotionSelectedResetCompletionToken
+            or completion is not retained
+            or completion._owner_nonce
+            is not self._action_ball_continuous_motion_selected_reset_owner_nonce
+            or expected_prepared_true_reset
+            is not getattr(
+                self,
+                "_action_ball_continuous_motion_selected_reset_completion_prepared",
+                None,
+            )
+        ):
+            raise RuntimeError(
+                "Motion selected-reset completion token is stale or foreign"
+            )
+        return completion
+
+    def consume_owned_selected_reset_completion(
+        self,
+        completion: object,
+        *,
+        expected_prepared_true_reset: object,
+    ) -> ActionBallContinuousMotionSelectedResetCompletionToken:
+        """Let the top owner consume the exact Motion ACK once."""
+
+        owned = self.require_owned_selected_reset_completion(
+            completion,
+            expected_prepared_true_reset=expected_prepared_true_reset,
+        )
+        self._action_ball_continuous_motion_selected_reset_completion_token = None
+        self._action_ball_continuous_motion_selected_reset_completion_prepared = (
+            None
+        )
+        return owned
+
+    # Top-owner-neutral aliases shared by all four selected-reset leaves.
+    prepare_selected_reset = prepare_action_ball_continuous_motion_selected_reset
+    arm_prevalidated_selected_reset = (
+        arm_prevalidated_action_ball_continuous_motion_selected_reset
+    )
+    commit_prevalidated_selected_reset = (
+        commit_prevalidated_action_ball_continuous_motion_selected_reset
+    )
+    abort_prevalidated_selected_reset = (
+        abort_prevalidated_action_ball_continuous_motion_selected_reset
+    )
+    complete_selected_reset_after_r05 = (
+        complete_action_ball_continuous_motion_selected_reset_after_r05
+    )
+
+    def action_ball_continuous_motion_boundary_child_token_authority(self):
+        """Return the boundary capability backed by Motion's retained token."""
+
+        if not self._action_ball_continuous_fresh_motion_lane_bound:
+            raise RuntimeError(
+                "continuous Motion child authority requires bound R05 staging"
+            )
+        if _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_SOURCE_SHA256 is None:
+            raise RuntimeError(
+                "continuous Motion reveal-boundary final source pin is pending"
+            )
+        import action_ball_full_mdp_reveal_boundary as boundary
+
+        authority = self._action_ball_continuous_motion_child_token_authority
+        if authority is None:
+            authority = (
+                boundary.ActionBallFullMdpRevealBoundaryChildTokenAuthority(
+                    owner_kind="motion",
+                    validator=(
+                        self._require_action_ball_continuous_motion_prearmed_claim
+                    ),
+                )
+            )
+            self._action_ball_continuous_motion_child_token_authority = (
+                authority
+            )
+        elif (
+            type(authority)
+            is not boundary.ActionBallFullMdpRevealBoundaryChildTokenAuthority
+            or authority.owner_kind != "motion"
+        ):
+            raise RuntimeError(
+                "continuous Motion child token authority drifted"
+            )
+        return authority
+
+    def action_ball_continuous_motion_reveal_boundary_fault_schema(self):
+        """Return Motion's one retained, frozen global-boundary schema."""
+
+        if not self._action_ball_continuous_fresh_motion_lane_bound:
+            raise RuntimeError(
+                "continuous Motion fault schema requires bound R05 staging"
+            )
+        if _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_SOURCE_SHA256 is None:
+            raise RuntimeError(
+                "continuous Motion reveal-boundary final source pin is pending"
+            )
+        import action_ball_full_mdp_reveal_boundary as boundary
+
+        boundary_path = Path(boundary.__file__).resolve()
+        if (
+            hashlib.sha256(boundary_path.read_bytes()).hexdigest()
+            != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_SOURCE_SHA256
+            or boundary.PACKET_ROW_INTEGRITY_SCHEMA_SHA256
+            != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_ROW_INTEGRITY_SCHEMA_SHA256
+            or boundary.RECEIPT_SCHEMA_SHA256
+            != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256
+        ):
+            raise RuntimeError(
+                "continuous Motion fault schema boundary pins differ"
+            )
+        schema = (
+            self._action_ball_continuous_motion_boundary_fault_schema
+        )
+        if schema is None:
+            schema = boundary.ActionBallFullMdpRevealBoundaryFaultSchema(
+                schema_version=1,
+                owner_kind="motion",
+                ordered_fault_bits=((
+                    _ACTION_BALL_CONTINUOUS_MOTION_FAULT_NAME,
+                    _ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT,
+                ),),
+                allowed_fault_mask=(
+                    _ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT
+                ),
+                precedence=(
+                    _ACTION_BALL_CONTINUOUS_MOTION_FAULT_NAME,
+                ),
+            )
+            self._action_ball_continuous_motion_boundary_fault_schema = (
+                schema
+            )
+        elif (
+            type(schema)
+            is not boundary.ActionBallFullMdpRevealBoundaryFaultSchema
+            or schema.schema_version != 1
+            or schema.owner_kind != "motion"
+            or schema.ordered_fault_bits
+            != ((
+                _ACTION_BALL_CONTINUOUS_MOTION_FAULT_NAME,
+                _ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT,
+            ),)
+            or schema.allowed_fault_mask
+            != _ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT
+            or schema.precedence
+            != (_ACTION_BALL_CONTINUOUS_MOTION_FAULT_NAME,)
+        ):
+            raise RuntimeError(
+                "continuous Motion retained fault schema drifted"
+            )
+        return schema
+
+    def bind_action_ball_continuous_motion_reveal_boundary(
+        self, boundary_owner: object
+    ) -> None:
+        """Bind only Motion's typed lane in the neutral packed owner."""
+
+        import action_ball_full_mdp_reveal_boundary as boundary
+
+        if (
+            type(boundary_owner)
+            is not boundary.ActionBallFullMdpRevealBoundaryOwner
+        ):
+            raise TypeError(
+                "continuous Motion requires the exact reveal-boundary owner"
+            )
+        boundary_path = Path(boundary.__file__).resolve()
+        source_sha256 = hashlib.sha256(boundary_path.read_bytes()).hexdigest()
+        expected_source_sha256 = (
+            _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_SOURCE_SHA256
+        )
+        if expected_source_sha256 is None:
+            raise RuntimeError(
+                "continuous Motion reveal-boundary final source pin is pending"
+            )
+        if (
+            boundary_path.name
+            != "action_ball_full_mdp_reveal_boundary.py"
+            or source_sha256 != expected_source_sha256
+            or boundary.PACKET_ROW_INTEGRITY_SCHEMA_SHA256
+            != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_ROW_INTEGRITY_SCHEMA_SHA256
+            or boundary.RECEIPT_SCHEMA_SHA256
+            != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256
+        ):
+            raise RuntimeError(
+                "continuous Motion reveal-boundary source pin differs"
+            )
+        authority = (
+            self.action_ball_continuous_motion_boundary_child_token_authority()
+        )
+        retained_schema = (
+            self.action_ball_continuous_motion_reveal_boundary_fault_schema()
+        )
+        lane = boundary_owner.lane_authority("motion")
+        schema = lane.fault_schema
+        if (
+            type(lane)
+            is not boundary.ActionBallFullMdpRevealBoundaryLaneAuthority
+            or lane.owner_kind != "motion"
+            or lane.child_token_authority is not authority
+            or boundary_owner.lane_authority("motion") is not lane
+            or schema is not retained_schema
+            or boundary_owner.num_envs != self.num_envs
+            or boundary_owner.device != torch.device(self.device)
+            or schema.owner_kind != "motion"
+            or schema.schema_version != 1
+            or schema.ordered_fault_bits
+            != ((
+                _ACTION_BALL_CONTINUOUS_MOTION_FAULT_NAME,
+                _ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT,
+            ),)
+            or schema.allowed_fault_mask
+            != _ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT
+            or schema.precedence
+            != (_ACTION_BALL_CONTINUOUS_MOTION_FAULT_NAME,)
+        ):
+            raise RuntimeError(
+                "continuous Motion reveal-boundary lane/schema differs"
+            )
+        current = self._action_ball_continuous_motion_boundary_owner
+        if current is not None and current is not boundary_owner:
+            raise RuntimeError(
+                "continuous Motion reveal-boundary owner may not be rebound"
+            )
+        if current is boundary_owner:
+            return
+        self._action_ball_continuous_motion_boundary_module = boundary
+        self._action_ball_continuous_motion_boundary_owner = boundary_owner
+        self._action_ball_continuous_motion_boundary_lane = lane
+        self._action_ball_continuous_motion_boundary_source_sha256 = (
+            source_sha256
+        )
+
+    def _action_ball_continuous_motion_boundary_binding(self):
+        boundary = self._action_ball_continuous_motion_boundary_module
+        owner = self._action_ball_continuous_motion_boundary_owner
+        lane = self._action_ball_continuous_motion_boundary_lane
+        expected_source_sha256 = (
+            _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_SOURCE_SHA256
+        )
+        if (
+            boundary is None
+            or type(owner)
+            is not boundary.ActionBallFullMdpRevealBoundaryOwner
+            or type(lane)
+            is not boundary.ActionBallFullMdpRevealBoundaryLaneAuthority
+            or lane.owner_kind != "motion"
+            or owner.lane_authority("motion") is not lane
+            or owner.num_envs != self.num_envs
+            or owner.device != torch.device(self.device)
+            or self._action_ball_continuous_motion_boundary_source_sha256
+            != expected_source_sha256
+            or boundary.PACKET_ROW_INTEGRITY_SCHEMA_SHA256
+            != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_ROW_INTEGRITY_SCHEMA_SHA256
+            or boundary.RECEIPT_SCHEMA_SHA256
+            != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256
+        ):
+            raise RuntimeError(
+                "continuous Motion has no exact reveal-boundary lane"
+            )
+        return boundary, owner, lane
+
+    def _action_ball_reject_legacy_fresh_motion_lane(
+        self, operation: str
+    ) -> None:
+        if type(operation) is not str or not operation:
+            raise TypeError("fresh continuous Motion operation must be named")
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            raise RuntimeError(
+                "fresh continuous Motion lane rejects legacy "
+                f"{operation}; use stage/finalize/arm/commit_prevalidated"
+            )
+
+    @staticmethod
+    def _validate_action_ball_continuous_motion_suffix_host(
+        *,
+        episode_tick: int,
+        next_reveal_tick: int,
+        step_dt: float,
+        timing: dict[str, float],
+    ) -> None:
+        gap_steps = next_reveal_tick - episode_tick
+        age_s = float(timing["pending_elapsed_s"])
+        cycle_total_s = float(
+            timing["pre_swing_wait_s"] + timing["scaled_t_cycle_s"]
+        )
+        latest_pre_reveal_age_s = age_s + (gap_steps - 2) * step_dt
+        if (
+            gap_steps < 2
+            or not math.isfinite(latest_pre_reveal_age_s)
+            or latest_pre_reveal_age_s + 1.0e-12 < cycle_total_s
+        ):
+            raise RuntimeError(
+                "continuous Motion full suffix cannot complete before the next reveal"
+            )
+
+    def stage_action_ball_continuous_motion_reveal(
+        self,
+        reveal_final_preview: object,
+        *,
+        runtime_task_receipts: tuple,
+    ) -> ActionBallContinuousMotionStage:
+        """Validate one exact full-K R05 preview without device readback."""
+
+        transaction = self._action_ball_continuous_transaction_module
+        owner = self._action_ball_continuous_transaction_owner
+        if (
+            transaction is None
+            or type(owner)
+            is not transaction.ContinuousRuntimeTransactionOwner
+            or not self._action_ball_continuous_fresh_motion_lane_bound
+        ):
+            raise RuntimeError(
+                "continuous Motion staging has no exact bound R05 owner"
+            )
+        self._action_ball_continuous_motion_boundary_binding()
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="stage"
+        )
+        if (
+            type(reveal_final_preview)
+            is not transaction.RevealFinalPreviewBatch
+        ):
+            raise TypeError(
+                "continuous Motion staging requires exact RevealFinalPreviewBatch"
+            )
+        preview_root = reveal_final_preview.canonical_sha256
+        try:
+            private_preview = owner.require_owned_active_reveal_final_preview(
+                reveal_final_preview,
+                expected_reveal_final_preview_sha256=preview_root,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "continuous Motion staging requires the exact active unarmed "
+                "R05 preview lease"
+            ) from exc
+        if (
+            private_preview is reveal_final_preview
+            or private_preview.canonical_sha256 != preview_root
+        ):
+            raise RuntimeError(
+                "continuous Motion retained R05 preview image differs"
+            )
+        current_step = getattr(self._env, "common_step_counter", None)
+        if (
+            type(current_step) is not int
+            or current_step < 0
+            or self._action_ball_continuous_published_common_step
+            != current_step
+        ):
+            raise RuntimeError(
+                "continuous Motion staging requires current-tick publication"
+            )
+        env_ids = private_preview.prepared_batch.selected_env_ids
+        if (
+            not env_ids
+            or type(runtime_task_receipts) is not tuple
+            or len(runtime_task_receipts) != len(env_ids)
+        ):
+            raise ValueError(
+                "continuous Motion stage requires aligned immutable task receipts"
+            )
+
+        runtime = self._action_ball_runtime_module_bound
+        schedule = self._action_ball_continuous_schedule_projection
+        cadence_steps = int(schedule["cadence_steps"])
+        step_dt = float(self._env.step_dt)
+        ordinals = []
+        episode_ticks = []
+        reveal_ticks = []
+        deadline_ticks = []
+        next_reveal_ticks = []
+        reset_generations = []
+        swing_generations = []
+        action_slots = []
+        ready_rows = []
+        refs = []
+        receipt_roots = []
+        timing_rows = []
+        timing_bytes = bytearray()
+        payload_rows = []
+        for env_id, preview_row, receipt in zip(
+            env_ids,
+            private_preview.reveal_final_rows,
+            runtime_task_receipts,
+        ):
+            prepared = preview_row.prepared_reveal
+            request = prepared.request
+            facts = preview_row.reveal_facts
+            if type(receipt) is not runtime.ActionBallTaskReceipt:
+                raise TypeError(
+                    "continuous Motion stage requires exact ActionBallTaskReceipt rows"
+                )
+            canonical_receipt = runtime.ActionBallTaskReceipt.from_dict(
+                receipt.to_dict()
+            )
+            if canonical_receipt != receipt:
+                raise RuntimeError(
+                    "continuous Motion task receipt failed exact round-trip"
+                )
+            ordinal = request.scheduled_ordinal
+            reset_generation = request.reset_generation
+            swing_generation = request.runtime_swing_generation
+            reveal_tick = request.scheduled_reveal_step
+            deadline_tick = request.scheduled_deadline_step
+            next_reveal_tick = reveal_tick + cadence_steps
+            ready = facts.ready_at_reveal
+            action_slot = request.action_slot
+            if (
+                request.env_id != env_id
+                or facts.env_id != env_id
+                or facts.reset_generation != reset_generation
+                or facts.scheduled_ordinal != ordinal
+                or facts.runtime_swing_generation != ordinal
+                or swing_generation != ordinal
+                or facts.reveal_step != reveal_tick
+                or facts.deadline_step != deadline_tick
+                or next_reveal_tick <= deadline_tick
+            ):
+                raise RuntimeError(
+                    "continuous Motion staged identity differs from the R05 reveal"
+                )
+            task_ref = receipt.task_ref()
+            expected_ref = prepared.selected_task_ref.runtime_dict()
+            if (
+                type(task_ref) is not runtime.ActionTaskReceiptRef
+                or task_ref.to_dict() != expected_ref
+                or receipt.canonical_sha256
+                != prepared.selected_task_ref.task_sha256
+                or task_ref.env_id != env_id
+                or task_ref.reset_generation != reset_generation
+                or task_ref.swing_generation != ordinal
+                or task_ref.action_slot != action_slot
+                or task_ref.action_uid != request.action_uid
+                or task_ref.birth_sha256 != request.birth_sha256
+            ):
+                raise RuntimeError(
+                    "continuous Motion staged task authority differs from R05"
+                )
+            previous = self._action_ball_continuous_committed_task_refs[
+                env_id
+            ]
+            if previous is not None and (
+                previous.reset_generation == reset_generation
+            ):
+                if (
+                    task_ref.action_uid != previous.action_uid
+                    or task_ref.action_slot != previous.action_slot
+                    or task_ref.birth_sha256 != previous.birth_sha256
+                    or task_ref.swing_generation
+                    <= previous.swing_generation
+                    or task_ref.sample_sha256 == previous.sample_sha256
+                    or task_ref.task_sha256 == previous.task_sha256
+                ):
+                    raise RuntimeError(
+                        "continuous Motion successor task lineage did not advance"
+                    )
+            if (
+                self._action_ball_segment_lengths is None
+                or action_slot >= len(self._action_ball_segment_lengths)
+            ):
+                raise RuntimeError(
+                    "continuous Motion has no construction-cached segment length"
+                )
+            pending_elapsed_s = 0.0 if ordinal == 0 else step_dt
+            timing = self._validate_action_ball_task_ref_and_receipt_host(
+                task_ref,
+                receipt,
+                env_id=env_id,
+                reset_generation=reset_generation,
+                swing_generation=swing_generation,
+                action_slot=action_slot,
+                segment_length=self._action_ball_segment_lengths[action_slot],
+                pending_elapsed_s=pending_elapsed_s,
+            )
+            if ready:
+                self._validate_action_ball_continuous_motion_suffix_host(
+                    episode_tick=reveal_tick,
+                    next_reveal_tick=next_reveal_tick,
+                    step_dt=step_dt,
+                    timing=timing,
+                )
+            packed = struct.pack(
+                "<6f",
+                timing["pending_elapsed_s"],
+                timing["time_to_contact_s"],
+                timing["teacher_rate"],
+                timing["scaled_t_hit_s"],
+                timing["scaled_t_cycle_s"],
+                timing["pre_swing_wait_s"],
+            )
+            canonical_timing = tuple(struct.unpack("<6f", packed))
+            timing_bytes.extend(packed)
+            timing_rows.append(canonical_timing)
+            ordinals.append(ordinal)
+            episode_ticks.append(reveal_tick)
+            reveal_ticks.append(reveal_tick)
+            deadline_ticks.append(deadline_tick)
+            next_reveal_ticks.append(next_reveal_tick)
+            reset_generations.append(reset_generation)
+            swing_generations.append(swing_generation)
+            action_slots.append(action_slot)
+            ready_rows.append(ready)
+            refs.append(task_ref)
+            receipt_roots.append(receipt.canonical_sha256)
+            payload_rows.append(
+                {
+                    "env_id": env_id,
+                    "scheduled_ordinal": ordinal,
+                    "episode_tick": reveal_tick,
+                    "reveal_tick": reveal_tick,
+                    "deadline_tick": deadline_tick,
+                    "next_reveal_tick": next_reveal_tick,
+                    "reset_generation": reset_generation,
+                    "swing_generation": swing_generation,
+                    "action_slot": action_slot,
+                    "ready_at_reveal": ready,
+                    "runtime_task_ref": task_ref.to_dict(),
+                    "runtime_task_receipt_sha256": receipt.canonical_sha256,
+                    "timing_f32": list(canonical_timing),
+                }
+            )
+        timing_identity = {
+            "schema_version": 1,
+            "kind": "action_ball_continuous_motion_timing_after_image_v1",
+            "dtype": "little_endian_ieee754_binary32",
+            "shape": [len(env_ids), 6],
+            "field_order": [
+                "pending_elapsed_s",
+                "time_to_contact_s",
+                "teacher_rate",
+                "scaled_t_hit_s",
+                "scaled_t_cycle_s",
+                "pre_swing_wait_s",
+            ],
+        }
+        timing_identity_bytes = _canonical_json_bytes(timing_identity)
+        timing_f32_le = bytes(timing_bytes)
+        timing_root = hashlib.sha256(
+            b"action_ball_continuous_motion_timing_after_image_v1\0"
+            + len(timing_identity_bytes).to_bytes(8, "little")
+            + timing_identity_bytes
+            + timing_f32_le
+        ).hexdigest()
+        serial = self._action_ball_continuous_motion_next_serial
+        payload = {
+            "schema_version": 1,
+            "kind": "action_ball_continuous_motion_prearm_child_token_v1",
+            "stage_serial": serial,
+            "owner_mutation_version": (
+                self._action_ball_continuous_motion_mutation_version
+            ),
+            "common_step": current_step,
+            "reveal_final_preview_schema_version": (
+                transaction.RevealFinalPreviewBatch.RECORD_SCHEMA_VERSION
+            ),
+            "reveal_final_preview_sha256": private_preview.canonical_sha256,
+            "r05_all_owner_install_root_sha256": (
+                private_preview.all_owner_install_root_sha256
+            ),
+            "prepared_batch_sha256": (
+                private_preview.prepared_batch.canonical_sha256
+            ),
+            "timing_after_image_sha256": timing_root,
+            "rows": payload_rows,
+        }
+        payload_json = _canonical_json_bytes(payload)
+        token_root = hashlib.sha256(payload_json).hexdigest()
+        stage = ActionBallContinuousMotionStage(
+            _owner_nonce=self._action_ball_continuous_motion_owner_nonce,
+            serial=serial,
+            owner_mutation_version=(
+                self._action_ball_continuous_motion_mutation_version
+            ),
+            common_step=current_step,
+            reveal_final_preview_schema_version=(
+                transaction.RevealFinalPreviewBatch.RECORD_SCHEMA_VERSION
+            ),
+            reveal_final_preview_sha256=private_preview.canonical_sha256,
+            all_owner_install_root_sha256=(
+                private_preview.all_owner_install_root_sha256
+            ),
+            prepared_batch_sha256=(
+                private_preview.prepared_batch.canonical_sha256
+            ),
+            env_ids=tuple(env_ids),
+            scheduled_ordinals=tuple(ordinals),
+            episode_ticks=tuple(episode_ticks),
+            reveal_ticks=tuple(reveal_ticks),
+            deadline_ticks=tuple(deadline_ticks),
+            next_reveal_ticks=tuple(next_reveal_ticks),
+            reset_generations=tuple(reset_generations),
+            swing_generations=tuple(swing_generations),
+            action_slots=tuple(action_slots),
+            ready_at_reveal=tuple(ready_rows),
+            runtime_task_refs=tuple(refs),
+            runtime_task_receipts=runtime_task_receipts,
+            runtime_task_receipt_sha256s=tuple(receipt_roots),
+            timing_after_image_sha256=timing_root,
+            motion_child_token_root_sha256=token_root,
+            _timing_rows=tuple(timing_rows),
+            _timing_f32_le=timing_f32_le,
+            _prearm_payload_json=payload_json,
+            _reveal_final_public_token=reveal_final_preview,
+            _reveal_final_private_token=private_preview,
+        )
+        self._action_ball_continuous_motion_next_serial = serial + 1
+        self._action_ball_continuous_motion_stage = stage
+        return stage
+
+    def _validate_action_ball_continuous_motion_stage(
+        self, stage: ActionBallContinuousMotionStage
+    ) -> None:
+        transaction = self._action_ball_continuous_transaction_module
+        owner = self._action_ball_continuous_transaction_owner
+        lease = getattr(owner, "_active_preview", None)
+        current_step = getattr(self._env, "common_step_counter", None)
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or type(stage) is not ActionBallContinuousMotionStage
+            or stage is not self._action_ball_continuous_motion_stage
+            or stage._owner_nonce
+            is not self._action_ball_continuous_motion_owner_nonce
+            or transaction is None
+            or type(owner)
+            is not transaction.ContinuousRuntimeTransactionOwner
+            or lease is None
+            or getattr(lease, "public_token", None)
+            is not stage._reveal_final_public_token
+            or getattr(lease, "preview_root_sha256", None)
+            != stage.reveal_final_preview_sha256
+            or getattr(lease, "armed_handle", None) is not None
+            or type(current_step) is not int
+            or current_step != stage.common_step
+            or self._action_ball_continuous_published_common_step
+            != stage.common_step
+            or self._action_ball_continuous_motion_mutation_version
+            != stage.owner_mutation_version
+            or hashlib.sha256(stage._prearm_payload_json).hexdigest()
+            != stage.motion_child_token_root_sha256
+        ):
+            raise RuntimeError(
+                "continuous Motion stage is forged, stale, or no longer abortable"
+            )
+
+    @staticmethod
+    def _action_ball_continuous_motion_indexed_after_image(
+        destination: torch.Tensor,
+        ids: torch.Tensor,
+        selected: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if (
+            not torch.is_tensor(destination)
+            or not torch.is_tensor(ids)
+            or not torch.is_tensor(selected)
+            or destination.device != ids.device
+            or destination.device != selected.device
+            or destination.dtype != selected.dtype
+            or destination.ndim < 1
+            or selected.ndim != destination.ndim
+            or selected.shape[0] != ids.shape[0]
+            or tuple(selected.shape[1:]) != tuple(destination.shape[1:])
+        ):
+            raise RuntimeError(
+                "continuous Motion selected after-image shape/dtype/device differs"
+            )
+        after = destination.detach().clone()
+        after.index_copy_(0, ids, selected)
+        return destination, after
+
+    @staticmethod
+    def _action_ball_continuous_motion_swap_receipts(
+        swaps: tuple[tuple[torch.Tensor, torch.Tensor], ...],
+    ) -> tuple[tuple[tuple[torch.Tensor, int], tuple[torch.Tensor, int]], ...]:
+        """Seal host-only tensor identity/version receipts for one branch."""
+
+        receipts = tuple(
+            (
+                _tensor_identity_version_receipt(destination),
+                _tensor_identity_version_receipt(after_image),
+            )
+            for destination, after_image in swaps
+        )
+        if any(
+            destination_receipt is None or after_receipt is None
+            for destination_receipt, after_receipt in receipts
+        ):
+            raise RuntimeError(
+                "continuous Motion could not seal a prearmed after-image"
+            )
+        return receipts
+
+    @staticmethod
+    def _action_ball_continuous_motion_swaps_match_receipts(
+        swaps: object,
+        receipts: object,
+    ) -> bool:
+        """Check retained tensor epochs without reading any device value."""
+
+        return (
+            isinstance(swaps, tuple)
+            and isinstance(receipts, tuple)
+            and len(swaps) == len(receipts)
+            and all(
+                isinstance(swap, tuple)
+                and len(swap) == 2
+                and isinstance(receipt, tuple)
+                and len(receipt) == 2
+                and _tensor_matches_identity_version_receipt(
+                    swap[0], receipt[0]
+                )
+                and _tensor_matches_identity_version_receipt(
+                    swap[1], receipt[1]
+                )
+                for swap, receipt in zip(swaps, receipts)
+            )
+        )
+
+    def _materialize_action_ball_continuous_motion_prearm(
+        self, stage: ActionBallContinuousMotionStage
+    ) -> tuple[
+        tuple[tuple[torch.Tensor, torch.Tensor], ...],
+        tuple[tuple[torch.Tensor, torch.Tensor], ...],
+        list[object],
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """Preconstruct ACCEPT/CENSOR swaps and the owner pass row."""
+
+        ids = torch.tensor(
+            stage.env_ids, dtype=torch.long, device=self.device
+        )
+        timing = torch.tensor(
+            stage._timing_rows,
+            dtype=self._action_ball_task_age_s.dtype,
+            device=self.device,
+        )
+        row_count = len(stage.env_ids)
+        if tuple(timing.shape) != (row_count, 6):
+            raise RuntimeError(
+                "continuous Motion timing after-image shape differs"
+            )
+        ready = torch.tensor(
+            stage.ready_at_reveal, dtype=torch.bool, device=self.device
+        )
+        ordinals = torch.tensor(
+            stage.scheduled_ordinals,
+            dtype=torch.long,
+            device=self.device,
+        )
+        episode_ticks = torch.tensor(
+            stage.episode_ticks, dtype=torch.long, device=self.device
+        )
+        reveal_ticks = torch.tensor(
+            stage.reveal_ticks, dtype=torch.long, device=self.device
+        )
+        deadline_ticks = torch.tensor(
+            stage.deadline_ticks, dtype=torch.long, device=self.device
+        )
+        next_reveal_ticks = torch.tensor(
+            stage.next_reveal_ticks, dtype=torch.long, device=self.device
+        )
+        reset_generations = torch.tensor(
+            stage.reset_generations,
+            dtype=torch.long,
+            device=self.device,
+        )
+        swing_generations = torch.tensor(
+            stage.swing_generations,
+            dtype=torch.long,
+            device=self.device,
+        )
+        action_slots = torch.tensor(
+            stage.action_slots, dtype=torch.long, device=self.device
+        )
+        selected_mask = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        selected_mask.index_fill_(0, ids, True)
+        unexpected_reveal = torch.any(
+            self._action_ball_continuous_reveal_due & ~selected_mask
+        )
+        version_expected = torch.full(
+            (1,),
+            stage.owner_mutation_version,
+            dtype=torch.int64,
+            device=self.device,
+        )
+        selected_chronology_integrity = (
+            self._action_ball_continuous_reveal_due[ids]
+            & (
+                self._action_ball_continuous_episode_step[ids]
+                == episode_ticks
+            )
+            & (
+                self._action_ball_continuous_scheduled_ordinal[ids]
+                == ordinals
+            )
+            & (
+                self._action_ball_continuous_current_reveal_step[ids]
+                == reveal_ticks
+            )
+            & (
+                self._action_ball_continuous_current_deadline_step[ids]
+                == deadline_ticks
+            )
+            & (
+                self._action_ball_continuous_next_reveal_step[ids]
+                == next_reveal_ticks
+            )
+            & (self._action_ball_reset_generation[ids] == reset_generations)
+            & (self._action_ball_swing_generation[ids] == swing_generations)
+        )
+        selected_preflight_pass = (
+            self._action_ball_continuous_task_commit_pending[ids]
+            & ~self._action_ball_continuous_task_committed[ids]
+            & ~self._action_ball_continuous_motion_active[ids]
+            & (self.clip_id[ids] == action_slots)
+            & (self._action_ball_continuous_ready_at_reveal[ids] == ready)
+        )
+        owner_integrity_ok = (
+            torch.all(selected_chronology_integrity)
+            & torch.all(
+                self._action_ball_continuous_motion_device_mutation_version
+                == version_expected
+            )
+            & ~unexpected_reveal
+        )
+        selected_pass = selected_preflight_pass & owner_integrity_ok
+        pass_mask = torch.zeros_like(selected_mask)
+        pass_mask.index_copy_(0, ids, selected_pass)
+        fault_bits = torch.zeros(
+            self.num_envs, dtype=torch.int64, device=self.device
+        )
+        selected_fault_bits = (
+            (~selected_preflight_pass).to(dtype=torch.int64)
+            * _ACTION_BALL_CONTINUOUS_MOTION_FAULT_BIT
+        )
+        selected_fault_bits = torch.where(
+            owner_integrity_ok,
+            selected_fault_bits,
+            torch.full_like(
+                selected_fault_bits,
+                _ACTION_BALL_CONTINUOUS_MOTION_UNATTRIBUTABLE_BIT,
+            ),
+        )
+        fault_bits.index_copy_(
+            0,
+            ids,
+            selected_fault_bits,
+        )
+
+        false_rows = torch.zeros(
+            row_count, dtype=torch.bool, device=self.device
+        )
+        true_rows = torch.ones(
+            row_count, dtype=torch.bool, device=self.device
+        )
+        accept_phase = torch.where(
+            ready,
+            torch.full(
+                (row_count,),
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "active_opportunity"
+                ],
+                dtype=torch.long,
+                device=self.device,
+            ),
+            torch.full(
+                (row_count,),
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "recovery_unavailable"
+                ],
+                dtype=torch.long,
+                device=self.device,
+            ),
+        )
+        accept_selected = (
+            (self._action_ball_task_pending_elapsed_s, timing[:, 0]),
+            (self._action_ball_task_age_s, timing[:, 0]),
+            (self._action_ball_time_to_contact_s, timing[:, 1]),
+            (self._action_ball_teacher_rate, timing[:, 2]),
+            (self._action_ball_scaled_t_hit_s, timing[:, 3]),
+            (self._action_ball_scaled_t_cycle_s, timing[:, 4]),
+            (self._action_ball_pre_swing_wait_s, timing[:, 5]),
+            (self._action_ball_task_timing_active, true_rows),
+            (self._action_ball_continuous_task_commit_pending, false_rows),
+            (self._action_ball_continuous_task_commit_missed, false_rows),
+            (self._action_ball_continuous_task_committed, true_rows),
+            (self._action_ball_continuous_motion_reset_pending, false_rows),
+            (self._action_ball_continuous_motion_release_pending, false_rows),
+            (self._action_ball_continuous_motion_release_missed, false_rows),
+            (self._action_ball_continuous_motion_active, ready),
+            (self._action_ball_continuous_suffix_complete, false_rows),
+            (
+                self._action_ball_continuous_ready_reference_active,
+                ~ready,
+            ),
+            (self._action_ball_continuous_phase, accept_phase),
+            (
+                self._action_ball_continuous_current_policy_opportunity,
+                true_rows,
+            ),
+            (
+                self._action_ball_continuous_policy_opportunities_created,
+                self._action_ball_continuous_policy_opportunities_created[
+                    ids
+                ]
+                + 1,
+            ),
+        )
+        accept_swaps = tuple(
+            self._action_ball_continuous_motion_indexed_after_image(
+                destination, ids, selected
+            )
+            for destination, selected in accept_selected
+        )
+
+        censor_phase = torch.full(
+            (row_count,),
+            _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                "infrastructure_invalid"
+            ],
+            dtype=torch.long,
+            device=self.device,
+        )
+        censor_selected = (
+            (self._action_ball_continuous_last_closed_ordinal, ordinals),
+            (self._action_ball_task_timing_active, false_rows),
+            (self._action_ball_continuous_task_commit_pending, false_rows),
+            (self._action_ball_continuous_task_commit_missed, true_rows),
+            (self._action_ball_continuous_task_committed, false_rows),
+            (self._action_ball_continuous_motion_release_pending, false_rows),
+            (self._action_ball_continuous_motion_release_missed, false_rows),
+            (self._action_ball_continuous_motion_active, false_rows),
+            (self._action_ball_continuous_suffix_complete, false_rows),
+            (self._action_ball_continuous_phase, censor_phase),
+            (
+                self._action_ball_continuous_current_policy_opportunity,
+                false_rows,
+            ),
+            (
+                self._action_ball_continuous_infrastructure_censors_consumed,
+                self._action_ball_continuous_infrastructure_censors_consumed[
+                    ids
+                ]
+                + 1,
+            ),
+        )
+        censor_swaps = tuple(
+            self._action_ball_continuous_motion_indexed_after_image(
+                destination, ids, selected
+            )
+            for destination, selected in censor_selected
+        )
+        version_after = (
+            self._action_ball_continuous_motion_device_mutation_version
+            .detach()
+            .clone()
+        )
+        version_after.add_(1)
+        version_swap = (
+            self._action_ball_continuous_motion_device_mutation_version,
+            version_after,
+        )
+        accept_swaps = (*accept_swaps, version_swap)
+        censor_swaps = (*censor_swaps, version_swap)
+        accept_refs = list(self._action_ball_active_task_refs)
+        committed_refs = list(
+            self._action_ball_continuous_committed_task_refs
+        )
+        for env_id, task_ref in zip(
+            stage.env_ids, stage.runtime_task_refs
+        ):
+            accept_refs[env_id] = task_ref
+            committed_refs[env_id] = task_ref
+        return (
+            accept_swaps,
+            censor_swaps,
+            [accept_refs, committed_refs],
+            pass_mask,
+            fault_bits,
+        )
+
+    def finalize_action_ball_continuous_motion_prearm(
+        self, stage: ActionBallContinuousMotionStage
+    ) -> ActionBallContinuousMotionPrearmedInstall:
+        """Complete all fallible materialization before the packed transfer."""
+
+        self._validate_action_ball_continuous_motion_stage(stage)
+        _boundary, _owner, lane = (
+            self._action_ball_continuous_motion_boundary_binding()
+        )
+        if (
+            self._action_ball_continuous_motion_prearmed_install is not None
+            or self._action_ball_continuous_motion_armed_install is not None
+            or self._action_ball_continuous_motion_censored_install is not None
+        ):
+            raise RuntimeError(
+                "continuous Motion already has a prearmed child"
+            )
+        (
+            accept_swaps,
+            censor_swaps,
+            accept_refs,
+            pass_mask,
+            fault_bits,
+        ) = self._materialize_action_ball_continuous_motion_prearm(stage)
+        accept_swap_receipts = (
+            self._action_ball_continuous_motion_swap_receipts(accept_swaps)
+        )
+        censor_swap_receipts = (
+            self._action_ball_continuous_motion_swap_receipts(censor_swaps)
+        )
+        prearmed = ActionBallContinuousMotionPrearmedInstall(
+            _owner_nonce=self._action_ball_continuous_motion_owner_nonce,
+            serial=stage.serial,
+            owner_mutation_version=stage.owner_mutation_version,
+            reveal_final_preview_schema_version=(
+                stage.reveal_final_preview_schema_version
+            ),
+            reveal_final_preview_sha256=(
+                stage.reveal_final_preview_sha256
+            ),
+            selected_env_ids=stage.env_ids,
+            canonical_sha256=stage.motion_child_token_root_sha256,
+        )
+        self._action_ball_continuous_motion_prearmed_accept_swaps = (
+            accept_swaps
+        )
+        self._action_ball_continuous_motion_prearmed_censor_swaps = (
+            censor_swaps
+        )
+        self._action_ball_continuous_motion_prearmed_accept_swap_receipts = (
+            accept_swap_receipts
+        )
+        self._action_ball_continuous_motion_prearmed_censor_swap_receipts = (
+            censor_swap_receipts
+        )
+        self._action_ball_continuous_motion_prearmed_accept_refs = accept_refs
+        self._action_ball_continuous_motion_prearmed_install = prearmed
+        try:
+            row = lane.mint_device_row(
+                prepared_token=prearmed,
+                selected_env_ids=stage.env_ids,
+                pass_mask=pass_mask,
+                fault_bits=fault_bits,
+            )
+        except Exception:
+            self._action_ball_continuous_motion_prearmed_accept_swaps = None
+            self._action_ball_continuous_motion_prearmed_censor_swaps = None
+            self._action_ball_continuous_motion_prearmed_accept_swap_receipts = (
+                None
+            )
+            self._action_ball_continuous_motion_prearmed_censor_swap_receipts = (
+                None
+            )
+            self._action_ball_continuous_motion_prearmed_accept_refs = None
+            self._action_ball_continuous_motion_prearmed_install = None
+            raise
+        self._action_ball_continuous_motion_prearmed_boundary_row = row
+        return prearmed
+
+    def _require_action_ball_continuous_motion_prearmed_claim(
+        self, prepared_token: object
+    ):
+        boundary, _owner, _lane = (
+            self._action_ball_continuous_motion_boundary_binding()
+        )
+        stage = self._action_ball_continuous_motion_stage
+        active = self._action_ball_continuous_motion_prearmed_install
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or type(prepared_token)
+            is not ActionBallContinuousMotionPrearmedInstall
+            or prepared_token is not active
+            or prepared_token._owner_nonce
+            is not self._action_ball_continuous_motion_owner_nonce
+            or stage is None
+            or prepared_token.serial != stage.serial
+            or prepared_token.owner_mutation_version
+            != stage.owner_mutation_version
+            or prepared_token.canonical_sha256
+            != stage.motion_child_token_root_sha256
+            or self._action_ball_continuous_motion_mutation_version
+            != stage.owner_mutation_version
+            or not torch.is_tensor(
+                self._action_ball_continuous_motion_device_mutation_version
+            )
+        ):
+            raise RuntimeError(
+                "continuous Motion prepared token is forged or stale"
+            )
+        return boundary.ActionBallFullMdpRevealBoundaryPreparedTokenClaim(
+            owner_kind="motion",
+            device_owner_mutation_version=(
+                self._action_ball_continuous_motion_device_mutation_version
+            ),
+            owner_token_root_sha256=stage.motion_child_token_root_sha256,
+            reveal_final_preview_schema_version=(
+                stage.reveal_final_preview_schema_version
+            ),
+            reveal_final_preview_sha256=(
+                stage.reveal_final_preview_sha256
+            ),
+            _prepared_token=prepared_token,
+        )
+
+    def action_ball_continuous_motion_boundary_row(
+        self, prearmed_install: ActionBallContinuousMotionPrearmedInstall
+    ):
+        """Return only the exact row minted from Motion's retained token."""
+
+        boundary, _owner, lane = (
+            self._action_ball_continuous_motion_boundary_binding()
+        )
+        active = self._action_ball_continuous_motion_prearmed_install
+        row = self._action_ball_continuous_motion_prearmed_boundary_row
+        stage = self._action_ball_continuous_motion_stage
+        if (
+            type(prearmed_install)
+            is not ActionBallContinuousMotionPrearmedInstall
+            or prearmed_install is not active
+            or stage is None
+            or self._action_ball_continuous_motion_armed_install is not None
+            or self._action_ball_continuous_motion_censored_install is not None
+            or type(row)
+            is not boundary.ActionBallFullMdpRevealBoundaryDeviceRow
+            or row.owner_kind != "motion"
+            or row.owner_token_root_sha256
+            != stage.motion_child_token_root_sha256
+            or row.reveal_final_preview_schema_version
+            != stage.reveal_final_preview_schema_version
+            or row.reveal_final_preview_sha256
+            != stage.reveal_final_preview_sha256
+            or row.selected_env_ids != stage.env_ids
+        ):
+            raise RuntimeError(
+                "continuous Motion prearmed boundary row is forged or stale"
+            )
+        return lane.require_owned_device_row(
+            row, expected_prepared_token=prearmed_install
+        )
+
+    def _clear_action_ball_continuous_motion_leaf(self) -> None:
+        """Drop only private capability state; live Motion bytes are untouched."""
+
+        self._action_ball_continuous_motion_stage = None
+        self._action_ball_continuous_motion_prearmed_install = None
+        self._action_ball_continuous_motion_prearmed_accept_swaps = None
+        self._action_ball_continuous_motion_prearmed_censor_swaps = None
+        self._action_ball_continuous_motion_prearmed_accept_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_censor_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_accept_refs = None
+        self._action_ball_continuous_motion_prearmed_boundary_row = None
+        self._action_ball_continuous_motion_armed_install = None
+        self._action_ball_continuous_motion_censored_install = None
+        self._action_ball_continuous_motion_armed_swaps = None
+        self._action_ball_continuous_motion_armed_refs = None
+        self._action_ball_continuous_motion_commit_receipt = None
+        self._action_ball_continuous_motion_terminal_claim = None
+        self._action_ball_continuous_motion_terminal_expectations = None
+        self._action_ball_continuous_motion_terminal_token = None
+        self._action_ball_continuous_motion_terminal_epoch_committed = False
+
+    def _retain_action_ball_continuous_motion_terminal_epoch(self) -> None:
+        """Retire install material but retain the exact R05 completion debt."""
+
+        self._action_ball_continuous_motion_prearmed_install = None
+        self._action_ball_continuous_motion_prearmed_accept_swaps = None
+        self._action_ball_continuous_motion_prearmed_censor_swaps = None
+        self._action_ball_continuous_motion_prearmed_accept_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_censor_swap_receipts = (
+            None
+        )
+        self._action_ball_continuous_motion_prearmed_accept_refs = None
+        self._action_ball_continuous_motion_prearmed_boundary_row = None
+        self._action_ball_continuous_motion_armed_install = None
+        self._action_ball_continuous_motion_censored_install = None
+        self._action_ball_continuous_motion_armed_swaps = None
+        self._action_ball_continuous_motion_armed_refs = None
+        self._action_ball_continuous_motion_terminal_epoch_committed = True
+
+    def _arm_action_ball_continuous_motion_prearm(
+        self,
+        prearmed_install: ActionBallContinuousMotionPrearmedInstall,
+        global_boundary_receipt: object,
+        prepared_terminal_claim: object,
+        *,
+        expected_decision: str,
+    ) -> (
+        ActionBallContinuousMotionArmedInstall
+        | ActionBallContinuousMotionCensoredInstall
+    ):
+        """Consume Motion's exact row through one typed terminal branch."""
+
+        boundary, boundary_owner, lane = (
+            self._action_ball_continuous_motion_boundary_binding()
+        )
+        stage = self._action_ball_continuous_motion_stage
+        active = self._action_ball_continuous_motion_prearmed_install
+        row = self._action_ball_continuous_motion_prearmed_boundary_row
+        accept_swaps = (
+            self._action_ball_continuous_motion_prearmed_accept_swaps
+        )
+        censor_swaps = (
+            self._action_ball_continuous_motion_prearmed_censor_swaps
+        )
+        accept_swap_receipts = (
+            self._action_ball_continuous_motion_prearmed_accept_swap_receipts
+        )
+        censor_swap_receipts = (
+            self._action_ball_continuous_motion_prearmed_censor_swap_receipts
+        )
+        accept_refs = (
+            self._action_ball_continuous_motion_prearmed_accept_refs
+        )
+        owner = self._action_ball_continuous_transaction_owner
+        lease = getattr(owner, "_active_preview", None)
+        if (
+            self._action_ball_continuous_motion_armed_install is not None
+            or self._action_ball_continuous_motion_censored_install is not None
+            or self._action_ball_continuous_motion_commit_receipt is not None
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion boundary receipt arm was duplicated"
+            )
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or type(prearmed_install)
+            is not ActionBallContinuousMotionPrearmedInstall
+            or prearmed_install is not active
+            or prearmed_install._owner_nonce
+            is not self._action_ball_continuous_motion_owner_nonce
+            or stage is None
+            or prearmed_install.serial != stage.serial
+            or prearmed_install.owner_mutation_version
+            != stage.owner_mutation_version
+            or prearmed_install.canonical_sha256
+            != stage.motion_child_token_root_sha256
+            or self._action_ball_continuous_motion_mutation_version
+            != stage.owner_mutation_version
+            or not isinstance(accept_swaps, tuple)
+            or not isinstance(censor_swaps, tuple)
+            or type(accept_refs) is not list
+            or type(row)
+            is not boundary.ActionBallFullMdpRevealBoundaryDeviceRow
+            or lease is None
+            or getattr(lease, "public_token", None)
+            is not stage._reveal_final_public_token
+            or getattr(lease, "preview_root_sha256", None)
+            != stage.reveal_final_preview_sha256
+            or getattr(lease, "armed_handle", None) is not None
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion prearmed leaf is forged, stale, or already armed"
+            )
+        if (
+            type(global_boundary_receipt)
+            is not boundary.ActionBallFullMdpRevealBoundaryReceipt
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion global boundary packet is malformed"
+            )
+        decision = global_boundary_receipt.decision
+        if decision not in (
+            boundary.DECISION_ACCEPT,
+            boundary.DECISION_CENSOR,
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion global boundary decision is malformed"
+            )
+        if decision != expected_decision:
+            raise RuntimeError(
+                "continuous Motion boundary receipt belongs to the other typed arm branch"
+            )
+        selected_swaps = (
+            accept_swaps
+            if expected_decision == boundary.DECISION_ACCEPT
+            else censor_swaps
+        )
+        current_step = getattr(self._env, "common_step_counter", None)
+        if (
+            type(current_step) is not int
+            or current_step != stage.common_step
+            or self._action_ball_continuous_published_common_step
+            != stage.common_step
+            or not self._action_ball_continuous_motion_swaps_match_receipts(
+                accept_swaps,
+                accept_swap_receipts,
+            )
+            or not self._action_ball_continuous_motion_swaps_match_receipts(
+                censor_swaps,
+                censor_swap_receipts,
+            )
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion prearmed tensor epoch or manager tick drifted"
+            )
+        try:
+            owned_row = boundary_owner.require_owned_owner_row(
+                global_boundary_receipt,
+                owner_kind="motion",
+                expected_device_row=row,
+                expected_prepared_token=prearmed_install,
+                expected_fault_schema_sha256=(
+                    lane.fault_schema.schema_sha256
+                ),
+                expected_reveal_final_preview_schema_version=(
+                    stage.reveal_final_preview_schema_version
+                ),
+                expected_reveal_final_preview_sha256=(
+                    stage.reveal_final_preview_sha256
+                ),
+                expected_selected_env_ids=stage.env_ids,
+                expected_packet_sha256=(
+                    global_boundary_receipt.packet_sha256
+                ),
+                expected_decision=expected_decision,
+            )
+        except Exception as exc:
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion global boundary row is malformed or stale"
+            ) from exc
+        if (
+            owned_row.owner_kind != "motion"
+            or owned_row.owner_mutation_version
+            != stage.owner_mutation_version
+            or owned_row.owner_token_root_sha256
+            != stage.motion_child_token_root_sha256
+            or owned_row.fault_schema_sha256
+            != lane.fault_schema.schema_sha256
+            or owned_row.allowed_fault_mask
+            != lane.fault_schema.allowed_fault_mask
+            or len(owned_row.selected_pass) != len(stage.env_ids)
+            or len(owned_row.selected_fault_bits) != len(stage.env_ids)
+            or (
+                decision == boundary.DECISION_ACCEPT
+                and (
+                    not all(owned_row.selected_pass)
+                    or any(owned_row.selected_fault_bits)
+                )
+            )
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion decoded owner row differs"
+            )
+        try:
+            return self._finish_action_ball_continuous_motion_arm(
+                stage=stage,
+                selected_swaps=selected_swaps,
+                accept_refs=accept_refs,
+                expected_decision=expected_decision,
+                global_boundary_receipt=global_boundary_receipt,
+                prepared_terminal_claim=prepared_terminal_claim,
+            )
+        except Exception:
+            self._action_ball_continuous_motion_poisoned = True
+            raise
+
+    def _require_action_ball_continuous_motion_terminal_claim(
+        self,
+        prepared_terminal_claim: object,
+        *,
+        global_boundary_receipt: object,
+        stage: ActionBallContinuousMotionStage,
+        expected_decision: str,
+        require_armed: bool,
+    ) -> MappingProxyType:
+        """Bind or revalidate R05's exact owner-issued terminal claim."""
+
+        transaction = self._action_ball_continuous_transaction_module
+        owner = self._action_ball_continuous_transaction_owner
+        boundary = self._action_ball_continuous_motion_boundary_module
+        if (
+            transaction is None
+            or type(owner)
+            is not transaction.ContinuousRuntimeTransactionOwner
+            or type(prepared_terminal_claim)
+            is not transaction.PreparedRevealTerminalClaim
+            or expected_decision
+            not in (
+                boundary.DECISION_ACCEPT,
+                boundary.DECISION_CENSOR,
+            )
+        ):
+            raise RuntimeError(
+                "continuous Motion R05 terminal claim type/decision differs"
+            )
+        if require_armed:
+            expectations = (
+                self._action_ball_continuous_motion_terminal_expectations
+            )
+            if (
+                prepared_terminal_claim
+                is not self._action_ball_continuous_motion_terminal_claim
+                or not isinstance(expectations, MappingProxyType)
+                or expectations["expected_decision"] != expected_decision
+                or expectations["expected_reveal_final_preview_sha256"]
+                != stage.reveal_final_preview_sha256
+                or expectations["expected_selected_env_ids"]
+                != stage.env_ids
+            ):
+                raise RuntimeError(
+                    "continuous Motion retained R05 terminal claim differs"
+                )
+            validator = owner.require_owned_armed_terminal_claim
+        else:
+            if (
+                type(global_boundary_receipt)
+                is not boundary.ActionBallFullMdpRevealBoundaryReceipt
+            ):
+                raise RuntimeError(
+                    "continuous Motion terminal claim lacks exact boundary receipt"
+                )
+            terminal_kind = (
+                transaction.CommittedRevealBatch.KIND
+                if expected_decision == boundary.DECISION_ACCEPT
+                else transaction.CensoredRevealBatch.KIND
+            )
+            receipt_sha256 = self._action_ball_continuous_motion_sha256(
+                global_boundary_receipt.canonical_sha256,
+                label="global reveal-boundary receipt root",
+            )
+            packet_sha256 = self._action_ball_continuous_motion_sha256(
+                global_boundary_receipt.packet_sha256,
+                label="global reveal-boundary packet root",
+            )
+            claim_sha256 = self._action_ball_continuous_motion_sha256(
+                prepared_terminal_claim.canonical_sha256,
+                label="R05 prepared terminal claim root",
+            )
+            terminal_sha256 = self._action_ball_continuous_motion_sha256(
+                prepared_terminal_claim.terminal_sha256,
+                label="R05 expected terminal root",
+            )
+            terminal_boundary_authority_sha256 = (
+                self._action_ball_continuous_motion_sha256(
+                    prepared_terminal_claim.terminal_boundary_authority_sha256,
+                    label="R05 terminal boundary authority root",
+                )
+            )
+            terminal_boundary_projection_sha256 = (
+                self._action_ball_continuous_motion_sha256(
+                    prepared_terminal_claim.terminal_boundary_projection_sha256,
+                    label="R05 terminal boundary projection root",
+                )
+            )
+            terminal_content_pin_sha256 = (
+                self._action_ball_continuous_motion_sha256(
+                    prepared_terminal_claim.terminal_content_pin_sha256,
+                    label="R05 terminal content pin root",
+                )
+            )
+            terminal_projection = (
+                prepared_terminal_claim.terminal_boundary_projection
+            )
+            terminal_content_pin = prepared_terminal_claim.terminal_content_pin
+            expected_motion_participant_root = (
+                _ACTION_BALL_CONTINUOUS_TERMINAL_BOUNDARY_AUTHORITY_DOMAIN,
+                "motion",
+                stage.motion_child_token_root_sha256,
+            )
+            projected_motion_participant_roots = (
+                ()
+                if type(terminal_projection)
+                is not transaction.TerminalBoundaryProjection
+                else tuple(
+                    (
+                        participant.participant_domain,
+                        participant.participant_kind,
+                        participant.participant_root_sha256,
+                    )
+                    for participant in (
+                        terminal_projection.ordered_participant_roots
+                    )
+                    if (
+                        participant.participant_domain
+                        == terminal_projection.authority_domain
+                        and participant.participant_kind == "motion"
+                    )
+                )
+            )
+            expectations = MappingProxyType(
+                {
+                    "expected_claim_sha256": claim_sha256,
+                    "expected_decision": expected_decision,
+                    "expected_reveal_final_preview_sha256": (
+                        stage.reveal_final_preview_sha256
+                    ),
+                    "expected_global_boundary_receipt_sha256": (
+                        receipt_sha256
+                    ),
+                    "expected_global_boundary_packet_sha256": packet_sha256,
+                    "expected_terminal_boundary_authority_sha256": (
+                        terminal_boundary_authority_sha256
+                    ),
+                    "expected_terminal_boundary_projection_sha256": (
+                        terminal_boundary_projection_sha256
+                    ),
+                    "expected_terminal_content_pin_sha256": (
+                        terminal_content_pin_sha256
+                    ),
+                    "expected_terminal_kind": terminal_kind,
+                    "expected_terminal_sha256": terminal_sha256,
+                    "expected_selected_env_ids": stage.env_ids,
+                }
+            )
+            if (
+                prepared_terminal_claim.schema_version != 1
+                or prepared_terminal_claim.kind
+                != transaction.PREPARED_REVEAL_TERMINAL_CLAIM_KIND
+                or prepared_terminal_claim.decision != expected_decision
+                or prepared_terminal_claim.selected_env_ids != stage.env_ids
+                or prepared_terminal_claim.reveal_final_preview_schema_version
+                != stage.reveal_final_preview_schema_version
+                or prepared_terminal_claim.reveal_final_preview_sha256
+                != stage.reveal_final_preview_sha256
+                or prepared_terminal_claim.global_boundary_receipt_kind
+                != boundary.RECEIPT_KIND
+                or prepared_terminal_claim.global_boundary_receipt_sha256
+                != receipt_sha256
+                or prepared_terminal_claim.global_boundary_packet_schema_version
+                != boundary.PACKET_SCHEMA_VERSION
+                or prepared_terminal_claim.global_boundary_packet_sha256
+                != packet_sha256
+                or prepared_terminal_claim.terminal_boundary_authority_sha256
+                != terminal_boundary_authority_sha256
+                or prepared_terminal_claim.terminal_boundary_projection_sha256
+                != terminal_boundary_projection_sha256
+                or prepared_terminal_claim.terminal_content_pin_sha256
+                != terminal_content_pin_sha256
+                or type(terminal_projection)
+                is not transaction.TerminalBoundaryProjection
+                or terminal_projection.canonical_sha256
+                != terminal_boundary_projection_sha256
+                or terminal_projection.authority_domain
+                != _ACTION_BALL_CONTINUOUS_TERMINAL_BOUNDARY_AUTHORITY_DOMAIN
+                or terminal_projection.authority_schema_sha256
+                != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_RECEIPT_SCHEMA_SHA256
+                or terminal_projection.authority_source_sha256
+                != _ACTION_BALL_CONTINUOUS_REVEAL_BOUNDARY_SOURCE_SHA256
+                or terminal_projection.decision_mapping_schema_version
+                != transaction.TERMINAL_BOUNDARY_DECISION_MAPPING_SCHEMA_VERSION
+                or terminal_projection.source_decision
+                != (
+                    transaction.TERMINAL_BOUNDARY_SOURCE_DECISION_PASS
+                    if expected_decision == boundary.DECISION_ACCEPT
+                    else transaction.TERMINAL_DECISION_CENSOR
+                )
+                or terminal_projection.decision != expected_decision
+                or terminal_projection.reveal_final_preview_schema_version
+                != stage.reveal_final_preview_schema_version
+                or terminal_projection.reveal_final_preview_sha256
+                != stage.reveal_final_preview_sha256
+                or terminal_projection.selected_env_ids != stage.env_ids
+                or terminal_projection.boundary_receipt_kind
+                != boundary.RECEIPT_KIND
+                or terminal_projection.boundary_receipt_sha256
+                != receipt_sha256
+                or terminal_projection.boundary_packet_schema_version
+                != boundary.PACKET_SCHEMA_VERSION
+                or terminal_projection.boundary_packet_sha256 != packet_sha256
+                or projected_motion_participant_roots
+                != (expected_motion_participant_root,)
+                or type(terminal_content_pin)
+                is not transaction.PreparedTerminalContentPin
+                or terminal_content_pin.canonical_sha256
+                != terminal_content_pin_sha256
+                or terminal_content_pin.terminal_kind != terminal_kind
+                or terminal_content_pin.terminal_canonical_sha256
+                != terminal_sha256
+                or prepared_terminal_claim.terminal_kind != terminal_kind
+                or prepared_terminal_claim.terminal_sha256
+                != terminal_sha256
+            ):
+                raise RuntimeError(
+                    "continuous Motion R05 terminal claim facts differ"
+                )
+            validator = owner.require_owned_prepared_terminal_claim
+        owned = validator(
+            prepared_terminal_claim,
+            expected_claim_sha256=expectations["expected_claim_sha256"],
+            expected_decision=expectations["expected_decision"],
+            expected_reveal_final_preview_sha256=expectations[
+                "expected_reveal_final_preview_sha256"
+            ],
+            expected_global_boundary_receipt_sha256=expectations[
+                "expected_global_boundary_receipt_sha256"
+            ],
+            expected_global_boundary_packet_sha256=expectations[
+                "expected_global_boundary_packet_sha256"
+            ],
+            expected_terminal_boundary_authority_sha256=expectations[
+                "expected_terminal_boundary_authority_sha256"
+            ],
+            expected_terminal_boundary_projection_sha256=expectations[
+                "expected_terminal_boundary_projection_sha256"
+            ],
+            expected_terminal_content_pin_sha256=expectations[
+                "expected_terminal_content_pin_sha256"
+            ],
+            expected_terminal_kind=expectations["expected_terminal_kind"],
+            expected_terminal_sha256=expectations[
+                "expected_terminal_sha256"
+            ],
+            expected_selected_env_ids=expectations[
+                "expected_selected_env_ids"
+            ],
+        )
+        if owned is not prepared_terminal_claim:
+            raise RuntimeError(
+                "continuous Motion R05 terminal claim identity differs"
+            )
+        return expectations
+
+    def _finish_action_ball_continuous_motion_arm(
+        self,
+        *,
+        stage: ActionBallContinuousMotionStage,
+        selected_swaps: tuple[tuple[torch.Tensor, torch.Tensor], ...],
+        accept_refs: list[object],
+        expected_decision: str,
+        global_boundary_receipt: object,
+        prepared_terminal_claim: object,
+    ) -> (
+        ActionBallContinuousMotionArmedInstall
+        | ActionBallContinuousMotionCensoredInstall
+    ):
+        """Build private terminal material after the row is authenticated."""
+
+        boundary = self._action_ball_continuous_motion_boundary_module
+        terminal_expectations = (
+            self._require_action_ball_continuous_motion_terminal_claim(
+                prepared_terminal_claim,
+                global_boundary_receipt=global_boundary_receipt,
+                stage=stage,
+                expected_decision=expected_decision,
+                require_armed=False,
+            )
+        )
+        receipt_sha256 = self._action_ball_continuous_motion_sha256(
+            global_boundary_receipt.canonical_sha256,
+            label="global reveal-boundary receipt root",
+        )
+        packet_sha256 = self._action_ball_continuous_motion_sha256(
+            global_boundary_receipt.packet_sha256,
+            label="global reveal-boundary packet root",
+        )
+        next_version = stage.owner_mutation_version + 1
+        if next_version > self._ACTION_BALL_INT64_MAX:
+            raise RuntimeError(
+                "continuous Motion mutation version would overflow int64"
+            )
+        accept = expected_decision == boundary.DECISION_ACCEPT
+        if accept:
+            receipt = ActionBallContinuousMotionCommitReceipt(
+                schema_version=1,
+                kind="action_ball_continuous_motion_child_commit_receipt_v1",
+                decision=expected_decision,
+                reveal_final_preview_sha256=(
+                    stage.reveal_final_preview_sha256
+                ),
+                global_boundary_receipt_sha256=receipt_sha256,
+                global_boundary_packet_sha256=packet_sha256,
+                motion_child_token_root_sha256=(
+                    stage.motion_child_token_root_sha256
+                ),
+                prepared_r05_terminal_claim_sha256=(
+                    terminal_expectations["expected_claim_sha256"]
+                ),
+                expected_r05_terminal_kind=(
+                    terminal_expectations["expected_terminal_kind"]
+                ),
+                expected_r05_terminal_sha256=(
+                    terminal_expectations["expected_terminal_sha256"]
+                ),
+                timing_after_image_sha256=stage.timing_after_image_sha256,
+                selected_env_ids=stage.env_ids,
+                owner_mutation_version_before=stage.owner_mutation_version,
+                owner_mutation_version_after=next_version,
+                installed_count=len(stage.env_ids),
+                censored_count=0,
+                policy_opportunity_created=True,
+                runtime_integrated=False,
+                launch_authorized=False,
+            )
+            armed = ActionBallContinuousMotionArmedInstall(
+                _owner_nonce=self._action_ball_continuous_motion_owner_nonce,
+                serial=stage.serial,
+            )
+        else:
+            receipt = ActionBallContinuousMotionCensorReceipt(
+                schema_version=1,
+                kind="action_ball_continuous_motion_child_censor_receipt_v1",
+                decision=expected_decision,
+                reveal_final_preview_sha256=(
+                    stage.reveal_final_preview_sha256
+                ),
+                global_boundary_receipt_sha256=receipt_sha256,
+                global_boundary_packet_sha256=packet_sha256,
+                motion_child_token_root_sha256=(
+                    stage.motion_child_token_root_sha256
+                ),
+                prepared_r05_terminal_claim_sha256=(
+                    terminal_expectations["expected_claim_sha256"]
+                ),
+                expected_r05_terminal_kind=(
+                    terminal_expectations["expected_terminal_kind"]
+                ),
+                expected_r05_terminal_sha256=(
+                    terminal_expectations["expected_terminal_sha256"]
+                ),
+                selected_env_ids=stage.env_ids,
+                owner_mutation_version_before=stage.owner_mutation_version,
+                owner_mutation_version_after=next_version,
+                censored_count=len(stage.env_ids),
+                policy_opportunity_created=False,
+                runtime_integrated=False,
+                launch_authorized=False,
+            )
+            armed = ActionBallContinuousMotionCensoredInstall(
+                _owner_nonce=self._action_ball_continuous_motion_owner_nonce,
+                serial=stage.serial,
+            )
+        self._action_ball_continuous_motion_sha256(
+            receipt.canonical_sha256,
+            label="Motion child commit receipt root",
+        )
+        terminal_token = ActionBallContinuousMotionChildTerminalToken(
+            _owner_nonce=self._action_ball_continuous_motion_owner_nonce,
+            serial=stage.serial,
+            decision=expected_decision,
+        )
+        self._action_ball_continuous_motion_armed_swaps = selected_swaps
+        self._action_ball_continuous_motion_armed_refs = (
+            accept_refs if accept else None
+        )
+        self._action_ball_continuous_motion_commit_receipt = receipt
+        self._action_ball_continuous_motion_terminal_claim = (
+            prepared_terminal_claim
+        )
+        self._action_ball_continuous_motion_terminal_expectations = (
+            terminal_expectations
+        )
+        self._action_ball_continuous_motion_terminal_token = terminal_token
+        if accept:
+            self._action_ball_continuous_motion_armed_install = armed
+        else:
+            self._action_ball_continuous_motion_censored_install = armed
+        return armed
+
+    def arm_action_ball_continuous_motion_prearm(
+        self,
+        prearmed_install: ActionBallContinuousMotionPrearmedInstall,
+        global_boundary_receipt: object,
+        prepared_terminal_claim: object,
+    ) -> ActionBallContinuousMotionArmedInstall:
+        """Arm only the owner-issued global ACCEPT branch."""
+
+        boundary = self._action_ball_continuous_motion_boundary_module
+        return self._arm_action_ball_continuous_motion_prearm(
+            prearmed_install,
+            global_boundary_receipt,
+            prepared_terminal_claim,
+            expected_decision=boundary.DECISION_ACCEPT,
+        )
+
+    def arm_censored_action_ball_continuous_motion_prearm(
+        self,
+        prearmed_install: ActionBallContinuousMotionPrearmedInstall,
+        global_boundary_receipt: object,
+        prepared_terminal_claim: object,
+    ) -> ActionBallContinuousMotionCensoredInstall:
+        """Arm only the owner-issued global CENSOR chronology."""
+
+        boundary = self._action_ball_continuous_motion_boundary_module
+        return self._arm_action_ball_continuous_motion_prearm(
+            prearmed_install,
+            global_boundary_receipt,
+            prepared_terminal_claim,
+            expected_decision=boundary.DECISION_CENSOR,
+        )
+
+    def _commit_prevalidated_action_ball_continuous_motion(
+        self,
+        armed_install: (
+            ActionBallContinuousMotionArmedInstall
+            | ActionBallContinuousMotionCensoredInstall
+        ),
+        *,
+        expected_decision: str,
+    ) -> (
+        ActionBallContinuousMotionChildTerminalToken
+    ):
+        boundary = self._action_ball_continuous_motion_boundary_module
+        accept = expected_decision == boundary.DECISION_ACCEPT
+        active = (
+            self._action_ball_continuous_motion_armed_install
+            if accept
+            else self._action_ball_continuous_motion_censored_install
+        )
+        swaps = self._action_ball_continuous_motion_armed_swaps
+        refs = self._action_ball_continuous_motion_armed_refs
+        receipt = self._action_ball_continuous_motion_commit_receipt
+        stage = self._action_ball_continuous_motion_stage
+        terminal_claim = self._action_ball_continuous_motion_terminal_claim
+        terminal_expectations = (
+            self._action_ball_continuous_motion_terminal_expectations
+        )
+        terminal_token = self._action_ball_continuous_motion_terminal_token
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or self._action_ball_continuous_motion_terminal_epoch_committed
+            or active is None
+            or armed_install is not active
+            or type(armed_install)
+            is not (
+                ActionBallContinuousMotionArmedInstall
+                if accept
+                else ActionBallContinuousMotionCensoredInstall
+            )
+            or armed_install._owner_nonce
+            is not self._action_ball_continuous_motion_owner_nonce
+            or not isinstance(swaps, tuple)
+            or type(receipt)
+            is not (
+                ActionBallContinuousMotionCommitReceipt
+                if accept
+                else ActionBallContinuousMotionCensorReceipt
+            )
+            or receipt.decision != expected_decision
+            or stage is None
+            or terminal_claim is None
+            or not isinstance(terminal_expectations, MappingProxyType)
+            or type(terminal_token)
+            is not ActionBallContinuousMotionChildTerminalToken
+            or terminal_token._owner_nonce
+            is not self._action_ball_continuous_motion_owner_nonce
+            or terminal_token.serial != armed_install.serial
+            or terminal_token.decision != expected_decision
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion armed install is not the active opaque handle"
+            )
+        try:
+            for destination, after_image in swaps:
+                destination.copy_(after_image)
+            if refs is not None:
+                self._action_ball_active_task_refs = refs[0]
+                self._action_ball_continuous_committed_task_refs = refs[1]
+            self._action_ball_continuous_motion_mutation_version = (
+                receipt.owner_mutation_version_after
+            )
+            self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
+            self._action_ball_continuous_current_projection = None
+            self._invalidate_action_ball_continuous_observation_publication()
+            self._retain_action_ball_continuous_motion_terminal_epoch()
+            return terminal_token
+        except Exception:
+            self._action_ball_continuous_motion_poisoned = True
+            self._clear_action_ball_continuous_motion_leaf()
+            raise
+
+    def commit_prevalidated_action_ball_continuous_motion(
+        self, armed_install: ActionBallContinuousMotionArmedInstall
+    ) -> ActionBallContinuousMotionChildTerminalToken:
+        """Pure-copy ACCEPT and return only an opaque completion token."""
+
+        boundary = self._action_ball_continuous_motion_boundary_module
+        return self._commit_prevalidated_action_ball_continuous_motion(
+            armed_install,
+            expected_decision=boundary.DECISION_ACCEPT,
+        )
+
+    def commit_censored_prevalidated_action_ball_continuous_motion(
+        self, armed_install: ActionBallContinuousMotionCensoredInstall
+    ) -> ActionBallContinuousMotionChildTerminalToken:
+        """Pure-copy CENSOR and return only an opaque completion token."""
+
+        boundary = self._action_ball_continuous_motion_boundary_module
+        return self._commit_prevalidated_action_ball_continuous_motion(
+            armed_install,
+            expected_decision=boundary.DECISION_CENSOR,
+        )
+
+    def poison_global_reveal_epoch(self, reason: str) -> None:
+        """Idempotently fail-stop this owner during a global poison broadcast."""
+
+        normalized = (
+            reason
+            if type(reason) is str and reason.strip()
+            else "invalid_global_reveal_poison_reason"
+        )
+        if (
+            getattr(
+                self,
+                "_action_ball_continuous_motion_poison_reason",
+                None,
+            )
+            is None
+        ):
+            self._action_ball_continuous_motion_poison_reason = normalized
+        fault_count = getattr(
+            self, "_action_ball_continuous_motion_fault_count_device", None
+        )
+        if torch.is_tensor(fault_count):
+            fault_count.fill_(1)
+        self._action_ball_continuous_motion_poisoned = True
+
+    @staticmethod
+    def _action_ball_continuous_motion_global_drain_row(
+        owner_row: object,
+    ) -> tuple[tuple[str, int], ...]:
+        """Parse only the exact frozen Motion row from the global receipt."""
+
+        field_names = (
+            "mutation_version",
+            "fault_count",
+            "invariant_count",
+            "terminal_resolution_total",
+        )
+        if getattr(owner_row, "owner_kind", None) != "motion":
+            raise RuntimeError("global drain owner row is not the Motion row")
+        values = getattr(owner_row, "values", None)
+        if (
+            type(values) is not tuple
+            or len(values) != len(field_names)
+            or any(
+                type(row) is not tuple
+                or len(row) != 2
+                or row[0] != name
+                or type(row[1]) is not int
+                for row, name in zip(values, field_names)
+            )
+        ):
+            raise RuntimeError("global drain Motion row schema differs")
+        return values
+
+    def prepare_pre_optimizer_ppo_boundary_device_pack(
+        self,
+        *,
+        authority: object,
+        update_index: int,
+        completed_environment_steps: int,
+    ) -> object:
+        """Freeze Motion counters for the one global device-to-host packet."""
+
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or self._action_ball_continuous_motion_global_drain_poisoned
+        ):
+            raise RuntimeError(
+                "continuous Motion is poisoned at the global PPO boundary"
+            )
+        if (
+            not getattr(
+                self, "_action_ball_continuous_fresh_motion_lane_bound", False
+            )
+            or self._action_ball_continuous_motion_global_drain_active
+            is not None
+            or self._action_ball_continuous_motion_leaf_is_active()
+            or self._action_ball_continuous_motion_selected_reset_is_active()
+        ):
+            raise RuntimeError(
+                "continuous Motion is not IDLE at the global PPO boundary"
+            )
+        if (
+            type(update_index) is not int
+            or update_index
+            <= self._action_ball_continuous_motion_global_drain_last_update
+            or type(completed_environment_steps) is not int
+            or completed_environment_steps
+            <= self._action_ball_continuous_motion_global_drain_last_completed_steps
+        ):
+            raise RuntimeError(
+                "continuous Motion global drain chronology did not advance"
+            )
+        field_names = (
+            "mutation_version",
+            "fault_count",
+            "invariant_count",
+            "terminal_resolution_total",
+        )
+        if (
+            getattr(authority, "owner_kind", None) != "motion"
+            or tuple(getattr(authority, "field_names", ())) != field_names
+            or getattr(authority, "expected_width", None) != len(field_names)
+        ):
+            raise RuntimeError(
+                "continuous Motion global drain authority differs"
+            )
+        mint = getattr(authority, "mint_device_pack", None)
+        require_owned_ack = getattr(authority, "require_owned_ack", None)
+        try:
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_full_mdp_ppo_drain as drain,
+            )
+        except (ImportError, ModuleNotFoundError):
+            import action_ball_full_mdp_ppo_drain as drain
+        if (
+            type(authority) is not drain.LeafDevicePackAuthority
+            or not callable(mint)
+            or getattr(mint, "__self__", None) is not authority
+            or getattr(mint, "__func__", None)
+            is not drain.LeafDevicePackAuthority.mint_device_pack
+            or not callable(require_owned_ack)
+            or getattr(require_owned_ack, "__self__", None) is not authority
+            or getattr(require_owned_ack, "__func__", None)
+            is not drain.LeafDevicePackAuthority.require_owned_ack
+        ):
+            raise RuntimeError(
+                "continuous Motion global drain exact authority API differs"
+            )
+        device_version = (
+            self._action_ball_continuous_motion_device_mutation_version
+        )
+        fault_count = (
+            self._action_ball_continuous_motion_fault_count_device
+        )
+        terminal_total = (
+            self._action_ball_continuous_motion_terminal_resolution_total_device
+        )
+        opportunities_consumed = (
+            self._action_ball_continuous_opportunities_consumed
+        )
+        policy_created = (
+            self._action_ball_continuous_policy_opportunities_created
+        )
+        infrastructure_censored = (
+            self._action_ball_continuous_infrastructure_censors_consumed
+        )
+        scheduled_ordinal = (
+            self._action_ball_continuous_scheduled_ordinal
+        )
+        current_policy_opportunity = (
+            self._action_ball_continuous_current_policy_opportunity
+        )
+        scalar_counters = (device_version, fault_count, terminal_total)
+        env_counters = (
+            opportunities_consumed,
+            policy_created,
+            infrastructure_censored,
+            scheduled_ordinal,
+        )
+        if (
+            any(not torch.is_tensor(value) for value in scalar_counters)
+            or any(not torch.is_tensor(value) for value in env_counters)
+            or not torch.is_tensor(current_policy_opportunity)
+            or any(value.dtype != torch.int64 for value in scalar_counters)
+            or any(value.dtype != torch.int64 for value in env_counters)
+            or current_policy_opportunity.dtype != torch.bool
+            or any(
+                value.device != torch.device(self.device)
+                for value in (*scalar_counters, *env_counters)
+            )
+            or current_policy_opportunity.device != torch.device(self.device)
+            or any(tuple(value.shape) != (1,) for value in scalar_counters)
+            or any(
+                tuple(value.shape) != (self.num_envs,)
+                for value in env_counters
+            )
+            or tuple(current_policy_opportunity.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "continuous Motion global drain counters differ"
+            )
+        # These are live device chronology relationships, not a hard-coded
+        # zero and not a host mirror echo.  ``terminal_total`` counts selected
+        # environments while ``device_version`` counts batches, so comparing
+        # their magnitudes would reject every legal K>1 terminal.
+        scalar_chronology_failure = (
+            (device_version < 0)
+            | (terminal_total < 0)
+        ).to(dtype=torch.int64)
+        ordinal_overflow = scheduled_ordinal >= self._ACTION_BALL_INT64_MAX
+        ordinal_capacity = torch.where(
+            (scheduled_ordinal >= -1) & ~ordinal_overflow,
+            scheduled_ordinal + 1,
+            torch.zeros_like(scheduled_ordinal),
+        )
+        negative_lane = (
+            (scheduled_ordinal < -1)
+            | (opportunities_consumed < 0)
+            | (policy_created < 0)
+            | (infrastructure_censored < 0)
+        )
+        opportunity_over_capacity = (
+            opportunities_consumed > ordinal_capacity
+        )
+        policy_over_capacity = policy_created > ordinal_capacity
+        censor_over_capacity = infrastructure_censored > ordinal_capacity
+        safe_policy = torch.minimum(
+            torch.clamp_min(policy_created, 0), ordinal_capacity
+        )
+        safe_censor = torch.minimum(
+            torch.clamp_min(infrastructure_censored, 0), ordinal_capacity
+        )
+        double_resolution = safe_policy > (ordinal_capacity - safe_censor)
+        safe_consumed = torch.minimum(
+            torch.clamp_min(opportunities_consumed, 0), ordinal_capacity
+        )
+        current_without_unconsumed_resolution = (
+            current_policy_opportunity
+            & (safe_censor <= safe_consumed)
+            & (safe_policy <= (safe_consumed - safe_censor))
+        )
+        lane_failure = (
+            negative_lane
+            | ordinal_overflow
+            | opportunity_over_capacity
+            | policy_over_capacity
+            | censor_over_capacity
+            | double_resolution
+            | current_without_unconsumed_resolution
+        )
+        invariant_count = scalar_chronology_failure + torch.sum(
+            lane_failure, dtype=torch.int64
+        ).reshape(1)
+        values = torch.cat(
+            (
+                device_version,
+                fault_count,
+                invariant_count,
+                terminal_total,
+            )
+        ).contiguous()
+        # Seal the actual scalar pack sources.  The per-env tensors are read
+        # only to derive ``invariant_count``; mutating them after prepare does
+        # not change the already-cloned authority pack and is not, by itself,
+        # a partial ACK ambiguity.  Normal Motion mutations are independently
+        # blocked while this global lease is active.
+        source_tensors = (device_version, fault_count, terminal_total)
+        source_receipts = tuple(
+            _tensor_identity_version_receipt(value)
+            for value in source_tensors
+        )
+        if any(receipt is None for receipt in source_receipts):
+            raise RuntimeError(
+                "continuous Motion global drain source epoch cannot be sealed"
+            )
+        pack = mint(leaf=self, values=values)
+        self._action_ball_continuous_motion_global_drain_active = (
+            _ActionBallContinuousMotionGlobalDrainLease(
+                pack=pack,
+                authority=authority,
+                update_index=update_index,
+                completed_environment_steps=completed_environment_steps,
+                owner_mutation_version=(
+                    self._action_ball_continuous_motion_mutation_version
+                ),
+                terminal_resolution_total=(
+                    self._action_ball_continuous_motion_terminal_resolution_total
+                ),
+                expected_values=(
+                    self._action_ball_continuous_motion_mutation_version,
+                    0,
+                    0,
+                    self._action_ball_continuous_motion_terminal_resolution_total,
+                ),
+                source_tensor_receipts=source_receipts,
+            )
+        )
+        return pack
+
+    def abort_pre_optimizer_ppo_boundary_device_pack(
+        self, *, pack: object
+    ) -> None:
+        """Release the exact pre-transfer lease without a business write."""
+
+        active = self._action_ball_continuous_motion_global_drain_active
+        if (
+            active is None
+            or active.stage != "prepared"
+            or pack is not active.pack
+        ):
+            raise RuntimeError(
+                "continuous Motion global drain abort pack is stale or foreign"
+            )
+        if (
+            self._action_ball_continuous_motion_mutation_version
+            != active.owner_mutation_version
+            or self._action_ball_continuous_motion_terminal_resolution_total
+            != active.terminal_resolution_total
+            or any(
+                not _tensor_matches_identity_version_receipt(row[0], row)
+                for row in active.source_tensor_receipts
+            )
+        ):
+            self.poison_pre_optimizer_ppo_boundary(
+                reason="continuous Motion mutated during global drain prepare"
+            )
+            raise RuntimeError(
+                "continuous Motion global drain pre-transfer image drifted"
+            )
+        active.stage = "aborted"
+        self._action_ball_continuous_motion_global_drain_active = None
+
+    def acknowledge_pre_optimizer_ppo_boundary(
+        self,
+        *,
+        pack: object,
+        receipt: object,
+        owner_row: object,
+    ) -> None:
+        """Consume Motion's exact row after the global optimizer boundary."""
+
+        if self._action_ball_continuous_motion_global_drain_poisoned:
+            raise RuntimeError("continuous Motion global drain is poisoned")
+        active = self._action_ball_continuous_motion_global_drain_active
+        if active is None:
+            raise RuntimeError(
+                "continuous Motion global drain acknowledgement has no active pack"
+            )
+        # Prove the exact construction-bound coordinator, optimizer-return
+        # window, receipt and decoded row before reading any business facts.
+        active.authority.require_owned_ack(
+            leaf=self,
+            pack=pack,
+            receipt=receipt,
+            owner_row=owner_row,
+        )
+        if (
+            active.stage != "prepared"
+            or pack is not active.pack
+            or self._action_ball_continuous_motion_mutation_version
+            != active.owner_mutation_version
+            or getattr(receipt, "update_index", None) != active.update_index
+            or getattr(receipt, "completed_environment_steps", None)
+            != active.completed_environment_steps
+            or getattr(receipt, "device_to_host_transfers", None) != 1
+            or getattr(receipt, "drain_sequence", None)
+            != self._action_ball_continuous_motion_global_drain_sequence + 1
+            or any(
+                not _tensor_matches_identity_version_receipt(row[0], row)
+                for row in active.source_tensor_receipts
+            )
+        ):
+            raise RuntimeError(
+                "continuous Motion global drain acknowledgement differs"
+            )
+        values = self._action_ball_continuous_motion_global_drain_row(
+            owner_row
+        )
+        decoded = tuple(value for _name, value in values)
+        if (
+            decoded != active.expected_values
+            or values[1][1] != 0
+            or values[2][1] != 0
+            or self._action_ball_continuous_motion_terminal_resolution_total
+            != active.terminal_resolution_total
+        ):
+            raise RuntimeError(
+                "continuous Motion global drain row differs from its device snapshot"
+            )
+        self._action_ball_continuous_motion_global_drain_sequence += 1
+        self._action_ball_continuous_motion_global_drain_last_update = (
+            active.update_index
+        )
+        self._action_ball_continuous_motion_global_drain_last_completed_steps = (
+            active.completed_environment_steps
+        )
+        self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version = (
+            active.owner_mutation_version
+        )
+        self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = False
+        active.stage = "acknowledged"
+        self._action_ball_continuous_motion_global_drain_active = None
+
+    def poison_pre_optimizer_ppo_boundary(self, *, reason: object) -> None:
+        """Sticky reason-only fail-stop for post-transfer/partial ACK faults."""
+
+        if self._action_ball_continuous_motion_global_drain_poison_reason is None:
+            self._action_ball_continuous_motion_global_drain_poison_reason = (
+                reason
+                if type(reason) is str and bool(reason)
+                else "unspecified continuous Motion global PPO drain failure"
+            )
+        self._action_ball_continuous_motion_global_drain_poisoned = True
+        self.poison_global_reveal_epoch(
+            self._action_ball_continuous_motion_global_drain_poison_reason
+        )
+        active = self._action_ball_continuous_motion_global_drain_active
+        if active is not None:
+            active.stage = "poisoned"
+
+    def complete_global_reveal_epoch(
+        self,
+        child_terminal_token: ActionBallContinuousMotionChildTerminalToken,
+        r05_terminal_receipt: object,
+    ) -> (
+        ActionBallContinuousMotionCommitReceipt
+        | ActionBallContinuousMotionCensorReceipt
+    ):
+        """Publish Motion's receipt only after R05's exact terminal last."""
+
+        transaction = self._action_ball_continuous_transaction_module
+        owner = self._action_ball_continuous_transaction_owner
+        boundary = self._action_ball_continuous_motion_boundary_module
+        stage = self._action_ball_continuous_motion_stage
+        claim = self._action_ball_continuous_motion_terminal_claim
+        expectations = (
+            self._action_ball_continuous_motion_terminal_expectations
+        )
+        retained_receipt = (
+            self._action_ball_continuous_motion_commit_receipt
+        )
+        retained_token = self._action_ball_continuous_motion_terminal_token
+        current_step = getattr(self._env, "common_step_counter", None)
+        if (
+            self._action_ball_continuous_motion_poisoned
+            or not self._action_ball_continuous_motion_terminal_epoch_committed
+            or transaction is None
+            or type(owner)
+            is not transaction.ContinuousRuntimeTransactionOwner
+            or stage is None
+            or claim is None
+            or not isinstance(expectations, MappingProxyType)
+            or type(child_terminal_token)
+            is not ActionBallContinuousMotionChildTerminalToken
+            or child_terminal_token is not retained_token
+            or child_terminal_token._owner_nonce
+            is not self._action_ball_continuous_motion_owner_nonce
+            or child_terminal_token.serial != stage.serial
+            or child_terminal_token.decision
+            != expectations["expected_decision"]
+            or type(current_step) is not int
+            or current_step != stage.common_step
+            or self._action_ball_continuous_published_common_step
+            != stage.common_step
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion global reveal epoch completion is stale or duplicated"
+            )
+        accept = expectations["expected_decision"] == boundary.DECISION_ACCEPT
+        expected_child_type = (
+            ActionBallContinuousMotionCommitReceipt
+            if accept
+            else ActionBallContinuousMotionCensorReceipt
+        )
+        expected_r05_type = (
+            transaction.CommittedRevealBatch
+            if accept
+            else transaction.CensoredRevealBatch
+        )
+        if (
+            type(retained_receipt) is not expected_child_type
+            or type(r05_terminal_receipt) is not expected_r05_type
+            or retained_receipt.decision
+            != expectations["expected_decision"]
+            or retained_receipt.prepared_r05_terminal_claim_sha256
+            != expectations["expected_claim_sha256"]
+            or retained_receipt.expected_r05_terminal_kind
+            != expectations["expected_terminal_kind"]
+            or retained_receipt.expected_r05_terminal_sha256
+            != expectations["expected_terminal_sha256"]
+        ):
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion global reveal epoch terminal type/root differs"
+            )
+        try:
+            owned = owner.require_owned_terminal_receipt(
+                claim,
+                r05_terminal_receipt,
+                expected_claim_sha256=expectations[
+                    "expected_claim_sha256"
+                ],
+                expected_decision=expectations["expected_decision"],
+                expected_reveal_final_preview_sha256=expectations[
+                    "expected_reveal_final_preview_sha256"
+                ],
+                expected_global_boundary_receipt_sha256=expectations[
+                    "expected_global_boundary_receipt_sha256"
+                ],
+                expected_global_boundary_packet_sha256=expectations[
+                    "expected_global_boundary_packet_sha256"
+                ],
+                expected_terminal_boundary_authority_sha256=expectations[
+                    "expected_terminal_boundary_authority_sha256"
+                ],
+                expected_terminal_boundary_projection_sha256=expectations[
+                    "expected_terminal_boundary_projection_sha256"
+                ],
+                expected_terminal_content_pin_sha256=expectations[
+                    "expected_terminal_content_pin_sha256"
+                ],
+                expected_terminal_kind=expectations[
+                    "expected_terminal_kind"
+                ],
+                expected_terminal_sha256=expectations[
+                    "expected_terminal_sha256"
+                ],
+                expected_selected_env_ids=expectations[
+                    "expected_selected_env_ids"
+                ],
+            )
+            if owned is not r05_terminal_receipt:
+                raise RuntimeError(
+                    "continuous Motion R05 terminal receipt identity differs"
+                )
+        except Exception as exc:
+            self._action_ball_continuous_motion_poisoned = True
+            raise RuntimeError(
+                "continuous Motion R05 terminal receipt is not owner-issued"
+            ) from exc
+        portable_receipt = retained_receipt
+        terminal_total = (
+            self._action_ball_continuous_motion_terminal_resolution_total_device
+        )
+        if (
+            not torch.is_tensor(terminal_total)
+            or terminal_total.dtype != torch.int64
+            or terminal_total.device != torch.device(self.device)
+            or tuple(terminal_total.shape) != (1,)
+        ):
+            self.poison_global_reveal_epoch(
+                "motion_terminal_resolution_counter_invalid"
+            )
+            raise RuntimeError(
+                "continuous Motion terminal-resolution counter differs"
+            )
+        try:
+            resolution_count = len(
+                expectations["expected_selected_env_ids"]
+            )
+            if (
+                resolution_count <= 0
+                or self._action_ball_continuous_motion_terminal_resolution_total
+                > self._ACTION_BALL_INT64_MAX - resolution_count
+            ):
+                raise RuntimeError(
+                    "continuous Motion terminal-resolution counter overflowed"
+                )
+            device_overflow = terminal_total > (
+                self._ACTION_BALL_INT64_MAX - resolution_count
+            )
+            terminal_total.copy_(
+                torch.where(
+                    device_overflow,
+                    torch.full_like(
+                        terminal_total, self._ACTION_BALL_INT64_MAX
+                    ),
+                    terminal_total + resolution_count,
+                )
+            )
+            self._action_ball_continuous_motion_fault_count_device.add_(
+                device_overflow.to(dtype=torch.int64)
+            )
+            self._action_ball_continuous_motion_terminal_resolution_total += (
+                resolution_count
+            )
+        except BaseException:
+            self.poison_global_reveal_epoch(
+                "motion_terminal_resolution_counter_overflow"
+            )
+            raise
+        self._clear_action_ball_continuous_motion_leaf()
+        return portable_receipt
+
+    def abort_action_ball_continuous_motion_prearm(
+        self,
+        value: (
+            ActionBallContinuousMotionStage
+            | ActionBallContinuousMotionPrearmedInstall
+        ),
+        *,
+        boundary_abort_capability: object = None,
+    ) -> None:
+        """Discard one exact pre-transfer leaf while R05 remains unarmed.
+
+        A stage with no minted row is purely local.  Once finalize has minted
+        Motion's retained-token row, the boundary lane must consume either its
+        local abort permission or the exact capability returned after the
+        coordinator aborts an active four-row attempt.  A transferred row,
+        ACCEPT handle, or CENSOR handle is permanently non-abortable.
+        """
+
+        if self._action_ball_continuous_motion_poisoned:
+            raise RuntimeError(
+                "continuous Motion poisoned owner cannot abort"
+        )
+        stage = self._action_ball_continuous_motion_stage
+        prearmed = self._action_ball_continuous_motion_prearmed_install
+        row = self._action_ball_continuous_motion_prearmed_boundary_row
+        owner = self._action_ball_continuous_transaction_owner
+        lease = getattr(owner, "_active_preview", None)
+        if (
+            stage is None
+            or not (
+                value is stage
+                or (prearmed is not None and value is prearmed)
+            )
+            or self._action_ball_continuous_motion_terminal_claim is not None
+            or self._action_ball_continuous_motion_terminal_epoch_committed
+            or lease is None
+            or getattr(lease, "public_token", None)
+            is not stage._reveal_final_public_token
+            or getattr(lease, "preview_root_sha256", None)
+            != stage.reveal_final_preview_sha256
+            or getattr(lease, "armed_handle", None) is not None
+        ):
+            raise RuntimeError(
+                "continuous Motion abort requires its exact active pre-transfer child and an unarmed R05 lease"
+            )
+        if prearmed is None:
+            if row is not None or boundary_abort_capability is not None:
+                raise RuntimeError(
+                    "continuous Motion local stage has no boundary abort capability"
+                )
+        else:
+            _boundary, _boundary_owner, lane = (
+                self._action_ball_continuous_motion_boundary_binding()
+            )
+            try:
+                lane.require_abortable_device_row(
+                    row,
+                    expected_prepared_token=prearmed,
+                    abort_capability=boundary_abort_capability,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "continuous Motion retained row is not pre-transfer abortable"
+                ) from exc
+        self._clear_action_ball_continuous_motion_leaf()
+
+    def prepare_action_ball_continuous_task_commit(
+        self,
+        env_ids,
+        scheduled_ordinals,
+        task_refs,
+        task_receipts,
+    ) -> ActionBallContinuousTaskCommitToken:
+        """Validate a complete reveal batch without reading live Racket state.
+
+        Task receipts are the other owner's staged immutable candidates.  The
+        existing Motion host validator closes task identity, birth/action
+        lineage, timing algebra, admitted suffix and episode horizon before
+        any Motion task/timing field changes.  The returned capability is
+        valid only for this exact policy tick and exact owner state.
+        """
+
+        self._action_ball_reject_legacy_fresh_motion_lane("task prepare")
+
+        # This also proves Motion already ran for the current manager tick.
+        projection = self.action_ball_continuous_current_projection()
+        ids, ordinals = self._action_ball_continuous_event_rows(
+            env_ids,
+            scheduled_ordinals,
+            operation="task prepare",
+        )
+        self._action_ball_continuous_require_full_reveal_batch(
+            ids,
+            ordinals,
+            operation="task prepare",
+        )
+        if self._action_ball_continuous_prepared_task_commit is not None:
+            raise RuntimeError(
+                "continuous Motion already has an unconsumed prepared task token"
+            )
+        if (
+            type(task_refs) is not tuple
+            or type(task_receipts) is not tuple
+            or len(task_refs) != len(ids)
+            or len(task_receipts) != len(ids)
+        ):
+            raise ValueError(
+                "continuous Motion task prepare requires aligned immutable ref/receipt tuples"
+            )
+
+        runtime = self._action_ball_runtime_module_bound
+        env_rows = tuple(int(value) for value in ids.detach().cpu().tolist())
+        ordinal_rows = tuple(
+            int(value) for value in ordinals.detach().cpu().tolist()
+        )
+        timing_rows = []
+        for env_id, ordinal, task_ref, receipt in zip(
+            env_rows,
+            ordinal_rows,
+            task_refs,
+            task_receipts,
+        ):
+            if type(task_ref) is not runtime.ActionTaskReceiptRef:
+                raise ValueError(
+                    "continuous Motion task prepare requires exact ActionTaskReceiptRef rows"
+                )
+            if type(receipt) is not runtime.ActionBallTaskReceipt:
+                raise ValueError(
+                    "continuous Motion task prepare requires exact ActionBallTaskReceipt rows"
+                )
+            if task_ref.env_id != env_id or task_ref.swing_generation != ordinal:
+                raise RuntimeError(
+                    "continuous Motion staged task ref differs from scheduled env/ordinal"
+                )
+            previous = self._action_ball_continuous_committed_task_refs[
+                env_id
+            ]
+            if previous is not None:
+                same_reset = (
+                    task_ref.reset_generation
+                    == previous.reset_generation
+                )
+                same_lineage = (
+                    task_ref.env_id == previous.env_id
+                    and same_reset
+                    and task_ref.action_uid == previous.action_uid
+                    and task_ref.action_slot == previous.action_slot
+                    and task_ref.birth_sha256 == previous.birth_sha256
+                )
+                if (
+                    (
+                        same_reset
+                        and (
+                            not same_lineage
+                            or task_ref.swing_generation
+                            != previous.swing_generation + 1
+                            or task_ref.sample_sha256
+                            == previous.sample_sha256
+                            or task_ref.task_sha256
+                            == previous.task_sha256
+                        )
+                    )
+                    or (
+                        not same_reset
+                        and (
+                            task_ref.reset_generation
+                            != previous.reset_generation + 1
+                            or task_ref.swing_generation != 0
+                        )
+                    )
+                ):
+                    raise RuntimeError(
+                        "continuous Motion successor/reset task identity did not advance exactly once"
+                    )
+            action_slot = int(self.clip_id[env_id].item())
+            # A successor is produced after Motion advances its generation on
+            # the reveal tick, matching the repository's existing formal and
+            # diagnostic wrap-timing convention.
+            pending_elapsed_s = (
+                0.0 if ordinal == 0 else float(self._env.step_dt)
+            )
+            timing = self._validate_action_ball_task_ref_and_receipt_host(
+                task_ref,
+                receipt,
+                env_id=env_id,
+                reset_generation=int(
+                    self._action_ball_reset_generation[env_id].item()
+                ),
+                swing_generation=int(
+                    self._action_ball_swing_generation[env_id].item()
+                ),
+                action_slot=action_slot,
+                segment_length=int(self.motion.seg_len[action_slot].item()),
+                pending_elapsed_s=pending_elapsed_s,
+            )
+            if bool(
+                self._action_ball_continuous_ready_at_reveal[env_id]
+            ):
+                # Cross-owner publication may start only after this exact
+                # staged task has proved it can satisfy Motion's final release
+                # guard.  Release repeats the check against live state solely
+                # as a drift revalidation.
+                self._validate_action_ball_continuous_full_suffix_window(
+                    env_id=env_id,
+                    timing=timing,
+                    task_age_s=timing["pending_elapsed_s"],
+                )
+            timing_rows.append(
+                (
+                    timing["pending_elapsed_s"],
+                    timing["time_to_contact_s"],
+                    timing["teacher_rate"],
+                    timing["scaled_t_hit_s"],
+                    timing["scaled_t_cycle_s"],
+                    timing["pre_swing_wait_s"],
+                )
+            )
+
+        selected = ids
+        serial = self._action_ball_continuous_next_commit_token_serial
+        token = ActionBallContinuousTaskCommitToken(
+            _owner_nonce=self._action_ball_continuous_commit_owner_nonce,
+            serial=serial,
+            common_step=projection.common_step,
+            env_ids=env_rows,
+            scheduled_ordinals=ordinal_rows,
+            episode_ticks=tuple(
+                int(value)
+                for value in projection.episode_tick[selected].tolist()
+            ),
+            reveal_ticks=tuple(
+                int(value)
+                for value in projection.reveal_tick[selected].tolist()
+            ),
+            deadline_ticks=tuple(
+                int(value)
+                for value in projection.deadline_tick[selected].tolist()
+            ),
+            next_reveal_ticks=tuple(
+                int(value)
+                for value in projection.next_reveal_tick[selected].tolist()
+            ),
+            reset_generations=tuple(
+                int(value)
+                for value in projection.reset_generation[selected].tolist()
+            ),
+            swing_generations=tuple(
+                int(value)
+                for value in projection.swing_generation[selected].tolist()
+            ),
+            task_refs=task_refs,
+            _timing_rows=tuple(timing_rows),
+            _active_task_refs_before=tuple(
+                self._action_ball_active_task_refs[env_id]
+                for env_id in env_rows
+            ),
+            _committed_task_refs_before=tuple(
+                self._action_ball_continuous_committed_task_refs[
+                    env_id
+                ]
+                for env_id in env_rows
+            ),
+        )
+        tensor_receipts = (
+            self._action_ball_continuous_commit_tensor_receipts()
+        )
+        self._action_ball_continuous_next_commit_token_serial = serial + 1
+        self._action_ball_continuous_prepared_task_commit = token
+        self._action_ball_continuous_prepared_task_commit_receipts = (
+            tensor_receipts
+        )
+        return token
+
+    def _validate_action_ball_continuous_task_commit_token(
+        self,
+        token: ActionBallContinuousTaskCommitToken,
+        *,
+        operation: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Authenticate one current, unmodified, single-use task token."""
+
+        current = self._action_ball_continuous_prepared_task_commit
+        if (
+            type(token) is not ActionBallContinuousTaskCommitToken
+            or token._owner_nonce
+            is not self._action_ball_continuous_commit_owner_nonce
+            or current is not token
+        ):
+            raise RuntimeError(
+                "continuous Motion task token is forged, stale, or already consumed"
+            )
+        common_step = getattr(self._env, "common_step_counter", None)
+        if (
+            type(common_step) is not int
+            or common_step != token.common_step
+            or self._action_ball_continuous_published_common_step
+            != token.common_step
+        ):
+            raise RuntimeError(
+                "continuous Motion task token is stale for the current policy tick"
+            )
+        expected_receipts = (
+            self._action_ball_continuous_prepared_task_commit_receipts
+        )
+        current_receipts = (
+            self._action_ball_continuous_commit_tensor_receipts()
+        )
+        if (
+            not isinstance(expected_receipts, tuple)
+            or len(current_receipts) != len(expected_receipts)
+            or any(
+                not _tensor_matches_identity_version_receipt(
+                    tensor, expected
+                )
+                for (tensor, _version), expected in zip(
+                    current_receipts, expected_receipts
+                )
+            )
+        ):
+            raise RuntimeError(
+                "continuous Motion task token owner state drifted after prepare"
+            )
+        if tuple(
+            self._action_ball_active_task_refs[env_id]
+            for env_id in token.env_ids
+        ) != token._active_task_refs_before:
+            raise RuntimeError(
+                "continuous Motion active task refs drifted after prepare"
+            )
+        if tuple(
+            self._action_ball_continuous_committed_task_refs[env_id]
+            for env_id in token.env_ids
+        ) != token._committed_task_refs_before:
+            raise RuntimeError(
+                "continuous Motion committed task refs drifted after prepare"
+            )
+
+        ids = torch.tensor(
+            token.env_ids, dtype=torch.long, device=self.device
+        )
+        ordinals = torch.tensor(
+            token.scheduled_ordinals,
+            dtype=torch.long,
+            device=self.device,
+        )
+        self._action_ball_continuous_require_full_reveal_batch(
+            ids,
+            ordinals,
+            operation=operation,
+        )
+        current_rows = (
+            tuple(
+                int(value)
+                for value in self._action_ball_continuous_episode_step[
+                    ids
+                ].detach().cpu().tolist()
+            ),
+            tuple(
+                int(value)
+                for value in self._action_ball_continuous_current_reveal_step[
+                    ids
+                ].detach().cpu().tolist()
+            ),
+            tuple(
+                int(value)
+                for value in self._action_ball_continuous_current_deadline_step[
+                    ids
+                ].detach().cpu().tolist()
+            ),
+            tuple(
+                int(value)
+                for value in self._action_ball_continuous_next_reveal_step[
+                    ids
+                ].detach().cpu().tolist()
+            ),
+            tuple(
+                int(value)
+                for value in self._action_ball_reset_generation[
+                    ids
+                ].detach().cpu().tolist()
+            ),
+            tuple(
+                int(value)
+                for value in self._action_ball_swing_generation[
+                    ids
+                ].detach().cpu().tolist()
+            ),
+        )
+        expected_rows = (
+            token.episode_ticks,
+            token.reveal_ticks,
+            token.deadline_ticks,
+            token.next_reveal_ticks,
+            token.reset_generations,
+            token.swing_generations,
+        )
+        if current_rows != expected_rows:
+            raise RuntimeError(
+                "continuous Motion task token identity/timing rows drifted after prepare"
+            )
+        return ids, ordinals
+
+    def commit_prepared_action_ball_continuous_task(
+        self,
+        token: ActionBallContinuousTaskCommitToken,
+    ) -> None:
+        """Publish one previously validated Motion batch exactly once."""
+
+        self._action_ball_reject_legacy_fresh_motion_lane(
+            "prepared task commit"
+        )
+
+        ids, _ordinals = (
+            self._validate_action_ball_continuous_task_commit_token(
+                token,
+                operation="task commit",
+            )
+        )
+
+        timing = torch.tensor(
+            token._timing_rows,
+            dtype=self._action_ball_task_age_s.dtype,
+            device=self.device,
+        )
+        if tuple(timing.shape) != (len(ids), 6):
+            raise RuntimeError(
+                "continuous Motion prepared timing batch shape changed"
+            )
+        active_refs = list(self._action_ball_active_task_refs)
+        committed_refs = list(
+            self._action_ball_continuous_committed_task_refs
+        )
+        for env_id, task_ref in zip(token.env_ids, token.task_refs):
+            active_refs[env_id] = task_ref
+            committed_refs[env_id] = task_ref
+
+        # All validation and device materialization completed above.  These
+        # indexed writes are the sole Motion publication phase.
+        self._action_ball_task_pending_elapsed_s[ids] = timing[:, 0]
+        self._action_ball_task_age_s[ids] = timing[:, 0]
+        self._action_ball_time_to_contact_s[ids] = timing[:, 1]
+        self._action_ball_teacher_rate[ids] = timing[:, 2]
+        self._action_ball_scaled_t_hit_s[ids] = timing[:, 3]
+        self._action_ball_scaled_t_cycle_s[ids] = timing[:, 4]
+        self._action_ball_pre_swing_wait_s[ids] = timing[:, 5]
+        self._action_ball_task_timing_active[ids] = True
+        self._action_ball_active_task_refs = active_refs
+        self._action_ball_continuous_committed_task_refs = committed_refs
+        self._action_ball_continuous_task_commit_pending[ids] = False
+        self._action_ball_continuous_task_commit_missed[ids] = False
+        self._action_ball_continuous_task_committed[ids] = True
+        self._action_ball_continuous_prepared_task_commit = None
+        self._action_ball_continuous_prepared_task_commit_receipts = None
+        self._action_ball_continuous_current_projection = None
+
+    def acknowledge_action_ball_continuous_infrastructure_invalid(
+        self,
+        env_ids,
+        scheduled_ordinals,
+        reveal_context,
+    ) -> None:
+        """Consume one current unpublishable reveal without cadence drift.
+
+        A successfully prepared batch must present its exact single-use token.
+        If preflight itself failed before a token existed, the caller presents
+        the isolated current Motion projection it read for this reveal.  Its
+        manager tick, plus Motion's still-current internal publication, closes
+        chronology without treating mutable tensor identity as authority.
+        """
+
+        self._action_ball_reject_legacy_fresh_motion_lane(
+            "infrastructure-invalid acknowledgement"
+        )
+
+        ids, ordinals = self._action_ball_continuous_event_rows(
+            env_ids,
+            scheduled_ordinals,
+            operation="infrastructure-invalid acknowledgement",
+        )
+        self._action_ball_continuous_require_full_reveal_batch(
+            ids,
+            ordinals,
+            operation="infrastructure-invalid acknowledgement",
+        )
+        prepared = self._action_ball_continuous_prepared_task_commit
+        if type(reveal_context) is ActionBallContinuousTaskCommitToken:
+            token_ids, token_ordinals = (
+                self._validate_action_ball_continuous_task_commit_token(
+                    reveal_context,
+                    operation="infrastructure-invalid acknowledgement",
+                )
+            )
+            if not torch.equal(ids, token_ids) or not torch.equal(
+                ordinals, token_ordinals
+            ):
+                raise RuntimeError(
+                    "continuous Motion infrastructure acknowledgement differs from prepared token"
+                )
+        elif type(reveal_context) is ActionBallContinuousMotionProjection:
+            if prepared is not None:
+                raise RuntimeError(
+                    "continuous Motion prepared infrastructure failure requires its exact token"
+                )
+            if (
+                reveal_context.common_step
+                != self._action_ball_continuous_published_common_step
+            ):
+                raise RuntimeError(
+                    "continuous Motion infrastructure projection is stale"
+                )
+            self._require_action_ball_continuous_projection_current(
+                self._action_ball_continuous_current_projection
+            )
+        else:
+            raise ValueError(
+                "continuous Motion infrastructure acknowledgement requires "
+                "an exact task token or current Motion projection"
+            )
+        self._action_ball_continuous_prepared_task_commit = None
+        self._action_ball_continuous_prepared_task_commit_receipts = None
+        self._action_ball_continuous_task_commit_pending[ids] = False
+        self._action_ball_continuous_task_committed[ids] = False
+        self._action_ball_continuous_task_commit_missed[ids] = True
+        self._action_ball_continuous_motion_release_pending[ids] = False
+        self._action_ball_continuous_motion_release_missed[ids] = False
+        self._publish_action_ball_continuous_phase()
+        self._action_ball_continuous_current_projection = None
+
+    def commit_action_ball_continuous_task(
+        self,
+        env_ids,
+        scheduled_ordinals,
+        task_refs,
+    ) -> None:
+        """Commit every admitted reveal's full task ref and Motion timing.
+
+        Readiness does not authorize skipping a question.  A not-ready row
+        still installs a new task identity/timing tuple and closes at its
+        frozen deadline; it merely keeps playback on the ready reference.
+        Target and ball installation remain the future R05 owner's separate
+        transaction and are not claimed by this Motion-side receipt.
+        """
+
+        self._action_ball_reject_legacy_fresh_motion_lane("direct task commit")
+
+        ids, ordinals = self._action_ball_continuous_event_rows(
+            env_ids,
+            scheduled_ordinals,
+            operation="task commit",
+        )
+        self._require_action_ball_continuous_current_publication(
+            operation="task commit",
+        )
+        self._action_ball_continuous_require_full_reveal_batch(
+            ids,
+            ordinals,
+            operation="task commit",
+        )
+        if self._action_ball_continuous_prepared_task_commit is not None:
+            raise RuntimeError(
+                "continuous Motion prepared task token must be consumed explicitly"
+            )
+        if type(task_refs) is not tuple or len(task_refs) != len(ids):
+            raise ValueError(
+                "continuous Motion task commit requires one immutable task ref per row"
+            )
+        admissible = (
+            self._action_ball_continuous_reveal_due[ids]
+            & self._action_ball_continuous_task_commit_pending[ids]
+            & ~self._action_ball_continuous_task_committed[ids]
+            & ~self._action_ball_continuous_motion_active[ids]
+            & (
+                self._action_ball_continuous_scheduled_ordinal[ids]
+                == ordinals
+            )
+        )
+        if not bool(admissible.all()):
+            raise RuntimeError(
+                "continuous Motion task commit is not the current scheduled reveal"
+            )
+        runtime = self._action_ball_runtime_module_bound
+        staged_refs = []
+        for env_id, ordinal, task_ref in zip(
+            ids.detach().cpu().tolist(),
+            ordinals.detach().cpu().tolist(),
+            task_refs,
+        ):
+            env_id = int(env_id)
+            ordinal = int(ordinal)
+            if type(task_ref) is not runtime.ActionTaskReceiptRef:
+                raise ValueError(
+                    "continuous Motion task commit requires exact ActionTaskReceiptRef rows"
+                )
+            if task_ref.env_id != env_id or task_ref.swing_generation != ordinal:
+                raise RuntimeError(
+                    "continuous Motion task ref differs from scheduled env/ordinal"
+                )
+            previous = self._action_ball_continuous_committed_task_refs[
+                env_id
+            ]
+            if previous is not None:
+                same_lineage = (
+                    task_ref.env_id == previous.env_id
+                    and task_ref.reset_generation
+                    == previous.reset_generation
+                    and task_ref.action_uid == previous.action_uid
+                    and task_ref.action_slot == previous.action_slot
+                    and task_ref.birth_sha256 == previous.birth_sha256
+                )
+                if (
+                    not same_lineage
+                    or task_ref.swing_generation
+                    != previous.swing_generation + 1
+                    or task_ref.sample_sha256 == previous.sample_sha256
+                    or task_ref.task_sha256 == previous.task_sha256
+                ):
+                    raise RuntimeError(
+                        "continuous Motion successor task identity did not advance exactly once"
+                    )
+            self._validate_action_ball_continuous_task_timing_binding(
+                env_id=env_id,
+                task_ref=task_ref,
+            )
+            staged_refs.append((env_id, task_ref))
+        for env_id, task_ref in staged_refs:
+            self._action_ball_continuous_committed_task_refs[env_id] = task_ref
+        self._action_ball_continuous_task_commit_pending[ids] = False
+        self._action_ball_continuous_task_committed[ids] = True
+        self._action_ball_continuous_current_projection = None
+
+    def _validate_action_ball_continuous_task_timing_binding(
+        self,
+        *,
+        env_id: int,
+        task_ref,
+    ) -> dict[str, float]:
+        """Revalidate the immutable task authority and its installed timing."""
+
+        runtime = self._action_ball_runtime_module_bound
+        if type(task_ref) is not runtime.ActionTaskReceiptRef:
+            raise ValueError(
+                "continuous Motion timing binding requires exact ActionTaskReceiptRef"
+            )
+        if not bool(self._action_ball_task_timing_active[env_id]):
+            raise RuntimeError(
+                "continuous Motion task timing was not atomically installed"
+            )
+        if self._action_ball_active_task_refs[env_id] != task_ref:
+            raise RuntimeError(
+                "continuous Motion task timing is not owned by the committed task ref"
+            )
+        live_ref = self._action_ball_task_ref_for_env(env_id)
+        if live_ref != task_ref:
+            raise RuntimeError(
+                "continuous Motion committed task ref differs from live task authority"
+            )
+        receipt = self._action_ball_task_receipt_resolver(task_ref)
+        timing = self._validate_action_ball_task_ref_and_receipt(
+            task_ref,
+            receipt,
+            env_id=env_id,
+        )
+        actual_timing = {
+            "pending_elapsed_s": (
+                self._action_ball_task_pending_elapsed_s,
+                timing["pending_elapsed_s"],
+            ),
+            "task_age_s": (
+                self._action_ball_task_age_s,
+                timing["pending_elapsed_s"],
+            ),
+            "time_to_contact_s": (
+                self._action_ball_time_to_contact_s,
+                timing["time_to_contact_s"],
+            ),
+            "teacher_rate": (
+                self._action_ball_teacher_rate,
+                timing["teacher_rate"],
+            ),
+            "scaled_t_hit_s": (
+                self._action_ball_scaled_t_hit_s,
+                timing["scaled_t_hit_s"],
+            ),
+            "scaled_t_cycle_s": (
+                self._action_ball_scaled_t_cycle_s,
+                timing["scaled_t_cycle_s"],
+            ),
+            "pre_swing_wait_s": (
+                self._action_ball_pre_swing_wait_s,
+                timing["pre_swing_wait_s"],
+            ),
+        }
+        for name, (tensor, expected_value) in actual_timing.items():
+            expected = torch.as_tensor(
+                expected_value,
+                dtype=tensor.dtype,
+                device=tensor.device,
+            )
+            if not bool(torch.eq(tensor[env_id], expected)):
+                raise RuntimeError(
+                    "continuous Motion task timing retained a stale "
+                    f"{name} value"
+                )
+        return timing
+
+    def release_action_ball_continuous_motion_playback(
+        self,
+        env_ids,
+        scheduled_ordinals,
+    ) -> None:
+        """Release playback only for a ready, already-committed reveal."""
+
+        self._action_ball_reject_legacy_fresh_motion_lane(
+            "separate playback release"
+        )
+
+        ids, ordinals = self._action_ball_continuous_event_rows(
+            env_ids,
+            scheduled_ordinals,
+            operation="playback release",
+        )
+        self._require_action_ball_continuous_current_publication(
+            operation="playback release",
+        )
+        self._action_ball_continuous_require_full_release_batch(
+            ids,
+            ordinals,
+        )
+        releasable = (
+            self._action_ball_continuous_reveal_due[ids]
+            & self._action_ball_continuous_ready_at_reveal[ids]
+            & self._action_ball_continuous_task_committed[ids]
+            & self._action_ball_continuous_motion_release_pending[ids]
+            & ~self._action_ball_continuous_motion_active[ids]
+            & (
+                self._action_ball_continuous_scheduled_ordinal[ids]
+                == ordinals
+            )
+        )
+        if not bool(releasable.all()):
+            raise RuntimeError(
+                "continuous Motion playback release is not a ready committed reveal"
+            )
+        for env_id, ordinal in zip(
+            ids.detach().cpu().tolist(),
+            ordinals.detach().cpu().tolist(),
+        ):
+            env_id = int(env_id)
+            ordinal = int(ordinal)
+            task_ref = self._action_ball_continuous_committed_task_refs[
+                env_id
+            ]
+            if task_ref is None or task_ref.swing_generation != ordinal:
+                raise RuntimeError(
+                    "continuous Motion playback release lost its committed task identity"
+                )
+            timing = self._validate_action_ball_continuous_task_timing_binding(
+                env_id=env_id,
+                task_ref=task_ref,
+            )
+            self._validate_action_ball_continuous_full_suffix_window(
+                env_id=env_id,
+                timing=timing,
+                task_age_s=float(
+                    self._action_ball_task_age_s[env_id].item()
+                ),
+            )
+        self._action_ball_continuous_motion_active[ids] = True
+        self._action_ball_continuous_motion_release_pending[ids] = False
+        self._action_ball_continuous_suffix_complete[ids] = False
+        self._action_ball_continuous_ready_reference_active[ids] = False
+        self._action_ball_continuous_phase[ids] = (
+            _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                "active_opportunity"
+            ]
+        )
+        self._action_ball_continuous_current_projection = None
+
+    def acknowledge_action_ball_continuous_motion_task(
+        self,
+        env_ids,
+        scheduled_ordinals,
+        task_refs,
+    ) -> None:
+        """Legacy convenience wrapper: commit all rows, release ready rows."""
+
+        self._action_ball_reject_legacy_fresh_motion_lane(
+            "task acknowledgement wrapper"
+        )
+
+        ids, ordinals = self._action_ball_continuous_event_rows(
+            env_ids,
+            scheduled_ordinals,
+            operation="task acknowledgement",
+        )
+
+        self.commit_action_ball_continuous_task(
+            ids,
+            ordinals,
+            task_refs,
+        )
+        ready = self._action_ball_continuous_ready_at_reveal[ids]
+        if bool(ready.any()):
+            self.release_action_ball_continuous_motion_playback(
+                ids[ready],
+                ordinals[ready],
+            )
+
+    def _publish_action_ball_continuous_phase(self) -> None:
+        step = self._action_ball_continuous_episode_step
+        ordinal = self._action_ball_continuous_scheduled_ordinal
+        deadline = self._action_ball_continuous_current_deadline_step
+        active = self._action_ball_continuous_sequence_active
+        before_first = active & (ordinal < 0)
+        within_opportunity = active & (ordinal >= 0) & (step <= deadline)
+        unavailable = within_opportunity & ~self._action_ball_continuous_ready_at_reveal
+        infrastructure_invalid = (
+            within_opportunity
+            & (
+                self._action_ball_continuous_task_commit_missed
+                | self._action_ball_continuous_motion_release_missed
+            )
+        )
+        active_opportunity = (
+            within_opportunity & ~unavailable & ~infrastructure_invalid
+        )
+        suffix = (
+            active
+            & self._action_ball_continuous_motion_active
+            & (step > deadline)
+        )
+        ready_reference = (
+            active & self._action_ball_continuous_ready_reference_active
+        )
+        ready_authority = self._action_ball_continuous_ready_authority
+        live_ready = (
+            torch.zeros_like(active)
+            if ready_authority is None
+            else ready_authority
+        )
+        phase = torch.full_like(
+            self._action_ball_continuous_phase,
+            _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                "recovery_hidden"
+            ],
+        )
+        phase = torch.where(
+            before_first,
+            torch.full_like(
+                phase,
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "pre_reveal_hidden"
+                ],
+            ),
+            phase,
+        )
+        phase = torch.where(
+            ready_reference & live_ready & ~before_first,
+            torch.full_like(
+                phase,
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE["ready_hold"],
+            ),
+            phase,
+        )
+        phase = torch.where(
+            active_opportunity,
+            torch.full_like(
+                phase,
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "active_opportunity"
+                ],
+            ),
+            phase,
+        )
+        phase = torch.where(
+            unavailable,
+            torch.full_like(
+                phase,
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "recovery_unavailable"
+                ],
+            ),
+            phase,
+        )
+        phase = torch.where(
+            infrastructure_invalid,
+            torch.full_like(
+                phase,
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "infrastructure_invalid"
+                ],
+            ),
+            phase,
+        )
+        phase = torch.where(
+            suffix,
+            torch.full_like(
+                phase,
+                _ACTION_BALL_CONTINUOUS_MOTION_PHASE_CODE[
+                    "post_deadline_suffix"
+                ],
+            ),
+            phase,
+        )
+        self._action_ball_continuous_phase.copy_(phase)
+
+    def _advance_action_ball_continuous_motion_cadence(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Advance the frozen clock independently of contact and readiness."""
+
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="cadence advance"
+        )
+        self._require_action_ball_continuous_parent_authorities()
+        # A prepared capability is valid for exactly one Motion publication
+        # tick.  Advancing first revokes it, while absolute cadence continues.
+        self._action_ball_continuous_prepared_task_commit = None
+        self._action_ball_continuous_prepared_task_commit_receipts = None
+        self._action_ball_continuous_current_projection = None
+        self._action_ball_continuous_published_common_step = None
+        if (
+            self._action_ball_birth_broker is None
+            and not self._action_ball_continuous_fresh_motion_lane_bound
+        ):
+            raise RuntimeError(
+                "continuous Motion cadence requires the action-ball birth authority"
+            )
+        schedule = self._action_ball_continuous_schedule_projection
+        active_sequence = self._action_ball_continuous_sequence_active
+        # A reveal not committed by the next Motion update, or a ready reveal
+        # committed without releasing playback, was not an atomic handoff.
+        # Record either missing half, then keep the frozen cadence moving;
+        # target/ball integration will classify it as infrastructure.
+        self._action_ball_continuous_task_commit_missed |= (
+            self._action_ball_continuous_task_commit_pending
+        )
+        self._action_ball_continuous_task_commit_pending.zero_()
+        self._action_ball_continuous_motion_release_missed |= (
+            self._action_ball_continuous_motion_release_pending
+        )
+        self._action_ball_continuous_motion_release_pending.zero_()
+        self._action_ball_continuous_reveal_due.zero_()
+        self._action_ball_continuous_closed_mask.zero_()
+        self._action_ball_continuous_close_reason.fill_(
+            ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE
+        )
+        self._action_ball_continuous_deadline_due.zero_()
+        self._action_ball_continuous_recovery_unavailable.zero_()
+        self._action_ball_continuous_episode_step.add_(
+            active_sequence.to(dtype=torch.long)
+        )
+        step = self._action_ball_continuous_episode_step
+        reveal = active_sequence & (
+            step == self._action_ball_continuous_next_reveal_step
+        )
+        torch._assert_async(
+            torch.all(
+                ~active_sequence
+                | (step <= self._action_ball_continuous_next_reveal_step)
+            )
+        )
+        self._action_ball_continuous_reveal_due.copy_(reveal)
+        self._action_ball_continuous_current_policy_opportunity[reveal] = False
+        self._action_ball_continuous_task_commit_missed[reveal] = False
+        self._action_ball_continuous_task_committed[reveal] = False
+        self._action_ball_continuous_task_commit_pending[reveal] = True
+        self._action_ball_continuous_motion_release_missed[reveal] = False
+        successor = reveal & (
+            self._action_ball_continuous_scheduled_ordinal >= 0
+        )
+        if self._action_ball_swing_generation is None:
+            raise RuntimeError(
+                "continuous Motion cadence has no swing-generation authority"
+            )
+        torch._assert_async(
+            torch.all(
+                ~successor
+                | (
+                    self._action_ball_swing_generation
+                    < self._ACTION_BALL_INT64_MAX
+                )
+            )
+        )
+        self._action_ball_swing_generation.add_(successor.to(torch.long))
+        self._action_ball_continuous_scheduled_ordinal[reveal] += 1
+        self._action_ball_continuous_current_reveal_step[reveal] = step[
+            reveal
+        ]
+        self._action_ball_continuous_current_deadline_step[reveal] = (
+            step[reveal] + int(schedule["deadline_offset_steps"])
+        )
+        self._action_ball_continuous_next_reveal_step[reveal] += int(
+            schedule["cadence_steps"]
+        )
+        # Fresh ActionEpoch consumes only the owner-issued, dwell-qualified
+        # next-tick R07 projection.  The legacy shared bool remains portable
+        # compatibility and cannot authorize a fresh first opportunity.
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            live_ready = self._action_ball_continuous_canonical_ready()
+        else:
+            ready_authority = self._action_ball_continuous_ready_authority
+            live_ready = (
+                torch.zeros_like(reveal)
+                if ready_authority is None
+                else ready_authority
+            )
+        ready = (
+            reveal
+            & live_ready
+            & self._action_ball_continuous_ready_reference_active
+            & ~self._action_ball_continuous_motion_active
+        )
+        self._action_ball_continuous_ready_at_reveal[reveal] = ready[
+            reveal
+        ]
+        self._action_ball_continuous_motion_release_pending[ready] = True
+        unavailable = reveal & ~ready
+        self._action_ball_continuous_recovery_unavailable.copy_(unavailable)
+
+        current_ordinal = self._action_ball_continuous_scheduled_ordinal
+        deadline = (
+            active_sequence
+            & (current_ordinal >= 0)
+            & (
+                step
+                == self._action_ball_continuous_current_deadline_step
+            )
+            & (
+                self._action_ball_continuous_last_closed_ordinal
+                < current_ordinal
+            )
+        )
+        self._action_ball_continuous_deadline_due.copy_(deadline)
+        self._action_ball_continuous_last_closed_ordinal[deadline] = (
+            current_ordinal[deadline]
+        )
+        self._action_ball_continuous_opportunities_consumed[deadline] += 1
+        if not self._action_ball_continuous_fresh_motion_lane_bound:
+            self._action_ball_continuous_current_policy_opportunity[deadline] = (
+                False
+            )
+        self._action_ball_continuous_task_commit_pending[deadline] = False
+        self._action_ball_continuous_motion_release_pending[deadline] = False
+
+        motion_active = self._action_ball_continuous_motion_active.clone()
+        closed_without_playback = deadline & ~motion_active
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            task_close_due = (
+                active_sequence
+                & self._action_ball_continuous_canonical_task_valid
+                & step.eq(
+                    self._action_ball_continuous_canonical_task_close_tick
+                )
+            )
+            closed_without_playback = (
+                task_close_due
+                & ~self._action_ball_continuous_canonical_playback_started
+            )
+            self._action_ball_continuous_current_policy_opportunity[
+                task_close_due
+            ] = False
+        self._action_ball_task_timing_active[closed_without_playback] = False
+        timing_advance = motion_active & ~closed_without_playback
+        held, suffix_due = self._advance_action_ball_task_timing(
+            advance_mask=timing_advance,
+            resolve_pending=False,
+        )
+        suffix_due &= timing_advance
+        self._action_ball_continuous_motion_active[suffix_due] = False
+        self._action_ball_continuous_motion_active[
+            closed_without_playback
+        ] = False
+        self._action_ball_continuous_suffix_complete[suffix_due] = True
+        self._action_ball_continuous_ready_reference_active[
+            suffix_due | closed_without_playback
+        ] = True
+        self._action_ball_task_timing_active[suffix_due] = False
+        self._write_action_ball_continuous_close_edge(
+            suffix_due=suffix_due,
+            closed_without_playback=closed_without_playback,
+        )
+        self._advance_action_ball_continuous_canonical_lifecycle(
+            motion_active_before=motion_active,
+            suffix_due=suffix_due,
+            closed_without_playback=closed_without_playback,
+        )
+        self._hold_action_ball_continuous_ready_reference()
+        held = held | self._action_ball_continuous_ready_reference_active
+        self._publish_action_ball_continuous_phase()
+        if "action_ball_continuous_phase" in self.metrics:
+            self.metrics["action_ball_continuous_phase"] = (
+                self._action_ball_continuous_phase.to(
+                    dtype=self.metrics["action_ball_continuous_phase"].dtype
+                )
+            )
+            self.metrics["action_ball_continuous_reveal_due"] = (
+                self._action_ball_continuous_reveal_due.float()
+            )
+            self.metrics["action_ball_continuous_deadline_due"] = (
+                self._action_ball_continuous_deadline_due.float()
+            )
+            self.metrics[
+                "action_ball_continuous_recovery_unavailable"
+            ] = self._action_ball_continuous_recovery_unavailable.float()
+            self.metrics[
+                "action_ball_continuous_task_commit_missed"
+            ] = self._action_ball_continuous_task_commit_missed.float()
+            self.metrics[
+                "action_ball_continuous_motion_release_missed"
+            ] = self._action_ball_continuous_motion_release_missed.float()
+            self.metrics[
+                "action_ball_continuous_opportunities_consumed"
+            ] = self._action_ball_continuous_opportunities_consumed.to(
+                dtype=self.speed_scale.dtype
+            )
+            self.metrics[
+                "action_ball_continuous_policy_opportunities_created"
+            ] = self._action_ball_continuous_policy_opportunities_created.to(
+                dtype=self.speed_scale.dtype
+            )
+            self.metrics[
+                "action_ball_continuous_infrastructure_censors_consumed"
+            ] = (
+                self._action_ball_continuous_infrastructure_censors_consumed.to(
+                    dtype=self.speed_scale.dtype
+                )
+            )
+        common_step = getattr(self._env, "common_step_counter", None)
+        if type(common_step) is int and common_step >= 0:
+            # Publish last, after every current-tick cadence/reference writer.
+            self._action_ball_continuous_published_common_step = common_step
+            self._publish_action_ball_continuous_observation()
+            self._seal_action_ball_continuous_current_projection(common_step)
+        self._increment_action_ball_continuous_motion_mutation_version()
+        return held, suffix_due
+
+    def _write_action_ball_continuous_close_edge(
+        self,
+        *,
+        suffix_due: torch.Tensor,
+        closed_without_playback: torch.Tensor,
+    ) -> None:
+        """Publish this tick's row-wise close mechanics before identity clear."""
+
+        self._action_ball_continuous_closed_mask.copy_(
+            suffix_due | closed_without_playback
+        )
+        self._action_ball_continuous_close_reason.copy_(
+            torch.where(
+                suffix_due,
+                torch.full_like(
+                    self._action_ball_continuous_close_reason,
+                    ACTION_BALL_CONTINUOUS_MOTION_CLOSE_PLAYED_SUFFIX,
+                ),
+                torch.where(
+                    closed_without_playback,
+                    torch.full_like(
+                        self._action_ball_continuous_close_reason,
+                        ACTION_BALL_CONTINUOUS_MOTION_CLOSE_UNPLAYED,
+                    ),
+                    torch.full_like(
+                        self._action_ball_continuous_close_reason,
+                        ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE,
+                    ),
+                ),
+            )
+        )
 
     @staticmethod
     def _range_is_exact_zero_pair(value) -> bool:
@@ -3100,6 +12797,52 @@ class MotionCommand(CommandTerm):
             )
         return value
 
+    def _action_ball_continuous_code_owned_action_uids(
+        self,
+    ) -> tuple[int, ...]:
+        """Return the one immutable slot/UID order available before broker bind.
+
+        The fresh diagnostic constructor retains the exact pinned catalog
+        before the pre-command factory freezes cadence.  The birth broker is
+        allowed to publish later, but only if its complete tuple equals that
+        catalog.  Legacy/non-catalog construction continues to require the
+        broker-owned tuple directly.
+        """
+
+        catalog = getattr(
+            self, "_action_ball_full_mdp_diagnostic_catalog_table", None
+        )
+        catalog_action_uids = None
+        if catalog is not None:
+            if type(catalog) is not ActionBallFullMdpDiagnosticCatalogTable:
+                raise RuntimeError(
+                    "Motion code-owned diagnostic catalog type differs"
+                )
+            catalog_action_uids = catalog.action_uids
+        broker_action_uids = getattr(self, "_action_ball_action_uids", None)
+        if (
+            broker_action_uids is not None
+            and catalog_action_uids is not None
+            and broker_action_uids != catalog_action_uids
+        ):
+            raise RuntimeError(
+                "Motion broker action identity differs from its code-owned catalog"
+            )
+        action_uids = (
+            broker_action_uids
+            if broker_action_uids is not None
+            else catalog_action_uids
+        )
+        action_count = int(self.motion.num_segments)
+        if (
+            type(action_uids) is not tuple
+            or len(action_uids) != action_count
+            or len(set(action_uids)) != action_count
+            or any(type(uid) is not int or uid <= 0 for uid in action_uids)
+        ):
+            raise RuntimeError("Motion code-owned action identity table differs")
+        return action_uids
+
     @classmethod
     def _action_ball_runtime_module(cls):
         """Return the exact repository runtime module that minted the broker classes."""
@@ -3412,6 +13155,18 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "broker.ordered_action_uids must contain one unique UID per slot"
             )
+        diagnostic_catalog = self._action_ball_full_mdp_diagnostic_catalog_table
+        if (
+            diagnostic_catalog is not None
+            and (
+                type(diagnostic_catalog.action_uids) is not tuple
+                or action_uids != diagnostic_catalog.action_uids
+            )
+        ):
+            raise ValueError(
+                "broker.ordered_action_uids differs from the code-owned "
+                "diagnostic catalog"
+            )
 
         motion_sha256: list[str] = []
         for slot in range(action_count):
@@ -3469,19 +13224,20 @@ class MotionCommand(CommandTerm):
             tuple(float(component) for component in row)
             for row in ready_root_quat_tensor.detach().cpu().tolist()
         )
-        segment_lengths = None
-        if broker.diagnostic_fast_path:
-            segment_lengths = tuple(
-                int(value)
-                for value in self.motion.seg_len.detach().cpu().tolist()
+        # Cache this immutable admitted-motion fact at construction.  The
+        # production reveal leaf must never add a per-reveal device readback
+        # merely to recover a segment length already known here.
+        segment_lengths = tuple(
+            int(value)
+            for value in self.motion.seg_len.detach().cpu().tolist()
+        )
+        if (
+            len(segment_lengths) != action_count
+            or any(length < 3 for length in segment_lengths)
+        ):
+            raise ValueError(
+                "action-ball admitted motions require one interior frame per action"
             )
-            if (
-                len(segment_lengths) != action_count
-                or any(length < 3 for length in segment_lengths)
-            ):
-                raise ValueError(
-                    "action-ball admitted motions require one interior frame per action"
-                )
         # Publish only after every opaque admission and file/broker row has passed.  The hard
         # receipt immediately reopens the capability and all implementation sources once more.
         self._action_ball_birth_broker = broker
@@ -3727,6 +13483,18 @@ class MotionCommand(CommandTerm):
             return torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
             )
+        if self.action_ball_continuous_motion_enabled:
+            # The pre-Q0 hidden wait still uses the separately admitted
+            # physical safe-ready tuple.  After a real shot has completed its
+            # full suffix, however, recovery is supervised against that
+            # completed action's frame 0 with zero reference velocity.  Hiding
+            # the future task must not silently switch the teacher back to the
+            # episode-birth tuple.
+            completed_action_ready = (
+                self._action_ball_continuous_suffix_complete
+                & self._action_ball_continuous_ready_reference_active
+            )
+            return (~task_valid) & ~completed_action_ready
         return ~task_valid
 
     def action_ball_split_ready_hold_command(self):
@@ -3978,12 +13746,13 @@ class MotionCommand(CommandTerm):
     def validate_action_ball_task_authority_binding(self) -> None:
         """Probe the shared Racket digest after both runtime owners are published."""
 
-        if self._action_ball_shared_state_sha256_accessor is None:
-            raise RuntimeError("action-ball task authority is not bound")
-        self._action_ball_sha256(
-            self._action_ball_shared_state_sha256_accessor(),
-            name="Racket.action_ball_shared_state_sha256",
-        )
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="task authority binding validation"
+            )
+        self.action_ball_shared_racket_state_sha256()
 
     @property
     def action_ball_enabled(self) -> bool:
@@ -3999,7 +13768,10 @@ class MotionCommand(CommandTerm):
     def action_ball_reset_generation(self) -> torch.Tensor:
         if self._action_ball_reset_generation is None:
             raise RuntimeError("action-ball birth broker is not bound")
-        return self._action_ball_reset_generation
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_reset_generation,
+            name="reset-generation",
+        )
 
     @property
     def action_ball_episode_generation(self) -> torch.Tensor:
@@ -4011,7 +13783,10 @@ class MotionCommand(CommandTerm):
     def action_ball_swing_generation(self) -> torch.Tensor:
         if self._action_ball_swing_generation is None:
             raise RuntimeError("action-ball birth broker is not bound")
-        return self._action_ball_swing_generation
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_swing_generation,
+            name="swing-generation",
+        )
 
     def action_ball_action_uid_for_envs(self, env_ids) -> torch.Tensor:
         if self._action_ball_action_uids is None:
@@ -4650,7 +14425,10 @@ class MotionCommand(CommandTerm):
             raise RuntimeError(
                 "action-ball single-stroke completion latch is unavailable"
             )
-        if not self.action_ball_diagnostic_split_ready_teacher:
+        if not (
+            self.action_ball_diagnostic_split_ready_teacher
+            and self.action_ball_single_stroke_timeout_enabled
+        ):
             return torch.zeros_like(complete)
         return complete
 
@@ -5693,6 +15471,12 @@ class MotionCommand(CommandTerm):
     ) -> None:
         """Activate one shared immutable timing row without task receipts."""
 
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="fixed-view timing install"
+            )
         if (
             not self.action_ball_fixed_view_enabled
             or self._action_ball_birth_broker is None
@@ -5905,6 +15689,13 @@ class MotionCommand(CommandTerm):
         through one H2D without advancing task age or teacher phase.
         """
 
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="task timing resolve"
+            )
+
         diagnostic_requested = any(
             value is not None
             for value in (
@@ -5942,12 +15733,21 @@ class MotionCommand(CommandTerm):
     def action_ball_task_timing_active(self) -> torch.Tensor:
         if self._action_ball_task_timing_active is None:
             raise RuntimeError("action-ball task timing is not bound")
-        return self._action_ball_task_timing_active
+        return self._action_ball_continuous_public_tensor(
+            self._action_ball_task_timing_active,
+            name="task-timing-active",
+        )
 
     @property
     def action_ball_time_to_contact_remaining_s(self) -> torch.Tensor:
         """Signed task deadline; inactive rows use a large fail-closed positive sentinel."""
 
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="time-to-contact remaining read"
+            )
         if self._action_ball_task_timing_active is None:
             raise RuntimeError("action-ball task timing is not bound")
         remaining = (
@@ -5970,6 +15770,12 @@ class MotionCommand(CommandTerm):
         every row before the policy observation is consumed.
         """
 
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="pre-swing wait remaining read"
+            )
         if (
             self._action_ball_task_timing_active is None
             or self._action_ball_pre_swing_wait_s is None
@@ -5989,6 +15795,9 @@ class MotionCommand(CommandTerm):
 
     def _advance_action_ball_task_timing(
         self,
+        advance_mask: torch.Tensor | None = None,
+        *,
+        resolve_pending: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Advance receipt time analytically; return held and cycle-due-before masks."""
 
@@ -5997,18 +15806,61 @@ class MotionCommand(CommandTerm):
         # consume this update's elapsed policy interval.  WRAP carries one dt
         # in ``pending_elapsed_s`` because its replacement task is installed
         # later in the previous compute and does drive the intervening tick.
-        active_before_resolve = self._action_ball_task_timing_active.clone()
-        self._resolve_pending_action_ball_tasks()
-        active = self._action_ball_task_timing_active
-        if self._action_ball_birth_broker.diagnostic_fast_path:
-            if self._action_ball_diagnostic_pending_row_count != 0:
-                raise RuntimeError(
-                    "diagnostic action-ball task timing remained unresolved"
-                )
-        elif bool(
-            ((self._action_ball_reset_generation > 0) & ~active).any()
+        if advance_mask is not None and (
+            not torch.is_tensor(advance_mask)
+            or advance_mask.dtype != torch.bool
+            or tuple(advance_mask.shape) != (self.num_envs,)
+            or advance_mask.device != torch.device(self.device)
         ):
-            raise RuntimeError("action-ball task timing remained unresolved")
+            raise ValueError(
+                "action-ball task timing advance_mask must be one bool tensor "
+                "on Motion's device"
+            )
+        if type(resolve_pending) is not bool:
+            raise ValueError("resolve_pending must be an exact boolean")
+        if not resolve_pending and advance_mask is None:
+            raise ValueError(
+                "skipping pending resolution requires an explicit advance_mask"
+            )
+        active_before_resolve = self._action_ball_task_timing_active.clone()
+        if advance_mask is not None:
+            active_before_resolve &= advance_mask
+        if resolve_pending:
+            self._resolve_pending_action_ball_tasks()
+        active_all = self._action_ball_task_timing_active
+        if resolve_pending:
+            if self._action_ball_birth_broker.diagnostic_fast_path:
+                if self._action_ball_diagnostic_pending_row_count != 0:
+                    raise RuntimeError(
+                        "diagnostic action-ball task timing remained unresolved"
+                    )
+            elif bool(
+                (
+                    (self._action_ball_reset_generation > 0)
+                    & (
+                        torch.ones_like(active_all)
+                        if advance_mask is None
+                        else advance_mask
+                    )
+                    & ~active_all
+                )
+                .any()
+            ):
+                raise RuntimeError(
+                    "action-ball task timing remained unresolved"
+                )
+        else:
+            # The continuous transaction releases a row only after the other
+            # command owner has atomically installed timing and acknowledged
+            # the same reveal.  Re-running the legacy formal pending resolver
+            # here would perform a device-wide ``where`` plus D2H scan on every
+            # policy tick.  Keep the prerequisite as a device assertion.
+            torch._assert_async(torch.all(~advance_mask | active_all))
+        active = (
+            active_all
+            if advance_mask is None
+            else (active_all & advance_mask)
+        )
         cycle_total = (
             self._action_ball_pre_swing_wait_s
             + self._action_ball_scaled_t_cycle_s
@@ -7440,10 +17292,42 @@ class MotionCommand(CommandTerm):
                 action_ball_identity["fixed_view_identity_sha256"] = (
                     self._action_ball_fixed_view_identity_sha256
                 )
+            if self.action_ball_continuous_motion_enabled:
+                self._require_action_ball_continuous_parent_authorities()
+                profile = self._action_ball_continuous_motion_profile
+                action_ball_identity[
+                    "continuous_motion_projection_sha256"
+                ] = profile[
+                    "canonical_sha256"
+                ]
+                action_ball_identity[
+                    "continuous_contract_authority_sha256"
+                ] = profile["continuous_contract_authority_sha256"]
+                action_ball_identity[
+                    "recovery_contract_authority_sha256"
+                ] = profile["recovery_contract_authority_sha256"]
+                action_ball_identity[
+                    "continuous_motion_schedule_projection"
+                ] = dict(
+                    self._action_ball_continuous_schedule_projection
+                )
             identity["action_ball"] = action_ball_identity
         return identity
 
     def _action_ball_exact_resume_state_dict(self) -> dict:
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="exact checkpoint"
+            )
+            if (
+                self._action_ball_continuous_motion_global_drain_active
+                is not None
+            ):
+                raise RuntimeError(
+                    "continuous Motion exact checkpoint is forbidden during global drain"
+                )
         if self.action_ball_fixed_view_enabled:
             pending_count = self._action_ball_diagnostic_pending_row_count
             active_generation = self._action_ball_reset_generation > 0
@@ -7598,6 +17482,12 @@ class MotionCommand(CommandTerm):
             result["fixed_view_identity_sha256"] = (
                 self._action_ball_fixed_view_identity_sha256
             )
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            result["continuous_motion_leaf"] = (
+                self._action_ball_continuous_motion_checkpoint_payload()
+            )
         return result
 
     # ``action_ball_shared_broker_state_sha256`` was deleted 2026-08-06: zero
@@ -7609,6 +17499,12 @@ class MotionCommand(CommandTerm):
     def action_ball_shared_racket_state_sha256(self) -> str:
         """Return Racket's digest over every shared action-ball authority byte."""
 
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="shared Racket digest read"
+            )
         if self._action_ball_shared_state_sha256_accessor is None:
             raise RuntimeError("action-ball shared Racket digest is not bound")
         return self._action_ball_sha256(
@@ -7619,6 +17515,12 @@ class MotionCommand(CommandTerm):
     def finalize_action_ball_exact_resume(self) -> None:
         """Verify Racket-first shared restore against Motion's staged digest and refs."""
 
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="exact resume finalization"
+            )
         expected = self._action_ball_expected_shared_racket_state_sha256
         if expected is None:
             raise RuntimeError(
@@ -7637,6 +17539,14 @@ class MotionCommand(CommandTerm):
 
     def exact_resume_state_dict(self) -> dict:
         """Return every persistent MotionCommand state that shapes the next rollout."""
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            # Fail before identity serialization, CPU copies, or replay-ring
+            # clones when a production reveal epoch is retained.
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="public exact checkpoint"
+            )
         # Per-env clip/hold/planner/event clocks are deliberately absent: the runner performs one
         # full env reset after loading. The two stagger pending flags are also construction state,
         # not curriculum state—the documented resume path must re-spread that freshly reset cohort.
@@ -7752,6 +17662,10 @@ class MotionCommand(CommandTerm):
         }
         if self.action_ball_fixed_view_enabled:
             expected.add("fixed_view_identity_sha256")
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            expected.add("continuous_motion_leaf")
         if type(value) is not dict or set(value) != expected:
             raise ValueError(
                 "Motion action-ball exact-resume state keys do not match schema 4"
@@ -7886,7 +17800,7 @@ class MotionCommand(CommandTerm):
                         "positive-generation Motion env has a mismatched task ref"
                     )
             task_refs.append(task_ref)
-        return {
+        prepared = {
             "shared_racket_state_sha256": shared_racket_state_sha256,
             "reset_generation": reset_generation,
             "swing_generation": swing_generation,
@@ -7894,6 +17808,15 @@ class MotionCommand(CommandTerm):
             "seen_birth_receipts": set(seen_receipts),
             "active_task_refs": task_refs,
         }
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            prepared["continuous_motion_leaf"] = (
+                self._prepare_action_ball_continuous_motion_checkpoint(
+                    value["continuous_motion_leaf"]
+                )
+            )
+        return prepared
 
     def validate_exact_resume_state_dict(
         self, state: dict, *, strict: bool = True
@@ -7925,6 +17848,19 @@ class MotionCommand(CommandTerm):
             "balanced_clip_sampler",
         }
         action_ball_bound = self._action_ball_birth_broker is not None
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="exact checkpoint restore"
+            )
+            if (
+                self._action_ball_continuous_motion_global_drain_active
+                is not None
+            ):
+                raise RuntimeError(
+                    "continuous Motion exact restore is forbidden during global drain"
+                )
         expected_schema = (
             self._ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION
             if action_ball_bound
@@ -8059,6 +17995,63 @@ class MotionCommand(CommandTerm):
         if _validate_only:
             return
 
+        # Complete every potentially fallible CPU->device transfer before the
+        # first live Motion byte changes.  The application block below is then
+        # same-device copy-only; a CUDA allocation/transfer failure cannot
+        # strand a mixed live/checkpoint state or require a second allocation
+        # while rolling back.
+        bin_failed_count_after = bin_failed_count.to(
+            device=self.bin_failed_count.device
+        )
+        current_bin_failed_after = current_bin_failed.to(
+            device=self._current_bin_failed.device
+        )
+        root_after = None if root is None else root.to(device=self.device)
+        joint_pos_after = (
+            None if joint_pos is None else joint_pos.to(device=self.device)
+        )
+        joint_vel_after = (
+            None if joint_vel is None else joint_vel.to(device=self.device)
+        )
+        continuous_motion_leaf_after = None
+        action_ball_reset_generation_after = None
+        action_ball_swing_generation_after = None
+        if action_ball_bound:
+            action_ball_reset_generation_after = action_ball_state[
+                "reset_generation"
+            ].to(device=self.device)
+            action_ball_swing_generation_after = action_ball_state[
+                "swing_generation"
+            ].to(device=self.device)
+        if (
+            action_ball_bound
+            and getattr(
+                self,
+                "_action_ball_continuous_fresh_motion_lane_bound",
+                False,
+            )
+        ):
+            leaf_state = action_ball_state["continuous_motion_leaf"]
+            continuous_motion_leaf_after = {
+                "device_owner_mutation_version": leaf_state[
+                    "device_owner_mutation_version"
+                ].to(device=self.device),
+                "terminal_resolution_total_device": leaf_state[
+                    "terminal_resolution_total_device"
+                ].to(device=self.device),
+                "fault_count_device": leaf_state["fault_count_device"].to(
+                    device=self.device
+                ),
+                "tensors": {
+                    field_name: leaf_state["tensors"][field_name].to(
+                        device=getattr(self, attr_name).device
+                    )
+                    for field_name, attr_name, _nonnegative in (
+                        _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
+                    )
+                },
+            }
+
         # Racket owns and restores the shared evaluator/curriculum/provider/domain/broker/pool/task
         # graph before this local load.  Motion never restores those bytes; it stages their full
         # digest plus opaque local refs for the runner's post-load finalize.
@@ -8091,42 +18084,59 @@ class MotionCommand(CommandTerm):
                 self._action_ball_expected_shared_racket_state_sha256,
                 self.clip_id.clone(),
             )
+            continuous_motion_leaf_before = (
+                (
+                    self._action_ball_continuous_motion_mutation_version,
+                    self._action_ball_continuous_motion_device_mutation_version.clone(),
+                    self._action_ball_continuous_motion_next_serial,
+                    self._action_ball_continuous_motion_selected_reset_next_serial,
+                    self._action_ball_continuous_motion_terminal_resolution_total,
+                    self._action_ball_continuous_motion_terminal_resolution_total_device.clone(),
+                    self._action_ball_continuous_motion_fault_count_device.clone(),
+                    self._action_ball_continuous_motion_global_drain_sequence,
+                    self._action_ball_continuous_motion_global_drain_last_update,
+                    self._action_ball_continuous_motion_global_drain_last_completed_steps,
+                    self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version,
+                    self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack,
+                    self._action_ball_continuous_published_common_step,
+                    tuple(
+                        (
+                            attr_name,
+                            getattr(self, attr_name).clone(),
+                        )
+                        for _field_name, attr_name, _nonnegative in (
+                            _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
+                        )
+                    ),
+                )
+                if getattr(
+                    self,
+                    "_action_ball_continuous_fresh_motion_lane_bound",
+                    False,
+                )
+                else None
+            )
         else:
             action_ball_before = None
+            continuous_motion_leaf_before = None
         try:
             self.load_balanced_clip_sampler_state_dict(
                 state["balanced_clip_sampler"]
             )
-            self.bin_failed_count.copy_(
-                bin_failed_count.to(device=self.bin_failed_count.device)
-            )
-            self._current_bin_failed.copy_(
-                current_bin_failed.to(
-                    device=self._current_bin_failed.device
-                )
-            )
-            self._post_swing_root = (
-                None if root is None else root.to(device=self.device)
-            )
-            self._post_swing_joint_pos = (
-                None if joint_pos is None else joint_pos.to(device=self.device)
-            )
-            self._post_swing_joint_vel = (
-                None if joint_vel is None else joint_vel.to(device=self.device)
-            )
+            self.bin_failed_count.copy_(bin_failed_count_after)
+            self._current_bin_failed.copy_(current_bin_failed_after)
+            self._post_swing_root = root_after
+            self._post_swing_joint_pos = joint_pos_after
+            self._post_swing_joint_vel = joint_vel_after
             self._post_swing_ptr = ptr
             self._post_swing_count = count
             self._post_swing_first_reset_checked = first_reset_checked
             if action_ball_bound:
                 self._action_ball_reset_generation.copy_(
-                    action_ball_state["reset_generation"].to(
-                        device=self.device
-                    )
+                    action_ball_reset_generation_after
                 )
                 self._action_ball_swing_generation.copy_(
-                    action_ball_state["swing_generation"].to(
-                        device=self.device
-                    )
+                    action_ball_swing_generation_after
                 )
                 self._action_ball_birth_receipt_sha256 = list(
                     action_ball_state["birth_receipt_sha256"]
@@ -8148,20 +18158,90 @@ class MotionCommand(CommandTerm):
                         self.clip_id[env_id] = task_ref.action_slot
                 if self.action_ball_fixed_view_enabled:
                     self.clip_id.zero_()
-                # The documented resume path finalizes Racket's restored authority and then
-                # performs one full reset.  No pre-checkpoint task clock is replayed or allowed to
-                # touch the simulator between those operations.
-                self._action_ball_task_timing_active.zero_()
-                self._action_ball_task_pending_elapsed_s.zero_()
-                self._action_ball_task_age_s.zero_()
-                self._action_ball_time_to_contact_s.zero_()
-                self._action_ball_teacher_rate.zero_()
-                self._action_ball_scaled_t_hit_s.zero_()
-                self._action_ball_scaled_t_cycle_s.zero_()
-                self._action_ball_pre_swing_wait_s.zero_()
+                # Legacy resume still resets these clocks.  Fresh R08 restores
+                # the complete owner payload below; silently zeroing it would
+                # turn a mid-task checkpoint into a different chronology.
+                if not getattr(
+                    self,
+                    "_action_ball_continuous_fresh_motion_lane_bound",
+                    False,
+                ):
+                    self._action_ball_task_timing_active.zero_()
+                    self._action_ball_task_pending_elapsed_s.zero_()
+                    self._action_ball_task_age_s.zero_()
+                    self._action_ball_time_to_contact_s.zero_()
+                    self._action_ball_teacher_rate.zero_()
+                    self._action_ball_scaled_t_hit_s.zero_()
+                    self._action_ball_scaled_t_cycle_s.zero_()
+                    self._action_ball_pre_swing_wait_s.zero_()
                 self._action_ball_expected_shared_racket_state_sha256 = (
                     action_ball_state["shared_racket_state_sha256"]
                 )
+                if getattr(
+                    self,
+                    "_action_ball_continuous_fresh_motion_lane_bound",
+                    False,
+                ):
+                    leaf_state = action_ball_state[
+                        "continuous_motion_leaf"
+                    ]
+                    self._action_ball_continuous_motion_device_mutation_version.copy_(
+                        continuous_motion_leaf_after[
+                            "device_owner_mutation_version"
+                        ]
+                    )
+                    self._action_ball_continuous_motion_mutation_version = (
+                        leaf_state["owner_mutation_version"]
+                    )
+                    self._action_ball_continuous_motion_next_serial = (
+                        leaf_state["next_serial"]
+                    )
+                    self._action_ball_continuous_motion_selected_reset_next_serial = (
+                        leaf_state["selected_reset_next_serial"]
+                    )
+                    self._action_ball_continuous_motion_terminal_resolution_total = (
+                        leaf_state["terminal_resolution_total"]
+                    )
+                    self._action_ball_continuous_motion_terminal_resolution_total_device.copy_(
+                        continuous_motion_leaf_after[
+                            "terminal_resolution_total_device"
+                        ]
+                    )
+                    self._action_ball_continuous_motion_fault_count_device.copy_(
+                        continuous_motion_leaf_after[
+                            "fault_count_device"
+                        ]
+                    )
+                    self._action_ball_continuous_motion_global_drain_sequence = (
+                        leaf_state["global_drain_sequence"]
+                    )
+                    self._action_ball_continuous_motion_global_drain_last_update = (
+                        leaf_state["global_drain_last_update"]
+                    )
+                    self._action_ball_continuous_motion_global_drain_last_completed_steps = (
+                        leaf_state["global_drain_last_completed_steps"]
+                    )
+                    self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version = (
+                        leaf_state[
+                            "global_drain_last_acknowledged_mutation_version"
+                        ]
+                    )
+                    self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = (
+                        leaf_state["checkpoint_requires_global_drain_ack"]
+                    )
+                    self._action_ball_continuous_published_common_step = (
+                        leaf_state["published_common_step"]
+                    )
+                    leaf_tensors = leaf_state["tensors"]
+                    for field_name, attr_name, _nonnegative in (
+                        _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
+                    ):
+                        getattr(self, attr_name).copy_(
+                            continuous_motion_leaf_after["tensors"][
+                                field_name
+                            ]
+                        )
+                    self._invalidate_action_ball_continuous_observation_publication()
         except Exception:
             # Restore live state without invoking reset/resample or any simulator setter.
             self.load_balanced_clip_sampler_state_dict(sampler_before)
@@ -8220,6 +18300,64 @@ class MotionCommand(CommandTerm):
                     expected_racket_before
                 )
                 self.clip_id.copy_(clip_id_before)
+                if continuous_motion_leaf_before is not None:
+                    (
+                        leaf_version_before,
+                        leaf_device_version_before,
+                        leaf_serial_before,
+                        leaf_selected_reset_serial_before,
+                        leaf_terminal_total_before,
+                        leaf_terminal_device_before,
+                        leaf_fault_count_before,
+                        leaf_drain_sequence_before,
+                        leaf_drain_update_before,
+                        leaf_drain_steps_before,
+                        leaf_drain_acknowledged_mutation_before,
+                        leaf_checkpoint_requires_drain_ack_before,
+                        leaf_published_common_step_before,
+                        leaf_tensors_before,
+                    ) = continuous_motion_leaf_before
+                    self._action_ball_continuous_motion_device_mutation_version.copy_(
+                        leaf_device_version_before
+                    )
+                    self._action_ball_continuous_motion_mutation_version = (
+                        leaf_version_before
+                    )
+                    self._action_ball_continuous_motion_next_serial = (
+                        leaf_serial_before
+                    )
+                    self._action_ball_continuous_motion_selected_reset_next_serial = (
+                        leaf_selected_reset_serial_before
+                    )
+                    self._action_ball_continuous_motion_terminal_resolution_total = (
+                        leaf_terminal_total_before
+                    )
+                    self._action_ball_continuous_motion_terminal_resolution_total_device.copy_(
+                        leaf_terminal_device_before
+                    )
+                    self._action_ball_continuous_motion_fault_count_device.copy_(
+                        leaf_fault_count_before
+                    )
+                    self._action_ball_continuous_motion_global_drain_sequence = (
+                        leaf_drain_sequence_before
+                    )
+                    self._action_ball_continuous_motion_global_drain_last_update = (
+                        leaf_drain_update_before
+                    )
+                    self._action_ball_continuous_motion_global_drain_last_completed_steps = (
+                        leaf_drain_steps_before
+                    )
+                    self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version = (
+                        leaf_drain_acknowledged_mutation_before
+                    )
+                    self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = (
+                        leaf_checkpoint_requires_drain_ack_before
+                    )
+                    self._action_ball_continuous_published_common_step = (
+                        leaf_published_common_step_before
+                    )
+                    for attr_name, tensor_before in leaf_tensors_before:
+                        getattr(self, attr_name).copy_(tensor_before)
             raise
 
     def _capture_post_swing_states(self, env_ids: torch.Tensor):
@@ -8833,8 +18971,30 @@ class MotionCommand(CommandTerm):
 
         if len(env_ids) == 0:
             return
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            # This guard is intentionally before adaptive sampling, broker
+            # reserve, simulator setters and every Motion tensor write.  The
+            # constructed top owner has separate initial-install and selected-
+            # reset paths; generic CommandManager resample is authority for
+            # neither one.
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="command resample"
+            )
+            raise RuntimeError(
+                "legacy Motion command resample is tombstoned for the fresh full-MDP lane"
+            )
+        if self.action_ball_continuous_motion_enabled:
+            # This guard must precede the reset body: broker, simulator and
+            # Motion writes inside that body are already too late to discover
+            # a retained production reveal epoch.
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="command resample"
+            )
         if (
             self.action_ball_diagnostic_split_ready_teacher
+            and self.action_ball_single_stroke_timeout_enabled
             and self._resampling_from_wrap
         ):
             raise RuntimeError(
@@ -8844,7 +19004,19 @@ class MotionCommand(CommandTerm):
             self._action_ball_birth_broker is None
             or self._resampling_from_wrap
         ):
-            return self._resample_command_body(env_ids)
+            result = self._resample_command_body(env_ids)
+            if (
+                self.action_ball_continuous_motion_enabled
+                and not self._resampling_from_wrap
+            ):
+                self._reset_action_ball_continuous_motion_cadence(
+                    torch.as_tensor(
+                        env_ids,
+                        dtype=torch.long,
+                        device=self.device,
+                    ).reshape(-1)
+                )
+            return result
         env_ids_t = (
             env_ids
             if torch.is_tensor(env_ids)
@@ -8855,17 +19027,30 @@ class MotionCommand(CommandTerm):
         env_ids_t = env_ids_t.to(
             device=self.device, dtype=torch.long
         ).reshape(-1)
-        if self.action_ball_diagnostic_split_ready_teacher:
+        if (
+            self.action_ball_diagnostic_split_ready_teacher
+            and self.action_ball_single_stroke_timeout_enabled
+        ):
             self._action_ball_single_stroke_complete[env_ids_t] = False
         if self._action_ball_birth_broker.diagnostic_fast_path:
             # Diagnostic broker/provider/domain state is intentionally not
             # recoverable after a true-reset exception.  Let the one attempt
             # either publish normally or poison the whole run; a formal Motion
             # snapshot here is both unused and a dominant short-episode tax.
-            return self._resample_command_body(env_ids_t)
+            result = self._resample_command_body(env_ids_t)
+            if self.action_ball_continuous_motion_enabled:
+                self._reset_action_ball_continuous_motion_cadence(
+                    env_ids_t
+                )
+            return result
         snapshot = self._action_ball_reset_motion_snapshot(env_ids_t)
         try:
-            return self._resample_command_body(env_ids_t)
+            result = self._resample_command_body(env_ids_t)
+            if self.action_ball_continuous_motion_enabled:
+                self._reset_action_ball_continuous_motion_cadence(
+                    env_ids_t
+                )
+            return result
         except Exception:
             self._restore_action_ball_reset_motion_snapshot(
                 env_ids_t, snapshot
@@ -9228,6 +19413,12 @@ class MotionCommand(CommandTerm):
         reset and then refresh observations after installing both motion timing and racket targets.
         """
 
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            self._require_action_ball_continuous_motion_leaf_idle(
+                operation="external exam timing install"
+            )
         raw_ids = torch.as_tensor(env_ids, device=self.device)
         raw_clips = torch.as_tensor(clip_ids, device=self.device)
         raw_holds = torch.as_tensor(hold_steps, device=self.device)
@@ -9272,7 +19463,68 @@ class MotionCommand(CommandTerm):
             self._stagger_hold_pending[ids] = False
         self._stagger_ep_pending = False
 
+    def compute(self, dt: float):
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="manager compute"
+        )
+        if getattr(
+            self,
+            "_action_ball_continuous_fresh_motion_lane_bound",
+            False,
+        ):
+            if not _tensor_matches_identity_version_receipt(
+                getattr(self, "time_left", None),
+                getattr(
+                    self,
+                    "_action_ball_continuous_fresh_time_left_receipt",
+                    None,
+                ),
+            ):
+                self.poison_global_reveal_epoch(
+                    "fresh Motion inherited resample timer drifted"
+                )
+                raise RuntimeError(
+                    "fresh Motion inherited resample timer drifted"
+                )
+            # Preserve IsaacLab's metric/timer/update order but omit the
+            # inherited expiry scan entirely.  Genesis installed literal
+            # infinity and no legacy resampler owns this lane; cadence/D05
+            # remain the only Motion business writers.
+            self._update_metrics()
+            self.time_left -= dt
+            receipt = _tensor_identity_version_receipt(self.time_left)
+            if receipt is None:
+                self.poison_global_reveal_epoch(
+                    "fresh Motion inherited resample timer became unsealable"
+                )
+                raise RuntimeError(
+                    "fresh Motion inherited resample timer became unsealable"
+                )
+            self._action_ball_continuous_fresh_time_left_receipt = receipt
+            self._update_command()
+            return
+        if _compute_without_disabled_time_resampling_scan(self, dt):
+            return
+        super().compute(dt)
+
+    def _resample(self, env_ids: Sequence[int]):
+        # Observe config drift before IsaacLab may write a short timer.  The
+        # poison is intentionally permanent: a later sentinel round-trip
+        # cannot prove that every per-env ``time_left`` is sentinel-origin.
+        _poison_disabled_time_resampling_fast_path_on_drift(self)
+        _revoke_disabled_time_resampling_fast_path_on_timer_drift(self)
+        super()._resample(env_ids)
+        _arm_disabled_time_resampling_fast_path_after_resample(
+            self, env_ids
+        )
+
     def _update_command(self):
+        self._require_action_ball_continuous_motion_leaf_idle(
+            operation="command update"
+        )
+        # An exception, changed command order, or repeated direct call must not
+        # leave a prior tick's empty-wrap proof consumable.
+        self._split_ready_empty_wrap_receipt = None
         # stagger (b): ONE-SHOT at the first step after construction (fresh run OR resume — both
         # are the same-instant cohort the metric-sync forensics caught): advance every env's
         # episode clock by U[0, max_episode_length) so the first timeouts, and every episode
@@ -9293,7 +19545,23 @@ class MotionCommand(CommandTerm):
 
         # Pre-swing HOLD: action-ball owns a continuous receipt deadline (including a possible
         # fractional first motion tick); legacy paths retain their integer random hold counter.
-        action_ball_active = self._action_ball_birth_broker is not None
+        legacy_action_ball_active = self._action_ball_birth_broker is not None
+        fresh_action_ball_active = (
+            self.action_ball_continuous_motion_enabled
+            and self._action_ball_continuous_fresh_motion_lane_bound
+            and isinstance(
+                self._action_ball_continuous_schedule_projection,
+                MappingProxyType,
+            )
+            and self._action_ball_continuous_motion_device_r05_owner is not None
+        )
+        action_ball_active = (
+            legacy_action_ball_active or fresh_action_ball_active
+        )
+        if self.action_ball_continuous_motion_enabled and not action_ball_active:
+            raise RuntimeError(
+                "continuous Motion cadence requires the action-ball birth authority"
+            )
         if action_ball_active and self._event_scheduler is not None:
             # bind_action_ball_birth_broker requires canonical-ready mode, whose
             # boot contract rejects every non-disabled event timing mode.
@@ -9301,9 +19569,14 @@ class MotionCommand(CommandTerm):
                 "action-ball/event timing mutual exclusion drifted after binding"
             )
         if action_ball_active:
-            held, action_ball_cycle_due = (
-                self._advance_action_ball_task_timing()
-            )
+            if self.action_ball_continuous_motion_enabled:
+                held, action_ball_cycle_due = (
+                    self._advance_action_ball_continuous_motion_cadence()
+                )
+            else:
+                held, action_ball_cycle_due = (
+                    self._advance_action_ball_task_timing()
+                )
         else:
             held = self.hold_counter > 0
             self.hold_counter = torch.clamp(
@@ -9374,7 +19647,20 @@ class MotionCommand(CommandTerm):
             # Receipt timing is the sole ActionBall wrap owner.  The bind-time
             # event exclusion above makes clamp/event reductions both
             # semantically impossible and an avoidable host synchronization.
-            if self.action_ball_diagnostic_split_ready_teacher:
+            if self.action_ball_continuous_motion_enabled:
+                # The frozen cadence publishes a separate reveal handoff; a
+                # suffix boundary is only a reference-phase change.  Never
+                # route it through legacy just_resampled/_resample_command,
+                # which would redraw a question immediately and erase the
+                # recovery interval.
+                env_ids = torch.empty(
+                    0, dtype=torch.long, device=self.device
+                )
+                wrap_ids = env_ids
+            elif (
+                self.action_ball_diagnostic_split_ready_teacher
+                and self.action_ball_single_stroke_timeout_enabled
+            ):
                 # A measured capture is one non-looping professional stroke.
                 # Latch completion for the diagnostic-only timeout term and
                 # hold the final teacher frame until the environment performs
@@ -9439,11 +19725,20 @@ class MotionCommand(CommandTerm):
                 self._capture_post_swing_states(wrap_ids)
         # Wrap-path resample: skips the RSI teleport (cfg.wrap_teleport=False) so the policy
         # physically transitions swing -> swing. True resets go through reset()/manager instead.
-        self._resampling_from_wrap = True
-        try:
-            self._resample_command(env_ids)
-        finally:
-            self._resampling_from_wrap = False
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            if len(env_ids) != 0:
+                self._action_ball_continuous_motion_poisoned = True
+                raise RuntimeError(
+                    "fresh continuous Motion produced a legacy wrap batch"
+                )
+        else:
+            self._resampling_from_wrap = True
+            try:
+                self._resample_command(env_ids)
+            finally:
+                self._resampling_from_wrap = False
 
         anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
         anchor_quat_w_repeat = self.anchor_quat_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
@@ -9461,6 +19756,22 @@ class MotionCommand(CommandTerm):
             self.cfg.adaptive_alpha * self._current_bin_failed + (1 - self.cfg.adaptive_alpha) * self.bin_failed_count
         )
         self._current_bin_failed.zero_()
+        if (
+            action_ball_active
+            and self.action_ball_diagnostic_split_ready_teacher
+            and self.action_ball_single_stroke_timeout_enabled
+        ):
+            token = getattr(self._env, "common_step_counter", None)
+            if type(token) is int:
+                # Published last, after every current Motion writer of
+                # ``just_resampled``.  The tensor identity closes replacement
+                # drift; the host step token closes stale/order drift.
+                self._split_ready_empty_wrap_receipt = (
+                    token,
+                    _tensor_identity_version_receipt(
+                        self.just_resampled
+                    ),
+                )
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         if debug_vis:
@@ -9533,9 +19844,25 @@ class MotionCommandCfg(CommandTermCfg):
     canonical_ready_mode: bool = False
     # Diagnostic-only measured N=1 bridge.  The robot true-resets from a separately validated
     # physical-ready state while the immutable measured clip frame 0 is held as the teacher.
-    # The clip is a single non-looping stroke: after its final frame the episode times out and
-    # true-resets instead of wrapping.  Formal/canonical-library runs must leave this false.
+    # This flag owns only that physical-ready -> measured-frame0 bridge; wrap/timeout ownership is
+    # deliberately separate.  Formal/canonical-library runs must leave this false.
     action_ball_diagnostic_split_ready_teacher: bool = False
+    # Internal route marker for the exact fresh full-MDP EnvCfg.  It is not
+    # accepted from task YAML and is not admission: the live Motion constructor
+    # re-reads the pinned table and snapshots all 73 exact NPZ payloads before
+    # handing them to the existing MotionLoader.
+    action_ball_full_mdp_diagnostic_catalog: str | None = None
+    # Diagnostic single-stroke lifecycle switch.  Exact true keeps the historical measured-N1
+    # behavior: cycle completion latches one terminal mask and forbids natural wrap.  Missing or
+    # false never latches that mask and lets the existing wrap path run; it does not by itself
+    # provide recovery waits, distinct next questions, or a continuous-task contract.
+    action_ball_single_stroke_timeout_enabled: bool = False
+    # Fresh successor Motion bridge. ``None`` is the exact legacy/single-shot path. A non-null
+    # mapping is only a C01/C02-bound projection of the episode-tick cadence and completed-action
+    # frame-0 zero-velocity reference; its self-hash is not a schedule authority. Target, ball,
+    # receipt admission, outcome and Reward remain separate owners and must acknowledge the same
+    # reveal before Motion may start a shot.
+    action_ball_continuous_motion_cadence: dict | None = None
     # Optional train.py-materialized action-specific reset/hold binding.  ``None`` is the literal
     # legacy path.  The runtime mapping is validated after immutable motion bytes are loaded, then
     # its normalized actor action and hold q_des are installed atomically with every ActionBall

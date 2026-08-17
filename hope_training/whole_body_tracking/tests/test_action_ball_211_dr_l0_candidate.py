@@ -33,7 +33,12 @@ def _load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
-    spec.loader.exec_module(module)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
     return module
 
 
@@ -770,8 +775,8 @@ def test_dr_l0_publishes_the_nominal_joint_zero_its_finalizer_removed():
     # Non-DR-L0 leaves keep their real startup capture; nothing is published.
     sampled = _nominal_env(torch, rows=[row, row], startup_event=object())
     assert (
-        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
-            sampled, dr_l0_zero_decoder=False
+        train._action_ball_publish_nominal_default_joint_pos_without_startup_randomization(
+            sampled, zero_startup_offset=False
         )
         is False
     )
@@ -780,8 +785,8 @@ def test_dr_l0_publishes_the_nominal_joint_zero_its_finalizer_removed():
     # DR-L0: the published bytes are the removed event's own clone of row 0.
     env = _nominal_env(torch, rows=[row, row, row])
     assert (
-        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
-            env, dr_l0_zero_decoder=True
+        train._action_ball_publish_nominal_default_joint_pos_without_startup_randomization(
+            env, zero_startup_offset=True
         )
         is True
     )
@@ -793,8 +798,8 @@ def test_dr_l0_publishes_the_nominal_joint_zero_its_finalizer_removed():
     other = row + 1.0
     kept = _nominal_env(torch, rows=[row, row], nominal=other)
     assert (
-        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
-            kept, dr_l0_zero_decoder=True
+        train._action_ball_publish_nominal_default_joint_pos_without_startup_randomization(
+            kept, zero_startup_offset=True
         )
         is False
     )
@@ -804,16 +809,16 @@ def test_dr_l0_publishes_the_nominal_joint_zero_its_finalizer_removed():
     with pytest.raises(
         RuntimeError, match="requires events.add_joint_default_pos=None"
     ):
-        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
+        train._action_ball_publish_nominal_default_joint_pos_without_startup_randomization(
             _nominal_env(torch, rows=[row, row], startup_event=object()),
-            dr_l0_zero_decoder=True,
+            zero_startup_offset=True,
         )
 
     # A per-environment spread means row 0 is not nominal: refuse, never guess.
     perturbed = _nominal_env(torch, rows=[row, row + 1.0e-9])
     with pytest.raises(RuntimeError, match="differs across environments"):
-        train._action_ball_publish_dr_l0_nominal_default_joint_pos(
-            perturbed, dr_l0_zero_decoder=True
+        train._action_ball_publish_nominal_default_joint_pos_without_startup_randomization(
+            perturbed, zero_startup_offset=True
         )
     assert not hasattr(perturbed.scene["robot"].data, "default_joint_pos_nominal")
 

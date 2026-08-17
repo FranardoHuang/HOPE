@@ -1,0 +1,7 @@
+defaults:
+  - HOPEPingPongActionBallFullMdpCommon@_here_
+  - _self_
+
+name: HOPEPingPongActionBallFullMdpC
+gym_task: HOPE-PingPong-ActionBall-FullMdpC-AgibotA3-v0
+action_ball_full_mdp_family_role: C

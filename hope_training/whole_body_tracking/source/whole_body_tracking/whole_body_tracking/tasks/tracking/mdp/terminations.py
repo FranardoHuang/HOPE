@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -159,6 +161,190 @@ def action_ball_diagnostic_single_stroke_complete(
             "single-stroke completion latch must be bool[num_envs]"
         )
     return complete
+
+
+def publish_action_ball_strike_fact(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Publish the post-physics strike fact before RewardManager consumes it.
+
+    IsaacLab evaluates every active DoneTerm before RewardManager on the same
+    transition.  This deliberately non-terminating term only hands the current
+    source step to the command-owned publisher; it must not advance or
+    reconstruct any command clock, task state, or randomness.
+    """
+
+    command = env.command_manager.get_term(command_name)
+    command.publish_action_ball_strike_fact_for_reward(
+        source_step=int(env.common_step_counter)
+    )
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+
+ACTION_BALL_FULL_MDP_LEAN_TERMINATION_MANAGER_ORDER = (
+    "time_out",
+    "base_fell_tilt",
+    "base_too_low",
+    "joint_qdes_forbidden",
+    "robot_hit_table",
+)
+_ACTION_BALL_FULL_MDP_LEGACY_PRE_REWARD_TERM = "fresh_pre_reward_publish"
+_ACTION_BALL_FULL_MDP_SOURCE_TERMINATION_MANAGER_ORDER = (
+    _ACTION_BALL_FULL_MDP_LEGACY_PRE_REWARD_TERM,
+    *ACTION_BALL_FULL_MDP_LEAN_TERMINATION_MANAGER_ORDER,
+)
+
+
+class ActionBallFullMdpLeanTerminationConstructionHold(RuntimeError):
+    """The diagnostic termination cfg is not the exact real five-term cutover."""
+
+
+def _lean_termination_cfg_items(source_cfg: object) -> tuple[tuple[str, object], ...]:
+    if isinstance(source_cfg, dict):
+        raw_items = tuple(source_cfg.items())
+    else:
+        try:
+            raw_items = tuple(vars(source_cfg).items())
+        except TypeError as exc:
+            raise ActionBallFullMdpLeanTerminationConstructionHold(
+                "termination source cfg must be an object or dict"
+            ) from exc
+    return tuple(
+        (name, value)
+        for name, value in raw_items
+        if type(name) is str and not name.startswith("_") and value is not None
+    )
+
+
+def materialize_action_ball_full_mdp_lean_termination_manager_cfg(
+    source_cfg: object,
+) -> dict[str, object]:
+    """Cut the retired DoneTerm publisher out of the diagnostic manager graph.
+
+    The full-MDP top owns post-physics fact publication before this manager is
+    evaluated.  A non-terminating DoneTerm that publishes the same facts would
+    therefore be a second writer disguised as a timing gate.  This materializer
+    removes exactly that one legacy bridge and preserves the five existing,
+    live consumers: Isaac's episode limit and plant fall checks, the action
+    owner's pre-clamp hard fault, and the live table keep-out.
+
+    This is a construction join, not safety evidence.  It validates callable
+    identity and the frozen narrow parameters so a caller cannot replace a real
+    consumer with an always-false fixture, then returns independent term copies
+    for ``TerminationManager``.  Runtime truth remains in the five producers.
+    """
+
+    items = _lean_termination_cfg_items(source_cfg)
+    if tuple(name for name, _ in items) != (
+        _ACTION_BALL_FULL_MDP_SOURCE_TERMINATION_MANAGER_ORDER
+    ):
+        raise ActionBallFullMdpLeanTerminationConstructionHold(
+            "full-MDP termination source order/surface differs"
+        )
+    by_name = dict(items)
+    try:
+        termination_cfg_type = importlib.import_module(
+            "isaaclab.managers"
+        ).TerminationTermCfg
+        isaac_mdp = importlib.import_module("isaaclab.envs.mdp")
+    except (ImportError, AttributeError) as exc:
+        raise ActionBallFullMdpLeanTerminationConstructionHold(
+            "Isaac termination cfg/callables are unavailable"
+        ) from exc
+
+    publisher = by_name[_ACTION_BALL_FULL_MDP_LEGACY_PRE_REWARD_TERM]
+    publisher_func = getattr(publisher, "func", None)
+    if (
+        type(publisher) is not termination_cfg_type
+        or getattr(publisher_func, "__name__", None)
+        != "fresh_full_mdp_pre_reward_done_term"
+        or getattr(publisher, "time_out", None) is not False
+        or getattr(publisher, "params", None) not in ({}, None)
+    ):
+        raise ActionBallFullMdpLeanTerminationConstructionHold(
+            "retired pre-reward publisher term differs"
+        )
+
+    exact_specs = {
+        "time_out": (getattr(isaac_mdp, "time_out", None), True, {}),
+        "base_fell_tilt": (
+            getattr(isaac_mdp, "bad_orientation", None),
+            False,
+            {"limit_angle": 0.7},
+        ),
+        "base_too_low": (
+            getattr(isaac_mdp, "root_height_below_minimum", None),
+            False,
+            {"minimum_height": 0.5},
+        ),
+        "joint_qdes_forbidden": (
+            pre_clamp_qdes_forbidden_zone,
+            False,
+            {
+                "action_name": "joint_pos",
+                "limit_source": "joint_pos_limits",
+                "margin_rad": 0.0,
+                "margin_fraction": 0.02,
+            },
+        ),
+    }
+    for name, (expected_func, expected_timeout, expected_params) in exact_specs.items():
+        term = by_name[name]
+        if (
+            expected_func is None
+            or type(term) is not termination_cfg_type
+            or getattr(term, "func", None) is not expected_func
+            or getattr(term, "time_out", None) is not expected_timeout
+            or getattr(term, "params", None) != expected_params
+        ):
+            raise ActionBallFullMdpLeanTerminationConstructionHold(
+                name + " real termination term differs"
+            )
+
+    table = by_name["robot_hit_table"]
+    table_params = getattr(table, "params", None)
+    required_table_params = {
+        "sensor_cfg",
+        "filtered_sensor_cfg",
+        "full_table_filtered_sensor_cfgs",
+        "expected_full_table_source_prim_paths",
+        "expected_full_robot_body_names",
+        "asset_cfg",
+        "near_x",
+        "surface_z",
+        "force_threshold",
+        "margin",
+        "full_table_assembly",
+        "keepout_floor_z",
+        "collision_proxy_artifact_path",
+        "collision_proxy_artifact_sha256",
+        "racket_body_name",
+        "racket_blade_center_offset_wrist_m",
+        "racket_blade_half_extents_m",
+        "action_name",
+        "require_substep_latch",
+        "attribution_diagnostic",
+        "attribution_command_name",
+    }
+    if (
+        type(table) is not termination_cfg_type
+        or getattr(table, "func", None) is not robot_hit_table
+        or getattr(table, "time_out", None) is not False
+        or not isinstance(table_params, dict)
+        or set(table_params) != required_table_params
+        or table_params.get("action_name") != "joint_pos"
+        or type(table_params.get("full_table_assembly")) is not bool
+        or type(table_params.get("require_substep_latch")) is not bool
+        or type(table_params.get("attribution_diagnostic")) is not bool
+    ):
+        raise ActionBallFullMdpLeanTerminationConstructionHold(
+            "robot_hit_table real termination term differs"
+        )
+
+    return {
+        name: copy.deepcopy(by_name[name])
+        for name in ACTION_BALL_FULL_MDP_LEAN_TERMINATION_MANAGER_ORDER
+    }
 
 
 def _resolve_repo_relative_file(relative: str, *, name: str) -> Path:
@@ -1535,8 +1721,12 @@ def _obb_aabb_sat_overlap(
     an extent.  Results are ``[E,N,O]`` for the ``O`` axis-aligned boxes.
     Degenerate cross-product axes impose no constraint, as required by SAT.
     ``broad_phase``, when supplied, is the conservative world-AABB prefilter
-    with the same ``[E,N,O]`` shape. SAT is evaluated only for its positive
-    pairs; all other pairs are exactly false. No world-AABB approximation is
+    with the same ``[E,N,O]`` shape.  The kernel deliberately retains that
+    fixed dense shape on device.  In particular, it must not compact positive
+    pairs with ``nonzero``: CUDA has to return the dynamic candidate count to
+    the host before the following gather can be launched, and this guard runs
+    once per physics substep.  SAT arithmetic is masked by ``broad_phase`` and
+    all negative pairs remain exactly false.  No world-AABB approximation is
     used in the final verdict.
     """
     shape = (
@@ -1557,37 +1747,37 @@ def _obb_aabb_sat_overlap(
             "OBB-vs-AABB SAT broad phase must be same-device bool [env,obb,box]"
         )
 
-    result = torch.zeros_like(broad_phase)
-    candidate = torch.nonzero(broad_phase, as_tuple=False)
-    env_index, obb_index, box_index = candidate.unbind(dim=1)
-    pair_center = obb_center[env_index, obb_index]
-    pair_half_axes = obb_half_axes[env_index, obb_index]
+    # Keep all pair axes explicit.  This performs more arithmetic than the
+    # retired sparse gather when the broad phase is very sparse, but avoids a
+    # CUDA dynamic-shape synchronization.  The table assembly has a fixed,
+    # small obstacle axis and the result is consumed entirely on device.
+    pair_center = obb_center[:, :, None, :]
+    pair_half_axes = obb_half_axes[:, :, None, :, :]
     box_center = 0.5 * (aabb_lo + aabb_hi)
     box_half = 0.5 * (aabb_hi - aabb_lo)
-    delta = box_center[box_index] - pair_center
+    delta = box_center[None, None, :, :] - pair_center
 
     axis_norm = torch.linalg.vector_norm(pair_half_axes, dim=-1)
     safe_norm = torch.clamp(
         axis_norm, min=torch.finfo(pair_center.dtype).tiny
     )
     obb_unit_axes = pair_half_axes / safe_norm[..., None]
-    overlap = torch.ones(
-        (candidate.shape[0],), dtype=torch.bool, device=obb_center.device
-    )
+    overlap = broad_phase.clone()
 
     def apply_axis(axis: torch.Tensor) -> None:
-        # axis: [candidate,3]. Projection radii may use an unnormalised axis;
-        # every term then carries the same scale and degenerate cross axes
-        # reduce to the tautology 0 <= 0.
+        # axis: [E,N,O,3] (or a broadcast-compatible fixed-shape view).
+        # Projection radii may use an unnormalised axis; every term then
+        # carries the same scale and degenerate cross axes reduce to the
+        # tautology 0 <= 0.
         separation = torch.abs(torch.sum(delta * axis, dim=-1))
         obb_radius = torch.sum(
             torch.abs(
-                torch.sum(pair_half_axes * axis[:, None, :], dim=-1)
+                torch.sum(pair_half_axes * axis[..., None, :], dim=-1)
             ),
             dim=-1,
         )
         box_radius = torch.sum(
-            box_half[box_index] * torch.abs(axis),
+            box_half[None, None, :, :] * torch.abs(axis),
             dim=-1,
         )
         overlap.logical_and_(separation <= obb_radius + box_radius)
@@ -1596,20 +1786,62 @@ def _obb_aabb_sat_overlap(
         3, dtype=obb_center.dtype, device=obb_center.device
     )
     for world_axis in range(3):
-        apply_axis(world_axes[world_axis].expand_as(pair_center))
+        apply_axis(world_axes[world_axis])
     for obb_axis in range(3):
-        axis = obb_unit_axes[:, obb_axis, :]
+        axis = obb_unit_axes[..., obb_axis, :]
         apply_axis(axis)
         for world_axis in range(3):
             apply_axis(
                 torch.cross(
                     axis,
-                    world_axes[world_axis].expand_as(pair_center),
+                    world_axes[world_axis].expand_as(axis),
                     dim=-1,
                 )
             )
-    result[env_index, obb_index, box_index] = overlap
-    return result
+    return overlap
+
+
+def _fused_component_blade_sat_overlap(
+    component_center: torch.Tensor,
+    component_half_axes: torch.Tensor,
+    component_broad: torch.Tensor,
+    blade_center: torch.Tensor,
+    blade_half_axes: torch.Tensor,
+    blade_broad: torch.Tensor,
+    aabb_lo: torch.Tensor,
+    aabb_hi: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run component and blade SAT as one fixed-shape device operation.
+
+    The blade is one additional OBB, so keeping a second SAT invocation would
+    duplicate every eager kernel launch (and formerly duplicated the dynamic
+    ``nonzero`` synchronization) once per physics substep.  Concatenating that
+    single row keeps the exact pairwise verdict while sharing the fixed
+    ``[env, obb, obstacle]`` launch sequence.  Returned tensors are views of
+    the fused result in the original component/blade shapes.
+    """
+
+    component_count = component_center.shape[1]
+    fused_center = torch.cat(
+        (component_center, blade_center[:, None, :]), dim=1
+    )
+    fused_half_axes = torch.cat(
+        (component_half_axes, blade_half_axes[:, None, :, :]), dim=1
+    )
+    fused_broad = torch.cat(
+        (component_broad, blade_broad[:, None, :]), dim=1
+    )
+    fused_exact = _obb_aabb_sat_overlap(
+        fused_center,
+        fused_half_axes,
+        aabb_lo,
+        aabb_hi,
+        broad_phase=fused_broad,
+    )
+    return (
+        fused_exact[:, :component_count, :],
+        fused_exact[:, component_count, :],
+    )
 
 
 def _geometric_table_contact_attribution_unchecked(
@@ -1679,14 +1911,6 @@ def _geometric_table_contact_attribution_unchecked(
         & (component_lo[:, :, None, :] <= aabb_hi[None, None, :, :]),
         dim=-1,
     )
-    component_exact = _obb_aabb_sat_overlap(
-        component_center,
-        component_world_half_axes,
-        aabb_lo,
-        aabb_hi,
-        broad_phase=component_broad,
-    )
-
     safe_racket_quat = safe_body_quat[:, racket_body_index, :]
     blade_center = p_local[:, racket_body_index, :] + _quat_rotate_wxyz(
         safe_racket_quat,
@@ -1714,13 +1938,16 @@ def _geometric_table_contact_attribution_unchecked(
         & (blade_lo[:, None, :] <= aabb_hi[None, :, :]),
         dim=-1,
     )
-    blade_exact = _obb_aabb_sat_overlap(
-        blade_center[:, None, :],
-        blade_world_half_axes[:, None, :, :],
+    component_exact, blade_exact = _fused_component_blade_sat_overlap(
+        component_center,
+        component_world_half_axes,
+        component_broad,
+        blade_center,
+        blade_world_half_axes,
+        blade_broad,
         aabb_lo,
         aabb_hi,
-        broad_phase=blade_broad[:, None, :],
-    )[:, 0, :]
+    )
 
     nonfinite = (
         ~torch.isfinite(body_pos_w).all(dim=(1, 2))
@@ -1888,15 +2115,6 @@ def _geometric_table_contact_hit_mask_unchecked(
                 <= aabb_hi[None, None, :, axis]
             )
         )
-    component_exact = _obb_aabb_sat_overlap(
-        component_center,
-        component_world_half_axes,
-        aabb_lo,
-        aabb_hi,
-        broad_phase=component_broad,
-    )
-    body_hit = torch.any(component_exact, dim=(1, 2))
-
     safe_quat = safe_body_quat[:, racket_body_index, :]
     blade_offset_w = _quat_rotate_wxyz(
         safe_quat, racket_blade_center_offset_wrist_m.expand_as(p_local[:, 0])
@@ -1919,13 +2137,17 @@ def _geometric_table_contact_hit_mask_unchecked(
         & (blade_lo[:, None, :] <= aabb_hi[None, :, :]),
         dim=-1,
     )
-    blade_exact = _obb_aabb_sat_overlap(
-        blade_center_local[:, None, :],
-        blade_world_half_axes[:, None, :, :],
+    component_exact, blade_exact = _fused_component_blade_sat_overlap(
+        component_center,
+        component_world_half_axes,
+        component_broad,
+        blade_center_local,
+        blade_world_half_axes,
+        blade_broad,
         aabb_lo,
         aabb_hi,
-        broad_phase=blade_broad[:, None, :],
-    )[:, 0, :]
+    )
+    body_hit = torch.any(component_exact, dim=(1, 2))
     racket_hit = torch.any(blade_exact, dim=1)
 
     invalid_runtime = (
@@ -1937,26 +2159,98 @@ def _geometric_table_contact_hit_mask_unchecked(
     return body_hit | racket_hit | invalid_runtime
 
 
-def filtered_contact_hit_mask(
-    force_matrix_w: torch.Tensor,
-    force_threshold: float,
+def racket_blade_table_overlap_mask(
+    wrist_pos_w: torch.Tensor,
+    wrist_quat_w: torch.Tensor,
+    env_origins: torch.Tensor,
+    table_aabb_lo: torch.Tensor,
+    table_aabb_hi: torch.Tensor,
+    blade_center_offset_wrist_m: torch.Tensor,
+    blade_local_half_axes_m: torch.Tensor,
 ) -> torch.Tensor:
-    """Reduce a filtered contact-force matrix to one table-hit bit per environment.
+    """Return exact live blade-OBB/table-AABB overlap for each environment.
 
-    ``ContactSensorData.force_matrix_w`` is shaped ``[env, sensor body, filter expression, xyz]``
-    in the pinned Isaac Lab implementation.  Legacy uses the right wrist as source and the table
-    top as its one filter.  Full ActionBall does not call this helper: it intentionally avoids the
-    pinned backend's broken/expensive many-filter matrix and uses
-    :func:`geometric_table_contact_hit_mask`.
-
-    Non-finite force data fails safe: it becomes an infinite force and ends the affected episode
-    instead of silently turning a broken contact stream into ``False``.
+    The pinned GPU backend does not produce a usable pair-filter matrix for a
+    dynamic wrist against IsaacLab's static ``TableObstacle`` cuboid.  The
+    racket collider is a fixed child merged into the wrist rigid body, so the
+    independent physical state available every substep is the wrist pose.  The
+    fixed blade geometry is transformed by that live pose and tested against
+    the same table slab that owns the collision.  A nearby but separated blade
+    remains a legal negative; a non-finite pose fails closed.
     """
-    safe_force = torch.nan_to_num(
-        force_matrix_w, nan=float("inf"), posinf=float("inf"), neginf=float("-inf")
+
+    if (
+        wrist_pos_w.ndim != 2
+        or wrist_pos_w.shape[-1] != 3
+        or wrist_quat_w.shape != (wrist_pos_w.shape[0], 4)
+        or env_origins.shape != wrist_pos_w.shape
+        or table_aabb_lo.shape != (3,)
+        or table_aabb_hi.shape != (3,)
+        or blade_center_offset_wrist_m.shape != (3,)
+        or blade_local_half_axes_m.shape != (3, 3)
+        or not torch.is_floating_point(wrist_pos_w)
+        or wrist_quat_w.dtype != wrist_pos_w.dtype
+        or env_origins.dtype != wrist_pos_w.dtype
+        or table_aabb_lo.dtype != wrist_pos_w.dtype
+        or table_aabb_hi.dtype != wrist_pos_w.dtype
+        or blade_center_offset_wrist_m.dtype != wrist_pos_w.dtype
+        or blade_local_half_axes_m.dtype != wrist_pos_w.dtype
+        or any(
+            value.device != wrist_pos_w.device
+            for value in (
+                wrist_quat_w,
+                env_origins,
+                table_aabb_lo,
+                table_aabb_hi,
+                blade_center_offset_wrist_m,
+                blade_local_half_axes_m,
+            )
+        )
+    ):
+        raise RuntimeError(
+            "racket blade table overlap requires same-device/dtype live pose "
+            "[env,3]/[env,4], one AABB and one blade OBB"
+        )
+    quat_norm_sq = torch.sum(wrist_quat_w * wrist_quat_w, dim=-1, keepdim=True)
+    safe_quat = wrist_quat_w / torch.sqrt(
+        torch.clamp(quat_norm_sq, min=torch.finfo(wrist_pos_w.dtype).tiny)
     )
-    pushing = torch.norm(safe_force, dim=-1) > float(force_threshold)
-    return torch.any(pushing.flatten(start_dim=1), dim=1)
+    blade_center = (
+        wrist_pos_w
+        - env_origins
+        + _quat_rotate_wxyz(
+            safe_quat,
+            blade_center_offset_wrist_m.expand_as(wrist_pos_w),
+        )
+    )
+    local_half_axes = blade_local_half_axes_m.unsqueeze(0).expand(
+        wrist_pos_w.shape[0], -1, -1
+    )
+    blade_world_half_axes = _quat_rotate_wxyz(
+        safe_quat[:, None, :].expand(-1, 3, -1), local_half_axes
+    )
+    blade_world_aabb_half = torch.sum(torch.abs(blade_world_half_axes), dim=1)
+    blade_lo = blade_center - blade_world_aabb_half
+    blade_hi = blade_center + blade_world_aabb_half
+    broad = torch.all(
+        (blade_hi >= table_aabb_lo[None, :])
+        & (blade_lo <= table_aabb_hi[None, :]),
+        dim=-1,
+    )
+    exact = _obb_aabb_sat_overlap(
+        blade_center[:, None, :],
+        blade_world_half_axes[:, None, :, :],
+        table_aabb_lo[None, :],
+        table_aabb_hi[None, :],
+        broad_phase=broad[:, None, None],
+    )[:, 0, 0]
+    invalid = (
+        ~torch.isfinite(wrist_pos_w).all(dim=1)
+        | ~torch.isfinite(wrist_quat_w).all(dim=1)
+        | ~torch.isfinite(env_origins).all(dim=1)
+        | ~(quat_norm_sq[:, 0] > 0.0)
+    )
+    return exact | invalid
 
 
 class _PreparedRobotTablePoseGuard:
@@ -2453,8 +2747,9 @@ def sample_robot_table_contact_current(
 ) -> torch.Tensor:
     """Sample current table contact once.
 
-    Legacy top-only mode uses broad-origin attribution plus an exact wrist pair.  Full ActionBall
-    mode uses live articulation pose and conservative table geometry without touching a
+    Legacy top-only mode uses broad force/origin attribution plus the live
+    wrist-transformed blade OBB.  Full ActionBall mode uses live articulation
+    pose and conservative table geometry without touching a pair-filtered
     ``ContactSensor``.
     """
 
@@ -2526,31 +2821,87 @@ def sample_robot_table_contact_current(
         setattr(sensor, "_hope_table_hit_aabb_cache", cached_aabb)
     lo_t, hi_t = cached_aabb[1], cached_aabb[2]
     broad_hit = table_hit_mask(p, f, env.scene.env_origins, lo_t, hi_t, force_threshold)
-
-    try:
-        filtered_sensor = env.scene.sensors[filtered_sensor_cfg.name]
-    except KeyError as exc:
-        raise RuntimeError(
-            "robot_hit_table requires the filtered wrist-vs-table contact sensor "
-            f"{filtered_sensor_cfg.name!r}"
-        ) from exc
-    force_matrix = getattr(filtered_sensor.data, "force_matrix_w", None)
-    expected_filter_count = 1
+    if filtered_sensor_cfg.name != sensor_cfg.name:
+        try:
+            compatibility_sensor = env.scene.sensors[
+                filtered_sensor_cfg.name
+            ]
+        except KeyError as exc:
+            raise RuntimeError(
+                "robot_hit_table legacy compatibility sensor is missing"
+            ) from exc
+        filter_paths = getattr(
+            getattr(compatibility_sensor, "cfg", None),
+            "filter_prim_paths_expr",
+            None,
+        )
+        if not isinstance(filter_paths, (tuple, list)) or tuple(filter_paths):
+            raise RuntimeError(
+                "robot_hit_table legacy compatibility sensor must carry no pair filters"
+            )
+    body_quat_w = getattr(asset.data, "body_quat_w", None)
     if (
-        force_matrix is None
-        or force_matrix.ndim != 4
-        or force_matrix.shape[0] != broad_hit.shape[0]
-        or force_matrix.shape[1] < 1
-        or force_matrix.shape[2] != expected_filter_count
-        or force_matrix.shape[3] != 3
+        body_quat_w is None
+        or body_quat_w.ndim != 3
+        or body_quat_w.shape[:2] != asset.data.body_pos_w.shape[:2]
+        or body_quat_w.shape[-1] != 4
+        or body_quat_w.device != p.device
+        or body_quat_w.dtype != p.dtype
     ):
         raise RuntimeError(
-            "robot_hit_table requires filtered force_matrix_w shaped "
-            f"[env, body, {expected_filter_count}, 3]; got "
-            f"{None if force_matrix is None else tuple(force_matrix.shape)}"
+            "robot_hit_table requires live articulation body quaternion [env,body,4]"
         )
-    filtered_hit = filtered_contact_hit_mask(force_matrix, force_threshold)
-    return broad_hit | filtered_hit
+    blade_values = tuple(float(value) for value in racket_blade_half_extents_m)
+    offset_values = tuple(
+        float(value) for value in racket_blade_center_offset_wrist_m
+    )
+    if (
+        len(blade_values) != 3
+        or len(offset_values) != 3
+        or not all(math.isfinite(value) and value > 0.0 for value in blade_values)
+        or not all(math.isfinite(value) for value in offset_values)
+    ):
+        raise RuntimeError(
+            "robot_hit_table racket blade geometry must be finite with positive half extents"
+        )
+    blade_cache_key = (
+        tuple(asset.body_names),
+        str(racket_body_name),
+        offset_values,
+        blade_values,
+        str(p.device),
+        str(p.dtype),
+    )
+    blade_cache = getattr(asset, "_hope_legacy_table_blade_cache", None)
+    if blade_cache is None:
+        if racket_body_name not in asset.body_names:
+            raise RuntimeError(
+                "robot_hit_table live articulation lacks the racket body"
+            )
+        blade_cache = (
+            blade_cache_key,
+            asset.body_names.index(racket_body_name),
+            torch.tensor(offset_values, device=p.device, dtype=p.dtype),
+            torch.diag(
+                torch.tensor(blade_values, device=p.device, dtype=p.dtype)
+            ),
+        )
+        setattr(asset, "_hope_legacy_table_blade_cache", blade_cache)
+    elif blade_cache[0] != blade_cache_key:
+        raise RuntimeError(
+            "robot_hit_table legacy blade geometry changed during one run"
+        )
+    racket_index = blade_cache[1]
+    blade_hit = racket_blade_table_overlap_mask(
+        asset.data.body_pos_w[:, racket_index, :],
+        body_quat_w[:, racket_index, :],
+        env.scene.env_origins,
+        lo_t,
+        hi_t,
+        blade_cache[2],
+        blade_cache[3],
+    )
+    return broad_hit | blade_hit
 
 
 def robot_hit_table(
@@ -2583,8 +2934,8 @@ def robot_hit_table(
 ) -> torch.Tensor:
     """The robot violated the table assembly guard.  Terminal, exactly like falling over.
 
-    Legacy top-only mode keeps the broad non-foot/body-origin channel plus one exact wrist/racket
-    pair channel. ActionBall first uses conservative world-AABB overlap to select candidate pairs,
+    Legacy top-only mode keeps the broad non-foot/body-origin force channel plus one exact live
+    blade-OBB/table-AABB geometry channel. ActionBall first uses conservative world-AABB overlap to select candidate pairs,
     then terminates only on exact OBB-vs-table-AABB SAT overlap of its materialized
     collision-component OBBs or live racket-blade OBB; it does not read a ``ContactSensor``.
     A full-assembly positive is exact for this guard geometry, not proof of resolved physical

@@ -1,0 +1,50 @@
+# Common, non-launchable source for the fresh continuous full-MDP A/C pair.
+#
+# The registered A/C leaves own family identity in Python.  This YAML contains
+# no numeric family gain: the constructed C10 authority must derive A=1/C=0
+# from the exact EnvCfg type.  It deliberately does not compose the legacy
+# ActionBall task recipe: the inherited Python observation/reward graph is only
+# a construction-HOLD scaffold until R08/R03 replace it once for both families.
+
+name: HOPEPingPongActionBallFullMdpCommon
+experiment_name: agibot_a3_hope_action_ball_full_mdp
+
+action_ball_full_mdp_runtime: true
+actor_obs_contract: null
+registry_name: null
+registry_name_2: null
+
+# Fresh A/C share one plant-birth policy prior.  Zero normalized action decodes
+# through the live default-offset action term to the same materialized default
+# joint pose written by the selected-row reset; Motion frame 0 is deliberately
+# not a bootstrap authority for this continuous 73-clip task.
+action_ball_full_mdp_policy_bootstrap:
+  kind: a3_default_stand_zero_head_v1
+  init_noise_std: 0.02
+  noise_std_type: log
+
+# Legacy one-ball drivers are not a substitute for the capacity-derived K-body
+# fresh scene.  The Python EnvCfg repeats and enforces these tombstones.
+physical_ball: false
+table_obstacle: true
+
+env:
+  num_envs: 4096
+
+motion:
+  # The fresh diagnostic uses all 73 measured capture clips.  The old switch
+  # is a one-clip physical-ready -> measured-frame0 bridge and is not the
+  # continuous D05/Motion epoch, so applying it here would reject N=73 by
+  # construction.  False does not authorize launch or invent reset semantics.
+  action_ball_diagnostic_split_ready_teacher: false
+  action_ball_single_stroke_timeout_enabled: false
+
+racket:
+  # Exact fresh identity.  Python repeats this invariant so a composed legacy
+  # ActionBall value cannot select its one-shot sampler by inheritance.
+  target_mode: action_ball_full_mdp
+  # Until all full-MDP gates close, any finite probe remains diagnostic-only;
+  # it cannot be promoted, exported or presented as formal physics evidence.
+  action_ball_diagnostic_unauthorized: true
+  virtual_ball: false
+  vb_metrics_only: false

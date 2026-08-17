@@ -81,6 +81,211 @@ def action_ball_task_valid_mask(cmd: RacketTargetCommand) -> torch.Tensor:
     return task_valid
 
 
+STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED = "window_integrated"
+STRIKE_GUIDANCE_ELIGIBILITY_EXACT_ONE_SHOT = "exact_strike_one_shot"
+# Fresh same-transition mode.  Unlike the older diagnostic exact mode, this
+# never reads CommandTerm metrics, clocks, targets, or achieved racket state.
+# Each real RewardTerm must also pass its exact ledger consumer name.
+STRIKE_GUIDANCE_ELIGIBILITY_DEVICE_SEALED = "device_sealed_same_transition"
+STRIKE_GUIDANCE_ELIGIBILITY_MODES = frozenset(
+    (
+        STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+        STRIKE_GUIDANCE_ELIGIBILITY_EXACT_ONE_SHOT,
+        "device_sealed_same_transition",
+    )
+)
+
+
+def strike_guidance_eligibility_mask(
+    cmd: RacketTargetCommand,
+    window: torch.Tensor,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+) -> torch.Tensor:
+    """Select the explicit payment clock for ball-target paddle guidance.
+
+    ``window_integrated`` is the historical contract: every eligible control
+    tick in the supplied tight/wide window can pay.  The default returns that
+    tensor directly, without touching any exact-strike state, so existing
+    reward values and command/RNG/termination behavior remain unchanged.
+
+    ``exact_strike_one_shot`` consumes the command owner's already-latched
+    ``exact_strike_hit_rate`` publication.  It deliberately does *not*
+    reconstruct an exact tick from ``time_to_strike`` and owns no second
+    latch.  ``RacketTargetCommand`` masks RESET_WAIT before publishing this
+    bit and re-arms its authoritative ``_exact_fired`` latch on reset/wrap;
+    therefore each reward term can pay on at most one control tick per
+    attempt while task-invalid rows pay zero.
+
+    This only defines the consumer-side mask once an authoritative publication
+    is available.  In the currently pinned IsaacLab step order RewardManager
+    runs before CommandManager publishes the current step's metric, so a live
+    training reward would read the previous snapshot.  The train translator
+    therefore launch-blocks this mode until a same-transition pre-reward fact
+    and durable eligible/payment ledger exist; fixed diagnostic calls made
+    after publication remain useful for testing the mask contract itself.
+
+    This helper is the eligibility boundary, not a longitudinal accounting
+    store.  RewardManager remains the source of per-term payment sums; a
+    durable eligible/payment ledger must be joined at the runner aggregation
+    boundary rather than approximated by incrementing state from nine reward
+    call sites.
+    """
+
+    if eligibility_mode == STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED:
+        return window
+    if eligibility_mode == "device_sealed_same_transition":
+        raise RuntimeError(
+            "device_sealed_same_transition must be consumed directly by a "
+            "named RewardTerm through the strike-fact device coordinator; "
+            "the legacy mask helper cannot reconstruct or repay that fact"
+        )
+    if eligibility_mode != STRIKE_GUIDANCE_ELIGIBILITY_EXACT_ONE_SHOT:
+        raise ValueError(
+            "strike guidance eligibility_mode must be one of "
+            f"{sorted(STRIKE_GUIDANCE_ELIGIBILITY_MODES)!r}, got "
+            f"{eligibility_mode!r}"
+        )
+    motion_accessor = getattr(cmd, "_motion", None)
+    motion = motion_accessor() if callable(motion_accessor) else None
+    if not bool(getattr(motion, "retiming_active", False)):
+        raise RuntimeError(
+            "exact_strike_one_shot requires the command owner's retiming "
+            "latch; non-retimed exact publications are not proven one-shot"
+        )
+    metrics = getattr(cmd, "metrics", None)
+    exact = (
+        metrics.get("exact_strike_hit_rate")
+        if isinstance(metrics, dict)
+        else None
+    )
+    if (
+        not isinstance(exact, torch.Tensor)
+        or exact.shape != window.shape
+        or exact.device != window.device
+        or exact.dtype not in (torch.bool, torch.float16, torch.float32, torch.float64)
+    ):
+        raise RuntimeError(
+            "exact_strike_one_shot requires command metrics"
+            "['exact_strike_hit_rate'] to be a bool/float tensor matching the "
+            "reward window batch"
+        )
+    # Do not launch per-term finite/binary reduction kernels here: this helper
+    # is called by nine rewards on every control tick.  The tensor is an
+    # internal command publication assigned from ``exact_strike.float()``;
+    # shape/device/dtype validation is sufficient at this consumer boundary.
+    return exact.bool() & action_ball_task_valid_mask(cmd)
+
+
+_DEVICE_POSITION_EXP_CONSUMERS = (
+    "racket_position",
+    "racket_position_precision",
+)
+_DEVICE_VELOCITY_EXP_CONSUMERS = (
+    "racket_velocity",
+    "racket_velocity_precision",
+)
+_DEVICE_NORMAL_EXP_CONSUMERS = (
+    "racket_normal",
+    "racket_normal_precision",
+)
+_DEVICE_POSITION_COARSE_CONSUMERS = ("racket_position_coarse",)
+_DEVICE_VELOCITY_COARSE_CONSUMERS = ("racket_velocity_coarse",)
+_DEVICE_NORMAL_COARSE_CONSUMERS = ("racket_normal_coarse",)
+
+
+def _strike_fact_device_view(
+    cmd: RacketTargetCommand,
+    consumer_name: str | None,
+    allowed_consumers: tuple[str, ...],
+):
+    """Book one named read from the command owner's sealed shared cache."""
+
+    if not isinstance(consumer_name, str) or not consumer_name:
+        raise RuntimeError(
+            "device-sealed strike guidance requires strike_fact_consumer_name"
+        )
+    if consumer_name not in allowed_consumers:
+        raise ValueError(
+            f"consumer {consumer_name!r} is not valid for this strike guide; "
+            f"expected one of {allowed_consumers!r}"
+        )
+    coordinator = getattr(
+        cmd, "_action_ball_strike_fact_device_coordinator", None
+    )
+    if coordinator is None:
+        raise RuntimeError(
+            "device-sealed strike guidance requires the command coordinator"
+        )
+    view = coordinator.view(consumer_name)
+    return coordinator, view
+
+
+def _strike_fact_device_tracking_payment(
+    cmd: RacketTargetCommand,
+    *,
+    consumer_name: str | None,
+    allowed_consumers: tuple[str, ...],
+    component: str,
+    kernel: str,
+    std: float,
+    pos_gate_radius: float | None = None,
+) -> torch.Tensor:
+    """Compute and book one guide using only the sealed same-transition view."""
+
+    scale = float(std)
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise ValueError(
+            f"device-sealed strike guidance std must be finite and positive, got {std!r}"
+        )
+    coordinator, view = _strike_fact_device_view(
+        cmd, consumer_name, allowed_consumers
+    )
+    if component == "position":
+        error = torch.linalg.vector_norm(
+            view.achieved_position - view.target_position, dim=-1
+        )
+    elif component == "velocity":
+        error = torch.linalg.vector_norm(
+            view.achieved_velocity - view.target_velocity, dim=-1
+        )
+    elif component == "normal":
+        cosine = torch.sum(
+            view.achieved_face_normal * view.target_face_normal, dim=-1
+        ).clamp(-1.0, 1.0)
+        error = torch.acos(cosine)
+    else:
+        raise ValueError(f"unknown sealed strike component {component!r}")
+
+    if kernel == "exp":
+        raw = torch.exp(-torch.square(error / scale))
+    elif kernel == "cauchy":
+        raw = torch.reciprocal(1.0 + torch.square(error / scale))
+    else:
+        raise ValueError(f"unknown sealed strike kernel {kernel!r}")
+
+    gate: torch.Tensor | float = 1.0
+    if pos_gate_radius is not None:
+        radius = float(pos_gate_radius)
+        if not math.isfinite(radius) or radius <= 0.0:
+            raise ValueError(
+                "device-sealed strike position gate must be finite and positive"
+            )
+        position_error = torch.linalg.vector_norm(
+            view.achieved_position - view.target_position, dim=-1
+        )
+        gate = torch.sigmoid((radius - position_error) / 0.05)
+
+    # ``validity`` means only that the sealed physical/task fact is valid.  It
+    # is deliberately not a family or treatment selector: matched environments
+    # pay the same pre/contact guide from the same tape.
+    eligible = view.eligible & view.validity
+    payment = torch.where(
+        eligible, raw * gate, torch.zeros_like(raw)
+    )
+    coordinator.record_payment(consumer_name, payment)
+    return payment
+
+
 def _stage1_split_ready_wait_mask(cmd: RacketTargetCommand) -> torch.Tensor:
     """Return the one public mask that selects the hidden-WAIT teacher."""
 
@@ -1102,18 +1307,39 @@ def _normal_kernel_raw(cmd: RacketTargetCommand, std: float) -> torch.Tensor:
     return torch.exp(-(angle**2) / std**2)
 
 
-def racket_position_tracking_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
+def racket_position_tracking_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
+) -> torch.Tensor:
     """Track racket center position near strike using the target's swing-through trajectory.
     Gated by the TIGHT position window (1c): contact must be precise; == strike_window by default."""
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_POSITION_EXP_CONSUMERS,
+            component="position",
+            kernel="exp",
+            std=std,
+        )
     raw = _pos_kernel_raw(cmd, std)
-    win = _window_pos(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_pos(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_pos", raw, win)
     return raw * win.float()
 
 
 def racket_position_coarse_tracking_exp(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Coarse companion to :func:`racket_position_tracking_exp`.
 
@@ -1123,8 +1349,19 @@ def racket_position_coarse_tracking_exp(
     rank the currently observed 20--70 cm strike-window misses.
     """
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_POSITION_COARSE_CONSUMERS,
+            component="position",
+            kernel="exp",
+            std=std,
+        )
     raw = _pos_kernel_raw(cmd, std)
-    win = _window_pos(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_pos(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_pos_coarse", raw, win)
     return raw * win.float()
 
@@ -1146,78 +1383,159 @@ def _cauchy_tracking_kernel(error: torch.Tensor, std: float) -> torch.Tensor:
 
 
 def racket_position_coarse_tracking_cauchy(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Wide strike-window position shaping whose far-error gradient does not exponentially die."""
 
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_POSITION_COARSE_CONSUMERS,
+            component="position",
+            kernel="cauchy",
+            std=std,
+        )
     if not _target_component_valid(cmd, "position"):
         return torch.zeros_like(cmd.time_to_strike)
     target = _target_position_now(cmd)
     error = torch.linalg.vector_norm(cmd.racket_pos_w - target, dim=-1)
     raw = _cauchy_tracking_kernel(error, std)
-    win = _window_pos(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_pos(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_pos_coarse", raw, win)
     return raw * win.float()
 
 
 def racket_velocity_coarse_tracking_exp(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Gaussian broad velocity companion retained for explicit comparison arms."""
 
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_VELOCITY_COARSE_CONSUMERS,
+            component="velocity",
+            kernel="exp",
+            std=std,
+        )
     raw = _vel_kernel_raw(cmd, std)
-    win = _window_wide(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_wide(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_vel_coarse", raw, win)
     return raw * win.float() * _pos_gate(cmd, None)
 
 
 def racket_normal_coarse_tracking_exp(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Gaussian broad signed-face companion retained for explicit comparison arms."""
 
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_NORMAL_COARSE_CONSUMERS,
+            component="normal",
+            kernel="exp",
+            std=std,
+        )
     raw = _normal_kernel_raw(cmd, std)
-    win = _window_wide(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_wide(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_normal_coarse", raw, win)
     return raw * win.float() * _pos_gate(cmd, None)
 
 
 def racket_velocity_coarse_tracking_cauchy(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Wide strike-window site-velocity shaping with polynomial rather than exponential tails."""
 
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_VELOCITY_COARSE_CONSUMERS,
+            component="velocity",
+            kernel="cauchy",
+            std=std,
+        )
     if not _target_component_valid(cmd, "velocity"):
         return torch.zeros_like(cmd.time_to_strike)
     error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - cmd.racket_target_vel_w, dim=-1)
     raw = _cauchy_tracking_kernel(error, std)
-    win = _window_wide(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_wide(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_vel_coarse", raw, win)
     return raw * win.float() * _pos_gate(cmd, None)
 
 
 def racket_normal_coarse_tracking_cauchy(
-    env: ManagerBasedRLEnv, command_name: str, std: float
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Wide strike-window signed-face shaping with a polynomial-tail angular landscape."""
 
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_NORMAL_COARSE_CONSUMERS,
+            component="normal",
+            kernel="cauchy",
+            std=std,
+        )
     if not _target_component_valid(cmd, "face"):
         return torch.zeros_like(cmd.time_to_strike)
     measured, target_normal = _face_pair(cmd)
     cosine = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
     error = torch.acos(cosine)
     raw = _cauchy_tracking_kernel(error, std)
-    win = _window_wide(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_wide(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_normal_coarse", raw, win)
     return raw * win.float() * _pos_gate(cmd, None)
 
 
-def racket_position_tracking_static_exp(env: ManagerBasedRLEnv, command_name: str, std: float) -> torch.Tensor:
+def racket_position_tracking_static_exp(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
+) -> torch.Tensor:
     """Ablation B: track the strike POINT itself (no swing-through), decoupling position from timing/velocity.
 
     Identical gating to ``racket_position_tracking_exp`` but compares against the bare ``racket_target_pos_w``
@@ -1227,37 +1545,82 @@ def racket_position_tracking_static_exp(env: ManagerBasedRLEnv, command_name: st
     early stable positioning. Select via ``rewards.racket_position_static: true`` in the task YAML.
     """
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_POSITION_EXP_CONSUMERS,
+            component="position",
+            kernel="exp",
+            std=std,
+        )
     if not _target_component_valid(cmd, "position"):
         return torch.zeros_like(cmd.time_to_strike)
     error = torch.sum(torch.square(cmd.racket_pos_w - cmd.racket_target_pos_w), dim=-1)
     raw = torch.exp(-error / std**2)
-    win = _window_pos(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_pos(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_pos", raw, win)
     return raw * win.float()
 
 
 def racket_velocity_tracking_exp(
-    env: ManagerBasedRLEnv, command_name: str, std: float, pos_gate_radius: float | None = None
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    pos_gate_radius: float | None = None,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Track racket linear velocity near the strike time (FK actual vs desired, world frame).
     Gated by the WIDE window (1c; == strike_window by default) and, when rewards.face_gate_by_pos
     is on, by the proximity power-gate (see ``_pos_gate``)."""
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_VELOCITY_EXP_CONSUMERS,
+            component="velocity",
+            kernel="exp",
+            std=std,
+            pos_gate_radius=pos_gate_radius,
+        )
     raw = _vel_kernel_raw(cmd, std)
-    win = _window_wide(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_wide(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_vel", raw, win)
     return raw * win.float() * _pos_gate(cmd, pos_gate_radius)
 
 
 def racket_normal_tracking_exp(
-    env: ManagerBasedRLEnv, command_name: str, std: float, pos_gate_radius: float | None = None
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    pos_gate_radius: float | None = None,
+    eligibility_mode: str = STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED,
+    strike_fact_consumer_name: str | None = None,
 ) -> torch.Tensor:
     """Track racket face-normal orientation near the strike time. ``std`` is in radians.
     Gated by the WIDE window (1c; == strike_window by default) and, when rewards.face_gate_by_pos
     is on, by the proximity power-gate (see ``_pos_gate``)."""
     cmd = _cmd(env, command_name)
+    if eligibility_mode == "device_sealed_same_transition":
+        return _strike_fact_device_tracking_payment(
+            cmd,
+            consumer_name=strike_fact_consumer_name,
+            allowed_consumers=_DEVICE_NORMAL_EXP_CONSUMERS,
+            component="normal",
+            kernel="exp",
+            std=std,
+            pos_gate_radius=pos_gate_radius,
+        )
     raw = _normal_kernel_raw(cmd, std)
-    win = _window_wide(cmd)
+    win = strike_guidance_eligibility_mask(
+        cmd, _window_wide(cmd), eligibility_mode
+    )
     _dbg_log(cmd, "racket_normal", raw, win)
     return raw * win.float() * _pos_gate(cmd, pos_gate_radius)
 
@@ -5070,10 +5433,22 @@ def virtual_landing_dense_actual_contact(
             "virtual_landing_dense_actual_contact target buffer must be "
             "broadcastable as [1,2] or match [num_envs,2] landing positions"
         )
-    dist2 = torch.sum(torch.square(cmd.vb_landing_xy - target_xy), dim=-1)
+    # ``vb_landing_xy`` is meaningful only where ``vb_landing_valid`` is true.
+    # In particular, the fitted counter-rally rollout deliberately leaves a
+    # non-finite first-landing coordinate on trajectories that never reach the
+    # landing plane.  Computing the kernel first and multiplying by the false
+    # validity gate afterwards is not a gate: IEEE ``NaN * 0 == NaN``.  Select
+    # a finite zero-error placeholder before any arithmetic so invalid rows
+    # keep the documented exact-zero reward while every valid row remains
+    # byte-for-byte on the original expression.
+    valid = cmd.vb_landing_valid
+    safe_landing_xy = torch.where(
+        valid.unsqueeze(-1), cmd.vb_landing_xy, target_xy
+    )
+    dist2 = torch.sum(torch.square(safe_landing_xy - target_xy), dim=-1)
     kernel = torch.exp(-dist2 / float(cmd.cfg.vb_landing_sigma) ** 2)
     fired = cmd.vb_fired & action_ball_task_valid_mask(cmd)
-    return kernel * cmd.vb_landing_valid.float() * fired.float()
+    return kernel * valid.float() * fired.float()
 
 
 _LANDING_PRIZE_PENDING_ATTR = "_hope_landing_prize_pending"

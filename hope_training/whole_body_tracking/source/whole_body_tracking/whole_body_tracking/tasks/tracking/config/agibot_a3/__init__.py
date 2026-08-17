@@ -92,6 +92,42 @@ gym.register(
     },
 )
 
+# Fresh continuous full-MDP replacement.  These two ids deliberately use the
+# custom environment that owns the post-physics and selected-reset callpoints;
+# mapping either id back to ManagerBasedRLEnv would leave the runtime gates with
+# no production consumer.  A/C use two exact EnvCfg types so the family role is
+# code-owned.  Neither registration accepts a YAML-authored numeric placement
+# gain: the constructed C10 authority derives A=1/C=0 from the exact type.
+gym.register(
+    id="HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
+    entry_point=(
+        "whole_body_tracking.tasks.tracking.full_mdp_env:"
+        "ActionBallFullMdpManagerBasedRLEnv"
+    ),
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            hope_env_cfg.HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="HOPE-PingPong-ActionBall-FullMdpC-AgibotA3-v0",
+    entry_point=(
+        "whole_body_tracking.tasks.tracking.full_mdp_env:"
+        "ActionBallFullMdpManagerBasedRLEnv"
+    ),
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            hope_env_cfg.HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg
+        ),
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
 # Fixed-question A211 four-arm learnability diagnostic.  This is intentionally
 # separate from both the historical fixed-194 ActionBall task and the
 # construction-only A211/C211 leaves.  Its explicit 319-D privileged critic is

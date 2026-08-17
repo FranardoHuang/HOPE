@@ -40,16 +40,39 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import torch
 
-from .strike_spec_torch import solve_strike_specs
-from .stroke_adapt_torch import (
-    REASONS,
-    _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
-    solve_strike_specs_fixed_dir,
-)
-from .virtual_ball import VirtualBallParams, coarse_landing, predict_paddle_contact
+if __package__:
+    from .strike_spec_torch import solve_strike_specs
+    from .stroke_adapt_torch import (
+        REASONS,
+        _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+        base_yaw_of,
+        solve_strike_specs_fixed_dir,
+    )
+    from .virtual_ball import (
+        VirtualBallParams,
+        coarse_landing,
+        predict_paddle_contact,
+    )
+else:
+    # MuJoCo-GPU imports this exact four-file pure-Torch closure as top-level
+    # modules from the pinned mdp source directory.  No package init, dynamic
+    # loader, sys.path mutation, or second solver implementation is involved.
+    from strike_spec_torch import solve_strike_specs
+    from stroke_adapt_torch import (
+        REASONS,
+        _DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+        base_yaw_of,
+        solve_strike_specs_fixed_dir,
+    )
+    from virtual_ball import (
+        VirtualBallParams,
+        coarse_landing,
+        predict_paddle_contact,
+    )
 
 _EPS = 1e-9
 
@@ -70,6 +93,21 @@ _R_NET = 5
 _R_FACE = 6
 _R_CONTACT_ENVELOPE = 7
 _CONTINUOUS_REASONS = REASONS + ("contact_normal_speed_out_of_fit",)
+
+# Device-resident producer-fault ABI.  These bits describe the input row, not
+# whether the numerical inverse solve found an installable answer.  A valid but
+# infeasible question therefore keeps ``producer_fault_bits == 0`` and its
+# ordinary construction rejection reason.  The future construction-bound R05
+# owner must include this exact int64 row in its sole packed reveal and CENSOR
+# every nonzero row before any task/ball write.
+PRODUCER_FAULT_NONFINITE_PROPOSAL = 1 << 0
+PRODUCER_FAULT_REFERENCE_NORMAL = 1 << 1
+PRODUCER_FAULT_BASE_QUATERNION = 1 << 2
+PRODUCER_FAULT_ACTION_RANGE = 1 << 3
+PRODUCER_FAULT_PROTOTYPE_DIRECTION = 1 << 4
+PRODUCER_FAULT_PROTOTYPE_SPEED = 1 << 5
+PRODUCER_FAULT_PROTOTYPE_FACE_SIGN = 1 << 6
+PRODUCER_FAULT_MASK = (1 << 7) - 1
 
 # --- incoming-ball birth-consistency gate (Franco 2026-07-28) ---------------
 # 人话:把来球"往回倒 ttc 秒",最少也得从这条线以外出发。低速球配短到球时间会把
@@ -174,6 +212,38 @@ class ProposalLedger:
 
 
 @dataclass(frozen=True)
+class DeviceProposalSolveResult:
+    """Device-resident result of one exact fixed-action proposal solve.
+
+    This is a numerical construction result, not a portable receipt and not a
+    complete Device-R05 candidate bank.  In particular, it contains no Python
+    reason histogram, JSON/hash identity, or host packet.  A construction-bound
+    question authority must still join these rows to Motion timing and the
+    Racket/physical after-images before Device-R05 can select a cell.
+
+    Invalid producer rows are represented by ``producer_fault_bits`` with the
+    exact seven-bit ABI above.  They are sanitized before numerical evaluation
+    so a NaN, bad quaternion or out-of-range action cannot poison another row,
+    then NaN-masked in every installable geometric tensor.  Their original
+    inputs and a schema-valid rejection code remain device-resident in
+    ``proposals`` so the one packed reveal boundary can record and block from
+    the same batch.  The bits are facts, not an authorization verdict.
+    """
+
+    p_contact: torch.Tensor
+    v_racket: torch.Tensor
+    n_racket: torch.Tensor
+    v_ball_in: torch.Tensor
+    w_ball_in: torch.Tensor
+    aim_xy: torch.Tensor
+    ok: torch.Tensor
+    resid_m: torch.Tensor
+    attempted_v_ball_in: torch.Tensor
+    producer_fault_bits: torch.Tensor
+    proposals: ProposalLedger
+
+
+@dataclass(frozen=True)
 class ProposalHostPacket:
     """Immutable host copy of the exact per-row solver outputs consumed by Python.
 
@@ -229,16 +299,28 @@ def _build_proposal_host_packet(
     *,
     reason_codes: torch.Tensor,
     admitted: torch.Tensor,
+    producer_fault_bits: torch.Tensor,
     racket_velocity: torch.Tensor,
     racket_normal: torch.Tensor,
     residual: torch.Tensor,
 ) -> ProposalHostPacket:
-    """Copy the exact-once solver result through one ordered device-to-host transfer."""
+    """Copy a diagnostic result through one ordered device-to-host transfer.
+
+    This is the legacy portable wrapper's boundary, not Device-R05's future
+    construction-bound packed reveal.  It fails synchronously on any producer
+    fault; the production owner will instead encode the same bits in its global
+    packet and select the typed CENSOR terminal.
+    """
 
     if not isinstance(reason_codes, torch.Tensor) or reason_codes.dtype != torch.long:
         raise TypeError("proposal host packet reason codes must be torch.long")
     if not isinstance(admitted, torch.Tensor) or admitted.dtype != torch.bool:
         raise TypeError("proposal host packet admitted mask must be torch.bool")
+    if (
+        not isinstance(producer_fault_bits, torch.Tensor)
+        or producer_fault_bits.dtype != torch.long
+    ):
+        raise TypeError("proposal host packet producer fault bits must be torch.long")
     if not isinstance(racket_velocity, torch.Tensor) or not isinstance(
         racket_normal, torch.Tensor
     ):
@@ -249,6 +331,7 @@ def _build_proposal_host_packet(
     if (
         tuple(reason_codes.shape) != (row_count,)
         or tuple(admitted.shape) != (row_count,)
+        or tuple(producer_fault_bits.shape) != (row_count,)
         or tuple(racket_velocity.shape) != (row_count, 3)
         or tuple(racket_normal.shape) != (row_count, 3)
         or tuple(residual.shape) != (row_count,)
@@ -263,16 +346,19 @@ def _build_proposal_host_packet(
         or residual.device != device
         or reason_codes.device != device
         or admitted.device != device
+        or producer_fault_bits.device != device
     ):
         raise ValueError(
             "proposal host packet tensors must share one floating dtype and device"
         )
 
-    # Float32/float64 represent the tiny integer reason schema and the 0/1 admission bit exactly.
-    # Keeping all nine columns in the solver dtype preserves the exact Python floats returned by
-    # the former per-field ``tolist`` calls while reducing seven synchronization points to one.
+    # Float32/float64 represent the seven-bit producer mask, tiny integer reason
+    # schema and 0/1 admission bit exactly.  Keeping all ten columns in the
+    # solver dtype preserves the exact historical numeric rows while consuming
+    # the producer fault in the same single host transfer.
     packed_rows = torch.cat(
         (
+            producer_fault_bits.to(dtype=dtype).unsqueeze(-1),
             reason_codes.to(dtype=dtype).unsqueeze(-1),
             admitted.to(dtype=dtype).unsqueeze(-1),
             racket_velocity,
@@ -288,13 +374,29 @@ def _build_proposal_host_packet(
     host_normal = []
     host_residual = []
     for row in packed_rows:
-        if not isinstance(row, list) or len(row) != 9:
+        if not isinstance(row, list) or len(row) != 10:
             raise RuntimeError("proposal host packet transfer returned a malformed row")
-        raw_reason = float(row[0])
+        raw_fault_bits = float(row[0])
+        fault_bits = int(raw_fault_bits)
+        if (
+            not math.isfinite(raw_fault_bits)
+            or raw_fault_bits != float(fault_bits)
+            or fault_bits < 0
+            or fault_bits & ~PRODUCER_FAULT_MASK
+        ):
+            raise RuntimeError(
+                "proposal host packet producer fault bits are invalid"
+            )
+        if fault_bits:
+            raise RuntimeError(
+                "diagnostic proposal producer fault bits are nonzero: "
+                f"0x{fault_bits:02x}"
+            )
+        raw_reason = float(row[1])
         reason = int(raw_reason)
         if not math.isfinite(raw_reason) or raw_reason != float(reason):
             raise RuntimeError("proposal host packet reason code is not an exact integer")
-        raw_admitted = float(row[1])
+        raw_admitted = float(row[2])
         if raw_admitted not in (0.0, 1.0):
             raise RuntimeError("proposal host packet admitted value is not exactly 0 or 1")
         is_admitted = raw_admitted == 1.0
@@ -309,9 +411,9 @@ def _build_proposal_host_packet(
             )
         host_reasons.append(reason)
         host_admitted.append(is_admitted)
-        host_velocity.append(tuple(float(value) for value in row[2:5]))
-        host_normal.append(tuple(float(value) for value in row[5:8]))
-        host_residual.append(float(row[8]))
+        host_velocity.append(tuple(float(value) for value in row[3:6]))
+        host_normal.append(tuple(float(value) for value in row[6:9]))
+        host_residual.append(float(row[9]))
 
     return ProposalHostPacket(
         reason_codes=tuple(host_reasons),
@@ -623,8 +725,6 @@ def _solve_fixed_direction_batch(
     Inputs have already passed their caller's validation; this function neither samples nor
     modifies them.
     """
-    from .stroke_adapt_torch import base_yaw_of
-
     device, dtype = p_contact.device, p_contact.dtype
     yaw = base_yaw_of(base_quat)
     d_m = _selected_direction_world(protos.v_hat_b, clip_ids, yaw, device, dtype)
@@ -636,20 +736,31 @@ def _solve_fixed_direction_batch(
             float(cfg.speed_budget),
         ),
     )
+    budget_infeasible = speed_min_m > speed_max_m
     if not _diagnostic_prevalidated and bool(
-        (speed_min_m > speed_max_m).any()
+        budget_infeasible.any()
     ):
         bad = torch.nonzero(
-            speed_min_m > speed_max_m, as_tuple=False
+            budget_infeasible, as_tuple=False
         ).flatten().tolist()
         raise ValueError(
             "fixed-direction global speed_budget is below the selected "
             f"prototype minimum for rows {bad[:8]}"
         )
+    # A finite, positive, ordered source band remains attributable even when
+    # its minimum lies above this run's global speed budget.  That relation is
+    # ordinary construction infeasibility, not a malformed producer.  Give the
+    # fixed-try numerical leaf a finite degenerate budget interval, then retain
+    # the original minimum in the authoritative replay and force the ordinary
+    # speed-under-min reason below.  The portable/formal entry keeps its legacy
+    # fail-loud behavior through the branch above.
+    solver_speed_min_m = torch.where(
+        budget_infeasible, speed_max_m, speed_min_m
+    )
     face_sign_m = protos.face_sign.to(device, dtype)[clip_ids]
     out = solve_strike_specs_fixed_dir(
         p_contact, v_ball_in, w_ball_in, aim_xy, d_m,
-        speed_min_m, speed_max_m,
+        solver_speed_min_m, speed_max_m,
         prm, surface_z=surface_z, net_x=net_x,
         # Map the adapter's legacy reconstructed threshold onto the scorer's explicit ball-centre
         # plane.  Its ok/reason are ignored; the replay below is the sole acceptance authority.
@@ -663,7 +774,7 @@ def _solve_fixed_direction_batch(
             else None
         ),
     )
-    return _fixed_direction_replay(
+    replayed, good, reasons = _fixed_direction_replay(
         out=out, p_contact=p_contact, v_ball_in=v_ball_in, w_ball_in=w_ball_in,
         aim_xy=aim_xy, ref_normal=ref_normal, speed_min=speed_min_m,
         speed_max=speed_max_m, face_sign=face_sign_m, prm=prm,
@@ -671,6 +782,15 @@ def _solve_fixed_direction_batch(
         net_top_z=float(net_top_z), tol_m=float(cfg.tol_m), h=float(h),
         n_steps=int(n_steps),
     )
+    good = good & ~budget_infeasible
+    reasons = torch.where(
+        budget_infeasible,
+        torch.full_like(reasons, _R_SPEED_UNDER),
+        reasons,
+    )
+    replayed["ok"] = good
+    replayed["reason"] = reasons
+    return replayed, good, reasons
 
 
 def _validate_external_proposals(
@@ -800,14 +920,19 @@ def _diagnostic_prevalidated_external_proposals(
     cfg,
     h,
     n_steps,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Normalize a producer-owned batch without synchronously reproving it.
+) -> tuple:
+    """Prepare a producer-owned batch without observing dynamic tensor facts.
 
-    Shape, dtype and device are host metadata and stay fail-loud here.  The
-    dynamic finite/unit/range invariant is retained as one asynchronous device
-    assertion; its failure is observed at the solver's existing result
-    transfer.  This path is diagnostic-only and cannot be selected with a
-    boolean or an equal-looking object.
+    Shape, dtype and device are host metadata and stay fail-loud here.  Every
+    dynamic finite/unit/range predicate becomes one bit in the returned
+    device-resident ``int64[P]`` producer-fault row.  Bad rows are replaced by
+    finite deterministic solver inputs, but their original evidence remains in
+    the ledger.  This helper never uses an asynchronous assertion as a delayed
+    authorization check.
+
+    The private capability protects only the portable diagnostic bypass.  The
+    public device entry point supplies it internally and exposes the fault row
+    for the future construction-bound authority to pack and CENSOR.
     """
 
     if authority is not _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY:
@@ -934,62 +1059,306 @@ def _diagnostic_prevalidated_external_proposals(
         raise ValueError(
             "prototype tables must have aligned (K,3)/(K,) shapes"
         )
-    base = torch.as_tensor(base_quat, dtype=dtype, device=device)
-    reference = ref_normal.to(device=device, dtype=dtype)
+    base = base_quat
+    reference = ref_normal
     proto_direction = protos.v_hat_b.to(device=device, dtype=dtype)
     proto_speed_min = protos.speed_min.to(device=device, dtype=dtype)
     proto_speed_max = protos.speed_max.to(device=device, dtype=dtype)
     proto_face_sign = protos.face_sign.to(device=device, dtype=dtype)
-    base_norm = torch.linalg.norm(base, dim=-1, keepdim=True)
-    reference_norm = torch.linalg.norm(
-        reference, dim=-1, keepdim=True
+    base_norm = torch.linalg.norm(base, dim=-1)
+    reference_norm = torch.linalg.norm(reference, dim=-1)
+    proto_direction_norm = torch.linalg.norm(proto_direction, dim=-1)
+
+    proposal_valid = (
+        torch.isfinite(p_contact).all(dim=-1)
+        & torch.isfinite(v_ball_in).all(dim=-1)
+        & torch.isfinite(w_ball_in).all(dim=-1)
+        & torch.isfinite(aim_xy).all(dim=-1)
     )
-    proto_direction_norm = torch.linalg.norm(
-        proto_direction, dim=-1
+    reference_valid = (
+        torch.isfinite(reference).all(dim=-1)
+        & torch.isfinite(reference_norm)
+        & (reference_norm > _EPS)
     )
-    dynamic_valid = (
-        torch.isfinite(p_contact).all()
-        & torch.isfinite(v_ball_in).all()
-        & torch.isfinite(w_ball_in).all()
-        & torch.isfinite(aim_xy).all()
-        & torch.isfinite(reference).all()
-        & torch.isfinite(base).all()
-        & torch.isfinite(base_norm).all()
-        & torch.isfinite(reference_norm).all()
-        & (base_norm.squeeze(-1) > _EPS).all()
-        & (
-            (base_norm.squeeze(-1) - 1.0).abs() <= 1.0e-3
-        ).all()
-        & (reference_norm.squeeze(-1) > _EPS).all()
-        & torch.isfinite(proto_direction).all()
-        & torch.isfinite(proto_direction_norm).all()
-        & (proto_direction_norm > _EPS).all()
-        & ((proto_direction_norm - 1.0).abs() <= 1.0e-3).all()
-        & torch.isfinite(proto_speed_min).all()
-        & torch.isfinite(proto_speed_max).all()
-        & (proto_speed_min > 0.0).all()
-        & (proto_speed_max >= proto_speed_min).all()
-        & (
-            proto_speed_min <= float(cfg.speed_budget)
-        ).all()
-        & torch.isfinite(proto_face_sign).all()
-        & (
-            (proto_face_sign == 1.0)
-            | (proto_face_sign == -1.0)
-        ).all()
-        & (clip_ids >= 0).all()
-        & (clip_ids < action_count).all()
+    base_valid = (
+        torch.isfinite(base).all(dim=-1)
+        & torch.isfinite(base_norm)
+        & (base_norm > _EPS)
+        & ((base_norm - 1.0).abs() <= 1.0e-3)
     )
-    assert_async = getattr(torch, "_assert_async", None)
-    if not callable(assert_async):
-        raise RuntimeError(
-            "diagnostic prevalidated solve requires torch._assert_async"
-        )
-    assert_async(
-        dynamic_valid,
-        "diagnostic producer emitted invalid prevalidated solver inputs",
+    action_valid = (clip_ids >= 0) & (clip_ids < action_count)
+    safe_clip_ids = clip_ids.clamp(min=0, max=action_count - 1)
+
+    direction_valid = (
+        torch.isfinite(proto_direction).all(dim=-1)
+        & torch.isfinite(proto_direction_norm)
+        & (proto_direction_norm > _EPS)
+        & ((proto_direction_norm - 1.0).abs() <= 1.0e-3)
     )
-    return reference / reference_norm, base / base_norm
+    speed_valid = (
+        torch.isfinite(proto_speed_min)
+        & torch.isfinite(proto_speed_max)
+        & (proto_speed_min > 0.0)
+        & (proto_speed_max >= proto_speed_min)
+    )
+    face_valid = (
+        torch.isfinite(proto_face_sign)
+        & ((proto_face_sign == 1.0) | (proto_face_sign == -1.0))
+    )
+    selected_direction_valid = action_valid & direction_valid[safe_clip_ids]
+    selected_speed_valid = action_valid & speed_valid[safe_clip_ids]
+    selected_face_valid = action_valid & face_valid[safe_clip_ids]
+
+    producer_fault_bits = torch.zeros_like(clip_ids, dtype=torch.long)
+    producer_fault_bits = torch.where(
+        proposal_valid,
+        producer_fault_bits,
+        producer_fault_bits | PRODUCER_FAULT_NONFINITE_PROPOSAL,
+    )
+    producer_fault_bits = torch.where(
+        reference_valid,
+        producer_fault_bits,
+        producer_fault_bits | PRODUCER_FAULT_REFERENCE_NORMAL,
+    )
+    producer_fault_bits = torch.where(
+        base_valid,
+        producer_fault_bits,
+        producer_fault_bits | PRODUCER_FAULT_BASE_QUATERNION,
+    )
+    producer_fault_bits = torch.where(
+        action_valid,
+        producer_fault_bits,
+        producer_fault_bits | PRODUCER_FAULT_ACTION_RANGE,
+    )
+    producer_fault_bits = torch.where(
+        selected_direction_valid | ~action_valid,
+        producer_fault_bits,
+        producer_fault_bits | PRODUCER_FAULT_PROTOTYPE_DIRECTION,
+    )
+    producer_fault_bits = torch.where(
+        selected_speed_valid | ~action_valid,
+        producer_fault_bits,
+        producer_fault_bits | PRODUCER_FAULT_PROTOTYPE_SPEED,
+    )
+    producer_fault_bits = torch.where(
+        selected_face_valid | ~action_valid,
+        producer_fault_bits,
+        producer_fault_bits | PRODUCER_FAULT_PROTOTYPE_FACE_SIGN,
+    )
+
+    fallback_reference = torch.zeros_like(reference)
+    fallback_reference[:, 0] = 1.0
+    safe_reference = torch.where(
+        reference_valid.unsqueeze(-1), reference, fallback_reference
+    )
+    ref_unit = safe_reference / torch.linalg.norm(
+        safe_reference, dim=-1, keepdim=True
+    )
+    fallback_base = torch.zeros_like(base)
+    fallback_base[:, 0] = 1.0
+    safe_base = torch.where(base_valid.unsqueeze(-1), base, fallback_base)
+    base_unit = safe_base / torch.linalg.norm(
+        safe_base, dim=-1, keepdim=True
+    )
+
+    fallback_direction = torch.zeros_like(proto_direction)
+    fallback_direction[:, 0] = 1.0
+    safe_direction = torch.where(
+        direction_valid.unsqueeze(-1), proto_direction, fallback_direction
+    )
+    fallback_speed_min = torch.full_like(
+        proto_speed_min, 0.5 * float(cfg.speed_budget)
+    )
+    fallback_speed_max = torch.full_like(
+        proto_speed_max, float(cfg.speed_budget)
+    )
+    safe_protos = SimpleNamespace(
+        v_hat_b=safe_direction,
+        speed_min=torch.where(
+            speed_valid, proto_speed_min, fallback_speed_min
+        ),
+        speed_max=torch.where(
+            speed_valid, proto_speed_max, fallback_speed_max
+        ),
+        face_sign=torch.where(
+            face_valid, proto_face_sign, torch.ones_like(proto_face_sign)
+        ),
+    )
+
+    fault_free = producer_fault_bits == 0
+    fallback_p_contact = torch.zeros_like(p_contact)
+    fallback_p_contact[:, 0] = float(net_x) - 0.8
+    fallback_p_contact[:, 2] = float(surface_z) + 0.2
+    fallback_v_ball_in = torch.zeros_like(v_ball_in)
+    fallback_v_ball_in[:, 0] = -3.0
+    fallback_aim_xy = torch.zeros_like(aim_xy)
+    fallback_aim_xy[:, 0] = float(net_x) + 0.6
+    safe_p_contact = torch.where(
+        fault_free.unsqueeze(-1), p_contact, fallback_p_contact
+    )
+    safe_v_ball_in = torch.where(
+        fault_free.unsqueeze(-1), v_ball_in, fallback_v_ball_in
+    )
+    safe_w_ball_in = torch.where(
+        fault_free.unsqueeze(-1), w_ball_in, torch.zeros_like(w_ball_in)
+    )
+    safe_aim_xy = torch.where(
+        fault_free.unsqueeze(-1), aim_xy, fallback_aim_xy
+    )
+    return (
+        safe_clip_ids,
+        safe_p_contact,
+        safe_v_ball_in,
+        safe_w_ball_in,
+        safe_aim_xy,
+        ref_unit,
+        base_unit,
+        safe_protos,
+        producer_fault_bits,
+    )
+
+
+@torch.no_grad()
+def solve_proposals_device(
+    clip_ids: torch.Tensor,
+    p_contact: torch.Tensor,
+    v_ball_in: torch.Tensor,
+    w_ball_in: torch.Tensor,
+    aim_xy: torch.Tensor,
+    ref_normal: torch.Tensor,
+    *,
+    protos,
+    base_quat: torch.Tensor,
+    prm: VirtualBallParams,
+    surface_z: float,
+    net_x: float,
+    net_top_z: float,
+    cfg: ContinuousQuestionCfg,
+    h: float = 0.01,
+    n_steps: int = 100,
+) -> DeviceProposalSolveResult:
+    """Solve exact external proposals without observing a tensor on the host.
+
+    ``P == N`` and each input row is solved once.  Shape/dtype/device mistakes
+    fail before the solver.  Dynamic tensor predicates are encoded in
+    ``producer_fault_bits`` without a host observation or delayed assertion.
+    The eventual construction-bound consumer must include that exact row in the
+    sole packed reveal boundary and CENSOR every nonzero row before installing
+    any task or ball.
+
+    This function deliberately uses the bit-exact fixed-try LM implementation:
+    unlike the portable historical loop it contains no data-dependent Python
+    ``bool(tensor)`` break.  It never calls ``_build_proposal_host_packet`` and
+    never materializes a Python reason/count/identity object.
+    """
+    (
+        safe_clip_ids,
+        safe_p_contact,
+        safe_v_ball_in,
+        safe_w_ball_in,
+        safe_aim_xy,
+        ref_unit,
+        base_unit,
+        safe_protos,
+        producer_fault_bits,
+    ) = _diagnostic_prevalidated_external_proposals(
+        authority=_DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY,
+        clip_ids=clip_ids,
+        p_contact=p_contact,
+        v_ball_in=v_ball_in,
+        w_ball_in=w_ball_in,
+        aim_xy=aim_xy,
+        ref_normal=ref_normal,
+        protos=protos,
+        base_quat=base_quat,
+        prm=prm,
+        surface_z=surface_z,
+        net_x=net_x,
+        net_top_z=net_top_z,
+        cfg=cfg,
+        h=h,
+        n_steps=n_steps,
+    )
+    out, good, reasons = _solve_fixed_direction_batch(
+        clip_ids=safe_clip_ids,
+        p_contact=safe_p_contact,
+        v_ball_in=safe_v_ball_in,
+        w_ball_in=safe_w_ball_in,
+        aim_xy=safe_aim_xy,
+        ref_normal=ref_unit,
+        protos=safe_protos,
+        base_quat=base_unit,
+        prm=prm,
+        surface_z=surface_z,
+        net_x=net_x,
+        net_top_z=net_top_z,
+        cfg=cfg,
+        h=h,
+        n_steps=n_steps,
+        _diagnostic_prevalidated=True,
+    )
+
+    row_count = int(clip_ids.shape[0])
+    fault_free = producer_fault_bits == 0
+    good = good & fault_free
+    reasons = torch.where(
+        fault_free, reasons, torch.full_like(reasons, _R_NO_LANDING)
+    )
+    installable = good.unsqueeze(-1)
+    p_out = torch.where(
+        installable, p_contact, torch.full_like(p_contact, float("nan"))
+    )
+    v_in_out = torch.where(
+        installable, v_ball_in, torch.full_like(v_ball_in, float("nan"))
+    )
+    w_in_out = torch.where(
+        installable, w_ball_in, torch.full_like(w_ball_in, float("nan"))
+    )
+    aim_out = torch.where(
+        installable, aim_xy, torch.full_like(aim_xy, float("nan"))
+    )
+    v_r_out = torch.where(
+        installable, out["v_r"], torch.full_like(out["v_r"], float("nan"))
+    )
+    n_r_out = torch.where(
+        installable, out["n"], torch.full_like(out["n"], float("nan"))
+    )
+    residual = torch.where(
+        fault_free,
+        torch.nan_to_num(out["resid_m"], nan=float("inf")),
+        torch.full_like(out["resid_m"], float("inf")),
+    ).clone()
+    ledger = ProposalLedger(
+        request_index=torch.arange(
+            row_count, dtype=torch.long, device=p_contact.device
+        ),
+        clip_id=clip_ids.clone(),
+        round_index=torch.ones(
+            row_count, dtype=torch.long, device=p_contact.device
+        ),
+        p_contact=p_contact.clone(),
+        v_ball_in=v_ball_in.clone(),
+        w_ball_in=w_ball_in.clone(),
+        aim_xy=aim_xy.clone(),
+        reason_code=reasons.clone(),
+        admitted=good.clone(),
+        resid_m=residual.clone(),
+        ref_normal=ref_normal.clone(),
+        base_quat=base_quat.clone(),
+    )
+    return DeviceProposalSolveResult(
+        p_contact=p_out,
+        v_racket=v_r_out,
+        n_racket=n_r_out,
+        v_ball_in=v_in_out,
+        w_ball_in=w_in_out,
+        aim_xy=aim_out,
+        ok=good.clone(),
+        resid_m=residual,
+        attempted_v_ball_in=v_ball_in.clone(),
+        producer_fault_bits=producer_fault_bits.clone(),
+        proposals=ledger,
+    )
 
 
 @torch.no_grad()
@@ -1012,88 +1381,178 @@ def solve_proposals(
     n_steps: int = 100,
     _diagnostic_prevalidated_authority=None,
 ) -> QuestionDrawResult:
-    """Solve exact externally supplied ball proposals once, with no sampling or redraw.
+    """Portable result boundary with a separate diagnostic device core.
 
-    ``P == N`` and each request row appears exactly once in ``proposals``.  Rejected inputs remain
-    visible there with their reason, but all installable geometric output fields for those rows are
-    NaN.  This is the curriculum bridge: an action-conditioned sampler owns the ball distribution;
-    this function only computes and certifies the matching task.
+    The historical validation branch stays first so public exception ordering
+    and serial-LM numerical behavior stay unchanged.  The private diagnostic
+    path delegates to :func:`solve_proposals_device`.  Only this portable
+    boundary constructs Python reason counts and the immutable one-transfer
+    host packet.
     """
     if _diagnostic_prevalidated_authority is None:
         ref_unit, base_unit = _validate_external_proposals(
-            clip_ids=clip_ids, p_contact=p_contact, v_ball_in=v_ball_in,
-            w_ball_in=w_ball_in, aim_xy=aim_xy, ref_normal=ref_normal,
-            protos=protos, base_quat=base_quat, prm=prm,
-            surface_z=surface_z, net_x=net_x, net_top_z=net_top_z,
-            cfg=cfg, h=h, n_steps=n_steps,
+            clip_ids=clip_ids,
+            p_contact=p_contact,
+            v_ball_in=v_ball_in,
+            w_ball_in=w_ball_in,
+            aim_xy=aim_xy,
+            ref_normal=ref_normal,
+            protos=protos,
+            base_quat=base_quat,
+            prm=prm,
+            surface_z=surface_z,
+            net_x=net_x,
+            net_top_z=net_top_z,
+            cfg=cfg,
+            h=h,
+            n_steps=n_steps,
+        )
+        # Preserve the formal/public numerical algorithm.  The device core's
+        # fixed-try LM is diagnostic-only; this branch keeps the historical
+        # serial LM/fallback and its fail-loud speed-budget contract.
+        out, good, reasons = _solve_fixed_direction_batch(
+            clip_ids=clip_ids,
+            p_contact=p_contact,
+            v_ball_in=v_ball_in,
+            w_ball_in=w_ball_in,
+            aim_xy=aim_xy,
+            ref_normal=ref_unit,
+            protos=protos,
+            base_quat=base_unit,
+            prm=prm,
+            surface_z=surface_z,
+            net_x=net_x,
+            net_top_z=net_top_z,
+            cfg=cfg,
+            h=h,
+            n_steps=n_steps,
+            _diagnostic_prevalidated=False,
+        )
+        row_count = int(clip_ids.shape[0])
+        nan = float("nan")
+        installable = good.unsqueeze(-1)
+        p_out = torch.where(
+            installable, p_contact, torch.full_like(p_contact, nan)
+        )
+        v_in_out = torch.where(
+            installable, v_ball_in, torch.full_like(v_ball_in, nan)
+        )
+        w_in_out = torch.where(
+            installable, w_ball_in, torch.full_like(w_ball_in, nan)
+        )
+        aim_out = torch.where(
+            installable, aim_xy, torch.full_like(aim_xy, nan)
+        )
+        v_r_out = torch.where(
+            installable, out["v_r"], torch.full_like(out["v_r"], nan)
+        )
+        n_r_out = torch.where(
+            installable, out["n"], torch.full_like(out["n"], nan)
+        )
+        residual = torch.nan_to_num(
+            out["resid_m"], nan=float("inf")
+        ).clone()
+        ledger = ProposalLedger(
+            request_index=torch.arange(
+                row_count, dtype=torch.long, device=p_contact.device
+            ),
+            clip_id=clip_ids.clone(),
+            round_index=torch.ones(
+                row_count, dtype=torch.long, device=p_contact.device
+            ),
+            p_contact=p_contact.clone(),
+            v_ball_in=v_ball_in.clone(),
+            w_ball_in=w_ball_in.clone(),
+            aim_xy=aim_xy.clone(),
+            reason_code=reasons.clone(),
+            admitted=good.clone(),
+            resid_m=residual.clone(),
+            ref_normal=ref_normal.clone(),
+            base_quat=base_quat.clone(),
+        )
+        host_packet = _build_proposal_host_packet(
+            reason_codes=reasons,
+            admitted=good,
+            producer_fault_bits=torch.zeros_like(
+                reasons, dtype=torch.long
+            ),
+            racket_velocity=v_r_out,
+            racket_normal=n_r_out,
+            residual=residual,
+        )
+        counts: dict = {}
+        for is_admitted, code in zip(
+            host_packet.admitted, host_packet.reason_codes
+        ):
+            if is_admitted:
+                continue
+            name = (
+                _CONTINUOUS_REASONS[code]
+                if 0 <= code < len(_CONTINUOUS_REASONS)
+                else "unsolved"
+            )
+            counts[name] = counts.get(name, 0) + 1
+        return QuestionDrawResult(
+            p_contact=p_out,
+            v_racket=v_r_out,
+            n_racket=n_r_out,
+            v_ball_in=v_in_out,
+            w_ball_in=w_in_out,
+            aim_xy=aim_out,
+            ok=good.clone(),
+            resid_m=residual,
+            attempted_v_ball_in=v_ball_in.clone(),
+            rounds_used=1,
+            exhausted=sum(not value for value in host_packet.admitted),
+            reason_counts=counts,
+            proposal_count=row_count,
+            proposals=ledger,
+            proposal_host_packet=host_packet,
         )
     else:
-        ref_unit, base_unit = (
-            _diagnostic_prevalidated_external_proposals(
-                authority=_diagnostic_prevalidated_authority,
-                clip_ids=clip_ids,
-                p_contact=p_contact,
-                v_ball_in=v_ball_in,
-                w_ball_in=w_ball_in,
-                aim_xy=aim_xy,
-                ref_normal=ref_normal,
-                protos=protos,
-                base_quat=base_quat,
-                prm=prm,
-                surface_z=surface_z,
-                net_x=net_x,
-                net_top_z=net_top_z,
-                cfg=cfg,
-                h=h,
-                n_steps=n_steps,
-            )
+        _diagnostic_prevalidated_external_proposals(
+            authority=_diagnostic_prevalidated_authority,
+            clip_ids=clip_ids,
+            p_contact=p_contact,
+            v_ball_in=v_ball_in,
+            w_ball_in=w_ball_in,
+            aim_xy=aim_xy,
+            ref_normal=ref_normal,
+            protos=protos,
+            base_quat=base_quat,
+            prm=prm,
+            surface_z=surface_z,
+            net_x=net_x,
+            net_top_z=net_top_z,
+            cfg=cfg,
+            h=h,
+            n_steps=n_steps,
         )
-    out, good, reasons = _solve_fixed_direction_batch(
-        clip_ids=clip_ids, p_contact=p_contact, v_ball_in=v_ball_in,
-        w_ball_in=w_ball_in, aim_xy=aim_xy, ref_normal=ref_unit, protos=protos,
-        base_quat=base_unit, prm=prm, surface_z=surface_z, net_x=net_x,
-        net_top_z=net_top_z, cfg=cfg, h=h, n_steps=n_steps,
-        _diagnostic_prevalidated=(
-            _diagnostic_prevalidated_authority is not None
-        ),
-    )
 
-    N, device, dtype = int(clip_ids.shape[0]), p_contact.device, p_contact.dtype
-    nan = float("nan")
-    p_out = torch.full((N, 3), nan, device=device, dtype=dtype)
-    v_in_out = torch.full((N, 3), nan, device=device, dtype=dtype)
-    w_in_out = torch.full((N, 3), nan, device=device, dtype=dtype)
-    aim_out = torch.full((N, 2), nan, device=device, dtype=dtype)
-    v_r_out = torch.full((N, 3), nan, device=device, dtype=dtype)
-    n_r_out = torch.full((N, 3), nan, device=device, dtype=dtype)
-    p_out[good] = p_contact[good]
-    v_in_out[good] = v_ball_in[good]
-    w_in_out[good] = w_ball_in[good]
-    aim_out[good] = aim_xy[good]
-    v_r_out[good] = out["v_r"][good]
-    n_r_out[good] = out["n"][good]
-    resid = torch.nan_to_num(out["resid_m"], nan=float("inf")).clone()
-
-    ledger = ProposalLedger(
-        request_index=torch.arange(N, dtype=torch.long, device=device),
-        clip_id=clip_ids.clone(),
-        round_index=torch.ones(N, dtype=torch.long, device=device),
-        p_contact=p_contact.clone(),
-        v_ball_in=v_ball_in.clone(),
-        w_ball_in=w_ball_in.clone(),
-        aim_xy=aim_xy.clone(),
-        reason_code=reasons.clone(),
-        admitted=good.clone(),
-        resid_m=resid.clone(),
-        ref_normal=ref_normal.clone(),
-        base_quat=base_quat.clone(),
+    device_result = solve_proposals_device(
+        clip_ids,
+        p_contact,
+        v_ball_in,
+        w_ball_in,
+        aim_xy,
+        ref_normal,
+        protos=protos,
+        base_quat=base_quat,
+        prm=prm,
+        surface_z=surface_z,
+        net_x=net_x,
+        net_top_z=net_top_z,
+        cfg=cfg,
+        h=h,
+        n_steps=n_steps,
     )
     host_packet = _build_proposal_host_packet(
-        reason_codes=reasons,
-        admitted=good,
-        racket_velocity=v_r_out,
-        racket_normal=n_r_out,
-        residual=resid,
+        reason_codes=device_result.proposals.reason_code,
+        admitted=device_result.ok,
+        producer_fault_bits=device_result.producer_fault_bits,
+        racket_velocity=device_result.v_racket,
+        racket_normal=device_result.n_racket,
+        residual=device_result.resid_m,
     )
     counts: dict = {}
     for is_admitted, code in zip(
@@ -1109,12 +1568,20 @@ def solve_proposals(
         counts[name] = counts.get(name, 0) + 1
 
     return QuestionDrawResult(
-        p_contact=p_out, v_racket=v_r_out, n_racket=n_r_out,
-        v_ball_in=v_in_out, w_ball_in=w_in_out, aim_xy=aim_out,
-        ok=good.clone(), resid_m=resid, attempted_v_ball_in=v_ball_in.clone(),
+        p_contact=device_result.p_contact,
+        v_racket=device_result.v_racket,
+        n_racket=device_result.n_racket,
+        v_ball_in=device_result.v_ball_in,
+        w_ball_in=device_result.w_ball_in,
+        aim_xy=device_result.aim_xy,
+        ok=device_result.ok,
+        resid_m=device_result.resid_m,
+        attempted_v_ball_in=device_result.attempted_v_ball_in,
         rounds_used=1,
         exhausted=sum(not value for value in host_packet.admitted),
-        reason_counts=counts, proposal_count=N, proposals=ledger,
+        reason_counts=counts,
+        proposal_count=int(clip_ids.shape[0]),
+        proposals=device_result.proposals,
         proposal_host_packet=host_packet,
     )
 
@@ -1147,7 +1614,17 @@ def _solve_proposals_diagnostic_host_only(
     that the diagnostic refill caller never reads.  The public/formal API remains unchanged.
     """
 
-    ref_unit, base_unit = _diagnostic_prevalidated_external_proposals(
+    (
+        safe_clip_ids,
+        safe_p_contact,
+        safe_v_ball_in,
+        safe_w_ball_in,
+        safe_aim_xy,
+        ref_unit,
+        base_unit,
+        safe_protos,
+        producer_fault_bits,
+    ) = _diagnostic_prevalidated_external_proposals(
         authority=_diagnostic_prevalidated_authority,
         clip_ids=clip_ids,
         p_contact=p_contact,
@@ -1166,13 +1643,13 @@ def _solve_proposals_diagnostic_host_only(
         n_steps=n_steps,
     )
     out, good, reasons = _solve_fixed_direction_batch(
-        clip_ids=clip_ids,
-        p_contact=p_contact,
-        v_ball_in=v_ball_in,
-        w_ball_in=w_ball_in,
-        aim_xy=aim_xy,
+        clip_ids=safe_clip_ids,
+        p_contact=safe_p_contact,
+        v_ball_in=safe_v_ball_in,
+        w_ball_in=safe_w_ball_in,
+        aim_xy=safe_aim_xy,
         ref_normal=ref_unit,
-        protos=protos,
+        protos=safe_protos,
         base_quat=base_unit,
         prm=prm,
         surface_z=surface_z,
@@ -1182,6 +1659,12 @@ def _solve_proposals_diagnostic_host_only(
         h=h,
         n_steps=n_steps,
         _diagnostic_prevalidated=True,
+    )
+
+    fault_free = producer_fault_bits == 0
+    good = good & fault_free
+    reasons = torch.where(
+        fault_free, reasons, torch.full_like(reasons, _R_NO_LANDING)
     )
 
     row_count, device, dtype = (
@@ -1200,12 +1683,15 @@ def _solve_proposals_diagnostic_host_only(
     )
     v_r_out[good] = out["v_r"][good]
     n_r_out[good] = out["n"][good]
-    residual = torch.nan_to_num(
-        out["resid_m"], nan=float("inf")
+    residual = torch.where(
+        fault_free,
+        torch.nan_to_num(out["resid_m"], nan=float("inf")),
+        torch.full_like(out["resid_m"], float("inf")),
     ).clone()
     host_packet = _build_proposal_host_packet(
         reason_codes=reasons,
         admitted=good,
+        producer_fault_bits=producer_fault_bits,
         racket_velocity=v_r_out,
         racket_normal=n_r_out,
         residual=residual,
