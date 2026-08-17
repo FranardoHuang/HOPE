@@ -1,9 +1,9 @@
 # ActionBall 单动作双后端：唯一执行 TODO
 
-> 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`  
-> 人类负责人：Franco  
-> 执行者：Codex  
-> 更新：2026-08-18  
+> 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`
+> 人类负责人：Franco
+> 执行者：Codex
+> 更新：2026-08-18
 > `origin/main:docs/NOW.md` 仍是项目优先级唯一权威；本页只维护这条分支的依赖、证据和下一条命令，不建立影子队列。
 
 ## 1. 目标

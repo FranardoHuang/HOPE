@@ -1,8 +1,9 @@
 # ActionBall Isaac 5.1 环境身份合同
 
-> 状态：`PASS-environment / branch-scoped`  
-> 更新：2026-08-18  
+> 状态：`PASS-environment / branch-scoped`
+> 更新：2026-08-18
 > 来源：Jiayi 的 `ENVIRONMENT_REPRODUCTION.md` 与 Pod2 实际 import/ABI/AppLauncher 验证。
+> 本页不改变 `origin/main:docs/NOW.md` 的项目优先级。
 
 ## 为什么必须换环境
 
