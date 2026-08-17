@@ -6858,6 +6858,117 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             raise ValueError(
                 "schema-3 control_step_action_delay block is invalid"
             )
+    full_mdp_runtime = contract.get("action_ball_full_mdp_runtime")
+    full_mdp_reward = contract.get("fresh_full_mdp_installed_reward_graph")
+    full_mdp_declared = (
+        target_mode == "action_ball_full_mdp"
+        or contract.get("actor_obs_mode") == "action_ball_full_mdp"
+        or actor_contract == "action_ball_full_mdp_action_epoch_v1"
+        or contract.get("critic_obs_contract")
+        == "action_ball_full_mdp_action_epoch_critic_v1"
+        or "action_ball_full_mdp_runtime" in contract
+        or "fresh_full_mdp_installed_reward_graph" in contract
+    )
+    if full_mdp_declared:
+        reward_names = (
+            full_mdp_reward.get("ordered_manager_names")
+            if isinstance(full_mdp_reward, Mapping)
+            else None
+        )
+        payment_consumers = (
+            full_mdp_reward.get("ordered_payment_consumers")
+            if isinstance(full_mdp_reward, Mapping)
+            else None
+        )
+        if (
+            target_mode != "action_ball_full_mdp"
+            or contract.get("actor_obs_mode") != "action_ball_full_mdp"
+            or actor_contract != "action_ball_full_mdp_action_epoch_v1"
+            or contract.get("actor_obs_total_dim") != 229
+            or contract.get("actor_obs_term_names") != ["action_epoch"]
+            or contract.get("actor_obs_term_dims") != [229]
+            or contract.get("observation_history_lengths") != [1]
+            or contract.get("critic_obs_contract")
+            != "action_ball_full_mdp_action_epoch_critic_v1"
+            or contract.get("critic_obs_total_dim") != 399
+            or contract.get("critic_obs_term_names") != ["action_epoch"]
+            or contract.get("critic_obs_term_dims") != [399]
+            or not isinstance(full_mdp_runtime, Mapping)
+            or full_mdp_runtime.get("schema_version") != 1
+            or full_mdp_runtime.get("kind")
+            != "action_ball_full_mdp_train_wiring_v1"
+            or full_mdp_runtime.get("target_mode") != "action_ball_full_mdp"
+            or full_mdp_runtime.get("actor_obs_mode") != "action_ball_full_mdp"
+            or full_mdp_runtime.get("run_mode") != "single_action_lean"
+            or full_mdp_runtime.get("diagnostic_unauthorized") is not True
+            or full_mdp_runtime.get("launch_authorized") is not False
+            or full_mdp_runtime.get("r10_checkpoint_adapter_bound") is not False
+            or full_mdp_runtime.get("cold_restore") is not False
+            or full_mdp_runtime.get("no_save") is not True
+            or full_mdp_runtime.get("diagnostic_operational") is not True
+            or full_mdp_runtime.get("formal_evidence_prohibited") is not True
+            or full_mdp_runtime.get("curriculum_promotion_prohibited") is not True
+            or full_mdp_runtime.get("exact_export_prohibited") is not True
+            or full_mdp_runtime.get("deployment_prohibited") is not True
+            or full_mdp_runtime.get("joint_safety_evidence_mode")
+            != "diagnostic_compact_two_phase_update_v1"
+            or full_mdp_runtime.get("runtime_dependency_kind")
+            != "action_ball_epoch_runtime_dependencies_v1"
+            or not isinstance(full_mdp_reward, Mapping)
+            or set(full_mdp_reward)
+            != {
+                "schema_version",
+                "kind",
+                "profile_kind",
+                "ordered_manager_names",
+                "ordered_payment_consumers",
+                "diagnostic_unauthorized",
+                "launch_authorized",
+                "no_receipt_or_sha_authority",
+            }
+            or full_mdp_reward.get("schema_version") != 1
+            or full_mdp_reward.get("kind")
+            != "action_ball_epoch_lean_reward_graph_v1"
+            or full_mdp_reward.get("profile_kind")
+            != "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
+            or full_mdp_reward.get("diagnostic_unauthorized") is not True
+            or full_mdp_reward.get("launch_authorized") is not False
+            or full_mdp_reward.get("no_receipt_or_sha_authority") is not True
+            or type(reward_names) is not list
+            or len(reward_names) != 20
+            or any(type(name) is not str or not name for name in reward_names)
+            or len(set(reward_names)) != 20
+            or reward_names[14:]
+            != [
+                "motion_global_anchor_pos",
+                "motion_global_anchor_ori",
+                "motion_body_pos",
+                "motion_body_ori",
+                "motion_body_lin_vel",
+                "motion_body_ang_vel",
+            ]
+            or type(payment_consumers) is not list
+            or len(payment_consumers) != 14
+            or any(
+                type(name) is not str or name.count(":") != 1
+                for name in payment_consumers
+            )
+            or len(set(payment_consumers)) != 14
+            or [name.split(":", 1)[0] for name in payment_consumers]
+            != ["r03"] * 10 + ["physical", "r06", "r06", "r07"]
+            or [name.split(":", 1)[-1] for name in payment_consumers]
+            != reward_names[:14]
+        ):
+            raise ValueError("schema-3 full-MDP runtime identity differs")
+        if block_present or action_delay_present:
+            raise ValueError(
+                "schema-3 full-MDP runtime cannot carry legacy ActionBall authorization or delay"
+            )
+        if not projection_present or not projection_inset_present:
+            raise ValueError(
+                "schema-3 full-MDP runtime requires finite q_des projection and inset facts"
+            )
+        return True
     action_ball_intent = (
         target_mode == "action_ball"
         or actor_prefixed

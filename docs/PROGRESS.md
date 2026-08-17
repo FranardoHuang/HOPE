@@ -8,12 +8,12 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
-- 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/Python3.11/RSL3环境与Git下载的FullMDP执行commit
-  `758e88ee`已复核。GPU1 fresh `N=2 × 2 update` canary完整构造229/399-D observation和20-term Reward，
-  但在PPO/WAL前因8320 `observation_manager.cfg`为`dict`、旧history consumer访问`.policy`而RC1；
-  日志SHA=`40c6631…5051b9f`，namespace不重试。窄修只迁到exact `cfg["policy"]`并新增旧形态负测，
-  dependency-light=`143 passed`。同轮仅清理无live-ref的可重建cache和一个旧verify scratch，Pod1 free
-  从约16.53GB恢复到24GB级；未碰foreign进程、checkpoint、日志或资产。见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
+- 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/Python3.11/RSL3环境上的两次fresh FullMDP canary
+  均完整构造229/399-D observation和20-term Reward，并依次暴露两个PPO/WAL前迁移首错：manager cfg
+  的8320 `dict` API（日志SHA=`40c6631…5051b9f`）与schema-3仍把FullMDP finite-`q_des`误判为
+  legacy ActionBall-only（`dba73962…e5e99a1`）。两个namespace均不重试；前者已提交`5ccc1c9d`，
+  后者窄修为exact互斥FullMDP身份。缓存清理只涉及无live-ref可重建cache和一个旧verify scratch，
+  未碰foreign进程、checkpoint、日志或资产。见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
 
 - 2026-08-18: FullMDP 已从旧 Isaac 4.5/RSL-RL2 执行面迁到 Jiayi/build_2 的精确
   Isaac Sim 5.1、IsaacLab `8320e0be…`、Python3.11、RSL-RL3.1.2 栈。代码通过 clean Git branch

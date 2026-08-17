@@ -1221,6 +1221,90 @@ def _action_ball_diagnostic_schema3_contract():
     return contract
 
 
+def _full_mdp_schema3_contract():
+    contract = _schema3_contract()
+    consumers = [
+        "r03:racket_position",
+        "r03:racket_velocity",
+        "r03:racket_normal",
+        "r03:racket_position_coarse",
+        "r03:racket_velocity_coarse",
+        "r03:racket_normal_coarse",
+        "r03:racket_position_precision",
+        "r03:racket_velocity_precision",
+        "r03:racket_normal_precision",
+        "r03:paddle_center_proximity",
+        "physical:physical_selected_contact",
+        "r06:common_on_table_outcome",
+        "r06:post_contact_placement_guidance",
+        "r07:common_recovery_reward_v1",
+    ]
+    managers = [name.split(":", 1)[1] for name in consumers]
+    managers.extend(
+        [
+            "motion_global_anchor_pos",
+            "motion_global_anchor_ori",
+            "motion_body_pos",
+            "motion_body_ori",
+            "motion_body_lin_vel",
+            "motion_body_ang_vel",
+        ]
+    )
+    contract.update(
+        {
+            TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY: True,
+            TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY: 0.05,
+            "target_mode": "action_ball_full_mdp",
+            "actor_obs_contract": "action_ball_full_mdp_action_epoch_v1",
+            "actor_obs_mode": "action_ball_full_mdp",
+            "actor_obs_total_dim": 229,
+            "actor_obs_term_names": ["action_epoch"],
+            "actor_obs_term_dims": [229],
+            "observation_history_lengths": [1],
+            "critic_obs_contract": "action_ball_full_mdp_action_epoch_critic_v1",
+            "critic_obs_total_dim": 399,
+            "critic_obs_term_names": ["action_epoch"],
+            "critic_obs_term_dims": [399],
+            "fresh_full_mdp_installed_reward_graph": {
+                "schema_version": 1,
+                "kind": "action_ball_epoch_lean_reward_graph_v1",
+                "profile_kind": (
+                    "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
+                ),
+                "ordered_manager_names": managers,
+                "ordered_payment_consumers": consumers,
+                "diagnostic_unauthorized": True,
+                "launch_authorized": False,
+                "no_receipt_or_sha_authority": True,
+            },
+            "action_ball_full_mdp_runtime": {
+                "schema_version": 1,
+                "kind": "action_ball_full_mdp_train_wiring_v1",
+                "target_mode": "action_ball_full_mdp",
+                "actor_obs_mode": "action_ball_full_mdp",
+                "run_mode": "single_action_lean",
+                "diagnostic_unauthorized": True,
+                "launch_authorized": False,
+                "r10_checkpoint_adapter_bound": False,
+                "cold_restore": False,
+                "no_save": True,
+                "diagnostic_operational": True,
+                "formal_evidence_prohibited": True,
+                "curriculum_promotion_prohibited": True,
+                "exact_export_prohibited": True,
+                "deployment_prohibited": True,
+                "joint_safety_evidence_mode": (
+                    "diagnostic_compact_two_phase_update_v1"
+                ),
+                "runtime_dependency_kind": (
+                    "action_ball_epoch_runtime_dependencies_v1"
+                ),
+            },
+        }
+    )
+    return contract
+
+
 _FIXED_TEACHER_START_V2_TERM_LAYOUT = (
     ("command", 62),
     ("motion_anchor_ori_b", 6),
@@ -1790,6 +1874,44 @@ def test_action_ball_requires_true_immutable_projection_fact():
     legacy[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = True
     with pytest.raises(ValueError, match="ActionBall-only"):
         TC.validate_schema3_contract_structure(legacy)
+
+
+def test_full_mdp_schema3_has_one_exact_disjoint_identity():
+    contract = _full_mdp_schema3_contract()
+    assert TC.validate_action_ball_training_authorization(contract) is True
+    TC.validate_schema3_contract_structure(contract)
+    with pytest.raises(ValueError, match="diagnostic_unauthorized"):
+        TC.validate_schema3_contract(contract)
+
+    for key, value in (
+        ("target_mode", "action_ball"),
+        ("actor_obs_mode", "deploy_parity"),
+        ("actor_obs_contract", "action_ball_n2"),
+        ("critic_obs_total_dim", 398),
+    ):
+        wrong = _full_mdp_schema3_contract()
+        wrong[key] = value
+        with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
+            TC.validate_schema3_contract_structure(wrong)
+
+    legacy_mixed = _full_mdp_schema3_contract()
+    legacy_mixed["action_ball_training"] = {}
+    with pytest.raises(ValueError, match="cannot carry legacy"):
+        TC.validate_schema3_contract_structure(legacy_mixed)
+
+    partial = _schema3_contract()
+    partial["action_ball_full_mdp_runtime"] = None
+    with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
+        TC.validate_schema3_contract_structure(partial)
+
+    for key, value in (
+        ("fresh_full_mdp_installed_reward_graph", {}),
+        ("critic_obs_contract", "action_ball_full_mdp_action_epoch_critic_v1"),
+    ):
+        partial = _schema3_contract()
+        partial[key] = value
+        with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
+            TC.validate_schema3_contract_structure(partial)
 
 
 def test_action_ball_formal_authorization_still_passes_formal_validation():
