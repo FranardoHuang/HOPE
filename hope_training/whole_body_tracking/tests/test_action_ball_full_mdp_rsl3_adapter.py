@@ -1,12 +1,57 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib.util
 import json
+from pathlib import Path
+import sys
 import types
 
 import pytest
 
-from whole_body_tracking.utils import action_ball_full_mdp_rsl3_adapter as adapter
+
+_UTILS = (
+    Path(__file__).parents[1]
+    / "source/whole_body_tracking/whole_body_tracking/utils"
+)
+
+
+def _load_source(name: str, filename: str):
+    spec = importlib.util.spec_from_file_location(name, _UTILS / filename)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_rsl = types.ModuleType("rsl_rl")
+_rsl_runners = types.ModuleType("rsl_rl.runners")
+_rsl_on_policy = types.ModuleType("rsl_rl.runners.on_policy_runner")
+_rsl_on_policy.OnPolicyRunner = type("OnPolicyRunner", (), {})
+_prior_modules = {
+    name: sys.modules.get(name)
+    for name in ("rsl_rl", "rsl_rl.runners", "rsl_rl.runners.on_policy_runner")
+}
+try:
+    sys.modules["rsl_rl"] = _rsl
+    sys.modules["rsl_rl.runners"] = _rsl_runners
+    sys.modules["rsl_rl.runners.on_policy_runner"] = _rsl_on_policy
+    adapter = _load_source(
+        "action_ball_full_mdp_rsl3_adapter_direct",
+        "action_ball_full_mdp_rsl3_adapter.py",
+    )
+finally:
+    for _name, _prior in _prior_modules.items():
+        if _prior is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _prior
+
+durable_wal = _load_source(
+    "action_ball_full_mdp_durable_wal_direct",
+    "action_ball_full_mdp_durable_wal.py",
+)
 
 
 @dataclass(frozen=True)
@@ -155,7 +200,6 @@ class _Env:
 
 @pytest.fixture
 def _fake_imports(monkeypatch):
-    real_import = adapter.importlib.import_module
     runtime = types.SimpleNamespace(
         ActionBallFullMdpLeanRuntimeOwner=_Owner,
         ActionEpochPpoBoundarySummary=_Summary,
@@ -177,7 +221,9 @@ def _fake_imports(monkeypatch):
             return runtime
         if name.endswith("action_ball_full_mdp_lean_rewards"):
             return types.SimpleNamespace(MANAGER_NAMES=("reward",))
-        return real_import(name)
+        if name.endswith("action_ball_full_mdp_durable_wal"):
+            return durable_wal
+        raise AssertionError(f"unexpected adapter import: {name}")
 
     monkeypatch.setattr(adapter.importlib, "import_module", import_module)
 
