@@ -980,7 +980,11 @@ def test_real_full_a_n1_launch_reports_only_live_racket_contact():
         racket_ids = env._geom_class.eq(1).nonzero(as_tuple=False).squeeze(-1)
         assert int(racket_ids.numel()) >= 1
         racket_gid = int(racket_ids[0].item())
-        racket_center = env.sim.data.geom_xpos[0, racket_gid].clone()
+        # A mesh geom's frame origin is not guaranteed to lie inside its
+        # collision volume.  The production measured-racket site is the
+        # authoritative live blade point and is independently resolved from
+        # the actual model; placing the ball there must create a real pair.
+        racket_center = env.sim.data.site_xpos[0, env.racket_sid].clone()
         env._full_a_launch_state_f32[0, :3] = racket_center
         env._full_a_launch_state_f32[0, 3:7] = torch.tensor(
             [1.0, 0.0, 0.0, 0.0], device=env.device
