@@ -6,6 +6,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+import zipfile
 
 import pytest
 
@@ -22,6 +23,7 @@ def _module(name: str, **attributes):
 
 
 def _load_train_module(monkeypatch):
+    monkeypatch.setattr(sys, "meta_path", list(sys.meta_path))
     hydra = _module("hydra", main=lambda **kwargs: (lambda function: function))
 
     class FakeOmegaConf:
@@ -225,6 +227,160 @@ def test_runtime_attestation_is_absent_or_complete(monkeypatch):
     monkeypatch.setenv("HOPE_ACTION_BALL_RUNTIME_ATTESTATION", "sealed_rsl_v1")
     with pytest.raises(RuntimeError, match="pre-AppLauncher runtime unload proof"):
         train._attest_action_ball_runtime_after_app_start()
+
+
+def test_sealed_rsl_resolution_allows_harmless_app_path_prepend(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    harmless = tmp_path / "app-extension"
+    harmless.mkdir()
+    archive = tmp_path / "sealed-rsl.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("rsl_rl/__init__.py", "")
+    monkeypatch.setattr(sys, "path", [str(harmless), str(archive)])
+    train._require_sealed_rsl_import_resolution(
+        "rsl_rl", archive, "rsl_rl/__init__.py", is_package=True
+    )
+
+
+def test_sealed_rsl_resolution_binds_package_and_leaf_prefixes(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    archive = tmp_path / "sealed-rsl.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("rsl_rl/__init__.py", "")
+        output.writestr(
+            "rsl_rl/runners/__init__.py", "from .leaf import SOURCE\n"
+        )
+        output.writestr("rsl_rl/runners/leaf.py", "SOURCE = 'sealed'\n")
+    monkeypatch.setattr(sys, "path", [str(archive)])
+    for name in ("rsl_rl.runners.leaf", "rsl_rl.runners", "rsl_rl"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    inventory = (
+        ("rsl_rl", "rsl_rl/__init__.py", True),
+        ("rsl_rl.runners", "rsl_rl/runners/__init__.py", True),
+        ("rsl_rl.runners.leaf", "rsl_rl/runners/leaf.py", False),
+    )
+    try:
+        for fullname, source, is_package in inventory:
+            train._require_sealed_rsl_import_resolution(
+                fullname, archive, source, is_package=is_package
+            )
+        for fullname, source, _is_package in inventory:
+            module = train.importlib.import_module(fullname)
+            assert module.__file__ == str(archive / source)
+        assert sys.modules["rsl_rl.runners"].SOURCE == "sealed"
+    finally:
+        for name in ("rsl_rl.runners.leaf", "rsl_rl.runners", "rsl_rl"):
+            sys.modules.pop(name, None)
+
+
+def test_sealed_rsl_resolution_rejects_earlier_foreign_provider(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    foreign = tmp_path / "foreign"
+    (foreign / "rsl_rl").mkdir(parents=True)
+    (foreign / "rsl_rl/__init__.py").write_text("")
+    archive = tmp_path / "sealed-rsl.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("rsl_rl/__init__.py", "")
+    monkeypatch.setattr(sys, "path", [str(foreign), str(archive)])
+    with pytest.raises(RuntimeError, match="selected import authority"):
+        train._require_sealed_rsl_import_resolution(
+            "rsl_rl", archive, "rsl_rl/__init__.py", is_package=True
+        )
+
+
+def test_sealed_rsl_resolution_rejects_foreign_meta_loader_before_execution(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    archive = tmp_path / "sealed-rsl.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("rsl_rl/__init__.py", "")
+    executed = []
+
+    class ForeignLoader:
+        def create_module(self, _spec):
+            return None
+
+        def exec_module(self, _module):
+            executed.append(True)
+
+    class ForeignFinder:
+        @staticmethod
+        def find_spec(fullname, _path=None, _target=None):
+            if fullname != "rsl_rl":
+                return None
+            spec = train.importlib.util.spec_from_loader(
+                fullname,
+                ForeignLoader(),
+                origin=str(archive / "rsl_rl/__init__.py"),
+                is_package=True,
+            )
+            spec.submodule_search_locations[:] = [str(archive / "rsl_rl")]
+            return spec
+
+    monkeypatch.setattr(sys, "path", [str(archive)])
+    monkeypatch.setattr(sys, "meta_path", [ForeignFinder(), *sys.meta_path])
+    with pytest.raises(RuntimeError, match="selected import authority"):
+        train._require_sealed_rsl_import_resolution(
+            "rsl_rl", archive, "rsl_rl/__init__.py", is_package=True
+        )
+    assert executed == []
+
+
+def test_sealed_rsl_resolution_rejects_foreign_reexport_leaf_before_execution(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    archive = tmp_path / "sealed-rsl.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("rsl_rl/__init__.py", "")
+        output.writestr(
+            "rsl_rl/runners/__init__.py", "from .leaf import SOURCE\n"
+        )
+        output.writestr("rsl_rl/runners/leaf.py", "SOURCE = 'sealed'\n")
+    executed = []
+
+    class ForeignLoader:
+        def create_module(self, _spec):
+            return None
+
+        def exec_module(self, module):
+            executed.append(module.__name__)
+            module.SOURCE = "foreign"
+
+    class ForeignFinder:
+        @staticmethod
+        def find_spec(fullname, _path=None, _target=None):
+            if fullname != "rsl_rl.runners.leaf":
+                return None
+            return train.importlib.util.spec_from_loader(
+                fullname,
+                ForeignLoader(),
+                origin=str(archive / "rsl_rl/runners/leaf.py"),
+            )
+
+    monkeypatch.setattr(sys, "path", [str(archive)])
+    monkeypatch.setattr(sys, "meta_path", [ForeignFinder(), *sys.meta_path])
+    for name in ("rsl_rl.runners.leaf", "rsl_rl.runners", "rsl_rl"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    inventory = (
+        ("rsl_rl", "rsl_rl/__init__.py", True),
+        ("rsl_rl.runners", "rsl_rl/runners/__init__.py", True),
+        ("rsl_rl.runners.leaf", "rsl_rl/runners/leaf.py", False),
+    )
+    with pytest.raises(RuntimeError, match="selected import authority"):
+        for fullname, source, is_package in inventory:
+            train._require_sealed_rsl_import_resolution(
+                fullname, archive, source, is_package=is_package
+            )
+    assert executed == []
+    assert not any(name.startswith("rsl_rl") for name in sys.modules)
 
 
 def test_runtime_attestation_rejects_preloaded_runtime(monkeypatch):

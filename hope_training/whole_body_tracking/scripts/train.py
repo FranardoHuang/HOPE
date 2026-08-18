@@ -26,6 +26,8 @@ import os
 import pathlib
 import sys
 import time
+import zipfile
+import zipimport
 
 import hydra
 from omegaconf import ListConfig, OmegaConf
@@ -21963,6 +21965,38 @@ _ACTION_BALL_RUNTIME_PRE_APP_STATE = "unchecked"
 _ACTION_BALL_RUNTIME_PRE_APP_VALUES = None
 
 
+def _require_sealed_rsl_import_resolution(
+    fullname: str,
+    package_parent: pathlib.Path,
+    source: str,
+    *,
+    is_package: bool,
+) -> None:
+    """Require the live resolver to select one exact fd18 RSL module."""
+
+    parent = fullname.rpartition(".")[0].replace(".", "/")
+    search_path = None if not parent else [str(package_parent / parent)]
+    spec = importlib._bootstrap._find_spec(fullname, search_path, None)
+    locations = tuple(spec.submodule_search_locations or ()) if spec else ()
+    loader = spec.loader if spec else None
+    prefix = parent
+    expected_origin = str(package_parent / source)
+    expected_locations = (
+        (str(package_parent / source[: -len("/__init__.py")]),)
+        if is_package
+        else ()
+    )
+    if (
+        spec is None
+        or type(loader) is not zipimport.zipimporter
+        or loader.archive != str(package_parent)
+        or loader.prefix != ("" if not prefix else f"{prefix}/")
+        or spec.origin != expected_origin
+        or locations != expected_locations
+    ):
+        raise RuntimeError("sealed RSL archive is not the selected import authority")
+
+
 def _require_action_ball_runtime_unloaded_before_app_start() -> None:
     """Prove Hydra did not preload the attested runtime before Kit."""
 
@@ -22107,17 +22141,56 @@ def _attest_action_ball_runtime_after_app_start() -> None:
     venv_site = pathlib.Path(
         values["HOPE_ACTION_BALL_RUNTIME_VENV_SITE"]
     ).resolve()
-    if not sys.path or pathlib.Path(sys.path[0]) != package_parent:
-        raise RuntimeError("sealed RSL archive is not first on sys.path")
-
-    import rsl_rl
+    with zipfile.ZipFile(package_parent) as archive:
+        rsl_modules = []
+        seen_fullnames = set()
+        for source in sorted(archive.namelist()):
+            if not source.startswith("rsl_rl/") or not source.endswith(".py"):
+                continue
+            is_package = source.endswith("/__init__.py")
+            fullname = (
+                source[: -len("/__init__.py")]
+                if is_package
+                else source[: -len(".py")]
+            ).replace("/", ".")
+            if fullname in seen_fullnames:
+                raise RuntimeError("sealed RSL archive has duplicate Python modules")
+            seen_fullnames.add(fullname)
+            rsl_modules.append((fullname, source, is_package))
+    required_rsl = {
+        "rsl_rl": "rsl_rl/__init__.py",
+        "rsl_rl.runners.on_policy_runner": "rsl_rl/runners/on_policy_runner.py",
+        "rsl_rl.algorithms.ppo": "rsl_rl/algorithms/ppo.py",
+        "rsl_rl.modules.actor_critic": "rsl_rl/modules/actor_critic.py",
+        "rsl_rl.storage.rollout_storage": "rsl_rl/storage/rollout_storage.py",
+    }
+    if {
+        fullname: source
+        for fullname, source, _is_package in rsl_modules
+        if fullname in required_rsl
+    } != required_rsl:
+        raise RuntimeError("sealed RSL archive required module inventory differs")
+    for fullname, source, is_package in rsl_modules:
+        _require_sealed_rsl_import_resolution(
+            fullname,
+            package_parent,
+            source,
+            is_package=is_package,
+        )
+    loaded_rsl = {}
+    for fullname, source in required_rsl.items():
+        module = importlib.import_module(fullname)
+        if pathlib.Path(module.__file__) != package_parent / source:
+            raise RuntimeError("post-AppLauncher RSL module escaped fd18")
+        loaded_rsl[fullname] = module
+    rsl_rl = loaded_rsl["rsl_rl"]
     import tensordict
     import torch
 
-    runner = importlib.import_module("rsl_rl.runners.on_policy_runner")
-    ppo = importlib.import_module("rsl_rl.algorithms.ppo")
-    actor = importlib.import_module("rsl_rl.modules.actor_critic")
-    storage = importlib.import_module("rsl_rl.storage.rollout_storage")
+    runner = loaded_rsl["rsl_rl.runners.on_policy_runner"]
+    ppo = loaded_rsl["rsl_rl.algorithms.ppo"]
+    actor = loaded_rsl["rsl_rl.modules.actor_critic"]
+    storage = loaded_rsl["rsl_rl.storage.rollout_storage"]
     expected = {
         rsl_rl: package_root / "__init__.py",
         runner: package_root / "runners/on_policy_runner.py",

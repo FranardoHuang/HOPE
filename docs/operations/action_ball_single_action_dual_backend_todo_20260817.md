@@ -105,6 +105,7 @@ deployment、真机或物理安全。
 | 17 | `FAIL-pre-App / ROOT-CAUSE-NARROWED` | second 4096 one-shot消费commit `d341931c…`、wrapper `60cfdeed…`和fresh namespace；preexec通过、v2 receipt为空，Kit仍在约2秒内segfault，scene/PPO/WAL零调用。pre-App状态机已证明Torch/RSL未提前导入，所以它不是唯一根因；两次失败共同剩下的异常入口是`python.sh -P -S -B -c runpy(...)` | successor回到成功N2使用的direct script入口，仅保留`-P/-B`和production内pre/post-App attestation；删除Kit Python的`-S/-c/runpy`，仍以fresh namespace直发4096长跑，不插smoke |
 | 18 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | third 4096 one-shot消费commit `356f706b…`、wrapper `00e340b7…`和fresh namespace；normal `python.sh -P -B train.py` 已稳定进入AppLauncher并完成约10秒Kit启动，随后production post-App gate拒绝AppLauncher合法加载的Torch。preexec通过、v2 receipt/scene/PPO/WAL仍为零；GPU与锁自然释放 | 不新增门；把post-App门缩到真正必须未加载的RSL/TensorDict，App前仍拒绝Torch/RSL/TensorDict，并继续对App-owned Torch核exact版本与venv来源。新commit/namespace直发同一4096长跑，不插smoke |
 | 19 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | fourth one-shot消费commit `d2cd7911…`、wrapper `41cd2d2a…`和fresh namespace；Torch范围修正生效，随后Kit Python在同一post-App门因未导出`F_SEAL_*`符号而拒绝，preexec通过但v2 receipt/scene/PPO/WAL仍为零，进程与GPU自然释放 | seal验证继续保留，但直接使用Linux uapi的`F_GET_SEALS=1034`与四个seal位；exact Pod父进程创建/封印memfd→Kit继承读取已PASS。不把Kit Python可选符号别名当训练ABI；下一条直接扩成同进程`4096×25000`，不是另跑smoke |
+| 20 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | fifth one-shot消费commit `6b3078bc…`和fresh 25k namespace；真实RSL serializer contract、GPU preexec、AppLauncher约10秒启动均通过，随后`sys.path[0]`位置断言拒绝；preexec=1、runtime receipt/scene/PPO/WAL=0，GPU与锁自然释放 | AppLauncher合法前插不提供`rsl_rl`的extension path；改为root、四个package与四个真实leaf在执行前逐一核live resolver的loader/archive/prefix/origin精确指向fd18，执行后仍逐module/class核source；旧namespace不复用 |
 
 ## 5. 下一条发射协议
 
@@ -145,6 +146,13 @@ fourth one-shot证明上述范围修正已越过；新的首错是Isaac Sim Kit 
 同一seal bitmask。Franco同时澄清长跑目标：此前`1000`是PPO update（98,304,000 transitions），不是
 1000个step；它只作早期趋势节点。下一条唯一进程改为`4096×25000`，即2,457,600,000 transitions，
 update1000不停机；25k终点仍不等于formal promotion。
+
+fifth one-shot（`6b3078bc…`）已越过serializer contract、preexec、AppLauncher约10秒启动，但post-App门把
+“sealed archive必须仍为`sys.path[0]`”当成身份。Kit/AppLauncher会合法前插不提供`rsl_rl`的extension path，
+所以在scene/PPO/WAL前RC1；preexec=1、runtime receipt=0。successor不放宽实际来源：对实际消费的root、
+四个package与四个leaf逐一核live resolver的loader/archive/prefix/origin精确指向fd18，再import并核
+module/class source与wiring。门只防确定性的依赖来源漂移；不把已经执行的可信Kit代码假设成会恶意并发改写
+Python全局import状态的对手。旧namespace不复用。
 
 25k不能只留下曲线。lean graph尚无完整plant/owner/RNG restore合同，所以仍禁止`load/resume`；但runner现在
 每1000 update及自然终点调用upstream RSL save，把policy、optimizer、iteration和normalizer所属model state

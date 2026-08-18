@@ -4272,3 +4272,8 @@
   必须在exact experiment/run_name下逐份交叉验证。sidecar前先从同一fd安全解码真实Torch payload，核四个
   顶层字段、非空model/optimizer state和全tensor finite；fresh namespace还跑冻结RSL3真实serializer host
   contract，防止正确文件名的空壳产物假绿。它们只保留评估产物，不假装完整plant/owner/RNG恢复已完成。
+- 2026-08-19：`6b3078bc…` fresh 4096×25000 one-shot已通过真实RSL serializer contract、GPU preexec和
+  AppLauncher启动，但post-App门把fd18必须仍是`sys.path[0]`当成身份而在scene/PPO/WAL前RC1；result精确为
+  `post_preexec_before_runtime_attestation_failed`。Kit合法前插的extension path不提供`rsl_rl`；successor逐一
+  核实际RSL root/package/leaf的live resolver与import后source/wiring均指向fd18，不再替换或锁住Kit全局import；
+  旧namespace不复用、不重试。

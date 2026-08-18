@@ -51,6 +51,11 @@ seal证据未漂移。改法是直接消费Linux uapi的`F_GET_SEALS=1034`和固
 `4096×25000=2,457,600,000` transitions，1000只读里程碑不停机。portable MuJoCo的R03/R06/R07与
 Reward0--13仍缺，继续明确`full_a_complete=false`，不因Isaac发车而假称两边齐备。
 
+fifth one-shot（`6b3078bc…`）在host serializer contract、preexec与AppLauncher约10秒正常启动后，因
+post-App把sealed fd18必须保持`sys.path[0]`当成identity而RC1；实际Kit/AppLauncher会前插不含`rsl_rl`的
+extension path。该run仍未进入scene/PPO/WAL。下一版对实际消费的root/package/leaf逐一核live resolver
+loader/archive/prefix/origin指向fd18，再逐module/class核source与wiring；不替换或锁住Kit全局import机制。
+
 长跑同时需要保留可评估策略，但当前owner graph还不能安全resume。采用最窄边界：upstream RSL仍序列化policy、
 optimizer、iteration/model state，文件强制命名为`model_N.diagnostic_nonresumable.pt`，payload明确
 `checkpoint_authority=false`、`resume_authority=false`，而lean runner的`load`继续拒绝。每1000 update和

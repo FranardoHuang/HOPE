@@ -6225,6 +6225,13 @@ Linux uapi固定`F_GET_SEALS=1034`和四个seal位，不删除seal检查；exact
 继承到Kit Python并读回bitmask=`15`。科学长跑目标同步为单进程
 `4096×25000`；`1000`是98,304,000 transitions的早期趋势节点，不是终点。G05保持`Partial`。
 
+commit `6b3078bc…` 的fifth one-shot在真实RSL serializer contract、GPU preexec和AppLauncher正常启动后，
+被`sys.path[0]`位置断言拒绝；result为`post_preexec_before_runtime_attestation_failed`，scene/PPO/WAL仍零调用。
+根因是AppLauncher合法前插extension path，不是sealed archive失效。修复对实际消费的root、四个package与
+四个leaf逐一核live resolver的loader/archive/prefix/origin精确指向fd18，并保留import后所有module/class
+source与wiring门；不再替换或锁住Kit全局import机制。
+该fresh namespace已消费且不重试，G05保持`Partial`。
+
 25k runner不再把所有save静默丢弃：它复用upstream RSL serializer，但改用显式
 `model_N.diagnostic_nonresumable.pt`文件名，并在payload中钉
 `checkpoint_authority=false/resume_authority=false`；`load`继续硬拒。预期0、1000…24000及终点24999共26份，
