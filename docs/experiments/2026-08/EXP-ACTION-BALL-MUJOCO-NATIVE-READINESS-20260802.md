@@ -11315,3 +11315,9 @@ identity通过，Hydra解析出4096，但身份代码在`AppLauncher`前先导�
 “4096装不下”或“Reward有问题”。采用的窄修是pre-App验不可变archive/interpreter并拒绝Hydra预载
 Torch/RSL/TensorDict；证明与五项attestation值只能交接一次，AppLauncher成功后的入口先消费、再拒绝值漂移和其期间预载runtime，然后
 在同一Kit进程再导入和核class source、写v2 receipt，然后才进训练；successor仍直跑同一4096长预算。
+
+second 4096 one-shot（commit `d341931c…`、wrapper `60cfdeed…`）也没有进入App后hook：preexec receipt
+已落盘，v2 receipt仍空，Kit约2秒内segfault，scene/PPO/WAL为零。由于pre-App状态机已直接证明
+Torch/RSL/TensorDict未预载，该因素不是唯一根因；保留下来的共同异常是两次都绕过常规direct-script入口，
+采用`python.sh -P -S -B -c runpy(...)`。下一successor回到成功N2同类的direct script形状，删除`-S/-c/runpy`，
+只保留`-P/-B`与production内同一pre/post-App attestation；仍直接使用fresh 4096长预算，不另跑小N。

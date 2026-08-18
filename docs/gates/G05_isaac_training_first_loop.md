@@ -6208,3 +6208,8 @@ attestation分成pre-App不可变bytes/unloaded-module门与post-App同进程cla
 attestation值由post-App入口一次性消费，随后拒绝值漂移及AppLauncher期间预载runtime；只有post-App v2 receipt落盘后才
 进入`_run`。前5次update继续只读同一进程的v11/WAL/Reward20/D05。G05保持`Partial`，run仍为
 `diagnostic_unauthorized=true`。
+
+commit `d341931c…` 的second one-shot随后证明两阶段状态机本身仍不足：preexec通过且v2 receipt为空，Kit在
+AppLauncher startup内再次segfault，scene/PPO/WAL继续零调用。两次失败共同使用、而成功N2未使用的入口是
+Kit Python `-S/-c/runpy`代理；next wrapper只撤掉这层代理，改为`python.sh -P -B scripts/train.py`，仍由
+production pre/post-App hook完成同一attestation。未得到4096容量或学习结论，G05保持`Partial`。

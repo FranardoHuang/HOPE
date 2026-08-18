@@ -4257,3 +4257,6 @@
   之前自然RC1；Kit startup约0.34秒后segfault。首错是wrapper在`AppLauncher`前导入Torch/RSL，不是容量
   或Reward。successor改成pre-App bytes门、post-App同进程class/source门，保持fresh `4096×1000`直跑；
   pre-App证明与attestation值现为一次性交接且post-App拒绝值漂移/AppLauncher预载；旧namespace不复用、不重试。G05仍`Partial`。
+- 2026-08-19：second 4096 one-shot（`d341931c…`/`60cfdeed…`）在preexec后、post-App v2 receipt前再次
+  segfault；这证明pre-App runtime导入不是唯一根因，也没有形成容量证据。next wrapper撤掉两次失败共有的
+  Kit Python `-S/-c/runpy`代理，回到direct script入口；仍只发fresh `4096×1000`，不加小N smoke。

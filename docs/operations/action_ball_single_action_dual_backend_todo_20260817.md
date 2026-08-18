@@ -102,6 +102,7 @@ deployment、真机或物理安全。
 | 14 | `PASS-structural / HOLD-live-business` | RSL3薄adapter升级独立v11 telemetry：compact joint-safety在optimizer前prepare/validate，随后`PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；4096×5单元反例得到5组pair和5份post-ACK receipt | 4096同进程前5次必须独立看到5份v11 safety receipt，并要求真实D05 producer/counter被调用；单元fixture的D05全零不能代签 |
 | 15 | `PASS-live-contact-slice / HOLD-portable-A` | portable MuJoCo新增诚实的`full_a_slice_attempted`纵切片：逐行reveal、真实ball state launch、20-substep plant、live contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。exact Pod1 Git `2c8ef444…`、GPU1节点从measured racket site构造真实ball-racket pair并穿production step/latch，`1 passed`。R03、R06 landing outcome、R07 recovery及Reward项0--13仍明确`not_produced` | 并行逐项接通缺失producer；未闭合前不得称MuJoCo A，但不再阻塞Isaac 4096 A1000 |
 | 16 | `FAIL-pre-PPO / ROOT-CAUSE-FIXED-HOST` | first 4096 one-shot消费commit `5ee1ffa6…`、wrapper `022c13f5…`和fresh namespace；GPU preexec、sealed archive及真实Kit Python身份通过，但wrapper在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault。Hydra已解析4096，scene/PPO/WAL均零调用；这不是容量或Reward失败 | runtime identity改成两阶段：AppLauncher前只验不可变解释器/archive，AppLauncher成功后同一Kit进程才导入并核Torch/RSL，再进入`_run`；新commit/namespace/wrapper可直发同一4096长跑，不复用本次证据 |
+| 17 | `FAIL-pre-App / ROOT-CAUSE-NARROWED` | second 4096 one-shot消费commit `d341931c…`、wrapper `60cfdeed…`和fresh namespace；preexec通过、v2 receipt为空，Kit仍在约2秒内segfault，scene/PPO/WAL零调用。pre-App状态机已证明Torch/RSL未提前导入，所以它不是唯一根因；两次失败共同剩下的异常入口是`python.sh -P -S -B -c runpy(...)` | successor回到成功N2使用的direct script入口，仅保留`-P/-B`和production内pre/post-App attestation；删除Kit Python的`-S/-c/runpy`，仍以fresh namespace直发4096长跑，不插smoke |
 
 ## 5. 下一条发射协议
 
@@ -126,6 +127,11 @@ Torch/RSL/TensorDict；opt-in precheck一经尝试即不可重试，成功证明
 入口先消费、再核值未漂移并拒绝AppLauncher预载，然后在
 真实Kit进程中导入并核Torch/TensorDict/RSL class、fsync v2 receipt，然后才调用`_run`。新ignored
 one-shot仍不进Git；最终source commit、wrapper SHA、namespace和result由发射件与remote保留证据共同记录。
+
+second one-shot在上述pre/post-App状态机完整生效后仍于AppLauncher startup内segfault：preexec receipt已fsync，
+v2 receipt、scene、PPO和WAL均未出现。它推翻了“pre-App Torch/RSL是唯一根因”，但没有提供4096容量信息。
+下一件只改启动形状：不再用Kit Python的`-S/-c/runpy`代理，直接以
+`python.sh -P -B scripts/train.py`进入同一production attestation；不是重跑已消费namespace。
 
 旧失败run只有在以下条件同时成立时才能按已绑定的唯一PID链停止：LM exact Pod异常路径零skip、v11
 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项已被明确列出且没有被成功receipt掩盖、最终
