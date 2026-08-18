@@ -4266,3 +4266,6 @@
 - 2026-08-19：fourth one-shot（`d2cd7911…`/`41cd2d2a…`）越过Torch范围修正后，被Kit Python缺失的
   `F_SEAL_*`符号别名拒绝；seal验证改用同一Linux uapi数值，exact Pod继承fd读回bitmask=`15`，不删除检查。长跑目标改为单进程
   `4096×25000`，1000 update只是98,304,000 transitions的早期节点，届时不停机。
+- 2026-08-19：25k不能只留曲线；lean runner改为每1000 update和自然终点写显式
+  `diagnostic_nonresumable` policy/optimizer snapshot，payload和文件名都拒绝resume/checkpoint authority，
+  `load`仍硬拒。预计26份，只保留评估产物，不假装完整plant/owner/RNG恢复已完成。

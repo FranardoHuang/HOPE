@@ -745,6 +745,36 @@ def test_runner_rejects_nonlean_mode_before_any_safety_or_wal(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    def _base_save(_self, path, infos=None):
+        calls.append((path, infos))
+
+    monkeypatch.setattr(adapter.OnPolicyRunner, "save", _base_save, raising=False)
+    runner = object.__new__(adapter.ActionBallFullMdpRsl3Runner)
+    requested = tmp_path / "model_1000.pt"
+    runner.save(str(requested), infos={"upstream": "kept"})
+
+    assert calls == [
+        (
+            str(tmp_path / "model_1000.diagnostic_nonresumable.pt"),
+            {
+                "upstream": "kept",
+                "action_ball_full_mdp_snapshot_kind": (
+                    "policy_optimizer_diagnostic_nonresumable_v1"
+                ),
+                "checkpoint_authority": False,
+                "resume_authority": False,
+            },
+        )
+    ]
+    with pytest.raises(RuntimeError, match="forbids checkpoint load/resume"):
+        runner.load(str(calls[0][0]))
+
+
 def test_adapter_rejects_foreign_exact_looking_compact_action_term(
     tmp_path, _fake_imports
 ):

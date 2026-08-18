@@ -51,6 +51,11 @@ seal证据未漂移。改法是直接消费Linux uapi的`F_GET_SEALS=1034`和固
 `4096×25000=2,457,600,000` transitions，1000只读里程碑不停机。portable MuJoCo的R03/R06/R07与
 Reward0--13仍缺，继续明确`full_a_complete=false`，不因Isaac发车而假称两边齐备。
 
+长跑同时需要保留可评估策略，但当前owner graph还不能安全resume。采用最窄边界：upstream RSL仍序列化policy、
+optimizer、iteration/model state，文件强制命名为`model_N.diagnostic_nonresumable.pt`，payload明确
+`checkpoint_authority=false`、`resume_authority=false`，而lean runner的`load`继续拒绝。每1000 update和
+自然终点留一份；它们可用于离线权重检查/后续显式评估，不是完整checkpoint或恢复授权。
+
 ## 2026-08-18 科学裁决：先真实运行，不再扩骨架
 
 Jiayi/build_2的可复现说明与Pod2实机证明，旧Isaac4.5/RSL2和新Isaac5.1/RSL3不是等价学习环境。

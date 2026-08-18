@@ -819,11 +819,30 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
         return name, value, aliases
 
     def save(self, path: str, infos: dict | None = None) -> None:
-        """Deliberately produce no resumable file for the diagnostic lane."""
+        """Persist policy/optimizer bytes without claiming environment restore."""
 
+        if infos is not None and type(infos) is not dict:
+            raise RuntimeError("single_action_lean diagnostic snapshot infos differ")
+        requested = Path(path)
+        if not requested.is_absolute() or requested.suffix != ".pt":
+            raise RuntimeError("single_action_lean diagnostic snapshot path differs")
+        snapshot = requested.with_name(
+            requested.stem + ".diagnostic_nonresumable.pt"
+        )
+        metadata = dict(infos or {})
+        metadata.update(
+            {
+                "action_ball_full_mdp_snapshot_kind": (
+                    "policy_optimizer_diagnostic_nonresumable_v1"
+                ),
+                "checkpoint_authority": False,
+                "resume_authority": False,
+            }
+        )
+        super().save(str(snapshot), infos=metadata)
         print(
-            "[ActionBallFullMdpRsl3Runner] checkpoint skipped: "
-            "single_action_lean has no complete plant/trainer restore contract",
+            "[ActionBallFullMdpRsl3Runner] wrote non-resumable diagnostic snapshot: "
+            f"{snapshot}",
             flush=True,
         )
 

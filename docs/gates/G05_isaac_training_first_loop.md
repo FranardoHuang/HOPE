@@ -6224,3 +6224,8 @@ post-App attestation拒绝；preexec已用系统Python验证同一memfd seal，s
 Linux uapi固定`F_GET_SEALS=1034`和四个seal位，不删除seal检查；exact Pod已用系统Python创建/封印memfd、
 继承到Kit Python并读回bitmask=`15`。科学长跑目标同步为单进程
 `4096×25000`；`1000`是98,304,000 transitions的早期趋势节点，不是终点。G05保持`Partial`。
+
+25k runner不再把所有save静默丢弃：它复用upstream RSL serializer，但改用显式
+`model_N.diagnostic_nonresumable.pt`文件名，并在payload中钉
+`checkpoint_authority=false/resume_authority=false`；`load`继续硬拒。预期0、1000…24000及终点24999共26份，
+final consumer只验regular/non-empty/inventory，不把它们升级成plant/RNG完整checkpoint。G05仍为`Partial`。
