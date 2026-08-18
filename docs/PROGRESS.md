@@ -8,6 +8,11 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: MuJoCo WAIT fresh commit `61887b43…` 在Pod1 GPU0共卡真实完成`19 passed,0 skipped`，
+  随后upstream RSL-RL3.1.2完成`N=2 × 24`一次PPO update、48 transitions、229/399 observation；
+  result/log SHA=`322592ce…f07a`/`7d4fbee7…2a3b`。这只关闭SAT与WAIT `learn(1)`调用点，lifecycle仍为
+  `idle_wait_only`，full MuJoCo A和长跑尚未开始。
+
 - 2026-08-18: MuJoCo fresh snapshot路径identity修复后，live direct的下一首错收敛到MJLab attach将
   canonical body名统一变成`robot/*`。fresh authority改为由唯一adapter显式传`robot/`，但仍以bare
   canonical名逐项比较32-body parent/local frame与portable closure；不自动猜prefix、不放宽plant identity。

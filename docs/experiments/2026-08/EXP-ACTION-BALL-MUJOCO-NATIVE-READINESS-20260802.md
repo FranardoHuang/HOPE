@@ -182,6 +182,13 @@ fresh GPU整合先排除了“snapshot绝对路径必须等于开发机canonical
 model中有同一语义，而不会把路径/名称表象误当plant identity。host namespace反例与device SAT分别为
 `7 passed`和`4 passed,1 skipped`；live 19-test与RSL update仍为`未测`。
 
+fresh commit `61887b43…` 随后在Pod1 GPU0共卡完成19个direct GPU测试、0 skip，并由同一clean checkout
+直接执行upstream RSL-RL3.1.2：`N=2 × 24`得到一次PPO update、48 transitions、229/399 observation，
+全部合同字段匹配，`final_rc=0`。result/log SHA为`322592ce…f07a`/`7d4fbee7…2a3b`。该结果关闭
+SAT与trainer调用点，不回答可学性：receipt明确`idle_wait_only`，没有A action lifecycle、击球或回合分母。
+下一纵切片只接真实A reveal→flight→outcome到现有VecEnv，不复制runner或新增第二套MDP；短live通过后才
+启动MuJoCo A长跑。
+
 trainer不再另起一套架构。新薄launcher只把现有WAIT TensorDict交给upstream RSL-RL 3.1.2
 `OnPolicyRunner.learn(1)`，并在runner构造前后分别绑定module与实际PPO、ActorCritic、RolloutStorage、
 Adam来源；有副作用的同名预载runner/algorithm不能先执行再被拒。host focused=`6 passed, 1 skipped`，

@@ -75,6 +75,14 @@ authority现要求adapter显式传`robot/`，用它只做live ID解析；写入�
 host owner-frame namespace卷=`7 passed`，device SAT卷=`4 passed,1 skipped`；新fresh GPU 19-test通过前
 仍保持`HOLD-live-RSL3`。
 
+新commit `61887b43…` 已在Pod1 GPU0与一个既有peer共卡完成fresh one-shot：process tree绑定GPU0本地
+CPU `32-47`，运行前后该卡均只保留原peer且约25GiB free。19个direct GPU测试全部通过、0 skip；随后
+同一clean checkout直接调用upstream RSL-RL3.1.2，完成`N=2 × 24`一次PPO update和48 transitions，
+policy/critic=`229/399`，`diagnostic_unauthorized=true`。result/log SHA=`322592ce…f07a`/
+`7d4fbee7…2a3b`，queue lock自然释放。因此SAT与真实trainer调用点提升为`PASS-live`。receipt明确
+`task_lifecycle=idle_wait_only`：它只证明WAIT engineering `learn(1)`，没有A question、launch、contact、
+outcome或long-run证据，G06仍为`Partial`。
+
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
 可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory
