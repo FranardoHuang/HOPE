@@ -21959,11 +21959,13 @@ def _close_simulation_app(simulation_app, *, failed: bool) -> None:
         simulation_app.close()
 
 
-_ACTION_BALL_RUNTIME_PRE_APP_CHECKED = False
+_ACTION_BALL_RUNTIME_PRE_APP_STATE = "unchecked"
 
 
 def _require_action_ball_runtime_unloaded_before_app_start() -> None:
     """Prove Hydra did not preload the attested runtime before Kit."""
+
+    global _ACTION_BALL_RUNTIME_PRE_APP_STATE
 
     names = (
         "HOPE_ACTION_BALL_RUNTIME_ATTESTATION",
@@ -21979,6 +21981,8 @@ def _require_action_ball_runtime_unloaded_before_app_start() -> None:
         raise RuntimeError("partial ActionBall post-AppLauncher runtime attestation")
     if values["HOPE_ACTION_BALL_RUNTIME_ATTESTATION"] != "sealed_rsl_v1":
         raise RuntimeError("unknown ActionBall post-AppLauncher runtime attestation")
+    if _ACTION_BALL_RUNTIME_PRE_APP_STATE != "unchecked":
+        raise RuntimeError("ActionBall pre-AppLauncher proof is not reusable")
     forbidden = tuple(
         name
         for name in sys.modules
@@ -21990,8 +21994,7 @@ def _require_action_ball_runtime_unloaded_before_app_start() -> None:
             "Hydra preloaded the ActionBall runtime before AppLauncher: "
             + ",".join(sorted(forbidden))
         )
-    global _ACTION_BALL_RUNTIME_PRE_APP_CHECKED
-    _ACTION_BALL_RUNTIME_PRE_APP_CHECKED = True
+    _ACTION_BALL_RUNTIME_PRE_APP_STATE = "checked"
 
 
 def _attest_action_ball_runtime_after_app_start() -> None:
@@ -22002,6 +22005,8 @@ def _attest_action_ball_runtime_after_app_start() -> None:
     sealed descriptors; ordinary training has no such environment and remains
     unchanged.
     """
+
+    global _ACTION_BALL_RUNTIME_PRE_APP_STATE
 
     names = (
         "HOPE_ACTION_BALL_RUNTIME_ATTESTATION",
@@ -22017,8 +22022,20 @@ def _attest_action_ball_runtime_after_app_start() -> None:
         raise RuntimeError("partial ActionBall post-AppLauncher runtime attestation")
     if values["HOPE_ACTION_BALL_RUNTIME_ATTESTATION"] != "sealed_rsl_v1":
         raise RuntimeError("unknown ActionBall post-AppLauncher runtime attestation")
-    if not _ACTION_BALL_RUNTIME_PRE_APP_CHECKED:
-        raise RuntimeError("pre-AppLauncher runtime unload proof is missing")
+    if _ACTION_BALL_RUNTIME_PRE_APP_STATE != "checked":
+        raise RuntimeError("pre-AppLauncher runtime unload proof is missing or consumed")
+    _ACTION_BALL_RUNTIME_PRE_APP_STATE = "consumed"
+    forbidden = tuple(
+        name
+        for name in sys.modules
+        if name in {"rsl_rl", "tensordict", "torch"}
+        or name.startswith(("rsl_rl.", "tensordict.", "torch."))
+    )
+    if forbidden:
+        raise RuntimeError(
+            "AppLauncher preloaded the sealed ActionBall runtime before attestation: "
+            + ",".join(sorted(forbidden))
+        )
 
     import fcntl
     import importlib

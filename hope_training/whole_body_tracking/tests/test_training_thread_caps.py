@@ -241,7 +241,34 @@ def test_runtime_attestation_rejects_preloaded_runtime(monkeypatch):
     monkeypatch.setitem(sys.modules, "rsl_rl.foreign_plugin", _module("foreign"))
     with pytest.raises(RuntimeError, match="Hydra preloaded"):
         train._require_action_ball_runtime_unloaded_before_app_start()
-    assert train._ACTION_BALL_RUNTIME_PRE_APP_CHECKED is False
+    assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "unchecked"
+
+
+def test_runtime_attestation_consumes_pre_app_proof_before_post_app_imports(
+    monkeypatch,
+):
+    train = _load_train_module(monkeypatch)
+    values = {
+        "HOPE_ACTION_BALL_RUNTIME_ATTESTATION": "sealed_rsl_v1",
+        "HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH": "/tmp/receipt",
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256": "a" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256": "b" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE": "/tmp/site-packages",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    train._require_action_ball_runtime_unloaded_before_app_start()
+    assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "checked"
+
+    # Model a module imported by AppLauncher itself, after the pre-App proof.
+    monkeypatch.setitem(sys.modules, "torch.post_app", _module("torch.post_app"))
+    with pytest.raises(RuntimeError, match="AppLauncher preloaded"):
+        train._attest_action_ball_runtime_after_app_start()
+    assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "consumed"
+
+    monkeypatch.delitem(sys.modules, "torch.post_app")
+    with pytest.raises(RuntimeError, match="missing or consumed"):
+        train._attest_action_ball_runtime_after_app_start()
 
 
 def test_runtime_attestation_failure_closes_started_app(monkeypatch):

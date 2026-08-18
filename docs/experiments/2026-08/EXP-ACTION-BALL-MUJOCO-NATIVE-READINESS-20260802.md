@@ -11313,5 +11313,5 @@ first 4096 one-shot没有进入学习：commit `5ee1ffa6…`、wrapper `022c13f5
 identity通过，Hydra解析出4096，但身份代码在`AppLauncher`前先导入Torch/RSL；Kit记录startup后约
 0.34秒segfault，`Learning iteration`、scene、PPO与WAL全缺席。这个反例把失败归因到启动顺序，不支持
 “4096装不下”或“Reward有问题”。采用的窄修是pre-App验不可变archive/interpreter并拒绝Hydra预载
-Torch/RSL/TensorDict，AppLauncher成功后
+Torch/RSL/TensorDict；证明只能使用一次，AppLauncher成功后的入口再拒绝其期间预载runtime，然后
 在同一Kit进程再导入和核class source、写v2 receipt，然后才进训练；successor仍直跑同一4096长预算。
