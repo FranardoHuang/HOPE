@@ -25,7 +25,15 @@ history consumer不匹配而RC1（日志SHA=`40c6631…5051b9f`）。这是迁�
 在同一structural boundary fail closed：live manager已安装229/399-D，但runtime fact writer漏掉
 FullMDP critic block，故exact validator拒绝（日志SHA=`9e6b066c…35b8a2`）。这三项都是按真实调用顺序
 剥出的环境迁移/合同接线错误，没有一次进入optimizer或产生WAL，不是Reward或学习反例。第三修只让
-code-owned ActionEpoch actor从live critic manager写唯一399-D事实；仍须fresh `2×2`，随后同进程A1000在20/50/100/200/500/1000只读趋势。
+code-owned ActionEpoch actor从live critic manager写唯一399-D事实。第四个fresh namespace随后自然RC0：
+`N=2 × 2 update`完成exact两个optimizer update和四行严格PENDING/ACK WAL；update0/1各48个Reward
+sample全部有限，实际Reward和=`3.1311374828/3.0717186332`，无poison/nonfinite，平均约
+`8.46 s/update`。这是第一份真实training-loop闭合证据。
+
+这两次更新尚无学习结论：总共只有2个forehand opportunity，均selected后defer/not-ready；contact、
+flight、R06 outcome与R07 recovery的eligible denominator仍为零，14个稀疏/任务项收入也为零，只有6个
+dense motion项为有限正收入。故下一实验不是调Reward，而是同代码、同`N=2`、单进程A1000，在
+20/50/100/200/500/1000只读趋势。
 2/5/14/60 update只回答工程链，不回答可学性。
 
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery

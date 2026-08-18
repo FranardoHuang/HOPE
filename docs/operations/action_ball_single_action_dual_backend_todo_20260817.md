@@ -65,33 +65,34 @@ deployment、真机或物理安全。
 | 2 | `PASS` | FullMDP lifecycle 重基线到 IsaacLab 8320；exact Kit cfg、train wiring 和 focused union 通过 | 不再维护 2.1 lifecycle |
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
-| 5 | `HOLD-first-code` | 三次Pod1 fresh canary均穿过完整env/Reward构造后在PPO/WAL前停止：8320 manager cfg dict（`40c6631…5051b9f`）；legacy schema-3误拒FullMDP finite-`q_des`（`dba73962…e5e99a1`）；修复后 exact validator 又揭示 runtime facts 从未把已安装的399-D FullMDP critic写入hard contract（`9e6b066c…35b8a2`）。三个namespace均已消费且不重试 | 只在真实ActionEpoch actor下从live critic manager物化399-D事实 |
-| 6 | `NEXT-fresh-fix4` | 第三窄修已提交`f53143f7`并在Pod1 host复跑联合wiring=`283 passed, 1 deselected`。第一份fix3 wrapper因磁盘在检查与执行之间跌破20GiB，guard/log/run均未创建但按no-retry废弃 | 使用同一代码的新docs commit、新Git root、新namespace再跑A `2×2` |
+| 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
+| 6 | `PASS-engineering / NEXT-A1000` | update0/1实际Reward和=`3.1311374828/3.0717186332`，各48/48有限；平均约`8.46 s/update`。两次更新只有2个forehand opportunity且均defer/not-ready，contact/flight/outcome/recovery分母仍为零，因此不作学习判断 | fresh namespace一次跑到1000；20/50/100/200/500/1000只读观察 |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `HOLD-producers` | MuJoCo 已有 Plant/R05→M04 packed boundary，但缺真实 vector observation/reward/termination/reset lineage 13类producer | producer-first实现后才 `learn(1)` |
-| 10 | `PASS-cleanup / HOLD-retention` | 第一轮只删无live-ref cache和旧verify scratch。fix3 preflight又暴露磁盘回落；逐项验证realpath/mount/special file和全`/proc`引用后，删除6个已由Git commit与`/tmp`主日志替代的可重建checkout，实收`2,729,152,512 B`，free=`23,742,586,880 B`。未碰foreign PID、checkpoint、主日志或资产 | fresh canary仍重验20GiB；A1000前再做retention与增长预算 |
+| 10 | `PASS-cleanup / PASS-A1000-margin` | 两轮只删无live-ref cache、旧verify scratch和6个Git可重建checkout，后者实收`2,729,152,512 B`；外部并发清理后末次只读free=`31,737,970,688 B`。未碰foreign PID、checkpoint、主日志或资产 | A1000仍在拿锁后重验；不按目录表观大小删硬链接/资产 |
 
 ## 5. 下一条命令
 
-最近执行、按no-retry废弃的 Pod1 GPU1 wrapper：
+已执行且不可复用的 Pod1 GPU1 engineering canary：
 
 ```text
-.codex-tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix3_pod1_gpu1_20260818.sh
-SHA256=be9add821ce665675257b426d7d9a753b4c07c0a75a2e0e896738519f73db792
+.codex-tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix4_pod1_gpu1_20260818.sh
+SHA256=9dcb0bcb54e163eb2bcd1b2b22da48e4a371580e875cbf59cebe1d6696109a08
 ```
 
 远端副本：
 
 ```text
-/tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix3_pod1_gpu1_20260818.sh
+/tmp/run_full_mdp_isaac51_rsl3_a_env2_iter2_fix4_pod1_gpu1_20260818.sh
 ```
 
-它要求 exact approval、clean Git HEAD、Isaac/IsaacLab/asset identity、至少 20 GiB workspace、GPU1 queue
-与 Kit 双锁；拿锁后再次确认物理 GPU UUID、显存和 zero compute PID，才以 no-clobber 创建 guard/log。
-它在任何guard/log/run创建前因`/workspace < 20 GiB`以RC70退出；虽然没有消费科学namespace，仍按
-一次性命令规则不重试。空间清理只移除6个可由Git重建的旧checkout；三个真实失败主日志继续保留在
-`/tmp`。下一份wrapper必须用新的Git root、namespace和approval，并在拿锁后重验磁盘与GPU。
+它在 fresh clean HEAD `86e36270…`、exact asset/环境、双锁和空物理GPU1上自然RC0；主日志
+`/tmp/action-ball-20260818T080000Isaac51Rsl3FullMdpAEnv2Iter2Fix4Pod1GPU1CST.log` SHA256=
+`51b26a37d624124dac03542ec35e4d3ecbb83717ba0242bbf9ab82f3333317ed`。WAL SHA256=
+`ba87926c8dd9beaf9df5c12a161d6624cdfc66f63e2b0f56d34fec75206acbe5`，4行newline-terminated JSONL
+严格闭合两个update的pending/ack key与step/commit/op/drain frontier。下一份A1000 wrapper必须使用新的
+Git root、namespace、approval和锁；`max_iterations=1000`且不生成checkpoint、不声称resume。
 
 ## 6. A1000 同进程里程碑
 
@@ -135,4 +136,6 @@ journal、checkpoint schema 和重复证明 gate。核心闭包约 14.9 万行�
 quarantine→`git fsck` 回收约 470 MB。2026-08-18 Pod1切回执行后，只删除6,902个可重建且无live-ref的
 `__pycache__/.pytest_cache`与旧`fullmdp-verify2.pdvCeV` scratch；观测free从约16.53GB升到24GB级。
 外部资产、foreign run、checkpoint、canonical logs和单副本证据仍不能按大小直接删；每次fresh run
-前重验磁盘增长和至少20GiB余量。
+前重验磁盘增长。fix4结束后曾为`22,794,698,752 B`；外部并发清理后末次只读值为
+`31,737,970,688 B`，已满足本次A1000的20GiB启动门和增长余量。审计仍无法证明额外3GiB可安全删除，
+所以不把`codexschema`、asset、日志或有live ref的目录包装成清理候选。

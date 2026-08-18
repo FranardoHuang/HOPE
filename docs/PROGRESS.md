@@ -8,6 +8,12 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/RSL3上的第四个fresh FullMDP A canary自然RC0：
+  `N=2 × 2 update`完成两个optimizer update与四行严格PENDING/ACK WAL；229/399-D observation、
+  Reward20均有限，无poison/nonfinite，平均约`8.46 s/update`。仅2个forehand opportunity且均
+  defer/not-ready，contact/flight/outcome/recovery分母仍为零，因此只关闭engineering loop，不作
+  学习判断；下一步为同代码单进程A1000里程碑。见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
+
 - 2026-08-18: Pod1第三个fresh FullMDP A canary在完整229/399-D manager、Reward20和policy bootstrap之后、
   PPO/WAL之前继续fail closed：schema-3 exact validator发现`runtime_execution_facts()`没有为FullMDP
   ActionEpoch actor物化live 399-D critic block；日志SHA=`9e6b066c…35b8a2`，namespace不重试。

@@ -17,7 +17,11 @@ authorization隔离后，第三个fresh namespace由该validator揭示真正遗�
 229/399-D，但`runtime_execution_facts()`只为Stage1/A211/C211写critic事实，FullMDP hard contract没有
 399-D critic block，日志SHA=`9e6b066c…35b8a2`。三次均没有optimizer或WAL行。当前修复只在exact
 ActionEpoch actor下读取live critic manager，并要求唯一`action_epoch=399D`；dependency-light=
-`145 passed`。下一次fresh run、A1000趋势、contact/outcome/recovery分母和C family仍`未测`，所以Gate不晋级。环境和下一条命令见
+`145 passed`。随后第四个fresh namespace在Pod1 GPU1自然RC0：真实`N=2 × 2 update`产生exact两个
+optimizer update，WAL为4行`PENDING0/ACK0/PENDING1/ACK1`，两组48个sample的Reward20均全部有限，
+实际Reward和为`3.1311374828/3.0717186332`，229/399-D observation有限且无poison/nonfinite。
+平均约`8.46 s/update`；仅2个forehand opportunity且均defer/not-ready，contact/flight/outcome/recovery
+分母仍为零，所以这是engineering loop证据，不是学习证据。A1000趋势和C family仍`未测`，Gate不晋级。环境和下一条命令见
 [唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)与
 [环境身份合同](../operations/action_ball_isaac51_environment_identity_20260818.md)。
 
