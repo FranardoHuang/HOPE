@@ -67,11 +67,12 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-A200 / STOPPED-TRUST-AT-A470 / STALLED-PROCESS` | 最后完整边界为ACK470（零基update469）、22560 steps，WAL没有悬空PENDING；此前Reward均finite且0 conservation violation。随后PhysX报CUDA device-side assert，坏CUDA context又使D05 poison attribution失败；PID仍活但GPU利用率、WAL、log、result均停止推进 | 不signal、不热补、不复用namespace；先用fresh诊断run定位异步kernel首错，再决定下一条A长跑 |
+| 6 | `PASS-A200 / STOPPED-TRUST-AT-A470 / STALLED-PROCESS` | 最后完整边界为ACK470（零基update469）、22560 steps，WAL没有悬空PENDING。下一段rollout的fixed-try LM在`solve_ex`后因`info!=0`或非有限`dq`触发device assert；row/类别未落盘。后续PhysX和D05 poison错误来自已损坏context；PID仍活但证据停止推进 | 不signal、不热补、不复用namespace；fresh诊断run先记录LM row/info/finite并同步首错，再决定下一条A长跑 |
 | 7 | `PASS-host-chain / HOLD-fresh-live` | bootstrap两拍ready仍授权Motion，但不再以neutral key写R07 ActionEpoch telemetry；CPU真实fact→owner projection→Motion reveal→production D05 settle已得到两行ACCEPT、Epoch无overflow。contact/flight/R06 outcome/R07 recovery仍需下一条fresh live分母 | fresh Kit N=2重验首个ACCEPT；A1000内只观察，不把潜伏bug当Reward结论 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `PASS-live-step / PASS-host-SAT / HOLD-live-SAT` | commit `e71ee1a…` 的fresh Pod1 GPU2门为`12 passed`，已闭合N=1 WAIT step与N=2 masked reset。下一纵切片净增249 production LOC，复用既有62-component/five-AABB authority，在20个post-integration state上运行fixed-shape device [SAT](../DEFINITIONS.md#sat-collision-test)；CPU float32/64、nonfinite、45° broad-true/exact-false反例通过，host组合=`12 passed, 5 skipped`。current 8320 branch的两枚Isaac语义AST pin由live constants与native随机交叉验证重钉 | fresh GPU2跑SAT/WAIT门；通过前仍禁止`learn(1)` |
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 外部清理后Pod1约`249.8 GiB` free；A1000 ACK417时run目录仅约6.6MB，预计到1000新增日志不足约10MB，即使终点单checkpoint也远低于空间余量。未碰foreign PID、checkpoint、主日志或资产 | 不再为本run清理；只读监控实际增长，不按表观du删除硬链接/资产 |
+| 11 | `PASS-host-callpoint / HOLD-live-RSL3` | 新的薄launcher在真实WAIT env外只调用upstream RSL-RL 3.1.2 `OnPolicyRunner.learn(1)`，构造前后都把实际PPO、ActorCritic、RolloutStorage和Adam绑定到安装distribution；没有新owner/receipt/WAL/checkpoint。host focused=`6 passed, 1 skipped`，组合=`18 passed, 6 skipped`；skip是唯一真实GPU integration | 先在fresh空卡跑row9 SAT，再用隔离RSL3 overlay跑真实`N=2 × 24` WAIT一次update；两者通过前不称MuJoCo A |
 
 ## 5. 下一条命令
 
@@ -99,9 +100,10 @@ A1000已在可信边界ACK470后失败并停滞（仍禁止修改、复用、sig
 `20260818T082100Isaac51Rsl3FullMdpAEnv2Iter1000Pod1GPU1CST`，wrapper SHA256=
 `9a6fc9194be7099e4c1ee0c0db8fdc782a763f594316e33de1c3fdd3a30707ed`，物理GPU1 UUID=
 `GPU-a8f7dd24-1162-15d4-2f22-7552ce2a6cb6`。它通过GitHub fresh clone取得代码；外部USD仍按路径与
-SHA-256绑定。最后完整WAL SHA256=`ba80b955…bcceb7`，log SHA256=`505751f4…ab293f`；首个可见错误
-出现在`2026-08-18 01:29:16 UTC`的PhysX rigid-body/contact view device assert，Python随后在
-`torch.isfinite(reference_hit)`观察到异步CUDA错误，因此该Python行不是kernel根因。进程、active
+SHA-256绑定。最后完整WAL SHA256=`ba80b955…bcceb7`，log SHA256=`505751f4…ab293f`；根device assert
+来自`stroke_adapt_torch.py`的fixed-try LM守卫，证明至少一个active candidate的`solve_ex info!=0`或
+`dq`非有限，但未落具体row/类别。其后的PhysX view与`torch.isfinite(reference_hit)`只是坏CUDA context
+的异步观察面，不能冒充根kernel。进程、active
 checkout和锁只读保留；下一条fresh run必须使用新Git root、namespace、approval和真实空卡。
 
 ## 6. A1000 同进程里程碑

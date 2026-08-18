@@ -114,10 +114,10 @@ R07 event并sticky overflow。该第二层是结构错误，不是学习结果�
 的shot-keyed telemetry，Motion readiness和completed-shot telemetry均保持。CPU生产链已从两拍真实
 plant facts走到owner projection、Motion reveal和D05 settle，得到两行ACCEPT且Epoch无overflow；
 现役A1000不热补，也不再能到500/1000：最后完整边界为ACK470（零基update469、22560 steps），随后
-PhysX rigid-body/contact view报告异步CUDA device-side assert；同一坏context令D05 poison attribution
-失败，子进程保留为停滞态。WAL没有悬空PENDING，故0--469仍是可信负证据；500/1000和Reward趋势均为
-`未测`。Python首次在`torch.isfinite(reference_hit)`观察到错误不能定位异步kernel根因，下一实验必须
-用fresh namespace做同步首错诊断，不能从该栈回溯猜因或重试现有namespace。
+fixed-try LM在`solve_ex`后因`info!=0`或非有限`dq`触发device assert；具体row、类别和更上游数值原因未
+落盘。同一坏context随后令PhysX view与D05 poison attribution失败，子进程保留为停滞态。WAL没有悬空
+PENDING，故0--469仍是可信负证据；500/1000和Reward趋势均为`未测`。下一实验必须用fresh namespace
+记录LM row/info/finite并同步首错，不能从后续PhysX/Python观察面猜因或重试现有namespace。
 隔离进程回归为integration=`1 passed`、recovery-device=`80 passed`、live-facts=`25 passed, 6 skipped`、
 Epoch rowwise=`51 passed, 7 skipped`；旧completed-action true-writer fixture也继续验证 keyed telemetry 正常发布。
 
@@ -171,6 +171,16 @@ state1--19，policy边界最终forward消费state20。测试不只比较同一�
 其world-AABB空角与table相交而真实OBB分离，明确要求`broad=true/exact=false`，从而阻止退回旧
 broadphase仍假绿。CPU float32/64、nonfinite、authority别名和时序反例通过；本纵切片production净增
 249 LOC。科学状态为`PASS-host-SAT / HOLD-live-SAT`；fresh GPU门通过前不接trainer、不执行`learn(1)`。
+
+trainer不再另起一套架构。新薄launcher只把现有WAIT TensorDict交给upstream RSL-RL 3.1.2
+`OnPolicyRunner.learn(1)`，并在runner构造前后分别绑定module与实际PPO、ActorCritic、RolloutStorage、
+Adam来源；有副作用的同名预载runner/algorithm不能先执行再被拒。host focused=`6 passed, 1 skipped`，
+WAIT/SAT组合=`18 passed, 6 skipped`。
+这证明真实production调用点与反例，不证明GPU update：唯一live test仍skip。下一实验只有两个串行问题：
+fresh空卡先跑SAT/WAIT；通过后在隔离RSL3.1.2 overlay跑`N=2 × 24`一次update，检查exact一次PPO
+`alg.update()`调用、48 transitions、229/399 finite。一次PPO update内部有20次Adam step，不能写成
+一次optimizer step。该run仍是`IDLE WAIT`工程门，没有question、contact、outcome或
+recovery分母，不能被解读成MuJoCo A学习结果。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`

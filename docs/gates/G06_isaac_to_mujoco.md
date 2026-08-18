@@ -52,6 +52,14 @@ config/callable语义AST（含fixed-dense SAT与component/blade fusion）同时�
 随机Isaac-vs-native SAT对照。真实GPU test仍
 是skip，因此状态为`PASS-host-SAT / HOLD-live-SAT`，不能据此启动PPO。
 
+trainer边界也已缩成一份薄launcher：直接构造现有WAIT env，再调用upstream RSL-RL 3.1.2
+`OnPolicyRunner.learn(1)`；没有复制runner、PPO或storage，也没有新增owner、receipt、WAL或checkpoint。
+构造前核module binding、构造后核实际PPO、ActorCritic、RolloutStorage对象均来自同一
+`rsl-rl-lib==3.1.2` distribution，optimizer为exact `torch.optim.Adam`，拒绝有副作用的同名预载模块。
+host focused=`6 passed, 1 skipped`，WAIT/SAT组合=`18 passed, 6 skipped`；唯一RSL3真实GPU用例仍是skip。因此它只关闭production callpoint，
+科学状态为`PASS-host-callpoint / HOLD-live-RSL3`。必须在fresh空卡先通过上段live SAT，再用隔离安装的
+RSL3.1.2运行`N=2 × 24`一次update；当前不得写成MuJoCo A已运行。
+
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
 可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory
