@@ -4268,4 +4268,7 @@
   `4096×25000`，1000 update只是98,304,000 transitions的早期节点，届时不停机。
 - 2026-08-19：25k不能只留曲线；lean runner改为每1000 update和自然终点写显式
   `diagnostic_nonresumable` policy/optimizer snapshot，payload和文件名都拒绝resume/checkpoint authority，
-  `load`仍硬拒。预计26份，只保留评估产物，不假装完整plant/owner/RNG恢复已完成。
+  `load`仍硬拒。预计26份；每份另写绑定iteration、size/SHA和authority字段的no-clobber sidecar，终局reader
+  必须在exact experiment/run_name下逐份交叉验证。sidecar前先从同一fd安全解码真实Torch payload，核四个
+  顶层字段、非空model/optimizer state和全tensor finite；fresh namespace还跑冻结RSL3真实serializer host
+  contract，防止正确文件名的空壳产物假绿。它们只保留评估产物，不假装完整plant/owner/RNG恢复已完成。

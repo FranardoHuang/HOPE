@@ -8,8 +8,10 @@ not a checkpoint, a readiness receipt, or a second telemetry authority.
 from __future__ import annotations
 
 from dataclasses import asdict
+import hashlib
 import importlib
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -22,6 +24,180 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 RUN_MODE = "single_action_lean"
 TELEMETRY_SCHEMA_VERSION = 11
 TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v11"
+SNAPSHOT_RECEIPT_KIND = "action_ball_full_mdp_diagnostic_snapshot_receipt_v1"
+SNAPSHOT_PAYLOAD_KIND = "policy_optimizer_diagnostic_nonresumable_v1"
+
+
+def _write_snapshot_receipt(
+    snapshot: Path, *, learning_iteration: int, required_infos: dict[str, object]
+) -> Path:
+    """Bind one completed upstream save to a durable, non-authoritative receipt."""
+
+    torch = importlib.import_module("torch")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(snapshot, flags)
+    try:
+        before = os.fstat(fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_size <= 0
+        ):
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot is not a non-empty "
+                "one-link regular file"
+            )
+        digest = hashlib.sha256()
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(fd, min(1024 * 1024, remaining))
+            if not chunk:
+                raise RuntimeError(
+                    "single_action_lean diagnostic snapshot shortened during read"
+                )
+            digest.update(chunk)
+            remaining -= len(chunk)
+        os.lseek(fd, 0, os.SEEK_SET)
+        with os.fdopen(os.dup(fd), "rb") as payload_stream:
+            payload = torch.load(
+                payload_stream, map_location="cpu", weights_only=True
+            )
+        if type(payload) is not dict or set(payload) != {
+            "model_state_dict",
+            "optimizer_state_dict",
+            "iter",
+            "infos",
+        }:
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot payload shape differs"
+            )
+        if type(payload["iter"]) is not int or payload["iter"] != learning_iteration:
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot iteration differs"
+            )
+        infos = payload["infos"]
+        if type(infos) is not dict or any(
+            infos.get(key) != value for key, value in required_infos.items()
+        ):
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot metadata differs"
+            )
+
+        def count_finite_tensors(value: object) -> int:
+            if isinstance(value, torch.Tensor):
+                if not bool(torch.isfinite(value).all().item()):
+                    raise RuntimeError(
+                        "single_action_lean diagnostic snapshot tensor is non-finite"
+                    )
+                return 1
+            if isinstance(value, dict):
+                if any(type(key) not in (str, int) for key in value):
+                    raise RuntimeError(
+                        "single_action_lean diagnostic snapshot mapping key differs"
+                    )
+                return sum(count_finite_tensors(item) for item in value.values())
+            if isinstance(value, (list, tuple)):
+                return sum(count_finite_tensors(item) for item in value)
+            if type(value) is float and not math.isfinite(value):
+                raise RuntimeError(
+                    "single_action_lean diagnostic snapshot scalar is non-finite"
+                )
+            if value is not None and type(value) not in (str, int, float, bool):
+                raise RuntimeError(
+                    "single_action_lean diagnostic snapshot value type differs"
+                )
+            return 0
+
+        model_state = payload["model_state_dict"]
+        optimizer_state = payload["optimizer_state_dict"]
+        if not isinstance(model_state, dict) or not model_state:
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot model state differs"
+            )
+        if not isinstance(optimizer_state, dict) or not optimizer_state:
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot optimizer state differs"
+            )
+        model_tensor_count = count_finite_tensors(model_state)
+        optimizer_tensor_count = count_finite_tensors(optimizer_state)
+        if model_tensor_count <= 0 or optimizer_tensor_count <= 0:
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot tensor inventory differs"
+            )
+        os.lseek(fd, 0, os.SEEK_SET)
+        verification_digest = hashlib.sha256()
+        verification_remaining = before.st_size
+        while verification_remaining:
+            chunk = os.read(fd, min(1024 * 1024, verification_remaining))
+            if not chunk:
+                raise RuntimeError(
+                    "single_action_lean diagnostic snapshot shortened after decode"
+                )
+            verification_digest.update(chunk)
+            verification_remaining -= len(chunk)
+        if verification_digest.digest() != digest.digest():
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot bytes changed during decode"
+            )
+        after = os.fstat(fd)
+        current = os.stat(snapshot, follow_symlinks=False)
+        identity = (before.st_dev, before.st_ino, before.st_size)
+        if identity != (after.st_dev, after.st_ino, after.st_size) or identity[:2] != (
+            current.st_dev,
+            current.st_ino,
+        ):
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot identity changed"
+            )
+    finally:
+        os.close(fd)
+
+    receipt = {
+        "schema_version": 1,
+        "kind": SNAPSHOT_RECEIPT_KIND,
+        "snapshot_name": snapshot.name,
+        "learning_iteration": learning_iteration,
+        "snapshot_size_bytes": before.st_size,
+        "snapshot_sha256": digest.hexdigest(),
+        "payload_kind": SNAPSHOT_PAYLOAD_KIND,
+        "model_tensor_count": model_tensor_count,
+        "optimizer_tensor_count": optimizer_tensor_count,
+        "all_tensors_finite": True,
+        "checkpoint_authority": False,
+        "resume_authority": False,
+    }
+    encoded = (
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        + "\n"
+    ).encode("utf-8")
+    receipt_path = snapshot.with_name(snapshot.name + ".receipt.json")
+    write_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    write_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    receipt_fd = os.open(receipt_path, write_flags, 0o600)
+    try:
+        written = 0
+        while written < len(encoded):
+            count = os.write(receipt_fd, encoded[written:])
+            if count <= 0:
+                raise OSError("single_action_lean snapshot receipt write was short")
+            written += count
+        os.fsync(receipt_fd)
+        info = os.fstat(receipt_fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise RuntimeError(
+                "single_action_lean snapshot receipt is not a unique regular file"
+            )
+    finally:
+        os.close(receipt_fd)
+    directory_fd = os.open(
+        receipt_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    )
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return receipt_path
 
 
 def _bound(owner: object, name: str) -> Callable:
@@ -824,25 +1000,39 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
         if infos is not None and type(infos) is not dict:
             raise RuntimeError("single_action_lean diagnostic snapshot infos differ")
         requested = Path(path)
-        if not requested.is_absolute() or requested.suffix != ".pt":
+        requested_stem = requested.stem
+        if (
+            not requested.is_absolute()
+            or requested.suffix != ".pt"
+            or not requested_stem.startswith("model_")
+            or not requested_stem[6:].isdigit()
+        ):
             raise RuntimeError("single_action_lean diagnostic snapshot path differs")
+        learning_iteration = int(requested_stem[6:])
         snapshot = requested.with_name(
-            requested.stem + ".diagnostic_nonresumable.pt"
+            requested_stem + ".diagnostic_nonresumable.pt"
         )
         metadata = dict(infos or {})
         metadata.update(
             {
-                "action_ball_full_mdp_snapshot_kind": (
-                    "policy_optimizer_diagnostic_nonresumable_v1"
-                ),
+                "action_ball_full_mdp_snapshot_kind": SNAPSHOT_PAYLOAD_KIND,
                 "checkpoint_authority": False,
                 "resume_authority": False,
             }
         )
         super().save(str(snapshot), infos=metadata)
+        receipt = _write_snapshot_receipt(
+            snapshot,
+            learning_iteration=learning_iteration,
+            required_infos={
+                "action_ball_full_mdp_snapshot_kind": SNAPSHOT_PAYLOAD_KIND,
+                "checkpoint_authority": False,
+                "resume_authority": False,
+            },
+        )
         print(
             "[ActionBallFullMdpRsl3Runner] wrote non-resumable diagnostic snapshot: "
-            f"{snapshot}",
+            f"{snapshot} receipt={receipt}",
             flush=True,
         )
 

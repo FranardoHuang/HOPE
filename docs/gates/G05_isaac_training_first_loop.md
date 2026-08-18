@@ -6228,4 +6228,8 @@ Linux uapi固定`F_GET_SEALS=1034`和四个seal位，不删除seal检查；exact
 25k runner不再把所有save静默丢弃：它复用upstream RSL serializer，但改用显式
 `model_N.diagnostic_nonresumable.pt`文件名，并在payload中钉
 `checkpoint_authority=false/resume_authority=false`；`load`继续硬拒。预期0、1000…24000及终点24999共26份，
-final consumer只验regular/non-empty/inventory，不把它们升级成plant/RNG完整checkpoint。G05仍为`Partial`。
+每份save返回后另以`O_NOFOLLOW|O_EXCL`写no-clobber sidecar，绑定iteration、snapshot size/SHA、payload kind
+和两项authority=false；写sidecar前从同一fd安全解码真实Torch payload，核四个顶层字段、iteration、非空
+model/optimizer state与全tensor finite。fresh namespace还以冻结RSL3真实`OnPolicyRunner.save`跑一次host serializer
+contract；final consumer要求exact experiment/run_name下26组snapshot/sidecar逐字交叉一致，而不把它们升级成
+plant/RNG完整checkpoint。G05仍为`Partial`。

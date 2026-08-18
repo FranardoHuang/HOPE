@@ -150,8 +150,12 @@ update1000不停机；25k终点仍不等于formal promotion。
 每1000 update及自然终点调用upstream RSL save，把policy、optimizer、iteration和normalizer所属model state
 写成`model_N.diagnostic_nonresumable.pt`。文件内同时写
 `checkpoint_authority=false`与`resume_authority=false`，文件名也不冒充可恢复checkpoint。长跑final consumer
-必须看到exact 26份（0、1000…24000、24999）regular non-empty snapshot及稳定inventory SHA；这只保证训练
-产物未丢，不能关闭TODO row8的完整restore缺口。
+必须看到exact 26份（0、1000…24000、24999）regular non-empty snapshot及同数目的no-clobber
+`*.receipt.json`；每份receipt绑定iteration、snapshot size/SHA、payload kind及两项authority=false，final consumer
+逐份交叉验证后才发布稳定inventory SHA。receipt生成前还会从同一已打开fd以`weights_only=True`重新读取真实
+Torch payload，要求`model_state_dict/optimizer_state_dict/iter/infos`四键、iteration一致、两类state非空且全部
+tensor finite；prelaunch再用冻结RSL3的真实`OnPolicyRunner.save`做一次host serializer contract。这个检查不是
+学习smoke，只保证训练产物未丢且确由diagnostic save边界签收，不能关闭TODO row8的完整restore缺口。
 
 旧失败run只有在以下条件同时成立时才能按已绑定的唯一PID链停止：LM exact Pod异常路径零skip、v11
 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项已被明确列出且没有被成功receipt掩盖、最终

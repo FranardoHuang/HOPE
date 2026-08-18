@@ -54,7 +54,10 @@ Reward0--13仍缺，继续明确`full_a_complete=false`，不因Isaac发车而�
 长跑同时需要保留可评估策略，但当前owner graph还不能安全resume。采用最窄边界：upstream RSL仍序列化policy、
 optimizer、iteration/model state，文件强制命名为`model_N.diagnostic_nonresumable.pt`，payload明确
 `checkpoint_authority=false`、`resume_authority=false`，而lean runner的`load`继续拒绝。每1000 update和
-自然终点留一份；它们可用于离线权重检查/后续显式评估，不是完整checkpoint或恢复授权。
+自然终点留一份；save返回后生成绑定同一文件size/SHA、iteration、payload kind与两项authority=false的
+no-clobber sidecar；签收前以`weights_only=True`从同一fd重新核真实payload四键、iteration、非空
+model/optimizer state和全tensor finite，prelaunch另跑冻结RSL3真实serializer contract。终局reader反绑exact
+experiment/run_name并要求26组逐份一致。它们可用于离线权重检查/后续显式评估，不是完整checkpoint或恢复授权。
 
 ## 2026-08-18 科学裁决：先真实运行，不再扩骨架
 

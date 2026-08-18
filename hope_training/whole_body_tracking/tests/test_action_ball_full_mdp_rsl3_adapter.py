@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import importlib.util
 import json
 import math
@@ -750,8 +751,41 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
 ):
     calls = []
 
+    class _Tensor:
+        pass
+
+    class _Finite:
+        def all(self):
+            return self
+
+        def item(self):
+            return True
+
+    fake_torch = types.SimpleNamespace(
+        Tensor=_Tensor,
+        isfinite=lambda _value: _Finite(),
+        load=lambda _stream, **_kwargs: {
+            "model_state_dict": {"weight": _Tensor()},
+            "optimizer_state_dict": {
+                "state": {0: {"step": _Tensor()}},
+                "param_groups": [{"params": [0], "lr": 1.0e-3}],
+            },
+            "iter": 1000,
+            "infos": calls[-1][1],
+        },
+    )
+    real_import_module = adapter.importlib.import_module
+
+    def _import_module(name):
+        if name == "torch":
+            return fake_torch
+        return real_import_module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", _import_module)
+
     def _base_save(_self, path, infos=None):
         calls.append((path, infos))
+        Path(path).write_bytes(b"unit-fixture-snapshot")
 
     monkeypatch.setattr(adapter.OnPolicyRunner, "save", _base_save, raising=False)
     runner = object.__new__(adapter.ActionBallFullMdpRsl3Runner)
@@ -771,8 +805,57 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
             },
         )
     ]
+    snapshot = tmp_path / "model_1000.diagnostic_nonresumable.pt"
+    receipt_path = tmp_path / (
+        "model_1000.diagnostic_nonresumable.pt.receipt.json"
+    )
+    assert json.loads(receipt_path.read_text()) == {
+        "schema_version": 1,
+        "kind": "action_ball_full_mdp_diagnostic_snapshot_receipt_v1",
+        "snapshot_name": snapshot.name,
+        "learning_iteration": 1000,
+        "snapshot_size_bytes": snapshot.stat().st_size,
+        "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+        "payload_kind": "policy_optimizer_diagnostic_nonresumable_v1",
+        "model_tensor_count": 1,
+        "optimizer_tensor_count": 1,
+        "all_tensors_finite": True,
+        "checkpoint_authority": False,
+        "resume_authority": False,
+    }
     with pytest.raises(RuntimeError, match="forbids checkpoint load/resume"):
         runner.load(str(calls[0][0]))
+
+
+def test_snapshot_receipt_rejects_unparseable_payload_before_sidecar(
+    tmp_path, monkeypatch
+):
+    snapshot = tmp_path / "model_7.diagnostic_nonresumable.pt"
+    snapshot.write_bytes(b"not-a-torch-payload")
+    fake_torch = types.SimpleNamespace(
+        load=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("unparseable")
+        )
+    )
+    real_import_module = adapter.importlib.import_module
+    monkeypatch.setattr(
+        adapter.importlib,
+        "import_module",
+        lambda name: fake_torch if name == "torch" else real_import_module(name),
+    )
+    with pytest.raises(RuntimeError, match="unparseable"):
+        adapter._write_snapshot_receipt(
+            snapshot,
+            learning_iteration=7,
+            required_infos={
+                "action_ball_full_mdp_snapshot_kind": (
+                    "policy_optimizer_diagnostic_nonresumable_v1"
+                ),
+                "checkpoint_authority": False,
+                "resume_authority": False,
+            },
+        )
+    assert not snapshot.with_name(snapshot.name + ".receipt.json").exists()
 
 
 def test_adapter_rejects_foreign_exact_looking_compact_action_term(
