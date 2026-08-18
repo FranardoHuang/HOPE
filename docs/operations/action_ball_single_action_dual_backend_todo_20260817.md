@@ -67,10 +67,10 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-A50 / RUNNING-A1000` | A50=`2400 steps/100 WAL/2400 finite/0 poison`；28次selected中25次admitted后均defer/not-ready、3次unknown reject，r03/physical=`0/25`，R06/R07=`未测`；26个episode均tilt，rolling length=`86.38` | 继续100/200/500/1000；尚无swing，不热改Reward |
+| 6 | `PASS-A200 / RUNNING-A1000` | A200=`9600 steps/400 WAL/9600 finite/0 poison`；118次selected中105次admitted后均defer/not-ready、13次unknown reject，r03/physical=`0/105`，R06/R07=`未测`；116个episode均tilt，mean length=`81.56` | 继续500/1000；并行只做readiness因果审计，不热改现役run |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
-| 9 | `HOLD-producers / CONTRACT-fixed-229x399` | 旧MuJoCo WIP有73个untracked Python文件、约12.4万行且目标仍是legacy 211/319；不得整包入Git。portable真源已随live Isaac冻结为FullMDP ActionEpoch 229/399 | 从tracked plant真实`reset()`做229/399 initial-WAIT TensorDict纵切片，≤500 prod LOC；随后才step/Reward/termination |
+| 9 | `PASS-host-slice / HOLD-GPU-step` | 旧MuJoCo WIP的73个untracked Python文件/约12.4万行不迁移。新2.0切片净增253 production LOC：共享229/399列序，复用tracked plant的`reset -> sim.forward`，park球并产initial-WAIT TensorDict；host focused=`9 passed,1 GPU skipped`，`step()`仍显式拒绝 | 在Pod1空闲GPU2跑真实N=1 reset/readback；通过后才接step/Reward/termination/masked reset，禁止`learn(1)`抢跑 |
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 两轮只删无live-ref cache、旧verify scratch和6个Git可重建checkout，后者实收`2,729,152,512 B`；外部并发清理后末次只读free=`31,737,970,688 B`。未碰foreign PID、checkpoint、主日志或资产 | A1000仍在拿锁后重验；不按目录表观大小删硬链接/资产 |
 
 ## 5. 下一条命令
@@ -122,6 +122,25 @@ recovery 的 eligible denominator 和 numerator、按 `stroke_family`/side 分�
 Reward 比例只在 update1000 后按因果证据改：先判断是触发率、权重还是分母问题；A/C 除 observation 和
 post-contact family Reward 外保持相同。历史 C 长跑曾看到 action penalty 负正比约
 `10.39 -> 3.45`、episode length 谷底后恢复；这只作为需要观察的模式，不直接抄权重。
+
+update100的WAL前缀闭合到ACK99：`1,297,132 B`，SHA256=
+`fdce022ba481fe7848619c3fa59244485629900b59df3de5ffda94e0d4606ed9`。累计100个update中，
+Reward=`4800/4800` finite、conservation violation=`0`、actual sum=`276.6504531`；58次due/selected中
+54次forehand construction/key admitted后全部defer/not-ready，4次unknown reject，仍为0 ACCEPT、
+0 playback/launch/contact/outcome/recovery。50→100窗口为30次selected、29次admitted、29次defer、
+1次reject；30个episode均base tilt，窗口mean length=`84.47`。六个dense income累计=`276.6504594`，
+约`0.05764/sample`，相比update20/50没有上升。TensorBoard step99仅作learner辅证：value loss=
+`5.34370`、surrogate=`-0.07934`、noise std=`0.0200275`、LR=`1e-5`；RSL-RL 3.1.2没有落KL。
+这仍只说明readiness入口尚未出现，不足以区分课程触发、模仿梯度和权重经济，故继续update200。
+
+update200前缀闭合到ACK199：`2,597,276 B`，SHA256=
+`6132cf21fd971f437554fc5e2070ff9f66bd60614a54ce88b35f2a8e71c82045`。累计9600个Reward sample
+全部finite、0 conservation violation；118次selected中105次forehand admitted仍全部not-ready，13次
+unknown reject，ACCEPT/playback/contact保持0。100→200窗口60次selected、51次admitted、51次defer、
+9次reject；60个episode全tilt，窗口mean length=`78.02`，累计mean=`81.56`。dense income累计=
+`547.6872`，约`0.05705/sample`；窗口约`0.05647/sample`，继续缓慢下降。TensorBoard step199的
+value loss=`0.01449`、surrogate=`-0.03678`、std=`0.0200528`、LR=`1e-5`。运行保持可信并继续500；
+但连续200 update为0 ACCEPT已足以并行启动只读readiness producer/阈值因果审计，不能靠调权重猜根因。
 
 ## 7. 架构减法
 

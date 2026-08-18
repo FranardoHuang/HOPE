@@ -28,6 +28,10 @@ def _load(name: str, path: Path):
 E = _load("action_ball_full_mdp_epoch", MDP / "action_ball_full_mdp_epoch.py")
 R = _load("action_ball_full_mdp_lean_rewards", MDP / "action_ball_full_mdp_lean_rewards.py")
 L = _load("action_ball_full_mdp_lean_runtime", MDP / "action_ball_full_mdp_lean_runtime.py")
+P = _load(
+    "action_ball_full_mdp_portable_observation",
+    MDP / "action_ball_full_mdp_portable_observation.py",
+)
 O = _load("action_ball_full_mdp_lean_observation_cfg", MDP / "action_ball_full_mdp_lean_observation_cfg.py")
 
 
@@ -113,6 +117,11 @@ def _direct_view(env, record, parts):
 def test_named_layout_is_compact_and_has_no_legacy_capacity_padding():
     assert O.ACTOR_WIDTH_V1 == 229
     assert O.CRITIC_WIDTH_V1 == 399
+    assert O.ACTOR_LAYOUT_V1 is P.ACTOR_LAYOUT_V1
+    assert O.CRITIC_EXTENSION_LAYOUT_V1 is P.CRITIC_EXTENSION_LAYOUT_V1
+    assert E.TASK_F32_WIDTH == P.TASK_F32_WIDTH
+    assert E.OWNER_FACT_F32_WIDTH == P.OWNER_FACT_F32_WIDTH
+    assert E.REWARD_CONSUMER_COUNT == P.REWARD_CONSUMER_COUNT
     assert [name for name, _ in O.ACTOR_LAYOUT_V1][-7:] == [
         "motion_phase_one_hot",
         "epoch_task_f32",

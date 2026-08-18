@@ -11,6 +11,16 @@ A211/C211 `211/319`；不能整包入Git或作为当前portable MDP。live Isaac
 不新增root/owner/receipt/schema。该reset切片通过也不授权`learn(1)`；真实step、Reward、termination、
 masked reset闭合后才可GPU训练。见[唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)。
 
+第一纵切片现已按该边界落成：一份engine-neutral module只拥有229/399列名、宽度和拼接顺序；Isaac
+observation source改为消费它；MuJoCo subclass复用tracked `A3ReadyBallVecEnv`的真实all-world
+`_reset_idx -> sim.forward`，在reveal前把球park于HOPE-local `(0,0,+10)`，并把live contact array
+中任何ball-involving row作为硬失败，再把live robot state与
+canonical zero task/clock/fact/reward rows与ActionEpoch `IDLE` one-hot组成RSL TensorDict。新增production净增253 LOC，没有root、
+owner、receipt、SHA或registry；`step()`继续硬拒绝缺失的Reward/termination/lifecycle。Host focused=
+`9 passed,1 skipped`，skip正是MuJoCo-Warp GPU real reset；因此当前只记`PASS-host-slice`，不把shape/
+AST或test callpoint写成live parity。Pod1 GPU2已只读确认空闲，但必须用fresh Git checkout执行该唯一
+GPU test并核park/readback/finite 229/399后，才能进入step纵切片。
+
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
 可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory

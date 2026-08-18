@@ -36,6 +36,20 @@ update50仍为可信但未进入任务阶段：2400 steps、100行exact WAL、Re
 `0/25`，R06/R07继续`未测`。26个episode全为base tilt，rolling length=`86.38`、mean reward=`4.99`，
 没有比update20更好的方向性变化；仍按协议继续到100，不在运行中改Reward。
 
+update100继续证明训练链可信，但未证明任务链已被policy进入：4800 steps、200行exact WAL、Reward
+`4800/4800` finite，0 nonfinite/poison/conservation violation。58次selected中54次forehand
+construction/key admitted后全部defer/not-ready，4次unknown reject；r03/physical=`0/54`，playback、
+launch、R06、R07仍无分母。56个episode全部base tilt，mean length=`85.36`；50→100窗口mean length=
+`84.47`。六个dense motion income约`0.05764/sample`，没有随20→50→100上升。该结果保持Gate
+`Partial`：继续同进程到200，不把0 contact写成0%成功率，也不因tilt终止或早期平坦曲线热改Reward。
+
+update200仍为可信的negative learning evidence：9600 steps、400行exact WAL、Reward `9600/9600`
+finite，0 poison/nonfinite/conservation violation。118次selected中105次forehand admitted后全部
+defer/not-ready，13次unknown reject，0 ACCEPT/playback/contact；116个episode均base tilt，累计mean
+length=`81.56`，100→200窗口mean=`78.02`。dense income约`0.05705/sample`，窗口约`0.05647/sample`。
+运行继续500/1000且不热改；同时允许对readiness producer、阈值和live输入做只读因果审计，因为200个
+update持续0 ACCEPT已是需要解释的事实，但还不是停止长跑或直接改Reward的充分条件。
+
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
 部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
 历史 225/318-D Stage1 V2 和 194/318-D fixed-question 只保留证据账；当前 branch

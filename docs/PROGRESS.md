@@ -15,6 +15,17 @@
   update50仍为25个admitted全部not-ready、r03/physical=`0/25`，rolling episode length=`86.38`，
   暂无方向性改善但不触发停机。详见[科学记录](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 
+- 2026-08-18: 同一只读A1000已闭合update100：4800 steps/200行严格PENDING/ACK WAL、Reward
+  `4800/4800` finite、0 poison/nonfinite/conservation violation。58次selected中54次forehand admitted
+  后仍全为defer/not-ready，4次unknown reject；0 ACCEPT/playback/contact，R06/R07保持`未测`。
+  56个episode均base tilt，mean length=`85.36`，dense income约`0.05764/sample`；按预注册计划继续200，
+  不因早期平坦或tilt热改Reward。
+
+- 2026-08-18: A1000 update200闭合为9600 steps/400行严格PENDING/ACK、Reward `9600/9600`
+  finite且0 poison/nonfinite/conservation violation。118次selected中105次forehand admitted仍全部
+  defer/not-ready，0 ACCEPT/playback/contact；116个episode均tilt，mean length=`81.56`，dense income约
+  `0.05705/sample`。现役run继续500/1000不热改；同时只读审计readiness producer/阈值，解释持续0 ACCEPT。
+
 - 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/RSL3上的第四个fresh FullMDP A canary自然RC0：
   `N=2 × 2 update`完成两个optimizer update与四行严格PENDING/ACK WAL；229/399-D observation、
   Reward20均有限，无poison/nonfinite，平均约`8.46 s/update`。仅2个forehand opportunity且均
@@ -25,6 +36,11 @@
   A211/C211 211/319，不再整包迁移。当前portable真源是live FullMDP ActionEpoch 229/399；MuJoCo
   2.0第一纵切片将从tracked plant真实reset直接产initial-WAIT 229/399 TensorDict，硬上限500 LOC，
   不新增root/owner/receipt/schema。
+
+- 2026-08-18: MuJoCo 2.0第一条initial-WAIT纵切片已以净增253 production LOC落地：共享FullMDP
+  229/399列序，Isaac改为消费同一合同；MuJoCo复用tracked plant真实reset/forward、park球并返回RSL
+  TensorDict，`step()`对缺失Reward/termination/lifecycle继续fail closed。Host focused=`9 passed,1 skipped`；
+  skipped GPU N=1 readback尚待Pod1空闲GPU2 fresh Git checkout执行，不把host结构测试写成live PASS。
 
 - 2026-08-18: Pod1第三个fresh FullMDP A canary在完整229/399-D manager、Reward20和policy bootstrap之后、
   PPO/WAL之前继续fail closed：schema-3 exact validator发现`runtime_execution_facts()`没有为FullMDP

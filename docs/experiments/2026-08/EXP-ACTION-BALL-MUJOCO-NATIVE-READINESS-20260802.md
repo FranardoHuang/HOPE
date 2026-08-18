@@ -69,6 +69,44 @@ admitted opportunity推进到playback与contact。
 
 裁决：目前是“readiness尚未被policy达到”，不是已证Reward权重根因；不改配置，继续update100。
 
+### A1000 update100
+
+- 科学边界：只消费WAL中update0--99的100组完整`PENDING-v2 -> EPOCH_ACK-v2`；前缀为
+  `1,297,132 B`，SHA256=`fdce022b…4606ed9`。累计4800 steps/200行WAL，Reward
+  `4800/4800` finite，nonfinite/poison/conservation violation均为0，actual sum=`276.6504531`。
+- 任务入口：D05 transactions=`2401`，due/selected=`58/58`，construction/key admitted=`54/54`；
+  54个forehand全部defer/not-ready，4个unknown reject，ACCEPT=`0`。因此playback、launch、r03、
+  physical contact、R06 outcome和R07 recovery仍没有合法分母，保持`未测`。
+- episode：56个episode全部base tilt，length sum=`4780`，mean length=`85.36`。单看50→100窗口为
+  30个episode、mean length=`84.47`，没有相对A50改善。
+- Reward：14个task/sparse项仍eligible=0；六个dense motion累计income依次为anchor-pos `27.7644`、
+  anchor-ori `24.5404`、body-pos `51.5558`、body-ori `0.2171`、lin-vel `81.2119`、ang-vel
+  `91.3609`，合计=`276.6505`，约`0.05764/sample`。A20/A50约为`0.05837/0.05787`，当前是平坦略降，
+  不是已证权重根因。
+- TensorBoard step99只作learner辅源：value loss=`5.34370`、surrogate=`-0.07934`、entropy=
+  `-77.2432`、noise std=`0.0200275`、LR=`1e-5`；KL与全optimizer/normalizer state finite receipt未产出。
+
+裁决：100个update仍没有swing，方向性尚差，但按预注册1000预算这不是停机条件。继续到200，届时优先
+判断admitted-but-not-ready是否开始松动；若仍为0 ACCEPT，才把“readiness/模仿入口可能结构性太难”提升为
+需要因果诊断的候选，而不是直接改Reward权重。
+
+### A1000 update200
+
+- WAL update0--199为200组完整PENDING/ACK；前缀`2,597,276 B`，SHA256=`6132cf21…1c82045`。
+  9600个Reward sample全部finite，0 poison/nonfinite/conservation violation，actual sum=`547.6872326`。
+- D05 transactions=`4801`，due/selected=`118/118`，105个forehand admitted后全为defer/not-ready，
+  13个unknown reject；ACCEPT、playback、launch、contact、R06和R07仍全部没有合法分母。
+- 116个episode全部base tilt，累计mean length=`81.56`；100→200窗口60个episode、mean=`78.02`，
+  相比A50/A100继续下降。dense configured income累计=`547.6872`，约`0.05705/sample`；窗口=
+  `271.0368/4800=0.05647/sample`，同样没有上升。
+- TensorBoard step199仅作learner辅证：value loss=`0.01449`、surrogate=`-0.03678`、entropy=
+  `-77.2043`、noise std=`0.0200528`、LR=`1e-5`；collection/learning=`7.72/0.40 s`，环境采样占主导。
+
+裁决：这不是数值故障，长跑继续500/1000；但“200 update、105个独立admitted opportunity仍0 ACCEPT”
+已经把readiness producer/阈值或可达性提升为明确的因果审计对象。审计只能读取冻结source与live WAL，
+不得热补active run；只有证明readiness输入恒不可达或奖励在该入口前没有有效梯度，才为下一条fresh run
+改合同或经济。
+
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery
 分母、termination reason和episode length；到1000后才区分权重失衡、触发率不足、分母错误或环境不可学。
 历史C曲线中action penalty负正比约`10.39 -> 3.45`及episode-length谷底恢复只作为待观察模式，
@@ -81,6 +119,14 @@ Python文件、约12.4万行，并面向历史A211/C211 `211/319`；继续增量
 `a3_train_ppo.py`的真实plant/reset callpoint重建：第一纵切片只做all-world reset后的initial-WAIT
 229/399 TensorDict，硬上限500 production LOC；不迁移M04/synthetic VecEnv/receipt/schema。真实step、
 Reward、termination和masked-reset lineage未闭合前，不声称接近GPU训练或执行`learn(1)`。
+
+该切片的host实现已经完成，production净增253 LOC：共享合同只定义列序；Isaac与MuJoCo分别提供live
+tensor。MuJoCo subclass复用tracked plant reset和`sim.forward()`，park unrevealed ball，返回policy229/
+critic399 TensorDict；缺失的step/Reward/termination明确抛错。Focused union=`9 passed,1 skipped`，
+唯一skip是需要MuJoCo-Warp和真实asset的GPU N=1 reset。科学裁决仍是`未测-live`：host shape/order不能
+证明GPU plant、park和readback，且现有`/workspace/mjlab_venv`的RSL-RL为5.4.0而Isaac为3.1.2；reset
+测试与runner无关，可以先跑，但任何`learn(1)`前必须隔离并锁定共同RSL3.1.2训练ABI，不能用兼容分支
+宣称等价。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`

@@ -25,9 +25,11 @@ import torch
 try:
     from . import action_ball_full_mdp_epoch as epoch_v1
     from . import action_ball_full_mdp_lean_runtime as lean_runtime
+    from . import action_ball_full_mdp_portable_observation as portable_observation
 except ImportError:  # Focused source-file tests avoid the Isaac package tree.
     import action_ball_full_mdp_epoch as epoch_v1
     import action_ball_full_mdp_lean_runtime as lean_runtime
+    import action_ball_full_mdp_portable_observation as portable_observation
 
 
 DIAGNOSTIC_UNAUTHORIZED = True
@@ -38,53 +40,20 @@ DIRECT_VIEW_METHOD = "action_epoch_observation_v1"
 ENV_TERM_METHOD = "_action_ball_full_mdp_lean_observe_term"
 MANAGER_GROUP_ORDER = ("policy", "critic")
 _CONSTRUCTION_STATE = "runtime_graph_ready"
-ACTOR_CONTRACT_V1 = "action_ball_full_mdp_action_epoch_v1"
-CRITIC_CONTRACT_V1 = "action_ball_full_mdp_action_epoch_critic_v1"
-OBSERVATION_KIND_V1 = "action_ball_full_mdp_action_epoch_observation_v1"
+ACTOR_CONTRACT_V1 = portable_observation.ACTOR_CONTRACT_V1
+CRITIC_CONTRACT_V1 = portable_observation.CRITIC_CONTRACT_V1
+OBSERVATION_KIND_V1 = portable_observation.OBSERVATION_KIND_V1
 
 # This is a deliberately small, named diagnostic ABI for the exact 31-DoF A3
 # plant and current 31-wide action.  Widths are derived only from these fields.
 # A future robot or observation change edits the named layout, never a magic
 # total inherited from the superseded R08 contract.
-ACTOR_LAYOUT_V1 = (
-    ("projected_gravity_b", 3),
-    ("base_ang_vel_b", 3),
-    ("joint_pos_rel", 31),
-    ("joint_vel_rel", 31),
-    ("last_action", 31),
-    ("teacher_joint_pos_rel", 31),
-    ("teacher_joint_vel_rel", 31),
-    ("motion_phase_one_hot", 5),
-    ("epoch_task_f32", epoch_v1.TASK_F32_WIDTH),
-    ("epoch_clock_remaining_s", 5),
-    ("epoch_phase_one_hot", 10),
-    ("epoch_task_valid", 1),
-    ("epoch_selected", 1),
-    # Preserve the frozen one-bit actor ABI with a public lifecycle fact.
-    # Construction admissibility is D05-private and is not a published shot fact.
-    ("epoch_launch_succeeded", 1),
-)
+ACTOR_LAYOUT_V1 = portable_observation.ACTOR_LAYOUT_V1
+CRITIC_EXTENSION_LAYOUT_V1 = portable_observation.CRITIC_EXTENSION_LAYOUT_V1
+ACTOR_WIDTH_V1 = portable_observation.ACTOR_WIDTH_V1
+CRITIC_WIDTH_V1 = portable_observation.CRITIC_WIDTH_V1
 
-CRITIC_EXTENSION_LAYOUT_V1 = (
-    ("physical_r03_r06_r07_fact_present", 4),
-    ("physical_r03_r06_r07_fact_age_s", 4),
-    (
-        "physical_r03_r06_r07_fact_f32",
-        4 * epoch_v1.OWNER_FACT_F32_WIDTH,
-    ),
-    ("physical_r03_r06_r07_fault_present", 4),
-    ("reward_cycle_open", 1),
-    ("reward_cycle_fault_present", 1),
-    ("reward_due", epoch_v1.REWARD_CONSUMER_COUNT),
-    ("reward_paid", epoch_v1.REWARD_CONSUMER_COUNT),
-)
-
-ACTOR_WIDTH_V1 = sum(width for _, width in ACTOR_LAYOUT_V1)
-CRITIC_WIDTH_V1 = ACTOR_WIDTH_V1 + sum(
-    width for _, width in CRITIC_EXTENSION_LAYOUT_V1
-)
-
-_DIRECT_FIELD_LAYOUT = ACTOR_LAYOUT_V1[:7]
+_DIRECT_FIELD_LAYOUT = portable_observation.DIRECT_FIELD_LAYOUT_V1
 _FACT_OWNER_KINDS = (
     "physical_ball",
     "r03_strike_fact",
@@ -520,21 +489,25 @@ class LeanActionEpochObservationSource:
         motion_phase = torch.nn.functional.one_hot(
             view.motion_phase_code, num_classes=5
         ).to(dtype=self._dtype)
-        actor_parts = [
-            getattr(view, name) for name, _ in _DIRECT_FIELD_LAYOUT
-        ]
-        actor_parts.extend(
-            (
-                motion_phase,
-                task,
-                clock_remaining,
-                phase_one_hot,
-                task_valid[:, None].to(dtype=self._dtype),
-                selected[:, None].to(dtype=self._dtype),
-                launch_succeeded[:, None].to(dtype=self._dtype),
-            )
+        actor_rows = {
+            name: getattr(view, name) for name, _ in _DIRECT_FIELD_LAYOUT
+        }
+        actor_rows.update(
+            {
+                "motion_phase_one_hot": motion_phase,
+                "epoch_task_f32": task,
+                "epoch_clock_remaining_s": clock_remaining,
+                "epoch_phase_one_hot": phase_one_hot,
+                "epoch_task_valid": task_valid[:, None].to(dtype=self._dtype),
+                "epoch_selected": selected[:, None].to(dtype=self._dtype),
+                "epoch_launch_succeeded": launch_succeeded[:, None].to(
+                    dtype=self._dtype
+                ),
+            }
         )
-        actor = torch.cat(actor_parts, dim=1)
+        actor = portable_observation.concatenate_layout_rows(
+            ACTOR_LAYOUT_V1, actor_rows
+        )
 
         owner_indices = torch.tensor(
             tuple(epoch_v1.OWNER_ORDER.index(name) for name in _FACT_OWNER_KINDS),
@@ -559,18 +532,24 @@ class LeanActionEpochObservationSource:
         facts = torch.where(
             present[:, :, None], facts, torch.zeros_like(facts)
         ).reshape(self._num_envs, -1)
-        critic_extension = torch.cat(
-            (
-                present.to(self._dtype),
-                fact_age,
-                facts,
-                faults.ne(0).to(self._dtype),
-                record.reward_cycle_open[:, None].to(self._dtype),
-                record.reward_cycle_fault.ne(0)[:, None].to(self._dtype),
-                record.reward_due.to(self._dtype),
-                record.reward_paid.to(self._dtype),
-            ),
-            dim=1,
+        critic_extension = portable_observation.concatenate_layout_rows(
+            CRITIC_EXTENSION_LAYOUT_V1,
+            {
+                "physical_r03_r06_r07_fact_present": present.to(self._dtype),
+                "physical_r03_r06_r07_fact_age_s": fact_age,
+                "physical_r03_r06_r07_fact_f32": facts,
+                "physical_r03_r06_r07_fault_present": faults.ne(0).to(
+                    self._dtype
+                ),
+                "reward_cycle_open": record.reward_cycle_open[:, None].to(
+                    self._dtype
+                ),
+                "reward_cycle_fault_present": record.reward_cycle_fault.ne(0)[
+                    :, None
+                ].to(self._dtype),
+                "reward_due": record.reward_due.to(self._dtype),
+                "reward_paid": record.reward_paid.to(self._dtype),
+            },
         )
         critic = torch.cat((actor, critic_extension), dim=1)
         if actor.shape != (self._num_envs, ACTOR_WIDTH_V1):
