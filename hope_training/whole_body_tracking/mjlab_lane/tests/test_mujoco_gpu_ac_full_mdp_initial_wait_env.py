@@ -89,6 +89,12 @@ def test_real_n1_reset_forward_returns_stock_rsl_tensordict():
     )
     try:
         observations, extras = env.reset()
+        assert env.physics_dt == 0.001
+        assert env.decimation == 20
+        assert env.step_dt == 0.02
+        # MuJoCo-Warp has no noslip pass; this is the tracked, registered
+        # backend deviation rather than an attach warning being ignored.
+        assert int(env.mj_model.opt.noslip_iterations) == 0
         assert isinstance(observations, tensordict.TensorDictBase)
         assert extras == {}
         policy = observations["policy"]
