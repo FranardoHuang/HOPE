@@ -8,6 +8,10 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: 在A `N=2 × 2 update`工程链闭合后，已从GitHub branch的fresh clean
+  `4d374ca8…` checkout于Pod1空闲GPU1启动同代码、同N、单进程A1000；active checkout只读，
+  不生成checkpoint、不声称resume，并在20/50/100/200/500/1000读取科学趋势。
+
 - 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/RSL3上的第四个fresh FullMDP A canary自然RC0：
   `N=2 × 2 update`完成两个optimizer update与四行严格PENDING/ACK WAL；229/399-D observation、
   Reward20均有限，无poison/nonfinite，平均约`8.46 s/update`。仅2个forehand opportunity且均

@@ -36,6 +36,9 @@ dense motion项为有限正收入。故下一实验不是调Reward，而是同�
 20/50/100/200/500/1000只读趋势。
 2/5/14/60 update只回答工程链，不回答可学性。
 
+同代码、同`N=2`的fresh A1000现已在Pod1 GPU1单进程启动；在第20个update之前仍记为`未测`，不因
+tilt/table/fall等可学习终止提前停机，也不在运行中改Reward或source。
+
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery
 分母、termination reason和episode length；到1000后才区分权重失衡、触发率不足、分母错误或环境不可学。
 历史C曲线中action penalty负正比约`10.39 -> 3.45`及episode-length谷底恢复只作为待观察模式，

@@ -66,7 +66,7 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-engineering / NEXT-A1000` | update0/1实际Reward和=`3.1311374828/3.0717186332`，各48/48有限；平均约`8.46 s/update`。两次更新只有2个forehand opportunity且均defer/not-ready，contact/flight/outcome/recovery分母仍为零，因此不作学习判断 | fresh namespace一次跑到1000；20/50/100/200/500/1000只读观察 |
+| 6 | `PASS-engineering / RUNNING-A1000` | update0/1实际Reward和=`3.1311374828/3.0717186332`，各48/48有限；平均约`8.46 s/update`。同代码、同`N=2`的fresh A1000已在Pod1 GPU1单进程启动 | 20/50/100/200/500/1000只读观察；不因tilt/table/fall停止 |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `HOLD-producers` | MuJoCo 已有 Plant/R05→M04 packed boundary，但缺真实 vector observation/reward/termination/reset lineage 13类producer | producer-first实现后才 `learn(1)` |
@@ -93,6 +93,12 @@ SHA256=9dcb0bcb54e163eb2bcd1b2b22da48e4a371580e875cbf59cebe1d6696109a08
 `ba87926c8dd9beaf9df5c12a161d6624cdfc66f63e2b0f56d34fec75206acbe5`，4行newline-terminated JSONL
 严格闭合两个update的pending/ack key与step/commit/op/drain frontier。下一份A1000 wrapper必须使用新的
 Git root、namespace、approval和锁；`max_iterations=1000`且不生成checkpoint、不声称resume。
+
+A1000现役运行（禁止修改、复用或重启）：Git HEAD=`4d374ca8…`，namespace=
+`20260818T082100Isaac51Rsl3FullMdpAEnv2Iter1000Pod1GPU1CST`，wrapper SHA256=
+`9a6fc9194be7099e4c1ee0c0db8fdc782a763f594316e33de1c3fdd3a30707ed`，物理GPU1 UUID=
+`GPU-a8f7dd24-1162-15d4-2f22-7552ce2a6cb6`。它通过GitHub fresh clone取得代码；外部USD仍按路径与
+SHA-256绑定。运行期间只读日志/WAL/TensorBoard，不在active checkout热补丁。
 
 ## 6. A1000 同进程里程碑
 
