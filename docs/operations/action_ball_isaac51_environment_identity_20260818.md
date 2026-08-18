@@ -19,7 +19,7 @@ RSL-RL 3.1.2/TensorDict。前者的 PPO rollout 接口是 `act(obs, critic_obs)`
 | --- | --- |
 | Jiayi 训练提交 | `35e65eb7f3e1bf21fa5719aa0c0a7a90b830b836` |
 | 历史 FullMDP 环境验证提交 | `758e88eefe6e9ce625ae57f5a732bc2024b7c74a` |
-| 下一条4096执行提交 | `未冻结；必须由最终一次性wrapper钉定exact commit` |
+| 下一条4096执行提交 | 由最终一次性wrapper钉定exact clean commit；本页不维护会自引用漂移的SHA |
 | Isaac Sim | `5.1.0-rc.19+release.26219.9c81211b.gl` |
 | IsaacLab | `8320e0be5c0f2def58d5b19d308c6d2539d47cb2` |
 | Python | `3.11.13` |
@@ -77,7 +77,7 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 - `PASS-direct`：FullMDP RSL3 optimizer boundary/WAL adapter；v11 compact joint-safety结构顺序已通过host反例。
 - `PASS-historical-N2`：FullMDP RSL3真实 `N=2×2`曾闭合optimizer/WAL，只作工程证据。
 - `PASS-Pod-CUDA`：clean Git `2c8ef444…`在Jiayi Python3.11/Torch2.7-cu128完成LM info/NaN/finite-overflow三参数，CUDA context存活。
-- `HOLD-next-4096`：最终commit/wrapper和真实v11前5次receipt尚未冻结。
+- `PASS-prelaunch-code / HOLD-live-4096`：LM异常路径与v11 adapter已闭合；一次性wrapper已把实际Kit trainer内的Python/RSL class source和update0--4 receipt纳入消费。最终发车仍待wrapper终审、文档commit repin与空卡/锁的临门只读重验。
 - `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、portable MuJoCo Full-A semantic runtime。
 
 环境 `PASS` 只回答“代码在同一软件栈上执行”，不回答 Reward 是否合理、是否可学或跨机逐位相同。

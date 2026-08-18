@@ -4247,3 +4247,9 @@
   排名。新增 fresh bounded `long512=(512 env,1000 updates,save/100)`，只让保留拍心+拍面梯度且
   不求目标速度的 B 进入长训；host launcher=`28 passed`。并发 A-fast 的 rollout 前 Kit 锁挂起
   已精确终止并用新 namespace 重跑成功，废弃 namespace 不计证据。
+
+- 2026-08-19：FullMDP A下一条发射收敛为唯一fresh `4096 env × 1000 update`；不再跑小N或独立
+  5-update smoke。LM坏行已在exact Pod CUDA闭合，RSL3 v11事务边界已接真实optimizer；one-shot
+  wrapper新增actual Kit trainer内Python/sealed-RSL来源attestation、exec紧前GPU/queue重验和终点
+  1000-pair evidence consumer，当前`PREPARED / NOT YET RUN`。portable MuJoCo只到真实contact的
+  `full_a_slice_attempted`，R03/R06/R07/Reward0--13仍缺，明确不称Full-A。

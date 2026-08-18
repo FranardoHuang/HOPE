@@ -6191,3 +6191,16 @@ exact Pod `2e743932` 随后验证17-file closure与全部递归 pin 无 missing/
 `.075/.5/.262`，A225 正确的 lockstep controller 是 flags=`111`、rollout-zero `.5/3/2.1`，再单调收紧
 到这些 minima。当前新增独立 `measured_vendor_v2_a225_monotonic_v1`，不改旧 L194 static profile；host
 聚焦=`323 passed`。需在新 exact commit fresh 重跑，不能复用失败 namespace 或据此解锁4096。
+
+### 2026-08-19 FullMDP A 4096单进程发射边界
+
+旧`N=2` A1000在ACK470后的LM device assert已由exact Pod三类坏行反例闭合：`solve_ex info!=0`、
+非有限`dq`和有限加法溢出均在任何物理forward前逐行拒绝，CUDA context保持可用。RSL3薄adapter的
+v11顺序固定为joint-safety prepare/validate→真实optimizer→PENDING fsync→Epoch ACK→EPOCH_ACK fsync→
+durable latch→joint-safety ACK；结构性4096×5只证明事务容量，不代签业务分母。
+
+下一条不再跑小N或独立5-update smoke，而是唯一fresh `4096 env × 1000 update`。one-shot wrapper在
+真实Isaac Kit trainer进程内以`-P -S`从sealed RSL bytes导入并重验Python/Torch/TensorDict/RSL class，
+`exec`紧前重验GPU与queue；前5次update只读同一进程的v11/WAL/Reward20/D05。当前状态为
+`PREPARED / NOT YET RUN`；终审和临门资源重验通过才可发车。G05仍为`Partial`，该run也继续
+`diagnostic_unauthorized=true`，不授权formal/export/deployment。

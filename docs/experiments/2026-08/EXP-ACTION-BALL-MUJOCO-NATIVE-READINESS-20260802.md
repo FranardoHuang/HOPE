@@ -11295,3 +11295,16 @@ update20/50完整JSONL显示：累计episode length约`145.45/145.56`；节点mi
 `145.22/144.47`，所以只称有稀少接触率上升，不能称整体更接近球。action-rate income均值约
 `-3.96e-5/-4.34e-5`、负/正Reward比约`0.00307/0.00326`，负惩罚不是当前主瓶颈。
 capacity overflow/nonfinite均为0，继续500。
+
+### 2026-08-19：Isaac长跑发射与portable MuJoCo并行裁决
+
+本轮采用“一个长跑、里程碑只读”的实验结构：Isaac A直接`4096×1000`，update0--4是同一进程的
+容量/finite/事务观察，不再用重复小N smoke累加退出码。发射件要求actual Kit trainer进程内绑定
+Python3.11/Torch2.7/TensorDict0.10/RSL3.1.2 class source，随后才进入`train.py`；末端证据必须消费
+1000组PENDING/EPOCH_ACK、1000份v11/post-safety ACK、Reward20 finite/conservation和非零D05分母。
+普通tilt/table/fall只记telemetry，不作为提前停机理由。
+
+MuJoCo侧不等待Isaac结束，但当前只承认`full_a_slice_attempted`：真实reveal/launch/contact/terminal/reset
+已经有live消费点，R03/R06/R07与Reward0--13仍`not_produced`。因此下一批工作是在Isaac长跑期间逐项
+补这些producer和rough课程；portable Full-A未闭合前不发其长跑，也不拿native A1000曲线做等价比较。
+本节是采用/拒绝边界，不记录逐条shell命令。

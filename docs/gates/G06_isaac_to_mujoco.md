@@ -2001,3 +2001,14 @@ stamp、face sign 和半径；无 generic contact 或 generic contact 无 classi
 `95382a53` receipt-v2 replay=`18 passed`，红面 face sign `+1`、tick/substep=`1/3`、tangential
 distance=`0.007168732 m < 0.044263876 m`、invalid reasons=`[]`，且 receipt/backend identity seals
 独立重算一致。selected-rubber contact receipt 子门至此关闭；Reward/PPO 仍未授权，G06 保持 `Partial`。
+
+### 2026-08-19 portable FullMDP A纵切片边界
+
+portable MuJoCo已真实穿过row-wise reveal、ball state launch、20-substep plant、live selected-racket
+contact、bounded terminal与selected reset；exact Pod节点用真实contact rows证明production latch，而非
+runner手造extras。runner固定发布`task_lifecycle=full_a_slice_attempted`、`full_a_complete=false`。
+
+仍缺R03 strike fact、R06 landing outcome、R07 recovery及Reward项0--13，因此portable MuJoCo Full-A
+长跑继续`HOLD`。native 114/114-D A1000的吞吐与contact提升只能作为工程/Reward经济参考，不能代签
+229/399-D portable语义。该缺口不阻塞Isaac 4096 A长跑；Isaac运行期间继续接producer，但不得热补
+活跃Isaac源码或把partial receipt改名为Full-A成功。G06保持`Partial`。

@@ -112,12 +112,18 @@ deployment、真机或物理安全。
 4. 仅在进程失败、证据不可信或结构性不可学被直接证明时停止；普通tilt/table/fall只记telemetry；
 5. 长跑期间并行完成portable MuJoCo A lifecycle、rough课程和2.0删除清单，不热补正在运行的源码或scene。
 
-当前尚无可执行的4096 wrapper；必须在真实GPU/显存、每卡最多两个进程、独立child CPU affinity与
-不复用namespace均可证明后冻结一次性发射件。旧失败run只有在以下条件同时成立时才能按已绑定的唯一
-PID链停止：LM exact Pod异常路径零skip、v11 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项
-已被明确列出且没有被成功receipt掩盖、最终commit/wrapper经独立红队。Pod1三张GPU和相关旧PID已自然
-释放，因此不再需要stop动作；截至本次更新仍未启动下一代，唯一剩余发射阻塞是final commit/wrapper与
-真实v11前5次消费设计的冻结审查。
+一次性4096 wrapper候选已经形成；它固定`4096×1000`、一个fresh namespace、GPU0/CPU32--47、
+最多一个已知peer、20 GiB显存与磁盘余量，并在实际Isaac Kit trainer进程内以`-P -S`绑定Python、
+Torch/TensorDict与sealed RSL3 source/class后才进入`train.py`。GPU/queue在`exec`紧前重验；
+update0--4由同一进程的v11 WAL/post-ACK receipt读取，不另起`4096×5`。该ignored one-shot文件不进入Git；
+最终source commit、wrapper SHA、namespace和result由发射件与remote保留证据共同记录，不能由本页
+自引用代签。
+
+旧失败run只有在以下条件同时成立时才能按已绑定的唯一PID链停止：LM exact Pod异常路径零skip、v11
+adapter真实callpoint可被前5次消费、portable MuJoCo缺失项已被明确列出且没有被成功receipt掩盖、最终
+commit/wrapper经独立红队。旧PID随后已自然消失，因此本轮没有发signal/kill。下一代仍未启动；只剩
+最终文档commit repin、wrapper终审和发车前一次GPU/lock/free只读重验。终审通过后直接启动长跑，不能
+再插入小N或独立5-update smoke。
 下面保留旧命令与失败证据，防止误复用。
 
 ### 已消费旧命令
