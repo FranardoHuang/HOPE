@@ -70,7 +70,7 @@ deployment、真机或物理安全。
 | 6 | `PASS-A200 / RUNNING-A1000` | A200=`9600 steps/400 WAL/9600 finite/0 poison`；118次selected中105次admitted后均defer/not-ready、13次unknown reject，r03/physical=`0/105`，R06/R07=`未测`；116个episode均tilt，mean length=`81.56` | 继续500/1000；并行只做readiness因果审计，不热改现役run |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
-| 9 | `PASS-host-slice / HOLD-GPU-step` | 旧MuJoCo WIP的73个untracked Python文件/约12.4万行不迁移。新2.0切片净增253 production LOC：共享229/399列序，复用tracked plant的`reset -> sim.forward`，park球并产initial-WAIT TensorDict；host focused=`9 passed,1 GPU skipped`，`step()`仍显式拒绝 | 在Pod1空闲GPU2跑真实N=1 reset/readback；通过后才接step/Reward/termination/masked reset，禁止`learn(1)`抢跑 |
+| 9 | `PASS-live-reset / HOLD-step` | fresh Git `495a0870`在Pod1 GPU2真实N=1 reset自然RC0：finite 229/399、IDLE、+10m park、raw no-ball-contact；result SHA=`6fe2e70c…0ba6030`。live log同时证明mjlab parent `timestep/noslip=0.002/0`覆盖MJCF `0.001/3` | 先闭合单一physics option真源，再接最小step/Reward/termination/masked reset；RSL3.1.2隔离前禁止`learn(1)` |
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 两轮只删无live-ref cache、旧verify scratch和6个Git可重建checkout，后者实收`2,729,152,512 B`；外部并发清理后末次只读free=`31,737,970,688 B`。未碰foreign PID、checkpoint、主日志或资产 | A1000仍在拿锁后重验；不按目录表观大小删硬链接/资产 |
 
 ## 5. 下一条命令

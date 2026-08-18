@@ -37,10 +37,11 @@
   2.0第一纵切片将从tracked plant真实reset直接产initial-WAIT 229/399 TensorDict，硬上限500 LOC，
   不新增root/owner/receipt/schema。
 
-- 2026-08-18: MuJoCo 2.0第一条initial-WAIT纵切片已以净增253 production LOC落地：共享FullMDP
-  229/399列序，Isaac改为消费同一合同；MuJoCo复用tracked plant真实reset/forward、park球并返回RSL
-  TensorDict，`step()`对缺失Reward/termination/lifecycle继续fail closed。Host focused=`9 passed,1 skipped`；
-  skipped GPU N=1 readback尚待Pod1空闲GPU2 fresh Git checkout执行，不把host结构测试写成live PASS。
+- 2026-08-18: MuJoCo 2.0第一条initial-WAIT纵切片以净增253 production LOC落地，并在Pod1 GPU2
+  的fresh Git `495a0870`上完成真实N=1 reset/forward：229/399 TensorDict finite、ActionEpoch为IDLE、
+  +10m park球无live contact，result RC0/SHA=`6fe2e70c…0ba6030`。该PASS只关闭reset/readback；live
+  log同时证明mjlab parent把MJCF `timestep/noslip_iterations=0.001/3`覆盖为`0.002/0`，因此step、
+  Reward、termination和masked reset继续HOLD，不能据reset执行`learn(1)`。
 
 - 2026-08-18: Pod1第三个fresh FullMDP A canary在完整229/399-D manager、Reward20和policy bootstrap之后、
   PPO/WAL之前继续fail closed：schema-3 exact validator发现`runtime_execution_facts()`没有为FullMDP

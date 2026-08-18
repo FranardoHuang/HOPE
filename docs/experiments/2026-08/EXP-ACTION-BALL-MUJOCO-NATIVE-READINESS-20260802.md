@@ -120,13 +120,18 @@ Python文件、约12.4万行，并面向历史A211/C211 `211/319`；继续增量
 229/399 TensorDict，硬上限500 production LOC；不迁移M04/synthetic VecEnv/receipt/schema。真实step、
 Reward、termination和masked-reset lineage未闭合前，不声称接近GPU训练或执行`learn(1)`。
 
-该切片的host实现已经完成，production净增253 LOC：共享合同只定义列序；Isaac与MuJoCo分别提供live
-tensor。MuJoCo subclass复用tracked plant reset和`sim.forward()`，park unrevealed ball，返回policy229/
-critic399 TensorDict；缺失的step/Reward/termination明确抛错。Focused union=`9 passed,1 skipped`，
-唯一skip是需要MuJoCo-Warp和真实asset的GPU N=1 reset。科学裁决仍是`未测-live`：host shape/order不能
-证明GPU plant、park和readback，且现有`/workspace/mjlab_venv`的RSL-RL为5.4.0而Isaac为3.1.2；reset
-测试与runner无关，可以先跑，但任何`learn(1)`前必须隔离并锁定共同RSL3.1.2训练ABI，不能用兼容分支
-宣称等价。
+该切片的host实现为production净增253 LOC：共享合同只定义列序；Isaac与MuJoCo分别提供live tensor。
+Pod1 GPU2随后从fresh Git `495a0870`执行唯一真实N=1 reset，Python3.12/Torch2.13/MuJoCo3.10/
+MuJoCo-Warp3.10.0.3上自然RC0。policy229/critic399 finite，live robot rows与readback一致，ActionEpoch
+phase为IDLE one-hot，+10m park球qvel为零且raw contact array中无ball row。result SHA256=
+`6fe2e70c43fc239c3f4a041e3e349c991ff1fb4ff312c17266d66e0580ba6030`，log SHA256=
+`2cc20c745293f39b5e46a1d10f19a066d5738648e85d8c02261bd6785901ba1c`；checkout保持clean。
+
+科学裁决为`PASS-live-reset / HOLD-step`。同一live log明确警告MJCF child的`timestep=0.001`与
+`noslip_iterations=3`没有传播，mjlab parent保留`0.002/0`。这不影响本次无步进reset/readback结论，
+却会改变后续动力学，必须在step纵切片先由单一配置真源闭合，不能忽略warning继续训练。此外
+`/workspace/mjlab_venv`的RSL-RL为5.4.0而Isaac为3.1.2；任何`learn(1)`前仍须隔离并锁定共同
+RSL3.1.2训练ABI，不能用兼容分支宣称等价。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`
