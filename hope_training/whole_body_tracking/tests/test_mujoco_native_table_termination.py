@@ -460,9 +460,10 @@ class _FakeMujoco:
 
 
 class _FakeOwnerFrameModel:
-    def __init__(self):
+    def __init__(self, *, body_name_prefix=""):
         self.body_name_to_id = {
-            name: index + 1 for index, name in enumerate(term.TABLE_CONTACT_BODY_NAMES)
+            body_name_prefix + name: index + 1
+            for index, name in enumerate(term.TABLE_CONTACT_BODY_NAMES)
         }
         self.body_parentid = np.zeros(33, dtype=np.int64)
         self.body_parentid[2:] = 1
@@ -519,6 +520,46 @@ def test_same_bytes_fresh_snapshot_binds_registered_owner_frames(
     assert receipt["root_mjcf_path"] == str(snapshot.resolve())
     assert receipt["root_mjcf_sha256"] == term.EXPECTED_CANONICAL_MJCF_SHA256
     assert receipt["owner_local_frame_sha256"] == expected_frames["content_sha256"]
+
+
+def test_attached_robot_namespace_binds_same_registered_owner_frames(
+    tmp_path, monkeypatch,
+):
+    snapshot = tmp_path / "a3_pingpong.xml"
+    snapshot.write_bytes(term.CANONICAL_MJCF.read_bytes())
+    base_model = _FakeOwnerFrameModel()
+    attached_model = _FakeOwnerFrameModel(body_name_prefix="robot/")
+    expected_frames = term._owner_frame_contract(_FakeMujoco, base_model)
+    observed_frames = term._owner_frame_contract(
+        _FakeMujoco, attached_model, body_name_prefix="robot/"
+    )
+    term._assert_owner_frame_contract_equal(expected_frames, observed_frames)
+
+    monkeypatch.setattr(
+        term,
+        "_verified_registered_owner_frames",
+        lambda mujoco, selected_root: (expected_frames, "portable", "verification"),
+    )
+    receipt = term.bind_pre_registered_owner_frames(
+        _FakeMujoco,
+        attached_model,
+        snapshot,
+        body_name_prefix="robot/",
+    )
+    assert receipt["owner_local_frame_sha256"] == expected_frames["content_sha256"]
+    assert observed_frames["body_ids"] == list(range(1, 33))
+
+
+@pytest.mark.parametrize("prefix", ["robot", "/robot/", "robot//", " robot/"])
+def test_owner_frame_namespace_prefix_is_explicit_and_canonical(prefix):
+    with pytest.raises(
+        term.TableTerminationContractError, match="namespace prefix is malformed"
+    ):
+        term._owner_frame_contract(
+            _FakeMujoco,
+            _FakeOwnerFrameModel(body_name_prefix="robot/"),
+            body_name_prefix=prefix,
+        )
 
 
 def test_plant_binding_rejects_nonfour_control_decimation():

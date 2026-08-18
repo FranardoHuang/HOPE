@@ -68,6 +68,13 @@ authority仍要求原绝对路径。该条件不是plant identity。fresh修复�
 receipt与live owner-local frame三重校验，只删除绝对路径相等；不同字节拒绝与同字节异路径正例=`2 passed`。
 该run的`direct_rc=1/rsl3_rc=99`保留且不重试；fresh live 19-test仍待验证。
 
+fresh identity修复后的下一次one-shot已越过绝对路径门，三个live构造共同停在attached-scene body命名：
+portable A3注册名为`pelvis_link`，MJLab attach后的live名为`robot/pelvis_link`。这不是几何或plant漂移。
+authority现要求adapter显式传`robot/`，用它只做live ID解析；写入比较合同的仍是canonical 32-body名、
+父子关系与owner-local frame，所以不能自动猜prefix，也没有放宽portable identity。native bare-model默认行为不变。
+host owner-frame namespace卷=`7 passed`，device SAT卷=`4 passed,1 skipped`；新fresh GPU 19-test通过前
+仍保持`HOLD-live-RSL3`。
+
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
 可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory

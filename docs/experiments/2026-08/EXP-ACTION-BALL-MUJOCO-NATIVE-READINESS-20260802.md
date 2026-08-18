@@ -175,6 +175,13 @@ state1--19，policy边界最终forward消费state20。测试不只比较同一�
 broadphase仍假绿。CPU float32/64、nonfinite、authority别名和时序反例通过；本纵切片production净增
 249 LOC。科学状态为`PASS-host-SAT / HOLD-live-SAT`；fresh GPU门通过前不接trainer、不执行`learn(1)`。
 
+fresh GPU整合先排除了“snapshot绝对路径必须等于开发机canonical路径”这一伪identity，随后把下一首错
+定位为MJLab attach的确定性命名空间：canonical 32个A3 body在live scene统一加`robot/`。采用的修复不是
+模糊查找或重新注册plant，而是唯一adapter显式声明该prefix；authority仍用canonical名称序列化并逐项比较
+父子关系、local frame、root bytes与portable closure。这样同一几何在bare native model与attached MJLab
+model中有同一语义，而不会把路径/名称表象误当plant identity。host namespace反例与device SAT分别为
+`7 passed`和`4 passed,1 skipped`；live 19-test与RSL update仍为`未测`。
+
 trainer不再另起一套架构。新薄launcher只把现有WAIT TensorDict交给upstream RSL-RL 3.1.2
 `OnPolicyRunner.learn(1)`，并在runner构造前后分别绑定module与实际PPO、ActorCritic、RolloutStorage、
 Adam来源；有副作用的同名预载runner/algorithm不能先执行再被拒。host focused=`6 passed, 1 skipped`，

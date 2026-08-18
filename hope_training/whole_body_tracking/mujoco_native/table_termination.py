@@ -634,15 +634,30 @@ def verify_isaac_source_authority() -> dict[str, str]:
     }
 
 
-def _owner_frame_contract(mujoco: Any, model: Any) -> dict[str, Any]:
+def _owner_frame_contract(
+    mujoco: Any, model: Any, *, body_name_prefix: str = ""
+) -> dict[str, Any]:
     """Serialize the exact local frames that give the 62 OBB rows meaning."""
 
+    if (
+        type(body_name_prefix) is not str
+        or body_name_prefix != body_name_prefix.strip()
+        or body_name_prefix.startswith("/")
+        or "//" in body_name_prefix
+        or (body_name_prefix and not body_name_prefix.endswith("/"))
+    ):
+        raise TableTerminationContractError(
+            "MuJoCo table-guard body namespace prefix is malformed"
+        )
     body_ids: list[int] = []
     for name in TABLE_CONTACT_BODY_NAMES:
-        body_id = int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name))
+        live_name = body_name_prefix + name
+        body_id = int(
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, live_name)
+        )
         if body_id <= 0:
             raise TableTerminationContractError(
-                f"MuJoCo model is missing exact A3 table-guard body {name!r}"
+                f"MuJoCo model is missing exact A3 table-guard body {live_name!r}"
             )
         body_ids.append(body_id)
     if len(set(body_ids)) != len(TABLE_CONTACT_BODY_NAMES):
@@ -768,7 +783,11 @@ def _verified_registered_owner_frames(
 
 
 def bind_pre_registered_owner_frames(
-    mujoco: Any, model: Any, mjcf_path: Path | str
+    mujoco: Any,
+    model: Any,
+    mjcf_path: Path | str,
+    *,
+    body_name_prefix: str = "",
 ) -> dict[str, Any]:
     """Bind the live augmented scene to the registered base plant and OBB frames."""
 
@@ -801,7 +820,9 @@ def bind_pre_registered_owner_frames(
         raise TableTerminationContractError(
             "pre-registered portable MuJoCo plant identity did not verify"
         ) from exc
-    observed_frames = _owner_frame_contract(mujoco, model)
+    observed_frames = _owner_frame_contract(
+        mujoco, model, body_name_prefix=body_name_prefix
+    )
     _assert_owner_frame_contract_equal(expected_frames, observed_frames)
     return {
         "root_mjcf_path": str(selected_root),
@@ -1304,14 +1325,20 @@ class ExactRobotTableGuard:
         geometry_contract: Mapping[str, Any],
         *,
         mjcf_path: Path | str,
+        body_name_prefix: str = "",
     ):
         self.source_receipt = verify_isaac_source_authority()
         self.identity_receipt = bind_pre_registered_owner_frames(
-            mujoco, model, mjcf_path
+            mujoco,
+            model,
+            mjcf_path,
+            body_name_prefix=body_name_prefix,
         )
         self.components = load_collision_components()
         self.aabb_lo, self.aabb_hi = _validated_table_aabbs(geometry_contract)
-        body_ids = _owner_frame_contract(mujoco, model)["body_ids"]
+        body_ids = _owner_frame_contract(
+            mujoco, model, body_name_prefix=body_name_prefix
+        )["body_ids"]
         self.body_ids = np.asarray(body_ids, dtype=np.int64)
         self.body_ids.setflags(write=False)
         self.racket_body_index = TABLE_CONTACT_BODY_NAMES.index(RACKET_BODY_NAME)

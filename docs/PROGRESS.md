@@ -8,6 +8,11 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: MuJoCo fresh snapshot路径identity修复后，live direct的下一首错收敛到MJLab attach将
+  canonical body名统一变成`robot/*`。fresh authority改为由唯一adapter显式传`robot/`，但仍以bare
+  canonical名逐项比较32-body parent/local frame与portable closure；不自动猜prefix、不放宽plant identity。
+  host namespace=`7 passed`、device SAT=`4 passed,1 skipped`；fresh 19-test/RSL update仍待新namespace。
+
 - 2026-08-18: MuJoCo WAIT整合在Pod1 GPU0共卡、CPU `32-47`完成direct `16/19`；3个真实env均被
   “fresh snapshot绝对路径不等于canonical path”同一假identity拒绝，RSL未启动。77文件逐项与clean Git
   canonical A3树相同；fresh修复改用root SHA + portable closure + live owner frames，host反例=`2 passed`。

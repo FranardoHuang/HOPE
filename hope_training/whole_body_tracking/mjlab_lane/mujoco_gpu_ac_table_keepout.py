@@ -170,7 +170,11 @@ class DeviceExactTableKeepout:
         rows = scene.action_ball_policy_obstacle_geometry()
         contract = scene.action_ball_policy_geometry_contract(rows)
         authority = _authority.ExactRobotTableGuard(
-            mujoco, model, contract, mjcf_path=mjcf_path
+            mujoco,
+            model,
+            contract,
+            mjcf_path=mjcf_path,
+            body_name_prefix="robot/",
         )
         dtype = env_origins.dtype
 
