@@ -18,8 +18,10 @@ import sys
 
 try:
     from .a3_train_ppo import A3ReadyBallVecEnv, SimCfg, TaskCfg
+    from .mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
 except ImportError:  # Direct execution with mjlab_lane on PYTHONPATH.
     from a3_train_ppo import A3ReadyBallVecEnv, SimCfg, TaskCfg
+    from mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
 
 
 _HERE = Path(__file__).resolve().parent
@@ -70,6 +72,7 @@ FULLMDP_TERMINATION_BITS = {
     "base_fell_tilt": 2,
     "base_too_low": 4,
     "joint_qdes_forbidden": 8,
+    "robot_hit_table": 16,
 }
 
 
@@ -147,6 +150,16 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self.num_envs, dtype=self._torch.long, device=self.device
         )
         self.last_terminal_bits = self._torch.zeros_like(self.reset_generation)
+        self._cur_table_keepout = self._torch.zeros(
+            self.num_envs, dtype=self._torch.bool, device=self.device
+        )
+        self._table_keepout = DeviceExactTableKeepout(
+            mujoco=mujoco,
+            model=self.mj_model,
+            mjcf_path=self.env.xml_path,
+            env_origins=self.env.scene.env_origins,
+            device=self.device,
+        )
         self._all_env_ids = self._torch.arange(
             self.num_envs, dtype=self._torch.long, device=self.device
         )
@@ -224,6 +237,16 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         robot_table = valid & (table0 | table1) & self._is_robot_geom[partner]
         world = self._con_world[:].long().clamp_(0, self.num_envs - 1)
         self._cur_robot_table.scatter_add_(0, world, robot_table.float())
+
+    def _after_physics_substep(self, substep_index) -> None:
+        # MJWarp leaves derived poses at the pre-integration state.  Calls
+        # 2..20 therefore expose post-states 1..19; the explicit final forward
+        # below supplies post-state 20 without adding 20 redundant forwards.
+        if substep_index > 0:
+            self._cur_table_keepout |= self._table_keepout.sample(self.sim.data)
+
+    def _latch_post_forward_table_keepout(self) -> None:
+        self._cur_table_keepout |= self._table_keepout.sample(self.sim.data)
 
     @staticmethod
     def _quat_error_sq(torch, expected, actual):
@@ -486,20 +509,22 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         tilt = torch.acos((-st["proj_g"][:, 2]).clamp(-1.0, 1.0)) > 0.7
         low = st["base_pos"][:, 2] < 0.5
         qdes = ~torch.isfinite(requested_qdes).all(dim=1)
-        table = self._cur_robot_table > 0
+        keepout = self._cur_table_keepout
+        resolved_table = self._cur_robot_table > 0
         bits = (
             timeout.to(torch.long) * FULLMDP_TERMINATION_BITS["time_out"]
             + tilt.to(torch.long) * FULLMDP_TERMINATION_BITS["base_fell_tilt"]
             + low.to(torch.long) * FULLMDP_TERMINATION_BITS["base_too_low"]
             + qdes.to(torch.long)
             * FULLMDP_TERMINATION_BITS["joint_qdes_forbidden"]
+            + keepout.to(torch.long) * FULLMDP_TERMINATION_BITS["robot_hit_table"]
         )
-        terminated = tilt | low | qdes | table
+        terminated = tilt | low | qdes | keepout | resolved_table
         # Isaac TerminationManager keeps timeout and physical termination as
         # independent masks.  RSL-RL needs the timeout bit even when a row also
         # falls or hits a guard in the same transition for value bootstrapping.
         truncated = timeout
-        return terminated, truncated, bits, table
+        return terminated, truncated, bits, resolved_table
 
     def _clear_lifecycle(self, ids) -> None:
         self._epoch_phase[ids] = observation_contract.EPOCH_IDLE_PHASE_INDEX
@@ -508,6 +533,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._epoch_launch_succeeded[ids] = False
         self._cur_touched[ids] = 0.0
         self._cur_robot_table[ids] = 0.0
+        self._cur_table_keepout[ids] = False
 
     def reset(self):
         observations, extras = super().reset()
@@ -532,6 +558,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # returned observation all describe the same post-transition state.
         self.sim.forward()
         self._latch_post_forward_resolved_table_contacts()
+        self._latch_post_forward_table_keepout()
         if self._cap_ok:
             self._probe_capacity("forward")
         st = self._state()

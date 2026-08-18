@@ -56,7 +56,10 @@ def test_step_refreshes_derived_state_before_termination_and_reward():
     assert first_line("forward") < first_line(
         "_latch_post_forward_resolved_table_contacts"
     )
-    assert first_line("_latch_post_forward_resolved_table_contacts") < first_line("_state")
+    assert first_line("_latch_post_forward_resolved_table_contacts") < first_line(
+        "_latch_post_forward_table_keepout"
+    )
+    assert first_line("_latch_post_forward_table_keepout") < first_line("_state")
     assert first_line("_state") < first_line("_fullmdp_termination")
     assert first_line("_fullmdp_termination") < first_line("_fullmdp_reward20")
 
@@ -378,18 +381,18 @@ def test_body_com_velocity_transform_matches_native_jacobian_oracle():
 
 
 def test_host_termination_bits_keep_timeout_independent_of_physical_terminal():
-    num_envs = 6
+    num_envs = 7
     env = SimpleNamespace(
         _torch=torch,
-        episode_length_buf=torch.tensor([0, 10, 10, 0, 0, 0]),
+        episode_length_buf=torch.tensor([0, 10, 10, 0, 0, 0, 0]),
         max_episode_length=10,
-        _cur_robot_table=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
+        _cur_robot_table=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+        _cur_table_keepout=torch.tensor([False, False, False, False, False, False, True]),
     )
     proj_g = torch.tensor(
         [[0.0, 0.0, -1.0]] * 2
         + [[0.0, 0.0, 0.0]]
-        + [[0.0, 0.0, -1.0]] * 2
-        + [[0.0, 0.0, 0.0]]
+        + [[0.0, 0.0, -1.0]] * 4
     )
     base_pos = torch.ones((num_envs, 3))
     base_pos[3, 2] = 0.49
@@ -402,14 +405,15 @@ def test_host_termination_bits_keep_timeout_independent_of_physical_terminal():
         )
     )
     assert torch.equal(
-        terminated, torch.tensor([False, False, True, True, True, True])
+        terminated, torch.tensor([False, False, True, True, True, True, True])
     )
     assert torch.equal(
-        truncated, torch.tensor([False, True, True, False, False, False])
+        truncated, torch.tensor([False, True, True, False, False, False, False])
     )
-    assert torch.equal(bits, torch.tensor([0, 1, 3, 4, 8, 2]))
+    assert torch.equal(bits, torch.tensor([0, 1, 3, 4, 8, 0, 16]))
     assert torch.equal(
-        resolved_table, torch.tensor([False, False, False, False, False, True])
+        resolved_table,
+        torch.tensor([False, False, False, False, False, True, False]),
     )
 
 
@@ -434,6 +438,7 @@ def test_step_falls_back_per_joint_but_preserves_raw_nonfinite_qdes_evidence():
         actions=previous,
         _advance_plant=advance,
         _latch_post_forward_resolved_table_contacts=lambda: None,
+        _latch_post_forward_table_keepout=lambda: None,
         _state=lambda: {},
         _fullmdp_termination=terminate,
         _fullmdp_reward20=lambda: (torch.zeros(2), torch.zeros(2, 20)),
@@ -615,6 +620,7 @@ def test_real_n2_timeout_reset_preserves_every_peer_reset_owned_row_exactly():
             "_cur_min_d",
             "_cur_touched",
             "_cur_robot_table",
+            "_cur_table_keepout",
         )
 
         def checked_reset(_self, ids):

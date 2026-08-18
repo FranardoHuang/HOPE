@@ -75,7 +75,7 @@
 | <a id="h-mech"></a>`Hmech` / `H_mech` / 机械硬位置边界 | 资产/URDF/MJCF 定义的关节真实最小与最大角度；actual-hard ledger 、终止与安全收据始终以它为真值，不得被控制保护边界改名或覆盖。 |
 | <a id="h-ctrl"></a>`Hctrl` / `H_ctrl` / PhysX 控制位置保护边界 | 在 live PhysX solver 中比 `Hmech` 更靠内的最后一道位置 constraint。当前 vendor N1 候选只对两腰与左右 ankle-roll 每侧内缩硬 span 的 `2%`，其余 27 轴 `Hctrl=Hmech`；actor q-des、soft envelope、Reward 和 `Hmech` ledger 不变。 |
 | <a id="obb"></a>`OBB` / oriented bounding box / 定向包围盒 | 中心和三条随物体旋转的半轴共同定义的碰撞代理盒。它比把旋转物体外包成 world-AABB 更紧，但仍是 proxy 几何，不等于 PhysX 已解析接触力。 |
-| <a id="sat-collision-test"></a>`SAT` / separating-axis test / 分离轴定理碰撞检测 | 对 OBB-vs-AABB 的 15 条候选轴逐轴投影；只要有一条轴上区间分离就判无重叠。ActionBall 当前只把它作 diagnostic counterfactual，旧保守 terminal mask 在数据定谳前不变。 |
+| <a id="sat-collision-test"></a>`SAT` / separating-axis test / 分离轴定理碰撞检测 | 对 OBB-vs-AABB 的 15 条候选轴逐轴投影；只要有一条轴上区间分离就判无重叠。ActionBall FullMDP 的 `robot_hit_table` 使用它作实际 keepout terminal；world-AABB 只作保守预筛，不能代签最终判决。 |
 | <a id="action-ball-table-safety"></a>`ActionBall table safety assembly` / 动作球优先桌体安全总成 | 解析球 ActionBall 专用的五件碰撞总成：真实桌面、从地面到桌板底面的保守 robot keep-out、球网和左右网柱。keep-out 是防机器人穿进桌下的安全代理，不冒充真实桌腿；因此它与 physical/shadow 动力学球互斥。`--contact-smoke` 是一次性 Pod 检查开关：用真实机器人刚体逐子步撞五件 collider，核对四个 5 ms 子步 latch、原始终止原因、filter 列和 reset 后不泄漏；它不是训练。 |
 | <a id="balanced-action-sampling-flags"></a>`motion.balanced_clip_sampling` 与 `motion.balanced_clip_sampling_seed` | 开启任意前缀动作数最多差一的均衡日程，并用内容绑定整数 seed 固定其顺序；这不是 planner selector。 |
 | <a id="mobility-mode"></a>`mobility_mode=no_move/move` / 不移动与移动版本 | 两个独立训练身份。`no_move` 仍可在一个 spawn 分布中出生，但每个 swing 的 base goal 必须等于本 episode 的实际 spawn；`move` 才允许逐级扩大相对 spawn 的目标位移。二者不能在 runtime 临时互相覆盖或继承课程证据。 |

@@ -32,7 +32,7 @@ rotating offset-body的native `mj_jacBodyCom @ qvel` oracle最大误差为`5.6e-
 最终forward后才刷新下一拍。每个policy step在最后一次integration后显式`forward`，再读取derived body
 tensors并锁存同tickresolved robot-table contact。该contact单独导出具名backend bool，不复用Isaac
 `robot_hit_table` bit16；mixed-nonfinite qdes按joint回退而不清掉同行finite action，并保留raw终止证据；
-portable component-OBB SAT keepout仍是learn前HOLD。host组合=`8 passed, 4 skipped`；
+portable component-[OBB](../DEFINITIONS.md#obb) [SAT](../DEFINITIONS.md#sat-collision-test) keepout仍是learn前HOLD。host组合=`8 passed, 4 skipped`；
 production净增396 LOC。真实GPU结果如下，不能反向把host skip写成live evidence。
 
 Pod1 GPU2随后从fresh Git commit `e71ee1a350d…` 运行同两文件，`12 passed`、RC0。该门真实覆盖
@@ -41,6 +41,16 @@ N=1 reset/非零step/timeout/Reward20/park和N=2 selected-reset peer preservatio
 `5fa33b26af3fea72007f6d48915cc96239a22c2729fd7140e637edddfa7286c1`。测试结束后GPU2无compute process、
 queue lock释放、checkout仍为exact commit。Gate据此提升为`PASS-live-step / HOLD-learn`；portable SAT
 keepout与RSL3.1.2 trainer未闭前仍禁止`learn(1)`，不能把resolved contact提升为Isaac同义bit16。
+
+下一条SAT纵切片保持同一plant/root且production净增249 LOC：construction复用既有native authority绑定
+32-body顺序、62个collision-component OBB、racket blade与五个table AABB；policy loop只运行fixed-shape
+Torch 15-axis SAT。MuJoCo-Warp每次step留下pre-integration derived pose，所以substep hook跳过state0、
+读取state1--19，最终显式forward读取state20，正好覆盖一个control step的20个post-state。resolved-contact
+仍是独立backend telemetry；shared bit16只由几何keepout写。host float32/float64、nonfinite与45°空角
+`broad=true/exact=false`判别卷均通过，组合=`12 passed, 5 skipped`；current 8320 branch重钉的
+config/callable语义AST（含fixed-dense SAT与component/blade fusion）同时通过live constant parity与
+随机Isaac-vs-native SAT对照。真实GPU test仍
+是skip，因此状态为`PASS-host-SAT / HOLD-live-SAT`，不能据此启动PPO。
 
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、

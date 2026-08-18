@@ -1573,6 +1573,9 @@ class A3ReadyBallVecEnv:
 
   # ---- step -------------------------------------------------------------
 
+  def _after_physics_substep(self, substep_index):
+    """Optional device-only observer; the base plant has no extra predicate."""
+
   def _advance_plant(self, actions):
     """Apply one policy action through the one real 20-substep plant loop."""
     torch = self._torch
@@ -1586,13 +1589,14 @@ class A3ReadyBallVecEnv:
     q_des = torch.clamp(pre_clamp_qdes, self.jnt_lo, self.jnt_hi)
 
     tau_sq = torch.zeros(self.num_envs, device=self.device)
-    for _ in range(self.decimation):
+    for substep_index in range(self.decimation):
       tau = self.kp * (q_des - self._qpos_act()) - self.kd * self._qvel_act()
       tau = torch.clamp(tau, self.tau_lo, self.tau_hi)
       d.ctrl[:] = tau
       tau_n = tau / self.tau_scale
       tau_sq += (tau_n * tau_n).mean(dim=-1)
       self.sim.step()
+      self._after_physics_substep(substep_index)
       if self._contact_ok:
         self._probe_contacts()
       if self._cap_ok:

@@ -150,7 +150,8 @@ vendor exact。`/workspace/mjlab_venv`的RSL-RL仍为5.4.0而Isaac为3.1.2；任
 inertial-COM线速度，必须按`xipos - subtree_com[body_rootid]`做刚体点速度平移；且MuJoCo-Warp每次
 `step`在integration后不会自动重算derived tensors，故policy边界要先`forward`再读Reward/termination。
 body position/orientation imitation则保留Isaac的上一拍Motion cache，Reward之后才按最终live anchor刷新
-下一拍。post-forward resolved contact只导出具名backend bool；它不是Isaac component-OBB SAT keepout，
+下一拍。post-forward resolved contact只导出具名backend bool；它不是Isaac component-[OBB](../../DEFINITIONS.md#obb)
+[SAT](../../DEFINITIONS.md#sat-collision-test) keepout，
 后者仍阻塞trainer。mixed-nonfinite qdes逐关节回退、其余finite joints继续执行，同时raw qdes仍进入终止证据。
 host组合=`8 passed, 4 skipped`，native旋转偏置body Jacobian oracle通过；
 fresh Git commit `e71ee1a350d…` 在Pod1物理GPU2自然RC0：两份门合计`12 passed`，覆盖N=1
@@ -158,6 +159,14 @@ reset、非零step后derived-tensor forward、timeout与同tickReward20、park�
 对peer plant/buffer rows不改。result/log SHA256=`f4d41aa9…/5fa33b26…`；运行后GPU2和queue lock均释放。
 因此WAIT纵切片改判`PASS-live-step`。这不是A训练证据：Isaac的component-OBB/table-AABB SAT keepout尚未
 成为MuJoCo device producer，resolved contact只能作backend telemetry；实现并GPU反例验证前禁止`learn(1)`。
+
+SAT producer现已在host落成，但尚未由GPU授权。它没有新增root/receipt/schema，而是在现有plant的
+20-substep loop后加device-only observer，复用已独立验证的62-component/five-AABB construction authority；
+runtime判据是fixed-shape 15-axis SAT。MJWarp的derived pose在integration后一拍才刷新，因此hook消费
+state1--19，policy边界最终forward消费state20。测试不只比较同一套正例：额外固定一个45°旋转小盒，
+其world-AABB空角与table相交而真实OBB分离，明确要求`broad=true/exact=false`，从而阻止退回旧
+broadphase仍假绿。CPU float32/64、nonfinite、authority别名和时序反例通过；本纵切片production净增
+249 LOC。科学状态为`PASS-host-SAT / HOLD-live-SAT`；fresh GPU门通过前不接trainer、不执行`learn(1)`。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`

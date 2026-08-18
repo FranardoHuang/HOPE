@@ -8,6 +8,12 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: MuJoCo WAIT后的portable table keepout以净增249 production LOC完成host闭合：复用既有
+  62-component/five-AABB authority，按MJWarp derived-state时序覆盖20个post-integration pose，并用
+  fixed-shape device SAT写shared bit16；resolved contact继续单列。CPU float32/64、nonfinite、foreign
+  authority alias与45° `broad=true/exact=false`判别反例通过，组合=`12 passed, 5 skipped`。状态为
+  `PASS-host-SAT / HOLD-live-SAT`；fresh GPU2通过前不执行`learn(1)`。详见[G06](gates/G06_isaac_to_mujoco.md)。
+
 - 2026-08-18: A1000只读审计到ACK437仍为242次admitted全not-ready、R07 first-ready=0，现役run继续
   500/1000不热补；同时确认旧bytes首次bootstrap ready会以neutral key误写full-key Epoch并sticky
   overflow。下一条fresh源码只mask该bootstrap telemetry，保留Motion readiness和completed-key fault；
