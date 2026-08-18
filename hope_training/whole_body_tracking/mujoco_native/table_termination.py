@@ -773,16 +773,14 @@ def bind_pre_registered_owner_frames(
     """Bind the live augmented scene to the registered base plant and OBB frames."""
 
     selected_root = Path(mjcf_path).expanduser().resolve()
-    registered_root = CANONICAL_MJCF.resolve()
-    if selected_root != registered_root:
-        raise TableTerminationContractError(
-            "exact robot/table termination requires the pre-registered root MJCF path"
-        )
+    # A one-shot run snapshots the plant into a fresh namespace.  Its absolute
+    # path is not plant identity; exact root bytes, portable source closure and
+    # live owner-local frames below are the three independent authorities.
     if (
         _sha256_file(selected_root, "canonical root MJCF")
         != EXPECTED_CANONICAL_MJCF_SHA256
     ):
-        raise TableTerminationContractError("canonical root MJCF SHA-256 drifted")
+        raise TableTerminationContractError("selected root MJCF SHA-256 drifted")
     if (
         _sha256_file(MUJOCO_IDENTITY_MANIFEST, "MuJoCo identity manifest")
         != EXPECTED_MUJOCO_IDENTITY_MANIFEST_SHA256

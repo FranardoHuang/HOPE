@@ -485,15 +485,40 @@ def test_same_named_model_with_changed_owner_local_frame_fails_closed(field):
         term._assert_owner_frame_contract_equal(expected, observed)
 
 
-def test_arbitrary_root_mjcf_path_is_rejected_before_live_model_binding(tmp_path):
+def test_arbitrary_root_mjcf_bytes_are_rejected_before_live_model_binding(tmp_path):
     arbitrary = tmp_path / "a3_pingpong.xml"
     arbitrary.write_text("<mujoco/>", encoding="utf-8")
     with pytest.raises(
-        term.TableTerminationContractError, match="pre-registered root MJCF path"
+        term.TableTerminationContractError, match="selected root MJCF SHA-256 drifted"
     ):
         term.bind_pre_registered_owner_frames(
             _FakeMujoco, _FakeOwnerFrameModel(), arbitrary
         )
+
+
+def test_same_bytes_fresh_snapshot_binds_registered_owner_frames(
+    tmp_path, monkeypatch,
+):
+    snapshot = tmp_path / "a3_pingpong.xml"
+    snapshot.write_bytes(term.CANONICAL_MJCF.read_bytes())
+    model = _FakeOwnerFrameModel()
+    expected_frames = term._owner_frame_contract(_FakeMujoco, model)
+    seen = {}
+
+    def verified(mujoco, selected_root):
+        seen["mujoco"] = mujoco
+        seen["selected_root"] = selected_root
+        return expected_frames, "portable", "verification"
+
+    monkeypatch.setattr(term, "_verified_registered_owner_frames", verified)
+    receipt = term.bind_pre_registered_owner_frames(_FakeMujoco, model, snapshot)
+    assert seen == {
+        "mujoco": _FakeMujoco,
+        "selected_root": str(snapshot.resolve()),
+    }
+    assert receipt["root_mjcf_path"] == str(snapshot.resolve())
+    assert receipt["root_mjcf_sha256"] == term.EXPECTED_CANONICAL_MJCF_SHA256
+    assert receipt["owner_local_frame_sha256"] == expected_frames["content_sha256"]
 
 
 def test_plant_binding_rejects_nonfour_control_decimation():

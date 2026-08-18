@@ -8,6 +8,10 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: MuJoCo WAIT整合在Pod1 GPU0共卡、CPU `32-47`完成direct `16/19`；3个真实env均被
+  “fresh snapshot绝对路径不等于canonical path”同一假identity拒绝，RSL未启动。77文件逐项与clean Git
+  canonical A3树相同；fresh修复改用root SHA + portable closure + live owner frames，host反例=`2 passed`。
+
 - 2026-08-18: FullMDP fixed-try LM不再以`_assert_async`处理普通数值不可解。非零`solve_ex info`和
   非有限`dq`先从candidate selection剔除，再沿既有proposal ledger写具名reason 8/9并逐行拒绝；没有新增
   owner、receipt或gate。host solver=`39 passed`、continuous producer=`50 passed`；真实GPU与新A1000仍待fresh run。

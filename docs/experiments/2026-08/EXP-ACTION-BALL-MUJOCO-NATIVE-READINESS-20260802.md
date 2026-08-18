@@ -185,6 +185,12 @@ fresh空卡先跑SAT/WAIT；通过后在隔离RSL3.1.2 overlay跑`N=2 × 24`一�
 一次optimizer step。该run仍是`IDLE WAIT`工程门，没有question、contact、outcome或
 recovery分母，不能被解读成MuJoCo A学习结果。
 
+2026-08-18真实整合首次在Pod1 GPU0以单卡双进程运行，进程树固定CPU `32-47`且启动前free显存超过
+20GiB。它通过环境、输入快照、RSL3安装和16个direct测试；剩余3个真实env测试均被同一绝对路径门拒绝，
+所以没有进入RSL/PPO。A3 snapshot的77个文件、总字节及逐文件SHA与clean Git canonical树完全相同；
+绝对路径不同不构成物理差异。采用的fresh修复以root SHA、portable closure与live owner-frame取代path
+equality，保留不同内容fail-closed。该失败不说明Reward或MuJoCo-Warp不可运行，状态仍`HOLD-live-RSL3`。
+
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`
 225/318-D prototype，以及当前 fresh `A211/C211` 211/319-D successor。A211/C211 从

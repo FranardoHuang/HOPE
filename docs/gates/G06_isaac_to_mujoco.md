@@ -61,6 +61,13 @@ host focused=`7 passed, 1 skipped`，WAIT/SAT组合=`21 passed, 6 skipped`；唯
 ready-pose，再让真实WAIT env直接解析同一份bytes，不能让direct test与production update读取不同文件。必须在fresh空卡先通过上段live SAT，再用隔离安装的
 RSL3.1.2运行`N=2 × 24`一次update；当前不得写成MuJoCo A已运行。
 
+第一次真实整合one-shot改用Pod1 GPU0共卡：物理卡原有1个peer、free显存大于20GiB，本进程树固定在
+GPU0本地NUMA的CPU `32-47`。direct完成`16/19`后，3个真实env构造均被同一错误path gate拒绝：运行器
+已将77个A3文件逐项快照到fresh namespace，内容与clean Git canonical A3树完全相同，但native table
+authority仍要求原绝对路径。该条件不是plant identity。fresh修复保留root SHA、portable source-closure
+receipt与live owner-local frame三重校验，只删除绝对路径相等；不同字节拒绝与同字节异路径正例=`2 passed`。
+该run的`direct_rc=1/rsl3_rc=99`保留且不重试；fresh live 19-test仍待验证。
+
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
 可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory
