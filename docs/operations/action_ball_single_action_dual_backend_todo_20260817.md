@@ -120,7 +120,8 @@ compute驻留。根因是identity代码在`AppLauncher`之前导入Torch/RSL，�
 再导入runtime模块”的顺序。该namespace不得复用、不得重试，也不能写成4096容量失败。
 
 successor保持`4096×1000`、fresh namespace、GPU0/CPU32--47、最多一个已知peer、20 GiB余量和同进程
-update0--4；唯一变化是两阶段identity门。pre-App阶段只验证sealed bytes/interpreter，post-App hook在
+update0--4；唯一变化是两阶段identity门。pre-App阶段验证sealed bytes/interpreter且拒绝Hydra预载
+Torch/RSL/TensorDict，post-App hook在
 真实Kit进程中导入并核Torch/TensorDict/RSL class、fsync v2 receipt，然后才调用`_run`。新ignored
 one-shot仍不进Git；最终source commit、wrapper SHA、namespace和result由发射件与remote保留证据共同记录。
 

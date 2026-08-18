@@ -172,6 +172,11 @@ def test_main_passes_and_verifies_kit_args(monkeypatch, capsys):
     )
     monkeypatch.setattr(
         train,
+        "_require_action_ball_runtime_unloaded_before_app_start",
+        lambda: order.append("pre_app_checked"),
+    )
+    monkeypatch.setattr(
+        train,
         "_attest_action_ball_runtime_after_app_start",
         lambda: order.append("runtime_attested"),
     )
@@ -195,7 +200,13 @@ def test_main_passes_and_verifies_kit_args(monkeypatch, capsys):
         "--/plugins/carb.tasking.plugin/threadCount=16 "
         "--/plugins/omni.tbb.globalcontrol/maxThreadCount=16"
     )
-    assert order == ["app_started", "runtime_attested", "run", "closed"]
+    assert order == [
+        "pre_app_checked",
+        "app_started",
+        "runtime_attested",
+        "run",
+        "closed",
+    ]
     assert "KIT_THREAD_CAP_OK" in capsys.readouterr().out
 
 
@@ -214,6 +225,23 @@ def test_runtime_attestation_is_absent_or_complete(monkeypatch):
     monkeypatch.setenv("HOPE_ACTION_BALL_RUNTIME_ATTESTATION", "sealed_rsl_v1")
     with pytest.raises(RuntimeError, match="partial ActionBall post-AppLauncher"):
         train._attest_action_ball_runtime_after_app_start()
+
+
+def test_runtime_attestation_rejects_preloaded_runtime(monkeypatch):
+    train = _load_train_module(monkeypatch)
+    values = {
+        "HOPE_ACTION_BALL_RUNTIME_ATTESTATION": "sealed_rsl_v1",
+        "HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH": "/tmp/receipt",
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256": "a" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256": "b" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE": "/tmp/site-packages",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setitem(sys.modules, "rsl_rl.foreign_plugin", _module("foreign"))
+    with pytest.raises(RuntimeError, match="Hydra preloaded"):
+        train._require_action_ball_runtime_unloaded_before_app_start()
+    assert train._ACTION_BALL_RUNTIME_PRE_APP_CHECKED is False
 
 
 def test_runtime_attestation_failure_closes_started_app(monkeypatch):
@@ -243,6 +271,11 @@ def test_runtime_attestation_failure_closes_started_app(monkeypatch):
     monkeypatch.setitem(sys.modules, "wandb", _module("wandb", run=None))
     monkeypatch.setattr(
         train,
+        "_require_action_ball_runtime_unloaded_before_app_start",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        train,
         "_attest_action_ball_runtime_after_app_start",
         lambda: (_ for _ in ()).throw(RuntimeError("attestation failed")),
     )
@@ -266,7 +299,10 @@ def test_runtime_attestation_call_is_after_app_start_before_training():
     main_source = TRAIN_PATH.read_text(encoding="utf-8").split(
         "def main(cfg):", 1
     )[1]
+    pre_app = main_source.index(
+        "_require_action_ball_runtime_unloaded_before_app_start()"
+    )
     app_started = main_source.index("simulation_app = app_launcher.app")
     attest = main_source.index("_attest_action_ball_runtime_after_app_start()")
     training = main_source.index("_run(cfg)")
-    assert app_started < attest < training
+    assert pre_app < app_started < attest < training

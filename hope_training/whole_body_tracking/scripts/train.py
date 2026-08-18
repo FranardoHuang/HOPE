@@ -21959,6 +21959,41 @@ def _close_simulation_app(simulation_app, *, failed: bool) -> None:
         simulation_app.close()
 
 
+_ACTION_BALL_RUNTIME_PRE_APP_CHECKED = False
+
+
+def _require_action_ball_runtime_unloaded_before_app_start() -> None:
+    """Prove Hydra did not preload the attested runtime before Kit."""
+
+    names = (
+        "HOPE_ACTION_BALL_RUNTIME_ATTESTATION",
+        "HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH",
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256",
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256",
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE",
+    )
+    values = {name: os.environ.get(name) for name in names}
+    if all(value is None for value in values.values()):
+        return
+    if any(value is None for value in values.values()):
+        raise RuntimeError("partial ActionBall post-AppLauncher runtime attestation")
+    if values["HOPE_ACTION_BALL_RUNTIME_ATTESTATION"] != "sealed_rsl_v1":
+        raise RuntimeError("unknown ActionBall post-AppLauncher runtime attestation")
+    forbidden = tuple(
+        name
+        for name in sys.modules
+        if name in {"rsl_rl", "tensordict", "torch"}
+        or name.startswith(("rsl_rl.", "tensordict.", "torch."))
+    )
+    if forbidden:
+        raise RuntimeError(
+            "Hydra preloaded the ActionBall runtime before AppLauncher: "
+            + ",".join(sorted(forbidden))
+        )
+    global _ACTION_BALL_RUNTIME_PRE_APP_CHECKED
+    _ACTION_BALL_RUNTIME_PRE_APP_CHECKED = True
+
+
 def _attest_action_ball_runtime_after_app_start() -> None:
     """Bind the optional sealed RSL runtime only after Kit has started.
 
@@ -21982,6 +22017,8 @@ def _attest_action_ball_runtime_after_app_start() -> None:
         raise RuntimeError("partial ActionBall post-AppLauncher runtime attestation")
     if values["HOPE_ACTION_BALL_RUNTIME_ATTESTATION"] != "sealed_rsl_v1":
         raise RuntimeError("unknown ActionBall post-AppLauncher runtime attestation")
+    if not _ACTION_BALL_RUNTIME_PRE_APP_CHECKED:
+        raise RuntimeError("pre-AppLauncher runtime unload proof is missing")
 
     import fcntl
     import importlib
@@ -22162,6 +22199,7 @@ def main(cfg):
     # Launch Isaac Sim BEFORE importing isaaclab modules. Clear argv so the kit app does not try to
     # parse Hydra's `task=...`/`algo=...` overrides.
     sys.argv = sys.argv[:1]
+    _require_action_ball_runtime_unloaded_before_app_start()
     from isaaclab.app import AppLauncher
 
     app_launcher_kwargs = {

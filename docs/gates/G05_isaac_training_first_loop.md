@@ -6204,6 +6204,6 @@ identity通过，Hydra也落下exact 4096配置；但旧identity wrapper在`AppL
 startup后约0.34秒segfault。scene/PPO/WAL均零调用，因此既不是4096容量结论，也不是Reward结论。
 
 successor不回退小N或独立5-update smoke，仍是fresh `4096 env × 1000 update`。唯一根因修复是把
-attestation分成pre-App不可变bytes门与post-App同进程class/source门；只有post-App v2 receipt落盘后才
+attestation分成pre-App不可变bytes/unloaded-module门与post-App同进程class/source门；只有post-App v2 receipt落盘后才
 进入`_run`。前5次update继续只读同一进程的v11/WAL/Reward20/D05。G05保持`Partial`，run仍为
 `diagnostic_unauthorized=true`。
