@@ -4,8 +4,9 @@
 
 - fresh LM row-rejection canary完成`N=2 × 2`、finite Reward与4行WAL闭合；新Isaac A1000在Pod1
   GPU0用CPU32--47运行，并允许一个既有同卡进程。
-- MuJoCo WAIT完成一次真实RSL3 update但仍是`idle_wait_only`。native court trainer现接受冻结MJCF/
-  ready-pose显式输入；专项回归`2 passed`。下一步是Pod1 GPU2 native A canary/1000，不能写成portable A。
+- MuJoCo WAIT完成一次真实RSL3 update但仍是`idle_wait_only`。native court trainer的冻结输入canary已
+  完成`1024 × 2`、49,152 transitions且capacity/finite通过；fresh native A1000已在Pod1 GPU2启动，
+  CPU48--63。它是114-D native学习基线，不能写成portable 229/399 A。
 - 地形逐顶点白噪声方案被拒绝；当前flat长跑不变，之后改为flat-heavy连续坡/波/台阶/rough patch混合。
   两边长跑启动后进入2.0瘦身。
 

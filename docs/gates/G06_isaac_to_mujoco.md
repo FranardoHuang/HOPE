@@ -6,7 +6,11 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 `learn(1)`（`N=2 × 24`、upstream RSL-RL3.1.2），但仍是`idle_wait_only`，不是full MuJoCo A。
 同时启用已有native MJLab court trainer作为真实学习基线，因为它已有ball launch、physical contact、
 episode termination和Reward telemetry。其XML与split-ready pose现为显式CLI输入，不再依赖隐式
-`/workspace`路径。native结果不能promotion 229/399-D portable合同。
+`/workspace`路径。Pod1 GPU2已完成`1024 × 2` finite/capacity canary并启动fresh 1000-update长跑；
+它的native observation是114-D、动作31-D。native结果不能promotion 229/399-D portable合同。
+native A1000的完整JSONL update20/50显示episode length约145.45/145.56、min racket-ball distance约
+0.454/0.448 m、binary contact仍0；action-rate income约`-3.65e-5/-3.78e-5`，capacity/nonfinite正常。
+按预注册继续，不把短窗0 contact当停止门。
 
 **2026-08-18 producer-first更正（Gate 仍 `Partial`）：**一次M05 root骨架尝试只把真实
 Plant/MotionBank/R05/M04构造到一起，但`step/reset`仍fail-closed，属于HANDOFF禁止的zero-callpoint

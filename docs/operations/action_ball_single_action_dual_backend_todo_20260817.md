@@ -74,13 +74,13 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-live-LM-canary / ACTIVE-A1000` | commit `fcfe9918…` 在Pod1 GPU0共卡完成fresh `N=2 × 2`：96 steps、4行PENDING/ACK严格闭合、Reward全finite、无poison/nonfinite/conservation fault。随后同代码、同N、独立namespace启动单进程A1000；durable frontier已过update18 | 不热补；只读20/50/100/200/500/1000，同一进程自然跑完 |
+| 6 | `PASS-live-LM-canary / ACTIVE-A1000` | commit `fcfe9918…` 在Pod1 GPU0共卡完成fresh `N=2 × 2`：96 steps、4行PENDING/ACK严格闭合、Reward全finite、无poison/nonfinite/conservation fault。随后同代码、同N、独立namespace启动单进程A1000；已通过durable update50里程碑 | 不热补；只读20/50/100/200/500/1000，同一进程自然跑完 |
 | 7 | `PASS-host-chain / HOLD-fresh-live` | bootstrap两拍ready仍授权Motion，但不再以neutral key写R07 ActionEpoch telemetry；CPU真实fact→owner projection→Motion reveal→production D05 settle已得到两行ACCEPT、Epoch无overflow。contact/flight/R06 outcome/R07 recovery仍需下一条fresh live分母 | fresh Kit N=2重验首个ACCEPT；A1000内只观察，不把潜伏bug当Reward结论 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `PASS-live-step / PASS-live-SAT` | commit `61887b43…` 的fresh Pod1 GPU0共卡门真实完成`19 passed,0 skipped`：N=1 reset/step、N=2 masked reset、float32 device SAT及attached `robot/*` authority全过。run结束仍只有原1个peer，queue lock自然释放 | 保持同一SAT producer；下一步接真实A lifecycle，不再扩identity gate |
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 外部清理后Pod1约`249.8 GiB` free；A1000 ACK417时run目录仅约6.6MB，预计到1000新增日志不足约10MB，即使终点单checkpoint也远低于空间余量。未碰foreign PID、checkpoint、主日志或资产 | 不再为本run清理；只读监控实际增长，不按表观du删除硬链接/资产 |
 | 11 | `PASS-live-WAIT-learn1 / HOLD-full-A` | 同一fresh checkout在19-test后直接调用upstream RSL-RL3.1.2：`N=2 × 24`完成1次PPO update、48 transitions、229/399宽度，`final_rc=0`；result SHA=`322592ce…f07a`。lifecycle仍明确`idle_wait_only`，没有question/contact/outcome | 复用该VecEnv/runner接真实A reveal→flight→outcome；先短live再启动MuJoCo A长跑 |
-| 12 | `PASS-host-explicit-input / READY-native-A-long` | 现有native MuJoCo trainer已是真实court/ball/ready/contact/Reward/PPO；本轮只新增`--xml-path`与`--ready-pose`薄接线，使长跑消费fresh namespace中的冻结输入。专项回归`2 passed`；本机完整alignment测试因未安装`mjlab`有5项环境失败，不冒充绿 | Pod1 GPU2与既有单进程共卡，CPU48--63，先短canary再同配方1000 update；报告native维度，禁止写成portable FullMDP A |
+| 12 | `PASS-live-native-A2 / ACTIVE-native-A1000` | 显式冻结输入后，Pod1 GPU2共卡canary自然完成`1024 env × 2`、49,152 transitions、capacity PASS、finite time/Reward；随后同配方fresh A1000已启动。native ABI为114-D actor/critic、31动作，不是portable 229/399 | CPU48--63；只读20/50/100/200/500/1000的episode/contact/Reward/action-rate趋势，禁止写成portable FullMDP A |
 
 ## 5. 下一条命令
 
@@ -115,6 +115,13 @@ SHA-256绑定。最后完整WAL SHA256=`ba80b955…bcceb7`，log SHA256=`505751f
 不更新`q/r/cost`，逐行记录`lm_solve_info_nonzero`或`lm_solve_nonfinite`，不再调用`_assert_async`。
 旧进程、active checkout和锁继续只读保留；下一条fresh run必须使用新Git root、namespace、approval和真实空卡。
 
+native A canary执行commit=`08d17b74…`、namespace=
+`20260818T135500MujocoNativeACanary08D17B74Fix1Pod1GPU2SharedCST`，result SHA256=
+`8847a1b5…e09c`。它完成2 update，capacity=`PASS_NO_OVERFLOW`，binary contact仍为0；短跑只证明链路。
+同一输入/seed/Reward/PPO的A1000随后以fresh namespace
+`20260818T140500MujocoNativeA1000_08D17B74Pod1GPU2SharedCST`启动，GPU2已有1个co-resident，
+本run固定CPU48--63并持GPU2 queue lock。它不是portable FullMDP A。
+
 ## 6. A1000 同进程里程碑
 
 每个节点只读同一个日志/WAL/TensorBoard，不重启、不改 Reward、不换 seed：
@@ -136,6 +143,16 @@ recovery 的 eligible denominator 和 numerator、按 `stroke_family`/side 分�
 Reward 比例只在 update1000 后按因果证据改：先判断是触发率、权重还是分母问题；A/C 除 observation 和
 post-contact family Reward 外保持相同。历史 C 长跑曾看到 action penalty 负正比约
 `10.39 -> 3.45`、episode length 谷底后恢复；这只作为需要观察的模式，不直接抄权重。
+
+fresh `fcfe9918…` A1000 的update20/50均已从完整ACK读取。累计actual Reward sample=`960/2400`，
+nonfinite=`0/0`、conservation violation=`0/0`；mean episode length约`87.6/86.4`。D05 selected=
+`12/28`，其中not-ready defer=`11/25`、reject=`1/3`、ACCEPT=`0/0`。链路可信但task producer仍未ready，
+所以继续100/200，不把0 ACCEPT归咎于Reward比例。
+
+native A1000 的update20/50从完整JSONL读取：累计episode length约`145.45/145.56`，节点min racket-ball
+distance约`0.454/0.448 m`，binary contact=`0/0`，action-rate income约`-3.65e-5/-3.78e-5`，累计
+负/正Reward比约`0.00270/0.00286`；capacity overflow和nonfinite均为0。当前未见负惩罚压垮正收入，
+更像接触/可达性尚未学到；按预注册继续100/200，不因0 contact早停。
 
 update100的WAL前缀闭合到ACK99：`1,297,132 B`，SHA256=
 `fdce022ba481fe7848619c3fa59244485629900b59df3de5ffda94e0d4606ed9`。累计100个update中，

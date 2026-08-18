@@ -8,6 +8,9 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 conservation/poison/nonfinite fault均为0。新单进程A1000已从fresh namespace用同一字节启动，
 与一个既有进程共卡但固定CPU32--47，只持GPU0 queue lock；里程碑仍为20/50/100/200/500/1000。
 它仍是`diagnostic_unauthorized`，没有checkpoint/resume claim。
+同一run的完整ACK update20/50分别有960/2400个finite actual Reward sample、0 nonfinite、0 conservation
+violation；mean episode length约87.6/86.4。D05 selected 12/28但ACCEPT仍0，均为not-ready defer或reject，
+因此继续100/200而不热改Reward。
 
 **2026-08-18 FullMDP Isaac5.1/RSL3 分支证据（Gate 仍 `Partial`）：**附件与 Pod2 实机共同锁定
 Isaac Sim 5.1、IsaacLab `8320e0be…`、Python3.11、RSL-RL3.1.2/TensorDict；旧4.5/2.1/RSL2

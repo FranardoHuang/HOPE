@@ -11235,3 +11235,14 @@ seed0、vendor action scale、initial std `.02`、1000 update；与Isaac并行�
 `action_rate_l2`、nonfinite/capacity和wall time。旧长跑中`action_rate_l2`由约`-0.126`改善到`-0.022`，
 并推动负/正Reward比跨过1，是本次重点复核的可迁移因果模式；不提前改权重，也不因早期跌倒/撞桌停止。
 该run若成功，只回答native scene的Reward经济和可学习性，不回答229/399-D portable A/C parity。
+
+canary已自然完成：`1024 × 2`、49,152 transitions、capacity `PASS_NO_OVERFLOW`、31动作、114-D
+actor/critic observation，两个update的Reward/time均finite。min racket-ball distance约
+`1.095 -> 0.511 m`，binary contact仍`0%`；不把两点曲线当学习结论。result SHA256=
+`8847a1b5…e09c`。同配方A1000已从fresh namespace启动，CPU48--63，GPU2最多一个既有peer；
+里程碑仍为20/50/100/200/500/1000。
+
+update20/50完整JSONL显示：累计episode length约`145.45/145.56`；节点min racket-ball distance约
+`0.454/0.448 m`；binary contact仍0；action-rate income约`-3.65e-5/-3.78e-5`；累计负/正Reward比
+约`0.00270/0.00286`；capacity overflow与nonfinite均为0。与历史“负惩罚压垮正收入”不同，当前
+更像contact geometry/可达性尚未学到。按预注册继续100/200，不在50步改权重或停止。
