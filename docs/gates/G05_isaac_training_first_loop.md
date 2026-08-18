@@ -56,8 +56,11 @@ neutral/empty shot key，但R07 first-ready原先无条件调用只接受current
 ready，旧bytes会sticky overflow并使下一次D05 CENSOR或drain fail。下一条fresh源码采用最窄语义修复：
 bootstrap readiness继续进入Motion admission，但不写shot-keyed R07 telemetry；completed-action exact-key
 和mismatch fault不放宽。CPU生产链已从真实plant facts连续两拍走到owner projection、Motion reveal和
-D05 settle，得到两行ACCEPT且Epoch无overflow；fresh Kit仍是进入下一条训练前的门。现役A1000继续自然跑500/1000，
-其0 ACCEPT不能再单独归因于Reward权重。host证据为integration=`1 passed`、recovery-device=`80 passed`、
+D05 settle，得到两行ACCEPT且Epoch无overflow；fresh Kit仍是进入下一条训练前的门。该A1000最终只到
+完整ACK470（零基update469、22560 steps），随后PhysX rigid-body/contact view报异步CUDA device-side
+assert；坏CUDA context又使D05 poison attribution失败。WAL无悬空PENDING，但进程停滞且log/result不再
+推进，所以可信科学边界止于ACK470，500/1000为`未测`。active checkout与进程不热补、不signal、不复用；
+下一条A只能在fresh namespace先定位异步kernel首错。其0 ACCEPT不能再单独归因于Reward权重。host证据为integration=`1 passed`、recovery-device=`80 passed`、
 live-facts=`25 passed, 6 skipped`、Epoch rowwise=`51 passed, 7 skipped`；四份需按已知module-identity隔离分进程运行。
 
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终

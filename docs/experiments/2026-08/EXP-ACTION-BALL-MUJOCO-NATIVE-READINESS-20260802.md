@@ -113,7 +113,11 @@ admitted opportunity推进到playback与contact。
 R07 event并sticky overflow。该第二层是结构错误，不是学习结果。采用的下一条fresh修复只mask bootstrap
 的shot-keyed telemetry，Motion readiness和completed-shot telemetry均保持。CPU生产链已从两拍真实
 plant facts走到owner projection、Motion reveal和D05 settle，得到两行ACCEPT且Epoch无overflow；
-现役A1000不热补，继续到500/1000观察修复前的readiness趋势，但不再用它裁决Reward能否产生ACCEPT。
+现役A1000不热补，也不再能到500/1000：最后完整边界为ACK470（零基update469、22560 steps），随后
+PhysX rigid-body/contact view报告异步CUDA device-side assert；同一坏context令D05 poison attribution
+失败，子进程保留为停滞态。WAL没有悬空PENDING，故0--469仍是可信负证据；500/1000和Reward趋势均为
+`未测`。Python首次在`torch.isfinite(reference_hit)`观察到错误不能定位异步kernel根因，下一实验必须
+用fresh namespace做同步首错诊断，不能从该栈回溯猜因或重试现有namespace。
 隔离进程回归为integration=`1 passed`、recovery-device=`80 passed`、live-facts=`25 passed, 6 skipped`、
 Epoch rowwise=`51 passed, 7 skipped`；旧completed-action true-writer fixture也继续验证 keyed telemetry 正常发布。
 

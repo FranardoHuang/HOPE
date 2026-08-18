@@ -8,6 +8,11 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: FullMDP A1000的可信边界止于ACK470（零基update469、22560 steps）：WAL无悬空PENDING，
+  随后PhysX rigid-body/contact view报异步CUDA device-side assert，坏context又令D05 poison attribution
+  失败。PID仍活但GPU利用率、WAL、log、result均停止推进；不signal、不热补、不复用namespace。
+  500/1000为`未测`，下一条fresh A先做同步首错诊断，不能把Python首次观察行冒充kernel根因。
+
 - 2026-08-18: MuJoCo WAIT后的portable table keepout以净增249 production LOC完成host闭合：复用既有
   62-component/five-AABB authority，按MJWarp derived-state时序覆盖20个post-integration pose，并用
   fixed-shape device SAT写shared bit16；resolved contact继续单列。CPU float32/64、nonfinite、foreign
