@@ -21959,6 +21959,159 @@ def _close_simulation_app(simulation_app, *, failed: bool) -> None:
         simulation_app.close()
 
 
+def _attest_action_ball_runtime_after_app_start() -> None:
+    """Bind the optional sealed RSL runtime only after Kit has started.
+
+    Isaac Sim must own the process before Torch/RSL modules are imported.  The
+    one-shot FullMDP launcher passes this opt-in contract through inherited,
+    sealed descriptors; ordinary training has no such environment and remains
+    unchanged.
+    """
+
+    names = (
+        "HOPE_ACTION_BALL_RUNTIME_ATTESTATION",
+        "HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH",
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256",
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256",
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE",
+    )
+    values = {name: os.environ.get(name) for name in names}
+    if all(value is None for value in values.values()):
+        return
+    if any(value is None for value in values.values()):
+        raise RuntimeError("partial ActionBall post-AppLauncher runtime attestation")
+    if values["HOPE_ACTION_BALL_RUNTIME_ATTESTATION"] != "sealed_rsl_v1":
+        raise RuntimeError("unknown ActionBall post-AppLauncher runtime attestation")
+
+    import fcntl
+    import importlib
+    import importlib.metadata
+    import inspect
+    import stat
+
+    receipt_fd = 16
+    archive_fd = 18
+    expected_seals = (
+        fcntl.F_SEAL_SEAL
+        | fcntl.F_SEAL_SHRINK
+        | fcntl.F_SEAL_GROW
+        | fcntl.F_SEAL_WRITE
+    )
+    archive = os.fstat(archive_fd)
+    if (
+        not stat.S_ISREG(archive.st_mode)
+        or archive.st_nlink != 0
+        or fcntl.fcntl(archive_fd, fcntl.F_GET_SEALS) != expected_seals
+    ):
+        raise RuntimeError("sealed RSL archive descriptor changed after AppLauncher")
+    os.lseek(archive_fd, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    while chunk := os.read(archive_fd, 1024 * 1024):
+        digest.update(chunk)
+    expected_archive_sha = values[
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256"
+    ]
+    if digest.hexdigest() != expected_archive_sha:
+        raise RuntimeError("sealed RSL archive digest changed after AppLauncher")
+
+    expected_python_sha = values[
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256"
+    ]
+    with open("/proc/self/exe", "rb", buffering=0) as stream:
+        if hashlib.file_digest(stream, "sha256").hexdigest() != expected_python_sha:
+            raise RuntimeError("Kit Python interpreter changed after AppLauncher")
+
+    receipt_path = pathlib.Path(
+        values["HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH"]
+    )
+    receipt = os.fstat(receipt_fd)
+    receipt_current = receipt_path.stat(follow_symlinks=False)
+    if (
+        not stat.S_ISREG(receipt.st_mode)
+        or receipt.st_nlink != 1
+        or receipt.st_size != 0
+        or (receipt.st_dev, receipt.st_ino)
+        != (receipt_current.st_dev, receipt_current.st_ino)
+    ):
+        raise RuntimeError("runtime attestation receipt inode changed")
+
+    package_parent = pathlib.Path(f"/proc/self/fd/{archive_fd}")
+    package_root = package_parent / "rsl_rl"
+    venv_site = pathlib.Path(
+        values["HOPE_ACTION_BALL_RUNTIME_VENV_SITE"]
+    ).resolve()
+    if not sys.path or pathlib.Path(sys.path[0]) != package_parent:
+        raise RuntimeError("sealed RSL archive is not first on sys.path")
+
+    import rsl_rl
+    import tensordict
+    import torch
+
+    runner = importlib.import_module("rsl_rl.runners.on_policy_runner")
+    ppo = importlib.import_module("rsl_rl.algorithms.ppo")
+    actor = importlib.import_module("rsl_rl.modules.actor_critic")
+    storage = importlib.import_module("rsl_rl.storage.rollout_storage")
+    expected = {
+        rsl_rl: package_root / "__init__.py",
+        runner: package_root / "runners/on_policy_runner.py",
+        ppo: package_root / "algorithms/ppo.py",
+        actor: package_root / "modules/actor_critic.py",
+        storage: package_root / "storage/rollout_storage.py",
+    }
+    if not (
+        sys.version_info[:3] == (3, 11, 13)
+        and torch.__version__ == "2.7.0+cu128"
+        and tensordict.__version__ == "0.10.0"
+        and importlib.metadata.version("rsl-rl-lib") == "3.1.2"
+    ):
+        raise RuntimeError("post-AppLauncher Python/RSL dependency ABI changed")
+    for module in (torch, tensordict):
+        if venv_site not in pathlib.Path(module.__file__).resolve().parents:
+            raise RuntimeError("post-AppLauncher dependency escaped the frozen venv")
+    for module, path in expected.items():
+        if pathlib.Path(module.__file__) != path:
+            raise RuntimeError("post-AppLauncher RSL module escaped the sealed archive")
+    for cls, module, path in (
+        (runner.OnPolicyRunner, runner, expected[runner]),
+        (ppo.PPO, ppo, expected[ppo]),
+        (actor.ActorCritic, actor, expected[actor]),
+        (storage.RolloutStorage, storage, expected[storage]),
+    ):
+        if cls.__module__ != module.__name__ or pathlib.Path(
+            inspect.getsourcefile(cls)
+        ) != path:
+            raise RuntimeError("post-AppLauncher RSL class source changed")
+    if not (
+        runner.PPO is ppo.PPO
+        and runner.ActorCritic is actor.ActorCritic
+        and ppo.RolloutStorage is storage.RolloutStorage
+        and ppo.optim.Adam is torch.optim.Adam
+    ):
+        raise RuntimeError("post-AppLauncher RSL class wiring changed")
+
+    payload = b"trainer_runtime_attested_v2\n"
+    if os.write(receipt_fd, payload) != len(payload):
+        raise RuntimeError("short post-AppLauncher runtime receipt write")
+    os.fsync(receipt_fd)
+    os.close(receipt_fd)
+    print(
+        "ACTION_BALL_TRAIN_RUNTIME_IDENTITY_JSON="
+        + json.dumps(
+            {
+                "kind": "action_ball_train_runtime_identity_v2",
+                "python": "3.11.13",
+                "rsl_archive_sha256": expected_archive_sha,
+                "rsl_rl": "3.1.2",
+                "tensordict": "0.10.0",
+                "torch": "2.7.0+cu128",
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 @hydra.main(version_base=None, config_path="../cfg", config_name="train")
 def main(cfg):
     OmegaConf.resolve(cfg)
@@ -22020,13 +22173,14 @@ def main(cfg):
         app_launcher_kwargs["kit_args"] = kit_args
     app_launcher = AppLauncher(**app_launcher_kwargs)
     simulation_app = app_launcher.app
-    _emit_lean_queue_phase(cfg, "app_started")
     # Print the traceback BEFORE closing the app.  Kit owns the process exit
     # after ``SimulationApp.close()``, so a Python ``sys.exit(1)`` placed after
     # close is dead code on the exact Pod runtime.  Record the failure first,
     # then give Kit the non-zero return code before asking it to clean up.
     failed = False
     try:
+        _attest_action_ball_runtime_after_app_start()
+        _emit_lean_queue_phase(cfg, "app_started")
         if kit_args is not None:
             import carb
 

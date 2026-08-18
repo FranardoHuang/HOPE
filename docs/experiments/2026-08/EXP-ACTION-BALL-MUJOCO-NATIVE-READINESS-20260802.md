@@ -11308,3 +11308,9 @@ MuJoCo侧不等待Isaac结束，但当前只承认`full_a_slice_attempted`：真
 已经有live消费点，R03/R06/R07与Reward0--13仍`not_produced`。因此下一批工作是在Isaac长跑期间逐项
 补这些producer和rough课程；portable Full-A未闭合前不发其长跑，也不拿native A1000曲线做等价比较。
 本节是采用/拒绝边界，不记录逐条shell命令。
+
+first 4096 one-shot没有进入学习：commit `5ee1ffa6…`、wrapper `022c13f5…`的preexec与sealed runtime
+identity通过，Hydra解析出4096，但身份代码在`AppLauncher`前先导入Torch/RSL；Kit记录startup后约
+0.34秒segfault，`Learning iteration`、scene、PPO与WAL全缺席。这个反例把失败归因到启动顺序，不支持
+“4096装不下”或“Reward有问题”。采用的窄修是pre-App只验不可变archive/interpreter，AppLauncher成功后
+在同一Kit进程再导入和核class source、写v2 receipt，然后才进训练；successor仍直跑同一4096长预算。

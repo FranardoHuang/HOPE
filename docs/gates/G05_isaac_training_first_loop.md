@@ -6199,8 +6199,11 @@ exact Pod `2e743932` 随后验证17-file closure与全部递归 pin 无 missing/
 v11顺序固定为joint-safety prepare/validate→真实optimizer→PENDING fsync→Epoch ACK→EPOCH_ACK fsync→
 durable latch→joint-safety ACK；结构性4096×5只证明事务容量，不代签业务分母。
 
-下一条不再跑小N或独立5-update smoke，而是唯一fresh `4096 env × 1000 update`。one-shot wrapper在
-真实Isaac Kit trainer进程内以`-P -S`从sealed RSL bytes导入并重验Python/Torch/TensorDict/RSL class，
-`exec`紧前重验GPU与queue；前5次update只读同一进程的v11/WAL/Reward20/D05。当前状态为
-`PREPARED / NOT YET RUN`；终审和临门资源重验通过才可发车。G05仍为`Partial`，该run也继续
-`diagnostic_unauthorized=true`，不授权formal/export/deployment。
+first one-shot已在fresh commit `5ee1ffa6…`和4096配置下消费：GPU/queue、sealed archive与Kit Python
+identity通过，Hydra也落下exact 4096配置；但旧identity wrapper在`AppLauncher`前导入Torch/RSL，Kit
+startup后约0.34秒segfault。scene/PPO/WAL均零调用，因此既不是4096容量结论，也不是Reward结论。
+
+successor不回退小N或独立5-update smoke，仍是fresh `4096 env × 1000 update`。唯一根因修复是把
+attestation分成pre-App不可变bytes门与post-App同进程class/source门；只有post-App v2 receipt落盘后才
+进入`_run`。前5次update继续只读同一进程的v11/WAL/Reward20/D05。G05保持`Partial`，run仍为
+`diagnostic_unauthorized=true`。

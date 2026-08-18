@@ -43,9 +43,11 @@ def _load_train_module(monkeypatch):
             OmegaConf=FakeOmegaConf,
         ),
     )
-    spec = importlib.util.spec_from_file_location("train_thread_caps_under_test", TRAIN_PATH)
+    module_name = "train_thread_caps_under_test"
+    spec = importlib.util.spec_from_file_location(module_name, TRAIN_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    monkeypatch.setitem(sys.modules, module_name, module)
     spec.loader.exec_module(module)
     return module
 
@@ -138,15 +140,18 @@ def test_verify_kit_thread_caps_rejects_runtime_mismatch(monkeypatch, values, me
 def test_main_passes_and_verifies_kit_args(monkeypatch, capsys):
     train = _load_train_module(monkeypatch)
     captured = {}
+    order = []
 
     class FakeSimulationApp:
         def close(self):
             captured["closed"] = True
+            order.append("closed")
 
     class FakeAppLauncher:
         def __init__(self, **kwargs):
             captured["kwargs"] = kwargs
             self.app = FakeSimulationApp()
+            order.append("app_started")
 
     isaaclab = _module("isaaclab")
     isaaclab.__path__ = []
@@ -165,7 +170,17 @@ def test_main_passes_and_verifies_kit_args(monkeypatch, capsys):
         "carb",
         _module("carb", settings=_module("carb.settings", get_settings=lambda: settings)),
     )
-    monkeypatch.setattr(train, "_run", lambda cfg: captured.setdefault("ran", True))
+    monkeypatch.setattr(
+        train,
+        "_attest_action_ball_runtime_after_app_start",
+        lambda: order.append("runtime_attested"),
+    )
+
+    def _run(cfg):
+        captured["ran"] = True
+        order.append("run")
+
+    monkeypatch.setattr(train, "_run", _run)
     cfg = _Cfg(
         headless=True,
         device="cuda:0",
@@ -180,4 +195,78 @@ def test_main_passes_and_verifies_kit_args(monkeypatch, capsys):
         "--/plugins/carb.tasking.plugin/threadCount=16 "
         "--/plugins/omni.tbb.globalcontrol/maxThreadCount=16"
     )
+    assert order == ["app_started", "runtime_attested", "run", "closed"]
     assert "KIT_THREAD_CAP_OK" in capsys.readouterr().out
+
+
+def test_runtime_attestation_is_absent_or_complete(monkeypatch):
+    train = _load_train_module(monkeypatch)
+    names = (
+        "HOPE_ACTION_BALL_RUNTIME_ATTESTATION",
+        "HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH",
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256",
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256",
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE",
+    )
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    assert train._attest_action_ball_runtime_after_app_start() is None
+    monkeypatch.setenv("HOPE_ACTION_BALL_RUNTIME_ATTESTATION", "sealed_rsl_v1")
+    with pytest.raises(RuntimeError, match="partial ActionBall post-AppLauncher"):
+        train._attest_action_ball_runtime_after_app_start()
+
+
+def test_runtime_attestation_failure_closes_started_app(monkeypatch):
+    train = _load_train_module(monkeypatch)
+    captured = []
+
+    class FakeCoreApp:
+        def post_quit(self, code):
+            captured.append(("post_quit", code))
+
+    class FakeSimulationApp:
+        app = FakeCoreApp()
+
+        def close(self):
+            captured.append(("close", None))
+
+    class FakeAppLauncher:
+        def __init__(self, **kwargs):
+            self.app = FakeSimulationApp()
+
+    isaaclab = _module("isaaclab")
+    isaaclab.__path__ = []
+    monkeypatch.setitem(sys.modules, "isaaclab", isaaclab)
+    monkeypatch.setitem(
+        sys.modules, "isaaclab.app", _module("isaaclab.app", AppLauncher=FakeAppLauncher)
+    )
+    monkeypatch.setitem(sys.modules, "wandb", _module("wandb", run=None))
+    monkeypatch.setattr(
+        train,
+        "_attest_action_ball_runtime_after_app_start",
+        lambda: (_ for _ in ()).throw(RuntimeError("attestation failed")),
+    )
+    monkeypatch.setattr(
+        train,
+        "_run",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("run must not start")),
+    )
+    cfg = _Cfg(
+        headless=True,
+        device="cuda:0",
+        video=False,
+        kit_carb_tasking_thread_count=None,
+        kit_tbb_thread_count=None,
+    )
+    train.main(cfg)
+    assert captured == [("post_quit", 1), ("close", None)]
+
+
+def test_runtime_attestation_call_is_after_app_start_before_training():
+    main_source = TRAIN_PATH.read_text(encoding="utf-8").split(
+        "def main(cfg):", 1
+    )[1]
+    app_started = main_source.index("simulation_app = app_launcher.app")
+    attest = main_source.index("_attest_action_ball_runtime_after_app_start()")
+    training = main_source.index("_run(cfg)")
+    assert app_started < attest < training

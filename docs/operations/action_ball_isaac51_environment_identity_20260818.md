@@ -77,7 +77,7 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 - `PASS-direct`：FullMDP RSL3 optimizer boundary/WAL adapter；v11 compact joint-safety结构顺序已通过host反例。
 - `PASS-historical-N2`：FullMDP RSL3真实 `N=2×2`曾闭合optimizer/WAL，只作工程证据。
 - `PASS-Pod-CUDA`：clean Git `2c8ef444…`在Jiayi Python3.11/Torch2.7-cu128完成LM info/NaN/finite-overflow三参数，CUDA context存活。
-- `PASS-prelaunch-code / HOLD-live-4096`：LM异常路径与v11 adapter已闭合；一次性wrapper已把实际Kit trainer内的Python/RSL class source和update0--4 receipt纳入消费。最终发车仍待wrapper终审、文档commit repin与空卡/锁的临门只读重验。
+- `PASS-environment / FAIL-first-4096-entry`：commit `5ee1ffa6…` 的first one-shot通过GPU preexec、sealed RSL和真实Kit Python身份，但身份代码在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault；Hydra解析成功，scene/PPO/WAL零调用。successor必须把class/source attestation移到AppLauncher成功后的同一Kit进程，不能用pre-App import代签。
 - `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、portable MuJoCo Full-A semantic runtime。
 
 环境 `PASS` 只回答“代码在同一软件栈上执行”，不回答 Reward 是否合理、是否可学或跨机逐位相同。

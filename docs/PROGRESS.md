@@ -4253,3 +4253,7 @@
   wrapper新增actual Kit trainer内Python/sealed-RSL来源attestation、exec紧前GPU/queue重验和终点
   1000-pair evidence consumer，当前`PREPARED / NOT YET RUN`。portable MuJoCo只到真实contact的
   `full_a_slice_attempted`，R03/R06/R07/Reward0--13仍缺，明确不称Full-A。
+- 2026-08-19：first 4096 one-shot在preexec、sealed archive、真实Kit Python和Hydra4096解析后、scene/PPO
+  之前自然RC1；Kit startup约0.34秒后segfault。首错是wrapper在`AppLauncher`前导入Torch/RSL，不是容量
+  或Reward。successor改成pre-App bytes门、post-App同进程class/source门，保持fresh `4096×1000`直跑；
+  旧namespace不复用、不重试。G05仍`Partial`。

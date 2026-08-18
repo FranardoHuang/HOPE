@@ -101,6 +101,7 @@ deployment、真机或物理安全。
 | 13 | `PASS-Pod-CUDA` | LM code 8/9 已统一为`lm_solve_info_nonzero/lm_solve_nonfinite`；`dq`非有限、`solve_ex info!=0`以及有限`q+dq`溢出都在任何物理forward前逐行拒绝，正常peer保持不变。exact Pod1 Git `2c8ef444…`、Jiayi Python3.11/Torch2.7-cu128在GPU0得到三参数`3 passed`，每次后续kernel与synchronize正常 | 进入唯一4096同进程；真实异常仍需写row/iteration/try/info以继续收窄 |
 | 14 | `PASS-structural / HOLD-live-business` | RSL3薄adapter升级独立v11 telemetry：compact joint-safety在optimizer前prepare/validate，随后`PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；4096×5单元反例得到5组pair和5份post-ACK receipt | 4096同进程前5次必须独立看到5份v11 safety receipt，并要求真实D05 producer/counter被调用；单元fixture的D05全零不能代签 |
 | 15 | `PASS-live-contact-slice / HOLD-portable-A` | portable MuJoCo新增诚实的`full_a_slice_attempted`纵切片：逐行reveal、真实ball state launch、20-substep plant、live contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。exact Pod1 Git `2c8ef444…`、GPU1节点从measured racket site构造真实ball-racket pair并穿production step/latch，`1 passed`。R03、R06 landing outcome、R07 recovery及Reward项0--13仍明确`not_produced` | 并行逐项接通缺失producer；未闭合前不得称MuJoCo A，但不再阻塞Isaac 4096 A1000 |
+| 16 | `FAIL-pre-PPO / ROOT-CAUSE-FIXED-HOST` | first 4096 one-shot消费commit `5ee1ffa6…`、wrapper `022c13f5…`和fresh namespace；GPU preexec、sealed archive及真实Kit Python身份通过，但wrapper在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault。Hydra已解析4096，scene/PPO/WAL均零调用；这不是容量或Reward失败 | runtime identity改成两阶段：AppLauncher前只验不可变解释器/archive，AppLauncher成功后同一Kit进程才导入并核Torch/RSL，再进入`_run`；新commit/namespace/wrapper可直发同一4096长跑，不复用本次证据 |
 
 ## 5. 下一条发射协议
 
@@ -112,18 +113,22 @@ deployment、真机或物理安全。
 4. 仅在进程失败、证据不可信或结构性不可学被直接证明时停止；普通tilt/table/fall只记telemetry；
 5. 长跑期间并行完成portable MuJoCo A lifecycle、rough课程和2.0删除清单，不热补正在运行的源码或scene。
 
-一次性4096 wrapper候选已经形成；它固定`4096×1000`、一个fresh namespace、GPU0/CPU32--47、
-最多一个已知peer、20 GiB显存与磁盘余量，并在实际Isaac Kit trainer进程内以`-P -S`绑定Python、
-Torch/TensorDict与sealed RSL3 source/class后才进入`train.py`。GPU/queue在`exec`紧前重验；
-update0--4由同一进程的v11 WAL/post-ACK receipt读取，不另起`4096×5`。该ignored one-shot文件不进入Git；
-最终source commit、wrapper SHA、namespace和result由发射件与remote保留证据共同记录，不能由本页
-自引用代签。
+第一份一次性4096 wrapper已经消费且自然RC1：commit=`5ee1ffa6…`、wrapper SHA256=`022c13f5…`、
+namespace=`20260819T044500FullMdpA4096Iter1000Git5EE1FFA6Pod1GPU0CST`。preexec receipt和旧v1 runtime
+receipt都落盘，但`run.log`只有identity marker和Kit segfault；无`Learning iteration`、无WAL、无GPU
+compute驻留。根因是identity代码在`AppLauncher`之前导入Torch/RSL，违反训练入口原有“先启动Isaac Sim
+再导入runtime模块”的顺序。该namespace不得复用、不得重试，也不能写成4096容量失败。
+
+successor保持`4096×1000`、fresh namespace、GPU0/CPU32--47、最多一个已知peer、20 GiB余量和同进程
+update0--4；唯一变化是两阶段identity门。pre-App阶段只验证sealed bytes/interpreter，post-App hook在
+真实Kit进程中导入并核Torch/TensorDict/RSL class、fsync v2 receipt，然后才调用`_run`。新ignored
+one-shot仍不进Git；最终source commit、wrapper SHA、namespace和result由发射件与remote保留证据共同记录。
 
 旧失败run只有在以下条件同时成立时才能按已绑定的唯一PID链停止：LM exact Pod异常路径零skip、v11
 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项已被明确列出且没有被成功receipt掩盖、最终
-commit/wrapper经独立红队。旧PID随后已自然消失，因此本轮没有发signal/kill。下一代仍未启动；只剩
-最终文档commit repin、wrapper终审和发车前一次GPU/lock/free只读重验。终审通过后直接启动长跑，不能
-再插入小N或独立5-update smoke。
+commit/wrapper经独立红队。旧PID随后已自然消失，因此本轮没有发signal/kill。第一份4096 one-shot也已
+自然失败并释放GPU/锁；successor只剩post-App identity回归、final commit/wrapper终审和临门资源重验。
+通过后仍直接启动长跑，不能插入小N或独立5-update smoke。
 下面保留旧命令与失败证据，防止误复用。
 
 ### 已消费旧命令
