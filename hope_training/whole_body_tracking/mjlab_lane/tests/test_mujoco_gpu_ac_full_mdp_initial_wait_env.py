@@ -51,15 +51,19 @@ def test_shared_layout_has_the_live_full_mdp_widths_and_one_order():
         offset += width
 
 
-def test_initial_wait_step_fails_instead_of_claiming_missing_producers():
-    with pytest.raises(ValueError, match="requires nworld=1"):
+def test_initial_wait_requires_positive_world_count_and_deterministic_reset():
+    with pytest.raises(ValueError, match="requires positive nworld"):
         wait_env.FullMdpInitialWaitVecEnv(
-            sim_cfg=wait_env.SimCfg(nworld=2),
+            sim_cfg=wait_env.SimCfg(nworld=0),
             task_cfg=wait_env.TaskCfg(),
             device="cpu",
         )
-    with pytest.raises(RuntimeError, match="no FullMDP step/reward/termination"):
-        wait_env.FullMdpInitialWaitVecEnv.step(None, torch.zeros((1, 31)))
+    with pytest.raises(ValueError, match="requires deterministic reset"):
+        wait_env.FullMdpInitialWaitVecEnv(
+            sim_cfg=wait_env.SimCfg(nworld=1),
+            task_cfg=wait_env.TaskCfg(reset_joint_noise_rad=0.01),
+            device="cpu",
+        )
 
 
 @pytest.mark.skipif(

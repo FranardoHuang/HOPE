@@ -581,6 +581,14 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert second_view.ready.tolist() == [True, True]
     assert second_view.control_tick.tolist() == [2, 2]
     assert bundle.owner._action_epoch_ready_streak.tolist() == [2, 2]
+    # Bootstrap readiness authorizes the next Motion reveal but has no current
+    # full shot key, so it must not poison ActionEpoch by publishing keyed R07
+    # telemetry against the neutral genesis rows.
+    assert not bool(epoch_owner._undecoded_overflow.any())
+    record = epoch_owner.current()
+    owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
+    assert record.fact_valid_bits[:, :, owner_slot].eq(0).all()
+    assert record.owner_fault_bits[:, :, owner_slot].eq(0).all()
 
 
 def test_cold_idle_bad_reference_does_not_advance_or_self_authorize(monkeypatch):

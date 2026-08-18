@@ -50,6 +50,16 @@ length=`81.56`，100→200窗口mean=`78.02`。dense income约`0.05705/sample`�
 运行继续500/1000且不热改；同时允许对readiness producer、阈值和live输入做只读因果审计，因为200个
 update持续0 ACCEPT已是需要解释的事实，但还不是停止长跑或直接改Reward的充分条件。
 
+同一现役HEAD的只读因果审计发现一个只在首次ready后触发的结构错误：cold-IDLE bootstrap使用
+neutral/empty shot key，但R07 first-ready原先无条件调用只接受current full-key唯一join的Epoch writer。
+截至ACK437仍为242次admitted全not-ready、R07 first-ready=0，所以现役WAL尚未触发overflow；一旦首次
+ready，旧bytes会sticky overflow并使下一次D05 CENSOR或drain fail。下一条fresh源码采用最窄语义修复：
+bootstrap readiness继续进入Motion admission，但不写shot-keyed R07 telemetry；completed-action exact-key
+和mismatch fault不放宽。CPU生产链已从真实plant facts连续两拍走到owner projection、Motion reveal和
+D05 settle，得到两行ACCEPT且Epoch无overflow；fresh Kit仍是进入下一条训练前的门。现役A1000继续自然跑500/1000，
+其0 ACCEPT不能再单独归因于Reward权重。host证据为integration=`1 passed`、recovery-device=`80 passed`、
+live-facts=`25 passed, 6 skipped`、Epoch rowwise=`51 passed, 7 skipped`；四份需按已知module-identity隔离分进程运行。
+
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
 部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
 历史 225/318-D Stage1 V2 和 194/318-D fixed-question 只保留证据账；当前 branch

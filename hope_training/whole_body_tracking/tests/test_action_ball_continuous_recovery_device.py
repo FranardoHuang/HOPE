@@ -910,7 +910,12 @@ def test_action_epoch_readiness_true_writer_publishes_only_monotonic_first_ready
             raw_score=torch.ones(1, dtype=owner.dtype, device=owner.device),
             weighted_reward=torch.ones(1, dtype=owner.dtype, device=owner.device),
             ready_instant=torch.ones(1, dtype=torch.bool, device=owner.device),
-            reference_kind=torch.ones(1, dtype=torch.int64, device=owner.device),
+            reference_kind=torch.full(
+                (1,),
+                device_recovery.R07_REFERENCE_COMPLETED_ACTION_FRAME0,
+                dtype=torch.int64,
+                device=owner.device,
+            ),
             reference_action_slot=torch.zeros(1, dtype=torch.int64, device=owner.device),
             reference_action_uid=torch.ones(1, dtype=torch.int64, device=owner.device),
         )

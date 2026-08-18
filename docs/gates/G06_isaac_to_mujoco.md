@@ -24,6 +24,17 @@ finite 229/399、IDLE one-hot、+10m park与raw no-ball-contact均通过，resul
 `noslip=0`是MuJoCo-Warp不实现vendor noslip pass的已登记backend deviation。真实step、Reward、
 termination和masked reset闭合前，本Gate仍为`Partial`且禁止`learn(1)`。
 
+最小WAIT transition现已在host闭合真实20-substep plant调用、Reward20、四项shared termination和逐env reset，
+但Gate仍`Partial`等待GPU N=1/N=2。实现没有迁移旧M04：MuJoCo内部`cvel`先从kinematic-root
+`subtree_com`参考点平移到每个body的inertial COM，再与Isaac `body_lin_vel_w/body_ang_vel_w`同义；
+rotating offset-body的native `mj_jacBodyCom @ qvel` oracle最大误差为`5.6e-17`，而raw `cvel`线速度
+误差范数约`0.50`。Reward使用Isaac同式的上一拍live-anchor x/y+yaw teacher pose cache；本拍Reward后、
+最终forward后才刷新下一拍。每个policy step在最后一次integration后显式`forward`，再读取derived body
+tensors并锁存同tickresolved robot-table contact。该contact单独导出具名backend bool，不复用Isaac
+`robot_hit_table` bit16；mixed-nonfinite qdes按joint回退而不清掉同行finite action，并保留raw终止证据；
+portable component-OBB SAT keepout仍是learn前HOLD。host组合=`8 passed, 4 skipped`；
+production净增396 LOC，四个skip包含真实GPU N=1/N=2与本机缺依赖路径，不得写成live PASS。
+
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、
 可选 Isaac checkpoint replay diagnostic、MuJoCo native VecEnv/PPO 三个子门；本页下方的 mandatory

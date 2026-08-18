@@ -1573,7 +1573,8 @@ class A3ReadyBallVecEnv:
 
   # ---- step -------------------------------------------------------------
 
-  def step(self, actions):
+  def _advance_plant(self, actions):
+    """Apply one policy action through the one real 20-substep plant loop."""
     torch = self._torch
     cfg = self.cfg
     d = self.sim.data
@@ -1581,8 +1582,8 @@ class A3ReadyBallVecEnv:
     actions = torch.clamp(actions.to(self.device), -cfg.action_clip, cfg.action_clip)
     self.last_actions = self.actions
     self.actions = actions
-    q_des = torch.clamp(self.q_ready.unsqueeze(0) + self.act_scale * actions,
-                        self.jnt_lo, self.jnt_hi)
+    pre_clamp_qdes = self.q_ready.unsqueeze(0) + self.act_scale * actions
+    q_des = torch.clamp(pre_clamp_qdes, self.jnt_lo, self.jnt_hi)
 
     tau_sq = torch.zeros(self.num_envs, device=self.device)
     for _ in range(self.decimation):
@@ -1608,6 +1609,13 @@ class A3ReadyBallVecEnv:
     self.common_step_counter += 1
 
     st = self._state()
+    return st, tau_sq, pre_clamp_qdes
+
+  def step(self, actions):
+    torch = self._torch
+    cfg = self.cfg
+    st, tau_sq, _pre_clamp_qdes = self._advance_plant(actions)
+
     rew, terms = self._reward(st, tau_sq)
     terminated, reasons = self._terminate(st)
     truncated = self.episode_length_buf >= self.max_episode_length

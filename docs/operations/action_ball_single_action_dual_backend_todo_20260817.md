@@ -67,11 +67,11 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-A200 / RUNNING-A1000` | A200=`9600 steps/400 WAL/9600 finite/0 poison`；118次selected中105次admitted后均defer/not-ready、13次unknown reject，r03/physical=`0/105`，R06/R07=`未测`；116个episode均tilt，mean length=`81.56` | 继续500/1000；并行只做readiness因果审计，不热改现役run |
-| 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
+| 6 | `PASS-A200 / RUNNING-A1000 / NEXT-FRESH-FIX` | A200=`9600 steps/400 WAL/9600 finite/0 poison`；118次selected中105次admitted后均defer/not-ready。只读审计到ACK437仍为242次admitted全not-ready、R07 first-ready=0；现役bytes另有潜伏的neutral-bootstrap first-ready→Epoch empty-key overflow，当前尚未触发 | 现役run继续500/1000且不热改；下一条fresh run只允许使用bootstrap telemetry mask修复 |
+| 7 | `PASS-host-chain / HOLD-fresh-live` | bootstrap两拍ready仍授权Motion，但不再以neutral key写R07 ActionEpoch telemetry；CPU真实fact→owner projection→Motion reveal→production D05 settle已得到两行ACCEPT、Epoch无overflow。contact/flight/R06 outcome/R07 recovery仍需下一条fresh live分母 | fresh Kit N=2重验首个ACCEPT；A1000内只观察，不把潜伏bug当Reward结论 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
-| 9 | `PASS-live-reset / HOLD-step` | fresh Git `495a0870`真实N=1 reset RC0；`d28a7eac`新namespace又直接断言compiled `physics_dt=0.001`、20 substeps、control dt0.02、registered Warp deviation `noslip=0`，result SHA=`9b40214f…e11eddc` | 接最小WAIT transition：真实action/step、Reward20、五termination和selected reset；RSL3.1.2隔离前禁止`learn(1)` |
-| 10 | `PASS-cleanup / PASS-A1000-margin` | 两轮只删无live-ref cache、旧verify scratch和6个Git可重建checkout，后者实收`2,729,152,512 B`；外部并发清理后末次只读free=`31,737,970,688 B`。未碰foreign PID、checkpoint、主日志或资产 | A1000仍在拿锁后重验；不按目录表观大小删硬链接/资产 |
+| 9 | `PASS-live-reset / PASS-host-step / HOLD-live-step` | 真实reset/compiled timestep仍PASS；最小WAIT transition净增396 production LOC，已接real 20-substep plant、Reward20、四项shared termination、masked reset与229/399。MuJoCo C-frame `cvel`已按root subtree COM平移到body inertial COM，teacher body pose保持Isaac上一拍anchor cache时序；mixed-nonfinite qdes逐关节回退且保留raw终止证据；resolved table contact只作具名backend bool，不冒充Isaac SAT keepout；host=`8 passed, 4 skipped` | fresh Git GPU2跑N=1 step+timeout和N=2 selected-reset peer；实现portable SAT keepout前禁止`learn(1)` |
+| 10 | `PASS-cleanup / PASS-A1000-margin` | 外部清理后Pod1约`249.8 GiB` free；A1000 ACK417时run目录仅约6.6MB，预计到1000新增日志不足约10MB，即使终点单checkpoint也远低于空间余量。未碰foreign PID、checkpoint、主日志或资产 | 不再为本run清理；只读监控实际增长，不按表观du删除硬链接/资产 |
 
 ## 5. 下一条命令
 
@@ -141,6 +141,14 @@ unknown reject，ACCEPT/playback/contact保持0。100→200窗口60次selected�
 `547.6872`，约`0.05705/sample`；窗口约`0.05647/sample`，继续缓慢下降。TensorBoard step199的
 value loss=`0.01449`、surrogate=`-0.03678`、std=`0.0200528`、LR=`1e-5`。运行保持可信并继续500；
 但连续200 update为0 ACCEPT已足以并行启动只读readiness producer/阈值因果审计，不能靠调权重猜根因。
+
+只读因果审计进一步区分了“当前还没ready”和“ready后会坏”两件事。现役HEAD截至ACK437仍是
+R07 first-ready=`0`、242次admitted均not-ready，因此sticky overflow尚未发生；但同一冻结源码在
+bootstrap两拍首次ready时会把neutral/empty shot key送入只接受current full key的Epoch writer，随后
+sticky overflow并使下一次D05 CENSOR或drain fail。该问题不能靠Reward比例解决。下一条fresh源码只把
+`reference_kind=bootstrap`的first-ready从Epoch telemetry中mask，仍保留R07 owner-private dwell、
+source step和Motion next-tick ready；completed shot和错误key继续fail closed。现役A1000不热补、不重启，
+继续作为“修复前readiness尚未达到”的负证据跑到500/1000。
 
 ## 7. 架构减法
 

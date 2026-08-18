@@ -3675,9 +3675,16 @@ class ContinuousRecoveryDeviceCoordinator:
         self._ready_instant_total.add_(ready_instant.to(torch.int64).sum())
         self._first_ready_total.add_(first_ready.to(torch.int64).sum())
         bundle = self._diagnostic_n2_bundle
+        # Bootstrap readiness is a Motion admission fact for the upcoming
+        # action, not an R07 fact owned by a current full ActionEpoch shot key.
+        # Keep the owner-private dwell/first-ready chronology above, but only
+        # publish keyed telemetry for a completed action reference.
+        epoch_first_ready = first_ready & result.reference_kind.eq(
+            R07_REFERENCE_COMPLETED_ACTION_FRAME0
+        )
         bundle.action_epoch_owner.publish_r07_first_ready(
             owner=bundle,
-            first_ready=first_ready,
+            first_ready=epoch_first_ready,
             shot_key=key,
             source_step=self._action_epoch_first_ready_source_step,
         )

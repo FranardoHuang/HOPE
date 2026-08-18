@@ -8,6 +8,17 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: A1000只读审计到ACK437仍为242次admitted全not-ready、R07 first-ready=0，现役run继续
+  500/1000不热补；同时确认旧bytes首次bootstrap ready会以neutral key误写full-key Epoch并sticky
+  overflow。下一条fresh源码只mask该bootstrap telemetry，保留Motion readiness和completed-key fault；
+  CPU生产链已从两拍live facts走到Motion reveal与production D05两行ACCEPT，fresh Kit仍待验。
+
+- 2026-08-18: MuJoCo最小WAIT transition production净增396 LOC，host已接真实20-substep plant、Reward20、
+  四项shared termination与masked reset；body速度经root subtree COM平移并由native `mj_jacBodyCom` oracle
+  验证，body pose reward保持Isaac上一拍anchor cache时序。resolved table contact只导出具名backend bool，
+  不冒充尚未移植的Isaac SAT keepout；mixed-nonfinite qdes逐关节回退；host=`8 passed, 4 skipped`，
+  N=1/N=2 GPU仍未测，禁止`learn(1)`。
+
 - 2026-08-18: 在A `N=2 × 2 update`工程链闭合后，已从GitHub branch的fresh clean
   `4d374ca8…` checkout于Pod1空闲GPU1启动同代码、同N、单进程A1000；active checkout只读，
   不生成checkpoint、不声称resume。update20达到960 steps/40 WAL/960 finite Reward samples；

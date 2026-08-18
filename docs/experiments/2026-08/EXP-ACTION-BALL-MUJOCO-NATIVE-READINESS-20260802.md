@@ -107,6 +107,16 @@ admitted opportunity推进到playback与contact。
 不得热补active run；只有证明readiness输入恒不可达或奖励在该入口前没有有效梯度，才为下一条fresh run
 改合同或经济。
 
+后续只读因果审计把该候选拆成两层。截至ACK437，242个admitted仍全部not-ready且R07 first-ready=0，
+所以现役run还没有触发协议fault；这是当前policy/plant尚未满足13项两拍readiness的观测事实。独立源码
+反例同时证明，旧bytes即使第一次满足bootstrap readiness，也会用neutral shot key发布只允许full-key的
+R07 event并sticky overflow。该第二层是结构错误，不是学习结果。采用的下一条fresh修复只mask bootstrap
+的shot-keyed telemetry，Motion readiness和completed-shot telemetry均保持。CPU生产链已从两拍真实
+plant facts走到owner projection、Motion reveal和D05 settle，得到两行ACCEPT且Epoch无overflow；
+现役A1000不热补，继续到500/1000观察修复前的readiness趋势，但不再用它裁决Reward能否产生ACCEPT。
+隔离进程回归为integration=`1 passed`、recovery-device=`80 passed`、live-facts=`25 passed, 6 skipped`、
+Epoch rowwise=`51 passed, 7 skipped`；旧completed-action true-writer fixture也继续验证 keyed telemetry 正常发布。
+
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery
 分母、termination reason和episode length；到1000后才区分权重失衡、触发率不足、分母错误或环境不可学。
 历史C曲线中action penalty负正比约`10.39 -> 3.45`及episode-length谷底恢复只作为待观察模式，
@@ -134,6 +144,17 @@ phase为IDLE one-hot，+10m park球qvel为零且raw contact array中无ball row�
 恢复vendor timestep；`noslip=0`则是MuJoCo-Warp没有noslip pass的已登记backend deviation，不伪称
 vendor exact。`/workspace/mjlab_venv`的RSL-RL仍为5.4.0而Isaac为3.1.2；任何`learn(1)`前须隔离并
 锁定共同RSL3.1.2训练ABI，不能用兼容分支宣称等价。
+
+下一纵切片保持同一root并净增396 production LOC，已在host接入真实plant step、六个dense Reward20、
+四项shared termination和masked reset。三个能改变Reward的语义错误已先由反例关闭：raw MuJoCo `cvel`不是body
+inertial-COM线速度，必须按`xipos - subtree_com[body_rootid]`做刚体点速度平移；且MuJoCo-Warp每次
+`step`在integration后不会自动重算derived tensors，故policy边界要先`forward`再读Reward/termination。
+body position/orientation imitation则保留Isaac的上一拍Motion cache，Reward之后才按最终live anchor刷新
+下一拍。post-forward resolved contact只导出具名backend bool；它不是Isaac component-OBB SAT keepout，
+后者仍阻塞trainer。mixed-nonfinite qdes逐关节回退、其余finite joints继续执行，同时raw qdes仍进入终止证据。
+host组合=`8 passed, 4 skipped`，native旋转偏置body Jacobian oracle通过；
+N=1真实step/timeout与N=2 selected-reset peer仍待fresh GPU，
+因此科学状态为`PASS-host-step / HOLD-live-step`，不是trainer ready。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`
