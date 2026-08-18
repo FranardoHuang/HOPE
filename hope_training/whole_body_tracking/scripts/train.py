@@ -22038,16 +22038,16 @@ def _attest_action_ball_runtime_after_app_start() -> None:
     _ACTION_BALL_RUNTIME_PRE_APP_VALUES = None
     if expected_values != tuple(values[name] for name in names):
         raise RuntimeError("ActionBall runtime attestation changed after AppLauncher")
-    forbidden = tuple(
+    forbidden_policy_runtime = tuple(
         name
         for name in sys.modules
-        if name in {"rsl_rl", "tensordict", "torch"}
-        or name.startswith(("rsl_rl.", "tensordict.", "torch."))
+        if name in {"rsl_rl", "tensordict"}
+        or name.startswith(("rsl_rl.", "tensordict."))
     )
-    if forbidden:
+    if forbidden_policy_runtime:
         raise RuntimeError(
-            "AppLauncher preloaded the sealed ActionBall runtime before attestation: "
-            + ",".join(sorted(forbidden))
+            "AppLauncher preloaded the sealed ActionBall policy runtime before attestation: "
+            + ",".join(sorted(forbidden_policy_runtime))
         )
 
     import fcntl

@@ -6213,3 +6213,8 @@ commit `d341931c…` 的second one-shot随后证明两阶段状态机本身仍�
 AppLauncher startup内再次segfault，scene/PPO/WAL继续零调用。两次失败共同使用、而成功N2未使用的入口是
 Kit Python `-S/-c/runpy`代理；next wrapper只撤掉这层代理，改为`python.sh -P -B scripts/train.py`，仍由
 production pre/post-App hook完成同一attestation。未得到4096容量或学习结论，G05保持`Partial`。
+
+commit `356f706b…` 的third one-shot证明normal direct-script入口已越过上述segfault：AppLauncher正常完成约
+10秒初始化，随后post-App attestation把AppLauncher自身加载的Torch误判为提前加载policy runtime而RC1。
+preexec通过，v2 receipt、scene、PPO、WAL仍为零；这不构成4096容量证据。修复只把post-App拒绝集合缩为
+RSL/TensorDict，pre-App仍拒绝Torch/RSL/TensorDict，Torch仍须通过exact版本与venv来源核验；G05保持`Partial`。

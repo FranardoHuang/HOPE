@@ -248,8 +248,9 @@ def test_runtime_attestation_rejects_preloaded_runtime(monkeypatch):
         train._require_action_ball_runtime_unloaded_before_app_start()
 
 
-def test_runtime_attestation_consumes_pre_app_proof_before_post_app_imports(
-    monkeypatch,
+@pytest.mark.parametrize("module_name", ["rsl_rl.post_app", "tensordict.post_app"])
+def test_runtime_attestation_rejects_policy_runtime_loaded_by_app_launcher(
+    monkeypatch, module_name
 ):
     train = _load_train_module(monkeypatch)
     values = {
@@ -264,15 +265,53 @@ def test_runtime_attestation_consumes_pre_app_proof_before_post_app_imports(
     train._require_action_ball_runtime_unloaded_before_app_start()
     assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "checked"
 
-    # Model a module imported by AppLauncher itself, after the pre-App proof.
-    monkeypatch.setitem(sys.modules, "torch.post_app", _module("torch.post_app"))
-    with pytest.raises(RuntimeError, match="AppLauncher preloaded"):
+    monkeypatch.setitem(sys.modules, module_name, _module(module_name))
+    with pytest.raises(RuntimeError, match="policy runtime"):
         train._attest_action_ball_runtime_after_app_start()
     assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "consumed"
 
-    monkeypatch.delitem(sys.modules, "torch.post_app")
+    monkeypatch.delitem(sys.modules, module_name)
     with pytest.raises(RuntimeError, match="missing or consumed"):
         train._attest_action_ball_runtime_after_app_start()
+
+
+def test_runtime_attestation_allows_app_launcher_to_load_torch(
+    monkeypatch,
+):
+    train = _load_train_module(monkeypatch)
+    values = {
+        "HOPE_ACTION_BALL_RUNTIME_ATTESTATION": "sealed_rsl_v1",
+        "HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH": "/tmp/receipt",
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256": "a" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256": "b" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE": "/tmp/site-packages",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    train._require_action_ball_runtime_unloaded_before_app_start()
+
+    # AppLauncher itself imports Torch on the exact Isaac Sim 5.1 path.  It is
+    # verified below by version and origin; reaching the descriptor gate proves
+    # it is not confused with a preloaded policy runtime.
+    monkeypatch.setitem(sys.modules, "torch", _module("torch"))
+    monkeypatch.setitem(sys.modules, "torch.post_app", _module("torch.post_app"))
+
+    def _descriptor_gate_reached(_fd):
+        raise RuntimeError("descriptor gate reached")
+
+    import fcntl
+
+    for name, value in (
+        ("F_SEAL_SEAL", 1),
+        ("F_SEAL_SHRINK", 2),
+        ("F_SEAL_GROW", 4),
+        ("F_SEAL_WRITE", 8),
+    ):
+        monkeypatch.setattr(fcntl, name, value, raising=False)
+    monkeypatch.setattr(train.os, "fstat", _descriptor_gate_reached)
+    with pytest.raises(RuntimeError, match="descriptor gate reached"):
+        train._attest_action_ball_runtime_after_app_start()
+    assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "consumed"
 
 
 def test_runtime_attestation_consumes_proof_before_post_app_env_validation(

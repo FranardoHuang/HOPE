@@ -103,6 +103,7 @@ deployment、真机或物理安全。
 | 15 | `PASS-live-contact-slice / HOLD-portable-A` | portable MuJoCo新增诚实的`full_a_slice_attempted`纵切片：逐行reveal、真实ball state launch、20-substep plant、live contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。exact Pod1 Git `2c8ef444…`、GPU1节点从measured racket site构造真实ball-racket pair并穿production step/latch，`1 passed`。R03、R06 landing outcome、R07 recovery及Reward项0--13仍明确`not_produced` | 并行逐项接通缺失producer；未闭合前不得称MuJoCo A，但不再阻塞Isaac 4096 A1000 |
 | 16 | `FAIL-pre-PPO / ROOT-CAUSE-FIXED-HOST` | first 4096 one-shot消费commit `5ee1ffa6…`、wrapper `022c13f5…`和fresh namespace；GPU preexec、sealed archive及真实Kit Python身份通过，但wrapper在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault。Hydra已解析4096，scene/PPO/WAL均零调用；这不是容量或Reward失败 | runtime identity改成两阶段：AppLauncher前只验不可变解释器/archive，AppLauncher成功后同一Kit进程才导入并核Torch/RSL，再进入`_run`；新commit/namespace/wrapper可直发同一4096长跑，不复用本次证据 |
 | 17 | `FAIL-pre-App / ROOT-CAUSE-NARROWED` | second 4096 one-shot消费commit `d341931c…`、wrapper `60cfdeed…`和fresh namespace；preexec通过、v2 receipt为空，Kit仍在约2秒内segfault，scene/PPO/WAL零调用。pre-App状态机已证明Torch/RSL未提前导入，所以它不是唯一根因；两次失败共同剩下的异常入口是`python.sh -P -S -B -c runpy(...)` | successor回到成功N2使用的direct script入口，仅保留`-P/-B`和production内pre/post-App attestation；删除Kit Python的`-S/-c/runpy`，仍以fresh namespace直发4096长跑，不插smoke |
+| 18 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | third 4096 one-shot消费commit `356f706b…`、wrapper `00e340b7…`和fresh namespace；normal `python.sh -P -B train.py` 已稳定进入AppLauncher并完成约10秒Kit启动，随后production post-App gate拒绝AppLauncher合法加载的Torch。preexec通过、v2 receipt/scene/PPO/WAL仍为零；GPU与锁自然释放 | 不新增门；把post-App门缩到真正必须未加载的RSL/TensorDict，App前仍拒绝Torch/RSL/TensorDict，并继续对App-owned Torch核exact版本与venv来源。新commit/namespace直发同一4096长跑，不插smoke |
 
 ## 5. 下一条发射协议
 
@@ -132,6 +133,11 @@ second one-shot在上述pre/post-App状态机完整生效后仍于AppLauncher st
 v2 receipt、scene、PPO和WAL均未出现。它推翻了“pre-App Torch/RSL是唯一根因”，但没有提供4096容量信息。
 下一件只改启动形状：不再用Kit Python的`-S/-c/runpy`代理，直接以
 `python.sh -P -B scripts/train.py`进入同一production attestation；不是重跑已消费namespace。
+
+third one-shot验证direct script入口确实消除了前两次segfault：AppLauncher正常打印设备、experience、系统与
+P2P信息并存活约10秒。随后首个Python错误来自post-App门把AppLauncher合法加载的Torch误归为policy runtime；
+这同样发生在scene/PPO/WAL之前，不是4096容量或学习反例。下一件只缩窄这道门：pre-App继续证明Torch、
+TensorDict、RSL都未加载；post-App允许Torch并在既有ABI/venv来源门中验证，只要求TensorDict/RSL仍未加载。
 
 旧失败run只有在以下条件同时成立时才能按已绑定的唯一PID链停止：LM exact Pod异常路径零skip、v11
 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项已被明确列出且没有被成功receipt掩盖、最终

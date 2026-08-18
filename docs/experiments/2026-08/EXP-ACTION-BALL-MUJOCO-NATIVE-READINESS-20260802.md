@@ -40,6 +40,11 @@ Reward，缺WAIT/reveal/ActionEpoch/outcome/recovery；Isaac则让固定Kit/Phys
 outcome→recovery lifecycle、准备rough独立课程，并从zero-callpoint/旧RSL2/重复receipt开始做2.0删除清单。
 任何并行改动只进入新commit和fresh namespace，不热补正在训练的process、scene或manifest。
 
+third 4096 one-shot回到normal direct-script入口后不再segfault，AppLauncher完成约10秒正常初始化；首错变成
+post-App identity门错误地拒绝AppLauncher合法加载的Torch。该run仍未进入scene/PPO/WAL，因而只证明启动形状
+修复有效、门的对象过宽。下一件不增加gate：pre-App继续禁止Torch/RSL/TensorDict，post-App只禁止policy
+runtime的RSL/TensorDict，并用既有版本/来源检查验证App-owned Torch。
+
 ## 2026-08-18 科学裁决：先真实运行，不再扩骨架
 
 Jiayi/build_2的可复现说明与Pod2实机证明，旧Isaac4.5/RSL2和新Isaac5.1/RSL3不是等价学习环境。

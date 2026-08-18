@@ -4260,3 +4260,6 @@
 - 2026-08-19：second 4096 one-shot（`d341931c…`/`60cfdeed…`）在preexec后、post-App v2 receipt前再次
   segfault；这证明pre-App runtime导入不是唯一根因，也没有形成容量证据。next wrapper撤掉两次失败共有的
   Kit Python `-S/-c/runpy`代理，回到direct script入口；仍只发fresh `4096×1000`，不加小N smoke。
+- 2026-08-19：third 4096 one-shot（`356f706b…`/`00e340b7…`）用normal direct-script入口越过前两次
+  segfault，AppLauncher完成约10秒初始化后被post-App门误拒：Torch是AppLauncher的合法依赖，不是提前加载的
+  policy runtime。该run仍为scene/PPO/WAL零调用；下一版只缩窄门到RSL/TensorDict，保持fresh 4096直跑。
