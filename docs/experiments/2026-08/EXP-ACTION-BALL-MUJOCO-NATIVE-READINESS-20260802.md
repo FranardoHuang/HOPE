@@ -45,6 +45,12 @@ post-App identity门错误地拒绝AppLauncher合法加载的Torch。该run仍�
 修复有效、门的对象过宽。下一件不增加gate：pre-App继续禁止Torch/RSL/TensorDict，post-App只禁止policy
 runtime的RSL/TensorDict，并用既有版本/来源检查验证App-owned Torch。
 
+fourth one-shot越过该范围修正后，Kit Python因未导出`F_SEAL_*`符号别名在同一门拒绝；memfd与preexec
+seal证据未漂移。改法是直接消费Linux uapi的`F_GET_SEALS=1034`和固定seal bitmask，而不是删除检查。
+长跑预算也从“1000个PPO update的早期趋势”恢复为历史同级的25000 update终局：单进程
+`4096×25000=2,457,600,000` transitions，1000只读里程碑不停机。portable MuJoCo的R03/R06/R07与
+Reward0--13仍缺，继续明确`full_a_complete=false`，不因Isaac发车而假称两边齐备。
+
 ## 2026-08-18 科学裁决：先真实运行，不再扩骨架
 
 Jiayi/build_2的可复现说明与Pod2实机证明，旧Isaac4.5/RSL2和新Isaac5.1/RSL3不是等价学习环境。

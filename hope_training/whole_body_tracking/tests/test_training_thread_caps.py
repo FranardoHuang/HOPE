@@ -299,15 +299,6 @@ def test_runtime_attestation_allows_app_launcher_to_load_torch(
     def _descriptor_gate_reached(_fd):
         raise RuntimeError("descriptor gate reached")
 
-    import fcntl
-
-    for name, value in (
-        ("F_SEAL_SEAL", 1),
-        ("F_SEAL_SHRINK", 2),
-        ("F_SEAL_GROW", 4),
-        ("F_SEAL_WRITE", 8),
-    ):
-        monkeypatch.setattr(fcntl, name, value, raising=False)
     monkeypatch.setattr(train.os, "fstat", _descriptor_gate_reached)
     with pytest.raises(RuntimeError, match="descriptor gate reached"):
         train._attest_action_ball_runtime_after_app_start()

@@ -104,14 +104,15 @@ deployment、真机或物理安全。
 | 16 | `FAIL-pre-PPO / ROOT-CAUSE-FIXED-HOST` | first 4096 one-shot消费commit `5ee1ffa6…`、wrapper `022c13f5…`和fresh namespace；GPU preexec、sealed archive及真实Kit Python身份通过，但wrapper在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault。Hydra已解析4096，scene/PPO/WAL均零调用；这不是容量或Reward失败 | runtime identity改成两阶段：AppLauncher前只验不可变解释器/archive，AppLauncher成功后同一Kit进程才导入并核Torch/RSL，再进入`_run`；新commit/namespace/wrapper可直发同一4096长跑，不复用本次证据 |
 | 17 | `FAIL-pre-App / ROOT-CAUSE-NARROWED` | second 4096 one-shot消费commit `d341931c…`、wrapper `60cfdeed…`和fresh namespace；preexec通过、v2 receipt为空，Kit仍在约2秒内segfault，scene/PPO/WAL零调用。pre-App状态机已证明Torch/RSL未提前导入，所以它不是唯一根因；两次失败共同剩下的异常入口是`python.sh -P -S -B -c runpy(...)` | successor回到成功N2使用的direct script入口，仅保留`-P/-B`和production内pre/post-App attestation；删除Kit Python的`-S/-c/runpy`，仍以fresh namespace直发4096长跑，不插smoke |
 | 18 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | third 4096 one-shot消费commit `356f706b…`、wrapper `00e340b7…`和fresh namespace；normal `python.sh -P -B train.py` 已稳定进入AppLauncher并完成约10秒Kit启动，随后production post-App gate拒绝AppLauncher合法加载的Torch。preexec通过、v2 receipt/scene/PPO/WAL仍为零；GPU与锁自然释放 | 不新增门；把post-App门缩到真正必须未加载的RSL/TensorDict，App前仍拒绝Torch/RSL/TensorDict，并继续对App-owned Torch核exact版本与venv来源。新commit/namespace直发同一4096长跑，不插smoke |
+| 19 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | fourth one-shot消费commit `d2cd7911…`、wrapper `41cd2d2a…`和fresh namespace；Torch范围修正生效，随后Kit Python在同一post-App门因未导出`F_SEAL_*`符号而拒绝，preexec通过但v2 receipt/scene/PPO/WAL仍为零，进程与GPU自然释放 | seal验证继续保留，但直接使用Linux uapi的`F_GET_SEALS=1034`与四个seal位；exact Pod父进程创建/封印memfd→Kit继承读取已PASS。不把Kit Python可选符号别名当训练ABI；下一条直接扩成同进程`4096×25000`，不是另跑smoke |
 
 ## 5. 下一条发射协议
 
 不再生成`N=2×2 -> 停 -> 修 -> N=2×2`的重复流水账。下一条Isaac A只允许一个fresh namespace：
 
 1. exact clean Git、Isaac5.1/IsaacLab8320/RSL3、资产SHA、空物理GPU和独立CPU affinity一次性闭合；
-2. `num_envs=4096`、`max_iterations=1000`直接启动，update0--4就是同一进程的scale/finite门；
-3. update5健康即自然继续，不重启、不换seed、不改Reward；只读20/50/100/200/500/1000；
+2. `num_envs=4096`、`max_iterations=25000`直接启动，update0--4就是同一进程的scale/finite门；
+3. update5健康即自然继续，不重启、不换seed、不改Reward；只读20/50/100/200/500/1000/2500/5000/10000/25000；
 4. 仅在进程失败、证据不可信或结构性不可学被直接证明时停止；普通tilt/table/fall只记telemetry；
 5. 长跑期间并行完成portable MuJoCo A lifecycle、rough课程和2.0删除清单，不热补正在运行的源码或scene。
 
@@ -138,6 +139,12 @@ third one-shot验证direct script入口确实消除了前两次segfault：AppLau
 P2P信息并存活约10秒。随后首个Python错误来自post-App门把AppLauncher合法加载的Torch误归为policy runtime；
 这同样发生在scene/PPO/WAL之前，不是4096容量或学习反例。下一件只缩窄这道门：pre-App继续证明Torch、
 TensorDict、RSL都未加载；post-App允许Torch并在既有ABI/venv来源门中验证，只要求TensorDict/RSL仍未加载。
+
+fourth one-shot证明上述范围修正已越过；新的首错是Isaac Sim Kit Python的`fcntl`模块有`fcntl()`，却没有
+系统Python提供的`F_SEAL_*`符号别名。memfd本身及preexec seal验证未漂移，修复只使用Linux uapi固定值读取
+同一seal bitmask。Franco同时澄清长跑目标：此前`1000`是PPO update（98,304,000 transitions），不是
+1000个step；它只作早期趋势节点。下一条唯一进程改为`4096×25000`，即2,457,600,000 transitions，
+update1000不停机；25k终点仍不等于formal promotion。
 
 旧失败run只有在以下条件同时成立时才能按已绑定的唯一PID链停止：LM exact Pod异常路径零skip、v11
 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项已被明确列出且没有被成功receipt掩盖、最终
@@ -186,7 +193,7 @@ native A canary执行commit=`08d17b74…`、namespace=
 `20260818T140500MujocoNativeA1000_08D17B74Pod1GPU2SharedCST`启动，GPU2已有1个co-resident，
 本run固定CPU48--63并持GPU2 queue lock。它不是portable FullMDP A。
 
-## 6. A1000 同进程里程碑
+## 6. A25000 同进程里程碑
 
 每个节点只读同一个日志/WAL/TensorBoard，不重启、不改 Reward、不换 seed：
 
@@ -199,6 +206,10 @@ native A canary执行commit=`08d17b74…`、namespace=
 | 200 | actor-pair contact、flight、outcome、recovery 是否出现非零且可归因的 numerator |
 | 500 | 模仿收入、机会率、终止率是否稳定改善而非短暂噪声 |
 | 1000 | 才裁决“有早期学习趋势 / Reward经济失衡 / 环境不可学 / 仍未测” |
+| 2500 | 检查早期趋势是否延续，而不是一次短窗口波动 |
+| 5000 | 检查contact/outcome分母和Reward经济是否进入稳定区间 |
+| 10000 | 检查策略是否继续改善或出现退化/遗忘 |
+| 25000 | 长跑终局；裁决可学习性、Reward比例与下一代配置，不自动授权promotion |
 
 每个节点至少记录：completed updates/steps、mean episode length、termination reason counts、20个 Reward term
 的 signed income、opportunity transactions/due/selected/accept/censor/reject/defer、contact/flight/outcome/

@@ -4263,3 +4263,6 @@
 - 2026-08-19：third 4096 one-shot（`356f706b…`/`00e340b7…`）用normal direct-script入口越过前两次
   segfault，AppLauncher完成约10秒初始化后被post-App门误拒：Torch是AppLauncher的合法依赖，不是提前加载的
   policy runtime。该run仍为scene/PPO/WAL零调用；下一版只缩窄门到RSL/TensorDict，保持fresh 4096直跑。
+- 2026-08-19：fourth one-shot（`d2cd7911…`/`41cd2d2a…`）越过Torch范围修正后，被Kit Python缺失的
+  `F_SEAL_*`符号别名拒绝；seal验证改用同一Linux uapi数值，exact Pod继承fd读回bitmask=`15`，不删除检查。长跑目标改为单进程
+  `4096×25000`，1000 update只是98,304,000 transitions的早期节点，届时不停机。

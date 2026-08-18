@@ -6218,3 +6218,9 @@ commit `356f706b…` 的third one-shot证明normal direct-script入口已越过�
 10秒初始化，随后post-App attestation把AppLauncher自身加载的Torch误判为提前加载policy runtime而RC1。
 preexec通过，v2 receipt、scene、PPO、WAL仍为零；这不构成4096容量证据。修复只把post-App拒绝集合缩为
 RSL/TensorDict，pre-App仍拒绝Torch/RSL/TensorDict，Torch仍须通过exact版本与venv来源核验；G05保持`Partial`。
+
+commit `d2cd7911…` 的fourth one-shot越过Torch范围门后，因Kit Python未导出`F_SEAL_*`符号别名而在同一
+post-App attestation拒绝；preexec已用系统Python验证同一memfd seal，scene/PPO/WAL仍为零。下一修只用
+Linux uapi固定`F_GET_SEALS=1034`和四个seal位，不删除seal检查；exact Pod已用系统Python创建/封印memfd、
+继承到Kit Python并读回bitmask=`15`。科学长跑目标同步为单进程
+`4096×25000`；`1000`是98,304,000 transitions的早期趋势节点，不是终点。G05保持`Partial`。

@@ -22058,17 +22058,17 @@ def _attest_action_ball_runtime_after_app_start() -> None:
 
     receipt_fd = 16
     archive_fd = 18
-    expected_seals = (
-        fcntl.F_SEAL_SEAL
-        | fcntl.F_SEAL_SHRINK
-        | fcntl.F_SEAL_GROW
-        | fcntl.F_SEAL_WRITE
-    )
+    # Linux uapi values.  Isaac Sim's Python 3.11 ``fcntl`` exposes ``fcntl()``
+    # but not these symbolic constants; the system Python used to create the
+    # memfd exposes both.  Keep the kernel ABI check without making the Kit
+    # interpreter's optional constant aliases part of the training contract.
+    f_get_seals = 1034
+    expected_seals = 0x0001 | 0x0002 | 0x0004 | 0x0008
     archive = os.fstat(archive_fd)
     if (
         not stat.S_ISREG(archive.st_mode)
         or archive.st_nlink != 0
-        or fcntl.fcntl(archive_fd, fcntl.F_GET_SEALS) != expected_seals
+        or fcntl.fcntl(archive_fd, f_get_seals) != expected_seals
     ):
         raise RuntimeError("sealed RSL archive descriptor changed after AppLauncher")
     os.lseek(archive_fd, 0, os.SEEK_SET)
