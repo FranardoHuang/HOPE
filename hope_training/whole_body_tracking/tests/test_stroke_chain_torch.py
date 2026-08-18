@@ -248,7 +248,15 @@ def _fit(sa_torch, protos_t, prm, motion_id, v_in, aim_x=2.555, n_iters=12):
     return out, d, p, i
 
 
-def _fixed_dir_batch(sa_torch, protos_t, prm, *, n_iters=4, authority=None):
+def _fixed_dir_batch(
+    sa_torch,
+    protos_t,
+    prm,
+    *,
+    n_iters=4,
+    authority=None,
+    device=None,
+):
     """Three ordinary rows used to prove formal/diagnostic LM identity."""
     motion_id = "bh_block"
     i = protos_t.motion_ids.index(motion_id)
@@ -256,9 +264,13 @@ def _fixed_dir_batch(sa_torch, protos_t, prm, *, n_iters=4, authority=None):
     p = torch.cat([scene[0] for scene in scenes], dim=0)
     v = torch.cat([scene[1] for scene in scenes], dim=0)
     aim = torch.cat([scene[5] for scene in scenes], dim=0)
+    if device is not None:
+        p = p.to(device)
+        v = v.to(device)
+        aim = aim.to(device)
     d = sa_torch.direction_world(
-        protos_t.v_hat_b[i:i + 1],
-        torch.zeros(len(scenes)),
+        protos_t.v_hat_b[i:i + 1].to(p.device),
+        torch.zeros(len(scenes), device=p.device),
     )[:, 0, :]
     return sa_torch.solve_strike_specs_fixed_dir(
         p,
@@ -266,8 +278,8 @@ def _fixed_dir_batch(sa_torch, protos_t, prm, *, n_iters=4, authority=None):
         torch.zeros_like(v),
         aim,
         d,
-        protos_t.speed_min[i].expand(len(scenes)),
-        protos_t.speed_max[i].expand(len(scenes)),
+        protos_t.speed_min[i].to(p.device).expand(len(scenes)),
+        protos_t.speed_max[i].to(p.device).expand(len(scenes)),
         prm,
         surface_z=0.76,
         net_x=0.5 + 1.37,
@@ -365,6 +377,8 @@ def test_diagnostic_fixed_try_lm_fails_closed_on_solve_failure(
     failure,
 ):
     real_solve_ex = torch.linalg.solve_ex
+    real_forward = sa_torch._forward_landing_fixed_dir
+    forward_q_was_finite = []
 
     def failed_solve_ex(*args, **kwargs):
         result, info = real_solve_ex(*args, **kwargs)
@@ -374,7 +388,16 @@ def test_diagnostic_fixed_try_lm_fails_closed_on_solve_failure(
             result = torch.full_like(result, float("nan"))
         return result, info
 
+    def finite_forward(q, *args, **kwargs):
+        forward_q_was_finite.append(bool(torch.isfinite(q).all()))
+        return real_forward(q, *args, **kwargs)
+
     monkeypatch.setattr(torch.linalg, "solve_ex", failed_solve_ex)
+    monkeypatch.setattr(
+        sa_torch,
+        "_forward_landing_fixed_dir",
+        finite_forward,
+    )
     monkeypatch.setattr(
         torch,
         "_assert_async",
@@ -397,6 +420,137 @@ def test_diagnostic_fixed_try_lm_fails_closed_on_solve_failure(
         assert out["lm_solve_info_ok"].tolist() == [True, True, True]
         assert out["lm_solve_finite"].tolist() == [False, False, False]
     assert torch.isfinite(out["q"]).all()
+    assert forward_q_was_finite
+    assert all(forward_q_was_finite)
+
+
+def test_finite_dq_sum_overflow_is_code9_and_does_not_change_peers(
+    sa_torch,
+    protos_t,
+    prm,
+    monkeypatch,
+):
+    baseline = _fixed_dir_batch(
+        sa_torch,
+        protos_t,
+        prm,
+        n_iters=1,
+        authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+    )
+    real_seed = sa_torch._seed
+    real_solve_ex = torch.linalg.solve_ex
+    real_forward = sa_torch._forward_landing_fixed_dir
+    maximum = torch.finfo(torch.float32).max
+    observed_forward_rows = []
+
+    def overflow_seed(*args, **kwargs):
+        seed = real_seed(*args, **kwargs).clone()
+        seed[0, 0] = maximum
+        return seed
+
+    def overflow_one_row(*args, **kwargs):
+        result, info = real_solve_ex(*args, **kwargs)
+        result = result.clone()
+        candidate_rows = result.view(4, 3, 3, 1)
+        candidate_rows[:, 0, 0, 0] = maximum
+        assert bool(torch.isfinite(candidate_rows).all())
+        overflow_probe = torch.tensor(maximum) + torch.tensor(maximum)
+        assert not bool(torch.isfinite(overflow_probe))
+        return result, info
+
+    def finite_forward(q, *args, **kwargs):
+        observed_forward_rows.append(q.detach().clone())
+        assert bool(torch.isfinite(q).all())
+        return real_forward(q, *args, **kwargs)
+
+    monkeypatch.setattr(sa_torch, "_seed", overflow_seed)
+    monkeypatch.setattr(torch.linalg, "solve_ex", overflow_one_row)
+    monkeypatch.setattr(
+        sa_torch,
+        "_forward_landing_fixed_dir",
+        finite_forward,
+    )
+    out = _fixed_dir_batch(
+        sa_torch,
+        protos_t,
+        prm,
+        n_iters=1,
+        authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+    )
+
+    assert out["ok"][0].item() is False
+    assert out["lm_solve_info_ok"][0].item() is True
+    assert out["lm_solve_finite"][0].item() is False
+    assert observed_forward_rows
+    assert all(bool(torch.isfinite(rows).all()) for rows in observed_forward_rows)
+    assert torch.isfinite(out["q"]).all()
+
+    # The continuous-question ABI maps this exact finite flag failure to the
+    # producer-owned code 9 / lm_solve_nonfinite reason.  Ordinary peer rows
+    # remain bitwise identical to the uninjected solve.
+    cq = _mdp("continuous_questions")
+    assert cq._R_LM_SOLVE_NONFINITE == 9
+    assert cq._CONTINUOUS_REASONS[9] == "lm_solve_nonfinite"
+    _assert_tensor_dict_bitwise_equal(
+        {key: value[1:] for key, value in out.items()},
+        {key: value[1:] for key, value in baseline.items()},
+    )
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="CUDA is unavailable for LM failure context-survival coverage",
+)
+@pytest.mark.parametrize("failure", ("info", "nonfinite"))
+def test_cuda_diagnostic_lm_failure_rejects_rows_and_context_survives(
+    sa_torch,
+    protos_t,
+    prm,
+    monkeypatch,
+    failure,
+):
+    real_solve_ex = torch.linalg.solve_ex
+    real_forward = sa_torch._forward_landing_fixed_dir
+
+    def failed_solve_ex(*args, **kwargs):
+        result, info = real_solve_ex(*args, **kwargs)
+        if failure == "info":
+            info = torch.ones_like(info)
+        else:
+            result = torch.full_like(result, float("nan"))
+        return result, info
+
+    def finite_forward(q, *args, **kwargs):
+        assert bool(torch.isfinite(q).all())
+        return real_forward(q, *args, **kwargs)
+
+    monkeypatch.setattr(torch.linalg, "solve_ex", failed_solve_ex)
+    monkeypatch.setattr(
+        sa_torch,
+        "_forward_landing_fixed_dir",
+        finite_forward,
+    )
+    out = _fixed_dir_batch(
+        sa_torch,
+        protos_t,
+        prm,
+        n_iters=1,
+        authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+        device="cuda",
+    )
+    torch.cuda.synchronize()
+    assert out["ok"].tolist() == [False, False, False]
+    assert torch.isfinite(out["q"]).all()
+    if failure == "info":
+        assert out["lm_solve_info_ok"].tolist() == [False, False, False]
+    else:
+        assert out["lm_solve_finite"].tolist() == [False, False, False]
+
+    # A fresh kernel plus an explicit synchronization is the context-survival
+    # assertion: numerical infeasibility must not leave a deferred CUDA fatal.
+    probe = torch.ones((), device="cuda") + 1.0
+    torch.cuda.synchronize()
+    assert probe.item() == 2.0
 
 
 def test_c1_direction_is_exact_by_construction(sa_torch, protos_t, prm):

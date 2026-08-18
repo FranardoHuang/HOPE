@@ -3,7 +3,7 @@
 > 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-18
+> 更新：2026-08-19
 > `origin/main:docs/NOW.md` 仍是项目优先级唯一权威；本页只维护这条分支的依赖、证据和下一条命令，不建立影子队列。
 
 ## 1. 目标
@@ -98,6 +98,9 @@ deployment、真机或物理安全。
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 外部清理后Pod1约`249.8 GiB` free；A1000 ACK417时run目录仅约6.6MB，预计到1000新增日志不足约10MB，即使终点单checkpoint也远低于空间余量。未碰foreign PID、checkpoint、主日志或资产 | 不再为本run清理；只读监控实际增长，不按表观du删除硬链接/资产 |
 | 11 | `PASS-live-WAIT-learn1 / HOLD-full-A` | 同一fresh checkout在19-test后直接调用upstream RSL-RL3.1.2：`N=2 × 24`完成1次PPO update、48 transitions、229/399宽度，`final_rc=0`；result SHA=`322592ce…f07a`。lifecycle仍明确`idle_wait_only`，没有question/contact/outcome | 复用该VecEnv/runner接真实A reveal→flight→outcome；先短live再启动MuJoCo A长跑 |
 | 12 | `PASS-live-native-A1000 / HOLD-portable-A` | native A以`1024 env × 1000`自然完成：后500-update窗口binary racket-ball contact=`4078/87546=4.658%`，明显高于50--100窗口`6/8452=0.071%`；但robot-table episode fraction仍约97%，ABI为114/114、10-term简化Reward，缺WAIT/ActionEpoch/outcome/recovery | 只作下一代吞吐与Reward经济参考；不可写成portable 229/399 FullMDP A成功 |
+| 13 | `PASS-host / HOLD-Pod-CUDA` | LM code 8/9 已统一为`lm_solve_info_nonzero/lm_solve_nonfinite`；`dq`非有限、`solve_ex info!=0`以及有限`q+dq`溢出都在任何物理forward前逐行拒绝，正常peer保持不变。主线独立回归为runtime wiring 90、semantic surface 66、questions 50、stroke chain 40（2个CUDA节点skip） | 在exact Pod运行info/NaN/finite-overflow三类CUDA context-survival节点；零skip前不发4096 |
+| 14 | `PASS-structural / HOLD-live-business` | RSL3薄adapter升级独立v11 telemetry：compact joint-safety在optimizer前prepare/validate，随后`PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；4096×5单元反例得到5组pair和5份post-ACK receipt | 4096同进程前5次必须独立看到5份v11 safety receipt，并要求真实D05 producer/counter被调用；单元fixture的D05全零不能代签 |
+| 15 | `PASS-host-slice / HOLD-portable-A` | portable MuJoCo新增诚实的`full_a_slice_attempted`纵切片：逐行reveal、真实ball state launch、20-substep plant、live contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。R03、R06 landing outcome、R07 recovery及Reward项0--13仍明确`not_produced` | 先在exact Pod跑live ball-racket contact节点；随后逐项接通缺失producer。未闭合前不得称MuJoCo A、不得用它满足“MuJoCo没有漏东西” |
 
 ## 5. 下一条发射协议
 
@@ -109,7 +112,11 @@ deployment、真机或物理安全。
 4. 仅在进程失败、证据不可信或结构性不可学被直接证明时停止；普通tilt/table/fall只记telemetry；
 5. 长跑期间并行完成portable MuJoCo A lifecycle、rough课程和2.0删除清单，不热补正在运行的源码或scene。
 
-当前尚无可执行的4096 wrapper；必须在真实空卡、锁和child CPU affinity均可证明后冻结一次性发射件。
+当前尚无可执行的4096 wrapper；必须在真实GPU/显存、每卡最多两个进程、独立child CPU affinity与
+不复用namespace均可证明后冻结一次性发射件。旧失败run只有在以下条件同时成立时才能按已绑定的唯一
+PID链停止：LM exact Pod异常路径零skip、v11 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项
+已被明确列出且没有被成功receipt掩盖、最终commit/wrapper经独立红队。当前这些条件尚未全部成立，
+所以截至2026-08-19没有向旧run发signal，也没有启动下一代。
 下面保留旧命令与失败证据，防止误复用。
 
 ### 已消费旧命令
@@ -168,7 +175,8 @@ native A canary执行commit=`08d17b74…`、namespace=
 
 每个节点至少记录：completed updates/steps、mean episode length、termination reason counts、20个 Reward term
 的 signed income、opportunity transactions/due/selected/accept/censor/reject/defer、contact/flight/outcome/
-recovery 的 eligible denominator 和 numerator、按 `stroke_family`/side 分组的结果、policy std/LR/KL、
+recovery 的 eligible denominator 和 numerator、按 `stroke_family`/side 分组的结果、policy std/LR；RSL3
+当前没有落KL producer，因此KL固定写`not_produced`而不是伪造数值，
 非有限数与 wall time。零分母写 `未测`，不能写 0% 或塞进平均数。
 
 Reward 比例只在 update1000 后按因果证据改：先判断是触发率、权重还是分母问题；A/C 除 observation 和

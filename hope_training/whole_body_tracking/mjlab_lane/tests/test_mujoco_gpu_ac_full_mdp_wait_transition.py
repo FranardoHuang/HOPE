@@ -463,6 +463,229 @@ def test_step_falls_back_per_joint_but_preserves_raw_nonfinite_qdes_evidence():
     assert torch.isinf(captured["requested_qdes"][1, 1])
 
 
+def _host_full_a_lifecycle_env():
+    n = 2
+    qpos = torch.zeros((n, 20))
+    qvel = torch.zeros((n, 12))
+    env = SimpleNamespace(
+        _torch=torch,
+        num_envs=n,
+        device=torch.device("cpu"),
+        qpos_init=torch.zeros(20),
+        qvel_init=torch.zeros(12),
+        serve_pos_lo=torch.tensor([1.95, -0.85, 0.64]),
+        serve_pos_hi=torch.tensor([2.05, -0.70, 0.72]),
+        serve_vel_lo=torch.tensor([-3.5, -0.05, 0.35]),
+        serve_vel_hi=torch.tensor([-3.1, 0.05, 0.55]),
+        hope_to_scene=torch.tensor([0.0, 0.0, 0.76]),
+        env=SimpleNamespace(
+            scene=SimpleNamespace(env_origins=torch.zeros((n, 3)))
+        ),
+        sim=SimpleNamespace(
+            data=SimpleNamespace(
+                qpos=qpos,
+                qvel=qvel,
+                site_xpos=torch.tensor(
+                    [[[0.0, -0.76, 1.05]], [[0.1, -0.76, 1.05]]]
+                ),
+            )
+        ),
+        racket_sid=0,
+        root_qadr=0,
+        b_q=7,
+        b_v=0,
+        ball_age_buf=torch.zeros(n, dtype=torch.long),
+        common_step_counter=0,
+        step_dt=0.02,
+        full_a_mode=True,
+        _fullmdp_initialized=True,
+        _all_env_ids=torch.arange(n),
+        _epoch_phase=torch.zeros(n, dtype=torch.long),
+        _epoch_task_valid=torch.zeros(n, dtype=torch.bool),
+        _epoch_selected=torch.zeros(n, dtype=torch.bool),
+        _epoch_launch_succeeded=torch.zeros(n, dtype=torch.bool),
+        _cur_touched=torch.zeros(n),
+        _cur_robot_table=torch.zeros(n),
+        _cur_table_keepout=torch.zeros(n, dtype=torch.bool),
+        cfg=SimpleNamespace(
+            ball_dead_z_hope=-0.35,
+            ball_dead_x_lo_hope=-1.2,
+            ball_dead_x_hi_hope=3.4,
+        ),
+    )
+    env._clear_lifecycle = MethodType(
+        wait_env.FullMdpInitialWaitVecEnv._clear_lifecycle, env
+    )
+    for name in (
+        "_full_a_reveal_rows",
+        "_full_a_launch_rows",
+        "_full_a_prepare_step",
+        "_full_a_publish_physical_fact",
+        "_full_a_settle_outcome",
+    ):
+        setattr(
+            env,
+            name,
+            MethodType(getattr(wait_env.FullMdpInitialWaitVecEnv, name), env),
+        )
+    wait_env.FullMdpInitialWaitVecEnv._initialize_full_a_state(env)
+    return env
+
+
+def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise():
+    env = _host_full_a_lifecycle_env()
+    reveal, launch = wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+
+    assert reveal.all()
+    assert not launch.any()
+
+    assert torch.equal(
+        env._epoch_phase,
+        torch.full((2,), wait_env.FULL_A_PHASE_REVEAL_COMMITTED),
+    )
+    assert env._epoch_task_valid.all() and env._epoch_selected.all()
+    assert torch.isfinite(env._epoch_task_f32).all()
+    assert torch.count_nonzero(env._epoch_task_f32[:, :32]) > 0
+    assert torch.equal(env._epoch_task_f32[:, 32:], env._full_a_launch_state_f32)
+    assert torch.equal(env._epoch_clock_ticks[:, 0], torch.zeros(2, dtype=torch.long))
+    assert torch.equal(env._epoch_clock_ticks[:, 2], torch.ones(2, dtype=torch.long))
+
+    env.common_step_counter = 1
+    reveal, launch = wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    assert not reveal.any()
+    assert launch.all()
+    assert torch.equal(
+        env._epoch_phase,
+        torch.full((2,), wait_env.FULL_A_PHASE_LAUNCH_SETTLED),
+    )
+    assert env._epoch_launch_succeeded.all()
+    assert torch.equal(
+        env.sim.data.qpos[:, env.b_q : env.b_q + 7],
+        env._full_a_launch_state_f32[:, :7],
+    )
+    assert torch.equal(
+        env.sim.data.qvel[:, env.b_v : env.b_v + 6],
+        env._full_a_launch_state_f32[:, 7:13],
+    )
+
+    env.sim.data.qpos[:, env.b_q : env.b_q + 3] += torch.tensor(
+        [[-0.06, 0.01, -0.02], [-0.04, -0.01, 0.03]]
+    )
+    wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
+    assert env._full_a_physical_present.all()
+    assert torch.equal(
+        env._full_a_physical_fact_f32[:, :3],
+        env.sim.data.qpos[:, env.b_q : env.b_q + 3],
+    )
+    assert torch.count_nonzero(env._full_a_physical_fact_f32[:, 10:]) == 0
+
+    peer = {
+        name: getattr(env, name)[1].clone()
+        for name in (
+            "_epoch_phase",
+            "_epoch_task_valid",
+            "_epoch_selected",
+            "_epoch_launch_succeeded",
+            "_epoch_task_f32",
+            "_epoch_clock_ticks",
+            "_full_a_launch_state_f32",
+            "_full_a_physical_fact_f32",
+        )
+    }
+    env._clear_lifecycle(torch.tensor([0]))
+    assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_IDLE
+    assert not env._epoch_task_valid[0]
+    for name, expected in peer.items():
+        assert torch.equal(getattr(env, name)[1], expected), name
+
+
+def test_host_full_a_packs_task_clocks_and_only_real_physical_fact():
+    env = _host_full_a_lifecycle_env()
+    env.q_ready = torch.zeros(31)
+    env.actions = torch.zeros((2, 31))
+    env._qpos_act = lambda: torch.zeros((2, 31))
+    env._qvel_act = lambda: torch.zeros((2, 31))
+    env._con_geom = torch.tensor([[0, 0]], dtype=torch.long)
+    env._con_idx = torch.tensor([0], dtype=torch.long)
+    env._nacon = torch.tensor([0], dtype=torch.long)
+    env._ball_gid = 2
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env.common_step_counter = 1
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
+
+    wait_env.FullMdpInitialWaitVecEnv._compute_obs(
+        env,
+        st={
+            "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
+            "base_ang_b": torch.zeros((2, 3)),
+        },
+    )
+    actor_offset = dict()
+    start = 0
+    for name, width in P.ACTOR_LAYOUT_V1:
+        actor_offset[name] = slice(start, start + width)
+        start += width
+    critic_offset = dict()
+    start = P.ACTOR_WIDTH_V1
+    for name, width in P.CRITIC_EXTENSION_LAYOUT_V1:
+        critic_offset[name] = slice(start, start + width)
+        start += width
+
+    assert torch.equal(
+        env._obs_buf[:, actor_offset["epoch_task_f32"]], env._epoch_task_f32
+    )
+    expected_clocks = (
+        env._epoch_clock_ticks - env.common_step_counter
+    ).float() * env.step_dt
+    assert torch.equal(
+        env._obs_buf[:, actor_offset["epoch_clock_remaining_s"]], expected_clocks
+    )
+    present = env._critic_obs_buf[
+        :, critic_offset["physical_r03_r06_r07_fact_present"]
+    ]
+    assert torch.equal(present, torch.tensor([[1.0, 0.0, 0.0, 0.0]]).repeat(2, 1))
+    facts = env._critic_obs_buf[
+        :, critic_offset["physical_r03_r06_r07_fact_f32"]
+    ].reshape(2, 4, 32)
+    assert torch.equal(facts[:, 0], env._full_a_physical_fact_f32)
+    assert torch.count_nonzero(facts[:, 1:]) == 0
+    assert torch.count_nonzero(
+        env._critic_obs_buf[:, critic_offset["reward_due"]]
+    ) == 0
+    assert torch.count_nonzero(
+        env._critic_obs_buf[:, critic_offset["reward_paid"]]
+    ) == 0
+
+
+def test_host_full_a_outcome_uses_live_contact_or_bounded_flight_only():
+    env = _host_full_a_lifecycle_env()
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env.common_step_counter = 1
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env._epoch_clock_ticks[1, 3] = 1
+    ball_pos = env.sim.data.qpos[:, env.b_q : env.b_q + 3].clone()
+    ball_pos[0, 0] = -2.0
+
+    settled, outcome = wait_env.FullMdpInitialWaitVecEnv._full_a_settle_outcome(
+        env, {"ball_pos": ball_pos}
+    )
+    assert settled.all()
+    assert torch.equal(
+        outcome,
+        torch.tensor(
+            [
+                wait_env.FULL_A_OUTCOME_BALL_DEAD,
+                wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED,
+            ]
+        ),
+    )
+    assert torch.equal(
+        env._epoch_phase,
+        torch.full((2,), wait_env.FULL_A_PHASE_OUTCOME_SETTLED),
+    )
+
+
 def _assert_step_surface(result, *, num_envs: int):
     observations, reward, dones, extras = result
     assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V1)
@@ -494,7 +717,40 @@ def _assert_step_surface(result, *, num_envs: int):
     return observations, reward, dones, extras
 
 
-def _gpu_env(*, num_envs: int):
+def _assert_full_a_step_surface(result, *, num_envs: int):
+    observations, reward, dones, extras = result
+    assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V1)
+    assert tuple(observations["critic"].shape) == (num_envs, P.CRITIC_WIDTH_V1)
+    assert tuple(reward.shape) == (num_envs,)
+    assert tuple(dones.shape) == (num_envs,)
+    assert dones.dtype == torch.long
+    assert set(extras) == {
+        "time_outs",
+        "termination_bits",
+        "backend_resolved_table_contact",
+        "reward_terms",
+        "reset_generation",
+        "full_a_phase_before_reset",
+        "full_a_outcome_code",
+        "full_a_selected_contact",
+        "full_a_ball_table_contact",
+        "full_a_physical_current_center",
+        "full_a_reveal_event",
+        "full_a_launch_event",
+        "full_a_flight_terminal_event",
+        "full_a_selected_reset_event",
+        "full_a_contact_eligible_event",
+        "full_a_selected_contact_event",
+    }
+    assert torch.isfinite(observations["policy"]).all()
+    assert torch.isfinite(observations["critic"]).all()
+    assert torch.isfinite(reward).all()
+    assert torch.count_nonzero(extras["reward_terms"][:, :14]) == 0
+    assert torch.allclose(reward, extras["reward_terms"].sum(dim=1))
+    return observations, reward, dones, extras
+
+
+def _gpu_env(*, num_envs: int, full_a_mode: bool = False):
     pytest.importorskip("mujoco")
     pytest.importorskip("mujoco_warp")
     pytest.importorskip("mjlab")
@@ -512,6 +768,7 @@ def _gpu_env(*, num_envs: int):
         task_cfg=task,
         device=os.environ.get("ACTIONBALL_MUJOCO_DEVICE", "cuda:0"),
         ready_pose_path=Path(ready_path) if ready_path else None,
+        full_a_mode=full_a_mode,
     )
 
 
@@ -650,6 +907,199 @@ def test_real_n2_timeout_reset_preserves_every_peer_reset_owned_row_exactly():
         assert torch.equal(extras["time_outs"], torch.tensor([True, False], device=env.device))
         assert torch.equal(extras["termination_bits"], torch.tensor([1, 0], device=env.device))
         assert extras["reset_generation"][0] == extras0["reset_generation"][0] + 1
+        assert extras["reset_generation"][1] == peer_generation
+    finally:
+        env.close()
+
+
+@pytest.mark.skipif(
+    not RUN_GPU_DIRECT,
+    reason="requires the exact MuJoCo-Warp GPU environment and A3 assets",
+)
+def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
+    env = _gpu_env(num_envs=1, full_a_mode=True)
+    try:
+        zero = torch.zeros((1, 31), device=env.device)
+        env.reset()
+        generation = env.reset_generation.clone()
+        obs0, _, dones0, extras0 = _assert_full_a_step_surface(
+            env.step(zero), num_envs=1
+        )
+        assert not bool(dones0.any())
+        assert extras0["full_a_phase_before_reset"][0] == wait_env.FULL_A_PHASE_REVEAL_COMMITTED
+        task_start = 0
+        for name, width in P.ACTOR_LAYOUT_V1:
+            if name == "epoch_task_f32":
+                break
+            task_start += width
+        assert torch.count_nonzero(obs0["policy"][0, task_start : task_start + 45]) > 0
+
+        launch_center = env._full_a_launch_state_f32[0, :3].clone()
+        _, _, dones1, extras1 = _assert_full_a_step_surface(
+            env.step(zero), num_envs=1
+        )
+        centers = [extras1["full_a_physical_current_center"][0].clone()]
+        terminal = bool(dones1[0])
+        last = extras1
+        for _ in range(80):
+            if terminal:
+                break
+            _, _, dones, last = _assert_full_a_step_surface(
+                env.step(zero), num_envs=1
+            )
+            centers.append(last["full_a_physical_current_center"][0].clone())
+            terminal = bool(dones[0])
+        assert terminal
+        assert any(not torch.equal(center, launch_center) for center in centers)
+        assert last["full_a_outcome_code"][0] in (
+            wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED,
+            wait_env.FULL_A_OUTCOME_BALL_DEAD,
+        )
+        assert last["full_a_phase_before_reset"][0] == wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+        assert env.reset_generation[0] == generation[0] + 1
+        assert torch.count_nonzero(last["reward_terms"][:, :14]) == 0
+    finally:
+        env.close()
+
+
+@pytest.mark.skipif(
+    not RUN_GPU_DIRECT,
+    reason="requires the exact MuJoCo-Warp GPU environment and A3 assets",
+)
+def test_real_full_a_n1_launch_reports_only_live_racket_contact():
+    env = _gpu_env(num_envs=1, full_a_mode=True)
+    try:
+        zero = torch.zeros((1, 31), device=env.device)
+        env.reset()
+        _, _, _, reveal = _assert_full_a_step_surface(
+            env.step(zero), num_envs=1
+        )
+        assert bool(reveal["full_a_reveal_event"][0])
+        assert not bool(reveal["full_a_launch_event"][0])
+
+        racket_ids = env._geom_class.eq(1).nonzero(as_tuple=False).squeeze(-1)
+        assert int(racket_ids.numel()) >= 1
+        racket_gid = int(racket_ids[0].item())
+        racket_center = env.sim.data.geom_xpos[0, racket_gid].clone()
+        env._full_a_launch_state_f32[0, :3] = racket_center
+        env._full_a_launch_state_f32[0, 3:7] = torch.tensor(
+            [1.0, 0.0, 0.0, 0.0], device=env.device
+        )
+        env._full_a_launch_state_f32[0, 7:13] = 0.0
+
+        # Prove the constructed overlap reaches MuJoCo-Warp's own contact
+        # array before asking the production step/latch path to report it.
+        env.sim.data.qpos[0, env.b_q : env.b_q + 3] = racket_center
+        env.sim.data.qpos[0, env.b_q + 3 : env.b_q + 7] = torch.tensor(
+            [1.0, 0.0, 0.0, 0.0], device=env.device
+        )
+        env.sim.data.qvel[0, env.b_v : env.b_v + 6] = 0.0
+        env.sim.forward()
+        geom = env._con_geom
+        valid = env._con_idx < env._nacon[0]
+        live_pair = valid & (
+            (geom[:, 0].eq(env._ball_gid) & geom[:, 1].eq(racket_gid))
+            | (geom[:, 1].eq(env._ball_gid) & geom[:, 0].eq(racket_gid))
+        )
+        assert bool(live_pair.any())
+
+        # One real physics substep retains the forced overlap while still
+        # crossing the production launch -> contact -> fact publication path.
+        env.decimation = 1
+        _, _, dones, contact = _assert_full_a_step_surface(
+            env.step(zero), num_envs=1
+        )
+        assert not bool(dones[0])
+        assert bool(contact["full_a_contact_eligible_event"][0])
+        assert bool(contact["full_a_selected_contact_event"][0])
+        assert bool(contact["full_a_selected_contact"][0])
+        assert torch.count_nonzero(env._full_a_physical_fact_f32[0, 3:6]) > 0
+        assert torch.equal(
+            env._full_a_physical_fact_f32[0, 3:6],
+            env._full_a_contact_center[0],
+        )
+    finally:
+        env.close()
+
+
+@pytest.mark.skipif(
+    not RUN_GPU_DIRECT,
+    reason="requires the exact MuJoCo-Warp GPU environment and A3 assets",
+)
+def test_real_full_a_n2_selected_outcome_reset_preserves_peer_rows():
+    env = _gpu_env(num_envs=2, full_a_mode=True)
+    try:
+        zero = torch.zeros((2, 31), device=env.device)
+        env.reset()
+        _assert_full_a_step_surface(env.step(zero), num_envs=2)
+        _, _, _, before = _assert_full_a_step_surface(env.step(zero), num_envs=2)
+        peer_generation = before["reset_generation"][1].clone()
+        env._epoch_clock_ticks[0, 3] = int(env.common_step_counter)
+        env._epoch_clock_ticks[1, 3] += 100
+
+        original_reset_idx = env._reset_idx
+        reset_checked = {"value": False}
+        plant_names = (
+            "qpos",
+            "qvel",
+            "ctrl",
+            "qacc",
+            "qacc_warmstart",
+            "act",
+            "time",
+            "qfrc_applied",
+            "xfrc_applied",
+            "eq_active",
+            "mocap_pos",
+            "mocap_quat",
+        )
+        buffer_names = (
+            "actions",
+            "last_actions",
+            "episode_length_buf",
+            "ball_age_buf",
+            "_epoch_phase",
+            "_epoch_task_valid",
+            "_epoch_selected",
+            "_epoch_launch_succeeded",
+            "_epoch_task_f32",
+            "_epoch_clock_ticks",
+            "_full_a_launch_state_f32",
+            "_full_a_physical_fact_f32",
+            "_full_a_physical_present",
+            "_full_a_selected_contact",
+            "_full_a_ball_table_contact",
+            "last_terminal_bits",
+            "reset_generation",
+        )
+
+        def checked_reset(_self, ids):
+            assert torch.equal(ids, torch.tensor([0], device=env.device))
+            plant_before = {
+                name: getattr(env.sim.data, name)[1].clone()
+                for name in plant_names
+                if torch.is_tensor(getattr(env.sim.data, name, None))
+                and getattr(env.sim.data, name).ndim >= 1
+                and getattr(env.sim.data, name).shape[0] == env.num_envs
+            }
+            buffers_before = {
+                name: getattr(env, name)[1].clone() for name in buffer_names
+            }
+            original_reset_idx(ids)
+            for name, expected in plant_before.items():
+                assert torch.equal(getattr(env.sim.data, name)[1], expected), name
+            for name, expected in buffers_before.items():
+                assert torch.equal(getattr(env, name)[1], expected), name
+            reset_checked["value"] = True
+
+        env._reset_idx = MethodType(checked_reset, env)
+        _, _, dones, extras = _assert_full_a_step_surface(
+            env.step(zero), num_envs=2
+        )
+        assert reset_checked["value"]
+        assert torch.equal(dones, torch.tensor([1, 0], device=env.device))
+        assert extras["full_a_outcome_code"][0] == wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED
+        assert extras["full_a_outcome_code"][1] == wait_env.FULL_A_OUTCOME_NONE
         assert extras["reset_generation"][1] == peer_generation
     finally:
         env.close()

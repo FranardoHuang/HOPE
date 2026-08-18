@@ -1,5 +1,14 @@
 # 简短进度记录
 
+## 2026-08-19 — 下一代代码面收口，运行面仍HOLD
+
+- LM reason 8/9共享ABI已统一；info失败、NaN/Inf和finite-add overflow都在physical forward前逐行拒绝。
+  host独立回归全部通过，但exact Pod CUDA context-survival仍未测，不能发4096。
+- RSL3薄adapter新增v11 compact joint-safety事务；portable MuJoCo新增诚实的Full-A首纵切片。后者仍明确
+  缺R03/R06/R07与Reward0--13，receipt固定`full_a_complete=false`；exact Pod live-contact节点仍待跑。
+- 因“下一代准备好、MuJoCo没有遗漏、TODO闭合”三项尚未同时成立，本轮没有signal旧失败run，也没有
+  启动新run。下一条仍是唯一fresh `4096×1000`同进程，前5次只读观察后自然继续。
+
 ## 2026-08-18 — 4096长跑口径更正；相关地形producer完成host门
 
 - `N=2`只保留工程证据，不再冒充学习长跑；旧Isaac A1000止于ACK470且0 ACCEPT。下一条fresh A直接

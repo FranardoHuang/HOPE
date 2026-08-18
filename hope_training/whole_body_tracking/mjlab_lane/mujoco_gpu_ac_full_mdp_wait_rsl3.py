@@ -1,11 +1,13 @@
-"""Run one upstream RSL-RL 3 update on the real MuJoCo WAIT environment.
+"""Run a bounded upstream RSL-RL 3 call on the real MuJoCo portable environment.
 
-This is an engineering callpoint, not a complete ActionBall task: question
-reveal, contact, outcome, and recovery remain absent while the epoch is IDLE.
+The default remains the historical one-update WAIT call.  ``--full-a`` selects
+the single-shot reveal/launch/flight slice; R03, R06, R07, and their fourteen
+Reward terms remain absent, so neither mode is a complete ActionBall task.
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import importlib.metadata
 import hashlib
@@ -54,11 +56,13 @@ def _ready_pose_input() -> tuple[bytes, str]:
         os.close(fd)
 
 
-def build_train_cfg() -> dict:
+def build_train_cfg(num_steps_per_env: int = NUM_STEPS_PER_ENV) -> dict:
     """Return the same RSL3 PPO surface used by the Isaac FullMDP run."""
 
+    if type(num_steps_per_env) is not int or num_steps_per_env <= 0:
+        raise ValueError("num_steps_per_env must be a positive int")
     return {
-        "num_steps_per_env": NUM_STEPS_PER_ENV,
+        "num_steps_per_env": num_steps_per_env,
         "save_interval": 1,
         "obs_groups": {"policy": ["policy"], "critic": ["critic"]},
         "policy": {
@@ -185,9 +189,23 @@ def _require_rsl3_runtime(distribution, runner, torch_module) -> None:
         raise RuntimeError("MuJoCo WAIT RSL-RL runtime origin differs")
 
 
-def main() -> int:
+def main(
+    *,
+    num_envs: int = 2,
+    num_steps_per_env: int = NUM_STEPS_PER_ENV,
+    num_updates: int = 1,
+    full_a_mode: bool = False,
+) -> int:
     import torch
 
+    if (
+        type(num_envs) is not int
+        or num_envs <= 0
+        or type(num_updates) is not int
+        or num_updates <= 0
+        or type(full_a_mode) is not bool
+    ):
+        raise ValueError("runner dimensions/mode differ")
     version, runner_type, distribution = _rsl3_runner()
     wait = _wait_module()
     ready_pose_payload, ready_pose_source = _ready_pose_input()
@@ -200,24 +218,65 @@ def main() -> int:
         reset_root_yaw_noise_rad=0.0,
     )
     env = wait.FullMdpInitialWaitVecEnv(
-        wait.SimCfg(nworld=2),
+        wait.SimCfg(nworld=num_envs),
         task,
         device="cuda:0",
         seed=0,
         ready_pose_payload=ready_pose_payload,
         ready_pose_source=ready_pose_source,
+        full_a_mode=full_a_mode,
     )
     initial = env.get_observations()
     if (
         env.num_actions != 31
-        or tuple(initial["policy"].shape) != (2, 229)
-        or tuple(initial["critic"].shape) != (2, 399)
+        or tuple(initial["policy"].shape) != (num_envs, 229)
+        or tuple(initial["critic"].shape) != (num_envs, 399)
         or not bool(torch.isfinite(initial["policy"]).all())
         or not bool(torch.isfinite(initial["critic"]).all())
     ):
         raise RuntimeError("MuJoCo WAIT initial RSL3 surface differs")
 
-    runner = runner_type(env, build_train_cfg(), log_dir=None, device="cuda:0")
+    evidence_keys = {
+        "reveal_rows": "full_a_reveal_event",
+        "launch_rows": "full_a_launch_event",
+        "flight_terminal_rows": "full_a_flight_terminal_event",
+        "selected_reset_rows": "full_a_selected_reset_event",
+        "contact_eligible_rows": "full_a_contact_eligible_event",
+        "selected_contact_rows": "full_a_selected_contact_event",
+    }
+    evidence_counts = {
+        name: torch.zeros((), dtype=torch.long, device=env.device)
+        for name in evidence_keys
+    }
+    evidence_valid_steps = {name: 0 for name in evidence_keys}
+    evidence_step_count = 0
+    if full_a_mode:
+        original_env_step = env.step
+
+        def evidence_step(actions):
+            nonlocal evidence_step_count
+            result = original_env_step(actions)
+            evidence_step_count += 1
+            extras = result[3]
+            for name, key in evidence_keys.items():
+                value = extras.get(key)
+                if (
+                    type(value) is torch.Tensor
+                    and value.dtype == torch.bool
+                    and tuple(value.shape) == (num_envs,)
+                ):
+                    evidence_counts[name] += value.to(torch.long).sum()
+                    evidence_valid_steps[name] += 1
+            return result
+
+        env.step = evidence_step
+
+    runner = runner_type(
+        env,
+        build_train_cfg(num_steps_per_env),
+        log_dir=None,
+        device="cuda:0",
+    )
     _require_rsl3_runtime(distribution, runner, torch)
     runner.disable_logs = True
     updates = 0
@@ -229,40 +288,79 @@ def main() -> int:
         return original_update()
 
     runner.alg.update = counted_update
-    runner.learn(1, init_at_random_ep_len=False)
+    runner.learn(num_updates, init_at_random_ep_len=False)
     final = env.get_observations()
     storage = runner.alg.storage
     if (
-        updates != 1
-        or env.common_step_counter != NUM_STEPS_PER_ENV
+        updates != num_updates
+        or env.common_step_counter != num_steps_per_env * num_updates
         or storage.step != 0
         or not runner.alg.optimizer.state
         or not bool(torch.isfinite(storage.rewards).all())
-        or tuple(final["policy"].shape) != (2, 229)
-        or tuple(final["critic"].shape) != (2, 399)
+        or tuple(final["policy"].shape) != (num_envs, 229)
+        or tuple(final["critic"].shape) != (num_envs, 399)
         or not bool(torch.isfinite(final["policy"]).all())
         or not bool(torch.isfinite(final["critic"]).all())
     ):
         raise RuntimeError("MuJoCo WAIT RSL3 update evidence differs")
+    payload = {
+        "diagnostic_unauthorized": True,
+        "rsl_rl_version": version,
+        "ppo_update_calls": updates,
+        "environment_steps": env.common_step_counter,
+        "transitions": env.common_step_counter * env.num_envs,
+        "policy_width": final["policy"].shape[1],
+        "critic_width": final["critic"].shape[1],
+        "task_lifecycle": "full_a_slice_attempted" if full_a_mode else "idle_wait_only",
+    }
+    if full_a_mode:
+        counts = {name: int(value.item()) for name, value in evidence_counts.items()}
+        unmeasured = sorted(
+            name
+            for name, valid_steps in evidence_valid_steps.items()
+            if valid_steps != evidence_step_count
+        )
+        eligible = counts["contact_eligible_rows"]
+        payload.update(
+            {
+                "full_a_complete": False,
+                "full_a_slice_evidence": {
+                    **counts,
+                    "selected_contact_rate": (
+                        counts["selected_contact_rows"] / eligible
+                        if eligible > 0
+                        else None
+                    ),
+                    "unmeasured": unmeasured,
+                },
+                "not_produced": {
+                    "r03_strike_fact": True,
+                    "r06_landing_outcome": True,
+                    "r07_recovery": True,
+                    "reward_terms_0_13": True,
+                },
+            }
+        )
     print(
         "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON="
-        + json.dumps(
-            {
-                "diagnostic_unauthorized": True,
-                "rsl_rl_version": version,
-                "ppo_update_calls": updates,
-                "environment_steps": env.common_step_counter,
-                "transitions": env.common_step_counter * env.num_envs,
-                "policy_width": final["policy"].shape[1],
-                "critic_width": final["critic"].shape[1],
-                "task_lifecycle": "idle_wait_only",
-            },
-            sort_keys=True,
-        ),
+        + json.dumps(payload, sort_keys=True),
         flush=True,
     )
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--num-envs", type=int, default=2)
+    parser.add_argument("--num-steps-per-env", type=int, default=NUM_STEPS_PER_ENV)
+    parser.add_argument("--num-updates", type=int, default=1)
+    parser.add_argument("--full-a", action="store_true")
+    args = parser.parse_args()
+    raise SystemExit(
+        main(
+            num_envs=args.num_envs,
+            num_steps_per_env=args.num_steps_per_env,
+            num_updates=args.num_updates,
+            full_a_mode=args.full_a,
+        )
+    )

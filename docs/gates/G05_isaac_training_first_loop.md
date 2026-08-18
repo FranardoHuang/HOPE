@@ -2,6 +2,16 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-19 next-generation preflight（Gate 仍 `Partial`）：**已知LM fatal的host实现面现已闭合到
+三个独立坏候选：`solve_ex info!=0`、非有限`dq`、以及两个有限float32相加后`q+dq`溢出；三者均在任何
+physical forward前替回原finite `q`并按reason 8/9逐行拒绝，mixed peer保持不变。RSL3薄adapter同时
+以新v11 ABI接入compact joint-safety，顺序为optimizer前prepare/validate，optimizer后
+`PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；没有静默修改旧v10。
+独立host回归为adapter 17、runtime wiring 90、semantic surface 66、questions 50、stroke chain 40，
+但stroke的2个CUDA context-survival节点在host跳过，因此不能据此启动4096。下一条仍是唯一
+`4096×1000`同进程；前5次必须实际得到5组v11 WAL/safety receipt和真实D05 producer调用，不能由D05全零
+fixture代签。最终发车wrapper和exact Pod CUDA零skip尚未产生，Gate不晋级，旧失败run未被signal。
+
 **2026-08-18 scale裁决更正（Gate 仍 `Partial`）：**此前`N=2 × 2`只证明构造、reset、229/399 ABI、
 Reward20 finite和optimizer/WAL调用点；后续`N=2` A1000不是学习规模，不能用于评价policy效果。它的可信
 前缀止于ACK470：296个episode全部base tilt，260个admitted opportunity全部not-ready，ACCEPT=0，且
@@ -80,9 +90,10 @@ D05 settle，得到两行ACCEPT且Epoch无overflow；fresh Kit仍是进入下一
 触发device assert；具体row/类别未落盘。其后PhysX view与D05 poison错误均发生在已损坏CUDA context。
 WAL无悬空PENDING，但进程停滞且log/result不再
 推进，所以可信科学边界止于ACK470，500/1000为`未测`。active checkout与进程不热补、不signal、不复用；
-fresh源码已把这条LM数值失败从CUDA-context级断言改成construction逐行拒绝：非零`solve_ex info`和
-非有限`dq`均不得参与候选选择，并通过既有proposal ledger分别写具名reason 8/9；没有新增owner、receipt
-或并行gate。solver正常路径及故障反例=`39 passed`，continuous producer=`50 passed`。这只关闭已知fatal
+fresh源码已把这条LM数值失败从CUDA-context级断言改成construction逐行拒绝：非零`solve_ex info`、
+非有限`dq`以及有限`q+dq`溢出均不得进入physical forward，并通过既有proposal ledger写具名reason 8/9；
+没有新增owner、receipt或并行gate。solver正常路径及故障反例=`40 passed,2 CUDA skipped`，continuous
+producer=`50 passed`。这只关闭已知fatal
 机制，不代签真实GPU或学习；下一条A使用fresh namespace直接启动4096 A1000，并把同一进程update0--4
 当作scale/finite观察窗，不再先开一条独立N=2 canary。
 旧run的0 ACCEPT不能再单独归因于Reward权重。host证据另有integration=`1 passed`、recovery-device=`80 passed`、

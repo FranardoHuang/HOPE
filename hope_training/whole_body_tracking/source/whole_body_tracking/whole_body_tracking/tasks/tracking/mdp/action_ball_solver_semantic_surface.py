@@ -358,6 +358,8 @@ COVERED: Dict[str, Tuple[str, ...]] = {
         "_R_NET",
         "_R_FACE",
         "_R_CONTACT_ENVELOPE",
+        "_R_LM_SOLVE_INFO",
+        "_R_LM_SOLVE_NONFINITE",
         "_CONTINUOUS_REASONS",
         "PRODUCER_FAULT_NONFINITE_PROPOSAL",
         "PRODUCER_FAULT_REFERENCE_NORMAL",

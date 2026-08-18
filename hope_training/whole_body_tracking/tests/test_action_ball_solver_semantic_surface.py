@@ -149,6 +149,51 @@ EQUISTRENGTH_MUTANTS = (
         ],
     ),
     (
+        "lm_rejection_codes_reordered",
+        [
+            (
+                "continuous_questions.py",
+                "_R_LM_SOLVE_INFO = 8\n_R_LM_SOLVE_NONFINITE = 9",
+                "_R_LM_SOLVE_INFO = 9\n_R_LM_SOLVE_NONFINITE = 8",
+            )
+        ],
+    ),
+    (
+        "lm_rejection_reason_missing",
+        [
+            (
+                "continuous_questions.py",
+                '    "lm_solve_info_nonzero",\n'
+                '    "lm_solve_nonfinite",',
+                '    "lm_solve_info_nonzero",',
+            )
+        ],
+    ),
+    (
+        "lm_rejection_reason_names_reordered",
+        [
+            (
+                "continuous_questions.py",
+                '    "lm_solve_info_nonzero",\n'
+                '    "lm_solve_nonfinite",',
+                '    "lm_solve_nonfinite",\n'
+                '    "lm_solve_info_nonzero",',
+            )
+        ],
+    ),
+    (
+        "legacy_runtime_reason_prefix_drops_lm_rejections",
+        [
+            (
+                "hope_commands.py",
+                '        "lm_solve_info_nonzero",\n'
+                '        "lm_solve_nonfinite",\n'
+                '        "teacher_site_rate_geometry_unsolved",',
+                '        "teacher_site_rate_geometry_unsolved",',
+            )
+        ],
+    ),
+    (
         "fixed_direction_admission_conjunct_dropped",
         [
             (
@@ -700,6 +745,8 @@ def _historical_reader(revision):
 #: existed all along, so it can and should still be compared across revisions.
 COVERED_SYMBOLS_ADDED_AFTER_HISTORICAL_REVISIONS = {
     "continuous_questions.py": (
+        "_R_LM_SOLVE_INFO",
+        "_R_LM_SOLVE_NONFINITE",
         "DeviceProposalSolveResult",
         "DeviceProposalSolveResult.p_contact",
         "DeviceProposalSolveResult.v_racket",
@@ -819,6 +866,27 @@ def test_device_proposal_boundary_is_covered_not_excluded():
     excluded = set(SURFACE.EXCLUDED["continuous_questions.py"])
     assert required <= covered
     assert required.isdisjoint(excluded)
+
+
+def test_lm_rejection_reason_abi_is_covered_not_excluded():
+    continuous_required = {
+        "_R_LM_SOLVE_INFO",
+        "_R_LM_SOLVE_NONFINITE",
+        "_CONTINUOUS_REASONS",
+        "_fixed_direction_replay",
+    }
+    runtime_required = {
+        "action_ball_solver_profile_contract",
+        "RacketTargetCommand._action_ball_refill_pool_many",
+    }
+    continuous_covered = set(SURFACE.COVERED["continuous_questions.py"])
+    continuous_excluded = set(SURFACE.EXCLUDED["continuous_questions.py"])
+    runtime_covered = set(SURFACE.COVERED["hope_commands.py"])
+    runtime_excluded = set(SURFACE.EXCLUDED["hope_commands.py"])
+    assert continuous_required <= continuous_covered
+    assert continuous_required.isdisjoint(continuous_excluded)
+    assert runtime_required <= runtime_covered
+    assert runtime_required.isdisjoint(runtime_excluded)
 
 
 def test_fresh_racket_protocol_and_drain_name_collisions_are_explicit():

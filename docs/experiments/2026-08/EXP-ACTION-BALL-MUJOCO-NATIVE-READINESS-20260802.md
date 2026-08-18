@@ -11249,6 +11249,23 @@ ball state；被否决的是额外 synthetic motion intent。旧 Stage1 与历�
 单链接的`ACTIONBALL_READY_POSE`，校验fixed SHA与inode后让WAIT env直接解析同一份bytes；显式输入不再
 fallback。此项只闭合输入身份，live RSL3仍未测。
 
+### 2026-08-19：portable Full-A 首纵切片裁决
+
+**问题。** WAIT `learn(1)`只证明229/399-D训练调用点；要判断是否可以把portable MuJoCo称作A，至少要
+区分“真实plant事件已经发生”与“runner成功返回”。本轮只采用最窄因果切片：row-wise reveal、真实ball
+launch state、20-substep plant、live contact、bounded terminal和selected reset；不为缺失语义造receipt。
+
+**结果。** host生产调用点与反例为`27 passed,9 skipped`。runner只累计`env.step`返回的事件，固定发布
+`task_lifecycle=full_a_slice_attempted`与`full_a_complete=false`。R03 strike fact、R06 landing outcome、
+R07 recovery和Reward项0--13仍是`not_produced`；因此这一结果不能解释为portable Full-A，也不能与
+native 114/114-D A1000的contact曲线直接比较。新增的GPU节点从真实racket geom和MuJoCo contact rows
+独立证明ball-racket pair，再穿production step验证latch；host没有执行该节点，所以live contact仍为`未测`。
+
+**裁决。** 保留这一纵切片作为下一批producer的真实消费端，拒绝把PPO成功或手造extras当Full-A完成。
+在exact Pod节点零skip、R03/R06/R07与Reward0--13接通前，不启动portable MuJoCo A长跑，也不以它满足
+“MuJoCo没有遗漏”。Isaac下一代也仍需LM CUDA异常路径和v11 compact-safety真实前5次receipt；这些门未闭
+之前，旧失败run不因代码面更优而被停止。
+
 ### 2026-08-18：native A长跑预注册
 
 目的不是用旧lane代签portable FullMDP，而是尽快取得一条真实MuJoCo学习曲线。采用既有court/ball/

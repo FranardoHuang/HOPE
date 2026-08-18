@@ -1,7 +1,7 @@
 # ActionBall Isaac 5.1 环境身份合同
 
 > 状态：`PASS-environment / branch-scoped`
-> 更新：2026-08-18
+> 更新：2026-08-19
 > 来源：Jiayi 的 `ENVIRONMENT_REPRODUCTION.md` 与 Pod2 实际 import/ABI/AppLauncher 验证。
 > 本页不改变 `origin/main:docs/NOW.md` 的项目优先级。
 
@@ -18,7 +18,8 @@ RSL-RL 3.1.2/TensorDict。前者的 PPO rollout 接口是 `act(obs, critic_obs)`
 | 项 | 精确值 |
 | --- | --- |
 | Jiayi 训练提交 | `35e65eb7f3e1bf21fa5719aa0c0a7a90b830b836` |
-| 本分支 FullMDP 执行提交 | `758e88eefe6e9ce625ae57f5a732bc2024b7c74a` |
+| 历史 FullMDP 环境验证提交 | `758e88eefe6e9ce625ae57f5a732bc2024b7c74a` |
+| 下一条4096执行提交 | `未冻结；必须由最终一次性wrapper钉定exact commit` |
 | Isaac Sim | `5.1.0-rc.19+release.26219.9c81211b.gl` |
 | IsaacLab | `8320e0be5c0f2def58d5b19d308c6d2539d47cb2` |
 | Python | `3.11.13` |
@@ -51,8 +52,10 @@ Git root:  /workspace/franco/mktemp/fullmdp-isaac51-rsl3-git.20260818T091500CST
 
 ## Git 与非 Git 资产
 
-代码已经通过 Git branch `Franco_codex/actionball-isaac51-rsl3-20260818` 传输，remote clean clone HEAD
-为 `758e88e…`。此前不能只用 Git 的原因不是 Git 本身，而是 FullMDP 长期处于未提交 WIP，并依赖
+代码已经通过 Git branch `Franco_codex/actionball-isaac51-rsl3-20260818` 传输；`758e88e…`只保留为
+历史环境验证receipt，不再充当下一条4096的源码身份。下一条运行只能消费最终wrapper内钉定、独立复核
+且能在remote clean clone复现的唯一commit；不能把浮动branch HEAD或本页历史SHA代签。此前不能只用
+Git 的原因不是 Git 本身，而是 FullMDP 长期处于未提交 WIP，并依赖
 `.gitignore` 排除的专有机器人资产和大型 checkpoint。现在把两者分开：代码由 clean Git tree
 证明，外部资产由独立路径、字节和派生关系证明。
 
@@ -71,9 +74,10 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 
 - `PASS`：package版本、import origin、两个 PPO 签名、Isaac Sim build、clean build_2 `6144×1`。
 - `PASS`：FullMDP IsaacLab8320 lifecycle、exact Kit cfg/train wiring、N=2 canonical reset和forced selected reset。
-- `PASS-direct`：FullMDP RSL3 optimizer boundary/WAL adapter。
-- `WAIT-resource`：FullMDP RSL3真实 `N=2×2`，只等Pod2 GPU0自然空闲。
-- `未测`：A1000学习趋势、C、完整checkpoint/restore、MuJoCo GPU semantic runtime。
+- `PASS-direct`：FullMDP RSL3 optimizer boundary/WAL adapter；v11 compact joint-safety结构顺序已通过host反例。
+- `PASS-historical-N2`：FullMDP RSL3真实 `N=2×2`曾闭合optimizer/WAL，只作工程证据。
+- `HOLD-next-4096`：最终commit/wrapper、exact Pod LM CUDA异常路径和真实v11前5次receipt尚未冻结。
+- `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、portable MuJoCo Full-A semantic runtime。
 
 环境 `PASS` 只回答“代码在同一软件栈上执行”，不回答 Reward 是否合理、是否可学或跨机逐位相同。
 后续 FullMDP 运行继续标记 `diagnostic_unauthorized=true`。

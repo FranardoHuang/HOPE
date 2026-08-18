@@ -20,8 +20,8 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 
 
 RUN_MODE = "single_action_lean"
-TELEMETRY_SCHEMA_VERSION = 10
-TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v10"
+TELEMETRY_SCHEMA_VERSION = 11
+TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v11"
 
 
 def _bound(owner: object, name: str) -> Callable:
@@ -35,6 +35,305 @@ def _bound(owner: object, name: str) -> Callable:
     ):
         raise RuntimeError(f"FullMDP owner lacks exact bound method {name}")
     return method
+
+
+def _exact_int(value: object, *, name: str, minimum: int = 0) -> int:
+    if type(value) is not int or value < minimum:
+        raise RuntimeError(f"FullMDP compact joint-safety {name} differs")
+    return value
+
+
+def _tensor(
+    value: object,
+    *,
+    name: str,
+    shape: tuple[int, ...],
+    kind: str,
+) -> object:
+    if tuple(getattr(value, "shape", ())) != shape:
+        raise RuntimeError(f"FullMDP compact joint-safety {name} shape differs")
+    dtype = str(getattr(value, "dtype", "")).rsplit(".", 1)[-1]
+    allowed = {
+        "integer": {"int64", "long"},
+        "boolean": {"bool"},
+        "floating": {"float32"},
+    }[kind]
+    if dtype not in allowed:
+        raise RuntimeError(f"FullMDP compact joint-safety {name} dtype differs")
+    for method_name in ("eq", "ge", "gt", "le", "all", "sum", "item"):
+        if not callable(getattr(value, method_name, None)):
+            raise RuntimeError(
+                f"FullMDP compact joint-safety {name} tensor API differs"
+            )
+    if kind == "floating" and not callable(getattr(value, "isfinite", None)):
+        raise RuntimeError(
+            f"FullMDP compact joint-safety {name} finite API differs"
+        )
+    return value
+
+
+def _scalar_bool(value: object, *, name: str) -> bool:
+    item = getattr(value, "item", None)
+    result = item() if callable(item) else None
+    if type(result) is not bool:
+        raise RuntimeError(f"FullMDP compact joint-safety {name} scalar differs")
+    return result
+
+
+def _scalar_number(value: object, *, name: str) -> int | float:
+    item = getattr(value, "item", None)
+    result = item() if callable(item) else None
+    if isinstance(result, bool) or type(result) not in (int, float):
+        raise RuntimeError(f"FullMDP compact joint-safety {name} scalar differs")
+    return result
+
+
+def _validate_compact_joint_safety(
+    snapshot: object,
+    *,
+    expected_num_envs: int,
+    expected_policy_steps: int,
+    expected_apply_calls: int,
+    previous_consume_sequence: int | None,
+    previous_policy_step_sequence: int | None,
+) -> dict[str, object]:
+    """Validate only the typed compact producer; never infer legacy attribution."""
+
+    top_keys = {
+        "schema_version",
+        "enabled",
+        "diagnostic_compact_evidence",
+        "diagnostic_first_policy_step_sequence",
+        "diagnostic_last_policy_step_sequence",
+        "since_last_consume",
+        "terminal_archives",
+        "identity_bound_policy_steps",
+        "policy_step_summary_capacity",
+        "policy_step_summary_used",
+        "policy_step_summary_payload_bytes",
+        "policy_step_summary_overflow_latch",
+        "policy_step_summary_overflow_count",
+        "terminal_archive_capacity",
+        "terminal_archive_used",
+        "terminal_archive_payload_bytes",
+        "terminal_archive_overflow_latch",
+        "terminal_archive_overflow_count",
+    }
+    if type(snapshot) is not dict or set(snapshot) != top_keys:
+        raise RuntimeError("FullMDP compact joint-safety snapshot ABI differs")
+    if (
+        snapshot["schema_version"] != 1
+        or snapshot["enabled"] is not True
+        or snapshot["diagnostic_compact_evidence"] is not True
+        or snapshot["terminal_archives"] != ()
+        or snapshot["identity_bound_policy_steps"] != ()
+    ):
+        raise RuntimeError("FullMDP compact joint-safety producer mode differs")
+    for prefix in ("policy_step_summary", "terminal_archive"):
+        _exact_int(snapshot[f"{prefix}_capacity"], name=f"{prefix}_capacity", minimum=1)
+        if (
+            snapshot[f"{prefix}_used"] != 0
+            or snapshot[f"{prefix}_payload_bytes"] != 0
+            or snapshot[f"{prefix}_overflow_latch"] is not False
+            or snapshot[f"{prefix}_overflow_count"] != 0
+        ):
+            raise RuntimeError(
+                f"FullMDP compact joint-safety {prefix} is not empty"
+            )
+
+    since_keys = {
+        "consume_sequence",
+        "has_data",
+        "identity_bound_policy_step_count",
+        "policy_step_count",
+        "complete_policy_step_count",
+        "incomplete_policy_step_count",
+        "apply_readback_count",
+        "post_readback_count",
+        "timestamp_invariant_pass_count",
+        "hard_crossing_latch",
+        "actual_hard_edge_latch",
+        "qdes_joint_count",
+        "policy_crossing_joint_count",
+        "substep_hard_crossing_joint_count",
+        "actual_hard_edge_joint_count",
+        "minimum_hard_lower_gap",
+        "minimum_hard_upper_gap",
+    }
+    since = snapshot["since_last_consume"]
+    if type(since) is not dict or set(since) != since_keys:
+        raise RuntimeError("FullMDP compact joint-safety aggregate ABI differs")
+    if since["has_data"] is not True or since["identity_bound_policy_step_count"] != 0:
+        raise RuntimeError("FullMDP compact joint-safety aggregate is absent or dense")
+    consume_sequence = _exact_int(
+        since["consume_sequence"], name="consume_sequence"
+    )
+    expected_consume_sequence = (
+        0 if previous_consume_sequence is None else previous_consume_sequence + 1
+    )
+    if consume_sequence != expected_consume_sequence:
+        raise RuntimeError("FullMDP compact joint-safety consume sequence differs")
+
+    env_shape = (expected_num_envs,)
+    policy_steps = _tensor(
+        since["policy_step_count"],
+        name="policy_step_count",
+        shape=env_shape,
+        kind="integer",
+    )
+    complete_steps = _tensor(
+        since["complete_policy_step_count"],
+        name="complete_policy_step_count",
+        shape=env_shape,
+        kind="integer",
+    )
+    incomplete_steps = _tensor(
+        since["incomplete_policy_step_count"],
+        name="incomplete_policy_step_count",
+        shape=env_shape,
+        kind="integer",
+    )
+    apply_readbacks = _tensor(
+        since["apply_readback_count"],
+        name="apply_readback_count",
+        shape=env_shape,
+        kind="integer",
+    )
+    post_readbacks = _tensor(
+        since["post_readback_count"],
+        name="post_readback_count",
+        shape=env_shape,
+        kind="integer",
+    )
+    timestamp_passes = _tensor(
+        since["timestamp_invariant_pass_count"],
+        name="timestamp_invariant_pass_count",
+        shape=env_shape,
+        kind="integer",
+    )
+    if not all(
+        _scalar_bool(check, name=name)
+        for name, check in (
+            ("policy_step_count", policy_steps.eq(expected_policy_steps).all()),
+            ("complete_policy_step_count", complete_steps.eq(expected_policy_steps).all()),
+            ("incomplete_policy_step_count", incomplete_steps.eq(0).all()),
+            (
+                "apply_readback_count",
+                apply_readbacks.eq(
+                    expected_policy_steps * expected_apply_calls
+                ).all(),
+            ),
+            ("post_readback_count", post_readbacks.eq(expected_policy_steps).all()),
+            ("timestamp_invariant_pass_count", timestamp_passes.eq(expected_policy_steps).all()),
+        )
+    ):
+        raise RuntimeError("FullMDP compact joint-safety rollout is incomplete")
+
+    qdes = since["qdes_joint_count"]
+    joint_shape = tuple(getattr(qdes, "shape", ()))
+    if (
+        len(joint_shape) != 2
+        or joint_shape[0] != expected_num_envs
+        or type(joint_shape[1]) is not int
+        or joint_shape[1] <= 0
+    ):
+        raise RuntimeError("FullMDP compact joint-safety joint shape differs")
+    integer_joint_names = (
+        "qdes_joint_count",
+        "policy_crossing_joint_count",
+        "substep_hard_crossing_joint_count",
+        "actual_hard_edge_joint_count",
+    )
+    joint_counts = {
+        name: _tensor(since[name], name=name, shape=joint_shape, kind="integer")
+        for name in integer_joint_names
+    }
+    if any(
+        not _scalar_bool(value.ge(0).all(), name=f"{name}_nonnegative")
+        for name, value in joint_counts.items()
+    ):
+        raise RuntimeError("FullMDP compact joint-safety counter is negative")
+    hard_latch = _tensor(
+        since["hard_crossing_latch"],
+        name="hard_crossing_latch",
+        shape=env_shape,
+        kind="boolean",
+    )
+    actual_latch = _tensor(
+        since["actual_hard_edge_latch"],
+        name="actual_hard_edge_latch",
+        shape=env_shape,
+        kind="boolean",
+    )
+    minimum_lower = _tensor(
+        since["minimum_hard_lower_gap"],
+        name="minimum_hard_lower_gap",
+        shape=joint_shape,
+        kind="floating",
+    )
+    minimum_upper = _tensor(
+        since["minimum_hard_upper_gap"],
+        name="minimum_hard_upper_gap",
+        shape=joint_shape,
+        kind="floating",
+    )
+    if not (
+        _scalar_bool(minimum_lower.isfinite().all(), name="minimum_lower_finite")
+        and _scalar_bool(minimum_upper.isfinite().all(), name="minimum_upper_finite")
+    ):
+        raise RuntimeError("FullMDP compact joint-safety gap is non-finite")
+    substep_rows = joint_counts["substep_hard_crossing_joint_count"].gt(0).any(dim=1)
+    actual_rows = joint_counts["actual_hard_edge_joint_count"].gt(0).any(dim=1)
+    actual_from_gap = minimum_lower.le(0) | minimum_upper.le(0)
+    if not (
+        _scalar_bool(hard_latch.eq(substep_rows).all(), name="hard_latch")
+        and _scalar_bool(actual_latch.eq(actual_rows).all(), name="actual_latch")
+        and _scalar_bool(
+            joint_counts["actual_hard_edge_joint_count"]
+            .gt(0)
+            .eq(actual_from_gap)
+            .all(),
+            name="actual_edge_gap_equivalence",
+        )
+    ):
+        raise RuntimeError("FullMDP compact joint-safety edge evidence differs")
+
+    first_sequence = _exact_int(
+        snapshot["diagnostic_first_policy_step_sequence"],
+        name="first_policy_step_sequence",
+    )
+    last_sequence = _exact_int(
+        snapshot["diagnostic_last_policy_step_sequence"],
+        name="last_policy_step_sequence",
+    )
+    if (
+        last_sequence - first_sequence + 1 != expected_policy_steps
+        or (
+            previous_policy_step_sequence is None
+            and first_sequence != 0
+        )
+        or (
+            previous_policy_step_sequence is not None
+            and first_sequence != previous_policy_step_sequence + 1
+        )
+    ):
+        raise RuntimeError("FullMDP compact joint-safety policy-step span differs")
+
+    totals = {
+        name: int(_scalar_number(value.sum(), name=f"{name}_total"))
+        for name, value in joint_counts.items()
+    }
+    minimum_gap = min(
+        float(_scalar_number(minimum_lower.amin(), name="minimum_lower")),
+        float(_scalar_number(minimum_upper.amin(), name="minimum_upper")),
+    )
+    return {
+        "consume_sequence": consume_sequence,
+        "first_policy_step_sequence": first_sequence,
+        "last_policy_step_sequence": last_sequence,
+        "counter_totals": totals,
+        "minimum_hard_gap_rad": minimum_gap,
+    }
 
 
 def _shot_row(shot: object, *, lifecycle_flags: tuple[str, ...]) -> dict:
@@ -168,13 +467,49 @@ class ActionBallFullMdpRsl3Adapter:
         self._ack = _bound(owner, "acknowledge_post_update")
         self._latch = _bound(owner, "_record_durable_epoch_ack_span")
         self._poison = _bound(owner, "poison_optimizer_boundary")
+        action_manager = getattr(runtime_env, "action_manager", None)
+        get_action_term = getattr(action_manager, "get_term", None)
+        action_term = get_action_term("joint_pos") if callable(get_action_term) else None
+        action_module = importlib.import_module(
+            "whole_body_tracking.tasks.tracking.mdp.hope_actions"
+        )
+        action_type = vars(action_module).get("ClampedJointPositionAction")
+        if (
+            type(action_type) is not type
+            or action_type.__name__ != "ClampedJointPositionAction"
+            or action_type.__module__ != action_module.__name__
+            or action_term is None
+            or type(action_term) is not action_type
+            or getattr(
+                action_term, "_joint_safety_diagnostic_compact_evidence", None
+            )
+            is not True
+        ):
+            raise RuntimeError(
+                "single_action_lean requires the compact joint-safety action producer"
+            )
+        self._safety_term = action_term
+        self._safety_expected_apply_calls = _exact_int(
+            getattr(action_term, "_pre_apply_guard_decimation", None),
+            name="bound guard decimation",
+            minimum=1,
+        )
+        self._safety_prepare = _bound(
+            action_term, "prepare_joint_safety_ledger_consume"
+        )
+        self._safety_ack = _bound(action_term, "acknowledge_joint_safety_ledger")
         self._wal = importlib.import_module(
             "whole_body_tracking.utils.action_ball_full_mdp_durable_wal"
         )
         self._rank = 0
+        self._num_envs = int(owner.epoch_owner.num_envs)
         self._path, self._identity, self._segment = self._create_wal(log_dir)
         self._size = 0
         self._last_update = -1
+        self._safety_pending = None
+        self._safety_last_completed_environment_steps = 0
+        self._safety_last_consume_sequence = None
+        self._safety_last_policy_step_sequence = None
         self._require_healthy()
 
     @staticmethod
@@ -263,16 +598,77 @@ class ActionBallFullMdpRsl3Adapter:
                 update_index=update_index,
                 completed_environment_steps=completed_environment_steps,
             )
+            if self._safety_pending is not None:
+                raise RuntimeError(
+                    "single_action_lean joint-safety evidence is already frozen"
+                )
+            delta_steps = (
+                completed_environment_steps
+                - self._safety_last_completed_environment_steps
+            )
+            if delta_steps <= 0 or delta_steps % self._num_envs != 0:
+                raise RuntimeError(
+                    "single_action_lean joint-safety rollout span differs"
+                )
+            safety_token, safety_snapshot = self._safety_prepare()
+            if type(safety_token) is not tuple:
+                raise RuntimeError(
+                    "single_action_lean joint-safety prepare token differs"
+                )
+            safety_pending = {
+                "term": self._safety_term,
+                "token": safety_token,
+                "validated": None,
+            }
+            self._safety_pending = safety_pending
+            safety_pending["validated"] = _validate_compact_joint_safety(
+                safety_snapshot,
+                expected_num_envs=self._num_envs,
+                expected_policy_steps=delta_steps // self._num_envs,
+                expected_apply_calls=self._safety_expected_apply_calls,
+                previous_consume_sequence=self._safety_last_consume_sequence,
+                previous_policy_step_sequence=(
+                    self._safety_last_policy_step_sequence
+                ),
+            )
             result = algorithm_update()
             self._mark_returned(boundary, update_index=update_index)
             summary = self._prepare_summary(boundary, update_index=update_index)
             record = _telemetry(summary, self._runtime)
+            validated = safety_pending["validated"]
+            record["joint_safety"] = {
+                "event": "hope_joint_safety_diagnostic_compact_update",
+                "schema_version": 1,
+                "status": "diagnostic_compact_prepared_before_optimizer",
+                "ppo_update": update_index,
+                "consume_sequence": validated["consume_sequence"],
+                "num_envs": self._num_envs,
+                "policy_step_count": delta_steps // self._num_envs,
+                "first_policy_step_sequence": validated[
+                    "first_policy_step_sequence"
+                ],
+                "last_policy_step_sequence": validated[
+                    "last_policy_step_sequence"
+                ],
+                "counter_totals": validated["counter_totals"],
+                "minimum_hard_gap_rad": validated["minimum_hard_gap_rad"],
+                "terminal_archive_count": 0,
+                "identity_bound_policy_step_count": 0,
+                "formal_authority": False,
+            }
             canonical, pending_line = self._wal.encode_pending(
                 segment_id=self._segment, rank=self._rank, telemetry=record
             )
             pending_start, pending_end = self._append(pending_line)
             if self._ack(boundary, summary, update_index=update_index) is not summary:
                 raise RuntimeError("single_action_lean owner changed ACK summary identity")
+            if (
+                safety_pending is not self._safety_pending
+                or safety_pending["term"] is not self._safety_term
+            ):
+                raise RuntimeError(
+                    "single_action_lean joint-safety prepared owner changed"
+                )
             ack_line = self._wal.encode_epoch_ack(
                 pending_line=pending_line,
                 pending_byte_start=pending_start,
@@ -289,6 +685,44 @@ class ActionBallFullMdpRsl3Adapter:
                 ack_byte_start=ack_start,
                 ack_byte_end=ack_end,
             )
+            # The action term is the existing typed compact-evidence owner.  Its
+            # destructive clear stays last in the durable owner transaction, so
+            # optimizer, PENDING, owner-ACK, EPOCH_ACK or latch failure leaves
+            # the exact generation frozen and retry-forbidden.
+            self._safety_ack(safety_pending["token"])
+            self._safety_last_completed_environment_steps = (
+                completed_environment_steps
+            )
+            self._safety_last_consume_sequence = validated["consume_sequence"]
+            self._safety_last_policy_step_sequence = validated[
+                "last_policy_step_sequence"
+            ]
+            self._safety_pending = None
+            safety_receipt = {
+                **record["joint_safety"],
+                "status": (
+                    "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+                ),
+                "completed_environment_steps": record[
+                    "completed_environment_steps"
+                ],
+                "epoch_operation_sequence": record[
+                    "epoch_operation_sequence"
+                ],
+                "epoch_drain_sequence": record["epoch_drain_sequence"],
+                "epoch_commit_start": record["epoch_commit_start"],
+                "epoch_commit_end": record["epoch_commit_end"],
+            }
+            safety_marker = (
+                "HOPE_JOINT_SAFETY_UPDATE_JSON="
+                + json.dumps(
+                    safety_receipt, sort_keys=True, separators=(",", ":")
+                )
+                + "\n"
+            )
+            if sys.stdout.write(safety_marker) != len(safety_marker):
+                raise OSError("single_action_lean joint-safety stdout was short")
+            sys.stdout.flush()
             marker = "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=" + canonical.decode("utf-8") + "\n"
             if sys.stdout.write(marker) != len(marker):
                 raise OSError("single_action_lean telemetry stdout was short")

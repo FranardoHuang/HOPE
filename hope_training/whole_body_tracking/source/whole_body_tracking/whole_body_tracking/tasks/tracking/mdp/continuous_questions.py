@@ -94,6 +94,9 @@ _R_FACE = 6
 _R_CONTACT_ENVELOPE = 7
 _R_LM_SOLVE_INFO = 8
 _R_LM_SOLVE_NONFINITE = 9
+#: Producer ABI consumed verbatim by the runtime solver profile and
+#: active-refill ledger.  Numeric ``reason_code`` values index this tuple; do
+#: not maintain a second handwritten solver prefix in a consumer.
 _CONTINUOUS_REASONS = REASONS + (
     "contact_normal_speed_out_of_fit",
     "lm_solve_info_nonzero",
@@ -603,6 +606,14 @@ def _fixed_direction_replay(
     again.  Runtime already passes ``net_top_z`` in the ball-centre convention.  This replay is the
     authority: exactly one explicit threshold, and the same rollout step/horizon as grading.
     """
+    if _CONTINUOUS_REASONS[_R_CONTACT_ENVELOPE :] != (
+        "contact_normal_speed_out_of_fit",
+        "lm_solve_info_nonzero",
+        "lm_solve_nonfinite",
+    ):
+        raise RuntimeError(
+            "continuous-question rejection reason ABI drifted before code 7"
+        )
     raw_n = out["n"]
     raw_n_norm = torch.linalg.norm(raw_n, dim=-1, keepdim=True)
     n_unit = raw_n / (raw_n_norm + _EPS)

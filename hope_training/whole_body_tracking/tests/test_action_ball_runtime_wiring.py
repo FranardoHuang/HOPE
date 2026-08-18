@@ -761,6 +761,7 @@ def _solver_profile_namespace():
 def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract(
     monkeypatch,
 ):
+    _install_continuous_questions_stub(monkeypatch)
     namespace = _solver_profile_namespace()
     canonical, knobs, build = _module_functions(
         (
@@ -797,7 +798,7 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract(
     # This digest was minted from the schema-v3 payload represented by the fixed
     # inputs above; keeping it literal catches even subtle key additions.
     assert contract["sha256"] == (
-        "dd10cac3caabef5a4af744be65847d15de3b2b3adf1ea950dee71e97f1ac85b1"
+        "fc0abe2fd61b7728ea2731191fa47df6285e07c08a9b9dbb12bceab7c4974dac"
     )
     assert contract["payload"]["solve"] == knobs(_solver_cfg())
     assert contract == build(
@@ -837,8 +838,14 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract(
         "maximum_mps_inclusive": 7.2,
         "rejection_reason": "contact_normal_speed_out_of_fit",
     }
-    assert acceptance["ordered_rejection_reason_schema"][-6:] == [
+    reason_schema = acceptance["ordered_rejection_reason_schema"]
+    assert tuple(reason_schema[:10]) == (
+        _continuous_solver_rejection_reason_schema_from_source()
+    )
+    assert reason_schema[-8:] == [
         "contact_normal_speed_out_of_fit",
+        "lm_solve_info_nonzero",
+        "lm_solve_nonfinite",
         "teacher_site_rate_geometry_unsolved",
         "teacher_rate_out_of_bounds",
         "pre_swing_wait_out_of_bounds",
@@ -906,6 +913,7 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract(
 def test_counter_rally_solver_contract_appends_exact_ordered_rejections_and_identity(
     monkeypatch,
 ):
+    _install_continuous_questions_stub(monkeypatch)
     canonical, _knobs, build = _module_functions(
         (
             "_action_ball_canonical_sha256",
@@ -2354,6 +2362,7 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
         "timing_reason",
         "sample_v_in_x",
         "solver_admit_counts",
+        "solver_rejection",
         "effective_rounds",
         "sample_field_override",
         "base_quat_mode",
@@ -2361,12 +2370,25 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
         "expected_pack_error",
     ),
     (
-        (1.0, 1, None, -5.0, None, 1, None, "identity", False, None),
+        (
+            1.0,
+            1,
+            None,
+            -5.0,
+            None,
+            None,
+            1,
+            None,
+            "identity",
+            False,
+            None,
+        ),
         (
             2.0,
             0,
             "teacher_rate_out_of_bounds",
             -5.0,
+            None,
             None,
             1,
             None,
@@ -2380,6 +2402,7 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
             "ball_birth_not_beyond_net",
             -1.0,
             None,
+            None,
             1,
             None,
             "identity",
@@ -2392,6 +2415,7 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
             None,
             -5.0,
             (2048, 1024, 512, 256, 256),
+            None,
             64,
             None,
             "identity",
@@ -2404,6 +2428,7 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
             None,
             -5.0,
             (0, 0, 0, 0, 0),
+            None,
             5,
             None,
             "identity",
@@ -2415,6 +2440,7 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
             0,
             None,
             -5.0,
+            None,
             None,
             1,
             ("contact_w_m", (0.0, 0.0)),
@@ -2428,6 +2454,7 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
             None,
             -5.0,
             None,
+            None,
             1,
             None,
             "extra_nan",
@@ -2440,10 +2467,28 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
             None,
             -5.0,
             None,
+            None,
             1,
             None,
             "distinct",
             True,
+            None,
+        ),
+        # First round: 4,095 ordinary peers are accepted while one LM-info
+        # row is rejected by its producer-owned code.  Second round: only the
+        # rejected peer is redrawn and accepted.  This is the live refill
+        # counterexample for row-local numerical infeasibility.
+        (
+            1.0,
+            1,
+            None,
+            -5.0,
+            (4095, 1),
+            (8, "lm_solve_info_nonzero"),
+            2,
+            None,
+            "identity",
+            False,
             None,
         ),
     ),
@@ -2455,6 +2500,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     timing_reason,
     sample_v_in_x,
     solver_admit_counts,
+    solver_rejection,
     effective_rounds,
     sample_field_override,
     base_quat_mode,
@@ -2665,9 +2711,14 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             [True] * admitted_count
             + [False] * rejected_count
         )
+        rejection_code, rejection_name = (
+            (0, "no_landing")
+            if solver_rejection is None
+            else solver_rejection
+        )
         reason_values = (
             [-1] * admitted_count
-            + [0] * rejected_count
+            + [rejection_code] * rejected_count
         )
         velocity_values = [
             (solver_speed, 0.0, 0.0)
@@ -2679,7 +2730,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             reason_counts=(
                 {}
                 if rejected_count == 0
-                else {"no_landing": rejected_count}
+                else {rejection_name: rejected_count}
             ),
             proposals=SimpleNamespace(
                 reason_code=_FakeTensor(reason_values)
@@ -2705,6 +2756,9 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         solve_proposals_diagnostic_host_only
     )
     solver_module._DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY = object()
+    solver_module._CONTINUOUS_REASONS = (
+        _continuous_solver_rejection_reason_schema_from_source()
+    )
     solver_module.BALL_BIRTH_NET_MARGIN_M = 0.05
     solver_module.ball_birth_x_lower_bound_m = (
         lambda contact_x, v_in_x, ttc: float(contact_x)
@@ -2866,7 +2920,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 )
             },
             "ordered_rejection_reason_schema": (
-                "no_landing",
+                *_continuous_solver_rejection_reason_schema_from_source(),
                 "teacher_site_rate_geometry_unsolved",
                 "teacher_rate_out_of_bounds",
                 "pre_swing_wait_out_of_bounds",
@@ -3092,7 +3146,13 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
             - sum(solver_admit_counts)
         )
         assert command._action_ball_reject_counts == {
-            7: {"no_landing": expected_rejections}
+            7: {
+                (
+                    "no_landing"
+                    if solver_rejection is None
+                    else solver_rejection[1]
+                ): expected_rejections
+            }
         }
     elif timing_reason is None:
         assert command._action_ball_reject_counts == {7: {}}
@@ -3106,6 +3166,25 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 command._action_ball_task_transcript_by_birth.values()
             )
         )
+    if solver_rejection == (8, "lm_solve_info_nonzero"):
+        live_schema = solver_payload["acceptance"][
+            "ordered_rejection_reason_schema"
+        ]
+        solver_payload["acceptance"][
+            "ordered_rejection_reason_schema"
+        ] = live_schema[:8] + live_schema[10:]
+        command._action_ball_manifest.solver_profile_sha256 = namespace[
+            "_action_ball_canonical_sha256"
+        ](solver_payload)
+        calls_before_legacy_profile = list(solver_calls)
+        with pytest.raises(
+            RuntimeError,
+            match="solver profile rejection ABI does not match",
+        ):
+            namespace["_action_ball_refill_pool_many"](
+                command, tuple(requests)
+            )
+        assert solver_calls == calls_before_legacy_profile
 
 
 def test_live_emitted_sample_hook_delegates_full_identity_and_rejects_resigned_forgery(
@@ -3897,6 +3976,7 @@ def test_every_live_birth_receipt_declares_the_sampler_initial_center_law():
 # 映射必须只有一处、活值和声明必须逐字段相等,不等就 fail-closed。                #
 # --------------------------------------------------------------------------- #
 CONTINUOUS_QUESTIONS_PATH = COMMAND_PATH.with_name("continuous_questions.py")
+STROKE_ADAPT_TORCH_PATH = COMMAND_PATH.with_name("stroke_adapt_torch.py")
 
 
 def _module_assignments(names, namespace):
@@ -3941,8 +4021,35 @@ def _source_constant(path, name):
     raise AssertionError(f"{name} is not a module-level constant of {path}")
 
 
+def _continuous_solver_rejection_reason_schema_from_source():
+    """Evaluate the public producer ABI without importing Torch/IsaacLab."""
+
+    tree = ast.parse(
+        CONTINUOUS_QUESTIONS_PATH.read_text(encoding="utf-8"),
+        filename=str(CONTINUOUS_QUESTIONS_PATH),
+    )
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name)
+            and target.id
+            == "_CONTINUOUS_REASONS"
+            for target in node.targets
+        )
+    )
+    assert isinstance(assignment.value, ast.BinOp)
+    assert isinstance(assignment.value.op, ast.Add)
+    assert isinstance(assignment.value.left, ast.Name)
+    assert assignment.value.left.id == "REASONS"
+    return tuple(_source_constant(STROKE_ADAPT_TORCH_PATH, "REASONS")) + tuple(
+        ast.literal_eval(assignment.value.right)
+    )
+
+
 def _install_continuous_questions_stub(monkeypatch):
-    """Serve the three covered acceptance constants out of their own source.
+    """Serve covered acceptance values out of their own source.
 
     ``hope_commands`` reads them at call time so that the payload cannot carry a
     stale hand-typed copy.  The test reads them the same way, for the same
@@ -3959,6 +4066,9 @@ def _install_continuous_questions_stub(monkeypatch):
         setattr(
             stub, constant, _source_constant(CONTINUOUS_QUESTIONS_PATH, constant)
         )
+    stub._CONTINUOUS_REASONS = (
+        _continuous_solver_rejection_reason_schema_from_source()
+    )
     monkeypatch.setitem(sys.modules, module_name, stub)
     return stub
 

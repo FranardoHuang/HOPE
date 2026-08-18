@@ -3656,6 +3656,10 @@ def action_ball_solver_profile_contract(
     unadjudicated_names = (
         ("counter_rally.py", "counter_rally_torch.py") if counter_rally else ()
     )
+    # This declaration and the producer's numeric tuple are both covered by
+    # the one solver semantic surface.  Active refill compares the declared
+    # prefix to the live producer tuple before drawing, so an old/self-
+    # consistent profile still cannot reinterpret codes 8/9.
     rejection_reasons = [
         "no_landing",
         "resid_gt_tol",
@@ -3665,6 +3669,8 @@ def action_ball_solver_profile_contract(
         "net_not_cleared",
         "face_not_opponent_facing",
         "contact_normal_speed_out_of_fit",
+        "lm_solve_info_nonzero",
+        "lm_solve_nonfinite",
         "teacher_site_rate_geometry_unsolved",
         "teacher_rate_out_of_bounds",
         "pre_swing_wait_out_of_bounds",
@@ -14497,6 +14503,7 @@ class RacketTargetCommand(CommandTerm):
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
             BALL_BIRTH_NET_MARGIN_M,
+            _CONTINUOUS_REASONS,
             _DIAGNOSTIC_PREVALIDATED_SOLVE_AUTHORITY,
             _solve_proposals_diagnostic_host_only,
             ball_birth_x_lower_bound_m,
@@ -14650,6 +14657,12 @@ class RacketTargetCommand(CommandTerm):
                 "ordered_rejection_reason_schema"
             ]
         )
+        solver_reason_schema = tuple(_CONTINUOUS_REASONS)
+        if reason_schema[: len(solver_reason_schema)] != solver_reason_schema:
+            raise RuntimeError(
+                "action-ball solver profile rejection ABI does not match "
+                "the live continuous-question producer"
+            )
         known_reasons = set(reason_schema)
         counter_rally_enabled = bool(
             getattr(self, "_counter_rally_enabled", False)

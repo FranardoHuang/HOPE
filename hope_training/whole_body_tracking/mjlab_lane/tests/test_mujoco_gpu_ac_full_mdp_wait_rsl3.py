@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -32,10 +33,100 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     assert cfg["policy"]["noise_std_type"] == "log"
     assert cfg["algorithm"]["num_learning_epochs"] == 5
     assert cfg["algorithm"]["num_mini_batches"] == 4
+    assert _load().build_train_cfg(7)["num_steps_per_env"] == 7
 
 
+@pytest.mark.parametrize(
+    (
+        "num_envs",
+        "num_steps",
+        "num_updates",
+        "full_a_mode",
+        "transitions",
+        "lifecycle",
+        "emit_evidence",
+        "expected_evidence",
+    ),
+    (
+        (2, 24, 1, False, 48, "idle_wait_only", False, None),
+        (
+            2,
+            1,
+            1,
+            True,
+            2,
+            "full_a_slice_attempted",
+            True,
+            {
+                "reveal_rows": 2,
+                "launch_rows": 0,
+                "flight_terminal_rows": 0,
+                "selected_reset_rows": 0,
+                "contact_eligible_rows": 0,
+                "selected_contact_rows": 0,
+                "selected_contact_rate": None,
+                "unmeasured": [],
+            },
+        ),
+        (
+            3,
+            4,
+            2,
+            True,
+            24,
+            "full_a_slice_attempted",
+            True,
+            {
+                "reveal_rows": 9,
+                "launch_rows": 9,
+                "flight_terminal_rows": 6,
+                "selected_reset_rows": 6,
+                "contact_eligible_rows": 9,
+                "selected_contact_rows": 3,
+                "selected_contact_rate": 1.0 / 3.0,
+                "unmeasured": [],
+            },
+        ),
+        (
+            2,
+            1,
+            1,
+            True,
+            2,
+            "full_a_slice_attempted",
+            False,
+            {
+                "reveal_rows": 0,
+                "launch_rows": 0,
+                "flight_terminal_rows": 0,
+                "selected_reset_rows": 0,
+                "contact_eligible_rows": 0,
+                "selected_contact_rows": 0,
+                "selected_contact_rate": None,
+                "unmeasured": [
+                    "contact_eligible_rows",
+                    "flight_terminal_rows",
+                    "launch_rows",
+                    "reveal_rows",
+                    "selected_contact_rows",
+                    "selected_reset_rows",
+                ],
+            },
+        ),
+    ),
+)
 def test_main_orchestrates_one_update_without_logging_or_checkpoint(
-    monkeypatch, capsys, tmp_path
+    monkeypatch,
+    capsys,
+    tmp_path,
+    num_envs,
+    num_steps,
+    num_updates,
+    full_a_mode,
+    transitions,
+    lifecycle,
+    emit_evidence,
+    expected_evidence,
 ):
     module = _load()
     ready_pose = tmp_path / "ready_pose.json"
@@ -50,27 +141,59 @@ def test_main_orchestrates_one_update_without_logging_or_checkpoint(
 
     class _Env:
         def __init__(
-            self, sim, task, device, seed, ready_pose_payload, ready_pose_source
+            self,
+            sim,
+            task,
+            device,
+            seed,
+            ready_pose_payload,
+            ready_pose_source,
+            full_a_mode,
         ):
-            assert sim.nworld == 2 and task.action_scale_mode == "vendor"
+            assert sim.nworld == num_envs and task.action_scale_mode == "vendor"
             assert device == "cuda:0" and seed == 0
             assert ready_pose_payload == payload and ready_pose_source == str(ready_pose)
-            self.num_envs = 2
+            assert full_a_mode is expected_full_a_mode
+            self.num_envs = num_envs
             self.num_actions = 31
             self.common_step_counter = 0
+            self.full_a_mode = full_a_mode
             self.device = torch.device("cpu")
-            self.episode_length_buf = torch.zeros(2, dtype=torch.long)
+            self.episode_length_buf = torch.zeros(num_envs, dtype=torch.long)
             self.max_episode_length = 150
 
         def get_observations(self):
             return {
-                "policy": torch.zeros(2, 229),
-                "critic": torch.zeros(2, 399),
+                "policy": torch.zeros(num_envs, 229),
+                "critic": torch.zeros(num_envs, 399),
             }
 
         def step(self, _actions):
+            step_index = self.common_step_counter
             self.common_step_counter += 1
-            return self.get_observations(), torch.ones(2), torch.zeros(2), {}
+            extras = {}
+            if self.full_a_mode and emit_evidence:
+                phase = step_index % 3
+                reveal = torch.full((num_envs,), phase == 0, dtype=torch.bool)
+                launch = torch.full((num_envs,), phase == 1, dtype=torch.bool)
+                terminal = torch.full((num_envs,), phase == 2, dtype=torch.bool)
+                contact = torch.zeros(num_envs, dtype=torch.bool)
+                if phase == 1:
+                    contact[0] = True
+                extras = {
+                    "full_a_reveal_event": reveal,
+                    "full_a_launch_event": launch,
+                    "full_a_flight_terminal_event": terminal,
+                    "full_a_selected_reset_event": terminal.clone(),
+                    "full_a_contact_eligible_event": launch.clone(),
+                    "full_a_selected_contact_event": contact,
+                }
+            return (
+                self.get_observations(),
+                torch.ones(num_envs),
+                torch.zeros(num_envs),
+                extras,
+            )
 
     wait_module = types.ModuleType("mujoco_gpu_ac_full_mdp_initial_wait_env")
     wait_module.__file__ = str(
@@ -83,9 +206,7 @@ def test_main_orchestrates_one_update_without_logging_or_checkpoint(
     class _Algorithm:
         def __init__(self):
             self.optimizer = types.SimpleNamespace(state={"parameter": {}})
-            self.storage = types.SimpleNamespace(
-                step=0, rewards=torch.ones(24, 2, 1)
-            )
+            self.storage = types.SimpleNamespace(step=0, rewards=torch.ones(1))
 
         def update(self):
             return {"surrogate": torch.tensor(0.0)}
@@ -94,26 +215,53 @@ def test_main_orchestrates_one_update_without_logging_or_checkpoint(
         def __init__(self, env, cfg, log_dir, device):
             assert log_dir is None and device == "cuda:0"
             assert cfg["obs_groups"]["critic"] == ["critic"]
+            assert cfg["num_steps_per_env"] == num_steps
             self.env = env
             self.alg = _Algorithm()
             self.disable_logs = False
 
         def learn(self, iterations, init_at_random_ep_len):
-            assert iterations == 1 and init_at_random_ep_len is False
+            assert iterations == num_updates and init_at_random_ep_len is False
             assert self.disable_logs is True
-            for _ in range(24):
-                self.env.step(torch.zeros(2, 31))
-            self.alg.update()
+            for _ in range(iterations):
+                for _ in range(num_steps):
+                    self.env.step(torch.zeros(num_envs, 31))
+                self.alg.update()
 
     monkeypatch.setitem(sys.modules, wait_module.__name__, wait_module)
     monkeypatch.setattr(module, "_rsl3_runner", lambda: ("3.1.2", _Runner, object()))
     monkeypatch.setattr(module, "_require_rsl3_runtime", lambda *_: None)
 
-    assert module.main() == 0
-    line = capsys.readouterr().out
-    assert '"ppo_update_calls": 1' in line
-    assert '"transitions": 48' in line
-    assert '"task_lifecycle": "idle_wait_only"' in line
+    expected_full_a_mode = full_a_mode
+    assert (
+        module.main(
+            num_envs=num_envs,
+            num_steps_per_env=num_steps,
+            num_updates=num_updates,
+            full_a_mode=full_a_mode,
+        )
+        == 0
+    )
+    line = capsys.readouterr().out.strip()
+    prefix = "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON="
+    assert line.startswith(prefix)
+    record = json.loads(line.removeprefix(prefix))
+    assert record["ppo_update_calls"] == num_updates
+    assert record["transitions"] == transitions
+    assert record["task_lifecycle"] == lifecycle
+    if full_a_mode:
+        assert record["full_a_complete"] is False
+        assert record["full_a_slice_evidence"] == expected_evidence
+        assert record["not_produced"] == {
+            "r03_strike_fact": True,
+            "r06_landing_outcome": True,
+            "r07_recovery": True,
+            "reward_terms_0_13": True,
+        }
+    else:
+        assert "full_a_complete" not in record
+        assert "full_a_slice_evidence" not in record
+        assert "not_produced" not in record
 
 
 def test_ready_pose_binding_rejects_missing_relative_symlink_and_wrong_bytes(

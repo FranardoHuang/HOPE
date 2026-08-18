@@ -453,9 +453,22 @@ def solve_strike_specs_fixed_dir(
             dq = dq_col.reshape(4, N, 3)
             info = info.reshape(4, N)
             candidate_info_ok = info == 0
-            candidate_finite = torch.isfinite(dq).all(dim=-1)
+            candidate_dq_finite = torch.isfinite(dq).all(dim=-1)
+            raw_q_new = q.unsqueeze(0) + dq
+            candidate_q_finite = torch.isfinite(raw_q_new).all(dim=-1)
+            candidate_finite = candidate_dq_finite & candidate_q_finite
             candidate_solve_ok = candidate_info_ok & candidate_finite
-            q_new = q.unsqueeze(0) + dq
+            # A numerical failure is an ordinary per-row rejection, but its
+            # payload must not enter the physical forward model.  In
+            # particular, a NaN ``dq`` can poison fused CUDA kernels even when
+            # ``better`` later masks that candidate.  Evaluate invalid
+            # candidates at the unchanged finite q and keep
+            # ``candidate_solve_ok`` as the admission mask below.
+            q_new = torch.where(
+                candidate_solve_ok.unsqueeze(-1),
+                raw_q_new,
+                q.unsqueeze(0),
+            )
             # Search box only: the ACCEPTED command is rejected outright if it needs more speed,
             # so this never produces a silently clamped output.
             q_new[:, :, 2] = q_new[:, :, 2].clamp(

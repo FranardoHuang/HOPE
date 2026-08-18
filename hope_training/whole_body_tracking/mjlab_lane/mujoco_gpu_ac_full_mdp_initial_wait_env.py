@@ -42,6 +42,14 @@ import action_ball_full_mdp_portable_observation as observation_contract
 
 WAIT_BALL_PARK_HOPE = (0.0, 0.0, 10.0)
 READY_HOLD_PHASE_INDEX = 4
+FULL_A_PHASE_IDLE = 0
+FULL_A_PHASE_REVEAL_COMMITTED = 2
+FULL_A_PHASE_LAUNCH_SETTLED = 5
+FULL_A_PHASE_OUTCOME_SETTLED = 6
+FULL_A_OUTCOME_NONE = 0
+FULL_A_OUTCOME_FLIGHT_EXPIRED = 1
+FULL_A_OUTCOME_BALL_DEAD = 2
+FULL_A_FLIGHT_HORIZON_S = 1.0
 FULLMDP_TRACKED_BODY_NAMES = (
     "pelvis_link",
     "left_hip_roll_Link",
@@ -90,6 +98,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         capacity_probe: bool = True,
         ready_pose_payload=None,
         ready_pose_source=None,
+        full_a_mode: bool = False,
     ) -> None:
         if int(sim_cfg.nworld) <= 0:
             raise ValueError("initial-WAIT FullMDP slice requires positive nworld")
@@ -103,6 +112,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             )
         ):
             raise ValueError("initial-WAIT FullMDP slice requires deterministic reset")
+        if type(full_a_mode) is not bool:
+            raise TypeError("full_a_mode must be bool")
+        self.full_a_mode = full_a_mode
         self._fullmdp_initialized = False
         super().__init__(
             sim_cfg=sim_cfg,
@@ -167,9 +179,226 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._all_env_ids = self._torch.arange(
             self.num_envs, dtype=self._torch.long, device=self.device
         )
+        if self.full_a_mode:
+            self._initialize_full_a_state()
         self._snapshot_ready_teacher()
         self._fullmdp_initialized = True
         self._compute_obs()
+
+    def _initialize_full_a_state(self) -> None:
+        """Allocate the one row-wise state used by the optional A slice."""
+
+        torch = self._torch
+        n = self.num_envs
+        dtype = self.qpos_init.dtype
+        self._epoch_task_f32 = torch.zeros(
+            (n, observation_contract.TASK_F32_WIDTH), dtype=dtype, device=self.device
+        )
+        self._epoch_clock_ticks = torch.full(
+            (n, 5), -1, dtype=torch.long, device=self.device
+        )
+        self._full_a_physical_present = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._full_a_physical_source_step = torch.full(
+            (n,), -1, dtype=torch.long, device=self.device
+        )
+        self._full_a_physical_fact_f32 = torch.zeros(
+            (n, observation_contract.OWNER_FACT_F32_WIDTH),
+            dtype=dtype,
+            device=self.device,
+        )
+        self._full_a_launch_state_f32 = torch.zeros((n, 13), dtype=dtype, device=self.device)
+        self._full_a_observation_ordinal = torch.zeros(
+            n, dtype=torch.long, device=self.device
+        )
+        self._full_a_selected_contact = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._full_a_ball_table_contact = torch.zeros_like(
+            self._full_a_selected_contact
+        )
+        self._full_a_contact_center = torch.zeros((n, 3), dtype=dtype, device=self.device)
+        self._full_a_outcome_code = torch.zeros(n, dtype=torch.long, device=self.device)
+        self._clear_lifecycle(self._all_env_ids)
+
+    def _full_a_reveal_rows(self, ids) -> None:
+        """Publish one deterministic, live-geometry question for selected rows."""
+
+        torch = self._torch
+        n = int(ids.numel())
+        if n == 0:
+            return
+        launch_pos = 0.5 * (self.serve_pos_lo + self.serve_pos_hi)
+        launch_vel = 0.5 * (self.serve_vel_lo + self.serve_vel_hi)
+        state = torch.zeros((n, 13), dtype=self.qpos_init.dtype, device=self.device)
+        state[:, :3] = launch_pos + self.hope_to_scene
+        state[:, 3] = 1.0
+        state[:, 7:10] = launch_vel
+        self._full_a_launch_state_f32[ids] = state
+
+        origins = self.env.scene.env_origins[ids]
+        racket_env = self.sim.data.site_xpos[ids, self.racket_sid] - origins
+        base_env = self.sim.data.qpos[ids, self.root_qadr : self.root_qadr + 3] - origins
+        speed_x = launch_vel[0]
+        time_to_contact = torch.clamp(
+            (racket_env[:, 0] - state[:, 0]) / speed_x,
+            min=self.step_dt,
+            max=0.8 * FULL_A_FLIGHT_HORIZON_S,
+        )
+        contact = state[:, :3] + state[:, 7:10] * time_to_contact[:, None]
+        contact[:, 2] -= 0.5 * 9.81 * time_to_contact.square()
+        contact_velocity = state[:, 7:10].clone()
+        contact_velocity[:, 2] -= 9.81 * time_to_contact
+        normal = -contact_velocity
+        normal /= torch.linalg.vector_norm(normal, dim=1, keepdim=True).clamp_min(1.0e-6)
+
+        task = torch.zeros(
+            (n, observation_contract.TASK_F32_WIDTH),
+            dtype=self.qpos_init.dtype,
+            device=self.device,
+        )
+        task[:, :5] = torch.stack(
+            (
+                time_to_contact,
+                torch.ones_like(time_to_contact),
+                time_to_contact,
+                torch.full_like(time_to_contact, FULL_A_FLIGHT_HORIZON_S),
+                torch.full_like(time_to_contact, self.step_dt),
+            ),
+            dim=1,
+        )
+        racket = task[:, 5:32]
+        racket[:, 0:3] = contact
+        racket[:, 3:6] = contact_velocity
+        racket[:, 6:9] = normal
+        racket[:, 9:12] = contact
+        racket[:, 12:15] = contact_velocity
+        racket[:, 15] = 1.0
+        racket[:, 19:21] = base_env[:, :2]
+        racket[:, 21:24] = state[:, 7:10]
+        task[:, 32:] = state
+        self._epoch_task_f32[ids] = task
+
+        reveal = int(self.common_step_counter)
+        launch = reveal + 1
+        deadline = launch + max(1, int(round(FULL_A_FLIGHT_HORIZON_S / self.step_dt)))
+        contact_tick = launch + torch.ceil(time_to_contact / self.step_dt).to(torch.long)
+        self._epoch_clock_ticks[ids, 0] = reveal
+        self._epoch_clock_ticks[ids, 1] = contact_tick
+        self._epoch_clock_ticks[ids, 2] = launch
+        self._epoch_clock_ticks[ids, 3] = deadline
+        self._epoch_clock_ticks[ids, 4] = deadline + 1
+        self._epoch_phase[ids] = FULL_A_PHASE_REVEAL_COMMITTED
+        self._epoch_task_valid[ids] = True
+        self._epoch_selected[ids] = True
+
+    def _full_a_launch_rows(self, ids) -> None:
+        state = self._full_a_launch_state_f32[ids]
+        data = self.sim.data
+        data.qpos[ids, self.b_q : self.b_q + 3] = state[:, :3]
+        data.qpos[ids, self.b_q + 3 : self.b_q + 7] = state[:, 3:7]
+        data.qvel[ids, self.b_v : self.b_v + 3] = state[:, 7:10]
+        data.qvel[ids, self.b_v + 3 : self.b_v + 6] = state[:, 10:13]
+        self.ball_age_buf[ids] = 0
+        self._epoch_phase[ids] = FULL_A_PHASE_LAUNCH_SETTLED
+        self._epoch_launch_succeeded[ids] = True
+
+    def _full_a_prepare_step(self):
+        idle = self._epoch_phase.eq(FULL_A_PHASE_IDLE)
+        self._full_a_reveal_rows(idle.nonzero(as_tuple=False).squeeze(-1))
+        launch = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED) & (
+            self._epoch_clock_ticks[:, 2] <= int(self.common_step_counter)
+        )
+        self._full_a_launch_rows(launch.nonzero(as_tuple=False).squeeze(-1))
+        return idle, launch
+
+    def _full_a_latch_ball_contacts(self) -> None:
+        """Latch only contacts read from the live MuJoCo contact arrays."""
+
+        torch = self._torch
+        geom = self._con_geom[:]
+        valid = self._con_idx < self._nacon[0]
+        g0, g1 = geom[:, 0], geom[:, 1]
+        ball0, ball1 = g0.eq(self._ball_gid), g1.eq(self._ball_gid)
+        other = torch.where(ball0, g1, g0).long()
+        ball = valid & (ball0 | ball1)
+        world = self._con_world[:].long().clamp_(0, self.num_envs - 1)
+        racket_count = torch.zeros(self.num_envs, device=self.device)
+        table_count = torch.zeros_like(racket_count)
+        racket_count.scatter_add_(0, world, (ball & self._geom_class[other].eq(1)).float())
+        table_count.scatter_add_(0, world, (ball & self._geom_class[other].eq(2)).float())
+        active = self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
+        first_contact = active & racket_count.gt(0) & ~self._full_a_selected_contact
+        center = self.sim.data.qpos[:, self.b_q : self.b_q + 3]
+        self._full_a_contact_center.copy_(
+            torch.where(first_contact[:, None], center, self._full_a_contact_center)
+        )
+        self._full_a_selected_contact |= active & racket_count.gt(0)
+        self._full_a_ball_table_contact |= active & table_count.gt(0)
+
+    def _full_a_publish_physical_fact(self) -> None:
+        active = self._epoch_task_valid & self._epoch_launch_succeeded
+        center = self.sim.data.qpos[:, self.b_q : self.b_q + 3]
+        values = self._full_a_physical_fact_f32
+        values[:, :3] = self._torch.where(active[:, None], center, self._torch.zeros_like(center))
+        values[:, 3:6] = self._torch.where(
+            self._full_a_selected_contact[:, None],
+            self._full_a_contact_center,
+            self._torch.zeros_like(self._full_a_contact_center),
+        )
+        values[:, 6:9] = values[:, 3:6]
+        self._full_a_observation_ordinal += active.to(self._torch.long)
+        values[:, 9] = self._torch.where(
+            active,
+            self._full_a_observation_ordinal.to(values.dtype),
+            self._torch.zeros_like(values[:, 9]),
+        )
+        self._full_a_physical_present.copy_(active)
+        self._full_a_physical_source_step.copy_(
+            self._torch.where(
+                active,
+                self._torch.full_like(
+                    self._full_a_physical_source_step, int(self.common_step_counter)
+                ),
+                self._torch.full_like(self._full_a_physical_source_step, -1),
+            )
+        )
+
+    def _full_a_settle_outcome(self, st):
+        torch = self._torch
+        active = self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
+        ball_hope = st["ball_pos"] - self.hope_to_scene
+        dead = active & (
+            (ball_hope[:, 2] < self.cfg.ball_dead_z_hope)
+            | (ball_hope[:, 0] < self.cfg.ball_dead_x_lo_hope)
+            | (ball_hope[:, 0] > self.cfg.ball_dead_x_hi_hope)
+            | ~torch.isfinite(ball_hope).all(dim=1)
+        )
+        expired = active & (
+            int(self.common_step_counter) >= self._epoch_clock_ticks[:, 3]
+        )
+        outcome = torch.where(
+            dead,
+            torch.full_like(self._full_a_outcome_code, FULL_A_OUTCOME_BALL_DEAD),
+            torch.where(
+                expired,
+                torch.full_like(
+                    self._full_a_outcome_code, FULL_A_OUTCOME_FLIGHT_EXPIRED
+                ),
+                torch.zeros_like(self._full_a_outcome_code),
+            ),
+        )
+        settled = outcome.ne(FULL_A_OUTCOME_NONE)
+        self._full_a_outcome_code.copy_(outcome)
+        self._epoch_phase.copy_(
+            torch.where(
+                settled,
+                torch.full_like(self._epoch_phase, FULL_A_PHASE_OUTCOME_SETTLED),
+                self._epoch_phase,
+            )
+        )
+        return settled, outcome
 
     def _snapshot_ready_teacher(self) -> None:
         data = self.sim.data
@@ -248,6 +477,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # below supplies post-state 20 without adding 20 redundant forwards.
         if substep_index > 0:
             self._cur_table_keepout |= self._table_keepout.sample(self.sim.data)
+            if getattr(self, "full_a_mode", False) and self._fullmdp_initialized:
+                self._full_a_latch_ball_contacts()
 
     def _latch_post_forward_table_keepout(self) -> None:
         self._cur_table_keepout |= self._table_keepout.sample(self.sim.data)
@@ -354,7 +585,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             (contact[:, 0] == self._ball_gid)
             | (contact[:, 1] == self._ball_gid)
         )
-        if bool(ball_contact.any()):
+        if bool(ball_contact.any()) and not getattr(self, "full_a_mode", False):
             raise RuntimeError("portable FullMDP initial-WAIT ball is in contact")
         st = st or self._state()
         joint_pos_rel = self._qpos_act() - self.q_ready.unsqueeze(0)
@@ -397,6 +628,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             actor_rows["epoch_launch_succeeded"] = self._epoch_launch_succeeded[
                 :, None
             ].to(dtype=joint_pos_rel.dtype)
+            if self.full_a_mode:
+                actor_rows["epoch_task_f32"] = self._epoch_task_f32
+                actor_rows["epoch_clock_remaining_s"] = (
+                    self._epoch_clock_ticks - int(self.common_step_counter)
+                ).to(dtype=joint_pos_rel.dtype) * self.step_dt
         else:
             actor_rows["epoch_phase_one_hot"][
                 :, observation_contract.EPOCH_IDLE_PHASE_INDEX
@@ -404,16 +640,45 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         policy = observation_contract.concatenate_layout_rows(
             observation_contract.ACTOR_LAYOUT_V1, actor_rows
         )
-        critic_extension = observation_contract.concatenate_layout_rows(
-            observation_contract.CRITIC_EXTENSION_LAYOUT_V1,
-            {
+        critic_rows = {
                 name: torch.zeros(
                     (self.num_envs, width),
                     dtype=joint_pos_rel.dtype,
                     device=self.device,
                 )
                 for name, width in observation_contract.CRITIC_EXTENSION_LAYOUT_V1
-            },
+            }
+        if self._fullmdp_initialized and self.full_a_mode:
+            present = torch.zeros(
+                (self.num_envs, 4), dtype=torch.bool, device=self.device
+            )
+            present[:, 0] = self._full_a_physical_present
+            age = torch.zeros(
+                (self.num_envs, 4), dtype=joint_pos_rel.dtype, device=self.device
+            )
+            age[:, 0] = torch.where(
+                self._full_a_physical_present,
+                (
+                    int(self.common_step_counter)
+                    - self._full_a_physical_source_step
+                ).to(joint_pos_rel.dtype) * self.step_dt,
+                torch.zeros_like(age[:, 0]),
+            )
+            facts = torch.zeros(
+                (self.num_envs, 4, observation_contract.OWNER_FACT_F32_WIDTH),
+                dtype=joint_pos_rel.dtype,
+                device=self.device,
+            )
+            facts[:, 0] = self._full_a_physical_fact_f32
+            critic_rows["physical_r03_r06_r07_fact_present"] = present.to(
+                joint_pos_rel.dtype
+            )
+            critic_rows["physical_r03_r06_r07_fact_age_s"] = age
+            critic_rows["physical_r03_r06_r07_fact_f32"] = facts.reshape(
+                self.num_envs, -1
+            )
+        critic_extension = observation_contract.concatenate_layout_rows(
+            observation_contract.CRITIC_EXTENSION_LAYOUT_V1, critic_rows
         )
         critic = torch.cat((policy, critic_extension), dim=1)
         if tuple(policy.shape) != (
@@ -538,6 +803,18 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._cur_touched[ids] = 0.0
         self._cur_robot_table[ids] = 0.0
         self._cur_table_keepout[ids] = False
+        if getattr(self, "full_a_mode", False) and hasattr(self, "_epoch_task_f32"):
+            self._epoch_task_f32[ids] = 0.0
+            self._epoch_clock_ticks[ids] = -1
+            self._full_a_physical_present[ids] = False
+            self._full_a_physical_source_step[ids] = -1
+            self._full_a_physical_fact_f32[ids] = 0.0
+            self._full_a_launch_state_f32[ids] = 0.0
+            self._full_a_observation_ordinal[ids] = 0
+            self._full_a_selected_contact[ids] = False
+            self._full_a_ball_table_contact[ids] = False
+            self._full_a_contact_center[ids] = 0.0
+            self._full_a_outcome_code[ids] = FULL_A_OUTCOME_NONE
 
     def reset(self):
         observations, extras = super().reset()
@@ -551,6 +828,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         return observations, extras
 
     def step(self, actions):
+        if getattr(self, "full_a_mode", False):
+            return self._step_full_a(actions)
         torch = self._torch
         incoming = actions.to(self.device)
         requested_qdes = self.q_ready.unsqueeze(0) + self.act_scale * incoming
@@ -594,10 +873,82 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         }
         return self.get_observations(), reward, dones.long(), extras
 
+    def _step_full_a(self, actions):
+        """Advance the one real reveal/launch/flight/outcome vertical slice."""
+
+        torch = self._torch
+        reveal_event, launch_event = self._full_a_prepare_step()
+        contact_before = self._full_a_selected_contact.clone()
+        incoming = actions.to(self.device)
+        requested_qdes = self.q_ready.unsqueeze(0) + self.act_scale * incoming
+        finite_qdes = torch.isfinite(requested_qdes)
+        safe_actions = torch.where(finite_qdes, incoming, self.actions)
+        self._advance_plant(safe_actions)
+        self.sim.forward()
+        self._latch_post_forward_resolved_table_contacts()
+        self._latch_post_forward_table_keepout()
+        self._full_a_latch_ball_contacts()
+        if self._cap_ok:
+            self._probe_capacity("forward")
+        st = self._state()
+        terminated, truncated, terminal_bits, resolved_table_contact = (
+            self._fullmdp_termination(st, requested_qdes)
+        )
+        reward, reward_terms = self._fullmdp_reward20()
+        self._full_a_publish_physical_fact()
+        shot_terminal, outcome = self._full_a_settle_outcome(st)
+        contact_event = self._full_a_selected_contact & ~contact_before
+        terminated |= shot_terminal
+        dones = terminated | truncated
+        selected_reset = dones & self._epoch_selected
+        terminal_phase = self._epoch_phase.clone()
+        selected_contact = self._full_a_selected_contact.clone()
+        table_contact = self._full_a_ball_table_contact.clone()
+        physical_center = self._full_a_physical_fact_f32[:, :3].clone()
+        reset_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+        if reset_ids.numel() > 0:
+            self.last_terminal_bits[reset_ids] = terminal_bits[reset_ids]
+            self._reset_idx(reset_ids)
+            self.reset_generation[reset_ids] += 1
+            self._clear_lifecycle(reset_ids)
+            self.sim.forward()
+            if self._cap_ok:
+                self._probe_capacity("forward")
+        self._refresh_aligned_teacher_body_pose()
+        self._compute_obs()
+        if self._cap_ok:
+            self._capacity_gate(f"FullMDP A step {self.common_step_counter}")
+        extras = {
+            "time_outs": truncated,
+            "termination_bits": terminal_bits,
+            "backend_resolved_table_contact": resolved_table_contact,
+            "reward_terms": reward_terms,
+            "reset_generation": self.reset_generation.clone(),
+            "full_a_phase_before_reset": terminal_phase,
+            "full_a_outcome_code": outcome,
+            "full_a_selected_contact": selected_contact,
+            "full_a_ball_table_contact": table_contact,
+            "full_a_physical_current_center": physical_center,
+            "full_a_reveal_event": reveal_event,
+            "full_a_launch_event": launch_event,
+            "full_a_flight_terminal_event": shot_terminal,
+            "full_a_selected_reset_event": selected_reset,
+            "full_a_contact_eligible_event": launch_event,
+            "full_a_selected_contact_event": contact_event,
+        }
+        return self.get_observations(), reward, dones.long(), extras
+
 
 __all__ = [
     "WAIT_BALL_PARK_HOPE",
     "READY_HOLD_PHASE_INDEX",
+    "FULL_A_PHASE_IDLE",
+    "FULL_A_PHASE_REVEAL_COMMITTED",
+    "FULL_A_PHASE_LAUNCH_SETTLED",
+    "FULL_A_PHASE_OUTCOME_SETTLED",
+    "FULL_A_OUTCOME_NONE",
+    "FULL_A_OUTCOME_FLIGHT_EXPIRED",
+    "FULL_A_OUTCOME_BALL_DEAD",
     "FULLMDP_TRACKED_BODY_NAMES",
     "FULLMDP_DENSE_REWARD_SPECS",
     "FULLMDP_TERMINATION_BITS",
