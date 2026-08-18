@@ -501,7 +501,7 @@ def test_finite_dq_sum_overflow_is_code9_and_does_not_change_peers(
     not torch.cuda.is_available(),
     reason="CUDA is unavailable for LM failure context-survival coverage",
 )
-@pytest.mark.parametrize("failure", ("info", "nonfinite"))
+@pytest.mark.parametrize("failure", ("info", "nonfinite", "overflow"))
 def test_cuda_diagnostic_lm_failure_rejects_rows_and_context_survives(
     sa_torch,
     protos_t,
@@ -509,21 +509,31 @@ def test_cuda_diagnostic_lm_failure_rejects_rows_and_context_survives(
     monkeypatch,
     failure,
 ):
+    real_seed = sa_torch._seed
     real_solve_ex = torch.linalg.solve_ex
     real_forward = sa_torch._forward_landing_fixed_dir
+
+    def failed_seed(*args, **kwargs):
+        seed = real_seed(*args, **kwargs)
+        if failure == "overflow":
+            seed = torch.full_like(seed, torch.finfo(seed.dtype).max)
+        return seed
 
     def failed_solve_ex(*args, **kwargs):
         result, info = real_solve_ex(*args, **kwargs)
         if failure == "info":
             info = torch.ones_like(info)
-        else:
+        elif failure == "nonfinite":
             result = torch.full_like(result, float("nan"))
+        else:
+            result = torch.full_like(result, torch.finfo(result.dtype).max)
         return result, info
 
     def finite_forward(q, *args, **kwargs):
         assert bool(torch.isfinite(q).all())
         return real_forward(q, *args, **kwargs)
 
+    monkeypatch.setattr(sa_torch, "_seed", failed_seed)
     monkeypatch.setattr(torch.linalg, "solve_ex", failed_solve_ex)
     monkeypatch.setattr(
         sa_torch,

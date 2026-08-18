@@ -8,7 +8,7 @@ physical forward前替回原finite `q`并按reason 8/9逐行拒绝，mixed peer�
 以新v11 ABI接入compact joint-safety，顺序为optimizer前prepare/validate，optimizer后
 `PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；没有静默修改旧v10。
 独立host回归为adapter 17、runtime wiring 90、semantic surface 66、questions 50、stroke chain 40，
-但stroke的2个CUDA context-survival节点在host跳过，因此不能据此启动4096。下一条仍是唯一
+但stroke的3个CUDA context-survival参数在host跳过，因此不能据此启动4096。下一条仍是唯一
 `4096×1000`同进程；前5次必须实际得到5组v11 WAL/safety receipt和真实D05 producer调用，不能由D05全零
 fixture代签。最终发车wrapper和exact Pod CUDA零skip尚未产生，Gate不晋级，旧失败run未被signal。
 
@@ -92,7 +92,7 @@ WAL无悬空PENDING，但进程停滞且log/result不再
 推进，所以可信科学边界止于ACK470，500/1000为`未测`。active checkout与进程不热补、不signal、不复用；
 fresh源码已把这条LM数值失败从CUDA-context级断言改成construction逐行拒绝：非零`solve_ex info`、
 非有限`dq`以及有限`q+dq`溢出均不得进入physical forward，并通过既有proposal ledger写具名reason 8/9；
-没有新增owner、receipt或并行gate。solver正常路径及故障反例=`40 passed,2 CUDA skipped`，continuous
+没有新增owner、receipt或并行gate。solver正常路径及故障反例=`40 passed,3 CUDA skipped`，continuous
 producer=`50 passed`。这只关闭已知fatal
 机制，不代签真实GPU或学习；下一条A使用fresh namespace直接启动4096 A1000，并把同一进程update0--4
 当作scale/finite观察窗，不再先开一条独立N=2 canary。

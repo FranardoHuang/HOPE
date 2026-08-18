@@ -3,7 +3,7 @@
 ## 2026-08-19 — 下一代代码面收口，运行面仍HOLD
 
 - LM reason 8/9共享ABI已统一；info失败、NaN/Inf和finite-add overflow都在physical forward前逐行拒绝。
-  host独立回归全部通过，但exact Pod CUDA context-survival仍未测，不能发4096。
+  host独立回归全部通过；三类CUDA context-survival已合并为同一Pod参数化节点，尚未实跑，不能发4096。
 - RSL3薄adapter新增v11 compact joint-safety事务；portable MuJoCo新增诚实的Full-A首纵切片。后者仍明确
   缺R03/R06/R07与Reward0--13，receipt固定`full_a_complete=false`；exact Pod live-contact节点仍待跑。
 - 因“下一代准备好、MuJoCo没有遗漏、TODO闭合”三项尚未同时成立，本轮没有signal旧失败run，也没有
