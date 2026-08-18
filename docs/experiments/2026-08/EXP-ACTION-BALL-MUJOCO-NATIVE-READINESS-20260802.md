@@ -11259,12 +11259,14 @@ launch state、20-substep plant、live contact、bounded terminal和selected res
 `task_lifecycle=full_a_slice_attempted`与`full_a_complete=false`。R03 strike fact、R06 landing outcome、
 R07 recovery和Reward项0--13仍是`not_produced`；因此这一结果不能解释为portable Full-A，也不能与
 native 114/114-D A1000的contact曲线直接比较。新增的GPU节点从真实racket geom和MuJoCo contact rows
-独立证明ball-racket pair，再穿production step验证latch；host没有执行该节点，所以live contact仍为`未测`。
+独立证明ball-racket pair，再穿production step验证latch。第一次Pod节点把mesh geom frame原点误当成
+mesh内部点，真实contact array按规格没有pair；改用production measured-racket site作为独立live blade点后，
+clean Git `2c8ef444…`在GPU1得到`1 passed`。这证明selected-contact调用点，不生产landing/recovery。
 
 **裁决。** 保留这一纵切片作为下一批producer的真实消费端，拒绝把PPO成功或手造extras当Full-A完成。
-在exact Pod节点零skip、R03/R06/R07与Reward0--13接通前，不启动portable MuJoCo A长跑，也不以它满足
-“MuJoCo没有遗漏”。Isaac下一代也仍需LM CUDA异常路径和v11 compact-safety真实前5次receipt；这些门未闭
-之前，旧失败run不因代码面更优而被停止。
+R03/R06/R07与Reward0--13接通前，不启动portable MuJoCo A长跑，也不以它满足“MuJoCo完整”。Isaac的
+LM CUDA异常路径已在Jiayi Python3.11/Torch2.7-cu128上三参数`3 passed`；下一阻塞收敛为v11 compact-safety
+真实前5次receipt和一次性4096 wrapper。旧失败run的PID已自然消失，没有stop动作。
 
 ### 2026-08-18：native A长跑预注册
 

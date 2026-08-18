@@ -8,6 +8,9 @@
   缺R03/R06/R07与Reward0--13，receipt固定`full_a_complete=false`；exact Pod live-contact节点仍待跑。
 - 因“下一代准备好、MuJoCo没有遗漏、TODO闭合”三项尚未同时成立，本轮没有signal旧失败run，也没有
   启动新run。下一条仍是唯一fresh `4096×1000`同进程，前5次只读观察后自然继续。
+- Pod1 clean Git `2c8ef444…`已补齐两项runtime证据：Jiayi Python3.11/Torch2.7 CUDA LM三类失败
+  `3 passed`；MuJoCo GPU measured-racket live pair→production step/latch `1 passed`。旧训练PID已自然消失，
+  三张GPU均空，未发signal。portable MuJoCo仍诚实保留R03/R06/R07/Reward0--13缺口。
 
 ## 2026-08-18 — 4096长跑口径更正；相关地形producer完成host门
 

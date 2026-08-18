@@ -8,8 +8,11 @@ live contact array、bounded flight terminal与selected reset。runner只累计�
 `task_lifecycle=full_a_slice_attempted`和`full_a_complete=false`；R03 strike fact、R06 landing outcome、
 R07 recovery以及Reward项0--13固定列为`not_produced`，因此它不是portable MuJoCo A完成证据。host组合
 为`27 passed,9 skipped`；新增opt-in节点不伪造contact bool，而是从production racket geom与live
-MuJoCo contact rows证明ball-racket pair，再穿真实`env.step`验证contact latch。该节点尚未在exact Pod
-零skip运行，所以live-contact证据仍`HOLD`；更不能用host或native 114/114-D A1000代签本Gate。
+MuJoCo contact rows证明ball-racket pair，再穿真实`env.step`验证contact latch。首次Pod节点使用mesh
+geom frame原点作为碰撞体内部点而失败；诊断证明该原点不在mesh体积内，而production measured-racket
+site会产生exact pair。测试改用这个独立live site后，clean Git `2c8ef444…`在Pod1 GPU1/NUMA3得到
+`1 passed`。这关闭selected-contact调用点，不关闭缺失的R03/R06/R07/Reward0--13；更不能用host或native
+114/114-D A1000代签本Gate。
 
 **2026-08-18 dual MuJoCo lanes（Gate 仍 `Partial`）：**portable lane已完成真实MuJoCo-Warp WAIT
 `learn(1)`（`N=2 × 24`、upstream RSL-RL3.1.2），但仍是`idle_wait_only`，不是full MuJoCo A。

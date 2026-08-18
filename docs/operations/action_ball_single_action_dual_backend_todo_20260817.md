@@ -98,9 +98,9 @@ deployment、真机或物理安全。
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 外部清理后Pod1约`249.8 GiB` free；A1000 ACK417时run目录仅约6.6MB，预计到1000新增日志不足约10MB，即使终点单checkpoint也远低于空间余量。未碰foreign PID、checkpoint、主日志或资产 | 不再为本run清理；只读监控实际增长，不按表观du删除硬链接/资产 |
 | 11 | `PASS-live-WAIT-learn1 / HOLD-full-A` | 同一fresh checkout在19-test后直接调用upstream RSL-RL3.1.2：`N=2 × 24`完成1次PPO update、48 transitions、229/399宽度，`final_rc=0`；result SHA=`322592ce…f07a`。lifecycle仍明确`idle_wait_only`，没有question/contact/outcome | 复用该VecEnv/runner接真实A reveal→flight→outcome；先短live再启动MuJoCo A长跑 |
 | 12 | `PASS-live-native-A1000 / HOLD-portable-A` | native A以`1024 env × 1000`自然完成：后500-update窗口binary racket-ball contact=`4078/87546=4.658%`，明显高于50--100窗口`6/8452=0.071%`；但robot-table episode fraction仍约97%，ABI为114/114、10-term简化Reward，缺WAIT/ActionEpoch/outcome/recovery | 只作下一代吞吐与Reward经济参考；不可写成portable 229/399 FullMDP A成功 |
-| 13 | `PASS-host / HOLD-Pod-CUDA` | LM code 8/9 已统一为`lm_solve_info_nonzero/lm_solve_nonfinite`；`dq`非有限、`solve_ex info!=0`以及有限`q+dq`溢出都在任何物理forward前逐行拒绝，正常peer保持不变。主线独立回归为runtime wiring 90、semantic surface 66、questions 50、stroke chain 40（3个CUDA参数skip） | 在exact Pod运行info/NaN/finite-overflow三类CUDA context-survival参数；零skip前不发4096 |
+| 13 | `PASS-Pod-CUDA` | LM code 8/9 已统一为`lm_solve_info_nonzero/lm_solve_nonfinite`；`dq`非有限、`solve_ex info!=0`以及有限`q+dq`溢出都在任何物理forward前逐行拒绝，正常peer保持不变。exact Pod1 Git `2c8ef444…`、Jiayi Python3.11/Torch2.7-cu128在GPU0得到三参数`3 passed`，每次后续kernel与synchronize正常 | 进入唯一4096同进程；真实异常仍需写row/iteration/try/info以继续收窄 |
 | 14 | `PASS-structural / HOLD-live-business` | RSL3薄adapter升级独立v11 telemetry：compact joint-safety在optimizer前prepare/validate，随后`PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；4096×5单元反例得到5组pair和5份post-ACK receipt | 4096同进程前5次必须独立看到5份v11 safety receipt，并要求真实D05 producer/counter被调用；单元fixture的D05全零不能代签 |
-| 15 | `PASS-host-slice / HOLD-portable-A` | portable MuJoCo新增诚实的`full_a_slice_attempted`纵切片：逐行reveal、真实ball state launch、20-substep plant、live contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。R03、R06 landing outcome、R07 recovery及Reward项0--13仍明确`not_produced` | 先在exact Pod跑live ball-racket contact节点；随后逐项接通缺失producer。未闭合前不得称MuJoCo A、不得用它满足“MuJoCo没有漏东西” |
+| 15 | `PASS-live-contact-slice / HOLD-portable-A` | portable MuJoCo新增诚实的`full_a_slice_attempted`纵切片：逐行reveal、真实ball state launch、20-substep plant、live contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。exact Pod1 Git `2c8ef444…`、GPU1节点从measured racket site构造真实ball-racket pair并穿production step/latch，`1 passed`。R03、R06 landing outcome、R07 recovery及Reward项0--13仍明确`not_produced` | 并行逐项接通缺失producer；未闭合前不得称MuJoCo A，但不再阻塞Isaac 4096 A1000 |
 
 ## 5. 下一条发射协议
 
@@ -115,8 +115,9 @@ deployment、真机或物理安全。
 当前尚无可执行的4096 wrapper；必须在真实GPU/显存、每卡最多两个进程、独立child CPU affinity与
 不复用namespace均可证明后冻结一次性发射件。旧失败run只有在以下条件同时成立时才能按已绑定的唯一
 PID链停止：LM exact Pod异常路径零skip、v11 adapter真实callpoint可被前5次消费、portable MuJoCo缺失项
-已被明确列出且没有被成功receipt掩盖、最终commit/wrapper经独立红队。当前这些条件尚未全部成立，
-所以截至2026-08-19没有向旧run发signal，也没有启动下一代。
+已被明确列出且没有被成功receipt掩盖、最终commit/wrapper经独立红队。Pod1三张GPU和相关旧PID已自然
+释放，因此不再需要stop动作；截至本次更新仍未启动下一代，唯一剩余发射阻塞是final commit/wrapper与
+真实v11前5次消费设计的冻结审查。
 下面保留旧命令与失败证据，防止误复用。
 
 ### 已消费旧命令

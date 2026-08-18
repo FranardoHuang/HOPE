@@ -7,10 +7,11 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 physical forward前替回原finite `q`并按reason 8/9逐行拒绝，mixed peer保持不变。RSL3薄adapter同时
 以新v11 ABI接入compact joint-safety，顺序为optimizer前prepare/validate，optimizer后
 `PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；没有静默修改旧v10。
-独立host回归为adapter 17、runtime wiring 90、semantic surface 66、questions 50、stroke chain 40，
-但stroke的3个CUDA context-survival参数在host跳过，因此不能据此启动4096。下一条仍是唯一
+独立host回归为adapter 17、runtime wiring 90、semantic surface 66、questions 50、stroke chain 40。
+host上的3个CUDA参数原先跳过；exact Pod1 clean Git `2c8ef444…`随后在Jiayi Python3.11/
+PyTorch2.7-cu128、GPU0/NUMA2上得到`3 passed`，三类失败后CUDA kernel和synchronize均正常。下一条仍是唯一
 `4096×1000`同进程；前5次必须实际得到5组v11 WAL/safety receipt和真实D05 producer调用，不能由D05全零
-fixture代签。最终发车wrapper和exact Pod CUDA零skip尚未产生，Gate不晋级，旧失败run未被signal。
+fixture代签。最终发车wrapper尚未冻结，Gate不晋级；旧失败PID链已自然消失，全程未发signal。
 
 **2026-08-18 scale裁决更正（Gate 仍 `Partial`）：**此前`N=2 × 2`只证明构造、reset、229/399 ABI、
 Reward20 finite和optimizer/WAL调用点；后续`N=2` A1000不是学习规模，不能用于评价policy效果。它的可信

@@ -76,7 +76,8 @@ URDF/meshes仍是非 Git 资产；如复现 Jiayi 的 Hitter baseline，必须�
 - `PASS`：FullMDP IsaacLab8320 lifecycle、exact Kit cfg/train wiring、N=2 canonical reset和forced selected reset。
 - `PASS-direct`：FullMDP RSL3 optimizer boundary/WAL adapter；v11 compact joint-safety结构顺序已通过host反例。
 - `PASS-historical-N2`：FullMDP RSL3真实 `N=2×2`曾闭合optimizer/WAL，只作工程证据。
-- `HOLD-next-4096`：最终commit/wrapper、exact Pod LM CUDA异常路径和真实v11前5次receipt尚未冻结。
+- `PASS-Pod-CUDA`：clean Git `2c8ef444…`在Jiayi Python3.11/Torch2.7-cu128完成LM info/NaN/finite-overflow三参数，CUDA context存活。
+- `HOLD-next-4096`：最终commit/wrapper和真实v11前5次receipt尚未冻结。
 - `未测`：可信4096 A1000趋势、C、完整checkpoint/restore、portable MuJoCo Full-A semantic runtime。
 
 环境 `PASS` 只回答“代码在同一软件栈上执行”，不回答 Reward 是否合理、是否可学或跨机逐位相同。
