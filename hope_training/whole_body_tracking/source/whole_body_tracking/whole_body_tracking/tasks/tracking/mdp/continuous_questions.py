@@ -92,7 +92,13 @@ _R_SPEED_UNDER = 3
 _R_NET = 5
 _R_FACE = 6
 _R_CONTACT_ENVELOPE = 7
-_CONTINUOUS_REASONS = REASONS + ("contact_normal_speed_out_of_fit",)
+_R_LM_SOLVE_INFO = 8
+_R_LM_SOLVE_NONFINITE = 9
+_CONTINUOUS_REASONS = REASONS + (
+    "contact_normal_speed_out_of_fit",
+    "lm_solve_info_nonzero",
+    "lm_solve_nonfinite",
+)
 
 # Device-resident producer-fault ABI.  These bits describe the input row, not
 # whether the numerical inverse solve found an installable answer.  A valid but
@@ -623,6 +629,13 @@ def _fixed_direction_replay(
         & (normal_speed >= CONTACT_NORMAL_SPEED_MIN_MPS)
         & (normal_speed <= CONTACT_NORMAL_SPEED_MAX_MPS)
     )
+    lm_solve_info_ok = out.get(
+        "lm_solve_info_ok", torch.ones_like(contact_ok)
+    )
+    lm_solve_finite = out.get(
+        "lm_solve_finite", torch.ones_like(contact_ok)
+    )
+    numerical_ok = lm_solve_info_ok & lm_solve_finite
 
     v_plus, w_plus = predict_paddle_contact(
         v_ball_in, out["v_r"], physical_n, w_ball_in, prm)
@@ -651,6 +664,7 @@ def _fixed_direction_replay(
         & net_ok
         & face_ok
         & contact_ok
+        & numerical_ok
     )
 
     reasons = torch.full_like(good, _R_NO_LANDING, dtype=torch.long)
@@ -675,6 +689,16 @@ def _fixed_direction_replay(
         & face_ok
         & ~contact_ok,
         torch.full_like(reasons, _R_CONTACT_ENVELOPE),
+        reasons,
+    )
+    reasons = torch.where(
+        ~lm_solve_info_ok,
+        torch.full_like(reasons, _R_LM_SOLVE_INFO),
+        reasons,
+    )
+    reasons = torch.where(
+        lm_solve_info_ok & ~lm_solve_finite,
+        torch.full_like(reasons, _R_LM_SOLVE_NONFINITE),
         reasons,
     )
     reasons = torch.where(good, torch.full_like(reasons, -1), reasons)

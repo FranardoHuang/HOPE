@@ -356,11 +356,8 @@ def solve_strike_specs_fixed_dir(
     cost = torch.where(valid, torch.sum(r * r, dim=-1), BIG)
     hstep = torch.tensor([3.5e-3, 3.5e-3, 0.02], device=dev, dtype=dt)
     lam = torch.full((N,), 1e-3, device=dev, dtype=dt)
-    diagnostic_solve_ok = (
-        torch.ones(N, dtype=torch.bool, device=dev)
-        if diagnostic_fixed_try_lm
-        else None
-    )
+    lm_solve_info_ok = torch.ones(N, dtype=torch.bool, device=dev)
+    lm_solve_finite = torch.ones(N, dtype=torch.bool, device=dev)
 
     for _ in range(n_iters):
         if diagnostic_fixed_try_lm:
@@ -455,6 +452,9 @@ def solve_strike_specs_fixed_dir(
             )
             dq = dq_col.reshape(4, N, 3)
             info = info.reshape(4, N)
+            candidate_info_ok = info == 0
+            candidate_finite = torch.isfinite(dq).all(dim=-1)
+            candidate_solve_ok = candidate_info_ok & candidate_finite
             q_new = q.unsqueeze(0) + dq
             # Search box only: the ACCEPTED command is rejected outright if it needs more speed,
             # so this never produces a silently clamped output.
@@ -481,7 +481,7 @@ def solve_strike_specs_fixed_dir(
                 torch.sum(r_new * r_new, dim=-1),
                 BIG,
             )
-            better = cost_new < cost.unsqueeze(0)
+            better = (cost_new < cost.unsqueeze(0)) & candidate_solve_ok
             any_better = better.any(dim=0)
             first_better = torch.argmax(
                 better.to(dtype=torch.long),
@@ -509,9 +509,11 @@ def solve_strike_specs_fixed_dir(
                 torch.arange(4, device=dev).unsqueeze(1)
                 <= active_through.unsqueeze(0)
             )
-            solve_ok = (info == 0) & torch.isfinite(dq).all(dim=-1)
-            diagnostic_solve_ok = diagnostic_solve_ok & (
-                (~active_candidates) | solve_ok
+            lm_solve_info_ok = lm_solve_info_ok & (
+                (~active_candidates) | candidate_info_ok
+            ).all(dim=0)
+            lm_solve_finite = lm_solve_finite & (
+                (~active_candidates) | candidate_finite
             ).all(dim=0)
 
             q = torch.where(any_better.unsqueeze(-1), selected_q, q)
@@ -544,12 +546,6 @@ def solve_strike_specs_fixed_dir(
             lam = torch.where(any_better, accepted_lam, failed_lam)
             accepted = any_better
 
-    if diagnostic_fixed_try_lm:
-        torch._assert_async(
-            diagnostic_solve_ok.all(),
-            "diagnostic fixed-try LM solve produced non-finite output or nonzero solve_ex info",
-        )
-
     if not diagnostic_fixed_try_lm:
         land_xy, valid, v_r, n, net_z = fwd(q)
     resid = torch.linalg.norm(land_xy - target_xy, dim=-1)
@@ -558,7 +554,8 @@ def solve_strike_specs_fixed_dir(
     net_ok = torch.isfinite(net_z) & (net_z > net_top + ball_radius + net_margin_m)
     face_ok = n[:, 0] > 1e-6
     speed_ok = (s >= speed_min - 1e-9) & (s <= speed_max + 1e-9)
-    ok = valid & (resid < tol_m) & speed_ok & net_ok & face_ok
+    numerical_ok = lm_solve_info_ok & lm_solve_finite
+    ok = valid & (resid < tol_m) & speed_ok & net_ok & face_ok & numerical_ok
 
     reason = torch.zeros(N, dtype=torch.long, device=dev)          # 0 = no_landing
     reason = torch.where(valid, torch.ones_like(reason), reason)   # 1 = resid_gt_tol
@@ -574,6 +571,8 @@ def solve_strike_specs_fixed_dir(
         "v_r": v_r, "n": n, "speed": s,
         "landing_xy": land_xy, "resid_m": resid, "net_z": net_z,
         "clears_net": net_ok, "ok": ok, "reason": reason, "q": q,
+        "lm_solve_info_ok": lm_solve_info_ok,
+        "lm_solve_finite": lm_solve_finite,
     }
 
 

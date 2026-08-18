@@ -8,6 +8,10 @@
 - 可复现验收：[gates/](gates/)
 - 缩写与人话释义：[DEFINITIONS](DEFINITIONS.md)
 
+- 2026-08-18: FullMDP fixed-try LM不再以`_assert_async`处理普通数值不可解。非零`solve_ex info`和
+  非有限`dq`先从candidate selection剔除，再沿既有proposal ledger写具名reason 8/9并逐行拒绝；没有新增
+  owner、receipt或gate。host solver=`39 passed`、continuous producer=`50 passed`；真实GPU与新A1000仍待fresh run。
+
 - 2026-08-18: FullMDP A1000的可信边界止于ACK470（零基update469、22560 steps）：WAL无悬空PENDING。
   下一段rollout的fixed-try LM在`solve_ex`后因`info!=0`或非有限`dq`触发device assert；row/类别未落盘，
   后续PhysX与D05 poison错误来自坏context。PID仍活但证据停止推进；不signal、不热补、不复用namespace。

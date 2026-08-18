@@ -375,17 +375,28 @@ def test_diagnostic_fixed_try_lm_fails_closed_on_solve_failure(
         return result, info
 
     monkeypatch.setattr(torch.linalg, "solve_ex", failed_solve_ex)
-    with pytest.raises(
-        RuntimeError,
-        match="non-finite output or nonzero solve_ex info",
-    ):
-        _fixed_dir_batch(
-            sa_torch,
-            protos_t,
-            prm,
-            n_iters=1,
-            authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
-        )
+    monkeypatch.setattr(
+        torch,
+        "_assert_async",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("numerical row rejection called _assert_async")
+        ),
+    )
+    out = _fixed_dir_batch(
+        sa_torch,
+        protos_t,
+        prm,
+        n_iters=1,
+        authority=sa_torch._DIAGNOSTIC_FIXED_TRY_LM_AUTHORITY,
+    )
+    assert out["ok"].tolist() == [False, False, False]
+    if failure == "info":
+        assert out["lm_solve_info_ok"].tolist() == [False, False, False]
+        assert out["lm_solve_finite"].tolist() == [True, True, True]
+    else:
+        assert out["lm_solve_info_ok"].tolist() == [True, True, True]
+        assert out["lm_solve_finite"].tolist() == [False, False, False]
+    assert torch.isfinite(out["q"]).all()
 
 
 def test_c1_direction_is_exact_by_construction(sa_torch, protos_t, prm):

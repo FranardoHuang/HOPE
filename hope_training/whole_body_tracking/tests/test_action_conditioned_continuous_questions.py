@@ -353,6 +353,48 @@ def test_selected_physical_face_must_approach_inside_contact_fit(
     assert correct_face.ok.tolist() == [True]
 
 
+@pytest.mark.parametrize(
+    ("failed_flag", "reason_code", "reason_name"),
+    (
+        ("lm_solve_info_ok", 8, "lm_solve_info_nonzero"),
+        ("lm_solve_finite", 9, "lm_solve_nonfinite"),
+    ),
+)
+def test_fixed_try_lm_numerical_failure_is_a_named_row_rejection(
+    cq, prm, monkeypatch, failed_flag, reason_code, reason_name,
+):
+    def numerical_solver(*args, **kwargs):
+        out = _fake_solver(*args, **kwargs)
+        row_count = int(out["ok"].shape[0])
+        out["lm_solve_info_ok"] = torch.ones(row_count, dtype=torch.bool)
+        out["lm_solve_finite"] = torch.ones(row_count, dtype=torch.bool)
+        out[failed_flag][0] = False
+        return out
+
+    monkeypatch.setattr(cq, "solve_strike_specs_fixed_dir", numerical_solver)
+    monkeypatch.setattr(cq, "predict_paddle_contact", _identity_contact)
+    monkeypatch.setattr(cq, "coarse_landing", _legal_scorer)
+    rows = _external_rows(2)
+    out = cq.solve_proposals(
+        rows["clip_ids"],
+        rows["p_contact"],
+        rows["v_ball_in"],
+        rows["w_ball_in"],
+        rows["aim_xy"],
+        rows["ref_normal"],
+        protos=_varied_protos(2),
+        base_quat=rows["base_quat"],
+        prm=prm,
+        surface_z=0.78,
+        net_x=1.87,
+        net_top_z=0.9325,
+        cfg=_fixed_cfg(cq),
+    )
+    assert out.ok.tolist() == [False, True]
+    assert out.proposals.reason_code.tolist() == [reason_code, -1]
+    assert out.reason_counts == {reason_name: 1}
+
+
 def test_contact_normal_speed_outside_venue_fit_is_rejected(
     cq, prm, monkeypatch,
 ):
@@ -928,6 +970,7 @@ def test_exact_proposal_host_packet_rejects_discrete_contract_drift(
         cq._build_proposal_host_packet(
             reason_codes=torch.tensor([reason], dtype=torch.long),
             admitted=torch.tensor([admitted], dtype=torch.bool),
+            producer_fault_bits=torch.zeros(1, dtype=torch.long),
             racket_velocity=torch.zeros((1, 3), dtype=torch.float32),
             racket_normal=torch.zeros((1, 3), dtype=torch.float32),
             residual=torch.zeros((1,), dtype=torch.float32),
@@ -958,7 +1001,7 @@ def test_diagnostic_prevalidated_solver_rejects_forged_authority(
 
 
 @pytest.mark.parametrize("invalid_kind", ("nan_input", "bad_proto"))
-def test_diagnostic_prevalidated_solver_async_rejects_invalid_dynamic_state(
+def test_diagnostic_prevalidated_solver_records_invalid_dynamic_state(
     cq, prm, invalid_kind,
 ):
     rows = _external_rows(1)
@@ -970,7 +1013,7 @@ def test_diagnostic_prevalidated_solver_async_rejects_invalid_dynamic_state(
 
     with pytest.raises(
         RuntimeError,
-        match="diagnostic producer emitted invalid prevalidated solver inputs",
+        match="diagnostic proposal producer fault bits are nonzero",
     ):
         cq.solve_proposals(
             rows["clip_ids"],

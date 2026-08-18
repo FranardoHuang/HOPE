@@ -117,7 +117,10 @@ plant facts走到owner projection、Motion reveal和D05 settle，得到两行ACC
 fixed-try LM在`solve_ex`后因`info!=0`或非有限`dq`触发device assert；具体row、类别和更上游数值原因未
 落盘。同一坏context随后令PhysX view与D05 poison attribution失败，子进程保留为停滞态。WAL没有悬空
 PENDING，故0--469仍是可信负证据；500/1000和Reward趋势均为`未测`。下一实验必须用fresh namespace
-记录LM row/info/finite并同步首错，不能从后续PhysX/Python观察面猜因或重试现有namespace。
+验证新的逐行数值拒绝：`solve_ex info!=0`和非有限`dq`不再参与候选选择，分别写入既有proposal ledger的
+`lm_solve_info_nonzero`/`lm_solve_nonfinite`，不再使用会摧毁CUDA context的`_assert_async`。该修改只把
+可预期的数值不可解改成可学习流程中的具名construction rejection，不把异常称为安全证明，也不改变Reward。
+不能从后续PhysX/Python观察面猜因或重试现有namespace。
 隔离进程回归为integration=`1 passed`、recovery-device=`80 passed`、live-facts=`25 passed, 6 skipped`、
 Epoch rowwise=`51 passed, 7 skipped`；旧completed-action true-writer fixture也继续验证 keyed telemetry 正常发布。
 
