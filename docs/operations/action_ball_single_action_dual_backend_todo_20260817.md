@@ -149,10 +149,19 @@ nonfinite=`0/0`、conservation violation=`0/0`；mean episode length约`87.6/86.
 `12/28`，其中not-ready defer=`11/25`、reject=`1/3`、ACCEPT=`0/0`。链路可信但task producer仍未ready，
 所以继续100/200，不把0 ACCEPT归咎于Reward比例。
 
+fresh update100累计4800个actual Reward sample全finite、0 conservation violation，mean episode length=
+`85.36`；58次selected为54 not-ready defer、4 reject、0 ACCEPT。它与旧run到update100的已记录数值
+精确一致，说明LM row-reject修复没有改变此前正常前缀；继续200。
+
 native A1000 的update20/50从完整JSONL读取：累计episode length约`145.45/145.56`，节点min racket-ball
 distance约`0.454/0.448 m`，binary contact=`0/0`，action-rate income约`-3.65e-5/-3.78e-5`，累计
 负/正Reward比约`0.00270/0.00286`；capacity overflow和nonfinite均为0。当前未见负惩罚压垮正收入，
 更像接触/可达性尚未学到；按预注册继续100/200，不因0 contact早停。
+
+native的50--100窗口首次出现真实binary racket-ball contact：`6/8452=0.071%`；100--200窗口为
+`32/17025=0.188%`，约2.65倍。同期mean min distance仍约`0.461/0.462 m`，episode length约
+`145.22/144.47`，所以只称“稀少接触率上升”，不称整体命中。action-rate income均值约
+`-3.96e-5/-4.34e-5`，负/正Reward比约`0.00307/0.00326`，不是当前主导惩罚。继续500。
 
 update100的WAL前缀闭合到ACK99：`1,297,132 B`，SHA256=
 `fdce022ba481fe7848619c3fa59244485629900b59df3de5ffda94e0d4606ed9`。累计100个update中，
@@ -187,6 +196,11 @@ source step和Motion next-tick ready；completed shot和错误key继续fail clos
 当前复杂度不是乒乓任务本身需要，而是历史上叠加了 RSL2/RSL3、legacy/full-MDP、多个 owner、receipt、
 journal、checkpoint schema 和重复证明 gate。核心闭包约 14.9 万行，热路径约 11.8 万行；同类参考仓库
 的共同训练闭包约 1.1k--1.6k 行。这个差距说明当前实现有真实技术债，不说明任务天然需要 100 倍代码。
+
+2026-08-18重新计数：整个production Python树约305,720行；`hope_commands/commands/landing-device/旧runner/
+physical-device/runtime`六个单体分别约32.6k/20.1k/16.3k/14.6k/13.3k/11.3k，合计超过108k。
+`commands`与`hope_commands`还由同一`mdp/__init__.py`双 wildcard导入。这是历史兼容与并行语义堆叠，
+不是物理任务固有复杂度；它也解释了为何每次改动都要跨多份一致性证明。
 
 减法顺序必须由真实运行证明保护：
 

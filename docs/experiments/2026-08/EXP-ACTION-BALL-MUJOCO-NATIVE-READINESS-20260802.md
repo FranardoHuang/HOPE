@@ -11246,3 +11246,9 @@ update20/50完整JSONL显示：累计episode length约`145.45/145.56`；节点mi
 `0.454/0.448 m`；binary contact仍0；action-rate income约`-3.65e-5/-3.78e-5`；累计负/正Reward比
 约`0.00270/0.00286`；capacity overflow与nonfinite均为0。与历史“负惩罚压垮正收入”不同，当前
 更像contact geometry/可达性尚未学到。按预注册继续100/200，不在50步改权重或停止。
+
+50--100窗口首次产生`6/8452=0.071%`binary racket-ball contact；100--200窗口为
+`32/17025=0.188%`，约2.65倍。mean min distance仍约`0.461/0.462 m`，episode length约
+`145.22/144.47`，所以只称有稀少接触率上升，不能称整体更接近球。action-rate income均值约
+`-3.96e-5/-4.34e-5`、负/正Reward比约`0.00307/0.00326`，负惩罚不是当前主瓶颈。
+capacity overflow/nonfinite均为0，继续500。

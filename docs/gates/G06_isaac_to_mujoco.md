@@ -11,6 +11,8 @@ episode termination和Reward telemetry。其XML与split-ready pose现为显式CL
 native A1000的完整JSONL update20/50显示episode length约145.45/145.56、min racket-ball distance约
 0.454/0.448 m、binary contact仍0；action-rate income约`-3.65e-5/-3.78e-5`，capacity/nonfinite正常。
 按预注册继续，不把短窗0 contact当停止门。
+50--100窗口随后得到`6/8452=0.071%`真实binary contact，100--200为`32/17025=0.188%`；
+mean min distance仍约0.462 m，故只记为稀少接触率上升。capacity/nonfinite继续为0，运行保留到500。
 
 **2026-08-18 producer-first更正（Gate 仍 `Partial`）：**一次M05 root骨架尝试只把真实
 Plant/MotionBank/R05/M04构造到一起，但`step/reset`仍fail-closed，属于HANDOFF禁止的zero-callpoint
