@@ -21997,6 +21997,50 @@ def _require_sealed_rsl_import_resolution(
         raise RuntimeError("sealed RSL archive is not the selected import authority")
 
 
+def _module_origin_matches(module, allowed_origins) -> bool:
+    """Return whether a live module came from one exact approved entrypoint."""
+
+    module_path = pathlib.Path(module.__file__).resolve()
+    return module_path in {
+        pathlib.Path(origin).resolve() for origin in allowed_origins
+    }
+
+
+def _require_loaded_module_closure(prefix, package_root, required_modules) -> None:
+    """Reject a live package whose already-loaded children came from elsewhere."""
+
+    package_root = pathlib.Path(package_root).resolve()
+    for name, module in tuple(sys.modules.items()):
+        if name != prefix and not name.startswith(f"{prefix}."):
+            continue
+        module_file = getattr(module, "__file__", None)
+        if module_file is None:
+            continue
+        module_path = pathlib.Path(module_file).resolve()
+        if package_root not in module_path.parents:
+            raise RuntimeError(
+                f"post-AppLauncher {prefix} closure escaped its selected root: "
+                f"{name}={module_path}"
+            )
+    for name in required_modules:
+        module = sys.modules.get(name)
+        module_file = getattr(module, "__file__", None)
+        if module_file is None or package_root not in pathlib.Path(module_file).resolve().parents:
+            raise RuntimeError(
+                f"post-AppLauncher required {prefix} module escaped its selected root: {name}"
+            )
+
+
+def _require_module_attribute_identity(package, attribute, fullname) -> None:
+    """Bind a consumed package attribute to the attested sys.modules object."""
+
+    loaded = sys.modules.get(fullname)
+    if loaded is None or getattr(package, attribute, None) is not loaded:
+        raise RuntimeError(
+            f"post-AppLauncher {fullname} package attribute identity changed"
+        )
+
+
 def _require_action_ball_runtime_unloaded_before_app_start() -> None:
     """Prove Hydra did not preload the attested runtime before Kit."""
 
@@ -22205,9 +22249,38 @@ def _attest_action_ball_runtime_after_app_start() -> None:
         and importlib.metadata.version("rsl-rl-lib") == "3.1.2"
     ):
         raise RuntimeError("post-AppLauncher Python/RSL dependency ABI changed")
-    for module in (torch, tensordict):
-        if venv_site not in pathlib.Path(module.__file__).resolve().parents:
-            raise RuntimeError("post-AppLauncher dependency escaped the frozen venv")
+    # AppLauncher owns the first Torch import and Isaac Sim 5.1 resolves that
+    # import from its pinned ``omni.isaac.ml_archive`` bundle.  TensorDict and
+    # every policy module still come from the frozen venv/sealed RSL archive.
+    # Derive the one allowed Kit Torch root from the already-hashed interpreter
+    # instead of accepting an arbitrary same-version package.
+    kit_python = pathlib.Path("/proc/self/exe").resolve()
+    isaac_sim_root = kit_python.parents[3]
+    kit_torch_site = (
+        isaac_sim_root / "exts/omni.isaac.ml_archive/pip_prebundle"
+    ).resolve()
+    dependency_origins = {
+        torch: (
+            venv_site / "torch/__init__.py",
+            kit_torch_site / "torch/__init__.py",
+        ),
+        tensordict: (venv_site / "tensordict/__init__.py",),
+    }
+    for module, allowed_origins in dependency_origins.items():
+        module_path = pathlib.Path(module.__file__).resolve()
+        if not _module_origin_matches(module, allowed_origins):
+            raise RuntimeError(
+                "post-AppLauncher dependency escaped its frozen roots: "
+                f"{module.__name__}={module_path}"
+            )
+    _require_loaded_module_closure(
+        "torch", pathlib.Path(torch.__file__).resolve().parent, ("torch.optim", "torch._C")
+    )
+    _require_module_attribute_identity(torch, "optim", "torch.optim")
+    _require_module_attribute_identity(torch, "_C", "torch._C")
+    _require_loaded_module_closure(
+        "tensordict", pathlib.Path(tensordict.__file__).resolve().parent, ()
+    )
     for module, path in expected.items():
         if pathlib.Path(module.__file__) != path:
             raise RuntimeError("post-AppLauncher RSL module escaped the sealed archive")
@@ -22225,6 +22298,7 @@ def _attest_action_ball_runtime_after_app_start() -> None:
         runner.PPO is ppo.PPO
         and runner.ActorCritic is actor.ActorCritic
         and ppo.RolloutStorage is storage.RolloutStorage
+        and ppo.optim is sys.modules["torch.optim"]
         and ppo.optim.Adam is torch.optim.Adam
     ):
         raise RuntimeError("post-AppLauncher RSL class wiring changed")

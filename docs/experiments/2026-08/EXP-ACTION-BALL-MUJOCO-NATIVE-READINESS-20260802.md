@@ -11345,3 +11345,11 @@ second 4096 one-shot（commit `d341931c…`、wrapper `60cfdeed…`）也没有�
 Torch/RSL/TensorDict未预载，该因素不是唯一根因；保留下来的共同异常是两次都绕过常规direct-script入口，
 采用`python.sh -P -S -B -c runpy(...)`。下一successor回到成功N2同类的direct script形状，删除`-S/-c/runpy`，
 只保留`-P/-B`与production内同一pre/post-App attestation；仍直接使用fresh 4096长预算，不另跑小N。
+
+第六个`4096×25000`尝试没有产生学习样本。commit=`00cc5425…`、wrapper=`edb7fec4…`的GPU preexec和
+AppLauncher均通过，post-App在scene/PPO/WAL之前拒绝`post-AppLauncher dependency escaped the frozen
+venv`。只读根因对照显示：AppLauncher选择Isaac Sim 5.1
+`exts/omni.isaac.ml_archive/pip_prebundle/torch`，版本`2.7.0+cu128`且入口SHA与冻结venv Torch相同；
+旧门错误地把“必须来自venv”当成Torch规格。采用的修复是Kit Torch exact entrypoint或venv二选一，且
+live `torch.*`必须全在同一selected package root，且实际消费的parent attributes必须与`sys.modules`同一对象；TensorDict仍只能来自venv，RSL仍来自sealed archive。
+由于runtime receipt、PPO和WAL均为0，本次不能解释4096容量或Reward。

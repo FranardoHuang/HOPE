@@ -9,7 +9,7 @@
 ## 1. 目标
 
 在 `shot_slot_capacity=1`、同一 `action_slot=0` 下，先让 Isaac family A 以 `4096 env` 真实运行，
-在同一进程跑到1000 个 PPO update并读取中间趋势；随后按相同环境、seed 和训练设置运行 family C。
+在同一进程跑到25000 个 PPO update；1000只是早期趋势节点，不停机。随后按相同环境、seed 和训练设置运行 family C。
 `N=2`只允许回答构造、reset、ABI和optimizer调用点，不作为学习效果或长跑证据。只有 Isaac 的真实
 opportunity/contact/outcome/recovery 分母与学习趋势可解释后，才让 MuJoCo GPU A/C 消费同一 MDP
 语义。全部运行均为 [`diagnostic_unauthorized`](../DEFINITIONS.md)，不授权 formal promotion、export、
@@ -38,9 +38,9 @@ deployment、真机或物理安全。
 - Git 管理代码；忽略的机器人 USD/大模型只作为外部资产，以源路径和 SHA-256 绑定。
 - FullMDP 使用 upstream RSL3 `OnPolicyRunner.learn()`；只在零参数 `alg.update()` 外包一层
   `PENDING fsync -> owner ACK -> EPOCH_ACK fsync -> stdout`。
-- 第一条可信学习 run 使用 Git exact commit 和 `4096 env × 1000 update`；前5个update只是同一进程的
+- 第一条可信学习 run 使用 Git exact commit 和 `4096 env × 25000 update`；前5个update只是同一进程的
   construction/capacity/finite观察窗，通过后自然继续，不另起或重跑smoke。
-- A1000 在 5/20/50/100/200/500/1000 只读里程碑，不为里程碑重启，也不因“看起来不好”自动停止。
+- A25000 在 5/20/50/100/200/500/1000/2500/5000/10000/25000 只读里程碑，不为里程碑重启，也不因“看起来不好”自动停止。
 - Pod1 按物理 GPU 与 CPU locality 调度：每卡最多两个进程；每个新进程固定独立 CPU 核组，
   不再用一个全 Pod 生命周期 Kit 锁把三张卡串成一张卡。共卡只要求显存余量、同卡进程上限和
   独立 namespace，不把共卡 wall time 当单进程性能证据。
@@ -106,6 +106,7 @@ deployment、真机或物理安全。
 | 18 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | third 4096 one-shot消费commit `356f706b…`、wrapper `00e340b7…`和fresh namespace；normal `python.sh -P -B train.py` 已稳定进入AppLauncher并完成约10秒Kit启动，随后production post-App gate拒绝AppLauncher合法加载的Torch。preexec通过、v2 receipt/scene/PPO/WAL仍为零；GPU与锁自然释放 | 不新增门；把post-App门缩到真正必须未加载的RSL/TensorDict，App前仍拒绝Torch/RSL/TensorDict，并继续对App-owned Torch核exact版本与venv来源。新commit/namespace直发同一4096长跑，不插smoke |
 | 19 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | fourth one-shot消费commit `d2cd7911…`、wrapper `41cd2d2a…`和fresh namespace；Torch范围修正生效，随后Kit Python在同一post-App门因未导出`F_SEAL_*`符号而拒绝，preexec通过但v2 receipt/scene/PPO/WAL仍为零，进程与GPU自然释放 | seal验证继续保留，但直接使用Linux uapi的`F_GET_SEALS=1034`与四个seal位；exact Pod父进程创建/封印memfd→Kit继承读取已PASS。不把Kit Python可选符号别名当训练ABI；下一条直接扩成同进程`4096×25000`，不是另跑smoke |
 | 20 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | fifth one-shot消费commit `6b3078bc…`和fresh 25k namespace；真实RSL serializer contract、GPU preexec、AppLauncher约10秒启动均通过，随后`sys.path[0]`位置断言拒绝；preexec=1、runtime receipt/scene/PPO/WAL=0，GPU与锁自然释放 | AppLauncher合法前插不提供`rsl_rl`的extension path；改为root、四个package与四个真实leaf在执行前逐一核live resolver的loader/archive/prefix/origin精确指向fd18，执行后仍逐module/class核source；旧namespace不复用 |
+| 21 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | sixth one-shot消费commit `00cc5425…`、wrapper `edb7fec4…`和fresh 25k namespace；GPU preexec与AppLauncher通过，但post-App把Isaac Sim 5.1从`omni.isaac.ml_archive`加载的Torch 2.7/cu128误拒为“escaped frozen venv”。runtime receipt/scene/PPO/WAL均为0，result自然RC1 | 只允许两条exact Torch entrypoint：冻结venv，或由已验签Kit Python推导的Isaac Sim 5.1 ML bundle；live `torch.*`必须全在同一selected root，TensorDict仍只能来自venv。错误携带module与resolved path；旧namespace不复用 |
 
 ## 5. 下一条发射协议
 
@@ -153,6 +154,14 @@ fifth one-shot（`6b3078bc…`）已越过serializer contract、preexec、AppLau
 四个package与四个leaf逐一核live resolver的loader/archive/prefix/origin精确指向fd18，再import并核
 module/class source与wiring。门只防确定性的依赖来源漂移；不把已经执行的可信Kit代码假设成会恶意并发改写
 Python全局import状态的对手。旧namespace不复用。
+
+sixth one-shot（`00cc5425…`，wrapper SHA256=`edb7fec4…`，namespace=
+`20260819T074000FullMdpA4096Iter25000Git00CC5425Pod1GPU0CST`）自然RC1。它证明完整26-module sealed
+RSL resolver已经越过，但同一post-App gate仍把AppLauncher合法选择的Isaac Sim 5.1 bundled Torch当成
+foreign，因为旧条件只接受venv目录。Pod只读核验表明 bundled与venv入口SHA相同、版本均为
+`2.7.0+cu128`，且bundled root固定在exact Kit tree。successor只增加这一条由已验签Kit解释器推导出的
+allowlist并拒绝同一top-level下混入foreign `torch.*`或parent attribute alias；不放宽TensorDict/RSL，不复用旧namespace，也不把
+这次零PPO失败记为4096容量证据。
 
 25k不能只留下曲线。lean graph尚无完整plant/owner/RNG restore合同，所以仍禁止`load/resume`；但runner现在
 每1000 update及自然终点调用upstream RSL save，把policy、optimizer、iteration和normalizer所属model state

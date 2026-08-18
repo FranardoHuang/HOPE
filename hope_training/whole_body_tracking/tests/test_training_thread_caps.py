@@ -461,6 +461,94 @@ def test_runtime_attestation_allows_app_launcher_to_load_torch(
     assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "consumed"
 
 
+def test_runtime_dependency_roots_distinguish_kit_torch_from_foreign_torch(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    venv_site = tmp_path / "venv/site-packages"
+    kit_torch_site = tmp_path / "isaac/exts/omni.isaac.ml_archive/pip_prebundle"
+    venv_tensordict = venv_site / "tensordict/__init__.py"
+    kit_torch = kit_torch_site / "torch/__init__.py"
+    foreign_torch = tmp_path / "foreign/torch/__init__.py"
+    nested_foreign_torch = kit_torch_site / "foreign/torch/__init__.py"
+    for path in (venv_tensordict, kit_torch, foreign_torch, nested_foreign_torch):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+
+    torch_origins = (venv_site / "torch/__init__.py", kit_torch)
+    assert train._module_origin_matches(
+        _module("torch", __file__=str(kit_torch)), torch_origins
+    )
+    assert train._module_origin_matches(
+        _module("tensordict", __file__=str(venv_tensordict)),
+        (venv_tensordict,),
+    )
+    assert not train._module_origin_matches(
+        _module("torch", __file__=str(foreign_torch)), torch_origins
+    )
+    assert not train._module_origin_matches(
+        _module("torch", __file__=str(nested_foreign_torch)), torch_origins
+    )
+
+
+def test_runtime_dependency_closure_rejects_foreign_torch_child(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    package_root = tmp_path / "bundle/torch"
+    foreign_root = tmp_path / "foreign/torch"
+    paths = {
+        "torch": package_root / "__init__.py",
+        "torch.optim": package_root / "optim/__init__.py",
+        "torch._C": package_root / "_C.so",
+    }
+    foreign_optim = foreign_root / "optim/__init__.py"
+    for path in (*paths.values(), foreign_optim):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+    for name in tuple(sys.modules):
+        if name == "torch" or name.startswith("torch."):
+            monkeypatch.delitem(sys.modules, name)
+    for name, path in paths.items():
+        monkeypatch.setitem(sys.modules, name, _module(name, __file__=str(path)))
+
+    train._require_loaded_module_closure(
+        "torch", package_root, ("torch.optim", "torch._C")
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch.optim",
+        _module("torch.optim", __file__=str(foreign_optim)),
+    )
+    with pytest.raises(RuntimeError, match="torch closure escaped"):
+        train._require_loaded_module_closure(
+            "torch", package_root, ("torch.optim", "torch._C")
+        )
+
+
+def test_runtime_dependency_rejects_foreign_torch_attribute_alias(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    root = tmp_path / "bundle/torch"
+    optim = _module("torch.optim", __file__=str(root / "optim/__init__.py"))
+    extension = _module("torch._C", __file__=str(root / "_C.so"))
+    foreign = _module(
+        "foreign_torch.optim", __file__=str(tmp_path / "foreign/optim/__init__.py")
+    )
+    package = _module(
+        "torch", __file__=str(root / "__init__.py"), optim=optim, _C=extension
+    )
+    monkeypatch.setitem(sys.modules, "torch", package)
+    monkeypatch.setitem(sys.modules, "torch.optim", optim)
+    monkeypatch.setitem(sys.modules, "torch._C", extension)
+
+    train._require_module_attribute_identity(package, "optim", "torch.optim")
+    package.optim = foreign
+    with pytest.raises(RuntimeError, match="package attribute identity changed"):
+        train._require_module_attribute_identity(package, "optim", "torch.optim")
+
+
 def test_runtime_attestation_consumes_proof_before_post_app_env_validation(
     monkeypatch,
 ):

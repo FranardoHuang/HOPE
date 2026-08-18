@@ -4277,3 +4277,8 @@
   `post_preexec_before_runtime_attestation_failed`。Kit合法前插的extension path不提供`rsl_rl`；successor逐一
   核实际RSL root/package/leaf的live resolver与import后source/wiring均指向fd18，不再替换或锁住Kit全局import；
   旧namespace不复用、不重试。
+- 2026-08-19：`00cc5425…` / `edb7fec4…` fresh 4096×25000 one-shot越过sealed 26-module RSL
+  resolver与AppLauncher，但在scene/PPO/WAL前误拒Isaac Sim 5.1 bundled Torch；result为
+  `post_preexec_before_runtime_attestation_failed`、runtime receipt=0。窄修只把exact Kit ML bundle加入
+  Torch来源allowlist，并拒绝同一top-level下混入foreign `torch.*`或parent attribute alias；
+  TensorDict/RSL边界不变；focused=`55 passed`，旧namespace不复用。

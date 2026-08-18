@@ -6240,3 +6240,12 @@ source与wiring门；不再替换或锁住Kit全局import机制。
 model/optimizer state与全tensor finite。fresh namespace还以冻结RSL3真实`OnPolicyRunner.save`跑一次host serializer
 contract；final consumer要求exact experiment/run_name下26组snapshot/sidecar逐字交叉一致，而不把它们升级成
 plant/RNG完整checkpoint。G05仍为`Partial`。
+
+commit `00cc5425…` 的sixth one-shot使用wrapper `edb7fec4…`直接请求`4096×25000`。GPU preexec、完整
+26-module sealed RSL resolver和AppLauncher均通过，随后在scene/PPO/WAL前被Torch origin门误拒；result为
+`post_preexec_before_runtime_attestation_failed`，runtime receipt为空。AppLauncher实际加载exact Isaac Sim 5.1
+`omni.isaac.ml_archive`内的Torch `2.7.0+cu128`；入口SHA与venv副本一致，但旧门只接受venv路径。窄修只允许
+冻结venv或由已验签Kit Python推导出的该exact entrypoint，并要求live `torch.*`全部来自同一selected root、
+`torch.optim/_C` parent attributes与`sys.modules`同一对象；
+TensorDict仍只允许venv，RSL仍只允许sealed fd18。
+该namespace已消费且不重试；零PPO不能晋级G05。
