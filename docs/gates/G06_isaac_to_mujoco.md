@@ -24,8 +24,8 @@ finite 229/399、IDLE one-hot、+10m park与raw no-ball-contact均通过，resul
 `noslip=0`是MuJoCo-Warp不实现vendor noslip pass的已登记backend deviation。真实step、Reward、
 termination和masked reset闭合前，本Gate仍为`Partial`且禁止`learn(1)`。
 
-最小WAIT transition现已在host闭合真实20-substep plant调用、Reward20、四项shared termination和逐env reset，
-但Gate仍`Partial`等待GPU N=1/N=2。实现没有迁移旧M04：MuJoCo内部`cvel`先从kinematic-root
+最小WAIT transition已在host闭合真实20-substep plant调用、Reward20、四项shared termination和逐env reset。
+实现没有迁移旧M04：MuJoCo内部`cvel`先从kinematic-root
 `subtree_com`参考点平移到每个body的inertial COM，再与Isaac `body_lin_vel_w/body_ang_vel_w`同义；
 rotating offset-body的native `mj_jacBodyCom @ qvel` oracle最大误差为`5.6e-17`，而raw `cvel`线速度
 误差范数约`0.50`。Reward使用Isaac同式的上一拍live-anchor x/y+yaw teacher pose cache；本拍Reward后、
@@ -33,7 +33,14 @@ rotating offset-body的native `mj_jacBodyCom @ qvel` oracle最大误差为`5.6e-
 tensors并锁存同tickresolved robot-table contact。该contact单独导出具名backend bool，不复用Isaac
 `robot_hit_table` bit16；mixed-nonfinite qdes按joint回退而不清掉同行finite action，并保留raw终止证据；
 portable component-OBB SAT keepout仍是learn前HOLD。host组合=`8 passed, 4 skipped`；
-production净增396 LOC，四个skip包含真实GPU N=1/N=2与本机缺依赖路径，不得写成live PASS。
+production净增396 LOC。真实GPU结果如下，不能反向把host skip写成live evidence。
+
+Pod1 GPU2随后从fresh Git commit `e71ee1a350d…` 运行同两文件，`12 passed`、RC0。该门真实覆盖
+N=1 reset/非零step/timeout/Reward20/park和N=2 selected-reset peer preservation；result SHA256=
+`f4d41aa983522243b657a437dc22065ad82895e4c1965ea777a384845c2591eb`，log SHA256=
+`5fa33b26af3fea72007f6d48915cc96239a22c2729fd7140e637edddfa7286c1`。测试结束后GPU2无compute process、
+queue lock释放、checkout仍为exact commit。Gate据此提升为`PASS-live-step / HOLD-learn`；portable SAT
+keepout与RSL3.1.2 trainer未闭前仍禁止`learn(1)`，不能把resolved contact提升为Isaac同义bit16。
 
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、

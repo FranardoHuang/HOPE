@@ -16,8 +16,10 @@
 - 2026-08-18: MuJoCo最小WAIT transition production净增396 LOC，host已接真实20-substep plant、Reward20、
   四项shared termination与masked reset；body速度经root subtree COM平移并由native `mj_jacBodyCom` oracle
   验证，body pose reward保持Isaac上一拍anchor cache时序。resolved table contact只导出具名backend bool，
-  不冒充尚未移植的Isaac SAT keepout；mixed-nonfinite qdes逐关节回退；host=`8 passed, 4 skipped`，
-  N=1/N=2 GPU仍未测，禁止`learn(1)`。
+  不冒充尚未移植的Isaac SAT keepout；mixed-nonfinite qdes逐关节回退。host=`8 passed, 4 skipped`；fresh Git
+  `e71ee1a…` 的Pod1 GPU2门=`12 passed`、RC0，覆盖N=1 step/timeout/Reward20/park与N=2 masked-reset peer，
+  result/log SHA=`f4d41aa9…/5fa33b26…`。状态为`PASS-live-step / HOLD-learn`；SAT keepout与RSL3 trainer
+  未闭，不启动`learn(1)`。
 
 - 2026-08-18: 在A `N=2 × 2 update`工程链闭合后，已从GitHub branch的fresh clean
   `4d374ca8…` checkout于Pod1空闲GPU1启动同代码、同N、单进程A1000；active checkout只读，

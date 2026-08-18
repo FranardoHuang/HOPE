@@ -153,8 +153,11 @@ body position/orientation imitation则保留Isaac的上一拍Motion cache，Rewa
 下一拍。post-forward resolved contact只导出具名backend bool；它不是Isaac component-OBB SAT keepout，
 后者仍阻塞trainer。mixed-nonfinite qdes逐关节回退、其余finite joints继续执行，同时raw qdes仍进入终止证据。
 host组合=`8 passed, 4 skipped`，native旋转偏置body Jacobian oracle通过；
-N=1真实step/timeout与N=2 selected-reset peer仍待fresh GPU，
-因此科学状态为`PASS-host-step / HOLD-live-step`，不是trainer ready。
+fresh Git commit `e71ee1a350d…` 在Pod1物理GPU2自然RC0：两份门合计`12 passed`，覆盖N=1
+reset、非零step后derived-tensor forward、timeout与同tickReward20、park，以及同一N=2 world内selected-reset
+对peer plant/buffer rows不改。result/log SHA256=`f4d41aa9…/5fa33b26…`；运行后GPU2和queue lock均释放。
+因此WAIT纵切片改判`PASS-live-step`。这不是A训练证据：Isaac的component-OBB/table-AABB SAT keepout尚未
+成为MuJoCo device producer，resolved contact只能作backend telemetry；实现并GPU反例验证前禁止`learn(1)`。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`
