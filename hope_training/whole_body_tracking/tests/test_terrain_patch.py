@@ -1,4 +1,4 @@
-"""Per-env 零均值凹凸地垫的纯 numpy 性质(terrain_patch.py,2026-07-29 抬脚地形修复)。
+"""Per-env flat-heavy相关地垫的纯 numpy 性质。
 
 Pinned here (host-only, no isaaclab):
 
@@ -8,6 +8,7 @@ Pinned here (host-only, no isaaclab):
 * 5 mm 量化:所有值都是整数级;带宽窄到量化成死平垫时 fail-loud。
 * 同 seed 逐 bit 复现,不同 seed 不同 pattern。
 * extents:带桌子 = 近沿往后 3 m 起、桌长+0.5 m 余量止;没桌子 = 对称全粗糙垫。
+* 出生核心区exact flat；相邻格强相关且坡度有界，排除旧逐顶点白噪声。
 
 Run:  python -m pytest hope_training/whole_body_tracking/tests/test_terrain_patch.py -q
 """
@@ -64,6 +65,34 @@ def test_table_side_is_exactly_flat_zero():
     assert not flat.any()  # 逐格恰好 0
     rough = hf[x_coords < _NEAR_X - 1e-9, :]
     assert rough.any()
+
+
+def test_spawn_core_is_exactly_flat():
+    hf, (x_min, _, y_half) = _build()
+    x = x_min + np.arange(hf.shape[0]) * TP.HORIZONTAL_SCALE_M
+    y = -y_half + np.arange(hf.shape[1]) * TP.HORIZONTAL_SCALE_M
+    radius = np.sqrt(np.square(x[:, None]) + np.square(y[None, :]))
+    core = hf[radius <= 0.20 + 1e-9]
+    assert core.size > 0
+    assert not core.any()
+
+
+def test_correlated_surface_is_not_vertex_white_noise():
+    hf, (x_min, _, _) = _build(seed=7)
+    x = x_min + np.arange(hf.shape[0]) * TP.HORIZONTAL_SCALE_M
+    rough = hf[x < _NEAR_X - 1e-9, :]
+    adjacent_corr = float(np.corrcoef(rough[:, :-1].ravel(), rough[:, 1:].ravel())[0, 1])
+    max_step = max(int(np.abs(np.diff(rough, axis=0)).max()), int(np.abs(np.diff(rough, axis=1)).max()))
+
+    # Independent iid fixed-tape counterexample: the retired producer has near-zero correlation
+    # and multi-level jumps between adjacent 10 cm vertices.
+    iid = np.random.default_rng(991).integers(-4, 5, size=rough.shape)
+    iid_corr = float(np.corrcoef(iid[:, :-1].ravel(), iid[:, 1:].ravel())[0, 1])
+    iid_max_step = max(int(np.abs(np.diff(iid, axis=0)).max()), int(np.abs(np.diff(iid, axis=1)).max()))
+    assert adjacent_corr > 0.75
+    assert abs(iid_corr) < 0.10
+    assert max_step <= 3
+    assert iid_max_step > 2
 
 
 def test_quantization_levels_are_integers_of_5mm():

@@ -1,8 +1,8 @@
-"""Per-env zero-mean rough ground patch, robot side only (task.plant.terrain_rough_height_range).
+"""Per-env correlated ground patch, robot side only (task.plant.terrain_rough_height_range).
 
 人话:让机器人学抬脚的"凹凸地垫"。每个 env 自带一块静态的随机凹凸地面,只铺在机器人这一侧
-(球台近沿之前);整个球台足迹连同前向余量都强制平在 z=0,凹凸高度以 0 为平均(±(hi-lo)/2),
-所以桌面 0.76、动作库 clip、虚拟球系的标定全都不动。谷底之下再垫一块全局兜底地板接住
+(球台近沿之前);整个球台足迹连同前向余量都强制平在 z=0。机器人出生点是平地,其余区域
+由低频平滑场形成连续坡/波,而不是每10 cm顶点独立抽白噪声。谷底之下再垫一块全局兜底地板接住
 "走出垫子/穿模"的极端情况。
 
 WHY this shape (and not ``TerrainImporterCfg(terrain_type="generator")``):
@@ -20,10 +20,10 @@ WHY this shape (and not ``TerrainImporterCfg(terrain_type="generator")``):
   mesh (identical bump pattern across envs; the pattern itself is seeded per run — the global
   numpy RNG is already seeded from ``env_cfg.seed`` before ``InteractiveScene`` is built).
 
-Zero-mean semantics of the authored band: ``terrain_rough_height_range=[lo, hi]`` keeps its
-contract spelling, but heights are sampled from the band re-centred about zero, i.e. uniformly on
-the 5 mm-quantized levels of ``[-(hi-lo)/2, +(hi-lo)/2]``.  ``[0.0, 0.04]`` therefore means
-"±2 cm about the calibrated floor", not "0..4 cm on top of it".
+Zero-centred semantics of the authored band: ``terrain_rough_height_range=[lo, hi]`` keeps its
+contract spelling, but correlated control values are symmetric about zero and the final mesh is
+quantized to 5 mm levels inside ``[-(hi-lo)/2, +(hi-lo)/2]``. ``[0.0, 0.04]`` therefore means
+"at most ±2 cm about the calibrated floor", not "0..4 cm on top of it".
 
 Module layout keeps the host-test contract of this repo: everything above
 ``attach_rough_ground_patch`` is pure numpy (py3.8 host pytest imports it); Isaac Lab / pxr
@@ -38,10 +38,14 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 
 # --- fixed pad geometry (metres). One place; the contract identifies the plant by the noise band,
-# these constants are part of the "robot_side_zero_mean_patch" terrain_type's definition. ---
+# these constants are part of the "robot_side_correlated_spawn_flat_v2" terrain type. ---
 HORIZONTAL_SCALE_M = 0.1   # cell size; matches the isaaclab rough-terrain precedent
 VERTICAL_SCALE_M = 0.005   # 5 mm height quantization (= noise step)
 SLOPE_THRESHOLD = 0.75     # vertical-wall correction, isaaclab precedent
+SPAWN_FLAT_RADIUS_M = 0.20
+SPAWN_BLEND_RADIUS_M = 0.40
+TABLE_BLEND_WIDTH_M = 0.30
+SMOOTHING_PASSES = 4
 X_BACK_M = 3.0             # rough zone reaches this far behind the table near edge
 X_FORWARD_MARGIN_M = 0.5   # flat zone reaches this far beyond the table far edge
 Y_HALF_M = 3.0             # pad half-width
@@ -110,6 +114,20 @@ def patch_extents_m(near_x_m: Optional[float]) -> Tuple[float, float, float]:
     return (x_min, x_max, Y_HALF_M)
 
 
+def _box_smooth(value: np.ndarray) -> np.ndarray:
+    padded = np.pad(value, ((1, 1), (1, 1)), mode="edge")
+    result = np.zeros_like(value, dtype=np.float64)
+    for row in range(3):
+        for col in range(3):
+            result += padded[row : row + value.shape[0], col : col + value.shape[1]]
+    return result / 9.0
+
+
+def _smoothstep01(value: np.ndarray) -> np.ndarray:
+    value = np.clip(value, 0.0, 1.0)
+    return value * value * (3.0 - 2.0 * value)
+
+
 def build_patch_height_field(
     height_range,
     flat_from_x_m: Optional[float],
@@ -118,13 +136,16 @@ def build_patch_height_field(
     y_half_m: float,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Integer height field (units of ``VERTICAL_SCALE_M``), zero-mean by construction.
+    """Flat-heavy correlated height field in units of ``VERTICAL_SCALE_M``.
 
     Rows walk +x from ``x_min_m``, columns walk +y from ``-y_half_m`` (the
-    ``convert_height_field_to_mesh`` convention).  Heights are sampled uniformly from the
-    symmetric integer levels ``{-K, .., +K}`` with ``K = round(((hi-lo)/2) / VERTICAL_SCALE_M)``
-    — expectation exactly 0.  Every vertex with ``x >= flat_from_x_m`` (the table side) is
-    forced to exactly 0.
+    ``convert_height_field_to_mesh`` convention). A seeded normal field is smoothed, centered,
+    peak-normalized and quantized within the symmetric integer levels ``{-K, .., +K}``, where
+    ``K = floor(((hi-lo)/2) / VERTICAL_SCALE_M)``. Every vertex with
+    ``x >= flat_from_x_m`` (the table side) is forced to exactly 0. Four fixed smoothing passes
+    correlate the sampled field before
+    quantization, so adjacent 10 cm cells form a continuous slope/wave instead of independent white
+    noise. A circular spawn platform is also exact flat; both flat boundaries have a smooth shoulder.
     """
     lo, hi = float(height_range[0]), float(height_range[1])
     if (hi - lo) < MIN_BAND_M - 1e-12:
@@ -160,11 +181,33 @@ def build_patch_height_field(
     num_cols = int(math.ceil(2.0 * y_half_m / HORIZONTAL_SCALE_M - 1e-9)) + 1
     if num_rows < 2 or num_cols < 2:
         raise ValueError("rough patch extents are degenerate")
-    hf = rng.integers(low=-levels, high=levels + 1, size=(num_rows, num_cols))
+    surface = rng.standard_normal((num_rows, num_cols))
+    for _ in range(SMOOTHING_PASSES):
+        surface = _box_smooth(surface)
+    surface -= float(surface.mean())
+    peak = float(np.max(np.abs(surface)))
+    if peak <= 1.0e-12:
+        raise RuntimeError("rough patch random field unexpectedly collapsed")
+    surface /= peak
+    x_coords = x_min_m + np.arange(num_rows) * HORIZONTAL_SCALE_M
+    y_coords = -y_half_m + np.arange(num_cols) * HORIZONTAL_SCALE_M
+    radius = np.sqrt(
+        np.square(x_coords[:, None]) + np.square(y_coords[None, :])
+    )
+    surface *= _smoothstep01(
+        (radius - SPAWN_FLAT_RADIUS_M)
+        / (SPAWN_BLEND_RADIUS_M - SPAWN_FLAT_RADIUS_M)
+    )
     if flat_from_x_m is not None:
-        x_coords = x_min_m + np.arange(num_rows) * HORIZONTAL_SCALE_M
-        hf[x_coords >= float(flat_from_x_m) - 1e-9, :] = 0
-    return hf.astype(np.int16)
+        surface *= _smoothstep01(
+            (float(flat_from_x_m) - x_coords[:, None]) / TABLE_BLEND_WIDTH_M
+        )
+    hf = np.rint(surface * levels).astype(np.int16)
+    np.clip(hf, -levels, levels, out=hf)
+    hf[radius <= SPAWN_FLAT_RADIUS_M + 1.0e-9] = 0
+    if flat_from_x_m is not None:
+        hf[x_coords >= float(flat_from_x_m) - 1.0e-9, :] = 0
+    return hf
 
 
 def _spawn_rough_ground_patch(prim_path, cfg, translation=None, orientation=None):
@@ -365,10 +408,12 @@ def attach_rough_ground_patch(env_cfg, height_range):
     )
     return [
         (
-            "scene.rough_ground_patch: per-env zero-mean rough pad "
-            f"±{half_band:.3f} m about z=0 (authored [{lo:g}, {hi:g}]), rough x<"
+            "scene.rough_ground_patch: per-env flat-heavy correlated pad "
+            f"within ±{half_band:.3f} m of z=0 (authored [{lo:g}, {hi:g}]), rough x<"
             f"{near_x if near_x is not None else x_max:g} (robot side), {flat_txt}, "
             f"extents x=[{x_min:g}, {x_max:g}] y=±{y_half:g}, cell {HORIZONTAL_SCALE_M:g} m, "
+            f"smoothing passes {SMOOTHING_PASSES}, spawn-flat radius "
+            f"{SPAWN_FLAT_RADIUS_M:g} m, "
             f"quantized {VERTICAL_SCALE_M * 1000:g} mm"
         ),
         f"scene.rough_safety_floor: global backstop plane at z=-{drop:.3f} m",

@@ -3,6 +3,15 @@
 日期:2026-07-29。人类负责人:Franco。执行者:Claude、Codex。状态:host 实现已落，
 Pod Isaac smoke 尚未运行。
 
+## 2026-08-18 successor addendum
+
+本页下文的`robot_side_zero_mean_patch`保留为2026-07-29历史实现说明；它的逐10 cm顶点独立采样现已
+拒绝。successor identity为`robot_side_correlated_spawn_flat_v2`：同seed normal field经过4次box
+smoothing，出生半径0.20 m与桌侧exact flat，两侧以smoothstep过渡，仍保持5 mm量化和显式band上限。
+固定IID反例证明successor相邻格相关而旧white-noise不相关；host terrain性质=`13 passed`，合同回归=
+`145 passed`。该修改不改变nominal FullMDP的plane配置；rough仍须fresh plant、新namespace，并在启用
+前验证A3双脚初态包络、2-env穿透/桌对齐和4096吞吐。
+
 ## 人话总结
 
 机器人在 Isaac 里学不会抬脚移动,查出三个病因,这次一起修:

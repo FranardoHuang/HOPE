@@ -316,7 +316,7 @@ def test_block_rough_terrain_requires_range_and_plane_refuses_it():
             "terrain_rough_height_range_m": [0.02, 0.06],
         }
     )
-    assert block["terrain_type"] == "robot_side_zero_mean_patch"
+    assert block["terrain_type"] == "robot_side_correlated_spawn_flat_v2"
     assert block["terrain_rough_height_range_m"] == [0.02, 0.06]
     with pytest.raises(ValueError, match="must not carry"):
         TC.ground_plant_block(
@@ -461,7 +461,7 @@ def test_contract_reader_fingerprints_all_overrides():
         "ground_dynamic_friction": 0.8,
         "robot_material_static_friction_range": [0.6, 1.6],
         "robot_material_dynamic_friction_range": [0.3, 1.2],
-        "terrain_type": "robot_side_zero_mean_patch",
+        "terrain_type": "robot_side_correlated_spawn_flat_v2",
         "terrain_rough_height_range_m": [0.02, 0.06],
     }
     # 老谱系 resume 对账:默认合同没有 ground_plant 键,出现即 diff 不匹配

@@ -13,6 +13,33 @@
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 [`origin/main` 的 `NOW`](../../NOW.md)。
 
+## 2026-08-18 scale与native A1000最终裁决
+
+小环境数边界纠正：`N=2`只回答构造、reset、ABI、finite和optimizer调用点，不回答学习效果。旧Isaac
+`N=2` A1000在ACK470前虽有22560个finite Reward sample，却是296/296 episode全base tilt、260个
+admitted opportunity全not-ready、0 ACCEPT；随后LM device assert终止。它是结构诊断，不是失败或成功的
+4096学习实验。下一条科学run直接使用同一冻结进程`4096×1000`，update0--4只读scale门，健康后不重启，
+里程碑为20/50/100/200/500/1000。
+
+native MuJoCo A的`1024×1000`已自然完成，但只能回答简化MDP的趋势：
+
+| update窗口 | binary racket-ball contact | mean minimum distance | 解释 |
+| --- | ---: | ---: | --- |
+| 50--100 | `6/8452 = 0.071%` | `0.461 m` | 稀少早期接触 |
+| 100--200 | `32/17025 = 0.188%` | `0.462 m` | 仍很弱 |
+| 200--500 | `361/51243 = 0.704%` | `0.431 m` | 开始靠近球 |
+| 500--1000 | `4078/87546 = 4.658%` | `0.325 m` | 有方向性，但未形成合格任务 |
+
+最后窗口吞吐约`15.2k environment steps/s`、约`1.62 s/update`。这不能与Isaac `N=2`的约
+`5.13 steps/s`作引擎等任务对比：native lane一次并行1024环境，只有114/114-D observation、10-term
+Reward，缺WAIT/reveal/ActionEpoch/outcome/recovery；Isaac则让固定Kit/PhysX/FullMDP transaction和WAL
+开销压在2个环境上。更重要的是native最后窗口robot-table episode fraction仍约`97%`，因此只采用其
+吞吐和“接触率能上升”作为下一代设计证据，不采用为portable A成功。
+
+下一代工作不等长跑结束：Isaac 4096运行期间并行闭合portable MuJoCo A的question→reveal→flight→
+outcome→recovery lifecycle、准备rough独立课程，并从zero-callpoint/旧RSL2/重复receipt开始做2.0删除清单。
+任何并行改动只进入新commit和fresh namespace，不热补正在训练的process、scene或manifest。
+
 ## 2026-08-18 科学裁决：先真实运行，不再扩骨架
 
 Jiayi/build_2的可复现说明与Pod2实机证明，旧Isaac4.5/RSL2和新Isaac5.1/RSL3不是等价学习环境。

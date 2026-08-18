@@ -2,6 +2,13 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-18 scale裁决更正（Gate 仍 `Partial`）：**此前`N=2 × 2`只证明构造、reset、229/399 ABI、
+Reward20 finite和optimizer/WAL调用点；后续`N=2` A1000不是学习规模，不能用于评价policy效果。它的可信
+前缀止于ACK470：296个episode全部base tilt，260个admitted opportunity全部not-ready，ACCEPT=0，且
+下一次collection由LM device assert终止。下一条fresh A不再重复小N smoke，而是同一冻结字节直接
+`4096 env × 1000 update`：update0--4作为同进程scale/finite观察窗，健康后不重启地继续，并在
+20/50/100/200/500/1000只读。该run未自然完成前，学习趋势仍为`未测`。
+
 **2026-08-18 fresh LM canary and A1000 restart（Gate 仍 `Partial`）：**fresh commit `fcfe9918…`
 把diagnostic fixed-try LM的device assert改成逐行具名拒绝。Pod1 GPU0随后自然完成`N=2 × 2`：
 96 environment steps、2次optimizer call和4行durable `PENDING/EPOCH_ACK`；Reward全finite，
@@ -787,8 +794,9 @@ Follow-up note (2026-07-29, ActionBall actual-joint reset follow-up; Gate remain
 Follow-up note (2026-07-29, ground-plant handoff; Gate remains `Partial`):
 
 - 旧 `TerrainImporterCfg(terrain_type="generator")` 会把 `env_origins` 移到 terrain tile，
-  而克隆桌体仍在 GridCloner 网格，因而 rough arm 实际把机器人与自己的桌子拆开。候选修复改为
-  每环境 `robot_side_zero_mean_patch`：机器人侧围绕 z=0 起伏、桌近沿起整块严格为平面；另以
+  而克隆桌体仍在 GridCloner 网格，因而 rough arm 实际把机器人与自己的桌子拆开。候选修复现为
+  每环境 `robot_side_correlated_spawn_flat_v2`：出生核心与桌近沿起整块严格为平面，机器人活动区
+  使用空间相关坡/波而非逐顶点白噪声；另以
   `robot_material_make_consistent=true` 显式约束逐桶 `dynamic≤static`。相关 schema-3 plant
   指纹和 host 联合回归为 `379 passed`。
 - 这只达到 E1。尚缺真实 Isaac 的 2-env clone/contact isolation、兜底地板 drop、桌 footprint

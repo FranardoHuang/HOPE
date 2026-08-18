@@ -1,14 +1,14 @@
 # 简短进度记录
 
-## 2026-08-18 — Isaac A1000 active; native MuJoCo A input binding ready
+## 2026-08-18 — 4096长跑口径更正；相关地形producer完成host门
 
-- fresh LM row-rejection canary完成`N=2 × 2`、finite Reward与4行WAL闭合；新Isaac A1000在Pod1
-  GPU0用CPU32--47运行，并允许一个既有同卡进程。
-- MuJoCo WAIT完成一次真实RSL3 update但仍是`idle_wait_only`。native court trainer的冻结输入canary已
-  完成`1024 × 2`、49,152 transitions且capacity/finite通过；fresh native A1000已在Pod1 GPU2启动，
-  CPU48--63。它是114-D native学习基线，不能写成portable 229/399 A。
-- 地形逐顶点白噪声方案被拒绝；当前flat长跑不变，之后改为flat-heavy连续坡/波/台阶/rough patch混合。
-  两边长跑启动后进入2.0瘦身。
+- `N=2`只保留工程证据，不再冒充学习长跑；旧Isaac A1000止于ACK470且0 ACCEPT。下一条fresh A直接
+  `4096×1000`，前5次更新只是同一进程观察窗，不再反复重启smoke。
+- native MuJoCo A已完成`1024×1000`；后500窗口binary contact=`4.658%`，但robot-table episode约97%，
+  且114/114-D简化MDP不等于portable 229/399 FullMDP A。
+- rough producer已由逐顶点IID白噪声改成相关场+出生/桌侧平地，plant identity换名防止静默resume；
+  terrain性质`13 passed`、training contract`145 passed`。nominal 4096仍用plane，rough按fresh独立阶段启用。
+- Isaac长跑占卡时并行推进portable MuJoCo A lifecycle和2.0删除清单；不热补运行中的源码/scene。
 
 本文件只保留短日期摘要，不再做第三份实验真源。更新时只写几句话并链接到权威位置：
 

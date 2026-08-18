@@ -241,7 +241,7 @@
 | `readiness critic / critic-gate q50` | readiness critic 是估计“当前状态能否及时接住下一题”的模型。它必须用独立训练/校准数据且不能偷看未揭题信息；critic-gate q50 是在正式 Gate3B 之前单独封存的一次性 50 题/侧诚实考试。 |
 | `guard reset` | 判卷器因跟踪包络或其他保护条件提前结束，但未发生真实倾倒。“物理不摔”不能隐去 guard reset，更不能据此证明连续恢复。 |
 | <a id="wave-cgf"></a>`Wave CGF` / 抖动-地面-脚部消融波（`p1cgf_*`） | 2026-07-22 预注册的 8 臂单变量波：action_rate 剂量三档（ar02/ar05/ar10）、机器人材质摩擦抬高（grip）、随机凹凸地形（rough，fresh 铁律）、mjlab 落地冲击罚（footrw）、软惩罚减负（penlight）、被动阻尼折 kd（kdpassive，未接线锁死）。父本只用 W，对照＝矩阵 `w_c_s0`；谱系 diagnostic-only。 |
-| <a id="ground-plant"></a>`ground_plant` 合同块 | schema-3 合同的地面/地形 plant 指纹：地面材质摩擦、机器人材质随机化范围、材质是否逐桶强制 `dynamic≤static`，以及平地或每环境零均值地垫。默认配方＝整块缺席（历史 checkpoint 逐字节兼容）；任何偏离＝落键，resume 对账把它当另一套 plant 拒绝静默续训（平地 checkpoint 上不了粗糙地）。`robot_side_zero_mean_patch` 是桌侧严格平、机器人侧围绕 z=0 起伏的候选地垫；目前只有 E1 host 证据。 |
+| <a id="ground-plant"></a>`ground_plant` 合同块 | schema-3 合同的地面/地形 plant 指纹：地面材质摩擦、机器人材质随机化范围、材质是否逐桶强制 `dynamic≤static`，以及平地或每环境相关地垫。默认配方＝整块缺席（历史 checkpoint 逐字节兼容）；任何偏离＝落键，resume 对账把它当另一套 plant 拒绝静默续训（平地 checkpoint 上不了粗糙地）。`robot_side_correlated_spawn_flat_v2` 是出生圆岛与桌侧严格平、机器人活动区由固定平滑场形成连续坡/波的候选地垫；目前只有 E1 host 证据。 |
 | `foot_soft_landing` / 落地冲击罚 | mjlab soft_landing 思想：first-contact 步的脚底法向峰值力超阈（默认 300 N）部分按阈值归一后惩罚，教"轻放脚别砸"。量纲要点：输出是无量纲超阈倍数（单脚封顶 3），不是牛顿——mjlab -1e-5/N 的等效剂量 = -3e-3。默认 weight=0 字节等价。 |
 | `foot_clearance` / 抬脚高度罚 | mjlab foot_clearance 思想：腾空脚 \|脚高-目标高\| × 水平速度，罚"贴地扫着走"。给允许跨步的臂用；站立击球默认不开（weight=0）。 |
 | `foot_slip_sq_weight` / `foot_drag_weight` | 触地脚水平蹭滑（源码常开 -1.0）与拖脚（-0.5）的剂量键，2026-07-22 新接 CLI（此前够不着）。penlight 减负臂降到 -0.33/-0.17。 |

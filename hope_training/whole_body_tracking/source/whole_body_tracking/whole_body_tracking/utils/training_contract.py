@@ -846,7 +846,7 @@ MOTION_BODY_LIN_VEL_POINTS = ("center_of_mass", "link_origin")
 # z=0"。合同字符串随之换名——两种形态是不同的 plant,不许靠同名静默互认 resume。
 GROUND_PLANT_KEY = "ground_plant"
 GROUND_PLANT_TERRAIN_PLANE = "plane"
-GROUND_PLANT_TERRAIN_ROUGH = "robot_side_zero_mean_patch"
+GROUND_PLANT_TERRAIN_ROUGH = "robot_side_correlated_spawn_flat_v2"
 GROUND_PLANT_DEFAULT = {
     "ground_static_friction": 1.0,
     "ground_dynamic_friction": 1.0,

@@ -14440,15 +14440,15 @@ _GROUND_PLANT_ROBOT_MATERIAL_AUTHORED_ATTR = "_ground_plant_robot_material_autho
 
 
 def _attach_rough_ground_patch(env_cfg, height_range):
-    """Per-env 零均值凹凸地垫的挂载 seam(真身在包内 terrain_patch;lazy import:Kit 起来后
+    """Per-env flat-heavy相关地垫的挂载 seam(真身在包内 terrain_patch;lazy import:Kit 起来后
     才 import 得动;host 测试 monkeypatch 这个名字)。
 
     人话:2026-07-29 抬脚地形修复。旧的 ``terrain_type="generator"`` 全局地形会把
     ``scene.env_origins`` 换成地形 tile 原点,而克隆出来的静态桌子还钉在 GridCloner 网格上
     ——机器人被传送到没有自己桌子的地方;而且 env_spacing=2.5 m 下邻居的桌子足迹和本 env 的
     机器人活动区在空间上重叠,一张共享地面 mesh 根本做不到"我这里凹凸、你桌下平整"。改成
-    每个 env 自己的静态凹凸垫(shadow-table 同款 ENV_REGEX_NS+碰撞过滤先例):凹凸只铺机器人
-    一侧,高度以 0 为平均(±(hi-lo)/2),桌子足迹强制平在 z=0,桌面/动作库/虚拟球标定全不动。
+    每个 env 自己的静态相关地垫(shadow-table 同款 ENV_REGEX_NS+碰撞过滤先例):凹凸只铺机器人
+    一侧,出生点与桌子足迹强制平在 z=0,其余区域用稀疏低频控制点形成连续坡/波。
     """
     from whole_body_tracking.tasks.tracking import terrain_patch
 
@@ -14695,7 +14695,7 @@ def _ground_plant_contract(
     else:
         raise RuntimeError(
             "ground-plant contract requires exactly one of scene.terrain (plane recipe) "
-            "or scene.rough_ground_patch (zero-mean rough pad)"
+            "or scene.rough_ground_patch (flat-heavy correlated rough pad)"
         )
     events = getattr(env_cfg, "events", None)
     event_term = None if events is None else getattr(events, "physics_material", None)

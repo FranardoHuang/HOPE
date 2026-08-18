@@ -13,6 +13,10 @@ native A1000的完整JSONL update20/50显示episode length约145.45/145.56、min
 按预注册继续，不把短窗0 contact当停止门。
 50--100窗口随后得到`6/8452=0.071%`真实binary contact，100--200为`32/17025=0.188%`；
 mean min distance仍约0.462 m，故只记为稀少接触率上升。capacity/nonfinite继续为0，运行保留到500。
+该native A1000现已自然完成1000 update。后500-update窗口binary contact=`4078/87546=4.658%`，
+mean min distance约`0.325 m`，相对早期有明显方向性；但robot-table episode fraction仍约`97%`，而且
+该lane只有114/114-D observation、10-term简化Reward，没有WAIT/reveal/ActionEpoch/outcome/recovery。
+所以它是“MuJoCo能快速学到更靠近球并偶发接触”的E1趋势，不是portable FullMDP A，也不关闭本Gate。
 
 **2026-08-18 producer-first更正（Gate 仍 `Partial`）：**一次M05 root骨架尝试只把真实
 Plant/MotionBank/R05/M04构造到一起，但`step/reset`仍fail-closed，属于HANDOFF禁止的zero-callpoint

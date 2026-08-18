@@ -8,8 +8,9 @@
 
 ## 1. 目标
 
-在 `shot_slot_capacity=1`、同一 `action_slot=0` 下，先让 Isaac family A 真实运行，再在同一进程跑到
-1000 个 PPO update 并读取中间趋势；随后按相同环境、seed 和训练设置运行 family C。只有 Isaac 的真实
+在 `shot_slot_capacity=1`、同一 `action_slot=0` 下，先让 Isaac family A 以 `4096 env` 真实运行，
+在同一进程跑到1000 个 PPO update并读取中间趋势；随后按相同环境、seed 和训练设置运行 family C。
+`N=2`只允许回答构造、reset、ABI和optimizer调用点，不作为学习效果或长跑证据。只有 Isaac 的真实
 opportunity/contact/outcome/recovery 分母与学习趋势可解释后，才让 MuJoCo GPU A/C 消费同一 MDP
 语义。全部运行均为 [`diagnostic_unauthorized`](../DEFINITIONS.md)，不授权 formal promotion、export、
 deployment、真机或物理安全。
@@ -37,9 +38,9 @@ deployment、真机或物理安全。
 - Git 管理代码；忽略的机器人 USD/大模型只作为外部资产，以源路径和 SHA-256 绑定。
 - FullMDP 使用 upstream RSL3 `OnPolicyRunner.learn()`；只在零参数 `alg.update()` 外包一层
   `PENDING fsync -> owner ACK -> EPOCH_ACK fsync -> stdout`。
-- 第一条真实训练已按 Franco 新调度切到 Pod1 空卡；源码仍由 Git exact commit 下载，family A
-  `N=2 × 2 update` 成功后才启动一个不重启的 A1000。
-- A1000 在 20/50/100/200/500/1000 只读里程碑，不因“看起来不好”自动停止。
+- 第一条可信学习 run 使用 Git exact commit 和 `4096 env × 1000 update`；前5个update只是同一进程的
+  construction/capacity/finite观察窗，通过后自然继续，不另起或重跑smoke。
+- A1000 在 5/20/50/100/200/500/1000 只读里程碑，不为里程碑重启，也不因“看起来不好”自动停止。
 - Pod1 按物理 GPU 与 CPU locality 调度：每卡最多两个进程；每个新进程固定独立 CPU 核组，
   不再用一个全 Pod 生命周期 Kit 锁把三张卡串成一张卡。共卡只要求显存余量、同卡进程上限和
   独立 namespace，不把共卡 wall time 当单进程性能证据。
@@ -66,6 +67,22 @@ deployment、真机或物理安全。
 
 ## 4. 当前证据与依赖
 
+先把“对齐”拆开，禁止用一个宽度或一次update代签整套MDP：
+
+| 轴 | Isaac FullMDP A | portable MuJoCo WAIT | native MuJoCo A | 当前裁决 |
+| --- | --- | --- | --- | --- |
+| 环境数 | 下一条必须4096；旧证据N=2 | N=2 learn(1) | N=1024×1000 | 未对齐 |
+| actor/critic/action | 229/399/31 | 229/399/31 | 114/114/31 | native未对齐 |
+| RSL/PPO | RSL3.1.2 thin adapter | RSL3.1.2 upstream | native trainer | 只对齐前两列训练ABI |
+| reset/plant | FullMDP generation/selected reset | WAIT selected reset已过 | native episode reset | lifecycle未对齐 |
+| question/reveal/launch | 完整producer | 全部缺席，`idle_wait_only` | 简化serve | portable未对齐 |
+| Reward | Reward20 | 仅6项dense有真实值 | 10-term简化Reward | 未对齐 |
+| contact/outcome/recovery | R03/physical/R06/R07 | 尚未接 | 简化binary contact | 未对齐 |
+| table终止 | component-OBB SAT | SAT已接 | table contact多为telemetry | native未对齐 |
+| terrain | nominal plane | nominal plane | plane | baseline对齐；rough尚未live |
+
+因此小N和native长跑都不能回答最终policy质量；它们只分别关闭工程调用点和提供下一代吞吐/Reward趋势。
+
 | 顺序 | 状态 | 事实 | 下一步 |
 | ---: | --- | --- | --- |
 | 0 | `PASS` | 附件环境合同与 Pod2 实机匹配；build_2 `6144 × 1` 完成，RSL3 ABI 为 `act(TensorDict)` / `process_env_step(TensorDict,...)` | 使用同一栈 |
@@ -74,15 +91,28 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-live-LM-canary / ACTIVE-A1000` | commit `fcfe9918…` 在Pod1 GPU0共卡完成fresh `N=2 × 2`：96 steps、4行PENDING/ACK严格闭合、Reward全finite、无poison/nonfinite/conservation fault。随后同代码、同N、独立namespace启动单进程A1000；已通过durable update50里程碑 | 不热补；只读20/50/100/200/500/1000，同一进程自然跑完 |
+| 6 | `PASS-engineering-N2 / FAIL-scientific-long` | `N=2 × 2`工程门闭合；随后`N=2` A1000只到ACK470并因LM device assert停滞。可信前缀全部finite，但296个episode全tilt、260个admitted opportunity全not-ready、ACCEPT=0；环境数和任务入口都不足以形成学习结论 | 不再重复小N smoke；fresh同一进程直接`4096 × 1000`，前5次只读观察 |
 | 7 | `PASS-host-chain / HOLD-fresh-live` | bootstrap两拍ready仍授权Motion，但不再以neutral key写R07 ActionEpoch telemetry；CPU真实fact→owner projection→Motion reveal→production D05 settle已得到两行ACCEPT、Epoch无overflow。contact/flight/R06 outcome/R07 recovery仍需下一条fresh live分母 | fresh Kit N=2重验首个ACCEPT；A1000内只观察，不把潜伏bug当Reward结论 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `PASS-live-step / PASS-live-SAT` | commit `61887b43…` 的fresh Pod1 GPU0共卡门真实完成`19 passed,0 skipped`：N=1 reset/step、N=2 masked reset、float32 device SAT及attached `robot/*` authority全过。run结束仍只有原1个peer，queue lock自然释放 | 保持同一SAT producer；下一步接真实A lifecycle，不再扩identity gate |
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 外部清理后Pod1约`249.8 GiB` free；A1000 ACK417时run目录仅约6.6MB，预计到1000新增日志不足约10MB，即使终点单checkpoint也远低于空间余量。未碰foreign PID、checkpoint、主日志或资产 | 不再为本run清理；只读监控实际增长，不按表观du删除硬链接/资产 |
 | 11 | `PASS-live-WAIT-learn1 / HOLD-full-A` | 同一fresh checkout在19-test后直接调用upstream RSL-RL3.1.2：`N=2 × 24`完成1次PPO update、48 transitions、229/399宽度，`final_rc=0`；result SHA=`322592ce…f07a`。lifecycle仍明确`idle_wait_only`，没有question/contact/outcome | 复用该VecEnv/runner接真实A reveal→flight→outcome；先短live再启动MuJoCo A长跑 |
-| 12 | `PASS-live-native-A2 / ACTIVE-native-A1000` | 显式冻结输入后，Pod1 GPU2共卡canary自然完成`1024 env × 2`、49,152 transitions、capacity PASS、finite time/Reward；随后同配方fresh A1000已启动。native ABI为114-D actor/critic、31动作，不是portable 229/399 | CPU48--63；只读20/50/100/200/500/1000的episode/contact/Reward/action-rate趋势，禁止写成portable FullMDP A |
+| 12 | `PASS-live-native-A1000 / HOLD-portable-A` | native A以`1024 env × 1000`自然完成：后500-update窗口binary racket-ball contact=`4078/87546=4.658%`，明显高于50--100窗口`6/8452=0.071%`；但robot-table episode fraction仍约97%，ABI为114/114、10-term简化Reward，缺WAIT/ActionEpoch/outcome/recovery | 只作下一代吞吐与Reward经济参考；不可写成portable 229/399 FullMDP A成功 |
 
-## 5. 下一条命令
+## 5. 下一条发射协议
+
+不再生成`N=2×2 -> 停 -> 修 -> N=2×2`的重复流水账。下一条Isaac A只允许一个fresh namespace：
+
+1. exact clean Git、Isaac5.1/IsaacLab8320/RSL3、资产SHA、空物理GPU和独立CPU affinity一次性闭合；
+2. `num_envs=4096`、`max_iterations=1000`直接启动，update0--4就是同一进程的scale/finite门；
+3. update5健康即自然继续，不重启、不换seed、不改Reward；只读20/50/100/200/500/1000；
+4. 仅在进程失败、证据不可信或结构性不可学被直接证明时停止；普通tilt/table/fall只记telemetry；
+5. 长跑期间并行完成portable MuJoCo A lifecycle、rough课程和2.0删除清单，不热补正在运行的源码或scene。
+
+当前尚无可执行的4096 wrapper；必须在真实空卡、锁和child CPU affinity均可证明后冻结一次性发射件。
+下面保留旧命令与失败证据，防止误复用。
+
+### 已消费旧命令
 
 已执行且不可复用的 Pod1 GPU1 engineering canary：
 
@@ -128,6 +158,7 @@ native A canary执行commit=`08d17b74…`、namespace=
 
 | update | 要回答的问题 |
 | ---: | --- |
+| 5 | 4096 scene、显存、obs/Reward/optimizer/WAL是否finite且没有scale-only错误；通过后同进程继续 |
 | 20 | optimizer、Reward20、WAL/ACK、finite、episode reason 和 opportunity 分母是否真实运转 |
 | 50 | ready/swing dense income 与 termination rate 是否开始偏离随机初始化 |
 | 100 | selected/defer/reject/accept 的比例与 episode length 是否出现方向性变化 |
@@ -216,12 +247,17 @@ physical-device/runtime`六个单体分别约32.6k/20.1k/16.3k/14.6k/13.3k/11.3k
 重复receipt/registry/journal。目标是一个训练root、一个typed event log、一个packed backend boundary；
 任何新增“安全层”若不能指出独立事实源、真实消费者和失败动作，默认删除而不是继续堆叠。
 
-## 8. 地形修正（长跑后第一批）
+## 8. 地形修正（代码现在修，课程用fresh run）
 
-当前10 cm网格逐顶点独立`±2 cm`高度是白噪声地面，不是可解释的真实地形，也不是MJLab的做法。
-本次A/C长跑继续flat，避免中途改变MDP。随后把terrain producer改成带显式平地质量的连续混合：大块flat、
-低频slope/wave、稀疏stairs/rough patch；每个tile内参数连续，tile间由curriculum控制难度。验收必须比较
-足底局部法向/高度谱、站立episode length和接触冲量，禁止用“随机数更多”代签robustness。
+旧10 cm网格逐顶点独立`±2 cm`高度是白噪声地面，不是可解释的真实地形。producer现已改成固定seed的
+空间相关场：四次box smoothing、出生圆岛exact flat、桌侧exact flat、两处smoothstep过渡，并用固定
+IID反例证明相邻格相关而非白噪声；plant identity改为`robot_side_correlated_spawn_flat_v2`，禁止旧rough
+checkpoint静默resume。host性质测试`13 passed`，training-contract回归`145 passed`。
+
+当前FullMDP nominal配置本来就是plane；上述修改只有显式`terrain_rough_height_range`时才生效，所以
+不会解释或改变旧N=2失败。下一条4096 nominal长跑仍用plane；rough必须用新namespace、新plant identity，
+按`plane -> ±5 mm -> ±10 mm -> ±20 mm`独立阶段启用。启用前还要用live A3双脚包络验证0.20 m出生平地
+半径，并做Isaac 2-env足底穿透/桌体对齐与4096吞吐；不把共享clone mesh伪装成逐env动态curriculum。
 
 ## 9. 存储边界
 
