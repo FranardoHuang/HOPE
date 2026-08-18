@@ -39,6 +39,24 @@ dense motion项为有限正收入。故下一实验不是调Reward，而是同�
 同代码、同`N=2`的fresh A1000现已在Pod1 GPU1单进程启动；在第20个update之前仍记为`未测`，不因
 tilt/table/fall等可学习终止提前停机，也不在运行中改Reward或source。
 
+### A1000 update20
+
+- 运行可信度：20 updates=`960` environment steps，WAL `40`行严格PENDING/ACK，Reward sample
+  `960/960` finite，nonfinite/poison/conservation violation均为0；wall=`00:03:08`。
+- 任务入口：D05 transactions=`481`，due/selected=`12/12`，construction/key admitted=`11/11`；
+  其中11个forehand opportunity均defer/not-ready，另1个unknown opportunity reject。side strata当前
+  producer明确`not_produced`，所以side结果为`未测`。
+- 事件梯：r03 first physically valid和physical observed/contact均`0/11 key-admitted`；没有launch、
+  playback、R06 settlement或R07 outcome，因此R06/R07成功率没有分母，写`未测`而不是0%。
+- episode：completed=`10`，length sum=`876`，10个均base tilt，rolling mean length=`87.6`；这仍是
+  随机早期policy的可学习终止，不触发停机。
+- Reward20：14个task/sparse项eligible=0；6个dense motion项收入依次为anchor-pos `5.6696`、
+  anchor-ori `4.9781`、body-pos `10.4131`、body-ori `0.0489`、lin-vel `16.5698`、ang-vel
+  `18.3530`，合计configured income=`56.0325`。policy noise std=`0.0200157`，LR=`1e-5`；KL未产出。
+
+裁决：链路可信但尚未进入swing/physical event，不改Reward、不停机，继续看50/100节点能否把
+admitted opportunity推进到playback与contact。
+
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery
 分母、termination reason和episode length；到1000后才区分权重失衡、触发率不足、分母错误或环境不可学。
 历史C曲线中action penalty负正比约`10.39 -> 3.45`及episode-length谷底恢复只作为待观察模式，

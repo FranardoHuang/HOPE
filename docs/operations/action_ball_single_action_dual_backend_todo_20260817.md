@@ -66,7 +66,7 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-engineering / RUNNING-A1000` | update0/1实际Reward和=`3.1311374828/3.0717186332`，各48/48有限；平均约`8.46 s/update`。同代码、同`N=2`的fresh A1000已在Pod1 GPU1单进程启动 | 20/50/100/200/500/1000只读观察；不因tilt/table/fall停止 |
+| 6 | `PASS-A20 / RUNNING-A1000` | A20=`960 steps/40 WAL rows/960 finite Reward samples/0 poison`；12次due/selected中11次admitted后defer/not-ready、1次unknown reject，r03/physical=`0/11`，R06/R07无分母=`未测`；10个episode均tilt，rolling length=`87.6` | 继续50/100/200/500/1000；不因tilt/table/fall停止 |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `HOLD-producers` | MuJoCo 已有 Plant/R05→M04 packed boundary，但缺真实 vector observation/reward/termination/reset lineage 13类producer | producer-first实现后才 `learn(1)` |

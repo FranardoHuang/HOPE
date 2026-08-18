@@ -25,6 +25,12 @@ optimizer update，WAL为4行`PENDING0/ACK0/PENDING1/ACK1`，两组48个sample�
 [唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)与
 [环境身份合同](../operations/action_ball_isaac51_environment_identity_20260818.md)。
 
+同一代码/`N=2`的A1000在update20仍健康：960 environment steps、40行exact WAL、Reward `960/960`
+finite、0 poison/conservation violation。12次due/selected中11次construction/key admitted，但均
+defer/not-ready，1次unknown reject；r03/physical first-valid=`0/11`，flight/outcome/recovery无分母写
+`未测`。10个episode均由base tilt终止，rolling mean length=`87.6`；按本Gate定义这是可学习telemetry，
+不是停机或Gate晋级依据。
+
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
 部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
 历史 225/318-D Stage1 V2 和 194/318-D fixed-question 只保留证据账；当前 branch

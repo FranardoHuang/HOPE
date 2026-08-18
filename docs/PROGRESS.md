@@ -10,7 +10,9 @@
 
 - 2026-08-18: 在A `N=2 × 2 update`工程链闭合后，已从GitHub branch的fresh clean
   `4d374ca8…` checkout于Pod1空闲GPU1启动同代码、同N、单进程A1000；active checkout只读，
-  不生成checkpoint、不声称resume，并在20/50/100/200/500/1000读取科学趋势。
+  不生成checkpoint、不声称resume。update20达到960 steps/40 WAL/960 finite Reward samples；
+  12次due中11次admitted后defer/not-ready，r03/physical=`0/11`，R06/R07分母为零仍`未测`；
+  10个episode均tilt但不触发停机。详见[科学记录](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)。
 
 - 2026-08-18: Pod1 exact Isaac5.1/IsaacLab8320/RSL3上的第四个fresh FullMDP A canary自然RC0：
   `N=2 × 2 update`完成两个optimizer update与四行严格PENDING/ACK WAL；229/399-D observation、
