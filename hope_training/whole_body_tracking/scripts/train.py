@@ -21960,12 +21960,14 @@ def _close_simulation_app(simulation_app, *, failed: bool) -> None:
 
 
 _ACTION_BALL_RUNTIME_PRE_APP_STATE = "unchecked"
+_ACTION_BALL_RUNTIME_PRE_APP_VALUES = None
 
 
 def _require_action_ball_runtime_unloaded_before_app_start() -> None:
     """Prove Hydra did not preload the attested runtime before Kit."""
 
     global _ACTION_BALL_RUNTIME_PRE_APP_STATE
+    global _ACTION_BALL_RUNTIME_PRE_APP_VALUES
 
     names = (
         "HOPE_ACTION_BALL_RUNTIME_ATTESTATION",
@@ -21975,14 +21977,21 @@ def _require_action_ball_runtime_unloaded_before_app_start() -> None:
         "HOPE_ACTION_BALL_RUNTIME_VENV_SITE",
     )
     values = {name: os.environ.get(name) for name in names}
-    if all(value is None for value in values.values()):
+    if (
+        _ACTION_BALL_RUNTIME_PRE_APP_STATE == "unchecked"
+        and all(value is None for value in values.values())
+    ):
         return
+    if _ACTION_BALL_RUNTIME_PRE_APP_STATE != "unchecked":
+        _ACTION_BALL_RUNTIME_PRE_APP_STATE = "consumed"
+        _ACTION_BALL_RUNTIME_PRE_APP_VALUES = None
+        raise RuntimeError("ActionBall pre-AppLauncher proof is not reusable")
+    _ACTION_BALL_RUNTIME_PRE_APP_STATE = "consumed"
+    _ACTION_BALL_RUNTIME_PRE_APP_VALUES = None
     if any(value is None for value in values.values()):
         raise RuntimeError("partial ActionBall post-AppLauncher runtime attestation")
     if values["HOPE_ACTION_BALL_RUNTIME_ATTESTATION"] != "sealed_rsl_v1":
         raise RuntimeError("unknown ActionBall post-AppLauncher runtime attestation")
-    if _ACTION_BALL_RUNTIME_PRE_APP_STATE != "unchecked":
-        raise RuntimeError("ActionBall pre-AppLauncher proof is not reusable")
     forbidden = tuple(
         name
         for name in sys.modules
@@ -21994,6 +22003,7 @@ def _require_action_ball_runtime_unloaded_before_app_start() -> None:
             "Hydra preloaded the ActionBall runtime before AppLauncher: "
             + ",".join(sorted(forbidden))
         )
+    _ACTION_BALL_RUNTIME_PRE_APP_VALUES = tuple(values[name] for name in names)
     _ACTION_BALL_RUNTIME_PRE_APP_STATE = "checked"
 
 
@@ -22007,6 +22017,7 @@ def _attest_action_ball_runtime_after_app_start() -> None:
     """
 
     global _ACTION_BALL_RUNTIME_PRE_APP_STATE
+    global _ACTION_BALL_RUNTIME_PRE_APP_VALUES
 
     names = (
         "HOPE_ACTION_BALL_RUNTIME_ATTESTATION",
@@ -22016,15 +22027,17 @@ def _attest_action_ball_runtime_after_app_start() -> None:
         "HOPE_ACTION_BALL_RUNTIME_VENV_SITE",
     )
     values = {name: os.environ.get(name) for name in names}
-    if all(value is None for value in values.values()):
-        return
-    if any(value is None for value in values.values()):
-        raise RuntimeError("partial ActionBall post-AppLauncher runtime attestation")
-    if values["HOPE_ACTION_BALL_RUNTIME_ATTESTATION"] != "sealed_rsl_v1":
-        raise RuntimeError("unknown ActionBall post-AppLauncher runtime attestation")
+    if _ACTION_BALL_RUNTIME_PRE_APP_STATE == "unchecked":
+        if all(value is None for value in values.values()):
+            return
+        raise RuntimeError("pre-AppLauncher runtime unload proof is missing or consumed")
     if _ACTION_BALL_RUNTIME_PRE_APP_STATE != "checked":
         raise RuntimeError("pre-AppLauncher runtime unload proof is missing or consumed")
+    expected_values = _ACTION_BALL_RUNTIME_PRE_APP_VALUES
     _ACTION_BALL_RUNTIME_PRE_APP_STATE = "consumed"
+    _ACTION_BALL_RUNTIME_PRE_APP_VALUES = None
+    if expected_values != tuple(values[name] for name in names):
+        raise RuntimeError("ActionBall runtime attestation changed after AppLauncher")
     forbidden = tuple(
         name
         for name in sys.modules

@@ -4256,4 +4256,4 @@
 - 2026-08-19：first 4096 one-shot在preexec、sealed archive、真实Kit Python和Hydra4096解析后、scene/PPO
   之前自然RC1；Kit startup约0.34秒后segfault。首错是wrapper在`AppLauncher`前导入Torch/RSL，不是容量
   或Reward。successor改成pre-App bytes门、post-App同进程class/source门，保持fresh `4096×1000`直跑；
-  pre-App证明现为一次性状态且post-App再次拒绝AppLauncher预载；旧namespace不复用、不重试。G05仍`Partial`。
+  pre-App证明与attestation值现为一次性交接且post-App拒绝值漂移/AppLauncher预载；旧namespace不复用、不重试。G05仍`Partial`。

@@ -121,8 +121,9 @@ compute驻留。根因是identity代码在`AppLauncher`之前导入Torch/RSL，�
 
 successor保持`4096×1000`、fresh namespace、GPU0/CPU32--47、最多一个已知peer、20 GiB余量和同进程
 update0--4；唯一变化是两阶段identity门。pre-App阶段验证sealed bytes/interpreter且拒绝Hydra预载
-Torch/RSL/TensorDict；该证明是`unchecked→checked→consumed`的一次性状态，post-App入口先消费并再次拒绝
-AppLauncher预载，再在
+Torch/RSL/TensorDict；opt-in precheck一经尝试即不可重试，成功证明连同五项attestation值以
+`unchecked→checked→consumed`一次性交接，post-App
+入口先消费、再核值未漂移并拒绝AppLauncher预载，然后在
 真实Kit进程中导入并核Torch/TensorDict/RSL class、fsync v2 receipt，然后才调用`_run`。新ignored
 one-shot仍不进Git；最终source commit、wrapper SHA、namespace和result由发射件与remote保留证据共同记录。
 

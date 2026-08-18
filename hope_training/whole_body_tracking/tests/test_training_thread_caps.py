@@ -223,7 +223,7 @@ def test_runtime_attestation_is_absent_or_complete(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     assert train._attest_action_ball_runtime_after_app_start() is None
     monkeypatch.setenv("HOPE_ACTION_BALL_RUNTIME_ATTESTATION", "sealed_rsl_v1")
-    with pytest.raises(RuntimeError, match="partial ActionBall post-AppLauncher"):
+    with pytest.raises(RuntimeError, match="pre-AppLauncher runtime unload proof"):
         train._attest_action_ball_runtime_after_app_start()
 
 
@@ -241,7 +241,11 @@ def test_runtime_attestation_rejects_preloaded_runtime(monkeypatch):
     monkeypatch.setitem(sys.modules, "rsl_rl.foreign_plugin", _module("foreign"))
     with pytest.raises(RuntimeError, match="Hydra preloaded"):
         train._require_action_ball_runtime_unloaded_before_app_start()
-    assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "unchecked"
+    assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "consumed"
+
+    monkeypatch.delitem(sys.modules, "rsl_rl.foreign_plugin")
+    with pytest.raises(RuntimeError, match="not reusable"):
+        train._require_action_ball_runtime_unloaded_before_app_start()
 
 
 def test_runtime_attestation_consumes_pre_app_proof_before_post_app_imports(
@@ -267,6 +271,33 @@ def test_runtime_attestation_consumes_pre_app_proof_before_post_app_imports(
     assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "consumed"
 
     monkeypatch.delitem(sys.modules, "torch.post_app")
+    with pytest.raises(RuntimeError, match="missing or consumed"):
+        train._attest_action_ball_runtime_after_app_start()
+
+
+def test_runtime_attestation_consumes_proof_before_post_app_env_validation(
+    monkeypatch,
+):
+    train = _load_train_module(monkeypatch)
+    values = {
+        "HOPE_ACTION_BALL_RUNTIME_ATTESTATION": "sealed_rsl_v1",
+        "HOPE_ACTION_BALL_RUNTIME_RECEIPT_PATH": "/tmp/receipt",
+        "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256": "a" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256": "b" * 64,
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE": "/tmp/site-packages",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    train._require_action_ball_runtime_unloaded_before_app_start()
+
+    monkeypatch.delenv("HOPE_ACTION_BALL_RUNTIME_VENV_SITE")
+    with pytest.raises(RuntimeError, match="changed after AppLauncher"):
+        train._attest_action_ball_runtime_after_app_start()
+    assert train._ACTION_BALL_RUNTIME_PRE_APP_STATE == "consumed"
+
+    monkeypatch.setenv(
+        "HOPE_ACTION_BALL_RUNTIME_VENV_SITE", values["HOPE_ACTION_BALL_RUNTIME_VENV_SITE"]
+    )
     with pytest.raises(RuntimeError, match="missing or consumed"):
         train._attest_action_ball_runtime_after_app_start()
 
