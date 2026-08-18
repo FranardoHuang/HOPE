@@ -59,12 +59,9 @@ sample全部有限，实际Reward和=`3.1311374828/3.0717186332`，无poison/non
 
 这两次更新尚无学习结论：总共只有2个forehand opportunity，均selected后defer/not-ready；contact、
 flight、R06 outcome与R07 recovery的eligible denominator仍为零，14个稀疏/任务项收入也为零，只有6个
-dense motion项为有限正收入。故下一实验不是调Reward，而是同代码、同`N=2`、单进程A1000，在
-20/50/100/200/500/1000只读趋势。
-2/5/14/60 update只回答工程链，不回答可学性。
-
-同代码、同`N=2`的fresh A1000现已在Pod1 GPU1单进程启动；在第20个update之前仍记为`未测`，不因
-tilt/table/fall等可学习终止提前停机，也不在运行中改Reward或source。
+dense motion项为有限正收入。当时据此启动的同代码`N=2` A1000现已由本文件§scale裁决降为历史结构诊断；
+它后续到ACK470的节点仍保留如下，但不再决定下一实验规模。2/5/14/60 update只回答工程链，不回答可学性；
+下一条科学实验改为同一进程`4096×1000`。
 
 ### A1000 update20
 

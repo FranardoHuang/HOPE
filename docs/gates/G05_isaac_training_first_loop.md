@@ -83,7 +83,8 @@ WAL无悬空PENDING，但进程停滞且log/result不再
 fresh源码已把这条LM数值失败从CUDA-context级断言改成construction逐行拒绝：非零`solve_ex info`和
 非有限`dq`均不得参与候选选择，并通过既有proposal ledger分别写具名reason 8/9；没有新增owner、receipt
 或并行gate。solver正常路径及故障反例=`39 passed`，continuous producer=`50 passed`。这只关闭已知fatal
-机制，不代签真实GPU或学习；下一条A仍必须使用fresh namespace在空卡先过N=2 canary，再启动A1000。
+机制，不代签真实GPU或学习；下一条A使用fresh namespace直接启动4096 A1000，并把同一进程update0--4
+当作scale/finite观察窗，不再先开一条独立N=2 canary。
 旧run的0 ACCEPT不能再单独归因于Reward权重。host证据另有integration=`1 passed`、recovery-device=`80 passed`、
 live-facts=`25 passed, 6 skipped`、Epoch rowwise=`51 passed, 7 skipped`；四份需按已知module-identity隔离分进程运行。
 
