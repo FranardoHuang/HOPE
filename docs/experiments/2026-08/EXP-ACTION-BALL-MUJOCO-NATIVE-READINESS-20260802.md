@@ -75,9 +75,12 @@ admitted opportunity推进到playback与contact。
 不能直接复制权重。EXP只保留这类假设、指标、结果和裁决；命令、锁和namespace状态只在
 [唯一执行 TODO](../../operations/action_ball_single_action_dual_backend_todo_20260817.md)记录。
 
-MuJoCo M05骨架因没有真实`step/reset`成功路径已撤回。MuJoCo A/C当前只到Plant/R05→M04 packed
-boundary，仍缺13类真实semantic producer；在211/319 observation、Reward、termination、masked-reset
-lineage进入既有VecEnv前，不写新的root/receipt/schema，也不声称接近GPU训练。
+MuJoCo M05骨架因没有真实`step/reset`成功路径已撤回。后续只读审计又确认当前WIP有73个未跟踪
+Python文件、约12.4万行，并面向历史A211/C211 `211/319`；继续增量只会扩大无法Git交付的平行系统。
+当前portable真源已由live Isaac固定为FullMDP ActionEpoch `229/399`。因此MuJoCo 2.0从tracked
+`a3_train_ppo.py`的真实plant/reset callpoint重建：第一纵切片只做all-world reset后的initial-WAIT
+229/399 TensorDict，硬上限500 production LOC；不迁移M04/synthetic VecEnv/receipt/schema。真实step、
+Reward、termination和masked-reset lineage未闭合前，不声称接近GPU训练或执行`learn(1)`。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`

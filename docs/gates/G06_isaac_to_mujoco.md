@@ -4,11 +4,12 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 
 **2026-08-18 producer-first更正（Gate 仍 `Partial`）：**一次M05 root骨架尝试只把真实
 Plant/MotionBank/R05/M04构造到一起，但`step/reset`仍fail-closed，属于HANDOFF禁止的zero-callpoint
-债务，已完整撤回。现有MuJoCo API只闭合Plant/R05→M04 packed boundary；真实vector receipt仍缺
-211/319 observation、Reward、termination和masked-reset lineage等13类核心producer。下一步不再加
-root/receipt/schema，而是把这些producer接入既有semantic composer，能真实产出VecEnv step后才允许
-GPU `learn(1) -> drain -> learn(1)`。Isaac A先跑不代表MuJoCo parity，MuJoCo A/C距离真实运行仍明显
-更远，见[唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)。
+债务，已完整撤回。进一步审计发现该WIP是73个未跟踪Python文件、约12.4万行，并继续面向历史
+A211/C211 `211/319`；不能整包入Git或作为当前portable MDP。live Isaac现役合同是FullMDP ActionEpoch
+`229/399`，因此MuJoCo 2.0只认该宽度。第一纵切片从tracked `a3_train_ppo.py`真实plant的all-world
+`reset -> sim.forward` callpoint直接构造initial-WAIT 229/399 TensorDict，production硬上限500 LOC；
+不新增root/owner/receipt/schema。该reset切片通过也不授权`learn(1)`；真实step、Reward、termination、
+masked reset闭合后才可GPU训练。见[唯一 TODO](../operations/action_ball_single_action_dual_backend_todo_20260817.md)。
 
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac
 只提供 N1 最小可学证据和冻结 handoff。G06 未来应拆成 portable contract/plant/reward/reset parity、

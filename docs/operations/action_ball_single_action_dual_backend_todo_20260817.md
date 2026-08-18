@@ -47,7 +47,8 @@ deployment、真机或物理安全。
 - checkpoint/restore：当前只存在 owner 结构事务，不存在完整 plant/manager/trainer/RNG fresh-process restore。
   A1000 必须一次自然运行完成，不能声称可恢复长跑。
 - 多动作：单动作非零 opportunity/contact/outcome 分母和趋势之前不扩。
-- MuJoCo GPU：等真实 211/319 observation、Reward、termination、masked-reset lineage producers 闭合。
+- MuJoCo GPU：消费当前FullMDP ActionEpoch `229/399` portable observation；历史A211/C211 `211/319`
+  只保留为旧诊断证据。等真实Reward、termination、masked-reset lineage producers闭合。
 
 ### 拒绝
 
@@ -69,7 +70,7 @@ deployment、真机或物理安全。
 | 6 | `PASS-A50 / RUNNING-A1000` | A50=`2400 steps/100 WAL/2400 finite/0 poison`；28次selected中25次admitted后均defer/not-ready、3次unknown reject，r03/physical=`0/25`，R06/R07=`未测`；26个episode均tilt，rolling length=`86.38` | 继续100/200/500/1000；尚无swing，不热改Reward |
 | 7 | `HOLD-learning` | contact/flight/R06 outcome/R07 recovery、per-shot family attribution需要 live v10 分母 | A1000内观察，不作启动门 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
-| 9 | `HOLD-producers` | MuJoCo 已有 Plant/R05→M04 packed boundary，但缺真实 vector observation/reward/termination/reset lineage 13类producer | producer-first实现后才 `learn(1)` |
+| 9 | `HOLD-producers / CONTRACT-fixed-229x399` | 旧MuJoCo WIP有73个untracked Python文件、约12.4万行且目标仍是legacy 211/319；不得整包入Git。portable真源已随live Isaac冻结为FullMDP ActionEpoch 229/399 | 从tracked plant真实`reset()`做229/399 initial-WAIT TensorDict纵切片，≤500 prod LOC；随后才step/Reward/termination |
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 两轮只删无live-ref cache、旧verify scratch和6个Git可重建checkout，后者实收`2,729,152,512 B`；外部并发清理后末次只读free=`31,737,970,688 B`。未碰foreign PID、checkpoint、主日志或资产 | A1000仍在拿锁后重验；不按目录表观大小删硬链接/资产 |
 
 ## 5. 下一条命令
@@ -133,7 +134,8 @@ journal、checkpoint schema 和重复证明 gate。核心闭包约 14.9 万行�
 1. FullMDP 已绕过 14.6k 行旧 runner，只保留 397 行 RSL3 boundary adapter；
 2. A `2×2` 与 A1000 通过后，删除旧 runner 内 FullMDP/R10/resume 分支及其重复 validator；
 3. 把五角色 structural carry 与没有生产 restore callpoint的 checkpoint ground-work隔离或删除；
-4. MuJoCo 只实现缺失 producer，不再新建平行 root/receipt/schema；
+4. MuJoCo 不迁移73文件/约12.4万行未跟踪WIP；从tracked plant的真实reset/step callpoint只实现当前
+   FullMDP 229/399所需producer，不再新建平行root/receipt/schema；
 5. 每次删除必须保持真实 writer/consumer、live telemetry和反例，不用 self-SHA 代签。
 
 ## 8. 存储边界

@@ -21,6 +21,11 @@
   defer/not-ready，contact/flight/outcome/recovery分母仍为零，因此只关闭engineering loop，不作
   学习判断；下一步为同代码单进程A1000里程碑。见[唯一 TODO](operations/action_ball_single_action_dual_backend_todo_20260817.md)。
 
+- 2026-08-18: MuJoCo producer路线已纠偏：73个未跟踪Python文件/约12.4万行的旧WIP仍面向历史
+  A211/C211 211/319，不再整包迁移。当前portable真源是live FullMDP ActionEpoch 229/399；MuJoCo
+  2.0第一纵切片将从tracked plant真实reset直接产initial-WAIT 229/399 TensorDict，硬上限500 LOC，
+  不新增root/owner/receipt/schema。
+
 - 2026-08-18: Pod1第三个fresh FullMDP A canary在完整229/399-D manager、Reward20和policy bootstrap之后、
   PPO/WAL之前继续fail closed：schema-3 exact validator发现`runtime_execution_facts()`没有为FullMDP
   ActionEpoch actor物化live 399-D critic block；日志SHA=`9e6b066c…35b8a2`，namespace不重试。
