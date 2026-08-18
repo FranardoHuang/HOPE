@@ -56,8 +56,9 @@ trainer边界也已缩成一份薄launcher：直接构造现有WAIT env，再调
 `OnPolicyRunner.learn(1)`；没有复制runner、PPO或storage，也没有新增owner、receipt、WAL或checkpoint。
 构造前核module binding、构造后核实际PPO、ActorCritic、RolloutStorage对象均来自同一
 `rsl-rl-lib==3.1.2` distribution，optimizer为exact `torch.optim.Adam`，拒绝有副作用的同名预载模块。
-host focused=`6 passed, 1 skipped`，WAIT/SAT组合=`18 passed, 6 skipped`；唯一RSL3真实GPU用例仍是skip。因此它只关闭production callpoint，
-科学状态为`PASS-host-callpoint / HOLD-live-RSL3`。必须在fresh空卡先通过上段live SAT，再用隔离安装的
+host focused=`7 passed, 1 skipped`，WAIT/SAT组合=`21 passed, 6 skipped`；唯一RSL3真实GPU用例仍是skip。因此它只关闭production callpoint，
+科学状态为`PASS-host-callpoint / HOLD-live-RSL3`。薄launcher必须单次读取并SHA绑定运行器冻结的
+ready-pose，再让真实WAIT env直接解析同一份bytes，不能让direct test与production update读取不同文件。必须在fresh空卡先通过上段live SAT，再用隔离安装的
 RSL3.1.2运行`N=2 × 24`一次update；当前不得写成MuJoCo A已运行。
 
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac

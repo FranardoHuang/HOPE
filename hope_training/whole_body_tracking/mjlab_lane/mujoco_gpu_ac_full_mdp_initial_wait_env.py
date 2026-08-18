@@ -88,6 +88,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         ready_pose_path=None,
         seed: int = 0,
         capacity_probe: bool = True,
+        ready_pose_payload=None,
+        ready_pose_source=None,
     ) -> None:
         if int(sim_cfg.nworld) <= 0:
             raise ValueError("initial-WAIT FullMDP slice requires positive nworld")
@@ -108,6 +110,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             device=device,
             xml_path=xml_path,
             ready_pose_path=ready_pose_path,
+            ready_pose_payload=ready_pose_payload,
+            ready_pose_source=ready_pose_source,
             seed=seed,
             count_contacts=True,
             capacity_probe=capacity_probe,

@@ -974,9 +974,27 @@ class A3ReadyBallVecEnv:
                xml_path: Path | None = None,
                ready_pose_path: Path | None = None,
                seed: int = 0, count_contacts: bool = False,
-               capacity_probe: bool = True) -> None:
+               capacity_probe: bool = True,
+               ready_pose_payload: bytes | None = None,
+               ready_pose_source: str | None = None) -> None:
     import mujoco
     import torch
+
+    if (ready_pose_payload is None) != (ready_pose_source is None) or (
+        ready_pose_payload is not None and ready_pose_path is not None):
+      raise ValueError("ready-pose bytes require one exclusive source pair")
+    if ready_pose_payload is not None:
+      pose = court.load_ready_pose_bytes(ready_pose_payload, ready_pose_source)
+    elif ready_pose_path is not None:
+      rp = Path(ready_pose_path)
+      if not rp.is_file():
+        raise FileNotFoundError(f"explicit ready pose does not exist: {rp}")
+      pose = court.load_ready_pose(rp)
+    else:
+      rp = _HERE / "ready_pose.json"
+      if not rp.is_file():
+        rp = Path("/workspace/mjlab_lane/ready_pose.json")
+      pose = court.load_ready_pose(rp)
 
     self.cfg = task_cfg
     self.sim_cfg = sim_cfg
@@ -1004,10 +1022,7 @@ class A3ReadyBallVecEnv:
     self.max_episode_length = int(round(task_cfg.episode_length_s / self.step_dt))
 
     # ---- ready pose --------------------------------------------------
-    rp = ready_pose_path or (_HERE / "ready_pose.json")
-    if not Path(rp).is_file():
-      rp = Path("/workspace/mjlab_lane/ready_pose.json")
-    self.pose = court.load_ready_pose(Path(rp))
+    self.pose = pose
     qpos0, qvel0, idx = court.ready_qpos(self.env, self.pose)
     self.root_qadr = int(idx["root_qadr"])
     self.row_map_agrees = bool(idx["consistency"]["agree"])

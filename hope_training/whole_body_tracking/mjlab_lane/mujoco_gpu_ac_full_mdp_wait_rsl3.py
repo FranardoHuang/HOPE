@@ -8,13 +8,50 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import hashlib
 import inspect
 import json
+import os
 from pathlib import Path
+import stat
 
 
 RSL_RL_VERSION = "3.1.2"
 NUM_STEPS_PER_ENV = 24
+READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+
+
+def _ready_pose_input() -> tuple[bytes, str]:
+    raw = os.environ.get("ACTIONBALL_READY_POSE")
+    if not raw:
+        raise RuntimeError("MuJoCo WAIT ready-pose path is not bound")
+    path = Path(raw)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise RuntimeError("MuJoCo WAIT ready-pose path differs") from exc
+    try:
+        row = os.fstat(fd)
+        resolved = path.resolve(strict=True)
+        payload = b""
+        while chunk := os.read(fd, 1024 * 1024):
+            payload += chunk
+        current = path.stat(follow_symlinks=False)
+        if (
+            not path.is_absolute()
+            or not stat.S_ISREG(row.st_mode)
+            or row.st_nlink != 1
+            or current.st_nlink != 1
+            or resolved != path
+            or (row.st_dev, row.st_ino) != (current.st_dev, current.st_ino)
+            or hashlib.sha256(payload).hexdigest() != READY_POSE_SHA256
+        ):
+            raise RuntimeError("MuJoCo WAIT ready-pose path differs")
+        return payload, str(path)
+    except OSError as exc:
+        raise RuntimeError("MuJoCo WAIT ready-pose path differs") from exc
+    finally:
+        os.close(fd)
 
 
 def build_train_cfg() -> dict:
@@ -153,6 +190,7 @@ def main() -> int:
 
     version, runner_type, distribution = _rsl3_runner()
     wait = _wait_module()
+    ready_pose_payload, ready_pose_source = _ready_pose_input()
     torch.manual_seed(0)
     task = wait.TaskCfg(
         action_scale_mode="vendor",
@@ -162,7 +200,12 @@ def main() -> int:
         reset_root_yaw_noise_rad=0.0,
     )
     env = wait.FullMdpInitialWaitVecEnv(
-        wait.SimCfg(nworld=2), task, device="cuda:0", seed=0
+        wait.SimCfg(nworld=2),
+        task,
+        device="cuda:0",
+        seed=0,
+        ready_pose_payload=ready_pose_payload,
+        ready_pose_source=ready_pose_source,
     )
     initial = env.get_observations()
     if (

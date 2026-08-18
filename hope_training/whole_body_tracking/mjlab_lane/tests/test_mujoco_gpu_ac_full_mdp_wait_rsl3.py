@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -33,17 +34,27 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     assert cfg["algorithm"]["num_mini_batches"] == 4
 
 
-def test_main_orchestrates_one_update_without_logging_or_checkpoint(monkeypatch, capsys):
+def test_main_orchestrates_one_update_without_logging_or_checkpoint(
+    monkeypatch, capsys, tmp_path
+):
     module = _load()
+    ready_pose = tmp_path / "ready_pose.json"
+    payload = b'{"pose":"frozen"}'
+    ready_pose.write_bytes(payload)
+    monkeypatch.setenv("ACTIONBALL_READY_POSE", str(ready_pose))
+    monkeypatch.setattr(module, "READY_POSE_SHA256", hashlib.sha256(payload).hexdigest())
 
     class _Cfg:
         def __init__(self, **values):
             vars(self).update(values)
 
     class _Env:
-        def __init__(self, sim, task, device, seed):
+        def __init__(
+            self, sim, task, device, seed, ready_pose_payload, ready_pose_source
+        ):
             assert sim.nworld == 2 and task.action_scale_mode == "vendor"
             assert device == "cuda:0" and seed == 0
+            assert ready_pose_payload == payload and ready_pose_source == str(ready_pose)
             self.num_envs = 2
             self.num_actions = 31
             self.common_step_counter = 0
@@ -103,6 +114,31 @@ def test_main_orchestrates_one_update_without_logging_or_checkpoint(monkeypatch,
     assert '"ppo_update_calls": 1' in line
     assert '"transitions": 48' in line
     assert '"task_lifecycle": "idle_wait_only"' in line
+
+
+def test_ready_pose_binding_rejects_missing_relative_symlink_and_wrong_bytes(
+    monkeypatch, tmp_path
+):
+    module = _load()
+    monkeypatch.delenv("ACTIONBALL_READY_POSE", raising=False)
+    with pytest.raises(RuntimeError, match="not bound"):
+        module._ready_pose_input()
+
+    monkeypatch.setenv("ACTIONBALL_READY_POSE", "ready_pose.json")
+    with pytest.raises(RuntimeError, match="path differs"):
+        module._ready_pose_input()
+
+    target = tmp_path / "ready_pose.json"
+    target.write_text("{}", encoding="utf-8")
+    alias = tmp_path / "ready_pose_alias.json"
+    alias.symlink_to(target)
+    monkeypatch.setenv("ACTIONBALL_READY_POSE", str(alias))
+    with pytest.raises(RuntimeError, match="path differs"):
+        module._ready_pose_input()
+
+    monkeypatch.setenv("ACTIONBALL_READY_POSE", str(target))
+    with pytest.raises(RuntimeError, match="path differs"):
+        module._ready_pose_input()
 
 
 def test_foreign_preloaded_wait_environment_is_rejected(monkeypatch):

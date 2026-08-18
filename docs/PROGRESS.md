@@ -14,8 +14,9 @@
   500/1000为`未测`，下一条fresh A先记录LM row/info/finite并同步首错。
 
 - 2026-08-18: MuJoCo WAIT的trainer边界已缩成upstream RSL-RL 3.1.2薄调用点：PPO、ActorCritic、
-  RolloutStorage与Adam在runner构造前后绑定安装来源；host focused=`6 passed, 1 skipped`，组合=`18 passed, 6 skipped`。
-  唯一live test仍skip，所以状态是`PASS-host-callpoint / HOLD-live-RSL3`，先过fresh GPU SAT再运行一次update。
+  RolloutStorage与Adam在runner构造前后绑定安装来源，且真实env直接消费one-shot单读并SHA绑定的ready-pose bytes；
+  host focused=`7 passed, 1 skipped`，组合=`21 passed, 6 skipped`。唯一live test仍skip，所以状态是
+  `PASS-host-callpoint / HOLD-live-RSL3`，先过fresh GPU SAT再运行一次update。
 
 - 2026-08-18: MuJoCo WAIT后的portable table keepout以净增249 production LOC完成host闭合：复用既有
   62-component/five-AABB authority，按MJWarp derived-state时序覆盖20个post-integration pose，并用

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import sys
+import types
 
 import pytest
 import torch
@@ -63,6 +64,88 @@ def test_initial_wait_requires_positive_world_count_and_deterministic_reset():
             sim_cfg=wait_env.SimCfg(nworld=1),
             task_cfg=wait_env.TaskCfg(reset_joint_noise_rad=0.01),
             device="cpu",
+        )
+
+
+def test_fullmdp_forwards_ready_pose_bytes_to_the_real_base(monkeypatch):
+    class _StopAtBase(Exception):
+        pass
+
+    captured = {}
+
+    def _base_init(_self, *_args, **kwargs):
+        captured.update(kwargs)
+        raise _StopAtBase
+
+    monkeypatch.setattr(wait_env.A3ReadyBallVecEnv, "__init__", _base_init)
+    with pytest.raises(_StopAtBase):
+        wait_env.FullMdpInitialWaitVecEnv(
+            sim_cfg=wait_env.SimCfg(nworld=1),
+            task_cfg=wait_env.TaskCfg(
+                reset_joint_noise_rad=0.0,
+                reset_joint_vel_noise=0.0,
+                reset_root_xy_noise_m=0.0,
+                reset_root_yaw_noise_rad=0.0,
+            ),
+            device="cpu",
+            ready_pose_payload=b"frozen-pose",
+            ready_pose_source="/frozen/ready_pose.json",
+        )
+    assert captured["ready_pose_path"] is None
+    assert captured["ready_pose_payload"] == b"frozen-pose"
+    assert captured["ready_pose_source"] == "/frozen/ready_pose.json"
+
+
+def test_real_base_parses_ready_pose_bytes_before_build_and_never_fallbacks(
+    monkeypatch, tmp_path
+):
+    train = sys.modules[wait_env.A3ReadyBallVecEnv.__module__]
+    monkeypatch.setitem(sys.modules, "mujoco", types.ModuleType("mujoco"))
+    trace = []
+
+    def _parse(payload, source):
+        trace.append(("parse", payload, source))
+        return {"source": source}
+
+    class _StopAtBuild(Exception):
+        pass
+
+    def _build(*_args, **_kwargs):
+        trace.append(("build",))
+        raise _StopAtBuild
+
+    monkeypatch.setattr(train.court, "load_ready_pose_bytes", _parse)
+    monkeypatch.setattr(train.court, "load_ready_pose", lambda *_: pytest.fail("fallback"))
+    monkeypatch.setattr(train.court, "build_court_env", _build)
+    with pytest.raises(_StopAtBuild):
+        wait_env.A3ReadyBallVecEnv(
+            wait_env.SimCfg(nworld=1),
+            wait_env.TaskCfg(),
+            "cpu",
+            ready_pose_payload=b"frozen-pose",
+            ready_pose_source="/frozen/ready_pose.json",
+        )
+    assert trace == [
+        ("parse", b"frozen-pose", "/frozen/ready_pose.json"),
+        ("build",),
+    ]
+
+    trace.clear()
+    with pytest.raises(FileNotFoundError, match="explicit ready pose"):
+        wait_env.A3ReadyBallVecEnv(
+            wait_env.SimCfg(nworld=1),
+            wait_env.TaskCfg(),
+            "cpu",
+            ready_pose_path=tmp_path / "missing.json",
+        )
+    assert trace == []
+
+    with pytest.raises(ValueError, match="exclusive source pair"):
+        wait_env.A3ReadyBallVecEnv(
+            wait_env.SimCfg(nworld=1),
+            wait_env.TaskCfg(),
+            "cpu",
+            ready_pose_source="/partial/source.json",
         )
 
 

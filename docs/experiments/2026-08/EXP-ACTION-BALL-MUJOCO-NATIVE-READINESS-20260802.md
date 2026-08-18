@@ -11195,3 +11195,9 @@ split-ready reset、5--25 tick seeded WAIT、measured-frame0 reveal 与 reset-bo
 GPU-native trainer未闭合。
 保留的是 A 的9-D `desired_at_contact` 与 C 的 causal
 ball state；被否决的是额外 synthetic motion intent。旧 Stage1 与历史76-D C-lite 都不能代签当前系统。**
+### 2026-08-18：WAIT RSL3 输入身份修正
+
+薄launcher原先没有把one-shot运行器冻结的ready-pose传进production env；direct GPU测试与真实
+`learn(1)`因此可能读取不同输入。现在production callpoint用`O_NOFOLLOW`单次读取absolute、regular、
+单链接的`ACTIONBALL_READY_POSE`，校验fixed SHA与inode后让WAIT env直接解析同一份bytes；显式输入不再
+fallback。此项只闭合输入身份，live RSL3仍未测。

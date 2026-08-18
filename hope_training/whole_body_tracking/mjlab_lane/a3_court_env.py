@@ -720,8 +720,8 @@ def verify_court(env, cone: str, add_pairs: bool, verbose: bool = True) -> dict:
 # --------------------------------------------------------------------------
 
 
-def load_ready_pose(path: Path) -> dict:
-    doc = json.loads(Path(path).read_text())
+def load_ready_pose_bytes(payload: bytes, source: str) -> dict:
+    doc = json.loads(payload.decode("utf-8"))
     return {
         "joint_names": list(doc["robot"]["joint_names"]),
         "joint_pos": np.asarray(doc["physical_ready"]["joint_pos_rad"], float),
@@ -732,8 +732,13 @@ def load_ready_pose(path: Path) -> dict:
         "root_quat_wxyz": np.asarray(doc["physical_ready"]["root_quat_wxyz"], float),
         "mujoco_row_for_runtime_joint": list(
             doc["hold_candidate"]["mujoco_row_for_runtime_joint"]),
-        "source": str(path),
+        "source": source,
     }
+
+
+def load_ready_pose(path: Path) -> dict:
+    path = Path(path)
+    return load_ready_pose_bytes(path.read_bytes(), str(path))
 
 
 def ready_qpos(env, pose: dict) -> tuple[np.ndarray, np.ndarray, dict]:
