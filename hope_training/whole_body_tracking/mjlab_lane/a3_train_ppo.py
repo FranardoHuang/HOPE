@@ -1946,7 +1946,11 @@ def train(args) -> int:
     # contact number on this curve that means anything physical; while it was
     # eval-only the training plots had nothing to show but the weighted `touch`
     # reward term, and that term got read as a contact probability.
-    env = A3ReadyBallVecEnv(sim_cfg, task_cfg, device=device, seed=args.seed,
+    env = A3ReadyBallVecEnv(sim_cfg, task_cfg, device=device,
+                            xml_path=Path(args.xml_path) if args.xml_path else None,
+                            ready_pose_path=(Path(args.ready_pose)
+                                             if args.ready_pose else None),
+                            seed=args.seed,
                             count_contacts=not args.no_contact_probe,
                             capacity_probe=not args.no_capacity_probe)
     build_s = time.perf_counter() - t_build
@@ -2249,6 +2253,9 @@ def evaluate(args) -> int:
   status, exit_code, error, stats = "started", 1, None, {}
   try:
     env = A3ReadyBallVecEnv(sim_cfg, task_cfg, device=args.device,
+                            xml_path=Path(args.xml_path) if args.xml_path else None,
+                            ready_pose_path=(Path(args.ready_pose)
+                                             if args.ready_pose else None),
                             seed=args.seed,
                             count_contacts=not args.no_contact_probe,
                             capacity_probe=not args.no_capacity_probe)
@@ -2868,6 +2875,10 @@ def main(argv=None) -> int:
   p.add_argument("--episode-s", type=float, default=3.0)
   p.add_argument("--seed", type=int, default=0)
   p.add_argument("--device", default="cuda:0")
+  p.add_argument("--xml-path", default=None,
+                 help="explicit frozen A3 MJCF input (no default-path claim)")
+  p.add_argument("--ready-pose", default=None,
+                 help="explicit frozen split-ready JSON input")
   p.add_argument("--cone", choices=("pyramidal", "elliptic"), default="elliptic")
   p.add_argument("--no-pairs", action="store_true")
   p.add_argument("--njmax", type=int, default=572)

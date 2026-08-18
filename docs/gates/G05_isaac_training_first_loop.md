@@ -2,6 +2,13 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-18 fresh LM canary and A1000 restart（Gate 仍 `Partial`）：**fresh commit `fcfe9918…`
+把diagnostic fixed-try LM的device assert改成逐行具名拒绝。Pod1 GPU0随后自然完成`N=2 × 2`：
+96 environment steps、2次optimizer call和4行durable `PENDING/EPOCH_ACK`；Reward全finite，
+conservation/poison/nonfinite fault均为0。新单进程A1000已从fresh namespace用同一字节启动，
+与一个既有进程共卡但固定CPU32--47，只持GPU0 queue lock；里程碑仍为20/50/100/200/500/1000。
+它仍是`diagnostic_unauthorized`，没有checkpoint/resume claim。
+
 **2026-08-18 FullMDP Isaac5.1/RSL3 分支证据（Gate 仍 `Partial`）：**附件与 Pod2 实机共同锁定
 Isaac Sim 5.1、IsaacLab `8320e0be…`、Python3.11、RSL-RL3.1.2/TensorDict；旧4.5/2.1/RSL2
 不能作为等价基线。FullMDP lifecycle 已按8320重基线，真实Kit N=2 canonical reset和forced selected

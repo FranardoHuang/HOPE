@@ -2,6 +2,12 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-18 dual MuJoCo lanes（Gate 仍 `Partial`）：**portable lane已完成真实MuJoCo-Warp WAIT
+`learn(1)`（`N=2 × 24`、upstream RSL-RL3.1.2），但仍是`idle_wait_only`，不是full MuJoCo A。
+同时启用已有native MJLab court trainer作为真实学习基线，因为它已有ball launch、physical contact、
+episode termination和Reward telemetry。其XML与split-ready pose现为显式CLI输入，不再依赖隐式
+`/workspace`路径。native结果不能promotion 229/399-D portable合同。
+
 **2026-08-18 producer-first更正（Gate 仍 `Partial`）：**一次M05 root骨架尝试只把真实
 Plant/MotionBank/R05/M04构造到一起，但`step/reset`仍fail-closed，属于HANDOFF禁止的zero-callpoint
 债务，已完整撤回。进一步审计发现该WIP是73个未跟踪Python文件、约12.4万行，并继续面向历史

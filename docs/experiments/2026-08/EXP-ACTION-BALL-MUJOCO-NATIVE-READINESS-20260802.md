@@ -11224,3 +11224,14 @@ ball state；被否决的是额外 synthetic motion intent。旧 Stage1 与历�
 `learn(1)`因此可能读取不同输入。现在production callpoint用`O_NOFOLLOW`单次读取absolute、regular、
 单链接的`ACTIONBALL_READY_POSE`，校验fixed SHA与inode后让WAIT env直接解析同一份bytes；显式输入不再
 fallback。此项只闭合输入身份，live RSL3仍未测。
+
+### 2026-08-18：native A长跑预注册
+
+目的不是用旧lane代签portable FullMDP，而是尽快取得一条真实MuJoCo学习曲线。采用既有court/ball/
+contact/native Reward/PPO，新增的production变更仅是显式`--xml-path`和`--ready-pose`输入。首个长跑固定
+seed0、vendor action scale、initial std `.02`、1000 update；与Isaac并行但用独立GPU/CPU核组和namespace。
+
+中途在20/50/100/200/500/1000读取同一run：episode length、binary racket-ball contact、各Reward term、
+`action_rate_l2`、nonfinite/capacity和wall time。旧长跑中`action_rate_l2`由约`-0.126`改善到`-0.022`，
+并推动负/正Reward比跨过1，是本次重点复核的可迁移因果模式；不提前改权重，也不因早期跌倒/撞桌停止。
+该run若成功，只回答native scene的Reward经济和可学习性，不回答229/399-D portable A/C parity。

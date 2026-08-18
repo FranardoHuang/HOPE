@@ -1,5 +1,14 @@
 # 简短进度记录
 
+## 2026-08-18 — Isaac A1000 active; native MuJoCo A input binding ready
+
+- fresh LM row-rejection canary完成`N=2 × 2`、finite Reward与4行WAL闭合；新Isaac A1000在Pod1
+  GPU0用CPU32--47运行，并允许一个既有同卡进程。
+- MuJoCo WAIT完成一次真实RSL3 update但仍是`idle_wait_only`。native court trainer现接受冻结MJCF/
+  ready-pose显式输入；专项回归`2 passed`。下一步是Pod1 GPU2 native A canary/1000，不能写成portable A。
+- 地形逐顶点白噪声方案被拒绝；当前flat长跑不变，之后改为flat-heavy连续坡/波/台阶/rough patch混合。
+  两边长跑启动后进入2.0瘦身。
+
 本文件只保留短日期摘要，不再做第三份实验真源。更新时只写几句话并链接到权威位置：
 
 - 当前 setting/采用状态：[NOW](NOW.md)

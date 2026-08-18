@@ -40,6 +40,12 @@ deployment、真机或物理安全。
 - 第一条真实训练已按 Franco 新调度切到 Pod1 空卡；源码仍由 Git exact commit 下载，family A
   `N=2 × 2 update` 成功后才启动一个不重启的 A1000。
 - A1000 在 20/50/100/200/500/1000 只读里程碑，不因“看起来不好”自动停止。
+- Pod1 按物理 GPU 与 CPU locality 调度：每卡最多两个进程；每个新进程固定独立 CPU 核组，
+  不再用一个全 Pod 生命周期 Kit 锁把三张卡串成一张卡。共卡只要求显存余量、同卡进程上限和
+  独立 namespace，不把共卡 wall time 当单进程性能证据。
+- 在 portable FullMDP MuJoCo A 尚未闭合前，先运行已有真实 court/ball/contact/reward 的 native A
+  长跑取得 Reward 比例、episode length、`action_rate_l2` 和 contact 趋势；它是工程/学习基线，
+  不能冒充 229/399-D portable A。
 
 ### 延后
 
@@ -47,8 +53,9 @@ deployment、真机或物理安全。
 - checkpoint/restore：当前只存在 owner 结构事务，不存在完整 plant/manager/trainer/RNG fresh-process restore。
   A1000 必须一次自然运行完成，不能声称可恢复长跑。
 - 多动作：单动作非零 opportunity/contact/outcome 分母和趋势之前不扩。
-- MuJoCo GPU：消费当前FullMDP ActionEpoch `229/399` portable observation；历史A211/C211 `211/319`
-  只保留为旧诊断证据。等真实Reward、termination、masked-reset lineage producers闭合。
+- MuJoCo portable GPU A：消费当前FullMDP ActionEpoch `229/399` portable observation；历史A211/C211
+  `211/319`只保留为旧诊断证据。真实Reward、termination、masked-reset lineage producer仍待闭合；
+  这不再阻塞独立的native A学习基线。
 
 ### 拒绝
 
@@ -67,12 +74,13 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 进入同代码、同N、单进程A1000 |
-| 6 | `PASS-host-LM-row-reject / HOLD-fresh-A` | 最后完整边界仍为ACK470（零基update469）、22560 steps，旧进程/namespace只读保留。fresh源码已删除会摧毁CUDA context的LM `_assert_async`：`solve_ex info!=0`与非有限`dq`不会再参与候选选择，而是沿既有proposal ledger写具名reason 8/9并逐行拒绝；formal/diagnostic正常卷仍bitwise一致。solver=`39 passed`，continuous producer=`50 passed` | 提交fresh源码；在空卡跑N=2 canary，必须看到有限训练或具名LM拒绝，绝不能再以device assert作为“安全门”；通过即启动新A1000 |
+| 6 | `PASS-live-LM-canary / ACTIVE-A1000` | commit `fcfe9918…` 在Pod1 GPU0共卡完成fresh `N=2 × 2`：96 steps、4行PENDING/ACK严格闭合、Reward全finite、无poison/nonfinite/conservation fault。随后同代码、同N、独立namespace启动单进程A1000；durable frontier已过update18 | 不热补；只读20/50/100/200/500/1000，同一进程自然跑完 |
 | 7 | `PASS-host-chain / HOLD-fresh-live` | bootstrap两拍ready仍授权Motion，但不再以neutral key写R07 ActionEpoch telemetry；CPU真实fact→owner projection→Motion reveal→production D05 settle已得到两行ACCEPT、Epoch无overflow。contact/flight/R06 outcome/R07 recovery仍需下一条fresh live分母 | fresh Kit N=2重验首个ACCEPT；A1000内只观察，不把潜伏bug当Reward结论 |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `PASS-live-step / PASS-live-SAT` | commit `61887b43…` 的fresh Pod1 GPU0共卡门真实完成`19 passed,0 skipped`：N=1 reset/step、N=2 masked reset、float32 device SAT及attached `robot/*` authority全过。run结束仍只有原1个peer，queue lock自然释放 | 保持同一SAT producer；下一步接真实A lifecycle，不再扩identity gate |
 | 10 | `PASS-cleanup / PASS-A1000-margin` | 外部清理后Pod1约`249.8 GiB` free；A1000 ACK417时run目录仅约6.6MB，预计到1000新增日志不足约10MB，即使终点单checkpoint也远低于空间余量。未碰foreign PID、checkpoint、主日志或资产 | 不再为本run清理；只读监控实际增长，不按表观du删除硬链接/资产 |
 | 11 | `PASS-live-WAIT-learn1 / HOLD-full-A` | 同一fresh checkout在19-test后直接调用upstream RSL-RL3.1.2：`N=2 × 24`完成1次PPO update、48 transitions、229/399宽度，`final_rc=0`；result SHA=`322592ce…f07a`。lifecycle仍明确`idle_wait_only`，没有question/contact/outcome | 复用该VecEnv/runner接真实A reveal→flight→outcome；先短live再启动MuJoCo A长跑 |
+| 12 | `PASS-host-explicit-input / READY-native-A-long` | 现有native MuJoCo trainer已是真实court/ball/ready/contact/Reward/PPO；本轮只新增`--xml-path`与`--ready-pose`薄接线，使长跑消费fresh namespace中的冻结输入。专项回归`2 passed`；本机完整alignment测试因未安装`mjlab`有5项环境失败，不冒充绿 | Pod1 GPU2与既有单进程共卡，CPU48--63，先短canary再同配方1000 update；报告native维度，禁止写成portable FullMDP A |
 
 ## 5. 下一条命令
 
@@ -172,7 +180,19 @@ journal、checkpoint schema 和重复证明 gate。核心闭包约 14.9 万行�
    FullMDP 229/399所需producer，不再新建平行root/receipt/schema；
 5. 每次删除必须保持真实 writer/consumer、live telemetry和反例，不用 self-SHA 代签。
 
-## 8. 存储边界
+2.0瘦身不在活跃长跑中热改。两边各有长跑后，先生成production callpoint census，再按依赖从外向内删：
+零引用observation、旧RSL2 runner的FullMDP/R10分支、无生产restore callpoint的carry/checkpoint groundwork、
+重复receipt/registry/journal。目标是一个训练root、一个typed event log、一个packed backend boundary；
+任何新增“安全层”若不能指出独立事实源、真实消费者和失败动作，默认删除而不是继续堆叠。
+
+## 8. 地形修正（长跑后第一批）
+
+当前10 cm网格逐顶点独立`±2 cm`高度是白噪声地面，不是可解释的真实地形，也不是MJLab的做法。
+本次A/C长跑继续flat，避免中途改变MDP。随后把terrain producer改成带显式平地质量的连续混合：大块flat、
+低频slope/wave、稀疏stairs/rough patch；每个tile内参数连续，tile间由curriculum控制难度。验收必须比较
+足底局部法向/高度谱、站立episode length和接触冲量，禁止用“随机数更多”代签robustness。
+
+## 9. 存储边界
 
 “超过 500 GB”是 Pod `/workspace` 配额，不是本机 repo；本机 `nohope` 约 1.56 GiB。本机已按
 quarantine→`git fsck` 回收约 470 MB。2026-08-18 Pod1切回执行后，只删除6,902个可重建且无live-ref的
