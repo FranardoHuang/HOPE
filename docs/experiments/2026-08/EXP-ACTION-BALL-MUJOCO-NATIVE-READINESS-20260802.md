@@ -57,6 +57,18 @@ tilt/table/fall等可学习终止提前停机，也不在运行中改Reward或so
 裁决：链路可信但尚未进入swing/physical event，不改Reward、不停机，继续看50/100节点能否把
 admitted opportunity推进到playback与contact。
 
+### A1000 update50
+
+- 运行仍可信：2400 steps、100行exact WAL、Reward `2400/2400` finite，0 nonfinite/poison/fault；
+  wall=`00:07:51`。
+- selected=`28`，其中25个forehand construction/key admitted后全为defer/not-ready，另3个unknown
+  reject；r03/physical=`0/25 admitted`，仍无launch/playback/R06/R07分母。
+- 26个episode全部base tilt，rolling mean length=`86.38`、mean reward=`4.986`；相比update20的
+  `87.6/5.056`没有改善。六个dense motion收入合计=`138.896`，每sample约`0.05787`，也与update20
+  的约`0.05837`基本持平略降。noise std=`0.0200191`、LR=`1e-5`、KL仍未产出。
+
+裁决：目前是“readiness尚未被policy达到”，不是已证Reward权重根因；不改配置，继续update100。
+
 本轮不预调Reward。A1000先记录20个term的signed income、opportunity/contact/flight/outcome/recovery
 分母、termination reason和episode length；到1000后才区分权重失衡、触发率不足、分母错误或环境不可学。
 历史C曲线中action penalty负正比约`10.39 -> 3.45`及episode-length谷底恢复只作为待观察模式，

@@ -31,6 +31,11 @@ defer/not-ready，1次unknown reject；r03/physical first-valid=`0/11`，flight/
 `未测`。10个episode均由base tilt终止，rolling mean length=`87.6`；按本Gate定义这是可学习telemetry，
 不是停机或Gate晋级依据。
 
+update50仍为可信但未进入任务阶段：2400 steps、100行exact WAL、Reward `2400/2400` finite、0 poison；
+28次selected里25次construction/key admitted后全部defer/not-ready，3次unknown reject，r03/physical=
+`0/25`，R06/R07继续`未测`。26个episode全为base tilt，rolling length=`86.38`、mean reward=`4.99`，
+没有比update20更好的方向性变化；仍按协议继续到100，不在运行中改Reward。
+
 **2026-08-02 下一版 Gate 提案（状态不变）：**Isaac 在下一版不再负责完成 N73、广域 long 或最终
 部署 policy，只负责用最终 ball-conditioned ABI/reward/scheduler 做 N1 最小可学门并冻结 handoff。
 历史 225/318-D Stage1 V2 和 194/318-D fixed-question 只保留证据账；当前 branch
