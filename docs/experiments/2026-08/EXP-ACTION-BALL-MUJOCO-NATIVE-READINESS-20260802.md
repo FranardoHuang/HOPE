@@ -127,11 +127,13 @@ phase为IDLE one-hot，+10m park球qvel为零且raw contact array中无ball row�
 `6fe2e70c43fc239c3f4a041e3e349c991ff1fb4ff312c17266d66e0580ba6030`，log SHA256=
 `2cc20c745293f39b5e46a1d10f19a066d5738648e85d8c02261bd6785901ba1c`；checkout保持clean。
 
-科学裁决为`PASS-live-reset / HOLD-step`。同一live log明确警告MJCF child的`timestep=0.001`与
-`noslip_iterations=3`没有传播，mjlab parent保留`0.002/0`。这不影响本次无步进reset/readback结论，
-却会改变后续动力学，必须在step纵切片先由单一配置真源闭合，不能忽略warning继续训练。此外
-`/workspace/mjlab_venv`的RSL-RL为5.4.0而Isaac为3.1.2；任何`learn(1)`前仍须隔离并锁定共同
-RSL3.1.2训练ABI，不能用兼容分支宣称等价。
+科学裁决为`PASS-live-reset / HOLD-step`。attach warning本身不能代签最终model option；因此新commit
+`d28a7eac`在新namespace直接断言live compiled `physics_dt=0.001`、decimation=`20`、control dt=
+`0.02`和`noslip_iterations=0`，再次自然RC0，result SHA256=
+`9b40214fe9f615f55cf0182b39eac7bcc1d91e22b4db083c567a20cd1e11eddc`。这证明SimulationCfg正确
+恢复vendor timestep；`noslip=0`则是MuJoCo-Warp没有noslip pass的已登记backend deviation，不伪称
+vendor exact。`/workspace/mjlab_venv`的RSL-RL仍为5.4.0而Isaac为3.1.2；任何`learn(1)`前须隔离并
+锁定共同RSL3.1.2训练ABI，不能用兼容分支宣称等价。
 
 本分支同时保留 `L194` legacy fixed-question
 194/318-D、`H225` historical ball-free 225/318-D、已 supersede 的 `A225-proto/C225-proto`

@@ -19,8 +19,9 @@ canonical zero task/clock/fact/reward rows与ActionEpoch `IDLE` one-hot组成RSL
 owner、receipt、SHA或registry；`step()`继续硬拒绝缺失的Reward/termination/lifecycle。Host focused=
 `9 passed,1 skipped`后，Pod1 GPU2 fresh Git `495a0870`的唯一live test已自然RC0：N=1 real reset、
 finite 229/399、IDLE one-hot、+10m park与raw no-ball-contact均通过，result SHA=`6fe2e70c…0ba6030`。
-因此reset/readback子门为`PASS-live`。但同一log证明mjlab attach保留parent `timestep=0.002`和
-`noslip_iterations=0`，没有采用MJCF child的`0.001/3`；在单一physics option真源、真实step、Reward、
+因此reset/readback子门为`PASS-live`。后续新commit/new namespace直接从compiled model断言
+`physics_dt=0.001`、20 substeps、control dt=`0.02`，再次RC0；attach warning没有改变最终timestep。
+`noslip=0`是MuJoCo-Warp不实现vendor noslip pass的已登记backend deviation。真实step、Reward、
 termination和masked reset闭合前，本Gate仍为`Partial`且禁止`learn(1)`。
 
 **2026-08-02 successor 提案（Gate 仍 `Partial`）：**下一版将 MuJoCo 设为 N73 主训练引擎；Isaac

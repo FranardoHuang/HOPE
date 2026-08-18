@@ -39,9 +39,10 @@
 
 - 2026-08-18: MuJoCo 2.0第一条initial-WAIT纵切片以净增253 production LOC落地，并在Pod1 GPU2
   的fresh Git `495a0870`上完成真实N=1 reset/forward：229/399 TensorDict finite、ActionEpoch为IDLE、
-  +10m park球无live contact，result RC0/SHA=`6fe2e70c…0ba6030`。该PASS只关闭reset/readback；live
-  log同时证明mjlab parent把MJCF `timestep/noslip_iterations=0.001/3`覆盖为`0.002/0`，因此step、
-  Reward、termination和masked reset继续HOLD，不能据reset执行`learn(1)`。
+  +10m park球无live contact，result RC0/SHA=`6fe2e70c…0ba6030`。随后新commit/new namespace直接
+  断言live compiled `physics_dt=0.001`、20 substeps、control dt=`0.02`和registered Warp deviation
+  `noslip=0`，再次RC0/result SHA=`9b40214f…e11eddc`。reset/readback已关闭；真实step、Reward、
+  termination和masked reset仍HOLD，不能据reset执行`learn(1)`。
 
 - 2026-08-18: Pod1第三个fresh FullMDP A canary在完整229/399-D manager、Reward20和policy bootstrap之后、
   PPO/WAL之前继续fail closed：schema-3 exact validator发现`runtime_execution_facts()`没有为FullMDP
