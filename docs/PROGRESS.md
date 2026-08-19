@@ -11,7 +11,9 @@
   N2 timeout-reset peer exact和N1 reveal/launch/settlement两节点通过。第三个selected-rubber节点的测试把
   球心放在恰好一个球半径处，零穿入时MuJoCo未生成resolved contact，结果`1 failed,2 passed,rc=1`；
   第四节点未执行，namespace封存，GPU/锁自然释放且不重试。tests-only反例改成selected侧1 mm明确穿入；
-  fresh GPU未通过前仍不关闭contact runtime缺口，更不授权portable Full-A长跑。
+  fresh `a6f83b24…`已继续证明production的live pair、eligible、selected classification和Reward10=`0.02`，
+  随后只因`pytest.approx`试图把CUDA tensor转NumPy而tests-only TypeError。断言改为device-native close；本轮
+  不再重复GPU smoke，完整四节点未通过前仍不关闭contact/reset runtime缺口，更不授权portable Full-A长跑。
 
 ## 2026-08-19 — Isaac到ACK809；GPU1 MuJoCo门在零调用点因缺`numactl`停止
 

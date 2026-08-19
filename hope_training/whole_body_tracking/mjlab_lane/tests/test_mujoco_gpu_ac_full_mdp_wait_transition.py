@@ -1194,7 +1194,12 @@ def test_real_full_a_n1_launch_reports_live_selected_rubber_contact():
         assert contact["full_a_contact_classification_status"][0] == (
             wait_env.racket_contact_geometry.OBSERVED_RUBBER_STATUS_SELECTED
         )
-        assert contact["reward_terms"][0, 10] == pytest.approx(env.step_dt)
+        torch.testing.assert_close(
+            contact["reward_terms"][0, 10],
+            contact["reward_terms"].new_tensor(env.step_dt),
+            rtol=0.0,
+            atol=1.0e-7,
+        )
         assert bool(contact["full_a_racket_contact"][0])
         assert torch.count_nonzero(env._full_a_physical_fact_f32[0, 3:6]) > 0
         assert torch.equal(

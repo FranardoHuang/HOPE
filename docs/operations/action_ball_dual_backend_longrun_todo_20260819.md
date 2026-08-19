@@ -82,7 +82,11 @@
    production callpoint前的测试构造失败，因为球心被放在恰好一个球半径的零穿入相切位置，MuJoCo合法地
    没有生成resolved pair；结果为`1 failed, 2 passed`、`rc=1`，第四节点未执行。namespace
    `mujoco-fullmdp-gpu-gate.5d0044b8.Pod1GPU1Taskset.TXXdHBJ7`封存且GPU/锁自然释放。tests-only successor
-   改为selected侧1 mm明确穿入；须fresh GPU通过后才关闭contact runtime缺口；
+   改为selected侧1 mm明确穿入。fresh `a6f83b24…`自然复核已证明live pair、eligible、generic contact、
+   selected classification与Reward10=`0.02`均由production真实产生；随后tests-only断言把CUDA tensor直接交给
+   `pytest.approx`，因其试图`.numpy()`而TypeError，结果仍为`1 failed,2 passed`，第四节点未执行。
+   该namespace同样封存且GPU/锁自然释放。断言已改为device-native `torch.testing.assert_close`；fresh完整
+   四节点未过前仍不关闭contact/reset runtime缺口；
 6. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在。
 
 因此当前runner必须继续写`full_a_slice_attempted`、`full_a_complete=false`，不得改名为Full-A成功。
