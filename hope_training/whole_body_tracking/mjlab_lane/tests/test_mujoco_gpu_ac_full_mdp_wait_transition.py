@@ -1147,12 +1147,16 @@ def test_real_full_a_n1_launch_reports_live_selected_rubber_contact():
         local_selected_center = torch.tensor(
             [
                 wait_env.racket_contact_geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M[0],
-                0.020,
+                wait_env.racket_contact_geometry.BALL_RADIUS_M - 0.001,
                 wait_env.racket_contact_geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M[1],
             ],
             dtype=site.dtype,
             device=site.device,
         )
+        # Exact tangency is not a resolved-contact guarantee: the pinned ball
+        # radius is about 20 mm and MuJoCo may legitimately emit no pair at
+        # zero penetration.  Keep the centre on the selected side while
+        # penetrating the measured outer face by an explicit 1 mm.
         racket_center = site + rotation @ local_selected_center
         env._full_a_launch_state_f32[0, :3] = racket_center
         env._full_a_launch_state_f32[0, 3:7] = torch.tensor(

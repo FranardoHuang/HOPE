@@ -1,5 +1,18 @@
 # 简短进度记录
 
+## 2026-08-19 — 22秒主因在FullMDP collection；MuJoCo GPU门走到真实contact边界
+
+- active Isaac `4096×25000`到update843附近时，collection分窗均值约`19.88→21.55 s`，learning保持
+  `1.5--1.6 s`，最近约93% iteration在collection。只读两秒采样显示trainer主线程约吃满1核、GPU0约
+  `19%`；Yikang虽未绑核且允许进入我们的`32--47`，实际样本只在该集合消耗约`8%` CPU，node2总体忙
+  约`4.3%`。所以CPU集合未隔离必须在下一fresh wrapper修，但它不是当前三倍差的主因；旧`6.700 s`
+  只是legacy diagnostic hot path，当前应profile并批量化FullMDP reset/solver/host barrier，不热改active。
+- fresh MuJoCo successor `5d0044b8…`在空闲GPU1、CPU`0--15`用`taskset`越过旧`numactl`零调用阻塞；
+  N2 timeout-reset peer exact和N1 reveal/launch/settlement两节点通过。第三个selected-rubber节点的测试把
+  球心放在恰好一个球半径处，零穿入时MuJoCo未生成resolved contact，结果`1 failed,2 passed,rc=1`；
+  第四节点未执行，namespace封存，GPU/锁自然释放且不重试。tests-only反例改成selected侧1 mm明确穿入；
+  fresh GPU未通过前仍不关闭contact runtime缺口，更不授权portable Full-A长跑。
+
 ## 2026-08-19 — Isaac到ACK809；GPU1 MuJoCo门在零调用点因缺`numactl`停止
 
 - active Isaac `4096×25000`固定消费完整ACK `0..808`：`79,527,936` transitions、Reward nonfinite=`0`、

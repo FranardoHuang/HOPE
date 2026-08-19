@@ -46,6 +46,14 @@
   “Reward0--13权重错了”，因为这些项的eligible denominator仍为0。
 - WAL action identity只出现slot 0、UID `6907688916670928`、forehand；unknown仅来自reject，
   不能拿73行冷bank宣称训练覆盖73动作或backhand。
+- update `0--843`的console分解为collection均值约`19.88/19.69/20.40/21.05/21.73/21.55 s`
+  （窗口`0--4/5--49/50--199/200--499/500--799/800--843`），learning始终约`1.5--1.6 s`；
+  当前约93%的iteration墙钟在collection。Pod采样显示trainer约`110% CPU`，其中主线程约`97.5%`，
+  GPU0约`19%`，所以不是PPO或GPU饱和。active affinity=`32--47`，Yikang进程仍允许`0--127`，配置上
+  确有重叠；但两秒样本中Yikang在`32--47`只消耗约`8%` CPU、全机node2忙约`4.3%`，不足解释相对
+  `6.7 s/update`旧diagnostic校准的三倍差。旧数来自legacy diagnostic hot path；当前高reset FullMDP
+  collection与正式transaction/owner路径不是同一工作量。下一版仍须把每个job绑定互斥cpuset，但性能
+  主线是对当前FullMDP做一次分段profile并批量化reset/solver/host barrier，不热改active进程。
 
 ### MuJoCo portable Full-A：尚未允许长跑
 
@@ -69,7 +77,12 @@
 4. per-action/per-family/per-side分母和生命周期证据未闭合；本代backhand denominator应明确为0；
 5. 新catalog与selected-rubber/Reward10只有host反例通过。2026-08-19空闲GPU1 fresh件使用完整机器读取
    HEAD与新namespace，但在Python/GPU零调用前因Pod没有`/usr/bin/numactl`自然`rc=127`；真实接触与reset门
-   仍未跑。该namespace封存、不重试；下一件须在preflight确认Pod已有`taskset`并绑定独立CPU集合；
+   仍未跑。该namespace封存、不重试。successor `5d0044b8…`改用Pod已有`taskset`并在GPU1/CPU`0--15`
+   真实执行：N2 timeout-reset peer exact与N1 reveal/launch/settlement两节点通过，selected-rubber节点在
+   production callpoint前的测试构造失败，因为球心被放在恰好一个球半径的零穿入相切位置，MuJoCo合法地
+   没有生成resolved pair；结果为`1 failed, 2 passed`、`rc=1`，第四节点未执行。namespace
+   `mujoco-fullmdp-gpu-gate.5d0044b8.Pod1GPU1Taskset.TXXdHBJ7`封存且GPU/锁自然释放。tests-only successor
+   改为selected侧1 mm明确穿入；须fresh GPU通过后才关闭contact runtime缺口；
 6. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在。
 
 因此当前runner必须继续写`full_a_slice_attempted`、`full_a_complete=false`，不得改名为Full-A成功。

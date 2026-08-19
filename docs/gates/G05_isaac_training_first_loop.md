@@ -2,6 +2,14 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-19 active 4096吞吐归因（Gate仍`Partial`）：**update `0--843`的collection分窗均值从
+`19.88 s`缓慢升到约`21.55 s`，learning始终约`1.5--1.6 s`；最近iteration约93%在collection。
+只读Pod采样为trainer约`110% CPU`（主线程约`97.5%`）、GPU0约`19%`。active只允许CPU`32--47`，
+Yikang进程允许`0--127`，所以调度集合没有严格隔离；但同一两秒样本中后者落在`32--47`的用量仅约
+`8%` CPU、node2总体忙约`4.3%`，不能解释三倍墙钟。旧`6.700 s/update`是legacy diagnostic hot path，
+不是当前FullMDP transaction/owner工作量。下一fresh件必须按job使用互斥cpuset；当前性能因果动作是
+profile FullMDP collection并批量化reset/solver/host barrier，不改active affinity、不动PPO。
+
 **2026-08-19 ACK809只读前缀（Gate仍`Partial`）：**active同一`4096×25000`进程的完整ACK `0..808`
 已到`79,527,936` transitions，Reward nonfinite与conservation violation均为0。D05 selected=`1,015,878`，
 其中`895,105` construction-admitted仍全是not-ready defer、`120,773` reject，ACCEPT/CENSOR、R03、launch、
