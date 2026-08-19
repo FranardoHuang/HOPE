@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC
 from dataclasses import dataclass
 import hashlib
 import importlib.util
@@ -275,7 +276,7 @@ class _Epoch:
         self.shot_slot_capacity = shot_slot_capacity
 
 
-class ClampedJointPositionAction:
+class ClampedJointPositionAction(ABC):
     _joint_safety_diagnostic_compact_evidence = True
     _pre_apply_guard_decimation = 4
 
@@ -436,6 +437,11 @@ def _fake_imports(monkeypatch):
 def test_update_orders_optimizer_between_prepare_and_durable_ack(
     tmp_path, _fake_imports, capsys, monkeypatch
 ):
+    # IsaacLab's ManagerTermBase inherits ABC, so the real action class uses
+    # ABCMeta rather than the literal ``type`` metaclass.  The adapter must pin
+    # the class object and live instance, not reject that legitimate metaclass.
+    assert isinstance(ClampedJointPositionAction, type)
+    assert type(ClampedJointPositionAction) is not type
     env = _Env()
     boundary = adapter.ActionBallFullMdpRsl3Adapter(
         env=env, owner=env.owner, log_dir=str(tmp_path)

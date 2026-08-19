@@ -24,9 +24,12 @@ successor采用IsaacLab真实`replicate_physics=True`/env0 source contract：完
 具体prim、K-ball rigid actor和contact binding仍逐行验证。它删除重复工作，不放宽per-env runtime身份。
 另将Motion catalog从旧plant bank切到同一0807 A3P plant重解的73条bank；逐文件根`pelvis_link` frame-0
 yaw均在`1e-6 rad`内，旧日志是把`torso_Link`合法挥拍yaw当grounding的错对象gate。新bank机械admission仍
-为`0/73`，只改善诊断lineage，不授权formal。代码真源同时证明FullMDP从未在action cfg启用compact
-evidence；这已经确定解释live producer为何为false，无需再用N=1真跑定位。successor在Manager构造前显式
-绑定该真实producer并直接fresh `4096×25000`长跑；不再循环多个短smoke。
+为`0/73`，只改善诊断lineage，不授权formal。compact的唯一writer本来就在`train.py` runtime binding；
+commit `75b18ba2…`错误地又从task cfg写了一次，因ownership门在scene前自然RC1，证实不应复制状态。
+回读exact IsaacLab表明live action class继承`ManagerTermBase(ABC)`，其metaclass必为`ABCMeta`；旧adapter却
+要求`type(class) is type`，所以531 run拒绝的是错误的metaclass gate，不是compact ledger缺失。successor
+保留runtime唯一writer，只把class检查改为“是type的实例+exact module/name+live object identity”，随后直接
+fresh `4096×25000`，不再插小N。
 
 ## 2026-08-18 scale与native A1000最终裁决
 

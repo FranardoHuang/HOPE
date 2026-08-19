@@ -819,15 +819,6 @@ def test_noncanonical_continuous_cadence_exception_is_catalog_scoped():
         C.MotionCommand._configure_action_ball_continuous_motion_cadence(owner)
 
 
-def test_full_mdp_cfg_opts_into_live_compact_joint_safety_producer():
-    pytest.importorskip("isaaclab")
-    from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
-
-    cfg = H.HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg()
-    assert cfg.commands.racket_target.action_ball_diagnostic_unauthorized is True
-    assert cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence is True
-
-
 def test_fresh_catalog_cfg_rejects_caller_override_and_order_or_sign_swap():
     pytest.importorskip("isaaclab")
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H

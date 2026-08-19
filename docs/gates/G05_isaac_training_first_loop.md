@@ -7,11 +7,13 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 `ActionBallFullMdpRsl3Adapter`在runner构造时拒绝live `joint_pos` compact producer，PPO/WAL均为0，
 result自然RC1且GPU/锁自然释放。该namespace封存、不重试。successor只做可区分的因果修正：对
 `replicate_physics=True`的homogeneous scene只在env0审完整Mesh/collision/BBox内容，所有env路径、K-ball
-rigid actor与contact binding仍逐行验证；compact门改为逐字段错误。代码真源进一步确定FullMDP action cfg
-漏开compact evidence；successor已在ActionManager构造前绑定真实producer，因此不再插N=1真跑。
+rigid actor与contact binding仍逐行验证；compact门改为逐字段错误。`train.py` runtime binding是compact
+唯一writer；`75b18ba2…`把它重复写进task cfg后在scene前被ownership门拒绝并自然RC1。exact IsaacLab源码
+表明live action class继承`ManagerTermBase(ABC)`，旧adapter的`type(class) is type`因此必错；successor改为
+接受`ABCMeta`这类合法type实例，同时仍硬钉exact module/name和live object identity，不再插N=1。
 Motion catalog同步切到与runtime 0807 A3P plant同源重解的73条bank，grounding读
 `pelvis_link`而不是会合法转腰的`torso_Link`；该bank机械admission仍为0/73，因此仍是diagnostic而非formal。
-host scene与cfg/timing/adapter聚焦回归=`63 passed,6 skipped`与`52 passed,25 skipped`；fresh Pod尚未跑，Gate不晋级。
+host回归重跑中；fresh Pod尚未跑，Gate不晋级。
 
 **2026-08-19 next-generation preflight（Gate 仍 `Partial`）：**已知LM fatal的host实现面现已闭合到
 三个独立坏候选：`solve_ex info!=0`、非有限`dq`、以及两个有限float32相加后`q+dq`溢出；三者均在任何

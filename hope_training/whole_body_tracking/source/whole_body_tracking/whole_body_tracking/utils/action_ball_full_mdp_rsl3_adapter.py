@@ -651,7 +651,7 @@ class ActionBallFullMdpRsl3Adapter:
         )
         action_type = vars(action_module).get("ClampedJointPositionAction")
         producer_mismatches = []
-        if type(action_type) is not type:
+        if not isinstance(action_type, type):
             producer_mismatches.append("export_type")
         elif (
             action_type.__name__ != "ClampedJointPositionAction"
@@ -664,7 +664,7 @@ class ActionBallFullMdpRsl3Adapter:
             producer_mismatches.append("get_term")
         if action_term is None:
             producer_mismatches.append("joint_pos")
-        elif type(action_type) is type and type(action_term) is not action_type:
+        elif isinstance(action_type, type) and type(action_term) is not action_type:
             producer_mismatches.append(
                 "joint_pos_type="
                 + type(action_term).__module__

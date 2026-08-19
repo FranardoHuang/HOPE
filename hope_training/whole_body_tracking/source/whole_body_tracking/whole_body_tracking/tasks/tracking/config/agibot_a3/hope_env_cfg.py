@@ -3249,11 +3249,6 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
         # D05/the hot Motion epoch still own first reveal and recovery; until
         # they are installed construction remains HOLD.
         racket.action_ball_diagnostic_unauthorized = True
-        # FullMDP uses its own target_mode, so ClampedJointPositionAction cannot
-        # inherit the legacy ``action_ball`` compact-evidence auto-enable.  The
-        # lean runner consumes this bounded device ledger at every optimizer
-        # boundary; bind the real action producer before ActionManager exists.
-        self.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence = True
         motion.action_ball_diagnostic_split_ready_teacher = False
         motion.action_ball_single_stroke_timeout_enabled = False
         motion.canonical_ready_mode = False
