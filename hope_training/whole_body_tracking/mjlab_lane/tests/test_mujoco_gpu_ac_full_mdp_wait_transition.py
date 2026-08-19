@@ -2454,9 +2454,22 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         initial_age = int(env.common_step_counter) - recovery_origin
         assert 0 <= initial_age < wait_env.FULL_A_RECOVERY_START_AGE_TICK
         episode_before = env.episode_length_buf.clone()
-        env._reset_idx = lambda _ids: pytest.fail(
-            "shot completion must not call the Gym environment reset"
-        )
+        def reject_gym_reset(ids):
+            state = env._state()
+            age = int(env.common_step_counter) - int(
+                env._full_a_recovery_origin_step[0]
+            )
+            pytest.fail(
+                "shot recovery called Gym reset: "
+                f"age={age}, ids={ids.detach().cpu().tolist()}, "
+                f"terminal_bits={env.last_terminal_bits[ids].detach().cpu().tolist()}, "
+                f"base_pos={state['base_pos'][ids].detach().cpu().tolist()}, "
+                f"projected_gravity={state['proj_g'][ids].detach().cpu().tolist()}, "
+                f"robot_table={env._cur_robot_table[ids].detach().cpu().tolist()}, "
+                f"table_keepout={env._cur_table_keepout[ids].detach().cpu().tolist()}"
+            )
+
+        env._reset_idx = reject_gym_reset
         for expected_age in range(
             initial_age + 1, wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1
         ):

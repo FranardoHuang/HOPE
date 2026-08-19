@@ -4402,3 +4402,5 @@
 - fresh `c2d8c536…`已进入真实R07 recovery循环，但age77前触发Gym safety reset，测试的nonterminal-shot
   hard gate正确拒绝`_reset_idx`，结果=`1 failed`、RC=1；namespace封存。当前trace未带具体terminal bit，
   因此只把split-ready/hold-qdes控制消费列为待定位阻塞，不把它假写成某一种termination；portable 25k继续HOLD。
+- GPU recovery hard gate现会在任何意外Gym reset前读取并报告exact age、terminal bits、base position、
+  projected gravity、robot-table与table-keepout；该诊断只增加失败证据，不放宽nonterminal shot语义。
