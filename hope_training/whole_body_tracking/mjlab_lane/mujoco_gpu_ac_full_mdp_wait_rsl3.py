@@ -39,7 +39,7 @@ def _ready_pose_input() -> tuple[bytes, str]:
         payload = b""
         while chunk := os.read(fd, 1024 * 1024):
             payload += chunk
-        current = path.stat(follow_symlinks=False)
+        current = os.stat(path, follow_symlinks=False)
         if (
             not path.is_absolute()
             or not stat.S_ISREG(row.st_mode)
@@ -212,6 +212,7 @@ def main(
     ready_pose_payload, ready_pose_source = _ready_pose_input()
     torch.manual_seed(0)
     task = wait.TaskCfg(
+        episode_length_s=10.0 if full_a_mode else 3.0,
         action_scale_mode="vendor",
         reset_joint_noise_rad=0.0,
         reset_joint_vel_noise=0.0,

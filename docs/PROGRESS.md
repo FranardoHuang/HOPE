@@ -4371,3 +4371,20 @@
   collider clone消费同一root。host asset/factory回归=`77 passed,37 skipped`；旧namespace不重试，G05不晋级。
 - 2026-08-19: FullMDP A `4096×25000` commit `53156327…`自然RC1：真实scene、229/399、Reward20与runtime v2已完成，runner在PPO前拒绝compact action type。exact IsaacLab源码证明该class继承`ManagerTermBase(ABC)`、metaclass为`ABCMeta`，旧adapter的`type(class) is type`是错门；compact仍由`train.py` runtime binding唯一写。`75b18ba2…`的task duplicate writer在scene前被ownership门自然拒绝并封存，反证不该复制状态。successor保留env0共享内容审计、逐envpath/ball/contact、0807 A3P 73-motion与pelvis grounding，只把type门修到exact class identity；fresh Pod待跑，G05仍`Partial`。
 - 2026-08-19: fresh FullMDP A commit `b64cb944…`首次在真实4096规模进入同一25,000-update长跑；update0--8有9组完整v11 durable pair、884,736个finite且守恒的Reward sample。D05真实due/selected=12,288，但ACCEPT仍0，全部为10,836 not-ready defer或1,452 reject；8,192个结束episode暂全tilt。工程窗通过、任务入口尚未ready，继续同一进程，1000只作里程碑不停车；G05仍`Partial`。
+
+## 2026-08-20 — FullMDP性能首墙与MuJoCo非终止shot reset
+
+- fresh Isaac `e8eef4fb…`前5个4096-env profile把`post_physics_publish`钉为约7--8秒/update，远高于
+  sim约0.9秒和owner binding约0.15秒；首个语义保持cut删除重复scene read/clone，host `81 passed, 5 skipped`，
+  待fresh GPU0 successor配对。
+- portable MuJoCo host纵切片补齐R06/R07/Reward11--13的clock、denominator、10N support、soft-limit与fault语义，
+  并把shot完成从错误的Gym done/full robot reset改成非终止row-wise selected reset；focused `38 passed, 7 skipped`，
+  exact MuJoCo-Warp GPU调用仍未测，不能称Full-A长跑。
+- R07又补上逐row的age `10..77`连续性、`68/68` expected/eligible计数和sticky fault：跳过中间格、
+  或先出现NaN再恢复finite都不得付款或被selected reset吞掉；四份portable direct suite现为
+  `49 passed, 8 skipped`。skip仍含真实MuJoCo-Warp GPU路径，故下一步是fresh GPU纵切片，不是直接宣称长跑完成。
+- Isaac `ddb1e7c4…` fresh GPU0 successor已在同一`4096×25000`进程完成前5个bounded profile并继续运行；
+  collection均值`14.987 s`、postphysics均值`7.522 s`、sim均值`0.922 s`。single-read/clone cut没有打掉
+  96次/update的empty-flight事务首墙，尚不严格支配GPU1旧run；两条immutable run均继续只读。第一次
+  pre-namespace resource gate因GPU XML混入其他卡graphics rows而误拒，fresh fix改用目标UUID compute query，
+  未复用namespace或执行Kit。

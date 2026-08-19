@@ -286,7 +286,7 @@ def test_main_orchestrates_one_update_without_logging_or_checkpoint(
     line = capsys.readouterr().out.strip()
     prefix = "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON="
     assert line.startswith(prefix)
-    record = json.loads(line.removeprefix(prefix))
+    record = json.loads(line[len(prefix) :])
     assert record["ppo_update_calls"] == num_updates
     assert record["transitions"] == transitions
     assert record["task_lifecycle"] == lifecycle

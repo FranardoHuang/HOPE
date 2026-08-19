@@ -30,10 +30,11 @@
 
 ## 3. 当前运行真相
 
-### Isaac A：正在运行
+### Isaac A：两条immutable run只读推进
 
 - 目标：`4096 × 25000`，fresh immutable namespace，1000不停机。
-- 2026-08-19 14:36 CST固定前缀为完整ACK `0..808`：`79,527,936` transitions；Reward sample
+- GPU1旧run commit=`e8eef4fb…`，2026-08-20只读前缀为完整ACK `0..1186`：
+  `116,686,848` transitions；Reward sample
   全部finite，nonfinite=`0`，conservation violation=`0`。
 - completed episode=`1,011,944`，mean length=`78.460`、mean return=`3.952`；termination bit累计
   tilt=`1,010,092`、base-too-low=`25,895`、robot-table=`1,209`，同一episode可有多个reason bit。
@@ -53,10 +54,16 @@
   确有重叠；但两秒样本中Yikang在`32--47`只消耗约`8%` CPU、全机node2忙约`4.3%`，不足解释相对
   `6.7 s/update`旧diagnostic校准的三倍差。旧数来自legacy diagnostic hot path；当前高reset FullMDP
   collection与正式transaction/owner路径不是同一工作量。CPU不要求互斥，只要求没有持续争抢或浪费；
-  性能主线是下一fresh `4096×25000`同一进程前5 update做bounded profile并自动关闭。候选已把D05的
+  性能主线已在当前fresh `4096×25000`同一进程前5 update完成bounded profile并自动关闭。结果把首墙钉在
+  96次/update的`post_physics_publish`（约7--8秒inclusive），不是CPU互斥、sim step或owner反patch扫描。候选已把D05的
   N平方唯一性改为O(N)，并只对construction rows执行solver/exact/Physical；它的唯一动态compact同步
   是否值得保留由同一successor实测决定。随后再批量化empty-flight/reset/owner gate，不热改active进程。详细量级和验收见
   [热路径实验记录](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
+- GPU0 successor commit=`ddb1e7c4…`使用同样`4096×25000`，只删除一次重复scene state read与无所有权clone；
+  2026-08-20已自然运行到至少iteration 27，GPU约`6.3 GiB`。前5个profile row的collection均值
+  `14.987 s`、postphysics均值`7.522 s`，故该cut没有消除首墙，尚不能称严格优于GPU1旧run。两条run均不
+  热改、不复用namespace；在matched profile-off与业务证据形成前不停止任一条。下一工程candidate只针对
+  zero-live-flight时成对跳过arm/capture/R06/retire/park，不能恢复已被反例否定的单边postphysics早退。
 
 ### MuJoCo portable Full-A：尚未允许长跑
 
@@ -79,9 +86,13 @@
 
 1. take061 physical-ready到take058 frame0仍缺certified production hold-qdes/bridge或逆动力学消费链；纯
    diagnostic recurrence helper无production consumer，不能代签3.2918 rad physical command gap；
-2. R06 legal landing/outcome、R07 recovery和Reward11--13未生产；
+2. R06 legal landing/outcome、R07 recovery和Reward11--13已完成host纵切片，但真实MuJoCo-Warp GPU尚未验收；
 3. per-action/per-family/per-side分母和生命周期证据未闭合；本代backhand denominator应明确为0；
-4. 新catalog、question/teacher与selected-rubber/Reward10的新增部分仍只有host反例通过。2026-08-19空闲GPU1 fresh件使用完整机器读取
+4. 新catalog、question/teacher、selected-rubber与R06/R07/Reward10--13新增部分仍需同一fresh GPU纵切片。host当前已锁定：
+   no-contact与selected-contact不同settlement clock、R07以deadline而非早落点为年龄原点、10N双脚support、0.9 soft joint limit、
+   invalid evidence fail-closed、R06/Physical critic retention与event payment分离、shot完成是非终止selected reset而非Gym full reset；
+   R07另以row-wise账本硬验age `10..77`连续、expected/eligible=`68/68`且全程无sticky fault；跳格或NaN后恢复
+   都fail closed且不再支付Reward13。四份direct suite当前=`49 passed, 8 skipped`。2026-08-19空闲GPU1 fresh件使用完整机器读取
    HEAD与新namespace，但在Python/GPU零调用前因Pod没有`/usr/bin/numactl`自然`rc=127`；真实接触与reset门
    仍未跑。该namespace封存、不重试。successor `5d0044b8…`改用Pod已有`taskset`并在GPU1/CPU`0--15`
    真实执行：N2 timeout-reset peer exact与N1 reveal/launch/settlement两节点通过，selected-rubber节点在
@@ -93,7 +104,8 @@
    `pytest.approx`，因其试图`.numpy()`而TypeError，结果仍为`1 failed,2 passed`，第四节点未执行。
    该namespace同样封存且GPU/锁自然释放。断言已改为device-native `torch.testing.assert_close`；fresh完整
    四节点未过前仍不关闭contact/reset runtime缺口；
-5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在。
+5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在；在上述真实GPU
+   纵切片通过前不生成长跑success receipt。
 
 因此当前runner必须继续写`full_a_slice_attempted`、`full_a_complete=false`，不得改名为Full-A成功。
 
@@ -113,7 +125,8 @@ Isaac active长跑期间开发和做host反例，但不能用未完成的下游�
 
 当前第1项的cold数据部分已由全73条真实motion的双实现逐列对拍闭合；固定slot0的4096 live genesis/
 reveal/reset仍需fresh运行证据。第2项的host question/teacher纵切片已闭合；下一真实阻塞是把split-ready
-控制消费、R06/R07/Reward11--13接到同一生命周期，不能把无consumer的diagnostic qdes helper代签执行。
+控制消费与当前R06/R07/Reward11--13纵切片送入同一fresh GPU gate，不能把无consumer的diagnostic qdes helper
+或host的`8 skipped`代签执行。
 
 ## 5. 地形
 

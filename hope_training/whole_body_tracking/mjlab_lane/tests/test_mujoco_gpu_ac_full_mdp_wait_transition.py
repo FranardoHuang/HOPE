@@ -481,7 +481,8 @@ def _host_full_a_lifecycle_env():
     qvel = torch.zeros((n, 12))
 
     def centre_question_stub(**kwargs):
-        task = torch.zeros((n, P.TASK_F32_WIDTH))
+        count = int(kwargs["base_position_scene"].shape[0])
+        task = torch.zeros((count, P.TASK_F32_WIDTH))
         task[:, 0] = 0.04
         task[:, 1] = 1.0
         task[:, 2] = 0.02
@@ -499,12 +500,12 @@ def _host_full_a_lifecycle_env():
         return {
             "task_f32": task,
             "launch_state_f32": task[:, 32:45],
-            "ttc_ticks": torch.full((n,), 2, dtype=torch.long),
-            "launch_horizon_ticks": torch.ones(n, dtype=torch.long),
-            "teacher_rate": torch.ones(n),
-            "scaled_t_hit_s": torch.full((n,), 0.02),
-            "scaled_t_cycle_s": torch.full((n,), 0.04),
-            "pre_swing_wait_s": torch.full((n,), 0.02),
+            "ttc_ticks": torch.full((count,), 2, dtype=torch.long),
+            "launch_horizon_ticks": torch.ones(count, dtype=torch.long),
+            "teacher_rate": torch.ones(count),
+            "scaled_t_hit_s": torch.full((count,), 0.02),
+            "scaled_t_cycle_s": torch.full((count,), 0.04),
+            "pre_swing_wait_s": torch.full((count,), 0.02),
         }
 
     env = SimpleNamespace(
@@ -550,6 +551,7 @@ def _host_full_a_lifecycle_env():
         _epoch_task_valid=torch.zeros(n, dtype=torch.bool),
         _epoch_selected=torch.zeros(n, dtype=torch.bool),
         _epoch_launch_succeeded=torch.zeros(n, dtype=torch.bool),
+        reset_generation=torch.ones(n, dtype=torch.long),
         _cur_touched=torch.zeros(n),
         _cur_robot_table=torch.zeros(n),
         _cur_table_keepout=torch.zeros(n, dtype=torch.bool),
@@ -567,6 +569,15 @@ def _host_full_a_lifecycle_env():
         ),
         _full_a_teacher=SimpleNamespace(contact_reference_root_z_scene=0.9),
         _full_a_question_builder=centre_question_stub,
+        _full_a_landing_target_xy=torch.tensor([2.55, 0.0]),
+        _full_a_target_positive_x=True,
+        _full_a_table_bounds=(0.50, 3.24, -0.7625, 0.7625),
+        _full_a_net_x=1.87,
+        _full_a_net_clear_z=0.94,
+        _full_a_landing_plane_z=0.78,
+        _full_a_placement_broad_sigma=wait_env.FULL_A_PLACEMENT_BROAD_SIGMA_M,
+        _full_a_placement_narrow_sigma=0.04,
+        _full_a_recovery_joint_limit_ok=lambda: torch.ones(n, dtype=torch.bool),
     )
     env._clear_lifecycle = MethodType(
         wait_env.FullMdpInitialWaitVecEnv._clear_lifecycle, env
@@ -650,10 +661,30 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
     assert env._full_a_physical_present.all()
     assert torch.equal(
         env._full_a_physical_fact_f32[:, :3],
-        env.sim.data.qpos[:, env.b_q : env.b_q + 3],
+        env.sim.data.qpos[:, env.b_q : env.b_q + 3]
+        - env.env.scene.env_origins,
     )
     assert torch.count_nonzero(env._full_a_physical_fact_f32[:, 10:]) == 0
 
+    env._full_a_selected_racket_contact[:] = True
+    env._full_a_previous_ball_center[:] = torch.tensor(
+        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    )
+    env._full_a_previous_ball_center_valid[:] = True
+    env._full_a_net_crossed[:] = True
+    env._full_a_net_clear[:] = True
+    env._full_a_landing_crossing_present[:] = True
+    env._full_a_landing_crossing_xy[:] = torch.tensor([[2.4, 0.1], [2.6, -0.1]])
+    env._full_a_landing_on_table[:] = True
+    env._full_a_landing_opponent_bound[:] = True
+    env._full_a_landing_on_opponent[:] = True
+    env._full_a_recovery_origin_step[:] = torch.tensor([11, 12])
+    env._full_a_recovery_ready_streak[:] = torch.tensor([1, 2])
+    env._full_a_recovery_ready_seen[:] = torch.tensor([False, True])
+    env._full_a_recovery_expected_count[:] = torch.tensor([3, 4])
+    env._full_a_recovery_eligible_count[:] = torch.tensor([2, 4])
+    env._full_a_recovery_last_age[:] = torch.tensor([12, 15])
+    env._full_a_recovery_sticky_fault[:] = torch.tensor([True, False])
     peer = {
         name: getattr(env, name)[1].clone()
         for name in (
@@ -675,8 +706,26 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
             "_full_a_r03_expected_source_step",
             "_full_a_racket_contact",
             "_full_a_ball_table_contact",
+            "_full_a_selected_racket_contact",
             "_full_a_contact_center",
+            "_full_a_previous_ball_center",
+            "_full_a_previous_ball_center_valid",
+            "_full_a_net_crossed",
+            "_full_a_net_clear",
+            "_full_a_landing_crossing_present",
+            "_full_a_landing_crossing_xy",
+            "_full_a_landing_on_table",
+            "_full_a_landing_opponent_bound",
+            "_full_a_landing_on_opponent",
             "_full_a_outcome_code",
+            "_full_a_recovery_origin_step",
+            "_full_a_recovery_ready_streak",
+            "_full_a_recovery_ready_seen",
+            "_full_a_recovery_expected_count",
+            "_full_a_recovery_eligible_count",
+            "_full_a_recovery_last_age",
+            "_full_a_recovery_sticky_fault",
+            "_full_a_selected_reset_frame0_carry",
             "_full_a_contact_classification_status",
             "_full_a_generic_contact_event",
             "_full_a_selected_contact_event",
@@ -689,8 +738,105 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
     env._clear_lifecycle(torch.tensor([0]))
     assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_IDLE
     assert not env._epoch_task_valid[0]
+    assert not env._full_a_selected_racket_contact[0]
+    assert not env._full_a_previous_ball_center_valid[0]
+    assert env._full_a_recovery_origin_step[0] == -1
+    assert not env._full_a_recovery_ready_seen[0]
+    assert env._full_a_recovery_expected_count[0] == 0
+    assert env._full_a_recovery_eligible_count[0] == 0
+    assert env._full_a_recovery_last_age[0] == -1
+    assert not env._full_a_recovery_sticky_fault[0]
     for name, expected in peer.items():
         assert torch.equal(getattr(env, name)[1], expected), name
+
+
+def test_host_full_a_shot_reset_preserves_episode_and_robot_then_reveals_again():
+    env = _host_full_a_lifecycle_env()
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env.actions = torch.arange(62, dtype=torch.float32).reshape(2, 31)
+    env.last_actions = -env.actions.clone()
+    env.episode_length_buf = torch.tensor([91, 37])
+    env.reset_generation = torch.tensor([4, 8])
+    robot_qpos = env.sim.data.qpos[:, : env.b_q].clone()
+    actions = env.actions.clone()
+    last_actions = env.last_actions.clone()
+    episode_length = env.episode_length_buf.clone()
+
+    ids = wait_env.FullMdpInitialWaitVecEnv._full_a_apply_selected_reset(
+        env, torch.tensor([True, False])
+    )
+
+    assert torch.equal(ids, torch.tensor([0]))
+    assert torch.equal(env.sim.data.qpos[:, : env.b_q], robot_qpos)
+    assert torch.equal(env.actions, actions)
+    assert torch.equal(env.last_actions, last_actions)
+    assert torch.equal(env.episode_length_buf, episode_length)
+    assert torch.equal(env.reset_generation, torch.tensor([5, 8]))
+    assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_IDLE
+    assert not env._epoch_task_valid[0]
+    assert env._epoch_task_valid[1]
+
+    reveal, _launch = wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    assert torch.equal(reveal, torch.tensor([True, False]))
+    assert env._epoch_task_valid.all()
+
+
+def test_host_full_a_physical_fact_is_scene_local_for_distinct_env_origins():
+    env = _host_full_a_lifecycle_env()
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_LAUNCH_SETTLED
+    env._epoch_task_valid[:] = True
+    env._epoch_launch_succeeded[:] = True
+    env._full_a_racket_contact[:] = True
+    env._full_a_selected_contact_event[:] = True
+    env.env.scene.env_origins[:] = torch.tensor(
+        [[0.0, 0.0, 0.0], [6.0, -2.0, 0.0]]
+    )
+    local_center = torch.tensor([1.25, -0.25, 1.0])
+    local_contact = torch.tensor([0.75, -0.5, 1.0])
+    env.sim.data.qpos[:, env.b_q : env.b_q + 3] = (
+        env.env.scene.env_origins + local_center
+    )
+    env._full_a_contact_center[:] = env.env.scene.env_origins + local_contact
+
+    env._full_a_publish_physical_fact()
+
+    assert torch.equal(
+        env._full_a_physical_fact_f32[:, :3], local_center.expand(2, 3)
+    )
+    assert torch.equal(
+        env._full_a_physical_fact_f32[:, 3:6], local_contact.expand(2, 3)
+    )
+    assert torch.equal(
+        env._full_a_physical_fact_f32[:, 6:9], local_contact.expand(2, 3)
+    )
+
+
+def test_host_full_a_physical_fact_freezes_after_outcome_settlement():
+    env = _host_full_a_lifecycle_env()
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_LAUNCH_SETTLED
+    env._epoch_task_valid[:] = True
+    env._epoch_launch_succeeded[:] = True
+    env._full_a_selected_contact_event[:] = True
+    env.sim.data.qpos[:, env.b_q : env.b_q + 3] = torch.tensor(
+        [[1.0, 2.0, 3.0], [1.5, 2.5, 3.5]]
+    )
+    env._full_a_contact_center[:] = env.sim.data.qpos[
+        :, env.b_q : env.b_q + 3
+    ]
+    env._full_a_publish_physical_fact()
+    retained_fact = env._full_a_physical_fact_f32.clone()
+    retained_ordinal = env._full_a_observation_ordinal.clone()
+    retained_source = env._full_a_physical_source_step.clone()
+
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+    env.sim.data.qpos[:, env.b_q : env.b_q + 3] = -100.0
+    env._full_a_selected_contact_event.zero_()
+    env._full_a_publish_physical_fact()
+
+    assert torch.equal(env._full_a_physical_fact_f32, retained_fact)
+    assert torch.equal(env._full_a_observation_ordinal, retained_ordinal)
+    assert torch.equal(env._full_a_physical_source_step, retained_source)
+    assert not env._full_a_physical_present.any()
 
 
 def _portable_center_row(**updates):
@@ -963,6 +1109,7 @@ def test_diagnostic_qdes_bridge_is_continuous_finite_and_exact_at_endpoints():
 
 def test_full_a_environment_consumes_the_measured_teacher_clock():
     env = _host_full_a_lifecycle_env()
+    env.q_ready = torch.full((31,), -7.0)
     origins = torch.tensor([[6.0, -12.0, 0.0], [-6.0, 12.0, 0.0]])
     env.env.scene.env_origins = origins
     frames = 4
@@ -1022,8 +1169,14 @@ def test_full_a_environment_consumes_the_measured_teacher_clock():
         env._full_a_motion_phase_code,
         torch.full((2,), 3, dtype=torch.long),
     )
-    assert torch.equal(env._full_a_teacher_joint_pos, env.q_ready.repeat(2, 1))
-    assert torch.equal(env._teacher_body_pos, env._ready_teacher_body_pos)
+    assert torch.equal(env._full_a_teacher_joint_pos, joint[0].repeat(2, 1))
+    assert torch.equal(
+        env._teacher_body_pos,
+        body_pos[0].repeat(2, 1, 1) + origins[:, None, :],
+    )
+    assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
+    assert torch.count_nonzero(env._teacher_body_lin_vel) == 0
+    assert torch.count_nonzero(env._teacher_body_ang_vel) == 0
 
 
 def test_full_a_reveal_teacher_is_atomic_frame0_then_strike_and_resets_rowwise():
@@ -1152,15 +1305,39 @@ def test_full_a_reveal_teacher_is_atomic_frame0_then_strike_and_resets_rowwise()
     )
     assert torch.equal(env._full_a_motion_phase_code, torch.ones(2, dtype=torch.long))
 
-    # A selected reset returns hidden references to the physical ready tuple.
-    # The peer remains on its own strike target; the next public reveal again
-    # switches only that row atomically to exact frame0.
+    # The completed action owns the recovery teacher: actor and dense reward
+    # hold measured frame zero rather than reverting to the unrelated physical
+    # ready snapshot.
+    env.common_step_counter = 160
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert torch.equal(
+        env._full_a_motion_phase_code,
+        torch.full((2,), 3, dtype=torch.long),
+    )
+    assert torch.equal(
+        env._full_a_teacher_joint_pos, joint[0].repeat(2, 1)
+    )
+    assert torch.equal(
+        env._teacher_body_pos,
+        body_pos[0].repeat(2, 1, 1) + origins[:, None, :],
+    )
+    assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
+    assert torch.count_nonzero(env._teacher_body_lin_vel) == 0
+    assert torch.count_nonzero(env._teacher_body_ang_vel) == 0
+
+    # A selected shot reset is nonterminating and carries measured frame zero;
+    # only a true Gym reset may expose the episode-birth physical-ready tuple.
+    # The peer remains on its own completed-action target.
     peer_joint = env._full_a_teacher_joint_pos[1].clone()
     peer_body = env._teacher_body_pos[1].clone()
-    env._clear_lifecycle(torch.tensor([0]))
-    torch.testing.assert_close(env._full_a_teacher_joint_pos[0], env.q_ready)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_apply_selected_reset(
+        env, torch.tensor([True, False])
+    )
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    torch.testing.assert_close(env._full_a_teacher_joint_pos[0], joint[0])
     torch.testing.assert_close(
-        env._teacher_body_pos[0], env._ready_teacher_body_pos[0]
+        env._teacher_body_pos[0], body_pos[0] + origins[0]
     )
     torch.testing.assert_close(env._full_a_teacher_joint_pos[1], peer_joint)
     torch.testing.assert_close(env._teacher_body_pos[1], peer_body)
@@ -1188,6 +1365,7 @@ def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r03_fact(env)
     wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
+    env._full_a_owner_fault_bits[0, 3] = 1
     exact_teacher_joint = torch.arange(31, dtype=torch.float32).repeat(2, 1)
     exact_teacher_vel = -exact_teacher_joint
     env._full_a_teacher_joint_pos.copy_(exact_teacher_joint)
@@ -1241,6 +1419,13 @@ def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
     assert torch.equal(facts[:, 0], env._full_a_physical_fact_f32)
     assert torch.equal(facts[:, 1], env._full_a_r03_fact_f32)
     assert torch.count_nonzero(facts[:, 2:]) == 0
+    faults = env._critic_obs_buf[
+        :, critic_offset["physical_r03_r06_r07_fault_present"]
+    ]
+    assert torch.equal(
+        faults,
+        torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0]]),
+    )
     assert torch.count_nonzero(
         env._critic_obs_buf[:, critic_offset["reward_due"]]
     ) == 0
@@ -1249,14 +1434,503 @@ def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
     ) == 0
 
 
-def test_host_full_a_outcome_uses_live_contact_or_bounded_flight_only():
+def test_host_full_a_outcome_uses_shared_contact_and_crossing_horizon_clocks():
     env = _host_full_a_lifecycle_env()
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     env.common_step_counter = 1
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
-    env._epoch_clock_ticks[1, 3] = 1
+    env._epoch_clock_ticks[:, 3] = torch.tensor([3, 3])
+    env._epoch_clock_ticks[:, 4] = torch.tensor([4, 5])
+    env._full_a_selected_racket_contact[1] = True
     ball_pos = env.sim.data.qpos[:, env.b_q : env.b_q + 3].clone()
-    ball_pos[0, 0] = -2.0
+    ball_pos[:, 0] = -2.0
+
+    settled, outcome = wait_env.FullMdpInitialWaitVecEnv._full_a_settle_outcome(
+        env, {"ball_pos": ball_pos}
+    )
+    assert not settled.any()
+    assert torch.count_nonzero(outcome) == 0
+
+    env.common_step_counter = 3
+    settled, outcome = wait_env.FullMdpInitialWaitVecEnv._full_a_settle_outcome(
+        env, {"ball_pos": ball_pos}
+    )
+    assert torch.equal(settled, torch.tensor([True, False]))
+    assert torch.equal(
+        outcome,
+        torch.tensor(
+            [
+                wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED,
+                wait_env.FULL_A_OUTCOME_NONE,
+            ]
+        ),
+    )
+    assert env._full_a_recovery_origin_step[0] == 3
+
+    env.common_step_counter = 5
+    settled, outcome = wait_env.FullMdpInitialWaitVecEnv._full_a_settle_outcome(
+        env, {"ball_pos": ball_pos}
+    )
+    assert torch.equal(settled, torch.tensor([False, True]))
+    assert torch.equal(
+        outcome,
+        torch.tensor(
+            [
+                wait_env.FULL_A_OUTCOME_NONE,
+                wait_env.FULL_A_OUTCOME_OUT,
+            ]
+        ),
+    )
+    assert env._full_a_recovery_origin_step[1] == 3
+    assert torch.equal(
+        env._epoch_phase,
+        torch.full((2,), wait_env.FULL_A_PHASE_OUTCOME_SETTLED),
+    )
+
+
+def test_host_full_a_invalid_contact_settles_r06_fault_with_finite_ball():
+    env = _host_full_a_lifecycle_env()
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env.common_step_counter = 1
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env._full_a_invalid_contact_event[0] = True
+    ball_pos = env.sim.data.qpos[:, env.b_q : env.b_q + 3].clone()
+
+    settled, outcome = wait_env.FullMdpInitialWaitVecEnv._full_a_settle_outcome(
+        env, {"ball_pos": ball_pos}
+    )
+    assert torch.equal(settled, torch.tensor([True, False]))
+    assert torch.equal(
+        outcome,
+        torch.tensor(
+            [wait_env.FULL_A_OUTCOME_INVALID, wait_env.FULL_A_OUTCOME_NONE]
+        ),
+    )
+    present, source_valid, common = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r06_fact(
+            env, settled, outcome
+        )
+    )
+    assert torch.equal(present, torch.tensor([True, False]))
+    assert not source_valid.any() and not common.any()
+    assert env._full_a_owner_fault_bits[0, 2] == 1
+    assert torch.count_nonzero(env._full_a_owner_fact_f32[0, 2]) == 0
+
+
+def test_host_full_a_r06_distinguishes_eligible_valid_fault_and_no_contact():
+    env = _host_full_a_lifecycle_env()
+    settled = torch.ones(2, dtype=torch.bool)
+    env._full_a_selected_racket_contact[:] = True
+    env._full_a_landing_crossing_present[:] = True
+    env._full_a_landing_crossing_xy[:] = env._full_a_landing_target_xy
+    env._full_a_landing_opponent_bound[:] = True
+    env._full_a_landing_on_opponent[:] = True
+    env._full_a_net_crossed[:] = True
+    env._full_a_net_clear[:] = True
+    outcome = torch.tensor(
+        [
+            wait_env.FULL_A_OUTCOME_LEGAL_LANDING,
+            wait_env.FULL_A_OUTCOME_INVALID,
+        ]
+    )
+
+    present, eligible, common = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r06_fact(
+            env, settled, outcome
+        )
+    )
+    reward = wait_env.portable_reward
+    assert present.all()
+    assert torch.equal(eligible, torch.tensor([True, False]))
+    assert torch.equal(common, torch.tensor([True, False]))
+    assert torch.equal(
+        env._full_a_owner_valid_bits[:, 2],
+        torch.tensor(
+            [
+                reward.R06_PRESENT
+                | reward.R06_POLICY_ELIGIBLE
+                | reward.R06_SOURCE_VALID,
+                reward.R06_PRESENT,
+            ]
+        ),
+    )
+    assert torch.equal(env._full_a_owner_fault_bits[:, 2], torch.tensor([0, 1]))
+    terms = reward.lifecycle_reward14(
+        valid_bits=env._full_a_owner_valid_bits,
+        fact_f32=env._full_a_owner_fact_f32,
+        owner_fault_bits=env._full_a_owner_fault_bits,
+        step_dt=env.step_dt,
+    )
+    torch.testing.assert_close(
+        terms[0, 11:13],
+        torch.tensor([20.0, 1.0]) * env.step_dt,
+    )
+    assert torch.count_nonzero(terms[1, 11:13]) == 0
+
+    retained_bits = env._full_a_owner_valid_bits[:, 2].clone()
+    retained_fact = env._full_a_owner_fact_f32[:, 2].clone()
+
+    wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+    assert torch.equal(env._full_a_owner_valid_bits[:, 2], retained_bits)
+    assert torch.equal(env._full_a_owner_fact_f32[:, 2], retained_fact)
+    assert not env._full_a_r06_payment_event.any()
+    dense_env = _fixed_reward_env()
+    dense_env.full_a_mode = True
+    dense_env._full_a_owner_valid_bits = env._full_a_owner_valid_bits
+    dense_env._full_a_owner_fault_bits = env._full_a_owner_fault_bits
+    dense_env._full_a_owner_fact_f32 = env._full_a_owner_fact_f32
+    dense_env._full_a_selected_contact_event = torch.zeros(2, dtype=torch.bool)
+    dense_env._full_a_r06_payment_event = env._full_a_r06_payment_event
+    _total, retained_terms = (
+        wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward20(dense_env)
+    )
+    assert torch.count_nonzero(retained_terms[:, 11:13]) == 0
+
+    env._full_a_selected_racket_contact[:] = False
+    outcome = torch.tensor(
+        [
+            wait_env.FULL_A_OUTCOME_LEGAL_LANDING,
+            wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED,
+        ]
+    )
+    present, eligible, common = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r06_fact(
+            env, settled, outcome
+        )
+    )
+    assert present.all() and eligible.all() and not common.any()
+    assert torch.equal(
+        env._full_a_owner_valid_bits[:, 2],
+        torch.full(
+            (2,),
+            reward.R06_PRESENT
+            | reward.R06_POLICY_ELIGIBLE
+            | reward.R06_SOURCE_VALID,
+            dtype=torch.long,
+        ),
+    )
+    assert torch.count_nonzero(env._full_a_owner_fault_bits[:, 2]) == 0
+    assert torch.equal(
+        env._full_a_owner_fact_f32[:, 2, 2], torch.ones(2)
+    )
+    terms = reward.lifecycle_reward14(
+        valid_bits=env._full_a_owner_valid_bits,
+        fact_f32=env._full_a_owner_fact_f32,
+        owner_fault_bits=env._full_a_owner_fault_bits,
+        step_dt=env.step_dt,
+    )
+    assert torch.count_nonzero(terms[:, 11:13]) == 0
+
+
+def test_host_full_a_r07_support_uses_10n_normal_force_and_faults_nonfinite():
+    env = SimpleNamespace(
+        _torch=torch,
+        num_envs=2,
+        device=torch.device("cpu"),
+        qpos_init=torch.zeros(1),
+        _con_geom=torch.tensor([[0, 1], [0, 2], [0, 1], [0, 2]]),
+        _con_idx=torch.arange(4),
+        _nacon=torch.tensor([4]),
+        _con_world=torch.tensor([0, 0, 1, 1]),
+        _full_a_floor_geom_id=0,
+        _full_a_foot_geom_class=torch.tensor([0, 1, 2], dtype=torch.int8),
+        _full_a_contact_normal_force=lambda: torch.tensor(
+            [9.999, 10.0, 12.0, float("nan")]
+        ),
+        _body_com_velocities_w=lambda: (
+            torch.zeros((2, 14, 3)),
+            torch.zeros((2, 14, 3)),
+        ),
+    )
+    support, slip, valid = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_recovery_foot_support(env)
+    )
+    assert torch.equal(
+        support, torch.tensor([[False, True], [True, False]])
+    )
+    assert torch.equal(valid, torch.tensor([True, False]))
+    assert torch.count_nonzero(slip) == 0
+
+
+def test_host_full_a_r07_ready_rejects_joint_outside_isaac_soft_limit():
+    lower = torch.full((31,), -1.0)
+    upper = torch.full((31,), 1.0)
+    joint = torch.zeros((2, 31))
+    joint[1, 0] = 0.91
+    env = SimpleNamespace(
+        _torch=torch,
+        jnt_lo=lower,
+        jnt_hi=upper,
+        _qpos_act=lambda: joint,
+    )
+    hard_safety = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_recovery_joint_limit_ok(env)
+    )
+    assert torch.equal(hard_safety, torch.tensor([True, False]))
+
+    eligible, valid, ready, facts = wait_env.portable_outcome.r07_rows(
+        torch=torch,
+        expected=torch.ones(2, dtype=torch.bool),
+        age=torch.full((2,), wait_env.FULL_A_RECOVERY_START_AGE_TICK),
+        errors=torch.zeros((2, 13)),
+        hard_safety_ok=hard_safety,
+        scales=torch.ones((1, 13)),
+        ready_tolerances=torch.ones((1, 13)),
+        weight=wait_env.portable_outcome.RECOVERY_REWARD_WEIGHT,
+    )
+    assert eligible.all() and valid.all()
+    assert torch.equal(ready, torch.tensor([True, False]))
+    assert torch.equal(facts[:, 0], torch.full((2,), 0.7))
+
+
+def test_host_full_a_r07_nonunit_or_zero_quaternion_faults_row():
+    env = _host_full_a_lifecycle_env()
+    env._fullmdp_body_ids = torch.arange(14)
+    env.sim.data.xpos = torch.zeros((2, 14, 3))
+    env.sim.data.xquat = torch.zeros((2, 14, 4))
+    env.sim.data.xquat[0, :, 0] = 1.0
+    env._full_a_teacher = SimpleNamespace(
+        joint_pos=torch.zeros((1, 31)),
+        body_pos_w=torch.zeros((1, 14, 3)),
+        body_quat_w=torch.nn.functional.pad(
+            torch.ones((1, 14, 1)), (0, 3)
+        ),
+    )
+    env._qpos_act = lambda: torch.zeros((2, 31))
+    env._qvel_act = lambda: torch.zeros((2, 31))
+    env._body_com_velocities_w = lambda: (
+        torch.zeros((2, 14, 3)),
+        torch.zeros((2, 14, 3)),
+    )
+    env._full_a_recovery_foot_support = lambda _body_lin_vel: (
+        torch.ones((2, 2), dtype=torch.bool),
+        torch.zeros((2, 2, 2)),
+        torch.ones(2, dtype=torch.bool),
+    )
+    env._quat_error_sq = wait_env.FullMdpInitialWaitVecEnv._quat_error_sq
+
+    errors = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_recovery_component_errors(env)
+    )
+    assert torch.isfinite(errors[0]).all()
+    assert torch.isnan(errors[1]).all()
+
+
+def test_host_full_a_invalid_outcome_faults_r06_and_cannot_enter_r07():
+    env = _host_full_a_lifecycle_env()
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+    env._full_a_outcome_code[:] = torch.tensor(
+        [wait_env.FULL_A_OUTCOME_INVALID, wait_env.FULL_A_OUTCOME_OUT]
+    )
+    env._full_a_recovery_origin_step[:] = 0
+    env.common_step_counter = wait_env.FULL_A_RECOVERY_START_AGE_TICK
+    env._full_a_recovery_component_errors = lambda: torch.zeros((2, 13))
+
+    present, source_valid, _common = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r06_fact(
+            env,
+            torch.ones(2, dtype=torch.bool),
+            env._full_a_outcome_code,
+        )
+    )
+    assert present.all()
+    assert torch.equal(source_valid, torch.tensor([False, True]))
+    assert torch.equal(env._full_a_owner_fault_bits[:, 2], torch.tensor([1, 0]))
+
+    r07_present, r07_valid = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
+    )
+    assert torch.equal(r07_present, torch.tensor([False, True]))
+    assert torch.equal(r07_valid, torch.tensor([False, True]))
+
+    terminal, success, failure, timeout = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_finish_recovery(
+            env,
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+        )
+    )
+    assert torch.equal(terminal, torch.tensor([True, False]))
+    assert not success.any() and not timeout.any()
+    assert torch.equal(failure, torch.tensor([True, False]))
+    assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_RECOVERY_SETTLED
+
+    wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+    r07_present, r07_valid = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
+    )
+    assert not r07_present[0] and not r07_valid[0]
+
+
+def test_host_full_a_r07_window_success_failure_timeout_and_reward20_conservation():
+    env = _host_full_a_lifecycle_env()
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+    env._full_a_recovery_origin_step[:] = 0
+    errors = torch.zeros((2, 13))
+    errors[1, 0] = float("nan")
+    env._full_a_recovery_component_errors = lambda: errors
+    env.common_step_counter = wait_env.FULL_A_RECOVERY_START_AGE_TICK - 1
+    present, eligible = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
+    )
+    assert not present.any() and not eligible.any()
+    assert torch.count_nonzero(env._full_a_owner_valid_bits[:, 3]) == 0
+    assert torch.count_nonzero(env._full_a_owner_fact_f32[:, 3]) == 0
+    wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+    env.common_step_counter = wait_env.FULL_A_RECOVERY_START_AGE_TICK
+
+    present, eligible = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
+    )
+    reward = wait_env.portable_reward
+    assert present.all()
+    assert torch.equal(eligible, torch.tensor([True, False]))
+    assert torch.equal(
+        env._full_a_owner_valid_bits[:, 3],
+        torch.tensor(
+            [
+                reward.R07_PRESENT | reward.R07_NUMERICALLY_VALID,
+                reward.R07_PRESENT,
+            ]
+        ),
+    )
+    assert torch.equal(env._full_a_owner_fault_bits[:, 3], torch.tensor([0, 1]))
+    assert torch.equal(
+        env._full_a_owner_source_step[:, 3], torch.tensor([10, -1])
+    )
+    lifecycle = reward.lifecycle_reward14(
+        valid_bits=env._full_a_owner_valid_bits,
+        fact_f32=env._full_a_owner_fact_f32,
+        owner_fault_bits=env._full_a_owner_fault_bits,
+        step_dt=env.step_dt,
+    )
+    torch.testing.assert_close(
+        lifecycle[:, 13], torch.tensor([0.7 * env.step_dt, 0.0])
+    )
+
+    dense_env = _fixed_reward_env()
+    dense_env.full_a_mode = True
+    dense_env._full_a_owner_valid_bits = env._full_a_owner_valid_bits
+    dense_env._full_a_owner_fault_bits = env._full_a_owner_fault_bits
+    dense_env._full_a_owner_fact_f32 = env._full_a_owner_fact_f32
+    dense_env._full_a_selected_contact_event = torch.zeros(2, dtype=torch.bool)
+    dense_env._full_a_r06_payment_event = torch.zeros(2, dtype=torch.bool)
+    total, terms = wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward20(dense_env)
+    torch.testing.assert_close(terms[:, :14], lifecycle.to(terms.dtype))
+    torch.testing.assert_close(total, terms.sum(dim=1))
+
+    errors.zero_()
+    for age in range(
+        wait_env.FULL_A_RECOVERY_START_AGE_TICK + 1,
+        wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1,
+    ):
+        env.common_step_counter = age
+        wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+        _, clean_eligible = (
+            wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
+        )
+        assert torch.equal(clean_eligible, torch.tensor([True, False]))
+        assert env._full_a_owner_fault_bits[1, 3] == 1
+        assert env._full_a_owner_source_step[1, 3] == -1
+        assert torch.count_nonzero(env._full_a_owner_fact_f32[1, 3]) == 0
+    assert torch.equal(
+        env._full_a_recovery_ready_seen, torch.tensor([True, False])
+    )
+    assert env._full_a_recovery_sticky_fault[1]
+    with pytest.raises(RuntimeError, match="incomplete or faulted"):
+        wait_env.FullMdpInitialWaitVecEnv._full_a_finish_recovery(
+            env,
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+        )
+
+    clean = _host_full_a_lifecycle_env()
+    clean._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+    clean._full_a_recovery_origin_step[:] = 0
+    clean_errors = torch.zeros((2, 13))
+    clean_errors[1] = 1.0
+    clean._full_a_recovery_component_errors = lambda: clean_errors
+    for age in range(
+        wait_env.FULL_A_RECOVERY_START_AGE_TICK,
+        wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1,
+    ):
+        clean.common_step_counter = age
+        wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(clean)
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(clean)
+    assert torch.equal(
+        clean._full_a_recovery_expected_count, torch.full((2,), 68)
+    )
+    assert torch.equal(
+        clean._full_a_recovery_eligible_count, torch.full((2,), 68)
+    )
+    assert not clean._full_a_recovery_sticky_fault.any()
+    terminal, success, failure, timeout = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_finish_recovery(
+            clean,
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+        )
+    )
+    assert terminal.all()
+    assert torch.equal(success, torch.tensor([True, False]))
+    assert not failure.any()
+    assert torch.equal(timeout, torch.tensor([False, True]))
+    assert torch.equal(
+        clean._epoch_phase,
+        torch.full((2,), wait_env.FULL_A_PHASE_RECOVERY_SETTLED),
+    )
+
+    safety = _host_full_a_lifecycle_env()
+    safety._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+    safety._full_a_recovery_origin_step[:] = 0
+    safety.common_step_counter = 20
+    terminal, success, failure, timeout = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_finish_recovery(
+            safety,
+            torch.tensor([True, False]),
+            torch.zeros(2, dtype=torch.bool),
+        )
+    )
+    assert torch.equal(terminal, torch.tensor([True, False]))
+    assert not success.any() and not timeout.any()
+    assert torch.equal(failure, torch.tensor([True, False]))
+
+
+def test_host_full_a_r07_window_rejects_skipped_ages():
+    env = _host_full_a_lifecycle_env()
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+    env._full_a_recovery_origin_step[:] = 0
+    env._full_a_recovery_component_errors = lambda: torch.zeros((2, 13))
+    for age in (
+        wait_env.FULL_A_RECOVERY_START_AGE_TICK,
+        wait_env.FULL_A_RECOVERY_END_AGE_TICK,
+    ):
+        env.common_step_counter = age
+        wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
+    assert env._full_a_recovery_sticky_fault.all()
+    with pytest.raises(RuntimeError, match="incomplete or faulted"):
+        wait_env.FullMdpInitialWaitVecEnv._full_a_finish_recovery(
+            env,
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+        )
+
+
+def test_host_full_a_r07_window_is_anchored_to_deadline_not_early_landing():
+    env = _host_full_a_lifecycle_env()
+    env._epoch_phase[:] = wait_env.FULL_A_PHASE_LAUNCH_SETTLED
+    env._epoch_clock_ticks[:, 3] = 50
+    env._epoch_clock_ticks[:, 4] = 51
+    env._full_a_selected_racket_contact[:] = True
+    env._full_a_landing_crossing_present[:] = True
+    env._full_a_landing_crossing_xy[:] = env._full_a_landing_target_xy
+    env._full_a_landing_opponent_bound[:] = True
+    env._full_a_landing_on_opponent[:] = True
+    env._full_a_net_crossed[:] = True
+    env._full_a_net_clear[:] = True
+    env.common_step_counter = 45
+    ball_pos = env.sim.data.qpos[:, env.b_q : env.b_q + 3].clone()
 
     settled, outcome = wait_env.FullMdpInitialWaitVecEnv._full_a_settle_outcome(
         env, {"ball_pos": ball_pos}
@@ -1264,17 +1938,21 @@ def test_host_full_a_outcome_uses_live_contact_or_bounded_flight_only():
     assert settled.all()
     assert torch.equal(
         outcome,
-        torch.tensor(
-            [
-                wait_env.FULL_A_OUTCOME_BALL_DEAD,
-                wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED,
-            ]
-        ),
+        torch.full((2,), wait_env.FULL_A_OUTCOME_LEGAL_LANDING),
     )
-    assert torch.equal(
-        env._epoch_phase,
-        torch.full((2,), wait_env.FULL_A_PHASE_OUTCOME_SETTLED),
+    assert torch.equal(env._full_a_recovery_origin_step, torch.full((2,), 50))
+    env._full_a_recovery_component_errors = lambda: torch.zeros((2, 13))
+
+    env.common_step_counter = 59
+    present, eligible = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
     )
+    assert not present.any() and not eligible.any()
+    env.common_step_counter = 60
+    present, eligible = (
+        wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r07_fact(env)
+    )
+    assert present.all() and eligible.all()
 
 
 def test_portable_reward14_uses_independent_r03_error_and_live_contact_bits():
@@ -1364,6 +2042,59 @@ def test_host_live_generic_contact_classifies_selected_and_opposite_once():
     assert terms[0, 10] == env.step_dt
     assert terms[1, 10] == 0.0
 
+    source_step = env._full_a_physical_source_step.clone()
+    contact_fact = env._full_a_physical_fact_f32[:, 3:9].clone()
+    wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
+    assert torch.equal(env._full_a_physical_source_step, source_step)
+    assert torch.equal(env._full_a_physical_fact_f32[:, 3:9], contact_fact)
+    assert torch.bitwise_and(
+        env._full_a_owner_valid_bits[:, 0],
+        wait_env.portable_reward.PHYSICAL_SELECTED_CONTACT,
+    ).ne(0)[0]
+
+    dense_env = _fixed_reward_env()
+    dense_env.full_a_mode = True
+    dense_env._full_a_owner_valid_bits = env._full_a_owner_valid_bits
+    dense_env._full_a_owner_fault_bits = env._full_a_owner_fault_bits
+    dense_env._full_a_owner_fact_f32 = env._full_a_owner_fact_f32
+    dense_env._full_a_selected_contact_event = env._full_a_selected_contact_event
+    dense_env._full_a_r06_payment_event = env._full_a_r06_payment_event
+    _total, repeated_terms = (
+        wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward20(dense_env)
+    )
+    assert torch.count_nonzero(repeated_terms[:, 10]) == 0
+
+
+def test_host_full_a_second_net_crossing_cannot_upgrade_first_low_crossing():
+    env = _host_full_a_lifecycle_env()
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env.common_step_counter = 1
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env._full_a_selected_racket_contact[:] = True
+    env._full_a_previous_ball_center_valid[:] = True
+    env._full_a_previous_ball_center[:] = torch.tensor(
+        [[1.70, 0.0, 1.00], [1.70, 0.0, 1.00]]
+    )
+    env._con_geom = torch.tensor([[0, 0]], dtype=torch.long)
+    env._con_idx = torch.tensor([0])
+    env._nacon = torch.tensor([0])
+    env._con_world = torch.tensor([0])
+    env._ball_gid = 2
+    env._geom_class = torch.zeros(3, dtype=torch.int8)
+
+    def observe_at(position):
+        env.sim.data.qpos[:, env.b_q : env.b_q + 3] = torch.tensor(position)
+        wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+        wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(env)
+
+    observe_at([[2.00, 0.0, 0.88], [2.00, 0.0, 0.88]])
+    assert env._full_a_net_crossed.all() and not env._full_a_net_clear.any()
+    observe_at([[1.70, 0.0, 1.10], [1.70, 0.0, 1.10]])
+    observe_at([[2.00, 0.0, 1.10], [2.00, 0.0, 1.10]])
+    assert env._full_a_net_crossed.all()
+    assert not env._full_a_net_clear.any()
+
     wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
     wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(env)
     assert not bool(env._full_a_generic_contact_event.any())
@@ -1436,11 +2167,21 @@ def _assert_full_a_step_surface(result, *, num_envs: int):
         "full_a_invalid_contact_event",
         "full_a_r03_present_event",
         "full_a_r03_physically_valid_event",
+        "full_a_landing_crossing_event",
+        "full_a_landing_on_opponent",
+        "full_a_r06_present_event",
+        "full_a_r06_eligible_event",
+        "full_a_r06_common_event",
+        "full_a_r07_present_event",
+        "full_a_r07_eligible_event",
+        "full_a_recovery_success_event",
+        "full_a_recovery_failure_event",
+        "full_a_recovery_timeout_event",
     }
     assert torch.isfinite(observations["policy"]).all()
     assert torch.isfinite(observations["critic"]).all()
     assert torch.isfinite(reward).all()
-    assert torch.count_nonzero(extras["reward_terms"][:, 11:14]) == 0
+    assert torch.isfinite(extras["reward_terms"]).all()
     assert torch.equal(extras["full_a_action_slot"], torch.zeros(num_envs, dtype=torch.long, device=extras["full_a_action_slot"].device))
     assert torch.equal(extras["full_a_action_uid"], torch.full((num_envs,), 6907688916670928, dtype=torch.long, device=extras["full_a_action_uid"].device))
     assert torch.equal(extras["full_a_mount_normal_sign"], torch.ones(num_envs, dtype=torch.int8, device=extras["full_a_mount_normal_sign"].device))
@@ -1454,6 +2195,7 @@ def _gpu_env(*, num_envs: int, full_a_mode: bool = False):
     pytest.importorskip("mjlab")
     pytest.importorskip("tensordict")
     task = wait_env.TaskCfg(
+        episode_length_s=10.0 if full_a_mode else 3.0,
         action_scale_mode="vendor",
         reset_joint_noise_rad=0.0,
         reset_joint_vel_noise=0.0,
@@ -1648,15 +2390,51 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         centers = [extras1["full_a_physical_current_center"][0].clone()]
         terminal = bool(dones1[0])
         last = extras1
-        assert terminal
+        assert not terminal
         assert any(not torch.equal(center, launch_center) for center in centers)
         assert last["full_a_outcome_code"][0] in (
             wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED,
             wait_env.FULL_A_OUTCOME_BALL_DEAD,
         )
         assert last["full_a_phase_before_reset"][0] == wait_env.FULL_A_PHASE_OUTCOME_SETTLED
-        assert env.reset_generation[0] == generation[0] + 1
+        assert env.reset_generation[0] == generation[0]
         assert torch.count_nonzero(last["reward_terms"][:, 10:14]) == 0
+
+        # Outcome settlement starts the fixed recovery window; it is not an
+        # immediate reset.  Traverse every real age 1..77 so the GPU test
+        # proves the exact 68 R07 cells rather than fabricating ledger state.
+        recovery_origin = int(env._full_a_recovery_origin_step[0])
+        assert int(env.common_step_counter) - recovery_origin == 0
+        episode_before = env.episode_length_buf.clone()
+        env._reset_idx = lambda _ids: pytest.fail(
+            "shot completion must not call the Gym environment reset"
+        )
+        for expected_age in range(1, wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1):
+            _, _, dones2, last = _assert_full_a_step_surface(
+                env.step(zero), num_envs=1
+            )
+            assert int(env.common_step_counter) - recovery_origin == expected_age
+            assert not bool(dones2[0])
+            in_window = expected_age >= wait_env.FULL_A_RECOVERY_START_AGE_TICK
+            assert bool(last["full_a_r07_present_event"][0]) is in_window
+            assert bool(last["full_a_r07_eligible_event"][0]) is in_window
+            if in_window:
+                assert last["reward_terms"][0, 13] > 0
+            assert bool(last["full_a_selected_reset_event"][0]) is (
+                expected_age == wait_env.FULL_A_RECOVERY_END_AGE_TICK
+            )
+        assert bool(last["full_a_selected_reset_event"][0])
+        assert bool(last["full_a_recovery_success_event"][0]) ^ bool(
+            last["full_a_recovery_timeout_event"][0]
+        )
+        assert (
+            last["full_a_phase_before_reset"][0]
+            == wait_env.FULL_A_PHASE_RECOVERY_SETTLED
+        )
+        assert env.reset_generation[0] == generation[0] + 1
+        assert env.episode_length_buf[0] == (
+            episode_before[0] + wait_env.FULL_A_RECOVERY_END_AGE_TICK
+        )
     finally:
         env.close()
 
@@ -1769,79 +2547,56 @@ def test_real_full_a_n2_selected_outcome_reset_preserves_peer_rows():
         peer_generation = before["reset_generation"][1].clone()
         env._epoch_clock_ticks[0, 3] = int(env.common_step_counter)
         env._epoch_clock_ticks[1, 3] += 100
-
-        original_reset_idx = env._reset_idx
-        reset_checked = {"value": False}
-        plant_names = (
-            "qpos",
-            "qvel",
-            "ctrl",
-            "qacc",
-            "qacc_warmstart",
-            "act",
-            "time",
-            "qfrc_applied",
-            "xfrc_applied",
-            "eq_active",
-            "mocap_pos",
-            "mocap_quat",
-        )
-        buffer_names = (
-            "actions",
-            "last_actions",
-            "episode_length_buf",
-            "ball_age_buf",
-            "_epoch_phase",
-            "_epoch_task_valid",
-            "_epoch_selected",
-            "_epoch_launch_succeeded",
-            "_epoch_task_f32",
-            "_epoch_clock_ticks",
-            "_full_a_launch_state_f32",
-            "_full_a_owner_valid_bits",
-            "_full_a_owner_fault_bits",
-            "_full_a_owner_source_step",
-            "_full_a_owner_fact_f32",
-            "_full_a_physical_present",
-            "_full_a_r03_present",
-            "_full_a_r03_physically_valid",
-            "_full_a_r03_armed",
-            "_full_a_r03_expected_source_step",
-            "_full_a_racket_contact",
-            "_full_a_ball_table_contact",
-            "_full_a_contact_center",
-            "_full_a_outcome_code",
-            "last_terminal_bits",
-            "reset_generation",
-        )
-
-        def checked_reset(_self, ids):
-            assert torch.equal(ids, torch.tensor([0], device=env.device))
-            plant_before = {
-                name: getattr(env.sim.data, name)[1].clone()
-                for name in plant_names
-                if torch.is_tensor(getattr(env.sim.data, name, None))
-                and getattr(env.sim.data, name).ndim >= 1
-                and getattr(env.sim.data, name).shape[0] == env.num_envs
-            }
-            buffers_before = {
-                name: getattr(env, name)[1].clone() for name in buffer_names
-            }
-            original_reset_idx(ids)
-            for name, expected in plant_before.items():
-                assert torch.equal(getattr(env.sim.data, name)[1], expected), name
-            for name, expected in buffers_before.items():
-                assert torch.equal(getattr(env, name)[1], expected), name
-            reset_checked["value"] = True
-
-        env._reset_idx = MethodType(checked_reset, env)
-        _, _, dones, extras = _assert_full_a_step_surface(
+        _, _, outcome_dones, outcome_extras = _assert_full_a_step_surface(
             env.step(zero), num_envs=2
         )
-        assert reset_checked["value"]
-        assert torch.equal(dones, torch.tensor([1, 0], device=env.device))
+        assert torch.equal(
+            outcome_dones, torch.tensor([0, 0], device=env.device)
+        )
+        assert (
+            outcome_extras["full_a_outcome_code"][0]
+            == wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED
+        )
+        assert (
+            outcome_extras["full_a_phase_before_reset"][0]
+            == wait_env.FULL_A_PHASE_OUTCOME_SETTLED
+        )
+        recovery_origin = int(env._full_a_recovery_origin_step[0])
+        assert int(env.common_step_counter) - recovery_origin == 0
+        generation_before = env.reset_generation.clone()
+        episode_before = env.episode_length_buf.clone()
+        env._reset_idx = lambda _ids: pytest.fail(
+            "selected shot reset must not call the Gym environment reset"
+        )
+        for expected_age in range(1, wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1):
+            _, _, dones, extras = _assert_full_a_step_surface(
+                env.step(zero), num_envs=2
+            )
+            assert int(env.common_step_counter) - recovery_origin == expected_age
+            assert torch.equal(dones, torch.tensor([0, 0], device=env.device))
+            in_window = expected_age >= wait_env.FULL_A_RECOVERY_START_AGE_TICK
+            assert bool(extras["full_a_r07_present_event"][0]) is in_window
+            assert bool(extras["full_a_r07_eligible_event"][0]) is in_window
+            assert bool(extras["full_a_selected_reset_event"][0]) is (
+                expected_age == wait_env.FULL_A_RECOVERY_END_AGE_TICK
+            )
+        assert torch.equal(
+            extras["full_a_selected_reset_event"],
+            torch.tensor([True, False], device=env.device),
+        )
         assert extras["full_a_outcome_code"][0] == wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED
         assert extras["full_a_outcome_code"][1] == wait_env.FULL_A_OUTCOME_NONE
+        assert extras["reset_generation"][0] == generation_before[0] + 1
         assert extras["reset_generation"][1] == peer_generation
+        assert torch.equal(
+            env.episode_length_buf,
+            episode_before + wait_env.FULL_A_RECOVERY_END_AGE_TICK,
+        )
+        assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_IDLE
+        _, _, next_dones, next_extras = _assert_full_a_step_surface(
+            env.step(zero), num_envs=2
+        )
+        assert not bool(next_dones.any())
+        assert bool(next_extras["full_a_reveal_event"][0])
     finally:
         env.close()

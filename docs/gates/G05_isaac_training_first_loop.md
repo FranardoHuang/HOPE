@@ -6355,3 +6355,11 @@ CPU互斥。
 首个窄cut只让exact scene producer返回同一次fresh state stack并删除中间重复clone；foreign request仍须显式
 state逐值join，Physical仍立即保留自己的after-image，arm/capture配对与retire路径不跳过。host focused=
 `81 passed,5 skipped`；fresh GPU0配对未跑，故只记`Partial`，不得把源码估计写成已提速。
+
+fresh GPU0 successor `ddb1e7c4…`随后进入同一`4096×25000`训练并完成前5个bounded profile row。
+第一次pre-namespace尝试因`nvidia-smi -q -x -i 0`把其他GPU的graphics process列入XML而误拒；没有创建
+namespace或启动Kit，fresh fix只改为按目标GPU UUID过滤compute-app query。有效run前5个collection均值
+`14.987 s`，`post_physics_publish`均值`7.522 s`，sim均值仅`0.922 s`；到只读快照时已到iteration 27。
+因此single-read/clone cut没有证明严格性能改进，G05仍`Partial`。下一candidate必须成对处理zero-flight
+prephysics arm与postphysics capture/R06/retire/park，并以profile-off matched strata验收；不允许单边早退
+留下未drain scene fact-owner。

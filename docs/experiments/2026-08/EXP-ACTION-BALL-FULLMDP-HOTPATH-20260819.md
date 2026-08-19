@@ -129,3 +129,31 @@ profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.
 3. 后续依次做可证明且能配对drain的empty-flight no-op、selected-reset compact transaction、cold/update-boundary owner validation、
    Reward/obs批处理。
 4. MuJoCo并行先完成action0 question/teacher，再合并contact census；R06/R07/Reward11--13闭合前不叫Full-A长跑。
+
+## 7. `ddb1e7c4` successor实测：single-read cut没有打中首墙
+
+2026-08-20在自然空闲的Pod1 GPU0启动fresh immutable successor：commit=`ddb1e7c4…`、
+`4096 env × 25000 update`，CPU=`32--47`。第一次wrapper在namespace创建前被GPU XML的全机graphics-process
+列表误拒；目标GPU0的compute-process查询实际为空。该尝试没有创建run root，也没有Python/Kit/GPU调用。
+successor只把resource gate改为按目标UUID过滤`nvidia-smi --query-compute-apps`，使用fresh approval与namespace，
+未复用失败尝试。
+
+有效successor前5个profile row为：
+
+| update | collection (s) | postphysics (s) | sim (s) | owner gate (s) | command->obs gap (s) | reward (s) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 15.424 | 7.624 | 0.934 | 0.160 | 3.070 | 0.772 |
+| 1 | 13.776 | 7.101 | 0.916 | 0.159 | 3.058 | 0.605 |
+| 2 | 13.981 | 7.208 | 0.904 | 0.172 | 2.989 | 0.582 |
+| 3 | 15.555 | 7.082 | 0.926 | 0.174 | 3.087 | 0.676 |
+| 4 | 16.198 | 8.593 | 0.929 | 0.190 | 3.306 | 0.655 |
+
+均值collection=`14.987 s`、median=`15.424 s`；均值postphysics=`7.522 s`、sim=`0.922 s`、
+owner gate=`0.171 s`、command-to-observation gap=`3.102 s`、reward=`0.658 s`。这组带profile的前缀不作为
+最终profiler-off吞吐成绩，但它足以否定“删除一次scene read/clone即可消除首墙”：postphysics仍与旧run同量级。
+
+该successor继续同一25k进程，用于收集profile-off与学习证据；旧GPU1 run也继续只读，因为当前cut尚未证明
+严格支配旧版。下一刀必须让**可证明的zero-live-flight窗口**同时跳过prephysics arm与postphysics capture/R06/
+retire/park，并保持arm/capture成对。仅在postphysics以Python `pending is None`早退会让scene fact-owner未drain，
+下一substep重arm直接失败，已明确拒绝。验收仍须matched fixed-tape与profile-off wall，不以代码更少或前5次
+总时间下降作结论。

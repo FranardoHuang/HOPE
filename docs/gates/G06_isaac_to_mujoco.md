@@ -2079,3 +2079,21 @@ deadline钉到launch transition：仍经过一次真实physics并验证ball移�
 不存在的`/usr/bin/numactl`，在Python/pytest/MuJoCo/GPU零调用前自然`rc=127`。该namespace与result/log封存、
 本轮不重试；下一件只能使用已只读确认存在的`/usr/bin/taskset`，并在创建namespace前把tool origin作为
 precondition。selected contact与masked reset live门因此仍`未测`，G06保持`Partial`。
+
+### 2026-08-20 portable R06/R07与非终止shot reset（Gate仍`Partial`）
+
+portable Full-A host纵切片现已把selected-rubber后的首次net证据、landing crossing、R06 denominator与
+Reward11/12接到同一生命周期。普通no-contact是有PRESENT/POLICY/SOURCE的零奖励样本；invalid evidence只
+PRESENT并写fault。placement只允许selected contact、首次landing、过网且清网、飞向对侧，off-table的0.5
+只适用于已经到达对侧的球。Physical与R06 critic fact会保留，Reward10--12仍只消费当步event pulse。
+
+R07以shared deadline而非早落点为年龄原点，使用真实MuJoCo contact-force法向分量和双脚`>=10 N`、
+0.9 soft joint-limit、finite normalized quaternion与同一frame0 recovery teacher。每row还维护age `10..77`
+连续性、expected/eligible=`68/68`与sticky fault；跳过格或NaN后恢复都从故障格起停止Reward13，并在允许
+success/timeout或selected reset前fail closed。shot完成只清ActionEpoch/ball row并增加generation，不再发
+Gym done、重置机器人、动作或episode；真实safety/time-limit才进入全环境reset。
+
+四份direct suite为`49 passed, 8 skipped`。两个GPU selected-reset节点不再伪改recovery clock，而是要求
+真实`env.step`逐格走完age 1--77并验68个R07 present/eligible、末格才reset。这些skip仍包含真实
+MuJoCo-Warp selected contact、contact force与nonterminal reset；没有fresh GPU PASS、4096容量/吞吐、
+terminal consumer和25k学习趋势前，不得把该slice改名为portable Full-A成功或长跑完成。
