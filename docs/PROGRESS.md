@@ -16,6 +16,8 @@
 - 首次fresh GPU1 direct组合在第一个N1节点遇到tests-only假失败：无关姿态/桌面terminal被旧断言误当成
   flight outcome。未重试原namespace；窄修强制launch transition结算该shot，host=`11 passed,6 skipped`，
   新commit GPU复核待办。
+- 第二个fresh namespace因执行脚本人工作错full commit SHA而在checkout `rc=128`，GPU/pytest零调用；
+  namespace保留不复用，本轮fail-stop，后续执行件只允许机器读取`git rev-parse HEAD`。
 
 ## 2026-08-19 — Isaac 4096×25000到A100；MuJoCo R03与rough修正并行推进
 

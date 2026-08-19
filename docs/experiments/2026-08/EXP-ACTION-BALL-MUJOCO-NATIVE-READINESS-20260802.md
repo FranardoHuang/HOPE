@@ -11471,3 +11471,6 @@ question、selected motion teacher、R06、R07和Reward11--13仍缺，fresh GPU 
 任何姿态/桌面terminal都要求带Full-A flight outcome，而production对此类terminal正确保留
 `outcome_code=NONE`。tests-only修复将该shot deadline钉在launch transition，避免无关terminal抢先，
 同时保留真实physics、movement、outcome和selected reset断言；host=`11 passed,6 skipped`，fresh GPU复核待办。
+
+紧接的`cdfc5ad1` fresh件因一次性脚本手抄错误full SHA而在checkout阶段`rc=128`；GPU/pytest均零调用，
+namespace `_p88w9df`保留且不复用。按fail-stop本轮不再尝试；下次必须机器读取完整HEAD SHA生成执行件。

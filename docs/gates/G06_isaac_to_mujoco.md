@@ -2057,3 +2057,7 @@ Reward11--13、per-action/per-side分母和fresh GPU真实contact/reset仍未闭
 `outcome_code=NONE`假失败，selected-contact与N2 reset两节点尚未执行。tests-only窄修把该节点的shot
 deadline钉到launch transition：仍经过一次真实physics并验证ball移动、outcome与selected reset，但不再让
 无关terminal抢先。host文件=`11 passed,6 skipped`；新commit/fresh namespace GPU复核待执行。
+
+随后准备的fresh namespace `mujoco-fullmdp-contact-cdfc5ad1.Pod1GPU1._p88w9df`没有进入GPU或pytest：
+一次性脚本手抄了错误的完整commit SHA，checkout自然`rc=128`。该namespace保留且不复用，本轮不做第三次
+尝试；下一执行件必须从本地`git rev-parse HEAD`机器读取完整SHA，而不是人工扩写短SHA。
