@@ -26,6 +26,7 @@ import os
 import pathlib
 import sys
 import time
+import types
 import zipfile
 import zipimport
 
@@ -22012,6 +22013,12 @@ def _require_loaded_module_closure(prefix, package_root, required_modules) -> No
     package_root = pathlib.Path(package_root).resolve()
     for name, module in tuple(sys.modules.items()):
         if name != prefix and not name.startswith(f"{prefix}."):
+            continue
+        # Torch registers dynamic namespace objects such as ``torch.ops`` in
+        # sys.modules.  Their ``__file__`` lookup is operator dispatch, not a
+        # module origin, so only file-backed Python/extension modules belong to
+        # this provenance closure.
+        if not isinstance(module, types.ModuleType):
             continue
         module_file = getattr(module, "__file__", None)
         if module_file is None:

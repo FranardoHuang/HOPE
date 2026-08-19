@@ -11353,3 +11353,8 @@ venv`。只读根因对照显示：AppLauncher选择Isaac Sim 5.1
 旧门错误地把“必须来自venv”当成Torch规格。采用的修复是Kit Torch exact entrypoint或venv二选一，且
 live `torch.*`必须全在同一selected package root，且实际消费的parent attributes必须与`sys.modules`同一对象；TensorDict仍只能来自venv，RSL仍来自sealed archive。
 由于runtime receipt、PPO和WAL均为0，本次不能解释4096容量或Reward。
+
+第七个尝试（commit `73d607f0…`、wrapper `324d36ad…`）继续把首错定位到证据门本身：exact Torch
+entrypoint已经通过，随后closure把`sys.modules['torch.ops']`里的动态`_Ops`对象当作file-backed module；
+其`__file__`访问是operator dispatch，得到的run-root `_ops.py`不是provider。采用修复只检查真实
+`types.ModuleType`，仍硬验`torch.optim/_C`路径与parent/sys.modules identity。此run同样零PPO/零WAL。

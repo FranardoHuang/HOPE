@@ -4281,4 +4281,8 @@
   resolver与AppLauncher，但在scene/PPO/WAL前误拒Isaac Sim 5.1 bundled Torch；result为
   `post_preexec_before_runtime_attestation_failed`、runtime receipt=0。窄修只把exact Kit ML bundle加入
   Torch来源allowlist，并拒绝同一top-level下混入foreign `torch.*`或parent attribute alias；
-  TensorDict/RSL边界不变；focused=`55 passed`，旧namespace不复用。
+  TensorDict/RSL边界不变；该阶段focused=`55 passed`，旧namespace不复用。
+- 2026-08-19：`73d607f0…` / `324d36ad…` fresh 4096×25000 successor越过exact Torch entrypoint，
+  但closure把非module的动态`torch.ops`对象误当provider并在scene/PPO/WAL前RC1。修复只忽略非
+  `types.ModuleType`对象；真实file-backed closure与`torch.optim/_C`identity硬门保持；当前focused=`56 passed`，
+  旧namespace不复用。

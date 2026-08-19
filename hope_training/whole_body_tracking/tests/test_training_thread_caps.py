@@ -549,6 +549,25 @@ def test_runtime_dependency_rejects_foreign_torch_attribute_alias(
         train._require_module_attribute_identity(package, "optim", "torch.optim")
 
 
+def test_runtime_dependency_closure_ignores_dynamic_torch_namespace(
+    tmp_path, monkeypatch
+):
+    train = _load_train_module(monkeypatch)
+    package_root = tmp_path / "bundle/torch"
+    package_file = package_root / "__init__.py"
+    package_file.parent.mkdir(parents=True)
+    package_file.write_text("")
+
+    class DynamicOps:
+        __file__ = str(tmp_path / "foreign/_ops.py")
+
+    monkeypatch.setitem(
+        sys.modules, "torch", _module("torch", __file__=str(package_file))
+    )
+    monkeypatch.setitem(sys.modules, "torch.ops", DynamicOps())
+    train._require_loaded_module_closure("torch", package_root, ())
+
+
 def test_runtime_attestation_consumes_proof_before_post_app_env_validation(
     monkeypatch,
 ):

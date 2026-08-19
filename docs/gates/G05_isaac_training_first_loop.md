@@ -6249,3 +6249,8 @@ commit `00cc5425…` 的sixth one-shot使用wrapper `edb7fec4…`直接请求`40
 `torch.optim/_C` parent attributes与`sys.modules`同一对象；
 TensorDict仍只允许venv，RSL仍只允许sealed fd18。
 该namespace已消费且不重试；零PPO不能晋级G05。
+
+commit `73d607f0…` 的seventh one-shot越过exact Torch entrypoint后，又被closure对`torch.ops`的误读拒绝。
+`torch.ops`是注册在`sys.modules`的动态`_Ops`对象，不是file-backed module；访问其`__file__`会走operator
+dispatch并产生当前run根下的伪路径。窄修只让closure忽略非`types.ModuleType`对象，真实Python/extension
+module、required `torch.optim/_C`及parent attribute identity门全部保留。该run仍为零PPO/零WAL，G05不晋级。

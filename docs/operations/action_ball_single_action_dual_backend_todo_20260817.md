@@ -107,6 +107,7 @@ deployment、真机或物理安全。
 | 19 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | fourth one-shot消费commit `d2cd7911…`、wrapper `41cd2d2a…`和fresh namespace；Torch范围修正生效，随后Kit Python在同一post-App门因未导出`F_SEAL_*`符号而拒绝，preexec通过但v2 receipt/scene/PPO/WAL仍为零，进程与GPU自然释放 | seal验证继续保留，但直接使用Linux uapi的`F_GET_SEALS=1034`与四个seal位；exact Pod父进程创建/封印memfd→Kit继承读取已PASS。不把Kit Python可选符号别名当训练ABI；下一条直接扩成同进程`4096×25000`，不是另跑smoke |
 | 20 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | fifth one-shot消费commit `6b3078bc…`和fresh 25k namespace；真实RSL serializer contract、GPU preexec、AppLauncher约10秒启动均通过，随后`sys.path[0]`位置断言拒绝；preexec=1、runtime receipt/scene/PPO/WAL=0，GPU与锁自然释放 | AppLauncher合法前插不提供`rsl_rl`的extension path；改为root、四个package与四个真实leaf在执行前逐一核live resolver的loader/archive/prefix/origin精确指向fd18，执行后仍逐module/class核source；旧namespace不复用 |
 | 21 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | sixth one-shot消费commit `00cc5425…`、wrapper `edb7fec4…`和fresh 25k namespace；GPU preexec与AppLauncher通过，但post-App把Isaac Sim 5.1从`omni.isaac.ml_archive`加载的Torch 2.7/cu128误拒为“escaped frozen venv”。runtime receipt/scene/PPO/WAL均为0，result自然RC1 | 只允许两条exact Torch entrypoint：冻结venv，或由已验签Kit Python推导的Isaac Sim 5.1 ML bundle；live `torch.*`必须全在同一selected root，TensorDict仍只能来自venv。错误携带module与resolved path；旧namespace不复用 |
+| 22 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | seventh one-shot消费commit `73d607f0…`、wrapper `324d36ad…`和fresh 25k namespace；exact Torch entrypoint已越过，但closure把注册在`sys.modules['torch.ops']`的动态`_Ops`对象当成file-backed module，其`__file__`访问触发operator namespace并产生伪路径。runtime receipt/scene/PPO/WAL仍为0，result自然RC1 | closure只检查`types.ModuleType`的file-backed Python/extension模块；dynamic namespace不参与origin claim。`torch.optim/_C` required modules与parent attribute identity硬门保持不变；旧namespace不复用 |
 
 ## 5. 下一条发射协议
 
@@ -162,6 +163,12 @@ foreign，因为旧条件只接受venv目录。Pod只读核验表明 bundled与v
 `2.7.0+cu128`，且bundled root固定在exact Kit tree。successor只增加这一条由已验签Kit解释器推导出的
 allowlist并拒绝同一top-level下混入foreign `torch.*`或parent attribute alias；不放宽TensorDict/RSL，不复用旧namespace，也不把
 这次零PPO失败记为4096容量证据。
+
+seventh one-shot（`73d607f0…`，wrapper SHA256=`324d36ad…`，namespace=
+`20260819T080000FullMdpA4096Iter25000Git73D607F0Pod1GPU0CST`）又在post-App、scene/PPO/WAL前自然RC1。
+首错精确为`torch.ops=<run-root>/_ops.py`；`torch.ops`实际是Torch注册到`sys.modules`的动态`_Ops`对象，
+不是`ModuleType`，它的`__file__`是动态operator namespace而非来源字段。successor只把closure范围收回到真实
+file-backed modules；实际消费的`torch.optim`、`torch._C`及parent/sys.modules identity门不变。
 
 25k不能只留下曲线。lean graph尚无完整plant/owner/RNG restore合同，所以仍禁止`load/resume`；但runner现在
 每1000 update及自然终点调用upstream RSL save，把policy、optimizer、iteration和normalizer所属model state
