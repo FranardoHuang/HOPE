@@ -1,11 +1,12 @@
-"""Code-owned consumer for the fresh full-MDP split-rubber robot asset.
+"""Code-owned verifier for the fresh full-MDP split-rubber robot asset.
 
 The offline producer owns deterministic reconstruction from the enclosed
-reviewed source bundle, URDF and STL files.  This consumer owns only the
-runtime selection boundary: one exact diagnostic path is allowed, and the
-current tracked producer must be able to reconstruct its contents.  Neither a
-producer receipt nor the value returned by ``check`` authorizes a run.  Live
-PhysX contact evidence remains a separate scene/runtime responsibility.
+reviewed source bundle, URDF and STL files.  This consumer verifies the actual
+runtime-selected directory with that tracked producer, so a private immutable
+run snapshot and the shared source directory have identical semantics when and
+only when their bytes reconstruct to the reviewed model.  Neither a producer
+receipt nor the value returned by ``check`` authorizes a run.  Live PhysX
+contact evidence remains a separate scene/runtime responsibility.
 """
 
 from __future__ import annotations
@@ -104,32 +105,46 @@ def _load_current_producer_module() -> ModuleType:
     return module
 
 
-def require_action_ball_full_mdp_split_asset() -> str:
-    """Verify and return the sole code-owned fresh diagnostic model path.
-
-    This no-argument API deliberately has no expected-path, pin, receipt,
-    checker, or verdict injection surface.  Success means only that the exact
-    selected path exists and the current producer independently reconstructs
-    it from the actual enclosed sources.  The producer's returned telemetry is
-    intentionally ignored.
-    """
+def _selected_split_asset_paths() -> tuple[Path, Path]:
+    """Return one canonical, real runtime-selected root and model path."""
 
     selected = os.environ.get("HOPE_AGIBOT_A3_USD_PATH")
-    expected = str(ACTION_BALL_FULL_MDP_SPLIT_ASSET_MODEL)
-    if selected != expected:
+    if not selected:
         raise ActionBallFullMdpSplitAssetError(
-            "fresh full-MDP requires the exact code-owned v3 split-rubber "
-            f"model path; expected {expected!r}, observed {selected!r}"
+            "fresh full-MDP requires an absolute runtime-selected model.usd"
         )
+    model = Path(selected)
+    if not model.is_absolute() or model.name != "model.usd":
+        raise ActionBallFullMdpSplitAssetError(
+            "fresh full-MDP runtime selection must be an absolute model.usd"
+        )
+    root = model.parent
+    _require_real_directory(root, "split-asset root")
+    _require_regular_file(model, "split-asset model.usd")
+    try:
+        resolved_model = model.resolve(strict=True)
+    except OSError as exc:
+        raise ActionBallFullMdpSplitAssetError(
+            f"split-asset model.usd cannot be resolved: {model}"
+        ) from exc
+    if resolved_model != model:
+        raise ActionBallFullMdpSplitAssetError(
+            "split-asset model selection must be canonical and contain no symlink"
+        )
+    return root, model
 
-    _require_real_directory(
-        ACTION_BALL_FULL_MDP_SPLIT_ASSET_ROOT,
-        "split-asset root",
-    )
-    _require_regular_file(
-        ACTION_BALL_FULL_MDP_SPLIT_ASSET_MODEL,
-        "split-asset model.usd",
-    )
+
+def require_action_ball_full_mdp_split_asset() -> str:
+    """Verify and return the actual fresh diagnostic model path.
+
+    This no-argument API deliberately has no expected-path, pin, receipt,
+    checker, or verdict injection surface.  Success means only that the
+    selected canonical path exists and the current tracked producer
+    independently reconstructs its bytes from the actual enclosed sources.
+    The producer's returned telemetry is intentionally ignored.
+    """
+
+    selected_root, selected_model = _selected_split_asset_paths()
 
     producer = _load_current_producer_module()
     check = getattr(producer, "check", None)
@@ -140,12 +155,12 @@ def require_action_ball_full_mdp_split_asset() -> str:
     try:
         # Do not inspect or propagate the return value.  It is recomputed
         # telemetry, not a capability, receipt, or launch verdict.
-        check(ACTION_BALL_FULL_MDP_SPLIT_ASSET_ROOT)
+        check(selected_root)
     except Exception as exc:
         raise ActionBallFullMdpSplitAssetError(
             "v3 split-rubber asset failed enclosed-source reconstruction"
         ) from exc
-    return expected
+    return str(selected_model)
 
 
 def action_ball_full_mdp_expected_collider_geometry(
@@ -158,7 +173,7 @@ def action_ball_full_mdp_expected_collider_geometry(
     red/black/handle geometry after the offline asset check.
     """
 
-    require_action_ball_full_mdp_split_asset()
+    selected_root = Path(require_action_ball_full_mdp_split_asset()).parent
     producer = _load_current_producer_module()
     source_geometry = getattr(producer, "_source_geometry", None)
     if not callable(source_geometry):
@@ -168,13 +183,13 @@ def action_ball_full_mdp_expected_collider_geometry(
     try:
         urdf_facts, output_meshes, _evidence = source_geometry(
             source_urdf=(
-                ACTION_BALL_FULL_MDP_SPLIT_ASSET_ROOT
+                selected_root
                 / "source"
                 / "urdf"
                 / "model.urdf"
             ),
             source_mesh_root=(
-                ACTION_BALL_FULL_MDP_SPLIT_ASSET_ROOT / "source" / "meshes"
+                selected_root / "source" / "meshes"
             ),
         )
         translations = urdf_facts["translations"]

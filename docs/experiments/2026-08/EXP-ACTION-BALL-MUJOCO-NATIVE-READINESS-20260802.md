@@ -11363,3 +11363,11 @@ entrypoint已经通过，随后closure把`sys.modules['torch.ops']`里的动态`
 `ModuleType`子类，仍触发同一动态`__file__`伪路径。最终采用不是继续枚举Torch内部对象，而是删除没人消费的
 blanket closure，只验top-level与RSL真实消费的`torch.optim/_C`、parent和PPO wiring。该改变缩小错层gate，
 不改变Torch/TensorDict/RSL版本或训练MDP；本次仍无PPO/WAL样本。
+
+第九个尝试（commit `f919ff1d…`、wrapper `d307dc29…`）首次通过post-App真实runtime attestation，随后在
+env cfg构造、scene之前自然RC1。首错不是资产内容：fresh run私有快照与共享源目录13个文件逐字相同，二者
+`model.usd` SHA256均为`a3cd3829…8140`；拒绝来自consumer要求pathname恰等于共享目录。这个反例再次支持
+HANDOFF §3的判据：实际物理引擎消费的是snapshot bytes，路径字符串并非模型规格。采用的修复仍由tracked
+producer对实际selected root使用代码内固定pins重建URDF、STL、IsaacLab asset hash和derived USD语义；不采用
+wrapper自产receipt或expected hash。live collider几何也改从同一已验root读取，避免“验共享源、用私有快照”
+的错层。host回归`77 passed,37 skipped`，尚无4096 scene/PPO/WAL证据，因此不改变学习裁决。

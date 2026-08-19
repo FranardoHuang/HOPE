@@ -114,12 +114,6 @@ def _split_asset_fixture(tmp_path: Path) -> Path:
 
 
 def _bind_split_asset_fixture(monkeypatch, consumer, root: Path) -> None:
-    monkeypatch.setattr(consumer, "ACTION_BALL_FULL_MDP_SPLIT_ASSET_ROOT", root)
-    monkeypatch.setattr(
-        consumer,
-        "ACTION_BALL_FULL_MDP_SPLIT_ASSET_MODEL",
-        root / "model.usd",
-    )
     monkeypatch.setattr(
         consumer,
         "_load_current_producer_module",
@@ -151,7 +145,7 @@ def _fixture_source_geometry(*, source_urdf: Path, source_mesh_root: Path):
     )
 
 
-def test_split_asset_consumer_has_one_noarg_code_owned_v3_selection():
+def test_split_asset_consumer_has_one_noarg_tracked_verifier():
     consumer = _load_split_asset_consumer()
     assert tuple(
         inspect.signature(
@@ -170,7 +164,7 @@ def test_split_asset_consumer_has_one_noarg_code_owned_v3_selection():
     )
 
 
-def test_split_asset_consumer_rejects_v1_suffix_and_never_calls_checker(
+def test_split_asset_consumer_rejects_relative_selection_and_never_calls_checker(
     monkeypatch,
 ):
     consumer = _load_split_asset_consumer()
@@ -182,11 +176,11 @@ def test_split_asset_consumer_rejects_v1_suffix_and_never_calls_checker(
     )
     monkeypatch.setenv(
         "HOPE_AGIBOT_A3_USD_PATH",
-        "/tmp/a3p0807_split_rubber_diagnostic_v1/model.usd",
+        "relative/private-snapshot/model.usd",
     )
     with pytest.raises(
         consumer.ActionBallFullMdpSplitAssetError,
-        match="exact code-owned v3",
+        match="absolute model.usd",
     ):
         consumer.require_action_ball_full_mdp_split_asset()
     assert called == []
@@ -198,6 +192,18 @@ def test_split_asset_consumer_accepts_actual_sources_without_trusting_return(
     consumer = _load_split_asset_consumer()
     root = _split_asset_fixture(tmp_path)
     _bind_split_asset_fixture(monkeypatch, consumer, root)
+    assert consumer.require_action_ball_full_mdp_split_asset() == str(
+        root / "model.usd"
+    )
+
+
+def test_split_asset_consumer_accepts_honest_private_snapshot(
+    tmp_path, monkeypatch
+):
+    consumer = _load_split_asset_consumer()
+    root = _split_asset_fixture(tmp_path / "fresh-run" / "asset")
+    _bind_split_asset_fixture(monkeypatch, consumer, root)
+    assert root != consumer.ACTION_BALL_FULL_MDP_SPLIT_ASSET_ROOT
     assert consumer.require_action_ball_full_mdp_split_asset() == str(
         root / "model.usd"
     )
@@ -268,14 +274,6 @@ def test_split_asset_consumer_rejects_symlink_selection(
     else:
         selected_root.mkdir()
         (selected_root / "model.usd").symlink_to(real / "model.usd")
-    monkeypatch.setattr(
-        consumer, "ACTION_BALL_FULL_MDP_SPLIT_ASSET_ROOT", selected_root
-    )
-    monkeypatch.setattr(
-        consumer,
-        "ACTION_BALL_FULL_MDP_SPLIT_ASSET_MODEL",
-        selected_root / "model.usd",
-    )
     monkeypatch.setenv(
         "HOPE_AGIBOT_A3_USD_PATH", str(selected_root / "model.usd")
     )

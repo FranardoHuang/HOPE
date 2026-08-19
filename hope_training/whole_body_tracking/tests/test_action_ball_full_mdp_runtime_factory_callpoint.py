@@ -25,9 +25,41 @@ _EXACT_SPLIT_ASSET = (
 
 @pytest.fixture(autouse=True)
 def _bind_exact_split_asset_environment(monkeypatch):
-    """Keep factory tests hermetic at the production asset identity gate."""
+    """Isolate non-asset factory tests from the external Pod asset tree.
+
+    Asset byte/reconstruction behavior is covered by
+    ``test_action_ball_full_mdp_cfg_registration.py``.  The dedicated factory
+    call-order test below replaces this seam with a rejecting implementation.
+    """
 
     monkeypatch.setenv("HOPE_AGIBOT_A3_USD_PATH", _EXACT_SPLIT_ASSET)
+    split_asset_name = (
+        "whole_body_tracking.tasks.tracking.config.agibot_a3."
+        "action_ball_full_mdp_split_asset"
+    )
+    split_asset = sys.modules.get(split_asset_name)
+    if split_asset is None:
+        source = (
+            TRACKING_ROOT
+            / "config"
+            / "agibot_a3"
+            / "action_ball_full_mdp_split_asset.py"
+        )
+        spec = importlib.util.spec_from_file_location(split_asset_name, source)
+        assert spec is not None and spec.loader is not None
+        split_asset = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, split_asset_name, split_asset)
+        spec.loader.exec_module(split_asset)
+
+    def accept_external_asset_seam():
+        return _EXACT_SPLIT_ASSET
+
+    accept_external_asset_seam.__module__ = split_asset.__name__
+    monkeypatch.setattr(
+        split_asset,
+        "require_action_ball_full_mdp_split_asset",
+        accept_external_asset_seam,
+    )
 
 
 ROOT = Path(__file__).resolve().parents[1]

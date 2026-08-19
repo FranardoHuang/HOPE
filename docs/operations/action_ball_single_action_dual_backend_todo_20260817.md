@@ -109,6 +109,7 @@ deployment、真机或物理安全。
 | 21 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | sixth one-shot消费commit `00cc5425…`、wrapper `edb7fec4…`和fresh 25k namespace；GPU preexec与AppLauncher通过，但post-App把Isaac Sim 5.1从`omni.isaac.ml_archive`加载的Torch 2.7/cu128误拒为“escaped frozen venv”。runtime receipt/scene/PPO/WAL均为0，result自然RC1 | 只允许两条exact Torch entrypoint：冻结venv，或由已验签Kit Python推导的Isaac Sim 5.1 ML bundle；live `torch.*`必须全在同一selected root，TensorDict仍只能来自venv。错误携带module与resolved path；旧namespace不复用 |
 | 22 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | seventh one-shot消费commit `73d607f0…`、wrapper `324d36ad…`和fresh 25k namespace；exact Torch entrypoint已越过，但closure把注册在`sys.modules['torch.ops']`的动态`_Ops`对象当成file-backed module，其`__file__`访问触发operator namespace并产生伪路径。runtime receipt/scene/PPO/WAL仍为0，result自然RC1 | closure只检查`types.ModuleType`的file-backed Python/extension模块；dynamic namespace不参与origin claim。`torch.optim/_C` required modules与parent attribute identity硬门保持不变；旧namespace不复用 |
 | 23 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | eighth one-shot消费commit `5db486cd…`、wrapper `a1d97aae…`和fresh 25k namespace；`torch.ops`本身是`ModuleType`子类，因此上一版`isinstance`窄修仍把它当普通module并重现同一伪路径拒绝。runtime receipt/scene/PPO/WAL仍为0，result自然RC1 | 删除没人消费的blanket `torch.*` scan；只保留top-level exact origins、实际消费的`torch.optim/_C` origins、parent/sys.modules identity与PPO wiring。dynamic namespace不再被错误升级成训练规格；旧namespace不复用 |
+| 24 | `FAIL-pre-scene-asset-gate / ROOT-CAUSE-EXACT` | ninth one-shot消费commit `f919ff1d…`、wrapper `d307dc29…`和fresh 25k namespace；GPU preexec、AppLauncher及真实Kit runtime v2 attestation全部通过，随后cfg构造把run-private资产快照路径误拒为“不是code-owned固定路径”。scene/PPO/WAL仍为0，result自然RC1。源目录与快照13个文件逐字相同，`model.usd` SHA均为`a3cd3829…8140` | 删除路径字符串相等这一错对象gate；无参production consumer改为对`HOPE_AGIBOT_A3_USD_PATH`实际指向的canonical、non-symlink目录运行同一个tracked producer，以代码内固定URDF/STL/asset-hash重建并验实际bytes。几何clone消费同一已验快照；旧namespace不复用 |
 
 ## 5. 下一条发射协议
 
@@ -176,6 +177,17 @@ eighth one-shot（`5db486cd…`，wrapper SHA256=`a1d97aae…`，namespace=
 所以仅按Python类型做blanket closure仍会重复同一错误。按HANDOFF §3，successor删除这道未消费全包扫描，
 只验RSL真实使用的top-level Torch/TensorDict、`torch.optim/_C`与parent/PPO identity；这是删错层gate，
 不是放宽实际训练依赖。
+
+ninth one-shot（`f919ff1d…`，wrapper SHA256=`d307dc29…`，namespace=
+`20260819T081500FullMdpA4096Iter25000GitF919FF1DPod1GPU0CST`）首次完整落下
+`trainer_runtime_attested_v2`，证明normal entry、AppLauncher、Torch/TensorDict/RSL实际消费identity均已越过。
+新的首错发生在env cfg构造、scene之前：wrapper按设计把完整split-rubber目录复制到fresh run私有目录并在
+launch边界重验inventory，consumer却只比较路径字符串是否等于旧共享目录。只读核验源目录和快照13个文件
+逐字相同，`model.usd`均为`2018444 B`、SHA256=`a3cd382943ff9f70beecf88c729a6cc1c052a3c0a0cbffe91003ec319ab78140`。
+tracked producer本来已经用代码内固定pins对实际`output_root`重建URDF/STL/asset hash与USD语义，所以固定
+pathname不增加事实，只拒绝更强的私有快照。successor保留无参consumer和全部重建检查，仅把`output_root`
+改成实际选中的canonical、non-symlink目录；live geometry clone也从同一目录读取。host asset/factory回归=
+`77 passed,37 skipped`；fresh Pod仍待新commit、wrapper和namespace，旧run不重试。
 
 25k不能只留下曲线。lean graph尚无完整plant/owner/RNG restore合同，所以仍禁止`load/resume`；但runner现在
 每1000 update及自然终点调用upstream RSL save，把policy、optimizer、iteration和normalizer所属model state

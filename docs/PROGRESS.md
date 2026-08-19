@@ -4289,3 +4289,7 @@
 - 2026-08-19：`5db486cd…` / `a1d97aae…` successor证明`torch.ops`是`ModuleType`子类，按类型的
   blanket closure仍误拒并保持零PPO/零WAL。现按HANDOFF §3删除未消费全包扫描，只保留top-level与
   `torch.optim/_C`、parent/PPO真实消费identity；旧namespace不复用。
+- 2026-08-19：`f919ff1d…` / `d307dc29…` fresh 4096×25000 successor首次通过真实Kit runtime v2
+  attestation，随后在scene前被固定pathname asset gate误拒。源目录与run-private快照13个文件逐字相同，
+  `model.usd` SHA均为`a3cd3829…8140`；consumer现对实际selected snapshot运行tracked fixed-pin重建并让
+  collider clone消费同一root。host asset/factory回归=`77 passed,37 skipped`；旧namespace不重试，G05不晋级。

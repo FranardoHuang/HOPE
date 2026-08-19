@@ -6258,3 +6258,12 @@ module、required `torch.optim/_C`及parent attribute identity门全部保留。
 commit `5db486cd…` 的eighth one-shot又在同一点拒绝，因为`torch.ops`实际是`ModuleType`子类；按类型豁免
 仍把未消费动态namespace升级成规格。依据HANDOFF §3删除blanket `torch.*` scan，只保留top-level exact
 origins、RSL实际消费的`torch.optim/_C` origins、parent/sys.modules identity和PPO wiring。该run仍零PPO/零WAL。
+
+commit `f919ff1d…` 的ninth one-shot随后通过GPU preexec、AppLauncher和真实Kit runtime v2 attestation，
+首错前移到env cfg构造：fresh wrapper消费的是完整run-private split-rubber目录快照，而asset consumer仍要求
+环境变量的路径字符串必须等于旧共享目录。源与快照13个文件逐字相同，`model.usd` SHA256均为
+`a3cd3829…8140`；scene/PPO/WAL仍为零，result自然RC1。tracked producer已经对传入目录用固定URDF/STL/
+asset-hash pins重建实际USD，因此pathname相等是错对象gate。窄修让无参consumer验证实际选择的canonical、
+non-symlink snapshot root，并让live collider geometry从同一已验root重建；不读取wrapper receipt、不接受调用方
+expected hash，也不放宽任何source/model语义。host asset/factory回归=`77 passed,37 skipped`；fresh Pod未跑，
+G05继续`Partial`。
