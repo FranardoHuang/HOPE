@@ -2,6 +2,13 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-19 ACK809只读前缀（Gate仍`Partial`）：**active同一`4096×25000`进程的完整ACK `0..808`
+已到`79,527,936` transitions，Reward nonfinite与conservation violation均为0。D05 selected=`1,015,878`，
+其中`895,105` construction-admitted仍全是not-ready defer、`120,773` reject，ACCEPT/CENSOR、R03、launch、
+contact、R06/R07、payment/retire仍全0。500--772窗口Reward/transition、episode length和return降到
+`0.045175/67.829/3.066`，低于0--199的`0.055453/84.036/4.658`。这支持“工程链持续可跑、业务producer
+仍未ready且dense后段变差”，不授权调零分母Reward0--13，也不构成停止25k的充分条件。
+
 **2026-08-19 4096真实PPO A100、25k长跑进行中（Gate仍`Partial`）：**fresh commit
 `b64cb944…`已经在同一进程越过真实4096 scene、229/399 observation、Reward20、Kit/RSL runtime v2、
 compact joint-safety和upstream optimizer。A100有100组完整`PENDING/EPOCH_ACK`、9,830,400个Reward sample

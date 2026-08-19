@@ -2061,3 +2061,9 @@ deadline钉到launch transition：仍经过一次真实physics并验证ball移�
 随后准备的fresh namespace `mujoco-fullmdp-contact-cdfc5ad1.Pod1GPU1._p88w9df`没有进入GPU或pytest：
 一次性脚本手抄了错误的完整commit SHA，checkout自然`rc=128`。该namespace保留且不复用，本轮不做第三次
 尝试；下一执行件必须从本地`git rev-parse HEAD`机器读取完整SHA，而不是人工扩写短SHA。
+
+2026-08-19下一次空闲GPU1件确已从`git rev-parse HEAD`绑定完整`0790504c…`，fresh namespace为
+`mujoco-fullmdp-gpu-gate.0790504c.Pod1GPU1.E6oHC4xX`，且checkout/test SHA门通过；但CPU隔离命令写成Pod
+不存在的`/usr/bin/numactl`，在Python/pytest/MuJoCo/GPU零调用前自然`rc=127`。该namespace与result/log封存、
+本轮不重试；下一件只能使用已只读确认存在的`/usr/bin/taskset`，并在创建namespace前把tool origin作为
+precondition。selected contact与masked reset live门因此仍`未测`，G06保持`Partial`。

@@ -33,16 +33,17 @@
 ### Isaac A：正在运行
 
 - 目标：`4096 × 25000`，fresh immutable namespace，1000不停机。
-- A200累计：`19,660,800` transitions；Reward sample全部finite，nonfinite=`0`，conservation
-  violation=`0`。
-- completed episode=`233,267`，其中tilt=`232,058`、robot-table=`1,209`；mean length
-  `84.036`，mean return `4.658`。
-- D05 due/selected=`237,221`；not-ready defer=`208,796`，reject=`28,425`，ACCEPT/CENSOR=`0`。
+- 2026-08-19 14:36 CST固定前缀为完整ACK `0..808`：`79,527,936` transitions；Reward sample
+  全部finite，nonfinite=`0`，conservation violation=`0`。
+- completed episode=`1,011,944`，mean length=`78.460`、mean return=`3.952`；termination bit累计
+  tilt=`1,010,092`、base-too-low=`25,895`、robot-table=`1,209`，同一episode可有多个reason bit。
+- D05 due/selected=`1,015,878`；not-ready defer=`895,105`，reject=`120,773`，ACCEPT/CENSOR=`0`。
 - R03、launch、selected contact、R06、R07、payment和retire全部`0`。Reward0--13没有eligible样本，
   只有dense motion Reward14--19在工作。
-- A100--199的dense Reward/transition约`0.052858`，低于前100约`0.058048`；episode length和return
-  同样下降。当前科学结论是“工程长跑成立，business producer仍未ready”，不是“已经学会”或
-  “Reward权重错了”。
+- 分窗趋势并未改善：0--199的Reward/transition=`0.055453`、episode length/return=`84.036/4.658`；
+  200--499为`0.052140/90.449/4.719`；500--772降到`0.045175/67.829/3.066`。当前科学结论是
+  “工程长跑成立，business producer仍未ready，dense imitation后段变差”，不是“已经学会”或
+  “Reward0--13权重错了”，因为这些项的eligible denominator仍为0。
 - WAL action identity只出现slot 0、UID `6907688916670928`、forehand；unknown仅来自reject，
   不能拿73行冷bank宣称训练覆盖73动作或backhand。
 
@@ -66,7 +67,9 @@
 2. selected motion teacher/reference timing仍未从同一portable action table消费；
 3. R06 legal landing/outcome、R07 recovery和Reward11--13未生产；
 4. per-action/per-family/per-side分母和生命周期证据未闭合；本代backhand denominator应明确为0；
-5. 新catalog与selected-rubber/Reward10只有host反例通过，fresh MuJoCo-Warp GPU真实接触与reset门仍未跑；
+5. 新catalog与selected-rubber/Reward10只有host反例通过。2026-08-19空闲GPU1 fresh件使用完整机器读取
+   HEAD与新namespace，但在Python/GPU零调用前因Pod没有`/usr/bin/numactl`自然`rc=127`；真实接触与reset门
+   仍未跑。该namespace封存、不重试；下一件须在preflight确认Pod已有`taskset`并绑定独立CPU集合；
 6. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在。
 
 因此当前runner必须继续写`full_a_slice_attempted`、`full_a_complete=false`，不得改名为Full-A成功。

@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-19 — Isaac到ACK809；GPU1 MuJoCo门在零调用点因缺`numactl`停止
+
+- active Isaac `4096×25000`固定消费完整ACK `0..808`：`79,527,936` transitions、Reward nonfinite=`0`、
+  conservation violation=`0`。D05 due/selected=`1,015,878`，其中`895,105` construction-admitted仍全为
+  not-ready defer、`120,773` reject、ACCEPT/CENSOR=`0`；R03、launch、contact、R06、R07、payment、retire
+  仍全0。500--772窗口dense Reward/episode length/return低于早期窗口，run继续25k但不能称已学会。
+- Pod1 GPU1自然空闲后，用机器读取完整HEAD `0790504c…`生成fresh namespace
+  `mujoco-fullmdp-gpu-gate.0790504c.Pod1GPU1.E6oHC4xX`，目标是三个可区分的真实门：flight settlement、
+  live selected-rubber Reward10、N2 masked reset peer preservation。checkout与test SHA通过，但Pod没有
+  `/usr/bin/numactl`，首错`line 85: /usr/bin/numactl: No such file or directory`、`rc=127`；Python、pytest、
+  MuJoCo和GPU均为零调用。namespace/result/log保留且本轮不重试；下一执行件先钉Pod已有`/usr/bin/taskset`。
+
 ## 2026-08-19 — A200仍零business分母；MuJoCo接入action0 identity与selected Reward10
 
 - active Isaac `4096×25000`同一进程到A200：`19,660,800`个Reward sample全finite且守恒；

@@ -11474,3 +11474,10 @@ question、selected motion teacher、R06、R07和Reward11--13仍缺，fresh GPU 
 
 紧接的`cdfc5ad1` fresh件因一次性脚本手抄错误full SHA而在checkout阶段`rc=128`；GPU/pytest均零调用，
 namespace `_p88w9df`保留且不复用。按fail-stop本轮不再尝试；下次必须机器读取完整HEAD SHA生成执行件。
+
+**2026-08-19 fresh GPU infrastructure stop。** 后续件已机器读取完整HEAD `0790504c…`，并在Pod1自然
+空闲GPU1上消费fresh namespace `mujoco-fullmdp-gpu-gate.0790504c.Pod1GPU1.E6oHC4xX`；checkout与
+transition-test SHA均匹配。首个真实错误是Pod不存在`/usr/bin/numactl`，wrapper line85自然`rc=127`。
+因此Python、pytest、MuJoCo-Warp和GPU callpoint均为0，不能把它计为contact/reset RED或GREEN。result/log
+保留且namespace不复用；本轮fail-stop。下一件在prewrite阶段必须确认`/usr/bin/taskset`存在并把GPU1绑到
+独立CPU集合，避免多GPU训练默认挤在同一CPU/NUMA集合。
