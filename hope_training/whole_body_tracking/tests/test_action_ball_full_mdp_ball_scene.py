@@ -182,11 +182,61 @@ class _Asset:
         self.velocity_writes += 1
 
 
+class _ReplicatedScene(dict):
+    def __init__(self, *, num_envs: int):
+        super().__init__()
+        self.cfg = SimpleNamespace(replicate_physics=True)
+        self.env_prim_paths = [
+            f"/World/envs/env_{index}" for index in range(num_envs)
+        ]
+
+
+def test_replicated_scene_contract_selects_one_content_source_and_keeps_all_paths():
+    scene = _ReplicatedScene(num_envs=4096)
+    paths = S._require_replicated_source_scene_paths(scene, num_envs=4096)
+    assert len(paths) == 4096
+    assert paths[0] == "/World/envs/env_0"
+    assert paths[-1] == "/World/envs/env_4095"
+
+    rows = [(object(),) * 7 for _ in range(4096)]
+    assert S._replicated_source_stage_row(rows, num_envs=4096) is rows[0]
+
+    source = inspect.getsource(
+        S.IsaacLabPhysicalFlightScenePort.install_action_epoch_live_physx_fact_owner
+    )
+    assert ") in (source_stage_row,):" in source
+    assert "for env_row in stage_inventory:" in source
+
+
+def test_replicated_scene_contract_rejects_heterogeneous_or_wrong_concrete_paths():
+    heterogeneous = _ReplicatedScene(num_envs=2)
+    heterogeneous.cfg.replicate_physics = False
+    with pytest.raises(
+        S.ActionBallFullMdpBallSceneError,
+        match="homogeneous replicated physics",
+    ):
+        S._require_replicated_source_scene_paths(heterogeneous, num_envs=2)
+
+    wrong_paths = _ReplicatedScene(num_envs=2)
+    wrong_paths.env_prim_paths[1] = "/World/envs/foreign"
+    with pytest.raises(
+        S.ActionBallFullMdpBallSceneError,
+        match="env prim paths differ",
+    ):
+        S._require_replicated_source_scene_paths(wrong_paths, num_envs=2)
+
+    with pytest.raises(
+        S.ActionBallFullMdpBallSceneError,
+        match="inventory width differs",
+    ):
+        S._replicated_source_stage_row([(object(),) * 7], num_envs=2)
+
+
 def test_isaac_port_preserves_env_local_state_and_uses_prevalidated_complete_after_image():
     _, spec = _spec(cadence=5, horizon=5)
     assert spec.flight_capacity == 2
     origins = torch.tensor([[1.0, 2.0, 3.0], [-1.0, 0.5, 4.0]], dtype=torch.float32)
-    scene = {}
+    scene = _ReplicatedScene(num_envs=2)
     for name in spec.scene_entity_names:
         root = torch.zeros((2, 13), dtype=torch.float32)
         root[:, :3] = origins + torch.tensor(S.PARK_POSITION_ENV_M)
@@ -235,7 +285,7 @@ def test_isaac_port_uses_one_fixed_grid_write_without_dynamic_cuda_selection():
         dtype=torch.float32,
         device=device,
     )
-    scene = {}
+    scene = _ReplicatedScene(num_envs=2)
     for name in spec.scene_entity_names:
         root = torch.zeros((2, 13), dtype=torch.float32, device=device)
         root[:, :3] = origins + torch.tensor(
@@ -278,10 +328,10 @@ def test_isaac_port_rejects_a_writer_that_returns_without_selected_row_readback(
     root = torch.zeros((1, 13), dtype=torch.float32)
     root[:, 2] = -20.0
     root[:, 3] = 1.0
-    scene = {
-        name: _NoOpAsset(root)
-        for name in spec.scene_entity_names
-    }
+    scene = _ReplicatedScene(num_envs=1)
+    scene.update(
+        {name: _NoOpAsset(root) for name in spec.scene_entity_names}
+    )
     port = S.IsaacLabPhysicalFlightScenePort(
         scene=scene,
         spec=spec,

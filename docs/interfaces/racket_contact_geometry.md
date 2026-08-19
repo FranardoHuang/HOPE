@@ -104,6 +104,13 @@ remains `diagnostic_unauthorized`, with `mechanical_admission=false`; it must no
 N73 training teacher until a soft-limit/velocity/acceleration/torque-speed re-solve and reference-
 tracking rollout pass per action.
 
+FullMDP on the 0807 A3P runtime plant does not consume that older-plant bank. Its diagnostic catalog is
+`assets/motions/chingmu73_measured_a3p0807_20260808` via
+`configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json`; changing motion bytes also changes the
+canonical `action_uid`. All 73 files have frame-0 `pelvis_link` yaw within `1e-6 rad`; torso yaw is not a
+grounding fact. This plant-consistent bank is still mechanically unadmitted (`0/73`) and therefore cannot
+grant formal motion, export, deployment or robot authority.
+
 Runtime tracking of measured site position, point velocity, signed face and the corrected long axis
 is the intended wrist teacher, while all three right-wrist joints remain policy actions. “Free wrist
 from body mimic” means generic wrist body position/orientation/velocity imitation is removed; it does

@@ -4,7 +4,7 @@ This module does not accept a manifest path, a timing mapping, or caller
 numeric tensors.  It starts from the exact live ``RacketTargetCommand``,
 follows its exact bound ``MotionCommand``, and admits only the ordered motion
 bytes that Motion froze at construction when those bytes are ordered members
-of the code-pinned ChingMu v4 diagnostic catalog.
+of the code-pinned ChingMu 0807-A3P diagnostic catalog.
 
 The catalog is diagnostic provenance, not formal motion admission: its
 teachers are not mechanically admitted and this owner cannot authorize a
@@ -35,13 +35,13 @@ LAUNCH_AUTHORIZED = False
 FORMAL_ADMISSION = False
 
 PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
-    "configs/action_ball_chingmu73_measured_v4_f10_20260803.json"
+    "configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json"
 )
 PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
-    "925b964c2ce6f5c57f56ef27af90c66d1c2516135dbac676cd5a6abc3f40c1e3"
+    "7176fa6448094eaa5dba9640c3e7c74fcd947f36208c434813820a5161dd24a4"
 )
 PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
-    "4e49656aa398174750f4b096fed569f4413dadb59f8b1f6d31c59bffe9c11548"
+    "f530165013baa570e0bf6bbbebcd7eef0c5c54db6ff7d51afccdc24e170f8cd5"
 )
 ATTEMPT_CLOSE_SEMANTICS = "one_exact_live_racket_policy_step"
 EPISODE_HORIZON_SEMANTICS = "exact_live_max_episode_length_times_step_dt"

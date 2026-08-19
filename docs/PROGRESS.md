@@ -4293,3 +4293,4 @@
   attestation，随后在scene前被固定pathname asset gate误拒。源目录与run-private快照13个文件逐字相同，
   `model.usd` SHA均为`a3cd3829…8140`；consumer现对实际selected snapshot运行tracked fixed-pin重建并让
   collider clone消费同一root。host asset/factory回归=`77 passed,37 skipped`；旧namespace不重试，G05不晋级。
+- 2026-08-19: FullMDP A `4096×25000` commit `53156327…`自然RC1：真实scene、229/399、Reward20与runtime v2已完成，runner在PPO前拒绝compact joint-safety producer，故无WAL/学习结论。失败namespace封存。代码真源确定FullMDP action cfg漏开compact evidence；successor在ActionManager前绑定真实producer，不再插N=1。replicated scene只在env0审共享Mesh/collision/BBox，逐envpath/ball/contact仍保留，并切换到0807 A3P同plant的73-motion diagnostic bank；grounding改查`pelvis_link`而非`torso_Link`。host聚焦回归scene=`63 passed,6 skipped`、cfg/timing/adapter=`52 passed,25 skipped`；fresh Pod待跑，G05仍`Partial`。

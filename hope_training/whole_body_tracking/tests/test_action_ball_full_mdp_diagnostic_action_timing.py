@@ -12,6 +12,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+import numpy as np
 import torch
 
 
@@ -44,6 +45,22 @@ _CATALOG_SLOTS = (27, 28)
 def _catalog_rows():
     actions = profile_mod._load_pinned_catalog().manifest.actions
     return tuple(actions[index] for index in _CATALOG_SLOTS)
+
+
+def test_pinned_a3p0807_catalog_is_grounded_on_the_articulation_root():
+    rows = profile_mod._load_pinned_catalog().manifest.actions
+    repo_root = Path(profile_mod.__file__).resolve().parents[4]
+    for row in rows:
+        with np.load(repo_root / row.motion_path, allow_pickle=False) as motion:
+            assert motion["body_names"].tolist()[0] == "pelvis_link"
+            w, x, y, z = (
+                float(value) for value in motion["body_quat_w"][0, 0]
+            )
+        yaw = math.atan2(
+            2.0 * (w * z + x * y),
+            1.0 - 2.0 * (y * y + z * z),
+        )
+        assert abs(yaw) <= 1.0e-6
 
 
 def _install_reference_table(

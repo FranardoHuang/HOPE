@@ -751,6 +751,10 @@ def test_fresh_cfg_installs_exact_code_owned_73_action_motion_catalog():
     assert len(table.action_order) == len(set(table.action_order)) == 73
     assert len(table.motion_files) == len(set(table.motion_files)) == 73
     assert len(table.motion_sha256) == len(set(table.motion_sha256)) == 73
+    assert all(
+        "/assets/motions/chingmu73_measured_a3p0807_20260808/" in path
+        for path in table.motion_files
+    )
     assert table.clip_family_per_clip.count("forehand") == 14
     assert table.clip_family_per_clip.count("backhand") == 59
     assert table.mount_normal_sign_per_clip.count(1.0) == 22
@@ -813,6 +817,15 @@ def test_noncanonical_continuous_cadence_exception_is_catalog_scoped():
     owner._action_ball_full_mdp_diagnostic_catalog_table = None
     with pytest.raises(ValueError, match="canonical_ready_mode must be true"):
         C.MotionCommand._configure_action_ball_continuous_motion_cadence(owner)
+
+
+def test_full_mdp_cfg_opts_into_live_compact_joint_safety_producer():
+    pytest.importorskip("isaaclab")
+    from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
+
+    cfg = H.HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg()
+    assert cfg.commands.racket_target.action_ball_diagnostic_unauthorized is True
+    assert cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence is True
 
 
 def test_fresh_catalog_cfg_rejects_caller_override_and_order_or_sign_swap():

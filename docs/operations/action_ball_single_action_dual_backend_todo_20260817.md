@@ -40,6 +40,9 @@ deployment、真机或物理安全。
   `PENDING fsync -> owner ACK -> EPOCH_ACK fsync -> stdout`。
 - 第一条可信学习 run 使用 Git exact commit 和 `4096 env × 25000 update`；前5个update只是同一进程的
   construction/capacity/finite观察窗，通过后自然继续，不另起或重跑smoke。
+- FullMDP Motion只消费与runtime 0807 A3P plant同源重解的73条measured bank；frame-0 grounding检查
+  articulation root `pelvis_link`，不再把合法挥拍腰转造成的`torso_Link` yaw误报成未ground。该bank仍为
+  `diagnostic_unauthorized`且机械admission=`0/73`，这项身份修正不授权formal/deployment。
 - A25000 在 5/20/50/100/200/500/1000/2500/5000/10000/25000 只读里程碑，不为里程碑重启，也不因“看起来不好”自动停止。
 - Pod1 按物理 GPU 与 CPU locality 调度：每卡最多两个进程；每个新进程固定独立 CPU 核组，
   不再用一个全 Pod 生命周期 Kit 锁把三张卡串成一张卡。共卡只要求显存余量、同卡进程上限和
@@ -110,6 +113,7 @@ deployment、真机或物理安全。
 | 22 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | seventh one-shot消费commit `73d607f0…`、wrapper `324d36ad…`和fresh 25k namespace；exact Torch entrypoint已越过，但closure把注册在`sys.modules['torch.ops']`的动态`_Ops`对象当成file-backed module，其`__file__`访问触发operator namespace并产生伪路径。runtime receipt/scene/PPO/WAL仍为0，result自然RC1 | closure只检查`types.ModuleType`的file-backed Python/extension模块；dynamic namespace不参与origin claim。`torch.optim/_C` required modules与parent attribute identity硬门保持不变；旧namespace不复用 |
 | 23 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | eighth one-shot消费commit `5db486cd…`、wrapper `a1d97aae…`和fresh 25k namespace；`torch.ops`本身是`ModuleType`子类，因此上一版`isinstance`窄修仍把它当普通module并重现同一伪路径拒绝。runtime receipt/scene/PPO/WAL仍为0，result自然RC1 | 删除没人消费的blanket `torch.*` scan；只保留top-level exact origins、实际消费的`torch.optim/_C` origins、parent/sys.modules identity与PPO wiring。dynamic namespace不再被错误升级成训练规格；旧namespace不复用 |
 | 24 | `FAIL-pre-scene-asset-gate / ROOT-CAUSE-EXACT` | ninth one-shot消费commit `f919ff1d…`、wrapper `d307dc29…`和fresh 25k namespace；GPU preexec、AppLauncher及真实Kit runtime v2 attestation全部通过，随后cfg构造把run-private资产快照路径误拒为“不是code-owned固定路径”。scene/PPO/WAL仍为0，result自然RC1。源目录与快照13个文件逐字相同，`model.usd` SHA均为`a3cd3829…8140` | 删除路径字符串相等这一错对象gate；无参production consumer改为对`HOPE_AGIBOT_A3_USD_PATH`实际指向的canonical、non-symlink目录运行同一个tracked producer，以代码内固定URDF/STL/asset-hash重建并验实际bytes。几何clone消费同一已验快照；旧namespace不复用 |
+| 25 | `FAIL-pre-PPO / ROOT-CAUSE-EXACT` | commit `53156327…`首次完成4096 scene、229/399 observation、Reward20与真实Kit/RSL runtime attestation；约25分钟后runner构造发现live `joint_pos`没有通过新compact producer identity门。`preexec_passed=1`、`runtime_attested=1`，但PPO/WAL均为0，result自然RC1；GPU和锁已自然释放 | 失败namespace封存且不重试。代码真源已确定FullMDP action cfg漏开compact evidence，successor在ActionManager前显式绑定；无需N=1代替静态事实。4096 replicated scene的Mesh/collision/BBox内容审计缩到env0原型一次，仍逐env保留prim、ball rigid actor和contact binding；随后直接fresh 4096×25000。Motion catalog同时改绑0807 A3P plant的73条重解bank；其机械admission仍为0/73，保持diagnostic unauthorized |
 
 ## 5. 下一条发射协议
 
@@ -127,7 +131,7 @@ receipt都落盘，但`run.log`只有identity marker和Kit segfault；无`Learni
 compute驻留。根因是identity代码在`AppLauncher`之前导入Torch/RSL，违反训练入口原有“先启动Isaac Sim
 再导入runtime模块”的顺序。该namespace不得复用、不得重试，也不能写成4096容量失败。
 
-successor保持`4096×1000`、fresh namespace、GPU0/CPU32--47、最多一个已知peer、20 GiB余量和同进程
+该阶段successor当时保持`4096×1000`、fresh namespace、GPU0/CPU32--47、最多一个已知peer、20 GiB余量和同进程
 update0--4；唯一变化是两阶段identity门。pre-App阶段验证sealed bytes/interpreter且拒绝Hydra预载
 Torch/RSL/TensorDict；opt-in precheck一经尝试即不可重试，成功证明连同五项attestation值以
 `unchecked→checked→consumed`一次性交接，post-App

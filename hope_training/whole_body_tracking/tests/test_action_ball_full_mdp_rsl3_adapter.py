@@ -866,11 +866,29 @@ def test_adapter_rejects_foreign_exact_looking_compact_action_term(
     foreign.snapshot = env.action_term.snapshot
     env.action_term = foreign
     env.action_manager.term = foreign
-    with pytest.raises(RuntimeError, match="compact joint-safety action producer"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"compact joint-safety action producer: joint_pos_type=",
+    ):
         adapter.ActionBallFullMdpRsl3Adapter(
             env=env, owner=env.owner, log_dir=str(tmp_path)
         )
     assert foreign.pending is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_adapter_names_disabled_live_compact_evidence_before_wal(
+    tmp_path, _fake_imports
+):
+    env = _Env()
+    env.action_term._joint_safety_diagnostic_compact_evidence = False
+    with pytest.raises(
+        RuntimeError,
+        match=r"compact joint-safety action producer: compact_evidence$",
+    ):
+        adapter.ActionBallFullMdpRsl3Adapter(
+            env=env, owner=env.owner, log_dir=str(tmp_path)
+        )
     assert list(tmp_path.iterdir()) == []
 
 

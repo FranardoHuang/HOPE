@@ -629,6 +629,56 @@ def _scene_has(scene: object, name: str) -> bool:
     return True
 
 
+def _require_replicated_source_scene_paths(
+    scene: object,
+    *,
+    num_envs: int,
+) -> tuple[str, ...]:
+    """Bind the port to InteractiveScene's homogeneous source inheritance.
+
+    With ``replicate_physics=True`` IsaacLab constructs env_1..N by inheriting
+    env_0 (``copy_from_source=False``).  Composed collider content therefore
+    has one source truth; concrete rigid/contact paths remain per-environment.
+    """
+
+    cfg = getattr(scene, "cfg", None)
+    env_prim_paths = getattr(scene, "env_prim_paths", None)
+    if getattr(cfg, "replicate_physics", None) is not True:
+        raise ActionBallFullMdpBallSceneError(
+            "fresh full-MDP scene requires homogeneous replicated physics"
+        )
+    if type(env_prim_paths) not in (list, tuple):
+        raise ActionBallFullMdpBallSceneError(
+            "fresh full-MDP scene does not expose concrete env prim paths"
+        )
+    paths = tuple(env_prim_paths)
+    expected = tuple(f"/World/envs/env_{index}" for index in range(num_envs))
+    if paths != expected:
+        raise ActionBallFullMdpBallSceneError(
+            "fresh full-MDP replicated env prim paths differ"
+        )
+    return paths
+
+
+def _replicated_source_stage_row(
+    stage_inventory: list[tuple[object, ...]],
+    *,
+    num_envs: int,
+) -> tuple[object, ...]:
+    """Return the sole composed-content authority row for a replicated scene."""
+
+    if len(stage_inventory) != num_envs or num_envs <= 0:
+        raise ActionBallFullMdpBallSceneError(
+            "fresh full-MDP replicated stage inventory width differs"
+        )
+    row = stage_inventory[0]
+    if len(row) != 7:
+        raise ActionBallFullMdpBallSceneError(
+            "fresh full-MDP replicated source inventory ABI differs"
+        )
+    return row
+
+
 def attach_action_ball_full_mdp_ball_scene(
     env_cfg: object,
     *,
@@ -2310,6 +2360,10 @@ class IsaacLabPhysicalFlightScenePort:
             raise ActionBallFullMdpBallSceneError("env_origins shape differs")
         if env_origins.dtype != torch.float32:
             raise ActionBallFullMdpBallSceneError("env_origins dtype must be float32")
+        env_prim_paths = _require_replicated_source_scene_paths(
+            scene,
+            num_envs=int(env_origins.shape[0]),
+        )
         device = assets[0].data.root_state_w.device
         if env_origins.device != device or any(
             asset.data.root_state_w.device != device
@@ -2321,6 +2375,7 @@ class IsaacLabPhysicalFlightScenePort:
         self.assets = tuple(assets)
         self.env_origins = env_origins
         self.num_envs = int(env_origins.shape[0])
+        self._env_prim_paths = env_prim_paths
         self.flight_capacity = spec.flight_capacity
         self.device = device
         self._identity = object()
@@ -2401,8 +2456,7 @@ class IsaacLabPhysicalFlightScenePort:
         wrist_actor_paths: list[str] = []
         non_rubber_bindings: list[tuple[str, int, str, str]] = []
         stage_inventory: list[tuple[object, ...]] = []
-        for env_index in range(self.num_envs):
-            env_root = f"/World/envs/env_{env_index}"
+        for env_index, env_root in enumerate(self._env_prim_paths):
             robot = f"{env_root}/Robot"
             wrist = f"{robot}/right_wrist_yaw_Link/action_ball_named_colliders"
             wrist_actor = f"{robot}/right_wrist_yaw_Link"
@@ -2418,6 +2472,7 @@ class IsaacLabPhysicalFlightScenePort:
             for label, path in (
                 ("environment", env_root),
                 ("robot", robot),
+                ("wrist actor", wrist_actor),
                 ("red rubber", red),
                 ("black rubber", black),
                 ("racket handle", handle),
@@ -2477,6 +2532,14 @@ class IsaacLabPhysicalFlightScenePort:
                 )
             return value
 
+        # IsaacLab's exact homogeneous scene contract above says env_1..N
+        # inherit composed content from env_0.  Validate the complete Mesh,
+        # collision and table-bounds truth once at that source.  Concrete
+        # paths and every ball rigid actor remain checked for every env.
+        source_stage_row = _replicated_source_stage_row(
+            stage_inventory,
+            num_envs=self.num_envs,
+        )
         for (
             red,
             black,
@@ -2485,7 +2548,7 @@ class IsaacLabPhysicalFlightScenePort:
             old_merged,
             table_root,
             row,
-        ) in stage_inventory:
+        ) in (source_stage_row,):
             parent = get_prim(str(red).rsplit("/", 1)[0])
             wrist_actor = parent.GetParent()
             if not bool(wrist_actor.HasAPI(UsdPhysics.RigidBodyAPI)):
@@ -2599,9 +2662,11 @@ class IsaacLabPhysicalFlightScenePort:
                 venue=build_canonical_venue_planes(),
                 table_thickness_m=float(geometry.TABLE_THICKNESS),
             )
-            for path in row:
-                # The fresh RigidObject root may own the collider on a child;
-                # ContactReportAPI is applied to this exact rigid actor below.
+        for env_row in stage_inventory:
+            for path in env_row[-1]:
+                # Every concrete fresh RigidObject root remains a separate
+                # PhysX actor/contact-report binding even though its composed
+                # source content is inherited from env_0.
                 prim = get_prim(path)
                 if not bool(prim.HasAPI(UsdPhysics.RigidBodyAPI)):
                     raise ActionBallFullMdpBallSceneError(

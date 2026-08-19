@@ -2337,18 +2337,34 @@ class MotionCommand(CommandTerm):
                 "motion fps must equal the policy rate exactly enough for one-frame-per-step "
                 f"playback: clips={list(self.motion.per_clip_fps)} policy_hz={expected_fps:.12g}"
             )
-        # GROUNDING preflight (2026-07-03): the actor obs consumes the RAW clip-world anchor quat,
-        # and the racket-target boxes are planned in the +X-grounded frame — a clip that was never
-        # re-grounded (frame-0 anchor yaw far from 0, e.g. registry v4 at ~+84 deg) trains a
-        # TURN-AND-WALK policy whose footwork is undeployable without real base localization
-        # (the 2026-07-03 model_9000 backward-jump lesson). Warn loudly; do not silently train.
+        # GROUNDING preflight (2026-07-03): grounding is a world transform of
+        # the articulation root, not the tracked torso anchor.  A torso can
+        # legitimately yaw tens of degrees at swing frame 0 while the pelvis
+        # and every measured world-space racket channel are already +X
+        # grounded.  Checking the torso here produced false turn-and-walk
+        # warnings for the exact 73-row measured bank.
+        configured_body_names = tuple(str(name) for name in self.cfg.body_names)
+        robot_body_names = tuple(str(name) for name in self.robot.body_names)
+        if (
+            not configured_body_names
+            or configured_body_names[0] != "pelvis_link"
+            or not robot_body_names
+            or robot_body_names[0] != configured_body_names[0]
+        ):
+            raise ValueError(
+                "motion grounding preflight requires pelvis_link as the "
+                "first selected and articulation body"
+            )
+        grounding_body_index = 0
         for _c in range(self.motion.num_segments):
-            _q0 = self.motion.body_quat_w[int(self.motion.seg_start[_c]), self.motion_anchor_body_index]
+            _q0 = self.motion.body_quat_w[
+                int(self.motion.seg_start[_c]), grounding_body_index
+            ]
             _w, _x, _y, _z = (float(_q0[0]), float(_q0[1]), float(_q0[2]), float(_q0[3]))
             _yaw0 = math.degrees(math.atan2(2.0 * (_w * _z + _x * _y), 1.0 - 2.0 * (_y * _y + _z * _z)))
             if abs(_yaw0) > 10.0:
                 print(
-                    f"[MotionCommand WARN] clip {_c} frame-0 anchor yaw = {_yaw0:+.1f} deg — this clip "
+                    f"[MotionCommand WARN] clip {_c} frame-0 tracked-root yaw = {_yaw0:+.1f} deg — this clip "
                     "was NOT re-grounded to +X (scripts/reground_hope_frame.py). Target boxes assume "
                     "+X grounding; training on it produces a turn-and-walk policy that needs "
                     "oracle/mocap localization at deploy. Pin registry_name to the re-grounded "

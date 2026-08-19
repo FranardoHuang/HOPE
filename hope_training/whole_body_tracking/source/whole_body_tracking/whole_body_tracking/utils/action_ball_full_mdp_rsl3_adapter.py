@@ -650,19 +650,39 @@ class ActionBallFullMdpRsl3Adapter:
             "whole_body_tracking.tasks.tracking.mdp.hope_actions"
         )
         action_type = vars(action_module).get("ClampedJointPositionAction")
-        if (
-            type(action_type) is not type
-            or action_type.__name__ != "ClampedJointPositionAction"
+        producer_mismatches = []
+        if type(action_type) is not type:
+            producer_mismatches.append("export_type")
+        elif (
+            action_type.__name__ != "ClampedJointPositionAction"
             or action_type.__module__ != action_module.__name__
-            or action_term is None
-            or type(action_term) is not action_type
-            or getattr(
+        ):
+            producer_mismatches.append("export_identity")
+        if action_manager is None:
+            producer_mismatches.append("action_manager")
+        elif not callable(get_action_term):
+            producer_mismatches.append("get_term")
+        if action_term is None:
+            producer_mismatches.append("joint_pos")
+        elif type(action_type) is type and type(action_term) is not action_type:
+            producer_mismatches.append(
+                "joint_pos_type="
+                + type(action_term).__module__
+                + "."
+                + type(action_term).__qualname__
+            )
+        if (
+            action_term is not None
+            and getattr(
                 action_term, "_joint_safety_diagnostic_compact_evidence", None
             )
             is not True
         ):
+            producer_mismatches.append("compact_evidence")
+        if producer_mismatches:
             raise RuntimeError(
-                "single_action_lean requires the compact joint-safety action producer"
+                "single_action_lean requires the compact joint-safety action "
+                "producer: " + ",".join(producer_mismatches)
             )
         self._safety_term = action_term
         self._safety_expected_apply_calls = _exact_int(

@@ -2,6 +2,17 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-19 4096 scene完成、PPO前compact wiring失败（Gate仍`Partial`）：**commit `53156327…`
+首次完成真实4096 scene、229/399 observation、Reward20和Kit/RSL runtime v2 attestation；约25分钟后
+`ActionBallFullMdpRsl3Adapter`在runner构造时拒绝live `joint_pos` compact producer，PPO/WAL均为0，
+result自然RC1且GPU/锁自然释放。该namespace封存、不重试。successor只做可区分的因果修正：对
+`replicate_physics=True`的homogeneous scene只在env0审完整Mesh/collision/BBox内容，所有env路径、K-ball
+rigid actor与contact binding仍逐行验证；compact门改为逐字段错误。代码真源进一步确定FullMDP action cfg
+漏开compact evidence；successor已在ActionManager构造前绑定真实producer，因此不再插N=1真跑。
+Motion catalog同步切到与runtime 0807 A3P plant同源重解的73条bank，grounding读
+`pelvis_link`而不是会合法转腰的`torso_Link`；该bank机械admission仍为0/73，因此仍是diagnostic而非formal。
+host scene与cfg/timing/adapter聚焦回归=`63 passed,6 skipped`与`52 passed,25 skipped`；fresh Pod尚未跑，Gate不晋级。
+
 **2026-08-19 next-generation preflight（Gate 仍 `Partial`）：**已知LM fatal的host实现面现已闭合到
 三个独立坏候选：`solve_ex info!=0`、非有限`dq`、以及两个有限float32相加后`q+dq`溢出；三者均在任何
 physical forward前替回原finite `q`并按reason 8/9逐行拒绝，mixed peer保持不变。RSL3薄adapter同时
@@ -10,7 +21,7 @@ physical forward前替回原finite `q`并按reason 8/9逐行拒绝，mixed peer�
 独立host回归为adapter 17、runtime wiring 90、semantic surface 66、questions 50、stroke chain 40。
 host上的3个CUDA参数原先跳过；exact Pod1 clean Git `2c8ef444…`随后在Jiayi Python3.11/
 PyTorch2.7-cu128、GPU0/NUMA2上得到`3 passed`，三类失败后CUDA kernel和synchronize均正常。下一条仍是唯一
-`4096×1000`同进程；前5次必须实际得到5组v11 WAL/safety receipt和真实D05 producer调用，不能由D05全零
+`4096×25000`同进程；前5次必须实际得到5组v11 WAL/safety receipt和真实D05 producer调用，不能由D05全零
 fixture代签。最终发车wrapper尚未冻结，Gate不晋级；旧失败PID链已自然消失，全程未发signal。
 
 **2026-08-18 scale裁决更正（Gate 仍 `Partial`）：**此前`N=2 × 2`只证明构造、reset、229/399 ABI、

@@ -13,13 +13,28 @@
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 [`origin/main` 的 `NOW`](../../NOW.md)。
 
+## 2026-08-19 4096 scene首证据与successor裁决
+
+commit `53156327…` 首次越过资产与runtime identity，真实构造4096 env、229/399 observation和Reward20；
+但约25分钟后在runner构造发现compact joint-safety producer identity不满足新adapter，PPO/WAL为0。
+因此本次只回答“4096 scene可构造”，没有return、contact或学习趋势。失败namespace永久封存。
+
+耗时主因不是物理步而是homogeneous replicated scene仍对4096份继承内容重复做Mesh/collision/BBox审计。
+successor采用IsaacLab真实`replicate_physics=True`/env0 source contract：完整组成内容只审env0一次，所有env的
+具体prim、K-ball rigid actor和contact binding仍逐行验证。它删除重复工作，不放宽per-env runtime身份。
+另将Motion catalog从旧plant bank切到同一0807 A3P plant重解的73条bank；逐文件根`pelvis_link` frame-0
+yaw均在`1e-6 rad`内，旧日志是把`torso_Link`合法挥拍yaw当grounding的错对象gate。新bank机械admission仍
+为`0/73`，只改善诊断lineage，不授权formal。代码真源同时证明FullMDP从未在action cfg启用compact
+evidence；这已经确定解释live producer为何为false，无需再用N=1真跑定位。successor在Manager构造前显式
+绑定该真实producer并直接fresh `4096×25000`长跑；不再循环多个短smoke。
+
 ## 2026-08-18 scale与native A1000最终裁决
 
 小环境数边界纠正：`N=2`只回答构造、reset、ABI、finite和optimizer调用点，不回答学习效果。旧Isaac
 `N=2` A1000在ACK470前虽有22560个finite Reward sample，却是296/296 episode全base tilt、260个
 admitted opportunity全not-ready、0 ACCEPT；随后LM device assert终止。它是结构诊断，不是失败或成功的
-4096学习实验。下一条科学run直接使用同一冻结进程`4096×1000`，update0--4只读scale门，健康后不重启，
-里程碑为20/50/100/200/500/1000。
+4096学习实验。下一条科学run直接使用同一冻结进程`4096×25000`，update0--4只读scale门，健康后不重启，
+里程碑为20/50/100/200/500/1000/2500/5000/10000/25000。
 
 native MuJoCo A的`1024×1000`已自然完成，但只能回答简化MDP的趋势：
 
@@ -85,7 +100,7 @@ sample全部有限，实际Reward和=`3.1311374828/3.0717186332`，无poison/non
 flight、R06 outcome与R07 recovery的eligible denominator仍为零，14个稀疏/任务项收入也为零，只有6个
 dense motion项为有限正收入。当时据此启动的同代码`N=2` A1000现已由本文件§scale裁决降为历史结构诊断；
 它后续到ACK470的节点仍保留如下，但不再决定下一实验规模。2/5/14/60 update只回答工程链，不回答可学性；
-下一条科学实验改为同一进程`4096×1000`。
+下一条科学实验改为同一进程`4096×25000`；1000只是早期趋势节点，不是终点。
 
 ### A1000 update20
 
@@ -11322,10 +11337,10 @@ capacity overflow/nonfinite均为0，继续500。
 
 ### 2026-08-19：Isaac长跑发射与portable MuJoCo并行裁决
 
-本轮采用“一个长跑、里程碑只读”的实验结构：Isaac A直接`4096×1000`，update0--4是同一进程的
+本轮采用“一个长跑、里程碑只读”的实验结构：Isaac A直接`4096×25000`，update0--4是同一进程的
 容量/finite/事务观察，不再用重复小N smoke累加退出码。发射件要求actual Kit trainer进程内绑定
 Python3.11/Torch2.7/TensorDict0.10/RSL3.1.2 class source，随后才进入`train.py`；末端证据必须消费
-1000组PENDING/EPOCH_ACK、1000份v11/post-safety ACK、Reward20 finite/conservation和非零D05分母。
+25000组PENDING/EPOCH_ACK、25000份v11/post-safety ACK、Reward20 finite/conservation和非零D05分母。
 普通tilt/table/fall只记telemetry，不作为提前停机理由。
 
 MuJoCo侧不等待Isaac结束，但当前只承认`full_a_slice_attempted`：真实reveal/launch/contact/terminal/reset

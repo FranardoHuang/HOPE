@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from test_action_ball_full_mdp_ball_scene import S, _Asset, _spec
+from test_action_ball_full_mdp_ball_scene import S, _Asset, _ReplicatedScene, _spec
 
 _PHYSICAL_PATH = (
     Path(__file__).resolve().parents[1]
@@ -38,7 +38,7 @@ def _port(device: torch.device):
         dtype=torch.float32,
         device=device,
     )
-    scene = {}
+    scene = _ReplicatedScene(num_envs=2)
     for name in spec.scene_entity_names:
         root = torch.zeros((2, 13), dtype=torch.float32, device=device)
         root[:, :3] = origins + torch.tensor(
