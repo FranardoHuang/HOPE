@@ -708,19 +708,36 @@ def test_canonical_epoch_idle_gate_needs_no_pre_materialized_commit_log():
     assert "commit_log" not in gate_source
 
 
-def test_hot_sources_have_no_dynamic_compaction_or_old_cadence_api():
-    paths = (
-        SOURCE / "action_ball_continuous_runtime_transaction_device.py",
-        SOURCE / "action_ball_motion_cadence_device.py",
-        SOURCE / "action_ball_full_mdp_canary_question_owner.py",
+def test_hot_sources_allow_only_the_profiled_question_compaction_boundary():
+    transaction_path = (
+        SOURCE / "action_ball_continuous_runtime_transaction_device.py"
     )
-    combined = "\n".join(path.read_text(encoding="utf-8") for path in paths)
-    for forbidden in ("masked_select", "torch.nonzero", ".nonzero("):
-        assert forbidden not in combined
-    cadence_source = paths[1].read_text(encoding="utf-8")
+    cadence_path = SOURCE / "action_ball_motion_cadence_device.py"
+    question_path = SOURCE / "action_ball_full_mdp_canary_question_owner.py"
+    transaction_source = transaction_path.read_text(encoding="utf-8")
+    cadence_source = cadence_path.read_text(encoding="utf-8")
+    question_source = question_path.read_text(encoding="utf-8")
+
+    # Cadence and transaction ownership remain static full-row surfaces.  The
+    # sole exception is the question composer's explicit mask-first seam: one
+    # dynamic row list is allowed to avoid sending all 4096 rows through the
+    # much larger LM/exact/Physical numeric stack.  Its synchronization cost is
+    # intentionally visible to the bounded real-run profiler and no second
+    # compaction may spread into the hot path unnoticed.
+    for source in (transaction_source, cadence_source):
+        for forbidden in ("masked_select", "torch.nonzero", ".nonzero("):
+            assert forbidden not in source
+    assert "masked_select" not in question_source
+    assert "torch.nonzero" not in question_source
+    assert question_source.count(".nonzero(") == 1
+    assert (
+        "active_index = construction_mask.nonzero(as_tuple=False).reshape(-1)"
+        in question_source
+    )
+
     assert "def issue_current_r05_cadence_if_due" not in cadence_source
     assert "def project_r05_cadence" not in cadence_source
-    d05_source = paths[0].read_text(encoding="utf-8")
+    d05_source = transaction_source
     assert "def prepare_many(" not in d05_source
     assert "def prepare_many_from_internal_question" not in d05_source
     assert "def settle_action_ball_full_mdp_epoch" not in d05_source

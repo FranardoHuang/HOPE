@@ -9,6 +9,12 @@
 
 本文件是现行术语真源。新人和 agent 不需要去历史归档猜缩写。
 
+<a id="hope_action_ball_full_mdp_profile_updates"></a>
+**`HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES` / FullMDP前N轮分段归因开关**：值必须是canonical整数
+`1..50`；缺失或`0`时完全不安装。启用后只记录指定数量PPO update的inclusive host wall，不新增CUDA
+同步，随后在同一进程恢复原方法并自动关闭。它只用于定位collection墙钟，固定
+`speed_evidence_eligible=false`，不能当profiler-off吞吐成绩。
+
 ## 先遵守这条：不用黑话
 
 - `run_name`、`flag`、实验臂代号和缩写第一次出现时，必须同行写出：**它是什么、改了什么、用来回答什么**。

@@ -7,8 +7,12 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 只读Pod采样为trainer约`110% CPU`（主线程约`97.5%`）、GPU0约`19%`。active只允许CPU`32--47`，
 Yikang进程允许`0--127`，所以调度集合没有严格隔离；但同一两秒样本中后者落在`32--47`的用量仅约
 `8%` CPU、node2总体忙约`4.3%`，不能解释三倍墙钟。旧`6.700 s/update`是legacy diagnostic hot path，
-不是当前FullMDP transaction/owner工作量。下一fresh件必须按job使用互斥cpuset；当前性能因果动作是
-profile FullMDP collection并批量化reset/solver/host barrier，不改active affinity、不动PPO。
+不是当前FullMDP transaction/owner工作量。CPU无需互斥，只须证明无持续争抢或浪费；当前性能因果动作是
+在下一fresh `4096×25000`同一进程前5个update启用bounded profile后自动关闭。候选已把D05的
+N平方uniqueness改为O(N)，并把mask前全N solver/exact/Physical改为只处理active rows；唯一动态
+`nonzero`同步与节省的数值工作须由真实Pod配对裁决。随后再批量化empty-flight/reset/owner gate，
+不改active affinity、不动PPO。候选host focused=`110 passed, 1 skipped`；Pod profile与profiler-off吞吐
+尚未运行，Gate保持`Partial`。
 
 **2026-08-19 ACK809只读前缀（Gate仍`Partial`）：**active同一`4096×25000`进程的完整ACK `0..808`
 已到`79,527,936` transitions，Reward nonfinite与conservation violation均为0。D05 selected=`1,015,878`，

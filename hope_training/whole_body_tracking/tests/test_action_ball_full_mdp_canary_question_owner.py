@@ -147,6 +147,9 @@ def _direct_projection(
     num_envs: int,
     source_rows: tuple[int, ...],
     selected_env_index: torch.Tensor,
+    construction_mask: torch.Tensor | None = None,
+    action_slot: torch.Tensor | None = None,
+    cadence_producer_fault: torch.Tensor | None = None,
 ):
     harness = _bundle_harness(num_envs=num_envs)
     source_row = torch.tensor(source_rows, dtype=torch.int64)
@@ -166,14 +169,22 @@ def _direct_projection(
         reveal_tick=torch.full((k,), 2, dtype=torch.int64),
         deadline_tick=torch.full((k,), 4, dtype=torch.int64),
         next_reveal_tick=torch.full((k,), 295, dtype=torch.int64),
-        action_slot=torch.zeros(k, dtype=torch.int64),
+        action_slot=(
+            torch.zeros(k, dtype=torch.int64)
+            if action_slot is None
+            else action_slot
+        ),
         task_identity=torch.full((k,), -1, dtype=torch.int64),
         cadence_identity=torch.full((k,), -1, dtype=torch.int64),
         action_uid=torch.full((k,), -1, dtype=torch.int64),
         contact_tick=torch.full((k,), -1, dtype=torch.int64),
         launch_tick=torch.full((k,), -1, dtype=torch.int64),
         chosen_horizon_ticks=torch.full((k,), -1, dtype=torch.int64),
-        cadence_producer_fault=torch.zeros(k, dtype=torch.int64),
+        cadence_producer_fault=(
+            torch.zeros(k, dtype=torch.int64)
+            if cadence_producer_fault is None
+            else cadence_producer_fault
+        ),
     )
     cadence = _new_device_cadence(values, selected_env_index)
     profile_projection = harness.profile_owner.require_owned_r05_profile(
@@ -210,7 +221,11 @@ def _direct_projection(
             support=3,
             draw_u01=draw,
             candidate_identity=candidate_identity,
-            construction_mask=torch.ones(k, dtype=torch.bool),
+            construction_mask=(
+                torch.ones(k, dtype=torch.bool)
+                if construction_mask is None
+                else construction_mask
+            ),
             bank_sequence=1,
         )
     finally:
@@ -283,6 +298,240 @@ def test_n64_foreign_or_duplicate_rows_censor_same_batch(selected, fault_mask):
         )
     )
     assert harness.physical_owner._pending == {}
+
+
+def _assert_active_projection_exact(actual, dense, construction_mask):
+    active = construction_mask.nonzero(as_tuple=False).reshape(-1)
+    assert torch.equal(
+        actual.round_bank.candidate_identity,
+        dense.round_bank.candidate_identity,
+    )
+    assert torch.equal(
+        torch.index_select(actual.producer_fault, 0, active),
+        torch.index_select(dense.producer_fault, 0, active),
+    )
+    for name in (
+        "construction_reason",
+        "producer_fault",
+        "motion_task_f32",
+        "racket_task_f32",
+        "physical_state_f32",
+    ):
+        assert torch.equal(
+            torch.index_select(getattr(actual.round_bank, name), 0, active),
+            torch.index_select(getattr(dense.round_bank, name), 0, active),
+        ), name
+    for name in (
+        "action_uid",
+        "contact_tick",
+        "launch_tick",
+        "chosen_horizon_ticks",
+        "task_close_tick",
+    ):
+        assert torch.equal(
+            torch.index_select(getattr(actual.round_chronology, name), 0, active),
+            torch.index_select(getattr(dense.round_chronology, name), 0, active),
+        ), name
+
+    inactive = (~construction_mask).nonzero(as_tuple=False).reshape(-1)
+    inactive_reason = torch.index_select(
+        actual.round_bank.construction_reason, 0, inactive
+    )
+    assert torch.all(
+        inactive_reason.eq(owner_mod.CONSTRUCTION_REASON_INVALID_PRODUCER)
+    )
+    assert torch.count_nonzero(
+        torch.index_select(actual.round_bank.producer_fault, 0, inactive)
+    ) == 0
+    assert torch.count_nonzero(
+        torch.index_select(actual.producer_fault, 0, inactive)
+    ) == 0
+    for name in ("motion_task_f32", "racket_task_f32", "physical_state_f32"):
+        assert torch.count_nonzero(
+            torch.index_select(getattr(actual.round_bank, name), 0, inactive)
+        ) == 0
+    for name in ("launch_tick", "chosen_horizon_ticks", "task_close_tick"):
+        assert torch.all(
+            torch.index_select(
+                getattr(actual.round_chronology, name), 0, inactive
+            ).eq(-1)
+        )
+
+
+@pytest.mark.parametrize(
+    "mask_values",
+    (
+        (True, False, True, False),
+        (False, False, False, False),
+        (True, True, True, True),
+    ),
+)
+def test_mask_first_fixed_tape_matches_dense_reference(mask_values):
+    mask = torch.tensor(mask_values, dtype=torch.bool)
+    dense, _dense_harness, _ = _direct_projection(
+        num_envs=4,
+        source_rows=(0, 1, 2, 3),
+        selected_env_index=torch.arange(4, dtype=torch.int64),
+    )
+    actual, harness, _ = _direct_projection(
+        num_envs=4,
+        source_rows=(0, 1, 2, 3),
+        selected_env_index=torch.arange(4, dtype=torch.int64),
+        construction_mask=mask,
+    )
+    _assert_active_projection_exact(actual, dense, mask)
+    assert actual.round_bank.candidate_identity.shape == (4, 3, 3)
+    assert actual.round_chronology.contact_tick.shape == (4, 3, 3)
+    assert harness.physical_owner._pending == {}
+
+
+def test_mask_first_dense_parity_includes_invalid_rows_slots_and_faults():
+    mask = torch.tensor((True, False, True, True), dtype=torch.bool)
+    selected = torch.tensor((0, 99, 0, 3), dtype=torch.int64)
+    slots = torch.tensor((0, 99, -1, 0), dtype=torch.int64)
+    faults = torch.tensor((0, 17, 1 << 40, 0), dtype=torch.int64)
+    kwargs = dict(
+        num_envs=4,
+        source_rows=(0, 1, 2, 3),
+        selected_env_index=selected,
+        action_slot=slots,
+        cadence_producer_fault=faults,
+    )
+    dense, _dense_harness, _ = _direct_projection(**kwargs)
+    actual, harness, _ = _direct_projection(
+        **kwargs,
+        construction_mask=mask,
+    )
+    _assert_active_projection_exact(actual, dense, mask)
+    assert torch.all(
+        actual.round_bank.construction_reason[
+            torch.tensor((0, 2), dtype=torch.int64)
+        ].eq(
+            owner_mod.CONSTRUCTION_REASON_INVALID_PRODUCER
+        )
+    )
+    assert harness.physical_owner._pending == {}
+
+
+@pytest.mark.parametrize(
+    "mask_values",
+    (
+        (False, False, False, False),
+        (True, False, True, False),
+        (True, True, True, True),
+    ),
+)
+def test_mask_first_numeric_owners_see_only_active_cells(monkeypatch, mask_values):
+    questions = sys.modules[f"{_PKG}.continuous_questions"]
+    exact_face = sys.modules[f"{_PKG}.action_ball_exact_face_timing_device"]
+    calls = {"solver": [], "exact": [], "issue": [], "project": [], "final": []}
+
+    original_solver = questions.solve_proposals_device
+    original_exact = exact_face.solve_exact_face_timing_device
+    original_issue = physical.PhysicalQuestionNumericCore.issue_horizon_for_test
+    original_project = physical.PhysicalQuestionNumericCore.project_horizon_for_test
+    original_final = physical.PhysicalQuestionNumericCore.finalize_exact_ticks_for_test
+
+    def spy_solver(*args, **kwargs):
+        calls["solver"].append(args[0].shape[0])
+        return original_solver(*args, **kwargs)
+
+    def spy_exact(*args, **kwargs):
+        calls["exact"].append(kwargs["ball_contact_w_m"].shape[0])
+        return original_exact(*args, **kwargs)
+
+    def spy_issue(self, batch):
+        calls["issue"].append(batch.candidate_identity.numel())
+        return original_issue(self, batch)
+
+    def spy_project(self, receipt):
+        calls["project"].append(1)
+        return original_project(self, receipt)
+
+    def spy_final(self, receipt, **kwargs):
+        calls["final"].append(kwargs["candidate_identity"].numel())
+        return original_final(self, receipt, **kwargs)
+
+    monkeypatch.setattr(questions, "solve_proposals_device", spy_solver)
+    monkeypatch.setattr(exact_face, "solve_exact_face_timing_device", spy_exact)
+    monkeypatch.setattr(
+        physical.PhysicalQuestionNumericCore, "issue_horizon_for_test", spy_issue
+    )
+    monkeypatch.setattr(
+        physical.PhysicalQuestionNumericCore, "project_horizon_for_test", spy_project
+    )
+    monkeypatch.setattr(
+        physical.PhysicalQuestionNumericCore,
+        "finalize_exact_ticks_for_test",
+        spy_final,
+    )
+
+    mask = torch.tensor(mask_values, dtype=torch.bool)
+    projection, harness, _ = _direct_projection(
+        num_envs=4,
+        source_rows=(0, 1, 2, 3),
+        selected_env_index=torch.arange(4, dtype=torch.int64),
+        construction_mask=mask,
+    )
+    numeric_cells = int(mask.sum()) * 3 * 3
+    expected_batch = [] if numeric_cells == 0 else [numeric_cells]
+    assert calls == {
+        "solver": expected_batch,
+        "exact": expected_batch,
+        "issue": expected_batch,
+        "project": [] if numeric_cells == 0 else [1],
+        "final": expected_batch,
+    }
+    assert projection.round_bank.candidate_identity.shape == (4, 3, 3)
+    assert harness.physical_owner._pending == {}
+
+
+def test_mask_first_documents_its_single_dynamic_cuda_sync_boundary():
+    hot = inspect.getsource(owner_mod._compose_recurring_question_projection)
+    assert hot.count("construction_mask.nonzero(") == 1
+    assert "synchronize while materializing its dynamic output size" in hot
+
+
+@pytest.mark.parametrize(
+    "selected",
+    (
+        torch.tensor([], dtype=torch.int64),
+        torch.tensor([9], dtype=torch.int64),
+        torch.tensor([4, 1, 4, 4, 7, 1], dtype=torch.int64),
+        torch.tensor([3, 2, 1, 0], dtype=torch.int64),
+    ),
+)
+def test_duplicate_row_mask_matches_pairwise_reference(selected):
+    expected = torch.tensor(
+        [
+            sum(int(value == other) for other in selected.tolist()) > 1
+            for value in selected.tolist()
+        ],
+        dtype=torch.bool,
+    )
+    actual = owner_mod._duplicate_valid_index_rows(selected, num_envs=64)
+    assert torch.equal(actual, expected)
+
+
+def test_duplicate_row_mask_rejects_non_i64_or_non_vector_inputs():
+    with pytest.raises(owner_mod.CanaryQuestionError, match="index ABI"):
+        owner_mod._duplicate_valid_index_rows(
+            torch.tensor([0, 1], dtype=torch.int32), num_envs=2
+        )
+    with pytest.raises(owner_mod.CanaryQuestionError, match="index ABI"):
+        owner_mod._duplicate_valid_index_rows(
+            torch.tensor([[0, 1]], dtype=torch.int64), num_envs=2
+        )
+    with pytest.raises(owner_mod.CanaryQuestionError, match="capacity ABI"):
+        owner_mod._duplicate_valid_index_rows(
+            torch.tensor([0, 1], dtype=torch.int64), num_envs=0
+        )
+
+
+def test_duplicate_row_mask_leaves_foreign_rows_to_range_fault():
+    selected = torch.tensor([-1, 63, -1, 64, 64], dtype=torch.int64)
+    actual = owner_mod._duplicate_valid_index_rows(selected, num_envs=64)
+    assert actual.tolist() == [False, False, False, False, False]
 
 
 @pytest.mark.parametrize(

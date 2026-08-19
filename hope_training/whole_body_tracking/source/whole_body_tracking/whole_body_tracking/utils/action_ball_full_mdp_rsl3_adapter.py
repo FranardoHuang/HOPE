@@ -998,6 +998,41 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
             )
 
         self.alg.update = update_with_full_mdp_boundary
+        self._full_mdp_update_profiler = None
+        profile_raw = os.environ.get(
+            "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
+        )
+        if profile_raw not in (None, "", "0"):
+            profiler_module = importlib.import_module(
+                "whole_body_tracking.utils."
+                "action_ball_full_mdp_update_profiler"
+            )
+            requested_updates = (
+                profiler_module.parse_full_mdp_profile_updates(os.environ)
+            )
+            self._full_mdp_update_profiler = (
+                profiler_module.install_full_mdp_update_profiler(
+                    self.env,
+                    requested_updates=requested_updates,
+                    emit_line=lambda line: print(line, flush=True),
+                )
+            )
+
+    def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
+        """Emit bounded real-FullMDP attribution after upstream logging."""
+
+        super().log(locs, width=width, pad=pad)
+        profiler = self._full_mdp_update_profiler
+        if profiler is None:
+            return
+        profiler.emit_update(
+            update=int(locs["it"]),
+            collection_time_s=locs["collection_time"],
+            learning_time_s=locs["learn_time"],
+            expected_env_step_calls=int(self.num_steps_per_env),
+        )
+        if profiler.closed:
+            self._full_mdp_update_profiler = None
 
     @staticmethod
     def _normalizer_aliases(role: str) -> tuple[str, ...]:

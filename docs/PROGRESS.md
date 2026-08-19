@@ -1,11 +1,25 @@
 # 简短进度记录
 
+## 2026-08-19 — FullMDP 22秒热墙完成源码归因；bounded profiler与D05 mask-first候选落盘
+
+- active `b64cb944…`到2026-08-19 16:40 CST完整ACK `0..1129`，累计`111,083,520`
+  transitions；约1062--1129窗口仍约`23.3 s/update`。GPU1自然空闲，active GPU0不热补、不停止。
+- 四路对照确认CPU互斥不是主修复。当前D05每control固定对36,864 candidates跑12轮LM/exact/Physical，
+  实际约52.32 selected rows/control，约78.3倍行工作无业务机会；另有两张4096平方唯一性矩阵、
+  96次/update empty Physical/R06事务、384次full-grid ball写、约552次owner surface重验和高频full-N reset。
+- 候选新增默认inert的真实FullMDP profiler：只在明确请求的前1--50个update记录inclusive host wall，
+  不新增CUDA同步并自动撤销wrapper后继续同一长跑；D05 uniqueness改为线性有界索引计数，且只把
+  `construction_mask=true`的行送进LM/exact/Physical，再scatter回原full-N ABI。它新增唯一一处动态
+  `nonzero`同步，保留还是撤回由Pod profiler-off配对决定。D05/FullMDP/profiler/RSL focused=
+  `110 passed, 1 skipped`；Pod真实binding/profile与提速仍`未测`。完整因果与验收见
+  [EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
+
 ## 2026-08-19 — 22秒主因在FullMDP collection；MuJoCo GPU门走到真实contact边界
 
 - active Isaac `4096×25000`到update843附近时，collection分窗均值约`19.88→21.55 s`，learning保持
   `1.5--1.6 s`，最近约93% iteration在collection。只读两秒采样显示trainer主线程约吃满1核、GPU0约
   `19%`；Yikang虽未绑核且允许进入我们的`32--47`，实际样本只在该集合消耗约`8%` CPU，node2总体忙
-  约`4.3%`。所以CPU集合未隔离必须在下一fresh wrapper修，但它不是当前三倍差的主因；旧`6.700 s`
+  约`4.3%`。所以不要求CPU互斥，只要求没有持续争抢或浪费；它不是当前三倍差的主因。旧`6.700 s`
   只是legacy diagnostic hot path，当前应profile并批量化FullMDP reset/solver/host barrier，不热改active。
 - fresh MuJoCo successor `5d0044b8…`在空闲GPU1、CPU`0--15`用`taskset`越过旧`numactl`零调用阻塞；
   N2 timeout-reset peer exact和N1 reveal/launch/settlement两节点通过。第三个selected-rubber节点的测试把

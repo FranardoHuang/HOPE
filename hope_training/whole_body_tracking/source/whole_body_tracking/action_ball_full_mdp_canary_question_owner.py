@@ -41,6 +41,34 @@ PRODUCER_FAULT_STATIC_ROW_BINDING = 1 << 59
 _I64_MAX = (1 << 63) - 1
 
 
+def _duplicate_valid_index_rows(
+    selected_env_index: torch.Tensor, *, num_envs: int
+) -> torch.Tensor:
+    """Mark repeated in-range environment indices with linear device work.
+
+    The retired pairwise implementation materialized two ``[K, K]`` boolean
+    matrices.  At the 4096-row capacity boundary that meant roughly 33.5M
+    comparisons per policy step solely to validate uniqueness.  The bounded
+    environment index is already part of the producer ABI, so a device
+    histogram preserves every valid-row duplicate fault using ``O(K + N)``
+    work and ``O(N)`` storage, with no host synchronization.  Out-of-range
+    rows are faulted independently by the caller and cannot be indexed here.
+    """
+
+    if selected_env_index.ndim != 1 or selected_env_index.dtype != torch.int64:
+        raise CanaryQuestionError("due environment index ABI differs")
+    if type(num_envs) is not int or num_envs < 1:
+        raise CanaryQuestionError("environment capacity ABI differs")
+    in_range = selected_env_index.ge(0) & selected_env_index.lt(num_envs)
+    safe_index = torch.where(
+        in_range,
+        selected_env_index,
+        torch.full_like(selected_env_index, num_envs),
+    )
+    counts = torch.bincount(safe_index, minlength=num_envs + 1)
+    return in_range & counts.index_select(0, safe_index).gt(1)
+
+
 class CanaryQuestionError(RuntimeError):
     """Base error for the canary question composition boundary."""
 
@@ -262,202 +290,13 @@ def _compose_recurring_question_projection(
     reaction_margin = gather(timing.reaction_margin_s)
     mount_sign = gather(timing.mount_normal_sign)
 
-    from whole_body_tracking.tasks.tracking.mdp import continuous_questions
-
-    defaults = continuous_questions.ContinuousQuestionCfg()
-    velocity_box = torch.tensor(
-        defaults.vel_range,
-        dtype=torch.float32,
-        device=device,
-    )
-    velocity = velocity_box[:, 0] + draw_u01[:, :, :3] * (
-        velocity_box[:, 1] - velocity_box[:, 0]
-    )
-    spin = (draw_u01[:, :, 3:6] * 2.0 - 1.0) * float(
-        defaults.spin_abs_max
-    )
-    target = (
-        profile.targets_xy_m.unsqueeze(0)
-        .unsqueeze(0)
-        .expand(k, rounds, support, 2)
-        .contiguous()
-    )
-    contact_cells = _expand_round_cells(contact, rounds, support)
-    velocity_cells = _expand_round_values(velocity, support)
-    spin_cells = _expand_round_values(spin, support)
-    normal_cells = _expand_round_cells(reference_normal, rounds, support)
-    base_cells = _expand_round_cells(base_quat, rounds, support)
-    sign_cells = _expand_round_cells(mount_sign, rounds, support)
-
-    solver = questions.solve_proposals_device(
-        _flat_round_cells(_expand_round_cells(slots, rounds, support)),
-        _flat_round_cells(contact_cells),
-        _flat_round_cells(velocity_cells),
-        _flat_round_cells(spin_cells),
-        _flat_round_cells(target),
-        _flat_round_cells(normal_cells),
-        protos=SimpleNamespace(
-            v_hat_b=bundle._prototype_direction,
-            speed_min=bundle._prototype_speed_min,
-            speed_max=bundle._prototype_speed_max,
-            face_sign=timing.mount_normal_sign,
-        ),
-        base_quat=_flat_round_cells(base_cells),
-        prm=bundle._venue,
-        surface_z=bundle._surface_z_m,
-        net_x=bundle._net_x_m,
-        net_top_z=bundle._net_top_z_m,
-        cfg=bundle._question_cfg,
-        h=bundle._integration_step_s,
-        n_steps=bundle._integration_steps,
-    )
-    solver_ok = solver.ok.reshape(k, rounds, support).unsqueeze(-1)
     contact_room = cadence.episode_tick.le(_I64_MAX - time_to_contact_ticks)
     safe_episode = torch.where(
         contact_room, cadence.episode_tick, torch.zeros_like(cadence.episode_tick)
     )
     contact_tick_row = safe_episode + time_to_contact_ticks
     ttc = time_to_contact_ticks.to(torch.float32) * bundle._policy_step_s
-    exact = exact_face.solve_exact_face_timing_device(
-        ball_contact_w_m=torch.where(
-            solver_ok.reshape(-1, 1),
-            solver.p_contact,
-            _flat_round_cells(contact_cells),
-        ),
-        racket_face_center_velocity_w_mps=torch.where(
-            solver_ok.reshape(-1, 1),
-            solver.v_racket,
-            torch.zeros_like(solver.v_racket),
-        ),
-        solved_raw_a_normal_w=torch.where(
-            solver_ok.reshape(-1, 1),
-            solver.n_racket,
-            _flat_round_cells(normal_cells),
-        ),
-        mount_normal_sign=_flat_round_cells(sign_cells),
-        reference_racket_quat_wxyz=_flat_round_cells(
-            _expand_round_cells(reference_quat, rounds, support)
-        ),
-        reference_racket_angular_velocity_w_radps=_flat_round_cells(
-            _expand_round_cells(reference_omega, rounds, support)
-        ),
-        reference_racket_site_speed_mps=_flat_round_cells(
-            _expand_round_cells(reference_site_speed, rounds, support)
-        ),
-        teacher_rate_min=_flat_round_cells(
-            _expand_round_cells(teacher_rate_min, rounds, support)
-        ),
-        teacher_rate_max=_flat_round_cells(
-            _expand_round_cells(teacher_rate_max, rounds, support)
-        ),
-        time_to_contact_s=_flat_round_cells(
-            _expand_round_cells(ttc, rounds, support)
-        ),
-        reference_t_hit_s=_flat_round_cells(
-            _expand_round_cells(reference_t_hit, rounds, support)
-        ),
-        reference_t_cycle_s=_flat_round_cells(
-            _expand_round_cells(reference_t_cycle, rounds, support)
-        ),
-        reaction_margin_s=_flat_round_cells(
-            _expand_round_cells(reaction_margin, rounds, support)
-        ),
-        attempt_close_margin_s=_flat_round_cells(
-            _expand_round_cells(
-                torch.full_like(ttc, bundle._policy_step_s), rounds, support
-            )
-        ),
-        episode_length_s=_flat_round_cells(
-            _expand_round_cells(
-                torch.full_like(ttc, bundle._episode_length_s), rounds, support
-            )
-        ),
-    )
-    horizon_receipt = bundle._physical_owner.issue_horizon_for_test(
-        _physical.PhysicalQuestionCandidateBatch(
-            candidate_identity=candidate_identity,
-            contact_position_env_m=contact_cells,
-            incoming_linear_velocity_world_mps=velocity_cells,
-            incoming_angular_velocity_world_radps=spin_cells,
-        )
-    )
-    horizon = bundle._physical_owner.project_horizon_for_test(horizon_receipt)
-    if type(horizon) is not _physical.PhysicalQuestionHorizonView:
-        raise CanaryQuestionError("Physical horizon projection exact type differs")
-    max_horizon = _require_tensor(
-        horizon.max_feasible_motion_ticks,
-        name="Physical max feasible motion ticks",
-        device=device,
-        dtype=torch.int64,
-        shape=(k, rounds, support),
-    )
     contact_tick = _expand_round_cells(contact_tick_row, rounds, support)
-    chosen_horizon = torch.minimum(
-        max_horizon,
-        contact_tick.clamp(min=0),
-    ).contiguous()
-    launch_tick = (contact_tick - chosen_horizon).contiguous()
-    pending_elapsed = _expand_round_cells(
-        cadence.pending_elapsed_s.to(torch.float64), rounds, support
-    )
-    task_duration_raw = (
-        exact.pre_swing_wait_s.reshape(k, rounds, support).to(torch.float64)
-        + exact.scaled_t_cycle_s.reshape(k, rounds, support).to(torch.float64)
-        - pending_elapsed
-    )
-    task_duration_finite = torch.isfinite(task_duration_raw)
-    task_duration = torch.where(
-        task_duration_finite,
-        task_duration_raw.clamp(min=0.0),
-        torch.zeros_like(task_duration_raw),
-    )
-    task_close_offset = torch.ceil(
-        task_duration / float(bundle._policy_step_s) - 1.0e-12
-    ).to(torch.int64)
-    task_close_room = task_duration_finite & cadence.reveal_tick.reshape(
-        k, 1, 1
-    ).le(_I64_MAX - task_close_offset)
-    safe_task_epoch = torch.where(
-        task_close_room,
-        cadence.reveal_tick.reshape(k, 1, 1),
-        torch.zeros_like(task_close_offset),
-    )
-    task_close_tick = (safe_task_epoch + task_close_offset).contiguous()
-    physical = bundle._physical_owner.finalize_exact_ticks_for_test(
-        horizon_receipt,
-        candidate_identity=candidate_identity,
-        contact_tick=contact_tick,
-        launch_tick=launch_tick,
-    )
-    reason = _reason_precedence(
-        solver.proposals.reason_code.reshape(k, rounds, support),
-        exact.construction_reason.reshape(k, rounds, support),
-        physical.construction_reason,
-    )
-    admitted_before_suffix = reason.eq(
-        _r05.QUESTION_CONSTRUCTION_REASON_ADMITTED
-    )
-    full_suffix_fits = cadence.next_reveal_tick.reshape(k, 1, 1).gt(
-        task_close_tick
-    )
-    reason = torch.where(
-        admitted_before_suffix
-        & task_close_room
-        & ~full_suffix_fits,
-        torch.full_like(
-            reason,
-            CONSTRUCTION_REASON_FULL_SUFFIX_CROSSES_NEXT_REVEAL,
-        ),
-        reason,
-    )
-    active_task_chronology = reason.eq(
-        _r05.QUESTION_CONSTRUCTION_REASON_ADMITTED
-    ) | reason.eq(CONSTRUCTION_REASON_FULL_SUFFIX_CROSSES_NEXT_REVEAL)
-    task_close_tick = torch.where(
-        active_task_chronology,
-        task_close_tick,
-        torch.full_like(task_close_tick, -1),
-    ).contiguous()
     structural_fault = torch.where(
         construction_mask,
         cadence.cadence_producer_fault,
@@ -470,12 +309,9 @@ def _compose_recurring_question_projection(
             & (
                 selected_env_index.lt(0)
                 | selected_env_index.ge(bundle._num_envs)
-                | selected_env_index.unsqueeze(1).eq(
-                    selected_env_index.unsqueeze(0)
-                ).triu(diagonal=1).any(dim=1)
-                | selected_env_index.unsqueeze(1).eq(
-                    selected_env_index.unsqueeze(0)
-                ).tril(diagonal=-1).any(dim=1)
+                | _duplicate_valid_index_rows(
+                    selected_env_index, num_envs=bundle._num_envs
+                )
                 |
                 slot_fault
                 | ~contact_room
@@ -488,81 +324,372 @@ def _compose_recurring_question_projection(
     round_producer_fault = torch.zeros(
         (k, rounds), dtype=torch.int64, device=device
     )
-    for fault in (
-        solver.producer_fault_bits.reshape(k, rounds, support),
-        exact.producer_fault_bits.reshape(k, rounds, support),
-        physical.producer_fault,
-    ):
-        round_producer_fault = torch.bitwise_or(
-            round_producer_fault,
-            fault.ne(0).any(dim=2).to(torch.int64)
-            * PRODUCER_FAULT_DIAGNOSTIC_SOURCE,
-        )
-    round_producer_fault = torch.where(
-        construction_mask[:, None],
-        round_producer_fault,
-        torch.zeros_like(round_producer_fault),
-    )
     structural_fault = structural_fault.contiguous()
-    round_producer_fault = round_producer_fault.contiguous()
-    reason = torch.where(
-        round_producer_fault.ne(0).unsqueeze(2)
-        | structural_fault.ne(0).reshape(k, 1, 1),
-        torch.full_like(reason, CONSTRUCTION_REASON_INVALID_PRODUCER),
-        reason,
-    ).contiguous()
-    reason = torch.where(
-        construction_mask[:, None, None],
-        reason,
-        torch.full_like(reason, CONSTRUCTION_REASON_INVALID_PRODUCER),
-    ).contiguous()
-    installable = reason.eq(-1).unsqueeze(-1)
-    motion = torch.stack(
-        (
+
+    # This is the single dynamic compaction boundary.  CUDA ``nonzero`` may
+    # synchronize while materializing its dynamic output size; retain that
+    # explicit cost until a profiler shows whether a static alternative beats
+    # the avoided solver/exact/Physical work at observed active densities.
+    active_index = construction_mask.nonzero(as_tuple=False).reshape(-1)
+    active_count = active_index.shape[0]
+
+    reason = torch.full(
+        (k, rounds, support),
+        CONSTRUCTION_REASON_INVALID_PRODUCER,
+        dtype=torch.int64,
+        device=device,
+    )
+    motion = torch.zeros(
+        (k, rounds, support, len(_r05.MOTION_TASK_F32_FIELDS)),
+        dtype=torch.float32,
+        device=device,
+    )
+    racket = torch.zeros(
+        (k, rounds, support, len(_r05.RACKET_F32_FIELDS)),
+        dtype=torch.float32,
+        device=device,
+    )
+    physical_state = torch.zeros(
+        (k, rounds, support, len(_r05.PHYSICAL_STATE_F32_FIELDS)),
+        dtype=torch.float32,
+        device=device,
+    )
+    chosen_horizon = torch.full(
+        (k, rounds, support), -1, dtype=torch.int64, device=device
+    )
+    launch_tick = torch.full_like(chosen_horizon, -1)
+    task_close_tick = torch.full_like(chosen_horizon, -1)
+
+    if active_count:
+        def compact(value: torch.Tensor) -> torch.Tensor:
+            return torch.index_select(value, 0, active_index).contiguous()
+
+        active_slots = compact(slots)
+        active_contact = compact(contact)
+        active_reference_quat = compact(reference_quat)
+        active_reference_omega = compact(reference_omega)
+        active_reference_site_speed = compact(reference_site_speed)
+        active_reference_normal = compact(reference_normal)
+        active_base_quat = compact(base_quat)
+        active_reach_offset = compact(reach_offset)
+        active_teacher_rate_min = compact(teacher_rate_min)
+        active_teacher_rate_max = compact(teacher_rate_max)
+        active_reference_t_hit = compact(reference_t_hit)
+        active_reference_t_cycle = compact(reference_t_cycle)
+        active_reaction_margin = compact(reaction_margin)
+        active_mount_sign = compact(mount_sign)
+        active_ttc = compact(ttc)
+        active_draw_u01 = compact(draw_u01)
+        active_candidate_identity = compact(candidate_identity)
+        active_contact_tick = compact(contact_tick)
+
+        defaults = questions.ContinuousQuestionCfg()
+        velocity_box = torch.tensor(
+            defaults.vel_range,
+            dtype=torch.float32,
+            device=device,
+        )
+        velocity = velocity_box[:, 0] + active_draw_u01[:, :, :3] * (
+            velocity_box[:, 1] - velocity_box[:, 0]
+        )
+        spin = (active_draw_u01[:, :, 3:6] * 2.0 - 1.0) * float(
+            defaults.spin_abs_max
+        )
+        target = (
+            profile.targets_xy_m.unsqueeze(0)
+            .unsqueeze(0)
+            .expand(active_count, rounds, support, 2)
+            .contiguous()
+        )
+        contact_cells = _expand_round_cells(active_contact, rounds, support)
+        velocity_cells = _expand_round_values(velocity, support)
+        spin_cells = _expand_round_values(spin, support)
+        normal_cells = _expand_round_cells(
+            active_reference_normal, rounds, support
+        )
+        base_cells = _expand_round_cells(active_base_quat, rounds, support)
+        sign_cells = _expand_round_cells(active_mount_sign, rounds, support)
+
+        solver = questions.solve_proposals_device(
             _flat_round_cells(
-                _expand_round_cells(ttc, rounds, support)
+                _expand_round_cells(active_slots, rounds, support)
             ),
-            exact.teacher_rate,
-            exact.scaled_t_hit_s,
-            exact.scaled_t_cycle_s,
-            exact.pre_swing_wait_s,
-        ),
-        dim=1,
-    ).reshape(
-        k, rounds, support, len(_r05.MOTION_TASK_F32_FIELDS)
-    )
-    base_goal = _expand_round_cells(
-        contact[:, :2] - reach_offset, rounds, support
-    )
-    racket = torch.cat(
-        (
-            exact.racket_site_target_w_m.reshape(k, rounds, support, 3),
-            exact.racket_site_velocity_w_mps.reshape(k, rounds, support, 3),
-            solver.n_racket.reshape(k, rounds, support, 3),
-            solver.p_contact.reshape(k, rounds, support, 3),
-            solver.v_racket.reshape(k, rounds, support, 3),
-            exact.racket_command_quat_wxyz.reshape(k, rounds, support, 4),
-            base_goal,
-            solver.v_ball_in.reshape(k, rounds, support, 3),
-            solver.w_ball_in.reshape(k, rounds, support, 3),
-        ),
-        dim=3,
-    )
+            _flat_round_cells(contact_cells),
+            _flat_round_cells(velocity_cells),
+            _flat_round_cells(spin_cells),
+            _flat_round_cells(target),
+            _flat_round_cells(normal_cells),
+            protos=SimpleNamespace(
+                v_hat_b=bundle._prototype_direction,
+                speed_min=bundle._prototype_speed_min,
+                speed_max=bundle._prototype_speed_max,
+                face_sign=timing.mount_normal_sign,
+            ),
+            base_quat=_flat_round_cells(base_cells),
+            prm=bundle._venue,
+            surface_z=bundle._surface_z_m,
+            net_x=bundle._net_x_m,
+            net_top_z=bundle._net_top_z_m,
+            cfg=bundle._question_cfg,
+            h=bundle._integration_step_s,
+            n_steps=bundle._integration_steps,
+        )
+        solver_ok = solver.ok.reshape(
+            active_count, rounds, support
+        ).unsqueeze(-1)
+        exact = exact_face.solve_exact_face_timing_device(
+            ball_contact_w_m=torch.where(
+                solver_ok.reshape(-1, 1),
+                solver.p_contact,
+                _flat_round_cells(contact_cells),
+            ),
+            racket_face_center_velocity_w_mps=torch.where(
+                solver_ok.reshape(-1, 1),
+                solver.v_racket,
+                torch.zeros_like(solver.v_racket),
+            ),
+            solved_raw_a_normal_w=torch.where(
+                solver_ok.reshape(-1, 1),
+                solver.n_racket,
+                _flat_round_cells(normal_cells),
+            ),
+            mount_normal_sign=_flat_round_cells(sign_cells),
+            reference_racket_quat_wxyz=_flat_round_cells(
+                _expand_round_cells(active_reference_quat, rounds, support)
+            ),
+            reference_racket_angular_velocity_w_radps=_flat_round_cells(
+                _expand_round_cells(active_reference_omega, rounds, support)
+            ),
+            reference_racket_site_speed_mps=_flat_round_cells(
+                _expand_round_cells(active_reference_site_speed, rounds, support)
+            ),
+            teacher_rate_min=_flat_round_cells(
+                _expand_round_cells(active_teacher_rate_min, rounds, support)
+            ),
+            teacher_rate_max=_flat_round_cells(
+                _expand_round_cells(active_teacher_rate_max, rounds, support)
+            ),
+            time_to_contact_s=_flat_round_cells(
+                _expand_round_cells(active_ttc, rounds, support)
+            ),
+            reference_t_hit_s=_flat_round_cells(
+                _expand_round_cells(active_reference_t_hit, rounds, support)
+            ),
+            reference_t_cycle_s=_flat_round_cells(
+                _expand_round_cells(active_reference_t_cycle, rounds, support)
+            ),
+            reaction_margin_s=_flat_round_cells(
+                _expand_round_cells(active_reaction_margin, rounds, support)
+            ),
+            attempt_close_margin_s=_flat_round_cells(
+                _expand_round_cells(
+                    torch.full_like(active_ttc, bundle._policy_step_s),
+                    rounds,
+                    support,
+                )
+            ),
+            episode_length_s=_flat_round_cells(
+                _expand_round_cells(
+                    torch.full_like(active_ttc, bundle._episode_length_s),
+                    rounds,
+                    support,
+                )
+            ),
+        )
+        horizon_receipt = bundle._physical_owner.issue_horizon_for_test(
+            _physical.PhysicalQuestionCandidateBatch(
+                candidate_identity=active_candidate_identity,
+                contact_position_env_m=contact_cells,
+                incoming_linear_velocity_world_mps=velocity_cells,
+                incoming_angular_velocity_world_radps=spin_cells,
+            )
+        )
+        horizon = bundle._physical_owner.project_horizon_for_test(horizon_receipt)
+        if type(horizon) is not _physical.PhysicalQuestionHorizonView:
+            raise CanaryQuestionError(
+                "Physical horizon projection exact type differs"
+            )
+        max_horizon = _require_tensor(
+            horizon.max_feasible_motion_ticks,
+            name="Physical max feasible motion ticks",
+            device=device,
+            dtype=torch.int64,
+            shape=(active_count, rounds, support),
+        )
+        active_chosen_horizon = torch.minimum(
+            max_horizon,
+            active_contact_tick.clamp(min=0),
+        ).contiguous()
+        active_launch_tick = (
+            active_contact_tick - active_chosen_horizon
+        ).contiguous()
+        pending_elapsed = _expand_round_cells(
+            compact(cadence.pending_elapsed_s).to(torch.float64), rounds, support
+        )
+        task_duration_raw = (
+            exact.pre_swing_wait_s.reshape(
+                active_count, rounds, support
+            ).to(torch.float64)
+            + exact.scaled_t_cycle_s.reshape(
+                active_count, rounds, support
+            ).to(torch.float64)
+            - pending_elapsed
+        )
+        task_duration_finite = torch.isfinite(task_duration_raw)
+        task_duration = torch.where(
+            task_duration_finite,
+            task_duration_raw.clamp(min=0.0),
+            torch.zeros_like(task_duration_raw),
+        )
+        task_close_offset = torch.ceil(
+            task_duration / float(bundle._policy_step_s) - 1.0e-12
+        ).to(torch.int64)
+        active_reveal_tick = compact(cadence.reveal_tick).reshape(
+            active_count, 1, 1
+        )
+        task_close_room = task_duration_finite & active_reveal_tick.le(
+            _I64_MAX - task_close_offset
+        )
+        safe_task_epoch = torch.where(
+            task_close_room,
+            active_reveal_tick,
+            torch.zeros_like(task_close_offset),
+        )
+        active_task_close_tick = (
+            safe_task_epoch + task_close_offset
+        ).contiguous()
+        physical = bundle._physical_owner.finalize_exact_ticks_for_test(
+            horizon_receipt,
+            candidate_identity=active_candidate_identity,
+            contact_tick=active_contact_tick,
+            launch_tick=active_launch_tick,
+        )
+        active_reason = _reason_precedence(
+            solver.proposals.reason_code.reshape(
+                active_count, rounds, support
+            ),
+            exact.construction_reason.reshape(active_count, rounds, support),
+            physical.construction_reason,
+        )
+        admitted_before_suffix = active_reason.eq(
+            _r05.QUESTION_CONSTRUCTION_REASON_ADMITTED
+        )
+        full_suffix_fits = compact(cadence.next_reveal_tick).reshape(
+            active_count, 1, 1
+        ).gt(active_task_close_tick)
+        active_reason = torch.where(
+            admitted_before_suffix & task_close_room & ~full_suffix_fits,
+            torch.full_like(
+                active_reason,
+                CONSTRUCTION_REASON_FULL_SUFFIX_CROSSES_NEXT_REVEAL,
+            ),
+            active_reason,
+        )
+        active_task_chronology = active_reason.eq(
+            _r05.QUESTION_CONSTRUCTION_REASON_ADMITTED
+        ) | active_reason.eq(CONSTRUCTION_REASON_FULL_SUFFIX_CROSSES_NEXT_REVEAL)
+        active_task_close_tick = torch.where(
+            active_task_chronology,
+            active_task_close_tick,
+            torch.full_like(active_task_close_tick, -1),
+        ).contiguous()
+
+        active_round_fault = torch.zeros(
+            (active_count, rounds), dtype=torch.int64, device=device
+        )
+        for fault in (
+            solver.producer_fault_bits.reshape(active_count, rounds, support),
+            exact.producer_fault_bits.reshape(active_count, rounds, support),
+            physical.producer_fault,
+        ):
+            active_round_fault = torch.bitwise_or(
+                active_round_fault,
+                fault.ne(0).any(dim=2).to(torch.int64)
+                * PRODUCER_FAULT_DIAGNOSTIC_SOURCE,
+            )
+        active_reason = torch.where(
+            active_round_fault.ne(0).unsqueeze(2)
+            | compact(structural_fault).ne(0).reshape(active_count, 1, 1),
+            torch.full_like(
+                active_reason, CONSTRUCTION_REASON_INVALID_PRODUCER
+            ),
+            active_reason,
+        ).contiguous()
+        installable = active_reason.eq(-1).unsqueeze(-1)
+        active_motion = torch.stack(
+            (
+                _flat_round_cells(
+                    _expand_round_cells(active_ttc, rounds, support)
+                ),
+                exact.teacher_rate,
+                exact.scaled_t_hit_s,
+                exact.scaled_t_cycle_s,
+                exact.pre_swing_wait_s,
+            ),
+            dim=1,
+        ).reshape(
+            active_count,
+            rounds,
+            support,
+            len(_r05.MOTION_TASK_F32_FIELDS),
+        )
+        base_goal = _expand_round_cells(
+            active_contact[:, :2] - active_reach_offset, rounds, support
+        )
+        active_racket = torch.cat(
+            (
+                exact.racket_site_target_w_m.reshape(
+                    active_count, rounds, support, 3
+                ),
+                exact.racket_site_velocity_w_mps.reshape(
+                    active_count, rounds, support, 3
+                ),
+                solver.n_racket.reshape(active_count, rounds, support, 3),
+                solver.p_contact.reshape(active_count, rounds, support, 3),
+                solver.v_racket.reshape(active_count, rounds, support, 3),
+                exact.racket_command_quat_wxyz.reshape(
+                    active_count, rounds, support, 4
+                ),
+                base_goal,
+                solver.v_ball_in.reshape(active_count, rounds, support, 3),
+                solver.w_ball_in.reshape(active_count, rounds, support, 3),
+            ),
+            dim=3,
+        )
+        active_motion = torch.where(
+            installable & torch.isfinite(active_motion),
+            active_motion,
+            torch.zeros_like(active_motion),
+        ).contiguous()
+        active_racket = torch.where(
+            installable & torch.isfinite(active_racket),
+            active_racket,
+            torch.zeros_like(active_racket),
+        ).contiguous()
+        active_physical_state = torch.where(
+            installable & torch.isfinite(physical.physical_state_f32),
+            physical.physical_state_f32,
+            torch.zeros_like(physical.physical_state_f32),
+        ).contiguous()
+
+        reason.index_copy_(0, active_index, active_reason)
+        round_producer_fault.index_copy_(0, active_index, active_round_fault)
+        motion.index_copy_(0, active_index, active_motion)
+        racket.index_copy_(0, active_index, active_racket)
+        physical_state.index_copy_(0, active_index, active_physical_state)
+        chosen_horizon.index_copy_(0, active_index, active_chosen_horizon)
+        launch_tick.index_copy_(0, active_index, active_launch_tick)
+        task_close_tick.index_copy_(0, active_index, active_task_close_tick)
+
+    round_producer_fault = round_producer_fault.contiguous()
+    reason = reason.contiguous()
     bank = _r05.DeviceR05CandidateRoundBank(
         candidate_identity=candidate_identity,
         construction_reason=reason,
         producer_fault=round_producer_fault,
-        motion_task_f32=torch.where(
-            installable & torch.isfinite(motion), motion, torch.zeros_like(motion)
-        ).contiguous(),
-        racket_task_f32=torch.where(
-            installable & torch.isfinite(racket), racket, torch.zeros_like(racket)
-        ).contiguous(),
-        physical_state_f32=torch.where(
-            installable & torch.isfinite(physical.physical_state_f32),
-            physical.physical_state_f32,
-            torch.zeros_like(physical.physical_state_f32),
-        ).contiguous(),
+        motion_task_f32=motion.contiguous(),
+        racket_task_f32=racket.contiguous(),
+        physical_state_f32=physical_state.contiguous(),
     )
     return _r05.DeviceQuestionProjection(
         cadence_receipt_identity=cadence_receipt,

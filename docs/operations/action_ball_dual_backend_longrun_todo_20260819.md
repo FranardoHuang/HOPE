@@ -52,8 +52,11 @@
   GPU0约`19%`，所以不是PPO或GPU饱和。active affinity=`32--47`，Yikang进程仍允许`0--127`，配置上
   确有重叠；但两秒样本中Yikang在`32--47`只消耗约`8%` CPU、全机node2忙约`4.3%`，不足解释相对
   `6.7 s/update`旧diagnostic校准的三倍差。旧数来自legacy diagnostic hot path；当前高reset FullMDP
-  collection与正式transaction/owner路径不是同一工作量。下一版仍须把每个job绑定互斥cpuset，但性能
-  主线是对当前FullMDP做一次分段profile并批量化reset/solver/host barrier，不热改active进程。
+  collection与正式transaction/owner路径不是同一工作量。CPU不要求互斥，只要求没有持续争抢或浪费；
+  性能主线是下一fresh `4096×25000`同一进程前5 update做bounded profile并自动关闭。候选已把D05的
+  N平方唯一性改为O(N)，并只对construction rows执行solver/exact/Physical；它的唯一动态compact同步
+  是否值得保留由同一successor实测决定。随后再批量化empty-flight/reset/owner gate，不热改active进程。详细量级和验收见
+  [热路径实验记录](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
 
 ### MuJoCo portable Full-A：尚未允许长跑
 
