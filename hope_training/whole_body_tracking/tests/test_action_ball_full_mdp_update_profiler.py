@@ -138,7 +138,9 @@ class _ExactEnv:
         self._after_reward_close()
         self._reset_idx((0, 3))
         self.command_manager.compute(0.02)
-        self.event_manager.apply(mode="interval", dt=0.02)
+        # The real FullMDP task has reset events but no interval event.  The
+        # after-command owner must therefore close at the following mandatory
+        # observation callpoint rather than waiting for EventManager.apply.
         self.observation_manager.compute()
         self.recorder_manager.record_post_step()
         return "done"
@@ -190,12 +192,30 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert payload["rollout_call_count_exact"] is True
     assert payload["auto_close_after_emit"] is True
     assert payload["speed_evidence_eligible"] is False
+    assert set(payload) == {
+        "event",
+        "schema_version",
+        "update",
+        "profile_update_ordinal",
+        "requested_profile_updates",
+        "clock",
+        "inclusive_nested_spans",
+        "speed_evidence_eligible",
+        "collection_ms",
+        "learning_ms",
+        "expected_env_step_calls",
+        "observed_env_step_calls",
+        "rollout_call_count_exact",
+        "auto_close_after_emit",
+        "segments",
+    }
     assert payload["segments"]["env_step_total"]["calls"] == 1
     assert payload["segments"]["sim_step"]["calls"] == 1
     assert payload["segments"]["owner_binding_assert"]["calls"] == 1
-    settlement_gap = payload["segments"]["after_command_settlement_gap"]
+    settlement_gap = payload["segments"]["after_command_to_observation_gap"]
     assert settlement_gap["calls"] == 1
     assert settlement_gap["inclusive_host_wall_ms"] > 0.0
+    assert payload["segments"]["event_apply"]["calls"] == 0
     selected_reset = payload["segments"]["selected_reset_total"]
     assert selected_reset["calls"] == 1
     assert selected_reset["env_count"] == 2

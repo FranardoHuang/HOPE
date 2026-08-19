@@ -61,7 +61,8 @@
 约`78.3×`行工作没有业务机会；这是复杂度倍率，不直接冒充wall倍率。
 
 粗略每update为约`42.5M`个3×3 solve、`7.43B`个RK4 row-step。下一profiler先单列command compute结束到
-interval event开始之间的after-command settlement gap；随后再在composer内拆materialize/solver/exact/Physical。
+mandatory observation开始之间的after-command-to-observation gap；它包含D05 settlement及可选interval event，
+不依赖本task不存在的interval event callpoint。随后再在composer内拆materialize/solver/exact/Physical。
 
 ### 4.2 二次方唯一性检查
 
@@ -100,7 +101,7 @@ interval event开始之间的after-command settlement gap；随后再在composer
 - 新profiler默认完全不import、不wrap；opt-in只接受canonical `1..50`。
 - 使用`perf_counter_ns`，不新增CUDA同步；nested inclusive spans只作归因，不当GPU kernel计时或速度成绩。
 - 覆盖env step、action/sim/scene、owner deep gate、protected state、before-policy/post-physics/after-reward外层，
-  after-command settlement gap，以及Reward/termination/reset/command/event/observation/recorder。profiler不替换
+  after-command-to-observation gap，以及Reward/termination/reset/command/event/observation/recorder。profiler不替换
   env已验签的top-runtime bound method，避免归因工具本身破坏身份门。
 - 每update要求观测到exact 24次env step；到预算后恢复所有原instance方法并关闭自己。
 - mask-first mixed/empty/full fixed-tape active rows与dense path逐位一致；invalid slot/index/fault保持同批拒绝，

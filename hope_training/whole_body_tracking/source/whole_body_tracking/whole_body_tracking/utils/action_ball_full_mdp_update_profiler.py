@@ -42,7 +42,7 @@ _SEGMENT_NAMES = (
     "after_reward_close",
     "selected_reset_total",
     "command_compute",
-    "after_command_settlement_gap",
+    "after_command_to_observation_gap",
     "event_apply",
     "observation_compute",
     "recorder_callbacks",
@@ -258,10 +258,10 @@ class FullMdpUpdateProfiler:
                 kwargs = {}
                 if owner is unwrapped.command_manager and method == "compute":
                     kwargs["mark_end"] = "command_compute_end"
-                elif owner is unwrapped.event_manager and method == "apply":
+                elif owner is unwrapped.observation_manager and method == "compute":
                     kwargs.update(
                         gap_from_mark="command_compute_end",
-                        gap_segment_name="after_command_settlement_gap",
+                        gap_segment_name="after_command_to_observation_gap",
                     )
                 self._wrap_method(
                     owner,
