@@ -6254,3 +6254,7 @@ commit `73d607f0…` 的seventh one-shot越过exact Torch entrypoint后，又被
 `torch.ops`是注册在`sys.modules`的动态`_Ops`对象，不是file-backed module；访问其`__file__`会走operator
 dispatch并产生当前run根下的伪路径。窄修只让closure忽略非`types.ModuleType`对象，真实Python/extension
 module、required `torch.optim/_C`及parent attribute identity门全部保留。该run仍为零PPO/零WAL，G05不晋级。
+
+commit `5db486cd…` 的eighth one-shot又在同一点拒绝，因为`torch.ops`实际是`ModuleType`子类；按类型豁免
+仍把未消费动态namespace升级成规格。依据HANDOFF §3删除blanket `torch.*` scan，只保留top-level exact
+origins、RSL实际消费的`torch.optim/_C` origins、parent/sys.modules identity和PPO wiring。该run仍零PPO/零WAL。

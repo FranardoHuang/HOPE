@@ -491,7 +491,7 @@ def test_runtime_dependency_roots_distinguish_kit_torch_from_foreign_torch(
     )
 
 
-def test_runtime_dependency_closure_rejects_foreign_torch_child(
+def test_runtime_required_module_origins_reject_foreign_torch_child(
     tmp_path, monkeypatch
 ):
     train = _load_train_module(monkeypatch)
@@ -512,17 +512,17 @@ def test_runtime_dependency_closure_rejects_foreign_torch_child(
     for name, path in paths.items():
         monkeypatch.setitem(sys.modules, name, _module(name, __file__=str(path)))
 
-    train._require_loaded_module_closure(
-        "torch", package_root, ("torch.optim", "torch._C")
+    train._require_required_module_origins(
+        package_root, ("torch.optim", "torch._C")
     )
     monkeypatch.setitem(
         sys.modules,
         "torch.optim",
         _module("torch.optim", __file__=str(foreign_optim)),
     )
-    with pytest.raises(RuntimeError, match="torch closure escaped"):
-        train._require_loaded_module_closure(
-            "torch", package_root, ("torch.optim", "torch._C")
+    with pytest.raises(RuntimeError, match="required module escaped"):
+        train._require_required_module_origins(
+            package_root, ("torch.optim", "torch._C")
         )
 
 
@@ -565,7 +565,7 @@ def test_runtime_dependency_closure_ignores_dynamic_torch_namespace(
         sys.modules, "torch", _module("torch", __file__=str(package_file))
     )
     monkeypatch.setitem(sys.modules, "torch.ops", DynamicOps())
-    train._require_loaded_module_closure("torch", package_root, ())
+    train._require_required_module_origins(package_root, ())
 
 
 def test_runtime_attestation_consumes_proof_before_post_app_env_validation(

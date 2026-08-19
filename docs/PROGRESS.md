@@ -4286,3 +4286,6 @@
   但closure把非module的动态`torch.ops`对象误当provider并在scene/PPO/WAL前RC1。修复只忽略非
   `types.ModuleType`对象；真实file-backed closure与`torch.optim/_C`identity硬门保持；当前focused=`56 passed`，
   旧namespace不复用。
+- 2026-08-19：`5db486cd…` / `a1d97aae…` successor证明`torch.ops`是`ModuleType`子类，按类型的
+  blanket closure仍误拒并保持零PPO/零WAL。现按HANDOFF §3删除未消费全包扫描，只保留top-level与
+  `torch.optim/_C`、parent/PPO真实消费identity；旧namespace不复用。

@@ -26,7 +26,6 @@ import os
 import pathlib
 import sys
 import time
-import types
 import zipfile
 import zipimport
 
@@ -22007,34 +22006,16 @@ def _module_origin_matches(module, allowed_origins) -> bool:
     }
 
 
-def _require_loaded_module_closure(prefix, package_root, required_modules) -> None:
-    """Reject a live package whose already-loaded children came from elsewhere."""
+def _require_required_module_origins(package_root, required_modules) -> None:
+    """Bind only the loaded child modules consumed by the RSL wiring."""
 
     package_root = pathlib.Path(package_root).resolve()
-    for name, module in tuple(sys.modules.items()):
-        if name != prefix and not name.startswith(f"{prefix}."):
-            continue
-        # Torch registers dynamic namespace objects such as ``torch.ops`` in
-        # sys.modules.  Their ``__file__`` lookup is operator dispatch, not a
-        # module origin, so only file-backed Python/extension modules belong to
-        # this provenance closure.
-        if not isinstance(module, types.ModuleType):
-            continue
-        module_file = getattr(module, "__file__", None)
-        if module_file is None:
-            continue
-        module_path = pathlib.Path(module_file).resolve()
-        if package_root not in module_path.parents:
-            raise RuntimeError(
-                f"post-AppLauncher {prefix} closure escaped its selected root: "
-                f"{name}={module_path}"
-            )
     for name in required_modules:
         module = sys.modules.get(name)
         module_file = getattr(module, "__file__", None)
         if module_file is None or package_root not in pathlib.Path(module_file).resolve().parents:
             raise RuntimeError(
-                f"post-AppLauncher required {prefix} module escaped its selected root: {name}"
+                f"post-AppLauncher required module escaped its selected root: {name}"
             )
 
 
@@ -22280,14 +22261,11 @@ def _attest_action_ball_runtime_after_app_start() -> None:
                 "post-AppLauncher dependency escaped its frozen roots: "
                 f"{module.__name__}={module_path}"
             )
-    _require_loaded_module_closure(
-        "torch", pathlib.Path(torch.__file__).resolve().parent, ("torch.optim", "torch._C")
+    _require_required_module_origins(
+        pathlib.Path(torch.__file__).resolve().parent, ("torch.optim", "torch._C")
     )
     _require_module_attribute_identity(torch, "optim", "torch.optim")
     _require_module_attribute_identity(torch, "_C", "torch._C")
-    _require_loaded_module_closure(
-        "tensordict", pathlib.Path(tensordict.__file__).resolve().parent, ()
-    )
     for module, path in expected.items():
         if pathlib.Path(module.__file__) != path:
             raise RuntimeError("post-AppLauncher RSL module escaped the sealed archive")

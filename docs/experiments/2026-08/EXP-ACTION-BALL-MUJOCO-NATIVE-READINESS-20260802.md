@@ -11358,3 +11358,8 @@ live `torch.*`必须全在同一selected package root，且实际消费的parent
 entrypoint已经通过，随后closure把`sys.modules['torch.ops']`里的动态`_Ops`对象当作file-backed module；
 其`__file__`访问是operator dispatch，得到的run-root `_ops.py`不是provider。采用修复只检查真实
 `types.ModuleType`，仍硬验`torch.optim/_C`路径与parent/sys.modules identity。此run同样零PPO/零WAL。
+
+第八个尝试（commit `5db486cd…`、wrapper `a1d97aae…`）反证上述按类型修法：`torch.ops`是
+`ModuleType`子类，仍触发同一动态`__file__`伪路径。最终采用不是继续枚举Torch内部对象，而是删除没人消费的
+blanket closure，只验top-level与RSL真实消费的`torch.optim/_C`、parent和PPO wiring。该改变缩小错层gate，
+不改变Torch/TensorDict/RSL版本或训练MDP；本次仍无PPO/WAL样本。
