@@ -2,7 +2,15 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-**2026-08-19 4096 scene完成、PPO前compact wiring失败（Gate仍`Partial`）：**commit `53156327…`
+**2026-08-19 4096真实PPO工程窗通过、25k长跑进行中（Gate仍`Partial`）：**fresh commit
+`b64cb944…`已经在同一进程越过真实4096 scene、229/399 observation、Reward20、Kit/RSL runtime v2、
+compact joint-safety和upstream optimizer。只读frontier为update8：9组完整`PENDING/EPOCH_ACK`、
+`884,736/884,736` Reward sample finite、0 nonfinite、0 conservation violation，D05真实执行而非零调用点。
+累计12,288次due/selected中10,836次not-ready defer、1,452次reject、0 ACCEPT；8,192个结束episode
+暂时全是base tilt。前9个update只能判工程链可信，不能判学习失败；进程按协议继续到25,000，
+1000只作里程碑且不会停机。Gate不晋级，因为真实strike/contact/outcome/recovery分母仍为0。
+
+其前驱commit `53156327…`
 首次完成真实4096 scene、229/399 observation、Reward20和Kit/RSL runtime v2 attestation；约25分钟后
 `ActionBallFullMdpRsl3Adapter`在runner构造时拒绝live `joint_pos` compact producer，PPO/WAL均为0，
 result自然RC1且GPU/锁自然释放。该namespace封存、不重试。successor只做可区分的因果修正：对
@@ -13,7 +21,7 @@ rigid actor与contact binding仍逐行验证；compact门改为逐字段错误�
 接受`ABCMeta`这类合法type实例，同时仍硬钉exact module/name和live object identity，不再插N=1。
 Motion catalog同步切到与runtime 0807 A3P plant同源重解的73条bank，grounding读
 `pelvis_link`而不是会合法转腰的`torso_Link`；该bank机械admission仍为0/73，因此仍是diagnostic而非formal。
-host回归重跑中；fresh Pod尚未跑，Gate不晋级。
+host回归已通过；上述fresh Pod长跑是这项窄修的真实消费点。
 
 **2026-08-19 next-generation preflight（Gate 仍 `Partial`）：**已知LM fatal的host实现面现已闭合到
 三个独立坏候选：`solve_ex info!=0`、非有限`dq`、以及两个有限float32相加后`q+dq`溢出；三者均在任何

@@ -11389,3 +11389,10 @@ HANDOFF §3的判据：实际物理引擎消费的是snapshot bytes，路径字�
 producer对实际selected root使用代码内固定pins重建URDF、STL、IsaacLab asset hash和derived USD语义；不采用
 wrapper自产receipt或expected hash。live collider几何也改从同一已验root读取，避免“验共享源、用私有快照”
 的错层。host回归`77 passed,37 skipped`，尚无4096 scene/PPO/WAL证据，因此不改变学习裁决。
+
+successor `b64cb944…`给出了第一段可消费的4096学习前缀。它不是另一个5-update smoke，而是目标
+25,000 update的同一进程；update0--8已有9组完整durable pair、884,736个finite Reward sample且守恒
+violation为0，证明scene、runtime、compact safety、optimizer和WAL在真实规模共同工作。与此同时，
+D05的12,288个due/selected全部落入10,836 not-ready defer或1,452 reject，ACCEPT、launch、contact、
+outcome、recovery仍为0；8,192个episode暂全由base tilt结束。因此当前科学裁决只有两条：工程边界通过；
+任务入口尚未ready。前9点不足以判断长期可学性，run继续，首次趋势判断仍等20/50/100/...，1000不停机。

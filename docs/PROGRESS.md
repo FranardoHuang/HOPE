@@ -4294,3 +4294,4 @@
   `model.usd` SHA均为`a3cd3829…8140`；consumer现对实际selected snapshot运行tracked fixed-pin重建并让
   collider clone消费同一root。host asset/factory回归=`77 passed,37 skipped`；旧namespace不重试，G05不晋级。
 - 2026-08-19: FullMDP A `4096×25000` commit `53156327…`自然RC1：真实scene、229/399、Reward20与runtime v2已完成，runner在PPO前拒绝compact action type。exact IsaacLab源码证明该class继承`ManagerTermBase(ABC)`、metaclass为`ABCMeta`，旧adapter的`type(class) is type`是错门；compact仍由`train.py` runtime binding唯一写。`75b18ba2…`的task duplicate writer在scene前被ownership门自然拒绝并封存，反证不该复制状态。successor保留env0共享内容审计、逐envpath/ball/contact、0807 A3P 73-motion与pelvis grounding，只把type门修到exact class identity；fresh Pod待跑，G05仍`Partial`。
+- 2026-08-19: fresh FullMDP A commit `b64cb944…`首次在真实4096规模进入同一25,000-update长跑；update0--8有9组完整v11 durable pair、884,736个finite且守恒的Reward sample。D05真实due/selected=12,288，但ACCEPT仍0，全部为10,836 not-ready defer或1,452 reject；8,192个结束episode暂全tilt。工程窗通过、任务入口尚未ready，继续同一进程，1000只作里程碑不停车；G05仍`Partial`。
