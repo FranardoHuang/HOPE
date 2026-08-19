@@ -70,15 +70,18 @@
 - 只在MuJoCo实际generic racket-contact edge出现的同一physics substep读取ball/site/rotation，区分
   selected、opposite、edge/rim、between-planes和invalid；
 - selected-rubber只发布一个control-step事件脉冲并驱动Reward10，不作shot终身latch。
+- slot0 manifest center、live base yaw与shared Physical reverse-integration生成integer-tick question/launch；
+  旧midpoint/linear/gravity shortcut已删除；
+- sealed take058 measured teacher进入同一actor/critic/Reward20 seam：reveal原子切frame0，prepare velocity为0，
+  measured rounded clock随后推进；take061 physical-ready reset不被改写。
 
 仍是发车阻塞：
 
-1. reveal question仍未由slot0 manifest center与shared reverse-integration physics生成；当前临时中点题
-   不是Isaac动作条件化题目；
-2. selected motion teacher/reference timing仍未从同一portable action table消费；
-3. R06 legal landing/outcome、R07 recovery和Reward11--13未生产；
-4. per-action/per-family/per-side分母和生命周期证据未闭合；本代backhand denominator应明确为0；
-5. 新catalog与selected-rubber/Reward10只有host反例通过。2026-08-19空闲GPU1 fresh件使用完整机器读取
+1. take061 physical-ready到take058 frame0仍缺certified production hold-qdes/bridge或逆动力学消费链；纯
+   diagnostic recurrence helper无production consumer，不能代签3.2918 rad physical command gap；
+2. R06 legal landing/outcome、R07 recovery和Reward11--13未生产；
+3. per-action/per-family/per-side分母和生命周期证据未闭合；本代backhand denominator应明确为0；
+4. 新catalog、question/teacher与selected-rubber/Reward10的新增部分仍只有host反例通过。2026-08-19空闲GPU1 fresh件使用完整机器读取
    HEAD与新namespace，但在Python/GPU零调用前因Pod没有`/usr/bin/numactl`自然`rc=127`；真实接触与reset门
    仍未跑。该namespace封存、不重试。successor `5d0044b8…`改用Pod已有`taskset`并在GPU1/CPU`0--15`
    真实执行：N2 timeout-reset peer exact与N1 reveal/launch/settlement两节点通过，selected-rubber节点在
@@ -90,7 +93,7 @@
    `pytest.approx`，因其试图`.numpy()`而TypeError，结果仍为`1 failed,2 passed`，第四节点未执行。
    该namespace同样封存且GPU/锁自然释放。断言已改为device-native `torch.testing.assert_close`；fresh完整
    四节点未过前仍不关闭contact/reset runtime缺口；
-6. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在。
+5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在。
 
 因此当前runner必须继续写`full_a_slice_attempted`、`full_a_complete=false`，不得改名为Full-A成功。
 
@@ -109,8 +112,8 @@
 Isaac active长跑期间开发和做host反例，但不能用未完成的下游测试反向授权上游。
 
 当前第1项的cold数据部分已由全73条真实motion的双实现逐列对拍闭合；固定slot0的4096 live genesis/
-reveal/reset仍需fresh运行证据。第2项保持进行中，不允许用MuJoCo现有midpoint ballistic shortcut代签
-Isaac的reverse-integration question。
+reveal/reset仍需fresh运行证据。第2项的host question/teacher纵切片已闭合；下一真实阻塞是把split-ready
+控制消费、R06/R07/Reward11--13接到同一生命周期，不能把无consumer的diagnostic qdes helper代签执行。
 
 ## 5. 地形
 

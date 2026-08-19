@@ -21,9 +21,11 @@ import sys
 
 try:
     from .a3_train_ppo import A3ReadyBallVecEnv, SimCfg, TaskCfg
+    from . import mujoco_full_mdp_portable_question as portable_question
     from .mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
 except ImportError:  # Direct execution with mjlab_lane on PYTHONPATH.
     from a3_train_ppo import A3ReadyBallVecEnv, SimCfg, TaskCfg
+    import mujoco_full_mdp_portable_question as portable_question
     from mujoco_gpu_ac_table_keepout import DeviceExactTableKeepout
 
 
@@ -192,6 +194,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         if self.full_a_mode:
             self._full_a_catalog = portable_catalog.load_portable_action_center_table()
             self._initialize_full_a_state()
+            self._full_a_teacher = portable_question.load_portable_motion_teacher(
+                row=self._full_a_catalog.fresh_action,
+                tracked_body_names=FULLMDP_TRACKED_BODY_NAMES,
+                torch=self._torch,
+                dtype=self.qpos_init.dtype,
+                device=self.device,
+            )
         self._snapshot_ready_teacher()
         self._fullmdp_initialized = True
         self._compute_obs()
@@ -252,6 +261,22 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._full_a_contact_center = torch.zeros((n, 3), dtype=dtype, device=self.device)
         self._full_a_outcome_code = torch.zeros(n, dtype=torch.long, device=self.device)
+        self._full_a_teacher_rate = torch.ones(n, dtype=dtype, device=self.device)
+        self._full_a_scaled_t_hit_s = torch.zeros(n, dtype=dtype, device=self.device)
+        self._full_a_scaled_t_cycle_s = torch.zeros(n, dtype=dtype, device=self.device)
+        self._full_a_pre_swing_wait_s = torch.zeros(n, dtype=dtype, device=self.device)
+        self._full_a_teacher_frame = torch.zeros(
+            n, dtype=torch.long, device=self.device
+        )
+        self._full_a_motion_phase_code = torch.full(
+            (n,), READY_HOLD_PHASE_INDEX, dtype=torch.long, device=self.device
+        )
+        self._full_a_teacher_joint_pos = self.q_ready.unsqueeze(0).expand(
+            n, -1
+        ).clone()
+        self._full_a_teacher_joint_vel = torch.zeros_like(
+            self._full_a_teacher_joint_pos
+        )
         action = self._full_a_catalog.fresh_action
         self._full_a_action_slot = torch.full(
             (n,), action.action_slot, dtype=torch.long, device=self.device
@@ -295,63 +320,46 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_invalid_contact_event.zero_()
 
     def _full_a_reveal_rows(self, ids) -> None:
-        """Publish one deterministic, live-geometry question for selected rows."""
+        """Publish the slot-zero centre question from the live base frame."""
 
         torch = self._torch
         n = int(ids.numel())
         if n == 0:
             return
-        launch_pos = 0.5 * (self.serve_pos_lo + self.serve_pos_hi)
-        launch_vel = 0.5 * (self.serve_vel_lo + self.serve_vel_hi)
-        state = torch.zeros((n, 13), dtype=self.qpos_init.dtype, device=self.device)
-        state[:, :3] = launch_pos + self.hope_to_scene
-        state[:, 3] = 1.0
-        state[:, 7:10] = launch_vel
-        self._full_a_launch_state_f32[ids] = state
-
+        builder = getattr(
+            self, "_full_a_question_builder", portable_question.build_center_question
+        )
         origins = self.env.scene.env_origins[ids]
-        racket_env = self.sim.data.site_xpos[ids, self.racket_sid] - origins
-        base_env = self.sim.data.qpos[ids, self.root_qadr : self.root_qadr + 3] - origins
-        speed_x = launch_vel[0]
-        time_to_contact = torch.clamp(
-            (racket_env[:, 0] - state[:, 0]) / speed_x,
-            min=self.step_dt,
-            max=0.8 * FULL_A_FLIGHT_HORIZON_S,
-        )
-        contact = state[:, :3] + state[:, 7:10] * time_to_contact[:, None]
-        contact[:, 2] -= 0.5 * 9.81 * time_to_contact.square()
-        contact_velocity = state[:, 7:10].clone()
-        contact_velocity[:, 2] -= 9.81 * time_to_contact
-        normal = -contact_velocity
-        normal /= torch.linalg.vector_norm(normal, dim=1, keepdim=True).clamp_min(1.0e-6)
-
-        task = torch.zeros(
-            (n, observation_contract.TASK_F32_WIDTH),
-            dtype=self.qpos_init.dtype,
-            device=self.device,
-        )
-        task[:, :5] = torch.stack(
-            (
-                time_to_contact,
-                torch.ones_like(time_to_contact),
-                time_to_contact,
-                torch.full_like(time_to_contact, FULL_A_FLIGHT_HORIZON_S),
-                torch.full_like(time_to_contact, self.step_dt),
+        base_position = self.sim.data.qpos[
+            ids, self.root_qadr : self.root_qadr + 3
+        ] - origins
+        base_quat = self.sim.data.qpos[
+            ids, self.root_qadr + 3 : self.root_qadr + 7
+        ]
+        question = builder(
+            torch=torch,
+            row=self._full_a_catalog.fresh_action,
+            base_position_scene=base_position,
+            base_quat_wxyz=base_quat,
+            contact_reference_root_z_scene=(
+                self._full_a_teacher.contact_reference_root_z_scene
             ),
-            dim=1,
+            step_dt=self.step_dt,
+            table_surface_z_scene=float(self.hope_to_scene[2]),
         )
-        racket = task[:, 5:32]
-        racket[:, 0:3] = contact
-        racket[:, 3:6] = contact_velocity
-        racket[:, 6:9] = normal
-        racket[:, 9:12] = contact
-        racket[:, 12:15] = contact_velocity
-        racket[:, 15] = 1.0
-        racket[:, 19:21] = base_env[:, :2]
-        racket[:, 21:24] = state[:, 7:10]
-        task[:, 32:] = state
+        task = question["task_f32"]
+        if tuple(task.shape) != (n, observation_contract.TASK_F32_WIDTH):
+            raise RuntimeError("portable centre question task width differs")
         self._epoch_task_f32[ids] = task
+        self._full_a_launch_state_f32[ids] = question[
+            "launch_state_f32"
+        ]
+        self._full_a_teacher_rate[ids] = question["teacher_rate"]
+        self._full_a_scaled_t_hit_s[ids] = question["scaled_t_hit_s"]
+        self._full_a_scaled_t_cycle_s[ids] = question["scaled_t_cycle_s"]
+        self._full_a_pre_swing_wait_s[ids] = question["pre_swing_wait_s"]
 
+        racket = task[:, 5:32]
         r03 = self._full_a_r03_fact_f32[ids]
         r03.zero_()
         r03[:, 0:3] = racket[:, 0:3]
@@ -370,15 +378,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_r03_physically_valid[ids] = target_finite & normal_unit
 
         reveal = int(self.common_step_counter)
-        launch = reveal + 1
-        deadline = launch + max(1, int(round(FULL_A_FLIGHT_HORIZON_S / self.step_dt)))
-        contact_tick = launch + torch.ceil(time_to_contact / self.step_dt).to(torch.long)
+        contact_tick = reveal + question["ttc_ticks"]
+        launch_tick = contact_tick - question["launch_horizon_ticks"]
+        deadline = contact_tick + max(
+            1, int(round(FULL_A_FLIGHT_HORIZON_S / self.step_dt))
+        )
         self._epoch_clock_ticks[ids, 0] = reveal
         self._epoch_clock_ticks[ids, 1] = contact_tick
-        self._epoch_clock_ticks[ids, 2] = launch
+        self._epoch_clock_ticks[ids, 2] = launch_tick
         self._epoch_clock_ticks[ids, 3] = deadline
         self._epoch_clock_ticks[ids, 4] = deadline + 1
-        self._full_a_r03_expected_source_step[ids] = reveal + 1
+        self._full_a_r03_expected_source_step[ids] = contact_tick
         self._epoch_phase[ids] = FULL_A_PHASE_REVEAL_COMMITTED
         self._epoch_task_valid[ids] = True
         self._epoch_selected[ids] = True
@@ -386,13 +396,39 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
     def _full_a_launch_rows(self, ids) -> None:
         state = self._full_a_launch_state_f32[ids]
         data = self.sim.data
-        data.qpos[ids, self.b_q : self.b_q + 3] = state[:, :3]
+        data.qpos[ids, self.b_q : self.b_q + 3] = (
+            self.env.scene.env_origins[ids] + state[:, :3]
+        )
         data.qpos[ids, self.b_q + 3 : self.b_q + 7] = state[:, 3:7]
         data.qvel[ids, self.b_v : self.b_v + 3] = state[:, 7:10]
         data.qvel[ids, self.b_v + 3 : self.b_v + 6] = state[:, 10:13]
         self.ball_age_buf[ids] = 0
         self._epoch_phase[ids] = FULL_A_PHASE_LAUNCH_SETTLED
         self._epoch_launch_succeeded[ids] = True
+
+    def _full_a_park_rows(self, ids) -> None:
+        """Kinematically park revealed rows until their reverse-flight tick."""
+
+        n = int(ids.numel())
+        if n == 0:
+            return
+        torch = self._torch
+        park_env = torch.tensor(
+            WAIT_BALL_PARK_HOPE,
+            dtype=self.qpos_init.dtype,
+            device=self.device,
+        ) + self.hope_to_scene
+        data = self.sim.data
+        data.qpos[ids, self.b_q : self.b_q + 3] = (
+            self.env.scene.env_origins[ids] + park_env
+        )
+        data.qpos[ids, self.b_q + 3 : self.b_q + 7] = torch.tensor(
+            (1.0, 0.0, 0.0, 0.0),
+            dtype=self.qpos_init.dtype,
+            device=self.device,
+        ).expand(n, 4)
+        data.qvel[ids, self.b_v : self.b_v + 6] = 0.0
+        self.ball_age_buf[ids] = 0
 
     def _full_a_prepare_step(self):
         idle = self._epoch_phase.eq(FULL_A_PHASE_IDLE)
@@ -401,6 +437,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._epoch_clock_ticks[:, 2] <= int(self.common_step_counter)
         )
         self._full_a_launch_rows(launch.nonzero(as_tuple=False).squeeze(-1))
+        waiting = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED)
+        self._full_a_park_rows(waiting.nonzero(as_tuple=False).squeeze(-1))
         return idle, launch
 
     def _full_a_latch_ball_contacts(self) -> None:
@@ -607,11 +645,149 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
     def _snapshot_ready_teacher(self) -> None:
         data = self.sim.data
         ids = self._fullmdp_body_ids
-        self._teacher_body_pos = data.xpos[:, ids].detach().clone()
-        self._teacher_body_quat = data.xquat[:, ids].detach().clone()
+        self._ready_teacher_body_pos = data.xpos[:, ids].detach().clone()
+        self._ready_teacher_body_quat = data.xquat[:, ids].detach().clone()
         body_lin_vel, body_ang_vel = self._body_com_velocities_w()
-        self._teacher_body_lin_vel = body_lin_vel.detach().clone()
-        self._teacher_body_ang_vel = body_ang_vel.detach().clone()
+        self._ready_teacher_body_lin_vel = body_lin_vel.detach().clone()
+        self._ready_teacher_body_ang_vel = body_ang_vel.detach().clone()
+        self._teacher_body_pos = self._ready_teacher_body_pos.clone()
+        self._teacher_body_quat = self._ready_teacher_body_quat.clone()
+        self._teacher_body_lin_vel = self._ready_teacher_body_lin_vel.clone()
+        self._teacher_body_ang_vel = self._ready_teacher_body_ang_vel.clone()
+        self._refresh_aligned_teacher_body_pose()
+
+    def _full_a_update_teacher(self) -> None:
+        """Advance the selected measured teacher on the task's exact clock."""
+
+        if not getattr(self, "full_a_mode", False):
+            return
+        torch = self._torch
+        valid = self._epoch_task_valid
+        elapsed = torch.clamp(
+            (
+                int(self.common_step_counter) - self._epoch_clock_ticks[:, 0]
+            ).to(dtype=self.qpos_init.dtype)
+            * self.step_dt,
+            min=0.0,
+        )
+        sampled = portable_question.sample_motion_teacher(
+            torch,
+            self._full_a_teacher,
+            elapsed,
+            self._full_a_teacher_rate,
+            self._full_a_pre_swing_wait_s,
+        )
+        origins = self.env.scene.env_origins[:, None, :]
+        # Isaac's Motion teacher switches atomically from the hidden physical
+        # safe-ready tuple to measured frame zero at reveal.  The separate
+        # diagnostic q_des oracle may ramp the command, but that ramp is never
+        # a Motion observation or reward reference.  Keep frame zero in the
+        # prepare phase until the rounded measured clock actually leaves it.
+        playback_started = (
+            valid
+            & (elapsed + 1.0e-12 >= self._full_a_pre_swing_wait_s)
+            & sampled["frame"].gt(0)
+        )
+        prepare = valid & ~playback_started
+        swing = (
+            playback_started
+            & (
+                elapsed
+                <= self._full_a_pre_swing_wait_s
+                + self._full_a_scaled_t_hit_s
+                + 1.0e-12
+            )
+        )
+        follow = (
+            valid
+            & ~prepare
+            & ~swing
+            & (
+                elapsed
+                < self._full_a_pre_swing_wait_s
+                + self._full_a_scaled_t_cycle_s
+            )
+        )
+        phase = torch.full_like(
+            self._full_a_motion_phase_code, READY_HOLD_PHASE_INDEX
+        )
+        phase = torch.where(
+            valid & ~prepare & ~swing & ~follow,
+            torch.full_like(phase, 3),
+            phase,
+        )
+        phase = torch.where(follow, torch.full_like(phase, 2), phase)
+        phase = torch.where(swing, torch.full_like(phase, 1), phase)
+        phase = torch.where(prepare, torch.zeros_like(phase), phase)
+        self._full_a_motion_phase_code.copy_(phase)
+        # The measured clip owns prepare/swing/follow-through only.  Returning
+        # to the pre-existing ready snapshot during phase 3 avoids inventing a
+        # recovery teacher before R07 exists.
+        measured = prepare | swing | follow
+        self._full_a_teacher_frame.copy_(
+            torch.where(
+                measured,
+                sampled["frame"],
+                torch.zeros_like(sampled["frame"]),
+            )
+        )
+        self._full_a_teacher_joint_pos.copy_(
+            torch.where(
+                measured[:, None],
+                sampled["joint_pos"],
+                self.q_ready.unsqueeze(0).expand_as(self._full_a_teacher_joint_pos),
+            )
+        )
+        measured_joint_vel = torch.where(
+            prepare[:, None],
+            torch.zeros_like(sampled["joint_vel"]),
+            sampled["joint_vel"],
+        )
+        self._full_a_teacher_joint_vel.copy_(
+            torch.where(
+                measured[:, None],
+                measured_joint_vel,
+                torch.zeros_like(self._full_a_teacher_joint_vel),
+            )
+        )
+        self._teacher_body_pos.copy_(
+            torch.where(
+                measured[:, None, None],
+                sampled["body_pos_w"] + origins,
+                self._ready_teacher_body_pos,
+            )
+        )
+        self._teacher_body_quat.copy_(
+            torch.where(
+                measured[:, None, None],
+                sampled["body_quat_w"],
+                self._ready_teacher_body_quat,
+            )
+        )
+        measured_body_lin_vel = torch.where(
+            prepare[:, None, None],
+            torch.zeros_like(sampled["body_lin_vel_w"]),
+            sampled["body_lin_vel_w"],
+        )
+        self._teacher_body_lin_vel.copy_(
+            torch.where(
+                measured[:, None, None],
+                measured_body_lin_vel,
+                self._ready_teacher_body_lin_vel,
+            )
+        )
+        measured_body_ang_vel = torch.where(
+            prepare[:, None, None],
+            torch.zeros_like(sampled["body_ang_vel_w"]),
+            sampled["body_ang_vel_w"],
+        )
+        self._teacher_body_ang_vel.copy_(
+            torch.where(
+                measured[:, None, None],
+                measured_body_ang_vel,
+                self._ready_teacher_body_ang_vel,
+            )
+        )
         self._refresh_aligned_teacher_body_pose()
 
     def _refresh_aligned_teacher_body_pose(self) -> None:
@@ -797,7 +973,18 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         phase = torch.zeros(
             (self.num_envs, 5), dtype=joint_pos_rel.dtype, device=self.device
         )
-        phase[:, READY_HOLD_PHASE_INDEX] = 1.0
+        if getattr(self, "full_a_mode", False):
+            phase = torch.nn.functional.one_hot(
+                self._full_a_motion_phase_code, num_classes=5
+            ).to(dtype=joint_pos_rel.dtype)
+            teacher_joint_pos_rel = (
+                self._full_a_teacher_joint_pos - self.q_ready.unsqueeze(0)
+            )
+            teacher_joint_vel = self._full_a_teacher_joint_vel
+        else:
+            phase[:, READY_HOLD_PHASE_INDEX] = 1.0
+            teacher_joint_pos_rel = zero_joint
+            teacher_joint_vel = zero_joint
 
         actor_rows = {
             name: torch.zeros(
@@ -814,8 +1001,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 "joint_pos_rel": joint_pos_rel,
                 "joint_vel_rel": self._qvel_act(),
                 "last_action": self.actions,
-                "teacher_joint_pos_rel": zero_joint,
-                "teacher_joint_vel_rel": zero_joint,
+                "teacher_joint_pos_rel": teacher_joint_pos_rel,
+                "teacher_joint_vel_rel": teacher_joint_vel,
                 "motion_phase_one_hot": phase,
             }
         )
@@ -1017,6 +1204,23 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_r03_armed[ids] = False
             self._full_a_r03_expected_source_step[ids] = -1
             self._full_a_launch_state_f32[ids] = 0.0
+            self._full_a_teacher_rate[ids] = 1.0
+            self._full_a_scaled_t_hit_s[ids] = 0.0
+            self._full_a_scaled_t_cycle_s[ids] = 0.0
+            self._full_a_pre_swing_wait_s[ids] = 0.0
+            self._full_a_teacher_frame[ids] = 0
+            self._full_a_motion_phase_code[ids] = READY_HOLD_PHASE_INDEX
+            self._full_a_teacher_joint_pos[ids] = self.q_ready
+            self._full_a_teacher_joint_vel[ids] = 0.0
+            if hasattr(self, "_ready_teacher_body_pos"):
+                self._teacher_body_pos[ids] = self._ready_teacher_body_pos[ids]
+                self._teacher_body_quat[ids] = self._ready_teacher_body_quat[ids]
+                self._teacher_body_lin_vel[ids] = (
+                    self._ready_teacher_body_lin_vel[ids]
+                )
+                self._teacher_body_ang_vel[ids] = (
+                    self._ready_teacher_body_ang_vel[ids]
+                )
             self._full_a_observation_ordinal[ids] = 0
             self._full_a_racket_contact[ids] = False
             self._full_a_ball_table_contact[ids] = False
@@ -1038,7 +1242,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self.reset_generation += 1
             self.last_terminal_bits.zero_()
             self._clear_lifecycle(self._all_env_ids)
-            self._refresh_aligned_teacher_body_pose()
+            if self.full_a_mode:
+                self._full_a_update_teacher()
+            else:
+                self._refresh_aligned_teacher_body_pose()
             self._compute_obs()
             observations = self.get_observations()
         return observations, extras
@@ -1107,6 +1314,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         if self._cap_ok:
             self._probe_capacity("forward")
         st = self._state()
+        self._full_a_update_teacher()
         terminated, truncated, terminal_bits, resolved_table_contact = (
             self._fullmdp_termination(st, requested_qdes)
         )
@@ -1131,7 +1339,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self.sim.forward()
             if self._cap_ok:
                 self._probe_capacity("forward")
-        self._refresh_aligned_teacher_body_pose()
+        self._full_a_update_teacher()
         self._compute_obs()
         if self._cap_ok:
             self._capacity_gate(f"FullMDP A step {self.common_step_counter}")

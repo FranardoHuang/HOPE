@@ -2,6 +2,18 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-19 slot0 question/teacher纵切片（Gate仍`Partial`）：**portable Full-A已删除midpoint serve、
+`x+vt-0.5gt²`和`normal=-incoming`临时代码。fresh action仍严格为slot0/UID `6907688916670928`
+（`take_058_unit02_fh`）；manifest center经live base yaw与shared Physical reverse-integration生成integer-tick
+launch state，world origin只在真实qpos写入时恢复。measured motion NPZ、31-joint order、body order、mount sign、
+strike frame52和canonical teacher rate在cold load一次绑定；public teacher与Isaac一致，在reveal原子切到
+frame0，prepare阶段position保持frame0且reference velocity为0，随后才按rounded measured clock推进。
+take061 physical-ready reset未改写。ready到frame0的`3.2918 rad`控制缺口没有伪装成teacher：仓内只有
+逐字镜像Isaac diagnostic oracle的纯`q_des` recurrence helper，production尚无consumer。host focused=
+`22 passed,7 skipped`；真实GPU shared reverse kernel、certified qdes/hold、R06/R07、Reward11--13和
+portable `4096×25000`仍缺，因此不能宣称Full-A或长跑就绪。详细边界见
+[portable纵切片实验](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+
 **2026-08-19 first Full-A slice（Gate 仍 `Partial`）：**portable 229/399-D lane在既有WAIT VecEnv上增加
 一条显式`full_a_mode`纵切片：逐行reveal、把launch state真实写入MuJoCo ball、20个physics substep、
 live contact array、bounded flight terminal与selected reset。runner只累计真实extras，receipt诚实写

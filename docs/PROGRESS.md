@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-19 — MuJoCo portable action0 question与measured teacher纵切片闭合host反例
+
+- portable Full-A不再用midpoint serve、线性`x+vt`或`normal=-incoming`临时代签：slot0
+  `take_058_unit02_fh`的manifest center、live base yaw、shared Physical reverse-integration与同一
+  measured motion timing进入真实reveal/launch/R03/observation/reward路径；physical qpos只在launch时加
+  env origin，prelaunch保持park。
+- take061 split-ready仍是真实reset。与Isaac一致，public teacher在reveal原子切到take058 frame0，prepare
+  阶段reference velocity严格为0；单独的ready→frame0 `q_des` recurrence只保留为无production消费者的
+  diagnostic helper，不能冒充teacher或动作执行已闭合。focused=`22 passed, 7 skipped`；真实GPU shared
+  kernel、certified qdes/hold、R06/R07、Reward11--13与4096长跑仍`未测/HOLD`。详见
+  [portable Full-A纵切片记录](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+
 ## 2026-08-19 — FullMDP 22秒热墙完成源码归因；bounded profiler与D05 mask-first候选落盘
 
 - active `b64cb944…`到2026-08-19 16:40 CST完整ACK `0..1129`，累计`111,083,520`

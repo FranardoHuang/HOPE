@@ -272,6 +272,17 @@ def test_host_reward20_matches_six_dense_formulas_and_weight_times_step_dt():
     assert torch.allclose(terms[:, 14:], expected_dense, rtol=0.0, atol=1.0e-15)
     assert torch.allclose(reward, expected_dense.sum(dim=1), rtol=0.0, atol=1.0e-15)
 
+    # Counterexample: this buffer is live Reward20 authority, not a private
+    # command-ramp scratch tensor.  Replacing one exact teacher body with a
+    # midpoint changes the body-position reward immediately.
+    exact_body_term = terms[:, 16].clone()
+    env._teacher_body_pos[:, 0, 0] += 0.25
+    env._refresh_aligned_teacher_body_pose()
+    _drifted_reward, drifted_terms = (
+        wait_env.FullMdpInitialWaitVecEnv._fullmdp_reward20(env)
+    )
+    assert not torch.equal(drifted_terms[:, 16], exact_body_term)
+
 
 def test_relative_body_rewards_use_prior_anchor_cache_then_align_next_tick():
     env = _fixed_reward_env()
@@ -466,11 +477,41 @@ def test_step_falls_back_per_joint_but_preserves_raw_nonfinite_qdes_evidence():
 def _host_full_a_lifecycle_env():
     n = 2
     qpos = torch.zeros((n, 20))
+    qpos[:, 3] = 1.0
     qvel = torch.zeros((n, 12))
+
+    def centre_question_stub(**kwargs):
+        task = torch.zeros((n, P.TASK_F32_WIDTH))
+        task[:, 0] = 0.04
+        task[:, 1] = 1.0
+        task[:, 2] = 0.02
+        task[:, 3] = 0.04
+        task[:, 4] = 0.02
+        task[:, 5:8] = torch.tensor([0.0, -0.76, 1.05])
+        task[:, 8:11] = torch.tensor([-3.3, 0.0, -0.05])
+        task[:, 11:14] = torch.tensor([0.0, 1.0, 0.0])
+        task[:, 14:17] = task[:, 5:8]
+        task[:, 17:20] = task[:, 8:11]
+        task[:, 20] = 1.0
+        task[:, 32:35] = torch.tensor([0.1, -0.76, 1.1])
+        task[:, 35] = 1.0
+        task[:, 39:42] = torch.tensor([-3.3, 0.0, 0.4])
+        return {
+            "task_f32": task,
+            "launch_state_f32": task[:, 32:45],
+            "ttc_ticks": torch.full((n,), 2, dtype=torch.long),
+            "launch_horizon_ticks": torch.ones(n, dtype=torch.long),
+            "teacher_rate": torch.ones(n),
+            "scaled_t_hit_s": torch.full((n,), 0.02),
+            "scaled_t_cycle_s": torch.full((n,), 0.04),
+            "pre_swing_wait_s": torch.full((n,), 0.02),
+        }
+
     env = SimpleNamespace(
         _torch=torch,
         num_envs=n,
         device=torch.device("cpu"),
+        q_ready=torch.zeros(31),
         qpos_init=torch.zeros(20),
         qvel_init=torch.zeros(12),
         serve_pos_lo=torch.tensor([1.95, -0.85, 0.64]),
@@ -524,6 +565,8 @@ def _host_full_a_lifecycle_env():
                 mount_normal_sign=1,
             )
         ),
+        _full_a_teacher=SimpleNamespace(contact_reference_root_z_scene=0.9),
+        _full_a_question_builder=centre_question_stub,
     )
     env._clear_lifecycle = MethodType(
         wait_env.FullMdpInitialWaitVecEnv._clear_lifecycle, env
@@ -531,6 +574,7 @@ def _host_full_a_lifecycle_env():
     for name in (
         "_full_a_reveal_rows",
         "_full_a_launch_rows",
+        "_full_a_park_rows",
         "_full_a_prepare_step",
         "_full_a_racket_kinematics",
         "_full_a_publish_r03_fact",
@@ -581,6 +625,9 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
         env.sim.data.qvel[:, env.b_v : env.b_v + 6],
         env._full_a_launch_state_f32[:, 7:13],
     )
+    present, physically_valid = env._full_a_publish_r03_fact()
+    assert not present.any() and not physically_valid.any()
+    env.common_step_counter = 2
     present, physically_valid = env._full_a_publish_r03_fact()
     assert present.all() and physically_valid.all()
     assert torch.equal(
@@ -646,6 +693,486 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
         assert torch.equal(getattr(env, name)[1], expected), name
 
 
+def _portable_center_row(**updates):
+    values = {
+        "mount_normal_sign": 1,
+        "base_spawn_center_w_xy_m": (0.2, -0.1),
+        "base_travel_center_b_yaw_xy_m": (0.1, 0.0),
+        "contact_offset_center_b_yaw_m": (0.7, -0.5, 0.1),
+        "incoming_direction_center_b_yaw": (-1.0, 0.0, 0.0),
+        "incoming_speed_center_mps": 3.0,
+        "spin_direction_center_b_yaw": (0.0, 1.0, 0.0),
+        "spin_magnitude_center_radps": 10.0,
+        "reference_base_root_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
+        "reference_racket_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
+        "reference_racket_site_velocity_w_mps": (3.0, 0.0, 0.0),
+        "reference_racket_angular_velocity_w_radps": (0.0, 0.0, 2.0),
+        "reference_racket_site_speed_mps": 3.0,
+        "reference_t_hit_s": 1.04,
+        "reference_t_cycle_s": 1.9,
+        "reaction_margin_s": 0.1,
+        "teacher_rate_min": 0.6,
+        "teacher_rate_max": 1.0,
+        "time_to_contact_center_s": 1.94,
+    }
+    values.update(updates)
+    return SimpleNamespace(**values)
+
+
+def test_portable_center_question_uses_action_row_yaw_and_two_stage_reverse_integration():
+    calls = []
+
+    def truncated_reverse(contact, velocity, spin, tts, _params, **_kwargs):
+        calls.append(tts.clone())
+        effective = torch.where(tts > 0.5, torch.full_like(tts, 0.4), tts)
+        return contact - velocity * effective[:, None], velocity.clone(), effective
+
+    geometry = SimpleNamespace(
+        BALL_RADIUS_M=0.02,
+        face_normal_local=lambda sign: (0.0, float(sign), 0.0),
+        ball_center_from_site_local=lambda sign: (
+            0.001,
+            0.02 if sign == 1 else -0.033,
+            0.002,
+        ),
+        face_center_from_site_local=lambda sign: (
+            0.001,
+            0.0 if sign == 1 else -0.013,
+            0.002,
+        ),
+        canonical_teacher_rate_from_site_speed=lambda required, reference, lo, hi: required / reference,
+    )
+    base = torch.tensor([[0.0, 0.0, 0.9], [1.0, 2.0, 0.9]])
+    yaw_90 = 2.0 ** -0.5
+    quat = torch.tensor(
+        [[1.0, 0.0, 0.0, 0.0], [yaw_90, 0.0, 0.0, yaw_90]]
+    )
+    result = wait_env.portable_question.build_center_question(
+        torch=torch,
+        row=_portable_center_row(),
+        base_position_scene=base,
+        base_quat_wxyz=quat,
+        contact_reference_root_z_scene=0.9,
+        step_dt=0.02,
+        table_surface_z_scene=0.76,
+        back_integrate=truncated_reverse,
+        venue_params=SimpleNamespace(ball_radius=0.02),
+        geometry=geometry,
+        serve_horizon_s=0.6,
+        backint_h=0.005,
+        plane_margin=0.005,
+    )
+
+    assert len(calls) == 2
+    torch.testing.assert_close(calls[0], torch.full((2,), 0.6))
+    torch.testing.assert_close(calls[1], torch.full((2,), 0.4))
+    assert torch.equal(result["ttc_ticks"], torch.full((2,), 97))
+    assert torch.equal(result["launch_horizon_ticks"], torch.full((2,), 20))
+    task = result["task_f32"]
+    torch.testing.assert_close(task[:, 0], torch.full((2,), 1.94))
+    torch.testing.assert_close(task[:, 4], torch.full((2,), 0.9))
+    torch.testing.assert_close(task[0, 14:17], torch.tensor([1.0, -0.6, 1.0]))
+    torch.testing.assert_close(task[1, 14:17], torch.tensor([0.7, 0.7, 1.0]))
+    torch.testing.assert_close(task[0, 24:26], torch.tensor([0.3, -0.1]))
+    torch.testing.assert_close(task[1, 24:26], torch.tensor([0.2, 0.0]), atol=1.0e-6, rtol=0.0)
+    torch.testing.assert_close(task[0, 26:29], torch.tensor([-3.0, 0.0, 0.0]))
+    torch.testing.assert_close(
+        task[1, 26:29],
+        torch.tensor([0.0, -3.0, 0.0]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    # Launch is reverse-integrated from the action question.  It is neither
+    # the legacy serve-range midpoint nor a forward gravity shortcut.
+    torch.testing.assert_close(task[0, 32:35], torch.tensor([2.2, -0.6, 1.0]))
+    assert not torch.equal(task[0, 32:35], torch.tensor([2.0, -0.775, 1.44]))
+
+
+def test_portable_center_question_changes_when_action_center_changes():
+    def reverse(contact, velocity, spin, tts, _params, **_kwargs):
+        return contact - velocity * tts[:, None], velocity.clone(), tts.clone()
+
+    kwargs = {
+        "torch": torch,
+        "base_position_scene": torch.tensor([[0.0, 0.0, 0.9]]),
+        "base_quat_wxyz": torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        "contact_reference_root_z_scene": 0.9,
+        "step_dt": 0.02,
+        "table_surface_z_scene": 0.76,
+        "back_integrate": reverse,
+        "venue_params": SimpleNamespace(ball_radius=0.02),
+        "geometry": SimpleNamespace(
+            BALL_RADIUS_M=0.02,
+            face_normal_local=lambda sign: (0.0, float(sign), 0.0),
+            ball_center_from_site_local=lambda sign: (
+                0.001,
+                0.02 if sign == 1 else -0.033,
+                0.002,
+            ),
+            face_center_from_site_local=lambda sign: (
+                0.001,
+                0.0 if sign == 1 else -0.013,
+                0.002,
+            ),
+            canonical_teacher_rate_from_site_speed=lambda required, reference, lo, hi: required / reference,
+        ),
+        "serve_horizon_s": 0.6,
+        "backint_h": 0.005,
+        "plane_margin": 0.005,
+    }
+    first = wait_env.portable_question.build_center_question(
+        row=_portable_center_row(), **kwargs
+    )
+    second = wait_env.portable_question.build_center_question(
+        row=_portable_center_row(
+            contact_offset_center_b_yaw_m=(0.8, -0.5, 0.1),
+            incoming_direction_center_b_yaw=(-0.8, 0.6, 0.0),
+        ),
+        **kwargs,
+    )
+    assert not torch.equal(
+        first["task_f32"][:, 14:17], second["task_f32"][:, 14:17]
+    )
+    assert not torch.equal(
+        first["task_f32"][:, 26:29], second["task_f32"][:, 26:29]
+    )
+    assert not torch.equal(
+        first["launch_state_f32"][:, :3],
+        second["launch_state_f32"][:, :3],
+    )
+
+
+def test_full_a_reveal_packs_env_local_question_and_launch_restores_world_origin():
+    env = _host_full_a_lifecycle_env()
+    origins = torch.tensor([[6.0, -12.0, 0.0], [-6.0, 12.0, 0.0]])
+    local_base = torch.tensor([[0.1, -0.2, 0.9], [0.3, -0.4, 0.9]])
+    env.env.scene.env_origins = origins
+    env.sim.data.qpos[:, :3] = origins + local_base
+    captured = {}
+
+    def question(**kwargs):
+        captured["base"] = kwargs["base_position_scene"].clone()
+        task = torch.zeros((2, P.TASK_F32_WIDTH))
+        launch = torch.zeros((2, 13))
+        launch[:, :3] = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        launch[:, 3] = 1.0
+        return {
+            "task_f32": task,
+            "launch_state_f32": launch,
+            "ttc_ticks": torch.full((2,), 4, dtype=torch.long),
+            "launch_horizon_ticks": torch.full((2,), 2, dtype=torch.long),
+            "teacher_rate": torch.ones(2),
+            "scaled_t_hit_s": torch.ones(2),
+            "scaled_t_cycle_s": torch.full((2,), 2.0),
+            "pre_swing_wait_s": torch.ones(2),
+        }
+
+    env._full_a_question_builder = question
+    ids = torch.arange(2)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_reveal_rows(env, ids)
+    torch.testing.assert_close(captured["base"], local_base)
+    env.sim.data.qpos[:, env.b_q : env.b_q + 3] = -100.0
+    env.sim.data.qvel[:, env.b_v : env.b_v + 6] = 10.0
+    env.common_step_counter = 1
+    _reveal, launch = wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    assert not launch.any()
+    torch.testing.assert_close(
+        env.sim.data.qpos[:, env.b_q : env.b_q + 3],
+        origins
+        + torch.tensor(wait_env.WAIT_BALL_PARK_HOPE)
+        + env.hope_to_scene,
+    )
+    assert torch.count_nonzero(
+        env.sim.data.qvel[:, env.b_v : env.b_v + 6]
+    ) == 0
+    env.common_step_counter = 2
+    _reveal, launch = wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    assert launch.all()
+    torch.testing.assert_close(
+        env.sim.data.qpos[:, env.b_q : env.b_q + 3],
+        origins + env._full_a_launch_state_f32[:, :3],
+    )
+
+
+def test_portable_motion_teacher_waits_then_hits_the_catalog_strike_frame():
+    frames = 96
+    joint = torch.arange(frames, dtype=torch.float32).reshape(frames, 1).repeat(1, 31)
+    body_pos = (
+        torch.arange(frames, dtype=torch.float32)
+        .reshape(frames, 1, 1)
+        .repeat(1, 2, 3)
+    )
+    body_quat = torch.zeros((frames, 2, 4))
+    body_quat[..., 0] = 1.0
+    teacher = wait_env.portable_question.PortableMotionTeacher(
+        fps=50.0,
+        strike_frame=52,
+        contact_reference_root_z_scene=0.9,
+        joint_pos=joint,
+        joint_vel=torch.ones_like(joint),
+        body_pos_w=body_pos,
+        body_quat_w=body_quat,
+        body_lin_vel_w=torch.ones_like(body_pos),
+        body_ang_vel_w=torch.ones_like(body_pos) * 2.0,
+    )
+    sampled = wait_env.portable_question.sample_motion_teacher(
+        torch,
+        teacher,
+        elapsed_s=torch.tensor([0.5, 1.94]),
+        teacher_rate=torch.ones(2),
+        pre_swing_wait_s=torch.full((2,), 0.9),
+    )
+    assert torch.equal(sampled["frame"], torch.tensor([0, teacher.strike_frame]))
+    assert torch.count_nonzero(sampled["joint_vel"][0]) == 0
+    assert torch.equal(sampled["joint_pos"][1], joint[teacher.strike_frame])
+    assert torch.equal(sampled["body_lin_vel_w"][1], torch.ones((2, 3)))
+
+
+def test_diagnostic_qdes_bridge_is_continuous_finite_and_exact_at_endpoints():
+    previous = torch.zeros((1, 2))
+    frame0 = torch.tensor([[2.0, 4.0]])
+    sent = []
+    for frozen in (4, 3, 2, 1, 0):
+        previous = (
+            wait_env.portable_question.step_diagnostic_split_ready_qdes_bridge(
+                torch=torch,
+                previous_qdes=previous,
+                frame0_qdes=frame0,
+                frozen_steps=torch.tensor([frozen], dtype=torch.long),
+            )
+        )
+        sent.append(previous.clone())
+
+    torch.testing.assert_close(
+        torch.cat(sent, dim=0),
+        torch.tensor(
+            [[0.4, 0.8], [0.8, 1.6], [1.2, 2.4], [1.6, 3.2], [2.0, 4.0]]
+        ),
+    )
+    assert torch.equal(sent[-1], frame0)
+    assert torch.isfinite(torch.cat(sent)).all()
+
+    with pytest.raises(RuntimeError, match="frozen steps are negative"):
+        wait_env.portable_question.step_diagnostic_split_ready_qdes_bridge(
+            torch=torch,
+            previous_qdes=previous,
+            frame0_qdes=frame0,
+            frozen_steps=torch.tensor([-1], dtype=torch.long),
+        )
+
+
+def test_full_a_environment_consumes_the_measured_teacher_clock():
+    env = _host_full_a_lifecycle_env()
+    origins = torch.tensor([[6.0, -12.0, 0.0], [-6.0, 12.0, 0.0]])
+    env.env.scene.env_origins = origins
+    frames = 4
+    joint = (
+        torch.arange(frames, dtype=torch.float32)
+        .reshape(frames, 1)
+        .repeat(1, 31)
+    )
+    body_pos = (
+        torch.arange(frames, dtype=torch.float32)
+        .reshape(frames, 1, 1)
+        .repeat(1, 1, 3)
+    )
+    body_quat = torch.zeros((frames, 1, 4))
+    body_quat[..., 0] = 1.0
+    env._full_a_teacher = wait_env.portable_question.PortableMotionTeacher(
+        fps=50.0,
+        strike_frame=1,
+        contact_reference_root_z_scene=0.9,
+        joint_pos=joint,
+        joint_vel=torch.ones_like(joint),
+        body_pos_w=body_pos,
+        body_quat_w=body_quat,
+        body_lin_vel_w=torch.ones_like(body_pos),
+        body_ang_vel_w=torch.ones_like(body_pos) * 2.0,
+    )
+    env._ready_teacher_body_pos = torch.zeros((2, 1, 3))
+    env._ready_teacher_body_quat = torch.zeros((2, 1, 4))
+    env._ready_teacher_body_quat[..., 0] = 1.0
+    env._ready_teacher_body_lin_vel = torch.zeros((2, 1, 3))
+    env._ready_teacher_body_ang_vel = torch.zeros((2, 1, 3))
+    env._teacher_body_pos = env._ready_teacher_body_pos.clone()
+    env._teacher_body_quat = env._ready_teacher_body_quat.clone()
+    env._teacher_body_lin_vel = env._ready_teacher_body_lin_vel.clone()
+    env._teacher_body_ang_vel = env._ready_teacher_body_ang_vel.clone()
+    env._refresh_aligned_teacher_body_pose = lambda: None
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+
+    env.common_step_counter = 2
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+
+    assert torch.equal(env._full_a_teacher_frame, torch.ones(2, dtype=torch.long))
+    assert torch.equal(env._full_a_teacher_joint_pos, joint[1].repeat(2, 1))
+    assert torch.equal(env._full_a_teacher_joint_vel, torch.ones((2, 31)))
+    assert torch.equal(
+        env._teacher_body_pos,
+        body_pos[1].repeat(2, 1, 1) + origins[:, None, :],
+    )
+    assert torch.equal(
+        env._full_a_motion_phase_code,
+        torch.ones(2, dtype=torch.long),
+    )
+
+    env.common_step_counter = 4
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert torch.equal(
+        env._full_a_motion_phase_code,
+        torch.full((2,), 3, dtype=torch.long),
+    )
+    assert torch.equal(env._full_a_teacher_joint_pos, env.q_ready.repeat(2, 1))
+    assert torch.equal(env._teacher_body_pos, env._ready_teacher_body_pos)
+
+
+def test_full_a_reveal_teacher_is_atomic_frame0_then_strike_and_resets_rowwise():
+    env = _host_full_a_lifecycle_env()
+    env.q_ready = torch.linspace(-2.0, 1.0, 31)
+    origins = torch.tensor([[6.0, -12.0, 0.0], [-6.0, 12.0, 0.0]])
+    env.env.scene.env_origins = origins
+    frames = 96
+    joint = (
+        torch.linspace(3.0, 4.0, 31).unsqueeze(0)
+        + torch.arange(frames, dtype=torch.float32)[:, None] * 0.01
+    )
+    joint_vel = torch.ones_like(joint) * 0.25
+    body_pos = torch.zeros((frames, 1, 3))
+    body_pos[:, 0, 0] = torch.arange(frames, dtype=torch.float32) * 0.01
+    body_pos[:, 0, 1] = -0.4
+    body_pos[:, 0, 2] = 0.9
+    body_quat = torch.zeros((frames, 1, 4))
+    body_quat[..., 0] = 2.0**-0.5
+    body_quat[..., 3] = 2.0**-0.5
+    body_vel = torch.ones_like(body_pos) * 0.5
+    env._full_a_teacher = wait_env.portable_question.PortableMotionTeacher(
+        fps=50.0,
+        strike_frame=52,
+        contact_reference_root_z_scene=0.9,
+        joint_pos=joint,
+        joint_vel=joint_vel,
+        body_pos_w=body_pos,
+        body_quat_w=body_quat,
+        body_lin_vel_w=body_vel,
+        body_ang_vel_w=body_vel * 2.0,
+    )
+    ready_pos_local = torch.tensor(
+        [[[0.2, -0.1, 1.1]], [[-0.3, 0.2, 1.05]]]
+    )
+    env._ready_teacher_body_pos = ready_pos_local + origins[:, None, :]
+    env._ready_teacher_body_quat = torch.zeros((2, 1, 4))
+    env._ready_teacher_body_quat[..., 0] = 1.0
+    env._ready_teacher_body_lin_vel = torch.zeros((2, 1, 3))
+    env._ready_teacher_body_ang_vel = torch.zeros((2, 1, 3))
+    env._teacher_body_pos = env._ready_teacher_body_pos.clone()
+    env._teacher_body_quat = env._ready_teacher_body_quat.clone()
+    env._teacher_body_lin_vel = env._ready_teacher_body_lin_vel.clone()
+    env._teacher_body_ang_vel = env._ready_teacher_body_ang_vel.clone()
+    env._refresh_aligned_teacher_body_pose = lambda: None
+
+    def question(**kwargs):
+        count = kwargs["base_position_scene"].shape[0]
+        task = torch.zeros((count, P.TASK_F32_WIDTH))
+        launch = torch.zeros((count, 13))
+        launch[:, 3] = 1.0
+        return {
+            "task_f32": task,
+            "launch_state_f32": launch,
+            "ttc_ticks": torch.full((count,), 97, dtype=torch.long),
+            "launch_horizon_ticks": torch.full((count,), 20, dtype=torch.long),
+            "teacher_rate": torch.ones(count),
+            "scaled_t_hit_s": torch.full((count,), 1.04),
+            "scaled_t_cycle_s": torch.full((count,), 1.90),
+            "pre_swing_wait_s": torch.full((count,), 0.90),
+        }
+
+    env._full_a_question_builder = question
+    physical_root_before = env.sim.data.qpos[:, :7].clone()
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+
+    # The physical plant remains on its separately admitted ready reset.  The
+    # Motion observation/reward teacher is a different channel and switches
+    # atomically to exact measured frame zero at public reveal, just as Isaac
+    # does; the diagnostic q_des bridge must never leak into these buffers.
+    assert torch.max(torch.abs(joint[0] - env.q_ready)) > 3.0
+    assert torch.equal(env.sim.data.qpos[:, :7], physical_root_before)
+    assert not hasattr(env, "_full_a_ready_bridge_alpha")
+    assert torch.equal(
+        env._full_a_teacher_joint_pos, joint[0].repeat(2, 1)
+    )
+    assert torch.equal(
+        env._teacher_body_pos, body_pos[0].repeat(2, 1, 1) + origins[:, None, :]
+    )
+    assert torch.equal(
+        env._teacher_body_quat, body_quat[0].repeat(2, 1, 1)
+    )
+    assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
+    assert torch.count_nonzero(env._teacher_body_lin_vel) == 0
+    assert torch.count_nonzero(env._teacher_body_ang_vel) == 0
+    assert torch.equal(env._full_a_teacher_frame, torch.zeros(2, dtype=torch.long))
+    assert torch.equal(env._full_a_motion_phase_code, torch.zeros(2, dtype=torch.long))
+
+    # There is no halfway Motion target during the frozen prepare clock: both
+    # actor teacher observation and Reward20 body teacher remain exact frame0.
+    env.common_step_counter = 22
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert torch.equal(
+        env._full_a_teacher_joint_pos, joint[0].repeat(2, 1)
+    )
+    assert torch.equal(
+        env._teacher_body_pos, body_pos[0].repeat(2, 1, 1) + origins[:, None, :]
+    )
+    assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
+    assert torch.equal(env._full_a_motion_phase_code, torch.zeros(2, dtype=torch.long))
+
+    # The exact end of the pre-wait is still frame0/prepare.  Only a later
+    # rounded frame transition starts measured playback.
+    env.common_step_counter = 45
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert torch.equal(
+        env._full_a_teacher_joint_pos, joint[0].repeat(2, 1)
+    )
+    assert torch.equal(
+        env._teacher_body_pos, body_pos[0].repeat(2, 1, 1) + origins[:, None, :]
+    )
+    assert torch.equal(env._full_a_teacher_frame, torch.zeros(2, dtype=torch.long))
+    assert torch.equal(env._full_a_motion_phase_code, torch.zeros(2, dtype=torch.long))
+    assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
+
+    env.common_step_counter = 97
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert torch.equal(
+        env._full_a_teacher_frame,
+        torch.full((2,), env._full_a_teacher.strike_frame, dtype=torch.long),
+    )
+    torch.testing.assert_close(
+        env._full_a_teacher_joint_pos,
+        joint[env._full_a_teacher.strike_frame].repeat(2, 1),
+    )
+    assert torch.equal(env._full_a_motion_phase_code, torch.ones(2, dtype=torch.long))
+
+    # A selected reset returns hidden references to the physical ready tuple.
+    # The peer remains on its own strike target; the next public reveal again
+    # switches only that row atomically to exact frame0.
+    peer_joint = env._full_a_teacher_joint_pos[1].clone()
+    peer_body = env._teacher_body_pos[1].clone()
+    env._clear_lifecycle(torch.tensor([0]))
+    torch.testing.assert_close(env._full_a_teacher_joint_pos[0], env.q_ready)
+    torch.testing.assert_close(
+        env._teacher_body_pos[0], env._ready_teacher_body_pos[0]
+    )
+    torch.testing.assert_close(env._full_a_teacher_joint_pos[1], peer_joint)
+    torch.testing.assert_close(env._teacher_body_pos[1], peer_body)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert env._epoch_task_valid[0]
+    assert torch.equal(env.sim.data.qpos[:, :7], physical_root_before)
+    assert torch.equal(env._full_a_teacher_joint_pos[0], joint[0])
+    assert torch.count_nonzero(env._full_a_teacher_joint_vel[0]) == 0
+    torch.testing.assert_close(env._full_a_teacher_joint_pos[1], peer_joint)
+
+
 def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
     env = _host_full_a_lifecycle_env()
     env.q_ready = torch.zeros(31)
@@ -657,10 +1184,14 @@ def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
     env._nacon = torch.tensor([0], dtype=torch.long)
     env._ball_gid = 2
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
-    env.common_step_counter = 1
+    env.common_step_counter = 2
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r03_fact(env)
     wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
+    exact_teacher_joint = torch.arange(31, dtype=torch.float32).repeat(2, 1)
+    exact_teacher_vel = -exact_teacher_joint
+    env._full_a_teacher_joint_pos.copy_(exact_teacher_joint)
+    env._full_a_teacher_joint_vel.copy_(exact_teacher_vel)
 
     wait_env.FullMdpInitialWaitVecEnv._compute_obs(
         env,
@@ -682,6 +1213,17 @@ def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
 
     assert torch.equal(
         env._obs_buf[:, actor_offset["epoch_task_f32"]], env._epoch_task_f32
+    )
+    # These actor fields consume the Motion teacher buffers directly.  A q_des
+    # bridge value inserted there would therefore become a cross-backend
+    # observation-contract drift, not an internal control implementation.
+    assert torch.equal(
+        env._obs_buf[:, actor_offset["teacher_joint_pos_rel"]],
+        exact_teacher_joint,
+    )
+    assert torch.equal(
+        env._obs_buf[:, actor_offset["teacher_joint_vel_rel"]],
+        exact_teacher_vel,
     )
     expected_clocks = (
         env._epoch_clock_ticks - env.common_step_counter
@@ -1083,9 +1625,7 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         )
         assert not bool(dones0.any())
         assert extras0["full_a_phase_before_reset"][0] == wait_env.FULL_A_PHASE_REVEAL_COMMITTED
-        assert bool(extras0["full_a_r03_present_event"][0])
-        assert bool(extras0["full_a_r03_physically_valid_event"][0])
-        assert torch.count_nonzero(extras0["reward_terms"][:, :10]) > 0
+        assert not bool(extras0["full_a_r03_present_event"][0])
         task_start = 0
         for name, width in P.ACTOR_LAYOUT_V1:
             if name == "epoch_task_f32":
@@ -1100,6 +1640,7 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         # physical terminal (outcome=NONE) for a broken Full-A settlement.
         # The forced deadline still crosses one real launch/physics step and
         # therefore proves movement, outcome publication, and selected reset.
+        env._epoch_clock_ticks[0, 2] = int(env.common_step_counter)
         env._epoch_clock_ticks[0, 3] = int(env.common_step_counter)
         _, _, dones1, extras1 = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
@@ -1158,7 +1699,9 @@ def test_real_full_a_n1_launch_reports_live_selected_rubber_contact():
         # zero penetration.  Keep the centre on the selected side while
         # penetrating the measured outer face by an explicit 1 mm.
         racket_center = site + rotation @ local_selected_center
-        env._full_a_launch_state_f32[0, :3] = racket_center
+        env._full_a_launch_state_f32[0, :3] = (
+            racket_center - env.env.scene.env_origins[0]
+        )
         env._full_a_launch_state_f32[0, 3:7] = torch.tensor(
             [1.0, 0.0, 0.0, 0.0], device=env.device
         )
@@ -1183,6 +1726,7 @@ def test_real_full_a_n1_launch_reports_live_selected_rubber_contact():
         # One real physics substep retains the forced overlap while still
         # crossing the production launch -> contact -> fact publication path.
         env.decimation = 1
+        env._epoch_clock_ticks[0, 2] = int(env.common_step_counter)
         _, _, dones, contact = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
         )
@@ -1220,6 +1764,7 @@ def test_real_full_a_n2_selected_outcome_reset_preserves_peer_rows():
         zero = torch.zeros((2, 31), device=env.device)
         env.reset()
         _assert_full_a_step_surface(env.step(zero), num_envs=2)
+        env._epoch_clock_ticks[:, 2] = int(env.common_step_counter)
         _, _, _, before = _assert_full_a_step_surface(env.step(zero), num_envs=2)
         peer_generation = before["reset_generation"][1].clone()
         env._epoch_clock_ticks[0, 3] = int(env.common_step_counter)
