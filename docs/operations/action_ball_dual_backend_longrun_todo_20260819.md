@@ -103,7 +103,12 @@
    selected classification与Reward10=`0.02`均由production真实产生；随后tests-only断言把CUDA tensor直接交给
    `pytest.approx`，因其试图`.numpy()`而TypeError，结果仍为`1 failed,2 passed`，第四节点未执行。
    该namespace同样封存且GPU/锁自然释放。断言已改为device-native `torch.testing.assert_close`；fresh完整
-   四节点未过前仍不关闭contact/reset runtime缺口；
+   四节点未过前仍不关闭contact/reset runtime缺口。2026-08-20 commit `ed11390e…`又在GPU0 slot-2/CPU
+   `16--31`真实运行：WAIT N1/N2两节点通过，首Full-A节点在构造期因base reset先于Full-A buffer安装而
+   `AttributeError`，结果=`2 passed,1 failed`、RC=1。namespace
+   `mujoco-fullmdp-gpu-gate.ed11390e.Pod1GPU0Slot2Taskset.50yWOSvf`封存且不重试。窄修只允许
+   `_fullmdp_initialized=false`的构造observation走WAIT surface，host反例后direct suite=`50 passed,8 skipped`；
+   仍须fresh commit/namespace重新跑真实Full-A节点；
 5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在；在上述真实GPU
    纵切片通过前不生成长跑success receipt。
 

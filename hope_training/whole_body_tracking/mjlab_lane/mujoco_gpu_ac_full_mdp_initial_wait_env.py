@@ -1540,13 +1540,20 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         """Read the live post-forward plant and publish initial WAIT only."""
 
         torch = self._torch
+        # Base construction calls reset() -> _compute_obs() before the
+        # Full-A buffers can be installed.  That construction observation is
+        # the ordinary deterministic WAIT surface; publish Full-A fields only
+        # after the subclass has completed its atomic initialization.
+        full_a_initialized = (
+            getattr(self, "full_a_mode", False) and self._fullmdp_initialized
+        )
         contact = self._con_geom[:]
         valid = self._con_idx < self._nacon[0]
         ball_contact = valid & (
             (contact[:, 0] == self._ball_gid)
             | (contact[:, 1] == self._ball_gid)
         )
-        if bool(ball_contact.any()) and not getattr(self, "full_a_mode", False):
+        if bool(ball_contact.any()) and not full_a_initialized:
             raise RuntimeError("portable FullMDP initial-WAIT ball is in contact")
         st = st or self._state()
         joint_pos_rel = self._qpos_act() - self.q_ready.unsqueeze(0)
@@ -1554,7 +1561,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         phase = torch.zeros(
             (self.num_envs, 5), dtype=joint_pos_rel.dtype, device=self.device
         )
-        if getattr(self, "full_a_mode", False):
+        if full_a_initialized:
             phase = torch.nn.functional.one_hot(
                 self._full_a_motion_phase_code, num_classes=5
             ).to(dtype=joint_pos_rel.dtype)
@@ -1600,7 +1607,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             actor_rows["epoch_launch_succeeded"] = self._epoch_launch_succeeded[
                 :, None
             ].to(dtype=joint_pos_rel.dtype)
-            if self.full_a_mode:
+            if full_a_initialized:
                 actor_rows["epoch_task_f32"] = self._epoch_task_f32
                 actor_rows["epoch_clock_remaining_s"] = (
                     self._epoch_clock_ticks - int(self.common_step_counter)
@@ -1620,7 +1627,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 )
                 for name, width in observation_contract.CRITIC_EXTENSION_LAYOUT_V1
             }
-        if self._fullmdp_initialized and self.full_a_mode:
+        if full_a_initialized:
             present = self._torch.bitwise_and(
                 self._full_a_owner_valid_bits, 1
             ).ne(0)

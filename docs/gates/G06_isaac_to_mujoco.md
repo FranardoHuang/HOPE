@@ -2097,3 +2097,14 @@ Gym done、重置机器人、动作或episode；真实safety/time-limit才进入
 真实`env.step`逐格走完age 1--77并验68个R07 present/eligible、末格才reset。这些skip仍包含真实
 MuJoCo-Warp selected contact、contact force与nonterminal reset；没有fresh GPU PASS、4096容量/吞吐、
 terminal consumer和25k学习趋势前，不得把该slice改名为portable Full-A成功或长跑完成。
+
+同日fresh GPU0 slot-2 gate以commit `ed11390e…`和独立CPU `16--31`与Isaac共卡；发车前目标卡只有一个
+compute peer且free memory超过20 GiB。WAIT N1/N2两节点真实PASS，第三个Full-A节点在构造期自然失败：
+base `super().__init__()`内部先调用`reset -> _compute_obs`，而Full-A motion/teacher buffers必须在base构造返回后
+才能原子安装，旧代码因此访问不存在的`_full_a_motion_phase_code`。结果=`2 passed, 1 failed`、RC=1；
+namespace `mujoco-fullmdp-gpu-gate.ed11390e.Pod1GPU0Slot2Taskset.50yWOSvf`封存且不重试。
+
+窄修让构造期 observation在`_fullmdp_initialized=false`时保持原deterministic WAIT surface；只有buffer整体安装后
+才发布Full-A phase/teacher/task/facts。host新增删除三份Full-A buffer仍能完成构造observation的反例，四份suite=
+`50 passed, 8 skipped`。该修复只关闭初始化顺序，不代签剩余三个GPU节点；fresh successor仍须新commit和
+新namespace，G06继续`Partial`。

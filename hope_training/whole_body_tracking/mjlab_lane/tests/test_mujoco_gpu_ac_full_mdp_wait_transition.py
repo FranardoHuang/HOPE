@@ -1434,6 +1434,52 @@ def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
     ) == 0
 
 
+def test_full_a_constructor_observation_stays_wait_until_buffers_are_installed():
+    env = _host_full_a_lifecycle_env()
+    env._fullmdp_initialized = False
+    env.actions = torch.zeros((2, 31))
+    env._qpos_act = lambda: torch.zeros((2, 31))
+    env._qvel_act = lambda: torch.zeros((2, 31))
+    env._con_geom = torch.tensor([[0, 0]], dtype=torch.long)
+    env._con_idx = torch.tensor([0], dtype=torch.long)
+    env._nacon = torch.tensor([0], dtype=torch.long)
+    env._ball_gid = 2
+    del env._full_a_motion_phase_code
+    del env._full_a_teacher_joint_pos
+    del env._full_a_teacher_joint_vel
+
+    wait_env.FullMdpInitialWaitVecEnv._compute_obs(
+        env,
+        st={
+            "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
+            "base_ang_b": torch.zeros((2, 3)),
+        },
+    )
+
+    offsets = {}
+    start = 0
+    for name, width in P.ACTOR_LAYOUT_V1:
+        offsets[name] = slice(start, start + width)
+        start += width
+    phase = env._obs_buf[:, offsets["motion_phase_one_hot"]]
+    assert torch.equal(
+        phase[:, wait_env.READY_HOLD_PHASE_INDEX], torch.ones(2)
+    )
+    assert torch.count_nonzero(env._obs_buf[:, offsets["teacher_joint_pos_rel"]]) == 0
+    assert torch.count_nonzero(env._obs_buf[:, offsets["teacher_joint_vel_rel"]]) == 0
+
+    env._con_geom = torch.tensor([[env._ball_gid, 0]], dtype=torch.long)
+    env._nacon = torch.tensor([1], dtype=torch.long)
+    with pytest.raises(RuntimeError, match="initial-WAIT ball is in contact"):
+        wait_env.FullMdpInitialWaitVecEnv._compute_obs(
+            env,
+            st={
+                "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
+                "base_ang_b": torch.zeros((2, 3)),
+            },
+        )
+
+
 def test_host_full_a_outcome_uses_shared_contact_and_crossing_horizon_clocks():
     env = _host_full_a_lifecycle_env()
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)

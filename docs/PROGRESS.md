@@ -4388,3 +4388,8 @@
   96次/update的empty-flight事务首墙，尚不严格支配GPU1旧run；两条immutable run均继续只读。第一次
   pre-namespace resource gate因GPU XML混入其他卡graphics rows而误拒，fresh fix改用目标UUID compute query，
   未复用namespace或执行Kit。
+- MuJoCo commit `ed11390e…`已在同一GPU0第二slot、CPU `16--31`做fresh真实门：WAIT N1/N2两节点PASS，
+  第一个Full-A节点在base constructor的初始reset访问尚未安装的motion phase buffer而自然FAIL，结果
+  `2 passed,1 failed`、RC=1；该namespace封存不重试。窄修使`_fullmdp_initialized=false`的构造期只发布
+  deterministic WAIT observation，新增缺失Full-A buffers反例后host=`50 passed,8 skipped`；下一步只能用
+  新commit/namespace续跑三个Full-A GPU节点，不能把两个WAIT PASS称为portable Full-A。
