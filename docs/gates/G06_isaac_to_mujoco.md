@@ -5,13 +5,15 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 **2026-08-19 first Full-A slice（Gate 仍 `Partial`）：**portable 229/399-D lane在既有WAIT VecEnv上增加
 一条显式`full_a_mode`纵切片：逐行reveal、把launch state真实写入MuJoCo ball、20个physics substep、
 live contact array、bounded flight terminal与selected reset。runner只累计真实extras，receipt诚实写
-`task_lifecycle=full_a_slice_attempted`和`full_a_complete=false`；R03 strike fact、R06 landing outcome、
-R07 recovery以及Reward项0--13固定列为`not_produced`，因此它不是portable MuJoCo A完成证据。host组合
-为`27 passed,9 skipped`；新增opt-in节点不伪造contact bool，而是从production racket geom与live
+`task_lifecycle=full_a_slice_attempted`和`full_a_complete=false`。当前host纵切片还从同一postphysics
+racket site发布真实R03 achieved position/velocity/normal，并由engine-neutral kernel计算Reward项0--9；
+R06 landing outcome、R07 recovery、selected-rubber contact与Reward10--13仍为`not_produced`，因此它不是
+portable MuJoCo A完成证据。MuJoCo host组合为`28 passed,9 skipped`；新增opt-in节点不伪造contact bool，而是从production racket geom与live
 MuJoCo contact rows证明ball-racket pair，再穿真实`env.step`验证contact latch。首次Pod节点使用mesh
 geom frame原点作为碰撞体内部点而失败；诊断证明该原点不在mesh体积内，而production measured-racket
 site会产生exact pair。测试改用这个独立live site后，clean Git `2c8ef444…`在Pod1 GPU1/NUMA3得到
-`1 passed`。这关闭selected-contact调用点，不关闭缺失的R03/R06/R07/Reward0--13；更不能用host或native
+`1 passed`。这只关闭generic racket-contact调用点，不证明selected-rubber；R03/Reward0--9仍待fresh GPU，
+R06/R07/Reward10--13仍缺失。更不能用host或native
 114/114-D A1000代签本Gate。
 
 **2026-08-18 dual MuJoCo lanes（Gate 仍 `Partial`）：**portable lane已完成真实MuJoCo-Warp WAIT
@@ -2004,11 +2006,13 @@ distance=`0.007168732 m < 0.044263876 m`、invalid reasons=`[]`，且 receipt/ba
 
 ### 2026-08-19 portable FullMDP A纵切片边界
 
-portable MuJoCo已真实穿过row-wise reveal、ball state launch、20-substep plant、live selected-racket
+portable MuJoCo已真实穿过row-wise reveal、ball state launch、20-substep plant、live generic racket
 contact、bounded terminal与selected reset；exact Pod节点用真实contact rows证明production latch，而非
-runner手造extras。runner固定发布`task_lifecycle=full_a_slice_attempted`、`full_a_complete=false`。
+runner手造extras。host路径又将真实postphysics racket FK写入R03 row，并消费Reward项0--9。runner固定
+发布`task_lifecycle=full_a_slice_attempted`、`full_a_complete=false`。
 
-仍缺R03 strike fact、R06 landing outcome、R07 recovery及Reward项0--13，因此portable MuJoCo Full-A
-长跑继续`HOLD`。native 114/114-D A1000的吞吐与contact提升只能作为工程/Reward经济参考，不能代签
+当前确定缺口是共享73-action lineage和mount sign、selected-rubber contact、R06 landing outcome、R07
+recovery及Reward项10--13；R03/Reward0--9还缺fresh GPU调用证据。因此portable MuJoCo Full-A长跑继续
+`HOLD`。native 114/114-D A1000的吞吐与contact提升只能作为工程/Reward经济参考，不能代签
 229/399-D portable语义。该缺口不阻塞Isaac 4096 A长跑；Isaac运行期间继续接producer，但不得热补
 活跃Isaac源码或把partial receipt改名为Full-A成功。G06保持`Partial`。

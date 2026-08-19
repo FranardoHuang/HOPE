@@ -2,13 +2,14 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-**2026-08-19 4096真实PPO工程窗通过、25k长跑进行中（Gate仍`Partial`）：**fresh commit
+**2026-08-19 4096真实PPO A100、25k长跑进行中（Gate仍`Partial`）：**fresh commit
 `b64cb944…`已经在同一进程越过真实4096 scene、229/399 observation、Reward20、Kit/RSL runtime v2、
-compact joint-safety和upstream optimizer。只读frontier为update8：9组完整`PENDING/EPOCH_ACK`、
-`884,736/884,736` Reward sample finite、0 nonfinite、0 conservation violation，D05真实执行而非零调用点。
-累计12,288次due/selected中10,836次not-ready defer、1,452次reject、0 ACCEPT；8,192个结束episode
-暂时全是base tilt。前9个update只能判工程链可信，不能判学习失败；进程按协议继续到25,000，
-1000只作里程碑且不会停机。Gate不晋级，因为真实strike/contact/outcome/recovery分母仍为0。
+compact joint-safety和upstream optimizer。A100有100组完整`PENDING/EPOCH_ACK`、9,830,400个Reward sample
+全部finite，0 nonfinite、0 conservation violation；D05是真实调用点。0--49→50--99窗口每transition
+Reward=`0.057989→0.058106`，episode return=`5.076→5.251`、length=`88.02→90.29`，只能称dense imitation
+有很小的正向变化。累计106,645个episode仍全部base tilt；110,664次D05 selected中97,328次not-ready
+defer、13,336次reject，ACCEPT/launch/R03/physical/R06/R07全0。因此工程链可信、业务入口仍为零；
+进程按协议继续25,000，1000只作里程碑且不会停机。Gate不晋级。
 
 其前驱commit `53156327…`
 首次完成真实4096 scene、229/399 observation、Reward20和Kit/RSL runtime v2 attestation；约25分钟后
@@ -21,7 +22,16 @@ rigid actor与contact binding仍逐行验证；compact门改为逐字段错误�
 接受`ABCMeta`这类合法type实例，同时仍硬钉exact module/name和live object identity，不再插N=1。
 Motion catalog同步切到与runtime 0807 A3P plant同源重解的73条bank，grounding读
 `pelvis_link`而不是会合法转腰的`torso_Link`；该bank机械admission仍为0/73，因此仍是diagnostic而非formal。
-host回归已通过；上述fresh Pod长跑是这项窄修的真实消费点。
+host回归已通过；上述fresh Pod长跑是这项窄修的真实消费点。当前A100完整前缀已证明它没有被
+4096容量、runtime identity或optimizer事务阻断。
+
+**2026-08-19 rough出生平地几何修正（Gate仍`Partial`）：**nominal FullMDP长跑继续使用plane，未被热改。
+后续rough producer本来已有固定seed相关场、桌侧平地和smooth blend，但出生exact-flat半径硬编码为
+`0.20 m`。对固定MJCF `70c4fd65…`和ready pose `ab6b7e41…`做exact CPU FK后，四个踝部collision mesh
+相对env origin的最大XY半径为`0.470508504 m`；旧core会让双脚落在rough/blend shoulder。producer改为
+`0.60 m` exact-flat core和`0.80 m` blend，覆盖foot envelope再加一个10 cm terrain cell guard，host性质
+测试=`14 passed`。这是确定性plant几何修正，不需要Reward A/B；但rough仍须fresh 2-env足底/桌体检查和
+4096吞吐，才可按`plane→±5 mm→±10 mm→±20 mm`独立阶段启用。
 
 **2026-08-19 next-generation preflight（Gate 仍 `Partial`）：**已知LM fatal的host实现面现已闭合到
 三个独立坏候选：`solve_ex info!=0`、非有限`dq`、以及两个有限float32相加后`q+dq`溢出；三者均在任何
@@ -31,15 +41,17 @@ physical forward前替回原finite `q`并按reason 8/9逐行拒绝，mixed peer�
 独立host回归为adapter 17、runtime wiring 90、semantic surface 66、questions 50、stroke chain 40。
 host上的3个CUDA参数原先跳过；exact Pod1 clean Git `2c8ef444…`随后在Jiayi Python3.11/
 PyTorch2.7-cu128、GPU0/NUMA2上得到`3 passed`，三类失败后CUDA kernel和synchronize均正常。下一条仍是唯一
-`4096×25000`同进程；前5次必须实际得到5组v11 WAL/safety receipt和真实D05 producer调用，不能由D05全零
-fixture代签。最终发车wrapper尚未冻结，Gate不晋级；旧失败PID链已自然消失，全程未发signal。
+`4096×25000`同进程；现役run已越过该门并到A100，真实v11 WAL/safety receipt和D05 producer均非
+zero-callpoint。Gate仍不晋级，因为任务lifecycle尚未产生ACCEPT及其后续分母；旧失败PID链已自然消失，
+全程未发signal。
 
 **2026-08-18 scale裁决更正（Gate 仍 `Partial`）：**此前`N=2 × 2`只证明构造、reset、229/399 ABI、
 Reward20 finite和optimizer/WAL调用点；后续`N=2` A1000不是学习规模，不能用于评价policy效果。它的可信
 前缀止于ACK470：296个episode全部base tilt，260个admitted opportunity全部not-ready，ACCEPT=0，且
-下一次collection由LM device assert终止。下一条fresh A不再重复小N smoke，而是同一冻结字节直接
-`4096 env × 1000 update`：update0--4作为同进程scale/finite观察窗，健康后不重启地继续，并在
-20/50/100/200/500/1000只读。该run未自然完成前，学习趋势仍为`未测`。
+下一次collection由LM device assert终止。successor不再重复小N smoke，而是同一冻结字节直接
+`4096 env × 25000 update`：update0--4作为同进程scale/finite观察窗，健康后不重启地继续，并在
+20/50/100/200/500/1000/2500/5000/10000/25000只读。该successor现已到A100；业务趋势仍是零入口，
+不等于长期不可学。
 
 **2026-08-18 fresh LM canary and A1000 restart（Gate 仍 `Partial`）：**fresh commit `fcfe9918…`
 把diagnostic fixed-try LM的device assert改成逐行具名拒绝。Pod1 GPU0随后自然完成`N=2 × 2`：

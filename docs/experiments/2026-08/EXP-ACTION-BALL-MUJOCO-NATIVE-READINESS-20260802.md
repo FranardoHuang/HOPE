@@ -11346,9 +11346,10 @@ Python3.11/Torch2.7/TensorDict0.10/RSL3.1.2 class source，随后才进入`train
 25000组PENDING/EPOCH_ACK、25000份v11/post-safety ACK、Reward20 finite/conservation和非零D05分母。
 普通tilt/table/fall只记telemetry，不作为提前停机理由。
 
-MuJoCo侧不等待Isaac结束，但当前只承认`full_a_slice_attempted`：真实reveal/launch/contact/terminal/reset
-已经有live消费点，R03/R06/R07与Reward0--13仍`not_produced`。因此下一批工作是在Isaac长跑期间逐项
-补这些producer和rough课程；portable Full-A未闭合前不发其长跑，也不拿native A1000曲线做等价比较。
+MuJoCo侧不等待Isaac结束，但当前只承认`full_a_slice_attempted`：真实reveal/launch/generic racket
+contact/terminal/reset已有live消费点，R03与Reward0--9已有host真实FK消费点；selected-rubber、R06/R07
+与Reward10--13仍`not_produced`。因此下一批工作是在Isaac长跑期间先接共享73-action identity/mount sign，
+再接selected-rubber和outcome/recovery；portable Full-A未闭合前不发其长跑，也不拿native A1000曲线做等价比较。
 本节是采用/拒绝边界，不记录逐条shell命令。
 
 first 4096 one-shot没有进入学习：commit `5ee1ffa6…`、wrapper `022c13f5…`的preexec与sealed runtime
@@ -11396,3 +11397,34 @@ violation为0，证明scene、runtime、compact safety、optimizer和WAL在真�
 D05的12,288个due/selected全部落入10,836 not-ready defer或1,452 reject，ACCEPT、launch、contact、
 outcome、recovery仍为0；8,192个episode暂全由base tilt结束。因此当前科学裁决只有两条：工程边界通过；
 任务入口尚未ready。前9点不足以判断长期可学性，run继续，首次趋势判断仍等20/50/100/...，1000不停机。
+
+### 2026-08-19：A100科学窗与下一代因果选择
+
+本节只消费100个完整`PENDING/EPOCH_ACK` pair，不用console rolling均值代签。0--99共
+`9,830,400` transitions，actual Reward全部finite、nonfinite=`0`、conservation violation=`0`；
+max residual=`2.492405e-7`，低于窗口max tolerance=`1.233621e-5`。0--49→50--99窗口的每transition
+Reward为`0.057989→0.058106`，episode return为`5.076→5.251`，episode length为`88.02→90.29`。
+这是一点dense imitation改善，但幅度很小，不能称击球学习。
+
+真正业务分母给出相反边界：累计`106,645`个episode全部由`base_fell_tilt`终止；D05
+`110,664`次due/selected分成`97,328`次not-ready defer与`13,336`次reject，ACCEPT/CENSOR均0。
+R03 first-valid、physical observed/contact、launch/playback、R06 settlement、R07 recovery、payment/retire
+全部0。因而当前不是Reward0--13权重太小，而是这些项尚无eligible样本；下一代先修ready producer和
+action identity，不能在分母为0时调稀疏Reward比例。现役run继续200/500/1000/.../25000，以后窗口若
+产生非零业务分母再讨论Reward经济。
+
+### 2026-08-19：portable R03与rough地形采用边界
+
+portable MuJoCo当前把同一postphysics racket site的scene-local position、COM point velocity和+Y normal
+写入R03 achieved row，并由engine-neutral Reward20 kernel计算项0--9；host combined为
+`28 passed,9 GPU skipped`。这证明计算图能消费真实FK，尚不证明73条动作的face方向：当前deterministic
+question没有Isaac action UID、family、mount sign或selected-rubber authority。generic ball-racket contact
+因此保持generic，Reward10--13保持0；下一实现必须复用共享catalog identity与既有保守selected-rubber
+classifier，而不是从generic contact或固定+Y猜拍面。R03 fresh GPU、R06/R07完成以前不发portable长跑。
+
+rough地形不是逐格随机。producer继续使用固定seed的空间相关场、桌侧exact-flat和smooth transition；
+确定性FK发现旧`0.20 m`出生平地小于双脚collision envelope。固定MJCF `70c4fd65…`与ready pose
+`ab6b7e41…`的四个踝部mesh最大XY半径为`0.470508504 m`，所以采用`0.60 m` exact-flat core和
+`0.80 m` blend，包含一个10 cm cell guard；host性质=`14 passed`。这是确定性几何纠错，不做A/B。
+现役nominal run仍为plane；rough只在fresh namespace中按`±5/±10/±20 mm`独立阶段验证2-env foot/table
+几何与4096吞吐，不把shared clone pattern说成per-env curriculum。

@@ -72,9 +72,31 @@ def test_spawn_core_is_exactly_flat():
     x = x_min + np.arange(hf.shape[0]) * TP.HORIZONTAL_SCALE_M
     y = -y_half + np.arange(hf.shape[1]) * TP.HORIZONTAL_SCALE_M
     radius = np.sqrt(np.square(x[:, None]) + np.square(y[None, :]))
-    core = hf[radius <= 0.20 + 1e-9]
+    core = hf[radius <= TP.SPAWN_FLAT_RADIUS_M + 1e-9]
     assert core.size > 0
     assert not core.any()
+
+
+def test_spawn_core_covers_real_ready_foot_colliders_plus_one_cell():
+    hf, (x_min, _, y_half) = _build(seed=7)
+    x = x_min + np.arange(hf.shape[0]) * TP.HORIZONTAL_SCALE_M
+    y = -y_half + np.arange(hf.shape[1]) * TP.HORIZONTAL_SCALE_M
+
+    # Independent exact Pod FK counterexample that failed the retired 0.20 m
+    # core: the two ankle-roll mesh extrema reached this radius.  One full
+    # terrain cell is reserved outside the collider envelope before blending.
+    measured_ready_foot_radius_m = 0.47050850367042957
+    assert (
+        measured_ready_foot_radius_m + TP.HORIZONTAL_SCALE_M
+        < TP.SPAWN_FLAT_RADIUS_M
+    )
+    radius = np.sqrt(np.square(x[:, None]) + np.square(y[None, :]))
+    guarded = hf[
+        radius
+        <= measured_ready_foot_radius_m + TP.HORIZONTAL_SCALE_M + 1.0e-9
+    ]
+    assert guarded.size > 0
+    assert not guarded.any()
 
 
 def test_correlated_surface_is_not_vertex_white_noise():

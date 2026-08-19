@@ -42,8 +42,12 @@ import numpy as np
 HORIZONTAL_SCALE_M = 0.1   # cell size; matches the isaaclab rough-terrain precedent
 VERTICAL_SCALE_M = 0.005   # 5 mm height quantization (= noise step)
 SLOPE_THRESHOLD = 0.75     # vertical-wall correction, isaaclab precedent
-SPAWN_FLAT_RADIUS_M = 0.20
-SPAWN_BLEND_RADIUS_M = 0.40
+# Exact Pod1 CPU FK over the four ready-pose ankle collision meshes reached
+# radius 0.470509 m from the env origin (MJCF 70c4fd65..., ready pose
+# ab6b7e41...).  Keep every collider plus one 10 cm terrain cell on exact
+# flat ground; the old 0.20 m core put both feet in the rough/blend shoulder.
+SPAWN_FLAT_RADIUS_M = 0.60
+SPAWN_BLEND_RADIUS_M = 0.80
 TABLE_BLEND_WIDTH_M = 0.30
 SMOOTHING_PASSES = 4
 X_BACK_M = 3.0             # rough zone reaches this far behind the table near edge

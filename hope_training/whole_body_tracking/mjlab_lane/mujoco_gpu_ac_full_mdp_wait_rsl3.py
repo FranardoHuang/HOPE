@@ -1,8 +1,9 @@
 """Run a bounded upstream RSL-RL 3 call on the real MuJoCo portable environment.
 
 The default remains the historical one-update WAIT call.  ``--full-a`` selects
-the single-shot reveal/launch/flight slice; R03, R06, R07, and their fourteen
-Reward terms remain absent, so neither mode is a complete ActionBall task.
+the single-shot reveal/launch/flight slice with live R03 and Reward ordinals
+0..9.  Selected-rubber contact, R06, R07, and ordinals 10..13 remain absent,
+so neither mode is a complete ActionBall task.
 """
 
 from __future__ import annotations
@@ -241,8 +242,10 @@ def main(
         "launch_rows": "full_a_launch_event",
         "flight_terminal_rows": "full_a_flight_terminal_event",
         "selected_reset_rows": "full_a_selected_reset_event",
-        "contact_eligible_rows": "full_a_contact_eligible_event",
-        "selected_contact_rows": "full_a_selected_contact_event",
+        "racket_contact_eligible_rows": "full_a_racket_contact_eligible_event",
+        "racket_contact_rows": "full_a_racket_contact_event",
+        "r03_present_rows": "full_a_r03_present_event",
+        "r03_physically_valid_rows": "full_a_r03_physically_valid_event",
     }
     evidence_counts = {
         name: torch.zeros((), dtype=torch.long, device=env.device)
@@ -320,24 +323,24 @@ def main(
             for name, valid_steps in evidence_valid_steps.items()
             if valid_steps != evidence_step_count
         )
-        eligible = counts["contact_eligible_rows"]
+        eligible = counts["racket_contact_eligible_rows"]
         payload.update(
             {
                 "full_a_complete": False,
                 "full_a_slice_evidence": {
                     **counts,
-                    "selected_contact_rate": (
-                        counts["selected_contact_rows"] / eligible
+                    "racket_contact_rate": (
+                        counts["racket_contact_rows"] / eligible
                         if eligible > 0
                         else None
                     ),
                     "unmeasured": unmeasured,
                 },
                 "not_produced": {
-                    "r03_strike_fact": True,
+                    "selected_rubber_contact": True,
                     "r06_landing_outcome": True,
                     "r07_recovery": True,
-                    "reward_terms_0_13": True,
+                    "reward_terms_10_13": True,
                 },
             }
         )

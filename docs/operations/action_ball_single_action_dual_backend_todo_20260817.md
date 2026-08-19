@@ -74,13 +74,13 @@ deployment、真机或物理安全。
 
 | 轴 | Isaac FullMDP A | portable MuJoCo WAIT | native MuJoCo A | 当前裁决 |
 | --- | --- | --- | --- | --- |
-| 环境数 | 下一条必须4096；旧证据N=2 | N=2 learn(1) | N=1024×1000 | 未对齐 |
+| 环境数 | 现役4096×25000；旧证据N=2 | N=2 learn(1) | N=1024×1000 | portable仍未对齐 |
 | actor/critic/action | 229/399/31 | 229/399/31 | 114/114/31 | native未对齐 |
 | RSL/PPO | RSL3.1.2 thin adapter | RSL3.1.2 upstream | native trainer | 只对齐前两列训练ABI |
 | reset/plant | FullMDP generation/selected reset | WAIT selected reset已过 | native episode reset | lifecycle未对齐 |
-| question/reveal/launch | 完整producer | 全部缺席，`idle_wait_only` | 简化serve | portable未对齐 |
-| Reward | Reward20 | 仅6项dense有真实值 | 10-term简化Reward | 未对齐 |
-| contact/outcome/recovery | R03/physical/R06/R07 | 尚未接 | 简化binary contact | 未对齐 |
+| question/reveal/launch | 完整producer | host纵切片已逐行reveal并真写launch state | 简化serve | portable仅窄切片 |
+| Reward | Reward20 | host已消费R03项0--9与6项dense；10--13仍零 | 10-term简化Reward | 未对齐 |
+| contact/outcome/recovery | R03/physical/R06/R07 | host R03 + live generic racket contact；selected-rubber/R06/R07缺失 | 简化binary contact | 未对齐 |
 | table终止 | component-OBB SAT | SAT已接 | table contact多为telemetry | native未对齐 |
 | terrain | nominal plane | nominal plane | plane | baseline对齐；rough尚未live |
 
@@ -94,7 +94,7 @@ deployment、真机或物理安全。
 | 3 | `PASS-live-N2` | 真实 `gym.make -> reset -> forced selected reset`：generation `[1,1] -> [2,1]`，selected row reset、peer row不变、obs/reward finite | 进入 PPO smoke |
 | 4 | `PASS-direct` | 397 行 RSL3 adapter direct test：成功顺序、optimizer exception、PENDING fsync failure；Pod host `3 passed` | real `alg.update()` |
 | 5 | `PASS-live-A2x2 / historical-engineering` | Pod1 exact 5.1/8320/RSL3、GPU1、`N=2 × 2 update`自然RC0：exact 2个optimizer update；WAL 4行严格`PENDING0/ACK0/PENDING1/ACK1`；229/399-D obs、Reward20全有限，无poison/nonfinite | 只保留调用点证据；不再续成小N学习run |
-| 6 | `PASS-engineering-N2 / FAIL-scientific-long` | `N=2 × 2`工程门闭合；随后`N=2` A1000只到ACK470并因LM device assert停滞。可信前缀全部finite，但296个episode全tilt、260个admitted opportunity全not-ready、ACCEPT=0；环境数和任务入口都不足以形成学习结论 | 不再重复小N smoke；fresh同一进程直接`4096 × 1000`，前5次只读观察 |
+| 6 | `PASS-engineering-N2 / FAIL-scientific-long` | `N=2 × 2`工程门闭合；随后`N=2` A1000只到ACK470并因LM device assert停滞。可信前缀全部finite，但296个episode全tilt、260个admitted opportunity全not-ready、ACCEPT=0；环境数和任务入口都不足以形成学习结论 | 不再重复小N smoke；现役同一进程已直接进入`4096 × 25000` |
 | 7 | `PASS-host-chain / HOLD-fresh-live` | bootstrap两拍ready仍授权Motion，但不再以neutral key写R07 ActionEpoch telemetry；CPU真实fact→owner projection→Motion reveal→production D05 settle已得到两行ACCEPT、Epoch无overflow。contact/flight/R06 outcome/R07 recovery仍需下一条fresh live分母 | 在4096长跑同一进程观察首个ACCEPT与真实分母；不再为它单开N=2 run |
 | 8 | `HOLD` | portable restore 缺 Motion/Racket/Physical/R03/R06/R07、plant/manager/action history、trainer/optimizer/RNG和pre-gym reader | 不声称 resume |
 | 9 | `PASS-live-step / PASS-live-SAT` | commit `61887b43…` 的fresh Pod1 GPU0共卡门真实完成`19 passed,0 skipped`：N=1 reset/step、N=2 masked reset、float32 device SAT及attached `robot/*` authority全过。run结束仍只有原1个peer，queue lock自然释放 | 保持同一SAT producer；下一步接真实A lifecycle，不再扩identity gate |
@@ -103,7 +103,7 @@ deployment、真机或物理安全。
 | 12 | `PASS-live-native-A1000 / HOLD-portable-A` | native A以`1024 env × 1000`自然完成：后500-update窗口binary racket-ball contact=`4078/87546=4.658%`，明显高于50--100窗口`6/8452=0.071%`；但robot-table episode fraction仍约97%，ABI为114/114、10-term简化Reward，缺WAIT/ActionEpoch/outcome/recovery | 只作下一代吞吐与Reward经济参考；不可写成portable 229/399 FullMDP A成功 |
 | 13 | `PASS-Pod-CUDA` | LM code 8/9 已统一为`lm_solve_info_nonzero/lm_solve_nonfinite`；`dq`非有限、`solve_ex info!=0`以及有限`q+dq`溢出都在任何物理forward前逐行拒绝，正常peer保持不变。exact Pod1 Git `2c8ef444…`、Jiayi Python3.11/Torch2.7-cu128在GPU0得到三参数`3 passed`，每次后续kernel与synchronize正常 | 进入唯一4096同进程；真实异常仍需写row/iteration/try/info以继续收窄 |
 | 14 | `PASS-structural / HOLD-live-business` | RSL3薄adapter升级独立v11 telemetry：compact joint-safety在optimizer前prepare/validate，随后`PENDING fsync -> Epoch ACK -> EPOCH_ACK fsync -> durable latch -> safety ACK`；4096×5单元反例得到5组pair和5份post-ACK receipt | 4096同进程前5次必须独立看到5份v11 safety receipt，并要求真实D05 producer/counter被调用；单元fixture的D05全零不能代签 |
-| 15 | `PASS-live-contact-slice / HOLD-portable-A` | portable MuJoCo新增诚实的`full_a_slice_attempted`纵切片：逐行reveal、真实ball state launch、20-substep plant、live contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。exact Pod1 Git `2c8ef444…`、GPU1节点从measured racket site构造真实ball-racket pair并穿production step/latch，`1 passed`。R03、R06 landing outcome、R07 recovery及Reward项0--13仍明确`not_produced` | 并行逐项接通缺失producer；未闭合前不得称MuJoCo A，但不再阻塞Isaac 4096 A1000 |
+| 15 | `PASS-live-generic-contact / PASS-host-R03 / HOLD-portable-A` | portable MuJoCo的`full_a_slice_attempted`已有逐行reveal、真实ball launch、20-substep plant、live generic racket contact、bounded terminal与selected reset；receipt固定`full_a_complete=false`。当前host又把同一postphysics racket site FK发布为R03 fact，并让engine-neutral Reward20 kernel消费项0--9；MuJoCo focused=`28 passed,9 GPU skipped`。generic contact不冒充selected-rubber；73-action lineage/mount sign、selected-rubber、R06/R07及Reward10--13仍明确缺失 | 下一批先接共享73-action identity和selected-rubber authority，再接R06/R07；fresh GPU R03门通过前不发portable长跑 |
 | 16 | `FAIL-pre-PPO / ROOT-CAUSE-FIXED-HOST` | first 4096 one-shot消费commit `5ee1ffa6…`、wrapper `022c13f5…`和fresh namespace；GPU preexec、sealed archive及真实Kit Python身份通过，但wrapper在`AppLauncher`前导入Torch/RSL，Kit startup后约0.34秒segfault。Hydra已解析4096，scene/PPO/WAL均零调用；这不是容量或Reward失败 | runtime identity改成两阶段：AppLauncher前只验不可变解释器/archive，AppLauncher成功后同一Kit进程才导入并核Torch/RSL，再进入`_run`；新commit/namespace/wrapper可直发同一4096长跑，不复用本次证据 |
 | 17 | `FAIL-pre-App / ROOT-CAUSE-NARROWED` | second 4096 one-shot消费commit `d341931c…`、wrapper `60cfdeed…`和fresh namespace；preexec通过、v2 receipt为空，Kit仍在约2秒内segfault，scene/PPO/WAL零调用。pre-App状态机已证明Torch/RSL未提前导入，所以它不是唯一根因；两次失败共同剩下的异常入口是`python.sh -P -S -B -c runpy(...)` | successor回到成功N2使用的direct script入口，仅保留`-P/-B`和production内pre/post-App attestation；删除Kit Python的`-S/-c/runpy`，仍以fresh namespace直发4096长跑，不插smoke |
 | 18 | `FAIL-post-App-gate / ROOT-CAUSE-EXACT` | third 4096 one-shot消费commit `356f706b…`、wrapper `00e340b7…`和fresh namespace；normal `python.sh -P -B train.py` 已稳定进入AppLauncher并完成约10秒Kit启动，随后production post-App gate拒绝AppLauncher合法加载的Torch。preexec通过、v2 receipt/scene/PPO/WAL仍为零；GPU与锁自然释放 | 不新增门；把post-App门缩到真正必须未加载的RSL/TensorDict，App前仍拒绝Torch/RSL/TensorDict，并继续对App-owned Torch核exact版本与venv来源。新commit/namespace直发同一4096长跑，不插smoke |
@@ -115,7 +115,7 @@ deployment、真机或物理安全。
 | 24 | `FAIL-pre-scene-asset-gate / ROOT-CAUSE-EXACT` | ninth one-shot消费commit `f919ff1d…`、wrapper `d307dc29…`和fresh 25k namespace；GPU preexec、AppLauncher及真实Kit runtime v2 attestation全部通过，随后cfg构造把run-private资产快照路径误拒为“不是code-owned固定路径”。scene/PPO/WAL仍为0，result自然RC1。源目录与快照13个文件逐字相同，`model.usd` SHA均为`a3cd3829…8140` | 删除路径字符串相等这一错对象gate；无参production consumer改为对`HOPE_AGIBOT_A3_USD_PATH`实际指向的canonical、non-symlink目录运行同一个tracked producer，以代码内固定URDF/STL/asset-hash重建并验实际bytes。几何clone消费同一已验快照；旧namespace不复用 |
 | 25 | `FAIL-pre-PPO / ROOT-CAUSE-EXACT` | commit `53156327…`首次完成4096 scene、229/399 observation、Reward20与真实Kit/RSL runtime attestation；约25分钟后runner构造发现live `joint_pos`没有通过新compact producer identity门。`preexec_passed=1`、`runtime_attested=1`，但PPO/WAL均为0，result自然RC1；GPU和锁已自然释放 | exact IsaacLab源码证明live class继承`ManagerTermBase(ABC)`，旧adapter却要求metaclass恰好为`type`，形成必错gate；compact仍由`train.py` runtime binding唯一写。successor只修为type实例+exact module/name+live object identity，并保留env0 source审计与逐env binding，直接fresh 4096×25000 |
 | 26 | `FAIL-pre-scene / WRONG-OWNER-FIX-REJECTED` | commit `75b18ba2…`、wrapper `29986b0f…`、fresh namespace在runtime v2后、scene前自然RC1；task cfg预写compact被`train.py`唯一writer门精确拒绝。result SHA=`993031e5…ae2ed`，PPO/WAL为0、GPU/锁释放 | 封存且不重试；撤掉task duplicate writer。该失败反证“多处复制同一安全状态”会增加一致性成本，不把它算容量或学习证据 |
-| 27 | `RUNNING-live-A4096x25000 / ENGINEERING-WINDOW-PASS` | fresh commit `b64cb944…`在Pod1 GPU0、独立CPU32--47进入同一4096×25000进程；update0--8已有9组完整v11 `PENDING/EPOCH_ACK`与post-safety receipt，累计884,736 transitions，Reward `884,736/884,736` finite、0 nonfinite、0 conservation violation。D05真实due/selected=12,288，但10,836 not-ready defer、1,452 reject、ACCEPT=0；8,192个结束episode暂全为base tilt | 不停机、不换seed、不热改；继续同一进程到20/50/100/200/500/1000/.../25000只读。1000只是趋势里程碑，不是终点。任务分母尚未进入时只记事实，不用前9个update判不可学 |
+| 27 | `RUNNING-live-A4096x25000 / A100-ENGINEERING-PASS / BUSINESS-ZERO` | fresh commit `b64cb944…`在Pod1 GPU0、独立CPU32--47运行同一4096×25000进程。A100有100组完整v11 pair、9,830,400 transitions，Reward全部finite、0 nonfinite、0 conservation violation。0--49→50--99窗口每transition Reward=`0.057989→0.058106`，episode return=`5.076→5.251`、length=`88.02→90.29`；但累计106,645个episode全部base tilt，110,664次D05 selected=`97,328 not-ready defer + 13,336 reject`，ACCEPT/launch/R03/physical/R06/R07全0 | 不停机、不换seed、不热改；继续200/500/1000/.../25000。轻微dense趋势不能掩盖业务分母为零；下一代并行修ready producer而非继续加smoke |
 
 ## 5. 下一条发射协议
 
@@ -358,12 +358,15 @@ physical-device/runtime`六个单体分别约32.6k/20.1k/16.3k/14.6k/13.3k/11.3k
 旧10 cm网格逐顶点独立`±2 cm`高度是白噪声地面，不是可解释的真实地形。producer现已改成固定seed的
 空间相关场：四次box smoothing、出生圆岛exact flat、桌侧exact flat、两处smoothstep过渡，并用固定
 IID反例证明相邻格相关而非白噪声；plant identity改为`robot_side_correlated_spawn_flat_v2`，禁止旧rough
-checkpoint静默resume。host性质测试`13 passed`，training-contract回归`145 passed`。
+checkpoint静默resume。host性质测试现在为`14 passed`，training-contract历史回归`145 passed`。
 
 当前FullMDP nominal配置本来就是plane；上述修改只有显式`terrain_rough_height_range`时才生效，所以
 不会解释或改变旧N=2失败。下一条4096 nominal长跑仍用plane；rough必须用新namespace、新plant identity，
-按`plane -> ±5 mm -> ±10 mm -> ±20 mm`独立阶段启用。启用前还要用live A3双脚包络验证0.20 m出生平地
-半径，并做Isaac 2-env足底穿透/桌体对齐与4096吞吐；不把共享clone mesh伪装成逐env动态curriculum。
+按`plane -> ±5 mm -> ±10 mm -> ±20 mm`独立阶段启用。exact Pod1 CPU FK已对固定MJCF
+`70c4fd65…`与ready pose `ab6b7e41…`计算四个踝部collision mesh：最大XY半径为
+`0.470508504 m`。producer据此把出生exact-flat半径从错误的`0.20 m`改为`0.60 m`，外接到`0.80 m`
+的smooth blend；这覆盖全部足部包络再加一个`0.10 m`地形cell guard。仍需fresh Isaac 2-env足底穿透/
+桌体对齐和4096 rough吞吐；不把共享clone mesh伪装成逐env动态curriculum，也不热改现役plane run。
 
 ## 9. 存储边界
 

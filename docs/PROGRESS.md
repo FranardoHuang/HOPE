@@ -1,16 +1,20 @@
 # 简短进度记录
 
-## 2026-08-19 — 下一代代码面收口，运行面仍HOLD
+## 2026-08-19 — Isaac 4096×25000到A100；MuJoCo R03与rough修正并行推进
 
-- LM reason 8/9共享ABI已统一；info失败、NaN/Inf和finite-add overflow都在physical forward前逐行拒绝。
-  host独立回归全部通过；三类CUDA context-survival已合并为同一Pod参数化节点，尚未实跑，不能发4096。
-- RSL3薄adapter新增v11 compact joint-safety事务；portable MuJoCo新增诚实的Full-A首纵切片。后者仍明确
-  缺R03/R06/R07与Reward0--13，receipt固定`full_a_complete=false`；exact Pod live-contact节点仍待跑。
-- 因“下一代准备好、MuJoCo没有遗漏、TODO闭合”三项尚未同时成立，本轮没有signal旧失败run，也没有
-  启动新run。下一条仍是唯一fresh `4096×1000`同进程，前5次只读观察后自然继续。
-- Pod1 clean Git `2c8ef444…`已补齐两项runtime证据：Jiayi Python3.11/Torch2.7 CUDA LM三类失败
-  `3 passed`；MuJoCo GPU measured-racket live pair→production step/latch `1 passed`。旧训练PID已自然消失，
-  三张GPU均空，未发signal。portable MuJoCo仍诚实保留R03/R06/R07/Reward0--13缺口。
+- fresh Isaac commit `b64cb944…`在同一`4096 env × 25000 update`进程自然到A100：9,830,400个Reward
+  sample全部finite、0 nonfinite、0 conservation violation。50--99窗口dense Reward、episode return/length
+  略高于0--49，但106,645个episode仍全tilt，110,664次D05 selected中ACCEPT=0，R03/launch/contact/
+  outcome/recovery全0。工程链通过、业务入口未启动；进程继续200/500/1000/.../25000，1000不停车。
+- portable MuJoCo在诚实`full_a_complete=false`纵切片上接入真实postphysics racket FK的R03 fact，并由
+  engine-neutral Reward20 kernel消费项0--9；generic racket contact不再命名为selected-rubber。host
+  MuJoCo=`28 passed,9 GPU skipped`。共享73-action identity/mount sign、selected-rubber、R06/R07和
+  Reward10--13仍缺失，所以portable长跑继续HOLD。
+- rough地形保持相关场，不使用逐格白噪声。exact MJCF/ready-pose FK测得足部collision envelope半径
+  `0.470508504 m`；出生平地改为`0.60 m` exact core、`0.80 m` blend，覆盖一格10 cm guard，terrain
+  性质=`14 passed`。现役Isaac仍是plane；rough只在fresh独立阶段做2-env几何和4096吞吐后启用。
+- 旧失败PID已自然消失，本轮未signal、未热补活跃run、未复用namespace。2.0瘦身仍等两边长跑保护后，
+  按production callpoint census删除legacy RSL2/重复validator/无restore消费者的carry与重复receipt。
 
 ## 2026-08-18 — 4096长跑口径更正；相关地形producer完成host门
 

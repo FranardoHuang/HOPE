@@ -1,14 +1,15 @@
-"""First MuJoCo FullMDP slice: one real reset and the 229/399 WAIT view.
+"""MuJoCo FullMDP WAIT plus an explicit incomplete single-shot A slice.
 
 The plant, masked reset implementation, and ``sim.forward()`` remain the
-tracked :class:`A3ReadyBallVecEnv` implementation.  This subclass only parks
-the ball and projects the post-forward live robot tensors into the shared
-ActionEpoch observation order.  Task, epoch, physical-fact, and reward rows
-are zero because no question has been revealed in this slice.
+tracked :class:`A3ReadyBallVecEnv` implementation.  WAIT parks the ball and
+projects the post-forward live robot tensors into the shared ActionEpoch
+observation order.  The opt-in A slice additionally reveals and launches one
+deterministic question, publishes live Physical and R03 FK facts, and computes
+Reward20 ordinals 0..9 plus the six common motion terms.
 
 The narrow WAIT transition below advances the real plant and closes only the
-IDLE Reward20/termination/masked-reset path.  Reveal, launch, shot facts, and
-the training runner remain unavailable.
+IDLE Reward20/termination/masked-reset path.  Selected-rubber contact, R06,
+R07, and Reward ordinals 10..13 remain explicitly unavailable.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ if str(_MDP) not in sys.path:
     sys.path.insert(0, str(_MDP))
 
 import action_ball_full_mdp_portable_observation as observation_contract
+import action_ball_full_mdp_portable_reward as portable_reward
 
 
 WAIT_BALL_PARK_HOPE = (0.0, 0.0, 10.0)
@@ -145,6 +147,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._fullmdp_body_root_ids = self._torch.tensor(
             roots, dtype=self._torch.long, device=self.device
         )
+        self._fullmdp_racket_body_id = int(self.mj_model.site_bodyid[self.racket_sid])
+        self._fullmdp_racket_root_id = int(
+            self.mj_model.body_rootid[self._fullmdp_racket_body_id]
+        )
         self._fullmdp_anchor_index = FULLMDP_TRACKED_BODY_NAMES.index(
             FULLMDP_ANCHOR_BODY_NAME
         )
@@ -197,26 +203,47 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._epoch_clock_ticks = torch.full(
             (n, 5), -1, dtype=torch.long, device=self.device
         )
-        self._full_a_physical_present = torch.zeros(
-            n, dtype=torch.bool, device=self.device
+        self._full_a_owner_valid_bits = torch.zeros(
+            (n, portable_reward.OWNER_COUNT), dtype=torch.long, device=self.device
         )
-        self._full_a_physical_source_step = torch.full(
-            (n,), -1, dtype=torch.long, device=self.device
+        self._full_a_owner_fault_bits = torch.zeros_like(
+            self._full_a_owner_valid_bits
         )
-        self._full_a_physical_fact_f32 = torch.zeros(
-            (n, observation_contract.OWNER_FACT_F32_WIDTH),
+        self._full_a_owner_source_step = torch.full_like(
+            self._full_a_owner_valid_bits, -1
+        )
+        self._full_a_owner_fact_f32 = torch.zeros(
+            (
+                n,
+                portable_reward.OWNER_COUNT,
+                portable_reward.OWNER_FACT_F32_WIDTH,
+            ),
             dtype=dtype,
             device=self.device,
         )
+        self._full_a_physical_present = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._full_a_physical_source_step = self._full_a_owner_source_step[:, 0]
+        self._full_a_physical_fact_f32 = self._full_a_owner_fact_f32[:, 0]
+        self._full_a_r03_present = torch.zeros_like(self._full_a_physical_present)
+        self._full_a_r03_physically_valid = torch.zeros_like(
+            self._full_a_physical_present
+        )
+        self._full_a_r03_armed = torch.zeros_like(self._full_a_physical_present)
+        self._full_a_r03_expected_source_step = torch.full(
+            (n,), -1, dtype=torch.long, device=self.device
+        )
+        self._full_a_r03_fact_f32 = self._full_a_owner_fact_f32[:, 1]
         self._full_a_launch_state_f32 = torch.zeros((n, 13), dtype=dtype, device=self.device)
         self._full_a_observation_ordinal = torch.zeros(
             n, dtype=torch.long, device=self.device
         )
-        self._full_a_selected_contact = torch.zeros(
+        self._full_a_racket_contact = torch.zeros(
             n, dtype=torch.bool, device=self.device
         )
         self._full_a_ball_table_contact = torch.zeros_like(
-            self._full_a_selected_contact
+            self._full_a_racket_contact
         )
         self._full_a_contact_center = torch.zeros((n, 3), dtype=dtype, device=self.device)
         self._full_a_outcome_code = torch.zeros(n, dtype=torch.long, device=self.device)
@@ -280,6 +307,23 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         task[:, 32:] = state
         self._epoch_task_f32[ids] = task
 
+        r03 = self._full_a_r03_fact_f32[ids]
+        r03.zero_()
+        r03[:, 0:3] = racket[:, 0:3]
+        r03[:, 3:6] = racket[:, 3:6]
+        r03[:, 6:9] = racket[:, 6:9]
+        r03[:, 9:12] = racket[:, 9:12]
+        r03[:, 12:15] = racket[:, 12:15]
+        target_finite = torch.isfinite(r03[:, :15]).all(dim=1)
+        normal_unit = torch.isclose(
+            torch.linalg.vector_norm(r03[:, 6:9], dim=1),
+            torch.ones(n, dtype=r03.dtype, device=r03.device),
+            rtol=0.0,
+            atol=1.0e-4,
+        )
+        self._full_a_r03_armed[ids] = True
+        self._full_a_r03_physically_valid[ids] = target_finite & normal_unit
+
         reveal = int(self.common_step_counter)
         launch = reveal + 1
         deadline = launch + max(1, int(round(FULL_A_FLIGHT_HORIZON_S / self.step_dt)))
@@ -289,6 +333,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._epoch_clock_ticks[ids, 2] = launch
         self._epoch_clock_ticks[ids, 3] = deadline
         self._epoch_clock_ticks[ids, 4] = deadline + 1
+        self._full_a_r03_expected_source_step[ids] = reveal + 1
         self._epoch_phase[ids] = FULL_A_PHASE_REVEAL_COMMITTED
         self._epoch_task_valid[ids] = True
         self._epoch_selected[ids] = True
@@ -329,13 +374,89 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         racket_count.scatter_add_(0, world, (ball & self._geom_class[other].eq(1)).float())
         table_count.scatter_add_(0, world, (ball & self._geom_class[other].eq(2)).float())
         active = self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
-        first_contact = active & racket_count.gt(0) & ~self._full_a_selected_contact
+        first_contact = active & racket_count.gt(0) & ~self._full_a_racket_contact
         center = self.sim.data.qpos[:, self.b_q : self.b_q + 3]
         self._full_a_contact_center.copy_(
             torch.where(first_contact[:, None], center, self._full_a_contact_center)
         )
-        self._full_a_selected_contact |= active & racket_count.gt(0)
+        self._full_a_racket_contact |= active & racket_count.gt(0)
         self._full_a_ball_table_contact |= active & table_count.gt(0)
+
+    def _full_a_racket_kinematics(self):
+        """Return live scene-local racket site position, velocity, and raw +Y."""
+
+        data = self.sim.data
+        position = data.site_xpos[:, self.racket_sid]
+        rotation = data.site_xmat[:, self.racket_sid].reshape(
+            self.num_envs, 3, 3
+        )
+        angular = data.cvel[:, self._fullmdp_racket_body_id, :3]
+        linear_at_subtree_com = data.cvel[
+            :, self._fullmdp_racket_body_id, 3:
+        ]
+        subtree_com = data.subtree_com[:, self._fullmdp_racket_root_id]
+        velocity = linear_at_subtree_com + self._torch.cross(
+            angular, position - subtree_com, dim=1
+        )
+        origins = self.env.scene.env_origins
+        normal = rotation[:, :, 1]
+        normal = normal / self._torch.linalg.vector_norm(
+            normal, dim=1, keepdim=True
+        ).clamp_min(1.0e-6)
+        return position - origins, velocity, normal
+
+    def _full_a_publish_r03_fact(self):
+        """Publish the armed question against one real post-physics racket FK."""
+
+        due = self._full_a_r03_armed & (
+            self._full_a_r03_expected_source_step
+            <= int(self.common_step_counter)
+        )
+        position, velocity, normal = self._full_a_racket_kinematics()
+        achieved_finite = (
+            self._torch.isfinite(position).all(dim=1)
+            & self._torch.isfinite(velocity).all(dim=1)
+            & self._torch.isfinite(normal).all(dim=1)
+        )
+        safe = due & achieved_finite
+        fact = self._full_a_r03_fact_f32
+        zero = self._torch.zeros_like(position)
+        fact[:, 15:18] = self._torch.where(safe[:, None], position, zero)
+        fact[:, 18:21] = self._torch.where(safe[:, None], velocity, zero)
+        fact[:, 21:24] = self._torch.where(safe[:, None], normal, zero)
+        bits = (
+            safe.to(self._torch.long) * portable_reward.R03_PRESENT
+            + (safe & self._full_a_r03_physically_valid).to(self._torch.long)
+            * portable_reward.R03_PHYSICALLY_VALID
+        )
+        self._full_a_owner_valid_bits[:, 1] = bits
+        self._full_a_owner_fault_bits[:, 1] = (
+            due & ~achieved_finite
+        ).to(self._torch.long)
+        self._full_a_owner_source_step[:, 1] = self._torch.where(
+            safe,
+            self._torch.full_like(
+                self._full_a_r03_expected_source_step,
+                int(self.common_step_counter),
+            ),
+            self._torch.full_like(self._full_a_r03_expected_source_step, -1),
+        )
+        self._full_a_r03_present.copy_(safe)
+        # The current task remains armed for every next transition until its
+        # selected reset, matching the Isaac Racket command tail rather than
+        # freezing one early FK sample for the whole shot.
+        self._full_a_r03_armed.copy_(self._epoch_task_valid)
+        self._full_a_r03_expected_source_step.copy_(
+            self._torch.where(
+                self._epoch_task_valid,
+                self._torch.full_like(
+                    self._full_a_r03_expected_source_step,
+                    int(self.common_step_counter) + 1,
+                ),
+                self._torch.full_like(self._full_a_r03_expected_source_step, -1),
+            )
+        )
+        return safe, safe & self._full_a_r03_physically_valid
 
     def _full_a_publish_physical_fact(self) -> None:
         active = self._epoch_task_valid & self._epoch_launch_succeeded
@@ -343,7 +464,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         values = self._full_a_physical_fact_f32
         values[:, :3] = self._torch.where(active[:, None], center, self._torch.zeros_like(center))
         values[:, 3:6] = self._torch.where(
-            self._full_a_selected_contact[:, None],
+            self._full_a_racket_contact[:, None],
             self._full_a_contact_center,
             self._torch.zeros_like(self._full_a_contact_center),
         )
@@ -355,6 +476,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._torch.zeros_like(values[:, 9]),
         )
         self._full_a_physical_present.copy_(active)
+        self._full_a_owner_valid_bits[:, 0] = (
+            active.to(self._torch.long) * portable_reward.PHYSICAL_PRESENT
+        )
+        self._full_a_owner_fault_bits[:, 0] = 0
         self._full_a_physical_source_step.copy_(
             self._torch.where(
                 active,
@@ -649,32 +774,22 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 for name, width in observation_contract.CRITIC_EXTENSION_LAYOUT_V1
             }
         if self._fullmdp_initialized and self.full_a_mode:
-            present = torch.zeros(
-                (self.num_envs, 4), dtype=torch.bool, device=self.device
-            )
-            present[:, 0] = self._full_a_physical_present
-            age = torch.zeros(
-                (self.num_envs, 4), dtype=joint_pos_rel.dtype, device=self.device
-            )
-            age[:, 0] = torch.where(
-                self._full_a_physical_present,
+            present = self._torch.bitwise_and(
+                self._full_a_owner_valid_bits, 1
+            ).ne(0)
+            age = torch.where(
+                present,
                 (
                     int(self.common_step_counter)
-                    - self._full_a_physical_source_step
+                    - self._full_a_owner_source_step
                 ).to(joint_pos_rel.dtype) * self.step_dt,
-                torch.zeros_like(age[:, 0]),
+                torch.zeros_like(self._full_a_owner_source_step, dtype=joint_pos_rel.dtype),
             )
-            facts = torch.zeros(
-                (self.num_envs, 4, observation_contract.OWNER_FACT_F32_WIDTH),
-                dtype=joint_pos_rel.dtype,
-                device=self.device,
-            )
-            facts[:, 0] = self._full_a_physical_fact_f32
             critic_rows["physical_r03_r06_r07_fact_present"] = present.to(
                 joint_pos_rel.dtype
             )
             critic_rows["physical_r03_r06_r07_fact_age_s"] = age
-            critic_rows["physical_r03_r06_r07_fact_f32"] = facts.reshape(
+            critic_rows["physical_r03_r06_r07_fact_f32"] = self._full_a_owner_fact_f32.reshape(
                 self.num_envs, -1
             )
         critic_extension = observation_contract.concatenate_layout_rows(
@@ -766,6 +881,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         terms = torch.zeros(
             (self.num_envs, 20), dtype=raw.dtype, device=self.device
         )
+        if getattr(self, "full_a_mode", False):
+            terms[:, :14] = portable_reward.lifecycle_reward14(
+                valid_bits=self._full_a_owner_valid_bits,
+                fact_f32=self._full_a_owner_fact_f32,
+                owner_fault_bits=self._full_a_owner_fault_bits,
+                step_dt=self.step_dt,
+            )
         terms[:, 14:] = configured
         reward = terms.sum(dim=1)
         if not bool(torch.isfinite(terms).all()):
@@ -807,11 +929,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._epoch_task_f32[ids] = 0.0
             self._epoch_clock_ticks[ids] = -1
             self._full_a_physical_present[ids] = False
-            self._full_a_physical_source_step[ids] = -1
-            self._full_a_physical_fact_f32[ids] = 0.0
+            self._full_a_owner_valid_bits[ids] = 0
+            self._full_a_owner_fault_bits[ids] = 0
+            self._full_a_owner_source_step[ids] = -1
+            self._full_a_owner_fact_f32[ids] = 0.0
+            self._full_a_r03_present[ids] = False
+            self._full_a_r03_physically_valid[ids] = False
+            self._full_a_r03_armed[ids] = False
+            self._full_a_r03_expected_source_step[ids] = -1
             self._full_a_launch_state_f32[ids] = 0.0
             self._full_a_observation_ordinal[ids] = 0
-            self._full_a_selected_contact[ids] = False
+            self._full_a_racket_contact[ids] = False
             self._full_a_ball_table_contact[ids] = False
             self._full_a_contact_center[ids] = 0.0
             self._full_a_outcome_code[ids] = FULL_A_OUTCOME_NONE
@@ -878,7 +1006,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
 
         torch = self._torch
         reveal_event, launch_event = self._full_a_prepare_step()
-        contact_before = self._full_a_selected_contact.clone()
+        contact_before = self._full_a_racket_contact.clone()
         incoming = actions.to(self.device)
         requested_qdes = self.q_ready.unsqueeze(0) + self.act_scale * incoming
         finite_qdes = torch.isfinite(requested_qdes)
@@ -894,15 +1022,16 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         terminated, truncated, terminal_bits, resolved_table_contact = (
             self._fullmdp_termination(st, requested_qdes)
         )
-        reward, reward_terms = self._fullmdp_reward20()
         self._full_a_publish_physical_fact()
+        r03_present_event, r03_valid_event = self._full_a_publish_r03_fact()
+        reward, reward_terms = self._fullmdp_reward20()
         shot_terminal, outcome = self._full_a_settle_outcome(st)
-        contact_event = self._full_a_selected_contact & ~contact_before
+        contact_event = self._full_a_racket_contact & ~contact_before
         terminated |= shot_terminal
         dones = terminated | truncated
         selected_reset = dones & self._epoch_selected
         terminal_phase = self._epoch_phase.clone()
-        selected_contact = self._full_a_selected_contact.clone()
+        racket_contact = self._full_a_racket_contact.clone()
         table_contact = self._full_a_ball_table_contact.clone()
         physical_center = self._full_a_physical_fact_f32[:, :3].clone()
         reset_ids = dones.nonzero(as_tuple=False).squeeze(-1)
@@ -926,15 +1055,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "reset_generation": self.reset_generation.clone(),
             "full_a_phase_before_reset": terminal_phase,
             "full_a_outcome_code": outcome,
-            "full_a_selected_contact": selected_contact,
+            "full_a_racket_contact": racket_contact,
             "full_a_ball_table_contact": table_contact,
             "full_a_physical_current_center": physical_center,
             "full_a_reveal_event": reveal_event,
             "full_a_launch_event": launch_event,
             "full_a_flight_terminal_event": shot_terminal,
             "full_a_selected_reset_event": selected_reset,
-            "full_a_contact_eligible_event": launch_event,
-            "full_a_selected_contact_event": contact_event,
+            "full_a_racket_contact_eligible_event": launch_event,
+            "full_a_racket_contact_event": contact_event,
+            "full_a_r03_present_event": r03_present_event,
+            "full_a_r03_physically_valid_event": r03_valid_event,
         }
         return self.get_observations(), reward, dones.long(), extras
 
