@@ -2451,12 +2451,15 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         # immediate reset.  Traverse every real age 1..77 so the GPU test
         # proves the exact 68 R07 cells rather than fabricating ledger state.
         recovery_origin = int(env._full_a_recovery_origin_step[0])
-        assert int(env.common_step_counter) - recovery_origin == 0
+        initial_age = int(env.common_step_counter) - recovery_origin
+        assert 0 <= initial_age < wait_env.FULL_A_RECOVERY_START_AGE_TICK
         episode_before = env.episode_length_buf.clone()
         env._reset_idx = lambda _ids: pytest.fail(
             "shot completion must not call the Gym environment reset"
         )
-        for expected_age in range(1, wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1):
+        for expected_age in range(
+            initial_age + 1, wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1
+        ):
             _, _, dones2, last = _assert_full_a_step_surface(
                 env.step(zero), num_envs=1
             )
@@ -2480,7 +2483,9 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         )
         assert env.reset_generation[0] == generation[0] + 1
         assert env.episode_length_buf[0] == (
-            episode_before[0] + wait_env.FULL_A_RECOVERY_END_AGE_TICK
+            episode_before[0]
+            + wait_env.FULL_A_RECOVERY_END_AGE_TICK
+            - initial_age
         )
     finally:
         env.close()
@@ -2609,13 +2614,16 @@ def test_real_full_a_n2_selected_outcome_reset_preserves_peer_rows():
             == wait_env.FULL_A_PHASE_OUTCOME_SETTLED
         )
         recovery_origin = int(env._full_a_recovery_origin_step[0])
-        assert int(env.common_step_counter) - recovery_origin == 0
+        initial_age = int(env.common_step_counter) - recovery_origin
+        assert 0 <= initial_age < wait_env.FULL_A_RECOVERY_START_AGE_TICK
         generation_before = env.reset_generation.clone()
         episode_before = env.episode_length_buf.clone()
         env._reset_idx = lambda _ids: pytest.fail(
             "selected shot reset must not call the Gym environment reset"
         )
-        for expected_age in range(1, wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1):
+        for expected_age in range(
+            initial_age + 1, wait_env.FULL_A_RECOVERY_END_AGE_TICK + 1
+        ):
             _, _, dones, extras = _assert_full_a_step_surface(
                 env.step(zero), num_envs=2
             )
@@ -2637,7 +2645,9 @@ def test_real_full_a_n2_selected_outcome_reset_preserves_peer_rows():
         assert extras["reset_generation"][1] == peer_generation
         assert torch.equal(
             env.episode_length_buf,
-            episode_before + wait_env.FULL_A_RECOVERY_END_AGE_TICK,
+            episode_before
+            + wait_env.FULL_A_RECOVERY_END_AGE_TICK
+            - initial_age,
         )
         assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_IDLE
         _, _, next_dones, next_extras = _assert_full_a_step_surface(

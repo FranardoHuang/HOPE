@@ -111,7 +111,10 @@
    commit `3534eeb0…`的fresh successor已越过构造并完成首个真实Full-A step，但GPU-only extras exact-key
    fixture漏列生产字段`full_a_landing_opponent_bound`，在物理断言前结果=`1 failed`、RC=1；namespace
    `mujoco-fullmdp-gpu-gate.3534eeb0.Pod1GPU0Slot2Taskset.GqVOyqcQ`封存不重试。tests-only补齐exact集合后仍须
-   fresh commit/namespace重新跑三个Full-A节点；
+   fresh commit/namespace重新跑三个Full-A节点。commit `66bc4c87…`已越过构造、extras、launch与outcome，
+   但fixture把deadline锚点后的真实初始age=1错写成0，结果=`1 failed`、RC=1；namespace
+   `mujoco-fullmdp-gpu-gate.66bc4c87.Pod1GPU0Slot2Taskset.DCj7RXfQ`封存。tests-only现从真实initial age
+   逐步跑到77，仍要求age10--77 exact 68格；
 5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在；在上述真实GPU
    纵切片通过前不生成长跑success receipt。
 

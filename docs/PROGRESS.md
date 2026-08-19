@@ -4396,3 +4396,6 @@
 - constructor fix commit `3534eeb0…`的fresh GPU0 gate已越过构造并完成第一步Full-A，但GPU-only extras
   exact-key fixture漏列生产字段`full_a_landing_opponent_bound`，在真实contact/R07断言前`1 failed`、RC=1；
   namespace封存不重试。tests-only修正加入该字段，production 0行变化，仍需fresh commit/namespace。
+- tests-only commit `66bc4c87…`的fresh gate已真实越过构造、extras、launch和outcome，随后因fixture把deadline
+  锚点后的initial R07 age=1写死为0而`1 failed`、RC=1；namespace封存。修正从真实initial age逐step到77，
+  仍要求age10--77的68格全present/eligible及末格非终止selected reset，production 0行变化。

@@ -2114,3 +2114,9 @@ constructor fix的fresh commit `3534eeb0…`随后在同一slot新namespace
 GPU-only test随后在生产physics断言前被自己的extras exact-key集合拒绝，因为该集合漏列生产已经发布的
 `full_a_landing_opponent_bound`。结果=`1 failed`、RC=1，该namespace封存不重试。tests-only窄修把该字段
 加入exact集合；production 0行变化，仍须fresh commit/namespace执行三个节点。
+
+tests-only successor `66bc4c87…`再次越过构造、exact extras、launch与outcome，然后在R07循环前被fixture的
+`initial_age==0`断言拒绝；真实deadline锚点为tick 1，而该step结束后common counter已到2，所以正确年龄为1。
+结果=`1 failed`、RC=1，namespace `mujoco-fullmdp-gpu-gate.66bc4c87.Pod1GPU0Slot2Taskset.DCj7RXfQ`
+封存不重试。修正仅让GPU test从真实`initial_age+1`推进至77，仍硬验age 10--77共68个present/eligible格、
+末格非终止selected reset及精确episode增量；production仍0行变化。
