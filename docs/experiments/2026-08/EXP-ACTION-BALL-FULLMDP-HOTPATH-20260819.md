@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`profiled / first-semantics-preserving-cut-host-validated`
-> 证据等级：E2 fresh Pod profiler + E1源码/host反例；首个瘦身cut仍待Pod配对
+> 状态：`profiled / zero-flight-host-validated / Pod-matched-wall-pending`
+> 证据等级：E2 fresh Pod profiler + E1源码/host fixed-tape；zero-flight Pod wall仍未测
 
 ## 1. 采用、延后、拒绝
 
@@ -123,11 +123,13 @@ profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.
 
 ## 6. 下一步
 
-1. commit/push当前single-read/clone瘦身cut，使用自然空闲GPU0和fresh namespace启动同样`4096×25000` successor；
-   旧GPU1 run在successor真实通过前继续只读，不因普通坏return而停。
-2. 消费successor前5个profile row，并比较profile自动关闭后的matched collection；没有净收益就撤回，不靠主观保留。
-3. 后续依次做可证明且能配对drain的empty-flight no-op、selected-reset compact transaction、cold/update-boundary owner validation、
-   Reward/obs批处理。
+1. commit/push当前成对zero-live-flight candidate；在exact Pod先跑fixed-tape/RNG/reason/counter/safety parity，
+   再用fresh namespace做profiler-off `4096×24` matched wall。旧run在successor真实通过前继续只读，
+   不因普通坏return而停。
+2. 只有Pod parity和matched wall都通过，才把zero-flight successor称为严格更强并停旧run；没有净收益就撤回，
+   不靠host测试或主观保留。
+3. 后续依次做selected-reset compact transaction、cold/update-boundary owner validation和Reward/obs批处理；
+   先不再给现有cross-owner graph叠加第五层token。
 4. MuJoCo并行先完成action0 question/teacher，再合并contact census；R06/R07/Reward11--13闭合前不叫Full-A长跑。
 
 ## 7. `ddb1e7c4` successor实测：single-read cut没有打中首墙
@@ -169,3 +171,35 @@ science telemetry逐字同为mean reward=`5.44`、mean episode length=`92.99`、
 
 不同物理卡仍可能贡献噪声，因此这不证明cut本身“变慢”；但它明确没有达到采用所需的可测净收益，更没有
 接近6秒目标。两条run继续只读，single-read cut不作为性能胜利；下一candidate只准针对完整empty-flight事务。
+
+## 8. zero-live-flight成对idle路径：host语义已闭合，Pod wall未测
+
+zero-live-flight是“下一个control step没有任何Physical、R06或scene callback业务”，不是
+`pending is None`的Python快捷判断。实现在D05 settle之后、每个control boundary只做一次合并
+device-to-host verdict：同时检查Physical pending/published/lifecycle/active slot/selected-contact、
+R06 live state与scene callback activity。任一输入的shape/dtype/device/chronology不合同或读取失败
+都先清旧cache并fail dense，不会沿用上一control的idle结论。
+
+只有上述writers全部为空时，本control的四个physics substep才走成对轻量路径：
+
+- prephysics打开一个与当前callback epoch绑定的idle fact-source；
+- postphysics清理candidate/binding fault、关闭binding，并严格推进scene heartbeat fence、scene exact
+  stamp和Physical exact stamp；
+- 不读/写scene state tensor，不构造Physical facts packet，不做空R06 publish/retire、全false
+  Epoch journal或false-mask full-grid ball write。
+
+mixed/full、false→D05 ACCEPT、active flight、retire所在control或任何sticky fault仍走原完整dense
+path；selected reset、true reset、restore会使cache失效，checkpoint不能穿过未配对的idle lease。
+空R06 mutation与全false Epoch journal没有科学consumer，所以本路径不为旧结构伪造它们；
+229/399 observation、Reward20、done/reason/reset/RNG和decoded evidence仍保持同义。
+
+host zero-flight三个focused文件各用独立Python进程，避免既有flat/package双namespace测试收集冲突；
+回归为`112 passed, 4 skipped` / 约4秒。更宽的consumer semantic回归为
+`166 passed, 8 skipped` / 约8秒。反例覆盖idle→ACCEPT→active→retire→idle、R06-live/Physical-empty、
+pre/post缺失、重复/倒序stamp、callback heartbeat/candidate、selected reset、restore/checkpoint与mixed/full
+fixed tape。这些只是host语义证据：exact Pod fixed-tape与profiler-off `4096×24` matched wall均
+仍`未测`，因此尚不声称从22秒恢复到6--9秒，也不声称严格支配active run。
+
+后续steady hot path每新增一个`.clone/.item/.cpu/.nonzero/full-N write`，都必须同时记录它的
+频率×shape和profile证据；一个事实只保留一个mutable owner，证据汇总尽量放在control/PPO
+boundary，不再把无业务事件的结构自证写回每个physics substep。

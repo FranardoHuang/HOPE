@@ -33,11 +33,17 @@ CONTROL ABI
 The vendor's actuators are pure torque motors and the deployed controller
 computes the PD itself.  We do the same, once per *physics* step (1 kHz):
 
-    q_des = clamp(q_ready + action_scale * a, joint_range)      # 50 Hz
+    q_raw = action_offset + action_scale * a                    # 50 Hz
+    q_des = clamp(finite_or_previous_action(q_raw), joint_range)# 50 Hz
     tau   = clamp(kp*(q_des - q) - kd*qd, ctrlrange)            # 1 kHz
 
-so the policy's action is a residual joint-position target around the
-split-ready pose, which is the same shape the Isaac lane uses.
+so the policy's action is a residual joint-position target around the pinned
+Isaac ``runtime_plant.default_joint_pos_rad``.  That affine offset is distinct
+from the split-ready physical reset pose.  There is no raw-policy clip: Isaac's
+active runner also has ``clip_actions=null``.  A NaN/Inf request is recorded
+before the q_des clamp, replaced elementwise by the preceding finite action
+(zero/raw-offset on the first step), and terminates after that safe physics
+transition.  It therefore never enters the plant.
 
 HOW A RUN FROM THIS FILE MAY BE REPORTED
 ----------------------------------------
@@ -63,6 +69,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -89,11 +96,135 @@ os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
+ACTION_JOINT_ORDER_CONTRACT_ID = "a3-gmr-dof-pos-to-runtime-articulation-v1"
+ACTION_JOINT_ORDER_CONTRACT_SHA256 = (
+  "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815"
+)
+ACTION_OFFSET_SOURCE = "runtime_plant.default_joint_pos_rad"
+ACTION_OFFSET_FLOAT32_SHA256 = (
+  "1b638d7b2e1ac7e552aace2ac8c2b00980dd9daf691f930b5fe775cebc84af78"
+)
+EXECUTABLE_QDES_GUARD = "mujoco_hard_range_only_divergent_declared"
+_ACTION_JOINT_ORDER_CONTRACT = (
+  _HERE.parents[2] / "configs/a3_joint_order_bijection_v1.json"
+)
+
 # a3_court_env pulls in a3_plant_env, calibrate_restitution and geometry.
 import a3_court_env as court  # noqa: E402
 
 plant = court.plant
 geom = court.geom
+
+
+def _joint_order_names(path: Path) -> list[str]:
+  return [row.strip() for row in path.read_text(encoding="utf-8").splitlines()
+          if row.strip() and not row.lstrip().startswith("#")]
+
+
+def _joint_order_names_sha256(names) -> str:
+  payload = json.dumps(
+    list(names), ensure_ascii=True, separators=(",", ":")
+  ).encode("utf-8")
+  return hashlib.sha256(payload).hexdigest()
+
+
+def _runtime_action_wiring(model, prefix: str):
+  """Return the one actuator(GMR)->policy(runtime) column authority.
+
+  Policy actions, observations, ready pose and measured teacher are always in
+  the schema-2 runtime articulation order.  MuJoCo's motors remain in vendor
+  GMR order; only the final ``ctrl`` write converts back.
+  """
+  import mujoco
+
+  raw = _ACTION_JOINT_ORDER_CONTRACT.read_bytes()
+  if hashlib.sha256(raw).hexdigest() != ACTION_JOINT_ORDER_CONTRACT_SHA256:
+    raise RuntimeError("A3 action joint-order contract bytes differ")
+  contract = json.loads(raw)
+  required = {
+    "schema_version", "contract_id", "expected_joint_count", "source_order",
+    "target_order", "target_from_source_indices",
+    "source_from_target_indices", "legacy_mirrors",
+    "runtime_metadata_contract", "status",
+  }
+  if (set(contract) != required or contract["schema_version"] != 1
+      or contract["contract_id"] != ACTION_JOINT_ORDER_CONTRACT_ID
+      or contract["expected_joint_count"] != 31):
+    raise RuntimeError("A3 action joint-order contract schema differs")
+  repo = _HERE.parents[2]
+  source_path = repo / contract["source_order"]["path"]
+  target_path = repo / contract["target_order"]["path"]
+  source_raw, target_raw = source_path.read_bytes(), target_path.read_bytes()
+  if (hashlib.sha256(source_raw).hexdigest()
+      != contract["source_order"]["file_sha256"]
+      or hashlib.sha256(target_raw).hexdigest()
+      != contract["target_order"]["file_sha256"]):
+    raise RuntimeError("A3 action joint-order name bytes differ")
+  source, target = _joint_order_names(source_path), _joint_order_names(target_path)
+  runtime_from_actuator = contract["target_from_source_indices"]
+  actuator_from_runtime = contract["source_from_target_indices"]
+  expected = list(range(31))
+  if (len(source) != 31 or len(target) != 31
+      or len(set(source)) != 31 or len(set(target)) != 31
+      or _joint_order_names_sha256(source)
+      != contract["source_order"]["names_sha256"]
+      or _joint_order_names_sha256(target)
+      != contract["target_order"]["names_sha256"]
+      or any(type(index) is not int for index in runtime_from_actuator)
+      or any(type(index) is not int for index in actuator_from_runtime)
+      or sorted(runtime_from_actuator) != expected
+      or sorted(actuator_from_runtime) != expected
+      or target != [source[index] for index in runtime_from_actuator]
+      or any(actuator_from_runtime[source_index] != runtime_index
+             for runtime_index, source_index in enumerate(runtime_from_actuator))):
+    raise RuntimeError("A3 action joint-order permutation differs")
+  if int(model.nu) != 31:
+    raise RuntimeError("MuJoCo actuator count differs from the 31-DOF contract")
+  actuator_names = []
+  for actuator_index in range(model.nu):
+    joint_id = int(model.actuator_trnid[actuator_index, 0])
+    qualified_name = mujoco.mj_id2name(
+      model, mujoco.mjtObj.mjOBJ_JOINT, joint_id
+    ) or ""
+    if prefix and not qualified_name.startswith(prefix):
+      raise RuntimeError("MuJoCo actuator joint is outside the robot namespace")
+    actuator_names.append(qualified_name[len(prefix):] if prefix
+                          else qualified_name)
+  if actuator_names != source:
+    raise RuntimeError("MuJoCo actuator order differs from the GMR authority")
+  runtime_from_actuator_array = np.asarray(
+    runtime_from_actuator, dtype=np.int64)
+  actuator_from_runtime_array = np.asarray(
+    actuator_from_runtime, dtype=np.int64)
+  runtime_from_actuator_array.setflags(write=False)
+  actuator_from_runtime_array.setflags(write=False)
+  return (runtime_from_actuator_array, actuator_from_runtime_array,
+          tuple(target))
+
+
+def _runtime_action_offset(ready_pose_payload: bytes, runtime_joint_names):
+  """Load the active Isaac affine origin from the same pinned ready artifact."""
+  try:
+    document = json.loads(ready_pose_payload)
+    runtime_plant = document["runtime_plant"]
+    values = runtime_plant["default_joint_pos_rad"]
+  except (KeyError, TypeError, ValueError) as exc:
+    raise RuntimeError(
+      "ready artifact lacks runtime_plant.default_joint_pos_rad") from exc
+  expected_names = list(runtime_joint_names)
+  if (type(runtime_plant) is not dict
+      or runtime_plant.get("joint_names") != expected_names
+      or runtime_plant.get("articulation_joint_names") != expected_names
+      or runtime_plant.get("action_joint_ids") != list(range(31))
+      or type(values) is not list or len(values) != 31
+      or any(type(value) not in (int, float) for value in values)):
+    raise RuntimeError("ready artifact runtime action-offset ABI differs")
+  offset_le = np.asarray(values, dtype="<f4")
+  digest = hashlib.sha256(offset_le.tobytes(order="C")).hexdigest()
+  if (offset_le.shape != (31,) or not np.isfinite(offset_le).all()
+      or digest != ACTION_OFFSET_FLOAT32_SHA256):
+    raise RuntimeError("ready artifact runtime action offset differs")
+  return np.asarray(offset_le, dtype=np.float32), digest
 
 
 # ==========================================================================
@@ -126,7 +257,11 @@ class TaskCfg:
   version of this docstring said 0.647 / waist yaw; the live read is what
   corrected it.)
   """
-  action_clip: float = 4.0            # hard clip on the raw policy output
+  # Active Isaac uses ``clip_actions=null``.  The old MuJoCo-only +/-4 raw
+  # clip made pinned measured-teacher targets mathematically unreachable.
+  # Keep the field so the live alignment ledger can classify this semantic;
+  # any non-None value is an unsupported, cross-engine-divergent setting.
+  action_clip: object = None
 
   # --- observation scaling ----------------------------------------------
   obs_scale_lin_vel: float = 0.5
@@ -980,21 +1115,29 @@ class A3ReadyBallVecEnv:
     import mujoco
     import torch
 
+    if task_cfg.action_clip is not None:
+      raise ValueError(
+        "raw policy action clipping is unsupported: active Isaac uses "
+        "clip_actions=null; constrain only the decoded q_des envelope")
     if (ready_pose_payload is None) != (ready_pose_source is None) or (
         ready_pose_payload is not None and ready_pose_path is not None):
       raise ValueError("ready-pose bytes require one exclusive source pair")
     if ready_pose_payload is not None:
-      pose = court.load_ready_pose_bytes(ready_pose_payload, ready_pose_source)
+      pose_payload = ready_pose_payload
+      pose_source = ready_pose_source
     elif ready_pose_path is not None:
       rp = Path(ready_pose_path)
       if not rp.is_file():
         raise FileNotFoundError(f"explicit ready pose does not exist: {rp}")
-      pose = court.load_ready_pose(rp)
+      pose_payload = rp.read_bytes()
+      pose_source = str(rp)
     else:
       rp = _HERE / "ready_pose.json"
       if not rp.is_file():
         rp = Path("/workspace/mjlab_lane/ready_pose.json")
-      pose = court.load_ready_pose(rp)
+      pose_payload = rp.read_bytes()
+      pose_source = str(rp)
+    pose = court.load_ready_pose_bytes(pose_payload, pose_source)
 
     self.cfg = task_cfg
     self.sim_cfg = sim_cfg
@@ -1033,9 +1176,27 @@ class A3ReadyBallVecEnv:
     self.root_vadr = int(m.jnt_dofadr[root_jid])
 
     # ---- actuator wiring (vendor PD, computed outside the plant) ------
-    kp_np, kd_np, q_adr_act, v_adr_act = plant._pd_wiring(self.env)
+    kp_actuator, kd_actuator, q_adr_actuator, v_adr_actuator = (
+      plant._pd_wiring(self.env)
+    )
+    runtime_from_actuator, actuator_from_runtime, action_joint_names = (
+      _runtime_action_wiring(m, self.env.entity_prefix)
+    )
+    if list(pose["joint_names"]) != list(action_joint_names):
+      raise RuntimeError("ready pose is not in the runtime action joint order")
+    action_offset_np, action_offset_sha256 = _runtime_action_offset(
+      pose_payload, action_joint_names)
+    actuator_rows = tuple(np.asarray(row) for row in (
+      kp_actuator, kd_actuator, q_adr_actuator, v_adr_actuator))
+    if any(row.shape != (31,) for row in actuator_rows):
+      raise RuntimeError("MuJoCo PD wiring is not one scalar per actuator")
+    kp_actuator, kd_actuator, q_adr_actuator, v_adr_actuator = actuator_rows
+    kp_np = kp_actuator[runtime_from_actuator]
+    kd_np = kd_actuator[runtime_from_actuator]
+    q_adr_act = q_adr_actuator[runtime_from_actuator]
+    v_adr_act = v_adr_actuator[runtime_from_actuator]
     self.num_actions = int(m.nu)
-    jnt_of_act = m.actuator_trnid[:, 0].astype(int)
+    jnt_of_act = m.actuator_trnid[:, 0].astype(int)[runtime_from_actuator]
     jrange = m.jnt_range[jnt_of_act]
 
     T = lambda x, dt=torch.float32: torch.as_tensor(  # noqa: E731
@@ -1044,17 +1205,24 @@ class A3ReadyBallVecEnv:
     self.kd = T(kd_np)
     self.q_adr_act = T(q_adr_act, torch.long)
     self.v_adr_act = T(v_adr_act, torch.long)
+    self.actuator_from_runtime = T(actuator_from_runtime, torch.long)
+    self._action_joint_names = action_joint_names
+    self._action_offset_sha256 = action_offset_sha256
     # Contiguity lets us use slices instead of gathers in the 1 kHz inner loop.
     self._q_slice = (slice(int(q_adr_act[0]), int(q_adr_act[0]) + len(q_adr_act))
                      if np.all(np.diff(q_adr_act) == 1) else None)
     self._v_slice = (slice(int(v_adr_act[0]), int(v_adr_act[0]) + len(v_adr_act))
                      if np.all(np.diff(v_adr_act) == 1) else None)
-    self.tau_lo = T(m.actuator_ctrlrange[:, 0])
-    self.tau_hi = T(m.actuator_ctrlrange[:, 1])
+    self.tau_lo = T(m.actuator_ctrlrange[runtime_from_actuator, 0])
+    self.tau_hi = T(m.actuator_ctrlrange[runtime_from_actuator, 1])
     self.tau_scale = torch.maximum(self.tau_hi.abs(), self.tau_lo.abs())
     self.jnt_lo = T(jrange[:, 0])
     self.jnt_hi = T(jrange[:, 1])
     self.q_ready = T(qpos0[q_adr_act])
+    self.action_offset = T(action_offset_np)
+    if bool(((self.action_offset < self.jnt_lo)
+             | (self.action_offset > self.jnt_hi)).any()):
+      raise RuntimeError("runtime action offset is outside MuJoCo hard limits")
     if task_cfg.action_scale_mode == "vendor":
       # AGIBOT_A3_ACTION_SCALE = 0.25 * effort_limit_sim / stiffness, per joint.
       # effort_limit_sim is bit-identical to the MJCF ctrlrange (verified in the
@@ -1095,6 +1263,8 @@ class A3ReadyBallVecEnv:
     self.ball_age_buf = torch.zeros(N, dtype=torch.long, device=self.device)
     self.actions = torch.zeros(N, self.num_actions, device=self.device)
     self.last_actions = torch.zeros_like(self.actions)
+    self.action_nonfinite_buf = torch.zeros(
+      N, dtype=torch.bool, device=self.device)
     self.gravity_w = torch.tensor([0.0, 0.0, -1.0], device=self.device).repeat(N, 1)
     self.common_step_counter = 0
     self._ball_reserve_steps = int(round(task_cfg.ball_reserve_after_s / self.step_dt))
@@ -1155,6 +1325,20 @@ class A3ReadyBallVecEnv:
     self.num_obs = int(self._obs_buf.shape[1])
 
   # ---- rsl-rl VecEnv surface ------------------------------------------
+
+  @property
+  def action_contract_identity(self) -> dict:
+    """Return one immutable-by-copy action identity for completion evidence."""
+    return {
+      "action_joint_order_contract_id": ACTION_JOINT_ORDER_CONTRACT_ID,
+      "action_joint_order_contract_sha256": ACTION_JOINT_ORDER_CONTRACT_SHA256,
+      "action_offset_source": ACTION_OFFSET_SOURCE,
+      "action_offset_sha256": self._action_offset_sha256,
+      "raw_action_clip": None,
+      "executable_qdes_guard": EXECUTABLE_QDES_GUARD,
+      "transfer_authority": False,
+      "matched_cross_backend_authority": False,
+    }
 
   @property
   def unwrapped(self):
@@ -1501,6 +1685,7 @@ class A3ReadyBallVecEnv:
     self.episode_length_buf[ids] = 0
     self.actions[ids] = 0.0
     self.last_actions[ids] = 0.0
+    self.action_nonfinite_buf[ids] = False
     self._cur_ret[ids] = 0.0
     self._cur_min_d[ids] = 1e3
 
@@ -1594,20 +1779,31 @@ class A3ReadyBallVecEnv:
   def _advance_plant(self, actions):
     """Apply one policy action through the one real 20-substep plant loop."""
     torch = self._torch
-    cfg = self.cfg
     d = self.sim.data
 
-    actions = torch.clamp(actions.to(self.device), -cfg.action_clip, cfg.action_clip)
+    incoming = actions.to(self.device)
+    if tuple(incoming.shape) != tuple(self.actions.shape):
+      raise ValueError(
+        "policy action shape differs from the runtime action buffer: "
+        f"{tuple(incoming.shape)} != {tuple(self.actions.shape)}")
+    pre_clamp_qdes = self.action_offset.unsqueeze(0) + self.act_scale * incoming
+    finite_qdes = torch.isfinite(pre_clamp_qdes)
+    # DoneTerms run after physics.  Retain the bad affine request for the
+    # termination bit, but substitute the prior finite action (zero/default
+    # offset after reset) elementwise so NaN/Inf never enters the plant.
+    safe_actions = torch.where(finite_qdes, incoming, self.actions)
+    self.action_nonfinite_buf = ~finite_qdes.all(dim=1)
     self.last_actions = self.actions
-    self.actions = actions
-    pre_clamp_qdes = self.q_ready.unsqueeze(0) + self.act_scale * actions
-    q_des = torch.clamp(pre_clamp_qdes, self.jnt_lo, self.jnt_hi)
+    self.actions = safe_actions
+    q_des = torch.clamp(
+      self.action_offset.unsqueeze(0) + self.act_scale * safe_actions,
+      self.jnt_lo, self.jnt_hi)
 
     tau_sq = torch.zeros(self.num_envs, device=self.device)
     for substep_index in range(self.decimation):
       tau = self.kp * (q_des - self._qpos_act()) - self.kd * self._qvel_act()
       tau = torch.clamp(tau, self.tau_lo, self.tau_hi)
-      d.ctrl[:] = tau
+      d.ctrl[:] = tau[:, self.actuator_from_runtime]
       tau_n = tau / self.tau_scale
       tau_sq += (tau_n * tau_n).mean(dim=-1)
       self.sim.step()
@@ -1711,7 +1907,8 @@ class A3ReadyBallVecEnv:
     fall_h = st["base_pos"][:, 2] < cfg.min_pelvis_z
     tilt = st["proj_g"][:, 2] > cfg.max_tilt_proj_g
     finite = (torch.isfinite(st["qpos"]).all(dim=1)
-              & torch.isfinite(st["qvel"]).all(dim=1))
+              & torch.isfinite(st["qvel"]).all(dim=1)
+              & (~self.action_nonfinite_buf))
     nonfinite = ~finite
     terminated = fall_h | tilt | nonfinite
     return terminated, {"fall_h": fall_h & finite, "tilt": tilt & finite & (~fall_h),
@@ -2198,6 +2395,7 @@ def _agent_summary(env, args, task_cfg, records) -> dict:
     "entropy_coef": args.entropy_coef,
     "init_std": args.init_std,
     "action_scale_mode": task_cfg.action_scale_mode,
+    "raw_action_clip": task_cfg.action_clip,
     "action_scale_rad_min_max": [float(env.act_scale.min()),
                                  float(env.act_scale.max())],
     "hidden_dims": [512, 256, 128],
@@ -2225,11 +2423,11 @@ def _scene_summary(env, sim_cfg, build_s) -> dict:
 def evaluate(args) -> int:
   """Score a fixed policy on the same reward the training run optimizes.
 
-  Two modes, and the pair is the point: ``--eval zero`` is the do-nothing
-  policy (pure vendor PD holding split-ready, which the plant receipt says
-  sags only 5 mm in 0.9 s), and ``--eval ckpt`` is a trained checkpoint,
-  deterministic.  If the trained number does not beat the do-nothing number on
-  the *same* reward, "the curve went up" would only mean PPO learned to stop
+  Two modes, and the pair is the point: ``--eval zero`` is the zero raw-action
+  policy, whose target is the pinned Isaac runtime default offset (not the
+  split-ready reset), and ``--eval ckpt`` is a trained checkpoint,
+  deterministic.  If the trained number does not beat the zero policy on the
+  *same* reward, "the curve went up" would only mean PPO learned to stop
   shouting at its own actuators.
   """
   import torch

@@ -70,6 +70,9 @@ R06_FLIGHT_INBOUND = 1
 R06_FLIGHT_OPEN = 2
 R06_FLIGHT_SETTLED_RETAINED = 3
 
+_ACTION_EPOCH_SUBSTEP_DENSE = "dense"
+_ACTION_EPOCH_SUBSTEP_IDLE = "idle"
+
 RUNTIME_INTEGRATED = False
 CUDA_REVEAL_BOUNDARY_INTEGRATED = False
 ISAAC_POSTPHYSICS_VALIDATED = False
@@ -2816,6 +2819,16 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_active_physics_fact_allocation: (
             ActionEpochPhysicsFactAllocationProjection | None
         ) = None
+        # One D2H reduction at the post-command control boundary decides
+        # whether the *next* control step has any Physical/R06/scene work.
+        # The per-substep pair kind remains host-only and may never cross a
+        # pre/post boundary.
+        self._action_epoch_host_activity_control_step: int | None = None
+        self._action_epoch_host_activity_has_work = True
+        self._action_epoch_substep_pair: str | None = None
+        self._action_epoch_empty_env_mask = torch.zeros(
+            (self.num_envs,), dtype=torch.bool, device=self.device
+        )
         self._action_epoch_runtime_call_active = False
         self._active_global_reveal_epoch_image: (
             _GlobalRevealEpochImage | None
@@ -3280,41 +3293,29 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(
                 "Physical ActionEpoch/D05/Motion construction sources differ"
             )
-        scene_binder = getattr(
-            self.scene_port, "bind_action_epoch_scene_writer", None
+        required_scene_methods = (
+            "bind_action_epoch_scene_writer",
+            "preflight_action_epoch_write",
+            "arm_action_epoch_physics_fact_source",
+            "action_epoch_physics_fact_activity_mask",
+            "begin_action_epoch_idle_physics_fact_source",
+            "complete_action_epoch_idle_physics_fact_source",
         )
-        direct_scene_binder = getattr(
-            type(self.scene_port), "bind_action_epoch_scene_writer", None
-        )
-        scene_preflight = getattr(
-            self.scene_port, "preflight_action_epoch_write", None
-        )
-        direct_scene_preflight = getattr(
-            type(self.scene_port), "preflight_action_epoch_write", None
-        )
-        scene_fact_arm = getattr(
-            self.scene_port, "arm_action_epoch_physics_fact_source", None
-        )
-        direct_scene_fact_arm = getattr(
-            type(self.scene_port), "arm_action_epoch_physics_fact_source", None
-        )
-        if type(self.scene_port) is not TensorPhysicalFlightScenePort and (
-            not callable(scene_binder)
-            or not callable(direct_scene_binder)
-            or getattr(scene_binder, "__self__", None) is not self.scene_port
-            or getattr(scene_binder, "__func__", None) is not direct_scene_binder
-            or not callable(scene_preflight)
-            or not callable(direct_scene_preflight)
-            or getattr(scene_preflight, "__self__", None) is not self.scene_port
-            or getattr(scene_preflight, "__func__", None) is not direct_scene_preflight
-            or not callable(scene_fact_arm)
-            or not callable(direct_scene_fact_arm)
-            or getattr(scene_fact_arm, "__self__", None) is not self.scene_port
-            or getattr(scene_fact_arm, "__func__", None) is not direct_scene_fact_arm
+        scene_type = type(self.scene_port)
+        if scene_type is not TensorPhysicalFlightScenePort and any(
+            not callable(getattr(self.scene_port, name, None))
+            or getattr(getattr(self.scene_port, name), "__self__", None)
+            is not self.scene_port
+            or getattr(getattr(self.scene_port, name), "__func__", None)
+            is not getattr(scene_type, name, None)
+            for name in required_scene_methods
         ):
             raise PhysicalEpochIntegrationHold(
                 "Physical ActionEpoch scene writer/fact-source API is absent or patched"
             )
+        scene_binder = getattr(
+            self.scene_port, "bind_action_epoch_scene_writer", None
+        )
         self._action_epoch_owner = epoch_owner
         self._action_epoch_device_r05_owner = device_r05_owner
         self._action_epoch_motion_owner = motion_owner
@@ -3822,8 +3823,123 @@ class ActionBallPhysicalFlightDeviceOwner:
             ),
         )
 
+    def refresh_action_epoch_host_activity(
+        self, *, next_control_step: int
+    ) -> None:
+        """Cache one multi-writer verdict after D05; synchronize exactly once."""
+
+        self._require_operable(allow_diagnostic_scene_observation=True)
+        if type(next_control_step) is not int or next_control_step < 1:
+            raise PhysicalEpochIntegrationHold(
+                "Physical activity refresh control step differs"
+            )
+        active_transactions = (
+            self._action_epoch_substep_pair,
+            self._action_epoch_active_scene_write,
+            self._action_epoch_active_r06_launch,
+            self._action_epoch_active_r06_postphysics,
+            self._action_epoch_active_physics_fact_allocation,
+            self._active_postphysics_capture,
+            self._active_postphysics_capture_image,
+        )
+        if any(value is not None for value in active_transactions):
+            raise PhysicalEpochIntegrationHold(
+                "Physical activity refresh crossed an active substep pair"
+            )
+        if next_control_step != self._action_epoch_expected_control(
+            require_control_boundary=True
+        ):
+            raise PhysicalEpochIntegrationHold(
+                "Physical activity refresh is stale, skipped, or replayed"
+            )
+        if self._action_epoch_host_activity_control_step == next_control_step:
+            raise PhysicalEpochIntegrationHold(
+                "Physical activity refresh is stale, skipped, or replayed"
+            )
+
+        # Fail dense if any part of the reduction raises.  A prior cached idle
+        # verdict can therefore never leak into a later control step.
+        self._action_epoch_host_activity_control_step = None
+        self._action_epoch_host_activity_has_work = True
+        pending = self._action_epoch_pending_launch
+        pending_rows = (
+            self._action_epoch_empty_env_mask
+            if pending is None
+            else pending.pending
+        )
+        physical_work = (
+            pending_rows
+            | (
+                (self._published & ~self._parked)
+                | self._lifecycle.ne(R06_FLIGHT_EMPTY)
+                | self._action_epoch_flight_publication_ordinal.ge(0)
+            ).any(dim=1)
+            | self._action_epoch_active_flight_slot.ge(0)
+            | self._selected_contact_pending
+        )
+        shape = (self.num_envs, self.flight_capacity)
+        r06_state = _tensor(
+            getattr(self._r06_owner, "flight_state", None),
+            label="R06 activity census",
+            shape=shape,
+            dtype=torch.int8,
+            device=self.device,
+        )
+        r06_work = r06_state.ne(R06_FLIGHT_EMPTY).any(dim=1)
+        if type(self.scene_port) is TensorPhysicalFlightScenePort:
+            scene_work = self._action_epoch_empty_env_mask
+        else:
+            scene_activity = _tensor(
+                self.scene_port.action_epoch_physics_fact_activity_mask(),
+                label="scene activity census",
+                shape=shape,
+                dtype=torch.bool,
+                device=self.device,
+            )
+            scene_work = scene_activity.any(dim=1)
+        self._action_epoch_host_activity_has_work = bool(
+            torch.any(physical_work | r06_work | scene_work).item()
+        )
+        self._action_epoch_host_activity_control_step = next_control_step
+
+    def _action_epoch_expected_control(
+        self, *, require_control_boundary: bool
+    ) -> int:
+        previous = self._last_postphysics_exact_stamp
+        if previous is None:
+            return 1
+        control, substep, decimation, _sim_step, _phase = previous
+        at_boundary = substep == decimation - 1
+        if require_control_boundary and not at_boundary:
+            raise PhysicalEpochIntegrationHold(
+                "Physical activity refresh preceded the final physics substep"
+            )
+        return control + int(at_boundary)
+
+    def _action_epoch_cached_idle_for_next_substep(self) -> bool:
+        if self._action_epoch_substep_pair is not None:
+            raise PhysicalEpochIntegrationHold(
+                "Physical pre-physics call crossed an unconsumed post pair"
+            )
+        cached_control = self._action_epoch_host_activity_control_step
+        if cached_control is None:
+            return False
+        if cached_control != self._action_epoch_expected_control(
+            require_control_boundary=False
+        ):
+            raise PhysicalEpochIntegrationHold(
+                "Physical cached activity control step is stale"
+            )
+        return not self._action_epoch_host_activity_has_work
+
     def launch_action_epoch(self) -> None:
         """Launch full-N pending rows whose exact Motion-owned tick is due."""
+
+        if self._action_epoch_cached_idle_for_next_substep():
+            if type(self.scene_port) is not TensorPhysicalFlightScenePort:
+                self.scene_port.begin_action_epoch_idle_physics_fact_source()
+            self._action_epoch_substep_pair = _ACTION_EPOCH_SUBSTEP_IDLE
+            return
 
         epoch_owner = self._action_epoch_owner
         motion_owner = self._action_epoch_motion_owner
@@ -3850,6 +3966,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._arm_current_action_epoch_physics_fact_source(
                 launch_due_mask=empty_due
             )
+            self._action_epoch_substep_pair = _ACTION_EPOCH_SUBSTEP_DENSE
             return
         try:
             token = motion_owner.action_ball_continuous_motion_observation_projection()
@@ -4068,6 +4185,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._action_epoch_pending_launch = replace(
                 pending, pending=pending.pending & ~launch_due
             )
+            self._action_epoch_substep_pair = _ACTION_EPOCH_SUBSTEP_DENSE
         except BaseException:
             self._action_epoch_active_scene_write = None
             self._action_epoch_active_r06_launch = None
@@ -5185,6 +5303,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             or self._active_postphysics is not None
             or self._active_postphysics_capture is not None
             or self._active_postphysics_capture_image is not None
+            or self._action_epoch_substep_pair is not None
             or self._active_r06_ack is not None
             or self._active_physical_hot_prepare is not None
             or self._active_physical_hot_commit is not None
@@ -7128,6 +7247,24 @@ class ActionBallPhysicalFlightDeviceOwner:
                 raise
             finally:
                 self._action_epoch_runtime_call_active = False
+        pair = self._action_epoch_substep_pair
+        if pair is None:
+            raise PhysicalEpochIntegrationHold(
+                "Physical postphysics has no exact pre-physics pair"
+            )
+        if pair == _ACTION_EPOCH_SUBSTEP_IDLE:
+            exact = self._validate_postphysics_capture_boundary(stamp)
+            if type(self.scene_port) is not TensorPhysicalFlightScenePort:
+                self.scene_port.complete_action_epoch_idle_physics_fact_source(
+                    exact
+                )
+            self._last_postphysics_exact_stamp = exact
+            self._action_epoch_substep_pair = None
+            return None
+        if pair != _ACTION_EPOCH_SUBSTEP_DENSE:
+            raise PhysicalEpochIntegrationHold(
+                "Physical postphysics pre-pair kind differs"
+            )
         epoch_owner = self._action_epoch_owner
         if epoch_owner is None:
             raise PhysicalEpochIntegrationHold(
@@ -7492,6 +7629,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         )
         self._active_postphysics_capture = None
         self._active_postphysics_capture_image = None
+        self._action_epoch_substep_pair = None
         return None
 
     def action_epoch_reward_facts_v1(
@@ -10319,6 +10457,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             or self._active_global_reveal_epoch_image is not None
             or self._active_reveal_boundary_row is not None
             or self._active_postphysics is not None
+            or self._action_epoch_substep_pair is not None
             or self._active_r06_ack is not None
             or self._active_physical_retire_prepare is not None
             or self._active_physical_retire_arm is not None
@@ -10925,6 +11064,8 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._action_epoch_flight_publication_ordinal.copy_(
                 direct_after.flight_publication_ordinal
             )
+            self._action_epoch_host_activity_control_step = None
+            self._action_epoch_host_activity_has_work = True
             self._host_reset_generation_projection_current = False
             self._advance_owner_mutation_version()
         except Exception as exc:
@@ -12030,6 +12171,10 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalFlightDeviceError(
                 "true reset cannot cross postphysics acknowledgement"
             )
+        if self._action_epoch_substep_pair is not None:
+            raise PhysicalFlightDeviceError(
+                "true reset cannot cross an ActionEpoch physics pair"
+            )
         if self._active_r06_ack is not None:
             raise PhysicalFlightDeviceError(
                 "true reset cannot cross an unconsumed R06 settlement authority"
@@ -12186,6 +12331,8 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._device_fault[list(selected), :] = False
             self._slot_version[list(selected), :] += 1
             self._reset_generation = predicted_reset_generations
+            self._action_epoch_host_activity_control_step = None
+            self._action_epoch_host_activity_has_work = True
             self._advance_owner_mutation_version()
         except Exception as exc:
             self._poisoned = True
@@ -12628,6 +12775,8 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._physical_checkpoint_last_live_projection = None
             self._physical_checkpoint_last_live_boundary = None
             self._physical_checkpoint_last_live_receipt = None
+            self._action_epoch_host_activity_control_step = None
+            self._action_epoch_host_activity_has_work = True
         except Exception as exc:
             self._poisoned = True
             self._poison_reason = "checkpoint scene restore failed"

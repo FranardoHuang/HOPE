@@ -69,10 +69,33 @@ git check-ignore -q vendor_assets
 | Venue `$BALLFIT_DATA_ROOT/analysis/segments/strikes.json` (current Pod copy: `/workspace/yikang/latest_data/analysis/segments/strikes.json`) | Detected real racket contacts used for the conservative A-B-A next-task timing audit | Generated from the 2026-07-03 venue mocap pipeline; current file SHA-256 `6ad3c45959c94b6fdd4033130403c32e0f1b612a138738c12afa43a58f752841` | G05 continuous-timing design; G03 ball fit |
 | ChingMu same-clock source: local `/Users/Franco/Downloads/ChingMu_Selected`; Pod `/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected`; retarget PKL `/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2` | Raw delivery has 41 human BVH, 41 racket BVH, 41 table BVH and 26 ball BVH at 120 Hz. The canonical source manifest contains 74 units with 74/74 unit NPZ+JSON and 74/74 PKL on Pod; the 73-action catalog explicitly excludes `Take_085_unit00_FH`. Unit NPZ carries blade/butt/signed-normal in one clock | **LOCATED; preserve source and every historical bank.** The v3 bank is revoked because its long axis was 45 degrees wrong. Corrected kinematic root: `/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j`; repo sibling `assets/motions/chingmu73_measured_v4_20260803`; completion/import receipt SHA `c45768b0...ab9a1` / `e6f0283f...727a82`; solver/materializer/auditor/resigner SHA `d6d6bfdd...57af5` / `34cf0f4c...99fe4` / `ddcb90b3...cddfa` / `32ee85be...bac9`. Kinematic admission is 73/73, but mechanical admission fails: 37/73 velocity and 58/73 limit-margin counterexamples. It is diagnostic-only, not training/promotion authority | G03 measured-racket calibration; G05 canonical N1; MuJoCo successor |
 | Tracked `assets/motions/chingmu73_measured_a3p0807_20260808/` plus `configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json` | FullMDP successor's 73 ordered teachers re-solved on the runtime 0807 A3P plant; frame-0 `pelvis_link` yaw is exact-grounded and action UIDs are rebound to the new motion bytes | Restore from the exact Git commit, never substitute the old v4 plant bank. Global audit remains `mechanical_admission=false` with 0/73 admitted (joint position/velocity plus missing vendor acceleration/torque-speed/ID evidence), so this is diagnostic lineage only | G05 FullMDP A/C diagnostic longrun |
+| `vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl` | portable MuJoCo Full-A使用的exact upstream RSL-RL 3.1.2 wheel；只供fresh run-local隔离环境，不替换ambient Pod环境 | Pod1 preserved source `/workspace/franco/mktemp/mujoco-fullmdp-wait-rsl3-host.20260818T112000CST/wheelhouse/rsl_rl_lib-3.1.2-py3-none-any.whl`；SHA-256 `406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d` | G06 portable MuJoCo focused gate及4096×25000长跑 |
 | Planned ignored root `vendor_assets/mocap/optitrack_20260730_full/` | 2026-07-30 full OptiTrack raw C3D and canonical extracted NPZ for ball, `PPP1/PPP2` rackets and table in one clock; calibration/schema evidence, not automatically a 73 body-motion teacher | **UNRESOLVED in this checkout:** restore exact private C3D/extracted bytes and record SHA/source path. The tracked extractor/docs do not recreate missing measurements | G03 physics/calibration and marker-to-site method |
 | RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
 | Generated policy artifacts such as `hope_training/policies/*.onnx` | Exported policies for local eval/deploy handoff | Produced by `scripts/play.py` or training/eval export; store metadata in G05/G07 | G05/G07 when a specific policy is accepted |
+
+### Restore exact RSL-RL 3.1.2 wheel for portable MuJoCo
+
+2026-08-20核对时Pod的ambient `/workspace/mjlab_venv`已经是RSL-RL 5.4.0，不能把它当作3.1.2，
+也不得为本任务原地降级或修改。只从上表preserved source恢复exact wheel，并发布到一个原本不存在的
+ignored子树：
+
+```bash
+RSL3_STAGE=$(mktemp -d ../nohope-rsl3-stage.XXXXXX)
+scp -P 18333 -i /Users/Franco/.ssh/id_ed25519_runpod \
+  root@162.43.172.171:/workspace/franco/mktemp/mujoco-fullmdp-wait-rsl3-host.20260818T112000CST/wheelhouse/rsl_rl_lib-3.1.2-py3-none-any.whl \
+  "$RSL3_STAGE/"
+printf '%s  %s\n' \
+  406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d \
+  "$RSL3_STAGE/rsl_rl_lib-3.1.2-py3-none-any.whl" | shasum -a 256 -c -
+test ! -e vendor_assets/rsl_rl_3_1_2
+mv "$RSL3_STAGE" vendor_assets/rsl_rl_3_1_2
+```
+
+发车时把该wheel复制进fresh、不可复用的run root，再验证同一SHA并安装到run-local隔离环境；不得从
+PyPI latest、同名未知wheel或ambient 5.4.0替代。若preserved source消失，只能从另一个内容寻址备份恢复
+同一SHA；找不到时G06保持`Partial`，不得联网重建一个“近似3.1.2”。
 
 ## ChingMu measured-racket rebuild contract
 

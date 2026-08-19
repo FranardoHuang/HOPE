@@ -63,8 +63,8 @@ ALIGNED = "aligned"
 #: this class blocks :func:`assert_cross_engine_claim`.
 DIVERGENT_BLOCKING = "divergent_blocking"
 
-#: The two lanes differ on purpose and the difference does not change the
-#: question.  Requires a reason; does not block.
+#: The lanes differ on purpose.  Name the accepted scope and any narrower claim
+#: restrictions; this verdict does not enter ``blocking_axes``.
 DIVERGENT_DECLARED = "divergent_declared"
 
 #: This lane cannot read one of the two sides at all (missing artifact, missing
@@ -105,9 +105,20 @@ ISAAC_SOURCE_RELPATHS = {
     "a211_leaf": _TRACKING_REL / "action_ball_a211_trainability.py",
     "c211_leaf": _TRACKING_REL / "action_ball_c211_trainability.py",
     "robot_cfg": _ISAAC_REL / "source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
+    "hope_actions": _TRACKING_REL / "mdp/hope_actions.py",
     "training_contract": _ISAAC_REL / "source/whole_body_tracking/whole_body_tracking/utils/training_contract.py",
     "ppo_yaml": _ISAAC_REL / "cfg/algo/ppo.yaml",
+    "train_entry": _ISAAC_REL / "scripts/train.py",
     "geometry": _GEOM_REL,
+    "joint_order_contract": Path("configs/a3_joint_order_bijection_v1.json"),
+    "gmr_joint_order": Path("configs/a3_gmr_dof_pos_joint_order.txt"),
+    "runtime_joint_order": Path("configs/a3_runtime_articulation_joint_order.txt"),
+    "ready_pose": Path(
+        "configs/action_ball_n1_measured_20260803/"
+        "evidence_holdpass_robust20n_20260803/"
+        "take061.measured_teacher.yaw_aligned_full_seed."
+        "robust20n.dynamic_ready.v2.json"
+    ),
     "vendor_mjcf": Path(
         "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
         "a3_pingpong/a3_pingpong.xml"),
@@ -308,6 +319,47 @@ def _post_init_self_attrs(tree: ast.Module, class_name: str) -> dict:
                 except AlignmentError:
                     continue
     return out
+
+
+def _live_nodes(root: ast.AST):
+    """Same-scope nodes, pruning nested helpers and constant-dead branches."""
+    yield root
+    children = list(ast.iter_child_nodes(root))
+    if isinstance(root, ast.If) and isinstance(root.test, ast.Constant):
+        children = root.body if bool(root.test.value) else root.orelse
+    for child in children:
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.Lambda, ast.ClassDef)):
+            yield from _live_nodes(child)
+
+
+def _method(tree: ast.Module, cls: str, name: str) -> ast.FunctionDef:
+    rows = [n for n in _class_body(tree, cls).body
+            if isinstance(n, ast.FunctionDef) and n.name == name]
+    if len(rows) != 1:
+        raise AlignmentError(f"{cls}.{name} does not have one live owner")
+    return rows[0]
+
+
+def _has_assign(fn: ast.FunctionDef, target: str, expression: str) -> bool:
+    wanted = ast.dump(ast.parse(expression, mode="eval").body,
+                      include_attributes=False)
+    binds = lambda n: (_dotted(n) == target or (  # noqa: E731
+        isinstance(n, (ast.Tuple, ast.List)) and any(binds(x) for x in n.elts)))
+    for node in _live_nodes(fn):
+        if isinstance(node, ast.Assign) and any(
+            binds(t) for t in node.targets
+        ) and ast.dump(node.value, include_attributes=False) == wanted:
+            return True
+    return False
+
+
+def _one_arg_call(fn: ast.FunctionDef, callee: str, arg: str) -> bool:
+    rows = [n for n in _live_nodes(fn) if isinstance(n, ast.Call)
+            and _dotted(n.func) == callee]
+    return (len(rows) == 1 and not rows[0].keywords and len(rows[0].args) == 1
+            and isinstance(rows[0].args[0], ast.Name)
+            and rows[0].args[0].id == arg)
 
 
 # ---------------------------------------------------------------------------
@@ -622,28 +674,164 @@ def _probe_critic_abi(paths: dict, lane: dict) -> dict:
                 DIVERGENT_BLOCKING if symmetric else ALIGNED)
 
 
-def _probe_action_decoder(paths: dict, lane: dict) -> dict:
+def _probe_raw_action_affine(paths: dict, lane: dict) -> dict:
+    raw = paths["joint_order_contract"].read_bytes()
+    contract, digest = json.loads(raw), hashlib.sha256(raw).hexdigest()
+    train_tree = _parse(_HERE / "a3_train_ppo.py")
+    train_consts = _module_consts(train_tree)
+    names = lambda p: [r.strip() for r in p.read_text().splitlines()  # noqa: E731
+                       if r.strip() and not r.lstrip().startswith("#")]
+    source, target = names(paths["gmr_joint_order"]), names(paths["runtime_joint_order"])
+    r, g = (contract["target_from_source_indices"],
+            contract["source_from_target_indices"])
+    if (digest != _literal(train_consts["ACTION_JOINT_ORDER_CONTRACT_SHA256"], train_consts)
+            or contract["contract_id"] != _literal(
+                train_consts["ACTION_JOINT_ORDER_CONTRACT_ID"], train_consts)
+            or hashlib.sha256(paths["gmr_joint_order"].read_bytes()).hexdigest()
+            != contract["source_order"]["file_sha256"]
+            or hashlib.sha256(paths["runtime_joint_order"].read_bytes()).hexdigest()
+            != contract["target_order"]["file_sha256"]
+            or source != mjcf_actuated_joints(paths) or len(set(target)) != 31
+            or target != [source[i] for i in r] or sorted(r) != list(range(31))
+            or any(g[s] != i for i, s in enumerate(r))):
+        raise AlignmentError("raw_action_affine tracked joint-order contract differs")
     per_joint = isaac_per_joint(paths)
-    joints = per_joint["joints"]
-    ctrlrange = mjcf_ctrlrange(paths)
-    kp, _kd = lane["plant"].vendor_pd_for_joint_names(joints)
-    mjlab_vendor = {j: 0.25 * ctrlrange[j] / float(k) for j, k in zip(joints, kp)}
-    isaac_scale = per_joint["action_scale"]
-    vendor_matches = all(
-        abs(mjlab_vendor[j] - isaac_scale[j]) <= 1e-12 * max(1.0, abs(isaac_scale[j]))
-        for j in joints)
-    mode = lane["task"].action_scale_mode
-    observed = ALIGNED if (vendor_matches and mode == "vendor") else DIVERGENT_BLOCKING
-    return _row({"decoder": "per-joint 0.25*effort_limit_sim/stiffness",
-                 "min": min(isaac_scale.values()), "max": max(isaac_scale.values()),
-                 "n_joints": len(joints)},
-                {"default_mode": mode,
-                 "flat_rad": float(lane["task"].action_scale),
-                 "vendor_mode_reproduces_isaac_per_joint": vendor_matches,
-                 "vendor_min": min(mjlab_vendor.values()),
-                 "vendor_max": max(mjlab_vendor.values())},
-                observed,
-                vendor_mode_available=True)
+    scale = [per_joint["action_scale"][j] for j in target]
+    ready_raw = paths["ready_pose"].read_bytes()
+    ready, runner_tree = json.loads(ready_raw), _parse(
+        _HERE / "mujoco_gpu_ac_full_mdp_wait_rsl3.py")
+    plant = ready["runtime_plant"]
+    offset = plant["default_joint_pos_rad"]
+    init, advance = (_method(train_tree, "A3ReadyBallVecEnv", n)
+                     for n in ("__init__", "_advance_plant"))
+    required = (
+        (init, "action_offset_np", "_runtime_action_offset(pose_payload, action_joint_names)"),
+        (init, "kp_np", "kp_actuator[runtime_from_actuator]"),
+        (init, "kd_np", "kd_actuator[runtime_from_actuator]"),
+        (init, "q_adr_act", "q_adr_actuator[runtime_from_actuator]"),
+        (init, "v_adr_act", "v_adr_actuator[runtime_from_actuator]"),
+        (init, "jnt_of_act", "m.actuator_trnid[:, 0].astype(int)[runtime_from_actuator]"),
+        (init, "jrange", "m.jnt_range[jnt_of_act]"),
+        (init, "self.kp", "T(kp_np)"),
+        (init, "self.tau_hi", "T(m.actuator_ctrlrange[runtime_from_actuator, 1])"),
+        (init, "self.act_scale", "0.25 * self.tau_hi / self.kp"),
+        (init, "self.action_offset", "T(action_offset_np)"),
+        (init, "self.jnt_lo", "T(jrange[:, 0])"),
+        (init, "self.jnt_hi", "T(jrange[:, 1])"),
+        (advance, "incoming", "actions.to(self.device)"),
+        (advance, "pre_clamp_qdes", "self.action_offset.unsqueeze(0) + self.act_scale * incoming"),
+    )
+    ctrl_rows = [n for n in _live_nodes(advance) if isinstance(n, ast.Assign)
+                 and any(isinstance(t, ast.Subscript) and _dotted(t.value) == "d.ctrl"
+                         for t in n.targets)]
+    ctrl_ok = len(ctrl_rows) == 1 and ast.dump(
+        ctrl_rows[0].value, include_attributes=False) == ast.dump(
+        ast.parse("tau[:, self.actuator_from_runtime]", mode="eval").body,
+        include_attributes=False)
+    runner_main = next(n for n in runner_tree.body
+                       if isinstance(n, ast.FunctionDef) and n.name == "main")
+    vendor = any(isinstance(n, ast.Call) and _dotted(n.func) == "wait.TaskCfg"
+                 and any(k.arg == "action_scale_mode"
+                         and isinstance(k.value, ast.Constant) and k.value.value == "vendor"
+                         for k in n.keywords) for n in _live_nodes(runner_main))
+    offset_owner = next(n for n in train_tree.body
+                        if isinstance(n, ast.FunctionDef)
+                        and n.name == "_runtime_action_offset")
+    build_cfg = next(n for n in train_tree.body if isinstance(n, ast.FunctionDef)
+                     and n.name == "build_agent_cfg")
+    runner_cfg_calls = [n for n in _live_nodes(build_cfg) if isinstance(n, ast.Call)
+                        and _dotted(n.func) == "RslRlOnPolicyRunnerCfg"]
+    clip_none = (len(runner_cfg_calls) == 1 and any(
+        k.arg == "clip_actions" and isinstance(k.value, ast.Constant)
+        and k.value.value is None for k in runner_cfg_calls[0].keywords))
+    tracking = _parse(paths["tracking_env_cfg"])
+    _, action_kw = _call_kwargs(_class_assignments(tracking, "ActionsCfg")["joint_pos"])
+    wait = _parse(_HERE / "mujoco_gpu_ac_full_mdp_initial_wait_env.py")
+    wrappers_ok = all(_one_arg_call(
+        _method(wait, "FullMdpInitialWaitVecEnv", name),
+        "self._advance_plant", "actions") for name in ("step", "_step_full_a"))
+    isaac_main = next(n for n in _parse(paths["train_entry"]).body if
+                      isinstance(n, ast.FunctionDef) and n.name == "_run_with_environment_close_owner")
+    if (_literal(_class_assignments(train_tree, "TaskCfg")["action_clip"],
+                 train_consts) is not None
+            or not clip_none
+            or not all(_has_assign(*row) for row in required) or not ctrl_ok or not vendor
+            or not wrappers_ok
+            or not _one_arg_call(isaac_main, "RslRlVecEnvWrapper", "env")
+            or not _has_assign(offset_owner, "values",
+                               'runtime_plant["default_joint_pos_rad"]')
+            or _literal(action_kw["use_default_offset"], _module_consts(tracking)) is not True
+            or plant["joint_names"] != target or plant["action_joint_ids"] != list(range(31))
+            or any(abs(a - b) > 2e-7 for a, b in zip(plant["action_scale_rad"], scale))
+            or hashlib.sha256(ready_raw).hexdigest()
+            != _literal(_module_consts(runner_tree)["READY_POSE_SHA256"],
+                        _module_consts(runner_tree))):
+        raise AlignmentError("raw_action_affine production callpath differs")
+    common = {"raw_policy_clip": None, "joint_order_contract_sha256": digest,
+              "joint_order": "runtime_articulation_joint_pos",
+              "scale": scale, "offset": offset,
+              "offset_source": "runtime_plant.default_joint_pos_rad"}
+    return _row(common, dict(common, final_ctrl_order="GMR actuator"), ALIGNED,
+                components={k: ALIGNED for k in
+                            ("raw_policy_action", "runtime_joint_order", "scale", "offset")})
+
+
+def _probe_executable_qdes_guard(paths: dict, lane: dict) -> dict:
+    attrs = _post_init_self_attrs(_parse(paths["hope_env_cfg"]),
+                                  "HOPEPingPongActionBallAgibotA3EnvCfg")
+    expected_attrs = {
+        "actions.joint_pos.pre_apply_limit_guard": True,
+        "actions.joint_pos.pre_apply_guard_policy_dt_s": 0.02,
+        "actions.joint_pos.pre_apply_guard_expected_decimation": 4,
+        "actions.joint_pos.pre_apply_guard_margin_rad": 0.0,
+        "actions.joint_pos.pre_apply_guard_margin_fraction": 0.05,
+        "actions.joint_pos.project_finite_preclamp_qdes_without_termination": True,
+    }
+    if any(attrs.get(name) != value for name, value in expected_attrs.items()):
+        raise AlignmentError("executable_qdes_guard active Isaac settings differ")
+
+    actions_tree, train_tree = (_parse(paths["hope_actions"]),
+                                _parse(_HERE / "a3_train_ppo.py"))
+    cfg, consts = (_class_assignments(actions_tree, "ClampedJointPositionActionCfg"),
+                   _module_consts(actions_tree))
+    process = _method(actions_tree, "ClampedJointPositionAction", "process_actions")
+    required = (
+        ("inset", "self._pre_apply_guard_margin_rad + "
+         "self._pre_apply_guard_margin_fraction * hard_travel"),
+        ("hard_inner_lower", "hard_lower + inset"),
+        ("hard_inner_upper", "hard_upper - inset"),
+        ("target_lower", "torch.maximum(lower, hard_inner_lower)"),
+        ("target_upper", "torch.minimum(upper, hard_inner_upper)"),
+        ("projection_inset", "self._finite_projection_soft_envelope_inset_fraction * travel"),
+        ("target_lower", "torch.maximum(target_lower, lower + projection_inset)"),
+        ("target_upper", "torch.minimum(target_upper, upper - projection_inset)"),
+        ("ballistic_next", "safe_joint_pos + safe_joint_vel * self._pre_apply_guard_policy_dt_s"),
+        ("crossing_violation", "~state_finite | safe_joint_pos.le(hard_inner_lower) | "
+         "safe_joint_pos.ge(hard_inner_upper) | ballistic_next.le(hard_inner_lower) | "
+         "ballistic_next.ge(hard_inner_upper)"),
+        ("per_joint_guard", "qdes_safety_violation | crossing_violation"),
+        ("brake_target", "torch.clamp(safe_joint_pos - safe_joint_vel * "
+         "self._pre_apply_guard_policy_dt_s, min=target_lower, max=target_upper)"),
+        ("self._processed_actions", "torch.where(per_joint_guard, brake_target, nominal_target)"),
+    )
+    advance = _method(train_tree, "A3ReadyBallVecEnv", "_advance_plant")
+    qdes_owners = [n for n in _live_nodes(advance) if isinstance(n, ast.Assign)
+                   and any(_dotted(t) == "q_des" for t in n.targets)]
+    qdes = "torch.clamp(self.action_offset.unsqueeze(0) + self.act_scale * "
+    qdes += "safe_actions, self.jnt_lo, self.jnt_hi)"
+    if (_literal(cfg["clamp"], consts) is not True
+            or _literal(cfg["finite_projection_soft_envelope_inset_fraction"], consts) != .05
+            or _literal(cfg["pre_apply_guard_brake_mode"], consts) != "velocity_horizon_v1"
+            or not all(_has_assign(process, *row) for row in required)
+            or len(qdes_owners) != 1 or not _has_assign(advance, "q_des", qdes)):
+        raise AlignmentError("executable_qdes_guard live descriptor differs")
+    return _row(
+        {"finite_proposal": "soft∩hard 5%-inset projection",
+         "state_guard": "q/qdot 0.02s prediction and brake"},
+        {"finite_proposal": "hard joint-range clamp only", "state_guard": None},
+        DIVERGENT_DECLARED,
+        claim_restrictions=["policy_transfer", "promotion", "matched_causal_comparison"],
+        allowed_scope="MuJoCo-only diagnostic_unauthorized 4096x24x25000")
 
 
 def _probe_pd_gains(paths: dict, lane: dict) -> dict:
@@ -1030,21 +1218,25 @@ AXES: tuple = (
          "需要 Isaac 的 motion command manager 提供 command/body_pos/body_ori 行。",
          _probe_critic_abi),
 
-    Axis("action_decoder",
-         "同一个 action=1 在两边意味着不同的关节角:Isaac 是逐关节 "
-         # 2026-08-08 就地改准:上界是 0.6875 rad(髋偏航/髋俯仰 220/80),不是
-         # 0.647/腰偏航。同一处手抄错在 a3_train_ppo 的 docstring 里 08-06 已按活值
-         # 改过(见该文件 §118-126),这一行当时漏了 —— 一处改准、另一处没跟,正是
-         # §9.2.9 说的那种"改了活代码、漏了同一句话的第二份拷贝"。
-         "0.25*力矩上限/Kp(头 0.0375 rad 到髋偏航/髋俯仰 0.6875 rad),"
-         "本车道默认是所有 31 个关节一律 0.25 rad。",
-         DIVERGENT_BLOCKING,
-         "这不是缩放而是**重新加权哪个关节动得动**;探索半径、动作率罚、"
-         "力矩饱和全都跟着变。",
-         "本车道已实现 vendor 模式且经本行逐关节对活值验过;把默认从 flat 改成 "
-         "vendor 是一个 flag(--action-scale-mode vendor),但会让新 run 与既有 "
-         "103 条 flat 收据不可比,属发车决定。",
-         _probe_action_decoder),
+    Axis("raw_action_affine",
+         "策略的31列先按tracked bijection固定为runtime articulation顺序;"
+         "两边同样无raw clip,并用同一份逐关节scale与动态ready offset做"
+         "q_des_raw=offset+scale*action。",
+         ALIGNED,
+         "",
+         "",
+         _probe_raw_action_affine,
+         caveat="这只对齐raw proposal;执行前的q_des保护由下一轴单独裁定。"),
+
+    Axis("executable_qdes_guard",
+         "raw proposal之后并不同构:Isaac把有限请求投影到soft∩hard"
+         "的5%内缩包络,并按鲜q/qdot和20 ms预测做刹车;MuJoCo"
+         "只做hard joint-range clamp。",
+         DIVERGENT_DECLARED,
+         "执行动作和反馈动力学不同,所以禁止policy transfer和matched causal"
+         "声明;但这不阻断明确标为diagnostic_unauthorized的MuJoCo-only 25k工程跑。",
+         "",
+         _probe_executable_qdes_guard),
 
     Axis("pd_gains",
          "PD 增益 Kp/Kd:本车道的 VENDOR_KP/KD 是手抄的,这一行把它逐关节"
@@ -1186,7 +1378,6 @@ AXES: tuple = (
 #: TaskCfg / SimCfg fields that no axis reads, and why that is acceptable.
 #: No wildcard: a new knob must be classified by hand or the guard fires.
 UNCLASSIFIED_LANE_FIELDS_ALLOWED = {
-    "action_clip": "raw policy clip; Isaac's twin lives in the action term, not the cfg",
     "obs_scale_lin_vel": "this lane's own observation scaling; there is no 114-D twin to compare",
     "obs_scale_ang_vel": "same",
     "obs_scale_joint_vel": "same",
@@ -1211,8 +1402,9 @@ UNCLASSIFIED_LANE_FIELDS_ALLOWED = {
 #: Lane fields each axis DOES read.  Kept explicit so the enumeration guard is
 #: a real guard and not a restatement of whatever the code happens to touch.
 LANE_FIELDS_READ_BY_AXES = {
-    "action_scale": "action_decoder",
-    "action_scale_mode": "action_decoder",
+    "action_scale": "raw_action_affine",
+    "action_scale_mode": "raw_action_affine",
+    "action_clip": "raw_action_affine",
     "episode_length_s": "episode_structure",
     "ball_reserve_after_s": "episode_structure",
     "min_pelvis_z": "fall_thresholds",
@@ -1304,6 +1496,10 @@ def build_ledger(root: Path | None = None, lane: dict | None = None) -> dict:
               for verdict in VERDICTS}
     blocking = sorted(k for k, r in rows.items()
                       if r["observed"] in BLOCKING_VERDICTS)
+    executable_guard_restricted = (
+        rows.get("executable_qdes_guard", {}).get("observed")
+        == DIVERGENT_DECLARED
+    )
     ledger = {
         "kind": "mjlab_lane_isaac_alignment_ledger_v1",
         "isaac_repo_root": summary_root,
@@ -1312,6 +1508,13 @@ def build_ledger(root: Path | None = None, lane: dict | None = None) -> dict:
         "verdict_counts": counts,
         "blocking_axes": blocking,
         "cross_engine_comparable": not blocking,
+        "policy_transfer_authorized": (
+            not blocking and not executable_guard_restricted
+        ),
+        "matched_causal_comparison_authorized": (
+            not blocking and not executable_guard_restricted
+        ),
+        "mujoco_only_diagnostic_25k_blocked_by_alignment": False,
         "bitwise_parity_is_never_a_valid_acceptance": True,
         "rows": rows,
     }
@@ -1328,7 +1531,14 @@ def build_ledger(root: Path | None = None, lane: dict | None = None) -> dict:
 #: Claims a receipt may ask this module to bless.
 CLAIM_CROSS_ENGINE_COMPARABLE = "cross_engine_comparable"
 CLAIM_BITWISE_PARITY = "bitwise_parity"
-CLAIMS = (CLAIM_CROSS_ENGINE_COMPARABLE, CLAIM_BITWISE_PARITY)
+CLAIM_POLICY_TRANSFER = "policy_transfer"
+CLAIM_MATCHED_CAUSAL_COMPARISON = "matched_causal_comparison"
+CLAIMS = (
+    CLAIM_CROSS_ENGINE_COMPARABLE,
+    CLAIM_BITWISE_PARITY,
+    CLAIM_POLICY_TRANSFER,
+    CLAIM_MATCHED_CAUSAL_COMPARISON,
+)
 
 
 def assert_cross_engine_claim(ledger: dict, claim: str) -> None:
@@ -1346,6 +1556,16 @@ def assert_cross_engine_claim(ledger: dict, claim: str) -> None:
             "bitwise cross-engine parity is not a valid acceptance criterion: "
             "mujoco-warp has no CPU fallback and diverges run to run even on a "
             "contact-free model (EXP 9.2.0).  Use an N-seed statistical band.")
+    guard = (ledger.get("rows") or {}).get("executable_qdes_guard") or {}
+    if (
+        claim in (CLAIM_POLICY_TRANSFER, CLAIM_MATCHED_CAUSAL_COMPARISON)
+        and guard.get("observed") == DIVERGENT_DECLARED
+    ):
+        raise AlignmentClaimRefused(
+            "executable_qdes_guard differs: Isaac projects into its inset "
+            "soft/hard envelope and brakes from q/qdot, while MuJoCo hard-clamps "
+            f"only; claim {claim!r} is outside the declared MuJoCo-only scope"
+        )
     blocking = ledger.get("blocking_axes") or []
     if blocking:
         raise AlignmentClaimRefused(

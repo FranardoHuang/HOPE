@@ -52,12 +52,13 @@ import racket_contact_geometry as racket_contact_geometry
 
 
 WAIT_BALL_PARK_HOPE = (0.0, 0.0, 10.0)
+RECOVER_HIDDEN_PHASE_INDEX = 3
 READY_HOLD_PHASE_INDEX = 4
 FULL_A_PHASE_IDLE = 0
 FULL_A_PHASE_REVEAL_COMMITTED = 2
 FULL_A_PHASE_LAUNCH_SETTLED = 5
 FULL_A_PHASE_OUTCOME_SETTLED = 6
-FULL_A_PHASE_RECOVERY_SETTLED = 7
+FULL_A_PHASE_RETIRED = 8
 FULL_A_OUTCOME_NONE = portable_outcome.OUTCOME_NONE
 FULL_A_OUTCOME_FLIGHT_EXPIRED = portable_outcome.OUTCOME_FLIGHT_EXPIRED
 FULL_A_OUTCOME_BALL_DEAD = portable_outcome.OUTCOME_BALL_DEAD
@@ -70,6 +71,9 @@ FULL_A_RECOVERY_START_AGE_TICK = portable_outcome.RECOVERY_START_AGE_TICK
 FULL_A_RECOVERY_END_AGE_TICK = portable_outcome.RECOVERY_END_AGE_TICK
 FULL_A_PLACEMENT_BROAD_SIGMA_M = portable_outcome.PLACEMENT_BROAD_SIGMA_M
 FULL_A_SUPPORT_FORCE_N = 10.0
+FULL_A_DEFAULT_ROOT_POS = (0.0, 0.0, 1.0684)
+FULL_A_DEFAULT_ROOT_QUAT_WXYZ = (1.0, 0.0, 0.0, 0.0)
+FULL_A_POLICY_BOOTSTRAP_KIND = "a3_default_stand_zero_head_v1"
 FULLMDP_TRACKED_BODY_NAMES = (
     "pelvis_link",
     "left_hip_roll_Link",
@@ -134,10 +138,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             raise ValueError("initial-WAIT FullMDP slice requires deterministic reset")
         if type(full_a_mode) is not bool:
             raise TypeError("full_a_mode must be bool")
-        if full_a_mode and float(task_cfg.episode_length_s) < 10.0:
+        if full_a_mode and float(task_cfg.episode_length_s) != 30.0:
             raise ValueError(
-                "Full-A requires the shared 10s episode horizon so one "
-                "question, flight, and recovery can complete"
+                "Full-A requires the shared exact 30s/1500-tick horizon"
             )
         self.full_a_mode = full_a_mode
         self._fullmdp_initialized = False
@@ -153,6 +156,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             count_contacts=True,
             capacity_probe=capacity_probe,
         )
+        if self.full_a_mode:
+            # Fresh A/C is born at the materialized default stand.  The
+            # take061 artifact remains an input/provenance carrier, not a
+            # physical-birth or policy-prior authority for this task.
+            self.q_ready = self.action_offset.clone()
         import mujoco
 
         if not self._robot_table_ok:
@@ -210,8 +218,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         if self.full_a_mode:
             self._full_a_catalog = portable_catalog.load_portable_action_center_table()
-            self._initialize_full_a_geometry(mujoco)
-            self._initialize_full_a_state()
+            self._full_a_cadence = portable_catalog.derive_portable_fresh_cadence(
+                self._full_a_catalog
+            )
+            if (
+                float(self.step_dt) != portable_catalog.FRESH_POLICY_STEP_S
+                or int(self.max_episode_length)
+                != self._full_a_cadence.episode_horizon_ticks
+            ):
+                raise RuntimeError("Full-A policy clock/cadence horizon differs")
             self._full_a_teacher = portable_question.load_portable_motion_teacher(
                 row=self._full_a_catalog.fresh_action,
                 tracked_body_names=FULLMDP_TRACKED_BODY_NAMES,
@@ -219,9 +234,53 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 dtype=self.qpos_init.dtype,
                 device=self.device,
             )
+            self._initialize_full_a_geometry(mujoco)
+            self._initialize_full_a_state()
+            self.sim.forward()
         self._snapshot_ready_teacher()
+        if self.full_a_mode:
+            self._full_a_prime_cadence_readiness(self._all_env_ids)
+            self._full_a_update_teacher()
         self._fullmdp_initialized = True
         self._compute_obs()
+
+    @property
+    def action_contract_identity(self) -> dict:
+        identity = super().action_contract_identity
+        identity.update(
+            {
+                "full_a_reset_joint_source": "runtime_plant.default_joint_pos_rad",
+                "full_a_reset_root_source": "AGIBOT_A3_CFG.init_state.pos/rot",
+                "full_a_policy_bootstrap": FULL_A_POLICY_BOOTSTRAP_KIND,
+            }
+        )
+        return identity
+
+    def _reset_idx(self, ids):
+        """Use the fresh Full-A default stand, never the legacy take061 pose."""
+
+        super()._reset_idx(ids)
+        if not getattr(self, "full_a_mode", False) or ids.numel() == 0:
+            return
+        data = self.sim.data
+        count = int(ids.numel())
+        root = self.root_qadr
+        data.qpos[ids, root : root + 3] = (
+            self._torch.tensor(
+                FULL_A_DEFAULT_ROOT_POS,
+                dtype=self.qpos_init.dtype,
+                device=self.device,
+            ).expand(count, 3)
+            + self.env.scene.env_origins[ids]
+        )
+        data.qpos[ids, root + 3 : root + 7] = self._torch.tensor(
+            FULL_A_DEFAULT_ROOT_QUAT_WXYZ,
+            dtype=self.qpos_init.dtype,
+            device=self.device,
+        ).expand(count, 4)
+        data.qpos[
+            ids[:, None], self.q_adr_act[None, :]
+        ] = self.action_offset[None, :].expand(count, -1)
 
     def _initialize_full_a_geometry(self, mujoco) -> None:
         """Bind R06/R07 numeric geometry to the compiled MuJoCo scene."""
@@ -439,7 +498,19 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_recovery_sticky_fault = torch.zeros_like(
             self._full_a_racket_contact
         )
-        self._full_a_selected_reset_frame0_carry = torch.zeros_like(
+        self._full_a_next_reveal_tick = torch.full(
+            (n,),
+            int(self._full_a_cadence.first_reveal_tick),
+            dtype=torch.long,
+            device=self.device,
+        )
+        self._full_a_scheduled_ordinal = torch.full(
+            (n,), -1, dtype=torch.long, device=self.device
+        )
+        self._full_a_cadence_ready_streak = torch.zeros(
+            (n,), dtype=torch.long, device=self.device
+        )
+        self._full_a_cadence_ready = torch.zeros_like(
             self._full_a_racket_contact
         )
         self._full_a_recovery_component_scales = torch.tensor(
@@ -460,9 +531,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             n, dtype=torch.long, device=self.device
         )
         self._full_a_motion_phase_code = torch.full(
-            (n,), READY_HOLD_PHASE_INDEX, dtype=torch.long, device=self.device
+            (n,), RECOVER_HIDDEN_PHASE_INDEX, dtype=torch.long, device=self.device
         )
-        self._full_a_teacher_joint_pos = self.q_ready.unsqueeze(0).expand(
+        self._full_a_teacher_joint_pos = self.action_offset.unsqueeze(0).expand(
             n, -1
         ).clone()
         self._full_a_teacher_joint_vel = torch.zeros_like(
@@ -501,6 +572,18 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._clear_lifecycle(self._all_env_ids)
 
+    def _full_a_reset_cadence_rows(self, ids) -> None:
+        """Restart only the true-reset cadence state for selected Gym rows."""
+
+        if ids.numel() == 0:
+            return
+        self._full_a_next_reveal_tick[ids] = int(
+            self._full_a_cadence.first_reveal_tick
+        )
+        self._full_a_scheduled_ordinal[ids] = -1
+        self._full_a_cadence_ready_streak[ids] = 0
+        self._full_a_cadence_ready[ids] = False
+
     def _full_a_begin_control_step(self) -> None:
         self._full_a_contact_classification_status.zero_()
         self._full_a_generic_contact_event.zero_()
@@ -522,7 +605,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         n = int(ids.numel())
         if n == 0:
             return
-        self._full_a_selected_reset_frame0_carry[ids] = False
         builder = getattr(
             self, "_full_a_question_builder", portable_question.build_center_question
         )
@@ -574,7 +656,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_r03_armed[ids] = True
         self._full_a_r03_physically_valid[ids] = target_finite & normal_unit
 
-        reveal = int(self.common_step_counter)
+        # This callpoint runs immediately before _advance_plant increments the
+        # shared control clock.  The accepted question belongs to that next
+        # transition, matching fresh Motion's command-compute tick.
+        reveal = int(self.common_step_counter) + 1
         contact_tick = reveal + question["ttc_ticks"]
         launch_tick = contact_tick - question["launch_horizon_ticks"]
         deadline = contact_tick + max(
@@ -589,6 +674,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._epoch_phase[ids] = FULL_A_PHASE_REVEAL_COMMITTED
         self._epoch_task_valid[ids] = True
         self._epoch_selected[ids] = True
+        self._full_a_cadence_ready_streak[ids] = 0
+        self._full_a_cadence_ready[ids] = False
 
     def _full_a_launch_rows(self, ids) -> None:
         state = self._full_a_launch_state_f32[ids]
@@ -628,17 +715,38 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self.ball_age_buf[ids] = 0
 
     def _full_a_prepare_step(self):
-        idle = self._epoch_phase.eq(FULL_A_PHASE_IDLE)
-        self._full_a_reveal_rows(idle.nonzero(as_tuple=False).squeeze(-1))
+        torch = self._torch
+        policy_tick = self.episode_length_buf + 1
+        due = policy_tick.eq(self._full_a_next_reveal_tick)
+        candidate = self._epoch_phase.eq(FULL_A_PHASE_IDLE) | self._epoch_phase.eq(
+            FULL_A_PHASE_RETIRED
+        )
+        torch._assert_async(torch.all(~due | candidate))
+        reveal = due & candidate & self._full_a_cadence_ready
+        deferred = due & candidate & ~self._full_a_cadence_ready
+        self._full_a_scheduled_ordinal += due.to(torch.long)
+        self._full_a_next_reveal_tick += (
+            due.to(torch.long) * int(self._full_a_cadence.cadence_ticks)
+        )
+        reveal_ids = reveal.nonzero(as_tuple=False).squeeze(-1)
+        if reveal_ids.numel() > 0:
+            # A retired row remains visible until a real ACCEPT.  The ACCEPT
+            # itself atomically replaces that row; DEFER is a zero-write.
+            self._clear_lifecycle(reveal_ids)
+            self._full_a_reveal_rows(reveal_ids)
         launch = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED) & (
-            self._epoch_clock_ticks[:, 2] <= int(self.common_step_counter)
+            self._epoch_clock_ticks[:, 2] <= int(self.common_step_counter) + 1
         )
         self._full_a_launch_rows(launch.nonzero(as_tuple=False).squeeze(-1))
         waiting = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED)
         self._full_a_park_rows(waiting.nonzero(as_tuple=False).squeeze(-1))
-        recovering = self._epoch_phase.eq(FULL_A_PHASE_OUTCOME_SETTLED)
+        recovering = self._epoch_phase.eq(FULL_A_PHASE_OUTCOME_SETTLED) | (
+            self._epoch_phase.eq(FULL_A_PHASE_RETIRED)
+        )
         self._full_a_park_rows(recovering.nonzero(as_tuple=False).squeeze(-1))
-        return idle, launch
+        idle = self._epoch_phase.eq(FULL_A_PHASE_IDLE)
+        self._full_a_park_rows(idle.nonzero(as_tuple=False).squeeze(-1))
+        return reveal, launch, due, deferred
 
     def _full_a_latch_ball_contacts(self) -> None:
         """Latch live contact plus first net/landing-plane crossings."""
@@ -1093,7 +1201,54 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             & (joint <= upper).all(dim=1)
         )
 
-    def _full_a_publish_r07_fact(self):
+    def _full_a_update_cadence_readiness(
+        self, errors, hard_safety_ok, terminated, truncated
+    ) -> None:
+        """Maintain the two-transition R07 readiness projection for D05."""
+
+        torch = self._torch
+        candidate = (
+            self._epoch_phase.eq(FULL_A_PHASE_IDLE)
+            | self._epoch_phase.eq(FULL_A_PHASE_OUTCOME_SETTLED)
+            | self._epoch_phase.eq(FULL_A_PHASE_RETIRED)
+        )
+        numeric = torch.isfinite(errors).all(dim=1)
+        ready = (
+            candidate
+            & numeric
+            & hard_safety_ok
+            & ~terminated
+            & ~truncated
+            & (errors <= self._full_a_recovery_ready_tolerances).all(dim=1)
+        )
+        self._full_a_cadence_ready_streak.copy_(
+            torch.where(
+                ready,
+                self._full_a_cadence_ready_streak + 1,
+                torch.zeros_like(self._full_a_cadence_ready_streak),
+            )
+        )
+        self._full_a_cadence_ready.copy_(
+            candidate & self._full_a_cadence_ready_streak.ge(2)
+        )
+
+    def _full_a_prime_cadence_readiness(self, ids) -> None:
+        """Install the reset-return tick-zero readiness sample for selected rows."""
+
+        if ids.numel() == 0:
+            return
+        torch = self._torch
+        errors = self._full_a_recovery_component_errors()
+        hard_safety_ok = self._full_a_recovery_joint_limit_ok()
+        ready = (
+            torch.isfinite(errors).all(dim=1)
+            & hard_safety_ok
+            & (errors <= self._full_a_recovery_ready_tolerances).all(dim=1)
+        )
+        self._full_a_cadence_ready_streak[ids] = ready[ids].to(torch.long)
+        self._full_a_cadence_ready[ids] = False
+
+    def _full_a_publish_r07_fact(self, errors=None, hard_safety_ok=None):
         """Publish one dense R07 cell only inside the exact 10..77 window."""
 
         torch = self._torch
@@ -1106,8 +1261,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             & (age >= FULL_A_RECOVERY_START_AGE_TICK)
             & (age <= FULL_A_RECOVERY_END_AGE_TICK)
         )
-        errors = self._full_a_recovery_component_errors()
-        hard_safety_ok = self._full_a_recovery_joint_limit_ok()
+        if errors is None:
+            errors = self._full_a_recovery_component_errors()
+        if hard_safety_ok is None:
+            hard_safety_ok = self._full_a_recovery_joint_limit_ok()
         eligible, valid, ready, facts = portable_outcome.r07_rows(
             torch=torch,
             expected=expected,
@@ -1199,14 +1356,44 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         terminal |= invalid_outcome
         failure |= invalid_outcome
+        # A physical/Gym terminal interrupts recovery and true-resets the row;
+        # it is telemetry, not a nonterminating shot retirement.  Only the
+        # naturally closed 68-cell window enters RETIRED.
+        retired = terminal & ~terminated & ~truncated
         self._epoch_phase.copy_(
             torch.where(
-                terminal,
-                torch.full_like(self._epoch_phase, FULL_A_PHASE_RECOVERY_SETTLED),
+                retired,
+                torch.full_like(self._epoch_phase, FULL_A_PHASE_RETIRED),
                 self._epoch_phase,
             )
         )
         return terminal, success, failure, timeout
+
+    def _full_a_completed_action_epoch(self, shot_retired):
+        """Close one same-row business epoch; this is evidence, not shot success."""
+
+        r03 = portable_reward.R03_PRESENT | portable_reward.R03_PHYSICALLY_VALID
+        r06 = (
+            portable_reward.R06_PRESENT
+            | portable_reward.R06_POLICY_ELIGIBLE
+            | portable_reward.R06_SOURCE_VALID
+        )
+        expected_cells = (
+            FULL_A_RECOVERY_END_AGE_TICK - FULL_A_RECOVERY_START_AGE_TICK + 1
+        )
+        return (
+            shot_retired
+            & self._epoch_launch_succeeded
+            & self._full_a_selected_racket_contact
+            & self._torch.bitwise_and(self._full_a_owner_valid_bits[:, 1], r03).eq(r03)
+            & self._full_a_owner_fault_bits[:, 1].eq(0)
+            & self._torch.bitwise_and(self._full_a_owner_valid_bits[:, 2], r06).eq(r06)
+            & self._full_a_owner_fault_bits[:, 2].eq(0)
+            & self._full_a_recovery_expected_count.eq(expected_cells)
+            & self._full_a_recovery_eligible_count.eq(expected_cells)
+            & self._full_a_recovery_last_age.eq(FULL_A_RECOVERY_END_AGE_TICK)
+            & ~self._full_a_recovery_sticky_fault
+        )
 
     def _snapshot_ready_teacher(self) -> None:
         data = self.sim.data
@@ -1229,7 +1416,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             return
         torch = self._torch
         valid = self._epoch_task_valid
-        frame0_carry = self._full_a_selected_reset_frame0_carry
         elapsed = torch.clamp(
             (
                 int(self.common_step_counter) - self._epoch_clock_ticks[:, 0]
@@ -1245,16 +1431,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_pre_swing_wait_s,
         )
         origins = self.env.scene.env_origins[:, None, :]
-        # Isaac's Motion teacher switches atomically from the hidden physical
-        # safe-ready tuple to measured frame zero at reveal.  The separate
-        # diagnostic q_des oracle may ramp the command, but that ramp is never
-        # a Motion observation or reward reference.  Keep frame zero in the
-        # prepare phase until the rounded measured clock actually leaves it.
-        playback_started = (
-            valid
-            & (elapsed + 1.0e-12 >= self._full_a_pre_swing_wait_s)
-            & sampled["frame"].gt(0)
+        # Fresh Motion keeps the public joint teacher at robot.default_joint_pos
+        # during the pre-swing hold.  Body references still use measured frame
+        # zero, and R07 independently scores the measured frame-zero target.
+        in_hold = valid & (
+            elapsed <= self._full_a_pre_swing_wait_s + 1.0e-12
         )
+        # Motion's public hold boundary is time-owned: once active motion time
+        # is positive, publish the measured sampler even when rounding still
+        # selects frame zero.  The discrete frame ordinal is not an authority
+        # for leaving HOLD.
+        playback_started = valid & ~in_hold
         prepare = valid & ~playback_started
         swing = (
             playback_started
@@ -1275,24 +1462,21 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 + self._full_a_scaled_t_cycle_s
             )
         )
-        phase = torch.full_like(
-            self._full_a_motion_phase_code, READY_HOLD_PHASE_INDEX
+        hidden_phase = torch.where(
+            self._full_a_cadence_ready,
+            torch.full_like(
+                self._full_a_motion_phase_code, READY_HOLD_PHASE_INDEX
+            ),
+            torch.full_like(
+                self._full_a_motion_phase_code, RECOVER_HIDDEN_PHASE_INDEX
+            ),
         )
-        phase = torch.where(
-            valid & ~prepare & ~swing & ~follow,
-            torch.full_like(phase, 3),
-            phase,
-        )
+        phase = hidden_phase
         phase = torch.where(follow, torch.full_like(phase, 2), phase)
         phase = torch.where(swing, torch.full_like(phase, 1), phase)
         phase = torch.where(prepare, torch.zeros_like(phase), phase)
         self._full_a_motion_phase_code.copy_(phase)
-        # Task-valid rows remain owned by this measured action through
-        # recovery.  Shared Motion holds the completed action's measured frame
-        # zero after the suffix; only task-invalid IDLE rows expose the
-        # separately admitted physical-ready snapshot.
-        measured = valid | frame0_carry
-        completed = (valid & ~prepare & ~swing & ~follow) | frame0_carry
+        completed = valid & ~prepare & ~swing & ~follow
         frame0_joint = self._full_a_teacher.joint_pos[0].unsqueeze(0)
         frame0_body_pos = self._full_a_teacher.body_pos_w[0].unsqueeze(0)
         frame0_body_quat = self._full_a_teacher.body_quat_w[0].unsqueeze(0)
@@ -1307,16 +1491,19 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._full_a_teacher_frame.copy_(
             torch.where(
-                valid & ~completed,
+                valid & ~completed & ~in_hold,
                 sampled["frame"],
                 torch.zeros_like(sampled["frame"]),
             )
         )
+        measured_joint = valid & ~completed & ~in_hold
         self._full_a_teacher_joint_pos.copy_(
             torch.where(
-                measured[:, None],
+                measured_joint[:, None],
                 measured_joint_pos,
-                self.q_ready.unsqueeze(0).expand_as(self._full_a_teacher_joint_pos),
+                self.action_offset.unsqueeze(0).expand_as(
+                    self._full_a_teacher_joint_pos
+                ),
             )
         )
         measured_joint_vel = torch.where(
@@ -1326,23 +1513,23 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._full_a_teacher_joint_vel.copy_(
             torch.where(
-                measured[:, None],
+                (measured_joint & ~prepare)[:, None],
                 measured_joint_vel,
                 torch.zeros_like(self._full_a_teacher_joint_vel),
             )
         )
         self._teacher_body_pos.copy_(
             torch.where(
-                measured[:, None, None],
+                (valid & ~completed)[:, None, None],
                 measured_body_pos + origins,
-                self._ready_teacher_body_pos,
+                frame0_body_pos + origins,
             )
         )
         self._teacher_body_quat.copy_(
             torch.where(
-                measured[:, None, None],
+                (valid & ~completed)[:, None, None],
                 measured_body_quat,
-                self._ready_teacher_body_quat,
+                frame0_body_quat.expand_as(self._teacher_body_quat),
             )
         )
         measured_body_lin_vel = torch.where(
@@ -1352,9 +1539,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._teacher_body_lin_vel.copy_(
             torch.where(
-                measured[:, None, None],
+                (valid & ~completed)[:, None, None],
                 measured_body_lin_vel,
-                self._ready_teacher_body_lin_vel,
+                torch.zeros_like(self._teacher_body_lin_vel),
             )
         )
         measured_body_ang_vel = torch.where(
@@ -1364,9 +1551,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._teacher_body_ang_vel.copy_(
             torch.where(
-                measured[:, None, None],
+                (valid & ~completed)[:, None, None],
                 measured_body_ang_vel,
-                self._ready_teacher_body_ang_vel,
+                torch.zeros_like(self._teacher_body_ang_vel),
             )
         )
         self._refresh_aligned_teacher_body_pose()
@@ -1776,19 +1963,19 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         qdes = ~torch.isfinite(requested_qdes).all(dim=1)
         keepout = self._cur_table_keepout
         resolved_table = self._cur_robot_table > 0
+        terminated = tilt | low | qdes | keepout | resolved_table
+        # RSL-RL bootstraps only a pure time-limit truncation.  A row that also
+        # hits a physical/safety terminal must not receive gamma*V merely
+        # because the horizon ended on the same control transition.
+        truncated = timeout & ~terminated
         bits = (
-            timeout.to(torch.long) * FULLMDP_TERMINATION_BITS["time_out"]
+            truncated.to(torch.long) * FULLMDP_TERMINATION_BITS["time_out"]
             + tilt.to(torch.long) * FULLMDP_TERMINATION_BITS["base_fell_tilt"]
             + low.to(torch.long) * FULLMDP_TERMINATION_BITS["base_too_low"]
             + qdes.to(torch.long)
             * FULLMDP_TERMINATION_BITS["joint_qdes_forbidden"]
             + keepout.to(torch.long) * FULLMDP_TERMINATION_BITS["robot_hit_table"]
         )
-        terminated = tilt | low | qdes | keepout | resolved_table
-        # Isaac TerminationManager keeps timeout and physical termination as
-        # independent masks.  RSL-RL needs the timeout bit even when a row also
-        # falls or hits a guard in the same transition for value bootstrapping.
-        truncated = timeout
         return terminated, truncated, bits, resolved_table
 
     def _clear_lifecycle(self, ids) -> None:
@@ -1817,8 +2004,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_scaled_t_cycle_s[ids] = 0.0
             self._full_a_pre_swing_wait_s[ids] = 0.0
             self._full_a_teacher_frame[ids] = 0
-            self._full_a_motion_phase_code[ids] = READY_HOLD_PHASE_INDEX
-            self._full_a_teacher_joint_pos[ids] = self.q_ready
+            self._full_a_motion_phase_code[ids] = RECOVER_HIDDEN_PHASE_INDEX
+            self._full_a_teacher_joint_pos[ids] = self.action_offset
             self._full_a_teacher_joint_vel[ids] = 0.0
             if hasattr(self, "_ready_teacher_body_pos"):
                 self._teacher_body_pos[ids] = self._ready_teacher_body_pos[ids]
@@ -1852,7 +2039,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_recovery_eligible_count[ids] = 0
             self._full_a_recovery_last_age[ids] = -1
             self._full_a_recovery_sticky_fault[ids] = False
-            self._full_a_selected_reset_frame0_carry[ids] = False
             self._full_a_contact_classification_status[ids] = (
                 racket_contact_geometry.OBSERVED_RUBBER_STATUS_NONE
             )
@@ -1863,17 +2049,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_between_contact_event[ids] = False
             self._full_a_invalid_contact_event[ids] = False
 
-    def _full_a_apply_selected_reset(self, selected_reset):
-        """Clear completed shot rows without terminating the Gym episode."""
-
-        ids = selected_reset.nonzero(as_tuple=False).squeeze(-1)
-        if ids.numel() > 0:
-            self._full_a_park_rows(ids)
-            self.reset_generation[ids] += 1
-            self._clear_lifecycle(ids)
-            self._full_a_selected_reset_frame0_carry[ids] = True
-        return ids
-
     def reset(self):
         observations, extras = super().reset()
         if self._fullmdp_initialized:
@@ -1881,6 +2056,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self.last_terminal_bits.zero_()
             self._clear_lifecycle(self._all_env_ids)
             if self.full_a_mode:
+                self._full_a_reset_cadence_rows(self._all_env_ids)
+                self.sim.forward()
+                self._full_a_prime_cadence_readiness(self._all_env_ids)
                 self._full_a_update_teacher()
             else:
                 self._refresh_aligned_teacher_body_pose()
@@ -1892,11 +2070,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         if getattr(self, "full_a_mode", False):
             return self._step_full_a(actions)
         torch = self._torch
-        incoming = actions.to(self.device)
-        requested_qdes = self.q_ready.unsqueeze(0) + self.act_scale * incoming
-        finite_qdes = torch.isfinite(requested_qdes)
-        safe_actions = torch.where(finite_qdes, incoming, self.actions)
-        _st_before_forward, _tau_sq, _safe_qdes = self._advance_plant(safe_actions)
+        _st_before_forward, _tau_sq, requested_qdes = self._advance_plant(actions)
         # MuJoCo-Warp's step integrates qpos/qvel after its derived-tensor
         # forward pass.  Re-forward once so termination, Reward20, and the
         # returned observation all describe the same post-transition state.
@@ -1939,12 +2113,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
 
         torch = self._torch
         self._full_a_begin_control_step()
-        reveal_event, launch_event = self._full_a_prepare_step()
-        incoming = actions.to(self.device)
-        requested_qdes = self.q_ready.unsqueeze(0) + self.act_scale * incoming
-        finite_qdes = torch.isfinite(requested_qdes)
-        safe_actions = torch.where(finite_qdes, incoming, self.actions)
-        self._advance_plant(safe_actions)
+        (
+            reveal_event,
+            launch_event,
+            reveal_due_event,
+            reveal_deferred_event,
+        ) = self._full_a_prepare_step()
+        _st_before_forward, _tau_sq, requested_qdes = self._advance_plant(actions)
         self.sim.forward()
         self._latch_post_forward_resolved_table_contacts()
         self._latch_post_forward_table_keepout()
@@ -1956,15 +2131,27 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         terminated, truncated, terminal_bits, resolved_table_contact = (
             self._fullmdp_termination(st, requested_qdes)
         )
+        recovery_errors = self._full_a_recovery_component_errors()
+        recovery_hard_safety_ok = (
+            self._full_a_recovery_joint_limit_ok() & ~terminated & ~truncated
+        )
+        self._full_a_update_cadence_readiness(
+            recovery_errors,
+            recovery_hard_safety_ok,
+            terminated,
+            truncated,
+        )
         self._full_a_publish_physical_fact()
         r03_present_event, r03_valid_event = self._full_a_publish_r03_fact()
         outcome_event, outcome = self._full_a_settle_outcome(st)
         r06_present, r06_eligible, r06_common = self._full_a_publish_r06_fact(
             outcome_event, outcome
         )
-        r07_present, r07_eligible = self._full_a_publish_r07_fact()
+        r07_present, r07_eligible = self._full_a_publish_r07_fact(
+            recovery_errors, recovery_hard_safety_ok
+        )
         reward, reward_terms = self._fullmdp_reward20()
-        shot_terminal, recovery_success, recovery_failure, recovery_timeout = (
+        recovery_terminal, recovery_success, recovery_failure, recovery_timeout = (
             self._full_a_finish_recovery(terminated, truncated)
         )
         contact_event = self._full_a_generic_contact_event.clone()
@@ -1978,39 +2165,40 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         landing_on_opponent = self._full_a_landing_on_opponent.clone()
         landing_opponent_bound = self._full_a_landing_opponent_bound.clone()
-        shot_terminal |= invalid_contact_event
+        landing_crossing_event = (
+            outcome_event & self._full_a_landing_crossing_present
+        ).clone()
+        recovery_terminal |= invalid_contact_event
         recovery_failure |= invalid_contact_event
-        self._epoch_phase.copy_(
-            torch.where(
-                invalid_contact_event,
-                torch.full_like(
-                    self._epoch_phase, FULL_A_PHASE_RECOVERY_SETTLED
-                ),
-                self._epoch_phase,
+        torch._assert_async(
+            torch.all(
+                ~invalid_contact_event
+                & ~(outcome_event & outcome.eq(FULL_A_OUTCOME_INVALID))
             )
         )
         dones = terminated | truncated
-        # R07 completion closes the selected ActionEpoch row, not the Gym
-        # episode.  Preserve robot/action/episode state and bootstrap across
-        # the next reveal; only an actual safety/time-limit terminal owns the
-        # expensive full environment reset.
-        selected_reset = shot_terminal & self._epoch_selected & ~dones
+        shot_retired = recovery_terminal & ~dones
+        completed_action_epoch = self._full_a_completed_action_epoch(shot_retired)
+        # Only a true Gym reset advances reset_generation.  A retired shot is
+        # retained until the next frozen due tick produces a real ACCEPT.
+        selected_reset = dones.clone()
         terminal_phase = self._epoch_phase.clone()
         outcome_state = self._full_a_outcome_code.clone()
         racket_contact = self._full_a_racket_contact.clone()
         table_contact = self._full_a_ball_table_contact.clone()
         physical_center = self._full_a_physical_fact_f32[:, :3].clone()
-        selected_reset_ids = self._full_a_apply_selected_reset(selected_reset)
         reset_ids = dones.nonzero(as_tuple=False).squeeze(-1)
         if reset_ids.numel() > 0:
             self.last_terminal_bits[reset_ids] = terminal_bits[reset_ids]
             self._reset_idx(reset_ids)
             self.reset_generation[reset_ids] += 1
             self._clear_lifecycle(reset_ids)
-        if selected_reset_ids.numel() > 0 or reset_ids.numel() > 0:
+            self._full_a_reset_cadence_rows(reset_ids)
+        if reset_ids.numel() > 0:
             self.sim.forward()
             if self._cap_ok:
                 self._probe_capacity("forward")
+            self._full_a_prime_cadence_readiness(reset_ids)
         self._full_a_update_teacher()
         self._compute_obs()
         if self._cap_ok:
@@ -2027,8 +2215,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "full_a_ball_table_contact": table_contact,
             "full_a_physical_current_center": physical_center,
             "full_a_reveal_event": reveal_event,
+            "full_a_reveal_due_event": reveal_due_event,
+            "full_a_reveal_deferred_event": reveal_deferred_event,
             "full_a_launch_event": launch_event,
             "full_a_flight_terminal_event": outcome_event,
+            "full_a_shot_retired_event": shot_retired,
+            "full_a_completed_action_epoch_event": completed_action_epoch,
             "full_a_selected_reset_event": selected_reset,
             "full_a_racket_contact_eligible_event": launch_event,
             "full_a_racket_contact_event": contact_event,
@@ -2045,9 +2237,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "full_a_invalid_contact_event": invalid_contact_event,
             "full_a_r03_present_event": r03_present_event,
             "full_a_r03_physically_valid_event": r03_valid_event,
-            "full_a_landing_crossing_event": (
-                outcome_event & self._full_a_landing_crossing_present
-            ),
+            "full_a_landing_crossing_event": landing_crossing_event,
             "full_a_landing_on_opponent": (
                 landing_on_opponent
             ),
@@ -2068,11 +2258,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
 
 __all__ = [
     "WAIT_BALL_PARK_HOPE",
+    "RECOVER_HIDDEN_PHASE_INDEX",
     "READY_HOLD_PHASE_INDEX",
     "FULL_A_PHASE_IDLE",
     "FULL_A_PHASE_REVEAL_COMMITTED",
     "FULL_A_PHASE_LAUNCH_SETTLED",
     "FULL_A_PHASE_OUTCOME_SETTLED",
+    "FULL_A_PHASE_RETIRED",
     "FULL_A_OUTCOME_NONE",
     "FULL_A_OUTCOME_FLIGHT_EXPIRED",
     "FULL_A_OUTCOME_BALL_DEAD",

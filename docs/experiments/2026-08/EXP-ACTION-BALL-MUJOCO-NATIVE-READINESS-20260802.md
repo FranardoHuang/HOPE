@@ -7,11 +7,27 @@
 - 执行者：Codex
 - 复核/决策负责人：Franco
 - 本 successor 最高证据等级：`E1`；历史 negative-control 另有 `E3` 诊断，不传递为新系统 E3
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-18
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-20
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 [`origin/main` 的 `NOW`](../../NOW.md)。
+
+> **2026-08-20 portable事实纠正：**当前MuJoCo portable Full-A的详细真源是
+> [EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819](EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+> 本页后文把R06/R07/Reward11--13写成尚不存在、或把zero-action下的table/fall/contact零值及额外
+> keepout witness写成长跑前置，均只保留为历史诊断，不得覆盖当前代码事实。当前host已闭合raw-action
+> proposal/runtime order/scale/default-offset、R06/R07/Reward0--20、thin ledger和独立consumer；MuJoCo
+> hard-range与Isaac soft-inset/brake仍显式`DIVERGENT_DECLARED`，所以没有transfer/matched authority。
+> 原有exact table keepout保留，错误的额外witness已拒绝。
+> true Gym reset现为runtime default plant/zero velocity/zero action history；30 s / 1500-tick cadence
+> 的due是`2 + 293k`，每次按live state作`ACCEPT/DEFER`。HOLD joint teacher为default/zero velocity，
+> body/R07 target为measured frame0；phase只允许`0/2/5/6/8`。natural `shot_retired`保留
+> robot/action/episode/generation，只有Gym done发布`selected_reset`并增加generation。ledger为26 events，
+> `completed_action_epoch`必须来自同一env行的完整业务闭合，不能由跨env边际拼接；
+> consumer分开engineering与slot0 business完成；本代因73动作、双侧和科学窗口报告未闭合，
+> `full_a_complete`固定为`false`。
+> exact Pod真实调用点、wall time与`4096×25000` live run仍为未测/未启动，故状态仍是`in_progress`而非完成。
 
 ## 2026-08-19 4096 scene首证据与successor裁决
 

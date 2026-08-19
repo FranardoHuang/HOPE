@@ -1,5 +1,23 @@
 # 简短进度记录
 
+## 2026-08-20 — MuJoCo cadence/reset/RETIRE与25k证据链完成host收口
+
+- MuJoCo raw-action/order/scale/default-offset host已闭合；true Gym reset现在使用runtime default joints、
+  configured default root加env origin、零速度和零action history，`take061/q_ready`不再是birth authority。
+  30 s / 1500 tick的due固定为`2 + 293k`；`DEFER`零写且不在下一tick补试。HOLD joint teacher为
+  default/zero velocity，body/R07 target为measured frame0；phase只允许`0/2/5/6/8`。
+- natural shot close现在发布`shot_retired`并停在phase8：不发Gym done、不重置robot/action/episode、
+  不增加generation；只有真实Gym done发布`selected_reset`并恰增generation。ledger为26 events，新增的
+  `completed_action_epoch`只在同一env行闭合launch/selected contact/fault-free physically-valid
+  R03/fault-free eligible+source-valid R06/exact 68-cell R07/natural RETIRE时原子发布，
+  consumer分开`engineering_run_complete`与slot0 `business_chain_complete`；本代因73动作、双侧与
+  科学窗口报告未闭合，`full_a_complete`固定为`false`。
+  zero-policy table/fall/contact仍只作telemetry，exact keepout termination保留。
+- 当前host回归：runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
+  `59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。exact Pod调用点与portable
+  `4096×25000` live run仍未测/未启动；q-des guard仍`DIVERGENT_DECLARED`，无transfer/matched authority。
+  详见[portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+
 ## 2026-08-19 — MuJoCo portable action0 question与measured teacher纵切片闭合host反例
 
 - portable Full-A不再用midpoint serve、线性`x+vt`或`normal=-incoming`临时代签：slot0
@@ -4372,7 +4390,7 @@
 - 2026-08-19: FullMDP A `4096×25000` commit `53156327…`自然RC1：真实scene、229/399、Reward20与runtime v2已完成，runner在PPO前拒绝compact action type。exact IsaacLab源码证明该class继承`ManagerTermBase(ABC)`、metaclass为`ABCMeta`，旧adapter的`type(class) is type`是错门；compact仍由`train.py` runtime binding唯一写。`75b18ba2…`的task duplicate writer在scene前被ownership门自然拒绝并封存，反证不该复制状态。successor保留env0共享内容审计、逐envpath/ball/contact、0807 A3P 73-motion与pelvis grounding，只把type门修到exact class identity；fresh Pod待跑，G05仍`Partial`。
 - 2026-08-19: fresh FullMDP A commit `b64cb944…`首次在真实4096规模进入同一25,000-update长跑；update0--8有9组完整v11 durable pair、884,736个finite且守恒的Reward sample。D05真实due/selected=12,288，但ACCEPT仍0，全部为10,836 not-ready defer或1,452 reject；8,192个结束episode暂全tilt。工程窗通过、任务入口尚未ready，继续同一进程，1000只作里程碑不停车；G05仍`Partial`。
 
-## 2026-08-20 — FullMDP性能首墙与MuJoCo非终止shot reset
+## HISTORICAL / SUPERSEDED — 2026-08-20 FullMDP性能首墙与旧MuJoCo shot-reset实现
 
 - fresh Isaac `e8eef4fb…`前5个4096-env profile把`post_physics_publish`钉为约7--8秒/update，远高于
   sim约0.9秒和owner binding约0.15秒；首个语义保持cut删除重复scene read/clone，host `81 passed, 5 skipped`，
@@ -4410,3 +4428,24 @@
 - Isaac profile-off matched update20--97：旧GPU1 mean/median/p95=`17.570/16.415/22.81 s`，新GPU0=
   `18.004/17.610/22.98 s`；update97 reward/episode length/timesteps exact相同。single-read cut没有可测净收益，
   不称严格优于；旧run已到iteration1300，新run到97，两者继续只读。
+## 2026-08-20 — Isaac zero-live-flight host candidate
+
+- Isaac zero-live-flight现用pre/post成对idle fast path：只在整批无live flight时跳过scene tensor、Physical
+  packet、空R06/epoch与全量false grid写入，mixed/full、ACCEPT、active、retire及
+  reset/restore/checkpoint仍走dense路径；global sticky fault不冒充activity，但原值保持到下一次live capture
+  时显式暴露。host zero-flight suite=`112 passed`（约4秒），consumer semantic
+  suite=`166 passed`（约8秒）；Pod fixed-tape、profile-off matched wall与6--9秒目标均为未测。
+- MuJoCo已删除错误的raw action `[-4,4]`裁剪；五个真实counterexample为
+  `-4.074456/16.459160/-5.387479/6.098073/-31.731944`。policy/teacher/observation/PD全部统一为
+  runtime/schema-2关节序，唯一actuator permutation在plant写入边界；physical `q_ready`只负责reset，
+  affine offset另取`runtime_plant.default_joint_pos_rad`。MuJoCo只做机械hard-range clamp，而Isaac还包含
+  soft-inset与state-dependent brake，故该轴明确`DIVERGENT_DECLARED`且无transfer/matched authority。
+- 错误的R07 zero-policy发车门已删除；age `10..77`、expected/eligible=`68/68`与无sticky fault只由
+  确定性host lifecycle反例验证，未训练policy的table/fall/contact不再误作通过条件。会误杀合法recovery的
+  额外keepout witness已拒绝并回退，原有exact table keepout仍保留。
+  optimizer前prepare/成功后snapshot+ACK的thin ledger与独立consumer host闭合：真实writer→consumer
+  prefix也由同一production payload测试，runner/ledger/consumer=`80 passed, 1 skipped`；MuJoCo env/action/
+  outcome=`54 passed, 7 skipped`，alignment新增反例=`14 passed`。Pod真实调用点与portable
+  `4096×25000` live run仍未测/未启动，详见
+  [portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)及
+  [G06](gates/G06_isaac_to_mujoco.md)。

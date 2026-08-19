@@ -308,10 +308,7 @@ def step_diagnostic_split_ready_qdes_bridge(
         or frozen_steps.dtype != torch.long
     ):
         raise ValueError("diagnostic q_des bridge tensors differ")
-    torch._assert_async(
-        torch.all(frozen_steps >= 0),
-        "diagnostic q_des bridge frozen steps are negative",
-    )
+    torch._assert_async(torch.all(frozen_steps >= 0))
     span = (frozen_steps + 1).to(dtype=previous_qdes.dtype)[:, None]
     blended = previous_qdes + (frame0_qdes - previous_qdes) / span
     # Preserve an exact endpoint instead of accepting one ulp of subtract/add

@@ -1051,6 +1051,7 @@ class IsaacPhysxBallFactOwner:
         # diagnostic until a separately typed production owner exists.
         self._diagnostic_unauthorized = True
         self._action_epoch_direct_binding = False
+        self._action_epoch_idle_binding = False
 
     @classmethod
     def _diagnostic_unauthorized_for_test(
@@ -1245,7 +1246,82 @@ class IsaacPhysxBallFactOwner:
         self._expected_rubber.copy_(rubber)
         self._expected_generation.copy_(generation)
         self._expected_key.copy_(full_key)
+        self._action_epoch_idle_binding = False
         self._action_epoch_direct_binding = True
+
+    def _action_epoch_activity_mask(self):
+        import torch
+
+        if (
+            self._bound_authority is not None
+            or self._bound_projection_sha256 is not None
+            or self._action_epoch_direct_binding
+            or self._action_epoch_idle_binding
+        ):
+            raise ActionBallFullMdpBallSceneError(
+                "ActionEpoch activity census crossed an armed callback epoch"
+            )
+        # Sticky producer faults belong to the next live fact row.  They do
+        # not make an otherwise empty scene transaction active: dense-empty
+        # capture cannot consume or expose them, so using them as activity
+        # would permanently re-enable the full K-grid hot path after one
+        # global engine error.
+        return (
+            self._expected_active
+            | self._contact_candidate_event.any(dim=-1)
+            | self._known_non_rubber_candidate_event
+            | self._binding_fault
+        ).detach().clone()
+
+    def _begin_action_epoch_idle_binding(self) -> None:
+        """Open one callback epoch after all writers proved the grid idle."""
+
+        if (
+            self._bound_authority is not None
+            or self._bound_projection_sha256 is not None
+            or self._action_epoch_direct_binding
+            or self._action_epoch_idle_binding
+        ):
+            raise ActionBallFullMdpBallSceneError(
+                "one callback binding already awaits capture"
+            )
+        self._action_epoch_idle_binding = True
+        self._action_epoch_direct_binding = True
+
+    def _complete_action_epoch_idle_binding(
+        self, *, exact_stamp: object
+    ) -> None:
+        """Seal one idle callback epoch without reading any scene tensor."""
+
+        exact = exact_stamp
+        if (
+            type(exact) is not tuple
+            or len(exact) != 5
+            or any(type(value) is not int for value in exact)
+        ):
+            raise ActionBallFullMdpBallSceneError(
+                "ActionEpoch idle binding exact stamp ABI differs"
+            )
+        if (
+            not self._action_epoch_idle_binding
+            or not self._action_epoch_direct_binding
+            or self._bound_authority is not None
+            or self._bound_projection_sha256 is not None
+        ):
+            raise ActionBallFullMdpBallSceneError(
+                "ActionEpoch idle binding ACK is missing, stale, or foreign"
+            )
+        if self._last_exact_stamp is not None and exact <= self._last_exact_stamp:
+            raise ActionBallFullMdpBallSceneError(
+                "ActionEpoch idle binding stamp is duplicate or non-monotonic"
+            )
+        self._contact_candidate_event.zero_()
+        self._known_non_rubber_candidate_event.zero_()
+        self._binding_fault.zero_()
+        self._action_epoch_idle_binding = False
+        self._action_epoch_direct_binding = False
+        self._last_capture_heartbeat = self._last_heartbeat
+        self._last_exact_stamp = exact
 
     def abort_expected_rubber_authority(self, value: object) -> None:
         """Cancel one unstepped projection without manufacturing fact rows."""
@@ -1673,6 +1749,10 @@ class IsaacPhysxBallFactOwner:
             label="request ball_generation",
         )
         exact = getattr(request, "exact_stamp", None)
+        if self._action_epoch_idle_binding:
+            raise ActionBallFullMdpBallSceneError(
+                "dense capture cannot consume an idle callback binding"
+            )
         legacy_bound = (
             self._bound_authority is not None
             and self._bound_projection_sha256 is not None
@@ -1870,6 +1950,7 @@ class IsaacPhysxBallFactOwner:
         self._binding_fault.zero_()
         self._bound_authority = None
         self._bound_projection_sha256 = None
+        self._action_epoch_idle_binding = False
         self._action_epoch_direct_binding = False
         self._last_capture_heartbeat = self._last_heartbeat
         self._last_exact_stamp = exact
@@ -1983,6 +2064,8 @@ class IsaacPhysxBallFactOwner:
         if (
             self._bound_authority is not None
             or self._bound_projection_sha256 is not None
+            or self._action_epoch_direct_binding
+            or self._action_epoch_idle_binding
             or bool(torch.any(self._contact_candidate_event))
             or bool(torch.any(self._binding_fault))
         ):
@@ -2077,6 +2160,8 @@ class IsaacPhysxBallFactOwner:
             or not error_counts_valid
             or self._bound_authority is not None
             or self._bound_projection_sha256 is not None
+            or self._action_epoch_direct_binding
+            or self._action_epoch_idle_binding
             or any(
                 handle is not None
                 for handle in (
@@ -2192,6 +2277,8 @@ class IsaacPhysxBallFactOwner:
         self._wrong_face_event_count.copy_(wrong_face_count)
         self._scene_global_error_counts = dict(value.scene_global_error_counts)
         self._unknown_scene_global_error_count = value.unknown_scene_global_error_count
+        self._action_epoch_idle_binding = False
+        self._action_epoch_direct_binding = False
 
 
 def _install_isaac_physx_ball_fact_owner(
@@ -3059,6 +3146,31 @@ class IsaacLabPhysicalFlightScenePort:
             ball_generation=physical.ball_generation,
             full_key_sha256=physical.full_key_sha256,
             _installer_token=_PHYSX_FACT_OWNER_TOKEN,
+        )
+
+    def _action_epoch_live_fact_owner(self):
+        fact_owner = self._physx_fact_owner
+        if fact_owner is None:
+            raise ActionBallFullMdpBallSceneError(
+                "ActionEpoch callback operation lacks the live PhysX fact owner"
+            )
+        return fact_owner
+
+    def action_epoch_physics_fact_activity_mask(self):
+        return self._action_epoch_live_fact_owner()._action_epoch_activity_mask()
+
+    def begin_action_epoch_idle_physics_fact_source(self) -> None:
+        """Open one empty callback epoch without constructing a K-grid."""
+
+        self._action_epoch_live_fact_owner()._begin_action_epoch_idle_binding()
+
+    def complete_action_epoch_idle_physics_fact_source(
+        self, exact_stamp: object
+    ) -> None:
+        """Seal the exact empty callback epoch without a scene state read."""
+
+        self._action_epoch_live_fact_owner()._complete_action_epoch_idle_binding(
+            exact_stamp=exact_stamp
         )
 
     def install_physx_fact_owner(self, value: object) -> None:

@@ -3,7 +3,7 @@
 > 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-19
+> 更新：2026-08-20
 >
 > `origin/main:docs/NOW.md` 仍是全项目唯一优先级权威。本页只记录当前分支这条
 > FullMDP 单动作双后端路线的依赖、证据、阻塞和完成条件，不建立影子队列。
@@ -65,85 +65,75 @@
   热改、不复用namespace；在matched profile-off与业务证据形成前不停止任一条。下一工程candidate只针对
   zero-live-flight时成对跳过arm/capture/R06/retire/park，不能恢复已被反例否定的单边postphysics早退。
 
-### MuJoCo portable Full-A：尚未允许长跑
+### MuJoCo portable Full-A：host长跑件已闭合，live 25k尚未启动
 
-已闭合的真实路径：
+当前host已闭合的代码合同：
 
-- 229/399 observation、31 action、upstream RSL-RL 3.1.2薄调用点；
-- WAIT reset/step、row-wise reveal、真实ball qpos/qvel launch、20 physics substep、bounded terminal、
-  selected row reset；
-- 真实postphysics racket FK进入R03 achieved fact；
-- engine-neutral 73行catalog冷校验，并将fresh env绑定同一slot 0/UID/mount sign；
-- 只在MuJoCo实际generic racket-contact edge出现的同一physics substep读取ball/site/rotation，区分
-  selected、opposite、edge/rim、between-planes和invalid；
-- selected-rubber只发布一个control-step事件脉冲并驱动Reward10，不作shot终身latch。
-- slot0 manifest center、live base yaw与shared Physical reverse-integration生成integer-tick question/launch；
-  旧midpoint/linear/gravity shortcut已删除；
-- sealed take058 measured teacher进入同一actor/critic/Reward20 seam：reveal原子切frame0，prepare velocity为0，
-  measured rounded clock随后推进；take061 physical-ready reset不被改写。
+- actor/critic observation为229/399维，action为31维；trainer必须隔离使用upstream RSL-RL 3.1.2；
+- production engineering surface已覆盖R03、R06、R07、Reward0--20与exact phase
+  `0/2/5/6/8`，fresh环境仍绑定slot 0及其UID/side；
+- true Gym reset使用runtime default joints、configured default root加env origin、零速度和零action history；
+  `take061/q_ready`不是birth authority。raw action不再做错误的`[-4,4]`裁剪，runtime/schema-2顺序与
+  default-offset affine已闭合；MuJoCo executable q-des相对Isaac soft-inset/brake仍明确
+  `DIVERGENT_DECLARED`，所以本run无transfer或matched authority；
+- 30 s / 1500-tick cadence的due opportunity固定为`2 + 293k`（tick `2..1467`）；每个due按live
+  readiness产生`ACCEPT/DEFER`，DEFER是zero-write且不在下一tick补试；
+- HOLD joint teacher保持default/zero velocity，body/R07 target使用measured frame0。natural shot close
+  发布`shot_retired`并停在phase8，保留robot/action/episode/generation；只有Gym done发布
+  `selected_reset`并使generation恰增1；
+- R07确定性host lifecycle反例必须走完age `10..77`、expected/eligible=`68/68`且没有sticky fault；
+  不要求未训练zero-action policy在真实rollout中活过该窗口，其table/fall/contact只是telemetry；
+- exact table keepout termination仍保留；曾加入、会误杀合法recovery的额外keepout witness已拒绝并回退；
+- 26-event thin ledger在optimizer前只prepare；第26个`completed_action_epoch`由同一env行完整闭合
+  launch/selected contact/fault-free physically-valid R03/fault-free eligible+source-valid R06/
+  exact 68-cell R07/natural RETIRE后原子发布，跨env边际不得代签。optimizer成功后才写snapshot与ACK。独立consumer将
+  engineering与business完成分开。host runner/ledger/consumer=`96 passed, 1 skipped`；
+  env/action/outcome=`59 passed, 7 skipped`；alignment=`14 passed, 21 deselected`。
 
-仍是发车阻塞：
+当前唯一发车边界：
 
-1. take061 physical-ready到take058 frame0仍缺certified production hold-qdes/bridge或逆动力学消费链；纯
-   diagnostic recurrence helper无production consumer，不能代签3.2918 rad physical command gap；
-2. R06 legal landing/outcome、R07 recovery和Reward11--13已完成host纵切片，但真实MuJoCo-Warp GPU尚未验收；
-3. per-action/per-family/per-side分母和生命周期证据未闭合；本代backhand denominator应明确为0；
-4. 新catalog、question/teacher、selected-rubber与R06/R07/Reward10--13新增部分仍需同一fresh GPU纵切片。host当前已锁定：
-   no-contact与selected-contact不同settlement clock、R07以deadline而非早落点为年龄原点、10N双脚support、0.9 soft joint limit、
-   invalid evidence fail-closed、R06/Physical critic retention与event payment分离、shot完成是非终止selected reset而非Gym full reset；
-   R07另以row-wise账本硬验age `10..77`连续、expected/eligible=`68/68`且全程无sticky fault；跳格或NaN后恢复
-   都fail closed且不再支付Reward13。四份direct suite当前=`49 passed, 8 skipped`。2026-08-19空闲GPU1 fresh件使用完整机器读取
-   HEAD与新namespace，但在Python/GPU零调用前因Pod没有`/usr/bin/numactl`自然`rc=127`；真实接触与reset门
-   仍未跑。该namespace封存、不重试。successor `5d0044b8…`改用Pod已有`taskset`并在GPU1/CPU`0--15`
-   真实执行：N2 timeout-reset peer exact与N1 reveal/launch/settlement两节点通过，selected-rubber节点在
-   production callpoint前的测试构造失败，因为球心被放在恰好一个球半径的零穿入相切位置，MuJoCo合法地
-   没有生成resolved pair；结果为`1 failed, 2 passed`、`rc=1`，第四节点未执行。namespace
-   `mujoco-fullmdp-gpu-gate.5d0044b8.Pod1GPU1Taskset.TXXdHBJ7`封存且GPU/锁自然释放。tests-only successor
-   改为selected侧1 mm明确穿入。fresh `a6f83b24…`自然复核已证明live pair、eligible、generic contact、
-   selected classification与Reward10=`0.02`均由production真实产生；随后tests-only断言把CUDA tensor直接交给
-   `pytest.approx`，因其试图`.numpy()`而TypeError，结果仍为`1 failed,2 passed`，第四节点未执行。
-   该namespace同样封存且GPU/锁自然释放。断言已改为device-native `torch.testing.assert_close`；fresh完整
-   四节点未过前仍不关闭contact/reset runtime缺口。2026-08-20 commit `ed11390e…`又在GPU0 slot-2/CPU
-   `16--31`真实运行：WAIT N1/N2两节点通过，首Full-A节点在构造期因base reset先于Full-A buffer安装而
-   `AttributeError`，结果=`2 passed,1 failed`、RC=1。namespace
-   `mujoco-fullmdp-gpu-gate.ed11390e.Pod1GPU0Slot2Taskset.50yWOSvf`封存且不重试。窄修只允许
-   `_fullmdp_initialized=false`的构造observation走WAIT surface，host反例后direct suite=`50 passed,8 skipped`；
-   commit `3534eeb0…`的fresh successor已越过构造并完成首个真实Full-A step，但GPU-only extras exact-key
-   fixture漏列生产字段`full_a_landing_opponent_bound`，在物理断言前结果=`1 failed`、RC=1；namespace
-   `mujoco-fullmdp-gpu-gate.3534eeb0.Pod1GPU0Slot2Taskset.GqVOyqcQ`封存不重试。tests-only补齐exact集合后仍须
-   fresh commit/namespace重新跑三个Full-A节点。commit `66bc4c87…`已越过构造、extras、launch与outcome，
-   但fixture把deadline锚点后的真实初始age=1错写成0，结果=`1 failed`、RC=1；namespace
-   `mujoco-fullmdp-gpu-gate.66bc4c87.Pod1GPU0Slot2Taskset.DCj7RXfQ`封存。tests-only现从真实initial age
-   逐步跑到77，仍要求age10--77 exact 68格。fresh `c2d8c536…`随后在真实recovery循环、age77之前触发
-   Gym safety reset，nonterminal-shot测试正确拒绝`_reset_idx`，结果=`1 failed`、RC=1；namespace
-   `mujoco-fullmdp-gpu-gate.c2d8c536.Pod1GPU0Slot2Taskset.d4aWD12U`封存。trace尚未输出具体terminal bit；
-   先做fresh首次reset age/bit/plant诊断并关闭split-ready控制消费，再谈25k；
-   fresh `c0aa32e9…`诊断已钉首错为recovery age16、terminal bit16=`robot_hit_table`：base高度与姿态仍正常、
-   resolved contact=0，但exact table keepout=true。该namespace封存。下一件不是放宽termination，而是输出首个
-   命中component/blade并与Isaac ready/table frame对拍；在此之前portable 25k继续HOLD；
-5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在；在上述真实GPU
-   纵切片通过前不生成长跑success receipt。
+1. 从exact committed source生成fresh launcher与consumer，并把exact RSL-RL 3.1.2 wheel复制进
+   fresh、不可复用的run root；不得依赖Pod ambient环境；
+2. 在Pod fresh真实调用点核对MuJoCo-Warp、GPU UUID、CPU、action ABI、ledger row与snapshot写入；
+   任一失败都封存namespace且不重试；
+3. 真正的`4096 env × 25000 PPO update`尚未启动，Pod wall time、吞吐与学习趋势均为**未测**；
+4. 本代只授权A/slot 0；C/backhand未授权，backhand denominator必须为0。
 
-因此当前runner必须继续写`full_a_slice_attempted`、`full_a_complete=false`，不得改名为Full-A成功。
+#### 25k runner与consumer合同
+
+- runner固定使用[`--full-a`、`--evidence-jsonl`、`--snapshot-dir`、`--completion-json`、
+  `--source-commit`、`--run-namespace`及`--save-interval=1000`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)：
+  分别表示启用portable 26-event engineering surface，指定逐update证据流、不可覆盖snapshot目录、最终completion seal、
+  exact source/run身份，以及每1000 update保存一次诊断快照；
+- run形状固定为`4096 env`、每update `24 steps`、`25000 updates`，不得把1000当终点；
+- JSONL是唯一逐update证据源。每个update先验证finite/counter/conservation，再调用optimizer；只有optimizer
+  成功返回后才能ACK。ledger每update至多做一次必要的host transfer，不复制整套env tensor；
+- snapshots仅允许update `0`、`1000..24000`每1000一次及final `24999`，共26个；它们都是
+  `diagnostic_nonresumable snapshot`，不授权resume/promotion/deployment；
+- 独立consumer必须在进程结束后读到exact 25000行、连续update `0..24999`、无重复/缺口，并离线计算
+  per-action/per-family/per-side分母与里程碑。零分母rate写`null/未测`，不得写0%；
+- `engineering_run_complete`要求exact 25k、25000 ACK与26份snapshot；
+  `business_chain_complete`独立表示slot0必需业务producer非零闭合；因73动作、双侧与
+  科学窗口报告未闭合，本代`full_a_complete`固定为`false`；
+- update `0..4`只验容量、finite与合同，随后同一进程继续到25000；科学里程碑只读，不触发重启；
+- table、fall、contact与zero-action观测都是telemetry；不得重新变成R07 scope或发车阻塞；
+- 全部产物保持[`diagnostic_unauthorized`](../DEFINITIONS.md)，不构成Full-A科学成功或物理安全授权。
 
 ## 4. 下一代按依赖推进
 
-| 顺序 | 唯一改动面 | 真实验收 | 完成后删除/合并 |
+| 顺序 | 唯一改动面 | 当前证据 | 下一验收 |
 | --- | --- | --- | --- |
-| 1 | engine-neutral portable action table | 73行identity/timing/FK与Isaac冷builder对齐；4096 env genesis/reveal/reset仍全slot0 | fresh lane不再构造未消费的balanced sampler；删除重复manifest pin和临时question常量 |
-| 2 | action-conditioned question/teacher | slot0 center经shared reverse-integration产生可揭示ball state；R03 target与reference timing同源 | 删除MuJoCo midpoint serve和`normal=-incoming`临时代码 |
-| 3 | observed selected-rubber | fresh GPU actual contact edge同substep分类；held contact不重复、recontact单独记账、masked reset不改peer | generic/selected双重临时命名与重复face推断 |
-| 4 | R06/R07与Reward11--13 | live landing/outcome、recovery窗口、eligible denominator和Reward20守恒 | 后端自建outcome/recovery副本 |
-| 5 | portable 4096长跑件 | 同一进程25k；早期5只看容量/finite，科学里程碑只读；终点独立消费 | WAIT-only launcher和一次性过渡receipt |
-| 6 | 2.0瘦身 | production callpoint census证明无人消费后再删 | legacy RSL2 runner、重复validator/owner/receipt、无restore consumer的carry graph |
+| 1 | raw-action ABI（原始动作接口约定） | **CLOSED-host**：无`[-4,4]` raw clip，nonfinite fallback与joint envelope反例通过 | fresh Pod真实调用点保持同一动作语义 |
+| 2 | thin ledger与独立consumer | **CLOSED-host**：runner/ledger/consumer `96 passed, 1 skipped`，含production writer→consumer prefix | Pod写出一行真实ACK、snapshot并由独立consumer读取 |
+| 3 | exact Pod focused gate | **未测** | exact commit、fresh namespace、exact RSL-RL 3.1.2、GPU UUID/CPU与MuJoCo-Warp一次通过 |
+| 4 | portable A长跑 | **未启动** | 同一进程`4096 × 25000`及exact 25000-row终端消费 |
+| 5 | 终跑删除与2.0瘦身 | **待长跑后** | production callpoint census证明无人消费后再删legacy runner、重复validator/receipt与无restore consumer的carry graph |
 
-依赖关系是 `catalog -> question/teacher -> observed contact -> R06/R07 -> longrun`。这些纵切片可在
-Isaac active长跑期间开发和做host反例，但不能用未完成的下游测试反向授权上游。
-
-当前第1项的cold数据部分已由全73条真实motion的双实现逐列对拍闭合；固定slot0的4096 live genesis/
-reveal/reset仍需fresh运行证据。第2项的host question/teacher纵切片已闭合；下一真实阻塞是把split-ready
-控制消费与当前R06/R07/Reward11--13纵切片送入同一fresh GPU gate，不能把无consumer的diagnostic qdes helper
-或host的`8 skipped`代签执行。
+catalog、question/teacher、observed contact、R06、R07和Reward0--20已经属于当前portable surface，
+不再作为重复的依赖阻塞；历史失败只保存在
+[G06](../gates/G06_isaac_to_mujoco.md)，本页不维护另一份影子事故队列。
+live 25k被独立consumer完整验收后只允许写`engineering_run_complete=true`；只有必需业务producer
+也非零闭合时，才允许写slot0 `business_chain_complete=true`。本代`full_a_complete`必须保持`false`。
 
 ## 5. 地形
 
@@ -162,7 +152,9 @@ reveal/reset仍需fresh运行证据。第2项的host question/teacher纵切片�
 3. fresh、immutable、同MDP且已通过真实调用点的successor已经就绪，旧run被它严格支配。
 
 普通tilt/table/fall、早期return下降或ACCEPT仍为0都只是telemetry，不自动触发stop。当前MuJoCo仍有
-上述六项阻塞，下一代尚未严格支配active Isaac，所以**现在不停**。
+Pod真实调用点与live 25k证据缺口，Isaac zero-flight candidate也只有host语义证据、没有matched Pod wall；
+所以它们都尚未严格支配active Isaac，**现在不停active Isaac**。这不等于继续暂停MuJoCo：exact Pod focused
+gate一旦自然通过，就直接在fresh namespace发同一进程25k，不再增加zero-policy表现门或1000-update中转run。
 
 ## 7. 里程碑与完成条件
 

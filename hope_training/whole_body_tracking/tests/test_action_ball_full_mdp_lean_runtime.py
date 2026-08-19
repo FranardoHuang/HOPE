@@ -154,6 +154,15 @@ class _Racket:
         return None
 
 
+class _Physical:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def refresh_action_epoch_host_activity(self, *, next_control_step):
+        self.calls.append(("physical", next_control_step))
+        return None
+
+
 class _R06:
     def __init__(self, calls, *, fail=False):
         self.calls = calls
@@ -183,6 +192,7 @@ def _owner(
     device=torch.device("cpu"),
     r05=None,
     racket=None,
+    physical=None,
     r06=None,
 ):
     env = _Env()
@@ -201,7 +211,7 @@ def _owner(
         r05_runtime=object() if r05 is None else r05,
         motion=object(),
         racket=object() if racket is None else racket,
-        physical_ball=object(),
+        physical_ball=object() if physical is None else physical,
         r06_landing_outcome=object() if r06 is None else r06,
         r03_strike_fact=object(),
         r07_recovery=object(),
@@ -489,14 +499,19 @@ def test_host_overflow_stops_before_optimizer_and_materializes_once(monkeypatch)
 def test_after_command_orders_r05_then_racket_without_caller_rows():
     calls = []
     owner, _epoch, _graph = _owner(
-        r05=_R05(calls), racket=_Racket(calls)
+        r05=_R05(calls),
+        racket=_Racket(calls),
+        physical=_Physical(calls),
     )
     owner.after_command_compute_before_observation(0)
-    assert calls == ["r05", "racket"]
+    assert calls == ["r05", ("physical", 1), "racket"]
+    owner.before_policy_step(1, torch.zeros((2, 1)))
+    owner.after_command_compute_before_observation(1)
+    assert calls[-3:] == ["r05", ("physical", 2), "racket"]
     with pytest.raises(
         L.ActionBallFullMdpLeanRuntimeError, match="stale, skipped, or replayed"
     ):
-        owner.after_command_compute_before_observation(0)
+        owner.after_command_compute_before_observation(1)
 
 
 def test_after_command_rejects_the_removed_r05_surface():

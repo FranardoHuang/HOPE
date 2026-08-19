@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import importlib.util
+import math
 from pathlib import Path
 import stat
 import sys
@@ -74,6 +75,12 @@ PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
 PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
     "f530165013baa570e0bf6bbbebcd7eef0c5c54db6ff7d51afccdc24e170f8cd5"
 )
+FRESH_POLICY_STEP_S = 0.02
+FRESH_FIRST_REVEAL_TICK = 2
+FRESH_RECOVERY_END_OFFSET_TICKS = 77
+FRESH_HIDDEN_GAP_TICKS = 2
+FRESH_REFERENCE_DUE_COUNT = 6
+FRESH_EPISODE_HORIZON_TICKS = 1500
 
 
 @dataclass(frozen=True)
@@ -139,6 +146,64 @@ class PortableActionCenterTable:
     @property
     def fresh_action(self) -> PortableActionCenterRow:
         return self.actions[self.fresh_action_slot]
+
+
+@dataclass(frozen=True)
+class PortableFreshCadence:
+    """Cold recurring due schedule shared by the Isaac and MuJoCo lanes.
+
+    A due tick is only an opportunity.  Its row-wise verdict remains
+    state-dependent ACCEPT, DEFER, CENSOR, or REJECT.
+    """
+
+    first_reveal_tick: int
+    cadence_ticks: int
+    reference_due_ticks: tuple[int, ...]
+    episode_horizon_ticks: int
+
+
+def derive_portable_fresh_cadence(
+    table: PortableActionCenterTable,
+) -> PortableFreshCadence:
+    """Derive the 30 s cadence from the sealed all-action timing bank."""
+
+    if type(table) is not PortableActionCenterTable or not table.actions:
+        raise ValueError("portable fresh cadence requires the exact action bank")
+    close_ticks = []
+    for slot, action in enumerate(table.actions):
+        duration_s = action.time_to_contact_center_s + (
+            action.reference_t_cycle_s - action.reference_t_hit_s
+        ) / action.teacher_rate_min
+        if not math.isfinite(duration_s) or duration_s <= 0.0:
+            raise ValueError(
+                f"portable fresh cadence timing is invalid at slot {slot}"
+            )
+        close_ticks.append(
+            math.ceil(duration_s / FRESH_POLICY_STEP_S - 1.0e-12)
+        )
+    maximum_close = max(close_ticks)
+    cadence = (
+        maximum_close
+        + FRESH_RECOVERY_END_OFFSET_TICKS
+        + FRESH_HIDDEN_GAP_TICKS
+    )
+    due_ticks = tuple(
+        FRESH_FIRST_REVEAL_TICK + cadence * ordinal
+        for ordinal in range(FRESH_REFERENCE_DUE_COUNT)
+    )
+    if (
+        maximum_close != 214
+        or cadence != 293
+        or due_ticks != (2, 295, 588, 881, 1174, 1467)
+        or due_ticks[-1] >= FRESH_EPISODE_HORIZON_TICKS
+    ):
+        raise ValueError("portable fresh cadence differs from the frozen schedule")
+    return PortableFreshCadence(
+        first_reveal_tick=FRESH_FIRST_REVEAL_TICK,
+        cadence_ticks=cadence,
+        reference_due_ticks=due_ticks,
+        episode_horizon_ticks=FRESH_EPISODE_HORIZON_TICKS,
+    )
 
 
 def _load_catalog_source():
@@ -361,9 +426,12 @@ def load_portable_action_center_table() -> PortableActionCenterTable:
     """Load exact action identities and centre questions without Isaac owners."""
 
     loaded, motion_files, motion_sha256 = _load_catalog_source()
+    actions = loaded.manifest.actions
+    if len(actions) != len(motion_files) or len(actions) != len(motion_sha256):
+        raise ValueError("portable action catalog columns differ in length")
     rows = []
     for slot, (action, motion_file, motion_digest) in enumerate(
-        zip(loaded.manifest.actions, motion_files, motion_sha256, strict=True)
+        zip(actions, motion_files, motion_sha256)
     ):
         profile = action.ball_profile
         reference = _portable_reference_row(
@@ -427,9 +495,17 @@ __all__ = [
     "PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH",
     "PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256",
     "PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256",
+    "FRESH_POLICY_STEP_S",
+    "FRESH_FIRST_REVEAL_TICK",
+    "FRESH_RECOVERY_END_OFFSET_TICKS",
+    "FRESH_HIDDEN_GAP_TICKS",
+    "FRESH_REFERENCE_DUE_COUNT",
+    "FRESH_EPISODE_HORIZON_TICKS",
     "ActionBallFullMdpDiagnosticCatalogTable",
     "PortableActionCenterRow",
     "PortableActionCenterTable",
+    "PortableFreshCadence",
+    "derive_portable_fresh_cadence",
     "load_action_ball_full_mdp_diagnostic_catalog_table",
     "load_portable_action_center_table",
 ]

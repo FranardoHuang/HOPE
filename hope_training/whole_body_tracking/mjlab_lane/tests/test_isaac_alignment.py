@@ -27,6 +27,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 LANE_DIR = Path(__file__).resolve().parent.parent
@@ -43,8 +44,15 @@ needs_repo = pytest.mark.skipif(
 #: Lane modules a temp copy needs in order to import.  `geometry.py` is added
 #: separately -- putting it next to the lane is exactly the pod deployment
 #: shape the provenance axis exists to catch.
-LANE_FILES = ("isaac_alignment.py", "a3_train_ppo.py", "a3_court_env.py",
-              "a3_plant_env.py", "calibrate_restitution.py")
+LANE_FILES = (
+    "isaac_alignment.py",
+    "a3_train_ppo.py",
+    "a3_court_env.py",
+    "a3_plant_env.py",
+    "calibrate_restitution.py",
+    "mujoco_gpu_ac_full_mdp_initial_wait_env.py",
+    "mujoco_gpu_ac_full_mdp_wait_rsl3.py",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +103,44 @@ def _run_ledger(lane: Path, repo: Path) -> dict:
     env["PYTHONPATH"] = str(lane) + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run([sys.executable, "-c", _RUNNER], cwd=str(lane),
                           env=env, capture_output=True, text=True, timeout=600)
+    assert proc.returncode == 0, f"runner crashed: {proc.stderr[-3000:]}"
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+_ACTION_RUNNER = textwrap.dedent("""
+    import json, sys
+    import isaac_alignment as align
+    try:
+        sources = align.isaac_sources()
+        if sources["missing"]:
+            raise align.AlignmentError("missing action-axis sources")
+        observed = {}
+        for axis in align.AXES:
+            if axis.key not in ("raw_action_affine", "executable_qdes_guard"):
+                continue
+            row = axis.probe(sources["paths"], {})
+            if row["observed"] != axis.declared:
+                raise align.AlignmentError(
+                    f"{axis.key} declared {axis.declared} but observed "
+                    f"{row['observed']}")
+            observed[axis.key] = row
+    except align.AlignmentError as exc:
+        print(json.dumps({"ok": False, "error": str(exc)}))
+        sys.exit(0)
+    print(json.dumps({"ok": True, "observed": observed}))
+""")
+
+
+def _run_action_axes(lane: Path, repo: Path) -> dict:
+    env = dict(os.environ)
+    env["HOPE_REPO_ROOT"] = str(repo)
+    env["OMP_NUM_THREADS"] = "1"
+    env["KMP_USE_SHM"] = "0"
+    env["OPENBLAS_NUM_THREADS"] = "1"
+    env.pop("HOPE_GEOMETRY_PY", None)
+    env["PYTHONPATH"] = str(lane) + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run([sys.executable, "-c", _ACTION_RUNNER], cwd=str(lane),
+                          env=env, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, f"runner crashed: {proc.stderr[-3000:]}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
@@ -208,6 +254,216 @@ def test_mutation_swapped_ctrlrange_flips_the_effort_limits_axis(tmp_path):
     mutated = _run_ledger(lane, repo)
     assert mutated["ok"] is False
     assert "effort_limits" in mutated["error"]
+
+
+# ---------------------------------------------------------------------------
+# 3b. Raw action reachability: deterministic artifact math, never rollout.
+# ---------------------------------------------------------------------------
+
+
+@needs_repo
+def test_legacy_raw_clip_makes_five_live_slot0_frame0_joints_unreachable():
+    ready = json.loads((REPO_ROOT / (
+        "configs/action_ball_n1_measured_20260803/"
+        "evidence_holdpass_robust20n_20260803/"
+        "take061.measured_teacher.yaw_aligned_full_seed."
+        "robust20n.dynamic_ready.v2.json")).read_text())
+    manifest = json.loads((REPO_ROOT /
+        "configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json").read_text())
+    slot0 = manifest["actions"][0]
+    with np.load(REPO_ROOT / slot0["motion_path"], allow_pickle=False) as motion:
+        joint_pos = np.asarray(motion["joint_pos"])
+        frame0 = joint_pos[0]
+    plant = ready["runtime_plant"]
+    action_offset = np.asarray(plant["default_joint_pos_rad"])
+    scale = np.asarray(plant["action_scale_rad"])
+    required = (frame0 - action_offset) / scale
+    required_all = (joint_pos - action_offset) / scale
+    indices = np.flatnonzero(np.abs(required) > 4.0)
+    assert slot0["action_id"] == "take_058_unit02_fh"
+    assert np.all(frame0 >= plant["executed_qdes_lower_rad"])
+    assert np.all(frame0 <= plant["executed_qdes_upper_rad"])
+    assert [plant["joint_names"][index] for index in indices] == [
+        "right_elbow_joint",
+        "right_wrist_roll_joint",
+        "left_wrist_pitch_joint",
+        "left_wrist_yaw_joint",
+        "right_wrist_yaw_joint",
+    ]
+    assert required[26] > 10.0 and required[30] < -15.0
+    assert np.all(np.any(np.abs(required_all) > 4.0, axis=1))
+    assert float(np.max(np.abs(required_all))) > 21.0
+
+
+@needs_repo
+def test_affine_offset_is_runtime_default_not_physical_reset_pose():
+    ready = json.loads((REPO_ROOT / align.ISAAC_SOURCE_RELPATHS[
+        "ready_pose"]).read_text())
+    plant, hold = ready["runtime_plant"], ready["hold_candidate"]
+    offset = np.asarray(plant["default_joint_pos_rad"])
+    physical = np.asarray(ready["physical_ready"]["joint_pos_rad"])
+    scale = np.asarray(plant["action_scale_rad"])
+    expected_raw = (np.asarray(hold["hold_qdes_joint_pos_rad"]) - offset) / scale
+    assert np.count_nonzero(offset != physical) == 14
+    assert np.max(np.abs(offset - physical)) == pytest.approx(1.5199244618415833)
+    np.testing.assert_array_equal(
+        np.asarray(hold["normalized_actor_action"]), expected_raw)
+
+
+@needs_repo
+def test_mutation_reintroducing_raw_clip_flips_the_action_contract_axis(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(lane / "a3_train_ppo.py",
+           "  action_clip: object = None",
+           "  action_clip: object = 4.0")
+    mutated = _run_action_axes(lane, repo)
+    assert mutated["ok"] is False
+    assert "raw_action_affine" in mutated["error"]
+
+
+@needs_repo
+def test_mutation_hardcoded_raw_clip_in_advance_path_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(lane / "a3_train_ppo.py",
+           "    incoming = actions.to(self.device)",
+           "    incoming = torch.clamp(actions.to(self.device), -4.0, 4.0)")
+    mutated = _run_action_axes(lane, repo)
+    assert mutated["ok"] is False
+    assert "raw_action_affine" in mutated["error"]
+
+
+@needs_repo
+def test_mutation_hardcoded_raw_clip_in_full_a_wrapper_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(
+        lane / "mujoco_gpu_ac_full_mdp_initial_wait_env.py",
+        "        (\n"
+        "            reveal_event,\n"
+        "            launch_event,\n"
+        "            reveal_due_event,\n"
+        "            reveal_deferred_event,\n"
+        "        ) = self._full_a_prepare_step()\n"
+        "        _st_before_forward, _tau_sq, requested_qdes = "
+        "self._advance_plant(actions)",
+        "        (\n"
+        "            reveal_event,\n"
+        "            launch_event,\n"
+        "            reveal_due_event,\n"
+        "            reveal_deferred_event,\n"
+        "        ) = self._full_a_prepare_step()\n"
+        "        _st_before_forward, _tau_sq, requested_qdes = "
+        "self._advance_plant(torch.clamp(actions, -4.0, 4.0))",
+    )
+    mutated = _run_action_axes(lane, repo)
+    assert mutated["ok"] is False
+    assert "raw_action_affine" in mutated["error"]
+
+
+@needs_repo
+def test_mutation_active_isaac_wrapper_clip_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(
+        repo / align.ISAAC_SOURCE_RELPATHS["train_entry"],
+        "RslRlVecEnvWrapper(env)",
+        "RslRlVecEnvWrapper(env, 4.0)",
+    )
+    mutated = _run_action_axes(lane, repo)
+    assert mutated["ok"] is False
+    assert "raw_action_affine" in mutated["error"]
+
+
+@needs_repo
+def test_focused_action_axes_match_their_honest_verdicts(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    result = _run_action_axes(lane, repo)
+    assert result["ok"] is True, result.get("error")
+    raw = result["observed"]["raw_action_affine"]
+    guard = result["observed"]["executable_qdes_guard"]
+    assert raw["observed"] == align.ALIGNED
+    assert set(raw["components"]) == {
+        "raw_policy_action", "runtime_joint_order", "scale", "offset"}
+    assert guard["observed"] == align.DIVERGENT_DECLARED
+    assert guard["claim_restrictions"] == [
+        "policy_transfer", "promotion", "matched_causal_comparison"]
+
+
+@needs_repo
+def test_mutation_final_ctrl_wrong_order_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(lane / "a3_train_ppo.py",
+           "      d.ctrl[:] = tau[:, self.actuator_from_runtime]",
+           "      d.ctrl[:] = tau")
+    result = _run_action_axes(lane, repo)
+    assert result["ok"] is False
+    assert "raw_action_affine" in result["error"]
+
+
+@needs_repo
+def test_mutation_vendor_scale_factor_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(lane / "a3_train_ppo.py",
+           "self.act_scale = 0.25 * self.tau_hi / self.kp",
+           "self.act_scale = 0.5 * self.tau_hi / self.kp")
+    result = _run_action_axes(lane, repo)
+    assert result["ok"] is False
+    assert "raw_action_affine" in result["error"]
+
+
+@needs_repo
+def test_mutation_physical_ready_as_affine_offset_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(lane / "a3_train_ppo.py",
+           "pre_clamp_qdes = self.action_offset.unsqueeze(0) + self.act_scale * incoming",
+           "pre_clamp_qdes = self.q_ready.unsqueeze(0) + self.act_scale * incoming")
+    result = _run_action_axes(lane, repo)
+    assert result["ok"] is False
+    assert "raw_action_affine" in result["error"]
+
+
+@needs_repo
+def test_mutation_deleted_brake_hidden_in_string_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    actions = repo / align.ISAAC_SOURCE_RELPATHS["hope_actions"]
+    _patch(
+        actions,
+        "                self._processed_actions = torch.where(\n"
+        "                    per_joint_guard, brake_target, nominal_target\n"
+        "                )",
+        "                '''self._processed_actions = torch.where(\n"
+        "                    per_joint_guard, brake_target, nominal_target\n"
+        "                )'''\n"
+        "                self._processed_actions = nominal_target",
+    )
+    result = _run_action_axes(lane, repo)
+    assert result["ok"] is False
+    assert "executable_qdes_guard" in result["error"]
+
+
+@needs_repo
+def test_mutation_extra_mujoco_qdes_guard_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(
+        lane / "a3_train_ppo.py",
+        "      self.jnt_lo, self.jnt_hi)\n\n    tau_sq",
+        "      self.jnt_lo, self.jnt_hi)\n"
+        "    q_des = torch.minimum(q_des, self.q_ready)\n\n    tau_sq",
+    )
+    result = _run_action_axes(lane, repo)
+    assert result["ok"] is False
+    assert "executable_qdes_guard" in result["error"]
+
+
+@needs_repo
+def test_mutation_declaring_the_live_guard_aligned_is_refused(tmp_path):
+    lane, repo = _build_tree(tmp_path)
+    _patch(
+        lane / "isaac_alignment.py",
+        '         "\u53ea\u505ahard joint-range clamp。",\n         DIVERGENT_DECLARED,',
+        '         "\u53ea\u505ahard joint-range clamp。",\n         ALIGNED,',
+    )
+    result = _run_action_axes(lane, repo)
+    assert result["ok"] is False
+    assert "declared aligned but observed divergent_declared" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +641,22 @@ def test_comparability_is_refused_while_any_axis_blocks():
                                         align.CLAIM_CROSS_ENGINE_COMPARABLE)
     align.assert_cross_engine_claim({"blocking_axes": []},
                                     align.CLAIM_CROSS_ENGINE_COMPARABLE)
+
+
+def test_declared_guard_divergence_restricts_transfer_but_not_diagnostic_25k():
+    ledger = {
+        "blocking_axes": [],
+        "rows": {"executable_qdes_guard": {
+            "observed": align.DIVERGENT_DECLARED}},
+        "mujoco_only_diagnostic_25k_blocked_by_alignment": False,
+    }
+    assert align.DIVERGENT_DECLARED not in align.BLOCKING_VERDICTS
+    assert ledger["mujoco_only_diagnostic_25k_blocked_by_alignment"] is False
+    for claim in (align.CLAIM_POLICY_TRANSFER,
+                  align.CLAIM_MATCHED_CAUSAL_COMPARISON):
+        with pytest.raises(align.AlignmentClaimRefused,
+                           match="declared MuJoCo-only scope"):
+            align.assert_cross_engine_claim(ledger, claim)
 
 
 def test_unknown_claims_are_refused_rather_than_ignored():

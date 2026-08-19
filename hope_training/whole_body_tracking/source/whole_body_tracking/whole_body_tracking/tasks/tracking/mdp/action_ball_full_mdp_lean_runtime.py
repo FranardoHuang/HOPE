@@ -1222,6 +1222,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
                             + type(attribution_exc).__name__
                         ) from exc
                     raise
+                refresh_activity = self._bound_plain_method(
+                    self._physical_ball,
+                    "refresh_action_epoch_host_activity",
+                )
+                if refresh_activity(next_control_step=step + 1) is not None:
+                    raise ActionBallFullMdpLeanRuntimeError(
+                        "Physical activity refresh must return None"
+                    )
                 # Fresh Racket compute deliberately never arms R03.  This is
                 # the sole callpoint, after the possible D05 epoch change, for
                 # genesis, ordinary not-due cadence and due reveal alike.

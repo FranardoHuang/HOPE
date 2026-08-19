@@ -491,6 +491,128 @@ def test_action_epoch_direct_capture_joins_full_key_and_allows_unarmed_empty(
     assert not torch.any(no_facts.selected_contact_event)
 
 
+def test_action_epoch_idle_pair_seals_heartbeat_fence_before_first_live_capture():
+    owner, centres, *_ = _fact_owner(device=torch.device("cpu"))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+
+    for substep in range(2):
+        owner._begin_action_epoch_idle_binding()
+        owner.on_post_step_heartbeat(0.005)
+        owner._complete_action_epoch_idle_binding(
+            exact_stamp=(1, substep, 2, substep + 1, 1)
+        )
+    assert owner._last_capture_heartbeat == owner._last_heartbeat == 2
+
+    # A live arm without a new heartbeat must fault.  If idle completion had
+    # left the old fence behind, heartbeat 2 would be mislabelled as current.
+    _direct_arm(owner)
+    facts = _capture_owner(owner, centres, stamp=(2, 0, 1, 3, 1))
+    assert torch.all(facts.producer_contract_fault)
+    assert not torch.any(facts.selected_contact_event)
+
+
+def test_action_epoch_idle_pair_scopes_unrelated_callbacks_to_one_substep():
+    owner, centres, *_ = _fact_owner(device=torch.device("cpu"))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+    unrelated = SimpleNamespace(
+        type=SimpleNamespace(name="CONTACT_FOUND"),
+        actor0="/World/floor",
+        collider0="/World/floor",
+        actor1="/World/net",
+        collider1="/World/net",
+    )
+
+    owner._begin_action_epoch_idle_binding()
+    owner.on_contact_report([unrelated], [])
+    owner.on_post_step_heartbeat(0.005)
+    owner._complete_action_epoch_idle_binding(exact_stamp=(1, 0, 1, 1, 1))
+    assert owner._producer_fault_sticky is False
+
+    _direct_arm(owner)
+    owner.on_post_step_heartbeat(0.005)
+    clean = _capture_owner(owner, centres, stamp=(2, 0, 1, 2, 1))
+    assert not torch.any(clean.producer_contract_fault)
+
+    # The same global report outside a pre/post pair remains a chronology
+    # violation, just as it is after a dense capture.
+    owner.on_contact_report([unrelated], [])
+    _direct_arm(owner)
+    owner.on_post_step_heartbeat(0.005)
+    poisoned = _capture_owner(owner, centres, stamp=(3, 0, 1, 3, 1))
+    assert torch.all(poisoned.producer_contract_fault)
+
+
+def test_action_epoch_idle_pair_rejects_unpaired_ack_and_preserves_engine_fault():
+    owner, centres, *_ = _fact_owner(device=torch.device("cpu"))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+    with pytest.raises(S.ActionBallFullMdpBallSceneError, match="ACK is missing"):
+        owner._complete_action_epoch_idle_binding(exact_stamp=(1, 0, 1, 1, 1))
+
+    owner._begin_action_epoch_idle_binding()
+    with pytest.raises(
+        S.ActionBallFullMdpBallSceneError, match="already awaits capture"
+    ):
+        owner._begin_action_epoch_idle_binding()
+    owner.on_error_event(SimpleNamespace(type=SimpleNamespace(name="PHYSX_CUDA_ERROR")))
+    owner.on_post_step_heartbeat(0.005)
+    owner._complete_action_epoch_idle_binding(exact_stamp=(1, 0, 1, 1, 1))
+    assert not torch.any(owner._action_epoch_activity_mask())
+    assert owner._producer_fault_sticky is True
+    with pytest.raises(S.ActionBallFullMdpBallSceneError, match="ACK is missing"):
+        owner._complete_action_epoch_idle_binding(exact_stamp=(1, 1, 2, 2, 1))
+
+    _direct_arm(owner)
+    owner.on_post_step_heartbeat(0.005)
+    facts = _capture_owner(owner, centres, stamp=(2, 0, 1, 2, 1))
+    assert torch.all(facts.producer_contract_fault)
+
+
+def test_action_epoch_idle_pair_cannot_cross_fact_checkpoint_or_restore():
+    clean, *_ = _fact_owner(device=torch.device("cpu"))
+    checkpoint = clean.checkpoint_projection()
+    clean._begin_action_epoch_idle_binding()
+    with pytest.raises(S.ActionBallFullMdpBallSceneError, match="drained"):
+        clean.checkpoint_projection()
+    with pytest.raises(
+        S.ActionBallFullMdpBallSceneError, match="identity/header differs"
+    ):
+        clean.restore_checkpoint_projection(checkpoint)
+
+
+def test_action_epoch_activity_mask_keeps_one_dense_empty_cleanup_after_live():
+    owner, centres, *_ = _fact_owner(device=torch.device("cpu"))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+    assert not torch.any(owner._action_epoch_activity_mask())
+
+    _direct_arm(owner)
+    with pytest.raises(S.ActionBallFullMdpBallSceneError, match="armed callback epoch"):
+        owner._action_epoch_activity_mask()
+    owner.on_post_step_heartbeat(0.005)
+    _capture_owner(owner, centres)
+    assert torch.all(owner._action_epoch_activity_mask())
+
+    inactive = torch.zeros(
+        (owner.num_envs, owner.flight_capacity), dtype=torch.bool, device=owner.device
+    )
+    _direct_arm(owner, active=inactive)
+    empty = _owner_request(owner, stamp=(2, 0, 1, 2, 1))
+    empty.observe_mask.zero_()
+    empty.full_key_sha256.zero_()
+    empty.ball_generation.fill_(-1)
+    owner.on_post_step_heartbeat(0.005)
+    owner.capture(
+        request=empty,
+        live_state=empty.current_state_env_f32,
+        facts_type=D.IsaacPostPhysicsFacts,
+        stamp_type=D.PhysicsStampGrid,
+    )
+    assert not torch.any(owner._action_epoch_activity_mask())
+
+
 def test_direct_selected_contact_wrong_face_known_none_and_unknown_alias_are_distinct():
     owner, centres, ball, red, black = _fact_owner(device=torch.device("cpu"))
     owner._diagnostic_unauthorized = False

@@ -964,6 +964,26 @@ schema-3 hard contract and ONNX/export metadata so old and corrected continuatio
   stand/reference/blend and future command sources. The runner publishes `{q_des, kp, kd}` to the
   implicit-PD backend (`dq_des = tau_ff = 0`) only while its requested/measured effort envelope and
   authorization generation remain valid.
+- Active Isaac and portable MuJoCo do not clip the normalized policy action before that affine
+  decoder.  Isaac fixes `clip_actions=null`; portable MuJoCo requires `TaskCfg.action_clip=None` and
+  rejects every non-`None` setting.  Policy action, current-state observation, teacher and PD vectors
+  all use the tracked runtime/schema-2 joint order; the sole runtime-to-MJCF actuator permutation is
+  the final plant `ctrl` write.  For portable FullMDP, a true Gym reset writes
+  `runtime_plant.default_joint_pos_rad`, the configured default root translated by `env_origin`,
+  zero joint/root velocity, and zero current/previous action history; `take061/q_ready` is provenance
+  only and is not the physical reset pose.  Natural shot retirement is not a reset and does not change
+  `reset_generation`.  The affine decoder is
+  `q_raw = runtime_plant.default_joint_pos_rad + action_scale * action`, followed in MuJoCo by its
+  compiled mechanical hard-range clamp.
+  If one affine q-des element is NaN/Inf, that element uses the preceding finite action for this one
+  safe transition (zero raw action after reset, hence the configured action offset), while the raw nonfinite request is latched
+  into termination after physics.  Thus nonfinite data never enters the plant.  This elementwise
+  fallback and the decoded q-des clamp are not a raw-policy clip; the historical MuJoCo-only
+  `[-4,+4]` clip diverged from Isaac and must not be restored.
+  This closes raw proposal/order/scale/offset, not the executable target guard: active Isaac also
+  applies its soft inset, finite projection and state-dependent q/qdot brake.  Until MuJoCo consumes
+  that same owner, the guard axis is `DIVERGENT_DECLARED`; MuJoCo-only diagnostics are allowed, but
+  checkpoint transfer, promotion and matched cross-engine causal claims are not.
 - The vendor ActionBall plant additionally distinguishes the runtime mechanical position ledger
   [`Hmech`](../DEFINITIONS.md#h-mech) from a PhysX control-position envelope
   [`Hctrl`](../DEFINITIONS.md#h-ctrl).  The selected runtime-ordered joints are

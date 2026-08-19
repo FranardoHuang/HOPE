@@ -1,9 +1,8 @@
-"""Run a bounded upstream RSL-RL 3 call on the real MuJoCo portable environment.
+"""Run upstream RSL-RL 3 on the real MuJoCo portable environment.
 
-The default remains the historical one-update WAIT call.  ``--full-a`` selects
-the single-shot reveal/launch/flight slice with live R03 and Reward ordinals
-0..9.  Selected-rubber contact, R06, R07, and ordinals 10..13 remain absent,
-so neither mode is a complete ActionBall task.
+The default preserves the historical one-update WAIT ABI. ``--full-a`` exposes
+the current R03/R06/R07/Reward20 engineering surface with fail-closed evidence;
+it remains diagnostic rather than a promotion or physics authority.
 """
 
 from __future__ import annotations
@@ -16,12 +15,55 @@ import inspect
 import json
 import os
 from pathlib import Path
+import re
 import stat
+import time
 
 
 RSL_RL_VERSION = "3.1.2"
 NUM_STEPS_PER_ENV = 24
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+FULL_A_ACTION_UID = 6907688916670928
+FULL_A_MOUNT_NORMAL_SIGN = 1
+FULL_A_FAMILY = "forehand"
+FULL_A_NUM_ENVS = 4096
+FULL_A_NUM_UPDATES = 25_000
+RSL_RL_SOURCE_SHA256 = {
+    "rsl_rl/runners/on_policy_runner.py": "6ffaee7e154a49ae55eebf53a7b1549f0461a1742d92dd34af5bb4b785d19cf2",
+    "rsl_rl/algorithms/ppo.py": "4373ac1b2f9fdf14d9da57516968fc95d8f605d2967fee01dc61bf0d09423478",
+    "rsl_rl/modules/actor_critic.py": "614eb6e14d21c46504ce2046f04c9ab70a8c3cf679502ef2a220987e506a959a",
+    "rsl_rl/modules/actor_critic_recurrent.py": "19fbe660f6a22a8df4e7d54dc13e6dc6d668f69c71f9303165553b9272aff5d0",
+    "rsl_rl/storage/rollout_storage.py": "32d8b1b3cead87e0eeb96e2b334a5c75fd431309e43dae85a42a89b62c5dc5de",
+    "rsl_rl/networks/mlp.py": "ead23a9b888bb70115c7ec17c085f21afa6903feeeb595d33aa9ce6c27534bfe",
+}
+
+
+def _run_identity(source_commit: str | None, run_namespace: str | None) -> dict:
+    if (type(source_commit) is not str or re.fullmatch(
+            r"[0-9a-f]{40}", source_commit) is None
+            or type(run_namespace) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{15,159}", run_namespace) is None):
+        raise ValueError("MuJoCo Full-A run identity differs")
+    return {"source_commit": source_commit, "run_namespace": run_namespace}
+
+
+def _stable_file_sha256(path: Path) -> str:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        before, digest = os.fstat(fd), hashlib.sha256()
+        while chunk := os.read(fd, 1024 * 1024):
+            digest.update(chunk)
+        after, current = os.fstat(fd), os.stat(path, follow_symlinks=False)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or (before.st_dev, before.st_ino, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns)
+                or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)):
+            raise RuntimeError("RSL-RL source file changed during verification")
+        return digest.hexdigest()
+    finally:
+        os.close(fd)
 
 
 def _ready_pose_input() -> tuple[bytes, str]:
@@ -64,7 +106,7 @@ def build_train_cfg(num_steps_per_env: int = NUM_STEPS_PER_ENV) -> dict:
         raise ValueError("num_steps_per_env must be a positive int")
     return {
         "num_steps_per_env": num_steps_per_env,
-        "save_interval": 1,
+        "save_interval": 1000,
         "obs_groups": {"policy": ["policy"], "critic": ["critic"]},
         "policy": {
             "class_name": "ActorCritic",
@@ -97,6 +139,39 @@ def build_train_cfg(num_steps_per_env: int = NUM_STEPS_PER_ENV) -> dict:
     }
 
 
+def _apply_full_a_policy_bootstrap(runner, torch_module) -> None:
+    """Install the fresh Isaac A/C zero-mean policy prior exactly once."""
+
+    policy = runner.alg.policy
+    actor = getattr(policy, "actor", None)
+    children = list(actor.children()) if isinstance(
+        actor, torch_module.nn.Sequential
+    ) else []
+    output = children[-1] if children else None
+    log_std = getattr(policy, "log_std", None)
+    if (
+        not isinstance(output, torch_module.nn.Linear)
+        or output.out_features != 31
+        or output.bias is None
+        or not torch_module.is_tensor(log_std)
+        or tuple(log_std.shape) != (31,)
+        or getattr(policy, "noise_std_type", None) != "log"
+    ):
+        raise RuntimeError("MuJoCo Full-A policy bootstrap surface differs")
+    with torch_module.no_grad():
+        output.weight.zero_()
+        output.bias.zero_()
+    expected_std = torch_module.full_like(log_std, 0.02)
+    if (
+        int(torch_module.count_nonzero(output.weight).item()) != 0
+        or int(torch_module.count_nonzero(output.bias).item()) != 0
+        or not torch_module.allclose(
+            torch_module.exp(log_std), expected_std, rtol=0.0, atol=1.0e-8
+        )
+    ):
+        raise RuntimeError("MuJoCo Full-A zero-head/log-std bootstrap differs")
+
+
 def _wait_module():
     module = importlib.import_module("mujoco_gpu_ac_full_mdp_initial_wait_env")
     expected = Path(__file__).with_name(
@@ -106,6 +181,167 @@ def _wait_module():
     if actual != expected:
         raise RuntimeError("MuJoCo WAIT environment import origin differs")
     return module
+
+
+def _update_ledger_module():
+    module = importlib.import_module("mujoco_full_mdp_update_ledger")
+    expected = Path(__file__).with_name("mujoco_full_mdp_update_ledger.py").resolve()
+    if Path(getattr(module, "__file__", "")).resolve() != expected:
+        raise RuntimeError("MuJoCo FullMDP update ledger import origin differs")
+    return module
+
+
+def _open_evidence_jsonl(raw: str | None) -> int | None:
+    if raw is None:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        raise ValueError("evidence JSONL path must be absolute")
+    fd = os.open(
+        path, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+    )
+    try:
+        row, current = os.fstat(fd), os.stat(path, follow_symlinks=False)
+        if (not stat.S_ISREG(row.st_mode) or row.st_nlink != 1
+                or current.st_nlink != 1 or row.st_size != 0
+                or (row.st_dev, row.st_ino) != (current.st_dev, current.st_ino)):
+            raise ValueError("evidence JSONL must be a fresh regular file")
+        parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _snapshot_root(raw: str | None) -> Path | None:
+    if raw is None:
+        return None
+    path = Path(raw)
+    try:
+        row = path.lstat()
+    except OSError as exc:
+        raise ValueError("snapshot directory differs") from exc
+    if (not path.is_absolute() or not stat.S_ISDIR(row.st_mode)
+            or path.resolve() != path or any(path.iterdir())):
+        raise ValueError("snapshot directory differs")
+    return path
+
+
+def _save_snapshot(runner, root: Path, update_index: int, *, run_identity: dict,
+                   prepared_update_sha256: str) -> dict:
+    path = root / f"model_{update_index}.pt"
+    dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    fd = -1
+    observed = runner.current_learning_iteration
+    try:
+        fd = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=dir_fd)
+        runner.current_learning_iteration = update_index
+        with os.fdopen(fd, "w+b", closefd=False) as stream:
+            runner.save(stream, infos={"diagnostic_unauthorized": True,
+                "checkpoint_authority": False, "resume_authority": False,
+                "update_index": update_index, "completed_updates": update_index + 1,
+                "run_identity": dict(run_identity),
+                "prepared_update_sha256": prepared_update_sha256})
+            stream.flush()
+            os.fsync(stream.fileno())
+            stream.seek(0)
+            digest = hashlib.sha256()
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        os.fsync(dir_fd)
+        row = os.fstat(fd)
+        current = os.stat(path.name, dir_fd=dir_fd, follow_symlinks=False)
+        if (not stat.S_ISREG(row.st_mode) or row.st_nlink != 1 or row.st_size <= 0
+                or (row.st_dev, row.st_ino) != (current.st_dev, current.st_ino)):
+            raise RuntimeError("diagnostic snapshot differs")
+    finally:
+        runner.current_learning_iteration = observed
+        if fd >= 0:
+            os.close(fd)
+        os.close(dir_fd)
+    return {"name": path.name, "bytes": row.st_size,
+            "sha256": digest.hexdigest()}
+
+
+def _fd_inventory(fd: int, path: Path) -> dict:
+    os.fsync(fd)
+    row = os.fstat(fd)
+    digest = hashlib.sha256()
+    offset = 0
+    while offset < row.st_size:
+        chunk = os.pread(fd, min(1024 * 1024, row.st_size - offset), offset)
+        if not chunk:
+            raise RuntimeError("evidence JSONL short read")
+        digest.update(chunk)
+        offset += len(chunk)
+    after, current = os.fstat(fd), os.stat(path, follow_symlinks=False)
+    if (row.st_dev, row.st_ino, row.st_size, row.st_mtime_ns, row.st_ctime_ns) != (
+        after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+        after.st_ctime_ns,
+    ) or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino):
+        raise RuntimeError("evidence JSONL changed during finalization")
+    return {"bytes": row.st_size, "sha256": digest.hexdigest()}
+
+
+def _write_completion(raw: str, record: dict) -> None:
+    path = Path(raw)
+    if not path.is_absolute():
+        raise ValueError("completion receipt path must be absolute")
+    payload = json.dumps(
+        record, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8") + b"\n"
+    parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    fd = -1
+    try:
+        fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=parent_fd)
+        with os.fdopen(fd, "wb", closefd=False) as stream:
+            if stream.write(payload) != len(payload):
+                raise OSError("completion receipt write made no progress")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(parent_fd)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        os.close(parent_fd)
+
+
+def _optimizer_state_evidence(optimizer, torch_module) -> tuple[bool, bool]:
+    try:
+        parameters = tuple(
+            parameter for group in optimizer.param_groups
+            for parameter in group["params"]
+        )
+        required = {"step", "exp_avg", "exp_avg_sq"}
+        present = bool(parameters) and set(optimizer.state) == set(parameters) and all(
+            type(optimizer.state[parameter]) is dict
+            and set(optimizer.state[parameter]) == required
+            for parameter in parameters
+        )
+        if not present:
+            return False, False
+        for parameter in parameters:
+            step, mean, square = (
+                optimizer.state[parameter][name]
+                for name in ("step", "exp_avg", "exp_avg_sq")
+            )
+            if (not all(isinstance(value, torch_module.Tensor)
+                        for value in (step, mean, square))
+                    or step.numel() != 1 or not bool(step.gt(0).all())
+                    or tuple(mean.shape) != tuple(parameter.shape)
+                    or tuple(square.shape) != tuple(parameter.shape)
+                    or not all(bool(torch_module.isfinite(value).all())
+                               for value in (step, mean, square))):
+                return True, False
+        return True, True
+    except (KeyError, TypeError, AttributeError):
+        return False, False
 
 
 def _rsl3_runner():
@@ -129,14 +365,10 @@ def _rsl3_runner():
     actor_module = importlib.import_module("rsl_rl.modules.actor_critic")
     recurrent_module = importlib.import_module("rsl_rl.modules.actor_critic_recurrent")
     storage_module = importlib.import_module("rsl_rl.storage.rollout_storage")
+    mlp_module = importlib.import_module("rsl_rl.networks.mlp")
     _require_rsl3_preconstruction(
-        distribution,
-        module,
-        ppo_module,
-        actor_module,
-        recurrent_module,
-        storage_module,
-        torch,
+        distribution, module, ppo_module, actor_module, recurrent_module,
+        storage_module, mlp_module, torch,
     )
     return distribution.version, runner, distribution
 
@@ -148,6 +380,7 @@ def _require_rsl3_preconstruction(
     actor_module,
     recurrent_module,
     storage_module,
+    mlp_module,
     torch_module,
 ) -> None:
     expected_modules = (
@@ -156,6 +389,7 @@ def _require_rsl3_preconstruction(
         (actor_module, "rsl_rl/modules/actor_critic.py"),
         (recurrent_module, "rsl_rl/modules/actor_critic_recurrent.py"),
         (storage_module, "rsl_rl/storage/rollout_storage.py"),
+        (mlp_module, "rsl_rl/networks/mlp.py"),
     )
     if any(
         Path(getattr(module, "__file__", "")).resolve()
@@ -166,9 +400,15 @@ def _require_rsl3_preconstruction(
         and runner_module.ActorCritic is actor_module.ActorCritic
         and runner_module.ActorCriticRecurrent is recurrent_module.ActorCriticRecurrent
         and ppo_module.RolloutStorage is storage_module.RolloutStorage
+        and actor_module.MLP is mlp_module.MLP
         and ppo_module.optim.Adam is torch_module.optim.Adam
     ):
         raise RuntimeError("MuJoCo WAIT RSL-RL preconstruction origin differs")
+    for relative, expected_sha256 in RSL_RL_SOURCE_SHA256.items():
+        if _stable_file_sha256(
+            Path(distribution.locate_file(relative)).resolve()
+        ) != expected_sha256:
+            raise RuntimeError("MuJoCo WAIT RSL-RL source bytes differ: " + relative)
 
 
 def _require_rsl3_runtime(distribution, runner, torch_module) -> None:
@@ -186,7 +426,11 @@ def _require_rsl3_runtime(distribution, runner, torch_module) -> None:
         Path(inspect.getsourcefile(type(value)) or "").resolve()
         != Path(distribution.locate_file(relative)).resolve()
         for value, relative in runtime
-    ) or type(optimizer) is not torch_module.optim.Adam:
+    ) or type(optimizer) is not torch_module.optim.Adam or (
+        getattr(alg.update, "__self__", None) is not alg
+        or Path(inspect.getsourcefile(alg.update) or "").resolve()
+        != Path(distribution.locate_file("rsl_rl/algorithms/ppo.py")).resolve()
+    ):
         raise RuntimeError("MuJoCo WAIT RSL-RL runtime origin differs")
 
 
@@ -196,23 +440,49 @@ def main(
     num_steps_per_env: int = NUM_STEPS_PER_ENV,
     num_updates: int = 1,
     full_a_mode: bool = False,
+    evidence_jsonl: str | None = None,
+    snapshot_dir: str | None = None,
+    completion_json: str | None = None,
+    source_commit: str | None = None,
+    run_namespace: str | None = None,
+    save_interval: int = 1000,
+    _test_allow_small_full_a: bool = False,
 ) -> int:
     import torch
 
     if (
         type(num_envs) is not int
         or num_envs <= 0
+        or type(num_steps_per_env) is not int
+        or num_steps_per_env <= 0
         or type(num_updates) is not int
         or num_updates <= 0
         or type(full_a_mode) is not bool
+        or type(_test_allow_small_full_a) is not bool
+        or type(save_interval) is not int or save_interval != 1000
     ):
         raise ValueError("runner dimensions/mode differ")
+    if full_a_mode and (
+        evidence_jsonl is None or snapshot_dir is None or completion_json is None
+    ):
+        raise ValueError("MuJoCo Full-A requires evidence, snapshot and completion paths")
+    if not full_a_mode and any(value is not None for value in (
+        evidence_jsonl, snapshot_dir, completion_json, source_commit, run_namespace
+    )):
+        raise ValueError("MuJoCo Full-A artifact arguments require --full-a")
+    if full_a_mode and not _test_allow_small_full_a and (
+        num_envs != FULL_A_NUM_ENVS
+        or num_steps_per_env != NUM_STEPS_PER_ENV
+        or num_updates != FULL_A_NUM_UPDATES
+    ):
+        raise ValueError("production MuJoCo Full-A shape must be 4096x24x25000")
+    identity = _run_identity(source_commit, run_namespace) if full_a_mode else None
     version, runner_type, distribution = _rsl3_runner()
     wait = _wait_module()
     ready_pose_payload, ready_pose_source = _ready_pose_input()
     torch.manual_seed(0)
     task = wait.TaskCfg(
-        episode_length_s=10.0 if full_a_mode else 3.0,
+        episode_length_s=30.0 if full_a_mode else 3.0,
         action_scale_mode="vendor",
         reset_joint_noise_rad=0.0,
         reset_joint_vel_noise=0.0,
@@ -228,6 +498,7 @@ def main(
         ready_pose_source=ready_pose_source,
         full_a_mode=full_a_mode,
     )
+    action_contract = env.action_contract_identity if full_a_mode else None
     initial = env.get_observations()
     if (
         env.num_actions != 31
@@ -238,44 +509,28 @@ def main(
     ):
         raise RuntimeError("MuJoCo WAIT initial RSL3 surface differs")
 
-    evidence_keys = {
-        "reveal_rows": "full_a_reveal_event",
-        "launch_rows": "full_a_launch_event",
-        "flight_terminal_rows": "full_a_flight_terminal_event",
-        "selected_reset_rows": "full_a_selected_reset_event",
-        "racket_contact_eligible_rows": "full_a_racket_contact_eligible_event",
-        "racket_contact_rows": "full_a_racket_contact_event",
-        "selected_contact_rows": "full_a_selected_contact_event",
-        "opposite_contact_rows": "full_a_opposite_contact_event",
-        "edge_contact_rows": "full_a_edge_contact_event",
-        "between_contact_rows": "full_a_between_contact_event",
-        "invalid_contact_rows": "full_a_invalid_contact_event",
-        "r03_present_rows": "full_a_r03_present_event",
-        "r03_physically_valid_rows": "full_a_r03_physically_valid_event",
-    }
-    evidence_counts = {
-        name: torch.zeros((), dtype=torch.long, device=env.device)
-        for name in evidence_keys
-    }
-    evidence_valid_steps = {name: 0 for name in evidence_keys}
-    evidence_step_count = 0
+    ledger = None
     if full_a_mode:
+        ledger_module = _update_ledger_module()
+        ledger = ledger_module.FullMdpUpdateLedger(
+            torch_module=torch,
+            num_envs=num_envs,
+            num_steps_per_env=num_steps_per_env,
+            device=env.device,
+            termination_bits=wait.FULLMDP_TERMINATION_BITS,
+            action_slot=0,
+            action_uid=FULL_A_ACTION_UID,
+            mount_normal_sign=FULL_A_MOUNT_NORMAL_SIGN,
+            family=FULL_A_FAMILY,
+            initial_reset_generation=env.reset_generation,
+            source_commit=identity["source_commit"],
+            run_namespace=identity["run_namespace"],
+        )
         original_env_step = env.step
 
         def evidence_step(actions):
-            nonlocal evidence_step_count
             result = original_env_step(actions)
-            evidence_step_count += 1
-            extras = result[3]
-            for name, key in evidence_keys.items():
-                value = extras.get(key)
-                if (
-                    type(value) is torch.Tensor
-                    and value.dtype == torch.bool
-                    and tuple(value.shape) == (num_envs,)
-                ):
-                    evidence_counts[name] += value.to(torch.long).sum()
-                    evidence_valid_steps[name] += 1
+            ledger.ingest(result)
             return result
 
         env.step = evidence_step
@@ -287,31 +542,129 @@ def main(
         device="cuda:0",
     )
     _require_rsl3_runtime(distribution, runner, torch)
+    if full_a_mode:
+        _apply_full_a_policy_bootstrap(runner, torch)
     runner.disable_logs = True
     updates = 0
+    snapshots = _snapshot_root(snapshot_dir) if full_a_mode else None
+    evidence_fd = _open_evidence_jsonl(evidence_jsonl) if full_a_mode else None
+    snapshot_receipts = []
+    snapshot_indices = tuple(range(0, num_updates, save_interval)) if full_a_mode else ()
+    if full_a_mode and snapshot_indices[-1] != num_updates - 1:
+        snapshot_indices += (num_updates - 1,)
     original_update = runner.alg.update
+    run_started_at = time.perf_counter()
+    iteration_started_at = run_started_at
 
     def counted_update():
-        nonlocal updates
+        nonlocal iteration_started_at, updates
+        collection_finished_at = time.perf_counter()
+        if ledger is not None:
+            storage = runner.alg.storage
+            prepared = ledger.prepare(
+                updates, environment_steps=env.common_step_counter,
+                storage_step=storage.step,
+                storage_tensors={"rewards": storage.rewards,
+                    "returns": storage.returns, "advantages": storage.advantages},
+                policy_std=runner.alg.policy.action_std,
+            )
+        else:
+            prepared = None
+        learning_started_at = time.perf_counter()
+        result = original_update()
+        learning_finished_at = time.perf_counter()
         updates += 1
-        return original_update()
+        if ledger is not None:
+            index = updates - 1
+            receipt = None
+            if index in snapshot_indices:
+                prepared_sha256 = hashlib.sha256(prepared.payload).hexdigest()
+                receipt = _save_snapshot(
+                    runner, snapshots, index, run_identity=identity,
+                    prepared_update_sha256=prepared_sha256,
+                )
+            ledger.ack(
+                prepared, completed_updates=updates, evidence_fd=evidence_fd,
+                optimizer_metrics=result, learning_rate=runner.alg.learning_rate,
+                timings={
+                    "collection_seconds": collection_finished_at - iteration_started_at,
+                    "learning_seconds": learning_finished_at - learning_started_at,
+                    "pre_ack_iteration_seconds": (
+                        learning_finished_at - iteration_started_at
+                    ),
+                    "run_elapsed_pre_ack_seconds": (
+                        learning_finished_at - run_started_at
+                    ),
+                },
+                snapshot=receipt,
+            )
+            if receipt is not None:
+                snapshot_receipts.append(receipt)
+                print(
+                    f"ACTION_BALL_MUJOCO_FULL_A_PROGRESS={index}:{receipt['name']}",
+                    flush=True,
+                )
+        iteration_started_at = time.perf_counter()
+        return result
 
     runner.alg.update = counted_update
-    runner.learn(num_updates, init_at_random_ep_len=False)
-    final = env.get_observations()
-    storage = runner.alg.storage
-    if (
-        updates != num_updates
-        or env.common_step_counter != num_steps_per_env * num_updates
-        or storage.step != 0
-        or not runner.alg.optimizer.state
-        or not bool(torch.isfinite(storage.rewards).all())
-        or tuple(final["policy"].shape) != (num_envs, 229)
-        or tuple(final["critic"].shape) != (num_envs, 399)
-        or not bool(torch.isfinite(final["policy"]).all())
-        or not bool(torch.isfinite(final["critic"]).all())
-    ):
-        raise RuntimeError("MuJoCo WAIT RSL3 update evidence differs")
+    try:
+        runner.learn(num_updates, init_at_random_ep_len=False)
+        final = env.get_observations()
+        storage = runner.alg.storage
+        storage_finite = all(
+            isinstance(value, torch.Tensor)
+            and tuple(value.shape) == (num_steps_per_env, num_envs, 1)
+            and bool(torch.isfinite(value).all())
+            for value in (storage.rewards, storage.returns, storage.advantages)
+        )
+        optimizer_state_present, optimizer_state_finite = _optimizer_state_evidence(
+            runner.alg.optimizer, torch
+        )
+        final_observation_finite = (
+            bool(torch.isfinite(final["policy"]).all())
+            and bool(torch.isfinite(final["critic"]).all())
+        )
+        if (
+            updates != num_updates
+            or env.common_step_counter != num_steps_per_env * num_updates
+            or storage.step != 0
+            or not storage_finite
+            or not optimizer_state_present
+            or not optimizer_state_finite
+            or tuple(final["policy"].shape) != (num_envs, 229)
+            or tuple(final["critic"].shape) != (num_envs, 399)
+            or not final_observation_finite
+        ):
+            raise RuntimeError("MuJoCo WAIT RSL3 update evidence differs")
+        if full_a_mode:
+            if tuple(row["name"] for row in snapshot_receipts) != tuple(
+                f"model_{index}.pt" for index in snapshot_indices
+            ):
+                raise RuntimeError("MuJoCo Full-A snapshot frontier differs")
+            completion = {
+                "schema_version": 2,
+                "record_type": "mujoco_full_mdp_completion",
+                "diagnostic_unauthorized": True,
+                "checkpoint_authority": False, "resume_authority": False,
+                "run_identity": dict(identity),
+                "action_contract": action_contract,
+                "num_envs": num_envs,
+                "num_steps_per_env": num_steps_per_env,
+                "completed_updates": updates,
+                "environment_steps": env.common_step_counter,
+                "transitions": env.common_step_counter * num_envs,
+                "evidence_jsonl": _fd_inventory(evidence_fd, Path(evidence_jsonl)),
+                "snapshot_receipts": snapshot_receipts,
+                "final_observation_finite": final_observation_finite,
+                "rollout_storage_finite": storage_finite,
+                "optimizer_state_present": optimizer_state_present,
+                "optimizer_state_finite": optimizer_state_finite,
+            }
+            _write_completion(completion_json, completion)
+    finally:
+        if evidence_fd is not None:
+            os.close(evidence_fd)
     payload = {
         "diagnostic_unauthorized": True,
         "rsl_rl_version": version,
@@ -320,50 +673,12 @@ def main(
         "transitions": env.common_step_counter * env.num_envs,
         "policy_width": final["policy"].shape[1],
         "critic_width": final["critic"].shape[1],
-        "task_lifecycle": "full_a_slice_attempted" if full_a_mode else "idle_wait_only",
+        "task_lifecycle": "full_a_engineering_longrun_complete" if full_a_mode else "idle_wait_only",
     }
     if full_a_mode:
-        counts = {name: int(value.item()) for name, value in evidence_counts.items()}
-        unmeasured = sorted(
-            name
-            for name, valid_steps in evidence_valid_steps.items()
-            if valid_steps != evidence_step_count
-        )
-        eligible = counts["racket_contact_eligible_rows"]
-        classified = sum(
-            counts[name]
-            for name in (
-                "selected_contact_rows",
-                "opposite_contact_rows",
-                "edge_contact_rows",
-                "between_contact_rows",
-            )
-        )
-        payload.update(
-            {
-                "full_a_complete": False,
-                "full_a_slice_evidence": {
-                    **counts,
-                    "racket_contact_rate": (
-                        counts["racket_contact_rows"] / eligible
-                        if eligible > 0
-                        else None
-                    ),
-                    "selected_contact_rate": (
-                        counts["selected_contact_rows"] / classified
-                        if classified > 0
-                        else None
-                    ),
-                    "selected_rubber_classified_rows": classified,
-                    "unmeasured": unmeasured,
-                },
-                "not_produced": {
-                    "r06_landing_outcome": True,
-                    "r07_recovery": True,
-                    "reward_terms_11_13": True,
-                },
-            }
-        )
+        payload.update({
+            "engineering_run_complete": True, "full_a_update_ack_count": updates,
+        })
     print(
         "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON="
         + json.dumps(payload, sort_keys=True),
@@ -377,13 +692,11 @@ if __name__ == "__main__":
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--num-steps-per-env", type=int, default=NUM_STEPS_PER_ENV)
     parser.add_argument("--num-updates", type=int, default=1)
-    parser.add_argument("--full-a", action="store_true")
-    args = parser.parse_args()
-    raise SystemExit(
-        main(
-            num_envs=args.num_envs,
-            num_steps_per_env=args.num_steps_per_env,
-            num_updates=args.num_updates,
-            full_a_mode=args.full_a,
-        )
-    )
+    parser.add_argument("--full-a", dest="full_a_mode", action="store_true")
+    parser.add_argument("--evidence-jsonl")
+    parser.add_argument("--snapshot-dir")
+    parser.add_argument("--completion-json")
+    parser.add_argument("--source-commit")
+    parser.add_argument("--run-namespace")
+    parser.add_argument("--save-interval", type=int, default=1000)
+    raise SystemExit(main(**vars(parser.parse_args())))

@@ -2,7 +2,55 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
-**2026-08-19 slot0 question/teacher纵切片（Gate仍`Partial`）：**portable Full-A已删除midpoint serve、
+**2026-08-20 current correction（Gate仍`Partial`）：**本段supersede下文把`take061/q_ready`
+当physical reset、joint teacher在reveal立即切measured frame0、自然shot完成当nonterminal selected reset
+并增加generation、ledger只有22 events，以及把zero-action table/fall表现当发车门的历史实现/判词。
+
+portable FullMDP true Gym reset现在写`runtime_plant.default_joint_pos_rad`、配置default root加env origin、
+零joint/root velocity和零current/previous action。30 s / 1500-tick内的due固定为
+`2,295,588,881,1174,1467`；每次只作state-dependent `ACCEPT/DEFER`，DEFER零写且不在下一tick补试。
+pre-swing HOLD的joint teacher为runtime default/zero velocity，body与R07 target为measured frame0；
+`active_motion_s > 0`后才公开measured sampler。phase只允许`0/2/5/6/8`。
+
+自然recovery success/window-timeout发`shot_retired`并停在phase8，不发Gym done、不改robot/action/episode/
+`reset_generation`；后续真实ACCEPT才开启下一shot。只有真实Gym done发`selected_reset`并使
+`reset_generation`恰增1。thin ledger累计26个event、5个terminal bit；其中
+`completed_action_epoch`只能由同一env行闭合launch/selected contact/fault-free physically-valid
+R03/fault-free eligible+source-valid R06/exact 68-cell R07/natural RETIRE后原子发布，
+跨env边际不能代签。optimizer前prepare，成功后才snapshot与append+fsync ACK。
+
+raw proposal/order/scale/default-offset host已闭合；MuJoCo hard-range与Isaac soft-inset/finite projection/
+state-dependent brake仍为`DIVERGENT_DECLARED`，因此本run只有MuJoCo-only
+`diagnostic_unauthorized` authority，没有transfer/promotion/matched cross-backend authority。
+zero-action的table/fall/contact/recovery率只是telemetry；exact keepout termination保留，错误额外witness
+不恢复。consumer把`engineering_run_complete`与slot0 `business_chain_complete`分开；25k工程seal
+不能代签业务链，而本代因73动作、双侧与科学窗口报告未闭合，`full_a_complete`
+固定为`false`。
+
+host当前精确回归为runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
+`59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。exact Pod MuJoCo-Warp/RSL-RL3.1.2
+调用点与同进程`4096×25000`仍未测/未启动，Gate保持`Partial`。详细当前真源见
+[`EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819`](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+
+本次host结果的可复现命令（均从repo root执行；skip只允许标明为GPU-only）为：
+
+```bash
+PY=/Users/Franco/opt/anaconda3/bin/python3
+$PY -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_full_mdp_update_ledger.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_gpu_ac_full_mdp_wait_rsl3.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_full_mdp_longrun_consumer.py
+$PY -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_a3_train_ppo_action_transform.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_gpu_ac_full_mdp_initial_wait_env.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_gpu_ac_full_mdp_wait_transition.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_full_mdp_portable_outcome.py
+$PY -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_isaac_alignment.py \
+  -k 'raw_clip or affine_offset or action_axes or final_ctrl or vendor_scale or physical_ready or active_isaac or deleted_brake or extra_mujoco or declaring_the_live_guard or declared_guard_divergence'
+```
+
+**HISTORICAL / SUPERSEDED — 2026-08-19 slot0 question/teacher纵切片：**portable Full-A已删除midpoint serve、
 `x+vt-0.5gt²`和`normal=-incoming`临时代码。fresh action仍严格为slot0/UID `6907688916670928`
 （`take_058_unit02_fh`）；manifest center经live base yaw与shared Physical reverse-integration生成integer-tick
 launch state，world origin只在真实qpos写入时恢复。measured motion NPZ、31-joint order、body order、mount sign、
@@ -14,7 +62,7 @@ take061 physical-ready reset未改写。ready到frame0的`3.2918 rad`控制缺�
 portable `4096×25000`仍缺，因此不能宣称Full-A或长跑就绪。详细边界见
 [portable纵切片实验](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 
-**2026-08-19 first Full-A slice（Gate 仍 `Partial`）：**portable 229/399-D lane在既有WAIT VecEnv上增加
+**HISTORICAL / SUPERSEDED — 2026-08-19 first Full-A slice：**portable 229/399-D lane在既有WAIT VecEnv上增加
 一条显式`full_a_mode`纵切片：逐行reveal、把launch state真实写入MuJoCo ball、20个physics substep、
 live contact array、bounded flight terminal与selected reset。runner只累计真实extras，receipt诚实写
 `task_lifecycle=full_a_slice_attempted`和`full_a_complete=false`。当前host纵切片还从同一postphysics
@@ -2080,7 +2128,7 @@ deadline钉到launch transition：仍经过一次真实physics并验证ball移�
 本轮不重试；下一件只能使用已只读确认存在的`/usr/bin/taskset`，并在创建namespace前把tool origin作为
 precondition。selected contact与masked reset live门因此仍`未测`，G06保持`Partial`。
 
-### 2026-08-20 portable R06/R07与非终止shot reset（Gate仍`Partial`）
+### HISTORICAL / SUPERSEDED — 2026-08-20 portable R06/R07与非终止shot reset
 
 portable Full-A host纵切片现已把selected-rubber后的首次net证据、landing crossing、R06 denominator与
 Reward11/12接到同一生命周期。普通no-contact是有PRESENT/POLICY/SOURCE的零奖励样本；invalid evidence只

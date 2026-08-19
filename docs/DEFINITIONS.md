@@ -15,6 +15,23 @@
 同步，随后在同一进程恢复原方法并自动关闭。它只用于定位collection墙钟，固定
 `speed_evidence_eligible=false`，不能当profiler-off吞吐成绩。
 
+<a id="mujoco-fullmdp-longrun-flags"></a>
+**portable MuJoCo FullMDP长跑flags**：[`--full-a`](#mujoco-fullmdp-longrun-flags)选择portable
+26-event engineering surface，而不是历史WAIT环境或业务Full-A成功声明；其中
+`completed_action_epoch`只由同一env行真实闭合launch/selected contact/fault-free physically-valid
+R03/fault-free eligible+source-valid R06/exact 68-cell R07/natural RETIRE时原子发布，
+禁止用跨env边际计数拼出业务完成；
+[`--evidence-jsonl`](#mujoco-fullmdp-longrun-flags)要求
+一个绝对路径、fresh、no-follow且exclusive创建的逐optimizer ACK文件；
+[`--snapshot-dir`](#mujoco-fullmdp-longrun-flags)要求一个预建的fresh目录，只接收
+no-clobber诊断快照；[`--completion-json`](#mujoco-fullmdp-longrun-flags)指定最终门之后才允许
+exclusive写入的completion seal；[`--source-commit`](#mujoco-fullmdp-longrun-flags)和
+[`--run-namespace`](#mujoco-fullmdp-longrun-flags)把ACK、snapshot和seal绑定到同一fresh源码与运行身份；
+[`--save-interval=1000`](#mujoco-fullmdp-longrun-flags)是固定的千轮快照周期，另在自然终点
+update `24999`保存。completion seal只证明exact 25k engineering completion；独立consumer另行报告
+slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，因为73动作、双侧与科学窗口
+报告未闭合。这些flag不授权checkpoint resume、promotion、跨后端matched结论或部署。
+
 ## 先遵守这条：不用黑话
 
 - `run_name`、`flag`、实验臂代号和缩写第一次出现时，必须同行写出：**它是什么、改了什么、用来回答什么**。

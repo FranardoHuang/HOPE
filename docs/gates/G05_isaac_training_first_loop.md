@@ -6368,3 +6368,40 @@ profile-off matched `20..97`窗口中，旧GPU1 mean/median/p95=`17.570/16.415/2
 `18.004/17.610/22.98 s`；iteration 97两者science telemetry exact相同（reward=`5.44`、episode length=
 `92.99`、timesteps=`9,633,792`）。不同GPU使该对比不能证明cut负收益，但足以证明没有可采用的提速。
 旧run已到iteration 1300（mean reward=`3.08`、length=`62.57`），新run到iteration 97；两者均保持只读。
+
+### 2026-08-20 zero-live-flight成对idle candidate（Gate仍`Partial`）
+
+22秒回归的第一墙是在没有ACCEPT/launch/contact/retire时，每update仍执行96次完整
+Physical/R06/Epoch事务。本候选不以`pending is None`为捷径；它在D05 settle后每control
+boundary只做一次合并device-to-host verdict，联合Physical pending/published/lifecycle/active slot/
+selected-contact、R06 live state与scene callback activity。读取或ABI故障先清cache并fail dense。
+
+只有所有writer都空时，pre/postphysics才走成对的轻量callback epoch：pre打开binding，post清
+candidate/binding并推进heartbeat/scene/Physical exact stamp，不读写scene tensor，不跑空R06/Epoch/
+retire/full-grid write。mixed/full、D05 ACCEPT和active/retiring flight均保持原dense path；global sticky
+fault不算activity、不被清除，并在下一次live capture显式进入原fault链；
+selected/true reset、restore使cache失效，checkpoint不能跨未配对lease。空journal/mutation没有科学
+consumer，不再为保留旧结构而伪造；229/399、Reward20、done/reason/reset/RNG与decoded
+evidence的语义不变。
+
+可复现host验证为：
+
+```bash
+for TEST_FILE in \
+  hope_training/whole_body_tracking/tests/test_action_ball_physical_epoch_hot_lane.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_ball_scene_postphysics.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_lean_runtime.py; do
+  PYTHONDONTWRITEBYTECODE=1 /Users/Franco/opt/anaconda3/envs/fast/bin/python \
+    -m pytest -q -p no:cacheprovider "$TEST_FILE"
+done
+```
+
+三个文件必须在独立Python进程中运行，避免仓内既有flat/package双namespace测试收集冲突；结果依次为
+`32 passed`、`54 passed, 4 skipped`、`26 passed`，合计`112 passed, 4 skipped`。扩展的consumer
+semantic卷为`166 passed, 8 skipped` / 约8秒。
+反例含idle→ACCEPT→active→retire→idle、R06/Physical多writer不一致、pre/post缺失、重复/
+倒序stamp、callback heartbeat/candidate、selected reset与restore/checkpoint。该结果只关闭host
+语义门；exact Pod fixed-tape和profiler-off `4096×24` wall仍`未测`，所以不称已恢复
+6--9秒、不称严格支配，也不用当前磁盘候选解释或停止active immutable runs。G05保持
+`Partial`。详细性能因果见
+[`EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819`](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
