@@ -4393,3 +4393,6 @@
   `2 passed,1 failed`、RC=1；该namespace封存不重试。窄修使`_fullmdp_initialized=false`的构造期只发布
   deterministic WAIT observation，新增缺失Full-A buffers反例后host=`50 passed,8 skipped`；下一步只能用
   新commit/namespace续跑三个Full-A GPU节点，不能把两个WAIT PASS称为portable Full-A。
+- constructor fix commit `3534eeb0…`的fresh GPU0 gate已越过构造并完成第一步Full-A，但GPU-only extras
+  exact-key fixture漏列生产字段`full_a_landing_opponent_bound`，在真实contact/R07断言前`1 failed`、RC=1；
+  namespace封存不重试。tests-only修正加入该字段，production 0行变化，仍需fresh commit/namespace。

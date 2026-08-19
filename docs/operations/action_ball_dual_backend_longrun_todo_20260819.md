@@ -108,7 +108,10 @@
    `AttributeError`，结果=`2 passed,1 failed`、RC=1。namespace
    `mujoco-fullmdp-gpu-gate.ed11390e.Pod1GPU0Slot2Taskset.50yWOSvf`封存且不重试。窄修只允许
    `_fullmdp_initialized=false`的构造observation走WAIT surface，host反例后direct suite=`50 passed,8 skipped`；
-   仍须fresh commit/namespace重新跑真实Full-A节点；
+   commit `3534eeb0…`的fresh successor已越过构造并完成首个真实Full-A step，但GPU-only extras exact-key
+   fixture漏列生产字段`full_a_landing_opponent_bound`，在物理断言前结果=`1 failed`、RC=1；namespace
+   `mujoco-fullmdp-gpu-gate.3534eeb0.Pod1GPU0Slot2Taskset.GqVOyqcQ`封存不重试。tests-only补齐exact集合后仍须
+   fresh commit/namespace重新跑三个Full-A节点；
 5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在；在上述真实GPU
    纵切片通过前不生成长跑success receipt。
 

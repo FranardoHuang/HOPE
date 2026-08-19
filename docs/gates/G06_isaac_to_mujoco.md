@@ -2108,3 +2108,9 @@ namespace `mujoco-fullmdp-gpu-gate.ed11390e.Pod1GPU0Slot2Taskset.50yWOSvf`封存
 才发布Full-A phase/teacher/task/facts。host新增删除三份Full-A buffer仍能完成构造observation的反例，四份suite=
 `50 passed, 8 skipped`。该修复只关闭初始化顺序，不代签剩余三个GPU节点；fresh successor仍须新commit和
 新namespace，G06继续`Partial`。
+
+constructor fix的fresh commit `3534eeb0…`随后在同一slot新namespace
+`mujoco-fullmdp-gpu-gate.3534eeb0.Pod1GPU0Slot2Taskset.GqVOyqcQ`越过构造并完成第一步真实Full-A；
+GPU-only test随后在生产physics断言前被自己的extras exact-key集合拒绝，因为该集合漏列生产已经发布的
+`full_a_landing_opponent_bound`。结果=`1 failed`、RC=1，该namespace封存不重试。tests-only窄修把该字段
+加入exact集合；production 0行变化，仍须fresh commit/namespace执行三个节点。

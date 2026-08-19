@@ -2215,6 +2215,7 @@ def _assert_full_a_step_surface(result, *, num_envs: int):
         "full_a_r03_physically_valid_event",
         "full_a_landing_crossing_event",
         "full_a_landing_on_opponent",
+        "full_a_landing_opponent_bound",
         "full_a_r06_present_event",
         "full_a_r06_eligible_event",
         "full_a_r06_common_event",
