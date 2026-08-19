@@ -15,6 +15,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -32,6 +33,8 @@ _D05_EPOCH_BEFORE_RACKET_IMPORT = device_r05._require_action_epoch_module()
 import test_reward_flags_mdp as loaded_mdp  # noqa: E402
 import test_spdmix_per_clip_binding as spdmix  # noqa: E402
 from whole_body_tracking.tasks.tracking.mdp import commands as command_module  # noqa: E402
+import action_ball_full_mdp_portable_catalog as portable_catalog  # noqa: E402
+import racket_contact_geometry as racket_geometry  # noqa: E402
 _EPOCH_NAME = "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_epoch"
 epoch = sys.modules.get(_EPOCH_NAME)
 if epoch is None:
@@ -646,3 +649,117 @@ def test_real_motionloader_backed_cold_materializer_publishes_static_table(tmp_p
     assert tuple(table.reference_raw_face_normal_w.shape) == (6, 3)
     assert tuple(table.reference_reach_offset_xy_m.shape) == (6, 2)
     assert tuple(table.reference_base_root_quat_wxyz.shape) == (6, 4)
+
+
+def test_all_portable_reference_rows_match_real_isaac_cold_fk_builder(
+    monkeypatch,
+):
+    """The portable bank must mirror the shipped Isaac cold FK, not itself.
+
+    Both implementations consume the same sealed NPZ bytes, but the expected
+    side below is the production ``MotionLoader`` + ``RacketTargetCommand``
+    builder.  This catches clip-boundary, strike-frame, point-offset, and
+    centered-FD drift across all 73 actions.
+    """
+
+    portable = portable_catalog.load_portable_action_center_table()
+
+    # ``test_reward_flags_mdp`` deliberately installs identity quaternion
+    # stubs so its unrelated reward tests stay small.  Replace those three
+    # imported globals with the actual wxyz algebra before exercising this
+    # production FK path.
+    def quat_apply(quaternion, vector):
+        xyz = quaternion[..., 1:]
+        return vector + 2.0 * (
+            quaternion[..., :1] * torch.cross(xyz, vector, dim=-1)
+            + torch.cross(xyz, torch.cross(xyz, vector, dim=-1), dim=-1)
+        )
+
+    def quat_mul(left, right):
+        left_w, left_xyz = left[..., :1], left[..., 1:]
+        right_w, right_xyz = right[..., :1], right[..., 1:]
+        return torch.cat(
+            (
+                left_w * right_w
+                - torch.sum(left_xyz * right_xyz, dim=-1, keepdim=True),
+                left_w * right_xyz
+                + right_w * left_xyz
+                + torch.cross(left_xyz, right_xyz, dim=-1),
+            ),
+            dim=-1,
+        )
+
+    def matrix_from_quat(quaternion):
+        basis = torch.eye(
+            3, dtype=quaternion.dtype, device=quaternion.device
+        ).expand(quaternion.shape[0], 3, 3)
+        return torch.stack(
+            [quat_apply(quaternion, basis[:, axis]) for axis in range(3)],
+            dim=-1,
+        )
+
+    monkeypatch.setattr(HC, "quat_apply", quat_apply)
+    monkeypatch.setattr(HC, "quat_mul", quat_mul)
+    monkeypatch.setattr(HC, "matrix_from_quat", matrix_from_quat)
+
+    with np.load(portable.actions[0].motion_file, allow_pickle=False) as data:
+        body_names = tuple(str(value) for value in data["body_names"].tolist())
+    loader = command_module.MotionLoader(
+        [row.motion_file for row in portable.actions],
+        list(range(len(body_names))),
+        articulation_body_names=body_names,
+        selected_body_names=body_names,
+        device="cpu",
+    )
+    motion = command_module.MotionCommand.__new__(command_module.MotionCommand)
+    motion.motion = loader
+    racket = HC.RacketTargetCommand.__new__(HC.RacketTargetCommand)
+    racket.device = torch.device("cpu")
+    racket.cfg = SimpleNamespace(
+        strike_phase=0.5,
+        strike_phase_per_clip=tuple(
+            row.strike_phase for row in portable.actions
+        ),
+        clean_strike_vel_window=2,
+        clean_reference_strike_velocity=True,
+        mount_normal_axis=1,
+    )
+    racket._env = SimpleNamespace(step_dt=1.0 / float(loader.fps))
+    racket._motion = lambda: motion
+    racket._racket_mode = "wrist_offset"
+    racket._racket_body_index = -1
+    racket._wrist_body_index = body_names.index(
+        racket_geometry.GEOMETRY_SOURCE_PAYLOAD["official_wrist_body_name"]
+    )
+    racket._mount_offset = torch.tensor(
+        [racket_geometry.RACKET_SITE_OFFSET_WRIST_M], dtype=torch.float32
+    )
+    racket._mount_quat = torch.tensor(
+        [[1.0, 0.0, 0.0, 0.0]], dtype=torch.float32
+    )
+
+    quat, omega, velocity, raw_normal, reach_xy, position, base_quat = (
+        racket._build_action_ball_full_mdp_racket_action_reference_cold_rows(
+            motion, loader
+        )
+    )
+
+    def portable_tensor(name):
+        return torch.tensor(
+            [getattr(row, name) for row in portable.actions],
+            dtype=torch.float32,
+        )
+
+    expected = {
+        "reference_racket_quat_wxyz": quat,
+        "reference_racket_angular_velocity_w_radps": omega,
+        "reference_racket_site_velocity_w_mps": velocity,
+        "reference_raw_face_normal_w": raw_normal,
+        "reference_reach_offset_xy_m": reach_xy,
+        "reference_racket_site_position_w_m": position,
+        "reference_base_root_quat_wxyz": base_quat,
+    }
+    for name, isaac_rows in expected.items():
+        assert torch.allclose(
+            portable_tensor(name), isaac_rows, rtol=0.0, atol=2.0e-6
+        ), name

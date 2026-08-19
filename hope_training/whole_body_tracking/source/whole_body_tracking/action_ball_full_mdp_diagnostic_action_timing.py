@@ -27,6 +27,22 @@ import torch
 from whole_body_tracking.tasks.tracking.mdp import action_ball_manifest as _manifest
 from whole_body_tracking.tasks.tracking.mdp import commands as _commands
 from whole_body_tracking.tasks.tracking.mdp import hope_commands as _racket
+try:
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_full_mdp_portable_catalog as _portable_catalog,
+    )
+except ImportError:  # Dependency-light spec-loaded command tests.
+    _portable_catalog = _commands._FULL_MDP_PORTABLE_CATALOG
+
+PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
+    _portable_catalog.PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256
+)
+PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
+    _portable_catalog.PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256
+)
+PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
+    _portable_catalog.PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH
+)
 
 
 DIAGNOSTIC_UNAUTHORIZED = True
@@ -34,15 +50,6 @@ RUNTIME_INTEGRATED = False
 LAUNCH_AUTHORIZED = False
 FORMAL_ADMISSION = False
 
-PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH = (
-    "configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json"
-)
-PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256 = (
-    "7176fa6448094eaa5dba9640c3e7c74fcd947f36208c434813820a5161dd24a4"
-)
-PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
-    "f530165013baa570e0bf6bbbebcd7eef0c5c54db6ff7d51afccdc24e170f8cd5"
-)
 ATTEMPT_CLOSE_SEMANTICS = "one_exact_live_racket_policy_step"
 EPISODE_HORIZON_SEMANTICS = "exact_live_max_episode_length_times_step_dt"
 DIAGNOSTIC_POLICY_STEP_S = 0.02

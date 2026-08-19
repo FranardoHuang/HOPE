@@ -8,8 +8,10 @@ deterministic question, publishes live Physical and R03 FK facts, and computes
 Reward20 ordinals 0..9 plus the six common motion terms.
 
 The narrow WAIT transition below advances the real plant and closes only the
-IDLE Reward20/termination/masked-reset path.  Selected-rubber contact, R06,
-R07, and Reward ordinals 10..13 remain explicitly unavailable.
+IDLE Reward20/termination/masked-reset path.  An observed generic racket
+contact is classified against the action-zero mount at the same physics
+substep, so Reward ordinal 10 is live; R06, R07, and Reward ordinals 11..13
+remain explicitly unavailable.
 """
 
 from __future__ import annotations
@@ -40,6 +42,8 @@ if str(_MDP) not in sys.path:
 
 import action_ball_full_mdp_portable_observation as observation_contract
 import action_ball_full_mdp_portable_reward as portable_reward
+import action_ball_full_mdp_portable_catalog as portable_catalog
+import racket_contact_geometry as racket_contact_geometry
 
 
 WAIT_BALL_PARK_HOPE = (0.0, 0.0, 10.0)
@@ -186,6 +190,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self.num_envs, dtype=self._torch.long, device=self.device
         )
         if self.full_a_mode:
+            self._full_a_catalog = portable_catalog.load_portable_action_center_table()
             self._initialize_full_a_state()
         self._snapshot_ready_teacher()
         self._fullmdp_initialized = True
@@ -247,7 +252,47 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._full_a_contact_center = torch.zeros((n, 3), dtype=dtype, device=self.device)
         self._full_a_outcome_code = torch.zeros(n, dtype=torch.long, device=self.device)
+        action = self._full_a_catalog.fresh_action
+        self._full_a_action_slot = torch.full(
+            (n,), action.action_slot, dtype=torch.long, device=self.device
+        )
+        self._full_a_action_uid = torch.full(
+            (n,), action.action_uid, dtype=torch.long, device=self.device
+        )
+        self._full_a_mount_normal_sign = torch.full(
+            (n,), action.mount_normal_sign, dtype=torch.int8, device=self.device
+        )
+        self._full_a_contact_classification_status = torch.zeros(
+            n, dtype=torch.int8, device=self.device
+        )
+        self._full_a_generic_contact_event = torch.zeros_like(
+            self._full_a_physical_present
+        )
+        self._full_a_selected_contact_event = torch.zeros_like(
+            self._full_a_physical_present
+        )
+        self._full_a_opposite_contact_event = torch.zeros_like(
+            self._full_a_physical_present
+        )
+        self._full_a_edge_contact_event = torch.zeros_like(
+            self._full_a_physical_present
+        )
+        self._full_a_between_contact_event = torch.zeros_like(
+            self._full_a_physical_present
+        )
+        self._full_a_invalid_contact_event = torch.zeros_like(
+            self._full_a_physical_present
+        )
         self._clear_lifecycle(self._all_env_ids)
+
+    def _full_a_begin_control_step(self) -> None:
+        self._full_a_contact_classification_status.zero_()
+        self._full_a_generic_contact_event.zero_()
+        self._full_a_selected_contact_event.zero_()
+        self._full_a_opposite_contact_event.zero_()
+        self._full_a_edge_contact_event.zero_()
+        self._full_a_between_contact_event.zero_()
+        self._full_a_invalid_contact_event.zero_()
 
     def _full_a_reveal_rows(self, ids) -> None:
         """Publish one deterministic, live-geometry question for selected rows."""
@@ -376,9 +421,39 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         active = self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
         first_contact = active & racket_count.gt(0) & ~self._full_a_racket_contact
         center = self.sim.data.qpos[:, self.b_q : self.b_q + 3]
+        site = self.sim.data.site_xpos[:, self.racket_sid]
+        rotation = self.sim.data.site_xmat[:, self.racket_sid].reshape(
+            self.num_envs, 3, 3
+        )
+        classification = (
+            racket_contact_geometry.torch_classify_observed_generic_racket_contact(
+                observed_generic_contact=first_contact,
+                ball_center_w_m=center,
+                racket_site_position_w_m=site,
+                racket_rotation_w_from_local=rotation,
+                mount_normal_sign=self._full_a_mount_normal_sign,
+            )
+        )
         self._full_a_contact_center.copy_(
             torch.where(first_contact[:, None], center, self._full_a_contact_center)
         )
+        self._full_a_contact_classification_status.copy_(
+            torch.where(
+                first_contact,
+                classification["status"],
+                self._full_a_contact_classification_status,
+            )
+        )
+        self._full_a_generic_contact_event |= first_contact
+        self._full_a_selected_contact_event |= classification["selected"]
+        self._full_a_opposite_contact_event |= classification["opposite"]
+        self._full_a_edge_contact_event |= classification[
+            "edge_or_rim_ambiguous"
+        ]
+        self._full_a_between_contact_event |= classification[
+            "between_planes_ambiguous"
+        ]
+        self._full_a_invalid_contact_event |= classification["invalid"]
         self._full_a_racket_contact |= active & racket_count.gt(0)
         self._full_a_ball_table_contact |= active & table_count.gt(0)
 
@@ -478,8 +553,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_physical_present.copy_(active)
         self._full_a_owner_valid_bits[:, 0] = (
             active.to(self._torch.long) * portable_reward.PHYSICAL_PRESENT
+            + self._full_a_selected_contact_event.to(self._torch.long)
+            * portable_reward.PHYSICAL_SELECTED_CONTACT
         )
-        self._full_a_owner_fault_bits[:, 0] = 0
+        self._full_a_owner_fault_bits[:, 0] = (
+            self._full_a_invalid_contact_event.to(self._torch.long)
+        )
         self._full_a_physical_source_step.copy_(
             self._torch.where(
                 active,
@@ -943,6 +1022,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_ball_table_contact[ids] = False
             self._full_a_contact_center[ids] = 0.0
             self._full_a_outcome_code[ids] = FULL_A_OUTCOME_NONE
+            self._full_a_contact_classification_status[ids] = (
+                racket_contact_geometry.OBSERVED_RUBBER_STATUS_NONE
+            )
+            self._full_a_generic_contact_event[ids] = False
+            self._full_a_selected_contact_event[ids] = False
+            self._full_a_opposite_contact_event[ids] = False
+            self._full_a_edge_contact_event[ids] = False
+            self._full_a_between_contact_event[ids] = False
+            self._full_a_invalid_contact_event[ids] = False
 
     def reset(self):
         observations, extras = super().reset()
@@ -1005,8 +1093,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         """Advance the one real reveal/launch/flight/outcome vertical slice."""
 
         torch = self._torch
+        self._full_a_begin_control_step()
         reveal_event, launch_event = self._full_a_prepare_step()
-        contact_before = self._full_a_racket_contact.clone()
         incoming = actions.to(self.device)
         requested_qdes = self.q_ready.unsqueeze(0) + self.act_scale * incoming
         finite_qdes = torch.isfinite(requested_qdes)
@@ -1026,7 +1114,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         r03_present_event, r03_valid_event = self._full_a_publish_r03_fact()
         reward, reward_terms = self._fullmdp_reward20()
         shot_terminal, outcome = self._full_a_settle_outcome(st)
-        contact_event = self._full_a_racket_contact & ~contact_before
+        contact_event = self._full_a_generic_contact_event.clone()
         terminated |= shot_terminal
         dones = terminated | truncated
         selected_reset = dones & self._epoch_selected
@@ -1064,6 +1152,25 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "full_a_selected_reset_event": selected_reset,
             "full_a_racket_contact_eligible_event": launch_event,
             "full_a_racket_contact_event": contact_event,
+            "full_a_action_slot": self._full_a_action_slot.clone(),
+            "full_a_action_uid": self._full_a_action_uid.clone(),
+            "full_a_mount_normal_sign": self._full_a_mount_normal_sign.clone(),
+            "full_a_contact_classification_status": (
+                self._full_a_contact_classification_status.clone()
+            ),
+            "full_a_selected_contact_event": (
+                self._full_a_selected_contact_event.clone()
+            ),
+            "full_a_opposite_contact_event": (
+                self._full_a_opposite_contact_event.clone()
+            ),
+            "full_a_edge_contact_event": self._full_a_edge_contact_event.clone(),
+            "full_a_between_contact_event": (
+                self._full_a_between_contact_event.clone()
+            ),
+            "full_a_invalid_contact_event": (
+                self._full_a_invalid_contact_event.clone()
+            ),
             "full_a_r03_present_event": r03_present_event,
             "full_a_r03_physically_valid_event": r03_valid_event,
         }

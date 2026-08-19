@@ -1,5 +1,10 @@
 # ActionBall 单动作双后端：唯一执行 TODO
 
+> **当前执行已迁移：** 本页保留为2026-08-17到2026-08-19的详细历史账。最新依赖、阻塞、
+> A200证据与`4096 × 25000`完成条件只看
+> [`action_ball_dual_backend_longrun_todo_20260819.md`](action_ball_dual_backend_longrun_todo_20260819.md)。
+> 不再在本页追加命令流水。
+
 > 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex

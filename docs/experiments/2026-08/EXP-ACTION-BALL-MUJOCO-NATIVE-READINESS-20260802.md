@@ -11428,3 +11428,40 @@ rough地形不是逐格随机。producer继续使用固定seed的空间相关场
 `0.80 m` blend，包含一个10 cm cell guard；host性质=`14 passed`。这是确定性几何纠错，不做A/B。
 现役nominal run仍为plane；rough只在fresh namespace中按`±5/±10/±20 mm`独立阶段验证2-env foot/table
 几何与4096吞吐，不把shared clone pattern说成per-env curriculum。
+
+### 2026-08-19：A200窗口与portable Reward10纵切片
+
+**A200方法。** 只消费active Isaac WAL最早200个完整、严格交替的`PENDING(v2)/EPOCH_ACK(v2)`
+pair；忽略未完成尾片，不用console rolling平均代签。每个scope对counter/sum/sum_sq求和，对residual和
+tolerance取max，gauge取窗口首尾。结果累计`19,660,800` transitions，actual Reward sample全部finite、
+nonfinite=`0`、conservation violation=`0`，actual sum=`1,090,246.0043500704`，每transition=
+`0.0554527793553706`。completed episode=`233,267`，mean length=`84.03598`、mean return=`4.65837`；
+tilt=`232,058`、robot-table=`1,209`，其余termination为0。
+
+D05 due/selected=`237,221`，construction/key admitted=`208,796`，这些全部not-ready defer；另
+reject=`28,425`，ACCEPT/CENSOR=`0`。没有completed shot、R03、physical launch/contact、R06、R07、
+payment或retire。Reward0--13的eligible/nonzero都为0，只有dense motion Reward14--19出值。
+100--199窗口Reward/transition=`0.0528580`，episode mean length/return=`79.7261/4.23285`，均低于
+0--99约`0.0580476/89.15/5.163`。因此采用“保持active长跑，平行修ready producer”，拒绝“停止到1000”、
+“继续增加短smoke”与“零分母时调稀疏Reward”。
+
+**动作身份纠正。** 冷catalog有73行，但current fresh cadence固定slot0，genesis与每次Device-R05也写
+slot0，selected reset只回同一clip frame0；legacy balanced sampler不在fresh调用链。WAL进一步只出现
+slot0、UID `6907688916670928`、forehand机会，unknown仅来自reject。因而本代的backhand denominator=
+`0/未测`，不能拿bank的59/14 family分布冒充训练覆盖。
+
+**portable实现。** 新portable catalog复用同一manifest与73个motion byte pin，冷算与Isaac同式的击球帧
+site position/quaternion/angular velocity、中心差分site velocity、raw normal、reach和base quaternion，
+并把slot0 UID/mount sign安装到MuJoCo per-env state。observed selected-rubber kernel只接受backend已观察的generic contact edge，
+同substep用`R^T(ball-site)`分类selected/opposite/edge/between/invalid；strict tangential radius、red/black
+outer plane和invalid rotation/sign都由shared racket geometry决定。MuJoCo只将selected分类作为一次
+Physical event写Reward10，不把persistent contact latch反复付款。host组合=`38 passed,9 skipped`；
+Isaac catalog/cadence/timing=`47 passed,24 skipped`。另用真实`MotionLoader + RacketTargetCommand`
+生产冷builder对全73条motion逐列比对portable FK，所在文件=`12 passed,3 skipped`；这避免固定数值自证，
+但仍不是GPU运行证据。
+
+**裁决。** 这关闭了action0 identity和Reward10 host计算图，不关闭portable Full-A。当前临时midpoint
+question、selected motion teacher、R06、R07和Reward11--13仍缺，fresh GPU contact/reset节点仍skip。
+下一依赖顺序固定为`catalog -> action-conditioned question/teacher -> observed contact GPU -> R06/R07 ->
+4096×25000`。直到这些真实调用点闭合，runner必须继续写`full_a_slice_attempted`与
+`full_a_complete=false`。

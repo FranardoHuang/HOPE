@@ -7,13 +7,14 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 live contact array、bounded flight terminal与selected reset。runner只累计真实extras，receipt诚实写
 `task_lifecycle=full_a_slice_attempted`和`full_a_complete=false`。当前host纵切片还从同一postphysics
 racket site发布真实R03 achieved position/velocity/normal，并由engine-neutral kernel计算Reward项0--9；
-R06 landing outcome、R07 recovery、selected-rubber contact与Reward10--13仍为`not_produced`，因此它不是
-portable MuJoCo A完成证据。MuJoCo host组合为`28 passed,9 skipped`；新增opt-in节点不伪造contact bool，而是从production racket geom与live
+当前host路径又在真实generic contact edge的同一physics substep完成selected-rubber分类与一次性Reward10，
+但fresh GPU节点仍未执行，R06 landing outcome、R07 recovery与Reward11--13仍为`not_produced`，因此它不是
+portable MuJoCo A完成证据。当前MuJoCo host组合为`38 passed,9 skipped`；新增opt-in节点不伪造contact bool，而是从production racket geom与live
 MuJoCo contact rows证明ball-racket pair，再穿真实`env.step`验证contact latch。首次Pod节点使用mesh
 geom frame原点作为碰撞体内部点而失败；诊断证明该原点不在mesh体积内，而production measured-racket
 site会产生exact pair。测试改用这个独立live site后，clean Git `2c8ef444…`在Pod1 GPU1/NUMA3得到
-`1 passed`。这只关闭generic racket-contact调用点，不证明selected-rubber；R03/Reward0--9仍待fresh GPU，
-R06/R07/Reward10--13仍缺失。更不能用host或native
+`1 passed`。这条历史收据只关闭generic racket-contact调用点；新selected-rubber/Reward10路径仍需另一个fresh GPU收据，
+R03/Reward0--10也未由host代签GPU，R06/R07/Reward11--13仍缺失。更不能用host或native
 114/114-D A1000代签本Gate。
 
 **2026-08-18 dual MuJoCo lanes（Gate 仍 `Partial`）：**portable lane已完成真实MuJoCo-Warp WAIT
@@ -2016,3 +2017,36 @@ recovery及Reward项10--13；R03/Reward0--9还缺fresh GPU调用证据。因此p
 `HOLD`。native 114/114-D A1000的吞吐与contact提升只能作为工程/Reward经济参考，不能代签
 229/399-D portable语义。该缺口不阻塞Isaac 4096 A长跑；Isaac运行期间继续接producer，但不得热补
 活跃Isaac源码或把partial receipt改名为Full-A成功。G06保持`Partial`。
+
+### 2026-08-19 action0 identity与observed selected-rubber Reward10
+
+fresh Isaac FullMDP运行态已经核为固定action slot0：73行manifest/motion bank只作冷身份与reference，
+fresh cadence、genesis、Device-R05和selected reset不消费legacy balanced sampler。为避免MuJoCo另造动作，
+新增dependency-light portable catalog作为唯一manifest pin、center-column与冷FK reference source；既有9字段catalog dataclass
+ABI保持不变，commands和timing owner只re-export同一真源。MuJoCo Full-A state固定绑定同一个slot0、UID
+`6907688916670928`和manifest mount sign；没有round-robin或`env_id % 73`。
+
+generic contact仍由MuJoCo live contact rows产生。第一次contact edge出现的同一physics substep立即读取
+ball center、racket site position和site rotation，再用engine-neutral Torch kernel区分selected、opposite、
+edge/rim、between-planes和invalid。分类kernel绝不由距离制造contact；strict safe-radius与outer-plane
+边界沿用shared racket geometry。只有selected分类发布一个control-step事件脉冲并写
+`PHYSICAL_SELECTED_CONTACT`，所以Reward10只支付一次；held contact不会持续付钱，invalid只写owner fault。
+
+host复现命令：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_portable_catalog.py \
+  hope_training/whole_body_tracking/tests/test_mujoco_selected_rubber_classifier.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_gpu_ac_full_mdp_initial_wait_env.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_gpu_ac_full_mdp_wait_transition.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_gpu_ac_full_mdp_wait_rsl3.py \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_gpu_ac_table_keepout.py
+```
+
+结果=`38 passed, 9 skipped`。Isaac catalog/cadence/timing回归为`47 passed, 24 skipped`；另外真实
+`MotionLoader + RacketTargetCommand`冷builder对73条motion逐列对拍的整文件回归为`12 passed, 3 skipped`。
+skip均是
+需要Isaac或MuJoCo-Warp GPU的节点，不能算live证据。动作条件化question/selected teacher、R06/R07、
+Reward11--13、per-action/per-side分母和fresh GPU真实contact/reset仍未闭，因此runner继续固定
+`full_a_complete=false`，G06保持`Partial`，portable长跑继续HOLD。

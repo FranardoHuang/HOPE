@@ -1,5 +1,19 @@
 # 简短进度记录
 
+## 2026-08-19 — A200仍零business分母；MuJoCo接入action0 identity与selected Reward10
+
+- active Isaac `4096×25000`同一进程到A200：`19,660,800`个Reward sample全finite且守恒；
+  `237,221`次D05 selected中`208,796`次not-ready、`28,425`次reject、ACCEPT/CENSOR=`0`，
+  R03/launch/contact/R06/R07仍全0。100--199窗口dense Reward、episode return和length低于前100，
+  但没有严格更强successor，run继续500/1000/.../25000，不因1000停车。
+- fresh cadence已核为action slot0：73行catalog只是冷reference bank，legacy balanced sampler不参与当前run。
+  新engine-neutral catalog消除commands/timing重复pins；portable MuJoCo绑定同一slot0 UID与mount sign。
+- portable冷FK已用真实Isaac `MotionLoader + RacketTargetCommand`对73条motion逐列对拍；不是固定常量自证。
+- MuJoCo只在真实generic racket-contact edge的同一physics substep分类selected/opposite/edge/between/invalid，
+  selected只发布单control-step事件并驱动Reward10。host聚焦回归通过；fresh GPU、动作条件化question/teacher、
+  R06/R07和Reward11--13仍未测，因此portable长跑继续HOLD。当前执行账见
+  [简洁TODO](operations/action_ball_dual_backend_longrun_todo_20260819.md)。
+
 ## 2026-08-19 — Isaac 4096×25000到A100；MuJoCo R03与rough修正并行推进
 
 - fresh Isaac commit `b64cb944…`在同一`4096 env × 25000 update`进程自然到A100：9,830,400个Reward

@@ -244,6 +244,11 @@ def main(
         "selected_reset_rows": "full_a_selected_reset_event",
         "racket_contact_eligible_rows": "full_a_racket_contact_eligible_event",
         "racket_contact_rows": "full_a_racket_contact_event",
+        "selected_contact_rows": "full_a_selected_contact_event",
+        "opposite_contact_rows": "full_a_opposite_contact_event",
+        "edge_contact_rows": "full_a_edge_contact_event",
+        "between_contact_rows": "full_a_between_contact_event",
+        "invalid_contact_rows": "full_a_invalid_contact_event",
         "r03_present_rows": "full_a_r03_present_event",
         "r03_physically_valid_rows": "full_a_r03_physically_valid_event",
     }
@@ -324,6 +329,15 @@ def main(
             if valid_steps != evidence_step_count
         )
         eligible = counts["racket_contact_eligible_rows"]
+        classified = sum(
+            counts[name]
+            for name in (
+                "selected_contact_rows",
+                "opposite_contact_rows",
+                "edge_contact_rows",
+                "between_contact_rows",
+            )
+        )
         payload.update(
             {
                 "full_a_complete": False,
@@ -334,13 +348,18 @@ def main(
                         if eligible > 0
                         else None
                     ),
+                    "selected_contact_rate": (
+                        counts["selected_contact_rows"] / classified
+                        if classified > 0
+                        else None
+                    ),
+                    "selected_rubber_classified_rows": classified,
                     "unmeasured": unmeasured,
                 },
                 "not_produced": {
-                    "selected_rubber_contact": True,
                     "r06_landing_outcome": True,
                     "r07_recovery": True,
-                    "reward_terms_10_13": True,
+                    "reward_terms_11_13": True,
                 },
             }
         )

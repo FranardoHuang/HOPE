@@ -8,6 +8,7 @@ import numpy as np
 import os
 import stat
 import struct
+import sys
 import torch
 from collections.abc import Sequence
 from dataclasses import MISSING, dataclass, fields
@@ -55,6 +56,42 @@ from whole_body_tracking.tasks.tracking.mdp.planner_revision import (
     PLANNER_TASK_REVISION_SCHEMA_VERSION,
     PhaseGovernorProfile,
 )
+try:
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_full_mdp_portable_catalog as _FULL_MDP_PORTABLE_CATALOG,
+    )
+except ImportError:  # Dependency-light spec-loaded command tests.
+    import importlib.util as _importlib_util
+
+    _portable_name = "_action_ball_full_mdp_portable_catalog_for_commands"
+    _FULL_MDP_PORTABLE_CATALOG = sys.modules.get(_portable_name)
+    if _FULL_MDP_PORTABLE_CATALOG is None:
+        _portable_spec = _importlib_util.spec_from_file_location(
+            _portable_name,
+            Path(__file__).resolve().with_name(
+                "action_ball_full_mdp_portable_catalog.py"
+            ),
+        )
+        if _portable_spec is None or _portable_spec.loader is None:
+            raise ImportError("cannot load the portable FullMDP catalog")
+        _FULL_MDP_PORTABLE_CATALOG = _importlib_util.module_from_spec(
+            _portable_spec
+        )
+        sys.modules[_portable_name] = _FULL_MDP_PORTABLE_CATALOG
+        _portable_spec.loader.exec_module(_FULL_MDP_PORTABLE_CATALOG)
+
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = (
+    _FULL_MDP_PORTABLE_CATALOG.ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
+)
+ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND = (
+    _FULL_MDP_PORTABLE_CATALOG.ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND
+)
+ActionBallFullMdpDiagnosticCatalogTable = (
+    _FULL_MDP_PORTABLE_CATALOG.ActionBallFullMdpDiagnosticCatalogTable
+)
+load_action_ball_full_mdp_diagnostic_catalog_table = (
+    _FULL_MDP_PORTABLE_CATALOG.load_action_ball_full_mdp_diagnostic_catalog_table
+)
 
 try:
     import action_ball_full_mdp_row_identity as _ACTION_BALL_ROW_IDENTITY
@@ -89,35 +126,9 @@ _TRAINING_CONTRACT_RUNTIME_MODULE = None
 _ACTION_BALL_RUNTIME_MODULE = None
 
 
-ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_KIND = (
-    "action_ball_full_mdp_code_owned_diagnostic_catalog_v1"
-)
-ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT = 73
-
 ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE = 0
 ACTION_BALL_CONTINUOUS_MOTION_CLOSE_PLAYED_SUFFIX = 1
 ACTION_BALL_CONTINUOUS_MOTION_CLOSE_UNPLAYED = 2
-
-
-@dataclass(frozen=True)
-class ActionBallFullMdpDiagnosticCatalogTable:
-    """Cold metadata table for the one disposable full-MDP catalog.
-
-    This is neither a receipt nor motion admission.  It only keeps the exact
-    fields that the existing Motion/Racket constructors consume in one order.
-    The live Motion constructor still snapshots and adopts the NPZ bytes, and
-    formal launch remains unavailable.
-    """
-
-    manifest_file_sha256: str
-    manifest_canonical_sha256: str
-    action_order: tuple[str, ...]
-    action_uids: tuple[int, ...]
-    motion_files: tuple[str, ...]
-    motion_sha256: tuple[str, ...]
-    clip_family_per_clip: tuple[str, ...]
-    strike_phase_per_clip: tuple[float, ...]
-    mount_normal_sign_per_clip: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -147,98 +158,6 @@ class ActionBallFullMdpCompletedActionFrame0Reference:
     station_anchor_xy_m: torch.Tensor
     validity: torch.Tensor
     producer_fault_bits: torch.Tensor
-
-
-def load_action_ball_full_mdp_diagnostic_catalog_table(
-) -> ActionBallFullMdpDiagnosticCatalogTable:
-    """Re-read the code-pinned v4 catalog and all 73 motion bytes.
-
-    The manifest provides diagnostic source membership only.  In particular,
-    this function never asks the metadata-only manifest schema for formal
-    admission and does not load the retired five-row prototype as a runtime
-    action table.
-    """
-
-    import action_ball_full_mdp_diagnostic_action_timing as _timing
-    from whole_body_tracking.tasks.tracking.mdp import (
-        action_ball_manifest as _manifest,
-    )
-
-    repo_root = Path(__file__).resolve().parents[8]
-    manifest_path = (
-        repo_root / _timing.PINNED_DIAGNOSTIC_MANIFEST_RELATIVE_PATH
-    ).resolve()
-    try:
-        manifest_path.relative_to(repo_root)
-        loaded = _manifest.load_action_ball_manifest(
-            manifest_path,
-            expected_sha256=(
-                _timing.PINNED_DIAGNOSTIC_MANIFEST_FILE_SHA256
-            ),
-            verify_referenced_assets=False,
-            require_formal_admission=False,
-        )
-    except Exception as exc:
-        raise ValueError(
-            "code-owned full-MDP diagnostic catalog is absent or changed"
-        ) from exc
-    if (
-        loaded.canonical_sha256
-        != _timing.PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256
-        or loaded.manifest.schema_version != _manifest.SCHEMA_VERSION
-    ):
-        raise ValueError(
-            "code-owned full-MDP diagnostic catalog schema/content changed"
-        )
-
-    actions = loaded.manifest.actions
-    action_order = tuple(loaded.manifest.action_order)
-    if (
-        len(actions) != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
-        or len(action_order)
-        != ACTION_BALL_FULL_MDP_DIAGNOSTIC_CATALOG_ACTION_COUNT
-        or action_order != tuple(action.action_id for action in actions)
-    ):
-        raise ValueError(
-            "code-owned full-MDP diagnostic catalog is not the exact 73-row order"
-        )
-
-    motion_files: list[str] = []
-    motion_sha256: list[str] = []
-    for slot, action in enumerate(actions):
-        candidate = repo_root.joinpath(*Path(action.motion_path).parts)
-        try:
-            resolved = candidate.resolve(strict=True)
-            resolved.relative_to(repo_root)
-            mode = resolved.stat().st_mode
-            payload = resolved.read_bytes()
-        except (OSError, RuntimeError, ValueError) as exc:
-            raise ValueError(
-                f"diagnostic catalog motion[{slot}] is absent or escapes the repository"
-            ) from exc
-        digest = hashlib.sha256(payload).hexdigest()
-        if not stat.S_ISREG(mode) or digest != action.motion_sha256:
-            raise ValueError(
-                f"diagnostic catalog motion[{slot}] bytes differ"
-            )
-        motion_files.append(str(resolved))
-        motion_sha256.append(digest)
-
-    return ActionBallFullMdpDiagnosticCatalogTable(
-        manifest_file_sha256=loaded.file_sha256,
-        manifest_canonical_sha256=loaded.canonical_sha256,
-        action_order=action_order,
-        action_uids=tuple(int(action.action_uid) for action in actions),
-        motion_files=tuple(motion_files),
-        motion_sha256=tuple(motion_sha256),
-        clip_family_per_clip=tuple(action.family for action in actions),
-        strike_phase_per_clip=tuple(
-            float(action.strike_phase) for action in actions
-        ),
-        mount_normal_sign_per_clip=tuple(
-            float(action.mount_normal_sign) for action in actions
-        ),
-    )
 
 
 def require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(

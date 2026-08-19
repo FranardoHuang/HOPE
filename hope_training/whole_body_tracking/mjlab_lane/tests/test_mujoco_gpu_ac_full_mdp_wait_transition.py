@@ -517,6 +517,13 @@ def _host_full_a_lifecycle_env():
             ball_dead_x_lo_hope=-1.2,
             ball_dead_x_hi_hope=3.4,
         ),
+        _full_a_catalog=SimpleNamespace(
+            fresh_action=SimpleNamespace(
+                action_slot=0,
+                action_uid=6907688916670928,
+                mount_normal_sign=1,
+            )
+        ),
     )
     env._clear_lifecycle = MethodType(
         wait_env.FullMdpInitialWaitVecEnv._clear_lifecycle, env
@@ -623,6 +630,13 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
             "_full_a_ball_table_contact",
             "_full_a_contact_center",
             "_full_a_outcome_code",
+            "_full_a_contact_classification_status",
+            "_full_a_generic_contact_event",
+            "_full_a_selected_contact_event",
+            "_full_a_opposite_contact_event",
+            "_full_a_edge_contact_event",
+            "_full_a_between_contact_event",
+            "_full_a_invalid_contact_event",
         )
     }
     env._clear_lifecycle(torch.tensor([0]))
@@ -752,6 +766,68 @@ def test_portable_reward14_uses_independent_r03_error_and_live_contact_bits():
     assert torch.count_nonzero(terms[:, 11:14]) == 0
 
 
+def test_host_live_generic_contact_classifies_selected_and_opposite_once():
+    env = _host_full_a_lifecycle_env()
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env.common_step_counter = 1
+    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
+    env._con_geom = torch.tensor([[2, 1], [2, 1]], dtype=torch.long)
+    env._con_idx = torch.arange(2)
+    env._nacon = torch.tensor([2], dtype=torch.long)
+    env._con_world = torch.tensor([0, 1], dtype=torch.long)
+    env._ball_gid = 2
+    env._geom_class = torch.tensor([0, 1, 0], dtype=torch.int8)
+    center_x, center_z = wait_env.racket_contact_geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M
+    env.sim.data.qpos[0, env.b_q : env.b_q + 3] = (
+        env.sim.data.site_xpos[0, 0]
+        + torch.tensor([center_x, 0.020, center_z])
+    )
+    env.sim.data.qpos[1, env.b_q : env.b_q + 3] = (
+        env.sim.data.site_xpos[1, 0]
+        + torch.tensor([center_x, -0.033208, center_z])
+    )
+    wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
+
+    assert torch.equal(env._full_a_generic_contact_event, torch.tensor([True, True]))
+    assert torch.equal(env._full_a_selected_contact_event, torch.tensor([True, False]))
+    assert torch.equal(env._full_a_opposite_contact_event, torch.tensor([False, True]))
+    assert torch.equal(
+        env._full_a_contact_classification_status,
+        torch.tensor(
+            [
+                wait_env.racket_contact_geometry.OBSERVED_RUBBER_STATUS_SELECTED,
+                wait_env.racket_contact_geometry.OBSERVED_RUBBER_STATUS_OPPOSITE,
+            ],
+            dtype=torch.int8,
+        ),
+    )
+    assert torch.equal(
+        env._full_a_owner_valid_bits[:, 0],
+        torch.tensor(
+            [
+                wait_env.portable_reward.PHYSICAL_PRESENT
+                | wait_env.portable_reward.PHYSICAL_SELECTED_CONTACT,
+                wait_env.portable_reward.PHYSICAL_PRESENT,
+            ]
+        ),
+    )
+    terms = wait_env.portable_reward.lifecycle_reward14(
+        valid_bits=env._full_a_owner_valid_bits,
+        fact_f32=env._full_a_owner_fact_f32,
+        owner_fault_bits=env._full_a_owner_fault_bits,
+        step_dt=env.step_dt,
+    )
+    assert terms[0, 10] == env.step_dt
+    assert terms[1, 10] == 0.0
+
+    wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step(env)
+    wait_env.FullMdpInitialWaitVecEnv._full_a_latch_ball_contacts(env)
+    assert not bool(env._full_a_generic_contact_event.any())
+    assert not bool(env._full_a_selected_contact_event.any())
+
+
 def _assert_step_surface(result, *, num_envs: int):
     observations, reward, dones, extras = result
     assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V1)
@@ -807,13 +883,25 @@ def _assert_full_a_step_surface(result, *, num_envs: int):
         "full_a_selected_reset_event",
         "full_a_racket_contact_eligible_event",
         "full_a_racket_contact_event",
+        "full_a_action_slot",
+        "full_a_action_uid",
+        "full_a_mount_normal_sign",
+        "full_a_contact_classification_status",
+        "full_a_selected_contact_event",
+        "full_a_opposite_contact_event",
+        "full_a_edge_contact_event",
+        "full_a_between_contact_event",
+        "full_a_invalid_contact_event",
         "full_a_r03_present_event",
         "full_a_r03_physically_valid_event",
     }
     assert torch.isfinite(observations["policy"]).all()
     assert torch.isfinite(observations["critic"]).all()
     assert torch.isfinite(reward).all()
-    assert torch.count_nonzero(extras["reward_terms"][:, 10:14]) == 0
+    assert torch.count_nonzero(extras["reward_terms"][:, 11:14]) == 0
+    assert torch.equal(extras["full_a_action_slot"], torch.zeros(num_envs, dtype=torch.long, device=extras["full_a_action_slot"].device))
+    assert torch.equal(extras["full_a_action_uid"], torch.full((num_envs,), 6907688916670928, dtype=torch.long, device=extras["full_a_action_uid"].device))
+    assert torch.equal(extras["full_a_mount_normal_sign"], torch.ones(num_envs, dtype=torch.int8, device=extras["full_a_mount_normal_sign"].device))
     assert torch.allclose(reward, extras["reward_terms"].sum(dim=1))
     return observations, reward, dones, extras
 
@@ -1037,7 +1125,7 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
     not RUN_GPU_DIRECT,
     reason="requires the exact MuJoCo-Warp GPU environment and A3 assets",
 )
-def test_real_full_a_n1_launch_reports_only_live_generic_racket_contact():
+def test_real_full_a_n1_launch_reports_live_selected_rubber_contact():
     env = _gpu_env(num_envs=1, full_a_mode=True)
     try:
         zero = torch.zeros((1, 31), device=env.device)
@@ -1055,7 +1143,18 @@ def test_real_full_a_n1_launch_reports_only_live_generic_racket_contact():
         # collision volume.  The production measured-racket site is the
         # authoritative live blade point and is independently resolved from
         # the actual model; placing the ball there must create a real pair.
-        racket_center = env.sim.data.site_xpos[0, env.racket_sid].clone()
+        site = env.sim.data.site_xpos[0, env.racket_sid].clone()
+        rotation = env.sim.data.site_xmat[0, env.racket_sid].reshape(3, 3)
+        local_selected_center = torch.tensor(
+            [
+                wait_env.racket_contact_geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M[0],
+                0.020,
+                wait_env.racket_contact_geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M[1],
+            ],
+            dtype=site.dtype,
+            device=site.device,
+        )
+        racket_center = site + rotation @ local_selected_center
         env._full_a_launch_state_f32[0, :3] = racket_center
         env._full_a_launch_state_f32[0, 3:7] = torch.tensor(
             [1.0, 0.0, 0.0, 0.0], device=env.device
@@ -1087,6 +1186,12 @@ def test_real_full_a_n1_launch_reports_only_live_generic_racket_contact():
         assert not bool(dones[0])
         assert bool(contact["full_a_racket_contact_eligible_event"][0])
         assert bool(contact["full_a_racket_contact_event"][0])
+        assert bool(contact["full_a_selected_contact_event"][0])
+        assert not bool(contact["full_a_opposite_contact_event"][0])
+        assert contact["full_a_contact_classification_status"][0] == (
+            wait_env.racket_contact_geometry.OBSERVED_RUBBER_STATUS_SELECTED
+        )
+        assert contact["reward_terms"][0, 10] == pytest.approx(env.step_dt)
         assert bool(contact["full_a_racket_contact"][0])
         assert torch.count_nonzero(env._full_a_physical_fact_f32[0, 3:6]) > 0
         assert torch.equal(

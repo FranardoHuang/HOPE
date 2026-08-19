@@ -6300,3 +6300,27 @@ asset-hash pins重建实际USD，因此pathname相等是错对象gate。窄修�
 non-symlink snapshot root，并让live collider geometry从同一已验root重建；不读取wrapper receipt、不接受调用方
 expected hash，也不放宽任何source/model语义。host asset/factory回归=`77 passed,37 skipped`；fresh Pod未跑，
 G05继续`Partial`。
+
+### 2026-08-19 A200：工程长跑通过，击球业务入口仍为零
+
+active `4096 env × 25000 update` A run的前200个完整`PENDING/EPOCH_ACK` pair已经独立消费；
+`1000`继续只是早期趋势节点，不是终点。累计`19,660,800` transitions全部finite，Reward守恒
+violation=`0`；completed episode=`233,267`，其中tilt=`232,058`、robot-table=`1,209`，mean
+length=`84.03598`、mean return=`4.65837`。D05 due/selected=`237,221`，其中not-ready defer=
+`208,796`、reject=`28,425`，ACCEPT/CENSOR=`0`；R03、launch、generic/selected contact、R06、R07、
+payment和retire全部0。
+
+100--199窗口的Reward/transition约`0.0528580`，低于0--99约`0.0580476`；episode length和return
+也从约`89.15/5.163`降到`79.73/4.233`。这只说明dense imitation早期趋势变差；Reward0--13没有
+eligible样本，不能据此调其权重或声称击球策略退化。WAL的opportunity只出现action slot0、UID
+`6907688916670928`、forehand；73行catalog是冷reference bank，不是训练覆盖。run继续
+500/1000/2500/5000/10000/25000；当前没有已通过真实业务调用点、能严格支配它的successor，故不stop。
+
+可复现的字段、分母和切换条件集中在
+[`action_ball_dual_backend_longrun_todo_20260819.md`](../operations/action_ball_dual_backend_longrun_todo_20260819.md)。
+G05仍为`Partial`：工程scale与证据链成立，business-callpoint与学习效果未成立。
+
+同日portable冷FK不再只靠action0固定数值自证：测试用真实Isaac `MotionLoader`拼接73条sealed motion，
+再调用production `RacketTargetCommand`冷builder，与dependency-light portable实现对quat、角速度、中心差分
+site速度、raw normal、reach、site位置和base quat逐列比较。该整文件回归=`12 passed,3 skipped`；
+它关闭cold reference同义性，不授权active run、GPU contact或question producer。

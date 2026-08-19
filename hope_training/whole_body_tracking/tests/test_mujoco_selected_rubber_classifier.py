@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import torch
 
 
 WBT_ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,155 @@ def test_edge_rim_and_between_planes_fail_ambiguous():
     assert edge["selected_rubber"] is None
     assert between["status"] == classifier.STATUS_BETWEEN_PLANES_AMBIGUOUS
     assert between["selected_rubber"] is None
+
+
+def test_portable_torch_classifier_matches_native_boundary_semantics():
+    geometry = classifier._geometry_module()
+    center_x, center_z = geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M
+    radius = geometry.SAFE_BALL_CENTER_TANGENTIAL_RADIUS_M
+    red_y = geometry.RED_OUTER_Y_FROM_SITE_M
+    black_y = geometry.BLACK_OUTER_Y_FROM_SITE_M
+    radius_inside = np.nextafter(radius, -np.inf)
+    radius_outside = np.nextafter(radius, np.inf)
+    red_outside = np.nextafter(red_y, np.inf)
+    black_outside = np.nextafter(black_y, -np.inf)
+    rows = torch.tensor(
+        [
+            [center_x, 0.020, center_z],
+            [center_x, -0.033208, center_z],
+            [center_x + radius, 0.020, center_z],
+            [center_x + radius_inside, 0.020, center_z],
+            [center_x + radius_outside, 0.020, center_z],
+            [center_x, red_y, center_z],
+            [center_x, red_outside, center_z],
+            [center_x, black_y, center_z],
+            [center_x, black_outside, center_z],
+            [center_x, 0.020, center_z],
+        ],
+        dtype=torch.float64,
+    )
+    observed = torch.tensor(
+        [True, True, True, True, True, True, True, True, True, False]
+    )
+    result = geometry.torch_classify_observed_generic_racket_contact(
+        observed_generic_contact=observed,
+        ball_center_w_m=rows,
+        racket_site_position_w_m=torch.zeros_like(rows),
+        racket_rotation_w_from_local=torch.eye(3, dtype=torch.float64).repeat(10, 1, 1),
+        mount_normal_sign=torch.ones(10, dtype=torch.int8),
+    )
+    assert torch.equal(
+        result["status"],
+        torch.tensor(
+            [
+                geometry.OBSERVED_RUBBER_STATUS_SELECTED,
+                geometry.OBSERVED_RUBBER_STATUS_OPPOSITE,
+                geometry.OBSERVED_RUBBER_STATUS_EDGE_RIM_AMBIGUOUS,
+                geometry.OBSERVED_RUBBER_STATUS_SELECTED,
+                geometry.OBSERVED_RUBBER_STATUS_EDGE_RIM_AMBIGUOUS,
+                geometry.OBSERVED_RUBBER_STATUS_BETWEEN_PLANES_AMBIGUOUS,
+                geometry.OBSERVED_RUBBER_STATUS_SELECTED,
+                geometry.OBSERVED_RUBBER_STATUS_BETWEEN_PLANES_AMBIGUOUS,
+                geometry.OBSERVED_RUBBER_STATUS_OPPOSITE,
+                geometry.OBSERVED_RUBBER_STATUS_NONE,
+            ],
+            dtype=torch.int8,
+        ),
+    )
+    assert torch.equal(
+        result["selected"],
+        torch.tensor([1, 0, 0, 1, 0, 0, 1, 0, 0, 0], dtype=torch.bool),
+    )
+    assert torch.equal(
+        result["opposite"],
+        torch.tensor([0, 1, 0, 0, 0, 0, 0, 0, 1, 0], dtype=torch.bool),
+    )
+
+    binding = _binding()
+    lineage = _lineage(binding)
+    angle = 0.73
+    rotation = np.asarray(
+        [
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    site = np.asarray((1.2, -0.4, 0.8), dtype=np.float64)
+    local_rows = np.asarray(
+        [
+            [center_x, 0.020, center_z],
+            [center_x, -0.033208, center_z],
+            [center_x + radius, 0.020, center_z],
+            [center_x, -0.006, center_z],
+        ],
+        dtype=np.float64,
+    )
+    world_rows = site + local_rows @ rotation.T
+    portable = geometry.torch_classify_observed_generic_racket_contact(
+        observed_generic_contact=torch.ones(4, dtype=torch.bool),
+        ball_center_w_m=torch.tensor(world_rows, dtype=torch.float64),
+        racket_site_position_w_m=torch.tensor(
+            np.repeat(site[None], 4, axis=0), dtype=torch.float64
+        ),
+        racket_rotation_w_from_local=torch.tensor(
+            np.repeat(rotation[None], 4, axis=0), dtype=torch.float64
+        ),
+        mount_normal_sign=torch.ones(4, dtype=torch.int8),
+    )
+    native_to_portable = {
+        classifier.STATUS_SELECTED: geometry.OBSERVED_RUBBER_STATUS_SELECTED,
+        classifier.STATUS_OPPOSITE: geometry.OBSERVED_RUBBER_STATUS_OPPOSITE,
+        classifier.STATUS_EDGE_RIM_AMBIGUOUS: (
+            geometry.OBSERVED_RUBBER_STATUS_EDGE_RIM_AMBIGUOUS
+        ),
+        classifier.STATUS_BETWEEN_PLANES_AMBIGUOUS: (
+            geometry.OBSERVED_RUBBER_STATUS_BETWEEN_PLANES_AMBIGUOUS
+        ),
+    }
+    native_status = []
+    for world in world_rows:
+        classified = classifier.classify_observed_generic_blade_contact(
+            ball_center_w_m=world,
+            racket_site_position_w_m=site,
+            racket_rotation_w_from_local=rotation,
+            action_lineage=lineage,
+            classifier_binding=binding,
+            policy_tick=4,
+            physics_substep=2,
+        )
+        native_status.append(native_to_portable[classified["status"]])
+    assert portable["status"].tolist() == native_status
+
+
+def test_portable_torch_classifier_never_turns_invalid_or_no_contact_into_selected():
+    geometry = classifier._geometry_module()
+    center_x, center_z = geometry.FACE_AREA_CENTER_XZ_FROM_SITE_M
+    ball = torch.tensor(
+        [[center_x, 0.020, center_z]] * 4, dtype=torch.float32
+    )
+    rotation = torch.eye(3, dtype=torch.float32).repeat(4, 1, 1)
+    rotation[1, 0, 0] = -1.0
+    rotation[2, 0, 1] = 0.25
+    ball[3, 0] = float("nan")
+    result = geometry.torch_classify_observed_generic_racket_contact(
+        observed_generic_contact=torch.tensor([False, True, True, True]),
+        ball_center_w_m=ball,
+        racket_site_position_w_m=torch.zeros_like(ball),
+        racket_rotation_w_from_local=rotation,
+        mount_normal_sign=torch.tensor([1, 1, 1, 0], dtype=torch.int8),
+    )
+    assert not bool(result["selected"].any())
+    assert result["status"][0] == geometry.OBSERVED_RUBBER_STATUS_NONE
+    assert torch.equal(
+        result["status"][1:],
+        torch.full(
+            (3,), geometry.OBSERVED_RUBBER_STATUS_INVALID_INPUT, dtype=torch.int8
+        ),
+    )
+    assert torch.isfinite(result["ball_center_local_m"]).all()
+    assert torch.isfinite(result["tangential_distance_m"]).all()
 
 
 def test_immutable_question_binds_action_mount_scene_and_backend(tmp_path):

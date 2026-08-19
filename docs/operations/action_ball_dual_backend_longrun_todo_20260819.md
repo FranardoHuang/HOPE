@@ -1,0 +1,124 @@
+# ActionBall 双后端长跑：当前执行 TODO
+
+> 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`
+> 人类负责人：Franco
+> 执行者：Codex
+> 更新：2026-08-19
+>
+> `origin/main:docs/NOW.md` 仍是全项目唯一优先级权威。本页只记录当前分支这条
+> FullMDP 单动作双后端路线的依赖、证据、阻塞和完成条件，不建立影子队列。
+
+## 1. 训练目标与口径
+
+- 长跑目标是**同一进程 `4096 env × 25000 PPO update`**；`1000 update`只是早期趋势里程碑，
+  不是终点，也不为它重启或停止。
+- 当前代严格使用 `action_slot=0`。manifest与motion bank仍冷加载并校验73行，但fresh Isaac cadence、
+  genesis、Device-R05和selected reset都保持slot 0；这不是73动作训练。
+- A完成工程和科学判读后再跑C。portable MuJoCo只有消费同一MDP语义、真实事件和同一action identity后，
+  才能称Full-A/Full-C。
+- 全部运行都是[`diagnostic_unauthorized`](../DEFINITIONS.md)：不授权promotion、export、deployment、
+  真机或物理安全结论。
+
+## 2. 不做什么
+
+- 不热补active run、不signal/kill、不复用namespace、不用新磁盘代码解释旧进程。
+- 不再累计小N或短update smoke；最小测试只用于能区分实现的确定性反例。
+- 不用fixture/self-SHA/同writer sidecar/无人消费的counter代签真实调用点。
+- 不把generic racket contact叫selected-rubber，不把距离或sweep推断叫observed contact。
+- 不在eligible denominator为0时调Reward0--13，也不把dense imitation均值称击球学习。
+- 不把native 114/114-D MuJoCo吞吐或WAIT `learn(1)`冒充229/399-D portable FullMDP。
+
+## 3. 当前运行真相
+
+### Isaac A：正在运行
+
+- 目标：`4096 × 25000`，fresh immutable namespace，1000不停机。
+- A200累计：`19,660,800` transitions；Reward sample全部finite，nonfinite=`0`，conservation
+  violation=`0`。
+- completed episode=`233,267`，其中tilt=`232,058`、robot-table=`1,209`；mean length
+  `84.036`，mean return `4.658`。
+- D05 due/selected=`237,221`；not-ready defer=`208,796`，reject=`28,425`，ACCEPT/CENSOR=`0`。
+- R03、launch、selected contact、R06、R07、payment和retire全部`0`。Reward0--13没有eligible样本，
+  只有dense motion Reward14--19在工作。
+- A100--199的dense Reward/transition约`0.052858`，低于前100约`0.058048`；episode length和return
+  同样下降。当前科学结论是“工程长跑成立，business producer仍未ready”，不是“已经学会”或
+  “Reward权重错了”。
+- WAL action identity只出现slot 0、UID `6907688916670928`、forehand；unknown仅来自reject，
+  不能拿73行冷bank宣称训练覆盖73动作或backhand。
+
+### MuJoCo portable Full-A：尚未允许长跑
+
+已闭合的真实路径：
+
+- 229/399 observation、31 action、upstream RSL-RL 3.1.2薄调用点；
+- WAIT reset/step、row-wise reveal、真实ball qpos/qvel launch、20 physics substep、bounded terminal、
+  selected row reset；
+- 真实postphysics racket FK进入R03 achieved fact；
+- engine-neutral 73行catalog冷校验，并将fresh env绑定同一slot 0/UID/mount sign；
+- 只在MuJoCo实际generic racket-contact edge出现的同一physics substep读取ball/site/rotation，区分
+  selected、opposite、edge/rim、between-planes和invalid；
+- selected-rubber只发布一个control-step事件脉冲并驱动Reward10，不作shot终身latch。
+
+仍是发车阻塞：
+
+1. reveal question仍未由slot0 manifest center与shared reverse-integration physics生成；当前临时中点题
+   不是Isaac动作条件化题目；
+2. selected motion teacher/reference timing仍未从同一portable action table消费；
+3. R06 legal landing/outcome、R07 recovery和Reward11--13未生产；
+4. per-action/per-family/per-side分母和生命周期证据未闭合；本代backhand denominator应明确为0；
+5. 新catalog与selected-rubber/Reward10只有host反例通过，fresh MuJoCo-Warp GPU真实接触与reset门仍未跑；
+6. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在。
+
+因此当前runner必须继续写`full_a_slice_attempted`、`full_a_complete=false`，不得改名为Full-A成功。
+
+## 4. 下一代按依赖推进
+
+| 顺序 | 唯一改动面 | 真实验收 | 完成后删除/合并 |
+| --- | --- | --- | --- |
+| 1 | engine-neutral portable action table | 73行identity/timing/FK与Isaac冷builder对齐；4096 env genesis/reveal/reset仍全slot0 | fresh lane不再构造未消费的balanced sampler；删除重复manifest pin和临时question常量 |
+| 2 | action-conditioned question/teacher | slot0 center经shared reverse-integration产生可揭示ball state；R03 target与reference timing同源 | 删除MuJoCo midpoint serve和`normal=-incoming`临时代码 |
+| 3 | observed selected-rubber | fresh GPU actual contact edge同substep分类；held contact不重复、recontact单独记账、masked reset不改peer | generic/selected双重临时命名与重复face推断 |
+| 4 | R06/R07与Reward11--13 | live landing/outcome、recovery窗口、eligible denominator和Reward20守恒 | 后端自建outcome/recovery副本 |
+| 5 | portable 4096长跑件 | 同一进程25k；早期5只看容量/finite，科学里程碑只读；终点独立消费 | WAIT-only launcher和一次性过渡receipt |
+| 6 | 2.0瘦身 | production callpoint census证明无人消费后再删 | legacy RSL2 runner、重复validator/owner/receipt、无restore consumer的carry graph |
+
+依赖关系是 `catalog -> question/teacher -> observed contact -> R06/R07 -> longrun`。这些纵切片可在
+Isaac active长跑期间开发和做host反例，但不能用未完成的下游测试反向授权上游。
+
+当前第1项的cold数据部分已由全73条真实motion的双实现逐列对拍闭合；固定slot0的4096 live genesis/
+reveal/reset仍需fresh运行证据。第2项保持进行中，不允许用MuJoCo现有midpoint ballistic shortcut代签
+Isaac的reverse-integration question。
+
+## 5. 地形
+
+- 现役nominal Isaac和参考tracking任务都是plane；A200失败不能归因rough terrain。
+- rough producer已改为空间相关场，并有spawn exact-flat core、smooth apron和table-side exact-flat；
+  不是每10 cm独立白噪声，也不逐step重采样。
+- 地形只在fresh独立阶段启用：`plane -> ±5 mm -> ±10 mm -> ±20 mm`。先过2-env foot/table几何和
+  4096吞吐，再观察站立/移动/恢复；不热改active scene，不把shared static mesh说成per-env curriculum。
+
+## 6. 停旧run与切换successor
+
+只有以下条件之一成立才停止旧run：
+
+1. 进程已失败且证据frontier不再推进；
+2. 发现使任务结构上不可学或使证据不可信的确定性错误；
+3. fresh、immutable、同MDP且已通过真实调用点的successor已经就绪，旧run被它严格支配。
+
+普通tilt/table/fall、早期return下降或ACCEPT仍为0都只是telemetry，不自动触发stop。当前MuJoCo仍有
+上述六项阻塞，下一代尚未严格支配active Isaac，所以**现在不停**。
+
+## 7. 里程碑与完成条件
+
+同一run只读：`20/50/100/200/500/1000/2500/5000/10000/25000`。每次至少报告：
+
+- exact WAL frontier、transition数、Reward finite/conservation；
+- D05 due/selected/admitted/ACCEPT/CENSOR/DEFER/REJECT；
+- action UID/family/side denominator，unknown单列；
+- R03、generic/selected contact、R06、R07、payment/retire；
+- episode reason、length、return；零分母写`未测`，不写0%成功率。
+
+本页只有在Isaac A/C与portable MuJoCo A/C都完成各自fresh `4096 × 25000`、真实业务分母和
+terminal consumer闭合，并完成删除清单后才可标`completed`。checkpoint只叫
+`diagnostic_nonresumable snapshot`；没有完整plant/manager/trainer/RNG restore前，
+`checkpoint_authority=false`、`resume_authority=false`。

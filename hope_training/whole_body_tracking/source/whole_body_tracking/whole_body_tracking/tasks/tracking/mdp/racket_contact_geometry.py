@@ -89,6 +89,12 @@ OFFICIAL_RED_BALL_CENTER_FROM_SITE_M: Vec3 = (
 )
 RED_FACE_SIGN = 1
 BLACK_FACE_SIGN = -1
+OBSERVED_RUBBER_STATUS_NONE = 0
+OBSERVED_RUBBER_STATUS_SELECTED = 1
+OBSERVED_RUBBER_STATUS_OPPOSITE = 2
+OBSERVED_RUBBER_STATUS_EDGE_RIM_AMBIGUOUS = 3
+OBSERVED_RUBBER_STATUS_BETWEEN_PLANES_AMBIGUOUS = 4
+OBSERVED_RUBBER_STATUS_INVALID_INPUT = 5
 # The ActionBall solver path stores prototype direction/speed and reference
 # kinematics in float32 tensors before this dependency-light scalar solve.
 # Reconstructing one native-rate vector can therefore land a few float32 ULPs
@@ -1444,6 +1450,179 @@ def torch_swept_selected_face_contact(
     }
 
 
+def torch_classify_observed_generic_racket_contact(
+    *,
+    observed_generic_contact,
+    ball_center_w_m,
+    racket_site_position_w_m,
+    racket_rotation_w_from_local,
+    mount_normal_sign,
+):
+    """Classify an already-observed generic racket contact row-wise.
+
+    This kernel never creates contact evidence.  ``observed_generic_contact``
+    must come from the backend's live contact array at the same physics
+    substep as the pose inputs.  Invalid rows remain explicit and can never
+    authorize a selected-rubber reward.
+    """
+
+    import torch
+
+    tensors = {
+        "observed_generic_contact": observed_generic_contact,
+        "ball_center_w_m": ball_center_w_m,
+        "racket_site_position_w_m": racket_site_position_w_m,
+        "racket_rotation_w_from_local": racket_rotation_w_from_local,
+        "mount_normal_sign": mount_normal_sign,
+    }
+    if any(not torch.is_tensor(value) for value in tensors.values()):
+        raise TypeError("observed-rubber classifier inputs must be Torch tensors")
+    if observed_generic_contact.dtype != torch.bool:
+        raise TypeError("observed_generic_contact must have dtype bool")
+    if observed_generic_contact.ndim != 1:
+        raise ValueError("observed_generic_contact must have shape [N]")
+    n = observed_generic_contact.shape[0]
+    if tuple(ball_center_w_m.shape) != (n, 3):
+        raise ValueError("ball_center_w_m must have shape [N,3]")
+    if tuple(racket_site_position_w_m.shape) != (n, 3):
+        raise ValueError("racket_site_position_w_m must have shape [N,3]")
+    if tuple(racket_rotation_w_from_local.shape) != (n, 3, 3):
+        raise ValueError("racket_rotation_w_from_local must have shape [N,3,3]")
+    if tuple(mount_normal_sign.shape) != (n,):
+        raise ValueError("mount_normal_sign must have shape [N]")
+    floating = (
+        ball_center_w_m,
+        racket_site_position_w_m,
+        racket_rotation_w_from_local,
+    )
+    if any(not value.dtype.is_floating_point for value in floating):
+        raise TypeError("observed-rubber pose inputs must be floating point")
+    if any(value.dtype != ball_center_w_m.dtype for value in floating):
+        raise TypeError("observed-rubber pose inputs must have one dtype")
+    if any(value.device != ball_center_w_m.device for value in tensors.values()):
+        raise ValueError("observed-rubber classifier inputs must share one device")
+    if not (
+        mount_normal_sign.dtype.is_floating_point
+        or mount_normal_sign.dtype
+        in (torch.int8, torch.int16, torch.int32, torch.int64)
+    ):
+        raise TypeError("mount_normal_sign must be floating point or signed integer")
+
+    delta = ball_center_w_m - racket_site_position_w_m
+    local_raw = torch.matmul(
+        racket_rotation_w_from_local.transpose(1, 2), delta.unsqueeze(-1)
+    ).squeeze(-1)
+    gram = torch.matmul(
+        racket_rotation_w_from_local.transpose(1, 2),
+        racket_rotation_w_from_local,
+    )
+    eye = torch.eye(
+        3,
+        dtype=ball_center_w_m.dtype,
+        device=ball_center_w_m.device,
+    ).expand(n, 3, 3)
+    rotation_tol = 2.0e-4 if ball_center_w_m.dtype == torch.float32 else 1.0e-8
+    determinant = torch.linalg.det(racket_rotation_w_from_local)
+    pose_finite = (
+        torch.isfinite(ball_center_w_m).all(dim=1)
+        & torch.isfinite(racket_site_position_w_m).all(dim=1)
+        & torch.isfinite(racket_rotation_w_from_local).reshape(n, -1).all(dim=1)
+    )
+    proper_rotation = (
+        torch.isfinite(determinant)
+        & torch.isclose(
+            determinant,
+            torch.ones_like(determinant),
+            rtol=0.0,
+            atol=rotation_tol,
+        )
+        & torch.isclose(gram, eye, rtol=0.0, atol=rotation_tol)
+        .reshape(n, -1)
+        .all(dim=1)
+    )
+    sign_finite = (
+        torch.isfinite(mount_normal_sign)
+        if mount_normal_sign.dtype.is_floating_point
+        else torch.ones(n, dtype=torch.bool, device=ball_center_w_m.device)
+    )
+    sign_valid = sign_finite & (
+        mount_normal_sign.eq(RED_FACE_SIGN)
+        | mount_normal_sign.eq(BLACK_FACE_SIGN)
+    )
+    input_valid = pose_finite & proper_rotation & sign_valid
+    local = torch.where(input_valid[:, None], local_raw, torch.zeros_like(local_raw))
+    center_xz = ball_center_w_m.new_tensor(FACE_AREA_CENTER_XZ_FROM_SITE_M)
+    tangential_raw = torch.linalg.vector_norm(
+        local_raw[:, (0, 2)] - center_xz,
+        dim=1,
+    )
+    tangential = torch.where(
+        input_valid,
+        tangential_raw,
+        torch.zeros_like(tangential_raw),
+    )
+
+    classified = observed_generic_contact & input_valid
+    edge = classified & ~(tangential_raw < SAFE_BALL_CENTER_TANGENTIAL_RADIUS_M)
+    interior = classified & ~edge
+    red = interior & local_raw[:, 1].gt(RED_OUTER_Y_FROM_SITE_M)
+    black = interior & local_raw[:, 1].lt(BLACK_OUTER_Y_FROM_SITE_M)
+    between = interior & ~red & ~black
+    observed_sign = torch.zeros(
+        n, dtype=torch.int8, device=ball_center_w_m.device
+    )
+    observed_sign = torch.where(
+        red, torch.ones_like(observed_sign), observed_sign
+    )
+    observed_sign = torch.where(
+        black, -torch.ones_like(observed_sign), observed_sign
+    )
+    face = red | black
+    selected = face & observed_sign.to(mount_normal_sign.dtype).eq(
+        mount_normal_sign
+    )
+    opposite = face & ~selected
+    invalid = observed_generic_contact & ~input_valid
+    status = torch.zeros_like(observed_sign)
+    status = torch.where(
+        selected,
+        torch.full_like(status, OBSERVED_RUBBER_STATUS_SELECTED),
+        status,
+    )
+    status = torch.where(
+        opposite,
+        torch.full_like(status, OBSERVED_RUBBER_STATUS_OPPOSITE),
+        status,
+    )
+    status = torch.where(
+        edge,
+        torch.full_like(status, OBSERVED_RUBBER_STATUS_EDGE_RIM_AMBIGUOUS),
+        status,
+    )
+    status = torch.where(
+        between,
+        torch.full_like(status, OBSERVED_RUBBER_STATUS_BETWEEN_PLANES_AMBIGUOUS),
+        status,
+    )
+    status = torch.where(
+        invalid,
+        torch.full_like(status, OBSERVED_RUBBER_STATUS_INVALID_INPUT),
+        status,
+    )
+    return {
+        "status": status,
+        "input_valid": input_valid,
+        "selected": selected,
+        "opposite": opposite,
+        "edge_or_rim_ambiguous": edge,
+        "between_planes_ambiguous": between,
+        "invalid": invalid,
+        "ball_center_local_m": local,
+        "tangential_distance_m": tangential,
+        "observed_face_sign": observed_sign,
+    }
+
+
 __all__ = [
     "EXACT_FACE_CONTACT_SCHEMA_VERSION",
     "EXACT_FACE_CONTACT_KIND",
@@ -1468,6 +1647,12 @@ __all__ = [
     "OFFICIAL_RED_BALL_CENTER_FROM_SITE_M",
     "RED_FACE_SIGN",
     "BLACK_FACE_SIGN",
+    "OBSERVED_RUBBER_STATUS_NONE",
+    "OBSERVED_RUBBER_STATUS_SELECTED",
+    "OBSERVED_RUBBER_STATUS_OPPOSITE",
+    "OBSERVED_RUBBER_STATUS_EDGE_RIM_AMBIGUOUS",
+    "OBSERVED_RUBBER_STATUS_BETWEEN_PLANES_AMBIGUOUS",
+    "OBSERVED_RUBBER_STATUS_INVALID_INPUT",
     "ExactFaceContactGeometryError",
     "ExactFaceContactSolution",
     "face_normal_local",
@@ -1489,4 +1674,5 @@ __all__ = [
     "legacy_colocation_error_m",
     "torch_exact_contact_state",
     "torch_swept_selected_face_contact",
+    "torch_classify_observed_generic_racket_contact",
 ]
