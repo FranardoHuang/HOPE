@@ -157,3 +157,15 @@ owner gate=`0.171 s`、command-to-observation gap=`3.102 s`、reward=`0.658 s`�
 retire/park，并保持arm/capture成对。仅在postphysics以Python `pending is None`早退会让scene fact-owner未drain，
 下一substep重arm直接失败，已明确拒绝。验收仍须matched fixed-tape与profile-off wall，不以代码更少或前5次
 总时间下降作结论。
+
+profile自动关闭后的matched `20..97`窗口进一步否定该cut的wall收益。旧GPU1与新GPU0在iteration 97的
+science telemetry逐字同为mean reward=`5.44`、mean episode length=`92.99`、total timesteps=`9,633,792`，
+说明固定seed语义轨迹没有因single-read cut改变；但iteration wall为：
+
+| run | n | mean (s) | median (s) | p95 (s) | min--max (s) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| old `e8eef4fb…` GPU1 | 78 | 17.570 | 16.415 | 22.81 | 13.50--23.46 |
+| new `ddb1e7c4…` GPU0 | 78 | 18.004 | 17.610 | 22.98 | 15.00--25.15 |
+
+不同物理卡仍可能贡献噪声，因此这不证明cut本身“变慢”；但它明确没有达到采用所需的可测净收益，更没有
+接近6秒目标。两条run继续只读，single-read cut不作为性能胜利；下一candidate只准针对完整empty-flight事务。

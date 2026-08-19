@@ -2128,3 +2128,11 @@ RC=1；namespace `mujoco-fullmdp-gpu-gate.c2d8c536.Pod1GPU0Slot2Taskset.d4aWD12U
 termination bit，不能把原因进一步写死为tilt/low/table。当前不能启动portable 25k：否则会把真实safety
 episode reset混成R07 nonterminal shot reset。下一件先在fresh诊断中记录首次reset age、terminal bits和plant state，
 再修production control/hold边界；G06保持`Partial`。
+
+fresh diagnostic commit `c0aa32e9…`现把首个reset钉死：recovery age=`16`、terminal bits=`16`即
+`robot_hit_table`；base position=`[0.1073775,-0.1811592,1.0640811]`、projected gravity约
+`[-0.020965,0.001150,-0.999780]`，resolved robot-table contact=`0`，但exact geometric
+table-keepout=`true`。因此不是tilt或base-too-low，也不能简单归因split-ready角度gap；真实阻塞是物理hold过程中
+机器人OBB/拍面在约0.32秒后进入table guard。namespace
+`mujoco-fullmdp-gpu-diag.c0aa32e9.Pod1GPU0Slot2Taskset.EdCf3ic7`封存不重试。下一步须定位首个命中的
+component/blade、与Isaac同ready/table frame对拍，再决定修ready控制还是frame/guard；不得关闭guard绕过。

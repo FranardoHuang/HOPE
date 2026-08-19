@@ -4404,3 +4404,9 @@
   因此只把split-ready/hold-qdes控制消费列为待定位阻塞，不把它假写成某一种termination；portable 25k继续HOLD。
 - GPU recovery hard gate现会在任何意外Gym reset前读取并报告exact age、terminal bits、base position、
   projected gravity、robot-table与table-keepout；该诊断只增加失败证据，不放宽nonterminal shot语义。
+- fresh `c0aa32e9…`已把MuJoCo首个真实recovery reset钉为age16、bit16=`robot_hit_table`：base z=`1.0641 m`、
+  tilt仅约`0.021 rad`、resolved table contact=0而geometric keepout=true。故不是跌倒/过低，也不能把原因写死为
+  split-ready gap；下一步对拍首个OBB/blade与Isaac ready/table frame，禁止关闭guard换假绿。
+- Isaac profile-off matched update20--97：旧GPU1 mean/median/p95=`17.570/16.415/22.81 s`，新GPU0=
+  `18.004/17.610/22.98 s`；update97 reward/episode length/timesteps exact相同。single-read cut没有可测净收益，
+  不称严格优于；旧run已到iteration1300，新run到97，两者继续只读。

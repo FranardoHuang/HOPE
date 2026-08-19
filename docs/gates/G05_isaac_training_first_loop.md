@@ -6363,3 +6363,8 @@ namespace或启动Kit，fresh fix只改为按目标GPU UUID过滤compute-app que
 因此single-read/clone cut没有证明严格性能改进，G05仍`Partial`。下一candidate必须成对处理zero-flight
 prephysics arm与postphysics capture/R06/retire/park，并以profile-off matched strata验收；不允许单边早退
 留下未drain scene fact-owner。
+
+profile-off matched `20..97`窗口中，旧GPU1 mean/median/p95=`17.570/16.415/22.81 s`，新GPU0=
+`18.004/17.610/22.98 s`；iteration 97两者science telemetry exact相同（reward=`5.44`、episode length=
+`92.99`、timesteps=`9,633,792`）。不同GPU使该对比不能证明cut负收益，但足以证明没有可采用的提速。
+旧run已到iteration 1300（mean reward=`3.08`、length=`62.57`），新run到iteration 97；两者均保持只读。

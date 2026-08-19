@@ -118,6 +118,9 @@
    Gym safety reset，nonterminal-shot测试正确拒绝`_reset_idx`，结果=`1 failed`、RC=1；namespace
    `mujoco-fullmdp-gpu-gate.c2d8c536.Pod1GPU0Slot2Taskset.d4aWD12U`封存。trace尚未输出具体terminal bit；
    先做fresh首次reset age/bit/plant诊断并关闭split-ready控制消费，再谈25k；
+   fresh `c0aa32e9…`诊断已钉首错为recovery age16、terminal bit16=`robot_hit_table`：base高度与姿态仍正常、
+   resolved contact=0，但exact table keepout=true。该namespace封存。下一件不是放宽termination，而是输出首个
+   命中component/blade并与Isaac ready/table frame对拍；在此之前portable 25k继续HOLD；
 5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在；在上述真实GPU
    纵切片通过前不生成长跑success receipt。
 
