@@ -14,11 +14,12 @@
   科学窗口报告未闭合，`full_a_complete`固定为`false`。
   zero-policy table/fall/contact仍只作telemetry，exact keepout termination保留。
 - 当前host回归：runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
-  `59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。Pod1 GPU2 exact `4aadd698…`的两次
-  fresh one-shot均在trainer前`failed_no_retry/rc=99`、ACK=0并封存：首轮是source-gate direct
-  Python缺`tensordict`；r1修正依赖入口后真实GPU focused=`5 passed, 3 failed in 23.11s`，暴露三项
-  旧测试把合法`due=true/deferred=true/reveal=false`误当必然ACCEPT。production不改；下一fresh
-  successor只修测试隔离。portable `4096×25000`仍未启动，q-des guard仍
+  `59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。Pod1 GPU2 fresh r2 exact
+  `9e7c1c61…`保持production cadence不变，真实GPU focused=`8 passed in 23.00s`；随后实际4096-env
+  trainer的首个optimizer update返回，但stock RSL-RL 3.1.2 save写出7,882,391-byte `model_0.pt`后，
+  因disable-logs路径缺`runner.logger_type`而`AttributeError/rc=99`。evidence 0 bytes、ACK=0；该未ACK
+  文件不算snapshot，r2 namespace封存不可重用。fresh r3只显式安装upstream默认
+  `runner.logger_type='tensorboard'`字段，不启日志或上传。portable `4096×25000`仍未形成启动证据，q-des guard仍
   `DIVERGENT_DECLARED`，无transfer/matched authority。详见
   [portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 
@@ -4450,7 +4451,8 @@
   额外keepout witness已拒绝并回退，原有exact table keepout仍保留。
   optimizer前prepare/成功后snapshot+ACK的thin ledger与独立consumer host闭合：真实writer→consumer
   prefix也由同一production payload测试，runner/ledger/consumer=`80 passed, 1 skipped`；MuJoCo env/action/
-  outcome=`54 passed, 7 skipped`，alignment新增反例=`14 passed`。Pod真实调用点与portable
-  `4096×25000` live run仍未测/未启动，详见
+  outcome=`54 passed, 7 skipped`，alignment新增反例=`14 passed`。Pod r2真实GPU focused现为
+  `8 passed in 23.00s`；实际4096 trainer首个optimizer返回后在stock save/logger边界停止，
+  evidence 0 bytes、ACK=0，因此`4096×25000`仍未形成启动证据。详见
   [portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)及
   [G06](gates/G06_isaac_to_mujoco.md)。

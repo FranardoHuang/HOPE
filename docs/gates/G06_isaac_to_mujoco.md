@@ -28,12 +28,14 @@ zero-action的table/fall/contact/recovery率只是telemetry；exact keepout term
 固定为`false`。
 
 host当前精确回归为runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
-`59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。Pod1 GPU2在exact
-`4aadd698…`上的两次fresh one-shot均于trainer前`failed_no_retry/rc=99`并封存、ACK=0：首轮在
-`rsl3_source_gate`暴露direct system Python缺`tensordict`；r1修正依赖入口后到达真实GPU focused，
-结果`5 passed, 3 failed in 23.11s`，三项旧测试把合法的tick-2
-`due=true/deferred=true/reveal=false`误写成必然ACCEPT。production cadence不回退；修正
-tests-only admission的fresh successor尚未通过，`4096×25000`仍未启动，Gate保持`Partial`。详细当前真源见
+`59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。Pod1 GPU2 fresh r2 exact
+`9e7c1c614b1e22eeec4de243f55d58293da155ce`已保持production cadence不变并通过真实GPU focused
+`8 passed in 23.00s`，随后进入4096-env trainer且首个optimizer update返回。stock RSL-RL 3.1.2
+save写出7,882,391-byte `model_0.pt`后，因`log_dir=None`/`disable_logs`路径未初始化
+`runner.logger_type`而触发`AttributeError`；one-shot `rc=99`、evidence 0 bytes、ACK=0。该未ACK文件
+保持`diagnostic_unauthorized/checkpoint_authority=false/resume_authority=false`，不能算snapshot；r2
+namespace封存且不可重用。fresh r3只显式安装upstream默认`runner.logger_type='tensorboard'`字段，
+不启日志或上传。`4096×25000`仍未形成启动证据，Gate保持`Partial`。详细当前真源见
 [`EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819`](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 
 本次host结果的可复现命令（均从repo root执行；skip只允许标明为GPU-only）为：

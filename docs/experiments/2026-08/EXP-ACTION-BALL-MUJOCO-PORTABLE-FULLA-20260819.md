@@ -92,8 +92,8 @@ question/teacher历史focused host=`22 passed, 7 skipped`。当前MuJoCo env/act
 `96 passed, 1 skipped`，其中production writer生成的真实prefix直接由独立consumer读取。另有
 `py_compile`与`git diff --check`通过。反例覆盖：
 
-Pod1 GPU2的live one-shot已经产生两条封存反例；两条result均为
-`status=failed_no_retry / final_rc=99 / ACK=0`，trainer均未启动：
+Pod1 GPU2的前两条live one-shot已经产生两条封存反例；两条result均为
+`status=failed_no_retry / final_rc=99 / ACK=0`，且trainer均未启动：
 
 - exact commit `4aadd698e44f2e03a916ea1fd8c1daa1b2c2466c`、fresh namespace
   `mujoco-fullmdp-a4096-u25000-4aadd698-20260820t071549cst`、wrapper SHA-256
@@ -110,10 +110,24 @@ Pod1 GPU2的live one-shot已经产生两条封存反例；两条result均为
   `due=true / deferred=true / reveal=false`，而旧测试错误要求zero action必然ACCEPT；该namespace
   同样封存且不重试。
 
-r1的production观测符合冻结语义：due只是机会，live readiness为false时必须DEFER。successor不改
+r1的production观测符合冻结语义：due只是机会，live readiness为false时必须DEFER。r2没有改
 production，只由独立GPU用例验证自然`ACCEPT XOR DEFER`、DEFER zero-write和tick 3不补试；下游
 contact/outcome用例显式安装tests-only readiness。该注入只隔离真实调用点，不能计入policy或business
-evidence；successor必须使用新commit、新namespace。
+evidence。
+
+fresh r2使用exact commit `9e7c1c614b1e22eeec4de243f55d58293da155ce`、namespace
+`mujoco-fullmdp-a4096-u25000-9e7c1c61-20260820t073755cst-r2`和wrapper SHA-256
+`36cc7a6166e1249061a45f7a3f7f1145a014a2b5a1f6f8417b84e0f58fefce5b`。真实GPU focused为
+`8 passed in 23.00s`，随后进入实际4096-env trainer，首个optimizer update已经返回。紧接着stock
+RSL-RL 3.1.2 save先写出7,882,391-byte `model_0.pt`，再因`log_dir=None`/`disable_logs`路径没有初始化
+`runner.logger_type`而抛出
+`AttributeError: 'OnPolicyRunner' object has no attribute 'logger_type'`；one-shot result为
+`status=failed_no_retry / final_rc=99`。
+此时evidence文件仍为0 bytes、ACK=0，`model_0.pt`没有对应ACK，只是封存且
+`diagnostic_unauthorized/checkpoint_authority=false/resume_authority=false`的故障文件，不能计入26份
+snapshot。该namespace封存且不可重用。最窄fresh r3修复只是显式安装upstream默认字段
+`runner.logger_type='tensorboard'`以满足stock save，不启用logger、TensorBoard写入或上传；必须使用
+新commit、新namespace，不能重试r2。
 
 - 改action center/incoming center会改变task与launch，旧midpoint shortcut不能假绿；
 - 两个env origin只影响world qpos写入，不污染env-local task；
@@ -137,10 +151,10 @@ evidence；successor必须使用新commit、新namespace。
 
 ## 4. 仍未闭合
 
-1. exact Pod one-shot已两次停在trainer之前：首轮暴露解释器依赖路径，r1越过source gate并到达
-   真实MuJoCo-Warp GPU focused `5/8`；修正后的fresh GPU gate仍未通过。
-2. portable `4096×25000`仍未实际启动；因而PPO update、25000 ACK、26份快照、终点consumer和学习
-   趋势均为`未测`。
+1. exact Pod r2已通过真实MuJoCo-Warp GPU focused `8/8`并进入4096 trainer；首个optimizer
+   update返回后，stock save在首条ACK前因缺`runner.logger_type`停止。fresh r3仍需验证这一最窄修复。
+2. portable `4096×25000`仍未形成启动证据：r2 evidence为0 bytes、ACK=0，未授权的`model_0.pt`
+   不计snapshot；25000 ACK、26份已ACK snapshot、终点consumer和学习趋势均为`未测`。
 3. 当前只是slot0 forehand A；C family、backhand分母、第二seed、promotion/export/deploy均未由
    本工程件授权。
 

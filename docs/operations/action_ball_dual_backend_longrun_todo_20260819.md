@@ -65,7 +65,7 @@
   热改、不复用namespace；在matched profile-off与业务证据形成前不停止任一条。下一工程candidate只针对
   zero-live-flight时成对跳过arm/capture/R06/retire/park，不能恢复已被反例否定的单边postphysics早退。
 
-### MuJoCo portable Full-A：host长跑件已闭合，live focused到正确DEFER，25k尚未启动
+### MuJoCo portable Full-A：live focused已通过，trainer停在首条ACK前，25k尚未启动
 
 当前host已闭合的代码合同：
 
@@ -92,17 +92,19 @@
 
 当前唯一发车边界：
 
-1. exact commit `4aadd698…`的两次Pod1 GPU2 fresh one-shot均已封存且不重试：首轮namespace
-   `...071549cst`在`rsl3_source_gate`因direct system Python缺`tensordict`停止；r1 namespace
-   `...072045cst-r1`修正依赖入口后到真实GPU focused `5 passed, 3 failed in 23.11s`，但三个旧
-   downstream测试错误要求zero action在tick 2必然ACCEPT。两轮均`failed_no_retry/rc=99`、ACK=0，
-   trainer未启动；详细身份与首错见[portable Full-A实验](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
-2. 语义裁决是不改production：tick 2只有due，readiness=false时正确结果是DEFER、zero-write、tick 3
-   不补试。下一fresh commit把自然`ACCEPT XOR DEFER`留给独立GPU反例，并只在contact/outcome的
-   downstream tests显式tests-only admission；该admission不得计入业务证据。
-3. 下一one-shot必须使用新commit、新namespace和exact RSL-RL 3.1.2 overlay；focused gate通过后由
-   同一执行件直接进入`4096 × 25000`，不再添加短跑或zero-policy表现门；任一失败仍封存且不重试。
-4. 真正的`4096 env × 25000 PPO update`尚未启动，Pod wall time、吞吐与学习趋势均为**未测**。
+1. r0/r1两条Pod1 GPU2 fresh one-shot均已封存且不重试：它们分别暴露direct system Python缺
+   `tensordict`和旧GPU tests误把合法DEFER写成必然ACCEPT；详细身份与首错见
+   [portable Full-A实验](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+2. fresh r2 exact commit `9e7c1c614b1e22eeec4de243f55d58293da155ce`、namespace
+   `mujoco-fullmdp-a4096-u25000-9e7c1c61-20260820t073755cst-r2`、wrapper SHA-256
+   `36cc7a6166e1249061a45f7a3f7f1145a014a2b5a1f6f8417b84e0f58fefce5b`通过真实GPU focused
+   `8 passed in 23.00s`。同一执行件进入实际4096-env trainer且首个optimizer update返回；随后stock
+   save写出7,882,391-byte `model_0.pt`，却因disable-logs路径缺`runner.logger_type`而
+   `AttributeError/rc=99`。evidence 0 bytes、ACK=0；未ACK文件不算snapshot，namespace封存不可重用。
+3. 下一one-shot只允许fresh r3：显式安装upstream默认`runner.logger_type='tensorboard'`字段以满足
+   stock save，但不启logger、TensorBoard写入或上传。使用新commit、新namespace；focused通过后由
+   同一执行件直接进入`4096 × 25000`，不增加短跑或zero-policy表现门，失败仍封存且不重试。
+4. 真正的`4096 env × 25000 PPO update`仍没有ACK启动证据；Pod吞吐与学习趋势均为**未测**。
 5. 本代只授权A/slot 0；C/backhand未授权，backhand denominator必须为0。
 
 #### 25k runner与consumer合同
@@ -130,9 +132,9 @@
 | 顺序 | 唯一改动面 | 当前证据 | 下一验收 |
 | --- | --- | --- | --- |
 | 1 | raw-action ABI（原始动作接口约定） | **CLOSED-host**：无`[-4,4]` raw clip，nonfinite fallback与joint envelope反例通过 | fresh Pod真实调用点保持同一动作语义 |
-| 2 | thin ledger与独立consumer | **CLOSED-host**：runner/ledger/consumer `96 passed, 1 skipped`，含production writer→consumer prefix | Pod写出一行真实ACK、snapshot并由独立consumer读取 |
-| 3 | exact Pod focused gate | **live attempted / HOLD**：两条fresh namespace均在trainer前封存；r1到真实GPU `5/8`，失败来自stale unconditional-ACCEPT tests，不是production cadence | fresh commit/new namespace；自然verdict反例与tests-only downstream admission分离；同一one-shot gate通过后直接进入25k |
-| 4 | portable A长跑 | **未启动** | 同一进程`4096 × 25000`及exact 25000-row终端消费 |
+| 2 | thin ledger与独立consumer | **CLOSED-host / live ACK=0**：runner/ledger/consumer `96 passed, 1 skipped`；r2首个optimizer返回，但save失败早于ACK | r3写出一行真实ACK、已ACK snapshot并由独立consumer读取 |
+| 3 | exact Pod focused gate | **CLOSED-live**：r2真实GPU `8 passed in 23.00s`，自然verdict与tests-only downstream admission已分离 | r3保持同一语义；同一one-shot直接进入25k |
+| 4 | portable A长跑 | **pre-ACK failed / 未启动**：r2进入4096 trainer但evidence 0 bytes、ACK=0 | fresh r3只补`runner.logger_type`默认字段后运行同一进程`4096 × 25000`及exact 25000-row终端消费 |
 | 5 | 终跑删除与2.0瘦身 | **待长跑后** | production callpoint census证明无人消费后再删legacy runner、重复validator/receipt与无restore consumer的carry graph |
 
 catalog、question/teacher、observed contact、R06、R07和Reward0--20已经属于当前portable surface，

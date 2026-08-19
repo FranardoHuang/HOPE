@@ -545,6 +545,9 @@ def main(
     if full_a_mode:
         _apply_full_a_policy_bootstrap(runner, torch)
     runner.disable_logs = True
+    # RSL-RL 3.1.2 initializes this field only when a logging writer exists,
+    # but its stock save() reads it unconditionally before checking disable_logs.
+    runner.logger_type = "tensorboard"
     updates = 0
     snapshots = _snapshot_root(snapshot_dir) if full_a_mode else None
     evidence_fd = _open_evidence_jsonl(evidence_jsonl) if full_a_mode else None

@@ -298,6 +298,7 @@ def _install_fake_stack(
                 self.current_learning_iteration = index
 
         def save(self, stream, infos=None):
+            assert self.logger_type == "tensorboard" and self.disable_logs is True
             trace.append("save")
             saved.append((self.current_learning_iteration, dict(infos)))
             if not valid_torch_snapshot:
