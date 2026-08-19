@@ -140,6 +140,7 @@ def _facts(shape, *, control: int):
     zeros = torch.zeros(shape, dtype=torch.bool)
     return D.IsaacPostPhysicsFacts(
         observation_stamp=_stamp(shape, control=control, substep=0, phase=2),
+        current_state_env_f32=torch.zeros(shape + (13,), dtype=torch.float32),
         selected_contact_event=zeros.clone(),
         selected_contact_ball_center_m=torch.zeros(
             shape + (3,), dtype=torch.float32
@@ -358,7 +359,12 @@ def test_isaac_scene_exact_type_accepts_nonsemantic_source_comment_without_sha_g
         def write_root_velocity_to_sim(self, value, *, env_ids):
             self.data.root_state_w[env_ids, 7:] = value
 
-    scene = {name: Asset() for name in scene_spec.scene_entity_names}
+    class Scene(dict):
+        pass
+
+    scene = Scene({name: Asset() for name in scene_spec.scene_entity_names})
+    scene.cfg = types.SimpleNamespace(replicate_physics=True)
+    scene.env_prim_paths = tuple(f"/World/envs/env_{index}" for index in range(2))
     port = scene_module.IsaacLabPhysicalFlightScenePort(
         scene=scene,
         spec=scene_spec,

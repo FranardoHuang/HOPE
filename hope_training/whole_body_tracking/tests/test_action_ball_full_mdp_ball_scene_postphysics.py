@@ -131,6 +131,42 @@ def test_capture_proves_scene_observation_but_faults_missing_event_producers_wit
         assert forbidden not in source
 
 
+def test_owner_issued_capture_reads_scene_once_and_returns_that_exact_state(
+    monkeypatch,
+):
+    port = _port(torch.device("cpu"))
+    request = _request(port)
+    physical_owner = SimpleNamespace(_owner_identity=object())
+    port._action_epoch_physical_owner = physical_owner
+    object.__setattr__(request, "_owner_identity", physical_owner._owner_identity)
+    object.__setattr__(request, "_token", D._POSTPHYSICS_CAPTURE_REQUEST_TOKEN)
+    object.__setattr__(request, "current_state_env_f32", None)
+    calls = []
+    original = S.IsaacLabPhysicalFlightScenePort.read_state_env
+
+    def read_once(actual):
+        calls.append(1)
+        return original(actual)
+
+    monkeypatch.setattr(
+        S.IsaacLabPhysicalFlightScenePort, "read_state_env", read_once
+    )
+    facts = port.capture_post_physics_facts(request)
+    assert calls == [1]
+    assert torch.equal(facts.current_state_env_f32, original(port))
+
+
+def test_foreign_request_cannot_omit_scene_state():
+    port = _port(torch.device("cpu"))
+    request = _request(port)
+    object.__setattr__(request, "current_state_env_f32", None)
+    with pytest.raises(
+        S.ActionBallFullMdpBallSceneError,
+        match="current_state_env_f32 tensor ABI",
+    ):
+        port.capture_post_physics_facts(request)
+
+
 def test_merged_wrist_contact_is_not_mislabelled_selected_rubber_authority():
     """A ball-wrist actor is not used; only exact rubber collider paths are."""
 

@@ -6343,3 +6343,15 @@ G05仍为`Partial`：工程scale与证据链成立，business-callpoint与学习
 再调用production `RacketTargetCommand`冷builder，与dependency-light portable实现对quat、角速度、中心差分
 site速度、raw normal、reach、site位置和base quat逐列比较。该整文件回归=`12 passed,3 skipped`；
 它关闭cold reference同义性，不授权active run、GPU contact或question producer。
+
+### 2026-08-20 A1187与FullMDP热路径首个语义保持cut
+
+fresh `e8eef4fb…`已产生完整ACK `0..1186`，累计`116,686,848` transitions；它仍只有dense motion业务，
+不因运行时间增长而晋级。该run前5个bounded profile逐update固定调用96次`post_physics_publish`，inclusive
+host wall=`6.998--7.809 s`，而`sim_step`仅`0.904--0.960 s`、552次owner binding检查仅
+`0.143--0.170 s`。因此22秒回归的第一修复对象是零业务时仍完整执行的Physical/R06/Epoch数据流，不是
+CPU互斥。
+
+首个窄cut只让exact scene producer返回同一次fresh state stack并删除中间重复clone；foreign request仍须显式
+state逐值join，Physical仍立即保留自己的after-image，arm/capture配对与retire路径不跳过。host focused=
+`81 passed,5 skipped`；fresh GPU0配对未跑，故只记`Partial`，不得把源码估计写成已提速。

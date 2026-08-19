@@ -89,6 +89,10 @@ physical = _canonical_module(
     MDP / "action_ball_physical_flight_device.py",
 )
 from test_action_ball_physical_flight_contract import _capacity  # noqa: E402
+from test_action_ball_physical_flight_device import (  # noqa: E402
+    _focused_postphysics_stamp,
+    _install_focused_postphysics_stamp_module,
+)
 import test_action_ball_continuous_runtime_transaction_device as d05t  # noqa: E402
 
 
@@ -390,6 +394,41 @@ def test_postphysics_source_orders_one_capture_through_physical_and_r06_retire()
     assert "retired[env_ids" not in source
     assert "clear_slot_mask = retired & active_slot_mask" in source
     assert "identity_grid.copy_(" in source
+
+
+@pytest.mark.parametrize("pending_values", (None, (False, False), (True, False), (True, True)))
+def test_undelivered_empty_mixed_full_fixed_tapes_keep_dense_capture(
+    monkeypatch, pending_values
+):
+    _install_focused_postphysics_stamp_module(monkeypatch)
+    owner, _scene = _physical_owner(torch.device("cpu"))
+    owner._action_epoch_owner = types.SimpleNamespace(
+        poison_owner_write=lambda *_args, **_kwargs: None
+    )
+    if pending_values is not None:
+        owner._action_epoch_pending_launch = _pending(
+            owner,
+            key=_shot_key(num_envs=2, device=owner.device, width=0),
+            pending=torch.tensor(pending_values, dtype=torch.bool),
+            ordinal=torch.tensor((4, 5), dtype=torch.int64),
+        )
+    seen = []
+
+    class DensePathReached(RuntimeError):
+        pass
+
+    def capture(_actual, stamp):
+        seen.append(stamp.exact_tuple())
+        raise DensePathReached
+
+    monkeypatch.setattr(
+        physical.ActionBallPhysicalFlightDeviceOwner,
+        "capture_post_physics_facts",
+        capture,
+    )
+    with pytest.raises(DensePathReached):
+        owner.publish_action_epoch_post_physics(_focused_postphysics_stamp())
+    assert seen == [(1, 0, 1, 1, 1)]
 
 
 @pytest.mark.parametrize("num_envs", (2, 64))

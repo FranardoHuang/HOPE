@@ -1086,6 +1086,7 @@ class IsaacPostPhysicsFacts:
     """Engine facts sampled after physics for the complete ``[N,K]`` grid."""
 
     observation_stamp: PhysicsStampGrid
+    current_state_env_f32: torch.Tensor
     selected_contact_event: torch.Tensor
     selected_contact_ball_center_m: torch.Tensor
     selected_contact_outgoing_segment_anchor_m: torch.Tensor
@@ -1118,7 +1119,7 @@ class PhysicalPostPhysicsCaptureRequest:
     ball_generation: torch.Tensor
     observation_ordinal: torch.Tensor
     previous_ball_center_m: torch.Tensor
-    current_state_env_f32: torch.Tensor
+    current_state_env_f32: torch.Tensor | None
     _owner_identity: object
     _token: object
 
@@ -2622,6 +2623,9 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._park_state_template = initial.detach().clone()
 
         shape = (self.num_envs, self.flight_capacity)
+        self._fixed_flight_slot_grid = torch.arange(
+            self.flight_capacity, dtype=torch.int64, device=self.device
+        ).unsqueeze(0).expand(shape)
         self._lifecycle = torch.zeros(shape, dtype=torch.int8, device=self.device)
         self._generation = torch.full(shape, -1, dtype=torch.int64, device=self.device)
         self._outcome_sha = torch.zeros(shape + (TOKEN_BYTES,), dtype=torch.uint8, device=self.device)
@@ -6936,14 +6940,10 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise error
         raise error from cause
 
-    def capture_post_physics_facts(self, stamp: object) -> IsaacPostPhysicsFacts:
-        """Capture once from the construction-owned producer after scene update.
-
-        This is the only production entry.  It never manufactures an all-miss
-        packet when the Isaac producer is absent: missing exact input is HOLD.
-        The retained request binds every live slot to key, generation and the
-        next observation ordinal before R06 sees any bytes.
-        """
+    def _validate_postphysics_capture_boundary(
+        self, stamp: object
+    ) -> tuple[int, int, int, int, int]:
+        """Validate one exact stamp before either empty or dense publication."""
 
         self._require_operable(allow_diagnostic_scene_observation=True)
         self._require_selected_contact_reward_cycle_closed(label="postphysics")
@@ -6984,6 +6984,18 @@ class ActionBallPhysicalFlightDeviceOwner:
                 self._poison_postphysics_capture(
                     "postphysics stamp was stale, skipped, duplicated or reordered"
                 )
+        return exact
+
+    def capture_post_physics_facts(self, stamp: object) -> IsaacPostPhysicsFacts:
+        """Capture once from the construction-owned producer after scene update.
+
+        This is the only production entry.  It never manufactures an all-miss
+        packet when the Isaac producer is absent: missing exact input is HOLD.
+        The retained request binds every live slot to key, generation and the
+        next observation ordinal before R06 sees any bytes.
+        """
+
+        exact = self._validate_postphysics_capture_boundary(stamp)
 
         scene_type = type(self.scene_port)
         retained_function = self._postphysics_scene_capture_function
@@ -7006,28 +7018,23 @@ class ActionBallPhysicalFlightDeviceOwner:
 
         shape = (self.num_envs, self.flight_capacity)
         observe = self._published & ~self._parked
-        flight_slot = torch.arange(
-            self.flight_capacity, dtype=torch.int64, device=self.device
-        ).unsqueeze(0).expand(shape)
-        state = _tensor(
-            self.scene_port.read_state_env(),
-            label="captured postphysics scene state",
-            shape=shape + (STATE_WIDTH,),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        flight_slot = self._fixed_flight_slot_grid
         next_ordinal = torch.where(
             observe, self._observation_ordinal + 1, self._observation_ordinal
         )
         request = PhysicalPostPhysicsCaptureRequest(
             exact_stamp=exact,
-            observe_mask=observe.detach().clone(),
-            flight_slot=flight_slot.detach().clone(),
-            full_key_sha256=self._outcome_sha.detach().clone(),
-            ball_generation=self._generation.detach().clone(),
-            observation_ordinal=next_ordinal.detach().clone(),
-            previous_ball_center_m=self._previous_ball_center.detach().clone(),
-            current_state_env_f32=state.detach().clone(),
+            observe_mask=observe,
+            flight_slot=flight_slot,
+            full_key_sha256=self._outcome_sha,
+            ball_generation=self._generation,
+            observation_ordinal=next_ordinal,
+            previous_ball_center_m=self._previous_ball_center,
+            # The exact bound scene producer owns the single post-scene read
+            # and returns it in ``IsaacPostPhysicsFacts``.  ``None`` is legal
+            # only with this owner-issued identity/token pair; direct test or
+            # foreign requests must still supply and match an explicit state.
+            current_state_env_f32=None,
             _owner_identity=self._owner_identity,
             _token=_POSTPHYSICS_CAPTURE_REQUEST_TOKEN,
         )
@@ -7045,6 +7052,13 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._poison_postphysics_capture(
                 "exact concrete Isaac postphysics producer returned an unjoined or partial ABI"
             )
+        state = _tensor(
+            raw.current_state_env_f32,
+            label="captured postphysics scene state",
+            shape=shape + (STATE_WIDTH,),
+            dtype=torch.float32,
+            device=self.device,
+        )
         facts = replace(
             raw,
             _owner_identity=self._owner_identity,
@@ -7155,7 +7169,7 @@ class ActionBallPhysicalFlightDeviceOwner:
                 self._poison_postphysics_capture(
                     "Physical epoch engine fact ABI differs: " + label
                 )
-            return value.detach().clone()
+            return value
 
         observe = image.observe_mask
         contact = exact(
@@ -7163,7 +7177,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             label="selected_contact_event",
             dtype=torch.bool,
         )
-        current_center = image.current_state_env_f32[..., :3].clone()
+        current_center = image.current_state_env_f32[..., :3]
         contact_center = exact(
             facts.selected_contact_ball_center_m,
             label="selected_contact_ball_center_m",
@@ -7267,9 +7281,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(
                 "R06 direct ActionEpoch postphysics/retire owner API is absent or patched"
             )
-        fixed_flight_slot = torch.arange(
-            self.flight_capacity, dtype=torch.int64, device=self.device
-        ).unsqueeze(0).expand(shape)
+        fixed_flight_slot = self._fixed_flight_slot_grid
         self._action_epoch_active_r06_postphysics = (
             ActionEpochR06PostPhysicsProjection(
                 observe_mask=observe.detach().clone(),
@@ -7413,10 +7425,9 @@ class ActionBallPhysicalFlightDeviceOwner:
             ),
             "R06 direct postphysics/retire result is internally inconsistent",
         )
-        park_state = self._park_state_template.detach().clone()
         scene_handle = self._prepare_action_epoch_scene_write(
             kind="retire",
-            state_env_f32=park_state,
+            state_env_f32=self._park_state_template,
             selected_mask=retired,
         )
         self._apply_scene_write(scene_handle)

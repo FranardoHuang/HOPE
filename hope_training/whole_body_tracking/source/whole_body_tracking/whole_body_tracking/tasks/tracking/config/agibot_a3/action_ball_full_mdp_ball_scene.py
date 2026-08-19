@@ -1845,6 +1845,7 @@ class IsaacPhysxBallFactOwner:
 
         result = facts_type(
             observation_stamp=stamp(observe, 2),
+            current_state_env_f32=live_state,
             selected_contact_event=contact.clone(),
             selected_contact_ball_center_m=contact_center.clone(),
             selected_contact_outgoing_segment_anchor_m=outgoing_anchor,
@@ -3090,9 +3091,10 @@ class IsaacLabPhysicalFlightScenePort:
         state = torch.stack(
             tuple(asset.data.root_state_w for asset in self.assets), dim=1
         ).to(dtype=torch.float32)
-        result = state.clone()
-        result[..., :3].sub_(self.env_origins.unsqueeze(1))
-        return result
+        # ``stack`` already owns fresh storage; translating that after-image
+        # in place avoids a second full-grid clone without aliasing Isaac.
+        state[..., :3].sub_(self.env_origins.unsqueeze(1))
+        return state
 
     def capture_post_physics_facts(self, request: object):
         """Capture the provable part of the exact Physical postphysics ABI.
@@ -3179,9 +3181,26 @@ class IsaacLabPhysicalFlightScenePort:
         previous_center = exact_tensor(
             "previous_ball_center_m", suffix=(3,), dtype=torch.float32
         )
-        request_state = exact_tensor(
-            "current_state_env_f32", suffix=(13,), dtype=torch.float32
+        request_state_raw = getattr(request, "current_state_env_f32", None)
+        physical_owner = self._action_epoch_physical_owner
+        owner_issued_state_read = (
+            request_state_raw is None
+            and physical_owner is not None
+            and request._owner_identity
+            is getattr(physical_owner, "_owner_identity", None)
+            and request._token
+            is getattr(physical_module, "_POSTPHYSICS_CAPTURE_REQUEST_TOKEN", None)
         )
+        if request_state_raw is None:
+            if not owner_issued_state_read:
+                raise ActionBallFullMdpBallSceneError(
+                    "postphysics request current_state_env_f32 tensor ABI differs"
+                )
+            request_state = None
+        else:
+            request_state = exact_tensor(
+                "current_state_env_f32", suffix=(13,), dtype=torch.float32
+            )
 
         live_state = self.read_state_env()
         expected_slot = torch.arange(
@@ -3196,13 +3215,17 @@ class IsaacLabPhysicalFlightScenePort:
             | (observe & torch.eq(full_key, 0).all(dim=-1))
             | (observe & (generation < 0))
             | (observe & (ordinal < 0))
-            | ~(
-                torch.eq(request_state, live_state)
-                | (torch.isnan(request_state) & torch.isnan(live_state))
-            ).all(dim=-1)
+            | (
+                torch.zeros(shape, dtype=torch.bool, device=self.device)
+                if request_state is None
+                else ~(
+                    torch.eq(request_state, live_state)
+                    | (torch.isnan(request_state) & torch.isnan(live_state))
+                ).all(dim=-1)
+            )
         )
         nonfinite = observe & (
-            ~torch.isfinite(request_state).all(dim=-1)
+            ~torch.isfinite(live_state).all(dim=-1)
             | ~torch.isfinite(previous_center).all(dim=-1)
         )
         if (
@@ -3268,6 +3291,7 @@ class IsaacLabPhysicalFlightScenePort:
         no_event_stamp = stamp(no_event, event_phase=2)
         return facts_type(
             observation_stamp=stamp(observe, event_phase=2),
+            current_state_env_f32=live_state,
             selected_contact_event=no_event.clone(),
             selected_contact_ball_center_m=torch.zeros(
                 shape + (3,), dtype=torch.float32, device=self.device

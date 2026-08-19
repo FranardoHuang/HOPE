@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`implementation-candidate / Pod-profiler-not-yet-run`
-> 证据等级：E1源码与host反例；active run只读E2运行快照
+> 状态：`profiled / first-semantics-preserving-cut-host-validated`
+> 证据等级：E2 fresh Pod profiler + E1源码/host反例；首个瘦身cut仍待Pod配对
 
 ## 1. 采用、延后、拒绝
 
@@ -34,14 +34,18 @@
 
 ## 2. 当前运行证据
 
-2026-08-19 16:40 CST只读快照：
+2026-08-20只读快照：
 
-- active commit=`b64cb944…`，目标=`4096 env × 25000 update`；完整WAL为`2260`行，即ACK `0..1129`；
-  累计`111,083,520` transitions。
-- update约1062到1129的26分钟窗口约`23.3 s/update`；此前console长期是collection约`21--24 s`、
-  learning约`1.3--1.8 s`。
-- trainer约`144% CPU`、135 threads；GPU0约`6.4 GiB`、瞬时利用约`22%`。GPU1当时无compute进程且仅`2 MiB`。
-- active不可热补、不可用磁盘新代码解释。它继续作为旧代长跑；successor使用另一fresh namespace和自然空闲卡。
+- active commit=`e8eef4fb…`，目标=`4096 env × 25000 update`；完整WAL已到ACK `1186`，累计
+  `116,686,848` transitions。该run只读继续，不能用当前磁盘WIP解释。
+- profile只在同一进程update `0..4`开启并自动关闭。五个collection wall为
+  `16.150/12.890/14.560/15.000/14.358 s`；这五个带profiler且reset strata不同，不能冒充稳定吞吐成绩。
+- 五个row中`post_physics_publish`固定96次/update，inclusive host wall为
+  `6.998--7.809 s`；`sim_step`仅`0.904--0.960 s`，`owner_binding_assert`的552次合计
+  `0.143--0.170 s`。因此第一优先级是Physical/R06/Epoch数据流，不是CPU互斥或先磨反patch断言。
+- `after_command_to_observation_gap`为`2.290--3.538 s`，reward为`0.525--0.924 s`；它们是第二层。
+- 2026-08-20资源快照中trainer约`6.4 GiB`、GPU利用约十几到二十个百分点，GPU0自然空闲；CPU主线仍是
+  单进程Python/小kernel/同步固定税，没有整机CPU饱和证据。
 
 ## 3. 四个参考栈给出的共同答案
 
@@ -106,8 +110,12 @@ mandatory observation开始之间的after-command-to-observation gap；它包含
 - 每update要求观测到exact 24次env step；到预算后恢复所有原instance方法并关闭自己。
 - mask-first mixed/empty/full fixed-tape active rows与dense path逐位一致；invalid slot/index/fault保持同批拒绝，
   empty mask不调用五个numeric owner，mixed mask的numeric batch严格等于`active×3×3`。
-- 跨D05/FullMDP/profiler/RSL focused回归=`110 passed, 1 skipped`；GPU/真实Isaac binding、dynamic compact
-  同步代价与wall改善仍`未测`。
+- 第一条Physical瘦身cut只删除一次重复的全`[4096,2,13]`scene read和若干无所有权用途的clone：scene
+  producer返回同一次fresh stack，Physical立即校验并保留自己的after-image；foreign/direct请求仍必须显式提供
+  state并逐值join。它没有引入`.item/.cpu/nonzero/synchronize`，也没有做危险的empty fast return。
+- 该cut focused回归=`81 passed, 5 skipped`。它不会单独把22秒变成6秒；真正的empty-flight no-op仍需一个
+  能同时drain concrete fact-owner的可靠active-slot authority，不能只看Python端`pending is None`就跳过capture。
+- D05 compact与profiler先前跨层回归=`110 passed, 1 skipped`；当前首个Physical cut的Pod wall改善仍`未测`。
 
 successor验收是同一`4096×25000`进程：前5个update只读profile，之后profile自动关闭继续；性能结论使用
 profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.5 s`、p95 `<=8 s`。任何数值优化还须
@@ -115,8 +123,9 @@ profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.
 
 ## 6. 下一步
 
-1. commit/push profiler、线性uniqueness和mask-first候选，生成fresh GPU1 successor wrapper；不停止active GPU0。
-2. 消费前5个profile row，并比较profile自动关闭后的collection；dynamic compact若没有净收益就撤回，不靠主观保留。
-3. 后续依次做empty-flight no-op、selected-reset compact transaction、cold/update-boundary owner validation、
+1. commit/push当前single-read/clone瘦身cut，使用自然空闲GPU0和fresh namespace启动同样`4096×25000` successor；
+   旧GPU1 run在successor真实通过前继续只读，不因普通坏return而停。
+2. 消费successor前5个profile row，并比较profile自动关闭后的matched collection；没有净收益就撤回，不靠主观保留。
+3. 后续依次做可证明且能配对drain的empty-flight no-op、selected-reset compact transaction、cold/update-boundary owner validation、
    Reward/obs批处理。
 4. MuJoCo并行先完成action0 question/teacher，再合并contact census；R06/R07/Reward11--13闭合前不叫Full-A长跑。
