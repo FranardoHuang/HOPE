@@ -2120,3 +2120,11 @@ tests-only successor `66bc4c87…`再次越过构造、exact extras、launch与o
 结果=`1 failed`、RC=1，namespace `mujoco-fullmdp-gpu-gate.66bc4c87.Pod1GPU0Slot2Taskset.DCj7RXfQ`
 封存不重试。修正仅让GPU test从真实`initial_age+1`推进至77，仍硬验age 10--77共68个present/eligible格、
 末格非终止selected reset及精确episode增量；production仍0行变化。
+
+fresh tests-only commit `c2d8c536…`继续越过上述三层，并在真实recovery循环中暴露首个生产行为阻塞：
+age 77之前MuJoCo触发Gym safety reset，测试对shot完成不得调用`_reset_idx`的硬门因此失败。结果=`1 failed`、
+RC=1；namespace `mujoco-fullmdp-gpu-gate.c2d8c536.Pod1GPU0Slot2Taskset.d4aWD12U`封存不重试。
+这与已记录的take061 physical-ready / take058 action-frame0控制消费缺口一致，但本次trace尚未打印具体
+termination bit，不能把原因进一步写死为tilt/low/table。当前不能启动portable 25k：否则会把真实safety
+episode reset混成R07 nonterminal shot reset。下一件先在fresh诊断中记录首次reset age、terminal bits和plant state，
+再修production control/hold边界；G06保持`Partial`。

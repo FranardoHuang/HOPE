@@ -4399,3 +4399,6 @@
 - tests-only commit `66bc4c87…`的fresh gate已真实越过构造、extras、launch和outcome，随后因fixture把deadline
   锚点后的initial R07 age=1写死为0而`1 failed`、RC=1；namespace封存。修正从真实initial age逐step到77，
   仍要求age10--77的68格全present/eligible及末格非终止selected reset，production 0行变化。
+- fresh `c2d8c536…`已进入真实R07 recovery循环，但age77前触发Gym safety reset，测试的nonterminal-shot
+  hard gate正确拒绝`_reset_idx`，结果=`1 failed`、RC=1；namespace封存。当前trace未带具体terminal bit，
+  因此只把split-ready/hold-qdes控制消费列为待定位阻塞，不把它假写成某一种termination；portable 25k继续HOLD。

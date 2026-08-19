@@ -114,7 +114,10 @@
    fresh commit/namespace重新跑三个Full-A节点。commit `66bc4c87…`已越过构造、extras、launch与outcome，
    但fixture把deadline锚点后的真实初始age=1错写成0，结果=`1 failed`、RC=1；namespace
    `mujoco-fullmdp-gpu-gate.66bc4c87.Pod1GPU0Slot2Taskset.DCj7RXfQ`封存。tests-only现从真实initial age
-   逐步跑到77，仍要求age10--77 exact 68格；
+   逐步跑到77，仍要求age10--77 exact 68格。fresh `c2d8c536…`随后在真实recovery循环、age77之前触发
+   Gym safety reset，nonterminal-shot测试正确拒绝`_reset_idx`，结果=`1 failed`、RC=1；namespace
+   `mujoco-fullmdp-gpu-gate.c2d8c536.Pod1GPU0Slot2Taskset.d4aWD12U`封存。trace尚未输出具体terminal bit；
+   先做fresh首次reset age/bit/plant诊断并关闭split-ready控制消费，再谈25k；
 5. portable Full-A `4096 × 25000`的唯一fresh wrapper、terminal consumer与学习趋势尚不存在；在上述真实GPU
    纵切片通过前不生成长跑success receipt。
 
