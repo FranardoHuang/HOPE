@@ -81,6 +81,13 @@ git check-ignore -q vendor_assets
 也不得为本任务原地降级或修改。只从上表preserved source恢复exact wheel，并发布到一个原本不存在的
 ignored子树：
 
+Pod的`/workspace/mjlab_venv/bin/python`必须作为已安装Torch、TensorDict和MJLab依赖的解释器入口；
+run-local fresh site中的exact RSL-RL 3.1.2置于`PYTHONPATH`最前，并逐项核版本与distribution origin。
+解释器还要独立核其resolved path为`/usr/bin/python3.12`及system binary SHA；不得因此直接用
+`/usr/bin/python3.12`启动source gate、test或trainer，因为direct system入口不继承venv
+site-packages，封存one-shot已以`ModuleNotFoundError: No module named 'tensordict'`证明该错误边界。
+ambient RSL-RL 5.4.0仍不得成为import winner。
+
 ```bash
 RSL3_STAGE=$(mktemp -d ../nohope-rsl3-stage.XXXXXX)
 scp -P 18333 -i /Users/Franco/.ssh/id_ed25519_runpod \

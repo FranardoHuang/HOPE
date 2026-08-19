@@ -28,8 +28,12 @@ zero-action的table/fall/contact/recovery率只是telemetry；exact keepout term
 固定为`false`。
 
 host当前精确回归为runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
-`59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。exact Pod MuJoCo-Warp/RSL-RL3.1.2
-调用点与同进程`4096×25000`仍未测/未启动，Gate保持`Partial`。详细当前真源见
+`59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。Pod1 GPU2在exact
+`4aadd698…`上的两次fresh one-shot均于trainer前`failed_no_retry/rc=99`并封存、ACK=0：首轮在
+`rsl3_source_gate`暴露direct system Python缺`tensordict`；r1修正依赖入口后到达真实GPU focused，
+结果`5 passed, 3 failed in 23.11s`，三项旧测试把合法的tick-2
+`due=true/deferred=true/reveal=false`误写成必然ACCEPT。production cadence不回退；修正
+tests-only admission的fresh successor尚未通过，`4096×25000`仍未启动，Gate保持`Partial`。详细当前真源见
 [`EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819`](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 
 本次host结果的可复现命令（均从repo root执行；skip只允许标明为GPU-only）为：

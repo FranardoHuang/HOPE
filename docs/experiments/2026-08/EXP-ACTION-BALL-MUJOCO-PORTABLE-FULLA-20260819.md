@@ -92,6 +92,29 @@ question/teacher历史focused host=`22 passed, 7 skipped`。当前MuJoCo env/act
 `96 passed, 1 skipped`，其中production writer生成的真实prefix直接由独立consumer读取。另有
 `py_compile`与`git diff --check`通过。反例覆盖：
 
+Pod1 GPU2的live one-shot已经产生两条封存反例；两条result均为
+`status=failed_no_retry / final_rc=99 / ACK=0`，trainer均未启动：
+
+- exact commit `4aadd698e44f2e03a916ea1fd8c1daa1b2c2466c`、fresh namespace
+  `mujoco-fullmdp-a4096-u25000-4aadd698-20260820t071549cst`、wrapper SHA-256
+  `2d87de4d1c8a752d58266cfa1cebc092ac484a2235869c879f625cb21ccc8251`停在
+  `first_error_phase=rsl3_source_gate`，首错为
+  `ModuleNotFoundError: No module named 'tensordict'`。worker虽由
+  `/workspace/mjlab_venv/bin/python`进入，child却直接调用`/usr/bin/python3.12`，丢失venv依赖；
+  该namespace不重试。
+- 同commit的fresh r1 namespace
+  `mujoco-fullmdp-a4096-u25000-4aadd698-20260820t072045cst-r1`、wrapper SHA-256
+  `6512a8c4de4c4627289caa6703d022f70ac130ed1e4fd4e03f3bacfb83b7090f`
+  改为用venv入口执行child，同时独立核system Python identity；source gate越过，真实GPU focused
+  为`5 passed, 3 failed in 23.11s`。三个失败均观测tick 2
+  `due=true / deferred=true / reveal=false`，而旧测试错误要求zero action必然ACCEPT；该namespace
+  同样封存且不重试。
+
+r1的production观测符合冻结语义：due只是机会，live readiness为false时必须DEFER。successor不改
+production，只由独立GPU用例验证自然`ACCEPT XOR DEFER`、DEFER zero-write和tick 3不补试；下游
+contact/outcome用例显式安装tests-only readiness。该注入只隔离真实调用点，不能计入policy或business
+evidence；successor必须使用新commit、新namespace。
+
 - 改action center/incoming center会改变task与launch，旧midpoint shortcut不能假绿；
 - 两个env origin只影响world qpos写入，不污染env-local task；
 - true reset的joint/root birth与action history逐项来自default/zero authority，不再从take061推导；
@@ -99,8 +122,8 @@ question/teacher历史focused host=`22 passed, 7 skipped`。当前MuJoCo env/act
 - 任意中间bridge teacher会同时改变actor teacher字段和dense body reward，测试直接拒绝；
 - contact tick97精确采到strike frame52；true-reset clear、phase8 retain/defer、后续ACCEPT
   与peer preservation逐行验证。
-- 历史raw `[-4,+4]` clip使slot0 frame0的五个关节需求
-  `-4.074456/16.459160/-5.387479/6.098073/-31.731944`结构上不可达，而对应decoded
+- 历史raw `[-4,+4]` clip使default-offset到slot0 frame0的五个关节需求
+  `-6.473237/10.688715/-5.803502/6.699031/-15.155990`结构上不可达，而对应decoded
   q-des均仍在现有joint envelope内；去掉raw clip后该确定性不可学阻塞关闭。
 - timeout错位、`done=2`、shot-retire误增generation、Gym done不增generation、common step卡住、Reward20不守恒、
   同源UID自证、optimizer/fsync失败与JSONL重复/缺口均会拒绝；event次数为0、
@@ -114,9 +137,9 @@ question/teacher历史focused host=`22 passed, 7 skipped`。当前MuJoCo env/act
 
 ## 4. 仍未闭合
 
-1. 上述host runner/ledger/consumer尚未在exact Pod的同一fresh checkout、RSL-RL 3.1.2隔离安装和
-   真实MuJoCo-Warp GPU上跑过调用点；host PASS不代签GPU。
-2. portable `4096×25000`尚未实际启动；因而25000 ACK、26份快照、终点consumer和学习
+1. exact Pod one-shot已两次停在trainer之前：首轮暴露解释器依赖路径，r1越过source gate并到达
+   真实MuJoCo-Warp GPU focused `5/8`；修正后的fresh GPU gate仍未通过。
+2. portable `4096×25000`仍未实际启动；因而PPO update、25000 ACK、26份快照、终点consumer和学习
    趋势均为`未测`。
 3. 当前只是slot0 forehand A；C family、backhand分母、第二seed、promotion/export/deploy均未由
    本工程件授权。

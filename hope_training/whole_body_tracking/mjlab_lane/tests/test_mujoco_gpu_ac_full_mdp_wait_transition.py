@@ -2729,7 +2729,7 @@ def test_real_n2_timeout_reset_preserves_every_peer_reset_owned_row_exactly():
     not RUN_GPU_DIRECT,
     reason="requires the exact MuJoCo-Warp GPU environment and A3 assets",
 )
-def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
+def test_real_full_a_n1_zero_action_due_accepts_or_defers_without_tick3_retry():
     env = _gpu_env(num_envs=1, full_a_mode=True)
     try:
         zero = torch.zeros((1, 31), device=env.device)
@@ -2741,58 +2741,59 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         assert not bool(dones0.any())
         assert not bool(tick1["full_a_reveal_due_event"][0])
         assert not bool(tick1["full_a_reveal_event"][0])
+        task_before = env._epoch_task_f32.clone()
+        clocks_before = env._epoch_clock_ticks.clone()
+        ready_before_due = bool(env._full_a_cadence_ready[0])
 
-        obs0, _, dones0, extras0 = _assert_full_a_step_surface(
+        _, _, dones0, extras0 = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
         )
-        assert not bool(dones0.any())
         assert bool(extras0["full_a_reveal_due_event"][0])
-        assert bool(extras0["full_a_reveal_event"][0])
-        assert not bool(extras0["full_a_reveal_deferred_event"][0])
-        assert (
-            extras0["full_a_phase_before_reset"][0]
-            == wait_env.FULL_A_PHASE_REVEAL_COMMITTED
-        )
+        accepted = bool(extras0["full_a_reveal_event"][0])
+        deferred = bool(extras0["full_a_reveal_deferred_event"][0])
+        assert accepted ^ deferred
+        assert not bool(extras0["full_a_launch_event"][0])
+        assert accepted == ready_before_due
+        if deferred:
+            assert (
+                extras0["full_a_phase_before_reset"][0]
+                == wait_env.FULL_A_PHASE_IDLE
+            )
+        else:
+            assert (
+                extras0["full_a_phase_before_reset"][0]
+                == wait_env.FULL_A_PHASE_REVEAL_COMMITTED
+            )
+        if not bool(dones0[0]):
+            if deferred:
+                assert not bool(env._epoch_task_valid[0])
+                assert not bool(env._epoch_selected[0])
+                assert torch.equal(env._epoch_task_f32, task_before)
+                assert torch.equal(env._epoch_clock_ticks, clocks_before)
+            else:
+                assert bool(env._epoch_task_valid[0])
+                assert bool(env._epoch_selected[0])
+            assert torch.equal(env.reset_generation, generation)
+            assert int(env._full_a_next_reveal_tick[0]) == (
+                int(env._full_a_cadence.first_reveal_tick)
+                + int(env._full_a_cadence.cadence_ticks)
+            )
         assert not bool(extras0["full_a_r03_present_event"][0])
-        task_start = 0
-        for name, width in P.ACTOR_LAYOUT_V1:
-            if name == "epoch_task_f32":
-                break
-            task_start += width
-        assert torch.count_nonzero(obs0["policy"][0, task_start : task_start + 45]) > 0
+        assert torch.count_nonzero(extras0["reward_terms"][:, :14]) == 0
 
-        launch_center = env._full_a_launch_state_f32[0, :3].clone()
-        # Close this exact shot at the launch transition.  Waiting for the
-        # natural one-second horizon lets an independent posture/table
-        # termination win the race and makes the test mistake an ordinary
-        # physical terminal (outcome=NONE) for a broken Full-A settlement.
-        # The forced deadline still crosses one real launch/physics step and
-        # therefore proves movement and R06 publication.  The deterministic
-        # host state-machine tests own the later 68-cell chronology; this GPU
-        # gate does not require an untrained zero policy to survive it.
-        env._epoch_clock_ticks[0, 2] = int(env.common_step_counter)
-        env._epoch_clock_ticks[0, 3] = int(env.common_step_counter)
+        # Either verdict consumes this frozen opportunity; DEFER is zero-write
+        # and neither verdict may slide the same opportunity to tick 3.
         _, _, dones1, extras1 = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
         )
-        assert not bool(dones1[0])
-        assert not torch.equal(
-            extras1["full_a_physical_current_center"][0], launch_center
-        )
-        assert extras1["full_a_outcome_code"][0] in (
-            wait_env.FULL_A_OUTCOME_FLIGHT_EXPIRED,
-            wait_env.FULL_A_OUTCOME_BALL_DEAD,
-        )
-        assert bool(extras1["full_a_flight_terminal_event"][0])
-        assert bool(extras1["full_a_r06_present_event"][0])
-        assert not bool(extras1["full_a_shot_retired_event"][0])
-        assert not bool(extras1["full_a_selected_reset_event"][0])
-        assert (
-            extras1["full_a_phase_before_reset"][0]
-            == wait_env.FULL_A_PHASE_OUTCOME_SETTLED
-        )
-        assert env.reset_generation[0] == generation[0]
-        assert torch.count_nonzero(extras1["reward_terms"][:, 10:14]) == 0
+        assert not bool(extras1["full_a_reveal_due_event"][0])
+        assert not bool(extras1["full_a_reveal_event"][0])
+        assert not bool(extras1["full_a_reveal_deferred_event"][0])
+        if deferred and not bool(dones0[0]) and not bool(dones1[0]):
+            assert torch.equal(env._epoch_task_f32, task_before)
+            assert torch.equal(env._epoch_clock_ticks, clocks_before)
+        if not bool(dones0[0]) and not bool(dones1[0]):
+            assert torch.equal(env.reset_generation, generation)
 
     finally:
         env.close()
@@ -2811,6 +2812,11 @@ def test_real_full_a_n1_launch_reports_live_selected_rubber_contact():
             env.step(zero), num_envs=1
         )
         assert not bool(tick1["full_a_reveal_due_event"][0])
+        # This test owns the downstream live-contact callpoint, not policy
+        # readiness.  Install a tests-only ready fact before the real frozen
+        # tick-2 due opportunity; it is never counted as business evidence.
+        env._full_a_cadence_ready_streak[:] = 2
+        env._full_a_cadence_ready[:] = True
         _, _, _, reveal = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
         )
@@ -2909,6 +2915,10 @@ def test_real_full_a_n2_selected_outcome_preserves_peer_rows():
             env.step(zero), num_envs=2
         )
         assert not bool(tick1["full_a_reveal_due_event"].any())
+        # Isolate the peer/outcome callpoint from an untrained policy's live
+        # readiness.  Natural ACCEPT/DEFER remains covered by the N=1 test.
+        env._full_a_cadence_ready_streak[:] = 2
+        env._full_a_cadence_ready[:] = True
         _, _, _, reveal = _assert_full_a_step_surface(
             env.step(zero), num_envs=2
         )
@@ -2934,6 +2944,12 @@ def test_real_full_a_n2_selected_outcome_preserves_peer_rows():
             outcome_extras["full_a_phase_before_reset"][0]
             == wait_env.FULL_A_PHASE_OUTCOME_SETTLED
         )
+        assert bool(outcome_extras["full_a_flight_terminal_event"][0])
+        assert bool(outcome_extras["full_a_r06_present_event"][0])
+        assert bool(outcome_extras["full_a_r06_eligible_event"][0])
+        assert not bool(outcome_extras["full_a_flight_terminal_event"][1])
+        assert not bool(outcome_extras["full_a_r06_present_event"][1])
+        assert not bool(outcome_extras["full_a_r06_eligible_event"][1])
         assert not bool(outcome_extras["full_a_selected_reset_event"].any())
         assert not bool(outcome_extras["full_a_shot_retired_event"].any())
         assert torch.equal(outcome_extras["reset_generation"], generation_before)

@@ -65,7 +65,7 @@
   热改、不复用namespace；在matched profile-off与业务证据形成前不停止任一条。下一工程candidate只针对
   zero-live-flight时成对跳过arm/capture/R06/retire/park，不能恢复已被反例否定的单边postphysics早退。
 
-### MuJoCo portable Full-A：host长跑件已闭合，live 25k尚未启动
+### MuJoCo portable Full-A：host长跑件已闭合，live focused到正确DEFER，25k尚未启动
 
 当前host已闭合的代码合同：
 
@@ -92,12 +92,18 @@
 
 当前唯一发车边界：
 
-1. 从exact committed source生成fresh launcher与consumer，并把exact RSL-RL 3.1.2 wheel复制进
-   fresh、不可复用的run root；不得依赖Pod ambient环境；
-2. 在Pod fresh真实调用点核对MuJoCo-Warp、GPU UUID、CPU、action ABI、ledger row与snapshot写入；
-   任一失败都封存namespace且不重试；
-3. 真正的`4096 env × 25000 PPO update`尚未启动，Pod wall time、吞吐与学习趋势均为**未测**；
-4. 本代只授权A/slot 0；C/backhand未授权，backhand denominator必须为0。
+1. exact commit `4aadd698…`的两次Pod1 GPU2 fresh one-shot均已封存且不重试：首轮namespace
+   `...071549cst`在`rsl3_source_gate`因direct system Python缺`tensordict`停止；r1 namespace
+   `...072045cst-r1`修正依赖入口后到真实GPU focused `5 passed, 3 failed in 23.11s`，但三个旧
+   downstream测试错误要求zero action在tick 2必然ACCEPT。两轮均`failed_no_retry/rc=99`、ACK=0，
+   trainer未启动；详细身份与首错见[portable Full-A实验](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+2. 语义裁决是不改production：tick 2只有due，readiness=false时正确结果是DEFER、zero-write、tick 3
+   不补试。下一fresh commit把自然`ACCEPT XOR DEFER`留给独立GPU反例，并只在contact/outcome的
+   downstream tests显式tests-only admission；该admission不得计入业务证据。
+3. 下一one-shot必须使用新commit、新namespace和exact RSL-RL 3.1.2 overlay；focused gate通过后由
+   同一执行件直接进入`4096 × 25000`，不再添加短跑或zero-policy表现门；任一失败仍封存且不重试。
+4. 真正的`4096 env × 25000 PPO update`尚未启动，Pod wall time、吞吐与学习趋势均为**未测**。
+5. 本代只授权A/slot 0；C/backhand未授权，backhand denominator必须为0。
 
 #### 25k runner与consumer合同
 
@@ -125,7 +131,7 @@
 | --- | --- | --- | --- |
 | 1 | raw-action ABI（原始动作接口约定） | **CLOSED-host**：无`[-4,4]` raw clip，nonfinite fallback与joint envelope反例通过 | fresh Pod真实调用点保持同一动作语义 |
 | 2 | thin ledger与独立consumer | **CLOSED-host**：runner/ledger/consumer `96 passed, 1 skipped`，含production writer→consumer prefix | Pod写出一行真实ACK、snapshot并由独立consumer读取 |
-| 3 | exact Pod focused gate | **未测** | exact commit、fresh namespace、exact RSL-RL 3.1.2、GPU UUID/CPU与MuJoCo-Warp一次通过 |
+| 3 | exact Pod focused gate | **live attempted / HOLD**：两条fresh namespace均在trainer前封存；r1到真实GPU `5/8`，失败来自stale unconditional-ACCEPT tests，不是production cadence | fresh commit/new namespace；自然verdict反例与tests-only downstream admission分离；同一one-shot gate通过后直接进入25k |
 | 4 | portable A长跑 | **未启动** | 同一进程`4096 × 25000`及exact 25000-row终端消费 |
 | 5 | 终跑删除与2.0瘦身 | **待长跑后** | production callpoint census证明无人消费后再删legacy runner、重复validator/receipt与无restore consumer的carry graph |
 

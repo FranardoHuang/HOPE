@@ -14,9 +14,13 @@
   科学窗口报告未闭合，`full_a_complete`固定为`false`。
   zero-policy table/fall/contact仍只作telemetry，exact keepout termination保留。
 - 当前host回归：runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
-  `59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。exact Pod调用点与portable
-  `4096×25000` live run仍未测/未启动；q-des guard仍`DIVERGENT_DECLARED`，无transfer/matched authority。
-  详见[portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
+  `59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。Pod1 GPU2 exact `4aadd698…`的两次
+  fresh one-shot均在trainer前`failed_no_retry/rc=99`、ACK=0并封存：首轮是source-gate direct
+  Python缺`tensordict`；r1修正依赖入口后真实GPU focused=`5 passed, 3 failed in 23.11s`，暴露三项
+  旧测试把合法`due=true/deferred=true/reveal=false`误当必然ACCEPT。production不改；下一fresh
+  successor只修测试隔离。portable `4096×25000`仍未启动，q-des guard仍
+  `DIVERGENT_DECLARED`，无transfer/matched authority。详见
+  [portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 
 ## 2026-08-19 — MuJoCo portable action0 question与measured teacher纵切片闭合host反例
 
@@ -4435,10 +4439,11 @@
   reset/restore/checkpoint仍走dense路径；global sticky fault不冒充activity，但原值保持到下一次live capture
   时显式暴露。host zero-flight suite=`112 passed`（约4秒），consumer semantic
   suite=`166 passed`（约8秒）；Pod fixed-tape、profile-off matched wall与6--9秒目标均为未测。
-- MuJoCo已删除错误的raw action `[-4,4]`裁剪；五个真实counterexample为
-  `-4.074456/16.459160/-5.387479/6.098073/-31.731944`。policy/teacher/observation/PD全部统一为
-  runtime/schema-2关节序，唯一actuator permutation在plant写入边界；physical `q_ready`只负责reset，
-  affine offset另取`runtime_plant.default_joint_pos_rad`。MuJoCo只做机械hard-range clamp，而Isaac还包含
+- MuJoCo已删除错误的raw action `[-4,4]`裁剪；default-offset到slot0 frame0的五个真实
+  counterexample为`-6.473237/10.688715/-5.803502/6.699031/-15.155990`。policy/teacher/observation/PD
+  全部统一为runtime/schema-2关节序，唯一actuator permutation在plant写入边界；true Full-A reset和
+  affine offset均取`runtime_plant.default_joint_pos_rad`，`take061/physical-ready`只保留provenance。
+  MuJoCo只做机械hard-range clamp，而Isaac还包含
   soft-inset与state-dependent brake，故该轴明确`DIVERGENT_DECLARED`且无transfer/matched authority。
 - 错误的R07 zero-policy发车门已删除；age `10..77`、expected/eligible=`68/68`与无sticky fault只由
   确定性host lifecycle反例验证，未训练policy的table/fall/contact不再误作通过条件。会误杀合法recovery的
