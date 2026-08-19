@@ -13,6 +13,9 @@
   selected只发布单control-step事件并驱动Reward10。host聚焦回归通过；fresh GPU、动作条件化question/teacher、
   R06/R07和Reward11--13仍未测，因此portable长跑继续HOLD。当前执行账见
   [简洁TODO](operations/action_ball_dual_backend_longrun_todo_20260819.md)。
+- 首次fresh GPU1 direct组合在第一个N1节点遇到tests-only假失败：无关姿态/桌面terminal被旧断言误当成
+  flight outcome。未重试原namespace；窄修强制launch transition结算该shot，host=`11 passed,6 skipped`，
+  新commit GPU复核待办。
 
 ## 2026-08-19 — Isaac 4096×25000到A100；MuJoCo R03与rough修正并行推进
 

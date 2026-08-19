@@ -11465,3 +11465,9 @@ question、selected motion teacher、R06、R07和Reward11--13仍缺，fresh GPU 
 下一依赖顺序固定为`catalog -> action-conditioned question/teacher -> observed contact GPU -> R06/R07 ->
 4096×25000`。直到这些真实调用点闭合，runner必须继续写`full_a_slice_attempted`与
 `full_a_complete=false`。
+
+**fresh GPU first attempt。** commit `e6cefaa0…`在Pod1空闲物理GPU1的一次性fresh namespace中运行
+三个Full-A direct节点，首个N1节点`rc=1`后按`-x`停止，未重试。真实ball已经launch并移动；失败是测试把
+任何姿态/桌面terminal都要求带Full-A flight outcome，而production对此类terminal正确保留
+`outcome_code=NONE`。tests-only修复将该shot deadline钉在launch transition，避免无关terminal抢先，
+同时保留真实physics、movement、outcome和selected reset断言；host=`11 passed,6 skipped`，fresh GPU复核待办。

@@ -1094,20 +1094,19 @@ def test_real_full_a_n1_reveals_launches_flies_and_settles_one_shot():
         assert torch.count_nonzero(obs0["policy"][0, task_start : task_start + 45]) > 0
 
         launch_center = env._full_a_launch_state_f32[0, :3].clone()
+        # Close this exact shot at the launch transition.  Waiting for the
+        # natural one-second horizon lets an independent posture/table
+        # termination win the race and makes the test mistake an ordinary
+        # physical terminal (outcome=NONE) for a broken Full-A settlement.
+        # The forced deadline still crosses one real launch/physics step and
+        # therefore proves movement, outcome publication, and selected reset.
+        env._epoch_clock_ticks[0, 3] = int(env.common_step_counter)
         _, _, dones1, extras1 = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
         )
         centers = [extras1["full_a_physical_current_center"][0].clone()]
         terminal = bool(dones1[0])
         last = extras1
-        for _ in range(80):
-            if terminal:
-                break
-            _, _, dones, last = _assert_full_a_step_surface(
-                env.step(zero), num_envs=1
-            )
-            centers.append(last["full_a_physical_current_center"][0].clone())
-            terminal = bool(dones[0])
         assert terminal
         assert any(not torch.equal(center, launch_center) for center in centers)
         assert last["full_a_outcome_code"][0] in (

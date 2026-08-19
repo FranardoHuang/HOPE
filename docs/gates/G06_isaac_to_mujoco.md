@@ -2050,3 +2050,10 @@ skip均是
 需要Isaac或MuJoCo-Warp GPU的节点，不能算live证据。动作条件化question/selected teacher、R06/R07、
 Reward11--13、per-action/per-side分母和fresh GPU真实contact/reset仍未闭，因此runner继续固定
 `full_a_complete=false`，G06保持`Partial`，portable长跑继续HOLD。
+
+首次fresh GPU1组合尝试固定commit `e6cefaa0…`与namespace
+`mujoco-fullmdp-contact-e6cefaa0.Pod1GPU1.2nfiiysp`，自然`rc=1`且未重试。首个N1节点在真实launch后
+先遇到独立姿态/桌面terminal，旧测试却把任意`done`都要求为Full-A flight outcome，因而在
+`outcome_code=NONE`假失败，selected-contact与N2 reset两节点尚未执行。tests-only窄修把该节点的shot
+deadline钉到launch transition：仍经过一次真实physics并验证ball移动、outcome与selected reset，但不再让
+无关terminal抢先。host文件=`11 passed,6 skipped`；新commit/fresh namespace GPU复核待执行。
