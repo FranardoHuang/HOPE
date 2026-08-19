@@ -1,6 +1,6 @@
 # 简短进度记录
 
-## 2026-08-20 — MuJoCo cadence/reset/RETIRE与25k证据链完成host收口
+## 2026-08-20 — MuJoCo cadence/reset/RETIRE host收口；25k工程长跑active
 
 - MuJoCo raw-action/order/scale/default-offset host已闭合；true Gym reset现在使用runtime default joints、
   configured default root加env origin、零速度和零action history，`take061/q_ready`不再是birth authority。
@@ -18,9 +18,13 @@
   `9e7c1c61…`保持production cadence不变，真实GPU focused=`8 passed in 23.00s`；随后实际4096-env
   trainer的首个optimizer update返回，但stock RSL-RL 3.1.2 save写出7,882,391-byte `model_0.pt`后，
   因disable-logs路径缺`runner.logger_type`而`AttributeError/rc=99`。evidence 0 bytes、ACK=0；该未ACK
-  文件不算snapshot，r2 namespace封存不可重用。fresh r3只显式安装upstream默认
-  `runner.logger_type='tensorboard'`字段，不启日志或上传。portable `4096×25000`仍未形成启动证据，q-des guard仍
-  `DIVERGENT_DECLARED`，无transfer/matched authority。详见
+  文件不算snapshot，r2 namespace封存不可重用。fresh r3 exact `dc62684c…`只补upstream默认
+  `runner.logger_type='tensorboard'`字段且不启日志/上传；真实GPU focused再次`8/8`，单一trainer进程的
+  `4096×24×25000`现已active。durable ACK=`0..7`，update 1/5只读consumer均通过；已ACK
+  `model_0.pt`为7,882,391 bytes、SHA=`06883851…528f`。前8个pre-ACK core iteration median约
+  `5.025 s`，Reward20/actual每update 98,304行finite、conservation fault=0且policy std finite。
+  到update5累计due/defer/ACCEPT=`8192/8192/0`；这只是行为telemetry。进程仍alive、result仍0 bytes，
+  engineering/business/Full-A终局均未完成；q-des guard仍`DIVERGENT_DECLARED`，无transfer/matched authority。详见
   [portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 
 ## 2026-08-19 — MuJoCo portable action0 question与measured teacher纵切片闭合host反例
@@ -4451,8 +4455,8 @@
   额外keepout witness已拒绝并回退，原有exact table keepout仍保留。
   optimizer前prepare/成功后snapshot+ACK的thin ledger与独立consumer host闭合：真实writer→consumer
   prefix也由同一production payload测试，runner/ledger/consumer=`80 passed, 1 skipped`；MuJoCo env/action/
-  outcome=`54 passed, 7 skipped`，alignment新增反例=`14 passed`。Pod r2真实GPU focused现为
-  `8 passed in 23.00s`；实际4096 trainer首个optimizer返回后在stock save/logger边界停止，
-  evidence 0 bytes、ACK=0，因此`4096×25000`仍未形成启动证据。详见
+  outcome=`54 passed, 7 skipped`，alignment新增反例=`14 passed`。Pod r3真实GPU focused为`8/8`，
+  单一4096 trainer现已active且durable ACK=`0..7`；update 1/5 consumer均通过。进程仍alive、result仍
+  0 bytes，25k终局未完成。详见
   [portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)及
   [G06](gates/G06_isaac_to_mujoco.md)。

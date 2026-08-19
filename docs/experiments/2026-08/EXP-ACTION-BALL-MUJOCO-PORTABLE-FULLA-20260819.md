@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`action-affine-and-ledger-host-validated / qdes-guard-divergent / live-25k-not-started`
-> 证据等级：E1源码与host反例
+> 状态：`action-affine-and-ledger-host-validated / qdes-guard-divergent / live-25k-active-incomplete`
+> 证据等级：E1源码、host反例与Pod live前缀
 
 ## 1. 采用、延后、拒绝
 
@@ -129,6 +129,23 @@ snapshot。该namespace封存且不可重用。最窄fresh r3修复只是显式�
 `runner.logger_type='tensorboard'`以满足stock save，不启用logger、TensorBoard写入或上传；必须使用
 新commit、新namespace，不能重试r2。
 
+fresh r3现使用exact source `dc62684c41e70e40dedaf191a32921b6cd98b344`、namespace
+`mujoco-fullmdp-a4096-u25000-dc62684c-20260820t074950cst-r3`和wrapper SHA-256
+`0f5adc6024f01ffee7e761ab7b620d70855e541dbea298216ab9093e30695fd6`；worker PID=`864055`、单一
+trainer PID=`865285`。真实GPU focused再次为`8/8`，随后同一trainer进程的
+`4096 env × 24 step × 25000 update`已经启动且仍alive；result文件在active期间仍为0 bytes，不是失败seal。
+当前durable ACK为`0..7`，`update_1`/`update_5`只读consumer均`passed`。首份已ACK
+`model_0.pt`为7,882,391 bytes，SHA-256
+`06883851e67ccaaa921cfeeb8bf5c983ee6b3443d67465d8cde1d08ed63f528f`，仍只有
+`diagnostic_unauthorized/checkpoint_authority=false/resume_authority=false`。
+
+前8个pre-ACK core iteration为`4.889..5.640 s`，median约`5.025 s`；这是active前缀，不代签25k
+终局吞吐。每update的Reward20与actual reward均有98,304行finite，conservation fault=0且policy std
+finite。行为telemetry中，update0为due/defer/ACCEPT=`4096/4096/0`；到update5累计为
+`8192/8192/0`，update4出现4,096行exact-table/Gym reset。这些未训练policy表现不阻断engineering
+run；当前`engineering_run_complete=false`、`business_chain_complete=false`、`full_a_complete=false`，
+终点consumer与最终趋势仍为`未测`。
+
 - 改action center/incoming center会改变task与launch，旧midpoint shortcut不能假绿；
 - 两个env origin只影响world qpos写入，不污染env-local task；
 - true reset的joint/root birth与action history逐项来自default/zero authority，不再从take061推导；
@@ -151,13 +168,13 @@ snapshot。该namespace封存且不可重用。最窄fresh r3修复只是显式�
 
 ## 4. 仍未闭合
 
-1. exact Pod r2已通过真实MuJoCo-Warp GPU focused `8/8`并进入4096 trainer；首个optimizer
-   update返回后，stock save在首条ACK前因缺`runner.logger_type`停止。fresh r3仍需验证这一最窄修复。
-2. portable `4096×25000`仍未形成启动证据：r2 evidence为0 bytes、ACK=0，未授权的`model_0.pt`
-   不计snapshot；25000 ACK、26份已ACK snapshot、终点consumer和学习趋势均为`未测`。
-3. 当前只是slot0 forehand A；C family、backhand分母、第二seed、promotion/export/deploy均未由
-   本工程件授权。
+1. exact Pod r3已通过真实MuJoCo-Warp GPU focused `8/8`，并在单一trainer进程中启动
+   `4096×24×25000`；durable ACK当前为`0..7`，update 1/5只读consumer均通过。
+2. active不等于完成：仍缺ACK `8..24999`、其余25份已ACK snapshot、终点consumer和最终趋势；result
+   在进程alive期间保持0 bytes，当前`engineering_run_complete=false`。
+3. update5前ACCEPT仍为0，所以slot0业务链仍未出现；C family、backhand分母、第二seed、
+   promotion/export/deploy也未由本工程件授权，`business_chain_complete/full_a_complete=false`。
 
 这些是真实剩余的证据边界。zero-action age16/bit16、普通table/fall、零contact或低
 recovery率只是未训练策略的telemetry，不再作为发车阻塞；现有keepout termination和证据完整性
-检查仍保留。因此本轮是host完成的长跑工程件，不是MuJoCo Full-A已长跑。
+检查仍保留。因此当前只是active engineering longrun前缀，不是25k完成或MuJoCo Full-A完成。

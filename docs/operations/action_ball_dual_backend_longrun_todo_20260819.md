@@ -65,7 +65,7 @@
   热改、不复用namespace；在matched profile-off与业务证据形成前不停止任一条。下一工程candidate只针对
   zero-live-flight时成对跳过arm/capture/R06/retire/park，不能恢复已被反例否定的单边postphysics早退。
 
-### MuJoCo portable Full-A：live focused已通过，trainer停在首条ACK前，25k尚未启动
+### MuJoCo portable Full-A：`4096×24×25000` active，已过update 5，尚未完成
 
 当前host已闭合的代码合同：
 
@@ -90,7 +90,7 @@
   engineering与business完成分开。host runner/ledger/consumer=`96 passed, 1 skipped`；
   env/action/outcome=`59 passed, 7 skipped`；alignment=`14 passed, 21 deselected`。
 
-当前唯一发车边界：
+当前live执行边界：
 
 1. r0/r1两条Pod1 GPU2 fresh one-shot均已封存且不重试：它们分别暴露direct system Python缺
    `tensordict`和旧GPU tests误把合法DEFER写成必然ACCEPT；详细身份与首错见
@@ -101,11 +101,21 @@
    `8 passed in 23.00s`。同一执行件进入实际4096-env trainer且首个optimizer update返回；随后stock
    save写出7,882,391-byte `model_0.pt`，却因disable-logs路径缺`runner.logger_type`而
    `AttributeError/rc=99`。evidence 0 bytes、ACK=0；未ACK文件不算snapshot，namespace封存不可重用。
-3. 下一one-shot只允许fresh r3：显式安装upstream默认`runner.logger_type='tensorboard'`字段以满足
-   stock save，但不启logger、TensorBoard写入或上传。使用新commit、新namespace；focused通过后由
-   同一执行件直接进入`4096 × 25000`，不增加短跑或zero-policy表现门，失败仍封存且不重试。
-4. 真正的`4096 env × 25000 PPO update`仍没有ACK启动证据；Pod吞吐与学习趋势均为**未测**。
-5. 本代只授权A/slot 0；C/backhand未授权，backhand denominator必须为0。
+3. fresh r3 exact source `dc62684c41e70e40dedaf191a32921b6cd98b344`、namespace
+   `mujoco-fullmdp-a4096-u25000-dc62684c-20260820t074950cst-r3`、wrapper SHA-256
+   `0f5adc6024f01ffee7e761ab7b620d70855e541dbea298216ab9093e30695fd6`；worker/trainer
+   PID=`864055/865285`。真实GPU focused=`8/8`，单一trainer进程的`4096×24×25000`已经active；不得
+   signal、热补、复用namespace或另发短跑。
+4. 当前durable ACK=`0..7`，`update_1`/`update_5`只读consumer均`passed`。已ACK `model_0.pt`
+   为7,882,391 bytes、SHA-256
+   `06883851e67ccaaa921cfeeb8bf5c983ee6b3443d67465d8cde1d08ed63f528f`；它仍是
+   `diagnostic_unauthorized/checkpoint_authority=false/resume_authority=false`。前8个pre-ACK core
+   iteration为`4.889..5.640 s`、median约`5.025 s`；进程alive且result仍0 bytes，25k尚未完成。
+5. Reward20/actual每update各98,304行finite，conservation fault=0且policy std finite。update0
+   due/defer/ACCEPT=`4096/4096/0`；到update5累计`8192/8192/0`，update4 exact-table/Gym reset=4,096。
+   这些是未训练policy的行为telemetry，不阻断engineering run；当前
+   `engineering_run_complete/business_chain_complete/full_a_complete=false`，final仍`未测`。
+6. 本代只授权A/slot 0；C/backhand未授权，backhand denominator必须为0。
 
 #### 25k runner与consumer合同
 
@@ -132,9 +142,9 @@
 | 顺序 | 唯一改动面 | 当前证据 | 下一验收 |
 | --- | --- | --- | --- |
 | 1 | raw-action ABI（原始动作接口约定） | **CLOSED-host**：无`[-4,4]` raw clip，nonfinite fallback与joint envelope反例通过 | fresh Pod真实调用点保持同一动作语义 |
-| 2 | thin ledger与独立consumer | **CLOSED-host / live ACK=0**：runner/ledger/consumer `96 passed, 1 skipped`；r2首个optimizer返回，但save失败早于ACK | r3写出一行真实ACK、已ACK snapshot并由独立consumer读取 |
-| 3 | exact Pod focused gate | **CLOSED-live**：r2真实GPU `8 passed in 23.00s`，自然verdict与tests-only downstream admission已分离 | r3保持同一语义；同一one-shot直接进入25k |
-| 4 | portable A长跑 | **pre-ACK failed / 未启动**：r2进入4096 trainer但evidence 0 bytes、ACK=0 | fresh r3只补`runner.logger_type`默认字段后运行同一进程`4096 × 25000`及exact 25000-row终端消费 |
+| 2 | thin ledger与独立consumer | **CLOSED-live-prefix**：runner/ledger/consumer host `96 passed, 1 skipped`；r3 durable ACK=`0..7`，update 1/5 consumer均通过，`model_0.pt`已ACK | 守护同一run的连续ACK、后续25份snapshot和terminal consumer |
+| 3 | exact Pod focused gate | **CLOSED-live**：r3真实GPU `8/8`，自然verdict与tests-only downstream admission已分离 | active run保持同一语义，不另发gate/smoke |
+| 4 | portable A长跑 | **ACTIVE / update 5 passed / incomplete**：单一`4096×24×25000` trainer alive，前8 ACK durable；business/full-A仍false | 同一进程到ACK 24999、26份已ACK snapshot及exact 25000-row终端消费 |
 | 5 | 终跑删除与2.0瘦身 | **待长跑后** | production callpoint census证明无人消费后再删legacy runner、重复validator/receipt与无restore consumer的carry graph |
 
 catalog、question/teacher、observed contact、R06、R07和Reward0--20已经属于当前portable surface，
@@ -159,10 +169,10 @@ live 25k被独立consumer完整验收后只允许写`engineering_run_complete=tr
 2. 发现使任务结构上不可学或使证据不可信的确定性错误；
 3. fresh、immutable、同MDP且已通过真实调用点的successor已经就绪，旧run被它严格支配。
 
-普通tilt/table/fall、早期return下降或ACCEPT仍为0都只是telemetry，不自动触发stop。当前MuJoCo仍有
-Pod真实调用点与live 25k证据缺口，Isaac zero-flight candidate也只有host语义证据、没有matched Pod wall；
-所以它们都尚未严格支配active Isaac，**现在不停active Isaac**。这不等于继续暂停MuJoCo：exact Pod focused
-gate一旦自然通过，就直接在fresh namespace发同一进程25k，不再增加zero-policy表现门或1000-update中转run。
+普通tilt/table/fall、早期return下降或ACCEPT仍为0都只是telemetry，不自动触发stop。MuJoCo r3虽已
+通过真实调用点并active，但q-des仍`DIVERGENT_DECLARED`且没有matched Pod authority，尚未严格支配
+active Isaac，**现在不停active Isaac**。同一MuJoCo r3继续自然推进25k；不因zero-policy表现另发gate、
+1000-update中转run或restart。
 
 ## 7. 里程碑与完成条件
 

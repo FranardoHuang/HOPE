@@ -34,8 +34,17 @@ host当前精确回归为runner/ledger/consumer=`96 passed, 1 skipped`，env/act
 save写出7,882,391-byte `model_0.pt`后，因`log_dir=None`/`disable_logs`路径未初始化
 `runner.logger_type`而触发`AttributeError`；one-shot `rc=99`、evidence 0 bytes、ACK=0。该未ACK文件
 保持`diagnostic_unauthorized/checkpoint_authority=false/resume_authority=false`，不能算snapshot；r2
-namespace封存且不可重用。fresh r3只显式安装upstream默认`runner.logger_type='tensorboard'`字段，
-不启日志或上传。`4096×25000`仍未形成启动证据，Gate保持`Partial`。详细当前真源见
+namespace封存且不可重用。fresh r3 exact source
+`dc62684c41e70e40dedaf191a32921b6cd98b344`只显式安装upstream默认
+`runner.logger_type='tensorboard'`字段，不启日志或上传；同一production cadence的真实GPU focused
+再次`8/8`，worker/trainer PID=`864055/865285`，单一trainer进程的`4096×24×25000`现已active。
+当前durable ACK=`0..7`，update 1/5只读consumer均通过；已ACK `model_0.pt`为7,882,391 bytes、
+SHA-256 `06883851e67ccaaa921cfeeb8bf5c983ee6b3443d67465d8cde1d08ed63f528f`。前8个pre-ACK core
+iteration范围`4.889..5.640 s`、median约`5.025 s`；每update Reward20/actual均有98,304行finite，
+conservation fault=0且policy std finite。update0 due/defer/ACCEPT=`4096/4096/0`，到update5累计
+`8192/8192/0`，update4 exact-table/Gym reset=4,096；这些只作行为telemetry。进程仍alive、result仍
+0 bytes；engineering、business、Full-A终局均未完成，
+Gate保持`Partial`。详细当前真源见
 [`EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819`](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 
 本次host结果的可复现命令（均从repo root执行；skip只允许标明为GPU-only）为：
