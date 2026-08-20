@@ -44,6 +44,18 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
 - **FullMDP RSL3 adapter / FullMDP RSL3优化边界适配器**：不复制RSL-RL3 rollout/storage/env-step，
   只包住真实零参数`alg.update()`，把FullMDP的pre-optimizer freeze、post-update summary、durable WAL与
   destructive ACK按一次性顺序接入。它不是新trainer、checkpoint或安全证明。
+- <a id="fullmdp-phase-a-direct-lean"></a>**FullMDP Phase-A direct-lean runtime / FullMDP第一阶段直连
+  lean运行时**：2026-08-20的branch-scoped结构减法；现役单动作family A与family C（A/C，分别把期望
+  击球任务与来球状态送入policy的两条训练族）只能构造exact `ActionBallFullMdpLeanRuntimeOwner`。
+  trainer不再选择formal runtime，环境不再暴露formal partial installer或逐leaf owner getter；旧
+  `action_ball_full_mdp_runtime_owner.py`仅是等待Phase-B物理删除的dormant源码，不是安全、执行或
+  checkpoint权威。仍保留独立可失败的source/API pin（源码与运行接口钉住）、环境铸造的lease与
+  construction seal、component
+  object identity、selected-reset generation与`int64` overflow、finite检查与sticky poison/fail-stop；
+  `R10 HOLD`在此专指尚未接通的FullMDP全局checkpoint/restore join（不是历史训练臂`R10c`），继续禁止
+  exact resume。由同一writer生成的依赖有向无环图（DAG）、hash、receipt或重复投影不是独立证据，
+  不得冒充安全。Phase-A只
+  证明现役runtime选择和接口已收窄，不证明`6 s/update`、学习质量、formal launch或任何Gate Done。
 - **A1000 / family A千轮早期趋势长跑**：同一fresh进程、同一seed和Reward连续完成1000个PPO update，
   在20/50/100/200/500/1000只读日志/WAL/TensorBoard；节点不重启、不改配置。它回答早期学习趋势，
   仍是`diagnostic_unauthorized`，不是formal promotion或可恢复长跑。

@@ -6406,7 +6406,7 @@ semantic卷为`166 passed, 8 skipped` / 约8秒。
 `Partial`。详细性能因果见
 [`EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819`](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
 
-### 2026-08-20 热路径结构瘦身与D05架构裁决（Gate仍`Partial`）
+### 2026-08-20 热路径结构瘦身与direct-lean Phase-A（Gate仍`Partial`）
 
 `43d95275…`删除Reward14中唯一production caller立即丢弃的整
 `ActionEpochRecord` clone；append/journal/ordinal/fault/close和守恒事实均保留。epoch/lean-reward
@@ -6419,11 +6419,29 @@ HANDOFF §3.1把“构造后同一writer的受信进程主动monkeypatch”这�
 global step相减，使同一plant state随训练时间漂移；现在invalid row固定为0，valid row仍保留原tick差。
 这是证据可信/可学性修复，不计作性能提速。
 
-第二阶段D05 producer→R05 compact ABI尝试已完整回退，production/test diff均为0：
-`action_ball_full_mdp_runtime_owner.py`冻结inventory真实需要旧`prepare_many/preview/stage/arm/commit/journal`
-surface，`train.py`在`launch_authorized=true`时仍会选择该formal owner。为它叠adapter只会永久保留
-两套ABI与两份state。下一步必须先正式退役/隔离formal legacy lane及其`train.py` branch，
-再以单一compact transaction删掉full-N scatter/bank，不加adapter。
+第二阶段D05 producer→R05 compact ABI尝试已完整回退，production/test diff均为0。终审继续追到
+formal owner的可达性：它只被`train.py`导入读取恒false inventory，无argv/config能构造；环境formal
+pins也全为None，唯一成功测试是自造authorization fixture。它是HANDOFF§3.1定义的
+zero-hot-callpoint stale API，不是production consumer。Phase-A现已把exact A/C FullMDP固定为direct
+lean：`train.py`只创建`ActionBallFullMdpLeanRuntimeOwner`，env只接受这一条owner/lease/manager
+graph；formal mode/pins/DAG/SHA validator/reset receipt/standalone installers/post-only escape均已从
+现役wiring删除。production为`train.py +176/-478`、`full_mdp_env.py +108/-1261`，合计
+`+284/-1739`、净删`1,455`行；exact七文件回归=`310 passed, 15 skipped`。formal owner源仍dormant，
+Phase-B再单独物理删除，不为它加adapter。
+
+这次只给结构GO，不给性能GO。保留的是construction executable binding、六个真实callpoint、
+lease/seal、component identity、reset generation/overflow、sticky poison与PhysX close；删除的是无consumer
+dispatch和同一writer的重复自证。跨全链的joint/nonfinite/overflow、slot/generation/key join、真实PhysX
+contact、selected-reset行集、finite Reward/observation、optimizer成功后才持久ACK及run provenance均不因
+Phase-A放宽。可复现七文件命令与限制见
+[`EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819` §5](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#5-本候选实现与验收)。
+下一性能刀仍须以单一compact transaction删掉D05 full-N scatter/bank。
+
+独立红队同时发现旧partial-construction `close()`会因缺manager提前中断、遗漏process-global simulator
+清理。`7b7c9510`已把该路径改成pinned顺序的单次best-effort teardown，并用transient guard阻止析构/
+callback重入；terminal步骤失败后sticky要求cold process exit，绝不重试旧sim或误清新instance。正常构造
+后的upstream close不变；exact七文件回归现为`317 passed, 15 skipped`，终审`P0=0 / P1=0`。这是真实
+资源安全修复，不是性能gate，也不改变G05的`Partial`状态。
 
 zero-flight加上述两个性能cut的算术预算仍只是约`8.4--9.1 s/iteration`，而且Pod matched
 wall未测；`6 s/update`既未证明也尚未在预算中闭合。因此G05保持`Partial`，不用host测试、

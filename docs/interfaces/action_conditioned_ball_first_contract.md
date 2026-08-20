@@ -53,6 +53,18 @@ manifest loader 可校验 repo 内 regular-file bytes、拒绝 symlink escape，
 逐项交叉绑定 ordered motion bytes、upper/full scope、shared-ready、evidence chain 和 promotion
 certificate。metadata、文件存在、diagnostic PASS 或手写布尔值都不能 mint capability。
 
+现役单动作family A/C FullMDP的runtime身份收窄为
+[`Phase-A direct-lean`](../DEFINITIONS.md#fullmdp-phase-a-direct-lean)：只允许exact lean owner；formal
+runtime selector、partial installer和逐leaf getter不是候选接口。旧
+`action_ball_full_mdp_runtime_owner.py`仅是dormant Phase-B删除对象，不能被引用为安全、执行或
+checkpoint权威。接口仍须在真正独立的边界 fail closed：source/API pin、环境铸造lease与construction
+seal、exact component object identity、selected-reset generation与overflow、finite与sticky
+poison/fail-stop。FullMDP全局checkpoint/restore join继续标为`R10 HOLD`，因此不授权exact resume。
+
+同一writer同时产生依赖有向无环图（DAG）/hash/receipt和被核值，只能发现局部损坏，不能形成独立
+安全证据；为它恢复formal旁路或兼容adapter均违反本合同。上述收窄只说明现役调用图更清晰，不是
+`6 s/update`的墙钟测量、学习成功、formal launch或Gate Done。
+
 stable action UID、motion loader slot、manifest order 和 checkpoint control-plane contract
 必须完全一致。dense slot 只用于当前数组索引；UID/slot 都不得作为 fresh actor 的 categorical
 observation。fresh N1 actor 使用固定 194-D

@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`profiled / zero-flight-host-validated / structural-cuts-host-validated / Pod-matched-wall-pending`
+> 状态：`profiled / zero-flight-host-validated / direct-lean-phase-a-host-validated / Pod-matched-wall-pending`
 > 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；zero-flight与后续结构cut的Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
@@ -24,6 +24,14 @@
 - `43d95275…`删除唯一production caller完全丢弃的Reward整record clone；`2ec32858…`把源码/
   API/lease/dependency-DAG深验收回构造边界；`e15e279d…`使`task_valid=false`的epoch clocks不再
   泄漏global training step。三者均不改active task的物理或Reward经济。
+- Phase-A已把exact A/C FullMDP现役construction固定为direct lean，删除formal mode/pins/DAG/SHA
+  validator/reset receipt/standalone installers/post-only escape等不可达分支；保留六个真实callpoint、
+  lease/seal、component identity、reset generation/overflow、sticky poison和PhysX close。production
+  净删`1,455`行，exact七文件回归=`310 passed, 15 skipped`。
+- `7b7c9510`独立修复partial-construction teardown：缺manager、manager析构异常、live PhysX shutdown
+  异常或callback重入均不能阻断其余terminal清理；in-memory stage严格按detach→stop→clear→callback
+  clear→instance clear执行。terminal失败不伪装closed，也不跨调用重试旧sim，而是sticky要求cold
+  process exit。该安全修复不计入性能收益，合并回归=`317 passed, 15 skipped`。
 
 延后：
 
@@ -36,10 +44,10 @@
   GPU低利用，Yikang落在同一CPU集合的实际用量不足以解释三倍差。
 - 通过降低LM迭代、关闭contact/termination/receipt或接受stale substep状态换速度。这些都会改变题目或证据语义。
 - 用旧legacy `6.700 s/update`、MuJoCo native 114-D或WAIT `learn(1)`冒充当前FullMDP等价A/B。
-- 为第二阶段D05 compact再加一层adapter。formal runtime owner的冻结inventory真实要求
-  `prepare_many/preview/stage/arm/commit/journal`旧ABI，`train.py`在`launch_authorized=true`时仍会选它；
-  本轮compact ABI尝试已完整回退。正确顺序是先正式退役/隔离formal legacy lane，再只做一次
-  compact，不并存两套接口。
+- 为第二阶段D05 compact再加一层adapter。formal runtime owner的冻结inventory仍要求
+  `prepare_many/preview/stage/arm/commit/journal`旧ABI，但没有production construction/hot callpoint；
+  Phase-A已经从现役`train.py`/env wiring退役该lane。其源文件仍dormant并留到Phase-B单独删除，不能
+  因为磁盘上还有历史类就继续冻结现役ABI。后续只做一套compact transaction，不并存两套接口。
 
 ## 2. 当前运行证据
 
@@ -68,6 +76,27 @@
 | BeyondMimic `cd651720…` | IsaacLab manager env、motion tracking | empty ball transaction、全场景retire write、复杂selected reset | reset仅批量采样与两次indexed sim write，普通step不写额外刚体 |
 | build_3 `7b88a021…` | 相同dt/decimation/PPO | 当前23次/control的深owner验证及大量packet/clone | 6秒不能直接外推，但结构膨胀是明确差异 |
 | MJLab `0fb8a681…` / Playground `e74217bb…` | batched GPU physics与manager/JIT env | Python包围20个substep、重复contact census、每步同步 | 先合并数据流与同步，再考虑更大graph capture |
+
+这个结构税也可直接从当前源码尺度看到：现役env/lean runtime/Physical/Epoch/R06/Scene六个核心
+文件合计`42,742 LOC`、`644`个`.clone()`调用点、`1,127`个class/function definition；另外
+formal owner/factory历史源还有`6,539 LOC`，Phase-A后已不在production construction graph。这不直接
+乘等于wall time，但它解释了为什么一个“empty flight
+应为no-op”的改动会跨Physical/Scene/R06/Epoch/Env重签协议、测试与gate。优化目标不只是减
+kernel，而是把mutable business state收回一个owner，让其他层只做IO或边界证据。
+
+后续结构固定为四层，不再添加第五层“safety token”：
+
+1. Env只拥有control/substep调度和Gym reset边界；
+2. 一个device-resident mutable `ActionBallState`唯一拥有phase/generation/shot/pending/live/
+   contact/outcome/fault；
+3. Scene只做simulator I/O、active-flight persistent mapping和原始contact latch，不拥有business key/
+   lifecycle；
+4. Epoch/R03/R06/R07是transition-scoped fact/event ledger，只在真实event时写，PPO边界统一汇总。
+
+真实安全边界继续保留：joint/nonfinite/overflow，slot/generation/key的transition join，真实PhysX
+contact/net/table/landing，selected-reset行集，Reward/observation finite，optimizer成功后才持久ACK，以及
+source/asset/run namespace provenance。要删的是同一writer的重复projection/receipt/digest、empty journal/park、
+每substep代码身份重扫和无consumer的formal/R10对象图；这些不是独立事实源。
 
 ## 4. 已定位的热路径
 
@@ -140,9 +169,32 @@ admission、已绑定method dispatch、poison/reentrancy、protected manager不�
 - Reward clone cut的epoch/lean-reward回归=`76 passed, 7 skipped`；owner validation cold-boundary cut回归=
   `29 passed, 1 skipped`。idle clock新增反例证明：同一invalid task在`common_step=10`与`1,000,000`时
   229/399输出完全一致，valid row仍保留原tick差。
-- 第二阶段D05 compact ABI尝试在追溯consumer后完整回退，production/test diff均为0。回退不是性能
-  结论；它是结构裁决：formal runtime owner仍是旧D05 transaction API的真实consumer，不能用
-  adapter把旧结构藏在新结构下。
+- 第二阶段D05 compact ABI尝试完整回退，production/test diff均为0。可达性反例进一步证明：
+  formal owner只是静态stale API consumer，无construction/hot callpoint；唯一“formal成功”测试是自造
+  `launch_authorized=true`的fixture。Phase-A据此把exact A/C FullMDP现役入口固定为direct lean：
+  `train.py +176/-478`、`full_mdp_env.py +108/-1261`，production合计`+284/-1739`、净删`1,455`行。
+  exact七文件回归=`310 passed, 15 skipped`；formal owner源仍dormant，Phase-B再做物理删除。
+- Phase-A是结构GO而非性能GO。它删的是无consumer的formal dispatch与同一writer自证，保留construction
+  executable binding、六个真实callpoint、lease/seal、component identity、reset generation/overflow、
+  sticky poison与PhysX close；没有Pod matched wall，不能把这`1,455`行删除换算成秒数。
+
+Phase-A的exact host回归命令为：
+
+```bash
+PYTHONPATH=hope_training/whole_body_tracking/source/whole_body_tracking \
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_env_runtime_callpoints.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_lean_env_install.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_policy_bootstrap.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_post_physics_env.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_runtime_factory_callpoint.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_train_wiring.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_runtime_owner.py
+```
+
+Phase-A提交结果=`310 passed, 15 skipped`；加上`7b7c9510`的partial-close故障注入后，同一命令结果=
+`317 passed, 15 skipped`。15个skip均按host dependency条件触发，不是失败。该回归验证现役construction/
+callpoint/reset/owner wiring，不替代exact Pod fixed-tape、真实GPU语义或profiler-off matched wall。
 
 successor验收是同一`4096×25000`进程：前5个update只读profile，之后profile自动关闭继续；性能结论使用
 profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.5 s`、p95 `<=8 s`。任何数值优化还须
@@ -153,11 +205,14 @@ profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.
 1. 等待合法GPU窗口，在exact Pod先跑zero-live-flight的fixed-tape/RNG/reason/counter/safety parity，
    再用fresh namespace做profiler-off `4096×24` matched wall。当前GPU0/GPU1队列锁被active run占用，
    GPU2也有正在运行的MuJoCo/共享进程，因此这一级证据只能记`未测`。
+   本轮一份未入Git的565行ABBA实现已因契约自证删除：测试自造ACK schema v10，
+   exact baseline/candidate runner均发schema v11，真跑必然被其自己拒绝。successor测量器必须从
+   exact runner的live wire contract建立fixture，不另造一份schema/gate。
 2. 只有Pod parity和matched wall都通过，才把zero-flight successor称为严格更强并停旧run；没有净收益就撤回，
    不靠host测试或主观保留。
-3. owner validation已收回cold boundary。下一个结构决策是正式退役/隔离formal legacy owner及
-   `train.py` formal branch；裁决完成后才把D05 producer→R05改成一套compact transaction，不加adapter。
-   随后再收敛Reward/observation的重复mutable state，不再给cross-owner graph叠加token。
+3. owner validation已收回cold boundary，Phase-A也已从现役wiring退役formal legacy lane并固定direct
+   lean。Phase-B只删除dormant formal owner源和相应历史测试，不重引入compatibility adapter；随后把
+   D05 producer→R05改成一套compact transaction，并收敛Reward/observation的重复mutable state。
 4. MuJoCo并行先完成action0 question/teacher，再合并contact census；R06/R07/Reward11--13闭合前不叫Full-A长跑。
 
 ## 7. `ddb1e7c4` successor实测：single-read cut没有打中首墙

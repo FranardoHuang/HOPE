@@ -43,6 +43,14 @@ deployment、真机或物理安全。
 - Git 管理代码；忽略的机器人 USD/大模型只作为外部资产，以源路径和 SHA-256 绑定。
 - FullMDP 使用 upstream RSL3 `OnPolicyRunner.learn()`；只在零参数 `alg.update()` 外包一层
   `PENDING fsync -> owner ACK -> EPOCH_ACK fsync -> stdout`。
+- 现役单动作family A/C只走
+  [`FullMDP Phase-A direct-lean runtime`](../DEFINITIONS.md#fullmdp-phase-a-direct-lean)：exact lean owner
+  是唯一可构造top owner；formal runtime选择、partial installer和逐leaf getter已从现役路径退休。
+  `action_ball_full_mdp_runtime_owner.py`暂留为dormant Phase-B删除对象，不再提供安全、执行或checkpoint
+  权威。保留的是真实独立边界：source/API pin、lease/seal、component identity、reset
+  generation/overflow、finite/sticky poison，以及仍禁止exact resume的FullMDP `R10 HOLD`。同一writer
+  生成的依赖有向无环图（DAG）/hash/receipt不能自证安全；这项结构减法也不证明`6 s/update`或任何
+  Gate Done。
 - 第一条可信学习 run 使用 Git exact commit 和 `4096 env × 25000 update`；前5个update只是同一进程的
   construction/capacity/finite观察窗，通过后自然继续，不另起或重跑smoke。
 - FullMDP Motion只消费与runtime 0807 A3P plant同源重解的73条measured bank；frame-0 grounding检查

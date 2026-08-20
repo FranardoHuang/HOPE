@@ -113,6 +113,25 @@ RNG 与完整 ActionBall state 无损恢复，才写 terminal，并允许 stage 
 `exact_resume_passed=true`。不要在正式 stage 手工重复 verifier；完整顺序见
 [V3 工序](run_action_ball_curriculum_no_clobber.md#训练结束后的-exact-resume-与阶段签名)。
 
+#### FullMDP Phase-A runtime边界（2026-08-20）
+
+现役单动作family A/C的FullMDP训练只能使用
+[`Phase-A direct-lean runtime`](../DEFINITIONS.md#fullmdp-phase-a-direct-lean)。没有可选formal runtime mode，
+也不得调用已退休的partial installer或逐leaf getter；旧`action_ball_full_mdp_runtime_owner.py`只是
+dormant Phase-B删除对象，不是发射、安全、checkpoint或resume权威。运行入口应继续验证真实独立边界：
+source/API pin、环境lease与construction seal、exact component identity、selected-reset
+generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint/restore仍是`R10 HOLD`，
+所以现役A/C继续fresh-only。
+
+不要为了替代已退休的formal路径新增同一writer自造的依赖有向无环图（DAG）/hash/receipt门；那类
+self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示已达到`6 s/update`、学会回球、
+获得formal authority或完成任何Gate。性能结论仍须使用exact Pod、profiler-off、matched-strata墙钟证据。
+
+若FullMDP在base manager构造中途失败，当前进程必须视为cold-discard：环境会按pinned顺序单次
+best-effort清理已存在manager与simulator；任何terminal simulator清理失败都会sticky拒绝后续资源操作并
+要求进程退出。不得在同一进程捕获该异常后重新构造环境、重试旧sim、复用namespace或把它当成可恢复
+checkpoint；重新运行必须从fresh process开始。
+
 <a id="effective-reward-truth"></a>
 
 ### Effective Reward truth（不要再按 pack 名字猜）

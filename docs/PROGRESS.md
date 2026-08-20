@@ -1,5 +1,42 @@
 # 简短进度记录
 
+## 2026-08-20 — Isaac FullMDP 22秒主墙定位；direct-lean Phase-A收口
+
+- Pod1两条`4096 env × 24 control × 4 substep` active run在profiler-off稳态仍约
+  `21.9--22.5 s/update`；collection约`20.5--20.7 s`，learning约`1.4--1.7 s`。trainer长期只用
+  约`1.4` CPU core，GPU瞬时利用率约`27%`，所以CPU互斥不是三倍慢的根因。inclusive profile把
+  collection中`7.522 s`定位到Physical→Scene→R06→Epoch post-physics链，`3.102 s`在D05/
+  command→observation，Reward约`.658 s`，真实sim仅约`.922 s`。
+- `dc62684c…` zero-live-flight候选已在host证明空行不读scene tensor、不发Physical/R06/
+  Epoch空事务，保留callback pair、heartbeat/stamp、fault sticky和true-live dense path。但同一张卡的
+  profiler-off matched A/B尚未执行；当前GPU0/1 queue被active Isaac占用，GPU2有MuJoCo和非本项目
+  peer，因此结果仍标` 未测`，不把预算推算写成已达6秒。
+- 第一批结构删减已落在候选分支：`43d95275`删掉唯一production caller丢弃的
+  `pay_reward()`整条`ActionEpochRecord.clone()`返回；`2ec32858`把Python class/function/lease/DAG
+  深扫留在construction admission，删掉16个运行期重扫及194行production自证，保留poison、
+  chronology、manager identity和返回ABI；`e15e279d`修正shared IDLE epoch clock的全局时钟泄漏。
+  focused分别为`76 passed, 7 skipped`、`29 passed, 1 skipped`；GPU墙时收益尚未测。
+- D05 compact payload中间实现已完整回退；后续可达性审计证明formal runtime owner没有production
+  construction/hot callpoint。Phase-A现已把exact A/C FullMDP固定为direct lean：`train.py`只创建
+  `ActionBallFullMdpLeanRuntimeOwner`，env只绑定这一条owner/lease/manager graph，旧formal
+  mode、pins、DAG/SHA自证、reset receipt、standalone installer及post-only escape不再参与现役路径。
+  production diff为`train.py +176/-478`、`full_mdp_env.py +108/-1261`，合计净删`1,455`行；exact
+  七文件回归=`310 passed, 15 skipped`。仍保留construction executable binding、六个真实callpoint、
+  lease/seal、component identity、reset generation/overflow、sticky poison、PhysX close等独立边界。
+  formal owner源文件仍是dormant历史代码，留到Phase-B单独删除；本轮只给结构GO，不代表GPU性能GO。
+  下一性能步仍是让compact active bank贯穿producer→R05并只scatter最终selected payload。详见
+  [FullMDP hot-path实验](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
+- `7b7c9510`另修复一个与性能无关、但真实可达的构造失败清理缺陷：旧路径在manager尚未建齐时
+  调用upstream `close()`，首个缺失字段会阻断process-global SimulationContext清理，却提前把后续
+  `close()`变成no-op。现在partial construction按pinned析构顺序单次best-effort清理，transient guard
+  阻止manager/simulator callback重入；任一terminal simulator步骤失败即sticky fail-stop并要求冷进程
+  退出，绝不跨调用重试旧sim或误清新实例。exact七文件回归更新为`317 passed, 15 skipped`，独立终审
+  `P0=0 / P1=0`；正常returned路径仍调用原upstream `close()`。
+- 一份新写的565行ABBA runner/test未进Git就被终审拒绝并删除：它用自造的ACK v10 fixture
+  验证parser，而exact两个目标commit实际都发v11，所以真跑必然被自己的门误拒。这正是
+  HANDOFF§3.1的“fixture自己造契约”；下一份临时测量器必须直接消费exact runner的live schema，
+  不为了安全再加一套平行协议。
+
 ## 2026-08-20 — MuJoCo cadence/reset/RETIRE host收口；25k工程长跑active
 
 - MuJoCo raw-action/order/scale/default-offset host已闭合；true Gym reset现在使用runtime default joints、
