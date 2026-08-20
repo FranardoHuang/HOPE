@@ -311,7 +311,8 @@ def _settle_candidate(racket, d05_owner, epoch_owner, candidate, accept_mask):
         publication_ordinal=17,
         base_version=epoch_owner.current().version,
     )
-    settled = epoch_owner.settle_d05_transaction(token)
+    epoch_owner.settle_d05_transaction(token)
+    settled = epoch_owner.current()
     return token, settled
 
 

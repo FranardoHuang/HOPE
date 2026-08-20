@@ -5,9 +5,10 @@ environment row.  A D05 opportunity is a private, single-flight transaction:
 REJECT/DEFER/CENSOR are journal events and never replace the public shot;
 ACCEPT alone performs one masked replacement after the old row is closed.
 
-All hot decisions remain device resident.  Motion and R06 are cold-bound real
-producers and are called without a caller mask, index, key, or verdict.  The
-prepared PPO drain is the only tensor-to-host boundary.
+All row-validity decisions remain device resident.  Motion and R06 are
+cold-bound real producers and are called without a caller mask, index, key, or
+verdict.  The after-command boundary performs one exact all-idle reduction so
+the common K=0 case never enters the dense D05 numeric/writer chain.
 """
 
 from __future__ import annotations
@@ -1483,8 +1484,8 @@ class ActionEpochOwner:
     # ------------------------------------------------------------------
     # Motion after-command close/due and D05-private opportunity transaction
 
-    def prepare_after_command_rows(self) -> ActionEpochDueRows:
-        """Freeze one D05 opportunity from owner-bound Motion and R06 facts."""
+    def prepare_after_command_rows(self) -> Optional[ActionEpochDueRows]:
+        """Freeze a real D05 opportunity, or advance an exactly idle tick."""
 
         with self._operation("prepare after command rows"):
             self._healthy()
@@ -1523,6 +1524,21 @@ class ActionEpochOwner:
                 shape=(self.num_envs,),
                 dtype=torch.int64,
             )
+            paid = self._require_previous_paid_rows(
+                self._r06_paid_projection(), label="R06.previous_paid_rows"
+            )
+            business_rows = (
+                due
+                | closed
+                | close_reason_rows.ne(MOTION_CLOSE_NONE)
+                | paid.valid
+            )
+            if torch.equal(business_rows, torch.zeros_like(business_rows)):
+                # Preserve scalar chronology without manufacturing a private
+                # transaction, empty journal rows, or neutral writer calls.
+                self._next_epoch += 1
+                self._last_motion_common_step = common_step
+                return None
             valid_reason = (
                 close_reason_rows.eq(MOTION_CLOSE_NONE)
                 | close_reason_rows.eq(MOTION_CLOSE_PLAYED_SUFFIX)
@@ -1574,9 +1590,6 @@ class ActionEpochOwner:
                 changes={"motion_close_reason": close_reason},
             )
 
-            paid = self._require_previous_paid_rows(
-                self._r06_paid_projection(), label="R06.previous_paid_rows"
-            )
             current_key = self._gather_current_key(record.identity.shot_key)
             current_settlement = self._gather_current(record.settlement_step)
             current_payment = self._gather_current(record.payment_step)
@@ -1737,7 +1750,7 @@ class ActionEpochOwner:
                 raise ActionEpochError("D05 abort owner or zero-write boundary differs")
             self._active_d05 = None
 
-    def settle_d05_transaction(self, token: object) -> ActionEpochRecord:
+    def settle_d05_transaction(self, token: object) -> None:
         """Classify the D05-private projection; ACCEPT alone replaces public rows."""
 
         with self._operation("settle D05 transaction"):
@@ -2013,7 +2026,7 @@ class ActionEpochOwner:
                 "r05_runtime", "reset_event_rows", accept
             )
             self._active_d05 = None
-            return record.clone()
+            return None
 
     # ------------------------------------------------------------------
     # Bound Motion/Physical/R06 publications

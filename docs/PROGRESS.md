@@ -1,5 +1,15 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP Phase-C0退役K=0空D05事务（branch candidate）
+
+- after-command业务mask全false时现在只推进两个scalar chronology；不再进入Question/RNG、三writer、第二次
+  Motion projection、post-D05 reseal或10条空journal。`N=4096`静态tensor payload proxy约少
+  `3,141,632 B/control`；settlement唯一caller丢弃的44-tensor返回clone也删除，proxy约
+  `6,242,304 B/settlement`。Physical成对idle callback及K>0/fault/close/paid原路径保持。
+- host focused=`160 passed, 12 skipped`，独立终审=`P0=0/P1=0`。这只有结构/静态proxy证据；CUDA
+  `torch.equal` host sync仍为P2，exact Pod matched wall与H48均`未测`，不声称达到6秒。详细真源见
+  [FullMDP hot-path实验§9](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#9-phase-c0k0只推进chronology不制造d05事务)。
+
 ## 2026-08-21 — FullMDP semantic Observation V2与当前执行顺序（branch candidate）
 
 - family A从旧229/399切为actor203/critic219。历史fixed-194/A211已包含table-relative root pose/velocity；

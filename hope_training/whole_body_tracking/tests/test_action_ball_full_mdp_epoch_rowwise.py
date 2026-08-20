@@ -440,6 +440,119 @@ def _materialized_entries(epoch: E.ActionEpochOwner) -> tuple[E.CommitEntry, ...
     return materialized.entries
 
 
+def test_k0_after_command_advances_only_scalar_chronology():
+    epoch, d05, cadence, r06, *_ = _ready_epoch()
+    cadence.projection = _MotionProjection(
+        1,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.int64),
+    )
+    before = epoch.current()
+    head_before = epoch.commit_head
+
+    with _NoHostTensorObservation():
+        rows = epoch.prepare_after_command_rows()
+
+    assert rows is None
+    after = epoch.current()
+    assert (after.epoch, after.version) == (before.epoch, before.version)
+    _assert_record_tensors_equal(after, before)
+    assert epoch.commit_head == head_before
+    assert epoch._next_epoch == 1
+    assert epoch._last_motion_common_step == 1
+    assert d05.motion.calls == d05.racket.calls == 0
+    assert d05.calls == []
+    assert r06.consumed is None
+
+
+def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
+    epoch, d05, cadence, r06, *_ = _ready_epoch()
+    cadence.projection = _MotionProjection(
+        1,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.int64),
+    )
+    assert epoch.prepare_after_command_rows() is None
+
+    cadence.projection = _MotionProjection(
+        2,
+        torch.zeros(2, dtype=torch.bool),
+        torch.tensor([False, True]),
+        torch.tensor([E.MOTION_CLOSE_NONE, E.MOTION_CLOSE_UNPLAYED]),
+    )
+    assert epoch.prepare_after_command_rows() is not None
+    assert epoch._undecoded_overflow.tolist() == [False, True]
+    assert r06.consumed is not None
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+    cadence.projection = _MotionProjection(
+        3,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.int64),
+    )
+    assert epoch.prepare_after_command_rows() is None
+    assert epoch._undecoded_overflow.tolist() == [False, True]
+
+    cadence.projection = _MotionProjection(
+        4,
+        torch.ones(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.int64),
+    )
+
+    rows = epoch.prepare_after_command_rows()
+    assert rows is not None
+    assert rows.common_step == 4
+    assert rows.due_mask.tolist() == [True, False]
+    assert rows.construct_mask.tolist() == [True, False]
+    assert epoch.settle_d05_transaction(d05.arm()) is None
+
+    current = epoch.current()
+    assert current.publication_ordinal[:, 0].tolist() == [3, -1]
+    assert current.rng_counter[:, 0].tolist() == [401, -1]
+    base = E.milestone_tensors._EI
+    assert epoch.milestone.i64[base:base + 4].tolist() == [1, 1, 1, 1]
+    settled = next(
+        entry
+        for entry in epoch._publication.pending_log
+        if entry.transition == "D05_SETTLED"
+    )
+    decision = dict(zip(settled.delta.names, settled.delta.values))["decision"]
+    assert decision[:, 0].tolist() == [E.D05_DECISION_ACCEPT, E.D05_DECISION_NONE]
+    assert settled.epoch == 3
+    assert d05.motion.calls == d05.racket.calls == 1
+    assert d05.calls == ["r05_runtime"]
+
+
+def test_previous_paid_row_is_business_even_when_motion_is_not_due():
+    epoch, d05, cadence, r06, *_ = _ready_epoch()
+    cadence.projection = _MotionProjection(
+        1,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.int64),
+    )
+    r06.previous = replace(
+        r06.previous,
+        valid=torch.tensor([True, False]),
+        payment_step=torch.tensor([1, -1], dtype=torch.int64),
+    )
+    head_before = epoch.commit_head
+
+    rows = epoch.prepare_after_command_rows()
+
+    assert rows is not None
+    assert not bool(rows.due_mask.any())
+    assert epoch.commit_head > head_before
+    assert epoch._last_r06_paid_payment_step.tolist() == [1, -1]
+    assert r06.consumed is not None
+    assert r06.consumed.valid.tolist() == [False, False]
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+
 def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(monkeypatch):
     monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
     monkeypatch.setitem(sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE)
@@ -466,7 +579,8 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
 
     due = epoch.prepare_after_command_rows()
     assert torch.equal(due.due_mask, torch.tensor([True, True]))
-    published = epoch.settle_d05_transaction(d05.arm())
+    epoch.settle_d05_transaction(d05.arm())
+    published = epoch.current()
     assert published.epoch == -1  # scalar compatibility value is never a join key
     assert published.phase[:, 0].tolist() == [E.PHASE_REVEAL_COMMITTED, E.PHASE_IDLE]
     assert published.publication_ordinal[:, 0].tolist() == [0, -1]
@@ -2393,11 +2507,12 @@ def test_fixed_writer_order_zero_masks_and_post_write_failure_are_sticky(monkeyp
         selected_mask=torch.ones(2, dtype=torch.bool),
         reset_generation=torch.zeros(2, dtype=torch.int64),
     )
-    d05 = _RealD05Harness(epoch, _candidate(torch.device("cpu")))
+    candidate = _candidate(torch.device("cpu"))
+    candidate.construction_admissible.zero_()
+    d05 = _RealD05Harness(epoch, candidate)
     d05.motion.fail = True
     d05.bind()
     cadence = _MotionCadence(torch.device("cpu"))
-    cadence.projection.reveal_due.zero_()
     epoch.bind_motion_cadence_owner(cadence)
     r06 = _R06(epoch, torch.device("cpu"))
     epoch.bind_fact_owner("r06_landing_outcome", r06)

@@ -2640,7 +2640,7 @@ class DeviceR05Owner:
 
     @torch.no_grad()
     def advance_action_ball_full_mdp_rows(self) -> None:
-        """Settle one after-command full-N opportunity through ActionEpoch."""
+        """Settle one real after-command opportunity, or return exactly idle."""
 
         with self._question_prepare_lock:
             self._require_idle()
@@ -2653,6 +2653,8 @@ class DeviceR05Owner:
             if type(epoch_owner) is not epoch.ActionEpochOwner:
                 raise DeviceR05ConflictError("diagnostic ActionEpoch is not bound")
             due = epoch_owner.prepare_after_command_rows()
+            if due is None:
+                return None
             started = [False]
             self._question_composition_in_progress = True
             try:

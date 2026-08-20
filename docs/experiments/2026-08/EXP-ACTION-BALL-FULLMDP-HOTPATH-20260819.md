@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / Pod-matched-wall-pending`
-> 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；zero-flight与后续结构cut的Pod matched wall仍未测
+> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0-host-validated / Pod-matched-wall-pending`
+> 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；Phase-C0只有静态payload proxy与host语义证据，Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
 
@@ -380,3 +380,40 @@ fixed tape。这些只是host语义证据：exact Pod fixed-tape与profiler-off 
 后续steady hot path每新增一个`.clone/.item/.cpu/.nonzero/full-N write`，都必须同时记录它的
 频率×shape和profile证据；一个事实只保留一个mutable owner，证据汇总尽量放在control/PPO
 boundary，不再把无业务事件的结构自证写回每个physics substep。
+
+## 9. Phase-C0：K=0只推进chronology，不制造D05事务
+
+Phase-C0把after-command的业务行定义为
+`due | closed | (close_reason != NONE) | previous_paid.valid`。仅当该mask全false时，持久状态只推进
+`_next_epoch`与`_last_motion_common_step`两个scalar chronology；不创建`_active_d05`，也不改变公开
+ActionEpoch record、commit head、milestone或sticky fault。这样K=0不再进入Question/RNG数值构造、第二次
+Motion projection、Motion/Racket/R05三writer、post-D05 Motion reseal，也不再制造10条全空journal entry。
+按`N=4096`逐tensor payload静态相加，后者约为`3,141,632 B/control`；这是源码shape/dtype proxy，
+不包含allocator开销，也不是实测CUDA流量、显存峰值或wall收益。
+
+独立的settlement减法把唯一caller不消费的`settle_d05_transaction()`整份record返回clone改为`None`；
+按当前record的44个tensor静态相加，少构造约`6,242,304 B/settlement`。真实consumer需要状态时改读owner
+当前record，不新建shadow owner或receipt。K>0、任何`closed`/non-NONE close reason、previous-paid row仍走
+原dense D05与payment/close chronology；既有fault会继续sticky并在下一业务行走原CENSOR/fail-stop反例。
+Phase-C0也没有改§8的Physical pre/post成对idle callback，不能用D05 K=0早退拆散arm/capture。
+
+可复现host focused union为：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH=hope_training/whole_body_tracking/source/whole_body_tracking:hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp:hope_training/whole_body_tracking/tests \
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_epoch_rowwise.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_d05_rowwise_transaction.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_motion_rowwise_accept_writer.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_bootstrap_ready_d05_accept.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_racket_rowwise_accept.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_continuous_runtime_transaction_device.py
+```
+
+结果=`160 passed, 12 skipped`；独立终审=`P0=0/P1=0`。反例覆盖K0→K>0的epoch/RNG连续性、invalid-close
+fault跨K0保持、previous-paid强制进入业务路径及writer/settlement合同。尚存P2是CUDA上的
+`torch.equal(business_rows, zeros_like(...))`会产生device-to-host同步；必须在exact Pod profile中量化后再决定
+device-resident替代，不能把它藏进“无业务”命名。当前没有Pod fixed-tape、profiler-off matched wall或H48
+成绩，因此不声称达到6秒或任何性能GO。该cut按HANDOFF的原则直接退役zero-business工作，而不是为它增加
+gate、owner或空journal；G05保持`Partial`。

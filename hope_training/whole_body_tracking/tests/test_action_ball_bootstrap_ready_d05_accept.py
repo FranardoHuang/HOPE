@@ -154,7 +154,8 @@ def test_cold_bootstrap_real_r07_facts_authorize_first_d05_accept(
         epoch_owner,
         d05_owner,
     )
-    settled = epoch_owner.settle_d05_transaction(token)
+    epoch_owner.settle_d05_transaction(token)
+    settled = epoch_owner.current()
 
     d05_entry = next(
         entry

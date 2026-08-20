@@ -9,6 +9,14 @@ transitions，`ddb1e7c4…`止于ACK `3467` / `340,918,272` transitions。退出
 Pod状态，因此不声称当前GPU空闲或存在训练进程。两条旧run都没有resume authority；新的H48/Observation V2
 必须使用fresh commit与fresh namespace。
 
+**2026-08-21 Phase-C0 K=0空D05退役（branch candidate；Gate仍`Partial`）：**after-command业务mask
+全false时只推进scalar chronology，跳过Question/RNG、三writer、第二次Motion projection、post-D05 reseal
+与10条空journal；settlement不再返回无人消费的44-tensor record clone。`N=4096`静态payload proxy分别约为
+`3,141,632 B/control`与`6,242,304 B/settlement`，不是CUDA流量或wall实测。Physical成对idle callback及
+K>0/fault/close/paid原路径保持；host focused=`160 passed, 12 skipped`，独立终审=`P0=0/P1=0`。CUDA
+`torch.equal` host sync仍为P2，Pod matched wall与H48结果均`未测`，不声称6秒或性能GO。详见
+[hot-path实验§9](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#9-phase-c0k0只推进chronology不制造d05事务)。
+
 **2026-08-21 semantic Observation V2 branch candidate（Gate仍`Partial`）：**family A从旧229/399切到
 actor203/critic219；它恢复229迁移遗漏的floating-base state并删除raw task/owner/reward账，不做237/407机械
 扩维。R06 broad projection也缩为现有owner内的key8+publication live selection与四tensor输出，没有新增

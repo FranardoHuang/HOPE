@@ -411,7 +411,8 @@ def test_real_epoch_stale_reset_censors_mutated_d05_accept_mask(monkeypatch):
     epoch_owner.bind_async_owner("r06_landing_outcome", r06)
     before = epoch_owner.current()
     epoch_owner.prepare_after_command_rows()
-    after = epoch_owner.settle_d05_transaction(token)
+    epoch_owner.settle_d05_transaction(token)
+    after = epoch_owner.current()
 
     assert bool(record.accept_mask.all())
     assert all(leaf.state.tolist() == [0, 1] for leaf in (motion, racket, physical))
@@ -683,6 +684,66 @@ def test_question_rng_is_unreachable_before_epoch_due_freeze():
     with pytest.raises(current_epoch.ActionEpochError):
         owner.advance_action_ball_full_mdp_rows()
     assert calls == []
+
+
+def test_k0_epoch_return_skips_question_numeric_writers_and_second_projection():
+    current_epoch = d05._require_action_epoch_module()
+    paid_rows_type = importlib.import_module(
+        current_epoch.__package__ + ".action_ball_landing_outcome_device"
+    ).PreviousPaidActionEpochRows
+    epoch_owner = current_epoch.ActionEpochOwner(num_envs=2, device="cpu")
+    epoch_owner.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool),
+        reset_generation=torch.zeros(2, dtype=torch.int64),
+    )
+    owner = d05.DeviceR05Owner.__new__(d05.DeviceR05Owner)
+    owner._question_prepare_lock = RLock()
+    owner._require_idle = lambda: None
+    owner._diagnostic_epoch_owner = epoch_owner
+    epoch_owner.bind_d05_accept_writers(
+        motion_write=owner._commit_action_epoch_motion_write,
+        racket_write=owner._commit_action_epoch_racket_write,
+        r05_write=owner._commit_action_epoch_r05_write,
+    )
+
+    class _IdleMotion:
+        def __init__(self):
+            self.calls = 0
+
+        def project_current_action_epoch_rows(self):
+            self.calls += 1
+            if self.calls != 1:
+                raise AssertionError("idle path requested a second Motion projection")
+            return SimpleNamespace(
+                common_step=1,
+                reveal_due=torch.zeros(2, dtype=torch.bool),
+                closed_mask=torch.zeros(2, dtype=torch.bool),
+                close_reason=torch.zeros(2, dtype=torch.int64),
+            )
+
+    motion = _IdleMotion()
+    epoch_owner.bind_motion_cadence_owner(motion)
+    r06 = _EmptyR06(epoch_owner, current_epoch, paid_rows_type)
+    epoch_owner.bind_fact_owner("r06_landing_outcome", r06)
+    epoch_owner.bind_async_owner("r06_landing_outcome", r06)
+    def bomb(*_args, **_kwargs):
+        raise AssertionError("K0 entered Question/RNG numeric composition")
+
+    owner._internal_question_compose = bomb
+    owner._cadence_authority = motion
+    for name in (
+        "_current_row_cadence",
+        "_prepare_many_impl",
+        "_preview_impl",
+        "_build_row_transaction",
+    ):
+        setattr(owner, name, bomb)
+    head_before = epoch_owner.commit_head
+
+    assert owner.advance_action_ball_full_mdp_rows() is None
+
+    assert motion.calls == 1
+    assert epoch_owner.commit_head == head_before
 
 
 def test_canonical_epoch_idle_gate_needs_no_pre_materialized_commit_log():

@@ -953,7 +953,8 @@ def test_real_d05_corrupt_accept_cannot_authorize_invalid_key_row(
         command._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version,
     )
 
-    settled = epoch_owner.settle_d05_transaction(token)
+    epoch_owner.settle_d05_transaction(token)
+    settled = epoch_owner.current()
 
     after = _snapshot(command)
     assert all(torch.equal(before[name], after[name]) for name in before)
@@ -1037,7 +1038,8 @@ def test_real_d05_corrupt_accept_task_invalid_row_is_motion_byte_noop(
     )
     host_version = command._action_ball_continuous_motion_mutation_version
 
-    settled = epoch_owner.settle_d05_transaction(token)
+    epoch_owner.settle_d05_transaction(token)
+    settled = epoch_owner.current()
 
     after = _snapshot(command)
     assert all(torch.equal(before[name], after[name]) for name in before)
