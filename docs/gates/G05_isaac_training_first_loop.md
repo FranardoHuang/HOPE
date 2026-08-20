@@ -2,17 +2,17 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-**2026-08-19 active 4096吞吐归因（Gate仍`Partial`）：**update `0--843`的collection分窗均值从
-`19.88 s`缓慢升到约`21.55 s`，learning始终约`1.5--1.6 s`；最近iteration约93%在collection。
-只读Pod采样为trainer约`110% CPU`（主线程约`97.5%`）、GPU0约`19%`。active只允许CPU`32--47`，
-Yikang进程允许`0--127`，所以调度集合没有严格隔离；但同一两秒样本中后者落在`32--47`的用量仅约
-`8%` CPU、node2总体忙约`4.3%`，不能解释三倍墙钟。旧`6.700 s/update`是legacy diagnostic hot path，
-不是当前FullMDP transaction/owner工作量。CPU无需互斥，只须证明无持续争抢或浪费；当前性能因果动作是
-在下一fresh `4096×25000`同一进程前5个update启用bounded profile后自动关闭。候选已把D05的
-N平方uniqueness改为O(N)，并把mask前全N solver/exact/Physical改为只处理active rows；唯一动态
-`nonzero`同步与节省的数值工作须由真实Pod配对裁决。随后再批量化empty-flight/reset/owner gate，
-不改active affinity、不动PPO。候选host focused=`110 passed, 1 skipped`；Pod profile与profiler-off吞吐
-尚未运行，Gate保持`Partial`。
+**2026-08-20 active 4096吞吐归因（Gate仍`Partial`）：**两条immutable长跑的后续只读
+steady窗口约为`21.94/22.45 s/update`，collection约`20.5/20.74 s`、learning约`1.45/1.71 s`。
+GPU利用约`27%`，trainer各只占约`1.44/1.46`个CPU core；CPU无饱和或持续争抢证据，
+因此不要CPU互斥。旧`6.700 s/update`是legacy diagnostic hot path，不是当前FullMDP
+transaction/owner工作量。
+
+fresh bounded profiler已实测collection均值`14.987 s`中`post_physics_publish=7.522 s`、
+command→observation/D05 gap=`3.102 s`、Reward=`0.658 s`、sim=`0.922 s`。第一墙是零业务时仍
+完整执行Physical/R06/Epoch事务，不是物理仿真或CPU。zero-live-flight成对idle candidate已有
+host语义证据，但exact Pod fixed-tape与profiler-off matched wall因当前GPU资源/队列锁均为
+`未测`；不得把预算写成已达`6 s/update`。
 
 **2026-08-19 ACK809只读前缀（Gate仍`Partial`）：**active同一`4096×25000`进程的完整ACK `0..808`
 已到`79,527,936` transitions，Reward nonfinite与conservation violation均为0。D05 selected=`1,015,878`，
@@ -6405,3 +6405,26 @@ semantic卷为`166 passed, 8 skipped` / 约8秒。
 6--9秒、不称严格支配，也不用当前磁盘候选解释或停止active immutable runs。G05保持
 `Partial`。详细性能因果见
 [`EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819`](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
+
+### 2026-08-20 热路径结构瘦身与D05架构裁决（Gate仍`Partial`）
+
+`43d95275…`删除Reward14中唯一production caller立即丢弃的整
+`ActionEpochRecord` clone；append/journal/ordinal/fault/close和守恒事实均保留。epoch/lean-reward
+回归=`76 passed, 7 skipped`。`2ec32858…`删除热路径中16个模块/类/方法/lease/DAG全表
+重扫调用点，但保留构造时源码/API/lease/DAG admission、已绑定dispatch、poison/reentrancy、
+protected-manager不变式与返回ABI；回归=`29 passed, 1 skipped`。这不是绕开安全门，而是按
+HANDOFF §3.1把“构造后同一writer的受信进程主动monkeypatch”这种自洽扫描移出稳态路径。
+
+`e15e279d…`修复shared 229/399 observation的idle epoch clock：`task_valid=false`时原`-1`时钟会与
+global step相减，使同一plant state随训练时间漂移；现在invalid row固定为0，valid row仍保留原tick差。
+这是证据可信/可学性修复，不计作性能提速。
+
+第二阶段D05 producer→R05 compact ABI尝试已完整回退，production/test diff均为0：
+`action_ball_full_mdp_runtime_owner.py`冻结inventory真实需要旧`prepare_many/preview/stage/arm/commit/journal`
+surface，`train.py`在`launch_authorized=true`时仍会选择该formal owner。为它叠adapter只会永久保留
+两套ABI与两份state。下一步必须先正式退役/隔离formal legacy lane及其`train.py` branch，
+再以单一compact transaction删掉full-N scatter/bank，不加adapter。
+
+zero-flight加上述两个性能cut的算术预算仍只是约`8.4--9.1 s/iteration`，而且Pod matched
+wall未测；`6 s/update`既未证明也尚未在预算中闭合。因此G05保持`Partial`，不用host测试、
+静态预算或早期rollout代签真实吞吐。

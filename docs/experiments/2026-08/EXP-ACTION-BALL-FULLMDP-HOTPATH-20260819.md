@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`profiled / zero-flight-host-validated / Pod-matched-wall-pending`
-> 证据等级：E2 fresh Pod profiler + E1源码/host fixed-tape；zero-flight Pod wall仍未测
+> 状态：`profiled / zero-flight-host-validated / structural-cuts-host-validated / Pod-matched-wall-pending`
+> 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；zero-flight与后续结构cut的Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
 
@@ -19,6 +19,11 @@
 - 已把D05 `construction_mask`前移到solver/exact/Physical之前；只对active rows执行数值主体，再按原索引
   scatter回full-N bank/chronology。该候选新增唯一一处动态`nonzero`同步，是否采用须由下一条Pod
   profiler-off配对确认；随后再处理empty-flight、selected-reset和重复owner verification。
+- `4aadd698…`已实现成对zero-live-flight idle路径；host反例与consumer语义卷已闭合，
+  但exact Pod matched wall仍是`未测`。
+- `43d95275…`删除唯一production caller完全丢弃的Reward整record clone；`2ec32858…`把源码/
+  API/lease/dependency-DAG深验收回构造边界；`e15e279d…`使`task_valid=false`的epoch clocks不再
+  泄漏global training step。三者均不改active task的物理或Reward经济。
 
 延后：
 
@@ -31,6 +36,10 @@
   GPU低利用，Yikang落在同一CPU集合的实际用量不足以解释三倍差。
 - 通过降低LM迭代、关闭contact/termination/receipt或接受stale substep状态换速度。这些都会改变题目或证据语义。
 - 用旧legacy `6.700 s/update`、MuJoCo native 114-D或WAIT `learn(1)`冒充当前FullMDP等价A/B。
+- 为第二阶段D05 compact再加一层adapter。formal runtime owner的冻结inventory真实要求
+  `prepare_many/preview/stage/arm/commit/journal`旧ABI，`train.py`在`launch_authorized=true`时仍会选它；
+  本轮compact ABI尝试已完整回退。正确顺序是先正式退役/隔离formal legacy lane，再只做一次
+  compact，不并存两套接口。
 
 ## 2. 当前运行证据
 
@@ -46,6 +55,10 @@
 - `after_command_to_observation_gap`为`2.290--3.538 s`，reward为`0.525--0.924 s`；它们是第二层。
 - 2026-08-20资源快照中trainer约`6.4 GiB`、GPU利用约十几到二十个百分点，GPU0自然空闲；CPU主线仍是
   单进程Python/小kernel/同步固定税，没有整机CPU饱和证据。
+- 后续只读steady窗口已收敛到约`22 s/update`：GPU0 `ddb1e7c4…`约`21.94 s`（collection
+  约`20.5 s`、learn约`1.45 s`），GPU1 `e8eef4fb…`约`22.45 s`（collection约`20.74 s`、
+  learn约`1.71 s`）。两者GPU利用约`27%`、trainer各只占约`1.44--1.46`个CPU core，
+  所以CPU不是这条回归的因果瓶颈，也不需要CPU互斥。
 
 ## 3. 四个参考栈给出的共同答案
 
@@ -93,12 +106,20 @@ mandatory observation开始之间的after-command-to-observation gap；它包含
   192 cycle/update。完整source/DAG验证应留在construction/update boundary，热路径只保留lease/generation/
   poison/chronology token。
 
+`2ec32858…`已删除热路径中的模块/类/方法/lease/DAG全表重扫及16个调用点，但保留构造时
+admission、已绑定method dispatch、poison/reentrancy、protected manager不变式和返回ABI。它不再拦截
+构造完成后受信同进程主动monkeypatch的情形；这不是运行边界上可发生的外部故障，也没有独立
+事实writer可供它核验。这符合HANDOFF §3.1：不把同一writer的自洽扫描当安全边界。
+
 ### 4.5 Reward/observation clone与MuJoCo重复contact
 
 - Isaac Reward14项支付中，调用者丢弃`pay_reward()`返回的完整ActionEpochRecord，约336次无用全record
   clone/update；R03十consumer还重复计算相同误差。
 - portable MuJoCo Full-A每policy step的20个substep各扫两次full contact buffer，末尾又扫一次table；
   4096×128时每次524,288 rows。既有matched数据已证明仅base probe就造成约13%吞吐损失。
+
+`43d95275…`已把`pay_reward()`改为只完成append/journal/ordinal/fault/close，不再给唯一且
+丢弃返回值的production caller制造最后一份整record clone。这不删除Reward事实或守恒证据。
 
 ## 5. 本候选实现与验收
 
@@ -116,6 +137,12 @@ mandatory observation开始之间的after-command-to-observation gap；它包含
 - 该cut focused回归=`81 passed, 5 skipped`。它不会单独把22秒变成6秒；真正的empty-flight no-op仍需一个
   能同时drain concrete fact-owner的可靠active-slot authority，不能只看Python端`pending is None`就跳过capture。
 - D05 compact与profiler先前跨层回归=`110 passed, 1 skipped`；当前首个Physical cut的Pod wall改善仍`未测`。
+- Reward clone cut的epoch/lean-reward回归=`76 passed, 7 skipped`；owner validation cold-boundary cut回归=
+  `29 passed, 1 skipped`。idle clock新增反例证明：同一invalid task在`common_step=10`与`1,000,000`时
+  229/399输出完全一致，valid row仍保留原tick差。
+- 第二阶段D05 compact ABI尝试在追溯consumer后完整回退，production/test diff均为0。回退不是性能
+  结论；它是结构裁决：formal runtime owner仍是旧D05 transaction API的真实consumer，不能用
+  adapter把旧结构藏在新结构下。
 
 successor验收是同一`4096×25000`进程：前5个update只读profile，之后profile自动关闭继续；性能结论使用
 profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.5 s`、p95 `<=8 s`。任何数值优化还须
@@ -123,13 +150,14 @@ profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.
 
 ## 6. 下一步
 
-1. commit/push当前成对zero-live-flight candidate；在exact Pod先跑fixed-tape/RNG/reason/counter/safety parity，
-   再用fresh namespace做profiler-off `4096×24` matched wall。旧run在successor真实通过前继续只读，
-   不因普通坏return而停。
+1. 等待合法GPU窗口，在exact Pod先跑zero-live-flight的fixed-tape/RNG/reason/counter/safety parity，
+   再用fresh namespace做profiler-off `4096×24` matched wall。当前GPU0/GPU1队列锁被active run占用，
+   GPU2也有正在运行的MuJoCo/共享进程，因此这一级证据只能记`未测`。
 2. 只有Pod parity和matched wall都通过，才把zero-flight successor称为严格更强并停旧run；没有净收益就撤回，
    不靠host测试或主观保留。
-3. 后续依次做selected-reset compact transaction、cold/update-boundary owner validation和Reward/obs批处理；
-   先不再给现有cross-owner graph叠加第五层token。
+3. owner validation已收回cold boundary。下一个结构决策是正式退役/隔离formal legacy owner及
+   `train.py` formal branch；裁决完成后才把D05 producer→R05改成一套compact transaction，不加adapter。
+   随后再收敛Reward/observation的重复mutable state，不再给cross-owner graph叠加token。
 4. MuJoCo并行先完成action0 question/teacher，再合并contact census；R06/R07/Reward11--13闭合前不叫Full-A长跑。
 
 ## 7. `ddb1e7c4` successor实测：single-read cut没有打中首墙
@@ -199,6 +227,12 @@ host zero-flight三个focused文件各用独立Python进程，避免既有flat/p
 pre/post缺失、重复/倒序stamp、callback heartbeat/candidate、selected reset、restore/checkpoint与mixed/full
 fixed tape。这些只是host语义证据：exact Pod fixed-tape与profiler-off `4096×24` matched wall均
 仍`未测`，因此尚不声称从22秒恢复到6--9秒，也不声称严格支配active run。
+
+当前只有算术预算：zero-flight加两个已落地结构cut估算将完整iteration降到约
+`8.4--9.1 s`；这不是Pod实测，更没有证明`6 s/update`。要继续逼近6秒，必须先解开formal
+legacy consumer对D05 full-N bank/transaction的结构锁定，再用matched A/B判定真实wall；不能用预算
+代签。这也符合HANDOFF §3.5/3.6：只把不可学或证据不可信当阻塞，确定性结构事实用
+直接consumer/dataflow追溯，不用随机rollout为它代言。
 
 后续steady hot path每新增一个`.clone/.item/.cpu/.nonzero/full-N write`，都必须同时记录它的
 频率×shape和profile证据；一个事实只保留一个mutable owner，证据汇总尽量放在control/PPO
