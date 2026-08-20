@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 from pathlib import Path
 import sys
@@ -266,6 +267,31 @@ def _rowwise_settled_subject(
     return motion._env, motion, robot, sensor, bundle, epoch_owner
 
 
+def _set_current_phase_and_deadline(
+    epoch_owner,
+    *,
+    phase: int,
+    deadline_tick: int,
+) -> None:
+    """Install one controlled lifecycle cell without changing its real key."""
+
+    publication = epoch_owner._publication
+    record = publication.current
+    row_phase = record.phase.clone()
+    row_deadline = record.clocks.deadline_tick.clone()
+    slot = int(record.current_task_slot[0])
+    row_phase[0, slot] = phase
+    row_deadline[0, slot] = deadline_tick
+    epoch_owner._publication = epoch_v1._Publication(
+        replace(
+            record,
+            phase=row_phase,
+            clocks=replace(record.clocks, deadline_tick=row_deadline),
+        ),
+        publication.pending_log,
+    )
+
+
 def _ready_reference(
     *,
     motion,
@@ -445,7 +471,7 @@ def test_equal_private_motion_schedule_replacement_cannot_change_parent_truth(
 
 
 @pytest.mark.parametrize("device_name", ("cpu", "cuda:0"))
-def test_r07_epoch_direct_publish_keeps_fall_and_low_support_as_learning_data(
+def test_r07_reveal_keeps_fall_and_low_support_numeric_but_unpaid(
     monkeypatch, device_name
 ):
     if device_name.startswith("cuda") and not torch.cuda.is_available():
@@ -482,8 +508,9 @@ def test_r07_epoch_direct_publish_keeps_fall_and_low_support_as_learning_data(
     assert result.producer_fault_bits.tolist() == [0, 0]
     assert result.ready_instant.tolist() == [False, False]
     assert result.recovery_age_tick.tolist() == [0, -1]
+    assert result.reward_eligible.tolist() == [False, False]
     assert torch.isfinite(result.weighted_reward).all()
-    assert torch.all(result.weighted_reward > 0)
+    assert torch.all(result.weighted_reward == 0)
 
     record = epoch_owner.current()
     owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
@@ -507,7 +534,69 @@ def test_r07_epoch_direct_publish_keeps_fall_and_low_support_as_learning_data(
     assert fallen.infrastructure_fault.tolist() == [False, False]
     assert fallen.ready_instant.tolist() == [False, False]
     assert fallen.recovery_age_tick.tolist() == [1, -1]
+    assert fallen.reward_eligible.tolist() == [False, False]
     assert torch.isfinite(fallen.weighted_reward).all()
+
+
+@pytest.mark.parametrize(
+    ("phase", "age", "expected_eligible"),
+    (
+        (epoch_v1.PHASE_REVEAL_COMMITTED, 10, False),
+        (epoch_v1.PHASE_LAUNCH_SETTLED, 10, False),
+        (epoch_v1.PHASE_OUTCOME_SETTLED, 9, False),
+        (epoch_v1.PHASE_OUTCOME_SETTLED, 10, True),
+        (epoch_v1.PHASE_OUTCOME_SETTLED, 77, True),
+        (epoch_v1.PHASE_OUTCOME_SETTLED, 78, False),
+        (epoch_v1.PHASE_RETIRED, 77, False),
+    ),
+    ids=(
+        "reveal_age10",
+        "launch_age10",
+        "outcome_age9",
+        "outcome_age10",
+        "outcome_age77",
+        "outcome_age78",
+        "retired_age77",
+    ),
+)
+def test_r07_reward_eligibility_is_exact_post_outcome_window(
+    monkeypatch, phase, age, expected_eligible
+):
+    device = torch.device("cpu")
+    env, motion, _robot, _sensor, bundle, epoch_owner = (
+        _rowwise_settled_subject(monkeypatch, device=device)
+    )
+    source_step = 100
+    _set_current_phase_and_deadline(
+        epoch_owner,
+        phase=phase,
+        deadline_tick=source_step - age,
+    )
+    env.common_step_counter = source_step
+    result = _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=source_step,
+        current_source_step=torch.full(
+            (2,), source_step, dtype=torch.int64, device=device
+        ),
+    )
+    assert result.facts_valid.tolist() == [True, True]
+    assert result.recovery_age_tick.tolist() == [age, -1]
+    assert result.reward_eligible.tolist() == [expected_eligible, False]
+    assert (result.weighted_reward[0] > 0).item() is expected_eligible
+    assert result.weighted_reward[1].item() == 0.0
+
+    record = epoch_owner.current()
+    owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
+    expected_present = phase != epoch_v1.PHASE_RETIRED
+    assert bool(record.fact_valid_bits[0, 0, owner_slot].ne(0)) is expected_present
+    assert record.fact_f32[0, 0, owner_slot, 2].item() == float(
+        expected_eligible
+    )
+    # The non-due IDLE peer is never turned into an R07 payment row.
+    assert record.fact_valid_bits[1, 0, owner_slot].item() == 0
+    assert record.fact_f32[1, 0, owner_slot].eq(0).all()
 
 
 def test_r07_epoch_direct_publish_marks_nonfinite_plant_as_typed_fault(monkeypatch):
@@ -558,6 +647,8 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     )
     assert first.ready_instant.tolist() == [True, True]
     assert first.reference_kind.tolist() == [1, 1]
+    assert first.reward_eligible.tolist() == [False, False]
+    assert first.weighted_reward.eq(0).all()
     assert first_view.ready.tolist() == [False, False]
     assert first_view.control_tick.tolist() == [1, 1]
     # Genesis has no action row that could own reward facts.  Bootstrap
@@ -578,6 +669,8 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
         bundle.motion_ready_projection(), owner_kind="motion"
     )
     assert second.ready_instant.tolist() == [True, True]
+    assert second.reward_eligible.tolist() == [False, False]
+    assert second.weighted_reward.eq(0).all()
     assert second_view.ready.tolist() == [True, True]
     assert second_view.control_tick.tolist() == [2, 2]
     assert bundle.owner._action_epoch_ready_streak.tolist() == [2, 2]

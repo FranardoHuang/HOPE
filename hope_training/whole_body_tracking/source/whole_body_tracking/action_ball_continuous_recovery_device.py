@@ -146,6 +146,26 @@ PHASE_CODES = (
     PHASE_INFRASTRUCTURE_INVALID,
 )
 
+
+def _action_epoch_recovery_reward_window(
+    phase_code: torch.Tensor,
+    recovery_age_tick: torch.Tensor,
+    *,
+    outcome_settled_phase: int,
+) -> torch.Tensor:
+    """Return the sole post-shot R07 payment window.
+
+    Readiness remains an all-cycle plant computation.  This predicate owns
+    only reward eligibility: the shot outcome must already be settled and the
+    deadline-relative age must be one of the 68 adopted recovery cells.
+    """
+
+    return (
+        phase_code.eq(outcome_settled_phase)
+        & recovery_age_tick.ge(RECOVERY_START_AGE_TICK)
+        & recovery_age_tick.le(RECOVERY_END_AGE_TICK)
+    )
+
 OWNER_NONE = 0
 OWNER_SEQUENCE_BIRTH = 1
 OWNER_COMMITTED_TASK = 2
@@ -618,7 +638,9 @@ class DiagnosticN2ContinuousRecoveryBundle:
         slot_valid = slots.ge(0) & slots.lt(s)
         safe_slots = torch.clamp(slots, min=0, max=s - 1)
         lifecycle = epoch.recovery_reference_lifecycle_masks()
-        lifecycle_type = _exact_action_epoch_types(epoch_owner)[2]
+        _owner_type, _record_type, lifecycle_type, epoch_globals = (
+            _exact_action_epoch_types(epoch_owner)
+        )
         if type(lifecycle) is not lifecycle_type:
             raise ContinuousRecoveryDeviceError(
                 "R07 publish lifecycle type differs"
@@ -637,16 +659,43 @@ class DiagnosticN2ContinuousRecoveryBundle:
                 for field in fields(_row_identity.ActionEpochShotKey)
             }
         )
+        current_phase = owner._tensor(
+            epoch.phase,
+            label="R07 publish phase",
+            shape=(n, s),
+            dtype=torch.int64,
+        )[env_ids, safe_slots]
+        reveal_phase = epoch_globals.get("PHASE_REVEAL_COMMITTED")
+        launch_phase = epoch_globals.get("PHASE_LAUNCH_SETTLED")
+        outcome_phase = epoch_globals.get("PHASE_OUTCOME_SETTLED")
+        if any(
+            type(value) is not int
+            for value in (reveal_phase, launch_phase, outcome_phase)
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 ActionEpoch public phase constants differ"
+            )
+        active_phase = (
+            current_phase.eq(reveal_phase)
+            | current_phase.eq(launch_phase)
+            | current_phase.eq(outcome_phase)
+        )
+        reward_window = _action_epoch_recovery_reward_window(
+            current_phase,
+            result.recovery_age_tick,
+            outcome_settled_phase=outcome_phase,
+        )
         publish_rows = (
             slot_valid
             & completed
+            & active_phase
             & _row_identity.action_epoch_shot_key_valid(current_key)
         )
         fault_bits = torch.zeros(
             (n, s), dtype=torch.int64, device=owner.device
         )
         fault_bits[env_ids, safe_slots] = torch.where(
-            publish_rows,
+            publish_rows & reward_window,
             result.producer_fault_bits,
             torch.zeros_like(result.producer_fault_bits),
         )
@@ -3032,7 +3081,7 @@ class ContinuousRecoveryDeviceCoordinator:
             epoch_owner_type,
             epoch_record_type,
             lifecycle_type,
-            _epoch_globals,
+            epoch_globals,
         ) = (
             _exact_action_epoch_types(action_epoch_owner)
         )
@@ -3230,6 +3279,17 @@ class ContinuousRecoveryDeviceCoordinator:
         safe_slots = torch.clamp(
             current_slots, min=0, max=shot_slot_capacity - 1
         )
+        current_phase = self._tensor(
+            getattr(epoch, "phase"),
+            label="R07 epoch current phase",
+            shape=(self.num_envs, shot_slot_capacity),
+            dtype=torch.int64,
+        )[env_ids, safe_slots]
+        outcome_phase = epoch_globals.get("PHASE_OUTCOME_SETTLED")
+        if type(outcome_phase) is not int:
+            raise ContinuousRecoveryDeviceError(
+                "R07 ActionEpoch outcome phase constant differs"
+            )
         lifecycle = epoch.recovery_reference_lifecycle_masks()
         if type(lifecycle) is not lifecycle_type:
             raise ContinuousRecoveryDeviceError(
@@ -3422,10 +3482,15 @@ class ContinuousRecoveryDeviceCoordinator:
             1.0 + torch.square(errors / self._scales.unsqueeze(0))
         )
         raw_score = torch.sum(scores * self._weights.unsqueeze(0), dim=1) / self._weight_sum
-        # R07 is dense throughout the control-step cycle.  The epoch owns
-        # payment chronology; ordinary poor recovery earns its finite low
-        # value rather than becoming a protocol failure or disappearing.
-        reward_eligible = facts_valid
+        # Plant errors and readiness remain dense throughout the control-step
+        # cycle.  Payment is narrower: R07 is post-shot recovery, never a
+        # frame-zero pull during reveal/swing and never retained-row income.
+        reward_window = _action_epoch_recovery_reward_window(
+            current_phase,
+            recovery_age_tick,
+            outcome_settled_phase=outcome_phase,
+        )
+        reward_eligible = facts_valid & reward_window
         weighted_reward = torch.where(
             reward_eligible,
             raw_score * float(self.profile.reward_weight),

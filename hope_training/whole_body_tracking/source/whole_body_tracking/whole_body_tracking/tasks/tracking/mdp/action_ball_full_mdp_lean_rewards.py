@@ -359,6 +359,7 @@ class LeanActionEpochRewardGraph:
 
     def _r07(self) -> torch.Tensor:
         valid, _source_step, fact, faults = self._owner_rows("r07_recovery")
+        phase = self._selected(self._record().phase)
         reward = fact[:, 0]
         reward_eligible = fact[:, 2].eq(1.0)
         facts_valid = fact[:, 3].eq(1.0)
@@ -376,6 +377,10 @@ class LeanActionEpochRewardGraph:
             & facts_valid
             & ~infrastructure_fault
             & faults.eq(0)
+            # RETIRED deliberately retains its last immutable fact image.
+            # Current phase is therefore the non-redundant boundary that
+            # prevents replaying the final recovery payment.
+            & phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
         )
         self._milestone.add_reward(
             13, raw_score, reward, eligible, finite,

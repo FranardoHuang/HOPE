@@ -15,7 +15,13 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 MDP = ROOT / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp"
-from test_action_ball_full_mdp_epoch_rowwise import E, _key, _ready_epoch
+from test_action_ball_full_mdp_epoch_rowwise import (
+    E,
+    _RealSelectedResetHarness,
+    _key,
+    _ready_epoch,
+    _terminal_reset_facts,
+)
 R = importlib.import_module(
     "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_lean_rewards"
 )
@@ -26,10 +32,14 @@ def _tensor(data, *, dtype=None):
     return torch.tensor(data, dtype=dtype, device=TEST_DEVICE)
 
 
-def _epoch(*, placement_gain=2.0):
+def _epoch(*, placement_gain=2.0, bind_selected_reset=False):
     owner, d05, _cadence, r06_owner, _playback, *_middle, physical_owner = (
         _ready_epoch(device=TEST_DEVICE)
     )
+    selected_reset = None
+    if bind_selected_reset:
+        selected_reset = _RealSelectedResetHarness(owner)
+        owner.bind_selected_reset_owner(selected_reset.owner)
     valid = torch.ones((2, 1), dtype=torch.bool, device=TEST_DEVICE)
     values = _tensor([[1], [2]], dtype=torch.int64)
     candidate = d05.candidate
@@ -49,6 +59,17 @@ def _epoch(*, placement_gain=2.0):
     owner.bind_fact_owner("r07_recovery", producers["r07_recovery"])
     owner.prepare_after_command_rows()
     owner.settle_d05_transaction(d05.arm())
+    # This focused decoder fixture represents a settled shot.  REVEAL and
+    # LAUNCH are covered by the live producer tests and must not pay R07.
+    publication = owner._publication
+    record = publication.current
+    owner._publication = E._Publication(
+        replace(
+            record,
+            phase=torch.full_like(record.phase, E.PHASE_OUTCOME_SETTLED),
+        ),
+        publication.pending_log,
+    )
 
     def publish(name, bits, values, faults=None):
         if faults is not None:
@@ -109,6 +130,7 @@ def _epoch(*, placement_gain=2.0):
     r07 = torch.zeros_like(values)
     r07[:, :, 0] = _tensor((0.25, -0.5)).reshape(2, 1)
     r07[:, :, 2:4] = 1.0
+    r07[:, :, 6] = 10.0
     publish(
         "r07_recovery",
         torch.full(
@@ -119,6 +141,7 @@ def _epoch(*, placement_gain=2.0):
         ),
         r07,
     )
+    owner._test_selected_reset = selected_reset
     return owner
 
 
@@ -186,6 +209,75 @@ def test_exact_fourteen_lifecycle_plus_six_dense_complete_once():
     assert torch.equal(values[11], _tensor((1.0, 0.0)))
     assert torch.equal(values[12], torch.ones(2, device=TEST_DEVICE))
     assert torch.equal(values[13], _tensor((0.25, -0.5)))
+
+
+def test_r07_retired_row_cannot_replay_fact_or_mask_peer():
+    owner = _epoch()
+    publication = owner._publication
+    record = publication.current
+    phase = record.phase.clone()
+    phase[0, 0] = E.PHASE_RETIRED
+    before_peer = record.fact_f32[1, 0, E.OWNER_ORDER.index("r07_recovery")].clone()
+    owner._publication = E._Publication(
+        replace(record, phase=phase), publication.pending_log
+    )
+
+    values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
+    assert torch.equal(values[13], _tensor((0.0, -0.5)))
+    after = owner.current()
+    assert torch.equal(
+        after.fact_f32[1, 0, E.OWNER_ORDER.index("r07_recovery")],
+        before_peer,
+    )
+
+
+def test_selected_true_reset_clears_only_its_r07_row_and_peer_still_pays():
+    owner = _epoch(bind_selected_reset=True)
+    reset = owner._test_selected_reset
+    before = owner.current()
+    r07_slot = E.OWNER_ORDER.index("r07_recovery")
+    peer_fact = before.fact_f32[1, 0, r07_slot].clone()
+    peer_bits = before.fact_valid_bits[1, 0, r07_slot].clone()
+
+    selected_index = _tensor([0], dtype=torch.int64)
+    selected = _tensor([True, False], dtype=torch.bool)
+    generation_before = before.reset_generation.clone()
+    generation_after = generation_before + selected.to(torch.int64)
+    overflow = torch.zeros_like(selected)
+    terminal = _terminal_reset_facts(selected)
+    top = reset.arm_preflight(
+        selected_env_index=selected_index,
+        selected_mask=selected,
+        generation_before=generation_before,
+        generation_after=generation_after,
+        generation_overflow_fault=overflow,
+        terminal_reset_facts_i64=terminal,
+    )
+    lease = owner.prepare_selected_true_reset(
+        owner=reset.owner,
+        top_preflight=top,
+        selected_env_index=selected_index,
+        selected_mask=selected,
+        generation_before=generation_before,
+        generation_after=generation_after,
+        generation_overflow_fault=overflow,
+        terminal_reset_facts_i64=terminal,
+    )
+    reset.arm_commit(lease)
+    after = owner.commit_selected_true_reset(
+        owner=reset.owner, prepared_reset=lease
+    )
+    assert after.phase[:, 0].tolist() == [
+        E.PHASE_IDLE,
+        E.PHASE_OUTCOME_SETTLED,
+    ]
+    assert after.fact_valid_bits[0, 0, r07_slot].item() == 0
+    assert after.fact_f32[0, 0, r07_slot].eq(0).all()
+    assert torch.equal(after.fact_valid_bits[1, 0, r07_slot], peer_bits)
+    assert torch.equal(after.fact_f32[1, 0, r07_slot], peer_fact)
+
+    values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
+    assert torch.equal(values[13], _tensor((0.0, -0.5)))
 
 
 def test_real_consumers_reduce_primitive_eligibility_and_configured_income():
