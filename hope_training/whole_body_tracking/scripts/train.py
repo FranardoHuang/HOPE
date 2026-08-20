@@ -4900,10 +4900,8 @@ def _diagnostic_full_mdp_motion_body_names_contract(env) -> dict:
         owner = env.full_mdp_runtime_owner
         lease = env.action_ball_full_mdp_runtime_lease
         components = env._action_ball_full_mdp_components
-        getter = env.action_ball_full_mdp_motion_owner
-        descriptor = type(env).action_ball_full_mdp_motion_owner
         manager_motion = env.command_manager.get_term("motion")
-        motion = getter(lease)
+        motion = components.motion_owner
     except (AttributeError, KeyError) as exc:
         raise RuntimeError(
             "[train.py] diagnostic Motion body order lacks its exact installed join"
@@ -4911,9 +4909,6 @@ def _diagnostic_full_mdp_motion_body_names_contract(env) -> dict:
     if (
         type(owner) is not owner_type
         or type(components) is not components_type
-        or not callable(getter)
-        or getattr(getter, "__self__", None) is not env
-        or getattr(getter, "__func__", None) is not descriptor
         or owner.full_mdp_runtime_env is not env
         or owner.full_mdp_runtime_lease is not lease
         or owner.epoch_owner is not components.epoch_owner
@@ -15024,7 +15019,6 @@ _ACTION_BALL_FULL_MDP_TRAIN_WIRING_KIND = (
 )
 _ACTION_BALL_FULL_MDP_TARGET_MODE = "action_ball_full_mdp"
 _ACTION_BALL_FULL_MDP_OBS_MODE = "action_ball_full_mdp"
-_ACTION_BALL_FULL_MDP_FORMAL_MODE = "formal"
 _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE = (
     "single_action_lean"
 )
@@ -15038,9 +15032,6 @@ _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD = 0.02
 _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM = 31
 _ACTION_BALL_FULL_MDP_DIAGNOSTIC_JOINT_SAFETY_MODE = (
     "diagnostic_compact_two_phase_update_v1"
-)
-_ACTION_BALL_FULL_MDP_FORMAL_JOINT_SAFETY_MODE = (
-    "formal_policy_step_summary_v1"
 )
 
 
@@ -15069,13 +15060,9 @@ class _ActionBallFullMdpPreGymBinding:
 
     owner_type: type
     owner_factory: object
-    dependency_dag_sha256: str | None
-    dependency_kind: str | None
-    epoch_owner_type: type | None
+    dependency_kind: str
+    epoch_owner_type: type
     gym_entry_point: str
-    run_mode: str
-    launch_authorized: bool
-    diagnostic_unauthorized: bool
 
 
 @dataclass(frozen=True)
@@ -15113,49 +15100,22 @@ def _configure_action_ball_full_mdp_joint_safety_evidence(
             "[train.py] fresh full-MDP joint-safety evidence selector must "
             "be an exact bool"
         )
-    if pre_gym_binding.run_mode == (
-        _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-    ):
-        if current:
-            raise RuntimeError(
-                "[train.py] diagnostic full-MDP compact joint-safety mode "
-                "must be selected by the exact runtime binding, not by a "
-                "caller/task override"
-            )
-        action.pre_apply_guard_diagnostic_compact_evidence = True
-        return _ACTION_BALL_FULL_MDP_DIAGNOSTIC_JOINT_SAFETY_MODE
-    if pre_gym_binding.run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE:
-        if current:
-            raise RuntimeError(
-                "[train.py] formal full-MDP forbids diagnostic compact "
-                "joint-safety evidence"
-            )
-        return _ACTION_BALL_FULL_MDP_FORMAL_JOINT_SAFETY_MODE
-    raise RuntimeError("[train.py] fresh full-MDP run mode differs")
+    if current:
+        raise RuntimeError(
+            "[train.py] diagnostic full-MDP compact joint-safety mode "
+            "must be selected by the exact runtime binding, not by a "
+            "caller/task override"
+        )
+    action.pre_apply_guard_diagnostic_compact_evidence = True
+    return _ACTION_BALL_FULL_MDP_DIAGNOSTIC_JOINT_SAFETY_MODE
 
 
-_ACTION_BALL_FULL_MDP_REWARD_GRAPH_ATTR = (
-    "action_ball_full_mdp_reward_graph"
-)
-_ACTION_BALL_FULL_MDP_INSTALLED_REWARD_RECEIPT_ATTR = (
-    "_action_ball_full_mdp_installed_reward_graph_receipt"
-)
 _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER = (
     "action_ball_full_mdp_lean_reward_graph"
 )
 _ACTION_BALL_FULL_MDP_LEAN_ACTOR_CONTRACT = (
     "action_ball_full_mdp_action_epoch_v1"
 )
-
-
-def _exact_full_mdp_sha256(value, *, label: str) -> str:
-    if (
-        type(value) is not str
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        raise RuntimeError(f"[train.py] {label} is not an exact SHA-256")
-    return value
 
 
 def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
@@ -15556,15 +15516,12 @@ def _resolve_action_ball_full_mdp_lean_actor_observation_contract(
 ):
     """Resolve the diagnostic actor ABI from its installed ActionEpoch source.
 
-    This is deliberately disjoint from the formal capacity-bound R08 resolver.
     The lean graph has one named manager term per group and no R06 capacity
     authority, receipt or SHA namespace to validate.
     """
 
     if (
         type(pre_gym_binding) is not _ActionBallFullMdpPreGymBinding
-        or pre_gym_binding.run_mode
-        != _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
         or type(runtime_binding) is not _ActionBallFullMdpRuntimeBinding
     ):
         raise RuntimeError(
@@ -15683,11 +15640,7 @@ def _resolve_action_ball_full_mdp_installed_reward_graph(
     if pre_gym_binding is None:
         partial = tuple(
             name
-            for name in (
-                _ACTION_BALL_FULL_MDP_REWARD_GRAPH_ATTR,
-                _ACTION_BALL_FULL_MDP_INSTALLED_REWARD_RECEIPT_ATTR,
-                _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER,
-            )
+            for name in (_ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER,)
             if hasattr(runtime_env, name)
         )
         if partial:
@@ -15699,264 +15652,132 @@ def _resolve_action_ball_full_mdp_installed_reward_graph(
     if type(pre_gym_binding) is not _ActionBallFullMdpPreGymBinding:
         raise RuntimeError("[train.py] fresh full-MDP pre-Gym binding differs")
 
-    if pre_gym_binding.run_mode == (
-        _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-    ):
-        lean_rewards = importlib.import_module(
-            "whole_body_tracking.tasks.tracking.mdp."
-            "action_ball_full_mdp_lean_rewards"
-        )
-        graph_type = getattr(
-            lean_rewards, "LeanActionEpochRewardGraph", None
-        )
-        manager_names = getattr(lean_rewards, "MANAGER_NAMES", None)
-        payment_consumers = getattr(
-            lean_rewards, "ORDERED_CONSUMERS", None
-        )
-        lifecycle_payment_count = getattr(
-            lean_rewards, "LIFECYCLE_PAYMENT_COUNT", None
-        )
-        manager_term_count = getattr(
-            lean_rewards, "MANAGER_TERM_COUNT", None
-        )
-        graph_attr = getattr(lean_rewards, "GRAPH_ATTR", None)
-        profile_kind = getattr(
-            lean_rewards, "DIAGNOSTIC_N2_REWARD_PROFILE_KIND", None
-        )
-        if (
-            type(graph_type) is not type
-            or graph_attr != _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER
-            or type(manager_names) is not tuple
-            or type(payment_consumers) is not tuple
-            or type(lifecycle_payment_count) is not int
-            or lifecycle_payment_count != 14
-            or type(manager_term_count) is not int
-            or manager_term_count != 20
-            or len(manager_names) != manager_term_count
-            or len(payment_consumers) != lifecycle_payment_count
-            or len(set(manager_names)) != manager_term_count
-            or len(set(payment_consumers)) != lifecycle_payment_count
-            or any(type(value) is not str or not value for value in manager_names)
-            or any(
-                type(value) is not str or not value
-                for value in payment_consumers
-            )
-            or any(value.count(":") != 1 for value in payment_consumers)
-            or tuple(
-                value.split(":", 1)[0]
-                for value in payment_consumers
-            )
-            != (("r03",) * 10 + ("physical", "r06", "r06", "r07"))
-            or tuple(
-                value.split(":", 1)[1]
-                for value in payment_consumers
-            )
-            != manager_names[:lifecycle_payment_count]
-            or getattr(lean_rewards, "DIAGNOSTIC_UNAUTHORIZED", None)
-            is not True
-            or getattr(lean_rewards, "LAUNCH_AUTHORIZED", None) is not False
-            or profile_kind
-            != "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
-        ):
-            raise RuntimeError(
-                "[train.py] diagnostic lean Reward module ABI differs"
-            )
-        try:
-            lease = runtime_env.action_ball_full_mdp_runtime_lease
-        except AttributeError as exc:
-            raise RuntimeError(
-                "[train.py] diagnostic lean Reward graph lacks the runtime lease"
-            ) from exc
-        getter = getattr(
-            runtime_env, _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER, None
-        )
-        descriptor = getattr(
-            type(runtime_env),
-            _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER,
-            None,
-        )
-        if (
-            lease is None
-            or not callable(getter)
-            or getattr(getter, "__self__", None) is not runtime_env
-            or getattr(getter, "__func__", None) is not descriptor
-        ):
-            raise RuntimeError(
-                "[train.py] diagnostic env omitted its exact lease-bound "
-                "lean Reward getter"
-            )
-        graph = getter(lease)
-        owner = runtime_env.full_mdp_runtime_owner
-        epoch_owner = getattr(owner, "epoch_owner", None)
-        active_terms = getattr(
-            getattr(runtime_env, "reward_manager", None),
-            "active_terms",
-            None,
-        )
-        if (
-            type(owner) is not pre_gym_binding.owner_type
-            or getattr(owner, "full_mdp_runtime_env", None) is not runtime_env
-            or getattr(owner, "full_mdp_runtime_lease", None) is not lease
-            or getattr(owner, "diagnostic_unauthorized", None) is not True
-            or getattr(owner, "launch_authorized", None) is not False
-            or type(epoch_owner) is not pre_gym_binding.epoch_owner_type
-            or type(graph) is not graph_type
-            or graph.epoch_owner is not epoch_owner
-            or type(graph.num_envs) is not int
-            or type(getattr(runtime_env, "num_envs", None)) is not int
-            or runtime_env.num_envs <= 0
-            or graph.num_envs != runtime_env.num_envs
-            or getattr(epoch_owner, "num_envs", None) != runtime_env.num_envs
-            or graph.device != epoch_owner.device
-            or type(graph.poisoned) is not bool
-            or graph.poisoned
-            or type(graph.cycle_open) is not bool
-            or graph.cycle_open
-            or type(active_terms) is not list
-            or tuple(active_terms) != manager_names
-        ):
-            raise RuntimeError(
-                "[train.py] diagnostic lean Reward graph owner/epoch/manager "
-                "join differs"
-            )
-        return {
-            "schema_version": 1,
-            "kind": "action_ball_epoch_lean_reward_graph_v1",
-            "profile_kind": profile_kind,
-            "ordered_manager_names": list(manager_names),
-            "ordered_payment_consumers": list(payment_consumers),
-            "diagnostic_unauthorized": True,
-            "launch_authorized": False,
-            "no_receipt_or_sha_authority": True,
-        }
-    if pre_gym_binding.run_mode != _ACTION_BALL_FULL_MDP_FORMAL_MODE:
-        raise RuntimeError("[train.py] fresh full-MDP Reward run mode differs")
-
-    factory = importlib.import_module(
+    lean_rewards = importlib.import_module(
         "whole_body_tracking.tasks.tracking.mdp."
-        "action_ball_full_mdp_runtime_factory"
+        "action_ball_full_mdp_lean_rewards"
+    )
+    graph_type = getattr(
+        lean_rewards, "LeanActionEpochRewardGraph", None
+    )
+    manager_names = getattr(lean_rewards, "MANAGER_NAMES", None)
+    payment_consumers = getattr(
+        lean_rewards, "ORDERED_CONSUMERS", None
+    )
+    lifecycle_payment_count = getattr(
+        lean_rewards, "LIFECYCLE_PAYMENT_COUNT", None
+    )
+    manager_term_count = getattr(
+        lean_rewards, "MANAGER_TERM_COUNT", None
+    )
+    graph_attr = getattr(lean_rewards, "GRAPH_ATTR", None)
+    profile_kind = getattr(
+        lean_rewards, "DIAGNOSTIC_N2_REWARD_PROFILE_KIND", None
     )
     if (
-        getattr(factory, "REWARD_GRAPH_ATTR", None)
-        != _ACTION_BALL_FULL_MDP_REWARD_GRAPH_ATTR
-        or getattr(factory, "INSTALLED_REWARD_RECEIPT_ATTR", None)
-        != _ACTION_BALL_FULL_MDP_INSTALLED_REWARD_RECEIPT_ATTR
-    ):
-        raise RuntimeError(
-            "[train.py] fresh Reward factory attribute ABI differs"
-        )
-    try:
-        graph = getattr(runtime_env, _ACTION_BALL_FULL_MDP_REWARD_GRAPH_ATTR)
-        receipt = getattr(
-            runtime_env,
-            _ACTION_BALL_FULL_MDP_INSTALLED_REWARD_RECEIPT_ATTR,
-        )
-    except AttributeError as exc:
-        raise RuntimeError(
-            "[train.py] fresh full-MDP env omitted its factory-installed "
-            "Reward graph/receipt"
-        ) from exc
-    require_owned = getattr(
-        factory,
-        "require_owned_action_ball_full_mdp_installed_reward_graph",
-        None,
-    )
-    view_type = getattr(
-        factory, "ActionBallFullMdpInstalledRewardGraphView", None
-    )
-    if not callable(require_owned) or type(view_type) is not type:
-        raise RuntimeError(
-            "[train.py] fresh Reward factory reverse validator is absent"
-        )
-    try:
-        view = require_owned(receipt, env=runtime_env, reward_graph=graph)
-    except Exception as exc:
-        raise RuntimeError(
-            "[train.py] fresh full-MDP installed Reward graph failed exact "
-            "factory reverse validation"
-        ) from exc
-    if type(view) is not view_type:
-        raise RuntimeError(
-            "[train.py] fresh Reward factory returned a foreign graph view"
-        )
-    if getattr(view, "schema_version", None) != 1:
-        raise RuntimeError(
-            "[train.py] fresh Reward factory graph schema differs"
-        )
-    manager_names = getattr(view, "ordered_manager_names", None)
-    payment_consumers = getattr(view, "ordered_payment_consumers", None)
-    if (
-        type(manager_names) is not tuple
+        type(graph_type) is not type
+        or graph_attr != _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER
+        or type(manager_names) is not tuple
         or type(payment_consumers) is not tuple
-        or len(manager_names) != 14
-        or len(payment_consumers) != 14
-        or len(set(manager_names)) != 14
-        or len(set(payment_consumers)) != 14
+        or type(lifecycle_payment_count) is not int
+        or lifecycle_payment_count != 14
+        or type(manager_term_count) is not int
+        or manager_term_count != 20
+        or len(manager_names) != manager_term_count
+        or len(payment_consumers) != lifecycle_payment_count
+        or len(set(manager_names)) != manager_term_count
+        or len(set(payment_consumers)) != lifecycle_payment_count
         or any(type(value) is not str or not value for value in manager_names)
         or any(
             type(value) is not str or not value
             for value in payment_consumers
         )
+        or any(value.count(":") != 1 for value in payment_consumers)
+        or tuple(
+            value.split(":", 1)[0]
+            for value in payment_consumers
+        )
+        != (("r03",) * 10 + ("physical", "r06", "r06", "r07"))
+        or tuple(
+            value.split(":", 1)[1]
+            for value in payment_consumers
+        )
+        != manager_names[:lifecycle_payment_count]
+        or getattr(lean_rewards, "DIAGNOSTIC_UNAUTHORIZED", None)
+        is not True
+        or getattr(lean_rewards, "LAUNCH_AUTHORIZED", None) is not False
+        or profile_kind
+        != "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
     ):
         raise RuntimeError(
-            "[train.py] fresh Reward factory view is not the exact ordered "
-            "fourteen-term graph"
+            "[train.py] diagnostic lean Reward module ABI differs"
         )
-    kind = getattr(view, "kind", None)
-    if kind != getattr(factory, "INSTALLED_REWARD_GRAPH_KIND", None):
+    try:
+        lease = runtime_env.action_ball_full_mdp_runtime_lease
+    except AttributeError as exc:
         raise RuntimeError(
-            "[train.py] fresh Reward factory graph kind differs"
-        )
-    booleans = {
-        name: getattr(view, name, None)
-        for name in (
-            "diagnostic_unauthorized",
-            "runtime_integrated",
-            "launch_authorized",
-        )
-    }
-    if any(type(value) is not bool for value in booleans.values()):
-        raise RuntimeError(
-            "[train.py] fresh Reward factory graph status booleans differ"
-        )
-    if booleans["diagnostic_unauthorized"] is not (
-        pre_gym_binding.diagnostic_unauthorized
-    ) or booleans["launch_authorized"] is not (
-        pre_gym_binding.launch_authorized
-    ):
-        raise RuntimeError(
-            "[train.py] fresh Reward graph authorization differs from its "
-            "code-owned launch binding"
-        )
+            "[train.py] diagnostic lean Reward graph lacks the runtime lease"
+        ) from exc
+    getter = getattr(
+        runtime_env, _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER, None
+    )
+    descriptor = getattr(
+        type(runtime_env),
+        _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER,
+        None,
+    )
     if (
-        pre_gym_binding.run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE
-        and booleans["runtime_integrated"] is not True
+        lease is None
+        or not callable(getter)
+        or getattr(getter, "__self__", None) is not runtime_env
+        or getattr(getter, "__func__", None) is not descriptor
     ):
         raise RuntimeError(
-            "[train.py] formal fresh Reward graph is not runtime integrated"
+            "[train.py] diagnostic env omitted its exact lease-bound "
+            "lean Reward getter"
+        )
+    graph = getter(lease)
+    owner = runtime_env.full_mdp_runtime_owner
+    epoch_owner = getattr(owner, "epoch_owner", None)
+    active_terms = getattr(
+        getattr(runtime_env, "reward_manager", None),
+        "active_terms",
+        None,
+    )
+    if (
+        type(owner) is not pre_gym_binding.owner_type
+        or getattr(owner, "full_mdp_runtime_env", None) is not runtime_env
+        or getattr(owner, "full_mdp_runtime_lease", None) is not lease
+        or getattr(owner, "diagnostic_unauthorized", None) is not True
+        or getattr(owner, "launch_authorized", None) is not False
+        or type(epoch_owner) is not pre_gym_binding.epoch_owner_type
+        or type(graph) is not graph_type
+        or graph.epoch_owner is not epoch_owner
+        or type(graph.num_envs) is not int
+        or type(getattr(runtime_env, "num_envs", None)) is not int
+        or runtime_env.num_envs <= 0
+        or graph.num_envs != runtime_env.num_envs
+        or getattr(epoch_owner, "num_envs", None) != runtime_env.num_envs
+        or graph.device != epoch_owner.device
+        or type(graph.poisoned) is not bool
+        or graph.poisoned
+        or type(graph.cycle_open) is not bool
+        or graph.cycle_open
+        or type(active_terms) is not list
+        or tuple(active_terms) != manager_names
+    ):
+        raise RuntimeError(
+            "[train.py] diagnostic lean Reward graph owner/epoch/manager "
+            "join differs"
         )
     return {
-        "schema_version": getattr(view, "schema_version", None),
-        "kind": kind,
-        "numeric_authority_sha256": _exact_full_mdp_sha256(
-            getattr(view, "numeric_authority_sha256", None),
-            label="fresh Reward numeric authority",
-        ),
-        "numeric_materialization_sha256": _exact_full_mdp_sha256(
-            getattr(view, "numeric_materialization_sha256", None),
-            label="fresh Reward numeric materialization",
-        ),
-        "resolved_graph_receipt_sha256": _exact_full_mdp_sha256(
-            getattr(view, "resolved_graph_receipt_sha256", None),
-            label="fresh resolved Reward graph receipt",
-        ),
-        "installed_manager_graph_sha256": _exact_full_mdp_sha256(
-            getattr(view, "installed_manager_graph_sha256", None),
-            label="fresh installed Reward manager graph",
-        ),
+        "schema_version": 1,
+        "kind": "action_ball_epoch_lean_reward_graph_v1",
+        "profile_kind": profile_kind,
         "ordered_manager_names": list(manager_names),
         "ordered_payment_consumers": list(payment_consumers),
-        **booleans,
+        "diagnostic_unauthorized": True,
+        "launch_authorized": False,
+        "no_receipt_or_sha_authority": True,
     }
 
 
@@ -16096,8 +15917,8 @@ def _finalize_action_ball_strike_fact_successor_cfg(
             )
         # The fresh full-MDP environment necessarily declares receipts and
         # parent markers that look partial to the older successor probe.  Its
-        # exact Gym entry point, frozen top-owner inventory, installed owner,
-        # and R10 adapter are validated by the dedicated fresh branch instead.
+        # exact Gym entry point, lean owner/component/lease join, and absence
+        # of an R10 adapter are validated by the dedicated fresh branch instead.
         return
     partial = _action_ball_strike_fact_partial_wiring(env_cfg)
     if not requested:
@@ -16231,9 +16052,8 @@ def _resolve_action_ball_full_mdp_pre_gym_binding(
     """Resolve the code-owned top-owner factory before allocating an env.
 
     The binding is intentionally absent for every legacy task.  A fresh task
-    does not receive a caller-authored factory: it may use only the exact
-    ``ActionBallFullMdpRuntimeOwner.create_from_env`` classmethod and the DAG
-    root recomputed from that module's current dependency inventory.
+    does not receive a caller-authored factory: it may use only the exact lean
+    owner's ``create_from_env`` classmethod.
 
     The diagnostic lane intentionally does not ask whether live runtime,
     post-physics, reset or drain objects already exist: those objects can only
@@ -16253,7 +16073,7 @@ def _resolve_action_ball_full_mdp_pre_gym_binding(
         raise RuntimeError("[train.py] fresh full-MDP task id is invalid")
     if task_id not in _ACTION_BALL_FULL_MDP_TASK_IDS:
         raise RuntimeError(
-            "[train.py] diagnostic/formal full-MDP launch requires one exact "
+            "[train.py] diagnostic full-MDP launch requires one exact "
             f"code-owned A/C task id; got {task_id!r}"
         )
     if type(num_envs) is not int or num_envs <= 0:
@@ -16285,93 +16105,29 @@ def _resolve_action_ball_full_mdp_pre_gym_binding(
             f"{entry_point!r}"
         )
 
-    formal_module = importlib.import_module(
+    lean_module = importlib.import_module(
         "whole_body_tracking.tasks.tracking.mdp."
-        "action_ball_full_mdp_runtime_owner"
+        "action_ball_full_mdp_lean_runtime"
     )
-    formal_owner_type = getattr(
-        formal_module, "ActionBallFullMdpRuntimeOwner", None
+    owner_type = getattr(
+        lean_module, "ActionBallFullMdpLeanRuntimeOwner", None
     )
-    inventory_provider = getattr(
-        formal_module, "action_ball_full_mdp_runtime_dependency_inventory", None
+    dependency_kind = getattr(
+        lean_module, "DIAGNOSTIC_DEPENDENCY_KIND", None
     )
-    if type(formal_owner_type) is not type or not callable(inventory_provider):
+    epoch_owner_type = getattr(
+        getattr(lean_module, "epoch_v1", None), "ActionEpochOwner", None
+    )
+    if (
+        type(owner_type) is not type
+        or type(epoch_owner_type) is not type
+        or dependency_kind != "action_ball_epoch_runtime_dependencies_v1"
+        or getattr(lean_module, "DIAGNOSTIC_UNAUTHORIZED", None) is not True
+        or getattr(lean_module, "LAUNCH_AUTHORIZED", None) is not False
+    ):
         raise RuntimeError(
-            "[train.py] fresh full-MDP top owner/inventory API is missing"
+            "[train.py] diagnostic lean runtime owner API differs"
         )
-    inventory = inventory_provider()
-    launch_authorized = getattr(inventory, "launch_authorized", None)
-    if type(launch_authorized) is not bool:
-        raise RuntimeError(
-            "[train.py] formal full-MDP inventory launch status differs"
-        )
-    if launch_authorized:
-        # Preserve the formal lane exactly: the complete frozen inventory and
-        # the existing runtime/post-physics/reset/R10 readiness vector remain
-        # mandatory.  The diagnostic exception below cannot weaken it.
-        frozen = getattr(inventory, "frozen", None)
-        readiness = (
-            getattr(formal_module, "RUNTIME_INTEGRATED", None),
-            getattr(formal_module, "POST_PHYSICS_INTEGRATED", None),
-            getattr(formal_module, "SELECTED_RESET_INTEGRATED", None),
-            getattr(formal_module, "R10_SHARED_JOIN_PROVIDER_INTEGRATED", None),
-        )
-        if frozen is not True or any(value is not True for value in readiness):
-            blockers = getattr(inventory, "blockers", ())
-            raise RuntimeError(
-                "[train.py] fresh full-MDP construction HOLD before gym.make: "
-                f"inventory_frozen={frozen!r} "
-                f"runtime/postphysics/reset/r10_join={readiness!r} "
-                f"blockers={tuple(blockers)!r}"
-            )
-        run_mode = _ACTION_BALL_FULL_MDP_FORMAL_MODE
-        owner_type = formal_owner_type
-        dependency_dag_sha256 = getattr(inventory, "content_sha256", None)
-        if (
-            type(dependency_dag_sha256) is not str
-            or len(dependency_dag_sha256) != 64
-            or any(
-                character not in "0123456789abcdef"
-                for character in dependency_dag_sha256
-            )
-        ):
-            raise RuntimeError(
-                "[train.py] formal full-MDP inventory has no exact DAG root"
-            )
-        diagnostic_unauthorized = False
-        dependency_kind = None
-        epoch_owner_type = None
-    else:
-        run_mode = _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-        lean_module = importlib.import_module(
-            "whole_body_tracking.tasks.tracking.mdp."
-            "action_ball_full_mdp_lean_runtime"
-        )
-        owner_type = getattr(
-            lean_module, "ActionBallFullMdpLeanRuntimeOwner", None
-        )
-        dependency_kind = getattr(
-            lean_module, "DIAGNOSTIC_DEPENDENCY_KIND", None
-        )
-        epoch_owner_type = getattr(
-            getattr(lean_module, "epoch_v1", None), "ActionEpochOwner", None
-        )
-        if (
-            type(owner_type) is not type
-            or type(epoch_owner_type) is not type
-            or dependency_kind
-            != "action_ball_epoch_runtime_dependencies_v1"
-            or getattr(lean_module, "DIAGNOSTIC_UNAUTHORIZED", None) is not True
-            or getattr(lean_module, "LAUNCH_AUTHORIZED", None) is not False
-        ):
-            raise RuntimeError(
-                "[train.py] diagnostic lean runtime owner API differs"
-            )
-        # The diagnostic owner is selected by exact executable identity, not
-        # by accepting the formal receipt graph's SHA as truth.
-        dependency_dag_sha256 = None
-        launch_authorized = False
-        diagnostic_unauthorized = True
     factory = getattr(owner_type, "create_from_env", None)
     factory_descriptor = owner_type.__dict__.get("create_from_env")
     if (
@@ -16388,13 +16144,9 @@ def _resolve_action_ball_full_mdp_pre_gym_binding(
     return _ActionBallFullMdpPreGymBinding(
         owner_type=owner_type,
         owner_factory=factory,
-        dependency_dag_sha256=dependency_dag_sha256,
         dependency_kind=dependency_kind,
         epoch_owner_type=epoch_owner_type,
         gym_entry_point=entry_point,
-        run_mode=run_mode,
-        launch_authorized=launch_authorized,
-        diagnostic_unauthorized=diagnostic_unauthorized,
     )
 
 
@@ -16402,7 +16154,7 @@ def _resolve_action_ball_full_mdp_runtime_binding(
     pre_gym_binding,
     runtime_env,
 ):
-    """Return exact post-Gym owner/env/lease/DAG and optional R10 identity."""
+    """Return the exact post-Gym lean owner, epoch, drain and lease identities."""
 
     if pre_gym_binding is None:
         return None
@@ -16424,14 +16176,7 @@ def _resolve_action_ball_full_mdp_runtime_binding(
         raise RuntimeError(
             "[train.py] fresh full-MDP top owner env binding differs"
         )
-    if pre_gym_binding.run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE:
-        if getattr(owner, "full_mdp_runtime_dependency_dag_sha256", None) != (
-            pre_gym_binding.dependency_dag_sha256
-        ):
-            raise RuntimeError(
-                "[train.py] formal full-MDP top owner dependency DAG differs"
-            )
-    elif (
+    if (
         getattr(owner, "diagnostic_dependency_kind", None)
         != pre_gym_binding.dependency_kind
         or getattr(owner, "diagnostic_unauthorized", None) is not True
@@ -16473,23 +16218,19 @@ def _resolve_action_ball_full_mdp_runtime_binding(
         raise RuntimeError(
             "[train.py] fresh full-MDP top owner/env global drain join differs"
         )
-    epoch_owner = None
-    if pre_gym_binding.run_mode == (
-        _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
+    epoch_owner = getattr(owner, "epoch_owner", None)
+    runtime_num_envs = getattr(runtime_env, "num_envs", None)
+    if (
+        type(epoch_owner) is not pre_gym_binding.epoch_owner_type
+        or ppo_drain_owner is not owner
+        or getattr(owner, "_epoch", None) is not epoch_owner
+        or type(runtime_num_envs) is not int
+        or runtime_num_envs <= 0
+        or getattr(epoch_owner, "num_envs", None) != runtime_num_envs
     ):
-        epoch_owner = getattr(owner, "epoch_owner", None)
-        runtime_num_envs = getattr(runtime_env, "num_envs", None)
-        if (
-            type(epoch_owner) is not pre_gym_binding.epoch_owner_type
-            or ppo_drain_owner is not owner
-            or getattr(owner, "_epoch", None) is not epoch_owner
-            or type(runtime_num_envs) is not int
-            or runtime_num_envs <= 0
-            or getattr(epoch_owner, "num_envs", None) != runtime_num_envs
-        ):
-            raise RuntimeError(
-                "[train.py] diagnostic lean owner/epoch/drain join differs"
-            )
+        raise RuntimeError(
+            "[train.py] diagnostic lean owner/epoch/drain join differs"
+        )
 
     owner_adapter = getattr(
         owner, "action_ball_r10_checkpoint_adapter", None
@@ -16500,21 +16241,10 @@ def _resolve_action_ball_full_mdp_runtime_binding(
         raise RuntimeError(
             "[train.py] fresh full-MDP env omitted its R10 adapter binding"
         ) from exc
-    if pre_gym_binding.run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE:
-        if owner_adapter is None or env_adapter is not owner_adapter:
-            raise RuntimeError(
-                "[train.py] formal fresh full-MDP requires the same non-null "
-                "R10 adapter from the env and top owner"
-            )
-    elif pre_gym_binding.run_mode == (
-        _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-    ):
-        if owner_adapter is not None or env_adapter is not None:
-            raise RuntimeError(
-                "[train.py] single_action_lean forbids every R10 adapter"
-            )
-    else:
-        raise RuntimeError("[train.py] fresh full-MDP run mode differs")
+    if owner_adapter is not None or env_adapter is not None:
+        raise RuntimeError(
+            "[train.py] single_action_lean forbids every R10 adapter"
+        )
     try:
         cold_capsule = runtime_env.action_ball_r10_cold_restore_capsule
     except AttributeError as exc:
@@ -16567,20 +16297,10 @@ def _action_ball_full_mdp_training_contract(
         raise RuntimeError(
             "[train.py] fresh full-MDP contract requires the complete fresh binding"
         )
-    if pre_gym_binding.run_mode == _ACTION_BALL_FULL_MDP_FORMAL_MODE:
-        if checkpoint_adapter is None:
-            raise RuntimeError(
-                "[train.py] formal fresh full-MDP contract requires R10"
-            )
-    elif pre_gym_binding.run_mode == (
-        _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-    ):
-        if checkpoint_adapter is not None:
-            raise RuntimeError(
-                "[train.py] single_action_lean contract forbids R10"
-            )
-    else:
-        raise RuntimeError("[train.py] fresh full-MDP run mode differs")
+    if checkpoint_adapter is not None:
+        raise RuntimeError(
+            "[train.py] single_action_lean contract forbids R10"
+        )
     contract = {
         "schema_version": 1,
         "kind": _ACTION_BALL_FULL_MDP_TRAIN_WIRING_KIND,
@@ -16593,20 +16313,15 @@ def _action_ball_full_mdp_training_contract(
         ),
         "r10_checkpoint_adapter_bound": checkpoint_adapter is not None,
         "cold_restore": False,
-        "launch_authorized": pre_gym_binding.launch_authorized,
-        "diagnostic_unauthorized": pre_gym_binding.diagnostic_unauthorized,
+        "launch_authorized": False,
+        "diagnostic_unauthorized": True,
         "joint_safety_evidence_mode": (
             _ACTION_BALL_FULL_MDP_DIAGNOSTIC_JOINT_SAFETY_MODE
-            if pre_gym_binding.run_mode
-            == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-            else _ACTION_BALL_FULL_MDP_FORMAL_JOINT_SAFETY_MODE
         ),
-        "formal_evidence_prohibited": pre_gym_binding.diagnostic_unauthorized,
-        "curriculum_promotion_prohibited": (
-            pre_gym_binding.diagnostic_unauthorized
-        ),
-        "exact_export_prohibited": pre_gym_binding.diagnostic_unauthorized,
-        "deployment_prohibited": pre_gym_binding.diagnostic_unauthorized,
+        "formal_evidence_prohibited": True,
+        "curriculum_promotion_prohibited": True,
+        "exact_export_prohibited": True,
+        "deployment_prohibited": True,
         **(
             {}
             if policy_bootstrap is None
@@ -16619,21 +16334,14 @@ def _action_ball_full_mdp_training_contract(
             }
         ),
     }
-    if pre_gym_binding.run_mode == (
-        _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-    ):
-        contract.update(
-            {
-                "run_mode": _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE,
-                "no_save": True,
-                "diagnostic_operational": True,
-                "runtime_dependency_kind": pre_gym_binding.dependency_kind,
-            }
-        )
-    else:
-        contract["dependency_dag_sha256"] = (
-            pre_gym_binding.dependency_dag_sha256
-        )
+    contract.update(
+        {
+            "run_mode": _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE,
+            "no_save": True,
+            "diagnostic_operational": True,
+            "runtime_dependency_kind": pre_gym_binding.dependency_kind,
+        }
+    )
     return contract
 
 
@@ -16641,7 +16349,7 @@ def _finalize_action_ball_full_mdp_hard_contract(
     hard_contract: dict,
     full_mdp_contract,
 ) -> None:
-    """Install the fresh lane marker only beside its two exact runtime modes."""
+    """Install the fresh lane marker only beside the exact lean runtime."""
 
     if type(hard_contract) is not dict:
         raise RuntimeError("[train.py] hard training contract must be a dict")
@@ -20469,9 +20177,8 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     _diag_racket_cfg = getattr(
         getattr(env_cfg, "commands", None), "racket_target", None
     )
-    full_mdp_diagnostic_unauthorized = bool(
-        action_ball_full_mdp_pre_gym_binding
-        and action_ball_full_mdp_pre_gym_binding.diagnostic_unauthorized
+    full_mdp_diagnostic_unauthorized = (
+        action_ball_full_mdp_pre_gym_binding is not None
     )
     if (
         getattr(
@@ -20949,9 +20656,6 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
             "full_mdp_runtime_owner_factory": (
                 action_ball_full_mdp_pre_gym_binding.owner_factory
             ),
-            "full_mdp_runtime_owner_expected_dependency_dag_sha256": (
-                action_ball_full_mdp_pre_gym_binding.dependency_dag_sha256
-            ),
             "full_mdp_cold_restore_dormant": False,
         }
     raw_env = gym.make(
@@ -21042,11 +20746,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     )
     expected_contract = _get(cfg.task, "actor_obs_contract")
     actor_contract = None
-    if (
-        action_ball_full_mdp_pre_gym_binding is not None
-        and action_ball_full_mdp_pre_gym_binding.run_mode
-        == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-    ):
+    if action_ball_full_mdp_pre_gym_binding is not None:
         if expected_contract is not None:
             raise RuntimeError(
                 "[train.py] diagnostic ActionEpoch actor contract is "
@@ -21545,8 +21245,6 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     runner_type = (
         ActionBallFullMdpRsl3Runner
         if action_ball_full_mdp_runtime_owner is not None
-        and action_ball_full_mdp_pre_gym_binding.run_mode
-        == _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
         else OnPolicyRunner
     )
     runner = runner_type(
@@ -21574,7 +21272,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         action_ball_full_mdp_run_mode=(
             None
             if action_ball_full_mdp_pre_gym_binding is None
-            else action_ball_full_mdp_pre_gym_binding.run_mode
+            else _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
         ),
     )
     if _211_mode == C211_ACTOR_CONTRACT:

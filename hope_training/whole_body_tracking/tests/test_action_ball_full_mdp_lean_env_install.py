@@ -137,12 +137,7 @@ def test_cold_local_binding_covers_install_getter_hooks_reset_and_teardown():
         "__init__",
         "step",
         "load_managers",
-        "install_action_ball_full_mdp_reset_genesis",
-        "bind_action_ball_full_mdp_selected_reset_authority",
-        "install_action_ball_full_mdp_runtime_components",
         "install_action_ball_full_mdp_lean_runtime_graph",
-        "action_ball_full_mdp_num_envs",
-        "action_ball_full_mdp_device",
         "action_ball_full_mdp_ppo_drain_owner",
         "action_ball_full_mdp_lean_runtime_owner",
         "action_ball_full_mdp_lean_reward_graph",
@@ -155,6 +150,23 @@ def test_cold_local_binding_covers_install_getter_hooks_reset_and_teardown():
         "reset",
         "close",
     } <= direct.keys()
+    retired_direct_surface = {
+        "install_action_ball_full_mdp_reset_genesis",
+        "install_action_ball_full_mdp_runtime_components",
+        "bind_action_ball_full_mdp_selected_reset_authority",
+        "action_ball_full_mdp_num_envs",
+        "action_ball_full_mdp_device",
+        "action_ball_full_mdp_device_r05_owner",
+        "action_ball_full_mdp_motion_owner",
+        "action_ball_full_mdp_racket_owner",
+        "action_ball_full_mdp_physical_owner",
+        "action_ball_full_mdp_r03_owner",
+        "action_ball_full_mdp_r06_owner",
+        "action_ball_full_mdp_r07_owner",
+    }
+    assert retired_direct_surface.isdisjoint(direct)
+    for name in retired_direct_surface:
+        assert not hasattr(M.ActionBallFullMdpManagerBasedRLEnv, name)
     assert {
         "action_ball_full_mdp_runtime_lease",
         "full_mdp_runtime_owner",
@@ -536,31 +548,56 @@ def test_lean_graph_setter_failure_restores_all_three_cfgs_and_publications(
         )
 
 
-@pytest.mark.parametrize("partial", ("genesis", "components"))
-def test_lean_graph_refuses_to_complete_or_overwrite_a_partial_install(partial):
+@pytest.mark.parametrize("prior_state", ("complete", "cold_discarded"))
+def test_lean_graph_is_one_shot_after_atomic_install(prior_state):
     env, lease = _env()
+    components = _components(env)
     rewards, observations, terminations = _manager_cfgs()
-    if partial == "genesis":
-        env.install_action_ball_full_mdp_reset_genesis(
-            lease, object(), object()
-        )
-    else:
-        env.install_action_ball_full_mdp_runtime_components(
-            lease, _components(env)
-        )
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="partial"):
-        components = _components(env)
+    env.install_action_ball_full_mdp_lean_runtime_graph(
+        lease,
+        genesis_authority=object(),
+        genesis_receipt=object(),
+        components=components,
+        reward_manager_cfg=rewards,
+        observation_source=_observation_source(env, components),
+        observation_manager_cfg=observations,
+        termination_manager_cfg=terminations,
+        live_physx_shutdown=_live_physx_shutdown(),
+    )
+    if prior_state == "cold_discarded":
+        env._poison_action_ball_full_mdp_construction_installs()
+
+    replacement = _components(env)
+    replacement_rewards, replacement_observations, replacement_terminations = (
+        _manager_cfgs()
+    )
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError,
+        match="cannot replace a partial or complete install",
+    ):
         env.install_action_ball_full_mdp_lean_runtime_graph(
             lease,
             genesis_authority=object(),
             genesis_receipt=object(),
-            components=components,
-            reward_manager_cfg=rewards,
-            observation_source=_observation_source(env, components),
-            observation_manager_cfg=observations,
-            termination_manager_cfg=terminations,
+            components=replacement,
+            reward_manager_cfg=replacement_rewards,
+            observation_source=_observation_source(env, replacement),
+            observation_manager_cfg=replacement_observations,
+            termination_manager_cfg=replacement_terminations,
             live_physx_shutdown=_live_physx_shutdown(),
         )
+
+    if prior_state == "complete":
+        assert env._action_ball_full_mdp_components is components
+        assert env._action_ball_full_mdp_lean_reward_graph is components.reward_graph
+        assert env.cfg.rewards is rewards
+        assert env.cfg.observations is observations
+        assert env.cfg.terminations is terminations
+    else:
+        assert env._action_ball_full_mdp_components is M._ABSENT
+        assert env._action_ball_full_mdp_reset_genesis_install is M._ABSENT
+        assert env._action_ball_full_mdp_lean_reward_graph is M._ABSENT
+        assert env._action_ball_full_mdp_lean_observation_source is M._ABSENT
 
 
 def test_lean_registry_rejects_role_aliasing():
@@ -642,17 +679,18 @@ class _TerminalResetManager(_ResetManager):
 
     def __init__(self, trace, label, *, device):
         super().__init__(trace, label)
-        zero = torch.zeros(2, dtype=torch.bool, device=device)
-        self._term_dones = {name: zero.clone() for name in self._NAMES}
-        self._term_dones["joint_qdes_forbidden"][0] = True
-        self._term_dones["robot_hit_table"][0] = True
+        self._term_dones = torch.zeros(
+            (2, len(self._NAMES)), dtype=torch.bool, device=device
+        )
+        self._term_dones[0, self._NAMES.index("joint_qdes_forbidden")] = True
+        self._term_dones[0, self._NAMES.index("robot_hit_table")] = True
 
     @property
     def active_terms(self):
         return list(self._NAMES)
 
     def get_term(self, name):
-        return self._term_dones[name]
+        return self._term_dones[:, self._NAMES.index(name)]
 
 
 class _SelectedResetLeafPort:
@@ -809,6 +847,26 @@ def _real_selected_reset_env(device, monkeypatch):
         "action_ball_full_mdp_lean_runtime"
     )
     epoch_module = lean_runtime.epoch_v1
+    selected_reset_module = epoch_module.selected_reset
+    selected_runtime_name = (
+        selected_reset_module.__package__ + "."
+        if selected_reset_module.__package__
+        else ""
+    ) + "action_ball_full_mdp_lean_runtime"
+    # Other focused files may preload the same production sources through
+    # their short module names.  SelectedReset resolves its owner class from
+    # its own package namespace, so bind both possible import spellings to the
+    # exact runtime that supplied this epoch instead of borrowing collection
+    # order as identity.
+    for runtime_name in {
+        selected_runtime_name,
+        "action_ball_full_mdp_lean_runtime",
+        (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "action_ball_full_mdp_lean_runtime"
+        ),
+    }:
+        monkeypatch.setitem(sys.modules, runtime_name, lean_runtime)
     reward_leaf = "action_ball_full_mdp_lean_rewards"
     reward_name = lean_runtime.__package__ + "." + reward_leaf
     package_module = sys.modules[lean_runtime.__package__]
@@ -855,6 +913,8 @@ def _real_selected_reset_env(device, monkeypatch):
     env._action_ball_full_mdp_reset_callpoint_authority = None
     env._action_ball_full_mdp_lean_genesis_reset_pending = False
     env._action_ball_full_mdp_manager_construction_state = "sealed"
+    env._full_mdp_post_physics_poison = None
+    env._full_mdp_active_dispatch = None
 
     epoch_owner = epoch_module.ActionEpochOwner(
         num_envs=2,
@@ -916,6 +976,7 @@ def _real_selected_reset_env(device, monkeypatch):
         r03_strike_fact=r03_owner,
         r07_recovery=r07_owner,
     )
+    env._full_mdp_runtime_owner = runtime_owner
     epoch_owner.bind_selected_reset_owner(runtime_owner)
     d05_owner.bind_true_reset_authority(runtime_owner)
     first = runtime_owner.prepare_pre_optimizer_ppo_boundary(
@@ -956,17 +1017,11 @@ def _real_selected_reset_env(device, monkeypatch):
 
     epoch_owner.prepare_selected_true_reset = capture_prepare_selected_reset
 
-    def require_binding():
-        if poisoned:
-            raise M.FullMdpPostPhysicsProtocolError(
-                "environment is sticky-poisoned"
-            )
-        trace.append(("binding",))
+    def poison(*, reason, exact_stamp):
+        poisoned.append({"reason": reason, "exact_stamp": exact_stamp})
+        if env._full_mdp_post_physics_poison is None:
+            env._full_mdp_post_physics_poison = (reason, exact_stamp)
 
-    def poison(**kwargs):
-        poisoned.append(kwargs)
-
-    env._assert_owner_binding_current = require_binding
     env._poison = poison
     env.curriculum_manager = _ResetManager(trace, "curriculum")
     env.scene = types.SimpleNamespace(
@@ -1074,7 +1129,6 @@ def test_genesis_reset_computes_command_once_before_first_observation():
     env._full_mdp_selected_true_reset = lambda *_args: trace.append(
         ("selected_reset",)
     )
-    env._assert_owner_binding_current = lambda: trace.append(("binding",))
     env._poison = lambda **_kwargs: None
     env.curriculum_manager = _ResetManager(trace, "curriculum")
     env.scene = types.SimpleNamespace(
@@ -1279,13 +1333,15 @@ def test_real_env_selected_reset_failure_precedes_native_and_blocks_retry(
         for item in trace
     )
 
-    env._authorize_action_ball_full_mdp_reset_callpoint(
-        env_ids, source="step_nonzero"
-    )
+    assert env._action_ball_full_mdp_reset_callpoint_authority is None
+    retry_trace_before = tuple(trace)
     with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="sticky-poisoned"
+        M.FullMdpPostPhysicsPoisonedError,
+        match="cold reconstruction is required",
     ):
-        env._reset_idx(env_ids)
+        env._assert_step_may_start()
+    assert env._action_ball_full_mdp_reset_callpoint_authority is None
+    assert tuple(trace) == retry_trace_before
     assert torch.equal(
         env._action_ball_full_mdp_reset_generation, generation_before
     )

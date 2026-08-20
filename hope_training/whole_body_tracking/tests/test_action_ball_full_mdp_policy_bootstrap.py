@@ -135,20 +135,13 @@ def _runner(*, std=0.02):
     )
 
 
-def _pre_gym_binding(run_mode):
+def _pre_gym_binding():
     return train_mod._ActionBallFullMdpPreGymBinding(
         owner_type=type("Owner", (), {}),
         owner_factory=object(),
-        dependency_dag_sha256=None,
-        dependency_kind=None,
-        epoch_owner_type=None,
+        dependency_kind="action_ball_epoch_runtime_dependencies_v1",
+        epoch_owner_type=type("EpochOwner", (), {}),
         gym_entry_point="entry",
-        run_mode=run_mode,
-        launch_authorized=run_mode == train_mod._ACTION_BALL_FULL_MDP_FORMAL_MODE,
-        diagnostic_unauthorized=(
-            run_mode
-            == train_mod._ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-        ),
     )
 
 
@@ -174,9 +167,7 @@ def test_diagnostic_binding_alone_selects_consumed_compact_joint_safety():
     cfg = _joint_safety_cfg()
     mode = train_mod._configure_action_ball_full_mdp_joint_safety_evidence(
         cfg,
-        _pre_gym_binding(
-            train_mod._ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-        ),
+        _pre_gym_binding(),
     )
     assert mode == "diagnostic_compact_two_phase_update_v1"
     assert cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence is True
@@ -184,25 +175,7 @@ def test_diagnostic_binding_alone_selects_consumed_compact_joint_safety():
     with pytest.raises(RuntimeError, match="not by a caller/task override"):
         train_mod._configure_action_ball_full_mdp_joint_safety_evidence(
             _joint_safety_cfg(compact=True),
-            _pre_gym_binding(
-                train_mod._ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE
-            ),
-        )
-
-
-def test_formal_binding_keeps_dense_joint_safety_and_rejects_compact_override():
-    cfg = _joint_safety_cfg()
-    mode = train_mod._configure_action_ball_full_mdp_joint_safety_evidence(
-        cfg,
-        _pre_gym_binding(train_mod._ACTION_BALL_FULL_MDP_FORMAL_MODE),
-    )
-    assert mode == "formal_policy_step_summary_v1"
-    assert cfg.actions.joint_pos.pre_apply_guard_diagnostic_compact_evidence is False
-
-    with pytest.raises(RuntimeError, match="formal full-MDP forbids"):
-        train_mod._configure_action_ball_full_mdp_joint_safety_evidence(
-            _joint_safety_cfg(compact=True),
-            _pre_gym_binding(train_mod._ACTION_BALL_FULL_MDP_FORMAL_MODE),
+            _pre_gym_binding(),
         )
 
 
@@ -213,7 +186,7 @@ def test_formal_binding_keeps_dense_joint_safety_and_rejects_compact_override():
         "HOPE-PingPong-ActionBall-FullMdpC-AgibotA3-v0",
     ),
 )
-def test_registered_ac_parse_then_launch_binding_is_the_only_compact_writer(gym_id):
+def test_registered_ac_parse_then_lean_binding_is_the_only_compact_writer(gym_id):
     pytest.importorskip("gymnasium")
     pytest.importorskip("isaaclab")
     pytest.importorskip("isaaclab_tasks")
@@ -226,20 +199,10 @@ def test_registered_ac_parse_then_launch_binding_is_the_only_compact_writer(gym_
     assert diagnostic_action.pre_apply_guard_diagnostic_compact_evidence is False
     diagnostic_mode = train_mod._configure_action_ball_full_mdp_joint_safety_evidence(
         diagnostic_cfg,
-        _pre_gym_binding(train_mod._ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE),
+        _pre_gym_binding(),
     )
     assert diagnostic_mode == "diagnostic_compact_two_phase_update_v1"
     assert diagnostic_action.pre_apply_guard_diagnostic_compact_evidence is True
-
-    formal_cfg = parse_env_cfg(gym_id, device="cpu", num_envs=2)
-    formal_action = formal_cfg.actions.joint_pos
-    assert formal_action.pre_apply_guard_diagnostic_compact_evidence is False
-    formal_mode = train_mod._configure_action_ball_full_mdp_joint_safety_evidence(
-        formal_cfg,
-        _pre_gym_binding(train_mod._ACTION_BALL_FULL_MDP_FORMAL_MODE),
-    )
-    assert formal_mode == "formal_policy_step_summary_v1"
-    assert formal_action.pre_apply_guard_diagnostic_compact_evidence is False
 
 
 @pytest.mark.parametrize(
@@ -382,13 +345,9 @@ def test_persisted_full_mdp_contract_contains_the_exact_bootstrap():
     binding = train_mod._ActionBallFullMdpPreGymBinding(
         owner_type=_Owner,
         owner_factory=object(),
-        dependency_dag_sha256=None,
         dependency_kind="action_ball_epoch_runtime_dependencies_v1",
         epoch_owner_type=object,
         gym_entry_point=train_mod._ACTION_BALL_FULL_MDP_GYM_ENTRY_POINT,
-        run_mode=train_mod._ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE,
-        launch_authorized=False,
-        diagnostic_unauthorized=True,
     )
     bootstrap = _contract()
     persisted = train_mod._action_ball_full_mdp_training_contract(

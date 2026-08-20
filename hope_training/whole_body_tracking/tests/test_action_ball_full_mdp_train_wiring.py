@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import FrozenInstanceError
+import importlib
 import importlib.util
 import inspect
 from pathlib import Path
@@ -66,12 +67,6 @@ class _Registry:
         return types.SimpleNamespace(entry_point=self.entry_point)
 
 
-class _Owner:
-    @classmethod
-    def create_from_env(cls, env, lease):
-        return (cls, env, lease)
-
-
 class _LeanOwner:
     @classmethod
     def create_from_env(cls, env, lease):
@@ -95,49 +90,13 @@ def _lean_module():
     )
 
 
-def _module(
-    *,
-    frozen=True,
-    flags=(True, True, True, True),
-    ppo_drain=True,
-    diagnostic_operational=True,
-    digest="a" * 64,
-    authorization=(False, True),
-):
-    inventory = types.SimpleNamespace(
-        frozen=frozen,
-        rows=(types.SimpleNamespace(frozen=frozen),),
-        blockers=() if frozen else ("r05_source_unfrozen",),
-        diagnostic_operational=diagnostic_operational,
-        runtime_integrated=flags[0],
-        post_physics_integrated=flags[1],
-        selected_reset_integrated=flags[2],
-        ppo_drain_bindings_integrated=ppo_drain,
-        r10_shared_join_provider_integrated=flags[3],
-        r11_audit_consumer_integrated=False,
-        content_sha256=digest,
-        launch_authorized=authorization[0],
-        diagnostic_unauthorized=authorization[1],
-    )
-    return types.SimpleNamespace(
-        ActionBallFullMdpRuntimeOwner=_Owner,
-        action_ball_full_mdp_runtime_dependency_inventory=lambda: inventory,
-        RUNTIME_INTEGRATED=flags[0],
-        POST_PHYSICS_INTEGRATED=flags[1],
-        SELECTED_RESET_INTEGRATED=flags[2],
-        R10_SHARED_JOIN_PROVIDER_INTEGRATED=flags[3],
-    )
-
-
-def _resolve(monkeypatch, module=None, **overrides):
-    module = _module() if module is None else module
+def _resolve(monkeypatch, lean_module=None, **overrides):
+    lean_module = _lean_module() if lean_module is None else lean_module
     real_import = train_mod.importlib.import_module
 
     def import_module(name, package=None):
-        if name.endswith("action_ball_full_mdp_runtime_owner"):
-            return module
         if name.endswith("action_ball_full_mdp_lean_runtime"):
-            return _lean_module()
+            return lean_module
         return real_import(name, package)
 
     monkeypatch.setattr(train_mod.importlib, "import_module", import_module)
@@ -252,7 +211,7 @@ def test_pre_gym_accepts_only_the_two_code_owned_family_tasks(
         monkeypatch,
         task_id=f"HOPE-PingPong-ActionBall-FullMdp{family}-AgibotA3-v0",
     )
-    assert binding.run_mode == "single_action_lean"
+    assert binding.owner_type is _LeanOwner
 
     with pytest.raises(RuntimeError, match="exact code-owned A/C task id"):
         _resolve(
@@ -675,57 +634,18 @@ def test_legacy_motion_route_is_unchanged(monkeypatch):
     assert calls == [cfg]
 
 
-@pytest.mark.parametrize(
-    "module",
-    [
-        _module(frozen=False),
-        _module(flags=(False, False, False, False)),
-        _module(diagnostic_operational=False, ppo_drain=False),
-    ],
-)
-def test_diagnostic_pre_gym_defers_live_graph_readiness_to_env_factory(
-    monkeypatch, module
-):
-    binding = _resolve(monkeypatch, module=module)
-    assert binding.run_mode == "single_action_lean"
-    assert binding.diagnostic_unauthorized is True
-
-
-@pytest.mark.parametrize(
-    "module",
-    [
-        _module(frozen=False, authorization=(True, False)),
-        _module(
-            flags=(True, False, True, True),
-            authorization=(True, False),
-        ),
-        _module(
-            flags=(True, True, True, False),
-            authorization=(True, False),
-        ),
-    ],
-)
-def test_formal_pre_gym_readiness_gate_is_unchanged(monkeypatch, module):
-    with pytest.raises(RuntimeError, match="construction HOLD before gym.make"):
-        _resolve(monkeypatch, module=module)
-
-
-def test_diagnostic_lean_binding_does_not_accept_formal_inventory_dag_as_truth(
-    monkeypatch,
-):
-    binding = _resolve(monkeypatch, module=_module(digest="not-a-sha"))
-    assert binding.run_mode == "single_action_lean"
-    assert binding.dependency_dag_sha256 is None
+def test_diagnostic_lean_binding_does_not_import_formal_inventory(monkeypatch):
+    binding = _resolve(monkeypatch)
+    assert binding.owner_type is _LeanOwner
 
 
 def test_diagnostic_pre_gym_source_does_not_read_post_gym_flags():
     source = inspect.getsource(
         train_mod._resolve_action_ball_full_mdp_pre_gym_binding
     )
-    diagnostic = source.split("if launch_authorized:", 1)[1].rsplit(
-        "else:", 1
-    )[1]
     for forbidden in (
+        "action_ball_full_mdp_runtime_owner",
+        "launch_authorized =",
         "diagnostic_operational",
         "runtime_integrated",
         "post_physics_integrated",
@@ -733,48 +653,20 @@ def test_diagnostic_pre_gym_source_does_not_read_post_gym_flags():
         "ppo_drain_bindings_integrated",
         "dependency_sources_frozen",
     ):
-        assert forbidden not in diagnostic
+        assert forbidden not in source
 
 
-def test_current_real_top_owner_reaches_the_live_env_factory_seam(monkeypatch):
-    if importlib.util.find_spec("torch") is None:
-        pytest.skip("host dependency-light lane has no torch; Pod test imports it")
-    owner_path = (
-        HERE.parent
-        / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp"
-        / "action_ball_full_mdp_runtime_owner.py"
-    )
-    if not owner_path.is_file():
-        pytest.skip("isolated Pod overlay omitted the real owner source")
-    module_name = "_action_ball_full_mdp_real_top_for_train_wiring_test"
-    spec = importlib.util.spec_from_file_location(module_name, owner_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-        binding = _resolve(monkeypatch, module=module)
-        assert binding.run_mode == "single_action_lean"
-        assert binding.diagnostic_unauthorized is True
-    finally:
-        sys.modules.pop(module_name, None)
-
-
-def test_pre_gym_binding_uses_only_code_owned_factory_and_inventory(monkeypatch):
+def test_pre_gym_binding_uses_only_code_owned_lean_factory(monkeypatch):
     binding = _resolve(monkeypatch)
     assert type(binding) is train_mod._ActionBallFullMdpPreGymBinding
     assert binding.owner_type is _LeanOwner
     assert binding.owner_factory.__self__ is _LeanOwner
     assert binding.owner_factory.__func__ is _LeanOwner.create_from_env.__func__
-    assert binding.dependency_dag_sha256 is None
     assert binding.dependency_kind == "action_ball_epoch_runtime_dependencies_v1"
     assert binding.epoch_owner_type is not None
     assert binding.gym_entry_point == train_mod._ACTION_BALL_FULL_MDP_GYM_ENTRY_POINT
-    assert binding.run_mode == "single_action_lean"
-    assert binding.launch_authorized is False
-    assert binding.diagnostic_unauthorized is True
     with pytest.raises(FrozenInstanceError):
-        binding.run_mode = "formal"
+        binding.owner_type = object
 
 
 @pytest.mark.parametrize("num_envs", [1, 2, 64, 4096])
@@ -782,7 +674,7 @@ def test_single_action_lean_binding_accepts_every_positive_n(
     monkeypatch, num_envs
 ):
     binding = _resolve(monkeypatch, num_envs=num_envs)
-    assert binding.run_mode == "single_action_lean"
+    assert binding.owner_type is _LeanOwner
 
 
 @pytest.mark.parametrize(
@@ -827,13 +719,11 @@ def test_caller_cannot_select_or_self_assert_the_diagnostic_mode(monkeypatch):
         )
 
 
-def test_diagnostic_binding_authorization_comes_from_exact_lean_module(monkeypatch):
-    binding = _resolve(
-        monkeypatch,
-        module=_module(authorization=(False, False)),
-    )
-    assert binding.launch_authorized is False
-    assert binding.diagnostic_unauthorized is True
+def test_pre_gym_rejects_a_lean_module_that_claims_launch_authority(monkeypatch):
+    lean = _lean_module()
+    lean.LAUNCH_AUTHORIZED = True
+    with pytest.raises(RuntimeError, match="lean runtime owner API differs"):
+        _resolve(monkeypatch, lean_module=lean)
 
 
 def test_pre_gym_binding_rejects_a_static_factory_shim(monkeypatch):
@@ -845,8 +735,6 @@ def test_pre_gym_binding_rejects_a_static_factory_shim(monkeypatch):
     real_import = train_mod.importlib.import_module
 
     def import_module(name):
-        if name.endswith("action_ball_full_mdp_runtime_owner"):
-            return _module()
         if name.endswith("action_ball_full_mdp_lean_runtime"):
             return lean
         return real_import(name)
@@ -865,31 +753,23 @@ def test_pre_gym_binding_rejects_a_static_factory_shim(monkeypatch):
 
 def _installed_runtime(binding):
     owner_type = binding.owner_type
-    digest = binding.dependency_dag_sha256
-    adapter = (
-        object()
-        if binding.run_mode == train_mod._ACTION_BALL_FULL_MDP_FORMAL_MODE
-        else None
-    )
+    adapter = None
     env = types.SimpleNamespace()
     lease = object()
     owner = object.__new__(owner_type)
     owner.full_mdp_runtime_env = env
     owner.full_mdp_runtime_lease = lease
-    if digest is not None:
-        owner.full_mdp_runtime_dependency_dag_sha256 = digest
-    else:
-        owner.diagnostic_dependency_kind = binding.dependency_kind
-        owner.diagnostic_unauthorized = True
-        owner.launch_authorized = False
-        lean_module = _lean_module()
-        epoch_module = lean_module.epoch_v1
-        assert binding.epoch_owner_type is epoch_module.ActionEpochOwner
-        owner._epoch = epoch_module.ActionEpochOwner()
-        owner._epoch.num_envs = 2
-        owner.epoch_owner = owner._epoch
-        owner._test_lean_module = lean_module
-    owner._ppo_drain = owner if digest is None else object()
+    owner.diagnostic_dependency_kind = binding.dependency_kind
+    owner.diagnostic_unauthorized = True
+    owner.launch_authorized = False
+    lean_module = _lean_module()
+    epoch_module = lean_module.epoch_v1
+    assert binding.epoch_owner_type is epoch_module.ActionEpochOwner
+    owner._epoch = epoch_module.ActionEpochOwner()
+    owner._epoch.num_envs = 2
+    owner.epoch_owner = owner._epoch
+    owner._test_lean_module = lean_module
+    owner._ppo_drain = owner
     owner.action_ball_r10_checkpoint_adapter = adapter
     env.full_mdp_runtime_owner = owner
     env.action_ball_full_mdp_runtime_lease = lease
@@ -958,7 +838,7 @@ def test_runtime_and_runner_inputs_preserve_one_owner_and_adapter_identity(
 
 
 def _installed_lean_actor_observation(monkeypatch, binding):
-    assert binding.run_mode == "single_action_lean"
+    assert binding.owner_type is _LeanOwner
     env, owner, _adapter = _installed_runtime(binding)
     epoch_owner = owner.epoch_owner
     epoch_owner.device = "cpu"
@@ -1222,10 +1102,7 @@ def _installed_lean_motion_body_order(monkeypatch):
         pass
 
     class _Env:
-        def action_ball_full_mdp_motion_owner(self, lease):
-            if lease is not self.action_ball_full_mdp_runtime_lease:
-                raise RuntimeError("foreign lease")
-            return self._action_ball_full_mdp_components.motion_owner
+        pass
 
     env = _Env()
     lease = object()
@@ -1309,6 +1186,7 @@ def _installed_lean_motion_body_order(monkeypatch):
 
 def test_diagnostic_motion_body_order_uses_exact_installed_motion(monkeypatch):
     state = _installed_lean_motion_body_order(monkeypatch)
+    assert not hasattr(state.env, "action_ball_full_mdp_motion_owner")
     assert train_mod._diagnostic_full_mdp_motion_body_names_contract(
         state.env
     ) == {
@@ -1442,26 +1320,8 @@ def test_diagnostic_racket_guidance_rejects_inexact_reward20_manager_order(
         train_mod._diagnostic_full_mdp_racket_guidance_contract(status)
 
 
-def test_run_routes_only_diagnostic_actor_resolution_around_formal_resolver():
-    source = inspect.getsource(train_mod._run_with_environment_close_owner)
-    diagnostic_index = source.index(
-        "_resolve_action_ball_full_mdp_lean_actor_observation_contract("
-    )
-    formal_validate_index = source.index(
-        "validate_actor_observation_contract(env.unwrapped"
-    )
-    formal_infer_index = source.index(
-        "infer_actor_observation_contract(env.unwrapped)"
-    )
-    assert diagnostic_index < formal_validate_index < formal_infer_index
-    assert (
-        "diagnostic ActionEpoch actor contract is " in source
-        and "code-owned; task.actor_obs_contract must remain absent" in source
-    )
-
-
 def _installed_lean_reward_graph(monkeypatch, binding):
-    assert binding.run_mode == "single_action_lean"
+    assert binding.owner_type is _LeanOwner
 
     class _LeanGraph:
         def __init__(self, epoch_owner):
@@ -1577,6 +1437,19 @@ def test_diagnostic_post_gym_uses_only_exact_lean_graph_getter(monkeypatch):
 def test_diagnostic_real_lean_reward_module_crosses_exact_20_term_abi(
     monkeypatch,
 ):
+    try:
+        importlib.import_module(
+            "whole_body_tracking.tasks.tracking.mdp."
+            "action_ball_full_mdp_lean_rewards"
+        )
+    except ModuleNotFoundError as exc:
+        if exc.name not in {
+            "whole_body_tracking",
+            "isaaclab",
+            "isaaclab_tasks",
+        }:
+            raise
+        pytest.skip(f"real lean Reward dependency unavailable: {exc.name}")
     binding = _resolve(monkeypatch)
     with pytest.raises(RuntimeError, match="lacks the runtime lease"):
         train_mod._resolve_action_ball_full_mdp_installed_reward_graph(
@@ -1664,118 +1537,6 @@ def test_diagnostic_rejects_instance_shadow_of_exact_lean_getter(monkeypatch):
         )
 
 
-def _installed_reward_factory(monkeypatch, binding):
-    assert binding.run_mode == "formal"
-
-    class _View:
-        pass
-
-    view = _View()
-    view.schema_version = 1
-    view.kind = "action_ball_full_mdp_installed_reward_graph_receipt_v1"
-    view.numeric_authority_sha256 = "1" * 64
-    view.numeric_materialization_sha256 = "2" * 64
-    view.resolved_graph_receipt_sha256 = "3" * 64
-    view.installed_manager_graph_sha256 = "4" * 64
-    view.ordered_manager_names = tuple(f"manager_{i}" for i in range(14))
-    view.ordered_payment_consumers = tuple(
-        f"consumer_{i}" for i in range(14)
-    )
-    view.diagnostic_unauthorized = binding.diagnostic_unauthorized
-    view.runtime_integrated = True
-    view.launch_authorized = binding.launch_authorized
-    graph = object()
-    receipt = object()
-    env = types.SimpleNamespace(
-        action_ball_full_mdp_reward_graph=graph,
-        _action_ball_full_mdp_installed_reward_graph_receipt=receipt,
-    )
-    calls = []
-
-    def require_owned(supplied_receipt, *, env: object, reward_graph: object):
-        calls.append((supplied_receipt, env, reward_graph))
-        return view
-
-    factory = types.SimpleNamespace(
-        REWARD_GRAPH_ATTR="action_ball_full_mdp_reward_graph",
-        INSTALLED_REWARD_RECEIPT_ATTR=(
-            "_action_ball_full_mdp_installed_reward_graph_receipt"
-        ),
-        INSTALLED_REWARD_GRAPH_KIND=view.kind,
-        ActionBallFullMdpInstalledRewardGraphView=_View,
-        require_owned_action_ball_full_mdp_installed_reward_graph=(
-            require_owned
-        ),
-    )
-    monkeypatch.setattr(
-        train_mod.importlib,
-        "import_module",
-        lambda name: factory
-        if name.endswith("action_ball_full_mdp_runtime_factory")
-        else (_ for _ in ()).throw(AssertionError(f"unexpected import {name}")),
-    )
-    return env, graph, receipt, view, calls
-
-
-def test_formal_post_gym_reward_graph_uses_factory_reverse_validation(
-    monkeypatch,
-):
-    binding = _resolve(
-        monkeypatch, module=_module(authorization=(True, False))
-    )
-    env, graph, receipt, view, calls = _installed_reward_factory(
-        monkeypatch, binding
-    )
-    status = train_mod._resolve_action_ball_full_mdp_installed_reward_graph(
-        binding, env
-    )
-    assert calls == [(receipt, env, graph)]
-    assert status == {
-        "schema_version": 1,
-        "kind": view.kind,
-        "numeric_authority_sha256": "1" * 64,
-        "numeric_materialization_sha256": "2" * 64,
-        "resolved_graph_receipt_sha256": "3" * 64,
-        "installed_manager_graph_sha256": "4" * 64,
-        "ordered_manager_names": list(view.ordered_manager_names),
-        "ordered_payment_consumers": list(view.ordered_payment_consumers),
-        "diagnostic_unauthorized": False,
-        "runtime_integrated": True,
-        "launch_authorized": True,
-    }
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        lambda env, _view: delattr(
-            env, "_action_ball_full_mdp_installed_reward_graph_receipt"
-        ),
-        lambda _env, view: setattr(
-            view, "ordered_manager_names", tuple(f"m{i}" for i in range(13))
-        ),
-        lambda _env, view: setattr(
-            view, "installed_manager_graph_sha256", "foreign"
-        ),
-        lambda _env, view: setattr(view, "diagnostic_unauthorized", True),
-    ],
-)
-def test_formal_missing_or_foreign_installed_reward_graph_fails_closed(
-    monkeypatch, mutation
-):
-    binding = _resolve(
-        monkeypatch, module=_module(authorization=(True, False))
-    )
-    env, _graph, _receipt, view, _calls = _installed_reward_factory(
-        monkeypatch, binding
-    )
-    mutation(env, view)
-    with pytest.raises(RuntimeError):
-        train_mod._resolve_action_ball_full_mdp_installed_reward_graph(
-            binding, env
-        )
-
-
 def test_legacy_env_rejects_partial_fresh_installed_reward_graph():
     assert (
         train_mod._resolve_action_ball_full_mdp_installed_reward_graph(
@@ -1786,39 +1547,10 @@ def test_legacy_env_rejects_partial_fresh_installed_reward_graph():
     with pytest.raises(RuntimeError, match="legacy env acquired a partial"):
         train_mod._resolve_action_ball_full_mdp_installed_reward_graph(
             None,
-            types.SimpleNamespace(action_ball_full_mdp_reward_graph=object()),
-        )
-    with pytest.raises(RuntimeError, match="legacy env acquired a partial"):
-        train_mod._resolve_action_ball_full_mdp_installed_reward_graph(
-            None,
             types.SimpleNamespace(
                 action_ball_full_mdp_lean_reward_graph=lambda _lease: object()
             ),
         )
-
-
-def test_formal_inventory_clears_every_diagnostic_prohibition(monkeypatch):
-    binding = _resolve(
-        monkeypatch,
-        module=_module(authorization=(True, False)),
-    )
-    _env, owner, adapter = _installed_runtime(binding)
-    assert adapter is not None
-    contract = train_mod._action_ball_full_mdp_training_contract(
-        binding, owner, adapter, None
-    )
-    assert contract["launch_authorized"] is True
-    assert contract["diagnostic_unauthorized"] is False
-    assert (
-        contract["joint_safety_evidence_mode"]
-        == "formal_policy_step_summary_v1"
-    )
-    assert contract["formal_evidence_prohibited"] is False
-    assert contract["curriculum_promotion_prohibited"] is False
-    assert contract["exact_export_prohibited"] is False
-    assert contract["deployment_prohibited"] is False
-    assert contract["dependency_dag_sha256"] == "a" * 64
-    assert "runtime_dependency_kind" not in contract
 
 
 def test_runtime_binding_reads_each_env_authority_exactly_once(monkeypatch):
@@ -2083,7 +1815,7 @@ def test_run_source_has_real_callsites_exact_runner_selection_and_no_config_fact
     )
     assert runner_keywords["action_ball_full_mdp_run_mode"] == (
         "None if action_ball_full_mdp_pre_gym_binding is None else "
-        "action_ball_full_mdp_pre_gym_binding.run_mode"
+        "_ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE"
     )
     assert "_get(cfg, \"full_mdp_runtime_owner_factory\")" not in source
     assert "_get(cfg.task, \"full_mdp_runtime_owner_factory\")" not in source

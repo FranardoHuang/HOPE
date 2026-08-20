@@ -143,6 +143,7 @@ def _load_constructing_env_subject(name: str):
             self.cfg = cfg
             self.num_envs = 2
             self.device = cfg.device
+            self.step_dt = 0.02
             self.common_step_counter = 0
             self.episode_length_buf = torch.zeros(
                 cfg.scene.num_envs,
@@ -207,7 +208,7 @@ def _load_factory_subject(name: str):
     return module
 
 
-def _install_unpinned_diagnostic_cfg_modules(
+def _install_single_action_lean_cfg_modules(
     monkeypatch,
     *,
     cfg,
@@ -215,6 +216,7 @@ def _install_unpinned_diagnostic_cfg_modules(
     entry_point=None,
     factory_flags=(False, False, True),
     canary_flags=(2, False, True, False, False),
+    owner_constructor=None,
 ):
     config_module = types.ModuleType(M.FULL_MDP_CONFIG_MODULE)
     type_name = (
@@ -262,12 +264,15 @@ def _install_unpinned_diagnostic_cfg_modules(
 
     owner = types.ModuleType(M.FULL_MDP_DIAGNOSTIC_RUNTIME_OWNER_MODULE)
     owner.__dict__["factory_calls"] = []
+    owner.__dict__["owner_constructor"] = owner_constructor
     exec(
         "class ActionBallFullMdpLeanRuntimeOwner:\n"
         "    @classmethod\n"
         "    def create_from_env(cls, env, lease):\n"
         "        factory_calls.append((env, lease))\n"
-        "        return None\n",
+        "        if owner_constructor is None:\n"
+        "            return None\n"
+        "        return owner_constructor(env, lease)\n",
         owner.__dict__,
     )
     monkeypatch.setitem(
@@ -292,7 +297,7 @@ def _install_unpinned_diagnostic_cfg_modules(
     return factory
 
 
-def _unpinned_diagnostic_cfg(*, family="A"):
+def _single_action_lean_cfg(*, family="A"):
     cfg_type = type(f"ExactDiagnostic{family}Cfg", (), {})
     cfg = cfg_type()
     cfg.scene = types.SimpleNamespace(num_envs=2)
@@ -310,6 +315,7 @@ def _unpinned_diagnostic_cfg(*, family="A"):
     cfg.action_ball_full_mdp_runtime_construction_status = "HOLD"
     cfg.checkpoint_path = None
     cfg.checkpoint_tolerant = False
+    cfg.observations = object()
     return cfg
 
 
@@ -324,6 +330,7 @@ class _Cfg:
     commands = object()
     terminations = object()
     rewards = object()
+    observations = object()
     curriculum = object()
 
 
@@ -333,6 +340,19 @@ class _ConstructingCfg(_Cfg):
         self.device = device
         self.scene = types.SimpleNamespace(num_envs=2)
         self.sim = types.SimpleNamespace(device=device)
+        self.commands = types.SimpleNamespace(
+            racket_target=types.SimpleNamespace(
+                target_mode="action_ball_full_mdp",
+                action_ball_diagnostic_unauthorized=True,
+            )
+        )
+        self.action_ball_full_mdp_family_role = "A"
+        self.obs_mode = "action_ball_full_mdp"
+        self.action_ball_full_mdp_scene_capacity = 2
+        self.action_ball_full_mdp_capacity_receipt_sha256 = ""
+        self.action_ball_full_mdp_runtime_construction_status = "HOLD"
+        self.checkpoint_path = None
+        self.checkpoint_tolerant = False
         self.swap_lease_before_super_return = swap_lease_before_super_return
 
 
@@ -382,18 +402,95 @@ class _SceneAsset:
         self.data.root_state_w[env_ids, 7:] = value
 
 
-def _component_registry(motion, racket, *, subject=M):
-    return subject.FullMdpRuntimeComponents(
-        r05_owner=object(),
+class _LeanRewardGraph:
+    def __init__(self):
+        self.configured = None
+
+    def configure_milestone_configured_income(self, manager_cfg, step_dt):
+        assert type(manager_cfg) is dict and len(manager_cfg) == 20
+        self.configured = (manager_cfg, step_dt)
+
+
+class _LivePhysxSubscriber:
+    def __init__(self):
+        self.shutdown_calls = 0
+
+    def shutdown_action_epoch_live_physx_fact_owner(self):
+        self.shutdown_calls += 1
+
+
+def _install_lean_observation_module(monkeypatch):
+    name = (
+        "whole_body_tracking.tasks.tracking.mdp."
+        "action_ball_full_mdp_lean_observation_cfg"
+    )
+    module = types.ModuleType(name)
+    exec(
+        "class LeanActionEpochObservationSource:\n"
+        "    def __init__(self, env, runtime_owner, epoch_owner):\n"
+        "        self._env = env\n"
+        "        self._runtime_owner = runtime_owner\n"
+        "        self._epoch_owner = epoch_owner\n"
+        "    def observe(self, group):\n"
+        "        raise AssertionError('cold observation source must not run')\n",
+        module.__dict__,
+    )
+    monkeypatch.setitem(sys.modules, name, module)
+    return module.LeanActionEpochObservationSource
+
+
+def _atomic_lean_graph_inputs(
+    env,
+    motion,
+    racket,
+    *,
+    subject,
+    observation_source_type,
+    lean_owner=None,
+):
+    epoch_owner = object()
+    runtime_owner = object() if lean_owner is None else lean_owner
+    reward_graph = _LeanRewardGraph()
+    observation_source = observation_source_type(
+        env, runtime_owner, epoch_owner
+    )
+    components = subject.FullMdpLeanRuntimeComponents(
+        epoch_owner=epoch_owner,
         device_r05_owner=object(),
         motion_owner=motion,
         racket_owner=racket,
-        r06_owner=object(),
         physical_owner=object(),
         r03_owner=object(),
+        r06_owner=object(),
         r07_owner=object(),
-        ppo_drain_owner=object(),
+        r07_plant_fact_adapter=object(),
+        reward_graph=reward_graph,
+        lean_runtime_owner=runtime_owner,
+        observation_source=observation_source,
     )
+    subscriber = _LivePhysxSubscriber()
+    return {
+        "components": components,
+        "reward_manager_cfg": {
+            f"reward_{index:02d}": object() for index in range(20)
+        },
+        "observation_source": observation_source,
+        "observation_manager_cfg": {
+            "policy": object(),
+            "critic": object(),
+        },
+        "termination_manager_cfg": {
+            "time_out": object(),
+            "base_fell_tilt": object(),
+            "base_too_low": object(),
+            "joint_qdes_forbidden": object(),
+            "robot_hit_table": object(),
+        },
+        "live_physx_shutdown": (
+            subscriber.shutdown_action_epoch_live_physx_fact_owner
+        ),
+        "subscriber": subscriber,
+    }
 
 
 def _manager_modules(trace, *, motion, racket, subject=M):
@@ -427,7 +524,7 @@ def _manager_modules(trace, *, motion, racket, subject=M):
     class ManagerBasedEnv:
         @staticmethod
         def load_managers(env):
-            assert type(env._action_ball_full_mdp_components) is subject.FullMdpRuntimeComponents
+            assert type(env._action_ball_full_mdp_components) is subject.FullMdpLeanRuntimeComponents
             assert type(env._action_ball_full_mdp_reset_genesis_install) is subject._FullMdpResetGenesisInstall
             trace.append("recorder")
             env.recorder_manager = object()
@@ -458,6 +555,7 @@ def _env(trace, *, device_name="cpu"):
     env._configure_gym_env_spaces = lambda: trace.append("spaces")
     env.num_envs = 2
     env.device = device_name
+    env.step_dt = 0.02
     env.common_step_counter = 0
     env.episode_length_buf = torch.zeros(2, dtype=torch.long, device=device_name)
     return env
@@ -476,26 +574,44 @@ def _install_fake_isaac_modules(
 
 
 def _install_success_builder(
-    monkeypatch, trace, *, motion, racket, subject=M
+    monkeypatch, trace, *, motion, racket, subject=M, lean_owner=None
 ):
     module = types.ModuleType(subject.FULL_MDP_RUNTIME_FACTORY_MODULE)
     authority = _GenesisAuthority(subject)
+    observation_source_type = _install_lean_observation_module(monkeypatch)
+
+    def make_install_inputs(env):
+        return _atomic_lean_graph_inputs(
+            env,
+            motion,
+            racket,
+            subject=subject,
+            observation_source_type=observation_source_type,
+            lean_owner=lean_owner,
+        )
+
     module.__dict__.update(
         {
             "trace": trace,
             "authority": authority,
             "receipt": authority.receipt,
-            "components": _component_registry(motion, racket, subject=subject),
+            "make_install_inputs": make_install_inputs,
             "seen_lease": None,
+            "seen_install_inputs": None,
         }
     )
     exec(
         "def construct_action_ball_full_mdp_runtime_graph(env):\n"
         "    trace.append('builder')\n"
-        "    global seen_lease\n"
+        "    global seen_lease, seen_install_inputs\n"
         "    seen_lease = env.action_ball_full_mdp_construction_lease()\n"
-        "    env.install_action_ball_full_mdp_reset_genesis(seen_lease, authority, receipt)\n"
-        "    env.install_action_ball_full_mdp_runtime_components(seen_lease, components)\n",
+        "    seen_install_inputs = make_install_inputs(env)\n"
+        "    env.install_action_ball_full_mdp_lean_runtime_graph(\n"
+        "        seen_lease,\n"
+        "        genesis_authority=authority,\n"
+        "        genesis_receipt=receipt,\n"
+        "        **{key: value for key, value in seen_install_inputs.items() if key != 'subscriber'},\n"
+        "    )\n",
         module.__dict__,
     )
     monkeypatch.setitem(
@@ -508,21 +624,6 @@ class _InitOwner:
     def __init__(self, env, lease):
         self._env = env
         self._lease = lease
-        self._dag = "a" * 64
-        self._live_reset_ledger_identity = object()
-        env.bind_action_ball_full_mdp_selected_reset_authority(
-            lease,
-            expected_top=self,
-            result_validator=self.require_owned_selected_true_reset_receipt,
-            live_reset_ledger_identity=self._live_reset_ledger_identity,
-            world_reset_identity=(
-                env._action_ball_full_mdp_world_reset_identity
-            ),
-        )
-
-    @property
-    def full_mdp_runtime_dependency_dag_sha256(self):
-        return self._dag
 
     @property
     def full_mdp_runtime_env(self):
@@ -535,6 +636,9 @@ class _InitOwner:
     def before_policy_step(self, control_step, action):
         del control_step, action
 
+    def before_physics_substep(self, stamp):
+        del stamp
+
     def publish_post_physics_substep(self, stamp):
         del stamp
 
@@ -542,32 +646,28 @@ class _InitOwner:
         assert type(control_step) is int
         return None
 
+    def after_command_compute_before_observation(self, control_step):
+        assert type(control_step) is int
+        return None
+
     def selected_true_reset(self, event):
         return event
-
-    def require_owned_selected_true_reset_receipt(
-        self, receipt, expected_event
-    ):
-        del expected_event
-        return receipt
 
 
 def _init_owner_binding(subject, owner):
     owner_type = type(owner)
-    return subject._ConcreteOwnerExecutableBinding(
-        module_name=owner_type.__module__,
-        qualname=owner_type.__qualname__,
-        module_object=sys.modules[owner_type.__module__],
+    return subject._LeanOwnerExecutableBinding(
         owner_type=owner_type,
-        direct_executable_sha256="b" * 64,
-        executable_members=(),
-        publish_function=vars(owner_type)["publish_post_physics_substep"],
         before_policy_step_function=vars(owner_type)["before_policy_step"],
-        after_reward_close_function=vars(owner_type)["after_reward_close"],
-        selected_true_reset_function=vars(owner_type)["selected_true_reset"],
-        selected_true_reset_receipt_validator_function=vars(owner_type)[
-            "require_owned_selected_true_reset_receipt"
+        before_physics_substep_function=vars(owner_type)[
+            "before_physics_substep"
         ],
+        publish_function=vars(owner_type)["publish_post_physics_substep"],
+        after_reward_close_function=vars(owner_type)["after_reward_close"],
+        after_command_compute_before_observation_function=vars(owner_type)[
+            "after_command_compute_before_observation"
+        ],
+        selected_true_reset_function=vars(owner_type)["selected_true_reset"],
     )
 
 
@@ -583,6 +683,16 @@ def _prepare_real_init_subject(
         racket=racket,
         subject=subject,
     )
+    cfg = _ConstructingCfg(
+        trace,
+        device=device_name,
+        swap_lease_before_super_return=swap_lease,
+    )
+    diagnostic = _install_single_action_lean_cfg_modules(
+        monkeypatch,
+        cfg=cfg,
+        owner_constructor=_InitOwner,
+    )
     builder = _install_success_builder(
         monkeypatch,
         trace,
@@ -590,22 +700,16 @@ def _prepare_real_init_subject(
         racket=racket,
         subject=subject,
     )
-    for name in (
-        "PINNED_FULL_MDP_OWNER_MODULE",
-        "PINNED_FULL_MDP_OWNER_QUALNAME",
-        "PINNED_FULL_MDP_OWNER_SOURCE_FILE_SHA256",
-        "PINNED_FULL_MDP_OWNER_CLASS_AST_SHA256",
-        "PINNED_FULL_MDP_OWNER_DEPENDENCY_DAG_SHA256",
-    ):
-        monkeypatch.setattr(
-            subject,
-            name,
-            (
-                "a" * 64
-                if name.endswith("SHA256")
-                else "focused_test_owner"
-            ),
-        )
+    builder.RUNTIME_INTEGRATED = False
+    builder.LAUNCH_AUTHORIZED = False
+    builder.DIAGNOSTIC_UNAUTHORIZED = True
+    builder.test_owner_module = diagnostic.test_owner_module
+    builder.test_owner_factory = diagnostic.test_owner_factory
+    monkeypatch.setitem(
+        sys.modules,
+        subject.FULL_MDP_DIAGNOSTIC_RUNTIME_OWNER_MODULE,
+        diagnostic.test_owner_module,
+    )
     for name in (
         "_require_standalone_simulation_app",
         "_assert_runtime_uses_pinned_upstream_step",
@@ -615,13 +719,8 @@ def _prepare_real_init_subject(
         monkeypatch.setattr(subject, name, lambda: None)
     monkeypatch.setattr(
         subject.ActionBallFullMdpManagerBasedRLEnv,
-        "_validate_concrete_owner_install",
+        "_validate_lean_owner_install",
         lambda self, owner, **kwargs: _init_owner_binding(subject, owner),
-    )
-    cfg = _ConstructingCfg(
-        trace,
-        device=device_name,
-        swap_lease_before_super_return=swap_lease,
     )
     return subject, builder, cfg
 
@@ -654,6 +753,13 @@ def test_builder_runs_exactly_once_after_command_before_observation(monkeypatch)
     ]
     assert env._action_ball_full_mdp_runtime_graph_builder_invocations == 1
     assert builder_module.seen_lease is minted_lease
+    install_inputs = builder_module.seen_install_inputs
+    assert type(install_inputs["components"]) is M.FullMdpLeanRuntimeComponents
+    assert len(install_inputs["reward_manager_cfg"]) == 20
+    assert install_inputs["components"].reward_graph.configured == (
+        install_inputs["reward_manager_cfg"],
+        env.step_dt,
+    )
     assert env._action_ball_full_mdp_manager_construction_state == (
         "base_managers_complete"
     )
@@ -667,16 +773,16 @@ def test_builder_runs_exactly_once_after_command_before_observation(monkeypatch)
 
 @pytest.mark.parametrize("family", ("A", "C"))
 @pytest.mark.parametrize("num_envs", (1, 2, 64))
-def test_unpinned_exact_diagnostic_cfg_reaches_unique_causal_builder(
+def test_exact_single_action_lean_cfg_reaches_unique_causal_builder(
     monkeypatch, family, num_envs
 ):
-    cfg = _unpinned_diagnostic_cfg(family=family)
+    cfg = _single_action_lean_cfg(family=family)
     cfg.scene.num_envs = num_envs
-    diagnostic_modules = _install_unpinned_diagnostic_cfg_modules(
+    diagnostic_modules = _install_single_action_lean_cfg_modules(
         monkeypatch, cfg=cfg, family=family
     )
 
-    M._require_unpinned_single_action_lean_cfg(
+    M._require_single_action_lean_cfg(
         cfg,
         owner_factory=diagnostic_modules.test_owner_factory,
     )
@@ -715,18 +821,17 @@ def test_unpinned_exact_diagnostic_cfg_reaches_unique_causal_builder(
             full_mdp_runtime_owner_factory=(
                 diagnostic_modules.test_owner_factory
             ),
-            full_mdp_runtime_owner_expected_dependency_dag_sha256="a" * 64,
         )
     assert env._action_ball_full_mdp_manager_construction_state == "failed"
     assert env._action_ball_full_mdp_runtime_graph_builder_invocations == 1
     assert trace == ["command"]
 
 
-def test_unpinned_diagnostic_rejects_foreign_owner_factory_before_super(
+def test_single_action_lean_rejects_foreign_owner_factory_before_super(
     monkeypatch,
 ):
-    cfg = _unpinned_diagnostic_cfg()
-    diagnostic_modules = _install_unpinned_diagnostic_cfg_modules(
+    cfg = _single_action_lean_cfg()
+    diagnostic_modules = _install_single_action_lean_cfg_modules(
         monkeypatch, cfg=cfg
     )
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
@@ -753,11 +858,11 @@ def test_unpinned_diagnostic_rejects_foreign_owner_factory_before_super(
     assert not hasattr(env, "_action_ball_full_mdp_runtime_lease")
 
 
-def test_unpinned_builder_with_legacy_registry_is_cold_discarded(
+def test_builder_owner_factory_mismatch_cold_discards_lean_graph(
     monkeypatch,
 ):
     trace = []
-    cfg = _unpinned_diagnostic_cfg()
+    cfg = _single_action_lean_cfg()
     cfg.trace = trace
     cfg.device = "cpu"
     cfg.swap_lease_before_super_return = False
@@ -765,7 +870,7 @@ def test_unpinned_builder_with_legacy_registry_is_cold_discarded(
     cfg.rewards = object()
     cfg.curriculum = object()
     subject = _load_constructing_env_subject(
-        "_full_mdp_unpinned_builder_success_subject"
+        "_full_mdp_lean_builder_mismatch_subject"
     )
     motion, racket = object(), object()
     _install_fake_isaac_modules(
@@ -782,7 +887,7 @@ def test_unpinned_builder_with_legacy_registry_is_cold_discarded(
         racket=racket,
         subject=subject,
     )
-    diagnostic_modules = _install_unpinned_diagnostic_cfg_modules(
+    diagnostic_modules = _install_single_action_lean_cfg_modules(
         monkeypatch, cfg=cfg
     )
     builder.RUNTIME_INTEGRATED = False
@@ -834,9 +939,7 @@ def test_unpinned_builder_with_legacy_registry_is_cold_discarded(
         subject.FullMdpPostPhysicsProtocolError,
         match="runtime lease is not sealed",
     ):
-        env.action_ball_full_mdp_num_envs(
-            env._action_ball_full_mdp_runtime_lease
-        )
+        _ = env.action_ball_full_mdp_runtime_lease
     with pytest.raises(
         subject.FullMdpPostPhysicsProtocolError,
         match="replayed or previously failed",
@@ -851,31 +954,28 @@ def test_unpinned_builder_with_legacy_registry_is_cold_discarded(
         ("family", "family_role_rewritten"),
         ("num_envs", "num_envs_must_be_positive_exact_int"),
         ("diagnostic", "diagnostic_unauthorized_differs"),
-        ("formal_receipt", "formal_capacity_receipt_present"),
         ("checkpoint", "checkpoint_resume_present"),
         ("registration", "gym_registration_differs"),
         ("factory_flag", "factory_authorization_flags_differ"),
         ("canary_save", "canary_no_save_or_authorization_flags_differ"),
     ),
 )
-def test_unpinned_diagnostic_rejects_foreign_or_save_authority(
+def test_single_action_lean_rejects_foreign_or_save_authority(
     monkeypatch, mutation, match
 ):
-    cfg = _unpinned_diagnostic_cfg()
+    cfg = _single_action_lean_cfg()
     exact_cfg = cfg
     entry_point = None
     factory_flags = (False, False, True)
     canary_flags = (2, False, True, False, False)
     if mutation == "foreign_type":
-        exact_cfg = _unpinned_diagnostic_cfg()
+        exact_cfg = _single_action_lean_cfg()
     elif mutation == "family":
         cfg.action_ball_full_mdp_family_role = "C"
     elif mutation == "num_envs":
         cfg.scene.num_envs = 0
     elif mutation == "diagnostic":
         cfg.commands.racket_target.action_ball_diagnostic_unauthorized = False
-    elif mutation == "formal_receipt":
-        cfg.action_ball_full_mdp_capacity_receipt_sha256 = "a" * 64
     elif mutation == "checkpoint":
         cfg.checkpoint_path = "/tmp/forbidden.pt"
     elif mutation == "registration":
@@ -884,7 +984,7 @@ def test_unpinned_diagnostic_rejects_foreign_or_save_authority(
         factory_flags = (True, False, True)
     elif mutation == "canary_save":
         canary_flags = (2, True, True, False, False)
-    _install_unpinned_diagnostic_cfg_modules(
+    _install_single_action_lean_cfg_modules(
         monkeypatch,
         cfg=exact_cfg,
         entry_point=entry_point,
@@ -893,31 +993,13 @@ def test_unpinned_diagnostic_rejects_foreign_or_save_authority(
     )
 
     with pytest.raises(M.FullMdpPostPhysicsOwnerMissingError, match=match):
-        M._require_unpinned_single_action_lean_cfg(
+        M._require_single_action_lean_cfg(
             cfg,
             owner_factory=(
                 sys.modules[M.FULL_MDP_RUNTIME_FACTORY_MODULE]
                 .test_owner_factory
             ),
         )
-
-
-def test_partial_formal_pins_never_fall_into_diagnostic_path(monkeypatch):
-    cfg = _unpinned_diagnostic_cfg()
-    _install_unpinned_diagnostic_cfg_modules(monkeypatch, cfg=cfg)
-    monkeypatch.setattr(M, "PINNED_FULL_MDP_OWNER_MODULE", "owner.module")
-    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-
-    with pytest.raises(
-        M.FullMdpPostPhysicsOwnerMissingError, match="partially frozen"
-    ):
-        M.ActionBallFullMdpManagerBasedRLEnv.__init__(
-            env,
-            cfg,
-            full_mdp_runtime_owner_factory=lambda *_: None,
-            full_mdp_runtime_owner_expected_dependency_dag_sha256="a" * 64,
-        )
-    assert not hasattr(env, "_action_ball_full_mdp_runtime_lease")
 
 
 @pytest.mark.parametrize("device_name", ("cpu", "cuda:0"))
@@ -937,22 +1019,19 @@ def test_real_super_return_seals_the_same_pre_manager_lease(
 
     env = subject.ActionBallFullMdpManagerBasedRLEnv(
         cfg,
-        full_mdp_runtime_owner_factory=lambda candidate, lease: _InitOwner(
-            candidate, lease
-        ),
-        full_mdp_runtime_owner_expected_dependency_dag_sha256="a" * 64,
+        full_mdp_runtime_owner_factory=builder.test_owner_factory,
     )
 
     assert trace[:3] == ["command", "builder", "recorder"]
     assert builder.seen_lease is env.action_ball_full_mdp_runtime_lease
     assert env.full_mdp_runtime_owner.full_mdp_runtime_lease is builder.seen_lease
     assert env._action_ball_full_mdp_manager_construction_state == "sealed"
-    assert env._action_ball_full_mdp_device == device_name
+    assert env.device == device_name
 
 
 def test_real_super_return_lease_swap_cold_discards_whole_env(monkeypatch):
     trace = []
-    subject, _builder, cfg = _prepare_real_init_subject(
+    subject, builder, cfg = _prepare_real_init_subject(
         monkeypatch,
         name="_full_mdp_real_init_swap",
         trace=trace,
@@ -967,56 +1046,12 @@ def test_real_super_return_lease_swap_cold_discards_whole_env(monkeypatch):
         subject.ActionBallFullMdpManagerBasedRLEnv.__init__(
             env,
             cfg,
-            full_mdp_runtime_owner_factory=lambda candidate, lease: _InitOwner(
-                candidate, lease
-            ),
-            full_mdp_runtime_owner_expected_dependency_dag_sha256="a" * 64,
+            full_mdp_runtime_owner_factory=builder.test_owner_factory,
         )
 
     assert env._action_ball_full_mdp_manager_construction_state == "failed"
     assert env._action_ball_full_mdp_components is subject._ABSENT
     assert env._action_ball_full_mdp_reset_genesis_install is subject._ABSENT
-    assert trace[-1] == "close"
-
-
-def test_missing_selected_reset_binding_cold_discards_published_owner(
-    monkeypatch,
-):
-    trace = []
-    subject, _builder, cfg = _prepare_real_init_subject(
-        monkeypatch,
-        name="_full_mdp_real_init_unbound_top",
-        trace=trace,
-        device_name="cpu",
-        swap_lease=False,
-    )
-
-    def unbound_factory(candidate, lease):
-        owner = object.__new__(_InitOwner)
-        owner._env = candidate
-        owner._lease = lease
-        owner._dag = "a" * 64
-        return owner
-
-    env = object.__new__(subject.ActionBallFullMdpManagerBasedRLEnv)
-    with pytest.raises(
-        subject.FullMdpPostPhysicsProtocolError,
-        match="did not bind the exact selected-reset",
-    ):
-        subject.ActionBallFullMdpManagerBasedRLEnv.__init__(
-            env,
-            cfg,
-            full_mdp_runtime_owner_factory=unbound_factory,
-            full_mdp_runtime_owner_expected_dependency_dag_sha256="a" * 64,
-        )
-
-    assert env._action_ball_full_mdp_manager_construction_state == "failed"
-    assert env._full_mdp_runtime_owner is subject._ABSENT
-    assert env._action_ball_full_mdp_components is subject._ABSENT
-    with pytest.raises(
-        subject.FullMdpPostPhysicsProtocolError, match="not sealed"
-    ):
-        _ = env.action_ball_full_mdp_runtime_lease
     assert trace[-1] == "close"
 
 
@@ -1044,26 +1079,32 @@ def test_super_return_seals_the_exact_pre_manager_lease(
 
     assert env.action_ball_full_mdp_runtime_lease is minted_lease
     assert env._action_ball_full_mdp_manager_construction_state == "sealed"
-    assert env._action_ball_full_mdp_num_envs == 2
-    assert env._action_ball_full_mdp_device == device_name
+    assert env.num_envs == 2
+    assert env.device == device_name
 
 
-def test_construction_installs_reject_foreign_lease_before_partial_publish():
+def test_atomic_lean_install_rejects_foreign_lease_before_publish(monkeypatch):
     trace = []
     motion, racket = object(), object()
     env = _env(trace)
     env._action_ball_full_mdp_manager_construction_state = (
         "command_manager_ready"
     )
-    components = _component_registry(motion, racket)
+    module = _install_success_builder(
+        monkeypatch, trace, motion=motion, racket=racket
+    )
+    install_inputs = module.make_install_inputs(env)
 
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="foreign lease"):
-        env.install_action_ball_full_mdp_runtime_components(
-            object(), components
-        )
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="foreign lease"):
-        env.install_action_ball_full_mdp_reset_genesis(
-            object(), object(), object()
+        env.install_action_ball_full_mdp_lean_runtime_graph(
+            object(),
+            genesis_authority=module.authority,
+            genesis_receipt=module.receipt,
+            **{
+                key: value
+                for key, value in install_inputs.items()
+                if key != "subscriber"
+            },
         )
     assert not hasattr(env, "_action_ball_full_mdp_components")
     assert not hasattr(env, "_action_ball_full_mdp_reset_genesis_install")
@@ -1099,27 +1140,22 @@ def test_builder_lease_swap_is_sticky_and_cannot_publish_partial_graph(
     _install_fake_isaac_modules(
         monkeypatch, trace, motion=motion, racket=racket
     )
-    module = types.ModuleType(M.FULL_MDP_RUNTIME_FACTORY_MODULE)
-    authority = _GenesisAuthority()
-    module.__dict__.update(
-        {
-            "trace": trace,
-            "authority": authority,
-            "receipt": authority.receipt,
-            "components": _component_registry(motion, racket),
-        }
+    module = _install_success_builder(
+        monkeypatch, trace, motion=motion, racket=racket
     )
     exec(
         "def construct_action_ball_full_mdp_runtime_graph(env):\n"
         "    trace.append('builder')\n"
         "    lease = env.action_ball_full_mdp_construction_lease()\n"
         "    env._action_ball_full_mdp_runtime_lease = object()\n"
-        "    env.install_action_ball_full_mdp_reset_genesis(lease, authority, receipt)\n"
-        "    env.install_action_ball_full_mdp_runtime_components(lease, components)\n",
+        "    install_inputs = make_install_inputs(env)\n"
+        "    env.install_action_ball_full_mdp_lean_runtime_graph(\n"
+        "        lease,\n"
+        "        genesis_authority=authority,\n"
+        "        genesis_receipt=receipt,\n"
+        "        **{key: value for key, value in install_inputs.items() if key != 'subscriber'},\n"
+        "    )\n",
         module.__dict__,
-    )
-    monkeypatch.setitem(
-        sys.modules, M.FULL_MDP_RUNTIME_FACTORY_MODULE, module
     )
 
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="identity changed"):
@@ -1148,8 +1184,13 @@ def test_builder_failure_after_install_is_cold_discard_not_partial_authority(
         "def construct_action_ball_full_mdp_runtime_graph(env):\n"
         "    trace.append('builder')\n"
         "    lease = env.action_ball_full_mdp_construction_lease()\n"
-        "    env.install_action_ball_full_mdp_reset_genesis(lease, authority, receipt)\n"
-        "    env.install_action_ball_full_mdp_runtime_components(lease, components)\n"
+        "    install_inputs = make_install_inputs(env)\n"
+        "    env.install_action_ball_full_mdp_lean_runtime_graph(\n"
+        "        lease,\n"
+        "        genesis_authority=authority,\n"
+        "        genesis_receipt=receipt,\n"
+        "        **{key: value for key, value in install_inputs.items() if key != 'subscriber'},\n"
+        "    )\n"
         "    raise ValueError('builder counterexample')\n",
         module.__dict__,
     )
@@ -1162,10 +1203,6 @@ def test_builder_failure_after_install_is_cold_discard_not_partial_authority(
     assert env._action_ball_full_mdp_reset_genesis_install is M._ABSENT
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="not sealed"):
         _ = env.action_ball_full_mdp_runtime_lease
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="not sealed"):
-        env.action_ball_full_mdp_motion_owner(
-            env._action_ball_full_mdp_runtime_lease
-        )
     with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="previously failed"):
         env.load_managers()
 
@@ -1208,71 +1245,38 @@ def test_missing_production_node_is_sticky_hold_before_observation(monkeypatch):
     assert trace == ["command"]
 
 
-def test_builder_cannot_omit_same_genesis_install(monkeypatch):
+def test_atomic_builder_cannot_omit_genesis(monkeypatch):
     trace = []
     motion, racket = object(), object()
     env = _env(trace)
     _install_fake_isaac_modules(
         monkeypatch, trace, motion=motion, racket=racket
     )
-    module = types.ModuleType(M.FULL_MDP_RUNTIME_FACTORY_MODULE)
-    module.__dict__.update(
-        {
-            "trace": trace,
-            "components": _component_registry(motion, racket),
-        }
+    module = _install_success_builder(
+        monkeypatch, trace, motion=motion, racket=racket
     )
     exec(
         "def construct_action_ball_full_mdp_runtime_graph(env):\n"
         "    trace.append('builder')\n"
         "    lease = env.action_ball_full_mdp_construction_lease()\n"
-        "    env.install_action_ball_full_mdp_runtime_components(lease, components)\n",
+        "    install_inputs = make_install_inputs(env)\n"
+        "    env.install_action_ball_full_mdp_lean_runtime_graph(\n"
+        "        lease,\n"
+        "        genesis_authority=None,\n"
+        "        genesis_receipt=receipt,\n"
+        "        **{key: value for key, value in install_inputs.items() if key != 'subscriber'},\n"
+        "    )\n",
         module.__dict__,
-    )
-    monkeypatch.setitem(
-        sys.modules, M.FULL_MDP_RUNTIME_FACTORY_MODULE, module
     )
 
     with pytest.raises(
         M.FullMdpPostPhysicsOwnerMissingError,
-        match="independent reset genesis",
+        match="lacks its independent reset genesis",
     ):
         env.load_managers()
     assert trace == ["command", "builder"]
     assert not hasattr(env, "observation_manager")
     assert env._action_ball_full_mdp_manager_construction_state == "failed"
-
-
-def test_runtime_factory_exposes_only_the_executable_critical_path():
-    name = "_action_ball_full_mdp_runtime_factory_contract_subject"
-    factory = _load_factory_subject(name)
-    nodes = tuple(
-        node for node, _dependencies in factory.FULL_MDP_RUNTIME_FACTORY_DAG
-    )
-    assert nodes == (
-        "verified_split_asset",
-        "command_owners",
-        "independent_reset_genesis",
-        "scene_question_cadence",
-        "hot_leaf_owners",
-        "action_epoch_owner",
-        "device_r05_owner",
-        "top_runtime_owner",
-        "reward_manager_cfg",
-        "observation_manager_cfg",
-        "termination_manager_cfg",
-        "live_physx_fact_subscriber",
-        "atomic_component_install",
-        "causal_step_runtime",
-        "first_optimizer_update",
-    )
-    assert len(nodes) == 15
-    assert factory.FIRST_UNRESOLVED_PRODUCTION_NODE == (
-        "row_wise_shot_close_and_four_shot_carry_state_absent"
-    )
-    assert factory.RUNTIME_INTEGRATED is False
-    assert factory.LAUNCH_AUTHORIZED is False
-    assert factory.DIAGNOSTIC_UNAUTHORIZED is True
 
 
 def _exact_single_action_lean_factory_env(*, num_envs=2, device_name="cpu"):
@@ -1460,7 +1464,13 @@ def _exact_single_action_lean_factory_env(*, num_envs=2, device_name="cpu"):
     cfg.checkpoint_path = None
     cfg.checkpoint_tolerant = False
     env_origins = torch.zeros((num_envs, 3), dtype=torch.float32, device=device)
-    live_scene = _Scene(env_origins=env_origins)
+    live_scene = _Scene(
+        env_origins=env_origins,
+        cfg=types.SimpleNamespace(replicate_physics=True),
+        env_prim_paths=tuple(
+            f"/World/envs/env_{index}" for index in range(num_envs)
+        ),
+    )
     for name in scene_spec.scene_entity_names:
         root = torch.zeros(
             (num_envs, 13), dtype=torch.float32, device=device
@@ -1840,8 +1850,8 @@ def test_canonical_r06_rejects_overlapping_live_scene_asset_storage_before_insta
         )
 
 
-def test_factory_routes_diagnostic_r06_reset_without_calling_formal_binder():
-    """Lock the callpoint only; real AppLauncher supplies semantic evidence."""
+def test_factory_binds_r06_to_diagnostic_device_r05_reset_owner():
+    """Lock the live reset dependency; AppLauncher supplies semantic evidence."""
 
     tree = ast.parse(FACTORY_MODULE_PATH.read_text(encoding="utf-8"))
     construct = next(
@@ -2659,37 +2669,6 @@ def test_motion_r07_cold_bind_rejects_foreign_owner_validator_pair():
     assert motion._action_ball_continuous_r07_ready_validator is None
 
 
-def test_reward_materializer_has_no_numeric_one_shell_or_flag_flip():
-    tree = ast.parse(FACTORY_MODULE_PATH.read_text(encoding="utf-8"))
-    function = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "materialize_action_ball_full_mdp_reward_manager"
-    )
-    literals = [
-        node.value
-        for node in ast.walk(function)
-        if isinstance(node, ast.Constant) and type(node.value) is float
-    ]
-    # R07's reviewed owner-weighted identity multiplier is the sole literal
-    # manager 1.0.  The first thirteen values and all ten scales use exact
-    # authority paths; no fallback shell is permitted.
-    assert literals.count(1.0) == 2
-    source = ast.unparse(function)
-    assert not any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
-        and len(node.args) > 1
-        and isinstance(node.args[1], ast.Constant)
-        and node.args[1].value == 1.0
-        for node in ast.walk(function)
-    )
-    assert "RUNTIME_INTEGRATED = True" not in source
-    assert "LAUNCH_AUTHORIZED = True" not in source
-
-
 def _load_pod_lean_reward_stack():
     pytest.importorskip("torch")
     pytest.importorskip("isaaclab.managers")
@@ -2748,6 +2727,7 @@ def test_code_owned_lean_reward_bundle_materializes_exact_graph_and_cfg(
     assert type(bundle) is rewards.DiagnosticN2RewardManagerBundle
     assert type(bundle.graph) is rewards.LeanActionEpochRewardGraph
     assert bundle.graph.epoch_owner is owner
+    assert len(bundle.manager_cfg) == 20
     assert tuple(bundle.manager_cfg) == rewards.MANAGER_NAMES
     assert tuple(term.func for term in bundle.manager_cfg.values()) == (
         rewards.REWARD_TERM_CALLABLES
@@ -2789,27 +2769,6 @@ def test_mutating_one_bundle_does_not_rewrite_code_owned_next_bundle():
     first.manager_cfg["common_on_table_outcome"].weight = 1.0
     _factory, rewards, _epoch, _owner, second = _diagnostic_lean_reward_bundle()
     assert second.manager_cfg["common_on_table_outcome"].weight == 20.0
-
-
-def test_formal_legacy_materializer_remains_compatible_but_fresh_never_calls_it():
-    factory, _rewards, _epoch = _load_pod_lean_reward_stack()
-    assert callable(factory.materialize_action_ball_full_mdp_reward_manager)
-    tree = ast.parse(FACTORY_MODULE_PATH.read_text(encoding="utf-8"))
-    fresh = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-        and node.name == "_construct_offside_lean_runtime"
-    )
-    calls = {
-        ast.unparse(node.func)
-        for node in ast.walk(fresh)
-        if isinstance(node, ast.Call)
-    }
-    assert (
-        "lean_rewards.materialize_diagnostic_n2_reward_manager_cfg" in calls
-    )
-    assert "materialize_action_ball_full_mdp_reward_manager" not in calls
 
 
 def test_live_physx_subscriber_is_last_offside_step_before_atomic_env_publish():
@@ -2943,74 +2902,6 @@ def test_atomic_env_publish_failure_calls_real_physx_unsubscribe_boundary(
     with pytest.raises(RuntimeError, match="publication failure"):
         factory._install_lean_runtime_graph(env, graph)
     assert shutdown_calls == ["shutdown"]
-
-
-def test_runtime_factory_dag_orders_atomic_install_before_live_consumers():
-    name = "_action_ball_full_mdp_runtime_factory_order_subject"
-    factory = _load_factory_subject(name)
-    ordered = tuple(
-        node for node, _dependencies in factory.FULL_MDP_RUNTIME_FACTORY_DAG
-    )
-    assert len(ordered) == len(set(ordered))
-    position = {node: index for index, node in enumerate(ordered)}
-    for node, dependencies in factory.FULL_MDP_RUNTIME_FACTORY_DAG:
-        assert all(position[dependency] < position[node] for dependency in dependencies)
-
-    assert (
-        position["verified_split_asset"]
-        < position["command_owners"]
-        < position["independent_reset_genesis"]
-        < position["action_epoch_owner"]
-        < position["device_r05_owner"]
-        < position["top_runtime_owner"]
-    )
-    assert (
-        position["top_runtime_owner"]
-        < position["reward_manager_cfg"]
-        < position["live_physx_fact_subscriber"]
-        < position["atomic_component_install"]
-        < position["causal_step_runtime"]
-        < position["first_optimizer_update"]
-    )
-    assert (
-        position["top_runtime_owner"]
-        < position["observation_manager_cfg"]
-        < position["live_physx_fact_subscriber"]
-        < position["atomic_component_install"]
-    )
-    assert (
-        position["top_runtime_owner"]
-        < position["termination_manager_cfg"]
-        < position["live_physx_fact_subscriber"]
-        < position["atomic_component_install"]
-    )
-    assert ordered[-1] == "first_optimizer_update"
-
-
-def test_runtime_factory_dag_has_one_epoch_and_no_receipt_inventory_nodes():
-    name = "_action_ball_full_mdp_runtime_factory_question_path_subject"
-    factory = _load_factory_subject(name)
-    dependencies = dict(factory.FULL_MDP_RUNTIME_FACTORY_DAG)
-    position = {
-        node: index
-        for index, (node, _dependencies) in enumerate(
-            factory.FULL_MDP_RUNTIME_FACTORY_DAG
-        )
-    }
-
-    assert tuple(node for node in position if "epoch" in node) == (
-        "action_epoch_owner",
-    )
-    assert dependencies["action_epoch_owner"] == (
-        "independent_reset_genesis",
-        "hot_leaf_owners",
-    )
-    assert position["action_epoch_owner"] < position["device_r05_owner"]
-    assert not any(
-        token in node.split("_")
-        for node in position
-        for token in ("receipt", "projection", "sha", "registry", "join")
-    )
 
 
 def _pinned_isaaclab_source() -> Path:

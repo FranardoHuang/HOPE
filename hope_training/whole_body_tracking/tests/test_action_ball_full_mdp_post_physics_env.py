@@ -1,14 +1,15 @@
-"""Fresh Isaac post-physics seam regression.
+"""Focused env/lean-owner chronology and fail-stop regression tests.
 
-The production module imports IsaacLab, but these behavioral tests substitute a
-minimal base class so they can exercise the copied step without constructing a
-Kit scene.  The source-pin test separately reads the exact Pod1 IsaacLab tree.
-Run this file only with the Pod1 training interpreter and CUDA hidden.
+The production module imports IsaacLab. These tests substitute only the base
+environment so they can exercise local callpoints without Kit. Formal owner
+source/DAG/SHA admission was retired; this file tests the exact lean owner and
+runtime facts that can actually fail.
 """
 
 from __future__ import annotations
 
 import ast
+import importlib
 import importlib.util
 from pathlib import Path
 import sys
@@ -19,15 +20,18 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "source" / "whole_body_tracking"
+MDP = SOURCE / "whole_body_tracking" / "tasks" / "tracking" / "mdp"
 MODULE_PATH = (
-    ROOT
-    / "source"
-    / "whole_body_tracking"
+    SOURCE
     / "whole_body_tracking"
     / "tasks"
     / "tracking"
     / "full_mdp_env.py"
 )
+for path in (str(SOURCE), str(MDP)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 
 def _load_subject():
@@ -36,11 +40,14 @@ def _load_subject():
         return sys.modules[subject_name]
 
     class FakeManagerBasedRLEnv:
+        base_constructions = 0
+
         def __init__(self, *args, **kwargs):
+            type(self).base_constructions += 1
             raise AssertionError("focused tests must not construct a Kit env")
 
         def close(self):
-            pass
+            return None
 
     class FakeManagerBasedRLEnvCfg:
         pass
@@ -74,6 +81,7 @@ def _load_subject():
         module = importlib.util.module_from_spec(spec)
         sys.modules[subject_name] = module
         spec.loader.exec_module(module)
+        module._TEST_FAKE_BASE = FakeManagerBasedRLEnv
         return module
     finally:
         for name, prior in previous.items():
@@ -86,30 +94,44 @@ def _load_subject():
 M = _load_subject()
 
 
-def _pinned_isaaclab_source() -> Path:
-    candidates: list[Path] = []
-    for entry in sys.path:
-        if not entry:
-            continue
-        candidate = (
-            Path(entry)
-            / "isaaclab"
-            / "envs"
-            / "manager_based_rl_env.py"
-        )
-        if candidate.is_file():
-            candidates.append(candidate.resolve())
-    build2 = Path(
-        "/workspace/IsaacLab-8320e0be/source/isaaclab/isaaclab/envs/"
-        "manager_based_rl_env.py"
+def _lean_modules():
+    qualified = (
+        "whole_body_tracking.tasks.tracking.mdp."
+        "action_ball_full_mdp_lean_runtime"
     )
-    if build2.is_file():
-        candidates.append(build2.resolve())
-    unique = tuple(dict.fromkeys(candidates))
-    if not unique:
-        pytest.skip("pinned build_2 IsaacLab source is unavailable")
-    assert len(unique) == 1, f"ambiguous IsaacLab sources: {unique!r}"
-    return unique[0]
+    runtime = (
+        sys.modules[qualified]
+        if qualified in sys.modules
+        else importlib.import_module("action_ball_full_mdp_lean_runtime")
+    )
+    reward_name = (
+        runtime.__package__ + ".action_ball_full_mdp_lean_rewards"
+        if runtime.__package__
+        else "action_ball_full_mdp_lean_rewards"
+    )
+    rewards = importlib.import_module(reward_name)
+    return runtime.epoch_v1, rewards, runtime
+
+
+EPOCH, REWARDS, LEAN = _lean_modules()
+CANONICAL_ENV_MODULE = "whole_body_tracking.tasks.tracking.full_mdp_env"
+
+
+@pytest.fixture(autouse=True)
+def _exact_stamp_namespace(monkeypatch):
+    """Let the real lean owner see the source-loaded env stamp identities."""
+
+    monkeypatch.setitem(sys.modules, CANONICAL_ENV_MODULE, M)
+    monkeypatch.setattr(
+        M.FullMdpPrePhysicsSubstepStamp,
+        "__module__",
+        CANONICAL_ENV_MODULE,
+    )
+    monkeypatch.setattr(
+        M.FullMdpPhysicsSubstepStamp,
+        "__module__",
+        CANONICAL_ENV_MODULE,
+    )
 
 
 def _dotted_name(node: ast.AST) -> str:
@@ -128,125 +150,71 @@ def _call_name(node: ast.AST) -> str:
 def _class_method(
     tree: ast.Module, class_name: str, method_name: str
 ) -> ast.FunctionDef:
-    classes = [
+    owner = next(
         node
         for node in tree.body
         if isinstance(node, ast.ClassDef) and node.name == class_name
-    ]
-    assert len(classes) == 1
-    methods = [
+    )
+    return next(
         node
-        for node in classes[0].body
+        for node in owner.body
         if isinstance(node, ast.FunctionDef) and node.name == method_name
-    ]
-    assert len(methods) == 1
-    return methods[0]
+    )
 
 
-def _statement_call_index(statements: list[ast.stmt], name: str) -> int:
+def _one_call_line(function: ast.AST, name: str) -> int:
     matches = [
-        index
-        for index, statement in enumerate(statements)
-        if any(
-            isinstance(node, ast.Call) and _call_name(node) == name
-            for node in ast.walk(statement)
-        )
+        node.lineno
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and _call_name(node) == name
     ]
     assert len(matches) == 1, (name, matches)
     return matches[0]
 
 
-def test_exact_build2_upstream_source_pin_and_reorder_counterexample():
-    source_path = _pinned_isaaclab_source()
-    source_bytes = source_path.read_bytes()
-    M._validate_pinned_upstream_source_bytes(source_bytes)
-
-    tree = ast.parse(source_bytes.decode("utf-8"))
-    step = _class_method(tree, "ManagerBasedRLEnv", "step")
-    loop = next(statement for statement in step.body if isinstance(statement, ast.For))
-    sim_index = _statement_call_index(loop.body, "self.sim.step")
-    update_index = _statement_call_index(loop.body, "self.scene.update")
-    loop.body[sim_index], loop.body[update_index] = (
-        loop.body[update_index],
-        loop.body[sim_index],
-    )
-    ast.fix_missing_locations(tree)
-    with pytest.raises(
-        M.FullMdpUpstreamSourceDriftError,
-        match="physics order|final upstream",
-    ):
-        M._assert_pinned_upstream_step_order(ast.unparse(tree))
-
-
-def test_local_step_has_the_only_legal_post_update_pre_manager_hook():
+def test_local_step_has_the_real_lean_callpoints_in_causal_order():
     tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
     step = _class_method(
         tree, "ActionBallFullMdpManagerBasedRLEnv", "step"
     )
+    assert _one_call_line(step, "self._before_policy_step") < _one_call_line(
+        step, "self.action_manager.process_action"
+    )
+
     loop = next(
-        statement
-        for statement in ast.walk(step)
-        if isinstance(statement, ast.For)
+        node
+        for node in ast.walk(step)
+        if isinstance(node, ast.For)
         and any(
-            isinstance(node, ast.Call) and _call_name(node) == "range"
-            for node in ast.walk(statement.iter)
+            isinstance(item, ast.Call) and _call_name(item) == "range"
+            for item in ast.walk(node.iter)
         )
     )
-    apply_index = _statement_call_index(
-        loop.body, "self.action_manager.apply_action"
+    loop_calls = (
+        "self.action_manager.apply_action",
+        "before_physics",
+        "self.scene.write_data_to_sim",
+        "self.sim.step",
+        "self.recorder_manager.record_post_physics_decimation_step",
+        "self.sim.render",
+        "self.scene.update",
+        "self._publish_post_physics_substep",
     )
-    write_index = _statement_call_index(loop.body, "self.scene.write_data_to_sim")
-    sim_index = _statement_call_index(loop.body, "self.sim.step")
-    recorder_index = _statement_call_index(
-        loop.body, "self.recorder_manager.record_post_physics_decimation_step"
-    )
-    render_index = _statement_call_index(loop.body, "self.sim.render")
-    update_index = _statement_call_index(loop.body, "self.scene.update")
-    hook_index = _statement_call_index(
-        loop.body, "self._publish_post_physics_substep"
-    )
-    assert (
-        apply_index
-        < write_index
-        < sim_index
-        < recorder_index
-        < render_index
-        < update_index
-    )
-    assert hook_index == update_index + 1 == len(loop.body) - 1
+    loop_lines = tuple(_one_call_line(loop, name) for name in loop_calls)
+    assert loop_lines == tuple(sorted(loop_lines))
 
-    common = next(
-        node
-        for node in ast.walk(step)
-        if isinstance(node, ast.AugAssign)
-        and _dotted_name(node.target) == "self.common_step_counter"
+    post_calls = (
+        "self.termination_manager.compute",
+        "self.reward_manager.compute",
+        "components.reward_graph.close_milestone_actual_reward",
+        "components.epoch_owner.milestone.add_step_return",
+        "self._after_reward_close",
+        "self._reset_idx",
+        "self.command_manager.compute",
+        "after_command",
     )
-    termination = next(
-        node
-        for node in ast.walk(step)
-        if isinstance(node, ast.Call)
-        and _call_name(node) == "self.termination_manager.compute"
-    )
-    reward = next(
-        node
-        for node in ast.walk(step)
-        if isinstance(node, ast.Call)
-        and _call_name(node) == "self.reward_manager.compute"
-    )
-    update = next(
-        node
-        for node in ast.walk(loop)
-        if isinstance(node, ast.Call) and _call_name(node) == "self.scene.update"
-    )
-    hook = next(
-        node
-        for node in ast.walk(loop)
-        if isinstance(node, ast.Call)
-        and _call_name(node) == "self._publish_post_physics_substep"
-    )
-    assert update.lineno < hook.lineno < common.lineno
-    assert common.lineno < termination.lineno < reward.lineno
-
+    post_lines = tuple(_one_call_line(step, name) for name in post_calls)
+    assert post_lines == tuple(sorted(post_lines))
     calls = {
         _call_name(node)
         for node in ast.walk(step)
@@ -254,12 +222,6 @@ def test_local_step_has_the_only_legal_post_update_pre_manager_hook():
     }
     assert not any(name.endswith("add_physics_callback") for name in calls)
 
-    seam_methods = (
-        "_protected_manager_state",
-        "_assert_protected_manager_state_unchanged",
-        "_publish_post_physics_substep",
-        "step",
-    )
     forbidden_suffixes = (
         ".item",
         ".cpu",
@@ -273,7 +235,12 @@ def test_local_step_has_the_only_legal_post_update_pre_manager_hook():
         ".randn",
         ".randint",
     )
-    for method_name in seam_methods:
+    for method_name in (
+        "_protected_manager_state",
+        "_assert_protected_manager_state_unchanged",
+        "_publish_post_physics_substep",
+        "step",
+    ):
         method = _class_method(
             tree, "ActionBallFullMdpManagerBasedRLEnv", method_name
         )
@@ -289,199 +256,23 @@ def test_local_step_has_the_only_legal_post_update_pre_manager_hook():
         )
 
 
-def test_cold_local_binding_rejects_same_valued_method_replacement(monkeypatch):
-    owner_type = M.ActionBallFullMdpManagerBasedRLEnv
-    original = owner_type.step
-    foreign = types.FunctionType(
-        original.__code__,
-        original.__globals__,
-        name=original.__name__,
-        argdefs=original.__defaults__,
-        closure=original.__closure__,
-    )
-    foreign.__module__ = original.__module__
-    foreign.__qualname__ = original.__qualname__
-    foreign.__annotations__ = dict(original.__annotations__)
-    monkeypatch.setattr(owner_type, "step", foreign)
-    with pytest.raises(
-        M.FullMdpUpstreamSourceDriftError,
-        match="method 'step' was replaced",
-    ):
-        M._assert_runtime_uses_pinned_local_step()
-
-
-@pytest.mark.parametrize("method_name", ("step", "__init__"))
-def test_cold_local_binding_rejects_in_place_code_replacement(method_name):
-    owner_type = M.ActionBallFullMdpManagerBasedRLEnv
-    method = vars(owner_type)[method_name]
-    original_code = method.__code__
-    constants = list(original_code.co_consts)
-    string_index = next(
-        index
-        for index, value in enumerate(constants)
-        if type(value) is str
-    )
-    constants[string_index] = constants[string_index] + " [foreign]"
-    foreign_code = original_code.replace(co_consts=tuple(constants))
-    assert foreign_code.co_filename == original_code.co_filename
-    method.__code__ = foreign_code
-    try:
-        with pytest.raises(
-            M.FullMdpUpstreamSourceDriftError,
-            match=rf"method '{method_name}' was replaced",
-        ):
-            M._assert_runtime_uses_pinned_local_step()
-    finally:
-        method.__code__ = original_code
-    M._assert_runtime_uses_pinned_local_step()
-
-
-def test_cold_local_binding_rejects_in_place_init_kwdefault_mutation():
-    constructor = M.ActionBallFullMdpManagerBasedRLEnv.__init__
-    keyword_defaults = constructor.__kwdefaults__
-    assert keyword_defaults is not None
-    original = dict(keyword_defaults)
-    keyword_defaults["full_mdp_cold_restore_dormant"] = True
-    try:
-        with pytest.raises(
-            M.FullMdpUpstreamSourceDriftError,
-            match="method '__init__' was replaced",
-        ):
-            M._assert_runtime_uses_pinned_local_step()
-    finally:
-        keyword_defaults.clear()
-        keyword_defaults.update(original)
-    M._assert_runtime_uses_pinned_local_step()
-
-
-def test_cold_local_binding_rejects_instance_executable_shadow():
-    owner_type = M.ActionBallFullMdpManagerBasedRLEnv
-    env = object.__new__(owner_type)
-    env.step = types.MethodType(owner_type.step, env)
-    with pytest.raises(
-        M.FullMdpUpstreamSourceDriftError,
-        match="instance overrides cold-bound executable names: step",
-    ):
-        M._assert_runtime_uses_pinned_local_step(env)
-
-
-def test_cold_local_binding_rejects_same_valued_foreign_export(monkeypatch):
-    owner_type = M.ActionBallFullMdpManagerBasedRLEnv
-    namespace = {
-        name: value
-        for name, value in vars(owner_type).items()
-        if name not in {"__dict__", "__weakref__"}
-    }
-    foreign_type = type(owner_type.__name__, owner_type.__bases__, namespace)
-    assert foreign_type.step is owner_type.step
-    assert foreign_type.__module__ == owner_type.__module__
-    monkeypatch.setattr(
-        M, "ActionBallFullMdpManagerBasedRLEnv", foreign_type
-    )
-    with pytest.raises(
-        M.FullMdpUpstreamSourceDriftError,
-        match="not its cold-bound module export",
-    ):
-        M._assert_runtime_uses_pinned_local_step()
-
-
-def test_cold_local_binding_rejects_module_and_property_replacement(monkeypatch):
-    replacement_module = types.ModuleType(M.__name__)
-    replacement_module.__dict__.update(vars(M))
-    monkeypatch.setitem(sys.modules, M.__name__, replacement_module)
-    with pytest.raises(
-        M.FullMdpUpstreamSourceDriftError,
-        match="not its cold-bound module export",
-    ):
-        M._assert_runtime_uses_pinned_local_step()
-    monkeypatch.setitem(sys.modules, M.__name__, M)
-
-    owner_type = M.ActionBallFullMdpManagerBasedRLEnv
-    original = owner_type.full_mdp_runtime_owner
-    monkeypatch.setattr(
-        owner_type,
-        "full_mdp_runtime_owner",
-        property(original.fget),
-    )
-    with pytest.raises(
-        M.FullMdpUpstreamSourceDriftError,
-        match="getter 'full_mdp_runtime_owner' was replaced",
-    ):
-        M._assert_runtime_uses_pinned_local_step()
-
-
-def test_missing_owner_is_rejected_before_base_construction():
-    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-    with pytest.raises(
-        M.FullMdpPostPhysicsOwnerMissingError,
-        match="requires one post-physics owner",
-    ):
-        M.ActionBallFullMdpManagerBasedRLEnv.__init__(
-            env,
-            cfg=None,
-            full_mdp_post_physics_owner_factory=None,
-        )
-
-
-def test_unfrozen_concrete_owner_and_extension_mode_fail_before_base_construction(
+def test_missing_lean_owner_factory_and_extension_mode_fail_pre_base(
     monkeypatch,
 ):
-    with pytest.raises(
-        M.FullMdpPostPhysicsOwnerMissingError, match="remains HOLD"
-    ):
-        M._frozen_concrete_owner_pins()
-    config_module = types.ModuleType(M.FULL_MDP_CONFIG_MODULE)
-    for name, _role, _task_id in M.FULL_MDP_DIAGNOSTIC_CONFIG_TYPES:
-        setattr(config_module, name, type(name, (), {}))
-    for name in (
-        "gymnasium",
-        "action_ball_full_mdp_canary_target_profile",
-        M.FULL_MDP_RUNTIME_FACTORY_MODULE,
-    ):
-        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
-    monkeypatch.setitem(
-        sys.modules, M.FULL_MDP_CONFIG_MODULE, config_module
-    )
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-    factory_calls = []
-
-    def factory(*args, **kwargs):
-        factory_calls.append((args, kwargs))
-        return None
-
+    before = M._TEST_FAKE_BASE.base_constructions
     with pytest.raises(
         M.FullMdpPostPhysicsOwnerMissingError,
-        match="exact registered A/C full-MDP EnvCfg type",
+        match="requires one post-physics owner factory",
     ):
         M.ActionBallFullMdpManagerBasedRLEnv.__init__(
             env,
             cfg=None,
-            full_mdp_post_physics_owner_factory=factory,
-            full_mdp_post_physics_expected_dependency_dag_sha256="a" * 64,
+            full_mdp_runtime_owner_factory=None,
         )
-    assert factory_calls == []
-    assert "_action_ball_full_mdp_runtime_lease" not in vars(env)
-    assert not any(
-        name.startswith("_action_ball_full_mdp_manager_construction")
-        or name.startswith("_action_ball_full_mdp_base_construction")
-        for name in vars(env)
-    )
-    monkeypatch.setattr(
-        M,
-        "PINNED_FULL_MDP_OWNER_MODULE",
-        "fake",
-    )
-    with pytest.raises(
-        M.FullMdpPostPhysicsOwnerMissingError, match="partially frozen"
-    ):
-        M.ActionBallFullMdpManagerBasedRLEnv.__init__(
-            env,
-            cfg=None,
-            full_mdp_post_physics_owner_factory=factory,
-            full_mdp_post_physics_expected_dependency_dag_sha256="c" * 64,
-        )
-    assert factory_calls == []
+    assert M._TEST_FAKE_BASE.base_constructions == before
     assert vars(env) == {}
+
     monkeypatch.setattr(
         M.builtins, "ISAAC_LAUNCHED_FROM_TERMINAL", True, raising=False
     )
@@ -491,248 +282,216 @@ def test_unfrozen_concrete_owner_and_extension_mode_fail_before_base_constructio
     M._require_standalone_simulation_app()
 
 
-def _concrete_owner_fixture_source(*, stale_variant: bool = False) -> str:
-    publish_body = (
-        "        marker = stamp\n        del marker\n        return None"
-        if stale_variant
-        else "        return None"
-    )
-    return f'''class ConcreteOwner:
-    def __init__(self, env, lease, dependency_dag):
-        self._env = env
-        self._lease = lease
-        self._dependency_dag = dependency_dag
-
-    @property
-    def full_mdp_post_physics_dependency_dag_sha256(self):
-        return self._dependency_dag
-
-    @property
-    def full_mdp_post_physics_env(self):
-        return self._env
-
-    @property
-    def full_mdp_post_physics_lease(self):
-        return self._lease
-
-    def publish_post_physics_substep(self, stamp):
-{{publish_body}}
-
-    def alternate_post_physics_substep(self, stamp):
-        return stamp
-'''.format(publish_body=publish_body)
+def _component_values():
+    return [object() for _ in range(12)]
 
 
-def _load_concrete_owner_fixture(tmp_path, monkeypatch):
-    module_name = f"_full_mdp_concrete_owner_{tmp_path.name.replace('-', '_')}"
-    source_path = tmp_path / "concrete_owner.py"
-    source_path.write_text(
-        _concrete_owner_fixture_source(), encoding="utf-8"
-    )
-    spec = importlib.util.spec_from_file_location(module_name, source_path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, module_name, module)
-    spec.loader.exec_module(module)
-    return module, source_path
-
-
-def _concrete_owner_fixture_pins(module, source_path, dependency_dag):
-    source_bytes = source_path.read_bytes()
-    return (
-        module.__name__,
-        "ConcreteOwner",
-        M.hashlib.sha256(source_bytes).hexdigest(),
-        M._concrete_owner_class_ast_sha256(source_bytes, "ConcreteOwner"),
-        dependency_dag,
+def _components_from_values(values):
+    return M.FullMdpLeanRuntimeComponents(
+        epoch_owner=values[0],
+        device_r05_owner=values[1],
+        motion_owner=values[2],
+        racket_owner=values[3],
+        physical_owner=values[4],
+        r03_owner=values[5],
+        r06_owner=values[6],
+        r07_owner=values[7],
+        r07_plant_fact_adapter=values[8],
+        reward_graph=values[9],
+        lean_runtime_owner=values[10],
+        observation_source=values[11],
     )
 
 
-def test_construction_binds_loaded_module_class_executable_and_dependency_dag(
-    tmp_path, monkeypatch
-):
-    module, source_path = _load_concrete_owner_fixture(tmp_path, monkeypatch)
-    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-    lease = object()
-    dependency_dag = "d" * 64
-    owner = module.ConcreteOwner(env, lease, dependency_dag)
-    pins = _concrete_owner_fixture_pins(
-        module, source_path, dependency_dag
-    )
+def test_lean_component_registry_rejects_missing_or_aliased_roles():
+    values = _component_values()
+    components = _components_from_values(values)
+    assert components.lean_runtime_owner is values[10]
 
-    binding = env._validate_concrete_owner_install(
-        owner,
-        concrete_pins=pins,
-        expected_dependency_dag=dependency_dag,
-        expected_lease=lease,
-    )
-
-    assert binding.module_object is module
-    assert binding.owner_type is module.ConcreteOwner
-    assert binding.publish_function is vars(module.ConcreteOwner)[
-        "publish_post_physics_substep"
-    ]
-    assert binding.direct_executable_sha256 == (
-        M._live_owner_direct_executable_sha256(module.ConcreteOwner)
-    )
-
-
-def test_disk_repin_cannot_authorize_a_different_already_loaded_executable(
-    tmp_path, monkeypatch
-):
-    module, source_path = _load_concrete_owner_fixture(tmp_path, monkeypatch)
-    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-    lease = object()
-    dependency_dag = "d" * 64
-    owner = module.ConcreteOwner(env, lease, dependency_dag)
-
-    source_path.write_text(
-        _concrete_owner_fixture_source(stale_variant=True), encoding="utf-8"
-    )
-    pins = _concrete_owner_fixture_pins(
-        module, source_path, dependency_dag
-    )
+    missing = list(values)
+    missing[6] = None
     with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError,
-        match="loaded concrete owner executable differs",
+        M.FullMdpPostPhysicsOwnerMissingError, match="missing role"
     ):
-        env._validate_concrete_owner_install(
-            owner,
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
-        )
+        _components_from_values(missing)
+
+    aliased = list(values)
+    aliased[7] = aliased[6]
+    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="aliases"):
+        _components_from_values(aliased)
 
 
-def test_module_export_or_instance_publish_shadow_cannot_spoof_concrete_type(
-    tmp_path, monkeypatch
-):
-    module, source_path = _load_concrete_owner_fixture(tmp_path, monkeypatch)
-    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-    lease = object()
-    dependency_dag = "d" * 64
-    owner_type = module.ConcreteOwner
-    owner = owner_type(env, lease, dependency_dag)
-    pins = _concrete_owner_fixture_pins(
-        module, source_path, dependency_dag
-    )
+class _R05:
+    def __init__(self, trace):
+        self.trace = trace
 
-    module.ConcreteOwner = object
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="pinned module export"
-    ):
-        env._validate_concrete_owner_install(
-            owner,
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
-        )
-
-    module.ConcreteOwner = owner_type
-    owner.publish_post_physics_substep = lambda stamp: None
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="shadowed or not bound"
-    ):
-        env._validate_concrete_owner_install(
-            owner,
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
-        )
-
-
-def test_keyed_manifest_rejects_method_swap_foreign_globals_and_defaults(
-    tmp_path, monkeypatch
-):
-    module, source_path = _load_concrete_owner_fixture(tmp_path, monkeypatch)
-    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-    lease = object()
-    dependency_dag = "d" * 64
-    owner_type = module.ConcreteOwner
-    pins = _concrete_owner_fixture_pins(
-        module, source_path, dependency_dag
-    )
-
-    publish = owner_type.publish_post_physics_substep
-    alternate = owner_type.alternate_post_physics_substep
-    owner_type.publish_post_physics_substep = alternate
-    owner_type.alternate_post_physics_substep = publish
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="foreign identity"
-    ):
-        env._validate_concrete_owner_install(
-            owner_type(env, lease, dependency_dag),
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
-        )
-
-    owner_type.publish_post_physics_substep = publish
-    owner_type.alternate_post_physics_substep = alternate
-    foreign = types.FunctionType(
-        publish.__code__,
-        dict(publish.__globals__),
-        name=publish.__name__,
-    )
-    foreign.__module__ = publish.__module__
-    foreign.__qualname__ = publish.__qualname__
-    owner_type.publish_post_physics_substep = foreign
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="foreign globals"
-    ):
-        env._validate_concrete_owner_install(
-            owner_type(env, lease, dependency_dag),
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
-        )
-
-    owner_type.publish_post_physics_substep = publish
-    publish.__defaults__ = (None,)
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="unpinned callable state"
-    ):
-        env._validate_concrete_owner_install(
-            owner_type(env, lease, dependency_dag),
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
-        )
-    publish.__defaults__ = None
-
-
-def test_subclass_and_loaded_local_helper_replacement_are_rejected():
-    class Subclass(M.ActionBallFullMdpManagerBasedRLEnv):
-        pass
-
-    subclass = object.__new__(Subclass)
-    with pytest.raises(
-        M.FullMdpUnsupportedRuntimeError, match="rejects subclasses"
-    ):
-        M.ActionBallFullMdpManagerBasedRLEnv.__init__(
-            subclass,
-            cfg=None,
-            full_mdp_post_physics_owner_factory=None,
-        )
-
-    owner_type = M.ActionBallFullMdpManagerBasedRLEnv
-    original = owner_type._poison
-
-    def replacement(self, *, reason, exact_stamp):
+    def advance_action_ball_full_mdp_rows(self):
+        self.trace.append(("r05",))
         return None
 
-    owner_type._poison = replacement
-    try:
-        with pytest.raises(
-            M.FullMdpUpstreamSourceDriftError,
-            match="method '_poison' was replaced",
-        ):
-            M._assert_runtime_uses_pinned_local_step()
-    finally:
-        owner_type._poison = original
+
+class _Motion:
+    def __init__(self, trace, count=2):
+        self.trace = trace
+        self.time_left = torch.ones(count)
+        self.command_counter = torch.zeros(count, dtype=torch.long)
+
+    def install_action_ball_continuous_r07_ready_projection(self, projection):
+        assert projection is not None
+        self.trace.append(("motion_ready",))
+        return None
 
 
-def test_stamp_is_exact_immutable_and_integer_only():
+class _Racket:
+    def __init__(self, trace, count=2):
+        self.trace = trace
+        self.time_left = torch.ones(count)
+        self.command_counter = torch.zeros(count, dtype=torch.long)
+
+    def arm_action_ball_full_mdp_epoch_strike_fact(self):
+        self.trace.append(("racket_arm",))
+        return None
+
+    def publish_action_ball_full_mdp_epoch_strike_fact(self, *, source_step):
+        self.trace.append(("racket_publish", source_step))
+        return None
+
+
+class _Physical:
+    def __init__(self, env, trace):
+        self.env = env
+        self.trace = trace
+        self.fail_publish = False
+        self.mutate_clock = False
+
+    def launch_action_epoch(self):
+        self.trace.append(("physical_launch",))
+        return None
+
+    def refresh_action_epoch_host_activity(self, *, next_control_step):
+        self.trace.append(("physical_refresh", next_control_step))
+        return None
+
+    def publish_action_epoch_post_physics(self, stamp):
+        self.trace.append(("physical_publish", stamp.exact_tuple()))
+        if self.mutate_clock:
+            self.env.common_step_counter += 1
+        if self.fail_publish:
+            raise ValueError("physical publish counterexample")
+        return None
+
+
+class _R06:
+    def __init__(self, trace):
+        self.trace = trace
+
+    def close_action_ball_full_mdp_epoch_reward_rows(self):
+        self.trace.append(("r06_close",))
+        return None
+
+
+class _R07:
+    def __init__(self, trace):
+        self.trace = trace
+        self.ready = object()
+
+    def publish_epoch_reward_facts(self, *, current_source_step):
+        self.trace.append(
+            ("r07_publish", tuple(current_source_step.shape))
+        )
+        return None
+
+    def motion_ready_projection(self):
+        self.trace.append(("r07_ready",))
+        return self.ready
+
+
+def _install_exact_lean_graph(env, trace):
+    lease = getattr(env, "_action_ball_full_mdp_runtime_lease", object())
+    env._action_ball_full_mdp_runtime_lease = lease
+    env._action_ball_full_mdp_runtime_lease_identity_at_mint = lease
+    epoch = EPOCH.ActionEpochOwner(num_envs=2, device="cpu")
+    epoch.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool),
+        reset_generation=torch.ones(2, dtype=torch.int64),
+    )
+    graph = REWARDS.LeanActionEpochRewardGraph(epoch_owner=epoch)
+    graph.configure_milestone_configured_income(
+        {
+            name: types.SimpleNamespace(weight=1.0)
+            for name in REWARDS.MANAGER_NAMES
+        },
+        getattr(env, "step_dt", 0.02),
+    )
+    r05 = _R05(trace)
+    motion = _Motion(trace)
+    racket = _Racket(trace)
+    physical = _Physical(env, trace)
+    r06 = _R06(trace)
+    r07 = _R07(trace)
+    r03 = object()
+    owner = LEAN.ActionBallFullMdpLeanRuntimeOwner(
+        env=env,
+        runtime_lease=lease,
+        epoch_owner=epoch,
+        reward_graph=graph,
+        r05_runtime=r05,
+        motion=motion,
+        racket=racket,
+        physical_ball=physical,
+        r06_landing_outcome=r06,
+        r03_strike_fact=r03,
+        r07_recovery=r07,
+    )
+    components = M.FullMdpLeanRuntimeComponents(
+        epoch_owner=epoch,
+        device_r05_owner=r05,
+        motion_owner=motion,
+        racket_owner=racket,
+        physical_owner=physical,
+        r03_owner=r03,
+        r06_owner=r06,
+        r07_owner=r07,
+        r07_plant_fact_adapter=object(),
+        reward_graph=graph,
+        lean_runtime_owner=owner,
+        observation_source=object(),
+    )
+    env._action_ball_full_mdp_components = components
+    env._action_ball_full_mdp_lean_reward_graph = graph
+    return owner, components, physical
+
+
+def test_exact_lean_owner_binding_and_lease_identity(monkeypatch):
+    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
+    env.step_dt = 0.02
+    env._action_ball_full_mdp_manager_construction_state = "sealed"
+    owner, components, _physical = _install_exact_lean_graph(env, [])
+    lease = env._action_ball_full_mdp_runtime_lease
+    monkeypatch.setattr(
+        M, "FULL_MDP_DIAGNOSTIC_RUNTIME_OWNER_MODULE", LEAN.__name__
+    )
+
+    binding = env._validate_lean_owner_install(owner, expected_lease=lease)
+    assert binding.owner_type is LEAN.ActionBallFullMdpLeanRuntimeOwner
+    assert binding.publish_function is vars(binding.owner_type)[
+        "publish_post_physics_substep"
+    ]
+    assert env.action_ball_full_mdp_runtime_lease is lease
+    assert components.lean_runtime_owner is owner
+
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError, match="binding or authorization"
+    ):
+        env._validate_lean_owner_install(owner, expected_lease=object())
+    env._action_ball_full_mdp_runtime_lease = object()
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError, match="lease identity changed"
+    ):
+        _ = env.action_ball_full_mdp_runtime_lease
+
+
+def test_stamp_and_dispatch_enforce_exact_integer_chronology():
     stamp = M.FullMdpPhysicsSubstepStamp(
         control_step=7,
         physics_substep=2,
@@ -743,46 +502,28 @@ def test_stamp_is_exact_immutable_and_integer_only():
     assert stamp.exact_tuple() == (7, 2, 4, 43, 1)
     with pytest.raises(AttributeError):
         object.__setattr__(stamp, "sim_step", 44)
+
     dispatch = M._ControlStepDispatch(
-        control_step=1, decimation=1, sim_step_before=0
+        control_step=1, decimation=2, sim_step_before=10
     )
     with pytest.raises(
         M.FullMdpPostPhysicsProtocolError, match="plain integers"
     ):
-        dispatch.prepare(physics_substep=True, sim_step=1)
-
-
-def test_dispatch_rejects_pre_step_skipped_and_duplicated_final_substeps():
-    pre_step = M._ControlStepDispatch(
-        control_step=1, decimation=2, sim_step_before=10
-    )
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="expected sim step"
-    ):
-        pre_step.prepare(physics_substep=0, sim_step=10)
-
-    skipped = M._ControlStepDispatch(
-        control_step=1, decimation=2, sim_step_before=10
-    )
-    first = skipped.prepare(physics_substep=0, sim_step=11)
-    skipped.commit(first)
+        dispatch.prepare(physics_substep=True, sim_step=11)
+    first = dispatch.prepare(physics_substep=0, sim_step=11)
+    dispatch.commit(first)
     with pytest.raises(
         M.FullMdpPostPhysicsProtocolError, match="final physics substep"
     ):
-        skipped.finish()
-
-    complete = M._ControlStepDispatch(
-        control_step=1, decimation=2, sim_step_before=10
-    )
-    first = complete.prepare(physics_substep=0, sim_step=11)
-    complete.commit(first)
-    final = complete.prepare(physics_substep=1, sim_step=12)
-    complete.commit(final)
-    complete.finish()
+        dispatch.finish()
+    final = dispatch.prepare(physics_substep=1, sim_step=12)
+    dispatch.commit(final)
+    dispatch.finish()
     with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="skipped, duplicated or reordered"
+        M.FullMdpPostPhysicsProtocolError,
+        match="skipped, duplicated or reordered",
     ):
-        complete.prepare(physics_substep=1, sim_step=12)
+        dispatch.prepare(physics_substep=1, sim_step=12)
 
 
 class _ActionManager:
@@ -825,9 +566,6 @@ class _Simulation:
     def render(self):
         self.trace.append(("render",))
 
-    def forward(self):
-        self.trace.append(("forward",))
-
 
 class _RecorderManager:
     active_terms = ()
@@ -841,21 +579,21 @@ class _RecorderManager:
     def record_post_physics_decimation_step(self):
         self.trace.append(("post_physics_record",))
 
-    def record_post_step(self):
-        self.trace.append(("post_record",))
-
-    def record_pre_reset(self, env_ids):
-        self.trace.append(("pre_reset", tuple(env_ids.shape)))
-
-    def record_post_reset(self, env_ids):
-        self.trace.append(("post_reset", tuple(env_ids.shape)))
-
 
 class _TerminationManager:
+    _NAMES = tuple(name for name, _bit in M._FULL_MDP_TERMINATION_REASON_BITS)
+
     def __init__(self, trace, count):
         self.trace = trace
+        self._term_dones = torch.zeros(
+            (count, len(self._NAMES)), dtype=torch.bool
+        )
         self._terminated = torch.zeros(count, dtype=torch.bool)
         self._time_outs = torch.zeros(count, dtype=torch.bool)
+
+    @property
+    def active_terms(self):
+        return list(self._NAMES)
 
     @property
     def terminated(self):
@@ -871,16 +609,31 @@ class _TerminationManager:
 
 
 class _RewardManager:
-    def __init__(self, trace, count):
+    def __init__(self, trace, graph, count, step_dt):
         self.trace = trace
+        self.graph = graph
         self.count = count
+        self.step_dt = step_dt
         self.fail = False
 
     def compute(self, *, dt):
+        assert dt == self.step_dt
         self.trace.append(("reward", dt))
         if self.fail:
             raise ValueError("reward failure counterexample")
-        return torch.zeros(self.count)
+        actual = torch.zeros(self.count, dtype=torch.float32)
+        for ordinal in range(REWARDS.LIFECYCLE_PAYMENT_COUNT):
+            value = self.graph.pay(
+                ordinal, scale=1.0 if ordinal < 10 else None
+            )
+            actual.add_(value * self.step_dt)
+        for offset in range(len(REWARDS.COMMON_DENSE_NAMES)):
+            ordinal = REWARDS.LIFECYCLE_PAYMENT_COUNT + offset
+            value = self.graph.record_common_dense(
+                ordinal, torch.zeros(self.count, dtype=torch.float32)
+            )
+            actual.add_(value * self.step_dt)
+        return actual
 
 
 class _ObservationManager:
@@ -889,28 +642,21 @@ class _ObservationManager:
         self.count = count
 
     def compute(self, **kwargs):
-        self.trace.append(("observation", kwargs))
+        self.trace.append(("observation", tuple(sorted(kwargs.items()))))
         return {"policy": torch.zeros(self.count, 1)}
 
 
-class _CommandTerm:
-    def __init__(self, count):
-        self.time_left = torch.ones(count)
-        self.command_counter = torch.zeros(count, dtype=torch.long)
-
-
 class _CommandManager:
-    def __init__(self, trace, count):
+    def __init__(self, trace, motion, racket):
         self.trace = trace
-        self._term = _CommandTerm(count)
+        self.terms = {"motion": motion, "racket_target": racket}
 
     @property
     def active_terms(self):
-        return ["motion"]
+        return list(self.terms)
 
     def get_term(self, name):
-        assert name == "motion"
-        return self._term
+        return self.terms[name]
 
     def compute(self, *, dt):
         self.trace.append(("command", dt))
@@ -923,75 +669,12 @@ class _EventManager:
         raise AssertionError("no interval event is configured")
 
 
-class _Owner:
-    def __init__(self, env, trace, options):
-        self.env = env
-        self.trace = trace
-        self.mutate_clock = bool(options.get("mutate_clock", False))
-        self.mutate_reset = bool(options.get("mutate_reset", False))
-        self.mutate_reset_buf = bool(options.get("mutate_reset_buf", False))
-        self.mutate_command_clock = bool(
-            options.get("mutate_command_clock", False)
-        )
-        self.reentrant_caught = bool(options.get("reentrant_caught", False))
-        self.fail = bool(options.get("fail", False))
-        self.return_value = options.get("return_value")
-        self.stamps = []
-        self._full_mdp_post_physics_dependency_dag_sha256 = None
-        self._full_mdp_post_physics_env = env
-        self._full_mdp_post_physics_lease = None
-
-    @property
-    def full_mdp_post_physics_dependency_dag_sha256(self):
-        return self._full_mdp_post_physics_dependency_dag_sha256
-
-    @full_mdp_post_physics_dependency_dag_sha256.setter
-    def full_mdp_post_physics_dependency_dag_sha256(self, value):
-        self._full_mdp_post_physics_dependency_dag_sha256 = value
-
-    @property
-    def full_mdp_post_physics_env(self):
-        return self._full_mdp_post_physics_env
-
-    @full_mdp_post_physics_env.setter
-    def full_mdp_post_physics_env(self, value):
-        self._full_mdp_post_physics_env = value
-
-    @property
-    def full_mdp_post_physics_lease(self):
-        return self._full_mdp_post_physics_lease
-
-    @full_mdp_post_physics_lease.setter
-    def full_mdp_post_physics_lease(self, value):
-        self._full_mdp_post_physics_lease = value
-
-    def publish_post_physics_substep(self, stamp):
-        assert self.trace[-1][0] == "update"
-        self.trace.append(("hook", stamp.exact_tuple()))
-        self.stamps.append(stamp)
-        if self.mutate_clock:
-            self.env.common_step_counter += 1
-        if self.mutate_reset:
-            self.env.termination_manager._terminated.logical_not_()
-        if self.mutate_reset_buf:
-            self.env.reset_buf = self.env.reset_buf.clone()
-        if self.mutate_command_clock:
-            self.env.command_manager._term.time_left.add_(1.0)
-        if self.reentrant_caught:
-            try:
-                self.env.step(torch.zeros(2, 4))
-            except M.FullMdpPostPhysicsProtocolError:
-                pass
-        if self.fail:
-            raise ValueError("owner failure counterexample")
-        return self.return_value
-
-
-def _fake_env(*, rendering=False, decimation=3, owner_kwargs=None):
+def _fake_env(*, rendering=False, decimation=3):
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
     trace = []
     count = 2
     env.device = "cpu"
+    env.num_envs = count
     env.cfg = types.SimpleNamespace(
         decimation=decimation,
         sim=types.SimpleNamespace(render_interval=1),
@@ -1002,38 +685,49 @@ def _fake_env(*, rendering=False, decimation=3, owner_kwargs=None):
     env.common_step_counter = 0
     env._sim_step_counter = 0
     env.episode_length_buf = torch.zeros(count, dtype=torch.long)
+    env._full_mdp_active_dispatch = None
+    env._full_mdp_last_after_reward_close_control_step = 0
+    env._full_mdp_post_physics_poison = None
+    env._action_ball_full_mdp_manager_construction_state = "sealed"
+    owner, components, physical = _install_exact_lean_graph(env, trace)
     env.action_manager = _ActionManager(trace)
     env.scene = _Scene(trace)
     env.sim = _Simulation(trace, rendering=rendering)
     env.recorder_manager = _RecorderManager(trace)
     env.termination_manager = _TerminationManager(trace, count)
-    env.reward_manager = _RewardManager(trace, count)
+    env.reward_manager = _RewardManager(
+        trace, components.reward_graph, count, env.step_dt
+    )
     env.observation_manager = _ObservationManager(trace, count)
-    env.command_manager = _CommandManager(trace, count)
+    env.command_manager = _CommandManager(
+        trace, components.motion_owner, components.racket_owner
+    )
     env.event_manager = _EventManager()
     env.extras = {}
-    env._action_ball_full_mdp_components = object()
-    env._full_mdp_active_dispatch = None
-    env._full_mdp_post_physics_poison = None
-    env._full_mdp_post_physics_expected_dependency_dag = "a" * 64
-    env._full_mdp_post_physics_lease = object()
-    owner = _Owner(env, trace, owner_kwargs or {})
-    owner.full_mdp_post_physics_dependency_dag_sha256 = "a" * 64
-    owner.full_mdp_post_physics_env = env
-    owner.full_mdp_post_physics_lease = env._full_mdp_post_physics_lease
-    env._full_mdp_post_physics_owner = owner
+    env._full_mdp_runtime_owner = owner
+    env._full_mdp_before_policy_step = owner.before_policy_step
+    env._full_mdp_before_physics_substep = owner.before_physics_substep
     env._full_mdp_post_physics_publish = owner.publish_post_physics_substep
-    return env, owner, trace
+    env._full_mdp_after_reward_close = owner.after_reward_close
+    env._full_mdp_after_command_compute_before_observation = (
+        owner.after_command_compute_before_observation
+    )
+    env._full_mdp_selected_true_reset = owner.selected_true_reset
+    return env, owner, physical, trace
 
 
 def _without_render(trace):
     return [row for row in trace if row[0] != "render"]
 
 
-def test_render_path_preserves_physics_and_exact_hook_parity_without_rng_use():
+def test_render_path_preserves_exact_lean_physics_parity_without_rng_use():
     rng_before = torch.random.get_rng_state().clone()
-    plain, plain_owner, plain_trace = _fake_env(rendering=False)
-    rendered, rendered_owner, rendered_trace = _fake_env(rendering=True)
+    plain, _plain_owner, _plain_physical, plain_trace = _fake_env(
+        rendering=False
+    )
+    rendered, _rendered_owner, _rendered_physical, rendered_trace = _fake_env(
+        rendering=True
+    )
     action = torch.zeros(2, 4)
     plain_result = plain.step(action)
     rendered_result = rendered.step(action)
@@ -1041,13 +735,13 @@ def test_render_path_preserves_physics_and_exact_hook_parity_without_rng_use():
 
     assert torch.equal(rng_before, rng_after)
     assert _without_render(rendered_trace) == plain_trace
-    assert [stamp.exact_tuple() for stamp in plain_owner.stamps] == [
+    stamps = [
+        row[1] for row in plain_trace if row[0] == "physical_publish"
+    ]
+    assert stamps == [
         (1, 0, 3, 1, 1),
         (1, 1, 3, 2, 1),
         (1, 2, 3, 3, 1),
-    ]
-    assert [stamp.exact_tuple() for stamp in rendered_owner.stamps] == [
-        stamp.exact_tuple() for stamp in plain_owner.stamps
     ]
     assert [row[0] for row in rendered_trace].count("render") == 3
     assert plain.common_step_counter == rendered.common_step_counter == 1
@@ -1058,132 +752,104 @@ def test_render_path_preserves_physics_and_exact_hook_parity_without_rng_use():
 
 
 @pytest.mark.parametrize(
-    "owner_kwargs, expected",
+    "failure, expected",
     [
-        ({"mutate_clock": True}, "mutated a protected manager"),
-        ({"mutate_reset": True}, "changed version"),
-        ({"mutate_command_clock": True}, "changed version"),
-        ({"reentrant_caught": True}, "reentrant or poisoned"),
-        ({"fail": True}, "owner failed"),
-        ({"return_value": object()}, "must return None"),
+        ("mutate_clock", "mutated a protected manager clock"),
+        ("publish", "post-physics owner failed"),
+        ("reward", "reward failure counterexample"),
     ],
 )
-def test_owner_mutation_or_failure_is_fail_stop_before_termination_reward(
-    owner_kwargs, expected
-):
-    env, owner, trace = _fake_env(owner_kwargs=owner_kwargs)
-    action = torch.zeros(2, 4)
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match=expected):
-        env.step(action)
-    assert owner.stamps
-    assert not any(row[0] in {"termination", "reward"} for row in trace)
+def test_partial_step_failure_is_sticky_before_any_retry(failure, expected):
+    env, owner, physical, trace = _fake_env(decimation=2)
+    if failure == "mutate_clock":
+        physical.mutate_clock = True
+    elif failure == "publish":
+        physical.fail_publish = True
+    else:
+        env.reward_manager.fail = True
+
+    with pytest.raises(Exception, match=expected):
+        env.step(torch.zeros(2, 4))
+    assert env._full_mdp_post_physics_poison is not None
+    assert not any(row[0] == "command" for row in trace)
     trace_before_retry = list(trace)
-    with pytest.raises(M.FullMdpPostPhysicsPoisonedError, match="cold reconstruction"):
-        env.step(action)
+    with pytest.raises(
+        M.FullMdpPostPhysicsPoisonedError, match="cold reconstruction"
+    ):
+        env.step(torch.zeros(2, 4))
     assert trace == trace_before_retry
+    if failure == "publish":
+        assert owner.poisoned is True
 
 
-def test_two_inference_mode_steps_and_inference_reset_mutation_counterexample():
-    env, owner, trace = _fake_env(decimation=1)
-    action = torch.zeros(2, 4)
-    with torch.inference_mode():
-        env.step(action)
-        assert env.reset_buf.is_inference()
-        env.step(action)
-    assert len(owner.stamps) == 2
-    assert env.common_step_counter == 2
-
-    mutated, mutated_owner, mutated_trace = _fake_env(decimation=1)
-    with torch.inference_mode():
-        mutated.step(action)
-        assert mutated.reset_buf.is_inference()
-        mutated_owner.mutate_reset_buf = True
-        prior_manager_rows = sum(
-            row[0] in {"termination", "reward"} for row in mutated_trace
-        )
-        with pytest.raises(
-            M.FullMdpPostPhysicsProtocolError,
-            match="changed identity",
-        ):
-            mutated.step(action)
-    assert sum(
-        row[0] in {"termination", "reward"} for row in mutated_trace
-    ) == prior_manager_rows
-
-
-def test_post_publication_reward_failure_poisons_before_any_retry():
-    env, owner, trace = _fake_env(decimation=2)
-    env.reward_manager.fail = True
-    action = torch.zeros(2, 4)
-    with pytest.raises(ValueError, match="reward failure counterexample"):
-        env.step(action)
-    assert len(owner.stamps) == 2
-    assert any(row[0] == "termination" for row in trace)
-    assert any(row[0] == "reward" for row in trace)
-    trace_before_retry = list(trace)
-    with pytest.raises(M.FullMdpPostPhysicsPoisonedError, match="cold reconstruction"):
-        env.step(action)
-    assert trace == trace_before_retry
-
-
-def test_poison_record_cannot_be_disabled_by_replacing_a_module_global(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        M, "_PoisonRecord", lambda **kwargs: None, raising=False
-    )
-    env, owner, trace = _fake_env(decimation=1)
-    env.reward_manager.fail = True
-    action = torch.zeros(2, 4)
-    with pytest.raises(ValueError, match="reward failure counterexample"):
-        env.step(action)
-    assert owner.stamps
-    assert isinstance(env._full_mdp_post_physics_poison, tuple)
-    trace_before_retry = list(trace)
-    with pytest.raises(M.FullMdpPostPhysicsPoisonedError, match="cold reconstruction"):
-        env.step(action)
-    assert trace == trace_before_retry
-
-
-def test_owner_lease_and_external_authority_are_rejected_at_install(
-    tmp_path, monkeypatch
-):
-    module, source_path = _load_concrete_owner_fixture(tmp_path, monkeypatch)
+def _reset_event_env():
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
-    lease = object()
-    dependency_dag = "d" * 64
-    pins = _concrete_owner_fixture_pins(
-        module, source_path, dependency_dag
+    env.device = "cpu"
+    env.num_envs = 2
+    env.step_dt = 0.02
+    env.cfg = types.SimpleNamespace(decimation=4)
+    env.common_step_counter = 17
+    env._sim_step_counter = 68
+    env.episode_length_buf = torch.tensor([5, 9], dtype=torch.int64)
+    env._action_ball_full_mdp_manager_construction_state = "sealed"
+    env._action_ball_full_mdp_active_reset_record = None
+    env._action_ball_full_mdp_reset_callpoint_authority = None
+    env._action_ball_full_mdp_reset_generation = torch.tensor(
+        [4, torch.iinfo(torch.int64).max], dtype=torch.int64
+    )
+    env.termination_manager = _TerminationManager([], 2)
+    env.termination_manager._term_dones[1, 1] = True
+    owner, components, _physical = _install_exact_lean_graph(env, [])
+    env._full_mdp_runtime_owner = owner
+    return env, components
+
+
+def test_selected_reset_projects_real_mask_clock_reason_and_overflow_once():
+    env, components = _reset_event_env()
+    env_ids = torch.tensor([1], dtype=torch.int64)
+    env._authorize_action_ball_full_mdp_reset_callpoint(
+        env_ids, source="step_nonzero"
+    )
+    event = env._mint_action_ball_full_mdp_selected_reset_event(env_ids)
+    projection = env._project_action_ball_full_mdp_lean_selected_reset_event(
+        event
     )
 
-    wrong_lease_owner = module.ConcreteOwner(
-        env, object(), dependency_dag
+    assert type(components) is M.FullMdpLeanRuntimeComponents
+    assert projection.selected_env_index.tolist() == [1]
+    assert projection.selected_mask.tolist() == [False, True]
+    assert projection.generation_before.tolist() == [4, 2**63 - 1]
+    assert projection.generation_after.tolist() == [4, 2**63 - 1]
+    assert projection.generation_overflow_fault.tolist() == [False, True]
+    assert projection.terminal_reset_facts_i64[:, :2].tolist() == [
+        [-1, -1],
+        [17, 9],
+    ]
+    assert projection.terminal_reset_facts_i64[0, 2].item() == 0
+    assert projection.terminal_reset_facts_i64[1, 2].item() != 0
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError, match="stale, foreign, or replayed"
+    ):
+        env._project_action_ball_full_mdp_lean_selected_reset_event(event)
+
+
+def test_selected_reset_requires_the_exact_authorized_tensor_identity():
+    env, _components = _reset_event_env()
+    authorized = torch.tensor([0], dtype=torch.int64)
+    env._authorize_action_ball_full_mdp_reset_callpoint(
+        authorized, source="step_nonzero"
     )
     with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="lease differs"
+        M.FullMdpPostPhysicsProtocolError, match="callpoint authority"
     ):
-        env._validate_concrete_owner_install(
-            wrong_lease_owner,
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
-        )
-
-    wrong_dag_owner = module.ConcreteOwner(env, lease, "e" * 64)
-    with pytest.raises(
-        M.FullMdpPostPhysicsProtocolError, match="dependency DAG differs"
-    ):
-        env._validate_concrete_owner_install(
-            wrong_dag_owner,
-            concrete_pins=pins,
-            expected_dependency_dag=dependency_dag,
-            expected_lease=lease,
+        env._mint_action_ball_full_mdp_selected_reset_event(
+            authorized.clone()
         )
 
 
 def test_hot_dispatch_does_not_rescan_owner_python_bindings():
     tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
-    owner_type = next(
+    owner = next(
         node
         for node in tree.body
         if isinstance(node, ast.ClassDef)
@@ -1194,20 +860,16 @@ def test_hot_dispatch_does_not_rescan_owner_python_bindings():
             isinstance(node, ast.FunctionDef)
             and node.name == "_assert_owner_binding_current"
         )
-        for node in owner_type.body
+        for node in owner.body
     )
-    hot_methods = {
-        "step",
-        "_before_policy_step",
-        "_publish_post_physics_substep",
-        "_after_reward_close",
-        "_reset_idx",
-    }
-    for method in owner_type.body:
-        if (
-            not isinstance(method, ast.FunctionDef)
-            or method.name not in hot_methods
-        ):
+    for method in owner.body:
+        if not isinstance(method, ast.FunctionDef) or method.name not in {
+            "step",
+            "_before_policy_step",
+            "_publish_post_physics_substep",
+            "_after_reward_close",
+            "_reset_idx",
+        }:
             continue
         assert not any(
             isinstance(node, ast.Call)
