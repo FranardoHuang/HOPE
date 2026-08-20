@@ -2,17 +2,29 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-**2026-08-20 active 4096吞吐归因（Gate仍`Partial`）：**两条immutable长跑的后续只读
-steady窗口约为`21.94/22.45 s/update`，collection约`20.5/20.74 s`、learning约`1.45/1.71 s`。
-GPU利用约`27%`，trainer各只占约`1.44/1.46`个CPU core；CPU无饱和或持续争抢证据，
-因此不要CPU互斥。旧`6.700 s/update`是legacy diagnostic hot path，不是当前FullMDP
-transaction/owner工作量。
+**2026-08-20两条4096长跑终局与吞吐归因（Gate仍`Partial`）：**两条immutable长跑已在约
+`14:41Z`不完整结束。`e8eef4fb…`止于durable ACK `4603` / `452,591,616` transitions，
+`ddb1e7c4…`止于ACK `3467` / `340,918,272` transitions；两份result均为`status=failed`、
+`final_rc=0`、`phase=training`。日志没有traceback、OOM、signal/kill证据，退出因果仍`未判定`；
+不能把`final_rc=0`解释成25k完成或Gate通过。当前三张GPU均无compute process。
+
+两条run的profiler-off steady窗口约为`21.94/22.45 s/update`，collection约`20.50/20.74 s`、
+learning约`1.45/1.71 s`。GPU利用约`27%`，trainer各只占约`1.44/1.46`个CPU core；CPU无饱和或
+持续争抢证据，因此不要CPU互斥。旧`6.700 s/update`是legacy diagnostic hot path，不是当前FullMDP
+transaction/owner工作量；当前`6 s/update`目标明确未达。
 
 fresh bounded profiler已实测collection均值`14.987 s`中`post_physics_publish=7.522 s`、
 command→observation/D05 gap=`3.102 s`、Reward=`0.658 s`、sim=`0.922 s`。第一墙是零业务时仍
 完整执行Physical/R06/Epoch事务，不是物理仿真或CPU。zero-live-flight成对idle candidate已有
-host语义证据，但exact Pod fixed-tape与profiler-off matched wall因当前GPU资源/队列锁均为
-`未测`；不得把预算写成已达`6 s/update`。
+host语义证据，但exact Pod fixed-tape与profiler-off matched wall仍`未测`；GPU虽已空，候选必须先
+冻结clean source与exact runner，不得从dirty WIP发射，也不得把预算写成已达`6 s/update`。
+
+`0 ACCEPT`只说明当前due opportunity仍停在站稳/模仿准备阶段，并非失败门；balance→mimic→strike→
+landing本来就可需要很多update。它不授权修改分母为零的task Reward，也不证明PPO超参是根因。
+当前裁决保留24-step rollout，48-step按现速约`44 s/update`且需约`7.33×`才到6秒，故现在拒绝；
+GAE `lambda=0.98`与actor/critic各`+8`个floating-base observation仅作可独立归因的候选。拒绝用同一pose
+统一reset、D05 stroke-entry和R07 post-shot recovery。详见
+[FullMDP hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
 
 **2026-08-19 ACK809只读前缀（Gate仍`Partial`）：**active同一`4096×25000`进程的完整ACK `0..808`
 已到`79,527,936` transitions，Reward nonfinite与conservation violation均为0。D05 selected=`1,015,878`，

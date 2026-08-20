@@ -4,10 +4,28 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`profiled / zero-flight-host-validated / direct-lean-phase-a-host-validated / Pod-matched-wall-pending`
+> 状态：`baseline-runs-incomplete / profiled / zero-flight-host-validated / direct-lean-phase-a-host-validated / Pod-matched-wall-pending`
 > 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；zero-flight与后续结构cut的Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
+
+并行调研的建议没有整包采用；以下是按当前代码、运行墙时和课程语义做的独立裁决。这里的H24/H48指
+rollout horizon（每次策略更新、每个环境收集的control step数；见[术语定义](../../DEFINITIONS.md)）为
+24/48，`lambda`指GAE（广义优势估计）的跨步权重参数。
+
+| 项目 | 裁决 | 当前理由与边界 |
+| --- | --- | --- |
+| H24 | 保留 | 先在不翻倍rollout固定税的前提下恢复可迭代吞吐和可信baseline。 |
+| H48 + 12,500 update + 8 minibatch | 现在拒绝 | 当前约22秒线性外推约`44 s/update`；到6秒需约`7.33×`提速，直接违背迭代目标。机械上的总transition/optimizer-step等价不代表训练动力学等价。 |
+| `lambda=0.98` | 延后为独立候选 | 它提高未来TD residual的权重，不是“reward衰减修复”；须在clock修复后的H24 fresh run单独归因，不直接改默认值。 |
+| `0 ACCEPT` | 保留为课程telemetry | 表示due opportunity仍DEFER在站稳/模仿准备阶段；balance→mimic→strike→landing需要很多step是合理课程。不得把`ACCEPT>0`做发射、安全或学习成败门。 |
+| actor/critic各`+8`个floating-base observation | 候选 | table-relative root position、heading与heading-frame linear velocity可减少balance相关alias；须先过两后端独立producer、符号/frame反例和真实normalization路径，不把它宣称成Markov闭合。 |
+| 一套pose统一reset/D05/R07 | 拒绝 | stable birth、stroke entry、completed-shot recovery是三个不同意图；强行相等是错误等价和同源自证，应共享安全envelope而不是共享唯一姿态。 |
+| 当前task Reward0--13 | 不改 | 业务eligible/income分母仍为零，改权重没有因果作用；先报告分母和课程阶段。 |
+
+Gate纪律继续按HANDOFF执行：删除同一writer自证、zero-callpoint与无consumer的“安全”门；保留能被真实
+production反例触发的nonfinite/overflow、identity join、物理contact/termination和durable ACK边界。
+删减和host回归通过只叫结构GO；exact Pod profiler-off matched wall通过后才叫性能GO。
 
 采用：
 
@@ -51,22 +69,26 @@
 
 ## 2. 当前运行证据
 
-2026-08-20只读快照：
+2026-08-20终局只读快照：
 
-- active commit=`e8eef4fb…`，目标=`4096 env × 25000 update`；完整WAL已到ACK `1186`，累计
-  `116,686,848` transitions。该run只读继续，不能用当前磁盘WIP解释。
+- `e8eef4fb…`目标为`4096 env × 25000 update`，止于durable ACK `4603`、累计
+  `452,591,616` transitions；`ddb1e7c4…`止于ACK `3467`、累计`340,918,272` transitions。
+  两条run均在2026-08-20约`14:41Z`不完整结束，不能用当前磁盘WIP解释它们。
+- 两份result均写`status=failed`、`final_rc=0`、`phase=training`。日志未见traceback、OOM、
+  signal/kill证据，cgroup也无OOM记录；所以退出因果是`未判定`，既不臆测OOM/外部停止，也不把
+  `final_rc=0`当成完成。当前三张GPU均无compute process。
 - profile只在同一进程update `0..4`开启并自动关闭。五个collection wall为
   `16.150/12.890/14.560/15.000/14.358 s`；这五个带profiler且reset strata不同，不能冒充稳定吞吐成绩。
 - 五个row中`post_physics_publish`固定96次/update，inclusive host wall为
   `6.998--7.809 s`；`sim_step`仅`0.904--0.960 s`，`owner_binding_assert`的552次合计
   `0.143--0.170 s`。因此第一优先级是Physical/R06/Epoch数据流，不是CPU互斥或先磨反patch断言。
 - `after_command_to_observation_gap`为`2.290--3.538 s`，reward为`0.525--0.924 s`；它们是第二层。
-- 2026-08-20资源快照中trainer约`6.4 GiB`、GPU利用约十几到二十个百分点，GPU0自然空闲；CPU主线仍是
-  单进程Python/小kernel/同步固定税，没有整机CPU饱和证据。
-- 后续只读steady窗口已收敛到约`22 s/update`：GPU0 `ddb1e7c4…`约`21.94 s`（collection
-  约`20.5 s`、learn约`1.45 s`），GPU1 `e8eef4fb…`约`22.45 s`（collection约`20.74 s`、
+- 运行中资源快照的trainer约`6.4 GiB`、GPU利用约十几到二十个百分点；CPU主线是单进程Python/
+  小kernel/同步固定税，没有整机CPU饱和证据。终局GPU为空只表示现在有测量窗口，不改变历史归因。
+- profiler-off steady窗口已收敛到约`22 s/update`：GPU0 `ddb1e7c4…`约`21.94 s`（collection
+  约`20.50 s`、learn约`1.45 s`），GPU1 `e8eef4fb…`约`22.45 s`（collection约`20.74 s`、
   learn约`1.71 s`）。两者GPU利用约`27%`、trainer各只占约`1.44--1.46`个CPU core，
-  所以CPU不是这条回归的因果瓶颈，也不需要CPU互斥。
+  所以CPU不是这条回归的因果瓶颈，也不需要CPU互斥；`6 s/update`未达。
 
 ## 3. 四个参考栈给出的共同答案
 
@@ -202,14 +224,14 @@ profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.
 
 ## 6. 下一步
 
-1. 等待合法GPU窗口，在exact Pod先跑zero-live-flight的fixed-tape/RNG/reason/counter/safety parity，
-   再用fresh namespace做profiler-off `4096×24` matched wall。当前GPU0/GPU1队列锁被active run占用，
-   GPU2也有正在运行的MuJoCo/共享进程，因此这一级证据只能记`未测`。
+1. 当前三张GPU均空，但候选source/runner仍须先冻结为clean、可复现的执行件；完成后在exact Pod先跑
+   zero-live-flight的fixed-tape/RNG/reason/counter/safety parity，再用fresh namespace做profiler-off
+   `4096×24` matched wall。这一级证据当前仍只能记`未测`，不得从dirty WIP发射。
    本轮一份未入Git的565行ABBA实现已因契约自证删除：测试自造ACK schema v10，
    exact baseline/candidate runner均发schema v11，真跑必然被其自己拒绝。successor测量器必须从
    exact runner的live wire contract建立fixture，不另造一份schema/gate。
-2. 只有Pod parity和matched wall都通过，才把zero-flight successor称为严格更强并停旧run；没有净收益就撤回，
-   不靠host测试或主观保留。
+2. 只有Pod parity和matched wall都通过，才把zero-flight successor称为严格更强；两条旧run已经结束，
+   successor必须fresh且不得resume旧checkpoint。没有净收益就撤回，不靠host测试或主观保留。
 3. owner validation已收回cold boundary，Phase-A也已从现役wiring退役formal legacy lane并固定direct
    lean。Phase-B只删除dormant formal owner源和相应历史测试，不重引入compatibility adapter；随后把
    D05 producer→R05改成一套compact transaction，并收敛Reward/observation的重复mutable state。
@@ -237,8 +259,9 @@ successor只把resource gate改为按目标UUID过滤`nvidia-smi --query-compute
 owner gate=`0.171 s`、command-to-observation gap=`3.102 s`、reward=`0.658 s`。这组带profile的前缀不作为
 最终profiler-off吞吐成绩，但它足以否定“删除一次scene read/clone即可消除首墙”：postphysics仍与旧run同量级。
 
-该successor继续同一25k进程，用于收集profile-off与学习证据；旧GPU1 run也继续只读，因为当前cut尚未证明
-严格支配旧版。下一刀必须让**可证明的zero-live-flight窗口**同时跳过prephysics arm与postphysics capture/R06/
+该successor此后曾继续同一25k进程收集profile-off与学习证据，最终止于ACK `3467`并不完整结束；旧GPU1
+run最终止于ACK `4603`。当前cut从未证明严格支配旧版。下一刀必须让**可证明的zero-live-flight窗口**
+同时跳过prephysics arm与postphysics capture/R06/
 retire/park，并保持arm/capture成对。仅在postphysics以Python `pending is None`早退会让scene fact-owner未drain，
 下一substep重arm直接失败，已明确拒绝。验收仍须matched fixed-tape与profile-off wall，不以代码更少或前5次
 总时间下降作结论。
@@ -253,7 +276,8 @@ science telemetry逐字同为mean reward=`5.44`、mean episode length=`92.99`、
 | new `ddb1e7c4…` GPU0 | 78 | 18.004 | 17.610 | 22.98 | 15.00--25.15 |
 
 不同物理卡仍可能贡献噪声，因此这不证明cut本身“变慢”；但它明确没有达到采用所需的可测净收益，更没有
-接近6秒目标。两条run继续只读，single-read cut不作为性能胜利；下一candidate只准针对完整empty-flight事务。
+接近6秒目标。两条run现均已不完整结束，single-read cut不作为性能胜利；下一candidate只准针对完整
+empty-flight事务，并从fresh namespace验证。
 
 ## 8. zero-live-flight成对idle路径：host语义已闭合，Pod wall未测
 
@@ -281,7 +305,7 @@ host zero-flight三个focused文件各用独立Python进程，避免既有flat/p
 `166 passed, 8 skipped` / 约8秒。反例覆盖idle→ACCEPT→active→retire→idle、R06-live/Physical-empty、
 pre/post缺失、重复/倒序stamp、callback heartbeat/candidate、selected reset、restore/checkpoint与mixed/full
 fixed tape。这些只是host语义证据：exact Pod fixed-tape与profiler-off `4096×24` matched wall均
-仍`未测`，因此尚不声称从22秒恢复到6--9秒，也不声称严格支配active run。
+仍`未测`，因此尚不声称从22秒恢复到6--9秒，也不声称严格支配已结束的baseline run。
 
 当前只有算术预算：zero-flight加两个已落地结构cut估算将完整iteration降到约
 `8.4--9.1 s`；这不是Pod实测，更没有证明`6 s/update`。要继续逼近6秒，必须先解开formal
