@@ -1336,7 +1336,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             self._poison_action_ball_full_mdp_construction_installs()
             try:
                 self.close()
-            except Exception:
+            except BaseException:
                 pass
             raise
         self._full_mdp_active_dispatch: _ControlStepDispatch | None = None
@@ -1983,44 +1983,117 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
     def close(self) -> None:
         """Drain the live PhysX subscriber before IsaacLab scene teardown."""
 
-        shutdown = self.__dict__.pop(
-            "_action_ball_full_mdp_live_physx_shutdown", None
-        )
-        shutdown_error: BaseException | None = None
-        if shutdown is not None:
-            try:
-                shutdown()
-            except BaseException as exc:
-                shutdown_error = exc
-        # Python may dispatch this override from ``ManagerBasedEnv.__del__``
-        # after a pre-super admission failure.  Use our own call-boundary state
-        # instead of guessing from an IsaacLab private field: a test base or a
-        # future upstream base need not expose ``_is_closed``.  A base that
-        # raised part-way through construction gets exactly one best-effort
-        # close attempt; a later ``__del__`` cannot manufacture a second error.
+        state_key = "_action_ball_full_mdp_base_construction_state"
+        failed_key = "_action_ball_full_mdp_partial_close_failed_terminal_steps"
+        guard_key = "_action_ball_full_mdp_partial_close_in_progress"
         base_state = self.__dict__.get(
-            "_action_ball_full_mdp_base_construction_state", "not_started"
+            state_key, "not_started"
         )
-        if base_state in ("not_started", "partial_close_attempted"):
-            if shutdown_error is not None:
-                raise shutdown_error
-            return
-        if base_state == "entered":
-            self._action_ball_full_mdp_base_construction_state = (
-                "partial_close_attempted"
+        if base_state == "partial_close_failed":
+            failed = self.__dict__.get(failed_key, ())
+            raise FullMdpPostPhysicsProtocolError(
+                "partial full-MDP simulator cleanup failed at "
+                f"{','.join(failed) or '<unknown>'}; cold process exit is "
+                "required and stale simulator resources will not be touched"
             )
-        elif base_state != "returned":
+        if base_state in ("not_started", "partial_close_complete"):
+            return
+        if base_state not in ("entered", "returned"):
             raise FullMdpPostPhysicsProtocolError(
                 "fresh full-MDP base-construction lifecycle state differs"
             )
+        is_partial = base_state == "entered"
+        if is_partial:
+            if self.__dict__.get(guard_key, False):
+                return
+            self.__dict__[guard_key] = True
         try:
-            super().close()
-        except BaseException as close_error:
-            if shutdown_error is not None:
-                raise close_error from shutdown_error
-            raise
-        if shutdown_error is not None:
-            raise shutdown_error
+            shutdown = self.__dict__.pop(
+                "_action_ball_full_mdp_live_physx_shutdown", None
+            )
+            shutdown_error: BaseException | None = None
+            if shutdown is not None:
+                try:
+                    shutdown()
+                except BaseException as exc:
+                    shutdown_error = exc
+            if not is_partial:
+                try:
+                    super().close()
+                except BaseException as close_error:
+                    if shutdown_error is not None:
+                        raise close_error from shutdown_error
+                    raise
+                if shutdown_error is not None:
+                    raise shutdown_error
+                return
+
+            cleanup_error = shutdown_error
+            sim = self.__dict__.get("sim")
+            # Mirror the pinned RL/base destructor order, skipping fields that
+            # construction never reached.  The guard makes __del__ re-entry a
+            # no-op without publishing a durable in-progress state.
+            for name in (
+                "command_manager", "reward_manager", "termination_manager",
+                "curriculum_manager", "viewport_camera_controller",
+                "action_manager", "observation_manager", "event_manager",
+                "recorder_manager", "scene",
+            ):
+                if name not in self.__dict__:
+                    continue
+                try:
+                    delattr(self, name)
+                except BaseException as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+            stage_methods = ()
+            if sim is not None:
+                sim_cfg = getattr(self.__dict__.get("cfg"), "sim", None)
+                if getattr(sim_cfg, "create_stage_in_memory", False):
+                    stage_methods = ("detach_stage", "stop", "clear")
+                    try:
+                        base_module = importlib.import_module(
+                            "isaaclab.envs.manager_based_env"
+                        )
+                        if base_module.get_isaac_sim_version().major < 5:
+                            stage_methods = ()
+                    except BaseException as exc:
+                        if cleanup_error is None:
+                            cleanup_error = exc
+            terminal_steps = (
+                *stage_methods,
+                "clear_all_callbacks",
+                "clear_instance",
+            ) if sim is not None else ()
+            failed_steps = []
+            for method_name in terminal_steps:
+                try:
+                    if method_name == "detach_stage":
+                        base_module = importlib.import_module(
+                            "isaaclab.envs.manager_based_env"
+                        )
+                        base_module.omni.physx.get_physx_simulation_interface().detach_stage()
+                    else:
+                        getattr(sim, method_name)()
+                except BaseException as exc:
+                    failed_steps.append(method_name)
+                    if cleanup_error is None:
+                        cleanup_error = exc
+            if failed_steps:
+                self.__dict__[failed_key] = tuple(failed_steps)
+                state = "partial_close_failed"
+            else:
+                self.__dict__.pop(failed_key, None)
+                if "_window" in self.__dict__:
+                    self.__dict__["_window"] = None
+                state = "partial_close_complete"
+            self.__dict__[state_key] = state
+            self.__dict__["_is_closed"] = not failed_steps
+            if cleanup_error is not None:
+                raise cleanup_error
+        finally:
+            if is_partial:
+                self.__dict__.pop(guard_key, None)
 
     @property
     def full_mdp_runtime_owner(self) -> object:

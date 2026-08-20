@@ -282,6 +282,267 @@ def test_missing_lean_owner_factory_and_extension_mode_fail_pre_base(
     M._require_standalone_simulation_app()
 
 
+class _PartialCloseSim:
+    def __init__(self, trace, *, fail_on=None, reenter_on=None):
+        self.trace = trace
+        self.fail_on = fail_on
+        self.reenter_on = reenter_on
+        self.reenter_env = None
+
+    def _record(self, name):
+        self.trace.append(name)
+        if self.reenter_on == name:
+            self.reenter_env.close()
+        if self.fail_on == name:
+            raise RuntimeError(f"injected {name} failure")
+
+    def stop(self):
+        self._record("stop")
+
+    def clear(self):
+        self._record("clear")
+
+    def clear_all_callbacks(self):
+        self._record("clear_all_callbacks")
+
+    def clear_instance(self):
+        self._record("clear_instance")
+
+
+def _partial_close_env(trace, *, with_sim=True):
+    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
+    env._action_ball_full_mdp_base_construction_state = "entered"
+    env.command_manager = object()
+    env.reward_manager = object()
+    # Deliberately omit termination_manager: partial construction has no
+    # obligation to fabricate every upstream manager merely to close.
+    env.curriculum_manager = object()
+    env.action_manager = object()
+    env.event_manager = object()
+    env.scene = object()
+    env._window = object()
+    if with_sim:
+        env.sim = _PartialCloseSim(trace)
+    return env
+
+
+def test_partial_close_guard_blocks_manager_delete_reentry_and_keeps_order(
+    monkeypatch,
+):
+    trace = []
+    env = _partial_close_env(trace)
+    env._action_ball_full_mdp_live_physx_shutdown = lambda: trace.append(
+        "physx_shutdown"
+    )
+
+    def reenter_and_fail_reward_delete(subject, name):
+        trace.append(f"del:{name}")
+        if name == "reward_manager":
+            trace.append("manager_reenter")
+            subject.close()
+            raise RuntimeError("injected reward-manager delete failure")
+        object.__delattr__(subject, name)
+
+    monkeypatch.setattr(
+        M.ActionBallFullMdpManagerBasedRLEnv,
+        "__delattr__",
+        reenter_and_fail_reward_delete,
+    )
+    with pytest.raises(RuntimeError, match="injected reward-manager"):
+        env.close()
+
+    assert trace == [
+        "physx_shutdown",
+        "del:command_manager",
+        "del:reward_manager",
+        "manager_reenter",
+        "del:curriculum_manager",
+        "del:action_manager",
+        "del:event_manager",
+        "del:scene",
+        "clear_all_callbacks",
+        "clear_instance",
+    ]
+    assert env._window is None
+    assert env._is_closed is True
+    assert env._action_ball_full_mdp_base_construction_state == (
+        "partial_close_complete"
+    )
+    assert "_action_ball_full_mdp_partial_close_in_progress" not in vars(env)
+    trace_after_first_close = list(trace)
+    env.close()
+    assert trace == trace_after_first_close
+
+
+def test_failed_live_physx_shutdown_does_not_block_partial_sim_cleanup():
+    trace = []
+    env = _partial_close_env(trace)
+
+    def fail_shutdown():
+        trace.append("physx_shutdown")
+        raise RuntimeError("injected live PhysX shutdown failure")
+
+    env._action_ball_full_mdp_live_physx_shutdown = fail_shutdown
+    with pytest.raises(RuntimeError, match="live PhysX shutdown"):
+        env.close()
+    assert trace[-2:] == ["clear_all_callbacks", "clear_instance"]
+    assert trace.count("clear_all_callbacks") == 1
+    assert trace.count("clear_instance") == 1
+    assert env._is_closed is True
+    assert env._action_ball_full_mdp_base_construction_state == (
+        "partial_close_complete"
+    )
+
+
+def test_partial_close_guard_blocks_sim_callback_reentry():
+    trace = []
+    env = _partial_close_env(trace)
+    env.sim = _PartialCloseSim(trace, reenter_on="clear_all_callbacks")
+    env.sim.reenter_env = env
+
+    env.close()
+    assert trace == ["clear_all_callbacks", "clear_instance"]
+    assert env._action_ball_full_mdp_base_construction_state == (
+        "partial_close_complete"
+    )
+    assert env._is_closed is True
+    assert "_action_ball_full_mdp_partial_close_in_progress" not in vars(env)
+
+
+def test_partial_in_memory_stage_cleanup_is_ordered_and_best_effort(
+    monkeypatch,
+):
+    trace = []
+    env = _partial_close_env(trace)
+    env.cfg = types.SimpleNamespace(
+        sim=types.SimpleNamespace(create_stage_in_memory=True)
+    )
+    env.sim = _PartialCloseSim(trace, fail_on="stop")
+
+    interface = types.SimpleNamespace(
+        detach_stage=lambda: trace.append("detach_stage")
+    )
+    base_module = types.ModuleType("isaaclab.envs.manager_based_env")
+    base_module.get_isaac_sim_version = lambda: types.SimpleNamespace(major=5)
+    base_module.omni = types.SimpleNamespace(
+        physx=types.SimpleNamespace(
+            get_physx_simulation_interface=lambda: interface
+        )
+    )
+    monkeypatch.setitem(
+        sys.modules, "isaaclab.envs.manager_based_env", base_module
+    )
+
+    with pytest.raises(RuntimeError, match="injected stop failure"):
+        env.close()
+    assert trace == [
+        "detach_stage",
+        "stop",
+        "clear",
+        "clear_all_callbacks",
+        "clear_instance",
+    ]
+    assert env._is_closed is False
+    assert env._action_ball_full_mdp_base_construction_state == (
+        "partial_close_failed"
+    )
+    assert env._action_ball_full_mdp_partial_close_failed_terminal_steps == (
+        "stop",
+    )
+    trace_after_failure = list(trace)
+    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="cold process exit"):
+        env.close()
+    assert trace == trace_after_failure
+    assert env._is_closed is False
+
+
+def test_partial_close_terminal_failure_is_durable_fail_stop():
+    trace = []
+    env = _partial_close_env(trace)
+    env.sim = _PartialCloseSim(trace, fail_on="clear_instance")
+    env._action_ball_full_mdp_live_physx_shutdown = lambda: trace.append(
+        "physx_shutdown"
+    )
+
+    with pytest.raises(RuntimeError, match="clear_instance failure"):
+        env.close()
+    assert trace == [
+        "physx_shutdown",
+        "clear_all_callbacks",
+        "clear_instance",
+    ]
+    assert env._is_closed is False
+    assert env._action_ball_full_mdp_base_construction_state == (
+        "partial_close_failed"
+    )
+    assert env._action_ball_full_mdp_partial_close_failed_terminal_steps == (
+        "clear_instance",
+    )
+
+    env._action_ball_full_mdp_live_physx_shutdown = lambda: trace.append(
+        "late_shutdown"
+    )
+    trace_after_failure = list(trace)
+    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="cold process exit"):
+        env.close()
+    assert trace == trace_after_failure
+    assert "_action_ball_full_mdp_live_physx_shutdown" in vars(env)
+    assert env._is_closed is False
+
+
+def test_constructor_preserves_original_error_identity_across_cleanup_baseexception(
+    monkeypatch,
+):
+    trace = []
+    original_error = RuntimeError("original base construction failure")
+
+    def fail_cleanup():
+        raise KeyboardInterrupt("cleanup interrupt")
+
+    def fail_base_construction(env, *args, **kwargs):
+        env.sim = _PartialCloseSim(trace)
+        env._action_ball_full_mdp_live_physx_shutdown = fail_cleanup
+        raise original_error
+
+    monkeypatch.setattr(M._TEST_FAKE_BASE, "__init__", fail_base_construction)
+    monkeypatch.setattr(M, "_require_owner_factory", lambda factory: object())
+    for name in (
+        "_require_single_action_lean_cfg",
+        "_require_standalone_simulation_app",
+        "_assert_runtime_uses_pinned_upstream_step",
+        "_assert_runtime_uses_pinned_manager_based_env",
+        "_assert_runtime_uses_pinned_local_step",
+        "_assert_runtime_instance_uses_pinned_local_step",
+    ):
+        monkeypatch.setattr(M, name, lambda *args, **kwargs: None)
+
+    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
+    with pytest.raises(RuntimeError) as caught:
+        M.ActionBallFullMdpManagerBasedRLEnv.__init__(
+            env,
+            cfg=object(),
+            full_mdp_runtime_owner_factory=object(),
+        )
+    assert caught.value is original_error
+    assert trace == ["clear_all_callbacks", "clear_instance"]
+    assert env._is_closed is True
+    assert env._action_ball_full_mdp_base_construction_state == (
+        "partial_close_complete"
+    )
+
+
+def test_partial_close_without_sim_is_safe_and_idempotent():
+    trace = []
+    env = _partial_close_env(trace, with_sim=False)
+    env.close()
+    env.close()
+    assert trace == []
+    assert env._is_closed is True
+    assert env._action_ball_full_mdp_base_construction_state == (
+        "partial_close_complete"
+    )
+
+
 def _component_values():
     return [object() for _ in range(12)]
 
