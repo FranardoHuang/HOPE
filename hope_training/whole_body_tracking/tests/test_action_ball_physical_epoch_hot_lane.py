@@ -519,8 +519,6 @@ def test_reset_restore_and_checkpoint_boundaries_invalidate_or_reject_idle_cache
         physical.ActionBallPhysicalFlightDeviceOwner.
         commit_prevalidated_selected_true_reset,
         physical.ActionBallPhysicalFlightDeviceOwner.true_reset_many,
-        physical.ActionBallPhysicalFlightDeviceOwner.
-        _commit_checkpoint_restore_cpu_reference,
     ):
         source = inspect.getsource(method)
         assert all(line in source for line in invalidation)
@@ -729,31 +727,11 @@ def test_direct_state_is_in_selected_reset_and_checkpoint_hold_paths():
         physical.ActionBallPhysicalFlightDeviceOwner.
         _require_action_epoch_checkpoint_clear
     )
-    checkpoint_sources = (
-        inspect.getsource(
-            physical.ActionBallPhysicalFlightDeviceOwner._r10_live_digest
-        ),
-        inspect.getsource(
-            physical.ActionBallPhysicalFlightDeviceOwner._checkpoint_cpu_reference
-        ),
-        inspect.getsource(
-            physical.ActionBallPhysicalFlightDeviceOwner.
-            _prepare_checkpoint_restore_cpu_reference
-        ),
-        inspect.getsource(
-            physical.ActionBallPhysicalFlightDeviceOwner.
-            _commit_checkpoint_restore_cpu_reference
-        ),
-    )
     assert "_selected_reset_action_epoch_direct_state" in finalize
     assert "_action_epoch_direct_state_mismatch" in stale
     assert "action_epoch_direct_state_after" in commit
     assert "pending.pending.any()" in checkpoint_gate
     assert "_action_epoch_flight_publication_ordinal.ge(0).any()" in checkpoint_gate
-    assert all(
-        "_require_action_epoch_checkpoint_clear()" in source
-        for source in checkpoint_sources
-    )
 
 
 def test_checkpoint_gate_holds_pending_or_live_direct_state():

@@ -117,8 +117,9 @@ RNG 与完整 ActionBall state 无损恢复，才写 terminal，并允许 stage 
 
 现役单动作family A/C的FullMDP训练只能使用
 [`Phase-A direct-lean runtime`](../DEFINITIONS.md#fullmdp-phase-a-direct-lean)。没有可选formal runtime mode，
-也不得调用已退休的partial installer或逐leaf getter；旧`action_ball_full_mdp_runtime_owner.py`只是
-dormant Phase-B删除对象，不是发射、安全、checkpoint或resume权威。运行入口应继续验证真实独立边界：
+也不得调用已退休的partial installer或逐leaf getter；旧`action_ball_full_mdp_runtime_owner.py`及其专属
+适配面已由Phase-B branch candidate物理退役，不是发射、安全、checkpoint或resume权威；详细证据见
+[FullMDP hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。运行入口应继续验证真实独立边界：
 source/API pin、环境lease与construction seal、exact component identity、selected-reset
 generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint/restore仍是`R10 HOLD`，
 所以现役A/C继续fresh-only。

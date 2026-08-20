@@ -12,13 +12,26 @@ import json
 import os
 from pathlib import Path
 import sys
-import threading
 from types import ModuleType, SimpleNamespace
 from typing import Mapping
 import weakref
 
 import pytest
 import torch
+
+
+try:  # Local torch 2.0 exposes only the one-argument overload.
+    torch._assert_async(torch.tensor(True), "probe")
+except TypeError:  # pragma: no cover - the exact Isaac runtime accepts a message
+    _torch_assert_async = torch._assert_async
+
+    def _assert_async_compat(condition, message=""):
+        try:
+            return _torch_assert_async(condition)
+        except RuntimeError as exc:
+            raise RuntimeError(message) from exc
+
+    torch._assert_async = _assert_async_compat
 
 
 _WBT_ROOT = Path(__file__).resolve().parents[1]
@@ -69,10 +82,13 @@ _PACKAGE_PATHS = (
     ("whole_body_tracking.tasks.tracking.mdp", _MDP_ROOT),
 )
 for _package_name, _package_path in _PACKAGE_PATHS:
-    if _package_name not in sys.modules:
+    _package = sys.modules.get(_package_name)
+    if _package is None:
         _package = ModuleType(_package_name)
         _package.__path__ = [str(_package_path)]
         sys.modules[_package_name] = _package
+    elif not hasattr(_package, "__path__"):
+        _package.__path__ = [str(_package_path)]
 
 _CANONICAL_MODULE_NAME = (
     "whole_body_tracking.tasks.tracking.mdp.action_ball_landing_outcome_device"
@@ -89,10 +105,6 @@ setattr(
     "action_ball_landing_outcome_device",
     D,
 )
-TOP = importlib.import_module(
-    "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_runtime_owner"
-)
-
 
 _HELPER_MODULES: dict[str, object] = {}
 _C10_PROJECTIONS: dict[str, tuple[object, Mapping[str, object], str]] = {}
@@ -965,160 +977,68 @@ def _settle_batch_rows(
     return result
 
 
-def _pay(
+def _current_action_epoch_outcome(
     owner: D.ActionBallLandingOutcomeDeviceCoordinator,
-    consumer: str,
-    *,
-    reward_epoch: int,
-) -> tuple[object, object, torch.Tensor]:
-    _top, _publication, token = _reward_cycle(owner, reward_epoch)
-    view = owner.view(consumer, reward_cycle_token=token)
-    if consumer == D.COMMON_ON_TABLE_CONSUMER:
-        raw = torch.where(
-            view.eligible,
-            view.common_on_table_outcome.to(dtype=torch.float32),
-            torch.zeros_like(view.canonical_total),
-        )
-    else:
-        treatment = torch.full_like(
-            view.canonical_total,
-            owner._test_payment_authority.placement_treatment_gain,
-        )
-        raw = torch.where(
-            view.eligible,
-            view.canonical_total * treatment,
-            torch.zeros_like(view.canonical_total),
-        )
-    result = owner.record_payment(
-        consumer,
-        reward_cycle_token=token,
-        mask=view.eligible.clone(),
-        full_key_sha256=view.full_key_sha256.clone(),
-        ball_generation=view.ball_generation.clone(),
-        raw_reward=raw,
+) -> SimpleNamespace:
+    """Expose a settled leaf row through the production direct-R06 ABI.
+
+    ``_install`` deliberately builds a legacy-shaped leaf row so physics can be
+    unit-tested without minting ActionEpoch launch authority.  At this one
+    classifier boundary we mark the already-retained row as ActionEpoch-owned;
+    exact key/launch authority remains covered by the direct integration suite.
+    """
+
+    candidate = (
+        owner._mailbox_history_valid
+        & owner._mailbox_physical_retired
+        & owner._mailbox_state.eq(D.MAILBOX_SETTLED_UNPAID)
     )
-    return view, result, raw
+    owner._mailbox_action_epoch.copy_(candidate)
+    rows = owner.project_current_action_epoch_outcome_rows()
+    assert rows.valid.shape == (1,)
+    assert rows.valid[0].item() is True
+    bits = int(rows.valid_bits[0].item())
+    values = rows.fact_values[0]
 
+    def fact(offset: int) -> bool:
+        return bool(values[offset].item())
 
-class _HealthyDeviceR05:
-    def require_healthy(self):
-        return None
-
-
-class _HealthyDrain:
-    poisoned = False
-    poison_reason = None
-
-
-def _pre_reward_publication(top: object, owner: object, control_step: int):
-    payload = TOP._PreRewardPublicationPayload(
-        owner_identity=top._identity,
-        runtime_lease=top._env_lease,
-        control_step=control_step,
-        r03_publication=object(),
-        r07_publication=object(),
-        terminated=torch.zeros(
-            owner.num_envs, dtype=torch.bool, device=owner.device
+    return SimpleNamespace(
+        rows=rows,
+        present=bool(bits & D.R06_ACTION_EPOCH_PRESENT),
+        source_valid=bool(bits & D.R06_ACTION_EPOCH_SOURCE_VALID),
+        policy_eligible=bool(bits & D.R06_ACTION_EPOCH_POLICY_ELIGIBLE),
+        settlement_cause=int(rows.outcome_code[0].item()),
+        owner_fault_bits=int(rows.owner_fault_bits[0].item()),
+        common_on_table_outcome=fact(D.R06_ACTION_EPOCH_COMMON_ON_TABLE_F32),
+        canonical_total=float(
+            values[D.R06_ACTION_EPOCH_CANONICAL_TOTAL_F32].item()
         ),
-        time_out=torch.zeros(
-            owner.num_envs, dtype=torch.bool, device=owner.device
+        on_opponent_table=fact(D.R06_ACTION_EPOCH_ON_TABLE_F32),
+        contact_valid=fact(D.R06_ACTION_EPOCH_CONTACT_VALID_F32),
+        first_plane_crossing_valid=fact(
+            D.R06_ACTION_EPOCH_CROSSING_VALID_F32
         ),
+        ball_center_net_crossed=fact(D.R06_ACTION_EPOCH_NET_CROSSED_F32),
+        ball_center_net_clear=fact(D.R06_ACTION_EPOCH_NET_CLEAR_F32),
     )
-    publication = TOP._mint_pre_reward_publication(payload)
-    top._active_pre_reward_publication = publication
-    top._active_pre_reward_payload = payload
-    return publication
-
-
-def _reward_cycle(owner: object, control_step: int):
-    top = getattr(owner, "_test_reward_top", None)
-    if top is None:
-        top = object.__new__(TOP.ActionBallFullMdpRuntimeOwner)
-        top._identity = object()
-        top._env_lease = object()
-        top._num_envs = owner.num_envs
-        top._device = owner.device
-        top._device_r05 = _HealthyDeviceR05()
-        top._ppo_drain = _HealthyDrain()
-        top._poisoned = False
-        top._poison_reason = None
-        top._poison_failures = ()
-        top._reward_poisoned = False
-        top._reward_poison_reason = None
-        top._reward_owner_binding_open = True
-        top._reward_owner_binding = None
-        top._lock = threading.RLock()
-        owner._bind_full_mdp_reward_graph_from_top(
-            runtime_owner=top,
-            ordered_consumers=D.CONSUMERS,
-        )
-        owner._test_reward_top = top
-    token = getattr(owner, "_test_reward_cycle_token", None)
-    if token is None:
-        publication = _pre_reward_publication(top, owner, control_step)
-        token = owner.open_full_mdp_reward_cycle(
-            publication,
-            control_step=control_step,
-            runtime_owner=top,
-        )
-        owner._test_reward_publication = publication
-        owner._test_reward_cycle_token = token
-        owner._test_reward_control_step = control_step
-    else:
-        assert owner._test_reward_control_step == control_step
-        publication = owner._test_reward_publication
-    return top, publication, token
-
-
-def _view(owner: object, consumer: str, *, reward_epoch: int):
-    _top, _publication, token = _reward_cycle(owner, reward_epoch)
-    return owner.view(consumer, reward_cycle_token=token)
-
-
-def _close_reward_cycle(
-    owner: D.ActionBallLandingOutcomeDeviceCoordinator,
-    verdicts: tuple[object, object],
-    *,
-    control_step: int,
-):
-    top, publication, _token = _reward_cycle(owner, control_step)
-    for consumer, verdict in zip(D.CONSUMERS, verdicts):
-        assert owner.require_owned_full_mdp_reward_payment(
-            verdict,
-            consumer=consumer,
-            control_step=control_step,
-            runtime_owner=top,
-        ) is verdict
-    receipt = owner.close_full_mdp_reward_cycle(
-        control_step=control_step,
-        pre_reward_publication=publication,
-        ordered_consumers=D.CONSUMERS,
-        ordered_payment_verdicts=verdicts,
-        runtime_owner=top,
-    )
-    assert owner.require_owned_full_mdp_reward_close(
-        receipt,
-        control_step=control_step,
-        runtime_owner=top,
-    ) is receipt
-    owner._test_reward_cycle_token = None
-    return top, receipt
 
 
 def _assert_safety_cleanup_hidden_from_policy(
     owner: D.ActionBallLandingOutcomeDeviceCoordinator,
-    view: D.SharedLandingOutcomeDeviceView,
+    outcome: SimpleNamespace,
     *,
     expected_causes: tuple[int, ...],
 ) -> None:
-    """Infrastructure cleanup remains diagnostic, never a reward opportunity."""
+    """A producer fault remains diagnostic but cannot enter policy facts."""
 
-    assert view.eligible.item() is False
-    assert view.policy_eligible.item() is False
-    assert view.settlement_cause.item() == D.SETTLEMENT_CAUSE_NONE
-    assert view.canonical_total.item() == 0.0
+    assert outcome.present is True
+    assert outcome.source_valid is False
+    assert outcome.policy_eligible is False
+    assert outcome.settlement_cause in expected_causes
+    assert outcome.owner_fault_bits != 0
+    assert torch.count_nonzero(outcome.rows.fact_values).item() == 0
     assert owner._device_sticky_poison.item() is True
-    assert owner._mailbox_settlement_cause.item() in expected_causes
 
 
 def _assert_deep_equal(left: object, right: object, path: str = "$") -> None:
@@ -1323,7 +1243,7 @@ def test_postphysics_result_is_an_exclusive_pending_capability_even_when_empty()
     snapshot = owner.current_flight_lifecycle_snapshot()
     assert snapshot.state[0, 0].item() in (D.FLIGHT_INBOUND, D.FLIGHT_OPEN)
     with pytest.raises(D.LandingOutcomeDeviceError, match="unclosed post-physics"):
-        owner.view(D.COMMON_ON_TABLE_CONSUMER, reward_cycle_token=None)
+        owner.project_current_action_epoch_outcome_rows()
     with pytest.raises(D.LandingOutcomeDeviceError, match="unclosed post-physics"):
         owner.drain_ppo_boundary(update_index=0)
     with pytest.raises(D.LandingOutcomeDeviceError, match="unclosed post-physics"):
@@ -1593,23 +1513,28 @@ def test_cuda_postphysics_contact_authority_is_device_only_and_clone_sealed(
     _commit_physical_retire(owner, result)
 
 
-def test_same_substep_contact_net_landing_uses_contact_outgoing_anchor():
+def test_direct_r06_same_substep_contact_net_landing_is_legal():
     owner = _coordinator()
-    full_key, key, installed = _install(owner)
+    full_key, _, installed = _install(owner)
     assert installed.accepted.item() is True
     _settle_on_table(owner, full_key=full_key)
-    view = _view(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-    assert view.eligible.item() is True
-    assert view.settlement_cause.item() == D.SETTLEMENT_CAUSE_FIRST_CROSSING
-    assert view.task_key.action_uid.item() == key.action_uid.item()
-    assert view.contact_valid.item() is True
-    assert view.first_plane_crossing_valid.item() is True
-    assert view.common_on_table_outcome.item() is True
-    assert view.canonical_reason_code.item() == D.REASON_TO_CODE["scored_on_table"]
+
+    outcome = _current_action_epoch_outcome(owner)
+    assert outcome.present is True
+    assert outcome.source_valid is True
+    assert outcome.policy_eligible is True
+    assert outcome.settlement_cause == D.SETTLEMENT_CAUSE_FIRST_CROSSING
+    assert outcome.contact_valid is True
+    assert outcome.first_plane_crossing_valid is True
+    assert outcome.ball_center_net_crossed is True
+    assert outcome.ball_center_net_clear is True
+    assert outcome.on_opponent_table is True
+    assert outcome.common_on_table_outcome is True
+    assert outcome.canonical_total > 0.0
 
 
 @pytest.mark.parametrize("mode", ("segment_only", "event_only", "absent", "mismatch"))
-def test_c05_crossing_report_matrix(mode: str):
+def test_direct_r06_c05_crossing_report_matrix(mode: str):
     owner = _coordinator()
     full_key, _, _ = _install(owner)
     _post_one(
@@ -1627,8 +1552,6 @@ def test_c05_crossing_report_matrix(mode: str):
     )
     segment = mode in ("segment_only", "mismatch")
     event = mode in ("event_only", "mismatch")
-    previous = (2.1, 0.0, 1.0)
-    current = (2.2, 0.0, 0.7) if segment else (2.2, 0.0, 1.01)
     _post_one(
         owner,
         full_key=full_key,
@@ -1636,28 +1559,29 @@ def test_c05_crossing_report_matrix(mode: str):
         flight_slot=0,
         ordinal=1,
         step=2,
-        previous=previous,
-        current=current,
+        previous=(2.1, 0.0, 1.0),
+        current=(2.2, 0.0, 0.7) if segment else (2.2, 0.0, 1.01),
         net=True,
         net_clear=True,
         report_delivered=mode != "absent",
         crossing_event=event,
         crossing_xy=(2.4, 0.0) if mode == "mismatch" else (2.2, 0.0),
     )
-    view = _view(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=2)
+    outcome = _current_action_epoch_outcome(owner)
     if mode in ("segment_only", "event_only"):
-        assert view.settlement_cause.item() == D.SETTLEMENT_CAUSE_FIRST_CROSSING
-        assert view.first_plane_crossing_valid.item() is True
+        assert outcome.source_valid is True
+        assert outcome.settlement_cause == D.SETTLEMENT_CAUSE_FIRST_CROSSING
+        assert outcome.first_plane_crossing_valid is True
     else:
         _assert_safety_cleanup_hidden_from_policy(
             owner,
-            view,
+            outcome,
             expected_causes=(D.SETTLEMENT_CAUSE_PRODUCER_CONTRACT_FAULT,),
         )
 
 
 @pytest.mark.parametrize("crossing_mode", ("event_only", "segment_and_event"))
-def test_post_contact_nonfinite_crossing_is_c04_nonfinite_but_other_nan_is_infra(
+def test_direct_r06_distinguishes_policy_nonfinite_from_infrastructure_fault(
     crossing_mode: str,
 ):
     crossing = _coordinator()
@@ -1682,24 +1606,12 @@ def test_post_contact_nonfinite_crossing_is_c04_nonfinite_but_other_nan_is_infra
         crossing_event=True,
         crossing_xy=(float("nan"), 0.0),
     )
-    common_view, common_paid, common_raw = _pay(
-        crossing, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    placement_view, placement_paid, placement_raw = _pay(
-        crossing, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1
-    )
-    assert common_view.settlement_cause.item() == D.SETTLEMENT_CAUSE_NONFINITE
-    assert common_view.policy_eligible.item() is True
-    assert common_view.first_plane_crossing_present.item() is True
-    assert common_view.first_plane_crossing_valid.item() is False
-    assert common_view.first_plane_crossing_nonfinite.item() is True
-    assert common_view.canonical_reason_code.item() == D.REASON_TO_CODE["nonfinite"]
-    assert common_raw.item() == 0.0
-    assert placement_view.canonical_total.item() == 0.0
-    assert placement_raw.item() == 0.0
-    assert common_paid.accepted.item() is True
-    assert placement_paid.accepted.item() is True
-    assert crossing.mailbox_state.item() == D.MAILBOX_PAID
+    policy_outcome = _current_action_epoch_outcome(crossing)
+    assert policy_outcome.settlement_cause == D.SETTLEMENT_CAUSE_NONFINITE
+    assert policy_outcome.source_valid is True
+    assert policy_outcome.policy_eligible is True
+    assert policy_outcome.first_plane_crossing_valid is False
+    assert policy_outcome.canonical_total == 0.0
 
     unrelated = _coordinator()
     unrelated_hash, _, _ = _install(unrelated)
@@ -1725,15 +1637,14 @@ def test_post_contact_nonfinite_crossing_is_c04_nonfinite_but_other_nan_is_infra
         current=(2.2, 0.0, 0.9),
         nonfinite=True,
     )
-    infra = _view(unrelated, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=2)
     _assert_safety_cleanup_hidden_from_policy(
         unrelated,
-        infra,
+        _current_action_epoch_outcome(unrelated),
         expected_causes=(D.SETTLEMENT_CAUSE_NONFINITE,),
     )
 
 
-def test_no_contact_closes_only_at_exact_deadline_and_incoming_events_do_not_latch():
+def test_direct_r06_contact_deadline_ignores_incoming_events():
     owner = _coordinator()
     full_key, _, _ = _install(owner, contact_deadline=3)
     _post_one(
@@ -1763,26 +1674,21 @@ def test_no_contact_closes_only_at_exact_deadline_and_incoming_events_do_not_lat
             previous=previous,
             current=current,
         )
-    view = _view(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=3)
-    assert view.settlement_cause.item() == D.SETTLEMENT_CAUSE_CONTACT_DEADLINE
-    assert view.contact_valid.item() is False
-    assert view.ball_center_net_crossed.item() is False
-    assert view.first_plane_crossing_present.item() is False
-    assert view.common_on_table_outcome.item() is False
-    assert view.canonical_reason_code.item() == D.REASON_TO_CODE["no_contact"]
+    outcome = _current_action_epoch_outcome(owner)
+    assert outcome.source_valid is True
+    assert outcome.settlement_cause == D.SETTLEMENT_CAUSE_CONTACT_DEADLINE
+    assert outcome.contact_valid is False
+    assert outcome.ball_center_net_crossed is False
+    assert outcome.first_plane_crossing_valid is False
+    assert outcome.common_on_table_outcome is False
+    assert outcome.canonical_total == 0.0
 
 
 @pytest.mark.parametrize(
     "fault",
-    (
-        "ordinal_gap",
-        "endpoint_gap",
-        "future_event",
-        "late_contact",
-        "anchor_mismatch",
-    ),
+    ("ordinal_gap", "endpoint_gap", "future_event", "late_contact", "anchor_mismatch"),
 )
-def test_observation_and_stamp_contracts_fail_closed(fault: str):
+def test_direct_r06_observation_and_stamp_faults_fail_closed(fault: str):
     owner = _coordinator(flight_horizon_ticks=3)
     full_key, _, _ = _install(owner, contact_deadline=2, crossing_horizon=4)
     if fault == "late_contact":
@@ -1826,33 +1732,24 @@ def test_observation_and_stamp_contracts_fail_closed(fault: str):
                 else (2.1, 0.0, 1.02)
             ),
         )
-        if fault == "anchor_mismatch":
-            view = _view(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-            _assert_safety_cleanup_hidden_from_policy(
+        if fault != "anchor_mismatch":
+            _post_one(
                 owner,
-                view,
-                expected_causes=(
-                    D.SETTLEMENT_CAUSE_PRODUCER_CONTRACT_FAULT,
-                    D.SETTLEMENT_CAUSE_PROTOCOL_FAULT,
-                ),
+                full_key=full_key,
+                generation=0,
+                flight_slot=0,
+                ordinal=2 if fault == "ordinal_gap" else 1,
+                step=2,
+                previous=(2.0, 0.0, 1.0)
+                if fault == "endpoint_gap"
+                else (2.1, 0.0, 1.0),
+                current=(2.2, 0.0, 0.9),
+                crossing_event=fault == "future_event",
+                crossing_step=3 if fault == "future_event" else None,
             )
-            return
-        _post_one(
-            owner,
-            full_key=full_key,
-            generation=0,
-            flight_slot=0,
-            ordinal=2 if fault == "ordinal_gap" else 1,
-            step=2,
-            previous=(2.0, 0.0, 1.0) if fault == "endpoint_gap" else (2.1, 0.0, 1.0),
-            current=(2.2, 0.0, 0.9),
-            crossing_event=fault == "future_event",
-            crossing_step=3 if fault == "future_event" else None,
-        )
-    view = _view(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=3 if fault == "late_contact" else 2)
     _assert_safety_cleanup_hidden_from_policy(
         owner,
-        view,
+        _current_action_epoch_outcome(owner),
         expected_causes=(
             D.SETTLEMENT_CAUSE_PRODUCER_CONTRACT_FAULT,
             D.SETTLEMENT_CAUSE_PROTOCOL_FAULT,
@@ -1860,7 +1757,7 @@ def test_observation_and_stamp_contracts_fail_closed(fault: str):
     )
 
 
-def test_previous_endpoint_equal_plane_is_first_crossing_and_horizon_is_exact_zero():
+def test_direct_r06_plane_endpoint_and_exact_crossing_horizon():
     crossing = _coordinator(flight_horizon_ticks=2)
     crossing_hash, _, _ = _install(
         crossing, contact_deadline=2, crossing_horizon=3
@@ -1890,8 +1787,10 @@ def test_previous_endpoint_equal_plane_is_first_crossing_and_horizon_is_exact_ze
         net=True,
         net_clear=True,
     )
-    crossing_view = _view(crossing, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=2)
-    assert crossing_view.settlement_cause.item() == D.SETTLEMENT_CAUSE_FIRST_CROSSING
+    assert (
+        _current_action_epoch_outcome(crossing).settlement_cause
+        == D.SETTLEMENT_CAUSE_FIRST_CROSSING
+    )
 
     horizon = _coordinator(flight_horizon_ticks=1)
     horizon_hash, _, _ = _install(
@@ -1920,43 +1819,17 @@ def test_previous_endpoint_equal_plane_is_first_crossing_and_horizon_is_exact_ze
         previous=(2.2, 0.0, 1.0),
         current=(2.2, 0.0, 0.99),
     )
-    _pay(horizon, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=2)
-    horizon_view = _view(
-        horizon, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=2
-    )
-    assert horizon_view.settlement_cause.item() == D.SETTLEMENT_CAUSE_CROSSING_HORIZON
-    assert horizon_view.canonical_total.item() == 0.0
+    horizon_outcome = _current_action_epoch_outcome(horizon)
+    assert horizon_outcome.settlement_cause == D.SETTLEMENT_CAUSE_CROSSING_HORIZON
+    assert horizon_outcome.canonical_total == 0.0
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def test_physical_slot_reuses_after_retire_while_q0_mailbox_remains_payable():
+def test_direct_r06_retained_q0_does_not_block_q1_physical_slot_reuse():
     owner = _coordinator(flight_slots=1, mailbox_slots=2)
-    q0_hash, q0_key, _ = _install(owner)
+    q0_hash, _, _ = _install(owner)
     _settle_on_table(owner, full_key=q0_hash)
     assert owner.flight_state.item() == D.FLIGHT_EMPTY
     assert owner._mailbox_physical_retired[0, 0].item() is True
-    assert owner._mailbox_physical_retired[0, 1].item() is False
 
     q1_hash, _, installed = _install(
         owner,
@@ -1966,15 +1839,38 @@ def test_physical_slot_reuses_after_retire_while_q0_mailbox_remains_payable():
         crossing_horizon=10,
     )
     assert installed.accepted.item() is True
-    view, paid, raw = _pay(
-        owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    assert paid.accepted[0, 0].item() is True
-    assert raw[0, 0].item() == 1.0
-    assert view.task_key.action_uid[0, 0].item() == q0_key.action_uid.item()
-    assert view.full_key_sha256[0, 0].equal(q0_hash[0])
-    assert not view.eligible[0, 1]
+    assert owner.flight_state.item() == D.FLIGHT_INBOUND
     assert q1_hash.ne(q0_hash).any()
+    q0_outcome = _current_action_epoch_outcome(owner)
+    assert q0_outcome.source_valid is True
+    assert q0_outcome.common_on_table_outcome is True
+
+
+def test_direct_r06_geometry_hit_without_net_clear_is_not_legal_return():
+    owner = _coordinator()
+    full_key, _, _ = _install(owner)
+    _post_one(
+        owner,
+        full_key=full_key,
+        generation=0,
+        flight_slot=0,
+        ordinal=0,
+        step=1,
+        previous=(2.1, 0.0, 1.1),
+        current=(2.2, 0.0, 0.7),
+        contact=True,
+        net=True,
+        net_clear=False,
+        crossing_event=True,
+        crossing_xy=(2.2, 0.0),
+    )
+    outcome = _current_action_epoch_outcome(owner)
+    assert outcome.source_valid is True
+    assert outcome.on_opponent_table is True
+    assert outcome.ball_center_net_crossed is True
+    assert outcome.ball_center_net_clear is False
+    assert outcome.common_on_table_outcome is False
+    assert outcome.canonical_total == 0.0
 
 
 def test_c10_projection_authenticates_family_gain_and_rejects_caller_reversal():
@@ -2013,301 +1909,7 @@ def test_c10_projection_authenticates_family_gain_and_rejects_caller_reversal():
                     **{**kwargs, pin_name: "0" * 64}
                 )
 
-    record_signature = inspect.signature(
-        D.ActionBallLandingOutcomeDeviceCoordinator.record_payment
-    )
-    assert "placement_treatment_gain" not in record_signature.parameters
-    assert "payment_authority" not in record_signature.parameters
     assert authorities["A"].canonical_sha256 != authorities["C"].canonical_sha256
-
-
-def test_a_and_c_pay_both_consumers_and_paid_future_views_are_empty():
-    a = _coordinator()
-    c = _coordinator(family="C")
-    for owner in (a, c):
-        full_key, _, _ = _install(owner)
-        _settle_on_table(owner, full_key=full_key)
-    a_common_view, a_common_result, a_common = _pay(
-        a, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    c_common_view, c_common_result, c_common = _pay(
-        c, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    a_placement_view, a_result, a_placement = _pay(
-        a, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1
-    )
-    c_placement_view, c_result, c_placement = _pay(
-        c, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1
-    )
-    _assert_deep_equal(a_common_view, c_common_view)
-    assert torch.equal(a_common, c_common)
-    assert a_common.item() == 1.0
-    assert a_common_view.treatment_family_code.item() == -1
-    assert c_common_view.treatment_family_code.item() == -1
-    assert not torch.any(a_common_view.c10_projection_sha256)
-    assert not torch.any(c_common_view.c10_projection_sha256)
-    assert a_common_view.placement_treatment_gain.item() == 0.0
-    assert c_common_view.placement_treatment_gain.item() == 0.0
-    assert a_placement.item() > 0.0
-    assert c_placement.item() == 0.0
-    assert a_result.accepted.item() is True
-    assert c_result.accepted.item() is True
-    assert a_placement_view.treatment_family_code.item() == D.C10_FAMILY_A
-    assert a_placement_view.placement_treatment_gain.item() == 1.0
-    assert c_placement_view.treatment_family_code.item() == D.C10_FAMILY_C
-    assert c_placement_view.placement_treatment_gain.item() == 0.0
-    assert c_placement_view.consumer_paid_mask.item() == 1
-
-    _close_reward_cycle(
-        a, (a_common_result, a_result), control_step=1
-    )
-    _close_reward_cycle(
-        c, (c_common_result, c_result), control_step=1
-    )
-    future = _view(a, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=2)
-    assert not torch.any(future.eligible)
-    assert not torch.any(future.full_key_sha256)
-    assert not torch.any(future.canonical_total)
-    assert not torch.any(future.payment_values)
-    # The prior returned consumer view is an epoch-local copy, not an alias
-    # that becomes q1 or PAID state behind the consumer's back.
-    assert a_common_view.full_key_sha256.ne(0).any()
-
-
-@pytest.mark.parametrize("family", ("A", "C"))
-def test_full_mdp_reward_owner_verdicts_close_exact_two_payment_epoch(family: str):
-    owner = _coordinator(family=family)
-    full_key, _, _ = _install(owner)
-    _settle_on_table(owner, full_key=full_key)
-    _, common, common_raw = _pay(
-        owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    _, placement, placement_raw = _pay(
-        owner, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1
-    )
-    if family == "C":
-        assert placement_raw.item() == 0.0
-        assert placement.accepted.item() is True
-    assert common.accepted.item() is True
-    top, receipt = _close_reward_cycle(
-        owner, (common, placement), control_step=1
-    )
-    assert owner.mailbox_state.item() == D.MAILBOX_EMPTY
-    assert owner._closed_total.item() == 1
-    assert owner.require_owned_full_mdp_reward_close(
-        receipt, control_step=1, runtime_owner=top
-    ) is receipt
-    owner.drain_ppo_boundary(update_index=0)
-
-
-def test_full_mdp_reward_cycle_debt_blocks_lifecycle_and_rejects_raw_verdict():
-    owner = _coordinator()
-    full_key, _, _ = _install(owner)
-    _settle_on_table(owner, full_key=full_key)
-    _view, common, _raw = _pay(
-        owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    with pytest.raises(D.LandingOutcomeDeviceError, match="stale debt"):
-        owner.drain_ppo_boundary(update_index=0)
-    with pytest.raises(D.LandingOutcomeDeviceError, match="stale debt"):
-        owner.prepare_selected_reset(object())
-    with pytest.raises(D.LandingOutcomeDeviceError, match="forged|foreign"):
-        owner.require_owned_full_mdp_reward_payment(
-            D.DeviceMutationResult(
-                accepted=common.accepted,
-                rejected=common.rejected,
-                fault_bits=common.fault_bits,
-            ),
-            consumer=D.COMMON_ON_TABLE_CONSUMER,
-            control_step=1,
-            runtime_owner=object(),
-        )
-
-
-def test_full_mdp_reward_close_requires_both_exact_verdicts_same_epoch():
-    owner = _coordinator()
-    full_key, _, _ = _install(owner)
-    _settle_on_table(owner, full_key=full_key)
-    _, common, _ = _pay(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-    top, publication, _token = _reward_cycle(owner, 1)
-    owner.require_owned_full_mdp_reward_payment(
-        common,
-        consumer=D.COMMON_ON_TABLE_CONSUMER,
-        control_step=1,
-        runtime_owner=top,
-    )
-    with pytest.raises(D.LandingOutcomeDeviceError, match="cycle/order/epoch"):
-        owner.close_full_mdp_reward_cycle(
-            control_step=1,
-            pre_reward_publication=publication,
-            ordered_consumers=D.CONSUMERS,
-            ordered_payment_verdicts=(common,),
-            runtime_owner=top,
-        )
-    assert owner._active_full_mdp_reward_cycle_identity is not None
-    assert owner._full_mdp_reward_poisoned is True
-
-
-
-
-def test_full_mdp_reward_c_zero_payment_is_owner_verdict_on_cuda():
-    if not torch.cuda.is_available():
-        pytest.skip("focused R06 Reward test requires CUDA")
-    owner = _coordinator(family="C")
-    full_key, _, _ = _install(owner)
-    _settle_on_table(owner, full_key=full_key)
-    for name, value in vars(owner).items():
-        if isinstance(value, torch.Tensor):
-            setattr(owner, name, value.cuda())
-        elif isinstance(value, dict) and value and all(
-            isinstance(item, torch.Tensor) for item in value.values()
-        ):
-            setattr(owner, name, {key: item.cuda() for key, item in value.items()})
-    owner.device = torch.device("cuda", torch.cuda.current_device())
-    _, common, _ = _pay(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-    _, placement, raw = _pay(
-        owner, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1
-    )
-    assert torch.equal(raw, torch.zeros_like(raw))
-    assert placement.accepted.all()
-    top, receipt = _close_reward_cycle(
-        owner, (common, placement), control_step=1
-    )
-    assert owner.require_owned_full_mdp_reward_close(
-        receipt, control_step=1, runtime_owner=top
-    ) is receipt
-
-
-def test_paid_and_empty_repeat_views_are_true_noops_and_keep_receipt_current():
-    paid = _coordinator()
-    full_key, _, _ = _install(paid)
-    _settle_on_table(paid, full_key=full_key)
-    _, common, _ = _pay(paid, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-    _, placement, _ = _pay(paid, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1)
-    _close_reward_cycle(paid, (common, placement), control_step=1)
-    assert paid.mailbox_state.item() == D.MAILBOX_EMPTY
-    paid_receipt = paid.drain_ppo_boundary(update_index=0)
-    paid.state_dict(paid_receipt)
-
-@pytest.mark.parametrize("mutation", ("valid_view", "faulting_view"))
-def test_real_view_or_fault_invalidates_prior_boundary_device_version(mutation: str):
-    owner = _coordinator()
-    full_key, _, _ = _install(owner)
-    _settle_on_table(owner, full_key=full_key)
-    receipt = owner.drain_ppo_boundary(update_index=0)
-    epoch = 1 if mutation == "valid_view" else 0
-    view = _view(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=epoch)
-    if mutation == "valid_view":
-        assert view.eligible.item() is True
-    else:
-        assert not torch.any(view.eligible)
-    with pytest.raises(D.LandingOutcomeDeviceError, match="stale|version"):
-        owner.state_dict(receipt)
-
-
-def test_returned_results_views_and_state_properties_never_alias_owner_storage():
-    owner = _coordinator()
-    full_key, _, installed = _install(owner)
-    installed.accepted.fill_(False)
-    installed.fault_bits.fill_(D.FAULT_INVALID_INSTALL)
-    assert owner.flight_state.item() == D.FLIGHT_INBOUND
-
-    leaked_state = owner.flight_state
-    leaked_state.fill_(D.FLIGHT_EMPTY)
-    assert owner.flight_state.item() == D.FLIGHT_INBOUND
-
-    _settle_on_table(owner, full_key=full_key)
-    common, _common_payment, _common_raw = _pay(
-        owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    expected_full_key = common.full_key_sha256.clone()
-    expected_action_uid = common.task_key.action_uid.clone()
-    common.eligible.fill_(False)
-    common.full_key_sha256.zero_()
-    common.task_key.action_uid.zero_()
-    common.payment_values.fill_(123.0)
-
-    placement = _view(owner, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1)
-    assert placement.eligible.item() is True
-    assert torch.equal(placement.full_key_sha256, expected_full_key)
-    assert torch.equal(placement.task_key.action_uid, expected_action_uid)
-    assert placement.payment_values[..., 0].item() == 1.0
-    assert placement.payment_values[..., 1].item() == 0.0
-
-    mailbox_snapshot = owner.mailbox_state
-    mailbox_snapshot.fill_(D.MAILBOX_EMPTY)
-    assert owner.mailbox_state.item() == D.MAILBOX_PARTIALLY_PAID
-
-    placement_snapshot = {
-        "eligible": placement.eligible.clone(),
-        "full_key_sha256": placement.full_key_sha256.clone(),
-        "payment_values": placement.payment_values.clone(),
-    }
-    placement_raw = torch.where(
-        placement.eligible,
-        placement.canonical_total
-        * owner._test_payment_authority.placement_treatment_gain,
-        torch.zeros_like(placement.canonical_total),
-    )
-    paid = owner.record_payment(
-        D.PLACEMENT_GUIDANCE_CONSUMER,
-        reward_cycle_token=owner._test_reward_cycle_token,
-        mask=placement.eligible.clone(),
-        full_key_sha256=placement.full_key_sha256.clone(),
-        ball_generation=placement.ball_generation.clone(),
-        raw_reward=placement_raw,
-    )
-    assert paid.accepted.item() is True
-    for name, expected in placement_snapshot.items():
-        assert torch.equal(getattr(placement, name), expected), name
-
-    empty = _coordinator()
-    first_empty, _empty_payment, _empty_raw = _pay(
-        empty, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    first_empty.full_key_sha256.fill_(255)
-    first_empty.canonical_total.fill_(99.0)
-    second_empty = _view(
-        empty, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1
-    )
-    assert not torch.any(second_empty.full_key_sha256)
-    assert not torch.any(second_empty.canonical_total)
-
-
-
-
-
-
-
-
-def test_common_outcome_is_zero_for_geometry_hit_without_net_clearance():
-    owner = _coordinator()
-    full_key, _, _ = _install(owner)
-    _post_one(
-        owner,
-        full_key=full_key,
-        generation=0,
-        flight_slot=0,
-        ordinal=0,
-        step=1,
-        previous=(2.2, 0.0, 0.9),
-        current=(2.2, 0.0, 0.7),
-        contact=True,
-        crossing_event=True,
-    )
-    view = _view(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-    assert view.on_opponent_table.item() is True
-    assert view.common_on_table_outcome.item() is False
-    assert view.canonical_total.item() == 0.0
-
-
-def test_partial_payment_debt_blocks_reveal_and_checkpoint_boundary():
-    owner = _coordinator(flight_slots=1, mailbox_slots=2)
-    q0_hash, _, _ = _install(owner)
-    _settle_on_table(owner, full_key=q0_hash)
-    _pay(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-    with pytest.raises(D.LandingOutcomeDeviceError, match="stale debt"):
-        owner.drain_ppo_boundary(update_index=0)
 
 
 def test_deep_empty_checkpoint_roundtrip_preserves_every_owned_tensor():
@@ -2387,46 +1989,6 @@ def test_boundary_receipt_rejects_faults_and_staleness():
     assert fault_receipt.checkpoint_safe is False
     with pytest.raises(D.LandingOutcomeDeviceError, match="invariant|safe"):
         faulted.state_dict(fault_receipt)
-
-
-def test_checkpoint_requires_external_root_and_rejects_self_resealed_tamper():
-    owner = _coordinator()
-    full_key, _, _ = _install(owner)
-    _settle_on_table(owner, full_key=full_key)
-    _, common, _ = _pay(owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1)
-    _, placement, _ = _pay(
-        owner, D.PLACEMENT_GUIDANCE_CONSUMER, reward_epoch=1
-    )
-    _close_reward_cycle(owner, (common, placement), control_step=1)
-    clean_receipt = owner.drain_ppo_boundary(update_index=0)
-    checkpoint = owner.state_dict(clean_receipt)
-    restored = _coordinator()
-    assert inspect.signature(restored.load_state_dict).parameters[
-        "expected_checkpoint_content_sha256"
-    ].default is inspect.Parameter.empty
-    with pytest.raises(TypeError):
-        restored.load_state_dict(checkpoint)
-    forged = deepcopy(checkpoint)
-    forged["tensors"]["mutation_version"].add_(1)
-    forged["tensor_manifest"] = D._tensor_manifest(forged["tensors"])
-    forged["tensor_bytes_sha256"] = D._tensor_bytes_sha256(forged["tensors"])
-    forged["checkpoint_content_sha256"] = D._checkpoint_content_sha256(forged)
-    assert forged["checkpoint_content_sha256"] != checkpoint[
-        "checkpoint_content_sha256"
-    ]
-    with pytest.raises(D.LandingOutcomeDeviceError, match="external content root"):
-        restored.load_state_dict(
-            forged,
-            expected_checkpoint_content_sha256=checkpoint[
-                "checkpoint_content_sha256"
-            ],
-        )
-    restored.load_state_dict(
-        checkpoint,
-        expected_checkpoint_content_sha256=checkpoint[
-            "checkpoint_content_sha256"
-        ],
-    )
 
 
 @pytest.mark.parametrize(

@@ -16,7 +16,6 @@ cannot authorize close/reset.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import importlib
 import math
 import threading
 from typing import NoReturn
@@ -62,31 +61,7 @@ if len(ORDERED_CONSUMERS) != EXPECTED_PAYMENT_COUNT:
 
 TOP_PUBLISH_METHOD = "publish_full_mdp_pre_reward"
 TOP_REQUIRE_PUBLISH_METHOD = "require_owned_full_mdp_pre_reward"
-TOP_BIND_OWNERS_METHOD = "bind_full_mdp_reward_owners"
 TOP_CLOSE_METHOD = "close_full_mdp_reward_cycle"
-
-_PRODUCTION_OWNER_TYPES = (
-    (
-        "r03",
-        "whole_body_tracking.tasks.tracking.mdp.action_ball_strike_fact_device",
-        "ActionBallStrikeFactDeviceCoordinator",
-    ),
-    (
-        "physical",
-        "whole_body_tracking.tasks.tracking.mdp.action_ball_physical_flight_device",
-        "ActionBallPhysicalFlightDeviceOwner",
-    ),
-    (
-        "r06",
-        "whole_body_tracking.tasks.tracking.mdp.action_ball_landing_outcome_device",
-        "ActionBallLandingOutcomeDeviceCoordinator",
-    ),
-    (
-        "r07",
-        "action_ball_continuous_recovery_device",
-        "ContinuousRecoveryDeviceCoordinator",
-    ),
-)
 
 
 class FreshFullMdpRewardError(RuntimeError):
@@ -152,7 +127,6 @@ class _PaymentRecord:
 
 
 _REGISTRY_LOCK = threading.RLock()
-_PRODUCTION_GRAPH_CONSTRUCTION_TOKEN = object()
 _CYCLE_REGISTRY: weakref.WeakKeyDictionary[
     FreshFullMdpRewardCycle, _CyclePayload
 ] = weakref.WeakKeyDictionary()
@@ -192,9 +166,6 @@ def _method(owner: object, name: str, *, label: str):
 
 def _validate_owners(
     binding: object,
-    *,
-    expected_exact_types: dict[str, type] | None = None,
-    require_full_mdp_close_api: bool = False,
 ) -> _RewardOwners:
     required = ("r03", "physical", "r06", "r07", "num_envs", "device")
     if any(not hasattr(binding, name) for name in required):
@@ -211,12 +182,6 @@ def _validate_owners(
         num_envs=num_envs,
         device=device,
     )
-    if expected_exact_types is not None:
-        for owner_name in ("r03", "physical", "r06", "r07"):
-            if type(getattr(owners, owner_name)) is not expected_exact_types[owner_name]:
-                raise FreshFullMdpRewardConstructionHold(
-                    f"{owner_name} Reward owner exact class/source identity differs"
-                )
     if tuple(getattr(owners.r03, "consumers", ())) != R03_CONSUMERS:
         raise FreshFullMdpRewardConstructionHold(
             "R03 owner does not expose the exact ordered-ten ABI"
@@ -225,49 +190,7 @@ def _validate_owners(
         raise FreshFullMdpRewardConstructionHold(
             "R06 owner does not expose the exact two-consumer ABI"
         )
-    declared_consumers = (
-        ("R03", owners.r03, R03_CONSUMERS),
-        (
-            "Physical",
-            owners.physical,
-            (PHYSICAL_SELECTED_CONTACT_CONSUMER,),
-        ),
-        ("R06", owners.r06, R06_CONSUMERS),
-        ("R07", owners.r07, (R07_CONSUMER,)),
-    )
-    if require_full_mdp_close_api:
-        for label, owner, expected in declared_consumers:
-            if tuple(getattr(owner, "full_mdp_reward_consumers", ())) != expected:
-                raise FreshFullMdpRewardConstructionHold(
-                    f"{label} full-MDP Reward consumer ABI differs"
-                )
-        for label, owner in (
-            ("Physical", owners.physical),
-            ("R06", owners.r06),
-        ):
-            _method(
-                owner,
-                "_bind_full_mdp_reward_graph_from_top",
-                label=f"{label} owner",
-            )
-            _method(
-                owner,
-                "open_full_mdp_reward_cycle",
-                label=f"{label} owner",
-            )
-
-    r03_methods = ["view", "record_payment"]
-    if require_full_mdp_close_api:
-        r03_methods.extend(
-            (
-                "publish_full_mdp_pre_reward",
-                "require_owned_full_mdp_pre_reward",
-                "require_owned_full_mdp_reward_payment",
-                "close_full_mdp_reward_cycle",
-                "require_owned_full_mdp_reward_close",
-            )
-        )
-    for method_name in r03_methods:
+    for method_name in ("view", "record_payment"):
         _method(owners.r03, method_name, label="R03 owner")
     # There is deliberately no fallback to caller ``contact``/``valid``
     # booleans or cumulative counters.  These two owner-issued methods are the
@@ -282,36 +205,9 @@ def _validate_owners(
         "record_selected_contact_reward_payment",
         label="Physical owner",
     )
-    if require_full_mdp_close_api:
-        for method_name in (
-            "require_owned_full_mdp_reward_payment",
-            "close_full_mdp_reward_cycle",
-            "require_owned_full_mdp_reward_close",
-        ):
-            _method(owners.physical, method_name, label="Physical owner")
-    r06_methods = ["view", "record_payment"]
-    if require_full_mdp_close_api:
-        r06_methods.extend(
-            (
-                "require_owned_full_mdp_reward_payment",
-                "close_full_mdp_reward_cycle",
-                "require_owned_full_mdp_reward_close",
-            )
-        )
-    for method_name in r06_methods:
+    for method_name in ("view", "record_payment"):
         _method(owners.r06, method_name, label="R06 owner")
-    r07_methods = ["reward_view", "record_reward_payment"]
-    if require_full_mdp_close_api:
-        r07_methods.extend(
-            (
-                "publish_full_mdp_pre_reward",
-                "require_owned_full_mdp_pre_reward",
-                "require_owned_full_mdp_reward_payment",
-                "close_full_mdp_reward_cycle",
-                "require_owned_full_mdp_reward_close",
-            )
-        )
-    for method_name in r07_methods:
+    for method_name in ("reward_view", "record_reward_payment"):
         _method(owners.r07, method_name, label="R07 owner")
     for label, owner in (
         ("R03", owners.r03),
@@ -334,54 +230,11 @@ def _validate_owners(
     return owners
 
 
-def _production_owner_types() -> dict[str, type]:
-    """Load the four canonical classes before any construction bind mutates."""
-
-    result: dict[str, type] = {}
-    for owner_name, module_name, class_name in _PRODUCTION_OWNER_TYPES:
-        try:
-            module = importlib.import_module(module_name)
-            owner_type = getattr(module, class_name)
-        except (ImportError, ModuleNotFoundError, AttributeError) as exc:
-            raise FreshFullMdpRewardConstructionHold(
-                f"{owner_name} Reward owner exact class/source is unavailable"
-            ) from exc
-        if not isinstance(owner_type, type):
-            raise FreshFullMdpRewardConstructionHold(
-                f"{owner_name} Reward owner exact class/source differs"
-            )
-        result[owner_name] = owner_type
-    return result
-
-
-def _preflight_production_owners(runtime_owner: object) -> _RewardOwners:
-    """Purely inspect the exact four top-owned leaves before top/leaf binding."""
-
-    binding = type(
-        "_PureRewardOwnerProjection",
-        (),
-        {
-            "r03": getattr(runtime_owner, "_r03", None),
-            "physical": getattr(runtime_owner, "_physical", None),
-            "r06": getattr(runtime_owner, "_r06", None),
-            "r07": getattr(runtime_owner, "_r07", None),
-            "num_envs": getattr(runtime_owner, "_num_envs", None),
-            "device": getattr(runtime_owner, "_device", None),
-        },
-    )()
-    return _validate_owners(
-        binding,
-        expected_exact_types=_production_owner_types(),
-        require_full_mdp_close_api=True,
-    )
-
-
 class FreshFullMdpRewardGraph:
     """Four-owner fourteen-consumer cycle coordinator.
 
-    Production construction is top-owner driven.  The diagnostic constructor
-    is explicit and permanently unauthorized; it exists only so focused tests
-    can exercise exception and zero-payment behavior without Isaac Lab.
+    This retained template graph is explicitly diagnostic and permanently
+    unauthorized.  The production runtime uses the direct ActionEpoch graph.
     """
 
     def __init__(
@@ -391,23 +244,16 @@ class FreshFullMdpRewardGraph:
         runtime_lease: object,
         owners: _RewardOwners,
         diagnostic_unauthorized: bool,
-        _construction_token: object = None,
     ) -> None:
         diagnostic = bool(diagnostic_unauthorized)
-        if diagnostic:
-            if _construction_token is not None:
-                raise FreshFullMdpRewardConstructionHold(
-                    "diagnostic Reward graph cannot carry production construction authority"
-                )
-        elif _construction_token is not _PRODUCTION_GRAPH_CONSTRUCTION_TOKEN:
+        if not diagnostic:
             raise FreshFullMdpRewardConstructionHold(
-                "production Reward graph must come from its exact constructor"
+                "template Reward graph is diagnostic-only"
             )
         self._runtime_owner = runtime_owner
         self._runtime_lease = runtime_lease
         self._owners = owners
         self._diagnostic_unauthorized = diagnostic
-        self._production_constructed = not diagnostic
         self._identity = object()
         self._sequence = 0
         self._active_cycle: FreshFullMdpRewardCycle | None = None
@@ -618,76 +464,6 @@ class FreshFullMdpRewardGraph:
         return result
 
 
-def construct_fresh_full_mdp_reward_graph(
-    *, runtime_owner: object, runtime_lease: object
-) -> FreshFullMdpRewardGraph:
-    """Construct only from the exact production top owner.
-
-    A class-name lookalike, Protocol fixture, or caller-provided leaf set cannot
-    satisfy this function.  Runtime integration remains disabled until the
-    production factory constructs this graph and atomically installs its
-    fourteen Manager terms.
-    """
-
-    cls = type(runtime_owner)
-    if (
-        cls.__name__ != "ActionBallFullMdpRuntimeOwner"
-        or cls.__module__
-        != "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_runtime_owner"
-    ):
-        raise FreshFullMdpRewardConstructionHold(
-            "production Reward graph requires the exact full-MDP runtime-owner class"
-        )
-    if getattr(runtime_owner, "full_mdp_runtime_lease", None) is not runtime_lease:
-        raise FreshFullMdpRewardConstructionHold(
-            "production Reward graph lease is not bound to the runtime owner"
-        )
-    bind = _method(runtime_owner, TOP_BIND_OWNERS_METHOD, label="top runtime owner")
-    _method(runtime_owner, TOP_PUBLISH_METHOD, label="top runtime owner")
-    _method(runtime_owner, TOP_REQUIRE_PUBLISH_METHOD, label="top runtime owner")
-    _method(runtime_owner, TOP_CLOSE_METHOD, label="top runtime owner")
-    # Every class/source identity, consumer ABI and leaf method is checked from
-    # the top-owned objects before the top/Physical one-way bind can mutate.
-    preflight = _preflight_production_owners(runtime_owner)
-    graph = FreshFullMdpRewardGraph(
-        runtime_owner=runtime_owner,
-        runtime_lease=runtime_lease,
-        owners=preflight,
-        diagnostic_unauthorized=False,
-        _construction_token=_PRODUCTION_GRAPH_CONSTRUCTION_TOKEN,
-    )
-    try:
-        binding = bind(
-            runtime_lease=runtime_lease,
-            ordered_consumers=ORDERED_CONSUMERS,
-            reward_graph=graph,
-        )
-        bound = _validate_owners(
-            binding,
-            expected_exact_types=_production_owner_types(),
-            require_full_mdp_close_api=True,
-        )
-        if any(
-            getattr(bound, name) is not getattr(preflight, name)
-            for name in ("r03", "physical", "r06", "r07")
-        ):
-            raise FreshFullMdpRewardConstructionHold(
-                "top Reward bind returned a different causal owner identity"
-            )
-    except BaseException:
-        # Binding is one-way.  Rolling a child back would manufacture authority;
-        # the only safe outcome is to discard this entire runtime graph cold.
-        graph._fail_construction()
-        poison = getattr(runtime_owner, "_poison_reward", None)
-        if callable(poison):
-            try:
-                poison("fresh Reward graph failed after construction bind")
-            except BaseException:
-                pass
-        raise
-    return graph
-
-
 def construct_diagnostic_fresh_full_mdp_reward_graph(
     *,
     runtime_owner: object,
@@ -864,12 +640,7 @@ def physical_selected_contact(
     graph._require_unpaid(receipt_name)
     owner = graph._owners.physical
     payload = graph._active_payload()
-    if payload.physical_reward_cycle is None:
-        view = owner.selected_contact_reward_view()
-    else:
-        view = owner.selected_contact_reward_view(
-            reward_cycle=payload.physical_reward_cycle
-        )
+    view = owner.selected_contact_reward_view()
     eligible = getattr(view, "eligible", None)
     if (
         not isinstance(eligible, torch.Tensor)
@@ -881,14 +652,7 @@ def physical_selected_contact(
             "Physical selected-contact view is not exact device bool [num_envs]"
         )
     raw = eligible.to(dtype=torch.float32)
-    if payload.physical_reward_cycle is None:
-        result = owner.record_selected_contact_reward_payment(view, raw_reward=raw)
-    else:
-        result = owner.record_selected_contact_reward_payment(
-            view,
-            raw_reward=raw,
-            reward_cycle=payload.physical_reward_cycle,
-        )
+    result = owner.record_selected_contact_reward_payment(view, raw_reward=raw)
     if getattr(result, "rejected", None) is None:
         raise FreshFullMdpRewardCycleError(
             "Physical selected-contact payment lacks its owner verdict"
@@ -1014,7 +778,6 @@ __all__ = [
     "FreshFullMdpRewardCycleError",
     "FreshFullMdpRewardCycle",
     "FreshFullMdpRewardGraph",
-    "construct_fresh_full_mdp_reward_graph",
     "construct_diagnostic_fresh_full_mdp_reward_graph",
     "r03_racket_position",
     "r03_racket_velocity",

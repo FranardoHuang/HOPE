@@ -56,8 +56,8 @@ certificate。metadata、文件存在、diagnostic PASS 或手写布尔值都不
 现役单动作family A/C FullMDP的runtime身份收窄为
 [`Phase-A direct-lean`](../DEFINITIONS.md#fullmdp-phase-a-direct-lean)：只允许exact lean owner；formal
 runtime selector、partial installer和逐leaf getter不是候选接口。旧
-`action_ball_full_mdp_runtime_owner.py`仅是dormant Phase-B删除对象，不能被引用为安全、执行或
-checkpoint权威。接口仍须在真正独立的边界 fail closed：source/API pin、环境铸造lease与construction
+`action_ball_full_mdp_runtime_owner.py`及其专属适配面已由Phase-B branch candidate物理退役，不能被引用为
+安全、执行或checkpoint权威；详细证据见[FullMDP hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。接口仍须在真正独立的边界 fail closed：source/API pin、环境铸造lease与construction
 seal、exact component object identity、selected-reset generation与overflow、finite与sticky
 poison/fail-stop。FullMDP全局checkpoint/restore join继续标为`R10 HOLD`，因此不授权exact resume。
 

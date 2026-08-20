@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP dormant formal owner物理退役（branch candidate）
+
+- Phase-A之后旧`ActionBallFullMdpRuntimeOwner`及其module import的production caller已为0；本候选遂物理删除
+  4,466行formal owner源、Reward/Physical/R06中只服务该死路径的top-cycle/exact-pin适配面，以及formal owner、
+  continuous racket transaction bridge与旧R10 checkpoint三组专属测试。五个production文件合计
+  `+58/-7,621`、净删`7,563`行；没有新增compatibility adapter、owner、receipt或gate。
+- 只含Phase-B staged slice的独立临时worktree scoped union=`489 passed, 37 skipped`，终审
+  `P0=0/P1=0`。现役direct-lean reveal、六个runtime callpoint、lease/seal、reset generation/overflow、
+  sticky poison、真实contact/joint/table/nonfinite边界与optimizer后durable ACK均保留。该结果仅给结构GO；
+  exact Pod fixed-tape、真实GPU与profiler-off matched wall仍`未测`，G05保持`Partial`。命令与边界见
+  [FullMDP hot-path实验](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
+
 ## 2026-08-21 — [MuJoCo-Warp EPA48](DEFINITIONS.md#mujoco-warp-epa48-fork)可审计离线构建链（branch candidate）
 
 - 为r3真实触发的`EPA_HORIZON` fail-stop建立project-owned窄fork基础设施：tracked provenance固定

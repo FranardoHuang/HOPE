@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`baseline-runs-incomplete / profiled / zero-flight-host-validated / direct-lean-phase-a-host-validated / Pod-matched-wall-pending`
+> 状态：`baseline-runs-incomplete / profiled / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / Pod-matched-wall-pending`
 > 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；zero-flight与后续结构cut的Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
@@ -46,6 +46,10 @@ production反例触发的nonfinite/overflow、identity join、物理contact/term
   validator/reset receipt/standalone installers/post-only escape等不可达分支；保留六个真实callpoint、
   lease/seal、component identity、reset generation/overflow、sticky poison和PhysX close。production
   净删`1,455`行，exact七文件回归=`310 passed, 15 skipped`。
+- Phase-B branch candidate在旧class/import production caller静态census为0后，物理删除4,466行formal
+  owner源和Reward/Physical/R06中只服务该死路径的top-cycle/exact-pin适配面；五个production文件合计
+  `+58/-7,621`、净删`7,563`行。现役direct-lean reveal、lease/seal、reset generation/overflow、sticky
+  poison、真实物理边界和optimizer后durable ACK不变；没有compatibility adapter。
 - `7b7c9510`独立修复partial-construction teardown：缺manager、manager析构异常、live PhysX shutdown
   异常或callback重入均不能阻断其余terminal清理；in-memory stage严格按detach→stop→clear→callback
   clear→instance clear执行。terminal失败不伪装closed，也不跨调用重试旧sim，而是sticky要求cold
@@ -62,10 +66,10 @@ production反例触发的nonfinite/overflow、identity join、物理contact/term
   GPU低利用，Yikang落在同一CPU集合的实际用量不足以解释三倍差。
 - 通过降低LM迭代、关闭contact/termination/receipt或接受stale substep状态换速度。这些都会改变题目或证据语义。
 - 用旧legacy `6.700 s/update`、MuJoCo native 114-D或WAIT `learn(1)`冒充当前FullMDP等价A/B。
-- 为第二阶段D05 compact再加一层adapter。formal runtime owner的冻结inventory仍要求
+- 为第二阶段D05 compact再加一层adapter。formal runtime owner的旧冻结inventory曾要求
   `prepare_many/preview/stage/arm/commit/journal`旧ABI，但没有production construction/hot callpoint；
-  Phase-A已经从现役`train.py`/env wiring退役该lane。其源文件仍dormant并留到Phase-B单独删除，不能
-  因为磁盘上还有历史类就继续冻结现役ABI。后续只做一套compact transaction，不并存两套接口。
+  Phase-A从现役`train.py`/env wiring退役该lane，Phase-B现已物理删除它。后续只做一套compact
+  transaction，不并存两套接口，也不为已删除类恢复compatibility adapter。
 
 ## 2. 当前运行证据
 
@@ -99,10 +103,10 @@ production反例触发的nonfinite/overflow、identity join、物理contact/term
 | build_3 `7b88a021…` | 相同dt/decimation/PPO | 当前23次/control的深owner验证及大量packet/clone | 6秒不能直接外推，但结构膨胀是明确差异 |
 | MJLab `0fb8a681…` / Playground `e74217bb…` | batched GPU physics与manager/JIT env | Python包围20个substep、重复contact census、每步同步 | 先合并数据流与同步，再考虑更大graph capture |
 
-这个结构税也可直接从当前源码尺度看到：现役env/lean runtime/Physical/Epoch/R06/Scene六个核心
-文件合计`42,742 LOC`、`644`个`.clone()`调用点、`1,127`个class/function definition；另外
-formal owner/factory历史源还有`6,539 LOC`，Phase-A后已不在production construction graph。这不直接
-乘等于wall time，但它解释了为什么一个“empty flight
+这个结构税也可直接从Phase-B前源码尺度看到：现役env/lean runtime/Physical/Epoch/R06/Scene六个核心
+文件合计`42,742 LOC`、`644`个`.clone()`调用点、`1,127`个class/function definition；另有
+`6,539 LOC` formal owner/factory历史源，Phase-A后已不在production construction graph，Phase-B又物理删除
+其中4,466行owner及其专属适配面。这不直接乘等于wall time，但它解释了为什么一个“empty flight
 应为no-op”的改动会跨Physical/Scene/R06/Epoch/Env重签协议、测试与gate。优化目标不只是减
 kernel，而是把mutable business state收回一个owner，让其他层只做IO或边界证据。
 
@@ -195,12 +199,12 @@ admission、已绑定method dispatch、poison/reentrancy、protected manager不�
   formal owner只是静态stale API consumer，无construction/hot callpoint；唯一“formal成功”测试是自造
   `launch_authorized=true`的fixture。Phase-A据此把exact A/C FullMDP现役入口固定为direct lean：
   `train.py +176/-478`、`full_mdp_env.py +108/-1261`，production合计`+284/-1739`、净删`1,455`行。
-  exact七文件回归=`310 passed, 15 skipped`；formal owner源仍dormant，Phase-B再做物理删除。
+  exact七文件回归=`310 passed, 15 skipped`；formal owner源当时仍dormant，现已由Phase-B物理删除。
 - Phase-A是结构GO而非性能GO。它删的是无consumer的formal dispatch与同一writer自证，保留construction
   executable binding、六个真实callpoint、lease/seal、component identity、reset generation/overflow、
   sticky poison与PhysX close；没有Pod matched wall，不能把这`1,455`行删除换算成秒数。
 
-Phase-A的exact host回归命令为：
+Phase-A当时的exact host回归命令为：
 
 ```bash
 PYTHONPATH=hope_training/whole_body_tracking/source/whole_body_tracking \
@@ -218,6 +222,40 @@ Phase-A提交结果=`310 passed, 15 skipped`；加上`7b7c9510`的partial-close�
 `317 passed, 15 skipped`。15个skip均按host dependency条件触发，不是失败。该回归验证现役construction/
 callpoint/reset/owner wiring，不替代exact Pod fixed-tape、真实GPU语义或profiler-off matched wall。
 
+Phase-B继续做物理删除，而不是给不可达壳再加兼容协议：删除4,466行
+`action_ball_full_mdp_runtime_owner.py`，并从Reward、Physical与R06移除它专属的top-cycle token、
+exact-class/source pin和close graph；同时删除formal owner、continuous racket transaction bridge与旧R10
+runner checkpoint的专属测试。五个production文件合计`+58/-7,621`、净删`7,563`行。静态census只证明
+旧class/import没有production caller，不代签动态GPU语义；仍可见的通用runner命名与个别leaf formal shell不在
+本slice内，后续只能按零caller逐项删除，不能把本次结果写成single-owner state已经完成。
+
+只含Phase-B staged slice的独立临时worktree使用以下scoped union复现：
+
+```bash
+PYTHONPATH=hope_training/whole_body_tracking/source/whole_body_tracking:hope_training/whole_body_tracking/scripts:hope_training/whole_body_tracking/tests \
+PYTHONDONTWRITEBYTECODE=1 \
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q -p no:cacheprovider \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_rsl3_adapter.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_runner_drain.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_lean_runtime.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_env_runtime_callpoints.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_train_wiring.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_landing_outcome_device.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_landing_outcome_epoch_direct.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_landing_outcome_selected_reset.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_epoch_rowwise.py::test_open_reward_debt_blocks_reset_drain_and_checkpoint \
+  hope_training/whole_body_tracking/tests/test_action_ball_physical_flight_device.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_physical_epoch_hot_lane.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_physical_flight_selected_reset.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_ball_scene_postphysics.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_cfg_registration.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_full_mdp_lean_rewards.py
+```
+
+结果=`489 passed, 37 skipped`；独立终审=`P0=0/P1=0`。这些skip是host dependency条件，不是失败。
+输入是只含本Phase-B staged slice的源码，输出只证明direct-lean host contract与故障反例未被旧壳删除破坏；
+exact Pod fixed-tape、真实GPU与profiler-off matched wall仍`未测`，所以Phase-B同样只有结构GO。
+
 successor验收是同一`4096×25000`进程：前5个update只读profile，之后profile自动关闭继续；性能结论使用
 profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.5 s`、p95 `<=8 s`。任何数值优化还须
 逐step对齐done/reason/reset IDs/generation/RNG、D05/R03/R06/R07/payment/retire、229/399 obs和Reward20。
@@ -232,9 +270,9 @@ profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.
    exact runner的live wire contract建立fixture，不另造一份schema/gate。
 2. 只有Pod parity和matched wall都通过，才把zero-flight successor称为严格更强；两条旧run已经结束，
    successor必须fresh且不得resume旧checkpoint。没有净收益就撤回，不靠host测试或主观保留。
-3. owner validation已收回cold boundary，Phase-A也已从现役wiring退役formal legacy lane并固定direct
-   lean。Phase-B只删除dormant formal owner源和相应历史测试，不重引入compatibility adapter；随后把
-   D05 producer→R05改成一套compact transaction，并收敛Reward/observation的重复mutable state。
+3. owner validation已收回cold boundary，Phase-A从现役wiring退役formal legacy lane并固定direct lean；
+   Phase-B branch candidate也已物理删除dormant formal owner、专属适配面和历史测试，未重引入compatibility
+   adapter。下一步把D05 producer→R05改成一套compact transaction，并收敛Reward/observation的重复mutable state。
 4. MuJoCo并行先完成action0 question/teacher，再合并contact census；R06/R07/Reward11--13闭合前不叫Full-A长跑。
 
 ## 7. `ddb1e7c4` successor实测：single-read cut没有打中首墙

@@ -31,8 +31,8 @@ leaf directly.  The seams themselves never call ``item``, ``cpu``, ``numpy``,
 ``tolist`` or a random API.  Owner failure or host-visible
 clock/identity/version drift poisons the environment.  Physics and
 owner-internal writes cannot be rolled back honestly, so failure atomicity is
-fail-stop rather than a fabricated rollback.  The retired formal owner lane
-has no constructor seam in this module.
+fail-stop rather than a fabricated rollback.  This module exposes no second
+owner-construction lane.
 """
 
 from __future__ import annotations
@@ -1244,16 +1244,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             raise FullMdpUnsupportedRuntimeError(
                 "dormant full-MDP cold restore remains HOLD before simulator, "
                 "reset, observation and noise construction"
-            )
-        retired_formal_kwargs = {
-            "full_mdp_runtime_owner_expected_dependency_dag_sha256",
-            "full_mdp_post_physics_owner_factory",
-            "full_mdp_post_physics_expected_dependency_dag_sha256",
-        }.intersection(kwargs)
-        if retired_formal_kwargs:
-            raise FullMdpUnsupportedRuntimeError(
-                "formal full-MDP owner API is retired: "
-                + ",".join(sorted(retired_formal_kwargs))
             )
         factory = _require_owner_factory(full_mdp_runtime_owner_factory)
         _require_single_action_lean_cfg(cfg, owner_factory=factory)

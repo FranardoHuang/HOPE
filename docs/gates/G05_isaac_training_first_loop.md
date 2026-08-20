@@ -2,6 +2,18 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-21 Phase-B dormant formal owner物理退役（branch candidate；Gate仍`Partial`）：**
+旧`ActionBallFullMdpRuntimeOwner` class/module import的production caller静态census为0后，本候选删除4,466行
+formal owner源及Reward/Physical/R06中只服务该死路径的top-cycle/exact-pin适配面；五个production文件
+`+58/-7,621`、净删`7,563`行。没有增加compatibility adapter、owner、receipt或gate。现役direct-lean
+reveal、六个runtime callpoint、lease/seal、reset generation/overflow、sticky poison、真实contact/joint/table/
+nonfinite边界与optimizer后durable ACK均保留。
+
+只含该staged slice的独立临时worktree scoped union=`489 passed, 37 skipped`，终审=`P0=0/P1=0`；
+可复现命令、输入输出和残留边界见[热路径实验§5](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
+这只授权结构GO：exact Pod fixed-tape、真实GPU和profiler-off matched wall仍`未测`，不能由净删行数推算秒数，
+也不能声称single-owner hot path已经完成。因此G05不晋级。
+
 **2026-08-20两条4096长跑终局与吞吐归因（Gate仍`Partial`）：**两条immutable长跑已在约
 `14:41Z`不完整结束。`e8eef4fb…`止于durable ACK `4603` / `452,591,616` transitions，
 `ddb1e7c4…`止于ACK `3467` / `340,918,272` transitions；两份result均为`status=failed`、
@@ -6439,7 +6451,7 @@ lean：`train.py`只创建`ActionBallFullMdpLeanRuntimeOwner`，env只接受这�
 graph；formal mode/pins/DAG/SHA validator/reset receipt/standalone installers/post-only escape均已从
 现役wiring删除。production为`train.py +176/-478`、`full_mdp_env.py +108/-1261`，合计
 `+284/-1739`、净删`1,455`行；exact七文件回归=`310 passed, 15 skipped`。formal owner源仍dormant，
-Phase-B再单独物理删除，不为它加adapter。
+这是Phase-A当时的状态；现已由Phase-B branch candidate单独物理删除，且未为它增加adapter。
 
 这次只给结构GO，不给性能GO。保留的是construction executable binding、六个真实callpoint、
 lease/seal、component identity、reset generation/overflow、sticky poison与PhysX close；删除的是无consumer

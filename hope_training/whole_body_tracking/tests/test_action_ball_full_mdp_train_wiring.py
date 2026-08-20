@@ -634,7 +634,18 @@ def test_legacy_motion_route_is_unchanged(monkeypatch):
     assert calls == [cfg]
 
 
-def test_diagnostic_lean_binding_does_not_import_formal_inventory(monkeypatch):
+def test_only_direct_lean_owner_remains_constructible(monkeypatch):
+    retired_owner = (
+        HERE.parent
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_runtime_owner.py"
+    )
+    assert not retired_owner.exists()
     binding = _resolve(monkeypatch)
     assert binding.owner_type is _LeanOwner
 

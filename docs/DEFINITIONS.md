@@ -56,8 +56,8 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   lean运行时**：2026-08-20的branch-scoped结构减法；现役单动作family A与family C（A/C，分别把期望
   击球任务与来球状态送入policy的两条训练族）只能构造exact `ActionBallFullMdpLeanRuntimeOwner`。
   trainer不再选择formal runtime，环境不再暴露formal partial installer或逐leaf owner getter；旧
-  `action_ball_full_mdp_runtime_owner.py`仅是等待Phase-B物理删除的dormant源码，不是安全、执行或
-  checkpoint权威。仍保留独立可失败的source/API pin（源码与运行接口钉住）、环境铸造的lease与
+  `action_ball_full_mdp_runtime_owner.py`及其专属适配面已由Phase-B branch candidate物理退役，不能作为
+  安全、执行或checkpoint权威。仍保留独立可失败的source/API pin（源码与运行接口钉住）、环境铸造的lease与
   construction seal、component
   object identity、selected-reset generation与`int64` overflow、finite检查与sticky poison/fail-stop；
   `R10 HOLD`在此专指尚未接通的FullMDP全局checkpoint/restore join（不是历史训练臂`R10c`），继续禁止

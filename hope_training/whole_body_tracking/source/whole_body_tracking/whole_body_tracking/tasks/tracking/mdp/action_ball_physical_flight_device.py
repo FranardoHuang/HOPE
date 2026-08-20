@@ -21,7 +21,6 @@ launch.
 
 from __future__ import annotations
 
-import base64
 import ast
 from dataclasses import dataclass, fields, replace
 import hashlib
@@ -37,7 +36,6 @@ import torch
 import action_ball_continuous_runtime_transaction as _r05
 import action_ball_continuous_runtime_transaction_device as _r05_device
 import action_ball_full_mdp_diagnostic_capacity as _diagnostic_capacity
-import action_ball_full_mdp_checkpoint as _r10
 import action_ball_full_mdp_row_identity as _row_identity
 import action_ball_full_mdp_reset_genesis as _reset_genesis
 import action_ball_full_mdp_reveal_boundary as _reveal_boundary
@@ -160,26 +158,14 @@ def materialize_physical_ppo_drain_leaf_schema(
             for name, cardinality, minimum in fields
         ),
     )
-PHYSICAL_R10_BOUNDARY_PIN_KIND = (
-    "action_ball_physical_r10_checkpoint_boundary_authority_v1"
-)
-PHYSICAL_R10_BOUNDARY_PIN_SCHEMA_SHA256 = hashlib.sha256(
-    b"action_ball_physical_r10_checkpoint_boundary_authority_v1:"
-    b"r10_boundary_sha256,shared_join_snapshot_sha256,"
-    b"provider_api_schema_sha256,complete_env_step,env_reset_invoked,"
-    b"rollout_storage_empty"
-).hexdigest()
-
 _PREPARED_TOKEN = object()
 _ARMED_TOKEN = object()
 _CHILD_TERMINAL_TOKEN = object()
 _POSTPHYSICS_TOKEN = object()
 _POSTPHYSICS_CAPTURE_REQUEST_TOKEN = object()
 _POSTPHYSICS_CAPTURE_FACTS_TOKEN = object()
-_CONTACT_REWARD_CYCLE_TOKEN = object()
 _CONTACT_REWARD_VIEW_TOKEN = object()
 _CONTACT_REWARD_PAYMENT_TOKEN = object()
-_CONTACT_REWARD_CLOSE_TOKEN = object()
 _R06_ACK_TOKEN = object()
 _TENSOR_SCENE_PORT_TOKEN = object()
 _TENSOR_SCENE_WRITE_TOKEN = object()
@@ -187,8 +173,6 @@ _PHYSICAL_PARK_CLEANUP_TOKEN = object()
 _PHYSICAL_RETIRE_PREPARE_TOKEN = object()
 _PHYSICAL_RETIRE_ARM_TOKEN = object()
 _PHYSICAL_RETIRE_COMMIT_TOKEN = object()
-_CHECKPOINT_ADAPTER_AUTH_TOKEN = object()
-_CHECKPOINT_RESTORE_TOKEN = object()
 _PHYSICAL_R10_LIVE_ACK_TOKEN = object()
 _PHYSICAL_HOT_PREPARE_TOKEN = object()
 _PHYSICAL_HOT_COMMIT_TOKEN = object()
@@ -445,67 +429,6 @@ def _device_bitwise_equal(left: torch.Tensor, right: torch.Tensor) -> torch.Tens
         left.contiguous().view(torch.uint8),
         right.contiguous().view(torch.uint8),
     ).all()
-
-
-def _state_bytes_base64(value: torch.Tensor) -> tuple[str, int, str]:
-    if value.device.type != "cpu" or value.dtype != torch.float32 or not value.is_contiguous():
-        raise PhysicalFlightDeviceError("checkpoint scene state must be contiguous CPU float32")
-    # ``numpy().tobytes`` is deliberately confined to the complete checkpoint
-    # boundary.  Runtime CUDA entry points fail before reaching this helper.
-    raw = value.numpy().tobytes(order="C")
-    return (
-        base64.b64encode(raw).decode("ascii"),
-        len(raw),
-        hashlib.sha256(raw).hexdigest(),
-    )
-
-
-def _r10_live_digest_from_checkpoint_receipt(
-    receipt: _flight.PhysicalFlightCheckpointReceipt,
-) -> str:
-    """Recompute the adapter live digest from sealed physical owner bytes."""
-
-    if type(receipt) is not _flight.PhysicalFlightCheckpointReceipt:
-        raise PhysicalFlightDeviceError("R10 physical checkpoint receipt type differs")
-    try:
-        raw = base64.b64decode(
-            receipt.owner_state_bytes_base64.encode("ascii"), validate=True
-        )
-        owner = json.loads(raw.decode("ascii"))
-    except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
-        raise PhysicalFlightDeviceError(
-            "R10 physical checkpoint owner bytes are invalid"
-        ) from exc
-    if (
-        _flight.canonical_json_bytes(owner) != raw
-        or frozenset(owner) != _flight.PHYSICAL_OWNER_STATE_REQUIRED_FIELDS
-    ):
-        raise PhysicalFlightDeviceError(
-            "R10 physical checkpoint owner bytes are not exact canonical state"
-        )
-    owner_checkpoint = _flight.physical_owner_checkpoint_root(
-        capacity_receipt_sha256=receipt.capacity_receipt_sha256,
-        num_envs=receipt.num_envs,
-        flight_capacity=receipt.flight_capacity,
-        mutation_version=receipt.mutation_version,
-        next_prepare_nonce=receipt.next_prepare_nonce,
-        reset_generations=tuple(owner["reset_generation"]),
-        slots=receipt.slot_snapshots,
-        poisoned=False,
-    )
-    return _flight.canonical_sha256(
-        {
-            "schema_version": 1,
-            "kind": "action_ball_physical_r10_live_digest_v1",
-            "owner_checkpoint_sha256": owner_checkpoint,
-            "scene_state_byte_length": owner["scene_state_byte_length"],
-            "scene_state_bytes_sha256": owner["scene_state_bytes_sha256"],
-            "flight_lifecycle_code": owner["flight_lifecycle_code"],
-            "observation_ordinal": owner["observation_ordinal"],
-            "previous_ball_center_m": owner["previous_ball_center_m"],
-            "device_fault": owner["device_fault"],
-        }
-    )
 
 
 @dataclass(frozen=True)
@@ -1467,17 +1390,6 @@ class PhysicalSelectedContactRewardView:
 
 
 @dataclass(frozen=True, eq=False, repr=False)
-class PhysicalSelectedContactRewardCycleToken:
-    """Exact top-opened Physical Reward transaction identity."""
-
-    control_step: int
-    pre_reward_publication: object
-    _runtime_owner: object
-    _owner_identity: object
-    _token: object
-
-
-@dataclass(frozen=True, eq=False, repr=False)
 class PhysicalSelectedContactRewardPaymentResult:
     """Owner-issued device verdict for one exact selected-contact payment.
 
@@ -1490,16 +1402,6 @@ class PhysicalSelectedContactRewardPaymentResult:
     rejected: torch.Tensor
     paid_raw_reward: torch.Tensor
     _owner_identity: object
-    _token: object
-
-
-@dataclass(frozen=True, eq=False, repr=False)
-class PhysicalSelectedContactRewardCloseReceipt:
-    """Opaque proof that the Physical one-consumer Reward cycle is closed."""
-
-    control_step: int
-    _owner_identity: object
-    _payment_identity: object
     _token: object
 
 
@@ -2298,47 +2200,6 @@ class _GlobalRevealEpochImage:
     )
 
 
-@dataclass(frozen=True, eq=False)
-class _PhysicalCheckpointAdapterAuthority:
-    adapter: object
-    owner_identity: object
-    boundary: object
-    shared_snapshot: object
-    boundary_pin: _flight.CanonicalJsonContentPin
-    token: object
-
-
-@dataclass(frozen=True)
-class _PreparedCheckpointRestoreImage:
-    receipt: _flight.PhysicalFlightCheckpointReceipt
-    scene_handle: object
-    slots: tuple[_flight.PhysicalFlightSlotSnapshot, ...]
-    mutation_version: int
-    next_prepare_nonce: int
-    reset_generation: list[int]
-    lifecycle: torch.Tensor
-    generation: torch.Tensor
-    outcome_sha: torch.Tensor
-    install_sha: torch.Tensor
-    installed_state_sha: torch.Tensor
-    reveal_step: torch.Tensor
-    observation_ordinal: torch.Tensor
-    previous_ball_center: torch.Tensor
-    parked: torch.Tensor
-    published: torch.Tensor
-    slot_version: torch.Tensor
-    device_fault: torch.Tensor
-
-
-@dataclass(frozen=True, eq=False)
-class _PhysicalCheckpointRestoreOpaqueToken:
-    adapter: object
-    authority: _PhysicalCheckpointAdapterAuthority
-    image: _PreparedCheckpointRestoreImage
-    checkpoint_owner_root_sha256: str
-    token: object
-
-
 @dataclass(frozen=True)
 class _PostPhysicsImage:
     """Owner-private binding immune to mutation of the R06-facing packet."""
@@ -2367,36 +2228,6 @@ class _PhysicalContactRewardViewRecord:
 
     view: PhysicalSelectedContactRewardView
     view_issued: bool
-    reward_cycle: PhysicalSelectedContactRewardCycleToken | None
-
-
-@dataclass(frozen=True)
-class _PhysicalContactRewardPaymentRecord:
-    """Private immutable after-image behind one owner-issued verdict."""
-
-    verdict: PhysicalSelectedContactRewardPaymentResult
-    view: PhysicalSelectedContactRewardView
-    eligible: torch.Tensor
-    accepted: torch.Tensor
-    rejected: torch.Tensor
-    paid_raw_reward: torch.Tensor
-    control_step: torch.Tensor
-    full_key_sha256: torch.Tensor
-    ball_generation: torch.Tensor
-    flight_slot: torch.Tensor
-    observation_ordinal: torch.Tensor
-    runtime_owner: object
-    reward_cycle: PhysicalSelectedContactRewardCycleToken
-
-
-@dataclass(frozen=True)
-class _PhysicalContactRewardCloseRecord:
-    """Private identity behind one Physical cycle-close receipt."""
-
-    receipt: PhysicalSelectedContactRewardCloseReceipt
-    payment: _PhysicalContactRewardPaymentRecord
-    runtime_owner: object
-    reward_cycle: PhysicalSelectedContactRewardCycleToken
 
 
 @dataclass(frozen=True)
@@ -2497,7 +2328,6 @@ def _stamp_grid(
 class ActionBallPhysicalFlightDeviceOwner:
     """Explicit-capacity physical owner with no legacy scene fallback."""
 
-    full_mdp_reward_consumers = ("physical_selected_contact",)
 
     def __init__(
         self,
@@ -2717,24 +2547,8 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._last_paid_selected_contact_reward_view: (
             PhysicalSelectedContactRewardView | None
         ) = None
-        self._full_mdp_reward_graph_bound = False
-        self._full_mdp_reward_binding_window_open = True
-        self._full_mdp_reward_runtime_owner: object | None = None
-        self._full_mdp_reward_prepublication_validator: object | None = None
-        self._active_selected_contact_reward_top_cycle: (
-            PhysicalSelectedContactRewardCycleToken | None
-        ) = None
         self._physical_reward_poisoned = False
         self._physical_reward_poison_reason: str | None = None
-        self._physical_reward_open_fault = torch.zeros(
-            (self.num_envs,), dtype=torch.bool, device=self.device
-        )
-        self._active_selected_contact_reward_payment: (
-            _PhysicalContactRewardPaymentRecord | None
-        ) = None
-        self._active_selected_contact_reward_close: (
-            _PhysicalContactRewardCloseRecord | None
-        ) = None
         self._diagnostic_paid_selected_contact_reward_verdicts: set[int] = set()
         self._active_physical_global_drain: (
             _PreparedPhysicalGlobalDrain | None
@@ -2877,7 +2691,6 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._selected_reset_completion_record: (
             _PhysicalSelectedResetCompletionRecord | None
         ) = None
-        self._checkpoint_adapter: object | None = None
         self._reveal_boundary_child_authority = (
             _reveal_boundary.ActionBallFullMdpRevealBoundaryChildTokenAuthority(
                 owner_kind="physical_ball",
@@ -3041,11 +2854,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalFlightDeviceError(
                 "physical device-R05 reset owner cannot be rebound"
             )
-        if (
-            self._mutation_version != 0
-            or self._next_prepare_nonce != 1
-            or self._checkpoint_adapter is not None
-        ):
+        if self._mutation_version != 0 or self._next_prepare_nonce != 1:
             raise PhysicalFlightDeviceError(
                 "physical Device-R05 reset owner must bind before business mutation"
             )
@@ -4972,10 +4781,8 @@ class ActionBallPhysicalFlightDeviceOwner:
     def _require_operable(
         self,
         *,
-        allow_prepared_restore: bool = False,
         allow_global_reveal_epoch: bool = False,
         allow_selected_reset: bool = False,
-        allow_contact_reward_close: bool = False,
         allow_diagnostic_scene_observation: bool = False,
         allow_action_epoch_construction: bool = False,
         diagnostic_selected_reset_capability: object | None = None,
@@ -5003,19 +4810,15 @@ class ActionBallPhysicalFlightDeviceOwner:
                 "mutation, checkpoint, R10, and late launch remain HOLD"
             )
         self._require_operable_invariants(
-            allow_prepared_restore=allow_prepared_restore,
             allow_global_reveal_epoch=allow_global_reveal_epoch,
             allow_selected_reset=allow_selected_reset,
-            allow_contact_reward_close=allow_contact_reward_close,
         )
 
     def _require_operable_invariants(
         self,
         *,
-        allow_prepared_restore: bool = False,
         allow_global_reveal_epoch: bool = False,
         allow_selected_reset: bool = False,
-        allow_contact_reward_close: bool = False,
     ) -> None:
         """Check fail-stop and lease state without authorizing a run mode."""
 
@@ -5027,15 +4830,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalFlightOwnerPoisonedError(
                 self._physical_reward_poison_reason
                 or "Physical Reward owner is poisoned"
-            )
-        if (
-            not allow_prepared_restore
-            and self._checkpoint_adapter is not None
-            and getattr(self._checkpoint_adapter, "_active_restore", None)
-            is not None
-        ):
-            raise PhysicalFlightDeviceError(
-                "physical mutation cannot cross a prepared R10 restore"
             )
         if self._active_physical_global_drain is not None:
             raise PhysicalFlightDeviceError(
@@ -5059,15 +4853,6 @@ class ActionBallPhysicalFlightDeviceOwner:
                 "physical mutation cannot cross an active selected-reset lease"
             )
 
-        if not allow_contact_reward_close and (
-            self._active_selected_contact_reward_top_cycle is not None
-            or self._active_selected_contact_reward_payment is not None
-            or self._active_selected_contact_reward_close is not None
-        ):
-            raise PhysicalFlightDeviceError(
-                "physical mutation cannot cross an unclosed selected-contact Reward verdict"
-            )
-
     def _require_selected_contact_reward_cycle_closed(
         self, *, label: str
     ) -> None:
@@ -5075,9 +4860,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             return
         if (
             self._selected_contact_reward_cycle_open
-            or self._active_selected_contact_reward_top_cycle is not None
-            or self._active_selected_contact_reward_payment is not None
-            or self._active_selected_contact_reward_close is not None
+            or self._active_selected_contact_reward_view is not None
         ):
             self._selected_contact_ledger_fault.logical_or_(
                 self._selected_contact_pending
@@ -5114,13 +4897,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             reason = "unspecified global reveal epoch failure"
         self._poisoned = True
         self._poison_reason = reason
-
-    def _bind_checkpoint_adapter(self, adapter: object) -> None:
-        if self._checkpoint_adapter is not None:
-            self._poisoned = True
-            self._poison_reason = "physical checkpoint adapter cannot be rebound"
-            raise PhysicalFlightOwnerPoisonedError(self._poison_reason)
-        self._checkpoint_adapter = adapter
 
     def _require_globally_acknowledged_checkpoint_frontier(self) -> None:
         """Require current physical bytes to equal one exact healthy drain ACK."""
@@ -5271,28 +5047,8 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._physical_checkpoint_last_live_receipt = receipt
         return projection
 
-    def _require_checkpoint_adapter_authority(
-        self,
-        authority: object,
-    ) -> _PhysicalCheckpointAdapterAuthority:
-        if (
-            type(authority) is not _PhysicalCheckpointAdapterAuthority
-            or authority.token is not _CHECKPOINT_ADAPTER_AUTH_TOKEN
-            or authority.owner_identity is not self._owner_identity
-            or authority.adapter is not self._checkpoint_adapter
-            or getattr(authority.adapter, "_active_owner_authority", None)
-            is not authority
-        ):
-            raise PhysicalFlightDeviceError(
-                "physical checkpoint adapter authority differs"
-            )
-        return authority
-
     def _require_checkpoint_idle(
         self,
-        *,
-        allow_prepared_restore: bool = False,
-        allow_contact_reward_cycle: bool = False,
     ) -> None:
         if (
             self._active_prepare is not None
@@ -5316,73 +5072,13 @@ class ActionBallPhysicalFlightDeviceOwner:
             or self._active_selected_reset_arm is not None
             or self._active_selected_reset_commit is not None
             or self._selected_reset_completion_token is not None
-            or (
-                not allow_contact_reward_cycle
-                and self._active_selected_contact_reward_top_cycle is not None
-            )
-            or (
-                not allow_contact_reward_cycle
-                and self._active_selected_contact_reward_view is not None
-            )
-            or (
-                not allow_contact_reward_cycle
-                and self._selected_contact_reward_cycle_open
-            )
-            or (
-                not allow_contact_reward_cycle
-                and self._active_selected_contact_reward_payment is not None
-            )
-            or (
-                not allow_contact_reward_cycle
-                and self._active_selected_contact_reward_close is not None
-            )
+            or self._active_selected_contact_reward_view is not None
+            or self._selected_contact_reward_cycle_open
             or self._active_physical_global_drain is not None
-            or (
-                not allow_prepared_restore
-                and
-                self._checkpoint_adapter is not None
-                and getattr(
-                    self._checkpoint_adapter,
-                    "_active_restore",
-                    None,
-                )
-                is not None
-            )
         ):
             raise PhysicalFlightDeviceError(
                 "checkpoint cannot cross a physical reveal/postphysics/retire/reset/contact-payment lease"
             )
-
-    def _r10_live_digest(self) -> str:
-        """Digest all physical owner tensors used by the CPU R10 reference."""
-
-        self._require_operable(allow_prepared_restore=True)
-        self._require_cpu_reference()
-        self._require_checkpoint_idle(allow_prepared_restore=True)
-        self._require_action_epoch_checkpoint_clear()
-        scene = _tensor(
-            self.scene_port.read_state_env(),
-            label="R10 physical live scene",
-            shape=(self.num_envs, self.flight_capacity, STATE_WIDTH),
-            dtype=torch.float32,
-            device=self.device,
-        ).contiguous()
-        if not bool(torch.isfinite(scene).all()):
-            raise PhysicalFlightDeviceError("R10 physical live scene is nonfinite")
-        _, scene_length, scene_sha = _state_bytes_base64(scene)
-        return _flight.canonical_sha256(
-            {
-                "schema_version": 1,
-                "kind": "action_ball_physical_r10_live_digest_v1",
-                "owner_checkpoint_sha256": self._owner_checkpoint_sha(),
-                "scene_state_byte_length": scene_length,
-                "scene_state_bytes_sha256": scene_sha,
-                "flight_lifecycle_code": self._lifecycle.tolist(),
-                "observation_ordinal": self._observation_ordinal.tolist(),
-                "previous_ball_center_m": self._previous_ball_center.tolist(),
-                "device_fault": self._device_fault.tolist(),
-            }
-        )
 
     def _require_cpu_reference(self) -> None:
         if self.device.type != "cpu":
@@ -8865,71 +8561,29 @@ class ActionBallPhysicalFlightDeviceOwner:
         )
         return result
 
-    def selected_contact_reward_view(
-        self,
-        reward_cycle: PhysicalSelectedContactRewardCycleToken | None = None,
-    ) -> PhysicalSelectedContactRewardView:
-        """Issue the exact pending selected-contact Reward view once."""
+    def selected_contact_reward_view(self) -> PhysicalSelectedContactRewardView:
+        """Issue the exact pending diagnostic contact view once."""
 
-        bound = bool(getattr(self, "_full_mdp_reward_graph_bound", False))
-        self._require_operable(allow_contact_reward_close=bound)
-        self._full_mdp_reward_binding_window_open = False
-        active_cycle = self._active_selected_contact_reward_top_cycle
-        if bound and (
-            type(reward_cycle) is not PhysicalSelectedContactRewardCycleToken
-            or reward_cycle is not active_cycle
-            or reward_cycle._runtime_owner
-            is not self._full_mdp_reward_runtime_owner
-            or reward_cycle._owner_identity is not self._owner_identity
-            or reward_cycle._token is not _CONTACT_REWARD_CYCLE_TOKEN
-        ):
-            self._selected_contact_ledger_fault.logical_or_(
-                torch.ones_like(self._selected_contact_ledger_fault)
-            )
-            self._poison_physical_reward(
-                "Physical Reward view lacks the exact top-opened cycle"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward view cycle differs"
-            )
-        if not bound and reward_cycle is not None:
-            raise PhysicalFlightDeviceError(
-                "diagnostic Physical Reward view cannot accept a top cycle"
-            )
+        self._require_operable()
         if self._active_selected_contact_reward_view is not None:
             self._selected_contact_ledger_fault.logical_or_(
                 torch.ones_like(self._selected_contact_pending)
             )
-            if bound:
-                self._poison_physical_reward(
-                    "selected-contact Reward view was requested twice"
-                )
-                raise PhysicalFlightOwnerPoisonedError(
-                    self._physical_reward_poison_reason
-                    or "selected-contact Reward view duplicated"
-                )
             raise PhysicalFlightDeviceError(
                 "selected-contact Reward view was requested twice"
             )
         eligible = self._selected_contact_pending & ~self._selected_contact_viewed
-        if bound:
-            eligible = eligible & ~self._physical_reward_open_fault
         view = PhysicalSelectedContactRewardView(
             eligible=eligible.detach().clone(),
             full_key_sha256=torch.where(
                 eligible.unsqueeze(-1),
                 self._selected_contact_pending_full_key_sha256,
-                torch.zeros_like(
-                    self._selected_contact_pending_full_key_sha256
-                ),
+                torch.zeros_like(self._selected_contact_pending_full_key_sha256),
             ).detach().clone(),
             ball_generation=torch.where(
                 eligible,
                 self._selected_contact_pending_ball_generation,
-                torch.full_like(
-                    self._selected_contact_pending_ball_generation, -1
-                ),
+                torch.full_like(self._selected_contact_pending_ball_generation, -1),
             ).detach().clone(),
             flight_slot=torch.where(
                 eligible,
@@ -8965,12 +8619,9 @@ class ActionBallPhysicalFlightDeviceOwner:
         )
         self._selected_contact_viewed.logical_or_(eligible)
         self._selected_contact_view_total.add_(self.num_envs)
-        self._active_selected_contact_reward_view = (
-            _PhysicalContactRewardViewRecord(
-                view=view,
-                view_issued=True,
-                reward_cycle=active_cycle,
-            )
+        self._active_selected_contact_reward_view = _PhysicalContactRewardViewRecord(
+            view=view,
+            view_issued=True,
         )
         self._advance_owner_mutation_version()
         return view
@@ -8980,34 +8631,11 @@ class ActionBallPhysicalFlightDeviceOwner:
         view: PhysicalSelectedContactRewardView,
         *,
         raw_reward: torch.Tensor,
-        reward_cycle: PhysicalSelectedContactRewardCycleToken | None = None,
     ) -> PhysicalSelectedContactRewardPaymentResult:
-        """Pay one exact view; raw zero is still a successful payment."""
+        """Finish the local diagnostic contact ledger; zero still pays."""
 
-        bound = bool(getattr(self, "_full_mdp_reward_graph_bound", False))
-        self._require_operable(allow_contact_reward_close=bound)
+        self._require_operable()
         record = self._active_selected_contact_reward_view
-        active_cycle = self._active_selected_contact_reward_top_cycle
-        if bound and (
-            type(reward_cycle) is not PhysicalSelectedContactRewardCycleToken
-            or reward_cycle is not active_cycle
-            or record is None
-            or record.reward_cycle is not reward_cycle
-        ):
-            self._selected_contact_ledger_fault.logical_or_(
-                torch.ones_like(self._selected_contact_ledger_fault)
-            )
-            self._poison_physical_reward(
-                "Physical Reward payment lacks the exact top-opened cycle"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward payment cycle differs"
-            )
-        if not bound and reward_cycle is not None:
-            raise PhysicalFlightDeviceError(
-                "diagnostic Physical Reward payment cannot accept a top cycle"
-            )
         if id(view) in self._diagnostic_paid_selected_contact_reward_verdicts:
             self._selected_contact_ledger_fault.logical_or_(
                 torch.ones_like(self._selected_contact_pending)
@@ -9033,14 +8661,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._selected_contact_ledger_fault.logical_or_(
                 torch.ones_like(self._selected_contact_pending)
             )
-            if bound:
-                self._poison_physical_reward(
-                    "selected-contact Reward payment view is stale, foreign, or replayed"
-                )
-                raise PhysicalFlightOwnerPoisonedError(
-                    self._physical_reward_poison_reason
-                    or "selected-contact Reward payment replayed"
-                )
             raise PhysicalFlightDeviceError(
                 "selected-contact Reward payment view is stale, foreign, or replayed"
             )
@@ -9057,21 +8677,13 @@ class ActionBallPhysicalFlightDeviceOwner:
             & self._selected_contact_viewed
             & torch.isfinite(value)
         )
-        rejected = (eligible & ~accepted) | (
-            self._physical_reward_open_fault if bound else False
-        )
+        rejected = eligible & ~accepted
         self._selected_contact_ledger_fault.logical_or_(rejected)
         self._device_fault.logical_or_(
-            rejected.unsqueeze(1).expand(
-                self.num_envs, self.flight_capacity
-            )
+            rejected.unsqueeze(1).expand(self.num_envs, self.flight_capacity)
         )
-        self._selected_contact_pending.copy_(
-            self._selected_contact_pending & ~accepted
-        )
-        self._selected_contact_viewed.copy_(
-            self._selected_contact_viewed & ~accepted
-        )
+        self._selected_contact_pending.logical_and_(~accepted)
+        self._selected_contact_viewed.logical_and_(~accepted)
         self._selected_contact_payment_total.add_(self.num_envs)
         paid = torch.where(accepted, value, torch.zeros_like(value))
         self._active_selected_contact_reward_view = None
@@ -9083,35 +8695,9 @@ class ActionBallPhysicalFlightDeviceOwner:
             _owner_identity=self._owner_identity,
             _token=_CONTACT_REWARD_PAYMENT_TOKEN,
         )
-        if bound:
-            assert active_cycle is not None
-            payment_record = _PhysicalContactRewardPaymentRecord(
-                verdict=verdict,
-                view=view,
-                eligible=eligible.detach().clone(),
-                accepted=accepted.detach().clone(),
-                rejected=rejected.detach().clone(),
-                paid_raw_reward=paid.detach().clone(),
-                control_step=view.selected_contact_control_step.detach().clone(),
-                full_key_sha256=view.full_key_sha256.detach().clone(),
-                ball_generation=view.ball_generation.detach().clone(),
-                flight_slot=view.flight_slot.detach().clone(),
-                observation_ordinal=view.observation_ordinal.detach().clone(),
-                runtime_owner=active_cycle._runtime_owner,
-                reward_cycle=active_cycle,
-            )
-            self._active_selected_contact_reward_payment = payment_record
+        self._diagnostic_paid_selected_contact_reward_verdicts.add(id(view))
+        self._selected_contact_reward_cycle_open = False
         self._advance_owner_mutation_version()
-        if not bound:
-            # Explicit diagnostic compatibility: old leaf tests do not own a
-            # top Reward graph, so they may finish the local payment here.
-            # Production construction sets the one-way bind before the first
-            # view; after that, only the exact top validator/close ACK releases
-            # mutation debt.
-            self._diagnostic_paid_selected_contact_reward_verdicts.add(
-                id(view)
-            )
-            self._selected_contact_reward_cycle_open = False
         if self.device.type == "cpu" and bool(rejected.any()):
             self._poison_physical_reward(
                 "selected-contact Reward payment was invalid"
@@ -9121,385 +8707,6 @@ class ActionBallPhysicalFlightDeviceOwner:
                 or "selected-contact Reward payment was invalid"
             )
         return verdict
-
-    def _bind_full_mdp_reward_graph_from_top(
-        self,
-        *,
-        runtime_owner: object,
-        ordered_consumers: object,
-    ) -> None:
-        """Construction-only one-way bind to the exact top Reward owner."""
-
-        if getattr(self, "_full_mdp_reward_graph_bound", False):
-            raise PhysicalFlightDeviceError(
-                "Physical full-MDP Reward graph cannot be rebound"
-            )
-        if (
-            not self._full_mdp_reward_binding_window_open
-            or self._selected_contact_reward_cycle_open
-            or self._active_selected_contact_reward_view is not None
-            or self._active_selected_contact_reward_payment is not None
-            or self._active_selected_contact_reward_close is not None
-        ):
-            raise PhysicalFlightDeviceError(
-                "Physical full-MDP Reward graph must bind before first Reward use"
-            )
-        if ordered_consumers != self.full_mdp_reward_consumers:
-            raise PhysicalFlightDeviceError(
-                "Physical full-MDP Reward consumer ABI differs"
-            )
-        value_type = type(runtime_owner)
-        source = inspect.getsourcefile(value_type)
-        if (
-            value_type.__name__ != "ActionBallFullMdpRuntimeOwner"
-            or source is None
-            or Path(source).resolve()
-            != Path(__file__).with_name(
-                "action_ball_full_mdp_runtime_owner.py"
-            ).resolve()
-        ):
-            raise PhysicalFlightDeviceError(
-                "Physical full-MDP Reward graph requires the exact top owner"
-            )
-        self._full_mdp_reward_graph_bound = True
-        self._full_mdp_reward_binding_window_open = False
-        self._full_mdp_reward_runtime_owner = runtime_owner
-        validator = getattr(
-            runtime_owner,
-            "require_owned_full_mdp_pre_reward",
-            None,
-        )
-        if (
-            not callable(validator)
-            or getattr(validator, "__self__", None) is not runtime_owner
-            or getattr(validator, "__func__", None)
-            is not getattr(
-                type(runtime_owner),
-                "require_owned_full_mdp_pre_reward",
-                None,
-            )
-        ):
-            self._full_mdp_reward_graph_bound = False
-            self._full_mdp_reward_runtime_owner = None
-            raise PhysicalFlightDeviceError(
-                "Physical Reward prepublication validator must be one direct top method"
-            )
-        self._full_mdp_reward_prepublication_validator = validator
-
-    def open_full_mdp_reward_cycle(
-        self,
-        pre_reward_publication: object,
-        *,
-        control_step: int,
-        runtime_owner: object,
-    ) -> PhysicalSelectedContactRewardCycleToken:
-        """Open Physical Reward only from the exact active top publication."""
-
-        self._require_operable(allow_contact_reward_close=True)
-        step = _exact_int(control_step, label="Physical Reward control_step")
-        owner = self._require_full_mdp_reward_runtime_owner(
-            runtime_owner,
-            control_step=step,
-            pre_reward_publication=pre_reward_publication,
-        )
-        if (
-            self._active_selected_contact_reward_top_cycle is not None
-            or self._active_selected_contact_reward_view is not None
-            or self._active_selected_contact_reward_payment is not None
-            or self._active_selected_contact_reward_close is not None
-        ):
-            self._poison_physical_reward(
-                "Physical Reward cycle opened across active debt"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward cycle already active"
-            )
-        if not self._selected_contact_reward_cycle_open:
-            self._poison_physical_reward(
-                "Physical Reward top publication preceded its postphysics authority"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward postphysics cycle is absent"
-            )
-        validator = self._full_mdp_reward_prepublication_validator
-        if not callable(validator):
-            self._poison_physical_reward(
-                "Physical Reward prepublication validator is unavailable"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward validator unavailable"
-            )
-        try:
-            owned = validator(
-                pre_reward_publication,
-                runtime_lease=owner.full_mdp_runtime_lease,
-                control_step=step,
-            )
-        except BaseException as exc:
-            self._poison_physical_reward(
-                "Physical Reward prepublication authentication failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            raise
-        if owned is None:
-            self._poison_physical_reward(
-                "Physical Reward prepublication authentication returned no view"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward prepublication differed"
-            )
-        step_fault = self._selected_contact_pending & (
-            self._selected_contact_pending_control_step != step
-        )
-        self._physical_reward_open_fault.copy_(step_fault)
-        self._selected_contact_ledger_fault.logical_or_(step_fault)
-        self._device_fault.logical_or_(
-            step_fault.unsqueeze(1).expand(
-                self.num_envs, self.flight_capacity
-            )
-        )
-        if self.device.type == "cpu" and bool(step_fault.any()):
-            self._poison_physical_reward(
-                "Physical Reward prepublication control step differs from pending contact"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward control step differs"
-            )
-        token = PhysicalSelectedContactRewardCycleToken(
-            control_step=step,
-            pre_reward_publication=pre_reward_publication,
-            _runtime_owner=owner,
-            _owner_identity=self._owner_identity,
-            _token=_CONTACT_REWARD_CYCLE_TOKEN,
-        )
-        self._active_selected_contact_reward_top_cycle = token
-        return token
-
-    def _require_full_mdp_reward_runtime_owner(
-        self,
-        value: object,
-        *,
-        control_step: int,
-        pre_reward_publication: object | None = None,
-    ) -> object:
-        """Reject fixture/self authority without reverse-pinning top bytes."""
-
-        value_type = type(value)
-        source = inspect.getsourcefile(value_type)
-        expected_source = Path(__file__).with_name(
-            "action_ball_full_mdp_runtime_owner.py"
-        ).resolve()
-        if (
-            value_type.__name__ != "ActionBallFullMdpRuntimeOwner"
-            or source is None
-            or Path(source).resolve() != expected_source
-            or not callable(
-                getattr(value, "require_owned_full_mdp_pre_reward", None)
-            )
-            or getattr(
-                getattr(value, "_reward_owner_binding", None),
-                "physical",
-                None,
-            )
-            is not self
-            or not bool(getattr(self, "_full_mdp_reward_graph_bound", False))
-            or getattr(self, "_full_mdp_reward_runtime_owner", None) is not value
-            or getattr(
-                getattr(value, "_active_pre_reward_payload", None),
-                "control_step",
-                None,
-            )
-            != control_step
-            or (
-                pre_reward_publication is not None
-                and getattr(value, "_active_pre_reward_publication", None)
-                is not pre_reward_publication
-            )
-        ):
-            self._poison_physical_reward(
-                "Physical Reward authority is not the exact top runtime owner"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward top authority differs"
-            )
-        return value
-
-    def require_owned_full_mdp_reward_payment(
-        self,
-        verdict: object,
-        *,
-        consumer: str,
-        control_step: int,
-        runtime_owner: object,
-    ) -> PhysicalSelectedContactRewardPaymentResult:
-        """Authenticate the one retained Physical payment verdict.
-
-        Public tensor fields are telemetry, not authority.  Exact object
-        identity selects the immutable private after-image; CUDA equality
-        faults remain device-resident for the sole global drain.
-        """
-
-        step = _exact_int(control_step, label="Physical Reward control_step")
-        self._require_operable(allow_contact_reward_close=True)
-        owner = self._require_full_mdp_reward_runtime_owner(
-            runtime_owner, control_step=step
-        )
-        record = self._active_selected_contact_reward_payment
-        if (
-            consumer != self.full_mdp_reward_consumers[0]
-            or type(verdict) is not PhysicalSelectedContactRewardPaymentResult
-            or record is None
-            or verdict is not record.verdict
-            or verdict._owner_identity is not self._owner_identity
-            or verdict._token is not _CONTACT_REWARD_PAYMENT_TOKEN
-            or record.runtime_owner is not owner
-            or record.reward_cycle
-            is not self._active_selected_contact_reward_top_cycle
-            or record.reward_cycle.control_step != step
-            or self._active_selected_contact_reward_close is not None
-        ):
-            self._selected_contact_ledger_fault.logical_or_(
-                torch.ones_like(self._selected_contact_ledger_fault)
-            )
-            self._poison_physical_reward(
-                "Physical Reward payment verdict is stale, foreign, or replayed"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward payment verdict replayed"
-            )
-        eligible_step_fault = record.eligible & (record.control_step != step)
-        public_mutation_fault = (
-            ~_device_bitwise_equal(verdict.accepted, record.accepted)
-            | ~_device_bitwise_equal(verdict.rejected, record.rejected)
-            | ~_device_bitwise_equal(
-                verdict.paid_raw_reward, record.paid_raw_reward
-            )
-        )
-        fault = eligible_step_fault | public_mutation_fault
-        self._selected_contact_ledger_fault.logical_or_(fault)
-        self._device_fault.logical_or_(
-            fault.unsqueeze(1).expand(self.num_envs, self.flight_capacity)
-        )
-        if self.device.type == "cpu" and bool(fault.any()):
-            self._poison_physical_reward(
-                "Physical Reward verdict bytes or control step changed"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward verdict changed"
-            )
-        return verdict
-
-    def close_full_mdp_reward_cycle(
-        self,
-        *,
-        control_step: int,
-        pre_reward_publication: object,
-        ordered_consumers: object,
-        ordered_payment_verdicts: object,
-        runtime_owner: object,
-    ) -> PhysicalSelectedContactRewardCloseReceipt:
-        """Close exactly one validated Physical payment; keep debt until ACK."""
-
-        self._require_operable(allow_contact_reward_close=True)
-        step = _exact_int(control_step, label="Physical Reward control_step")
-        owner = self._require_full_mdp_reward_runtime_owner(
-            runtime_owner,
-            control_step=step,
-            pre_reward_publication=pre_reward_publication,
-        )
-        record = self._active_selected_contact_reward_payment
-        if (
-            ordered_consumers != self.full_mdp_reward_consumers
-            or type(ordered_payment_verdicts) is not tuple
-            or len(ordered_payment_verdicts) != 1
-            or record is None
-            or ordered_payment_verdicts[0] is not record.verdict
-            or record.runtime_owner is not owner
-            or record.reward_cycle
-            is not self._active_selected_contact_reward_top_cycle
-            or record.reward_cycle.pre_reward_publication
-            is not pre_reward_publication
-            or self._active_selected_contact_reward_close is not None
-        ):
-            self._selected_contact_ledger_fault.logical_or_(
-                torch.ones_like(self._selected_contact_ledger_fault)
-            )
-            self._poison_physical_reward(
-                "Physical Reward close order/verdict/owner differs"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward close differs"
-            )
-        receipt = PhysicalSelectedContactRewardCloseReceipt(
-            control_step=step,
-            _owner_identity=self._owner_identity,
-            _payment_identity=record.verdict,
-            _token=_CONTACT_REWARD_CLOSE_TOKEN,
-        )
-        self._active_selected_contact_reward_close = (
-            _PhysicalContactRewardCloseRecord(
-                receipt=receipt,
-                payment=record,
-                runtime_owner=owner,
-                reward_cycle=record.reward_cycle,
-            )
-        )
-        return receipt
-
-    def require_owned_full_mdp_reward_close(
-        self,
-        receipt: object,
-        *,
-        control_step: int,
-        runtime_owner: object,
-    ) -> PhysicalSelectedContactRewardCloseReceipt:
-        """Acknowledge one exact close and release Physical mutation debt."""
-
-        self._require_operable(allow_contact_reward_close=True)
-        step = _exact_int(control_step, label="Physical Reward control_step")
-        owner = self._require_full_mdp_reward_runtime_owner(
-            runtime_owner, control_step=step
-        )
-        record = self._active_selected_contact_reward_close
-        if (
-            type(receipt) is not PhysicalSelectedContactRewardCloseReceipt
-            or record is None
-            or receipt is not record.receipt
-            or receipt.control_step != step
-            or receipt._owner_identity is not self._owner_identity
-            or receipt._payment_identity is not record.payment.verdict
-            or receipt._token is not _CONTACT_REWARD_CLOSE_TOKEN
-            or record.runtime_owner is not owner
-            or record.reward_cycle
-            is not self._active_selected_contact_reward_top_cycle
-            or self._active_selected_contact_reward_payment is not record.payment
-        ):
-            self._selected_contact_ledger_fault.logical_or_(
-                torch.ones_like(self._selected_contact_ledger_fault)
-            )
-            self._poison_physical_reward(
-                "Physical Reward close receipt is stale or foreign"
-            )
-            raise PhysicalFlightOwnerPoisonedError(
-                self._physical_reward_poison_reason
-                or "Physical Reward close receipt differs"
-            )
-        self._active_selected_contact_reward_close = None
-        self._active_selected_contact_reward_payment = None
-        self._active_selected_contact_reward_top_cycle = None
-        self._physical_reward_open_fault.zero_()
-        self._selected_contact_reward_cycle_open = False
-        self._advance_owner_mutation_version()
-        return receipt
 
     def _validate_r06_retire_result(
         self,
@@ -10463,11 +9670,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             or self._active_physical_retire_arm is not None
             or self._active_physical_retire_commit is not None
             or self._active_physical_global_drain is not None
-            or (
-                self._checkpoint_adapter is not None
-                and getattr(self._checkpoint_adapter, "_active_restore", None)
-                is not None
-            )
         ):
             raise PhysicalFlightDeviceError(
                 "selected reset cannot cross a reveal/postphysics/retire/checkpoint lease"
@@ -12354,1067 +11556,6 @@ class ActionBallPhysicalFlightDeviceOwner:
                 "has no portable checkpoint schema"
             )
 
-    def _checkpoint_cpu_reference(
-        self,
-        *,
-        adapter_authority: _PhysicalCheckpointAdapterAuthority,
-    ) -> _flight.PhysicalFlightCheckpointReceipt:
-        """Seal bytes only for the exact active R10 adapter authority."""
-
-        self._require_operable()
-        self._require_cpu_reference()
-        self._require_checkpoint_idle()
-        self._require_action_epoch_checkpoint_clear()
-        authority = self._require_checkpoint_adapter_authority(adapter_authority)
-        checkpoint_boundary_authority = authority.boundary_pin
-        boundary_mapping = checkpoint_boundary_authority.decoded_mapping
-        if (
-            checkpoint_boundary_authority.source_kind
-            != PHYSICAL_R10_BOUNDARY_PIN_KIND
-            or checkpoint_boundary_authority.source_schema_sha256
-            != PHYSICAL_R10_BOUNDARY_PIN_SCHEMA_SHA256
-            or
-            boundary_mapping.get("complete_env_step") is not True
-            or boundary_mapping.get("env_reset_invoked") is not False
-            or boundary_mapping.get("rollout_storage_empty") is not True
-            or boundary_mapping.get("provider_api_schema_sha256")
-            != CHECKPOINT_JOIN_PROVIDER_API_SCHEMA_SHA256
-            or boundary_mapping.get("r10_boundary_sha256")
-            != _r10.boundary_sha256(authority.boundary)
-            or boundary_mapping.get("shared_join_snapshot_sha256")
-            != authority.shared_snapshot.canonical_sha256
-        ):
-            raise PhysicalFlightDeviceError(
-                "checkpoint authority is not a complete empty-storage non-reset boundary"
-            )
-        if bool(self._device_fault.any()):
-            raise PhysicalFlightDeviceError("checkpoint cannot serialize a sticky owner fault")
-        scene_state = self.scene_port.read_state_env().contiguous()
-        if not bool(torch.isfinite(scene_state).all()):
-            raise PhysicalFlightDeviceError("checkpoint scene state is nonfinite")
-        scene_b64, scene_length, scene_sha = _state_bytes_base64(scene_state)
-        owner_state = {
-            **OWNER_STATE_SCHEMA,
-            "capacity_receipt_sha256": self.capacity_receipt_sha256,
-            "num_envs": self.num_envs,
-            "flight_capacity": self.flight_capacity,
-            "owner_mutation_version": self._mutation_version,
-            "next_prepare_nonce": self._next_prepare_nonce,
-            "reset_generation": list(self._reset_generation),
-            "slot_snapshots": [row.to_mapping() for row in self._host_slots],
-            "scene_state_shape": [self.num_envs, self.flight_capacity, STATE_WIDTH],
-            "scene_state_f32_base64": scene_b64,
-            "scene_state_byte_length": scene_length,
-            "scene_state_bytes_sha256": scene_sha,
-            "flight_lifecycle_code": self._lifecycle.tolist(),
-            "observation_ordinal": self._observation_ordinal.tolist(),
-            "previous_ball_center_m": self._previous_ball_center.tolist(),
-            "device_fault": self._device_fault.tolist(),
-            "pending_r06_settlement_ack": None,
-            "poisoned": False,
-        }
-        owner_bytes = _flight.canonical_json_bytes(owner_state)
-        return _flight.PhysicalFlightCheckpointReceipt(
-            integration_status=_flight.INTEGRATION_STATUS,
-            capacity_receipt=self.capacity_receipt,
-            capacity_receipt_sha256=self.capacity_receipt_sha256,
-            checkpoint_boundary_authority=checkpoint_boundary_authority,
-            num_envs=self.num_envs,
-            flight_capacity=self.flight_capacity,
-            mutation_version=self._mutation_version,
-            next_prepare_nonce=self._next_prepare_nonce,
-            pending_prepare_receipt_sha256=None,
-            slot_snapshots=self._host_slots,
-            slot_root_sha256=_flight.physical_slot_root(self._host_slots),
-            owner_state_schema_sha256=OWNER_STATE_SCHEMA_SHA256,
-            owner_state_bytes_base64=base64.b64encode(owner_bytes).decode("ascii"),
-            owner_state_byte_length=len(owner_bytes),
-            owner_state_bytes_sha256=hashlib.sha256(owner_bytes).hexdigest(),
-            complete_env_step=True,
-            env_reset_invoked=False,
-        )
-
-    def _prepare_checkpoint_restore_cpu_reference(
-        self,
-        receipt: _flight.PhysicalFlightCheckpointReceipt,
-        *,
-        adapter_authority: _PhysicalCheckpointAdapterAuthority,
-    ) -> _PreparedCheckpointRestoreImage:
-        """Validate and stage restore without mutating live physical state."""
-
-        self._require_operable()
-        self._require_cpu_reference()
-        self._require_checkpoint_idle()
-        self._require_action_epoch_checkpoint_clear()
-        authority = self._require_checkpoint_adapter_authority(
-            adapter_authority
-        )
-        if (
-            type(receipt) is not _flight.PhysicalFlightCheckpointReceipt
-            or receipt.checkpoint_boundary_authority.canonical_sha256
-            != authority.boundary_pin.canonical_sha256
-            or receipt.capacity_receipt != self.capacity_receipt
-            or receipt.num_envs != self.num_envs
-            or receipt.flight_capacity != self.flight_capacity
-            or receipt.owner_state_schema_sha256 != OWNER_STATE_SCHEMA_SHA256
-        ):
-            raise PhysicalFlightDeviceError("checkpoint external roots/runtime binding differ")
-        boundary_mapping = receipt.checkpoint_boundary_authority.decoded_mapping
-        if (
-            boundary_mapping.get("complete_env_step") is not True
-            or boundary_mapping.get("env_reset_invoked") is not False
-            or boundary_mapping.get("rollout_storage_empty") is not True
-        ):
-            raise PhysicalFlightDeviceError("checkpoint boundary content differs")
-        try:
-            raw = base64.b64decode(receipt.owner_state_bytes_base64.encode("ascii"), validate=True)
-            owner = json.loads(raw.decode("ascii"))
-        except (ValueError, UnicodeError, json.JSONDecodeError) as exc:
-            raise PhysicalFlightDeviceError("checkpoint owner bytes are invalid") from exc
-        if _flight.canonical_json_bytes(owner) != raw:
-            raise PhysicalFlightDeviceError("checkpoint owner bytes are not canonical")
-        for key, value in OWNER_STATE_SCHEMA.items():
-            if owner.get(key) != value:
-                raise PhysicalFlightDeviceError("checkpoint owner-state schema differs")
-        if frozenset(owner) != _flight.PHYSICAL_OWNER_STATE_REQUIRED_FIELDS:
-            raise PhysicalFlightDeviceError(
-                "checkpoint owner-state field set differs"
-            )
-        if (
-            owner.get("capacity_receipt_sha256") != self.capacity_receipt_sha256
-            or owner.get("num_envs") != self.num_envs
-            or owner.get("flight_capacity") != self.flight_capacity
-            or owner.get("owner_mutation_version") != receipt.mutation_version
-            or owner.get("next_prepare_nonce") != receipt.next_prepare_nonce
-            or owner.get("poisoned") is not False
-        ):
-            raise PhysicalFlightDeviceError("checkpoint owner-state header differs")
-        scene_b64 = owner.get("scene_state_f32_base64")
-        if type(scene_b64) is not str:
-            raise PhysicalFlightDeviceError("checkpoint scene-state bytes missing")
-        try:
-            scene_raw = base64.b64decode(scene_b64.encode("ascii"), validate=True)
-        except (ValueError, UnicodeError) as exc:
-            raise PhysicalFlightDeviceError("checkpoint scene-state base64 differs") from exc
-        expected_length = self.num_envs * self.flight_capacity * STATE_WIDTH * 4
-        if (
-            owner.get("scene_state_shape") != [self.num_envs, self.flight_capacity, STATE_WIDTH]
-            or owner.get("scene_state_byte_length") != expected_length
-            or len(scene_raw) != expected_length
-            or owner.get("scene_state_bytes_sha256") != hashlib.sha256(scene_raw).hexdigest()
-        ):
-            raise PhysicalFlightDeviceError("checkpoint scene-state byte pin differs")
-        scene_state = torch.frombuffer(bytearray(scene_raw), dtype=torch.float32).clone().reshape(
-            self.num_envs, self.flight_capacity, STATE_WIDTH
-        )
-        if not bool(torch.isfinite(scene_state).all()):
-            raise PhysicalFlightDeviceError("checkpoint scene state is nonfinite")
-        slots = tuple(
-            _flight.PhysicalFlightSlotSnapshot._from_mapping_unpinned(row)
-            for row in owner.get("slot_snapshots", ())
-        )
-        if slots != receipt.slot_snapshots:
-            raise PhysicalFlightDeviceError("checkpoint slot bytes differ from receipt")
-        expected_scene_names = tuple(
-            f"env{env_id:06d}/{self.scene_body_names[slot_index]}"
-            for env_id in range(self.num_envs)
-            for slot_index in range(self.flight_capacity)
-        )
-        if tuple(slot.scene_body_name for slot in slots) != expected_scene_names:
-            raise PhysicalFlightDeviceError(
-                "checkpoint scene-body mapping differs from this owner"
-            )
-        reset_generation = owner.get("reset_generation")
-        if (
-            not isinstance(reset_generation, list)
-            or len(reset_generation) != self.num_envs
-            or any(type(item) is not int or item < 1 for item in reset_generation)
-        ):
-            raise PhysicalFlightDeviceError("checkpoint reset-generation state differs")
-        if any(
-            slot.outcome_key is not None
-            and slot.outcome_key.reset_generation
-            != reset_generation[slot.env_id]
-            for slot in slots
-        ):
-            raise PhysicalFlightDeviceError(
-                "checkpoint slot/reset-generation join differs"
-            )
-        try:
-            lifecycle = torch.tensor(
-                owner.get("flight_lifecycle_code"),
-                dtype=torch.int8,
-                device=self.device,
-            )
-            ordinal = torch.tensor(
-                owner.get("observation_ordinal"),
-                dtype=torch.int64,
-                device=self.device,
-            )
-            previous = torch.tensor(
-                owner.get("previous_ball_center_m"),
-                dtype=torch.float32,
-                device=self.device,
-            )
-            device_fault = torch.tensor(
-                owner.get("device_fault"),
-                dtype=torch.bool,
-                device=self.device,
-            )
-        except (TypeError, ValueError) as exc:
-            raise PhysicalFlightDeviceError(
-                "checkpoint device owner tensors are invalid"
-            ) from exc
-        _tensor(
-            lifecycle,
-            label="checkpoint flight_lifecycle_code",
-            shape=(self.num_envs, self.flight_capacity),
-            dtype=torch.int8,
-            device=self.device,
-        )
-        _tensor(
-            ordinal,
-            label="checkpoint observation_ordinal",
-            shape=(self.num_envs, self.flight_capacity),
-            dtype=torch.int64,
-            device=self.device,
-        )
-        _tensor(
-            previous,
-            label="checkpoint previous_ball_center_m",
-            shape=(self.num_envs, self.flight_capacity, 3),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        _tensor(
-            device_fault,
-            label="checkpoint device_fault",
-            shape=(self.num_envs, self.flight_capacity),
-            dtype=torch.bool,
-            device=self.device,
-        )
-        if (
-            bool(device_fault.any())
-            or not bool(torch.isfinite(previous).all())
-            or bool(((lifecycle < R06_FLIGHT_EMPTY) | (lifecycle > R06_FLIGHT_SETTLED_RETAINED)).any())
-        ):
-            raise PhysicalFlightDeviceError("checkpoint device owner tensors are unsafe")
-        for slot in slots:
-            code = int(lifecycle[slot.env_id, slot.slot_index])
-            if (
-                (slot.lifecycle == _flight.SLOT_PARKED and code != R06_FLIGHT_EMPTY)
-                or (
-                    slot.lifecycle == _flight.SLOT_RETIRED
-                    and code != R06_FLIGHT_EMPTY
-                )
-                or (
-                    slot.lifecycle == _flight.SLOT_SETTLED_RETAINED
-                    and code != R06_FLIGHT_SETTLED_RETAINED
-                )
-                or (
-                    slot.lifecycle == _flight.SLOT_IN_FLIGHT
-                    and code
-                    not in (
-                        R06_FLIGHT_INBOUND,
-                        R06_FLIGHT_OPEN,
-                        R06_FLIGHT_SETTLED_RETAINED,
-                    )
-                )
-            ):
-                raise PhysicalFlightDeviceError(
-                    "checkpoint portable/device lifecycle join differs"
-                )
-        restored_generation = torch.full(
-            (self.num_envs, self.flight_capacity),
-            -1,
-            dtype=torch.int64,
-            device=self.device,
-        )
-        restored_key = torch.zeros(
-            (self.num_envs, self.flight_capacity, TOKEN_BYTES),
-            dtype=torch.uint8,
-            device=self.device,
-        )
-        restored_install = torch.zeros_like(restored_key)
-        restored_installed_state = torch.zeros_like(restored_key)
-        restored_reveal_step = torch.full(
-            (self.num_envs, self.flight_capacity),
-            -1,
-            dtype=torch.int64,
-            device=self.device,
-        )
-        restored_parked = torch.ones(
-            (self.num_envs, self.flight_capacity),
-            dtype=torch.bool,
-            device=self.device,
-        )
-        restored_published = torch.zeros_like(restored_parked)
-        restored_slot_version = torch.zeros(
-            (self.num_envs, self.flight_capacity),
-            dtype=torch.int64,
-            device=self.device,
-        )
-        for slot in slots:
-            restored_parked[slot.env_id, slot.slot_index] = (
-                slot.physically_parked
-            )
-            restored_published[slot.env_id, slot.slot_index] = (
-                slot.published_to_runtime
-            )
-            restored_slot_version[slot.env_id, slot.slot_index] = (
-                slot.mutation_version
-            )
-            if slot.outcome_key_sha256 is not None:
-                restored_generation[slot.env_id, slot.slot_index] = (
-                    slot.ball_generation
-                )
-                restored_key[slot.env_id, slot.slot_index].copy_(
-                    _digest_bytes(
-                        slot.outcome_key_sha256,
-                        device=self.device,
-                    )
-                )
-                restored_install[slot.env_id, slot.slot_index].copy_(
-                    _digest_bytes(
-                        slot.install_payload_sha256,
-                        device=self.device,
-                    )
-                )
-                restored_installed_state[slot.env_id, slot.slot_index].copy_(
-                    _digest_bytes(
-                        slot.installed_ball_state_sha256,
-                        device=self.device,
-                    )
-                )
-                restored_reveal_step[slot.env_id, slot.slot_index] = (
-                    slot.reveal_control_step
-                )
-        pending_mapping = owner.get("pending_r06_settlement_ack")
-        if pending_mapping is not None:
-            raise PhysicalFlightDeviceError(
-                "checkpoint cannot restore a transient R06 settlement/retire lease"
-            )
-        if any(
-            slot.published_to_runtime
-            and int(lifecycle[slot.env_id, slot.slot_index])
-            == R06_FLIGHT_SETTLED_RETAINED
-            for slot in slots
-        ):
-            raise PhysicalFlightDeviceError(
-                "checkpoint cannot restore an unretired settled physical flight"
-            )
-        scene_handle = self.scene_port.preflight_write(
-            scene_state,
-            torch.ones(
-                (self.num_envs, self.flight_capacity),
-                dtype=torch.bool,
-                device=self.device,
-            ),
-            device_faults_bound_in_reveal_row=True,
-        )
-        restored_reset_generation = list(reset_generation)
-        return _PreparedCheckpointRestoreImage(
-            receipt=receipt,
-            scene_handle=scene_handle,
-            slots=slots,
-            mutation_version=receipt.mutation_version,
-            next_prepare_nonce=receipt.next_prepare_nonce,
-            reset_generation=restored_reset_generation,
-            lifecycle=lifecycle,
-            generation=restored_generation,
-            outcome_sha=restored_key,
-            install_sha=restored_install,
-            installed_state_sha=restored_installed_state,
-            reveal_step=restored_reveal_step,
-            observation_ordinal=ordinal,
-            previous_ball_center=previous,
-            parked=restored_parked,
-            published=restored_published,
-            slot_version=restored_slot_version,
-            device_fault=device_fault,
-        )
-
-    def _commit_checkpoint_restore_cpu_reference(
-        self,
-        image: _PreparedCheckpointRestoreImage,
-        *,
-        adapter_authority: _PhysicalCheckpointAdapterAuthority,
-    ) -> None:
-        """Publish one allocation-complete image after all R10 owners prepare."""
-
-        self._require_checkpoint_adapter_authority(adapter_authority)
-        self._require_action_epoch_checkpoint_clear()
-        if type(image) is not _PreparedCheckpointRestoreImage:
-            raise PhysicalFlightDeviceError("checkpoint restore image differs")
-        try:
-            self._apply_scene_write(image.scene_handle)
-            self._host_slots = image.slots
-            self._set_owner_mutation_version(image.mutation_version)
-            self._next_prepare_nonce = image.next_prepare_nonce
-            self._reset_generation = image.reset_generation
-            self._lifecycle.copy_(image.lifecycle)
-            self._generation.copy_(image.generation)
-            self._outcome_sha.copy_(image.outcome_sha)
-            self._install_sha.copy_(image.install_sha)
-            self._installed_state_sha.copy_(image.installed_state_sha)
-            self._reveal_step.copy_(image.reveal_step)
-            self._observation_ordinal.copy_(image.observation_ordinal)
-            self._previous_ball_center.copy_(image.previous_ball_center)
-            self._parked.copy_(image.parked)
-            self._published.copy_(image.published)
-            self._slot_version.copy_(image.slot_version)
-            self._device_fault.copy_(image.device_fault)
-            self._active_r06_ack = None
-            self._active_r06_ack_image = None
-            # Portable bytes restore chronology, never process-local global
-            # drain authority/receipt identity.  A fresh ACK must rejoin R10.
-            self._physical_global_drain_authority = None
-            self._physical_global_drain_last_acknowledged_receipt = None
-            self._physical_checkpoint_live_join_required = True
-            self._physical_checkpoint_live_ack = None
-            self._physical_checkpoint_last_live_projection = None
-            self._physical_checkpoint_last_live_boundary = None
-            self._physical_checkpoint_last_live_receipt = None
-            self._action_epoch_host_activity_control_step = None
-            self._action_epoch_host_activity_has_work = True
-        except Exception as exc:
-            self._poisoned = True
-            self._poison_reason = "checkpoint scene restore failed"
-            raise PhysicalFlightOwnerPoisonedError(self._poison_reason) from exc
-
-    def _rollback_checkpoint_restore_cpu_reference(
-        self,
-        image: _PreparedCheckpointRestoreImage,
-        *,
-        adapter_authority: _PhysicalCheckpointAdapterAuthority,
-    ) -> None:
-        """Release one staged scene write before any restore publication."""
-
-        self._require_checkpoint_adapter_authority(adapter_authority)
-        if type(image) is not _PreparedCheckpointRestoreImage:
-            raise PhysicalFlightDeviceError("checkpoint restore image differs")
-        self._abort_scene_write(image.scene_handle)
-
-    def _rebuild_device_metadata_from_host_slots(self) -> None:
-        self._lifecycle.zero_()
-        self._generation.fill_(-1)
-        self._outcome_sha.zero_()
-        self._install_sha.zero_()
-        self._installed_state_sha.zero_()
-        self._reveal_step.fill_(-1)
-        self._parked.fill_(True)
-        self._published.zero_()
-        self._slot_version.zero_()
-        self._device_fault.zero_()
-        lifecycle_to_code = {
-            _flight.SLOT_PARKED: R06_FLIGHT_EMPTY,
-            _flight.SLOT_IN_FLIGHT: R06_FLIGHT_INBOUND,
-            _flight.SLOT_SETTLED_RETAINED: R06_FLIGHT_SETTLED_RETAINED,
-            _flight.SLOT_RETIRED: R06_FLIGHT_EMPTY,
-        }
-        for row in self._host_slots:
-            env_id, slot = row.env_id, row.slot_index
-            self._lifecycle[env_id, slot] = lifecycle_to_code[row.lifecycle]
-            self._slot_version[env_id, slot] = row.mutation_version
-            self._parked[env_id, slot] = row.physically_parked
-            self._published[env_id, slot] = row.published_to_runtime
-            if row.ball_generation is not None:
-                self._generation[env_id, slot] = row.ball_generation
-                self._outcome_sha[env_id, slot].copy_(
-                    _digest_bytes(row.outcome_key_sha256, device=self.device)
-                )
-                self._install_sha[env_id, slot].copy_(
-                    _digest_bytes(row.install_payload_sha256, device=self.device)
-                )
-                self._installed_state_sha[env_id, slot].copy_(
-                    _digest_bytes(row.installed_ball_state_sha256, device=self.device)
-                )
-                self._reveal_step[env_id, slot] = row.reveal_control_step
-
-
-class PhysicalFlightCheckpointAdapter:
-    """Dedicated ``env.ball_physical`` R10 adapter.
-
-    Save authority comes only from an exact R10 boundary plus the immutable
-    top-owner join-snapshot provider.  One owner export retains the provider's
-    exact, still-unacknowledged R10 audit-frontier claim and seals its root into
-    the physical envelope.  Export is deliberately not global checkpoint
-    publication authority: only the construction-bound global coordinator may
-    acknowledge that claim after every owner, Merkle root, and archive has
-    succeeded.  Restore remains fail-closed until the provider exposes an
-    owner-issued restore join capability; public envelope fields are not
-    accepted as their own cross-owner authority.
-    """
-
-    def __init__(
-        self,
-        *,
-        physical_owner: ActionBallPhysicalFlightDeviceOwner,
-        shared_join_snapshot_provider: object,
-    ) -> None:
-        if type(physical_owner) is not ActionBallPhysicalFlightDeviceOwner:
-            raise PhysicalFlightDeviceError(
-                "R10 physical adapter requires the exact physical owner"
-            )
-        provider_type = type(shared_join_snapshot_provider)
-        provider_module = sys.modules.get(provider_type.__module__)
-        try:
-            provider_source = inspect.getsourcefile(provider_type)
-        except (OSError, TypeError):
-            provider_source = None
-        expected_provider_source = Path(__file__).with_name(
-            "action_ball_full_mdp_runtime_owner.py"
-        ).resolve()
-        if (
-            provider_module is None
-            or provider_source is None
-            or Path(provider_source).resolve() != expected_provider_source
-            or provider_type.__name__
-            != "ActionBallFullMdpCheckpointJoinSnapshotProvider"
-            or getattr(
-                provider_module,
-                "ActionBallFullMdpCheckpointJoinSnapshotProvider",
-                None,
-            )
-            is not provider_type
-            or provider_type.API_SCHEMA_SHA256
-            != CHECKPOINT_JOIN_PROVIDER_API_SCHEMA_SHA256
-            or getattr(provider_module, "PROVIDER_API_SCHEMA_SHA256", None)
-            != CHECKPOINT_JOIN_PROVIDER_API_SCHEMA_SHA256
-            or shared_join_snapshot_provider.provider_identity is None
-            or shared_join_snapshot_provider.runtime_owner_identity is None
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 shared checkpoint join provider type/API differs"
-            )
-        self._physical_owner = physical_owner
-        self._provider = shared_join_snapshot_provider
-        self._identity = object()
-        self._config_authority_sha256 = _flight.canonical_sha256(
-            {
-                "schema_version": 1,
-                "kind": "action_ball_physical_r10_adapter_config_v1",
-                "num_envs": physical_owner.num_envs,
-                "flight_capacity": physical_owner.flight_capacity,
-                "capacity_receipt_sha256": (
-                    physical_owner.capacity_receipt_sha256
-                ),
-                "scene_body_names": list(physical_owner.scene_body_names),
-                "physical_contract_source_sha256": CONTRACT_SOURCE_SHA256,
-                "checkpoint_join_provider_api_schema_sha256": (
-                    CHECKPOINT_JOIN_PROVIDER_API_SCHEMA_SHA256
-                ),
-            }
-        )
-        self.descriptor = _r10.OwnerDescriptor(
-            owner_id="env.ball_physical",
-            schema_version=1,
-            state_kind="action_ball.r10.env.ball_physical.v1",
-            scope=_r10.OwnerScope.WORLD,
-            engine=_r10.OwnerEngine.PORTABLE,
-            immutable_identity_sha256=self._config_authority_sha256,
-            dependencies=(
-                "env.world_reset",
-                "env.plant",
-                "env.task_authority",
-            ),
-            restore_rank=6,
-        )
-        self._active_owner_authority: (
-            _PhysicalCheckpointAdapterAuthority | None
-        ) = None
-        self._last_boundary: object | None = None
-        self._last_snapshot: object | None = None
-        self._last_freeze_receipt: _r10.OwnerFreezeReceipt | None = None
-        self._last_physical_receipt: (
-            _flight.PhysicalFlightCheckpointReceipt | None
-        ) = None
-        self._last_live_digest: str | None = None
-        self._last_audit_frontier_claim: object | None = None
-        self._last_checkpoint_join_claims: tuple[object, ...] | None = None
-        self._last_exported_envelope: object | None = None
-        self._active_restore: _PhysicalCheckpointRestoreOpaqueToken | None = None
-        self._last_rolled_back_restore: (
-            _PhysicalCheckpointRestoreOpaqueToken | None
-        ) = None
-        self._poisoned = False
-        self._poison_reason: str | None = None
-        physical_owner._bind_checkpoint_adapter(self)
-
-    def _require_operable(self) -> None:
-        if getattr(self, "_poisoned", True):
-            raise PhysicalFlightOwnerPoisonedError(
-                getattr(self, "_poison_reason", None)
-                or "physical checkpoint adapter is unavailable or poisoned"
-            )
-
-    def _require_frozen_boundary(self, boundary: object) -> None:
-        if (
-            boundary is not self._last_boundary
-            or self._last_snapshot is None
-            or self._last_freeze_receipt is None
-            or self._last_physical_receipt is None
-            or self._last_live_digest is None
-            or self._physical_owner._mutation_version
-            != self._last_freeze_receipt.mutation_version
-            or self._physical_owner._r10_live_digest()
-            != self._last_live_digest
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical freeze boundary is stale or absent"
-            )
-
-    def _boundary_pin(
-        self,
-        boundary: _r10.CheckpointBoundary,
-        snapshot: object,
-    ) -> _flight.CanonicalJsonContentPin:
-        payload = {
-            "schema_version": 1,
-            "kind": PHYSICAL_R10_BOUNDARY_PIN_KIND,
-            "r10_boundary_sha256": _r10.boundary_sha256(boundary),
-            "shared_join_snapshot_sha256": snapshot.canonical_sha256,
-            "provider_api_schema_sha256": (
-                CHECKPOINT_JOIN_PROVIDER_API_SCHEMA_SHA256
-            ),
-            "complete_env_step": True,
-            "env_reset_invoked": False,
-            "rollout_storage_empty": True,
-        }
-        mapping = {
-            **payload,
-            "canonical_sha256": _flight.canonical_sha256(payload),
-        }
-        return _flight.CanonicalJsonContentPin.from_sealed_mapping(
-            mapping,
-            expected_source_kind=PHYSICAL_R10_BOUNDARY_PIN_KIND,
-            source_schema_sha256=PHYSICAL_R10_BOUNDARY_PIN_SCHEMA_SHA256,
-        )
-
-    def mutation_version(self) -> int:
-        self._require_operable()
-        self._physical_owner._require_operable(
-            allow_prepared_restore=True
-        )
-        return self._physical_owner._mutation_version
-
-    def live_digest(self) -> str:
-        self._require_operable()
-        return self._physical_owner._r10_live_digest()
-
-    def freeze(self, boundary: object) -> object:
-        self._require_operable()
-        if type(boundary) is not _r10.CheckpointBoundary:
-            raise PhysicalFlightDeviceError(
-                "R10 physical freeze requires exact CheckpointBoundary"
-            )
-        _r10.validate_checkpoint_boundary(boundary)
-        owner = self._physical_owner
-        owner._require_operable()
-        owner._require_cpu_reference()
-        owner._require_checkpoint_idle()
-        owner._require_globally_acknowledged_checkpoint_frontier()
-        if (
-            len(boundary.worlds) != owner.num_envs
-            or tuple(world.world_id for world in boundary.worlds)
-            != tuple(range(owner.num_envs))
-            or tuple(world.reset_generation for world in boundary.worlds)
-            != tuple(owner._reset_generation)
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical boundary reset identities differ"
-            )
-        snapshot = self._provider.snapshot_for_checkpoint_boundary(boundary)
-        owned = self._provider.require_owned_snapshot(
-            boundary,
-            snapshot,
-            snapshot.canonical_sha256,
-        )
-        if owned is not snapshot:
-            raise PhysicalFlightDeviceError(
-                "R10 physical shared join snapshot identity differs"
-            )
-        pin = self._boundary_pin(boundary, snapshot)
-        authority = _PhysicalCheckpointAdapterAuthority(
-            adapter=self,
-            owner_identity=owner._owner_identity,
-            boundary=boundary,
-            shared_snapshot=snapshot,
-            boundary_pin=pin,
-            token=_CHECKPOINT_ADAPTER_AUTH_TOKEN,
-        )
-        self._active_owner_authority = authority
-        try:
-            physical_receipt = owner._checkpoint_cpu_reference(
-                adapter_authority=authority
-            )
-        finally:
-            self._active_owner_authority = None
-        digest = owner._r10_live_digest()
-        boundary_root = _r10.boundary_sha256(boundary)
-        freeze_receipt = _r10.OwnerFreezeReceipt(
-            owner_id=self.descriptor.owner_id,
-            descriptor_sha256=_r10.descriptor_sha256(self.descriptor),
-            boundary_sha256=boundary_root,
-            mutation_version=owner._mutation_version,
-            seal_nonce_sha256=_flight.canonical_sha256(
-                {
-                    "kind": "action_ball_physical_r10_freeze_nonce_v1",
-                    "boundary_sha256": boundary_root,
-                    "shared_join_snapshot_sha256": snapshot.canonical_sha256,
-                    "physical_checkpoint_receipt_sha256": (
-                        physical_receipt.canonical_sha256
-                    ),
-                    "mutation_version": owner._mutation_version,
-                }
-            ),
-        )
-        self._last_boundary = boundary
-        self._last_snapshot = snapshot
-        self._last_freeze_receipt = freeze_receipt
-        self._last_physical_receipt = physical_receipt
-        self._last_live_digest = digest
-        self._last_audit_frontier_claim = None
-        self._last_checkpoint_join_claims = None
-        self._last_exported_envelope = None
-        return freeze_receipt
-
-    def export_sealed(self, receipt: object) -> object:
-        """Seal one owner image without acknowledging the global R10 claim."""
-
-        try:
-            self._require_operable()
-            if receipt is not self._last_freeze_receipt:
-                raise PhysicalFlightDeviceError(
-                    "R10 physical freeze receipt is stale or foreign"
-                )
-            self._require_frozen_boundary(self._last_boundary)
-            if self._last_exported_envelope is not None:
-                if (
-                    self._last_audit_frontier_claim is None
-                    or self._last_checkpoint_join_claims is None
-                    or getattr(
-                        self._last_exported_envelope,
-                        "join_claims",
-                        None,
-                    )
-                    is not self._last_checkpoint_join_claims
-                ):
-                    raise PhysicalFlightDeviceError(
-                        "R10 physical retained export identities differ"
-                    )
-                return self._last_exported_envelope
-            physical_receipt = self._last_physical_receipt
-            if physical_receipt is None or self._last_live_digest is None:
-                raise PhysicalFlightDeviceError(
-                    "R10 physical sealed image is missing"
-                )
-            payload = _flight.canonical_json_bytes(
-                physical_receipt.to_mapping()
-            )
-            audit_claim = self._provider.prepare_checkpoint_audit_claim(
-                self._last_boundary,
-                self._last_snapshot,
-                self.descriptor.owner_id,
-            )
-            joins = self._provider.checkpoint_join_claims(
-                self._last_boundary,
-                self._last_snapshot,
-                self.descriptor.owner_id,
-                audit_claim,
-            )
-            if (
-                type(joins) is not tuple
-                or tuple(getattr(row, "join_id", None) for row in joins)
-                != (
-                    "per_world_reset_identity",
-                    "task_ball_r06_current",
-                    "ppo_drain_frontier",
-                )
-                or getattr(audit_claim, "drain_frontier_sha256", None)
-                != getattr(joins[2], "value_sha256", None)
-            ):
-                raise PhysicalFlightDeviceError(
-                    "R10 physical checkpoint join/audit surface differs"
-                )
-            envelope = _r10.make_opaque_owner_state(
-                descriptor=self.descriptor,
-                receipt=receipt,
-                live_digest_sha256=self._last_live_digest,
-                payload=payload,
-                join_claims=joins,
-            )
-            if getattr(envelope, "join_claims", None) is not joins:
-                raise PhysicalFlightDeviceError(
-                    "R10 physical envelope did not retain exact join claims"
-                )
-        except BaseException as exc:
-            self.poison_restore(
-                "R10 physical owner export failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            raise
-        self._last_audit_frontier_claim = audit_claim
-        self._last_checkpoint_join_claims = joins
-        self._last_exported_envelope = envelope
-        return envelope
-
-    def prepare_restore(
-        self,
-        envelope: object,
-        immutable_pins: object,
-        owner_root_sha256: str,
-    ) -> object:
-        self._require_operable()
-        owner = self._physical_owner
-        owner._require_operable()
-        owner._require_cpu_reference()
-        owner._require_checkpoint_idle()
-        if self._active_restore is not None:
-            raise PhysicalFlightDeviceError(
-                "one R10 physical restore is already prepared"
-            )
-        if type(envelope) is not _r10.OpaqueOwnerState:
-            raise PhysicalFlightDeviceError(
-                "R10 physical restore envelope type differs"
-            )
-        if type(immutable_pins) is not _r10.ImmutableCheckpointPins:
-            raise PhysicalFlightDeviceError(
-                "R10 physical immutable pins type differs"
-            )
-        expected_owner_root = _sha256(
-            owner_root_sha256,
-            label="checkpoint_owner_root_sha256",
-        )
-        for name in ("code_sha256", "config_sha256", "contract_sha256"):
-            _sha256(
-                getattr(immutable_pins, name),
-                label=f"immutable_pins.{name}",
-            )
-        descriptor_sha = _r10.descriptor_sha256(self.descriptor)
-        expected_join_ids = (
-            "per_world_reset_identity",
-            "task_ball_r06_current",
-            "ppo_drain_frontier",
-        )
-        claims = envelope.join_claims
-        if (
-            envelope.owner_id != self.descriptor.owner_id
-            or envelope.owner_schema_version != self.descriptor.schema_version
-            or envelope.state_kind != self.descriptor.state_kind
-            or envelope.descriptor_sha256 != descriptor_sha
-            or envelope.seal_status is not _r10.SealStatus.SEALED
-            or type(envelope.mutation_version) is not int
-            or envelope.mutation_version < 0
-            or type(envelope.payload) is not bytes
-            or not envelope.payload
-            or hashlib.sha256(envelope.payload).hexdigest()
-            != envelope.payload_sha256
-            or type(claims) is not tuple
-            or any(type(claim) is not _r10.OwnerJoinClaim for claim in claims)
-            or tuple(claim.join_id for claim in claims)
-            != expected_join_ids
-            or any(
-                _sha256(claim.value_sha256, label=claim.join_id)
-                != claim.value_sha256
-                for claim in claims
-            )
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical restore envelope/descriptor/join surface differs"
-            )
-        try:
-            mapping = json.loads(envelope.payload.decode("ascii"))
-        except (UnicodeError, json.JSONDecodeError) as exc:
-            raise PhysicalFlightDeviceError(
-                "R10 physical restore payload is not canonical JSON"
-            ) from exc
-        if (
-            not isinstance(mapping, Mapping)
-            or _flight.canonical_json_bytes(mapping) != envelope.payload
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical restore payload bytes differ"
-            )
-        expected_receipt_sha = _sha256(
-            mapping.get("canonical_sha256"),
-            label="physical_checkpoint_receipt_sha256",
-        )
-        try:
-            physical_receipt = _flight.PhysicalFlightCheckpointReceipt.from_mapping(
-                mapping,
-                expected_canonical_sha256=expected_receipt_sha,
-            )
-        except Exception as exc:
-            raise PhysicalFlightDeviceError(
-                "R10 physical restore receipt content differs"
-            ) from exc
-        boundary_pin = physical_receipt.checkpoint_boundary_authority
-        boundary_mapping = boundary_pin.decoded_mapping
-        if (
-            boundary_pin.source_kind != PHYSICAL_R10_BOUNDARY_PIN_KIND
-            or boundary_pin.source_schema_sha256
-            != PHYSICAL_R10_BOUNDARY_PIN_SCHEMA_SHA256
-            or boundary_mapping.get("r10_boundary_sha256")
-            != envelope.boundary_sha256
-            or boundary_mapping.get("provider_api_schema_sha256")
-            != CHECKPOINT_JOIN_PROVIDER_API_SCHEMA_SHA256
-            or physical_receipt.mutation_version != envelope.mutation_version
-            or _r10_live_digest_from_checkpoint_receipt(physical_receipt)
-            != envelope.live_digest_sha256
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical restore boundary/live digest differs"
-            )
-        authority = _PhysicalCheckpointAdapterAuthority(
-            adapter=self,
-            owner_identity=owner._owner_identity,
-            boundary=envelope.boundary_sha256,
-            shared_snapshot=tuple(claims),
-            boundary_pin=boundary_pin,
-            token=_CHECKPOINT_ADAPTER_AUTH_TOKEN,
-        )
-        self._active_owner_authority = authority
-        try:
-            image = owner._prepare_checkpoint_restore_cpu_reference(
-                physical_receipt,
-                adapter_authority=authority,
-            )
-        finally:
-            self._active_owner_authority = None
-        opaque = _PhysicalCheckpointRestoreOpaqueToken(
-            adapter=self,
-            authority=authority,
-            image=image,
-            checkpoint_owner_root_sha256=expected_owner_root,
-            token=_CHECKPOINT_RESTORE_TOKEN,
-        )
-        result = _r10.PreparedRestoreToken(
-            owner_id=self.descriptor.owner_id,
-            descriptor_sha256=descriptor_sha,
-            checkpoint_owner_root_sha256=expected_owner_root,
-            opaque_token=opaque,
-        )
-        self._active_restore = opaque
-        self._last_rolled_back_restore = None
-        return result
-
-    def commit_restore(self, token: object) -> None:
-        self._require_operable()
-        opaque = (
-            token.opaque_token
-            if type(token) is _r10.PreparedRestoreToken
-            else None
-        )
-        if (
-            type(opaque) is not _PhysicalCheckpointRestoreOpaqueToken
-            or opaque.token is not _CHECKPOINT_RESTORE_TOKEN
-            or opaque.adapter is not self
-            or opaque is not self._active_restore
-            or token.owner_id != self.descriptor.owner_id
-            or token.descriptor_sha256
-            != _r10.descriptor_sha256(self.descriptor)
-            or token.checkpoint_owner_root_sha256
-            != opaque.checkpoint_owner_root_sha256
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical restore token is stale or foreign"
-            )
-        self._active_owner_authority = opaque.authority
-        try:
-            self._physical_owner._commit_checkpoint_restore_cpu_reference(
-                opaque.image,
-                adapter_authority=opaque.authority,
-            )
-        except BaseException:
-            self._active_restore = None
-            self.poison_restore("R10 physical restore commit failed")
-            raise
-        finally:
-            self._active_owner_authority = None
-        self._active_restore = None
-        self._last_boundary = None
-        self._last_snapshot = None
-        self._last_freeze_receipt = None
-        self._last_physical_receipt = None
-        self._last_live_digest = None
-        self._last_audit_frontier_claim = None
-        self._last_checkpoint_join_claims = None
-        self._last_exported_envelope = None
-
-    def rollback_restore(self, token: object) -> None:
-        opaque = (
-            token.opaque_token
-            if type(token) is _r10.PreparedRestoreToken
-            else None
-        )
-        if opaque is self._last_rolled_back_restore:
-            return
-        if (
-            type(opaque) is not _PhysicalCheckpointRestoreOpaqueToken
-            or opaque.token is not _CHECKPOINT_RESTORE_TOKEN
-            or opaque.adapter is not self
-            or opaque is not self._active_restore
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical rollback token is stale or foreign"
-            )
-        self._active_owner_authority = opaque.authority
-        try:
-            self._physical_owner._rollback_checkpoint_restore_cpu_reference(
-                opaque.image,
-                adapter_authority=opaque.authority,
-            )
-        except BaseException:
-            self._active_restore = None
-            self.poison_restore("R10 physical restore rollback failed")
-            raise
-        finally:
-            self._active_owner_authority = None
-        self._active_restore = None
-        self._last_rolled_back_restore = opaque
-
-    def poison_restore(self, reason: str) -> None:
-        if self._poisoned:
-            return
-        clean_reason = (
-            reason
-            if type(reason) is str and reason.strip()
-            else "unspecified R10 physical restore failure"
-        )
-        self._poisoned = True
-        self._poison_reason = clean_reason
-        self._physical_owner.poison_global_reveal_epoch(clean_reason)
-
-    def checkpoint_join_claims(self, boundary: object) -> object:
-        self._require_operable()
-        self._require_frozen_boundary(boundary)
-        if (
-            self._last_exported_envelope is None
-            or self._last_audit_frontier_claim is None
-            or self._last_checkpoint_join_claims is None
-            or getattr(
-                self._last_exported_envelope,
-                "join_claims",
-                None,
-            )
-            is not self._last_checkpoint_join_claims
-        ):
-            raise PhysicalFlightDeviceError(
-                "R10 physical join claims require one successful owner export"
-            )
-        return self._last_checkpoint_join_claims
-
-    def checkpoint_boundary_authority_sha256(self) -> str:
-        self._require_operable()
-        self._require_frozen_boundary(self._last_boundary)
-        return _r10.boundary_sha256(self._last_boundary)
-
-    def checkpoint_config_authority_sha256(self) -> str:
-        self._require_operable()
-        return self._config_authority_sha256
-
-
 __all__ = [
     "AcknowledgedR06PhysicalSnapshot",
     "ActionEpochPhysicsFactAllocationProjection",
@@ -13457,16 +11598,13 @@ __all__ = [
     "PhysicalLateLaunchPublicationView",
     "PHYSICAL_SELECTED_RESET_DEVICE_PARK_INTEGRATED",
     "PHYSICAL_SELECTED_RESET_R05_ACK_INTEGRATED",
-    "PhysicalFlightCheckpointAdapter",
     "PhysicalFlightSceneSnapshotNK",
     "PhysicalDeviceInstallAbortReceipt",
     "PhysicalDeviceInstallPrepareReceipt",
     "PhysicalDeviceInstallTerminalReceipt",
     "PhysicalPostPhysicsPublication",
     "PhysicalRetireDeviceResult",
-    "PhysicalSelectedContactRewardCycleToken",
     "PhysicalSelectedContactRewardPaymentResult",
-    "PhysicalSelectedContactRewardCloseReceipt",
     "PhysicalSelectedContactRewardView",
     "PhysicalSettleRetireInput",
     "PhysicalSelectedTrueResetCompletionToken",

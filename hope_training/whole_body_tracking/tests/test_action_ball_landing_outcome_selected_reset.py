@@ -828,55 +828,6 @@ def test_n2_selected_reset_clears_only_selected_rows_and_acks_device_r05():
         owner.require_owned_selected_reset_completion(completion)
 
 
-def test_partial_payment_debt_blocks_current_d05_to_physical_selected_reset():
-    owner = H._coordinator(
-        rows=2,
-        flight_slots=2,
-        mailbox_slots=3,
-        bind_physical_park=False,
-    )
-    harness, reset_authority, physical = _bind_device_reset_fixture(owner)
-    full_key, _key, installed = H._install(owner)
-    assert installed.accepted.tolist() == [True, False]
-    full_keys = torch.zeros(
-        (2, D.TOKEN_BYTES), dtype=torch.uint8, device=owner.device
-    )
-    full_keys[0].copy_(full_key[0])
-    settlement = H._settle_batch_rows(
-        owner,
-        full_keys=full_keys,
-        ball_generations=torch.tensor(
-            (0, -1), dtype=torch.int64, device=owner.device
-        ),
-        observe_envs=(0,),
-        step=1,
-        retire=False,
-    )
-    # This test targets Reward debt before selected-reset staging.  Release the
-    # test-only legacy-shaped settlement handle without inventing a second
-    # Physical owner; the exact D05/Physical pair below remains untouched.
-    assert settlement.settled_mask[0, 0].item() is True
-    owner._latest_post_physics_settlement = None
-    _view, payment, _raw = H._pay(
-        owner, D.COMMON_ON_TABLE_CONSUMER, reward_epoch=1
-    )
-    assert payment.accepted.tolist() == [[True, False, False], [False, False, False]]
-    assert owner._mailbox_state[0, 0].item() == D.MAILBOX_PARTIALLY_PAID
-    physical_before = physical.scene_snapshot()
-    prepared_r05 = _prepare_device_reset(harness, reset_authority)
-
-    with pytest.raises(D.LandingOutcomeDeviceError, match="stale debt"):
-        owner.prepare_selected_reset(prepared_r05)
-
-    physical_after = physical.scene_snapshot()
-    assert torch.equal(
-        physical_before.state_env_f32, physical_after.state_env_f32
-    )
-    assert owner._active_selected_reset_lease is None
-    assert physical._active_selected_reset_stage is None
-    assert physical._active_selected_reset_finalize is None
-
-
 def test_selected_reset_generation_regression_becomes_global_fault_debt():
     drain = _global_drain_module()
     owner = H._coordinator(

@@ -20,12 +20,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from test_action_ball_r10_runner_checkpoint import (
-    _Adapter,
+from _action_ball_runner_test_harness import (
     _Env,
     _load_runner_module,
-    E,
-    RUNNER_PATH,
 )
 from test_joint_limit_safety import (
     _action_and_env,
@@ -53,139 +50,6 @@ def runner_module():
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = previous
-
-
-class _DrainOwner:
-    """Recorder implementing only the production owner API seen by runner."""
-
-    def __init__(
-        self,
-        events,
-        *,
-        fail_prepare=False,
-        fail_mark=False,
-        fail_ack=False,
-    ):
-        self.events = events
-        self.fail_prepare = fail_prepare
-        self.fail_mark = fail_mark
-        self.fail_ack = fail_ack
-        self.healthy = True
-        self.tokens = []
-        self.completed_by_token = {}
-        self.optimizer_returns = []
-        self.acks = []
-        self.poisons = []
-        from test_action_ball_r10_runner_checkpoint import _GlobalDrainOwner
-
-        self.global_drain = _GlobalDrainOwner()
-
-    def require_healthy(self):
-        self.events.append("healthy")
-        if not self.healthy:
-            raise RuntimeError("owner poisoned")
-
-    def prepare_pre_optimizer_ppo_boundary(
-        self, *, update_index, completed_environment_steps
-    ):
-        self.events.append(("prepare", update_index, completed_environment_steps))
-        if self.fail_prepare:
-            raise RuntimeError("prepare mismatch")
-        token = object()
-        self.tokens.append(token)
-        self.completed_by_token[token] = completed_environment_steps
-        return token
-
-    def mark_optimizer_returned(self, token, *, update_index):
-        assert token is self.tokens[-1]
-        self.events.append(("optimizer_returned", update_index))
-        if self.fail_mark:
-            raise RuntimeError("optimizer-return mismatch")
-        self.optimizer_returns.append(token)
-
-    def acknowledge_post_update(self, token, *, update_index):
-        assert token is self.optimizer_returns[-1]
-        self.events.append(("ack", update_index))
-        if self.fail_ack:
-            raise RuntimeError("ack mismatch")
-        self.acks.append(token)
-        completed = self.completed_by_token[token]
-        self.global_drain.acknowledge(token, update_index, completed)
-        # Owner receipts are intentionally opaque to the runner.
-        return {"owner_receipt": "not-runner-authority"}
-
-    def poison_optimizer_boundary(
-        self, token, *, update_index, reason
-    ):
-        self.healthy = False
-        self.events.append(("poison", update_index, token is None))
-        self.poisons.append((token, update_index, reason))
-
-
-def _runner(
-    runner_module,
-    owner,
-    events,
-    *,
-    disable_logs=True,
-    rank=7,
-):
-    env = _Env()
-    env._drain_owner = owner.global_drain
-    adapter = _Adapter(save=False)
-    adapter.module = runner_module
-    adapter.env = env
-    adapter.runtime_owner = owner
-    adapter._source = SimpleNamespace(family=E.checkpoint.PolicyFamily.A)
-    adapter._runner_api = E.RunnerCheckpointApiAuthority(
-        schema_version=E.SCHEMA_VERSION,
-        kind="action_ball_r10_runner_checkpoint_api_authority_v1",
-        source_sha256=hashlib.sha256(RUNNER_PATH.read_bytes()).hexdigest(),
-        training_launch_claim_sha256=hashlib.sha256(
-            b"launch-claim"
-        ).hexdigest(),
-        boundary_handoff_type=(
-            runner_module.ActionBallR10RunnerBoundaryHandoff
-        ),
-        save_authority_type=(runner_module.ActionBallR10RunnerSaveAuthority),
-    )
-    runner = runner_module.MotionOnPolicyRunner(
-        env,
-        {"num_steps_per_env": 2, "leave_storage_full": False},
-        log_dir="/tmp/full-mdp-runner-drain-test",
-        training_contract_schema_version=1,
-        training_contract_sha256=adapter.contract_sha256,
-        training_contract_lineage_exact=True,
-        training_launch_claim_sha256=(
-            hashlib.sha256(b"launch-claim").hexdigest()
-        ),
-        require_exact_resume_state=True,
-        action_ball_r10_checkpoint_adapter=adapter,
-        action_ball_full_mdp_runtime_owner=owner,
-    )
-
-    runner.disable_logs = disable_logs
-    runner.rank = rank
-
-    original_update = runner.alg.update
-
-    def optimizer():
-        events.append("optimizer")
-        return original_update()
-
-    runner.alg.update = optimizer
-    runner.env.unwrapped.command_manager = SimpleNamespace(
-        active_terms=("full_mdp",),
-        get_term=lambda _name: SimpleNamespace(
-            on_rollout_end=lambda step: events.append(("rollout_end", step))
-        ),
-    )
-    runner_module.MotionOnPolicyRunner._notify_command_terms_rollout_end = (
-        lambda self, step: self.env.unwrapped.command_manager.get_term(
-            "full_mdp"
-        ).on_rollout_end(step)
-    )
-    return runner, env, adapter
 
 
 def _diagnostic_runner(
@@ -562,28 +426,6 @@ def _durable_wal_scan(runner):
     )
 
 
-def test_constructor_requires_runtime_owner_and_r10_together(runner_module):
-    owner = _DrainOwner([])
-    owner_only_env = _Env()
-    owner_only_env._drain_owner = owner.global_drain
-    with pytest.raises(RuntimeError, match="runtime owner and R10.*together"):
-        runner_module.MotionOnPolicyRunner(
-            owner_only_env,
-            {"num_steps_per_env": 2},
-            action_ball_full_mdp_runtime_owner=owner,
-        )
-    assert owner_only_env.getter_calls == 0
-
-    adapter_only_env = _Env()
-    with pytest.raises(RuntimeError, match="runtime owner and R10.*together"):
-        runner_module.MotionOnPolicyRunner(
-            adapter_only_env,
-            {"num_steps_per_env": 2},
-            action_ball_r10_checkpoint_adapter=object(),
-        )
-    assert adapter_only_env.getter_calls == 0
-
-
 @pytest.mark.parametrize("num_envs", (1, 2, 64))
 def test_single_action_lean_runner_accepts_positive_n(
     runner_module, num_envs
@@ -627,6 +469,32 @@ def test_single_action_lean_forbids_invalid_n_r10_or_capsule(
             action_ball_full_mdp_run_mode="single_action_lean",
             action_ball_r10_cold_restore_capsule=object(),
         )
+
+
+def test_ordinary_runner_without_full_mdp_owner_never_enters_r10(
+    runner_module, tmp_path
+):
+    env = _Env()
+    env.command_manager = SimpleNamespace(
+        get_term=lambda _name: SimpleNamespace(on_rollout_end=lambda _step: None)
+    )
+    runner = runner_module.MotionOnPolicyRunner(
+        env,
+        {"num_steps_per_env": 2, "leave_storage_full": False},
+        log_dir=str(tmp_path),
+        training_contract_schema_version=1,
+        training_contract_sha256=hashlib.sha256(
+            b"ordinary-no-r10-contract"
+        ).hexdigest(),
+        training_contract_lineage_exact=True,
+    )
+    runner.learn(1)
+    assert env.getter_calls == 2
+    assert env.reset_calls == 0
+    assert env.step_calls == 2
+    assert not hasattr(runner, "_action_ball_r10_last_boundary_handoff") or (
+        runner._action_ball_r10_last_boundary_handoff is None
+    )
 
 
 def test_diagnostic_ack_returns_one_typed_summary_and_one_marker(
@@ -1043,24 +911,6 @@ def test_full_mdp_compact_joint_safety_predicate_does_not_widen_auxiliaries(
     assert runner._diagnostic_joint_safety_compact_evidence() is False
     assert runner._consume_actual_joint_forbidden_diagnostic(0) is None
     assert runner._consume_push_velocity_diagnostic_update(0) is None
-
-    events = []
-    formal_owner = _DrainOwner(events)
-    formal_runner, formal_env, _adapter = _runner(
-        runner_module, formal_owner, events
-    )
-    formal_env.cfg.commands.racket_target.target_mode = (
-        "action_ball_full_mdp"
-    )
-    assert (
-        formal_runner._full_mdp_diagnostic_joint_safety_compact_evidence()
-        is False
-    )
-    assert (
-        formal_runner._diagnostic_joint_safety_compact_update_evidence()
-        is False
-    )
-
 
 def test_diagnostic_full_mdp_joint_safety_drains_once_per_update_and_keeps_actual_edge(
     runner_module, capsys
@@ -2059,9 +1909,9 @@ def test_diagnostic_control_checkpoint_holds_before_any_directory_creation(
 def test_diagnostic_rejects_foreign_owner_before_observation_or_sampling(
     runner_module,
 ):
-    owner = _DrainOwner([])
+    owner = object()
     env = _Env(obs_mode="action_ball_full_mdp", target_mode="action_ball_full_mdp")
-    env._drain_owner = owner.global_drain
+    env._drain_owner = owner
     with pytest.raises(RuntimeError, match="exact code-owned lean runtime owner"):
         runner_module.MotionOnPolicyRunner(
             env,
@@ -2231,294 +2081,3 @@ def test_diagnostic_joint_safety_localization_uses_the_existing_cuda_pack(
     ]
     runner._commit_diagnostic_joint_safety_update(prepared)
     assert term.acknowledged is True
-
-
-def test_disable_logs_and_nonprimary_rank_still_drain_every_update(
-    runner_module,
-):
-    events = []
-    owner = _DrainOwner(events)
-    runner, env, adapter = _runner(
-        runner_module,
-        owner,
-        events,
-        disable_logs=True,
-        rank=7,
-    )
-
-    runner.learn(2)
-
-    assert env.step_calls == 4
-    assert len(owner.tokens) == len(owner.acks) == 2
-    assert owner.poisons == []
-    assert adapter.handoffs[0].completed_update_index == 0
-    assert adapter.handoffs[1].completed_update_index == 1
-    assert [event for event in events if event != "healthy"] == [
-        ("prepare", 0, 4),
-        "optimizer",
-        ("optimizer_returned", 0),
-        ("rollout_end", 0),
-        ("ack", 0),
-        ("prepare", 1, 8),
-        "optimizer",
-        ("optimizer_returned", 1),
-        ("rollout_end", 1),
-        ("ack", 1),
-    ]
-
-
-def test_low_reward_result_is_not_a_drain_gate(runner_module):
-    events = []
-    owner = _DrainOwner(events)
-    runner, _env, _adapter = _runner(runner_module, owner, events)
-    original_update = runner.alg.update
-
-    def low_reward_optimizer():
-        original_update()
-        return {"mean_reward": -1.0e30, "loss": 1.0e20}
-
-    runner.alg.update = low_reward_optimizer
-    runner.learn(1)
-
-    assert len(owner.acks) == 1
-    assert owner.poisons == []
-
-
-def test_prepare_mismatch_runs_zero_optimizer_and_poison_disables_retry(
-    runner_module,
-):
-    events = []
-    owner = _DrainOwner(events, fail_prepare=True)
-    runner, _env, _adapter = _runner(runner_module, owner, events)
-
-    with pytest.raises(RuntimeError, match="pre-optimizer drain failed"):
-        runner.learn(1)
-    assert "optimizer" not in events
-    assert len(owner.poisons) == 1
-    assert owner.poisons[0][0] is None
-    assert runner._action_ball_full_mdp_boundary_poisoned is True
-    with pytest.raises(RuntimeError, match="checkpoint is forbidden"):
-        runner._checkpoint_infos()
-    with pytest.raises(RuntimeError, match="poisoned|retry is forbidden"):
-        runner.learn(1)
-    assert len(owner.poisons) == 1
-    assert "optimizer" not in events
-
-
-def test_owner_callback_surface_is_exactly_preflighted_before_sampling(
-    runner_module,
-):
-    env = _Env()
-    incomplete = SimpleNamespace(
-        require_healthy=lambda: None,
-        prepare_pre_optimizer_ppo_boundary=lambda **_kwargs: object(),
-        acknowledge_post_update=lambda *_args, **_kwargs: None,
-        poison_optimizer_boundary=lambda *_args, **_kwargs: None,
-    )
-    env._drain_owner = SimpleNamespace(
-        require_owned_runner_frontier_projection=lambda _receipt: object()
-    )
-    with pytest.raises(RuntimeError, match="mark_optimizer_returned"):
-        runner_module.MotionOnPolicyRunner(
-            env,
-            {"num_steps_per_env": 2},
-            action_ball_r10_checkpoint_adapter=object(),
-            action_ball_full_mdp_runtime_owner=incomplete,
-        )
-    assert env.getter_calls == 0
-
-
-def test_optimizer_mark_or_ack_failure_poison_and_forbid_checkpoint(
-    runner_module,
-):
-    for failure in ("optimizer", "mark", "ack"):
-        events = []
-        owner = _DrainOwner(
-            events,
-            fail_mark=failure == "mark",
-            fail_ack=failure == "ack",
-        )
-        runner, _env, _adapter = _runner(runner_module, owner, events)
-        if failure == "optimizer":
-            runner.alg.update = lambda: (
-                events.append("optimizer"),
-                (_ for _ in ()).throw(RuntimeError("optimizer failed")),
-            )[-1]
-
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                f"{failure}.*failed|ack mismatch|optimizer-return mismatch"
-            ),
-        ):
-            runner.learn(1)
-        assert len(owner.poisons) == 1
-        assert owner.poisons[0][0] is owner.tokens[0]
-        assert len(owner.optimizer_returns) == (1 if failure == "ack" else 0)
-        assert runner._action_ball_full_mdp_boundary_active is True
-        with pytest.raises(RuntimeError, match="checkpoint is forbidden"):
-            runner._checkpoint_infos()
-
-
-def test_projection_mismatch_after_ack_poisoned_and_cannot_retry(
-    runner_module,
-):
-    events = []
-    owner = _DrainOwner(events)
-    runner, _env, adapter = _runner(runner_module, owner, events)
-    projection = owner.global_drain
-    original_acknowledge = projection.acknowledge
-
-    def mismatched_acknowledge(token, update_index, completed):
-        original_acknowledge(token, update_index, completed)
-        projection.projection.completed_environment_steps += 1
-
-    projection.acknowledge = mismatched_acknowledge
-
-    with pytest.raises(RuntimeError, match="frontier chronology differs"):
-        runner.learn(1)
-    assert adapter.publication is None
-    assert len(owner.acks) == 1
-    assert len(owner.poisons) == 1
-    assert owner.poisons[0][0] is owner.tokens[0]
-    with pytest.raises(RuntimeError, match="poisoned|retry is forbidden"):
-        runner.learn(1)
-    assert len(owner.tokens) == 1
-
-
-def test_projection_identity_must_repeat_at_checkpoint_boundary(
-    runner_module,
-    monkeypatch,
-):
-    events = []
-    owner = _DrainOwner(events)
-    runner, _env, adapter = _runner(runner_module, owner, events)
-    adapter.save = True
-    call_count = 0
-    projection_owner = owner.global_drain
-
-    def replace_saved_callback(self, receipt):
-        nonlocal call_count
-        call_count += 1
-        if receipt is not self.latest or self.projection is None:
-            raise RuntimeError("stale or foreign fake global receipt")
-        value = self.projection
-        if call_count == 1:
-            return value
-        replacement = object.__new__(type(value))
-        replacement.__dict__.update(value.__dict__)
-        return replacement
-
-    monkeypatch.setattr(
-        type(owner.global_drain),
-        "require_owned_runner_frontier_projection",
-        replace_saved_callback,
-    )
-    runner._action_ball_full_mdp_projection_callback = (
-        projection_owner.require_owned_runner_frontier_projection
-    )
-
-    with pytest.raises(RuntimeError, match="projection identity changed"):
-        runner.learn(1)
-    assert adapter.publication is None
-    assert len(owner.poisons) == 1
-
-
-def _schema_with_first_owner_fields(*fields):
-    from test_action_ball_r10_runner_checkpoint import (
-        _DRAIN_SCHEMA_IDENTITY,
-    )
-
-    first_owner, legacy_fields = _DRAIN_SCHEMA_IDENTITY[0]
-    return (
-        (first_owner, legacy_fields + tuple(fields)),
-    ) + _DRAIN_SCHEMA_IDENTITY[1:]
-
-
-def test_projection_accepts_owner_supplied_mixed_legacy_and_fixed_schema(
-    runner_module,
-):
-    events = []
-    owner = _DrainOwner(events)
-    expected = _schema_with_first_owner_fields(
-        ("portable_row", "per_env", 0),
-        ("journal_values", "fixed", 0, 4),
-    )
-    owner.global_drain.schema_identity = expected
-    runner, _env, _adapter = _runner(runner_module, owner, events)
-
-    runner.learn(1)
-
-    assert len(owner.acks) == 1
-    assert owner.poisons == []
-    assert (
-        runner._action_ball_full_mdp_last_drain_chronology
-        .projection.schema_identity
-        is expected
-    )
-
-
-@pytest.mark.parametrize(
-    ("field", "message"),
-    (
-        (("journal_values", "fixed", 0), "fixed schema width"),
-        (("journal_values", "fixed", 0, 0), "fixed schema width"),
-        (("journal_values", "fixed", 0, True), "fixed schema width"),
-        (("journal_values", "variable", 0, 4), "field identity"),
-        (("legacy_counter", "scalar", 0, 4), "foreign width"),
-        (("portable_row", "per_env", 0, 4), "foreign width"),
-    ),
-)
-def test_projection_rejects_malformed_fixed_or_drifted_legacy_schema(
-    runner_module,
-    field,
-    message,
-):
-    events = []
-    owner = _DrainOwner(events)
-    owner.global_drain.schema_identity = _schema_with_first_owner_fields(field)
-    runner, _env, adapter = _runner(runner_module, owner, events)
-
-    with pytest.raises(RuntimeError, match=message):
-        runner.learn(1)
-
-    assert adapter.publication is None
-    assert len(owner.acks) == 1
-    assert len(owner.poisons) == 1
-
-
-@pytest.mark.parametrize(
-    "replacement",
-    (
-        ("journal_values", "fixed", 0, 5),
-        ("mutation_version", "scalar", 1),
-    ),
-)
-def test_projection_rejects_fixed_width_or_legacy_identity_drift(
-    runner_module,
-    replacement,
-):
-    events = []
-    owner = _DrainOwner(events)
-    owner.global_drain.schema_identity = _schema_with_first_owner_fields(
-        ("journal_values", "fixed", 0, 4)
-    )
-    runner, _env, adapter = _runner(runner_module, owner, events)
-    runner.learn(1)
-
-    if replacement[0] == "mutation_version":
-        schema = list(owner.global_drain.schema_identity)
-        owner_id, fields = schema[0]
-        schema[0] = (owner_id, (replacement,) + fields[1:])
-        owner.global_drain.schema_identity = tuple(schema)
-    else:
-        owner.global_drain.schema_identity = _schema_with_first_owner_fields(
-            replacement
-        )
-
-    with pytest.raises(RuntimeError, match="schema identity drifted"):
-        runner.learn(1)
-
-    assert adapter.publication is None
-    assert len(owner.acks) == 2
-    assert len(owner.poisons) == 1

@@ -52,12 +52,14 @@ batch 翻倍掩盖吞吐没有改善。
    `H/lambda/epochs/minibatches/budget/save`，但recipe hash只证明provenance，不证明学习更好。
 4. **MuJoCo capacity**：在project-owned pinned wheel中修EPA horizon，跑24-fail/48-pass deterministic fixture与
    exact GPU focused；不删除容量gate，不从r3恢复。
-5. **Phase-B结构删除**：物理删除zero-callpoint formal owner、reveal adapter、旧Reward/Physical/R06 exact-pin
-   family及专属测试。不得为了旧壳添加compatibility adapter。
+5. **Phase-B结构删除（branch candidate / host闭合）**：已物理删除zero-callpoint formal owner、其
+   Reward/Physical/R06专属top-cycle与exact-pin适配层及专属测试；旧class/import的production caller静态
+   census为0。不得为了旧壳添加compatibility adapter；Pod语义与wall仍未测，Gate保持`Partial`。
 6. **single-owner hot path**：一个device-resident mutable `ActionBallState`拥有phase/generation/shot/contact/
    outcome/fault；K-row候选只构造一次、一次sparse commit，只有真实transition写compact event delta。
    zero-live-flight成对跳过Physical/scene/R06/Epoch空事务；PPO boundary再统一汇总。
-7. **性能与语义验收**：clean source做fixed-tape RNG/highwater/reason/done/reset/Reward20/237/407 parity；
+7. **性能与语义验收**：clean source做fixed-tape RNG/highwater/reason/done/reset/Reward20/A=`203/219`
+   （未来C=`202/218`）parity；
    同卡、profiler-off、matched zero/mixed/active strata A/B。总update与transitions/s都必须显著改善；若最大span
    转移则重新profile，只处理新的首墙，不继续堆小clone补丁。
 8. **fresh运行**：先运行clock-fixed、EPA-fixed的portable MuJoCo V2，随后运行通过matched性能验收的Isaac V2；
@@ -88,7 +90,8 @@ counter、用随机rollout证明确定性几何，以及`ACCEPT>0`/zero-policy�
 
 ## 1. 训练目标与口径
 
-- 长跑目标是**同一进程 `4096 env × 25000 PPO update`**；`1000 update`只是早期趋势里程碑，
+- PPO V2长跑目标是**同一进程 `4096 env × 12500 PPO update × 48 control steps`**；它与旧
+  `4096 × 25000 × 24`保持总transition量级。`500 update`只是早期趋势里程碑，
   不是终点，也不为它重启或停止。
 - 当前代严格使用 `action_slot=0`。manifest与motion bank仍冷加载并校验73行，但fresh Isaac cadence、
   genesis、Device-R05和selected reset都保持slot 0；这不是73动作训练。

@@ -46,8 +46,9 @@ deployment、真机或物理安全。
 - 现役单动作family A/C只走
   [`FullMDP Phase-A direct-lean runtime`](../DEFINITIONS.md#fullmdp-phase-a-direct-lean)：exact lean owner
   是唯一可构造top owner；formal runtime选择、partial installer和逐leaf getter已从现役路径退休。
-  `action_ball_full_mdp_runtime_owner.py`暂留为dormant Phase-B删除对象，不再提供安全、执行或checkpoint
-  权威。保留的是真实独立边界：source/API pin、lease/seal、component identity、reset
+  `action_ball_full_mdp_runtime_owner.py`及其专属适配面已由Phase-B branch candidate物理退役，不再提供
+  安全、执行或checkpoint权威；详细证据见
+  [FullMDP hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。保留的是真实独立边界：source/API pin、lease/seal、component identity、reset
   generation/overflow、finite/sticky poison，以及仍禁止exact resume的FullMDP `R10 HOLD`。同一writer
   生成的依赖有向无环图（DAG）/hash/receipt不能自证安全；这项结构减法也不证明`6 s/update`或任何
   Gate Done。

@@ -564,6 +564,77 @@ def test_optimizer_exception_poisoned_without_wal_or_ack(tmp_path, _fake_imports
     assert env.action_term.acknowledged == 0
 
 
+def test_low_reward_optimizer_success_is_not_an_ack_gate(
+    tmp_path, _fake_imports, capsys
+):
+    env = _Env()
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    result = boundary.update(
+        lambda: {"mean_reward": -1.0e30, "mean_loss": 1.0e30},
+        update_index=0,
+        completed_environment_steps=48,
+    )
+    assert result == {"mean_reward": -1.0e30, "mean_loss": 1.0e30}
+    assert env.owner.poisoned is False
+    names = [
+        event if isinstance(event, str) else event[0]
+        for event in env.owner.events
+    ]
+    assert names[-5:] == ["mark", "summary", "ack", "latch", "safety_ack"]
+    assert [
+        json.loads(line)["kind"]
+        for line in boundary._path.read_text().splitlines()
+    ] == [
+        "action_ball_epoch_durable_pending_v2",
+        "action_ball_epoch_durable_ack_v2",
+    ]
+    assert "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=" in capsys.readouterr().out
+
+
+def test_mark_optimizer_returned_failure_is_sticky_and_never_acks(
+    tmp_path, _fake_imports, capsys, monkeypatch
+):
+    env = _Env()
+
+    def fail_mark(self, _boundary, *, update_index):
+        del update_index
+        self.events.append("mark_failed")
+        raise RuntimeError("injected optimizer-return mark failure")
+
+    monkeypatch.setattr(_Owner, "mark_optimizer_returned", fail_mark)
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    with pytest.raises(RuntimeError, match="retry forbidden") as caught:
+        boundary.update(
+            lambda: env.owner.events.append("update"),
+            update_index=0,
+            completed_environment_steps=48,
+        )
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert "optimizer-return mark failure" in str(caught.value.__cause__)
+    assert env.owner.poisoned is True
+    names = [
+        event if isinstance(event, str) else event[0]
+        for event in env.owner.events
+    ]
+    assert names[-3:] == ["update", "mark_failed", "poison"]
+    assert "summary" not in names
+    assert "ack" not in names
+    assert boundary._path.read_bytes() == b""
+    assert env.action_term.pending is not None
+    assert env.action_term.acknowledged == 0
+    assert "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=" not in capsys.readouterr().out
+    with pytest.raises(RuntimeError, match="retry forbidden"):
+        boundary.update(
+            lambda: None,
+            update_index=0,
+            completed_environment_steps=48,
+        )
+
+
 def test_pending_fsync_failure_precedes_destructive_owner_ack(
     tmp_path, _fake_imports, monkeypatch
 ):
