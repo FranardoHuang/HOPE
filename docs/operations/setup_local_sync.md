@@ -70,6 +70,8 @@ git check-ignore -q vendor_assets
 | ChingMu same-clock source: local `/Users/Franco/Downloads/ChingMu_Selected`; Pod `/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected`; retarget PKL `/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2` | Raw delivery has 41 human BVH, 41 racket BVH, 41 table BVH and 26 ball BVH at 120 Hz. The canonical source manifest contains 74 units with 74/74 unit NPZ+JSON and 74/74 PKL on Pod; the 73-action catalog explicitly excludes `Take_085_unit00_FH`. Unit NPZ carries blade/butt/signed-normal in one clock | **LOCATED; preserve source and every historical bank.** The v3 bank is revoked because its long axis was 45 degrees wrong. Corrected kinematic root: `/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j`; repo sibling `assets/motions/chingmu73_measured_v4_20260803`; completion/import receipt SHA `c45768b0...ab9a1` / `e6f0283f...727a82`; solver/materializer/auditor/resigner SHA `d6d6bfdd...57af5` / `34cf0f4c...99fe4` / `ddcb90b3...cddfa` / `32ee85be...bac9`. Kinematic admission is 73/73, but mechanical admission fails: 37/73 velocity and 58/73 limit-margin counterexamples. It is diagnostic-only, not training/promotion authority | G03 measured-racket calibration; G05 canonical N1; MuJoCo successor |
 | Tracked `assets/motions/chingmu73_measured_a3p0807_20260808/` plus `configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json` | FullMDP successor's 73 ordered teachers re-solved on the runtime 0807 A3P plant; frame-0 `pelvis_link` yaw is exact-grounded and action UIDs are rebound to the new motion bytes | Restore from the exact Git commit, never substitute the old v4 plant bank. Global audit remains `mechanical_admission=false` with 0/73 admitted (joint position/velocity plus missing vendor acceleration/torque-speed/ID evidence), so this is diagnostic lineage only | G05 FullMDP A/C diagnostic longrun |
 | `vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl` | portable MuJoCo Full-A使用的exact upstream RSL-RL 3.1.2 wheel；只供fresh run-local隔离环境，不替换ambient Pod环境 | Pod1 preserved source `/workspace/franco/mktemp/mujoco-fullmdp-wait-rsl3-host.20260818T112000CST/wheelhouse/rsl_rl_lib-3.1.2-py3-none-any.whl`；SHA-256 `406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d` | G06 portable MuJoCo focused gate及4096×25000长跑 |
+| `vendor_assets/mujoco_warp_3_10_0_3_source/mujoco_warp-3.10.0.3.tar.gz` | project-owned EPA48 fork的exact upstream源码输入；不是可执行wheel | PyPI `mujoco-warp==3.10.0.3` sdist，tag `v3.10.0.3` / commit `710c34ca…5728`，SHA-256 `f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070`；按下文显式恢复 | G06 EPA horizon build chain |
+| `vendor_assets/mujoco_warp_epa48_1/` | ignored、no-clobber的`mujoco-warp==3.10.0.3+hope.epa48.1` wheel与build receipt | 只由tracked provenance/patch和`build_mujoco_warp_epa48.py`离线构建；patched source在临时目录exact重建，不从PyPI找同名wheel，不安装进ambient环境 | G06 EPA48 GPU fixture候选输入；当前不授权训练 |
 | Planned ignored root `vendor_assets/mocap/optitrack_20260730_full/` | 2026-07-30 full OptiTrack raw C3D and canonical extracted NPZ for ball, `PPP1/PPP2` rackets and table in one clock; calibration/schema evidence, not automatically a 73 body-motion teacher | **UNRESOLVED in this checkout:** restore exact private C3D/extracted bytes and record SHA/source path. The tracked extractor/docs do not recreate missing measurements | G03 physics/calibration and marker-to-site method |
 | RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
@@ -103,6 +105,57 @@ mv "$RSL3_STAGE" vendor_assets/rsl_rl_3_1_2
 发车时把该wheel复制进fresh、不可复用的run root，再验证同一SHA并安装到run-local隔离环境；不得从
 PyPI latest、同名未知wheel或ambient 5.4.0替代。若preserved source消失，只能从另一个内容寻址备份恢复
 同一SHA；找不到时G06保持`Partial`，不得联网重建一个“近似3.1.2”。
+
+### Restore and build the project-owned [MuJoCo-Warp EPA48 fork](../DEFINITIONS.md#mujoco-warp-epa48-fork)
+
+这条链只解决“从哪份源码、改了哪两个字节域、产出的wheel到底是什么”，不证明EPA48已修复r3那一对
+稀有凸碰撞。upstream唯一输入是Apache-2.0的`mujoco-warp==3.10.0.3` sdist；Git tag
+`v3.10.0.3`解析到commit `710c34ca96745a44bfb701cdbda89e1434845728`。先在checkout外显式下载并
+核SHA，再no-clobber发布；build脚本本身绝不联网：
+
+```bash
+MJWARP_SOURCE_STAGE=$(mktemp -d ../nohope-mjwarp-source.XXXXXX)
+curl --proto '=https' --tlsv1.2 --fail --location \
+  https://files.pythonhosted.org/packages/4f/02/1687ee928ea468345546af79dcfd65da9cd5840e16d1e71a244223494e54/mujoco_warp-3.10.0.3.tar.gz \
+  --output "$MJWARP_SOURCE_STAGE/mujoco_warp-3.10.0.3.tar.gz"
+printf '%s  %s\n' \
+  f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070 \
+  "$MJWARP_SOURCE_STAGE/mujoco_warp-3.10.0.3.tar.gz" | shasum -a 256 -c -
+test ! -e vendor_assets/mujoco_warp_3_10_0_3_source
+mv "$MJWARP_SOURCE_STAGE" vendor_assets/mujoco_warp_3_10_0_3_source
+```
+
+caller必须是独立、已准备好的Python `>=3.10` builder，预先具备支持该PEP 621 `pyproject.toml`的
+`pip`、`setuptools`、`wheel`和系统`patch`。脚本不会创建环境、升级或安装这些依赖；缺失或过旧就由
+build/版本核验自然fail closed，不另造一套版本解析器。它强制
+`pip wheel --no-index --no-deps --no-build-isolation`，并把Python executable及SHA与Python/pip/
+setuptools/wheel版本和distribution root写入receipt。`patch`只是应用已钉SHA的tracked diff，不另造
+一套工具二进制身份门。不要为这一步修改Pod ambient venv：
+
+```bash
+MJWARP_BUILDER_PYTHON=/absolute/path/to/isolated-builder/bin/python
+test -x "$MJWARP_BUILDER_PYTHON"
+test ! -e vendor_assets/mujoco_warp_epa48_1
+
+"$MJWARP_BUILDER_PYTHON" scripts/build_mujoco_warp_epa48.py build \
+  --sdist vendor_assets/mujoco_warp_3_10_0_3_source/mujoco_warp-3.10.0.3.tar.gz \
+  --output-root vendor_assets/mujoco_warp_epa48_1 \
+  --python "$MJWARP_BUILDER_PYTHON"
+
+"$MJWARP_BUILDER_PYTHON" scripts/build_mujoco_warp_epa48.py verify \
+  --sdist vendor_assets/mujoco_warp_3_10_0_3_source/mujoco_warp-3.10.0.3.tar.gz \
+  --artifact-root vendor_assets/mujoco_warp_epa48_1
+```
+
+tracked patch只允许两处变化：`pyproject.toml`把local version改成
+`3.10.0.3+hope.epa48.1`，`mujoco_warp/_src/types.py`把`MJ_MAX_EPAHORIZON=24`改成`48`；
+builder对patch前后全树做两文件allowlist diff，再核wheel filename、`METADATA`、exact patched
+sdist的281-file package payload、无missing/extra/duplicate/unsafe ZIP member、`RECORD`、receipt
+schema/build evidence和wheel SHA。输出仍只是
+`PASS_BUILD_CHAIN_ONLY`：当前没有保存下来的deterministic 24-fail/48-pass MJCF+pose fixture，没有
+exact GPU复测，也没有instrumented/ASan独立oracle。stock CPU MuJoCo同样把EPA horizon硬编码为24，且
+该边界可能越界，不能直接拿来当oracle。运行时`d.overflow`/warning fail-stop不得关闭；任一缺口存在时
+G06保持`Partial`，不得从r3恢复或授权训练。
 
 ## ChingMu measured-racket rebuild contract
 

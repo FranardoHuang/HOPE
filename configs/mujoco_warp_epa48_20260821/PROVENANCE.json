@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "fork_id": "hope_mujoco_warp_epa48_v1",
+  "upstream": {
+    "distribution": "mujoco-warp",
+    "version": "3.10.0.3",
+    "repository_url": "https://github.com/google-deepmind/mujoco_warp",
+    "release_tag": "v3.10.0.3",
+    "release_commit": "710c34ca96745a44bfb701cdbda89e1434845728",
+    "license": "Apache-2.0",
+    "sdist": {
+      "filename": "mujoco_warp-3.10.0.3.tar.gz",
+      "top_level_directory": "mujoco_warp-3.10.0.3",
+      "url": "https://files.pythonhosted.org/packages/4f/02/1687ee928ea468345546af79dcfd65da9cd5840e16d1e71a244223494e54/mujoco_warp-3.10.0.3.tar.gz",
+      "sha256": "f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070"
+    }
+  },
+  "fork": {
+    "distribution": "mujoco-warp",
+    "version": "3.10.0.3+hope.epa48.1",
+    "epa_horizon": 48,
+    "patch": {
+      "path": "mujoco_warp-3.10.0.3_epa48.patch",
+      "sha256": "76d8206acfc14fd71ab78ce786761034dc88a0ef72f5710e275f37905a5c3758"
+    },
+    "allowed_source_changes": {
+      "pyproject.toml": {
+        "before_sha256": "426af33108cc8ac418568f46cc46ca5c1e68ee86a6fddb482027a3aa12a17f38",
+        "after_sha256": "8440cd78768e19c4701038528b9599237792880874f82510ef8c9bfb8d93bae3"
+      },
+      "mujoco_warp/_src/types.py": {
+        "before_sha256": "712e76f495d3dedcb45acc7c248e226f56144b5fef5d9841d5e04d279fa7fd4f",
+        "after_sha256": "391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696"
+      }
+    },
+    "expected_wheel_filename": "mujoco_warp-3.10.0.3+hope.epa48.1-py3-none-any.whl"
+  },
+  "build": {
+    "network_allowed": false,
+    "dependency_install_allowed": false,
+    "backend": "setuptools.build_meta",
+    "backend_distribution": "setuptools",
+    "wheel_output_root": "vendor_assets/mujoco_warp_epa48_1",
+    "policy": "caller supplies Python, pip, setuptools and wheel; builder records exact executable, hashes, versions and import origins"
+  },
+  "scientific_status": {
+    "deterministic_epa_fixture": "BLOCKED_NOT_YET_CAPTURED",
+    "gpu_24_fail_48_pass": "UNTESTED",
+    "independent_oracle": "UNTESTED_INSTRUMENTED_OR_ASAN_REQUIRED",
+    "stock_cpu_mujoco_is_oracle": false,
+    "overflow_gate_may_be_disabled": false,
+    "training_authorized": false,
+    "diagnostic_unauthorized": true
+  }
+}

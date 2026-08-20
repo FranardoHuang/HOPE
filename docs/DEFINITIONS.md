@@ -41,6 +41,14 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
 
 ## 当前训练与判卷术语
 
+- <a id="mujoco-warp-epa48-fork"></a>**MuJoCo-Warp EPA48 fork / MuJoCo-Warp凸体穿透算法48边界窄分支**：
+  EPA是Expanding Polytope Algorithm（扩展多面体算法），MuJoCo-Warp用它计算凸体穿透法向与深度；
+  horizon是算法每轮可保留的边界边缓冲，本分支只把上限`24`改为`48`，并用PEP 440 local version
+  `3.10.0.3+hope.epa48.1`区别于upstream。base来自exact sdist（source distribution，Python源码分发包），
+  wheel只可离线构建；stock CPU MuJoCo也硬编码24，不能作为独立裁判。独立内存安全裁判需
+  instrumented build或ASan（AddressSanitizer，地址越界检测器）。tracked patch/build receipt只证明
+  supply chain，不证明24-fail/48-pass、physics parity或训练授权。
+
 - **FullMDP RSL3 adapter / FullMDP RSL3优化边界适配器**：不复制RSL-RL3 rollout/storage/env-step，
   只包住真实零参数`alg.update()`，把FullMDP的pre-optimizer freeze、post-update summary、durable WAL与
   destructive ACK按一次性顺序接入。它不是新trainer、checkpoint或安全证明。

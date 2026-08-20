@@ -2,6 +2,28 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-21 project-owned [MuJoCo-Warp EPA48](../DEFINITIONS.md#mujoco-warp-epa48-fork) build chain（Gate仍`Partial`）：**portable r3已经停止在
+durable ACK `10249`；真实`EPA_HORIZON` fail-stop证明stock `MJ_MAX_EPAHORIZON=24`可达，但当时没有把
+exact稀有geom pair/pose另存为可复现fixture，所以不能事后宣称已有24-fail样本。当前分支新增
+[`PROVENANCE.json`](../../configs/mujoco_warp_epa48_20260821/PROVENANCE.json)、tracked two-hunk patch和
+[`build_mujoco_warp_epa48.py`](../../scripts/build_mujoco_warp_epa48.py)：base只认PyPI
+`mujoco-warp==3.10.0.3` sdist SHA-256 `f2219646…3070`、tag `v3.10.0.3` / commit
+`710c34ca…5728`；source只准`pyproject.toml` local version改为
+`3.10.0.3+hope.epa48.1`及`types.py`的horizon `24->48`。builder不下载、不安装，以
+`--no-index --no-deps --no-build-isolation`产出ignored wheel，核全树two-file allowlist、wheel filename/
+METADATA、patched sdist的281-file package payload、ZIP member/RECORD与wheel SHA，并严格复核receipt
+schema/fork/build/wheel evidence；任一missing/extra/duplicate/unsafe member都拒绝。它同时记录caller
+Python与build backend来源。host focused：
+`python3 -m pytest -q tests/test_build_mujoco_warp_epa48.py` = **`9 passed`**；这些是supply-chain与
+synthetic反例测试，不是physics fixture。
+
+当前仍缺三件：同一deterministic pair的stock-24 fail / fork-48 finite exact GPU复测、固定tape数值与
+reason/counter/safety一致性、以及instrumented/ASan独立oracle。stock CPU MuJoCo同样硬编码24且该边界
+可能越界，不能直接当oracle。runtime `d.overflow`与warning gate一位不降级，旧r3不resume；当前也尚未在
+稳定、project-owned isolated builder中向`vendor_assets/`物化wheel。因此这里只关闭tracked build infrastructure，
+`diagnostic_unauthorized=true / training_authorized=false`，完整恢复/离线构建命令见
+[`setup_local_sync`](../operations/setup_local_sync.md#restore-and-build-the-project-owned-mujoco-warp-epa48-fork)。
+
 **2026-08-20 R07 payment-window branch candidate（Gate仍`Partial`）：**`1f9ed762…`将Isaac
 R07 reward eligibility收窄为与MuJoCo一致的唯一谓词：
 `phase == PHASE_OUTCOME_SETTLED && 10 <= deadline_relative_age <= 77`。readiness plant计算仍每个

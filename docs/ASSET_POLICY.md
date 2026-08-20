@@ -184,6 +184,24 @@ Promote external repos when they become real dependencies:
 
 TTRL is currently an auto-synced reference clone, not a pinned dependency. If code, config, or an experiment result is extracted from TTRL, record the upstream commit in the relevant gate doc or operation doc. Its future dependency state should be decided during G05/G08 planning.
 
+### Source-derived [MuJoCo-Warp EPA48 fork](DEFINITIONS.md#mujoco-warp-epa48-fork)
+
+The G06 EPA horizon candidate is a narrow source-derived fork, not an opaque wheel and not a copy of the
+whole upstream repository in Git. Git tracks the exact upstream provenance plus one two-file patch under
+`configs/mujoco_warp_epa48_20260821/` and the offline builder/verifier
+`scripts/build_mujoco_warp_epa48.py`. The base is the Apache-2.0
+`mujoco-warp==3.10.0.3` sdist at SHA-256
+`f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070`, corresponding to upstream tag
+`v3.10.0.3` / commit `710c34ca96745a44bfb701cdbda89e1434845728`. The only allowed source changes are
+the PEP 440 local version `3.10.0.3+hope.epa48.1` and `MJ_MAX_EPAHORIZON=24 -> 48`.
+
+The restored sdist and built wheel/receipt stay in versioned real directories under ignored `vendor_assets/`;
+the patched build tree is temporary and exactly reconstructible. See
+[`setup_local_sync.md`](operations/setup_local_sync.md#restore-and-build-the-project-owned-mujoco-warp-epa48-fork).
+The builder is no-network/no-install and records the caller Python and build backend identity. A build receipt is
+only supply-chain evidence: it does not replace the missing deterministic 24-fail/48-pass GPU fixture, an
+instrumented/ASan independent oracle, or the existing runtime overflow fail-stop, and it cannot authorize training.
+
 ## Third-Party And Vendor Provenance
 
 Keep a short notice file at [../THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for bundled source/vendor drops and ignored runtime payloads. At minimum it must describe Agibot A3 URDF/deploy materials, BeyondMimic/whole_body_tracking provenance, VRPN/mocap source, and AimRT/MuJoCo runtime policy.

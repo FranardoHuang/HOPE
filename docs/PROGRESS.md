@@ -1,5 +1,22 @@
 # 简短进度记录
 
+## 2026-08-21 — [MuJoCo-Warp EPA48](DEFINITIONS.md#mujoco-warp-epa48-fork)可审计离线构建链（branch candidate）
+
+- 为r3真实触发的`EPA_HORIZON` fail-stop建立project-owned窄fork基础设施：tracked provenance固定
+  upstream `mujoco-warp==3.10.0.3` sdist SHA `f2219646…3070`、tag `v3.10.0.3` / commit
+  `710c34ca…5728`；patch只允许local version `3.10.0.3+hope.epa48.1`和
+  `MJ_MAX_EPAHORIZON 24->48`两处变化。sdist与wheel/receipt留在ignored `vendor_assets/`，
+  patched build tree临时生成，不提交大生成物。
+- 新builder/verifier硬设no-network/no-install的`pip wheel --no-index --no-deps --no-build-isolation`，
+  核sdist/patch SHA、safe extraction、全树两文件allowlist，并把patched sdist的281-file package
+  payload逐文件绑定到wheel；missing/extra/duplicate/unsafe ZIP member、dist-info/RECORD漂移和伪造
+  receipt都fail closed。它记录caller Python与pip/setuptools/wheel来源；host focused=`9 passed`。
+  当前没有采用稳定、project-owned builder，也没有向`vendor_assets/`发布wheel或冒充已采用制品。
+- 科学状态不随build-chain晋级：r3当时没有保存exact稀有pair/pose，故deterministic 24-fail/48-pass
+  fixture、exact GPU fixed-tape parity和instrumented/ASan独立oracle仍`未测`；stock CPU MuJoCo也硬24且
+  可能越界，不能代签。overflow gate保持fail-stop，旧r3不resume，G06仍`Partial`且
+  `diagnostic_unauthorized=true / training_authorized=false`。
+
 ## 2026-08-20 — Isaac R07只在post-shot recovery窗口付款（branch candidate）
 
 - `1f9ed762…`把Isaac R07从“accepted shot的REVEAL/LAUNCH/OUTCOME/RETIRED生命周期都可付款”

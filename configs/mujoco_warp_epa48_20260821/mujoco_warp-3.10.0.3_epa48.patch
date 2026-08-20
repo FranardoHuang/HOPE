@@ -1,0 +1,22 @@
+diff --git a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -5,6 +5,6 @@
+ [project]
+ name="mujoco-warp"
+-version = "3.10.0.3"
++version = "3.10.0.3+hope.epa48.1"
+ # TODO(team): create a distribution list
+ authors = [
+     {name = "Newton Developers", email = "mujoco@deepmind.com"},
+diff --git a/mujoco_warp/_src/types.py b/mujoco_warp/_src/types.py
+--- a/mujoco_warp/_src/types.py
++++ b/mujoco_warp/_src/types.py
+@@ -28,6 +28,6 @@ MJ_MAXCONPAIR = mujoco.mjMAXCONPAIR
+ MJ_MINMU = mujoco.mjMINMU  # minimum friction
+ MJ_MINAWAKE = mujoco.mjMINAWAKE  # minimum number of timesteps before sleeping
+ # maximum size (by number of edges) of an horizon in EPA algorithm
+-MJ_MAX_EPAHORIZON = 24
++MJ_MAX_EPAHORIZON = 48
+ # maximum average number of trianglarfaces EPA can insert at each iteration
+ MJ_MAX_EPAFACES = 5
