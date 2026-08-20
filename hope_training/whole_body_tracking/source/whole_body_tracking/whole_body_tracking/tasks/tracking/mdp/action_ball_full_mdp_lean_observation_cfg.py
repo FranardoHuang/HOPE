@@ -480,8 +480,10 @@ class LeanActionEpochObservationSource:
             ),
             dim=1,
         )
-        clock_remaining = (
-            clock_rows - common_step
+        clock_remaining = torch.where(
+            task_valid[:, None],
+            clock_rows - common_step,
+            torch.zeros_like(clock_rows),
         ).to(dtype=self._dtype) * self._step_dt
         phase_one_hot = torch.nn.functional.one_hot(
             torch.clamp(phase, min=0, max=9), num_classes=10

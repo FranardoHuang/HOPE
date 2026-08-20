@@ -215,6 +215,61 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     assert bundle.source.semantic_publication_count == 1
 
 
+def test_idle_epoch_clocks_do_not_leak_global_training_step(monkeypatch):
+    env = _Env()
+    epoch = _prepared_epoch()
+    runtime, parts = _runtime(env, epoch)
+    source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
+    record = epoch.current()
+    assert not bool(record.task.task_valid.any())
+    monkeypatch.setattr(
+        O,
+        "_assert_async_all",
+        lambda predicate, *, label: torch.testing.assert_close(
+            predicate, torch.ones_like(predicate), msg=label
+        ),
+    )
+
+    actor_early, critic_early = source._pack(
+        _direct_view(env, record, parts), record, common_step=10
+    )
+    actor_late, critic_late = source._pack(
+        _direct_view(env, record, parts), record, common_step=1_000_000
+    )
+    clock_index = next(
+        index
+        for index, (name, _) in enumerate(O.ACTOR_LAYOUT_V1)
+        if name == "epoch_clock_remaining_s"
+    )
+    clock_offset = sum(width for _, width in O.ACTOR_LAYOUT_V1[:clock_index])
+    clock_slice = slice(clock_offset, clock_offset + 5)
+    assert torch.equal(actor_early[:, clock_slice], torch.zeros((2, 5)))
+    assert torch.equal(actor_late[:, clock_slice], torch.zeros((2, 5)))
+    torch.testing.assert_close(actor_early, actor_late)
+    torch.testing.assert_close(critic_early, critic_late)
+
+    valid = record.clone()
+    valid.task.task_valid[:, 0].fill_(True)
+    for tick, name in enumerate(
+        (
+            "reveal_tick",
+            "contact_tick",
+            "launch_tick",
+            "deadline_tick",
+            "next_reveal_tick",
+        ),
+        start=11,
+    ):
+        getattr(valid.clocks, name)[:, 0].fill_(tick)
+    actor_valid, _ = source._pack(
+        _direct_view(env, valid, parts), valid, common_step=10
+    )
+    torch.testing.assert_close(
+        actor_valid[:, clock_slice],
+        torch.tensor([[0.02, 0.04, 0.06, 0.08, 0.10]]).repeat(2, 1),
+    )
+
+
 def test_term_rejects_invalid_group_instance_shadow_and_caller_source(monkeypatch):
     env = _Env()
     epoch = _prepared_epoch()
