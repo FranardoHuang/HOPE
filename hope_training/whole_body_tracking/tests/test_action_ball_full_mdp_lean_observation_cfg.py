@@ -478,9 +478,17 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
         common_step=10,
         phase=torch.tensor([0, 4], dtype=torch.int64),
         task_valid=torch.tensor([True, False]),
-        time_to_contact_remaining_s=torch.tensor([0.2, 0.3]),
-        time_to_teacher_start_remaining_s=torch.tensor([0.1, 0.2]),
-        time_to_next_reveal_s=torch.tensor([0.4, 0.5]),
+        # Motion's analytic task clocks are intentionally float64.  The semantic
+        # observation boundary, not Motion state, owns the policy ABI cast.
+        time_to_contact_remaining_s=torch.tensor(
+            [0.242, 0.3], dtype=torch.float64
+        ),
+        time_to_teacher_start_remaining_s=torch.tensor(
+            [0.125, 0.2], dtype=torch.float64
+        ),
+        time_to_next_reveal_s=torch.tensor(
+            [0.586, 1.172], dtype=torch.float64
+        ),
         control_tick=torch.tensor([10, 10], dtype=torch.int64),
         reset_generation=torch.tensor([1, 1], dtype=torch.int64),
         action_uid=torch.tensor([101, -1], dtype=torch.int64),
@@ -647,18 +655,38 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
         "time_to_teacher_start_s",
     ):
         assert view.actor_rows[name][1].eq(0).all()
-    assert view.actor_rows["time_to_contact_s"][0].item() == pytest.approx(0.2)
+    for name in (
+        "time_to_contact_s",
+        "time_to_teacher_start_s",
+        "time_to_next_opportunity_s",
+    ):
+        assert view.actor_rows[name].dtype == torch.float32
+    torch.testing.assert_close(
+        view.actor_rows["time_to_contact_s"],
+        torch.tensor([[0.242], [0.0]], dtype=torch.float32),
+    )
+    torch.testing.assert_close(
+        view.actor_rows["time_to_teacher_start_s"],
+        torch.tensor([[0.125], [0.0]], dtype=torch.float32),
+    )
     torch.testing.assert_close(
         view.actor_rows["time_to_next_opportunity_s"],
-        torch.tensor([[0.4], [0.5]]),
+        torch.tensor([[0.586], [1.172]], dtype=torch.float32),
     )
     source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
     policy, critic = source._pack(view, record, common_step=10)
+    assert policy.shape == (2, 203) and policy.dtype == torch.float32
+    assert critic.shape == (2, 219) and critic.dtype == torch.float32
     assert torch.isfinite(policy).all() and torch.isfinite(critic).all()
+    torch.testing.assert_close(
+        policy[:, 194:197],
+        torch.tensor([[0.1, 0.125, 0.1], [0.0, 0.0, 0.2]]),
+    )
+    torch.testing.assert_close(critic[:, :203], policy)
     # Task-dependent fields are masked, while next-opportunity and RETIRED
     # phase remain observable and the actor-visible validity bit is false.
     assert policy[1, 183:196].eq(0).all()
-    assert policy[1, 196].item() == pytest.approx(0.5 / 5.86)
+    assert policy[1, 196].item() == pytest.approx(1.172 / 5.86)
     torch.testing.assert_close(
         policy[1, 197:202], torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0])
     )

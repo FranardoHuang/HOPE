@@ -237,15 +237,17 @@ def build_direct_action_epoch_observation_facts(
         "base_goal_error_heading_xy": task_vector(base_goal_delta)[:, :2],
         "time_to_contact_s": torch.where(
             task_mask,
-            motion_view.time_to_contact_remaining_s[:, None],
+            motion_view.time_to_contact_remaining_s[:, None].to(dtype=dtype),
             torch.zeros_like(task_mask, dtype=dtype),
         ),
         "time_to_teacher_start_s": torch.where(
             task_mask,
-            motion_view.time_to_teacher_start_remaining_s[:, None],
+            motion_view.time_to_teacher_start_remaining_s[:, None].to(dtype=dtype),
             torch.zeros_like(task_mask, dtype=dtype),
         ),
-        "time_to_next_opportunity_s": motion_view.time_to_next_reveal_s[:, None],
+        "time_to_next_opportunity_s": motion_view.time_to_next_reveal_s[:, None].to(
+            dtype=dtype
+        ),
     }
 
     slot = record.current_task_slot

@@ -14,6 +14,8 @@ actor203/critic219；它恢复229迁移遗漏的floating-base state并删除raw 
 扩维。R06 broad projection也缩为现有owner内的key8+publication live selection与四tensor输出，没有新增
 owner/receipt/Gate。R07 support/dwell复用同一真实post-physics plant sample；cold genesis为zero，selected
 reset仅精确`generation+1`行当帧清零，peer保持，下一真实publication恢复，不再第二次扫描全robot。
+Isaac Motion内部的三个解析计时量保持`float64`，仅在semantic pack边界显式转为policy合同的`float32`；
+真实`float64`夹具覆盖203/219 dtype、scale和critic-prefix，避免旧`float32`夹具把生产dtype不一致遮住。
 host implementation不能代签deploy producer、exact Pod ObservationManager、GPU
 fixed-snapshot parity或matched wall，故G05不晋级。采用理由与验收真源见
 [hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)和

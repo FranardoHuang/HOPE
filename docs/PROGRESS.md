@@ -10,6 +10,9 @@
 - R06 observation从81-tensor broad projection缩为现有owner内部用canonical shot key八字段加publication
   ordinal唯一选择live INBOUND/OPEN row，再只输出flight slot与contact/net-crossed/net-clear三枚latch；没有
   新owner、receipt或Gate。Full-A V1 fallback禁止，V1只为明确的historical WAIT consumer保留。
+- 补查真实producer dtype发现Motion三组解析计时状态为`float64`，而旧focused夹具误用`float32`；semantic
+  observation现在只在最终actor row边界显式转为合同`float32`，Motion内部精度不变。真实`float64`反例验证
+  三组timing scale、actor203/critic219 dtype与critic prefix，focused=`14 passed`；这修的是生产ABI，不新增Gate。
 - 三条旧run均已停止：两条Isaac分别止于ACK `4603/3467`且退出因果未知，MuJoCo r3止于ACK `10249`并由
   `EPA_HORIZON` overflow fail-stop；r3还消费旧IDLE clock泄漏，均不得resume。本次live SSH认证失败，
   未确认当前Pod/GPU状态。唯一依赖顺序固定为Observation V2原子闭合 → EPA deterministic 24-fail/48-finite +
