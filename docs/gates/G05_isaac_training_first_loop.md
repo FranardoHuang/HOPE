@@ -2,6 +2,23 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-21 current run correction（supersede下文所有“active/继续25k”叙述；Gate仍`Partial`）：**
+两条Isaac `4096×24×25000`均已停止：`e8eef4fb…`止于durable ACK `4603` / `452,591,616`
+transitions，`ddb1e7c4…`止于ACK `3467` / `340,918,272` transitions。退出因果仍是`未知`；现有日志
+不足以归因OOM、外部停止或代码异常，`final_rc=0`也不表示25k完成。本次live SSH刷新因认证失败未取得
+Pod状态，因此不声称当前GPU空闲或存在训练进程。两条旧run都没有resume authority；新的H48/Observation V2
+必须使用fresh commit与fresh namespace。
+
+**2026-08-21 semantic Observation V2 branch candidate（Gate仍`Partial`）：**family A从旧229/399切到
+actor203/critic219；它恢复229迁移遗漏的floating-base state并删除raw task/owner/reward账，不做237/407机械
+扩维。R06 broad projection也缩为现有owner内的key8+publication live selection与四tensor输出，没有新增
+owner/receipt/Gate。R07 support/dwell复用同一真实post-physics plant sample；cold genesis为zero，selected
+reset仅精确`generation+1`行当帧清零，peer保持，下一真实publication恢复，不再第二次扫描全robot。
+host implementation不能代签deploy producer、exact Pod ObservationManager、GPU
+fixed-snapshot parity或matched wall，故G05不晋级。采用理由与验收真源见
+[hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)和
+[当前长跑TODO](../operations/action_ball_dual_backend_longrun_todo_20260819.md)。
+
 **2026-08-21 FullMDP PPO V2 branch candidate（supersede下文“保留H24/拒绝H48”的旧裁决；Gate仍`Partial`）：**
 用户已采用FullMDP-only typed recipe `H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`。该配对保持旧
 `H24/U25000/save1000/E5/MB4`的总transition、minibatch size、总optimizer step与按env-step计的snapshot
@@ -28,7 +45,8 @@ nonfinite边界与optimizer后durable ACK均保留。
 `14:41Z`不完整结束。`e8eef4fb…`止于durable ACK `4603` / `452,591,616` transitions，
 `ddb1e7c4…`止于ACK `3467` / `340,918,272` transitions；两份result均为`status=failed`、
 `final_rc=0`、`phase=training`。日志没有traceback、OOM、signal/kill证据，退出因果仍`未判定`；
-不能把`final_rc=0`解释成25k完成或Gate通过。当前三张GPU均无compute process。
+不能把`final_rc=0`解释成25k完成或Gate通过。2026-08-20终局快照当时显示三张GPU无compute process；
+这不是当前资源证据。
 
 两条run的profiler-off steady窗口约为`21.94/22.45 s/update`，collection约`20.50/20.74 s`、
 learning约`1.45/1.71 s`。GPU利用约`27%`，trainer各只占约`1.44/1.46`个CPU core；CPU无饱和或
@@ -38,14 +56,15 @@ transaction/owner工作量；当前`6 s/update`目标明确未达。
 fresh bounded profiler已实测collection均值`14.987 s`中`post_physics_publish=7.522 s`、
 command→observation/D05 gap=`3.102 s`、Reward=`0.658 s`、sim=`0.922 s`。第一墙是零业务时仍
 完整执行Physical/R06/Epoch事务，不是物理仿真或CPU。zero-live-flight成对idle candidate已有
-host语义证据，但exact Pod fixed-tape与profiler-off matched wall仍`未测`；GPU虽已空，候选必须先
+host语义证据，但exact Pod fixed-tape与profiler-off matched wall仍`未测`；不论GPU资源状态，候选必须先
 冻结clean source与exact runner，不得从dirty WIP发射，也不得把预算写成已达`6 s/update`。
 
 `0 ACCEPT`只说明当前due opportunity仍停在站稳/模仿准备阶段，并非失败门；balance→mimic→strike→
 landing本来就可需要很多update。它不授权修改分母为零的task Reward，也不证明PPO超参是根因。
-当前裁决保留24-step rollout，48-step按现速约`44 s/update`且需约`7.33×`才到6秒，故现在拒绝；
-GAE `lambda=0.98`与actor/critic各`+8`个floating-base observation仅作可独立归因的候选。拒绝用同一pose
-统一reset、D05 stroke-entry和R07 post-shot recovery。详见
+**SUPERSEDED裁决：**当时“保留H24、拒绝H48、floating-base只作`+8`候选”的判断已由顶部PPO V2与
+semantic Observation V2合同替代。当前采用H48与`lambda=.98`，A使用203/219删冗余语义包；仍拒绝用同一pose
+统一reset、D05 stroke-entry和R07 post-shot recovery。旧6秒是H24量级信号，H48线性尺度约12秒；它不是
+硬Gate，后续统一报告原始wall、transitions/s与H24-equivalent。详见
 [FullMDP hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)。
 
 **2026-08-19 ACK809只读前缀（Gate仍`Partial`）：**active同一`4096×25000`进程的完整ACK `0..808`

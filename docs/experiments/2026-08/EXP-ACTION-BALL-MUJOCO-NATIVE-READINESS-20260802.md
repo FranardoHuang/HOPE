@@ -1,19 +1,20 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`in_progress`
+- 状态：`successor-in-progress / no-authorized-live-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
 - 本 successor 最高证据等级：`E1`；历史 negative-control 另有 `E3` 诊断，不传递为新系统 E3
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-20
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-21
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 [`origin/main` 的 `NOW`](../../NOW.md)。
 
-> **2026-08-20 portable事实纠正：**当前MuJoCo portable Full-A的详细真源是
+> **2026-08-21 portable successor事实纠正（supersede下文旧229/399、H24与active-run叙述）：**当前
+> MuJoCo portable Full-A的执行真源是
 > [EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819](EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 > 本页后文把R06/R07/Reward11--13写成尚不存在、或把zero-action下的table/fall/contact零值及额外
 > keepout witness写成长跑前置，均只保留为历史诊断，不得覆盖当前代码事实。当前host已闭合raw-action
@@ -27,7 +28,20 @@
 > `completed_action_epoch`必须来自同一env行的完整业务闭合，不能由跨env边际拼接；
 > consumer分开engineering与slot0 business完成；本代因73动作、双侧和科学窗口报告未闭合，
 > `full_a_complete`固定为`false`。
-> exact Pod真实调用点、wall time与`4096×25000` live run仍为未测/未启动，故状态仍是`in_progress`而非完成。
+> r3曾真实运行到durable ACK `10249`，终段last-100 wall mean/median=`4.890/4.886 s/update`，随后由
+> MuJoCo-Warp `EPA_HORIZON` overflow fail-stop；旧229-D IDLE clock也会随global step漂移。因此r3已停止、
+> 无resume authority，不能继续25k。`ACCEPT=0`只记录当时balance/mimic/readiness课程阶段，不是失败门。
+>
+> successor采用H48/U12500/save500/E5/MB8/lambda=.98和semantic A203/219。Observation V2恢复历史
+> fixed-194/A211已有、229迁移遗漏的table-relative root XYZ/heading/COM velocity，同时删除raw task与
+> owner/fault/reward账本；R06 broad projection缩为owner内canonical key8+publication join后输出live slot和
+> 三枚latch。它们已是host实现面，但exact GPU observation/snapshot parity仍`未测`。EPA48也只在同一
+> deterministic pair完成24-fail/48-finite、GPU复测与独立oracle后才可授权训练。
+>
+> 本次live SSH认证失败，未取得当前Pod/GPU状态，所以本文不声明GPU空闲或存在active process。下一步只按
+> [当前长跑TODO](../../operations/action_ball_dual_backend_longrun_todo_20260819.md)执行：Observation原子闭合
+> → EPA fixture/GPU/oracle → 单一ActionBallState/zero-live skip → matched H48性能 → fresh namespace。
+> Gate继续`Partial`，authority继续`diagnostic_unauthorized`。
 
 ## 2026-08-19 4096 scene首证据与successor裁决
 

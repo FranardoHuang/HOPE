@@ -87,13 +87,14 @@ station center 属于 level-0 task identity。level 0 只做中心 warm-up，pos
 才开始；base residual 是最后一轴。改变 station center 会改变 manifest/task identity，并使旧碰撞、
 能力与 selector 证据失效。
 
-## Historical ChingMu Runtime Contract (superseded for fresh fixed-194 N1 ActionBall)
+## Historical ChingMu Runtime Contract (superseded for FullMDP semantic V2)
 
 The following 300-Hz ChingMu/VRPN contract documents the old P1/P2 consumer and remains relevant
-only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; fresh N1
-`action_ball_table_pose_twist_heading_task_teacher_start_v2` training uses the OptiTrack+IMU split
-stated in [ActionBall table-centered actor frame](#actionball-table-centered-actor-frame).
-MuJoCo/C++ do not yet produce v2, so this sentence does not authorize deployment.
+only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; FullMDP
+semantic V2 uses the OptiTrack+IMU split stated in
+[FullMDP semantic V2 table and heading frame](#actionball-table-pose-frame).
+Isaac and MuJoCo implement the simulator row, but the real C++ producer does not; this sentence does
+not authorize deployment.
 Do not copy the old object names, rate, sensor authority or noise profile into the fresh contract.
 
 The historical rig was ChingMu streaming over VRPN. The tracked-object set differed by phase:
@@ -130,88 +131,67 @@ the interface boundary.
 
 The historical base flat wire already carried position plus a normalized quaternion, but the old
 `LocMode::kExternalBase` C++ consumer deliberately uses only mocap position and retains the
-yaw-aligned pelvis-IMU quaternion. That mixed historical producer is not the fresh contract.
-The current fresh A211/C211 successor uses calibrated OptiTrack/localization for canonical
-HOPE-world position, full orientation and root-COM linear velocity, followed by exactly one pelvis/body-frame
-IMU gyro for three-axis angular velocity.  It does **not** append a separate projected-gravity row:
-the 6-D base orientation already determines gravity, while the direct gyro preserves the
-low-latency robot-frame angular-rate measurement.  These sources must be time aligned as one causal
-state packet and need explicit latency/stale/dropout handling.  Historical L194/H225 proposals that
-packed projected gravity separately do not define the current 211-D actor ABI; see
-[the ordered A211/C211 contract](policy_observation_action.md#current-fresh-a211c211-contracts).
+yaw-aligned pelvis-IMU quaternion. That mixed historical producer is not semantic V2. V2 requires
+one time-consistent packet: table-relative root position and unit heading from calibrated
+OptiTrack/localization, causal root inertial-COM linear velocity from the same pose lineage, and
+projected gravity plus body-frame angular velocity from the pelvis IMU. Explicit latency,
+stale/dropout and marker-extrinsic handling remain mandatory. The complete ordered 203/219 layout is
+defined only in [policy_observation_action.md](policy_observation_action.md#current-portable-fullmdp-semantic-observation-v2-actor-203--critic-219).
 
 <a id="action-ball-table-pose-frame"></a>
 
-## Historical ActionBall table-centered actor frame
+## FullMDP semantic V2 table and heading frame
 
-[`action_ball_table_pose_n<N>`](../DEFINITIONS.md#action-ball-table-pose-n-contract) is a historical
-pre-A211/C211 contract and separates two
-kinds of geometry:
-
-- **task channels stay robot-relative**: `base_target_pos_b` is a base-goal residual in the current
-  base-yaw frame, and `racket_target_pos_b` is the target-minus-current-racket-FK residual in that
-  frame. This preserves translation/generalization semantics;
-- **base context is table-relative 6-DoF**: it tells the policy where and how the A3 is standing
-  with respect to the table, so the same relative swing request can account for table clearance,
-  reach and balance from a displaced or tilted spawn.
-
-For a table frame `T`, venue/world frame `W` and base/root frame `B`, the semantic contract is:
+Semantic V2 is intentionally narrower than a general movable-table interface. The current Isaac and
+MuJoCo ActionBall scenes fix every table to the environment-local world axes; environment origins
+translate rows but never rotate them. In that fixed frame:
 
 ```text
-p_base_table = R_TW * (p_base_world - p_table_surface_center_world)
-R_table_base = R_TW * R_world_base
+p_base_table = p_root_world - env_origin - p_table_surface_center_scene
+heading_xy = normalize(project_xy(R_world_root * [1, 0, 0]))
 ```
 
-The current Isaac ActionBall scene aligns `T` axes with each environment-local world axes, so its
-position implementation reduces to subtracting the environment origin and the table-surface center
-`(near_x + TABLE_LENGTH/2, 0.0, surface_z)`. That optimization does not change the semantic
-frame and must not be copied to a venue whose table axes are rotated.
+The table-surface centre is `(near_x + TABLE_LENGTH/2, 0, surface_z)` in scene coordinates. A future
+rotatable table needs a measured table pose and a new versioned contract; it must not reinterpret
+these columns in place. A root pose whose forward X axis is nearly vertical has no stable yaw heading
+and fails explicitly instead of publishing a shrinking or fabricated vector.
 
-`R_table_base` is encoded as the first two matrix columns in row-major tensor order
-`[R00,R01,R10,R11,R20,R21]`. Those are two orthogonal axes that recover the third by cross product,
-so the six scalars retain roll, pitch and yaw; they do not mean “only two angles.” This continuous
-rotation representation follows Zhou et al.,
-[CVPR 2019](https://openaccess.thecvf.com/content_CVPR_2019/html/Zhou_On_the_Continuity_of_Rotation_Representations_in_Neural_Networks_CVPR_2019_paper.html),
-and avoids Euler wrap/gimbal singularities and quaternion sign ambiguity at the network boundary.
-
-For a deployment of that historical contract, the same `p_base_table` and `R_table_base` must be built from a calibrated table pose,
-the OptiTrack rigid-body pose and the measured marker-cluster→`base_link` SE(3). OptiTrack owns
-absolute position/orientation; the pelvis IMU's calibrated three-axis gyroscope owns
-`base_ang_vel`. A table-centered actor would derive gravity from `R_table_base`; current A211/C211
-instead derive it from their canonical HOPE-world base orientation and likewise omit a duplicate
-`projected_gravity` vector. Neither contract obtains angular velocity by differentiating filtered
-mocap quaternions when the direct gyro exists. `motion_anchor_ori_b` combines the same OptiTrack
-base orientation with joint-encoder FK. The current arbitrary-N deploy builder, rotational
-marker extrinsic and time-aligned OptiTrack/gyro producer remain OPEN, so this frame contract is
-simulator-training-only until those are closed.
-
-The fixed-width 194-D
-`action_ball_table_pose_twist_heading_task_teacher_start_v2` representation is the historical L194
-diagnostic, not the current fresh N1 authority.  Current A211/C211 actors use the purpose-grouped
-211-D v2 layout and 319-D critic defined in
-[policy_observation_action.md](policy_observation_action.md#current-fresh-a211c211-contracts): A
-receives desired contact p/v/face, C receives incoming-ball-at-contact p/v/spin, and both append the
-atomic task-valid bit.  Stable action UID/slot remains control-plane state; no motion ID or synthetic
-intent code is required. N5/N73 still fail closed until the varying-ball/task/history ABI is frozen,
-but a formal N2/N3 action-count staircase is not a prerequisite for the fixed-N1 diagnostic. Unlike
-the historical table-centered block above, current A211/C211 actor columns `[0:12]` are
-`actual_base_pose_lin_vel_world`: canonical HOPE-world position3, orientation6D and linear velocity3.
-Column `[12:15]` is the sole pelvis/body-frame IMU gyro. The current implementation does not subtract
-the table center or rotate the base orientation into `R_table_base`; changing it to do so would be a
-new ABI, not a documentation clarification. All
-three racket-task vectors share the current base yaw-heading frame:
+For `heading_xy=[c,s]`, every world-axis vector uses one inverse-yaw transform while preserving
+physical vertical Z:
 
 ```text
-p_task_h = R_heading^T (p_target_table - p_racket_FK_table)
-v_task_h = R_heading^T v_target_table
-n_rawA_h = R_heading^T n_rawA_table
+heading([x,y,z]) = [c*x + s*y, -s*x + c*y, z]
+position_error_h = heading(target_position_world - achieved_position_world)
+vector_error_h   = heading(target_vector_world - achieved_vector_world)
 ```
 
-The full canonical HOPE-world base orientation remains a separate 6-D channel. We deliberately do not
-rotate the ballistic task through the instantaneous base roll/pitch: table Z is the physical
-vertical axis, while transient body tilt is state context rather than a redefinition of the task.
-Planner wire, solver, Reward and physics stay in canonical table/world coordinates; only the actor
-view is transformed.
+Therefore task position/velocity/raw-A-normal residuals and root COM velocity share the table yaw
+convention without rotating through transient root roll/pitch. `base_position_table` is absolute
+table context, `base_goal_error_heading_xy` is a task residual, and `motion_anchor_pos_b` is a
+teacher alignment residual; equal dimensions do not make them interchangeable. Their exact network
+order belongs only to
+[policy_observation_action.md](policy_observation_action.md#current-portable-fullmdp-semantic-observation-v2-actor-203--critic-219).
+
+Isaac's `root_lin_vel_w` is the linear velocity of the root body's inertial center of mass. MuJoCo's
+`cvel` linear component is instead expressed at the kinematic root subtree COM, so the portable
+MuJoCo producer converts it to the pelvis body's inertial COM before heading rotation:
+
+```text
+v_body_com_world = cvel_linear_world
+                   - (xipos_body - subtree_com_root) cross omega_world
+```
+
+Using raw freejoint `qvel`, link-origin velocity, or unconverted `cvel` would change the observation
+point and violate cross-backend semantics.
+
+The real producer must derive table/root position and heading from calibrated OptiTrack table and
+pelvis marker bodies plus a measured marker-cluster→root-inertial-COM transform. Root-COM velocity
+must be causal: update only on a genuinely new capture timestamp, transform the marker sample to the
+COM point, estimate from present/past samples, and surface age/dropout instead of turning held poses
+into zero velocity. Pelvis IMU supplies projected gravity and calibrated body-frame gyro directly;
+joint encoders and FK supply achieved robot/racket state. Capture-time synchronization,
+OptiTrack↔IMU offset, marker/COM extrinsics, estimator error under dropout and the exact real 203-D
+builder have not been accepted. Semantic V2 is therefore simulator-trainable but **not deploy-ready**.
 
 ## Base Link
 

@@ -19,13 +19,12 @@ N1 uses fixed-194 `action_ball_table_pose_twist_heading_task_teacher_start_v2`: 
 one-hot slot is replaced by the exact Motion phase-governor countdown. Pod smoke/probe have
 materialized the 17-term layout and finite fresh checkpoints; what remains open is the corrected
 safety-gated long result and production deploy-consumer parity.
-The branch-candidate fresh A/C successor is separately frozen at actor/critic=`211/319`: its v2 actor
-uses localizer world pose+linear velocity12 followed by body-frame IMU gyro3, removes teacher-base15,
-omits projected gravity and appends atomic `task_valid`; the same-width pre-IMU211 lineage is rejected.
-Its physical reset is the tracked zero-velocity split-ready state, not measured frame 0. During the
-private 5--25 tick WAIT both plant and teacher remain split-ready; atomic reveal changes the teacher to
-measured frame 0 and exposes the original teacher-start clock so dense mimic can learn the bridge.
-Direct measured-frame0 physical birth was screened under the same support gate and passed `0/73`.
+The current portable FullMDP successor is the semantic Observation V2 contract:
+actor=`203`, critic=`219`. It restores the minimum floating-base state needed to distinguish
+balance-relevant states, removes raw task/control ledgers, and uses one shared ordered/scaled ABI in
+Isaac and MuJoCo Full-A. It is a fresh, warm-start-breaking lineage. The old raw `229/399` V1 remains
+only for intentional legacy WAIT compatibility; neither V1 nor the historical `211/319` fixed-question
+lineages is a fallback for a Full-A V2 launch.
 
 ## HITTER-Compatible Contract
 
@@ -382,9 +381,103 @@ The 212-D common prefix groups as `robot/achieved=117` and `teacher/mimic=95`:
   representation, followed by teacher joint position31/velocity31, teacher paddle-now9 and teacher
   paddle-at-reference-hit9. This raw teacher-base representation is not the final canonical choice.
 
-### Current fresh A211/C211 contracts
+### Current portable FullMDP semantic Observation V2: actor 203 / critic 219
 
-The current fixed N1 successor deletes the actor-only raw `teacher_base_now_world(15)` block. It does
+The current FullMDP identity is
+`action_ball_full_mdp_semantic_observation_v2`, paired with actor contract
+`action_ball_full_mdp_semantic_actor_v2` and critic contract
+`action_ball_full_mdp_semantic_critic_v2`. This section is the **only complete ordered-layout and
+scale truth source**; operation and Gate documents may summarize it but must not copy a second table.
+The critic is asymmetric: its first 203 columns are the exact already-scaled actor row, followed by
+16 privileged values. Actor and critic use static nondimensionalization at the observation boundary;
+`empirical_normalization=false`, and the V2 packer performs no observation clipping.
+
+The multiplier column below means `network_value = raw_physical_value * multiplier`.
+
+| Slice | Ordered term | Dim | Exact meaning / frame | Static multiplier |
+| --- | --- | ---: | --- | ---: |
+| `[0:3]` | `projected_gravity_b` | 3 | unit gravity direction in pelvis/body coordinates | `1` |
+| `[3:6]` | `base_ang_vel_b` | 3 | pelvis/body-frame angular velocity | `0.25` |
+| `[6:9]` | `base_position_table` | 3 | root XYZ minus fixed table-surface centre, in table/world axes | `1` |
+| `[9:11]` | `base_heading_table_xy` | 2 | normalized `[cos(yaw), sin(yaw)]` in fixed table axes | `1` |
+| `[11:14]` | `base_com_lin_vel_heading` | 3 | root inertial-COM linear velocity, inverse-yaw heading frame with world Z preserved | `0.5` |
+| `[14:45]` | `joint_pos_rel` | 31 | measured joint position minus default, actor joint order | `1` |
+| `[45:76]` | `joint_vel` | 31 | measured joint velocity, actor joint order | `0.05` |
+| `[76:107]` | `last_action` | 31 | previous normalized actor output | `1` |
+| `[107:138]` | `teacher_joint_pos_rel` | 31 | current teacher joint position minus default | `1` |
+| `[138:169]` | `teacher_joint_vel` | 31 | current teacher joint velocity | `0.05` |
+| `[169:172]` | `motion_anchor_pos_b` | 3 | teacher anchor position relative to the current robot anchor, current anchor frame | `10/3` |
+| `[172:178]` | `motion_anchor_ori_b6` | 6 | teacher-versus-current anchor orientation residual, continuous 6-D form | `1` |
+| `[178:183]` | `motion_phase_one_hot` | 5 | existing Motion phase (`pre-reveal hidden/active opportunity/post-deadline suffix/recovery hidden/ready hold`) | `1` |
+| `[183:186]` | `racket_target_pos_error_heading` | 3 | actor-visible target position minus achieved racket-site position, heading frame | `5` |
+| `[186:189]` | `racket_target_vel_error_heading` | 3 | actor-visible target point velocity minus achieved racket-site velocity, heading frame | `1` |
+| `[189:192]` | `racket_target_normal_error_heading` | 3 | actor-visible raw A/+Y target normal minus achieved raw mount +Y normal, heading frame；per-action mount sign只选择胶面/contact identity，不翻转该残差 | `2` |
+| `[192:194]` | `base_goal_error_heading_xy` | 2 | desired base XY minus current root XY, heading frame | `5` |
+| `[194:195]` | `time_to_contact_s` | 1 | signed task contact time remaining; zero when task-hidden | `1/2.42` |
+| `[195:196]` | `time_to_teacher_start_s` | 1 | teacher playback start time remaining; zero when task-hidden | `1` |
+| `[196:197]` | `time_to_next_opportunity_s` | 1 | time until cadence can next reveal a task; visible also outside a task | `1/5.86` |
+| `[197:202]` | `epoch_learning_phase_one_hot` | 5 | compact public phase (`idle/reveal/launch/outcome/retired`) | `1` |
+| `[202:203]` | `task_valid` | 1 | Motion-owned actor visibility bit, not Epoch payload retention | `1` |
+| `[203:204]` | `episode_time_remaining_s` | 1 | privileged finite-episode time remaining | `1/30` |
+| `[204:207]` | `live_ball_center_rel_root_heading` | 3 | current live flight ball centre minus root, heading frame | `1` |
+| `[207:210]` | `live_ball_lin_vel_heading` | 3 | current live flight ball linear velocity, heading frame | `0.1` |
+| `[210:213]` | `live_ball_ang_vel_heading` | 3 | current live flight ball angular velocity, heading frame | `1/60` |
+| `[213:214]` | `selected_rubber_contact_latched` | 1 | privileged current-flight selected-rubber contact latch | `1` |
+| `[214:215]` | `net_crossed_latched` | 1 | privileged current-flight net-crossed latch | `1` |
+| `[215:216]` | `net_clear_latched` | 1 | privileged current-flight net-clear latch | `1` |
+| `[216:218]` | `foot_supported_lr` | 2 | privileged left/right support-contact bits from the existing R07 plant sample | `1` |
+| `[218:219]` | `cadence_ready_dwell_fraction` | 1 | privileged ready streak divided by required dwell, clamped to `[0,1]` | `1` |
+
+This is not `229 + 8 = 237` or `399 + 8 = 407`. V1 exposed a 45-value raw task payload plus
+Epoch/control bookkeeping to the actor and broad owner-fact/Reward due-paid ledgers to the critic.
+V2 adds the nonredundant floating-root block `base position3 + unit heading2 + COM velocity3`, but
+deletes those raw ledgers and replaces them with the semantic residuals, clocks, phases and compact
+privileged suffix above. V1 `229/399` is retained only by the deliberately legacy WAIT runner/model;
+Full-A must bind V2 `203/219` and cannot silently fall back by matching an old checkpoint width.
+
+The three position-like terms are not duplicates. `base_position_table` answers where the robot is
+relative to the table; `base_goal_error_heading_xy` answers where the current task wants the base to
+move from its present location; `motion_anchor_pos_b` answers how the current robot anchor differs
+from the time-varying teacher anchor. Holding either the goal residual or teacher residual fixed while
+moving the whole robot relative to the table changes clearance, reach and balance. Likewise,
+instantaneous 31-D joint `q/dq` cannot recover floating-root translational COM velocity: joint
+velocities omit the free root. These eight restored root values reduce a measured
+balance-relevant observation alias; they do **not** prove that the complete process is Markov.
+
+Task visibility has one owner. Motion exposes the task only in its task-active phases and supplies
+the actor `task_valid` mask; Epoch intentionally retains the last payload through `RETIRED` until a
+later accept, so Epoch payload validity must not be reused as actor visibility. Task residuals and
+the two task clocks are zero under that Motion mask. On Isaac, the three racket residuals use
+Racket's public actor-visible target accessors, including configured observation delay, never live
+truth or a private target tensor. A backend must supply the corresponding causal target view rather
+than granting the policy an undelayed simulator oracle.
+
+R07 support and cadence dwell are one narrow direct observation state from the same real
+post-physics plant sample; Observation must not call the broad plant adapter a second time or consume
+the Motion-only admission capability under a forged consumer name. Before the first real
+post-physics edge, genesis returns explicit zero support/dwell. After a row-wise selected reset,
+only the exact `reset_generation + 1` row returns zero for that observation; same-generation peers
+retain their published bytes and still require exact control-tick alignment. The next real
+post-physics publication restores the reset row. Generation rollback, jumps and integer wrap fail.
+
+The critic's current-flight latches and ball row are selected by R06 against the complete current
+`ActionEpochShotKey` **and** publication ordinal. R06 performs that identity match internally and
+returns only a physical storage slot plus the three latches; the slot is used immediately to gather
+the Physical `[N,K,13]` state and is never concatenated into actor or critic observations. Thus a
+slot/UID remains an implementation locator, not an action identity or learnable feature.
+
+Actor fields are intended to be deploy-observable, but the real producer is not yet closed. Joint
+state comes from encoders; projected gravity and gyro come from the pelvis IMU; table-relative root
+position/heading and causal marker-to-COM velocity require calibrated OptiTrack table/root rigid
+bodies and marker extrinsics; achieved racket state uses encoder FK plus that base estimate; teacher,
+planner targets and clocks are controller-owned causal state. Ball truth, selected-contact/net
+latches, support and ready dwell remain critic-only. This source list is a design constraint, not a
+deployment claim; calibration, synchronization, stale/dropout behavior, real builder parity and
+hardware evidence remain open in G07.
+
+### Historical fixed-question A211/C211 contracts (not current FullMDP)
+
+This historical fixed N1 successor deletes the actor-only raw `teacher_base_now_world(15)` block. It does
 not replace it with a residual. Its actor-side actual-base information remains 15 scalars but is a
 new source-homogeneous v2 layout: localizer world `position3 + orientation6D + linear_velocity3`
 followed by the pelvis/body-frame IMU gyro3. It contains neither `projected_gravity` nor a second,
@@ -400,7 +493,7 @@ remain split-ready, while the not-yet-active ball is held in a no-contact parked
 reverse-integrated through table/floor collisions. The reveal event atomically installs the sealed
 incoming-ball launch state and complete task tuple; on that same tick the teacher changes to measured frame 0
 and the actor sees the original `time_to_teacher_start` (about
-`.712376 s` for the current N1), so dense mimic learns the split-ready-to-frame0 bridge. No hand-
+`.712376 s` for the historical N1), so dense mimic learns the split-ready-to-frame0 bridge. No hand-
 authored robot connector, robot teleport or robot reset rewrite is part of this contract; installing
 the ball launch state is the task-start event itself. The separate `200/800`
 durability soak and a 4 s passive hold are not birth or first-learnability prerequisites. The policy
@@ -409,7 +502,7 @@ relative contact information that explain the transition and professional swing 
 
 Both actor and critic append one atomic `task_valid` scalar. Therefore actor width is
 `225 - 15 + 1 = 211`; the historical 318-D critic did not own that actor teacher-base block, so its
-fresh width is `318 + 1 = 319`. A and C retain separate normalizer/checkpoint lineages:
+then-fresh width was `318 + 1 = 319`. A and C retain separate normalizer/checkpoint lineages:
 
 | Contract | Task block | Final rows | Meaning |
 | --- | --- | --- | --- |
@@ -490,10 +583,10 @@ question source and may reuse only an exact answer keyed by the complete questio
 curriculum and RNG advance on every reset; the first cold Q and each changed Q' really solve once;
 replay/assert/checkpoint paths do not re-solve. Formal C uses `direct_ball`, performs zero inverse
 calls and has no answer cache. `immutable_tape` is a historical target-information ablation fixture,
-not an A211/C211 formal-lineage input. An offline `banded_question_bank` is only an optional future
+not an A211/C211 lineage input. An offline `banded_question_bank` was only an optional future
 producer optimization and is not a prerequisite for the first expanding long.
 
-The following paragraph applies only to historical `L194/H225`, not to current A211/C211.
+The following paragraph applies only to historical `L194/H225`, not to the historical A211/C211 row.
 `L194` reads its receipt-owned continuous pre-swing deadline. `H225` has no ball receipt and reads
 `max(MotionCommand.hold_counter_after_current_update, 0) * policy_dt`: the counter is the number
 of future frozen-reference control steps visible to the next action.  Consequently the final
@@ -530,7 +623,7 @@ through the critic, Reward, normalizer or checkpoint side channel.
 For the five-update scale gate, only qdes-hard, actual-hard and nonfinite are implementation
 strict-zero accounts. Fall, base-too-low and robot-hit-table remain real terminations, but are initial-
 policy behavioral evidence: report them separately for hidden-WAIT, revealed-pre-strike and
-post-strike phases with conserved denominators instead of requiring zero occurrences. The current
+post-strike phases with conserved denominators instead of requiring zero occurrences. The historical
 MuJoCo A211/C211 host paths preserve the same split-ready/WAIT/reveal contract, but each family's
 `1 env x 2 PPO update + save/fresh-process cold-load` remains exact-Pod `未测` and cannot authorize
 canonical N1 or 4096-native training.
@@ -555,15 +648,16 @@ merely because both total 318 scalars. It is also not an authorized critic for `
 `C225-proto`: both prototypes now have separately registered 318-D critic ABI and normalizer
 identities, and must not silently reuse this historical `318` or one another's checkpoint lineage.
 
-V2 currently preserves vendor-scale joint observation noise (`q ±0.01 rad`, `dq ±0.5`) and a
+This historical A211/C211 V2 preserved vendor-scale joint observation noise (`q ±0.01 rad`, `dq ±0.5`) and a
 clean privileged critic. The new 15-D `actual_base_now_world` block is currently noise-free: the
 legacy `base_ang_vel ±0.2` and `projected_gravity ±0.05` knobs do not define physically valid
 noise for a mixed position/orientation/linear-velocity/angular-velocity block. Base pose/twist noise
 must be specified per mocap/IMU component instead of applying one uniform perturbation to all 15
 columns.
 
-This is a warm-start-breaking contract migration. Isaac and MuJoCo must independently construct
-the same ordered row and pass fixed-tape parity; actor, critic and Reward must all read the same
+This was a warm-start-breaking contract migration. It is retained as ABI history, not as permission
+to relabel a `211/319` checkpoint as current semantic V2. Isaac and MuJoCo had to independently construct
+the same ordered row and pass fixed-tape parity; actor, critic and Reward had to read the same
 site/frame/sign truth. Existing 170-D and fixed-194 checkpoints remain historical inputs and are
 never relabelled as this contract.
 
@@ -1224,14 +1318,14 @@ What the real system can observe (team contract, 2026-07):
 
 Rules: actor observations must be built only from deploy-available signals; rewards run in sim
 only and may use privileged state; the critic may be privileged. The current 175-D actor uses only
-robot-side signals + planner targets (no mocap terms at all). The fresh frame-consistent
-`action_ball_table_pose_twist_heading_task_teacher_start_v2` successor deliberately consumes
-calibrated mocap base pose plus a causal base linear-velocity estimate and the same Motion phase
-clock that governs teacher playback: absolute-with-respect-to-table context is required alongside
-robot-relative tasks. Training must use the simulator's exact counterpart of those same terms.
-Deployment must close mocap marker→base and venue→table SE(3), gyro extrinsic,
-velocity-estimator noise/latency/stale/dropout and fixed-194 v2 C++ builder parity first;
-until then it remains simulator-only (see G07 Next Steps).
+robot-side signals + planner targets (no mocap terms at all). The historical fixed-194 contract and
+the current FullMDP semantic V2 both require absolute table-relative context in addition to
+robot-relative tasks. Semantic V2's actor uses calibrated table/root pose, a unit root heading and a
+causal root inertial-COM velocity estimate, while projected gravity and angular rate remain direct
+pelvis-IMU quantities. Training must use each backend's exact counterpart of those same physical
+terms. Deployment must close table and marker→root/COM extrinsics, gyro extrinsic, timestamp
+alignment, velocity-estimator noise/latency/stale/dropout and the exact 203-D real builder first;
+until then semantic V2 remains simulator-only (see G07 Next Steps).
 
 ## Table-Tennis Physics Scene Observation (experimental)
 

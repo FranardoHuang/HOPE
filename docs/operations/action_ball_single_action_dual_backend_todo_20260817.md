@@ -1,15 +1,16 @@
-# ActionBall 单动作双后端：唯一执行 TODO
+# ActionBall 单动作双后端：历史执行账（只读）
 
-> **当前执行已迁移：** 本页保留为2026-08-17到2026-08-19的详细历史账。最新依赖、阻塞、
-> A200证据与`4096 × 25000`完成条件只看
+> **HISTORICAL / READ-ONLY：** 本页只保留2026-08-17到2026-08-19的详细历史账；下文所有
+> `ACTIVE`、`RUNNING`、229/399、H24、25k与旧namespace表述都只描述当时快照，不是当前命令或合同。
+> 当前依赖、停止状态、A203/219、H48与fresh-run条件只看
 > [`action_ball_dual_backend_longrun_todo_20260819.md`](action_ball_dual_backend_longrun_todo_20260819.md)。
 > 不再在本页追加命令流水。
 
-> 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`
+> 状态：`HISTORICAL / READ-ONLY / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-19
-> `origin/main:docs/NOW.md` 仍是项目优先级唯一权威；本页只维护这条分支的依赖、证据和下一条命令，不建立影子队列。
+> 更新：2026-08-21
+> `origin/main:docs/NOW.md` 仍是项目优先级唯一权威；本页不得用于发车、resume或维护下一条命令。
 
 ## 1. 目标
 

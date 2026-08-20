@@ -2,6 +2,17 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-21 current correction（supersede下文所有“r3 active/继续25k”叙述；Gate仍`Partial`）：**portable
+MuJoCo r3已经停止在durable ACK `10249`；终段last-100 wall mean/median=`4.890/4.886 s/update`。
+直接停止原因是真实MuJoCo-Warp `EPA_HORIZON` overflow fail-stop；旧229-D observation还存在IDLE clock
+随global step漂移，所以即使扩大EPA容量也不得resume r3。本次live SSH刷新因认证失败，没有取得当前Pod/GPU
+状态；本文不把旧资源快照表述成当前事实。
+
+successor同时切到semantic A203/219，并由Isaac与MuJoCo各自native producer生成同一语义布局与static
+scale；R06缩为现有owner内key8+publication live selection与四tensor输出，不新建owner/receipt/Gate。
+host实现不代签exact GPU ObservationManager/snapshot parity或deploy producer，所以仍无transfer authority。
+详细合同与依赖见[当前长跑TODO](../operations/action_ball_dual_backend_longrun_todo_20260819.md)。
+
 **2026-08-21 FullMDP PPO V2双后端配方身份（Gate仍`Partial`）：**Isaac与portable MuJoCo现在消费同一
 typed learning recipe `H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`。MuJoCo不再接受H override，
 snapshot/completion绑定包含预算与保存节奏的execution SHA；evidence schema 2与completion schema 3显式
@@ -64,7 +75,7 @@ zero-action的table/fall/contact/recovery率只是telemetry；exact keepout term
 不能代签业务链，而本代因73动作、双侧与科学窗口报告未闭合，`full_a_complete`
 固定为`false`。
 
-host当前精确回归为runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
+**HISTORICAL LIVE PREFIX（已由顶部停止状态取代）：**当时host精确回归为runner/ledger/consumer=`96 passed, 1 skipped`，env/action/outcome=
 `59 passed, 7 skipped`，alignment=`14 passed, 21 deselected`。Pod1 GPU2 fresh r2 exact
 `9e7c1c614b1e22eeec4de243f55d58293da155ce`已保持production cadence不变并通过真实GPU focused
 `8 passed in 23.00s`，随后进入4096-env trainer且首个optimizer update返回。stock RSL-RL 3.1.2
@@ -74,13 +85,13 @@ save写出7,882,391-byte `model_0.pt`后，因`log_dir=None`/`disable_logs`路�
 namespace封存且不可重用。fresh r3 exact source
 `dc62684c41e70e40dedaf191a32921b6cd98b344`只显式安装upstream默认
 `runner.logger_type='tensorboard'`字段，不启日志或上传；同一production cadence的真实GPU focused
-再次`8/8`，worker/trainer PID=`864055/865285`，单一trainer进程的`4096×24×25000`现已active。
-当前durable ACK=`0..7`，update 1/5只读consumer均通过；已ACK `model_0.pt`为7,882,391 bytes、
+再次`8/8`，worker/trainer PID=`864055/865285`，单一trainer进程的`4096×24×25000`当时进入active。
+当时durable ACK=`0..7`，update 1/5只读consumer均通过；已ACK `model_0.pt`为7,882,391 bytes、
 SHA-256 `06883851e67ccaaa921cfeeb8bf5c983ee6b3443d67465d8cde1d08ed63f528f`。前8个pre-ACK core
 iteration范围`4.889..5.640 s`、median约`5.025 s`；每update Reward20/actual均有98,304行finite，
 conservation fault=0且policy std finite。update0 due/defer/ACCEPT=`4096/4096/0`，到update5累计
-`8192/8192/0`，update4 exact-table/Gym reset=4,096；这些只作行为telemetry。进程仍alive、result仍
-0 bytes；engineering、business、Full-A终局均未完成，
+`8192/8192/0`，update4 exact-table/Gym reset=4,096；这些只作行为telemetry。该段只是当时的live prefix；
+最终进程止于ACK10249且没有engineering/business/Full-A终局，
 Gate保持`Partial`。详细当前真源见
 [`EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819`](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)。
 

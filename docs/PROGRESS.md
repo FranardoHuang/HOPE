@@ -1,5 +1,21 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP semantic Observation V2与当前执行顺序（branch candidate）
+
+- family A从旧229/399切为actor203/critic219。历史fixed-194/A211已包含table-relative root pose/velocity；
+  229迁移遗漏了floating-base state，却带入raw task45和owner/reward账本。本候选恢复root XYZ、continuous
+  heading和heading-frame COM velocity，同时删除控制面冗余；actor仍只消费Motion-visible mask和delayed
+  planner target，critic才读取live ball/contact/net/support/dwell。外部HITTER/SMaSH/BeyondMimic只作方向性
+  对照，本地root translation/yaw/COM-velocity alias反例才是采用依据。真实deploy producer尚未接通。
+- R06 observation从81-tensor broad projection缩为现有owner内部用canonical shot key八字段加publication
+  ordinal唯一选择live INBOUND/OPEN row，再只输出flight slot与contact/net-crossed/net-clear三枚latch；没有
+  新owner、receipt或Gate。Full-A V1 fallback禁止，V1只为明确的historical WAIT consumer保留。
+- 三条旧run均已停止：两条Isaac分别止于ACK `4603/3467`且退出因果未知，MuJoCo r3止于ACK `10249`并由
+  `EPA_HORIZON` overflow fail-stop；r3还消费旧IDLE clock泄漏，均不得resume。本次live SSH认证失败，
+  未确认当前Pod/GPU状态。唯一依赖顺序固定为Observation V2原子闭合 → EPA deterministic 24-fail/48-finite +
+  GPU/oracle → 单一ActionBallState/K-row一次构造与`K=0` zero-live skip → H48 matched performance → fresh namespace
+  短验并同进程训练。G05/G06保持`Partial`，全程`diagnostic_unauthorized`。
+
 ## 2026-08-21 — FullMDP PPO V2执行配方闭合（branch candidate）
 
 - 用户已采用FullMDP-only typed PPO V2：`H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`。
@@ -34,7 +50,8 @@
   核sdist/patch SHA、safe extraction、全树两文件allowlist，并把patched sdist的281-file package
   payload逐文件绑定到wheel；missing/extra/duplicate/unsafe ZIP member、dist-info/RECORD漂移和伪造
   receipt都fail closed。它记录caller Python与pip/setuptools/wheel来源；host focused=`9 passed`。
-  当前没有采用稳定、project-owned builder，也没有向`vendor_assets/`发布wheel或冒充已采用制品。
+  当前只闭合了project-owned离线构建链；尚未向`vendor_assets/`发布wheel，也不把临时build产物冒充
+  已采用的训练制品。
 - 科学状态不随build-chain晋级：r3当时没有保存exact稀有pair/pose，故deterministic 24-fail/48-pass
   fixture、exact GPU fixed-tape parity和instrumented/ASan独立oracle仍`未测`；stock CPU MuJoCo也硬24且
   可能越界，不能代签。overflow gate保持fail-stop，旧r3不resume，G06仍`Partial`且
@@ -4556,3 +4573,18 @@
   0 bytes，25k终局未完成。详见
   [portable Full-A实验](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md)及
   [G06](gates/G06_isaac_to_mujoco.md)。
+
+## 2026-08-21 — FullMDP semantic Observation V2 host closure
+
+- family A的actor/critic已原子切到`203/219`语义合同；恢复229迁移遗漏的table-relative root
+  XYZ、unit heading和heading-frame COM velocity，同时删除raw task45、owner/fault/age与Reward due/paid
+  账本。V1 `229/399`只保留给明确的legacy WAIT consumer，Full-A training contract与不可恢复diagnostic
+  snapshot均拒绝V1 fallback或caller注入authority metadata。
+- R06 observation从81-tensor broad clone缩为owner内canonical key8+publication live join，只返回slot与三枚
+  latch。R07 support/dwell复用同一真实post-physics plant read；cold genesis为zero，selected reset只清
+  generation精确`+1`的行，peer保持，下一真实publication恢复。Observation不再冒充Motion admission
+  consumer，也不再为两个support bit第二次重扫全机器人。
+- 主线分进程定向回归合计`737 passed, 54 skipped`，另有真实env selected-reset节点包含在20个lean-env
+  tests内；全改动Python `py_compile`与`git diff --check`通过。独立终审`P0=0/P1=0`。这只关闭host代码
+  合同：exact Pod smoke、GPU fixed snapshot、部署producer与matched H48 wall仍`未测`；Motion broad view
+  每control tick仍clone约1.22 MB，是下一single-state/窄projection性能债。

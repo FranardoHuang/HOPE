@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`baseline-runs-incomplete / profiled / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / Pod-matched-wall-pending`
+> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / Pod-matched-wall-pending`
 > 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；zero-flight与后续结构cut的Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
@@ -19,13 +19,18 @@ rollout horizon（每次策略更新、每个环境收集的control step数；�
 | H48 + 12,500 update + 8 minibatch | 采用为PPO V2 | 用户接受更长rollout作为学习算法取舍。总transition/minibatch/optimizer-step量级保持，但按旧吞吐仍约`44 s/update`，所以它不是性能修复；后续主报transitions/s与H24-equivalent。 |
 | `lambda=0.98` | 采用为PPO V2 | 它提高未来TD residual的GAE trace权重，不是“reward衰减修复”；bias/variance已改变，必须fresh并由真实学习证据判断。 |
 | `0 ACCEPT` | 保留为课程telemetry | 表示due opportunity仍DEFER在站稳/模仿准备阶段；balance→mimic→strike→landing需要很多step是合理课程。不得把`ACCEPT>0`做发射、安全或学习成败门。 |
-| actor/critic各`+8`个floating-base observation | 候选 | table-relative root position、heading与heading-frame linear velocity可减少balance相关alias；须先过两后端独立producer、符号/frame反例和真实normalization路径，不把它宣称成Markov闭合。 |
+| semantic Observation V2 A=`203/219` | 采用 | 历史fixed-194/A211已有root state，229迁移遗漏了它却带入raw task/owner/reward账；恢复table-relative root XYZ、heading与heading-frame COM velocity，同时删控制账本。两后端独立producer与真实scale/符号反例仍是GPU验收项，不宣称Markov闭合。 |
 | 一套pose统一reset/D05/R07 | 拒绝 | stable birth、stroke entry、completed-shot recovery是三个不同意图；强行相等是错误等价和同源自证，应共享安全envelope而不是共享唯一姿态。 |
 | 当前task Reward0--13 | 不改 | 业务eligible/income分母仍为零，改权重没有因果作用；先报告分母和课程阶段。 |
 
 Gate纪律继续按HANDOFF执行：删除同一writer自证、zero-callpoint与无consumer的“安全”门；保留能被真实
 production反例触发的nonfinite/overflow、identity join、物理contact/termination和durable ACK边界。
 删减和host回归通过只叫结构GO；exact Pod profiler-off matched wall通过后才叫性能GO。
+
+旧“约6秒”来自H24迭代尺度；对H48的线性等价约为`12 s/update`，只表达必须大砍迭代时间，不是固定
+rollout或形式Gate。旧Isaac H24约22秒意味着按原吞吐H48约44秒；下一代至少要显著提升transitions/s，
+不能用每update transition翻倍掩盖数据流仍慢。所有H48结果同时报告原始wall、transitions/s和
+`wall_s × 24 / 48`的H24-equivalent。
 
 采用：
 
@@ -80,7 +85,8 @@ production反例触发的nonfinite/overflow、identity join、物理contact/term
   两条run均在2026-08-20约`14:41Z`不完整结束，不能用当前磁盘WIP解释它们。
 - 两份result均写`status=failed`、`final_rc=0`、`phase=training`。日志未见traceback、OOM、
   signal/kill证据，cgroup也无OOM记录；所以退出因果是`未判定`，既不臆测OOM/外部停止，也不把
-  `final_rc=0`当成完成。当前三张GPU均无compute process。
+  `final_rc=0`当成完成。2026-08-20终局快照当时显示三张GPU无compute process；本次live SSH认证失败，
+  不能把该快照当成当前资源状态。
 - profile只在同一进程update `0..4`开启并自动关闭。五个collection wall为
   `16.150/12.890/14.560/15.000/14.358 s`；这五个带profiler且reset strata不同，不能冒充稳定吞吐成绩。
 - 五个row中`post_physics_publish`固定96次/update，inclusive host wall为
@@ -123,6 +129,24 @@ kernel，而是把mutable business state收回一个owner，让其他层只做IO
 contact/net/table/landing，selected-reset行集，Reward/observation finite，optimizer成功后才持久ACK，以及
 source/asset/run namespace provenance。要删的是同一writer的重复projection/receipt/digest、empty journal/park、
 每substep代码身份重扫和无consumer的formal/R10对象图；这些不是独立事实源。
+
+Observation V2也按这个结构原则落地，而不是继续给旧229/399尾部加字段：actor common183只保留机器人、
+teacher与anchor状态，tail20只保留actor可观测的raw A/+Y task-normal residual、per-env倒计时、Motion phase/mask；
+critic再加16-D live ball/contact/net/support/dwell。raw task45、owner/fault/age与Reward due/paid账本被删除。
+base goal不等于root pose，torso anchor不等于table-frame base，q/dq也不能唯一推出COM velocity；本地
+root translation/yaw/COM-velocity alias反例因此支持恢复这8个量。外部参考只作为相对base/anchor和velocity
+设计方向，不代替本地因果反例。
+
+同一轮把R06 broad observation projection从81个tensor缩为一个owner内join：用canonical shot key八字段
+和publication ordinal唯一选择INBOUND/OPEN live row，只返回`flight_slot`及contact/net-crossed/net-clear三枚
+latch。slot仅是读取Physical `[N,K,13]`的locator，不成为policy business key；SETTLED_RETAINED、EMPTY或
+无匹配均返回无live slot。这里复用已有R06 owner和opaque projection，没有新增owner、receipt或Gate。
+
+R07 observation也不再冒充Motion consumer或为两个support bit第二次重扫root/joint/all-body/contact：
+support与dwell直接复用同一真实post-physics plant read的窄状态。cold genesis明确为zero；selected reset只把
+generation精确`+1`的行在当帧置零，peer保持，下一真实post-physics恢复。host红队未见P0/P1；但Motion
+observation仍是34个full-N tensor的broad clone-only view，4096环境静态约`1,224,704 bytes/control tick`，
+V2只消费其中8个。这是后续single-state/窄projection的明确P2性能债，不能由host测试换算成Pod秒数。
 
 ## 4. 已定位的热路径
 
@@ -257,23 +281,25 @@ PYTHONDONTWRITEBYTECODE=1 \
 exact Pod fixed-tape、真实GPU与profiler-off matched wall仍`未测`，所以Phase-B同样只有结构GO。
 
 successor验收是同一`4096×48×12500`进程：前若干update只读profile，之后profile自动关闭继续；性能结论使用
-profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.5 s`、p95 `<=8 s`。任何数值优化还须
-逐step对齐done/reason/reset IDs/generation/RNG、D05/R03/R06/R07/payment/retire、229/399 obs和Reward20。
+profile-off后相同reset/live-flight/D05 strata，同时报告原始wall、transitions/s与H24-equivalent。旧H24约6秒
+线性对应H48约12秒，只是加速尺度，不是硬阈值。任何数值优化还须逐step对齐done/reason/reset IDs/
+generation/RNG、D05/R03/R06/R07/payment/retire、203/219 obs和Reward20。
 
 ## 6. 下一步
 
-1. 当前三张GPU均空，但候选source/runner仍须先冻结为clean、可复现的执行件；完成后在exact Pod先跑
-   zero-live-flight的fixed-tape/RNG/reason/counter/safety parity，再用fresh namespace做profiler-off
-   `4096×24` matched wall。这一级证据当前仍只能记`未测`，不得从dirty WIP发射。
+1. 先原子闭合Observation V2 A203/219及training/snapshot contract；本次live SSH认证失败，未取得当前
+   GPU状态，不能沿用旧“GPU均空”快照。候选source/runner须先冻结为clean、可复现执行件，不得从dirty WIP发射。
    本轮一份未入Git的565行ABBA实现已因契约自证删除：测试自造ACK schema v10，
    exact baseline/candidate runner均发schema v11，真跑必然被其自己拒绝。successor测量器必须从
    exact runner的live wire contract建立fixture，不另造一份schema/gate。
-2. 只有Pod parity和matched wall都通过，才把zero-flight successor称为严格更强；两条旧run已经结束，
+2. 在MuJoCo以同一deterministic pair闭合EPA24-fail/48-finite、exact GPU和独立oracle；容量gate保持fail-stop，
+   不从r3恢复。
+3. 把D05 producer→R05→Physical/R06/Epoch收敛为一个device-resident `ActionBallState`：K-row只构造一次、
+   sparse commit、真实event才写delta，并让`K=0`/zero-live-flight成为自然的无业务路径。
+4. 只有fixed-tape parity和exact Pod profiler-off matched H48 wall都通过，才把successor称为严格更强；两条旧run已经结束，
    successor必须fresh且不得resume旧checkpoint。没有净收益就撤回，不靠host测试或主观保留。
-3. owner validation已收回cold boundary，Phase-A从现役wiring退役formal legacy lane并固定direct lean；
-   Phase-B branch candidate也已物理删除dormant formal owner、专属适配面和历史测试，未重引入compatibility
-   adapter。下一步把D05 producer→R05改成一套compact transaction，并收敛Reward/observation的重复mutable state。
-4. MuJoCo并行先完成action0 question/teacher，再合并contact census；R06/R07/Reward11--13闭合前不叫Full-A长跑。
+5. 通过后使用fresh namespace先短验真实构造/finite/callpoint，再在同一进程继续训练；不插`ACCEPT>0`表现门，
+   按balance→mimic→entry→strike→landing报告分母。
 
 ## 7. `ddb1e7c4` successor实测：single-read cut没有打中首墙
 
@@ -336,7 +362,7 @@ R06 live state与scene callback activity。任一输入的shape/dtype/device/chr
 mixed/full、false→D05 ACCEPT、active flight、retire所在control或任何sticky fault仍走原完整dense
 path；selected reset、true reset、restore会使cache失效，checkpoint不能穿过未配对的idle lease。
 空R06 mutation与全false Epoch journal没有科学consumer，所以本路径不为旧结构伪造它们；
-229/399 observation、Reward20、done/reason/reset/RNG和decoded evidence仍保持同义。
+203/219 semantic observation、Reward20、done/reason/reset/RNG和decoded evidence必须保持同义。
 
 host zero-flight三个focused文件各用独立Python进程，避免既有flat/package双namespace测试收集冲突；
 回归为`112 passed, 4 skipped` / 约4秒。更宽的consumer semantic回归为
@@ -345,10 +371,10 @@ pre/post缺失、重复/倒序stamp、callback heartbeat/candidate、selected re
 fixed tape。这些只是host语义证据：exact Pod fixed-tape与profiler-off `4096×24` matched wall均
 仍`未测`，因此尚不声称从22秒恢复到6--9秒，也不声称严格支配已结束的baseline run。
 
-当前只有算术预算：zero-flight加两个已落地结构cut估算将完整iteration降到约
-`8.4--9.1 s`；这不是Pod实测，更没有证明`6 s/update`。要继续逼近6秒，必须先解开formal
-legacy consumer对D05 full-N bank/transaction的结构锁定，再用matched A/B判定真实wall；不能用预算
-代签。这也符合HANDOFF §3.5/3.6：只把不可学或证据不可信当阻塞，确定性结构事实用
+此前只有算术预算：zero-flight加两个结构cut曾估算H24 iteration约`8.4--9.1 s`；这不是Pod实测，
+也没有证明任何H48速度。formal legacy consumer现已由Phase-B删除，下一刀不是继续适配旧full-N接口，
+而是把mutable business state收成单一`ActionBallState`后用matched A/B判定真实wall；不能用预算代签。
+这也符合HANDOFF §3.5/3.6：只把不可学或证据不可信当阻塞，确定性结构事实用
 直接consumer/dataflow追溯，不用随机rollout为它代言。
 
 后续steady hot path每新增一个`.clone/.item/.cpu/.nonzero/full-N write`，都必须同时记录它的

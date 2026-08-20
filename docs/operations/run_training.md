@@ -140,6 +140,38 @@ schema 2，terminal completion使用schema 3，consumer必须按schema分流。H
 transition翻倍，验收统一报告transitions/s和`wall_s * 24 / H`的H24-equivalent，并保留原始wall；真实GPU
 wall、显存和学习收益未测前，任何host hash/shape测试都只能算配方闭合。
 
+#### FullMDP semantic Observation V2与snapshot边界（2026-08-21 branch candidate）
+
+family A只接受actor contract `action_ball_full_mdp_semantic_actor_v2`（203-D）和critic contract
+`action_ball_full_mdp_semantic_critic_v2`（219-D）；observation kind为
+`action_ball_full_mdp_semantic_observation_v2`。Full-A不得回退到旧229/399 V1；V1符号只供明确声明的
+historical WAIT consumer使用。family C将另用202/218合同，不补零伪装成A。
+
+203-D actor只含目标传感链可观测的robot/teacher/anchor、table-relative root XYZ、continuous heading、
+heading-frame COM velocity和raw A/+Y task-normal residual；contact/support/spin/fault/reward ledger只允许出现在critic或
+telemetry。actor task-valid必须来自Motion-visible mask，不能用Epoch retained row把RETIRED task重新暴露；
+target必须使用actor-visible delayed planner tuple，不能读live truth。所有scale是V2 ABI内的静态常量；
+不得另开running normalization或CLI clipping改变语义。
+
+Isaac首个genesis observation尚未经历post-physics，因此R07 support/dwell只能为zero。selected reset发生在
+post-physics之后、返回observation之前；仅reset generation相对R07 publication精确`+1`的行清零，未reset
+peer仍使用同一publication并严格对齐tick，下一次真实post-physics恢复。跳代、回退或整数wrap必须拒绝；
+不要通过重读plant、伪造R07 capability或全batch清空来“修”这个边界。
+
+launcher在构造Kit/runner前必须对exact actor/critic contract、203/219宽度和training contract schema/hash
+fail closed。禁止通过Hydra、task YAML、MuJoCo CLI或snapshot metadata覆盖contract、width、layout、scale、
+PPO recipe或execution cadence；出现冲突就启新代码合同与fresh namespace，不做运行时“兼容修正”。
+
+每个V2 snapshot及其receipt必须绑定同一`training_contract_schema_version`和
+`training_contract_sha256`；该SHA已经覆盖actor/critic contract与维度及PPO配方，不再复制一套同writer
+observation摘要作自证。缺字段、旧schema、hash mismatch、路径/iteration不一致或文件未完成验证时，consumer
+必须拒绝。snapshot仍明确为`diagnostic_nonresumable`，并写
+`checkpoint_authority=false / resume_authority=false`；runner `load()`继续硬拒。receipt只证明已持久化文件与
+本次training contract相同，不授权resume、promotion、export、部署或真机安全。
+
+当前真实IMU、table/root定位、marker→COM因果速度和planner producer尚未接通；simulation V2通过也只能称
+host/Pod diagnostic。旧r3与两条Isaac H24 run均已停止，新V2只能fresh launch。
+
 若FullMDP在base manager构造中途失败，当前进程必须视为cold-discard：环境会按pinned顺序单次
 best-effort清理已存在manager与simulator；任何terminal simulator清理失败都会sticky拒绝后续资源操作并
 要求进程退出。不得在同一进程捕获该异常后重新构造环境、重试旧sim、复用namespace或把它当成可恢复
