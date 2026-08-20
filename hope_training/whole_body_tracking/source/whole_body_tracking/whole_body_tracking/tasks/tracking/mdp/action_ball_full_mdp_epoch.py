@@ -2515,7 +2515,7 @@ class ActionEpochOwner:
             self._reward_ordinal = 0
             return record.clone()
 
-    def pay_reward(self, ordinal: int) -> ActionEpochRecord:
+    def pay_reward(self, ordinal: int) -> None:
         if type(ordinal) is not int:
             raise ActionEpochError("reward ordinal must be exact int")
         with self._operation("pay reward"):
@@ -2536,7 +2536,7 @@ class ActionEpochOwner:
                 if last
                 else record.reward_cycle_open
             )
-            record = self._append(
+            self._append(
                 record,
                 transition="REWARD_CONSUMER_PAID",
                 names=("reward_consumer_ordinal", "reward_paid"),
@@ -2554,7 +2554,6 @@ class ActionEpochOwner:
             self._reward_ordinal += 1
             if last:
                 self._reward_open = False
-            return record.clone()
 
     def publish_reward_payment(self, control_step: int) -> ActionEpochRewardPaymentRows:
         """Publish the actual completed Reward edge; control_step is clock fact."""

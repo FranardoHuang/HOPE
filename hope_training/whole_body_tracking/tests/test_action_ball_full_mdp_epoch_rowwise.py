@@ -2622,6 +2622,50 @@ def test_reward_order_overflow_and_checkpoint_are_bounded():
     assert not hasattr(checkpoint, "commit_log")
 
 
+def test_reward_payment_mutates_publication_without_return_clone(monkeypatch):
+    epoch = E.ActionEpochOwner(num_envs=2, device="cpu")
+    epoch.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool),
+        reset_generation=torch.zeros(2, dtype=torch.int64),
+    )
+    epoch.open_reward_cycle()
+    before = epoch._publication.current
+    assert before is not None
+    commit_head = epoch.commit_head
+
+    clone_calls = 0
+    original_clone = E.ActionEpochRecord.clone
+
+    def counted_clone(record):
+        nonlocal clone_calls
+        clone_calls += 1
+        return original_clone(record)
+
+    monkeypatch.setattr(E.ActionEpochRecord, "clone", counted_clone)
+
+    assert epoch.pay_reward(0) is None
+    paid = epoch._publication.current
+    assert paid is not None and paid is not before
+    assert paid.identity is before.identity
+    assert paid.version == before.version + 1
+    assert epoch.commit_head == commit_head + 1
+    assert paid.reward_paid[:, 0].tolist() == [True, True]
+    assert not bool(paid.reward_paid[:, 1:].any())
+    assert clone_calls == 0
+
+    for wrong_ordinal in (0, 2):
+        with pytest.raises(E.ActionEpochError, match="chronology differs"):
+            epoch.pay_reward(wrong_ordinal)
+        assert epoch._publication.current is paid
+        assert epoch.commit_head == commit_head + 1
+        assert clone_calls == 0
+
+    assert epoch.pay_reward(1) is None
+    assert epoch._publication.current is not paid
+    assert epoch._publication.current.reward_paid[:, :2].all()
+    assert clone_calls == 0
+
+
 def test_open_reward_debt_blocks_reset_drain_and_checkpoint():
     epoch = E.ActionEpochOwner(num_envs=2, device="cpu")
     epoch.activate_reset_genesis(
