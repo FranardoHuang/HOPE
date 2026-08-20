@@ -28,7 +28,7 @@ batch 翻倍掩盖吞吐没有改善。
 | --- | --- | --- |
 | invalid-task epoch clock mask | **采用** | `task_valid=false`时五个clock严格为0；旧run的全局时间泄漏使MDP非平稳。Isaac/MuJoCo必须同源反例闭合，旧snapshot不resume。 |
 | R07付款阶段 | **采用** | 只在`OUTCOME_SETTLED && deadline-relative age in [10,77]`付款；readiness仍每tick计算，REVEAL/LAUNCH/RETIRED不付。 |
-| floating-base observation V2 | **条件候选 / 先复核** | 先逐字段复核既有HITTER、SMASH、BeyondMimic、智元/Unitree尽调和当前229/399布局，证明没有等价编码、字段可由真实部署观测且确实减少合法state alias；随后才决定是`+0/+2/+3/+5/+8`，不得先锁死237/407，也不得宣称单帧完全Markov。 |
+| semantic observation V2 | **采用 A=`203/219`；C另立`202/218`合同** | 既有194/A211已经包含table-relative root pose与COM velocity；229/399是direct-lean diagnostic迁移时的遗漏，不是此前尽调否决。A actor只保留183-D robot/teacher prefix和20-D signed task residual；critic只加16-D未来因果物理状态。删除raw task45、owner fact blob、fault/age、reward due/paid等控制面，不做机械`237/407`扩维，也不宣称单帧完全Markov。 |
 | FullMDP PPO recipe V2 | **采用** | `H=48, lambda=.98, epochs=5, minibatches=8, max_iterations=12500, save_interval=500`；总transitions、minibatch size、总optimizer steps与snapshot的env-step cadence保持旧`24x25000/MB4/save1000`量级。它是学习算法取舍，不是性能修复。 |
 | one-pose reset/D05/R07 | **拒绝** | stable birth、action-specific stroke entry、post-shot recovery服务不同意图；强行相等会绕过balance->mimic->entry课程。 |
 | Reward0--13调权 | **拒绝当前改动** | eligible denominator为0时调权没有因果作用；先修observation/clock/phase与学习配方。 |
@@ -41,10 +41,13 @@ batch 翻倍掩盖吞吐没有改善。
 只有前一项闭合后才能开始后一项；每项独立提交、可单独回退。禁止把全部变化揉成一条无法归因的长跑。
 
 1. **基线与TODO冻结**：从 stable `ee6571ba…`建立clean successor；整合已验证的clock与R07修复。
-2. **Observation尽调与V2裁决**：先重读既有HITTER、SMASH、BeyondMimic、智元/Unitree字段级对照，解释
-   为什么旧设计没有这些量；再审当前229/399是否已有等价编码。只有独立native-state正负扰动证明旧ABI存在
-   合法alias、候选字段可由真实部署观测且没有冗余，才实现最小增量。实现时一个纯tensor pack真源供
-   Isaac/MuJoCo复用，验证frame/单位/COM速度及reset peer preservation；不能用shared layout自己生成expected再自证。
+2. **Observation V2**：尽调已确认旧194/A211有root/table pose与COM velocity，direct-lean 229迁移遗漏了
+   floating-base state，却机械拼入raw task45和170-D owner/reward账本。A冻结为actor203/critic219：common183
+   包含table-relative root XYZ、continuous heading2、heading-frame COM velocity、proprioception、teacher与anchor
+   residual；A tail20只给racket position/velocity/normal error、base-goal error、三个per-env倒计时、phase5与
+   task-valid。critic suffix16只给episode余时、live ball9、selected contact/net history、foot support2和cadence
+   dwell。实现为一个纯tensor semantic pack供Isaac/MuJoCo复用；用独立native-state正负扰动验证frame/单位/
+   COM速度/alias，不能用shared layout自己生成expected再自证。C将来使用独立202/218合同，不补零凑宽度。
 3. **PPO recipe V2**：只改FullMDP typed recipe，不改共享`ppo.yaml`；launcher receipt记录effective
    `H/lambda/epochs/minibatches/budget/save`，但recipe hash只证明provenance，不证明学习更好。
 4. **MuJoCo capacity**：在project-owned pinned wheel中修EPA horizon，跑24-fail/48-pass deterministic fixture与
@@ -75,8 +78,10 @@ counter、用随机rollout证明确定性几何，以及`ACCEPT>0`/zero-policy�
   direct-lean Phase-A、partial-construction simulator cleanup；这些主要降低固定税和维护面，尚无matched Pod wall。
 - MuJoCo clock修复与R07 phase-window修复已作为独立提交整合到本clean successor；前者窄反例
   `2 passed`，后者当前独立focused=`138 passed,6 skipped`，完整既有190-test口径待Pod/依赖齐备后复跑。
-- floating-base observation仍是条件候选；在外部尽调/current-layout/部署可观测性三份独立审计闭合前，不改
-  229/399 ABI，也不把“减少policy负担”当成无需证据的口号。
+- observation三份独立审计已闭合：旧229能构造root translation/yaw/COM velocity三类同obs异动作alias；
+  这些量在旧194/A211已存在，HITTER/SMASH/BeyondMimic也分别用相对base/anchor、history或base velocity解决
+  同类负担。A V2采用203/219并删除raw task/ledger冗余；OptiTrack marker->root、table extrinsic与causal
+  marker->COM velocity可生产，但部署builder尚未接通，故当前仍只授权simulation diagnostic。
 - D05 compact WIP虽然production净删2167行且`517 passed,40 skipped`，仍保留full-N publication/journal，
   并使dormant formal/reveal壳construction-broken；因此明确`HOLD / uncommitted`，不能直接作为successor。
 - `origin/main:docs/NOW.md`仍是项目优先级唯一权威；本节只是本功能分支的执行依赖与验收清单。
