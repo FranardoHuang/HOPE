@@ -1022,31 +1022,7 @@ def _fake_env(*, rendering=False, decimation=3, owner_kwargs=None):
     owner.full_mdp_post_physics_env = env
     owner.full_mdp_post_physics_lease = env._full_mdp_post_physics_lease
     env._full_mdp_post_physics_owner = owner
-    env._full_mdp_post_physics_owner_type = type(owner)
-    owner_type = type(owner)
-    executable_members = M._loaded_class_executable_members(
-        owner_type,
-        module_object=sys.modules[owner_type.__module__],
-        strict_plain_functions=True,
-    )
-    env._full_mdp_post_physics_executable_binding = (
-        M._ConcreteOwnerExecutableBinding(
-            module_name=owner_type.__module__,
-            qualname=owner_type.__qualname__,
-            module_object=sys.modules[owner_type.__module__],
-            owner_type=owner_type,
-            direct_executable_sha256=M._live_owner_direct_executable_sha256(
-                owner_type
-            ),
-            executable_members=executable_members,
-            publish_function=vars(owner_type)["publish_post_physics_substep"],
-        )
-    )
-    env._full_mdp_post_physics_publish = (
-        env._full_mdp_post_physics_executable_binding.publish_function.__get__(
-            owner, owner_type
-        )
-    )
+    env._full_mdp_post_physics_publish = owner.publish_post_physics_substep
     return env, owner, trace
 
 
@@ -1169,16 +1145,72 @@ def test_poison_record_cannot_be_disabled_by_replacing_a_module_global(
     assert trace == trace_before_retry
 
 
-def test_owner_binding_lease_and_external_authority_are_rechecked_pre_physics():
-    env, owner, trace = _fake_env(decimation=1)
-    owner.full_mdp_post_physics_lease = object()
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="lease changed"):
-        env.step(torch.zeros(2, 4))
-    assert not trace
-    assert env._full_mdp_post_physics_poison is not None
+def test_owner_lease_and_external_authority_are_rejected_at_install(
+    tmp_path, monkeypatch
+):
+    module, source_path = _load_concrete_owner_fixture(tmp_path, monkeypatch)
+    env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
+    lease = object()
+    dependency_dag = "d" * 64
+    pins = _concrete_owner_fixture_pins(
+        module, source_path, dependency_dag
+    )
 
-    other, other_owner, other_trace = _fake_env(decimation=1)
-    other_owner.full_mdp_post_physics_dependency_dag_sha256 = "b" * 64
-    with pytest.raises(M.FullMdpPostPhysicsProtocolError, match="dependency DAG"):
-        other.step(torch.zeros(2, 4))
-    assert not other_trace
+    wrong_lease_owner = module.ConcreteOwner(
+        env, object(), dependency_dag
+    )
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError, match="lease differs"
+    ):
+        env._validate_concrete_owner_install(
+            wrong_lease_owner,
+            concrete_pins=pins,
+            expected_dependency_dag=dependency_dag,
+            expected_lease=lease,
+        )
+
+    wrong_dag_owner = module.ConcreteOwner(env, lease, "e" * 64)
+    with pytest.raises(
+        M.FullMdpPostPhysicsProtocolError, match="dependency DAG differs"
+    ):
+        env._validate_concrete_owner_install(
+            wrong_dag_owner,
+            concrete_pins=pins,
+            expected_dependency_dag=dependency_dag,
+            expected_lease=lease,
+        )
+
+
+def test_hot_dispatch_does_not_rescan_owner_python_bindings():
+    tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
+    owner_type = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "ActionBallFullMdpManagerBasedRLEnv"
+    )
+    assert all(
+        not (
+            isinstance(node, ast.FunctionDef)
+            and node.name == "_assert_owner_binding_current"
+        )
+        for node in owner_type.body
+    )
+    hot_methods = {
+        "step",
+        "_before_policy_step",
+        "_publish_post_physics_substep",
+        "_after_reward_close",
+        "_reset_idx",
+    }
+    for method in owner_type.body:
+        if (
+            not isinstance(method, ast.FunctionDef)
+            or method.name not in hot_methods
+        ):
+            continue
+        assert not any(
+            isinstance(node, ast.Call)
+            and _call_name(node) == "self._assert_owner_binding_current"
+            for node in ast.walk(method)
+        )

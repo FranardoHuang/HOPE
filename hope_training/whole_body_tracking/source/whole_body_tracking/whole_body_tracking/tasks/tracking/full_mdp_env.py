@@ -21,6 +21,10 @@ The concrete owner is likewise bound to the class actually exported by its
 loaded module.  Its direct Python code objects must match code compiled (but
 never executed) from the pinned class source; a newly pinned disk file cannot
 authorize stale or replaced executable code already resident in the process.
+That source, API, lease and dependency-DAG admission is a construction
+boundary.  Runtime dispatch uses the exact bound methods retained there; it
+does not repeatedly scan Python module/class dictionaries for deliberate
+same-process rebinding.
 
 The installed top owner has the only fresh callpoints: one policy-step entry
 before action processing (the owner, not this environment, decides whether a
@@ -1954,8 +1958,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                     require_top_runtime_owner=True,
                 )
             self._full_mdp_runtime_owner = owner
-            self._full_mdp_runtime_owner_type = type(owner)
-            self._full_mdp_runtime_executable_binding = executable_binding
             self._full_mdp_before_policy_step = (
                 executable_binding.before_policy_step_function.__get__(
                     owner, executable_binding.owner_type
@@ -2033,12 +2035,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             except Exception:
                 pass
             raise
-        self._full_mdp_runtime_expected_dependency_dag = expected_dependency_dag
-        self._full_mdp_runtime_diagnostic_dependency_kind = (
-            FULL_MDP_DIAGNOSTIC_RUNTIME_DEPENDENCY_KIND
-            if pins_unfrozen
-            else None
-        )
         self._full_mdp_active_dispatch: _ControlStepDispatch | None = None
         self._full_mdp_last_after_reward_close_control_step = 0
         self._full_mdp_post_physics_poison: (
@@ -2188,8 +2184,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 setattr(self, manager_name, _ABSENT)
         for name in (
             "_full_mdp_runtime_owner",
-            "_full_mdp_runtime_owner_type",
-            "_full_mdp_runtime_executable_binding",
             "_full_mdp_before_policy_step",
             "_full_mdp_before_physics_substep",
             "_full_mdp_post_physics_publish",
@@ -3159,174 +3153,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             selected_true_reset_receipt_validator_function=None,
         )
 
-    def _assert_owner_binding_current(self) -> None:
-        production_top_runtime = hasattr(self, "_full_mdp_runtime_owner")
-        owner = (
-            self._full_mdp_runtime_owner
-            if production_top_runtime
-            else self._full_mdp_post_physics_owner
-        )
-        executable_binding = (
-            self._full_mdp_runtime_executable_binding
-            if production_top_runtime
-            else self._full_mdp_post_physics_executable_binding
-        )
-        installed_owner_type = (
-            self._full_mdp_runtime_owner_type
-            if production_top_runtime
-            else self._full_mdp_post_physics_owner_type
-        )
-        if (
-            type(owner) is not installed_owner_type
-            or type(owner) is not executable_binding.owner_type
-        ):
-            raise FullMdpPostPhysicsProtocolError(
-                "installed post-physics owner nominal type changed"
-            )
-        if (
-            sys.modules.get(executable_binding.module_name)
-            is not executable_binding.module_object
-            or vars(executable_binding.module_object).get(
-                executable_binding.qualname, _ABSENT
-            )
-            is not executable_binding.owner_type
-        ):
-            raise FullMdpPostPhysicsProtocolError(
-                "installed post-physics owner module binding changed"
-            )
-        current_members = _loaded_class_executable_members(
-            type(owner),
-            module_object=executable_binding.module_object,
-            strict_plain_functions=True,
-        )
-        if len(current_members) != len(executable_binding.executable_members) or any(
-            current.name != installed.name
-            or current.role != installed.role
-            or current.function is not installed.function
-            or current.code is not installed.code
-            for current, installed in zip(
-                current_members, executable_binding.executable_members
-            )
-        ):
-            raise FullMdpPostPhysicsProtocolError(
-                "installed post-physics owner executable changed"
-            )
-        bound_surfaces: tuple[
-            tuple[str, object, types.FunctionType | None], ...
-        ] = (
-            (
-                "publish_post_physics_substep",
-                self._full_mdp_post_physics_publish,
-                executable_binding.publish_function,
-            ),
-        )
-        if production_top_runtime:
-            diagnostic_kind = getattr(
-                self, "_full_mdp_runtime_diagnostic_dependency_kind", None
-            )
-            bound_surfaces = (
-                (
-                    "before_policy_step",
-                    self._full_mdp_before_policy_step,
-                    executable_binding.before_policy_step_function,
-                ),
-                *bound_surfaces,
-                (
-                    "after_reward_close",
-                    getattr(self, "_full_mdp_after_reward_close", _ABSENT),
-                    executable_binding.after_reward_close_function,
-                ),
-                (
-                    "selected_true_reset",
-                    self._full_mdp_selected_true_reset,
-                    executable_binding.selected_true_reset_function,
-                ),
-            )
-            if diagnostic_kind is not None:
-                bound_surfaces = (
-                    *bound_surfaces,
-                    (
-                        "before_physics_substep",
-                        getattr(
-                            self,
-                            "_full_mdp_before_physics_substep",
-                            _ABSENT,
-                        ),
-                        executable_binding.before_physics_substep_function,
-                    ),
-                    (
-                        "after_command_compute_before_observation",
-                        getattr(
-                            self,
-                            "_full_mdp_after_command_compute_before_observation",
-                            _ABSENT,
-                        ),
-                        executable_binding.
-                        after_command_compute_before_observation_function,
-                    ),
-                )
-            if diagnostic_kind is None:
-                bound_surfaces = (
-                    *bound_surfaces,
-                    (
-                        "require_owned_selected_true_reset_receipt",
-                        self._action_ball_full_mdp_selected_reset_result_validator,
-                        executable_binding.selected_true_reset_receipt_validator_function,
-                    ),
-                )
-        for name, bound, function in bound_surfaces:
-            if (
-                not isinstance(function, types.FunctionType)
-                or not isinstance(bound, types.MethodType)
-                or bound.__self__ is not owner
-                or bound.__func__ is not function
-                or vars(type(owner)).get(name, _ABSENT) is not function
-            ):
-                raise FullMdpPostPhysicsProtocolError(
-                    f"installed top runtime owner {name!r} binding changed"
-                )
-        if production_top_runtime:
-            expected_dependency_dag = self._full_mdp_runtime_expected_dependency_dag
-            if diagnostic_kind is None:
-                if not isinstance(owner, FullMdpRuntimeOwner):
-                    raise FullMdpPostPhysicsProtocolError(
-                        "installed top runtime owner protocol changed"
-                    )
-                dependency_dag = owner.full_mdp_runtime_dependency_dag_sha256
-            else:
-                if (
-                    diagnostic_kind
-                    != FULL_MDP_DIAGNOSTIC_RUNTIME_DEPENDENCY_KIND
-                    or owner.diagnostic_dependency_kind != diagnostic_kind
-                ):
-                    raise FullMdpPostPhysicsProtocolError(
-                        "installed lean diagnostic dependency kind changed"
-                    )
-                dependency_dag = None
-            owner_env = owner.full_mdp_runtime_env
-            owner_lease = owner.full_mdp_runtime_lease
-            expected_lease = self._action_ball_full_mdp_runtime_lease
-        else:
-            dependency_dag = owner.full_mdp_post_physics_dependency_dag_sha256
-            expected_dependency_dag = (
-                self._full_mdp_post_physics_expected_dependency_dag
-            )
-            owner_env = owner.full_mdp_post_physics_env
-            owner_lease = owner.full_mdp_post_physics_lease
-            expected_lease = self._full_mdp_post_physics_lease
-        if dependency_dag != expected_dependency_dag:
-            raise FullMdpPostPhysicsProtocolError(
-                "installed post-physics owner dependency DAG changed"
-            )
-        if owner_env is not self:
-            raise FullMdpPostPhysicsProtocolError(
-                "installed post-physics owner environment changed"
-            )
-        if owner_lease is not expected_lease:
-            raise FullMdpPostPhysicsProtocolError(
-                "installed post-physics owner lease changed"
-            )
-
     def _protected_manager_values(self) -> tuple[tuple[str, object], ...]:
         termination_manager = self.termination_manager
         values: list[tuple[str, object]] = [
@@ -3444,13 +3270,11 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 )
             return
         try:
-            self._assert_owner_binding_current()
             result = self._full_mdp_before_policy_step(control_step, action)
             if result is not None:
                 raise FullMdpPostPhysicsProtocolError(
                     "top runtime owner before_policy_step must return None"
                 )
-            self._assert_owner_binding_current()
             if self._full_mdp_post_physics_poison is not None:
                 raise FullMdpPostPhysicsProtocolError(
                     "top runtime owner poisoned the before-policy boundary"
@@ -3483,14 +3307,12 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 sim_step=self._sim_step_counter,
             )
             expected_exact = dispatch.pending_exact_tuple
-            self._assert_owner_binding_current()
             protected = self._protected_manager_state()
             result = self._full_mdp_post_physics_publish(stamp)
             if result is not None:
                 raise FullMdpPostPhysicsProtocolError(
                     "post-physics owner must return None"
                 )
-            self._assert_owner_binding_current()
             self._assert_protected_manager_state_unchanged(protected)
             if self._full_mdp_post_physics_poison is not None:
                 raise FullMdpPostPhysicsProtocolError(
@@ -3543,13 +3365,11 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 raise FullMdpPostPhysicsProtocolError(
                     "after-Reward close was skipped, duplicated, or replayed"
                 )
-            self._assert_owner_binding_current()
             result = self._full_mdp_after_reward_close(control_step)
             if result is not None:
                 raise FullMdpPostPhysicsProtocolError(
                     "top runtime owner after_reward_close must return None"
                 )
-            self._assert_owner_binding_current()
             if self._full_mdp_post_physics_poison is not None:
                 raise FullMdpPostPhysicsProtocolError(
                     "top runtime owner poisoned the after-Reward boundary"
@@ -3932,7 +3752,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 "fresh full-MDP top owner has no selected-reset callpoint"
             )
         try:
-            self._assert_owner_binding_current()
             components = self._action_ball_full_mdp_components
             genesis_reset = (
                 type(components) is FullMdpLeanRuntimeComponents
@@ -3974,7 +3793,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                     raise FullMdpPostPhysicsProtocolError(
                         "lean selected_true_reset must return None"
                     )
-                self._assert_owner_binding_current()
                 record = self._action_ball_full_mdp_active_reset_record
                 if (
                     type(record) is not _FullMdpSelectedResetRecord
@@ -3994,7 +3812,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                     raise FullMdpPostPhysicsProtocolError(
                         "top runtime owner selected_true_reset returned no receipt"
                     )
-                self._assert_owner_binding_current()
                 self._consume_action_ball_full_mdp_selected_reset_result(
                     event, receipt
                 )
@@ -4045,7 +3862,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 # initial command epoch here, after every manager reset and
                 # before the base reset computes its returned observation.
                 self.command_manager.compute(dt=self.step_dt)
-                self._assert_owner_binding_current()
                 result = (
                     self._full_mdp_after_command_compute_before_observation(0)
                 )
@@ -4053,7 +3869,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                     raise FullMdpPostPhysicsProtocolError(
                         "lean genesis after-command boundary must return None"
                     )
-                self._assert_owner_binding_current()
         except Exception as exc:
             self._poison(
                 reason=f"{type(exc).__module__}.{type(exc).__qualname__}",
@@ -4112,7 +3927,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
         self._assert_step_may_start()
         dispatch: _ControlStepDispatch | None = None
         try:
-            self._assert_owner_binding_current()
             action_on_device = action.to(self.device)
             self._before_policy_step(
                 control_step=self.common_step_counter + 1,
@@ -4144,7 +3958,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                         self, "_full_mdp_before_physics_substep", None
                     )
                     if before_physics is not None:
-                        self._assert_owner_binding_current()
                         protected = self._protected_manager_state()
                         pre_stamp = FullMdpPrePhysicsSubstepStamp(
                             control_step=dispatch.control_step,
@@ -4160,7 +3973,6 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                         self._assert_protected_manager_state_unchanged(
                             protected
                         )
-                        self._assert_owner_binding_current()
                     # set actions into simulator
                     self.scene.write_data_to_sim()
                     # simulate
@@ -4243,13 +4055,11 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 None,
             )
             if after_command is not None:
-                self._assert_owner_binding_current()
                 result = after_command(self.common_step_counter)
                 if result is not None:
                     raise FullMdpPostPhysicsProtocolError(
                         "lean after-command boundary must return None"
                     )
-                self._assert_owner_binding_current()
                 if self._full_mdp_post_physics_poison is not None:
                     raise FullMdpPostPhysicsProtocolError(
                         "lean after-command boundary poisoned the environment"
