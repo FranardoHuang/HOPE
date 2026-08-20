@@ -21,9 +21,10 @@ def _ppo_recipe_module():
     return module
 
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
-FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
-SCHEMA_VERSION, COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
-    2, FULL_MDP_PPO_RECIPE.max_iterations, 4096,
+FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
+EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 2, 3, 2
+COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
+    FULL_MDP_PPO_RECIPE.max_iterations, 4096,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
     6907688916670928)
 TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
@@ -124,7 +125,8 @@ def _receipt(value, label, name=None):
 def _validate_record(row, index, run_identity):
     _keys(row, TOP_KEYS, "top-level")
     fixed = {
-        "schema_version": 2, "record_type": "mujoco_full_mdp_update_ack",
+        "schema_version": EVIDENCE_SCHEMA_VERSION,
+        "record_type": "mujoco_full_mdp_update_ack",
         "diagnostic_unauthorized": True, "update_index": index, "num_envs": NUM_ENVS,
         "num_steps_per_env": STEPS_PER_UPDATE,
         "transitions_delta": TRANSITIONS_PER_UPDATE,
@@ -402,7 +404,8 @@ def _completion(path, identity, count, evidence, snapshots):
     try: record = json.loads(raw[:-1], object_pairs_hook=_duplicates)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc: _fail("completion receipt JSON: " + str(exc))
     _keys(record, COMPLETION_KEYS, "completion receipt")
-    expected = {"schema_version": 2, "record_type": "mujoco_full_mdp_completion",
+    expected = {"schema_version": COMPLETION_SCHEMA_VERSION,
+        "record_type": "mujoco_full_mdp_completion",
         "diagnostic_unauthorized": True, "checkpoint_authority": False,
         "resume_authority": False, "run_identity": identity, "action_contract": ACTION_CONTRACT,
         "action_ball_full_mdp_ppo_recipe_sha256": FULL_MDP_PPO_RECIPE_SHA256,
@@ -439,7 +442,8 @@ def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_comm
     milestones = dict(sorted(events.items()))
     milestones.update({key: life[key] for key in (
         "landing_on_opponent_rows", "landing_opponent_bound_rows", "gym_reset_rows")})
-    return {"schema_version": 2, "diagnostic_unauthorized": True,
+    return {"schema_version": SUMMARY_SCHEMA_VERSION,
+        "diagnostic_unauthorized": True,
         "evidence_level": "sealed_engineering_longrun" if complete else "advisory_prefix",
         "run_identity": identity, "engineering_run_complete": complete,
         "business_chain_complete": not missing, "full_a_complete": False,

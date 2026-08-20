@@ -2,6 +2,12 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-21 FullMDP PPO V2双后端配方身份（Gate仍`Partial`）：**Isaac与portable MuJoCo现在消费同一
+typed learning recipe `H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`。MuJoCo不再接受H override，
+snapshot/completion绑定包含预算与保存节奏的execution SHA；evidence schema 2与completion schema 3显式
+分流。host runner/consumer回归=`39 passed, 1 skipped`。这只关闭配方漂移，不证明两后端数值、吞吐或学习
+等价；exact GPU H48与fixed-snapshot parity仍`未测`，旧H24产物不得resume或冒充V2证据。
+
 **2026-08-21 project-owned [MuJoCo-Warp EPA48](../DEFINITIONS.md#mujoco-warp-epa48-fork) build chain（Gate仍`Partial`）：**portable r3已经停止在
 durable ACK `10249`；真实`EPA_HORIZON` fail-stop证明stock `MJ_MAX_EPAHORIZON=24`可达，但当时没有把
 exact稀有geom pair/pose另存为可复现fixture，所以不能事后宣称已有24-fail样本。当前分支新增

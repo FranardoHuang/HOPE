@@ -99,8 +99,31 @@ class ActionBallFullMdpPpoRecipe:
         }
 
     def learning_recipe_sha256(self) -> str:
+        return self._sha256(self.learning_recipe())
+
+    def execution_recipe(self) -> dict:
+        """Return the complete finite execution identity for run artifacts."""
+
+        return {
+            "schema_version": 1,
+            "kind": self.kind,
+            "runner": {
+                "num_steps_per_env": self.num_steps_per_env,
+                "max_iterations": self.max_iterations,
+                "save_interval": self.save_interval,
+            },
+            "learning_recipe": self.learning_recipe(),
+        }
+
+    def recipe_sha256(self) -> str:
+        """Hash the learning recipe together with budget and save cadence."""
+
+        return self._sha256(self.execution_recipe())
+
+    @staticmethod
+    def _sha256(value: dict) -> str:
         payload = json.dumps(
-            self.learning_recipe(),
+            value,
             allow_nan=False,
             ensure_ascii=False,
             separators=(",", ":"),
@@ -122,18 +145,11 @@ class ActionBallFullMdpPpoRecipe:
             "algorithm": self.algorithm(),
         }
 
-    def mujoco_train_cfg(self, *, num_steps_per_env: int | None = None) -> dict:
+    def mujoco_train_cfg(self) -> dict:
         """Return the upstream RSL-RL 3 config used by the MuJoCo lane."""
 
-        steps = (
-            self.num_steps_per_env
-            if num_steps_per_env is None
-            else num_steps_per_env
-        )
-        if type(steps) is not int or steps <= 0:
-            raise ValueError("num_steps_per_env must be a positive int")
         return {
-            "num_steps_per_env": steps,
+            "num_steps_per_env": self.num_steps_per_env,
             "save_interval": self.save_interval,
             "obs_groups": {"policy": ["policy"], "critic": ["critic"]},
             "policy": {

@@ -84,8 +84,17 @@ counter、用随机rollout证明确定性几何，以及`ACCEPT>0`/zero-policy�
   这些量在旧194/A211已存在，HITTER/SMASH/BeyondMimic也分别用相对base/anchor、history或base velocity解决
   同类负担。A V2采用203/219并删除raw task/ledger冗余；OptiTrack marker->root、table extrinsic与causal
   marker->COM velocity可生产，但部署builder尚未接通，故当前仍只授权simulation diagnostic。
-- D05 compact WIP虽然production净删2167行且`517 passed,40 skipped`，仍保留full-N publication/journal，
-  并使dormant formal/reveal壳construction-broken；因此明确`HOLD / uncommitted`，不能直接作为successor。
+- PPO V2已收成单一typed recipe：Isaac/MuJoCo都固定`H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`；
+  learning hash与包含budget/save cadence的finite-execution hash分开，MuJoCo不再接受H override，evidence schema2与
+  completion schema3明确分流，FullMDP冲突Hydra override在Kit启动前拒绝。当前整合回归为Isaac recipe/train
+  `134 passed,1 skipped`、MuJoCo runner/consumer=`39 passed,1 skipped`；这些只证明配方和来源闭合，不证明学习收益。
+- Phase-B branch candidate已删掉4,466行formal owner源及只服务该死路径的Reward/Physical/R06适配面；
+  五个production文件合计`+58/-7,621`、净删`7,563`行，scoped union=`489 passed,37 skipped`，独立终审
+  `P0=0/P1=0`。现役direct-lean reveal、lease/seal、reset generation/overflow、sticky poison、真实物理边界与
+  optimizer后durable ACK保留；这只是结构GO，不是Pod性能GO，也不是single-owner hot path已经完成。
+- Phase-B前的D05 compact WIP虽然production净删2167行且`517 passed,40 skipped`，仍保留full-N
+  publication/journal，并曾使当时的formal/reveal壳construction-broken；因此继续明确
+  `HOLD / uncommitted`，Phase-B删除旧formal owner也不把它变成可直接采用的successor。
 - `origin/main:docs/NOW.md`仍是项目优先级唯一权威；本节只是本功能分支的执行依赖与验收清单。
 
 ## 1. 训练目标与口径

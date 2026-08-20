@@ -1,5 +1,16 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP PPO V2执行配方闭合（branch candidate）
+
+- 用户已采用FullMDP-only typed PPO V2：`H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`。
+  与旧`H24/U25000/save1000/E5/MB4`相比，总transition、minibatch size、总optimizer step与按env-step
+  计的snapshot节奏保持；policy refresh、GAE bias/variance、每次update的batch与优化分组会改变，必须fresh，
+  不得resume旧checkpoint，也不能把H48冒充吞吐优化。
+- learning recipe SHA与包含budget/save cadence的finite-execution SHA已分开；MuJoCo不再允许rollout
+  horizon override，evidence保持schema 2、completion升为schema 3；冲突的FullMDP Hydra PPO override在Kit
+  启动前拒绝。host回归为Isaac recipe/train=`134 passed, 1 skipped`、MuJoCo runner/consumer=
+  `39 passed, 1 skipped`。后续性能统一报告transitions/s和H24-equivalent；真实H48 GPU wall与学习收益仍`未测`。
+
 ## 2026-08-21 — FullMDP dormant formal owner物理退役（branch candidate）
 
 - Phase-A之后旧`ActionBallFullMdpRuntimeOwner`及其module import的production caller已为0；本候选遂物理删除

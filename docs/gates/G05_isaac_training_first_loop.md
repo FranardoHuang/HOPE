@@ -2,6 +2,16 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-21 FullMDP PPO V2 branch candidate（supersede下文“保留H24/拒绝H48”的旧裁决；Gate仍`Partial`）：**
+用户已采用FullMDP-only typed recipe `H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`。该配对保持旧
+`H24/U25000/save1000/E5/MB4`的总transition、minibatch size、总optimizer step与按env-step计的snapshot
+节奏，但不声称训练动力学等价：policy refresh、GAE bias/variance、adaptive-KL与每update优化分组都改变，
+因此只允许fresh，不允许resume旧checkpoint。
+
+learning recipe SHA与包含budget/save cadence的finite-execution SHA已分开；冲突的FullMDP Hydra PPO
+override在Kit前拒绝。host recipe/train回归=`134 passed, 1 skipped`。H48只是学习算法取舍，不是性能GO；
+后续必须报告transitions/s与H24-equivalent，真实H48 GPU wall、显存与学习收益仍`未测`，所以Gate不晋级。
+
 **2026-08-21 Phase-B dormant formal owner物理退役（branch candidate；Gate仍`Partial`）：**
 旧`ActionBallFullMdpRuntimeOwner` class/module import的production caller静态census为0后，本候选删除4,466行
 formal owner源及Reward/Physical/R06中只服务该死路径的top-cycle/exact-pin适配面；五个production文件

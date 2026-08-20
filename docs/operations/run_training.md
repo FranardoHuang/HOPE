@@ -128,6 +128,18 @@ generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint
 self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示已达到`6 s/update`、学会回球、
 获得formal authority或完成任何Gate。性能结论仍须使用exact Pod、profiler-off、matched-strata墙钟证据。
 
+#### FullMDP PPO V2执行配方（2026-08-21 branch candidate）
+
+FullMDP A/C与portable MuJoCo只能消费code-owned typed recipe：`num_steps_per_env=48`、
+`max_iterations=12500`、`save_interval=500`、`num_learning_epochs=5`、`num_mini_batches=8`、
+`gamma=.99`、`lambda=.98`。不要在Hydra argv、task YAML或MuJoCo CLI复制/覆盖这些值；FullMDP冲突
+override必须在Kit启动前失败。旧H24 checkpoint与本配方的policy refresh/GAE/update grouping不同，不能resume。
+
+learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。MuJoCo evidence使用
+schema 2，terminal completion使用schema 3，consumer必须按schema分流。H48并不是性能豁免：每次update的
+transition翻倍，验收统一报告transitions/s和`wall_s * 24 / H`的H24-equivalent，并保留原始wall；真实GPU
+wall、显存和学习收益未测前，任何host hash/shape测试都只能算配方闭合。
+
 若FullMDP在base manager构造中途失败，当前进程必须视为cold-discard：环境会按pinned顺序单次
 best-effort清理已存在manager与simulator；任何terminal simulator清理失败都会sticky拒绝后续资源操作并
 要求进程退出。不得在同一进程捕获该异常后重新构造环境、重试旧sim、复用namespace或把它当成可恢复

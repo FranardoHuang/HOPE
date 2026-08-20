@@ -16112,6 +16112,62 @@ def _apply_action_ball_full_mdp_ppo_recipe(
     return recipe
 
 
+def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
+    """Reject a second FullMDP PPO authority before launching Kit.
+
+    The resolved legacy ``algo=ppo`` mapping remains input for every other
+    task.  FullMDP replaces it from the typed recipe, so accepting nested Hydra
+    overrides here would silently ignore the caller's request.  The root
+    ``max_iterations`` field is the one supported launch surface and may be
+    absent or repeat the exact finite budget.
+    """
+
+    task = _get(cfg, "task")
+    requested = _get(task, "action_ball_full_mdp_runtime")
+    if requested is None or requested is False:
+        return
+    if type(requested) is not bool:
+        raise _OverrideError(
+            "task.action_ball_full_mdp_runtime must be an exact bool"
+        )
+    recipe = (
+        _action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
+    root_iterations = _get(cfg, "max_iterations")
+    if root_iterations is not None:
+        if type(root_iterations) is not int:
+            raise _OverrideError(
+                "FullMDP root max_iterations must be an exact integer"
+            )
+        if root_iterations != recipe.max_iterations:
+            raise _OverrideError(
+                "FullMDP PPO V2 max_iterations is code-owned at "
+                f"{recipe.max_iterations}; got root max_iterations="
+                f"{root_iterations}"
+            )
+
+    conflicts = []
+    for raw_arg in _ORIGINAL_TRAINING_ARGV[1:]:
+        if type(raw_arg) is not str or "=" not in raw_arg:
+            continue
+        key = raw_arg.split("=", 1)[0].lstrip("+")
+        if key.startswith(
+            (
+                "algo.runner.",
+                "algo.policy.",
+                "algo.algorithm.",
+                "task.algo.",
+            )
+        ):
+            conflicts.append(key)
+    if conflicts:
+        raise _OverrideError(
+            "FullMDP PPO V2 has one typed recipe; nested Hydra PPO overrides "
+            "would be silently replaced: " + ",".join(sorted(set(conflicts)))
+        )
+
+
 def _resolve_action_ball_full_mdp_pre_gym_binding(
     *,
     requested: bool,
@@ -22117,6 +22173,7 @@ def main(cfg):
     OmegaConf.resolve(cfg)
     OmegaConf.set_struct(cfg, False)
     _emit_lean_queue_phase(cfg, "hydra_resolved")
+    _preflight_action_ball_full_mdp_ppo_cli(cfg)
     kit_args, kit_carb_count, kit_tbb_count = _resolve_kit_thread_caps(cfg)
 
     # 热启动/续训的"归一化 2x2 真值表"预检,必须在 Kit 启动前跑:checkpoint 里有没有

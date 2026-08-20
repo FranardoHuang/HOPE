@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import hashlib
 import importlib.util
 import json
@@ -75,6 +75,26 @@ def test_learning_identity_matches_existing_training_contract_serializer_shape()
     ).encode("utf-8")
     assert recipe.learning_recipe_sha256() == hashlib.sha256(payload).hexdigest()
 
+    execution = recipe.execution_recipe()
+    assert execution == {
+        "schema_version": 1,
+        "kind": "action_ball_full_mdp_ppo_v2",
+        "runner": {
+            "num_steps_per_env": 48,
+            "max_iterations": 12_500,
+            "save_interval": 500,
+        },
+        "learning_recipe": scientific,
+    }
+    full_payload = json.dumps(
+        execution,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    assert recipe.recipe_sha256() == hashlib.sha256(full_payload).hexdigest()
+
 
 def test_isaac_and_mujoco_views_share_scientific_values_without_aliasing():
     recipe = _load().ACTION_BALL_FULL_MDP_PPO_RECIPE
@@ -96,3 +116,16 @@ def test_isaac_and_mujoco_views_share_scientific_values_without_aliasing():
     assert mujoco["algorithm"] == isaac["algorithm"]
     isaac["runner"]["num_steps_per_env"] = 1
     assert recipe.num_steps_per_env == 48
+    with pytest.raises(TypeError):
+        recipe.mujoco_train_cfg(num_steps_per_env=7)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("max_iterations", 12_499), ("save_interval", 499)),
+)
+def test_execution_schedule_mutation_changes_only_the_full_hash(field, value):
+    recipe = _load().ACTION_BALL_FULL_MDP_PPO_RECIPE
+    changed = replace(recipe, **{field: value})
+    assert changed.learning_recipe_sha256() == recipe.learning_recipe_sha256()
+    assert changed.recipe_sha256() != recipe.recipe_sha256()

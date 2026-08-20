@@ -715,6 +715,54 @@ def test_full_mdp_typed_ppo_v2_replaces_only_the_fresh_algo_mapping():
     assert serialized["sha256"] == recipe.learning_recipe_sha256()
 
 
+def test_full_mdp_ppo_cli_preflight_rejects_competing_schedule_before_kit(
+    monkeypatch,
+):
+    cfg = {
+        "task": {"action_ball_full_mdp_runtime": True},
+        "max_iterations": 12_500,
+    }
+    monkeypatch.setattr(
+        train_mod,
+        "_ORIGINAL_TRAINING_ARGV",
+        ("python", "train.py", "task=FullMdpA"),
+    )
+    assert train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg) is None
+
+    cfg["max_iterations"] = 5
+    with pytest.raises(train_mod._OverrideError, match="code-owned at 12500"):
+        train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
+
+    cfg["max_iterations"] = 12_500.0
+    with pytest.raises(train_mod._OverrideError, match="exact integer"):
+        train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
+
+    cfg["max_iterations"] = 12_500
+    monkeypatch.setattr(
+        train_mod,
+        "_ORIGINAL_TRAINING_ARGV",
+        (
+            "python",
+            "train.py",
+            "task=FullMdpA",
+            "algo.runner.max_iterations=5",
+        ),
+    )
+    with pytest.raises(train_mod._OverrideError, match="nested Hydra PPO"):
+        train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
+
+
+def test_legacy_ppo_cli_preflight_does_not_claim_the_typed_recipe(monkeypatch):
+    monkeypatch.setattr(
+        train_mod,
+        "_ORIGINAL_TRAINING_ARGV",
+        ("python", "train.py", "algo.runner.max_iterations=5"),
+    )
+    assert train_mod._preflight_action_ball_full_mdp_ppo_cli(
+        {"task": {"action_ball_full_mdp_runtime": False}, "max_iterations": 5}
+    ) is None
+
+
 def test_legacy_algo_does_not_load_or_apply_the_full_mdp_recipe(monkeypatch):
     algo = {"runner": {"num_steps_per_env": 24}}
     monkeypatch.setattr(

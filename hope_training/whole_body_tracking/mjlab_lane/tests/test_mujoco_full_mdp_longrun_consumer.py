@@ -262,7 +262,7 @@ def _write_evidence(path, rows):
 def _write_completion(path, module, count, evidence_inventory, receipts,
                       *, identity=IDENTITY, mutation=None):
     record = {
-        "schema_version": 2,
+        "schema_version": 3,
         "record_type": "mujoco_full_mdp_completion",
         "diagnostic_unauthorized": True,
         "run_identity": dict(identity),
@@ -361,7 +361,7 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
     }
 
 
-def test_runner_update_ack_fixture_matches_exact_v3_wire(tmp_path):
+def test_runner_update_ack_fixture_matches_exact_evidence_v2_wire(tmp_path):
     module = _load()
     assert module.EVENT_KEYS == RUNNER_EVENT_KEYS
     assert module.LIFECYCLE_KEYS == RUNNER_LIFECYCLE_KEYS
@@ -372,6 +372,31 @@ def test_runner_update_ack_fixture_matches_exact_v3_wire(tmp_path):
     summary = _consume(module, evidence, snapshots, 1)
     assert summary["milestones"]["reveal_due_rows"] == 0
     assert summary["engineering_run_complete"] is False
+
+
+def test_evidence_v3_and_completion_v2_are_rejected_by_separate_schemas(
+        monkeypatch, tmp_path):
+    module = _load()
+
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    evidence, snapshots, _completion, rows = _artifacts(
+        module, evidence_root, 1, complete=False
+    )
+    rows[0]["schema_version"] = 3
+    _write_evidence(evidence, rows)
+    with pytest.raises(ValueError, match="fixed fields at update 0"):
+        _consume(module, evidence, snapshots, 1)
+
+    monkeypatch.setattr(module, "COMPLETE_UPDATES", 1)
+    completion_root = tmp_path / "completion"
+    completion_root.mkdir()
+    evidence, snapshots, completion, _rows = _artifacts(
+        module, completion_root, 1, complete=True,
+        seal_mutation=lambda row: row.__setitem__("schema_version", 2),
+    )
+    with pytest.raises(ValueError, match="completion seal binding"):
+        _consume(module, evidence, snapshots, 1, completion)
 
 
 def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v2():

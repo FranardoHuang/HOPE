@@ -53,8 +53,9 @@ def _ppo_recipe_module():
 FULL_MDP_PPO_RECIPE = (
     _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 )
-FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
 RSL_RL_VERSION = "3.1.2"
+COMPLETION_SCHEMA_VERSION = 3
 NUM_STEPS_PER_ENV = FULL_MDP_PPO_RECIPE.num_steps_per_env
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
 FULL_A_ACTION_UID = 6907688916670928
@@ -134,12 +135,17 @@ def _ready_pose_input() -> tuple[bytes, str]:
         os.close(fd)
 
 
-def build_train_cfg(num_steps_per_env: int = NUM_STEPS_PER_ENV) -> dict:
+def build_train_cfg() -> dict:
     """Return the same RSL3 PPO surface used by the Isaac FullMDP run."""
 
-    return FULL_MDP_PPO_RECIPE.mujoco_train_cfg(
-        num_steps_per_env=num_steps_per_env
-    )
+    return FULL_MDP_PPO_RECIPE.mujoco_train_cfg()
+
+
+def _snapshot_indices(num_updates: int, save_interval: int) -> tuple[int, ...]:
+    """Return cadence checkpoints plus the final finite-run frontier."""
+
+    indices = tuple(range(0, num_updates, save_interval))
+    return indices if indices[-1] == num_updates - 1 else indices + (num_updates - 1,)
 
 
 def _apply_full_a_policy_bootstrap(runner, torch_module) -> None:
@@ -443,7 +449,6 @@ def _require_rsl3_runtime(distribution, runner, torch_module) -> None:
 def main(
     *,
     num_envs: int = 2,
-    num_steps_per_env: int = NUM_STEPS_PER_ENV,
     num_updates: int = 1,
     full_a_mode: bool = False,
     evidence_jsonl: str | None = None,
@@ -456,11 +461,10 @@ def main(
 ) -> int:
     import torch
 
+    num_steps_per_env = NUM_STEPS_PER_ENV
     if (
         type(num_envs) is not int
         or num_envs <= 0
-        or type(num_steps_per_env) is not int
-        or num_steps_per_env <= 0
         or type(num_updates) is not int
         or num_updates <= 0
         or type(full_a_mode) is not bool
@@ -478,7 +482,6 @@ def main(
         raise ValueError("MuJoCo Full-A artifact arguments require --full-a")
     if full_a_mode and not _test_allow_small_full_a and (
         num_envs != FULL_A_NUM_ENVS
-        or num_steps_per_env != NUM_STEPS_PER_ENV
         or num_updates != FULL_A_NUM_UPDATES
     ):
         raise ValueError(
@@ -546,7 +549,7 @@ def main(
 
     runner = runner_type(
         env,
-        build_train_cfg(num_steps_per_env),
+        build_train_cfg(),
         log_dir=None,
         device="cuda:0",
     )
@@ -561,9 +564,9 @@ def main(
     snapshots = _snapshot_root(snapshot_dir) if full_a_mode else None
     evidence_fd = _open_evidence_jsonl(evidence_jsonl) if full_a_mode else None
     snapshot_receipts = []
-    snapshot_indices = tuple(range(0, num_updates, save_interval)) if full_a_mode else ()
-    if full_a_mode and snapshot_indices[-1] != num_updates - 1:
-        snapshot_indices += (num_updates - 1,)
+    snapshot_indices = (
+        _snapshot_indices(num_updates, save_interval) if full_a_mode else ()
+    )
     original_update = runner.alg.update
     run_started_at = time.perf_counter()
     iteration_started_at = run_started_at
@@ -655,7 +658,7 @@ def main(
             ):
                 raise RuntimeError("MuJoCo Full-A snapshot frontier differs")
             completion = {
-                "schema_version": 2,
+                "schema_version": COMPLETION_SCHEMA_VERSION,
                 "record_type": "mujoco_full_mdp_completion",
                 "diagnostic_unauthorized": True,
                 "checkpoint_authority": False, "resume_authority": False,
@@ -708,7 +711,6 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--num-envs", type=int, default=2)
-    parser.add_argument("--num-steps-per-env", type=int, default=NUM_STEPS_PER_ENV)
     parser.add_argument("--num-updates", type=int, default=1)
     parser.add_argument("--full-a", dest="full_a_mode", action="store_true")
     parser.add_argument("--evidence-jsonl")

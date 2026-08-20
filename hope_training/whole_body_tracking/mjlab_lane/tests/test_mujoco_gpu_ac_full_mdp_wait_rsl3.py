@@ -89,7 +89,10 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     assert cfg["algorithm"]["num_mini_batches"] == 8
     assert cfg["algorithm"]["gamma"] == 0.99
     assert cfg["algorithm"]["lam"] == 0.98
-    assert _load().build_train_cfg(7)["num_steps_per_env"] == 7
+    with pytest.raises(TypeError):
+        module.build_train_cfg(7)
+    with pytest.raises(TypeError):
+        module.main(num_steps_per_env=7)
 
 
 FULL_A_EVENT_KEYS = (
@@ -111,12 +114,13 @@ FULL_A_EVENT_KEYS = (
 
 
 def _install_fake_stack(
-    monkeypatch, tmp_path, *, num_envs, num_steps, num_updates,
+    monkeypatch, tmp_path, *, num_envs, num_updates,
     full_a_mode, schema_ok=True, fail_optimizer=False,
     drop_optimizer_state=False, empty_optimizer_state=False,
     valid_torch_snapshot=False,
 ):
     module = _load()
+    num_steps = module.NUM_STEPS_PER_ENV
     ready_pose = tmp_path / "ready_pose.json"
     ready_payload = b'{"pose":"frozen"}'
     ready_pose.write_bytes(ready_payload)
@@ -340,8 +344,8 @@ def _install_fake_stack(
 
     def invoke():
         kwargs = dict(
-            num_envs=num_envs, num_steps_per_env=num_steps,
-            num_updates=num_updates, full_a_mode=full_a_mode,
+            num_envs=num_envs, num_updates=num_updates,
+            full_a_mode=full_a_mode,
         )
         if full_a_mode:
             kwargs.update(
@@ -358,14 +362,14 @@ def test_real_runner_writer_prefix_is_consumed_without_a_second_schema(
     monkeypatch, tmp_path,
 ):
     invoke, _trace, _saved, evidence, snapshots, _completion = _install_fake_stack(
-        monkeypatch, tmp_path, num_envs=2, num_steps=2, num_updates=1,
+        monkeypatch, tmp_path, num_envs=2, num_updates=1,
         full_a_mode=True, valid_torch_snapshot=True,
     )
     assert invoke() == 0
     consumer = _load_consumer()
     monkeypatch.setattr(consumer, "NUM_ENVS", 2)
-    monkeypatch.setattr(consumer, "STEPS_PER_UPDATE", 2)
-    monkeypatch.setattr(consumer, "TRANSITIONS_PER_UPDATE", 4)
+    monkeypatch.setattr(consumer, "STEPS_PER_UPDATE", 48)
+    monkeypatch.setattr(consumer, "TRANSITIONS_PER_UPDATE", 96)
     summary = consumer.consume(
         evidence,
         expected_updates=1,
@@ -381,7 +385,7 @@ def test_real_runner_writer_prefix_is_consumed_without_a_second_schema(
 
 def test_main_preserves_default_wait_learn_one(monkeypatch, capsys, tmp_path):
     invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
-        monkeypatch, tmp_path, num_envs=2, num_steps=48, num_updates=1,
+        monkeypatch, tmp_path, num_envs=2, num_updates=1,
         full_a_mode=False,
     )
     assert invoke() == 0
@@ -404,7 +408,7 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     monkeypatch, capsys, tmp_path,
 ):
     invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
-        monkeypatch, tmp_path, num_envs=3, num_steps=2, num_updates=2,
+        monkeypatch, tmp_path, num_envs=3, num_updates=2,
         full_a_mode=True,
     )
     assert invoke() == 0
@@ -420,7 +424,7 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     } for row in rows)
     assert rows[0]["extras_counts"]["r06_present_rows"] == 0
     assert rows[1]["extras_counts"]["r07_present_rows"] == 0
-    assert rows[1]["reward20"]["reward20_finite_rows"] == 6
+    assert rows[1]["reward20"]["reward20_finite_rows"] == 144
     assert rows[1]["optimizer_metrics"] == {
         "entropy": 1.5, "surrogate": -0.125, "value_function": 0.25
     }
@@ -448,7 +452,7 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
             (snapshots / f"model_{index}.pt").read_bytes()
         ).hexdigest()
     seal = json.loads(completion.read_text())
-    assert seal["schema_version"] == 2
+    assert seal["schema_version"] == 3
     assert seal["record_type"] == "mujoco_full_mdp_completion"
     assert seal["diagnostic_unauthorized"] is True
     assert seal["checkpoint_authority"] is False
@@ -488,7 +492,7 @@ def test_full_a_failure_has_no_ack_or_snapshot(
     monkeypatch, tmp_path, schema_ok, fail_optimizer, error, expected_trace,
 ):
     invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
-        monkeypatch, tmp_path, num_envs=2, num_steps=1, num_updates=1,
+        monkeypatch, tmp_path, num_envs=2, num_updates=1,
         full_a_mode=True, schema_ok=schema_ok, fail_optimizer=fail_optimizer,
     )
     with pytest.raises(RuntimeError, match=error):
@@ -504,7 +508,7 @@ def test_full_a_final_gate_withholds_completion_after_durable_ack(
     monkeypatch, tmp_path, state_fault,
 ):
     invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
-        monkeypatch, tmp_path, num_envs=2, num_steps=1, num_updates=1,
+        monkeypatch, tmp_path, num_envs=2, num_updates=1,
         full_a_mode=True, drop_optimizer_state=state_fault == "drop",
         empty_optimizer_state=state_fault == "empty",
     )
@@ -520,13 +524,16 @@ def test_full_a_production_shape_and_snapshot_schedule_are_exact(
     monkeypatch, tmp_path,
 ):
     module = _load()
+    assert module._snapshot_indices(12_500, 500) == (
+        *range(0, 12_500, 500), 12_499,
+    )
     monkeypatch.setattr(
         module, "_rsl3_runner",
         lambda: pytest.fail("shape validation must precede RSL construction"),
     )
     with pytest.raises(ValueError, match="4096x48x12500"):
         module.main(
-            num_envs=2, num_steps_per_env=48, num_updates=12_500,
+            num_envs=2, num_updates=12_500,
             full_a_mode=True, evidence_jsonl=str(tmp_path / "updates.jsonl"),
             snapshot_dir=str(tmp_path), completion_json=str(tmp_path / "seal.json"),
             source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE,
@@ -535,12 +542,12 @@ def test_full_a_production_shape_and_snapshot_schedule_are_exact(
     cadence_root = tmp_path / "cadence"
     cadence_root.mkdir()
     invoke, _trace, _saved, _evidence, snapshots, _completion = _install_fake_stack(
-        monkeypatch, cadence_root, num_envs=1, num_steps=1,
-        num_updates=1002, full_a_mode=True,
+        monkeypatch, cadence_root, num_envs=1,
+        num_updates=2, full_a_mode=True,
     )
     assert invoke() == 0
     assert sorted(path.name for path in snapshots.iterdir()) == [
-        "model_0.pt", "model_1000.pt", "model_1001.pt", "model_500.pt",
+        "model_0.pt", "model_1.pt",
     ]
 
 
@@ -560,7 +567,7 @@ def test_evidence_jsonl_is_created_exclusively(monkeypatch, tmp_path):
     seal = tmp_path / "completion.json"
     seal.write_bytes(b"do not overwrite")
     with pytest.raises(FileExistsError):
-        module._write_completion(str(seal), {"schema_version": 2})
+        module._write_completion(str(seal), {"schema_version": 3})
     assert seal.read_bytes() == b"do not overwrite"
 
 
@@ -700,7 +707,7 @@ def test_real_wait_environment_runs_one_real_rsl3_update(capsys):
     line = capsys.readouterr().out
     assert "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON=" in line
     assert '"ppo_update_calls": 1' in line
-    assert '"environment_steps": 24' in line
-    assert '"transitions": 48' in line
+    assert '"environment_steps": 48' in line
+    assert '"transitions": 96' in line
     assert '"policy_width": 229' in line
     assert '"critic_width": 399' in line

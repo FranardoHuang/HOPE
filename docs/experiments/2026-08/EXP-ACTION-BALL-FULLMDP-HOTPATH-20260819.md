@@ -15,9 +15,9 @@ rollout horizon（每次策略更新、每个环境收集的control step数；�
 
 | 项目 | 裁决 | 当前理由与边界 |
 | --- | --- | --- |
-| H24 | 保留 | 先在不翻倍rollout固定税的前提下恢复可迭代吞吐和可信baseline。 |
-| H48 + 12,500 update + 8 minibatch | 现在拒绝 | 当前约22秒线性外推约`44 s/update`；到6秒需约`7.33×`提速，直接违背迭代目标。机械上的总transition/optimizer-step等价不代表训练动力学等价。 |
-| `lambda=0.98` | 延后为独立候选 | 它提高未来TD residual的权重，不是“reward衰减修复”；须在clock修复后的H24 fresh run单独归因，不直接改默认值。 |
+| H24 | 历史baseline | 旧墙钟与profile继续按H24保存，不再作为V2执行配方；比较时换算H24-equivalent。 |
+| H48 + 12,500 update + 8 minibatch | 采用为PPO V2 | 用户接受更长rollout作为学习算法取舍。总transition/minibatch/optimizer-step量级保持，但按旧吞吐仍约`44 s/update`，所以它不是性能修复；后续主报transitions/s与H24-equivalent。 |
+| `lambda=0.98` | 采用为PPO V2 | 它提高未来TD residual的GAE trace权重，不是“reward衰减修复”；bias/variance已改变，必须fresh并由真实学习证据判断。 |
 | `0 ACCEPT` | 保留为课程telemetry | 表示due opportunity仍DEFER在站稳/模仿准备阶段；balance→mimic→strike→landing需要很多step是合理课程。不得把`ACCEPT>0`做发射、安全或学习成败门。 |
 | actor/critic各`+8`个floating-base observation | 候选 | table-relative root position、heading与heading-frame linear velocity可减少balance相关alias；须先过两后端独立producer、符号/frame反例和真实normalization路径，不把它宣称成Markov闭合。 |
 | 一套pose统一reset/D05/R07 | 拒绝 | stable birth、stroke entry、completed-shot recovery是三个不同意图；强行相等是错误等价和同源自证，应共享安全envelope而不是共享唯一姿态。 |
@@ -29,7 +29,7 @@ production反例触发的nonfinite/overflow、identity join、物理contact/term
 
 采用：
 
-- 在下一条fresh `4096×25000`同一进程的前若干PPO update开启
+- 在下一条fresh `4096×48×12500`同一进程的前若干PPO update开启
   [`HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES`](../../DEFINITIONS.md#hope_action_ball_full_mdp_profile_updates)，
   记录真实FullMDP env/manager/runtime的inclusive host-wall分段；达到预算后自动撤掉全部wrapper，继续同一长跑。
 - 先删除D05 row uniqueness的两张`[N,N]`比较矩阵，改成有界环境索引直方图；有效行fault语义不变，
@@ -256,7 +256,7 @@ PYTHONDONTWRITEBYTECODE=1 \
 输入是只含本Phase-B staged slice的源码，输出只证明direct-lean host contract与故障反例未被旧壳删除破坏；
 exact Pod fixed-tape、真实GPU与profiler-off matched wall仍`未测`，所以Phase-B同样只有结构GO。
 
-successor验收是同一`4096×25000`进程：前5个update只读profile，之后profile自动关闭继续；性能结论使用
+successor验收是同一`4096×48×12500`进程：前若干update只读profile，之后profile自动关闭继续；性能结论使用
 profile-off后相同reset/live-flight/D05 strata，目标median collection `<=6.5 s`、p95 `<=8 s`。任何数值优化还须
 逐step对齐done/reason/reset IDs/generation/RNG、D05/R03/R06/R07/payment/retire、229/399 obs和Reward20。
 
