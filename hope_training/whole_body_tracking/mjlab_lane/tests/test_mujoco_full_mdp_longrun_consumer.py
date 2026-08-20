@@ -11,7 +11,7 @@ import torch
 
 
 LANE = Path(__file__).resolve().parents[1]
-TRANSITIONS = 4096 * 24
+TRANSITIONS = 4096 * 48
 UID = 6907688916670928
 COMMIT = "a" * 40
 NAMESPACE = "mujoco-fullmdp-consumer-test-0001"
@@ -63,11 +63,11 @@ def _base_record(module, index, *, identity=IDENTITY):
         "update_index": index,
         "run_identity": dict(identity),
         "num_envs": 4096,
-        "num_steps_per_env": 24,
+        "num_steps_per_env": 48,
         "transitions_delta": TRANSITIONS,
         "transitions_cumulative": TRANSITIONS * (index + 1),
-        "environment_steps_delta": 24,
-        "environment_steps_cumulative": 24 * (index + 1),
+        "environment_steps_delta": 48,
+        "environment_steps_cumulative": 48 * (index + 1),
         "storage_finite": {"rewards": True, "returns": True, "advantages": True},
         "extras_counts": events,
         "terminal_bit_counts": terminal,
@@ -220,6 +220,9 @@ def _payload(module, index, row, *, identity=IDENTITY, toy=False):
             "update_index": index,
             "completed_updates": index + 1,
             "run_identity": dict(identity),
+            "action_ball_full_mdp_ppo_recipe_sha256": (
+                module.FULL_MDP_PPO_RECIPE_SHA256
+            ),
             "prepared_update_sha256": row["prepared_update_sha256"],
         },
     }
@@ -264,9 +267,9 @@ def _write_completion(path, module, count, evidence_inventory, receipts,
         "diagnostic_unauthorized": True,
         "run_identity": dict(identity),
         "num_envs": 4096,
-        "num_steps_per_env": 24,
+        "num_steps_per_env": 48,
         "completed_updates": count,
-        "environment_steps": 24 * count,
+        "environment_steps": 48 * count,
         "transitions": TRANSITIONS * count,
         "evidence_jsonl": evidence_inventory,
         "snapshot_receipts": receipts,
@@ -277,6 +280,9 @@ def _write_completion(path, module, count, evidence_inventory, receipts,
         "checkpoint_authority": False,
         "resume_authority": False,
         "action_contract": dict(module.ACTION_CONTRACT),
+        "action_ball_full_mdp_ppo_recipe_sha256": (
+            module.FULL_MDP_PPO_RECIPE_SHA256
+        ),
     }
     if mutation is not None:
         mutation(record)
@@ -368,10 +374,10 @@ def test_runner_update_ack_fixture_matches_exact_v3_wire(tmp_path):
     assert summary["engineering_run_complete"] is False
 
 
-def test_snapshot_schedule_is_exact_twenty_six_for_25k():
+def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v2():
     module = _load()
     indices = module._snapshot_indices(True)
-    assert indices == list(range(0, 25_000, 1000)) + [24_999]
+    assert indices == list(range(0, 12_500, 500)) + [12_499]
     assert len(indices) == 26
 
 

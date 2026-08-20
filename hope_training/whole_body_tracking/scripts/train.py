@@ -64,6 +64,7 @@ _ORIGINAL_TRAINING_ARGV = _capture_original_training_argv()
 ACTION_BALL_MIN_SPEED_SCALE_LOWER = 0.85
 
 _TRAINING_CONTRACT_PATH_MODULE = None
+_ACTION_BALL_FULL_MDP_PPO_RECIPE_PATH_MODULE = None
 
 
 def _training_contract_module():
@@ -112,6 +113,43 @@ def _training_contract_module():
         sys.modules.pop(module_name, None)
         raise RuntimeError("training contract executed from a wrong file")
     _TRAINING_CONTRACT_PATH_MODULE = module
+    return module
+
+
+def _action_ball_full_mdp_ppo_recipe_module():
+    """Load the dependency-free FullMDP recipe from this exact checkout."""
+
+    global _ACTION_BALL_FULL_MDP_PPO_RECIPE_PATH_MODULE
+    source = (
+        pathlib.Path(__file__).resolve(strict=True).parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "action_ball_full_mdp_ppo_recipe.py"
+    )
+    cached = _ACTION_BALL_FULL_MDP_PPO_RECIPE_PATH_MODULE
+    if cached is not None:
+        if pathlib.Path(cached.__file__).resolve() != source:
+            raise RuntimeError(
+                "cached FullMDP PPO recipe resolved to a different file"
+            )
+        return cached
+    if not source.is_file():
+        raise RuntimeError(f"FullMDP PPO recipe module is missing: {source}")
+    module_name = "_hope_train_action_ball_full_mdp_ppo_recipe"
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot create the FullMDP PPO recipe loader spec")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    if pathlib.Path(module.__file__).resolve() != source:
+        sys.modules.pop(module_name, None)
+        raise RuntimeError("FullMDP PPO recipe executed from a wrong file")
+    _ACTION_BALL_FULL_MDP_PPO_RECIPE_PATH_MODULE = module
     return module
 
 
@@ -11674,6 +11712,15 @@ def _build_training_hard_contract(
            else {"continuous_questions": continuous_questions}),
         **(
             {}
+            if not action_ball_full_mdp_enabled
+            else {
+                "action_ball_full_mdp_ppo_runner_recipe": (
+                    _task_first_agent_recipe(agent_cfg)
+                )
+            }
+        ),
+        **(
+            {}
             if task_first_contract is None
             else {
                 "task_first_training": task_first_contract,
@@ -16040,6 +16087,31 @@ def _apply_action_ball_full_mdp_policy_algo_config(
     policy["noise_std_type"] = resolved["noise_std_type"]
 
 
+def _apply_action_ball_full_mdp_ppo_recipe(
+    algo: dict, *, requested: bool
+):
+    """Replace only a FullMDP run's legacy PPO defaults with typed V2."""
+
+    if type(requested) is not bool:
+        raise TypeError("FullMDP PPO recipe selection must be an exact bool")
+    if not requested:
+        return None
+    if not isinstance(algo, dict):
+        raise _OverrideError("FullMDP PPO V2 requires cfg.algo to be a mapping")
+    recipe = (
+        _action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
+    overrides = recipe.isaac_overrides()
+    for section in ("runner", "policy", "algorithm"):
+        if section not in overrides or not isinstance(overrides[section], dict):
+            raise RuntimeError(
+                f"FullMDP PPO recipe omitted its {section} mapping"
+            )
+        algo[section] = overrides[section]
+    return recipe
+
+
 def _resolve_action_ball_full_mdp_pre_gym_binding(
     *,
     requested: bool,
@@ -20146,16 +20218,6 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
 
     # 2) PPO runner cfg from cfg.algo
     algo = OmegaConf.to_container(cfg.algo, resolve=True)
-    _apply_action_ball_full_mdp_policy_algo_config(
-        algo, action_ball_full_mdp_policy_bootstrap_config
-    )
-    if action_ball_full_mdp_policy_bootstrap_config is not None:
-        print(
-            "[train.py] full-MDP policy config: "
-            "kind=a3_default_stand_zero_head_v1 "
-            "init_noise_std=0.02 noise_std_type=log",
-            flush=True,
-        )
     # Task-level algo override (merge-audit 2026-07-06): a task YAML may pin ITS lineage's
     # algorithm deviations (e.g. Hitter entropy_coef 0.015) without touching the global
     # cfg/algo/ppo.yaml that every other lineage trains through. Whitelisted + fail-loud,
@@ -20167,11 +20229,52 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         if _ec is not None:
             algo["algorithm"]["entropy_coef"] = float(_ec)
             print(f"[train.py] task.algo override: algorithm.entropy_coef={float(_ec)}", flush=True)
+    action_ball_full_mdp_ppo_recipe = _apply_action_ball_full_mdp_ppo_recipe(
+        algo,
+        requested=action_ball_full_mdp_pre_gym_binding is not None,
+    )
+    _apply_action_ball_full_mdp_policy_algo_config(
+        algo, action_ball_full_mdp_policy_bootstrap_config
+    )
+    if action_ball_full_mdp_ppo_recipe is not None:
+        print(
+            "[train.py] full-MDP PPO recipe: "
+            f"kind={action_ball_full_mdp_ppo_recipe.kind} "
+            f"H={action_ball_full_mdp_ppo_recipe.num_steps_per_env} "
+            f"updates={action_ball_full_mdp_ppo_recipe.max_iterations} "
+            f"save={action_ball_full_mdp_ppo_recipe.save_interval} "
+            f"epochs={action_ball_full_mdp_ppo_recipe.num_learning_epochs} "
+            f"minibatches={action_ball_full_mdp_ppo_recipe.num_mini_batches} "
+            f"gamma={action_ball_full_mdp_ppo_recipe.gamma} "
+            f"lambda={action_ball_full_mdp_ppo_recipe.lam} "
+            "effective_normalization=false "
+            "learning_recipe_sha256="
+            f"{action_ball_full_mdp_ppo_recipe.learning_recipe_sha256()}",
+            flush=True,
+        )
+    if action_ball_full_mdp_policy_bootstrap_config is not None:
+        print(
+            "[train.py] full-MDP policy config: "
+            "kind=a3_default_stand_zero_head_v1 "
+            "init_noise_std=0.02 noise_std_type=log",
+            flush=True,
+        )
     agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(algo, str(cfg.task.experiment_name)))
     agent_cfg.seed = int(cfg.seed)
     agent_cfg.device = str(cfg.device)
     if cfg.max_iterations is not None:
-        agent_cfg.max_iterations = int(cfg.max_iterations)
+        requested_iterations = int(cfg.max_iterations)
+        if (
+            action_ball_full_mdp_ppo_recipe is not None
+            and requested_iterations
+            != action_ball_full_mdp_ppo_recipe.max_iterations
+        ):
+            raise _OverrideError(
+                "FullMDP PPO V2 max_iterations is code-owned at "
+                f"{action_ball_full_mdp_ppo_recipe.max_iterations}; got "
+                f"root max_iterations={requested_iterations}"
+            )
+        agent_cfg.max_iterations = requested_iterations
     if cfg.run_name is not None:
         agent_cfg.run_name = str(cfg.run_name)
     _diag_racket_cfg = getattr(

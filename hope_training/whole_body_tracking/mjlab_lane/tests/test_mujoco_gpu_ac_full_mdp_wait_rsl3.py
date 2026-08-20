@@ -78,12 +78,17 @@ def test_full_a_policy_bootstrap_zeroes_only_output_head_and_pins_std():
 def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     module = _load()
     cfg = module.build_train_cfg()
-    assert cfg["num_steps_per_env"] == 24
+    assert cfg["num_steps_per_env"] == 48
+    assert cfg["save_interval"] == 500
     assert cfg["obs_groups"] == {"policy": ["policy"], "critic": ["critic"]}
     assert cfg["policy"]["init_noise_std"] == 0.02
     assert cfg["policy"]["noise_std_type"] == "log"
+    assert cfg["policy"]["actor_obs_normalization"] is False
+    assert cfg["policy"]["critic_obs_normalization"] is False
     assert cfg["algorithm"]["num_learning_epochs"] == 5
-    assert cfg["algorithm"]["num_mini_batches"] == 4
+    assert cfg["algorithm"]["num_mini_batches"] == 8
+    assert cfg["algorithm"]["gamma"] == 0.99
+    assert cfg["algorithm"]["lam"] == 0.98
     assert _load().build_train_cfg(7)["num_steps_per_env"] == 7
 
 
@@ -376,7 +381,7 @@ def test_real_runner_writer_prefix_is_consumed_without_a_second_schema(
 
 def test_main_preserves_default_wait_learn_one(monkeypatch, capsys, tmp_path):
     invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
-        monkeypatch, tmp_path, num_envs=2, num_steps=24, num_updates=1,
+        monkeypatch, tmp_path, num_envs=2, num_steps=48, num_updates=1,
         full_a_mode=False,
     )
     assert invoke() == 0
@@ -384,8 +389,11 @@ def test_main_preserves_default_wait_learn_one(monkeypatch, capsys, tmp_path):
         capsys.readouterr().out.split("ACTION_BALL_MUJOCO_WAIT_RSL3_JSON=", 1)[1]
     )
     assert record["ppo_update_calls"] == 1
-    assert record["environment_steps"] == 24
-    assert record["transitions"] == 48
+    assert record["environment_steps"] == 48
+    assert record["transitions"] == 96
+    assert record["action_ball_full_mdp_ppo_recipe_sha256"] == (
+        _load().FULL_MDP_PPO_RECIPE_SHA256
+    )
     assert record["task_lifecycle"] == "idle_wait_only"
     assert trace == ["optimizer"] and saved == []
     assert not evidence.exists() and list(snapshots.iterdir()) == []
@@ -430,6 +438,9 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
             "run_identity": {
                 "source_commit": SOURCE_COMMIT, "run_namespace": RUN_NAMESPACE,
             },
+            "action_ball_full_mdp_ppo_recipe_sha256": (
+                _load().FULL_MDP_PPO_RECIPE_SHA256
+            ),
             "prepared_update_sha256": rows[index]["prepared_update_sha256"],
         }
         assert rows[index]["snapshot"]["name"] == f"model_{index}.pt"
@@ -446,6 +457,9 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
         "source_commit": SOURCE_COMMIT, "run_namespace": RUN_NAMESPACE,
     }
     assert seal["action_contract"] == ACTION_CONTRACT
+    assert seal["action_ball_full_mdp_ppo_recipe_sha256"] == (
+        _load().FULL_MDP_PPO_RECIPE_SHA256
+    )
     assert seal["evidence_jsonl"] == {
         "bytes": evidence.stat().st_size,
         "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
@@ -510,9 +524,9 @@ def test_full_a_production_shape_and_snapshot_schedule_are_exact(
         module, "_rsl3_runner",
         lambda: pytest.fail("shape validation must precede RSL construction"),
     )
-    with pytest.raises(ValueError, match="4096x24x25000"):
+    with pytest.raises(ValueError, match="4096x48x12500"):
         module.main(
-            num_envs=2, num_steps_per_env=24, num_updates=25_000,
+            num_envs=2, num_steps_per_env=48, num_updates=12_500,
             full_a_mode=True, evidence_jsonl=str(tmp_path / "updates.jsonl"),
             snapshot_dir=str(tmp_path), completion_json=str(tmp_path / "seal.json"),
             source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE,
@@ -526,7 +540,7 @@ def test_full_a_production_shape_and_snapshot_schedule_are_exact(
     )
     assert invoke() == 0
     assert sorted(path.name for path in snapshots.iterdir()) == [
-        "model_0.pt", "model_1000.pt", "model_1001.pt",
+        "model_0.pt", "model_1000.pt", "model_1001.pt", "model_500.pt",
     ]
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.metadata
+import importlib.util
 import hashlib
 import inspect
 import json
@@ -17,17 +18,51 @@ import os
 from pathlib import Path
 import re
 import stat
+import sys
 import time
 
 
+def _ppo_recipe_module():
+    """Load the shared dependency-free recipe from this exact checkout."""
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "action_ball_full_mdp_ppo_recipe.py"
+    )
+    name = "_hope_mujoco_action_ball_full_mdp_ppo_recipe"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(cached.__file__).resolve() != source:
+            raise RuntimeError("cached FullMDP PPO recipe origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load the FullMDP PPO recipe")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+FULL_MDP_PPO_RECIPE = (
+    _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
+)
+FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
 RSL_RL_VERSION = "3.1.2"
-NUM_STEPS_PER_ENV = 24
+NUM_STEPS_PER_ENV = FULL_MDP_PPO_RECIPE.num_steps_per_env
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
 FULL_A_ACTION_UID = 6907688916670928
 FULL_A_MOUNT_NORMAL_SIGN = 1
 FULL_A_FAMILY = "forehand"
 FULL_A_NUM_ENVS = 4096
-FULL_A_NUM_UPDATES = 25_000
+FULL_A_NUM_UPDATES = FULL_MDP_PPO_RECIPE.max_iterations
+FULL_A_SAVE_INTERVAL = FULL_MDP_PPO_RECIPE.save_interval
 RSL_RL_SOURCE_SHA256 = {
     "rsl_rl/runners/on_policy_runner.py": "6ffaee7e154a49ae55eebf53a7b1549f0461a1742d92dd34af5bb4b785d19cf2",
     "rsl_rl/algorithms/ppo.py": "4373ac1b2f9fdf14d9da57516968fc95d8f605d2967fee01dc61bf0d09423478",
@@ -102,41 +137,9 @@ def _ready_pose_input() -> tuple[bytes, str]:
 def build_train_cfg(num_steps_per_env: int = NUM_STEPS_PER_ENV) -> dict:
     """Return the same RSL3 PPO surface used by the Isaac FullMDP run."""
 
-    if type(num_steps_per_env) is not int or num_steps_per_env <= 0:
-        raise ValueError("num_steps_per_env must be a positive int")
-    return {
-        "num_steps_per_env": num_steps_per_env,
-        "save_interval": 1000,
-        "obs_groups": {"policy": ["policy"], "critic": ["critic"]},
-        "policy": {
-            "class_name": "ActorCritic",
-            "actor_hidden_dims": [512, 256, 128],
-            "critic_hidden_dims": [512, 256, 128],
-            "activation": "elu",
-            "init_noise_std": 0.02,
-            "noise_std_type": "log",
-            "actor_obs_normalization": False,
-            "critic_obs_normalization": False,
-        },
-        "algorithm": {
-            "class_name": "PPO",
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-            "clip_param": 0.2,
-            "gamma": 0.99,
-            "lam": 0.95,
-            "value_loss_coef": 1.0,
-            "entropy_coef": 0.01,
-            "learning_rate": 1.0e-3,
-            "max_grad_norm": 1.0,
-            "use_clipped_value_loss": True,
-            "schedule": "adaptive",
-            "desired_kl": 0.01,
-            "normalize_advantage_per_mini_batch": False,
-            "rnd_cfg": None,
-            "symmetry_cfg": None,
-        },
-    }
+    return FULL_MDP_PPO_RECIPE.mujoco_train_cfg(
+        num_steps_per_env=num_steps_per_env
+    )
 
 
 def _apply_full_a_policy_bootstrap(runner, torch_module) -> None:
@@ -246,6 +249,9 @@ def _save_snapshot(runner, root: Path, update_index: int, *, run_identity: dict,
                 "checkpoint_authority": False, "resume_authority": False,
                 "update_index": update_index, "completed_updates": update_index + 1,
                 "run_identity": dict(run_identity),
+                "action_ball_full_mdp_ppo_recipe_sha256": (
+                    FULL_MDP_PPO_RECIPE_SHA256
+                ),
                 "prepared_update_sha256": prepared_update_sha256})
             stream.flush()
             os.fsync(stream.fileno())
@@ -445,7 +451,7 @@ def main(
     completion_json: str | None = None,
     source_commit: str | None = None,
     run_namespace: str | None = None,
-    save_interval: int = 1000,
+    save_interval: int = FULL_A_SAVE_INTERVAL,
     _test_allow_small_full_a: bool = False,
 ) -> int:
     import torch
@@ -459,7 +465,7 @@ def main(
         or num_updates <= 0
         or type(full_a_mode) is not bool
         or type(_test_allow_small_full_a) is not bool
-        or type(save_interval) is not int or save_interval != 1000
+        or type(save_interval) is not int or save_interval != FULL_A_SAVE_INTERVAL
     ):
         raise ValueError("runner dimensions/mode differ")
     if full_a_mode and (
@@ -475,7 +481,10 @@ def main(
         or num_steps_per_env != NUM_STEPS_PER_ENV
         or num_updates != FULL_A_NUM_UPDATES
     ):
-        raise ValueError("production MuJoCo Full-A shape must be 4096x24x25000")
+        raise ValueError(
+            "production MuJoCo Full-A shape must be "
+            f"{FULL_A_NUM_ENVS}x{NUM_STEPS_PER_ENV}x{FULL_A_NUM_UPDATES}"
+        )
     identity = _run_identity(source_commit, run_namespace) if full_a_mode else None
     version, runner_type, distribution = _rsl3_runner()
     wait = _wait_module()
@@ -652,6 +661,9 @@ def main(
                 "checkpoint_authority": False, "resume_authority": False,
                 "run_identity": dict(identity),
                 "action_contract": action_contract,
+                "action_ball_full_mdp_ppo_recipe_sha256": (
+                    FULL_MDP_PPO_RECIPE_SHA256
+                ),
                 "num_envs": num_envs,
                 "num_steps_per_env": num_steps_per_env,
                 "completed_updates": updates,
@@ -676,6 +688,9 @@ def main(
         "transitions": env.common_step_counter * env.num_envs,
         "policy_width": final["policy"].shape[1],
         "critic_width": final["critic"].shape[1],
+        "action_ball_full_mdp_ppo_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE_SHA256
+        ),
         "task_lifecycle": "full_a_engineering_longrun_complete" if full_a_mode else "idle_wait_only",
     }
     if full_a_mode:
@@ -701,5 +716,7 @@ if __name__ == "__main__":
     parser.add_argument("--completion-json")
     parser.add_argument("--source-commit")
     parser.add_argument("--run-namespace")
-    parser.add_argument("--save-interval", type=int, default=1000)
+    parser.add_argument(
+        "--save-interval", type=int, default=FULL_A_SAVE_INTERVAL
+    )
     raise SystemExit(main(**vars(parser.parse_args())))

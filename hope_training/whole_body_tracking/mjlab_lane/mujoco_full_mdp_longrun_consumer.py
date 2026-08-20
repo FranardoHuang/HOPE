@@ -1,8 +1,32 @@
 """Independent offline verifier for the portable MuJoCo FullMDP long run."""
 from __future__ import annotations
-import argparse, hashlib, inspect, io, json, math, os, re, stat
+import argparse, hashlib, importlib.util, inspect, io, json, math, os, re, stat, sys
 from pathlib import Path
-SCHEMA_VERSION, COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = 2, 25_000, 4096, 24, 1000, 6907688916670928; TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
+
+def _ppo_recipe_module():
+    source = (Path(__file__).resolve().parents[1] / "source" /
+              "whole_body_tracking" / "action_ball_full_mdp_ppo_recipe.py")
+    name = "_hope_mujoco_action_ball_full_mdp_ppo_recipe"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(cached.__file__).resolve() != source:
+            raise RuntimeError("cached FullMDP PPO recipe origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None: raise RuntimeError("cannot load FullMDP PPO recipe")
+    module = importlib.util.module_from_spec(spec); sys.modules[name] = module
+    try: spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None); raise
+    return module
+
+FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
+FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+SCHEMA_VERSION, COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
+    2, FULL_MDP_PPO_RECIPE.max_iterations, 4096,
+    FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
+    6907688916670928)
+TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
 def _names(raw): return frozenset(raw.split())
 EVENT_KEYS = _names("""reveal_rows reveal_due_rows reveal_deferred_rows launch_rows flight_terminal_rows
  shot_retired_rows completed_action_epoch_rows selected_reset_rows racket_contact_eligible_rows racket_contact_rows selected_contact_rows
@@ -31,7 +55,8 @@ RECEIPT_KEYS = _names("name bytes sha256")
 COMPLETION_KEYS = _names("""schema_version record_type diagnostic_unauthorized run_identity
  num_envs num_steps_per_env completed_updates environment_steps transitions evidence_jsonl
  snapshot_receipts final_observation_finite rollout_storage_finite optimizer_state_present
- optimizer_state_finite checkpoint_authority resume_authority action_contract""")
+ optimizer_state_finite checkpoint_authority resume_authority action_contract
+ action_ball_full_mdp_ppo_recipe_sha256""")
 ACTION_CONTRACT = {
     "action_joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
     "action_joint_order_contract_sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815",
@@ -361,6 +386,7 @@ def _snapshots(root, rows, identity, complete):
             infos = {"diagnostic_unauthorized": True, "checkpoint_authority": False,
                 "resume_authority": False, "update_index": index, "completed_updates": index + 1,
                 "run_identity": dict(identity),
+                "action_ball_full_mdp_ppo_recipe_sha256": FULL_MDP_PPO_RECIPE_SHA256,
                 "prepared_update_sha256": rows[index][0]["prepared_update_sha256"]}
             if type(payload["iter"]) is not int or payload["iter"] != index or not _same(payload["infos"], infos):
                 _fail("snapshot infos binding " + name)
@@ -379,6 +405,7 @@ def _completion(path, identity, count, evidence, snapshots):
     expected = {"schema_version": 2, "record_type": "mujoco_full_mdp_completion",
         "diagnostic_unauthorized": True, "checkpoint_authority": False,
         "resume_authority": False, "run_identity": identity, "action_contract": ACTION_CONTRACT,
+        "action_ball_full_mdp_ppo_recipe_sha256": FULL_MDP_PPO_RECIPE_SHA256,
         "num_envs": NUM_ENVS, "num_steps_per_env": STEPS_PER_UPDATE,
         "completed_updates": count, "environment_steps": STEPS_PER_UPDATE * count,
         "transitions": TRANSITIONS_PER_UPDATE * count, "evidence_jsonl": evidence,
@@ -439,6 +466,7 @@ def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_comm
         "snapshot_count": len(snapshots), "snapshot_inventory": snapshots,
         "model_abi_verified": True, "optimizer_state_verified": True,
         "completion_seal_verified": complete,
+        "action_ball_full_mdp_ppo_recipe_sha256": FULL_MDP_PPO_RECIPE_SHA256,
         "action_contract": dict(ACTION_CONTRACT) if complete else None}
 def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--evidence-jsonl", type=Path, required=True); parser.add_argument("--expected-updates", type=int, default=COMPLETE_UPDATES)

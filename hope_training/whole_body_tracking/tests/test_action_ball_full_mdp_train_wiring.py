@@ -669,6 +669,63 @@ def test_pre_gym_binding_uses_only_code_owned_lean_factory(monkeypatch):
         binding.owner_type = object
 
 
+def test_full_mdp_typed_ppo_v2_replaces_only_the_fresh_algo_mapping():
+    legacy = {
+        "name": "ppo",
+        "runner": {"num_steps_per_env": 24, "max_iterations": 25_000},
+        "policy": {"init_noise_std": 1.0},
+        "algorithm": {"lam": 0.95, "num_mini_batches": 4},
+    }
+    recipe = train_mod._apply_action_ball_full_mdp_ppo_recipe(
+        legacy, requested=True
+    )
+    assert legacy["name"] == "ppo"
+    assert legacy["runner"] == {
+        "num_steps_per_env": 48,
+        "max_iterations": 12_500,
+        "save_interval": 500,
+        "empirical_normalization": False,
+    }
+    assert legacy["policy"] == recipe.policy()
+    assert legacy["algorithm"] == recipe.algorithm()
+    assert legacy["algorithm"]["lam"] == 0.98
+    assert legacy["algorithm"]["num_mini_batches"] == 8
+
+    class _AgentCfg:
+        def to_dict(self):
+            return {
+                **legacy["runner"],
+                "policy": legacy["policy"],
+                "algorithm": legacy["algorithm"],
+            }
+
+    serialized = train_mod._task_first_agent_recipe(_AgentCfg())
+    assert serialized["recipe"] == recipe.learning_recipe()
+    assert serialized["sha256"] == recipe.learning_recipe_sha256()
+
+
+def test_legacy_algo_does_not_load_or_apply_the_full_mdp_recipe(monkeypatch):
+    algo = {"runner": {"num_steps_per_env": 24}}
+    monkeypatch.setattr(
+        train_mod,
+        "_action_ball_full_mdp_ppo_recipe_module",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy loaded recipe")),
+    )
+    assert (
+        train_mod._apply_action_ball_full_mdp_ppo_recipe(
+            algo, requested=False
+        )
+        is None
+    )
+    assert algo == {"runner": {"num_steps_per_env": 24}}
+
+
+def test_full_mdp_hard_contract_reuses_existing_agent_recipe_serializer():
+    source = inspect.getsource(train_mod._build_training_hard_contract)
+    assert '"action_ball_full_mdp_ppo_runner_recipe"' in source
+    assert "_task_first_agent_recipe(agent_cfg)" in source
+
+
 @pytest.mark.parametrize("num_envs", [1, 2, 64, 4096])
 def test_single_action_lean_binding_accepts_every_positive_n(
     monkeypatch, num_envs
