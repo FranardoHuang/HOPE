@@ -1752,6 +1752,43 @@ def test_host_full_a_observation_is_default_relative_with_zero_action_history():
     )
 
 
+def test_host_full_a_idle_observation_masks_invalid_clocks_from_global_step():
+    env = _host_full_a_lifecycle_env()
+    env.q_ready = torch.zeros(31)
+    env.actions = torch.zeros((2, 31))
+    env._qpos_act = lambda: torch.zeros((2, 31))
+    env._qvel_act = lambda: torch.zeros((2, 31))
+    env._con_geom = torch.tensor([[0, 0]], dtype=torch.long)
+    env._con_idx = torch.tensor([0], dtype=torch.long)
+    env._nacon = torch.tensor([0], dtype=torch.long)
+    env._ball_gid = 2
+    state = {
+        "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
+        "base_ang_b": torch.zeros((2, 3)),
+    }
+    offsets, start = {}, 0
+    for name, width in P.ACTOR_LAYOUT_V1:
+        offsets[name] = slice(start, start + width)
+        start += width
+
+    assert torch.equal(env._epoch_phase, torch.zeros(2, dtype=torch.long))
+    assert not env._epoch_task_valid.any()
+    assert torch.equal(env._epoch_clock_ticks, torch.full((2, 5), -1))
+    wait_env.FullMdpInitialWaitVecEnv._compute_obs(env, st=state)
+    initial_policy = env._obs_buf.clone()
+    initial_critic = env._critic_obs_buf.clone()
+    assert tuple(initial_policy.shape) == (2, P.ACTOR_WIDTH_V1)
+    assert tuple(initial_critic.shape) == (2, P.CRITIC_WIDTH_V1)
+    assert torch.count_nonzero(
+        initial_policy[:, offsets["epoch_clock_remaining_s"]]
+    ) == 0
+
+    env.common_step_counter = 96_024
+    wait_env.FullMdpInitialWaitVecEnv._compute_obs(env, st=state)
+    assert torch.equal(env._obs_buf, initial_policy)
+    assert torch.equal(env._critic_obs_buf, initial_critic)
+
+
 def test_full_a_constructor_observation_stays_wait_until_buffers_are_installed():
     env = _host_full_a_lifecycle_env()
     env._fullmdp_initialized = False

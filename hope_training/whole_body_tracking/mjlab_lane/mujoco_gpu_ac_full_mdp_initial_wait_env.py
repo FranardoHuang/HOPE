@@ -1796,9 +1796,14 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             ].to(dtype=joint_pos_rel.dtype)
             if full_a_initialized:
                 actor_rows["epoch_task_f32"] = self._epoch_task_f32
-                actor_rows["epoch_clock_remaining_s"] = (
+                clock_remaining = (
                     self._epoch_clock_ticks - int(self.common_step_counter)
                 ).to(dtype=joint_pos_rel.dtype) * self.step_dt
+                actor_rows["epoch_clock_remaining_s"] = torch.where(
+                    self._epoch_task_valid[:, None],
+                    clock_remaining,
+                    torch.zeros_like(clock_remaining),
+                )
         else:
             actor_rows["epoch_phase_one_hot"][
                 :, observation_contract.EPOCH_IDLE_PHASE_INDEX
