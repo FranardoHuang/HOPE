@@ -351,6 +351,15 @@ def test_diagnostic_n2_live_adapter_reads_same_tick_real_channels(
     assert recovery.RUNTIME_WIRING_CONNECTED is False
     assert recovery.LAUNCH_AUTHORIZED is False
 
+    cold = bundle.action_epoch_observation_state()
+    assert type(cold) is recovery.ContinuousRecoveryObservationState
+    assert cold.postphysics_valid.tolist() == [False, False]
+    assert cold.source_step.tolist() == [-1, -1]
+    assert cold.reset_generation.tolist() == [-1, -1]
+    assert cold.control_tick.tolist() == [-1, -1]
+    assert cold.ready_streak.tolist() == [0, 0]
+    assert not cold.foot_supported_lr.any()
+
     facts = bundle.plant_fact_adapter.read()
     assert type(facts) is recovery.DeviceContinuousRecoveryPlantFacts
     assert bundle.plant_fact_adapter.last_source_step == 7
@@ -650,6 +659,8 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert first.reward_eligible.tolist() == [False, False]
     assert first.weighted_reward.eq(0).all()
     assert first_view.ready.tolist() == [False, False]
+    assert first_view.ready_streak.tolist() == [1, 1]
+    assert first_view.required_dwell == 2
     assert first_view.control_tick.tolist() == [1, 1]
     # Genesis has no action row that could own reward facts.  Bootstrap
     # readiness therefore advances only the R07 owner-private dwell state.
@@ -672,6 +683,8 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert second.reward_eligible.tolist() == [False, False]
     assert second.weighted_reward.eq(0).all()
     assert second_view.ready.tolist() == [True, True]
+    assert second_view.ready_streak.tolist() == [2, 2]
+    assert second_view.required_dwell == 2
     assert second_view.control_tick.tolist() == [2, 2]
     assert bundle.owner._action_epoch_ready_streak.tolist() == [2, 2]
     # Bootstrap readiness authorizes the next Motion reveal but has no current
@@ -1252,8 +1265,20 @@ def test_epoch_publish_owns_two_tick_dwell_and_next_tick_motion_projection(
     first_view = bundle.require_owned_motion_ready_projection(
         first_projection, owner_kind="motion"
     )
+    first_observation = bundle.action_epoch_observation_state()
     assert first_view.ready.tolist() == [False, False]
     assert first_view.control_tick.tolist() == [41, 41]
+    assert first_observation.postphysics_valid.tolist() == [True, True]
+    assert torch.equal(first_observation.source_step, first.source_step)
+    assert torch.equal(
+        first_observation.reset_generation, first.reset_generation
+    )
+    assert first_observation.control_tick.tolist() == [41, 41]
+    assert first_observation.ready_streak.tolist() == [1, 1]
+    assert first_observation.foot_supported_lr.tolist() == [
+        [True, True],
+        [True, True],
+    ]
     assert bundle.owner._action_epoch_ready_streak.tolist() == [1, 1]
 
     env.common_step_counter = 41
@@ -1270,8 +1295,11 @@ def test_epoch_publish_owns_two_tick_dwell_and_next_tick_motion_projection(
     second_view = bundle.require_owned_motion_ready_projection(
         second_projection, owner_kind="motion"
     )
+    second_observation = bundle.action_epoch_observation_state()
     assert second_view.ready.tolist() == [True, True]
     assert second_view.control_tick.tolist() == [42, 42]
+    assert second_observation.control_tick.tolist() == [42, 42]
+    assert second_observation.ready_streak.tolist() == [2, 2]
     assert bundle.owner._action_epoch_ready_streak.tolist() == [2, 2]
     assert bundle.owner._action_epoch_first_ready_source_step.tolist() == [41, 41]
 
@@ -1281,6 +1309,13 @@ def test_epoch_publish_owns_two_tick_dwell_and_next_tick_motion_projection(
         bundle.require_owned_motion_ready_projection(
             first_projection, owner_kind="motion"
         )
+
+    bundle.owner._latest_motion_ready_projection = None
+    with pytest.raises(
+        recovery.ContinuousRecoveryDeviceError,
+        match="lost its post-physics publication",
+    ):
+        bundle.action_epoch_observation_state()
 
 
 def test_epoch_invalid_fact_resets_dwell_and_cannot_mint_ready(monkeypatch):

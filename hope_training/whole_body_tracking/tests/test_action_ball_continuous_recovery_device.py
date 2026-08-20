@@ -786,12 +786,17 @@ def test_motion_consumes_only_owner_issued_current_epoch_ready_projection():
     assert view.ready_projection is first
     assert view.owner_kind == "motion"
     assert view.ready.tolist() == [False]
+    assert view.ready_streak.tolist() == [1]
+    assert view.required_dwell == 2
     assert view.control_tick.tolist() == [1]
     view.ready.fill_(True)
+    view.ready_streak.zero_()
     again = owner.require_owned_motion_ready_projection(
         first, owner_kind="motion"
     )
     assert again.ready.tolist() == [False]
+    assert again.ready_streak.tolist() == [1]
+    assert again.required_dwell == 2
 
     _reconcile(owner, tick=1)
     _publish_and_settle(owner)
@@ -801,6 +806,8 @@ def test_motion_consumes_only_owner_issued_current_epoch_ready_projection():
         second, owner_kind="motion"
     )
     assert second_view.ready.tolist() == [True]
+    assert second_view.ready_streak.tolist() == [2]
+    assert second_view.required_dwell == 2
     assert second_view.control_tick.tolist() == [2]
     with pytest.raises(
         device_recovery.ContinuousRecoveryDeviceError,
@@ -901,6 +908,9 @@ def test_action_epoch_readiness_true_writer_publishes_only_monotonic_first_ready
             recovery_age_tick=one_i64.clone(),
             reward_eligible=torch.ones(1, dtype=torch.bool, device=owner.device),
             facts_valid=torch.ones(1, dtype=torch.bool, device=owner.device),
+            foot_supported_lr=torch.ones(
+                (1, owner.num_feet), dtype=torch.bool, device=owner.device
+            ),
             infrastructure_fault=torch.zeros(1, dtype=torch.bool, device=owner.device),
             producer_fault_bits=torch.zeros(1, dtype=torch.int64, device=owner.device),
             component_errors=torch.zeros(

@@ -15062,7 +15062,7 @@ _ACTION_BALL_FULL_MDP_TASK_IDS = (
     "HOPE-PingPong-ActionBall-FullMdpC-AgibotA3-v0",
 )
 _ACTION_BALL_FULL_MDP_TRAIN_WIRING_KIND = (
-    "action_ball_full_mdp_train_wiring_v1"
+    "action_ball_full_mdp_train_wiring_v2"
 )
 _ACTION_BALL_FULL_MDP_TARGET_MODE = "action_ball_full_mdp"
 _ACTION_BALL_FULL_MDP_OBS_MODE = "action_ball_full_mdp"
@@ -15160,11 +15160,6 @@ def _configure_action_ball_full_mdp_joint_safety_evidence(
 _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER = (
     "action_ball_full_mdp_lean_reward_graph"
 )
-_ACTION_BALL_FULL_MDP_LEAN_ACTOR_CONTRACT = (
-    "action_ball_full_mdp_action_epoch_v1"
-)
-
-
 def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
     """Validate the code-owned default-stand bootstrap without self-hashing it."""
 
@@ -15618,56 +15613,45 @@ def _resolve_action_ball_full_mdp_lean_actor_observation_contract(
             "[train.py] diagnostic actor contract API differs"
     )
     facts = resolver(runtime_env)
-    expected_fact_keys = {
-        "actor_obs_contract",
-        "actor_obs_mode",
-        "actor_obs_total_dim",
-        "actor_obs_term_names",
-        "actor_obs_term_dims",
-        "critic_obs_contract",
-        "critic_obs_total_dim",
-        "critic_obs_term_names",
-        "critic_obs_term_dims",
-        "fresh_full_mdp_observation_kind",
-        "fresh_full_mdp_diagnostic_unauthorized",
-        "fresh_full_mdp_launch_authorized",
-        "fresh_full_mdp_no_capacity_receipt_or_sha_authority",
-    }
-    if (
-        type(facts) is not dict
-        or set(facts) != expected_fact_keys
-        or facts.get("actor_obs_contract")
-        != _ACTION_BALL_FULL_MDP_LEAN_ACTOR_CONTRACT
-        or facts.get("actor_obs_mode") != _ACTION_BALL_FULL_MDP_OBS_MODE
-        or facts.get("actor_obs_total_dim") != 229
-        or facts.get("actor_obs_term_names") != ["action_epoch"]
-        or facts.get("actor_obs_term_dims") != [229]
-        or facts.get("critic_obs_total_dim") != 399
-        or facts.get("critic_obs_contract")
-        != "action_ball_full_mdp_action_epoch_critic_v1"
-        or facts.get("critic_obs_term_names") != ["action_epoch"]
-        or facts.get("critic_obs_term_dims") != [399]
-        or facts.get("fresh_full_mdp_observation_kind")
-        != "action_ball_full_mdp_action_epoch_observation_v1"
-        or facts.get("fresh_full_mdp_diagnostic_unauthorized") is not True
-        or facts.get("fresh_full_mdp_launch_authorized") is not False
-        or facts.get("fresh_full_mdp_no_capacity_receipt_or_sha_authority")
-        is not True
-    ):
+    if type(facts) is not dict:
         raise RuntimeError(
             "[train.py] diagnostic ActionEpoch observation facts differ"
         )
+    actor_name = facts.get("actor_obs_contract")
+    actor_mode = facts.get("actor_obs_mode")
+    actor_total = facts.get("actor_obs_total_dim")
+    actor_names = facts.get("actor_obs_term_names")
+    actor_dims = facts.get("actor_obs_term_dims")
+    if (
+        type(actor_name) is not str
+        or not actor_name
+        or type(actor_mode) is not str
+        or not actor_mode
+        or type(actor_total) is not int
+        or actor_total <= 0
+        or type(actor_names) is not list
+        or type(actor_dims) is not list
+        or not actor_names
+        or len(actor_names) != len(actor_dims)
+        or any(type(name) is not str or not name for name in actor_names)
+        or any(type(dim) is not int or dim <= 0 for dim in actor_dims)
+        or sum(actor_dims) != actor_total
+    ):
+        raise RuntimeError(
+            "[train.py] installed actor observation facts are malformed"
+        )
     return actor_contract_type(
-        name=_ACTION_BALL_FULL_MDP_LEAN_ACTOR_CONTRACT,
-        obs_mode=_ACTION_BALL_FULL_MDP_OBS_MODE,
-        total_dim=229,
-        terms=(
+        name=actor_name,
+        obs_mode=actor_mode,
+        total_dim=actor_total,
+        terms=tuple(
             actor_term_type(
-                "action_epoch",
-                229,
+                name,
+                dim,
                 "diagnostic_action_epoch",
                 "exact installed diagnostic ActionEpoch policy observation",
-            ),
+            )
+            for name, dim in zip(actor_names, actor_dims, strict=True)
         ),
     )
 
@@ -16429,8 +16413,17 @@ def _action_ball_full_mdp_training_contract(
         raise RuntimeError(
             "[train.py] single_action_lean contract forbids R10"
         )
+    typed_recipe = (
+        _action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
+    snapshot_interval = getattr(typed_recipe, "save_interval", None)
+    if type(snapshot_interval) is not int or snapshot_interval <= 0:
+        raise RuntimeError(
+            "[train.py] FullMDP typed recipe lacks a positive snapshot interval"
+        )
     contract = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": _ACTION_BALL_FULL_MDP_TRAIN_WIRING_KIND,
         "gym_entry_point": pre_gym_binding.gym_entry_point,
         "target_mode": _ACTION_BALL_FULL_MDP_TARGET_MODE,
@@ -16465,7 +16458,9 @@ def _action_ball_full_mdp_training_contract(
     contract.update(
         {
             "run_mode": _ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE,
-            "no_save": True,
+            "resumable_checkpoint_write": False,
+            "diagnostic_snapshot_write": True,
+            "diagnostic_snapshot_interval_updates": snapshot_interval,
             "diagnostic_operational": True,
             "runtime_dependency_kind": pre_gym_binding.dependency_kind,
         }
@@ -21418,7 +21413,9 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         training_launch_claim_sha256=(
             effective_training_launch_claim_sha256
         ),
-        require_exact_resume_state=strict_exact_training,
+        require_exact_resume_state=(
+            strict_exact_training and not action_ball_full_mdp_training
+        ),
         action_ball_r10_checkpoint_adapter=(
             action_ball_r10_checkpoint_adapter
         ),

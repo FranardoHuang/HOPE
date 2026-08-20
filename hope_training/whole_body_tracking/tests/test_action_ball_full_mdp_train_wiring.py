@@ -178,7 +178,17 @@ def test_legacy_pre_gym_resolution_is_a_strict_noop():
     )
 
 
-def test_fresh_resume_holds_before_gym_or_environment_reset():
+@pytest.mark.parametrize(
+    ("checkpoint_path", "checkpoint_tolerant"),
+    (
+        ("/externally/pinned/r10.chk", False),
+        (None, True),
+        ("/externally/pinned/r10.chk", True),
+    ),
+)
+def test_fresh_resume_holds_before_gym_or_environment_reset(
+    checkpoint_path, checkpoint_tolerant
+):
     class _BombRegistry:
         def spec(self, _task_id):
             raise AssertionError("resume HOLD reached Gym allocation")
@@ -189,8 +199,8 @@ def test_fresh_resume_holds_before_gym_or_environment_reset():
             task_id="HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
             gym_registry=_BombRegistry(),
             num_envs=2,
-            checkpoint_path="/externally/pinned/r10.chk",
-            checkpoint_tolerant=False,
+            checkpoint_path=checkpoint_path,
+            checkpoint_tolerant=checkpoint_tolerant,
         )
 
 
@@ -929,8 +939,8 @@ def test_runtime_and_runner_inputs_preserve_one_owner_and_adapter_identity(
         resolved.cold_restore_capsule,
     )
     assert contract == {
-        "schema_version": 1,
-        "kind": "action_ball_full_mdp_train_wiring_v1",
+        "schema_version": 2,
+        "kind": "action_ball_full_mdp_train_wiring_v2",
         "gym_entry_point": train_mod._ACTION_BALL_FULL_MDP_GYM_ENTRY_POINT,
         "target_mode": "action_ball_full_mdp",
         "actor_obs_mode": "action_ball_full_mdp",
@@ -947,10 +957,34 @@ def test_runtime_and_runner_inputs_preserve_one_owner_and_adapter_identity(
         "exact_export_prohibited": True,
         "deployment_prohibited": True,
         "run_mode": "single_action_lean",
-        "no_save": True,
+        "resumable_checkpoint_write": False,
+        "diagnostic_snapshot_write": True,
+        "diagnostic_snapshot_interval_updates": (
+            train_mod._action_ball_full_mdp_ppo_recipe_module()
+            .ACTION_BALL_FULL_MDP_PPO_RECIPE.save_interval
+        ),
         "diagnostic_operational": True,
         "runtime_dependency_kind": "action_ball_epoch_runtime_dependencies_v1",
     }
+
+
+def test_diagnostic_snapshot_interval_is_read_from_the_typed_recipe(
+    monkeypatch,
+):
+    binding = _resolve(monkeypatch)
+    _env, owner, adapter = _installed_runtime(binding)
+    recipe_module = train_mod._action_ball_full_mdp_ppo_recipe_module()
+    monkeypatch.setattr(
+        recipe_module,
+        "ACTION_BALL_FULL_MDP_PPO_RECIPE",
+        types.SimpleNamespace(save_interval=37),
+    )
+
+    contract = train_mod._action_ball_full_mdp_training_contract(
+        binding, owner, adapter, None
+    )
+
+    assert contract["diagnostic_snapshot_interval_updates"] == 37
 
 
 def _installed_lean_actor_observation(monkeypatch, binding):
@@ -987,21 +1021,21 @@ def _installed_lean_actor_observation(monkeypatch, binding):
 
         @property
         def group_widths(self):
-            return {"policy": 229, "critic": 399}
+            return {"policy": 203, "critic": 219}
 
     def _term(_env, *, group):
         return (_env, group)
 
-    actor_layout = (("actor_payload", 229),)
-    critic_extension = (("critic_extension", 170),)
+    actor_layout = (("actor_payload", 203),)
+    critic_extension = (("critic_extension", 16),)
     lean_observations = types.SimpleNamespace(
         LeanActionEpochObservationSource=_Source,
         _term=_term,
         MANAGER_GROUP_ORDER=("policy", "critic"),
-        ACTOR_LAYOUT_V1=actor_layout,
-        CRITIC_EXTENSION_LAYOUT_V1=critic_extension,
-        ACTOR_WIDTH_V1=229,
-        CRITIC_WIDTH_V1=399,
+        ACTOR_LAYOUT_V2=actor_layout,
+        CRITIC_EXTENSION_LAYOUT_V2=critic_extension,
+        ACTOR_WIDTH_V2=203,
+        CRITIC_WIDTH_V2=219,
         DIAGNOSTIC_UNAUTHORIZED=True,
         LAUNCH_AUTHORIZED=False,
     )
@@ -1033,8 +1067,8 @@ def _installed_lean_actor_observation(monkeypatch, binding):
     )
     env.observation_manager = types.SimpleNamespace(
         active_terms={"policy": ["action_epoch"], "critic": ["action_epoch"]},
-        group_obs_term_dim={"policy": [(229,)], "critic": [(399,)]},
-        group_obs_dim={"policy": (229,), "critic": (399,)},
+        group_obs_term_dim={"policy": [(203,)], "critic": [(219,)]},
+        group_obs_dim={"policy": (203,), "critic": (219,)},
         group_obs_concatenate={"policy": True, "critic": True},
         _group_obs_term_cfgs={
             "policy": [
@@ -1073,9 +1107,9 @@ def _installed_lean_actor_observation(monkeypatch, binding):
             or manager.active_terms
             != {"policy": ["action_epoch"], "critic": ["action_epoch"]}
             or manager.group_obs_term_dim
-            != {"policy": [(229,)], "critic": [(399,)]}
+            != {"policy": [(203,)], "critic": [(219,)]}
             or manager.group_obs_dim
-            != {"policy": (229,), "critic": (399,)}
+            != {"policy": (203,), "critic": (219,)}
             or policy.params != {"group": "policy"}
             or critic.params != {"group": "critic"}
             or supplied_env._action_ball_full_mdp_lean_observation_source
@@ -1091,19 +1125,19 @@ def _installed_lean_actor_observation(monkeypatch, binding):
         ):
             raise RuntimeError("foreign diagnostic observation")
         return {
-            "actor_obs_contract": "action_ball_full_mdp_action_epoch_v1",
+            "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
             "actor_obs_mode": "action_ball_full_mdp",
-            "actor_obs_total_dim": 229,
+            "actor_obs_total_dim": 203,
             "actor_obs_term_names": ["action_epoch"],
-            "actor_obs_term_dims": [229],
+            "actor_obs_term_dims": [203],
             "critic_obs_contract": (
-                "action_ball_full_mdp_action_epoch_critic_v1"
+                "action_ball_full_mdp_semantic_critic_v2"
             ),
-            "critic_obs_total_dim": 399,
+            "critic_obs_total_dim": 219,
             "critic_obs_term_names": ["action_epoch"],
-            "critic_obs_term_dims": [399],
+            "critic_obs_term_dims": [219],
             "fresh_full_mdp_observation_kind": (
-                "action_ball_full_mdp_action_epoch_observation_v1"
+                "action_ball_full_mdp_semantic_observation_v2"
             ),
             "fresh_full_mdp_diagnostic_unauthorized": True,
             "fresh_full_mdp_launch_authorized": False,
@@ -1149,11 +1183,11 @@ def test_diagnostic_actor_contract_uses_only_installed_action_epoch_source(
         )
     )
     assert type(contract) is state.actor_contract_type
-    assert contract.name == "action_ball_full_mdp_action_epoch_v1"
+    assert contract.name == "action_ball_full_mdp_semantic_actor_v2"
     assert contract.obs_mode == "action_ball_full_mdp"
-    assert contract.total_dim == 229
+    assert contract.total_dim == 203
     assert tuple((term.name, term.dim) for term in contract.terms) == (
-        ("action_epoch", 229),
+        ("action_epoch", 203),
     )
     assert not hasattr(state.parts["r06_landing_outcome"], "capacity_authority")
 
@@ -1165,10 +1199,10 @@ def test_diagnostic_actor_contract_uses_only_installed_action_epoch_source(
             "foreign"
         ),
         lambda state: state.env.observation_manager.group_obs_term_dim.__setitem__(
-            "policy", [(228,)]
+            "policy", [(202,)]
         ),
         lambda state: state.env.observation_manager.group_obs_dim.__setitem__(
-            "critic", (398,)
+            "critic", (218,)
         ),
         lambda state: state.env.observation_manager._group_obs_term_cfgs[
             "critic"
@@ -1932,6 +1966,9 @@ def test_run_source_has_real_callsites_exact_runner_selection_and_no_config_fact
     assert runner_keywords["action_ball_full_mdp_run_mode"] == (
         "None if action_ball_full_mdp_pre_gym_binding is None else "
         "_ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE"
+    )
+    assert runner_keywords["require_exact_resume_state"] == (
+        "strict_exact_training and (not action_ball_full_mdp_training)"
     )
     assert "_get(cfg, \"full_mdp_runtime_owner_factory\")" not in source
     assert "_get(cfg.task, \"full_mdp_runtime_owner_factory\")" not in source

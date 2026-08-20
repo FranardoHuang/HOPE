@@ -70,10 +70,10 @@ ACTION_CONTRACT = {
     "transfer_authority": False, "matched_cross_backend_authority": False,
 }
 MODEL_SHAPES = (
-    ("log_std", (31,)), ("actor.0.weight", (512, 229)), ("actor.0.bias", (512,)),
+    ("log_std", (31,)), ("actor.0.weight", (512, 203)), ("actor.0.bias", (512,)),
     ("actor.2.weight", (256, 512)), ("actor.2.bias", (256,)), ("actor.4.weight", (128, 256)), ("actor.4.bias", (128,)),
     ("actor.6.weight", (31, 128)), ("actor.6.bias", (31,)),
-    ("critic.0.weight", (512, 399)), ("critic.0.bias", (512,)),
+    ("critic.0.weight", (512, 219)), ("critic.0.bias", (512,)),
     ("critic.2.weight", (256, 512)), ("critic.2.bias", (256,)), ("critic.4.weight", (128, 256)), ("critic.4.bias", (128,)),
     ("critic.6.weight", (1, 128)), ("critic.6.bias", (1,)),
 )

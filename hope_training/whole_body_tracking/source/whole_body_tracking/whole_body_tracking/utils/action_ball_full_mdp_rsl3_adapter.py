@@ -24,8 +24,113 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 RUN_MODE = "single_action_lean"
 TELEMETRY_SCHEMA_VERSION = 11
 TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v11"
-SNAPSHOT_RECEIPT_KIND = "action_ball_full_mdp_diagnostic_snapshot_receipt_v1"
-SNAPSHOT_PAYLOAD_KIND = "policy_optimizer_diagnostic_nonresumable_v1"
+TRAINING_CONTRACT_SCHEMA_VERSION = 3
+ACTOR_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_actor_v2"
+ACTOR_OBSERVATION_WIDTH = 203
+CRITIC_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_critic_v2"
+CRITIC_OBSERVATION_WIDTH = 219
+OBSERVATION_KIND = "action_ball_full_mdp_semantic_observation_v2"
+SNAPSHOT_RECEIPT_SCHEMA_VERSION = 2
+SNAPSHOT_RECEIPT_KIND = "action_ball_full_mdp_diagnostic_snapshot_receipt_v2"
+SNAPSHOT_PAYLOAD_KIND = "policy_optimizer_diagnostic_nonresumable_v2"
+
+_SNAPSHOT_IDENTITY_KEYS = {
+    "action_ball_full_mdp_snapshot_kind",
+    "fresh_full_mdp_observation_kind",
+    "actor_obs_contract",
+    "actor_obs_total_dim",
+    "critic_obs_contract",
+    "critic_obs_total_dim",
+    "training_contract_schema_version",
+    "training_contract_sha256",
+    "diagnostic_unauthorized",
+    "checkpoint_authority",
+    "resume_authority",
+}
+
+
+def _validate_training_contract_identity(
+    schema_version: object, sha256: object
+) -> tuple[int, str]:
+    if (
+        type(schema_version) is not int
+        or schema_version != TRAINING_CONTRACT_SCHEMA_VERSION
+    ):
+        raise RuntimeError("FullMDP RSL3 training-contract schema differs")
+    if (
+        type(sha256) is not str
+        or len(sha256) != 64
+        or any(character not in "0123456789abcdef" for character in sha256)
+    ):
+        raise RuntimeError("FullMDP RSL3 training-contract SHA differs")
+    return schema_version, sha256
+
+
+def _validate_observation_identity(env: object) -> dict[str, object]:
+    observations = importlib.import_module(
+        "whole_body_tracking.tasks.tracking.mdp."
+        "action_ball_full_mdp_lean_observation_cfg"
+    )
+    resolver = getattr(observations, "installed_observation_facts", None)
+    if not callable(resolver):
+        raise RuntimeError("FullMDP RSL3 observation identity resolver differs")
+    facts = resolver(env)
+    expected = {
+        "actor_obs_contract": ACTOR_OBSERVATION_CONTRACT,
+        "actor_obs_mode": "action_ball_full_mdp",
+        "actor_obs_total_dim": ACTOR_OBSERVATION_WIDTH,
+        "actor_obs_term_names": ["action_epoch"],
+        "actor_obs_term_dims": [ACTOR_OBSERVATION_WIDTH],
+        "critic_obs_contract": CRITIC_OBSERVATION_CONTRACT,
+        "critic_obs_total_dim": CRITIC_OBSERVATION_WIDTH,
+        "critic_obs_term_names": ["action_epoch"],
+        "critic_obs_term_dims": [CRITIC_OBSERVATION_WIDTH],
+        "fresh_full_mdp_observation_kind": OBSERVATION_KIND,
+        "fresh_full_mdp_diagnostic_unauthorized": True,
+        "fresh_full_mdp_launch_authorized": False,
+        "fresh_full_mdp_no_capacity_receipt_or_sha_authority": True,
+    }
+    if type(facts) is not dict or facts != expected:
+        raise RuntimeError("FullMDP RSL3 semantic observation identity differs")
+    return {
+        "fresh_full_mdp_observation_kind": facts[
+            "fresh_full_mdp_observation_kind"
+        ],
+        "actor_obs_contract": facts["actor_obs_contract"],
+        "actor_obs_total_dim": facts["actor_obs_total_dim"],
+        "critic_obs_contract": facts["critic_obs_contract"],
+        "critic_obs_total_dim": facts["critic_obs_total_dim"],
+    }
+
+
+def _validate_snapshot_identity_infos(
+    required_infos: object,
+) -> dict[str, object]:
+    if (
+        type(required_infos) is not dict
+        or set(required_infos) != _SNAPSHOT_IDENTITY_KEYS
+    ):
+        raise RuntimeError("single_action_lean diagnostic snapshot identity differs")
+    schema_version, sha256 = _validate_training_contract_identity(
+        required_infos["training_contract_schema_version"],
+        required_infos["training_contract_sha256"],
+    )
+    expected = {
+        "action_ball_full_mdp_snapshot_kind": SNAPSHOT_PAYLOAD_KIND,
+        "fresh_full_mdp_observation_kind": OBSERVATION_KIND,
+        "actor_obs_contract": ACTOR_OBSERVATION_CONTRACT,
+        "actor_obs_total_dim": ACTOR_OBSERVATION_WIDTH,
+        "critic_obs_contract": CRITIC_OBSERVATION_CONTRACT,
+        "critic_obs_total_dim": CRITIC_OBSERVATION_WIDTH,
+        "training_contract_schema_version": schema_version,
+        "training_contract_sha256": sha256,
+        "diagnostic_unauthorized": True,
+        "checkpoint_authority": False,
+        "resume_authority": False,
+    }
+    if required_infos != expected:
+        raise RuntimeError("single_action_lean diagnostic snapshot identity differs")
+    return expected
 
 
 def _write_snapshot_receipt(
@@ -33,6 +138,7 @@ def _write_snapshot_receipt(
 ) -> Path:
     """Bind one completed upstream save to a durable, non-authoritative receipt."""
 
+    snapshot_identity = _validate_snapshot_identity_infos(required_infos)
     torch = importlib.import_module("torch")
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -78,7 +184,7 @@ def _write_snapshot_receipt(
             )
         infos = payload["infos"]
         if type(infos) is not dict or any(
-            infos.get(key) != value for key, value in required_infos.items()
+            infos.get(key) != value for key, value in snapshot_identity.items()
         ):
             raise RuntimeError(
                 "single_action_lean diagnostic snapshot metadata differs"
@@ -154,18 +260,16 @@ def _write_snapshot_receipt(
         os.close(fd)
 
     receipt = {
-        "schema_version": 1,
+        "schema_version": SNAPSHOT_RECEIPT_SCHEMA_VERSION,
         "kind": SNAPSHOT_RECEIPT_KIND,
         "snapshot_name": snapshot.name,
         "learning_iteration": learning_iteration,
         "snapshot_size_bytes": before.st_size,
         "snapshot_sha256": digest.hexdigest(),
-        "payload_kind": SNAPSHOT_PAYLOAD_KIND,
         "model_tensor_count": model_tensor_count,
         "optimizer_tensor_count": optimizer_tensor_count,
         "all_tensors_finite": True,
-        "checkpoint_authority": False,
-        "resume_authority": False,
+        **snapshot_identity,
     }
     encoded = (
         json.dumps(receipt, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -963,20 +1067,25 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
             or action_ball_full_mdp_runtime_owner is None
             or action_ball_r10_checkpoint_adapter is not None
             or action_ball_r10_cold_restore_capsule is not None
-            or type(training_contract_lineage_exact) is not bool
-            or type(require_exact_resume_state) is not bool
+            or training_contract_lineage_exact is not False
+            or training_launch_claim_sha256 is not None
+            or require_exact_resume_state is not False
         ):
             raise RuntimeError("FullMDP RSL3 runner accepts only fresh single_action_lean")
+        contract_schema, contract_sha256 = _validate_training_contract_identity(
+            training_contract_schema_version,
+            training_contract_sha256,
+        )
+        runtime_env = getattr(env, "unwrapped", env)
+        observation_identity = _validate_observation_identity(runtime_env)
         _bound(action_ball_full_mdp_runtime_owner, "require_healthy")()
+        self.training_contract_schema_version = contract_schema
+        self.training_contract_sha256 = contract_sha256
+        self._full_mdp_observation_identity = observation_identity
         super().__init__(env, train_cfg, log_dir, device)
         if self.is_distributed:
             raise RuntimeError("single_action_lean RSL3 runner is single-process only")
         self.registry_name = registry_name
-        self.training_contract_schema_version = training_contract_schema_version
-        self.training_contract_sha256 = training_contract_sha256
-        self.training_contract_lineage_exact = training_contract_lineage_exact
-        self.training_launch_claim_sha256 = training_launch_claim_sha256
-        self.require_exact_resume_state = require_exact_resume_state
         self.empirical_normalization = bool(train_cfg.get("empirical_normalization"))
         if log_dir is None:
             raise RuntimeError("single_action_lean RSL3 runner requires log_dir")
@@ -1052,8 +1161,10 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
     def save(self, path: str, infos: dict | None = None) -> None:
         """Persist policy/optimizer bytes without claiming environment restore."""
 
-        if infos is not None and type(infos) is not dict:
-            raise RuntimeError("single_action_lean diagnostic snapshot infos differ")
+        if infos is not None:
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot forbids caller infos"
+            )
         requested = Path(path)
         requested_stem = requested.stem
         if (
@@ -1067,23 +1178,33 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
         snapshot = requested.with_name(
             requested_stem + ".diagnostic_nonresumable.pt"
         )
-        metadata = dict(infos or {})
-        metadata.update(
+        contract_schema, contract_sha256 = _validate_training_contract_identity(
+            getattr(self, "training_contract_schema_version", None),
+            getattr(self, "training_contract_sha256", None),
+        )
+        observation_identity = getattr(
+            self, "_full_mdp_observation_identity", None
+        )
+        if type(observation_identity) is not dict:
+            raise RuntimeError(
+                "single_action_lean diagnostic snapshot observation identity differs"
+            )
+        snapshot_identity = _validate_snapshot_identity_infos(
             {
                 "action_ball_full_mdp_snapshot_kind": SNAPSHOT_PAYLOAD_KIND,
+                **observation_identity,
+                "training_contract_schema_version": contract_schema,
+                "training_contract_sha256": contract_sha256,
+                "diagnostic_unauthorized": True,
                 "checkpoint_authority": False,
                 "resume_authority": False,
             }
         )
-        super().save(str(snapshot), infos=metadata)
+        super().save(str(snapshot), infos=snapshot_identity)
         receipt = _write_snapshot_receipt(
             snapshot,
             learning_iteration=learning_iteration,
-            required_infos={
-                "action_ball_full_mdp_snapshot_kind": SNAPSHOT_PAYLOAD_KIND,
-                "checkpoint_authority": False,
-                "resume_authority": False,
-            },
+            required_infos=snapshot_identity,
         )
         print(
             "[ActionBallFullMdpRsl3Runner] wrote non-resumable diagnostic snapshot: "

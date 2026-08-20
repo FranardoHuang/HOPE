@@ -1,10 +1,9 @@
-"""Compact ObservationManager ABI for the diagnostic ActionEpoch runtime.
+"""Semantic ObservationManager ABI for the diagnostic ActionEpoch runtime.
 
-One direct runtime publication supplies real robot proprioception, current
-action and Motion teacher state.  This manager independently gathers the
-canonical task, clocks, lifecycle, Physical/R03/R06/R07 facts and Reward ledger
-from the current fixed-slot ActionEpoch record.  There is no legacy observation
-prefix, capacity padding, receipt adapter, or source digest.
+One direct runtime publication supplies the robot, Motion, Racket, Physical,
+R06 and R07 state that can change the next transition.  Raw task packets,
+owner fact rows, fault bits and Reward ledgers are deliberately not policy or
+critic inputs.  Infrastructure faults fail-stop instead of becoming features.
 
 Isaac Lab invokes each term once while constructing ObservationManager.  Those
 two calls are explicitly shape-only and may return zeros.  Every term config
@@ -16,11 +15,13 @@ finite semantic tensors.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dataclass_fields
 import importlib
 from typing import Mapping
 
 import torch
+
+import action_ball_full_mdp_row_identity as row_identity
 
 try:
     from . import action_ball_full_mdp_epoch as epoch_v1
@@ -36,34 +37,39 @@ DIAGNOSTIC_UNAUTHORIZED = True
 RUNTIME_INTEGRATED = False
 LAUNCH_AUTHORIZED = False
 
-DIRECT_VIEW_METHOD = "action_epoch_observation_v1"
+DIRECT_VIEW_METHOD = "semantic_action_epoch_observation_v2"
 ENV_TERM_METHOD = "_action_ball_full_mdp_lean_observe_term"
 MANAGER_GROUP_ORDER = ("policy", "critic")
 _CONSTRUCTION_STATE = "runtime_graph_ready"
-ACTOR_CONTRACT_V1 = portable_observation.ACTOR_CONTRACT_V1
-CRITIC_CONTRACT_V1 = portable_observation.CRITIC_CONTRACT_V1
-OBSERVATION_KIND_V1 = portable_observation.OBSERVATION_KIND_V1
+ACTOR_CONTRACT_V2 = portable_observation.ACTOR_CONTRACT_V2
+CRITIC_CONTRACT_V2 = portable_observation.CRITIC_CONTRACT_V2
+OBSERVATION_KIND_V2 = portable_observation.OBSERVATION_KIND_V2
 
 # This is a deliberately small, named diagnostic ABI for the exact 31-DoF A3
 # plant and current 31-wide action.  Widths are derived only from these fields.
 # A future robot or observation change edits the named layout, never a magic
 # total inherited from the superseded R08 contract.
-ACTOR_LAYOUT_V1 = portable_observation.ACTOR_LAYOUT_V1
-CRITIC_EXTENSION_LAYOUT_V1 = portable_observation.CRITIC_EXTENSION_LAYOUT_V1
-ACTOR_WIDTH_V1 = portable_observation.ACTOR_WIDTH_V1
-CRITIC_WIDTH_V1 = portable_observation.CRITIC_WIDTH_V1
+ACTOR_LAYOUT_V2 = portable_observation.ACTOR_LAYOUT_V2
+CRITIC_EXTENSION_LAYOUT_V2 = portable_observation.CRITIC_EXTENSION_LAYOUT_V2
+ACTOR_WIDTH_V2 = portable_observation.ACTOR_WIDTH_V2
+CRITIC_WIDTH_V2 = portable_observation.CRITIC_WIDTH_V2
 
-_DIRECT_FIELD_LAYOUT = portable_observation.DIRECT_FIELD_LAYOUT_V1
-_FACT_OWNER_KINDS = (
-    "physical_ball",
-    "r03_strike_fact",
-    "r06_landing_outcome",
-    "r07_recovery",
+_DIRECT_FLOAT_LAYOUT = tuple(
+    (name, width)
+    for name, width in ACTOR_LAYOUT_V2 + CRITIC_EXTENSION_LAYOUT_V2
+    if name
+    not in (
+        "motion_phase_one_hot",
+        "epoch_learning_phase_one_hot",
+        "task_valid",
+    )
 )
 _REQUIRED_COMPONENTS = (
     "motion",
     "racket",
-    *_FACT_OWNER_KINDS,
+    "physical_ball",
+    "r06_landing_outcome",
+    "r07_recovery",
 )
 
 
@@ -77,28 +83,15 @@ class LeanObservationConstructionHold(LeanObservationError):
 
 @dataclass(frozen=True)
 class DirectActionEpochObservationFacts:
-    """Real non-epoch facts published by the construction-bound lean owner."""
+    """Real semantic tensors published by the construction-bound lean owner."""
 
-    projected_gravity_b: torch.Tensor
-    base_ang_vel_b: torch.Tensor
-    joint_pos_rel: torch.Tensor
-    joint_vel_rel: torch.Tensor
-    last_action: torch.Tensor
-    teacher_joint_pos_rel: torch.Tensor
-    teacher_joint_vel_rel: torch.Tensor
+    actor_rows: Mapping[str, torch.Tensor]
+    critic_rows: Mapping[str, torch.Tensor]
     motion_phase_code: torch.Tensor
-    current_task_slot: torch.Tensor
-    current_action_uid: torch.Tensor
-    current_rng_counter: torch.Tensor
+    task_valid: torch.Tensor
     transaction_epoch: int
     transaction_version: int
     common_step: int
-    motion_owner: object
-    racket_owner: object
-    physical_owner: object
-    r03_owner: object
-    r06_owner: object
-    r07_owner: object
     diagnostic_unauthorized: bool = True
 
 
@@ -128,7 +121,7 @@ def _assert_async_all(predicate: torch.Tensor, *, label: str) -> None:
     condition = torch.all(predicate)
     async_assert = getattr(torch, "_assert_async", None)
     if callable(async_assert):
-        async_assert(condition, label)
+        async_assert(condition)
     else:  # pragma: no cover - supported Torch builds provide _assert_async.
         torch._assert(condition, label)
 
@@ -144,117 +137,350 @@ def build_direct_action_epoch_observation_facts(
     runtime_owner: lean_runtime.ActionBallFullMdpLeanRuntimeOwner,
     record: epoch_v1.ActionEpochRecord,
 ) -> DirectActionEpochObservationFacts:
-    """Read the exact Isaac/Motion buffers for the lean owner's direct method.
-
-    ``ActionBallFullMdpLeanRuntimeOwner.action_epoch_observation_v1`` delegates
-    here.  Keeping extraction beside the named layout prevents that top owner
-    from guessing Motion private storage or duplicating the 31-DoF contract.
-    No legacy observation function, token, receipt or manager cache is read.
-    """
+    """Project the bound Isaac owners into the semantic 203/219 ABI."""
 
     if type(runtime_owner) is not lean_runtime.ActionBallFullMdpLeanRuntimeOwner:
         raise LeanObservationError("direct fact builder requires exact lean owner")
-    if type(record) is not epoch_v1.ActionEpochRecord:
-        raise LeanObservationError("direct fact builder requires exact epoch record")
-    env = runtime_owner.full_mdp_runtime_env
     epoch_owner = runtime_owner.epoch_owner
-    if type(epoch_owner) is not epoch_v1.ActionEpochOwner:
-        raise LeanObservationError("direct fact builder lost exact epoch owner")
-    current = epoch_owner.current()
-    if current.epoch != record.epoch or current.version != record.version:
-        raise LeanObservationError("direct fact builder received stale epoch clone")
-
-    components = runtime_owner.component_identities
-    if type(components) is not tuple:
-        raise LeanObservationError("direct fact builder component surface differs")
-    by_name = dict(components)
+    if type(record) is not epoch_v1.ActionEpochRecord:
+        raise LeanObservationError("direct fact builder requires exact ActionEpoch record")
+    env = runtime_owner.full_mdp_runtime_env
+    parts = dict(runtime_owner.component_identities)
     try:
         from .commands import MotionCommand
-    except ImportError:  # Runtime may import this module from the flat source root.
+        from whole_body_tracking.tasks.table_tennis import geometry as table_geometry
+    except ImportError:
         from commands import MotionCommand
-    motion = by_name.get("motion")
+        from whole_body_tracking.tasks.table_tennis import geometry as table_geometry
+
+    motion = parts["motion"]
     if type(motion) is not MotionCommand:
         raise LeanObservationError("direct fact builder requires exact MotionCommand")
-    robot = getattr(motion, "robot", None)
-    data = getattr(robot, "data", None)
-    action_manager = getattr(env, "action_manager", None)
-    action = getattr(action_manager, "action", None)
-    phase = getattr(motion, "_action_ball_continuous_canonical_phase", None)
-    common_step = getattr(env, "common_step_counter", None)
-    if type(common_step) is not int or common_step < 0:
-        raise LeanObservationError("direct fact builder common step differs")
+    racket, physical = parts["racket"], parts["physical_ball"]
+    r06, r07 = parts["r06_landing_outcome"], parts["r07_recovery"]
+    data, device = motion.robot.data, epoch_owner.device
+    dtype, n = r06.dtype, epoch_owner.num_envs
+    step = env.common_step_counter
+    motion_view = motion.require_owned_action_ball_continuous_motion_observation(
+        motion.action_ball_continuous_motion_observation_projection()
+    )
+    if motion_view.motion_owner is not motion or motion_view.common_step != step:
+        raise LeanObservationError("Motion observation chronology differs")
 
-    dtype = getattr(by_name.get("r06_landing_outcome"), "dtype", None)
-    device = epoch_owner.device
-    n = epoch_owner.num_envs
-    if not isinstance(dtype, torch.dtype) or not dtype.is_floating_point:
-        raise LeanObservationError("direct fact builder R06 dtype differs")
-
-    def exact(name: str, value: object, width: int) -> torch.Tensor:
-        result = _exact_tensor(
-            value,
-            label="live " + name,
-            shape=(n, width),
-            device=device,
-            dtype=dtype,
+    root_pos_w, root_quat_w = data.root_pos_w, data.root_quat_w
+    root_pos_env = root_pos_w - env.scene.env_origins
+    # The installed ActionBall scene fixes every table to env-local/world axes;
+    # env origins translate but never rotate it.  A rotatable table therefore
+    # requires a new real pose producer rather than reinterpretation here.
+    table_center = root_pos_w.new_tensor(
+        (
+            float(racket.cfg.vb_table_near_x)
+            + 0.5 * float(table_geometry.TABLE_LENGTH),
+            0.0,
+            float(racket.cfg.vb_table_surface_z),
         )
-        _assert_async_all(torch.isfinite(result), label=name + " is nonfinite")
-        return result.detach().clone()
+    )
+    anchor_pos, anchor_ori = portable_observation.relative_pose_6d(
+        motion.robot_anchor_pos_w,
+        motion.robot_anchor_quat_w,
+        motion.anchor_pos_w,
+        motion.anchor_quat_w,
+    )
+    task_valid = motion_view.task_valid
+    task_mask = task_valid[:, None]
+    base_heading = portable_observation.heading_xy_from_quat_wxyz(root_quat_w)
 
-    projected_gravity = exact(
-        "projected_gravity_b", getattr(data, "projected_gravity_b", None), 3
+    def heading(value: torch.Tensor) -> torch.Tensor:
+        return portable_observation.rotate_world_to_heading_xy(base_heading, value)
+
+    def task_vector(value: torch.Tensor) -> torch.Tensor:
+        value = heading(value)
+        return torch.where(task_mask, value, torch.zeros_like(value))
+
+    # FullMDP questions and R03 rewards both use the raw mount +Y (A-frame)
+    # normal.  The per-action mount sign selects the physical rubber/contact
+    # identity; multiplying it into this residual would reverse the learning
+    # direction for negative-sign actions.
+    actual_normal = racket.racket_normal_raw_w
+    actor_target_pos_w = racket.actor_racket_target_pos_w()
+    actor_target_vel_w = racket.actor_racket_target_vel_w()
+    actor_target_normal_w = racket.actor_target_normal_cmd()
+    base_goal_delta = torch.cat(
+        (
+            racket.base_target_pos_w - root_pos_w[:, :2],
+            torch.zeros_like(root_pos_w[:, :1]),
+        ),
+        dim=1,
     )
-    base_ang_vel = exact(
-        "base_ang_vel_b", getattr(data, "root_ang_vel_b", None), 3
+    actor_rows = {
+        "projected_gravity_b": data.projected_gravity_b,
+        "base_ang_vel_b": data.root_ang_vel_b,
+        "base_position_table": root_pos_env - table_center,
+        "base_heading_table_xy": base_heading,
+        "base_com_lin_vel_heading": heading(data.root_lin_vel_w),
+        "joint_pos_rel": data.joint_pos - data.default_joint_pos,
+        "joint_vel": data.joint_vel,
+        "last_action": env.action_manager.action,
+        "teacher_joint_pos_rel": motion.joint_pos - data.default_joint_pos,
+        "teacher_joint_vel": motion.joint_vel,
+        "motion_anchor_pos_b": anchor_pos,
+        "motion_anchor_ori_b6": anchor_ori,
+        "racket_target_pos_error_heading": task_vector(
+            actor_target_pos_w - racket.racket_pos_w
+        ),
+        "racket_target_vel_error_heading": task_vector(
+            actor_target_vel_w - racket.racket_lin_vel_w
+        ),
+        "racket_target_normal_error_heading": task_vector(
+            actor_target_normal_w - actual_normal
+        ),
+        "base_goal_error_heading_xy": task_vector(base_goal_delta)[:, :2],
+        "time_to_contact_s": torch.where(
+            task_mask,
+            motion_view.time_to_contact_remaining_s[:, None],
+            torch.zeros_like(task_mask, dtype=dtype),
+        ),
+        "time_to_teacher_start_s": torch.where(
+            task_mask,
+            motion_view.time_to_teacher_start_remaining_s[:, None],
+            torch.zeros_like(task_mask, dtype=dtype),
+        ),
+        "time_to_next_opportunity_s": motion_view.time_to_next_reveal_s[:, None],
+    }
+
+    slot = record.current_task_slot
+    current_key = row_identity.ActionEpochShotKey(
+        **{
+            field.name: _gather_selected(
+                getattr(record.identity.shot_key, field.name), slot
+            )
+            for field in dataclass_fields(row_identity.ActionEpochShotKey)
+        }
     )
-    joint_pos = exact("joint_pos", getattr(data, "joint_pos", None), 31)
-    default_joint_pos = exact(
-        "default_joint_pos", getattr(data, "default_joint_pos", None), 31
+    current_publication = _gather_selected(record.publication_ordinal, slot)
+    r06_projection = r06.action_ball_full_mdp_observation_projection()
+    r06_view = r06.require_owned_action_epoch_current_flight_observation(
+        r06_projection,
+        current_shot_key=current_key,
+        current_publication_ordinal=current_publication,
     )
-    joint_vel = exact("joint_vel", getattr(data, "joint_vel", None), 31)
-    teacher_joint_pos = exact("teacher_joint_pos", motion.joint_pos, 31)
-    teacher_joint_vel = exact("teacher_joint_vel", motion.joint_vel, 31)
-    last_action = exact("last_action", action, 31)
-    motion_phase = _exact_tensor(
-        phase,
-        label="live Motion canonical phase",
+    if (
+        r06_view.r06_owner is not r06
+        or r06_view.publication_identity is not r06_projection
+    ):
+        raise LeanObservationError("R06 current-flight observation owner differs")
+    flight_slot = _exact_tensor(
+        r06_view.flight_slot,
+        label="R06 current flight_slot",
         shape=(n,),
         device=device,
         dtype=torch.int64,
     )
-    _assert_async_all(
-        (motion_phase >= 0) & (motion_phase < 5),
-        label="Motion canonical phase is outside 0..4",
+    contact = _exact_tensor(
+        r06_view.contact_valid,
+        label="R06 current contact_valid",
+        shape=(n,),
+        device=device,
+        dtype=torch.bool,
     )
-    slot = record.current_task_slot.detach().clone()
-    row = slot[:, None]
+    crossed = _exact_tensor(
+        r06_view.net_crossed,
+        label="R06 current net_crossed",
+        shape=(n,),
+        device=device,
+        dtype=torch.bool,
+    )
+    clear = _exact_tensor(
+        r06_view.net_clear,
+        label="R06 current net_clear",
+        shape=(n,),
+        device=device,
+        dtype=torch.bool,
+    )
+    live = flight_slot.ge(0)
+    _assert_async_all(
+        live | (~contact & ~crossed & ~clear),
+        label="absent R06 current flight has retained latches",
+    )
+    _assert_async_all(~clear | crossed, label="R06 net-clear lacks crossing")
+    _assert_async_all(~crossed | contact, label="R06 net crossing lacks contact")
+
+    scene_state = physical.scene_port.read_state_env()
+    flight_capacity = getattr(r06, "flight_slot_capacity", None)
+    if (
+        type(scene_state) is not torch.Tensor
+        or scene_state.ndim != 3
+        or scene_state.shape[0] != n
+        or type(flight_capacity) is not int
+        or flight_capacity < 1
+        or scene_state.shape[1] != flight_capacity
+        or scene_state.shape[2] != 13
+        or scene_state.device != device
+        or scene_state.dtype != dtype
+    ):
+        raise LeanObservationError("Physical flight scene ABI differs")
+    _assert_async_all(
+        (flight_slot >= -1) & (flight_slot < flight_capacity),
+        label="R06 current flight_slot is outside Physical capacity",
+    )
+    flight_index = flight_slot.clamp(0, flight_capacity - 1)
+    env_index = torch.arange(n, dtype=torch.int64, device=device)
+    ball = scene_state[env_index, flight_index]
+    ball9 = torch.cat(
+        (
+            heading(ball[:, :3] - root_pos_env),
+            heading(ball[:, 7:10]),
+            heading(ball[:, 10:13]),
+        ),
+        dim=1,
+    )
+    ball9 = torch.where(live[:, None], ball9, torch.zeros_like(ball9))
+
+    contact = contact[:, None]
+    crossed = crossed[:, None]
+    clear = clear[:, None]
+
+    ready = r07.action_epoch_observation_state()
+    postphysics_valid = _exact_tensor(
+        ready.postphysics_valid,
+        label="R07 observation postphysics_valid",
+        shape=(n,),
+        device=device,
+        dtype=torch.bool,
+    )
+    source_step = _exact_tensor(
+        ready.source_step,
+        label="R07 observation source_step",
+        shape=(n,),
+        device=device,
+        dtype=torch.int64,
+    )
+    ready_generation = _exact_tensor(
+        ready.reset_generation,
+        label="R07 observation reset_generation",
+        shape=(n,),
+        device=device,
+        dtype=torch.int64,
+    )
+    motion_generation = _exact_tensor(
+        motion_view.reset_generation,
+        label="Motion observation reset_generation",
+        shape=(n,),
+        device=device,
+        dtype=torch.int64,
+    )
+    ready_control_tick = _exact_tensor(
+        ready.control_tick,
+        label="R07 observation control_tick",
+        shape=(n,),
+        device=device,
+        dtype=torch.int64,
+    )
+    motion_control_tick = _exact_tensor(
+        motion_view.control_tick,
+        label="Motion observation control_tick",
+        shape=(n,),
+        device=device,
+        dtype=torch.int64,
+    )
+    ready_streak = _exact_tensor(
+        ready.ready_streak,
+        label="R07 observation streak",
+        shape=(n,),
+        device=device,
+        dtype=torch.int64,
+    )
+    published_support = _exact_tensor(
+        ready.foot_supported_lr,
+        label="R07 observation foot_supported_lr",
+        shape=(n, 2),
+        device=device,
+        dtype=torch.bool,
+    )
+    same_generation = ready_generation == motion_generation
+    can_advance_generation = (
+        ready_generation >= 0
+    ) & (ready_generation < torch.iinfo(torch.int64).max)
+    safe_generation_base = torch.where(
+        can_advance_generation,
+        ready_generation,
+        torch.zeros_like(ready_generation),
+    )
+    next_generation = safe_generation_base + can_advance_generation.to(
+        dtype=torch.int64
+    )
+    reset_boundary = (
+        can_advance_generation & (motion_generation == next_generation)
+    )
+    cold_genesis = (
+        ~postphysics_valid
+        & source_step.eq(-1)
+        & ready_generation.eq(-1)
+        & ready_control_tick.eq(-1)
+        & ready_streak.eq(0)
+        & torch.all(~published_support, dim=1)
+    )
+    same_epoch_publication = (
+        postphysics_valid
+        & source_step.ge(0)
+        & same_generation
+        & ready_control_tick.eq(motion_control_tick)
+    )
+    _assert_async_all(
+        (motion_generation >= 0)
+        & (cold_genesis | reset_boundary | same_epoch_publication),
+        label="R07 observation chronology differs",
+    )
+    if type(ready.required_dwell) is not int or ready.required_dwell < 1:
+        raise LeanObservationError("R07 required dwell differs")
+    # A selected true reset happens after this step's real post-physics
+    # publication and before its returned observation.  The new Motion
+    # generation is therefore the sole row-wise reset-boundary fact: expose
+    # zero dwell for exactly those +1 rows while preserving every peer byte.
+    # No new R07 publication or post-physics capability is fabricated.
+    observation_streak = torch.where(
+        same_epoch_publication, ready_streak, torch.zeros_like(ready_streak)
+    )
+    support = torch.where(
+        same_epoch_publication[:, None],
+        published_support,
+        torch.zeros_like(published_support),
+    )
+    dwell = (
+        observation_streak.clamp(0, ready.required_dwell).to(dtype)[:, None]
+        / float(ready.required_dwell)
+    )
+    remaining = (
+        (env.max_episode_length - env.episode_length_buf)
+        .clamp_min(0)
+        .to(dtype)[:, None]
+        * float(env.step_dt)
+    )
+    critic_rows = {
+        "episode_time_remaining_s": remaining,
+        "live_ball_center_rel_root_heading": ball9[:, :3],
+        "live_ball_lin_vel_heading": ball9[:, 3:6],
+        "live_ball_ang_vel_heading": ball9[:, 6:9],
+        "selected_rubber_contact_latched": contact.to(dtype),
+        "net_crossed_latched": crossed.to(dtype),
+        "net_clear_latched": clear.to(dtype),
+        "foot_supported_lr": support.to(dtype),
+        "cadence_ready_dwell_fraction": dwell,
+    }
+
+    epoch_uid = _gather_selected(record.action_uid, slot)
+    _assert_async_all(
+        ~task_valid | (motion_view.action_uid == epoch_uid),
+        label="Motion/Epoch current action UID differs",
+    )
     return DirectActionEpochObservationFacts(
-        projected_gravity_b=projected_gravity,
-        base_ang_vel_b=base_ang_vel,
-        joint_pos_rel=joint_pos - default_joint_pos,
-        joint_vel_rel=joint_vel,
-        last_action=last_action,
-        teacher_joint_pos_rel=teacher_joint_pos - default_joint_pos,
-        teacher_joint_vel_rel=teacher_joint_vel,
-        motion_phase_code=motion_phase.detach().clone(),
-        current_task_slot=slot,
-        current_action_uid=torch.gather(record.action_uid, 1, row)
-        .squeeze(1)
-        .detach()
-        .clone(),
-        current_rng_counter=torch.gather(record.rng_counter, 1, row)
-        .squeeze(1)
-        .detach()
-        .clone(),
+        actor_rows=actor_rows,
+        critic_rows=critic_rows,
+        motion_phase_code=motion_view.phase,
+        task_valid=task_valid,
         transaction_epoch=record.epoch,
         transaction_version=record.version,
-        common_step=common_step,
-        motion_owner=motion,
-        racket_owner=by_name.get("racket"),
-        physical_owner=by_name.get("physical_ball"),
-        r03_owner=by_name.get("r03_strike_fact"),
-        r06_owner=by_name.get("r06_landing_outcome"),
-        r07_owner=by_name.get("r07_recovery"),
+        common_step=step,
     )
 
 
@@ -336,19 +562,20 @@ class LeanActionEpochObservationSource:
         self._env = env
         self._runtime_owner = runtime_owner
         self._epoch_owner = epoch_owner
-        self._components = {
-            "motion_owner": by_name["motion"],
-            "racket_owner": by_name["racket"],
-            "physical_owner": by_name["physical_ball"],
-            "r03_owner": by_name["r03_strike_fact"],
-            "r06_owner": r06,
-            "r07_owner": by_name["r07_recovery"],
-        }
         self._num_envs = epoch_owner.num_envs
         self._device = epoch_owner.device
         self._dtype = dtype
-        self._step_dt = step_dt
-        self._widths = {"policy": ACTOR_WIDTH_V1, "critic": CRITIC_WIDTH_V1}
+        self._actor_scale_v2 = torch.tensor(
+            portable_observation.ACTOR_SCALE_FLAT_V2,
+            dtype=dtype,
+            device=self._device,
+        ).reshape(1, ACTOR_WIDTH_V2)
+        self._critic_extension_scale_v2 = torch.tensor(
+            portable_observation.CRITIC_EXTENSION_SCALE_FLAT_V2,
+            dtype=dtype,
+            device=self._device,
+        ).reshape(1, CRITIC_WIDTH_V2 - ACTOR_WIDTH_V2)
+        self._widths = {"policy": ACTOR_WIDTH_V2, "critic": CRITIC_WIDTH_V2}
         self._shape_probed: set[str] = set()
         self._cached_key: tuple[int, int, int] | None = None
         self._cached_actor: torch.Tensor | None = None
@@ -397,20 +624,24 @@ class LeanActionEpochObservationSource:
             or view.common_step != common_step
         ):
             raise LeanObservationError("direct runtime observation chronology is stale")
-        for name, expected in self._components.items():
-            if getattr(view, name) is not expected:
-                raise LeanObservationError(
-                    "direct runtime observation provider identity differs: " + name
-                )
-        for name, width in _DIRECT_FIELD_LAYOUT:
-            tensor = _exact_tensor(
-                getattr(view, name),
+        if type(view.actor_rows) is not dict or type(view.critic_rows) is not dict:
+            raise LeanObservationError("direct semantic row mappings differ")
+        rows = {**view.actor_rows, **view.critic_rows}
+        for name, width in _DIRECT_FLOAT_LAYOUT:
+            _exact_tensor(
+                rows.get(name),
                 label="direct " + name,
                 shape=(self._num_envs, width),
                 device=self._device,
                 dtype=self._dtype,
             )
-            _assert_async_all(torch.isfinite(tensor), label=name + " is nonfinite")
+        _exact_tensor(
+            view.task_valid,
+            label="direct task_valid",
+            shape=(self._num_envs,),
+            device=self._device,
+            dtype=torch.bool,
+        )
         phase = _exact_tensor(
             view.motion_phase_code,
             label="direct motion_phase_code",
@@ -421,38 +652,6 @@ class LeanActionEpochObservationSource:
         _assert_async_all(
             (phase >= 0) & (phase < 5), label="Motion phase is outside 0..4"
         )
-        slot = _exact_tensor(
-            view.current_task_slot,
-            label="direct current_task_slot",
-            shape=(self._num_envs,),
-            device=self._device,
-            dtype=torch.int64,
-        )
-        _assert_async_all(
-            (slot >= 0) & (slot < self._epoch_owner.shot_slot_capacity),
-            label="direct current_task_slot is outside epoch capacity",
-        )
-        epoch_slot = record.current_task_slot
-        row = epoch_slot[:, None]
-        epoch_uid = torch.gather(record.action_uid, 1, row).squeeze(1)
-        epoch_rng = torch.gather(record.rng_counter, 1, row).squeeze(1)
-        uid = _exact_tensor(
-            view.current_action_uid,
-            label="direct current_action_uid",
-            shape=(self._num_envs,),
-            device=self._device,
-            dtype=torch.int64,
-        )
-        rng = _exact_tensor(
-            view.current_rng_counter,
-            label="direct current_rng_counter",
-            shape=(self._num_envs,),
-            device=self._device,
-            dtype=torch.int64,
-        )
-        _assert_async_all(slot == epoch_slot, label="current task slot differs")
-        _assert_async_all(uid == epoch_uid, label="current action UID differs")
-        _assert_async_all(rng == epoch_rng, label="current RNG counter differs")
         return view
 
     def _pack(
@@ -461,106 +660,65 @@ class LeanActionEpochObservationSource:
         record: epoch_v1.ActionEpochRecord,
         common_step: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        del common_step
         slot = record.current_task_slot
-        task = _gather_selected(record.task.task_f32, slot)
-        task_valid = _gather_selected(record.task.task_valid, slot)
         phase = _gather_selected(record.phase, slot)
-        selected = _gather_selected(record.selected_mask, slot)
-        launch_succeeded = _gather_selected(record.launch_succeeded, slot)
-        clock_rows = torch.stack(
-            tuple(
-                _gather_selected(getattr(record.clocks, name), slot)
-                for name in (
-                    "reveal_tick",
-                    "contact_tick",
-                    "launch_tick",
-                    "deadline_tick",
-                    "next_reveal_tick",
-                )
-            ),
-            dim=1,
+        allowed_phase = (
+            phase.eq(epoch_v1.PHASE_IDLE)
+            | phase.eq(epoch_v1.PHASE_REVEAL_COMMITTED)
+            | phase.eq(epoch_v1.PHASE_LAUNCH_SETTLED)
+            | phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
+            | phase.eq(epoch_v1.PHASE_RETIRED)
         )
-        clock_remaining = torch.where(
-            task_valid[:, None],
-            clock_rows - common_step,
-            torch.zeros_like(clock_rows),
-        ).to(dtype=self._dtype) * self._step_dt
+        _assert_async_all(allowed_phase, label="ActionEpoch public phase differs")
+        learning_phase = torch.zeros_like(phase)
+        for index, code in enumerate(
+            (
+                epoch_v1.PHASE_IDLE,
+                epoch_v1.PHASE_REVEAL_COMMITTED,
+                epoch_v1.PHASE_LAUNCH_SETTLED,
+                epoch_v1.PHASE_OUTCOME_SETTLED,
+                epoch_v1.PHASE_RETIRED,
+            )
+        ):
+            learning_phase = torch.where(
+                phase.eq(code), torch.full_like(phase, index), learning_phase
+            )
         phase_one_hot = torch.nn.functional.one_hot(
-            torch.clamp(phase, min=0, max=9), num_classes=10
+            learning_phase, num_classes=5
         ).to(dtype=self._dtype)
         motion_phase = torch.nn.functional.one_hot(
             view.motion_phase_code, num_classes=5
         ).to(dtype=self._dtype)
-        actor_rows = {
-            name: getattr(view, name) for name, _ in _DIRECT_FIELD_LAYOUT
-        }
+        actor_rows = dict(view.actor_rows)
         actor_rows.update(
             {
                 "motion_phase_one_hot": motion_phase,
-                "epoch_task_f32": task,
-                "epoch_clock_remaining_s": clock_remaining,
-                "epoch_phase_one_hot": phase_one_hot,
-                "epoch_task_valid": task_valid[:, None].to(dtype=self._dtype),
-                "epoch_selected": selected[:, None].to(dtype=self._dtype),
-                "epoch_launch_succeeded": launch_succeeded[:, None].to(
-                    dtype=self._dtype
-                ),
+                "epoch_learning_phase_one_hot": phase_one_hot,
+                # Motion owns whether the retained Epoch task is currently
+                # visible to the actor.  Epoch deliberately keeps its payload
+                # valid through RETIRED until the next ACCEPT, so its payload
+                # bit is not an actor-visibility mask.
+                "task_valid": view.task_valid[:, None].to(dtype=self._dtype),
             }
         )
         actor = portable_observation.concatenate_layout_rows(
-            ACTOR_LAYOUT_V1, actor_rows
+            ACTOR_LAYOUT_V2, actor_rows
         )
-
-        owner_indices = torch.tensor(
-            tuple(epoch_v1.OWNER_ORDER.index(name) for name in _FACT_OWNER_KINDS),
-            dtype=torch.int64,
-            device=self._device,
-        )
-        selected_valid_bits = _gather_selected(record.fact_valid_bits, slot)
-        selected_source_step = _gather_selected(record.fact_source_step, slot)
-        selected_fact_f32 = _gather_selected(record.fact_f32, slot)
-        selected_fault_bits = _gather_selected(record.owner_fault_bits, slot)
-        valid_bits = selected_valid_bits.index_select(1, owner_indices)
-        source_step = selected_source_step.index_select(1, owner_indices)
-        facts = selected_fact_f32.index_select(1, owner_indices)
-        faults = selected_fault_bits.index_select(1, owner_indices)
-        present = valid_bits.ne(0)
-        fact_age = torch.where(
-            present,
-            torch.clamp(common_step - source_step, min=0).to(self._dtype)
-            * self._step_dt,
-            torch.zeros_like(source_step, dtype=self._dtype),
-        )
-        facts = torch.where(
-            present[:, :, None], facts, torch.zeros_like(facts)
-        ).reshape(self._num_envs, -1)
+        actor.mul_(self._actor_scale_v2)
         critic_extension = portable_observation.concatenate_layout_rows(
-            CRITIC_EXTENSION_LAYOUT_V1,
-            {
-                "physical_r03_r06_r07_fact_present": present.to(self._dtype),
-                "physical_r03_r06_r07_fact_age_s": fact_age,
-                "physical_r03_r06_r07_fact_f32": facts,
-                "physical_r03_r06_r07_fault_present": faults.ne(0).to(
-                    self._dtype
-                ),
-                "reward_cycle_open": record.reward_cycle_open[:, None].to(
-                    self._dtype
-                ),
-                "reward_cycle_fault_present": record.reward_cycle_fault.ne(0)[
-                    :, None
-                ].to(self._dtype),
-                "reward_due": record.reward_due.to(self._dtype),
-                "reward_paid": record.reward_paid.to(self._dtype),
-            },
+            CRITIC_EXTENSION_LAYOUT_V2,
+            view.critic_rows,
         )
+        critic_extension.mul_(self._critic_extension_scale_v2)
         critic = torch.cat((actor, critic_extension), dim=1)
-        if actor.shape != (self._num_envs, ACTOR_WIDTH_V1):
+        if actor.shape != (self._num_envs, ACTOR_WIDTH_V2):
             raise LeanObservationError("named actor layout width differs")
-        if critic.shape != (self._num_envs, CRITIC_WIDTH_V1):
+        if critic.shape != (self._num_envs, CRITIC_WIDTH_V2):
             raise LeanObservationError("named critic layout width differs")
         _assert_async_all(torch.isfinite(actor), label="packed actor is nonfinite")
         _assert_async_all(torch.isfinite(critic), label="packed critic is nonfinite")
-        return actor.detach().clone(), critic.detach().clone()
+        return actor, critic
 
     def _semantic(self) -> tuple[torch.Tensor, torch.Tensor]:
         if self._shape_probed != set(MANAGER_GROUP_ORDER):
@@ -597,8 +755,7 @@ class LeanActionEpochObservationSource:
         if group not in self._shape_probed:
             return self._shape_probe(group)
         actor, critic = self._semantic()
-        value = actor if group == "policy" else critic
-        return value.detach().clone()
+        return actor if group == "policy" else critic
 
 
 @dataclass(frozen=True)
@@ -734,9 +891,9 @@ def installed_observation_facts(env: object) -> dict[str, object]:
     if (
         getattr(manager, "active_terms", None) != expected_active
         or getattr(manager, "group_obs_term_dim", None)
-        != {"policy": [(ACTOR_WIDTH_V1,)], "critic": [(CRITIC_WIDTH_V1,)]}
+        != {"policy": [(ACTOR_WIDTH_V2,)], "critic": [(CRITIC_WIDTH_V2,)]}
         or getattr(manager, "group_obs_dim", None)
-        != {"policy": (ACTOR_WIDTH_V1,), "critic": (CRITIC_WIDTH_V1,)}
+        != {"policy": (ACTOR_WIDTH_V2,), "critic": (CRITIC_WIDTH_V2,)}
         or getattr(manager, "group_obs_concatenate", None)
         != {"policy": True, "critic": True}
         or type(cfgs) is not dict
@@ -780,44 +937,24 @@ def installed_observation_facts(env: object) -> dict[str, object]:
         or source._num_envs != epoch_owner.num_envs
         or source._device != epoch_owner.device
         or source.group_widths
-        != {"policy": ACTOR_WIDTH_V1, "critic": CRITIC_WIDTH_V1}
+        != {"policy": ACTOR_WIDTH_V2, "critic": CRITIC_WIDTH_V2}
         or type(components) is not tuple
         or any(type(row) is not tuple or len(row) != 2 for row in components)
     ):
         raise LeanObservationError(
             "installed ActionEpoch observation resolver/source differs"
         )
-    by_name = dict(components)
-    expected_sources = {
-        "motion_owner": "motion",
-        "racket_owner": "racket",
-        "physical_owner": "physical_ball",
-        "r03_owner": "r03_strike_fact",
-        "r06_owner": "r06_landing_outcome",
-        "r07_owner": "r07_recovery",
-    }
-    if (
-        type(source._components) is not dict
-        or tuple(source._components) != tuple(expected_sources)
-        or any(
-            source._components[source_name] is not by_name.get(component_name)
-            for source_name, component_name in expected_sources.items()
-        )
-    ):
-        raise LeanObservationError(
-            "installed ActionEpoch observation component identities differ"
-        )
     return {
-        "actor_obs_contract": ACTOR_CONTRACT_V1,
+        "actor_obs_contract": ACTOR_CONTRACT_V2,
         "actor_obs_mode": "action_ball_full_mdp",
-        "actor_obs_total_dim": ACTOR_WIDTH_V1,
+        "actor_obs_total_dim": ACTOR_WIDTH_V2,
         "actor_obs_term_names": ["action_epoch"],
-        "actor_obs_term_dims": [ACTOR_WIDTH_V1],
-        "critic_obs_contract": CRITIC_CONTRACT_V1,
-        "critic_obs_total_dim": CRITIC_WIDTH_V1,
+        "actor_obs_term_dims": [ACTOR_WIDTH_V2],
+        "critic_obs_contract": CRITIC_CONTRACT_V2,
+        "critic_obs_total_dim": CRITIC_WIDTH_V2,
         "critic_obs_term_names": ["action_epoch"],
-        "critic_obs_term_dims": [CRITIC_WIDTH_V1],
-        "fresh_full_mdp_observation_kind": OBSERVATION_KIND_V1,
+        "critic_obs_term_dims": [CRITIC_WIDTH_V2],
+        "fresh_full_mdp_observation_kind": OBSERVATION_KIND_V2,
         "fresh_full_mdp_diagnostic_unauthorized": True,
         "fresh_full_mdp_launch_authorized": False,
         "fresh_full_mdp_no_capacity_receipt_or_sha_authority": True,
@@ -831,13 +968,13 @@ __all__ = [
     "DIRECT_VIEW_METHOD",
     "ENV_TERM_METHOD",
     "MANAGER_GROUP_ORDER",
-    "ACTOR_CONTRACT_V1",
-    "CRITIC_CONTRACT_V1",
-    "OBSERVATION_KIND_V1",
-    "ACTOR_LAYOUT_V1",
-    "CRITIC_EXTENSION_LAYOUT_V1",
-    "ACTOR_WIDTH_V1",
-    "CRITIC_WIDTH_V1",
+    "ACTOR_CONTRACT_V2",
+    "CRITIC_CONTRACT_V2",
+    "OBSERVATION_KIND_V2",
+    "ACTOR_LAYOUT_V2",
+    "CRITIC_EXTENSION_LAYOUT_V2",
+    "ACTOR_WIDTH_V2",
+    "CRITIC_WIDTH_V2",
     "DirectActionEpochObservationFacts",
     "build_direct_action_epoch_observation_facts",
     "LeanObservationError",

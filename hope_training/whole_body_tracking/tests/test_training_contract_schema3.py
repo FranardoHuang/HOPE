@@ -383,35 +383,35 @@ def test_runtime_contract_carries_exact_full_mdp_critic_layout():
         "critic": ["action_epoch"],
     }
     env.observation_manager.group_obs_term_dim = {
-        "policy": [(229,)],
-        "critic": [(399,)],
+        "policy": [(203,)],
+        "critic": [(219,)],
     }
     env.observation_manager.group_obs_dim = {
-        "policy": (229,),
-        "critic": (399,),
+        "policy": (203,),
+        "critic": (219,),
     }
     env.observation_manager.cfg["policy"] = SimpleNamespace(
         history_length=None,
         to_dict=lambda: {"action_epoch": {"history_length": 0}},
     )
     actor = SimpleNamespace(
-        name="action_ball_full_mdp_action_epoch_v1",
+        name="action_ball_full_mdp_semantic_actor_v2",
         obs_mode="action_ball_full_mdp",
-        total_dim=229,
-        terms=(_Term("action_epoch", 229),),
+        total_dim=203,
+        terms=(_Term("action_epoch", 203),),
     )
 
     facts = TC.runtime_execution_facts(env, actor)
 
     assert facts["critic_obs_contract"] == (
-        "action_ball_full_mdp_action_epoch_critic_v1"
+        "action_ball_full_mdp_semantic_critic_v2"
     )
-    assert facts["critic_obs_total_dim"] == 399
+    assert facts["critic_obs_total_dim"] == 219
     assert facts["critic_obs_term_names"] == ["action_epoch"]
-    assert facts["critic_obs_term_dims"] == [399]
+    assert facts["critic_obs_term_dims"] == [219]
 
-    env.observation_manager.group_obs_term_dim["critic"] = [(398,)]
-    env.observation_manager.group_obs_dim["critic"] = (398,)
+    env.observation_manager.group_obs_term_dim["critic"] = [(218,)]
+    env.observation_manager.group_obs_dim["critic"] = (218,)
     with pytest.raises(RuntimeError, match="ActionEpoch critic observation"):
         TC.runtime_execution_facts(env, actor)
 
@@ -1295,16 +1295,16 @@ def _full_mdp_schema3_contract():
             TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY: True,
             TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY: 0.05,
             "target_mode": "action_ball_full_mdp",
-            "actor_obs_contract": "action_ball_full_mdp_action_epoch_v1",
+            "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
             "actor_obs_mode": "action_ball_full_mdp",
-            "actor_obs_total_dim": 229,
+            "actor_obs_total_dim": 203,
             "actor_obs_term_names": ["action_epoch"],
-            "actor_obs_term_dims": [229],
+            "actor_obs_term_dims": [203],
             "observation_history_lengths": [1],
-            "critic_obs_contract": "action_ball_full_mdp_action_epoch_critic_v1",
-            "critic_obs_total_dim": 399,
+            "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
+            "critic_obs_total_dim": 219,
             "critic_obs_term_names": ["action_epoch"],
-            "critic_obs_term_dims": [399],
+            "critic_obs_term_dims": [219],
             "fresh_full_mdp_installed_reward_graph": {
                 "schema_version": 1,
                 "kind": "action_ball_epoch_lean_reward_graph_v1",
@@ -1318,16 +1318,24 @@ def _full_mdp_schema3_contract():
                 "no_receipt_or_sha_authority": True,
             },
             "action_ball_full_mdp_runtime": {
-                "schema_version": 1,
-                "kind": "action_ball_full_mdp_train_wiring_v1",
+                "schema_version": 2,
+                "kind": "action_ball_full_mdp_train_wiring_v2",
+                "gym_entry_point": "whole_body_tracking.envs:ManagerBasedRLEnv",
                 "target_mode": "action_ball_full_mdp",
                 "actor_obs_mode": "action_ball_full_mdp",
+                "runtime_owner_type": (
+                    "whole_body_tracking.tasks.tracking.mdp."
+                    "action_ball_full_mdp_lean_runtime."
+                    "ActionBallFullMdpLeanRuntimeOwner"
+                ),
                 "run_mode": "single_action_lean",
                 "diagnostic_unauthorized": True,
                 "launch_authorized": False,
                 "r10_checkpoint_adapter_bound": False,
                 "cold_restore": False,
-                "no_save": True,
+                "resumable_checkpoint_write": False,
+                "diagnostic_snapshot_write": True,
+                "diagnostic_snapshot_interval_updates": 37,
                 "diagnostic_operational": True,
                 "formal_evidence_prohibited": True,
                 "curriculum_promotion_prohibited": True,
@@ -1927,7 +1935,7 @@ def test_full_mdp_schema3_has_one_exact_disjoint_identity():
         ("target_mode", "action_ball"),
         ("actor_obs_mode", "deploy_parity"),
         ("actor_obs_contract", "action_ball_n2"),
-        ("critic_obs_total_dim", 398),
+        ("critic_obs_total_dim", 218),
     ):
         wrong = _full_mdp_schema3_contract()
         wrong[key] = value
@@ -1939,6 +1947,49 @@ def test_full_mdp_schema3_has_one_exact_disjoint_identity():
     with pytest.raises(ValueError, match="cannot carry legacy"):
         TC.validate_schema3_contract_structure(legacy_mixed)
 
+    complete_v1 = _full_mdp_schema3_contract()
+    complete_v1.update(
+        {
+            "actor_obs_contract": "action_ball_full_mdp_action_epoch_v1",
+            "actor_obs_total_dim": 229,
+            "actor_obs_term_dims": [229],
+            "critic_obs_contract": (
+                "action_ball_full_mdp_action_epoch_critic_v1"
+            ),
+            "critic_obs_total_dim": 399,
+            "critic_obs_term_dims": [399],
+        }
+    )
+    complete_v1["action_ball_full_mdp_runtime"] = {
+        **complete_v1["action_ball_full_mdp_runtime"],
+        "schema_version": 1,
+        "kind": "action_ball_full_mdp_train_wiring_v1",
+        "no_save": True,
+    }
+    complete_v1["action_ball_full_mdp_runtime"].pop(
+        "resumable_checkpoint_write"
+    )
+    complete_v1["action_ball_full_mdp_runtime"].pop(
+        "diagnostic_snapshot_write"
+    )
+    complete_v1["action_ball_full_mdp_runtime"].pop(
+        "diagnostic_snapshot_interval_updates"
+    )
+    with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
+        TC.validate_schema3_contract_structure(complete_v1)
+
+    stale_no_save = _full_mdp_schema3_contract()
+    stale_no_save["action_ball_full_mdp_runtime"]["no_save"] = True
+    with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
+        TC.validate_schema3_contract_structure(stale_no_save)
+
+    contradictory_authority = _full_mdp_schema3_contract()
+    contradictory_authority["action_ball_full_mdp_runtime"][
+        "resume_authority"
+    ] = True
+    with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
+        TC.validate_schema3_contract_structure(contradictory_authority)
+
     partial = _schema3_contract()
     partial["action_ball_full_mdp_runtime"] = None
     with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
@@ -1946,7 +1997,7 @@ def test_full_mdp_schema3_has_one_exact_disjoint_identity():
 
     for key, value in (
         ("fresh_full_mdp_installed_reward_graph", {}),
-        ("critic_obs_contract", "action_ball_full_mdp_action_epoch_critic_v1"),
+        ("critic_obs_contract", "action_ball_full_mdp_semantic_critic_v2"),
     ):
         partial = _schema3_contract()
         partial[key] = value

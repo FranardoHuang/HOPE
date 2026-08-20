@@ -550,6 +550,25 @@ def test_rejects_finite_toy_snapshot_that_is_not_exact_model_abi(tmp_path):
         _consume(module, evidence, snapshots, 1)
 
 
+def test_fresh_model_abi_is_semantic_203_219_and_rejects_legacy_inputs(tmp_path):
+    module = _load()
+    shapes = dict(module.MODEL_SHAPES)
+    assert shapes["actor.0.weight"] == (512, 203)
+    assert shapes["critic.0.weight"] == (512, 219)
+
+    def mutate(index, payload):
+        if index == 0:
+            payload["model_state_dict"]["actor.0.weight"] = torch.zeros(
+                (512, 229), dtype=torch.float32
+            )
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, snapshot_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="snapshot model ABI"):
+        _consume(module, evidence, snapshots, 1)
+
+
 def test_rejects_optimizer_state_shape_drift(tmp_path):
     module = _load()
 

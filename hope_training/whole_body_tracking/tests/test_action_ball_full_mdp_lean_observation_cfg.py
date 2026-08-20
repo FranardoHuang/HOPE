@@ -55,6 +55,7 @@ class _Env:
 
 class _R06:
     num_envs = 2
+    flight_slot_capacity = 2
     device = torch.device("cpu")
     dtype = torch.float32
 
@@ -89,49 +90,659 @@ def _runtime(env, epoch):
 
 
 def _direct_view(env, record, parts):
-    slot = record.current_task_slot
-    row = slot[:, None]
     value = 1.0
-    tensors = {}
-    for name, width in O._DIRECT_FIELD_LAYOUT:
-        tensors[name] = torch.full((2, width), value)
+    actor_rows = {}
+    for name, width in O.ACTOR_LAYOUT_V2:
+        if name in (
+            "motion_phase_one_hot",
+            "epoch_learning_phase_one_hot",
+            "task_valid",
+        ):
+            continue
+        actor_rows[name] = torch.full((2, width), value)
         value += 1.0
+    critic_rows = {}
+    for name, width in O.CRITIC_EXTENSION_LAYOUT_V2:
+        critic_rows[name] = torch.full((2, width), value)
+        value += 1.0
+    task_valid = O._gather_selected(
+        record.task.task_valid, record.current_task_slot
+    )
     return O.DirectActionEpochObservationFacts(
-        **tensors,
+        actor_rows=actor_rows,
+        critic_rows=critic_rows,
         motion_phase_code=torch.tensor([1, 4], dtype=torch.int64),
-        current_task_slot=slot.clone(),
-        current_action_uid=torch.gather(record.action_uid, 1, row).squeeze(1),
-        current_rng_counter=torch.gather(record.rng_counter, 1, row).squeeze(1),
+        task_valid=task_valid,
         transaction_epoch=record.epoch,
         transaction_version=record.version,
         common_step=env.common_step_counter,
-        motion_owner=parts["motion"],
-        racket_owner=parts["racket"],
-        physical_owner=parts["physical_ball"],
-        r03_owner=parts["r03_strike_fact"],
-        r06_owner=parts["r06_landing_outcome"],
-        r07_owner=parts["r07_recovery"],
     )
 
 
-def test_named_layout_is_compact_and_has_no_legacy_capacity_padding():
-    assert O.ACTOR_WIDTH_V1 == 229
-    assert O.CRITIC_WIDTH_V1 == 399
-    assert O.ACTOR_LAYOUT_V1 is P.ACTOR_LAYOUT_V1
-    assert O.CRITIC_EXTENSION_LAYOUT_V1 is P.CRITIC_EXTENSION_LAYOUT_V1
-    assert E.TASK_F32_WIDTH == P.TASK_F32_WIDTH
-    assert E.OWNER_FACT_F32_WIDTH == P.OWNER_FACT_F32_WIDTH
-    assert E.REWARD_CONSUMER_COUNT == P.REWARD_CONSUMER_COUNT
-    assert [name for name, _ in O.ACTOR_LAYOUT_V1][-7:] == [
-        "motion_phase_one_hot",
-        "epoch_task_f32",
-        "epoch_clock_remaining_s",
-        "epoch_phase_one_hot",
-        "epoch_task_valid",
-        "epoch_selected",
-        "epoch_launch_succeeded",
+def _hard_coded_actor_scale_v2():
+    groups = (
+        (1.0, 3),
+        (0.25, 3),
+        (1.0, 3),
+        (1.0, 2),
+        (0.5, 3),
+        (1.0, 31),
+        (0.05, 31),
+        (1.0, 31),
+        (1.0, 31),
+        (0.05, 31),
+        (10.0 / 3.0, 3),
+        (1.0, 6),
+        (1.0, 5),
+        (5.0, 3),
+        (1.0, 3),
+        (2.0, 3),
+        (5.0, 2),
+        (1.0 / 2.42, 1),
+        (1.0, 1),
+        (1.0 / 5.86, 1),
+        (1.0, 5),
+        (1.0, 1),
+    )
+    return tuple(scale for scale, width in groups for _ in range(width))
+
+
+def _hard_coded_critic_extension_scale_v2():
+    groups = (
+        (1.0 / 30.0, 1),
+        (1.0, 3),
+        (0.1, 3),
+        (1.0 / 60.0, 3),
+        (1.0, 1),
+        (1.0, 1),
+        (1.0, 1),
+        (1.0, 2),
+        (1.0, 1),
+    )
+    return tuple(scale for scale, width in groups for _ in range(width))
+
+
+def test_named_layout_is_semantic_203_219_without_raw_packets_or_ledgers():
+    assert P.COMMON_ACTOR_WIDTH_V2 == 183
+    assert O.ACTOR_WIDTH_V2 == 203
+    assert O.CRITIC_WIDTH_V2 == 219
+    assert O.ACTOR_LAYOUT_V2 is P.ACTOR_LAYOUT_V2
+    assert O.CRITIC_EXTENSION_LAYOUT_V2 is P.CRITIC_EXTENSION_LAYOUT_V2
+    assert [name for name, _ in O.ACTOR_LAYOUT_V2][-9:] == [
+        "racket_target_pos_error_heading",
+        "racket_target_vel_error_heading",
+        "racket_target_normal_error_heading",
+        "base_goal_error_heading_xy",
+        "time_to_contact_s",
+        "time_to_teacher_start_s",
+        "time_to_next_opportunity_s",
+        "epoch_learning_phase_one_hot",
+        "task_valid",
     ]
-    assert dict(O.CRITIC_EXTENSION_LAYOUT_V1)["physical_r03_r06_r07_fact_f32"] == 128
+    assert sum(width for _, width in O.CRITIC_EXTENSION_LAYOUT_V2) == 16
+
+
+def test_v2_static_scale_keys_and_flat_values_match_independent_golden():
+    assert P.ACTOR_SCALE_BY_FIELD_V2 == (
+        ("projected_gravity_b", 1.0),
+        ("base_ang_vel_b", 0.25),
+        ("base_position_table", 1.0),
+        ("base_heading_table_xy", 1.0),
+        ("base_com_lin_vel_heading", 0.5),
+        ("joint_pos_rel", 1.0),
+        ("joint_vel", 0.05),
+        ("last_action", 1.0),
+        ("teacher_joint_pos_rel", 1.0),
+        ("teacher_joint_vel", 0.05),
+        ("motion_anchor_pos_b", 10.0 / 3.0),
+        ("motion_anchor_ori_b6", 1.0),
+        ("motion_phase_one_hot", 1.0),
+        ("racket_target_pos_error_heading", 5.0),
+        ("racket_target_vel_error_heading", 1.0),
+        ("racket_target_normal_error_heading", 2.0),
+        ("base_goal_error_heading_xy", 5.0),
+        ("time_to_contact_s", 1.0 / 2.42),
+        ("time_to_teacher_start_s", 1.0),
+        ("time_to_next_opportunity_s", 1.0 / 5.86),
+        ("epoch_learning_phase_one_hot", 1.0),
+        ("task_valid", 1.0),
+    )
+    assert P.CRITIC_EXTENSION_SCALE_BY_FIELD_V2 == (
+        ("episode_time_remaining_s", 1.0 / 30.0),
+        ("live_ball_center_rel_root_heading", 1.0),
+        ("live_ball_lin_vel_heading", 0.1),
+        ("live_ball_ang_vel_heading", 1.0 / 60.0),
+        ("selected_rubber_contact_latched", 1.0),
+        ("net_crossed_latched", 1.0),
+        ("net_clear_latched", 1.0),
+        ("foot_supported_lr", 1.0),
+        ("cadence_ready_dwell_fraction", 1.0),
+    )
+    assert P.ACTOR_SCALE_FLAT_V2 == _hard_coded_actor_scale_v2()
+    assert (
+        P.CRITIC_EXTENSION_SCALE_FLAT_V2
+        == _hard_coded_critic_extension_scale_v2()
+    )
+    assert len(P.ACTOR_SCALE_FLAT_V2) == 203
+    assert len(P.CRITIC_EXTENSION_SCALE_FLAT_V2) == 16
+
+
+def test_portable_keeps_complete_legacy_v1_surface_until_atomic_cutover():
+    direct = (
+        ("projected_gravity_b", 3),
+        ("base_ang_vel_b", 3),
+        ("joint_pos_rel", 31),
+        ("joint_vel_rel", 31),
+        ("last_action", 31),
+        ("teacher_joint_pos_rel", 31),
+        ("teacher_joint_vel_rel", 31),
+    )
+    actor = direct + (
+        ("motion_phase_one_hot", 5),
+        ("epoch_task_f32", 45),
+        ("epoch_clock_remaining_s", 5),
+        ("epoch_phase_one_hot", 10),
+        ("epoch_task_valid", 1),
+        ("epoch_selected", 1),
+        ("epoch_launch_succeeded", 1),
+    )
+    critic = (
+        ("physical_r03_r06_r07_fact_present", 4),
+        ("physical_r03_r06_r07_fact_age_s", 4),
+        ("physical_r03_r06_r07_fact_f32", 128),
+        ("physical_r03_r06_r07_fault_present", 4),
+        ("reward_cycle_open", 1),
+        ("reward_cycle_fault_present", 1),
+        ("reward_due", 14),
+        ("reward_paid", 14),
+    )
+    assert P.TASK_F32_WIDTH == 45
+    assert P.OWNER_FACT_F32_WIDTH == 32
+    assert P.REWARD_CONSUMER_COUNT == 14
+    assert P.EPOCH_IDLE_PHASE_INDEX == 0
+    assert P.ACTOR_CONTRACT_V1 == "action_ball_full_mdp_action_epoch_v1"
+    assert P.CRITIC_CONTRACT_V1 == "action_ball_full_mdp_action_epoch_critic_v1"
+    assert P.OBSERVATION_KIND_V1 == "action_ball_full_mdp_action_epoch_observation_v1"
+    assert P.DIRECT_FIELD_LAYOUT_V1 == direct
+    assert P.ACTOR_LAYOUT_V1 == actor
+    assert P.CRITIC_EXTENSION_LAYOUT_V1 == critic
+    assert P.ACTOR_WIDTH_V1 == 229
+    assert P.CRITIC_WIDTH_V1 == 399
+    raw_rows = {
+        name: torch.full((1, width), float(index + 2))
+        for index, (name, width) in enumerate(direct)
+    }
+    torch.testing.assert_close(
+        P.concatenate_layout_rows(P.DIRECT_FIELD_LAYOUT_V1, raw_rows),
+        torch.cat(
+            (
+                raw_rows["projected_gravity_b"],
+                raw_rows["base_ang_vel_b"],
+                raw_rows["joint_pos_rel"],
+                raw_rows["joint_vel_rel"],
+                raw_rows["last_action"],
+                raw_rows["teacher_joint_pos_rel"],
+                raw_rows["teacher_joint_vel_rel"],
+            ),
+            dim=1,
+        ),
+    )
+    assert {
+        "ACTOR_LAYOUT_V1",
+        "CRITIC_EXTENSION_LAYOUT_V1",
+        "ACTOR_WIDTH_V1",
+        "CRITIC_WIDTH_V1",
+        "concatenate_layout_rows",
+    }.issubset(P.__all__)
+
+
+def test_portable_frame_transforms_match_independent_ninety_degree_golden():
+    half = 2.0 ** -0.5
+    yaw_90 = torch.tensor([[half, 0.0, 0.0, half]])
+    torch.testing.assert_close(
+        P.heading_xy_from_quat_wxyz(yaw_90),
+        torch.tensor([[0.0, 1.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        P.rotate_world_to_heading(yaw_90, torch.tensor([[1.0, 0.0, 3.0]])),
+        torch.tensor([[0.0, -1.0, 3.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    position, orientation = P.relative_pose_6d(
+        torch.tensor([[1.0, 2.0, 0.0]]),
+        yaw_90,
+        torch.tensor([[2.0, 2.0, 0.0]]),
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+    )
+    torch.testing.assert_close(
+        position, torch.tensor([[0.0, -1.0, 0.0]]), atol=1.0e-6, rtol=0.0
+    )
+    torch.testing.assert_close(
+        orientation,
+        torch.tensor([[0.0, 1.0, -1.0, 0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+
+
+def test_tilted_heading_is_unit_and_near_vertical_heading_fails_explicitly():
+    yaw_45_pitch_60 = torch.tensor(
+        [[0.80010315, -0.19134172, 0.46193977, 0.33141357]]
+    )
+    expected_heading = torch.tensor([[0.70710678, 0.70710678]])
+    torch.testing.assert_close(
+        P.heading_xy_from_quat_wxyz(yaw_45_pitch_60),
+        expected_heading,
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        P.rotate_world_to_heading(
+            yaw_45_pitch_60, torch.tensor([[1.0, 0.0, 2.0]])
+        ),
+        torch.tensor([[0.70710678, -0.70710678, 2.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    near_vertical = torch.tensor([[0.70710678, 0.0, 0.70710678, 0.0]])
+    with pytest.raises(RuntimeError):
+        P.heading_xy_from_quat_wxyz(near_vertical)
+
+
+def test_new_root_translation_yaw_and_com_velocity_break_old_229_aliases():
+    env = _Env()
+    epoch = _prepared_epoch()
+    runtime, parts = _runtime(env, epoch)
+    source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
+    record = epoch.current()
+    baseline_view = _direct_view(env, record, parts)
+    baseline, _ = source._pack(baseline_view, record, common_step=10)
+
+    def mutate(name, value):
+        return O.DirectActionEpochObservationFacts(
+            **{
+                **baseline_view.__dict__,
+                "actor_rows": {**baseline_view.actor_rows, name: value},
+            }
+        )
+
+    translated, _ = source._pack(
+        mutate(
+            "base_position_table",
+            torch.tensor([[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]]),
+        ),
+        record,
+        common_step=10,
+    )
+    torch.testing.assert_close(
+        translated[:, 6:9],
+        torch.tensor([[1.0, 2.0, 3.0], [-1.0, -2.0, -3.0]]),
+    )
+    torch.testing.assert_close(translated[:, :6], baseline[:, :6])
+    torch.testing.assert_close(translated[:, 9:], baseline[:, 9:])
+
+    yawed, _ = source._pack(
+        mutate("base_heading_table_xy", torch.tensor([[0.0, 1.0], [1.0, 0.0]])),
+        record,
+        common_step=10,
+    )
+    torch.testing.assert_close(
+        yawed[:, 9:11], torch.tensor([[0.0, 1.0], [1.0, 0.0]])
+    )
+    torch.testing.assert_close(yawed[:, :9], baseline[:, :9])
+    torch.testing.assert_close(yawed[:, 11:], baseline[:, 11:])
+
+    moving, _ = source._pack(
+        mutate(
+            "base_com_lin_vel_heading",
+            torch.tensor([[4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]),
+        ),
+        record,
+        common_step=10,
+    )
+    torch.testing.assert_close(
+        moving[:, 11:14],
+        torch.tensor([[2.0, 2.5, 3.0], [3.5, 4.0, 4.5]]),
+    )
+    torch.testing.assert_close(moving[:, :11], baseline[:, :11])
+    torch.testing.assert_close(moving[:, 14:], baseline[:, 14:])
+
+
+def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
+    monkeypatch,
+):
+    env = _Env()
+    env.episode_length_buf = torch.tensor([10, 20], dtype=torch.int64)
+    env.max_episode_length = 100
+    env.scene = types.SimpleNamespace(env_origins=torch.zeros((2, 3)))
+    env.action_manager = types.SimpleNamespace(action=torch.zeros((2, 31)))
+    epoch = _prepared_epoch()
+    record = epoch.current()
+    record.phase[0, 0] = E.PHASE_LAUNCH_SETTLED
+    record.task.task_valid[0, 0] = True
+    # Epoch retains the completed payload until the next ACCEPT.  Motion has
+    # already hidden it during the inter-reveal recovery interval below.
+    record.phase[1, 0] = E.PHASE_RETIRED
+    record.task.task_valid[1, 0] = True
+    current_key_values = {
+        "reset_generation": 1,
+        "ball_generation": 7,
+        "action_uid": 101,
+        "action_slot": 0,
+        "shot_index": 1,
+        "task_identity": 11,
+        "outcome_identity": 12,
+        "ball_identity": 13,
+    }
+    for name, value in current_key_values.items():
+        getattr(record.identity.shot_key, name)[0, 0] = value
+    record.publication_ordinal[0, 0] = 17
+
+    class Motion:
+        pass
+
+    commands = types.ModuleType("commands")
+    commands.MotionCommand = Motion
+    table_tennis = types.ModuleType("whole_body_tracking.tasks.table_tennis")
+    table_tennis.geometry = types.SimpleNamespace(TABLE_LENGTH=2.74)
+    monkeypatch.setitem(sys.modules, "commands", commands)
+    monkeypatch.setitem(
+        sys.modules, "whole_body_tracking.tasks.table_tennis", table_tennis
+    )
+
+    data = types.SimpleNamespace(
+        projected_gravity_b=torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
+        root_ang_vel_b=torch.zeros((2, 3)),
+        root_pos_w=torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]]),
+        root_quat_w=torch.tensor(
+            [[2.0 ** -0.5, 0.0, 0.0, 2.0 ** -0.5], [1.0, 0.0, 0.0, 0.0]]
+        ),
+        root_lin_vel_w=torch.tensor([[1.0, 0.0, 0.0], [0.0, 2.0, 0.0]]),
+        joint_pos=torch.zeros((2, 31)),
+        default_joint_pos=torch.zeros((2, 31)),
+        joint_vel=torch.zeros((2, 31)),
+    )
+    motion = Motion()
+    motion.robot = types.SimpleNamespace(data=data)
+    motion.joint_pos = torch.zeros((2, 31))
+    motion.joint_vel = torch.zeros((2, 31))
+    motion.robot_anchor_pos_w = data.root_pos_w
+    motion.robot_anchor_quat_w = data.root_quat_w
+    motion.anchor_pos_w = data.root_pos_w
+    motion.anchor_quat_w = data.root_quat_w
+    motion_view = types.SimpleNamespace(
+        motion_owner=motion,
+        common_step=10,
+        phase=torch.tensor([0, 4], dtype=torch.int64),
+        task_valid=torch.tensor([True, False]),
+        time_to_contact_remaining_s=torch.tensor([0.2, 0.3]),
+        time_to_teacher_start_remaining_s=torch.tensor([0.1, 0.2]),
+        time_to_next_reveal_s=torch.tensor([0.4, 0.5]),
+        control_tick=torch.tensor([10, 10], dtype=torch.int64),
+        reset_generation=torch.tensor([1, 1], dtype=torch.int64),
+        action_uid=torch.tensor([101, -1], dtype=torch.int64),
+    )
+    token = object()
+    motion.action_ball_continuous_motion_observation_projection = lambda: token
+    motion.require_owned_action_ball_continuous_motion_observation = (
+        lambda value: motion_view if value is token else None
+    )
+
+    actor_target_pos_w = torch.tensor(
+        [[2.0, 0.0, 1.0], [3.0, 4.0, 5.0]]
+    )
+    actor_target_vel_w = torch.tensor(
+        [[0.0, 2.0, 0.0], [6.0, 7.0, 8.0]]
+    )
+    actor_target_normal_w = torch.tensor(
+        [[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]]
+    )
+    racket = types.SimpleNamespace(
+        cfg=types.SimpleNamespace(
+            vb_table_near_x=0.0,
+            vb_table_surface_z=0.76,
+            face_command=False,
+        ),
+        # The live controller target deliberately differs from the delayed
+        # actor-visible command.  V2 must consume the latter while keeping the
+        # measured racket pose/velocity/normal live.
+        racket_target_pos_w=torch.ones((2, 3)),
+        racket_pos_w=torch.zeros((2, 3)),
+        racket_target_vel_w=torch.ones((2, 3)),
+        racket_lin_vel_w=torch.zeros((2, 3)),
+        racket_normal_raw_w=torch.tensor([[0.0, 1.0, 0.0]]).repeat(2, 1),
+        # The signed normal deliberately points the other way.  FullMDP V2
+        # must stay aligned with the raw A/+Y question and R03 reward.
+        racket_normal_w=torch.tensor([[0.0, -1.0, 0.0]]).repeat(2, 1),
+        target_normal_cmd=torch.tensor([[1.0, 0.0, 0.0]]).repeat(2, 1),
+        base_target_pos_w=torch.ones((2, 2)),
+        actor_racket_target_pos_w=lambda: actor_target_pos_w,
+        actor_racket_target_vel_w=lambda: actor_target_vel_w,
+        actor_target_normal_cmd=lambda: actor_target_normal_w,
+    )
+    r06_token = object()
+    r06 = _R06()
+    flight = types.SimpleNamespace(
+        r06_owner=r06,
+        publication_identity=r06_token,
+        # The R06 semantic projection has already selected the current typed
+        # ActionEpoch row.  Slot 1 is only a Physical scene locator.
+        flight_slot=torch.tensor([1, -1], dtype=torch.int64),
+        contact_valid=torch.tensor([True, False]),
+        net_crossed=torch.tensor([True, False]),
+        net_clear=torch.tensor([True, False]),
+    )
+    r06.action_ball_full_mdp_observation_projection = lambda: r06_token
+
+    def current_flight(
+        value, *, current_shot_key, current_publication_ordinal
+    ):
+        assert value is r06_token
+        for name in current_key_values:
+            torch.testing.assert_close(
+                getattr(current_shot_key, name),
+                O._gather_selected(
+                    getattr(record.identity.shot_key, name),
+                    record.current_task_slot,
+                ),
+            )
+        torch.testing.assert_close(
+            current_publication_ordinal,
+            O._gather_selected(
+                record.publication_ordinal, record.current_task_slot
+            ),
+        )
+        return flight
+
+    r06.require_owned_action_epoch_current_flight_observation = current_flight
+    state = torch.zeros((2, 2, 13))
+    state[0, 1, :3] = torch.tensor([1.0, 0.0, 1.0])
+    state[0, 1, 7:10] = torch.tensor([1.0, 0.0, 0.0])
+    state[0, 1, 10:13] = torch.tensor([0.0, 1.0, 0.0])
+    physical = types.SimpleNamespace(
+        scene_port=types.SimpleNamespace(read_state_env=lambda: state)
+    )
+    ready = types.SimpleNamespace(
+        postphysics_valid=torch.ones(2, dtype=torch.bool),
+        source_step=torch.tensor([9, 9], dtype=torch.int64),
+        reset_generation=torch.tensor([1, 1], dtype=torch.int64),
+        control_tick=torch.tensor([10, 10], dtype=torch.int64),
+        ready_streak=torch.tensor([1, 3], dtype=torch.int64),
+        required_dwell=2,
+        foot_supported_lr=torch.tensor(
+            [[True, False], [True, True]], dtype=torch.bool
+        ),
+    )
+    r07 = types.SimpleNamespace(
+        plant_fact_adapter=types.SimpleNamespace(
+            read=lambda: (_ for _ in ()).throw(
+                AssertionError("Observation V2 reread the R07 plant adapter")
+            )
+        ),
+        action_epoch_observation_state=lambda: ready,
+    )
+    runtime = L.ActionBallFullMdpLeanRuntimeOwner(
+        env=env,
+        runtime_lease=object(),
+        epoch_owner=epoch,
+        reward_graph=R.LeanActionEpochRewardGraph(epoch_owner=epoch),
+        r05_runtime=object(),
+        motion=motion,
+        racket=racket,
+        physical_ball=physical,
+        r06_landing_outcome=r06,
+        r03_strike_fact=object(),
+        r07_recovery=r07,
+    )
+    view = O.build_direct_action_epoch_observation_facts(
+        runtime_owner=runtime, record=record
+    )
+    torch.testing.assert_close(
+        view.actor_rows["racket_target_pos_error_heading"],
+        torch.tensor([[0.0, -2.0, 1.0], [0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.actor_rows["racket_target_vel_error_heading"],
+        torch.tensor([[2.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.actor_rows["racket_target_normal_error_heading"],
+        torch.tensor([[-2.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.critic_rows["live_ball_center_rel_root_heading"],
+        torch.tensor([[0.0, -1.0, 0.0], [0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.critic_rows["live_ball_lin_vel_heading"],
+        torch.tensor([[0.0, -1.0, 0.0], [0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.critic_rows["live_ball_ang_vel_heading"],
+        torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    assert view.critic_rows["foot_supported_lr"].tolist() == [[1.0, 0.0], [1.0, 1.0]]
+    assert view.critic_rows["cadence_ready_dwell_fraction"].tolist() == [[0.5], [1.0]]
+    for name in (
+        "racket_target_pos_error_heading",
+        "racket_target_vel_error_heading",
+        "racket_target_normal_error_heading",
+        "base_goal_error_heading_xy",
+        "time_to_contact_s",
+        "time_to_teacher_start_s",
+    ):
+        assert view.actor_rows[name][1].eq(0).all()
+    assert view.actor_rows["time_to_contact_s"][0].item() == pytest.approx(0.2)
+    torch.testing.assert_close(
+        view.actor_rows["time_to_next_opportunity_s"],
+        torch.tensor([[0.4], [0.5]]),
+    )
+    source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
+    policy, critic = source._pack(view, record, common_step=10)
+    assert torch.isfinite(policy).all() and torch.isfinite(critic).all()
+    # Task-dependent fields are masked, while next-opportunity and RETIRED
+    # phase remain observable and the actor-visible validity bit is false.
+    assert policy[1, 183:196].eq(0).all()
+    assert policy[1, 196].item() == pytest.approx(0.5 / 5.86)
+    torch.testing.assert_close(
+        policy[1, 197:202], torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0])
+    )
+    assert policy[1, 202].item() == 0.0
+
+    # A true selected reset advances only row 0's Motion generation after the
+    # real post-physics publication above.  Its first returned observation is
+    # finite and reset-safe; the untouched peer remains byte-identical.
+    peer_policy = policy[1].clone()
+    peer_critic = critic[1].clone()
+    motion_view.reset_generation[0] = 2
+    motion_view.control_tick[0] = 0
+    env.episode_length_buf[0] = 0
+    ready.ready_streak[0] = 2
+    ready.foot_supported_lr[0].fill_(True)
+    reset_view = O.build_direct_action_epoch_observation_facts(
+        runtime_owner=runtime, record=record
+    )
+    reset_policy, reset_critic = source._pack(
+        reset_view, record, common_step=10
+    )
+    assert torch.isfinite(reset_policy).all()
+    assert torch.isfinite(reset_critic).all()
+    assert reset_critic[0, 216:218].eq(0).all()
+    assert reset_critic[0, 218].item() == 0.0
+    assert torch.equal(reset_policy[1], peer_policy)
+    assert torch.equal(reset_critic[1], peer_critic)
+
+    # The next real post-physics publication carries the new generation and
+    # restores row 0 without disturbing its peer.
+    ready.reset_generation[0] = 2
+    ready.control_tick[0] = 0
+    ready.source_step[0] = 10
+    ready.ready_streak[0] = 1
+    ready.foot_supported_lr[0] = torch.tensor([True, False])
+    resumed_view = O.build_direct_action_epoch_observation_facts(
+        runtime_owner=runtime, record=record
+    )
+    assert resumed_view.critic_rows["foot_supported_lr"][0].tolist() == [1.0, 0.0]
+    assert resumed_view.critic_rows["cadence_ready_dwell_fraction"][0].item() == 0.5
+
+    # Cold genesis has no post-physics capability.  Its explicit invalid/zero
+    # R07 state is the one allowed no-publication case and remains finite.
+    ready.postphysics_valid.zero_()
+    ready.source_step.fill_(-1)
+    ready.reset_generation.fill_(-1)
+    ready.control_tick.fill_(-1)
+    ready.ready_streak.zero_()
+    ready.foot_supported_lr.zero_()
+    motion_view.reset_generation.zero_()
+    motion_view.control_tick.zero_()
+    genesis_view = O.build_direct_action_epoch_observation_facts(
+        runtime_owner=runtime, record=record
+    )
+    genesis_policy, genesis_critic = source._pack(
+        genesis_view, record, common_step=10
+    )
+    assert torch.isfinite(genesis_policy).all()
+    assert torch.isfinite(genesis_critic).all()
+    assert genesis_critic[:, 216:219].eq(0).all()
+
+    # MAX may not wrap into a reset boundary and hide stale chronology.
+    ready.postphysics_valid.fill_(True)
+    ready.source_step.fill_(10)
+    ready.reset_generation[:] = torch.tensor(
+        [torch.iinfo(torch.int64).max, 1], dtype=torch.int64
+    )
+    ready.control_tick.fill_(0)
+    motion_view.reset_generation[:] = torch.tensor(
+        [torch.iinfo(torch.int64).min, 1], dtype=torch.int64
+    )
+    with pytest.raises(RuntimeError):
+        O.build_direct_action_epoch_observation_facts(
+            runtime_owner=runtime, record=record
+        )
+
+    ready.reset_generation.fill_(1)
+    motion_view.reset_generation.fill_(1)
+
+    r06.flight_slot_capacity = 1
+    with pytest.raises(O.LeanObservationError, match="scene ABI differs"):
+        O.build_direct_action_epoch_observation_facts(
+            runtime_owner=runtime, record=record
+        )
 
 
 def test_missing_exact_direct_runtime_method_holds_before_manager_import(monkeypatch):
@@ -175,6 +786,16 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
         env=env, runtime_owner=runtime
     )
     assert type(bundle) is O.DiagnosticN2ObservationManagerBundle
+    actor_scale_ptr = bundle.source._actor_scale_v2.data_ptr()
+    critic_scale_ptr = bundle.source._critic_extension_scale_v2.data_ptr()
+    torch.testing.assert_close(
+        bundle.source._actor_scale_v2,
+        torch.tensor(_hard_coded_actor_scale_v2())[None, :],
+    )
+    torch.testing.assert_close(
+        bundle.source._critic_extension_scale_v2,
+        torch.tensor(_hard_coded_critic_extension_scale_v2())[None, :],
+    )
     env._installed_lean_observation_source = bundle.source
     cfg = bundle.manager_cfg
     policy_term = cfg["policy"].action_epoch
@@ -184,44 +805,87 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     copied = copy.deepcopy(cfg)
     assert copied["policy"].action_epoch.params == {"group": "policy"}
     assert copied["critic"].action_epoch.params == {"group": "critic"}
-    assert policy_term.func(env, **policy_term.params).shape == (2, 229)
-    assert critic_term.func(env, **critic_term.params).shape == (2, 399)
+    assert policy_term.func(env, **policy_term.params).shape == (2, 203)
+    assert critic_term.func(env, **critic_term.params).shape == (2, 219)
     assert calls == []
 
     env._action_ball_full_mdp_manager_construction_state = "base_managers_complete"
     policy = policy_term.func(env, **policy_term.params)
     critic = critic_term.func(env, **critic_term.params)
+    assert bundle.source._actor_scale_v2.data_ptr() == actor_scale_ptr
+    assert bundle.source._critic_extension_scale_v2.data_ptr() == critic_scale_ptr
     assert calls == [epoch.current().version]
-    assert policy.shape == (2, 229) and torch.all(torch.isfinite(policy))
-    assert critic.shape == (2, 399) and torch.all(torch.isfinite(critic))
-    # First seven direct groups have exactly the published real values.
-    cursor = 0
-    for expected, (_, width) in enumerate(O._DIRECT_FIELD_LAYOUT, start=1):
-        assert torch.all(policy[:, cursor : cursor + width] == float(expected))
-        cursor += width
-    # Task payload is gathered through the current public slot.
-    task_offset = sum(width for _, width in O.ACTOR_LAYOUT_V1[:8])
-    expected_task = torch.stack((
-        epoch.current().task.task_f32[0, 0],
-        epoch.current().task.task_f32[1, 0],
-    ))
-    assert torch.equal(policy[:, task_offset : task_offset + E.TASK_F32_WIDTH], expected_task)
-    # This exact record comes from the current Epoch producer.  It deliberately
-    # has no D05-private construction field, while its independent Physical
-    # launch fact is a valid false value before launch.
-    assert not hasattr(epoch.current(), "construction_admissible")
-    assert epoch.current().launch_succeeded[:, 0].tolist() == [False, False]
-    assert policy[:, -1].tolist() == [0.0, 0.0]
+    assert policy.shape == (2, 203) and torch.all(torch.isfinite(policy))
+    assert critic.shape == (2, 219) and torch.all(torch.isfinite(critic))
+
+    # Independent hard-coded golden: expected order is written here rather
+    # than generated from the shared layout under test.
+    view = _direct_view(env, epoch.current(), parts)
+    actor = view.actor_rows
+    expected_policy_raw = torch.cat(
+        (
+            actor["projected_gravity_b"],
+            actor["base_ang_vel_b"],
+            actor["base_position_table"],
+            actor["base_heading_table_xy"],
+            actor["base_com_lin_vel_heading"],
+            actor["joint_pos_rel"],
+            actor["joint_vel"],
+            actor["last_action"],
+            actor["teacher_joint_pos_rel"],
+            actor["teacher_joint_vel"],
+            actor["motion_anchor_pos_b"],
+            actor["motion_anchor_ori_b6"],
+            torch.nn.functional.one_hot(
+                torch.tensor([1, 4]), num_classes=5
+            ).float(),
+            actor["racket_target_pos_error_heading"],
+            actor["racket_target_vel_error_heading"],
+            actor["racket_target_normal_error_heading"],
+            actor["base_goal_error_heading_xy"],
+            actor["time_to_contact_s"],
+            actor["time_to_teacher_start_s"],
+            actor["time_to_next_opportunity_s"],
+            torch.tensor([[1, 0, 0, 0, 0], [1, 0, 0, 0, 0]]).float(),
+            torch.zeros((2, 1)),
+        ),
+        dim=1,
+    )
+    expected_policy = expected_policy_raw * torch.tensor(
+        _hard_coded_actor_scale_v2()
+    )[None, :]
+    torch.testing.assert_close(policy, expected_policy)
+    extension = view.critic_rows
+    expected_extension_raw = torch.cat(
+        (
+            extension["episode_time_remaining_s"],
+            extension["live_ball_center_rel_root_heading"],
+            extension["live_ball_lin_vel_heading"],
+            extension["live_ball_ang_vel_heading"],
+            extension["selected_rubber_contact_latched"],
+            extension["net_crossed_latched"],
+            extension["net_clear_latched"],
+            extension["foot_supported_lr"],
+            extension["cadence_ready_dwell_fraction"],
+        ),
+        dim=1,
+    )
+    expected_extension = expected_extension_raw * torch.tensor(
+        _hard_coded_critic_extension_scale_v2()
+    )[None, :]
+    expected_critic = torch.cat((expected_policy, expected_extension), dim=1)
+    torch.testing.assert_close(critic, expected_critic)
+    torch.testing.assert_close(critic[:, :203], policy)
+    assert policy.abs().max().item() > 1.0
     assert bundle.source.semantic_publication_count == 1
 
 
-def test_idle_epoch_clocks_do_not_leak_global_training_step(monkeypatch):
+def test_packer_ignores_raw_task_owner_facts_and_reward_ledger(monkeypatch):
     env = _Env()
     epoch = _prepared_epoch()
     runtime, parts = _runtime(env, epoch)
     source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
     record = epoch.current()
-    assert not bool(record.task.task_valid.any())
     monkeypatch.setattr(
         O,
         "_assert_async_all",
@@ -229,45 +893,34 @@ def test_idle_epoch_clocks_do_not_leak_global_training_step(monkeypatch):
             predicate, torch.ones_like(predicate), msg=label
         ),
     )
+    view = _direct_view(env, record, parts)
+    actor, critic = source._pack(view, record, common_step=10)
 
-    actor_early, critic_early = source._pack(
-        _direct_view(env, record, parts), record, common_step=10
+    legacy_mutated = record.clone()
+    legacy_mutated.task.task_f32.fill_(123.0)
+    legacy_mutated.fact_valid_bits.fill_(7)
+    legacy_mutated.fact_source_step.fill_(999)
+    legacy_mutated.fact_f32.fill_(-456.0)
+    legacy_mutated.owner_fault_bits.fill_(31)
+    legacy_mutated.reward_cycle_open.fill_(True)
+    legacy_mutated.reward_cycle_fault.fill_(1)
+    legacy_mutated.reward_due.fill_(True)
+    legacy_mutated.reward_paid.fill_(True)
+    actor_mutated, critic_mutated = source._pack(
+        view, legacy_mutated, common_step=1_000_000
     )
-    actor_late, critic_late = source._pack(
-        _direct_view(env, record, parts), record, common_step=1_000_000
-    )
-    clock_index = next(
-        index
-        for index, (name, _) in enumerate(O.ACTOR_LAYOUT_V1)
-        if name == "epoch_clock_remaining_s"
-    )
-    clock_offset = sum(width for _, width in O.ACTOR_LAYOUT_V1[:clock_index])
-    clock_slice = slice(clock_offset, clock_offset + 5)
-    assert torch.equal(actor_early[:, clock_slice], torch.zeros((2, 5)))
-    assert torch.equal(actor_late[:, clock_slice], torch.zeros((2, 5)))
-    torch.testing.assert_close(actor_early, actor_late)
-    torch.testing.assert_close(critic_early, critic_late)
+    torch.testing.assert_close(actor, actor_mutated)
+    torch.testing.assert_close(critic, critic_mutated)
 
-    valid = record.clone()
-    valid.task.task_valid[:, 0].fill_(True)
-    for tick, name in enumerate(
-        (
-            "reveal_tick",
-            "contact_tick",
-            "launch_tick",
-            "deadline_tick",
-            "next_reveal_tick",
-        ),
-        start=11,
-    ):
-        getattr(valid.clocks, name)[:, 0].fill_(tick)
-    actor_valid, _ = source._pack(
-        _direct_view(env, valid, parts), valid, common_step=10
-    )
+    phase_changed = record.clone()
+    phase_changed.phase[0, 0] = E.PHASE_REVEAL_COMMITTED
+    phase_changed.phase[1, 0] = E.PHASE_RETIRED
+    phased, _ = source._pack(view, phase_changed, common_step=10)
     torch.testing.assert_close(
-        actor_valid[:, clock_slice],
-        torch.tensor([[0.02, 0.04, 0.06, 0.08, 0.10]]).repeat(2, 1),
+        phased[:, 197:202],
+        torch.tensor([[0, 1, 0, 0, 0], [0, 0, 0, 0, 1]]).float(),
     )
+
 
 
 def test_term_rejects_invalid_group_instance_shadow_and_caller_source(monkeypatch):
@@ -301,7 +954,7 @@ def test_term_rejects_invalid_group_instance_shadow_and_caller_source(monkeypatc
     with pytest.raises(TypeError, match="unexpected keyword argument 'source'"):
         O._term(env, group="policy", source=bundle.source)
 
-    env.__dict__[O.ENV_TERM_METHOD] = lambda **_kwargs: torch.zeros((2, 229))
+    env.__dict__[O.ENV_TERM_METHOD] = lambda **_kwargs: torch.zeros((2, 203))
     with pytest.raises(O.LeanObservationConstructionHold, match="shadowed"):
         O._term(env, group="policy")
 
@@ -349,7 +1002,10 @@ def test_nonfinite_direct_fact_fails_without_runtime_zero_fallback(monkeypatch):
         return O.DirectActionEpochObservationFacts(
             **{
                 **view.__dict__,
-                "joint_pos_rel": torch.full((2, 31), float("nan")),
+                "actor_rows": {
+                    **view.actor_rows,
+                    "joint_pos_rel": torch.full((2, 31), float("nan")),
+                },
             }
         )
 
@@ -376,7 +1032,15 @@ def test_source_has_no_superseded_observation_or_zero_prefix_adapter():
         "receipt_sha256",
         "source_stamp",
         "numeric_authority",
-        "flight_slot_capacity",
         "mailbox_capacity",
+        "epoch_task_f32",
+        "physical_r03_r06_r07_fact_f32",
+        '"reward_due"',
+        '"reward_paid"',
+        "plant_fact_adapter.read",
+        'owner_kind="motion"',
     ):
         assert marker not in source
+    # The one retained capacity spelling is an exact R06/Physical K-axis ABI
+    # check, not capacity padding or an observation feature.
+    assert source.count("flight_slot_capacity") == 1

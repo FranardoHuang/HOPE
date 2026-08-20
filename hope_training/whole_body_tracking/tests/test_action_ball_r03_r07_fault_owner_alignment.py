@@ -154,6 +154,9 @@ def _ready_result(owner, *, step: int, kind: int):
         recovery_age_tick=torch.full((2,), -1, dtype=torch.int64),
         reward_eligible=ready.clone(),
         facts_valid=ready.clone(),
+        foot_supported_lr=torch.ones(
+            (2, owner.num_feet), dtype=torch.bool
+        ),
         infrastructure_fault=torch.zeros(2, dtype=torch.bool),
         producer_fault_bits=torch.zeros(2, dtype=torch.int64),
         component_errors=torch.zeros(

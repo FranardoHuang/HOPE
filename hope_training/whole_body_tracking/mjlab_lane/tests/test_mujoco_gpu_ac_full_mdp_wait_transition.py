@@ -1622,171 +1622,22 @@ def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
     assert torch.equal(env.reset_generation, generation)
 
 
-def test_host_full_a_packs_task_clocks_and_real_physical_r03_facts():
-    env = _host_full_a_lifecycle_env()
-    env.q_ready = torch.zeros(31)
-    env.actions = torch.zeros((2, 31))
-    env._qpos_act = lambda: torch.zeros((2, 31))
-    env._qvel_act = lambda: torch.zeros((2, 31))
-    env._con_geom = torch.tensor([[0, 0]], dtype=torch.long)
-    env._con_idx = torch.tensor([0], dtype=torch.long)
-    env._nacon = torch.tensor([0], dtype=torch.long)
-    env._ball_gid = 2
-    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
-    env.common_step_counter = 2
-    wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
-    env.common_step_counter = 3
-    wait_env.FullMdpInitialWaitVecEnv._full_a_publish_r03_fact(env)
-    wait_env.FullMdpInitialWaitVecEnv._full_a_publish_physical_fact(env)
-    env._full_a_owner_fault_bits[0, 3] = 1
-    exact_teacher_joint = torch.arange(31, dtype=torch.float32).repeat(2, 1)
-    exact_teacher_vel = -exact_teacher_joint
-    env._full_a_teacher_joint_pos.copy_(exact_teacher_joint)
-    env._full_a_teacher_joint_vel.copy_(exact_teacher_vel)
-
-    wait_env.FullMdpInitialWaitVecEnv._compute_obs(
-        env,
-        st={
-            "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
-            "base_ang_b": torch.zeros((2, 3)),
-        },
+def test_semantic_v2_drops_raw_task_owner_fault_and_reward_ledger_columns():
+    actor = {name for name, _width in P.ACTOR_LAYOUT_V2}
+    critic = {name for name, _width in P.CRITIC_EXTENSION_LAYOUT_V2}
+    assert not actor.intersection(
+        {"epoch_task_f32", "epoch_clock_remaining_s", "epoch_selected", "epoch_launch_succeeded"}
     )
-    actor_offset = dict()
-    start = 0
-    for name, width in P.ACTOR_LAYOUT_V1:
-        actor_offset[name] = slice(start, start + width)
-        start += width
-    critic_offset = dict()
-    start = P.ACTOR_WIDTH_V1
-    for name, width in P.CRITIC_EXTENSION_LAYOUT_V1:
-        critic_offset[name] = slice(start, start + width)
-        start += width
-
-    assert torch.equal(
-        env._obs_buf[:, actor_offset["epoch_task_f32"]], env._epoch_task_f32
+    assert not critic.intersection(
+        {
+            "physical_r03_r06_r07_fact_present",
+            "physical_r03_r06_r07_fact_age_s",
+            "physical_r03_r06_r07_fact_f32",
+            "physical_r03_r06_r07_fault_present",
+            "reward_due",
+            "reward_paid",
+        }
     )
-    # These actor fields consume the Motion teacher buffers directly.  A q_des
-    # bridge value inserted there would therefore become a cross-backend
-    # observation-contract drift, not an internal control implementation.
-    assert torch.equal(
-        env._obs_buf[:, actor_offset["teacher_joint_pos_rel"]],
-        exact_teacher_joint,
-    )
-    assert torch.equal(
-        env._obs_buf[:, actor_offset["teacher_joint_vel_rel"]],
-        exact_teacher_vel,
-    )
-    expected_clocks = (
-        env._epoch_clock_ticks - env.common_step_counter
-    ).float() * env.step_dt
-    assert torch.equal(
-        env._obs_buf[:, actor_offset["epoch_clock_remaining_s"]], expected_clocks
-    )
-    present = env._critic_obs_buf[
-        :, critic_offset["physical_r03_r06_r07_fact_present"]
-    ]
-    assert torch.equal(present, torch.tensor([[1.0, 1.0, 0.0, 0.0]]).repeat(2, 1))
-    facts = env._critic_obs_buf[
-        :, critic_offset["physical_r03_r06_r07_fact_f32"]
-    ].reshape(2, 4, 32)
-    assert torch.equal(facts[:, 0], env._full_a_physical_fact_f32)
-    assert torch.equal(facts[:, 1], env._full_a_r03_fact_f32)
-    assert torch.count_nonzero(facts[:, 2:]) == 0
-    faults = env._critic_obs_buf[
-        :, critic_offset["physical_r03_r06_r07_fault_present"]
-    ]
-    assert torch.equal(
-        faults,
-        torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0]]),
-    )
-    assert torch.count_nonzero(
-        env._critic_obs_buf[:, critic_offset["reward_due"]]
-    ) == 0
-    assert torch.count_nonzero(
-        env._critic_obs_buf[:, critic_offset["reward_paid"]]
-    ) == 0
-
-
-def test_host_full_a_observation_is_default_relative_with_zero_action_history():
-    env = _host_full_a_lifecycle_env()
-    offset = torch.linspace(-0.3, 0.3, 31)
-    live_delta = torch.full((2, 31), 0.125)
-    teacher_delta = torch.full((2, 31), -0.25)
-    env.action_offset = offset
-    env.q_ready = offset.clone()
-    env.actions = torch.zeros((2, 31))
-    env._qpos_act = lambda: offset.unsqueeze(0).repeat(2, 1)
-    env._qvel_act = lambda: torch.zeros((2, 31))
-    env._full_a_teacher_joint_pos.copy_(offset.unsqueeze(0))
-    env._full_a_teacher_joint_vel.zero_()
-    env._con_geom = torch.tensor([[0, 0]], dtype=torch.long)
-    env._con_idx = torch.tensor([0], dtype=torch.long)
-    env._nacon = torch.tensor([0], dtype=torch.long)
-    env._ball_gid = 2
-
-    offsets, start = {}, 0
-    for name, width in P.ACTOR_LAYOUT_V1:
-        offsets[name] = slice(start, start + width)
-        start += width
-    state = {
-        "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
-        "base_ang_b": torch.zeros((2, 3)),
-    }
-    wait_env.FullMdpInitialWaitVecEnv._compute_obs(env, st=state)
-    assert torch.count_nonzero(env._obs_buf[:, offsets["joint_pos_rel"]]) == 0
-    assert torch.count_nonzero(
-        env._obs_buf[:, offsets["teacher_joint_pos_rel"]]
-    ) == 0
-    assert torch.count_nonzero(env._obs_buf[:, offsets["last_action"]]) == 0
-    hidden = env._obs_buf[:, offsets["motion_phase_one_hot"]]
-    assert torch.equal(hidden[:, wait_env.RECOVER_HIDDEN_PHASE_INDEX], torch.ones(2))
-
-    env._qpos_act = lambda: offset.unsqueeze(0) + live_delta
-    env._full_a_teacher_joint_pos.copy_(offset.unsqueeze(0) + teacher_delta)
-    wait_env.FullMdpInitialWaitVecEnv._compute_obs(env, st=state)
-    torch.testing.assert_close(
-        env._obs_buf[:, offsets["joint_pos_rel"]], live_delta
-    )
-    torch.testing.assert_close(
-        env._obs_buf[:, offsets["teacher_joint_pos_rel"]], teacher_delta
-    )
-
-
-def test_host_full_a_idle_observation_masks_invalid_clocks_from_global_step():
-    env = _host_full_a_lifecycle_env()
-    env.q_ready = torch.zeros(31)
-    env.actions = torch.zeros((2, 31))
-    env._qpos_act = lambda: torch.zeros((2, 31))
-    env._qvel_act = lambda: torch.zeros((2, 31))
-    env._con_geom = torch.tensor([[0, 0]], dtype=torch.long)
-    env._con_idx = torch.tensor([0], dtype=torch.long)
-    env._nacon = torch.tensor([0], dtype=torch.long)
-    env._ball_gid = 2
-    state = {
-        "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1),
-        "base_ang_b": torch.zeros((2, 3)),
-    }
-    offsets, start = {}, 0
-    for name, width in P.ACTOR_LAYOUT_V1:
-        offsets[name] = slice(start, start + width)
-        start += width
-
-    assert torch.equal(env._epoch_phase, torch.zeros(2, dtype=torch.long))
-    assert not env._epoch_task_valid.any()
-    assert torch.equal(env._epoch_clock_ticks, torch.full((2, 5), -1))
-    wait_env.FullMdpInitialWaitVecEnv._compute_obs(env, st=state)
-    initial_policy = env._obs_buf.clone()
-    initial_critic = env._critic_obs_buf.clone()
-    assert tuple(initial_policy.shape) == (2, P.ACTOR_WIDTH_V1)
-    assert tuple(initial_critic.shape) == (2, P.CRITIC_WIDTH_V1)
-    assert torch.count_nonzero(
-        initial_policy[:, offsets["epoch_clock_remaining_s"]]
-    ) == 0
-
-    env.common_step_counter = 96_024
-    wait_env.FullMdpInitialWaitVecEnv._compute_obs(env, st=state)
-    assert torch.equal(env._obs_buf, initial_policy)
-    assert torch.equal(env._critic_obs_buf, initial_critic)
 
 
 def test_full_a_constructor_observation_stays_wait_until_buffers_are_installed():
@@ -2539,8 +2390,8 @@ def _assert_step_surface(result, *, num_envs: int):
 
 def _assert_full_a_step_surface(result, *, num_envs: int):
     observations, reward, dones, extras = result
-    assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V1)
-    assert tuple(observations["critic"].shape) == (num_envs, P.CRITIC_WIDTH_V1)
+    assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V2)
+    assert tuple(observations["critic"].shape) == (num_envs, P.CRITIC_WIDTH_V2)
     assert tuple(reward.shape) == (num_envs,)
     assert tuple(dones.shape) == (num_envs,)
     assert dones.dtype == torch.long

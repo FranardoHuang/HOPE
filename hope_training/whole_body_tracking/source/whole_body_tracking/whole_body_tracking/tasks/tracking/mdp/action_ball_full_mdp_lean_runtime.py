@@ -1248,10 +1248,10 @@ class ActionBallFullMdpLeanRuntimeOwner:
             finally:
                 self._leave()
 
-    def action_epoch_observation_v1(
+    def semantic_action_epoch_observation_v2(
         self, record: epoch_v1.ActionEpochRecord
     ) -> object:
-        """Delegate exact real-source extraction to the observation ABI."""
+        """Delegate exact semantic real-source extraction to observation v2."""
 
         module = importlib.import_module(
             "whole_body_tracking.tasks.tracking.mdp."

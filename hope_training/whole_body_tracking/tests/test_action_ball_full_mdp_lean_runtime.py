@@ -219,6 +219,36 @@ def _owner(
     return owner, epoch, graph
 
 
+def test_semantic_observation_v2_is_the_only_live_forwarding_surface(
+    monkeypatch,
+):
+    owner, epoch, _graph = _owner()
+    record = epoch.current()
+    cached_observation = object()
+    calls = []
+
+    def build(*, runtime_owner, record):
+        calls.append((runtime_owner, record))
+        return cached_observation
+
+    class ObservationModule:
+        build_direct_action_epoch_observation_facts = staticmethod(build)
+
+    monkeypatch.setattr(
+        L.importlib,
+        "import_module",
+        lambda name: ObservationModule,
+    )
+
+    assert not hasattr(L.ActionBallFullMdpLeanRuntimeOwner, "action_epoch_observation_v1")
+    assert not hasattr(owner, "action_epoch_observation_v1")
+    first = owner.semantic_action_epoch_observation_v2(record)
+    second = owner.semantic_action_epoch_observation_v2(record)
+    assert first is cached_observation
+    assert second is cached_observation
+    assert calls == [(owner, record), (owner, record)]
+
+
 def test_real_root_registers_all_five_mandatory_roles():
     epoch, *_ = _ready_epoch(device="cpu")
     graph = R.LeanActionEpochRewardGraph(epoch_owner=epoch)

@@ -185,9 +185,11 @@ def _install_fake_stack(
             return dict(ACTION_CONTRACT)
 
         def get_observations(self):
+            policy_width = 203 if self.full_a_mode else 229
+            critic_width = 219 if self.full_a_mode else 399
             return {
-                "policy": torch.zeros(num_envs, 229),
-                "critic": torch.zeros(num_envs, 399),
+                "policy": torch.zeros(num_envs, policy_width),
+                "critic": torch.zeros(num_envs, critic_width),
             }
 
         def step(self, _actions):
@@ -242,6 +244,12 @@ def _install_fake_stack(
     wait_module.FullMdpInitialWaitVecEnv = _Env
     wait_module.SimCfg = _Cfg
     wait_module.TaskCfg = _Cfg
+    wait_module.observation_contract = types.SimpleNamespace(
+        ACTOR_WIDTH_V1=229,
+        CRITIC_WIDTH_V1=399,
+        ACTOR_WIDTH_V2=203,
+        CRITIC_WIDTH_V2=219,
+    )
     wait_module.FULLMDP_TERMINATION_BITS = {
         "time_out": 1, "base_fell_tilt": 2, "base_too_low": 4,
         "joint_qdes_forbidden": 8, "robot_hit_table": 16,
@@ -399,6 +407,8 @@ def test_main_preserves_default_wait_learn_one(monkeypatch, capsys, tmp_path):
         _load().FULL_MDP_PPO_RECIPE_SHA256
     )
     assert record["task_lifecycle"] == "idle_wait_only"
+    assert record["policy_width"] == 229
+    assert record["critic_width"] == 399
     assert trace == ["optimizer"] and saved == []
     assert not evidence.exists() and list(snapshots.iterdir()) == []
     assert not completion.exists()
@@ -413,6 +423,15 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     )
     assert invoke() == 0
     output = capsys.readouterr().out.splitlines()
+    final = json.loads(
+        next(
+            line.split("ACTION_BALL_MUJOCO_WAIT_RSL3_JSON=", 1)[1]
+            for line in output
+            if line.startswith("ACTION_BALL_MUJOCO_WAIT_RSL3_JSON=")
+        )
+    )
+    assert final["policy_width"] == 203
+    assert final["critic_width"] == 219
     assert trace == [
         "prepare", "optimizer", "save", "ack",
         "prepare", "optimizer", "save", "ack",

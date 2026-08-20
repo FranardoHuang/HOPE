@@ -511,11 +511,18 @@ def main(
         full_a_mode=full_a_mode,
     )
     action_contract = env.action_contract_identity if full_a_mode else None
+    observation = wait.observation_contract
+    policy_width = (
+        observation.ACTOR_WIDTH_V2 if full_a_mode else observation.ACTOR_WIDTH_V1
+    )
+    critic_width = (
+        observation.CRITIC_WIDTH_V2 if full_a_mode else observation.CRITIC_WIDTH_V1
+    )
     initial = env.get_observations()
     if (
         env.num_actions != 31
-        or tuple(initial["policy"].shape) != (num_envs, 229)
-        or tuple(initial["critic"].shape) != (num_envs, 399)
+        or tuple(initial["policy"].shape) != (num_envs, policy_width)
+        or tuple(initial["critic"].shape) != (num_envs, critic_width)
         or not bool(torch.isfinite(initial["policy"]).all())
         or not bool(torch.isfinite(initial["critic"]).all())
     ):
@@ -647,8 +654,8 @@ def main(
             or not storage_finite
             or not optimizer_state_present
             or not optimizer_state_finite
-            or tuple(final["policy"].shape) != (num_envs, 229)
-            or tuple(final["critic"].shape) != (num_envs, 399)
+            or tuple(final["policy"].shape) != (num_envs, policy_width)
+            or tuple(final["critic"].shape) != (num_envs, critic_width)
             or not final_observation_finite
         ):
             raise RuntimeError("MuJoCo WAIT RSL3 update evidence differs")

@@ -3288,58 +3288,21 @@ class ActionBallFullMdpObservationProjection:
 
 
 @dataclass(frozen=True, eq=False, repr=False)
-class ActionBallFullMdpObservationView:
-    """Clone-only R06 flight, raw mailbox, and durable previous-paid facts.
+class ActionEpochR06CurrentFlightObservationView:
+    """Clone-only semantic facts for the current live ActionEpoch flight.
 
-    This projection intentionally excludes Reward views, payment values,
-    family treatment, and canonical/common outcome aliases.  In particular,
-    ``mailbox_on_opponent_table`` is the raw physical placement fact.
+    ``flight_slot`` is an engine-local locator for the paired Physical scene
+    row, never part of shot identity or an observation feature.  ``-1`` means
+    that the current ActionEpoch publication has no live R06 flight; all three
+    latches are then false.
     """
 
     r06_owner: object
     publication_identity: object
-    mutation_version: torch.Tensor
-    flight_task_key: DeviceLandingOutcomeKey
-    flight_state: torch.Tensor
-    flight_full_key_sha256: torch.Tensor
-    flight_ball_generation: torch.Tensor
-    flight_mailbox_slot: torch.Tensor
-    flight_observation_ordinal: torch.Tensor
-    flight_target_xy_m: torch.Tensor
-    flight_reveal_control_step: torch.Tensor
-    flight_contact_deadline_control_step: torch.Tensor
-    flight_crossing_horizon_control_step: torch.Tensor
-    flight_last_observation_control_step: torch.Tensor
-    flight_contact_valid: torch.Tensor
-    flight_net_crossed: torch.Tensor
-    flight_net_clear: torch.Tensor
-    flight_physical_retired: torch.Tensor
-    mailbox_task_key: DeviceLandingOutcomeKey
-    mailbox_state: torch.Tensor
-    mailbox_full_key_sha256: torch.Tensor
-    mailbox_ball_generation: torch.Tensor
-    mailbox_observation_ordinal: torch.Tensor
-    mailbox_settlement_control_step: torch.Tensor
-    mailbox_target_xy_m: torch.Tensor
-    mailbox_contact_valid: torch.Tensor
-    mailbox_policy_eligible: torch.Tensor
-    mailbox_crossing_valid: torch.Tensor
-    mailbox_on_opponent_table: torch.Tensor
-    mailbox_placement_error_m: torch.Tensor
-    mailbox_common_outcome_paid: torch.Tensor
-    mailbox_placement_shell_paid: torch.Tensor
-    mailbox_physical_retired: torch.Tensor
-    previous_paid_task_key: DeviceLandingOutcomeKey
-    previous_paid_valid: torch.Tensor
-    previous_paid_full_key_sha256: torch.Tensor
-    previous_paid_ball_generation: torch.Tensor
-    previous_paid_observation_ordinal: torch.Tensor
-    previous_paid_settlement_control_step: torch.Tensor
-    previous_paid_selected_contact: torch.Tensor
-    previous_paid_first_crossing_valid: torch.Tensor
-    previous_paid_on_opponent_table: torch.Tensor
-    previous_paid_target_error_m: torch.Tensor
-    previous_paid_target_xy_m: torch.Tensor
+    flight_slot: torch.Tensor
+    contact_valid: torch.Tensor
+    net_crossed: torch.Tensor
+    net_clear: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -6985,29 +6948,21 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             _masked_fill_(destination, release, 0)
         self._mutation_version.add_(release.any().to(torch.int64))
 
-    @staticmethod
-    def _clone_key(key: DeviceLandingOutcomeKey) -> DeviceLandingOutcomeKey:
-        return DeviceLandingOutcomeKey(
-            **{
-                name: getattr(key, name).detach().clone()
-                for name in _KEY_FIELDS
-            }
-        )
-
-    def require_owned_action_ball_full_mdp_observation(
+    def require_owned_action_epoch_current_flight_observation(
         self,
         projection: ActionBallFullMdpObservationProjection,
-    ) -> ActionBallFullMdpObservationView:
-        """Authenticate the owner-issued handle and clone current raw facts.
+        *,
+        current_shot_key: _row_identity.ActionEpochShotKey,
+        current_publication_ordinal: torch.Tensor,
+    ) -> ActionEpochR06CurrentFlightObservationView:
+        """Select the current live typed flight at a closed owner boundary.
 
-        This method is deliberately independent of :meth:`view`: it neither
-        books a Reward consumer nor mutates view/payment epochs, counters, or
-        the coordinator mutation version.
+        The caller supplies only the current public Epoch identity and its
+        non-identity publication chronology.  R06 performs the exact join
+        against its private typed flight plane and returns no identity echo,
+        mailbox, Reward, receipt, or raw storage view.
         """
 
-        # Actual facts are publishable only at a closed semantic boundary.  A
-        # retained settlement awaiting Physical retirement is a cross-owner
-        # lifecycle half-transaction, not an observation snapshot.
         self._require_operable()
         if (
             type(projection) is not ActionBallFullMdpObservationProjection
@@ -7016,104 +6971,77 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             raise LandingOutcomeDeviceError(
                 "R06 full-MDP observation projection is forged or foreign"
             )
+        try:
+            expected_key = _row_identity.require_action_epoch_shot_key(
+                current_shot_key,
+                shape=(self.num_envs,),
+                device=self.device,
+                label="R06 current observation shot_key",
+            )
+        except _row_identity.ActionEpochShotKeyError as exc:
+            raise LandingOutcomeDeviceError(str(exc)) from exc
+        if (
+            type(current_publication_ordinal) is not torch.Tensor
+            or tuple(current_publication_ordinal.shape) != (self.num_envs,)
+            or current_publication_ordinal.dtype != torch.int64
+            or current_publication_ordinal.device != self.device
+            or current_publication_ordinal.layout != torch.strided
+            or not current_publication_ordinal.is_contiguous()
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 current observation publication_ordinal ABI differs"
+            )
+        expected_publication = current_publication_ordinal.detach()
+        try:
+            flight_key = _row_identity.require_action_epoch_shot_key(
+                self._flight_action_epoch_shot_key(),
+                shape=self._flight_shape,
+                device=self.device,
+                label="R06 private flight shot_key",
+            )
+        except _row_identity.ActionEpochShotKeyError as exc:
+            raise LandingOutcomeDeviceError(str(exc)) from exc
 
-        def clone(value: torch.Tensor) -> torch.Tensor:
-            return value.detach().clone()
+        matches = (
+            self._flight_action_epoch
+            & self._flight_state.ne(FLIGHT_EMPTY)
+            & _row_identity.action_epoch_shot_key_valid(flight_key)
+            & _row_identity.action_epoch_shot_key_valid(expected_key)[:, None]
+            & self._flight_publication_ordinal.ge(0)
+            & expected_publication.ge(0)[:, None]
+            & self._flight_publication_ordinal.eq(expected_publication[:, None])
+        )
+        for field in fields(_row_identity.ActionEpochShotKey):
+            matches &= getattr(flight_key, field.name).eq(
+                getattr(expected_key, field.name)[:, None]
+            )
+        torch._assert_async(
+            torch.all(matches.to(torch.int64).sum(dim=1).le(1)),
+            "R06 current ActionEpoch flight is not unique",
+        )
+        selected = torch.argmax(matches.to(torch.int64), dim=1)
+        present = matches.any(dim=1)
 
-        flight_key = self._key_storage("flight")
-        mailbox_key = self._key_storage("mailbox")
-        previous_key = DeviceLandingOutcomeKey(
-            **{
-                **self._previous_paid_key_ints,
-                **self._previous_paid_key_digests,
-            }
+        def gather(value: torch.Tensor) -> torch.Tensor:
+            return torch.gather(value, 1, selected[:, None]).squeeze(1)
+
+        selected_state = gather(self._flight_state)
+        live = present & (
+            selected_state.eq(FLIGHT_INBOUND) | selected_state.eq(FLIGHT_OPEN)
         )
-        mailbox_ordinal = torch.where(
-            self._mailbox_history_valid,
-            self._mailbox_observation_ordinal,
-            torch.full_like(self._mailbox_observation_ordinal, -1),
-        )
-        return ActionBallFullMdpObservationView(
+        invalid_slot = torch.full_like(selected, -1)
+
+        def selected_latch(value: torch.Tensor) -> torch.Tensor:
+            gathered = gather(value)
+            return torch.where(live, gathered, torch.zeros_like(gathered)).detach()
+
+        return ActionEpochR06CurrentFlightObservationView(
             r06_owner=self,
             publication_identity=projection,
-            mutation_version=clone(self._mutation_version),
-            flight_task_key=self._clone_key(flight_key),
-            flight_state=clone(self._flight_state),
-            flight_full_key_sha256=clone(self._flight_full_key_sha256),
-            flight_ball_generation=clone(self._flight_ball_generation),
-            flight_mailbox_slot=clone(self._flight_mailbox_slot),
-            flight_observation_ordinal=clone(self._flight_observation_ordinal),
-            flight_target_xy_m=clone(self._flight_target_xy_m),
-            flight_reveal_control_step=clone(self._flight_reveal_control_step),
-            flight_contact_deadline_control_step=clone(
-                self._flight_contact_deadline_control_step
-            ),
-            flight_crossing_horizon_control_step=clone(
-                self._flight_crossing_horizon_control_step
-            ),
-            flight_last_observation_control_step=clone(
-                self._flight_last_observation_control
-            ),
-            flight_contact_valid=clone(self._flight_contact_valid),
-            flight_net_crossed=clone(self._flight_net_crossed),
-            flight_net_clear=clone(self._flight_net_clear),
-            flight_physical_retired=clone(self._flight_physical_retired),
-            mailbox_task_key=self._clone_key(mailbox_key),
-            mailbox_state=clone(self._mailbox_state),
-            mailbox_full_key_sha256=clone(self._mailbox_full_key_sha256),
-            mailbox_ball_generation=clone(self._mailbox_ball_generation),
-            mailbox_observation_ordinal=clone(mailbox_ordinal),
-            mailbox_settlement_control_step=clone(
-                self._mailbox_settlement_control_step
-            ),
-            mailbox_target_xy_m=clone(self._mailbox_target_xy_m),
-            mailbox_contact_valid=clone(self._mailbox_contact_valid),
-            mailbox_policy_eligible=clone(self._mailbox_policy_eligible),
-            mailbox_crossing_valid=clone(self._mailbox_crossing_valid),
-            mailbox_on_opponent_table=clone(
-                self._mailbox_on_opponent_table
-            ),
-            mailbox_placement_error_m=clone(
-                self._mailbox_placement_error_m
-            ),
-            mailbox_common_outcome_paid=clone(
-                torch.bitwise_and(self._mailbox_paid_mask, 1) != 0
-            ),
-            mailbox_placement_shell_paid=clone(
-                torch.bitwise_and(self._mailbox_paid_mask, 2) != 0
-            ),
-            mailbox_physical_retired=clone(
-                self._mailbox_physical_retired
-            ),
-            previous_paid_task_key=self._clone_key(previous_key),
-            previous_paid_valid=clone(self._previous_paid_valid),
-            previous_paid_full_key_sha256=clone(
-                self._previous_paid_full_key_sha256
-            ),
-            previous_paid_ball_generation=clone(
-                self._previous_paid_ball_generation
-            ),
-            previous_paid_observation_ordinal=clone(
-                self._previous_paid_observation_ordinal
-            ),
-            previous_paid_settlement_control_step=clone(
-                self._previous_paid_settlement_control_step
-            ),
-            previous_paid_selected_contact=clone(
-                self._previous_paid_selected_contact
-            ),
-            previous_paid_first_crossing_valid=clone(
-                self._previous_paid_first_crossing_valid
-            ),
-            previous_paid_on_opponent_table=clone(
-                self._previous_paid_on_opponent_table
-            ),
-            previous_paid_target_error_m=clone(
-                self._previous_paid_target_error_m
-            ),
-            previous_paid_target_xy_m=clone(
-                self._previous_paid_target_xy_m
-            ),
+            flight_slot=torch.where(live, selected, invalid_slot).detach(),
+            contact_valid=selected_latch(self._flight_contact_valid),
+            net_crossed=selected_latch(self._flight_net_crossed),
+            net_clear=selected_latch(self._flight_net_clear),
         )
 
     def _flight_lifecycle_snapshot(self) -> FlightLifecycleSnapshotBatch:
@@ -15122,7 +15050,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
 
 __all__ = [
     "ActionBallFullMdpObservationProjection",
-    "ActionBallFullMdpObservationView",
+    "ActionEpochR06CurrentFlightObservationView",
     "ActionEpochR06OutcomeRows",
     "ActionEpochR06PostPhysicsResult",
     "ActionEpochR06RetireResult",

@@ -384,6 +384,7 @@ class _Env:
     def __init__(self, num_envs=2):
         self.num_envs = num_envs
         self.unwrapped = self
+        self.observation_facts = _v2_observation_facts()
         self.action_ball_full_mdp_runtime_lease = object()
         self.owner = _Owner(self, self.action_ball_full_mdp_runtime_lease, num_envs)
         self.action_term = _ActionTerm(self.owner.events)
@@ -398,6 +399,50 @@ class _Env:
     def action_ball_full_mdp_ppo_drain_owner(self, lease):
         assert lease is self.action_ball_full_mdp_runtime_lease
         return self.owner
+
+
+def _v2_observation_facts(**overrides):
+    facts = {
+        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
+        "actor_obs_mode": "action_ball_full_mdp",
+        "actor_obs_total_dim": 203,
+        "actor_obs_term_names": ["action_epoch"],
+        "actor_obs_term_dims": [203],
+        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
+        "critic_obs_total_dim": 219,
+        "critic_obs_term_names": ["action_epoch"],
+        "critic_obs_term_dims": [219],
+        "fresh_full_mdp_observation_kind": (
+            "action_ball_full_mdp_semantic_observation_v2"
+        ),
+        "fresh_full_mdp_diagnostic_unauthorized": True,
+        "fresh_full_mdp_launch_authorized": False,
+        "fresh_full_mdp_no_capacity_receipt_or_sha_authority": True,
+    }
+    facts.update(overrides)
+    return facts
+
+
+def _v2_snapshot_identity(*, sha256="a" * 64, **overrides):
+    identity = {
+        "action_ball_full_mdp_snapshot_kind": (
+            "policy_optimizer_diagnostic_nonresumable_v2"
+        ),
+        "fresh_full_mdp_observation_kind": (
+            "action_ball_full_mdp_semantic_observation_v2"
+        ),
+        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
+        "actor_obs_total_dim": 203,
+        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
+        "critic_obs_total_dim": 219,
+        "training_contract_schema_version": 3,
+        "training_contract_sha256": sha256,
+        "diagnostic_unauthorized": True,
+        "checkpoint_authority": False,
+        "resume_authority": False,
+    }
+    identity.update(overrides)
+    return identity
 
 
 @pytest.fixture
@@ -421,6 +466,10 @@ def _fake_imports(monkeypatch):
     def import_module(name):
         if name.endswith("action_ball_full_mdp_lean_runtime"):
             return runtime
+        if name.endswith("action_ball_full_mdp_lean_observation_cfg"):
+            return types.SimpleNamespace(
+                installed_observation_facts=lambda env: env.observation_facts
+            )
         if name.endswith("action_ball_full_mdp_lean_rewards"):
             return types.SimpleNamespace(MANAGER_NAMES=("reward",))
         if name.endswith("hope_actions"):
@@ -823,6 +872,155 @@ def test_runner_rejects_nonlean_mode_before_any_safety_or_wal(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize(
+    "authority_kwargs",
+    [
+        {"training_contract_lineage_exact": True},
+        {"training_launch_claim_sha256": "a" * 64},
+        {"require_exact_resume_state": True},
+    ],
+)
+def test_runner_rejects_resume_or_lineage_authority_before_any_side_effect(
+    tmp_path, _fake_imports, authority_kwargs
+):
+    env = _Env()
+    with pytest.raises(RuntimeError, match="only fresh single_action_lean"):
+        adapter.ActionBallFullMdpRsl3Runner(
+            env,
+            {},
+            str(tmp_path),
+            action_ball_full_mdp_runtime_owner=env.owner,
+            action_ball_full_mdp_run_mode="single_action_lean",
+            **authority_kwargs,
+        )
+    assert env.owner.events == []
+    assert env.action_term.pending is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def _install_fake_runner_base(monkeypatch, calls):
+    class _Algorithm:
+        def update(self):
+            return None
+
+    def _base_init(self, env, train_cfg, log_dir, device):
+        calls.append((env, train_cfg, log_dir, device))
+        self.env = env
+        self.alg = _Algorithm()
+        self.is_distributed = False
+        self.num_steps_per_env = 48
+
+    monkeypatch.setattr(
+        adapter.OnPolicyRunner,
+        "__init__",
+        _base_init,
+        raising=False,
+    )
+
+
+def test_runner_binds_v2_observation_and_contract_before_base_init(
+    tmp_path, _fake_imports, monkeypatch
+):
+    env = _Env()
+    calls = []
+    _install_fake_runner_base(monkeypatch, calls)
+
+    runner = adapter.ActionBallFullMdpRsl3Runner(
+        env,
+        {},
+        str(tmp_path),
+        training_contract_schema_version=3,
+        training_contract_sha256="a" * 64,
+        action_ball_full_mdp_runtime_owner=env.owner,
+        action_ball_full_mdp_run_mode="single_action_lean",
+    )
+
+    assert calls == [(env, {}, str(tmp_path), "cpu")]
+    assert runner.training_contract_schema_version == 3
+    assert runner.training_contract_sha256 == "a" * 64
+    assert runner._full_mdp_observation_identity == {
+        "fresh_full_mdp_observation_kind": (
+            "action_ball_full_mdp_semantic_observation_v2"
+        ),
+        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
+        "actor_obs_total_dim": 203,
+        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
+        "critic_obs_total_dim": 219,
+    }
+    assert not hasattr(runner, "training_contract_lineage_exact")
+    assert not hasattr(runner, "training_launch_claim_sha256")
+    assert not hasattr(runner, "require_exact_resume_state")
+
+
+@pytest.mark.parametrize(
+    ("schema", "sha256", "error"),
+    [
+        (2, "a" * 64, "schema differs"),
+        (True, "a" * 64, "schema differs"),
+        (3, "A" * 64, "SHA differs"),
+        (3, "a" * 63, "SHA differs"),
+    ],
+)
+def test_runner_rejects_non_v2_contract_identity_before_base_init(
+    tmp_path, _fake_imports, monkeypatch, schema, sha256, error
+):
+    env = _Env()
+    calls = []
+    _install_fake_runner_base(monkeypatch, calls)
+
+    with pytest.raises(RuntimeError, match=error):
+        adapter.ActionBallFullMdpRsl3Runner(
+            env,
+            {},
+            str(tmp_path),
+            training_contract_schema_version=schema,
+            training_contract_sha256=sha256,
+            action_ball_full_mdp_runtime_owner=env.owner,
+            action_ball_full_mdp_run_mode="single_action_lean",
+        )
+
+    assert calls == []
+    assert env.owner.events == []
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("actor_obs_contract", "action_ball_full_mdp_action_epoch_v1"),
+        ("actor_obs_total_dim", 229),
+        ("critic_obs_contract", "action_ball_full_mdp_action_epoch_critic_v1"),
+        ("critic_obs_total_dim", 399),
+        (
+            "fresh_full_mdp_observation_kind",
+            "action_ball_full_mdp_action_epoch_observation_v1",
+        ),
+    ],
+)
+def test_runner_rejects_v1_observation_identity_before_base_init(
+    tmp_path, _fake_imports, monkeypatch, field, value
+):
+    env = _Env()
+    env.observation_facts[field] = value
+    calls = []
+    _install_fake_runner_base(monkeypatch, calls)
+
+    with pytest.raises(RuntimeError, match="semantic observation identity differs"):
+        adapter.ActionBallFullMdpRsl3Runner(
+            env,
+            {},
+            str(tmp_path),
+            training_contract_schema_version=3,
+            training_contract_sha256="a" * 64,
+            action_ball_full_mdp_runtime_owner=env.owner,
+            action_ball_full_mdp_run_mode="single_action_lean",
+        )
+
+    assert calls == []
+    assert env.owner.events == []
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
     tmp_path, monkeypatch
 ):
@@ -866,20 +1064,35 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
 
     monkeypatch.setattr(adapter.OnPolicyRunner, "save", _base_save, raising=False)
     runner = object.__new__(adapter.ActionBallFullMdpRsl3Runner)
+    runner.training_contract_schema_version = 3
+    runner.training_contract_sha256 = "a" * 64
+    runner._full_mdp_observation_identity = {
+        key: value
+        for key, value in _v2_snapshot_identity().items()
+        if key
+        in {
+            "fresh_full_mdp_observation_kind",
+            "actor_obs_contract",
+            "actor_obs_total_dim",
+            "critic_obs_contract",
+            "critic_obs_total_dim",
+        }
+    }
     requested = tmp_path / "model_1000.pt"
-    runner.save(str(requested), infos={"upstream": "kept"})
+    with pytest.raises(RuntimeError, match="forbids caller infos"):
+        runner.save(
+            str(requested),
+            infos={"training_contract_lineage_exact": True},
+        )
+    assert calls == []
+    assert not requested.exists()
+
+    runner.save(str(requested))
 
     assert calls == [
         (
             str(tmp_path / "model_1000.diagnostic_nonresumable.pt"),
-            {
-                "upstream": "kept",
-                "action_ball_full_mdp_snapshot_kind": (
-                    "policy_optimizer_diagnostic_nonresumable_v1"
-                ),
-                "checkpoint_authority": False,
-                "resume_authority": False,
-            },
+            _v2_snapshot_identity(),
         )
     ]
     snapshot = tmp_path / "model_1000.diagnostic_nonresumable.pt"
@@ -887,18 +1100,16 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
         "model_1000.diagnostic_nonresumable.pt.receipt.json"
     )
     assert json.loads(receipt_path.read_text()) == {
-        "schema_version": 1,
-        "kind": "action_ball_full_mdp_diagnostic_snapshot_receipt_v1",
+        "schema_version": 2,
+        "kind": "action_ball_full_mdp_diagnostic_snapshot_receipt_v2",
         "snapshot_name": snapshot.name,
         "learning_iteration": 1000,
         "snapshot_size_bytes": snapshot.stat().st_size,
         "snapshot_sha256": hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-        "payload_kind": "policy_optimizer_diagnostic_nonresumable_v1",
         "model_tensor_count": 1,
         "optimizer_tensor_count": 1,
         "all_tensors_finite": True,
-        "checkpoint_authority": False,
-        "resume_authority": False,
+        **_v2_snapshot_identity(),
     }
     with pytest.raises(RuntimeError, match="forbids checkpoint load/resume"):
         runner.load(str(calls[0][0]))
@@ -924,14 +1135,83 @@ def test_snapshot_receipt_rejects_unparseable_payload_before_sidecar(
         adapter._write_snapshot_receipt(
             snapshot,
             learning_iteration=7,
-            required_infos={
-                "action_ball_full_mdp_snapshot_kind": (
-                    "policy_optimizer_diagnostic_nonresumable_v1"
-                ),
-                "checkpoint_authority": False,
-                "resume_authority": False,
-            },
+            required_infos=_v2_snapshot_identity(),
         )
+    assert not snapshot.with_name(snapshot.name + ".receipt.json").exists()
+
+
+def test_snapshot_receipt_rejects_v1_identity_before_read(tmp_path):
+    snapshot = tmp_path / "model_7.diagnostic_nonresumable.pt"
+    snapshot.write_bytes(b"old-v1-snapshot")
+    old_identity = _v2_snapshot_identity(
+        action_ball_full_mdp_snapshot_kind=(
+            "policy_optimizer_diagnostic_nonresumable_v1"
+        ),
+        fresh_full_mdp_observation_kind=(
+            "action_ball_full_mdp_action_epoch_observation_v1"
+        ),
+        actor_obs_contract="action_ball_full_mdp_action_epoch_v1",
+        actor_obs_total_dim=229,
+        critic_obs_contract="action_ball_full_mdp_action_epoch_critic_v1",
+        critic_obs_total_dim=399,
+        training_contract_schema_version=1,
+    )
+
+    with pytest.raises(RuntimeError, match="training-contract schema differs"):
+        adapter._write_snapshot_receipt(
+            snapshot,
+            learning_iteration=7,
+            required_infos=old_identity,
+        )
+
+    assert not snapshot.with_name(snapshot.name + ".receipt.json").exists()
+
+
+def test_snapshot_receipt_rejects_v1_payload_metadata(tmp_path, monkeypatch):
+    snapshot = tmp_path / "model_7.diagnostic_nonresumable.pt"
+    snapshot.write_bytes(b"old-v1-snapshot")
+
+    class _Tensor:
+        pass
+
+    class _Finite:
+        def all(self):
+            return self
+
+        def item(self):
+            return True
+
+    old_infos = {
+        "action_ball_full_mdp_snapshot_kind": (
+            "policy_optimizer_diagnostic_nonresumable_v1"
+        ),
+        "checkpoint_authority": False,
+        "resume_authority": False,
+    }
+    fake_torch = types.SimpleNamespace(
+        Tensor=_Tensor,
+        isfinite=lambda _value: _Finite(),
+        load=lambda _stream, **_kwargs: {
+            "model_state_dict": {"weight": _Tensor()},
+            "optimizer_state_dict": {"state": {0: {"step": _Tensor()}}},
+            "iter": 7,
+            "infos": old_infos,
+        },
+    )
+    real_import_module = adapter.importlib.import_module
+    monkeypatch.setattr(
+        adapter.importlib,
+        "import_module",
+        lambda name: fake_torch if name == "torch" else real_import_module(name),
+    )
+
+    with pytest.raises(RuntimeError, match="snapshot metadata differs"):
+        adapter._write_snapshot_receipt(
+            snapshot,
+            learning_iteration=7,
+            required_infos=_v2_snapshot_identity(),
+        )
+
     assert not snapshot.with_name(snapshot.name + ".receipt.json").exists()
 
 

@@ -1,11 +1,11 @@
-"""MuJoCo FullMDP WAIT plus an explicit incomplete single-shot A slice.
+"""MuJoCo FullMDP legacy WAIT plus the live single-shot Full-A slice.
 
 The plant, masked reset implementation, and ``sim.forward()`` remain the
 tracked :class:`A3ReadyBallVecEnv` implementation.  WAIT parks the ball and
-projects the post-forward live robot tensors into the shared ActionEpoch
-observation order.  The opt-in A slice additionally reveals and launches one
-deterministic question, publishes live Physical/R03/R06/R07 facts, and computes
-their Reward20 terms plus the six common motion terms.
+keeps the legacy V1 observation ABI.  The opt-in A slice additionally reveals
+and launches one deterministic question, publishes live Physical/R03/R06/R07
+facts, computes their Reward20 terms plus the six common motion terms, and
+publishes the compact semantic V2 observation ABI.
 
 The narrow WAIT transition below advances the real plant and closes only the
 IDLE Reward20/termination/masked-reset path.  An observed generic racket
@@ -109,7 +109,7 @@ FULLMDP_TERMINATION_BITS = {
 
 
 class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
-    """Real WAIT reset/transition projected into the live 229/399 contract."""
+    """Real WAIT V1 plus the Full-A semantic 203/219 observation."""
 
     def __init__(
         self,
@@ -185,6 +185,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._fullmdp_anchor_index = FULLMDP_TRACKED_BODY_NAMES.index(
             FULLMDP_ANCHOR_BODY_NAME
         )
+        self._fullmdp_anchor_body_id = int(body_ids[self._fullmdp_anchor_index])
+        self._fullmdp_pelvis_body_id = int(body_ids[0])
+        self._fullmdp_pelvis_root_id = int(roots[0])
         weights = [spec[1] for spec in FULLMDP_DENSE_REWARD_SPECS]
         self._fullmdp_dense_weights = self._torch.tensor(
             weights, dtype=self.qpos_init.dtype, device=self.device
@@ -243,6 +246,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_update_teacher()
         self._fullmdp_initialized = True
         self._compute_obs()
+        # ``A3ReadyBallVecEnv.__init__`` necessarily observes the legacy WAIT
+        # surface before the Full-A producers below exist.  No caller can see
+        # that construction-only row; publish the final public width only after
+        # the semantic state has been installed atomically.
+        self.num_obs = int(self._obs_buf.shape[1])
 
     @property
     def action_contract_identity(self) -> dict:
@@ -321,6 +329,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_target_positive_x = float(target[0]) > net_x
         self._full_a_table_bounds = (x_min, x_max, y_min, y_max)
         self._full_a_table_surface_z = table_surface
+        self._full_a_table_surface_center_scene = torch.tensor(
+            (
+                0.5 * (x_min + x_max),
+                0.5 * (y_min + y_max),
+                table_surface,
+            ),
+            dtype=dtype,
+            device=self.device,
+        )
         self._full_a_net_x = net_x
         self._full_a_net_clear_z = net_top + ball_radius
         self._full_a_landing_plane_z = table_surface + ball_radius
@@ -512,6 +529,25 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         self._full_a_cadence_ready = torch.zeros_like(
             self._full_a_racket_contact
+        )
+        # R07 already measures support once from the real contact-force rows on
+        # every control transition.  The critic consumes that same sample;
+        # observation packing must not launch a second contact-force pass.
+        self._full_a_foot_supported_lr = torch.zeros(
+            (n, 2), dtype=torch.bool, device=self.device
+        )
+        # Materialize the shared host ABI constants once.  Observation packing
+        # then needs one flat multiply per newly allocated actor/critic suffix,
+        # with the already-scaled actor reused as the critic prefix.
+        self._full_a_actor_scale_v2 = torch.tensor(
+            observation_contract.ACTOR_SCALE_FLAT_V2,
+            dtype=dtype,
+            device=self.device,
+        )
+        self._full_a_critic_extension_scale_v2 = torch.tensor(
+            observation_contract.CRITIC_EXTENSION_SCALE_FLAT_V2,
+            dtype=dtype,
+            device=self.device,
         )
         self._full_a_recovery_component_scales = torch.tensor(
             portable_outcome.RECOVERY_COMPONENT_SCALES,
@@ -1119,8 +1155,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             )
         if body_lin_vel is None:
             body_lin_vel, _body_ang_vel = self._body_com_velocities_w()
+        support = support_force.ge(FULL_A_SUPPORT_FORCE_N)
+        cache = getattr(self, "_full_a_foot_supported_lr", None)
+        if cache is not None:
+            cache.copy_(support)
         slip = body_lin_vel[:, (3, 6), :2]
-        return support_force.ge(FULL_A_SUPPORT_FORCE_N), slip, invalid_force.eq(0)
+        return support, slip, invalid_force.eq(0)
 
     def _full_a_recovery_component_errors(self):
         """Compute the shared thirteen recovery errors from live MuJoCo state."""
@@ -1723,8 +1763,218 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         data.qvel[ids, self.b_v : self.b_v + 6] = 0.0
         self.ball_age_buf[ids] = 0
 
+    def _full_a_semantic_observation_v2(self, st):
+        """Pack the live Full-A plant into the shared semantic 203/219 ABI."""
+
+        torch = self._torch
+        data = self.sim.data
+        dtype = self.qpos_init.dtype
+        origins = self.env.scene.env_origins
+        root_pos_w = st["base_pos"]
+        root_pos_scene = root_pos_w - origins
+        root_quat_w = st["base_quat"]
+        heading_xy = observation_contract.heading_xy_from_quat_wxyz(root_quat_w)
+
+        def heading(value):
+            return observation_contract.rotate_world_to_heading_xy(
+                heading_xy, value
+            )
+
+        # Epoch deliberately retains the current task through RETIRED until a
+        # later ACCEPT replaces it.  Actor visibility is narrower: Motion's
+        # prepare/swing/follow phases expose the task, while recover/ready hide
+        # it.  Derive that view from the existing canonical phase rather than
+        # adding a second validity owner.
+        current_task = self._epoch_task_valid
+        task_visible = current_task & self._full_a_motion_phase_code.lt(
+            RECOVER_HIDDEN_PHASE_INDEX
+        )
+        task_mask = task_visible[:, None]
+
+        def task_vector(value):
+            rotated = heading(value)
+            return torch.where(task_mask, rotated, torch.zeros_like(rotated))
+
+        anchor = self._fullmdp_anchor_index
+        live_anchor_pos = data.xpos[:, self._fullmdp_anchor_body_id]
+        live_anchor_quat = data.xquat[:, self._fullmdp_anchor_body_id]
+        anchor_pos, anchor_ori = observation_contract.relative_pose_6d(
+            live_anchor_pos,
+            live_anchor_quat,
+            self._teacher_body_pos[:, anchor],
+            self._teacher_body_quat[:, anchor],
+        )
+        root_com_lin_vel_w = self._body_com_velocities_from_cvel(
+            torch,
+            data.cvel[:, self._fullmdp_pelvis_body_id],
+            data.xipos[:, self._fullmdp_pelvis_body_id],
+            data.subtree_com[:, self._fullmdp_pelvis_root_id],
+        )[0]
+
+        racket_pos_scene, racket_vel_w, racket_raw_normal_w = (
+            self._full_a_racket_kinematics()
+        )
+        task = self._epoch_task_f32
+        base_goal_delta = torch.cat(
+            (
+                task[:, 24:26] - root_pos_scene[:, :2],
+                torch.zeros_like(root_pos_scene[:, :1]),
+            ),
+            dim=1,
+        )
+        elapsed_s = (
+            int(self.common_step_counter) - self._epoch_clock_ticks[:, 0]
+        ).to(dtype=dtype) * float(self.step_dt)
+        time_to_contact = (
+            self._epoch_clock_ticks[:, 1] - int(self.common_step_counter)
+        ).to(dtype=dtype) * float(self.step_dt)
+        time_to_contact = torch.where(
+            task_visible, time_to_contact, torch.zeros_like(time_to_contact)
+        )
+        time_to_teacher_start = torch.clamp(
+            self._full_a_pre_swing_wait_s - elapsed_s, min=0.0
+        )
+        time_to_teacher_start = torch.where(
+            task_visible,
+            time_to_teacher_start,
+            torch.zeros_like(time_to_teacher_start),
+        )
+        time_to_next_opportunity = (
+            self._full_a_next_reveal_tick - self.episode_length_buf
+        ).to(dtype=dtype) * float(self.step_dt)
+
+        learning_phase = torch.zeros_like(self._epoch_phase)
+        for index, code in enumerate(
+            (
+                FULL_A_PHASE_IDLE,
+                FULL_A_PHASE_REVEAL_COMMITTED,
+                FULL_A_PHASE_LAUNCH_SETTLED,
+                FULL_A_PHASE_OUTCOME_SETTLED,
+                FULL_A_PHASE_RETIRED,
+            )
+        ):
+            learning_phase = torch.where(
+                self._epoch_phase.eq(code),
+                torch.full_like(learning_phase, index),
+                learning_phase,
+            )
+
+        actor_rows = {
+            "projected_gravity_b": st["proj_g"],
+            "base_ang_vel_b": st["base_ang_b"],
+            "base_position_table": (
+                root_pos_scene - self._full_a_table_surface_center_scene
+            ),
+            "base_heading_table_xy": heading_xy,
+            "base_com_lin_vel_heading": heading(root_com_lin_vel_w),
+            "joint_pos_rel": self._qpos_act() - self.action_offset.unsqueeze(0),
+            "joint_vel": self._qvel_act(),
+            "last_action": self.actions,
+            "teacher_joint_pos_rel": (
+                self._full_a_teacher_joint_pos - self.action_offset.unsqueeze(0)
+            ),
+            "teacher_joint_vel": self._full_a_teacher_joint_vel,
+            "motion_anchor_pos_b": anchor_pos,
+            "motion_anchor_ori_b6": anchor_ori,
+            "motion_phase_one_hot": torch.nn.functional.one_hot(
+                self._full_a_motion_phase_code, num_classes=5
+            ).to(dtype=dtype),
+            "racket_target_pos_error_heading": task_vector(
+                task[:, 5:8] - racket_pos_scene
+            ),
+            "racket_target_vel_error_heading": task_vector(
+                task[:, 8:11] - racket_vel_w
+            ),
+            "racket_target_normal_error_heading": task_vector(
+                task[:, 11:14] - racket_raw_normal_w
+            ),
+            "base_goal_error_heading_xy": task_vector(base_goal_delta)[:, :2],
+            "time_to_contact_s": time_to_contact[:, None],
+            "time_to_teacher_start_s": time_to_teacher_start[:, None],
+            "time_to_next_opportunity_s": time_to_next_opportunity[:, None],
+            "epoch_learning_phase_one_hot": torch.nn.functional.one_hot(
+                learning_phase, num_classes=5
+            ).to(dtype=dtype),
+            "task_valid": task_visible[:, None].to(dtype=dtype),
+        }
+        policy = observation_contract.concatenate_layout_rows(
+            observation_contract.ACTOR_LAYOUT_V2, actor_rows
+        )
+        policy.mul_(self._full_a_actor_scale_v2)
+
+        ball_pos_w = data.qpos[:, self.b_q : self.b_q + 3]
+        ball_quat_w = data.qpos[:, self.b_q + 3 : self.b_q + 7]
+        ball_lin_vel_w = data.qvel[:, self.b_v : self.b_v + 3]
+        ball_ang_vel_w = observation_contract.quat_rotate_wxyz(
+            ball_quat_w, data.qvel[:, self.b_v + 3 : self.b_v + 6]
+        )
+        live_ball = (
+            current_task
+            & self._epoch_launch_succeeded
+            & self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
+        )
+        ball9 = torch.cat(
+            (
+                heading(ball_pos_w - root_pos_w),
+                heading(ball_lin_vel_w),
+                heading(ball_ang_vel_w),
+            ),
+            dim=1,
+        )
+        ball9 = torch.where(live_ball[:, None], ball9, torch.zeros_like(ball9))
+
+        def current_latch(value):
+            # These critic bits describe the current live flight, not the
+            # retained history of a shot whose outcome has already closed.
+            return torch.where(live_ball, value, torch.zeros_like(value))[
+                :, None
+            ].to(dtype=dtype)
+
+        critic_rows = {
+            "episode_time_remaining_s": (
+                (self.max_episode_length - self.episode_length_buf)
+                .clamp_min(0)
+                .to(dtype=dtype)[:, None]
+                * float(self.step_dt)
+            ),
+            "live_ball_center_rel_root_heading": ball9[:, :3],
+            "live_ball_lin_vel_heading": ball9[:, 3:6],
+            "live_ball_ang_vel_heading": ball9[:, 6:9],
+            "selected_rubber_contact_latched": current_latch(
+                self._full_a_selected_racket_contact
+            ),
+            "net_crossed_latched": current_latch(self._full_a_net_crossed),
+            "net_clear_latched": current_latch(self._full_a_net_clear),
+            "foot_supported_lr": self._full_a_foot_supported_lr.to(dtype=dtype),
+            "cadence_ready_dwell_fraction": (
+                self._full_a_cadence_ready_streak.clamp(0, 2).to(dtype=dtype)[
+                    :, None
+                ]
+                / 2.0
+            ),
+        }
+        critic_extension = observation_contract.concatenate_layout_rows(
+            observation_contract.CRITIC_EXTENSION_LAYOUT_V2, critic_rows
+        )
+        critic_extension.mul_(self._full_a_critic_extension_scale_v2)
+        critic = torch.cat((policy, critic_extension), dim=1)
+        if tuple(policy.shape) != (
+            self.num_envs,
+            observation_contract.ACTOR_WIDTH_V2,
+        ) or tuple(critic.shape) != (
+            self.num_envs,
+            observation_contract.CRITIC_WIDTH_V2,
+        ):
+            raise RuntimeError("portable Full-A semantic observation width differs")
+        # The critic contains the actor tensor as its exact prefix, so one
+        # finite reduction covers both public groups.
+        torch._assert_async(torch.isfinite(critic).all())
+        self._obs_buf = policy
+        self._critic_obs_buf = critic
+        return policy
+
     def _compute_obs(self, st=None):
-        """Read the live post-forward plant and publish initial WAIT only."""
+        """Publish legacy WAIT V1 or the initialized Full-A semantic V2."""
 
         torch = self._torch
         # Base construction calls reset() -> _compute_obs() before the
@@ -1734,13 +1984,16 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         full_a_initialized = (
             getattr(self, "full_a_mode", False) and self._fullmdp_initialized
         )
+        if full_a_initialized:
+            return self._full_a_semantic_observation_v2(st or self._state())
+
         contact = self._con_geom[:]
         valid = self._con_idx < self._nacon[0]
         ball_contact = valid & (
             (contact[:, 0] == self._ball_gid)
             | (contact[:, 1] == self._ball_gid)
         )
-        if bool(ball_contact.any()) and not full_a_initialized:
+        if bool(ball_contact.any()):
             raise RuntimeError("portable FullMDP initial-WAIT ball is in contact")
         st = st or self._state()
         joint_pos_rel = self._qpos_act() - self.q_ready.unsqueeze(0)
@@ -1748,18 +2001,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         phase = torch.zeros(
             (self.num_envs, 5), dtype=joint_pos_rel.dtype, device=self.device
         )
-        if full_a_initialized:
-            phase = torch.nn.functional.one_hot(
-                self._full_a_motion_phase_code, num_classes=5
-            ).to(dtype=joint_pos_rel.dtype)
-            teacher_joint_pos_rel = (
-                self._full_a_teacher_joint_pos - self.q_ready.unsqueeze(0)
-            )
-            teacher_joint_vel = self._full_a_teacher_joint_vel
-        else:
-            phase[:, READY_HOLD_PHASE_INDEX] = 1.0
-            teacher_joint_pos_rel = zero_joint
-            teacher_joint_vel = zero_joint
+        phase[:, READY_HOLD_PHASE_INDEX] = 1.0
 
         actor_rows = {
             name: torch.zeros(
@@ -1776,8 +2018,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 "joint_pos_rel": joint_pos_rel,
                 "joint_vel_rel": self._qvel_act(),
                 "last_action": self.actions,
-                "teacher_joint_pos_rel": teacher_joint_pos_rel,
-                "teacher_joint_vel_rel": teacher_joint_vel,
+                "teacher_joint_pos_rel": zero_joint,
+                "teacher_joint_vel_rel": zero_joint,
                 "motion_phase_one_hot": phase,
             }
         )
@@ -1794,16 +2036,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             actor_rows["epoch_launch_succeeded"] = self._epoch_launch_succeeded[
                 :, None
             ].to(dtype=joint_pos_rel.dtype)
-            if full_a_initialized:
-                actor_rows["epoch_task_f32"] = self._epoch_task_f32
-                clock_remaining = (
-                    self._epoch_clock_ticks - int(self.common_step_counter)
-                ).to(dtype=joint_pos_rel.dtype) * self.step_dt
-                actor_rows["epoch_clock_remaining_s"] = torch.where(
-                    self._epoch_task_valid[:, None],
-                    clock_remaining,
-                    torch.zeros_like(clock_remaining),
-                )
         else:
             actor_rows["epoch_phase_one_hot"][
                 :, observation_contract.EPOCH_IDLE_PHASE_INDEX
@@ -1819,28 +2051,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 )
                 for name, width in observation_contract.CRITIC_EXTENSION_LAYOUT_V1
             }
-        if full_a_initialized:
-            present = self._torch.bitwise_and(
-                self._full_a_owner_valid_bits, 1
-            ).ne(0)
-            age = torch.where(
-                present,
-                (
-                    int(self.common_step_counter)
-                    - self._full_a_owner_source_step
-                ).to(joint_pos_rel.dtype) * self.step_dt,
-                torch.zeros_like(self._full_a_owner_source_step, dtype=joint_pos_rel.dtype),
-            )
-            critic_rows["physical_r03_r06_r07_fact_present"] = present.to(
-                joint_pos_rel.dtype
-            )
-            critic_rows["physical_r03_r06_r07_fact_age_s"] = age
-            critic_rows["physical_r03_r06_r07_fact_f32"] = self._full_a_owner_fact_f32.reshape(
-                self.num_envs, -1
-            )
-            critic_rows["physical_r03_r06_r07_fault_present"] = (
-                self._full_a_owner_fault_bits.ne(0).to(joint_pos_rel.dtype)
-            )
         critic_extension = observation_contract.concatenate_layout_rows(
             observation_contract.CRITIC_EXTENSION_LAYOUT_V1, critic_rows
         )

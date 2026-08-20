@@ -322,12 +322,43 @@ _ACTION_BALL_C211_CRITIC_OBS_LAYOUT = (
     ("task_valid", 1),
 )
 _ACTION_BALL_FULL_MDP_ACTOR_OBS_CONTRACT = (
-    "action_ball_full_mdp_action_epoch_v1"
+    "action_ball_full_mdp_semantic_actor_v2"
 )
 _ACTION_BALL_FULL_MDP_CRITIC_OBS_CONTRACT = (
+    "action_ball_full_mdp_semantic_critic_v2"
+)
+_ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT = (("action_epoch", 219),)
+_ACTION_BALL_FULL_MDP_LEGACY_ACTOR_OBS_CONTRACT = (
+    "action_ball_full_mdp_action_epoch_v1"
+)
+_ACTION_BALL_FULL_MDP_LEGACY_CRITIC_OBS_CONTRACT = (
     "action_ball_full_mdp_action_epoch_critic_v1"
 )
-_ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT = (("action_epoch", 399),)
+_ACTION_BALL_FULL_MDP_RUNTIME_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "gym_entry_point",
+        "target_mode",
+        "actor_obs_mode",
+        "runtime_owner_type",
+        "r10_checkpoint_adapter_bound",
+        "cold_restore",
+        "launch_authorized",
+        "diagnostic_unauthorized",
+        "joint_safety_evidence_mode",
+        "formal_evidence_prohibited",
+        "curriculum_promotion_prohibited",
+        "exact_export_prohibited",
+        "deployment_prohibited",
+        "run_mode",
+        "resumable_checkpoint_write",
+        "diagnostic_snapshot_write",
+        "diagnostic_snapshot_interval_updates",
+        "diagnostic_operational",
+        "runtime_dependency_kind",
+    }
+)
 
 
 def _action_ball_211_wait_contract_facts() -> dict:
@@ -6893,9 +6924,16 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     full_mdp_declared = (
         target_mode == "action_ball_full_mdp"
         or contract.get("actor_obs_mode") == "action_ball_full_mdp"
-        or actor_contract == "action_ball_full_mdp_action_epoch_v1"
+        or actor_contract
+        in (
+            _ACTION_BALL_FULL_MDP_ACTOR_OBS_CONTRACT,
+            _ACTION_BALL_FULL_MDP_LEGACY_ACTOR_OBS_CONTRACT,
+        )
         or contract.get("critic_obs_contract")
-        == "action_ball_full_mdp_action_epoch_critic_v1"
+        in (
+            _ACTION_BALL_FULL_MDP_CRITIC_OBS_CONTRACT,
+            _ACTION_BALL_FULL_MDP_LEGACY_CRITIC_OBS_CONTRACT,
+        )
         or "action_ball_full_mdp_runtime" in contract
         or "fresh_full_mdp_installed_reward_graph" in contract
     )
@@ -6913,28 +6951,49 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
         if (
             target_mode != "action_ball_full_mdp"
             or contract.get("actor_obs_mode") != "action_ball_full_mdp"
-            or actor_contract != "action_ball_full_mdp_action_epoch_v1"
-            or contract.get("actor_obs_total_dim") != 229
+            or actor_contract != _ACTION_BALL_FULL_MDP_ACTOR_OBS_CONTRACT
+            or contract.get("actor_obs_total_dim") != 203
             or contract.get("actor_obs_term_names") != ["action_epoch"]
-            or contract.get("actor_obs_term_dims") != [229]
+            or contract.get("actor_obs_term_dims") != [203]
             or contract.get("observation_history_lengths") != [1]
             or contract.get("critic_obs_contract")
-            != "action_ball_full_mdp_action_epoch_critic_v1"
-            or contract.get("critic_obs_total_dim") != 399
+            != _ACTION_BALL_FULL_MDP_CRITIC_OBS_CONTRACT
+            or contract.get("critic_obs_total_dim") != 219
             or contract.get("critic_obs_term_names") != ["action_epoch"]
-            or contract.get("critic_obs_term_dims") != [399]
+            or contract.get("critic_obs_term_dims") != [219]
             or not isinstance(full_mdp_runtime, Mapping)
-            or full_mdp_runtime.get("schema_version") != 1
+            or set(full_mdp_runtime)
+            not in (
+                _ACTION_BALL_FULL_MDP_RUNTIME_KEYS,
+                _ACTION_BALL_FULL_MDP_RUNTIME_KEYS | {"policy_bootstrap"},
+            )
+            or full_mdp_runtime.get("schema_version") != 2
             or full_mdp_runtime.get("kind")
-            != "action_ball_full_mdp_train_wiring_v1"
+            != "action_ball_full_mdp_train_wiring_v2"
             or full_mdp_runtime.get("target_mode") != "action_ball_full_mdp"
             or full_mdp_runtime.get("actor_obs_mode") != "action_ball_full_mdp"
+            or not isinstance(full_mdp_runtime.get("gym_entry_point"), str)
+            or not full_mdp_runtime.get("gym_entry_point")
+            or not isinstance(full_mdp_runtime.get("runtime_owner_type"), str)
+            or not full_mdp_runtime.get("runtime_owner_type")
             or full_mdp_runtime.get("run_mode") != "single_action_lean"
             or full_mdp_runtime.get("diagnostic_unauthorized") is not True
             or full_mdp_runtime.get("launch_authorized") is not False
             or full_mdp_runtime.get("r10_checkpoint_adapter_bound") is not False
             or full_mdp_runtime.get("cold_restore") is not False
-            or full_mdp_runtime.get("no_save") is not True
+            or "no_save" in full_mdp_runtime
+            or full_mdp_runtime.get("resumable_checkpoint_write") is not False
+            or full_mdp_runtime.get("diagnostic_snapshot_write") is not True
+            or isinstance(
+                full_mdp_runtime.get("diagnostic_snapshot_interval_updates"),
+                bool,
+            )
+            or not isinstance(
+                full_mdp_runtime.get("diagnostic_snapshot_interval_updates"),
+                int,
+            )
+            or full_mdp_runtime.get("diagnostic_snapshot_interval_updates")
+            <= 0
             or full_mdp_runtime.get("diagnostic_operational") is not True
             or full_mdp_runtime.get("formal_evidence_prohibited") is not True
             or full_mdp_runtime.get("curriculum_promotion_prohibited") is not True

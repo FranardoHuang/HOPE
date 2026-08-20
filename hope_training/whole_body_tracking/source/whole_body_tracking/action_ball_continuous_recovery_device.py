@@ -361,7 +361,22 @@ class ContinuousRecoveryMotionReadyView:
     owner_kind: str
     ready_identity: object
     ready: torch.Tensor
+    ready_streak: torch.Tensor
+    required_dwell: int
     control_tick: torch.Tensor
+
+
+@dataclass(frozen=True)
+class ContinuousRecoveryObservationState:
+    """Clone-only R07 post-physics state; never a Motion admission fact."""
+
+    postphysics_valid: torch.Tensor
+    source_step: torch.Tensor
+    reset_generation: torch.Tensor
+    control_tick: torch.Tensor
+    ready_streak: torch.Tensor
+    required_dwell: int
+    foot_supported_lr: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -408,9 +423,14 @@ class _FullMdpClosePayload:
 class _MotionReadyPayload:
     owner_identity: object
     owner: object
+    postphysics_valid: torch.Tensor
     source_step: torch.Tensor
+    reset_generation: torch.Tensor
     control_tick: torch.Tensor
     ready: torch.Tensor
+    ready_streak: torch.Tensor
+    required_dwell: int
+    foot_supported_lr: torch.Tensor
 
 
 _FULL_MDP_REWARD_REGISTRY_LOCK = threading.RLock()
@@ -575,6 +595,13 @@ class DiagnosticN2ContinuousRecoveryBundle:
             projection,
             owner_kind=owner_kind,
         )
+
+    def action_epoch_observation_state(
+        self,
+    ) -> "ContinuousRecoveryObservationState":
+        """Read the existing R07 post-physics state without Motion authority."""
+
+        return self._require_bound_owner().action_epoch_observation_state()
 
     def publish_epoch_reward_facts(
         self, *, current_source_step: torch.Tensor
@@ -779,6 +806,7 @@ class R07EpochDirectRewardFacts:
     recovery_age_tick: torch.Tensor
     reward_eligible: torch.Tensor
     facts_valid: torch.Tensor
+    foot_supported_lr: torch.Tensor
     infrastructure_fault: torch.Tensor
     producer_fault_bits: torch.Tensor
     component_errors: torch.Tensor
@@ -3512,6 +3540,13 @@ class ContinuousRecoveryDeviceCoordinator:
             recovery_age_tick=recovery_age_tick,
             reward_eligible=reward_eligible,
             facts_valid=facts_valid,
+            foot_supported_lr=(
+                facts.facts_valid[:, None]
+                & (
+                    facts.foot_contact_signal
+                    >= float(self.profile.support_contact_threshold)
+                )
+            ),
             infrastructure_fault=infrastructure_fault,
             producer_fault_bits=producer_fault_bits,
             component_errors=torch.where(
@@ -3663,6 +3698,12 @@ class ContinuousRecoveryDeviceCoordinator:
                 raise ContinuousRecoveryDeviceError(
                     f"R07 ActionEpoch readiness {name} shape differs"
                 )
+        foot_supported_lr = self._tensor(
+            result.foot_supported_lr,
+            label="R07 readiness foot_supported_lr",
+            shape=(self.num_envs, self.num_feet),
+            dtype=torch.bool,
+        )
         generation_changed = (
             self._require_action_epoch_motion_cadence_chronology(
                 reset_generation=result.reset_generation,
@@ -3757,13 +3798,18 @@ class ContinuousRecoveryDeviceCoordinator:
         motion_ready_payload = _MotionReadyPayload(
             owner_identity=self._identity,
             owner=self,
+            postphysics_valid=result.facts_valid.detach().clone(),
             source_step=result.source_step.detach().clone(),
+            reset_generation=result.reset_generation.detach().clone(),
             control_tick=torch.where(
                 result.motion_cadence_tick < torch.iinfo(torch.int64).max,
                 result.motion_cadence_tick + 1,
                 torch.full_like(result.motion_cadence_tick, -1),
             ),
             ready=ready_live.detach().clone(),
+            ready_streak=next_streak.detach().clone(),
+            required_dwell=int(self.profile.ready_dwell_ticks),
+            foot_supported_lr=foot_supported_lr.detach().clone(),
         )
         self._latest_motion_ready_projection = _mint_full_mdp_identity(
             ContinuousRecoveryMotionReadyProjection,
@@ -4016,9 +4062,20 @@ class ContinuousRecoveryDeviceCoordinator:
         motion_ready_payload = _MotionReadyPayload(
             owner_identity=self._identity,
             owner=self,
+            postphysics_valid=self._cache_facts_valid.detach().clone(),
             source_step=self._cache_source_step.detach().clone(),
+            reset_generation=self._reset_generation.detach().clone(),
             control_tick=(self._cache_episode_tick + 1).detach().clone(),
             ready=self._cache_ready_live.detach().clone(),
+            ready_streak=self._cache_ready_streak.detach().clone(),
+            required_dwell=int(self.profile.ready_dwell_ticks),
+            foot_supported_lr=(
+                facts.facts_valid[:, None]
+                & (
+                    facts.foot_contact_signal
+                    >= float(self.profile.support_contact_threshold)
+                )
+            ).detach().clone(),
         )
         self._latest_motion_ready_projection = _mint_full_mdp_identity(
             ContinuousRecoveryMotionReadyProjection,
@@ -4046,6 +4103,73 @@ class ContinuousRecoveryDeviceCoordinator:
                 "R07 Motion readiness has no real post-physics publication"
             )
         return projection
+
+    def action_epoch_observation_state(
+        self,
+    ) -> ContinuousRecoveryObservationState:
+        """Clone the current direct post-physics state for Observation V2.
+
+        Cold genesis has no simulated post-physics edge, so its only truthful
+        state is an explicit invalid/zero row set.  Once direct publication
+        has started, losing the retained payload is an error rather than a
+        reusable zero fallback.
+        """
+
+        if (
+            type(self._diagnostic_n2_bundle)
+            is not DiagnosticN2ContinuousRecoveryBundle
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 observation state requires the bound direct runtime"
+            )
+        projection = self._latest_motion_ready_projection
+        if projection is None:
+            if self._action_epoch_ready_last_source_step >= 0:
+                raise ContinuousRecoveryDeviceError(
+                    "R07 observation state lost its post-physics publication"
+                )
+            return ContinuousRecoveryObservationState(
+                postphysics_valid=torch.zeros(
+                    self.num_envs, dtype=torch.bool, device=self.device
+                ),
+                source_step=torch.full(
+                    (self.num_envs,), -1, dtype=torch.int64, device=self.device
+                ),
+                reset_generation=torch.full(
+                    (self.num_envs,), -1, dtype=torch.int64, device=self.device
+                ),
+                control_tick=torch.full(
+                    (self.num_envs,), -1, dtype=torch.int64, device=self.device
+                ),
+                ready_streak=torch.zeros(
+                    self.num_envs, dtype=torch.int64, device=self.device
+                ),
+                required_dwell=int(self.profile.ready_dwell_ticks),
+                foot_supported_lr=torch.zeros(
+                    (self.num_envs, self.num_feet),
+                    dtype=torch.bool,
+                    device=self.device,
+                ),
+            )
+        with _FULL_MDP_REWARD_REGISTRY_LOCK:
+            payload = _MOTION_READY_REGISTRY.get(projection)
+        if (
+            payload is None
+            or payload.owner_identity is not self._identity
+            or payload.owner is not self
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 observation state publication is not owner-issued"
+            )
+        return ContinuousRecoveryObservationState(
+            postphysics_valid=payload.postphysics_valid.detach().clone(),
+            source_step=payload.source_step.detach().clone(),
+            reset_generation=payload.reset_generation.detach().clone(),
+            control_tick=payload.control_tick.detach().clone(),
+            ready_streak=payload.ready_streak.detach().clone(),
+            required_dwell=payload.required_dwell,
+            foot_supported_lr=payload.foot_supported_lr.detach().clone(),
+        )
 
     def require_owned_motion_ready_projection(
         self,
@@ -4081,6 +4205,8 @@ class ContinuousRecoveryDeviceCoordinator:
             owner_kind="motion",
             ready_identity=self._identity,
             ready=payload.ready.detach().clone(),
+            ready_streak=payload.ready_streak.detach().clone(),
+            required_dwell=payload.required_dwell,
             control_tick=payload.control_tick.detach().clone(),
         )
 
@@ -6032,6 +6158,7 @@ __all__ = (
     "ContinuousRecoveryFullMdpRewardCloseReceipt",
     "ContinuousRecoveryMotionReadyProjection",
     "ContinuousRecoveryMotionReadyView",
+    "ContinuousRecoveryObservationState",
     "ContinuousRecoveryFullMdpPreRewardView",
     "DeviceLandingOutcomeShotKey",
     "DeviceContinuousRecoveryReference",

@@ -447,6 +447,35 @@ def test_fixed_n_physical_launch_installs_due_and_neutral_rows_without_compactio
     assert owner._mailbox_reserved[0].sum() == 1
     assert not owner._mailbox_reserved[1].any()
 
+    # The direct install writes only R06's typed ActionEpoch plane.  The
+    # observation projection must therefore select it without consulting the
+    # still-default legacy DeviceLandingOutcomeKey buffers.
+    assert int(owner._flight_key_ints["action_uid"][0, 0]) == 0
+    observation_projection = owner.action_ball_full_mdp_observation_projection()
+    observation = owner.require_owned_action_epoch_current_flight_observation(
+        observation_projection,
+        current_shot_key=key,
+        current_publication_ordinal=torch.tensor(
+            (17, -1), dtype=torch.int64, device=device
+        ),
+    )
+    assert type(observation) is D.ActionEpochR06CurrentFlightObservationView
+    assert observation.r06_owner is owner
+    assert observation.publication_identity is observation_projection
+    assert observation.flight_slot.tolist() == [0, -1]
+    assert not observation.contact_valid.any()
+    assert not observation.net_crossed.any()
+    assert not observation.net_clear.any()
+
+    observation.flight_slot.fill_(1)
+    observation.contact_valid.fill_(True)
+    observation.net_crossed.fill_(True)
+    observation.net_clear.fill_(True)
+    assert int(owner._flight_state[0, 0]) == D.FLIGHT_INBOUND
+    assert not owner._flight_contact_valid.any()
+    assert not owner._flight_net_crossed.any()
+    assert not owner._flight_net_clear.any()
+
     before = owner._mutation_version.clone()
     neutral_i64 = torch.full((2,), -1, dtype=torch.int64, device=device)
     neutral_key = E.ActionEpochShotKey(
@@ -476,3 +505,246 @@ def test_fixed_n_physical_launch_installs_due_and_neutral_rows_without_compactio
     finally:
         physical._action_epoch_active_r06_launch = None
     assert torch.equal(owner._mutation_version, before)
+
+
+_OBSERVATION_KEY_VALUES = {
+    "reset_generation": 1,
+    "ball_generation": 3,
+    "action_uid": 7,
+    "action_slot": 0,
+    "shot_index": 11,
+    "task_identity": 101,
+    "outcome_identity": 201,
+    "ball_identity": 301,
+}
+
+
+def _observation_key(owner, **overrides):
+    values = {**_OBSERVATION_KEY_VALUES, **overrides}
+    return E.ActionEpochShotKey(
+        **{
+            name: torch.tensor(
+                (value, -1), dtype=torch.int64, device=owner.device
+            )
+            for name, value in values.items()
+        }
+    )
+
+
+def _seed_typed_observation_flight(
+    owner,
+    *,
+    slot,
+    key,
+    publication=17,
+    state=D.FLIGHT_INBOUND,
+    action_epoch=True,
+    contact=False,
+    crossed=False,
+    clear=False,
+):
+    for field in E.fields(E.ActionEpochShotKey):
+        getattr(owner, "_flight_" + field.name)[0, slot] = getattr(
+            key, field.name
+        )[0]
+    owner._flight_publication_ordinal[0, slot] = publication
+    owner._flight_state[0, slot] = state
+    owner._flight_action_epoch[0, slot] = action_epoch
+    owner._flight_contact_valid[0, slot] = contact
+    owner._flight_net_crossed[0, slot] = crossed
+    owner._flight_net_clear[0, slot] = clear
+
+
+def _project_current_flight(owner, key, *, publication=17):
+    return owner.require_owned_action_epoch_current_flight_observation(
+        owner.action_ball_full_mdp_observation_projection(),
+        current_shot_key=key,
+        current_publication_ordinal=torch.tensor(
+            (publication, -1), dtype=torch.int64, device=owner.device
+        ),
+    )
+
+
+def test_current_flight_projection_selects_full_key_collision_in_k2():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    current = _observation_key(owner)
+    prior = _observation_key(
+        owner,
+        task_identity=901,
+        outcome_identity=902,
+        ball_identity=903,
+    )
+    _seed_typed_observation_flight(
+        owner,
+        slot=0,
+        key=prior,
+        state=D.FLIGHT_SETTLED_RETAINED,
+        contact=True,
+    )
+    _seed_typed_observation_flight(
+        owner,
+        slot=1,
+        key=current,
+        state=D.FLIGHT_OPEN,
+        contact=True,
+        crossed=True,
+        clear=True,
+    )
+
+    projected = _project_current_flight(owner, current)
+    assert projected.flight_slot.tolist() == [1, -1]
+    assert projected.contact_valid.tolist() == [True, False]
+    assert projected.net_crossed.tolist() == [True, False]
+    assert projected.net_clear.tolist() == [True, False]
+    assert tuple(field.name for field in D.fields(type(projected))) == (
+        "r06_owner",
+        "publication_identity",
+        "flight_slot",
+        "contact_valid",
+        "net_crossed",
+        "net_clear",
+    )
+    for value, dtype in (
+        (projected.flight_slot, torch.int64),
+        (projected.contact_valid, torch.bool),
+        (projected.net_crossed, torch.bool),
+        (projected.net_clear, torch.bool),
+    ):
+        assert tuple(value.shape) == (2,)
+        assert value.dtype == dtype
+        assert value.device == owner.device
+        assert value.is_contiguous()
+
+
+@pytest.mark.parametrize(
+    "identity_field", ("task_identity", "outcome_identity", "ball_identity")
+)
+def test_current_flight_projection_rejects_each_omitted_identity_collision(
+    identity_field,
+):
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    current = _observation_key(owner)
+    stale = _observation_key(
+        owner, **{identity_field: _OBSERVATION_KEY_VALUES[identity_field] + 1}
+    )
+    _seed_typed_observation_flight(
+        owner,
+        slot=0,
+        key=stale,
+        state=D.FLIGHT_OPEN,
+        contact=True,
+    )
+    _seed_typed_observation_flight(
+        owner,
+        slot=1,
+        key=current,
+        state=D.FLIGHT_OPEN,
+        contact=True,
+        crossed=True,
+        clear=True,
+    )
+
+    projected = _project_current_flight(owner, current)
+    assert projected.flight_slot.tolist() == [1, -1]
+    assert projected.contact_valid.tolist() == [True, False]
+    assert projected.net_crossed.tolist() == [True, False]
+    assert projected.net_clear.tolist() == [True, False]
+
+
+def test_current_flight_projection_rejects_publication_mismatch():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    key = _observation_key(owner)
+    _seed_typed_observation_flight(owner, slot=0, key=key, publication=17)
+
+    projected = _project_current_flight(owner, key, publication=18)
+    assert projected.flight_slot.tolist() == [-1, -1]
+    assert not projected.contact_valid.any()
+    assert not projected.net_crossed.any()
+    assert not projected.net_clear.any()
+
+
+@pytest.mark.parametrize(
+    ("key_overrides", "publication"),
+    (({"action_uid": 0}, 17), ({}, -1)),
+)
+def test_current_flight_projection_rejects_invalid_key_or_publication(
+    key_overrides, publication
+):
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    key = _observation_key(owner, **key_overrides)
+    _seed_typed_observation_flight(
+        owner,
+        slot=0,
+        key=key,
+        publication=publication,
+        state=D.FLIGHT_OPEN,
+        contact=True,
+        crossed=True,
+        clear=True,
+    )
+
+    projected = _project_current_flight(
+        owner, key, publication=publication
+    )
+    assert projected.flight_slot.tolist() == [-1, -1]
+    assert not projected.contact_valid.any()
+    assert not projected.net_crossed.any()
+    assert not projected.net_clear.any()
+
+
+def test_current_flight_projection_duplicate_exact_owner_fails_stop():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    key = _observation_key(owner)
+    _seed_typed_observation_flight(owner, slot=0, key=key, publication=17)
+    _seed_typed_observation_flight(owner, slot=1, key=key, publication=17)
+
+    with pytest.raises(RuntimeError, match="not unique"):
+        _project_current_flight(owner, key)
+
+
+@pytest.mark.parametrize(
+    ("action_epoch", "state"),
+    (
+        (False, D.FLIGHT_OPEN),
+        (True, D.FLIGHT_EMPTY),
+        (True, D.FLIGHT_SETTLED_RETAINED),
+    ),
+)
+def test_current_flight_projection_neutralizes_stale_or_nonlive_typed_rows(
+    action_epoch, state
+):
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    key = _observation_key(owner)
+    _seed_typed_observation_flight(
+        owner,
+        slot=0,
+        key=key,
+        state=state,
+        action_epoch=action_epoch,
+        contact=True,
+        crossed=True,
+        clear=True,
+    )
+
+    projected = _project_current_flight(owner, key)
+    assert projected.flight_slot.tolist() == [-1, -1]
+    assert not projected.contact_valid.any()
+    assert not projected.net_crossed.any()
+    assert not projected.net_clear.any()
+
+
+def test_current_flight_projection_rejects_foreign_handle_and_publication_abi():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    key = _observation_key(owner)
+    with pytest.raises(D.LandingOutcomeDeviceError, match="forged or foreign"):
+        owner.require_owned_action_epoch_current_flight_observation(
+            object(),
+            current_shot_key=key,
+            current_publication_ordinal=torch.tensor((17, -1)),
+        )
+    with pytest.raises(D.LandingOutcomeDeviceError, match="ABI differs"):
+        owner.require_owned_action_epoch_current_flight_observation(
+            owner.action_ball_full_mdp_observation_projection(),
+            current_shot_key=key,
+            current_publication_ordinal=torch.tensor((17, -1), dtype=torch.int32),
+        )
