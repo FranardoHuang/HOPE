@@ -1,12 +1,84 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`ACTIVE / branch-scoped / diagnostic_unauthorized`
+> 状态：`ACTIVE-successor-construction / no-live-run / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-20
+> 更新：2026-08-21
 >
 > `origin/main:docs/NOW.md` 仍是全项目唯一优先级权威。本页只记录当前分支这条
 > FullMDP 单动作双后端路线的依赖、证据、阻塞和完成条件，不建立影子队列。
+
+## 0. 2026-08-21 当前执行面（supersede 下文旧 active-run 叙述）
+
+三条 `4096` 长跑都已经停止；当前三张 Pod1 GPU 没有本项目 compute process。两条 Isaac run 分别止于
+ACK `4603/3467`，steady wall 约 `21.95/22.01 s/update`，退出原因未判定。MuJoCo r3 止于 ACK
+`10249`，终段 last-100 wall mean/median=`4.890/4.886 s/update`；它因真实 MuJoCo-Warp EPA horizon
+overflow fail-stop，同时旧 229-D actor observation 存在 IDLE clock 随全局 step 无界漂移，所以不得
+resume，也不得把累计 `ACCEPT=0`解释成课程失败。下文把这些进程写成 active 的段落只保留历史，不能再作
+发车依据。
+
+Franco 2026-08-21 明确：此前“约 6 秒”是要求大幅缩短迭代时间的量级信号，不是把 rollout 固定为
+24 steps 的绝对约束。下一代允许为更长 credit assignment 采用 48-step rollout，但仍必须大砍
+environment collection 与 owner/transaction 固定税，并同时报告 update latency 与 transitions/s；不能用
+batch 翻倍掩盖吞吐没有改善。
+
+### 0.1 本代采用、延后、拒绝
+
+| 项目 | 裁决 | 原因与边界 |
+| --- | --- | --- |
+| invalid-task epoch clock mask | **采用** | `task_valid=false`时五个clock严格为0；旧run的全局时间泄漏使MDP非平稳。Isaac/MuJoCo必须同源反例闭合，旧snapshot不resume。 |
+| R07付款阶段 | **采用** | 只在`OUTCOME_SETTLED && deadline-relative age in [10,77]`付款；readiness仍每tick计算，REVEAL/LAUNCH/RETIRED不付。 |
+| floating-base observation V2 | **条件候选 / 先复核** | 先逐字段复核既有HITTER、SMASH、BeyondMimic、智元/Unitree尽调和当前229/399布局，证明没有等价编码、字段可由真实部署观测且确实减少合法state alias；随后才决定是`+0/+2/+3/+5/+8`，不得先锁死237/407，也不得宣称单帧完全Markov。 |
+| FullMDP PPO recipe V2 | **采用** | `H=48, lambda=.98, epochs=5, minibatches=8, max_iterations=12500, save_interval=500`；总transitions、minibatch size、总optimizer steps与snapshot的env-step cadence保持旧`24x25000/MB4/save1000`量级。它是学习算法取舍，不是性能修复。 |
+| one-pose reset/D05/R07 | **拒绝** | stable birth、action-specific stroke entry、post-shot recovery服务不同意图；强行相等会绕过balance->mimic->entry课程。 |
+| Reward0--13调权 | **拒绝当前改动** | eligible denominator为0时调权没有因果作用；先修observation/clock/phase与学习配方。 |
+| balance safe-set debt | **延后** | 仅在fixed-clock/less-aliased successor仍显示robot-centric奖励缺口时，才考虑一个shared pure-tensor barrier；不新增owner/receipt/gate。 |
+| potential progress reward | **拒绝当前改动** | terminal/reset/timeout/phase边界未闭合，可能产生fall/reset正奖励。 |
+| MuJoCo EPA horizon `24->48` | **采用为依赖候选** | 保留overflow fail-stop；先用同一稀有pair证明24确定失败、48 finite且CPU oracle/固定tape一致，再钉fork/version/SHA。不是调`njmax/nconmax`。 |
+
+### 0.2 唯一依赖顺序
+
+只有前一项闭合后才能开始后一项；每项独立提交、可单独回退。禁止把全部变化揉成一条无法归因的长跑。
+
+1. **基线与TODO冻结**：从 stable `ee6571ba…`建立clean successor；整合已验证的clock与R07修复。
+2. **Observation尽调与V2裁决**：先重读既有HITTER、SMASH、BeyondMimic、智元/Unitree字段级对照，解释
+   为什么旧设计没有这些量；再审当前229/399是否已有等价编码。只有独立native-state正负扰动证明旧ABI存在
+   合法alias、候选字段可由真实部署观测且没有冗余，才实现最小增量。实现时一个纯tensor pack真源供
+   Isaac/MuJoCo复用，验证frame/单位/COM速度及reset peer preservation；不能用shared layout自己生成expected再自证。
+3. **PPO recipe V2**：只改FullMDP typed recipe，不改共享`ppo.yaml`；launcher receipt记录effective
+   `H/lambda/epochs/minibatches/budget/save`，但recipe hash只证明provenance，不证明学习更好。
+4. **MuJoCo capacity**：在project-owned pinned wheel中修EPA horizon，跑24-fail/48-pass deterministic fixture与
+   exact GPU focused；不删除容量gate，不从r3恢复。
+5. **Phase-B结构删除**：物理删除zero-callpoint formal owner、reveal adapter、旧Reward/Physical/R06 exact-pin
+   family及专属测试。不得为了旧壳添加compatibility adapter。
+6. **single-owner hot path**：一个device-resident mutable `ActionBallState`拥有phase/generation/shot/contact/
+   outcome/fault；K-row候选只构造一次、一次sparse commit，只有真实transition写compact event delta。
+   zero-live-flight成对跳过Physical/scene/R06/Epoch空事务；PPO boundary再统一汇总。
+7. **性能与语义验收**：clean source做fixed-tape RNG/highwater/reason/done/reset/Reward20/237/407 parity；
+   同卡、profiler-off、matched zero/mixed/active strata A/B。总update与transitions/s都必须显著改善；若最大span
+   转移则重新profile，只处理新的首墙，不继续堆小clone补丁。
+8. **fresh运行**：先运行clock-fixed、EPA-fixed的portable MuJoCo V2，随后运行通过matched性能验收的Isaac V2；
+   都使用fresh commit/namespace，不插zero-policy表现门，不要求早期`ACCEPT>0`。里程碑观察balance->mimic->
+   entry->strike->landing的分母和readiness margins，只有环境不可学或证据不可信才停止。
+
+### 0.3 HANDOFF约束：什么是真安全，什么必须删
+
+保留的边界只有跨真实权威的事实：nonfinite/overflow、真实contact与joint/table limit、reset generation、
+source/asset provenance、optimizer后durable ACK及失败后的sticky poison。以下不得继续称安全：同一writer的
+digest/receipt互证、无事件也写journal、每substep重复验证已在construction固定的class/bound method、没人消费的
+counter、用随机rollout证明确定性几何，以及`ACCEPT>0`/zero-policy不跌倒这类“学会后才允许开始学”的门。
+删除门时同批保留真正需要的人类telemetry和正/负反例；不能静默绕过真实物理或证据边界。
+
+### 0.4 当前代码状态
+
+- stable已有：discarded Reward record clone删除、invalid Isaac clock mask、owner deep scan移到cold boundary、
+  direct-lean Phase-A、partial-construction simulator cleanup；这些主要降低固定税和维护面，尚无matched Pod wall。
+- MuJoCo clock修复与R07 phase-window修复在独立clean分支通过focused回归，待按上述顺序整合。
+- floating-base observation仍是条件候选；在外部尽调/current-layout/部署可观测性三份独立审计闭合前，不改
+  229/399 ABI，也不把“减少policy负担”当成无需证据的口号。
+- D05 compact WIP虽然production净删2167行且`517 passed,40 skipped`，仍保留full-N publication/journal，
+  并使dormant formal/reveal壳construction-broken；因此明确`HOLD / uncommitted`，不能直接作为successor。
+- `origin/main:docs/NOW.md`仍是项目优先级唯一权威；本节只是本功能分支的执行依赖与验收清单。
 
 ## 1. 训练目标与口径
 
