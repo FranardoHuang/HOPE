@@ -2,6 +2,15 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-20 R07 payment-window branch candidate（Gate仍`Partial`）：**`1f9ed762…`将Isaac
+R07 reward eligibility收窄为与MuJoCo一致的唯一谓词：
+`phase == PHASE_OUTCOME_SETTLED && 10 <= deadline_relative_age <= 77`。readiness plant计算仍每个
+control tick执行，不被payment window截断；REVEAL/LAUNCH不付R07，RETIRED保留的immutable
+fact也不得重放age 77付款。selected true reset只清被选env的R07行，peer行与付款不变；
+没有新增owner、receipt或gate。exact host联合回归=`190 passed, 6 skipped`，独立red-team为
+`P0=0 / P1=0`。该commit尚未合入`main`且未live GPU验证，所以只是branch-scoped
+candidate，不改变本Gate状态或当前adopted runtime。
+
 **2026-08-20 current correction（Gate仍`Partial`）：**本段supersede下文把`take061/q_ready`
 当physical reset、joint teacher在reveal立即切measured frame0、自然shot完成当nonterminal selected reset
 并增加generation、ledger只有22 events，以及把zero-action table/fall表现当发车门的历史实现/判词。

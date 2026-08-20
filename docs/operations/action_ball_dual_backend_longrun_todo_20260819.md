@@ -73,7 +73,8 @@ counter、用随机rollout证明确定性几何，以及`ACCEPT>0`/zero-policy�
 
 - stable已有：discarded Reward record clone删除、invalid Isaac clock mask、owner deep scan移到cold boundary、
   direct-lean Phase-A、partial-construction simulator cleanup；这些主要降低固定税和维护面，尚无matched Pod wall。
-- MuJoCo clock修复与R07 phase-window修复在独立clean分支通过focused回归，待按上述顺序整合。
+- MuJoCo clock修复与R07 phase-window修复已作为独立提交整合到本clean successor；前者窄反例
+  `2 passed`，后者当前独立focused=`138 passed,6 skipped`，完整既有190-test口径待Pod/依赖齐备后复跑。
 - floating-base observation仍是条件候选；在外部尽调/current-layout/部署可观测性三份独立审计闭合前，不改
   229/399 ABI，也不把“减少policy负担”当成无需证据的口号。
 - D05 compact WIP虽然production净删2167行且`517 passed,40 skipped`，仍保留full-N publication/journal，

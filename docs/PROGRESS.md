@@ -1,5 +1,16 @@
 # 简短进度记录
 
+## 2026-08-20 — Isaac R07只在post-shot recovery窗口付款（branch candidate）
+
+- `1f9ed762…`把Isaac R07从“accepted shot的REVEAL/LAUNCH/OUTCOME/RETIRED生命周期都可付款”
+  收窄为与MuJoCo一致的唯一条件：ActionEpoch必须处于`PHASE_OUTCOME_SETTLED`，且以
+  shared deadline为原点的age在`10..77`。plant readiness仍每个control tick计算；
+  REVEAL/LAUNCH只保留numeric readiness/fact，RETIRED的immutable尾行不再重放最后一格Reward。
+- selected true reset仍只清自己的R07行，未选peer的fact/付款不变；没有新增owner、
+  receipt或gate。exact host联合回归=`190 passed, 6 skipped`，独立red-team为`P0=0 / P1=0`。
+  该提交仍是branch candidate，未合入`main`、未跑真实GPU/live调用点，因此Gate只能保持
+  `Partial`。
+
 ## 2026-08-20 — Isaac两条22秒长跑不完整结束；direct-lean Phase-A收口
 
 - Pod1两条`4096 env × 24 control × 4 substep` immutable run已在2026-08-20约`14:41Z`
@@ -10,7 +21,7 @@
 - 两条run在profiler-off稳态仍约`21.94/22.45 s/update`；collection约`20.50/20.74 s`，learning约
   `1.45/1.71 s`。trainer长期只用约`1.4` CPU core，GPU瞬时利用率约`27%`，所以CPU互斥不是三倍慢
   的根因。inclusive profile把collection中`7.522 s`定位到Physical→Scene→R06→Epoch post-physics链，
-  `3.102 s`在D05/command→observation，Reward约`.658 s`，真实sim仅约`.922 s`；`6 s/update`尚未达到。
+  `3.102 s`在D05/command→observation，Reward约`.658 s`，真实sim仅约`.922 s`；大幅加速尚未达到。
 - `dc62684c…` zero-live-flight候选已在host证明空行不读scene tensor、不发Physical/R06/
   Epoch空事务，保留callback pair、heartbeat/stamp、fault sticky和true-live dense path。但同一张卡的
   profiler-off matched A/B尚未执行；GPU窗口虽已空出，候选仍须先冻结clean source与exact runner，
