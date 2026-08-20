@@ -111,7 +111,8 @@ PyPI latest、同名未知wheel或ambient 5.4.0替代。若preserved source消�
 这条链只解决“从哪份源码、改了哪两个字节域、产出的wheel到底是什么”，不证明EPA48已修复r3那一对
 稀有凸碰撞。upstream唯一输入是Apache-2.0的`mujoco-warp==3.10.0.3` sdist；Git tag
 `v3.10.0.3`解析到commit `710c34ca96745a44bfb701cdbda89e1434845728`。先在checkout外显式下载并
-核SHA，再no-clobber发布；build脚本本身绝不联网：
+核SHA，再在没有并发恢复者时以显式`test ! -e`做本地no-clobber移动；下列下载步骤**不是**原子发布，
+若需要并发恢复必须另用平台原生no-replace工具。build脚本本身绝不联网：
 
 ```bash
 MJWARP_SOURCE_STAGE=$(mktemp -d ../nohope-mjwarp-source.XXXXXX)
@@ -129,7 +130,8 @@ caller必须是独立、已准备好的Python `>=3.10` builder，预先具备支
 `pip`、`setuptools`、`wheel`和系统`patch`。脚本不会创建环境、升级或安装这些依赖；缺失或过旧就由
 build/版本核验自然fail closed，不另造一套版本解析器。它强制
 `pip wheel --no-index --no-deps --no-build-isolation`，并把Python executable及SHA与Python/pip/
-setuptools/wheel版本和distribution root写入receipt。`patch`只是应用已钉SHA的tracked diff，不另造
+setuptools/wheel版本和distribution root作为**reported build-environment telemetry**写入receipt；这些字段
+帮助复现但由builder自报，不能独立认证builder。authority来自sdist/patch/source/wheel逐字节重算。`patch`只是应用已钉SHA的tracked diff，不另造
 一套工具二进制身份门。不要为这一步修改Pod ambient venv：
 
 ```bash
@@ -149,10 +151,16 @@ test ! -e vendor_assets/mujoco_warp_epa48_1
 
 tracked patch只允许两处变化：`pyproject.toml`把local version改成
 `3.10.0.3+hope.epa48.1`，`mujoco_warp/_src/types.py`把`MJ_MAX_EPAHORIZON=24`改成`48`；
-builder对patch前后全树做两文件allowlist diff，再核wheel filename、`METADATA`、exact patched
-sdist的281-file package payload、无missing/extra/duplicate/unsafe ZIP member、`RECORD`、receipt
-schema/build evidence和wheel SHA。输出仍只是
-`PASS_BUILD_CHAIN_ONLY`：当前没有保存下来的deterministic 24-fail/48-pass MJCF+pose fixture，没有
+builder对patch前后全树做两文件allowlist diff；schema-4 full receipt保留patch前与patch后各自
+281-file count+manifest digest，复验时重建完整source并把后者逐文件对到wheel，再核filename、`METADATA`、无
+missing/extra/duplicate/unsafe ZIP member、`RECORD`与wheel SHA。tracked
+[`HOST_BUILD_RECEIPT_SUMMARY.json`](../../configs/mujoco_warp_epa48_20260821/HOST_BUILD_RECEIPT_SUMMARY.json)
+只索引2026-08-21一次真实host build；worker仍须重读ignored full receipt与
+wheel，不能用summary代替。输出仍只是`PASS_BUILD_CHAIN_ONLY`：当前没有保存下来的stock反复exact
+build receipt不包含会变化的fixture/GPU/oracle进度或raw provenance SHA；这些状态只在G06、实验记录与
+compact summary维护，
+不能因科学Gate推进而要求重建相同wheel。输出仍只是`PASS_BUILD_CHAIN_ONLY`：当前没有保存下来的stock反复exact
+`EPA_HORIZON`-only overflow / fork反复zero-overflow finite active contact MJCF+pose fixture，没有
 exact GPU复测，也没有instrumented/ASan独立oracle。stock CPU MuJoCo同样把EPA horizon硬编码为24，且
 该边界可能越界，不能直接拿来当oracle。运行时`d.overflow`/warning fail-stop不得关闭；任一缺口存在时
 G06保持`Partial`，不得从r3恢复或授权训练。

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "verdict": "PASS_BUILD_CHAIN_ONLY",
+  "fork_id": "hope_mujoco_warp_epa48_v1",
+  "provenance_sha256": "61b31f77137c9b5e112c16479e4a4bed6c54fb695ca57c6f895908eefed34f30",
+  "full_build_receipt": {
+    "schema_version": 4,
+    "sha256": "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041",
+    "ignored_artifact_path": "vendor_assets/mujoco_warp_epa48_1/build_receipt.json"
+  },
+  "source": {
+    "sdist_sha256": "f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070",
+    "patch_sha256": "7683c6934d14bf0f291173e024327bf145bffa870b989259d8e139ddce4f9f51",
+    "package_changed_files": [
+      "mujoco_warp/_src/types.py"
+    ],
+    "package_before_file_count": 281,
+    "package_before_manifest_sha256": "6fb7b2849955d952e69d67c534b96816f43db5914805ff2732692e70011ea3c2",
+    "package_after_file_count": 281,
+    "package_after_manifest_sha256": "90ae9570e2e4e0dc45fd28315aae15b156802a5c2f92c0ba33dad3aac4385036"
+  },
+  "wheel": {
+    "filename": "mujoco_warp-3.10.0.3+hope.epa48.1-py3-none-any.whl",
+    "sha256": "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a",
+    "version": "3.10.0.3+hope.epa48.1"
+  },
+  "builder": {
+    "authority": "reported_telemetry_only",
+    "python_version": "3.12.13",
+    "pip_version": "26.2.1",
+    "setuptools_version": "84.0.0",
+    "wheel_version": "0.48.0"
+  },
+  "scientific_status": {
+    "deterministic_epa_fixture": "BLOCKED_NOT_YET_CAPTURED",
+    "gpu_24_fail_48_pass": "UNTESTED",
+    "independent_oracle": "UNTESTED_INSTRUMENTED_OR_ASAN_REQUIRED",
+    "overflow_gate_may_be_disabled": false,
+    "training_authorized": false,
+    "diagnostic_unauthorized": true
+  },
+  "scope": "Tracked compact index of one verified host build; source/patch/wheel bytes are independently recomputed, mutable scientific progress is deliberately separate, builder fields are reported telemetry only, and the ignored schema-4 receipt must be reverified before any future GPU probe."
+}

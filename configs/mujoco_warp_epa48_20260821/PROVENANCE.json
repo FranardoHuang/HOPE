@@ -21,7 +21,7 @@
     "epa_horizon": 48,
     "patch": {
       "path": "mujoco_warp-3.10.0.3_epa48.patch",
-      "sha256": "76d8206acfc14fd71ab78ce786761034dc88a0ef72f5710e275f37905a5c3758"
+      "sha256": "7683c6934d14bf0f291173e024327bf145bffa870b989259d8e139ddce4f9f51"
     },
     "allowed_source_changes": {
       "pyproject.toml": {
@@ -41,15 +41,6 @@
     "backend": "setuptools.build_meta",
     "backend_distribution": "setuptools",
     "wheel_output_root": "vendor_assets/mujoco_warp_epa48_1",
-    "policy": "caller supplies Python, pip, setuptools and wheel; builder records exact executable, hashes, versions and import origins"
-  },
-  "scientific_status": {
-    "deterministic_epa_fixture": "BLOCKED_NOT_YET_CAPTURED",
-    "gpu_24_fail_48_pass": "UNTESTED",
-    "independent_oracle": "UNTESTED_INSTRUMENTED_OR_ASAN_REQUIRED",
-    "stock_cpu_mujoco_is_oracle": false,
-    "overflow_gate_may_be_disabled": false,
-    "training_authorized": false,
-    "diagnostic_unauthorized": true
+    "policy": "caller supplies Python, pip, setuptools and wheel; build-environment fields are reported telemetry, while reconstructed source and wheel bytes are authoritative"
   }
 }

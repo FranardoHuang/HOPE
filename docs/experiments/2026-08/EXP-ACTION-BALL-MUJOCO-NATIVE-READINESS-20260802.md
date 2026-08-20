@@ -35,8 +35,12 @@
 > successor采用H48/U12500/save500/E5/MB8/lambda=.98和semantic A203/219。Observation V2恢复历史
 > fixed-194/A211已有、229迁移遗漏的table-relative root XYZ/heading/COM velocity，同时删除raw task与
 > owner/fault/reward账本；R06 broad projection缩为owner内canonical key8+publication join后输出live slot和
-> 三枚latch。它们已是host实现面，但exact GPU observation/snapshot parity仍`未测`。EPA48也只在同一
-> deterministic pair完成24-fail/48-finite、GPU复测与独立oracle后才可授权训练。
+> 三枚latch。它们已是host实现面，但exact GPU observation/snapshot parity仍`未测`。EPA48的exact
+> source/build chain已有一次真实`PASS_BUILD_CHAIN_ONLY` host receipt；无CUDA/隔离runtime时形成的通用
+> search/capture WIP因体量大且只能同源自证而被拒绝。r3 exact pair未保存，本轮也没有live GPU或
+> CUDA-qualified synthetic fixture。即便以后捕获，它也只关闭stock反复exact
+> `EPA_HORIZON`-only overflow / fork反复zero-overflow finite active contact差分，不能代签ActionBall
+> fixed-tape parity或instrumented/ASan独立oracle；三者未闭合前仍不授权训练。
 >
 > 本次live SSH认证失败，未取得当前Pod/GPU状态，所以本文不声明GPU空闲或存在active process。下一步只按
 > [当前长跑TODO](../../operations/action_ball_dual_backend_longrun_todo_20260819.md)执行：Observation原子闭合

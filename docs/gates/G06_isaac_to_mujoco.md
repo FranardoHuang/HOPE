@@ -28,16 +28,29 @@ exact稀有geom pair/pose另存为可复现fixture，所以不能事后宣称已
 `710c34ca…5728`；source只准`pyproject.toml` local version改为
 `3.10.0.3+hope.epa48.1`及`types.py`的horizon `24->48`。builder不下载、不安装，以
 `--no-index --no-deps --no-build-isolation`产出ignored wheel，核全树two-file allowlist、wheel filename/
-METADATA、patched sdist的281-file package payload、ZIP member/RECORD与wheel SHA，并严格复核receipt
-schema/fork/build/wheel evidence；任一missing/extra/duplicate/unsafe member都拒绝。它同时记录caller
-Python与build backend来源。host focused：
-`python3 -m pytest -q tests/test_build_mujoco_warp_epa48.py` = **`9 passed`**；这些是supply-chain与
-synthetic反例测试，不是physics fixture。
+METADATA、patch前后各自281-file count+manifest digest、ZIP member/RECORD与wheel SHA；复验时重建完整
+source并逐文件绑定wheel，严格复核schema-4 receipt/fork/source/wheel evidence。任一
+missing/extra/duplicate/unsafe member都拒绝。builder环境
+字段只作自报复现telemetry，不当成可独立认证的authority。tracked
+[`HOST_BUILD_RECEIPT_SUMMARY.json`](../../configs/mujoco_warp_epa48_20260821/HOST_BUILD_RECEIPT_SUMMARY.json)
+绑定本轮GNU patch zero-fuzz真实build的full receipt SHA `336f6454…041`与wheel SHA
+`58f47b1c…61a`；wheel构建后另从pinned输入重建fresh source逐字节验wheel，避免build backend改写
+首棵source后自证；host builder suite=`12 passed`。它仍只是`PASS_BUILD_CHAIN_ONLY`，不会代替
+ignored full receipt重验。
+Fixture/GPU/oracle是本Gate会变化的科学进度，只在本节、实验记录和compact summary更新，不进入
+immutable build receipt；raw provenance SHA只留summary作telemetry。因此推进本Gate或改说明文字不会
+迫使相同source/patch/wheel重新构建。
 
-当前仍缺三件：同一deterministic pair的stock-24 fail / fork-48 finite exact GPU复测、固定tape数值与
+本轮明确拒绝提交一个1545行、仅由526行host fake-worker测试覆盖的通用search/capture WIP：没有CUDA和
+两套可恢复隔离runtime时，它只能自验schema，不能证明Warp API、物理卡身份或EPA physics；当前算法还会
+在合法最坏配置启动4356个subprocess。等GPU恢复后，应先用约200--300行临时批搜找到真实candidate，
+随后只提交固定XML/pose/probe contract与singleton replay-only回归，不保留durable generator、搜索预算或
+worker history attestation。这是删除同源自证和结构臃肿，不是降低物理门槛。
+
+当前仍缺三件：CUDA-qualified新构造synthetic singleton reproducer、ActionBall fixed-tape数值与
 reason/counter/safety一致性、以及instrumented/ASan独立oracle。stock CPU MuJoCo同样硬编码24且该边界
 可能越界，不能直接当oracle。runtime `d.overflow`与warning gate一位不降级，旧r3不resume；当前也尚未在
-稳定、project-owned isolated builder中向`vendor_assets/`物化wheel。因此这里只关闭tracked build infrastructure，
+稳定、project-owned isolated runtime中完成GPU复核。因此这里只关闭可审计build chain，没有关闭科学证据，
 `diagnostic_unauthorized=true / training_authorized=false`，完整恢复/离线构建命令见
 [`setup_local_sync`](../operations/setup_local_sync.md#restore-and-build-the-project-owned-mujoco-warp-epa48-fork)。
 

@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import ctypes
 import email.policy
+import errno
 import hashlib
 import json
 import os
@@ -28,9 +30,47 @@ import zipfile
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROVENANCE_PATH = REPO_ROOT / "configs/mujoco_warp_epa48_20260821/PROVENANCE.json"
 RECEIPT_NAME = "build_receipt.json"
+RECEIPT_SCHEMA_VERSION = 4
 
 class ForkError(RuntimeError):
     pass
+
+def _atomic_rename_noreplace(source: Path, target: Path) -> None:
+    """Atomically publish one directory without replacing any target."""
+    source_bytes = os.fsencode(source)
+    target_bytes = os.fsencode(target)
+    if sys.platform == "darwin":
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename = getattr(libc, "renamex_np", None)
+        if rename is None:
+            raise ForkError("atomic no-replace rename is unavailable on this macOS host")
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        ctypes.set_errno(0)
+        result = rename(source_bytes, target_bytes, 0x00000004)  # RENAME_EXCL
+    elif sys.platform.startswith("linux"):
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename = getattr(libc, "renameat2", None)
+        if rename is None:
+            raise ForkError("atomic no-replace renameat2 is unavailable on this Linux host")
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        ctypes.set_errno(0)
+        result = rename(-100, source_bytes, -100, target_bytes, 1)  # AT_FDCWD, RENAME_NOREPLACE
+    elif os.name == "nt":
+        try:
+            os.rename(source, target)  # Windows rename already refuses an existing target.
+        except FileExistsError as exc:
+            raise ForkError(f"refusing to replace publish target {target}") from exc
+        return
+    else:
+        raise ForkError(f"atomic no-replace directory publish is unsupported on {sys.platform}")
+    if result == 0:
+        return
+    error = ctypes.get_errno()
+    if error in (errno.EEXIST, errno.ENOTEMPTY):
+        raise ForkError(f"refusing to replace publish target {target}")
+    raise ForkError(f"atomic no-replace publish failed for {target}: {os.strerror(error)}")
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -50,14 +90,11 @@ def _read_json(path: Path) -> Dict[str, Any]:
 
 def _load_provenance(path: Path = PROVENANCE_PATH) -> Dict[str, Any]:
     value = _read_json(path)
-    if value.get("schema_version") != 1 or value.get("fork_id") != "hope_mujoco_warp_epa48_v1":
+    if type(value.get("schema_version")) is not int or value["schema_version"] != 1 or value.get("fork_id") != "hope_mujoco_warp_epa48_v1":
         raise ForkError("unexpected provenance identity")
     build = value.get("build", {})
-    status = value.get("scientific_status", {})
     if build.get("network_allowed") is not False or build.get("dependency_install_allowed") is not False:
         raise ForkError("build must remain no-network and no-install")
-    if status.get("overflow_gate_may_be_disabled") is not False or status.get("training_authorized") is not False:
-        raise ForkError("build provenance cannot relax overflow or authorize training")
     return value
 
 def _write_json_x(path: Path, value: Mapping[str, Any]) -> None:
@@ -121,6 +158,12 @@ def _manifest_sha256(payload: Mapping[str, str]) -> str:
         digest.update(name.encode("utf-8") + b"\0" + value.encode("ascii") + b"\n")
     return digest.hexdigest()
 
+def _manifest_record(payload: Mapping[str, str]) -> Dict[str, Any]:
+    return {
+        "file_count": len(payload),
+        "manifest_sha256": _manifest_sha256(payload),
+    }
+
 def _check_input(path: Path, contract: Mapping[str, Any], kind: str) -> None:
     if not path.is_file() or path.is_symlink():
         raise ForkError(f"{kind} must be an existing regular file: {path}")
@@ -138,6 +181,7 @@ def _prepare_source(sdist: Path, destination: Path, provenance: Mapping[str, Any
     _check_input(patch_path, patch_contract, "patch")
     source = _safe_extract(sdist, destination, sdist_contract["top_level_directory"])
     before = _inventory(source)
+    package_before = _package_payload(source)
     allowed = provenance["fork"]["allowed_source_changes"]
     for name, contract in allowed.items():
         if before.get(name) != contract["before_sha256"]:
@@ -164,15 +208,35 @@ def _prepare_source(sdist: Path, destination: Path, provenance: Mapping[str, Any
         if after[name] != contract["after_sha256"]:
             raise ForkError(f"unexpected patched bytes for {name}")
     payload = _package_payload(source)
+    package_changed = sorted(
+        name for name in set(package_before) | set(payload)
+        if package_before.get(name) != payload.get(name)
+    )
+    if package_changed != ["mujoco_warp/_src/types.py"]:
+        raise ForkError(f"runtime package delta is not the one-file EPA constant: {package_changed}")
     return source, {
-        "sdist_sha256": sdist_contract["sha256"],
-        "patch_sha256": patch_contract["sha256"],
+        "sdist": {
+            "filename": sdist_contract["filename"],
+            "sha256": sdist_contract["sha256"],
+            "top_level_directory": sdist_contract["top_level_directory"],
+        },
+        "patch": {
+            "path": patch_contract["path"],
+            "sha256": patch_contract["sha256"],
+        },
         "changed_files": changed,
-        "package_file_count": len(payload),
-        "package_manifest_sha256": _manifest_sha256(payload),
+        "package_changed_files": package_changed,
+        "package_before": _manifest_record(package_before),
+        "package_after": _manifest_record(payload),
     }
 
 def _builder_identity(python: Path) -> Dict[str, Any]:
+    """Return reported build-environment telemetry.
+
+    These values help reproduce a build, but the source/wheel byte verifier is
+    the authority.  A receipt cannot independently authenticate the process
+    that wrote its own environment fields.
+    """
     code = r'''
 import importlib.metadata as md, json, sys
 from pathlib import Path
@@ -202,6 +266,7 @@ print(json.dumps(out, sort_keys=True))
     return value
 
 def _build_wheel(source: Path, wheelhouse: Path, python: Path) -> Tuple[Path, Dict[str, Any]]:
+    python = python.absolute()
     identity = _builder_identity(python)
     wheelhouse.mkdir(parents=True, exist_ok=False)
     flags = ["--no-index", "--no-deps", "--no-build-isolation", "--no-cache-dir"]
@@ -218,6 +283,8 @@ def _build_wheel(source: Path, wheelhouse: Path, python: Path) -> Tuple[Path, Di
 
 def _verify_wheel(wheel: Path, provenance: Mapping[str, Any], source: Path) -> Dict[str, Any]:
     fork = provenance["fork"]
+    if not wheel.is_file() or wheel.is_symlink():
+        raise ForkError("wheel must be a regular non-symlink file")
     if wheel.name != fork["expected_wheel_filename"]:
         raise ForkError(f"wheel filename mismatch: {wheel.name}")
     payload = _package_payload(source)
@@ -310,8 +377,6 @@ def _verify_wheel(wheel: Path, provenance: Mapping[str, Any], source: Path) -> D
         "version": fork["version"],
         "epa_horizon": 48,
         "types_py_sha256": expected_types,
-        "package_file_count": len(payload),
-        "package_manifest_sha256": _manifest_sha256(payload),
     }
 
 def _validate_target(artifact_root: Path, provenance: Mapping[str, Any]) -> None:
@@ -330,17 +395,17 @@ def _validate_target(artifact_root: Path, provenance: Mapping[str, Any]) -> None
 def _validate_receipt(
     receipt: Mapping[str, Any], provenance: Mapping[str, Any], source: Mapping[str, Any], wheel: Mapping[str, Any]
 ) -> None:
-    required = {"schema_version", "verdict", "fork_id", "provenance_sha256", "source", "build", "wheel", "scientific_status"}
-    if set(receipt) != required or receipt.get("schema_version") != 1:
+    required = {"schema_version", "verdict", "fork_id", "source", "build", "wheel"}
+    if (
+        set(receipt) != required
+        or type(receipt.get("schema_version")) is not int
+        or receipt["schema_version"] != RECEIPT_SCHEMA_VERSION
+    ):
         raise ForkError("receipt schema mismatch")
     if receipt.get("verdict") != "PASS_BUILD_CHAIN_ONLY" or receipt.get("fork_id") != provenance["fork_id"]:
         raise ForkError("receipt identity mismatch")
-    if receipt.get("provenance_sha256") != _sha256_file(PROVENANCE_PATH):
-        raise ForkError("receipt provenance mismatch")
     if receipt.get("source") != source or receipt.get("wheel") != wheel:
         raise ForkError("receipt source or wheel evidence mismatch")
-    if receipt.get("scientific_status") != provenance["scientific_status"]:
-        raise ForkError("receipt scientific status mismatch")
     build = receipt.get("build")
     flags = ["--no-index", "--no-deps", "--no-build-isolation", "--no-cache-dir"]
     if not isinstance(build, dict) or set(build) != {"caller", "pip_flags"} or build.get("pip_flags") != flags:
@@ -365,23 +430,30 @@ def build_artifact(sdist: Path, artifact_root: Path, python: Path) -> Path:
     stage = Path(tempfile.mkdtemp(prefix=f".{artifact_root.name}.partial.", dir=str(artifact_root.parent)))
     try:
         with tempfile.TemporaryDirectory(prefix="hope-mjwarp-epa48-source.") as temp:
-            source, source_evidence = _prepare_source(sdist.resolve(), Path(temp) / "source", provenance)
-            wheel, build_evidence = _build_wheel(source, stage / "wheelhouse", python.resolve())
-            wheel_evidence = _verify_wheel(wheel, provenance, source)
+            source, _ = _prepare_source(sdist.absolute(), Path(temp) / "source", provenance)
+            # ``_build_wheel`` preserves a venv entry path; resolving
+            # ``venv/bin/python`` would silently escape the selected prefix.
+            wheel, build_evidence = _build_wheel(source, stage / "wheelhouse", python)
+        # The build backend may mutate its input tree.  Reconstruct the pinned
+        # source independently so a mutated build tree cannot certify itself.
+        with tempfile.TemporaryDirectory(prefix="hope-mjwarp-epa48-verify-source.") as temp:
+            verify_source, source_evidence = _prepare_source(
+                sdist.absolute(), Path(temp) / "source", provenance
+            )
+            wheel_evidence = _verify_wheel(wheel, provenance, verify_source)
         receipt = {
-            "schema_version": 1,
+            "schema_version": RECEIPT_SCHEMA_VERSION,
             "verdict": "PASS_BUILD_CHAIN_ONLY",
             "fork_id": provenance["fork_id"],
-            "provenance_sha256": _sha256_file(PROVENANCE_PATH),
             "source": source_evidence,
             "build": build_evidence,
             "wheel": wheel_evidence,
-            "scientific_status": provenance["scientific_status"],
         }
         _write_json_x(stage / RECEIPT_NAME, receipt)
+        _validate_receipt(_read_json(stage / RECEIPT_NAME), provenance, source_evidence, wheel_evidence)
         if artifact_root.exists() or artifact_root.is_symlink():
             raise ForkError(f"publish target appeared during build: {artifact_root}")
-        os.rename(str(stage), str(artifact_root))
+        _atomic_rename_noreplace(stage, artifact_root)
     except Exception:
         print(f"partial build preserved at {stage}", file=sys.stderr)
         raise
@@ -389,12 +461,22 @@ def build_artifact(sdist: Path, artifact_root: Path, python: Path) -> Path:
 
 def verify_artifact(sdist: Path, artifact_root: Path) -> Dict[str, Any]:
     provenance = _load_provenance()
+    if not artifact_root.is_dir() or artifact_root.is_symlink():
+        raise ForkError("artifact root must be a real directory")
+    if set(path.name for path in artifact_root.iterdir()) != {RECEIPT_NAME, "wheelhouse"}:
+        raise ForkError("artifact root must contain exactly receipt and wheelhouse")
+    wheelhouse = artifact_root / "wheelhouse"
+    if not wheelhouse.is_dir() or wheelhouse.is_symlink():
+        raise ForkError("artifact wheelhouse must be a real directory")
     receipt = _read_json(artifact_root / RECEIPT_NAME)
-    wheels = list((artifact_root / "wheelhouse").glob("*.whl"))
-    if len(wheels) != 1:
-        raise ForkError(f"artifact contains {len(wheels)} wheels, expected one")
+    if (artifact_root / RECEIPT_NAME).is_symlink():
+        raise ForkError("artifact receipt must not be a symlink")
+    entries = list(wheelhouse.iterdir())
+    wheels = [path for path in entries if path.suffix == ".whl"]
+    if len(entries) != 1 or len(wheels) != 1 or wheels[0].is_symlink():
+        raise ForkError("artifact wheelhouse must contain exactly one regular wheel")
     with tempfile.TemporaryDirectory(prefix="hope-mjwarp-epa48-verify.") as temp:
-        source, source_evidence = _prepare_source(sdist.resolve(), Path(temp) / "source", provenance)
+        source, source_evidence = _prepare_source(sdist.absolute(), Path(temp) / "source", provenance)
         wheel_evidence = _verify_wheel(wheels[0], provenance, source)
     _validate_receipt(receipt, provenance, source_evidence, wheel_evidence)
     return receipt

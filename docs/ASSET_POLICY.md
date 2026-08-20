@@ -195,11 +195,17 @@ whole upstream repository in Git. Git tracks the exact upstream provenance plus 
 `v3.10.0.3` / commit `710c34ca96745a44bfb701cdbda89e1434845728`. The only allowed source changes are
 the PEP 440 local version `3.10.0.3+hope.epa48.1` and `MJ_MAX_EPAHORIZON=24 -> 48`.
 
-The restored sdist and built wheel/receipt stay in versioned real directories under ignored `vendor_assets/`;
+The restored sdist and built wheel/full receipt stay in versioned real directories under ignored `vendor_assets/`;
 the patched build tree is temporary and exactly reconstructible. See
 [`setup_local_sync.md`](operations/setup_local_sync.md#restore-and-build-the-project-owned-mujoco-warp-epa48-fork).
-The builder is no-network/no-install and records the caller Python and build backend identity. A build receipt is
-only supply-chain evidence: it does not replace the missing deterministic 24-fail/48-pass GPU fixture, an
+The schema-4 receipt stores the content-addressed package count/manifest digest before and after the patch; verification
+reconstructs the full source payload and binds every wheel package member to it.
+the tracked compact host summary is an evidence index, not a substitute for re-verifying the ignored full receipt.
+Its build-environment fields are reported reproducibility telemetry, not independently authenticated authority;
+authority comes from recomputing the pinned source, patch and wheel bytes.
+A build receipt deliberately excludes mutable fixture/GPU/oracle progress; those current scientific states live in
+G06, the experiment record and the compact summary, so advancing a Gate cannot invalidate identical wheel bytes.
+A build receipt is diagnostic evidence: it does not replace an
 instrumented/ASan independent oracle, or the existing runtime overflow fail-stop, and it cannot authorize training.
 
 ## Third-Party And Vendor Provenance

@@ -50,13 +50,23 @@
   `MJ_MAX_EPAHORIZON 24->48`两处变化。sdist与wheel/receipt留在ignored `vendor_assets/`，
   patched build tree临时生成，不提交大生成物。
 - 新builder/verifier硬设no-network/no-install的`pip wheel --no-index --no-deps --no-build-isolation`，
-  核sdist/patch SHA、safe extraction、全树两文件allowlist，并把patched sdist的281-file package
-  payload逐文件绑定到wheel；missing/extra/duplicate/unsafe ZIP member、dist-info/RECORD漂移和伪造
-  receipt都fail closed。它记录caller Python与pip/setuptools/wheel来源；host focused=`9 passed`。
-  当前只闭合了project-owned离线构建链；尚未向`vendor_assets/`发布wheel，也不把临时build产物冒充
-  已采用的训练制品。
-- 科学状态不随build-chain晋级：r3当时没有保存exact稀有pair/pose，故deterministic 24-fail/48-pass
-  fixture、exact GPU fixed-tape parity和instrumented/ASan独立oracle仍`未测`；stock CPU MuJoCo也硬24且
+  核sdist/patch SHA、safe extraction、全树两文件allowlist；schema-4 full receipt保存patch前/后各自
+  281-file count+manifest digest，复验时重建完整source并逐文件绑定wheel；artifact extra/symlink与
+  ZIP/RECORD/schema/payload漂移都
+  fail closed；builder环境只是自报复现telemetry，不冒充独立认证。patch改成GNU/Apple都能以zero-fuzz
+  应用的两个single-line hunk后，真实host build得到full receipt SHA `336f6454…041`、wheel SHA
+  `58f47b1c…61a`；wheel构建完成后再从pinned输入生成第二棵fresh source逐字节验wheel，避免build
+  backend改写首棵source后形成同源自证。tracked compact summary只索引这份ignored证据，host=
+  `12 passed`，verdict仍为`PASS_BUILD_CHAIN_ONLY`。会变化的fixture/GPU/oracle进度不再进入immutable
+  build receipt，只留在G06、实验记录和compact summary；raw provenance SHA也只作summary telemetry，
+  避免文案或Gate正常推进使同一wheel失效。
+- 对无CUDA、无两套可恢复隔离runtime时产生的1545行search/capture WIP作出明确拒绝：host fake-worker
+  只能自验schema，不能证明Warp/GPU/physics；提交它会把设计稿冒充能力，也违背删同源自证的原则。
+  等GPU可用后先用临时短search找到pair，再只保留固定fixture与singleton replay。当前只提交已在真实
+  sdist/patch/wheel bytes上复核的builder chain。
+- 科学状态不随build晋级：r3当时没有保存exact稀有pair/pose，故CUDA-qualified synthetic stock
+  exact-overflow / fork finite-contact fixture、exact GPU fixed-tape parity和instrumented/ASan独立oracle
+  仍`未测`；stock CPU MuJoCo也硬24且
   可能越界，不能代签。overflow gate保持fail-stop，旧r3不resume，G06仍`Partial`且
   `diagnostic_unauthorized=true / training_authorized=false`。
 
