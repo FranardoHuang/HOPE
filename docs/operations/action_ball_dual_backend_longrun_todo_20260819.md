@@ -118,10 +118,10 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
 1. **Observation V2原子闭合**：Isaac/MuJoCo、training hard contract、snapshot receipt与文档同时切到
    A203/219；两后端用独立native state正负扰动验证frame、符号、scale、mask和R06 live selection。
    V1只为明确的历史 WAIT consumer保留，不允许Full-A静默fallback。
-2. **MuJoCo EPA48**：build chain与fresh dual-wheel actual import已在branch candidate闭合；下一物理门仍是
-   同一 deterministic geom pair/pose在stock-24确定overflow、fork-48 finite，再跑exact GPU focused、
-   固定tape reason/counter/safety parity和独立instrumented/ASan oracle。独立search-fixture replay尚未结束，
-   不能写成fixture完成；stock CPU同样硬编码24，不能充当golden。未闭合前
+2. **MuJoCo EPA48**：build chain与fresh dual-wheel actual import已在branch candidate闭合；tracked replay
+   也已在Pod同卡完成stock24 mask256/contact0与fork48 zero-overflow/contact1+finite raw contact各10次，
+   branch只保留fixed fixture+replay-only工具。下一步做固定tape
+   reason/counter/safety parity和独立instrumented/ASan oracle；stock CPU同样硬编码24，不能充当golden。未闭合前
    `training_authorized=false`，r3不resume。
 3. **单一 ActionBallState**：一个device-resident mutable state唯一拥有phase/generation/shot/contact/
    outcome/fault；K-row候选只构造一次并sparse commit，只有真实transition写compact event delta；
@@ -138,6 +138,8 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    [`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)指向一个尚不存在的绝对路径；
    future launcher先从clean Git truth取得并传`source_commit`，binder不得自报。短验只回答构造、有限性和
    真实调用点，随后同一进程继续训练并按balance→mimic→entry→strike→landing分阶段报告分母。
+   branch候选one-shot launcher只负责clean Git、fresh root、GPU UUID/空卡/lock与固定H48 argv，并等待child
+   自然退出；它不监控、不重试、不发signal，也不以`ACCEPT>0`作为启动或停止条件。Pod dry-run/real run未测。
 
 ## 4. 当前完成条件
 

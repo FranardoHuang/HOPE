@@ -172,6 +172,12 @@ observation摘要作自证。缺字段、旧schema、hash mismatch、路径/iter
 当前真实IMU、table/root定位、marker→COM因果速度和planner producer尚未接通；simulation V2通过也只能称
 host/Pod diagnostic。旧r3与两条Isaac H24 run均已停止，新V2只能fresh launch。
 
+portable MuJoCo Full-A的branch候选单次入口是`scripts/launch_mujoco_full_mdp_successor.py`。它只接受
+clean Git checkout、absent `/workspace/.../<namespace>`、canonical Python、显式GPU index/UUID与已有lock file；
+dry-run只打印固定H48 argv/env，不查GPU或建run root。真实模式持lock覆盖唯一child lifetime，等待自然rc并
+原样返回；没有monitor、retry、resume、signal或`ACCEPT`门。Pod dry-run/real run未闭合前不得把host
+`11 passed`写成发车授权；完整证据边界见[portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)。
+
 若FullMDP在base manager构造中途失败，当前进程必须视为cold-discard：环境会按pinned顺序单次
 best-effort清理已存在manager与simulator；任何terminal simulator清理失败都会sticky拒绝后续资源操作并
 要求进程退出。不得在同一进程捕获该异常后重新构造环境、重试旧sim、复用namespace或把它当成可恢复

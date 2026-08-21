@@ -197,6 +197,27 @@ test ! -L "$FULLA_RUNTIME_SITE"
 [portable Full-A实验](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)
 维护；本节只是真实资产恢复与调用工序。
 
+固定EPA pair的replay-only工具不创建或搜索fixture。准备两套独立、已分别安装stock24/fork48的Python
+环境后，在空闲GPU的外层队列锁内，把`cuda:0`对应的physical UUID显式传入，并使用fresh output root：
+
+```bash
+exec 9<>/tmp/hope_lean_queue_gpu2.lock
+flock -n 9
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=2 \
+  /absolute/stock24/bin/python scripts/replay_mujoco_warp_epa48_fixture.py replay \
+  --stock-python /absolute/stock24/bin/python \
+  --fork-python /absolute/fork48/bin/python \
+  --output-root /workspace/franco/mktemp/fresh-epa48-replay \
+  --expected-gpu-uuid GPU-... --device cuda:0 --repeats 10
+```
+
+工具只发布两份raw result和一份no-clobber summary；PASS只表示这一个tracked pair在同卡上稳定呈现
+stock24 mask256与fork48 zero-overflow/finite active contact，不代签ASan、ActionBall fixed-tape或training GO。
+host=`17 passed, 1 skipped`；exact Pod GPU2实际10+10次结果为
+`PASS_EPA48_FIXED_FIXTURE_REPLAY`（stock24 mask256/contact0，fork48 mask0/contact1且raw contact finite）。
+证据root=`/workspace/franco/mktemp/epa48-tracked-replay-20260821-v1`，summary SHA-256=`af6694…dee`；
+标准lock覆盖全程，结束apps empty/lock free。其余科学HOLD见实验真源。
+
 ## ChingMu measured-racket rebuild contract
 
 The corrected exact 73 kinematic batch is complete in the v4d root above; the command below remains

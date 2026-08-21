@@ -28,8 +28,11 @@ import顺序/fail-close、EPA-only durable identity、RSL进程内门与schema `
 [portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)
 维护；恢复与caller工序见
 [`setup_local_sync`](../operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)。
-Pod1无CUDA actual dual-wheel import=`19 passed in 4.33s`；fixed-tape、matched H48 wall、ASan oracle、
-independent fixture replay与fresh longrun仍未闭合。故非GPU physics/training GO，保持
+Pod1无CUDA actual dual-wheel import=`19 passed in 4.33s`。tracked fixed fixture/replay又在GPU2
+`GPU-473a79f3-8736-6c7f-c3db-290c6be385b8`、PCI `00000001:BE:00`各重复10次：stock24均为exact
+`EPA_HORIZON` mask `256`/contact0，fork48均为mask `0`/contact1且dist/pos/frame finite，verdict=
+`PASS_EPA48_FIXED_FIXTURE_REPLAY`；标准lock覆盖全程，结束apps empty/lock free。fixed-tape、matched H48 wall、
+ASan/instrumented独立oracle与fresh longrun仍未闭合。故非完整physics/training GO，保持
 `diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`，且尚未合`main`。
 
 **2026-08-21 project-owned [MuJoCo-Warp EPA48](../DEFINITIONS.md#mujoco-warp-epa48-fork) build chain（Gate仍`Partial`）：**portable r3已经停止在
@@ -60,11 +63,12 @@ immutable build receipt；raw provenance SHA只留summary作telemetry。因此�
 随后只提交固定XML/pose/probe contract与singleton replay-only回归，不保留durable generator、搜索预算或
 worker history attestation。这是删除同源自证和结构臃肿，不是降低物理门槛。
 
-当前仍缺三件：CUDA-qualified新构造synthetic singleton reproducer、ActionBall fixed-tape数值与
-reason/counter/safety一致性、以及instrumented/ASan独立oracle。stock CPU MuJoCo同样硬编码24且该边界
+临时搜索已找到一对CUDA-qualified synthetic singleton；branch候选只保留固定fixture与singleton replay，
+不提交搜索器。tracked replay自身已完成上述exact Pod 10+10次差分。当前仍缺
+ActionBall fixed-tape数值与reason/counter/safety一致性，以及instrumented/ASan独立oracle。stock CPU MuJoCo同样硬编码24且该边界
 可能越界，不能直接当oracle。runtime `d.overflow`与warning gate一位不降级，旧r3不resume；稳定
-run-local site的actual dual-wheel import已经通过，但exact GPU physics复核与独立search-fixture replay仍未
-完成。因此这里只关闭可审计build chain与import identity，没有关闭科学证据，
+run-local site的actual dual-wheel import与tracked fixture replay已经通过，但其余physics gates仍未闭合。
+因此这里只关闭可审计build chain、import identity和一对固定差分证据，没有关闭完整科学证据，
 `diagnostic_unauthorized=true / training_authorized=false`，完整恢复/离线构建命令见
 [`setup_local_sync`](../operations/setup_local_sync.md#restore-and-build-the-project-owned-mujoco-warp-epa48-fork)。
 

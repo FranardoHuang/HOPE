@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`successor-runtime-binding-branch-candidate / Pod dual-wheel import PASS / physics-and-fresh-longrun HOLD`
-> 证据等级：E1源码、host反例与Pod actual import；无GPU physics或fresh长跑证据
+> 状态：`successor-tools-branch-candidate / Pod dual-wheel import+tracked fixture replay PASS / fresh-longrun HOLD`
+> 证据等级：E1源码、host反例、Pod actual import与tracked GPU fixture差分；无ASan/fixed-tape或fresh长跑证据
 
 <a id="epa48-fresh-runtime-binding-20260821"></a>
 ## 0. 2026-08-21 successor的EPA48 fresh runtime binding
@@ -49,9 +49,37 @@ env -u PYTHONPATH CUDA_VISIBLE_DEVICES='' PYTHONNOUSERSITE=1 \
 
 结果`19 passed in 4.33s`，actual import覆盖EPA package/types与RSL package/runner，并核version/horizon/
 distribution/module roots。因命令隐藏CUDA，它不是GPU physics或训练证据。ActionBall fixed-tape、matched
-H48 wall、instrumented/ASan oracle、fresh Full-A longrun仍`未测`，独立search-fixture replay也未结束。
+H48 wall、instrumented/ASan oracle与fresh Full-A longrun仍`未测`。
 因此仍为`diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`、
 `full_a_complete=false`，不是training GO。
+
+### 固定EPA差分fixture与replay-only候选
+
+一次性临时搜索已找到tracked
+[`mujoco_warp_epa48_ellipsoid_cylinder_cross_v1.json`](../../../configs/fixtures/mujoco_warp_epa48_ellipsoid_cylinder_cross_v1.json)
+及同名MJCF。tracked replay在Pod root
+`/workspace/franco/mktemp/epa48-tracked-replay-20260821-v1`、GPU2
+`GPU-473a79f3-8736-6c7f-c3db-290c6be385b8` / PCI `00000001:BE:00`、两套Python环境和两份Warp cache上
+各重复10次：stock24 masks=`[256]×10`/contact0；fork48 masks=`[0]×10`/contact1且raw dist/pos/frame
+finite。verdict=`PASS_EPA48_FIXED_FIXTURE_REPLAY`；script/JSON/XML SHA-256分别为
+`d8d055…24b7f7` / `5bd5fd…8d6e6` / `f611bb…c58ce`，raw stock/fork/summary结果SHA-256分别为
+`92bebd…bc1a` / `831a28…3ce` / `af6694…dee`。标准GPU2 lock覆盖全程，结束apps empty/lock free。
+
+branch候选只提交fixed pair与[`replay_mujoco_warp_epa48_fixture.py`](../../../scripts/replay_mujoco_warp_epa48_fixture.py)：
+它要求stock24/fork48独立interpreter、独立cache、同一physical GPU UUID，no-clobber输出raw contact和summary；
+host=`17 passed, 1 skipped`，上述exact Pod replay已PASS。该证据只证明“一对24-overflow/48-finite
+CUDA差分”，不证明通用碰撞正确性；ASan/instrumented independent oracle、ActionBall fixed-tape、
+matched H48和training authorization均保持HOLD。
+该fixture/tool代码commit为`a331832a`。
+
+### clean-Git H48 one-shot launcher候选
+
+[`launch_mujoco_full_mdp_successor.py`](../../../scripts/launch_mujoco_full_mdp_successor.py)从clean Git truth
+读取40-hex source commit，核canonical Python、fresh `/workspace/.../<namespace>`、GPU index→UUID、空compute
+apps与显式flock；然后固定启动`4096×12500`、H48 recipe、save500及run-local EPA48/RSL3 site。lock覆盖child
+lifetime，launcher前台等待自然rc；没有monitor、retry、signal、resume或`ACCEPT` gate。host=`11 passed`，
+Pod dry-run和real run仍`未测`，因此当前只是一条更窄的发射入口，不是发车授权。
+launcher代码commit为`4468b681`。
 
 ## 1. 采用、延后、拒绝
 
@@ -216,8 +244,8 @@ run；当前`engineering_run_complete=false`、`business_chain_complete=false`�
 
 1. historical r3已止于durable ACK `10249`；EPA overflow与旧IDLE clock泄漏共同禁止resume。下文
    `0..7`与active PID只保留为当时前缀，不是当前运行态。
-2. successor的fresh dual-wheel import已经通过，但独立search-fixture replay、stock-24/fork-48
-   deterministic physics、ActionBall fixed-tape、matched H48 wall和instrumented/ASan oracle尚未闭合。
+2. successor的fresh dual-wheel import与tracked 10+10次fixture replay已经通过，但ActionBall fixed-tape、
+   matched H48 wall和instrumented/ASan oracle尚未闭合。
 3. 使用本runtime binder的fresh longrun尚未发射；因此没有新ACK schema 3、completion schema 4、
    summary schema 3的live训练产物。C family、backhand分母、第二seed、promotion/export/deploy也仍`未测`，
    `business_chain_complete/full_a_complete=false`。

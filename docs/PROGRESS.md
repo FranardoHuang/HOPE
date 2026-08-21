@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-21 — EPA48固定fixture与Full-A单次launcher候选（branch candidate）
+
+- 拒绝保留通用GPU搜索框架后，branch只保留一对tracked ellipsoid/cylinder MJCF+pose及singleton replay。
+  tracked工具已在Pod GPU2同卡、独立runtime/cache各重复10次：stock24 exact mask `256`/contact0，fork48
+  mask `0`/contact1且dist/pos/frame finite，verdict=`PASS_EPA48_FIXED_FIXTURE_REPLAY`；标准lock覆盖全程，
+  结束apps empty/lock free。host=`17 passed, 1 skipped`。这只证明一对CUDA差分，不代签ASan独立oracle、
+  ActionBall fixed-tape、matched H48或training GO。
+- 新one-shot launcher从clean Git读取source commit，固定H48 Full-A命令，持GPU lock覆盖child lifetime并等待
+  自然退出；它不监控、不重试、不以`ACCEPT>0`停车。host=`11 passed`；Pod dry-run与真实发射仍`未测`。
+  fixed replay与launcher代码commit分别为`a331832a` / `4468b681`。
+  详细证据和剩余边界见[portable Full-A实验§0](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)。
+
 ## 2026-08-21 — portable Full-A fresh EPA48/RSL3 runtime binding（branch candidate）
 
 - base `074e2a0d` + runtime diff `df4d5ea6…f2d3`新增
@@ -7,8 +19,9 @@
   EPA48/RSL3 wheels绑定同一site；legacy WAIT不绑定，clean `source_commit`未来由launcher传。wire升为
   ACK/completion/summary `3/4/3`，host=`125 passed, 2 skipped`，Pod1无CUDA actual import=
   `19 passed in 4.33s`。
-- fixed-tape、matched H48 wall、ASan oracle、independent fixture replay与fresh longrun仍`未测`；非training
-  GO，仍`diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`。详细真源见
+- 本条落地时independent fixture replay尚未测；现已由本日顶部tracked replay条目闭合该单点差分。
+  fixed-tape、matched H48 wall、ASan oracle与fresh longrun仍`未测`；非training GO，仍
+  `diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`。详细真源见
   [portable Full-A实验§0](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)，
   恢复/调用见[`setup_local_sync`](operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)。
 
