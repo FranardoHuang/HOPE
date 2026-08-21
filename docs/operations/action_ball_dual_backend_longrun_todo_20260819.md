@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`ACTIVE-successor-MuJoCo-longrun / branch-scoped / diagnostic_unauthorized`
+> 状态：`ACTIVE-successor-MuJoCo-longrun / Isaac-launch-in-progress / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-21
@@ -148,8 +148,9 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    61 update；Isaac只增加同样`10+50+1`的code-owned diagnostic budget，不开放任意短跑覆盖12500配方。
    MuJoCo actual p50/p90=`9.448/9.661 s/update`、throughput=`20,779.64/s`、H24-equivalent p50=`4.724 s`，
    因而本后端不继续堆微优化；Isaac同卡pre/post Phase-C wall仍`未测`。
-5. **fresh namespace短验与训练**：先做clock-fixed、EPA-fixed的portable MuJoCo V2，再做通过matched性能
-   验收的Isaac V2；不复用旧namespace、runtime site或snapshot，不插`ACCEPT>0`门。MuJoCo caller必须传
+5. **fresh namespace启动与训练**：clock-fixed、EPA-fixed的portable MuJoCo V2与Isaac V2均使用fresh
+   namespace；matched性能是并行诊断，不是Isaac启动前置。两条都不复用旧runtime site或snapshot，不插
+   `ACCEPT>0`门。MuJoCo caller必须传
    [`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)指向一个尚不存在的绝对路径；
    future launcher先从clean Git truth取得并传`source_commit`，binder不得自报。短验只回答构造、有限性和
    真实调用点，随后同一进程继续训练并按balance→mimic→entry→strike→landing分阶段报告分母。
@@ -158,7 +159,8 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    `2e4279ba` dry-run已PASS且未建root、未查GPU、未改lock；随后clean detached `96f0ca69`已按上述fresh
    identity真实发射并取得update `0..4`连续durable ACK。61-update实际rate与fixed-tape关闭发射前的有限
    构造/吞吐证据；运行现在只允许自然推进，`ACCEPT=0`及五strata未出现不作为表现门。Isaac V2的同卡
-   pre/post Phase-C测量与fresh run仍在后续，不能由MuJoCo代签。
+   pre/post Phase-C测量仍在后续，不能由MuJoCo代签。Isaac one-shot候选已复用现有Kit boot owner并通过
+   host双launcher回归`18 passed`；exact Pod dry-run、真实发射和首批连续ACK仍待本commit后闭合。
 
 ## 4. 当前完成条件
 

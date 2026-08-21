@@ -1,5 +1,15 @@
 # 简短进度记录
 
+## 2026-08-22 — Isaac Full-A H48 fresh one-shot入口（branch candidate）
+
+- 新增`scripts/launch_isaac_full_mdp_successor.py`，只复用现有Kit boot owner；从clean Git固定
+  Full-A `4096×48×12500/save500` argv，并绑定exact IsaacLab/Kit Python/RSL wheel/A3 USD、fresh
+  `/workspace` root、显式GPU index+UUID、empty compute-app与lifetime flock。runtime fd16 receipt与fd18
+  sealed RSL archive均由child继承；launcher自身只持Kit环境，训练child经`env -i`获得窄runtime环境。
+- 本入口不加`ACCEPT`、学习表现、matched wall或“先短跑”准入；这些是诊断/学习证据，不是真安全门。
+  失败不重试、不resume、不复用namespace，且不发signal；`diagnostic_unauthorized=true`保持。
+  host Isaac/MuJoCo launcher回归=`18 passed`。exact Pod dry-run、真实发射与首批durable ACK尚待本commit后执行。
+
 ## 2026-08-21 — portable Full-A H48 fresh长跑已真实发射（branch candidate）
 
 - Pod1从clean detached `96f0ca69887aba44c71983529d05e759e1a4cd2f`建立fresh namespace

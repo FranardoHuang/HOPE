@@ -512,3 +512,17 @@ non-mutating reward view；snapshot不写入owner字段，不成为token、recei
 1份，H48静态少`599,261,184 B = 571.5 MiB/update`与4,224个call；这是shape/dtype/frequency proxy，
 不是wall或显存峰值。五个相关文件分进程回归合计`99 passed, 6 skipped`，pycompile/diff-check通过；独立
 终审`P0=0/P1=0`。exact Pod fixed-tape、profiler-off matched H48 wall仍`未测`，G05保持`Partial`。
+
+## 14. Isaac H48 one-shot启动边界
+
+为了让双后端训练本身继续产生证据，matched wall不再被误作Isaac启动前的安全准入。新增入口只完成
+一次性发射所需的独立事实绑定：clean Git、fresh namespace/root、exact IsaacLab/Kit Python/RSL wheel/A3
+USD、GPU index→UUID、empty compute-app、nonblocking lifetime flock，以及训练主链已经要求的fd16 runtime
+receipt和fd18 sealed archive。它复用现有Kit boot owner；没有新增supervisor、owner、receipt schema、
+`ACCEPT`门、短跑成绩门或同writer自证。
+
+入口固定Full-A `4096×48×12500/save500`，不开放recipe override、resume或retry。ready后只验证existing
+launcher state中的exact PID=PGID、runtime attestation receipt和live non-zombie child；不monitor、不发
+signal。真实overflow/nonfinite、joint/table/contact与optimizer后durable ACK仍由训练主链负责。host对Isaac/
+MuJoCo两个launcher的focused回归=`18 passed in 7.44s`；exact Pod dry-run、real launch、首批ACK和wall均
+`未测`，因此当前只是branch launch candidate，`diagnostic_unauthorized=true`且G05保持`Partial`。

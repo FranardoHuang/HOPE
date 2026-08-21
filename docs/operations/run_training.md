@@ -187,6 +187,18 @@ dry-run只打印固定H48 argv/env，不查GPU或建run root。真实模式持lo
 完成dry-run，且未建root、未查GPU、未改lock；real run未闭合前仍不得把host`11 passed`或dry-run写成
 发车授权。完整证据边界见[portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)。
 
+Isaac Full-A的对应单次入口是`scripts/launch_isaac_full_mdp_successor.py`。它复用仓库现有Kit boot
+owner，不再建立第二套supervisor：从clean Git固定同一typed H48 argv，核exact IsaacLab、Kit Python、
+RSL wheel与A3 USD，先取得目标GPU的nonblocking lifetime lock，再核index→UUID和empty compute-app，最后
+才创建fresh run root。fd16 runtime receipt、fd18 sealed RSL archive与GPU lock由唯一child继承；训练child
+通过`/usr/bin/env -i`获得窄runtime环境，避免Kit launcher的环境清洗丢失attestation输入。
+
+该入口不把matched timing、`ACCEPT>0`、已有学习表现或短跑成功当作启动门；这些都不是防止错误写卡、
+错误资产、错误进程或数值故障的独立安全事实。它也不monitor/retry/resume/signal，ready marker后只验证
+exact PID=PGID、runtime receipt与live non-zombie进程并返回。真正的overflow/nonfinite、joint/table/contact
+边界和optimizer后durable ACK仍在训练路径内保持fail-stop。exact Pod real run未闭合前，不得把host测试或
+dry-run写成已启动。
+
 若FullMDP在base manager构造中途失败，当前进程必须视为cold-discard：环境会按pinned顺序单次
 best-effort清理已存在manager与simulator；任何terminal simulator清理失败都会sticky拒绝后续资源操作并
 要求进程退出。不得在同一进程捕获该异常后重新构造环境、重试旧sim、复用namespace或把它当成可恢复

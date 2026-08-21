@@ -2,6 +2,13 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-22 fresh one-shot launch入口（branch candidate；Gate仍`Partial`）：**新增极简Isaac Full-A H48
+launcher，复用现有Kit boot owner并固定clean source、fresh root、exact IsaacLab/Kit/RSL/USD、目标GPU
+UUID/empty-app/lifetime lock、fd16 runtime receipt和fd18 sealed archive。它没有新增`ACCEPT`、matched wall、
+短跑成绩或学习表现Gate：这些不是启动所需的安全独立事实。真实overflow/nonfinite、joint/table/contact与
+optimizer后durable ACK仍由训练主链fail-stop；入口不retry/resume/signal。host双launcher回归=`18 passed`，
+exact Pod dry-run、real launch与连续ACK尚待本commit后闭合，故不声称Isaac已运行或Gate晋级。
+
 **2026-08-21 current run correction（supersede下文所有“active/继续25k”叙述；Gate仍`Partial`）：**
 两条Isaac `4096×24×25000`均已停止：`e8eef4fb…`止于durable ACK `4603` / `452,591,616`
 transitions，`ddb1e7c4…`止于ACK `3467` / `340,918,272` transitions。退出因果仍是`未知`；现有日志
