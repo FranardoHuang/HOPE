@@ -20,6 +20,14 @@ snapshot/completion绑定包含预算与保存节奏的execution SHA；旧eviden
 当前runtime/runner/ledger/consumer host union=`125 passed, 2 skipped`。这只关闭配方与wire漂移，不证明两后端数值、吞吐或学习
 等价；exact GPU H48与fixed-snapshot parity仍`未测`，旧H24产物不得resume或冒充V2证据。
 
+branch又新增一个不改变typed recipe的有限墙钟面：portable Full-A显式rate probe与Isaac默认false的task flag
+都只允许`10 warm-up + 50 measured + 1 tail`、H48/4096、profiler-off，且保持
+`diagnostic_unauthorized`；Isaac CLI仍不能把root `max_iterations`改成61。另有tracked N64×H48 fixed-tape
+保存Reward20、actor203/critic219、plant与全部离散生命周期raw arrays，compare无tolerance/verdict。host分别为
+rate runner `23 passed,1 skipped`、tape `6 passed`、Isaac focused `147 passed,26 skipped`；实际Pod运行尚未成功：
+clean source已到`404031d2`，但首次尝试在GPU/lock前因ignored EPA48资产未恢复而fail closed，所有wall/parity
+仍`未测`。这不改变Gate `Partial`或训练权限。
+
 **2026-08-21 portable Full-A fresh EPA48 runtime binding（Gate仍`Partial`）：**当前branch candidate在
 base `074e2a0d`之上的runtime diff `df4d5ea6…f2d3`新增
 [`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)（fresh双wheel隔离导入目录）；

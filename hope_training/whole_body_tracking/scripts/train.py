@@ -15053,6 +15053,15 @@ _ACTION_BALL_STRIKE_FACT_SUCCESSOR_RECEIPT_ATTR = (
     "_action_ball_strike_fact_successor_receipt"
 )
 _ACTION_BALL_FULL_MDP_RUNTIME_FLAG = "action_ball_full_mdp_runtime"
+_ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG = "action_ball_full_mdp_rate_probe"
+_ACTION_BALL_FULL_MDP_RATE_PROBE_UPDATES = 61
+_ACTION_BALL_FULL_MDP_RATE_PROBE_WARMUP_UPDATES = 10
+_ACTION_BALL_FULL_MDP_RATE_PROBE_MEASURED_UPDATES = 50
+_ACTION_BALL_FULL_MDP_RATE_PROBE_TAIL_UPDATES = 1
+_ACTION_BALL_FULL_MDP_PROFILER_ENV_KEYS = (
+    "HOPE_ACTION_BALL_UPDATE_PROFILE",
+    "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES",
+)
 _ACTION_BALL_FULL_MDP_GYM_ENTRY_POINT = (
     "whole_body_tracking.tasks.tracking.full_mdp_env:"
     "ActionBallFullMdpManagerBasedRLEnv"
@@ -15994,6 +16003,37 @@ def _action_ball_full_mdp_runtime_requested(task) -> bool:
     return requested
 
 
+def _action_ball_full_mdp_rate_probe_requested(task) -> bool:
+    """Resolve the one code-owned H48 rate budget before Kit starts."""
+
+    if not _contains_key(task, _ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG):
+        return False
+    requested = _get(task, _ACTION_BALL_FULL_MDP_RATE_PROBE_FLAG)
+    if type(requested) is not bool:
+        raise _OverrideError(
+            "task.action_ball_full_mdp_rate_probe must be an exact explicit "
+            f"boolean; got type={type(requested).__name__}"
+        )
+    if not requested:
+        return False
+    if not _action_ball_full_mdp_runtime_requested(task):
+        raise _OverrideError(
+            "task.action_ball_full_mdp_rate_probe=true requires "
+            "task.action_ball_full_mdp_runtime=true"
+        )
+    active_profiler = {
+        key: os.environ.get(key)
+        for key in _ACTION_BALL_FULL_MDP_PROFILER_ENV_KEYS
+        if os.environ.get(key) not in (None, "0")
+    }
+    if active_profiler:
+        raise _OverrideError(
+            "FullMDP H48 rate probe requires profiler-off environment; got "
+            f"{active_profiler}"
+        )
+    return True
+
+
 def _resolve_action_ball_full_mdp_policy_bootstrap_config(
     task, *, requested: bool
 ) -> dict | None:
@@ -16107,6 +16147,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
     """
 
     task = _get(cfg, "task")
+    _action_ball_full_mdp_rate_probe_requested(task)
     requested = _get(task, "action_ball_full_mdp_runtime")
     if requested is None or requested is False:
         return
@@ -20145,6 +20186,9 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     action_ball_full_mdp_requested = (
         _action_ball_full_mdp_runtime_requested(cfg.task)
     )
+    action_ball_full_mdp_rate_probe = (
+        _action_ball_full_mdp_rate_probe_requested(cfg.task)
+    )
     raw_num_envs = (
         cfg.num_envs
         if cfg.num_envs is not None
@@ -20326,6 +20370,17 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
                 f"root max_iterations={requested_iterations}"
             )
         agent_cfg.max_iterations = requested_iterations
+    if action_ball_full_mdp_rate_probe:
+        agent_cfg.max_iterations = _ACTION_BALL_FULL_MDP_RATE_PROBE_UPDATES
+        print(
+            "[train.py] FULLMDP_H48_RATE_PROBE: diagnostic_unauthorized=true "
+            f"updates={_ACTION_BALL_FULL_MDP_RATE_PROBE_UPDATES} "
+            f"warmup={_ACTION_BALL_FULL_MDP_RATE_PROBE_WARMUP_UPDATES} "
+            f"measured={_ACTION_BALL_FULL_MDP_RATE_PROBE_MEASURED_UPDATES} "
+            f"tail={_ACTION_BALL_FULL_MDP_RATE_PROBE_TAIL_UPDATES} "
+            "profiler=off formal_evidence=false checkpoint_authority=false",
+            flush=True,
+        )
     if cfg.run_name is not None:
         agent_cfg.run_name = str(cfg.run_name)
     _diag_racket_cfg = getattr(

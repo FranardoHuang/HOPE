@@ -120,8 +120,9 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    V1只为明确的历史 WAIT consumer保留，不允许Full-A静默fallback。
 2. **MuJoCo EPA48**：build chain与fresh dual-wheel actual import已在branch candidate闭合；tracked replay
    也已在Pod同卡完成stock24 mask256/contact0与fork48 zero-overflow/contact1+finite raw contact各10次，
-   branch只保留fixed fixture+replay-only工具。下一步做固定tape
-   reason/counter/safety parity和独立instrumented/ASan oracle；stock CPU同样硬编码24，不能充当golden。未闭合前
+   branch只保留fixed fixture+replay-only工具。H48 fixed-tape工具已落地并经host/red-team闭合；下一步在
+   exact Pod实际生成两份record并compare reason/counter/safety/Reward20/203/219，另做独立
+   instrumented/ASan oracle；stock CPU同样硬编码24，不能充当golden。未闭合前
    `training_authorized=false`，r3不resume。
 3. **单一 ActionBallState**：一个device-resident mutable state唯一拥有phase/generation/shot/contact/
    outcome/fault；K-row候选只构造一次并sparse commit，只有真实transition写compact event delta；
@@ -132,7 +133,8 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    Epoch/R06/Physical state与host sync仍须按真实profile继续收敛，不能把这些局部刀称为single-state完成。
 4. **matched H48性能验收**：clean exact source、同卡、profiler-off，按zero/mixed/active strata对比；
    同时验证fixed tape RNG/highwater/reason/done/reset/Reward20/203/219 parity。报告原始wall、transitions/s和
-   H24-equivalent；首墙转移后重新profile，不继续堆零碎clone patch。
+   H24-equivalent；首墙转移后重新profile，不继续堆零碎clone patch。MuJoCo的真实生产热路rate入口已固定
+   61 update；Isaac只增加同样`10+50+1`的code-owned diagnostic budget，不开放任意短跑覆盖12500配方。
 5. **fresh namespace短验与训练**：先做clock-fixed、EPA-fixed的portable MuJoCo V2，再做通过matched性能
    验收的Isaac V2；不复用旧namespace、runtime site或snapshot，不插`ACCEPT>0`门。MuJoCo caller必须传
    [`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)指向一个尚不存在的绝对路径；

@@ -140,6 +140,14 @@ schema 2，terminal completion使用schema 3，consumer必须按schema分流。H
 transition翻倍，验收统一报告transitions/s和`wall_s * 24 / H`的H24-equivalent，并保留原始wall；真实GPU
 wall、显存和学习收益未测前，任何host hash/shape测试都只能算配方闭合。
 
+为得到可迭代的墙钟数据，两后端只增加一个固定`10 warm-up + 50 measured + 1 tail`的H48 rate diagnostic。
+MuJoCo使用`--full-a --diagnostic-rate-probe`；Isaac只可把task中的
+`action_ball_full_mdp_rate_probe=false`显式改为`true`。两者都必须profiler-off、fresh process、4096 env，
+并保持`diagnostic_unauthorized`。Isaac root `max_iterations`仍只能缺席或等于typed `12500`；传61仍在Kit前
+拒绝，实际61预算由code-owned diagnostic flag在runner边界安装。该入口不写学习结论、不授权resume/
+promotion/export/deploy，也不得在完成后自动转成12500；先报告50个measured update的逐项wall、p50/p90、
+transitions/s和H24-equivalent，再由人决定继续优化还是另开fresh长跑。
+
 #### FullMDP semantic Observation V2与snapshot边界（2026-08-21 branch candidate）
 
 family A只接受actor contract `action_ball_full_mdp_semantic_actor_v2`（203-D）和critic contract

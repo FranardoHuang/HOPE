@@ -134,6 +134,73 @@ def test_fresh_task_flag_rejects_non_boolean_values(value):
         )
 
 
+def test_full_mdp_rate_probe_is_exact_scoped_and_profiler_off(monkeypatch):
+    task = {
+        "action_ball_full_mdp_runtime": True,
+        "action_ball_full_mdp_rate_probe": True,
+    }
+    for key in train_mod._ACTION_BALL_FULL_MDP_PROFILER_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    assert train_mod._action_ball_full_mdp_rate_probe_requested(task) is True
+    assert train_mod._ACTION_BALL_FULL_MDP_RATE_PROBE_UPDATES == 61
+    assert (
+        train_mod._ACTION_BALL_FULL_MDP_RATE_PROBE_WARMUP_UPDATES,
+        train_mod._ACTION_BALL_FULL_MDP_RATE_PROBE_MEASURED_UPDATES,
+        train_mod._ACTION_BALL_FULL_MDP_RATE_PROBE_TAIL_UPDATES,
+    ) == (10, 50, 1)
+
+    assert train_mod._action_ball_full_mdp_rate_probe_requested(
+        {
+            "action_ball_full_mdp_runtime": True,
+            "action_ball_full_mdp_rate_probe": False,
+        }
+    ) is False
+    with pytest.raises(train_mod._OverrideError, match="exact explicit boolean"):
+        train_mod._action_ball_full_mdp_rate_probe_requested(
+            {
+                "action_ball_full_mdp_runtime": True,
+                "action_ball_full_mdp_rate_probe": 1,
+            }
+        )
+    with pytest.raises(train_mod._OverrideError, match="requires.*runtime=true"):
+        train_mod._action_ball_full_mdp_rate_probe_requested(
+            {
+                "action_ball_full_mdp_runtime": False,
+                "action_ball_full_mdp_rate_probe": True,
+            }
+        )
+
+    monkeypatch.setenv("HOPE_ACTION_BALL_UPDATE_PROFILE", "1")
+    with pytest.raises(train_mod._OverrideError, match="profiler-off"):
+        train_mod._action_ball_full_mdp_rate_probe_requested(task)
+
+
+def test_full_mdp_rate_probe_keeps_the_typed_cli_budget_authority(monkeypatch):
+    task = {
+        "action_ball_full_mdp_runtime": True,
+        "action_ball_full_mdp_rate_probe": True,
+    }
+    for key in train_mod._ACTION_BALL_FULL_MDP_PROFILER_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(
+        train_mod,
+        "_ORIGINAL_TRAINING_ARGV",
+        (
+            "python",
+            "train.py",
+            "task=FullMdpA",
+            "task.action_ball_full_mdp_rate_probe=true",
+        ),
+    )
+    assert train_mod._preflight_action_ball_full_mdp_ppo_cli(
+        {"task": task, "max_iterations": 12_500}
+    ) is None
+    with pytest.raises(train_mod._OverrideError, match="code-owned at 12500"):
+        train_mod._preflight_action_ball_full_mdp_ppo_cli(
+            {"task": task, "max_iterations": 61}
+        )
+
+
 def test_fresh_flag_routes_around_the_obsolete_successor_partial_probe():
     env_cfg = types.SimpleNamespace(
         _action_ball_strike_fact_successor_receipt={}

@@ -384,6 +384,7 @@ def test_a_c_task_yaml_compose_to_one_common_non_self_authorizing_recipe():
         assert task["name"] == task_name
         assert task["gym_task"] == gym_id
         assert task["action_ball_full_mdp_runtime"] is True
+        assert task["action_ball_full_mdp_rate_probe"] is False
         assert task["action_ball_full_mdp_family_role"] == role
         assert task["actor_obs_contract"] is None
         assert task["registry_name"] is None

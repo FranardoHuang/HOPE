@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`successor-tools-branch-candidate / Pod dual-wheel import+tracked fixture replay PASS / fresh-longrun HOLD`
-> 证据等级：E1源码、host反例、Pod actual import与tracked GPU fixture差分；无ASan/fixed-tape或fresh长跑证据
+> 状态：`successor-tools-branch-candidate / Pod dual-wheel import+tracked fixture replay PASS / H48 actual HOLD / fresh-longrun HOLD`
+> 证据等级：E1源码、host反例、Pod actual import与tracked GPU fixture差分；无ASan、ActionBall fixed-tape actual、H48 wall或fresh长跑证据
 
 <a id="epa48-fresh-runtime-binding-20260821"></a>
 ## 0. 2026-08-21 successor的EPA48 fresh runtime binding
@@ -82,6 +82,33 @@ Pod1 clean detached `2e4279ba`已用真实`/workspace/mjlab_venv/bin/python`完�
 source commit、Full-A `4096×12500`、H48、save500与run-local site；run root前后均不存在，lock inode/size/
 mtime/ctime不变，且dry-run在GPU查询前返回。real run仍`未测`，因此当前只是一条更窄的发射入口，
 不是发车授权。launcher初版/venv入口修复commit为`4468b681` / `2e4279ba`。
+
+<a id="h48-fixed-tape-and-rate-probes-20260821"></a>
+### H48 fixed-tape与有限rate probes
+
+tracked [`mujoco_full_mdp_h48_tape_v1.json`](../../../configs/fixtures/mujoco_full_mdp_h48_tape_v1.json)
+固定`N64×H48×31`、seed0、zero reset noise和SplitMix64 `[-.02,.02]` action tape。
+[`probe_mujoco_full_mdp_h48_tape.py`](../../../scripts/probe_mujoco_full_mdp_h48_tape.py)先通过真实Full-A
+binder建立run-local EPA48/RSL3 site，再构造`FullMdpInitialWaitVecEnv(full_a_mode=True)`；raw NPZ包含initial
+qpos/qvel/actor203/critic219，以及逐tick Reward20、actor203/critic219、qpos/qvel、done/reason/timeout/table
+contact/reset generation/phase/outcome/action key和全部公开Full-A event。record loader不信summary：它独立重算
+tracked config与完整action bytes，核NPZ SHA、字段集合、exact shape/dtype/finite；compare拒绝NumPy广播，
+从raw event重算缺失strata，只报告离散mismatch cell和数值difference envelope，不提供tolerance、PASS verdict、
+promotion或training authority。自然H48未覆盖的launch/contact/outcome/recovery必须写`未测`，不得注入生命周期。
+host=`6 passed`，独立终审`P0=0/P1=0`；代码commit=`404031d2`。
+
+portable trainer的`--full-a --diagnostic-rate-probe`复用production H48/4096 PPO、Reward ledger、durable ACK/
+fsync调用面，但固定`10 warm-up + 50 measured + 1 tail`，拒绝
+`HOPE_ACTION_BALL_UPDATE_PROFILE`和`HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES`为非0；不写snapshot/completion，
+只报告61项raw update seconds、measured p50/p90、transitions/s和peak CUDA allocation。`--num-updates`不能
+覆盖61，正式12500/save500路径逐字不变；host=`23 passed,1 skipped`，代码commit=`3f730100`。
+
+Isaac训练入口也只新增默认false的`task.action_ball_full_mdp_rate_probe`：true时在runner边界安装同一61预算，
+但root `max_iterations`仍须缺席或为typed 12500，不能另开第二配方；profiler-on在Kit前拒绝。focused=
+`147 passed,26 skipped`。第一轮Pod执行把clean detached checkout切到`404031d2`后，在GPU/lock前因ignored
+EPA48 wheel/build receipt缺失而fail closed；未创建tape/rate namespace，未运行61或12500。当前exact本机三份
+ignored输入已按文档SHA复核并只恢复这些内容寻址资产后重试。因此本节只有可执行工具与host边界，Pod
+fixed-tape、H48 wall及strata仍全部`未测`。
 
 ## 1. 采用、延后、拒绝
 

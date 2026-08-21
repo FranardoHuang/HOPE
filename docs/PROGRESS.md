@@ -1,5 +1,24 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP H48 fixed-tape与有限rate入口（branch candidate）
+
+- portable MuJoCo新增tracked `N64×H48×31` SplitMix64 action tape；真实
+  `FullMdpInitialWaitVecEnv(full_a_mode=True)`在zero reset noise下保存initial/final qpos/qvel、Reward20、
+  actor203/critic219、done/reason/timeout/table/reset-generation/phase/outcome/action key及全部Full-A event raw
+  arrays。loader独立重算config/tape bytes、核NPZ SHA与exact shape/dtype/finite；compare只报告离散差异和数值
+  envelope，未自然出现的launch/contact/outcome/recovery写`未测`，不设tolerance/verdict/promotion authority。
+  host=`6 passed`，独立终审`P0=0/P1=0`。
+- portable trainer新增显式`--full-a --diagnostic-rate-probe`：沿用真实H48、4096 env、PPO/ledger/ACK/fsync
+  调用面，固定`10 warm-up + 50 measured + 1 tail`，拒绝两个profiler环境开关；只输出raw update seconds、
+  p50/p90、transitions/s与peak CUDA allocation，不写snapshot/completion，也不改变12500/save500正式入口。
+  host runner=`23 passed, 1 skipped`。
+- Isaac `train.py`新增默认false的`task.action_ball_full_mdp_rate_probe`窄入口；true时只把实际runner预算固定为
+  61，typed H48/U12500配方和root `max_iterations=12500`权威仍不可覆盖，profiler-on在Kit前拒绝。focused=
+  `147 passed, 26 skipped`。这不是新的学习配方、训练GO或安全Gate，只是同一生产热路的有限墙钟入口。
+- 第一轮Pod执行已把clean detached source更新到`404031d2`，但在GPU/lock前因ignored EPA48 wheel/full
+  receipt未恢复而fail closed；fixed-tape、rate与任何namespace均未创建。exact本机资产已按文档SHA复核，
+  正在仅恢复三份内容寻址文件后重试。故当前Pod fixed-tape/H48 wall仍`未测`，12500长跑未启动。
+
 ## 2026-08-21 — EPA48固定fixture与Full-A单次launcher候选（branch candidate）
 
 - 拒绝保留通用GPU搜索框架后，branch只保留一对tracked ellipsoid/cylinder MJCF+pose及singleton replay。
