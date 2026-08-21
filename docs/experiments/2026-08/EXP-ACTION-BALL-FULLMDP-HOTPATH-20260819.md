@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0+c1+c2-host-validated / Pod-matched-wall-pending`
-> 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；Phase-C0只有静态payload proxy与host语义证据，Pod matched wall仍未测
+> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0+c1+c2+c2b-host-validated / Pod-matched-wall-pending`
+> 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；Phase-C0--C2b只有静态payload proxy与host语义证据，Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
 
@@ -470,3 +470,26 @@ shape/dtype/frequency proxy，不能折算wall或显存峰值。
 runtime与postphysics env，共`168 passed, 7 skipped`；pycompile/diff-check通过。独立caller/paired/reset审查
 为`P0=0/P1=0`。下一步仍需exact Pod fixed-tape逐项对齐Reward20、actor203/critic219、Epoch final state、
 Physical/R06 substep lifecycle及fault/reset/overflow，再做profiler-off matched H48 wall；G05保持`Partial`。
+
+## 12. Phase-C2b：Observation先查cache再clone
+
+semantic Observation的policy与critic由同一source、同一control step依次读取。旧实现虽然缓存已打包的
+actor/critic，却先调用`ActionEpochOwner.current()`复制44个tensor，再用复制出的epoch/version发现第二组
+命中cache。该副本没有独立consumer，也不参与任何安全判定。
+
+Phase-C2b把cache判定前移到clone之前，复用已有的`common_step`与owner host scalar `commit_head`。
+Genesis满足`version=0, commit_head=1`；所有真实Epoch mutation唯一经`_append()`同时令二者各加一，carry
+restore也强制`current.version == commit_head - 1`。因此同step、同commit才返回cache；same-step真实commit或
+新control step都会miss并读取新record。owner poison仍在cache之前检查，不会用旧finite observation逃逸。
+这不是新鲜度Gate或第二份状态，只是把现有cache放到昂贵copy之前。
+
+critic由`torch.cat((actor, critic_extension))`构造，完整包含actor prefix。旧实现随后分别扫描actor和critic
+finite；前一次扫描不可能发现后一次扫描看不到的actor nonfinite。现只保留critic reduction，hard-coded
+actor行同时注入NaN/Inf的真实pack反例仍fail，没有zero fallback。
+
+`N=4096,S=1`时一次record clone静态为`6,242,304 B`、44个tensor；按每control一对policy/critic调用，H48
+少48份，即`299,630,592 B = 285.75 MiB/update`与2,112个clone/copy call，另少一次actor finite
+scan/control。focused Observation回归=`14 passed`，覆盖policy→critic只读一次current、same-step真实commit
+重建、新step重建、热cache后poison fail及actor NaN/Inf。该数字仍只是shape/dtype/frequency proxy；真实
+manager调用频率、CUDA traffic和wall须由exact Pod profile确认。R07同一事务三份Epoch snapshot的收敛是
+下一独立提交，不与本刀混因果；G05保持`Partial`。

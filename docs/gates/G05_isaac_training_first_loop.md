@@ -33,6 +33,13 @@ active dense再少约`3.349 GiB/update`；主线=`168 passed, 7 skipped`，独�
 或显存实测，Pod fixed-tape与profiler-off matched H48仍`未测`。详见
 [hot-path实验§11](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#11-phase-c2mutator不返回无人消费的整record)。
 
+**2026-08-21 Phase-C2b Observation cache前置（branch candidate；Gate仍`Partial`）：**policy/critic同一
+control step不再各自先clone整份44-tensor Epoch record后才发现cache；已有`common_step + commit_head`
+在clone前判定，same-step真实commit、新step与poison反例仍分别重建或fail。critic包含完整actor prefix，故只保留
+一次critic finite reduction；actor NaN/Inf仍被拒绝。`N=4096,S=1,H48`一对group/control的静态下界少
+`285.75 MiB/update`与2,112个clone/copy call；focused=`14 passed`。这不是wall实测，详见
+[hot-path实验§12](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#12-phase-c2bobservation先查cache再clone)。
+
 **2026-08-21 semantic Observation V2 branch candidate（Gate仍`Partial`）：**family A从旧229/399切到
 actor203/critic219；它恢复229迁移遗漏的floating-base state并删除raw task/owner/reward账，不做237/407机械
 扩维。R06 broad projection也缩为现有owner内的key8+publication live selection与四tensor输出，没有新增

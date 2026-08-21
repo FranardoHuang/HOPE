@@ -718,7 +718,9 @@ class LeanActionEpochObservationSource:
             raise LeanObservationError("named actor layout width differs")
         if critic.shape != (self._num_envs, CRITIC_WIDTH_V2):
             raise LeanObservationError("named critic layout width differs")
-        _assert_async_all(torch.isfinite(actor), label="packed actor is nonfinite")
+        # The critic contains the actor as its exact prefix, so this single
+        # reduction rejects every nonfinite actor value as well as the
+        # critic-only suffix without rescanning the prefix.
         _assert_async_all(torch.isfinite(critic), label="packed critic is nonfinite")
         return actor, critic
 
@@ -732,14 +734,17 @@ class LeanActionEpochObservationSource:
         common_step = getattr(self._env, "common_step_counter", None)
         if type(common_step) is not int or common_step < 0:
             raise LeanObservationError("environment common_step_counter differs")
-        record = self._epoch_owner.current()
-        key = (common_step, record.epoch, record.version)
+        cached_key = self._cached_key
         if (
-            self._cached_key == key
+            cached_key is not None
+            and cached_key[0] == common_step
+            and cached_key[2] + 1 == self._epoch_owner.commit_head
             and self._cached_actor is not None
             and self._cached_critic is not None
         ):
             return self._cached_actor, self._cached_critic
+        record = self._epoch_owner.current()
+        key = (common_step, record.epoch, record.version)
         view = getattr(self._runtime_owner, DIRECT_VIEW_METHOD)(record)
         checked = self._validate_direct(
             view, record=record, common_step=common_step

@@ -791,6 +791,15 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     epoch = _prepared_epoch()
     runtime, parts = _runtime(env, epoch)
     calls = []
+    current_calls = []
+    original_current = E.ActionEpochOwner.current
+
+    def counted_current(owner):
+        assert owner is epoch
+        current_calls.append(owner.commit_head)
+        return original_current(owner)
+
+    monkeypatch.setattr(E.ActionEpochOwner, "current", counted_current)
 
     def direct(self, record):
         calls.append(record.version)
@@ -842,13 +851,33 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     critic = critic_term.func(env, **critic_term.params)
     assert bundle.source._actor_scale_v2.data_ptr() == actor_scale_ptr
     assert bundle.source._critic_extension_scale_v2.data_ptr() == critic_scale_ptr
-    assert calls == [epoch.current().version]
+    assert calls == [0]
+    assert current_calls == [1]
     assert policy.shape == (2, 203) and torch.all(torch.isfinite(policy))
     assert critic.shape == (2, 219) and torch.all(torch.isfinite(critic))
 
+    # A real same-step Epoch commit invalidates the cache even though this
+    # zero fault row does not change any packed semantic value.
+    r03_owner = parts["r03_strike_fact"]
+    epoch.bind_fact_owner("r03_strike_fact", r03_owner)
+    epoch.merge_runtime_owner_fault(
+        "r03_strike_fact", torch.zeros((2, 2), dtype=torch.int64), owner=r03_owner
+    )
+    same_step_policy = policy_term.func(env, **policy_term.params)
+    torch.testing.assert_close(same_step_policy, policy)
+    assert calls == [0, 1]
+    assert current_calls == [1, 2]
+
+    # A new control step rebuilds once even if Epoch itself has not mutated.
+    env.common_step_counter += 1
+    next_step_critic = critic_term.func(env, **critic_term.params)
+    torch.testing.assert_close(next_step_critic, critic)
+    assert calls == [0, 1, 1]
+    assert current_calls == [1, 2, 2]
+
     # Independent hard-coded golden: expected order is written here rather
     # than generated from the shared layout under test.
-    view = _direct_view(env, epoch.current(), parts)
+    view = _direct_view(env, original_current(epoch), parts)
     actor = view.actor_rows
     expected_policy_raw = torch.cat(
         (
@@ -905,7 +934,14 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     torch.testing.assert_close(critic, expected_critic)
     torch.testing.assert_close(critic[:, :203], policy)
     assert policy.abs().max().item() > 1.0
-    assert bundle.source.semantic_publication_count == 1
+    assert bundle.source.semantic_publication_count == 3
+
+    # Poison is checked before the hot cache and cannot return a previously
+    # finite observation from the same step.
+    epoch.poison_owner_write("r03_strike_fact", 1, owner=r03_owner)
+    with pytest.raises(O.LeanObservationError, match="poisoned"):
+        policy_term.func(env, **policy_term.params)
+    assert calls == [0, 1, 1]
 
 
 def test_packer_ignores_raw_task_owner_facts_and_reward_ledger(monkeypatch):
@@ -1027,12 +1063,15 @@ def test_nonfinite_direct_fact_fails_without_runtime_zero_fallback(monkeypatch):
     def bad(self, record):
         del self
         view = _direct_view(env, record, parts)
+        nonfinite = torch.zeros((2, 31), dtype=torch.float32)
+        nonfinite[0, 0] = float("nan")
+        nonfinite[1, 0] = float("inf")
         return O.DirectActionEpochObservationFacts(
             **{
                 **view.__dict__,
                 "actor_rows": {
                     **view.actor_rows,
-                    "joint_pos_rel": torch.full((2, 31), float("nan")),
+                    "joint_pos_rel": nonfinite,
                 },
             }
         )

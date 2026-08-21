@@ -1,5 +1,16 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP Phase-C2b Observation先查cache（branch candidate）
+
+- semantic Observation原先在policy/critic同一control step的第二组调用中，先clone一份44-tensor
+  `ActionEpochRecord`再发现cache命中。现用已有`common_step + commit_head`先判cache；真实same-step Epoch
+  commit或新control step仍重建，poison仍在cache前fail。critic本来就以完整actor为prefix，因此只保留一次
+  critic finite reduction，actor NaN/Inf仍由真实pack反例拒绝；无新owner、token、receipt或Gate。
+- `N=4096,S=1,H48`且每control一对policy/critic调用时，静态下界少`285.75 MiB/update`与2,112个
+  tensor clone/copy call；focused=`14 passed`。这不是CUDA traffic或wall成绩，R07三份Epoch snapshot合一
+  仍作为下一独立刀，Pod matched H48仍`未测`。详见
+  [FullMDP hot-path实验§12](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#12-phase-c2bobservation先查cache再clone)。
+
 ## 2026-08-21 — FullMDP Phase-C2退役Epoch零consumer返回clone（branch candidate）
 
 - 5个ActionEpoch mutator改为`None`返回，只删除production caller全部丢弃的44-tensor整record clone；
