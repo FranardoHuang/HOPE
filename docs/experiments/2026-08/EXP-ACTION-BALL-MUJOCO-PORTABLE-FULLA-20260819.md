@@ -4,8 +4,8 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`successor-tools-branch-candidate / Pod dual-wheel import+tracked fixture replay PASS / H48 actual HOLD / fresh-longrun HOLD`
-> 证据等级：E1源码、host反例、Pod actual import与tracked GPU fixture差分；无ASan、ActionBall fixed-tape actual、H48 wall或fresh长跑证据
+> 状态：`successor-tools-branch-candidate / Pod dual-wheel+fixture+tape+H48 rate PASS / fresh-longrun HOLD`
+> 证据等级：E2 exact Pod H48 wall/fixed tape + E1源码/host反例；无ASan physics-promotion或fresh长跑证据
 
 <a id="epa48-fresh-runtime-binding-20260821"></a>
 ## 0. 2026-08-21 successor的EPA48 fresh runtime binding
@@ -106,9 +106,30 @@ fsync调用面，但固定`10 warm-up + 50 measured + 1 tail`，拒绝
 Isaac训练入口也只新增默认false的`task.action_ball_full_mdp_rate_probe`：true时在runner边界安装同一61预算，
 但root `max_iterations`仍须缺席或为typed 12500，不能另开第二配方；profiler-on在Kit前拒绝。focused=
 `147 passed,26 skipped`。第一轮Pod执行把clean detached checkout切到`404031d2`后，在GPU/lock前因ignored
-EPA48 wheel/build receipt缺失而fail closed；未创建tape/rate namespace，未运行61或12500。当前exact本机三份
-ignored输入已按文档SHA复核并只恢复这些内容寻址资产后重试。因此本节只有可执行工具与host边界，Pod
-fixed-tape、H48 wall及strata仍全部`未测`。
+EPA48 wheel/build receipt缺失而fail closed；只恢复本机按文档SHA复核的三份内容寻址资产后，同一GPU2 UUID
+与外层lock自然完成两次tape、compare和rate，SSH rc0，source最终clean、前后apps empty、unlock后可重新获取。
+
+两次tape各3072 rows；离散/reason/events全exact，initial qpos/qvel/actor/critic exact。连续repeat max/mean为：
+
+| 字段 | max abs | mean abs |
+| --- | ---: | ---: |
+| actor203 / critic219 | `0.005191662` | `1.63e-5 / 1.51e-5` |
+| qpos | `0.000633504` | `9.64e-6` |
+| qvel | `0.103833243` | `0.001050465` |
+| Reward20 | `6.0955e-6` | `3.25e-8` |
+
+每次reveal due/deferred=`64/64`，所以reveal/launch/contact/outcome/recovery都诚实为`未测`；compare不据此
+造PASS。A/B summary+arrays SHA分别为`195023ad…d4c43`/`0c0499d0…077a`与
+`19bd8753…ae99`/`21444b7b…b6db`，compare SHA=`b6d5c6d…886c0`。
+
+rate为`4096×48×61`，50个measured update共`9,830,400` transitions、wall=`473.078529 s`，
+throughput=`20,779.63677/s`，p50/p90=`9.44830058/9.66072240 s/update`，全过程
+`575.269436 s`，Torch peak allocated=`1,046,172,672 B`；evidence SHA=`5e7ba562…d763`。
+H24-equivalent p50=`4.72415 s/update`，所以按当前“约6秒是旧H24量级、H48约12秒不是硬Gate”的取舍，
+MuJoCo不再继续堆微优化。把6秒直接要求在H48并宣称仍差1.57倍的判读明确不采用。
+
+instrumented/ASan仍是physics promotion/transfer的独立证据缺口，不是未训练policy表现门，也不阻塞本来就
+`diagnostic_unauthorized`且保留overflow/nonfinite fail-stop的fresh工程长跑；12500仍尚未发射。
 
 ## 1. 采用、延后、拒绝
 

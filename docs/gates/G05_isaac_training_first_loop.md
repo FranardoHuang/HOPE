@@ -9,6 +9,16 @@ transitions，`ddb1e7c4…`止于ACK `3467` / `340,918,272` transitions。退出
 Pod状态，因此不声称当前GPU空闲或存在训练进程。两条旧run都没有resume authority；新的H48/Observation V2
 必须使用fresh commit与fresh namespace。
 
+**2026-08-21 H48有限rate入口（branch candidate；Gate仍`Partial`）：**Isaac task新增默认false的
+`action_ball_full_mdp_rate_probe`；只在显式true时把runner实际预算code-owned固定为61（10 warm-up、
+50 measured、1 tail），typed H48/U12500 recipe和root `max_iterations=12500`权威不变，CLI传61或任一
+profiler-on环境都在Kit前拒绝。focused=`147 passed,26 skipped`。这是为了测量production热路而不是新增
+training recipe、owner、receipt或安全Gate；Isaac exact Pod pre/post Phase-C wall仍`未测`。
+
+portable MuJoCo同配方实际rate p50/p90=`9.448/9.661 s/update`、throughput=`20,779.64/s`、
+H24-equivalent p50=`4.724 s`，说明H48本身不妨碍迭代；但它不能代签Isaac的Phase-C收益。本Gate下一步只做
+同GPU profiler-off matched measurement，不再用静态payload减法或MuJoCo成绩推算Isaac秒数。
+
 **2026-08-21 Phase-C0 K=0空D05退役（branch candidate；Gate仍`Partial`）：**after-command业务mask
 全false时只推进scalar chronology，跳过Question/RNG、三writer、第二次Motion projection、post-D05 reseal
 与10条空journal；settlement不再返回无人消费的44-tensor record clone。`N=4096`静态payload proxy分别约为

@@ -25,8 +25,12 @@ branch又新增一个不改变typed recipe的有限墙钟面：portable Full-A�
 `diagnostic_unauthorized`；Isaac CLI仍不能把root `max_iterations`改成61。另有tracked N64×H48 fixed-tape
 保存Reward20、actor203/critic219、plant与全部离散生命周期raw arrays，compare无tolerance/verdict。host分别为
 rate runner `23 passed,1 skipped`、tape `6 passed`、Isaac focused `147 passed,26 skipped`；实际Pod运行尚未成功：
-clean source已到`404031d2`，但首次尝试在GPU/lock前因ignored EPA48资产未恢复而fail closed，所有wall/parity
-仍`未测`。这不改变Gate `Partial`或训练权限。
+clean source到`404031d2`后的首次尝试在GPU/lock前因ignored EPA48资产未恢复而fail closed；只恢复三份
+exact SHA资产后，同一GPU2/lock实际两次tape的离散/reason/events与初态全exact，连续repeat max envelope=
+actor/critic `0.005192`、qpos `0.000634`、qvel `0.103833`、Reward20 `6.10e-6`，五个自然strata仍`未测`。
+同一SSH的H48/4096 rate measured50 p50/p90=`9.448/9.661 s`、throughput=`20,779.64/s`、H24-equivalent
+p50=`4.724 s`，source clean、前后apps empty、lock free。该结果关闭MuJoCo有限构造/吞吐HOLD，不关闭
+ASan physics promotion、Isaac matched wall或本Gate `Partial`。
 
 **2026-08-21 portable Full-A fresh EPA48 runtime binding（Gate仍`Partial`）：**当前branch candidate在
 base `074e2a0d`之上的runtime diff `df4d5ea6…f2d3`新增

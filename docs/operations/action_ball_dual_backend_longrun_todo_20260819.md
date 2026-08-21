@@ -120,10 +120,11 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    V1只为明确的历史 WAIT consumer保留，不允许Full-A静默fallback。
 2. **MuJoCo EPA48**：build chain与fresh dual-wheel actual import已在branch candidate闭合；tracked replay
    也已在Pod同卡完成stock24 mask256/contact0与fork48 zero-overflow/contact1+finite raw contact各10次，
-   branch只保留fixed fixture+replay-only工具。H48 fixed-tape工具已落地并经host/red-team闭合；下一步在
-   exact Pod实际生成两份record并compare reason/counter/safety/Reward20/203/219，另做独立
-   instrumented/ASan oracle；stock CPU同样硬编码24，不能充当golden。未闭合前
-   `training_authorized=false`，r3不resume。
+   branch只保留fixed fixture+replay-only工具。H48 fixed-tape已在exact Pod同卡生成两份record：离散/
+   reason/events与初态exact，连续repeat envelope已保存；五个自然business strata因due全DEFER仍`未测`。
+   instrumented/ASan独立oracle继续阻塞physics promotion/transfer claim，但不再作为
+   `diagnostic_unauthorized`长跑前的表现式准入门：fork只改project-pinned容量常量，runtime overflow/nonfinite
+   fail-stop仍在，且真实Full-A 61-update已自然rc0。stock CPU同样硬编码24，不能充当golden；r3仍不resume。
 3. **单一 ActionBallState**：一个device-resident mutable state唯一拥有phase/generation/shot/contact/
    outcome/fault；K-row候选只构造一次并sparse commit，只有真实transition写compact event delta；
    `K=0`/zero-live-flight成对跳过Physical/scene/R06/Epoch空事务，PPO boundary统一汇总。
@@ -135,6 +136,8 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    同时验证fixed tape RNG/highwater/reason/done/reset/Reward20/203/219 parity。报告原始wall、transitions/s和
    H24-equivalent；首墙转移后重新profile，不继续堆零碎clone patch。MuJoCo的真实生产热路rate入口已固定
    61 update；Isaac只增加同样`10+50+1`的code-owned diagnostic budget，不开放任意短跑覆盖12500配方。
+   MuJoCo actual p50/p90=`9.448/9.661 s/update`、throughput=`20,779.64/s`、H24-equivalent p50=`4.724 s`，
+   因而本后端不继续堆微优化；Isaac同卡pre/post Phase-C wall仍`未测`。
 5. **fresh namespace短验与训练**：先做clock-fixed、EPA-fixed的portable MuJoCo V2，再做通过matched性能
    验收的Isaac V2；不复用旧namespace、runtime site或snapshot，不插`ACCEPT>0`门。MuJoCo caller必须传
    [`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)指向一个尚不存在的绝对路径；
@@ -142,7 +145,8 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    真实调用点，随后同一进程继续训练并按balance→mimic→entry→strike→landing分阶段报告分母。
    branch候选one-shot launcher只负责clean Git、fresh root、GPU UUID/空卡/lock与固定H48 argv，并等待child
    自然退出；它不监控、不重试、不发signal，也不以`ACCEPT>0`作为启动或停止条件。Pod1 clean detached
-   `2e4279ba` dry-run已PASS且未建root、未查GPU、未改lock；real run仍未测。
+   `2e4279ba` dry-run已PASS且未建root、未查GPU、未改lock；real longrun仍未发射。61-update实际rate与
+   fixed-tape已关闭MuJoCo发射前的有限构造/吞吐证据，`ACCEPT=0`及五strata未出现不作为表现门。
 
 ## 4. 当前完成条件
 

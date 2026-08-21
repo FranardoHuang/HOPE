@@ -15,9 +15,16 @@
 - Isaac `train.py`新增默认false的`task.action_ball_full_mdp_rate_probe`窄入口；true时只把实际runner预算固定为
   61，typed H48/U12500配方和root `max_iterations=12500`权威仍不可覆盖，profiler-on在Kit前拒绝。focused=
   `147 passed, 26 skipped`。这不是新的学习配方、训练GO或安全Gate，只是同一生产热路的有限墙钟入口。
-- 第一轮Pod执行已把clean detached source更新到`404031d2`，但在GPU/lock前因ignored EPA48 wheel/full
-  receipt未恢复而fail closed；fixed-tape、rate与任何namespace均未创建。exact本机资产已按文档SHA复核，
-  正在仅恢复三份内容寻址文件后重试。故当前Pod fixed-tape/H48 wall仍`未测`，12500长跑未启动。
+- 第一轮Pod执行已把clean detached source更新到`404031d2`，并在GPU/lock前因ignored EPA48 wheel/full
+  receipt未恢复而fail closed；随后只恢复三份已核SHA的内容寻址资产。GPU2同卡、全程lock的两次tape各
+  3072 rows，离散/reason/events全exact，初态全exact；连续repeat envelope的max为actor/critic
+  `0.005192`、qpos `0.000634`、qvel `0.103833`、Reward20 `6.10e-6`。五个自然business strata都`未测`
+  （每次due/deferred=`64/64`），compare SHA=`b6d5c6d…886c0`，没有人为PASS tolerance。
+- 同一SSH自然完成MuJoCo `4096×48×61` rate：50个measured update的wall=`473.079 s`、p50/p90=
+  `9.448/9.661 s/update`、throughput=`20,779.64 transitions/s`、peak allocated=`1,046,172,672 B`；
+  H24-equivalent p50=`4.724 s/update`。这满足“旧约6秒是H24量级信号”的当前性能取舍；不采用把6秒硬套
+  到H48、再声称还差1.57倍的读法。source最终clean、前后apps empty、lock free，rate evidence SHA=
+  `5e7ba562…d763`；仍不授权physics promotion，12500长跑尚未启动。
 
 ## 2026-08-21 — EPA48固定fixture与Full-A单次launcher候选（branch candidate）
 
