@@ -5,8 +5,9 @@ Status: Partial (parity procedure operational and used to gate the 2026-07-02 si
 **2026-08-21 current correction（supersede下文所有“r3 active/继续25k”叙述；Gate仍`Partial`）：**portable
 MuJoCo r3已经停止在durable ACK `10249`；终段last-100 wall mean/median=`4.890/4.886 s/update`。
 直接停止原因是真实MuJoCo-Warp `EPA_HORIZON` overflow fail-stop；旧229-D observation还存在IDLE clock
-随global step漂移，所以即使扩大EPA容量也不得resume r3。本次live SSH刷新因认证失败，没有取得当前Pod/GPU
-状态；本文不把旧资源快照表述成当前事实。
+随global step漂移，所以即使扩大EPA容量也不得resume r3。fresh successor现已从clean detached `96f0ca69`
+在GPU2启动H48 `4096×12500`，最近只读前缀为update `0..4`五个连续durable ACK且child仍在运行；这不是
+completion或本Gate晋级。
 
 successor同时切到semantic A203/219，并由Isaac与MuJoCo各自native producer生成同一语义布局与static
 scale；R06缩为现有owner内key8+publication live selection与四tensor输出，不新建owner/receipt/Gate。
@@ -24,13 +25,20 @@ branch又新增一个不改变typed recipe的有限墙钟面：portable Full-A�
 都只允许`10 warm-up + 50 measured + 1 tail`、H48/4096、profiler-off，且保持
 `diagnostic_unauthorized`；Isaac CLI仍不能把root `max_iterations`改成61。另有tracked N64×H48 fixed-tape
 保存Reward20、actor203/critic219、plant与全部离散生命周期raw arrays，compare无tolerance/verdict。host分别为
-rate runner `23 passed,1 skipped`、tape `6 passed`、Isaac focused `147 passed,26 skipped`；实际Pod运行尚未成功：
-clean source到`404031d2`后的首次尝试在GPU/lock前因ignored EPA48资产未恢复而fail closed；只恢复三份
+rate runner `23 passed,1 skipped`、tape `6 passed`、Isaac focused `147 passed,26 skipped`。首次Pod尝试
+在GPU/lock前因ignored EPA48资产未恢复而fail closed；只恢复三份
 exact SHA资产后，同一GPU2/lock实际两次tape的离散/reason/events与初态全exact，连续repeat max envelope=
 actor/critic `0.005192`、qpos `0.000634`、qvel `0.103833`、Reward20 `6.10e-6`，五个自然strata仍`未测`。
 同一SSH的H48/4096 rate measured50 p50/p90=`9.448/9.661 s`、throughput=`20,779.64/s`、H24-equivalent
 p50=`4.724 s`，source clean、前后apps empty、lock free。该结果关闭MuJoCo有限构造/吞吐HOLD，不关闭
 ASan physics promotion、Isaac matched wall或本Gate `Partial`。
+
+随后one-shot launcher从clean detached `96f0ca69887aba44c71983529d05e759e1a4cd2f`在GPU2 UUID
+`GPU-473a79f3-8736-6c7f-c3db-290c6be385b8`启动fresh namespace
+`fullmdp-a-h48-v2-96f0ca69-20260821`：Full-A `4096×48×12500/save500`、fresh runtime site、无resume/
+retry/signal/`ACCEPT`门。update0的collection/learning/pre-ACK=`9.354775/0.284285/9.639704 s`，Reward20/
+storage finite且fault为0，model0 SHA=`50ebc7c9…7b26`；最近已见update `0..4`五个连续ACK且child为`R`。
+这关闭real-launch HOLD，只提供运行中engineering prefix；12500 completion、业务阶段分母与transfer仍未闭合。
 
 **2026-08-21 portable Full-A fresh EPA48 runtime binding（Gate仍`Partial`）：**当前branch candidate在
 base `074e2a0d`之上的runtime diff `df4d5ea6…f2d3`新增
@@ -43,8 +51,9 @@ import顺序/fail-close、EPA-only durable identity、RSL进程内门与schema `
 Pod1无CUDA actual dual-wheel import=`19 passed in 4.33s`。tracked fixed fixture/replay又在GPU2
 `GPU-473a79f3-8736-6c7f-c3db-290c6be385b8`、PCI `00000001:BE:00`各重复10次：stock24均为exact
 `EPA_HORIZON` mask `256`/contact0，fork48均为mask `0`/contact1且dist/pos/frame finite，verdict=
-`PASS_EPA48_FIXED_FIXTURE_REPLAY`；标准lock覆盖全程，结束apps empty/lock free。fixed-tape、matched H48 wall、
-ASan/instrumented独立oracle与fresh longrun仍未闭合。故非完整physics/training GO，保持
+`PASS_EPA48_FIXED_FIXTURE_REPLAY`；标准lock覆盖全程，结束apps empty/lock free。fixed-tape、MuJoCo H48 wall
+与fresh longrun发射前缀已由上段闭合；ASan/instrumented独立oracle、Isaac matched wall、longrun completion
+仍未闭合。故非完整physics/training GO，保持
 `diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`，且尚未合`main`。
 one-shot launcher又在Pod1 clean detached `2e4279ba`以真实venv完成无副作用dry-run：固定H48 argv与source
 commit正确，run root未创建、lock元数据未变、GPU未查询；这只关闭发射入口构造，不代签real run或本Gate。

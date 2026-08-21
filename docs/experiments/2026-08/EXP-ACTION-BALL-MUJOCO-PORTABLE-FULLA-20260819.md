@@ -4,14 +4,15 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`successor-tools-branch-candidate / Pod dual-wheel+fixture+tape+H48 rate PASS / fresh-longrun HOLD`
-> 证据等级：E2 exact Pod H48 wall/fixed tape + E1源码/host反例；无ASan physics-promotion或fresh长跑证据
+> 状态：`successor-tools-branch-candidate / Pod dual-wheel+fixture+tape+H48 rate PASS / fresh-longrun RUNNING`
+> 证据等级：E2 exact Pod H48 wall/fixed tape与fresh ACK前缀 + E1源码/host反例；无ASan physics-promotion或完成证据
 
 <a id="epa48-fresh-runtime-binding-20260821"></a>
 ## 0. 2026-08-21 successor的EPA48 fresh runtime binding
 
 本节是runtime binding详细真源，并supersede下文的r3 active及旧wire叙述。r3已止于ACK `10249`且
-不得resume；当前实现仍是`074e2a0d`之上的branch WIP，尚未合入`main`，没有fresh训练namespace。
+不得resume；当前实现仍是branch candidate，尚未合入`main`。fresh训练namespace已从clean detached
+`96f0ca69887aba44c71983529d05e759e1a4cd2f`真实发射，身份和前缀证据见本节下文。
 
 Full-A新增[`--mujoco-warp-runtime-site`](../../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)（本次run的
 MuJoCo-Warp/RSL-RL隔离导入目录）：路径必须绝对、父目录已存在且canonical，site本身不存在、非symlink且
@@ -48,8 +49,8 @@ env -u PYTHONPATH CUDA_VISIBLE_DEVICES='' PYTHONNOUSERSITE=1 \
 ```
 
 结果`19 passed in 4.33s`，actual import覆盖EPA package/types与RSL package/runner，并核version/horizon/
-distribution/module roots。因命令隐藏CUDA，它不是GPU physics或训练证据。ActionBall fixed-tape、matched
-H48 wall、instrumented/ASan oracle与fresh Full-A longrun仍`未测`。
+distribution/module roots。因命令隐藏CUDA，它本身不是GPU physics或训练证据；后续同页已经补齐ActionBall
+fixed-tape、H48 wall和fresh Full-A运行前缀。instrumented/ASan physics-promotion oracle仍`未测`。
 因此仍为`diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`、
 `full_a_complete=false`，不是training GO。
 
@@ -80,8 +81,9 @@ apps与显式flock；然后固定启动`4096×12500`、H48 recipe、save500及ru
 lifetime，launcher前台等待自然rc；没有monitor、retry、signal、resume或`ACCEPT` gate。host=`11 passed`，
 Pod1 clean detached `2e4279ba`已用真实`/workspace/mjlab_venv/bin/python`完成dry-run：输出精确绑定
 source commit、Full-A `4096×12500`、H48、save500与run-local site；run root前后均不存在，lock inode/size/
-mtime/ctime不变，且dry-run在GPU查询前返回。real run仍`未测`，因此当前只是一条更窄的发射入口，
-不是发车授权。launcher初版/venv入口修复commit为`4468b681` / `2e4279ba`。
+mtime/ctime不变，且dry-run在GPU查询前返回。随后同一窄入口已从clean detached `96f0ca69`真实发射；这仍只
+是branch-scoped、`diagnostic_unauthorized`工程长跑，不是training/promotion授权。launcher初版/venv入口
+修复commit为`4468b681` / `2e4279ba`。
 
 <a id="h48-fixed-tape-and-rate-probes-20260821"></a>
 ### H48 fixed-tape与有限rate probes
@@ -129,7 +131,21 @@ H24-equivalent p50=`4.72415 s/update`，所以按当前“约6秒是旧H24量级
 MuJoCo不再继续堆微优化。把6秒直接要求在H48并宣称仍差1.57倍的判读明确不采用。
 
 instrumented/ASan仍是physics promotion/transfer的独立证据缺口，不是未训练policy表现门，也不阻塞本来就
-`diagnostic_unauthorized`且保留overflow/nonfinite fail-stop的fresh工程长跑；12500仍尚未发射。
+`diagnostic_unauthorized`且保留overflow/nonfinite fail-stop的fresh工程长跑。
+
+### Fresh H48 longrun运行前缀
+
+clean detached source=`96f0ca69887aba44c71983529d05e759e1a4cd2f`；namespace=
+`fullmdp-a-h48-v2-96f0ca69-20260821`；run root=
+`/workspace/franco/runs/fullmdp-a-h48-v2-96f0ca69-20260821`；GPU2 UUID=
+`GPU-473a79f3-8736-6c7f-c3db-290c6be385b8`。发射前empty-app与nonblocking lock通过，launcher PID
+`2030437`持lock等待唯一child PID `2030453`；child exact argv为Full-A `4096×48×12500/save500`、fresh
+runtime site且无resume/retry/signal/`ACCEPT`门。
+
+update0 durable ACK：prepared SHA=`1d186373…614e53`，`196,608` transitions，collection/learning/pre-ACK=
+`9.354775/0.284285/9.639704 s`；storage与Reward20 finite，conservation/nonfinite fault为0；
+`model_0.pt`大小`6,617,367 B`、SHA=`50ebc7c9…7b26`。最近一次只读检查已见update `0..4`共5个连续ACK，
+child仍为`R`。这证明真实production路径开始持续推进，不证明12500 completion或任何business stage已经出现。
 
 ## 1. 采用、延后、拒绝
 
@@ -294,12 +310,12 @@ run；当前`engineering_run_complete=false`、`business_chain_complete=false`�
 
 1. historical r3已止于durable ACK `10249`；EPA overflow与旧IDLE clock泄漏共同禁止resume。下文
    `0..7`与active PID只保留为当时前缀，不是当前运行态。
-2. successor的fresh dual-wheel import与tracked 10+10次fixture replay已经通过，但ActionBall fixed-tape、
-   matched H48 wall和instrumented/ASan oracle尚未闭合。
-3. 使用本runtime binder的fresh longrun尚未发射；因此没有新ACK schema 3、completion schema 4、
-   summary schema 3的live训练产物。C family、backhand分母、第二seed、promotion/export/deploy也仍`未测`，
+2. successor的fresh dual-wheel import、tracked 10+10次fixture replay、ActionBall H48 fixed-tape与MuJoCo
+   H48 wall已经实跑；instrumented/ASan physics-promotion oracle和Isaac matched wall尚未闭合。
+3. 使用本runtime binder的fresh longrun已经发射并有schema-3 durable ACK前缀，但12500个ACK与schema-4
+   completion尚未产生。C family、backhand分母、第二seed、promotion/export/deploy也仍`未测`，
    `business_chain_complete/full_a_complete=false`。
 
 这些是真实剩余的证据边界。zero-action table/fall、零contact或低recovery率仍只是未训练策略telemetry，
 不作为发车阻塞；现有overflow/keepout termination与证据完整性检查继续保留。当前是branch-scoped
-runtime import closure，不是GPU physics、fresh engineering longrun或MuJoCo Full-A完成。
+runtime import closure与运行中engineering prefix，不是physics promotion、完整engineering longrun或MuJoCo Full-A完成。

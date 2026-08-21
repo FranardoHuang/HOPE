@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`ACTIVE-successor-construction / no-authorized-live-run / branch-scoped / diagnostic_unauthorized`
+> 状态：`ACTIVE-successor-MuJoCo-longrun / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-21
@@ -12,7 +12,7 @@
 
 ## 1. 当前运行事实
 
-三条旧长跑均已停止，不存在可继续推进的 active run：
+三条旧长跑均已停止，不可继续推进：
 
 - Isaac `e8eef4fb…`止于 durable ACK（optimizer成功后已持久化的更新签收）`4603`，累计
   `452,591,616` transitions；
@@ -25,8 +25,18 @@
 迭代深度上限）overflow fail-stop；
 它同时消费了会在 IDLE 时随全局 step 漂移的旧 229-D observation，所以不允许 resume。
 
-本次尝试只读刷新 Pod 状态时 SSH 认证失败；因此本文不声称当前 GPU 是否空闲，也不把旧快照写成
-“当前没有 compute process”。任何新运行都必须重新取得 live 资源证据。
+fresh successor已经从clean detached `96f0ca69887aba44c71983529d05e759e1a4cd2f`在Pod1真实发射：
+
+- namespace=`fullmdp-a-h48-v2-96f0ca69-20260821`，run root=
+  `/workspace/franco/runs/fullmdp-a-h48-v2-96f0ca69-20260821`；
+- GPU2 UUID=`GPU-473a79f3-8736-6c7f-c3db-290c6be385b8`；发射前empty-app与nonblocking lock门通过，
+  launcher PID=`2030437`持lock等待唯一child PID=`2030453`自然退出；
+- exact argv为Full-A `4096×48×12500/save500`，fresh runtime site，无resume/retry/signal/`ACCEPT`门；
+- 首个durable ACK为update `0`、`196,608` transitions，collection/learning/pre-ACK=
+  `9.354775/0.284285/9.639704 s`；Reward20/storage finite，conservation/nonfinite fault均为0；
+  `model_0.pt` SHA-256=`50ebc7c9…7b26`；
+- 最近一次只读检查已见update `0..4`共5个连续durable ACK，child仍为`R`。这是运行态快照，不预测最终
+  completion；source、namespace与PID只作为本次run身份，不为后续run复用。
 
 旧 run 的 `ACCEPT=0`只是课程 telemetry：当时 opportunity 仍停在 balance/mimic/readiness 阶段。
 balance→mimic→entry→strike→landing 本来就可能需要很多 step；`ACCEPT>0`不是启动门、安全门或早期
@@ -145,8 +155,10 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    真实调用点，随后同一进程继续训练并按balance→mimic→entry→strike→landing分阶段报告分母。
    branch候选one-shot launcher只负责clean Git、fresh root、GPU UUID/空卡/lock与固定H48 argv，并等待child
    自然退出；它不监控、不重试、不发signal，也不以`ACCEPT>0`作为启动或停止条件。Pod1 clean detached
-   `2e4279ba` dry-run已PASS且未建root、未查GPU、未改lock；real longrun仍未发射。61-update实际rate与
-   fixed-tape已关闭MuJoCo发射前的有限构造/吞吐证据，`ACCEPT=0`及五strata未出现不作为表现门。
+   `2e4279ba` dry-run已PASS且未建root、未查GPU、未改lock；随后clean detached `96f0ca69`已按上述fresh
+   identity真实发射并取得update `0..4`连续durable ACK。61-update实际rate与fixed-tape关闭发射前的有限
+   构造/吞吐证据；运行现在只允许自然推进，`ACCEPT=0`及五strata未出现不作为表现门。Isaac V2的同卡
+   pre/post Phase-C测量与fresh run仍在后续，不能由MuJoCo代签。
 
 ## 4. 当前完成条件
 

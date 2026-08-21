@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-21 — portable Full-A H48 fresh长跑已真实发射（branch candidate）
+
+- Pod1从clean detached `96f0ca69887aba44c71983529d05e759e1a4cd2f`建立fresh namespace
+  `fullmdp-a-h48-v2-96f0ca69-20260821`，在GPU2 UUID `GPU-473a79f3-8736-6c7f-c3db-290c6be385b8`
+  通过empty-app与nonblocking lock门后启动唯一child。exact argv为Full-A `4096×48×12500/save500`、
+  fresh双wheel runtime site、无resume/retry/signal/`ACCEPT`门；launcher持续持lock并等待child自然退出。
+- 首个durable ACK update0含`196,608` transitions，collection/learning/pre-ACK=
+  `9.354775/0.284285/9.639704 s`，Reward20/storage finite、conservation/nonfinite fault均为0；
+  `model_0.pt` SHA=`50ebc7c9…7b26`。最近一次只读检查已有update `0..4`五个连续ACK且child为`R`。
+  这关闭“是否跑起来”，不关闭12500 completion、业务链、ASan physics promotion、Isaac matched wall、
+  export/deploy或真机安全；早期`ACCEPT=0`仍只表示课程尚未进入eligible strike，不是停车条件。
+
 ## 2026-08-21 — FullMDP H48 fixed-tape与有限rate入口（branch candidate）
 
 - portable MuJoCo新增tracked `N64×H48×31` SplitMix64 action tape；真实
@@ -24,7 +36,7 @@
   `9.448/9.661 s/update`、throughput=`20,779.64 transitions/s`、peak allocated=`1,046,172,672 B`；
   H24-equivalent p50=`4.724 s/update`。这满足“旧约6秒是H24量级信号”的当前性能取舍；不采用把6秒硬套
   到H48、再声称还差1.57倍的读法。source最终clean、前后apps empty、lock free，rate evidence SHA=
-  `5e7ba562…d763`；仍不授权physics promotion，12500长跑尚未启动。
+  `5e7ba562…d763`；仍不授权physics promotion。12500长跑随后已按本日顶部记录fresh启动。
 
 ## 2026-08-21 — EPA48固定fixture与Full-A单次launcher候选（branch candidate）
 
