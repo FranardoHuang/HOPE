@@ -1,0 +1,59 @@
+{
+  "fixture_id": "mujoco_warp_epa48_ellipsoid_cylinder_cross_v1",
+  "geometry": {
+    "fixed": {
+      "name": "fixed_geom",
+      "size_m": [
+        0.025,
+        0.075,
+        0.125
+      ],
+      "type": "ellipsoid"
+    },
+    "moving": {
+      "density_kg_m3": 1000,
+      "name": "moving_geom",
+      "size_m": [
+        0.04,
+        0.105
+      ],
+      "type": "cylinder"
+    }
+  },
+  "mjcf_file": "mujoco_warp_epa48_ellipsoid_cylinder_cross_v1.xml",
+  "mjcf_sha256": "f611bbf5189a5eb87b0b9da58261d7f6d1d31302757daea106cfbc22a4fc58ce",
+  "pose": {
+    "quat_wxyz": [
+      0.102804198523,
+      0.325362607212,
+      0.0882094053962,
+      0.935836295189
+    ],
+    "translation_m": [
+      0.0071089754719,
+      -0.011792854753,
+      0.0173480845636
+    ]
+  },
+  "probe": {
+    "ccd_iterations": 100,
+    "ccd_tolerance": 1e-08,
+    "disable_multiccd": true,
+    "gravity_m_s2": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "joint": "free",
+    "nccdmax": 4,
+    "nconmax": 4,
+    "njmax": 32,
+    "nworld": 1
+  },
+  "schema_version": 1,
+  "scientific_scope": {
+    "diagnostic_unauthorized": true,
+    "stock_cpu_mujoco_is_oracle": false,
+    "training_authorized": false
+  }
+}

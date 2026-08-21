@@ -1,0 +1,11 @@
+<mujoco model="hope_epa_pair">
+  <compiler angle="radian"/>
+  <option gravity="0 0 0"/>
+  <worldbody>
+    <geom name="fixed_geom" contype="1" conaffinity="1" margin="0" gap="0" type="ellipsoid" size="0.025 0.075 0.125"/>
+    <body name="moving_body">
+      <freejoint name="moving_free"/>
+      <geom name="moving_geom" contype="1" conaffinity="1" margin="0" gap="0" type="cylinder" size="0.04 0.105" density="1000"/>
+    </body>
+  </worldbody>
+</mujoco>
