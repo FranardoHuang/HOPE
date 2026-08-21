@@ -2314,3 +2314,25 @@ table-keepout=`true`。因此不是tilt或base-too-low，也不能简单归因sp
 机器人OBB/拍面在约0.32秒后进入table guard。namespace
 `mujoco-fullmdp-gpu-diag.c0aa32e9.Pod1GPU0Slot2Taskset.EdCf3ic7`封存不重试。下一步须定位首个命中的
 component/blade、与Isaac同ready/table frame对拍，再决定修ready控制还是frame/guard；不得关闭guard绕过。
+
+### 2026-08-22 课程解阻后的fresh portable MuJoCo（Gate仍`Partial`）
+
+旧H48 run在ACK3023累计`due=901 / reveal=0 / deferred=901`，继续等待不会自然产生任务分母。课程与
+reset-ready reference的同一最小修复已经exact Pod聚焦回归；launcher另把child cwd从source checkout改为
+唯一run root，防止`MUJOCO_LOG.TXT`污染immutable source。该路径回归=`11 passed`，没有用`.gitignore`
+掩盖错误输出边界。
+
+fresh commit `23c0f6c…`、namespace `fullmdp-a-h48-v2-mujoco-unblock-23c0f6c8-20260822`现于GPU0运行。
+22:55 UTC快照已连续到至少update47，Reward/storage全finite，nonfinite/conservation fault均为0。最近20轮
+wall中位约`9.634 s/H48`、约`20,408 transitions/s`，H24-equivalent约`4.82 s`，进入旧`6 s/H24`要求的
+量级。early update0--9到recent update38--47的episode均长从`105.61`升到`149.75 tick`；update45首次
+出现`due=1 / reveal=1 / deferred=0`，同一rollout随后有phase-2 task row `27`个、R03 physically-valid
+`26`个并产生Reward0--9非零梯度。这是自然课程首穿的runtime证据。selected contact与landing仍为0，
+所以击球和上台继续记`未测`。近期`motion_body_ori`约`2,526--3,831`，说明错误reference/单窄核造成的
+近零梯度已经解除，但不能代签mimic或击球成功。
+
+Isaac与MuJoCo现在是两个独立clean detached checkout和两个fresh namespace，不共享可变source。旧run均按
+精确PID/start-ticks停止、root/checkpoint/admin pre/post证据只读保留，completion没有伪造。双后端同时live
+只关闭工程发车与早期finite证据；学习阶段对拍、selected contact、landing、formal completion、transfer与
+部署仍未成立，`diagnostic_unauthorized=true`，所以G06保持`Partial`。详细证据见
+[`EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822`](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。

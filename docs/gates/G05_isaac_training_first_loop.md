@@ -6574,3 +6574,27 @@ reference与reward view。最终版本没有以性能为由删除freshness：vie
 version/head检查，stale pair与计算期间推进反例均fail-close；production `current()`计数仍精确为1。
 相关分进程回归=`99 passed, 6 skipped`，独立终审`P0=0/P1=0`。H48静态复制proxy少571.5 MiB/update，
 但exact Pod fixed-tape与profiler-off matched wall均未执行，不能据此晋级或发车。
+
+### 2026-08-22 课程解阻后的fresh Isaac（Gate仍`Partial`）
+
+旧run在ACK631仍有`due=618 / CENSOR=618`，所以不是“再等训练自然变好”：错误的R07 all-of课程门会把
+所有已到期样本从学习问题中删除。branch candidate已让balance存活到首个due tick 295后直接reveal任务，
+R07只保留shot后的恢复reward/critic诊断；finite、joint envelope、跌倒与碰台等真实plant invariant不变。
+hidden阶段的joint/body teacher也已统一到reset-ready，body orientation采用`.4/1.0 rad`双核恢复大误差区
+梯度。没有新增actor observation或新的receipt/owner/gate。
+
+host launcher/profiler回归=`40 passed`；exact Pod核心11个分进程文件=`292 passed, 36 skipped`。fresh
+Isaac commit `333f9490…`、namespace `fullmdp-a-h48-v2-isaac-unblock-333f9490-20260822`现于GPU1运行。
+22:55 UTC快照已连续到至少update69，每轮`196,608/196,608` actual Reward finite，nonfinite为0。early
+update0--9到recent update60--69的episode均长从`87.65`升到`94.93 tick`，仍低于首次due 295，因此task
+reveal、strike和landing当前分母为0，统一记`未测`；这是balance早期改善，不是CENSOR复发，也不足以
+声明balance成功。`motion_body_ori`窗口均值从约`692.4`升到`789.6`，旧run update631只有约`79`；这只
+证明梯度恢复。recent终止中table-hit约占`11.0%`，需要继续按原因而非aggregate return监测。
+
+前5轮有界profile按约定自动卸载：collection中位约`14.616 s`，其中`post_physics_publish` inclusive中位
+约`9.206 s`。22:55 UTC最近20轮wall中位约`15.775 s/H48`、约`12,463 transitions/s`，H24-equivalent
+约`7.89 s`；仍高于约`12 s/H48`（旧尺度约`6 s/H24`）的量级目标约31%。因此训练可以继续，但Isaac迭代
+速度不能称正常或达标；下一结构刀是合并post-physics owner数据流，而不是缩rollout、改PPO或再叠一层门。
+这些都是branch-scoped运行证据，`diagnostic_unauthorized=true`，不授权promotion/export/部署，G05保持
+`Partial`。详细证据见
+[`EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822`](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。

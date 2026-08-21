@@ -4752,3 +4752,19 @@
   Motion reference和reward view复用它，不新增owner/token/receipt。stale pair与“计算后、首写前owner推进”
   仍由两个零clone的host-version检查拒绝。相关回归=`99 passed, 6 skipped`、独立终审`P0=0/P1=0`；
   H48静态少571.5 MiB复制payload，但Pod fixed-tape/matched wall仍`未测`，不把proxy写成秒数。
+
+## 2026-08-22 — FullMDP课程解阻与双fresh successor
+
+- 已修复会让旧Isaac全部due样本CENSOR、旧MuJoCo全部due样本defer的学习阻塞：hidden joint/body reference
+  统一为reset-ready，首次due固定为tick295，R07不再充当task reveal/admission门，D05到期序数无论outcome
+  都推进而task identity只在ACCEPT推进；真实finite/joint/fall/table safety不变。没有新增actor observation、
+  safety gate或自证receipt。
+- host launcher/profiler=`40 passed`；exact Pod核心11文件=`292 passed,36 skipped`，MuJoCo run-root cwd
+  回归=`11 passed`。两个旧run在保存最终ACK和admin pre/post证据后按精确PID停止，root/snapshot只读保留，
+  completion均未伪造；两个fresh successor从独立clean detached checkout同时运行。
+- 22:55 UTC fresh Isaac已到至少ACK69，Reward每轮`196,608/196,608` finite；recent20 wall中位约
+  `15.775 s/H48`、H24-equivalent`7.89 s`，尚未达目标，profile把主墙定位为
+  `post_physics_publish`。fresh MuJoCo已到至少ACK47且全finite，recent20 wall中位约`9.634 s/H48`、
+  H24-equivalent`4.82 s`，进入目标量级；其update45首次出现`due=1/reveal=1/deferred=0`并立即产生
+  phase-2/R03/task Reward梯度，验证课程首穿。selected contact/landing仍为0，故击球/上台继续`未测`；
+  Gate G05/G06保持`Partial`、`diagnostic_unauthorized=true`。

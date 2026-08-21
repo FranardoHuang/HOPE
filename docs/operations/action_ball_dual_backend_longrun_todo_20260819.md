@@ -13,8 +13,8 @@
 ## 0. 2026-08-22 学习阻塞修复与 fresh 重启 TODO
 
 本节是当前 branch-scoped successor 的顺序清单，不改变 `origin/main:docs/NOW.md` 的项目优先级。
-现役 MuJoCo/Isaac H48 长跑在 successor 验证完成前保持只读运行；不得 hot-patch、复用 namespace，
-也不得在新运行可用前制造无谓 GPU 空窗。
+旧 MuJoCo/Isaac H48 长跑已经在successor验证后精确停止并只读封存；不得hot-patch、resume或复用namespace。
+两条fresh successor各自从独立clean checkout运行，不共享可变source。
 
 - [x] 保存两条现役 run 的连续 ACK、finite、速度、episode、阶段分母和 Reward14--19 趋势快照。
 - [x] 查清两个 backend 的 `motion_body_ori` 都长期只有约理论最大值 `0.3%` 的根因；区分 reference/frame
@@ -27,9 +27,9 @@
   不得伪装成 policy observation、owner、receipt 或新的 safety Gate。
 - [x] 复核 PPO action-noise/entropy/adaptive-KL 实际曲线，明确采用或拒绝显式有界 schedule；H48/
   `lambda=.98` 保持已采用，不能把 rollout 变化冒充性能修复。
-- [ ] 完成 host 聚焦回归、exact Pod 测试、有限短验和必要的固定条件数值/行为检查；学习语义变更必须
+- [x] 完成 host 聚焦回归、exact Pod 测试、有限短验和必要的固定条件数值/行为检查；学习语义变更必须
   使用 fresh checkpoint lineage。
-- [ ] successor 就绪后保存旧 run 最终证据，按精确 PID/PGID/namespace 收口旧 MuJoCo 与 Isaac；确认
+- [x] successor 就绪后保存旧 run 最终证据，按精确 PID/PGID/namespace 收口旧 MuJoCo 与 Isaac；确认
   GPU/lock/process absent 后，用两个 fresh namespace 同时重启。
 - [ ] 验收新 run 的 durable ACK、finite、wall/throughput、六项 mimic 梯度和逐阶段 denominator；
   正式判断仍按 balance→mimic→entry→strike→landing，不以早期 `ACCEPT=0` 单独停车。
@@ -61,6 +61,24 @@
 [2026-08-22课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
 
 ## 1. 当前运行事实
+
+### 2026-08-22课程解阻后的现役successor
+
+- Isaac现役：commit `333f9490…`，namespace
+  `fullmdp-a-h48-v2-isaac-unblock-333f9490-20260822`，GPU1，launcher/child=`2213515/2213532`；
+  22:55 UTC durable ACK已到至少69且每轮Reward `196,608/196,608` finite。profiler-off最近20轮中位约
+  `15.775 s/H48`（H24-equivalent `7.89 s`），仍未达目标；前5轮profile把主要墙定位到
+  `post_physics_publish`。
+- portable MuJoCo现役：commit `23c0f6c…`，namespace
+  `fullmdp-a-h48-v2-mujoco-unblock-23c0f6c8-20260822`，GPU0，launcher/child=`2219700/2219718`；
+  22:55 UTC durable ACK已到至少47且Reward/storage全finite。最近20轮wall中位约`9.634 s/H48`
+  （H24-equivalent `4.82 s`），child cwd与全部运行输出均钉到run root，source clean。
+- Isaac仍未有due；MuJoCo update45已首次出现`due=1/reveal=1/deferred=0`，随后27个phase-2 task row中
+  R03 physically-valid为26且Reward0--9非零，证明mimic入口与balance自然重叠。contact/landing仍为0，
+  击球/上台继续写`未测`。不能用早期`ACCEPT=0`停车；也不能在真实due出现后仍无reveal时继续盲等。
+- 被替换的Isaac/MuJoCo分别精确停止于ACK631/3023，旧root、snapshot和admin-stop pre/post证据保留，
+  completion均缺席且未伪造。下述`96f0ca69…`与`99405266…`段落是本次修复前的历史快照，已被以上两条
+  fresh successor取代。
 
 三条旧长跑均已停止，不可继续推进：
 
