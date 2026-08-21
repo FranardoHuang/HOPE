@@ -117,7 +117,8 @@ Phase-B已经物理删除zero-caller formal owner及专属适配层；下一步�
    outcome/fault；K-row候选只构造一次并sparse commit，只有真实transition写compact event delta；
    `K=0`/zero-live-flight成对跳过Physical/scene/R06/Epoch空事务，PPO boundary统一汇总。
    Phase-C0已先退役zero-business D05事务，Phase-C1已收窄Motion publication，Phase-C2已删除五个无人消费的
-   Epoch整record返回clone，Phase-C2b把Observation cache移到整record clone之前；剩余dense
+   Epoch整record返回clone，Phase-C2b把Observation cache移到整record clone之前，并把R07同一事务三份
+   Epoch snapshot收成一份栈内快照；stale caller与首写前推进仍由零clone version/head检查拒绝。剩余dense
    Epoch/R06/Physical state与host sync仍须按真实profile继续收敛，不能把这些局部刀称为single-state完成。
 4. **matched H48性能验收**：clean exact source、同卡、profiler-off，按zero/mixed/active strata对比；
    同时验证fixed tape RNG/highwater/reason/done/reset/Reward20/203/219 parity。报告原始wall、transitions/s和

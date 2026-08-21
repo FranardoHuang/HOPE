@@ -4643,3 +4643,7 @@
   tests内；全改动Python `py_compile`与`git diff --check`通过。独立终审`P0=0/P1=0`。这只关闭host代码
   合同：exact Pod smoke、GPU fixed snapshot、部署producer与matched H48 wall仍`未测`；Motion broad view
   每control tick仍clone约1.22 MB，是下一single-state/窄projection性能债。
+- 2026-08-21：Phase-C2b把R07一次post-physics事务内三次`ActionEpoch.current()`收成一份栈内snapshot；
+  Motion reference和reward view复用它，不新增owner/token/receipt。stale pair与“计算后、首写前owner推进”
+  仍由两个零clone的host-version检查拒绝。相关回归=`99 passed, 6 skipped`、独立终审`P0=0/P1=0`；
+  H48静态少571.5 MiB复制payload，但Pod fixed-tape/matched wall仍`未测`，不把proxy写成秒数。

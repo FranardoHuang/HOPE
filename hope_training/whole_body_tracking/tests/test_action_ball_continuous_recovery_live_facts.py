@@ -697,6 +697,115 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert record.owner_fault_bits[:, :, owner_slot].eq(0).all()
 
 
+def test_epoch_publish_reads_one_action_epoch_snapshot(monkeypatch):
+    device = torch.device("cpu")
+    env, motion, robot, sensor, bundle, epoch_owner = (
+        _rowwise_settled_subject(monkeypatch, device=device)
+    )
+    sensor.data.net_forces_w.zero_()
+    for name in FEET:
+        sensor.data.net_forces_w[:, BODY_NAMES.index(name), 2] = 10.0
+    robot.data.body_lin_vel_w.zero_()
+
+    before_head = epoch_owner.commit_head
+    current_calls = []
+    original_current = epoch_v1.ActionEpochOwner.current
+
+    def counted_current():
+        current_calls.append(epoch_owner.commit_head)
+        return original_current(epoch_owner)
+
+    monkeypatch.setattr(epoch_owner, "current", counted_current)
+    result = _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=40,
+        current_source_step=torch.full((2,), 40, dtype=torch.int64),
+    )
+    assert current_calls == [before_head]
+    assert result.facts_valid.tolist() == [True, True]
+
+
+def test_reward_view_rejects_internally_consistent_stale_epoch_reference(
+    monkeypatch,
+):
+    device = torch.device("cpu")
+    env, motion, _robot, _sensor, bundle, epoch_owner = (
+        _rowwise_settled_subject(monkeypatch, device=device)
+    )
+    env.common_step_counter = 40
+    motion._action_ball_continuous_episode_step.fill_(40)
+    stale_epoch = epoch_owner.current()
+    stale_reference = (
+        motion.project_action_ball_full_mdp_recovery_ready_reference(
+            action_epoch_snapshot=stale_epoch
+        )
+    )
+    facts = bundle.plant_fact_adapter.read()
+    epoch_owner.merge_runtime_owner_fault(
+        "r07_recovery",
+        torch.zeros(
+            (epoch_owner.num_envs, epoch_owner.shot_slot_capacity),
+            dtype=torch.int64,
+            device=device,
+        ),
+        owner=bundle,
+    )
+
+    with pytest.raises(
+        recovery.ContinuousRecoveryDeviceError,
+        match="snapshot/reference is stale or foreign",
+    ):
+        bundle.owner.action_epoch_reward_view(
+            facts,
+            reference=stale_reference,
+            epoch=stale_epoch,
+            current_source_step=torch.full((2,), 40, dtype=torch.int64),
+            adapter_source_step=40,
+            motion_owner=motion,
+            action_epoch_owner=epoch_owner,
+        )
+
+
+def test_epoch_publish_rejects_owner_advance_before_first_mutation(monkeypatch):
+    device = torch.device("cpu")
+    env, motion, robot, sensor, bundle, epoch_owner = (
+        _rowwise_settled_subject(monkeypatch, device=device)
+    )
+    sensor.data.net_forces_w.zero_()
+    for name in FEET:
+        sensor.data.net_forces_w[:, BODY_NAMES.index(name), 2] = 10.0
+    robot.data.body_lin_vel_w.zero_()
+    before_head = epoch_owner.commit_head
+    original_view = bundle.owner.action_epoch_reward_view
+
+    def advancing_view(*args, **kwargs):
+        result = original_view(*args, **kwargs)
+        epoch_owner.merge_runtime_owner_fault(
+            "r07_recovery",
+            torch.zeros(
+                (epoch_owner.num_envs, epoch_owner.shot_slot_capacity),
+                dtype=torch.int64,
+                device=device,
+            ),
+            owner=bundle,
+        )
+        return result
+
+    monkeypatch.setattr(bundle.owner, "action_epoch_reward_view", advancing_view)
+    with pytest.raises(
+        recovery.ContinuousRecoveryDeviceError,
+        match="snapshot advanced before publication",
+    ):
+        _publish_epoch_reward_facts(
+            bundle,
+            motion,
+            cadence_tick=40,
+            current_source_step=torch.full((2,), 40, dtype=torch.int64),
+        )
+    assert epoch_owner.commit_head == before_head + 1
+
+
 def test_cold_idle_bad_reference_does_not_advance_or_self_authorize(monkeypatch):
     device = torch.device("cpu")
     env, motion, robot, sensor = _subject(monkeypatch, device=device)

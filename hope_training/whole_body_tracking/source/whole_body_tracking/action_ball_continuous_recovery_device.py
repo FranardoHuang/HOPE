@@ -621,7 +621,7 @@ class DiagnosticN2ContinuousRecoveryBundle:
             shape=(owner.num_envs,),
             dtype=torch.int64,
         )
-        epoch = epoch_owner.current()
+        epoch_snapshot = epoch_owner.current()
         method_name = "project_action_ball_full_mdp_recovery_ready_reference"
         project_reference = getattr(self.motion_owner, method_name, None)
         exact_method = _exact_motion_reference_producer_definition(
@@ -635,12 +635,12 @@ class DiagnosticN2ContinuousRecoveryBundle:
             raise ContinuousRecoveryDeviceError(
                 "R07 Motion ready-reference producer identity differs"
             )
-        reference = project_reference()
+        reference = project_reference(action_epoch_snapshot=epoch_snapshot)
         facts = self.plant_fact_adapter.read()
         result = owner.action_epoch_reward_view(
             facts,
             reference=reference,
-            epoch=epoch,
+            epoch=epoch_snapshot,
             current_source_step=step,
             adapter_source_step=self.plant_fact_adapter.last_source_step,
             motion_owner=self.motion_owner,
@@ -657,14 +657,14 @@ class DiagnosticN2ContinuousRecoveryBundle:
         s = epoch_owner.shot_slot_capacity
         env_ids = torch.arange(n, dtype=torch.int64, device=owner.device)
         slots = owner._tensor(
-            epoch.current_task_slot,
+            epoch_snapshot.current_task_slot,
             label="R07 publish current_task_slot",
             shape=(n,),
             dtype=torch.int64,
         )
         slot_valid = slots.ge(0) & slots.lt(s)
         safe_slots = torch.clamp(slots, min=0, max=s - 1)
-        lifecycle = epoch.recovery_reference_lifecycle_masks()
+        lifecycle = epoch_snapshot.recovery_reference_lifecycle_masks()
         _owner_type, _record_type, lifecycle_type, epoch_globals = (
             _exact_action_epoch_types(epoch_owner)
         )
@@ -680,14 +680,14 @@ class DiagnosticN2ContinuousRecoveryBundle:
         )[env_ids, safe_slots]
         current_key = _row_identity.ActionEpochShotKey(
             **{
-                field.name: getattr(epoch.identity.shot_key, field.name)[
+                field.name: getattr(epoch_snapshot.identity.shot_key, field.name)[
                     env_ids, safe_slots
                 ].detach().clone()
                 for field in fields(_row_identity.ActionEpochShotKey)
             }
         )
         current_phase = owner._tensor(
-            epoch.phase,
+            epoch_snapshot.phase,
             label="R07 publish phase",
             shape=(n, s),
             dtype=torch.int64,
@@ -726,6 +726,16 @@ class DiagnosticN2ContinuousRecoveryBundle:
             result.producer_fault_bits,
             torch.zeros_like(result.producer_fault_bits),
         )
+        epoch_version = getattr(epoch_snapshot, "version", None)
+        commit_head = epoch_owner.commit_head
+        if (
+            type(epoch_version) is not int
+            or type(commit_head) is not int
+            or epoch_version != commit_head - 1
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 ActionEpoch snapshot advanced before publication"
+            )
         epoch_owner.merge_runtime_owner_fault(
             "r07_recovery", fault_bits, owner=self
         )
@@ -3127,24 +3137,27 @@ class ContinuousRecoveryDeviceCoordinator:
         motion_parent_identity = (
             bound_bundle._project_parent_action_identity()
         )
-        bound_epoch = action_epoch_owner.current()
+        epoch_version = getattr(epoch, "version", None)
+        reference_epoch_version = getattr(reference, "epoch_version", None)
+        commit_head = getattr(action_epoch_owner, "commit_head", None)
+        if (
+            type(epoch_version) is not int
+            or type(reference_epoch_version) is not int
+            or type(commit_head) is not int
+            or epoch_version != reference_epoch_version
+            or epoch_version != commit_head - 1
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 ActionEpoch snapshot/reference is stale or foreign"
+            )
         required_epoch = (
             type(epoch) is epoch_record_type
-            and type(bound_epoch) is epoch_record_type
             and type(action_epoch_owner) is epoch_owner_type
             and action_epoch_owner.num_envs == self.num_envs
             and action_epoch_owner.device == self.device
             and getattr(reference, "epoch_owner", None) is action_epoch_owner
             and getattr(reference, "motion_owner", None) is motion_owner
-            and getattr(reference, "epoch_version", None)
-            == getattr(epoch, "version", None)
-            and getattr(epoch, "version", None)
-            == getattr(bound_epoch, "version", None)
         )
-        # Public callers cannot substitute an exact-looking record clone as
-        # the semantic source.  The bound owner is the only epoch truth; the
-        # supplied record contributes no lifecycle or identity tensors.
-        epoch = bound_epoch
         reference_fields = (
             ("root_position_m", (self.num_envs, 3)),
             ("root_orientation_wxyz", (self.num_envs, 4)),

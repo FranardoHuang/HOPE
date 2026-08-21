@@ -6240,6 +6240,8 @@ class MotionCommand(CommandTerm):
 
     def project_action_ball_full_mdp_recovery_ready_reference(
         self,
+        *,
+        action_epoch_snapshot: object = None,
     ) -> ActionBallFullMdpCompletedActionFrame0Reference:
         """Clone Motion's owner-selected recovery-ready frame-0 reference.
 
@@ -6248,10 +6250,12 @@ class MotionCommand(CommandTerm):
         Only the typed completed lifecycle uses the epoch-selected action and
         its exact full eight-field shot key.  REJECT/DEFER/CENSOR are event
         classifications and are deliberately not inspected here; the current
-        carry lifecycle remains the sole authority.  The caller supplies
-        neither a slot nor a validity verdict, and no live robot pose, zero
-        tensor or current-position self-reference can become the target.
-        Reference velocities are literal zero by contract.
+        carry lifecycle remains the sole authority.  The internal R07
+        transaction may pass its one public epoch snapshot so this projection
+        does not reread the same record.  The caller still supplies neither a
+        slot nor a validity verdict, and no live robot pose, zero tensor or
+        current-position self-reference can become the target.  Reference
+        velocities are literal zero by contract.
         """
 
         epoch_owner = self._action_ball_full_mdp_motion_epoch_owner
@@ -6270,7 +6274,11 @@ class MotionCommand(CommandTerm):
 
         if type(epoch_owner) is not epoch.ActionEpochOwner:
             raise RuntimeError("Motion frame-0 epoch owner type differs")
-        record = epoch_owner.current()
+        record = (
+            epoch_owner.current()
+            if action_epoch_snapshot is None
+            else action_epoch_snapshot
+        )
         if type(record) is not epoch.ActionEpochRecord:
             raise RuntimeError("Motion frame-0 epoch publication type differs")
 

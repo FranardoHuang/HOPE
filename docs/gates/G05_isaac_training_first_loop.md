@@ -6532,3 +6532,11 @@ callback重入；terminal步骤失败后sticky要求cold process exit，绝不�
 zero-flight加上述两个性能cut的算术预算仍只是约`8.4--9.1 s/iteration`，而且Pod matched
 wall未测；`6 s/update`既未证明也尚未在预算中闭合。因此G05保持`Partial`，不用host测试、
 静态预算或早期rollout代签真实吞吐。
+
+### 2026-08-21 R07单快照减法（Gate仍`Partial`）
+
+R07同一post-physics事务原有三份`ActionEpochRecord` clone，现由bundle读取一份栈内snapshot并传给Motion
+reference与reward view。最终版本没有以性能为由删除freshness：view和首次mutation前各保留一次host scalar
+version/head检查，stale pair与计算期间推进反例均fail-close；production `current()`计数仍精确为1。
+相关分进程回归=`99 passed, 6 skipped`，独立终审`P0=0/P1=0`。H48静态复制proxy少571.5 MiB/update，
+但exact Pod fixed-tape与profiler-off matched wall均未执行，不能据此晋级或发车。

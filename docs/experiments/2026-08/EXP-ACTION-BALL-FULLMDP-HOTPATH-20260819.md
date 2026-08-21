@@ -493,3 +493,22 @@ scan/control。focused Observation回归=`14 passed`，覆盖policy→critic只�
 重建、新step重建、热cache后poison fail及actor NaN/Inf。该数字仍只是shape/dtype/frequency proxy；真实
 manager调用频率、CUDA traffic和wall须由exact Pod profile确认。R07同一事务三份Epoch snapshot的收敛是
 下一独立提交，不与本刀混因果；G05保持`Partial`。
+
+## 13. Phase-C2b：R07一次事务只读一份Epoch快照
+
+R07的单次post-physics publication此前在bundle、Motion frame-0 reference和reward view中各调用一次
+`ActionEpochOwner.current()`。三次之间没有合法Epoch mutation，后两份44-tensor record只有一致性检查消费，
+却每control重复复制。现在bundle在栈内读取唯一一份snapshot，并把它传给真实Motion public producer和
+non-mutating reward view；snapshot不写入owner字段，不成为token、receipt或新的authority。
+
+第一版曾错误地连stale caller边界一起删掉，独立红队据此构造出内部一致但已过期的
+`(epoch, reference)`。最终实现保留两处仅比较Python整数的真实freshness：view要求
+`epoch.version == reference.epoch_version == owner.commit_head - 1`，bundle在首次ActionEpoch mutation紧前
+再次要求snapshot仍对应当前head。两项检查都不调用`current()`、不clone tensor；行为反例分别覆盖stale pair
+和计算完成后、首写前owner推进。parent/owner/full-key、selected reset、fault/nonfinite、dwell与首次写入后的
+原事务顺序不变。
+
+`N=4096,S=1`时，一份record静态为`6,242,304 B`与44个tensor clone/copy call。本刀把每control的3份降为
+1份，H48静态少`599,261,184 B = 571.5 MiB/update`与4,224个call；这是shape/dtype/frequency proxy，
+不是wall或显存峰值。五个相关文件分进程回归合计`99 passed, 6 skipped`，pycompile/diff-check通过；独立
+终审`P0=0/P1=0`。exact Pod fixed-tape、profiler-off matched H48 wall仍`未测`，G05保持`Partial`。
