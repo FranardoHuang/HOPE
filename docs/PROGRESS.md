@@ -8,7 +8,10 @@
   sealed RSL archive均由child继承；launcher自身只持Kit环境，训练child经`env -i`获得窄runtime环境。
 - 本入口不加`ACCEPT`、学习表现、matched wall或“先短跑”准入；这些是诊断/学习证据，不是真安全门。
   失败不重试、不resume、不复用namespace，且不发signal；`diagnostic_unauthorized=true`保持。
-  host Isaac/MuJoCo launcher回归=`18 passed`。exact Pod dry-run、真实发射与首批durable ACK尚待本commit后执行。
+  host Isaac/MuJoCo launcher回归=`18 passed`。exact Pod dry-run通过；第一次real在PPO前自然RC1，暴露launcher
+  只复制`model.usd`而漏掉同目录sealed `source_bundle`。失败root封存、GPU0/lock自然释放；successor改为
+  no-symlink复制完整61 MiB asset package，训练侧既有enclosed-source重构检查不放宽。新commit的real与首批
+  durable ACK尚待执行。
 
 ## 2026-08-21 — portable Full-A H48 fresh长跑已真实发射（branch candidate）
 

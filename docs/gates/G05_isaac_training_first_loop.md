@@ -8,6 +8,9 @@ UUID/empty-app/lifetime lock、fd16 runtime receipt和fd18 sealed archive。它�
 短跑成绩或学习表现Gate：这些不是启动所需的安全独立事实。真实overflow/nonfinite、joint/table/contact与
 optimizer后durable ACK仍由训练主链fail-stop；入口不retry/resume/signal。host双launcher回归=`18 passed`，
 exact Pod dry-run、real launch与连续ACK尚待本commit后闭合，故不声称Isaac已运行或Gate晋级。
+首次real在PPO/ACK前自然RC1：run-local asset只有`model.usd`，缺训练合同要求的同目录sealed
+`source_bundle`。该失败namespace封存且GPU0/lock自然释放；successor复制完整asset package后仍由既有
+enclosed-source reconstruction校验，不把缺包改成可忽略warning。
 
 **2026-08-21 current run correction（supersede下文所有“active/继续25k”叙述；Gate仍`Partial`）：**
 两条Isaac `4096×24×25000`均已停止：`e8eef4fb…`止于durable ACK `4603` / `452,591,616`

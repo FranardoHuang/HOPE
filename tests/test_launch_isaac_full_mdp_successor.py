@@ -112,8 +112,13 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     venv = base / "venv-site"
     venv.mkdir()
-    asset = base / "model.usd"
+    asset = base / "asset" / "model.usd"
+    asset.parent.mkdir()
     asset.write_bytes(b"exact-usd")
+    (asset.parent / "source_bundle").mkdir()
+    (asset.parent / "source_bundle" / "config.yaml").write_text(
+        "fixture: exact\n", encoding="utf-8"
+    )
     wheel = base / "rsl.whl"
     wheel.write_bytes(b"exact-rsl-wheel")
     workspace = base / "workspace"
@@ -228,6 +233,9 @@ def test_real_path_uses_clean_env_wrapper_and_spends_fresh_root(
     assert rig.module.main(rig.argv()) == 0
     assert rig.root.is_dir()
     assert (rig.root / "asset" / "model.usd").read_bytes() == b"exact-usd"
+    assert (rig.root / "asset" / "source_bundle" / "config.yaml").read_text() == (
+        "fixture: exact\n"
+    )
     record = json.loads(rig.record.read_text())
     assert record["argv"][0] == str(rig.root / "run.log")
     child = record["argv"][1:]
@@ -243,4 +251,11 @@ def test_wrong_pinned_asset_or_rsl_bytes_fail_before_root(rig, capsys) -> None:
     rig.asset.write_bytes(b"changed")
     assert rig.module.main(rig.argv(dry=True)) == 2
     assert "USD digest differs" in capsys.readouterr().err
+    assert not rig.root.exists()
+
+
+def test_asset_package_symlink_fails_before_root(rig, capsys) -> None:
+    (rig.asset.parent / "external-link").symlink_to(rig.wheel)
+    assert rig.module.main(rig.argv(dry=True)) == 2
+    assert "non-regular entry" in capsys.readouterr().err
     assert not rig.root.exists()

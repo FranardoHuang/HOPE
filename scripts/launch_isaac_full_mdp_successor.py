@@ -216,18 +216,31 @@ def _paths(root: Path) -> dict[str, Path]:
     }
 
 
-def _create_root(root: Path, paths: dict[str, Path], asset_source: Path) -> None:
+def _asset_package(asset_source: Path) -> Path:
+    package = _canonical_directory(asset_source.parent, "A3 asset package")
+    for directory, names, files in os.walk(package, followlinks=False):
+        for name in (*names, *files):
+            item = Path(directory) / name
+            try:
+                row = item.lstat()
+            except OSError as exc:
+                raise LaunchError("cannot inspect A3 asset package") from exc
+            if stat.S_ISLNK(row.st_mode) or not (
+                stat.S_ISDIR(row.st_mode) or stat.S_ISREG(row.st_mode)
+            ):
+                raise LaunchError("A3 asset package contains a non-regular entry")
+    return package
+
+
+def _create_root(root: Path, paths: dict[str, Path], asset_package: Path) -> None:
     root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if root.parent.resolve(strict=True) != root.parent or os.path.lexists(root):
         raise LaunchError("run-root changed before creation")
     try:
         os.mkdir(root, 0o700)
-        for name in ("asset_dir", "tmp", "pycache"):
+        for name in ("tmp", "pycache"):
             os.mkdir(paths[name], 0o700)
-        with asset_source.open("rb") as source, paths["asset"].open("xb") as target:
-            shutil.copyfileobj(source, target, 1024 * 1024)
-            target.flush()
-            os.fsync(target.fileno())
+        shutil.copytree(asset_package, paths["asset_dir"], symlinks=False)
         os.chmod(paths["asset"], 0o400)
     except OSError as exc:
         raise LaunchError("cannot create fresh Isaac run-root") from exc
@@ -412,6 +425,7 @@ def launch(args: argparse.Namespace) -> int:
     asset_source = _canonical_regular(args.asset_usd, "A3 USD")
     if _sha256(asset_source) != PINNED_A3_USD_SHA256:
         raise LaunchError("A3 USD digest differs")
+    asset_package = _asset_package(asset_source)
     rsl_wheel = _canonical_regular(args.rsl_wheel, "RSL-RL wheel")
     rsl_sha256 = _sha256(rsl_wheel)
     if rsl_sha256 != PINNED_RSL_WHEEL_SHA256:
@@ -444,7 +458,7 @@ def launch(args: argparse.Namespace) -> int:
     runtime_descriptors: tuple[int, int] | None = None
     try:
         _gpu_is_free(args.gpu_index, args.expected_gpu_uuid)
-        _create_root(root, paths, asset_source)
+        _create_root(root, paths, asset_package)
         runtime_descriptors = _open_exact_runtime_descriptors(paths, rsl_wheel)
         clean_child = [
             "/usr/bin/env",

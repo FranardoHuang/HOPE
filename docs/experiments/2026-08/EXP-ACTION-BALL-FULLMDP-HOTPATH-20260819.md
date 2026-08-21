@@ -526,3 +526,10 @@ launcher state中的exact PID=PGID、runtime attestation receipt和live non-zomb
 signal。真实overflow/nonfinite、joint/table/contact与optimizer后durable ACK仍由训练主链负责。host对Isaac/
 MuJoCo两个launcher的focused回归=`18 passed in 7.44s`；exact Pod dry-run、real launch、首批ACK和wall均
 `未测`，因此当前只是branch launch candidate，`diagnostic_unauthorized=true`且G05保持`Partial`。
+
+Pod exact dry-run在把两个workspace symlink改传其canonical `/opt`目标后通过，且run root仍absent、GPU0
+empty。第一次real随后在PPO前自然RC1：训练侧既有split-rubber检查需要`model.usd`同目录的sealed
+`source_bundle`做enclosed-source reconstruction，而launcher只复制了单个USD。失败root不复用，child自然
+退出且GPU0 lock复核free。旧asset package实际61 MiB、只含regular file/directory、无symlink；successor
+因此改为先拒绝任何non-regular entry，再完整copytree到fresh run root，保留训练侧原校验。新commit real、
+ACK与wall仍`未测`。
