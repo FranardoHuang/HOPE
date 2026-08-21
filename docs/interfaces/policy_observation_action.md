@@ -452,6 +452,14 @@ Racket's public actor-visible target accessors, including configured observation
 truth or a private target tensor. A backend must supply the corresponding causal target view rather
 than granting the policy an undelayed simulator oracle.
 
+For the fresh FullMDP lane, `motion_phase_one_hot` is derived only from the
+observable Motion/task lifecycle. R07 recovery readiness does not choose an
+actor phase, authorize reveal, or become a training-liveness dependency.
+Before the first task the actor sees the hidden/reset-ready lifecycle; at
+reveal, teacher joint/body references change together to action frame 0. The
+existing privileged support/dwell suffix remains critic-only recovery state;
+none of the thirteen R07 component errors is added to the actor.
+
 The internal Isaac Motion publication feeding this ABI is one typed ten-tensor snapshot: row-wise
 `control_tick`, five-state `phase`, `reset_generation`, `swing_generation`, `action_uid`,
 `task_identity`, `task_valid`, and the three float64 countdowns used above. Observation and Physical

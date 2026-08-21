@@ -586,7 +586,7 @@ def test_fresh_a_c_episode_horizon_carries_four_shots_through_retirement():
     # Mechanical timing is calculated here from the independently reviewed
     # control schedule.  It is not copied from a source-code receipt or an AST
     # fingerprint: a changed cfg must still satisfy these physical ticks.
-    first_reveal_tick = 2
+    first_reveal_tick = 295
     max_task_close_ticks = 214
     recovery_ticks = 77
     deadline_offset_ticks = 2
@@ -595,7 +595,7 @@ def test_fresh_a_c_episode_horizon_carries_four_shots_through_retirement():
     )
     accept_reveal_ticks = tuple(
         first_reveal_tick + cadence_ticks * index
-        for index in range(1, 5)
+        for index in range(4)
     )
     fourth_shot_retirement_tick = accept_reveal_ticks[-1] + cadence_ticks
 

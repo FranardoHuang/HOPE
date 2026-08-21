@@ -20499,8 +20499,34 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     _validate_action_ball_motion_sources(env_cfg, motion_files)
     _validate_stage1_natural_clip_motion_sources(env_cfg, motion_files)
 
-    # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
-    log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
+    # 4) logging dir.  The fresh FullMDP one-shot launcher gives its namespace
+    # ownership of checkpoints/WAL/contracts instead of writing them into the
+    # source checkout.  Other training paths retain the upstream layout.
+    full_mdp_log_root_raw = os.environ.get(
+        "HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT"
+    )
+    if full_mdp_log_root_raw is not None:
+        full_mdp_log_root = pathlib.Path(full_mdp_log_root_raw)
+        if action_ball_full_mdp_ppo_recipe is None:
+            raise RuntimeError(
+                "HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT is FullMDP-only"
+            )
+        if (
+            not full_mdp_log_root.is_absolute()
+            or not full_mdp_log_root.is_dir()
+            or full_mdp_log_root.is_symlink()
+            or full_mdp_log_root.resolve(strict=True) != full_mdp_log_root
+        ):
+            raise RuntimeError(
+                "HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT must be one canonical directory"
+            )
+        log_root_path = str(
+            full_mdp_log_root / agent_cfg.experiment_name
+        )
+    else:
+        log_root_path = os.path.abspath(
+            os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
+        )
     log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if agent_cfg.run_name:
         log_dir += f"_{agent_cfg.run_name}"

@@ -3952,6 +3952,7 @@ class DeviceR05Owner:
         self._publish_action_epoch_afterimage(
             record.preview,
             accepted=accepted,
+            settled_due=record.due_mask,
         )
         if retain_physical:
             method = getattr(
@@ -4685,8 +4686,9 @@ class DeviceR05Owner:
         preview: _PreviewRecord,
         *,
         accepted: torch.Tensor,
+        settled_due: torch.Tensor,
     ) -> None:
-        """Publish full-N ACCEPT rows; ActionEpoch owns settlement evidence."""
+        """Publish cadence settlement separately from ACCEPT task state."""
 
         prepared = preview.prepared
         n = self._num_envs
@@ -4697,6 +4699,14 @@ class DeviceR05Owner:
             dtype=torch.bool,
             shape=(n,),
         )
+        due = _require_tensor(
+            settled_due,
+            label="diagnostic_epoch.settled_due",
+            device=self._device,
+            dtype=torch.bool,
+            shape=(n,),
+        )
+        torch._assert_async(torch.all(~accept | due))
         rng_advance = prepared.rng_advance_mask
         try:
             after = self._publication_afterimage()
@@ -4708,45 +4718,52 @@ class DeviceR05Owner:
                 after.live[name] = torch.where(
                     rng_advance, committed, before
                 ).contiguous()
-            for name, committed, before in (
+            for name, committed, before, mask in (
                 (
                     "_target_generation",
                     prepared.generation_after,
                     prepared.generation_before,
+                    accept,
                 ),
                 (
                     "_previous_cell_index",
                     prepared.selected_cell,
                     prepared.previous_before,
+                    accept,
                 ),
                 (
                     "_scheduled_ordinal",
                     prepared.projection.scheduled_ordinal,
                     prepared.ordinal_before,
+                    due,
                 ),
                 (
                     "_outcome_shot_index",
                     prepared.projection.outcome_shot_index,
                     prepared.outcome_before,
+                    due,
                 ),
                 (
                     "_task_identity",
                     prepared.projection.task_identity,
                     after.live["_task_identity"],
+                    accept,
                 ),
                 (
                     "_outcome_identity",
                     prepared.reserved_outcome_identity,
                     after.live["_outcome_identity"],
+                    accept,
                 ),
                 (
                     "_ball_identity",
                     prepared.reserved_ball_identity,
                     after.live["_ball_identity"],
+                    accept,
                 ),
             ):
                 after.live[name] = torch.where(
-                    accept, committed, before
+                    mask, committed, before
                 ).contiguous()
             after.live["_sequence_kind"] = torch.where(
                 accept,
@@ -6307,7 +6324,14 @@ class DeviceR05Owner:
             & data["mutation_version"].eq(mutation_host)
         )
         empty = sequence.eq(SEQUENCE_EMPTY)
-        valid &= torch.all(~empty | ((scheduled == -1) & (outcome == 0) & (task == -1)))
+        # Cadence settlement and task acceptance are deliberately separate.
+        # A due row can be rejected/deferred/censored before any task has ever
+        # been accepted, so SEQUENCE_EMPTY does not imply an untouched cadence
+        # cursor.  The one invariant shared by genesis and consumed due rows is
+        # that the next outcome index is exactly one past the last scheduled
+        # ordinal (-1/0 at genesis, N/N+1 afterwards).
+        valid &= torch.all(outcome.eq(scheduled + 1))
+        valid &= torch.all(~empty | task.eq(-1))
         valid &= torch.all(empty | ((scheduled >= 0) & (outcome >= 0)))
         if not bool(valid) or len({value for value in task.tolist() if value >= 1}) != int(torch.sum(task >= 1)):
             raise DeviceR05ConflictError("D05 Lean carry business state differs")

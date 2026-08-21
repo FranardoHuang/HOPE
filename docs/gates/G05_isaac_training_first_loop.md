@@ -2,6 +2,16 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-22课程/chronology解阻候选（Gate仍`Partial`）：**旧live约update500已学会1500-tick站立，
+但update305后所有due均CENSOR，故task分母为零不是“还需要更多step”。根因是Motion每个due推进ordinal，
+D05只在ACCEPT推进；首个活过second due tick295的row触发bit50并整批fanout。候选现按settled due推进
+cadence cursor、按ACCEPT推进task identity，并允许checkpoint保存“已消费due但尚无task”。fresh首次曝光改为
+catalog单一真源tick295；R07退出reveal、liveness和actor phase，只保留recovery Reward/critic/telemetry。
+hidden teacher同源reset-ready，reveal后joint/body同切frame0，body orientation采用`.4/1.0 rad` fine+coarse核。
+不新增actor observation、success Gate或PPO schedule。host可运行聚焦=`18 passed`；exact Pod与fresh ACK仍
+`未测`，所以不晋级。详细见
+[课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
 **2026-08-22 fresh one-shot launch入口（branch candidate；Gate仍`Partial`）：**新增极简Isaac Full-A H48
 launcher，复用现有Kit boot owner并固定clean source、fresh root、exact IsaacLab/Kit/RSL/USD、目标GPU
 UUID/empty-app/lifetime lock、fd16 runtime receipt和fd18 sealed archive。它没有新增`ACCEPT`、matched wall、

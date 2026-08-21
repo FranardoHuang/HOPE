@@ -312,18 +312,18 @@ def _install_fake_a3_upper_module(monkeypatch, upper: tuple[str, ...]) -> None:
     )
 
 
-def test_c01_tick4_deadline_does_not_close_before_question_task_close() -> None:
+def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -> None:
     command, _cadence_owner, device_owner, epoch_owner = (
         _fresh_command_and_owners(torch.device("cpu"))
     )
     command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
     command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
-    for common_step in range(3):
+    for common_step in range(296):
         command._env.common_step_counter = common_step
         command._advance_action_ball_continuous_motion_cadence()
 
-    assert command._action_ball_continuous_current_deadline_step.tolist() == [4, 4]
-    assert command._action_ball_continuous_next_reveal_step.tolist() == [295, 295]
+    assert command._action_ball_continuous_current_deadline_step.tolist() == [297, 297]
+    assert command._action_ball_continuous_next_reveal_step.tolist() == [588, 588]
     command._action_ball_continuous_motion_active.fill_(True)
     command._action_ball_continuous_current_policy_opportunity.fill_(True)
     command._action_ball_continuous_canonical_task_valid.fill_(True)
@@ -332,7 +332,7 @@ def test_c01_tick4_deadline_does_not_close_before_question_task_close() -> None:
     command._action_ball_continuous_canonical_action_uid.copy_(
         torch.as_tensor(command._action_ball_action_uids)[command.clip_id]
     )
-    command._action_ball_continuous_canonical_task_close_tick.fill_(6)
+    command._action_ball_continuous_canonical_task_close_tick.fill_(299)
     command._action_ball_task_timing_active.fill_(True)
     command._action_ball_pre_swing_wait_s.fill_(100.0)
     command._action_ball_scaled_t_cycle_s.fill_(1.0)
@@ -341,7 +341,7 @@ def test_c01_tick4_deadline_does_not_close_before_question_task_close() -> None:
         C.ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE
     )
 
-    for common_step in (3, 4):
+    for common_step in (296, 297):
         command._env.common_step_counter = common_step
         command._advance_action_ball_continuous_motion_cadence()
     assert torch.all(command._action_ball_continuous_deadline_due)
@@ -352,10 +352,10 @@ def test_c01_tick4_deadline_does_not_close_before_question_task_close() -> None:
         command._action_ball_continuous_canonical_playback_started
     )
 
-    command._env.common_step_counter = 5
+    command._env.common_step_counter = 298
     command._advance_action_ball_continuous_motion_cadence()
     assert torch.all(command._action_ball_continuous_motion_active)
-    command._env.common_step_counter = 6
+    command._env.common_step_counter = 299
     command._advance_action_ball_continuous_motion_cadence()
     assert not torch.any(command._action_ball_continuous_motion_active)
     assert not torch.any(command._action_ball_continuous_canonical_task_valid)

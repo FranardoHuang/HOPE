@@ -1118,6 +1118,7 @@ def _install_counterexample_committed(owner):
     owner._target_generation.fill_(1)
     owner._previous_cell_index.fill_(0)
     owner._scheduled_ordinal.fill_(0)
+    owner._outcome_shot_index.fill_(1)
     owner._sequence_kind.fill_(r05.SEQUENCE_COMMITTED)
     owner._policy_opportunity.fill_(True)
     identities = torch.arange(1, owner._num_envs + 1, dtype=torch.int64)
@@ -1162,6 +1163,32 @@ def test_lean_carry_real_true_reset_roundtrip_and_next_public_afterimage(monkeyp
         torch.equal(left, right)
         for left, right in zip(source.owner._lean_carry_views(), target.owner._lean_carry_views())
     )
+
+
+def test_lean_carry_roundtrips_due_consumed_without_accepted_task():
+    """A deferred first due consumes chronology without inventing a task."""
+
+    source, target = _lean_harness(), _lean_harness()
+    source.owner._scheduled_ordinal.fill_(0)
+    source.owner._outcome_shot_index.fill_(1)
+    assert source.owner._sequence_kind.eq(r05.SEQUENCE_EMPTY).all()
+    assert source.owner._task_identity.eq(-1).all()
+    source_root, source_coordinator = _carry_coordinator(
+        source.owner, root_value=7
+    )
+    target_root, target_coordinator = _carry_coordinator(
+        target.owner, root_value=0
+    )
+
+    image = source_coordinator._capture()
+    prepared = target_coordinator._prepare(image)
+    target_coordinator._commit(prepared)
+
+    assert target_root.value.tolist() == source_root.value.tolist()
+    assert target.owner._scheduled_ordinal.eq(0).all()
+    assert target.owner._outcome_shot_index.eq(1).all()
+    assert target.owner._sequence_kind.eq(r05.SEQUENCE_EMPTY).all()
+    assert target.owner._task_identity.eq(-1).all()
 
 
 @pytest.mark.parametrize(

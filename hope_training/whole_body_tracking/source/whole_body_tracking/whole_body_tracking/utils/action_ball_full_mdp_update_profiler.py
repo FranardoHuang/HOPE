@@ -28,7 +28,7 @@ MAX_PROFILE_UPDATES = 50
 _SEGMENT_NAMES = (
     "env_step_total",
     "before_policy_step",
-    "owner_binding_assert",
+    "step_may_start_assert",
     "protected_state_capture",
     "protected_state_assert",
     "action_process",
@@ -204,7 +204,7 @@ class FullMdpUpdateProfiler:
         bindings = (
             (unwrapped, "step", "env_step_total", None),
             (unwrapped, "_before_policy_step", "before_policy_step", None),
-            (unwrapped, "_assert_owner_binding_current", "owner_binding_assert", None),
+            (unwrapped, "_assert_step_may_start", "step_may_start_assert", None),
             (unwrapped, "_protected_manager_state", "protected_state_capture", None),
             (
                 unwrapped,

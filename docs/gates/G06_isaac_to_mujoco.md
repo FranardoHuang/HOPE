@@ -2,6 +2,13 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-22 fresh课程双后端对齐候选（Gate仍`Partial`）：**Isaac/MuJoCo现共享首次due tick295与
+`295+293k`节奏；R07均不再授权task曝光或actor phase。MuJoCo修正了hidden joint=reset而body=frame0的
+矛盾，hidden joint/body同取reset-ready，reveal后同切action frame0；Isaac本来没有该dense teacher错误，
+但同样移除了pre-exposure R07依赖。两端body orientation采用同一fine+coarse语义。该对齐尚未取得exact
+Pod fixed-tape或fresh runtime结果，不代签数值parity/transfer。详细见
+[课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
 **2026-08-22 dual-backend live prefix（Gate仍`Partial`）：**Isaac H48 successor `99405266…`已在GPU0
 fresh启动并有durable ACK `0..10`，前10个完整wall median=`18.445 s`、Reward finite且fault0；portable
 MuJoCo H48 successor同时在GPU2运行，最近只读为update `1110`、last-10 pre-ACK median=`9.771 s`且

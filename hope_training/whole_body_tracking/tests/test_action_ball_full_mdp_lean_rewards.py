@@ -492,9 +492,17 @@ def test_module_global_functions_dispatch_exact_fourteen_lifecycle_groups():
 def test_common_dense_reuses_motion_evaluator_and_changes_with_reference_error(
     monkeypatch,
 ):
-    def evaluator(env, *, command_name, std):
+    def evaluator(env, *, command_name, std, coarse_std=None):
         assert command_name == "motion"
-        return torch.exp(-torch.square(env.reference - env.robot) / std**2)
+        fine = torch.exp(-torch.square(env.reference - env.robot) / std**2)
+        if coarse_std is None:
+            return fine
+        return 0.5 * (
+            fine
+            + torch.exp(
+                -torch.square(env.reference - env.robot) / coarse_std**2
+            )
+        )
 
     evaluator_module = types.SimpleNamespace(
         **{spec[1]: evaluator for spec in R.COMMON_DENSE_SPECS}
@@ -515,9 +523,18 @@ def test_common_dense_reuses_motion_evaluator_and_changes_with_reference_error(
         graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
     values = []
     for ordinal, spec in enumerate(R.COMMON_DENSE_SPECS, start=14):
+        coarse_std = (
+            R.BODY_ORIENTATION_COARSE_STD
+            if spec[0] == "motion_body_ori"
+            else None
+        )
         values.append(
             R.common_dense_reward(
-                env, ordinal=ordinal, command_name="motion", std=spec[3]
+                env,
+                ordinal=ordinal,
+                command_name="motion",
+                std=spec[3],
+                coarse_std=coarse_std,
             )
         )
     assert graph.completed_cycle_count == 1

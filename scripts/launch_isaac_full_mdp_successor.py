@@ -19,6 +19,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = Path("/workspace")
 NVIDIA_SMI = Path("/usr/bin/nvidia-smi")
+TASKSET = Path("/usr/bin/taskset")
 TRAIN_RELATIVE = Path("hope_training/whole_body_tracking/scripts/train.py")
 KIT_LAUNCHER_RELATIVE = Path(
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
@@ -204,6 +205,40 @@ def _gpu_is_free(index: int, expected_uuid: str) -> None:
             raise LaunchError("selected GPU already has a compute application")
 
 
+def _available_cpu_ids() -> set[int]:
+    try:
+        return set(os.sched_getaffinity(0))
+    except (AttributeError, OSError) as exc:
+        raise LaunchError("cpu-affinity requires Linux sched_getaffinity") from exc
+
+
+def _cpu_affinity(value: str | None) -> tuple[str | None, tuple[int, ...]]:
+    """Parse one explicit Linux CPU list and reject unavailable processors."""
+
+    if value is None:
+        return None, ()
+    if re.fullmatch(r"[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*", value) is None:
+        raise LaunchError("cpu-affinity must be a comma-separated CPU/range list")
+    selected: set[int] = set()
+    for field in value.split(","):
+        if "-" in field:
+            lower_text, upper_text = field.split("-", 1)
+            lower, upper = int(lower_text), int(upper_text)
+            if upper < lower:
+                raise LaunchError("cpu-affinity range is reversed")
+            values = range(lower, upper + 1)
+        else:
+            values = (int(field),)
+        for cpu in values:
+            if cpu > 4095 or cpu in selected:
+                raise LaunchError("cpu-affinity contains an invalid or duplicate CPU")
+            selected.add(cpu)
+    available = _available_cpu_ids()
+    if not selected or not selected.issubset(available):
+        raise LaunchError("cpu-affinity is outside the launcher's allowed CPU set")
+    return value, tuple(sorted(selected))
+
+
 def _paths(root: Path) -> dict[str, Path]:
     return {
         "asset_dir": root / "asset",
@@ -213,6 +248,8 @@ def _paths(root: Path) -> dict[str, Path]:
         "runtime_receipt": root / "train-runtime.receipt",
         "run_log": root / "run.log",
         "launch_state": root / "kit_boot.launch",
+        "training": root / "training",
+        "hydra": root / "training" / "hydra",
     }
 
 
@@ -238,7 +275,7 @@ def _create_root(root: Path, paths: dict[str, Path], asset_package: Path) -> Non
         raise LaunchError("run-root changed before creation")
     try:
         os.mkdir(root, 0o700)
-        for name in ("tmp", "pycache"):
+        for name in ("tmp", "pycache", "training"):
             os.mkdir(paths[name], 0o700)
         shutil.copytree(asset_package, paths["asset_dir"], symlinks=False)
         os.chmod(paths["asset"], 0o400)
@@ -248,7 +285,12 @@ def _create_root(root: Path, paths: dict[str, Path], asset_package: Path) -> Non
         raise LaunchError("copied A3 USD digest differs")
 
 
-def _child_argv(isaac_python: Path, train: Path, namespace: str) -> list[str]:
+def _child_argv(
+    isaac_python: Path,
+    train: Path,
+    namespace: str,
+    hydra_run_dir: Path,
+) -> list[str]:
     return [
         str(isaac_python),
         "-P",
@@ -267,6 +309,7 @@ def _child_argv(isaac_python: Path, train: Path, namespace: str) -> list[str]:
         "checkpoint_tolerant=false",
         "checkpoint_allow_missing_contract=false",
         "checkpoint_allow_contract_mismatch=false",
+        f"hydra.run.dir={hydra_run_dir}",
     ]
 
 
@@ -293,8 +336,9 @@ def _runtime_env(
     isaaclab: Path,
     venv_site: Path,
     rsl_sha256: str,
+    profile_updates: int,
 ) -> dict[str, str]:
-    return {
+    result = {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
         "HOME": "/root",
         "TMPDIR": str(paths["tmp"]),
@@ -309,12 +353,18 @@ def _runtime_env(
         "HOPE_ACTION_BALL_RUNTIME_KIT_PYTHON_SHA256": PINNED_KIT_PYTHON_SHA256,
         "HOPE_ACTION_BALL_RUNTIME_RSL_ZIP_SHA256": rsl_sha256,
         "HOPE_ACTION_BALL_RUNTIME_VENV_SITE": str(venv_site),
+        "HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT": str(paths["training"]),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONNOUSERSITE": "1",
         "PYTHONPYCACHEPREFIX": str(paths["pycache"]),
         "PYTHONPATH": _pythonpath(isaaclab, venv_site),
         "LD_LIBRARY_PATH": LD_LIBRARY_PATH,
     }
+    if profile_updates:
+        result["HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"] = str(
+            profile_updates
+        )
+    return result
 
 
 def _launcher_env(paths: dict[str, Path]) -> dict[str, str]:
@@ -435,14 +485,22 @@ def launch(args: argparse.Namespace) -> int:
         raise LaunchError("gpu-index must be nonnegative")
     if re.fullmatch(r"GPU-[A-Za-z0-9-]{8,}", args.expected_gpu_uuid) is None:
         raise LaunchError("expected-gpu-uuid format differs")
+    if not 0 <= args.profile_updates <= 50:
+        raise LaunchError("profile-updates must be between 0 and 50")
+    cpu_affinity, cpu_ids = _cpu_affinity(args.cpu_affinity)
+    if cpu_affinity is not None:
+        _canonical_regular(TASKSET, "taskset", executable=True)
     paths = _paths(root)
-    child_argv = _child_argv(isaac_python, train, args.namespace)
+    child_argv = _child_argv(
+        isaac_python, train, args.namespace, paths["hydra"]
+    )
     runtime_env = _runtime_env(
         gpu_uuid=args.expected_gpu_uuid,
         paths=paths,
         isaaclab=isaaclab,
         venv_site=venv_site,
         rsl_sha256=rsl_sha256,
+        profile_updates=args.profile_updates,
     )
     if args.dry_run:
         print(json.dumps({
@@ -451,6 +509,8 @@ def launch(args: argparse.Namespace) -> int:
             "launcher_env": _launcher_env(paths),
             "runtime_env": runtime_env,
             "run_root": str(root),
+            "cpu_affinity": cpu_affinity,
+            "cpu_ids": cpu_ids,
         }, sort_keys=True, separators=(",", ":")))
         return 0
 
@@ -466,6 +526,8 @@ def launch(args: argparse.Namespace) -> int:
             *(f"{name}={value}" for name, value in runtime_env.items()),
             *child_argv,
         ]
+        if cpu_affinity is not None:
+            clean_child = [str(TASKSET), "-c", cpu_affinity, *clean_child]
         command = [str(kit_launcher), str(paths["run_log"]), *clean_child]
         try:
             result = subprocess.run(
@@ -484,6 +546,7 @@ def launch(args: argparse.Namespace) -> int:
         print(json.dumps({
             "diagnostic_unauthorized": True,
             "gpu_uuid": args.expected_gpu_uuid,
+            "cpu_affinity": cpu_affinity,
             "namespace": args.namespace,
             "pid": pid,
             "pgid": pgid,
@@ -518,6 +581,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gpu-index", type=int, required=True)
     parser.add_argument("--expected-gpu-uuid", required=True)
     parser.add_argument("--lock-file", type=Path, required=True)
+    parser.add_argument("--profile-updates", type=int, default=0)
+    parser.add_argument("--cpu-affinity")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

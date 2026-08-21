@@ -87,6 +87,7 @@ payload = {"argv": sys.argv[1:], "cwd": os.getcwd(), "lock_held": held,
            "env": {name: os.environ.get(name) for name in names}}
 pathlib.Path(os.environ["FAKE_CHILD_RECORD"]).write_text(json.dumps(payload))
 pathlib.Path(os.environ["FAKE_CHILD_STARTED"]).write_text("started")
+pathlib.Path("MUJOCO_LOG.TXT").write_text("process-local runtime log")
 print("fake child stdout", flush=True)
 print("fake child stderr", file=sys.stderr, flush=True)
 release = os.environ.get("FAKE_CHILD_RELEASE")
@@ -278,7 +279,9 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert (rig.root / "stderr.log").read_text() == "fake child stderr\n"
     record = json.loads(rig.record.read_text())
     assert record["argv"] == _expected_child(rig, _git(rig.repo, "rev-parse", "HEAD"))[1:]
-    assert record["cwd"] == str(rig.repo)
+    assert record["cwd"] == str(rig.root)
+    assert (rig.root / "MUJOCO_LOG.TXT").read_text() == "process-local runtime log"
+    assert not (rig.repo / "MUJOCO_LOG.TXT").exists()
     assert record["lock_held"] is True
     assert record["env"] == {
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",

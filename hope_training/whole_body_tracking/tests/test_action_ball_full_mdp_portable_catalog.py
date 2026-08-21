@@ -21,9 +21,9 @@ import action_ball_full_mdp_portable_catalog as catalog  # noqa: E402
 def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
     table = catalog.load_portable_action_center_table()
     cadence = catalog.derive_portable_fresh_cadence(table)
-    assert cadence.first_reveal_tick == 2
+    assert cadence.first_reveal_tick == 295
     assert cadence.cadence_ticks == 293
-    assert cadence.reference_due_ticks == (2, 295, 588, 881, 1174, 1467)
+    assert cadence.reference_due_ticks == (295, 588, 881, 1174, 1467)
     assert cadence.episode_horizon_ticks == 1500
     assert not hasattr(cadence, "minimum_shot_reveal_ticks")
 

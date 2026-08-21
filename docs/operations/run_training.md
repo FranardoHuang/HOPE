@@ -183,7 +183,8 @@ host/Pod diagnostic。旧r3与两条Isaac H24 run均已停止，新V2只能fresh
 portable MuJoCo Full-A的branch候选单次入口是`scripts/launch_mujoco_full_mdp_successor.py`。它只接受
 clean Git checkout、absent `/workspace/.../<namespace>`、canonical Python、显式GPU index/UUID与已有lock file；
 dry-run只打印固定H48 argv/env，不查GPU或建run root。真实模式持lock覆盖唯一child lifetime，等待自然rc并
-原样返回；没有monitor、retry、resume、signal或`ACCEPT`门。Pod1 clean detached `2e4279ba`已用真实venv
+原样返回；child的cwd固定为fresh run root，使`MUJOCO_LOG.TXT`等底层fallback产物不能污染source checkout；
+没有monitor、retry、resume、signal或`ACCEPT`门。Pod1 clean detached `2e4279ba`已用真实venv
 完成dry-run，且未建root、未查GPU、未改lock；real run未闭合前仍不得把host`11 passed`或dry-run写成
 发车授权。当前`96f0ca69…` real已在GPU2运行并取得durable ACK；完整证据边界见
 [portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)。
@@ -200,6 +201,25 @@ exact PID=PGID、runtime receipt与live non-zombie进程并返回。真正的ove
 边界和optimizer后durable ACK仍在训练路径内保持fail-stop。exact Pod real run未闭合前，不得把host测试或
 dry-run写成已启动。当前successor `99405266…`已在GPU0 fresh namespace真实启动并取得连续durable ACK；
 前10个完整H48 wall median=`18.445 s`。这只把本条从“待启动”改为“运行中”，不改变上述authority。
+
+2026-08-22课程解阻后的successor必须额外显式给出GPU-local `--cpu-affinity`。Pod1 GPU0当前实测local
+CPU set是`32-47,96-111`；launcher会核该list属于自身allowed cpuset，再以`taskset`包住唯一child。短期归因
+可加`--profile-updates 5`，但该五轮固定为`speed_evidence_eligible=false`；正式墙钟窗口必须省略该flag或
+传`0`。launcher还把`HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT`固定到fresh run root的`training/`，并把
+`hydra.run.dir`固定到同一目录下的`hydra/`，所以checkpoint、WAL、contract、TensorBoard和Hydra metadata
+都不再散落到source checkout。三个参数都不新增学习或安全Gate。
+
+典型新增片段为：
+
+```bash
+python3 scripts/launch_isaac_full_mdp_successor.py \
+  ...既有exact Isaac/asset/GPU/fresh namespace参数... \
+  --cpu-affinity 32-47,96-111 \
+  --profile-updates 5
+```
+
+课程、D05 chronology、teacher和fresh验收见
+[2026-08-22课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
 
 若FullMDP在base manager构造中途失败，当前进程必须视为cold-discard：环境会按pinned顺序单次
 best-effort清理已存在manager与simulator；任何terminal simulator清理失败都会sticky拒绝后续资源操作并

@@ -28,9 +28,11 @@ import torch
 try:
     from whole_body_tracking.tasks.tracking.mdp import (
         action_ball_full_mdp_action_strata as _action_strata,
+        action_ball_full_mdp_portable_catalog as _portable_catalog,
     )
 except ImportError:
     import action_ball_full_mdp_action_strata as _action_strata
+    import action_ball_full_mdp_portable_catalog as _portable_catalog
 
 try:
     import action_ball_continuous_runtime_transaction_device as _r05
@@ -63,7 +65,10 @@ _MOTION_PROFILE_KIND = (
 _READY_REFERENCE_KIND = "completed_action_frame0_zero_velocity_v1"
 _DIAGNOSTIC_FROZEN_AT_STEP = 0
 _DIAGNOSTIC_SEQUENCE_ORIGIN_STEP = 0
-_DIAGNOSTIC_FIRST_REVEAL_STEP = 2
+# A fresh learner first gets one catalog-owned balance-only prefix.  Reaching
+# the due tick alive is sufficient for curriculum exposure; R07 is post-shot
+# recovery telemetry/reward, not Motion playback authorization.
+_DIAGNOSTIC_FIRST_REVEAL_STEP = _portable_catalog.FRESH_FIRST_REVEAL_TICK
 _DIAGNOSTIC_UPCOMING_ACTION_SLOT = 0
 _DIAGNOSTIC_DEADLINE_OFFSET_STEPS = 2
 # The slowest code-pinned action must finish its complete question-owned

@@ -3809,9 +3809,15 @@ class MotionCommand(CommandTerm):
         next_phase = current.clone()
         active = self._action_ball_continuous_sequence_active
         task_valid = self._action_ball_continuous_canonical_task_valid
-        # R07 validation is the only fallible owner call.  Resolve it before
-        # constructing or applying any Motion after-image.
-        ready = self._action_ball_continuous_canonical_ready()
+        # Fresh Full-MDP lifecycle is owned by observable task/teacher events.
+        # R07 remains recovery telemetry/reward; it cannot become a training
+        # liveness dependency or an actor-phase authority.  Legacy lanes keep
+        # their existing R07-qualified ready transition.
+        ready = (
+            torch.ones_like(active)
+            if self._action_ball_continuous_fresh_motion_lane_bound
+            else self._action_ball_continuous_canonical_ready()
+        )
         timing = self._action_ball_task_timing_active & task_valid
         teacher_left_frame0 = self.time_steps.gt(
             self.motion.seg_start[self.clip_id]
@@ -10791,9 +10797,13 @@ class MotionCommand(CommandTerm):
         )
         ready_authority = self._action_ball_continuous_ready_authority
         live_ready = (
-            torch.zeros_like(active)
-            if ready_authority is None
-            else ready_authority
+            torch.ones_like(active)
+            if self._action_ball_continuous_fresh_motion_lane_bound
+            else (
+                torch.zeros_like(active)
+                if ready_authority is None
+                else ready_authority
+            )
         )
         phase = torch.full_like(
             self._action_ball_continuous_phase,
@@ -10950,11 +10960,12 @@ class MotionCommand(CommandTerm):
         self._action_ball_continuous_next_reveal_step[reveal] += int(
             schedule["cadence_steps"]
         )
-        # Fresh ActionEpoch consumes only the owner-issued, dwell-qualified
-        # next-tick R07 projection.  The legacy shared bool remains portable
-        # compatibility and cannot authorize a fresh first opportunity.
+        # A fresh training row earns task exposure by surviving the balance
+        # prefix to this due tick.  R07 remains post-shot recovery evidence;
+        # using its 13-component all-of projection here would circularly make
+        # full-motion imitation a prerequisite for seeing full motion.
         if self._action_ball_continuous_fresh_motion_lane_bound:
-            live_ready = self._action_ball_continuous_canonical_ready()
+            live_ready = torch.ones_like(reveal)
         else:
             ready_authority = self._action_ball_continuous_ready_authority
             live_ready = (

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import torch
 from typing import TYPE_CHECKING
 
@@ -85,6 +86,7 @@ def motion_relative_body_position_error_exp(
 def motion_relative_body_orientation_error_exp(
     env: ManagerBasedRLEnv, command_name: str, std: float, body_names: list[str] | None = None,
     window_scale: float = 1.0, window_command_name: str | None = None,
+    coarse_std: float | None = None,
 ) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     body_indexes = _get_body_indexes(command, body_names)
@@ -92,9 +94,20 @@ def motion_relative_body_orientation_error_exp(
         quat_error_magnitude(command.body_quat_relative_w[:, body_indexes], command.robot_body_quat_w[:, body_indexes])
         ** 2
     )
+    mean_error = error.mean(-1)
+    reward = torch.exp(-mean_error / std**2)
+    if coarse_std is not None:
+        if not math.isfinite(coarse_std) or coarse_std <= std:
+            raise ValueError("coarse_std must be finite and greater than std")
+        # The narrow kernel preserves close-pose precision.  The broad kernel
+        # keeps a usable gradient during the ready-to-frame0 transition rather
+        # than letting one large all-body RMS error erase the whole term.
+        reward = 0.5 * (
+            reward + torch.exp(-mean_error / coarse_std**2)
+        )
     return _apply_window_scale(
         env,
-        torch.exp(-error.mean(-1) / std**2),
+        reward,
         window_scale,
         window_command_name,
         command,

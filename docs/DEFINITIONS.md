@@ -15,6 +15,14 @@
 同步，随后在同一进程恢复原方法并自动关闭。它只用于定位collection墙钟，固定
 `speed_evidence_eligible=false`，不能当profiler-off吞吐成绩。
 
+**Isaac FullMDP `--cpu-affinity` / GPU-local CPU放置参数**：one-shot launcher接受的显式Linux CPU list，
+例如`32-47,96-111`；只允许当前launcher本来就可用的CPU，并通过`taskset`让唯一训练child继承。它修正
+NUMA放置，不改变训练语义，也不是性能或安全Gate；收益必须另做同GPU profiler-off实测。
+
+**`HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT` / fresh namespace训练产物根**：Isaac one-shot launcher内部写给
+FullMDP child的canonical目录，令checkpoint、WAL和training contract归属于当前fresh run root。它不是
+通用用户覆盖项，非FullMDP训练若携带会被拒绝。
+
 <a id="mujoco-fullmdp-longrun-flags"></a>
 **portable MuJoCo FullMDP长跑flags**：[`--full-a`](#mujoco-fullmdp-longrun-flags)选择portable
 26-event engineering surface，而不是历史WAIT环境或业务Full-A成功声明；其中

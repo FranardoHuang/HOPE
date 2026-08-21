@@ -193,7 +193,14 @@ class _RealD05Harness:
         owner._diagnostic_physical_owner = self.physical
         owner._publish_action_epoch_afterimage = self._publish_afterimage
 
-    def _publish_afterimage(self, _preview, *, accepted: torch.Tensor) -> None:
+    def _publish_afterimage(
+        self,
+        _preview,
+        *,
+        accepted: torch.Tensor,
+        settled_due: torch.Tensor,
+    ) -> None:
+        assert torch.equal(accepted & settled_due, accepted)
         self.accepted_masks.append(accepted[:, None].clone())
         self.calls.append("r05_runtime")
 

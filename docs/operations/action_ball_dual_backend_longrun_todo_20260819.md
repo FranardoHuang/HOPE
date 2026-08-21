@@ -10,6 +10,56 @@
 > successor 的依赖顺序、运行事实和完成条件，不维护竞争性的优先级队列。旧的单动作执行页已转为
 > [只读历史账](action_ball_single_action_dual_backend_todo_20260817.md)。
 
+## 0. 2026-08-22 学习阻塞修复与 fresh 重启 TODO
+
+本节是当前 branch-scoped successor 的顺序清单，不改变 `origin/main:docs/NOW.md` 的项目优先级。
+现役 MuJoCo/Isaac H48 长跑在 successor 验证完成前保持只读运行；不得 hot-patch、复用 namespace，
+也不得在新运行可用前制造无谓 GPU 空窗。
+
+- [x] 保存两条现役 run 的连续 ACK、finite、速度、episode、阶段分母和 Reward14--19 趋势快照。
+- [x] 查清两个 backend 的 `motion_body_ori` 都长期只有约理论最大值 `0.3%` 的根因；区分 reference/frame
+  错配、body 集合污染和指数 Reward 饱和，不能凭 aggregate return 猜修法。
+- [x] 按 `HANDOFF_TO_CODEX_20260808.md` §3 四问审计 D05/R07：真实 safety invariant 与
+  balance→mimic→entry→strike→landing 课程推进必须分离；退役为别种诊断 run 设计或按构造恒真的门。
+- [x] 冻结 adopt/defer/reject：课程采用自然事件 eligibility；上一阶段开始可用时下一阶段立即已有分母，不新增
+  冗余或部署不可观测的 actor observation，不用 task Reward 调权掩盖零 eligible denominator。
+- [x] 实现最小可学修复，并保留现有 13 项 readiness 分解的更新摘要；诊断 telemetry
+  不得伪装成 policy observation、owner、receipt 或新的 safety Gate。
+- [x] 复核 PPO action-noise/entropy/adaptive-KL 实际曲线，明确采用或拒绝显式有界 schedule；H48/
+  `lambda=.98` 保持已采用，不能把 rollout 变化冒充性能修复。
+- [ ] 完成 host 聚焦回归、exact Pod 测试、有限短验和必要的固定条件数值/行为检查；学习语义变更必须
+  使用 fresh checkpoint lineage。
+- [ ] successor 就绪后保存旧 run 最终证据，按精确 PID/PGID/namespace 收口旧 MuJoCo 与 Isaac；确认
+  GPU/lock/process absent 后，用两个 fresh namespace 同时重启。
+- [ ] 验收新 run 的 durable ACK、finite、wall/throughput、六项 mimic 梯度和逐阶段 denominator；
+  正式判断仍按 balance→mimic→entry→strike→landing，不以早期 `ACCEPT=0` 单独停车。
+
+### 本轮冻结的 adopt / defer / reject
+
+- **Adopt — 课程推进：** episode 前 `295` 个 policy tick（约 `5.9 s`）只学习可持续站立；活到首个
+  due tick 且仍是有限、未终止的 row 就进入 task reveal。随着能活到该 tick 的 row 增多，mimic 样本自然
+  与 balance 样本重叠；mimic 稍有成形后，同一个 task 自带的 ball flight/contact/landing 奖励立即可学，
+  不再另设一扇会把下游分母清零的课程门。
+- **Adopt — reference：** hidden balance 阶段的 joint/body reference 必须来自同一份 reset 后静态 ready
+  tuple；reveal 后才原子切到 action frame 0 和 bridge。不得再让 joint teacher 要求 runtime default、而
+  14-body teacher 同时要求 measured action frame 0。
+- **Adopt — safety 边界：** finite、joint envelope、跌倒/碰台等真实 plant invariant 继续硬失败；R07 的
+  13 项 recovery 误差只做已发生 shot 后的恢复奖励和可读诊断，不再授权 task 是否可以出现。
+- **Adopt — learner：** 保持已经采用的 `rollout=48`、`lambda=.98` 和 fresh lineage；先修零分母与错误
+  reference，再判断 exploration schedule，不能用噪声或调 Reward 权重替代可学性修复。
+- **Reject：** 不新增 actor observation；当前 semantic actor 已有 base pose/velocity/heading、teacher、
+  task geometry、阶段和倒计时。13 项误差来自 critic 可观测的 plant/reference，只需要摘要 telemetry，
+  再喂给 actor 会冗余并扩大部署合同。
+- **Adopt — orientation梯度：** 先修正reference，再对同一14-body角误差使用`.4 rad` fine与`1.0 rad`
+  coarse等权核；coarse只恢复大误差区梯度，不改变target或制造额外状态。
+- **Reject：** 不通过单独放宽 `motion_body_ori` 的 `std` 掩盖 reference 错配；不把 R07 all-of 阈值改名成
+  “安全”；不添加 receipt/owner/counter/gate 来证明按构造恒真的事实。
+- **Defer：** `solver_solve_many` 的更低 `cq_n_iters` 和其他 MuJoCo 数值性能取舍独立做 fixed-tape parity
+  canary；它们不与本轮学习语义修复捆成一个不可归因的改动。
+
+实现、证据与fresh验收的详细真源见
+[2026-08-22课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
 ## 1. 当前运行事实
 
 三条旧长跑均已停止，不可继续推进：

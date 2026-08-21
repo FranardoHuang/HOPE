@@ -423,6 +423,30 @@ def test_r07_validation_fault_leaves_canonical_owner_bytes_unchanged() -> None:
         assert torch.equal(getattr(command, name), expected), name
 
 
+def test_fresh_canonical_lifecycle_does_not_consume_r07_for_actor_phase() -> None:
+    command, _receipts = _motion()
+    _seed_complete_canonical_prepare(command)
+    command._action_ball_continuous_fresh_motion_lane_bound = True
+
+    def _unexpected_r07(_projection, *, owner_kind):
+        raise AssertionError(f"fresh lifecycle consumed R07 for {owner_kind}")
+
+    command._action_ball_continuous_r07_ready_projection = object()
+    command._action_ball_continuous_r07_ready_validator = _unexpected_r07
+    command._advance_action_ball_continuous_canonical_lifecycle(
+        motion_active_before=torch.ones(2, dtype=torch.bool),
+        suffix_due=torch.ones(2, dtype=torch.bool),
+        closed_without_playback=torch.zeros(2, dtype=torch.bool),
+    )
+
+    assert torch.all(
+        command._action_ball_continuous_canonical_phase.eq(
+            C.ACTION_BALL_CONTINUOUS_CANONICAL_READY_HOLD
+        )
+    )
+    assert not torch.any(command._action_ball_continuous_canonical_task_valid)
+
+
 @pytest.mark.parametrize("device", _DEVICES)
 def test_observation_is_pre_published_opaque_and_exact_narrow_snapshot(
     device: torch.device,

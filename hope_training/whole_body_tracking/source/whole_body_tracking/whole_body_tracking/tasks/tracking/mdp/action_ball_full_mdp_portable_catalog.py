@@ -76,10 +76,13 @@ PINNED_DIAGNOSTIC_MANIFEST_CANONICAL_SHA256 = (
     "f530165013baa570e0bf6bbbebcd7eef0c5c54db6ff7d51afccdc24e170f8cd5"
 )
 FRESH_POLICY_STEP_S = 0.02
-FRESH_FIRST_REVEAL_TICK = 2
+# Give every fresh row one complete, observable balance prefix before task
+# exposure.  Surviving to this tick is the curriculum condition; post-shot
+# R07 recovery quality is deliberately not an admission gate.
+FRESH_FIRST_REVEAL_TICK = 295
 FRESH_RECOVERY_END_OFFSET_TICKS = 77
 FRESH_HIDDEN_GAP_TICKS = 2
-FRESH_REFERENCE_DUE_COUNT = 6
+FRESH_REFERENCE_DUE_COUNT = 5
 FRESH_EPISODE_HORIZON_TICKS = 1500
 
 
@@ -194,7 +197,7 @@ def derive_portable_fresh_cadence(
     if (
         maximum_close != 214
         or cadence != 293
-        or due_ticks != (2, 295, 588, 881, 1174, 1467)
+        or due_ticks != (295, 588, 881, 1174, 1467)
         or due_ticks[-1] >= FRESH_EPISODE_HORIZON_TICKS
     ):
         raise ValueError("portable fresh cadence differs from the frozen schedule")

@@ -248,7 +248,14 @@ def test_host_reward20_matches_six_dense_formulas_and_weight_times_step_dt():
                 .mean(dim=-1)
                 / 0.3**2
             ),
-            torch.exp(-quat_error_sq.mean(dim=-1) / 0.4**2),
+            0.5
+            * (
+                torch.exp(-quat_error_sq.mean(dim=-1) / 0.4**2)
+                + torch.exp(
+                    -quat_error_sq.mean(dim=-1)
+                    / wait_env.FULL_A_BODY_ORIENTATION_COARSE_STD_RAD**2
+                )
+            ),
             torch.exp(
                 -torch.square(env._teacher_body_lin_vel - lin)
                 .sum(dim=-1)
@@ -611,7 +618,9 @@ def _host_full_a_lifecycle_env():
         )
     wait_env.FullMdpInitialWaitVecEnv._initialize_full_a_state(env)
     # Most focused lifecycle tests start at a deliberately admitted D05 due
-    # boundary.  Cadence-specific tests reset these fields explicitly.
+    # boundary.  Cadence-specific tests reset these fields to the production
+    # 295-tick balance prefix explicitly.
+    env._full_a_next_reveal_tick.fill_(2)
     env.episode_length_buf.fill_(1)
     env._full_a_cadence_ready.fill_(True)
     return env
@@ -806,7 +815,7 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
         assert torch.equal(getattr(env, name)[1], expected), name
 
 
-def test_host_full_a_retired_shot_defers_then_accepts_without_true_reset():
+def test_host_full_a_retired_shot_accepts_next_due_without_true_reset():
     env = _host_full_a_lifecycle_env()
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     env._epoch_phase[0] = wait_env.FULL_A_PHASE_RETIRED
@@ -823,21 +832,7 @@ def test_host_full_a_retired_shot_defers_then_accepts_without_true_reset():
         wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     )
     assert torch.equal(due, torch.tensor([True, False]))
-    assert torch.equal(deferred, torch.tensor([True, False]))
-    assert not reveal.any()
-    assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_RETIRED
-    assert torch.equal(env.sim.data.qpos[:, : env.b_q], robot_qpos)
-    assert torch.equal(env.actions, actions)
-    assert torch.equal(env.last_actions, last_actions)
-    assert torch.equal(env.reset_generation, torch.tensor([4, 8]))
-
-    env.episode_length_buf[0] = 587
-    env._full_a_cadence_ready[0] = True
-    reveal, _launch, due, deferred = (
-        wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
-    )
     assert torch.equal(reveal, torch.tensor([True, False]))
-    assert torch.equal(due, torch.tensor([True, False]))
     assert not deferred.any()
     assert env._epoch_task_valid.all()
     assert torch.equal(env.sim.data.qpos[:, : env.b_q], robot_qpos)
@@ -846,13 +841,15 @@ def test_host_full_a_retired_shot_defers_then_accepts_without_true_reset():
     assert torch.equal(env.reset_generation, torch.tensor([4, 8]))
 
 
-def test_host_full_a_step_uses_tick_zero_readiness_then_tick_two_due():
+def test_host_full_a_step_reveals_after_balance_prefix_without_r07_admission():
     env = _host_full_a_lifecycle_env()
     ids = torch.arange(2)
     env._clear_lifecycle(ids)
     wait_env.FullMdpInitialWaitVecEnv._full_a_reset_cadence_rows(env, ids)
-    env._full_a_cadence_ready_streak[:] = 1  # reset-return tick-zero sample
-    env.episode_length_buf.zero_()
+    env._full_a_next_reveal_tick.fill_(295)
+    env._full_a_cadence_ready_streak.zero_()
+    env._full_a_cadence_ready.zero_()
+    env.episode_length_buf.fill_(293)
     env.common_step_counter = 0
     env._full_a_begin_control_step = MethodType(
         wait_env.FullMdpInitialWaitVecEnv._full_a_begin_control_step, env
@@ -914,35 +911,32 @@ def test_host_full_a_step_uses_tick_zero_readiness_then_tick_two_due():
         env, torch.zeros((2, 31))
     )
     assert not first[3]["full_a_reveal_due_event"].any()
-    assert env._full_a_cadence_ready.all()
+    # One sample cannot satisfy the legacy two-transition R07 dwell.  The
+    # next due still reveals because R07 is telemetry, not admission.
+    assert not env._full_a_cadence_ready.any()
     second = wait_env.FullMdpInitialWaitVecEnv._step_full_a(
         env, torch.zeros((2, 31))
     )
     assert second[3]["full_a_reveal_due_event"].all()
     assert second[3]["full_a_reveal_event"].all()
     assert not second[3]["full_a_reveal_deferred_event"].any()
-    assert env.episode_length_buf.eq(2).all()
+    assert env.episode_length_buf.eq(295).all()
 
 
-def test_host_full_a_defer_does_not_slide_to_the_next_tick():
+def test_host_full_a_r07_not_ready_does_not_defer_curriculum_exposure():
     env = _host_full_a_lifecycle_env()
     ids = torch.arange(2)
     env._clear_lifecycle(ids)
     wait_env.FullMdpInitialWaitVecEnv._full_a_reset_cadence_rows(env, ids)
-    env.episode_length_buf.fill_(1)
+    env._full_a_next_reveal_tick.fill_(295)
+    env.episode_length_buf.fill_(294)
     env._full_a_cadence_ready.zero_()
 
     reveal, _launch, due, deferred = (
         wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     )
-    assert due.all() and deferred.all() and not reveal.any()
-    assert env._full_a_next_reveal_tick.eq(295).all()
-    env.episode_length_buf.fill_(2)
-    env._full_a_cadence_ready.fill_(True)
-    reveal, _launch, due, deferred = (
-        wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
-    )
-    assert not due.any() and not deferred.any() and not reveal.any()
+    assert due.all() and reveal.all() and not deferred.any()
+    assert env._full_a_next_reveal_tick.eq(588).all()
 
 
 def test_host_full_a_step_freezes_landing_crossing_on_shot_retirement():
@@ -1391,9 +1385,11 @@ def test_full_a_environment_consumes_the_measured_teacher_clock():
         body_lin_vel_w=torch.ones_like(body_pos),
         body_ang_vel_w=torch.ones_like(body_pos) * 2.0,
     )
-    env._ready_teacher_body_pos = torch.zeros((2, 1, 3))
+    env._ready_teacher_body_pos = torch.tensor(
+        [[[0.25, -0.10, 1.05]], [[-0.20, 0.15, 1.10]]]
+    ) + origins[:, None, :]
     env._ready_teacher_body_quat = torch.zeros((2, 1, 4))
-    env._ready_teacher_body_quat[..., 0] = 1.0
+    env._ready_teacher_body_quat[..., 1] = 1.0
     env._ready_teacher_body_lin_vel = torch.zeros((2, 1, 3))
     env._ready_teacher_body_ang_vel = torch.zeros((2, 1, 3))
     env._teacher_body_pos = env._ready_teacher_body_pos.clone()
@@ -1401,6 +1397,17 @@ def test_full_a_environment_consumes_the_measured_teacher_clock():
     env._teacher_body_lin_vel = env._ready_teacher_body_lin_vel.clone()
     env._teacher_body_ang_vel = env._ready_teacher_body_ang_vel.clone()
     env._refresh_aligned_teacher_body_pose = lambda: None
+
+    # Before curriculum reveal, body and joint teachers describe the same
+    # reset-ready hold.  Action frame zero is intentionally different.
+    wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
+    assert torch.equal(env._teacher_body_pos, env._ready_teacher_body_pos)
+    assert torch.equal(env._teacher_body_quat, env._ready_teacher_body_quat)
+    assert torch.equal(
+        env._full_a_teacher_joint_pos,
+        env.action_offset.unsqueeze(0).repeat(2, 1),
+    )
+
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
 
     env.common_step_counter = 3
@@ -1422,11 +1429,13 @@ def test_full_a_environment_consumes_the_measured_teacher_clock():
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
     assert torch.equal(
         env._full_a_motion_phase_code,
-        torch.full((2,), 3, dtype=torch.long),
+        torch.full(
+            (2,), wait_env.READY_HOLD_PHASE_INDEX, dtype=torch.long
+        ),
     )
     assert torch.equal(
         env._full_a_teacher_joint_pos,
-        env.action_offset.unsqueeze(0).repeat(2, 1),
+        joint[0].repeat(2, 1),
     )
     assert torch.equal(
         env._teacher_body_pos,
@@ -1437,7 +1446,7 @@ def test_full_a_environment_consumes_the_measured_teacher_clock():
     assert torch.count_nonzero(env._teacher_body_ang_vel) == 0
 
 
-def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
+def test_full_a_teacher_holds_coherent_frame0_then_plays_and_retires_rowwise():
     env = _host_full_a_lifecycle_env()
     env.q_ready = torch.linspace(-2.0, 1.0, 31)
     origins = torch.tensor([[6.0, -12.0, 0.0], [-6.0, 12.0, 0.0]])
@@ -1502,15 +1511,15 @@ def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
     wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
 
-    # Fresh Motion keeps the joint teacher on default during pre-swing HOLD;
-    # the body/R07 target is independently measured frame zero.  The optional
-    # diagnostic q_des bridge must never leak into either public buffer.
+    # Reveal atomically switches both joint and body teachers to the same
+    # stationary frame-zero preparation target.  The clip clock stays frozen;
+    # physical qpos still carries continuously from the learned ready pose.
     assert torch.max(torch.abs(joint[0] - env.q_ready)) > 3.0
     assert torch.equal(env.sim.data.qpos[:, :7], physical_root_before)
     assert not hasattr(env, "_full_a_ready_bridge_alpha")
     assert torch.equal(
         env._full_a_teacher_joint_pos,
-        env.action_offset.unsqueeze(0).repeat(2, 1),
+        joint[0].repeat(2, 1),
     )
     assert torch.equal(
         env._teacher_body_pos, body_pos[0].repeat(2, 1, 1) + origins[:, None, :]
@@ -1524,13 +1533,12 @@ def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
     assert torch.equal(env._full_a_teacher_frame, torch.zeros(2, dtype=torch.long))
     assert torch.equal(env._full_a_motion_phase_code, torch.zeros(2, dtype=torch.long))
 
-    # There is no halfway joint target during HOLD: joints stay on default,
-    # while the body reference remains exact measured frame zero.
+    # The entire preparation window keeps the coherent frame-zero target.
     env.common_step_counter = 22
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
     assert torch.equal(
         env._full_a_teacher_joint_pos,
-        env.action_offset.unsqueeze(0).repeat(2, 1),
+        joint[0].repeat(2, 1),
     )
     assert torch.equal(
         env._teacher_body_pos, body_pos[0].repeat(2, 1, 1) + origins[:, None, :]
@@ -1538,14 +1546,14 @@ def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
     assert torch.count_nonzero(env._full_a_teacher_joint_vel) == 0
     assert torch.equal(env._full_a_motion_phase_code, torch.zeros(2, dtype=torch.long))
 
-    # The exact end of the pre-wait is still HOLD/default.  The first strictly
+    # The exact end of the pre-wait is still stationary frame-zero HOLD.  The first strictly
     # positive active-motion instant publishes the measured sampler; frame
     # rounding is not the owner of that boundary.
     env.common_step_counter = 46
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
     assert torch.equal(
         env._full_a_teacher_joint_pos,
-        env.action_offset.unsqueeze(0).repeat(2, 1),
+        joint[0].repeat(2, 1),
     )
     assert torch.equal(
         env._teacher_body_pos, body_pos[0].repeat(2, 1, 1) + origins[:, None, :]
@@ -1572,18 +1580,20 @@ def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
     )
     assert torch.equal(env._full_a_motion_phase_code, torch.ones(2, dtype=torch.long))
 
-    # Completed/retired Motion hides the joint task at default while the R07
-    # and body reference remains measured frame zero.
+    # Completed/retired Motion freezes both joint and body references at the
+    # same measured frame zero.
     env.common_step_counter = 160
     env._epoch_phase[:] = wait_env.FULL_A_PHASE_OUTCOME_SETTLED
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
     assert torch.equal(
         env._full_a_motion_phase_code,
-        torch.full((2,), 3, dtype=torch.long),
+        torch.full(
+            (2,), wait_env.READY_HOLD_PHASE_INDEX, dtype=torch.long
+        ),
     )
     assert torch.equal(
         env._full_a_teacher_joint_pos,
-        env.action_offset.unsqueeze(0).repeat(2, 1),
+        joint[0].repeat(2, 1),
     )
     assert torch.equal(
         env._teacher_body_pos,
@@ -1600,7 +1610,7 @@ def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
     generation = env.reset_generation.clone()
     env._epoch_phase[0] = wait_env.FULL_A_PHASE_RETIRED
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
-    torch.testing.assert_close(env._full_a_teacher_joint_pos[0], env.action_offset)
+    torch.testing.assert_close(env._full_a_teacher_joint_pos[0], joint[0])
     torch.testing.assert_close(
         env._teacher_body_pos[0], body_pos[0] + origins[0]
     )
@@ -1613,10 +1623,10 @@ def test_full_a_teacher_holds_default_then_plays_and_retires_rowwise():
         wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
     )
     wait_env.FullMdpInitialWaitVecEnv._full_a_update_teacher(env)
-    assert due[0] and deferred[0] and not reveal[0]
-    assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_RETIRED
+    assert due[0] and reveal[0] and not deferred[0]
+    assert env._epoch_phase[0] == wait_env.FULL_A_PHASE_REVEAL_COMMITTED
     assert torch.equal(env.sim.data.qpos[:, :7], physical_root_before)
-    assert torch.equal(env._full_a_teacher_joint_pos[0], env.action_offset)
+    assert torch.equal(env._full_a_teacher_joint_pos[0], joint[0])
     assert torch.count_nonzero(env._full_a_teacher_joint_vel[0]) == 0
     torch.testing.assert_close(env._full_a_teacher_joint_pos[1], peer_joint)
     assert torch.equal(env.reset_generation, generation)

@@ -7,6 +7,10 @@
 > 状态：`successor-tools-branch-candidate / Pod dual-wheel+fixture+tape+H48 rate PASS / fresh-longrun RUNNING`
 > 证据等级：E2 exact Pod H48 wall/fixed tape与fresh ACK前缀 + E1源码/host反例；无ASan physics-promotion或完成证据
 
+> **2026-08-22 supersede：**本页下文所有`first due=2`、R07授权reveal以及hidden
+> `joint=default/body=frame0`叙述已由
+> [课程解阻实验](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)替代；旧run只作历史证据，不得resume。
+
 <a id="epa48-fresh-runtime-binding-20260821"></a>
 ## 0. 2026-08-21 successor的EPA48 fresh runtime binding
 
@@ -154,13 +158,13 @@ child仍为`R`。这证明真实production路径开始持续推进，不证明12
 - fixed action严格沿用现役Isaac cadence的slot0/UID `6907688916670928`，不把已cold-load的73行bank冒充73动作训练。
 - cold load一次校验manifest/motion SHA、31-joint order、tracked-body order、mount sign与measured timing；hot step只消费device tensor。
 - question由slot0 manifest center、live base yaw、shared Physical reverse-integration和integer control tick生成；world origin只在qpos launch写入时恢复。
-- fixed cadence沿用shared 30 s / 1500-control-tick schedule：due opportunity固定为
-  `2,295,588,881,1174,1467`（`2 + 293k`）；每行在due时按live readiness得到
-  `ACCEPT`或`DEFER`。`DEFER`是zero-write，不在tick 3补试，下一机会仍是下一个冻结due。
+- fixed cadence沿用shared 30 s / 1500-control-tick schedule：前295 tick只给reset-ready balance，due
+  opportunity固定为`295,588,881,1174,1467`（`295 + 293k`）；有限且未终止的candidate在due获得task曝光，
+  R07不再授权或defer reveal。
 - true Gym reset写`runtime_plant.default_joint_pos_rad`、配置default root加env origin、零joint/root
   velocity和零current/previous action history；`take061/q_ready`只保留输入provenance，不是physical birth authority。
-- pre-swing HOLD期间public joint teacher是runtime default、joint velocity为0；body reference与R07 target
-  使用measured frame0。只有`active_motion_s > 0`后才公开measured sampler，即使rounded frame ordinal仍为0。
+- hidden balance期间public joint/body teacher同取reset-ready静态tuple；reveal后的pre-swing preparation与
+  measured sampler都让joint/body同取action frame0，速度为0，避免两个target authority互相矛盾。
 - raw action affine的proposal、runtime/schema-2关节顺序、scale与
   `runtime_plant.default_joint_pos_rad` offset已与active Isaac闭合；`take061/physical-ready`只保留
   provenance，不是reset或affine-offset authority。

@@ -1,5 +1,26 @@
 # 简短进度记录
 
+## 2026-08-22 — FullMDP课程、D05 chronology与teacher解阻（branch candidate）
+
+- 旧Isaac约update500已学会站立，但从update305起所有due都被CENSOR；定位到首次活过second due tick295
+  后，Motion ordinal与只按ACCEPT推进的D05 cursor错位并触发bit50整批fanout。候选把cadence settlement与
+  task acceptance分开，补carry/second-due回归；任务身份仍只由ACCEPT写。
+- fresh首次曝光由catalog单一真源改为tick295，R07退出task exposure、training liveness和actor phase；
+  不新增success gate或actor observation。MuJoCo hidden teacher改为joint/body同源reset-ready，reveal后同切
+  frame0；14-body orientation在修正reference后使用`.4/1.0 rad` fine+coarse梯度。
+- Isaac launcher新增有界profiler、显式GPU-local CPU affinity，并让fresh namespace拥有training产物而非
+  写入源码checkout。host launcher/catalog=`18 passed`；exact Pod逐文件隔离回归=`292 passed, 36 skipped`。
+  第一次GPU1 profiler-on fresh real在PPO前因profiler仍绑定退役callpoint而fail-closed，root冷弃且GPU/lock
+  自然释放；现已切到真实`_assert_step_may_start`。同次发现Hydra metadata仍污染source，launcher也把
+  `hydra.run.dir`纳入fresh run-local路径；profiler+launcher host=`29 passed`。短验、旧run精确停止和双后端
+  fresh重启仍待完成。详见
+  [实验记录](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
+- 修复后Isaac已在GPU1 fresh启动并取得连续durable ACK，5轮profiler自动卸载；旧Isaac精确停在ACK631，
+  process/GPU app/lock absent且未伪造completion。MuJoCo GPU0第一候选已取得ACK0--7且finite，但暴露底层
+  `MUJOCO_LOG.TXT`仍写source cwd；该候选精确停止、日志封存，launcher改为让child以fresh run root为cwd，
+  新MuJoCo fresh namespace待复验。
+
 ## 2026-08-22 — Isaac Full-A H48 fresh one-shot入口（branch candidate）
 
 - 新增`scripts/launch_isaac_full_mdp_successor.py`，只复用现有Kit boot owner；从clean Git固定

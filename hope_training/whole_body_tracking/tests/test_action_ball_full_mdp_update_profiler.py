@@ -101,7 +101,7 @@ class _ExactEnv:
     def _before_policy_step(self):
         return None
 
-    def _assert_owner_binding_current(self):
+    def _assert_step_may_start(self):
         return None
 
     def _protected_manager_state(self):
@@ -123,7 +123,7 @@ class _ExactEnv:
     def step(self, action):
         self.recorder_manager.record_pre_step()
         self._before_policy_step()
-        self._assert_owner_binding_current()
+        self._assert_step_may_start()
         protected = self._protected_manager_state()
         self.action_manager.process_action(action)
         self.action_manager.apply_action()
@@ -211,7 +211,7 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     }
     assert payload["segments"]["env_step_total"]["calls"] == 1
     assert payload["segments"]["sim_step"]["calls"] == 1
-    assert payload["segments"]["owner_binding_assert"]["calls"] == 1
+    assert payload["segments"]["step_may_start_assert"]["calls"] == 1
     settlement_gap = payload["segments"]["after_command_to_observation_gap"]
     assert settlement_gap["calls"] == 1
     assert settlement_gap["inclusive_host_wall_ms"] > 0.0

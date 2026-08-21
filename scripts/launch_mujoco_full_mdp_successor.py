@@ -282,7 +282,10 @@ def launch(args: argparse.Namespace) -> int:
         with stdout, stderr:
             try:
                 child = subprocess.Popen(
-                    argv, cwd=REPO_ROOT, env=_child_env(contract),
+                    # MuJoCo may create MUJOCO_LOG.TXT without an explicit
+                    # path.  The fresh run root, not the immutable checkout,
+                    # owns every such process-local fallback artifact.
+                    argv, cwd=root, env=_child_env(contract),
                     stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
                     close_fds=True,
                 )

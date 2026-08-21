@@ -103,6 +103,7 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     tools.mkdir()
     isaac_python = _executable(tools / "python.sh", "#!/bin/sh\nexit 0\n")
     kit_python = _executable(tools / "kit-python", "#!/bin/sh\nexit 0\n")
+    taskset = _executable(tools / "taskset", "#!/bin/sh\nexit 0\n")
     nvidia = _executable(
         tools / "nvidia-smi",
         "#!/bin/sh\n"
@@ -129,6 +130,8 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(module, "WORKSPACE_ROOT", workspace)
     monkeypatch.setattr(module, "NVIDIA_SMI", nvidia)
+    monkeypatch.setattr(module, "TASKSET", taskset)
+    monkeypatch.setattr(module, "_available_cpu_ids", lambda: {2, 3})
     monkeypatch.setattr(module, "PINNED_ISAACLAB_COMMIT", _git(isaaclab, "rev-parse", "HEAD"))
     monkeypatch.setattr(module, "PINNED_KIT_PYTHON_SHA256", _sha(kit_python))
     monkeypatch.setattr(module, "PINNED_A3_USD_SHA256", _sha(asset))
@@ -181,7 +184,45 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert "save_interval=" not in joined
     assert "action_ball_full_mdp_rate_probe" not in joined
     assert payload["runtime_env"]["PYTHONPATH"].startswith("/proc/self/fd/18:")
+    assert payload["runtime_env"]["HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT"] == str(
+        rig.root / "training"
+    )
+    assert f"hydra.run.dir={rig.root / 'training' / 'hydra'}" in payload["argv"]
     assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "0"
+    assert "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES" not in payload["runtime_env"]
+    assert not rig.root.exists()
+
+
+def test_dry_run_can_bind_bounded_full_mdp_profiler(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(rig.argv(dry=True) + ["--profile-updates", "5"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["runtime_env"][
+        "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
+    ] == "5"
+    assert not rig.root.exists()
+
+
+def test_dry_run_can_bind_explicit_cpu_affinity(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cpu = 2
+    assert rig.module.main(
+        rig.argv(dry=True) + ["--cpu-affinity", str(cpu)]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["cpu_affinity"] == str(cpu)
+    assert payload["cpu_ids"] == [cpu]
+    assert not rig.root.exists()
+
+
+@pytest.mark.parametrize("value", ["2-1", "1,1", "cpu1"])
+def test_invalid_cpu_affinity_fails_before_root(rig, value, capsys) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True) + ["--cpu-affinity", value]
+    ) == 2
+    assert "cpu-affinity" in capsys.readouterr().err
     assert not rig.root.exists()
 
 
@@ -221,18 +262,17 @@ def test_real_path_uses_clean_env_wrapper_and_spends_fresh_root(
 
     def fake_descriptors(paths, wheel):
         assert wheel == rig.wheel
-        for target in (16, 18):
-            descriptor = os.open(os.devnull, os.O_RDONLY)
-            os.dup2(descriptor, target, inheritable=True)
-            os.close(descriptor)
-            descriptors.append(target)
-        return 16, 18
+        descriptors.extend(
+            os.open(os.devnull, os.O_RDONLY) for _ in range(2)
+        )
+        return tuple(descriptors)
 
     monkeypatch.setattr(rig.module, "_open_exact_runtime_descriptors", fake_descriptors)
     monkeypatch.setattr(rig.module, "_verify_started", lambda paths: (1234, 1234))
     assert rig.module.main(rig.argv()) == 0
     assert rig.root.is_dir()
     assert (rig.root / "asset" / "model.usd").read_bytes() == b"exact-usd"
+    assert (rig.root / "training").is_dir()
     assert (rig.root / "asset" / "source_bundle" / "config.yaml").read_text() == (
         "fixture: exact\n"
     )
@@ -242,9 +282,39 @@ def test_real_path_uses_clean_env_wrapper_and_spends_fresh_root(
     assert child[:2] == ["/usr/bin/env", "-i"]
     assert str(rig.isaac_python) in child
     assert "task=HOPEPingPongActionBallFullMdpA" in child
+    assert f"hydra.run.dir={rig.root / 'training' / 'hydra'}" in child
     assert record["env"]["KIT_BOOT_MARKER"] == "Learning iteration"
     assert "PYTHONPATH" not in record["env"]
     assert "LD_LIBRARY_PATH" not in record["env"]
+
+
+def test_real_path_wraps_child_in_explicit_cpu_affinity(
+    rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_descriptors(paths, wheel):
+        assert wheel == rig.wheel
+        return tuple(
+            os.open(os.devnull, os.O_RDONLY) for _ in range(2)
+        )
+
+    monkeypatch.setattr(
+        rig.module, "_open_exact_runtime_descriptors", fake_descriptors
+    )
+    monkeypatch.setattr(
+        rig.module, "_verify_started", lambda paths: (1234, 1234)
+    )
+    assert rig.module.main(
+        rig.argv() + ["--cpu-affinity", "2"]
+    ) == 0
+    record = json.loads(rig.record.read_text())
+    child = record["argv"][1:]
+    assert child[:5] == [
+        str(rig.module.TASKSET),
+        "-c",
+        "2",
+        "/usr/bin/env",
+        "-i",
+    ]
 
 
 def test_wrong_pinned_asset_or_rsl_bytes_fail_before_root(rig, capsys) -> None:

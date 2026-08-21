@@ -70,6 +70,7 @@ FULL_A_FLIGHT_HORIZON_S = 1.0
 FULL_A_RECOVERY_START_AGE_TICK = portable_outcome.RECOVERY_START_AGE_TICK
 FULL_A_RECOVERY_END_AGE_TICK = portable_outcome.RECOVERY_END_AGE_TICK
 FULL_A_PLACEMENT_BROAD_SIGMA_M = portable_outcome.PLACEMENT_BROAD_SIGMA_M
+FULL_A_BODY_ORIENTATION_COARSE_STD_RAD = 1.0
 FULL_A_SUPPORT_FORCE_N = 10.0
 FULL_A_DEFAULT_ROOT_POS = (0.0, 0.0, 1.0684)
 FULL_A_DEFAULT_ROOT_QUAT_WXYZ = (1.0, 0.0, 0.0, 0.0)
@@ -758,8 +759,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             FULL_A_PHASE_RETIRED
         )
         torch._assert_async(torch.all(~due | candidate))
-        reveal = due & candidate & self._full_a_cadence_ready
-        deferred = due & candidate & ~self._full_a_cadence_ready
+        # Curriculum exposure is earned by surviving to the scheduled due
+        # tick.  The 13-component R07 projection remains useful recovery
+        # telemetry, but it is not a safety invariant and must not hold the
+        # first learnable motion/ball sample behind an all-of gate.
+        reveal = due & candidate
+        deferred = torch.zeros_like(reveal)
         self._full_a_scheduled_ordinal += due.to(torch.long)
         self._full_a_next_reveal_tick += (
             due.to(torch.long) * int(self._full_a_cadence.cadence_ticks)
@@ -1244,7 +1249,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
     def _full_a_update_cadence_readiness(
         self, errors, hard_safety_ok, terminated, truncated
     ) -> None:
-        """Maintain the two-transition R07 readiness projection for D05."""
+        """Maintain two-transition R07 recovery telemetry and reward state."""
 
         torch = self._torch
         candidate = (
@@ -1471,9 +1476,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_pre_swing_wait_s,
         )
         origins = self.env.scene.env_origins[:, None, :]
-        # Fresh Motion keeps the public joint teacher at robot.default_joint_pos
-        # during the pre-swing hold.  Body references still use measured frame
-        # zero, and R07 independently scores the measured frame-zero target.
+        # Before any reveal, joint and body teachers describe the same
+        # reset-ready pose.  Reveal switches both to action frame zero for the
+        # stationary pre-swing preparation window; mixing those authorities
+        # makes orientation imitation contradictory.
         in_hold = valid & (
             elapsed <= self._full_a_pre_swing_wait_s + 1.0e-12
         )
@@ -1502,14 +1508,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 + self._full_a_scaled_t_cycle_s
             )
         )
-        hidden_phase = torch.where(
-            self._full_a_cadence_ready,
-            torch.full_like(
-                self._full_a_motion_phase_code, READY_HOLD_PHASE_INDEX
-            ),
-            torch.full_like(
-                self._full_a_motion_phase_code, RECOVER_HIDDEN_PHASE_INDEX
-            ),
+        # Hidden rows always track the reset-ready teacher.  R07 readiness is
+        # recovery telemetry/reward, not an actor phase authority or a task
+        # exposure gate.
+        hidden_phase = torch.full_like(
+            self._full_a_motion_phase_code, READY_HOLD_PHASE_INDEX
         )
         phase = hidden_phase
         phase = torch.where(follow, torch.full_like(phase, 2), phase)
@@ -1536,7 +1539,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 torch.zeros_like(sampled["frame"]),
             )
         )
-        measured_joint = valid & ~completed & ~in_hold
+        # Reveal starts one stationary frame-zero preparation window.  Joint
+        # and body targets switch together; the clip clock itself remains
+        # frozen until the window ends.
+        measured_joint = valid
         self._full_a_teacher_joint_pos.copy_(
             torch.where(
                 measured_joint[:, None],
@@ -1558,18 +1564,28 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 torch.zeros_like(self._full_a_teacher_joint_vel),
             )
         )
+        inactive_body_pos = torch.where(
+            completed[:, None, None],
+            frame0_body_pos + origins,
+            self._ready_teacher_body_pos,
+        )
+        inactive_body_quat = torch.where(
+            completed[:, None, None],
+            frame0_body_quat.expand_as(self._teacher_body_quat),
+            self._ready_teacher_body_quat,
+        )
         self._teacher_body_pos.copy_(
             torch.where(
                 (valid & ~completed)[:, None, None],
                 measured_body_pos + origins,
-                frame0_body_pos + origins,
+                inactive_body_pos,
             )
         )
         self._teacher_body_quat.copy_(
             torch.where(
                 (valid & ~completed)[:, None, None],
                 measured_body_quat,
-                frame0_body_quat.expand_as(self._teacher_body_quat),
+                inactive_body_quat,
             )
         )
         measured_body_lin_vel = torch.where(
@@ -2089,6 +2105,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         body_quat = data.xquat[:, ids]
         body_lin_vel, body_ang_vel = self._body_com_velocities_w()
         anchor = self._fullmdp_anchor_index
+        body_orientation_error = self._quat_error_sq(
+            torch, self._aligned_teacher_body_quat, body_quat
+        ).mean(-1)
         raw = torch.stack(
             (
                 torch.exp(
@@ -2115,11 +2134,16 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                     ).mean(-1)
                     / FULLMDP_DENSE_REWARD_SPECS[2][2] ** 2
                 ),
-                torch.exp(
-                    -self._quat_error_sq(
-                        torch, self._aligned_teacher_body_quat, body_quat
-                    ).mean(-1)
-                    / FULLMDP_DENSE_REWARD_SPECS[3][2] ** 2
+                0.5
+                * (
+                    torch.exp(
+                        -body_orientation_error
+                        / FULLMDP_DENSE_REWARD_SPECS[3][2] ** 2
+                    )
+                    + torch.exp(
+                        -body_orientation_error
+                        / FULL_A_BODY_ORIENTATION_COARSE_STD_RAD**2
+                    )
                 ),
                 torch.exp(
                     -torch.sum(

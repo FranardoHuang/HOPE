@@ -178,6 +178,39 @@ def test_all_false_due_is_neutral_and_has_no_selected_shape():
     assert not bool(record.candidate.task.task_f32.any())
 
 
+def test_second_due_after_unaccepted_first_due_has_clean_chronology():
+    """A settled-but-unaccepted Q0 must not poison Q1 with bit 50."""
+
+    owner = d05.DeviceR05Owner.__new__(d05.DeviceR05Owner)
+    owner._num_envs = 2
+    owner._device = torch.device("cpu")
+    owner._row_axis = torch.arange(2, dtype=torch.int64)
+    owner._reset_generation = torch.tensor([1, 1], dtype=torch.int64)
+    owner._scheduled_ordinal = torch.tensor([0, 0], dtype=torch.int64)
+    owner._outcome_shot_index = torch.tensor([1, 1], dtype=torch.int64)
+    owner._target_generation = torch.tensor([0, 0], dtype=torch.int64)
+    due_mask = torch.ones(2, dtype=torch.bool)
+    due = epoch.ActionEpochDueRows(588, due_mask, due_mask.clone())
+    motion = SimpleNamespace(
+        common_step=588,
+        episode_tick=torch.tensor([588, 588], dtype=torch.int64),
+        scheduled_ordinal=torch.tensor([1, 1], dtype=torch.int64),
+        reveal_tick=torch.tensor([588, 588], dtype=torch.int64),
+        deadline_tick=torch.tensor([733, 733], dtype=torch.int64),
+        next_reveal_tick=torch.tensor([881, 881], dtype=torch.int64),
+        reset_generation=torch.tensor([1, 1], dtype=torch.int64),
+        swing_generation=torch.tensor([1, 1], dtype=torch.int64),
+        reveal_due=due_mask.clone(),
+        ready_at_reveal=torch.zeros(2, dtype=torch.bool),
+    )
+
+    projection = owner._current_row_cadence(due, motion)
+
+    assert projection.scheduled_ordinal.tolist() == [1, 1]
+    assert projection.outcome_shot_index.tolist() == [2, 2]
+    assert not bool(projection.cadence_producer_fault.any())
+
+
 class _EpochWriterWindow:
     def __init__(self, active: str, *, accept=(True, False)):
         self.active = active
@@ -398,7 +431,9 @@ def test_real_epoch_stale_reset_censors_mutated_d05_accept_mask(monkeypatch):
     owner._diagnostic_physical_owner = physical
     published = []
     owner._publish_action_epoch_afterimage = (
-        lambda preview, *, accepted: published.append(accepted.clone())
+        lambda preview, *, accepted, settled_due: published.append(
+            (accepted.clone(), settled_due.clone())
+        )
     )
     epoch_owner.bind_d05_accept_writers(
         motion_write=owner._commit_action_epoch_motion_write,
@@ -417,7 +452,8 @@ def test_real_epoch_stale_reset_censors_mutated_d05_accept_mask(monkeypatch):
     assert bool(record.accept_mask.all())
     assert all(leaf.state.tolist() == [0, 1] for leaf in (motion, racket, physical))
     assert all(not bool(leaf.view.task.task_valid.any()) for leaf in (motion, racket, physical))
-    assert len(published) == 1 and not bool(published[0].any())
+    assert len(published) == 1 and not bool(published[0][0].any())
+    assert bool(published[0][1].all())
     assert torch.equal(after.phase, before.phase)
     start, end = epoch_owner.prepare_drain()
     materialized = epoch_owner.materialize_drain(start=start, end=end)
@@ -434,7 +470,7 @@ def test_real_epoch_stale_reset_censors_mutated_d05_accept_mask(monkeypatch):
         )
 
 
-def test_real_r05_allzero_accept_preserves_business_bytes_and_consumes_tape():
+def test_real_r05_defer_advances_only_due_cursor_and_consumes_tape():
     owner = d05.DeviceR05Owner.__new__(d05.DeviceR05Owner)
     owner._num_envs = 2
     owner._device = torch.device("cpu")
@@ -496,12 +532,22 @@ def test_real_r05_allzero_accept_preserves_business_bytes_and_consumes_tape():
         for name in business_names
     }
     owner._publish_action_epoch_afterimage(
-        preview, accepted=torch.zeros(2, dtype=torch.bool)
+        preview,
+        accepted=torch.zeros(2, dtype=torch.bool),
+        settled_due=torch.tensor([True, False], dtype=torch.bool),
+    )
+    identity_names = tuple(
+        name
+        for name in business_names
+        if name not in {"_scheduled_ordinal", "_outcome_shot_index"}
     )
     assert all(
         torch.equal(owner._publication.live[name].view(torch.uint8), value)
         for name, value in before.items()
+        if name in identity_names
     )
+    assert owner._publication.live["_scheduled_ordinal"].tolist() == [106, 107]
+    assert owner._publication.live["_outcome_shot_index"].tolist() == [107, 108]
     assert owner._publication.live["_rng_lo"].tolist() == [4, 6]
     assert owner._publication.live["_next_outcome_identity"].item() == 42
     assert owner._publication.counters["_active"] is None
@@ -686,11 +732,12 @@ def test_question_rng_is_unreachable_before_epoch_due_freeze():
     assert calls == []
 
 
-def test_k0_epoch_return_skips_question_numeric_writers_and_second_projection():
+def test_k0_epoch_return_skips_question_numeric_writers_and_second_projection(
+    monkeypatch,
+):
+    monkeypatch.setitem(sys.modules, _FAKE_R06.__name__, _FAKE_R06)
     current_epoch = d05._require_action_epoch_module()
-    paid_rows_type = importlib.import_module(
-        current_epoch.__package__ + ".action_ball_landing_outcome_device"
-    ).PreviousPaidActionEpochRows
+    paid_rows_type = _PreviousPaidRows
     epoch_owner = current_epoch.ActionEpochOwner(num_envs=2, device="cpu")
     epoch_owner.activate_reset_genesis(
         selected_mask=torch.ones(2, dtype=torch.bool),

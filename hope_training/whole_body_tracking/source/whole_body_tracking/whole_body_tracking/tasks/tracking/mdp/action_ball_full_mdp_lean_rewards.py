@@ -57,6 +57,7 @@ COMMON_DENSE_SPECS = (
     ("motion_body_ang_vel", "motion_global_body_angular_velocity_error_exp", 1.0, 3.14),
 )
 COMMON_DENSE_NAMES = tuple(spec[0] for spec in COMMON_DENSE_SPECS)
+BODY_ORIENTATION_COARSE_STD = 1.0
 MANAGER_NAMES = LIFECYCLE_MANAGER_NAMES + COMMON_DENSE_NAMES
 MANAGER_TERM_COUNT = len(MANAGER_NAMES)
 
@@ -658,6 +659,7 @@ def common_dense_reward(
     ordinal: int,
     command_name: str,
     std: float,
+    coarse_std: float | None = None,
 ) -> torch.Tensor:
     """Evaluate one adopted Motion imitation function and record its manager row."""
 
@@ -672,6 +674,11 @@ def common_dense_reward(
         std, label=name + " std"
     ).hex() != expected_std.hex():
         raise LeanRewardConstructionHold("common dense term parameters differ")
+    expected_coarse = (
+        BODY_ORIENTATION_COARSE_STD if name == "motion_body_ori" else None
+    )
+    if coarse_std != expected_coarse:
+        raise LeanRewardConstructionHold("common dense coarse kernel differs")
     try:
         evaluator_module = importlib.import_module(
             "whole_body_tracking.tasks.tracking.mdp.rewards"
@@ -681,7 +688,10 @@ def common_dense_reward(
         raise LeanRewardConstructionHold(
             "common dense Motion evaluator is unavailable: " + name
         ) from exc
-    value = evaluator(env, command_name=command_name, std=expected_std)
+    evaluator_kwargs = {"command_name": command_name, "std": expected_std}
+    if expected_coarse is not None:
+        evaluator_kwargs["coarse_std"] = expected_coarse
+    value = evaluator(env, **evaluator_kwargs)
     return _env_reward_dispatcher(env)(ordinal=ordinal, value=value)
 
 
@@ -837,6 +847,8 @@ def materialize_reward_manager_cfg(
                 command_name="motion",
                 std=float(spec[3]),
             )
+            if name == "motion_body_ori":
+                params["coarse_std"] = BODY_ORIENTATION_COARSE_STD
         result[name] = reward_term_type(
             func=REWARD_TERM_CALLABLES[ordinal], weight=weight, params=params
         )
@@ -877,6 +889,7 @@ __all__ = [
     "LIFECYCLE_MANAGER_NAMES",
     "COMMON_DENSE_SPECS",
     "COMMON_DENSE_NAMES",
+    "BODY_ORIENTATION_COARSE_STD",
     "MANAGER_NAMES",
     "MANAGER_TERM_COUNT",
     "DIAGNOSTIC_N2_REWARD_PROFILE_KIND",
