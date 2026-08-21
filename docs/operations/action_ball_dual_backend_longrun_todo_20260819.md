@@ -139,7 +139,8 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    future launcher先从clean Git truth取得并传`source_commit`，binder不得自报。短验只回答构造、有限性和
    真实调用点，随后同一进程继续训练并按balance→mimic→entry→strike→landing分阶段报告分母。
    branch候选one-shot launcher只负责clean Git、fresh root、GPU UUID/空卡/lock与固定H48 argv，并等待child
-   自然退出；它不监控、不重试、不发signal，也不以`ACCEPT>0`作为启动或停止条件。Pod dry-run/real run未测。
+   自然退出；它不监控、不重试、不发signal，也不以`ACCEPT>0`作为启动或停止条件。Pod1 clean detached
+   `2e4279ba` dry-run已PASS且未建root、未查GPU、未改lock；real run仍未测。
 
 ## 4. 当前完成条件
 

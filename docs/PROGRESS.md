@@ -8,8 +8,10 @@
   结束apps empty/lock free。host=`17 passed, 1 skipped`。这只证明一对CUDA差分，不代签ASan独立oracle、
   ActionBall fixed-tape、matched H48或training GO。
 - 新one-shot launcher从clean Git读取source commit，固定H48 Full-A命令，持GPU lock覆盖child lifetime并等待
-  自然退出；它不监控、不重试、不以`ACCEPT>0`停车。host=`11 passed`；Pod dry-run与真实发射仍`未测`。
-  fixed replay与launcher代码commit分别为`a331832a` / `4468b681`。
+  自然退出；它不监控、不重试、不以`ACCEPT>0`停车。host=`11 passed`。Pod1 clean detached
+  `2e4279ba`用真实`/workspace/mjlab_venv/bin/python`完成dry-run：固定H48 argv/source commit/env逐项正确，
+  run root前后均不存在，lock元数据逐位未变，且未调用`nvidia-smi`；真实发射仍`未测`。
+  fixed replay、launcher初版与venv入口修复commit分别为`a331832a` / `4468b681` / `2e4279ba`。
   详细证据和剩余边界见[portable Full-A实验§0](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)。
 
 ## 2026-08-21 — portable Full-A fresh EPA48/RSL3 runtime binding（branch candidate）

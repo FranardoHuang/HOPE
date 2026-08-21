@@ -34,6 +34,8 @@ Pod1无CUDA actual dual-wheel import=`19 passed in 4.33s`。tracked fixed fixtur
 `PASS_EPA48_FIXED_FIXTURE_REPLAY`；标准lock覆盖全程，结束apps empty/lock free。fixed-tape、matched H48 wall、
 ASan/instrumented独立oracle与fresh longrun仍未闭合。故非完整physics/training GO，保持
 `diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`，且尚未合`main`。
+one-shot launcher又在Pod1 clean detached `2e4279ba`以真实venv完成无副作用dry-run：固定H48 argv与source
+commit正确，run root未创建、lock元数据未变、GPU未查询；这只关闭发射入口构造，不代签real run或本Gate。
 
 **2026-08-21 project-owned [MuJoCo-Warp EPA48](../DEFINITIONS.md#mujoco-warp-epa48-fork) build chain（Gate仍`Partial`）：**portable r3已经停止在
 durable ACK `10249`；真实`EPA_HORIZON` fail-stop证明stock `MJ_MAX_EPAHORIZON=24`可达，但当时没有把

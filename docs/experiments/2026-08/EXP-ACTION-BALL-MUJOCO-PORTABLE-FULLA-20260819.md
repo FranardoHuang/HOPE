@@ -78,8 +78,10 @@ matched H48和training authorization均保持HOLD。
 读取40-hex source commit，核canonical Python、fresh `/workspace/.../<namespace>`、GPU index→UUID、空compute
 apps与显式flock；然后固定启动`4096×12500`、H48 recipe、save500及run-local EPA48/RSL3 site。lock覆盖child
 lifetime，launcher前台等待自然rc；没有monitor、retry、signal、resume或`ACCEPT` gate。host=`11 passed`，
-Pod dry-run和real run仍`未测`，因此当前只是一条更窄的发射入口，不是发车授权。
-launcher代码commit为`4468b681`。
+Pod1 clean detached `2e4279ba`已用真实`/workspace/mjlab_venv/bin/python`完成dry-run：输出精确绑定
+source commit、Full-A `4096×12500`、H48、save500与run-local site；run root前后均不存在，lock inode/size/
+mtime/ctime不变，且dry-run在GPU查询前返回。real run仍`未测`，因此当前只是一条更窄的发射入口，
+不是发车授权。launcher初版/venv入口修复commit为`4468b681` / `2e4279ba`。
 
 ## 1. 采用、延后、拒绝
 
