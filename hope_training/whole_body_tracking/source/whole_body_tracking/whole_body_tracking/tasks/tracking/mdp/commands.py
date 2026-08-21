@@ -377,11 +377,13 @@ class ActionBallContinuousMotionObservationToken:
 
 @dataclass(frozen=True, eq=False, repr=False)
 class ActionBallContinuousMotionObservationView:
-    """Clone-only current Motion chronology used by the fresh R08 owner.
+    """One publication-frozen Motion chronology with consumer isolation.
 
     The five-state lifecycle is independently written by Motion.  It is never
     derived from the legacy seven-state diagnostic phase, and none of the
-    tensors aliases live owner storage.
+    tensors aliases live owner storage.  The owner retains one private
+    publication instance and returns a fresh clone-only instance to each
+    consumer so an in-place tensor write cannot cross the trust boundary.
     """
 
     motion_owner: object
@@ -389,36 +391,12 @@ class ActionBallContinuousMotionObservationView:
     common_step: int
     control_tick: torch.Tensor
     phase: torch.Tensor
-    phase_start_tick: torch.Tensor
-    phase_elapsed_tick: torch.Tensor
-    reveal_tick: torch.Tensor
-    deadline_tick: torch.Tensor
-    next_reveal_tick: torch.Tensor
     reset_generation: torch.Tensor
     swing_generation: torch.Tensor
-    scheduled_ordinal: torch.Tensor
-    action_slot: torch.Tensor
-    task_identity: torch.Tensor
-    cadence_identity: torch.Tensor
     action_uid: torch.Tensor
-    task_receipt_sha256: torch.Tensor
-    cadence_receipt_sha256: torch.Tensor
-    candidate_identity: torch.Tensor
-    contact_tick: torch.Tensor
-    launch_tick: torch.Tensor
-    chosen_horizon_tick: torch.Tensor
-    task_close_tick: torch.Tensor
+    task_identity: torch.Tensor
     task_valid: torch.Tensor
-    timing_active: torch.Tensor
-    playback_started: torch.Tensor
-    pending_elapsed_s: torch.Tensor
-    task_age_s: torch.Tensor
-    time_to_contact_s: torch.Tensor
     time_to_contact_remaining_s: torch.Tensor
-    teacher_rate: torch.Tensor
-    scaled_t_hit_s: torch.Tensor
-    scaled_t_cycle_s: torch.Tensor
-    pre_swing_wait_s: torch.Tensor
     time_to_teacher_start_remaining_s: torch.Tensor
     time_to_next_reveal_s: torch.Tensor
 
@@ -4029,11 +4007,6 @@ class MotionCommand(CommandTerm):
         def snapshot(value: torch.Tensor) -> torch.Tensor:
             return value.detach().clone()
 
-        phase_elapsed = torch.clamp(
-            self._action_ball_continuous_episode_step
-            - self._action_ball_continuous_canonical_phase_start_tick,
-            min=0,
-        )
         time_to_contact_remaining = (
             self._action_ball_time_to_contact_s
             - self._action_ball_task_age_s
@@ -4049,84 +4022,32 @@ class MotionCommand(CommandTerm):
         ).to(dtype=self._action_ball_task_age_s.dtype) * float(
             self._env.step_dt
         )
-        record = {
-            "publication_identity": publication_identity,
-            "common_step": common_step,
-            "control_tick": snapshot(self._action_ball_continuous_episode_step),
-            "phase": snapshot(self._action_ball_continuous_canonical_phase),
-            "phase_start_tick": snapshot(
-                self._action_ball_continuous_canonical_phase_start_tick
-            ),
-            "phase_elapsed_tick": snapshot(phase_elapsed),
-            "reveal_tick": snapshot(
-                self._action_ball_continuous_current_reveal_step
-            ),
-            "deadline_tick": snapshot(
-                self._action_ball_continuous_current_deadline_step
-            ),
-            "next_reveal_tick": snapshot(
-                self._action_ball_continuous_next_reveal_step
-            ),
-            "reset_generation": snapshot(self._action_ball_reset_generation),
-            "swing_generation": snapshot(self._action_ball_swing_generation),
-            "scheduled_ordinal": snapshot(
-                self._action_ball_continuous_scheduled_ordinal
-            ),
-            "action_slot": snapshot(self.clip_id),
-            "task_identity": snapshot(
-                self._action_ball_continuous_canonical_task_identity
-            ),
-            "cadence_identity": snapshot(
-                self._action_ball_continuous_canonical_cadence_identity
-            ),
-            "action_uid": snapshot(
+        record = ActionBallContinuousMotionObservationView(
+            motion_owner=self,
+            publication_identity=publication_identity,
+            common_step=common_step,
+            control_tick=snapshot(self._action_ball_continuous_episode_step),
+            phase=snapshot(self._action_ball_continuous_canonical_phase),
+            reset_generation=snapshot(self._action_ball_reset_generation),
+            swing_generation=snapshot(self._action_ball_swing_generation),
+            action_uid=snapshot(
                 self._action_ball_continuous_canonical_action_uid
             ),
-            "task_receipt_sha256": snapshot(
-                self._action_ball_continuous_canonical_task_receipt_sha256
+            task_identity=snapshot(
+                self._action_ball_continuous_canonical_task_identity
             ),
-            "cadence_receipt_sha256": snapshot(
-                self._action_ball_continuous_canonical_cadence_receipt_sha256
-            ),
-            "candidate_identity": snapshot(
-                self._action_ball_continuous_canonical_candidate_identity
-            ),
-            "contact_tick": snapshot(
-                self._action_ball_continuous_canonical_contact_tick
-            ),
-            "launch_tick": snapshot(
-                self._action_ball_continuous_canonical_launch_tick
-            ),
-            "chosen_horizon_tick": snapshot(
-                self._action_ball_continuous_canonical_chosen_horizon_tick
-            ),
-            "task_close_tick": snapshot(
-                self._action_ball_continuous_canonical_task_close_tick
-            ),
-            "task_valid": snapshot(
+            task_valid=snapshot(
                 self._action_ball_continuous_canonical_task_valid
             ),
-            "timing_active": snapshot(self._action_ball_task_timing_active),
-            "playback_started": snapshot(
-                self._action_ball_continuous_canonical_playback_started
+            # These three chronology values were allocated above for this
+            # publication; detach is sufficient because they cannot alias an
+            # owner buffer.
+            time_to_contact_remaining_s=time_to_contact_remaining.detach(),
+            time_to_teacher_start_remaining_s=(
+                time_to_teacher_start_remaining.detach()
             ),
-            "pending_elapsed_s": snapshot(
-                self._action_ball_task_pending_elapsed_s
-            ),
-            "task_age_s": snapshot(self._action_ball_task_age_s),
-            "time_to_contact_s": snapshot(self._action_ball_time_to_contact_s),
-            "time_to_contact_remaining_s": snapshot(
-                time_to_contact_remaining
-            ),
-            "teacher_rate": snapshot(self._action_ball_teacher_rate),
-            "scaled_t_hit_s": snapshot(self._action_ball_scaled_t_hit_s),
-            "scaled_t_cycle_s": snapshot(self._action_ball_scaled_t_cycle_s),
-            "pre_swing_wait_s": snapshot(self._action_ball_pre_swing_wait_s),
-            "time_to_teacher_start_remaining_s": snapshot(
-                time_to_teacher_start_remaining
-            ),
-            "time_to_next_reveal_s": snapshot(time_to_next_reveal),
-        }
+            time_to_next_reveal_s=time_to_next_reveal.detach(),
+        )
         self._action_ball_continuous_observation_publication_identity = (
             publication_identity
         )
@@ -4149,7 +4070,11 @@ class MotionCommand(CommandTerm):
         record = self._action_ball_continuous_observation_record
         if (
             type(token) is not ActionBallContinuousMotionObservationToken
-            or type(record) is not dict
+            or type(record) is not ActionBallContinuousMotionObservationView
+            or record.motion_owner is not self
+            or record.publication_identity
+            is not self._action_ball_continuous_observation_publication_identity
+            or record.common_step != common_step
             or self._action_ball_continuous_observation_common_step
             != common_step
         ):
@@ -4202,7 +4127,7 @@ class MotionCommand(CommandTerm):
         self,
         token: ActionBallContinuousMotionObservationToken,
     ) -> ActionBallContinuousMotionObservationView:
-        """Validate one current opaque token and return a clone-only view."""
+        """Validate one current opaque token and return an isolated view."""
 
         self._require_action_ball_continuous_motion_leaf_idle(
             operation="observation validation"
@@ -4214,20 +4139,35 @@ class MotionCommand(CommandTerm):
         if (
             type(token) is not ActionBallContinuousMotionObservationToken
             or token is not self._action_ball_continuous_observation_token
-            or type(record) is not dict
-            or record.get("publication_identity")
+            or type(record) is not ActionBallContinuousMotionObservationView
+            or record.motion_owner is not self
+            or record.publication_identity
             is not self._action_ball_continuous_observation_publication_identity
-            or record.get("common_step") != common_step
+            or record.common_step != common_step
+            or self._action_ball_continuous_observation_common_step
+            != common_step
         ):
             raise RuntimeError(
                 "continuous Motion observation token is forged or stale"
             )
         return ActionBallContinuousMotionObservationView(
             motion_owner=self,
-            **{
-                name: value.clone() if torch.is_tensor(value) else value
-                for name, value in record.items()
-            },
+            publication_identity=record.publication_identity,
+            common_step=record.common_step,
+            control_tick=record.control_tick.clone(),
+            phase=record.phase.clone(),
+            reset_generation=record.reset_generation.clone(),
+            swing_generation=record.swing_generation.clone(),
+            action_uid=record.action_uid.clone(),
+            task_identity=record.task_identity.clone(),
+            task_valid=record.task_valid.clone(),
+            time_to_contact_remaining_s=(
+                record.time_to_contact_remaining_s.clone()
+            ),
+            time_to_teacher_start_remaining_s=(
+                record.time_to_teacher_start_remaining_s.clone()
+            ),
+            time_to_next_reveal_s=record.time_to_next_reveal_s.clone(),
         )
 
     def _action_ball_continuous_motion_checkpoint_payload(self) -> dict:

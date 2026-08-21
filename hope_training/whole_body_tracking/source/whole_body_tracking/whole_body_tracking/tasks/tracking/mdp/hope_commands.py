@@ -55,7 +55,6 @@ from isaaclab.utils.math import (
 )
 
 from whole_body_tracking.tasks.tracking.mdp.commands import (
-    ActionBallContinuousMotionObservationView,
     MotionCommand,
     MotionLoader,
     _arm_disabled_time_resampling_fast_path_after_resample,

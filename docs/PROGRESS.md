@@ -1,5 +1,16 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP Phase-C1收窄Motion热路径publication（branch candidate）
+
+- 现役Motion observation从34-tensor broad dict收成两个真实consumer所需的10-field typed snapshot；
+  publication只clone 7个live buffer，3个新计算的float64 clock直接detach。validator仍给每个consumer一份
+  10-field隔离clone，避免可变Tensor跨Observation/Physical污染。生产净删61行，无新owner/receipt/Gate。
+- `N=4096`按publish+两个consumer各一次的静态payload proxy从`3,674,112 B/tick`降到
+  `897,024 B/tick`；四个consumer面
+  独立回归=`21+6+14+32 passed`，pycompile/diff-check通过。这仍不是CUDA流量或wall结论；exact Pod
+  fixed-tape、profiler-off H48 matched wall与6秒级目标均`未测`。详细真源见
+  [FullMDP hot-path实验§10](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#10-phase-c1motion只发布真实consumer并集)。
+
 ## 2026-08-21 — FullMDP Phase-C0退役K=0空D05事务（branch candidate）
 
 - after-command业务mask全false时现在只推进两个scalar chronology；不再进入Question/RNG、三writer、第二次

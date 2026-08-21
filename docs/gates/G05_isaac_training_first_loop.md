@@ -17,6 +17,14 @@ K>0/fault/close/paid原路径保持；host focused=`160 passed, 12 skipped`，�
 `torch.equal` host sync仍为P2，Pod matched wall与H48结果均`未测`，不声称6秒或性能GO。详见
 [hot-path实验§9](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#9-phase-c0k0只推进chronology不制造d05事务)。
 
+**2026-08-21 Phase-C1 Motion窄publication（branch candidate；Gate仍`Partial`）：**34-tensor broad view
+收为两个production consumer的10-field并集；一次publication只clone 7个live buffer，三个新算float64 clock
+不再二次clone；validator为每个consumer返回10-field隔离clone，防止可变Tensor跨consumer污染。生产净删61行，
+无新owner/receipt/Gate。`N=4096`按publish+两个consumer各一次的静态payload proxy从
+`3,674,112 B/tick`降为`897,024 B/tick`；分进程host回归=`21+6+14+32 passed`。
+这不是CUDA或wall实测；Pod fixed-tape、profiler-off H48 matched wall与6秒级目标均`未测`。详见
+[hot-path实验§10](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#10-phase-c1motion只发布真实consumer并集)。
+
 **2026-08-21 semantic Observation V2 branch candidate（Gate仍`Partial`）：**family A从旧229/399切到
 actor203/critic219；它恢复229迁移遗漏的floating-base state并删除raw task/owner/reward账，不做237/407机械
 扩维。R06 broad projection也缩为现有owner内的key8+publication live selection与四tensor输出，没有新增

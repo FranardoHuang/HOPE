@@ -423,26 +423,94 @@ def test_r07_validation_fault_leaves_canonical_owner_bytes_unchanged() -> None:
         assert torch.equal(getattr(command, name), expected), name
 
 
-def test_observation_is_pre_published_opaque_and_clone_only() -> None:
-    command, _receipts = _motion()
+@pytest.mark.parametrize("device", _DEVICES)
+def test_observation_is_pre_published_opaque_and_exact_narrow_snapshot(
+    device: torch.device,
+) -> None:
+    command, _receipts = _motion(device)
     with pytest.raises(RuntimeError, match="not published|stale"):
         command.action_ball_continuous_motion_observation_projection()
     _seed_complete_canonical_prepare(command)
     command._action_ball_continuous_published_common_step = 0
     command._publish_action_ball_continuous_observation()
     token = command.action_ball_continuous_motion_observation_projection()
-    before = command._action_ball_continuous_canonical_task_identity.clone()
     view = command.require_owned_action_ball_continuous_motion_observation(token)
-    view.task_identity.zero_()
-    view.task_receipt_sha256.zero_()
-    assert torch.equal(
-        command._action_ball_continuous_canonical_task_identity, before
+
+    record = command._action_ball_continuous_observation_record
+    isolated = ("task_identity", "time_to_contact_remaining_s")
+    expected = {name: getattr(record, name).clone() for name in isolated}
+    for name in isolated:
+        getattr(view, name).zero_()
+    second = command.require_owned_action_ball_continuous_motion_observation(token)
+    assert second is not view
+    for name in isolated:
+        assert torch.equal(getattr(record, name), expected[name])
+        assert torch.equal(getattr(second, name), expected[name])
+    assert tuple(type(view).__dataclass_fields__) == (
+        "motion_owner",
+        "publication_identity",
+        "common_step",
+        "control_tick",
+        "phase",
+        "reset_generation",
+        "swing_generation",
+        "action_uid",
+        "task_identity",
+        "task_valid",
+        "time_to_contact_remaining_s",
+        "time_to_teacher_start_remaining_s",
+        "time_to_next_reveal_s",
     )
-    assert torch.all(
-        command._action_ball_continuous_canonical_task_receipt_sha256.eq(0x11)
-    )
+    for name in tuple(type(view).__dataclass_fields__)[3:]:
+        value = getattr(view, name)
+        dtype = (
+            torch.bool
+            if name == "task_valid"
+            else torch.float64 if name.endswith("_s") else torch.int64
+        )
+        assert type(value) is torch.Tensor
+        assert tuple(value.shape) == (2,)
+        assert value.dtype == dtype
+        assert value.device == device
     assert view.motion_owner is command
     assert view.publication_identity is not None
+    assert view.common_step == 0
+
+
+def test_observation_republication_rejects_old_token_and_retains_old_snapshot(
+) -> None:
+    command, _receipts = _motion()
+    _seed_complete_canonical_prepare(command)
+    command._action_ball_continuous_published_common_step = 0
+    command._publish_action_ball_continuous_observation()
+    old_token = command.action_ball_continuous_motion_observation_projection()
+    old_view = command.require_owned_action_ball_continuous_motion_observation(
+        old_token
+    )
+    old_task_identity = old_view.task_identity.clone()
+    old_time_to_contact = old_view.time_to_contact_remaining_s.clone()
+
+    command._action_ball_continuous_canonical_task_identity.add_(1000)
+    command._action_ball_task_age_s.add_(0.25)
+    command._publish_action_ball_continuous_observation()
+    new_token = command.action_ball_continuous_motion_observation_projection()
+    new_view = command.require_owned_action_ball_continuous_motion_observation(
+        new_token
+    )
+
+    with pytest.raises(RuntimeError, match="forged or stale"):
+        command.require_owned_action_ball_continuous_motion_observation(old_token)
+    assert new_view is not old_view
+    assert new_view.publication_identity is not old_view.publication_identity
+    assert torch.equal(old_view.task_identity, old_task_identity)
+    assert torch.equal(
+        old_view.time_to_contact_remaining_s, old_time_to_contact
+    )
+    assert torch.equal(new_view.task_identity, old_task_identity + 1000)
+    assert torch.equal(
+        new_view.time_to_contact_remaining_s,
+        old_time_to_contact - 0.25,
+    )
 
 
 @pytest.mark.parametrize(
@@ -574,26 +642,3 @@ def test_active_midtask_checkpoint_payload_keeps_complete_identity_and_timing() 
     damaged["tensors"]["teacher_rate"][0] = 0.0
     with pytest.raises(ValueError, match="lifecycle invariants"):
         command._prepare_action_ball_continuous_motion_checkpoint(damaged)
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
-def test_canonical_observation_clone_only_projection_runs_on_cuda() -> None:
-    command, _receipts = _motion()
-    device = torch.device("cuda", torch.cuda.current_device())
-    for _field_name, attr_name, _nonnegative in (
-        C._ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
-    ):
-        setattr(command, attr_name, getattr(command, attr_name).to(device))
-    command.device = device
-    _seed_complete_canonical_prepare(command)
-    command._action_ball_continuous_published_common_step = 0
-    command._publish_action_ball_continuous_observation()
-    token = command.action_ball_continuous_motion_observation_projection()
-    view = command.require_owned_action_ball_continuous_motion_observation(token)
-    assert view.phase.device == device
-    assert view.task_receipt_sha256.device == device
-    view.task_identity.zero_()
-    assert torch.all(
-        command._action_ball_continuous_canonical_task_identity
-        == torch.tensor([101, 102], device=device)
-    )

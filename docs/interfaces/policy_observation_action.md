@@ -452,6 +452,14 @@ Racket's public actor-visible target accessors, including configured observation
 truth or a private target tensor. A backend must supply the corresponding causal target view rather
 than granting the policy an undelayed simulator oracle.
 
+The internal Isaac Motion publication feeding this ABI is one typed ten-tensor snapshot: row-wise
+`control_tick`, five-state `phase`, `reset_generation`, `swing_generation`, `action_uid`,
+`task_identity`, `task_valid`, and the three float64 countdowns used above. Observation and Physical
+validate the same opaque publication token, then receive isolated clones of only these ten fields;
+they do not receive the old 34-field identity/timing ledger. The isolation is intentional because a
+frozen dataclass does not make Tensor bytes immutable. Float64 countdowns are converted to float32
+only at this policy boundary. This internal narrowing does not change the 203/219 model ABI.
+
 R07 support and cadence dwell are one narrow direct observation state from the same real
 post-physics plant sample; Observation must not call the broad plant adapter a second time or consume
 the Motion-only admission capability under a forged consumer name. Before the first real

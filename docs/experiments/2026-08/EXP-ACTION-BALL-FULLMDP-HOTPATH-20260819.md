@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0-host-validated / Pod-matched-wall-pending`
+> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0+c1-host-validated / Pod-matched-wall-pending`
 > 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；Phase-C0只有静态payload proxy与host语义证据，Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
@@ -417,3 +417,31 @@ fault跨K0保持、previous-paid强制进入业务路径及writer/settlement合�
 device-resident替代，不能把它藏进“无业务”命名。当前没有Pod fixed-tape、profiler-off matched wall或H48
 成绩，因此不声称达到6秒或任何性能GO。该cut按HANDOFF的原则直接退役zero-business工作，而不是为它增加
 gate、owner或空journal；G05保持`Partial`。
+
+## 10. Phase-C1：Motion只发布真实consumer并集
+
+生产callgraph中，Motion的34-tensor observation view只有两个字段consumer：semantic Observation V2读取
+`control_tick/phase/reset_generation/action_uid/task_valid`与三个float64倒计时，Physical launch读取
+`control_tick/reset_generation/action_uid/task_identity/swing_generation`。二者并集精确为6个`int64[N]`、
+1个`bool[N]`和3个`float64[N]`；其余24个字段没有production consumer。Epoch/D05使用的15-field cadence
+projection是另一份真实事务合同，本刀没有混删。
+
+Phase-C1把owner-private broad dict替换为现有Motion owner内的一份frozen typed snapshot。publication只对7个
+live owner buffer执行`detach().clone()`；三个倒计时是该publication刚产生的新tensor，只需`detach()`。
+opaque token、publication identity、common step、D05写前撤销/写后同tick重发及selected-reset row-wise
+generation/tick语义全部保留。两个内部consumer当前虽均只读，红队仍拒绝了“validator直接返回同一snapshot”
+的试作：`frozen dataclass`不能冻结Tensor内容。最终validator为每个consumer返回一份
+10-field隔离clone，误写一个view不会污染owner-private record或同tick另一consumer。下一publication创建
+新record，旧view字节保持；没有新增owner、adapter、receipt或Gate。
+
+`N=4096`时，旧单份34-tensor payload静态为`1,224,704 B`；新10-field snapshot为`299,008 B`。
+按publish加两个consumer各一次读取，静态proxy从`3,674,112 B/tick`降为`897,024 B/tick`，少
+`2,777,088 B/tick`（约75.6%）。纯K0只走publish+Observation getter时，H48尺度约少
+`88,866,816 B/update`复制payload与约2,448个clone call；这些只由
+shape/dtype/frequency相加，不代表allocator、CUDA流量、kernel wall或显存峰值。
+
+主线将四个consumer面分进程复跑：Motion chronology=`21 passed`、row-wise due/closure=`6 passed`、semantic
+Observation=`14 passed`、Physical hot lane=`32 passed`；pycompile与diff-check通过。`task_valid`虽可由Motion
+phase严格推出，但删除它会把policy ABI从203/219改成202/218，因此明确延后为独立learning-interface裁决，
+不与本次复制减法混在同一因果刀。Pod fixed-tape、profiler-off matched H48 wall及6秒级目标仍`未测`，G05
+保持`Partial`。
