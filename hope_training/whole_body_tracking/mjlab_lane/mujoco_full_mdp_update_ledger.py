@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import hashlib, json, math, os, re
-SCHEMA_VERSION, REWARD_TERM_COUNT = 2, 20
+SCHEMA_VERSION, REWARD_TERM_COUNT = 3, 20
 EXACT_TERMINATION_BITS = {
     "time_out": 1, "base_fell_tilt": 2, "base_too_low": 4,
     "joint_qdes_forbidden": 8, "robot_hit_table": 16,
@@ -50,19 +50,27 @@ class FullMdpUpdateLedger:
     def __init__(self, *, torch_module, num_envs: int, num_steps_per_env: int,
                  device, termination_bits: dict[str, int], action_slot: int,
                  action_uid: int, mount_normal_sign: int, family: str,
-                 initial_reset_generation, source_commit: str,
-                 run_namespace: str) -> None:
+                 initial_reset_generation, run_identity: dict) -> None:
         torch = torch_module
         if (type(num_envs) is not int or num_envs <= 0
                 or type(num_steps_per_env) is not int or num_steps_per_env <= 0
                 or action_slot != 0 or type(action_uid) is not int
                 or mount_normal_sign != 1 or family not in ("forehand", "backhand")):
             raise ValueError("FullMDP ledger dimensions or action identity differ")
-        if (type(source_commit) is not str
-                or re.fullmatch(r"[0-9a-f]{40}", source_commit) is None
-                or type(run_namespace) is not str
-                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{15,159}", run_namespace) is None):
+        if (type(run_identity) is not dict
+                or set(run_identity) != {
+                    "source_commit", "run_namespace", "mujoco_warp_runtime"
+                }
+                or type(run_identity.get("source_commit")) is not str
+                or re.fullmatch(r"[0-9a-f]{40}", run_identity["source_commit"]) is None
+                or type(run_identity.get("run_namespace")) is not str
+                or re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9._-]{15,159}",
+                    run_identity["run_namespace"],
+                ) is None
+                or type(run_identity.get("mujoco_warp_runtime")) is not dict):
             raise ValueError("FullMDP run identity differs")
+        runtime = run_identity["mujoco_warp_runtime"]
         if termination_bits != EXACT_TERMINATION_BITS:
             raise ValueError("termination bit schema differs")
         bits = tuple(sorted(EXACT_TERMINATION_BITS.items(), key=lambda row: row[1]))
@@ -77,8 +85,11 @@ class FullMdpUpdateLedger:
         self.time_out_bit = termination_bits["time_out"]
         self.action_uid, self.mount_normal_sign = action_uid, mount_normal_sign
         self.family = family
-        self.run_identity = {"source_commit": source_commit,
-                             "run_namespace": run_namespace}
+        self.run_identity = {
+            "source_commit": run_identity["source_commit"],
+            "run_namespace": run_identity["run_namespace"],
+            "mujoco_warp_runtime": dict(runtime),
+        }
         self._reset_generation = initial_reset_generation.detach().clone()
         counters = (
             len(EVENT_FIELDS), len(bits), 6, 7, len(EXACT_PHASE_CODES), len(_MISC_NAMES),

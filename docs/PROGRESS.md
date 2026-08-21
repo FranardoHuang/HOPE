@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-21 — portable Full-A fresh EPA48/RSL3 runtime binding（branch candidate）
+
+- base `074e2a0d` + runtime diff `df4d5ea6…f2d3`新增
+  [`--mujoco-warp-runtime-site`](DEFINITIONS.md#mujoco-fullmdp-longrun-flags)，在fresh CLI import前把固定
+  EPA48/RSL3 wheels绑定同一site；legacy WAIT不绑定，clean `source_commit`未来由launcher传。wire升为
+  ACK/completion/summary `3/4/3`，host=`125 passed, 2 skipped`，Pod1无CUDA actual import=
+  `19 passed in 4.33s`。
+- fixed-tape、matched H48 wall、ASan oracle、independent fixture replay与fresh longrun仍`未测`；非training
+  GO，仍`diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`。详细真源见
+  [portable Full-A实验§0](experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)，
+  恢复/调用见[`setup_local_sync`](operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)。
+
 ## 2026-08-21 — FullMDP Phase-C2b Observation先查cache（branch candidate）
 
 - semantic Observation原先在policy/critic同一control step的第二组调用中，先clone一份44-tensor

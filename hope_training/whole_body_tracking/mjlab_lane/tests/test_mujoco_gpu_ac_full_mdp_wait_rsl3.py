@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
+import textwrap
 import types
 
 import pytest
@@ -15,6 +17,33 @@ import torch
 LANE = Path(__file__).resolve().parents[1]
 SOURCE_COMMIT = "a" * 40
 RUN_NAMESPACE = "mujoco-full-a-runner-v2-test"
+MUJOCO_WARP_RUNTIME = {
+    "schema_version": 1,
+    "distribution": "mujoco-warp",
+    "fork_id": "hope_mujoco_warp_epa48_v1",
+    "version": "3.10.0.3+hope.epa48.1",
+    "epa_horizon": 48,
+    "types_py_sha256": (
+        "391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696"
+    ),
+    "wheel_sha256": (
+        "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a"
+    ),
+    "build_receipt_sha256": (
+        "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041"
+    ),
+    "import_scope": "fresh_run_local_site",
+}
+
+
+def _identity():
+    return {
+        "source_commit": SOURCE_COMMIT,
+        "run_namespace": RUN_NAMESPACE,
+        "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
+    }
+
+
 ACTION_CONTRACT = {
     "action_joint_order_contract_id": "a3-gmr-dof-pos-to-runtime-articulation-v1",
     "action_joint_order_contract_sha256": (
@@ -93,6 +122,138 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
         module.build_train_cfg(7)
     with pytest.raises(TypeError):
         module.main(num_steps_per_env=7)
+
+
+def test_full_a_binds_epa48_before_torch_rsl_and_wait_imports(tmp_path):
+    trace = tmp_path / "import-order.trace"
+    fake_stack = tmp_path / "fake_stack"
+    fake_stack.mkdir()
+    (fake_stack / "torch.py").write_text(
+        "import os\n"
+        "with open(os.environ['ACTIONBALL_IMPORT_TRACE'], 'a', encoding='utf-8') "
+        "as stream:\n"
+        "    stream.write('torch\\n')\n",
+        encoding="utf-8",
+    )
+    runner = LANE / "mujoco_gpu_ac_full_mdp_wait_rsl3.py"
+    script = textwrap.dedent(
+        """
+        import importlib.util
+        from pathlib import Path
+        import sys
+        import types
+
+        runner, fake_stack, trace, root = map(Path, sys.argv[1:])
+        sys.path.insert(0, str(fake_stack))
+        spec = importlib.util.spec_from_file_location("behavioral_runner", runner)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        runtime = {
+            "schema_version": 1,
+            "distribution": "mujoco-warp",
+            "fork_id": "hope_mujoco_warp_epa48_v1",
+            "version": "3.10.0.3+hope.epa48.1",
+            "epa_horizon": 48,
+            "types_py_sha256": (
+                "391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696"
+            ),
+            "wheel_sha256": (
+                "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a"
+            ),
+            "build_receipt_sha256": (
+                "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041"
+            ),
+            "import_scope": "fresh_run_local_site",
+        }
+
+        def log(value):
+            with trace.open("a", encoding="utf-8") as stream:
+                stream.write(value + "\\n")
+
+        module._epa48_runtime_module = lambda: types.SimpleNamespace(
+            expected_mujoco_warp_runtime_identity=lambda: dict(runtime)
+        )
+
+        def bind(raw):
+            assert raw == str(root / "runtime_site")
+            assert not any(
+                name == prefix or name.startswith(prefix + ".")
+                for name in sys.modules
+                for prefix in ("torch", "mujoco_warp", "mjlab", "rsl_rl")
+            )
+            log("bind")
+            return dict(runtime)
+
+        def rsl3_runner():
+            log("rsl")
+            return "3.1.2", object(), object()
+
+        def wait_module():
+            log("wait")
+            raise RuntimeError("stop-after-wait-import")
+
+        module._bind_full_a_runtime = bind
+        module._rsl3_runner = rsl3_runner
+        module._wait_module = wait_module
+        try:
+            module.main(
+                num_envs=1,
+                num_updates=1,
+                full_a_mode=True,
+                evidence_jsonl=str(root / "updates.jsonl"),
+                snapshot_dir=str(root / "snapshots"),
+                completion_json=str(root / "completion.json"),
+                source_commit="a" * 40,
+                run_namespace="mujoco-full-a-import-order-test",
+                mujoco_warp_runtime_site=str(root / "runtime_site"),
+                _test_allow_small_full_a=True,
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "stop-after-wait-import"
+        else:
+            raise AssertionError("wait sentinel was not reached")
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(runner), str(fake_stack), str(trace),
+         str(tmp_path)],
+        env={**os.environ, "ACTIONBALL_IMPORT_TRACE": str(trace)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert trace.read_text(encoding="utf-8").splitlines() == [
+        "bind", "torch", "rsl", "wait",
+    ]
+
+
+def test_full_a_run_identity_isolates_the_binder_result_copy():
+    module = _load()
+    runtime = dict(MUJOCO_WARP_RUNTIME)
+    identity = module._run_identity(SOURCE_COMMIT, RUN_NAMESPACE, runtime)
+    assert identity == _identity()
+    runtime["epa_horizon"] = 24
+    assert identity == _identity()
+
+
+def test_runtime_site_argument_is_full_a_only_and_required_before_torch(tmp_path):
+    module = _load()
+    with pytest.raises(ValueError, match="artifact arguments require --full-a"):
+        module.main(mujoco_warp_runtime_site=str(tmp_path / "site"))
+    with pytest.raises(ValueError, match="runtime site is not bound"):
+        module.main(
+            num_envs=1,
+            num_updates=1,
+            full_a_mode=True,
+            evidence_jsonl=str(tmp_path / "updates.jsonl"),
+            snapshot_dir=str(tmp_path),
+            completion_json=str(tmp_path / "completion.json"),
+            source_commit=SOURCE_COMMIT,
+            run_namespace=RUN_NAMESPACE,
+            _test_allow_small_full_a=True,
+        )
 
 
 FULL_A_EVENT_KEYS = (
@@ -348,6 +509,16 @@ def _install_fake_stack(
     monkeypatch.setitem(sys.modules, wait_module.__name__, wait_module)
     monkeypatch.setattr(module, "_rsl3_runner", lambda: ("3.1.2", _Runner, object()))
     monkeypatch.setattr(module, "_require_rsl3_runtime", lambda *_: None)
+    runtime_site = tmp_path / "runtime_site"
+    monkeypatch.setattr(
+        module,
+        "_bind_full_a_runtime",
+        lambda raw: (
+            dict(MUJOCO_WARP_RUNTIME)
+            if raw == str(runtime_site)
+            else pytest.fail("Full-A runtime site argument differs")
+        ),
+    )
     expected_mode = full_a_mode
 
     def invoke():
@@ -360,6 +531,7 @@ def _install_fake_stack(
                 evidence_jsonl=str(evidence), snapshot_dir=str(snapshots),
                 completion_json=str(completion), source_commit=SOURCE_COMMIT,
                 run_namespace=RUN_NAMESPACE, _test_allow_small_full_a=True,
+                mujoco_warp_runtime_site=str(runtime_site),
             )
         return module.main(**kwargs)
 
@@ -438,9 +610,10 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     ]
     rows = [json.loads(line) for line in evidence.read_text().splitlines()]
     assert [row["update_index"] for row in rows] == [0, 1]
-    assert all(row["schema_version"] == 2 and row["run_identity"] == {
-        "source_commit": SOURCE_COMMIT, "run_namespace": RUN_NAMESPACE,
-    } for row in rows)
+    assert all(
+        row["schema_version"] == 3 and row["run_identity"] == _identity()
+        for row in rows
+    )
     assert rows[0]["extras_counts"]["r06_present_rows"] == 0
     assert rows[1]["extras_counts"]["r07_present_rows"] == 0
     assert rows[1]["reward20"]["reward20_finite_rows"] == 144
@@ -458,9 +631,7 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
             "resume_authority": False,
             "update_index": index,
             "completed_updates": index + 1,
-            "run_identity": {
-                "source_commit": SOURCE_COMMIT, "run_namespace": RUN_NAMESPACE,
-            },
+            "run_identity": _identity(),
             "action_ball_full_mdp_ppo_recipe_sha256": (
                 _load().FULL_MDP_PPO_RECIPE_SHA256
             ),
@@ -471,14 +642,12 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
             (snapshots / f"model_{index}.pt").read_bytes()
         ).hexdigest()
     seal = json.loads(completion.read_text())
-    assert seal["schema_version"] == 3
+    assert seal["schema_version"] == 4
     assert seal["record_type"] == "mujoco_full_mdp_completion"
     assert seal["diagnostic_unauthorized"] is True
     assert seal["checkpoint_authority"] is False
     assert seal["resume_authority"] is False
-    assert seal["run_identity"] == {
-        "source_commit": SOURCE_COMMIT, "run_namespace": RUN_NAMESPACE,
-    }
+    assert seal["run_identity"] == _identity()
     assert seal["action_contract"] == ACTION_CONTRACT
     assert seal["action_ball_full_mdp_ppo_recipe_sha256"] == (
         _load().FULL_MDP_PPO_RECIPE_SHA256
@@ -586,7 +755,7 @@ def test_evidence_jsonl_is_created_exclusively(monkeypatch, tmp_path):
     seal = tmp_path / "completion.json"
     seal.write_bytes(b"do not overwrite")
     with pytest.raises(FileExistsError):
-        module._write_completion(str(seal), {"schema_version": 3})
+        module._write_completion(str(seal), {"schema_version": 4})
     assert seal.read_bytes() == b"do not overwrite"
 
 

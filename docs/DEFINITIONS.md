@@ -27,6 +27,12 @@ R03/fault-free eligible+source-valid R06/exact 68-cell R07/natural RETIRE时原�
 no-clobber诊断快照；[`--completion-json`](#mujoco-fullmdp-longrun-flags)指定最终门之后才允许
 exclusive写入的completion seal；[`--source-commit`](#mujoco-fullmdp-longrun-flags)和
 [`--run-namespace`](#mujoco-fullmdp-longrun-flags)把ACK、snapshot和seal绑定到同一fresh源码与运行身份；
+[`--mujoco-warp-runtime-site`](#mujoco-fullmdp-longrun-flags)是Full-A专用的MuJoCo-Warp/RSL-RL
+隔离导入目录：caller必须传一个绝对、父目录已存在且本身尚不存在的fresh路径；正常Full-A CLI中，
+binder会在runner自身的Torch、RSL-RL、WAIT或MJLab import之前把两枚已钉wheel解到同一site并核import winner；它不是可复用venv或
+任意`PYTHONPATH`。binder不读取Git，也不自报`source_commit`；未来launcher必须先从clean Git truth
+取得commit再通过前一flag显式传入。恢复与调用边界见
+[`setup_local_sync.md`](operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)；
 [`--save-interval=500`](#mujoco-fullmdp-longrun-flags)是当前typed recipe固定的500轮快照周期，另在自然终点
 update `12499`保存。completion seal只证明exact 12,500-update engineering completion；独立consumer另行报告
 slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，因为73动作、双侧与科学窗口

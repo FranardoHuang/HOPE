@@ -103,6 +103,14 @@ sticky poison/fail-stop。
 每substep重验construction已固定的class/bound method、无人消费的counter和用zero policy表现作启动许可。
 Phase-B已经物理删除zero-caller formal owner及专属适配层；下一步不为死接口补compatibility adapter。
 
+### 2.4 portable Full-A runtime package binding
+
+branch WIP已在fresh CLI import前把EPA48/RSL3两wheel绑定同一site；Pod1无CUDA actual import=
+`19 passed in 4.33s`。durable identity只增加EPA mapping，RSL仍走既有process-local gate；wire为`3/4/3`，
+legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未授权边界只在
+[portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)
+维护；恢复与调用见[`setup_local_sync`](setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)。
+
 ## 3. 唯一依赖顺序
 
 每项必须独立提交、可单独回退；前一项闭合后才进入后一项。
@@ -110,9 +118,11 @@ Phase-B已经物理删除zero-caller formal owner及专属适配层；下一步�
 1. **Observation V2原子闭合**：Isaac/MuJoCo、training hard contract、snapshot receipt与文档同时切到
    A203/219；两后端用独立native state正负扰动验证frame、符号、scale、mask和R06 live selection。
    V1只为明确的历史 WAIT consumer保留，不允许Full-A静默fallback。
-2. **MuJoCo EPA48**：同一 deterministic geom pair/pose必须在stock-24确定overflow、fork-48 finite；
-   再跑exact GPU focused、固定tape reason/counter/safety parity和独立instrumented/ASan oracle。
-   stock CPU同样硬编码24，不能充当golden。未闭合前`training_authorized=false`，r3不resume。
+2. **MuJoCo EPA48**：build chain与fresh dual-wheel actual import已在branch candidate闭合；下一物理门仍是
+   同一 deterministic geom pair/pose在stock-24确定overflow、fork-48 finite，再跑exact GPU focused、
+   固定tape reason/counter/safety parity和独立instrumented/ASan oracle。独立search-fixture replay尚未结束，
+   不能写成fixture完成；stock CPU同样硬编码24，不能充当golden。未闭合前
+   `training_authorized=false`，r3不resume。
 3. **单一 ActionBallState**：一个device-resident mutable state唯一拥有phase/generation/shot/contact/
    outcome/fault；K-row候选只构造一次并sparse commit，只有真实transition写compact event delta；
    `K=0`/zero-live-flight成对跳过Physical/scene/R06/Epoch空事务，PPO boundary统一汇总。
@@ -124,8 +134,10 @@ Phase-B已经物理删除zero-caller formal owner及专属适配层；下一步�
    同时验证fixed tape RNG/highwater/reason/done/reset/Reward20/203/219 parity。报告原始wall、transitions/s和
    H24-equivalent；首墙转移后重新profile，不继续堆零碎clone patch。
 5. **fresh namespace短验与训练**：先做clock-fixed、EPA-fixed的portable MuJoCo V2，再做通过matched性能
-   验收的Isaac V2；不复用旧namespace或snapshot，不插`ACCEPT>0`门。短验只回答构造、有限性和真实调用点，
-   随后同一进程继续训练并按balance→mimic→entry→strike→landing分阶段报告分母。
+   验收的Isaac V2；不复用旧namespace、runtime site或snapshot，不插`ACCEPT>0`门。MuJoCo caller必须传
+   [`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)指向一个尚不存在的绝对路径；
+   future launcher先从clean Git truth取得并传`source_commit`，binder不得自报。短验只回答构造、有限性和
+   真实调用点，随后同一进程继续训练并按balance→mimic→entry→strike→landing分阶段报告分母。
 
 ## 4. 当前完成条件
 
@@ -141,4 +153,6 @@ Phase-B已经物理删除zero-caller formal owner及专属适配层；下一步�
 
 热路径证据和结构设计详见
 [FullMDP hot-path实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md)；
-MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，操作边界见[训练工序](run_training.md)。
+MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，runtime资产与调用见
+[`setup_local_sync`](setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)，
+其余训练操作边界见[训练工序](run_training.md)。

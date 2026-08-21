@@ -50,12 +50,35 @@ def _ppo_recipe_module():
     return module
 
 
+def _epa48_runtime_module():
+    """Load the dependency-free Full-A runtime binder from this checkout."""
+
+    source = Path(__file__).with_name("mujoco_full_mdp_epa48_runtime.py").resolve()
+    name = "_hope_mujoco_full_mdp_epa48_runtime"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached Full-A EPA48 runtime binder origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load the Full-A EPA48 runtime binder")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
 FULL_MDP_PPO_RECIPE = (
     _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 )
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
 RSL_RL_VERSION = "3.1.2"
-COMPLETION_SCHEMA_VERSION = 3
+COMPLETION_SCHEMA_VERSION = 4
 NUM_STEPS_PER_ENV = FULL_MDP_PPO_RECIPE.num_steps_per_env
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
 FULL_A_ACTION_UID = 6907688916670928
@@ -74,13 +97,32 @@ RSL_RL_SOURCE_SHA256 = {
 }
 
 
-def _run_identity(source_commit: str | None, run_namespace: str | None) -> dict:
+def _require_run_identity_fields(
+    source_commit: str | None, run_namespace: str | None
+) -> None:
     if (type(source_commit) is not str or re.fullmatch(
             r"[0-9a-f]{40}", source_commit) is None
             or type(run_namespace) is not str
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{15,159}", run_namespace) is None):
         raise ValueError("MuJoCo Full-A run identity differs")
-    return {"source_commit": source_commit, "run_namespace": run_namespace}
+
+
+def _run_identity(
+    source_commit: str | None,
+    run_namespace: str | None,
+    mujoco_warp_runtime: dict,
+) -> dict:
+    return {
+        "source_commit": source_commit,
+        "run_namespace": run_namespace,
+        "mujoco_warp_runtime": dict(mujoco_warp_runtime),
+    }
+
+
+def _bind_full_a_runtime(raw: str | None) -> dict:
+    if type(raw) is not str or not raw:
+        raise ValueError("MuJoCo Full-A runtime site is not bound")
+    return _epa48_runtime_module().bind_fresh_epa48_runtime_site(Path(raw))
 
 
 def _stable_file_sha256(path: Path) -> str:
@@ -456,11 +498,10 @@ def main(
     completion_json: str | None = None,
     source_commit: str | None = None,
     run_namespace: str | None = None,
+    mujoco_warp_runtime_site: str | None = None,
     save_interval: int = FULL_A_SAVE_INTERVAL,
     _test_allow_small_full_a: bool = False,
 ) -> int:
-    import torch
-
     num_steps_per_env = NUM_STEPS_PER_ENV
     if (
         type(num_envs) is not int
@@ -477,7 +518,8 @@ def main(
     ):
         raise ValueError("MuJoCo Full-A requires evidence, snapshot and completion paths")
     if not full_a_mode and any(value is not None for value in (
-        evidence_jsonl, snapshot_dir, completion_json, source_commit, run_namespace
+        evidence_jsonl, snapshot_dir, completion_json, source_commit, run_namespace,
+        mujoco_warp_runtime_site,
     )):
         raise ValueError("MuJoCo Full-A artifact arguments require --full-a")
     if full_a_mode and not _test_allow_small_full_a and (
@@ -488,7 +530,20 @@ def main(
             "production MuJoCo Full-A shape must be "
             f"{FULL_A_NUM_ENVS}x{NUM_STEPS_PER_ENV}x{FULL_A_NUM_UPDATES}"
         )
-    identity = _run_identity(source_commit, run_namespace) if full_a_mode else None
+    if full_a_mode:
+        _require_run_identity_fields(source_commit, run_namespace)
+    runtime_identity = _bind_full_a_runtime(
+        mujoco_warp_runtime_site
+    ) if full_a_mode else None
+    identity = (
+        _run_identity(source_commit, run_namespace, runtime_identity)
+        if full_a_mode else None
+    )
+
+    # Full-A must bind the exact EPA48/RSL3 site before importing torch or any
+    # environment path that can import MJLab/MuJoCo-Warp.
+    import torch
+
     version, runner_type, distribution = _rsl3_runner()
     wait = _wait_module()
     ready_pose_payload, ready_pose_source = _ready_pose_input()
@@ -542,8 +597,7 @@ def main(
             mount_normal_sign=FULL_A_MOUNT_NORMAL_SIGN,
             family=FULL_A_FAMILY,
             initial_reset_generation=env.reset_generation,
-            source_commit=identity["source_commit"],
-            run_namespace=identity["run_namespace"],
+            run_identity=identity,
         )
         original_env_step = env.step
 
@@ -725,6 +779,7 @@ if __name__ == "__main__":
     parser.add_argument("--completion-json")
     parser.add_argument("--source-commit")
     parser.add_argument("--run-namespace")
+    parser.add_argument("--mujoco-warp-runtime-site")
     parser.add_argument(
         "--save-interval", type=int, default=FULL_A_SAVE_INTERVAL
     )

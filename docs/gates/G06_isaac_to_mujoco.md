@@ -15,9 +15,22 @@ host实现不代签exact GPU ObservationManager/snapshot parity或deploy produce
 
 **2026-08-21 FullMDP PPO V2双后端配方身份（Gate仍`Partial`）：**Isaac与portable MuJoCo现在消费同一
 typed learning recipe `H48/U12500/save500/E5/MB8/gamma=.99/lambda=.98`。MuJoCo不再接受H override，
-snapshot/completion绑定包含预算与保存节奏的execution SHA；evidence schema 2与completion schema 3显式
-分流。host runner/consumer回归=`39 passed, 1 skipped`。这只关闭配方漂移，不证明两后端数值、吞吐或学习
+snapshot/completion绑定包含预算与保存节奏的execution SHA；旧evidence schema 2/completion schema 3
+又由下述runtime binding原子升级为ACK schema 3、completion schema 4、summary schema 3。
+当前runtime/runner/ledger/consumer host union=`125 passed, 2 skipped`。这只关闭配方与wire漂移，不证明两后端数值、吞吐或学习
 等价；exact GPU H48与fixed-snapshot parity仍`未测`，旧H24产物不得resume或冒充V2证据。
+
+**2026-08-21 portable Full-A fresh EPA48 runtime binding（Gate仍`Partial`）：**当前branch candidate在
+base `074e2a0d`之上的runtime diff `df4d5ea6…f2d3`新增
+[`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)（fresh双wheel隔离导入目录）；
+legacy WAIT不绑定，binder不自报`source_commit`，future launcher须从clean Git truth传入。三份SHA、
+import顺序/fail-close、EPA-only durable identity、RSL进程内门与schema `3/4/3`的完整合同只在
+[portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)
+维护；恢复与caller工序见
+[`setup_local_sync`](../operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)。
+Pod1无CUDA actual dual-wheel import=`19 passed in 4.33s`；fixed-tape、matched H48 wall、ASan oracle、
+independent fixture replay与fresh longrun仍未闭合。故非GPU physics/training GO，保持
+`diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`，且尚未合`main`。
 
 **2026-08-21 project-owned [MuJoCo-Warp EPA48](../DEFINITIONS.md#mujoco-warp-epa48-fork) build chain（Gate仍`Partial`）：**portable r3已经停止在
 durable ACK `10249`；真实`EPA_HORIZON` fail-stop证明stock `MJ_MAX_EPAHORIZON=24`可达，但当时没有把
@@ -49,8 +62,9 @@ worker history attestation。这是删除同源自证和结构臃肿，不是降
 
 当前仍缺三件：CUDA-qualified新构造synthetic singleton reproducer、ActionBall fixed-tape数值与
 reason/counter/safety一致性、以及instrumented/ASan独立oracle。stock CPU MuJoCo同样硬编码24且该边界
-可能越界，不能直接当oracle。runtime `d.overflow`与warning gate一位不降级，旧r3不resume；当前也尚未在
-稳定、project-owned isolated runtime中完成GPU复核。因此这里只关闭可审计build chain，没有关闭科学证据，
+可能越界，不能直接当oracle。runtime `d.overflow`与warning gate一位不降级，旧r3不resume；稳定
+run-local site的actual dual-wheel import已经通过，但exact GPU physics复核与独立search-fixture replay仍未
+完成。因此这里只关闭可审计build chain与import identity，没有关闭科学证据，
 `diagnostic_unauthorized=true / training_authorized=false`，完整恢复/离线构建命令见
 [`setup_local_sync`](../operations/setup_local_sync.md#restore-and-build-the-project-owned-mujoco-warp-epa48-fork)。
 

@@ -15,11 +15,43 @@ TRANSITIONS = 4096 * 48
 UID = 6907688916670928
 COMMIT = "a" * 40
 NAMESPACE = "mujoco-fullmdp-consumer-test-0001"
-IDENTITY = {"source_commit": COMMIT, "run_namespace": NAMESPACE}
+MUJOCO_WARP_RUNTIME = {
+    "schema_version": 1,
+    "distribution": "mujoco-warp",
+    "fork_id": "hope_mujoco_warp_epa48_v1",
+    "version": "3.10.0.3+hope.epa48.1",
+    "epa_horizon": 48,
+    "types_py_sha256": (
+        "391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696"
+    ),
+    "wheel_sha256": (
+        "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a"
+    ),
+    "build_receipt_sha256": (
+        "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041"
+    ),
+    "import_scope": "fresh_run_local_site",
+}
+IDENTITY = {
+    "source_commit": COMMIT,
+    "run_namespace": NAMESPACE,
+    "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
+}
 OTHER_IDENTITY = {
     "source_commit": "b" * 40,
     "run_namespace": "mujoco-fullmdp-consumer-other-0002",
+    "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
 }
+
+
+def _copy_identity(identity):
+    return {
+        "source_commit": identity["source_commit"],
+        "run_namespace": identity["run_namespace"],
+        "mujoco_warp_runtime": dict(identity["mujoco_warp_runtime"]),
+    }
+
+
 RUNNER_EVENT_KEYS = {
     "reveal_rows", "reveal_due_rows", "reveal_deferred_rows", "launch_rows",
     "flight_terminal_rows", "shot_retired_rows", "selected_reset_rows",
@@ -57,11 +89,11 @@ def _base_record(module, index, *, identity=IDENTITY):
     terminal = {key: 0 for key in module.TERMINAL_KEYS}
     lifecycle = {key: 0 for key in RUNNER_LIFECYCLE_KEYS}
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "record_type": "mujoco_full_mdp_update_ack",
         "diagnostic_unauthorized": True,
         "update_index": index,
-        "run_identity": dict(identity),
+        "run_identity": _copy_identity(identity),
         "num_envs": 4096,
         "num_steps_per_env": 48,
         "transitions_delta": TRANSITIONS,
@@ -219,7 +251,7 @@ def _payload(module, index, row, *, identity=IDENTITY, toy=False):
             "resume_authority": False,
             "update_index": index,
             "completed_updates": index + 1,
-            "run_identity": dict(identity),
+            "run_identity": _copy_identity(identity),
             "action_ball_full_mdp_ppo_recipe_sha256": (
                 module.FULL_MDP_PPO_RECIPE_SHA256
             ),
@@ -262,10 +294,10 @@ def _write_evidence(path, rows):
 def _write_completion(path, module, count, evidence_inventory, receipts,
                       *, identity=IDENTITY, mutation=None):
     record = {
-        "schema_version": 3,
+        "schema_version": 4,
         "record_type": "mujoco_full_mdp_completion",
         "diagnostic_unauthorized": True,
-        "run_identity": dict(identity),
+        "run_identity": _copy_identity(identity),
         "num_envs": 4096,
         "num_steps_per_env": 48,
         "completed_updates": count,
@@ -334,6 +366,8 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
         module, tmp_path, 5, complete=False
     )
     summary = _consume(module, evidence, snapshots, 5)
+    assert summary["schema_version"] == 3
+    assert summary["run_identity"] == IDENTITY
     assert summary["evidence_level"] == "advisory_prefix"
     assert summary["engineering_run_complete"] is False
     assert summary["business_chain_complete"] is False
@@ -361,7 +395,7 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
     }
 
 
-def test_runner_update_ack_fixture_matches_exact_evidence_v2_wire(tmp_path):
+def test_runner_update_ack_fixture_matches_exact_evidence_v3_wire(tmp_path):
     module = _load()
     assert module.EVENT_KEYS == RUNNER_EVENT_KEYS
     assert module.LIFECYCLE_KEYS == RUNNER_LIFECYCLE_KEYS
@@ -374,7 +408,7 @@ def test_runner_update_ack_fixture_matches_exact_evidence_v2_wire(tmp_path):
     assert summary["engineering_run_complete"] is False
 
 
-def test_evidence_v3_and_completion_v2_are_rejected_by_separate_schemas(
+def test_evidence_v2_and_completion_v3_are_rejected_by_separate_schemas(
         monkeypatch, tmp_path):
     module = _load()
 
@@ -383,7 +417,7 @@ def test_evidence_v3_and_completion_v2_are_rejected_by_separate_schemas(
     evidence, snapshots, _completion, rows = _artifacts(
         module, evidence_root, 1, complete=False
     )
-    rows[0]["schema_version"] = 3
+    rows[0]["schema_version"] = 2
     _write_evidence(evidence, rows)
     with pytest.raises(ValueError, match="fixed fields at update 0"):
         _consume(module, evidence, snapshots, 1)
@@ -393,13 +427,13 @@ def test_evidence_v3_and_completion_v2_are_rejected_by_separate_schemas(
     completion_root.mkdir()
     evidence, snapshots, completion, _rows = _artifacts(
         module, completion_root, 1, complete=True,
-        seal_mutation=lambda row: row.__setitem__("schema_version", 2),
+        seal_mutation=lambda row: row.__setitem__("schema_version", 3),
     )
     with pytest.raises(ValueError, match="completion seal binding"):
         _consume(module, evidence, snapshots, 1, completion)
 
 
-def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v2():
+def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v3():
     module = _load()
     indices = module._snapshot_indices(True)
     assert indices == list(range(0, 12_500, 500)) + [12_499]
@@ -532,6 +566,19 @@ def test_rejects_cross_run_evidence_identity(tmp_path):
         _consume(module, evidence, snapshots, 1)
 
 
+def test_rejects_mutated_runtime_identity_in_evidence_even_with_new_hash(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["run_identity"]["mujoco_warp_runtime"]["epa_horizon"] = 24
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="run identity at update 0"):
+        _consume(module, evidence, snapshots, 1)
+
+
 def test_rejects_cross_run_snapshot_infos_even_with_matching_receipt(tmp_path):
     module = _load()
     evidence, snapshots, _completion, _rows = _artifacts(
@@ -539,6 +586,36 @@ def test_rejects_cross_run_snapshot_infos_even_with_matching_receipt(tmp_path):
     )
     with pytest.raises(ValueError, match="snapshot infos binding"):
         _consume(module, evidence, snapshots, 1)
+
+
+def test_rejects_mutated_runtime_identity_in_snapshot_infos(tmp_path):
+    module = _load()
+
+    def mutate(index, payload):
+        if index == 0:
+            payload["infos"]["run_identity"]["mujoco_warp_runtime"][
+                "wheel_sha256"
+            ] = "0" * 64
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, snapshot_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="snapshot infos binding"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_rejects_mutated_runtime_identity_in_completion(monkeypatch, tmp_path):
+    module = _load()
+    monkeypatch.setattr(module, "COMPLETE_UPDATES", 1)
+
+    def mutate(record):
+        record["run_identity"]["mujoco_warp_runtime"]["version"] = "3.10.0.3"
+
+    evidence, snapshots, completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=True, seal_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="completion seal binding"):
+        _consume(module, evidence, snapshots, 1, completion)
 
 
 def test_rejects_finite_toy_snapshot_that_is_not_exact_model_abi(tmp_path):
@@ -674,7 +751,7 @@ def test_rejects_prepared_hash_drift_and_duplicate_json_key(tmp_path):
         _consume(module, evidence, snapshots, 1)
 
     record = json.dumps(rows[0])
-    evidence.write_text(record[:-1] + ',"schema_version":2}\n')
+    evidence.write_text(record[:-1] + ',"schema_version":3}\n')
     with pytest.raises(ValueError, match="duplicate JSON key"):
         _consume(module, evidence, snapshots, 1)
 

@@ -69,9 +69,9 @@ git check-ignore -q vendor_assets
 | Venue `$BALLFIT_DATA_ROOT/analysis/segments/strikes.json` (current Pod copy: `/workspace/yikang/latest_data/analysis/segments/strikes.json`) | Detected real racket contacts used for the conservative A-B-A next-task timing audit | Generated from the 2026-07-03 venue mocap pipeline; current file SHA-256 `6ad3c45959c94b6fdd4033130403c32e0f1b612a138738c12afa43a58f752841` | G05 continuous-timing design; G03 ball fit |
 | ChingMu same-clock source: local `/Users/Franco/Downloads/ChingMu_Selected`; Pod `/workspace/yikang/a3_vendor_194d_physical_83b5ba8e/ChingMu_Selected`; retarget PKL `/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2` | Raw delivery has 41 human BVH, 41 racket BVH, 41 table BVH and 26 ball BVH at 120 Hz. The canonical source manifest contains 74 units with 74/74 unit NPZ+JSON and 74/74 PKL on Pod; the 73-action catalog explicitly excludes `Take_085_unit00_FH`. Unit NPZ carries blade/butt/signed-normal in one clock | **LOCATED; preserve source and every historical bank.** The v3 bank is revoked because its long axis was 45 degrees wrong. Corrected kinematic root: `/workspace/codexschema/chingmu_racket_v4d_exact_20260803.kRiC8j`; repo sibling `assets/motions/chingmu73_measured_v4_20260803`; completion/import receipt SHA `c45768b0...ab9a1` / `e6f0283f...727a82`; solver/materializer/auditor/resigner SHA `d6d6bfdd...57af5` / `34cf0f4c...99fe4` / `ddcb90b3...cddfa` / `32ee85be...bac9`. Kinematic admission is 73/73, but mechanical admission fails: 37/73 velocity and 58/73 limit-margin counterexamples. It is diagnostic-only, not training/promotion authority | G03 measured-racket calibration; G05 canonical N1; MuJoCo successor |
 | Tracked `assets/motions/chingmu73_measured_a3p0807_20260808/` plus `configs/action_ball_chingmu73_measured_a3p0807_f10_20260819.json` | FullMDP successor's 73 ordered teachers re-solved on the runtime 0807 A3P plant; frame-0 `pelvis_link` yaw is exact-grounded and action UIDs are rebound to the new motion bytes | Restore from the exact Git commit, never substitute the old v4 plant bank. Global audit remains `mechanical_admission=false` with 0/73 admitted (joint position/velocity plus missing vendor acceleration/torque-speed/ID evidence), so this is diagnostic lineage only | G05 FullMDP A/C diagnostic longrun |
-| `vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl` | portable MuJoCo Full-A使用的exact upstream RSL-RL 3.1.2 wheel；只供fresh run-local隔离环境，不替换ambient Pod环境 | Pod1 preserved source `/workspace/franco/mktemp/mujoco-fullmdp-wait-rsl3-host.20260818T112000CST/wheelhouse/rsl_rl_lib-3.1.2-py3-none-any.whl`；SHA-256 `406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d` | G06 portable MuJoCo focused gate及4096×25000长跑 |
+| `vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl` | portable MuJoCo Full-A binder使用的exact upstream RSL-RL 3.1.2 wheel；只供fresh run-local隔离site，不替换ambient Pod环境 | Pod1 preserved source `/workspace/franco/mktemp/mujoco-fullmdp-wait-rsl3-host.20260818T112000CST/wheelhouse/rsl_rl_lib-3.1.2-py3-none-any.whl`；SHA-256 `406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d` | G06 portable MuJoCo focused gate及successor长跑 |
 | `vendor_assets/mujoco_warp_3_10_0_3_source/mujoco_warp-3.10.0.3.tar.gz` | project-owned EPA48 fork的exact upstream源码输入；不是可执行wheel | PyPI `mujoco-warp==3.10.0.3` sdist，tag `v3.10.0.3` / commit `710c34ca…5728`，SHA-256 `f22196465cb1350677f66d8b65aa23bf37d95e150ce3ba3c68ea934ba35e3070`；按下文显式恢复 | G06 EPA horizon build chain |
-| `vendor_assets/mujoco_warp_epa48_1/` | ignored、no-clobber的`mujoco-warp==3.10.0.3+hope.epa48.1` wheel与build receipt | 只由tracked provenance/patch和`build_mujoco_warp_epa48.py`离线构建；patched source在临时目录exact重建，不从PyPI找同名wheel，不安装进ambient环境 | G06 EPA48 GPU fixture候选输入；当前不授权训练 |
+| `vendor_assets/mujoco_warp_epa48_1/` | ignored、no-clobber的`mujoco-warp==3.10.0.3+hope.epa48.1` wheel与build receipt，也是Full-A runtime binder的固定输入 | 只由tracked provenance/patch和`build_mujoco_warp_epa48.py`离线构建；patched source在临时目录exact重建，不从PyPI找同名wheel，不安装进ambient环境 | G06 runtime import与EPA48 GPU fixture候选输入；当前不授权训练 |
 | Planned ignored root `vendor_assets/mocap/optitrack_20260730_full/` | 2026-07-30 full OptiTrack raw C3D and canonical extracted NPZ for ball, `PPP1/PPP2` rackets and table in one clock; calibration/schema evidence, not automatically a 73 body-motion teacher | **UNRESOLVED in this checkout:** restore exact private C3D/extracted bytes and record SHA/source path. The tracked extractor/docs do not recreate missing measurements | G03 physics/calibration and marker-to-site method |
 | RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
@@ -102,9 +102,10 @@ test ! -e vendor_assets/rsl_rl_3_1_2
 mv "$RSL3_STAGE" vendor_assets/rsl_rl_3_1_2
 ```
 
-发车时把该wheel复制进fresh、不可复用的run root，再验证同一SHA并安装到run-local隔离环境；不得从
-PyPI latest、同名未知wheel或ambient 5.4.0替代。若preserved source消失，只能从另一个内容寻址备份恢复
-同一SHA；找不到时G06保持`Partial`，不得联网重建一个“近似3.1.2”。
+Full-A发车不再把该wheel安装到ambient venv，也不由wrapper另造一份未绑定副本。先把exact wheel恢复到
+本checkout上表路径；runtime binder会stable-read该文件，并与EPA48 wheel一起解到同一个fresh run-local
+site。不得从PyPI latest、同名未知wheel或ambient 5.4.0替代。若preserved source消失，只能从另一个
+内容寻址备份恢复同一SHA；找不到时G06保持`Partial`，不得联网重建一个“近似3.1.2”。
 
 ### Restore and build the project-owned [MuJoCo-Warp EPA48 fork](../DEFINITIONS.md#mujoco-warp-epa48-fork)
 
@@ -164,6 +165,37 @@ compact summary维护，
 exact GPU复测，也没有instrumented/ASan独立oracle。stock CPU MuJoCo同样把EPA horizon硬编码为24，且
 该边界可能越界，不能直接拿来当oracle。运行时`d.overflow`/warning fail-stop不得关闭；任一缺口存在时
 G06保持`Partial`，不得从r3恢复或授权训练。
+
+<a id="bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a"></a>
+### Bind the exact EPA48 + RSL-RL 3.1.2 site for portable Full-A
+
+先按上面两节把RSL wheel以及EPA48 wheel/build receipt恢复到本checkout表列的exact路径与SHA；不要用
+ambient package、跨worktree symlink或同名替代。binder只接受canonical、单hard-link、stable regular file。
+
+launcher先创建本次run独占、canonical父目录，但**不得创建site本身**。给Full-A命令增加
+[`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)（本次run的双wheel
+隔离目录），把`FULLA_RUNTIME_SITE`设为run root下尚不存在的绝对子路径并先核：
+
+```bash
+FULLA_RUNTIME_SITE=/absolute/canonical/fresh-run-root/mujoco-warp-rsl3-site
+test -d /absolute/canonical/fresh-run-root
+test ! -e "$FULLA_RUNTIME_SITE"
+test ! -L "$FULLA_RUNTIME_SITE"
+```
+
+未来clean launcher生成的完整命令同时包含：
+
+```text
+--full-a
+--mujoco-warp-runtime-site /absolute/canonical/fresh-run-root/mujoco-warp-rsl3-site
+--source-commit <clean Git truth supplied by launcher>
+--run-namespace <fresh no-clobber namespace>
+```
+
+`source_commit`不是binder自报；当前WIP不能冒充clean source。binder创建mode `0700` site并把两wheel解到
+同一路径；失败site/namespace视为spent，legacy WAIT不接受该flag。identity/schema/Pod证据只在
+[portable Full-A实验](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)
+维护；本节只是真实资产恢复与调用工序。
 
 ## ChingMu measured-racket rebuild contract
 

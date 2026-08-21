@@ -1,11 +1,57 @@
 # EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819
 
-> 问题：portable MuJoCo怎样在不复制Isaac owner graph的前提下，逐纵切片消费同一slot0题目、measured teacher、真实事件与Reward20，直到可以做`4096×25000`长跑？
+> 问题：portable MuJoCo怎样在不复制Isaac owner graph的前提下，逐纵切片消费同一slot0题目、measured teacher、真实事件与Reward20，直到可以做H48的`4096×12500`长跑？
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`action-affine-and-ledger-host-validated / qdes-guard-divergent / live-25k-active-incomplete`
-> 证据等级：E1源码、host反例与Pod live前缀
+> 状态：`successor-runtime-binding-branch-candidate / Pod dual-wheel import PASS / physics-and-fresh-longrun HOLD`
+> 证据等级：E1源码、host反例与Pod actual import；无GPU physics或fresh长跑证据
+
+<a id="epa48-fresh-runtime-binding-20260821"></a>
+## 0. 2026-08-21 successor的EPA48 fresh runtime binding
+
+本节是runtime binding详细真源，并supersede下文的r3 active及旧wire叙述。r3已止于ACK `10249`且
+不得resume；当前实现仍是`074e2a0d`之上的branch WIP，尚未合入`main`，没有fresh训练namespace。
+
+Full-A新增[`--mujoco-warp-runtime-site`](../../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)（本次run的
+MuJoCo-Warp/RSL-RL隔离导入目录）：路径必须绝对、父目录已存在且canonical，site本身不存在、非symlink且
+不在`sys.path`。正常fresh CLI中binder先于runner自身的Torch/RSL-RL/WAIT/MJLab/MuJoCo-Warp import；
+legacy WAIT不绑定，不带`--full-a`时传该flag也拒绝。binder以`O_NOFOLLOW`读取并在前后核regular file、
+单hard-link、device/inode/size/mtime/ctime及canonical path，只接受三份ignored输入：
+
+| 输入 | 固定SHA-256 |
+| --- | --- |
+| `vendor_assets/mujoco_warp_epa48_1/build_receipt.json` | `336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041` |
+| `vendor_assets/mujoco_warp_epa48_1/wheelhouse/mujoco_warp-3.10.0.3+hope.epa48.1-py3-none-any.whl` | `58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a` |
+| `vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl` | `406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d` |
+
+三份stable-read命中SHA后才创建mode `0700`的site，把两枚wheel解到**同一个**`sys.path[0]`；失败site
+视为spent。预载`mujoco_warp/rsl_rl/mjlab`，输入缺失/变化/symlink，site已存在/别名化，或
+distribution/spec/module origin落到foreign site，均fail closed；import失败还恢复`sys.path`并清partial prefix。
+
+成功绑定要求fresh site中的`mujoco-warp==3.10.0.3+hope.epa48.1`、
+`MJ_MAX_EPAHORIZON=48`及loaded `types.py` SHA-256=
+`391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696`。
+RSL-RL 3.1.2也须在同site赢得distribution/spec，随后仍由既有process-local gate核版本、六份source SHA、
+module与live class/callable origin。持久化的`mujoco_warp_runtime`仅含EPA schema-1 mapping，并进入ACK、
+snapshot infos、completion、summary；RSL不复制进去。wire升级为ACK `2→3`、completion `3→4`、summary
+`2→3`，无旧wire fallback。binder不读Git或自报`source_commit`；future launcher必须从clean Git truth
+传入，不能把当前WIP或binder常量当clean source identity。
+
+scoped runtime diff SHA-256=`df4d5ea686f017206da3ad7cee5ef328cae1079da19d8da92b061fafedaef2d3`；
+host union=`125 passed, 2 skipped`。Pod1 current-branch WIP命令为：
+
+```bash
+env -u PYTHONPATH CUDA_VISIBLE_DEVICES='' PYTHONNOUSERSITE=1 \
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspace/mjlab_venv/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/mjlab_lane/tests/test_mujoco_full_mdp_epa48_runtime.py -rs
+```
+
+结果`19 passed in 4.33s`，actual import覆盖EPA package/types与RSL package/runner，并核version/horizon/
+distribution/module roots。因命令隐藏CUDA，它不是GPU physics或训练证据。ActionBall fixed-tape、matched
+H48 wall、instrumented/ASan oracle、fresh Full-A longrun仍`未测`，独立search-fixture replay也未结束。
+因此仍为`diagnostic_unauthorized=true / checkpoint_authority=false / resume_authority=false`、
+`full_a_complete=false`，不是training GO。
 
 ## 1. 采用、延后、拒绝
 
@@ -26,7 +72,7 @@
   provenance，不是reset或affine-offset authority。
   executable q-des guard仍明确`DIVERGENT_DECLARED`：MuJoCo机械hard clamp没有复制Isaac的
   soft-inset与state-dependent brake，因此只授权MuJoCo-only诊断，不授权transfer/matched结论。
-- 直接目标是同一upstream RSL-RL 3.1.2进程`4096×24×25000 = 2,457,600,000`
+- successor直接目标是同一upstream RSL-RL 3.1.2进程`4096×48×12500 = 2,457,600,000`
   transitions；`1000`只是只读早期节点，不停车。
 - thin update ledger只在optimizer boundary事务性记一条ACK；rate/window/per-side表全部
   由独立offline consumer计算。
@@ -78,11 +124,11 @@ MuJoCo Full-A env现在：
   reset/identity/integrity计数；每update只用一次`torch.cat(...).cpu()`把该固定向量送到host。
 - 第26个`completed_action_epoch`不是边际推导：只有同一env行保留的launch、selected contact、R03、
   R06、无fault的68格R07与自然RETIRE同时闭合才发布；跨env拼接这些里程碑必须保持业务未完成。
-- optimizer前要求24步、storage reward/return/advantage finite、done只能为`0/1`、timeout与bit1
+- optimizer前要求48步、storage reward/return/advantage finite、done只能为`0/1`、timeout与bit1
   一致、done与terminal-or-resolved-table一致、`selected_reset == done`且generation delta只等于done，并验
   Reward20守恒和独立钉住的slot0/UID/sign/family。optimizer前只prepare冻结payload；只有upstream
   optimizer成功返回后才写snapshot并append+fsync ACK；optimizer/write/fsync失败不记假ACK。
-- stock RSL serializer在update `0,1000,...,24000,24999`留26份no-clobber快照；它们均
+- stock RSL serializer在update `0,500,...,12000,12499`留26份no-clobber快照；它们均
   `diagnostic_unauthorized=true`、`checkpoint_authority=false`、`resume_authority=false`。
 
 ## 3. 反例与结果
@@ -129,7 +175,7 @@ snapshot。该namespace封存且不可重用。最窄fresh r3修复只是显式�
 `runner.logger_type='tensorboard'`以满足stock save，不启用logger、TensorBoard写入或上传；必须使用
 新commit、新namespace，不能重试r2。
 
-fresh r3现使用exact source `dc62684c41e70e40dedaf191a32921b6cd98b344`、namespace
+**HISTORICAL / SUPERSEDED —** fresh r3当时使用exact source `dc62684c41e70e40dedaf191a32921b6cd98b344`、namespace
 `mujoco-fullmdp-a4096-u25000-dc62684c-20260820t074950cst-r3`和wrapper SHA-256
 `0f5adc6024f01ffee7e761ab7b620d70855e541dbea298216ab9093e30695fd6`；worker PID=`864055`、单一
 trainer PID=`865285`。真实GPU focused再次为`8/8`，随后同一trainer进程的
@@ -159,22 +205,23 @@ run；当前`engineering_run_complete=false`、`business_chain_complete=false`�
 - timeout错位、`done=2`、shot-retire误增generation、Gym done不增generation、common step卡住、Reward20不守恒、
   同源UID自证、optimizer/fsync失败与JSONL重复/缺口均会拒绝；event次数为0、
   table/fall多或recovery failure多不会被误拒。
-- 独立consumer要求完整25k文件有25000行、index `0..24999`无缺口/重复、每行
-  `4096/24/98304`与最终累计精确，再另验26份有限model/optimizer快照。零分母的rate输出
+- successor独立consumer要求完整文件有12500行、index `0..12499`无缺口/重复、每行
+  `4096/48/196608`与最终累计精确，再另验26份有限model/optimizer快照。零分母的rate输出
   `null/未测`，不输出假0%。
-- consumer分别输出`engineering_run_complete`与slot0 `business_chain_complete`。25000个ACK可关闭
+- consumer分别输出`engineering_run_complete`与slot0 `business_chain_complete`。12500个ACK可关闭
   工程长跑，但业务事件全零时仍不得称slot0链出现；又73动作、双侧与科学窗口
   报告未闭合，本代`full_a_complete`固定为`false`。
 
 ## 4. 仍未闭合
 
-1. exact Pod r3已通过真实MuJoCo-Warp GPU focused `8/8`，并在单一trainer进程中启动
-   `4096×24×25000`；durable ACK当前为`0..7`，update 1/5只读consumer均通过。
-2. active不等于完成：仍缺ACK `8..24999`、其余25份已ACK snapshot、终点consumer和最终趋势；result
-   在进程alive期间保持0 bytes，当前`engineering_run_complete=false`。
-3. update5前ACCEPT仍为0，所以slot0业务链仍未出现；C family、backhand分母、第二seed、
-   promotion/export/deploy也未由本工程件授权，`business_chain_complete/full_a_complete=false`。
+1. historical r3已止于durable ACK `10249`；EPA overflow与旧IDLE clock泄漏共同禁止resume。下文
+   `0..7`与active PID只保留为当时前缀，不是当前运行态。
+2. successor的fresh dual-wheel import已经通过，但独立search-fixture replay、stock-24/fork-48
+   deterministic physics、ActionBall fixed-tape、matched H48 wall和instrumented/ASan oracle尚未闭合。
+3. 使用本runtime binder的fresh longrun尚未发射；因此没有新ACK schema 3、completion schema 4、
+   summary schema 3的live训练产物。C family、backhand分母、第二seed、promotion/export/deploy也仍`未测`，
+   `business_chain_complete/full_a_complete=false`。
 
-这些是真实剩余的证据边界。zero-action age16/bit16、普通table/fall、零contact或低
-recovery率只是未训练策略的telemetry，不再作为发车阻塞；现有keepout termination和证据完整性
-检查仍保留。因此当前只是active engineering longrun前缀，不是25k完成或MuJoCo Full-A完成。
+这些是真实剩余的证据边界。zero-action table/fall、零contact或低recovery率仍只是未训练策略telemetry，
+不作为发车阻塞；现有overflow/keepout termination与证据完整性检查继续保留。当前是branch-scoped
+runtime import closure，不是GPU physics、fresh engineering longrun或MuJoCo Full-A完成。

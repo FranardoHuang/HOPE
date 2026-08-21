@@ -20,9 +20,25 @@ def _ppo_recipe_module():
         sys.modules.pop(name, None); raise
     return module
 
+def _epa48_runtime_module():
+    source = Path(__file__).with_name("mujoco_full_mdp_epa48_runtime.py").resolve()
+    name = "_hope_mujoco_full_mdp_epa48_runtime"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached Full-A EPA48 runtime binder origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None: raise RuntimeError("cannot load Full-A EPA48 runtime identity")
+    module = importlib.util.module_from_spec(spec); sys.modules[name] = module
+    try: spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None); raise
+    return module
+
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
-EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 2, 3, 2
+EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 3, 4, 3
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, 4096,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
@@ -98,7 +114,10 @@ def _run_identity(commit, namespace):
             or type(namespace) is not str
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{15,159}", namespace) is None):
         _fail("expected run identity")
-    return {"source_commit": commit, "run_namespace": namespace}
+    return {"source_commit": commit, "run_namespace": namespace,
+        "mujoco_warp_runtime": (
+            _epa48_runtime_module().expected_mujoco_warp_runtime_identity()
+        )}
 def _count_map(row, name, keys):
     _keys(row[name], keys, name)
     return {key: _int(value, f"{name}.{key}", TRANSITIONS_PER_UPDATE) for key, value in row[name].items()}
@@ -136,7 +155,9 @@ def _validate_record(row, index, run_identity):
     }
     if any(type(row[key]) is not type(value) or row[key] != value for key, value in fixed.items()):
         _fail(f"fixed fields at update {index}")
-    _keys(row["run_identity"], {"source_commit", "run_namespace"}, "run identity")
+    _keys(row["run_identity"], {
+        "source_commit", "run_namespace", "mujoco_warp_runtime"
+    }, "run identity")
     if row["run_identity"] != run_identity:
         _fail(f"run identity at update {index}")
     if (_hex(row["prepared_update_sha256"], 64, "prepared update hash")

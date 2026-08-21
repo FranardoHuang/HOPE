@@ -16,6 +16,33 @@ LANE = Path(__file__).resolve().parents[1]
 UID = 6907688916670928
 SOURCE_COMMIT = "a" * 40
 RUN_NAMESPACE = "mujoco-fullmdp-ledger-test-v2"
+MUJOCO_WARP_RUNTIME = {
+    "schema_version": 1,
+    "distribution": "mujoco-warp",
+    "fork_id": "hope_mujoco_warp_epa48_v1",
+    "version": "3.10.0.3+hope.epa48.1",
+    "epa_horizon": 48,
+    "types_py_sha256": (
+        "391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696"
+    ),
+    "wheel_sha256": (
+        "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a"
+    ),
+    "build_receipt_sha256": (
+        "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041"
+    ),
+    "import_scope": "fresh_run_local_site",
+}
+
+
+def _run_identity(source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE):
+    return {
+        "source_commit": source_commit,
+        "run_namespace": run_namespace,
+        "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
+    }
+
+
 TERMINATION_BITS = {
     "time_out": 1,
     "base_fell_tilt": 2,
@@ -64,7 +91,7 @@ def _load():
     return module
 
 
-def _ledger(module, *, steps=2, num_envs=3):
+def _ledger(module, *, steps=2, num_envs=3, run_identity=None):
     return module.FullMdpUpdateLedger(
         torch_module=torch,
         num_envs=num_envs,
@@ -76,8 +103,7 @@ def _ledger(module, *, steps=2, num_envs=3):
         mount_normal_sign=1,
         family="forehand",
         initial_reset_generation=torch.zeros(num_envs, dtype=torch.long),
-        source_commit=SOURCE_COMMIT,
-        run_namespace=RUN_NAMESPACE,
+        run_identity=_run_identity() if run_identity is None else run_identity,
     )
 
 
@@ -102,8 +128,7 @@ def test_constructor_rejects_nonexact_termination_bit_schema(bits):
             mount_normal_sign=1,
             family="forehand",
             initial_reset_generation=torch.zeros(3, dtype=torch.long),
-            source_commit=SOURCE_COMMIT,
-            run_namespace=RUN_NAMESPACE,
+            run_identity=_run_identity(),
         )
 
 
@@ -130,9 +155,31 @@ def test_constructor_rejects_nonexact_run_identity(source_commit, run_namespace)
             mount_normal_sign=1,
             family="forehand",
             initial_reset_generation=torch.zeros(3, dtype=torch.long),
-            source_commit=source_commit,
-            run_namespace=run_namespace,
+            run_identity=_run_identity(source_commit, run_namespace),
         )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda identity: identity.pop("mujoco_warp_runtime"),
+        lambda identity: identity.__setitem__("mujoco_warp_runtime", []),
+    ),
+)
+def test_constructor_rejects_missing_or_nonmapping_runtime_identity(mutation):
+    module = _load()
+    identity = _run_identity()
+    mutation(identity)
+    with pytest.raises(ValueError, match="run identity|runtime identity"):
+        _ledger(module, run_identity=identity)
+
+
+def test_constructor_isolates_nested_runtime_identity_copy():
+    module = _load()
+    identity = _run_identity()
+    ledger = _ledger(module, run_identity=identity)
+    identity["mujoco_warp_runtime"]["epa_horizon"] = 24
+    assert ledger.run_identity == _run_identity()
 
 
 def _result(module, *, num_envs=3, event=None, bits=None, done=None,
@@ -270,11 +317,8 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     prepared = _prepare(ledger, 0, environment_steps=2)
     record = _decode(prepared)
 
-    assert record["schema_version"] == 2
-    assert record["run_identity"] == {
-        "source_commit": SOURCE_COMMIT,
-        "run_namespace": RUN_NAMESPACE,
-    }
+    assert record["schema_version"] == 3
+    assert record["run_identity"] == _run_identity()
     assert record["update_index"] == 0
     assert record["num_envs"] == 3
     assert record["num_steps_per_env"] == 2
