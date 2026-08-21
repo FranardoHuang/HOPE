@@ -2,6 +2,12 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-22 dual-backend live prefix（Gate仍`Partial`）：**Isaac H48 successor `99405266…`已在GPU0
+fresh启动并有durable ACK `0..3`，前三个完整wall=`16.02/19.53/16.89 s`、Reward finite且fault0；portable
+MuJoCo H48 successor同时在GPU2运行，最近只读为update `1099`、last-10 pre-ACK约`9.79--9.89 s`且
+Reward nonfinite/conservation fault为0。两条现在都真实运行，但不同backend、不同live state且不是matched
+strata，不能据此签数值parity、transfer、physics promotion或本Gate晋级。
+
 **2026-08-21 current correction（supersede下文所有“r3 active/继续25k”叙述；Gate仍`Partial`）：**portable
 MuJoCo r3已经停止在durable ACK `10249`；终段last-100 wall mean/median=`4.890/4.886 s/update`。
 直接停止原因是真实MuJoCo-Warp `EPA_HORIZON` overflow fail-stop；旧229-D observation还存在IDLE clock

@@ -524,12 +524,19 @@ receipt和fd18 sealed archive。它复用现有Kit boot owner；没有新增supe
 入口固定Full-A `4096×48×12500/save500`，不开放recipe override、resume或retry。ready后只验证existing
 launcher state中的exact PID=PGID、runtime attestation receipt和live non-zombie child；不monitor、不发
 signal。真实overflow/nonfinite、joint/table/contact与optimizer后durable ACK仍由训练主链负责。host对Isaac/
-MuJoCo两个launcher的focused回归=`18 passed in 7.44s`；exact Pod dry-run、real launch、首批ACK和wall均
-`未测`，因此当前只是branch launch candidate，`diagnostic_unauthorized=true`且G05保持`Partial`。
+MuJoCo两个launcher的最终focused回归=`19 passed`。实现提交时它仍只是branch launch candidate；后续exact
+Pod dry-run、两次real与live前缀按下文追加，`diagnostic_unauthorized=true`且G05保持`Partial`。
 
 Pod exact dry-run在把两个workspace symlink改传其canonical `/opt`目标后通过，且run root仍absent、GPU0
 empty。第一次real随后在PPO前自然RC1：训练侧既有split-rubber检查需要`model.usd`同目录的sealed
 `source_bundle`做enclosed-source reconstruction，而launcher只复制了单个USD。失败root不复用，child自然
 退出且GPU0 lock复核free。旧asset package实际61 MiB、只含regular file/directory、无symlink；successor
 因此改为先拒绝任何non-regular entry，再完整copytree到fresh run root，保留训练侧原校验。新commit real、
-ACK与wall仍`未测`。
+ACK与wall随后实际闭合：clean detached source=
+`9940526684a4ea068b08bf7a2627a6e07c1452f1`、fresh namespace=
+`fullmdp-a-h48-v2-isaac-99405266-20260822`、GPU0 UUID=`GPU-889b1712-8d89-0536-5c9e-e79aae30523d`、
+PID=PGID=`2095711`、Kit child=`2095727`。fd16 receipt为`trainer_runtime_attested_v2`，GPU0 flock由child
+保持；durable ACK `0..3`连续。前三个完整iteration wall=`16.02/19.53/16.89 s`，对应H24-equivalent=
+`8.01/9.765/8.445 s`；每个ACK的196,608 Reward sample全finite、nonfinite/conservation fault均0。
+这证明real longrun已进入optimizer后持久化路径；样本仍太早，不能当50-update matched rate、6秒GO、
+12500 completion、physics promotion或deployment证据。

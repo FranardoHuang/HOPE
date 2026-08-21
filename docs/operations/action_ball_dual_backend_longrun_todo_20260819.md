@@ -1,9 +1,9 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`ACTIVE-successor-MuJoCo-longrun / Isaac-launch-in-progress / branch-scoped / diagnostic_unauthorized`
+> 状态：`ACTIVE-dual-backend-H48-longruns / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
-> 更新：2026-08-21
+> 更新：2026-08-22
 >
 > `origin/main:docs/NOW.md` 是全项目唯一优先级权威。本页只维护
 > [FullMDP](../DEFINITIONS.md)（完整球路、击球、落点与恢复状态机）单动作双后端
@@ -37,6 +37,20 @@ fresh successor已经从clean detached `96f0ca69887aba44c71983529d05e759e1a4cd2f
   `model_0.pt` SHA-256=`50ebc7c9…7b26`；
 - 最近一次只读检查已见update `0..4`共5个连续durable ACK，child仍为`R`。这是运行态快照，不预测最终
   completion；source、namespace与PID只作为本次run身份，不为后续run复用。
+
+Isaac successor也已从clean detached `9940526684a4ea068b08bf7a2627a6e07c1452f1`在Pod1真实发射：
+
+- namespace=`fullmdp-a-h48-v2-isaac-99405266-20260822`，GPU0 UUID=
+  `GPU-889b1712-8d89-0536-5c9e-e79aae30523d`，PID=PGID=`2095711`、Kit child=`2095727`；
+- exact argv同为Full-A `4096×48×12500/save500`，fd16 runtime receipt精确为
+  `trainer_runtime_attested_v2`，fd18 sealed RSL archive与GPU0 lock由live child继承；
+- durable ACK已连续到`0..3`；前三个完整wall=`16.02/19.53/16.89 s`，H24-equivalent=
+  `8.01/9.765/8.445 s`。每个ACK均有`196,608/196,608` actual Reward finite，nonfinite与conservation
+  fault均为0；早期`ACCEPT=0`不作停车门。
+
+第一次Isaac real曾因launcher只复制单个USD、缺同目录sealed source bundle而在PPO前自然RC1；该root封存、
+GPU/lock自然释放，未resume或复用。successor改为拒绝non-regular entry并复制完整61 MiB asset package，
+训练侧enclosed-source reconstruction不放宽。
 
 旧 run 的 `ACCEPT=0`只是课程 telemetry：当时 opportunity 仍停在 balance/mimic/readiness 阶段。
 balance→mimic→entry→strike→landing 本来就可能需要很多 step；`ACCEPT>0`不是启动门、安全门或早期
@@ -160,7 +174,9 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    identity真实发射并取得update `0..4`连续durable ACK。61-update实际rate与fixed-tape关闭发射前的有限
    构造/吞吐证据；运行现在只允许自然推进，`ACCEPT=0`及五strata未出现不作为表现门。Isaac V2的同卡
    pre/post Phase-C测量仍在后续，不能由MuJoCo代签。Isaac one-shot候选已复用现有Kit boot owner并通过
-   host双launcher回归`18 passed`；exact Pod dry-run、真实发射和首批连续ACK仍待本commit后闭合。
+   host双launcher回归`19 passed`；exact Pod dry-run及GPU0 fresh real均已闭合，source=`99405266…`、
+   PID=PGID=`2095711`，durable ACK已有`0..3`连续且Reward finite/fault0。当前Isaac early H48 wall=
+   `16.02/19.53/16.89 s`；这是自然长跑中的早期观测，不是matched稳态测量或6秒GO。
 
 ## 4. 当前完成条件
 

@@ -8,10 +8,15 @@
   sealed RSL archive均由child继承；launcher自身只持Kit环境，训练child经`env -i`获得窄runtime环境。
 - 本入口不加`ACCEPT`、学习表现、matched wall或“先短跑”准入；这些是诊断/学习证据，不是真安全门。
   失败不重试、不resume、不复用namespace，且不发signal；`diagnostic_unauthorized=true`保持。
-  host Isaac/MuJoCo launcher回归=`18 passed`。exact Pod dry-run通过；第一次real在PPO前自然RC1，暴露launcher
+  host Isaac/MuJoCo launcher回归=`19 passed`。exact Pod dry-run通过；第一次real在PPO前自然RC1，暴露launcher
   只复制`model.usd`而漏掉同目录sealed `source_bundle`。失败root封存、GPU0/lock自然释放；successor改为
-  no-symlink复制完整61 MiB asset package，训练侧既有enclosed-source重构检查不放宽。新commit的real与首批
-  durable ACK尚待执行。
+  no-symlink复制完整61 MiB asset package，训练侧既有enclosed-source重构检查不放宽。successor commit
+  `9940526684a4ea068b08bf7a2627a6e07c1452f1`随后在GPU0以fresh namespace
+  `fullmdp-a-h48-v2-isaac-99405266-20260822`真实启动，PID=PGID=`2095711`、Kit child=`2095727`，fd16 receipt
+  为`trainer_runtime_attested_v2`且lifetime lock由child保持。只读前缀已有durable ACK `0..3`连续，前三个
+  完整wall=`16.02/19.53/16.89 s`（H24-equivalent=`8.01/9.765/8.445 s`）；每个ACK的196,608 Reward sample
+  全finite、nonfinite/conservation fault为0。它关闭“双后端是否都已跑起来”，不关闭稳态6秒、12500完成、
+  physics promotion或deployment。
 
 ## 2026-08-21 — portable Full-A H48 fresh长跑已真实发射（branch candidate）
 
