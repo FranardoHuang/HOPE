@@ -199,7 +199,7 @@ RSL wheel与A3 USD，先取得目标GPU的nonblocking lifetime lock，再核inde
 exact PID=PGID、runtime receipt与live non-zombie进程并返回。真正的overflow/nonfinite、joint/table/contact
 边界和optimizer后durable ACK仍在训练路径内保持fail-stop。exact Pod real run未闭合前，不得把host测试或
 dry-run写成已启动。当前successor `99405266…`已在GPU0 fresh namespace真实启动并取得连续durable ACK；
-前三个完整H48 wall=`16.02/19.53/16.89 s`。这只把本条从“待启动”改为“运行中”，不改变上述authority。
+前10个完整H48 wall median=`18.445 s`。这只把本条从“待启动”改为“运行中”，不改变上述authority。
 
 若FullMDP在base manager构造中途失败，当前进程必须视为cold-discard：环境会按pinned顺序单次
 best-effort清理已存在manager与simulator；任何terminal simulator清理失败都会sticky拒绝后续资源操作并

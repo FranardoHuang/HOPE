@@ -13,8 +13,9 @@
   no-symlink复制完整61 MiB asset package，训练侧既有enclosed-source重构检查不放宽。successor commit
   `9940526684a4ea068b08bf7a2627a6e07c1452f1`随后在GPU0以fresh namespace
   `fullmdp-a-h48-v2-isaac-99405266-20260822`真实启动，PID=PGID=`2095711`、Kit child=`2095727`，fd16 receipt
-  为`trainer_runtime_attested_v2`且lifetime lock由child保持。只读前缀已有durable ACK `0..3`连续，前三个
-  完整wall=`16.02/19.53/16.89 s`（H24-equivalent=`8.01/9.765/8.445 s`）；每个ACK的196,608 Reward sample
+  为`trainer_runtime_attested_v2`且lifetime lock由child保持。最新只读前缀已有durable ACK `0..10`连续；
+  已完整打印的10次wall范围=`16.02--22.52 s`、median=`18.445 s`、H24-equivalent median=`9.2225 s`。
+  每个ACK的196,608 Reward sample
   全finite、nonfinite/conservation fault为0。它关闭“双后端是否都已跑起来”，不关闭稳态6秒、12500完成、
   physics promotion或deployment。
 

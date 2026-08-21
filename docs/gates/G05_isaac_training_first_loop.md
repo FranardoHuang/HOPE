@@ -9,8 +9,9 @@ UUID/empty-app/lifetime lock、fd16 runtime receipt和fd18 sealed archive。它�
 optimizer后durable ACK仍由训练主链fail-stop；入口不retry/resume/signal。host双launcher回归=`19 passed`，
 exact Pod dry-run已通过。successor `9940526684a4ea068b08bf7a2627a6e07c1452f1`现已在GPU0以fresh
 namespace真实启动，PID=PGID=`2095711`、Kit child=`2095727`，fd16 receipt精确且lifetime lock保持；
-durable ACK `0..3`连续，每个ACK的196,608 Reward sample全finite、nonfinite/conservation fault为0。
-前三个完整H48 wall=`16.02/19.53/16.89 s`，只算early live prefix，不是matched稳态或6秒GO；Gate不晋级。
+durable ACK `0..10`连续，每个ACK的196,608 Reward sample全finite、nonfinite/conservation fault为0。
+已完整打印的前10个H48 wall median=`18.445 s`、H24-equivalent median=`9.2225 s`，只算early live
+prefix，不是matched稳态或6秒GO；Gate不晋级。
 首次real在PPO/ACK前自然RC1：run-local asset只有`model.usd`，缺训练合同要求的同目录sealed
 `source_bundle`。该失败namespace封存且GPU0/lock自然释放；successor复制完整asset package后仍由既有
 enclosed-source reconstruction校验，不把缺包改成可忽略warning。

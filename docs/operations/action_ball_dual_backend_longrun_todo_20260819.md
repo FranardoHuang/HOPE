@@ -44,8 +44,8 @@ Isaac successor也已从clean detached `9940526684a4ea068b08bf7a2627a6e07c1452f1
   `GPU-889b1712-8d89-0536-5c9e-e79aae30523d`，PID=PGID=`2095711`、Kit child=`2095727`；
 - exact argv同为Full-A `4096×48×12500/save500`，fd16 runtime receipt精确为
   `trainer_runtime_attested_v2`，fd18 sealed RSL archive与GPU0 lock由live child继承；
-- durable ACK已连续到`0..3`；前三个完整wall=`16.02/19.53/16.89 s`，H24-equivalent=
-  `8.01/9.765/8.445 s`。每个ACK均有`196,608/196,608` actual Reward finite，nonfinite与conservation
+- durable ACK已连续到`0..10`；已完整打印的10次wall范围=`16.02--22.52 s`、median=`18.445 s`，
+  H24-equivalent median=`9.2225 s`。每个ACK均有`196,608/196,608` actual Reward finite，nonfinite与conservation
   fault均为0；早期`ACCEPT=0`不作停车门。
 
 第一次Isaac real曾因launcher只复制单个USD、缺同目录sealed source bundle而在PPO前自然RC1；该root封存、
@@ -175,8 +175,9 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
    构造/吞吐证据；运行现在只允许自然推进，`ACCEPT=0`及五strata未出现不作为表现门。Isaac V2的同卡
    pre/post Phase-C测量仍在后续，不能由MuJoCo代签。Isaac one-shot候选已复用现有Kit boot owner并通过
    host双launcher回归`19 passed`；exact Pod dry-run及GPU0 fresh real均已闭合，source=`99405266…`、
-   PID=PGID=`2095711`，durable ACK已有`0..3`连续且Reward finite/fault0。当前Isaac early H48 wall=
-   `16.02/19.53/16.89 s`；这是自然长跑中的早期观测，不是matched稳态测量或6秒GO。
+   PID=PGID=`2095711`，durable ACK已有`0..10`连续且Reward finite/fault0。当前Isaac前10个完整H48 wall
+   median=`18.445 s`、H24-equivalent median=`9.2225 s`；这是自然长跑中的早期观测，不是matched稳态
+   测量或6秒GO。
 
 ## 4. 当前完成条件
 

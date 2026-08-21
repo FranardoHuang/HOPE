@@ -536,7 +536,8 @@ ACK与wall随后实际闭合：clean detached source=
 `9940526684a4ea068b08bf7a2627a6e07c1452f1`、fresh namespace=
 `fullmdp-a-h48-v2-isaac-99405266-20260822`、GPU0 UUID=`GPU-889b1712-8d89-0536-5c9e-e79aae30523d`、
 PID=PGID=`2095711`、Kit child=`2095727`。fd16 receipt为`trainer_runtime_attested_v2`，GPU0 flock由child
-保持；durable ACK `0..3`连续。前三个完整iteration wall=`16.02/19.53/16.89 s`，对应H24-equivalent=
-`8.01/9.765/8.445 s`；每个ACK的196,608 Reward sample全finite、nonfinite/conservation fault均0。
+保持；durable ACK `0..10`连续。已完整打印的前10个iteration wall范围=`16.02--22.52 s`、median=
+`18.445 s`，对应H24-equivalent median=`9.2225 s`；每个ACK的196,608 Reward sample全finite、
+nonfinite/conservation fault均0。
 这证明real longrun已进入optimizer后持久化路径；样本仍太早，不能当50-update matched rate、6秒GO、
 12500 completion、physics promotion或deployment证据。
