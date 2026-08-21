@@ -2,7 +2,8 @@
 
 The default preserves the historical one-update WAIT ABI. ``--full-a`` exposes
 the current R03/R06/R07/Reward20 engineering surface with fail-closed evidence;
-it remains diagnostic rather than a promotion or physics authority.
+``--diagnostic-rate-probe`` keeps that surface but measures a finite 61-update
+profiler-off window without snapshots or completion authority.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import statistics
 import sys
 import time
 
@@ -87,6 +89,18 @@ FULL_A_FAMILY = "forehand"
 FULL_A_NUM_ENVS = 4096
 FULL_A_NUM_UPDATES = FULL_MDP_PPO_RECIPE.max_iterations
 FULL_A_SAVE_INTERVAL = FULL_MDP_PPO_RECIPE.save_interval
+RATE_PROBE_WARMUP_UPDATES = 10
+RATE_PROBE_MEASURED_UPDATES = 50
+RATE_PROBE_TAIL_UPDATES = 1
+RATE_PROBE_NUM_UPDATES = (
+    RATE_PROBE_WARMUP_UPDATES
+    + RATE_PROBE_MEASURED_UPDATES
+    + RATE_PROBE_TAIL_UPDATES
+)
+RATE_PROBE_PROFILE_ENVS = (
+    "HOPE_ACTION_BALL_UPDATE_PROFILE",
+    "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES",
+)
 RSL_RL_SOURCE_SHA256 = {
     "rsl_rl/runners/on_policy_runner.py": "6ffaee7e154a49ae55eebf53a7b1549f0461a1742d92dd34af5bb4b785d19cf2",
     "rsl_rl/algorithms/ppo.py": "4373ac1b2f9fdf14d9da57516968fc95d8f605d2967fee01dc61bf0d09423478",
@@ -500,6 +514,7 @@ def main(
     run_namespace: str | None = None,
     mujoco_warp_runtime_site: str | None = None,
     save_interval: int = FULL_A_SAVE_INTERVAL,
+    diagnostic_rate_probe: bool = False,
     _test_allow_small_full_a: bool = False,
 ) -> int:
     num_steps_per_env = NUM_STEPS_PER_ENV
@@ -509,27 +524,45 @@ def main(
         or type(num_updates) is not int
         or num_updates <= 0
         or type(full_a_mode) is not bool
+        or type(diagnostic_rate_probe) is not bool
         or type(_test_allow_small_full_a) is not bool
         or type(save_interval) is not int or save_interval != FULL_A_SAVE_INTERVAL
     ):
         raise ValueError("runner dimensions/mode differ")
-    if full_a_mode and (
+    if diagnostic_rate_probe and not full_a_mode:
+        raise ValueError("diagnostic rate probe requires --full-a")
+    production_full_a = full_a_mode and not diagnostic_rate_probe
+    if production_full_a and (
         evidence_jsonl is None or snapshot_dir is None or completion_json is None
     ):
         raise ValueError("MuJoCo Full-A requires evidence, snapshot and completion paths")
+    if diagnostic_rate_probe and (
+        evidence_jsonl is None or snapshot_dir is not None or completion_json is not None
+    ):
+        raise ValueError(
+            "diagnostic rate probe requires evidence and forbids snapshot/completion paths"
+        )
     if not full_a_mode and any(value is not None for value in (
         evidence_jsonl, snapshot_dir, completion_json, source_commit, run_namespace,
         mujoco_warp_runtime_site,
     )):
         raise ValueError("MuJoCo Full-A artifact arguments require --full-a")
+    expected_updates = (
+        RATE_PROBE_NUM_UPDATES if diagnostic_rate_probe else FULL_A_NUM_UPDATES
+    )
     if full_a_mode and not _test_allow_small_full_a and (
-        num_envs != FULL_A_NUM_ENVS
-        or num_updates != FULL_A_NUM_UPDATES
+        num_envs != FULL_A_NUM_ENVS or num_updates != expected_updates
     ):
+        label = "diagnostic rate probe" if diagnostic_rate_probe else "production MuJoCo Full-A"
         raise ValueError(
-            "production MuJoCo Full-A shape must be "
-            f"{FULL_A_NUM_ENVS}x{NUM_STEPS_PER_ENV}x{FULL_A_NUM_UPDATES}"
+            f"{label} shape must be "
+            f"{FULL_A_NUM_ENVS}x{NUM_STEPS_PER_ENV}x{expected_updates}"
         )
+    if diagnostic_rate_probe and any(
+        os.environ.get(name) not in (None, "0")
+        for name in RATE_PROBE_PROFILE_ENVS
+    ):
+        raise ValueError("diagnostic rate probe requires profiler environment off")
     if full_a_mode:
         _require_run_identity_fields(source_commit, run_namespace)
     runtime_identity = _bind_full_a_runtime(
@@ -622,15 +655,16 @@ def main(
     # but its stock save() reads it unconditionally before checking disable_logs.
     runner.logger_type = "tensorboard"
     updates = 0
-    snapshots = _snapshot_root(snapshot_dir) if full_a_mode else None
+    snapshots = _snapshot_root(snapshot_dir) if production_full_a else None
     evidence_fd = _open_evidence_jsonl(evidence_jsonl) if full_a_mode else None
     snapshot_receipts = []
     snapshot_indices = (
-        _snapshot_indices(num_updates, save_interval) if full_a_mode else ()
+        _snapshot_indices(num_updates, save_interval) if production_full_a else ()
     )
     original_update = runner.alg.update
     run_started_at = time.perf_counter()
     iteration_started_at = run_started_at
+    rate_update_seconds = []
 
     def counted_update():
         nonlocal iteration_started_at, updates
@@ -680,7 +714,10 @@ def main(
                     f"ACTION_BALL_MUJOCO_FULL_A_PROGRESS={index}:{receipt['name']}",
                     flush=True,
                 )
-        iteration_started_at = time.perf_counter()
+        update_finished_at = time.perf_counter()
+        if diagnostic_rate_probe:
+            rate_update_seconds.append(update_finished_at - iteration_started_at)
+        iteration_started_at = update_finished_at
         return result
 
     runner.alg.update = counted_update
@@ -713,7 +750,7 @@ def main(
             or not final_observation_finite
         ):
             raise RuntimeError("MuJoCo WAIT RSL3 update evidence differs")
-        if full_a_mode:
+        if production_full_a:
             if tuple(row["name"] for row in snapshot_receipts) != tuple(
                 f"model_{index}.pt" for index in snapshot_indices
             ):
@@ -755,9 +792,47 @@ def main(
         "action_ball_full_mdp_ppo_recipe_sha256": (
             FULL_MDP_PPO_RECIPE_SHA256
         ),
-        "task_lifecycle": "full_a_engineering_longrun_complete" if full_a_mode else "idle_wait_only",
+        "task_lifecycle": (
+            "full_a_diagnostic_rate_probe"
+            if diagnostic_rate_probe
+            else "full_a_engineering_longrun_complete"
+            if full_a_mode
+            else "idle_wait_only"
+        ),
     }
-    if full_a_mode:
+    if diagnostic_rate_probe:
+        measured = rate_update_seconds[
+            RATE_PROBE_WARMUP_UPDATES:
+            RATE_PROBE_WARMUP_UPDATES + RATE_PROBE_MEASURED_UPDATES
+        ]
+        if len(rate_update_seconds) != RATE_PROBE_NUM_UPDATES or len(measured) != (
+            RATE_PROBE_MEASURED_UPDATES
+        ):
+            raise RuntimeError("diagnostic rate probe timing window differs")
+        measured_wall = sum(measured)
+        measured_transitions = (
+            RATE_PROBE_MEASURED_UPDATES * num_steps_per_env * num_envs
+        )
+        rate = {
+            "warmup_updates": RATE_PROBE_WARMUP_UPDATES,
+            "measured_updates": RATE_PROBE_MEASURED_UPDATES,
+            "tail_updates": RATE_PROBE_TAIL_UPDATES,
+            "total_wall_seconds": time.perf_counter() - run_started_at,
+            "measured_wall_seconds": measured_wall,
+            "measured_update_seconds": measured,
+            "measured_transitions": measured_transitions,
+            "measured_transitions_per_second": measured_transitions / measured_wall,
+            "update_seconds_p50": statistics.median(measured),
+            "update_seconds_p90": statistics.quantiles(
+                measured, n=10, method="inclusive"
+            )[8],
+        }
+        if getattr(env.device, "type", None) == "cuda":
+            rate["torch_cuda_peak_allocated_bytes"] = int(
+                torch.cuda.max_memory_allocated(env.device)
+            )
+        payload["rate_probe"] = rate
+    elif full_a_mode:
         payload.update({
             "engineering_run_complete": True, "full_a_update_ack_count": updates,
         })
@@ -774,6 +849,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--num-updates", type=int, default=1)
     parser.add_argument("--full-a", dest="full_a_mode", action="store_true")
+    parser.add_argument("--diagnostic-rate-probe", action="store_true")
     parser.add_argument("--evidence-jsonl")
     parser.add_argument("--snapshot-dir")
     parser.add_argument("--completion-json")

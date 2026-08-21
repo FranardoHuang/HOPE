@@ -278,7 +278,7 @@ def _install_fake_stack(
     monkeypatch, tmp_path, *, num_envs, num_updates,
     full_a_mode, schema_ok=True, fail_optimizer=False,
     drop_optimizer_state=False, empty_optimizer_state=False,
-    valid_torch_snapshot=False,
+    valid_torch_snapshot=False, diagnostic_rate_probe=False,
 ):
     module = _load()
     num_steps = module.NUM_STEPS_PER_ENV
@@ -528,11 +528,15 @@ def _install_fake_stack(
         )
         if full_a_mode:
             kwargs.update(
-                evidence_jsonl=str(evidence), snapshot_dir=str(snapshots),
-                completion_json=str(completion), source_commit=SOURCE_COMMIT,
+                evidence_jsonl=str(evidence), source_commit=SOURCE_COMMIT,
                 run_namespace=RUN_NAMESPACE, _test_allow_small_full_a=True,
                 mujoco_warp_runtime_site=str(runtime_site),
+                diagnostic_rate_probe=diagnostic_rate_probe,
             )
+            if not diagnostic_rate_probe:
+                kwargs.update(
+                    snapshot_dir=str(snapshots), completion_json=str(completion)
+                )
         return module.main(**kwargs)
 
     return invoke, trace, saved, evidence, snapshots, completion
@@ -737,6 +741,81 @@ def test_full_a_production_shape_and_snapshot_schedule_are_exact(
     assert sorted(path.name for path in snapshots.iterdir()) == [
         "model_0.pt", "model_1.pt",
     ]
+
+
+def test_full_a_rate_probe_reuses_ledger_without_snapshot_or_completion(
+    monkeypatch, capsys, tmp_path,
+):
+    module = _load()
+    invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
+        monkeypatch, tmp_path, num_envs=1,
+        num_updates=module.RATE_PROBE_NUM_UPDATES, full_a_mode=True,
+        diagnostic_rate_probe=True,
+    )
+
+    assert invoke() == 0
+    output = capsys.readouterr().out.splitlines()
+    record = json.loads(output[-1].split("=", 1)[1])
+    rate = record["rate_probe"]
+    assert record["diagnostic_unauthorized"] is True
+    assert record["task_lifecycle"] == "full_a_diagnostic_rate_probe"
+    assert "engineering_run_complete" not in record
+    assert rate["warmup_updates"] == 10
+    assert rate["measured_updates"] == 50
+    assert rate["tail_updates"] == 1
+    assert len(rate["measured_update_seconds"]) == 50
+    assert rate["measured_transitions"] == 50 * 48
+    assert rate["measured_wall_seconds"] > 0
+    assert rate["measured_transitions_per_second"] > 0
+    assert 0 < rate["update_seconds_p50"] <= rate["update_seconds_p90"]
+    assert len(evidence.read_text().splitlines()) == 61
+    assert trace.count("prepare") == trace.count("ack") == 61
+    assert saved == [] and list(snapshots.iterdir()) == []
+    assert not completion.exists()
+
+
+@pytest.mark.parametrize("profiler_env", (
+    "HOPE_ACTION_BALL_UPDATE_PROFILE",
+    "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES",
+))
+def test_rate_probe_keeps_production_shape_and_rejects_artifact_authority(
+    monkeypatch, tmp_path, profiler_env,
+):
+    module = _load()
+    monkeypatch.setattr(
+        module, "_rsl3_runner",
+        lambda: pytest.fail("rate validation must precede RSL construction"),
+    )
+    common = dict(
+        full_a_mode=True, diagnostic_rate_probe=True,
+        evidence_jsonl=str(tmp_path / "updates.jsonl"),
+        source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE,
+        mujoco_warp_runtime_site=str(tmp_path / "runtime_site"),
+    )
+    with pytest.raises(ValueError, match="4096x48x61"):
+        module.main(num_envs=2, num_updates=61, **common)
+    with pytest.raises(ValueError, match="forbids snapshot/completion"):
+        module.main(
+            num_envs=4096, num_updates=61,
+            snapshot_dir=str(tmp_path / "snapshots"), **common,
+        )
+    assert profiler_env in module.RATE_PROBE_PROFILE_ENVS
+    monkeypatch.setenv(profiler_env, "1")
+    with pytest.raises(ValueError, match="profiler environment off"):
+        module.main(num_envs=4096, num_updates=61, **common)
+
+
+def test_rate_probe_cli_has_no_resume_surface():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(LANE / "mujoco_gpu_ac_full_mdp_wait_rsl3.py"),
+            "--full-a", "--diagnostic-rate-probe", "--resume",
+        ],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    assert result.returncode == 2
+    assert "unrecognized arguments: --resume" in result.stderr
 
 
 def test_evidence_jsonl_is_created_exclusively(monkeypatch, tmp_path):
