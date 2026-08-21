@@ -152,8 +152,7 @@ def _expected_child(rig, commit: str) -> list[str]:
 
 
 def test_dry_run_reports_actual_head_and_exact_contract_without_resources(
-    rig, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
+    rig, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     rig.module.NVIDIA_SMI = rig.nvidia.with_name("must-not-run")
     descriptor = os.open(rig.lock, os.O_RDWR)
     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -189,8 +188,7 @@ def test_dirty_source_fails_before_run_root(rig, dirty: str, capsys) -> None:
 
 @pytest.mark.parametrize("failure", ["uuid", "apps"])
 def test_gpu_uuid_mapping_and_selected_compute_apps_fail_before_root(
-    rig, failure: str, monkeypatch: pytest.MonkeyPatch, capsys
-) -> None:
+    rig, failure: str, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     expected = UUID
     if failure == "uuid":
         expected = "GPU-wrong-0000"
@@ -231,12 +229,17 @@ def test_existing_or_symlink_run_root_is_not_clobbered(rig, kind: str, monkeypat
     assert marker.read_text(encoding="utf-8") == "user data"
 
 
-def test_python_symlink_is_rejected_before_root(rig, capsys) -> None:
+def test_python_symlink_requires_a_canonical_venv(rig) -> None:
     linked = rig.python.with_name("linked-python")
     linked.symlink_to(rig.python)
-    assert rig.module.main(rig.argv(dry=True, executable=linked)) == 2
-    assert "canonical regular executable" in capsys.readouterr().err
-    assert not rig.root.parent.exists()
+    with pytest.raises(rig.module.LaunchError, match="canonical venv bin entry"):
+        rig.module._python_entry(linked)
+    venv = rig.workspace / "exact-venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = /exact\n", encoding="utf-8")
+    entry = venv / "bin" / "python"
+    entry.symlink_to(rig.python)
+    assert rig.module._python_entry(entry) == entry
 
 
 def test_child_rc_logs_exact_env_argv_and_lock_lifetime(

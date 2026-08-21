@@ -57,7 +57,7 @@ def _source_commit() -> str:
     return commit
 
 
-def _canonical_regular(path: Path, label: str, *, executable: bool = False) -> Path:
+def _canonical_regular(path: Path, label: str) -> Path:
     if not path.is_absolute():
         raise LaunchError(f"{label} must be absolute")
     try:
@@ -69,10 +69,32 @@ def _canonical_regular(path: Path, label: str, *, executable: bool = False) -> P
         not stat.S_ISREG(row.st_mode)
         or stat.S_ISLNK(row.st_mode)
         or resolved != path
-        or (executable and not os.access(path, os.X_OK))
     ):
-        raise LaunchError(f"{label} must be one canonical regular executable"
-                          if executable else f"{label} must be one canonical regular file")
+        raise LaunchError(f"{label} must be one canonical regular file")
+    return path
+
+
+def _python_entry(path: Path) -> Path:
+    """Validate a Python entry without resolving away its venv semantics."""
+    if not path.is_absolute():
+        raise LaunchError("python must be absolute")
+    try:
+        entry = path.lstat()
+        resolved = path.resolve(strict=True)
+        target = resolved.lstat()
+    except OSError as exc:
+        raise LaunchError("python is missing") from exc
+    if not stat.S_ISREG(target.st_mode) or not os.access(path, os.X_OK):
+        raise LaunchError("python target must be one canonical regular executable")
+    if stat.S_ISREG(entry.st_mode):
+        if resolved != path:
+            raise LaunchError("python regular entry has a symlinked ancestor")
+        return path
+    if not stat.S_ISLNK(entry.st_mode) or path.parent.name != "bin":
+        raise LaunchError("python symlink must be one canonical venv bin entry")
+    _canonical_regular(path.parent.parent / "pyvenv.cfg", "python venv pyvenv.cfg")
+    if path.parent.resolve(strict=True) != path.parent:
+        raise LaunchError("python venv entry has no canonical pyvenv.cfg")
     return path
 
 
@@ -93,7 +115,7 @@ def _nearest_existing(path: Path) -> Path:
 
 
 def _validate_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
-    python = _canonical_regular(args.python, "python", executable=True)
+    python = _python_entry(args.python)
     runner = _canonical_regular(REPO_ROOT / RUNNER_RELATIVE, "Full-A runner")
     root = args.run_root
     if (
