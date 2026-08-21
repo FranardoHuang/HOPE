@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 from contextlib import contextmanager
 from dataclasses import fields, is_dataclass, replace
 import importlib
@@ -114,23 +113,6 @@ def _real_settled_r03():
     return owner, epoch, racket, _r03_identity(epoch)
 
 
-def _assert_callpoints_pass_exact_self(path: Path, expected_count: int) -> None:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    calls = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "merge_runtime_owner_fault"
-    ]
-    assert len(calls) == expected_count
-    for call in calls:
-        owner_keywords = [item for item in call.keywords if item.arg == "owner"]
-        assert len(owner_keywords) == 1
-        assert isinstance(owner_keywords[0].value, ast.Name)
-        assert owner_keywords[0].value.id == "self"
-
-
 def _shot_key(*, shot_index=(11, 12)):
     values = torch.tensor(shot_index, dtype=torch.int64)
     return R07._row_identity.ActionEpochShotKey(
@@ -190,12 +172,9 @@ def _ready_row_bytes(owner, row: int):
     return tuple(tensor[row].contiguous().numpy().tobytes() for tensor in tensors)
 
 
-def test_r03_real_callpoints_and_epoch_gate_require_the_bound_coordinator():
-    epoch = _epoch()
+def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
+    owner, epoch, racket, identity = _real_settled_r03()
     epoch_module = importlib.import_module(type(epoch).__module__)
-    owner = R03.ActionBallStrikeFactDeviceCoordinator(
-        num_envs=2, device="cpu", action_epoch_owner=epoch
-    )
     foreign = R03.ActionBallStrikeFactDeviceCoordinator(
         num_envs=2, device="cpu"
     )
@@ -213,23 +192,33 @@ def test_r03_real_callpoints_and_epoch_gate_require_the_bound_coordinator():
         assert epoch.commit_head == before_head
         assert _raw_bytes(epoch.current()) == before
 
-    # Both real R03 sites execute even on canonical IDLE; the inactive row
-    # makes their business fault zero while still proving the bound caller.
-    racket = _Racket()
-    owner.bind_action_epoch_racket_owner(racket)
-    identity = _r03_identity(epoch)
-    step = torch.zeros(2, dtype=torch.int64)
-    zero = torch.zeros((2, 3), dtype=torch.float32)
+    step = torch.full((2,), 7, dtype=torch.int64)
+    vectors = {
+        name: torch.arange(offset, offset + 6, dtype=torch.float32).reshape(2, 3)
+        for offset, name in enumerate(
+            (
+                "target_position",
+                "target_velocity",
+                "target_face_normal",
+                "ball_position",
+                "ball_velocity",
+                "achieved_position",
+                "achieved_velocity",
+                "achieved_face_normal",
+            ),
+            start=1,
+        )
+    }
     with _active(racket):
         owner.arm_action_epoch_strike_fact_v1(
             racket_owner=racket,
             source_step=step,
             racket_identity=identity,
-            target_position=zero,
-            target_velocity=zero,
-            target_face_normal=zero,
-            ball_position=zero,
-            ball_velocity=zero,
+            target_position=vectors["target_position"],
+            target_velocity=vectors["target_velocity"],
+            target_face_normal=vectors["target_face_normal"],
+            ball_position=vectors["ball_position"],
+            ball_velocity=vectors["ball_velocity"],
         )
     after_arm = epoch.commit_head
     assert after_arm == before_head + 1
@@ -238,20 +227,34 @@ def test_r03_real_callpoints_and_epoch_gate_require_the_bound_coordinator():
             racket_owner=racket,
             source_step=step,
             racket_identity=identity,
-            achieved_position=zero,
-            achieved_velocity=zero,
-            achieved_face_normal=zero,
+            achieved_position=vectors["achieved_position"],
+            achieved_velocity=vectors["achieved_velocity"],
+            achieved_face_normal=vectors["achieved_face_normal"],
         )
     assert epoch.commit_head == after_arm + 2
 
-    record = epoch.merge_runtime_owner_fault(
-        "r03_strike_fact", bits, owner=owner
-    )
-    slot = epoch_module.OWNER_ORDER.index("r03_strike_fact")
-    assert record.owner_fault_bits[:, 0, slot].tolist() == [4, 0]
-    _assert_callpoints_pass_exact_self(
-        MDP / "action_ball_strike_fact_device.py", 2
-    )
+    record = epoch.current()
+    owner_slot = epoch_module.OWNER_ORDER.index("r03_strike_fact")
+    row = torch.arange(2, dtype=torch.int64)
+    slot = record.current_task_slot
+    published = record.fact_f32[row, slot, owner_slot]
+    expected = torch.cat(tuple(vectors.values()), dim=1)
+    assert published.shape[1] == epoch_module.OWNER_FACT_F32_WIDTH
+    assert torch.equal(published[0, : R03.R03_EPOCH_FACT_VALUE_COUNT], expected[0])
+    assert torch.count_nonzero(
+        published[0, R03.R03_EPOCH_FACT_VALUE_COUNT :]
+    ).item() == 0
+    assert torch.count_nonzero(published[1]).item() == 0
+    assert record.fact_valid_bits[row, slot, owner_slot].tolist() == [
+        R03.R03_EPOCH_FACT_PRESENT | R03.R03_EPOCH_FACT_PHYSICALLY_VALID,
+        0,
+    ]
+    assert record.fact_source_step[row, slot, owner_slot].tolist() == [7, -1]
+    assert record.owner_fault_bits[row, slot, owner_slot].tolist() == [0, 0]
+
+    epoch.merge_runtime_owner_fault("r03_strike_fact", bits, owner=owner)
+    record = epoch.current()
+    assert record.owner_fault_bits[row, slot, owner_slot].tolist() == [4, 0]
 
 
 def test_r03_stale_arm_rejects_next_full_key_with_same_action_slot():
@@ -401,14 +404,10 @@ def test_r07_epoch_gate_rejects_same_type_foreign_bundle_without_mutation():
         assert epoch.commit_head == before_head
         assert _raw_bytes(epoch.current()) == before
 
-    record = epoch.merge_runtime_owner_fault(
-        "r07_recovery", bits, owner=bundle
-    )
+    epoch.merge_runtime_owner_fault("r07_recovery", bits, owner=bundle)
+    record = epoch.current()
     slot = epoch_module.OWNER_ORDER.index("r07_recovery")
     assert record.owner_fault_bits[:, 0, slot].tolist() == [0, 2]
-    _assert_callpoints_pass_exact_self(
-        SOURCE / "action_ball_continuous_recovery_device.py", 1
-    )
 
 
 def test_r07_readiness_uses_full_key_and_selected_reset_preserves_peer_bytes():

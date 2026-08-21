@@ -623,7 +623,9 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
         outcome_code=torch.tensor([2, -1], dtype=torch.int64),
         owner_fault_bits=torch.zeros(2, dtype=torch.int64),
     )
-    outcome_record = epoch.refresh_r06_outcome_rows()
+    refresh_result = epoch.refresh_r06_outcome_rows()
+    assert refresh_result is None
+    outcome_record = epoch.current()
     r06_slot = E.OWNER_ORDER.index("r06_landing_outcome")
     assert outcome_record.owner_fault_bits[0, 0, r06_slot].item() == 4
     epoch.open_reward_cycle()
@@ -724,7 +726,9 @@ def test_physical_launch_journals_keyed_target_and_preserves_peer_bytes(
         target_xy_m=target,
     )
     with _NoHostTensorObservation():
-        after = epoch.refresh_physical_launch_rows()
+        refresh_result = epoch.refresh_physical_launch_rows()
+    assert refresh_result is None
+    after = epoch.current()
     peer_after = _peer_bytes(after)
     assert peer_before.keys() == peer_after.keys()
     assert all(
@@ -781,7 +785,8 @@ def test_nonfinite_physical_target_latches_before_launch_publication(
         target_xy_m=target,
     )
     with _NoHostTensorObservation():
-        after = epoch.refresh_physical_launch_rows()
+        epoch.refresh_physical_launch_rows()
+    after = epoch.current()
     after_rows = (_peer_bytes(after, row=0), _peer_bytes(after))
     assert all(
         lhs.keys() == rhs.keys()
@@ -1243,7 +1248,9 @@ def test_physical_k_grid_join_preserves_first_contact_across_later_miss(
     physical.projection = _physical_packet(epoch.current(), flight_index=1, contact=True)
     epoch.refresh_physical_postphysics_rows()
     physical.projection = _physical_packet(epoch.current(), flight_index=0, contact=False)
-    after = epoch.refresh_physical_postphysics_rows()
+    refresh_result = epoch.refresh_physical_postphysics_rows()
+    assert refresh_result is None
+    after = epoch.current()
     slot = E.OWNER_ORDER.index("physical_ball")
     assert after.fact_valid_bits[0, 0, slot].item() == 3
     assert after.fact_source_step[0, 0, slot].item() == 50
@@ -1267,7 +1274,8 @@ def test_physical_k_grid_join_preserves_first_contact_across_later_miss(
     physical.projection = duplicate
     before_duplicate = epoch.current()
     with _NoHostTensorObservation():
-        after_duplicate = epoch.refresh_physical_postphysics_rows()
+        epoch.refresh_physical_postphysics_rows()
+    after_duplicate = epoch.current()
     assert torch.equal(after_duplicate.fact_f32, before_duplicate.fact_f32)
     assert epoch.milestone.i64[E.milestone_tensors._EI + 5].item() == 1
     assert epoch.milestone.i64[E.milestone_tensors._EI + 6].item() == 1
@@ -2417,9 +2425,11 @@ def test_owner_fault_plane_is_typed_and_malformed_input_is_rejected(monkeypatch)
     else:
         raise AssertionError("rank-1 owner fault was accepted")
     bits = torch.tensor([[4], [0]], dtype=torch.int64)
-    record = epoch.merge_runtime_owner_fault(
+    merge_result = epoch.merge_runtime_owner_fault(
         "r07_recovery", bits, owner=r07_owner
     )
+    assert merge_result is None
+    record = epoch.current()
     slot = E.OWNER_ORDER.index("r07_recovery")
     assert record.owner_fault_bits[:, 0, slot].tolist() == [4, 0]
 
@@ -2489,10 +2499,12 @@ def test_owner_facts_mask_idle_rows_and_keep_active_owner_planes_distinct(monkey
     )
     physical.launch = _launch_packet(epoch.current(), due=torch.tensor([True, False]))
     epoch.refresh_physical_launch_rows()
-    record = epoch.publish_owner_facts(
+    publish_result = epoch.publish_owner_facts(
         "r07_recovery", owner=r07_owner,
         valid_bits=valid, source_step=step, values=r07_values,
     )
+    assert publish_result is None
+    record = epoch.current()
     r03_slot = E.OWNER_ORDER.index("r03_strike_fact")
     r07_slot = E.OWNER_ORDER.index("r07_recovery")
     assert record.fact_f32[0, 0, r03_slot, 0].item() == 1.0

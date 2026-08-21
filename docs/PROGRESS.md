@@ -1,5 +1,15 @@
 # 简短进度记录
 
+## 2026-08-21 — FullMDP Phase-C2退役Epoch零consumer返回clone（branch candidate）
+
+- 5个ActionEpoch mutator改为`None`返回，只删除production caller全部丢弃的44-tensor整record clone；
+  真正被Motion/Reward消费的两个返回合同保留。R03也用公开fact宽度常量替代一次只为读取`32`而执行的
+  `current()`。mutation/journal/fault/selected-reset与Physical/R06 paired顺序均未改，无新Gate或owner。
+- `N=4096,S=1,H48`静态下界：固定路径少约`1.674 GiB/update`，active dense再少约
+  `3.349 GiB/update`；主线分进程=`168 passed, 7 skipped`，独立终审`P0=0/P1=0`。这不是wall结论，
+  exact Pod fixed-tape与matched H48仍`未测`。详细真源见
+  [FullMDP hot-path实验§11](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#11-phase-c2mutator不返回无人消费的整record)。
+
 ## 2026-08-21 — FullMDP Phase-C1收窄Motion热路径publication（branch candidate）
 
 - 现役Motion observation从34-tensor broad dict收成两个真实consumer所需的10-field typed snapshot；

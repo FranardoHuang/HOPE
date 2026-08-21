@@ -2069,7 +2069,7 @@ class ActionEpochOwner:
             )
             return record.clone()
 
-    def refresh_physical_postphysics_rows(self) -> ActionEpochRecord:
+    def refresh_physical_postphysics_rows(self) -> None:
         """Pull the sole active Physical packet and full-key join its fact planes."""
 
         with self._operation("refresh Physical postphysics rows"):
@@ -2261,9 +2261,8 @@ class ActionEpochOwner:
                 first_observed,
                 first_contact,
             )
-            return record.clone()
 
-    def refresh_r06_outcome_rows(self) -> ActionEpochRecord:
+    def refresh_r06_outcome_rows(self) -> None:
         """Pull and full-key join R06's current settled outcome rows."""
 
         with self._operation("refresh R06 outcome rows"):
@@ -2470,7 +2469,6 @@ class ActionEpochOwner:
                 join
                 & facts[:, None, r06_device.R06_ACTION_EPOCH_COMMON_ON_TABLE_F32].eq(1.0),
             )
-            return record.clone()
 
     # ------------------------------------------------------------------
     # Reward-cycle completion and actual control-step payment
@@ -2634,7 +2632,7 @@ class ActionEpochOwner:
 
     def merge_runtime_owner_fault(
         self, owner_kind: str, fault_bits: torch.Tensor, *, owner: object
-    ) -> ActionEpochRecord:
+    ) -> None:
         with self._operation("merge runtime owner fault"):
             self._healthy()
             record = self._publication.current
@@ -2663,7 +2661,6 @@ class ActionEpochOwner:
                 values=(*values, merged[:, :, owner_slot]),
                 changes={"owner_fault_bits": merged},
             )
-            return record.clone()
 
     def publish_owner_facts(
         self,
@@ -2673,7 +2670,7 @@ class ActionEpochOwner:
         valid_bits: torch.Tensor,
         source_step: torch.Tensor,
         values: torch.Tensor,
-    ) -> ActionEpochRecord:
+    ) -> None:
         with self._operation("publish owner facts"):
             self._healthy()
             record = self._publication.current
@@ -2768,7 +2765,6 @@ class ActionEpochOwner:
                     owner_kind,
                     fully_valid,
                 )
-            return record.clone()
 
     def publish_r07_first_ready(
         self,
@@ -2839,7 +2835,7 @@ class ActionEpochOwner:
                 "r07_recovery", "add_r07_first_ready", joined
             )
 
-    def refresh_physical_launch_rows(self) -> ActionEpochRecord:
+    def refresh_physical_launch_rows(self) -> None:
         """Pull Physical's active launch after-image and join its full row key."""
 
         with self._operation("refresh Physical launch rows"):
@@ -2962,7 +2958,6 @@ class ActionEpochOwner:
                     "writes_committed": committed,
                 },
             )
-            return record.clone()
 
     # ------------------------------------------------------------------
     # Publication-free selected reset lease followed by one masked commit

@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0+c1-host-validated / Pod-matched-wall-pending`
+> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0+c1+c2-host-validated / Pod-matched-wall-pending`
 > 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；Phase-C0只有静态payload proxy与host语义证据，Pod matched wall仍未测
 
 ## 1. 采用、延后、拒绝
@@ -445,3 +445,28 @@ Observation=`14 passed`、Physical hot lane=`32 passed`；pycompile与diff-check
 phase严格推出，但删除它会把policy ABI从203/219改成202/218，因此明确延后为独立learning-interface裁决，
 不与本次复制减法混在同一因果刀。Pod fixed-tape、profiler-off matched H48 wall及6秒级目标仍`未测`，G05
 保持`Partial`。
+
+## 11. Phase-C2：mutator不返回无人消费的整record
+
+`ActionEpochRecord.clone()`在`N=4096,S=1`包含44个tensor，静态大小精确为`6,242,304 B`
+（`5.953125 MiB`）。production caller census显示下列五个mutator的返回值全部被丢弃：
+`merge_runtime_owner_fault`、`publish_owner_facts`、`refresh_physical_launch_rows`、
+`refresh_physical_postphysics_rows`和`refresh_r06_outcome_rows`。其中postphysics是经已验证bound method动态调用，
+同样只执行而不绑定返回。Phase-C2把这五个方法改为`None`返回并删除末尾整record clone；真正被Motion phase
+和Reward cycle消费的`publish_motion_playback_started`、`open_reward_cycle`返回合同没有动。
+
+R03每次publish还曾为读取`fact_f32.shape[-1] == 32`而额外调用一次`epoch.current()`；现改用Epoch公开的
+`OWNER_FACT_F32_WIDTH`。旧AST/源码形状测试同步替换为真实R03发布反例，逐行验证24个业务值、8个保留零、
+valid/source-step/fault与ineligible行。没有删除任何mutation、journal append、milestone、fault latch、sticky
+poison、selected-reset或Physical/R06 paired callback；这些都在旧return clone前已完成。
+
+静态下界按真实频率计算：固定每control的三次fault merge、两次owner fact publish和一次R03 width read，
+H48共少288份record，即`1,714.5 MiB`（约`1.674 GiB`）与12,672个tensor clone/copy call。active dense在
+decimation4的每个substep再少Physical launch/postphysics/R06三份返回，H48共少576份，即`3,429 MiB`
+（约`3.349 GiB`）与25,344个call；合计active下界约`5.022 GiB/update`与38,016个call。这里只是
+shape/dtype/frequency proxy，不能折算wall或显存峰值。
+
+主线分进程复跑Epoch rowwise、R03/R07 alignment、R03 direct Reward、Physical hot lane、lean Rewards、lean
+runtime与postphysics env，共`168 passed, 7 skipped`；pycompile/diff-check通过。独立caller/paired/reset审查
+为`P0=0/P1=0`。下一步仍需exact Pod fixed-tape逐项对齐Reward20、actor203/critic219、Epoch final state、
+Physical/R06 substep lifecycle及fault/reset/overflow，再做profiler-off matched H48 wall；G05保持`Partial`。

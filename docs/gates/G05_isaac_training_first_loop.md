@@ -25,6 +25,14 @@ K>0/fault/close/paid原路径保持；host focused=`160 passed, 12 skipped`，�
 这不是CUDA或wall实测；Pod fixed-tape、profiler-off H48 matched wall与6秒级目标均`未测`。详见
 [hot-path实验§10](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#10-phase-c1motion只发布真实consumer并集)。
 
+**2026-08-21 Phase-C2 Epoch零consumer返回clone退役（branch candidate；Gate仍`Partial`）：**五个
+ActionEpoch mutator改为`None`返回，删除所有production caller均丢弃的44-tensor整record clone；R03也删除
+一次只为读取公开fact宽度32而执行的`current()`。真正被Motion/Reward消费的返回合同、mutation/journal、
+fault/reset与Physical/R06 paired顺序保持。`N=4096,S=1,H48`静态下界为固定路径少约`1.674 GiB/update`，
+active dense再少约`3.349 GiB/update`；主线=`168 passed, 7 skipped`，独立终审`P0=0/P1=0`。这不是wall
+或显存实测，Pod fixed-tape与profiler-off matched H48仍`未测`。详见
+[hot-path实验§11](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#11-phase-c2mutator不返回无人消费的整record)。
+
 **2026-08-21 semantic Observation V2 branch candidate（Gate仍`Partial`）：**family A从旧229/399切到
 actor203/critic219；它恢复229迁移遗漏的floating-base state并删除raw task/owner/reward账，不做237/407机械
 扩维。R06 broad projection也缩为现有owner内的key8+publication live selection与四tensor输出，没有新增

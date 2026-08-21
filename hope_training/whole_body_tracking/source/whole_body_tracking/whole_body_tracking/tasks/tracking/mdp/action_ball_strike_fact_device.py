@@ -1076,7 +1076,7 @@ class ActionBallStrikeFactDeviceCoordinator:
             safe, steps, torch.full_like(steps, -1)
         )
         values = torch.zeros(
-            (self.num_envs, slots, self._action_epoch_owner.current().fact_f32.shape[-1]),
+            (self.num_envs, slots, epoch_module.OWNER_FACT_F32_WIDTH),
             dtype=torch.float32,
             device=self.device,
         )
