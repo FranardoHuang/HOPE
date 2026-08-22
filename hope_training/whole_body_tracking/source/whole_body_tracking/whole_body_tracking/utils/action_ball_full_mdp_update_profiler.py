@@ -38,7 +38,7 @@ _SEGMENT_NAMES = (
     "scene_update",
     "post_physics_publish",
     "physical_epoch_postphysics",
-    "r07_idle_support",
+    "r07_idle_stamp",
     "r07_keyed_publish",
     "r07_motion_projection",
     "motion_ready_install",

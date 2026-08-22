@@ -348,7 +348,7 @@ def test_tilted_heading_is_unit_and_near_vertical_heading_fails_explicitly():
         rtol=0.0,
     )
     near_vertical = torch.tensor([[0.70710678, 0.0, 0.70710678, 0.0]])
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="R07 observation chronology differs"):
         P.heading_xy_from_quat_wxyz(near_vertical)
 
 
@@ -727,6 +727,16 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     )
     assert resumed_view.critic_rows["foot_supported_lr"][0].tolist() == [1.0, 0.0]
     assert resumed_view.critic_rows["cadence_ready_dwell_fraction"][0].item() == 0.5
+
+    # R07 only stamps the pre-reset cadence it observed.  Motion is the
+    # independent chronology authority, so a replayed same-generation stamp
+    # is rejected here instead of being self-approved by the R07 producer.
+    ready.control_tick[0] -= 1
+    with pytest.raises(RuntimeError):
+        O.build_direct_action_epoch_observation_facts(
+            runtime_owner=runtime, record=record
+        )
+    ready.control_tick[0] += 1
 
     # Cold genesis has no post-physics capability.  Its explicit invalid/zero
     # R07 state is the one allowed no-publication case and remains finite.

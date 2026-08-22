@@ -177,18 +177,18 @@ def _publish_epoch_reward_facts(
     )
 
 
-def _refresh_epoch_idle_support_without_keyed_facts(
+def _stamp_epoch_idle_observation_without_keyed_facts(
     bundle,
     motion,
     *,
     cadence_tick: int,
-    current_source_step: torch.Tensor,
+    current_source_step: int,
 ):
-    """Refresh idle support without an ActionEpoch fact publication."""
+    """Stamp idle observation chronology without an Epoch fact write."""
 
     assert type(cadence_tick) is int
     motion._action_ball_continuous_episode_step.fill_(cadence_tick)
-    return bundle.refresh_epoch_idle_support_without_keyed_facts(
+    return bundle.stamp_epoch_idle_observation_without_keyed_facts(
         current_source_step=current_source_step
     )
 
@@ -701,7 +701,7 @@ def test_idle_no_key_reads_only_support_and_keeps_readiness_neutral(
     monkeypatch.setattr(
         epoch_owner, "publish_r07_first_ready", reject_keyed_write
     )
-    assert _refresh_epoch_idle_support_without_keyed_facts(
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=0,
@@ -732,7 +732,7 @@ def test_idle_no_key_reads_only_support_and_keeps_readiness_neutral(
     assert record.owner_fault_bits[:, :, owner_slot].eq(0).all()
 
     env.common_step_counter = 1
-    assert _refresh_epoch_idle_support_without_keyed_facts(
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=1,
@@ -764,12 +764,15 @@ def test_idle_no_key_support_is_finite_rowwise_and_clone_only(monkeypatch):
     bundle = _construct_bundle(
         env=env, motion=motion, action_epoch_owner=epoch_owner
     )
-    assert _refresh_epoch_idle_support_without_keyed_facts(
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=0,
         current_source_step=0,
     ) is None
+    # Observation must consume the exact postphysics sample, not a later
+    # same-control contact mutation (for example, a selected reset write).
+    sensor.data.net_forces_w.zero_()
     state = bundle.action_epoch_observation_state()
     assert state.postphysics_valid.tolist() == [False, True]
     assert state.source_step.tolist() == [-1, 0]
@@ -794,7 +797,7 @@ def test_idle_no_key_subset_reset_preserves_peer_and_zero_dwell(
     )
 
     env.common_step_counter = 0
-    assert _refresh_epoch_idle_support_without_keyed_facts(
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=0,
@@ -823,7 +826,7 @@ def test_idle_no_key_subset_reset_preserves_peer_and_zero_dwell(
     epoch_owner._commit_head += 1
 
     env.common_step_counter = 1
-    assert _refresh_epoch_idle_support_without_keyed_facts(
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=1,
@@ -855,7 +858,7 @@ def test_idle_support_rejects_snapshot_when_epoch_advances(monkeypatch):
         recovery.ContinuousRecoveryDeviceError,
         match="snapshot is stale or foreign",
     ):
-        bundle.owner.publish_action_epoch_idle_support(
+        bundle.owner.stamp_action_epoch_idle_observation(
             support,
             epoch_facts=epoch_facts,
             current_source_step=0,
@@ -864,7 +867,7 @@ def test_idle_support_rejects_snapshot_when_epoch_advances(monkeypatch):
         )
 
 
-def test_idle_support_rejects_source_mismatch_and_cadence_replay_before_mutation(
+def test_idle_stamp_rejects_independent_source_mismatch_before_mutation(
     monkeypatch,
 ):
     device = torch.device("cpu")
@@ -884,7 +887,7 @@ def test_idle_support_rejects_source_mismatch_and_cadence_replay_before_mutation
         recovery.ContinuousRecoveryDeviceError,
         match="source step differs from runtime",
     ):
-        _refresh_epoch_idle_support_without_keyed_facts(
+        _stamp_epoch_idle_observation_without_keyed_facts(
             bundle,
             motion,
             cadence_tick=0,
@@ -893,7 +896,7 @@ def test_idle_support_rejects_source_mismatch_and_cadence_replay_before_mutation
     assert bundle.owner._mutation_version == mutation
     assert bundle.owner._latest_motion_ready_projection is None
 
-    assert _refresh_epoch_idle_support_without_keyed_facts(
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=0,
@@ -901,26 +904,19 @@ def test_idle_support_rejects_source_mismatch_and_cadence_replay_before_mutation
     ) is None
     first = bundle.action_epoch_observation_state()
     assert bundle.owner._latest_motion_ready_projection is None
-    published_source = bundle.owner._idle_observation_source_step.clone()
-    mutation = bundle.owner._mutation_version
+    published_source = bundle.owner._idle_observation_source_step
     env.common_step_counter = 1
-    with pytest.raises(RuntimeError):
-        _refresh_epoch_idle_support_without_keyed_facts(
-            bundle,
-            motion,
-            cadence_tick=0,
-            current_source_step=1,
-        )
-    assert bundle.owner._mutation_version == mutation
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
+        bundle,
+        motion,
+        cadence_tick=0,
+        current_source_step=1,
+    ) is None
     assert bundle.owner._latest_motion_ready_projection is None
-    assert torch.equal(
-        bundle.owner._idle_observation_source_step,
-        published_source,
-    )
-    assert torch.equal(
-        bundle.action_epoch_observation_state().source_step,
-        first.source_step,
-    )
+    assert published_source == 0
+    replayed = bundle.action_epoch_observation_state()
+    assert replayed.source_step.tolist() == [1, 1]
+    assert replayed.control_tick.tolist() == first.control_tick.tolist()
 
 
 def test_epoch_publish_reads_one_action_epoch_snapshot(monkeypatch):

@@ -671,11 +671,11 @@ class _R07:
         )
         return None
 
-    def refresh_epoch_idle_support_without_keyed_facts(
+    def stamp_epoch_idle_observation_without_keyed_facts(
         self, *, current_source_step
     ):
         assert type(current_source_step) is int
-        self.trace.append(("r07_idle_support", current_source_step))
+        self.trace.append(("r07_idle_stamp", current_source_step))
         return None
 
     def motion_ready_projection(self):
@@ -1059,7 +1059,7 @@ def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
     assert "racket_arm" not in names
     assert "racket_publish" not in names
     assert "r07_publish" not in names
-    assert names.count("r07_idle_support") == 1
+    assert names.count("r07_idle_stamp") == 1
     assert "r07_ready" not in names
     assert "motion_ready" not in names
     assert names.count("physical_publish") == 2
@@ -1076,7 +1076,7 @@ def test_transport_idle_keyed_epoch_keeps_full_r07_publication():
     assert "racket_arm" not in names
     assert "racket_publish" not in names
     assert names.count("r07_publish") == 1
-    assert "r07_idle_support" not in names
+    assert "r07_idle_stamp" not in names
     assert names.count("r07_ready") == 1
     assert names.count("motion_ready") == 1
 
@@ -1091,7 +1091,7 @@ def test_transport_work_without_key_keeps_r03_but_skips_r07_keyed_writes():
     names = [row[0] for row in trace]
     assert names.count("racket_publish") == 1
     assert "r07_publish" not in names
-    assert names.count("r07_idle_support") == 1
+    assert names.count("r07_idle_stamp") == 1
     assert "r07_ready" not in names
     assert "motion_ready" not in names
 

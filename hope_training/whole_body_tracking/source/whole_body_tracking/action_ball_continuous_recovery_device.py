@@ -622,10 +622,10 @@ class DiagnosticN2ContinuousRecoveryBundle:
             publish_keyed_action_epoch=True,
         )
 
-    def refresh_epoch_idle_support_without_keyed_facts(
+    def stamp_epoch_idle_observation_without_keyed_facts(
         self, *, current_source_step: int
     ) -> None:
-        """Publish only same-tick support for an unkeyed observation."""
+        """Stamp pre-reset chronology for the next unkeyed observation."""
 
         owner = self._require_bound_owner()
         epoch_owner = self.action_epoch_owner
@@ -663,7 +663,7 @@ class DiagnosticN2ContinuousRecoveryBundle:
         support = self.plant_fact_adapter.read_idle_foot_support(
             support_contact_threshold=owner.profile.support_contact_threshold,
         )
-        owner.publish_action_epoch_idle_support(
+        owner.stamp_action_epoch_idle_observation(
             support,
             epoch_facts=epoch_facts,
             current_source_step=current_source_step,
@@ -1998,10 +1998,9 @@ class ContinuousRecoveryDeviceCoordinator:
         self._action_epoch_ready_last_source_step = -1
         self._idle_observation_published = False
         self._idle_observation_postphysics_valid = torch.zeros(n, **bo)
-        self._idle_observation_source_step = torch.full((n,), -1, **lo)
+        self._idle_observation_source_step = -1
         self._idle_observation_reset_generation = torch.full((n,), -1, **lo)
-        self._idle_observation_control_tick = torch.full((n,), -1, **lo)
-        self._idle_observation_ready_streak = torch.zeros(n, **lo)
+        self._idle_observation_motion_cadence_tick = torch.full((n,), -1, **lo)
         self._idle_observation_foot_supported_lr = torch.zeros(
             (n, self.num_feet), **bo
         )
@@ -3720,7 +3719,7 @@ class ContinuousRecoveryDeviceCoordinator:
             reference_action_uid=reference_action_uid,
         )
 
-    def publish_action_epoch_idle_support(
+    def stamp_action_epoch_idle_observation(
         self,
         support: _IdleFootSupportFacts,
         *,
@@ -3729,7 +3728,7 @@ class ContinuousRecoveryDeviceCoordinator:
         motion_cadence_tick: torch.Tensor,
         action_epoch_owner: object,
     ) -> None:
-        """Publish the independent contact fact needed by the idle critic."""
+        """Retain only pre-reset chronology needed by the idle critic."""
 
         if (
             isinstance(current_source_step, bool)
@@ -3789,47 +3788,33 @@ class ContinuousRecoveryDeviceCoordinator:
             shape=(self.num_envs, self.num_feet),
             dtype=torch.bool,
         )
-        source_step = support.source_step
+        observed_source_step = support.source_step
         if (
-            isinstance(source_step, bool)
-            or not isinstance(source_step, int)
-            or source_step < 0
+            isinstance(observed_source_step, bool)
+            or not isinstance(observed_source_step, int)
+            or observed_source_step < 0
         ):
             raise ContinuousRecoveryDeviceError(
                 "R07 idle-support source step is malformed"
             )
-        if source_step != current_source_step:
+        if observed_source_step != current_source_step:
             raise ContinuousRecoveryDeviceError(
                 "R07 idle-support source step differs from runtime"
             )
 
         self._require_action_epoch_readiness_chronology(
-            observed_source_step=source_step,
+            observed_source_step=observed_source_step,
         )
         self._require_r07_business_mutation_allowed(
             label="ActionEpoch idle post-physics support"
         )
-        self._require_action_epoch_motion_cadence_chronology(
-            reset_generation=reset_generation,
-            motion_cadence_tick=motion_tick,
-        )
-
-        self._action_epoch_ready_instant.zero_()
-        self._action_epoch_ready_live.zero_()
-        self._action_epoch_ready_streak.zero_()
         self._action_epoch_ready_last_motion_cadence_tick.copy_(motion_tick)
         self._action_epoch_ready_last_reset_generation.copy_(reset_generation)
-        self._action_epoch_ready_last_source_step = source_step
-
-        torch._assert_async(
-            torch.all(motion_tick < torch.iinfo(torch.int64).max)
-        )
+        self._action_epoch_ready_last_source_step = observed_source_step
         self._idle_observation_postphysics_valid.copy_(support_valid)
-        self._idle_observation_source_step.fill_(current_source_step)
-        self._idle_observation_source_step.masked_fill_(~support_valid, -1)
+        self._idle_observation_source_step = observed_source_step
         self._idle_observation_reset_generation.copy_(reset_generation)
-        self._idle_observation_control_tick.copy_(motion_tick).add_(1)
-        self._idle_observation_ready_streak.zero_()
+        self._idle_observation_motion_cadence_tick.copy_(motion_tick)
         self._idle_observation_foot_supported_lr.copy_(foot_supported_lr)
         self._idle_observation_published = True
         self._latest_motion_ready_projection = None
@@ -4426,26 +4411,31 @@ class ContinuousRecoveryDeviceCoordinator:
         projection = self._latest_motion_ready_projection
         if projection is None:
             if self._idle_observation_published:
+                support_valid = self._idle_observation_postphysics_valid
+                foot_supported_lr = self._idle_observation_foot_supported_lr
+                source_step = torch.full(
+                    (self.num_envs,),
+                    self._idle_observation_source_step,
+                    dtype=torch.int64,
+                    device=self.device,
+                )
+                source_step.masked_fill_(~support_valid, -1)
+                cadence_tick = self._idle_observation_motion_cadence_tick
+                torch._assert_async(
+                    torch.all(cadence_tick < torch.iinfo(torch.int64).max)
+                )
                 return ContinuousRecoveryObservationState(
-                    postphysics_valid=(
-                        self._idle_observation_postphysics_valid.detach().clone()
-                    ),
-                    source_step=(
-                        self._idle_observation_source_step.detach().clone()
-                    ),
+                    postphysics_valid=support_valid,
+                    source_step=source_step,
                     reset_generation=(
                         self._idle_observation_reset_generation.detach().clone()
                     ),
-                    control_tick=(
-                        self._idle_observation_control_tick.detach().clone()
-                    ),
+                    control_tick=cadence_tick.detach().clone().add_(1),
                     ready_streak=(
-                        self._idle_observation_ready_streak.detach().clone()
+                        torch.zeros_like(cadence_tick)
                     ),
                     required_dwell=int(self.profile.ready_dwell_ticks),
-                    foot_supported_lr=(
-                        self._idle_observation_foot_supported_lr.detach().clone()
-                    ),
+                    foot_supported_lr=foot_supported_lr.detach().clone(),
                 )
             if self._action_epoch_ready_last_source_step >= 0:
                 raise ContinuousRecoveryDeviceError(

@@ -1388,7 +1388,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                                     "Racket epoch strike-fact publisher must return None"
                                 )
                         recovery_method = (
-                            "refresh_epoch_idle_support_without_keyed_facts"
+                            "stamp_epoch_idle_observation_without_keyed_facts"
                             if not activity.keyed_epoch_work
                             else "publish_epoch_reward_facts"
                         )
@@ -1410,7 +1410,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                         else:
                             profile_call(
                                 (
-                                    "r07_idle_support"
+                                    "r07_idle_stamp"
                                     if not activity.keyed_epoch_work
                                     else "r07_keyed_publish"
                                 ),
