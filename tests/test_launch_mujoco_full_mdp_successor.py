@@ -86,12 +86,15 @@ try:
 finally:
     os.close(fd)
 names = ["CUDA_DEVICE_ORDER", "CUDA_VISIBLE_DEVICES", "PYTHONNOUSERSITE", "PYTHONDONTWRITEBYTECODE",
-         "ACTIONBALL_READY_POSE", "WARP_CACHE_PATH",
+         "ACTIONBALL_READY_POSE", "WARP_CACHE_PATH", "CUDA_CACHE_PATH",
+         "TMPDIR", "PYTHONPYCACHEPREFIX",
          "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"]
 warp_cache = pathlib.Path(os.environ["WARP_CACHE_PATH"])
+cuda_cache = pathlib.Path(os.environ["CUDA_CACHE_PATH"])
 payload = {"argv": sys.argv[1:], "cwd": os.getcwd(), "lock_held": held,
            "env": {name: os.environ.get(name) for name in names},
-           "warp_cache_is_dir": warp_cache.is_dir()}
+           "warp_cache_is_dir": warp_cache.is_dir(),
+           "cuda_cache_is_dir": cuda_cache.is_dir()}
 pathlib.Path(os.environ["FAKE_CHILD_RECORD"]).write_text(json.dumps(payload))
 pathlib.Path(os.environ["FAKE_CHILD_STARTED"]).write_text("started")
 pathlib.Path("MUJOCO_LOG.TXT").write_text("process-local runtime log")
@@ -182,6 +185,9 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
         "env": {
             "set": {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
                     "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
+                    "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"),
+                    "TMPDIR": str(rig.root / "tmp"),
+                    "PYTHONPYCACHEPREFIX": str(rig.root / "pycache"),
                     "WARP_CACHE_PATH": str(rig.root / "warp_cache")},
             "unset": ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"],
         },
@@ -299,6 +305,9 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert rig.started.exists(), errors
     assert (rig.root / "snapshots").is_dir()
     assert (rig.root / "warp_cache").is_dir()
+    assert (rig.root / "cuda_cache").is_dir()
+    assert (rig.root / "tmp").is_dir()
+    assert (rig.root / "pycache").is_dir()
     assert not (rig.root / "runtime_site").exists()
     assert not (rig.root / "evidence.jsonl").exists()
     assert not (rig.root / "completion.json").exists()
@@ -317,13 +326,17 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert record["cwd"] == str(rig.root)
     assert (rig.root / "MUJOCO_LOG.TXT").read_text() == "process-local runtime log"
     assert record["warp_cache_is_dir"] is True
+    assert record["cuda_cache_is_dir"] is True
     assert (rig.root / "warp_cache" / "fake-compiled-kernel").read_text() == "run-owned cache"
     assert not (rig.repo / "MUJOCO_LOG.TXT").exists()
     assert record["lock_held"] is True
     assert record["env"] == {
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
-        "WARP_CACHE_PATH": str(rig.root / "warp_cache"), "PYTHONPATH": None,
+        "WARP_CACHE_PATH": str(rig.root / "warp_cache"),
+        "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"), "PYTHONPATH": None,
+        "TMPDIR": str(rig.root / "tmp"),
+        "PYTHONPYCACHEPREFIX": str(rig.root / "pycache"),
         "PYTHONHOME": None, "VIRTUAL_ENV": None, "CONDA_PREFIX": None,
     }
     descriptor = os.open(rig.lock, os.O_RDWR)
@@ -337,6 +350,9 @@ def test_child_start_failure_leaves_spent_root(rig, capsys) -> None:
     assert "cannot start" in capsys.readouterr().err
     assert rig.root.is_dir() and (rig.root / "snapshots").is_dir()
     assert (rig.root / "warp_cache").is_dir()
+    assert (rig.root / "cuda_cache").is_dir()
+    assert (rig.root / "tmp").is_dir()
+    assert (rig.root / "pycache").is_dir()
     assert (rig.root / "stdout.log").is_file()
     assert (rig.root / "stderr.log").is_file()
     assert not (rig.root / "runtime_site").exists()

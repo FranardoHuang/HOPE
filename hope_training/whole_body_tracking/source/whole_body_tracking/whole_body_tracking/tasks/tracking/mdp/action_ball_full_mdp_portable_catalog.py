@@ -82,7 +82,7 @@ FRESH_POLICY_STEP_S = 0.02
 FRESH_FIRST_REVEAL_TICK = 295
 FRESH_RECOVERY_END_OFFSET_TICKS = 77
 FRESH_HIDDEN_GAP_TICKS = 2
-FRESH_REFERENCE_DUE_COUNT = 5
+FRESH_REFERENCE_DUE_COUNT = 4
 FRESH_EPISODE_HORIZON_TICKS = 1500
 
 
@@ -197,8 +197,11 @@ def derive_portable_fresh_cadence(
     if (
         maximum_close != 214
         or cadence != 293
-        or due_ticks != (295, 588, 881, 1174, 1467)
-        or due_ticks[-1] >= FRESH_EPISODE_HORIZON_TICKS
+        or due_ticks != (295, 588, 881, 1174)
+        # Every advertised opportunity must fit its complete construction
+        # window.  Tick 1467 is the fourth row's retirement boundary, not a
+        # fifth reveal: only 33 episode ticks remain after it.
+        or due_ticks[-1] + cadence >= FRESH_EPISODE_HORIZON_TICKS
     ):
         raise ValueError("portable fresh cadence differs from the frozen schedule")
     return PortableFreshCadence(

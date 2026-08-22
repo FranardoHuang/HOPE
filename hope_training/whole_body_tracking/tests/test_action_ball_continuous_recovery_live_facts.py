@@ -1660,6 +1660,79 @@ def test_epoch_publish_owns_two_tick_dwell_and_next_tick_motion_projection(
         bundle.action_epoch_observation_state()
 
 
+@pytest.mark.parametrize("device_name", ("cpu", "cuda:0"))
+def test_neutral_observation_breaks_consecutive_recovery_dwell(
+    monkeypatch, device_name
+):
+    if device_name.startswith("cuda") and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    device = torch.device(device_name)
+    env, motion, robot, sensor, bundle, _epoch_owner = (
+        _rowwise_settled_subject(monkeypatch, device=device)
+    )
+    sensor.data.net_forces_w.zero_()
+    for name in FEET:
+        sensor.data.net_forces_w[:, BODY_NAMES.index(name), 2] = 10.0
+    robot.data.body_lin_vel_w.zero_()
+
+    first = _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=40,
+        current_source_step=torch.full(
+            (2,), 40, dtype=torch.int64, device=device
+        ),
+    )
+    assert first.ready_instant.tolist() == [True, True]
+    assert bundle.owner._action_epoch_ready_streak.tolist() == [1, 1]
+
+    env.common_step_counter = 41
+    assert _stamp_epoch_idle_observation_without_keyed_facts(
+        bundle,
+        motion,
+        cadence_tick=41,
+        current_source_step=41,
+    ) is None
+    assert bundle.owner._action_epoch_ready_instant.tolist() == [False, False]
+    assert bundle.owner._action_epoch_ready_live.tolist() == [False, False]
+    assert bundle.owner._action_epoch_ready_streak.tolist() == [0, 0]
+    assert bundle.owner._latest_motion_ready_projection is None
+    neutral = bundle.action_epoch_observation_state()
+    assert neutral.ready_streak.tolist() == [0, 0]
+
+    env.common_step_counter = 42
+    after_gap = _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=42,
+        current_source_step=torch.full(
+            (2,), 42, dtype=torch.int64, device=device
+        ),
+    )
+    assert after_gap.ready_instant.tolist() == [True, True]
+    after_gap_view = bundle.require_owned_motion_ready_projection(
+        bundle.motion_ready_projection(), owner_kind="motion"
+    )
+    assert after_gap_view.ready.tolist() == [False, False]
+    assert after_gap_view.ready_streak.tolist() == [1, 1]
+
+    env.common_step_counter = 43
+    consecutive = _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=43,
+        current_source_step=torch.full(
+            (2,), 43, dtype=torch.int64, device=device
+        ),
+    )
+    assert consecutive.ready_instant.tolist() == [True, True]
+    consecutive_view = bundle.require_owned_motion_ready_projection(
+        bundle.motion_ready_projection(), owner_kind="motion"
+    )
+    assert consecutive_view.ready.tolist() == [True, True]
+    assert consecutive_view.ready_streak.tolist() == [2, 2]
+
+
 def test_epoch_invalid_fact_resets_dwell_and_cannot_mint_ready(monkeypatch):
     device = torch.device("cpu")
     env, motion, robot, sensor, bundle, epoch_owner = (

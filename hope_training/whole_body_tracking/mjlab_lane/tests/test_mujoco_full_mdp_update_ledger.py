@@ -55,6 +55,7 @@ EVENT_KEYS = {
     "reveal_due_rows": "full_a_reveal_due_event",
     "reveal_deferred_rows": "full_a_reveal_deferred_event",
     "launch_rows": "full_a_launch_event",
+    "missed_launch_rows": "full_a_missed_launch_event",
     "flight_terminal_rows": "full_a_flight_terminal_event",
     "shot_retired_rows": "full_a_shot_retired_event",
     "completed_action_epoch_rows": "full_a_completed_action_epoch_event",
@@ -66,6 +67,8 @@ EVENT_KEYS = {
     "edge_contact_rows": "full_a_edge_contact_event",
     "between_contact_rows": "full_a_between_contact_event",
     "invalid_contact_rows": "full_a_invalid_contact_event",
+    "actual_hard_edge_rows": "full_a_actual_hard_edge_event",
+    "qdes_guard_intervention_rows": "full_a_qdes_guard_intervention_event",
     "r03_present_rows": "full_a_r03_present_event",
     "r03_physically_valid_rows": "full_a_r03_physically_valid_event",
     "landing_crossing_rows": "full_a_landing_crossing_event",
@@ -77,6 +80,18 @@ EVENT_KEYS = {
     "recovery_success_rows": "full_a_recovery_success_event",
     "recovery_failure_rows": "full_a_recovery_failure_event",
     "recovery_timeout_rows": "full_a_recovery_timeout_event",
+}
+STORAGE_WIDTHS = {
+    "observations_policy": 203,
+    "observations_critic": 219,
+    "actions": 31,
+    "values": 1,
+    "actions_log_prob": 1,
+    "mu": 31,
+    "sigma": 31,
+    "rewards": 1,
+    "returns": 1,
+    "advantages": 1,
 }
 
 
@@ -257,15 +272,19 @@ def _snapshot(update_index=0):
 
 def _prepare(ledger, update_index, *, environment_steps, finite=True,
              policy_std=0.02):
-    shape = (ledger.num_steps, ledger.num_envs, 1)
     storage = {
-        name: torch.ones(shape) for name in ("rewards", "returns", "advantages")
+        name: torch.ones(ledger.num_steps, ledger.num_envs, width)
+        for name, width in STORAGE_WIDTHS.items()
     }
+    dones = torch.zeros(
+        ledger.num_steps, ledger.num_envs, 1, dtype=torch.uint8
+    )
     if not finite:
         storage["advantages"][0, 0, 0] = torch.nan
     return ledger.prepare(
         update_index, environment_steps=environment_steps,
         storage_step=ledger.num_steps, storage_tensors=storage,
+        storage_dones=dones,
         policy_std=(
             torch.full((ledger.num_envs, 31), policy_std)
             if type(policy_std) in (int, float)
@@ -317,14 +336,20 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     prepared = _prepare(ledger, 0, environment_steps=2)
     record = _decode(prepared)
 
-    assert record["schema_version"] == 3
+    assert record["schema_version"] == 4
     assert record["run_identity"] == _run_identity()
     assert record["update_index"] == 0
     assert record["num_envs"] == 3
     assert record["num_steps_per_env"] == 2
     assert record["transitions_delta"] == 6
     assert record["transitions_cumulative"] == 6
-    assert len(record["extras_counts"]) == 26
+    assert len(record["extras_counts"]) == 29
+    assert record["storage_finite"] == {
+        name: True for name in STORAGE_WIDTHS
+    }
+    assert record["storage_domains"] == {
+        "dones_binary": True, "sigma_positive": True,
+    }
     assert record["extras_counts"]["reveal_rows"] == 2
     assert record["extras_counts"]["reveal_due_rows"] == 2
     assert record["extras_counts"]["reveal_deferred_rows"] == 0
@@ -577,6 +602,18 @@ def test_prepare_rejects_lifecycle_counterexamples(mutation, expected):
         _prepare(ledger, 0, environment_steps=1)
 
 
+def test_prepare_rejects_named_missed_launch_fault_before_optimizer():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={"missed_launch_rows": [True, False, False]},
+        phase=[5, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="missed_launch_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
 def test_prepare_accepts_idle_retired_occupancy_and_both_due_verdicts():
     module = _load()
     ledger = _ledger(module, steps=1)
@@ -637,6 +674,48 @@ def test_prepare_accepts_gym_terminal_recovery_failure_without_shot_retirement()
     assert record["selected_reset_rows"] == 1
 
 
+def test_prepare_accepts_invalid_contact_failure_as_durable_retirement():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "racket_contact_rows": [True, False, False],
+            "invalid_contact_rows": [True, False, False],
+            "flight_terminal_rows": [True, False, False],
+            "r06_present_rows": [True, False, False],
+            "recovery_failure_rows": [True, False, False],
+            "shot_retired_rows": [True, False, False],
+        },
+        status=[5, 0, 0],
+        outcome=[6, 0, 0],
+        phase=[8, 0, 0],
+    ))
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    assert record["extras_counts"]["invalid_contact_rows"] == 1
+    assert record["extras_counts"]["recovery_failure_rows"] == 1
+    assert record["extras_counts"]["shot_retired_rows"] == 1
+    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
+
+
+def test_prepare_counts_joint_safety_telemetry_without_a_done_bit():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "actual_hard_edge_rows": [True, False, False],
+            "qdes_guard_intervention_rows": [True, False, False],
+        },
+    ))
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    assert record["extras_counts"]["actual_hard_edge_rows"] == 1
+    assert record["extras_counts"]["qdes_guard_intervention_rows"] == 1
+    assert record["terminal_bit_counts"]["joint_qdes_forbidden"] == 0
+    assert record["lifecycle_counts"]["gym_reset_rows"] == 0
+    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
+
+
 @pytest.mark.parametrize(
     "bits,resolved",
     (
@@ -693,6 +772,67 @@ def test_prepare_packs_storage_health_in_the_single_copy_and_rejects_nonfinite()
         _prepare(ledger, 0, environment_steps=1, finite=False)
 
 
+@pytest.mark.parametrize("name", tuple(STORAGE_WIDTHS))
+def test_prepare_rejects_every_nonfinite_rollout_storage_lane_before_optimizer(name):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(module))
+    storage = {
+        field: torch.ones(1, ledger.num_envs, width)
+        for field, width in STORAGE_WIDTHS.items()
+    }
+    storage[name][0, 0, 0] = torch.inf
+    with pytest.raises(RuntimeError, match="storage is nonfinite") as caught:
+        ledger.prepare(
+            0, environment_steps=1, storage_step=1,
+            storage_tensors=storage,
+            storage_dones=torch.zeros(
+                1, ledger.num_envs, 1, dtype=torch.uint8
+            ),
+            policy_std=torch.full((ledger.num_envs, 31), 0.02),
+        )
+    assert name in str(caught.value)
+
+
+def test_prepare_rejects_nonbinary_rollout_dones_before_optimizer():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(module))
+    storage = {
+        field: torch.ones(1, ledger.num_envs, width)
+        for field, width in STORAGE_WIDTHS.items()
+    }
+    dones = torch.zeros(1, ledger.num_envs, 1, dtype=torch.uint8)
+    dones[0, 0, 0] = 2
+    with pytest.raises(RuntimeError, match="dones_binary"):
+        ledger.prepare(
+            0, environment_steps=1, storage_step=1,
+            storage_tensors=storage, storage_dones=dones,
+            policy_std=torch.full((ledger.num_envs, 31), 0.02),
+        )
+
+
+@pytest.mark.parametrize("value", (0.0, -1.0))
+def test_prepare_rejects_nonpositive_finite_rollout_sigma_before_optimizer(value):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(module))
+    storage = {
+        field: torch.ones(1, ledger.num_envs, width)
+        for field, width in STORAGE_WIDTHS.items()
+    }
+    storage["sigma"][0, 0, 0] = value
+    with pytest.raises(RuntimeError, match="sigma_positive"):
+        ledger.prepare(
+            0, environment_steps=1, storage_step=1,
+            storage_tensors=storage,
+            storage_dones=torch.zeros(
+                1, ledger.num_envs, 1, dtype=torch.uint8
+            ),
+            policy_std=torch.full((ledger.num_envs, 31), 0.02),
+        )
+
+
 @pytest.mark.parametrize("fault", ("scalar", "wrong_shape", "noncontiguous"))
 def test_prepare_rejects_nonexact_or_noncontiguous_storage(fault):
     module = _load()
@@ -700,7 +840,10 @@ def test_prepare_rejects_nonexact_or_noncontiguous_storage(fault):
     ledger.ingest(_result(module))
     ledger.ingest(_result(module))
     shape = (ledger.num_steps, ledger.num_envs, 1)
-    storage = {name: torch.ones(shape) for name in ("rewards", "returns", "advantages")}
+    storage = {
+        name: torch.ones(ledger.num_steps, ledger.num_envs, width)
+        for name, width in STORAGE_WIDTHS.items()
+    }
     if fault == "scalar":
         storage["rewards"] = torch.tensor(1.0)
     elif fault == "wrong_shape":
@@ -716,6 +859,7 @@ def test_prepare_rejects_nonexact_or_noncontiguous_storage(fault):
             environment_steps=2,
             storage_step=2,
             storage_tensors=storage,
+            storage_dones=torch.zeros(2, ledger.num_envs, 1, dtype=torch.uint8),
             policy_std=torch.full((ledger.num_envs, 31), 0.02),
         )
 

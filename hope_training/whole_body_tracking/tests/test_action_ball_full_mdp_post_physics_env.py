@@ -626,6 +626,7 @@ class _Physical:
         self.mutate_clock = False
         self.transport_work = True
         self.keyed_epoch_work = True
+        self.recovery_epoch_work = True
 
     def launch_action_epoch(self):
         self.trace.append(("physical_launch",))
@@ -640,6 +641,7 @@ class _Physical:
             "control_step": control_step,
             "transport_work": self.transport_work,
             "keyed_epoch_work": self.keyed_epoch_work,
+            "recovery_epoch_work": self.recovery_epoch_work,
         })()
 
     def publish_action_epoch_post_physics(self, stamp):
@@ -947,7 +949,12 @@ class _EventManager:
 
 
 def _fake_env(
-    *, rendering=False, decimation=3, transport_work=True, keyed_epoch_work=True
+    *,
+    rendering=False,
+    decimation=3,
+    transport_work=True,
+    keyed_epoch_work=True,
+    recovery_epoch_work=True,
 ):
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
     trace = []
@@ -994,6 +1001,7 @@ def _fake_env(
     env._full_mdp_selected_true_reset = owner.selected_true_reset
     physical.transport_work = transport_work
     physical.keyed_epoch_work = keyed_epoch_work
+    physical.recovery_epoch_work = recovery_epoch_work
     owner.after_command_compute_before_observation(0)
     trace.clear()
     return env, owner, physical, trace
@@ -1053,6 +1061,7 @@ def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
         decimation=2,
         transport_work=False,
         keyed_epoch_work=False,
+        recovery_epoch_work=False,
     )
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
@@ -1065,11 +1074,12 @@ def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
     assert names.count("physical_publish") == 2
 
 
-def test_transport_idle_keyed_epoch_keeps_full_r07_publication():
+def test_transport_idle_recovery_epoch_keeps_full_r07_publication():
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=False,
         keyed_epoch_work=True,
+        recovery_epoch_work=True,
     )
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
@@ -1081,11 +1091,58 @@ def test_transport_idle_keyed_epoch_keeps_full_r07_publication():
     assert names.count("motion_ready") == 1
 
 
+def test_transport_idle_preoutcome_key_uses_neutral_chronology_only(
+    monkeypatch,
+):
+    def reject_projection(_self):
+        raise AssertionError("pre-outcome row projected R07 readiness to Motion")
+
+    def reject_install(_self, _projection):
+        raise AssertionError("pre-outcome row installed R07 readiness into Motion")
+
+    monkeypatch.setattr(_R07, "motion_ready_projection", reject_projection)
+    monkeypatch.setattr(
+        _Motion,
+        "install_action_ball_continuous_r07_ready_projection",
+        reject_install,
+    )
+    env, _owner, _physical, trace = _fake_env(
+        decimation=2,
+        transport_work=False,
+        keyed_epoch_work=True,
+        recovery_epoch_work=False,
+    )
+    env.step(torch.zeros(2, 4))
+    names = [row[0] for row in trace]
+    assert "racket_publish" not in names
+    assert "r07_publish" not in names
+    assert names.count("r07_idle_stamp") == 1
+    assert "r07_ready" not in names
+    assert "motion_ready" not in names
+
+
+def test_live_transport_key_conservatively_keeps_full_r07_publication():
+    env, _owner, _physical, trace = _fake_env(
+        decimation=2,
+        transport_work=True,
+        keyed_epoch_work=True,
+        recovery_epoch_work=False,
+    )
+    env.step(torch.zeros(2, 4))
+    names = [row[0] for row in trace]
+    assert names.count("racket_publish") == 1
+    assert names.count("r07_publish") == 1
+    assert "r07_idle_stamp" not in names
+    assert names.count("r07_ready") == 1
+    assert names.count("motion_ready") == 1
+
+
 def test_transport_work_without_key_keeps_r03_but_skips_r07_keyed_writes():
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=True,
         keyed_epoch_work=False,
+        recovery_epoch_work=False,
     )
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]

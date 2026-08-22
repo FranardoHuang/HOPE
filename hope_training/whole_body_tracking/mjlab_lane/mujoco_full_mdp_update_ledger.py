@@ -2,22 +2,31 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import hashlib, json, math, os, re
-SCHEMA_VERSION, REWARD_TERM_COUNT = 3, 20
+SCHEMA_VERSION, REWARD_TERM_COUNT = 4, 20
 EXACT_TERMINATION_BITS = {
     "time_out": 1, "base_fell_tilt": 2, "base_too_low": 4,
     "joint_qdes_forbidden": 8, "robot_hit_table": 16,
 }
 EXACT_PHASE_CODES = (0, 2, 5, 6, 8)
 EVENT_NAMES = (
-    "reveal_rows", "reveal_due_rows", "reveal_deferred_rows", "launch_rows", "flight_terminal_rows",
+    "reveal_rows", "reveal_due_rows", "reveal_deferred_rows", "launch_rows",
+    "missed_launch_rows", "flight_terminal_rows",
     "shot_retired_rows", "completed_action_epoch_rows", "selected_reset_rows",
     "racket_contact_eligible_rows", "racket_contact_rows", "selected_contact_rows",
     "opposite_contact_rows", "edge_contact_rows", "between_contact_rows", "invalid_contact_rows",
+    "actual_hard_edge_rows", "qdes_guard_intervention_rows",
     "r03_present_rows", "r03_physically_valid_rows", "landing_crossing_rows",
     "r06_present_rows", "r06_eligible_rows", "r06_common_rows", "r07_present_rows", "r07_eligible_rows",
     "recovery_success_rows", "recovery_failure_rows", "recovery_timeout_rows",
 )
 EVENT_FIELDS = tuple((name, "full_a_" + name[:-5] + "_event") for name in EVENT_NAMES)
+STORAGE_FLOAT_WIDTHS = (
+    ("observations_policy", 203), ("observations_critic", 219),
+    ("actions", 31), ("values", 1), ("actions_log_prob", 1),
+    ("mu", 31), ("sigma", 31), ("rewards", 1), ("returns", 1),
+    ("advantages", 1),
+)
+STORAGE_DOMAIN_NAMES = ("dones_binary", "sigma_positive")
 _MISC_NAMES = (
     "gym_reset_rows", "unknown_terminal_rows", "invalid_done_rows",
     "done_explanation_fault_rows", "time_out_rows", "timeout_fault_rows",
@@ -45,6 +54,40 @@ class PreparedUpdate:
     update_index: int
     token: int
     payload: bytes
+
+
+def storage_schema_is_exact(torch_module, *, num_steps: int, num_envs: int,
+                            device, storage_tensors: dict, storage_dones) -> bool:
+    """Validate the pinned RSL3 rollout ABI without copying tensor contents."""
+    expected = dict(STORAGE_FLOAT_WIDTHS)
+    return (
+        type(storage_tensors) is dict
+        and set(storage_tensors) == set(expected)
+        and all(
+            isinstance(storage_tensors[name], torch_module.Tensor)
+            and torch_module.is_floating_point(storage_tensors[name])
+            and storage_tensors[name].device == device
+            and tuple(storage_tensors[name].shape)
+            == (num_steps, num_envs, width)
+            and storage_tensors[name].is_contiguous()
+            for name, width in STORAGE_FLOAT_WIDTHS
+        )
+        and isinstance(storage_dones, torch_module.Tensor)
+        and storage_dones.dtype == torch_module.uint8
+        and storage_dones.device == device
+        and tuple(storage_dones.shape) == (num_steps, num_envs, 1)
+        and storage_dones.is_contiguous()
+    )
+
+
+def storage_domain_validity(storage_tensors: dict, storage_dones) -> tuple:
+    """Return device predicates in exact ``STORAGE_DOMAIN_NAMES`` order."""
+    return (
+        (storage_dones.eq(0) | storage_dones.eq(1)).all(),
+        storage_tensors["sigma"].gt(0).all(),
+    )
+
+
 class FullMdpUpdateLedger:
     """Accumulate one rollout on-device, then prepare-before/ACK-after PPO."""
     def __init__(self, *, torch_module, num_envs: int, num_steps_per_env: int,
@@ -213,9 +256,14 @@ class FullMdpUpdateLedger:
             | (outcome_event & ~(phase6 | phase8))
             | (event["r06_present_rows"] & ~(phase6 | phase8))
             | (event["r07_present_rows"] & ~(phase6 | phase8))
-            | event["shot_retired_rows"].ne(natural_recovery)
+            | event["shot_retired_rows"].ne(
+                natural_recovery | event["invalid_contact_rows"]
+            )
             | (event["completed_action_epoch_rows"] & ~event["shot_retired_rows"])
-            | (event["recovery_failure_rows"] & ~done)
+            | (
+                event["recovery_failure_rows"]
+                & ~(done | event["invalid_contact_rows"])
+            )
             | (natural_recovery & done)
             | (event["shot_retired_rows"] & (~phase8 | done))
             | selected_reset.ne(done)
@@ -275,22 +323,17 @@ class FullMdpUpdateLedger:
         self._episode_length.masked_fill_(done, 0)
         self._reset_generation.copy_(generation)
     def prepare(self, update_index: int, *, environment_steps: int, storage_step: int,
-                storage_tensors: dict, policy_std) -> PreparedUpdate:
+                storage_tensors: dict, storage_dones, policy_std) -> PreparedUpdate:
         torch = self.torch
         if self._pending is not None or update_index != self._next:
             raise RuntimeError("FullMDP ledger update order differs")
         expected_steps = (update_index + 1) * self.num_steps
-        storage_names = ("rewards", "returns", "advantages")
-        if (type(storage_tensors) is not dict
-                or set(storage_tensors) != set(storage_names) or any(
-            not isinstance(storage_tensors[name], torch.Tensor)
-            or not torch.is_floating_point(storage_tensors[name])
-            or storage_tensors[name].device != self.device
-            or tuple(storage_tensors[name].shape)
-            != (self.num_steps, self.num_envs, 1)
-            or not storage_tensors[name].is_contiguous()
-            for name in storage_names
-        )):
+        storage_names = tuple(name for name, _width in STORAGE_FLOAT_WIDTHS)
+        if not storage_schema_is_exact(
+            torch, num_steps=self.num_steps, num_envs=self.num_envs,
+            device=self.device, storage_tensors=storage_tensors,
+            storage_dones=storage_dones,
+        ):
             self._faults.add("storage_tensors")
         if (
             not isinstance(policy_std, torch.Tensor)
@@ -310,6 +353,9 @@ class FullMdpUpdateLedger:
         storage_finite = torch.stack(tuple(
             torch.isfinite(storage_tensors[name]).all() for name in storage_names
         )).to(dtype=torch.float64)
+        storage_domains = torch.stack(
+            storage_domain_validity(storage_tensors, storage_dones)
+        ).to(dtype=torch.float64)
         policy_summary = torch.stack((
             (torch.isfinite(policy_std) & policy_std.gt(0)).all().to(torch.float64),
             policy_std.mean().to(torch.float64),
@@ -317,7 +363,7 @@ class FullMdpUpdateLedger:
         host = torch.cat(
             (self._event, self._terminal, self._classification, self._outcome,
              self._phase, self._misc, self._reward, self._actual,
-             self._episode, storage_finite, policy_summary)
+             self._episode, storage_finite, storage_domains, policy_summary)
         ).cpu()
         values = host.tolist()
         cursor = 0
@@ -333,9 +379,25 @@ class FullMdpUpdateLedger:
         episode_values = values[cursor:cursor + 3]; cursor += 3
         storage_values = values[cursor:cursor + len(storage_names)]
         cursor += len(storage_names)
+        storage_domain_values = values[cursor:cursor + len(STORAGE_DOMAIN_NAMES)]
+        cursor += len(STORAGE_DOMAIN_NAMES)
         policy_finite, policy_mean_std = values[cursor:cursor + 2]
-        if any(value != 1.0 for value in storage_values):
-            raise RuntimeError("FullMDP rollout storage is nonfinite")
+        nonfinite_storage = [name for name, value in zip(
+            storage_names, storage_values
+        ) if value != 1.0]
+        if nonfinite_storage:
+            raise RuntimeError(
+                "FullMDP rollout storage is nonfinite: "
+                + ",".join(nonfinite_storage)
+            )
+        invalid_domains = [name for name, value in zip(
+            STORAGE_DOMAIN_NAMES, storage_domain_values
+        ) if value != 1.0]
+        if invalid_domains:
+            raise RuntimeError(
+                "FullMDP rollout storage domain differs: "
+                + ",".join(invalid_domains)
+            )
         if policy_finite != 1.0 or not math.isfinite(policy_mean_std) or policy_mean_std <= 0:
             raise RuntimeError("FullMDP policy std is nonfinite or nonpositive")
         events = {name: int(value) for (name, _key), value
@@ -345,12 +407,13 @@ class FullMdpUpdateLedger:
         misc = {name: int(value) for name, value in zip(_MISC_NAMES, misc_values)}
         transitions = self.num_envs * self.num_steps
         bad = [name for name in _ZERO_FAULTS if misc[name] != 0]
-        if bad or any(misc[name] != transitions for name in (
+        bad_events = [name for name in ("missed_launch_rows",) if events[name] != 0]
+        if bad or bad_events or any(misc[name] != transitions for name in (
             "reward20_finite_rows", "actual_reward_finite_rows",
             "slot0_rows", "uid_rows", "identity_rows",
         )):
             raise RuntimeError("FullMDP ledger rollout evidence differs: "
-                               + ",".join(bad or ["identity_or_finite_rows"]))
+                               + ",".join(bad + bad_events or ["identity_or_finite_rows"]))
         family_counts = {"forehand": 0, "backhand": 0}
         family_counts[self.family] = misc["identity_rows"]
         record = {
@@ -363,6 +426,8 @@ class FullMdpUpdateLedger:
             "environment_steps_cumulative": environment_steps,
             "storage_finite": {name: bool(value) for name, value
                                in zip(storage_names, storage_values)},
+            "storage_domains": {name: bool(value) for name, value
+                                in zip(STORAGE_DOMAIN_NAMES, storage_domain_values)},
             "extras_counts": events, "terminal_bit_counts": terminal,
             "classification_status_counts": {str(index): int(value) for index, value
                                              in enumerate(classification_values)},

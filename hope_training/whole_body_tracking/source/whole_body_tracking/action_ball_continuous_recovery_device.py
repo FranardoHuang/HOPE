@@ -616,7 +616,11 @@ class DiagnosticN2ContinuousRecoveryBundle:
     def stamp_epoch_idle_observation_without_keyed_facts(
         self, *, current_source_step: int
     ) -> None:
-        """Stamp pre-reset chronology for the next unkeyed observation."""
+        """Stamp neutral/N/A chronology without reading R07 plant facts.
+
+        This is shared by the unkeyed idle lane and keyed pre-recovery phases;
+        neither has an R07 reward/readiness business consumer on this tick.
+        """
 
         owner = self._require_bound_owner()
         epoch_owner = self.action_epoch_owner
@@ -3677,7 +3681,7 @@ class ContinuousRecoveryDeviceCoordinator:
         motion_cadence_tick: torch.Tensor,
         action_epoch_owner: object,
     ) -> None:
-        """Retain only pre-reset chronology needed by the idle critic."""
+        """Retain only neutral chronology needed by the current critic view."""
 
         if (
             isinstance(current_source_step, bool)
@@ -3748,6 +3752,13 @@ class ContinuousRecoveryDeviceCoordinator:
         self._action_epoch_ready_last_motion_cadence_tick.copy_(motion_tick)
         self._action_epoch_ready_last_reset_generation.copy_(reset_generation)
         self._action_epoch_ready_last_source_step = observed_source_step
+        # A neutral/N/A tick is a real gap in R07's consecutive-readiness
+        # chronology.  Preserve the keyed reference and first-ready history,
+        # but never let a later full recovery sample inherit dwell accumulated
+        # before this gap.
+        self._action_epoch_ready_instant.zero_()
+        self._action_epoch_ready_live.zero_()
+        self._action_epoch_ready_streak.zero_()
         self._idle_observation_source_step = observed_source_step
         self._idle_observation_reset_generation.copy_(reset_generation)
         self._idle_observation_motion_cadence_tick.copy_(motion_tick)

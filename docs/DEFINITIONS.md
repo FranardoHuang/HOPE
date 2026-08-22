@@ -76,6 +76,12 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   与任务质量无关的固定上推梯度；现役V2 MuJoCo从`.02`涨到大于`1`后已破坏balance，因此V3直接删除这项
   无条件噪声奖励，不增加iteration/phase schedule、clamp或新Gate。学习配方hash不含总预算/保存频率，完整执行hash
   另含二者；详细值以typed recipe为准。`H=48`是算法取舍和当前合同，不是“每update 6秒”的性能承诺。
+- <a id="fullmdp-correction-lineage-v4"></a>**`fullmdp-a-h48-v4-*` / FullMDP第四批实现纠错lineage**：
+  2026-08-23在V3真实训练与结构审计后计划启动的fresh-only namespace族，用来验证one-shot Reward、exact launch、
+  四次episode内可完成cadence、完整rollout有限性和run-owned cache/lock等实现修复。这里的`v4`只编号fresh
+  source/run谱系；学习算法仍是[`action_ball_full_mdp_ppo_v3`](#fullmdp-ppo-v3)，Observation仍是203/219 V2，
+  不表示PPO V4、课程第四阶段、checkpoint兼容、promotion或部署授权。每个失败root/namespace一次性消费，
+  修复后必须新commit、新root、新namespace，不得hot-patch、retry或resume。
 - <a id="fullmdp-ppo-v2"></a>**`action_ball_full_mdp_ppo_v2` / FullMDP统一PPO V2历史配方**：与V3的
   H48、预算、GAE和optimizer分组相同，但使用永久`entropy_coef=.01`；已由V3取代，只用于解释历史run，
   不得resume或作为当前学习证据。

@@ -1280,6 +1280,15 @@ class A3ReadyBallVecEnv:
       N, dtype=torch.bool, device=self.device)
     self._qdes_guard_terminal = torch.zeros(
       N, dtype=torch.bool, device=self.device)
+    # Per-control physical readback evidence.  The executable q_des guard may
+    # brake a predicted hard-inner crossing without ending the episode.  Raw
+    # mechanical-edge readback (current or any physics substep) is likewise
+    # retained as promotion evidence, while only non-finite q_des terminates
+    # the exact FullMDP lane.
+    self._actual_hard_edge_latch = torch.zeros(
+      N, dtype=torch.bool, device=self.device)
+    self._qdes_guard_intervention = torch.zeros_like(
+      self._actual_hard_edge_latch)
     self.gravity_w = torch.tensor([0.0, 0.0, -1.0], device=self.device).repeat(N, 1)
     self.common_step_counter = 0
     self._ball_reserve_steps = int(round(task_cfg.ball_reserve_after_s / self.step_dt))
@@ -1704,6 +1713,8 @@ class A3ReadyBallVecEnv:
     self._qdes_previous_executable[ids] = self.action_offset
     self._qdes_previous_executable_valid[ids] = True
     self._qdes_guard_terminal[ids] = False
+    self._actual_hard_edge_latch[ids] = False
+    self._qdes_guard_intervention[ids] = False
     self._cur_ret[ids] = 0.0
     self._cur_min_d[ids] = 1e3
 
@@ -1794,6 +1805,16 @@ class A3ReadyBallVecEnv:
   def _after_physics_substep(self, substep_index):
     """Optional device-only observer; the base plant has no extra predicate."""
 
+  def _latch_actual_hard_edge(self):
+    """Latch raw joint-position hard edges without a host synchronization."""
+    q = self._qpos_act()
+    actual = (
+      ~self._torch.isfinite(q)
+      | q.le(self.jnt_lo)
+      | q.ge(self.jnt_hi)
+    )
+    self._actual_hard_edge_latch.logical_or_(actual.any(dim=1))
+
   def _advance_plant(self, actions):
     """Apply one policy action through the one real 20-substep plant loop."""
     torch = self._torch
@@ -1809,6 +1830,9 @@ class A3ReadyBallVecEnv:
     safe_actions = torch.where(finite_qdes, incoming, self.actions)
     self.last_actions = self.actions
     self.actions = safe_actions
+    self._actual_hard_edge_latch.zero_()
+    self._qdes_guard_intervention.zero_()
+    self._latch_actual_hard_edge()
     if getattr(self, "full_a_mode", False):
       hard_span = self.jnt_hi - self.jnt_lo
       soft_lower = self.jnt_lo + 0.05 * hard_span
@@ -1832,7 +1856,19 @@ class A3ReadyBallVecEnv:
       )
       q_des = guard.executable_qdes
       self.action_nonfinite_buf = guard.qdes_nonfinite.any(dim=1)
-      self._qdes_guard_terminal.copy_(guard.hard_violation_env)
+      # Projection mode makes a finite out-of-envelope request and a
+      # predicted/current hard-inner crossing recoverable: both still select
+      # the executable projection/brake target, but neither is a Done bit.
+      # qdes_safety_violation is exactly the non-finite request in this mode.
+      self._qdes_guard_terminal.copy_(
+        guard.qdes_safety_violation.any(dim=1)
+      )
+      # Raw intervention telemetry is deliberately wider than the terminal:
+      # predicted/current inner-envelope risk still selects the finite brake
+      # target and must remain visible even though it is recoverable.
+      self._qdes_guard_intervention.copy_(
+        guard.per_joint_guard.any(dim=1)
+      )
       self._qdes_previous_executable.copy_(q_des)
       self._qdes_previous_executable_valid.fill_(True)
     else:
@@ -1851,6 +1887,7 @@ class A3ReadyBallVecEnv:
       tau_n = tau / self.tau_scale
       tau_sq += (tau_n * tau_n).mean(dim=-1)
       self.sim.step()
+      self._latch_actual_hard_edge()
       self._after_physics_substep(substep_index)
       if self._contact_ok:
         self._probe_contacts()

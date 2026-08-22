@@ -90,7 +90,9 @@ def _diagnostic_cadence_steps() -> int:
         + _c02.RECOVERY_END_OFFSET_TICKS
         + 2
     )
-_DIAGNOSTIC_SCHEDULED_SHOT_COUNT = 4
+_DIAGNOSTIC_SCHEDULED_SHOT_COUNT = (
+    _portable_catalog.FRESH_REFERENCE_DUE_COUNT
+)
 _COMMANDS_SOURCE = (
     Path(__file__).resolve().parent
     / "whole_body_tracking"

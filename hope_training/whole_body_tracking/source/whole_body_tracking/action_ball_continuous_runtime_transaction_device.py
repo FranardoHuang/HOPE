@@ -1528,17 +1528,6 @@ def _bitwise_or_rounds(value: torch.Tensor) -> torch.Tensor:
     return result.contiguous()
 
 
-def _bitwise_or_rows(value: torch.Tensor) -> torch.Tensor:
-    """Reduce selected rows while preserving trailing device dimensions."""
-
-    result = torch.zeros(
-        value.shape[1:], dtype=torch.int64, device=value.device
-    )
-    for row_index in range(value.shape[0]):
-        result = torch.bitwise_or(result, value[row_index])
-    return result.contiguous()
-
-
 def _u64_mul_u31_high(
     lo: torch.Tensor, hi: torch.Tensor, multiplier: torch.Tensor
 ) -> torch.Tensor:
@@ -3025,14 +3014,9 @@ class DeviceR05Owner:
             structural_fault,
             torch.zeros_like(structural_fault),
         ).contiguous()
-        if internal_round_bank:
-            payload_structural_source_fault = _bitwise_or_rows(
-                structural_fault.reshape(k, 1)
-            ).reshape(())
-            structural_fault = payload_structural_source_fault.expand(
-                k
-            ).contiguous()
-        shared_structural_fault_bits = structural_fault.clone()
+        # Structural faults are row-owned; a malformed peer must not censor
+        # any other environment in the full-N payload.
+        source_structural_fault_bits = structural_fault.clone()
         structural_round_fault = torch.zeros(
             (k, rounds), dtype=torch.int64, device=self._device
         )
@@ -3138,14 +3122,7 @@ class DeviceR05Owner:
                 structural_round_fault,
                 torch.zeros_like(structural_round_fault),
             ).contiguous()
-            payload_structural_round_fault = _bitwise_or_rows(
-                structural_round_fault
-            )
-            structural_round_fault = (
-                payload_structural_round_fault.reshape(1, rounds)
-                .expand(k, rounds)
-                .contiguous()
-            )
+        # Reduce only the fixed redraw rounds, independently for every row.
         structural_fault = torch.bitwise_or(
             structural_fault,
             _bitwise_or_rounds(structural_round_fault),
@@ -3262,10 +3239,10 @@ class DeviceR05Owner:
         first_structural_round_index = torch.argmax(
             structural_round_event.to(torch.int64), dim=1
         )
-        shared_structural_fault = shared_structural_fault_bits.ne(0)
+        has_source_structural_fault = source_structural_fault_bits.ne(0)
         has_structural_fault = structural_fault.ne(0)
         structural_terminal_index = torch.where(
-            shared_structural_fault,
+            has_source_structural_fault,
             torch.zeros_like(first_structural_round_index),
             first_structural_round_index,
         )

@@ -260,13 +260,16 @@ def test_runtime_site_argument_is_full_a_only_and_required_before_torch(tmp_path
 FULL_A_EVENT_KEYS = (
     "full_a_reveal_event", "full_a_reveal_due_event",
     "full_a_reveal_deferred_event", "full_a_launch_event",
+    "full_a_missed_launch_event",
     "full_a_flight_terminal_event", "full_a_shot_retired_event",
     "full_a_completed_action_epoch_event",
     "full_a_selected_reset_event",
     "full_a_racket_contact_eligible_event", "full_a_racket_contact_event",
     "full_a_selected_contact_event", "full_a_opposite_contact_event",
     "full_a_edge_contact_event", "full_a_between_contact_event",
-    "full_a_invalid_contact_event", "full_a_r03_present_event",
+    "full_a_invalid_contact_event", "full_a_actual_hard_edge_event",
+    "full_a_qdes_guard_intervention_event",
+    "full_a_r03_present_event",
     "full_a_r03_physically_valid_event", "full_a_landing_crossing_event",
     "full_a_r06_present_event", "full_a_r06_eligible_event",
     "full_a_r06_common_event", "full_a_r07_present_event",
@@ -280,6 +283,7 @@ def _install_fake_stack(
     full_a_mode, schema_ok=True, fail_optimizer=False,
     drop_optimizer_state=False, empty_optimizer_state=False,
     valid_torch_snapshot=False, diagnostic_rate_probe=False,
+    storage_fault=None,
 ):
     module = _load()
     num_steps = module.NUM_STEPS_PER_ENV
@@ -316,7 +320,12 @@ def _install_fake_stack(
 
     monkeypatch.setattr(
         module, "_update_ledger_module",
-        lambda: types.SimpleNamespace(FullMdpUpdateLedger=_TracingLedger),
+        lambda: types.SimpleNamespace(
+            FullMdpUpdateLedger=_TracingLedger,
+            STORAGE_FLOAT_WIDTHS=ledger_module.STORAGE_FLOAT_WIDTHS,
+            storage_schema_is_exact=ledger_module.storage_schema_is_exact,
+            storage_domain_validity=ledger_module.storage_domain_validity,
+        ),
     )
 
     class _Cfg:
@@ -431,9 +440,33 @@ def _install_fake_stack(
             )
             shape = (num_steps, num_envs, 1)
             self.storage = types.SimpleNamespace(
-                step=0, rewards=torch.ones(shape), returns=torch.ones(shape),
+                step=0,
+                observations={
+                    "policy": torch.zeros(num_steps, num_envs, 203),
+                    "critic": torch.zeros(num_steps, num_envs, 219),
+                },
+                actions=torch.zeros(num_steps, num_envs, 31),
+                dones=torch.zeros(shape, dtype=torch.uint8),
+                values=torch.zeros(shape),
+                actions_log_prob=torch.zeros(shape),
+                mu=torch.zeros(num_steps, num_envs, 31),
+                sigma=torch.ones(num_steps, num_envs, 31),
+                rewards=torch.ones(shape),
+                returns=torch.ones(shape),
                 advantages=torch.ones(shape),
             )
+            if storage_fault in ("observations_policy", "observations_critic"):
+                self.storage.observations[
+                    storage_fault[len("observations_"):]
+                ][0, 0, 0] = torch.nan
+            elif storage_fault == "dones_binary":
+                self.storage.dones[0, 0, 0] = 2
+            elif storage_fault == "sigma_zero":
+                self.storage.sigma[0, 0, 0] = 0.0
+            elif storage_fault == "sigma_negative":
+                self.storage.sigma[0, 0, 0] = -1.0
+            elif storage_fault is not None:
+                getattr(self.storage, storage_fault)[0, 0, 0] = torch.nan
             self.learning_rate = 1.0e-3
             class _Policy:
                 def __init__(self):
@@ -616,9 +649,17 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     rows = [json.loads(line) for line in evidence.read_text().splitlines()]
     assert [row["update_index"] for row in rows] == [0, 1]
     assert all(
-        row["schema_version"] == 3 and row["run_identity"] == _identity()
+        row["schema_version"] == 4 and row["run_identity"] == _identity()
         for row in rows
     )
+    assert all(set(row["storage_finite"]) == {
+        "observations_policy", "observations_critic", "actions", "values",
+        "actions_log_prob", "mu", "sigma", "rewards", "returns",
+        "advantages",
+    } for row in rows)
+    assert all(row["storage_domains"] == {
+        "dones_binary": True, "sigma_positive": True,
+    } for row in rows)
     assert rows[0]["extras_counts"]["r06_present_rows"] == 0
     assert rows[1]["extras_counts"]["r07_present_rows"] == 0
     assert rows[1]["reward20"]["reward20_finite_rows"] == 144
@@ -691,6 +732,39 @@ def test_full_a_failure_has_no_ack_or_snapshot(
     with pytest.raises(RuntimeError, match=error):
         invoke()
     assert trace == expected_trace
+    assert evidence.read_bytes() == b""
+    assert list(snapshots.iterdir()) == [] and saved == []
+    assert not completion.exists()
+
+
+@pytest.mark.parametrize(
+    "storage_fault,error",
+    (
+        ("observations_policy", "storage is nonfinite"),
+        ("observations_critic", "storage is nonfinite"),
+        ("actions", "storage is nonfinite"),
+        ("values", "storage is nonfinite"),
+        ("actions_log_prob", "storage is nonfinite"),
+        ("mu", "storage is nonfinite"),
+        ("sigma", "storage is nonfinite"),
+        ("rewards", "storage is nonfinite"),
+        ("returns", "storage is nonfinite"),
+        ("advantages", "storage is nonfinite"),
+        ("dones_binary", "storage domain differs"),
+        ("sigma_zero", "sigma_positive"),
+        ("sigma_negative", "sigma_positive"),
+    ),
+)
+def test_full_a_complete_storage_faults_fail_before_optimizer_or_ack(
+    monkeypatch, tmp_path, storage_fault, error,
+):
+    invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
+        monkeypatch, tmp_path, num_envs=2, num_updates=1,
+        full_a_mode=True, storage_fault=storage_fault,
+    )
+    with pytest.raises(RuntimeError, match=error):
+        invoke()
+    assert trace == ["prepare"]
     assert evidence.read_bytes() == b""
     assert list(snapshots.iterdir()) == [] and saved == []
     assert not completion.exists()

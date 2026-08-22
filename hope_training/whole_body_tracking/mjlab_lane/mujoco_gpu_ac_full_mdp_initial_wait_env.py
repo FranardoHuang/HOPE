@@ -754,20 +754,38 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
     def _full_a_prepare_step(self):
         torch = self._torch
         policy_tick = self.episode_length_buf + 1
-        due = policy_tick.eq(self._full_a_next_reveal_tick)
+        last_scheduled_ordinal = len(
+            self._full_a_cadence.reference_due_ticks
+        ) - 1
+        opportunity_available = self._full_a_scheduled_ordinal.lt(
+            last_scheduled_ordinal
+        )
+        due = policy_tick.eq(self._full_a_next_reveal_tick) & opportunity_available
         candidate = self._epoch_phase.eq(FULL_A_PHASE_IDLE) | self._epoch_phase.eq(
             FULL_A_PHASE_RETIRED
         )
-        torch._assert_async(torch.all(~due | candidate))
         # Curriculum exposure is earned by surviving to the scheduled due
         # tick.  The 13-component R07 projection remains useful recovery
         # telemetry, but it is not a safety invariant and must not hold the
         # first learnable motion/ball sample behind an all-of gate.
         reveal = due & candidate
-        deferred = torch.zeros_like(reveal)
+        deferred = due & ~candidate
         self._full_a_scheduled_ordinal += due.to(torch.long)
-        self._full_a_next_reveal_tick += (
-            due.to(torch.long) * int(self._full_a_cadence.cadence_ticks)
+        exhausted = due & self._full_a_scheduled_ordinal.eq(
+            last_scheduled_ordinal
+        )
+        future_tick = self._full_a_next_reveal_tick + int(
+            self._full_a_cadence.cadence_ticks
+        )
+        self._full_a_next_reveal_tick.copy_(
+            torch.where(
+                exhausted,
+                torch.full_like(
+                    self._full_a_next_reveal_tick,
+                    int(self._full_a_cadence.episode_horizon_ticks) + 1,
+                ),
+                torch.where(due, future_tick, self._full_a_next_reveal_tick),
+            )
         )
         reveal_ids = reveal.nonzero(as_tuple=False).squeeze(-1)
         if reveal_ids.numel() > 0:
@@ -775,9 +793,14 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             # itself atomically replaces that row; DEFER is a zero-write.
             self._clear_lifecycle(reveal_ids)
             self._full_a_reveal_rows(reveal_ids)
-        launch = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED) & (
-            self._epoch_clock_ticks[:, 2] <= int(self.common_step_counter) + 1
-        )
+        launch_pending = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED)
+        launch_tick = self._epoch_clock_ticks[:, 2]
+        now = int(self.common_step_counter)
+        missed_launch = launch_pending & launch_tick.lt(now)
+        # Clock ticks name post-transition boundaries.  Installing at boundary
+        # L makes L->L+1 the first integrated flight transition; installing at
+        # L-1 would add one hidden step and move a H-tick tape by (H+1)*dt.
+        launch = launch_pending & launch_tick.eq(now)
         self._full_a_launch_rows(launch.nonzero(as_tuple=False).squeeze(-1))
         waiting = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED)
         self._full_a_park_rows(waiting.nonzero(as_tuple=False).squeeze(-1))
@@ -787,7 +810,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_park_rows(recovering.nonzero(as_tuple=False).squeeze(-1))
         idle = self._epoch_phase.eq(FULL_A_PHASE_IDLE)
         self._full_a_park_rows(idle.nonzero(as_tuple=False).squeeze(-1))
-        return reveal, launch, due, deferred
+        return reveal, launch, due, deferred, missed_launch
 
     def _full_a_latch_ball_contacts(self) -> None:
         """Latch live contact plus first net/landing-plane crossings."""
@@ -1991,9 +2014,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             observation_contract.CRITIC_WIDTH_V2,
         ):
             raise RuntimeError("portable Full-A semantic observation width differs")
-        # The critic contains the actor tensor as its exact prefix, so one
-        # finite reduction covers both public groups.
-        torch._assert_async(torch.isfinite(critic).all())
+        # The update ledger scans both stored observation groups before PPO;
+        # keep this path device-only so a fault remains attributable there.
         self._obs_buf = policy
         self._critic_obs_buf = critic
         return policy
@@ -2186,6 +2208,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                     ),
                 ),
             )
+            payment_valid_bits[:, 1] = self._torch.where(
+                self._full_a_r03_present,
+                payment_valid_bits[:, 1],
+                self._torch.zeros_like(payment_valid_bits[:, 1]),
+            )
             payment_valid_bits[:, 2] = self._torch.where(
                 self._full_a_r06_payment_event,
                 payment_valid_bits[:, 2],
@@ -2199,8 +2226,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             )
         terms[:, 14:] = configured
         reward = terms.sum(dim=1)
-        if not bool(torch.isfinite(terms).all()):
-            raise RuntimeError("FullMDP WAIT Reward20 is nonfinite")
+        # Do not synchronize or poison the CUDA context here.  The bound
+        # FullMdpUpdateLedger accumulates per-row Reward20 finiteness on device
+        # and performs the single, attributed host reduction before PPO's
+        # optimizer step.
         return reward, terms
 
     def _fullmdp_termination(self, st, requested_qdes):
@@ -2208,14 +2237,17 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         timeout = self.episode_length_buf >= self.max_episode_length
         tilt = torch.acos((-st["proj_g"][:, 2]).clamp(-1.0, 1.0)) > 0.7
         low = st["base_pos"][:, 2] < 0.5
-        # ``_advance_plant`` stores the shared Isaac/MuJoCo guard verdict.
-        # Finite out-of-range proposals are projected and remain learnable;
-        # non-finite requests or actual/predicted hard-inner crossings brake
-        # before physics and terminate this transition.
-        qdes = self._qdes_guard_terminal
+        # ``_advance_plant`` keeps the projection/brake executable for every
+        # guard verdict.  In projection mode only a non-finite request is a
+        # q_des safety violation; predicted/current hard-inner crossings are
+        # recoverable telemetry.  A raw mechanical-edge readback from the
+        # current state or any physics substep is latched into Full-A evidence,
+        # but the exact Isaac FullMDP manager does not turn that evidence into
+        # a Done bit.
+        qdes_safety = self._qdes_guard_terminal
         keepout = self._cur_table_keepout
         resolved_table = self._cur_robot_table > 0
-        terminated = tilt | low | qdes | keepout | resolved_table
+        terminated = tilt | low | qdes_safety | keepout | resolved_table
         # RSL-RL bootstraps only a pure time-limit truncation.  A row that also
         # hits a physical/safety terminal must not receive gamma*V merely
         # because the horizon ended on the same control transition.
@@ -2224,7 +2256,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             truncated.to(torch.long) * FULLMDP_TERMINATION_BITS["time_out"]
             + tilt.to(torch.long) * FULLMDP_TERMINATION_BITS["base_fell_tilt"]
             + low.to(torch.long) * FULLMDP_TERMINATION_BITS["base_too_low"]
-            + qdes.to(torch.long)
+            + qdes_safety.to(torch.long)
             * FULLMDP_TERMINATION_BITS["joint_qdes_forbidden"]
             + keepout.to(torch.long) * FULLMDP_TERMINATION_BITS["robot_hit_table"]
         )
@@ -2370,6 +2402,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             launch_event,
             reveal_due_event,
             reveal_deferred_event,
+            missed_launch_event,
         ) = self._full_a_prepare_step()
         _st_before_forward, _tau_sq, requested_qdes = self._advance_plant(actions)
         self.sim.forward()
@@ -2412,6 +2445,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         edge_contact_event = self._full_a_edge_contact_event.clone()
         between_contact_event = self._full_a_between_contact_event.clone()
         invalid_contact_event = self._full_a_invalid_contact_event.clone()
+        actual_hard_edge_event = self._actual_hard_edge_latch.clone()
+        qdes_guard_intervention_event = self._qdes_guard_intervention.clone()
         contact_classification_status = (
             self._full_a_contact_classification_status.clone()
         )
@@ -2422,12 +2457,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         ).clone()
         recovery_terminal |= invalid_contact_event
         recovery_failure |= invalid_contact_event
-        torch._assert_async(
-            torch.all(
-                ~invalid_contact_event
-                & ~(outcome_event & outcome.eq(FULL_A_OUTCOME_INVALID))
-            )
-        )
         dones = terminated | truncated
         shot_retired = recovery_terminal & ~dones
         completed_action_epoch = self._full_a_completed_action_epoch(shot_retired)
@@ -2470,6 +2499,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "full_a_reveal_due_event": reveal_due_event,
             "full_a_reveal_deferred_event": reveal_deferred_event,
             "full_a_launch_event": launch_event,
+            "full_a_missed_launch_event": missed_launch_event,
             "full_a_flight_terminal_event": outcome_event,
             "full_a_shot_retired_event": shot_retired,
             "full_a_completed_action_epoch_event": completed_action_epoch,
@@ -2487,6 +2517,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "full_a_edge_contact_event": edge_contact_event,
             "full_a_between_contact_event": between_contact_event,
             "full_a_invalid_contact_event": invalid_contact_event,
+            "full_a_actual_hard_edge_event": actual_hard_edge_event,
+            "full_a_qdes_guard_intervention_event": (
+                qdes_guard_intervention_event
+            ),
             "full_a_r03_present_event": r03_present_event,
             "full_a_r03_physically_valid_event": r03_valid_event,
             "full_a_landing_crossing_event": landing_crossing_event,

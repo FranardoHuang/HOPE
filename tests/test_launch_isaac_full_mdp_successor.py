@@ -187,6 +187,19 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert payload["runtime_env"]["HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT"] == str(
         rig.root / "training"
     )
+    assert payload["runtime_env"]["HOME"] == str(rig.root / "home")
+    assert payload["runtime_env"]["CUDA_CACHE_PATH"] == str(
+        rig.root / "cuda_cache"
+    )
+    for name, directory in (
+        ("XDG_CACHE_HOME", "xdg_cache"),
+        ("XDG_CONFIG_HOME", "xdg_config"),
+        ("XDG_DATA_HOME", "xdg_data"),
+        ("XDG_STATE_HOME", "xdg_state"),
+    ):
+        assert payload["runtime_env"][name] == str(rig.root / directory)
+        assert payload["launcher_env"][name] == str(rig.root / directory)
+    assert payload["launcher_env"]["HOME"] == str(rig.root / "home")
     assert f"hydra.run.dir={rig.root / 'training' / 'hydra'}" in payload["argv"]
     assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "0"
     assert "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES" not in payload["runtime_env"]
@@ -268,11 +281,24 @@ def test_real_path_uses_clean_env_wrapper_and_spends_fresh_root(
         return tuple(descriptors)
 
     monkeypatch.setattr(rig.module, "_open_exact_runtime_descriptors", fake_descriptors)
-    monkeypatch.setattr(rig.module, "_verify_started", lambda paths: (1234, 1234))
+    monkeypatch.setattr(
+        rig.module,
+        "_verify_started",
+        lambda paths, *, gpu_lock, lock_file: (1234, 1234),
+    )
     assert rig.module.main(rig.argv()) == 0
     assert rig.root.is_dir()
     assert (rig.root / "asset" / "model.usd").read_bytes() == b"exact-usd"
     assert (rig.root / "training").is_dir()
+    for directory in (
+        "home",
+        "cuda_cache",
+        "xdg_cache",
+        "xdg_config",
+        "xdg_data",
+        "xdg_state",
+    ):
+        assert (rig.root / directory).is_dir()
     assert (rig.root / "asset" / "source_bundle" / "config.yaml").read_text() == (
         "fixture: exact\n"
     )
@@ -283,6 +309,15 @@ def test_real_path_uses_clean_env_wrapper_and_spends_fresh_root(
     assert str(rig.isaac_python) in child
     assert "task=HOPEPingPongActionBallFullMdpA" in child
     assert f"hydra.run.dir={rig.root / 'training' / 'hydra'}" in child
+    for item in (
+        f"HOME={rig.root / 'home'}",
+        f"CUDA_CACHE_PATH={rig.root / 'cuda_cache'}",
+        f"XDG_CACHE_HOME={rig.root / 'xdg_cache'}",
+        f"XDG_CONFIG_HOME={rig.root / 'xdg_config'}",
+        f"XDG_DATA_HOME={rig.root / 'xdg_data'}",
+        f"XDG_STATE_HOME={rig.root / 'xdg_state'}",
+    ):
+        assert item in child
     assert record["env"]["KIT_BOOT_MARKER"] == "Learning iteration"
     assert "PYTHONPATH" not in record["env"]
     assert "LD_LIBRARY_PATH" not in record["env"]
@@ -301,7 +336,9 @@ def test_real_path_wraps_child_in_explicit_cpu_affinity(
         rig.module, "_open_exact_runtime_descriptors", fake_descriptors
     )
     monkeypatch.setattr(
-        rig.module, "_verify_started", lambda paths: (1234, 1234)
+        rig.module,
+        "_verify_started",
+        lambda paths, *, gpu_lock, lock_file: (1234, 1234),
     )
     assert rig.module.main(
         rig.argv() + ["--cpu-affinity", "2"]
@@ -329,3 +366,28 @@ def test_asset_package_symlink_fails_before_root(rig, capsys) -> None:
     assert rig.module.main(rig.argv(dry=True)) == 2
     assert "non-regular entry" in capsys.readouterr().err
     assert not rig.root.exists()
+
+
+def test_ready_workload_must_retain_exact_gpu_lifetime_flock(
+    rig, tmp_path: Path
+) -> None:
+    proc = tmp_path / "proc" / "1234"
+    (proc / "fd").mkdir(parents=True)
+    (proc / "fdinfo").mkdir()
+    descriptor = 3
+    (proc / "fd" / str(descriptor)).symlink_to(rig.lock)
+    info = proc / "fdinfo" / str(descriptor)
+    info.write_text(
+        "pos:\t0\nflags:\t02100002\n"
+        "lock:\t1: FLOCK  ADVISORY  WRITE 0 00:3f:123 0 EOF\n",
+        encoding="utf-8",
+    )
+
+    rig.module._verify_inherited_gpu_lock(
+        proc=proc, descriptor=descriptor, lock_file=rig.lock
+    )
+    info.write_text("pos:\t0\nflags:\t02100002\n", encoding="utf-8")
+    with pytest.raises(rig.module.LaunchError, match="lifetime flock is absent"):
+        rig.module._verify_inherited_gpu_lock(
+            proc=proc, descriptor=descriptor, lock_file=rig.lock
+        )

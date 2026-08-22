@@ -361,6 +361,17 @@ class ActionEpochRewardPaymentRows:
 
 
 @dataclass(frozen=True)
+class _RequiredPreviousPaidRows:
+    """Validated R06 mailbox after-image retained for the local full join."""
+
+    valid: torch.Tensor
+    shot_key: ActionEpochShotKey
+    publication_ordinal: torch.Tensor
+    settlement_step: torch.Tensor
+    payment_step: torch.Tensor
+
+
+@dataclass(frozen=True)
 class ActionEpochClosedRows:
     """Transient full-key close acknowledgement exposed only to bound R06."""
 
@@ -800,6 +811,35 @@ class ActionEpochOwner:
                     phase.eq(PHASE_REVEAL_COMMITTED)
                     | phase.eq(PHASE_LAUNCH_SETTLED)
                     | phase.eq(PHASE_OUTCOME_SETTLED)
+                    | phase.eq(PHASE_RETIRED)
+                )
+            ).detach()
+
+    def project_recovery_postphysics_activity_mask(
+        self, *, owner: object
+    ) -> torch.Tensor:
+        """Project completed rows whose R07 recovery phase remains active."""
+
+        with self._lock:
+            self._healthy()
+            record = self._publication.current
+            if (
+                record is None
+                or self._async_owner_identities.get("physical_ball") is not owner
+            ):
+                raise ActionEpochError(
+                    "recovery postphysics activity owner identity differs"
+                )
+            motion_slot = self._owner_slot("motion")
+            phase = record.phase
+            return (
+                row_identity.action_epoch_shot_key_valid(
+                    record.identity.shot_key
+                )
+                & record.writes_started[:, :, motion_slot]
+                & record.writes_committed[:, :, motion_slot]
+                & (
+                    phase.eq(PHASE_OUTCOME_SETTLED)
                     | phase.eq(PHASE_RETIRED)
                 )
             ).detach()
@@ -1540,7 +1580,7 @@ class ActionEpochOwner:
 
     def _require_previous_paid_rows(
         self, value: object, *, label: str
-    ) -> ActionEpochRewardPaymentRows:
+    ) -> _RequiredPreviousPaidRows:
         try:
             from .action_ball_landing_outcome_device import (
                 PreviousPaidActionEpochRows,
@@ -1558,7 +1598,7 @@ class ActionEpochOwner:
             )
         except row_identity.ActionEpochShotKeyError as exc:
             raise ActionEpochError(str(exc)) from exc
-        return ActionEpochRewardPaymentRows(
+        return _RequiredPreviousPaidRows(
             valid=self._tensor(
                 value.valid,
                 label=label + ".valid",
@@ -1566,6 +1606,18 @@ class ActionEpochOwner:
                 dtype=torch.bool,
             ),
             shot_key=key.clone(),
+            publication_ordinal=self._tensor(
+                value.publication_ordinal,
+                label=label + ".publication_ordinal",
+                shape=(self.num_envs,),
+                dtype=torch.int64,
+            ),
+            settlement_step=self._tensor(
+                value.settlement_step,
+                label=label + ".settlement_step",
+                shape=(self.num_envs,),
+                dtype=torch.int64,
+            ),
             payment_step=self._tensor(
                 value.payment_step,
                 label=label + ".payment_step",
@@ -1684,25 +1736,19 @@ class ActionEpochOwner:
             )
 
             current_key = self._gather_current_key(record.identity.shot_key)
+            current_publication = self._gather_current(
+                record.publication_ordinal
+            )
             current_settlement = self._gather_current(record.settlement_step)
             current_payment = self._gather_current(record.payment_step)
             current_phase = self._gather_current(record.phase)
             debt = self._gather_current(record.motion_close_reason).ne(MOTION_CLOSE_NONE)
             paid_chronology = (
-                paid.payment_step.gt(0)
+                paid.publication_ordinal.ge(0)
+                & paid.settlement_step.ge(0)
+                & paid.payment_step.ge(paid.settlement_step)
                 & paid.payment_step.le(common_step)
                 & paid.payment_step.ge(self._last_r06_paid_payment_step)
-            )
-            paid_safe = self._latch_device_row_fault(
-                paid.valid & ~paid_chronology
-            )
-            due &= paid_safe
-            self._last_r06_paid_payment_step = torch.where(
-                paid.valid,
-                torch.maximum(
-                    self._last_r06_paid_payment_step, paid.payment_step
-                ),
-                self._last_r06_paid_payment_step,
             )
             same_paid_key = (
                 row_identity.action_epoch_shot_key_valid(current_key)
@@ -1715,27 +1761,35 @@ class ActionEpochOwner:
                 & current_payment.ge(current_settlement)
                 & current_payment.le(common_step)
             )
-            payment_safe = self._latch_device_row_fault(
-                paid.valid
-                & paid_chronology
-                & paid_safe
+            # A valid mailbox row is an assertion of the entire local paid
+            # contract.  Partial matches are faults, never high-water input.
+            paid_contract = (
+                paid_chronology
                 & same_paid_key
+                & paid.publication_ordinal.eq(current_publication)
+                & paid.settlement_step.eq(current_settlement)
+                & paid.payment_step.eq(current_payment)
                 & current_phase.eq(PHASE_OUTCOME_SETTLED)
                 & debt
-                & ~current_payment_chronology
-            )
-            due &= payment_safe
-            paid_matches = (
-                paid.valid
-                & paid_chronology
-                & paid_safe
-                & payment_safe
-                & same_paid_key
                 & current_payment_chronology
             )
-            retire_rows = (
-                current_phase.eq(PHASE_OUTCOME_SETTLED) & debt & paid_matches
+            paid_safe = self._latch_device_row_fault(
+                paid.valid & ~paid_contract
             )
+            due &= paid_safe
+            paid_matches = (
+                paid.valid
+                & paid_contract
+                & paid_safe
+            )
+            self._last_r06_paid_payment_step = torch.where(
+                paid_matches,
+                torch.maximum(
+                    self._last_r06_paid_payment_step, paid.payment_step
+                ),
+                self._last_r06_paid_payment_step,
+            )
+            retire_rows = paid_matches
             retire_slots = self._current_slot_mask(retire_rows)
             phase = torch.where(
                 retire_slots,
@@ -2679,16 +2733,26 @@ class ActionEpochOwner:
             complete = record.reward_due.all(dim=1) & record.reward_due.eq(
                 record.reward_paid
             ).all(dim=1)
-            valid = (
+            settlement_step = self._gather_current(record.settlement_step)
+            prior_payment_step = self._gather_current(record.payment_step)
+            candidate = (
                 complete
                 & self._gather_current(record.phase).eq(PHASE_OUTCOME_SETTLED)
                 & row_identity.action_epoch_shot_key_valid(current_key)
                 & self._gather_current(
                     record.fact_valid_bits[:, :, owner_slot]
                 ).ne(0)
-                & self._gather_current(record.settlement_step).ge(0)
-                & self._gather_current(record.payment_step).lt(0)
             )
+            pending = candidate & prior_payment_step.lt(0)
+            payment_contract = (
+                settlement_step.ge(0)
+                & prior_payment_step.eq(-1)
+                & settlement_step.le(control_step)
+            )
+            safe_rows = self._latch_device_row_fault(
+                pending & ~payment_contract
+            )
+            valid = pending & payment_contract & safe_rows
             mask = self._current_slot_mask(valid)
             payment_step = torch.where(
                 mask,
@@ -2711,7 +2775,16 @@ class ActionEpochOwner:
             self._current_payment_rows = ActionEpochRewardPaymentRows(
                 valid=valid.clone(),
                 shot_key=current_key.clone(),
-                payment_step=self._gather_current(record.payment_step).clone(),
+                payment_step=torch.where(
+                    valid,
+                    self._gather_current(record.payment_step),
+                    torch.full(
+                        (self.num_envs,),
+                        -1,
+                        dtype=torch.int64,
+                        device=self.device,
+                    ),
+                ),
             )
             return self._current_payment_rows.clone()
 

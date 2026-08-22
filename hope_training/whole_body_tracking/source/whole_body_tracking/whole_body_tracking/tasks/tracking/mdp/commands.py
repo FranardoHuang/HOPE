@@ -92,6 +92,12 @@ ActionBallFullMdpDiagnosticCatalogTable = (
 load_action_ball_full_mdp_diagnostic_catalog_table = (
     _FULL_MDP_PORTABLE_CATALOG.load_action_ball_full_mdp_diagnostic_catalog_table
 )
+_ACTION_BALL_FULL_MDP_FRESH_REFERENCE_DUE_COUNT = (
+    _FULL_MDP_PORTABLE_CATALOG.FRESH_REFERENCE_DUE_COUNT
+)
+_ACTION_BALL_FULL_MDP_FRESH_EPISODE_HORIZON_TICKS = (
+    _FULL_MDP_PORTABLE_CATALOG.FRESH_EPISODE_HORIZON_TICKS
+)
 
 try:
     import action_ball_full_mdp_row_identity as _ACTION_BALL_ROW_IDENTITY
@@ -4126,6 +4132,14 @@ class MotionCommand(CommandTerm):
             )
         control_tick = origin + common_step
         if control_tick < first or (control_tick - first) % cadence:
+            return None
+        if (
+            self._action_ball_continuous_fresh_motion_lane_bound
+            and control_tick
+            > first
+            + cadence
+            * (_ACTION_BALL_FULL_MDP_FRESH_REFERENCE_DUE_COUNT - 1)
+        ):
             return None
         return self.action_ball_continuous_motion_observation_projection()
 
@@ -10918,12 +10932,21 @@ class MotionCommand(CommandTerm):
             active_sequence.to(dtype=torch.long)
         )
         step = self._action_ball_continuous_episode_step
-        reveal = active_sequence & (
-            step == self._action_ball_continuous_next_reveal_step
+        fresh_schedule_exhausted = torch.zeros_like(active_sequence)
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            fresh_schedule_exhausted = (
+                self._action_ball_continuous_scheduled_ordinal
+                >= _ACTION_BALL_FULL_MDP_FRESH_REFERENCE_DUE_COUNT - 1
+            )
+        reveal = (
+            active_sequence
+            & ~fresh_schedule_exhausted
+            & (step == self._action_ball_continuous_next_reveal_step)
         )
         torch._assert_async(
             torch.all(
                 ~active_sequence
+                | fresh_schedule_exhausted
                 | (step <= self._action_ball_continuous_next_reveal_step)
             )
         )
@@ -10960,6 +10983,22 @@ class MotionCommand(CommandTerm):
         self._action_ball_continuous_next_reveal_step[reveal] += int(
             schedule["cadence_steps"]
         )
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            # The boundary after the fourth reveal retires that opportunity;
+            # it is not a fifth task.  Once retirement is reached, park the
+            # next-reveal clock at the shared episode horizon so the final
+            # ready-hold tail remains non-negative and cannot schedule again.
+            retired_final_opportunity = (
+                active_sequence
+                & fresh_schedule_exhausted
+                & step.eq(self._action_ball_continuous_next_reveal_step)
+                & self._action_ball_continuous_next_reveal_step.lt(
+                    _ACTION_BALL_FULL_MDP_FRESH_EPISODE_HORIZON_TICKS
+                )
+            )
+            self._action_ball_continuous_next_reveal_step[
+                retired_final_opportunity
+            ] = _ACTION_BALL_FULL_MDP_FRESH_EPISODE_HORIZON_TICKS
         # A fresh training row earns task exposure by surviving the balance
         # prefix to this due tick.  R07 remains post-shot recovery evidence;
         # using its 13-component all-of projection here would circularly make

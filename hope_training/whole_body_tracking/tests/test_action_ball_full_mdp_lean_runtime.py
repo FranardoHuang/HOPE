@@ -155,10 +155,18 @@ class _Racket:
 
 
 class _Physical:
-    def __init__(self, calls, *, transport_work=True, keyed_epoch_work=True):
+    def __init__(
+        self,
+        calls,
+        *,
+        transport_work=True,
+        keyed_epoch_work=True,
+        recovery_epoch_work=True,
+    ):
         self.calls = calls
         self.transport_work = transport_work
         self.keyed_epoch_work = keyed_epoch_work
+        self.recovery_epoch_work = recovery_epoch_work
 
     def refresh_action_epoch_host_activity(self, *, next_control_step):
         self.calls.append(("physical", next_control_step))
@@ -169,6 +177,7 @@ class _Physical:
             "control_step": control_step,
             "transport_work": self.transport_work,
             "keyed_epoch_work": self.keyed_epoch_work,
+            "recovery_epoch_work": self.recovery_epoch_work,
         })()
 
 
@@ -560,6 +569,7 @@ def test_after_command_transport_idle_skips_r03_arm(keyed_epoch_work):
         calls,
         transport_work=False,
         keyed_epoch_work=keyed_epoch_work,
+        recovery_epoch_work=keyed_epoch_work,
     )
     owner, _epoch, _graph = _owner(
         r05=_R05(calls),
@@ -571,6 +581,7 @@ def test_after_command_transport_idle_skips_r03_arm(keyed_epoch_work):
     verdict = physical.action_epoch_host_activity_verdict(control_step=1)
     assert verdict.transport_work is False
     assert verdict.keyed_epoch_work is keyed_epoch_work
+    assert verdict.recovery_epoch_work is keyed_epoch_work
 
 
 def test_after_command_rejects_the_removed_r05_surface():

@@ -245,6 +245,12 @@ def _paths(root: Path) -> dict[str, Path]:
         "asset": root / "asset" / "model.usd",
         "tmp": root / "tmp",
         "pycache": root / "pycache",
+        "home": root / "home",
+        "cuda_cache": root / "cuda_cache",
+        "xdg_cache": root / "xdg_cache",
+        "xdg_config": root / "xdg_config",
+        "xdg_data": root / "xdg_data",
+        "xdg_state": root / "xdg_state",
         "runtime_receipt": root / "train-runtime.receipt",
         "run_log": root / "run.log",
         "launch_state": root / "kit_boot.launch",
@@ -275,7 +281,17 @@ def _create_root(root: Path, paths: dict[str, Path], asset_package: Path) -> Non
         raise LaunchError("run-root changed before creation")
     try:
         os.mkdir(root, 0o700)
-        for name in ("tmp", "pycache", "training"):
+        for name in (
+            "tmp",
+            "pycache",
+            "home",
+            "cuda_cache",
+            "xdg_cache",
+            "xdg_config",
+            "xdg_data",
+            "xdg_state",
+            "training",
+        ):
             os.mkdir(paths[name], 0o700)
         shutil.copytree(asset_package, paths["asset_dir"], symlinks=False)
         os.chmod(paths["asset"], 0o400)
@@ -340,7 +356,15 @@ def _runtime_env(
 ) -> dict[str, str]:
     result = {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
-        "HOME": "/root",
+        # Kit/Omniverse, NVIDIA JIT and Python caches must be owned by this
+        # fresh namespace.  The Pod root overlay is small and shared; using
+        # /root would both risk ENOSPC and mix evidence across runs.
+        "HOME": str(paths["home"]),
+        "XDG_CACHE_HOME": str(paths["xdg_cache"]),
+        "XDG_CONFIG_HOME": str(paths["xdg_config"]),
+        "XDG_DATA_HOME": str(paths["xdg_data"]),
+        "XDG_STATE_HOME": str(paths["xdg_state"]),
+        "CUDA_CACHE_PATH": str(paths["cuda_cache"]),
         "TMPDIR": str(paths["tmp"]),
         "ACCEPT_EULA": "Y",
         "PRIVACY_CONSENT": "Y",
@@ -370,7 +394,11 @@ def _runtime_env(
 def _launcher_env(paths: dict[str, Path]) -> dict[str, str]:
     return {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
-        "HOME": "/root",
+        "HOME": str(paths["home"]),
+        "XDG_CACHE_HOME": str(paths["xdg_cache"]),
+        "XDG_CONFIG_HOME": str(paths["xdg_config"]),
+        "XDG_DATA_HOME": str(paths["xdg_data"]),
+        "XDG_STATE_HOME": str(paths["xdg_state"]),
         "KIT_BOOT_MARKER": "Learning iteration",
         "KIT_BOOT_TIMEOUT_S": "900",
         "KIT_BOOT_STALE_TIMEOUT_S": "180",
@@ -435,7 +463,41 @@ def _state_fields(path: Path) -> dict[str, str]:
     return dict(row.split("=", 1) for row in rows if "=" in row)
 
 
-def _verify_started(paths: dict[str, Path]) -> tuple[int, int]:
+def _verify_inherited_gpu_lock(
+    *, proc: Path, descriptor: int, lock_file: Path
+) -> None:
+    """Require the ready workload to retain the exact locked open description."""
+
+    try:
+        descriptor_stat = os.stat(proc / "fd" / str(descriptor))
+        pathname_stat = os.stat(lock_file, follow_symlinks=False)
+        fdinfo = (proc / "fdinfo" / str(descriptor)).read_text(
+            encoding="utf-8"
+        )
+    except OSError as exc:
+        raise LaunchError("Isaac child did not inherit the GPU lifetime lock") from exc
+    if (descriptor_stat.st_dev, descriptor_stat.st_ino) != (
+        pathname_stat.st_dev,
+        pathname_stat.st_ino,
+    ):
+        raise LaunchError("Isaac child GPU lock descriptor identity differs")
+    lock_rows = tuple(
+        row for row in fdinfo.splitlines() if row.startswith("lock:")
+    )
+    lock_fields = lock_rows[0].split() if len(lock_rows) == 1 else ()
+    if (
+        len(lock_rows) != 1
+        or not any(
+            lock_fields[index : index + 3] == ["FLOCK", "ADVISORY", "WRITE"]
+            for index in range(max(0, len(lock_fields) - 2))
+        )
+    ):
+        raise LaunchError("Isaac child GPU lifetime flock is absent")
+
+
+def _verify_started(
+    paths: dict[str, Path], *, gpu_lock: int, lock_file: Path
+) -> tuple[int, int]:
     fields = _state_fields(paths["launch_state"])
     try:
         pid = int(fields["pid"])
@@ -457,6 +519,9 @@ def _verify_started(paths: dict[str, Path]) -> tuple[int, int]:
         raise LaunchError("Isaac child disappeared after ready marker") from exc
     if state == "Z":
         raise LaunchError("Isaac child is a zombie after ready marker")
+    _verify_inherited_gpu_lock(
+        proc=proc, descriptor=gpu_lock, lock_file=lock_file
+    )
     return pid, pgid
 
 
@@ -542,7 +607,9 @@ def launch(args: argparse.Namespace) -> int:
             raise LaunchError("cannot start the Kit boot launcher") from exc
         if result.returncode != 0:
             raise LaunchError(f"Kit boot launcher failed rc={result.returncode}")
-        pid, pgid = _verify_started(paths)
+        pid, pgid = _verify_started(
+            paths, gpu_lock=gpu_lock, lock_file=args.lock_file
+        )
         print(json.dumps({
             "diagnostic_unauthorized": True,
             "gpu_uuid": args.expected_gpu_uuid,
@@ -550,6 +617,7 @@ def launch(args: argparse.Namespace) -> int:
             "namespace": args.namespace,
             "pid": pid,
             "pgid": pgid,
+            "gpu_lock_fd": gpu_lock,
             "run_root": str(root),
             "source_commit": commit,
             "status": "RUNNING",

@@ -54,11 +54,14 @@ def _copy_identity(identity):
 
 RUNNER_EVENT_KEYS = {
     "reveal_rows", "reveal_due_rows", "reveal_deferred_rows", "launch_rows",
+    "missed_launch_rows",
     "flight_terminal_rows", "shot_retired_rows", "selected_reset_rows",
     "completed_action_epoch_rows",
     "racket_contact_eligible_rows", "racket_contact_rows", "selected_contact_rows",
     "opposite_contact_rows", "edge_contact_rows", "between_contact_rows",
-    "invalid_contact_rows", "r03_present_rows", "r03_physically_valid_rows",
+    "invalid_contact_rows", "actual_hard_edge_rows",
+    "qdes_guard_intervention_rows", "r03_present_rows",
+    "r03_physically_valid_rows",
     "landing_crossing_rows", "r06_present_rows", "r06_eligible_rows",
     "r06_common_rows", "r07_present_rows", "r07_eligible_rows",
     "recovery_success_rows", "recovery_failure_rows", "recovery_timeout_rows",
@@ -89,7 +92,7 @@ def _base_record(module, index, *, identity=IDENTITY):
     terminal = {key: 0 for key in module.TERMINAL_KEYS}
     lifecycle = {key: 0 for key in RUNNER_LIFECYCLE_KEYS}
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "record_type": "mujoco_full_mdp_update_ack",
         "diagnostic_unauthorized": True,
         "update_index": index,
@@ -100,7 +103,21 @@ def _base_record(module, index, *, identity=IDENTITY):
         "transitions_cumulative": TRANSITIONS * (index + 1),
         "environment_steps_delta": 48,
         "environment_steps_cumulative": 48 * (index + 1),
-        "storage_finite": {"rewards": True, "returns": True, "advantages": True},
+        "storage_finite": {
+            "observations_policy": True,
+            "observations_critic": True,
+            "actions": True,
+            "values": True,
+            "actions_log_prob": True,
+            "mu": True,
+            "sigma": True,
+            "rewards": True,
+            "returns": True,
+            "advantages": True,
+        },
+        "storage_domains": {
+            "dones_binary": True, "sigma_positive": True,
+        },
         "extras_counts": events,
         "terminal_bit_counts": terminal,
         "classification_status_counts": {
@@ -395,11 +412,11 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
     }
 
 
-def test_runner_update_ack_fixture_matches_exact_evidence_v3_wire(tmp_path):
+def test_runner_update_ack_fixture_matches_exact_evidence_v4_wire(tmp_path):
     module = _load()
     assert module.EVENT_KEYS == RUNNER_EVENT_KEYS
     assert module.LIFECYCLE_KEYS == RUNNER_LIFECYCLE_KEYS
-    assert len(module.EVENT_KEYS) == 26
+    assert len(module.EVENT_KEYS) == 29
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False
     )
@@ -408,7 +425,62 @@ def test_runner_update_ack_fixture_matches_exact_evidence_v3_wire(tmp_path):
     assert summary["engineering_run_complete"] is False
 
 
-def test_evidence_v2_and_completion_v3_are_rejected_by_separate_schemas(
+@pytest.mark.parametrize(
+    "field",
+    (
+        "observations_policy", "observations_critic", "actions", "values",
+        "actions_log_prob", "mu", "sigma", "rewards", "returns",
+        "advantages",
+    ),
+)
+def test_consumer_rejects_each_nonfinite_storage_receipt(field, tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["storage_finite"][field] = False
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="nonfinite rollout storage"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_consumer_rejects_storage_domains_and_missed_launch_receipts(tmp_path):
+    module = _load()
+    for label, mutation, error in (
+        (
+            "dones",
+            lambda rows: rows[0]["storage_domains"].__setitem__(
+                "dones_binary", False
+            ),
+            "rollout storage domain",
+        ),
+        (
+            "missed",
+            lambda rows: rows[0]["extras_counts"].__setitem__(
+                "missed_launch_rows", 1
+            ),
+            "missed launch fault counter",
+        ),
+        (
+            "sigma",
+            lambda rows: rows[0]["storage_domains"].__setitem__(
+                "sigma_positive", False
+            ),
+            "sigma_positive",
+        ),
+    ):
+        root = tmp_path / label
+        root.mkdir()
+        evidence, snapshots, _completion, _rows = _artifacts(
+            module, root, 1, complete=False, row_mutation=mutation
+        )
+        with pytest.raises(ValueError, match=error):
+            _consume(module, evidence, snapshots, 1)
+
+
+def test_evidence_v3_and_completion_v3_are_rejected_by_separate_schemas(
         monkeypatch, tmp_path):
     module = _load()
 
@@ -417,7 +489,7 @@ def test_evidence_v2_and_completion_v3_are_rejected_by_separate_schemas(
     evidence, snapshots, _completion, rows = _artifacts(
         module, evidence_root, 1, complete=False
     )
-    rows[0]["schema_version"] = 2
+    rows[0]["schema_version"] = 3
     _write_evidence(evidence, rows)
     with pytest.raises(ValueError, match="fixed fields at update 0"):
         _consume(module, evidence, snapshots, 1)
@@ -433,7 +505,7 @@ def test_evidence_v2_and_completion_v3_are_rejected_by_separate_schemas(
         _consume(module, evidence, snapshots, 1, completion)
 
 
-def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v3():
+def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v4():
     module = _load()
     indices = module._snapshot_indices(True)
     assert indices == list(range(0, 12_500, 500)) + [12_499]
@@ -457,6 +529,23 @@ def test_sealed_all_zero_longrun_is_engineering_not_business_completion(
     assert summary["action_contract"]["matched_cross_backend_authority"] is False
     assert "selected_contact_rows" in summary["business_chain_missing"]
     assert all(value == 0 for value in summary["milestones"].values())
+
+
+def test_joint_safety_telemetry_reaches_summary_without_a_done_bit(tmp_path):
+    module = _load()
+
+    def add_telemetry(rows):
+        rows[0]["extras_counts"]["actual_hard_edge_rows"] = 1
+        rows[0]["extras_counts"]["qdes_guard_intervention_rows"] = 1
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=add_telemetry
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["actual_hard_edge_rows"] == 1
+    assert summary["milestones"]["qdes_guard_intervention_rows"] == 1
+    assert summary["terminal_bit_totals"]["joint_qdes_forbidden"] == 0
+    assert summary["milestones"]["gym_reset_rows"] == 0
 
 
 def test_sealed_slot0_chain_never_claims_formal_full_a_completion(
@@ -751,7 +840,7 @@ def test_rejects_prepared_hash_drift_and_duplicate_json_key(tmp_path):
         _consume(module, evidence, snapshots, 1)
 
     record = json.dumps(rows[0])
-    evidence.write_text(record[:-1] + ',"schema_version":3}\n')
+    evidence.write_text(record[:-1] + ',"schema_version":4}\n')
     with pytest.raises(ValueError, match="duplicate JSON key"):
         _consume(module, evidence, snapshots, 1)
 

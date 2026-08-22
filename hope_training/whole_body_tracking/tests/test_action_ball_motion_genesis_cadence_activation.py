@@ -365,6 +365,43 @@ def test_c01_post_balance_deadline_does_not_close_before_question_task_close() -
         command._action_ball_continuous_canonical_task_close_tick.eq(-1)
     )
 
+
+def test_fresh_1500_tick_trace_has_exactly_four_due_opportunities() -> None:
+    command, _cadence_owner, device_owner, epoch_owner = (
+        _fresh_command_and_owners(torch.device("cpu"))
+    )
+    command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
+    command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
+
+    reveal_ticks = []
+    issued_task_ticks = []
+    for common_step in range(1500):
+        command._env.common_step_counter = common_step
+        command._advance_action_ball_continuous_motion_cadence()
+        if command._action_ball_continuous_reveal_due[0].item():
+            assert torch.all(command._action_ball_continuous_reveal_due)
+            reveal_ticks.append(common_step)
+        token = command.issue_current_r05_cadence_if_due()
+        if token is not None:
+            issued_task_ticks.append(common_step)
+        if common_step == 1467:
+            assert not torch.any(command._action_ball_continuous_reveal_due)
+            assert token is None
+            assert command._action_ball_continuous_scheduled_ordinal.tolist() == [
+                3,
+                3,
+            ]
+
+    assert reveal_ticks == [295, 588, 881, 1174]
+    assert issued_task_ticks == reveal_ticks
+    assert command._action_ball_continuous_scheduled_ordinal.tolist() == [3, 3]
+    assert command._action_ball_swing_generation.tolist() == [3, 3]
+    assert command._action_ball_continuous_next_reveal_step.tolist() == [
+        1500,
+        1500,
+    ]
+
+
 @pytest.mark.parametrize("device", _DEVICES, ids=lambda value: str(value))
 def test_fresh_compute_owns_initial_due_timer_without_legacy_resample(
     monkeypatch,

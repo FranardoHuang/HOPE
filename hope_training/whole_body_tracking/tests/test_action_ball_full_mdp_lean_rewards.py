@@ -34,7 +34,7 @@ def _tensor(data, *, dtype=None):
 
 def _epoch(*, placement_gain=2.0, bind_selected_reset=False):
     owner, d05, _cadence, r06_owner, _playback, *_middle, physical_owner = (
-        _ready_epoch(device=TEST_DEVICE)
+        _ready_epoch(reward_age=7, device=TEST_DEVICE)
     )
     selected_reset = None
     if bind_selected_reset:
@@ -67,19 +67,24 @@ def _epoch(*, placement_gain=2.0, bind_selected_reset=False):
         replace(
             record,
             phase=torch.full_like(record.phase, E.PHASE_OUTCOME_SETTLED),
+            settlement_step=torch.full_like(record.settlement_step, 8),
         ),
         publication.pending_log,
     )
 
-    def publish(name, bits, values, faults=None):
+    def publish(name, bits, values, faults=None, source_step=None):
         if faults is not None:
             owner.merge_runtime_owner_fault(name, faults)
         owner.publish_owner_facts(
             name,
             owner=producers[name],
             valid_bits=bits,
-            source_step=torch.full(
-                (2, 1), 8, dtype=torch.int64, device=TEST_DEVICE
+            source_step=(
+                torch.full(
+                    (2, 1), 8, dtype=torch.int64, device=TEST_DEVICE
+                )
+                if source_step is None
+                else source_step
             ),
             values=values,
         )
@@ -112,6 +117,7 @@ def _epoch(*, placement_gain=2.0, bind_selected_reset=False):
             dtype=torch.int64,
         ),
         torch.zeros_like(values),
+        source_step=_tensor([[8], [-1]], dtype=torch.int64),
     )
     r06 = torch.zeros_like(values)
     r06[:, :, 0] = _tensor((1.0, 0.0)).reshape(2, 1)
@@ -140,6 +146,9 @@ def _epoch(*, placement_gain=2.0, bind_selected_reset=False):
             device=TEST_DEVICE,
         ),
         r07,
+        source_step=torch.full(
+            (2, 1), 7, dtype=torch.int64, device=TEST_DEVICE
+        ),
     )
     owner._test_selected_reset = selected_reset
     return owner
@@ -209,6 +218,160 @@ def test_exact_fourteen_lifecycle_plus_six_dense_complete_once():
     assert torch.equal(values[11], _tensor((1.0, 0.0)))
     assert torch.equal(values[12], torch.ones(2, device=TEST_DEVICE))
     assert torch.equal(values[13], _tensor((0.25, -0.5)))
+
+
+def test_sticky_one_shots_do_not_repay_and_r07_requires_fresh_phase_tick():
+    owner = _epoch()
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
+
+    first = _pay_all(graph)
+    payment = owner.publish_reward_payment(8)
+    second = _pay_all(graph)
+    record = owner.current()
+    r07_slot = E.OWNER_ORDER.index("r07_recovery")
+    owner.publish_owner_facts(
+        "r07_recovery",
+        owner=owner._fact_owner_identities["r07_recovery"],
+        valid_bits=record.fact_valid_bits[:, :, r07_slot].clone(),
+        source_step=torch.full(
+            (2, 1), 9, dtype=torch.int64, device=TEST_DEVICE
+        ),
+        values=record.fact_f32[:, :, r07_slot].clone(),
+    )
+    third = _pay_all(graph)
+
+    assert payment.valid.tolist() == [True, True]
+    assert all(not bool(value.any()) for value in second[:14])
+    assert all(not bool(value.any()) for value in third[:13])
+    assert torch.equal(third[13], first[13])
+    reward_i = owner.milestone.i64[: 20 * 4].reshape(20, 4)
+    assert reward_i[0, 1].item() == 2
+    assert reward_i[10, 1].item() == 1
+    assert reward_i[11, 1].item() == 2
+    assert reward_i[12, 1].item() == 2
+    assert reward_i[13, 1].item() == 4
+
+
+def test_r06_payment_tick_can_follow_its_outcome_source_tick():
+    owner = _epoch()
+    publication = owner._publication
+    record = publication.current
+    source_step = record.fact_source_step.clone()
+    source_step[:, :, E.OWNER_ORDER.index("r06_landing_outcome")] = 3
+    owner._publication = E._Publication(
+        replace(
+            record,
+            fact_source_step=source_step,
+            settlement_step=torch.full_like(record.settlement_step, 3),
+        ),
+        publication.pending_log,
+    )
+
+    values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
+    payment = owner.publish_reward_payment(8)
+
+    assert torch.equal(values[11], _tensor((1.0, 0.0)))
+    assert torch.equal(values[12], torch.ones(2, device=TEST_DEVICE))
+    assert payment.valid.tolist() == [True, True]
+    assert payment.payment_step.tolist() == [8, 8]
+    assert owner._undecoded_overflow.tolist() == [False, False]
+
+
+def test_r06_rejects_missing_settlement_and_noncanonical_unpaid_sentinel():
+    owner = _epoch()
+    publication = owner._publication
+    record = publication.current
+    settlement_step = record.settlement_step.clone()
+    payment_step = record.payment_step.clone()
+    settlement_step[0, 0] = -1
+    payment_step[1, 0] = -2
+    owner._publication = E._Publication(
+        replace(
+            record,
+            settlement_step=settlement_step,
+            payment_step=payment_step,
+        ),
+        publication.pending_log,
+    )
+
+    values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
+    payment = owner.publish_reward_payment(8)
+
+    assert not bool(values[11].any())
+    assert not bool(values[12].any())
+    assert payment.valid.tolist() == [False, False]
+    assert payment.payment_step.tolist() == [-1, -1]
+    assert owner.current().payment_step[:, 0].tolist() == [-1, -2]
+    assert owner._undecoded_overflow.tolist() == [True, True]
+
+
+def test_reward_payment_before_local_settlement_faults_without_mutation():
+    owner = _epoch()
+    _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
+
+    payment = owner.publish_reward_payment(7)
+
+    assert payment.valid.tolist() == [False, False]
+    assert payment.payment_step.tolist() == [-1, -1]
+    assert owner.current().payment_step[:, 0].tolist() == [-1, -1]
+    assert owner._undecoded_overflow.tolist() == [True, True]
+
+
+def test_r06_ordinals_share_the_ordinal_zero_frozen_before_image():
+    owner = _epoch()
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
+    for ordinal in range(12):
+        graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
+
+    record = owner.current()
+    slot = E.OWNER_ORDER.index("r06_landing_outcome")
+    live_facts = record.fact_f32[:, :, slot].clone()
+    live_facts[:, :, 1] = 3.0
+    live_facts[:, :, 2] = 4.0
+    owner.publish_owner_facts(
+        "r06_landing_outcome",
+        owner=owner._fact_owner_identities["r06_landing_outcome"],
+        valid_bits=record.fact_valid_bits[:, :, slot].clone(),
+        source_step=record.fact_source_step[:, :, slot].clone(),
+        values=live_facts,
+    )
+
+    assert torch.equal(graph.pay(12), torch.ones(2, device=TEST_DEVICE))
+    current = owner.current().fact_f32[:, :, slot]
+    assert torch.equal(
+        current[:, :, 1] * current[:, :, 2],
+        torch.full((2, 1), 12.0, device=TEST_DEVICE),
+    )
+
+
+def test_reward_cycle_overflow_fault_suppresses_all_fresh_reward_families():
+    owner = _epoch()
+    limit = 2**63 - 1
+    owner._reward_cycle_age.fill_(limit)
+    publication = owner._publication
+    record = publication.current
+    source_step = record.fact_source_step.clone()
+    source_step[:, :, E.OWNER_ORDER.index("r03_strike_fact")] = limit
+    source_step[:, :, E.OWNER_ORDER.index("physical_ball")] = limit
+    source_step[:, :, E.OWNER_ORDER.index("r07_recovery")] = limit - 1
+    owner._publication = E._Publication(
+        replace(
+            record,
+            reward_cycle_age=owner._reward_cycle_age,
+            fact_source_step=source_step,
+        ),
+        publication.pending_log,
+    )
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
+
+    first = _pay_all(graph)
+    second = _pay_all(graph)
+
+    assert all(not bool(value.any()) for value in first[:11])
+    assert not bool(first[13].any())
+    assert all(not bool(value.any()) for value in second[:11])
+    assert not bool(second[13].any())
+    assert owner.current().reward_cycle_fault.ne(0).all()
 
 
 def test_r07_retired_row_cannot_replay_fact_or_mask_peer():
@@ -298,7 +461,7 @@ def test_real_consumers_reduce_primitive_eligibility_and_configured_income():
     assert reward_f[0, 0].item() == 2.0
     assert reward_f[0, 3].item() == -1.0
     assert reward_f[0, 6].item() == 1.0
-    assert reward_i[10].tolist() == [2, 2, 2, 1]
+    assert reward_i[10].tolist() == [2, 1, 1, 1]
     assert reward_f[12, 0].item() == 1.0
     assert reward_f[12, 2].item() == 2.0
     assert reward_f[13, 0].item() == 0.0  # R07 raw score, not leaf-weighted payment.

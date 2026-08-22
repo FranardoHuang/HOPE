@@ -1,5 +1,23 @@
 # 简短进度记录
 
+## 2026-08-23 — V3阶段复核、第一性原理审计与fresh V4候选
+
+- 只读刷新到MuJoCo update1256 / Isaac ACK1024：recent100 episode均长约`230.73/183.18 tick`，但timeout
+  仍均为0；Mu累计`reveal=10648,launch=1,R03/contact/landing=0`，Isaac累计
+  `accepted=601,playback=101,launch/contact/landing=0`。因此balance在改善、mimic入口自然打开但尚未基本
+  形成，hit/landing继续`未测`，没有用aggregate return掩盖零分母。
+- 对账当前TODO与MuJoCo-native readiness后，没有发现新的reference/Observation遗漏：hidden reset-ready、
+  reveal后measured-frame0 bridge与teacher/contact几何已闭合；203/219合同保持，不增加冗余或不可部署actor
+  观测。确认的是实现债：sticky Reward重复支付、late launch catch-up、episode外第五shot、invalid contact
+  reset语义、Mu完整rollout证据缺口及run cache/lock身份。
+- branch候选已把Reward收成fresh-source/settlement one-shot、launch改exact/no-catch-up、cadence收成四拍，
+  并让Mu evidence schema 4在一次既有PPO前reduction内检查完整storage finite、done二值、sigma为正。launcher
+  使用run-owned缓存，Isaac直接核child继承GPU flock；不增加stage/owner/same-writer Gate。修改文件分进程host
+  回归=`533 passed,23 skipped`，alignment聚焦=`12 passed,23 deselected`，`py_compile`与diff check通过。
+- V3当前速度并不正常：Mu recent100约`11.27 s/H48`；Isaac collection/完整iteration约`14.50/15.79 s`且CPU
+  affinity非GPU1-local。exact Pod、clean commit与fresh V4双后端尚待闭合，G05/G06保持`Partial`且所有证据
+  `diagnostic_unauthorized=true`。
+
 ## 2026-08-23 — R03 exact-strike与FullMDP PPO V3修复（branch candidate）
 
 - 定位为实现错误而非课程设计错误：Isaac在REVEAL phase等待只会在launch后产生的exact bit，R03不可达；

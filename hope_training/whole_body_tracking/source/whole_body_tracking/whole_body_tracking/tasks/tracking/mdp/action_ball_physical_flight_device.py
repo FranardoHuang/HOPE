@@ -79,6 +79,8 @@ class ActionEpochHostActivityVerdict:
     control_step: int
     transport_work: bool
     keyed_epoch_work: bool
+    recovery_epoch_work: bool
+
 
 RUNTIME_INTEGRATED = False
 CUDA_REVEAL_BOUNDARY_INTEGRATED = False
@@ -127,10 +129,12 @@ PHYSICAL_EPOCH_FAULT_POSTPHYSICS_NONFINITE = 1 << 42
 _ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE = 1 << 0
 _ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST = 1 << 1
 _ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH = 1 << 2
+_ACTION_EPOCH_RUNTIME_FAULT_MISSED_LAUNCH_TICK = 1 << 3
 _ACTION_EPOCH_RUNTIME_FAULT_NAMES = (
     (_ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE, "accept_not_launchable"),
     (_ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST, "due_identity_lost"),
     (_ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH, "r06_retire_mismatch"),
+    (_ACTION_EPOCH_RUNTIME_FAULT_MISSED_LAUNCH_TICK, "missed_launch_tick"),
 )
 PHYSICAL_EPOCH_FACT_PRESENT = 1 << 0
 PHYSICAL_EPOCH_FACT_SELECTED_CONTACT = 1 << 1
@@ -2667,6 +2671,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_host_activity_control_step: int | None = None
         self._action_epoch_host_activity_has_work = True
         self._action_epoch_host_activity_has_keyed_work = True
+        self._action_epoch_host_activity_has_recovery_work = True
         self._action_epoch_substep_pair: str | None = None
         self._action_epoch_empty_env_mask = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=self.device
@@ -3467,6 +3472,40 @@ class ActionBallPhysicalFlightDeviceOwner:
             ),
         )
 
+    def _current_action_epoch_motion_observation(self) -> object:
+        """Read the exact per-environment Motion clock without host materialization."""
+
+        motion_owner = self._action_epoch_motion_owner
+        if motion_owner is None:
+            raise PhysicalEpochIntegrationHold(
+                "Physical ActionEpoch Motion owner is not construction-bound"
+            )
+        try:
+            token = (
+                motion_owner.action_ball_continuous_motion_observation_projection()
+            )
+            motion = (
+                motion_owner.require_owned_action_ball_continuous_motion_observation(
+                    token
+                )
+            )
+        except BaseException as exc:
+            raise PhysicalEpochIntegrationHold(
+                "Physical ActionEpoch current Motion producer is absent or stale"
+            ) from exc
+        current_tick = getattr(motion, "control_tick", None)
+        if (
+            getattr(motion, "motion_owner", None) is not motion_owner
+            or type(current_tick) is not torch.Tensor
+            or current_tick.dtype != torch.int64
+            or current_tick.device != self.device
+            or tuple(current_tick.shape) != (self.num_envs,)
+        ):
+            raise PhysicalEpochIntegrationHold(
+                "Physical ActionEpoch Motion clock ABI differs"
+            )
+        return motion
+
     def _selected_reset_action_epoch_direct_state(
         self, selected_env_mask: torch.Tensor
     ) -> _ActionEpochDirectState:
@@ -3702,14 +3741,33 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_host_activity_control_step = None
         self._action_epoch_host_activity_has_work = True
         self._action_epoch_host_activity_has_keyed_work = True
+        self._action_epoch_host_activity_has_recovery_work = True
         pending = self._action_epoch_pending_launch
-        pending_rows = (
-            self._action_epoch_empty_env_mask
-            if pending is None
-            else pending.pending
-        )
+        if pending is None:
+            pending_due = self._action_epoch_empty_env_mask
+        else:
+            # The retained launch step is in Motion's per-environment episode
+            # clock.  A selected reset rewinds only those rows, so the host's
+            # global ``next_control_step`` must never decide launch activity.
+            motion = self._current_action_epoch_motion_observation()
+            current_tick = getattr(motion, "control_tick")
+            pending_due = pending.pending & current_tick.eq(
+                pending.launch_control_step
+            )
+            # Launch is an exact chronology boundary, not a catch-up service.
+            # Once a row is overdue its reverse-flight tape has already lost
+            # integration steps relative to the retained contact/deadline
+            # clocks.  Mask it from PhysX and attribute the infrastructure
+            # failure through this existing packed host reduction.
+            missed_launch = pending.pending & current_tick.gt(
+                pending.launch_control_step
+            )
+            self._action_epoch_runtime_fault_bits |= (
+                missed_launch.to(torch.int64)
+                * _ACTION_EPOCH_RUNTIME_FAULT_MISSED_LAUNCH_TICK
+            )
         physical_work = (
-            pending_rows
+            pending_due
             | (
                 (self._published & ~self._parked)
                 | self._lifecycle.ne(R06_FLIGHT_EMPTY)
@@ -3755,12 +3813,28 @@ class ActionBallPhysicalFlightDeviceOwner:
             device=self.device,
         )
         keyed_epoch_work = torch.any(keyed_rows)
-        # Pack both activity facts plus all named fault classes into the one
+        project_recovery = getattr(
+            epoch_owner, "project_recovery_postphysics_activity_mask", None
+        )
+        if not callable(project_recovery):
+            raise PhysicalEpochIntegrationHold(
+                "ActionEpoch recovery activity projection is absent"
+            )
+        recovery_rows = _tensor(
+            project_recovery(owner=self),
+            label="ActionEpoch recovery activity census",
+            shape=(self.num_envs, self._action_epoch_owner.shot_slot_capacity),
+            dtype=torch.bool,
+            device=self.device,
+        )
+        recovery_epoch_work = torch.any(recovery_rows)
+        # Pack all activity facts plus all named fault classes into the one
         # existing scalar.  No second device-to-host synchronization is added.
         summary = transport_work.to(torch.int64)
         summary += keyed_epoch_work.to(torch.int64) * 2
+        summary += recovery_epoch_work.to(torch.int64) * 4
         for ordinal, (bit, _name) in enumerate(
-            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
+            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=3
         ):
             present = torch.any(
                 torch.bitwise_and(
@@ -3772,7 +3846,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         fault_names = tuple(
             name
             for ordinal, (_bit, name) in enumerate(
-                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
+                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=3
             )
             if host_summary & (1 << ordinal)
         )
@@ -3784,6 +3858,9 @@ class ActionBallPhysicalFlightDeviceOwner:
             raise PhysicalEpochIntegrationHold(self._poison_reason)
         self._action_epoch_host_activity_has_work = bool(host_summary & 1)
         self._action_epoch_host_activity_has_keyed_work = bool(host_summary & 2)
+        self._action_epoch_host_activity_has_recovery_work = bool(
+            host_summary & 4
+        )
         self._action_epoch_host_activity_control_step = next_control_step
 
     def action_epoch_host_activity_verdict(
@@ -3803,6 +3880,9 @@ class ActionBallPhysicalFlightDeviceOwner:
             control_step=control_step,
             transport_work=self._action_epoch_host_activity_has_work,
             keyed_epoch_work=self._action_epoch_host_activity_has_keyed_work,
+            recovery_epoch_work=(
+                self._action_epoch_host_activity_has_recovery_work
+            ),
         )
 
     def _action_epoch_expected_control(
@@ -3845,12 +3925,8 @@ class ActionBallPhysicalFlightDeviceOwner:
             return
 
         epoch_owner = self._action_epoch_owner
-        motion_owner = self._action_epoch_motion_owner
         pending = self._action_epoch_pending_launch
-        if (
-            epoch_owner is None
-            or motion_owner is None
-        ):
+        if epoch_owner is None:
             raise PhysicalEpochIntegrationHold(
                 "Physical ActionEpoch launch sources are not construction-bound"
             )
@@ -3871,34 +3947,17 @@ class ActionBallPhysicalFlightDeviceOwner:
             )
             self._action_epoch_substep_pair = _ACTION_EPOCH_SUBSTEP_DENSE
             return
+        motion = self._current_action_epoch_motion_observation()
         try:
-            token = motion_owner.action_ball_continuous_motion_observation_projection()
-            motion = motion_owner.require_owned_action_ball_continuous_motion_observation(
-                token
-            )
             from whole_body_tracking.tasks.tracking.mdp import (
                 action_ball_full_mdp_epoch as epoch,
             )
         except ImportError:
             import action_ball_full_mdp_epoch as epoch
-        except BaseException as exc:
-            raise PhysicalEpochIntegrationHold(
-                "Physical ActionEpoch current Motion producer is absent or stale"
-            ) from exc
         ids = torch.arange(
             self.num_envs, dtype=torch.int64, device=self.device
         )
         current_tick = getattr(motion, "control_tick", None)
-        if (
-            getattr(motion, "motion_owner", None) is not motion_owner
-            or type(current_tick) is not torch.Tensor
-            or current_tick.dtype != torch.int64
-            or current_tick.device != self.device
-            or tuple(current_tick.shape) != (self.num_envs,)
-        ):
-            raise PhysicalEpochIntegrationHold(
-                "Physical ActionEpoch Motion clock ABI differs"
-            )
         record = epoch_owner.current()
         shot_slots = record.current_task_slot
         safe_shot_slots = shot_slots.clamp(0, epoch_owner.shot_slot_capacity - 1)
@@ -3927,20 +3986,25 @@ class ActionBallPhysicalFlightDeviceOwner:
         phase_current = record.phase[ids, safe_shot_slots].eq(
             epoch.PHASE_REVEAL_COMMITTED
         )
-        reached = current_tick.ge(pending.launch_control_step)
+        exact_tick = current_tick.eq(pending.launch_control_step)
+        missed_launch = current_tick.gt(pending.launch_control_step)
         launch_due = (
             pending.pending
             & phase_current
             & identity_current
             & key_current
-            & reached
+            & exact_tick
         )
-        invalid_due = pending.pending & reached & (
+        invalid_due = pending.pending & exact_tick & (
             ~phase_current | ~identity_current | ~key_current
         )
         self._action_epoch_runtime_fault_bits |= (
             invalid_due.to(torch.int64)
             * _ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST
+        )
+        self._action_epoch_runtime_fault_bits |= (
+            (pending.pending & missed_launch).to(torch.int64)
+            * _ACTION_EPOCH_RUNTIME_FAULT_MISSED_LAUNCH_TICK
         )
 
         state_before = self.scene_port.read_state_env()
@@ -4013,16 +4077,14 @@ class ActionBallPhysicalFlightDeviceOwner:
             ] = torch.where(
                 launch_due, pending.publication_ordinal, selected_ordinal
             )
-            # A planned launch after reveal is not late.  A due row observed
-            # after its exact Motion-owned launch tick is late.
-            late_launch = launch_due & current_tick.gt(
-                pending.launch_control_step
-            )
+            # Catch-up launch is forbidden.  The retained field remains in
+            # the immutable ABI, but an admitted production launch is exact.
+            late_launch = torch.zeros_like(launch_due)
             if self._action_epoch_active_r06_launch is not None:
                 raise PhysicalEpochIntegrationHold(
                     "another Physical ActionEpoch R06 launch is active"
                 )
-            selected = pending.pending & ~invalid_due
+            selected = pending.pending & ~invalid_due & ~missed_launch
 
             def selected_or(value: torch.Tensor, fill: int | float) -> torch.Tensor:
                 mask = selected.reshape(
@@ -10374,6 +10436,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._action_epoch_host_activity_control_step = None
             self._action_epoch_host_activity_has_work = True
             self._action_epoch_host_activity_has_keyed_work = True
+            self._action_epoch_host_activity_has_recovery_work = True
             self._host_reset_generation_projection_current = False
             self._advance_owner_mutation_version()
         except Exception as exc:
@@ -11642,6 +11705,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._action_epoch_host_activity_control_step = None
             self._action_epoch_host_activity_has_work = True
             self._action_epoch_host_activity_has_keyed_work = True
+            self._action_epoch_host_activity_has_recovery_work = True
             self._advance_owner_mutation_version()
         except Exception as exc:
             self._poisoned = True

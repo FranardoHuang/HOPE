@@ -23,7 +23,13 @@ def test_portable_fresh_cadence_freezes_due_ticks_not_verdicts():
     cadence = catalog.derive_portable_fresh_cadence(table)
     assert cadence.first_reveal_tick == 295
     assert cadence.cadence_ticks == 293
-    assert cadence.reference_due_ticks == (295, 588, 881, 1174, 1467)
+    assert cadence.reference_due_ticks == (295, 588, 881, 1174)
+    assert len(cadence.reference_due_ticks) == catalog.FRESH_REFERENCE_DUE_COUNT
+    assert cadence.reference_due_ticks[-1] + cadence.cadence_ticks == 1467
+    assert (
+        cadence.reference_due_ticks[-1] + cadence.cadence_ticks
+        < cadence.episode_horizon_ticks
+    )
     assert cadence.episode_horizon_ticks == 1500
     assert not hasattr(cadence, "minimum_shot_reveal_ticks")
 

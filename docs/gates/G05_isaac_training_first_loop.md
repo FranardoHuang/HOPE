@@ -6680,3 +6680,20 @@ update49--59累计`due/reveal=9/9`且每个task update的R03 present/physically-
 “上一阶段一旦有row活过tick295，task/action-mimic入口是否立即开放”，不等于balance/action mimic成功；
 两端launch/contact/landing仍为0分母，击球与上台继续`未测`。本轮也不关闭physics parity、12500
 completion、resume、export、部署或真机安全，G05继续`Partial`且`diagnostic_unauthorized=true`。
+
+### 2026-08-23 V3阶段复核与fresh V4实现纠错候选（Gate仍`Partial`）
+
+只读到Isaac V3 durable ACK1024时，recent100 episode均长约`183.18 tick`，累计
+`due/accepted/playback=656/601/101`，但launch/R03/contact/R06/landing仍全0且timeout=0。它证明balance
+仍在改善且mimic入口已打开，不证明balance或mimic基本成功；hit/landing继续`未测`。recent100 collection
+mean/median=`14.495/13.794 s/H48`，完整iteration=`15.790/14.810 s`，且现役V3 CPU affinity不在GPU1
+local NUMA，因此当前速度不能称正常或达标。
+
+branch候选把sticky R03/Physical/R07 Reward收成fresh-source一次付款、R06 settlement一次完整付款，删除
+episode内不可完成的第五个due，并把late launch改为exact Motion tick/no-catch-up具名fault。future pending与
+无真实R07业务路径走状态/数据流fastpath，不增加stage、actor Observation、owner或same-writer Gate；Isaac
+launcher改用run-owned HOME/XDG/CUDA/TMP/pycache并在ready child的fdinfo直接核GPU lifetime flock。
+
+修改文件host分进程回归合计`533 passed,23 skipped`，另有alignment聚焦`12 passed,23 deselected`；本机完整
+alignment的五个失败均为pinned`mjlab`缺席，必须在exact Pod重跑。clean commit、exact Pod、fresh V4连续ACK、
+profiler-off wall与学习阶段尚未闭合；本节不授权resume/promotion/export/deploy，G05保持`Partial`。

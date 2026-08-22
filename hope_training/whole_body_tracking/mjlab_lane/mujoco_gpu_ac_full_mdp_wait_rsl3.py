@@ -256,6 +256,48 @@ def _update_ledger_module():
     return module
 
 
+def _rollout_storage_views(storage) -> tuple[dict, object]:
+    """Map the pinned RSL3 RolloutStorage object to the ledger wire names."""
+    observations = getattr(storage, "observations", None)
+
+    def observation(name):
+        try:
+            return observations[name]
+        except (KeyError, TypeError):
+            return None
+
+    return {
+        "observations_policy": observation("policy"),
+        "observations_critic": observation("critic"),
+        "actions": getattr(storage, "actions", None),
+        "values": getattr(storage, "values", None),
+        "actions_log_prob": getattr(storage, "actions_log_prob", None),
+        "mu": getattr(storage, "mu", None),
+        "sigma": getattr(storage, "sigma", None),
+        "rewards": getattr(storage, "rewards", None),
+        "returns": getattr(storage, "returns", None),
+        "advantages": getattr(storage, "advantages", None),
+    }, getattr(storage, "dones", None)
+
+
+def _full_a_rollout_storage_finite(
+    storage, *, ledger_module, torch_module, num_steps: int, num_envs: int,
+    device,
+) -> bool:
+    """Recheck the complete Full-A storage ABI for the final completion seal."""
+    tensors, dones = _rollout_storage_views(storage)
+    if not ledger_module.storage_schema_is_exact(
+        torch_module, num_steps=num_steps, num_envs=num_envs, device=device,
+        storage_tensors=tensors, storage_dones=dones,
+    ):
+        return False
+    health = torch_module.stack(tuple(
+        torch_module.isfinite(tensors[name]).all()
+        for name, _width in ledger_module.STORAGE_FLOAT_WIDTHS
+    ) + ledger_module.storage_domain_validity(tensors, dones))
+    return bool(health.all())
+
+
 def _open_evidence_jsonl(raw: str | None) -> int | None:
     if raw is None:
         return None
@@ -671,11 +713,12 @@ def main(
         collection_finished_at = time.perf_counter()
         if ledger is not None:
             storage = runner.alg.storage
+            storage_tensors, storage_dones = _rollout_storage_views(storage)
             prepared = ledger.prepare(
                 updates, environment_steps=env.common_step_counter,
                 storage_step=storage.step,
-                storage_tensors={"rewards": storage.rewards,
-                    "returns": storage.returns, "advantages": storage.advantages},
+                storage_tensors=storage_tensors,
+                storage_dones=storage_dones,
                 policy_std=runner.alg.policy.action_std,
             )
         else:
@@ -725,11 +768,21 @@ def main(
         runner.learn(num_updates, init_at_random_ep_len=False)
         final = env.get_observations()
         storage = runner.alg.storage
-        storage_finite = all(
-            isinstance(value, torch.Tensor)
-            and tuple(value.shape) == (num_steps_per_env, num_envs, 1)
-            and bool(torch.isfinite(value).all())
-            for value in (storage.rewards, storage.returns, storage.advantages)
+        storage_finite = (
+            _full_a_rollout_storage_finite(
+                storage, ledger_module=ledger_module, torch_module=torch,
+                num_steps=num_steps_per_env, num_envs=num_envs,
+                device=env.device,
+            )
+            if full_a_mode
+            else all(
+                isinstance(value, torch.Tensor)
+                and tuple(value.shape) == (num_steps_per_env, num_envs, 1)
+                and bool(torch.isfinite(value).all())
+                for value in (
+                    storage.rewards, storage.returns, storage.advantages
+                )
+            )
         )
         optimizer_state_present, optimizer_state_finite = _optimizer_state_evidence(
             runner.alg.optimizer, torch

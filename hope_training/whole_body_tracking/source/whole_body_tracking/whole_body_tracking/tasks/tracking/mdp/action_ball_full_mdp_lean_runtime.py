@@ -1387,10 +1387,21 @@ class ActionBallFullMdpLeanRuntimeOwner:
                                 raise ActionBallFullMdpLeanRuntimeError(
                                     "Racket epoch strike-fact publisher must return None"
                                 )
+                        # The packed host verdict distinguishes a merely keyed
+                        # reveal/future-launch row from real R07 business.  A
+                        # live transport remains conservative because this
+                        # final substep may settle its outcome; retained
+                        # OUTCOME/RETIRED recovery rows stay active through the
+                        # dedicated recovery bit even after transport is idle.
+                        # No-key transport can never publish keyed epoch facts.
+                        full_r07 = activity.keyed_epoch_work and (
+                            activity.transport_work
+                            or activity.recovery_epoch_work
+                        )
                         recovery_method = (
-                            "stamp_epoch_idle_observation_without_keyed_facts"
-                            if not activity.keyed_epoch_work
-                            else "publish_epoch_reward_facts"
+                            "publish_epoch_reward_facts"
+                            if full_r07
+                            else "stamp_epoch_idle_observation_without_keyed_facts"
                         )
                         recovery_publish = self._bound_plain_method(
                             self._r07_recovery, recovery_method
@@ -1402,7 +1413,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                                 dtype=torch.int64,
                                 device=self._epoch.device,
                             )
-                            if activity.keyed_epoch_work
+                            if full_r07
                             else control - 1
                         )
                         if profile_call is None:
@@ -1411,13 +1422,13 @@ class ActionBallFullMdpLeanRuntimeOwner:
                             profile_call(
                                 (
                                     "r07_idle_stamp"
-                                    if not activity.keyed_epoch_work
+                                    if not full_r07
                                     else "r07_keyed_publish"
                                 ),
                                 recovery_publish,
                                 current_source_step=source_step,
                             )
-                        if activity.keyed_epoch_work:
+                        if full_r07:
                             project_ready = self._bound_plain_method(
                                 self._r07_recovery, "motion_ready_projection"
                             )

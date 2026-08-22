@@ -135,6 +135,8 @@ def _plant_env(n, width, actuator_from_runtime=None):
     ).clone()
     env._qdes_previous_executable_valid = torch.ones(n, dtype=torch.bool)
     env._qdes_guard_terminal = torch.zeros(n, dtype=torch.bool)
+    env._actual_hard_edge_latch = torch.zeros(n, dtype=torch.bool)
+    env._qdes_guard_intervention = torch.zeros(n, dtype=torch.bool)
     env.kp = torch.ones(width)
     env.kd = torch.zeros(width)
     env.tau_lo = torch.full((width,), -100.0)
@@ -430,6 +432,8 @@ def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
     env._qdes_previous_executable = torch.ones((2, 31))
     env._qdes_previous_executable_valid = torch.zeros(2, dtype=torch.bool)
     env._qdes_guard_terminal = torch.ones(2, dtype=torch.bool)
+    env._actual_hard_edge_latch = torch.ones(2, dtype=torch.bool)
+    env._qdes_guard_intervention = torch.ones(2, dtype=torch.bool)
     env._cur_ret = torch.ones(2)
     env._cur_min_d = torch.zeros(2)
     peer_qpos = env.sim.data.qpos[1].clone()
@@ -454,6 +458,8 @@ def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
     )
     assert env._qdes_previous_executable_valid[0]
     assert not env._qdes_guard_terminal[0]
+    assert not env._actual_hard_edge_latch[0]
+    assert not env._qdes_guard_intervention[0]
     assert torch.equal(env.sim.data.qpos[1], peer_qpos)
 
 
@@ -475,6 +481,68 @@ def test_real_unbound_advance_plant_scatter_matches_all_31_names():
     )
     assert state == {"sentinel": True}
     assert env.sim.step_calls == 1
+
+
+def _fullmdp_termination(env):
+    env.max_episode_length = 100
+    env._cur_robot_table = torch.zeros(env.num_envs)
+    env._cur_table_keepout = torch.zeros(env.num_envs, dtype=torch.bool)
+    state = {
+        "proj_g": torch.tensor([[0.0, 0.0, -1.0]]).repeat(env.num_envs, 1),
+        "base_pos": torch.tensor([[0.0, 0.0, 1.0]]).repeat(env.num_envs, 1),
+    }
+    return wait_env.FullMdpInitialWaitVecEnv._fullmdp_termination(
+        env, state, torch.zeros_like(env.actions)
+    )
+
+
+def test_full_a_projection_predicted_brake_and_actual_edge_are_nonterminal_telemetry():
+    env = _plant_env(4, 1)
+    env.full_a_mode = True
+    env.jnt_lo.fill_(-1.0)
+    env.jnt_hi.fill_(1.0)
+    env.sim.data.qpos[:, 0] = torch.tensor([0.0, 0.85, 0.0, 1.0])
+    env.sim.data.qvel[:, 0] = torch.tensor([0.0, 5.0, 0.0, 0.0])
+    incoming = torch.tensor([[10.0], [0.0], [float("nan")], [0.0]])
+
+    train.A3ReadyBallVecEnv._advance_plant(env, incoming)
+
+    # Finite projection and a predicted inner-envelope crossing keep their
+    # executable projection/brake but do not produce a Done bit.
+    assert env._qdes_guard_terminal.tolist() == [False, False, True, False]
+    assert env._actual_hard_edge_latch.tolist() == [False, False, False, True]
+    assert env._qdes_guard_intervention.tolist() == [False, True, True, True]
+    torch.testing.assert_close(
+        env.sim.data.ctrl[:, 0], torch.tensor([0.81, -0.10, 0.0, -0.19])
+    )
+    terminated, truncated, bits, _resolved = _fullmdp_termination(env)
+    assert terminated.tolist() == [False, False, True, False]
+    assert not truncated.any()
+    assert bits.tolist() == [0, 0, 8, 0]
+
+
+def test_full_a_transient_substep_raw_edge_remains_latched_as_nonterminal_telemetry():
+    env = _plant_env(1, 1)
+    env.full_a_mode = True
+    env.jnt_lo.fill_(-1.0)
+    env.jnt_hi.fill_(1.0)
+    env.decimation = 2
+    calls = 0
+
+    def step():
+        nonlocal calls
+        calls += 1
+        env.sim.data.qpos[0, 0] = 1.0 if calls == 1 else 0.0
+
+    env.sim.step = step
+    train.A3ReadyBallVecEnv._advance_plant(env, torch.zeros((1, 1)))
+
+    assert env.sim.data.qpos[0, 0] == 0.0
+    assert env._actual_hard_edge_latch.item()
+    assert not env._qdes_guard_intervention.item()
+    terminated, _truncated, bits, _resolved = _fullmdp_termination(env)
+    assert not terminated.item()
+    assert bits.item() == 0
 
 
 def test_nonfinite_fallback_and_selected_reset_leave_peer_unchanged():

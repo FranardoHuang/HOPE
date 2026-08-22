@@ -424,12 +424,46 @@ def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
     assert not epoch.project_keyed_postphysics_activity_mask(
         owner=physical
     ).any()
+    assert not epoch.project_recovery_postphysics_activity_mask(
+        owner=physical
+    ).any()
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
     assert epoch.project_keyed_postphysics_activity_mask(
         owner=physical
     ).tolist() == [[True], [False]]
+    assert not epoch.project_recovery_postphysics_activity_mask(
+        owner=physical
+    ).any()
 
+    current = epoch._publication.current
+    assert current is not None
+    epoch._publication = replace(
+        epoch._publication,
+        current=replace(
+            current,
+            phase=torch.full_like(current.phase, E.PHASE_LAUNCH_SETTLED),
+        ),
+    )
+    assert epoch.project_keyed_postphysics_activity_mask(
+        owner=physical
+    ).tolist() == [[True], [False]]
+    assert not epoch.project_recovery_postphysics_activity_mask(
+        owner=physical
+    ).any()
+
+    current = epoch._publication.current
+    assert current is not None
+    epoch._publication = replace(
+        epoch._publication,
+        current=replace(
+            current,
+            phase=torch.full_like(current.phase, E.PHASE_OUTCOME_SETTLED),
+        ),
+    )
+    assert epoch.project_recovery_postphysics_activity_mask(
+        owner=physical
+    ).tolist() == [[True], [False]]
     current = epoch._publication.current
     assert current is not None
     epoch._publication = replace(
@@ -442,8 +476,13 @@ def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
     assert epoch.project_keyed_postphysics_activity_mask(
         owner=physical
     ).tolist() == [[True], [False]]
+    assert epoch.project_recovery_postphysics_activity_mask(
+        owner=physical
+    ).tolist() == [[True], [False]]
     with pytest.raises(E.ActionEpochError, match="owner identity"):
         epoch.project_keyed_postphysics_activity_mask(owner=object())
+    with pytest.raises(E.ActionEpochError, match="owner identity"):
+        epoch.project_recovery_postphysics_activity_mask(owner=object())
 
 
 def test_idle_observation_chronology_is_narrow_clone_only_and_owner_bound():
@@ -582,7 +621,7 @@ def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
     assert d05.calls == ["r05_runtime"]
 
 
-def test_previous_paid_row_is_business_even_when_motion_is_not_due():
+def test_invalid_previous_paid_row_is_business_without_highwater_advance():
     epoch, d05, cadence, r06, *_ = _ready_epoch()
     cadence.projection = _MotionProjection(
         1,
@@ -602,7 +641,8 @@ def test_previous_paid_row_is_business_even_when_motion_is_not_due():
     assert rows is not None
     assert not bool(rows.due_mask.any())
     assert epoch.commit_head > head_before
-    assert epoch._last_r06_paid_payment_step.tolist() == [1, -1]
+    assert epoch._undecoded_overflow.tolist() == [True, False]
+    assert epoch._last_r06_paid_payment_step.tolist() == [-1, -1]
     assert r06.consumed is not None
     assert r06.consumed.valid.tolist() == [False, False]
     epoch.abort_d05_transaction(owner=d05.owner)
@@ -696,7 +736,8 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
         paid_record.settlement_step[:, 0].clone(),
         payment.payment_step.clone(),
     )
-    # Advance only the peer row to a newer publication before delayed row-0 close.
+    # The paid row carries Motion debt at its first mailbox observation while
+    # the peer independently advances to a newer publication.
     peer_construct = torch.tensor([[False], [True]], dtype=torch.bool)
     peer_values = torch.tensor([[9], [10]], dtype=torch.int64)
     peer = _candidate(device)
@@ -709,31 +750,20 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
     cadence.projection = _MotionProjection(
         80,
         torch.tensor([False, True]),
-        torch.zeros(2, dtype=torch.bool),
-        torch.zeros(2, dtype=torch.int64),
+        torch.tensor([True, False]),
+        torch.tensor(
+            [E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE],
+            dtype=torch.int64,
+        ),
     )
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
     assert epoch.current().publication_ordinal[:, 0].tolist() == [0, 1]
-    retire_peer_before = _peer_bytes(epoch.current())
-    cadence.projection = _MotionProjection(
-        100,
-        torch.zeros(2, dtype=torch.bool),
-        torch.tensor([True, False]),
-        torch.tensor([E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE], dtype=torch.int64),
-    )
-    epoch.prepare_after_command_rows()
-    retire_peer_after = _peer_bytes(epoch.current())
-    assert retire_peer_before.keys() == retire_peer_after.keys()
-    assert all(
-        torch.equal(retire_peer_before[name], retire_peer_after[name])
-        for name in retire_peer_before
-    )
     assert epoch.current().phase[:, 0].tolist() == [E.PHASE_RETIRED, E.PHASE_REVEAL_COMMITTED]
     assert r06.consumed is not None and r06.consumed.valid.tolist() == [True, False]
+    assert epoch._last_r06_paid_payment_step.tolist() == [77, -1]
     assert epoch.project_current_reward_payment_rows().valid.tolist() == [False, False]
-    epoch.settle_d05_transaction(d05.arm())
-    assert d05.motion.calls == d05.racket.calls == 3  # peer + neutral callbacks
+    assert d05.motion.calls == d05.racket.calls == 2
 
     retirement_entries = _materialized_entries(epoch)
     retired = next(
@@ -747,7 +777,7 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
     )
     assert retired_delta["event_mask"].tolist() == [[True], [False]]
     assert retired_delta["payment_step"].tolist() == [[77], [-1]]
-    assert retired_delta["retirement_step"].tolist() == [[100], [-1]]
+    assert retired_delta["retirement_step"].tolist() == [[80], [-1]]
     assert torch.all(
         retired_delta["payment_step"][retired_delta["event_mask"]]
         <= retired_delta["retirement_step"][retired_delta["event_mask"]]
@@ -3290,9 +3320,18 @@ def test_epoch_carry_capture_requires_ack_boundary_and_exact_live_abi():
 
 @pytest.mark.parametrize(
     "paid_fault",
-    ["wrong_key", "future_payment", "current_future"],
+    [
+        "wrong_key",
+        "wrong_publication",
+        "wrong_settlement",
+        "wrong_payment",
+        "future_payment",
+        "current_future",
+        "wrong_phase",
+        "no_debt",
+    ],
 )
-def test_wrong_full_key_or_payment_chronology_cannot_retire(
+def test_invalid_previous_paid_contract_faults_without_retire_or_highwater(
     monkeypatch, paid_fault
 ):
     monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
@@ -3327,31 +3366,59 @@ def test_wrong_full_key_or_payment_chronology_cannot_retire(
     for ordinal in range(E.REWARD_CONSUMER_COUNT):
         epoch.pay_reward(ordinal)
     current_payment_step = 22 if paid_fault == "current_future" else 20
-    paid = epoch.publish_reward_payment(current_payment_step)
+    epoch.publish_reward_payment(current_payment_step)
+    publication_ordinal = epoch.current().publication_ordinal[:, 0].clone()
+    settlement_step = torch.tensor([12, -1], dtype=torch.int64)
     if paid_fault == "wrong_key":
         key.shot_index[0] += 1
+    elif paid_fault == "wrong_publication":
+        publication_ordinal[0] += 1
+    elif paid_fault == "wrong_settlement":
+        settlement_step[0] += 1
     paid_step = 22 if paid_fault == "future_payment" else 20
+    if paid_fault == "wrong_payment":
+        paid_step = 19
     r06.previous = PreviousPaidActionEpochRows(
         valid=torch.tensor([True, False]),
         shot_key=key,
-        publication_ordinal=epoch.current().publication_ordinal[:, 0].clone(),
-        settlement_step=torch.tensor([12, -1], dtype=torch.int64),
+        publication_ordinal=publication_ordinal,
+        settlement_step=settlement_step,
         payment_step=torch.tensor([paid_step, -1], dtype=torch.int64),
+    )
+    if paid_fault == "wrong_phase":
+        publication = epoch._publication
+        phase = publication.current.phase.clone()
+        phase[0, 0] = E.PHASE_LAUNCH_SETTLED
+        epoch._publication = E._Publication(
+            replace(publication.current, phase=phase),
+            publication.pending_log,
+        )
+    closed_mask = torch.tensor(
+        [paid_fault != "no_debt", False], dtype=torch.bool
+    )
+    close_reason = torch.tensor(
+        [
+            E.MOTION_CLOSE_NONE
+            if paid_fault == "no_debt"
+            else E.MOTION_CLOSE_PLAYED_SUFFIX,
+            E.MOTION_CLOSE_NONE,
+        ],
+        dtype=torch.int64,
     )
     cadence.projection = _MotionProjection(
         21,
         torch.zeros(2, dtype=torch.bool),
-        torch.tensor([True, False]),
-        torch.tensor([E.MOTION_CLOSE_PLAYED_SUFFIX, 0], dtype=torch.int64),
+        closed_mask,
+        close_reason,
     )
     epoch.prepare_after_command_rows()
-    assert epoch.current().phase[0, 0] == E.PHASE_OUTCOME_SETTLED
+    assert epoch.current().phase[0, 0] != E.PHASE_RETIRED
     assert r06.consumed is not None and not r06.consumed.valid.any()
-    if paid_fault != "wrong_key":
-        epoch.settle_d05_transaction(d05.arm())
-        start, end = epoch.prepare_drain()
-        materialized = epoch.materialize_drain(start=start, end=end)
-        assert materialized.overflow.tolist() == [True, False]
+    assert epoch._last_r06_paid_payment_step.tolist() == [-1, -1]
+    epoch.settle_d05_transaction(d05.arm())
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert materialized.overflow.tolist() == [True, False]
 
 
 @pytest.mark.parametrize(

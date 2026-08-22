@@ -503,6 +503,163 @@ def _harness(
     )
 
 
+class _SingleRowFaultQuestion:
+    """Internal round-bank mutation with faults confined to one row."""
+
+    _SOURCE_FAULT = 1 << 48
+
+    def __init__(self, bad_row):
+        self.bad_row = bad_row
+
+    def compose_r05_candidate_bank_inside_prepare(self, internal_context):
+        (
+            cadence_receipt,
+            cadence,
+            _profile_projection,
+            device,
+            support,
+            _draw_u01,
+            candidate_identity,
+            _construction_mask,
+            bank_sequence,
+        ) = r05._consume_internal_question_context(internal_context, self)
+        rounds = r05.INTERNAL_QUESTION_REDRAW_ROUNDS
+        prefix = (cadence.selected_count, rounds, support)
+        mutated_identity = candidate_identity.clone()
+        mutated_identity[self.bad_row, 1, 0] += 1
+        source_fault = torch.zeros(
+            cadence.selected_count, dtype=torch.int64, device=device
+        )
+        source_fault[self.bad_row] = self._SOURCE_FAULT
+        chronology = r05.DeviceQuestionRoundChronology(
+            action_uid=torch.ones(prefix, dtype=torch.int64, device=device),
+            contact_tick=torch.full(
+                prefix, 12, dtype=torch.int64, device=device
+            ),
+            launch_tick=torch.full(
+                prefix, 11, dtype=torch.int64, device=device
+            ),
+            chosen_horizon_ticks=torch.ones(
+                prefix, dtype=torch.int64, device=device
+            ),
+            task_close_tick=torch.full(
+                prefix, 20, dtype=torch.int64, device=device
+            ),
+        )
+        return r05.DeviceQuestionProjection(
+            cadence_receipt_identity=cadence_receipt,
+            bank_identity=object(),
+            bank_sequence=bank_sequence,
+            bank=None,
+            producer_fault=source_fault.contiguous(),
+            selected_count=cadence.selected_count,
+            support_size=support,
+            round_bank=r05.DeviceR05CandidateRoundBank(
+                candidate_identity=mutated_identity.contiguous(),
+                construction_reason=torch.full(
+                    prefix,
+                    r05.QUESTION_CONSTRUCTION_REASON_ADMITTED,
+                    dtype=torch.int64,
+                    device=device,
+                ),
+                producer_fault=torch.zeros(
+                    (cadence.selected_count, rounds),
+                    dtype=torch.int64,
+                    device=device,
+                ),
+                motion_task_f32=torch.zeros(
+                    (*prefix, len(r05.MOTION_TASK_F32_FIELDS)),
+                    dtype=torch.float32,
+                    device=device,
+                ),
+                racket_task_f32=torch.zeros(
+                    (*prefix, len(r05.RACKET_F32_FIELDS)),
+                    dtype=torch.float32,
+                    device=device,
+                ),
+                physical_state_f32=torch.zeros(
+                    (*prefix, len(r05.PHYSICAL_STATE_F32_FIELDS)),
+                    dtype=torch.float32,
+                    device=device,
+                ),
+            ),
+            round_chronology=chronology,
+        )
+
+
+def test_internal_question_one_bad_row_does_not_censor_peers():
+    """Source and round mutations censor only their owning environment."""
+
+    n, bad_row = 3, 1
+    question = _SingleRowFaultQuestion(bad_row)
+    h = _harness(n, question=question)
+    cadence_receipt = object()
+    i64_zero = torch.zeros(n, dtype=torch.int64, device=h.device)
+    i64_one = torch.ones(n, dtype=torch.int64, device=h.device)
+    cadence = r05.DeviceCadenceProjection(
+        selected_count=n,
+        selected_env_index=torch.arange(n, dtype=torch.int64, device=h.device),
+        episode_tick=torch.full_like(i64_zero, 10),
+        reveal_tick=torch.full_like(i64_zero, 10),
+        deadline_tick=torch.full_like(i64_zero, 30),
+        next_reveal_tick=torch.full_like(i64_zero, 100),
+        swing_generation=i64_one.clone(),
+        ready_at_reveal=torch.ones(n, dtype=torch.bool, device=h.device),
+        action_slot=i64_zero.clone(),
+        pending_elapsed_s=torch.zeros(
+            n, dtype=torch.float32, device=h.device
+        ),
+        reset_generation=i64_one.clone(),
+        scheduled_ordinal=i64_zero.clone(),
+        outcome_shot_index=i64_one.clone(),
+        sampler_generation=i64_zero.clone(),
+        task_identity=torch.full_like(i64_zero, -1),
+        cadence_identity=torch.full_like(i64_zero, -1),
+        cadence_producer_fault=i64_zero.clone(),
+        cadence_owner_receipt_identity=cadence_receipt,
+    )
+    callback_started = [False]
+    prepared_token = h.owner._prepare_many_impl(
+        cadence_receipt,
+        question_receipt=None,
+        internal_question_compose=(
+            question.compose_r05_candidate_bank_inside_prepare
+        ),
+        internal_callback_started=callback_started,
+        owned_projection=cadence,
+        construction_mask=torch.ones(
+            n, dtype=torch.bool, device=h.device
+        ),
+        transaction_ordinal=0,
+    )
+    prepared = h.owner._require_prepared(prepared_token)
+
+    assert callback_started == [True]
+    assert prepared.owner_fault_free.tolist() == [True, False, True]
+    assert prepared.question_producer_fault[[0, 2]].eq(0).all()
+    assert (
+        prepared.question_producer_fault[bad_row]
+        == question._SOURCE_FAULT | r05.PRODUCER_FAULT_QUESTION_CHRONOLOGY
+    )
+
+    preview_token = h.owner._preview_impl(prepared_token)
+    preview = h.owner._require_preview(preview_token)
+    all_rows = torch.ones(n, dtype=torch.bool, device=h.device)
+    transaction = h.owner._build_row_transaction(
+        object.__new__(r05.DeviceR05RowTransaction),
+        epoch.ActionEpochDueRows(0, all_rows, all_rows.clone()),
+        prepared,
+        preview,
+    )
+    assert transaction.accept_mask.tolist() == [True, False, True]
+    assert transaction.censor_mask.tolist() == [False, True, False]
+    r05_fault = transaction.candidate.owner_fault_bits[
+        :, 0, epoch.OWNER_ORDER.index("r05_runtime")
+    ]
+    assert r05_fault[[0, 2]].eq(0).all()
+    assert r05_fault[bad_row].ne(0)
+
+
 def _drain_ack(h):
     coordinator = _ensure_global(h)
     for peer in h.global_peers.values():

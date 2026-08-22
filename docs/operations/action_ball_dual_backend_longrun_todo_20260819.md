@@ -115,6 +115,45 @@ checkpoint只保留历史，不是本轮exact-resume父本。
 - [ ] MuJoCo早期qdes forbidden已在update26基本归零，随后robot-table与fall占比继续波动；Isaac仍以fall为主。
   两者都属于policy可学习行为，先按原因/分母观察，不绕过真实joint/table termination，也不增加“安全”门。
 
+## 0.3 2026-08-23 V3审计、实现纠错与fresh V4 TODO
+
+本节只记录当前branch-scoped successor的依赖顺序，不改变`origin/main:docs/NOW.md`的统一队列。
+[`fullmdp-a-h48-v4-*`](../DEFINITIONS.md#fullmdp-correction-lineage-v4)表示第四批fresh实现纠错lineage，
+仍消费PPO V3配方；名称中的V4不是新PPO算法、阶段或promotion等级。现役V3 source/run保持只读，所有修复只能
+进入clean detached successor、新namespace和新run root。
+
+- [x] 保存现役V3双后端的进程身份、continuous ACK、finite/fault、H48 wall、episode与
+  `survive→reveal/ACCEPT→playback→launch→R03→contact→landing`逐阶段分母；零格不得用aggregate return
+  或几何证明替代。
+- [x] 重新对账本页既有TODO与
+  [`EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802`](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)：
+  hidden阶段reset-ready joint/body reference、reveal后原子切measured frame0与bridge、以及teacher/contact
+  几何闭合都已经是已采用设计；当前零launch/contact本身不是“又有一个reference偏移”的证据。
+- [x] 复核203-D actor / 219-D critic合同：actor已有deploy-observable robot、teacher、task geometry、phase与
+  clocks；本轮没有构造出“同一现有actor状态却需要不同动作”的alias反例，故不增加冗余、不可部署观测。
+- [x] 按`HANDOFF_TO_CODEX_20260808.md`§3裁决实现问题：R03/physical/R07只付fresh source step，R06只在
+  settlement后完整付一次；missed launch不得catch-up；第五个episode内不可完成的shot从共享cadence删除；
+  invalid contact退休shot而不伪造Gym reset；q-des真实终止语义双后端一致。
+- [x] 把portable MuJoCo missed launch变成具名pre-optimizer ledger fault；完整rollout storage在同一次已有
+  host reduction中检查policy/critic observation、action/value/logprob/mu/sigma/reward/return/advantage有限，
+  并检查done严格二值，不新增逐step同步。
+- [x] 分文件完成host聚焦回归、consumer/launcher、`py_compile`与`git diff --check`；混合import-alias造成的
+  exact-type假失败须分进程验证，不能为让测试绿而放宽production type identity。
+- [ ] commit后在exact Pod clean detached checkout恢复固定SHA的EPA48/RSL3 ignored资产，运行隔离回归与两个
+  one-shot dry-run；Isaac必须使用目标GPU的NUMA-local CPU set，并由ready child的`/proc/.../fdinfo`证明
+  继承同一GPU lifetime flock。
+- [ ] 只在live lane owner/queue再次对账后，以fresh V4分别替换现役V3；先取得连续durable ACK、完整finite/
+  fault0、run-owned cache与source clean，再宣布切换完成。空闲GPU不等于已获授权，不借用未协调lane。
+- [ ] 继续按自然课程报告：balance基本成功前允许下游样本稀少；但一旦mimic基本形成，launch/contact必须已有
+  非零分母；一旦hit基本形成，policy-settled R06/landing必须已有非零分母，否则才判对应交接故障。
+
+结构裁决也冻结在本轮：真正独立的finite、full-key/generation、plant terminal、scene writer、optimizer与GPU
+lock边界继续fail-stop；task成功、每update必须出事件、R07 readiness、同一writer回声/hash、late catch-up都不是
+安全Gate。当前Physical/Epoch/R06等owner文件已经过大且存在多份sticky fact/payment副本与import/type耦合，
+这确实提高了开发和审计成本；但V4前只做已经有因果证据的减法，不先造巨型state、C++重写或新owner。
+V4取得运行证据后，下一轮结构目标是“一条lifecycle spine + 两个backend StepFeatures adapter + 纯fact/payment
+kernels + 一个telemetry funnel”，每次删除self-proof都必须同时保留独立mutation反例和fixed-tape parity。
+
 ## 1. 当前运行事实
 
 ### 2026-08-22 `aa42418b`当前两条fresh lineage

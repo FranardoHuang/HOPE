@@ -2387,3 +2387,20 @@ GPU证据，不能用该代数测试授权transfer或promotion，G06保持`Parti
 运行输入。候选新增required `--ready-pose`，核canonical regular file与固定SHA后再显式传给child；missing、
 wrong SHA和symlink均在建root前拒绝。该失败root不resume、不复用。新的exact Pod test与连续ACK仍待完成，
 不把launcher host PASS写成GPU或学习证据，G06保持`Partial`。
+
+### 2026-08-23 portable V3阶段复核与evidence V4候选（Gate仍`Partial`）
+
+只读到portable MuJoCo V3 update1256时，recent100 episode均长约`230.73 tick`，累计
+`due/reveal/deferred=10648/10648/0`，但只有一次launch且没有R03/contact/R06/landing；timeout仍为0。
+这不是reference重新偏移的证据：reset-ready→measured frame0 bridge、official racket site与ball-centre
+几何已经由既有TODO/readiness实验和确定性反例闭合。当前判断仍是balance改善、mimic未基本形成、hit/landing
+`未测`。recent100 raw H48 mean/median=`11.269/11.262 s`，未达约6秒量级目标。
+
+branch候选让portable launch只在exact tick发生、missed tick在PPO前具名失败；invalid contact退休shot而不
+伪造Gym reset。evidence schema 4在原有一次host reduction中检查完整rollout finite、done二值与sigma为正，
+consumer拒绝旧schema冒充兼容；q-des Done语义与Isaac一致，actual hard-edge与projection intervention保留
+telemetry。Mu launcher的Warp/CUDA/TMP/pycache均落fresh run root。
+
+host聚焦与launcher证据同G05；exact EPA48/RSL3 Pod runtime、clean detached source、fresh V4 ACK、真实contact/
+landing、双后端physics parity、12500 completion与transfer均未测。G06继续`Partial`，不授权resume、promotion、
+export、部署或真机。

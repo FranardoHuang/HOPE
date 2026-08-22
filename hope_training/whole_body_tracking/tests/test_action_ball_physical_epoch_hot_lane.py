@@ -122,6 +122,11 @@ def _physical_owner(device: torch.device, *, num_envs: int = 2):
                 (num_envs, 1), dtype=torch.bool, device=device
             )
         ),
+        project_recovery_postphysics_activity_mask=(
+            lambda *, owner: torch.zeros(
+                (num_envs, 1), dtype=torch.bool, device=device
+            )
+        ),
         poison_owner_write=lambda *_args, **_kwargs: None,
     )
     return owner, scene
@@ -219,6 +224,14 @@ class _EpochLaunchStub:
     def project_keyed_postphysics_activity_mask(self, *, owner):
         assert owner is self.owner
         return torch.ones(
+            (self.owner.num_envs, self.shot_slot_capacity),
+            dtype=torch.bool,
+            device=self.owner.device,
+        )
+
+    def project_recovery_postphysics_activity_mask(self, *, owner):
+        assert owner is self.owner
+        return torch.zeros(
             (self.owner.num_envs, self.shot_slot_capacity),
             dtype=torch.bool,
             device=self.owner.device,
@@ -365,12 +378,22 @@ def test_physical_epoch_hot_sources_have_no_host_or_current_epoch_rejoin():
         physical.ActionBallPhysicalFlightDeviceOwner.
         _arm_current_action_epoch_physics_fact_source
     )
+    motion = inspect.getsource(
+        physical.ActionBallPhysicalFlightDeviceOwner.
+        _current_action_epoch_motion_observation
+    )
     publish = inspect.getsource(
         physical.ActionBallPhysicalFlightDeviceOwner.
         publish_action_epoch_post_physics
     )
-    for source in (launch, arm):
-        for forbidden in (".item(", ".cpu(", ".tolist(", ".numpy("):
+    for source in (launch, arm, motion):
+        for forbidden in (
+            ".item(",
+            ".cpu(",
+            ".tolist(",
+            ".numpy(",
+            ".nonzero(",
+        ):
             assert forbidden not in source
     refresh = inspect.getsource(
         physical.ActionBallPhysicalFlightDeviceOwner.
@@ -412,6 +435,7 @@ def test_host_activity_verdict_keeps_transport_and_keyed_facts_distinct():
     assert type(idle_verdict) is physical.ActionEpochHostActivityVerdict
     assert idle_verdict.transport_work is False
     assert idle_verdict.keyed_epoch_work is False
+    assert idle_verdict.recovery_epoch_work is False
 
     retired, _scene = _physical_owner(torch.device("cpu"))
     retired._r06_owner = types.SimpleNamespace(
@@ -422,11 +446,44 @@ def test_host_activity_verdict_keeps_transport_and_keyed_facts_distinct():
         project_keyed_postphysics_activity_mask=(
             lambda *, owner: torch.ones((2, 1), dtype=torch.bool)
         ),
+        project_recovery_postphysics_activity_mask=(
+            lambda *, owner: torch.zeros((2, 1), dtype=torch.bool)
+        ),
     )
     retired.refresh_action_epoch_host_activity(next_control_step=1)
     retired_verdict = retired.action_epoch_host_activity_verdict(control_step=1)
     assert retired_verdict.transport_work is False
     assert retired_verdict.keyed_epoch_work is True
+    assert retired_verdict.recovery_epoch_work is False
+
+
+@pytest.mark.parametrize(
+    ("keyed", "recovery"),
+    ((False, False), (True, False), (True, True)),
+)
+def test_host_activity_packs_keyed_and_recovery_bits_in_one_sync(
+    keyed, recovery
+):
+    owner, _scene = _physical_owner(torch.device("cpu"))
+    owner._r06_owner = types.SimpleNamespace(
+        flight_state=torch.zeros((2, 2), dtype=torch.int8)
+    )
+    owner._action_epoch_owner = types.SimpleNamespace(
+        shot_slot_capacity=1,
+        project_keyed_postphysics_activity_mask=(
+            lambda *, owner: torch.full((2, 1), keyed, dtype=torch.bool)
+        ),
+        project_recovery_postphysics_activity_mask=(
+            lambda *, owner: torch.full((2, 1), recovery, dtype=torch.bool)
+        ),
+    )
+
+    owner.refresh_action_epoch_host_activity(next_control_step=1)
+    verdict = owner.action_epoch_host_activity_verdict(control_step=1)
+
+    assert verdict.transport_work is False
+    assert verdict.keyed_epoch_work is keyed
+    assert verdict.recovery_epoch_work is recovery
 
 
 def test_keyed_activity_projection_failure_invalidates_cache_fail_dense():
@@ -451,6 +508,7 @@ def test_keyed_activity_projection_failure_invalidates_cache_fail_dense():
     assert owner._action_epoch_host_activity_control_step is None
     assert owner._action_epoch_host_activity_has_work is True
     assert owner._action_epoch_host_activity_has_keyed_work is True
+    assert owner._action_epoch_host_activity_has_recovery_work is True
     with pytest.raises(
         physical.PhysicalEpochIntegrationHold, match="absent, stale, or replayed"
     ):
@@ -504,7 +562,7 @@ def test_idle_pair_rejects_missing_or_duplicate_pre_and_post(monkeypatch):
     assert owner._poisoned
 
 
-def test_false_then_d05_accept_refreshes_next_control_dense(monkeypatch):
+def test_false_then_future_d05_accept_stays_idle_until_launch_step(monkeypatch):
     _install_focused_postphysics_stamp_module(monkeypatch)
     owner, _scene = _physical_owner(torch.device("cpu"))
     owner._r06_owner = types.SimpleNamespace(
@@ -513,6 +571,10 @@ def test_false_then_d05_accept_refreshes_next_control_dense(monkeypatch):
     owner.refresh_action_epoch_host_activity(next_control_step=1)
     owner.launch_action_epoch()
     owner.publish_action_epoch_post_physics(_focused_postphysics_stamp())
+
+    current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
+    _epoch_owner, motion, _r06 = _bind_launch_stubs(owner, current_grid)
+    motion.control_tick.fill_(2)
 
     token = object()
     view = _accepted_view(
@@ -527,6 +589,11 @@ def test_false_then_d05_accept_refreshes_next_control_dense(monkeypatch):
     owner._action_epoch_device_r05_owner = D05()
     owner.retain_action_epoch_launch(token)
     owner.refresh_action_epoch_host_activity(next_control_step=2)
+    assert owner._action_epoch_host_activity_has_work is False
+
+    motion.control_tick.fill_(6)
+    owner._last_postphysics_exact_stamp = (5, 0, 1, 5, 1)
+    owner.refresh_action_epoch_host_activity(next_control_step=6)
     assert owner._action_epoch_host_activity_has_work is True
 
 
@@ -541,6 +608,10 @@ def test_activity_cache_transitions_idle_accept_retire_idle(monkeypatch):
     owner.launch_action_epoch()
     owner.publish_action_epoch_post_physics(_focused_postphysics_stamp())
 
+    current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
+    _epoch_owner, motion, _r06 = _bind_launch_stubs(owner, current_grid)
+    motion.control_tick.fill_(2)
+
     token = object()
     accepted = torch.tensor((True, False))
     view = _accepted_view(owner, token=token, accepted=accepted)
@@ -552,6 +623,7 @@ def test_activity_cache_transitions_idle_accept_retire_idle(monkeypatch):
 
     owner._action_epoch_device_r05_owner = D05()
     owner.retain_action_epoch_launch(token)
+    owner._action_epoch_pending_launch.launch_control_step[0] = 2
     owner.refresh_action_epoch_host_activity(next_control_step=2)
     assert owner._action_epoch_host_activity_has_work is True
 
@@ -593,6 +665,7 @@ def test_reset_restore_and_checkpoint_boundaries_invalidate_or_reject_idle_cache
         "self._action_epoch_host_activity_control_step = None",
         "self._action_epoch_host_activity_has_work = True",
         "self._action_epoch_host_activity_has_keyed_work = True",
+        "self._action_epoch_host_activity_has_recovery_work = True",
     )
     for method in (
         physical.ActionBallPhysicalFlightDeviceOwner.
@@ -661,6 +734,13 @@ def test_zero_flight_fixed_tapes_use_paired_idle_without_dense_mutation(
         flight_state=torch.zeros((2, 2), dtype=torch.int8)
     )
     if pending_values is not None:
+        current_grid = _shot_key(
+            num_envs=2, device=owner.device, width=1
+        )
+        _epoch_owner, motion, _r06 = _bind_launch_stubs(
+            owner, current_grid
+        )
+        motion.control_tick.zero_()
         owner._action_epoch_pending_launch = _pending(
             owner,
             key=_shot_key(num_envs=2, device=owner.device, width=0),
@@ -694,14 +774,22 @@ def test_zero_flight_fixed_tapes_use_paired_idle_without_dense_mutation(
     assert not owner._action_epoch_direct_state_mismatch(before)
 
 
-@pytest.mark.parametrize("pending_values", ((True, False), (True, True)))
-def test_mixed_and_full_fixed_tapes_keep_dense_capture(
-    monkeypatch, pending_values
+@pytest.mark.parametrize(
+    ("num_envs", "all_pending"),
+    ((2, False), (2, True), (4096, True)),
+)
+def test_future_pending_fixed_tapes_skip_dense_scene_and_r06_callpoints(
+    monkeypatch, num_envs, all_pending
 ):
     _install_focused_postphysics_stamp_module(monkeypatch)
-    owner, _scene = _physical_owner(torch.device("cpu"))
-    current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
-    _epoch_owner, _motion, _r06 = _bind_launch_stubs(owner, current_grid)
+    owner, scene = _physical_owner(
+        torch.device("cpu"), num_envs=num_envs
+    )
+    current_grid = _shot_key(
+        num_envs=num_envs, device=owner.device, width=1
+    )
+    _epoch_owner, motion, r06 = _bind_launch_stubs(owner, current_grid)
+    motion.control_tick.fill_(1)
     key = physical._row_identity.ActionEpochShotKey(
         **{
             field.name: getattr(current_grid, field.name)[:, 0]
@@ -711,29 +799,259 @@ def test_mixed_and_full_fixed_tapes_keep_dense_capture(
     owner._action_epoch_pending_launch = _pending(
         owner,
         key=key,
-        pending=torch.tensor(pending_values, dtype=torch.bool),
-        ordinal=torch.tensor((4, 5), dtype=torch.int64),
+        pending=(
+            torch.ones(num_envs, dtype=torch.bool)
+            if all_pending
+            else torch.arange(num_envs).remainder(2).eq(0)
+        ),
+        ordinal=torch.arange(num_envs, dtype=torch.int64) + 4,
     )
-    owner.refresh_action_epoch_host_activity(next_control_step=1)
-    assert owner._action_epoch_host_activity_has_work is True
-    owner.launch_action_epoch()
-    seen = []
-
-    class DensePathReached(RuntimeError):
-        pass
-
-    def capture(_actual, stamp):
-        seen.append(stamp.exact_tuple())
-        raise DensePathReached
-
+    monkeypatch.setattr(
+        scene,
+        "read_state_env",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("future pending reached the dense scene read")
+        ),
+    )
     monkeypatch.setattr(
         physical.ActionBallPhysicalFlightDeviceOwner,
         "capture_post_physics_facts",
-        capture,
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("future pending reached dense postphysics capture")
+        ),
     )
-    with pytest.raises(DensePathReached):
-        owner.publish_action_epoch_post_physics(_focused_postphysics_stamp())
-    assert seen == [(1, 0, 1, 1, 1)]
+    before = owner._clone_action_epoch_direct_state()
+    mutation_before = owner._mutation_version
+    runtime_fault_before = owner._action_epoch_runtime_fault_bits.clone()
+
+    # The host/common counter may be far ahead after a selected reset.  The
+    # retained launch tick is in Motion's per-environment episode clock.
+    owner._last_postphysics_exact_stamp = (99, 3, 4, 399, 1)
+    owner.refresh_action_epoch_host_activity(next_control_step=100)
+    assert owner._action_epoch_host_activity_has_work is False
+    for substep in range(4):
+        owner.launch_action_epoch()
+        owner.publish_action_epoch_post_physics(
+            _focused_postphysics_stamp(
+                control=100,
+                substep=substep,
+                decimation=4,
+                sim_step=400 + substep,
+            )
+        )
+
+    assert scene.apply_count == 0
+    assert r06.views == []
+    assert not owner._action_epoch_direct_state_mismatch(before)
+    assert owner._mutation_version == mutation_before
+    assert physical._device_bitwise_equal(
+        owner._action_epoch_runtime_fault_bits, runtime_fault_before
+    )
+    assert owner._action_epoch_substep_pair is None
+
+
+def test_due_tick_launch_matches_uncached_dense_fixed_tape():
+    num_envs = 4096
+    cached, cached_scene = _physical_owner(
+        torch.device("cpu"), num_envs=num_envs
+    )
+    reference, reference_scene = _physical_owner(
+        torch.device("cpu"), num_envs=num_envs
+    )
+    cached_grid = _shot_key(
+        num_envs=num_envs, device=cached.device, width=1
+    )
+    reference_grid = _shot_key(
+        num_envs=num_envs, device=reference.device, width=1
+    )
+    cached_epoch, cached_motion, cached_r06 = _bind_launch_stubs(
+        cached, cached_grid
+    )
+    reference_epoch, reference_motion, reference_r06 = _bind_launch_stubs(
+        reference, reference_grid
+    )
+    cached_motion.control_tick.fill_(7)
+    reference_motion.control_tick.fill_(7)
+
+    def key_row(value):
+        return physical._row_identity.ActionEpochShotKey(
+            **{
+                field.name: getattr(value, field.name)[:, 0]
+                for field in fields(physical._row_identity.ActionEpochShotKey)
+            }
+        )
+
+    pending = torch.arange(num_envs).remainder(3).ne(1)
+    ordinal = torch.arange(num_envs, dtype=torch.int64) + 100
+    flight_slot = torch.arange(num_envs, dtype=torch.int64).remainder(2)
+    cached._action_epoch_pending_launch = _pending(
+        cached,
+        key=key_row(cached_grid),
+        pending=pending.clone(),
+        ordinal=ordinal.clone(),
+        flight_slot=flight_slot.clone(),
+    )
+    reference._action_epoch_pending_launch = _pending(
+        reference,
+        key=key_row(reference_grid),
+        pending=pending.clone(),
+        ordinal=ordinal.clone(),
+        flight_slot=flight_slot.clone(),
+    )
+
+    # The cached lane has a host/common counter far ahead of Motion's episode
+    # clock, but selects dense exactly when the retained Motion launch step is
+    # 7.  The reference takes the same existing dense launch path with no
+    # host-activity cache, isolating the new gate.
+    cached._last_postphysics_exact_stamp = (99, 0, 1, 99, 1)
+    cached.refresh_action_epoch_host_activity(next_control_step=100)
+    assert cached.action_epoch_host_activity_verdict(
+        control_step=100
+    ).transport_work is True
+
+    cached.launch_action_epoch()
+    reference.launch_action_epoch()
+
+    assert cached_scene.apply_count == reference_scene.apply_count == 1
+    assert physical._device_bitwise_equal(
+        cached_scene.read_state_env(), reference_scene.read_state_env()
+    )
+    assert not cached._action_epoch_direct_state_mismatch(
+        reference._clone_action_epoch_direct_state()
+    )
+    for name in (
+        "_lifecycle",
+        "_reveal_step",
+        "_previous_ball_center",
+        "_parked",
+        "_published",
+        "_slot_version",
+    ):
+        assert physical._device_bitwise_equal(
+            getattr(cached, name), getattr(reference, name)
+        )
+    assert physical._device_bitwise_equal(
+        cached._action_epoch_runtime_fault_bits,
+        reference._action_epoch_runtime_fault_bits,
+    )
+    assert cached._mutation_version == reference._mutation_version
+    assert (
+        cached._action_epoch_substep_pair
+        == reference._action_epoch_substep_pair
+        == physical._ACTION_EPOCH_SUBSTEP_DENSE
+    )
+    assert cached_epoch.launch_views[-1] is cached_r06.views[-1]
+    assert reference_epoch.launch_views[-1] is reference_r06.views[-1]
+
+    cached_view = cached_r06.views[-1]
+    reference_view = reference_r06.views[-1]
+    for name in (
+        "selected_mask",
+        "due",
+        "late_launch",
+        "flight_slot",
+        "publication_ordinal",
+        "target_xy_m",
+        "launch_control_step",
+        "contact_deadline_control_step",
+        "crossing_horizon_control_step",
+    ):
+        assert physical._device_bitwise_equal(
+            getattr(cached_view, name), getattr(reference_view, name)
+        )
+    for field in fields(physical._row_identity.ActionEpochShotKey):
+        assert physical._device_bitwise_equal(
+            getattr(cached_view.shot_key, field.name),
+            getattr(reference_view.shot_key, field.name),
+        )
+
+
+def test_overdue_pending_is_named_fault_and_never_catches_up():
+    owner, scene = _physical_owner(torch.device("cpu"))
+    current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
+    _epoch_owner, motion, r06 = _bind_launch_stubs(owner, current_grid)
+    motion.control_tick.fill_(8)
+    key = physical._row_identity.ActionEpochShotKey(
+        **{
+            field.name: getattr(current_grid, field.name)[:, 0]
+            for field in fields(physical._row_identity.ActionEpochShotKey)
+        }
+    )
+    owner._action_epoch_pending_launch = _pending(
+        owner,
+        key=key,
+        pending=torch.ones(2, dtype=torch.bool),
+        ordinal=torch.tensor((8, 9), dtype=torch.int64),
+    )
+    owner._last_postphysics_exact_stamp = (99, 0, 1, 99, 1)
+
+    before = owner._clone_action_epoch_direct_state()
+    scene_before = scene.read_state_env().clone()
+    with pytest.raises(
+        physical.PhysicalEpochIntegrationHold,
+        match="missed_launch_tick",
+    ):
+        owner.refresh_action_epoch_host_activity(next_control_step=100)
+
+    assert scene.apply_count == 0
+    assert r06.views == []
+    assert torch.equal(scene.read_state_env(), scene_before)
+    assert not owner._action_epoch_direct_state_mismatch(before)
+    assert torch.all(
+        torch.bitwise_and(
+            owner._action_epoch_runtime_fault_bits,
+            physical._ACTION_EPOCH_RUNTIME_FAULT_MISSED_LAUNCH_TICK,
+        ).ne(0)
+    )
+    assert owner._poisoned
+
+
+def test_mixed_motion_clocks_launch_only_due_row_and_retain_future_peer():
+    owner, scene = _physical_owner(torch.device("cpu"))
+    current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
+    _epoch_owner, motion, r06 = _bind_launch_stubs(owner, current_grid)
+    motion.control_tick.copy_(torch.tensor((6, 7), dtype=torch.int64))
+    key = physical._row_identity.ActionEpochShotKey(
+        **{
+            field.name: getattr(current_grid, field.name)[:, 0]
+            for field in fields(physical._row_identity.ActionEpochShotKey)
+        }
+    )
+    owner._action_epoch_pending_launch = _pending(
+        owner,
+        key=key,
+        pending=torch.ones(2, dtype=torch.bool),
+        ordinal=torch.tensor((8, 9), dtype=torch.int64),
+    )
+    before = owner._clone_action_epoch_direct_state()
+    scene_before = scene.read_state_env()
+    owner._last_postphysics_exact_stamp = (99, 0, 1, 99, 1)
+
+    owner.refresh_action_epoch_host_activity(next_control_step=100)
+    assert owner.action_epoch_host_activity_verdict(
+        control_step=100
+    ).transport_work is True
+    owner.launch_action_epoch()
+
+    assert r06.views[-1].due.tolist() == [False, True]
+    assert owner._action_epoch_pending_launch.pending.tolist() == [True, False]
+    assert owner._action_epoch_active_flight_slot.tolist() == [-1, 0]
+    assert physical._device_bitwise_equal(
+        scene.read_state_env()[0], scene_before[0]
+    )
+    for field in fields(physical._ActionEpochPendingLaunchState):
+        if field.name == "shot_key":
+            continue
+        assert physical._device_bitwise_equal(
+            getattr(owner._action_epoch_pending_launch, field.name)[0:1],
+            getattr(before.pending_launch, field.name)[0:1],
+        )
+    for field in fields(physical._row_identity.ActionEpochShotKey):
+        assert physical._device_bitwise_equal(
+            getattr(owner._action_epoch_pending_launch.shot_key, field.name)[0:1],
+            getattr(before.pending_launch.shot_key, field.name)[0:1],
+        )
+    assert not bool(owner._action_epoch_runtime_fault_bits.any())
 
 
 @pytest.mark.parametrize("num_envs", (2, 64))

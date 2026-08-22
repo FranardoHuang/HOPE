@@ -38,16 +38,17 @@ def _epa48_runtime_module():
 
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
-EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 3, 4, 3
+EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 4, 4, 3
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, 4096,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
     6907688916670928)
 TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
 def _names(raw): return frozenset(raw.split())
-EVENT_KEYS = _names("""reveal_rows reveal_due_rows reveal_deferred_rows launch_rows flight_terminal_rows
+EVENT_KEYS = _names("""reveal_rows reveal_due_rows reveal_deferred_rows launch_rows missed_launch_rows flight_terminal_rows
  shot_retired_rows completed_action_epoch_rows selected_reset_rows racket_contact_eligible_rows racket_contact_rows selected_contact_rows
- opposite_contact_rows edge_contact_rows between_contact_rows invalid_contact_rows r03_present_rows
+ opposite_contact_rows edge_contact_rows between_contact_rows invalid_contact_rows actual_hard_edge_rows
+ qdes_guard_intervention_rows r03_present_rows
  r03_physically_valid_rows landing_crossing_rows r06_present_rows r06_eligible_rows r06_common_rows
  r07_present_rows r07_eligible_rows recovery_success_rows recovery_failure_rows recovery_timeout_rows""")
 TERMINAL_KEYS = _names("time_out base_fell_tilt base_too_low joint_qdes_forbidden robot_hit_table")
@@ -58,7 +59,7 @@ FAULT_KEYS = _names("""unknown_terminal_rows invalid_done_rows done_explanation_
  selected_reset_fault_rows reset_generation_fault_rows classification_unknown_rows event_semantics_fault_rows""")
 TOP_KEYS = _names("""schema_version record_type diagnostic_unauthorized update_index
  run_identity num_envs num_steps_per_env transitions_delta transitions_cumulative
- environment_steps_delta environment_steps_cumulative storage_finite extras_counts
+ environment_steps_delta environment_steps_cumulative storage_finite storage_domains extras_counts
  terminal_bit_counts classification_status_counts outcome_code_counts phase_counts episodes
  rollout_policy_mean_std selected_reset_rows gym_reset_rows lifecycle_counts reward20
  action_identity prepared_update_sha256 snapshot optimizer_metrics learning_rate timings""")
@@ -164,10 +165,23 @@ def _validate_record(row, index, run_identity):
     if (_hex(row["prepared_update_sha256"], 64, "prepared update hash")
             != _prepared_hash(row)):
         _fail(f"prepared update hash at update {index}")
-    _keys(row["storage_finite"], {"rewards", "returns", "advantages"}, "storage")
+    _keys(row["storage_finite"], {
+        "observations_policy", "observations_critic", "actions", "values",
+        "actions_log_prob", "mu", "sigma", "rewards", "returns",
+        "advantages",
+    }, "storage")
     if any(value is not True for value in row["storage_finite"].values()):
         _fail("nonfinite rollout storage")
+    _keys(row["storage_domains"], {
+        "dones_binary", "sigma_positive",
+    }, "storage domains")
+    invalid_domains = [name for name, value
+                       in row["storage_domains"].items() if value is not True]
+    if invalid_domains:
+        _fail("rollout storage domain: " + ",".join(sorted(invalid_domains)))
     events = _count_map(row, "extras_counts", EVENT_KEYS)
+    if events["missed_launch_rows"] != 0:
+        _fail("missed launch fault counter")
     terms = _count_map(row, "terminal_bit_counts", TERMINAL_KEYS)
     life = _count_map(row, "lifecycle_counts", LIFECYCLE_KEYS)
     classes = _count_map(row, "classification_status_counts", map(str, range(6)))
@@ -194,7 +208,8 @@ def _validate_record(row, index, run_identity):
         or events["reveal_due_rows"] != (
             events["reveal_rows"] + events["reveal_deferred_rows"])
         or events["shot_retired_rows"] != (
-            events["recovery_success_rows"] + events["recovery_timeout_rows"])
+            events["recovery_success_rows"] + events["recovery_timeout_rows"]
+            + events["invalid_contact_rows"])
         or events["completed_action_epoch_rows"] > events["shot_retired_rows"])
     if subset_fault:
         _fail("event subset conservation")
@@ -218,7 +233,9 @@ def _validate_record(row, index, run_identity):
     if (selected != events["selected_reset_rows"] or gym != life["gym_reset_rows"]
             or selected != gym or life["reset_generation_rows"] != gym
             or life["time_out_rows"] != terms["time_out"]
-            or events["recovery_failure_rows"] > gym
+            or events["recovery_failure_rows"] > (
+                gym + events["invalid_contact_rows"]
+            )
             or events["shot_retired_rows"] + selected > TRANSITIONS_PER_UPDATE
             or gym < max((life["resolved_table_rows"], *terms.values()))
             or gym > life["resolved_table_rows"] + sum(terms.values())):

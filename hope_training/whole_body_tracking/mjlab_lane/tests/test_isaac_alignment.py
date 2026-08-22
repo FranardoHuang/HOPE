@@ -346,6 +346,7 @@ def test_mutation_hardcoded_raw_clip_in_full_a_wrapper_is_refused(tmp_path):
         "            launch_event,\n"
         "            reveal_due_event,\n"
         "            reveal_deferred_event,\n"
+        "            missed_launch_event,\n"
         "        ) = self._full_a_prepare_step()\n"
         "        _st_before_forward, _tau_sq, requested_qdes = "
         "self._advance_plant(actions)",
@@ -354,6 +355,7 @@ def test_mutation_hardcoded_raw_clip_in_full_a_wrapper_is_refused(tmp_path):
         "            launch_event,\n"
         "            reveal_due_event,\n"
         "            reveal_deferred_event,\n"
+        "            missed_launch_event,\n"
         "        ) = self._full_a_prepare_step()\n"
         "        _st_before_forward, _tau_sq, requested_qdes = "
         "self._advance_plant(torch.clamp(actions, -4.0, 4.0))",

@@ -140,13 +140,18 @@ MuJoCo V2 checkpoint的mean std已从`.02`单调涨到大于`1`并伴随balance�
 保留advantage对learned std和adaptive-KL的真实控制；不叠加std clamp、decay或课程状态机。V2 checkpoint
 已经带有放大的std，故同样禁止resume，必须fresh。
 
-learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。MuJoCo evidence使用
-schema 2，terminal completion使用schema 3，consumer必须按schema分流。H48并不是性能豁免：每次update的
+learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。2026-08-23的
+[`fullmdp-a-h48-v4-*`](../DEFINITIONS.md#fullmdp-correction-lineage-v4)只把MuJoCo per-update evidence升级为
+schema 4，terminal completion保持schema 4，consumer summary保持schema 3；consumer必须按exact schema
+分流，旧V3 evidence不得拿新consumer伪装兼容。schema 4除Reward/return/advantage外，还在同一次PPO前host
+reduction中检查policy/critic observation、action、value、action log-probability、old mu、old sigma全部finite，
+done严格二值且old sigma严格为正；ACK逐字段自陈这些事实。H48并不是性能豁免：每次update的
 transition翻倍，验收统一报告transitions/s和`wall_s * 24 / H`的H24-equivalent，并保留原始wall；真实GPU
 wall、显存和学习收益未测前，任何host hash/shape测试都只能算配方闭合。
 
-MuJoCo one-shot launcher还把`WARP_CACHE_PATH`显式绑定到fresh `<run-root>/warp_cache`并在child任何import前
-创建该目录；这是run-owned编译缓存位置，不是训练Gate或第二份physics authority，也不得回退到用户根目录cache。
+MuJoCo one-shot launcher在child任何import前把`WARP_CACHE_PATH`、`CUDA_CACHE_PATH`、`TMPDIR`和
+`PYTHONPYCACHEPREFIX`分别绑定到fresh `<run-root>/warp_cache`、`cuda_cache`、`tmp`和`pycache`；这些是
+run-owned编译/临时缓存位置，不是训练Gate或第二份physics authority，也不得回退到用户根目录cache。
 
 为得到可迭代的墙钟数据，两后端只增加一个固定`10 warm-up + 50 measured + 1 tail`的H48 rate diagnostic。
 MuJoCo使用`--full-a --diagnostic-rate-probe`；Isaac只可把task中的
@@ -213,6 +218,11 @@ RSL wheel与A3 USD，先取得目标GPU的nonblocking lifetime lock，再核inde
 才创建fresh run root。fd16 runtime receipt、fd18 sealed RSL archive与GPU lock由唯一child继承；训练child
 通过`/usr/bin/env -i`获得窄runtime环境，避免Kit launcher的环境清洗丢失attestation输入。
 
+fresh root还必须拥有`home`、`cuda_cache`、`xdg_cache/config/data/state`、`tmp`、`pycache`与`training`；
+launcher/child分别把`HOME`、四个`XDG_*`、`CUDA_CACHE_PATH`、`TMPDIR`和`PYTHONPYCACHEPREFIX`钉到这些目录。
+这防止Kit/Omniverse/NVIDIA JIT把大缓存写入共享且容量很小的root overlay，也防止不同namespace混用缓存；
+它不是新的学习或安全Gate。不得未经共享Pod owner授权清理`/root`或他人的cache来替代正确的run-owned边界。
+
 该入口不把matched timing、`ACCEPT>0`、已有学习表现或短跑成功当作启动门；这些都不是防止错误写卡、
 错误资产、错误进程或数值故障的独立安全事实。它也不monitor/retry/resume/signal，ready marker后只验证
 exact PID=PGID、runtime receipt与live non-zombie进程并返回。真正的overflow/nonfinite、joint/table/contact
@@ -220,8 +230,9 @@ exact PID=PGID、runtime receipt与live non-zombie进程并返回。真正的ove
 dry-run写成已启动。当前successor `99405266…`已在GPU0 fresh namespace真实启动并取得连续durable ACK；
 前10个完整H48 wall median=`18.445 s`。这只把本条从“待启动”改为“运行中”，不改变上述authority。
 
-2026-08-22课程解阻后的successor必须额外显式给出GPU-local `--cpu-affinity`。Pod1 GPU0当前实测local
-CPU set是`32-47,96-111`；launcher会核该list属于自身allowed cpuset，再以`taskset`包住唯一child。短期归因
+2026-08-22课程解阻后的successor必须额外显式给出GPU-local `--cpu-affinity`。CPU list必须在每次launch前
+从live PCI/NUMA topology重新取得，不能把历史GPU0的`32-47,96-111`外推到另一张卡；当前Pod1实测GPU1/2为
+`48-63,112-127`。launcher会核该list属于自身allowed cpuset，再以`taskset`包住唯一child。短期归因
 可加`--profile-updates 5`，但该五轮固定为`speed_evidence_eligible=false`；正式墙钟窗口必须省略该flag或
 传`0`。launcher还把`HOPE_ACTION_BALL_FULL_MDP_LOG_ROOT`固定到fresh run root的`training/`，并把
 `hydra.run.dir`固定到同一目录下的`hydra/`，所以checkpoint、WAL、contract、TensorBoard和Hydra metadata
@@ -232,9 +243,14 @@ CPU set是`32-47,96-111`；launcher会核该list属于自身allowed cpuset，再
 ```bash
 python3 scripts/launch_isaac_full_mdp_successor.py \
   ...既有exact Isaac/asset/GPU/fresh namespace参数... \
-  --cpu-affinity 32-47,96-111 \
+  --cpu-affinity <live-target-GPU-local-cpu-list> \
   --profile-updates 5
 ```
+
+ready marker后还必须由launcher直接检查该exact leader的`/proc/<pid>/fd/<gpu-lock-fd>`与canonical lock file
+具有相同device/inode，且`fdinfo`唯一lock行包含`FLOCK ADVISORY WRITE`。`lslocks`或`/proc/locks`可能把parent
+已经退出、但child仍继承open-file-description flock的owner显示为PID 0或直接漏掉，不能据此误判lifetime lock
+已丢。该检查只证明同一训练进程仍独占已批准GPU lane，不证明学习、physics parity或promotion。
 
 课程、D05 chronology、teacher和fresh验收见
 [2026-08-22课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。

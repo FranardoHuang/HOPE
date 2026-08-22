@@ -367,3 +367,98 @@ present/physically-valid=`174/174`。Isaac recent10 collection中位`8.238 s/H48
   `.02000495→.01445465`；Reward nonfinite、owner/conservation fault均0。recent10 raw wall分别为
   `9.833/10.380 s/H48`，H24-equivalent约`4.916/5.190 s`；相比旧约22秒已大砍，但raw H48仍未达到约6秒，
   后续性能刀必须从active/mimic profiler找真实主墙，不能缩rollout或加Gate冒充提速。
+
+## 8. 2026-08-23 V3阶段复核、reference对账与V4实现纠错
+
+### 8.1 V3当前不是“训练失败”，也不是可继续忽略实现错误
+
+2026-08-22T21:17Z只读快照如下。两条run均仍绑定clean `46800617…` source、进程存活、finite且
+`diagnostic_unauthorized=true`；本节没有hot-patch、signal、resume或复用namespace。
+
+- portable MuJoCo到update1256、`247,136,256` transitions。early100→recent100 episode均长约
+  `116.63→230.73 tick`，recent100平均回报约`21.25`；累计`due/reveal/deferred=10648/10648/0`，但
+  `launch=1 / R03=0 / selected contact=0 / R06=0 / landing=0`。recent100 raw H48 mean/median=
+  `11.269/11.262 s`，不是约6秒目标。
+- Isaac到durable ACK1024、`201,523,200` environment steps。early100→recent100 episode均长约
+  `91.06→183.18 tick`，recent100平均回报约`12.39`；累计`due/accepted/playback=656/601/101`，
+  playback/accepted约`16.8%`，但physical launch、R03、contact、R06、landing仍全0。recent100
+  collection mean/median=`14.495/13.794 s`，完整iteration=`15.790/14.810 s`；该V3错误使用远离GPU1
+  NUMA-local的CPU affinity，当前迭代速度不能称正常。
+- 两端timeout终止均为0，因此episode变长只证明balance/survival与reset-ready imitation继续改善，不能写
+  balance“基本成功”。task入口已经自然打开，但绝大多数accepted/revealed row在playback/launch前由fall、
+  table或旧Mu qdes语义结束；mimic尚未基本形成，hit与landing仍是零分母`未测`。
+
+这个顺序与预期的balance→mimic→hit→landing一致：允许前一阶段花很多step；验收点不是固定iteration，
+而是上一阶段基本形成时下一阶段已经有真实非零exposure。当前只验证了balance存活row会立即得到mimic题，
+尚未验证mimic基本形成后会得到launch/contact，也没有资格判断hit→landing交接。
+
+### 8.2 reference与Observation重新对账
+
+本轮没有把“launch=0”重新包装成一个未经证明的reference偏移。对账
+[`action_ball_dual_backend_longrun_todo_20260819`](../../operations/action_ball_dual_backend_longrun_todo_20260819.md)
+与[`EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802`](EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md)
+后三层结论仍一致：
+
+- physical reset与hidden WAIT使用同一reset-ready joint/body reference；reveal才原子切measured frame0，
+  actor通过公开teacher-start clock学习非零bridge。direct frame0 physical birth已经被exact Pod `0/73`拒绝，
+  不能因当前训练慢就复活该方案。
+- portable teacher/contact的旧组合错位与Isaac少一个球半径已经在§6.2用唯一official racket site、共享
+  ball-centre offset与构造期几何反例修掉；perfect mimic在exact strike边界可触球。若未来fixed-tape回归失败，
+  应归类实现回归，不应添加actor观测或准入Gate。
+- 203-D actor已经有deploy-observable root/gravity/gyro、q/dq/last action、teacher q/dq/anchor、motion phase、
+  task位置/速度/法向误差、base goal、三个clock、epoch phase与task-valid；219-D critic才保留物理/contact/
+  support事实。HITTER、SMASH、BeyondMimic对照支持这份分层。本轮没有找到现有actor状态相同却要求不同未来动作
+  的具体alias反例，因此拒绝冗余、不可部署的新Observation；只有出现这种反例时才重新讨论future-teacher preview。
+
+### 8.3 已采用的实现纠错
+
+V3的下游零事件尚未触发多数错误，但第一枚真实hit/outcome会立刻污染经济，因此不能继续等到事件出现才修：
+
+- sticky R03、Physical contact与R07只在各自fresh source step付钱；R06两个ordinal共享settlement前冻结图并
+  完整支付一次，payment mailbox用full key/publication/settlement/payment chronology闭合。sticky fact仍留给
+  Observation与审计，不能重复变成Reward。
+- Isaac/portable MuJoCo launch都只接受row自己的exact Motion clock equality；missed tick不得catch-up后继续沿用
+  旧contact/deadline。Isaac用既有packed host reduction报具名`missed_launch_tick`并禁止scene write；MuJoCo用
+  `full_a_missed_launch_event`在PPO前ledger具名失败，不增加逐step D2H。
+- 共享cadence从五个due收成episode内能完成的四个`295/588/881/1174`。第五个1467最早launch已超过1500 horizon，
+  不是课程机会；保留它只会制造永远无法完成的分母。
+- MuJoCo invalid racket-contact classification结算invalid outcome并退休shot，但不伪造Gym Done/reset generation；
+  q-des predicted/current inner-envelope intervention与actual hard-edge作为逐update evidence，只有nonfinite q-des保留
+  双后端相同的qdes Done语义。
+- portable evidence schema 4在已有一次PPO前reduction中检查policy/critic observation、actions、values、
+  log-prob、mu/sigma、reward/return/advantage finite，done二值且sigma为正；consumer按exact schema拒绝旧V3
+  冒充兼容。两端launcher把CUDA/XDG/Warp/TMP/pycache放到fresh run root；Isaac ready后直接核child继承同一
+  GPU lifetime flock，不能再用`lslocks`缺行误判。
+- R05删除把一行结构故障广播到全batch的两个Python O(N)逐行reduce；故障保持row-local。Physical未来launch
+  pending只读Motion per-env clock并走零scene/R06 fastpath，R07只在真实transport或recovery业务存在时执行完整
+  keyed路径。这些是状态/数据流减法，不是新增Gate。
+
+### 8.4 safety与结构裁决
+
+按`HANDOFF_TO_CODEX_20260808.md`§3，继续硬失败的是来自独立事实源且会让环境不可学或证据不可信的边界：
+nonfinite、full-key/generation/chronology、plant fall/table、scene writer、optimizer/storage domain、exact process/
+GPU lock。task成功、每update必须出事件、R07 readiness、同writer回声/hash、actual finite hard-edge立即reset、
+late catch-up都不是安全Gate；它们只做telemetry、课程结果或直接删除。
+
+结构审计也确认当前代码过于臃肿：Physical约万行、Epoch/R06各有多份sticky fact/payment镜像，production测试还会因
+同一源码被不同import alias加载而出现exact-type假失败。过多owner、reverse ACK与same-writer self-proof既拖慢热路，
+也让真正跨owner边界藏在噪声里；旧匿名CUDA assert延迟到下一PhysX write才报错就是实际代价。V4前只实现已有
+因果证据的纠错与减法；不先造巨型`ActionBallState`、C++重写、第二套receipt或新stage。V4运行后再按
+“一条lifecycle spine + backend StepFeatures adapter + 纯fact/payment kernels + 一个telemetry funnel”分批重构，
+每次删除self-proof都保留独立mutation与fixed-tape/RNG/reason/counter parity。
+
+仍保留的结构债不冒充本轮blocker：R06 launch admission/payment的真正跨owner谓词应从匿名async assert迁成
+写前preflight+具名fault；Observation最终finite与R07↔Motion chronology也应迁到已有host boundary。它们的正常
+production after-image当前可达且本轮反例未触发，但后续不能继续用async assert当写前安全屏障。MuJoCo的family
+字段也仍由launcher自陈，当前单一slot0/forehand只能按该分母报告，其他动作/侧继续`未测`。
+
+### 8.5 host验收与下一边界
+
+修改文件逐进程host回归合计`533 passed,23 skipped`；另有alignment聚焦`12 passed,23 deselected`。
+完整alignment本机因未安装pinned `mjlab`有`30 passed,5 failed`，五项都是同一
+`ModuleNotFoundError: mjlab`导致axis不可验证，不是把失败吞成PASS；它必须在exact Pod runtime重跑。
+全部修改Python已通过`py_compile`，`git diff --check`通过。
+
+当前状态仍是branch candidate：exact Pod clean detached回归、ignored EPA48/RSL3资产恢复、两个one-shot
+dry-run、GPU-local affinity、fresh V4连续ACK和真实wall尚未完成。完成前不替换V3、不宣布速度恢复、也不更新
+`docs/NOW.md`或任何formal Gate为Done。

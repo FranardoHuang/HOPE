@@ -278,7 +278,8 @@ class LeanActionEpochRewardGraph:
         )
 
     def _r03(self, ordinal: int, scale: float) -> torch.Tensor:
-        valid, _source_step, fact, faults = self._owner_rows("r03_strike_fact")
+        valid, source_step, fact, faults = self._owner_rows("r03_strike_fact")
+        record = self._record()
         if fact.shape != (self.num_envs, epoch_v1.OWNER_FACT_F32_WIDTH):
             raise LeanRewardCycleError("R03 epoch fact width differs")
         target_position = fact[:, 0:3]
@@ -316,7 +317,13 @@ class LeanActionEpochRewardGraph:
         else:
             raw = torch.exp(-ratio_sq)
         present = torch.bitwise_and(valid, R03_PRESENT).ne(0) & faults.eq(0)
-        admitted = present & torch.bitwise_and(valid, R03_PHYSICALLY_VALID).ne(0)
+        admitted = (
+            present
+            & torch.bitwise_and(valid, R03_PHYSICALLY_VALID).ne(0)
+            # The fact image is sticky; only its source Reward tick is payable.
+            & record.reward_cycle_fault.eq(0)
+            & source_step.eq(record.reward_cycle_age)
+        )
         self._milestone.add_reward(
             ordinal, raw, raw, admitted, finite,
             self._milestone_configured_income_scale[ordinal],
@@ -324,8 +331,14 @@ class LeanActionEpochRewardGraph:
         return torch.where(admitted & finite, raw, torch.zeros_like(raw))
 
     def _physical(self) -> torch.Tensor:
-        valid, _source_step, _fact, faults = self._owner_rows("physical_ball")
-        present = torch.bitwise_and(valid, PHYSICAL_PRESENT).ne(0) & faults.eq(0)
+        valid, source_step, _fact, faults = self._owner_rows("physical_ball")
+        record = self._record()
+        present = (
+            torch.bitwise_and(valid, PHYSICAL_PRESENT).ne(0)
+            & faults.eq(0)
+            & record.reward_cycle_fault.eq(0)
+            & source_step.eq(record.reward_cycle_age)
+        )
         contact = torch.bitwise_and(valid, PHYSICAL_SELECTED_CONTACT).ne(0)
         raw = (present & contact).to(torch.float32)
         finite = torch.ones_like(present)
@@ -339,6 +352,10 @@ class LeanActionEpochRewardGraph:
         valid, _source_step, fact, faults = self._owner_rows(
             "r06_landing_outcome"
         )
+        record = self._record()
+        phase = self._selected(record.phase)
+        settlement_step = self._selected(record.settlement_step)
+        payment_step = self._selected(record.payment_step)
         primitive = fact[:, 0] if ordinal == 11 else fact[:, 1]
         payment = primitive if ordinal == 11 else primitive * fact[:, 2]
         finite = torch.isfinite(primitive) & torch.isfinite(payment)
@@ -347,6 +364,11 @@ class LeanActionEpochRewardGraph:
             & torch.bitwise_and(valid, R06_POLICY_ELIGIBLE).ne(0)
             & torch.bitwise_and(valid, R06_SOURCE_VALID).ne(0)
             & faults.eq(0)
+            # Both R06 ordinals share the ordinal-zero frozen before-image.
+            # The payment is recorded only after the complete Reward cycle.
+            & phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
+            & settlement_step.ge(0)
+            & payment_step.eq(-1)
         )
         self._milestone.add_reward(
             ordinal, primitive, payment, eligible, finite,
@@ -359,8 +381,10 @@ class LeanActionEpochRewardGraph:
         )
 
     def _r07(self) -> torch.Tensor:
-        valid, _source_step, fact, faults = self._owner_rows("r07_recovery")
-        phase = self._selected(self._record().phase)
+        valid, source_step, fact, faults = self._owner_rows("r07_recovery")
+        record = self._record()
+        phase = self._selected(record.phase)
+        reward_cycle_age = record.reward_cycle_age
         reward = fact[:, 0]
         reward_eligible = fact[:, 2].eq(1.0)
         facts_valid = fact[:, 3].eq(1.0)
@@ -378,6 +402,11 @@ class LeanActionEpochRewardGraph:
             & facts_valid
             & ~infrastructure_fault
             & faults.eq(0)
+            & record.reward_cycle_fault.eq(0)
+            # R07 is dense across recovery ticks, but each tick still requires
+            # the producer's immediately preceding post-physics publication.
+            & reward_cycle_age.gt(0)
+            & source_step.eq(reward_cycle_age - 1)
             # RETIRED deliberately retains its last immutable fact image.
             # Current phase is therefore the non-redundant boundary that
             # prevents replaying the final recovery payment.
