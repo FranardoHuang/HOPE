@@ -645,7 +645,7 @@ def test_r07_epoch_direct_publish_marks_nonfinite_plant_as_typed_fault(monkeypat
 
 
 @pytest.mark.parametrize("device_name", ("cpu", "cuda:0"))
-def test_idle_no_key_reads_only_support_and_keeps_readiness_neutral(
+def test_idle_no_key_avoids_plant_and_keeps_observation_neutral(
     monkeypatch, device_name
 ):
     if device_name.startswith("cuda") and not torch.cuda.is_available():
@@ -662,37 +662,43 @@ def test_idle_no_key_reads_only_support_and_keeps_readiness_neutral(
     bundle = _construct_bundle(
         env=env, motion=motion, action_epoch_owner=epoch_owner
     )
+    class RejectContactData:
+        @property
+        def net_forces_w(self):
+            raise AssertionError("idle observation read contact forces")
+
+    sensor.data = RejectContactData()
     commit_head = epoch_owner.commit_head
     original_current = epoch_v1.ActionEpochOwner.current
 
     def reject_full_epoch_clone():
-        raise AssertionError("idle support cloned the full ActionEpoch")
+        raise AssertionError("idle observation cloned the full ActionEpoch")
 
     monkeypatch.setattr(epoch_owner, "current", reject_full_epoch_clone)
     monkeypatch.setattr(
         bundle.plant_fact_adapter,
         "read",
         lambda: (_ for _ in ()).throw(
-            AssertionError("idle support read the full plant")
+            AssertionError("idle observation read the full plant")
         ),
     )
     monkeypatch.setattr(
         bundle.owner,
         "_component_errors_against",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("idle support computed the 13-component recovery")
+            AssertionError("idle observation computed the 13-component recovery")
         ),
     )
     monkeypatch.setattr(
         motion,
         "project_action_ball_full_mdp_recovery_ready_reference",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("idle support projected Motion frame 0")
+            AssertionError("idle observation projected Motion frame 0")
         ),
     )
 
     def reject_keyed_write(*_args, **_kwargs):
-        raise AssertionError("idle support reached a keyed epoch write")
+        raise AssertionError("idle observation reached a keyed epoch write")
 
     monkeypatch.setattr(
         epoch_owner, "merge_runtime_owner_fault", reject_keyed_write
@@ -710,7 +716,7 @@ def test_idle_no_key_reads_only_support_and_keeps_readiness_neutral(
     first = bundle.action_epoch_observation_state()
     assert type(first) is recovery.ContinuousRecoveryObservationState
     assert first.postphysics_valid.tolist() == [True, True]
-    assert first.foot_supported_lr.tolist() == [[True, True], [True, True]]
+    assert first.foot_supported_lr.tolist() == [[False, False], [False, False]]
     assert first.ready_streak.tolist() == [0, 0]
     assert first.required_dwell == 2
     assert first.control_tick.tolist() == [1, 1]
@@ -752,7 +758,7 @@ def test_idle_no_key_reads_only_support_and_keeps_readiness_neutral(
     assert record.owner_fault_bits[:, :, owner_slot].eq(0).all()
 
 
-def test_idle_no_key_support_is_finite_rowwise_and_clone_only(monkeypatch):
+def test_idle_no_key_observation_is_neutral_and_clone_only(monkeypatch):
     device = torch.device("cpu")
     env, motion, robot, sensor = _subject(monkeypatch, device=device)
     env.common_step_counter = 0
@@ -770,22 +776,21 @@ def test_idle_no_key_support_is_finite_rowwise_and_clone_only(monkeypatch):
         cadence_tick=0,
         current_source_step=0,
     ) is None
-    # Observation must consume the exact postphysics sample, not a later
-    # same-control contact mutation (for example, a selected reset write).
+    # Contact is not applicable before a keyed shot and must not be consumed.
     sensor.data.net_forces_w.zero_()
     state = bundle.action_epoch_observation_state()
-    assert state.postphysics_valid.tolist() == [False, True]
-    assert state.source_step.tolist() == [-1, 0]
-    assert state.foot_supported_lr.tolist() == [[False, False], [True, False]]
+    assert state.postphysics_valid.tolist() == [True, True]
+    assert state.source_step.tolist() == [0, 0]
+    assert state.foot_supported_lr.tolist() == [[False, False], [False, False]]
     before = sensor.data.net_forces_w.clone()
     state.postphysics_valid.logical_not_()
     state.foot_supported_lr.logical_not_()
     assert torch.allclose(sensor.data.net_forces_w, before, equal_nan=True)
     repeated = bundle.action_epoch_observation_state()
-    assert repeated.postphysics_valid.tolist() == [False, True]
+    assert repeated.postphysics_valid.tolist() == [True, True]
     assert repeated.foot_supported_lr.tolist() == [
         [False, False],
-        [True, False],
+        [False, False],
     ]
 
 
@@ -844,10 +849,10 @@ def test_idle_no_key_subset_reset_preserves_peer_and_zero_dwell(
     expected_generation[0] += 1
     assert torch.equal(second.reset_generation, expected_generation)
     assert second.ready_streak.tolist() == [0, 0]
-    assert second.foot_supported_lr.tolist() == [[True, True], [True, True]]
+    assert second.foot_supported_lr.tolist() == [[False, False], [False, False]]
 
 
-def test_idle_support_rejects_snapshot_when_epoch_advances(monkeypatch):
+def test_idle_observation_rejects_snapshot_when_epoch_advances(monkeypatch):
     device = torch.device("cpu")
     env, motion, _robot, _sensor = _subject(monkeypatch, device=device)
     env.common_step_counter = 0
@@ -855,9 +860,8 @@ def test_idle_support_rejects_snapshot_when_epoch_advances(monkeypatch):
     bundle = _construct_bundle(
         env=env, motion=motion, action_epoch_owner=epoch_owner
     )
-    epoch_facts = epoch_owner.snapshot_idle_support_facts(owner=bundle)
-    support = bundle.plant_fact_adapter.read_idle_foot_support(
-        support_contact_threshold=bundle.owner.profile.support_contact_threshold
+    epoch_facts = epoch_owner.snapshot_idle_observation_chronology(
+        owner=bundle
     )
     motion._action_ball_continuous_episode_step.zero_()
     epoch_owner._commit_head += 1
@@ -866,9 +870,9 @@ def test_idle_support_rejects_snapshot_when_epoch_advances(monkeypatch):
         match="snapshot is stale or foreign",
     ):
         bundle.owner.stamp_action_epoch_idle_observation(
-            support,
             epoch_facts=epoch_facts,
             current_source_step=0,
+            observed_source_step=0,
             motion_cadence_tick=torch.zeros(2, dtype=torch.int64),
             action_epoch_owner=epoch_owner,
         )

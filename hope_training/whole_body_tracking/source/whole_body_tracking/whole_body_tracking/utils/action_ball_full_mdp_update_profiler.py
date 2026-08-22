@@ -246,7 +246,6 @@ class FullMdpUpdateProfiler:
             components = dict(runtime_owner.component_identities)
             r07 = components.get("r07_recovery")
             r07_epoch = getattr(r07, "action_epoch_owner", None)
-            r07_plant = getattr(r07, "plant_fact_adapter", None)
             r07_owner = getattr(r07, "owner", None)
             if (
                 r07_epoch is not runtime_owner.epoch_owner
@@ -305,14 +304,8 @@ class FullMdpUpdateProfiler:
             ),
             (
                 r07_epoch,
-                "snapshot_idle_support_facts",
+                "snapshot_idle_observation_chronology",
                 "r07_idle_epoch_snapshot",
-                None,
-            ),
-            (
-                r07_plant,
-                "read_idle_foot_support",
-                "r07_idle_support_read",
                 None,
             ),
             (

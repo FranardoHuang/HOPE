@@ -446,7 +446,7 @@ def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
         epoch.project_keyed_postphysics_activity_mask(owner=object())
 
 
-def test_idle_support_snapshot_is_narrow_clone_only_and_owner_bound():
+def test_idle_observation_chronology_is_narrow_clone_only_and_owner_bound():
     epoch, _d05, _cadence, _r06, _playback, _motion, _racket, _physical = (
         _ready_epoch()
     )
@@ -455,14 +455,14 @@ def test_idle_support_snapshot_is_narrow_clone_only_and_owner_bound():
     record = epoch._publication.current
     assert record is not None
     with _NoHostTensorObservation():
-        facts = epoch.snapshot_idle_support_facts(owner=r07)
-    assert type(facts) is E.ActionEpochIdleSupportFacts
+        facts = epoch.snapshot_idle_observation_chronology(owner=r07)
+    assert type(facts) is E.ActionEpochIdleObservationChronology
     assert facts.epoch_version == record.version
     assert facts.reset_generation.data_ptr() != record.reset_generation.data_ptr()
     facts.reset_generation.add_(10)
     assert record.reset_generation.tolist() == [0, 0]
     with pytest.raises(E.ActionEpochError, match="owner identity"):
-        epoch.snapshot_idle_support_facts(owner=object())
+        epoch.snapshot_idle_observation_chronology(owner=object())
 
 
 @pytest.mark.parametrize(

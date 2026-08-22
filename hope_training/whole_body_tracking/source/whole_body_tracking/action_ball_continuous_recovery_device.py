@@ -380,15 +380,6 @@ class ContinuousRecoveryObservationState:
 
 
 @dataclass(frozen=True)
-class _IdleFootSupportFacts:
-    """Same-tick foot-contact facts for the unkeyed critic observation."""
-
-    source_step: int
-    facts_valid: torch.Tensor
-    foot_supported_lr: torch.Tensor
-
-
-@dataclass(frozen=True)
 class ContinuousRecoveryFullMdpPreRewardView:
     """Authenticated R07 nonterminating DoneTerm projection."""
 
@@ -635,30 +626,30 @@ class DiagnosticN2ContinuousRecoveryBundle:
             or current_source_step < 0
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 idle-support current_source_step is malformed"
+                "R07 idle-observation current_source_step is malformed"
             )
         # Construction already bound this exact ActionEpoch owner, and the
         # callee validates this R07 owner before projecting its narrow fact.
         # Re-authenticating the bound Python method here only made the caller
         # prove its own wiring and prevented transparent diagnostic wrapping.
-        epoch_facts = epoch_owner.snapshot_idle_support_facts(owner=self)
+        epoch_facts = epoch_owner.snapshot_idle_observation_chronology(
+            owner=self
+        )
         motion_cadence_tick = owner._tensor(
             getattr(
                 self.motion_owner,
                 "_action_ball_continuous_episode_step",
                 None,
             ),
-            label="R07 idle-support Motion cadence tick",
+            label="R07 idle-observation Motion cadence tick",
             shape=(owner.num_envs,),
             dtype=torch.int64,
         )
-        support = self.plant_fact_adapter.read_idle_foot_support(
-            support_contact_threshold=owner.profile.support_contact_threshold,
-        )
+        observed_source_step = self.plant_fact_adapter.observe_idle_source_step()
         owner.stamp_action_epoch_idle_observation(
-            support,
             epoch_facts=epoch_facts,
             current_source_step=current_source_step,
+            observed_source_step=observed_source_step,
             motion_cadence_tick=motion_cadence_tick,
             action_epoch_owner=epoch_owner,
         )
@@ -1059,40 +1050,10 @@ class DiagnosticN2ContinuousRecoveryPlantFactAdapter:
         self._last_source_step = source_step
         return source_step
 
-    def read_idle_foot_support(
-        self, *, support_contact_threshold: float
-    ) -> _IdleFootSupportFacts:
-        """Read only finite vertical force on the two bound feet."""
+    def observe_idle_source_step(self) -> int:
+        """Read the env chronology without touching robot/contact tensors."""
 
-        self._require_bound_identities()
-        source_step = self._observe_source_step()
-        n = self.num_envs
-        f = len(self.ordered_foot_names)
-        sensor_body_count = len(
-            tuple(getattr(self._contact_sensor, "body_names", ()))
-        )
-        forces = getattr(
-            getattr(self._contact_sensor, "data", None), "net_forces_w", None
-        )
-        if (
-            not isinstance(forces, torch.Tensor)
-            or tuple(forces.shape) != (n, sensor_body_count, 3)
-            or forces.device != self.device
-            or forces.dtype != self.dtype
-        ):
-            valid = torch.zeros(n, dtype=torch.bool, device=self.device)
-            support = torch.zeros((n, f), dtype=torch.bool, device=self.device)
-        else:
-            vertical_force = forces[:, self._foot_sensor_body_ids, 2]
-            valid = torch.isfinite(vertical_force).all(dim=1)
-            support = valid[:, None] & vertical_force.ge(
-                float(support_contact_threshold)
-            )
-        return _IdleFootSupportFacts(
-            source_step=source_step,
-            facts_valid=valid.detach(),
-            foot_supported_lr=support.detach(),
-        )
+        return self._observe_source_step()
 
     def read(self) -> "DeviceContinuousRecoveryPlantFacts":
         """Read one same-tick fact batch; no caller verdict enters this method."""
@@ -1989,13 +1950,9 @@ class ContinuousRecoveryDeviceCoordinator:
         )
         self._action_epoch_ready_last_source_step = -1
         self._idle_observation_published = False
-        self._idle_observation_postphysics_valid = torch.zeros(n, **bo)
         self._idle_observation_source_step = -1
         self._idle_observation_reset_generation = torch.full((n,), -1, **lo)
         self._idle_observation_motion_cadence_tick = torch.full((n,), -1, **lo)
-        self._idle_observation_foot_supported_lr = torch.zeros(
-            (n, self.num_feet), **bo
-        )
 
         self._fault_bits = torch.zeros(n, **lo)
         self._cache_pending = torch.zeros(n, **bo)
@@ -3713,10 +3670,10 @@ class ContinuousRecoveryDeviceCoordinator:
 
     def stamp_action_epoch_idle_observation(
         self,
-        support: _IdleFootSupportFacts,
         *,
         epoch_facts: object,
         current_source_step: int,
+        observed_source_step: int,
         motion_cadence_tick: torch.Tensor,
         action_epoch_owner: object,
     ) -> None:
@@ -3728,22 +3685,23 @@ class ContinuousRecoveryDeviceCoordinator:
             or current_source_step < 0
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 idle-support current_source_step is malformed"
+                "R07 idle-observation current_source_step is malformed"
             )
         motion_tick = self._tensor(
             motion_cadence_tick,
-            label="R07 idle-support Motion cadence tick",
+            label="R07 idle-observation Motion cadence tick",
             shape=(self.num_envs,),
             dtype=torch.int64,
         )
         epoch_owner_type, _record_type, _lifecycle_type, epoch_globals = (
             _exact_action_epoch_types(action_epoch_owner)
         )
-        epoch_facts_type = epoch_globals.get("ActionEpochIdleSupportFacts")
+        epoch_facts_type = epoch_globals.get(
+            "ActionEpochIdleObservationChronology"
+        )
         bound_bundle = self._diagnostic_n2_bundle
         if (
-            type(support) is not _IdleFootSupportFacts
-            or type(bound_bundle) is not DiagnosticN2ContinuousRecoveryBundle
+            type(bound_bundle) is not DiagnosticN2ContinuousRecoveryBundle
             or bound_bundle.owner is not self
             or bound_bundle.action_epoch_owner is not action_epoch_owner
             or type(action_epoch_owner) is not epoch_owner_type
@@ -3751,12 +3709,12 @@ class ContinuousRecoveryDeviceCoordinator:
             or type(epoch_facts) is not epoch_facts_type
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 idle-support owner or fact type differs"
+                "R07 idle-observation owner or fact type differs"
             )
 
         reset_generation = self._tensor(
             getattr(epoch_facts, "reset_generation", None),
-            label="R07 idle-support reset_generation",
+            label="R07 idle-observation reset_generation",
             shape=(self.num_envs,),
             dtype=torch.int64,
         )
@@ -3766,32 +3724,19 @@ class ContinuousRecoveryDeviceCoordinator:
             or epoch_version != action_epoch_owner.commit_head - 1
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 idle-support ActionEpoch snapshot is stale or foreign"
+                "R07 idle-observation ActionEpoch snapshot is stale or foreign"
             )
-        support_valid = self._tensor(
-            support.facts_valid,
-            label="R07 idle-support finite validity",
-            shape=(self.num_envs,),
-            dtype=torch.bool,
-        )
-        foot_supported_lr = self._tensor(
-            support.foot_supported_lr,
-            label="R07 idle-support foot_supported_lr",
-            shape=(self.num_envs, self.num_feet),
-            dtype=torch.bool,
-        )
-        observed_source_step = support.source_step
         if (
             isinstance(observed_source_step, bool)
             or not isinstance(observed_source_step, int)
             or observed_source_step < 0
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 idle-support source step is malformed"
+                "R07 idle-observation source step is malformed"
             )
         if observed_source_step != current_source_step:
             raise ContinuousRecoveryDeviceError(
-                "R07 idle-support source step differs from runtime"
+                "R07 idle-observation source step differs from runtime"
             )
 
         self._require_action_epoch_readiness_chronology(
@@ -3803,11 +3748,9 @@ class ContinuousRecoveryDeviceCoordinator:
         self._action_epoch_ready_last_motion_cadence_tick.copy_(motion_tick)
         self._action_epoch_ready_last_reset_generation.copy_(reset_generation)
         self._action_epoch_ready_last_source_step = observed_source_step
-        self._idle_observation_postphysics_valid.copy_(support_valid)
         self._idle_observation_source_step = observed_source_step
         self._idle_observation_reset_generation.copy_(reset_generation)
         self._idle_observation_motion_cadence_tick.copy_(motion_tick)
-        self._idle_observation_foot_supported_lr.copy_(foot_supported_lr)
         self._idle_observation_published = True
         self._latest_motion_ready_projection = None
         self._advance_mutation_version()
@@ -4403,21 +4346,20 @@ class ContinuousRecoveryDeviceCoordinator:
         projection = self._latest_motion_ready_projection
         if projection is None:
             if self._idle_observation_published:
-                support_valid = self._idle_observation_postphysics_valid
-                foot_supported_lr = self._idle_observation_foot_supported_lr
                 source_step = torch.full(
                     (self.num_envs,),
                     self._idle_observation_source_step,
                     dtype=torch.int64,
                     device=self.device,
                 )
-                source_step.masked_fill_(~support_valid, -1)
                 cadence_tick = self._idle_observation_motion_cadence_tick
                 torch._assert_async(
                     torch.all(cadence_tick < torch.iinfo(torch.int64).max)
                 )
                 return ContinuousRecoveryObservationState(
-                    postphysics_valid=support_valid.detach().clone(),
+                    postphysics_valid=torch.ones_like(
+                        source_step, dtype=torch.bool
+                    ),
                     source_step=source_step,
                     reset_generation=(
                         self._idle_observation_reset_generation.detach().clone()
@@ -4427,7 +4369,11 @@ class ContinuousRecoveryDeviceCoordinator:
                         torch.zeros_like(cadence_tick)
                     ),
                     required_dwell=int(self.profile.ready_dwell_ticks),
-                    foot_supported_lr=foot_supported_lr.detach().clone(),
+                    foot_supported_lr=torch.zeros(
+                        (self.num_envs, self.num_feet),
+                        dtype=torch.bool,
+                        device=self.device,
+                    ),
                 )
             if self._action_epoch_ready_last_source_step >= 0:
                 raise ContinuousRecoveryDeviceError(

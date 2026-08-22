@@ -208,8 +208,8 @@ class RecoveryReferenceLifecycleMasks:
 
 
 @dataclass(frozen=True)
-class ActionEpochIdleSupportFacts:
-    """Clone-only chronology needed by the unkeyed support observation."""
+class ActionEpochIdleObservationChronology:
+    """Clone-only reset chronology for an unkeyed neutral observation."""
 
     epoch_version: int
     reset_generation: torch.Tensor
@@ -804,10 +804,10 @@ class ActionEpochOwner:
                 )
             ).detach()
 
-    def snapshot_idle_support_facts(
+    def snapshot_idle_observation_chronology(
         self, *, owner: object
-    ) -> ActionEpochIdleSupportFacts:
-        """Clone only reset chronology for the unkeyed support observation."""
+    ) -> ActionEpochIdleObservationChronology:
+        """Clone only reset chronology for the unkeyed observation."""
 
         with self._lock:
             self._healthy()
@@ -817,9 +817,9 @@ class ActionEpochOwner:
                 or self._fact_owner_identities.get("r07_recovery") is not owner
             ):
                 raise ActionEpochError(
-                    "idle support owner identity differs"
+                    "idle observation owner identity differs"
                 )
-            return ActionEpochIdleSupportFacts(
+            return ActionEpochIdleObservationChronology(
                 epoch_version=record.version,
                 reset_generation=record.reset_generation.detach().clone(),
             )
@@ -3990,7 +3990,7 @@ class ActionEpochOwner:
 
 
 __all__ = [
-    "ActionEpochIdleSupportFacts",
+    "ActionEpochIdleObservationChronology",
     "ActionEpochCheckpoint",
     "ActionEpochClosedRows",
     "ActionEpochD05AcceptedRows",

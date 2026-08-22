@@ -102,16 +102,13 @@ class _R07Owner:
 
 
 class _Epoch:
-    def snapshot_idle_support_facts(self, *args, **kwargs):
+    def snapshot_idle_observation_chronology(self, *args, **kwargs):
         return args, kwargs
 
 
 class _PlantAdapter:
     def read(self):
         return None
-
-    def read_idle_foot_support(self, *args, **kwargs):
-        return args, kwargs
 
 
 class _Motion:
@@ -253,11 +250,8 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     r07 = env._full_mdp_runtime_owner._r07_recovery
 
     def idle_snapshot():
-        r07.action_epoch_owner.snapshot_idle_support_facts(owner=r07)
-        r07.plant_fact_adapter.read_idle_foot_support(
-            support_contact_threshold=1.0
-        )
-        r07.owner.stamp_action_epoch_idle_observation(object())
+        r07.action_epoch_owner.snapshot_idle_observation_chronology(owner=r07)
+        r07.owner.stamp_action_epoch_idle_observation()
         return "profiled"
 
     assert env._full_mdp_runtime_owner._full_mdp_profile_runtime_call(
@@ -301,7 +295,7 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert settlement_gap["inclusive_host_wall_ms"] > 0.0
     assert payload["segments"]["event_apply"]["calls"] == 0
     assert payload["segments"]["r07_idle_epoch_snapshot"]["calls"] == 1
-    assert payload["segments"]["r07_idle_support_read"]["calls"] == 1
+    assert payload["segments"]["r07_idle_support_read"]["calls"] == 0
     assert payload["segments"]["r07_idle_state_store"]["calls"] == 1
     selected_reset = payload["segments"]["selected_reset_total"]
     assert selected_reset["calls"] == 1
@@ -312,8 +306,9 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert profiler.closed
     assert "step" not in env.__dict__
     assert "compute" not in env.reward_manager.__dict__
-    assert "snapshot_idle_support_facts" not in r07.action_epoch_owner.__dict__
-    assert "read_idle_foot_support" not in r07.plant_fact_adapter.__dict__
+    assert "snapshot_idle_observation_chronology" not in (
+        r07.action_epoch_owner.__dict__
+    )
     assert "stamp_action_epoch_idle_observation" not in r07.owner.__dict__
     assert "_full_mdp_profile_runtime_call" not in (
         env._full_mdp_runtime_owner.__dict__
