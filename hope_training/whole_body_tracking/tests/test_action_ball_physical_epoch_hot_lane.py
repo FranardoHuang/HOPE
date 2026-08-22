@@ -363,7 +363,12 @@ def test_physical_epoch_hot_sources_have_no_host_or_current_epoch_rejoin():
     for forbidden in (".cpu(", ".tolist(", ".numpy(", ".nonzero("):
         assert forbidden not in refresh
     assert "epoch_owner.current()" not in publish
-    assert "self._action_epoch_flight_shot_key.clone()" in publish
+    assert "self._action_epoch_flight_shot_key.clone()" not in publish
+    assert "shot_key=self._action_epoch_flight_shot_key" in publish
+    # Physical's one-shot packet is consumed synchronously by Epoch/R06.  A
+    # second same-writer full-grid snapshot is neither an independent fact nor
+    # a safety boundary.
+    assert "observe_mask=observe.detach().clone()" not in publish
     assert "publication_ordinal" in publish
     assert "refresh_physical_postphysics_rows" in publish
     assert "publish_physical_launch_rows" not in launch
@@ -821,7 +826,7 @@ def test_direct_state_partial_reset_preserves_peer_bytes_and_slot_mapping(
     tuple(physical._row_identity.ActionEpochShotKey.__dataclass_fields__),
 )
 def test_launch_rejects_each_mutated_row_key_field(field_name):
-    owner, _scene = _physical_owner(torch.device("cpu"))
+    owner, scene = _physical_owner(torch.device("cpu"))
     current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
     _epoch_owner, _motion, _r06 = _bind_launch_stubs(owner, current_grid)
     pending_key = physical._row_identity.ActionEpochShotKey(
@@ -838,8 +843,59 @@ def test_launch_rejects_each_mutated_row_key_field(field_name):
         ordinal=torch.tensor((3, 4), dtype=torch.int64),
     )
 
-    with pytest.raises(RuntimeError, match="exact Motion/epoch identity"):
-        owner.launch_action_epoch()
+    before = scene.read_state_env().clone()
+    owner.launch_action_epoch()
+    assert torch.equal(scene.read_state_env(), before)
+    assert torch.all(
+        torch.bitwise_and(
+            owner._action_epoch_runtime_fault_bits,
+            physical._ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST,
+        ).ne(0)
+    )
+    assert torch.all(owner._action_epoch_pending_launch.pending)
+
+
+def test_named_runtime_fault_fails_at_existing_activity_boundary():
+    owner, _scene = _physical_owner(torch.device("cpu"))
+    owner._r06_owner = types.SimpleNamespace(
+        flight_state=torch.zeros((2, 2), dtype=torch.int8)
+    )
+    owner._action_epoch_runtime_fault_bits[0] = (
+        physical._ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST
+    )
+
+    with pytest.raises(
+        physical.PhysicalEpochIntegrationHold,
+        match="due_identity_lost",
+    ):
+        owner.refresh_action_epoch_host_activity(next_control_step=1)
+    assert owner._poisoned
+    assert owner._poison_reason == (
+        "Physical ActionEpoch runtime fault: due_identity_lost"
+    )
+
+
+def test_invalid_d05_accept_is_not_staged_for_physx():
+    owner, _scene = _physical_owner(torch.device("cpu"))
+    token = object()
+    view = _accepted_view(
+        owner, token=token, accepted=torch.tensor((True, False))
+    )
+    # An accepted row whose deadline precedes launch is a cross-owner fault,
+    # not a row that may be forwarded and asserted after the scene write.
+    view.clocks.deadline_tick[0, 0] = view.clocks.launch_tick[0, 0] - 1
+
+    class D05:
+        def require_owned_action_epoch_accepted(self, actual, *, owner_kind):
+            assert actual is token and owner_kind == "physical_ball"
+            return view
+
+    owner._action_epoch_device_r05_owner = D05()
+    owner.retain_action_epoch_launch(token)
+    assert not bool(owner._action_epoch_pending_launch.pending.any())
+    assert owner._action_epoch_runtime_fault_bits[0].item() == (
+        physical._ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE
+    )
 
 
 @pytest.mark.parametrize("num_envs", (2, 64))

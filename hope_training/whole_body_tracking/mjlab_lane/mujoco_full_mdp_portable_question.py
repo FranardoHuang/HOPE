@@ -402,10 +402,6 @@ def build_center_question(
     )
     base_travel = repeated((*row.base_travel_center_b_yaw_xy_m, 0.0))
     base_goal += _quat_apply_wxyz(torch, live_yaw_q, base_travel)
-    contact_offset = repeated(row.contact_offset_center_b_yaw_m)
-    contact = base_goal + _quat_apply_wxyz(
-        torch, live_yaw_q, contact_offset
-    )
     incoming_direction = _quat_apply_wxyz(
         torch, live_yaw_q, repeated(row.incoming_direction_center_b_yaw)
     )
@@ -432,6 +428,23 @@ def build_center_question(
         racket_normal, dim=1, keepdim=True
     ).clamp_min(1.0e-8)
 
+    # Close the curriculum geometrically: if the policy exactly tracks the
+    # measured teacher while its root reaches ``base_goal``, the official
+    # racket site must meet the ball centre at the strike tick.  The older
+    # portable path independently combined the profile contact offset with the
+    # unretargeted measured teacher; slot zero missed by about 13 cm, so
+    # successful mimic could not naturally produce first contact.
+    reference_reach = repeated(
+        (
+            *row.reference_reach_offset_xy_m,
+            float(row.reference_racket_site_position_w_m[2])
+            - float(contact_reference_root_z_scene),
+        )
+    )
+    racket_site_target = base_goal + _quat_apply_wxyz(
+        torch, delta_yaw_q, reference_reach
+    )
+
     # Selected ball centre relative to the official racket site comes from the
     # same dependency-light geometry module as the catalog's reference FK.
     ball_radius = float(geometry.BALL_RADIUS_M)
@@ -440,7 +453,7 @@ def build_center_question(
     ball_from_site_local = repeated(
         geometry.ball_center_from_site_local(int(row.mount_normal_sign))
     )
-    racket_site_target = contact - _quat_apply_wxyz(
+    contact = racket_site_target + _quat_apply_wxyz(
         torch, racket_quat, ball_from_site_local
     )
 

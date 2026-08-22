@@ -60,6 +60,37 @@
 实现、证据与fresh验收的详细真源见
 [2026-08-22课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
 
+## 0.1 2026-08-22 active-path简化、故障修复与第二次fresh重启 TODO
+
+本节承接上节，不改变项目优先级。现役Isaac在durable ACK 257之后由匿名CUDA
+`_assert_async`毒化context，最终在下一次PhysX scene write显错并卡住；它已按精确PID/start-ticks保全现场并
+停止。MuJoCo继续只读运行。第二次successor必须先闭合下列顺序，不能hot-patch旧source或复用namespace。
+
+- [x] 保全Isaac最后完整ACK、run log/WAL/checkpoint和进程身份；确认context已不可继续训练后，只对精确
+  child执行TERM，TERM两次无效才KILL，并验证child/leader/GPU compute app均absent。
+- [x] 把ActionBall active-path的匿名异步assert改为单一、具名、device-local fault状态：无效行不得写PhysX，
+  在已有control/PPO边界统一同步并报告具体reason；保留真正的finite/identity/joint/contact安全，不保留
+  同一writer按构造恒真的echo检查。
+- [x] 让Isaac与MuJoCo共用同一纯tensor `q_des` guard语义；finite fallback、soft/hard inset、state-dependent
+  brake和终止位必须有反例测试，不能继续把MuJoCo的简单hard clamp写成已对齐。
+- [x] 用构造期确定性几何证明slot0的teacher strike pose与question ball/contact tuple闭合；该证明回答
+  “mimic成功后是否已经能碰球”，不新增actor observation，也不用随机rollout冒充几何证明。
+- [x] 收敛Isaac post-physics同一调用栈内的重复full-grid clone/同写者校验；只删除同步consumer完成前不会
+  被修改的副本，并用alias/mutation反例与fixed-tape检查保护真实跨owner边界。
+- [x] launcher加入有界profiler窗口和GPU-local NUMA放置的显式参数；profiler只作归因，profiler-off同卡
+  `10 warmup + 50 measured`才记wall/throughput，且必须同时报告raw H48和H24-equivalent。
+- [ ] host聚焦回归、exact Pod隔离测试、Reward20/actor203/critic219/done/reset/reason/RNG/fault parity全部通过；
+  学习语义改变一律fresh lineage。
+- [ ] successor就绪后保全仍在运行的MuJoCo最终证据并精确停止；两个backend用新clean detached source、
+  fresh run root和fresh namespace同时重启，至少取得连续ACK `0..4`、finite/fault0后才宣布切换完成。
+- [ ] 按balance→mimic→entry→strike→landing继续报告逐阶段分母：上一阶段基本成形时下一阶段应已有非零
+  exposure；contact/landing为零就明确写零或`未测`，不靠aggregate return掩盖。
+
+本轮冻结的取舍：采用active-path状态收敛、共享q_des guard、确定性几何闭合与有界诊断；延后resume、
+CUDA Graph、solver iteration和物理步长变化；拒绝先写C++、增加actor observation、增加same-writer receipt，
+以及用Reward调权掩盖zero denominator。100-step RK4 fused CUDA/Triton路径已经存在，本轮只验证真实绑定，
+不重复实现。
+
 ## 1. 当前运行事实
 
 ### 2026-08-22课程解阻后的现役successor

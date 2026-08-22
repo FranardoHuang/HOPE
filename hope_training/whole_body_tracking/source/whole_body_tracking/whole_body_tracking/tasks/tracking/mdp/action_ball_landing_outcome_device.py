@@ -11248,10 +11248,11 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             & ~self._flight_physical_retired
             & self._action_epoch_settled_mailbox_ok()
         )
-        torch._assert_async(
-            torch.all(~settled | retire_valid),
-            "R06 epoch retire differs from the private typed settlement",
-        )
+        # Physical is the cross-owner consumer of both this settlement and the
+        # actual retire result.  It masks any mismatch from scene writes and
+        # reports one named control-boundary fault.  An asynchronous assertion
+        # here used to continue mutating R06 after poisoning CUDA, so the next
+        # unrelated PhysX call carried an untraceable device-side assert.
         mailbox_retired = mailbox_target & torch.gather(
             retire_valid, 1, self._mailbox_reserved_flight_slot.clamp(
                 0, self.flight_slot_capacity - 1

@@ -812,6 +812,33 @@ class ActionEpochOwner:
             )
         return value.detach().clone().contiguous()
 
+    def _borrow_tensor(
+        self,
+        value: object,
+        *,
+        label: str,
+        shape: tuple[int, ...],
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Validate one synchronous owner projection without copying it.
+
+        The caller must consume the view inside the current owner operation;
+        it must never store the tensor in a record or journal entry.  This is
+        the narrow seam used by Physical's one-shot postphysics packet.
+        """
+
+        if (
+            type(value) is not torch.Tensor
+            or value.device != self.device
+            or value.dtype is not dtype
+            or tuple(value.shape) != shape
+            or not value.is_contiguous()
+        ):
+            raise ActionEpochError(
+                f"{label} must be contiguous {dtype} on {self.device} with shape {shape}"
+            )
+        return value.detach()
+
     @staticmethod
     def _owner_slot(owner_kind: str) -> int:
         if type(owner_kind) is not str or owner_kind not in OWNER_ORDER:
@@ -2099,13 +2126,13 @@ class ActionEpochOwner:
             ):
                 raise ActionEpochError("Physical.flight_slot must establish [N,K]")
             physical_shape = (self.num_envs, flight_slot_value.shape[1])
-            self._tensor(
+            self._borrow_tensor(
                 flight_slot_value,
                 label="Physical.flight_slot",
                 shape=physical_shape,
                 dtype=torch.int64,
             )
-            observe = self._tensor(
+            observe = self._borrow_tensor(
                 projection.observe_mask,
                 label="Physical.observe_mask",
                 shape=physical_shape,
@@ -2117,34 +2144,34 @@ class ActionEpochOwner:
                     shape=physical_shape,
                     device=self.device,
                     label="Physical.shot_key",
-                ).clone()
+                )
             except row_identity.ActionEpochShotKeyError as exc:
                 raise ActionEpochError(str(exc)) from exc
-            publication = self._tensor(
+            publication = self._borrow_tensor(
                 projection.publication_ordinal,
                 label="Physical.publication_ordinal",
                 shape=physical_shape,
                 dtype=torch.int64,
             )
-            faults = self._tensor(
+            faults = self._borrow_tensor(
                 projection.owner_fault_bits,
                 label="Physical.owner_fault_bits",
                 shape=physical_shape,
                 dtype=torch.int64,
             )
-            valid_bits = self._tensor(
+            valid_bits = self._borrow_tensor(
                 projection.fact_valid_bits,
                 label="Physical.fact_valid_bits",
                 shape=physical_shape,
                 dtype=torch.int64,
             )
-            source_step = self._tensor(
+            source_step = self._borrow_tensor(
                 projection.fact_source_step,
                 label="Physical.fact_source_step",
                 shape=physical_shape,
                 dtype=torch.int64,
             )
-            fact_f32 = self._tensor(
+            fact_f32 = self._borrow_tensor(
                 projection.fact_f32,
                 label="Physical.fact_f32",
                 shape=(*physical_shape, OWNER_FACT_F32_WIDTH),

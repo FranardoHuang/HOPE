@@ -2336,3 +2336,15 @@ Isaac与MuJoCo现在是两个独立clean detached checkout和两个fresh namespa
 只关闭工程发车与早期finite证据；学习阶段对拍、selected contact、landing、formal completion、transfer与
 部署仍未成立，`diagnostic_unauthorized=true`，所以G06保持`Partial`。详细证据见
 [`EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822`](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
+### 2026-08-22 q_des与mimic→contact闭环候选（Gate仍`Partial`）
+
+portable FullMDP现与Isaac调用同一纯tensor executable-q_des guard，包含finite fallback、共同soft/hard
+inner projection、鲜q/qdot 20 ms crossing brake与终止位；alignment ledger以live AST call/参数反例将该轴
+从`DIVERGENT_DECLARED`改为`ALIGNED`。这只关闭该轴，203/219 Observation以外的critic/termination/plant
+物理差异仍各自保留。
+
+slot0确定性构造还发现旧portable teacher与contact约错开13 cm；现由measured strike site和共享exact-face
+ball-centre offset唯一构造contact，且共同Isaac D05补回此前漏掉的球半径。host证明perfect mimic在strike
+tick的ball/site/selected-face几何闭合；真实MuJoCo-Warp/PhysX contact、landing与多seed学习曲线仍需fresh
+GPU证据，不能用该代数测试授权transfer或promotion，G06保持`Partial`。

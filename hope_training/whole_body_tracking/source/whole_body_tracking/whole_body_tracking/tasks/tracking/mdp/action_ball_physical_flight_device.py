@@ -108,6 +108,21 @@ PHYSICAL_HOT_FAULT_LAUNCH_TICK = 1 << 4
 PHYSICAL_EPOCH_FAULT_LAUNCH_SOURCE = 1 << 40
 PHYSICAL_EPOCH_FAULT_POSTPHYSICS_PRODUCER = 1 << 41
 PHYSICAL_EPOCH_FAULT_POSTPHYSICS_NONFINITE = 1 << 42
+
+# Private active-path fault bits.  These do not become another epoch owner or
+# policy input.  They retain the first cross-owner contradiction on device and
+# are consumed by the one host reduction that already selects idle vs dense at
+# a control boundary.  In particular, they replace anonymous CUDA assertions:
+# an invalid row is masked from PhysX first, then fails with a named reason
+# without poisoning the CUDA context.
+_ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE = 1 << 0
+_ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST = 1 << 1
+_ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH = 1 << 2
+_ACTION_EPOCH_RUNTIME_FAULT_NAMES = (
+    (_ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE, "accept_not_launchable"),
+    (_ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST, "due_identity_lost"),
+    (_ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH, "r06_retire_mismatch"),
+)
 PHYSICAL_EPOCH_FACT_PRESENT = 1 << 0
 PHYSICAL_EPOCH_FACT_SELECTED_CONTACT = 1 << 1
 # Physical's fixed epoch fact slice is intentionally small.  Reward consumes
@@ -2600,6 +2615,9 @@ class ActionBallPhysicalFlightDeviceOwner:
         # as one full-N masked image; a peer publication never invalidates an
         # older row merely because the journal ordinal advanced.
         self._action_epoch_pending_launch: _ActionEpochPendingLaunchState | None = None
+        self._action_epoch_runtime_fault_bits = torch.zeros(
+            (self.num_envs,), dtype=torch.int64, device=self.device
+        )
         self._action_epoch_active_flight_slot = torch.full(
             (self.num_envs,), -1, dtype=torch.int64, device=self.device
         )
@@ -3605,16 +3623,19 @@ class ActionBallPhysicalFlightDeviceOwner:
             & torch.isfinite(target_xy).all(dim=1)
             & deadline_tick.ge(launch_tick) & horizon_tick.gt(deadline_tick)
         )
-        torch._assert_async(
-            torch.all(valid), "Physical D05 ACCEPT rows are not launchable"
+        invalid_accepted = task_valid & ~valid
+        self._action_epoch_runtime_fault_bits |= (
+            invalid_accepted.to(torch.int64)
+            * _ACTION_EPOCH_RUNTIME_FAULT_ACCEPT_NOT_LAUNCHABLE
         )
+        accepted = task_valid & valid
 
         def merge(value: torch.Tensor, prior: torch.Tensor) -> torch.Tensor:
-            mask = task_valid.reshape(self.num_envs, *((1,) * (prior.ndim - 1)))
+            mask = accepted.reshape(self.num_envs, *((1,) * (prior.ndim - 1)))
             return torch.where(mask, value, prior)
 
         self._action_epoch_pending_launch = _ActionEpochPendingLaunchState(
-            pending=before.pending | task_valid,
+            pending=before.pending | accepted,
             flight_slot=merge(flight_slot, before.flight_slot),
             shot_key=_row_identity.ActionEpochShotKey(
                 **{f.name: merge(getattr(key, f.name), getattr(before.shot_key, f.name))
@@ -3706,9 +3727,34 @@ class ActionBallPhysicalFlightDeviceOwner:
                 device=self.device,
             )
             scene_work = scene_activity.any(dim=1)
-        self._action_epoch_host_activity_has_work = bool(
-            torch.any(physical_work | r06_work | scene_work).item()
+        has_work = torch.any(physical_work | r06_work | scene_work)
+        # Pack activity plus all named fault classes into one scalar so this
+        # boundary retains exactly one device-to-host synchronization.
+        summary = has_work.to(torch.int64)
+        for ordinal, (bit, _name) in enumerate(
+            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=1
+        ):
+            present = torch.any(
+                torch.bitwise_and(
+                    self._action_epoch_runtime_fault_bits, bit
+                ).ne(0)
+            )
+            summary += present.to(torch.int64) * (1 << ordinal)
+        host_summary = int(summary.item())
+        fault_names = tuple(
+            name
+            for ordinal, (_bit, name) in enumerate(
+                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=1
+            )
+            if host_summary & (1 << ordinal)
         )
+        if fault_names:
+            self._poisoned = True
+            self._poison_reason = (
+                "Physical ActionEpoch runtime fault: " + ",".join(fault_names)
+            )
+            raise PhysicalEpochIntegrationHold(self._poison_reason)
+        self._action_epoch_host_activity_has_work = bool(host_summary & 1)
         self._action_epoch_host_activity_control_step = next_control_step
 
     def _action_epoch_expected_control(
@@ -3844,9 +3890,9 @@ class ActionBallPhysicalFlightDeviceOwner:
         invalid_due = pending.pending & reached & (
             ~phase_current | ~identity_current | ~key_current
         )
-        torch._assert_async(
-            torch.all(~invalid_due),
-            "Physical ActionEpoch due row lost its exact Motion/epoch identity",
+        self._action_epoch_runtime_fault_bits |= (
+            invalid_due.to(torch.int64)
+            * _ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST
         )
 
         state_before = self.scene_port.read_state_env()
@@ -3928,7 +3974,7 @@ class ActionBallPhysicalFlightDeviceOwner:
                 raise PhysicalEpochIntegrationHold(
                     "another Physical ActionEpoch R06 launch is active"
                 )
-            selected = pending.pending
+            selected = pending.pending & ~invalid_due
 
             def selected_or(value: torch.Tensor, fill: int | float) -> torch.Tensor:
                 mask = selected.reshape(
@@ -6879,16 +6925,26 @@ class ActionBallPhysicalFlightDeviceOwner:
             _owner_identity=self._owner_identity,
             _capture_token=_POSTPHYSICS_CAPTURE_FACTS_TOKEN,
         )
+        # The ActionEpoch entry consumes this packet synchronously, before any
+        # scene or Physical mutation.  Retaining another full [N,K] snapshot
+        # here only duplicated the scene producer's fresh tensors; the legacy
+        # two-phase API still receives independent snapshots for its longer
+        # lease.
+        def retain(value: torch.Tensor) -> torch.Tensor:
+            if self._action_epoch_runtime_call_active:
+                return value.detach()
+            return value.detach().clone()
+
         self._active_postphysics_capture = facts
         self._active_postphysics_capture_image = _PostPhysicsCaptureImage(
             exact_stamp=exact,
-            observe_mask=observe.detach().clone(),
-            flight_slot=flight_slot.detach().clone(),
-            full_key_sha256=self._outcome_sha.detach().clone(),
-            ball_generation=self._generation.detach().clone(),
-            observation_ordinal=next_ordinal.detach().clone(),
-            current_state_env_f32=state.detach().clone(),
-            slot_version=self._slot_version.detach().clone(),
+            observe_mask=retain(observe),
+            flight_slot=retain(flight_slot),
+            full_key_sha256=retain(self._outcome_sha),
+            ball_generation=retain(self._generation),
+            observation_ordinal=retain(next_ordinal),
+            current_state_env_f32=retain(state),
+            slot_version=retain(self._slot_version),
             owner_mutation_version=self._mutation_version,
         )
         self._last_postphysics_exact_stamp = exact
@@ -7117,22 +7173,20 @@ class ActionBallPhysicalFlightDeviceOwner:
         fixed_flight_slot = self._fixed_flight_slot_grid
         self._action_epoch_active_r06_postphysics = (
             ActionEpochR06PostPhysicsProjection(
-                observe_mask=observe.detach().clone(),
-                flight_slot=fixed_flight_slot.detach().clone(),
-                shot_key=self._action_epoch_flight_shot_key.clone(),
+                observe_mask=observe.detach(),
+                flight_slot=fixed_flight_slot.detach(),
+                shot_key=self._action_epoch_flight_shot_key,
                 publication_ordinal=(
-                    self._action_epoch_flight_publication_ordinal.detach().clone()
+                    self._action_epoch_flight_publication_ordinal.detach()
                 ),
-                observation_ordinal=image.observation_ordinal.detach().clone(),
-                previous_ball_center_m=(
-                    self._previous_ball_center.detach().clone()
-                ),
-                current_ball_center_m=current_center.detach().clone(),
+                observation_ordinal=image.observation_ordinal.detach(),
+                previous_ball_center_m=self._previous_ball_center.detach(),
+                current_ball_center_m=current_center.detach(),
                 observation_stamp=observation_stamp,
-                selected_contact_event=contact.detach().clone(),
-                selected_contact_ball_center_m=contact_center.detach().clone(),
+                selected_contact_event=contact.detach(),
+                selected_contact_ball_center_m=contact_center.detach(),
                 selected_contact_outgoing_segment_anchor_m=(
-                    outgoing_anchor.detach().clone()
+                    outgoing_anchor.detach()
                 ),
                 selected_contact_stamp=_stamp_grid(
                     facts.selected_contact_stamp,
@@ -7178,13 +7232,13 @@ class ActionBallPhysicalFlightDeviceOwner:
                     shape=shape,
                     device=self.device,
                 ),
-                nonfinite_observation=nonfinite.detach().clone(),
-                producer_contract_fault=producer_fault.detach().clone(),
-                engine_overflow=overflow.detach().clone(),
-                owner_fault_bits=row_fault.detach().clone(),
-                fact_valid_bits=valid_bits.detach().clone(),
-                fact_source_step=source_step.detach().clone(),
-                fact_f32=values.detach().clone(),
+                nonfinite_observation=nonfinite.detach(),
+                producer_contract_fault=producer_fault.detach(),
+                engine_overflow=overflow.detach(),
+                owner_fault_bits=row_fault.detach(),
+                fact_valid_bits=valid_bits.detach(),
+                fact_source_step=source_step.detach(),
+                fact_f32=values.detach(),
                 physical_owner=self,
                 epoch_owner=epoch_owner,
                 _owner_identity=self._owner_identity,
@@ -7251,25 +7305,28 @@ class ActionBallPhysicalFlightDeviceOwner:
                 dtype=torch.int64,
                 device=self.device,
             ).eq(fixed_flight_slot)
-        torch._assert_async(
-            torch.all(
-                slot_match & ~(accepted & rejected)
-                & ~(retired & ~settled)
-            ),
-            "R06 direct postphysics/retire result is internally inconsistent",
+        retire_mismatch = (
+            ~slot_match | (accepted & rejected) | (retired ^ settled)
         )
+        self._action_epoch_runtime_fault_bits |= (
+            retire_mismatch.any(dim=1).to(torch.int64)
+            * _ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH
+        )
+        safe_retired = retired & ~retire_mismatch
         scene_handle = self._prepare_action_epoch_scene_write(
             kind="retire",
             state_env_f32=self._park_state_template,
-            selected_mask=retired,
+            selected_mask=safe_retired,
         )
         self._apply_scene_write(scene_handle)
         self._lifecycle = torch.where(
-            retired, torch.full_like(self._lifecycle, R06_FLIGHT_EMPTY), self._lifecycle
+            safe_retired,
+            torch.full_like(self._lifecycle, R06_FLIGHT_EMPTY),
+            self._lifecycle,
         )
-        self._parked |= retired
-        self._published &= ~retired
-        self._slot_version += retired.to(torch.int64)
+        self._parked |= safe_retired
+        self._published &= ~safe_retired
+        self._slot_version += safe_retired.to(torch.int64)
         self._action_epoch_active_r06_postphysics = None
         r06_publish = getattr(
             self._r06_owner, "publish_action_ball_full_mdp_epoch_facts", None

@@ -34,16 +34,17 @@ The vendor's actuators are pure torque motors and the deployed controller
 computes the PD itself.  We do the same, once per *physics* step (1 kHz):
 
     q_raw = action_offset + action_scale * a                    # 50 Hz
-    q_des = clamp(finite_or_previous_action(q_raw), joint_range)# 50 Hz
+    q_des = shared_soft_hard_state_guard(q_raw, q, qd)          # 50 Hz
     tau   = clamp(kp*(q_des - q) - kd*qd, ctrlrange)            # 1 kHz
 
 so the policy's action is a residual joint-position target around the pinned
 Isaac ``runtime_plant.default_joint_pos_rad``.  That affine offset is distinct
 from the split-ready physical reset pose.  There is no raw-policy clip: Isaac's
-active runner also has ``clip_actions=null``.  A NaN/Inf request is recorded
-before the q_des clamp, replaced elementwise by the preceding finite action
-(zero/raw-offset on the first step), and terminates after that safe physics
-transition.  It therefore never enters the plant.
+active runner also has ``clip_actions=null``.  FullMDP calls the same pure
+tensor q_des guard as Isaac: finite proposals are projected into the soft/hard
+inner envelope, while NaN/Inf or a measured/predicted hard-inner crossing is
+braked before physics and terminates after that safe transition.  The legacy
+non-FullMDP lane retains its historical hard clamp.
 
 HOW A RUN FROM THIS FILE MAY BE REPORTED
 ----------------------------------------
@@ -95,6 +96,14 @@ os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
+_MDP = (
+  _HERE.parent / "source" / "whole_body_tracking" / "whole_body_tracking"
+  / "tasks" / "tracking" / "mdp"
+)
+if str(_MDP) not in sys.path:
+  sys.path.insert(0, str(_MDP))
+
+import action_ball_qdes_guard as shared_qdes_guard  # noqa: E402
 
 ACTION_JOINT_ORDER_CONTRACT_ID = "a3-gmr-dof-pos-to-runtime-articulation-v1"
 ACTION_JOINT_ORDER_CONTRACT_SHA256 = (
@@ -104,7 +113,7 @@ ACTION_OFFSET_SOURCE = "runtime_plant.default_joint_pos_rad"
 ACTION_OFFSET_FLOAT32_SHA256 = (
   "1b638d7b2e1ac7e552aace2ac8c2b00980dd9daf691f930b5fe775cebc84af78"
 )
-EXECUTABLE_QDES_GUARD = "mujoco_hard_range_only_divergent_declared"
+EXECUTABLE_QDES_GUARD = "action_ball_shared_soft_hard_state_guard_v1"
 _ACTION_JOINT_ORDER_CONTRACT = (
   _HERE.parents[2] / "configs/a3_joint_order_bijection_v1.json"
 )
@@ -1265,6 +1274,12 @@ class A3ReadyBallVecEnv:
     self.last_actions = torch.zeros_like(self.actions)
     self.action_nonfinite_buf = torch.zeros(
       N, dtype=torch.bool, device=self.device)
+    self._qdes_previous_executable = self.action_offset.unsqueeze(0).expand(
+      N, -1).clone()
+    self._qdes_previous_executable_valid = torch.ones(
+      N, dtype=torch.bool, device=self.device)
+    self._qdes_guard_terminal = torch.zeros(
+      N, dtype=torch.bool, device=self.device)
     self.gravity_w = torch.tensor([0.0, 0.0, -1.0], device=self.device).repeat(N, 1)
     self.common_step_counter = 0
     self._ball_reserve_steps = int(round(task_cfg.ball_reserve_after_s / self.step_dt))
@@ -1686,6 +1701,9 @@ class A3ReadyBallVecEnv:
     self.actions[ids] = 0.0
     self.last_actions[ids] = 0.0
     self.action_nonfinite_buf[ids] = False
+    self._qdes_previous_executable[ids] = self.action_offset
+    self._qdes_previous_executable_valid[ids] = True
+    self._qdes_guard_terminal[ids] = False
     self._cur_ret[ids] = 0.0
     self._cur_min_d[ids] = 1e3
 
@@ -1788,16 +1806,42 @@ class A3ReadyBallVecEnv:
         f"{tuple(incoming.shape)} != {tuple(self.actions.shape)}")
     pre_clamp_qdes = self.action_offset.unsqueeze(0) + self.act_scale * incoming
     finite_qdes = torch.isfinite(pre_clamp_qdes)
-    # DoneTerms run after physics.  Retain the bad affine request for the
-    # termination bit, but substitute the prior finite action (zero/default
-    # offset after reset) elementwise so NaN/Inf never enters the plant.
     safe_actions = torch.where(finite_qdes, incoming, self.actions)
-    self.action_nonfinite_buf = ~finite_qdes.all(dim=1)
     self.last_actions = self.actions
     self.actions = safe_actions
-    q_des = torch.clamp(
-      self.action_offset.unsqueeze(0) + self.act_scale * safe_actions,
-      self.jnt_lo, self.jnt_hi)
+    if getattr(self, "full_a_mode", False):
+      hard_span = self.jnt_hi - self.jnt_lo
+      soft_lower = self.jnt_lo + 0.05 * hard_span
+      soft_upper = self.jnt_hi - 0.05 * hard_span
+      guard = shared_qdes_guard.action_ball_qdes_guard(
+        pre_clamp_qdes=pre_clamp_qdes,
+        previous_executable_qdes=self._qdes_previous_executable,
+        previous_executable_valid=self._qdes_previous_executable_valid,
+        default_qdes=self.action_offset.unsqueeze(0).expand_as(pre_clamp_qdes),
+        soft_lower=soft_lower.unsqueeze(0).expand_as(pre_clamp_qdes),
+        soft_upper=soft_upper.unsqueeze(0).expand_as(pre_clamp_qdes),
+        hard_lower=self.jnt_lo.unsqueeze(0).expand_as(pre_clamp_qdes),
+        hard_upper=self.jnt_hi.unsqueeze(0).expand_as(pre_clamp_qdes),
+        joint_pos=self._qpos_act(),
+        joint_vel=self._qvel_act(),
+        policy_dt_s=0.02,
+        hard_margin_rad=0.0,
+        hard_margin_fraction=0.05,
+        project_finite_without_termination=True,
+        projection_soft_inset_fraction=0.05,
+      )
+      q_des = guard.executable_qdes
+      self.action_nonfinite_buf = guard.qdes_nonfinite.any(dim=1)
+      self._qdes_guard_terminal.copy_(guard.hard_violation_env)
+      self._qdes_previous_executable.copy_(q_des)
+      self._qdes_previous_executable_valid.fill_(True)
+    else:
+      # Keep the historical base-lane ABI outside FullMDP.
+      self.action_nonfinite_buf = ~finite_qdes.all(dim=1)
+      q_des = torch.clamp(
+        self.action_offset.unsqueeze(0) + self.act_scale * safe_actions,
+        self.jnt_lo, self.jnt_hi)
+      self._qdes_guard_terminal.copy_(self.action_nonfinite_buf)
 
     tau_sq = torch.zeros(self.num_envs, device=self.device)
     for substep_index in range(self.decimation):

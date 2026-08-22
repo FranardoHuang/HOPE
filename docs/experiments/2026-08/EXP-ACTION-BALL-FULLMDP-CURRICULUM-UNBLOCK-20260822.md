@@ -125,3 +125,48 @@
   `R03 physically valid=26`且task Reward0--9已产生非零梯度；这直接验证上一阶段有一个row活到due时，
   下一阶段立即开始可学，不再被旧R07门清零。selected contact与landing仍为0，所以击球和上台继续记
   `未测`。最近20轮wall中位约`9.634 s/H48`（H24-equivalent约`4.82 s`）。
+
+## 6. 2026-08-22第二次successor：CUDA故障、几何闭环与热路减法
+
+### 6.1 旧Isaac不是“继续等就会学”
+
+现役Isaac在durable ACK257后触发匿名CUDA device-side assert；因为旧`torch._assert_async`先毒化context、
+仍继续执行，异常直到下一次PhysX write才显现，进程随后约2小时45分无新ACK。最后完整ACK、日志SHA、
+PID/start-ticks与run root已经写入旧namespace下独立`administrative_failed_stop_20260822T0252Z`；只对精确
+child先TERM、两次无效后KILL，leader与GPU1 compute app均确认absent。该run不resume、不复用namespace。
+
+最接近故障因果的active-path是R06 settlement与retire矛盾处的异步assert：旧代码即使条件为false仍继续
+修改R06，符合“在后一PhysX调用才显错”的时序。本候选先mask无效行，Physical把
+`accept_not_launchable / due_identity_lost / r06_retire_mismatch`三类跨owner矛盾保留在device-local bit，
+并复用既有每control一次host reduction具名失败；删除scene对Physical私有projection和rubber echo的
+same-writer异步assert。finite、key/generation、contact、joint、fall/table等真实独立安全源不变。
+
+### 6.2 上一阶段完成时下一阶段现在有确定性入口
+
+对slot0做构造期反例后发现两个真实问题。portable MuJoCo把profile contact offset与未retarget的measured
+teacher独立拼接；完美mimic在strike时刻与球心约差`13 cm`。共同Isaac D05又把
+`continuous_questions.p_contact`（源码合同明确为球心arrival）初始化为selected face centre，少一个球半径。
+两处都不是需要新Observation的问题，而是题目本身不闭合。
+
+修复后两端都从measured official racket site、reference root displacement、command quaternion和共享
+`ball_center_from_site_local(sign)`唯一构造球心；base goal同时减去同一ball-centre reach，不再由第二份
+profile offset制造冲突。确定性测试逐项证明：`ball_center = site + R*local_offset`、球心到selected face
+法向距离精确为球半径、切向残差为0、`pre_wait + scaled_t_hit = ttc`。这意味着balance row活到295后立即
+有mimic分母，而完美mimic在strike tick几何上已经是一枚selected-face接触；真实引擎contact仍必须由fresh
+run实测，几何证明不冒充物理成功率。
+
+### 6.3 共用q_des与postphysics减法
+
+- 新的`action_ball_qdes_guard`只拥有纯tensor变换，不拥有backend、receipt、counter或Observation。Isaac和
+  portable MuJoCo都调用同一函数，覆盖finite fallback、soft/hard inset、20 ms q/qdot brake与terminal bit；
+  alignment不再靠声明字符串，而以AST反例验证两边唯一call和同一参数。
+- Physical→Epoch/R06在同一Python调用栈内同步消费的postphysics packet不再先复制一份完整`[N,K,*]`
+  snapshot，再由Epoch复制一次输入。ActionEpoch只读借用在operation返回前有效；legacy长租约/abort路径仍
+  保留独立snapshot。跨owner identity/fault join仍执行，删除的只是同writer、无并发mutation窗口的副本。
+- 当前host分进程结果：question/D05=`71 passed,2 skipped`，Physical/Epoch/R06=`112 passed,7 skipped`，
+  MuJoCo action/transition/runner=`74 passed,7 skipped`，shared q_des/Isaac joint safety=`122 passed`；完整
+  exact Pod、fixed parity与profiler-off matched H48仍待执行，因此本节不给速度GO。
+
+取舍保持：rollout=`48`、lambda=`.98`，不缩rollout冒充提速；不新增actor observation；resume、CUDA
+Graph、solver iteration、physics dt与C++均延后。第二次fresh只有在exact Pod通过后才替换仍只读运行的
+MuJoCo旧run。

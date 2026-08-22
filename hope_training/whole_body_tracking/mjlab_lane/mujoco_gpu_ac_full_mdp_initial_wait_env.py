@@ -2199,7 +2199,11 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         timeout = self.episode_length_buf >= self.max_episode_length
         tilt = torch.acos((-st["proj_g"][:, 2]).clamp(-1.0, 1.0)) > 0.7
         low = st["base_pos"][:, 2] < 0.5
-        qdes = ~torch.isfinite(requested_qdes).all(dim=1)
+        # ``_advance_plant`` stores the shared Isaac/MuJoCo guard verdict.
+        # Finite out-of-range proposals are projected and remain learnable;
+        # non-finite requests or actual/predicted hard-inner crossings brake
+        # before physics and terminate this transition.
+        qdes = self._qdes_guard_terminal
         keepout = self._cur_table_keepout
         resolved_table = self._cur_robot_table > 0
         terminated = tilt | low | qdes | keepout | resolved_table

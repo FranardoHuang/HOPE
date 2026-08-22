@@ -68,6 +68,10 @@ def _build_tree(tmp_path: Path) -> tuple[Path, Path]:
     lane.mkdir(parents=True)
     for name in LANE_FILES:
         shutil.copy2(LANE_DIR / name, lane / name)
+    shutil.copy2(
+        REPO_ROOT / align.ISAAC_SOURCE_RELPATHS["qdes_guard"],
+        lane / "action_ball_qdes_guard.py",
+    )
     for name, rel in align.ISAAC_SOURCE_RELPATHS.items():
         src = REPO_ROOT / rel
         dst = repo / rel
@@ -382,9 +386,8 @@ def test_focused_action_axes_match_their_honest_verdicts(tmp_path):
     assert raw["observed"] == align.ALIGNED
     assert set(raw["components"]) == {
         "raw_policy_action", "runtime_joint_order", "scale", "offset"}
-    assert guard["observed"] == align.DIVERGENT_DECLARED
-    assert guard["claim_restrictions"] == [
-        "policy_transfer", "promotion", "matched_causal_comparison"]
+    assert guard["observed"] == align.ALIGNED
+    assert guard["isaac"] == guard["mjlab"]
 
 
 @needs_repo
@@ -426,13 +429,10 @@ def test_mutation_deleted_brake_hidden_in_string_is_refused(tmp_path):
     actions = repo / align.ISAAC_SOURCE_RELPATHS["hope_actions"]
     _patch(
         actions,
-        "                self._processed_actions = torch.where(\n"
-        "                    per_joint_guard, brake_target, nominal_target\n"
+        "                crossing_violation = guard.crossing_violation",
+        "                crossing_violation = torch.zeros_like(\n"
+        "                    guard.crossing_violation\n"
         "                )",
-        "                '''self._processed_actions = torch.where(\n"
-        "                    per_joint_guard, brake_target, nominal_target\n"
-        "                )'''\n"
-        "                self._processed_actions = nominal_target",
     )
     result = _run_action_axes(lane, repo)
     assert result["ok"] is False
@@ -440,13 +440,12 @@ def test_mutation_deleted_brake_hidden_in_string_is_refused(tmp_path):
 
 
 @needs_repo
-def test_mutation_extra_mujoco_qdes_guard_is_refused(tmp_path):
+def test_mutation_mujoco_qdes_guard_dt_is_refused(tmp_path):
     lane, repo = _build_tree(tmp_path)
     _patch(
         lane / "a3_train_ppo.py",
-        "      self.jnt_lo, self.jnt_hi)\n\n    tau_sq",
-        "      self.jnt_lo, self.jnt_hi)\n"
-        "    q_des = torch.minimum(q_des, self.q_ready)\n\n    tau_sq",
+        "        policy_dt_s=0.02,",
+        "        policy_dt_s=0.04,",
     )
     result = _run_action_axes(lane, repo)
     assert result["ok"] is False
@@ -454,12 +453,12 @@ def test_mutation_extra_mujoco_qdes_guard_is_refused(tmp_path):
 
 
 @needs_repo
-def test_mutation_declaring_the_live_guard_aligned_is_refused(tmp_path):
+def test_mutation_declaring_the_live_guard_divergent_is_refused(tmp_path):
     lane, repo = _build_tree(tmp_path)
     _patch(
         lane / "isaac_alignment.py",
-        '         "\u53ea\u505ahard joint-range clamp。",\n         DIVERGENT_DECLARED,',
-        '         "\u53ea\u505ahard joint-range clamp。",\n         ALIGNED,',
+        "    return _row(shared, dict(shared), ALIGNED)",
+        "    return _row(shared, dict(shared), DIVERGENT_DECLARED)",
     )
     result = _run_action_axes(lane, repo)
     assert result["ok"] is False
@@ -643,20 +642,16 @@ def test_comparability_is_refused_while_any_axis_blocks():
                                     align.CLAIM_CROSS_ENGINE_COMPARABLE)
 
 
-def test_declared_guard_divergence_restricts_transfer_but_not_diagnostic_25k():
+def test_aligned_guard_adds_no_special_transfer_restriction():
     ledger = {
         "blocking_axes": [],
-        "rows": {"executable_qdes_guard": {
-            "observed": align.DIVERGENT_DECLARED}},
+        "rows": {"executable_qdes_guard": {"observed": align.ALIGNED}},
         "mujoco_only_diagnostic_25k_blocked_by_alignment": False,
     }
-    assert align.DIVERGENT_DECLARED not in align.BLOCKING_VERDICTS
     assert ledger["mujoco_only_diagnostic_25k_blocked_by_alignment"] is False
     for claim in (align.CLAIM_POLICY_TRANSFER,
                   align.CLAIM_MATCHED_CAUSAL_COMPARISON):
-        with pytest.raises(align.AlignmentClaimRefused,
-                           match="declared MuJoCo-only scope"):
-            align.assert_cross_engine_claim(ledger, claim)
+        align.assert_cross_engine_claim(ledger, claim)
 
 
 def test_unknown_claims_are_refused_rather_than_ignored():

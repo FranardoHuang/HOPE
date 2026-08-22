@@ -6598,3 +6598,16 @@ reveal、strike和landing当前分母为0，统一记`未测`；这是balance早
 这些都是branch-scoped运行证据，`diagnostic_unauthorized=true`，不授权promotion/export/部署，G05保持
 `Partial`。详细证据见
 [`EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822`](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
+### 2026-08-22 ACK257异步CUDA故障与第二次fresh候选（Gate仍`Partial`）
+
+上一Isaac successor在ACK257后由匿名`torch._assert_async`触发device-side assert，错误延迟到下一PhysX
+write才显现并卡死；旧run已精确保全/停止，不能继续训练或resume。本候选把D05 launch、due identity和R06
+retire三类跨owner矛盾改为“先mask scene write、device-local具名fault、既有control boundary一次同步”，
+并删除scene对同一Physical projection/rubber echo的异步自证。它同时把同步postphysics packet的重复
+full-grid snapshot和Epoch ingress clone改成只读借用；长租约路径仍保留snapshot。
+
+Isaac D05的球心arrival也从错误的face-centre改为`reference_site + R*ball_center_from_site_local`，与
+ExactFace和MuJoCo确定性闭环一致。host Physical/Epoch/R06与question聚焦回归已通过，但exact Pod、真实
+device fault反例、profiler-off H48 wall和fresh连续ACK尚未完成；因此不能声称CUDA根因已由GPU反例完全
+证明，也不能声称达到性能目标，G05继续`Partial`。

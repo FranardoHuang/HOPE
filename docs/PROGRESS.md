@@ -4768,3 +4768,14 @@
   H24-equivalent`4.82 s`，进入目标量级；其update45首次出现`due=1/reveal=1/deferred=0`并立即产生
   phase-2/R03/task Reward梯度，验证课程首穿。selected contact/landing仍为0，故击球/上台继续`未测`；
   Gate G05/G06保持`Partial`、`diagnostic_unauthorized=true`。
+
+## 2026-08-22 — 第二次fresh候选：具名CUDA故障、共享q_des、mimic→contact闭环
+
+- 旧Isaac在ACK257后触发异步CUDA device assert并卡死；已按PID/start-ticks/run path留证，只精确停止失败
+  child。候选改为无效行先mask、三类具名device fault在既有control boundary一次报告，删除两个same-writer
+  scene异步assert，真实plant/identity安全不变。
+- Isaac/MuJoCo FullMDP现调用同一纯tensor q_des guard；不新增actor observation。确定性反例另发现portable
+  perfect-mimic错球约13 cm、Isaac D05球心arrival漏一个球半径，现统一由measured site与exact-face ball
+  offset闭环，因此上一阶段成形时下一阶段不再被错误问题定义先天隔断。
+- 同步Physical→Epoch/R06 packet删除重复full-grid snapshot/ingress clone；host相关分进程回归均通过。
+  exact Pod、profiler-off matched H48和双fresh ACK仍未完成，G05/G06保持`Partial`，不把结构proxy写成秒数。

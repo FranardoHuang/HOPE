@@ -34,6 +34,11 @@ from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg
 from isaaclab.envs.mdp.actions.joint_actions import JointPositionAction
 from isaaclab.utils import configclass
 
+try:
+    from .action_ball_qdes_guard import action_ball_qdes_guard
+except ImportError:  # Focused source tests load this module without a package.
+    from action_ball_qdes_guard import action_ball_qdes_guard
+
 
 class _PhysicsSubstepJointSafetyLedger:
     """One-policy-step, read-only-exportable hard-limit readback transcript.
@@ -5018,14 +5023,6 @@ class ClampedJointPositionAction(JointPositionAction):
                     target_upper,
                 )
 
-                pre_qdes = self._pre_clamp_qdes
-                qdes_nonfinite = ~torch.isfinite(pre_qdes)
-                qdes_forbidden_request = (
-                    qdes_nonfinite
-                    | pre_qdes.le(hard_inner_lower)
-                    | pre_qdes.ge(hard_inner_upper)
-                )
-
                 joint_pos = self._asset.data.joint_pos[:, self._joint_ids]
                 joint_vel = self._asset.data.joint_vel[:, self._joint_ids]
                 for name, value in (
@@ -5041,51 +5038,47 @@ class ClampedJointPositionAction(JointPositionAction):
                             "pre_apply_limit_guard requires runtime "
                             f"{name} to match q_des shape/device/dtype"
                         )
-                state_finite = torch.isfinite(joint_pos) & torch.isfinite(joint_vel)
-                safe_joint_pos = torch.where(
-                    torch.isfinite(joint_pos), joint_pos, default_qdes
+                guard = action_ball_qdes_guard(
+                    pre_clamp_qdes=self._pre_clamp_qdes,
+                    previous_executable_qdes=self._previous_processed_qdes,
+                    previous_executable_valid=(
+                        self._previous_processed_qdes_valid
+                    ),
+                    default_qdes=default_qdes,
+                    soft_lower=lower,
+                    soft_upper=upper,
+                    hard_lower=hard_lower,
+                    hard_upper=hard_upper,
+                    joint_pos=joint_pos,
+                    joint_vel=joint_vel,
+                    policy_dt_s=self._pre_apply_guard_policy_dt_s,
+                    hard_margin_rad=self._pre_apply_guard_margin_rad,
+                    hard_margin_fraction=(
+                        self._pre_apply_guard_margin_fraction
+                    ),
+                    project_finite_without_termination=(
+                        self._project_finite_preclamp_qdes_without_termination
+                    ),
+                    projection_soft_inset_fraction=(
+                        self._finite_projection_soft_envelope_inset_fraction
+                    ),
                 )
-                safe_joint_vel = torch.where(
-                    torch.isfinite(joint_vel),
-                    joint_vel,
-                    torch.zeros_like(joint_vel),
-                )
-                ballistic_next = (
-                    safe_joint_pos
-                    + safe_joint_vel * self._pre_apply_guard_policy_dt_s
-                )
+                qdes_safety_violation = guard.qdes_safety_violation
+                crossing_violation = guard.crossing_violation
+                per_joint_guard = guard.per_joint_guard
                 if self.max_inward_joint_safety_containment_enabled:
-                    lower_risk = state_finite & (
-                        safe_joint_pos.le(hard_inner_lower)
-                        | ballistic_next.le(hard_inner_lower)
+                    lower_risk = guard.state_finite & (
+                        guard.safe_joint_pos.le(hard_inner_lower)
+                        | guard.ballistic_next.le(hard_inner_lower)
                     )
-                    upper_risk = state_finite & (
-                        safe_joint_pos.ge(hard_inner_upper)
-                        | ballistic_next.ge(hard_inner_upper)
+                    upper_risk = guard.state_finite & (
+                        guard.safe_joint_pos.ge(hard_inner_upper)
+                        | guard.ballistic_next.ge(hard_inner_upper)
                     )
                     self._latch_max_inward_direction(
                         lower_risk=lower_risk, upper_risk=upper_risk
                     )
                     ambiguous_risk = lower_risk & upper_risk
-                crossing_violation = (
-                    ~state_finite
-                    | safe_joint_pos.le(hard_inner_lower)
-                    | safe_joint_pos.ge(hard_inner_upper)
-                    | ballistic_next.le(hard_inner_lower)
-                    | ballistic_next.ge(hard_inner_upper)
-                )
-                # Legacy tasks preserve the historical behavior: any affine request outside the
-                # hard-inner envelope is replaced by a brake target and terminates later.  The
-                # ActionBall projection mode treats a *finite* request as an ordinary constrained
-                # action instead: execute its nearest safe projection and teach the policy through
-                # the bounded projection penalty.  Non-finite requests and dangerous plant
-                # state/crossing predictions remain brake-and-terminate events.
-                qdes_safety_violation = (
-                    qdes_nonfinite
-                    if self._project_finite_preclamp_qdes_without_termination
-                    else qdes_forbidden_request
-                )
-                per_joint_guard = qdes_safety_violation | crossing_violation
                 # These latches feed the formal hard-safety transcript, whose nonzero rows must
                 # have a terminal archive before PPO.  A finite constrained-action saturation is
                 # not a hard event in projection mode; its separate Reward ledger below preserves
@@ -5109,15 +5102,7 @@ class ClampedJointPositionAction(JointPositionAction):
                     torch.any(crossing_violation, dim=1)
                 )
 
-                # No guessed acceleration/deceleration constant: mirror one current-velocity
-                # horizon inward, then project to the explicitly inset soft envelope.  This is a
-                # conservative derived brake request, not a proof of substep stopping distance.
-                brake_target = torch.clamp(
-                    safe_joint_pos
-                    - safe_joint_vel * self._pre_apply_guard_policy_dt_s,
-                    min=target_lower,
-                    max=target_upper,
-                )
+                brake_target = guard.brake_target
                 if self.max_inward_joint_safety_containment_enabled:
                     active_containment = self._max_inward_direction_latch.ne(0)
                     brake_target = torch.where(
@@ -5128,24 +5113,11 @@ class ClampedJointPositionAction(JointPositionAction):
                         ),
                         brake_target,
                     )
-                # Keep the nominal projection finite even when the actor emitted NaN/Inf.
-                # The request remains terminal, while RewardManager may still evaluate the
-                # projection-distance term before the reset is applied.  Reuse the already
-                # validated finite brake target only as the projection anchor; the reward maps
-                # the non-finite raw request to one full envelope span independently.
-                nominal_source = torch.where(
-                    qdes_nonfinite,
-                    brake_target,
-                    self._processed_actions,
+                self._nominal_projected_qdes.copy_(
+                    guard.nominal_projected_qdes
                 )
-                nominal_target = torch.clamp(
-                    nominal_source,
-                    min=target_lower,
-                    max=target_upper,
-                )
-                self._nominal_projected_qdes.copy_(nominal_target)
                 self._nominal_projection_span.copy_(
-                    target_upper - target_lower
+                    guard.nominal_projection_span
                 )
                 if self.max_inward_joint_safety_containment_enabled:
                     per_joint_guard = (
@@ -5153,7 +5125,9 @@ class ClampedJointPositionAction(JointPositionAction):
                         | self._max_inward_direction_latch.ne(0)
                     )
                 self._processed_actions = torch.where(
-                    per_joint_guard, brake_target, nominal_target
+                    per_joint_guard,
+                    brake_target,
+                    guard.nominal_projected_qdes,
                 )
             else:
                 self._processed_actions = torch.clamp(

@@ -82,7 +82,8 @@ ACTION_CONTRACT = {
     "full_a_reset_joint_source": "runtime_plant.default_joint_pos_rad",
     "full_a_reset_root_source": "AGIBOT_A3_CFG.init_state.pos/rot",
     "full_a_policy_bootstrap": "a3_default_stand_zero_head_v1",
-    "raw_action_clip": None, "executable_qdes_guard": "mujoco_hard_range_only_divergent_declared",
+    "raw_action_clip": None,
+    "executable_qdes_guard": "action_ball_shared_soft_hard_state_guard_v1",
     "transfer_authority": False, "matched_cross_backend_authority": False,
 }
 MODEL_SHAPES = (

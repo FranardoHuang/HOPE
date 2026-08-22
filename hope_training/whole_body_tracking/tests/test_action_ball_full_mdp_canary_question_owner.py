@@ -241,6 +241,37 @@ def test_recurring_question_bundle_is_cardinality_generic(num_envs):
     assert harness.racket.racket_target_pos_w.shape == (num_envs, 3)
 
 
+def test_recurring_question_ball_arrival_closes_measured_selected_face_geometry():
+    harness = _bundle_harness(num_envs=2)
+    hope_commands = sys.modules[f"{_PKG}.hope_commands"]
+    geometry = sys.modules[f"{_PKG}.racket_contact_geometry"]
+    static = (
+        hope_commands.RacketTargetCommand.
+        project_action_ball_full_mdp_racket_action_reference_static_table(
+            harness.racket
+        )
+    )
+    signs = harness.bundle._timing_table.mount_normal_sign
+    local = torch.tensor(
+        [
+            geometry.ball_center_from_site_local(int(sign))
+            for sign in signs.tolist()
+        ],
+        dtype=torch.float32,
+    )
+    rotated = owner_mod._quat_rotate_wxyz(
+        static.reference_racket_quat_wxyz, local
+    )
+    torch.testing.assert_close(
+        harness.bundle._contact_position_env_m,
+        static.reference_racket_site_position_w_m + rotated,
+    )
+    torch.testing.assert_close(
+        harness.bundle._contact_reach_offset_xy,
+        static.reference_reach_offset_xy_m + rotated[:, :2],
+    )
+
+
 def test_n4096_constructs_the_same_recurring_graph_with_linear_row_storage():
     harness = _bundle_harness(num_envs=4096)
     assert type(harness.bundle) is owner_mod.RecurringD05InternalQuestionBundle

@@ -130,6 +130,11 @@ def _plant_env(n, width, actuator_from_runtime=None):
     env.actions = torch.zeros(n, width)
     env.last_actions = torch.zeros_like(env.actions)
     env.action_nonfinite_buf = torch.zeros(n, dtype=torch.bool)
+    env._qdes_previous_executable = env.action_offset.unsqueeze(0).expand(
+        n, -1
+    ).clone()
+    env._qdes_previous_executable_valid = torch.ones(n, dtype=torch.bool)
+    env._qdes_guard_terminal = torch.zeros(n, dtype=torch.bool)
     env.kp = torch.ones(width)
     env.kd = torch.zeros(width)
     env.tau_lo = torch.full((width,), -100.0)
@@ -179,13 +184,18 @@ def test_runtime_decoder_has_one_unclipped_ctrl_scatter_owner():
         "incoming",
         "self.actions",
     ]
-    assert _contains_name(assignments["q_des"], "safe_actions")
-    assert not _contains_name(assignments["q_des"], "incoming")
-    assert any(
-        isinstance(node, ast.Attribute)
-        and _dotted(node) == "self.action_offset"
-        for node in ast.walk(assignments["q_des"])
-    )
+    guard_calls = [
+        node
+        for node in ast.walk(advance)
+        if isinstance(node, ast.Call)
+        and _dotted(node.func)
+        == "shared_qdes_guard.action_ball_qdes_guard"
+    ]
+    assert len(guard_calls) == 1
+    guard_kwargs = {item.arg: item.value for item in guard_calls[0].keywords}
+    assert _dotted(guard_kwargs["pre_clamp_qdes"]) == "pre_clamp_qdes"
+    assert _dotted(guard_kwargs["joint_pos"].func) == "self._qpos_act"
+    assert _dotted(guard_kwargs["joint_vel"].func) == "self._qvel_act"
     ctrl_writes = [
         node
         for node in ast.walk(advance)
@@ -340,7 +350,7 @@ def test_action_contract_identity_is_one_read_only_copy():
         "full_a_reset_root_source": "AGIBOT_A3_CFG.init_state.pos/rot",
         "full_a_policy_bootstrap": "a3_default_stand_zero_head_v1",
         "raw_action_clip": None,
-        "executable_qdes_guard": "mujoco_hard_range_only_divergent_declared",
+        "executable_qdes_guard": "action_ball_shared_soft_hard_state_guard_v1",
         "transfer_authority": False,
         "matched_cross_backend_authority": False,
     }
@@ -417,6 +427,9 @@ def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
     env.actions = torch.ones((2, 31))
     env.last_actions = -torch.ones((2, 31))
     env.action_nonfinite_buf = torch.ones(2, dtype=torch.bool)
+    env._qdes_previous_executable = torch.ones((2, 31))
+    env._qdes_previous_executable_valid = torch.zeros(2, dtype=torch.bool)
+    env._qdes_guard_terminal = torch.ones(2, dtype=torch.bool)
     env._cur_ret = torch.ones(2)
     env._cur_min_d = torch.zeros(2)
     peer_qpos = env.sim.data.qpos[1].clone()
@@ -436,6 +449,11 @@ def test_full_a_reset_uses_default_joint_and_root_birth_not_take061():
     )
     assert not torch.equal(env.sim.data.qpos[0, env.q_adr_act], env.q_ready)
     assert not env.actions[0].any() and not env.last_actions[0].any()
+    torch.testing.assert_close(
+        env._qdes_previous_executable[0], env.action_offset
+    )
+    assert env._qdes_previous_executable_valid[0]
+    assert not env._qdes_guard_terminal[0]
     assert torch.equal(env.sim.data.qpos[1], peer_qpos)
 
 

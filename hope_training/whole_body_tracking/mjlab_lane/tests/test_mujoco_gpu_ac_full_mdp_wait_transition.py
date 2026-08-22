@@ -406,6 +406,9 @@ def test_host_termination_bootstraps_only_pure_time_limit_rows():
         max_episode_length=10,
         _cur_robot_table=torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
         _cur_table_keepout=torch.tensor([False, False, False, False, False, False, True]),
+        _qdes_guard_terminal=torch.tensor(
+            [False, False, False, False, True, False, False]
+        ),
     )
     proj_g = torch.tensor(
         [[0.0, 0.0, -1.0]] * 2
@@ -1095,6 +1098,8 @@ def _portable_center_row(**updates):
         "spin_magnitude_center_radps": 10.0,
         "reference_base_root_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
         "reference_racket_quat_wxyz": (1.0, 0.0, 0.0, 0.0),
+        "reference_racket_site_position_w_m": (0.3, -0.6, 1.0),
+        "reference_reach_offset_xy_m": (0.3, -0.5),
         "reference_racket_site_velocity_w_mps": (3.0, 0.0, 0.0),
         "reference_racket_angular_velocity_w_radps": (0.0, 0.0, 2.0),
         "reference_racket_site_speed_mps": 3.0,
@@ -1161,8 +1166,14 @@ def test_portable_center_question_uses_action_row_yaw_and_two_stage_reverse_inte
     task = result["task_f32"]
     torch.testing.assert_close(task[:, 0], torch.full((2,), 1.94))
     torch.testing.assert_close(task[:, 4], torch.full((2,), 0.9))
-    torch.testing.assert_close(task[0, 14:17], torch.tensor([1.0, -0.6, 1.0]))
-    torch.testing.assert_close(task[1, 14:17], torch.tensor([0.7, 0.7, 1.0]))
+    # At the strike tick, exact measured-teacher mimic plus base-goal tracking
+    # places the official site at task[5:8], and the ball centre is exactly the
+    # selected-face geometry offset away.  This is the curriculum hand-off,
+    # not a random rollout success proxy.
+    torch.testing.assert_close(task[0, 5:8], torch.tensor([0.6, -0.6, 1.0]))
+    torch.testing.assert_close(task[0, 14:17], torch.tensor([0.601, -0.58, 1.002]))
+    torch.testing.assert_close(task[1, 5:8], torch.tensor([0.7, 0.3, 1.0]), atol=1.0e-6, rtol=0.0)
+    torch.testing.assert_close(task[1, 14:17], torch.tensor([0.68, 0.301, 1.002]), atol=1.0e-6, rtol=0.0)
     torch.testing.assert_close(task[0, 24:26], torch.tensor([0.3, -0.1]))
     torch.testing.assert_close(task[1, 24:26], torch.tensor([0.2, 0.0]), atol=1.0e-6, rtol=0.0)
     torch.testing.assert_close(task[0, 26:29], torch.tensor([-3.0, 0.0, 0.0]))
@@ -1174,7 +1185,7 @@ def test_portable_center_question_uses_action_row_yaw_and_two_stage_reverse_inte
     )
     # Launch is reverse-integrated from the action question.  It is neither
     # the legacy serve-range midpoint nor a forward gravity shortcut.
-    torch.testing.assert_close(task[0, 32:35], torch.tensor([2.2, -0.6, 1.0]))
+    torch.testing.assert_close(task[0, 32:35], torch.tensor([1.801, -0.58, 1.002]))
     assert not torch.equal(task[0, 32:35], torch.tensor([2.0, -0.775, 1.44]))
 
 
@@ -1220,7 +1231,10 @@ def test_portable_center_question_changes_when_action_center_changes():
         ),
         **kwargs,
     )
-    assert not torch.equal(
+    # The former independent contact offset is intentionally no longer a
+    # second authority.  Incoming direction still changes the reverse launch,
+    # while teacher/site geometry uniquely owns contact position.
+    torch.testing.assert_close(
         first["task_f32"][:, 14:17], second["task_f32"][:, 14:17]
     )
     assert not torch.equal(
@@ -1229,6 +1243,83 @@ def test_portable_center_question_changes_when_action_center_changes():
     assert not torch.equal(
         first["launch_state_f32"][:, :3],
         second["launch_state_f32"][:, :3],
+    )
+
+
+def test_fresh_action_exact_mimic_closes_the_selected_face_contact_geometry():
+    row = wait_env.portable_catalog.load_portable_action_center_table().fresh_action
+    geometry = wait_env.racket_contact_geometry
+    root_z = float(row.reference_racket_site_position_w_m[2]) - 0.1
+
+    def reverse(contact, velocity, spin, tts, _params, **_kwargs):
+        return contact - velocity * tts[:, None], velocity.clone(), tts.clone()
+
+    result = wait_env.portable_question.build_center_question(
+        torch=torch,
+        row=row,
+        base_position_scene=torch.tensor(
+            [[*row.base_spawn_center_w_xy_m, root_z]], dtype=torch.float64
+        ),
+        base_quat_wxyz=torch.tensor(
+            [row.reference_base_root_quat_wxyz], dtype=torch.float64
+        ),
+        contact_reference_root_z_scene=root_z,
+        step_dt=0.02,
+        table_surface_z_scene=0.76,
+        back_integrate=reverse,
+        venue_params=SimpleNamespace(ball_radius=geometry.BALL_RADIUS_M),
+        geometry=geometry,
+        serve_horizon_s=0.6,
+        backint_h=0.005,
+        plane_margin=0.005,
+    )
+    task = result["task_f32"][0]
+    site = task[5:8]
+    contact = task[14:17]
+    racket_quat = task[20:24]
+    ball_local = torch.tensor(
+        [geometry.ball_center_from_site_local(row.mount_normal_sign)],
+        dtype=task.dtype,
+    )
+    reconstructed = site + wait_env.portable_question._quat_apply_wxyz(
+        torch, racket_quat[None, :], ball_local
+    )[0]
+    torch.testing.assert_close(contact, reconstructed, rtol=0.0, atol=1.0e-12)
+
+    # With live yaw equal to the measured reference yaw, perfect base-goal and
+    # teacher tracking recover the catalog's measured strike-site displacement.
+    expected_site = torch.tensor(
+        [
+            task[24] + row.reference_reach_offset_xy_m[0],
+            task[25] + row.reference_reach_offset_xy_m[1],
+            row.reference_racket_site_position_w_m[2],
+        ],
+        dtype=task.dtype,
+    )
+    torch.testing.assert_close(site, expected_site, rtol=0.0, atol=2.0e-8)
+
+    face = torch.tensor(
+        geometry.face_center_from_site_local(row.mount_normal_sign),
+        dtype=task.dtype,
+    )
+    normal = torch.tensor(
+        geometry.face_normal_local(row.mount_normal_sign), dtype=task.dtype
+    )
+    separation = ball_local[0] - face
+    torch.testing.assert_close(
+        torch.dot(separation, normal),
+        torch.tensor(geometry.BALL_RADIUS_M, dtype=task.dtype),
+        rtol=0.0,
+        atol=1.0e-12,
+    )
+    torch.testing.assert_close(
+        separation - torch.dot(separation, normal) * normal,
+        torch.zeros(3, dtype=task.dtype),
+        rtol=0.0,
+        atol=1.0e-12,
+    )
+    torch.testing.assert_close(
+        task[4] + task[2], task[0], rtol=0.0, atol=1.0e-12
     )
 
 

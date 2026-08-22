@@ -106,6 +106,7 @@ ISAAC_SOURCE_RELPATHS = {
     "c211_leaf": _TRACKING_REL / "action_ball_c211_trainability.py",
     "robot_cfg": _ISAAC_REL / "source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py",
     "hope_actions": _TRACKING_REL / "mdp/hope_actions.py",
+    "qdes_guard": _TRACKING_REL / "mdp/action_ball_qdes_guard.py",
     "training_contract": _ISAAC_REL / "source/whole_body_tracking/whole_body_tracking/utils/training_contract.py",
     "ppo_yaml": _ISAAC_REL / "cfg/algo/ppo.yaml",
     "train_entry": _ISAAC_REL / "scripts/train.py",
@@ -792,46 +793,82 @@ def _probe_executable_qdes_guard(paths: dict, lane: dict) -> dict:
 
     actions_tree, train_tree = (_parse(paths["hope_actions"]),
                                 _parse(_HERE / "a3_train_ppo.py"))
+    guard_tree = _parse(paths["qdes_guard"])
     cfg, consts = (_class_assignments(actions_tree, "ClampedJointPositionActionCfg"),
                    _module_consts(actions_tree))
     process = _method(actions_tree, "ClampedJointPositionAction", "process_actions")
-    required = (
-        ("inset", "self._pre_apply_guard_margin_rad + "
-         "self._pre_apply_guard_margin_fraction * hard_travel"),
-        ("hard_inner_lower", "hard_lower + inset"),
-        ("hard_inner_upper", "hard_upper - inset"),
-        ("target_lower", "torch.maximum(lower, hard_inner_lower)"),
-        ("target_upper", "torch.minimum(upper, hard_inner_upper)"),
-        ("projection_inset", "self._finite_projection_soft_envelope_inset_fraction * travel"),
-        ("target_lower", "torch.maximum(target_lower, lower + projection_inset)"),
-        ("target_upper", "torch.minimum(target_upper, upper - projection_inset)"),
-        ("ballistic_next", "safe_joint_pos + safe_joint_vel * self._pre_apply_guard_policy_dt_s"),
-        ("crossing_violation", "~state_finite | safe_joint_pos.le(hard_inner_lower) | "
-         "safe_joint_pos.ge(hard_inner_upper) | ballistic_next.le(hard_inner_lower) | "
-         "ballistic_next.ge(hard_inner_upper)"),
-        ("per_joint_guard", "qdes_safety_violation | crossing_violation"),
-        ("brake_target", "torch.clamp(safe_joint_pos - safe_joint_vel * "
-         "self._pre_apply_guard_policy_dt_s, min=target_lower, max=target_upper)"),
-        ("self._processed_actions", "torch.where(per_joint_guard, brake_target, nominal_target)"),
-    )
     advance = _method(train_tree, "A3ReadyBallVecEnv", "_advance_plant")
-    qdes_owners = [n for n in _live_nodes(advance) if isinstance(n, ast.Assign)
-                   and any(_dotted(t) == "q_des" for t in n.targets)]
-    qdes = "torch.clamp(self.action_offset.unsqueeze(0) + self.act_scale * "
-    qdes += "safe_actions, self.jnt_lo, self.jnt_hi)"
+
+    def one_call(fn: ast.FunctionDef, callee: str) -> ast.Call:
+        calls = [
+            node for node in _live_nodes(fn)
+            if isinstance(node, ast.Call) and _dotted(node.func) == callee
+        ]
+        if len(calls) != 1:
+            raise AlignmentError(
+                f"executable_qdes_guard expected one {callee} call, got {len(calls)}"
+            )
+        return calls[0]
+
+    isaac_call = one_call(process, "action_ball_qdes_guard")
+    mujoco_call = one_call(
+        advance, "shared_qdes_guard.action_ball_qdes_guard"
+    )
+    expected_keywords = {
+        "pre_clamp_qdes", "previous_executable_qdes",
+        "previous_executable_valid", "default_qdes", "soft_lower",
+        "soft_upper", "hard_lower", "hard_upper", "joint_pos",
+        "joint_vel", "policy_dt_s", "hard_margin_rad",
+        "hard_margin_fraction", "project_finite_without_termination",
+        "projection_soft_inset_fraction",
+    }
+    keyword_sets = [
+        {item.arg for item in call.keywords if item.arg is not None}
+        for call in (isaac_call, mujoco_call)
+    ]
+    guard_functions = [
+        node for node in guard_tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "action_ball_qdes_guard"
+    ]
+    mujoco_kwargs = {
+        item.arg: item.value for item in mujoco_call.keywords
+        if item.arg is not None
+    }
+
+    def expression_is(node: ast.AST, source: str) -> bool:
+        return ast.dump(node, include_attributes=False) == ast.dump(
+            ast.parse(source, mode="eval").body, include_attributes=False
+        )
+
     if (_literal(cfg["clamp"], consts) is not True
             or _literal(cfg["finite_projection_soft_envelope_inset_fraction"], consts) != .05
             or _literal(cfg["pre_apply_guard_brake_mode"], consts) != "velocity_horizon_v1"
-            or not all(_has_assign(process, *row) for row in required)
-            or len(qdes_owners) != 1 or not _has_assign(advance, "q_des", qdes)):
+            or len(guard_functions) != 1
+            or any(items != expected_keywords for items in keyword_sets)
+            or not expression_is(mujoco_kwargs["policy_dt_s"], "0.02")
+            or not expression_is(mujoco_kwargs["hard_margin_rad"], "0.0")
+            or not expression_is(mujoco_kwargs["hard_margin_fraction"], "0.05")
+            or not expression_is(
+                mujoco_kwargs["project_finite_without_termination"], "True"
+            )
+            or not expression_is(
+                mujoco_kwargs["projection_soft_inset_fraction"], "0.05"
+            )
+            or not _has_assign(advance, "q_des", "guard.executable_qdes")
+            or not _has_assign(
+                process, "qdes_safety_violation", "guard.qdes_safety_violation"
+            )
+            or not _has_assign(
+                process, "crossing_violation", "guard.crossing_violation"
+            )):
         raise AlignmentError("executable_qdes_guard live descriptor differs")
-    return _row(
-        {"finite_proposal": "soft∩hard 5%-inset projection",
-         "state_guard": "q/qdot 0.02s prediction and brake"},
-        {"finite_proposal": "hard joint-range clamp only", "state_guard": None},
-        DIVERGENT_DECLARED,
-        claim_restrictions=["policy_transfer", "promotion", "matched_causal_comparison"],
-        allowed_scope="MuJoCo-only diagnostic_unauthorized 4096x24x25000")
+    shared = {
+        "implementation": "action_ball_qdes_guard.action_ball_qdes_guard",
+        "finite_proposal": "soft∩hard 5%-inset projection",
+        "state_guard": "q/qdot 0.02s prediction and brake",
+    }
+    return _row(shared, dict(shared), ALIGNED)
 
 
 def _probe_pd_gains(paths: dict, lane: dict) -> dict:
@@ -1229,12 +1266,11 @@ AXES: tuple = (
          caveat="这只对齐raw proposal;执行前的q_des保护由下一轴单独裁定。"),
 
     Axis("executable_qdes_guard",
-         "raw proposal之后并不同构:Isaac把有限请求投影到soft∩hard"
-         "的5%内缩包络,并按鲜q/qdot和20 ms预测做刹车;MuJoCo"
-         "只做hard joint-range clamp。",
-         DIVERGENT_DECLARED,
-         "执行动作和反馈动力学不同,所以禁止policy transfer和matched causal"
-         "声明;但这不阻断明确标为diagnostic_unauthorized的MuJoCo-only 25k工程跑。",
+         "raw proposal之后两边调用同一个无引擎状态的纯tensor guard:"
+         "有限请求投影到soft∩hard的5%内缩包络,并按鲜q/qdot和"
+         "20 ms预测做刹车。",
+         ALIGNED,
+         "",
          "",
          _probe_executable_qdes_guard),
 
@@ -1496,10 +1532,6 @@ def build_ledger(root: Path | None = None, lane: dict | None = None) -> dict:
               for verdict in VERDICTS}
     blocking = sorted(k for k, r in rows.items()
                       if r["observed"] in BLOCKING_VERDICTS)
-    executable_guard_restricted = (
-        rows.get("executable_qdes_guard", {}).get("observed")
-        == DIVERGENT_DECLARED
-    )
     ledger = {
         "kind": "mjlab_lane_isaac_alignment_ledger_v1",
         "isaac_repo_root": summary_root,
@@ -1508,12 +1540,8 @@ def build_ledger(root: Path | None = None, lane: dict | None = None) -> dict:
         "verdict_counts": counts,
         "blocking_axes": blocking,
         "cross_engine_comparable": not blocking,
-        "policy_transfer_authorized": (
-            not blocking and not executable_guard_restricted
-        ),
-        "matched_causal_comparison_authorized": (
-            not blocking and not executable_guard_restricted
-        ),
+        "policy_transfer_authorized": not blocking,
+        "matched_causal_comparison_authorized": not blocking,
         "mujoco_only_diagnostic_25k_blocked_by_alignment": False,
         "bitwise_parity_is_never_a_valid_acceptance": True,
         "rows": rows,
@@ -1556,16 +1584,6 @@ def assert_cross_engine_claim(ledger: dict, claim: str) -> None:
             "bitwise cross-engine parity is not a valid acceptance criterion: "
             "mujoco-warp has no CPU fallback and diverges run to run even on a "
             "contact-free model (EXP 9.2.0).  Use an N-seed statistical band.")
-    guard = (ledger.get("rows") or {}).get("executable_qdes_guard") or {}
-    if (
-        claim in (CLAIM_POLICY_TRANSFER, CLAIM_MATCHED_CAUSAL_COMPARISON)
-        and guard.get("observed") == DIVERGENT_DECLARED
-    ):
-        raise AlignmentClaimRefused(
-            "executable_qdes_guard differs: Isaac projects into its inset "
-            "soft/hard envelope and brakes from q/qdot, while MuJoCo hard-clamps "
-            f"only; claim {claim!r} is outside the declared MuJoCo-only scope"
-        )
     blocking = ledger.get("blocking_axes") or []
     if blocking:
         raise AlignmentClaimRefused(

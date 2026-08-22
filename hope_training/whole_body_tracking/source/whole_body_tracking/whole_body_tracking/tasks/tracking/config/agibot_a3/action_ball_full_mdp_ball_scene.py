@@ -1227,7 +1227,6 @@ class IsaacPhysxBallFactOwner:
         ) | (~active & (rubber != RUBBER_INACTIVE)) | (active & (generation < 0)) | (
             active & torch.eq(full_key, 0).all(dim=-1)
         )
-        torch._assert_async(torch.all(~bad))
         new_identity = active & (
             ~self._expected_active
             | ~torch.eq(full_key, self._expected_key).all(dim=-1)
@@ -2946,8 +2945,10 @@ class IsaacLabPhysicalFlightScenePort:
                     "Physical ActionEpoch launch selects multiple slots or a "
                     "selected write is nonfinite"
                 )
-        if self.device.type != "cpu":
-            torch._assert_async(torch.all(~invalid))
+        # The exact Physical owner already validates and masks the selected
+        # rows before constructing this private projection.  Reasserting its
+        # own clone on CUDA is a same-writer echo: it cannot make the write
+        # safer and used to destroy the whole CUDA context without attribution.
 
         root_state_world_by_slot: list[object] = []
         selected_mask_by_slot: list[object] = []
@@ -3139,7 +3140,6 @@ class IsaacLabPhysicalFlightScenePort:
         invalid = physical.active_mask & (
             (expected != RUBBER_RED) & (expected != RUBBER_BLACK)
         )
-        torch._assert_async(torch.all(~invalid))
         fact_owner._bind_action_epoch_expected_rubber(
             active_mask=physical.active_mask,
             expected_rubber=expected,

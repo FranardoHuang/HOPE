@@ -98,7 +98,7 @@ class RecurringD05InternalQuestionBundle:
         "_reference_site_speed",
         "_reference_normal",
         "_base_yaw_quat",
-        "_face_reach_offset_xy",
+        "_contact_reach_offset_xy",
         "_prototype_direction",
         "_prototype_speed_min",
         "_prototype_speed_max",
@@ -126,7 +126,7 @@ class RecurringD05InternalQuestionBundle:
         reference_site_speed: torch.Tensor,
         reference_normal: torch.Tensor,
         base_yaw_quat: torch.Tensor,
-        face_reach_offset_xy: torch.Tensor,
+        contact_reach_offset_xy: torch.Tensor,
         prototype_direction: torch.Tensor,
         prototype_speed_min: torch.Tensor,
         prototype_speed_max: torch.Tensor,
@@ -154,7 +154,7 @@ class RecurringD05InternalQuestionBundle:
         self._reference_site_speed = reference_site_speed
         self._reference_normal = reference_normal
         self._base_yaw_quat = base_yaw_quat
-        self._face_reach_offset_xy = face_reach_offset_xy
+        self._contact_reach_offset_xy = contact_reach_offset_xy
         self._prototype_direction = prototype_direction
         self._prototype_speed_min = prototype_speed_min
         self._prototype_speed_max = prototype_speed_max
@@ -282,7 +282,7 @@ def _compose_recurring_question_projection(
     reference_site_speed = gather(bundle._reference_site_speed)
     reference_normal = gather(bundle._reference_normal)
     base_quat = gather(bundle._base_yaw_quat)
-    reach_offset = gather(bundle._face_reach_offset_xy)
+    reach_offset = gather(bundle._contact_reach_offset_xy)
     teacher_rate_min = gather(timing.teacher_rate_min)
     teacher_rate_max = gather(timing.teacher_rate_max)
     reference_t_hit = gather(timing.reference_t_hit_s)
@@ -1008,8 +1008,23 @@ def construct_recurring_d05_internal_question_bundle(
     face_offset_w = _quat_rotate_wxyz(
         static.reference_racket_quat_wxyz, face_offsets
     )
+    ball_offsets = torch.tensor(
+        [
+            racket_contact_geometry.ball_center_from_site_local(int(sign))
+            for sign in timing.mount_normal_sign.detach().cpu().tolist()
+        ],
+        dtype=torch.float32,
+        device=device,
+    )
+    ball_offset_w = _quat_rotate_wxyz(
+        static.reference_racket_quat_wxyz, ball_offsets
+    )
+    # ``continuous_questions.p_contact`` is explicitly the ball centre's
+    # arrival point.  Feeding the selected-face centre here used to omit one
+    # ball radius, so the ExactFace target disagreed with perfect measured
+    # mimic before learning had even started.
     contact = (
-        static.reference_racket_site_position_w_m + face_offset_w
+        static.reference_racket_site_position_w_m + ball_offset_w
     ).contiguous()
     face_velocity = static.reference_racket_site_velocity_w_mps + torch.cross(
         static.reference_racket_angular_velocity_w_radps,
@@ -1077,8 +1092,8 @@ def construct_recurring_d05_internal_question_bundle(
         reference_site_speed=site_speed64.to(torch.float32).contiguous(),
         reference_normal=static.reference_raw_face_normal_w,
         base_yaw_quat=base_yaw,
-        face_reach_offset_xy=(
-            static.reference_reach_offset_xy_m + face_offset_w[:, :2]
+        contact_reach_offset_xy=(
+            static.reference_reach_offset_xy_m + ball_offset_w[:, :2]
         ).contiguous(),
         prototype_direction=direction,
         prototype_speed_min=speed_min,
