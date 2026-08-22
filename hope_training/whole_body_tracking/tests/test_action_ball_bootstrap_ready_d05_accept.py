@@ -55,7 +55,7 @@ def _arm_production_d05_from_fresh_motion(
         ).reshape(n, 2),
     )
     rows = EPOCH.ActionEpochDueRows(
-        common_step=2,
+        common_step=motion._env.common_step_counter,
         due_mask=due,
         construct_mask=due.clone(),
     )
@@ -108,10 +108,16 @@ def test_fresh_first_d05_accepts_without_r07_publication_or_install(
     motion._action_ball_continuous_ready_authority = torch.zeros(
         motion.num_envs, dtype=torch.bool, device=device
     )
-    env.common_step_counter = 1
-    motion._advance_action_ball_continuous_motion_cadence()
-    assert motion._action_ball_continuous_reveal_due.tolist() == [False, False]
-    env.common_step_counter = 2
+    first_reveal_step = int(
+        motion._action_ball_continuous_schedule_projection[
+            "first_reveal_step"
+        ]
+    )
+    assert first_reveal_step > 1
+    # This test isolates the curriculum seam rather than replaying the full
+    # balance prefix.  Motion still owns both the due tick and its transition.
+    motion._action_ball_continuous_episode_step.fill_(first_reveal_step - 1)
+    env.common_step_counter = first_reveal_step
     motion._advance_action_ball_continuous_motion_cadence()
     assert motion._action_ball_continuous_r07_ready_projection is None
     assert motion._action_ball_continuous_reveal_due.tolist() == [True, True]
