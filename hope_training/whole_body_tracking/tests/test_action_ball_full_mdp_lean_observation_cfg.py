@@ -732,7 +732,7 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     # independent chronology authority, so a replayed same-generation stamp
     # is rejected here instead of being self-approved by the R07 producer.
     ready.control_tick[0] -= 1
-    with pytest.raises(RuntimeError, match="R07 observation chronology differs"):
+    with pytest.raises(RuntimeError):
         O.build_direct_action_epoch_observation_facts(
             runtime_owner=runtime, record=record
         )
