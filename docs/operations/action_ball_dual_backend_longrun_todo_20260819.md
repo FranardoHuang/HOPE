@@ -312,8 +312,18 @@ MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，runtime资产与调
   `14.94--15.91 s/H48`，仍高于约`12 s/H48`量级目标，故只完成发车/正确性，不完成性能项。
 - [x] 同一commit的新MuJoCo用required ready-pose fresh启动并连续取得ACK0--4以上；ACK1--28
   collection大致`9.11--9.61 s/H48`、Reward/storage finite且conservation fault为0。两个backend现同时运行。
-- [ ] 在空闲GPU上用只增加host-clock、5 update后自动卸载的嵌套profile拆开R07 plant/reference/reward/
-  readiness/Motion install；只对测得主墙做下一结构减法，不缩H48、不改PPO、不新增gate。
-  首次`8cbccad8…`在PPO前fail-closed：profiler试图替换frozen R07 bundle实例方法，同时也会违反
-  LeanRuntime对class-bound exact method的身份合同。该namespace自然RC1并封存；successor不替换任何
-  production owner方法，只由LeanRuntime在已认证bound method外调用纯host-clock callback。
+- [x] 在空闲GPU用只增加host-clock、5 update后自动卸载的嵌套profile拆开R07。修复后的
+  `a7ae7c6f…`显示全批无shot-key时`r07_readiness_no_key=7.00--8.32 s/update`，几乎等于整个
+  post-physics wall；首次`8cbccad8…`因替换frozen实例方法自然RC1的root保留，不冒充训练失败。
+- [x] 证伪`3e53f991…/19877d8d…`的845行bootstrap readiness旁路：同H48五轮collection仍为
+  `13.84--14.59 s/update`，没有可用提速。它只缩窄Epoch clone，却保留Motion frame0、完整plant读取、
+  13项R07误差和Motion install，因此不继续维护第二套bootstrap ABI。
+- [ ] 把全批no-key路径收成same-tick双脚support及其自身finite validity；`ready/dwell=0`，跳过Motion
+  frame0、完整plant、13项误差、raw/weighted recovery和Motion install。keyed post-shot recovery保持现状；
+  不改actor `203`、critic `219`宽度，不新增gate/owner/receipt/D2H。
+- [ ] exact Pod分进程回归no-key禁用昂贵调用、support finite/invalid、selected reset/stale frontier、
+  keyed fixed tape和203/219 observation；同时验证无新增D2H与CUDA fault边界不回退。
+- [ ] 在同一H48、同GPU档先跑5-update bounded profile，再以profiler-off matched strata验收；只有
+  `r07_readiness_no_key`消失且连续wall显著低于现役Isaac约15秒，才启动fresh Isaac successor。
+- [ ] successor取得连续durable ACK、finite Reward/observation、fault/CENSOR为0且wall稳定后，精确核对
+  PID/starttime/cmdline再只退役旧Isaac child；MuJoCo因本刀为Isaac-only且已约`9.5 s/H48`，继续只读长跑。

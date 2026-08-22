@@ -1035,7 +1035,21 @@ def test_render_path_preserves_exact_lean_physics_parity_without_rng_use():
     assert len(plain_result) == len(rendered_result) == 5
 
 
-def test_global_idle_without_key_skips_r03_and_r07_keyed_writes_only():
+def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
+    monkeypatch,
+):
+    def reject_projection(_self):
+        raise AssertionError("idle no-key projected R07 readiness to Motion")
+
+    def reject_install(_self, _projection):
+        raise AssertionError("idle no-key installed R07 readiness into Motion")
+
+    monkeypatch.setattr(_R07, "motion_ready_projection", reject_projection)
+    monkeypatch.setattr(
+        _Motion,
+        "install_action_ball_continuous_r07_ready_projection",
+        reject_install,
+    )
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=False,
@@ -1047,8 +1061,8 @@ def test_global_idle_without_key_skips_r03_and_r07_keyed_writes_only():
     assert "racket_publish" not in names
     assert "r07_publish" not in names
     assert names.count("r07_readiness_only") == 1
-    assert names.count("r07_ready") == 1
-    assert names.count("motion_ready") == 1
+    assert "r07_ready" not in names
+    assert "motion_ready" not in names
     assert names.count("physical_publish") == 2
 
 
@@ -1079,8 +1093,8 @@ def test_transport_work_without_key_keeps_r03_but_skips_r07_keyed_writes():
     assert names.count("racket_publish") == 1
     assert "r07_publish" not in names
     assert names.count("r07_readiness_only") == 1
-    assert names.count("r07_ready") == 1
-    assert names.count("motion_ready") == 1
+    assert "r07_ready" not in names
+    assert "motion_ready" not in names
 
 
 @pytest.mark.parametrize(

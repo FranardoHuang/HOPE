@@ -115,11 +115,6 @@ R07_EPOCH_FAULT_STALE_SOURCE_STEP = 1 << 0
 R07_EPOCH_FAULT_INVALID_PLANT_FACT = 1 << 1
 R07_EPOCH_FAULT_INVALID_REFERENCE = 1 << 2
 R07_EPOCH_FAULT_EPOCH_IDENTITY = 1 << 3
-R07_EPOCH_FAULT_BOOTSTRAP_SLOT_OR_PHASE = 1 << 4
-R07_EPOCH_FAULT_BOOTSTRAP_NONNEUTRAL_KEY = 1 << 5
-R07_EPOCH_FAULT_BOOTSTRAP_DIRTY_WRITER = 1 << 6
-R07_EPOCH_FAULT_BOOTSTRAP_RESET_GENERATION = 1 << 7
-R07_EPOCH_FAULT_BOOTSTRAP_SHIFT = 4
 R07_EPOCH_FACT_PRESENT = 1 << 0
 R07_EPOCH_FACT_NUMERICALLY_VALID = 1 << 1
 R07_EPOCH_FACT_VALUE_COUNT = 20
@@ -385,6 +380,15 @@ class ContinuousRecoveryObservationState:
 
 
 @dataclass(frozen=True)
+class _IdleFootSupportFacts:
+    """Same-tick foot-contact facts for the unkeyed critic observation."""
+
+    source_step: int
+    facts_valid: torch.Tensor
+    foot_supported_lr: torch.Tensor
+
+
+@dataclass(frozen=True)
 class ContinuousRecoveryFullMdpPreRewardView:
     """Authenticated R07 nonterminating DoneTerm projection."""
 
@@ -620,18 +624,18 @@ class DiagnosticN2ContinuousRecoveryBundle:
 
     def refresh_epoch_readiness_without_keyed_facts(
         self, *, current_source_step: torch.Tensor
-    ) -> "R07EpochDirectRewardFacts":
-        """Refresh bootstrap readiness without inventing a keyed shot event."""
+    ) -> "ContinuousRecoveryObservationState":
+        """Publish only same-tick support for an unkeyed observation."""
 
         owner = self._require_bound_owner()
         epoch_owner = self.action_epoch_owner
         step = owner._tensor(
             current_source_step,
-            label="R07 bootstrap current_source_step",
+            label="R07 idle-support current_source_step",
             shape=(owner.num_envs,),
             dtype=torch.int64,
         )
-        snapshot_name = "snapshot_bootstrap_readiness_facts"
+        snapshot_name = "snapshot_idle_support_facts"
         snapshot_facts = getattr(epoch_owner, snapshot_name, None)
         exact_snapshot = getattr(type(epoch_owner), snapshot_name, None)
         if (
@@ -641,47 +645,29 @@ class DiagnosticN2ContinuousRecoveryBundle:
             or getattr(snapshot_facts, "__func__", None) is not exact_snapshot
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 ActionEpoch bootstrap snapshot identity differs"
+                "R07 ActionEpoch idle-support snapshot identity differs"
             )
         epoch_facts = snapshot_facts(owner=self)
-
-        method_name = "project_action_ball_full_mdp_bootstrap_ready_reference"
-        project_reference = getattr(self.motion_owner, method_name, None)
-        exact_method = _exact_motion_reference_producer_definition(
-            self.motion_owner, method_name=method_name
+        motion_cadence_tick = owner._tensor(
+            getattr(
+                self.motion_owner,
+                "_action_ball_continuous_episode_step",
+                None,
+            ),
+            label="R07 idle-support Motion cadence tick",
+            shape=(owner.num_envs,),
+            dtype=torch.int64,
+        ).detach().clone()
+        support = self.plant_fact_adapter.read_idle_foot_support(
+            support_contact_threshold=owner.profile.support_contact_threshold,
         )
-        if (
-            not callable(project_reference)
-            or getattr(project_reference, "__self__", None) is not self.motion_owner
-            or getattr(project_reference, "__func__", None) is not exact_method
-        ):
-            raise ContinuousRecoveryDeviceError(
-                "R07 Motion bootstrap-reference producer identity differs"
-            )
-        reference = project_reference()
-        facts = self.plant_fact_adapter.read()
-        result = owner.action_epoch_bootstrap_readiness_view(
-            facts,
-            reference=reference,
+        return owner.publish_action_epoch_idle_support(
+            support,
             epoch_facts=epoch_facts,
             current_source_step=step,
-            adapter_source_step=self.plant_fact_adapter.last_source_step,
-            motion_owner=self.motion_owner,
+            motion_cadence_tick=motion_cadence_tick,
             action_epoch_owner=epoch_owner,
         )
-        owner._require_action_epoch_readiness_chronology(
-            observed_source_step=self.plant_fact_adapter.last_source_step,
-        )
-        owner._require_r07_business_mutation_allowed(
-            label="ActionEpoch bootstrap post-physics readiness"
-        )
-        owner._publish_action_epoch_motion_readiness(
-            result,
-            observed_source_step=self.plant_fact_adapter.last_source_step,
-            shot_key=None,
-            publish_keyed_first_ready=False,
-        )
-        return result
 
     def _publish_epoch_reward_facts(
         self,
@@ -1067,10 +1053,7 @@ class DiagnosticN2ContinuousRecoveryPlantFactAdapter:
             return self._fallback(shape), torch.zeros_like(valid)
         return value, torch.isfinite(value).reshape(self.num_envs, -1).all(dim=1)
 
-    def read(self) -> "DeviceContinuousRecoveryPlantFacts":
-        """Read one same-tick fact batch; no caller verdict enters this method."""
-
-        self._require_bound_identities()
+    def _observe_source_step(self) -> int:
         source_step = getattr(self._env, "common_step_counter", None)
         if isinstance(source_step, bool) or not isinstance(source_step, int):
             raise ContinuousRecoveryDeviceError(
@@ -1079,6 +1062,48 @@ class DiagnosticN2ContinuousRecoveryPlantFactAdapter:
         if source_step < self._last_source_step:
             raise ContinuousRecoveryDeviceError("R07 source step regressed")
         self._last_source_step = source_step
+        return source_step
+
+    def read_idle_foot_support(
+        self, *, support_contact_threshold: float
+    ) -> _IdleFootSupportFacts:
+        """Read only finite vertical force on the two bound feet."""
+
+        self._require_bound_identities()
+        source_step = self._observe_source_step()
+        n = self.num_envs
+        f = len(self.ordered_foot_names)
+        sensor_body_count = len(
+            tuple(getattr(self._contact_sensor, "body_names", ()))
+        )
+        forces = getattr(
+            getattr(self._contact_sensor, "data", None), "net_forces_w", None
+        )
+        if (
+            not isinstance(forces, torch.Tensor)
+            or tuple(forces.shape) != (n, sensor_body_count, 3)
+            or forces.device != self.device
+            or forces.dtype != self.dtype
+        ):
+            valid = torch.zeros(n, dtype=torch.bool, device=self.device)
+            support = torch.zeros((n, f), dtype=torch.bool, device=self.device)
+        else:
+            vertical_force = forces[:, self._foot_sensor_body_ids, 2]
+            valid = torch.isfinite(vertical_force).all(dim=1)
+            support = valid[:, None] & vertical_force.ge(
+                float(support_contact_threshold)
+            )
+        return _IdleFootSupportFacts(
+            source_step=source_step,
+            facts_valid=valid.detach(),
+            foot_supported_lr=support.detach(),
+        )
+
+    def read(self) -> "DeviceContinuousRecoveryPlantFacts":
+        """Read one same-tick fact batch; no caller verdict enters this method."""
+
+        self._require_bound_identities()
+        self._observe_source_step()
 
         data = getattr(self._robot, "data", None)
         n = self.num_envs
@@ -1237,13 +1262,13 @@ def _exact_action_epoch_types(
 
 def _exact_motion_reference_producer_definition(
     motion_owner: object,
-    *,
-    method_name: str = "project_action_ball_full_mdp_recovery_ready_reference",
 ) -> FunctionType:
     """Return only the code-defined Motion frame-0 producer method."""
 
     motion_type = type(motion_owner)
-    declared = vars(motion_type).get(method_name)
+    declared = vars(motion_type).get(
+        "project_action_ball_full_mdp_recovery_ready_reference"
+    )
     defining_globals = (
         declared.__globals__ if type(declared) is FunctionType else None
     )
@@ -1259,8 +1284,13 @@ def _exact_motion_reference_producer_definition(
         or owner_source is None
         or Path(owner_source).resolve() != _COMMANDS_SOURCE
         or type(declared) is not FunctionType
-        or declared.__name__ != method_name
-        or declared.__qualname__ != "MotionCommand." + method_name
+        or declared.__name__
+        != "project_action_ball_full_mdp_recovery_ready_reference"
+        or declared.__qualname__
+        != (
+            "MotionCommand."
+            "project_action_ball_full_mdp_recovery_ready_reference"
+        )
         or method_source is None
         or Path(method_source).resolve() != _COMMANDS_SOURCE
         or type(defining_globals) is not dict
@@ -3678,67 +3708,51 @@ class ContinuousRecoveryDeviceCoordinator:
             reference_action_uid=reference_action_uid,
         )
 
-    def action_epoch_bootstrap_readiness_view(
+    def publish_action_epoch_idle_support(
         self,
-        facts: DeviceContinuousRecoveryPlantFacts,
+        support: _IdleFootSupportFacts,
         *,
-        reference: object,
         epoch_facts: object,
         current_source_step: torch.Tensor,
-        adapter_source_step: object,
-        motion_owner: object,
+        motion_cadence_tick: torch.Tensor,
         action_epoch_owner: object,
-    ) -> R07EpochDirectRewardFacts:
-        """Compute unkeyed readiness without materializing keyed reward state."""
+    ) -> ContinuousRecoveryObservationState:
+        """Publish the independent contact fact needed by the idle critic."""
 
-        facts = self._plant_facts(facts)
         step = self._tensor(
             current_source_step,
-            label="R07 bootstrap current_source_step",
+            label="R07 idle-support current_source_step",
+            shape=(self.num_envs,),
+            dtype=torch.int64,
+        )
+        motion_tick = self._tensor(
+            motion_cadence_tick,
+            label="R07 idle-support Motion cadence tick",
             shape=(self.num_envs,),
             dtype=torch.int64,
         )
         epoch_owner_type, _record_type, _lifecycle_type, epoch_globals = (
             _exact_action_epoch_types(action_epoch_owner)
         )
-        epoch_facts_type = epoch_globals.get(
-            "ActionEpochBootstrapReadinessFacts"
-        )
-        bootstrap_method = _exact_motion_reference_producer_definition(
-            motion_owner,
-            method_name="project_action_ball_full_mdp_bootstrap_ready_reference",
-        )
-        reference_type = bootstrap_method.__globals__.get(
-            "_ActionBallFullMdpBootstrapFrame0Reference"
-        )
+        epoch_facts_type = epoch_globals.get("ActionEpochIdleSupportFacts")
         bound_bundle = self._diagnostic_n2_bundle
         if (
-            type(bound_bundle) is not DiagnosticN2ContinuousRecoveryBundle
+            type(support) is not _IdleFootSupportFacts
+            or type(bound_bundle) is not DiagnosticN2ContinuousRecoveryBundle
             or bound_bundle.owner is not self
-            or bound_bundle.motion_owner is not motion_owner
             or bound_bundle.action_epoch_owner is not action_epoch_owner
             or type(action_epoch_owner) is not epoch_owner_type
             or type(epoch_facts_type) is not type
-            or type(reference_type) is not type
             or type(epoch_facts) is not epoch_facts_type
-            or type(reference) is not reference_type
-            or getattr(reference, "motion_owner", None) is not motion_owner
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 bootstrap owner/reference identity differs"
+                "R07 idle-support owner or fact type differs"
             )
 
-        n = self.num_envs
         reset_generation = self._tensor(
             getattr(epoch_facts, "reset_generation", None),
-            label="R07 bootstrap reset_generation",
-            shape=(n,),
-            dtype=torch.int64,
-        )
-        bootstrap_fault_bits = self._tensor(
-            getattr(epoch_facts, "bootstrap_fault_bits", None),
-            label="R07 bootstrap epoch fault bits",
-            shape=(n,),
+            label="R07 idle-support reset_generation",
+            shape=(self.num_envs,),
             dtype=torch.int64,
         )
         epoch_version = getattr(epoch_facts, "epoch_version", None)
@@ -3747,141 +3761,95 @@ class ContinuousRecoveryDeviceCoordinator:
             or epoch_version != action_epoch_owner.commit_head - 1
         ):
             raise ContinuousRecoveryDeviceError(
-                "R07 bootstrap epoch facts differ"
+                "R07 idle-support ActionEpoch snapshot is stale or foreign"
             )
+        support_valid = self._tensor(
+            support.facts_valid,
+            label="R07 idle-support finite validity",
+            shape=(self.num_envs,),
+            dtype=torch.bool,
+        )
+        foot_supported_lr = self._tensor(
+            support.foot_supported_lr,
+            label="R07 idle-support foot_supported_lr",
+            shape=(self.num_envs, self.num_feet),
+            dtype=torch.bool,
+        )
+        source_step = support.source_step
+        if (
+            isinstance(source_step, bool)
+            or not isinstance(source_step, int)
+            or source_step < 0
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 idle-support source step is malformed"
+            )
+        chronology_valid = step.eq(source_step) & step.ge(0)
+        postphysics_valid = support_valid & chronology_valid
 
-        reference_fields = (
-            ("root_position_m", (n, 3)),
-            ("root_orientation_wxyz", (n, 4)),
-            ("joint_position_rad", (n, self.num_joints)),
-            ("body_position_m", (n, self.num_bodies, 3)),
-            ("body_orientation_wxyz", (n, self.num_bodies, 4)),
-            ("station_anchor_xy_m", (n, 2)),
+        self._require_action_epoch_readiness_chronology(
+            observed_source_step=source_step,
         )
-        reference_values: dict[str, torch.Tensor] = {}
-        for name, shape in reference_fields:
-            reference_values[name] = self._tensor(
-                getattr(reference, name, None),
-                label="R07 bootstrap reference " + name,
-                shape=shape,
-                dtype=self.dtype,
-            )
-        reference_faults = self._tensor(
-            getattr(reference, "producer_fault_bits", None),
-            label="R07 bootstrap reference fault bits",
-            shape=(n,),
-            dtype=torch.int64,
-        )
-        reference_action_slot = self._tensor(
-            getattr(reference, "reference_action_slot", None),
-            label="R07 bootstrap reference action slot",
-            shape=(n,),
-            dtype=torch.int64,
-        )
-        reference_action_uid = self._tensor(
-            getattr(reference, "reference_action_uid", None),
-            label="R07 bootstrap reference action UID",
-            shape=(n,),
-            dtype=torch.int64,
-        )
-        motion_cadence_tick = self._tensor(
-            getattr(reference, "cadence_tick", None),
-            label="R07 bootstrap Motion cadence tick",
-            shape=(n,),
-            dtype=torch.int64,
+        self._require_r07_business_mutation_allowed(
+            label="ActionEpoch idle post-physics support"
         )
         self._require_action_epoch_motion_cadence_chronology(
             reset_generation=reset_generation,
-            motion_cadence_tick=motion_cadence_tick,
+            motion_cadence_tick=motion_tick,
         )
 
-        errors, arithmetic_valid, support_count = self._component_errors_against(
-            facts,
-            root_position=reference_values["root_position_m"],
-            root_orientation=reference_values["root_orientation_wxyz"],
-            joint_position=reference_values["joint_position_rad"],
-            body_position=reference_values["body_position_m"],
-            body_orientation=reference_values["body_orientation_wxyz"],
-            station_anchor=reference_values["station_anchor_xy_m"],
+        self._action_epoch_ready_instant.zero_()
+        self._action_epoch_ready_live.zero_()
+        self._action_epoch_ready_streak.zero_()
+        self._action_epoch_ready_reference_kind.zero_()
+        self._action_epoch_ready_reference_action_slot.fill_(-1)
+        self._action_epoch_ready_reference_action_uid.fill_(-1)
+        for field in fields(_row_identity.ActionEpochShotKey):
+            getattr(self._action_epoch_ready_shot_key, field.name).fill_(-1)
+        self._action_epoch_first_ready_source_step.fill_(-1)
+        self._action_epoch_ready_last_motion_cadence_tick.copy_(motion_tick)
+        self._action_epoch_ready_last_reset_generation.copy_(reset_generation)
+        self._action_epoch_ready_last_source_step = source_step
+
+        zeros = torch.zeros(
+            self.num_envs, dtype=torch.int64, device=self.device
         )
-        adapter_step_valid = (
-            type(adapter_source_step) is int and adapter_source_step >= 0
+        published_source_step = torch.where(
+            postphysics_valid, step, torch.full_like(step, -1)
         )
-        adapter_step = torch.full_like(
-            step, adapter_source_step if adapter_step_valid else -1
+        control_tick = torch.where(
+            motion_tick < torch.iinfo(torch.int64).max,
+            motion_tick + 1,
+            torch.full_like(motion_tick, -1),
         )
-        chronology_valid = step.eq(adapter_step) & step.ge(0)
-        plant_valid = facts.facts_valid & arithmetic_valid
-        reference_valid = (
-            bootstrap_fault_bits.eq(0)
-            & reference_faults.eq(0)
-            & reference_action_slot.ge(0)
-            & reference_action_uid.gt(0)
-        )
-        producer_fault_bits = reference_faults.detach().clone()
-        producer_fault_bits |= (
-            bootstrap_fault_bits << R07_EPOCH_FAULT_BOOTSTRAP_SHIFT
-        )
-        producer_fault_bits |= (
-            (~chronology_valid).to(torch.int64)
-            * R07_EPOCH_FAULT_STALE_SOURCE_STEP
-        )
-        producer_fault_bits |= (
-            (~plant_valid).to(torch.int64)
-            * R07_EPOCH_FAULT_INVALID_PLANT_FACT
-        )
-        producer_fault_bits |= (
-            (~reference_valid).to(torch.int64)
-            * R07_EPOCH_FAULT_INVALID_REFERENCE
-        )
-        facts_valid = plant_valid & reference_valid & chronology_valid
-        infrastructure_fault = producer_fault_bits.ne(0)
-        scores = torch.reciprocal(
-            1.0 + torch.square(errors / self._scales.unsqueeze(0))
-        )
-        raw_score = (
-            torch.sum(scores * self._weights.unsqueeze(0), dim=1)
-            / self._weight_sum
-        )
-        support_ok = support_count >= int(self.profile.minimum_supported_feet)
-        ready_instant = (
-            facts_valid
-            & facts.hard_safety_ok
-            & support_ok
-            & torch.all(errors <= self._ready_tolerances.unsqueeze(0), dim=1)
-        )
-        false_rows = torch.zeros(n, dtype=torch.bool, device=self.device)
-        return R07EpochDirectRewardFacts(
-            source_step=torch.where(
-                facts_valid, step, torch.full_like(step, -1)
-            ),
-            motion_cadence_tick=motion_cadence_tick.detach().clone(),
+        payload = _MotionReadyPayload(
+            owner_identity=self._identity,
+            owner=self,
+            postphysics_valid=postphysics_valid.detach().clone(),
+            source_step=published_source_step.detach().clone(),
             reset_generation=reset_generation.detach().clone(),
-            recovery_age_tick=torch.full_like(step, -1),
-            reward_eligible=false_rows,
-            facts_valid=facts_valid,
-            foot_supported_lr=(
-                facts.facts_valid[:, None]
-                & (
-                    facts.foot_contact_signal
-                    >= float(self.profile.support_contact_threshold)
-                )
+            control_tick=control_tick.detach().clone(),
+            ready=torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
             ),
-            infrastructure_fault=infrastructure_fault,
-            producer_fault_bits=producer_fault_bits,
-            component_errors=torch.where(
-                facts_valid[:, None], errors, torch.zeros_like(errors)
-            ),
-            raw_score=torch.where(
-                facts_valid, raw_score, torch.zeros_like(raw_score)
-            ),
-            weighted_reward=torch.zeros_like(raw_score),
-            ready_instant=ready_instant,
-            reference_kind=torch.full_like(
-                step, R07_REFERENCE_BOOTSTRAP_UPCOMING_ACTION_FRAME0
-            ),
-            reference_action_slot=reference_action_slot.detach().clone(),
-            reference_action_uid=reference_action_uid.detach().clone(),
+            ready_streak=zeros.detach().clone(),
+            required_dwell=int(self.profile.ready_dwell_ticks),
+            foot_supported_lr=foot_supported_lr.detach().clone(),
+        )
+        self._latest_motion_ready_projection = _mint_full_mdp_identity(
+            ContinuousRecoveryMotionReadyProjection,
+            _MOTION_READY_REGISTRY,
+            payload,
+        )
+        self._advance_mutation_version()
+        return ContinuousRecoveryObservationState(
+            postphysics_valid=payload.postphysics_valid.detach().clone(),
+            source_step=payload.source_step.detach().clone(),
+            reset_generation=payload.reset_generation.detach().clone(),
+            control_tick=payload.control_tick.detach().clone(),
+            ready_streak=payload.ready_streak.detach().clone(),
+            required_dwell=payload.required_dwell,
+            foot_supported_lr=payload.foot_supported_lr.detach().clone(),
         )
 
     def _require_action_epoch_motion_cadence_chronology(
