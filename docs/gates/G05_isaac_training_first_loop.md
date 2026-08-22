@@ -7,9 +7,13 @@ Status: Partial (the base training-loop mechanics are proven; the current-candid
 课程现象。候选改为在`LAUNCH_SETTLED && exact`冻结问题，publish只核冻结identity/source，并用真实R06
 LAUNCH→OUTCOME时序防止二次phase gate回归。shared typed recipe同时从永久`entropy_coef=.01`改为`0`；
 真实V2 MuJoCo checkpoint的mean std已从`.02`涨过`1`并继续超过`2.8`，不能resume。没有新增actor observation、
-stage、owner、receipt、std clamp/decay或成功Gate；H48/lambda `.98`不变。fresh exact Pod与新namespace结果
-见[课程解阻实验§7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)，
-在结果写入前均为`未测`，本Gate不晋级。
+stage、owner、receipt、std clamp/decay或成功Gate；H48/lambda `.98`不变。clean `46800617…` exact Pod
+相关回归合计`345 passed,13 skipped`；fresh Isaac到update694时TensorBoard mean std
+`.02000495→.01445465`，完成episode均长由first10 `87.53`升到recent10 `176.72 tick`，Reward
+nonfinite/attributed fault为0。累计`due/selected/accepted=233/233/218`、playback=`42`，但launch/R03/contact/
+landing仍为0分母和`未测`；课程入口已开而mimic→hit未成。recent10 raw wall `10.380 s/H48`，H24-equivalent
+约`5.190 s`。因此这里只关闭启动、optimizer canary和mimic入口，不声称下游通过，本Gate不晋级。详见
+[课程解阻实验§7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
 
 **2026-08-22 `aa42418b`当前结论（Gate仍`Partial`）：**no-key ContactSensor主墙已删除；exact Pod=
 `304 passed, 6 skipped`，profiler-off匹配5轮中位`6.346 s/H48`。新Isaac到ACK176仍active/finite/fault0；

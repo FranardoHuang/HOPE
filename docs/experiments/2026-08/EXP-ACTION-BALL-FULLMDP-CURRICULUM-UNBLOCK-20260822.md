@@ -343,6 +343,27 @@ present/physically-valid=`174/174`。Isaac recent10 collection中位`8.238 s/H48
 - Isaac/MuJoCo都增加production chronology正例与IDLE/REVEAL/OUTCOME/RETIRED、wrong-phase/no-catch-up、
   one-shot/sticky/reset反例；另覆盖LAUNCH时arm后经真实R06进入OUTCOME仍可publish，防止错误phase gate回归。
 - launcher dry-run不得创建root，real root预建0700 cache且ambient `WARP_CACHE_PATH`不得泄漏。
-- 当前仍在跑的`aa42418b`两条V2 lineage只保留历史诊断意义；本节代码必须在exact Pod聚焦回归通过后，
-  以新commit、新namespace、fresh sigma `.02`重启。successor可用前不触碰旧进程；阶段报告继续逐项写
-  balance、mimic、launch/contact、landing的numerator/denominator，零分母为`未测`。
+- clean detached commit `46800617c505f9cc10ff72f9228a60ece2bb0293`在exact Pod分进程聚焦回归为
+  launcher `15 passed`、PPO/train wiring `139 passed,1 skipped`、Isaac R03 `27 passed`、MuJoCo
+  lifecycle/RSL `61 passed,6 skipped`、扩展Epoch/runtime `103 passed,6 skipped`，合计
+  `345 passed,13 skipped`；skip仍是既有可选依赖/CUDA边界。
+- fresh MuJoCo namespace `fullmdp-a-h48-v3-mujoco-exact-r03-46800617-20260823`绑定GPU0，Warp首次编译
+  产物已确认只写run-owned cache。到ACK35，mean std从`.01999999`降至`.01958219`，最近10轮
+  pre-ACK中位`9.524 s/H48`；Reward/storage finite、conservation fault=0。
+- fresh Isaac namespace `fullmdp-a-h48-v3-isaac-exact-r03-46800617-20260823`绑定GPU1。到ACK23，日志
+  mean std保持`.02`，最近10轮中位`6.915 s/H48`；Reward nonfinite和attributed fault均0。两端都通过
+  20-update optimizer canary，没有复现V2的统一std上漂。
+- successor分别连续8个MuJoCo ACK和11个Isaac ACK后，才按旧process的PID/start-ticks/argv精确替换V2；
+  MuJoCo一次TERM退出，Isaac leader一次TERM退出、Kit child第二次TERM退出，未用KILL。旧root/checkpoint/log
+  保留，completion仍缺席；GPU2已释放。当前只有两条V3 lineage运行，均`diagnostic_unauthorized=true`。
+- 后续只读刷新到MuJoCo update790 / Isaac update694：前10→recent10完成episode均长分别从
+  `68.05→211.05 tick`和`87.53→176.72 tick`，说明balance继续改善但尚未基本成功。MuJoCo累计
+  `due/reveal=1802/1802`、deferred=0；Isaac累计`due/selected/accepted=233/233/218`且playback started=`42`，
+  证明row一活到first reveal tick295就立即获得mimic/task输入，没有R07或新Gate阻断。
+- 后半段仍未闭合：MuJoCo只有`launch=1`，该row只在launch phase活了2个control tick，没到20 tick后的
+  exact-strike，因此R03=0；Isaac launch=0。两端contact/landing也都是0分母和`未测`。这不是旧R03 phase
+  bug复发，但说明“mimic基本成功→开始击球”尚未发生，不能把入口打开写成阶段成功。
+- exploration因果修复持续成立：MuJoCo mean std `.02000→.01640`，Isaac TensorBoard精确
+  `.02000495→.01445465`；Reward nonfinite、owner/conservation fault均0。recent10 raw wall分别为
+  `9.833/10.380 s/H48`，H24-equivalent约`4.916/5.190 s`；相比旧约22秒已大砍，但raw H48仍未达到约6秒，
+  后续性能刀必须从active/mimic profiler找真实主墙，不能缩rollout或加Gate冒充提速。

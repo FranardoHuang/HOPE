@@ -9,8 +9,14 @@
   已超过`2.8`。FullMDP-only PPO V3改为`entropy_coef=0`，其余H48/lambda `.98`/E5/MB8/LR/fresh sigma
   `.02`保持；拒绝resume、entropy decay状态机与std clamp。
 - MuJoCo one-shot launcher把Warp cache绑定到fresh run root，避免继续写已满的用户根盘；该位置隔离不是
-  training/safety Gate。exact Pod聚焦回归与新commit、新namespace fresh双run仍待本轮写回，G05/G06保持
-  `Partial`、`diagnostic_unauthorized=true`。
+  training/safety Gate。clean `46800617…` exact Pod相关回归合计`345 passed,13 skipped`；fresh V3
+  MuJoCo到ACK35为std `.02000→.01958`、recent10 `9.524 s/H48`，Isaac到ACK23保持`.02`、recent10
+  `6.915 s/H48`，两端finite/fault0。successor可用后才精确TERM旧V2，产物保留且未伪造completion。
+  后续到MuJoCo update790为`due/reveal=1802/1802`、deferred=0、launch=1但R03=0；Isaac update694为
+  `due/selected/accepted=233/233/218`、playback=42但launch=0。episode均长分别改善到recent10
+  `211.05/176.72 tick`，std降至`.01640/.01445`，两端finite/fault0。mimic入口已开而mimic→hit尚未成，
+  contact/landing仍`未测`。recent10 raw H48为`9.833/10.380 s`（H24-equivalent约`4.916/5.190 s`）；
+  两条V3保持运行，G05/G06仍`Partial`、`diagnostic_unauthorized=true`。
 
 ## 2026-08-22 — no-key ContactSensor主墙删除与`aa42418b`双fresh（branch candidate）
 

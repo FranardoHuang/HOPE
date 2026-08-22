@@ -7,8 +7,14 @@ H48/lambda `.98`且把永久entropy改为`0`，但旧V2 checkpoint绝不resume�
 tick一次event + task内sticky fact”：Isaac冻结后允许同tick进入OUTCOME再publish，MuJoCo禁止`<=`延迟补发和
 逐tick重采FK。该对齐删除同writer `task_valid/launch_succeeded`重复gate，不新建portable lifecycle抽象；当前
 只有两个短谓词，没有第三处漂移值得新增层。Mu launcher另绑定run-owned Warp cache，但这不签physics parity。
-exact Pod与fresh双run前缀见[课程解阻实验§7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)；
-未写入的backend/stage分母一律`未测`，本Gate不晋级。
+clean `46800617…` exact Pod相关回归合计`345 passed,13 skipped`。fresh 20-update后MuJoCo std
+`.02000→.01958`、recent10 `9.524 s/H48`；Isaac std显示`.02`、recent10 `6.915 s/H48`，两端finite/fault0。
+旧V2在successor可用后精确停止且产物保留。后续到MuJoCo update790累计`due/reveal=1802/1802`、
+deferred=0、launch=1，但唯一launch只活2 tick，R03/contact/landing=0；Isaac update694累计
+`due/selected/accepted=233/233/218`、playback=42，但launch/R03/contact/landing=0。两端std分别降至
+`.01640/.01445`且finite/fault0。共同recipe与mimic入口成立，mimic→hit仍未成立；这不签数值/physics/
+transfer parity，本Gate不晋级。详见
+[课程解阻实验§7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
 
 **2026-08-22 `aa42418b`双fresh现状（Gate仍`Partial`）：**Isaac与portable MuJoCo现均从clean source
 `aa42418b187e8f3edf49d5757868fe0215e62d42`以H48 fresh运行。Isaac no-key critic `[216:219]`是N/A zero，
