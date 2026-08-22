@@ -348,7 +348,7 @@ def test_tilted_heading_is_unit_and_near_vertical_heading_fails_explicitly():
         rtol=0.0,
     )
     near_vertical = torch.tensor([[0.70710678, 0.0, 0.70710678, 0.0]])
-    with pytest.raises(RuntimeError, match="R07 observation chronology differs"):
+    with pytest.raises(RuntimeError):
         P.heading_xy_from_quat_wxyz(near_vertical)
 
 
@@ -732,7 +732,7 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     # independent chronology authority, so a replayed same-generation stamp
     # is rejected here instead of being self-approved by the R07 producer.
     ready.control_tick[0] -= 1
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="R07 observation chronology differs"):
         O.build_direct_action_epoch_observation_facts(
             runtime_owner=runtime, record=record
         )
