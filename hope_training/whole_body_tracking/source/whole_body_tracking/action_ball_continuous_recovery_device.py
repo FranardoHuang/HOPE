@@ -637,19 +637,11 @@ class DiagnosticN2ContinuousRecoveryBundle:
             raise ContinuousRecoveryDeviceError(
                 "R07 idle-support current_source_step is malformed"
             )
-        snapshot_name = "snapshot_idle_support_facts"
-        snapshot_facts = getattr(epoch_owner, snapshot_name, None)
-        exact_snapshot = getattr(type(epoch_owner), snapshot_name, None)
-        if (
-            not callable(snapshot_facts)
-            or not callable(exact_snapshot)
-            or getattr(snapshot_facts, "__self__", None) is not epoch_owner
-            or getattr(snapshot_facts, "__func__", None) is not exact_snapshot
-        ):
-            raise ContinuousRecoveryDeviceError(
-                "R07 ActionEpoch idle-support snapshot identity differs"
-            )
-        epoch_facts = snapshot_facts(owner=self)
+        # Construction already bound this exact ActionEpoch owner, and the
+        # callee validates this R07 owner before projecting its narrow fact.
+        # Re-authenticating the bound Python method here only made the caller
+        # prove its own wiring and prevented transparent diagnostic wrapping.
+        epoch_facts = epoch_owner.snapshot_idle_support_facts(owner=self)
         motion_cadence_tick = owner._tensor(
             getattr(
                 self.motion_owner,

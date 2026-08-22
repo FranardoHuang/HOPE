@@ -97,10 +97,21 @@ class _R07Owner:
     def _publish_action_epoch_motion_readiness(self, *args, **kwargs):
         return args, kwargs
 
+    def stamp_action_epoch_idle_observation(self, *args, **kwargs):
+        return args, kwargs
+
+
+class _Epoch:
+    def snapshot_idle_support_facts(self, *args, **kwargs):
+        return args, kwargs
+
 
 class _PlantAdapter:
     def read(self):
         return None
+
+    def read_idle_foot_support(self, *args, **kwargs):
+        return args, kwargs
 
 
 class _Motion:
@@ -114,7 +125,9 @@ class _Motion:
 class _R07Bundle:
     def __init__(self, motion):
         self.owner = _R07Owner()
+        self.owner._diagnostic_n2_bundle = self
         self.plant_fact_adapter = _PlantAdapter()
+        self.action_epoch_owner = _Epoch()
         self.motion_owner = motion
 
     def stamp_epoch_idle_observation_without_keyed_facts(self, *args, **kwargs):
@@ -132,6 +145,14 @@ class _RuntimeOwner:
         self._physical_ball = _Physical()
         self._motion = _Motion()
         self._r07_recovery = _R07Bundle(self._motion)
+
+    @property
+    def epoch_owner(self):
+        return self._r07_recovery.action_epoch_owner
+
+    @property
+    def component_identities(self):
+        return (("r07_recovery", self._r07_recovery),)
 
 
 class _ExactEnv:
@@ -229,12 +250,19 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     )
 
     assert env.step(object()) == "done"
-    assert (
-        env._full_mdp_runtime_owner._full_mdp_profile_runtime_call(
-            "r07_idle_stamp", lambda: "profiled"
+    r07 = env._full_mdp_runtime_owner._r07_recovery
+
+    def idle_snapshot():
+        r07.action_epoch_owner.snapshot_idle_support_facts(owner=r07)
+        r07.plant_fact_adapter.read_idle_foot_support(
+            support_contact_threshold=1.0
         )
-        == "profiled"
-    )
+        r07.owner.stamp_action_epoch_idle_observation(object())
+        return "profiled"
+
+    assert env._full_mdp_runtime_owner._full_mdp_profile_runtime_call(
+        "r07_idle_stamp", idle_snapshot
+    ) == "profiled"
     payload = profiler.emit_update(
         update=7,
         collection_time_s=22.0,
@@ -243,6 +271,7 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     )
 
     assert payload["update"] == 7
+    assert payload["schema_version"] == 2
     assert payload["observed_env_step_calls"] == 1
     assert payload["rollout_call_count_exact"] is True
     assert payload["auto_close_after_emit"] is True
@@ -271,6 +300,9 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert settlement_gap["calls"] == 1
     assert settlement_gap["inclusive_host_wall_ms"] > 0.0
     assert payload["segments"]["event_apply"]["calls"] == 0
+    assert payload["segments"]["r07_idle_epoch_snapshot"]["calls"] == 1
+    assert payload["segments"]["r07_idle_support_read"]["calls"] == 1
+    assert payload["segments"]["r07_idle_state_store"]["calls"] == 1
     selected_reset = payload["segments"]["selected_reset_total"]
     assert selected_reset["calls"] == 1
     assert selected_reset["env_count"] == 2
@@ -280,6 +312,9 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert profiler.closed
     assert "step" not in env.__dict__
     assert "compute" not in env.reward_manager.__dict__
+    assert "snapshot_idle_support_facts" not in r07.action_epoch_owner.__dict__
+    assert "read_idle_foot_support" not in r07.plant_fact_adapter.__dict__
+    assert "stamp_action_epoch_idle_observation" not in r07.owner.__dict__
     assert "_full_mdp_profile_runtime_call" not in (
         env._full_mdp_runtime_owner.__dict__
     )

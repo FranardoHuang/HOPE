@@ -22,7 +22,7 @@ from collections.abc import Callable, Mapping
 
 PROFILE_ENV_VAR = "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
 PROFILE_JSON_PREFIX = "HOPE_ACTION_BALL_FULL_MDP_PROFILE_JSON="
-PROFILE_SCHEMA_VERSION = 1
+PROFILE_SCHEMA_VERSION = 2
 MAX_PROFILE_UPDATES = 50
 
 _SEGMENT_NAMES = (
@@ -39,6 +39,9 @@ _SEGMENT_NAMES = (
     "post_physics_publish",
     "physical_epoch_postphysics",
     "r07_idle_stamp",
+    "r07_idle_epoch_snapshot",
+    "r07_idle_support_read",
+    "r07_idle_state_store",
     "r07_keyed_publish",
     "r07_motion_projection",
     "motion_ready_install",
@@ -239,6 +242,23 @@ class FullMdpUpdateProfiler:
             self.profile_runtime_call,
         )
         self._runtime_owner = runtime_owner
+        try:
+            components = dict(runtime_owner.component_identities)
+            r07 = components.get("r07_recovery")
+            r07_epoch = getattr(r07, "action_epoch_owner", None)
+            r07_plant = getattr(r07, "plant_fact_adapter", None)
+            r07_owner = getattr(r07, "owner", None)
+            if (
+                r07_epoch is not runtime_owner.epoch_owner
+                or getattr(r07_owner, "_diagnostic_n2_bundle", None) is not r07
+            ):
+                raise RuntimeError("FullMDP profiler R07 identities differ")
+        except (AttributeError, TypeError, ValueError) as exc:
+            self.close()
+            raise RuntimeError("FullMDP profiler component identities differ") from exc
+        except BaseException:
+            self.close()
+            raise
         bindings = (
             (unwrapped, "step", "env_step_total", None),
             (unwrapped, "_before_policy_step", "before_policy_step", None),
@@ -281,6 +301,24 @@ class FullMdpUpdateProfiler:
                 unwrapped.observation_manager,
                 "compute",
                 "observation_compute",
+                None,
+            ),
+            (
+                r07_epoch,
+                "snapshot_idle_support_facts",
+                "r07_idle_epoch_snapshot",
+                None,
+            ),
+            (
+                r07_plant,
+                "read_idle_foot_support",
+                "r07_idle_support_read",
+                None,
+            ),
+            (
+                r07_owner,
+                "stamp_action_epoch_idle_observation",
+                "r07_idle_state_store",
                 None,
             ),
         )
