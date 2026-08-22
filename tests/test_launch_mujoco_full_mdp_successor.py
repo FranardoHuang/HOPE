@@ -17,6 +17,10 @@ import pytest
 
 PROJECT = Path(__file__).resolve().parents[1]
 SCRIPT = PROJECT / "scripts" / "launch_mujoco_full_mdp_successor.py"
+READY_POSE = PROJECT / (
+    "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/"
+    "take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json"
+)
 RUNNER = Path("hope_training/whole_body_tracking/mjlab_lane/"
               "mujoco_gpu_ac_full_mdp_wait_rsl3.py")
 UUID = "GPU-exact-0002"
@@ -82,6 +86,7 @@ try:
 finally:
     os.close(fd)
 names = ["CUDA_DEVICE_ORDER", "CUDA_VISIBLE_DEVICES", "PYTHONNOUSERSITE", "PYTHONDONTWRITEBYTECODE",
+         "ACTIONBALL_READY_POSE",
          "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"]
 payload = {"argv": sys.argv[1:], "cwd": os.getcwd(), "lock_held": held,
            "env": {name: os.environ.get(name) for name in names}}
@@ -110,6 +115,8 @@ fi
     run_root = workspace / "runs" / NAMESPACE
     lock = base / "gpu.lock"
     lock.write_text("", encoding="utf-8")
+    ready_pose = base / "ready-pose.json"
+    shutil.copy2(READY_POSE, ready_pose)
     record, started, release = (base / name for name in ("record.json", "started", "release"))
     monkeypatch.setattr(module, "WORKSPACE_ROOT", workspace)
     monkeypatch.setattr(module, "NVIDIA_SMI", nvidia)
@@ -123,18 +130,20 @@ fi
         monkeypatch.setenv(name, "ambient-must-not-leak")
 
     def argv(*, dry: bool = False, root: Path = run_root,
-             executable: Path = python, expected: str = UUID) -> list[str]:
+             executable: Path = python, expected: str = UUID,
+             ready: Path = ready_pose) -> list[str]:
         result = [
             "--python", str(executable), "--run-root", str(root),
             "--namespace", NAMESPACE, "--gpu-index", "2",
             "--expected-gpu-uuid", expected, "--lock-file", str(lock),
+            "--ready-pose", str(ready),
         ]
         return result + (["--dry-run"] if dry else [])
 
     return SimpleNamespace(
         module=module, repo=repo, runner=runner, python=python, nvidia=nvidia,
         workspace=workspace, root=run_root, lock=lock, record=record,
-        started=started, release=release, argv=argv,
+        ready_pose=ready_pose, started=started, release=release, argv=argv,
     )
 
 
@@ -152,7 +161,7 @@ def _expected_child(rig, commit: str) -> list[str]:
     ]
 
 
-def test_dry_run_reports_actual_head_and_exact_contract_without_resources(
+def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
     rig, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     rig.module.NVIDIA_SMI = rig.nvidia.with_name("must-not-run")
     descriptor = os.open(rig.lock, os.O_RDWR)
@@ -168,11 +177,31 @@ def test_dry_run_reports_actual_head_and_exact_contract_without_resources(
         "argv": _expected_child(rig, commit),
         "env": {
             "set": {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
-                    "PYTHONDONTWRITEBYTECODE": "1"},
+                    "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose)},
             "unset": ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"],
         },
     }
     assert output.err == ""
+    assert not rig.root.parent.exists()
+
+
+def test_ready_pose_argument_is_required(rig) -> None:
+    argv = rig.argv(dry=True)
+    offset = argv.index("--ready-pose")
+    del argv[offset:offset + 2]
+    with pytest.raises(SystemExit, match="2"):
+        rig.module.parse_args(argv)
+
+
+@pytest.mark.parametrize("kind", ["missing", "wrong", "symlink"])
+def test_ready_pose_fails_closed_before_resources(rig, kind: str, capsys) -> None:
+    candidate = rig.ready_pose.with_name(kind + ".json")
+    if kind == "wrong":
+        candidate.write_text("{}\n", encoding="utf-8")
+    elif kind == "symlink":
+        candidate.symlink_to(rig.ready_pose)
+    assert rig.module.main(rig.argv(dry=True, ready=candidate)) == 2
+    assert "ready-pose" in capsys.readouterr().err
     assert not rig.root.parent.exists()
 
 
@@ -285,7 +314,7 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert record["lock_held"] is True
     assert record["env"] == {
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
-        "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": None,
+        "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose), "PYTHONPATH": None,
         "PYTHONHOME": None, "VIRTUAL_ENV": None, "CONDA_PREFIX": None,
     }
     descriptor = os.open(rig.lock, os.O_RDWR)

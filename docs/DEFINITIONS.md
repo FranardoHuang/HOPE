@@ -23,6 +23,11 @@ NUMA放置，不改变训练语义，也不是性能或安全Gate；收益必须
 FullMDP child的canonical目录，令checkpoint、WAL和training contract归属于当前fresh run root。它不是
 通用用户覆盖项，非FullMDP训练若携带会被拒绝。
 
+<a id="mujoco-fullmdp-ready-pose"></a>
+**portable MuJoCo FullMDP `--ready-pose` / 显式初始站姿输入**：one-shot launcher要求的canonical regular
+JSON文件；launcher与child都核固定SHA `ab6b7e41...8d38069`，并由launcher显式设置
+`ACTIONBALL_READY_POSE`。它消除外层shell的隐藏依赖，不是课程Gate、学习成绩或安全授权。
+
 <a id="mujoco-fullmdp-longrun-flags"></a>
 **portable MuJoCo FullMDP长跑flags**：[`--full-a`](#mujoco-fullmdp-longrun-flags)选择portable
 26-event engineering surface，而不是历史WAIT环境或业务Full-A成功声明；其中

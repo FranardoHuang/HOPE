@@ -4779,3 +4779,12 @@
   offset闭环，因此上一阶段成形时下一阶段不再被错误问题定义先天隔断。
 - 同步Physical→Epoch/R06 packet删除重复full-grid snapshot/ingress clone；host相关分进程回归均通过。
   exact Pod、profiler-off matched H48和双fresh ACK仍未完成，G05/G06保持`Partial`，不把结构proxy写成秒数。
+
+## 2026-08-22 — 空业务热路减法与MuJoCo显式ready-pose输入
+
+- Isaac无shot final-substep不再制造R03/R07空keyed业务：现有单次host summary拆成transport/keyed两个事实，
+  各自只控制对应消费者；R07 plant/readiness与Motion每control仍运行，retired recovery反例保持。
+- MuJoCo one-shot launcher不再依赖外层shell偶然带入`ACTIONBALL_READY_POSE`；required CLI、canonical file与
+  fixed SHA在建root前验证并显式进入child env。首次遗漏绑定的fresh root自然RC1后封存、不复用。
+- host launcher=`15 passed`；fast-path exact Pod与fresh双GPU ACK/速度仍待验，Gate保持`Partial`且
+  `diagnostic_unauthorized=true`。

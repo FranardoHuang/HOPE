@@ -417,6 +417,35 @@ def _ready_epoch(
     )
 
 
+def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
+    epoch, d05, _cadence, _r06, _playback, _motion, _racket, physical = (
+        _ready_epoch()
+    )
+    assert not epoch.project_keyed_postphysics_activity_mask(
+        owner=physical
+    ).any()
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    assert epoch.project_keyed_postphysics_activity_mask(
+        owner=physical
+    ).tolist() == [[True], [False]]
+
+    current = epoch._publication.current
+    assert current is not None
+    epoch._publication = replace(
+        epoch._publication,
+        current=replace(
+            current,
+            phase=torch.full_like(current.phase, E.PHASE_RETIRED),
+        ),
+    )
+    assert epoch.project_keyed_postphysics_activity_mask(
+        owner=physical
+    ).tolist() == [[True], [False]]
+    with pytest.raises(E.ActionEpochError, match="owner identity"):
+        epoch.project_keyed_postphysics_activity_mask(owner=object())
+
+
 @pytest.mark.parametrize(
     ("catalog_uids", "family_codes", "family", "attributed"),
     (((21,), (2,), 2, True), ((999,), (1,), 0, False)),

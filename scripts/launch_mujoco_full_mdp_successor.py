@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,7 @@ RUNNER_RELATIVE = Path(
     "mujoco_gpu_ac_full_mdp_wait_rsl3.py"
 )
 ENV_UNSET = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX")
+READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
 
 
 class LaunchError(RuntimeError):
@@ -74,6 +76,17 @@ def _canonical_regular(path: Path, label: str) -> Path:
     return path
 
 
+def _ready_pose(path: Path) -> Path:
+    path = _canonical_regular(path, "ready-pose")
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise LaunchError("cannot read ready-pose") from exc
+    if digest != READY_POSE_SHA256:
+        raise LaunchError("ready-pose SHA-256 differs")
+    return path
+
+
 def _python_entry(path: Path) -> Path:
     """Validate a Python entry without resolving away its venv semantics."""
     if not path.is_absolute():
@@ -114,9 +127,10 @@ def _nearest_existing(path: Path) -> Path:
     return current
 
 
-def _validate_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+def _validate_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
     python = _python_entry(args.python)
     runner = _canonical_regular(REPO_ROOT / RUNNER_RELATIVE, "Full-A runner")
+    ready_pose = _ready_pose(args.ready_pose)
     root = args.run_root
     if (
         not root.is_absolute()
@@ -142,7 +156,7 @@ def _validate_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
         raise LaunchError("expected-gpu-uuid format differs")
     if not args.lock_file.is_absolute():
         raise LaunchError("lock-file must be absolute")
-    return python, runner, root
+    return python, runner, ready_pose, root
 
 
 def _paths(root: Path) -> dict[str, Path]:
@@ -171,13 +185,14 @@ def _child_argv(
     ]
 
 
-def _env_contract(gpu_index: int) -> dict[str, object]:
+def _env_contract(gpu_index: int, ready_pose: Path) -> dict[str, object]:
     return {
         "set": {
             "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
             "CUDA_VISIBLE_DEVICES": str(gpu_index),
             "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "ACTIONBALL_READY_POSE": str(ready_pose),
         },
         "unset": list(ENV_UNSET),
     }
@@ -259,10 +274,10 @@ def _create_root(root: Path, paths: dict[str, Path]) -> None:
 
 def launch(args: argparse.Namespace) -> int:
     commit = _source_commit()
-    python, runner, root = _validate_inputs(args)
+    python, runner, ready_pose, root = _validate_inputs(args)
     paths = _paths(root)
     argv = _child_argv(python, runner, paths, commit, args.namespace)
-    contract = _env_contract(args.gpu_index)
+    contract = _env_contract(args.gpu_index, ready_pose)
     if args.dry_run:
         print(json.dumps({"argv": argv, "env": contract}, sort_keys=True,
                          separators=(",", ":")))
@@ -302,6 +317,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gpu-index", type=int, required=True)
     parser.add_argument("--expected-gpu-uuid", required=True)
     parser.add_argument("--lock-file", type=Path, required=True)
+    parser.add_argument("--ready-pose", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

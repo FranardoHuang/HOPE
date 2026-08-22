@@ -2348,3 +2348,11 @@ slot0确定性构造还发现旧portable teacher与contact约错开13 cm；现�
 ball-centre offset唯一构造contact，且共同Isaac D05补回此前漏掉的球半径。host证明perfect mimic在strike
 tick的ball/site/selected-face几何闭合；真实MuJoCo-Warp/PhysX contact、landing与多seed学习曲线仍需fresh
 GPU证据，不能用该代数测试授权transfer或promotion，G06保持`Partial`。
+
+### 2026-08-22 MuJoCo ready-pose显式绑定候选（Gate仍`Partial`）
+
+`dd82bb7b`的首次fresh launcher已取得GPU0 lock并创建独立run root，但child在PPO前因
+`ACTIONBALL_READY_POSE`未绑定自然RC1。此前dry-run只验证argv/GPU env，外层shell偶然存在的变量成了隐藏
+运行输入。候选新增required `--ready-pose`，核canonical regular file与固定SHA后再显式传给child；missing、
+wrong SHA和symlink均在建root前拒绝。该失败root不resume、不复用。新的exact Pod test与连续ACK仍待完成，
+不把launcher host PASS写成GPU或学习证据，G06保持`Partial`。

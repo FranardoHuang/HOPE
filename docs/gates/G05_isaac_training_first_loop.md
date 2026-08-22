@@ -6611,3 +6611,11 @@ Isaac D05的球心arrival也从错误的face-centre改为`reference_site + R*bal
 ExactFace和MuJoCo确定性闭环一致。host Physical/Epoch/R06与question聚焦回归已通过，但exact Pod、真实
 device fault反例、profiler-off H48 wall和fresh连续ACK尚未完成；因此不能声称CUDA根因已由GPU反例完全
 证明，也不能声称达到性能目标，G05继续`Partial`。
+
+### 2026-08-22 空ActionEpoch热路候选（Gate仍`Partial`）
+
+无shot的Physical已是idle，但旧final-substep仍每control运行R03并让R07写三类空keyed事件。候选复用同一次
+host activity reduction，分别投影transport与keyed lifecycle：R03只看transport；R07 keyed写只看key；
+R07真实plant/readiness和Motion publication始终运行。它删除的是不存在的业务事件、full-grid tensor构造和
+同写者journal，不删除finite/joint/fall/table/contact边界，也不增加安全Gate。exact Pod回归和新的
+profiler-off H48 wall尚未完成，不能把静态减法写成秒数，G05保持`Partial`。

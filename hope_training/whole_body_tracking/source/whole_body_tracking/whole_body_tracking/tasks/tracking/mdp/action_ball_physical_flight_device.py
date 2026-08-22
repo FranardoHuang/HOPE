@@ -71,6 +71,15 @@ R06_FLIGHT_SETTLED_RETAINED = 3
 _ACTION_EPOCH_SUBSTEP_DENSE = "dense"
 _ACTION_EPOCH_SUBSTEP_IDLE = "idle"
 
+
+@dataclass(frozen=True)
+class ActionEpochHostActivityVerdict:
+    """One control-bound host view from the existing packed activity sync."""
+
+    control_step: int
+    transport_work: bool
+    keyed_epoch_work: bool
+
 RUNTIME_INTEGRATED = False
 CUDA_REVEAL_BOUNDARY_INTEGRATED = False
 ISAAC_POSTPHYSICS_VALIDATED = False
@@ -2473,7 +2482,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         shape = (self.num_envs, self.flight_capacity)
         self._fixed_flight_slot_grid = torch.arange(
             self.flight_capacity, dtype=torch.int64, device=self.device
-        ).unsqueeze(0).expand(shape)
+        ).unsqueeze(0).expand(shape).contiguous()
         self._lifecycle = torch.zeros(shape, dtype=torch.int8, device=self.device)
         self._generation = torch.full(shape, -1, dtype=torch.int64, device=self.device)
         self._outcome_sha = torch.zeros(shape + (TOKEN_BYTES,), dtype=torch.uint8, device=self.device)
@@ -2657,6 +2666,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         # pre/post boundary.
         self._action_epoch_host_activity_control_step: int | None = None
         self._action_epoch_host_activity_has_work = True
+        self._action_epoch_host_activity_has_keyed_work = True
         self._action_epoch_substep_pair: str | None = None
         self._action_epoch_empty_env_mask = torch.zeros(
             (self.num_envs,), dtype=torch.bool, device=self.device
@@ -3691,6 +3701,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         # verdict can therefore never leak into a later control step.
         self._action_epoch_host_activity_control_step = None
         self._action_epoch_host_activity_has_work = True
+        self._action_epoch_host_activity_has_keyed_work = True
         pending = self._action_epoch_pending_launch
         pending_rows = (
             self._action_epoch_empty_env_mask
@@ -3727,12 +3738,29 @@ class ActionBallPhysicalFlightDeviceOwner:
                 device=self.device,
             )
             scene_work = scene_activity.any(dim=1)
-        has_work = torch.any(physical_work | r06_work | scene_work)
-        # Pack activity plus all named fault classes into one scalar so this
-        # boundary retains exactly one device-to-host synchronization.
-        summary = has_work.to(torch.int64)
+        transport_work = torch.any(physical_work | r06_work | scene_work)
+        epoch_owner = self._action_epoch_owner
+        project_keyed = getattr(
+            epoch_owner, "project_keyed_postphysics_activity_mask", None
+        )
+        if not callable(project_keyed):
+            raise PhysicalEpochIntegrationHold(
+                "ActionEpoch keyed activity projection is absent"
+            )
+        keyed_rows = _tensor(
+            project_keyed(owner=self),
+            label="ActionEpoch keyed activity census",
+            shape=(self.num_envs, self._action_epoch_owner.shot_slot_capacity),
+            dtype=torch.bool,
+            device=self.device,
+        )
+        keyed_epoch_work = torch.any(keyed_rows)
+        # Pack both activity facts plus all named fault classes into the one
+        # existing scalar.  No second device-to-host synchronization is added.
+        summary = transport_work.to(torch.int64)
+        summary += keyed_epoch_work.to(torch.int64) * 2
         for ordinal, (bit, _name) in enumerate(
-            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=1
+            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
         ):
             present = torch.any(
                 torch.bitwise_and(
@@ -3744,7 +3772,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         fault_names = tuple(
             name
             for ordinal, (_bit, name) in enumerate(
-                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=1
+                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
             )
             if host_summary & (1 << ordinal)
         )
@@ -3755,7 +3783,27 @@ class ActionBallPhysicalFlightDeviceOwner:
             )
             raise PhysicalEpochIntegrationHold(self._poison_reason)
         self._action_epoch_host_activity_has_work = bool(host_summary & 1)
+        self._action_epoch_host_activity_has_keyed_work = bool(host_summary & 2)
         self._action_epoch_host_activity_control_step = next_control_step
+
+    def action_epoch_host_activity_verdict(
+        self, *, control_step: int
+    ) -> ActionEpochHostActivityVerdict:
+        """Return the already-synchronized facts for one exact control step."""
+
+        if type(control_step) is not int or control_step < 1:
+            raise PhysicalEpochIntegrationHold(
+                "Physical activity verdict control step differs"
+            )
+        if self._action_epoch_host_activity_control_step != control_step:
+            raise PhysicalEpochIntegrationHold(
+                "Physical activity verdict is absent, stale, or replayed"
+            )
+        return ActionEpochHostActivityVerdict(
+            control_step=control_step,
+            transport_work=self._action_epoch_host_activity_has_work,
+            keyed_epoch_work=self._action_epoch_host_activity_has_keyed_work,
+        )
 
     def _action_epoch_expected_control(
         self, *, require_control_boundary: bool
@@ -10325,6 +10373,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             )
             self._action_epoch_host_activity_control_step = None
             self._action_epoch_host_activity_has_work = True
+            self._action_epoch_host_activity_has_keyed_work = True
             self._host_reset_generation_projection_current = False
             self._advance_owner_mutation_version()
         except Exception as exc:
@@ -11592,6 +11641,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._reset_generation = predicted_reset_generations
             self._action_epoch_host_activity_control_step = None
             self._action_epoch_host_activity_has_work = True
+            self._action_epoch_host_activity_has_keyed_work = True
             self._advance_owner_mutation_version()
         except Exception as exc:
             self._poisoned = True
@@ -11616,6 +11666,7 @@ class ActionBallPhysicalFlightDeviceOwner:
 __all__ = [
     "AcknowledgedR06PhysicalSnapshot",
     "ActionEpochPhysicsFactAllocationProjection",
+    "ActionEpochHostActivityVerdict",
     "ActionEpochR06LaunchProjection",
     "ActionEpochR06PostPhysicsProjection",
     "ActionEpochSceneWriteProjection",

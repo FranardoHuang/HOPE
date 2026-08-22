@@ -115,6 +115,15 @@ def _physical_owner(device: torch.device, *, num_envs: int = 2):
         ),
         scene_port=scene,
     )
+    owner._action_epoch_owner = types.SimpleNamespace(
+        shot_slot_capacity=1,
+        project_keyed_postphysics_activity_mask=(
+            lambda *, owner: torch.zeros(
+                (num_envs, 1), dtype=torch.bool, device=device
+            )
+        ),
+        poison_owner_write=lambda *_args, **_kwargs: None,
+    )
     return owner, scene
 
 
@@ -206,6 +215,14 @@ class _EpochLaunchStub:
 
     def current(self):
         return self.record
+
+    def project_keyed_postphysics_activity_mask(self, *, owner):
+        assert owner is self.owner
+        return torch.ones(
+            (self.owner.num_envs, self.shot_slot_capacity),
+            dtype=torch.bool,
+            device=self.owner.device,
+        )
 
     def refresh_physical_launch_rows(self):
         view = self.owner.action_epoch_r06_launch_projection()
@@ -384,6 +401,62 @@ def test_r06_live_row_forces_dense_activity_when_physical_is_empty():
     assert owner._action_epoch_host_activity_has_work is True
 
 
+def test_host_activity_verdict_keeps_transport_and_keyed_facts_distinct():
+    idle, _scene = _physical_owner(torch.device("cpu"))
+    assert idle._fixed_flight_slot_grid.is_contiguous()
+    idle._r06_owner = types.SimpleNamespace(
+        flight_state=torch.zeros((2, 2), dtype=torch.int8)
+    )
+    idle.refresh_action_epoch_host_activity(next_control_step=1)
+    idle_verdict = idle.action_epoch_host_activity_verdict(control_step=1)
+    assert type(idle_verdict) is physical.ActionEpochHostActivityVerdict
+    assert idle_verdict.transport_work is False
+    assert idle_verdict.keyed_epoch_work is False
+
+    retired, _scene = _physical_owner(torch.device("cpu"))
+    retired._r06_owner = types.SimpleNamespace(
+        flight_state=torch.zeros((2, 2), dtype=torch.int8)
+    )
+    retired._action_epoch_owner = types.SimpleNamespace(
+        shot_slot_capacity=1,
+        project_keyed_postphysics_activity_mask=(
+            lambda *, owner: torch.ones((2, 1), dtype=torch.bool)
+        ),
+    )
+    retired.refresh_action_epoch_host_activity(next_control_step=1)
+    retired_verdict = retired.action_epoch_host_activity_verdict(control_step=1)
+    assert retired_verdict.transport_work is False
+    assert retired_verdict.keyed_epoch_work is True
+
+
+def test_keyed_activity_projection_failure_invalidates_cache_fail_dense():
+    owner, _scene = _physical_owner(torch.device("cpu"))
+    owner._r06_owner = types.SimpleNamespace(
+        flight_state=torch.zeros((2, 2), dtype=torch.int8)
+    )
+    owner.refresh_action_epoch_host_activity(next_control_step=1)
+    assert owner.action_epoch_host_activity_verdict(
+        control_step=1
+    ).transport_work is False
+    owner._last_postphysics_exact_stamp = (1, 0, 1, 1, 1)
+
+    def fail_projection(*, owner):
+        raise RuntimeError("keyed activity failure")
+
+    owner._action_epoch_owner.project_keyed_postphysics_activity_mask = (
+        fail_projection
+    )
+    with pytest.raises(RuntimeError, match="keyed activity failure"):
+        owner.refresh_action_epoch_host_activity(next_control_step=2)
+    assert owner._action_epoch_host_activity_control_step is None
+    assert owner._action_epoch_host_activity_has_work is True
+    assert owner._action_epoch_host_activity_has_keyed_work is True
+    with pytest.raises(
+        physical.PhysicalEpochIntegrationHold, match="absent, stale, or replayed"
+    ):
+        owner.action_epoch_host_activity_verdict(control_step=2)
+
+
 def test_activity_refresh_rejects_a_second_control_boundary_reduction():
     owner, _scene = _physical_owner(torch.device("cpu"))
     owner._r06_owner = types.SimpleNamespace(
@@ -519,6 +592,7 @@ def test_reset_restore_and_checkpoint_boundaries_invalidate_or_reject_idle_cache
     invalidation = (
         "self._action_epoch_host_activity_control_step = None",
         "self._action_epoch_host_activity_has_work = True",
+        "self._action_epoch_host_activity_has_keyed_work = True",
     )
     for method in (
         physical.ActionBallPhysicalFlightDeviceOwner.

@@ -1230,17 +1230,23 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     raise ActionBallFullMdpLeanRuntimeError(
                         "Physical activity refresh must return None"
                     )
+                read_activity = self._bound_plain_method(
+                    self._physical_ball,
+                    "action_epoch_host_activity_verdict",
+                )
+                activity = read_activity(control_step=step + 1)
                 # Fresh Racket compute deliberately never arms R03.  This is
                 # the sole callpoint, after the possible D05 epoch change, for
                 # genesis, ordinary not-due cadence and due reveal alike.
-                arm = self._bound_plain_method(
-                    self._racket,
-                    "arm_action_ball_full_mdp_epoch_strike_fact",
-                )
-                if arm() is not None:
-                    raise ActionBallFullMdpLeanRuntimeError(
-                        "Racket epoch strike-fact arm must return None"
+                if activity.transport_work:
+                    arm = self._bound_plain_method(
+                        self._racket,
+                        "arm_action_ball_full_mdp_epoch_strike_fact",
                     )
+                    if arm() is not None:
+                        raise ActionBallFullMdpLeanRuntimeError(
+                            "Racket epoch strike-fact arm must return None"
+                        )
                 if genesis:
                     self._genesis_after_command_completed = True
                 else:
@@ -1357,16 +1363,27 @@ class ActionBallFullMdpLeanRuntimeOwner:
                             "Physical post-physics publisher must return None"
                         )
                     if substep == count - 1:
-                        racket_publish = self._bound_plain_method(
-                            self._racket,
-                            "publish_action_ball_full_mdp_epoch_strike_fact",
+                        read_activity = self._bound_plain_method(
+                            self._physical_ball,
+                            "action_epoch_host_activity_verdict",
                         )
-                        if racket_publish(source_step=control) is not None:
-                            raise ActionBallFullMdpLeanRuntimeError(
-                                "Racket epoch strike-fact publisher must return None"
+                        activity = read_activity(control_step=control)
+                        if activity.transport_work:
+                            racket_publish = self._bound_plain_method(
+                                self._racket,
+                                "publish_action_ball_full_mdp_epoch_strike_fact",
                             )
+                            if racket_publish(source_step=control) is not None:
+                                raise ActionBallFullMdpLeanRuntimeError(
+                                    "Racket epoch strike-fact publisher must return None"
+                                )
+                        recovery_method = (
+                            "refresh_epoch_readiness_without_keyed_facts"
+                            if not activity.keyed_epoch_work
+                            else "publish_epoch_reward_facts"
+                        )
                         recovery_publish = self._bound_plain_method(
-                            self._r07_recovery, "publish_epoch_reward_facts"
+                            self._r07_recovery, recovery_method
                         )
                         source_step = torch.full(
                             (self._epoch.num_envs,),

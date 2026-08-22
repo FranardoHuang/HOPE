@@ -155,12 +155,21 @@ class _Racket:
 
 
 class _Physical:
-    def __init__(self, calls):
+    def __init__(self, calls, *, transport_work=True, keyed_epoch_work=True):
         self.calls = calls
+        self.transport_work = transport_work
+        self.keyed_epoch_work = keyed_epoch_work
 
     def refresh_action_epoch_host_activity(self, *, next_control_step):
         self.calls.append(("physical", next_control_step))
         return None
+
+    def action_epoch_host_activity_verdict(self, *, control_step):
+        return type("Activity", (), {
+            "control_step": control_step,
+            "transport_work": self.transport_work,
+            "keyed_epoch_work": self.keyed_epoch_work,
+        })()
 
 
 class _R06:
@@ -542,6 +551,26 @@ def test_after_command_orders_r05_then_racket_without_caller_rows():
         L.ActionBallFullMdpLeanRuntimeError, match="stale, skipped, or replayed"
     ):
         owner.after_command_compute_before_observation(1)
+
+
+@pytest.mark.parametrize("keyed_epoch_work", (False, True))
+def test_after_command_transport_idle_skips_r03_arm(keyed_epoch_work):
+    calls = []
+    physical = _Physical(
+        calls,
+        transport_work=False,
+        keyed_epoch_work=keyed_epoch_work,
+    )
+    owner, _epoch, _graph = _owner(
+        r05=_R05(calls),
+        racket=_Racket(calls),
+        physical=physical,
+    )
+    owner.after_command_compute_before_observation(0)
+    assert calls == ["r05", ("physical", 1)]
+    verdict = physical.action_epoch_host_activity_verdict(control_step=1)
+    assert verdict.transport_work is False
+    assert verdict.keyed_epoch_work is keyed_epoch_work
 
 
 def test_after_command_rejects_the_removed_r05_surface():

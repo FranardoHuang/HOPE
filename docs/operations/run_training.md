@@ -181,7 +181,9 @@ observation摘要作自证。缺字段、旧schema、hash mismatch、路径/iter
 host/Pod diagnostic。旧r3与两条Isaac H24 run均已停止，新V2只能fresh launch。
 
 portable MuJoCo Full-A的branch候选单次入口是`scripts/launch_mujoco_full_mdp_successor.py`。它只接受
-clean Git checkout、absent `/workspace/.../<namespace>`、canonical Python、显式GPU index/UUID与已有lock file；
+clean Git checkout、absent `/workspace/.../<namespace>`、canonical Python、显式GPU index/UUID与已有lock file，
+并要求[`--ready-pose`](../DEFINITIONS.md#mujoco-fullmdp-ready-pose)绑定一份canonical regular file；launcher在建run root前核固定SHA
+`ab6b7e41...8d38069`，再把同一路径显式写入child的`ACTIONBALL_READY_POSE`环境，而不是依赖启动shell的隐式状态；
 dry-run只打印固定H48 argv/env，不查GPU或建run root。真实模式持lock覆盖唯一child lifetime，等待自然rc并
 原样返回；child的cwd固定为fresh run root，使`MUJOCO_LOG.TXT`等底层fallback产物不能污染source checkout；
 没有monitor、retry、resume、signal或`ACCEPT`门。Pod1 clean detached `2e4279ba`已用真实venv

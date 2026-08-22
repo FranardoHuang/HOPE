@@ -624,6 +624,8 @@ class _Physical:
         self.trace = trace
         self.fail_publish = False
         self.mutate_clock = False
+        self.transport_work = True
+        self.keyed_epoch_work = True
 
     def launch_action_epoch(self):
         self.trace.append(("physical_launch",))
@@ -632,6 +634,13 @@ class _Physical:
     def refresh_action_epoch_host_activity(self, *, next_control_step):
         self.trace.append(("physical_refresh", next_control_step))
         return None
+
+    def action_epoch_host_activity_verdict(self, *, control_step):
+        return type("Activity", (), {
+            "control_step": control_step,
+            "transport_work": self.transport_work,
+            "keyed_epoch_work": self.keyed_epoch_work,
+        })()
 
     def publish_action_epoch_post_physics(self, stamp):
         self.trace.append(("physical_publish", stamp.exact_tuple()))
@@ -659,6 +668,14 @@ class _R07:
     def publish_epoch_reward_facts(self, *, current_source_step):
         self.trace.append(
             ("r07_publish", tuple(current_source_step.shape))
+        )
+        return None
+
+    def refresh_epoch_readiness_without_keyed_facts(
+        self, *, current_source_step
+    ):
+        self.trace.append(
+            ("r07_readiness_only", tuple(current_source_step.shape))
         )
         return None
 
@@ -930,7 +947,9 @@ class _EventManager:
         raise AssertionError("no interval event is configured")
 
 
-def _fake_env(*, rendering=False, decimation=3):
+def _fake_env(
+    *, rendering=False, decimation=3, transport_work=True, keyed_epoch_work=True
+):
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
     trace = []
     count = 2
@@ -974,6 +993,10 @@ def _fake_env(*, rendering=False, decimation=3):
         owner.after_command_compute_before_observation
     )
     env._full_mdp_selected_true_reset = owner.selected_true_reset
+    physical.transport_work = transport_work
+    physical.keyed_epoch_work = keyed_epoch_work
+    owner.after_command_compute_before_observation(0)
+    trace.clear()
     return env, owner, physical, trace
 
 
@@ -1010,6 +1033,54 @@ def test_render_path_preserves_exact_lean_physics_parity_without_rng_use():
     assert plain.episode_length_buf.tolist() == [1, 1]
     assert rendered.episode_length_buf.tolist() == [1, 1]
     assert len(plain_result) == len(rendered_result) == 5
+
+
+def test_global_idle_without_key_skips_r03_and_r07_keyed_writes_only():
+    env, _owner, _physical, trace = _fake_env(
+        decimation=2,
+        transport_work=False,
+        keyed_epoch_work=False,
+    )
+    env.step(torch.zeros(2, 4))
+    names = [row[0] for row in trace]
+    assert "racket_arm" not in names
+    assert "racket_publish" not in names
+    assert "r07_publish" not in names
+    assert names.count("r07_readiness_only") == 1
+    assert names.count("r07_ready") == 1
+    assert names.count("motion_ready") == 1
+    assert names.count("physical_publish") == 2
+
+
+def test_transport_idle_keyed_epoch_keeps_full_r07_publication():
+    env, _owner, _physical, trace = _fake_env(
+        decimation=2,
+        transport_work=False,
+        keyed_epoch_work=True,
+    )
+    env.step(torch.zeros(2, 4))
+    names = [row[0] for row in trace]
+    assert "racket_arm" not in names
+    assert "racket_publish" not in names
+    assert names.count("r07_publish") == 1
+    assert "r07_readiness_only" not in names
+    assert names.count("r07_ready") == 1
+    assert names.count("motion_ready") == 1
+
+
+def test_transport_work_without_key_keeps_r03_but_skips_r07_keyed_writes():
+    env, _owner, _physical, trace = _fake_env(
+        decimation=2,
+        transport_work=True,
+        keyed_epoch_work=False,
+    )
+    env.step(torch.zeros(2, 4))
+    names = [row[0] for row in trace]
+    assert names.count("racket_publish") == 1
+    assert "r07_publish" not in names
+    assert names.count("r07_readiness_only") == 1
+    assert names.count("r07_ready") == 1
+    assert names.count("motion_ready") == 1
 
 
 @pytest.mark.parametrize(

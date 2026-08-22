@@ -177,6 +177,22 @@ def _publish_epoch_reward_facts(
     )
 
 
+def _refresh_epoch_readiness_without_keyed_facts(
+    bundle,
+    motion,
+    *,
+    cadence_tick: int,
+    current_source_step: torch.Tensor,
+):
+    """Refresh bootstrap readiness without an ActionEpoch fact publication."""
+
+    assert type(cadence_tick) is int
+    motion._action_ball_continuous_episode_step.fill_(cadence_tick)
+    return bundle.refresh_epoch_readiness_without_keyed_facts(
+        current_source_step=current_source_step
+    )
+
+
 def _rowwise_settled_subject(
     monkeypatch,
     *,
@@ -645,7 +661,19 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     bundle = _construct_bundle(
         env=env, motion=motion, action_epoch_owner=epoch_owner
     )
-    first = _publish_epoch_reward_facts(
+    commit_head = epoch_owner.commit_head
+
+    def reject_keyed_write(*_args, **_kwargs):
+        raise AssertionError("bootstrap readiness reached a keyed epoch write")
+
+    monkeypatch.setattr(
+        epoch_owner, "merge_runtime_owner_fault", reject_keyed_write
+    )
+    monkeypatch.setattr(epoch_owner, "publish_owner_facts", reject_keyed_write)
+    monkeypatch.setattr(
+        epoch_owner, "publish_r07_first_ready", reject_keyed_write
+    )
+    first = _refresh_epoch_readiness_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=0,
@@ -662,6 +690,7 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert first_view.ready_streak.tolist() == [1, 1]
     assert first_view.required_dwell == 2
     assert first_view.control_tick.tolist() == [1, 1]
+    assert epoch_owner.commit_head == commit_head
     # Genesis has no action row that could own reward facts.  Bootstrap
     # readiness therefore advances only the R07 owner-private dwell state.
     record = epoch_owner.current()
@@ -670,7 +699,7 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert record.owner_fault_bits[:, :, owner_slot].eq(0).all()
 
     env.common_step_counter = 1
-    second = _publish_epoch_reward_facts(
+    second = _refresh_epoch_readiness_without_keyed_facts(
         bundle,
         motion,
         cadence_tick=1,
@@ -687,6 +716,7 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert second_view.required_dwell == 2
     assert second_view.control_tick.tolist() == [2, 2]
     assert bundle.owner._action_epoch_ready_streak.tolist() == [2, 2]
+    assert epoch_owner.commit_head == commit_head
     # Bootstrap readiness authorizes the next Motion reveal but has no current
     # full shot key, so it must not poison ActionEpoch by publishing keyed R07
     # telemetry against the neutral genesis rows.

@@ -606,6 +606,29 @@ class DiagnosticN2ContinuousRecoveryBundle:
     def publish_epoch_reward_facts(
         self, *, current_source_step: torch.Tensor
     ) -> "R07EpochDirectRewardFacts":
+        """Publish R07 readiness and keyed facts for an active ActionEpoch."""
+
+        return self._publish_epoch_reward_facts(
+            current_source_step=current_source_step,
+            publish_keyed_action_epoch=True,
+        )
+
+    def refresh_epoch_readiness_without_keyed_facts(
+        self, *, current_source_step: torch.Tensor
+    ) -> "R07EpochDirectRewardFacts":
+        """Refresh bootstrap readiness without inventing a keyed shot event."""
+
+        return self._publish_epoch_reward_facts(
+            current_source_step=current_source_step,
+            publish_keyed_action_epoch=False,
+        )
+
+    def _publish_epoch_reward_facts(
+        self,
+        *,
+        current_source_step: torch.Tensor,
+        publish_keyed_action_epoch: bool,
+    ) -> "R07EpochDirectRewardFacts":
         """Publish one real post-physics R07 fact group into ActionEpoch.
 
         The live adapter and Motion reference are construction-owned.  The
@@ -613,6 +636,10 @@ class DiagnosticN2ContinuousRecoveryBundle:
         checked as chronology and cannot authorize validity or reward.
         """
 
+        if type(publish_keyed_action_epoch) is not bool:
+            raise ContinuousRecoveryDeviceError(
+                "R07 keyed publication mode differs"
+            )
         owner = self._require_bound_owner()
         epoch_owner = self.action_epoch_owner
         step = owner._tensor(
@@ -621,7 +648,6 @@ class DiagnosticN2ContinuousRecoveryBundle:
             shape=(owner.num_envs,),
             dtype=torch.int64,
         )
-        epoch_snapshot = epoch_owner.current()
         method_name = "project_action_ball_full_mdp_recovery_ready_reference"
         project_reference = getattr(self.motion_owner, method_name, None)
         exact_method = _exact_motion_reference_producer_definition(
@@ -635,6 +661,8 @@ class DiagnosticN2ContinuousRecoveryBundle:
             raise ContinuousRecoveryDeviceError(
                 "R07 Motion ready-reference producer identity differs"
             )
+
+        epoch_snapshot = epoch_owner.current()
         reference = project_reference(action_epoch_snapshot=epoch_snapshot)
         facts = self.plant_fact_adapter.read()
         result = owner.action_epoch_reward_view(
@@ -652,6 +680,41 @@ class DiagnosticN2ContinuousRecoveryBundle:
         owner._require_r07_business_mutation_allowed(
             label="ActionEpoch post-physics readiness"
         )
+
+        if publish_keyed_action_epoch:
+            self._publish_keyed_epoch_reward_facts(
+                owner=owner,
+                epoch_owner=epoch_owner,
+                epoch_snapshot=epoch_snapshot,
+                result=result,
+            )
+        n = owner.num_envs
+        try:
+            reference_shot_key = _row_identity.require_action_epoch_shot_key(
+                getattr(reference, "shot_key", None),
+                shape=(n,),
+                device=owner.device,
+                label="R07 Motion reference shot_key",
+            ).clone()
+        except _row_identity.ActionEpochShotKeyError as exc:
+            raise ContinuousRecoveryDeviceError(str(exc)) from exc
+        owner._publish_action_epoch_motion_readiness(
+            result,
+            observed_source_step=self.plant_fact_adapter.last_source_step,
+            shot_key=reference_shot_key,
+            publish_keyed_first_ready=publish_keyed_action_epoch,
+        )
+        return result
+
+    def _publish_keyed_epoch_reward_facts(
+        self,
+        *,
+        owner: "ContinuousRecoveryDeviceCoordinator",
+        epoch_owner: object,
+        epoch_snapshot: object,
+        result: "R07EpochDirectRewardFacts",
+    ) -> None:
+        """Publish only the keyed ActionEpoch planes for a real shot."""
 
         n = owner.num_envs
         s = epoch_owner.shot_slot_capacity
@@ -789,21 +852,6 @@ class DiagnosticN2ContinuousRecoveryBundle:
             source_step=source_step,
             values=values,
         )
-        try:
-            reference_shot_key = _row_identity.require_action_epoch_shot_key(
-                getattr(reference, "shot_key", None),
-                shape=(n,),
-                device=owner.device,
-                label="R07 Motion reference shot_key",
-            ).clone()
-        except _row_identity.ActionEpochShotKeyError as exc:
-            raise ContinuousRecoveryDeviceError(str(exc)) from exc
-        owner._publish_action_epoch_motion_readiness(
-            result,
-            observed_source_step=self.plant_fact_adapter.last_source_step,
-            shot_key=reference_shot_key,
-        )
-        return result
 
 
 @dataclass(frozen=True)
@@ -3667,9 +3715,14 @@ class ContinuousRecoveryDeviceCoordinator:
         *,
         observed_source_step: object,
         shot_key: _row_identity.ActionEpochShotKey,
+        publish_keyed_first_ready: bool = True,
     ) -> None:
         """Commit lean dwell state and mint only the next-tick Motion view."""
 
+        if type(publish_keyed_first_ready) is not bool:
+            raise ContinuousRecoveryDeviceError(
+                "R07 keyed first-ready publication mode differs"
+            )
         self._require_r07_business_mutation_allowed(
             label="ActionEpoch post-physics readiness"
         )
@@ -3801,12 +3854,13 @@ class ContinuousRecoveryDeviceCoordinator:
         epoch_first_ready = first_ready & result.reference_kind.eq(
             R07_REFERENCE_COMPLETED_ACTION_FRAME0
         )
-        bundle.action_epoch_owner.publish_r07_first_ready(
-            owner=bundle,
-            first_ready=epoch_first_ready,
-            shot_key=key,
-            source_step=self._action_epoch_first_ready_source_step,
-        )
+        if publish_keyed_first_ready:
+            bundle.action_epoch_owner.publish_r07_first_ready(
+                owner=bundle,
+                first_ready=epoch_first_ready,
+                shot_key=key,
+                source_step=self._action_epoch_first_ready_source_step,
+            )
 
         motion_ready_payload = _MotionReadyPayload(
             owner_identity=self._identity,

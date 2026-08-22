@@ -295,3 +295,14 @@ legacy WAIT不绑定，checkpoint/resume authority仍false。完整合同与未�
 MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，runtime资产与调用见
 [`setup_local_sync`](setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)，
 其余训练操作边界见[训练工序](run_training.md)。
+
+## 2026-08-22 dd82之后的执行TODO
+
+- [x] 保留`dd82bb7b` Isaac fresh只读运行，确认连续finite ACK、fault/CENSOR为0；早期episode尚未到tick295时，
+  mimic/strike/landing按零分母记`未测`。
+- [x] 封存MuJoCo首次fresh自然RC1 root；根因为launcher遗漏显式ready-pose输入，不复用namespace。
+- [x] 把ready pose变成required CLI + fixed-SHA child binding；host launcher `15 passed`。
+- [x] 实现同一D2H内transport/keyed双activity事实；空业务跳R03与R07 keyed写，但保留R07 readiness/Motion。
+- [ ] exact Pod运行fast-path、retired反例、R07 no-key与launcher focused tests。
+- [ ] fresh GPU profile/ACK确认真实wall；只有证据优于`dd82bb7b`才精确停止并替换Isaac。
+- [ ] 以新的clean detached commit和fresh namespace启动MuJoCo，至少核连续ACK0--4、finite与fault0。
