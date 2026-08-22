@@ -665,7 +665,7 @@ def test_completed_action_epoch_cannot_be_spliced_across_env_rows():
     assert not env._full_a_completed_action_epoch(retired).any()
 
 
-def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise():
+def test_host_full_a_reveal_launch_r03_one_shot_and_selected_clear_are_rowwise():
     env = _host_full_a_lifecycle_env()
     reveal, launch, due, deferred = (
         wait_env.FullMdpInitialWaitVecEnv._full_a_prepare_step(env)
@@ -708,20 +708,44 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
     present, physically_valid = env._full_a_publish_r03_fact()
     assert not present.any() and not physically_valid.any()
     env.common_step_counter = 3
+    # Row one loses the physical-launch phase exactly at strike time.  It must
+    # not publish on this tick or catch up after its phase is repaired.
+    env._epoch_phase[1] = wait_env.FULL_A_PHASE_REVEAL_COMMITTED
     present, physically_valid = env._full_a_publish_r03_fact()
-    assert present.all() and physically_valid.all()
+    assert torch.equal(present, torch.tensor([True, False]))
+    assert torch.equal(physically_valid, torch.tensor([True, False]))
+    assert torch.equal(env._full_a_r03_present, present)
     assert torch.equal(
         env._full_a_owner_valid_bits[:, 1],
-        torch.full((2,), 3, dtype=torch.long),
+        torch.tensor([3, 0], dtype=torch.long),
     )
     assert torch.equal(
-        env._full_a_r03_fact_f32[:, 15:18],
-        env.sim.data.site_xpos[:, 0],
+        env._full_a_r03_fact_f32[0, 15:18],
+        env.sim.data.site_xpos[0, 0],
     )
     assert torch.equal(
         env._full_a_r03_fact_f32[:, 21:24],
-        torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]]),
+        torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]),
     )
+    captured_fact = env._full_a_r03_fact_f32.clone()
+    captured_valid = env._full_a_owner_valid_bits[:, 1].clone()
+    captured_source = env._full_a_owner_source_step[:, 1].clone()
+    assert torch.equal(captured_source, torch.tensor([3, -1]))
+    assert not env._full_a_r03_armed.any()
+    assert torch.equal(
+        env._full_a_r03_expected_source_step, torch.tensor([-1, -1])
+    )
+
+    env._epoch_phase[1] = wait_env.FULL_A_PHASE_LAUNCH_SETTLED
+    env.sim.data.site_xpos[:, 0] += 100.0
+    env.common_step_counter = 4
+    present, physically_valid = env._full_a_publish_r03_fact()
+    assert not present.any() and not physically_valid.any()
+    assert not env._full_a_r03_present.any()
+    assert env._epoch_task_valid.all()
+    assert torch.equal(env._full_a_r03_fact_f32, captured_fact)
+    assert torch.equal(env._full_a_owner_valid_bits[:, 1], captured_valid)
+    assert torch.equal(env._full_a_owner_source_step[:, 1], captured_source)
 
     env.sim.data.qpos[:, env.b_q : env.b_q + 3] += torch.tensor(
         [[-0.06, 0.01, -0.02], [-0.04, -0.01, 0.03]]
@@ -814,6 +838,13 @@ def test_host_full_a_reveal_launch_physical_fact_and_selected_clear_are_rowwise(
     assert env._full_a_recovery_eligible_count[0] == 0
     assert env._full_a_recovery_last_age[0] == -1
     assert not env._full_a_recovery_sticky_fault[0]
+    assert env._full_a_owner_valid_bits[0, 1] == 0
+    assert env._full_a_owner_source_step[0, 1] == -1
+    assert torch.count_nonzero(env._full_a_r03_fact_f32[0]) == 0
+    assert not env._full_a_r03_present[0]
+    assert not env._full_a_r03_physically_valid[0]
+    assert not env._full_a_r03_armed[0]
+    assert env._full_a_r03_expected_source_step[0] == -1
     for name, expected in peer.items():
         assert torch.equal(getattr(env, name)[1], expected), name
 

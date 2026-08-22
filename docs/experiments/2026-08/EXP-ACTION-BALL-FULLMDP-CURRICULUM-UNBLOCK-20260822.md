@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822
 
-> 问题：为什么两条 [FullMDP](../../DEFINITIONS.md#fullmdp-ppo-v2) H48 长跑已经学会站立，却没有进入可学习的 mimic/击球链；怎样用最少状态和单一真源修复后 fresh 重启？
+> 问题：为什么两条 [FullMDP](../../DEFINITIONS.md#fullmdp-ppo-v3) H48 长跑已经学会站立，却没有进入可学习的 mimic/击球链；怎样用最少状态和单一真源修复后 fresh 重启？
 >
 > 人类负责人：Franco
 > 执行者：Codex
@@ -42,8 +42,9 @@
   恢复大误差区梯度，不用放宽阈值掩盖错 target。
 - R07 保留 recovery Reward、critic plant state和可读 telemetry，但退出 fresh reveal、训练 liveness 与
   actor phase authority。nonfinite/overflow、joint envelope、跌倒/过低、真实桌碰等 plant fail-stop不变。
-- PPO 保持 H48、GAE lambda `.98`、E5/MB8、fresh `sigma=.02`、log-std、entropy `.01`、adaptive KL；
-  没有 actual-KL 证据前不叠加 std decay、clamp 或 LR 改动。
+- **HISTORICAL / SUPERSEDED by §7：**当时保留了H48、GAE lambda `.98`、E5/MB8、fresh
+  `sigma=.02`、log-std、entropy `.01`、adaptive KL；后续真实checkpoint已证明永久entropy使std无界上升，
+  当前V3改为`entropy=0`，仍不叠加std decay、clamp或LR改动。
 - 不新增 actor observation。现有 203-D 已包含可部署的 root/velocity、teacher、task residual、phase 与倒计时；
   R07 误差重复喂给 actor只会扩大合同并制造 shortcut。
 
@@ -298,3 +299,50 @@ present/physically-valid=`174/174`。Isaac recent10 collection中位`8.238 s/H48
   只按新profile或明确恢复需求独立实现。
 - **拒绝：**C++优先重写、缩H48、减少MuJoCo 20个contact substep、热补现役run或增加stage/safety gate。
   这些要么没有当前因果证据，要么改变训练/接触问题。
+
+## 7. 2026-08-23 R03 exact-strike与PPO探索修复
+
+### 7.1 当前V2不是“再多等一些step”
+
+- Isaac现役源码在R03 arm时要求`REVEAL_COMMITTED`，但exact-strike one-shot只会在真实发射后出现；因此
+  production chronology下R03不可能发布。MuJoCo又用`expected_step <= current_step`反复重采当前FK，既不是
+  exact问题，也没有保留首次回答。两处是实现错误，不是balance→mimic→hit→landing课程设计错误。
+- MuJoCo V2的learned `log_std[31]`没有decay/clamp；永久`entropy_coef=.01`对每维每minibatch施加固定
+  `-.01` loss梯度。真实checkpoint的post-update mean std从update0的`.020076`升到update500的`.094639`、
+  update1000的`.216543`、update2000的`.481180`和update2500的`1.148104`；现役只读刷新已超过`2.8`。
+  这与任务质量无关，并已破坏balance，所以现役V2不得resume。
+
+### 7.2 adopt / defer / reject
+
+采用：
+
+- Isaac只在`LAUNCH_SETTLED && exact-one-shot`时冻结R03问题；publish只核冻结的identity/source，即使同一
+  post-physics tick随后真实进入OUTCOME也不得重新按phase拦截。MuJoCo同样只接受
+  `armed && expected_step == current_step && LAUNCH_SETTLED`，exact tick一次采样；event下一tick归零，owner
+  fact/valid/source保持到task reset。wrong phase或错过exact tick都不补发。
+- PPO V3只把FullMDP typed recipe的`entropy_coef`从`.01`改为`0`。learned std仍由真实advantage更新，
+  adaptive KL仍约束actor mean/std总变化；H48、lambda `.98`、E5/MB8、LR与fresh sigma `.02`不变。
+- MuJoCo launcher把Warp kernel cache绑定到fresh `<run-root>/warp_cache`，只解决已由Warp 1.16.0源码确认的
+  root-cache写入路径；它不是新Gate，也不冒充Isaac的Omniverse/Triton root-cache问题已关闭。
+
+延后：
+
+- actual-KL统计只可作为optimizer摘要；本轮不做promotion Gate。若fresh 20-update仍出现同量级的各维std
+  一致上涨，再定位surrogate机制，届时才讨论上限。
+- R03 sticky fact是否只在event当tick计Reward、219→216 critic ABI、两后端单一巨型状态与CUDA Graph均不
+  混入本轮实现修复。
+
+拒绝：
+
+- 不增加phase owner、receipt、poison gate、entropy decay状态机或std clamp；不在publish时二次检查phase。
+- 不把真实contact、R07 readiness或rollout成功作为R03许可；它们会重新制造“先学会下游才开放上游”的环。
+- 不热补现役V2进程、不复用namespace、不从已膨胀std的checkpoint resume。
+
+### 7.3 实现与验收状态
+
+- Isaac/MuJoCo都增加production chronology正例与IDLE/REVEAL/OUTCOME/RETIRED、wrong-phase/no-catch-up、
+  one-shot/sticky/reset反例；另覆盖LAUNCH时arm后经真实R06进入OUTCOME仍可publish，防止错误phase gate回归。
+- launcher dry-run不得创建root，real root预建0700 cache且ambient `WARP_CACHE_PATH`不得泄漏。
+- 当前仍在跑的`aa42418b`两条V2 lineage只保留历史诊断意义；本节代码必须在exact Pod聚焦回归通过后，
+  以新commit、新namespace、fresh sigma `.02`重启。successor可用前不触碰旧进程；阶段报告继续逐项写
+  balance、mimic、launch/contact、landing的numerator/denominator，零分母为`未测`。

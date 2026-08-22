@@ -921,12 +921,16 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         return position - origins, velocity, normal
 
     def _full_a_publish_r03_fact(self):
-        """Publish the armed question against one real post-physics racket FK."""
+        """Publish one exact-strike FK and retain it until task reset."""
 
-        due = self._full_a_r03_armed & (
-            self._full_a_r03_expected_source_step
-            <= int(self.common_step_counter)
+        step = int(self.common_step_counter)
+        exact = self._full_a_r03_armed & (
+            self._full_a_r03_expected_source_step == step
         )
+        # LAUNCH_SETTLED is the lifecycle authority.  ``task_valid`` and
+        # ``launch_succeeded`` are written by the same transition, so checking
+        # them again here would only add a same-source, always-agreeing gate.
+        due = exact & self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
         position, velocity, normal = self._full_a_racket_kinematics()
         achieved_finite = (
             self._torch.isfinite(position).all(dim=1)
@@ -935,42 +939,47 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         )
         safe = due & achieved_finite
         fact = self._full_a_r03_fact_f32
-        zero = self._torch.zeros_like(position)
-        fact[:, 15:18] = self._torch.where(safe[:, None], position, zero)
-        fact[:, 18:21] = self._torch.where(safe[:, None], velocity, zero)
-        fact[:, 21:24] = self._torch.where(safe[:, None], normal, zero)
+        fact[:, 15:18] = self._torch.where(
+            safe[:, None], position, fact[:, 15:18]
+        )
+        fact[:, 18:21] = self._torch.where(
+            safe[:, None], velocity, fact[:, 18:21]
+        )
+        fact[:, 21:24] = self._torch.where(
+            safe[:, None], normal, fact[:, 21:24]
+        )
         bits = (
             safe.to(self._torch.long) * portable_reward.R03_PRESENT
             + (safe & self._full_a_r03_physically_valid).to(self._torch.long)
             * portable_reward.R03_PHYSICALLY_VALID
         )
-        self._full_a_owner_valid_bits[:, 1] = bits
-        self._full_a_owner_fault_bits[:, 1] = (
-            due & ~achieved_finite
-        ).to(self._torch.long)
+        self._full_a_owner_valid_bits[:, 1] = self._torch.where(
+            due, bits, self._full_a_owner_valid_bits[:, 1]
+        )
+        self._full_a_owner_fault_bits[:, 1] = self._torch.where(
+            due,
+            (due & ~achieved_finite).to(self._torch.long),
+            self._full_a_owner_fault_bits[:, 1],
+        )
         self._full_a_owner_source_step[:, 1] = self._torch.where(
-            safe,
-            self._torch.full_like(
-                self._full_a_r03_expected_source_step,
-                int(self.common_step_counter),
+            due,
+            self._torch.where(
+                safe,
+                self._torch.full_like(
+                    self._full_a_r03_expected_source_step, step
+                ),
+                self._torch.full_like(
+                    self._full_a_r03_expected_source_step, -1
+                ),
             ),
-            self._torch.full_like(self._full_a_r03_expected_source_step, -1),
+            self._full_a_owner_source_step[:, 1],
         )
         self._full_a_r03_present.copy_(safe)
-        # The current task remains armed for every next transition until its
-        # selected reset, matching the Isaac Racket command tail rather than
-        # freezing one early FK sample for the whole shot.
-        self._full_a_r03_armed.copy_(self._epoch_task_valid)
-        self._full_a_r03_expected_source_step.copy_(
-            self._torch.where(
-                self._epoch_task_valid,
-                self._torch.full_like(
-                    self._full_a_r03_expected_source_step,
-                    int(self.common_step_counter) + 1,
-                ),
-                self._torch.full_like(self._full_a_r03_expected_source_step, -1),
-            )
+        consumed = self._full_a_r03_armed & (
+            self._full_a_r03_expected_source_step <= step
         )
+        self._full_a_r03_armed.logical_and_(~consumed)
+        self._full_a_r03_expected_source_step.masked_fill_(consumed, -1)
         return safe, safe & self._full_a_r03_physically_valid
 
     def _full_a_publish_physical_fact(self) -> None:

@@ -68,11 +68,17 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   instrumented build或ASan（AddressSanitizer，地址越界检测器）。tracked patch/build receipt只证明
   supply chain，不证明24-fail/48-pass、physics parity或训练授权。
 
-- <a id="fullmdp-ppo-v2"></a>**`action_ball_full_mdp_ppo_v2` / FullMDP统一PPO配方**：Isaac与
+- <a id="fullmdp-ppo-v3"></a>**`action_ball_full_mdp_ppo_v3` / FullMDP统一PPO V3配方**：Isaac与
   MuJoCo Full-A共同读取的typed recipe：`H=48`、总更新`12,500`、`save_interval=500`、每次
   optimizer做`5`个learning epoch和`8`个minibatch、`gamma=0.99`、GAE
-  `lambda=0.98`、`empirical_normalization=false`。学习配方hash不含总预算/保存频率，完整执行hash
+  `lambda=0.98`、fresh `init_noise_std=0.02`、learned `log_std`、`entropy_coef=0`、
+  `empirical_normalization=false`。V2的永久`entropy_coef=.01`会在每个minibatch给每个`log_std`施加
+  与任务质量无关的固定上推梯度；现役V2 MuJoCo从`.02`涨到大于`1`后已破坏balance，因此V3直接删除这项
+  无条件噪声奖励，不增加iteration/phase schedule、clamp或新Gate。学习配方hash不含总预算/保存频率，完整执行hash
   另含二者；详细值以typed recipe为准。`H=48`是算法取舍和当前合同，不是“每update 6秒”的性能承诺。
+- <a id="fullmdp-ppo-v2"></a>**`action_ball_full_mdp_ppo_v2` / FullMDP统一PPO V2历史配方**：与V3的
+  H48、预算、GAE和optimizer分组相同，但使用永久`entropy_coef=.01`；已由V3取代，只用于解释历史run，
+  不得resume或作为当前学习证据。
 - <a id="fullmdp-semantic-observation-v2"></a>**FullMDP semantic Observation V2 / FullMDP语义观测V2**：
   `action_ball_full_mdp_semantic_actor_v2`为203维actor，
   `action_ball_full_mdp_semantic_critic_v2`为219维critic；逐字段静态scale属于ABI，关闭经验归一化。

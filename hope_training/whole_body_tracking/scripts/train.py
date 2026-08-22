@@ -16121,7 +16121,7 @@ def _apply_action_ball_full_mdp_ppo_recipe(
     if not requested:
         return None
     if not isinstance(algo, dict):
-        raise _OverrideError("FullMDP PPO V2 requires cfg.algo to be a mapping")
+        raise _OverrideError("FullMDP PPO V3 requires cfg.algo to be a mapping")
     recipe = (
         _action_ball_full_mdp_ppo_recipe_module()
         .ACTION_BALL_FULL_MDP_PPO_RECIPE
@@ -16167,7 +16167,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
             )
         if root_iterations != recipe.max_iterations:
             raise _OverrideError(
-                "FullMDP PPO V2 max_iterations is code-owned at "
+                "FullMDP PPO V3 max_iterations is code-owned at "
                 f"{recipe.max_iterations}; got root max_iterations="
                 f"{root_iterations}"
             )
@@ -16188,7 +16188,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
             conflicts.append(key)
     if conflicts:
         raise _OverrideError(
-            "FullMDP PPO V2 has one typed recipe; nested Hydra PPO overrides "
+            "FullMDP PPO V3 has one typed recipe; nested Hydra PPO overrides "
             "would be silently replaced: " + ",".join(sorted(set(conflicts)))
         )
 
@@ -20365,7 +20365,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
             != action_ball_full_mdp_ppo_recipe.max_iterations
         ):
             raise _OverrideError(
-                "FullMDP PPO V2 max_iterations is code-owned at "
+                "FullMDP PPO V3 max_iterations is code-owned at "
                 f"{action_ball_full_mdp_ppo_recipe.max_iterations}; got "
                 f"root max_iterations={requested_iterations}"
             )

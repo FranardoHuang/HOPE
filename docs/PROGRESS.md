@@ -1,5 +1,17 @@
 # 简短进度记录
 
+## 2026-08-23 — R03 exact-strike与FullMDP PPO V3修复（branch candidate）
+
+- 定位为实现错误而非课程设计错误：Isaac在REVEAL phase等待只会在launch后产生的exact bit，R03不可达；
+  MuJoCo则用`<=`逐tick重采FK。两端现统一为LAUNCH exact tick一次event、task内sticky fact，wrong phase与
+  missed tick不补写；保留identity/source/nonfinite独立完整性边界，删除同writer重复gate，不新增stage/owner。
+- V2 MuJoCo的permanent entropy `.01`把learned mean std从`.02`推到update2500 post-update `1.148`且现役
+  已超过`2.8`。FullMDP-only PPO V3改为`entropy_coef=0`，其余H48/lambda `.98`/E5/MB8/LR/fresh sigma
+  `.02`保持；拒绝resume、entropy decay状态机与std clamp。
+- MuJoCo one-shot launcher把Warp cache绑定到fresh run root，避免继续写已满的用户根盘；该位置隔离不是
+  training/safety Gate。exact Pod聚焦回归与新commit、新namespace fresh双run仍待本轮写回，G05/G06保持
+  `Partial`、`diagnostic_unauthorized=true`。
+
 ## 2026-08-22 — no-key ContactSensor主墙删除与`aa42418b`双fresh（branch candidate）
 
 - 细分profile把Isaac旧`14.194 s/H48`主墙定位为无shot/key阶段读取两脚ContactSensor，单update约

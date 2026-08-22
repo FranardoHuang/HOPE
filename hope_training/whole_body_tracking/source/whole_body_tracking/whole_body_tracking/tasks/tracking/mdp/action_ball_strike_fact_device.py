@@ -877,9 +877,9 @@ class ActionBallStrikeFactDeviceCoordinator:
     ) -> None:
         """Arm from the bound epoch and Racket's independent integer state.
 
-        Eligibility is the intersection of current epoch phase/task slot and
-        the exact one-shot bit from the cold-bound Racket producer.  It is a
-        causal fact, not a caller verdict.  This lean path never reads or
+        Eligibility is the intersection of the launched epoch phase/task slot
+        and the exact one-shot bit from the cold-bound Racket producer.  It is
+        a causal fact, not a caller verdict.  This lean path never reads or
         manufactures the legacy birth/sample/task SHA fields.
         """
 
@@ -921,7 +921,7 @@ class ActionBallStrikeFactDeviceCoordinator:
             "bound_racket.exact_strike_eligible",
         )
         eligible = (
-            selected(epoch.phase).eq(epoch_module.PHASE_REVEAL_COMMITTED)
+            selected(epoch.phase).eq(epoch_module.PHASE_LAUNCH_SETTLED)
             & exact
         )
         identity_fault = eligible & (

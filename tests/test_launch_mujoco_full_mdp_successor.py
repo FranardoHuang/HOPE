@@ -86,13 +86,16 @@ try:
 finally:
     os.close(fd)
 names = ["CUDA_DEVICE_ORDER", "CUDA_VISIBLE_DEVICES", "PYTHONNOUSERSITE", "PYTHONDONTWRITEBYTECODE",
-         "ACTIONBALL_READY_POSE",
+         "ACTIONBALL_READY_POSE", "WARP_CACHE_PATH",
          "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"]
+warp_cache = pathlib.Path(os.environ["WARP_CACHE_PATH"])
 payload = {"argv": sys.argv[1:], "cwd": os.getcwd(), "lock_held": held,
-           "env": {name: os.environ.get(name) for name in names}}
+           "env": {name: os.environ.get(name) for name in names},
+           "warp_cache_is_dir": warp_cache.is_dir()}
 pathlib.Path(os.environ["FAKE_CHILD_RECORD"]).write_text(json.dumps(payload))
 pathlib.Path(os.environ["FAKE_CHILD_STARTED"]).write_text("started")
 pathlib.Path("MUJOCO_LOG.TXT").write_text("process-local runtime log")
+warp_cache.joinpath("fake-compiled-kernel").write_text("run-owned cache")
 print("fake child stdout", flush=True)
 print("fake child stderr", file=sys.stderr, flush=True)
 release = os.environ.get("FAKE_CHILD_RELEASE")
@@ -126,6 +129,7 @@ fi
     monkeypatch.setenv("FAKE_CHILD_RECORD", str(record))
     monkeypatch.setenv("FAKE_CHILD_STARTED", str(started))
     monkeypatch.setenv("FAKE_CHILD_RELEASE", "")
+    monkeypatch.setenv("WARP_CACHE_PATH", str(base / "ambient-warp-cache"))
     for name in module.ENV_UNSET:
         monkeypatch.setenv(name, "ambient-must-not-leak")
 
@@ -177,7 +181,8 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
         "argv": _expected_child(rig, commit),
         "env": {
             "set": {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
-                    "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose)},
+                    "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
+                    "WARP_CACHE_PATH": str(rig.root / "warp_cache")},
             "unset": ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"],
         },
     }
@@ -293,6 +298,7 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
         time.sleep(0.01)
     assert rig.started.exists(), errors
     assert (rig.root / "snapshots").is_dir()
+    assert (rig.root / "warp_cache").is_dir()
     assert not (rig.root / "runtime_site").exists()
     assert not (rig.root / "evidence.jsonl").exists()
     assert not (rig.root / "completion.json").exists()
@@ -310,11 +316,14 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert record["argv"] == _expected_child(rig, _git(rig.repo, "rev-parse", "HEAD"))[1:]
     assert record["cwd"] == str(rig.root)
     assert (rig.root / "MUJOCO_LOG.TXT").read_text() == "process-local runtime log"
+    assert record["warp_cache_is_dir"] is True
+    assert (rig.root / "warp_cache" / "fake-compiled-kernel").read_text() == "run-owned cache"
     assert not (rig.repo / "MUJOCO_LOG.TXT").exists()
     assert record["lock_held"] is True
     assert record["env"] == {
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
-        "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose), "PYTHONPATH": None,
+        "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
+        "WARP_CACHE_PATH": str(rig.root / "warp_cache"), "PYTHONPATH": None,
         "PYTHONHOME": None, "VIRTUAL_ENV": None, "CONDA_PREFIX": None,
     }
     descriptor = os.open(rig.lock, os.O_RDWR)
@@ -327,6 +336,7 @@ def test_child_start_failure_leaves_spent_root(rig, capsys) -> None:
     assert rig.module.main(rig.argv(executable=bad_python)) == 2
     assert "cannot start" in capsys.readouterr().err
     assert rig.root.is_dir() and (rig.root / "snapshots").is_dir()
+    assert (rig.root / "warp_cache").is_dir()
     assert (rig.root / "stdout.log").is_file()
     assert (rig.root / "stderr.log").is_file()
     assert not (rig.root / "runtime_site").exists()

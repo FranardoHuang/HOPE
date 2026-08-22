@@ -110,6 +110,15 @@ def _real_settled_r03():
     racket._action_ball_strike_fact_exact_eligibility[1] = False
     owner.bind_action_epoch_racket_owner(racket)
     epoch.settle_d05_transaction(d05_token)
+    epoch_module = importlib.import_module(type(epoch).__module__)
+    # This fixture owns fault-plane alignment, not launch chronology.  The
+    # production Physical -> Epoch launch path is covered by the row-wise R03
+    # test; set only the prerequisite phase here to keep this seam narrow.
+    epoch._publication.current.phase[0, 0] = epoch_module.PHASE_LAUNCH_SETTLED
+    assert epoch.current().phase[:, 0].tolist() == [
+        epoch_module.PHASE_LAUNCH_SETTLED,
+        epoch_module.PHASE_IDLE,
+    ]
     return owner, epoch, racket, _r03_identity(epoch)
 
 

@@ -128,17 +128,25 @@ generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint
 self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示已达到`6 s/update`、学会回球、
 获得formal authority或完成任何Gate。性能结论仍须使用exact Pod、profiler-off、matched-strata墙钟证据。
 
-#### FullMDP PPO V2执行配方（2026-08-21 branch candidate）
+#### FullMDP PPO V3执行配方（2026-08-23 branch candidate）
 
 FullMDP A/C与portable MuJoCo只能消费code-owned typed recipe：`num_steps_per_env=48`、
 `max_iterations=12500`、`save_interval=500`、`num_learning_epochs=5`、`num_mini_batches=8`、
-`gamma=.99`、`lambda=.98`。不要在Hydra argv、task YAML或MuJoCo CLI复制/覆盖这些值；FullMDP冲突
+`gamma=.99`、`lambda=.98`、fresh `init_noise_std=.02`、learned `log_std`、`entropy_coef=0`。不要在Hydra argv、task YAML或MuJoCo CLI复制/覆盖这些值；FullMDP冲突
 override必须在Kit启动前失败。旧H24 checkpoint与本配方的policy refresh/GAE/update grouping不同，不能resume。
+
+V2长跑的永久`entropy_coef=.01`在RSL-RL 3.1.2中对31维`log_std`各自产生固定`-.01` loss梯度；真实
+MuJoCo V2 checkpoint的mean std已从`.02`单调涨到大于`1`并伴随balance退化。V3只删除这个已测因果项，
+保留advantage对learned std和adaptive-KL的真实控制；不叠加std clamp、decay或课程状态机。V2 checkpoint
+已经带有放大的std，故同样禁止resume，必须fresh。
 
 learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。MuJoCo evidence使用
 schema 2，terminal completion使用schema 3，consumer必须按schema分流。H48并不是性能豁免：每次update的
 transition翻倍，验收统一报告transitions/s和`wall_s * 24 / H`的H24-equivalent，并保留原始wall；真实GPU
 wall、显存和学习收益未测前，任何host hash/shape测试都只能算配方闭合。
+
+MuJoCo one-shot launcher还把`WARP_CACHE_PATH`显式绑定到fresh `<run-root>/warp_cache`并在child任何import前
+创建该目录；这是run-owned编译缓存位置，不是训练Gate或第二份physics authority，也不得回退到用户根目录cache。
 
 为得到可迭代的墙钟数据，两后端只增加一个固定`10 warm-up + 50 measured + 1 tail`的H48 rate diagnostic。
 MuJoCo使用`--full-a --diagnostic-rate-probe`；Isaac只可把task中的

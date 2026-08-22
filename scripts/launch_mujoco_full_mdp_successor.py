@@ -165,6 +165,7 @@ def _paths(root: Path) -> dict[str, Path]:
         "snapshots": root / "snapshots",
         "completion": root / "completion.json",
         "runtime_site": root / "runtime_site",
+        "warp_cache": root / "warp_cache",
         "stdout": root / "stdout.log",
         "stderr": root / "stderr.log",
     }
@@ -185,7 +186,9 @@ def _child_argv(
     ]
 
 
-def _env_contract(gpu_index: int, ready_pose: Path) -> dict[str, object]:
+def _env_contract(
+    gpu_index: int, ready_pose: Path, warp_cache: Path
+) -> dict[str, object]:
     return {
         "set": {
             "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
@@ -193,6 +196,10 @@ def _env_contract(gpu_index: int, ready_pose: Path) -> dict[str, object]:
             "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "ACTIONBALL_READY_POSE": str(ready_pose),
+            # Warp reads this before creating its versioned kernel cache in
+            # warp.init().  Changed-source kernels belong to the fresh run,
+            # not the launch user's ~/.cache/warp directory.
+            "WARP_CACHE_PATH": str(warp_cache),
         },
         "unset": list(ENV_UNSET),
     }
@@ -268,6 +275,7 @@ def _create_root(root: Path, paths: dict[str, Path]) -> None:
     try:
         os.mkdir(root, 0o700)
         os.mkdir(paths["snapshots"], 0o700)
+        os.mkdir(paths["warp_cache"], 0o700)
     except OSError as exc:
         raise LaunchError("cannot create fresh run-root") from exc
 
@@ -277,7 +285,7 @@ def launch(args: argparse.Namespace) -> int:
     python, runner, ready_pose, root = _validate_inputs(args)
     paths = _paths(root)
     argv = _child_argv(python, runner, paths, commit, args.namespace)
-    contract = _env_contract(args.gpu_index, ready_pose)
+    contract = _env_contract(args.gpu_index, ready_pose, paths["warp_cache"])
     if args.dry_run:
         print(json.dumps({"argv": argv, "env": contract}, sort_keys=True,
                          separators=(",", ":")))

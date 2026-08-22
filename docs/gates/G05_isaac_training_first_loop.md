@@ -2,6 +2,15 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+**2026-08-23 FullMDP PPO V3 / R03 exact-strike候选（Gate仍`Partial`）：**现役V2 Isaac的R03 arm错误地要求
+`REVEAL_COMMITTED`，而exact one-shot只在真实launch后出现，production下因而不可达；这不是需要更多step的
+课程现象。候选改为在`LAUNCH_SETTLED && exact`冻结问题，publish只核冻结identity/source，并用真实R06
+LAUNCH→OUTCOME时序防止二次phase gate回归。shared typed recipe同时从永久`entropy_coef=.01`改为`0`；
+真实V2 MuJoCo checkpoint的mean std已从`.02`涨过`1`并继续超过`2.8`，不能resume。没有新增actor observation、
+stage、owner、receipt、std clamp/decay或成功Gate；H48/lambda `.98`不变。fresh exact Pod与新namespace结果
+见[课程解阻实验§7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)，
+在结果写入前均为`未测`，本Gate不晋级。
+
 **2026-08-22 `aa42418b`当前结论（Gate仍`Partial`）：**no-key ContactSensor主墙已删除；exact Pod=
 `304 passed, 6 skipped`，profiler-off匹配5轮中位`6.346 s/H48`。新Isaac到ACK176仍active/finite/fault0；
 随episode变长，recent10 collection中位为`8.238 s/H48`、episode均长`148.93 tick`。累计

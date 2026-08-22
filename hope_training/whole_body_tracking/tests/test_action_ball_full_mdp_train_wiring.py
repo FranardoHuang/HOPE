@@ -757,7 +757,7 @@ def test_pre_gym_binding_uses_only_code_owned_lean_factory(monkeypatch):
         binding.owner_type = object
 
 
-def test_full_mdp_typed_ppo_v2_replaces_only_the_fresh_algo_mapping():
+def test_full_mdp_typed_ppo_v3_replaces_only_the_fresh_algo_mapping():
     legacy = {
         "name": "ppo",
         "runner": {"num_steps_per_env": 24, "max_iterations": 25_000},

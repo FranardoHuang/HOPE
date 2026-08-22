@@ -118,6 +118,7 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     assert cfg["algorithm"]["num_mini_batches"] == 8
     assert cfg["algorithm"]["gamma"] == 0.99
     assert cfg["algorithm"]["lam"] == 0.98
+    assert cfg["algorithm"]["entropy_coef"] == 0.0
     with pytest.raises(TypeError):
         module.build_train_cfg(7)
     with pytest.raises(TypeError):

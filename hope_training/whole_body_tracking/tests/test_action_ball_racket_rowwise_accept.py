@@ -9,6 +9,8 @@ semantics can be checked directly.
 from __future__ import annotations
 
 import ast
+from dataclasses import fields
+import importlib
 import inspect
 import textwrap
 from types import SimpleNamespace
@@ -23,6 +25,12 @@ import test_action_ball_continuous_runtime_transaction_device as d05_test
 HC = racket_test.HC
 device_r05 = racket_test.device_r05
 epoch = racket_test.epoch
+physical = importlib.import_module(
+    "whole_body_tracking.tasks.tracking.mdp.action_ball_physical_flight_device"
+)
+landing = importlib.import_module(
+    "whole_body_tracking.tasks.tracking.mdp.action_ball_landing_outcome_device"
+)
 
 
 _FLOAT_WIDTHS = {
@@ -316,6 +324,141 @@ def _settle_candidate(racket, d05_owner, epoch_owner, candidate, accept_mask):
     return token, settled
 
 
+class _PhysicalLaunchOwner:
+    """Expose one exact Physical-owned launch projection to ActionEpoch."""
+
+    def __init__(self):
+        self.launch = None
+
+    def action_epoch_r06_launch_projection(self):
+        assert self.launch is not None
+        return self.launch
+
+
+class _R06OutcomeOwner:
+    """Expose one production-shaped settled outcome to ActionEpoch."""
+
+    def __init__(self):
+        self.outcome = None
+
+    def project_previous_paid_action_epoch_rows(self):
+        return None
+
+    def consume_closed_action_epoch_rows(self, _rows):
+        return None
+
+    def project_current_action_epoch_outcome_rows(self):
+        assert self.outcome is not None
+        return self.outcome
+
+
+def _bind_physical_launch_owner(epoch_owner):
+    owner = _PhysicalLaunchOwner()
+    epoch_owner.bind_fact_owner("physical_ball", owner)
+    epoch_owner.bind_async_owner("physical_ball", owner)
+    return owner
+
+
+def _bind_r06_outcome_owner(epoch_owner):
+    owner = _R06OutcomeOwner()
+    epoch_owner.bind_fact_owner("r06_landing_outcome", owner)
+    epoch_owner.bind_async_owner("r06_landing_outcome", owner)
+    return owner
+
+
+def _refresh_real_physical_launch(epoch_owner, physical_owner, due):
+    """Drive the production Physical projection -> Epoch launch transition."""
+
+    current = epoch_owner.current()
+    slot = current.current_task_slot[:, None]
+
+    def selected(value):
+        return torch.gather(value, 1, slot).squeeze(1).clone().contiguous()
+
+    shot_key = epoch.row_identity.ActionEpochShotKey(
+        **{
+            field.name: selected(
+                getattr(current.identity.shot_key, field.name)
+            )
+            for field in fields(epoch.row_identity.ActionEpochShotKey)
+        }
+    )
+    n = epoch_owner.num_envs
+    device = epoch_owner.device
+    minus_one = torch.full((n,), -1, dtype=torch.int64, device=device)
+    physical_owner.launch = physical.ActionEpochR06LaunchProjection(
+        selected_mask=due.clone(),
+        due=due.clone(),
+        late_launch=torch.zeros(n, dtype=torch.bool, device=device),
+        flight_slot=torch.where(
+            due, torch.zeros(n, dtype=torch.int64, device=device), minus_one
+        ),
+        shot_key=shot_key,
+        publication_ordinal=selected(current.publication_ordinal),
+        target_xy_m=torch.zeros((n, 2), dtype=torch.float32, device=device),
+        launch_control_step=torch.where(
+            due, torch.full_like(minus_one, 5), minus_one
+        ),
+        contact_deadline_control_step=torch.where(
+            due, torch.full_like(minus_one, 6), minus_one
+        ),
+        crossing_horizon_control_step=torch.where(
+            due, torch.full_like(minus_one, 7), minus_one
+        ),
+        physical_owner=physical_owner,
+        epoch_owner=epoch_owner,
+        owner_identity=physical_owner,
+        _token=physical._ACTION_EPOCH_R06_LAUNCH_TOKEN,
+    )
+    try:
+        epoch_owner.refresh_physical_launch_rows()
+    finally:
+        physical_owner.launch = None
+    return epoch_owner.current()
+
+
+def _refresh_real_r06_outcome(epoch_owner, r06_owner, due):
+    """Drive the production R06 projection -> Epoch outcome transition."""
+
+    current = epoch_owner.current()
+    slot = current.current_task_slot[:, None]
+
+    def selected(value):
+        return torch.gather(value, 1, slot).squeeze(1).clone().contiguous()
+
+    shot_key = epoch.row_identity.ActionEpochShotKey(
+        **{
+            field.name: selected(
+                getattr(current.identity.shot_key, field.name)
+            )
+            for field in fields(epoch.row_identity.ActionEpochShotKey)
+        }
+    )
+    n = epoch_owner.num_envs
+    device = epoch_owner.device
+    minus_one = torch.full((n,), -1, dtype=torch.int64, device=device)
+    r06_owner.outcome = landing.ActionEpochR06OutcomeRows(
+        valid=due.clone(),
+        shot_key=shot_key,
+        publication_ordinal=selected(current.publication_ordinal),
+        settlement_step=torch.where(
+            due, torch.full_like(minus_one, 5), minus_one
+        ),
+        valid_bits=due.to(torch.int64),
+        fact_values=torch.zeros(
+            (n, epoch.OWNER_FACT_F32_WIDTH),
+            dtype=torch.float32,
+            device=device,
+        ),
+        outcome_code=torch.where(
+            due, torch.full_like(minus_one, 2), minus_one
+        ),
+        owner_fault_bits=torch.zeros(n, dtype=torch.int64, device=device),
+    )
+    epoch_owner.refresh_r06_outcome_rows()
+    return epoch_owner.current()
+
+
 def _bytes(value: torch.Tensor) -> torch.Tensor:
     return value.detach().contiguous().view(torch.uint8).reshape(-1).clone()
 
@@ -540,6 +683,8 @@ def test_rowwise_accept_arms_r03_and_publishes_real_fk(
         2, runtime_device=runtime_device, monkeypatch=monkeypatch
     )
     r03_owner = racket_test._bind_epoch_r03(racket, epoch_owner)
+    physical_owner = _bind_physical_launch_owner(epoch_owner)
+    r06_owner = _bind_r06_outcome_owner(epoch_owner)
     candidate = _candidate(2, racket.device)
     racket_before = _snapshot(racket)
     fact_before = {
@@ -557,11 +702,28 @@ def test_rowwise_accept_arms_r03_and_publishes_real_fk(
     assert accepted.tolist() == [True, False]
     assert settled.phase[1, 0].item() == epoch.PHASE_IDLE
     _assert_snapshot_equal(racket, racket_before, row_mask=accepted)
+    launched = _refresh_real_physical_launch(
+        epoch_owner, physical_owner, accepted
+    )
+    assert launched.phase[:, 0].tolist() == [
+        epoch.PHASE_LAUNCH_SETTLED,
+        epoch.PHASE_IDLE,
+    ]
     racket._action_ball_strike_fact_exact_eligibility.copy_(
         torch.tensor([True, False], dtype=torch.bool, device=racket.device)
     )
     racket.arm_action_ball_full_mdp_epoch_strike_fact()
+    assert r03_owner._epoch_arm_mask.tolist() == [True, False]
     assert racket._action_ball_strike_fact_expected_publish_step == 5
+
+    # Physical/R06 may settle the launched shot before the final-substep R03
+    # publisher runs.  Eligibility was frozen at arm time, so the publication
+    # must survive this real lifecycle advance rather than re-gating on phase.
+    outcome = _refresh_real_r06_outcome(epoch_owner, r06_owner, accepted)
+    assert outcome.phase[:, 0].tolist() == [
+        epoch.PHASE_OUTCOME_SETTLED,
+        epoch.PHASE_IDLE,
+    ]
 
     achieved_position = torch.full((2, 3), 0.25, device=racket.device)
     achieved_velocity = torch.full_like(achieved_position, 0.5)
@@ -586,6 +748,58 @@ def test_rowwise_accept_arms_r03_and_publishes_real_fk(
         assert torch.equal(_bytes(getattr(record, name)[1]), expected), name
     assert racket._action_ball_strike_fact_expected_publish_step is None
     assert r03_owner._epoch_arm_identity is None
+    sticky = {
+        name: _bytes(getattr(record, name)[0])
+        for name in ("fact_valid_bits", "fact_source_step", "fact_f32")
+    }
+
+    # The producer clears its exact one-shot on the following command step;
+    # LAUNCH_SETTLED alone must not make the same strike eligible again.
+    racket._action_ball_strike_fact_exact_eligibility.zero_()
+    racket.arm_action_ball_full_mdp_epoch_strike_fact()
+    assert r03_owner._epoch_arm_mask.tolist() == [False, False]
+    racket.publish_action_ball_full_mdp_epoch_strike_fact(source_step=5)
+    record = epoch_owner.current()
+    assert record.fact_valid_bits[:, 0, owner_slot].tolist() == [3, 0]
+    for name, expected in sticky.items():
+        assert torch.equal(_bytes(getattr(record, name)[0]), expected), name
+    assert r03_owner._epoch_arm_identity is None
+
+
+@pytest.mark.parametrize(
+    "nonlaunch_phase",
+    (
+        epoch.PHASE_IDLE,
+        epoch.PHASE_REVEAL_COMMITTED,
+        epoch.PHASE_OUTCOME_SETTLED,
+        epoch.PHASE_RETIRED,
+    ),
+)
+def test_r03_exact_strike_rejects_every_nonlaunch_phase(
+    monkeypatch, nonlaunch_phase
+):
+    racket, d05_owner, epoch_owner = _racket_and_sources(
+        2, runtime_device="cpu", monkeypatch=monkeypatch
+    )
+    r03_owner = racket_test._bind_epoch_r03(racket, epoch_owner)
+    _, settled = _settle_candidate(
+        racket,
+        d05_owner,
+        epoch_owner,
+        _candidate(2, racket.device),
+        torch.ones(2, dtype=torch.bool),
+    )
+    assert settled.phase[:, 0].tolist() == [
+        epoch.PHASE_REVEAL_COMMITTED,
+        epoch.PHASE_IDLE,
+    ]
+
+    # Negative-only phase injection isolates the R03 gate.  The eligible case
+    # above reaches LAUNCH_SETTLED through the real Physical projection path.
+    epoch_owner._publication.current.phase[0, 0] = nonlaunch_phase
+    racket._action_ball_strike_fact_exact_eligibility.fill_(True)
+    racket.arm_action_ball_full_mdp_epoch_strike_fact()
+    assert r03_owner._epoch_arm_mask.tolist() == [False, False]
 
 
 def test_rowwise_r03_rejects_foreign_racket_and_wrong_postphysics_step(

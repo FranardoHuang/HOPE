@@ -1,4 +1,4 @@
-"""Dependency-free checks for the shared continuous FullMDP PPO V2 recipe."""
+"""Dependency-free checks for the shared continuous FullMDP PPO V3 recipe."""
 
 from __future__ import annotations
 
@@ -31,9 +31,9 @@ def _load():
     return module
 
 
-def test_v2_recipe_is_frozen_complete_and_keeps_total_training_work():
+def test_v3_recipe_is_frozen_complete_and_keeps_total_training_work():
     recipe = _load().ACTION_BALL_FULL_MDP_PPO_RECIPE
-    assert recipe.kind == "action_ball_full_mdp_ppo_v2"
+    assert recipe.kind == "action_ball_full_mdp_ppo_v3"
     assert (
         recipe.num_steps_per_env,
         recipe.max_iterations,
@@ -42,6 +42,7 @@ def test_v2_recipe_is_frozen_complete_and_keeps_total_training_work():
     assert recipe.empirical_normalization is False
     assert (recipe.num_learning_epochs, recipe.num_mini_batches) == (5, 8)
     assert (recipe.gamma, recipe.lam) == (0.99, 0.98)
+    assert recipe.entropy_coef == 0.0
     assert 48 * 12_500 == 24 * 25_000
     assert 5 * 8 * 12_500 == 5 * 4 * 25_000
     assert 48 * 500 == 24 * 1000
@@ -66,6 +67,7 @@ def test_learning_identity_matches_existing_training_contract_serializer_shape()
     }
     assert scientific["algorithm"]["num_mini_batches"] == 8
     assert scientific["algorithm"]["lam"] == 0.98
+    assert scientific["algorithm"]["entropy_coef"] == 0.0
     payload = json.dumps(
         scientific,
         allow_nan=False,
@@ -78,7 +80,7 @@ def test_learning_identity_matches_existing_training_contract_serializer_shape()
     execution = recipe.execution_recipe()
     assert execution == {
         "schema_version": 1,
-        "kind": "action_ball_full_mdp_ppo_v2",
+        "kind": "action_ball_full_mdp_ppo_v3",
         "runner": {
             "num_steps_per_env": 48,
             "max_iterations": 12_500,

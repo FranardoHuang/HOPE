@@ -2,6 +2,14 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
+**2026-08-23 FullMDP PPO V3 / R03双后端生命周期候选（Gate仍`Partial`）：**Isaac与portable MuJoCo现共享
+H48/lambda `.98`且把永久entropy改为`0`，但旧V2 checkpoint绝不resume。R03语义统一为“launch-settled exact
+tick一次event + task内sticky fact”：Isaac冻结后允许同tick进入OUTCOME再publish，MuJoCo禁止`<=`延迟补发和
+逐tick重采FK。该对齐删除同writer `task_valid/launch_succeeded`重复gate，不新建portable lifecycle抽象；当前
+只有两个短谓词，没有第三处漂移值得新增层。Mu launcher另绑定run-owned Warp cache，但这不签physics parity。
+exact Pod与fresh双run前缀见[课程解阻实验§7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)；
+未写入的backend/stage分母一律`未测`，本Gate不晋级。
+
 **2026-08-22 `aa42418b`双fresh现状（Gate仍`Partial`）：**Isaac与portable MuJoCo现均从clean source
 `aa42418b187e8f3edf49d5757868fe0215e62d42`以H48 fresh运行。Isaac no-key critic `[216:219]`是N/A zero，
 不读取ContactSensor；keyed R07仍读取真实contact/support/slip/recovery，actor 203-D不变。exact Pod=
