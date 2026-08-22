@@ -4799,3 +4799,6 @@
   PhysX solver是主墙。
 - bounded profiler仅新增Physical/R07/Motion子调用的inclusive host-clock行，5轮后仍自动卸载；它不新增
   CUDA同步、gate、owner、receipt或Observation。下一结构修改必须由该实测定位，而不是继续堆空事务保护层。
+- 首次`8cbccad8…`实现错误地替换frozen R07实例方法，runner构造时自然RC1；失败root封存。successor改为
+  LeanRuntime先完成原有class-bound identity认证，再用可卸载callback包住同一个bound method；没有以诊断
+  为由放宽生产方法身份合同。

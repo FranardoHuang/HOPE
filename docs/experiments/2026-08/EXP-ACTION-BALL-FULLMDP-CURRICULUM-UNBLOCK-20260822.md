@@ -206,3 +206,9 @@ update22后已降为0，因此它是balance早期可学习过渡，不是持续�
 “空R03/keyed写减法正确且有局部收益”，不支持“已达约12秒”。下一诊断只在已有bounded profiler增加
 Physical、R07 plant/reference/reward/readiness和Motion install的嵌套host wall，不增加CUDA同步、gate、owner、
 receipt或actor observation；测完5轮自动卸载。只有测得主墙后才做下一结构刀。
+
+第一次嵌套profile commit `8cbccad8…`在runner构造时自然RC1，尚未进入PPO：R07 bundle是frozen dataclass，
+实例方法不可替换；即使强行替换，也会破坏LeanRuntime要求的class-bound exact method identity。失败namespace
+只读封存，GPU/lock自然释放。successor保留原方法对象不动：profiler只在LeanRuntime实例安装一个非authority
+host-clock callback，LeanRuntime仍先用现有`_bound_plain_method`认证真实Physical/R07/Motion方法，再把该
+bound method交给callback计时。自动卸载时callback一并删除；未启profile时生产调用序列不变。

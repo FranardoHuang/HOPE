@@ -314,3 +314,6 @@ MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，runtime资产与调
   collection大致`9.11--9.61 s/H48`、Reward/storage finite且conservation fault为0。两个backend现同时运行。
 - [ ] 在空闲GPU上用只增加host-clock、5 update后自动卸载的嵌套profile拆开R07 plant/reference/reward/
   readiness/Motion install；只对测得主墙做下一结构减法，不缩H48、不改PPO、不新增gate。
+  首次`8cbccad8…`在PPO前fail-closed：profiler试图替换frozen R07 bundle实例方法，同时也会违反
+  LeanRuntime对class-bound exact method的身份合同。该namespace自然RC1并封存；successor不替换任何
+  production owner方法，只由LeanRuntime在已认证bound method外调用纯host-clock callback。

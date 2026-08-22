@@ -40,10 +40,6 @@ _SEGMENT_NAMES = (
     "physical_epoch_postphysics",
     "r07_readiness_no_key",
     "r07_keyed_publish",
-    "r07_plant_read",
-    "r07_motion_reference",
-    "r07_reward_view",
-    "r07_readiness_publish",
     "r07_motion_projection",
     "motion_ready_install",
     "termination_compute",
@@ -107,6 +103,7 @@ class FullMdpUpdateProfiler:
         self._emit_line = emit_line
         self._wrapped: list[tuple[object, str, bool, object]] = []
         self._wrapped_keys: set[tuple[int, str]] = set()
+        self._runtime_owner: object | None = None
         self._closed = False
         self._emitted_updates = 0
         self._marks: dict[str, int] = {}
@@ -196,6 +193,25 @@ class FullMdpUpdateProfiler:
         )
         self._wrapped_keys.add(key)
 
+    def profile_runtime_call(
+        self,
+        segment_name: str,
+        operation: Callable[..., object],
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        """Measure one already-authenticated runtime call without replacing it."""
+
+        if self._closed or segment_name not in self._segments:
+            raise RuntimeError("FullMDP profiler runtime segment differs")
+        if not callable(operation):
+            raise RuntimeError("FullMDP profiler runtime operation differs")
+        started_ns = self._clock_ns()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            self._record(segment_name, self._clock_ns() - started_ns, 0)
+
     def install(self, env: object) -> None:
         if self._closed or self._wrapped:
             raise RuntimeError("FullMDP profiler can be installed exactly once")
@@ -211,12 +227,18 @@ class FullMdpUpdateProfiler:
         if not hasattr(unwrapped, "_full_mdp_runtime_owner"):
             raise RuntimeError("FullMDP profiler requires the installed top owner")
         runtime_owner = unwrapped._full_mdp_runtime_owner
-        physical = getattr(runtime_owner, "_physical_ball", None)
-        r07_bundle = getattr(runtime_owner, "_r07_recovery", None)
-        motion = getattr(runtime_owner, "_motion", None)
-        r07_owner = getattr(r07_bundle, "owner", None)
-        plant_adapter = getattr(r07_bundle, "plant_fact_adapter", None)
-        motion_reference_owner = getattr(r07_bundle, "motion_owner", None)
+        runtime_namespace = getattr(runtime_owner, "__dict__", None)
+        if (
+            not isinstance(runtime_namespace, dict)
+            or "_full_mdp_profile_runtime_call" in runtime_namespace
+        ):
+            raise RuntimeError("FullMDP runtime profiler binding differs")
+        setattr(
+            runtime_owner,
+            "_full_mdp_profile_runtime_call",
+            self.profile_runtime_call,
+        )
+        self._runtime_owner = runtime_owner
         bindings = (
             (unwrapped, "step", "env_step_total", None),
             (unwrapped, "_before_policy_step", "before_policy_step", None),
@@ -232,45 +254,6 @@ class FullMdpUpdateProfiler:
                 unwrapped,
                 "_publish_post_physics_substep",
                 "post_physics_publish",
-                None,
-            ),
-            (
-                physical,
-                "publish_action_epoch_post_physics",
-                "physical_epoch_postphysics",
-                None,
-            ),
-            (
-                r07_bundle,
-                "refresh_epoch_readiness_without_keyed_facts",
-                "r07_readiness_no_key",
-                None,
-            ),
-            (
-                r07_bundle,
-                "publish_epoch_reward_facts",
-                "r07_keyed_publish",
-                None,
-            ),
-            (plant_adapter, "read", "r07_plant_read", None),
-            (
-                motion_reference_owner,
-                "project_action_ball_full_mdp_recovery_ready_reference",
-                "r07_motion_reference",
-                None,
-            ),
-            (r07_owner, "action_epoch_reward_view", "r07_reward_view", None),
-            (
-                r07_owner,
-                "_publish_action_epoch_motion_readiness",
-                "r07_readiness_publish",
-                None,
-            ),
-            (r07_bundle, "motion_ready_projection", "r07_motion_projection", None),
-            (
-                motion,
-                "install_action_ball_continuous_r07_ready_projection",
-                "motion_ready_install",
                 None,
             ),
             (unwrapped, "_after_reward_close", "after_reward_close", None),
@@ -424,6 +407,11 @@ class FullMdpUpdateProfiler:
                 delattr(owner, method)
         self._wrapped.clear()
         self._wrapped_keys.clear()
+        if self._runtime_owner is not None:
+            namespace = getattr(self._runtime_owner, "__dict__", None)
+            if isinstance(namespace, dict):
+                namespace.pop("_full_mdp_profile_runtime_call", None)
+            self._runtime_owner = None
         self._marks.clear()
         self._closed = True
 

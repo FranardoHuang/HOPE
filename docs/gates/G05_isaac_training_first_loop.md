@@ -6626,3 +6626,7 @@ profiler-off H48 wall尚未完成，不能把静态减法写成秒数，G05保�
 `post_physics_publish=6.53--9.12 s/update`，明显大于`sim_step=1.75--1.84 s/update`。因此Gate仍
 `Partial`；下一步只细分现有bounded profiler中的R07子调用，禁止用缩rollout、课程改动或新增同源安全门
 冒充提速。
+
+首次细分profile `8cbccad8…`因试图替换frozen R07 bundle实例方法，在PPO前自然RC1；这不是训练或physics
+失败。successor没有放宽LeanRuntime的exact method identity，而是在现有认证之后由一个可卸载host-clock
+callback包住原bound method。失败namespace不复用；fresh GPU细分结果仍待测，因此G05状态不变。

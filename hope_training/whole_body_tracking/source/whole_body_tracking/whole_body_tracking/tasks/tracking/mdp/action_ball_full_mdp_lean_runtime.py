@@ -1357,7 +1357,17 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 publication_started = False
                 try:
                     publication_started = True
-                    result = physical_publish(stamp)
+                    profile_call = getattr(
+                        self, "_full_mdp_profile_runtime_call", None
+                    )
+                    if profile_call is None:
+                        result = physical_publish(stamp)
+                    else:
+                        result = profile_call(
+                            "physical_epoch_postphysics",
+                            physical_publish,
+                            stamp,
+                        )
                     if result is not None:
                         raise ActionBallFullMdpLeanRuntimeError(
                             "Physical post-physics publisher must return None"
@@ -1391,11 +1401,28 @@ class ActionBallFullMdpLeanRuntimeOwner:
                             dtype=torch.int64,
                             device=self._epoch.device,
                         )
-                        recovery_publish(current_source_step=source_step)
+                        if profile_call is None:
+                            recovery_publish(current_source_step=source_step)
+                        else:
+                            profile_call(
+                                (
+                                    "r07_readiness_no_key"
+                                    if not activity.keyed_epoch_work
+                                    else "r07_keyed_publish"
+                                ),
+                                recovery_publish,
+                                current_source_step=source_step,
+                            )
                         project_ready = self._bound_plain_method(
                             self._r07_recovery, "motion_ready_projection"
                         )
-                        ready_projection = project_ready()
+                        ready_projection = (
+                            project_ready()
+                            if profile_call is None
+                            else profile_call(
+                                "r07_motion_projection", project_ready
+                            )
+                        )
                         if ready_projection is None:
                             raise ActionBallFullMdpLeanRuntimeError(
                                 "R07 Motion-ready projection is absent"
@@ -1404,7 +1431,16 @@ class ActionBallFullMdpLeanRuntimeOwner:
                             self._motion,
                             "install_action_ball_continuous_r07_ready_projection",
                         )
-                        if install_ready(ready_projection) is not None:
+                        install_result = (
+                            install_ready(ready_projection)
+                            if profile_call is None
+                            else profile_call(
+                                "motion_ready_install",
+                                install_ready,
+                                ready_projection,
+                            )
+                        )
+                        if install_result is not None:
                             raise ActionBallFullMdpLeanRuntimeError(
                                 "Motion R07-ready installer must return None"
                             )
