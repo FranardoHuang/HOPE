@@ -172,6 +172,28 @@ G06保持`Partial`，不得从r3恢复或授权训练。
 先按上面两节把RSL wheel以及EPA48 wheel/build receipt恢复到本checkout表列的exact路径与SHA；不要用
 ambient package、跨worktree symlink或同名替代。binder只接受canonical、单hard-link、stable regular file。
 
+**新clean/detached checkout必须把下面三件看成一个恢复单元，在创建run namespace之前一次性核完。**
+只复制EPA48或只复制RSL wheel会在runtime site绑定时依次失败，并白白消耗fresh namespace。2026-08-22
+一次真实切换正是先漏`build_receipt.json`、再漏RSL wheel；两个失败root都在首个ACK前封存，没有复用。
+
+```bash
+test -f vendor_assets/mujoco_warp_epa48_1/build_receipt.json
+test -f vendor_assets/mujoco_warp_epa48_1/wheelhouse/mujoco_warp-3.10.0.3+hope.epa48.1-py3-none-any.whl
+test -f vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl
+
+printf '%s  %s\n' \
+  336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041 \
+  vendor_assets/mujoco_warp_epa48_1/build_receipt.json \
+  58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a \
+  vendor_assets/mujoco_warp_epa48_1/wheelhouse/mujoco_warp-3.10.0.3+hope.epa48.1-py3-none-any.whl \
+  406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d \
+  vendor_assets/rsl_rl_3_1_2/rsl_rl_lib-3.1.2-py3-none-any.whl | shasum -a 256 -c -
+```
+
+若从另一个已验证checkout恢复，必须复制真实regular files并在目标checkout重新执行上面的三文件hash；
+不得用跨worktree symlink。Git clean只证明tracked source未变，`vendor_assets/`被忽略，因此不能代替这份
+manifest核验。
+
 launcher先创建本次run独占、canonical父目录，但**不得创建site本身**。给Full-A命令增加
 [`--mujoco-warp-runtime-site`](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)（本次run的双wheel
 隔离目录），把`FULLA_RUNTIME_SITE`设为run root下尚不存在的绝对子路径并先核：

@@ -161,10 +161,18 @@ telemetry。actor task-valid必须来自Motion-visible mask，不能用Epoch ret
 target必须使用actor-visible delayed planner tuple，不能读live truth。所有scale是V2 ABI内的静态常量；
 不得另开running normalization或CLI clipping改变语义。
 
-Isaac首个genesis observation尚未经历post-physics，因此R07 support/dwell只能为zero。selected reset发生在
-post-physics之后、返回observation之前；仅reset generation相对R07 publication精确`+1`的行清零，未reset
-peer仍使用同一publication并严格对齐tick，下一次真实post-physics恢复。跳代、回退或整数wrap必须拒绝；
-不要通过重读plant、伪造R07 capability或全batch清空来“修”这个边界。
+Isaac在尚无admitted shot key时没有R07 recovery业务事件。该no-key路径只核独立的source step、
+ActionEpoch reset generation与Motion cadence chronology，不读取ContactSensor；critic `[216:219]`的
+双脚support与ready dwell按N/A语义填零。此时`postphysics_valid=true`只表示neutral chronology已在本control
+step发布，不表示测得“双脚无支撑”。一旦存在keyed recovery，R07仍从同一真实post-physics plant sample
+读取support/slip并计算完整reward/readiness。selected reset发生在post-physics之后、返回observation之前；
+仅reset generation相对R07 publication精确`+1`的keyed行清零，未reset peer仍使用同一publication并严格
+对齐tick，下一次真实keyed post-physics恢复。跳代、回退或整数wrap必须拒绝；不要通过Observation重读
+plant、伪造R07 capability或全batch清空来“修”这个边界。
+
+虽然critic宽度仍为219，idle真实foot bits变成N/A zero已经改变数值语义；这只保留shape/load兼容，不保留
+旧checkpoint的exact-resume语义。使用该合同必须fresh namespace/fresh lineage，禁止把旧snapshot续成同一
+lineage。actor 203-D没有变化。
 
 launcher在构造Kit/runner前必须对exact actor/critic contract、203/219宽度和training contract schema/hash
 fail closed。禁止通过Hydra、task YAML、MuJoCo CLI或snapshot metadata覆盖contract、width、layout、scale、

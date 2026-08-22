@@ -91,9 +91,47 @@ CUDA Graph、solver iteration和物理步长变化；拒绝先写C++、增加act
 以及用Reward调权掩盖zero denominator。100-step RK4 fused CUDA/Triton路径已经存在，本轮只验证真实绑定，
 不重复实现。
 
+## 0.2 2026-08-22 `aa42418b`性能闭合与当前监测 TODO
+
+这是上节的实测收口，不新增优先级。219-D critic的no-key support/dwell语义已经变化，因此旧`661ff84b`
+checkpoint只保留历史，不是本轮exact-resume父本。
+
+- [x] 用细分profile确认旧主墙是no-key阶段读取Isaac ContactSensor两脚net force，约`7.41--8.03 s/H48`；
+  chronology snapshot/store各只有毫秒量级。
+- [x] no-key路径删除contact读取，只保留独立source/reset-generation/Motion cadence chronology；
+  critic `[216:219]`保持宽度但按N/A填零。keyed R07仍读取真实contact并计算support/slip/recovery。
+- [x] 删除同writer自证：caller不再重验construction-bound method identity；D05测试不再手造Motion true输入
+  再断言ACCEPT。独立consumer chronology、catalog tick295/cadence293和真实keyed反例仍保留。
+- [x] exact Pod分进程回归=`304 passed, 6 skipped`；no-key contact `.data` sentinel、keyed recovery、
+  Epoch、profiler、Motion bridge、Physical hot lane、env install与D05 transaction均覆盖。
+- [x] 同卡H48 profile后`r07_idle_support_read=0 calls`；profiler-off匹配5轮中位`6.346 s/H48`，
+  相对旧`14.194 s/H48`约降55%，且fault/CENSOR/nonfinite/conservation全0。
+- [x] 新Isaac连续ACK后精确停止旧Isaac；补齐ignored runtime三文件manifest后启动新MuJoCo，连续ACK后再
+  精确停止旧MuJoCo。最终两条active run都绑定clean source `aa42418b…`且是fresh lineage。
+- [ ] 继续只读监测balance→mimic→reveal→launch/contact→landing。当前两端尚未活到first reveal tick295，
+  下游分母为0就写`未测`；只有上一阶段基本成功后下一阶段仍无exposure，才判课程交接故障。
+- [ ] MuJoCo早期qdes forbidden已在update26归零，现主要终止为robot-table contact；Isaac仍以fall为主。
+  两者都属于policy可学习行为，先按原因/分母观察，不绕过真实joint/table termination，也不增加“安全”门。
+
 ## 1. 当前运行事实
 
-### 2026-08-22课程解阻后的现役successor
+### 2026-08-22 `aa42418b`当前两条fresh lineage
+
+下列namespace都是[仅全新训练、禁止续跑](../DEFINITIONS.md#fresh-only-no-resume)的一次性运行身份；名称中的
+backend/commit用于回答“哪套源码在哪个后端训练”，不是算法版本或可复用checkpoint标签。
+
+- Isaac：namespace `fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-20260822`，物理GPU2，launcher/child=
+  `2423802/2423818`。ACK67快照中recent20 collection中位`6.758 s/H48`，Reward finite且fault/CENSOR/
+  nonfinite/conservation均0；episode均长first10→recent10约`87.73→93.57 tick`，orientation mimic有上升但
+  balance尚未成功，due/reveal/launch/contact/landing分母均0。
+- portable MuJoCo：namespace `fullmdp-a-h48-v2-mujoco-idle-zero-aa42418b-r3-20260822`，物理GPU1，
+  launcher/child=`2426696/2426711`。update0--19 collection中位`9.391 s/H48`，storage/Reward finite且全部
+  lifecycle/conservation fault为0；qdes forbidden在update26起归零，episode均长到update36约`122.3 tick`，
+  当前主要termination为robot-table contact。尚无due/reveal/launch/contact/landing，后四层均`未测`。
+- 两端都严格是fresh、`diagnostic_unauthorized=true`；219 width只保留ABI，不给旧idle-foot-bit snapshot
+  exact-resume语义。性能数字不授权physics promotion/export/deploy。
+
+### HISTORICAL / SUPERSEDED — 2026-08-22课程解阻后的上一批successor
 
 - Isaac现役：commit `333f9490…`，namespace
   `fullmdp-a-h48-v2-isaac-unblock-333f9490-20260822`，GPU1，launcher/child=`2213515/2213532`；

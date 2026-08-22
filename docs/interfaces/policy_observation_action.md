@@ -425,8 +425,8 @@ The multiplier column below means `network_value = raw_physical_value * multipli
 | `[213:214]` | `selected_rubber_contact_latched` | 1 | privileged current-flight selected-rubber contact latch | `1` |
 | `[214:215]` | `net_crossed_latched` | 1 | privileged current-flight net-crossed latch | `1` |
 | `[215:216]` | `net_clear_latched` | 1 | privileged current-flight net-clear latch | `1` |
-| `[216:218]` | `foot_supported_lr` | 2 | privileged left/right support-contact bits from the existing R07 plant sample | `1` |
-| `[218:219]` | `cadence_ready_dwell_fraction` | 1 | privileged ready streak divided by required dwell, clamped to `[0,1]` | `1` |
+| `[216:218]` | `foot_supported_lr` | 2 | privileged left/right support-contact bits for a keyed R07 recovery; before any keyed shot they are not applicable and are zero-filled without reading the contact sensor | `1` |
+| `[218:219]` | `cadence_ready_dwell_fraction` | 1 | privileged keyed-recovery ready streak divided by required dwell, clamped to `[0,1]`; before any keyed shot it is not applicable and zero-filled | `1` |
 
 This is not `229 + 8 = 237` or `399 + 8 = 407`. V1 exposed a 45-value raw task payload plus
 Epoch/control bookkeeping to the actor and broad owner-fact/Reward due-paid ledgers to the critic.
@@ -457,8 +457,11 @@ observable Motion/task lifecycle. R07 recovery readiness does not choose an
 actor phase, authorize reveal, or become a training-liveness dependency.
 Before the first task the actor sees the hidden/reset-ready lifecycle; at
 reveal, teacher joint/body references change together to action frame 0. The
-existing privileged support/dwell suffix remains critic-only recovery state;
-none of the thirteen R07 component errors is added to the actor.
+existing privileged support/dwell suffix remains critic-only keyed-recovery
+state; none of the thirteen R07 component errors is added to the actor. A row
+with no admitted shot key has no recovery event, so `[216:219]` is explicitly
+N/A-as-zero rather than a claim that both feet are unsupported or that a
+recovery check failed.
 
 The internal Isaac Motion publication feeding this ABI is one typed ten-tensor snapshot: row-wise
 `control_tick`, five-state `phase`, `reset_generation`, `swing_generation`, `action_uid`,
@@ -468,13 +471,23 @@ they do not receive the old 34-field identity/timing ledger. The isolation is in
 frozen dataclass does not make Tensor bytes immutable. Float64 countdowns are converted to float32
 only at this policy boundary. This internal narrowing does not change the 203/219 model ABI.
 
-R07 support and cadence dwell are one narrow direct observation state from the same real
-post-physics plant sample; Observation must not call the broad plant adapter a second time or consume
-the Motion-only admission capability under a forged consumer name. Before the first real
-post-physics edge, genesis returns explicit zero support/dwell. After a row-wise selected reset,
-only the exact `reset_generation + 1` row returns zero for that observation; same-generation peers
-retain their published bytes and still require exact control-tick alignment. The next real
-post-physics publication restores the reset row. Generation rollback, jumps and integer wrap fail.
+For a keyed R07 recovery, support and cadence dwell are one narrow direct observation state from the
+same real post-physics plant sample; Observation must not call the broad plant adapter a second time
+or consume the Motion-only admission capability under a forged consumer name. Before any keyed shot,
+the no-key path observes only independent source-step, ActionEpoch reset-generation and Motion cadence
+chronology. It deliberately does not touch Isaac ContactSensor data: `postphysics_valid=true` on this
+path means the neutral chronology state is current, not that support contact was measured. It emits
+zero for support/dwell because those keyed-recovery quantities are not applicable. After a keyed
+row-wise selected reset, only the exact `reset_generation + 1` row returns zero for that observation;
+same-generation peers retain their published bytes and still require exact control-tick alignment.
+The next keyed real post-physics publication restores the reset row. Generation rollback, jumps and
+integer wrap fail.
+
+This is a numeric semantic change even though the critic width stays `219`: older FullMDP snapshots
+observed live foot bits in idle rows, whereas this contract emits N/A zeros until a keyed shot exists.
+The retained width is only an ABI/load-shape compatibility choice. A run using this contract must use
+a fresh lineage and must not claim exact resume from a pre-change checkpoint. Actor `203-D` deployment
+semantics are unchanged.
 
 The critic's current-flight latches and ball row are selected by R06 against the complete current
 `ActionEpochShotKey` **and** publication ordinal. R06 performs that identity match internally and

@@ -1,5 +1,24 @@
 # 简短进度记录
 
+## 2026-08-22 — no-key ContactSensor主墙删除与`aa42418b`双fresh（branch candidate）
+
+- 细分profile把Isaac旧`14.194 s/H48`主墙定位为无shot/key阶段读取两脚ContactSensor，单update约
+  `7.41--8.03 s`；`aa42418b…`让该路径只发布独立source/reset/Motion chronology，critic `[216:219]`
+  按N/A填零且保持219宽度，keyed R07的真实contact/support/slip/recovery完全保留。删除同writer method
+  self-auth与手造D05 ACCEPT fixture，不新增actor observation、owner、receipt或安全Gate。数值语义改变，
+  因此只允许fresh lineage，不能把shape兼容写成exact resume。
+- clean exact Pod分进程回归=`304 passed, 6 skipped`。GPU2 profile的support-read为`0 calls`；profiler-off
+  匹配5轮中位`6.346 s/H48`，较旧同卡约降55%，fault/CENSOR/nonfinite/conservation全0。新Isaac
+  [fresh-only/no-resume](DEFINITIONS.md#fresh-only-no-resume)一次性namespace
+  `fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-20260822`已连续ACK，recent20约`6.758 s/H48`。
+- portable MuJoCo新checkout先后因漏EPA build receipt、漏RSL3 wheel在首ACK前自然失败并封存；三文件固定
+  SHA manifest恢复后，r3 namespace已在GPU1连续ACK，H48约`9.39 s`且storage/Reward/fault全绿。新backend
+  各自稳定后才精确停止对应旧run，最终两条active lineage均绑定clean `aa42418b…`。
+- 当前两端仍在balance+mimic早期：Isaac episode均长约`87.7→93.6 tick`，MuJoCo到update36约
+  `122.3 tick`；Mu早期qdes forbidden已于update26归零，随后主要为robot-table contact。两端仍未活到
+  first reveal tick295，due/reveal/launch/contact/landing均为0分母并记`未测`。G05/G06保持`Partial`，
+  所有run仍`diagnostic_unauthorized=true`。
+
 ## 2026-08-22 — FullMDP课程、D05 chronology与teacher解阻（branch candidate）
 
 - 旧Isaac约update500已学会站立，但从update305起所有due都被CENSOR；定位到首次活过second due tick295

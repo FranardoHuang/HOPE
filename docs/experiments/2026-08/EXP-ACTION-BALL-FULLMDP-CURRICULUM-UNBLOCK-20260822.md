@@ -212,3 +212,54 @@ receipt或actor observation；测完5轮自动卸载。只有测得主墙后才�
 只读封存，GPU/lock自然释放。successor保留原方法对象不动：profiler只在LeanRuntime实例安装一个非authority
 host-clock callback，LeanRuntime仍先用现有`_bound_plain_method`认证真实Physical/R07/Motion方法，再把该
 bound method交给callback计时。自动卸载时callback一并删除；未启profile时生产调用序列不变。
+
+### 6.6 `aa42418b`：no-key contact read删除、性能闭合与双fresh切换
+
+`2b590889…`的细分profile把旧Isaac主墙收窄到一个具体独立事实读取：no-key阶段每个H48 update中，
+`ContactSensor.data.net_forces_w`的两脚support读取吸收约`7.41--8.03 s` host wall；ActionEpoch chronology
+snapshot只有约`2 ms`，coordinator store约`5 ms`。这两个support bit和ready dwell只在critic
+`[216:219]`，actor 203-D从未看到；在没有admitted shot key时也没有recovery事件，dwell按定义为0。
+
+因此本轮采用最小语义减法：no-key路径只观察独立source step、ActionEpoch reset generation和Motion
+cadence chronology，不触碰ContactSensor；critic宽度仍保留219，`[216:219]`按N/A填零。keyed R07路径不变，
+仍读取真实contact并计算foot slip/support deficit、recovery reward和readiness。延后把critic物理缩到216，
+因为那会同时破坏checkpoint/optimizer和双后端ABI；拒绝全局关闭contact sensor。这里删除的不是安全事实，
+而是在没有shot/recovery业务事件时为三个critic bit重读整份contact buffer。finite、joint/table/contact、
+key/generation和optimizer后durable ACK边界全部保留。
+
+虽然shape不变，idle真实foot bits变成N/A zero已经改变critic数值合同，所以只能fresh lineage，不能称为旧
+checkpoint exact resume。`postphysics_valid=true`只说明该control step的neutral chronology有效，不是
+“已测得双脚无支撑”。同批还删除调用者对construction-bound method的重复self-auth；callee仍核R07 owner，
+Observation继续以独立Motion/ActionEpoch chronology反例检查consumer事实。测试也删除了把Motion的true输入
+手造回D05 ACCEPT的self-proof fixture，保留catalog-owned first reveal tick 295与cadence 293的独立seam。
+
+exact Pod在clean detached source `aa42418b187e8f3edf49d5757868fe0215e62d42`按文件隔离得到
+`304 passed, 6 skipped`；其中sentinel令任意no-key ContactSensor `.data`访问直接失败，且keyed recovery、
+Motion bridge、Physical hot lane、env install与D05 row-wise transaction均通过。H48 diagnostic namespace
+（一次性、[仅全新训练且禁止续跑](../../DEFINITIONS.md#fresh-only-no-resume)的性能归因运行身份）
+`fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-profile-20260822`的5个profile-on collection为
+`6.086/4.910/5.898/6.255/5.949 s`，`r07_idle_support_read=0 calls`、idle stamp仅
+`5.8--7.3 ms/update`；profiler自动卸载后的匹配5轮为
+`6.346/5.999/6.400/5.892/6.408 s`，中位`6.346 s/H48`。前9个ACK的fault/CENSOR/nonfinite/
+conservation均为0。相对上一同卡profiler-off中位`14.194 s/H48`下降约55%；这是真实数据流删除，不是缩H48、
+改PPO或加一层gate。diagnostic随后按PID/start-ticks精确停止，GPU2与lock均free。
+
+双fresh切换随后完成：
+
+- Isaac namespace `fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-20260822`在物理GPU2运行；快照到ACK67时
+  source clean、Reward全finite且fault/CENSOR/nonfinite/conservation为0，recent20 H48 collection中位
+  `6.758 s`。first10→recent10 episode均长约`87.73→93.57 tick`；anchor/body orientation mimic均有
+  上升，但所有episode仍以fall/table结束，尚不能写balance或mimic成功。due=0，所以reveal/launch/contact/
+  landing均为`未测`。
+- portable MuJoCo前两个namespace在首个ACK前分别因新checkout遗漏EPA48 build receipt、遗漏RSL3 wheel
+  自然失败并封存；代码未执行、namespace未复用。按三文件manifest恢复并重核固定SHA后，r3 namespace
+  `fullmdp-a-h48-v2-mujoco-idle-zero-aa42418b-r3-20260822`在物理GPU1运行。update0--19 H48 collection中位
+  `9.391 s`，storage/reward finite且lifecycle/conservation fault为0。早期qdes forbidden在update25降到3、
+  update26起为0，复现了旧lineage的短暂balance过渡；随后主要终止转为robot-table contact，episode均长
+  到update36已约`122.3 tick`。这仍是policy可学习的balance行为，不是应绕过的安全门，也不是成功。
+  due/reveal/launch/contact/landing仍为0分母，统一记`未测`。
+
+新Isaac连续ACK后，旧Isaac `661ff84b…`才按精确child identity停止；新MuJoCo连续ACK后，旧MuJoCo才停止。
+最终只保留两条`aa42418b` fresh lineage运行。两条都仍为`diagnostic_unauthorized=true`，没有resume、promotion、
+export、physics parity或部署授权。当前阶段判断是“早期balance + 部分mimic信号，尚未到task reveal”；符合
+balance→mimic→hit→landing顺序，但还没有证据验收mimic→hit或hit→landing交接。

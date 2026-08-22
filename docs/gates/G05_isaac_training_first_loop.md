@@ -6630,3 +6630,29 @@ profiler-off H48 wall尚未完成，不能把静态减法写成秒数，G05保�
 首次细分profile `8cbccad8…`因试图替换frozen R07 bundle实例方法，在PPO前自然RC1；这不是训练或physics
 失败。successor没有放宽LeanRuntime的exact method identity，而是在现有认证之后由一个可卸载host-clock
 callback包住原bound method。失败namespace不复用；fresh GPU细分结果仍待测，因此G05状态不变。
+
+### 2026-08-22 no-key contact主墙删除与`aa42418b`双fresh（Gate仍`Partial`）
+
+`2b590889…`真实细分profile确认无shot/key阶段的`ContactSensor.data.net_forces_w`两脚support读取占
+`7.41--8.03 s/H48`，而Epoch chronology snapshot与coordinator store只有毫秒量级。`aa42418b…`据此让
+no-key路径只发布source/reset-generation/Motion cadence chronology，critic `[216:219]`按N/A填零且不读
+contact；keyed R07仍读取真实contact并计算support/slip/recovery。actor 203-D不变。219宽度只保留ABI，
+idle数值语义已变，所以必须fresh lineage，不能把旧snapshot写成exact resume。
+
+这是按`HANDOFF_TO_CODEX_20260808.md`重定范围，不是静默绕过：没有shot key就没有recovery业务事件，故该
+读取不是安全事实；finite、joint/table、真实keyed contact、shot key/generation、Reward守恒和optimizer后
+durable ACK仍由独立事实源fail-stop。caller的bound-method重复self-auth与D05手造ACCEPT self-proof被删除，
+callee owner核验、Observation独立chronology反例、catalog tick295/cadence293和keyed recovery反例均保留。
+
+clean exact Pod分进程回归=`304 passed, 6 skipped`。GPU2 5轮profile中
+`r07_idle_support_read=0 calls`，collection=`6.086/4.910/5.898/6.255/5.949 s`；profiler自动卸载后的
+匹配5轮=`6.346/5.999/6.400/5.892/6.408 s`，中位`6.346 s/H48`，相对旧同卡中位`14.194 s/H48`
+约降55%。前9个ACK的fault/CENSOR/nonfinite/conservation均0。随后Isaac fresh namespace
+（一次性、[仅全新训练且禁止续跑](../DEFINITIONS.md#fresh-only-no-resume)的源码/后端运行身份）
+`fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-20260822`到ACK67仍finite/fault0，recent20 collection中位
+`6.758 s/H48`；新MuJoCo r3也已连续ACK、storage/Reward/fault0，H48约`9.39 s`。
+
+两端当前episode仍主要因fall/table终止，尚未活到first reveal tick295；due/reveal/launch/contact/landing
+分母为0，击球与上台统一为`未测`。因此这次结果关闭的是“当前no-key主墙是否删除”和“双后端是否fresh
+运行”，不关闭balance/mimic成功、阶段交接、physics parity、12500 completion、resume、export、部署或
+真机安全，G05继续`Partial`且`diagnostic_unauthorized=true`。
