@@ -778,8 +778,15 @@ def test_idle_no_key_support_is_finite_rowwise_and_clone_only(monkeypatch):
     assert state.source_step.tolist() == [-1, 0]
     assert state.foot_supported_lr.tolist() == [[False, False], [True, False]]
     before = sensor.data.net_forces_w.clone()
+    state.postphysics_valid.logical_not_()
     state.foot_supported_lr.logical_not_()
     assert torch.allclose(sensor.data.net_forces_w, before, equal_nan=True)
+    repeated = bundle.action_epoch_observation_state()
+    assert repeated.postphysics_valid.tolist() == [False, True]
+    assert repeated.foot_supported_lr.tolist() == [
+        [False, False],
+        [True, False],
+    ]
 
 
 def test_idle_no_key_subset_reset_preserves_peer_and_zero_dwell(

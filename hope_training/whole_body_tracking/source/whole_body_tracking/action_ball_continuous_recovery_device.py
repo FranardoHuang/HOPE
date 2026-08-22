@@ -4425,7 +4425,7 @@ class ContinuousRecoveryDeviceCoordinator:
                     torch.all(cadence_tick < torch.iinfo(torch.int64).max)
                 )
                 return ContinuousRecoveryObservationState(
-                    postphysics_valid=support_valid,
+                    postphysics_valid=support_valid.detach().clone(),
                     source_step=source_step,
                     reset_generation=(
                         self._idle_observation_reset_generation.detach().clone()
