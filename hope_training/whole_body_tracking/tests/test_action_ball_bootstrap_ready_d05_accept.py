@@ -108,9 +108,13 @@ def test_fresh_first_d05_accepts_without_r07_publication_or_install(
     motion._action_ball_continuous_ready_authority = torch.zeros(
         motion.num_envs, dtype=torch.bool, device=device
     )
+    env.common_step_counter = 1
+    motion._advance_action_ball_continuous_motion_cadence()
+    assert motion._action_ball_continuous_reveal_due.tolist() == [False, False]
     env.common_step_counter = 2
     motion._advance_action_ball_continuous_motion_cadence()
     assert motion._action_ball_continuous_r07_ready_projection is None
+    assert motion._action_ball_continuous_reveal_due.tolist() == [True, True]
     assert motion._action_ball_continuous_ready_at_reveal.tolist() == [True, True]
 
     token, d05_record = _arm_production_d05_from_fresh_motion(
