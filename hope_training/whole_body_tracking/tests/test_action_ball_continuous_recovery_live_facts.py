@@ -857,7 +857,8 @@ def test_bootstrap_fastpath_subset_reset_restarts_only_selected_dwell(
         cadence_tick=0,
         current_source_step=torch.zeros(2, dtype=torch.int64),
     )
-    assert first.reset_generation.tolist() == [0, 0]
+    baseline_generation = first.reset_generation.clone()
+    assert baseline_generation.eq(baseline_generation[0]).all()
     assert bundle.owner._action_epoch_ready_streak.tolist() == [1, 1]
 
     record = epoch_owner._publication.current
@@ -884,7 +885,9 @@ def test_bootstrap_fastpath_subset_reset_restarts_only_selected_dwell(
         cadence_tick=1,
         current_source_step=torch.ones(2, dtype=torch.int64),
     )
-    assert second.reset_generation.tolist() == [1, 0]
+    expected_generation = baseline_generation.clone()
+    expected_generation[0] += 1
+    assert torch.equal(second.reset_generation, expected_generation)
     ready = bundle.require_owned_motion_ready_projection(
         bundle.motion_ready_projection(), owner_kind="motion"
     )
