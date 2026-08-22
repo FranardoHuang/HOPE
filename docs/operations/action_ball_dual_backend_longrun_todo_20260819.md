@@ -303,6 +303,14 @@ MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，runtime资产与调
 - [x] 封存MuJoCo首次fresh自然RC1 root；根因为launcher遗漏显式ready-pose输入，不复用namespace。
 - [x] 把ready pose变成required CLI + fixed-SHA child binding；host launcher `15 passed`。
 - [x] 实现同一D2H内transport/keyed双activity事实；空业务跳R03与R07 keyed写，但保留R07 readiness/Motion。
-- [ ] exact Pod运行fast-path、retired反例、R07 no-key与launcher focused tests。
-- [ ] fresh GPU profile/ACK确认真实wall；只有证据优于`dd82bb7b`才精确停止并替换Isaac。
-- [ ] 以新的clean detached commit和fresh namespace启动MuJoCo，至少核连续ACK0--4、finite与fault0。
+- [x] exact Pod分进程运行fast-path、retired反例、R07 no-key与launcher focused tests：候选
+  `8aa3…`合计`546 passed,32 skipped`；随后修复active-path noncontiguous fixed flight-slot后，最终
+  `661ff84b…`重跑直接覆盖的Physical/Epoch两文件=`92 passed,7 skipped`。另一个未改区域的旧N2 landing
+  fixture因缺`scene.cfg.replicate_physics=true`有`2 failed`，不混入本候选通过数，也不伪写成已修。
+- [x] `661ff84b…` fresh Isaac已取得连续ACK0--10、fault/CENSOR/nonfinite为0；idle Epoch commit约
+  `816--824/update`，低于`dd82bb7b`约`1104--1152/update`。但profiler-off ACK5--10 wall约
+  `14.94--15.91 s/H48`，仍高于约`12 s/H48`量级目标，故只完成发车/正确性，不完成性能项。
+- [x] 同一commit的新MuJoCo用required ready-pose fresh启动并连续取得ACK0--4以上；ACK1--28
+  collection大致`9.11--9.61 s/H48`、Reward/storage finite且conservation fault为0。两个backend现同时运行。
+- [ ] 在空闲GPU上用只增加host-clock、5 update后自动卸载的嵌套profile拆开R07 plant/reference/reward/
+  readiness/Motion install；只对测得主墙做下一结构减法，不缩H48、不改PPO、不新增gate。

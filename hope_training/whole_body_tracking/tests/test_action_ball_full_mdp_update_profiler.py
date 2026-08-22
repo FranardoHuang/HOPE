@@ -85,9 +85,58 @@ class _Recorder:
         return None
 
 
+class _Physical:
+    def publish_action_epoch_post_physics(self, _stamp=None):
+        return None
+
+
+class _R07Owner:
+    def action_epoch_reward_view(self, *args, **kwargs):
+        return args, kwargs
+
+    def _publish_action_epoch_motion_readiness(self, *args, **kwargs):
+        return args, kwargs
+
+
+class _PlantAdapter:
+    def read(self):
+        return None
+
+
+class _Motion:
+    def project_action_ball_full_mdp_recovery_ready_reference(self, *args, **kwargs):
+        return args, kwargs
+
+    def install_action_ball_continuous_r07_ready_projection(self, _projection):
+        return None
+
+
+class _R07Bundle:
+    def __init__(self, motion):
+        self.owner = _R07Owner()
+        self.plant_fact_adapter = _PlantAdapter()
+        self.motion_owner = motion
+
+    def refresh_epoch_readiness_without_keyed_facts(self, *args, **kwargs):
+        return args, kwargs
+
+    def publish_epoch_reward_facts(self, *args, **kwargs):
+        return args, kwargs
+
+    def motion_ready_projection(self):
+        return None
+
+
+class _RuntimeOwner:
+    def __init__(self):
+        self._physical_ball = _Physical()
+        self._motion = _Motion()
+        self._r07_recovery = _R07Bundle(self._motion)
+
+
 class _ExactEnv:
     def __init__(self):
-        self._full_mdp_runtime_owner = object()
+        self._full_mdp_runtime_owner = _RuntimeOwner()
         self.action_manager = _ActionManager()
         self.scene = _Scene()
         self.sim = _Simulation()

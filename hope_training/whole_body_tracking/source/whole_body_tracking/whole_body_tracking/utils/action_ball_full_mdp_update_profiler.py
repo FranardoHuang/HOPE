@@ -37,6 +37,15 @@ _SEGMENT_NAMES = (
     "sim_step",
     "scene_update",
     "post_physics_publish",
+    "physical_epoch_postphysics",
+    "r07_readiness_no_key",
+    "r07_keyed_publish",
+    "r07_plant_read",
+    "r07_motion_reference",
+    "r07_reward_view",
+    "r07_readiness_publish",
+    "r07_motion_projection",
+    "motion_ready_install",
     "termination_compute",
     "reward_compute",
     "after_reward_close",
@@ -201,6 +210,13 @@ class FullMdpUpdateProfiler:
             raise RuntimeError("FullMDP profiler requires the exact live env")
         if not hasattr(unwrapped, "_full_mdp_runtime_owner"):
             raise RuntimeError("FullMDP profiler requires the installed top owner")
+        runtime_owner = unwrapped._full_mdp_runtime_owner
+        physical = getattr(runtime_owner, "_physical_ball", None)
+        r07_bundle = getattr(runtime_owner, "_r07_recovery", None)
+        motion = getattr(runtime_owner, "_motion", None)
+        r07_owner = getattr(r07_bundle, "owner", None)
+        plant_adapter = getattr(r07_bundle, "plant_fact_adapter", None)
+        motion_reference_owner = getattr(r07_bundle, "motion_owner", None)
         bindings = (
             (unwrapped, "step", "env_step_total", None),
             (unwrapped, "_before_policy_step", "before_policy_step", None),
@@ -216,6 +232,45 @@ class FullMdpUpdateProfiler:
                 unwrapped,
                 "_publish_post_physics_substep",
                 "post_physics_publish",
+                None,
+            ),
+            (
+                physical,
+                "publish_action_epoch_post_physics",
+                "physical_epoch_postphysics",
+                None,
+            ),
+            (
+                r07_bundle,
+                "refresh_epoch_readiness_without_keyed_facts",
+                "r07_readiness_no_key",
+                None,
+            ),
+            (
+                r07_bundle,
+                "publish_epoch_reward_facts",
+                "r07_keyed_publish",
+                None,
+            ),
+            (plant_adapter, "read", "r07_plant_read", None),
+            (
+                motion_reference_owner,
+                "project_action_ball_full_mdp_recovery_ready_reference",
+                "r07_motion_reference",
+                None,
+            ),
+            (r07_owner, "action_epoch_reward_view", "r07_reward_view", None),
+            (
+                r07_owner,
+                "_publish_action_epoch_motion_readiness",
+                "r07_readiness_publish",
+                None,
+            ),
+            (r07_bundle, "motion_ready_projection", "r07_motion_projection", None),
+            (
+                motion,
+                "install_action_ball_continuous_r07_ready_projection",
+                "motion_ready_install",
                 None,
             ),
             (unwrapped, "_after_reward_close", "after_reward_close", None),

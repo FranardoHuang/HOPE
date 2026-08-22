@@ -6619,3 +6619,10 @@ host activity reduction，分别投影transport与keyed lifecycle：R03只看tra
 R07真实plant/readiness和Motion publication始终运行。它删除的是不存在的业务事件、full-grid tensor构造和
 同写者journal，不删除finite/joint/fall/table/contact边界，也不增加安全Gate。exact Pod回归和新的
 profiler-off H48 wall尚未完成，不能把静态减法写成秒数，G05保持`Partial`。
+
+`661ff84b…` exact Pod直接语义回归已闭合，fresh Isaac也连续取得ACK0--10、fault/CENSOR/nonfinite为0；
+每update Epoch commit从旧约`1104--1152`降到`816--824`。然而profiler-off ACK5--10仍约
+`14.94--15.91 s/H48`，未达约`12 s/H48`量级目标。已有profile把inclusive主墙留在
+`post_physics_publish=6.53--9.12 s/update`，明显大于`sim_step=1.75--1.84 s/update`。因此Gate仍
+`Partial`；下一步只细分现有bounded profiler中的R07子调用，禁止用缩rollout、课程改动或新增同源安全门
+冒充提速。

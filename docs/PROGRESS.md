@@ -4788,3 +4788,14 @@
   fixed SHA在建root前验证并显式进入child env。首次遗漏绑定的fresh root自然RC1后封存、不复用。
 - host launcher=`15 passed`；fast-path exact Pod与fresh双GPU ACK/速度仍待验，Gate保持`Partial`且
   `diagnostic_unauthorized=true`。
+
+## 2026-08-22 — `661ff84b`双fresh与R07细分profile
+
+- exact Pod在active-path contiguity修复前合计`546 passed,32 skipped`，修复后直接覆盖的Physical/Epoch
+  再得`92 passed,7 skipped`。MuJoCo和Isaac均从同一clean detached commit fresh启动并取得连续ACK；
+  Reward/storage finite，fault/CENSOR/conservation均为0。
+- MuJoCo H48约`9.11--9.61 s`且balance episode均长已从约67升至111 tick。Isaac idle Epoch commit降约
+  26%，但profiler-off仍约`14.94--15.91 s/H48`，所以性能未完成；已有profile显示post-physics owner链而非
+  PhysX solver是主墙。
+- bounded profiler仅新增Physical/R07/Motion子调用的inclusive host-clock行，5轮后仍自动卸载；它不新增
+  CUDA同步、gate、owner、receipt或Observation。下一结构修改必须由该实测定位，而不是继续堆空事务保护层。

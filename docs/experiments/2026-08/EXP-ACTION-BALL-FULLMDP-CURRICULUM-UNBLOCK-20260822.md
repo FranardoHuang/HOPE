@@ -186,3 +186,23 @@ receipt，也不把idle当安全判决。
 shell预设`ACTIONBALL_READY_POSE`；其dry-run没有暴露这个输入。候选把ready pose改为required
 `--ready-pose`，在创建run root前核canonical regular file与固定SHA，并显式写入child env。失败namespace
 保留、不复用；新的Pod测试、性能数值和fresh ACK尚未产生，故本节仍是branch candidate，不能声称提速成功。
+
+### 6.5 `661ff84b`双fresh实测与下一性能问题
+
+exact Pod回归先在`8aa3…`分进程得到`546 passed,32 skipped`；旧N2 landing fixture另有2个与本变更无关的
+`replicate_physics`构造缺口。随后第一次fresh Isaac在ACK97后的首个active-path暴露
+`Physical.flight_slot`来自`expand`的noncontiguous tensor；该run自然失败且namespace保留。最终
+`661ff84b…`把固定grid在构造时一次性`.contiguous()`，重跑直接覆盖的Physical/Epoch为
+`92 passed,7 skipped`，没有每control复制。
+
+`661ff84b…`的portable MuJoCo已连续取得ACK0以上；ACK1--28 collection约`9.11--9.61 s/H48`，Reward/storage
+全finite、conservation fault=0。early episode均长从约67 tick升至111 tick；`joint_qdes_forbidden`终止在
+update22后已降为0，因此它是balance早期可学习过渡，不是持续的q_des阻塞。尚无due/reveal/contact/landing，
+后三阶段按零分母记`未测`。
+
+同commit的Isaac已连续取得ACK0--10；fault/CENSOR/nonfinite为0，Epoch commit由旧约`1104--1152`降为
+`816--824/update`。但前5轮profile自动卸载后的ACK5--10仍约`14.94--15.91 s/H48`；profile内
+`post_physics_publish`为`6.53--9.12 s/update`，而`sim_step`仅`1.75--1.84 s/update`。所以当前实测支持
+“空R03/keyed写减法正确且有局部收益”，不支持“已达约12秒”。下一诊断只在已有bounded profiler增加
+Physical、R07 plant/reference/reward/readiness和Motion install的嵌套host wall，不增加CUDA同步、gate、owner、
+receipt或actor observation；测完5轮自动卸载。只有测得主墙后才做下一结构刀。
