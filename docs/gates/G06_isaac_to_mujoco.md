@@ -2,20 +2,37 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
-**2026-08-22 fresh课程双后端对齐候选（Gate仍`Partial`）：**Isaac/MuJoCo现共享首次due tick295与
+**2026-08-22 `aa42418b`双fresh现状（Gate仍`Partial`）：**Isaac与portable MuJoCo现均从clean source
+`aa42418b187e8f3edf49d5757868fe0215e62d42`以H48 fresh运行。Isaac no-key critic `[216:219]`是N/A zero，
+不读取ContactSensor；keyed R07仍读取真实contact/support/slip/recovery，actor 203-D不变。exact Pod=
+`304 passed, 6 skipped`；Isaac匹配profiler-off中位`6.346 s/H48`。只读刷新到Isaac ACK176时，recent10
+collection中位`8.238 s/H48`、episode均长`148.93 tick`；MuJoCo update118时对应为`9.585 s/H48`和
+`151.17 tick`。两进程均仍active。
+MuJoCo首两个一次性namespace因ignored EPA48 receipt/RSL3 wheel缺失在trainer/PPO和首个ACK前自然失败；按
+三文件固定SHA manifest恢复后，r3 H48 update0--19中位`9.391 s`且连续finite ACK。两端fault/CENSOR/
+nonfinite/conservation均0。
+
+课程分母也已自然打开：Isaac累计`due/selected/construction/key=2/2/2/2`；MuJoCo累计
+`due/reveal=15/15`、deferred=0且R03 present/physically-valid=`174/174`。这只证明row活过tick295时
+task/action-mimic入口立即开放；两端仍无launch/contact/landing，故击球与上台为`未测`。两条均为
+`diagnostic_unauthorized=true`且[仅全新训练、禁止续跑](../DEFINITIONS.md#fresh-only-no-resume)，不授权
+numerical/physics parity、transfer、promotion、export、deploy或真机。详细见
+[课程解阻实验§6.6](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
+**HISTORICAL / SUPERSEDED — 2026-08-22 fresh课程双后端对齐候选：**Isaac/MuJoCo现共享首次due tick295与
 `295+293k`节奏；R07均不再授权task曝光或actor phase。MuJoCo修正了hidden joint=reset而body=frame0的
 矛盾，hidden joint/body同取reset-ready，reveal后同切action frame0；Isaac本来没有该dense teacher错误，
 但同样移除了pre-exposure R07依赖。两端body orientation采用同一fine+coarse语义。该对齐尚未取得exact
 Pod fixed-tape或fresh runtime结果，不代签数值parity/transfer。详细见
 [课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
 
-**2026-08-22 dual-backend live prefix（Gate仍`Partial`）：**Isaac H48 successor `99405266…`已在GPU0
+**HISTORICAL / SUPERSEDED — 2026-08-22 dual-backend live prefix：**Isaac H48 successor `99405266…`已在GPU0
 fresh启动并有durable ACK `0..10`，前10个完整wall median=`18.445 s`、Reward finite且fault0；portable
 MuJoCo H48 successor同时在GPU2运行，最近只读为update `1110`、last-10 pre-ACK median=`9.771 s`且
 Reward nonfinite/conservation fault为0。两条现在都真实运行，但不同backend、不同live state且不是matched
 strata，不能据此签数值parity、transfer、physics promotion或本Gate晋级。
 
-**2026-08-21 current correction（supersede下文所有“r3 active/继续25k”叙述；Gate仍`Partial`）：**portable
+**HISTORICAL / SUPERSEDED — 2026-08-21 correction：**portable
 MuJoCo r3已经停止在durable ACK `10249`；终段last-100 wall mean/median=`4.890/4.886 s/update`。
 直接停止原因是真实MuJoCo-Warp `EPA_HORIZON` overflow fail-stop；旧229-D observation还存在IDLE clock
 随global step漂移，所以即使扩大EPA容量也不得resume r3。fresh successor现已从clean detached `96f0ca69`

@@ -541,3 +541,24 @@ PID=PGID=`2095711`、Kit child=`2095727`。fd16 receipt为`trainer_runtime_attes
 nonfinite/conservation fault均0。
 这证明real longrun已进入optimizer后持久化路径；样本仍太早，不能当50-update matched rate、6秒GO、
 12500 completion、physics promotion或deployment证据。
+
+## 15. 2026-08-22 no-key ContactSensor主墙与`aa42418b`实测
+
+后续bounded profile把§14之后仍约14秒的Isaac主墙收窄到no-key阶段读取
+`ContactSensor.data.net_forces_w`：两脚support读取约`7.41--8.03 s/H48`，而ActionEpoch chronology
+snapshot与coordinator store只有毫秒量级。这里没有admitted shot key，也就没有R07 recovery业务事件；
+三个critic-only `[216:219]` support/dwell值不值得承担整份contact buffer读取。
+
+`aa42418b187e8f3edf49d5757868fe0215e62d42`采用N/A-zero语义：no-key只发布独立source step、reset
+generation与Motion cadence chronology，不触碰ContactSensor；keyed R07仍读取真实contact并计算support/
+slip/recovery。219宽度只保留ABI，数值语义已变，因此只允许fresh lineage，不是旧checkpoint exact resume。
+R07 bundle对已绑定ActionEpoch `snapshot_idle_*` getter的重复方法身份复核与手造D05 ACCEPT fixture一并删除；
+LeanRuntime production component callpoint binding、callee owner、Observation独立chronology、catalog
+tick295/cadence293和keyed反例仍保留。
+
+clean exact Pod=`304 passed, 6 skipped`。同GPU H48 profile的`r07_idle_support_read=0 calls`；profiler-off
+匹配5轮为`6.346/5.999/6.400/5.892/6.408 s`，中位`6.346 s/H48`，相对旧同卡中位
+`14.194 s/H48`约降55%，fault/CENSOR/nonfinite/conservation全0。随后fresh Isaac recent20中位约
+`6.758 s/H48`并连续ACK；详细运行身份、双backend切换和阶段分母只在
+[课程解阻实验§6.6](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)维护。该结果关闭当前no-key首墙，
+不等于single-state架构已完成，也不授权physics promotion、resume、export或部署。

@@ -31,6 +31,8 @@
   自然获得分母；不以未训练 policy 的 rollout 成败作下游启动门。
 - `295` 只由 portable catalog 定义，Isaac cadence 消费同一常量；后续 due 为
   `295, 588, 881, 1174, 1467`。
+  首次`295`是catalog课程常量；重复间隔`293`则由当前action timing上界
+  `max close tick 214 + recovery window 77 + 2`派生。两者来源不同，不能把293反写成first-reveal真源。
 - D05 的 cadence cursor 按所有 settled due 前进；target generation、selected cell 与现役
   task/outcome/ball identity 仍只按 ACCEPT 前进。checkpoint 合同允许“cadence 已消费但尚无 accepted task”，
   并统一要求 `outcome_shot_index = scheduled_ordinal + 1`。
@@ -173,6 +175,9 @@ MuJoCo旧run。
 
 ### 6.4 空业务热路与显式运行输入候选
 
+本节记录`661ff84b`形成前后的历史候选；其中“no-key仍每control读取plant/readiness并安装Motion”的描述
+已被§6.6的`aa42418b`实测裁决取代，不是当前合同。
+
 `dd82bb7b`的fresh Isaac前五轮profile仍显示无shot时`post_physics_publish`约`9 s/update`；同一窗口中
 Physical已经走idle，但R03和R07每control仍为不存在的key生成空ActionEpoch写入。候选不新增stage、gate、
 owner或第二次D2H：Physical现有packed host summary在同一`.item()`中区分`transport_work`与
@@ -229,8 +234,9 @@ key/generation和optimizer后durable ACK边界全部保留。
 
 虽然shape不变，idle真实foot bits变成N/A zero已经改变critic数值合同，所以只能fresh lineage，不能称为旧
 checkpoint exact resume。`postphysics_valid=true`只说明该control step的neutral chronology有效，不是
-“已测得双脚无支撑”。同批还删除调用者对construction-bound method的重复self-auth；callee仍核R07 owner，
-Observation继续以独立Motion/ActionEpoch chronology反例检查consumer事实。测试也删除了把Motion的true输入
+"已测得双脚无支撑"。同批只删除R07 bundle对已绑定ActionEpoch `snapshot_idle_*` getter的重复方法身份复核；
+LeanRuntime的production component callpoint binding与callee R07 owner核验仍保留，Observation继续以独立
+Motion/ActionEpoch chronology反例检查consumer事实。测试也删除了把Motion的true输入
 手造回D05 ACCEPT的self-proof fixture，保留catalog-owned first reveal tick 295与cadence 293的独立seam。
 
 exact Pod在clean detached source `aa42418b187e8f3edf49d5757868fe0215e62d42`按文件隔离得到
@@ -248,11 +254,12 @@ conservation均为0。相对上一同卡profiler-off中位`14.194 s/H48`下降�
 
 - Isaac namespace `fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-20260822`在物理GPU2运行；快照到ACK67时
   source clean、Reward全finite且fault/CENSOR/nonfinite/conservation为0，recent20 H48 collection中位
-  `6.758 s`。first10→recent10 episode均长约`87.73→93.57 tick`；anchor/body orientation mimic均有
-  上升，但所有episode仍以fall/table结束，尚不能写balance或mimic成功。due=0，所以reveal/launch/contact/
-  landing均为`未测`。
+  `6.758 s`。first10→recent10 episode均长约`87.73→93.57 tick`；reset-ready anchor/body orientation
+  imitation reward均有上升，但所有episode仍以fall/table结束，尚不能写balance或action mimic成功。due=0，
+  所以reveal/launch/contact/landing均为`未测`。
 - portable MuJoCo前两个namespace在首个ACK前分别因新checkout遗漏EPA48 build receipt、遗漏RSL3 wheel
-  自然失败并封存；代码未执行、namespace未复用。按三文件manifest恢复并重核固定SHA后，r3 namespace
+  自然失败并封存；均未进入trainer/PPO、训练业务路径或首个ACK，namespace未复用。按三文件manifest恢复并
+  重核固定SHA后，r3 namespace
   `fullmdp-a-h48-v2-mujoco-idle-zero-aa42418b-r3-20260822`在物理GPU1运行。update0--19 H48 collection中位
   `9.391 s`，storage/reward finite且lifecycle/conservation fault为0。早期qdes forbidden在update25降到3、
   update26起为0，复现了旧lineage的短暂balance过渡；随后主要终止转为robot-table contact，episode均长
@@ -261,5 +268,33 @@ conservation均为0。相对上一同卡profiler-off中位`14.194 s/H48`下降�
 
 新Isaac连续ACK后，旧Isaac `661ff84b…`才按精确child identity停止；新MuJoCo连续ACK后，旧MuJoCo才停止。
 最终只保留两条`aa42418b` fresh lineage运行。两条都仍为`diagnostic_unauthorized=true`，没有resume、promotion、
-export、physics parity或部署授权。当前阶段判断是“早期balance + 部分mimic信号，尚未到task reveal”；符合
-balance→mimic→hit→landing顺序，但还没有证据验收mimic→hit或hit→landing交接。
+export、physics parity或部署授权。该切换快照的阶段判断是“早期balance + hidden reset-ready imitation信号，
+尚未到task/action mimic reveal”；符合balance→action mimic→hit→landing顺序，但还没有证据验收
+action mimic→hit或hit→landing交接。
+
+后续同进程自然推进已经给出第一次课程交接反例：Isaac update106出现
+`due/selected/ACCEPT=1/1/1`且defer/reject/CENSOR/fault全0；MuJoCo update49--59累计
+`due/reveal=9/9`、deferred=0，每个有task的update都产生非零且相等的R03 present/physically-valid rows。
+这证明上一阶段只要有row活过tick295，task/action-mimic分母立即打开，没有被R07 readiness再次阻断。Isaac尚未
+开始playback，两个backend的launch/contact/landing仍为0，所以击球/上台继续`未测`，不能用R03几何有效
+冒充真实接触。
+
+只读刷新到Isaac ACK176 / MuJoCo update118时，累计分母分别为
+`due/selected/construction/key=2/2/2/2`和`due/reveal=15/15`、deferred=0、R03
+present/physically-valid=`174/174`。Isaac recent10 collection中位`8.238 s/H48`、episode均长
+`148.93 tick`；MuJoCo对应为`9.585 s/H48`、`151.17 tick`。两端fault/nonfinite/conservation仍为0，
+但Isaac playback与两端launch/contact/landing仍为0。
+
+### 6.7 side-session建议的独立裁决
+
+- **采用且已完成：**保留既有100-step fused RK4，不重复实现；现役Isaac日志在task construction出现后仍无
+  eager-fallback warning。共享engine-neutral q-des guard也已在本source中由两端消费，alignment ledger为
+  `ALIGNED`，不是本轮待办。
+- **采用更窄实现：**没有先造一个新的巨型`ActionBallState`或C++层，而是从实测主墙删除no-key
+  ContactSensor读取和同writer重复自证；同卡H48匹配中位从`14.194 s`降到`6.346 s`。这是状态/数据流减法，
+  不是用gate包住旧结构。
+- **延后：**219→216的critic ABI收缩、完整single-state合并、optimizer-boundary numerical resume、
+  CUDA Graph/Warp capture。它们不解决本轮已定位的首墙，并会扩大checkpoint/optimizer/双后端语义面；后续
+  只按新profile或明确恢复需求独立实现。
+- **拒绝：**C++优先重写、缩H48、减少MuJoCo 20个contact substep、热补现役run或增加stage/safety gate。
+  这些要么没有当前因果证据，要么改变训练/接触问题。

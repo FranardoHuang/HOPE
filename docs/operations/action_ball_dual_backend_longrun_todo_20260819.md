@@ -100,17 +100,19 @@ checkpoint只保留历史，不是本轮exact-resume父本。
   chronology snapshot/store各只有毫秒量级。
 - [x] no-key路径删除contact读取，只保留独立source/reset-generation/Motion cadence chronology；
   critic `[216:219]`保持宽度但按N/A填零。keyed R07仍读取真实contact并计算support/slip/recovery。
-- [x] 删除同writer自证：caller不再重验construction-bound method identity；D05测试不再手造Motion true输入
-  再断言ACCEPT。独立consumer chronology、catalog tick295/cadence293和真实keyed反例仍保留。
+- [x] 删除同writer自证：R07 bundle不再重验已绑定ActionEpoch `snapshot_idle_*` getter identity；LeanRuntime
+  production component callpoint binding与callee owner核验仍保留。D05测试不再手造Motion true输入再断言
+  ACCEPT；独立consumer chronology、catalog tick295/cadence293和真实keyed反例仍保留。
 - [x] exact Pod分进程回归=`304 passed, 6 skipped`；no-key contact `.data` sentinel、keyed recovery、
   Epoch、profiler、Motion bridge、Physical hot lane、env install与D05 transaction均覆盖。
 - [x] 同卡H48 profile后`r07_idle_support_read=0 calls`；profiler-off匹配5轮中位`6.346 s/H48`，
   相对旧`14.194 s/H48`约降55%，且fault/CENSOR/nonfinite/conservation全0。
 - [x] 新Isaac连续ACK后精确停止旧Isaac；补齐ignored runtime三文件manifest后启动新MuJoCo，连续ACK后再
   精确停止旧MuJoCo。最终两条active run都绑定clean source `aa42418b…`且是fresh lineage。
-- [ ] 继续只读监测balance→mimic→reveal→launch/contact→landing。当前两端尚未活到first reveal tick295，
-  下游分母为0就写`未测`；只有上一阶段基本成功后下一阶段仍无exposure，才判课程交接故障。
-- [ ] MuJoCo早期qdes forbidden已在update26归零，现主要终止为robot-table contact；Isaac仍以fall为主。
+- [ ] 继续只读监测balance→action mimic→launch/contact→landing。两端均已验证row活过tick295时task exposure
+  立即打开；当前零分母只剩launch/contact/landing并记`未测`。只有action mimic已基本形成而后续仍无launch/
+  contact exposure，或hit已基本形成而landing仍无exposure，才判对应课程交接故障。
+- [ ] MuJoCo早期qdes forbidden已在update26基本归零，随后robot-table与fall占比继续波动；Isaac仍以fall为主。
   两者都属于policy可学习行为，先按原因/分母观察，不绕过真实joint/table termination，也不增加“安全”门。
 
 ## 1. 当前运行事实
@@ -121,15 +123,19 @@ checkpoint只保留历史，不是本轮exact-resume父本。
 backend/commit用于回答“哪套源码在哪个后端训练”，不是算法版本或可复用checkpoint标签。
 
 - Isaac：namespace `fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-20260822`，物理GPU2，launcher/child=
-  `2423802/2423818`。ACK67快照中recent20 collection中位`6.758 s/H48`，Reward finite且fault/CENSOR/
-  nonfinite/conservation均0；episode均长first10→recent10约`87.73→93.57 tick`，orientation mimic有上升但
-  balance尚未成功，due/reveal/launch/contact/landing分母均0。
+  `2423802/2423818`。ACK176只读刷新中recent10 collection中位`8.238 s/H48`，Reward finite且fault/CENSOR/
+  nonfinite/conservation均0；episode均长first10→recent10约`87.73→148.93 tick`。reset-ready imitation和
+  survival均有上升，但balance/action mimic尚未成功。
 - portable MuJoCo：namespace `fullmdp-a-h48-v2-mujoco-idle-zero-aa42418b-r3-20260822`，物理GPU1，
-  launcher/child=`2426696/2426711`。update0--19 collection中位`9.391 s/H48`，storage/Reward finite且全部
-  lifecycle/conservation fault为0；qdes forbidden在update26起归零，episode均长到update36约`122.3 tick`，
-  当前主要termination为robot-table contact。尚无due/reveal/launch/contact/landing，后四层均`未测`。
+  launcher/child=`2426696/2426711`。update118只读刷新中recent10 collection中位`9.585 s/H48`，storage/
+  Reward finite且全部lifecycle/conservation fault为0；episode均长从first10 `67.32`升到recent10
+  `151.17 tick`。早期qdes forbidden从近全episode降为recent10仅1次；fall/table比例仍波动，balance未成功。
 - 两端都严格是fresh、`diagnostic_unauthorized=true`；219 width只保留ABI，不给旧idle-foot-bit snapshot
   exact-resume语义。性能数字不授权physics promotion/export/deploy。
+- 最新阶段穿越：Isaac累计`due/selected/construction/key=2/2/2/2`且CENSOR/fault=0；MuJoCo累计
+  `due/reveal=15/15`、deferred=0，R03 present/physically-valid=`174/174`。说明上一阶段一有row活过tick295，
+  task/action-mimic入口立即开放。Isaac仍未playback；两端launch/contact/landing仍为0分母，击球与上台
+  继续`未测`。
 
 ### HISTORICAL / SUPERSEDED — 2026-08-22课程解阻后的上一批successor
 
@@ -334,7 +340,10 @@ MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，runtime资产与调
 [`setup_local_sync`](setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)，
 其余训练操作边界见[训练工序](run_training.md)。
 
-## 2026-08-22 dd82之后的执行TODO
+## HISTORICAL / SUPERSEDED — 2026-08-22 dd82之后的执行TODO
+
+本节保留`661ff84b`到首次细分profile的执行轨迹；未完成项已由本页§0.2的`aa42418b`裁决取代，不是第二份
+active队列。
 
 - [x] 保留`dd82bb7b` Isaac fresh只读运行，确认连续finite ACK、fault/CENSOR为0；早期episode尚未到tick295时，
   mimic/strike/landing按零分母记`未测`。
@@ -356,12 +365,10 @@ MuJoCo fork状态见[G06](../gates/G06_isaac_to_mujoco.md)，runtime资产与调
 - [x] 证伪`3e53f991…/19877d8d…`的845行bootstrap readiness旁路：同H48五轮collection仍为
   `13.84--14.59 s/update`，没有可用提速。它只缩窄Epoch clone，却保留Motion frame0、完整plant读取、
   13项R07误差和Motion install，因此不继续维护第二套bootstrap ABI。
-- [ ] 把全批no-key路径收成same-tick双脚support及其自身finite validity；`ready/dwell=0`，跳过Motion
-  frame0、完整plant、13项误差、raw/weighted recovery和Motion install。keyed post-shot recovery保持现状；
-  不改actor `203`、critic `219`宽度，不新增gate/owner/receipt/D2H。
-- [ ] exact Pod分进程回归no-key禁用昂贵调用、support finite/invalid、selected reset/stale frontier、
-  keyed fixed tape和203/219 observation；同时验证无新增D2H与CUDA fault边界不回退。
-- [ ] 在同一H48、同GPU档先跑5-update bounded profile，再以profiler-off matched strata验收；只有
-  `r07_readiness_no_key`消失且连续wall显著低于现役Isaac约15秒，才启动fresh Isaac successor。
-- [ ] successor取得连续durable ACK、finite Reward/observation、fault/CENSOR为0且wall稳定后，精确核对
-  PID/starttime/cmdline再只退役旧Isaac child；MuJoCo因本刀为Isaac-only且已约`9.5 s/H48`，继续只读长跑。
+- [x] **SUPERSEDED：**没有采用same-tick双脚support，因为它仍会触发昂贵ContactSensor读取；`aa42418b`
+  采用更窄且可证的N/A-zero no-key语义，keyed post-shot recovery保持现状。
+- [x] exact Pod按新语义完成`304 passed, 6 skipped`，包括contact `.data`禁读sentinel、selected reset/stale
+  chronology、keyed recovery和203/219 Observation。
+- [x] 同H48/GPU先跑5-update bounded profile再跑profiler-off matched 5轮；旧support-read归零，后者中位
+  `6.346 s/H48`，因此启动fresh Isaac successor。
+- [x] successor连续ACK/fault0后精确退役旧Isaac；随后同source启动fresh MuJoCo并在连续ACK后退役旧MuJoCo。

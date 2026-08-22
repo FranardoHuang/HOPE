@@ -4,9 +4,10 @@
 
 - 细分profile把Isaac旧`14.194 s/H48`主墙定位为无shot/key阶段读取两脚ContactSensor，单update约
   `7.41--8.03 s`；`aa42418b…`让该路径只发布独立source/reset/Motion chronology，critic `[216:219]`
-  按N/A填零且保持219宽度，keyed R07的真实contact/support/slip/recovery完全保留。删除同writer method
-  self-auth与手造D05 ACCEPT fixture，不新增actor observation、owner、receipt或安全Gate。数值语义改变，
-  因此只允许fresh lineage，不能把shape兼容写成exact resume。
+  按N/A填零且保持219宽度，keyed R07的真实contact/support/slip/recovery完全保留。只删除R07 bundle对
+  已绑定ActionEpoch getter的重复身份复核与手造D05 ACCEPT fixture；LeanRuntime production callpoint binding
+  仍保留。不新增actor observation、owner、receipt或安全Gate。数值语义改变，因此只允许fresh lineage，
+  不能把shape兼容写成exact resume。
 - clean exact Pod分进程回归=`304 passed, 6 skipped`。GPU2 profile的support-read为`0 calls`；profiler-off
   匹配5轮中位`6.346 s/H48`，较旧同卡约降55%，fault/CENSOR/nonfinite/conservation全0。新Isaac
   [fresh-only/no-resume](DEFINITIONS.md#fresh-only-no-resume)一次性namespace
@@ -14,10 +15,15 @@
 - portable MuJoCo新checkout先后因漏EPA build receipt、漏RSL3 wheel在首ACK前自然失败并封存；三文件固定
   SHA manifest恢复后，r3 namespace已在GPU1连续ACK，H48约`9.39 s`且storage/Reward/fault全绿。新backend
   各自稳定后才精确停止对应旧run，最终两条active lineage均绑定clean `aa42418b…`。
-- 当前两端仍在balance+mimic早期：Isaac episode均长约`87.7→93.6 tick`，MuJoCo到update36约
-  `122.3 tick`；Mu早期qdes forbidden已于update26归零，随后主要为robot-table contact。两端仍未活到
-  first reveal tick295，due/reveal/launch/contact/landing均为0分母并记`未测`。G05/G06保持`Partial`，
-  所有run仍`diagnostic_unauthorized=true`。
+- 切换快照中两端仍在balance/reset-ready imitation早期：Isaac episode均长约`87.7→93.6 tick`，MuJoCo
+  到update36约`122.3 tick`；Mu早期qdes forbidden已于update26归零，随后主要为robot-table contact。
+  后续Isaac update106已有`due/selected/ACCEPT=1/1/1`；MuJoCo update49--59累计`due/reveal=9/9`且R03
+  present/physically-valid非零，证明有row活过tick295时task/action-mimic入口立即开放。两端仍无
+  launch/contact/landing，击球与上台为`未测`。G05/G06保持`Partial`，所有run仍
+  `diagnostic_unauthorized=true`。
+- 最新只读刷新到Isaac ACK176 / MuJoCo update118：recent10分别为`8.238/9.585 s/H48`，episode均长
+  `148.93/151.17 tick`；Isaac累计task admission `2/2`，MuJoCo due/reveal=`15/15`且R03 valid=`174`。
+  两端fault/nonfinite/conservation仍为0，playback/launch/contact/landing结论不变。
 
 ## 2026-08-22 — FullMDP课程、D05 chronology与teacher解阻（branch candidate）
 

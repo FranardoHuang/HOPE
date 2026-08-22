@@ -2,14 +2,22 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-**2026-08-22课程/chronology解阻候选（Gate仍`Partial`）：**旧live约update500已学会1500-tick站立，
+**2026-08-22 `aa42418b`当前结论（Gate仍`Partial`）：**no-key ContactSensor主墙已删除；exact Pod=
+`304 passed, 6 skipped`，profiler-off匹配5轮中位`6.346 s/H48`。新Isaac到ACK176仍active/finite/fault0；
+随episode变长，recent10 collection中位为`8.238 s/H48`、episode均长`148.93 tick`。累计
+`due/selected/construction/key=2/2/2/2`、CENSOR=0，证明row一旦活到catalog first reveal tick295，task
+入口立即开放；playback/launch/contact/landing仍为0分母和`未测`。critic 219宽度虽不变，
+idle support/dwell已改为N/A zero，所以只允许fresh lineage。详细证据见本页末尾与
+[课程解阻实验§6.6](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+
+**HISTORICAL / SUPERSEDED — 2026-08-22课程/chronology解阻候选：**旧live约update500已学会1500-tick站立，
 但update305后所有due均CENSOR，故task分母为零不是“还需要更多step”。根因是Motion每个due推进ordinal，
 D05只在ACCEPT推进；首个活过second due tick295的row触发bit50并整批fanout。候选现按settled due推进
 cadence cursor、按ACCEPT推进task identity，并允许checkpoint保存“已消费due但尚无task”。fresh首次曝光改为
 catalog单一真源tick295；R07退出reveal、liveness和actor phase，只保留recovery Reward/critic/telemetry。
 hidden teacher同源reset-ready，reveal后joint/body同切frame0，body orientation采用`.4/1.0 rad` fine+coarse核。
-不新增actor observation、success Gate或PPO schedule。host可运行聚焦=`18 passed`；exact Pod与fresh ACK仍
-`未测`，所以不晋级。详细见
+不新增actor observation、success Gate或PPO schedule。host可运行聚焦=`18 passed`；本段形成时exact Pod与
+fresh ACK仍`未测`，其后已由上面的`aa42418b`实测取代。详细见
 [课程解阻实验](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
 
 **2026-08-22 fresh one-shot launch入口（branch candidate；Gate仍`Partial`）：**新增极简Isaac Full-A H48
@@ -74,11 +82,12 @@ control step不再各自先clone整份44-tensor Epoch record后才发现cache；
 `285.75 MiB/update`与2,112个clone/copy call；focused=`14 passed`。这不是wall实测，详见
 [hot-path实验§12](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#12-phase-c2bobservation先查cache再clone)。
 
-**2026-08-21 semantic Observation V2 branch candidate（Gate仍`Partial`）：**family A从旧229/399切到
+**HISTORICAL CONTRACT BASE — 2026-08-21 semantic Observation V2 branch candidate（Gate仍`Partial`）：**family A从旧229/399切到
 actor203/critic219；它恢复229迁移遗漏的floating-base state并删除raw task/owner/reward账，不做237/407机械
 扩维。R06 broad projection也缩为现有owner内的key8+publication live selection与四tensor输出，没有新增
-owner/receipt/Gate。R07 support/dwell复用同一真实post-physics plant sample；cold genesis为zero，selected
-reset仅精确`generation+1`行当帧清零，peer保持，下一真实publication恢复，不再第二次扫描全robot。
+owner/receipt/Gate。该版R07 support/dwell曾在idle也复用真实post-physics plant sample；这一数值语义已被
+本页顶部/末尾的`aa42418b` no-key N/A-zero合同取代。keyed recovery仍复用真实sample；selected reset仅精确
+`generation+1`行当帧清零，peer保持，下一真实keyed publication恢复，不在Observation第二次扫描全robot。
 Isaac Motion内部的三个解析计时量保持`float64`，仅在semantic pack边界显式转为policy合同的`float32`；
 真实`float64`夹具覆盖203/219 dtype、scale和critic-prefix，避免旧`float32`夹具把生产dtype不一致遮住。
 host implementation不能代签deploy producer、exact Pod ObservationManager、GPU
@@ -6641,8 +6650,9 @@ idle数值语义已变，所以必须fresh lineage，不能把旧snapshot写成e
 
 这是按`HANDOFF_TO_CODEX_20260808.md`重定范围，不是静默绕过：没有shot key就没有recovery业务事件，故该
 读取不是安全事实；finite、joint/table、真实keyed contact、shot key/generation、Reward守恒和optimizer后
-durable ACK仍由独立事实源fail-stop。caller的bound-method重复self-auth与D05手造ACCEPT self-proof被删除，
-callee owner核验、Observation独立chronology反例、catalog tick295/cadence293和keyed recovery反例均保留。
+durable ACK仍由独立事实源fail-stop。R07 bundle对已绑定ActionEpoch `snapshot_idle_*` getter的重复身份复核与
+D05手造ACCEPT self-proof被删除；LeanRuntime production component callpoint binding、callee owner核验、
+Observation独立chronology反例、catalog tick295/cadence293和keyed recovery反例均保留。
 
 clean exact Pod分进程回归=`304 passed, 6 skipped`。GPU2 5轮profile中
 `r07_idle_support_read=0 calls`，collection=`6.086/4.910/5.898/6.255/5.949 s`；profiler自动卸载后的
@@ -6652,7 +6662,8 @@ clean exact Pod分进程回归=`304 passed, 6 skipped`。GPU2 5轮profile中
 `fullmdp-a-h48-v2-isaac-idle-zero-aa42418b-20260822`到ACK67仍finite/fault0，recent20 collection中位
 `6.758 s/H48`；新MuJoCo r3也已连续ACK、storage/Reward/fault0，H48约`9.39 s`。
 
-两端当前episode仍主要因fall/table终止，尚未活到first reveal tick295；due/reveal/launch/contact/landing
-分母为0，击球与上台统一为`未测`。因此这次结果关闭的是“当前no-key主墙是否删除”和“双后端是否fresh
-运行”，不关闭balance/mimic成功、阶段交接、physics parity、12500 completion、resume、export、部署或
-真机安全，G05继续`Partial`且`diagnostic_unauthorized=true`。
+后续自然推进中，Isaac update106首次出现`due/selected/ACCEPT=1/1/1`且CENSOR/fault=0；MuJoCo
+update49--59累计`due/reveal=9/9`且每个task update的R03 present/physically-valid rows均非零。这关闭的是
+“上一阶段一旦有row活过tick295，task/action-mimic入口是否立即开放”，不等于balance/action mimic成功；
+两端launch/contact/landing仍为0分母，击球与上台继续`未测`。本轮也不关闭physics parity、12500
+completion、resume、export、部署或真机安全，G05继续`Partial`且`diagnostic_unauthorized=true`。
