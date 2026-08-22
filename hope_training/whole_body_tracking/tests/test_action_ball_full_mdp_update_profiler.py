@@ -117,7 +117,7 @@ class _R07Bundle:
         self.plant_fact_adapter = _PlantAdapter()
         self.motion_owner = motion
 
-    def refresh_epoch_readiness_without_keyed_facts(self, *args, **kwargs):
+    def refresh_epoch_idle_support_without_keyed_facts(self, *args, **kwargs):
         return args, kwargs
 
     def publish_epoch_reward_facts(self, *args, **kwargs):
@@ -231,7 +231,7 @@ def test_exact_profiler_counts_real_callpoints_and_auto_restores(monkeypatch):
     assert env.step(object()) == "done"
     assert (
         env._full_mdp_runtime_owner._full_mdp_profile_runtime_call(
-            "r07_readiness_no_key", lambda: "profiled"
+            "r07_idle_support", lambda: "profiled"
         )
         == "profiled"
     )

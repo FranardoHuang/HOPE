@@ -622,19 +622,21 @@ class DiagnosticN2ContinuousRecoveryBundle:
             publish_keyed_action_epoch=True,
         )
 
-    def refresh_epoch_readiness_without_keyed_facts(
-        self, *, current_source_step: torch.Tensor
-    ) -> "ContinuousRecoveryObservationState":
+    def refresh_epoch_idle_support_without_keyed_facts(
+        self, *, current_source_step: int
+    ) -> None:
         """Publish only same-tick support for an unkeyed observation."""
 
         owner = self._require_bound_owner()
         epoch_owner = self.action_epoch_owner
-        step = owner._tensor(
-            current_source_step,
-            label="R07 idle-support current_source_step",
-            shape=(owner.num_envs,),
-            dtype=torch.int64,
-        )
+        if (
+            isinstance(current_source_step, bool)
+            or not isinstance(current_source_step, int)
+            or current_source_step < 0
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 idle-support current_source_step is malformed"
+            )
         snapshot_name = "snapshot_idle_support_facts"
         snapshot_facts = getattr(epoch_owner, snapshot_name, None)
         exact_snapshot = getattr(type(epoch_owner), snapshot_name, None)
@@ -657,17 +659,18 @@ class DiagnosticN2ContinuousRecoveryBundle:
             label="R07 idle-support Motion cadence tick",
             shape=(owner.num_envs,),
             dtype=torch.int64,
-        ).detach().clone()
+        )
         support = self.plant_fact_adapter.read_idle_foot_support(
             support_contact_threshold=owner.profile.support_contact_threshold,
         )
-        return owner.publish_action_epoch_idle_support(
+        owner.publish_action_epoch_idle_support(
             support,
             epoch_facts=epoch_facts,
-            current_source_step=step,
+            current_source_step=current_source_step,
             motion_cadence_tick=motion_cadence_tick,
             action_epoch_owner=epoch_owner,
         )
+        return None
 
     def _publish_epoch_reward_facts(
         self,
@@ -1993,6 +1996,15 @@ class ContinuousRecoveryDeviceCoordinator:
             (n,), -1, **lo
         )
         self._action_epoch_ready_last_source_step = -1
+        self._idle_observation_published = False
+        self._idle_observation_postphysics_valid = torch.zeros(n, **bo)
+        self._idle_observation_source_step = torch.full((n,), -1, **lo)
+        self._idle_observation_reset_generation = torch.full((n,), -1, **lo)
+        self._idle_observation_control_tick = torch.full((n,), -1, **lo)
+        self._idle_observation_ready_streak = torch.zeros(n, **lo)
+        self._idle_observation_foot_supported_lr = torch.zeros(
+            (n, self.num_feet), **bo
+        )
 
         self._fault_bits = torch.zeros(n, **lo)
         self._cache_pending = torch.zeros(n, **bo)
@@ -3713,18 +3725,20 @@ class ContinuousRecoveryDeviceCoordinator:
         support: _IdleFootSupportFacts,
         *,
         epoch_facts: object,
-        current_source_step: torch.Tensor,
+        current_source_step: int,
         motion_cadence_tick: torch.Tensor,
         action_epoch_owner: object,
-    ) -> ContinuousRecoveryObservationState:
+    ) -> None:
         """Publish the independent contact fact needed by the idle critic."""
 
-        step = self._tensor(
-            current_source_step,
-            label="R07 idle-support current_source_step",
-            shape=(self.num_envs,),
-            dtype=torch.int64,
-        )
+        if (
+            isinstance(current_source_step, bool)
+            or not isinstance(current_source_step, int)
+            or current_source_step < 0
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 idle-support current_source_step is malformed"
+            )
         motion_tick = self._tensor(
             motion_cadence_tick,
             label="R07 idle-support Motion cadence tick",
@@ -3784,8 +3798,10 @@ class ContinuousRecoveryDeviceCoordinator:
             raise ContinuousRecoveryDeviceError(
                 "R07 idle-support source step is malformed"
             )
-        chronology_valid = step.eq(source_step) & step.ge(0)
-        postphysics_valid = support_valid & chronology_valid
+        if source_step != current_source_step:
+            raise ContinuousRecoveryDeviceError(
+                "R07 idle-support source step differs from runtime"
+            )
 
         self._require_action_epoch_readiness_chronology(
             observed_source_step=source_step,
@@ -3801,56 +3817,24 @@ class ContinuousRecoveryDeviceCoordinator:
         self._action_epoch_ready_instant.zero_()
         self._action_epoch_ready_live.zero_()
         self._action_epoch_ready_streak.zero_()
-        self._action_epoch_ready_reference_kind.zero_()
-        self._action_epoch_ready_reference_action_slot.fill_(-1)
-        self._action_epoch_ready_reference_action_uid.fill_(-1)
-        for field in fields(_row_identity.ActionEpochShotKey):
-            getattr(self._action_epoch_ready_shot_key, field.name).fill_(-1)
-        self._action_epoch_first_ready_source_step.fill_(-1)
         self._action_epoch_ready_last_motion_cadence_tick.copy_(motion_tick)
         self._action_epoch_ready_last_reset_generation.copy_(reset_generation)
         self._action_epoch_ready_last_source_step = source_step
 
-        zeros = torch.zeros(
-            self.num_envs, dtype=torch.int64, device=self.device
+        torch._assert_async(
+            torch.all(motion_tick < torch.iinfo(torch.int64).max)
         )
-        published_source_step = torch.where(
-            postphysics_valid, step, torch.full_like(step, -1)
-        )
-        control_tick = torch.where(
-            motion_tick < torch.iinfo(torch.int64).max,
-            motion_tick + 1,
-            torch.full_like(motion_tick, -1),
-        )
-        payload = _MotionReadyPayload(
-            owner_identity=self._identity,
-            owner=self,
-            postphysics_valid=postphysics_valid.detach().clone(),
-            source_step=published_source_step.detach().clone(),
-            reset_generation=reset_generation.detach().clone(),
-            control_tick=control_tick.detach().clone(),
-            ready=torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
-            ),
-            ready_streak=zeros.detach().clone(),
-            required_dwell=int(self.profile.ready_dwell_ticks),
-            foot_supported_lr=foot_supported_lr.detach().clone(),
-        )
-        self._latest_motion_ready_projection = _mint_full_mdp_identity(
-            ContinuousRecoveryMotionReadyProjection,
-            _MOTION_READY_REGISTRY,
-            payload,
-        )
+        self._idle_observation_postphysics_valid.copy_(support_valid)
+        self._idle_observation_source_step.fill_(current_source_step)
+        self._idle_observation_source_step.masked_fill_(~support_valid, -1)
+        self._idle_observation_reset_generation.copy_(reset_generation)
+        self._idle_observation_control_tick.copy_(motion_tick).add_(1)
+        self._idle_observation_ready_streak.zero_()
+        self._idle_observation_foot_supported_lr.copy_(foot_supported_lr)
+        self._idle_observation_published = True
+        self._latest_motion_ready_projection = None
         self._advance_mutation_version()
-        return ContinuousRecoveryObservationState(
-            postphysics_valid=payload.postphysics_valid.detach().clone(),
-            source_step=payload.source_step.detach().clone(),
-            reset_generation=payload.reset_generation.detach().clone(),
-            control_tick=payload.control_tick.detach().clone(),
-            ready_streak=payload.ready_streak.detach().clone(),
-            required_dwell=payload.required_dwell,
-            foot_supported_lr=payload.foot_supported_lr.detach().clone(),
-        )
+        return None
 
     def _require_action_epoch_motion_cadence_chronology(
         self,
@@ -4131,6 +4115,7 @@ class ContinuousRecoveryDeviceCoordinator:
             _MOTION_READY_REGISTRY,
             motion_ready_payload,
         )
+        self._idle_observation_published = False
         self._advance_mutation_version()
 
     def publish_after_physics(
@@ -4397,6 +4382,7 @@ class ContinuousRecoveryDeviceCoordinator:
             _MOTION_READY_REGISTRY,
             motion_ready_payload,
         )
+        self._idle_observation_published = False
 
         zeros = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -4439,6 +4425,28 @@ class ContinuousRecoveryDeviceCoordinator:
             )
         projection = self._latest_motion_ready_projection
         if projection is None:
+            if self._idle_observation_published:
+                return ContinuousRecoveryObservationState(
+                    postphysics_valid=(
+                        self._idle_observation_postphysics_valid.detach().clone()
+                    ),
+                    source_step=(
+                        self._idle_observation_source_step.detach().clone()
+                    ),
+                    reset_generation=(
+                        self._idle_observation_reset_generation.detach().clone()
+                    ),
+                    control_tick=(
+                        self._idle_observation_control_tick.detach().clone()
+                    ),
+                    ready_streak=(
+                        self._idle_observation_ready_streak.detach().clone()
+                    ),
+                    required_dwell=int(self.profile.ready_dwell_ticks),
+                    foot_supported_lr=(
+                        self._idle_observation_foot_supported_lr.detach().clone()
+                    ),
+                )
             if self._action_epoch_ready_last_source_step >= 0:
                 raise ContinuousRecoveryDeviceError(
                     "R07 observation state lost its post-physics publication"

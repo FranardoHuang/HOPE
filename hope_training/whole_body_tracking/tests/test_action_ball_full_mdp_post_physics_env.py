@@ -671,7 +671,7 @@ class _R07:
         )
         return None
 
-    def refresh_epoch_readiness_without_keyed_facts(
+    def refresh_epoch_idle_support_without_keyed_facts(
         self, *, current_source_step
     ):
         self.trace.append(

@@ -1388,25 +1388,29 @@ class ActionBallFullMdpLeanRuntimeOwner:
                                     "Racket epoch strike-fact publisher must return None"
                                 )
                         recovery_method = (
-                            "refresh_epoch_readiness_without_keyed_facts"
+                            "refresh_epoch_idle_support_without_keyed_facts"
                             if not activity.keyed_epoch_work
                             else "publish_epoch_reward_facts"
                         )
                         recovery_publish = self._bound_plain_method(
                             self._r07_recovery, recovery_method
                         )
-                        source_step = torch.full(
-                            (self._epoch.num_envs,),
-                            control - 1,
-                            dtype=torch.int64,
-                            device=self._epoch.device,
+                        source_step = (
+                            torch.full(
+                                (self._epoch.num_envs,),
+                                control - 1,
+                                dtype=torch.int64,
+                                device=self._epoch.device,
+                            )
+                            if activity.keyed_epoch_work
+                            else control - 1
                         )
                         if profile_call is None:
                             recovery_publish(current_source_step=source_step)
                         else:
                             profile_call(
                                 (
-                                    "r07_readiness_no_key"
+                                    "r07_idle_support"
                                     if not activity.keyed_epoch_work
                                     else "r07_keyed_publish"
                                 ),

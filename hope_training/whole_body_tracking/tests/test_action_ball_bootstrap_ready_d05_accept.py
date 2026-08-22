@@ -1,4 +1,4 @@
-"""Cold-bootstrap R07 readiness must authorize the first real D05 row."""
+"""Fresh first-task exposure must not depend on R07 recovery readiness."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ D05 = rowwise.D05
 EPOCH = D05._require_action_epoch_module()
 
 
-def _arm_production_d05_from_motion_ready(
+def _arm_production_d05_from_fresh_motion(
     motion,
     epoch_owner,
     d05_owner: D05.DeviceR05Owner,
@@ -92,64 +92,28 @@ def _arm_production_d05_from_motion_ready(
     return token, record
 
 
-def test_cold_bootstrap_real_r07_facts_authorize_first_d05_accept(
+def test_fresh_first_d05_accepts_without_r07_publication_or_install(
     monkeypatch,
 ) -> None:
     device = torch.device("cpu")
-    env, motion, robot, sensor = live._subject(monkeypatch, device=device)
-    env.common_step_counter = 0
-    sensor.data.net_forces_w.zero_()
-    for name in live.FEET:
-        sensor.data.net_forces_w[:, live.BODY_NAMES.index(name), 2] = 10.0
-    robot.data.body_lin_vel_w.zero_()
+    env, motion, _robot, _sensor = live._subject(monkeypatch, device=device)
 
     epoch_owner = motion._diagnostic_test_epoch_owner
     d05_owner = motion._diagnostic_test_device_r05_owner
-    bundle = live._construct_bundle(
-        env=env,
-        motion=motion,
-        action_epoch_owner=epoch_owner,
+    assert motion._action_ball_continuous_fresh_motion_lane_bound is True
+    assert motion._action_ball_continuous_r07_ready_owner is None
+    assert motion._action_ball_continuous_r07_ready_projection is None
+    # This is the legacy ready source.  Fresh training must ignore even an
+    # explicitly false value instead of requiring an R07 bootstrap verdict.
+    motion._action_ball_continuous_ready_authority = torch.zeros(
+        motion.num_envs, dtype=torch.bool, device=device
     )
-    motion.bind_action_ball_continuous_r07_ready_projection(
-        bundle.owner,
-        require_owned_ready_projection=(
-            bundle.owner.require_owned_motion_ready_projection
-        ),
-    )
-
-    first = live._publish_epoch_reward_facts(
-        bundle,
-        motion,
-        cadence_tick=0,
-        current_source_step=torch.zeros(2, dtype=torch.int64),
-    )
-    first_ready = bundle.require_owned_motion_ready_projection(
-        bundle.motion_ready_projection(), owner_kind="motion"
-    )
-    assert first.ready_instant.tolist() == [True, True]
-    assert first_ready.ready.tolist() == [False, False]
-
-    env.common_step_counter = 1
-    second = live._publish_epoch_reward_facts(
-        bundle,
-        motion,
-        cadence_tick=1,
-        current_source_step=torch.ones(2, dtype=torch.int64),
-    )
-    projection = bundle.motion_ready_projection()
-    second_ready = bundle.require_owned_motion_ready_projection(
-        projection, owner_kind="motion"
-    )
-    assert second.ready_instant.tolist() == [True, True]
-    assert second_ready.ready.tolist() == [True, True]
-    assert second_ready.control_tick.tolist() == [2, 2]
-
-    motion.install_action_ball_continuous_r07_ready_projection(projection)
     env.common_step_counter = 2
     motion._advance_action_ball_continuous_motion_cadence()
+    assert motion._action_ball_continuous_r07_ready_projection is None
     assert motion._action_ball_continuous_ready_at_reveal.tolist() == [True, True]
 
-    token, d05_record = _arm_production_d05_from_motion_ready(
+    token, d05_record = _arm_production_d05_from_fresh_motion(
         motion,
         epoch_owner,
         d05_owner,
