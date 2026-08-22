@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields, replace
 import math
 from pathlib import Path
 import sys
@@ -662,6 +662,12 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
         env=env, motion=motion, action_epoch_owner=epoch_owner
     )
     commit_head = epoch_owner.commit_head
+    original_current = epoch_v1.ActionEpochOwner.current
+
+    def reject_full_epoch_clone():
+        raise AssertionError("bootstrap readiness cloned the full ActionEpoch")
+
+    monkeypatch.setattr(epoch_owner, "current", reject_full_epoch_clone)
 
     def reject_keyed_write(*_args, **_kwargs):
         raise AssertionError("bootstrap readiness reached a keyed epoch write")
@@ -693,7 +699,7 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     assert epoch_owner.commit_head == commit_head
     # Genesis has no action row that could own reward facts.  Bootstrap
     # readiness therefore advances only the R07 owner-private dwell state.
-    record = epoch_owner.current()
+    record = original_current(epoch_owner)
     owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
     assert record.fact_valid_bits[:, :, owner_slot].eq(0).all()
     assert record.owner_fault_bits[:, :, owner_slot].eq(0).all()
@@ -721,10 +727,263 @@ def test_cold_idle_bootstrap_requires_two_real_facts_for_control_two_ready(
     # full shot key, so it must not poison ActionEpoch by publishing keyed R07
     # telemetry against the neutral genesis rows.
     assert not bool(epoch_owner._undecoded_overflow.any())
-    record = epoch_owner.current()
+    record = original_current(epoch_owner)
     owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
     assert record.fact_valid_bits[:, :, owner_slot].eq(0).all()
     assert record.owner_fault_bits[:, :, owner_slot].eq(0).all()
+
+
+def test_bootstrap_fastpath_matches_generic_no_key_fixed_tape(monkeypatch):
+    device = torch.device("cpu")
+
+    def subject():
+        env, motion, robot, sensor = _subject(monkeypatch, device=device)
+        env.common_step_counter = 0
+        sensor.data.net_forces_w.zero_()
+        for name in FEET:
+            sensor.data.net_forces_w[:, BODY_NAMES.index(name), 2] = 10.0
+        robot.data.body_lin_vel_w.zero_()
+        epoch_owner = motion._diagnostic_test_epoch_owner
+        bundle = _construct_bundle(
+            env=env, motion=motion, action_epoch_owner=epoch_owner
+        )
+        motion._action_ball_continuous_episode_step.zero_()
+        return motion, bundle, epoch_owner
+
+    old_motion, old_bundle, old_epoch = subject()
+    new_motion, new_bundle, new_epoch = subject()
+    old_before = old_epoch.current()
+    new_before = new_epoch.current()
+    source_step = torch.zeros(2, dtype=torch.int64, device=device)
+    generic = old_bundle._publish_epoch_reward_facts(
+        current_source_step=source_step,
+        publish_keyed_action_epoch=False,
+    )
+    fast = new_bundle.refresh_epoch_readiness_without_keyed_facts(
+        current_source_step=source_step,
+    )
+    for field in fields(recovery.R07EpochDirectRewardFacts):
+        old_value = getattr(generic, field.name)
+        new_value = getattr(fast, field.name)
+        assert torch.equal(old_value, new_value), field.name
+
+    generic_ready = old_bundle.require_owned_motion_ready_projection(
+        old_bundle.motion_ready_projection(), owner_kind="motion"
+    )
+    fast_ready = new_bundle.require_owned_motion_ready_projection(
+        new_bundle.motion_ready_projection(), owner_kind="motion"
+    )
+    for name in ("ready", "ready_streak", "control_tick"):
+        assert torch.equal(
+            getattr(generic_ready, name), getattr(fast_ready, name)
+        ), name
+    assert generic_ready.required_dwell == fast_ready.required_dwell
+    assert old_bundle.owner._mutation_version == new_bundle.owner._mutation_version
+    assert torch.equal(
+        old_bundle.owner._ready_instant_total,
+        new_bundle.owner._ready_instant_total,
+    )
+    assert torch.equal(
+        old_bundle.owner._first_ready_total,
+        new_bundle.owner._first_ready_total,
+    )
+
+    assert old_epoch.commit_head == new_epoch.commit_head == 1
+    old_after = old_epoch.current()
+    new_after = new_epoch.current()
+    for name in (
+        "owner_fault_bits",
+        "fact_valid_bits",
+        "fact_source_step",
+        "fact_f32",
+        "writes_started",
+        "writes_committed",
+    ):
+        assert torch.equal(getattr(old_before, name), getattr(old_after, name))
+        assert torch.equal(getattr(new_before, name), getattr(new_after, name))
+    for key_field in fields(epoch_v1.ActionEpochShotKey):
+        assert torch.equal(
+            getattr(old_before.identity.shot_key, key_field.name),
+            getattr(old_after.identity.shot_key, key_field.name),
+        )
+        assert torch.equal(
+            getattr(new_before.identity.shot_key, key_field.name),
+            getattr(new_after.identity.shot_key, key_field.name),
+        )
+    assert old_motion is not new_motion
+
+
+def test_bootstrap_motion_reference_is_real_frame0_and_has_no_live_alias(
+    monkeypatch,
+):
+    device = torch.device("cpu")
+    _env, motion, _robot, _sensor = _subject(monkeypatch, device=device)
+    reference = motion.project_action_ball_full_mdp_bootstrap_ready_reference()
+    starts = motion.motion.seg_start[motion.clip_id]
+    expected_root = (
+        motion.motion.body_pos_w[starts, 0] + motion._env.scene.env_origins
+    )
+    assert torch.equal(reference.root_position_m, expected_root)
+    assert torch.equal(reference.joint_position_rad, motion.motion.joint_pos[starts])
+    assert reference.cadence_tick.data_ptr() != (
+        motion._action_ball_continuous_episode_step.data_ptr()
+    )
+    assert reference.root_position_m.data_ptr() != motion.motion.body_pos_w.data_ptr()
+    assert reference.joint_position_rad.data_ptr() != motion.motion.joint_pos.data_ptr()
+    assert reference.body_position_m.data_ptr() != motion.motion.body_pos_w.data_ptr()
+    before = motion.motion.joint_pos.clone()
+    reference.joint_position_rad.add_(1.0)
+    assert torch.equal(motion.motion.joint_pos, before)
+
+
+def test_bootstrap_fastpath_subset_reset_restarts_only_selected_dwell(
+    monkeypatch,
+):
+    device = torch.device("cpu")
+    env, motion, robot, sensor = _subject(monkeypatch, device=device)
+    sensor.data.net_forces_w.zero_()
+    for name in FEET:
+        sensor.data.net_forces_w[:, BODY_NAMES.index(name), 2] = 10.0
+    robot.data.body_lin_vel_w.zero_()
+    epoch_owner = motion._diagnostic_test_epoch_owner
+    bundle = _construct_bundle(
+        env=env, motion=motion, action_epoch_owner=epoch_owner
+    )
+
+    env.common_step_counter = 0
+    first = _refresh_epoch_readiness_without_keyed_facts(
+        bundle,
+        motion,
+        cadence_tick=0,
+        current_source_step=torch.zeros(2, dtype=torch.int64),
+    )
+    assert first.reset_generation.tolist() == [0, 0]
+    assert bundle.owner._action_epoch_ready_streak.tolist() == [1, 1]
+
+    record = epoch_owner._publication.current
+    assert record is not None
+    reset_generation = record.reset_generation.clone()
+    reset_generation[0] += 1
+    selected = torch.tensor([True, False], dtype=torch.bool, device=device)
+    reset_record = replace(
+        record,
+        version=record.version + 1,
+        reset_generation=reset_generation,
+        reset_selected_mask=selected,
+    )
+    epoch_owner._publication = replace(
+        epoch_owner._publication, current=reset_record
+    )
+    epoch_owner._reset_generation = reset_record.reset_generation
+    epoch_owner._commit_head += 1
+
+    env.common_step_counter = 1
+    second = _refresh_epoch_readiness_without_keyed_facts(
+        bundle,
+        motion,
+        cadence_tick=1,
+        current_source_step=torch.ones(2, dtype=torch.int64),
+    )
+    assert second.reset_generation.tolist() == [1, 0]
+    ready = bundle.require_owned_motion_ready_projection(
+        bundle.motion_ready_projection(), owner_kind="motion"
+    )
+    assert ready.ready_streak.tolist() == [1, 2]
+    assert ready.ready.tolist() == [False, True]
+
+
+@pytest.mark.parametrize(
+    ("malformation", "expected_r07_fault"),
+    (
+        (
+            "phase",
+            recovery.R07_EPOCH_FAULT_BOOTSTRAP_SLOT_OR_PHASE,
+        ),
+        (
+            "key",
+            recovery.R07_EPOCH_FAULT_BOOTSTRAP_NONNEUTRAL_KEY,
+        ),
+        (
+            "writer",
+            recovery.R07_EPOCH_FAULT_BOOTSTRAP_DIRTY_WRITER,
+        ),
+    ),
+)
+def test_bootstrap_fastpath_preserves_malformed_epoch_fault_telemetry(
+    monkeypatch, malformation, expected_r07_fault
+):
+    device = torch.device("cpu")
+    env, motion, robot, sensor = _subject(monkeypatch, device=device)
+    env.common_step_counter = 0
+    sensor.data.net_forces_w.zero_()
+    for name in FEET:
+        sensor.data.net_forces_w[:, BODY_NAMES.index(name), 2] = 10.0
+    robot.data.body_lin_vel_w.zero_()
+    epoch_owner = motion._diagnostic_test_epoch_owner
+    bundle = _construct_bundle(
+        env=env, motion=motion, action_epoch_owner=epoch_owner
+    )
+    record = epoch_owner._publication.current
+    assert record is not None
+    if malformation == "phase":
+        phase = record.phase.clone()
+        phase[0, 0] = epoch_v1.PHASE_REVEAL_COMMITTED
+        record = replace(record, phase=phase)
+    elif malformation == "key":
+        key = record.identity.shot_key.clone()
+        key.action_uid[0, 0] = 21
+        record = replace(
+            record,
+            identity=replace(record.identity, shot_key=key),
+        )
+    else:
+        writes_started = record.writes_started.clone()
+        writes_started[
+            0, 0, epoch_v1.OWNER_ORDER.index("motion")
+        ] = True
+        record = replace(record, writes_started=writes_started)
+    epoch_owner._publication = replace(epoch_owner._publication, current=record)
+
+    result = _refresh_epoch_readiness_without_keyed_facts(
+        bundle,
+        motion,
+        cadence_tick=0,
+        current_source_step=torch.zeros(2, dtype=torch.int64),
+    )
+    assert result.facts_valid.tolist() == [False, True]
+    assert result.ready_instant.tolist() == [False, True]
+    assert int(result.producer_fault_bits[0]) & expected_r07_fault
+    assert int(result.producer_fault_bits[0]) & (
+        recovery.R07_EPOCH_FAULT_INVALID_REFERENCE
+    )
+    assert int(result.producer_fault_bits[1]) == 0
+
+
+def test_bootstrap_view_rejects_snapshot_when_epoch_advances(monkeypatch):
+    device = torch.device("cpu")
+    env, motion, _robot, _sensor = _subject(monkeypatch, device=device)
+    env.common_step_counter = 0
+    epoch_owner = motion._diagnostic_test_epoch_owner
+    bundle = _construct_bundle(
+        env=env, motion=motion, action_epoch_owner=epoch_owner
+    )
+    epoch_facts = epoch_owner.snapshot_bootstrap_readiness_facts(owner=bundle)
+    reference = motion.project_action_ball_full_mdp_bootstrap_ready_reference()
+    facts = bundle.plant_fact_adapter.read()
+    epoch_owner._commit_head += 1
+    with pytest.raises(
+        recovery.ContinuousRecoveryDeviceError,
+        match="bootstrap epoch facts differ",
+    ):
+        bundle.owner.action_epoch_bootstrap_readiness_view(
+            facts,
+            reference=reference,
+            epoch_facts=epoch_facts,
+            current_source_step=torch.zeros(2, dtype=torch.int64),
+            adapter_source_step=0,
+            motion_owner=motion,
+            action_epoch_owner=epoch_owner,
+        )
 
 
 def test_epoch_publish_reads_one_action_epoch_snapshot(monkeypatch):

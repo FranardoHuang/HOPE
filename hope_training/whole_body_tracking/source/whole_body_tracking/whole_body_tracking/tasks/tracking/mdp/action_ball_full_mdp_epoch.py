@@ -108,6 +108,13 @@ PHASE_REJECTED = 4
 PHASE_REWARD_SETTLED = 7
 PHASE_DEFERRED = 10
 
+# Device-only bootstrap-readiness diagnostics.  These are numerical facts,
+# never host gates or admission authority.
+BOOTSTRAP_READINESS_FAULT_SLOT_OR_PHASE = 1 << 0
+BOOTSTRAP_READINESS_FAULT_NONNEUTRAL_KEY = 1 << 1
+BOOTSTRAP_READINESS_FAULT_DIRTY_WRITER = 1 << 2
+BOOTSTRAP_READINESS_FAULT_RESET_GENERATION = 1 << 3
+
 D05_DECISION_NONE = 0
 D05_DECISION_ACCEPT = 1
 D05_DECISION_CENSOR = 2
@@ -205,6 +212,15 @@ class EpochTaskPayload:
 class RecoveryReferenceLifecycleMasks:
     upcoming: torch.Tensor
     completed: torch.Tensor
+
+
+@dataclass(frozen=True)
+class ActionEpochBootstrapReadinessFacts:
+    """Narrow clone-only ActionEpoch inputs for unkeyed R07 readiness."""
+
+    epoch_version: int
+    reset_generation: torch.Tensor
+    bootstrap_fault_bits: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -795,6 +811,69 @@ class ActionEpochOwner:
                     | phase.eq(PHASE_RETIRED)
                 )
             ).detach()
+
+    def snapshot_bootstrap_readiness_facts(
+        self, *, owner: object
+    ) -> ActionEpochBootstrapReadinessFacts:
+        """Clone only facts R07 needs when no row owns a full shot key.
+
+        The caller is the already-bound R07 fact owner.  All canonical-idle
+        checks remain device facts and feed the ordinary R07 producer-fault
+        lane; this method performs no device-to-host verdict and exposes no
+        live ActionEpoch tensor.
+        """
+
+        with self._lock:
+            self._healthy()
+            record = self._publication.current
+            if (
+                record is None
+                or self._fact_owner_identities.get("r07_recovery") is not owner
+            ):
+                raise ActionEpochError(
+                    "bootstrap readiness owner identity differs"
+                )
+            env_ids = torch.arange(
+                self.num_envs, dtype=torch.int64, device=self.device
+            )
+            slots = record.current_task_slot
+            slot_valid = slots.ge(0) & slots.lt(self.shot_slot_capacity)
+            safe_slots = torch.clamp(
+                slots, min=0, max=self.shot_slot_capacity - 1
+            )
+            phase = record.phase[env_ids, safe_slots]
+            fault_bits = (
+                (~slot_valid | phase.ne(PHASE_IDLE)).to(torch.int64)
+                * BOOTSTRAP_READINESS_FAULT_SLOT_OR_PHASE
+            )
+            key_neutral = torch.ones(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            for field in fields(ActionEpochShotKey):
+                key_neutral &= getattr(
+                    record.identity.shot_key, field.name
+                )[env_ids, safe_slots].eq(-1)
+            fault_bits |= (
+                (~key_neutral).to(torch.int64)
+                * BOOTSTRAP_READINESS_FAULT_NONNEUTRAL_KEY
+            )
+            writer_dirty = (
+                record.writes_started[env_ids, safe_slots].any(dim=1)
+                | record.writes_committed[env_ids, safe_slots].any(dim=1)
+            )
+            fault_bits |= (
+                writer_dirty.to(torch.int64)
+                * BOOTSTRAP_READINESS_FAULT_DIRTY_WRITER
+            )
+            fault_bits |= (
+                record.reset_generation.lt(0).to(torch.int64)
+                * BOOTSTRAP_READINESS_FAULT_RESET_GENERATION
+            )
+            return ActionEpochBootstrapReadinessFacts(
+                epoch_version=record.version,
+                reset_generation=record.reset_generation.detach().clone(),
+                bootstrap_fault_bits=fault_bits.detach().clone(),
+            )
 
     @contextmanager
     def _operation(
@@ -3962,6 +4041,7 @@ class ActionEpochOwner:
 
 
 __all__ = [
+    "ActionEpochBootstrapReadinessFacts",
     "ActionEpochCheckpoint",
     "ActionEpochClosedRows",
     "ActionEpochD05AcceptedRows",

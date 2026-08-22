@@ -160,6 +160,23 @@ class ActionBallFullMdpCompletedActionFrame0Reference:
     producer_fault_bits: torch.Tensor
 
 
+@dataclass(frozen=True)
+class _ActionBallFullMdpBootstrapFrame0Reference:
+    """Clone-only upcoming frame-0 facts for bootstrap readiness."""
+
+    motion_owner: object
+    cadence_tick: torch.Tensor
+    reference_action_slot: torch.Tensor
+    reference_action_uid: torch.Tensor
+    root_position_m: torch.Tensor
+    root_orientation_wxyz: torch.Tensor
+    joint_position_rad: torch.Tensor
+    body_position_m: torch.Tensor
+    body_orientation_wxyz: torch.Tensor
+    station_anchor_xy_m: torch.Tensor
+    producer_fault_bits: torch.Tensor
+
+
 def require_action_ball_full_mdp_diagnostic_catalog_cfg_bindings(
     motion_cfg: object,
     racket_cfg: object,
@@ -6514,6 +6531,124 @@ class MotionCommand(CommandTerm):
             station_anchor_xy_m=root_position[:, :2].detach().clone(),
             validity=validity.detach().clone(),
             producer_fault_bits=producer_fault_bits.detach().clone(),
+        )
+
+    def project_action_ball_full_mdp_bootstrap_ready_reference(
+        self,
+    ) -> _ActionBallFullMdpBootstrapFrame0Reference:
+        """Snapshot the real upcoming action frame 0 without reading Epoch rows.
+
+        This is the unkeyed bootstrap half of the recovery reference.  Motion
+        still selects the code-owned upcoming action and real immutable clip
+        frame; current robot pose and synthetic zero targets never enter it.
+        Every returned tensor is an isolated value, not a live owner borrow.
+        """
+
+        epoch_owner = self._action_ball_full_mdp_motion_epoch_owner
+        if epoch_owner is None:
+            raise RuntimeError("Motion frame-0 reference requires its bound epoch")
+        if self._action_ball_continuous_motion_poisoned or epoch_owner.poisoned:
+            raise RuntimeError("Motion frame-0 reference owner is poisoned")
+        from whole_body_tracking.robots.agibot_a3 import A3_UPPER_TRACKED
+
+        device = torch.device(self.device)
+        n = self.num_envs
+        schedule = self._action_ball_continuous_schedule_projection
+        if not isinstance(schedule, MappingProxyType):
+            raise RuntimeError("Motion frame-0 reference lacks its parent schedule")
+        upcoming_action_slot = schedule.get("upcoming_action_slot")
+        upcoming_action_uid = schedule.get("upcoming_action_uid")
+        motion_clip_id = self._action_ball_full_mdp_motion_exact_tensor(
+            self.clip_id,
+            name="frame0.action_slot",
+            device=device,
+            dtype=torch.int64,
+            shape=(n,),
+        )
+        code_owned_action_uids = (
+            self._action_ball_continuous_code_owned_action_uids()
+        )
+        if tuple(self.cfg.body_names)[0] != self.robot.body_names[0]:
+            raise RuntimeError("Motion frame-0 action/root binding differs")
+        ordered_body_names = tuple(A3_UPPER_TRACKED)
+        configured_body_names = tuple(self.cfg.body_names)
+        if (
+            not ordered_body_names
+            or len(set(ordered_body_names)) != len(ordered_body_names)
+            or any(name not in configured_body_names for name in ordered_body_names)
+        ):
+            raise RuntimeError("Motion frame-0 A3 upper-body order is unavailable")
+        body_slots = torch.tensor(
+            [configured_body_names.index(name) for name in ordered_body_names],
+            dtype=torch.int64,
+            device=device,
+        )
+        action_uids = torch.as_tensor(
+            code_owned_action_uids,
+            dtype=torch.int64,
+            device=device,
+        )
+        if (
+            tuple(action_uids.shape) != (self.motion.num_segments,)
+            or action_uids.device != device
+            or action_uids.dtype != torch.int64
+        ):
+            raise RuntimeError("Motion frame-0 action UID table differs")
+
+        action_slot_valid = (
+            motion_clip_id.ge(0)
+            & motion_clip_id.lt(self.motion.num_segments)
+        )
+        safe_action_slot = torch.clamp(
+            motion_clip_id, min=0, max=self.motion.num_segments - 1
+        )
+        starts = self.motion.seg_start[safe_action_slot]
+        root_position = (
+            self.motion.body_pos_w[starts, 0]
+            + self._env.scene.env_origins
+        )
+        root_orientation = self.motion.body_quat_w[starts, 0]
+        joint_position = self.motion.joint_pos[starts]
+        body_position = (
+            self.motion.body_pos_w[starts][:, body_slots]
+            + self._env.scene.env_origins[:, None, :]
+        )
+        body_orientation = self.motion.body_quat_w[starts][:, body_slots]
+        selected_uid = action_uids[safe_action_slot]
+        schedule_identity_valid = (
+            action_slot_valid
+            & selected_uid.gt(0)
+            & motion_clip_id.eq(upcoming_action_slot)
+            & selected_uid.eq(upcoming_action_uid)
+        )
+        numeric_valid = (
+            torch.isfinite(root_position).all(dim=1)
+            & torch.isfinite(root_orientation).all(dim=1)
+            & torch.isfinite(joint_position).all(dim=1)
+            & torch.isfinite(body_position).reshape(n, -1).all(dim=1)
+            & torch.isfinite(body_orientation).reshape(n, -1).all(dim=1)
+        )
+        producer_fault_bits = (
+            (~schedule_identity_valid).to(dtype=torch.int64)
+            | ((~numeric_valid).to(dtype=torch.int64) << 1)
+        )
+        return _ActionBallFullMdpBootstrapFrame0Reference(
+            motion_owner=self,
+            cadence_tick=(
+                self._action_ball_continuous_episode_step.detach().clone()
+            ),
+            reference_action_slot=motion_clip_id.detach().clone(),
+            reference_action_uid=selected_uid.detach().clone(),
+            # Every geometry value below is freshly allocated by advanced
+            # indexing or addition.  Detach preserves isolation without a
+            # second full-N copy.
+            root_position_m=root_position.detach(),
+            root_orientation_wxyz=root_orientation.detach(),
+            joint_position_rad=joint_position.detach(),
+            body_position_m=body_position.detach(),
+            body_orientation_wxyz=body_orientation.detach(),
+            station_anchor_xy_m=root_position[:, :2].detach().clone(),
+            producer_fault_bits=producer_fault_bits.detach(),
         )
 
     def project_action_ball_full_mdp_completed_action_frame0_reference(

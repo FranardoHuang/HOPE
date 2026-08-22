@@ -446,6 +446,65 @@ def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
         epoch.project_keyed_postphysics_activity_mask(owner=object())
 
 
+def test_bootstrap_readiness_snapshot_is_narrow_clone_only_and_owner_bound():
+    epoch, _d05, _cadence, _r06, _playback, _motion, _racket, _physical = (
+        _ready_epoch()
+    )
+    r07 = object()
+    epoch.bind_fact_owner("r07_recovery", r07)
+    record = epoch._publication.current
+    assert record is not None
+    with _NoHostTensorObservation():
+        facts = epoch.snapshot_bootstrap_readiness_facts(owner=r07)
+    assert type(facts) is E.ActionEpochBootstrapReadinessFacts
+    assert facts.epoch_version == record.version
+    assert facts.bootstrap_fault_bits.eq(0).all()
+    assert facts.reset_generation.data_ptr() != record.reset_generation.data_ptr()
+    facts.reset_generation.add_(10)
+    assert record.reset_generation.tolist() == [0, 0]
+    with pytest.raises(E.ActionEpochError, match="owner identity"):
+        epoch.snapshot_bootstrap_readiness_facts(owner=object())
+
+
+@pytest.mark.parametrize(
+    ("malformation", "expected_fault"),
+    (
+        ("phase", E.BOOTSTRAP_READINESS_FAULT_SLOT_OR_PHASE),
+        ("key", E.BOOTSTRAP_READINESS_FAULT_NONNEUTRAL_KEY),
+        ("writer", E.BOOTSTRAP_READINESS_FAULT_DIRTY_WRITER),
+    ),
+)
+def test_bootstrap_readiness_snapshot_preserves_malformed_device_faults(
+    malformation, expected_fault
+):
+    epoch, _d05, _cadence, _r06, _playback, _motion, _racket, _physical = (
+        _ready_epoch()
+    )
+    r07 = object()
+    epoch.bind_fact_owner("r07_recovery", r07)
+    record = epoch._publication.current
+    assert record is not None
+    if malformation == "phase":
+        phase = record.phase.clone()
+        phase[0, 0] = E.PHASE_REVEAL_COMMITTED
+        record = replace(record, phase=phase)
+    elif malformation == "key":
+        key = record.identity.shot_key.clone()
+        key.action_uid[0, 0] = 21
+        record = replace(
+            record,
+            identity=replace(record.identity, shot_key=key),
+        )
+    else:
+        writes_started = record.writes_started.clone()
+        writes_started[0, 0, E.OWNER_ORDER.index("motion")] = True
+        record = replace(record, writes_started=writes_started)
+    epoch._publication = replace(epoch._publication, current=record)
+    facts = epoch.snapshot_bootstrap_readiness_facts(owner=r07)
+    assert int(facts.bootstrap_fault_bits[0]) & expected_fault
+    assert int(facts.bootstrap_fault_bits[1]) == 0
+
+
 @pytest.mark.parametrize(
     ("catalog_uids", "family_codes", "family", "attributed"),
     (((21,), (2,), 2, True), ((999,), (1,), 0, False)),
