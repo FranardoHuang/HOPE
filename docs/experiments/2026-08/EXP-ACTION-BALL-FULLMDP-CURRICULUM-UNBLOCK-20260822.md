@@ -581,7 +581,7 @@ learned `log_std`/init sigma `.02`，不能把H48误写成性能修复。自查�
   而是让direct scene、postphysics和R06全程只用typed key/publication，并由Physical唯一推进observation
   ordinal与球心continuity；legacy API保持独立。参数化legacy digest=`0/23`的launch→3 substeps→retire
   反例单文件=`2 passed`：ordinal `[0,1,2]`、相邻previous/current闭合、publication恒8，retire清typed
-  identity/continuity且peer逐字节不变；九文件host联合=`202 passed,17 skipped`。landing diagnostic N2的
+  identity/continuity且peer逐字节不变；九文件host联合=`203 passed,17 skipped`。landing diagnostic N2的
   stale fixture仅补生产合同已要求的`replicate_physics=True/env_prim_paths`。17项skip需要CUDA/SimulationApp，
   Pod exact Isaac/CUDA N=2仍未测。
 - Physical/R06曾把producer fault写进owner journal，却没有进入唯一pre-optimizer row verdict；这是典型
@@ -640,3 +640,12 @@ plant authority。上述hot-path仍要求fixed-tape/reason/counter与现有测�
 D2H、canonical/flat双import和三层stamp/receipt echo已经审计确认，但先defer到Pod matched-state profile，
 不冒充本轮已完成。在clean commit、exact Pod parity、fresh namespace
 连续ACK与profiler-off wall产生前，V5不得写成已提速、已验证或Gate完成。
+
+Pod首轮GPU反例进一步固定了课程边界：clean `67612c41…`的CPU合同为
+`457 passed,6 skipped,0 failed`，EPA48 GPU direct五项为`4 passed,1 failed`；唯一失败的CUDA-only断言仍把
+旧R07 readiness当成ACCEPT权威，而production与既有host mutation均是`due & (IDLE | RETIRED)`直接曝光，
+R07只提供recovery telemetry/reward。故采纳的是删除tests-only ready注入和旧断言，让真实GPU测试直接覆盖
+“balance survival→mimic question”的无额外Gate交接；不是把production改回R07 admission。并行审计还把
+Mu child从numeric GPU index改为已核UUID，并让它继承同一GPU flock open-file-description，去掉枚举偶然性和
+parent-only lifetime假设。更新后的host launcher=`21 passed`、transition=`62 passed,6 skipped`；必须在新的
+clean commit上重跑GPU direct/RSL update和fresh 1/5 ACK后才能采用为运行证据。

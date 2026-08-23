@@ -4159,7 +4159,7 @@ def test_real_n2_timeout_reset_preserves_every_peer_reset_owned_row_exactly():
     not RUN_GPU_DIRECT,
     reason="requires the exact MuJoCo-Warp GPU environment and A3 assets",
 )
-def test_real_full_a_n1_zero_action_due_accepts_or_defers_without_next_tick_retry():
+def test_real_full_a_n1_zero_action_due_accepts_without_r07_admission_or_retry():
     env = _gpu_env(num_envs=1, full_a_mode=True)
     try:
         zero = torch.zeros((1, 31), device=env.device)
@@ -4172,9 +4172,11 @@ def test_real_full_a_n1_zero_action_due_accepts_or_defers_without_next_tick_retr
         assert not bool(dones0.any())
         assert not bool(tick1["full_a_reveal_due_event"][0])
         assert not bool(tick1["full_a_reveal_event"][0])
-        task_before = env._epoch_task_f32.clone()
-        clocks_before = env._epoch_clock_ticks.clone()
+        # The balance prefix itself earns the first learnable question.  R07
+        # remains recovery telemetry/reward and must not become a second,
+        # all-of admission gate for motion/ball exposure.
         ready_before_due = bool(env._full_a_cadence_ready[0])
+        assert not ready_before_due
 
         _, _, dones0, extras0 = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
@@ -4182,28 +4184,16 @@ def test_real_full_a_n1_zero_action_due_accepts_or_defers_without_next_tick_retr
         assert bool(extras0["full_a_reveal_due_event"][0])
         accepted = bool(extras0["full_a_reveal_event"][0])
         deferred = bool(extras0["full_a_reveal_deferred_event"][0])
-        assert accepted ^ deferred
+        assert accepted
+        assert not deferred
         assert not bool(extras0["full_a_launch_event"][0])
-        assert accepted == ready_before_due
-        if deferred:
-            assert (
-                extras0["full_a_phase_before_reset"][0]
-                == wait_env.FULL_A_PHASE_IDLE
-            )
-        else:
-            assert (
-                extras0["full_a_phase_before_reset"][0]
-                == wait_env.FULL_A_PHASE_REVEAL_COMMITTED
-            )
+        assert (
+            extras0["full_a_phase_before_reset"][0]
+            == wait_env.FULL_A_PHASE_REVEAL_COMMITTED
+        )
         if not bool(dones0[0]):
-            if deferred:
-                assert not bool(env._epoch_task_valid[0])
-                assert not bool(env._epoch_selected[0])
-                assert torch.equal(env._epoch_task_f32, task_before)
-                assert torch.equal(env._epoch_clock_ticks, clocks_before)
-            else:
-                assert bool(env._epoch_task_valid[0])
-                assert bool(env._epoch_selected[0])
+            assert bool(env._epoch_task_valid[0])
+            assert bool(env._epoch_selected[0])
             assert torch.equal(env.reset_generation, generation)
             assert int(env._full_a_next_reveal_tick[0]) == (
                 int(env._full_a_cadence.first_reveal_tick)
@@ -4212,17 +4202,14 @@ def test_real_full_a_n1_zero_action_due_accepts_or_defers_without_next_tick_retr
         assert not bool(extras0["full_a_r03_present_event"][0])
         assert torch.count_nonzero(extras0["reward_terms"][:, :14]) == 0
 
-        # Either verdict consumes this frozen opportunity; DEFER is zero-write
-        # and neither verdict may slide the opportunity to the next tick.
+        # ACCEPT consumes this frozen opportunity and cannot slide it to the
+        # next tick.  Busy rows exercise the rowwise DEFER path separately.
         _, _, dones1, extras1 = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
         )
         assert not bool(extras1["full_a_reveal_due_event"][0])
         assert not bool(extras1["full_a_reveal_event"][0])
         assert not bool(extras1["full_a_reveal_deferred_event"][0])
-        if deferred and not bool(dones0[0]) and not bool(dones1[0]):
-            assert torch.equal(env._epoch_task_f32, task_before)
-            assert torch.equal(env._epoch_clock_ticks, clocks_before)
         if not bool(dones0[0]) and not bool(dones1[0]):
             assert torch.equal(env.reset_generation, generation)
 
@@ -4244,11 +4231,9 @@ def test_real_full_a_n1_launch_reports_live_selected_rubber_contact():
             env.step(zero), num_envs=1
         )
         assert not bool(tick1["full_a_reveal_due_event"][0])
-        # This test owns the downstream live-contact callpoint, not policy
-        # readiness.  Install a tests-only ready fact before the real frozen
-        # production tick-295 opportunity; it is never business evidence.
-        env._full_a_cadence_ready_streak[:] = 2
-        env._full_a_cadence_ready[:] = True
+        # This test owns the downstream live-contact callpoint.  Survival to
+        # the real frozen tick-295 opportunity exposes the question directly;
+        # no tests-only readiness override may hide that production contract.
         _, _, _, reveal = _assert_full_a_step_surface(
             env.step(zero), num_envs=1
         )
@@ -4348,10 +4333,9 @@ def test_real_full_a_n2_selected_outcome_preserves_peer_rows():
             env.step(zero), num_envs=2
         )
         assert not bool(tick1["full_a_reveal_due_event"].any())
-        # Isolate the peer/outcome callpoint from an untrained policy's live
-        # readiness.  Natural ACCEPT/DEFER remains covered by the N=1 test.
-        env._full_a_cadence_ready_streak[:] = 2
-        env._full_a_cadence_ready[:] = True
+        # Survival to the frozen opportunity exposes both rows directly.
+        # Keep this peer/outcome test on the production path without a
+        # tests-only R07 readiness override.
         _, _, _, reveal = _assert_full_a_step_surface(
             env.step(zero), num_envs=2
         )

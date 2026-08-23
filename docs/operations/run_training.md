@@ -227,8 +227,11 @@ owner-local-frame digest；完整字段见
 [`runtime_attach v2`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)。这些path-free事实进入schema-5
 ACK/completion。dry-run只打印固定H48 argv/env、plant locator与expected identity，不查GPU、建run root或
 冒充live augmented-model verification。
-真实模式持lock覆盖唯一child lifetime，等待自然rc并
-原样返回；child的cwd固定为fresh run root，使`MUJOCO_LOG.TXT`等底层fallback产物不能污染source checkout；
+真实模式先按`nvidia-smi index→UUID`核选卡空闲，再把**同一UUID**直接写入child
+`CUDA_VISIBLE_DEVICES`，不假定numeric CUDA enumeration与`nvidia-smi` index偶然一致。GPU flock的同一
+open-file-description通过`pass_fds`由child继承：parent等待自然rc并原样返回，即使parent异常退出，仍存活的
+唯一child也继续持有lifetime lock，直到自身退出；child的cwd固定为fresh run root，使`MUJOCO_LOG.TXT`等
+底层fallback产物不能污染source checkout；
 没有monitor、retry、resume、signal或`ACCEPT`门。Pod1 clean detached `2e4279ba`已用真实venv
 完成dry-run，且未建root、未查GPU、未改lock；real run未闭合前仍不得把host`11 passed`或dry-run写成
 发车授权。当前`96f0ca69…` real已在GPU2运行并取得durable ACK；完整证据边界见

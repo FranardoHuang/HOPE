@@ -57,7 +57,7 @@
 > `outcome_sha/generation/observation`，fresh direct中的零digest与停滞ordinal会破坏identity/continuity。
 > V5 direct只认typed 8-field key+publication，并由Physical推进substep ordinal与previous/current center；
 > legacy API保持独立。legacy digest=`0/23`参数化三substep反例=`2 passed`，九文件host联合=
-> `202 passed,17 skipped`；17项skip需要CUDA/SimulationApp，Pod exact Isaac/CUDA N=2仍未测。
+> `203 passed,17 skipped`；17项skip需要CUDA/SimulationApp，Pod exact Isaac/CUDA N=2仍未测。
 >
 > 本轮性能只采用两项有直接数据流证据的减法：MuJoCo contact扫描从`41→21/control`、H48从
 > `1968→1008/update`（host联合=`335 passed,10 skipped`；CPU microbenchmark ratio `.647`不代签GPU wall），
@@ -74,6 +74,14 @@
 > plant contract=`13 passed`，runner identity=`12 passed,39 deselected`，但formal N1/N2/CUDA仍未测。
 > 本轮40个受影响test文件全部逐fresh Python=`1724 passed,66 skipped,0 failed`，修改/新增Python
 > `py_compile`与whole-diff check通过；66项skip不代签exact Pod/CUDA、fixed-tape、launcher或真实wall。
+>
+> clean `67612c41…`的独立Pod checkout随后得到CPU合同`457 passed,6 skipped,0 failed`与双launcher
+> dry-run；首轮EPA48 GPU direct五项为`4 passed,1 failed`。唯一失败的CUDA test仍断言旧
+> `ACCEPT == R07 ready`并注入tests-only ready bit；production与同文件host mutation的现役合同均为
+> “存活到due就曝光，只有busy lifecycle才逐row DEFER”，所以修复是删除旧oracle/注入，不是把R07重新变成
+> admission Gate。并行审计还让Mu child直接消费已核GPU UUID并继承同一GPU flock，删除numeric enumeration
+> 与parent-only lifetime两项假设；host launcher=`21 passed`、transition=`62 passed,6 skipped`。这些改动
+> 必须以新的clean commit在Pod重跑GPU direct/RSL update与fresh ACK，当前仍不授权发车结论。
 
 ### 2026-08-23 current adoption table
 

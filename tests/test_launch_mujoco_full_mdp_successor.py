@@ -91,6 +91,15 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
 import fcntl, json, os, pathlib, sys, time
 root = pathlib.Path.cwd()
 base = root.parents[2]
+lock_stat = os.stat(base / "gpu.lock", follow_symlinks=False)
+inherited_lock_fds = []
+for candidate in range(3, 256):
+    try:
+        row = os.fstat(candidate)
+    except OSError:
+        continue
+    if candidate > 2 and (row.st_dev, row.st_ino) == (lock_stat.st_dev, lock_stat.st_ino):
+        inherited_lock_fds.append(candidate)
 fd = os.open(base / "gpu.lock", os.O_RDWR)
 held = False
 try:
@@ -111,6 +120,7 @@ names = ["CUDA_DEVICE_ORDER", "CUDA_VISIBLE_DEVICES", "PYTHONNOUSERSITE", "PYTHO
 warp_cache = pathlib.Path(os.environ["WARP_CACHE_PATH"])
 cuda_cache = pathlib.Path(os.environ["CUDA_CACHE_PATH"])
 payload = {"argv": sys.argv[1:], "cwd": os.getcwd(), "lock_held": held,
+           "inherited_lock_fds": inherited_lock_fds,
            "env": {name: os.environ.get(name) for name in names},
            "warp_cache_is_dir": warp_cache.is_dir(),
            "cuda_cache_is_dir": cuda_cache.is_dir()}
@@ -238,7 +248,7 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
                     "LANG": rig.module.CHILD_LOCALE,
                     "LC_ALL": rig.module.CHILD_LOCALE,
                     "LC_CTYPE": rig.module.CHILD_LOCALE,
-                    "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
+                    "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": UUID, "PYTHONNOUSERSITE": "1",
                     "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
                     "A3_PINGPONG_XML": str(rig.plant_xml),
                     "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"),
@@ -260,7 +270,7 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
 
 def test_child_env_is_closed_and_rejects_ambient_inheritance(rig) -> None:
     contract = rig.module._env_contract(
-        2,
+        UUID,
         rig.ready_pose,
         rig.plant_xml,
         rig.module._paths(rig.root),
@@ -436,6 +446,7 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert (rig.root / "warp_cache" / "fake-compiled-kernel").read_text() == "run-owned cache"
     assert not (rig.repo / "MUJOCO_LOG.TXT").exists()
     assert record["lock_held"] is True
+    assert len(record["inherited_lock_fds"]) == 1
     assert record["env"] == {
         "PATH": rig.module.CHILD_PATH,
         "HOME": str(rig.root / "home"),
@@ -446,7 +457,7 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
         "LANG": rig.module.CHILD_LOCALE,
         "LC_ALL": rig.module.CHILD_LOCALE,
         "LC_CTYPE": rig.module.CHILD_LOCALE,
-        "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
+        "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": UUID, "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
         "A3_PINGPONG_XML": str(rig.plant_xml),
         "WARP_CACHE_PATH": str(rig.root / "warp_cache"),

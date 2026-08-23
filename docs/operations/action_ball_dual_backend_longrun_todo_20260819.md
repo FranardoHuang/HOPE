@@ -258,7 +258,7 @@ phase也不再混称：**Epoch phase**是shot业务carry-state（`IDLE→REVEAL�
   substep的observation ordinal与previous/current center由Physical唯一拥有；legacy digest API保持独立，
   不造假digest来喂direct。参数化legacy digest=`0/23`的真实launch→3 substeps→retire单文件反例=`2 passed`：
   ordinal为`[0,1,2]`、`previous[i]=current[i-1]`、publication恒为8，retire清typed identity/continuity且健康
-  peer逐字节不变；九文件host联合=`202 passed,17 skipped`。landing diagnostic N2的stale fixture只补生产合同
+  peer逐字节不变；九文件host联合=`203 passed,17 skipped`。landing diagnostic N2的stale fixture只补生产合同
   已要求的`replicate_physics=True/env_prim_paths`。17项skip需要CUDA/SimulationApp，故Pod exact Isaac/CUDA
   N=2仍未测，host不得代签formal ready。
 - **Adopt — 删除写后无人读与异步自证：** Physical/R06的producer fault不能只写进journal、再被唯一
@@ -291,6 +291,11 @@ phase也不再混称：**Epoch phase**是shot业务carry-state（`IDLE→REVEAL�
   `12 passed,39 deselected`。它不把vendor base MJB误称augmented runtime，也不合并backend physics；
   formal N1/N2与semantic-mutation
   registration receipt未闭合前仍只是diagnostic candidate。
+- **Adopt — launcher身份减法：** Pod GPU反例前的独立审计发现Mu child仍把已核的GPU UUID降成numeric
+  `CUDA_VISIBLE_DEVICES`，且flock只由等待中的parent持有。V5后续候选直接把已核UUID交给CUDA，并把同一
+  locked open-file-description传给唯一child；这删除index-enumeration假设，也让parent异常退出时child仍不能
+  丢失GPU lifetime ownership。它不新增业务Gate或monitor/retry；host launcher=`21 passed`，exact Pod
+  child PID→UUID、继承fd/inode与退出后解锁仍须在fresh commit复验。
 - **Adopt — 渐进结构：** 长期中心只收敛成single
   `PlantFacts → ActionBallState transition → StepTelemetry`：backend-local adapter只交本step独立物理事实，
   唯一纯transition拥有lifecycle/identity/payment状态，telemetry再流向既有WAL/ACK且不回喂policy。
@@ -318,7 +323,11 @@ phase也不再混称：**Epoch phase**是shot业务carry-state（`IDLE→REVEAL�
 - [ ] exact Pod使用独立`--no-hardlinks` clean checkout恢复固定SHA资产；19:23 CST预检时Pod root overlay/`/tmp`只余约
   `134 MiB`，所有HOME/TMP/XDG/CUDA/Warp/pycache/pytest basetemp必须显式落到`/workspace`。先逐文件
   fresh-process回归再联合收集，随后双launcher dry-run、真实1/5 ACK consumer与profiler-off H48 wall；
-  host skip、瞬时空GPU或旧V4 runtime cache都不得代签。
+  host skip、瞬时空GPU或旧V4 runtime cache都不得代签。第一份clean commit `67612c41…`已在独立Pod checkout
+  得到CPU合同`457 passed,6 skipped,0 failed`及双launcher dry-run；真实GPU direct为`4 passed,1 failed`，
+  唯一失败是GPU test仍把已删除的R07 admission当成ACCEPT权威，而同文件host反例和production均明确
+  “survival到due即曝光”。该stale oracle已修，连同UUID/child-lock改动必须在新的clean commit上重跑，故本项
+  仍未勾选。
 - [ ] 仅在successor exact ready且live queue/lock重新对账后精确收口V4 MuJoCo，fresh启动Isaac/MuJoCo；
   两边至少连续ACK `0..4`、finite/fault0后才宣布切换完成，再按balance→mimic→hit→landing继续观察。
 

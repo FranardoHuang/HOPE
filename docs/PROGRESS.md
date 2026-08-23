@@ -13,7 +13,7 @@
   actor/critic保持`203/219`（203-D已含所需8维root状态），`history_length=0`；237-D、新offset、新balance
   Reward/Stage均拒绝，`history=8`在无alias反例前延后。PPO保持H48、GAE `lambda=.98`。
 - direct Physical typed identity反例已闭合host：legacy digest=`0/23`的launch→3 substeps→retire单文件
-  `2 passed`，九文件联合=`202 passed,17 skipped`；ordinal=`[0,1,2]`、previous/current连续、retire清typed
+  `2 passed`，九文件联合=`203 passed,17 skipped`；ordinal=`[0,1,2]`、previous/current连续、retire清typed
   continuity且peer不变。另把Physical/R06 write-only fault接入唯一具名pre-optimizer drain，并把selected-rubber
   identity冲突改为坏row neutral/具名fault、健康peer继续。ActionEpoch注册表按源码动态核验为33项：既有
   bit0--26，另有Physical/R06六个稀疏ingress bit41--46；ActionEpoch全文件=`81 passed,7 skipped`，真实
@@ -28,6 +28,13 @@
 - 本轮40个受影响test文件全部逐fresh Python=`1724 passed,66 skipped,0 failed`；修改/新增Python
   `py_compile`与whole-diff check通过。66项skip不代签exact Pod/CUDA、fixed-tape、launcher、fresh双run或
   真实wall，故当前只关闭host实现，不关闭发车验收。
+- clean commit `67612c41…`的独立Pod checkout已完成CPU合同`457 passed,6 skipped,0 failed`、三份runtime
+  wheel/receipt SHA与双launcher dry-run。首轮真实Mu CUDA五个节点为`4 passed,1 failed`：失败断言仍要求
+  `ACCEPT == R07 ready`，与production及既有host“survival到due直接曝光、R07只作telemetry/reward”合同冲突；
+  候选已删除该tests-only readiness override，并让GPU反例直接证明无R07 admission。同时Mu launcher把选定
+  UUID直接交给CUDA并让child继承同一GPU flock，删除numeric enumeration和parent-only lock两项隐藏假设；
+  host launcher=`21 passed`、Mu transition=`62 passed,6 skipped`。新clean commit的Pod GPU重跑与fresh ACK
+  尚未闭合，故不把这次4/5写成发车通过。
 
 ## HISTORICAL / SUPERSEDED — 2026-08-23 V3阶段复核、第一性原理审计与fresh V4候选
 

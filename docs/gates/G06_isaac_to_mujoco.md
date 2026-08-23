@@ -2448,3 +2448,11 @@ direct/RSL一轮更新、双launcher dry-run、profiler-off wall及fresh双后�
 已完成plant/physics parity或可替换V4；formal registration、真实contact/landing、12500 completion、transfer、
 export、部署和真机仍未测。独立plant/finite/full-key/optimizer/durable ACK继续fail closed，same-writer
 self-proof与任务成功率不新增为安全Gate。G06保持`Partial`。
+
+首个clean V5 commit `67612c41…`随后在独立Pod checkout完成CPU合同`457 passed,6 skipped,0 failed`与双
+launcher dry-run。真实EPA48 GPU direct五项得到`4 passed,1 failed`；唯一失败不是production admission失效，
+而是CUDA-only test仍断言旧`ACCEPT == R07 ready`并注入tests-only ready bit。production及同文件host反例的
+现役合同均为“存活到due即曝光，只有busy lifecycle才逐row DEFER”，因此候选删除该旧oracle/注入，并保留真实
+contact与N2 peer callpoint。并行launcher审计还删除两项运行身份假设：child直接消费已核GPU UUID而非numeric
+index，并继承parent取得的同一flock open-file-description。更新后的host launcher=`21 passed`、Mu transition=
+`62 passed,6 skipped`；新commit尚未在Pod重跑，故这一段不关闭GPU/direct、1/5 ACK或wall项，G06仍`Partial`。

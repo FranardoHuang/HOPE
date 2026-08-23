@@ -242,7 +242,7 @@ def _child_argv(
 
 
 def _env_contract(
-    gpu_index: int, ready_pose: Path, plant_xml: Path, paths: dict[str, Path]
+    gpu_uuid: str, ready_pose: Path, plant_xml: Path, paths: dict[str, Path]
 ) -> dict[str, object]:
     return {
         "set": {
@@ -260,7 +260,10 @@ def _env_contract(
             "LC_ALL": CHILD_LOCALE,
             "LC_CTYPE": CHILD_LOCALE,
             "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
-            "CUDA_VISIBLE_DEVICES": str(gpu_index),
+            # CUDA accepts a GPU UUID directly.  Bind the child to the exact
+            # identity that the launcher just checked with nvidia-smi instead
+            # of assuming its numeric index shares CUDA's enumeration order.
+            "CUDA_VISIBLE_DEVICES": gpu_uuid,
             "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "A3_PINGPONG_XML": str(plant_xml),
@@ -342,7 +345,7 @@ def _exclusive_lock(path: Path):
         os.close(descriptor)
         raise LaunchError("cannot acquire GPU launch lock") from exc
     try:
-        yield
+        yield descriptor
     finally:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
@@ -375,7 +378,9 @@ def launch(args: argparse.Namespace) -> int:
     python, runner, ready_pose, plant_xml, root = _validate_inputs(args)
     paths = _paths(root)
     argv = _child_argv(python, runner, paths, commit, args.namespace)
-    contract = _env_contract(args.gpu_index, ready_pose, plant_xml, paths)
+    contract = _env_contract(
+        args.expected_gpu_uuid, ready_pose, plant_xml, paths
+    )
     if args.dry_run:
         plant_identity = _plant_contract_module().expected_plant_model_identity()
         print(json.dumps({
@@ -386,7 +391,7 @@ def launch(args: argparse.Namespace) -> int:
             },
         }, sort_keys=True, separators=(",", ":")))
         return 0
-    with _exclusive_lock(args.lock_file):
+    with _exclusive_lock(args.lock_file) as gpu_lock:
         _gpu_is_free(args.gpu_index, args.expected_gpu_uuid)
         _create_root(root, paths)
         try:
@@ -406,7 +411,7 @@ def launch(args: argparse.Namespace) -> int:
                     # owns every such process-local fallback artifact.
                     argv, cwd=root, env=_child_env(contract),
                     stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-                    close_fds=True,
+                    close_fds=True, pass_fds=(gpu_lock,),
                 )
             except OSError as exc:
                 raise LaunchError("cannot start Full-A child") from exc
