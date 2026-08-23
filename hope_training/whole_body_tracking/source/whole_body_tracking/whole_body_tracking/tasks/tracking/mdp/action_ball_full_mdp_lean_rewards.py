@@ -45,6 +45,7 @@ if len(ORDERED_CONSUMERS) != LIFECYCLE_PAYMENT_COUNT:
     raise RuntimeError("lean Reward ABI is not exactly fourteen consumers")
 
 R03_NAMES = tuple(name.split(":", 1)[1] for name in ORDERED_CONSUMERS[:10])
+_R03_ERROR_COMPONENT_BY_ORDINAL = (0, 1, 2, 0, 1, 2, 0, 1, 2, 3)
 LIFECYCLE_MANAGER_NAMES = tuple(
     name.split(":", 1)[1] for name in ORDERED_CONSUMERS
 )
@@ -117,6 +118,15 @@ class DirectR03RewardFacts:
 
 
 @dataclass(frozen=True)
+class _PackedR03RewardCycle:
+    """One frozen selected-slot decode shared by the ten R03 consumers."""
+
+    clean_errors: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+    finite: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+    admitted: torch.Tensor
+
+
+@dataclass(frozen=True)
 class DirectR06RewardFacts:
     """Compatibility decode of the immutable R06 epoch fact slice."""
 
@@ -183,6 +193,7 @@ class LeanActionEpochRewardGraph:
         self.shot_slot_capacity = epoch_owner.shot_slot_capacity
         self.device = epoch_owner.device
         self._cycle_epoch: epoch_v1.ActionEpochRecord | None = None
+        self._r03_cycle_cache: _PackedR03RewardCycle | None = None
         self._next_ordinal = 0
         self._next_dense_ordinal = LIFECYCLE_PAYMENT_COUNT
         self._dense_cycle_open = False
@@ -241,6 +252,7 @@ class LeanActionEpochRewardGraph:
         return self._actual_closed_cycle_count
 
     def _poison(self, reason: object) -> None:
+        self._invalidate_r03_cycle_cache()
         clean = reason.strip() if type(reason) is str else ""
         if not clean:
             clean = "lean Reward cycle failed"
@@ -277,7 +289,13 @@ class LeanActionEpochRewardGraph:
             self._selected(record.owner_fault_bits[:, :, slot]),
         )
 
-    def _r03(self, ordinal: int, scale: float) -> torch.Tensor:
+    def _invalidate_r03_cycle_cache(self) -> None:
+        self._r03_cycle_cache = None
+
+    def _decode_r03_cycle(self) -> _PackedR03RewardCycle:
+        cached = self._r03_cycle_cache
+        if cached is not None:
+            return cached
         valid, source_step, fact, faults = self._owner_rows("r03_strike_fact")
         record = self._record()
         if fact.shape != (self.num_envs, epoch_v1.OWNER_FACT_F32_WIDTH):
@@ -289,33 +307,27 @@ class LeanActionEpochRewardGraph:
         achieved_position = fact[:, 15:18]
         achieved_velocity = fact[:, 18:21]
         achieved_normal = fact[:, 21:24]
-        consumer = R03_NAMES[ordinal]
-        if consumer == "paddle_center_proximity":
-            error = torch.linalg.vector_norm(
+        errors = (
+            torch.linalg.vector_norm(
+                achieved_position - target_position, dim=-1
+            ),
+            torch.linalg.vector_norm(
+                achieved_velocity - target_velocity, dim=-1
+            ),
+            torch.acos(
+                torch.sum(achieved_normal * target_normal, dim=-1).clamp(
+                    -1.0, 1.0
+                )
+            ),
+            torch.linalg.vector_norm(
                 achieved_position - ball_position, dim=-1
-            )
-        else:
-            component = consumer.split("_", 1)[1].split("_", 1)[0]
-            if component == "position":
-                error = torch.linalg.vector_norm(
-                    achieved_position - target_position, dim=-1
-                )
-            elif component == "velocity":
-                error = torch.linalg.vector_norm(
-                    achieved_velocity - target_velocity, dim=-1
-                )
-            else:
-                cosine = torch.sum(
-                    achieved_normal * target_normal, dim=-1
-                ).clamp(-1.0, 1.0)
-                error = torch.acos(cosine)
-        finite = torch.isfinite(error)
-        clean_error = torch.where(finite, error, torch.zeros_like(error))
-        ratio_sq = torch.square(clean_error / scale)
-        if consumer.endswith("_coarse") or consumer == "paddle_center_proximity":
-            raw = torch.reciprocal(1.0 + ratio_sq)
-        else:
-            raw = torch.exp(-ratio_sq)
+            ),
+        )
+        finite = tuple(torch.isfinite(error) for error in errors)
+        clean_errors = tuple(
+            torch.where(valid_error, error, torch.zeros_like(error))
+            for error, valid_error in zip(errors, finite)
+        )
         present = torch.bitwise_and(valid, R03_PRESENT).ne(0) & faults.eq(0)
         admitted = (
             present
@@ -324,11 +336,32 @@ class LeanActionEpochRewardGraph:
             & record.reward_cycle_fault.eq(0)
             & source_step.eq(record.reward_cycle_age)
         )
+        cached = _PackedR03RewardCycle(
+            clean_errors=clean_errors,
+            finite=finite,
+            admitted=admitted,
+        )
+        self._r03_cycle_cache = cached
+        return cached
+
+    def _r03(self, ordinal: int, scale: float) -> torch.Tensor:
+        cached = self._decode_r03_cycle()
+        consumer = R03_NAMES[ordinal]
+        component = _R03_ERROR_COMPONENT_BY_ORDINAL[ordinal]
+        clean_error = cached.clean_errors[component]
+        finite = cached.finite[component]
+        ratio_sq = torch.square(clean_error / scale)
+        if consumer.endswith("_coarse") or consumer == "paddle_center_proximity":
+            raw = torch.reciprocal(1.0 + ratio_sq)
+        else:
+            raw = torch.exp(-ratio_sq)
         self._milestone.add_reward(
-            ordinal, raw, raw, admitted, finite,
+            ordinal, raw, raw, cached.admitted, finite,
             self._milestone_configured_income_scale[ordinal],
         )
-        return torch.where(admitted & finite, raw, torch.zeros_like(raw))
+        return torch.where(
+            cached.admitted & finite, raw, torch.zeros_like(raw)
+        )
 
     def _physical(self) -> torch.Tensor:
         valid, source_step, _fact, faults = self._owner_rows("physical_ball")
@@ -427,15 +460,18 @@ class LeanActionEpochRewardGraph:
         """Decode and pay the next manager ordinal exactly once."""
 
         if self._poisoned:
+            self._invalidate_r03_cycle_cache()
             raise LeanRewardCycleError(
                 "lean Reward graph is poisoned: " + str(self._poison_reason)
             )
         if type(ordinal) is not int or ordinal != self._next_ordinal:
+            self._invalidate_r03_cycle_cache()
             raise LeanRewardCycleError(
                 f"Reward consumer order differs: expected {self._next_ordinal}, got {ordinal!r}"
             )
         try:
             if ordinal == 0:
+                self._invalidate_r03_cycle_cache()
                 if self._cycle_epoch is not None or self._dense_cycle_open:
                     raise LeanRewardCycleError("Reward cycle was already open")
                 if self._actual_closed_cycle_count != self._completed_cycle_count:
@@ -470,6 +506,8 @@ class LeanActionEpochRewardGraph:
                     raise LeanRewardCycleError("R07 Reward cannot accept a scale")
                 value = self._r07()
             self.epoch_owner.pay_reward(ordinal)
+            if ordinal == len(R03_NAMES) - 1:
+                self._invalidate_r03_cycle_cache()
         except BaseException as exc:
             self._poison(
                 "ordinal " + str(ordinal) + " failed: " + type(exc).__name__
@@ -480,6 +518,7 @@ class LeanActionEpochRewardGraph:
         if self._next_ordinal == LIFECYCLE_PAYMENT_COUNT:
             self._next_ordinal = 0
             self._cycle_epoch = None
+            self._invalidate_r03_cycle_cache()
         return value
 
     def record_common_dense(
@@ -489,6 +528,7 @@ class LeanActionEpochRewardGraph:
 
         carry_txn._require_leaf_mutable(self)
         if self._poisoned:
+            self._invalidate_r03_cycle_cache()
             raise LeanRewardCycleError(
                 "lean Reward graph is poisoned: " + str(self._poison_reason)
             )
@@ -538,6 +578,7 @@ class LeanActionEpochRewardGraph:
         carry_txn._require_leaf_mutable(self)
         """Close one completed cycle with RewardManager's exact output tensor."""
 
+        self._invalidate_r03_cycle_cache()
         if self._poisoned:
             raise LeanRewardCycleError(
                 "lean Reward graph is poisoned: " + str(self._poison_reason)
@@ -566,6 +607,7 @@ class LeanActionEpochRewardGraph:
 
     def _require_checkpoint_boundary(self, *, dormant: bool) -> None:
         if self._poisoned:
+            self._invalidate_r03_cycle_cache()
             raise LeanRewardCycleError("poisoned Reward graph cannot checkpoint")
         if (
             self._cycle_epoch is not None
@@ -574,6 +616,7 @@ class LeanActionEpochRewardGraph:
             or self._next_dense_ordinal != LIFECYCLE_PAYMENT_COUNT
             or self._completed_cycle_count != self._actual_closed_cycle_count
         ):
+            self._invalidate_r03_cycle_cache()
             raise LeanRewardCycleError("Reward checkpoint boundary is not closed")
         if dormant and self._completed_cycle_count != 0:
             raise LeanRewardCycleError("Reward restore target is not dormant")

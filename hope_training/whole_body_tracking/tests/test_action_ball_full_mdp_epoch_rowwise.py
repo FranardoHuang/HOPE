@@ -364,6 +364,32 @@ def _launch_packet(
     )
 
 
+def _row0_outcome_packet(
+    record: E.ActionEpochRecord, *, settlement_step: int = 12
+) -> ActionEpochR06OutcomeRows:
+    device = record.phase.device
+    key = E.ActionEpochShotKey(
+        **{
+            field.name: getattr(record.identity.shot_key, field.name)[:, 0].clone()
+            for field in fields(E.ActionEpochShotKey)
+        }
+    )
+    return ActionEpochR06OutcomeRows(
+        valid=torch.tensor([True, False], dtype=torch.bool, device=device),
+        shot_key=key,
+        publication_ordinal=record.publication_ordinal[:, 0].clone(),
+        settlement_step=torch.tensor(
+            [settlement_step, -1], dtype=torch.int64, device=device
+        ),
+        valid_bits=torch.tensor([1, 0], dtype=torch.int64, device=device),
+        fact_values=torch.zeros(
+            (2, E.OWNER_FACT_F32_WIDTH), dtype=torch.float32, device=device
+        ),
+        outcome_code=torch.tensor([2, -1], dtype=torch.int64, device=device),
+        owner_fault_bits=torch.zeros(2, dtype=torch.int64, device=device),
+    )
+
+
 class _PlaybackOwner:
     def __init__(self, epoch: E.ActionEpochOwner):
         self.epoch = epoch
@@ -415,6 +441,43 @@ def _ready_epoch(
     return (
         epoch, d05, cadence, r06, playback, d05.motion, d05.racket, physical
     )
+
+
+def _two_row_launched_epoch(*, device="cpu"):
+    exact_device = torch.device(device)
+    epoch = E.ActionEpochOwner(num_envs=2, device=exact_device)
+    epoch.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool, device=exact_device),
+        reset_generation=torch.zeros(2, dtype=torch.int64, device=exact_device),
+    )
+    base = _candidate(exact_device)
+    both = torch.ones((2, 1), dtype=torch.bool, device=exact_device)
+    values = torch.tensor([[1], [2]], dtype=torch.int64, device=exact_device)
+    candidate = replace(
+        base,
+        identity=replace(base.identity, shot_key=_key(values, both)),
+        task=replace(base.task, task_valid=both),
+        construction_admissible=both,
+        playback_admissible=both,
+    )
+    d05 = _RealD05Harness(epoch, candidate)
+    d05.bind()
+    cadence = _MotionCadence(exact_device)
+    epoch.bind_motion_cadence_owner(cadence)
+    r06 = _R06(epoch, exact_device)
+    epoch.bind_fact_owner("r06_landing_outcome", r06)
+    epoch.bind_async_owner("r06_landing_outcome", r06)
+    physical = _PhysicalProjectionOwner()
+    epoch.bind_fact_owner("physical_ball", physical)
+    epoch.bind_async_owner("physical_ball", physical)
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    physical.launch = _launch_packet(
+        epoch.current(),
+        due=torch.ones(2, dtype=torch.bool, device=exact_device),
+    )
+    epoch.refresh_physical_launch_rows()
+    return epoch, r06, physical
 
 
 def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
@@ -529,7 +592,7 @@ def test_d05_action_family_requires_exact_slot_uid_join(
 def _materialized_entries(epoch: E.ActionEpochOwner) -> tuple[E.CommitEntry, ...]:
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert not bool(materialized.overflow.any())
+    assert materialized.row_fault_bits.tolist() == [0] * epoch.num_envs
     epoch.acknowledge_drain(start=start, end=end)
     return materialized.entries
 
@@ -577,7 +640,7 @@ def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
         torch.tensor([E.MOTION_CLOSE_NONE, E.MOTION_CLOSE_UNPLAYED]),
     )
     assert epoch.prepare_after_command_rows() is not None
-    assert epoch._undecoded_overflow.tolist() == [False, True]
+    assert epoch._undrained_row_fault_bits.tolist() == [0, E.ROW_FAULT_MOTION_CLOSE_CONTRACT]
     assert r06.consumed is not None
     epoch.abort_d05_transaction(owner=d05.owner)
 
@@ -588,7 +651,7 @@ def test_k0_then_kpositive_fixed_tape_preserves_counters_reason_and_rng():
         torch.zeros(2, dtype=torch.int64),
     )
     assert epoch.prepare_after_command_rows() is None
-    assert epoch._undecoded_overflow.tolist() == [False, True]
+    assert epoch._undrained_row_fault_bits.tolist() == [0, E.ROW_FAULT_MOTION_CLOSE_CONTRACT]
 
     cadence.projection = _MotionProjection(
         4,
@@ -641,11 +704,368 @@ def test_invalid_previous_paid_row_is_business_without_highwater_advance():
     assert rows is not None
     assert not bool(rows.due_mask.any())
     assert epoch.commit_head > head_before
-    assert epoch._undecoded_overflow.tolist() == [True, False]
+    assert epoch._undrained_row_fault_bits.tolist() == [E.ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT, 0]
     assert epoch._last_r06_paid_payment_step.tolist() == [-1, -1]
     assert r06.consumed is not None
     assert r06.consumed.valid.tolist() == [False, False]
     epoch.abort_d05_transaction(owner=d05.owner)
+
+
+def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
+    monkeypatch,
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    epoch, d05, cadence, r06, playback, *_middle, physical = _ready_epoch(
+        bind_playback=True
+    )
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    epoch.publish_motion_playback_started(owner=playback)
+    physical.launch = _launch_packet(
+        epoch.current(), due=torch.tensor([True, False])
+    )
+    epoch.refresh_physical_launch_rows()
+    r06.outcome = _row0_outcome_packet(epoch.current())
+    epoch.refresh_r06_outcome_rows()
+    epoch.open_reward_cycle()
+    for ordinal in range(E.REWARD_CONSUMER_COUNT):
+        epoch.pay_reward(ordinal)
+    payment = epoch.publish_reward_payment(20)
+    paid_record = epoch.current()
+    r06.previous = PreviousPaidActionEpochRows(
+        valid=payment.valid.clone(),
+        shot_key=payment.shot_key.clone(),
+        publication_ordinal=paid_record.publication_ordinal[:, 0].clone(),
+        settlement_step=paid_record.settlement_step[:, 0].clone(),
+        payment_step=payment.payment_step.clone(),
+    )
+
+    # Payment and Motion close are independent edges.  R06 retains the same
+    # paid mailbox until close; repeatedly validating that assertion must not
+    # manufacture empty Motion/retirement events or a zero-mask D05 writer
+    # transaction.  Only scalar Motion chronology advances on these ticks.
+    pending_record = epoch.current()
+    pending_head = epoch.commit_head
+    pending_next_epoch = epoch._next_epoch
+    pending_consumed = r06.consumed
+    pending_checkpoint_tensors = tuple(
+        (name, value.clone()) for name, value in epoch._checkpoint_extra_items()
+    )
+    writer_counts = (
+        d05.motion.calls,
+        d05.racket.calls,
+        d05.physical.calls,
+        len(d05.calls),
+        len(d05.accepted_masks),
+    )
+    for offset, common_step in enumerate((21, 22, 23), start=1):
+        cadence.projection = _MotionProjection(
+            common_step,
+            torch.zeros(2, dtype=torch.bool),
+            torch.zeros(2, dtype=torch.bool),
+            torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
+        )
+        assert epoch.prepare_after_command_rows() is None
+        assert epoch.commit_head == pending_head
+        assert epoch.current().version == pending_record.version
+        _assert_record_tensors_equal(epoch.current(), pending_record)
+        current_checkpoint_tensors = epoch._checkpoint_extra_items()
+        assert tuple(name for name, _value in current_checkpoint_tensors) == tuple(
+            name for name, _value in pending_checkpoint_tensors
+        )
+        assert all(
+            torch.equal(current_value, pending_value)
+            for (_name, current_value), (_name, pending_value) in zip(
+                current_checkpoint_tensors, pending_checkpoint_tensors
+            )
+        )
+        assert epoch._next_epoch == pending_next_epoch + offset
+        assert epoch._last_motion_common_step == common_step
+        assert epoch._active_d05 is None
+        assert r06.consumed is pending_consumed
+        assert (
+            d05.motion.calls,
+            d05.racket.calls,
+            d05.physical.calls,
+            len(d05.calls),
+            len(d05.accepted_masks),
+        ) == writer_counts
+
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_OUTCOME_SETTLED,
+        E.PHASE_IDLE,
+    ]
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+    assert r06.consumed is not None and r06.consumed.valid.tolist() == [
+        False,
+        False,
+    ]
+    assert epoch._last_r06_paid_payment_step.tolist() == [-1, -1]
+    assert epoch.project_current_reward_payment_rows().valid.tolist() == [
+        True,
+        False,
+    ]
+
+    # The next cadence contributes exactly the missing close edge.  That is
+    # the sole retirement/consume point and advances payment high-water once.
+    cadence.projection = _MotionProjection(
+        24,
+        torch.zeros(2, dtype=torch.bool),
+        torch.tensor([True, False]),
+        torch.tensor(
+            [E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE],
+            dtype=torch.int64,
+        ),
+    )
+    rows = epoch.prepare_after_command_rows()
+    assert rows is not None and not bool(rows.due_mask.any())
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_RETIRED,
+        E.PHASE_IDLE,
+    ]
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+    assert r06.consumed is not None and r06.consumed.valid.tolist() == [
+        True,
+        False,
+    ]
+    assert epoch._last_r06_paid_payment_step.tolist() == [20, -1]
+    assert epoch.project_current_reward_payment_rows().valid.tolist() == [
+        False,
+        False,
+    ]
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+    entries = _materialized_entries(epoch)
+    retirement_masks = tuple(
+        dict(zip(entry.delta.names, entry.delta.values))["event_mask"]
+        for entry in entries
+        if entry.transition == "RETIRED"
+    )
+    assert sum(int(mask.to(torch.int64).sum()) for mask in retirement_masks) == 1
+
+
+@pytest.mark.parametrize(
+    ("settle_outcome", "expected_phase"),
+    [
+        (False, E.PHASE_LAUNCH_SETTLED),
+        (True, E.PHASE_OUTCOME_SETTLED),
+    ],
+)
+def test_launch_or_outcome_phase_accepts_late_playback_and_played_suffix_close(
+    monkeypatch, settle_outcome, expected_phase
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    epoch, d05, cadence, r06, playback, *_middle, physical = _ready_epoch(
+        bind_playback=True
+    )
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+
+    # A fast physical edge may arrive before Motion publishes its playback
+    # edge.  LAUNCH/OUTCOME still belong to the same open shot.
+    physical.launch = _launch_packet(
+        epoch.current(), due=torch.tensor([True, False])
+    )
+    epoch.refresh_physical_launch_rows()
+    if settle_outcome:
+        r06.outcome = _row0_outcome_packet(epoch.current())
+        epoch.refresh_r06_outcome_rows()
+    assert epoch.current().phase[0, 0] == expected_phase
+    epoch.publish_motion_playback_started(owner=playback)
+    assert epoch.current().motion_playback_started[:, 0].tolist() == [True, False]
+
+    cadence.projection = _MotionProjection(
+        13,
+        torch.zeros(2, dtype=torch.bool),
+        torch.tensor([True, False]),
+        torch.tensor(
+            [E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE],
+            dtype=torch.int64,
+        ),
+    )
+    rows = epoch.prepare_after_command_rows()
+    assert rows is not None and not bool(rows.due_mask.any())
+    assert epoch.current().motion_close_reason[:, 0].tolist() == [
+        E.MOTION_CLOSE_PLAYED_SUFFIX,
+        -1,
+    ]
+    assert epoch.current().phase[0, 0] == expected_phase
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+    assert r06.consumed is not None and not bool(r06.consumed.valid.any())
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+
+def test_named_row_fault_bits_accumulate_exact_compound_or():
+    epoch, d05, cadence, r06, *_ = _ready_epoch()
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    r06.previous = replace(
+        r06.previous,
+        valid=torch.tensor([True, False]),
+        payment_step=torch.tensor([1, -1], dtype=torch.int64),
+    )
+    cadence.projection = _MotionProjection(
+        2,
+        torch.zeros(2, dtype=torch.bool),
+        torch.tensor([True, False]),
+        torch.tensor(
+            [E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE],
+            dtype=torch.int64,
+        ),
+    )
+
+    epoch.prepare_after_command_rows()
+    compound = (
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT
+        | E.ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT
+    )
+    assert epoch._undrained_row_fault_bits.tolist() == [compound, 0]
+    assert epoch.current().motion_close_reason[:, 0].tolist() == [
+        E.MOTION_CLOSE_NONE,
+        -1,
+    ]
+    assert epoch._last_r06_paid_payment_step.tolist() == [-1, -1]
+    assert r06.consumed is not None and not bool(r06.consumed.valid.any())
+    epoch.abort_d05_transaction(owner=d05.owner)
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert materialized.row_fault_bits.tolist() == [compound, 0]
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu"] + (["cuda:0"] if torch.cuda.is_available() else [])
+)
+def test_runtime_row_fault_latch_uses_exact_r06_and_real_motion_owners(device):
+    epoch, _d05, cadence, r06, playback, *_ = _ready_epoch(
+        bind_playback=True, device=device
+    )
+    row0 = torch.tensor([True, False], dtype=torch.bool, device=epoch.device)
+    row1 = torch.tensor([False, True], dtype=torch.bool, device=epoch.device)
+
+    # The latch is deliberately safe inside an exact producer callback that
+    # Epoch is already pulling; it must not trip the general reentrancy poison.
+    with epoch._operation("test exact R06 callback"):
+        safe = epoch.latch_runtime_row_fault(
+            "r06_landing_outcome",
+            E.ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT,
+            row0,
+            owner=r06,
+        )
+    assert safe.tolist() == [False, True]
+    assert not epoch.poisoned
+
+    # Motion authority is the playback leaf itself, never the cadence adapter.
+    with pytest.raises(E.ActionEpochError, match="owner binding differs"):
+        epoch.latch_runtime_row_fault(
+            "motion",
+            E.ROW_FAULT_MOTION_CADENCE_OVERDUE,
+            row1,
+            owner=cadence,
+        )
+    safe = epoch.latch_runtime_row_fault(
+        "motion",
+        E.ROW_FAULT_MOTION_CADENCE_OVERDUE,
+        row1,
+        owner=playback,
+    )
+    assert safe.tolist() == [False, False]
+    assert epoch._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT,
+        E.ROW_FAULT_MOTION_CADENCE_OVERDUE,
+    ]
+
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT,
+        E.ROW_FAULT_MOTION_CADENCE_OVERDUE,
+    ]
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu"] + (["cuda:0"] if torch.cuda.is_available() else [])
+)
+def test_runtime_row_fault_latch_rejects_foreign_bit_compound_and_tensor_abi(
+    device,
+):
+    epoch, _d05, _cadence, r06, *_ = _ready_epoch(device=device)
+    rows = torch.tensor([True, False], dtype=torch.bool, device=epoch.device)
+    baseline = epoch._undrained_row_fault_bits.clone()
+
+    with pytest.raises(E.ActionEpochError, match="owner binding differs"):
+        epoch.latch_runtime_row_fault(
+            "r06_landing_outcome",
+            E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+            rows,
+            owner=object(),
+        )
+    with pytest.raises(E.ActionEpochError, match="owner binding differs"):
+        epoch.latch_runtime_row_fault(
+            [],
+            E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+            rows,
+            owner=r06,
+        )
+    for forbidden_bit in (
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT,
+        E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE
+        | E.ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE,
+    ):
+        with pytest.raises(E.ActionEpochError, match="reason bit differs"):
+            epoch.latch_runtime_row_fault(
+                "r06_landing_outcome",
+                forbidden_bit,
+                rows,
+                owner=r06,
+            )
+    for malformed in (
+        torch.zeros(3, dtype=torch.bool, device=epoch.device),
+        torch.zeros(4, dtype=torch.bool, device=epoch.device)[::2],
+        torch.zeros(2, dtype=torch.int64, device=epoch.device),
+    ):
+        with pytest.raises(E.ActionEpochError, match="runtime row fault rows"):
+            epoch.latch_runtime_row_fault(
+                "r06_landing_outcome",
+                E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+                malformed,
+                owner=r06,
+            )
+    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
+
+    start, end = epoch.prepare_drain()
+    with pytest.raises(E.ActionEpochError, match="frozen drain"):
+        epoch.latch_runtime_row_fault(
+            "r06_landing_outcome",
+            E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+            rows,
+            owner=r06,
+        )
+    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
+    epoch.abort_drain(start=start, end=end)
+
+
+def test_row_fault_registry_is_unique_named_single_bits_with_owner_subsets():
+    bits = tuple(bit for bit, _name in E.ACTION_EPOCH_ROW_FAULT_NAMES)
+    names = tuple(name for _bit, name in E.ACTION_EPOCH_ROW_FAULT_NAMES)
+    assert len(bits) == 33
+    assert len(bits) == len(set(bits))
+    assert len(names) == len(set(names))
+    assert all(bit > 0 and bit & (bit - 1) == 0 for bit in bits)
+    assert E._KNOWN_ROW_FAULT_MASK == sum(bits)
+    assert set(E._RUNTIME_ROW_FAULT_BITS_BY_OWNER) == {
+        "motion",
+        "r06_landing_outcome",
+    }
+    assert all(
+        allowed and allowed.issubset(bits)
+        for allowed in E._RUNTIME_ROW_FAULT_BITS_BY_OWNER.values()
+    )
 
 
 def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(monkeypatch):
@@ -880,7 +1300,10 @@ def test_nonfinite_physical_target_latches_before_launch_publication(
     )
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert materialized.overflow.tolist() == [True, False]
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_PHYSICAL_LAUNCH_JOIN,
+        0,
+    ]
     launch = next(
         entry for entry in materialized.entries
         if entry.transition == "PHYSICAL_LAUNCH_ROWS"
@@ -903,7 +1326,7 @@ def test_structurally_malformed_physical_target_fails_before_any_mutation(
     epoch.settle_d05_transaction(d05.arm())
     before = epoch.current()
     before_head = epoch.commit_head
-    before_overflow = epoch._undecoded_overflow.clone()
+    before_fault_bits = epoch._undrained_row_fault_bits.clone()
     before_rows = (_peer_bytes(before, row=0), _peer_bytes(before))
     if malformed == "shape":
         target = torch.zeros((2, 3), dtype=torch.float32)
@@ -923,7 +1346,7 @@ def test_structurally_malformed_physical_target_fails_before_any_mutation(
     after = epoch.current()
     after_rows = (_peer_bytes(after, row=0), _peer_bytes(after))
     assert epoch.commit_head == before_head
-    assert torch.equal(epoch._undecoded_overflow, before_overflow)
+    assert torch.equal(epoch._undrained_row_fault_bits, before_fault_bits)
     assert all(
         lhs.keys() == rhs.keys()
         and all(torch.equal(lhs[name], rhs[name]) for name in lhs)
@@ -1287,7 +1710,231 @@ def test_physical_launch_pull_rejects_stale_key_before_publication(
     assert torch.equal(after.launch_succeeded, before.launch_succeeded)
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert materialized.overflow.tolist() == [True, False]
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_PHYSICAL_LAUNCH_JOIN,
+        0,
+    ]
+
+
+def test_physical_postphysics_rejects_stale_publication_without_fact_mutation(
+    monkeypatch,
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    device = torch.device("cpu")
+    epoch = E.ActionEpochOwner(num_envs=2, device=device)
+    epoch.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool),
+        reset_generation=torch.zeros(2, dtype=torch.int64),
+    )
+    d05 = _RealD05Harness(epoch, _candidate(device))
+    d05.bind()
+    cadence = _MotionCadence(device)
+    epoch.bind_motion_cadence_owner(cadence)
+    r06 = _R06(epoch, device)
+    epoch.bind_fact_owner("r06_landing_outcome", r06)
+    epoch.bind_async_owner("r06_landing_outcome", r06)
+    physical = _PhysicalProjectionOwner()
+    epoch.bind_fact_owner("physical_ball", physical)
+    epoch.bind_async_owner("physical_ball", physical)
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    physical.launch = _launch_packet(
+        epoch.current(), due=torch.tensor([True, False])
+    )
+    epoch.refresh_physical_launch_rows()
+
+    stale = _physical_packet(epoch.current(), flight_index=0, contact=False)
+    stale.publication_ordinal[0, 0] += 1
+    physical.projection = stale
+    before = epoch.current()
+    before_bytes = _peer_bytes(before, row=0)
+    before_milestone = epoch.milestone.i64.clone()
+    with _NoHostTensorObservation():
+        epoch.refresh_physical_postphysics_rows()
+    after = epoch.current()
+    after_bytes = _peer_bytes(after, row=0)
+
+    assert before_bytes.keys() == after_bytes.keys()
+    assert all(
+        torch.equal(before_bytes[name], after_bytes[name]) for name in before_bytes
+    )
+    assert torch.equal(epoch.milestone.i64, before_milestone)
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN,
+        0,
+    ]
+
+
+@pytest.mark.parametrize(
+    "raw_fault,expected_row_fault",
+    (
+        (
+            PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_PRODUCER,
+            E.ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER,
+        ),
+        (
+            PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_NONFINITE,
+            E.ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE,
+        ),
+        (
+            PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_PRODUCER
+            | PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_NONFINITE,
+            E.ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER
+            | E.ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE,
+        ),
+        (1 << 39, E.ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER),
+    ),
+)
+def test_physical_owner_fault_latches_before_business_write_and_keeps_raw_audit(
+    monkeypatch, raw_fault, expected_row_fault
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    epoch, _r06, physical = _two_row_launched_epoch()
+    packet = _physical_packet(epoch.current(), flight_index=0, contact=True)
+    packet.observe_mask[1, 0] = True
+    packet.publication_ordinal[1, 0] = epoch.current().publication_ordinal[1, 0]
+    for field in fields(packet.shot_key):
+        getattr(packet.shot_key, field.name)[1, 0] = getattr(
+            epoch.current().identity.shot_key, field.name
+        )[1, 0]
+    packet.fact_valid_bits[1, 0] = 3
+    packet.fact_source_step[1, 0] = 51
+    packet.fact_f32[1, 0, :10] = torch.arange(1, 11, dtype=torch.float32)
+    packet.owner_fault_bits[0, 0] = raw_fault
+    # A contradictory selected-rubber binding reaches Physical as this exact
+    # producer bit.  Epoch must not reinterpret its zeroed facts as a miss.
+    packet.producer_contract_fault[0, 0] = bool(
+        raw_fault
+        & PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_PRODUCER
+    )
+    packet.nonfinite_observation[0, 0] = bool(
+        raw_fault
+        & PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_NONFINITE
+    )
+    physical.projection = packet
+
+    epoch.refresh_physical_postphysics_rows()
+
+    record = epoch.current()
+    owner_slot = E.OWNER_ORDER.index("physical_ball")
+    assert record.owner_fault_bits[0, 0, owner_slot].item() == raw_fault
+    assert record.fact_valid_bits[0, 0, owner_slot].item() == 0
+    assert record.fact_valid_bits[1, 0, owner_slot].item() == 3
+    entry = epoch._publication.pending_log[-1]
+    assert entry.transition == "PHYSICAL_POSTPHYSICS_ROWS"
+    delta = dict(zip(entry.delta.names, entry.delta.values))
+    assert delta["event_mask"][:, 0].tolist() == [True, True]
+    assert delta["owner_fault_bits"][:, 0].tolist() == [raw_fault, 0]
+
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert materialized.row_fault_bits.tolist() == [expected_row_fault, 0]
+
+
+def test_physical_producer_fault_aborts_lean_preoptimizer_before_decode(
+    monkeypatch,
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    epoch, _r06, physical = _two_row_launched_epoch()
+    packet = _physical_packet(epoch.current(), flight_index=0, contact=False)
+    packet.owner_fault_bits[0, 0] = (
+        PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_PRODUCER
+    )
+    packet.producer_contract_fault[0, 0] = True
+    physical.projection = packet
+    epoch.refresh_physical_postphysics_rows()
+    reward = LEAN_REWARDS.LeanActionEpochRewardGraph(epoch_owner=epoch)
+    runtime = LEAN.ActionBallFullMdpLeanRuntimeOwner(
+        env=object(),
+        runtime_lease=object(),
+        epoch_owner=epoch,
+        reward_graph=reward,
+        r05_runtime=object(),
+        motion=object(),
+        racket=object(),
+        physical_ball=physical,
+        r06_landing_outcome=object(),
+        r03_strike_fact=object(),
+        r07_recovery=object(),
+    )
+
+    with pytest.raises(
+        LEAN.ActionBallFullMdpEpochRowFaultError,
+        match="physical_postphysics_producer",
+    ):
+        runtime.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=48
+        )
+
+
+@pytest.mark.parametrize(
+    "raw_fault,expected_row_fault",
+    (
+        (
+            R06_MODULE.FAULT_PRODUCER_CONTRACT,
+            E.ROW_FAULT_R06_OWNER_PRODUCER_CONTRACT,
+        ),
+        (
+            R06_MODULE.FAULT_ENGINE_OVERFLOW,
+            E.ROW_FAULT_R06_OWNER_ENGINE_OVERFLOW,
+        ),
+        (R06_MODULE.FAULT_NONFINITE, E.ROW_FAULT_R06_OWNER_NONFINITE),
+        (R06_MODULE.FAULT_KEY_BINDING, E.ROW_FAULT_R06_OWNER_OTHER),
+        (1 << 39, E.ROW_FAULT_R06_OWNER_OTHER),
+        (
+            R06_MODULE.FAULT_PRODUCER_CONTRACT | R06_MODULE.FAULT_NONFINITE,
+            E.ROW_FAULT_R06_OWNER_PRODUCER_CONTRACT
+            | E.ROW_FAULT_R06_OWNER_NONFINITE,
+        ),
+    ),
+)
+def test_r06_owner_fault_latches_named_cause_freezes_row_and_keeps_raw_audit(
+    monkeypatch, raw_fault, expected_row_fault
+):
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    epoch, r06, _physical = _two_row_launched_epoch()
+    packet = _row0_outcome_packet(epoch.current())
+    packet.valid.fill_(True)
+    packet.settlement_step.copy_(torch.tensor([12, 13], dtype=torch.int64))
+    packet.valid_bits.copy_(torch.tensor([1, 7], dtype=torch.int64))
+    packet.outcome_code.copy_(torch.tensor([5, 2], dtype=torch.int64))
+    packet.owner_fault_bits.copy_(torch.tensor([raw_fault, 0], dtype=torch.int64))
+    r06.outcome = packet
+
+    epoch.refresh_r06_outcome_rows()
+
+    record = epoch.current()
+    owner_slot = E.OWNER_ORDER.index("r06_landing_outcome")
+    assert record.owner_fault_bits[0, 0, owner_slot].item() == raw_fault
+    assert record.phase[:, 0].tolist() == [
+        E.PHASE_LAUNCH_SETTLED,
+        E.PHASE_OUTCOME_SETTLED,
+    ]
+    assert record.fact_valid_bits[0, 0, owner_slot].item() == 0
+    assert record.fact_valid_bits[1, 0, owner_slot].item() == 7
+    entry = epoch._publication.pending_log[-1]
+    assert entry.transition == "R06_OUTCOME_ROWS"
+    delta = dict(zip(entry.delta.names, entry.delta.values))
+    assert delta["event_mask"][:, 0].tolist() == [True, True]
+    assert delta["owner_fault_bits"][:, 0].tolist() == [raw_fault, 0]
+
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert materialized.row_fault_bits.tolist() == [expected_row_fault, 0]
 
 
 @pytest.mark.parametrize(
@@ -1366,7 +2013,10 @@ def test_physical_k_grid_join_preserves_first_contact_across_later_miss(
     assert epoch.milestone.i64[E.milestone_tensors._EI + 6].item() == 1
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert materialized.overflow.tolist() == [True, False]
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN,
+        0,
+    ]
 
 
 def test_drain_has_one_materialization_and_no_pre_materialized_tensor_surface():
@@ -1379,7 +2029,7 @@ def test_drain_has_one_materialization_and_no_pre_materialized_tensor_surface():
     assert prepared == (0, 1)
     materialized = epoch.materialize_drain(start=0, end=1)
     assert type(materialized) is E.ActionEpochMaterializedDrain
-    assert materialized.overflow.device.type == "cpu"
+    assert materialized.row_fault_bits.device.type == "cpu"
     assert materialized.milestone_i64.device.type == "cpu"
     assert materialized.milestone_f64.device.type == "cpu"
     assert materialized.entries[0].delta.names == (
@@ -1411,10 +2061,10 @@ def _pending_host_reference(epoch: E.ActionEpochOwner):
         )
         for entry in epoch._publication.pending_log
     )
-    return entries, epoch._undecoded_overflow.detach().clone().contiguous()
+    return entries, epoch._undrained_row_fault_bits.detach().clone().contiguous()
 
 
-def _assert_materialized_bytes_equal(materialized, expected_entries, expected_overflow):
+def _assert_materialized_bytes_equal(materialized, expected_entries, expected_fault_bits):
     assert tuple(
         (entry.sequence, entry.epoch, entry.transition, entry.before_version, entry.after_version)
         for entry in materialized.entries
@@ -1432,8 +2082,8 @@ def _assert_materialized_bytes_equal(materialized, expected_entries, expected_ov
                 expected_value.reshape(-1).view(torch.uint8),
             )
     assert torch.equal(
-        materialized.overflow.reshape(-1).view(torch.uint8),
-        expected_overflow.reshape(-1).view(torch.uint8),
+        materialized.row_fault_bits.reshape(-1).view(torch.uint8),
+        expected_fault_bits.reshape(-1).view(torch.uint8),
     )
     assert materialized.milestone_i64.shape == (E.milestone_tensors.I64_NUMEL,)
     assert materialized.milestone_f64.shape == (E.milestone_tensors.F64_NUMEL,)
@@ -1447,7 +2097,7 @@ def test_drain_one_d2h_contains_every_byte_and_source_has_one_cpu_transfer(
         selected_mask=torch.ones(2, dtype=torch.bool),
         reset_generation=torch.zeros(2, dtype=torch.int64),
     )
-    expected_entries, expected_overflow = _pending_host_reference(epoch)
+    expected_entries, expected_fault_bits = _pending_host_reference(epoch)
     expected_bytes = torch.cat(
         tuple(
             value.contiguous().view(torch.uint8).reshape(-1)
@@ -1455,7 +2105,7 @@ def test_drain_one_d2h_contains_every_byte_and_source_has_one_cpu_transfer(
             for value in entry.delta.values
         )
         + tuple(value.view(torch.uint8).reshape(-1) for value in epoch.milestone.pack_views())
-        + (expected_overflow.view(torch.uint8).reshape(-1),),
+        + (expected_fault_bits.view(torch.uint8).reshape(-1),),
         dim=0,
     )
     calls = []
@@ -1473,7 +2123,7 @@ def test_drain_one_d2h_contains_every_byte_and_source_has_one_cpu_transfer(
     materialized = epoch.materialize_drain(start=start, end=end)
     assert len(calls) == 1
     _assert_materialized_bytes_equal(
-        materialized, expected_entries, expected_overflow
+        materialized, expected_entries, expected_fault_bits
     )
 
     tree = ast.parse(inspect.getsource(E))
@@ -1640,7 +2290,10 @@ def test_epoch_fact_and_ready_events_are_once_per_full_key_and_reset_rearms():
         source_step=(step + 1)[:, 0],
     )
     assert epoch.milestone.i64[base + 15].item() == 2
-    assert epoch._undecoded_overflow.tolist() == [True, False]
+    assert epoch._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_R07_FIRST_READY_JOIN,
+        0,
+    ]
 
 
 def test_r03_and_r07_first_fact_owner_offsets_are_independently_wired():
@@ -1793,7 +2446,7 @@ def test_r06_event_tuple_counts_unique_settlement_not_reprojection_or_wrong_key(
         assert epoch.milestone.i64[base:base + 7].tolist() == [1, *pattern]
 
     # One settlement followed by the three legal decimation re-reads has one
-    # positive business incidence, one event, and no device overflow.
+    # positive business incidence, one event, and no device row fault.
     epoch, _r06 = run(patterns[0], replay_count=3)
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
@@ -1807,13 +2460,14 @@ def test_r06_event_tuple_counts_unique_settlement_not_reprojection_or_wrong_key(
     assert materialized.milestone_i64[base:base + 7].tolist() == [
         1, *patterns[0]
     ]
-    assert materialized.overflow.tolist() == [False, False]
+    assert materialized.row_fault_bits.tolist() == [0, 0]
 
     wrong, _r06 = run(patterns[-1], wrong_key=True)
     assert not bool(wrong.milestone.i64[base:base + 7].any())
     start, end = wrong.prepare_drain()
-    assert wrong.materialize_drain(start=start, end=end).overflow.tolist() == [
-        True, False
+    assert wrong.materialize_drain(start=start, end=end).row_fault_bits.tolist() == [
+        E.ROW_FAULT_R06_OUTCOME_JOIN,
+        0,
     ]
 
     for delta in (-1, 1):
@@ -1826,7 +2480,7 @@ def test_r06_event_tuple_counts_unique_settlement_not_reprojection_or_wrong_key(
         start, end = wrong_publication.prepare_drain()
         assert wrong_publication.materialize_drain(
             start=start, end=end
-        ).overflow.tolist() == [True, False]
+        ).row_fault_bits.tolist() == [E.ROW_FAULT_R06_OUTCOME_JOIN, 0]
 
     # Every retained payload field participates in the replay after-image.
     for changed in (
@@ -1854,7 +2508,10 @@ def test_r06_event_tuple_counts_unique_settlement_not_reprojection_or_wrong_key(
         mutant.refresh_r06_outcome_rows()
         start, end = mutant.prepare_drain()
         materialized = mutant.materialize_drain(start=start, end=end)
-        assert materialized.overflow.tolist() == [True, False]
+        assert materialized.row_fault_bits.tolist() == [
+            E.ROW_FAULT_R06_OUTCOME_JOIN,
+            0,
+        ]
         assert materialized.milestone_i64[base:base + 7].tolist() == [
             1, *patterns[-1]
         ]
@@ -1918,7 +2575,7 @@ def test_drain_decoder_rejects_truncation_extension_and_schema_mutations():
             for value in entry.delta.values
         )
         + tuple(value.view(torch.uint8).reshape(-1) for value in epoch.milestone.pack_views())
-        + (epoch._undecoded_overflow.view(torch.uint8).reshape(-1),),
+        + (epoch._undrained_row_fault_bits.view(torch.uint8).reshape(-1),),
         dim=0,
     ).contiguous()
     malformed = (
@@ -1944,7 +2601,11 @@ def _decode_test_entries(epoch, entries):
             for value in entry.delta.values
         )
         + tuple(value.view(torch.uint8).reshape(-1) for value in epoch.milestone.pack_views())
-        + (torch.zeros(epoch.num_envs, dtype=torch.uint8),),
+        + (
+            torch.zeros(epoch.num_envs, dtype=torch.int64)
+            .view(torch.uint8)
+            .reshape(-1),
+        ),
         dim=0,
     ).contiguous()
     return epoch._decode_drain_bytes(
@@ -2078,7 +2739,7 @@ def test_materialize_drain_cuda_profiler_observes_one_physical_d2h():
         if event.name.startswith("Memcpy DtoH")
     ]
     assert len(dtoh_events) == 1
-    assert materialized.overflow.device.type == "cpu"
+    assert materialized.row_fault_bits.device.type == "cpu"
     assert all(
         value.device.type == "cpu"
         for entry in materialized.entries
@@ -2190,11 +2851,11 @@ def test_single_d2h_preserves_full_key_payment_and_selected_reset_bytes(monkeypa
     for ordinal in range(E.REWARD_CONSUMER_COUNT):
         epoch.pay_reward(ordinal)
     epoch.publish_reward_payment(20)
-    expected_entries, expected_overflow = _pending_host_reference(epoch)
+    expected_entries, expected_fault_bits = _pending_host_reference(epoch)
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
     _assert_materialized_bytes_equal(
-        materialized, expected_entries, expected_overflow
+        materialized, expected_entries, expected_fault_bits
     )
     assert any(entry.transition == "D05_SETTLED" for entry in materialized.entries)
     assert any(entry.transition == "PAYMENT_RECORDED" for entry in materialized.entries)
@@ -2234,11 +2895,11 @@ def test_single_d2h_preserves_full_key_payment_and_selected_reset_bytes(monkeypa
     reset_epoch.commit_selected_true_reset(
         owner=reset.owner, prepared_reset=lease
     )
-    expected_entries, expected_overflow = _pending_host_reference(reset_epoch)
+    expected_entries, expected_fault_bits = _pending_host_reference(reset_epoch)
     start, end = reset_epoch.prepare_drain()
     materialized = reset_epoch.materialize_drain(start=start, end=end)
     _assert_materialized_bytes_equal(
-        materialized, expected_entries, expected_overflow
+        materialized, expected_entries, expected_fault_bits
     )
     assert any(entry.transition == "RESET_SELECTED" for entry in materialized.entries)
 
@@ -2248,18 +2909,18 @@ def test_frozen_drain_rejects_before_producer_pull_or_device_fault_latch(monkeyp
     epoch, _d05, _cadence, _r06, _playback, *_middle, physical = _ready_epoch()
     fact_owner = object()
     epoch.bind_fact_owner("r03_strike_fact", fact_owner)
-    baseline = epoch._undecoded_overflow.clone()
+    baseline = epoch._undrained_row_fault_bits.clone()
     start, end = epoch.prepare_drain()
     with pytest.raises(E.ActionEpochError):
         epoch.refresh_physical_launch_rows()
     assert physical.launch_calls == 0
-    assert torch.equal(epoch._undecoded_overflow, baseline)
+    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
     epoch.abort_drain(start=start, end=end)
     epoch.milestone.add_step_return(torch.ones(2))
 
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert not bool(materialized.overflow.any())
+    assert materialized.row_fault_bits.tolist() == [0, 0]
     with pytest.raises(E.ActionEpochError):
         epoch.publish_owner_facts(
             "r03_strike_fact",
@@ -2270,12 +2931,12 @@ def test_frozen_drain_rejects_before_producer_pull_or_device_fault_latch(monkeyp
                 (2, 1, E.OWNER_FACT_F32_WIDTH), dtype=torch.float32
             ),
         )
-    assert torch.equal(epoch._undecoded_overflow, baseline)
+    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
     epoch.acknowledge_drain(start=start, end=end)
-    assert torch.equal(epoch._undecoded_overflow, baseline)
+    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
 
 
-def test_drain_abort_overflow_and_inference_replacement_are_exact(monkeypatch):
+def test_drain_abort_row_fault_and_inference_replacement_are_exact(monkeypatch):
     with torch.inference_mode():
         epoch = E.ActionEpochOwner(num_envs=2, device="cpu")
         epoch.activate_reset_genesis(
@@ -2283,7 +2944,7 @@ def test_drain_abort_overflow_and_inference_replacement_are_exact(monkeypatch):
             reset_generation=torch.zeros(2, dtype=torch.int64),
         )
         start, end = epoch.prepare_drain()
-    inference_storage = epoch._undecoded_overflow
+    inference_storage = epoch._undrained_row_fault_bits
     assert torch.is_inference(inference_storage)
     epoch.abort_drain(start=start, end=end)
     start, end = epoch.prepare_drain()
@@ -2307,11 +2968,11 @@ def test_drain_abort_overflow_and_inference_replacement_are_exact(monkeypatch):
     else:
         raise AssertionError("ACK committed despite replacement allocation failure")
     assert epoch.drain_frontier == start
-    assert epoch._undecoded_overflow is inference_storage
+    assert epoch._undrained_row_fault_bits is inference_storage
     monkeypatch.setattr(E.torch, "zeros", original_zeros)
     epoch.acknowledge_drain(start=start, end=end)
-    assert epoch._undecoded_overflow is not inference_storage
-    assert not torch.is_inference(epoch._undecoded_overflow)
+    assert epoch._undrained_row_fault_bits is not inference_storage
+    assert not torch.is_inference(epoch._undrained_row_fault_bits)
     try:
         epoch.acknowledge_drain(start=start, end=end)
     except E.ActionEpochError:
@@ -2319,40 +2980,44 @@ def test_drain_abort_overflow_and_inference_replacement_are_exact(monkeypatch):
     else:
         raise AssertionError("drain ACK replayed")
 
-    overflowed = E.ActionEpochOwner(num_envs=2, device="cpu")
-    overflowed.activate_reset_genesis(
+    row_faulted = E.ActionEpochOwner(num_envs=2, device="cpu")
+    row_faulted.activate_reset_genesis(
         selected_mask=torch.ones(2, dtype=torch.bool),
         reset_generation=torch.ones(2, dtype=torch.int64),
     )
-    start, end = overflowed.prepare_drain()
-    materialized = overflowed.materialize_drain(start=start, end=end)
-    assert bool(materialized.overflow.all()) and overflowed.poisoned
-    storage = overflowed._undecoded_overflow
+    start, end = row_faulted.prepare_drain()
+    materialized = row_faulted.materialize_drain(start=start, end=end)
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_RESET_GENESIS_CONTRACT,
+        E.ROW_FAULT_RESET_GENESIS_CONTRACT,
+    ]
+    assert row_faulted.poisoned
+    storage = row_faulted._undrained_row_fault_bits
     try:
-        overflowed.acknowledge_drain(start=start, end=end)
+        row_faulted.acknowledge_drain(start=start, end=end)
     except E.ActionEpochError:
         pass
     else:
-        raise AssertionError("overflowed drain ACKed")
-    assert overflowed._undecoded_overflow is storage
-    assert overflowed.drain_frontier == start
+        raise AssertionError("row-faulted drain ACKed")
+    assert row_faulted._undrained_row_fault_bits is storage
+    assert row_faulted.drain_frontier == start
 
 
 def test_inference_constructed_owner_accepts_genesis_after_context_exit():
     with torch.inference_mode():
         epoch = E.ActionEpochOwner(num_envs=2, device="cpu")
-    inference_storage = epoch._undecoded_overflow
+    inference_storage = epoch._undrained_row_fault_bits
     assert torch.is_inference(inference_storage)
 
     epoch.activate_reset_genesis(
         selected_mask=torch.ones(2, dtype=torch.bool),
         reset_generation=torch.zeros(2, dtype=torch.int64),
     )
-    assert epoch._undecoded_overflow is not inference_storage
-    assert not torch.is_inference(epoch._undecoded_overflow)
+    assert epoch._undrained_row_fault_bits is not inference_storage
+    assert not torch.is_inference(epoch._undrained_row_fault_bits)
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert not bool(materialized.overflow.any())
+    assert materialized.row_fault_bits.tolist() == [0, 0]
     epoch.acknowledge_drain(start=start, end=end)
     assert epoch.drain_frontier == end
 
@@ -2483,7 +3148,10 @@ def test_motion_close_causality_is_device_latched_without_host_observation(
     epoch.settle_d05_transaction(d05.arm())
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert materialized.overflow.tolist() == [True, False]
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT,
+        0,
+    ]
 
 
 def test_owner_fault_plane_is_typed_and_malformed_input_is_rejected(monkeypatch):
@@ -2566,7 +3234,9 @@ def test_owner_facts_mask_idle_rows_and_keep_active_owner_planes_distinct(monkey
     )
     assert idle.current().fact_valid_bits.eq(0).all()
     start, end = idle.prepare_drain()
-    assert idle.materialize_drain(start=start, end=end).overflow.tolist() == [True, False]
+    assert idle.materialize_drain(
+        start=start, end=end
+    ).row_fault_bits.tolist() == [E.ROW_FAULT_OWNER_FACT_ACTIVE_JOIN, 0]
 
     epoch, d05, _cadence, _r06, _playback, *_middle, physical = _ready_epoch()
     r03_owner, r07_owner = object(), object()
@@ -2701,7 +3371,10 @@ def test_d05_old_reset_generation_is_censored_and_device_latched(monkeypatch):
         E.D05_DECISION_CENSOR,
         E.D05_DECISION_REJECT,
     ]
-    assert materialized.overflow.tolist() == [True, False]
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_D05_RESET_GENERATION_JOIN,
+        0,
+    ]
 
 
 def test_d05_defer_and_censor_are_event_only_with_exact_zero_writer_log(monkeypatch):
@@ -2826,7 +3499,7 @@ def test_reward_order_overflow_and_checkpoint_are_bounded():
         epoch.pay_reward(ordinal)
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert not bool(materialized.overflow.any())
+    assert materialized.row_fault_bits.tolist() == [0, 0]
     epoch.acknowledge_drain(start=start, end=end)
     checkpoint = epoch.checkpoint()
     assert checkpoint.reward_cycle_age.tolist() == [2**63 - 1, 2**63 - 1]
@@ -3007,6 +3680,22 @@ def test_epoch_private_carry_leaf_exposes_typed_values_without_milestone_pack():
     assert not hasattr(E, "_single_d2h_checkpoint_views")
 
 
+def test_active_epoch_carry_source_rejects_nonzero_named_row_fault_bits():
+    source = _portable_epoch_source()
+    coordinator = object()
+    source._lean_carry_coordinator = coordinator
+    lease = types.SimpleNamespace(coordinator=coordinator, kind="capture")
+    source._undrained_row_fault_bits[0] = (
+        E.ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW
+    )
+    before = source._undrained_row_fault_bits.clone()
+
+    with pytest.raises(E.ActionEpochError, match="not quiescent"):
+        source._lean_carry_capture(lease)
+
+    assert torch.equal(source._undrained_row_fault_bits, before)
+
+
 @pytest.mark.skip(reason="superseded by Lean-root composite carry transaction")
 def test_private_epoch_carry_restores_record_frontier_payment_and_milestone():
     source = _portable_epoch_source()
@@ -3112,7 +3801,7 @@ def test_private_epoch_restore_rejects_foreign_catalog_alias_and_token():
         malformed_target._prepare_restore_carry(state)
 
     overflow_target, *_ = _ready_epoch()
-    overflow_target._undecoded_overflow[0] = True
+    overflow_target._undrained_row_fault_bits[0] = E.ROW_FAULT_RESET_GENESIS_CONTRACT
     with pytest.raises(E.ActionEpochError):
         overflow_target._prepare_restore_carry(state)
 
@@ -3123,7 +3812,7 @@ def test_private_epoch_restore_rejects_foreign_catalog_alias_and_token():
 
     cross_aliased_target, *_ = _ready_epoch()
     cross_aliased_target.milestone.r03_seen = (
-        cross_aliased_target._undecoded_overflow[:, None]
+        cross_aliased_target._undrained_row_fault_bits[:, None]
     )
     with pytest.raises(E.ActionEpochError, match="aliases"):
         cross_aliased_target._prepare_restore_carry(state)
@@ -3328,7 +4017,6 @@ def test_epoch_carry_capture_requires_ack_boundary_and_exact_live_abi():
         "future_payment",
         "current_future",
         "wrong_phase",
-        "no_debt",
     ],
 )
 def test_invalid_previous_paid_contract_faults_without_retire_or_highwater(
@@ -3393,16 +4081,9 @@ def test_invalid_previous_paid_contract_faults_without_retire_or_highwater(
             replace(publication.current, phase=phase),
             publication.pending_log,
         )
-    closed_mask = torch.tensor(
-        [paid_fault != "no_debt", False], dtype=torch.bool
-    )
+    closed_mask = torch.tensor([True, False], dtype=torch.bool)
     close_reason = torch.tensor(
-        [
-            E.MOTION_CLOSE_NONE
-            if paid_fault == "no_debt"
-            else E.MOTION_CLOSE_PLAYED_SUFFIX,
-            E.MOTION_CLOSE_NONE,
-        ],
+        [E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE],
         dtype=torch.int64,
     )
     cadence.projection = _MotionProjection(
@@ -3418,7 +4099,10 @@ def test_invalid_previous_paid_contract_faults_without_retire_or_highwater(
     epoch.settle_d05_transaction(d05.arm())
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
-    assert materialized.overflow.tolist() == [True, False]
+    assert materialized.row_fault_bits.tolist() == [
+        E.ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT,
+        0,
+    ]
 
 
 @pytest.mark.parametrize(

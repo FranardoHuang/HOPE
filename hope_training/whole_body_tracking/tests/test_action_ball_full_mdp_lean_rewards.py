@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import importlib
+import inspect
 import os
 from pathlib import Path
 import pickle
@@ -204,6 +205,271 @@ class _ExactEnvRewardDispatcherRepresentation:
         return self._test_reward_graph.record_common_dense(ordinal, value)
 
 
+class _OldReferenceLeanActionEpochRewardGraph(R.LeanActionEpochRewardGraph):
+    """The pre-cache R03 implementation retained only as a parity oracle."""
+
+    def _r03(self, ordinal: int, scale: float) -> torch.Tensor:
+        valid, source_step, fact, faults = self._owner_rows("r03_strike_fact")
+        record = self._record()
+        if fact.shape != (self.num_envs, E.OWNER_FACT_F32_WIDTH):
+            raise R.LeanRewardCycleError("R03 epoch fact width differs")
+        target_position = fact[:, 0:3]
+        target_velocity = fact[:, 3:6]
+        target_normal = fact[:, 6:9]
+        ball_position = fact[:, 9:12]
+        achieved_position = fact[:, 15:18]
+        achieved_velocity = fact[:, 18:21]
+        achieved_normal = fact[:, 21:24]
+        consumer = R.R03_NAMES[ordinal]
+        if consumer == "paddle_center_proximity":
+            error = torch.linalg.vector_norm(
+                achieved_position - ball_position, dim=-1
+            )
+        else:
+            component = consumer.split("_", 1)[1].split("_", 1)[0]
+            if component == "position":
+                error = torch.linalg.vector_norm(
+                    achieved_position - target_position, dim=-1
+                )
+            elif component == "velocity":
+                error = torch.linalg.vector_norm(
+                    achieved_velocity - target_velocity, dim=-1
+                )
+            else:
+                cosine = torch.sum(
+                    achieved_normal * target_normal, dim=-1
+                ).clamp(-1.0, 1.0)
+                error = torch.acos(cosine)
+        finite = torch.isfinite(error)
+        clean_error = torch.where(finite, error, torch.zeros_like(error))
+        ratio_sq = torch.square(clean_error / scale)
+        if consumer.endswith("_coarse") or consumer == "paddle_center_proximity":
+            raw = torch.reciprocal(1.0 + ratio_sq)
+        else:
+            raw = torch.exp(-ratio_sq)
+        present = torch.bitwise_and(valid, R.R03_PRESENT).ne(0) & faults.eq(0)
+        admitted = (
+            present
+            & torch.bitwise_and(valid, R.R03_PHYSICALLY_VALID).ne(0)
+            & record.reward_cycle_fault.eq(0)
+            & source_step.eq(record.reward_cycle_age)
+        )
+        self._milestone.add_reward(
+            ordinal,
+            raw,
+            raw,
+            admitted,
+            finite,
+            self._milestone_configured_income_scale[ordinal],
+        )
+        return torch.where(admitted & finite, raw, torch.zeros_like(raw))
+
+
+_R03_TEST_SCALES = (0.2, 1.1, 0.45, 0.55, 2.1, 0.9, 0.08, 0.4, 0.2, 0.13)
+
+
+def _set_r03_parity_case(owner, case):
+    publication = owner._publication
+    record = publication.current
+    slot = E.OWNER_ORDER.index("r03_strike_fact")
+    facts = record.fact_f32.clone()
+    valid_bits = record.fact_valid_bits.clone()
+    source_step = record.fact_source_step.clone()
+    faults = record.owner_fault_bits.clone()
+
+    facts[0, 0, slot, 0:3] = _tensor((0.2, -0.1, 0.3))
+    facts[0, 0, slot, 3:6] = _tensor((0.5, 0.1, -0.2))
+    facts[0, 0, slot, 9:12] = _tensor((0.1, 0.2, -0.1))
+    facts[0, 0, slot, 15:18] = _tensor((0.4, 0.2, 0.1))
+    facts[0, 0, slot, 18:21] = _tensor((0.1, 0.3, -0.4))
+    facts[0, 0, slot, 21:24] = _tensor((0.0, 0.6, 0.8))
+    facts[1, 0, slot, 0:3] = _tensor((-0.3, 0.2, 0.1))
+    facts[1, 0, slot, 3:6] = _tensor((-0.2, 0.4, 0.3))
+    facts[1, 0, slot, 9:12] = _tensor((0.0, -0.2, 0.3))
+    facts[1, 0, slot, 15:18] = _tensor((-0.1, -0.2, 0.5))
+    facts[1, 0, slot, 18:21] = _tensor((0.3, 0.1, -0.1))
+    facts[1, 0, slot, 21:24] = _tensor((0.0, -0.8, 0.6))
+
+    if case == "invalid":
+        valid_bits[0, 0, slot] = R.R03_PRESENT
+        faults[1, 0, slot] = 32
+    elif case == "nonfinite":
+        facts[0, 0, slot, 15] = float("nan")
+        facts[1, 0, slot, 18] = float("inf")
+        facts[1, 0, slot, 21] = float("nan")
+    elif case not in ("valid", "sticky"):
+        raise AssertionError("unknown R03 parity case")
+
+    owner._publication = E._Publication(
+        replace(
+            record,
+            fact_valid_bits=valid_bits,
+            fact_source_step=source_step,
+            fact_f32=facts,
+            owner_fault_bits=faults,
+        ),
+        publication.pending_log,
+    )
+
+
+def _configure_unique_income(graph):
+    graph.configure_milestone_configured_income(
+        {
+            name: types.SimpleNamespace(weight=0.25 + ordinal * 0.125)
+            for ordinal, name in enumerate(R.MANAGER_NAMES)
+        },
+        0.031,
+    )
+
+
+def _pay_r03(graph):
+    return tuple(
+        graph.pay(ordinal, scale=_R03_TEST_SCALES[ordinal])
+        for ordinal in range(len(R.R03_NAMES))
+    )
+
+
+@pytest.mark.parametrize("case", ("valid", "invalid", "nonfinite", "sticky"))
+def test_packed_r03_cache_matches_old_reference_for_all_fact_classes(case):
+    old_owner = _epoch()
+    new_owner = _epoch()
+    _set_r03_parity_case(old_owner, case)
+    _set_r03_parity_case(new_owner, case)
+    old = _OldReferenceLeanActionEpochRewardGraph(epoch_owner=old_owner)
+    new = R.LeanActionEpochRewardGraph(epoch_owner=new_owner)
+    _configure_unique_income(old)
+    _configure_unique_income(new)
+
+    if case == "sticky":
+        old_first = _pay_all(old)
+        new_first = _pay_all(new)
+        assert all(
+            torch.equal(old_value, new_value)
+            for old_value, new_value in zip(old_first, new_first)
+        )
+        old_owner.publish_reward_payment(8)
+        new_owner.publish_reward_payment(8)
+
+    old_values = _pay_r03(old)
+    new_values = _pay_r03(new)
+
+    assert all(
+        torch.equal(old_value, new_value)
+        for old_value, new_value in zip(old_values, new_values)
+    )
+    assert torch.equal(old_owner.milestone.i64, new_owner.milestone.i64)
+    assert torch.equal(old_owner.milestone.f64, new_owner.milestone.f64)
+    assert new._r03_cycle_cache is None
+
+
+def test_packed_r03_owner_decode_and_shared_errors_run_once(monkeypatch):
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    counts = {"owner_rows": 0, "gather": 0, "vector_norm": 0, "acos": 0}
+    owner_rows = graph._owner_rows
+    gather = R.torch.gather
+    vector_norm = R.torch.linalg.vector_norm
+    acos = R.torch.acos
+
+    def counted_owner_rows(owner_kind):
+        counts["owner_rows"] += 1
+        return owner_rows(owner_kind)
+
+    def counted_gather(*args, **kwargs):
+        counts["gather"] += 1
+        return gather(*args, **kwargs)
+
+    def counted_vector_norm(*args, **kwargs):
+        counts["vector_norm"] += 1
+        return vector_norm(*args, **kwargs)
+
+    def counted_acos(*args, **kwargs):
+        counts["acos"] += 1
+        return acos(*args, **kwargs)
+
+    monkeypatch.setattr(graph, "_owner_rows", counted_owner_rows)
+    monkeypatch.setattr(R.torch, "gather", counted_gather)
+    monkeypatch.setattr(R.torch.linalg, "vector_norm", counted_vector_norm)
+    monkeypatch.setattr(R.torch, "acos", counted_acos)
+
+    values = _pay_r03(graph)
+
+    assert all(torch.isfinite(value).all() for value in values)
+    assert counts == {"owner_rows": 1, "gather": 4, "vector_norm": 3, "acos": 1}
+    assert graph._r03_cycle_cache is None
+
+
+def test_r03_cache_lifecycle_closes_and_reopens_with_a_new_cycle():
+    owner = _epoch()
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
+    actual = torch.zeros(graph.num_envs, dtype=torch.float32, device=TEST_DEVICE)
+
+    value = graph.pay(0, scale=_R03_TEST_SCALES[0])
+    actual.add_(value)
+    first_cache = graph._r03_cycle_cache
+    assert first_cache is not None
+    for ordinal in range(1, len(R.R03_NAMES)):
+        value = graph.pay(ordinal, scale=_R03_TEST_SCALES[ordinal])
+        actual.add_(value)
+    assert graph._r03_cycle_cache is None
+    for ordinal in range(10, R.LIFECYCLE_PAYMENT_COUNT):
+        value = graph.pay(ordinal)
+        actual.add_(value)
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT, R.MANAGER_TERM_COUNT):
+        value = graph.record_common_dense(
+            ordinal, torch.ones(graph.num_envs, device=TEST_DEVICE)
+        )
+        actual.add_(value)
+    graph.close_milestone_actual_reward(actual)
+    assert graph._r03_cycle_cache is None
+    owner.publish_reward_payment(8)
+
+    graph.pay(0, scale=_R03_TEST_SCALES[0])
+
+    assert graph._r03_cycle_cache is not None
+    assert graph._r03_cycle_cache is not first_cache
+
+
+def test_r03_cache_invalidates_on_order_error_and_poison():
+    order_error = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    order_error.pay(0, scale=_R03_TEST_SCALES[0])
+    assert order_error._r03_cycle_cache is not None
+    with pytest.raises(R.LeanRewardCycleError, match="expected 1"):
+        order_error.pay(0, scale=_R03_TEST_SCALES[0])
+    assert order_error._r03_cycle_cache is None
+    assert order_error.poisoned is False
+
+    poisoned = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    poisoned.pay(0, scale=_R03_TEST_SCALES[0])
+    assert poisoned._r03_cycle_cache is not None
+    with pytest.raises(R.LeanRewardConstructionHold, match="scale must"):
+        poisoned.pay(1, scale=0.0)
+    assert poisoned.poisoned is True
+    assert poisoned._r03_cycle_cache is None
+
+
+def test_r03_cache_hot_path_has_no_tensor_host_observation_api():
+    source = "\n".join(
+        inspect.getsource(member)
+        for member in (
+            R.LeanActionEpochRewardGraph._decode_r03_cycle,
+            R.LeanActionEpochRewardGraph._r03,
+            R.LeanActionEpochRewardGraph._invalidate_r03_cycle_cache,
+        )
+    )
+    assert all(
+        token not in source
+        for token in (
+            ".item(",
+            ".cpu(",
+            ".numpy(",
+            ".tolist(",
+            ".synchronize(",
+            "torch.equal(",
+        )
+    )
+    assert '.to(device="cpu"' not in source
+
+
 def test_exact_fourteen_lifecycle_plus_six_dense_complete_once():
     graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
     values = _pay_all(graph)
@@ -274,7 +540,7 @@ def test_r06_payment_tick_can_follow_its_outcome_source_tick():
     assert torch.equal(values[12], torch.ones(2, device=TEST_DEVICE))
     assert payment.valid.tolist() == [True, True]
     assert payment.payment_step.tolist() == [8, 8]
-    assert owner._undecoded_overflow.tolist() == [False, False]
+    assert owner._undrained_row_fault_bits.tolist() == [0, 0]
 
 
 def test_r06_rejects_missing_settlement_and_noncanonical_unpaid_sentinel():
@@ -302,7 +568,10 @@ def test_r06_rejects_missing_settlement_and_noncanonical_unpaid_sentinel():
     assert payment.valid.tolist() == [False, False]
     assert payment.payment_step.tolist() == [-1, -1]
     assert owner.current().payment_step[:, 0].tolist() == [-1, -2]
-    assert owner._undecoded_overflow.tolist() == [True, True]
+    assert owner._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY,
+        E.ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY,
+    ]
 
 
 def test_reward_payment_before_local_settlement_faults_without_mutation():
@@ -314,7 +583,10 @@ def test_reward_payment_before_local_settlement_faults_without_mutation():
     assert payment.valid.tolist() == [False, False]
     assert payment.payment_step.tolist() == [-1, -1]
     assert owner.current().payment_step[:, 0].tolist() == [-1, -1]
-    assert owner._undecoded_overflow.tolist() == [True, True]
+    assert owner._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY,
+        E.ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY,
+    ]
 
 
 def test_r06_ordinals_share_the_ordinal_zero_frozen_before_image():

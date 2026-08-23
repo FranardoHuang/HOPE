@@ -14085,6 +14085,17 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
     return merged
 
 
+_FRESH_FULL_MDP_ENV_CFG_MODULE = (
+    "whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg"
+)
+_FRESH_FULL_MDP_ENV_CFG_NAMES = frozenset(
+    {
+        "HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg",
+        "HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg",
+    }
+)
+
+
 def _fresh_full_mdp_reward_graph_identity(env_cfg, task) -> str | None:
     """Return A/C only for the exact config/task pair that owns Reward.
 
@@ -14094,9 +14105,20 @@ def _fresh_full_mdp_reward_graph_identity(env_cfg, task) -> str | None:
     of the exact config objects to bypass the legacy reward translator.
     """
 
-    config_module = importlib.import_module(
-        "whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg"
-    )
+    # The legacy translator is also used by light-weight host tools and unit
+    # tests that deliberately do not import IsaacLab.  Reject the overwhelmingly
+    # common non-candidate case from immutable Python type metadata before
+    # importing the registered EnvCfg module.  These strings are routing only:
+    # a same-named foreign/reloaded class still has to pass the exact type-keyed
+    # lookup below and therefore cannot claim the fresh Reward graph.
+    env_cfg_type = type(env_cfg)
+    if (
+        env_cfg_type.__module__ != _FRESH_FULL_MDP_ENV_CFG_MODULE
+        or env_cfg_type.__name__ not in _FRESH_FULL_MDP_ENV_CFG_NAMES
+    ):
+        return None
+
+    config_module = importlib.import_module(_FRESH_FULL_MDP_ENV_CFG_MODULE)
     pairs = {
         getattr(
             config_module,

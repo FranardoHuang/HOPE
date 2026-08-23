@@ -399,8 +399,7 @@ def _install_real_d05_record(
     owner._diagnostic_epoch_owner = epoch_owner
 
     command._action_ball_continuous_motion_device_r05_owner = owner
-    command._action_ball_full_mdp_motion_epoch_owner = epoch_owner
-    epoch_owner.bind_motion_playback_owner(command)
+    command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
     if command._action_ball_continuous_motion_device_mutation_version is None:
         command._action_ball_continuous_motion_device_mutation_version = torch.zeros(
             1, dtype=torch.int64, device=device

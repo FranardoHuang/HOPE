@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -131,7 +132,20 @@ def test_numpy_guard_verdict_equals_the_live_isaac_terminal_kernel():
     """
 
     torch = pytest.importorskip("torch")
+    package_root = WBT_ROOT / "source/whole_body_tracking"
+    if str(package_root) not in sys.path:
+        sys.path.insert(0, str(package_root))
     sys.path.insert(0, str(WBT_ROOT / "tests"))
+    synthetic_package = "whole_body_tracking.tasks.tracking.mdp"
+    package_module = sys.modules.setdefault(
+        synthetic_package, types.ModuleType(synthetic_package)
+    )
+    package_module.__path__ = [
+        str(
+            WBT_ROOT
+            / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp"
+        )
+    ]
     from test_reward_flags_mdp import _PKG, _load  # noqa: E402  (installs the isaaclab stub)
 
     mdp_dir = (
@@ -203,6 +217,23 @@ def test_numpy_guard_verdict_equals_the_live_isaac_terminal_kernel():
     rng = np.random.default_rng(20260806)
     hit_samples = 0
     retired_rule_disagreements = 0
+    owner_indices_t = torch.tensor(
+        np.array(components.owner_indices, copy=True), dtype=torch.long
+    )
+    local_centers_t = torch.tensor(
+        np.array(components.local_centers_m, copy=True), dtype=torch.float64
+    )
+    local_half_axes_t = torch.tensor(
+        np.array(components.local_half_axes_m, copy=True), dtype=torch.float64
+    )
+    racket_center_t = torch.tensor(
+        np.array(term.RACKET_BLADE_CENTER_OFFSET_WRIST_M, copy=True),
+        dtype=torch.float64,
+    )
+    racket_half_axes_t = torch.tensor(
+        np.array(term.RACKET_BLADE_LOCAL_HALF_AXES_M, copy=True),
+        dtype=torch.float64,
+    )
     for trial in range(400):
         # Park the whole robot far away and graze ONE owner body across the
         # near-top corner of the table slab.  Poses drawn uniformly over the
@@ -233,18 +264,14 @@ def test_numpy_guard_verdict_equals_the_live_isaac_terminal_kernel():
                 torch.as_tensor(positions, dtype=torch.float64)[None],
                 torch.as_tensor(quats, dtype=torch.float64)[None],
                 torch.zeros((1, 3), dtype=torch.float64),
-                torch.as_tensor(components.owner_indices, dtype=torch.long),
-                torch.as_tensor(components.local_centers_m, dtype=torch.float64),
-                torch.as_tensor(components.local_half_axes_m, dtype=torch.float64),
+                owner_indices_t,
+                local_centers_t,
+                local_half_axes_t,
                 torch.as_tensor(lo, dtype=torch.float64),
                 torch.as_tensor(hi, dtype=torch.float64),
                 racket_body_index=31,
-                racket_blade_center_offset_wrist_m=torch.as_tensor(
-                    term.RACKET_BLADE_CENTER_OFFSET_WRIST_M, dtype=torch.float64
-                ),
-                racket_blade_local_half_axes_m=torch.as_tensor(
-                    term.RACKET_BLADE_LOCAL_HALF_AXES_M, dtype=torch.float64
-                ),
+                racket_blade_center_offset_wrist_m=racket_center_t,
+                racket_blade_local_half_axes_m=racket_half_axes_t,
             )[0].item()
         )
         assert port == live, (
@@ -484,6 +511,22 @@ def test_same_named_model_with_changed_owner_local_frame_fails_closed(field):
     observed = term._owner_frame_contract(_FakeMujoco, observed_model)
     with pytest.raises(term.TableTerminationContractError, match="owner-local"):
         term._assert_owner_frame_contract_equal(expected, observed)
+
+
+def test_public_owner_frame_adapter_consumes_one_already_verified_model():
+    model = _FakeOwnerFrameModel()
+    calls = []
+
+    class Verified:
+        def consume_verified_model(self, consumer):
+            calls.append("consume")
+            return consumer(model)
+
+    contract = term.consume_verified_owner_frame_contract(_FakeMujoco, Verified())
+    assert calls == ["consume"]
+    assert contract["content_sha256"] == term._owner_frame_contract(
+        _FakeMujoco, model
+    )["content_sha256"]
 
 
 def test_arbitrary_root_mjcf_bytes_are_rejected_before_live_model_binding(tmp_path):

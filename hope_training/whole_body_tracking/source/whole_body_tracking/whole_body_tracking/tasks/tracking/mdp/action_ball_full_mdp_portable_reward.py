@@ -79,12 +79,17 @@ def lifecycle_reward14(
     fact_f32: torch.Tensor,
     owner_fault_bits: torch.Tensor,
     step_dt: float,
+    weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Return configured Reward20 ordinals 0..13 as finite ``[N,14]``.
+    """Return configured Reward20 ordinals 0..13 as ``[N,14]``.
 
     The packing and math match ``action_ball_full_mdp_lean_rewards``.  This
     function deliberately does not return a success verdict: a row can be a
-    valid learning sample with zero payment.
+    valid learning sample with zero payment.  The MuJoCo training lane supplies
+    its construction-cached device ``weights`` and attributes any nonfinite
+    result in the rollout ledger before the optimizer boundary.  Omitting
+    ``weights`` retains the prior finite fail-fast behavior for non-hot
+    diagnostic callers.
     """
 
     batch = _require_inputs(valid_bits, fact_f32, owner_fault_bits)
@@ -103,16 +108,20 @@ def lifecycle_reward14(
     target_position, target_velocity, target_normal = r03[:, 0:3], r03[:, 3:6], r03[:, 6:9]
     ball_position = r03[:, 9:12]
     achieved_position, achieved_velocity, achieved_normal = r03[:, 15:18], r03[:, 18:21], r03[:, 21:24]
+    position_error = torch.linalg.vector_norm(achieved_position - target_position, dim=-1)
+    velocity_error = torch.linalg.vector_norm(achieved_velocity - target_velocity, dim=-1)
+    normal_cosine = torch.sum(achieved_normal * target_normal, dim=-1).clamp(-1.0, 1.0)
+    normal_error = torch.acos(normal_cosine)
+    paddle_center_error = torch.linalg.vector_norm(achieved_position - ball_position, dim=-1)
     for ordinal, (name, scale, reciprocal) in enumerate(R03_REWARD_SPECS):
         if name == "paddle_center_proximity":
-            error = torch.linalg.vector_norm(achieved_position - ball_position, dim=-1)
+            error = paddle_center_error
         elif "position" in name:
-            error = torch.linalg.vector_norm(achieved_position - target_position, dim=-1)
+            error = position_error
         elif "velocity" in name:
-            error = torch.linalg.vector_norm(achieved_velocity - target_velocity, dim=-1)
+            error = velocity_error
         else:
-            cosine = torch.sum(achieved_normal * target_normal, dim=-1).clamp(-1.0, 1.0)
-            error = torch.acos(cosine)
+            error = normal_error
         finite = torch.isfinite(error)
         clean = torch.where(finite, error, torch.zeros_like(error))
         ratio_sq = torch.square(clean / scale)
@@ -152,9 +161,19 @@ def lifecycle_reward14(
     )
     raw[:, 13] = torch.where(r07_eligible & r07_finite, r07[:, 0], torch.zeros_like(r07[:, 0]))
 
-    weights = torch.tensor(LIFECYCLE_WEIGHTS, dtype=fact_f32.dtype, device=fact_f32.device)
+    cached_weights = weights is not None
+    if not cached_weights:
+        weights = fact_f32.new_tensor(LIFECYCLE_WEIGHTS)
+    elif (
+        not isinstance(weights, torch.Tensor)
+        or weights.dtype != fact_f32.dtype
+        or weights.device != fact_f32.device
+        or weights.shape != (LIFECYCLE_TERM_COUNT,)
+        or not weights.is_contiguous()
+    ):
+        raise ValueError("weights must be contiguous [14] matching fact_f32")
     configured = raw * weights * dt
-    if not bool(torch.isfinite(configured).all()):
+    if not cached_weights and not bool(torch.isfinite(configured).all()):
         raise RuntimeError("portable lifecycle Reward14 is nonfinite")
     return configured
 

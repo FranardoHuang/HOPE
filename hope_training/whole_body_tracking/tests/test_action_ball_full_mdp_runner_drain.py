@@ -1556,7 +1556,9 @@ def test_diagnostic_prepare_materializes_the_frozen_suffix_exactly_once(
         assert self is epoch_owner
         calls.append((start, end))
         materialized = original(start=start, end=end)
-        assert materialized.overflow.device.type == "cpu"
+        assert materialized.row_fault_bits.device.type == "cpu"
+        assert materialized.row_fault_bits.dtype == torch.int64
+        assert not bool(materialized.row_fault_bits.ne(0).any())
         assert all(
             value.device.type == "cpu" and value.is_contiguous()
             for entry in materialized.entries

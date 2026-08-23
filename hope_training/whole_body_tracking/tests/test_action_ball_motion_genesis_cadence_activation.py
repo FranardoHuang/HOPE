@@ -177,6 +177,25 @@ def _fresh_command_and_owners(
     command, _env_ids = bridge._configure_unbound_command(
         num_envs=2, profile=profile
     )
+    # The lightweight bridge harness bypasses MotionCommand.__init__. Mirror
+    # the two always-present live reference buffers so state snapshots see the
+    # same object shape as production construction.
+    body_count = len(command.cfg.body_names)
+    command.body_pos_relative_w = torch.zeros(
+        command.num_envs,
+        body_count,
+        3,
+        dtype=torch.float32,
+        device=command.device,
+    )
+    command.body_quat_relative_w = torch.zeros(
+        command.num_envs,
+        body_count,
+        4,
+        dtype=torch.float32,
+        device=command.device,
+    )
+    command.body_quat_relative_w[..., 0] = 1.0
     motion_action_uids = (
         command._action_ball_continuous_code_owned_action_uids()
     )
@@ -260,6 +279,7 @@ def _snapshot(command) -> dict[str, torch.Tensor]:
         for field, attr, _nonnegative in (
             C._ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
         )
+        if torch.is_tensor(getattr(command, attr, None))
     }
     values.update(
         {

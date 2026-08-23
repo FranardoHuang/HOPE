@@ -21,8 +21,15 @@ READY_POSE = PROJECT / (
     "configs/action_ball_n1_measured_20260803/evidence_holdpass_robust20n_20260803/"
     "take061.measured_teacher.yaw_aligned_full_seed.robust20n.dynamic_ready.v2.json"
 )
+PLANT_XML = PROJECT / (
+    "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
+    "a3_pingpong/a3_pingpong.xml"
+)
 RUNNER = Path("hope_training/whole_body_tracking/mjlab_lane/"
               "mujoco_gpu_ac_full_mdp_wait_rsl3.py")
+PLANT_CONTRACT = Path("hope_training/whole_body_tracking/mjlab_lane/"
+                      "mujoco_full_mdp_plant_contract.py")
+PLANT_MANIFEST = Path("configs/a3_mujoco_identity_v2_20260803.json")
 UUID = "GPU-exact-0002"
 NAMESPACE = "mujoco-full-a-h48-test-0001"
 
@@ -55,7 +62,7 @@ def _load(path: Path):
 
 
 @pytest.fixture
-def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     base = tmp_path.resolve()
     repo = base / "repo"
     (repo / "scripts").mkdir(parents=True)
@@ -63,18 +70,28 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     runner = repo / RUNNER
     runner.parent.mkdir(parents=True)
     runner.write_text("# tracked runner placeholder\n", encoding="utf-8")
+    shutil.copy2(PROJECT / PLANT_CONTRACT, repo / PLANT_CONTRACT)
+    manifest = repo / PLANT_MANIFEST
+    manifest.parent.mkdir(parents=True)
+    shutil.copy2(PROJECT / PLANT_MANIFEST, manifest)
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "test@example.invalid")
     _git(repo, "config", "user.name", "Launcher Test")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "fixture")
+    sys.modules.pop("_hope_mujoco_full_mdp_plant_contract", None)
+    request.addfinalizer(
+        lambda: sys.modules.pop("_hope_mujoco_full_mdp_plant_contract", None)
+    )
     module = _load(repo / "scripts" / SCRIPT.name)
 
     tools = base / "tools"
     tools.mkdir()
     python = _executable(tools / "fake-python", """#!/usr/bin/env python3
 import fcntl, json, os, pathlib, sys, time
-fd = os.open(os.environ["FAKE_LOCK_FILE"], os.O_RDWR)
+root = pathlib.Path.cwd()
+base = root.parents[2]
+fd = os.open(base / "gpu.lock", os.O_RDWR)
 held = False
 try:
     try:
@@ -86,26 +103,28 @@ try:
 finally:
     os.close(fd)
 names = ["CUDA_DEVICE_ORDER", "CUDA_VISIBLE_DEVICES", "PYTHONNOUSERSITE", "PYTHONDONTWRITEBYTECODE",
-         "ACTIONBALL_READY_POSE", "WARP_CACHE_PATH", "CUDA_CACHE_PATH",
-         "TMPDIR", "PYTHONPYCACHEPREFIX",
-         "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"]
+         "ACTIONBALL_READY_POSE", "A3_PINGPONG_XML", "WARP_CACHE_PATH", "CUDA_CACHE_PATH",
+         "TMPDIR", "PYTHONPYCACHEPREFIX", "PATH", "HOME", "XDG_CACHE_HOME",
+         "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "LANG", "LC_ALL", "LC_CTYPE",
+         "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX", "HOPE_GEOMETRY_PY",
+         "LD_PRELOAD", "ACTIONBALL_AUDIT_AMBIENT", "OMP_NUM_THREADS", "CUDA_LAUNCH_BLOCKING"]
 warp_cache = pathlib.Path(os.environ["WARP_CACHE_PATH"])
 cuda_cache = pathlib.Path(os.environ["CUDA_CACHE_PATH"])
 payload = {"argv": sys.argv[1:], "cwd": os.getcwd(), "lock_held": held,
            "env": {name: os.environ.get(name) for name in names},
            "warp_cache_is_dir": warp_cache.is_dir(),
            "cuda_cache_is_dir": cuda_cache.is_dir()}
-pathlib.Path(os.environ["FAKE_CHILD_RECORD"]).write_text(json.dumps(payload))
-pathlib.Path(os.environ["FAKE_CHILD_STARTED"]).write_text("started")
+root.joinpath("record.json").write_text(json.dumps(payload))
+root.joinpath("started").write_text("started")
 pathlib.Path("MUJOCO_LOG.TXT").write_text("process-local runtime log")
 warp_cache.joinpath("fake-compiled-kernel").write_text("run-owned cache")
 print("fake child stdout", flush=True)
 print("fake child stderr", file=sys.stderr, flush=True)
-release = os.environ.get("FAKE_CHILD_RELEASE")
+release = root / "release"
 deadline = time.monotonic() + 5
-while release and not pathlib.Path(release).exists() and time.monotonic() < deadline:
+while not release.exists() and time.monotonic() < deadline:
     time.sleep(0.01)
-sys.exit(int(os.environ.get("FAKE_CHILD_RC", "0")))
+sys.exit(7)
 """)
     nvidia = _executable(tools / "nvidia-smi", """#!/bin/sh
 if [ "$#" -eq 2 ] && [ "$1" = "--query-gpu=index,uuid" ] && [ "$2" = "--format=csv,noheader,nounits" ]; then
@@ -123,34 +142,40 @@ fi
     lock.write_text("", encoding="utf-8")
     ready_pose = base / "ready-pose.json"
     shutil.copy2(READY_POSE, ready_pose)
-    record, started, release = (base / name for name in ("record.json", "started", "release"))
+    plant_xml = base / "a3_pingpong.xml"
+    shutil.copy2(PLANT_XML, plant_xml)
+    record, started, release = (
+        run_root / name for name in ("record.json", "started", "release")
+    )
     monkeypatch.setattr(module, "WORKSPACE_ROOT", workspace)
     monkeypatch.setattr(module, "NVIDIA_SMI", nvidia)
     monkeypatch.setenv("FAKE_GPU_ROWS", f"0, GPU-other-0000\n2, {UUID}\n")
     monkeypatch.setenv("FAKE_APP_ROWS", "")
-    monkeypatch.setenv("FAKE_LOCK_FILE", str(lock))
-    monkeypatch.setenv("FAKE_CHILD_RECORD", str(record))
-    monkeypatch.setenv("FAKE_CHILD_STARTED", str(started))
-    monkeypatch.setenv("FAKE_CHILD_RELEASE", "")
     monkeypatch.setenv("WARP_CACHE_PATH", str(base / "ambient-warp-cache"))
-    for name in module.ENV_UNSET:
+    monkeypatch.setenv("A3_PINGPONG_XML", str(base / "ambient-wrong-plant.xml"))
+    for name in (
+        "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX",
+        "HOPE_GEOMETRY_PY", "LD_PRELOAD", "ACTIONBALL_AUDIT_AMBIENT",
+        "OMP_NUM_THREADS", "CUDA_LAUNCH_BLOCKING",
+    ):
         monkeypatch.setenv(name, "ambient-must-not-leak")
 
     def argv(*, dry: bool = False, root: Path = run_root,
              executable: Path = python, expected: str = UUID,
-             ready: Path = ready_pose) -> list[str]:
+             ready: Path = ready_pose, plant: Path = plant_xml) -> list[str]:
         result = [
             "--python", str(executable), "--run-root", str(root),
             "--namespace", NAMESPACE, "--gpu-index", "2",
             "--expected-gpu-uuid", expected, "--lock-file", str(lock),
-            "--ready-pose", str(ready),
+            "--ready-pose", str(ready), "--plant-xml", str(plant),
         ]
         return result + (["--dry-run"] if dry else [])
 
     return SimpleNamespace(
         module=module, repo=repo, runner=runner, python=python, nvidia=nvidia,
         workspace=workspace, root=run_root, lock=lock, record=record,
-        ready_pose=ready_pose, started=started, release=release, argv=argv,
+        ready_pose=ready_pose, plant_xml=plant_xml, started=started,
+        release=release, argv=argv,
     )
 
 
@@ -168,6 +193,27 @@ def _expected_child(rig, commit: str) -> list[str]:
     ]
 
 
+def test_plant_contract_loads_under_stdlib_only_python() -> None:
+    script = """
+import importlib.util, json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('pure_plant_contract', path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+assert 'numpy' not in sys.modules and 'mujoco' not in sys.modules
+print(json.dumps(module.expected_plant_model_identity(), sort_keys=True))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-S", "-c", script, str(PROJECT / PLANT_CONTRACT)],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    identity = json.loads(completed.stdout)
+    assert identity["source_plant"]["portable_identity_sha256"] == (
+        "472219ae346d9217b7d1af860d462a18d6ed8507c5cbb9c0f1ddcd6f964dfd7a"
+    )
+
+
 def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
     rig, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     rig.module.NVIDIA_SMI = rig.nvidia.with_name("must-not-run")
@@ -183,22 +229,68 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
     assert json.loads(output.out) == {
         "argv": _expected_child(rig, commit),
         "env": {
-            "set": {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
+            "set": {"PATH": rig.module.CHILD_PATH,
+                    "HOME": str(rig.root / "home"),
+                    "XDG_CACHE_HOME": str(rig.root / "xdg_cache"),
+                    "XDG_CONFIG_HOME": str(rig.root / "xdg_config"),
+                    "XDG_DATA_HOME": str(rig.root / "xdg_data"),
+                    "XDG_STATE_HOME": str(rig.root / "xdg_state"),
+                    "LANG": rig.module.CHILD_LOCALE,
+                    "LC_ALL": rig.module.CHILD_LOCALE,
+                    "LC_CTYPE": rig.module.CHILD_LOCALE,
+                    "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
                     "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
+                    "A3_PINGPONG_XML": str(rig.plant_xml),
                     "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"),
                     "TMPDIR": str(rig.root / "tmp"),
                     "PYTHONPYCACHEPREFIX": str(rig.root / "pycache"),
                     "WARP_CACHE_PATH": str(rig.root / "warp_cache")},
-            "unset": ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX"],
+            "inherit": [],
+        },
+        "plant_xml": {
+            "path": str(rig.plant_xml),
+            "expected_identity": (
+                rig.module._plant_contract_module().expected_plant_model_identity()
+            ),
         },
     }
     assert output.err == ""
     assert not rig.root.parent.exists()
 
 
+def test_child_env_is_closed_and_rejects_ambient_inheritance(rig) -> None:
+    contract = rig.module._env_contract(
+        2,
+        rig.ready_pose,
+        rig.plant_xml,
+        rig.module._paths(rig.root),
+    )
+    child = rig.module._child_env(contract)
+    assert child == contract["set"]
+    assert contract["inherit"] == []
+    for name in (
+        "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX",
+        "HOPE_GEOMETRY_PY", "LD_PRELOAD", "ACTIONBALL_AUDIT_AMBIENT",
+        "OMP_NUM_THREADS", "CUDA_LAUNCH_BLOCKING",
+    ):
+        assert name not in child
+
+    poisoned = {"set": dict(contract["set"]), "inherit": ["LD_PRELOAD"]}
+    with pytest.raises(rig.module.LaunchError, match="environment contract"):
+        rig.module._child_env(poisoned)
+
+
 def test_ready_pose_argument_is_required(rig) -> None:
     argv = rig.argv(dry=True)
     offset = argv.index("--ready-pose")
+    del argv[offset:offset + 2]
+    with pytest.raises(SystemExit, match="2"):
+        rig.module.parse_args(argv)
+
+
+def test_plant_xml_argument_is_required(rig) -> None:
+    argv = rig.argv(dry=True)
+    offset = argv.index("--plant-xml")
     del argv[offset:offset + 2]
     with pytest.raises(SystemExit, match="2"):
         rig.module.parse_args(argv)
@@ -213,6 +305,18 @@ def test_ready_pose_fails_closed_before_resources(rig, kind: str, capsys) -> Non
         candidate.symlink_to(rig.ready_pose)
     assert rig.module.main(rig.argv(dry=True, ready=candidate)) == 2
     assert "ready-pose" in capsys.readouterr().err
+    assert not rig.root.parent.exists()
+
+
+@pytest.mark.parametrize("kind", ["missing", "wrong", "symlink"])
+def test_plant_xml_fails_closed_before_resources(rig, kind: str, capsys) -> None:
+    candidate = rig.plant_xml.with_name(kind + ".xml")
+    if kind == "wrong":
+        candidate.write_text("<mujoco/>\n", encoding="utf-8")
+    elif kind == "symlink":
+        candidate.symlink_to(rig.plant_xml)
+    assert rig.module.main(rig.argv(dry=True, plant=candidate)) == 2
+    assert "plant-xml" in capsys.readouterr().err
     assert not rig.root.parent.exists()
 
 
@@ -286,8 +390,6 @@ def test_python_symlink_requires_a_canonical_venv(rig) -> None:
 def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     rig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("FAKE_CHILD_RELEASE", str(rig.release))
-    monkeypatch.setenv("FAKE_CHILD_RC", "7")
     results: list[int] = []
     errors: list[BaseException] = []
 
@@ -306,6 +408,10 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert (rig.root / "snapshots").is_dir()
     assert (rig.root / "warp_cache").is_dir()
     assert (rig.root / "cuda_cache").is_dir()
+    for directory in (
+        "home", "xdg_cache", "xdg_config", "xdg_data", "xdg_state",
+    ):
+        assert (rig.root / directory).is_dir()
     assert (rig.root / "tmp").is_dir()
     assert (rig.root / "pycache").is_dir()
     assert not (rig.root / "runtime_site").exists()
@@ -331,13 +437,31 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert not (rig.repo / "MUJOCO_LOG.TXT").exists()
     assert record["lock_held"] is True
     assert record["env"] == {
+        "PATH": rig.module.CHILD_PATH,
+        "HOME": str(rig.root / "home"),
+        "XDG_CACHE_HOME": str(rig.root / "xdg_cache"),
+        "XDG_CONFIG_HOME": str(rig.root / "xdg_config"),
+        "XDG_DATA_HOME": str(rig.root / "xdg_data"),
+        "XDG_STATE_HOME": str(rig.root / "xdg_state"),
+        "LANG": rig.module.CHILD_LOCALE,
+        "LC_ALL": rig.module.CHILD_LOCALE,
+        "LC_CTYPE": rig.module.CHILD_LOCALE,
         "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": "2", "PYTHONNOUSERSITE": "1",
         "PYTHONDONTWRITEBYTECODE": "1", "ACTIONBALL_READY_POSE": str(rig.ready_pose),
+        "A3_PINGPONG_XML": str(rig.plant_xml),
         "WARP_CACHE_PATH": str(rig.root / "warp_cache"),
-        "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"), "PYTHONPATH": None,
+        "CUDA_CACHE_PATH": str(rig.root / "cuda_cache"),
         "TMPDIR": str(rig.root / "tmp"),
         "PYTHONPYCACHEPREFIX": str(rig.root / "pycache"),
-        "PYTHONHOME": None, "VIRTUAL_ENV": None, "CONDA_PREFIX": None,
+        "PYTHONPATH": None,
+        "PYTHONHOME": None,
+        "VIRTUAL_ENV": None,
+        "CONDA_PREFIX": None,
+        "HOPE_GEOMETRY_PY": None,
+        "LD_PRELOAD": None,
+        "ACTIONBALL_AUDIT_AMBIENT": None,
+        "OMP_NUM_THREADS": None,
+        "CUDA_LAUNCH_BLOCKING": None,
     }
     descriptor = os.open(rig.lock, os.O_RDWR)
     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -351,6 +475,10 @@ def test_child_start_failure_leaves_spent_root(rig, capsys) -> None:
     assert rig.root.is_dir() and (rig.root / "snapshots").is_dir()
     assert (rig.root / "warp_cache").is_dir()
     assert (rig.root / "cuda_cache").is_dir()
+    for directory in (
+        "home", "xdg_cache", "xdg_config", "xdg_data", "xdg_state",
+    ):
+        assert (rig.root / directory).is_dir()
     assert (rig.root / "tmp").is_dir()
     assert (rig.root / "pycache").is_dir()
     assert (rig.root / "stdout.log").is_file()

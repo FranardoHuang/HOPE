@@ -2643,3 +2643,262 @@ def test_fault_injected_suffix_completion_is_atomic_for_all_device_and_host_stat
     for name, tensor in owner._state_tensors().items():
         assert torch.equal(tensor, before_tensors[name]), name
     assert owner._host_state() == before_host
+
+
+def _direct_readiness_facts(
+    owner: device_recovery.ContinuousRecoveryDeviceCoordinator,
+    *,
+    cadence: tuple[int, ...],
+    reset_generation: tuple[int, ...],
+) -> device_recovery.R07EpochDirectRewardFacts:
+    n = owner.num_envs
+    assert len(cadence) == n and len(reset_generation) == n
+    source_step = torch.ones(n, dtype=torch.int64, device=owner.device)
+    return device_recovery.R07EpochDirectRewardFacts(
+        source_step=source_step,
+        motion_cadence_tick=torch.tensor(
+            cadence, dtype=torch.int64, device=owner.device
+        ),
+        reset_generation=torch.tensor(
+            reset_generation, dtype=torch.int64, device=owner.device
+        ),
+        recovery_age_tick=torch.ones(
+            n, dtype=torch.int64, device=owner.device
+        ),
+        reward_eligible=torch.ones(
+            n, dtype=torch.bool, device=owner.device
+        ),
+        facts_valid=torch.ones(n, dtype=torch.bool, device=owner.device),
+        foot_supported_lr=torch.ones(
+            (n, owner.num_feet), dtype=torch.bool, device=owner.device
+        ),
+        infrastructure_fault=torch.zeros(
+            n, dtype=torch.bool, device=owner.device
+        ),
+        producer_fault_bits=torch.zeros(
+            n, dtype=torch.int64, device=owner.device
+        ),
+        component_errors=torch.zeros(
+            (n, len(recovery.COMPONENT_NAMES)),
+            dtype=owner.dtype,
+            device=owner.device,
+        ),
+        raw_score=torch.ones(n, dtype=owner.dtype, device=owner.device),
+        weighted_reward=torch.ones(
+            n, dtype=owner.dtype, device=owner.device
+        ),
+        ready_instant=torch.ones(
+            n, dtype=torch.bool, device=owner.device
+        ),
+        reference_kind=torch.full(
+            (n,),
+            device_recovery.R07_REFERENCE_COMPLETED_ACTION_FRAME0,
+            dtype=torch.int64,
+            device=owner.device,
+        ),
+        reference_action_slot=torch.zeros(
+            n, dtype=torch.int64, device=owner.device
+        ),
+        reference_action_uid=torch.arange(
+            101, 101 + n, dtype=torch.int64, device=owner.device
+        ),
+    )
+
+
+def _seed_direct_readiness_owner(
+    *,
+    prior_tick: tuple[int, ...],
+    prior_generation: tuple[int, ...],
+) -> device_recovery.ContinuousRecoveryDeviceCoordinator:
+    owner = _owner(num_envs=len(prior_tick))
+    owner._diagnostic_n2_bundle = (
+        device_recovery.DiagnosticN2ContinuousRecoveryBundle(
+            owner=owner,
+            plant_fact_adapter=object(),
+            motion_owner=object(),
+            action_epoch_owner=object(),
+            motion_parent_authority=object(),
+            motion_parent_receipt=object(),
+        )
+    )
+    owner._action_epoch_ready_last_motion_cadence_tick.copy_(
+        torch.tensor(prior_tick, dtype=torch.int64, device=owner.device)
+    )
+    owner._action_epoch_ready_last_reset_generation.copy_(
+        torch.tensor(
+            prior_generation, dtype=torch.int64, device=owner.device
+        )
+    )
+    owner._action_epoch_ready_instant.fill_(True)
+    owner._action_epoch_ready_live.fill_(True)
+    owner._action_epoch_ready_streak.copy_(
+        torch.arange(7, 7 + owner.num_envs, device=owner.device)
+    )
+    owner._action_epoch_ready_reference_kind.fill_(
+        device_recovery.R07_REFERENCE_COMPLETED_ACTION_FRAME0
+    )
+    owner._action_epoch_ready_reference_action_slot.zero_()
+    owner._action_epoch_ready_reference_action_uid.copy_(
+        torch.arange(101, 101 + owner.num_envs, device=owner.device)
+    )
+    owner._action_epoch_first_ready_source_step.fill_(42)
+    for field in fields(owner._action_epoch_ready_shot_key):
+        getattr(owner._action_epoch_ready_shot_key, field.name).fill_(-1)
+    return owner
+
+
+def _direct_readiness_row_state(
+    owner: device_recovery.ContinuousRecoveryDeviceCoordinator,
+    row: int,
+) -> dict[str, torch.Tensor]:
+    names = (
+        "_action_epoch_ready_instant",
+        "_action_epoch_ready_live",
+        "_action_epoch_ready_streak",
+        "_action_epoch_ready_reference_kind",
+        "_action_epoch_ready_reference_action_slot",
+        "_action_epoch_ready_reference_action_uid",
+        "_action_epoch_first_ready_source_step",
+        "_action_epoch_ready_last_motion_cadence_tick",
+        "_action_epoch_ready_last_reset_generation",
+    )
+    values = {
+        name: getattr(owner, name)[row].detach().clone() for name in names
+    }
+    for field in fields(owner._action_epoch_ready_shot_key):
+        values[f"shot_key.{field.name}"] = getattr(
+            owner._action_epoch_ready_shot_key, field.name
+        )[row].detach().clone()
+    return values
+
+
+@pytest.mark.parametrize(
+    "bad_cadence",
+    (9, 10, 13),
+    ids=("rollback", "hold", "skip"),
+)
+def test_action_epoch_motion_chronology_fault_masks_row_and_peer_matches_control(
+    bad_cadence,
+):
+    faulty = _seed_direct_readiness_owner(
+        prior_tick=(10, 10), prior_generation=(3, 3)
+    )
+    control = _seed_direct_readiness_owner(
+        prior_tick=(10, 10), prior_generation=(3, 3)
+    )
+    bad_before = _direct_readiness_row_state(faulty, 0)
+
+    faulty._publish_action_epoch_motion_readiness(
+        _direct_readiness_facts(
+            faulty, cadence=(bad_cadence, 11), reset_generation=(3, 3)
+        ),
+        observed_source_step=1,
+        shot_key=None,
+        publish_keyed_first_ready=False,
+    )
+    control._publish_action_epoch_motion_readiness(
+        _direct_readiness_facts(
+            control, cadence=(11, 11), reset_generation=(3, 3)
+        ),
+        observed_source_step=1,
+        shot_key=None,
+        publish_keyed_first_ready=False,
+    )
+
+    assert faulty._fault_bits.tolist() == [
+        device_recovery.FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY,
+        0,
+    ]
+    for name, value in bad_before.items():
+        assert torch.equal(
+            _direct_readiness_row_state(faulty, 0)[name], value
+        ), name
+    faulty_peer = _direct_readiness_row_state(faulty, 1)
+    control_peer = _direct_readiness_row_state(control, 1)
+    for name, value in control_peer.items():
+        assert torch.equal(faulty_peer[name], value), name
+
+    projection = faulty.motion_ready_projection()
+    with device_recovery._FULL_MDP_REWARD_REGISTRY_LOCK:
+        payload = device_recovery._MOTION_READY_REGISTRY[projection]
+    assert payload.postphysics_valid.tolist() == [False, True]
+    assert payload.source_step.tolist() == [-1, 1]
+    assert payload.reset_generation.tolist() == [-1, 3]
+    assert payload.control_tick.tolist() == [-1, 12]
+    assert payload.ready.tolist() == [False, True]
+    assert payload.ready_streak.tolist() == [0, 9]
+    assert payload.foot_supported_lr[0].tolist() == [False, False]
+
+
+def test_motion_cadence_successor_overflow_is_named_neutral_and_causally_exact():
+    maximum = torch.iinfo(torch.int64).max
+    owner = _seed_direct_readiness_owner(
+        prior_tick=(10, maximum - 1), prior_generation=(3, 3)
+    )
+    before = {
+        row: _direct_readiness_row_state(owner, row) for row in (0, 1)
+    }
+
+    owner._publish_action_epoch_motion_readiness(
+        _direct_readiness_facts(
+            owner,
+            cadence=(maximum, maximum),
+            reset_generation=(3, 3),
+        ),
+        observed_source_step=1,
+        shot_key=None,
+        publish_keyed_first_ready=False,
+    )
+
+    # Row 0 first violates chronology; its consequential overflow must not
+    # manufacture a second cause.  Row 1 reaches the exact successor overflow.
+    assert owner._fault_bits.tolist() == [
+        device_recovery.FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY,
+        device_recovery.FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW,
+    ]
+    for row in (0, 1):
+        after = _direct_readiness_row_state(owner, row)
+        for name, value in before[row].items():
+            assert torch.equal(after[name], value), (row, name)
+    projection = owner.motion_ready_projection()
+    with device_recovery._FULL_MDP_REWARD_REGISTRY_LOCK:
+        payload = device_recovery._MOTION_READY_REGISTRY[projection]
+    assert payload.postphysics_valid.tolist() == [False, False]
+    assert payload.source_step.tolist() == [-1, -1]
+    assert payload.reset_generation.tolist() == [-1, -1]
+    assert payload.control_tick.tolist() == [-1, -1]
+    assert payload.ready.tolist() == [False, False]
+    assert payload.ready_streak.tolist() == [0, 0]
+    receipt = owner.drain_ppo_ledger(update_index=0)
+    counts = dict(receipt.fault_counts)
+    assert counts["action_epoch_motion_chronology"] == 1
+    assert counts["motion_cadence_successor_overflow"] == 1
+
+
+def test_r07_runtime_fault_latch_rejects_unknown_or_compound_without_mutation():
+    owner = _owner(num_envs=2)
+    rows = torch.tensor([True, False], dtype=torch.bool, device=owner.device)
+    before = owner._fault_bits.detach().clone()
+    with pytest.raises(
+        device_recovery.ContinuousRecoveryDeviceError,
+        match="unknown or compound",
+    ):
+        owner._latch_r07_row_fault(rows, reason_bit=1 << 40)
+    assert torch.equal(owner._fault_bits, before)
+    with pytest.raises(
+        device_recovery.ContinuousRecoveryDeviceError,
+        match="unknown or compound",
+    ):
+        owner._latch_r07_row_fault(
+            rows,
+            reason_bit=(
+                device_recovery.FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY
+                | device_recovery.FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW
+            ),
+        )
+    assert torch.equal(owner._fault_bits, before)
+
+
+def test_r07_production_source_has_no_anonymous_async_asserts():
+    source = Path(device_recovery.__file__).read_text(encoding="utf-8")
+    assert "torch._assert_async" not in source

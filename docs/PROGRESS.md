@@ -1,6 +1,35 @@
 # 简短进度记录
 
-## 2026-08-23 — V3阶段复核、第一性原理审计与fresh V4候选
+## 2026-08-23 — V4最终证据、V5合同纠错与本轮最小减法（branch candidate）
+
+- V4 Isaac最终ACK=`0..748`，update749在optimizer前由匿名epoch overflow停止；V4没有row/cause信息，不能
+  反推EPA或其他具体根因。MuJoCo只读快照ACK=`0..3995`、`785,645,568` transitions，recent20/50 episode
+  length=`375.28/375.70`，证明balance可学并自然打开task exposure；但recent20全部`10,450/10,450`
+  completed episode仍由tilt/table闭合，不能称安全存活毕业。累计launch/contact-eligible=
+  `265,378/265,378`、R03 valid=`63,684`后racket/selected contact仍为0，所以当前明确卡在mimic→hit，
+  post-hit landing/recovery因无合格分母仍为`未测`。
+- V5恢复既有最小reference合同：仅首次ACCEPT前用reset-ready joint/body；ACCEPT同tick原子切selected
+  measured frame0；recovery用completed-action frame0。Epoch业务phase与Motion reference phase分开。
+  actor/critic保持`203/219`（203-D已含所需8维root状态），`history_length=0`；237-D、新offset、新balance
+  Reward/Stage均拒绝，`history=8`在无alias反例前延后。PPO保持H48、GAE `lambda=.98`。
+- direct Physical typed identity反例已闭合host：legacy digest=`0/23`的launch→3 substeps→retire单文件
+  `2 passed`，九文件联合=`202 passed,17 skipped`；ordinal=`[0,1,2]`、previous/current连续、retire清typed
+  continuity且peer不变。另把Physical/R06 write-only fault接入唯一具名pre-optimizer drain，并把selected-rubber
+  identity冲突改为坏row neutral/具名fault、健康peer继续。ActionEpoch注册表按源码动态核验为33项：既有
+  bit0--26，另有Physical/R06六个稀疏ingress bit41--46；ActionEpoch全文件=`81 passed,7 skipped`，真实
+  selected-rubber binding相邻反例=`3 passed`。Pod exact/CUDA仍未测。
+- 性能只采用有直接因果证据的两刀：MuJoCo contact census从`41→21/control`、H48从`1968→1008/update`
+  （host=`335 passed,10 skipped`；CPU ratio `.647`不代签GPU wall），以及Isaac Epoch窄投影替代dense hot
+  `current()`；N4096静态payload从`5.953→0.316 MiB/call`（降`94.7%`），cached/dense-empty/retained
+  每control调用`0/4/8`次，六文件相邻=`147 passed,16 skipped,0 failed`，真实wall待Pod profiler。
+  Motion exact-resume补reset-ready state，legacy Reward改lazy import。长期中心链为single
+  `PlantFacts → ActionBallState transition → StepTelemetry`；不做巨型重写。exact Pod fixed-tape、双launcher、
+  连续ACK和profiler-off matched H48完成前，V5仍是`diagnostic_unauthorized`候选。
+- 本轮40个受影响test文件全部逐fresh Python=`1724 passed,66 skipped,0 failed`；修改/新增Python
+  `py_compile`与whole-diff check通过。66项skip不代签exact Pod/CUDA、fixed-tape、launcher、fresh双run或
+  真实wall，故当前只关闭host实现，不关闭发车验收。
+
+## HISTORICAL / SUPERSEDED — 2026-08-23 V3阶段复核、第一性原理审计与fresh V4候选
 
 - 只读刷新到MuJoCo update1256 / Isaac ACK1024：recent100 episode均长约`230.73/183.18 tick`，但timeout
   仍均为0；Mu累计`reveal=10648,launch=1,R03/contact/landing=0`，Isaac累计

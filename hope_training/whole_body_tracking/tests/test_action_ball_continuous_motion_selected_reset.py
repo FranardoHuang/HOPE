@@ -409,6 +409,17 @@ def _command(*, bind_stub=True):
     )
     command._reset_action_ball_continuous_motion_cadence(env_ids)
     device_owner, authority = _bind_real_device_r05_owner(command)
+    # ``_configure_unbound_command`` bypasses ``MotionCommand.__init__``.
+    # Production always owns these two cached reward tensors before the fresh
+    # checkpoint lane binds, so spell them out in this focused harness too.
+    if not hasattr(command, "body_pos_relative_w"):
+        command.body_pos_relative_w = torch.zeros_like(
+            command._action_ball_safe_ready_body_pos_w
+        )
+        command.body_quat_relative_w = torch.zeros_like(
+            command._action_ball_safe_ready_body_quat_w
+        )
+        command.body_quat_relative_w[..., 0] = 1.0
     r05_owner = _DeviceR05Authority(
         command=command,
         mask=torch.tensor([False, True, False], dtype=torch.bool)
@@ -1147,7 +1158,7 @@ def test_motion_global_drain_uses_one_transfer_exact_ack_and_persists_highwater(
     assert command._action_ball_continuous_motion_terminal_resolution_total == 0
 
     leaf = command._action_ball_continuous_motion_checkpoint_payload()
-    assert leaf["schema_version"] == 6
+    assert leaf["schema_version"] == 7
     assert leaf["terminal_resolution_total"] == 0
     assert leaf["terminal_resolution_total_device"].tolist() == [0]
     assert leaf["global_drain_sequence"] == 1
@@ -1163,6 +1174,203 @@ def test_motion_global_drain_uses_one_transfer_exact_ack_and_persists_highwater(
         command._prepare_action_ball_continuous_motion_checkpoint(
             missing_task_close
         )
+
+
+def _checkpointable_fresh_exact_command():
+    """Return one globally ACKed fresh owner with coherent legacy refs."""
+
+    command, _owner_unused, _reset_unused = _command()
+    command.clip_id.copy_(
+        torch.tensor(
+            [
+                task_ref.action_slot
+                for task_ref in command._action_ball_active_task_refs
+            ],
+            dtype=torch.int64,
+            device=command.device,
+        )
+    )
+    command.time_steps.copy_(command.motion.seg_start[command.clip_id])
+    command.time_steps_f.copy_(command.time_steps.float())
+
+    body_pos = command._action_ball_safe_ready_body_pos_w
+    body_quat = command._action_ball_safe_ready_body_quat_w
+    relative_pos = command.body_pos_relative_w
+    relative_quat = command.body_quat_relative_w
+    body_pos.copy_(
+        torch.arange(
+            body_pos.numel(), dtype=body_pos.dtype, device=body_pos.device
+        ).reshape_as(body_pos)
+        / 10.0
+    )
+    relative_pos.copy_(body_pos + 20.0)
+    body_quat.zero_()
+    body_quat[..., 0] = 1.0
+    relative_quat.zero_()
+    relative_quat[..., 0] = 1.0
+    command._action_ball_safe_ready_reference_pending.copy_(
+        torch.tensor(
+            [False, True, False],
+            dtype=torch.bool,
+            device=command.device,
+        )
+    )
+    # This is a conservative work cache, not a second row-count authority.
+    command._action_ball_safe_ready_pending_count = command.num_envs
+
+    drain, _peers = _global_drain_owner(command)
+    prepared = drain.prepare_pre_optimizer_ppo_boundary(
+        update_index=0,
+        completed_environment_steps=command.num_envs * 24,
+    )
+    receipt = drain.transfer_decode_pre_optimizer_ppo_boundary(prepared)
+    drain.mark_optimizer_returned(receipt)
+    drain.acknowledge_post_update(receipt)
+    return command
+
+
+_READY_CHECKPOINT_FIELDS = (
+    "_action_ball_safe_ready_body_pos_w",
+    "_action_ball_safe_ready_body_quat_w",
+    "_action_ball_safe_ready_reference_pending",
+    "body_pos_relative_w",
+    "body_quat_relative_w",
+)
+
+
+def _ready_checkpoint_snapshot(command):
+    return {
+        **{
+            name: getattr(command, name).detach().clone()
+            for name in _READY_CHECKPOINT_FIELDS
+        },
+        "pending_count": command._action_ball_safe_ready_pending_count,
+    }
+
+
+def _assert_ready_checkpoint_snapshot(command, expected) -> None:
+    for name in _READY_CHECKPOINT_FIELDS:
+        assert torch.equal(getattr(command, name), expected[name]), name
+    assert (
+        command._action_ball_safe_ready_pending_count
+        == expected["pending_count"]
+    )
+
+
+def test_schema7_exact_resume_roundtrip_restores_complete_ready_teacher():
+    command = _checkpointable_fresh_exact_command()
+    saved = command.exact_resume_state_dict()
+    leaf = saved["action_ball_birth"]["continuous_motion_leaf"]
+
+    assert saved["schema_version"] == 5
+    assert leaf["schema_version"] == 7
+    assert "safe_ready_pending_count" not in leaf
+    for name in (
+        "reset_ready_body_pos_w",
+        "reset_ready_body_quat_w",
+        "reset_ready_reference_pending",
+        "body_pos_relative_w",
+        "body_quat_relative_w",
+    ):
+        assert name in leaf["tensors"]
+
+    expected = _ready_checkpoint_snapshot(command)
+    command._action_ball_safe_ready_body_pos_w.fill_(-101.0)
+    command._action_ball_safe_ready_body_quat_w.fill_(-102.0)
+    command._action_ball_safe_ready_reference_pending.zero_()
+    command.body_pos_relative_w.fill_(-103.0)
+    command.body_quat_relative_w.fill_(-104.0)
+    command._action_ball_safe_ready_pending_count = 0
+
+    command.load_exact_resume_state_dict(saved, strict=True)
+    _assert_ready_checkpoint_snapshot(command, expected)
+    command.finalize_action_ball_exact_resume()
+    bridge.motion_birth._assert_nested_equal(
+        command.exact_resume_state_dict(), saved
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        ("missing", "tensor fields differ"),
+        ("type", "must be a torch.Tensor"),
+        ("dtype", "shape/dtype mismatch"),
+        ("shape", "shape/dtype mismatch"),
+        ("drift", "checkpoint root differs"),
+    ),
+)
+def test_schema7_ready_teacher_missing_type_shape_and_drift_fail_closed(
+    mutation,
+    message,
+):
+    command = _checkpointable_fresh_exact_command()
+    saved = command.exact_resume_state_dict()
+    before = _ready_checkpoint_snapshot(command)
+    damaged = deepcopy(saved)
+    tensors = damaged["action_ball_birth"]["continuous_motion_leaf"][
+        "tensors"
+    ]
+    if mutation == "missing":
+        del tensors["reset_ready_body_pos_w"]
+    elif mutation == "type":
+        tensors["reset_ready_body_pos_w"] = tensors[
+            "reset_ready_body_pos_w"
+        ].tolist()
+    elif mutation == "dtype":
+        tensors["reset_ready_body_pos_w"] = tensors[
+            "reset_ready_body_pos_w"
+        ].to(torch.float64)
+    elif mutation == "shape":
+        tensors["reset_ready_body_pos_w"] = tensors[
+            "reset_ready_body_pos_w"
+        ][:-1]
+    else:
+        tensors["reset_ready_body_pos_w"] = tensors[
+            "reset_ready_body_pos_w"
+        ].clone()
+        tensors["reset_ready_body_pos_w"][0, 0, 0] += 1.0
+
+    with pytest.raises(ValueError, match=message):
+        command.validate_exact_resume_state_dict(damaged, strict=True)
+    _assert_ready_checkpoint_snapshot(command, before)
+
+
+def test_schema7_pending_work_cache_cannot_disagree_with_device_mask():
+    command = _checkpointable_fresh_exact_command()
+    assert bool(command._action_ball_safe_ready_reference_pending.any())
+    command._action_ball_safe_ready_pending_count = 0
+
+    with pytest.raises(RuntimeError, match="pending cache differs from its mask"):
+        command.exact_resume_state_dict()
+
+
+def test_schema7_ready_teacher_load_rollback_restores_prior_live_state(
+    monkeypatch,
+):
+    command = _checkpointable_fresh_exact_command()
+    saved = command.exact_resume_state_dict()
+
+    command._action_ball_safe_ready_body_pos_w.add_(101.0)
+    command._action_ball_safe_ready_body_quat_w.mul_(-1.0)
+    command._action_ball_safe_ready_reference_pending.zero_()
+    command.body_pos_relative_w.sub_(55.0)
+    command.body_quat_relative_w.mul_(-1.0)
+    command._action_ball_safe_ready_pending_count = 0
+    before = _ready_checkpoint_snapshot(command)
+
+    def fail_after_leaf_copy():
+        raise RuntimeError("injected post-leaf failure")
+
+    monkeypatch.setattr(
+        command,
+        "_invalidate_action_ball_continuous_observation_publication",
+        fail_after_leaf_copy,
+    )
+    with pytest.raises(RuntimeError, match="injected post-leaf failure"):
+        command.load_exact_resume_state_dict(saved, strict=True)
+
+    _assert_ready_checkpoint_snapshot(command, before)
 
 
 def test_motion_rejects_same_value_foreign_real_coordinator_and_post_ack_checkpoint_mutation():

@@ -58,6 +58,32 @@ class ActionBallFullMdpLeanRuntimeError(RuntimeError):
     """The diagnostic owner boundary is stale, foreign, or poisoned."""
 
 
+class ActionBallFullMdpEpochRowFaultError(ActionBallFullMdpLeanRuntimeError):
+    """Named device row faults decoded by the existing optimizer boundary."""
+
+    def __init__(self, row_fault_bits: torch.Tensor) -> None:
+        self.row_fault_bits = row_fault_bits.detach().clone().contiguous()
+        parts: list[str] = []
+        known_mask = 0
+        for bit, name in epoch_v1.ACTION_EPOCH_ROW_FAULT_NAMES:
+            known_mask |= bit
+            rows = self.row_fault_bits.bitwise_and(bit).ne(0)
+            count = int(rows.sum().item())
+            if count:
+                env_ids = rows.nonzero(as_tuple=False).flatten()[:8].tolist()
+                parts.append(f"{name}(rows={count},envs={env_ids})")
+        unknown = self.row_fault_bits.bitwise_and(~known_mask)
+        if bool(unknown.ne(0).any()):
+            rows = unknown.ne(0)
+            env_ids = rows.nonzero(as_tuple=False).flatten()[:8].tolist()
+            values = sorted({int(value) for value in unknown[rows].tolist()})[:8]
+            parts.append(
+                "unknown_action_epoch_row_fault_bits"
+                f"(rows={int(rows.sum().item())},envs={env_ids},values={values})"
+            )
+        super().__init__("epoch terminal row faults: " + "; ".join(parts))
+
+
 class _OptimizerBoundary:
     """Owner-issued identity with no caller-readable authority fields."""
 
@@ -728,18 +754,17 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     type(materialized)
                     is not epoch_v1.ActionEpochMaterializedDrain
                     or type(materialized.entries) is not tuple
-                    or type(materialized.overflow) is not torch.Tensor
-                    or materialized.overflow.dtype != torch.bool
-                    or tuple(materialized.overflow.shape)
+                    or type(materialized.row_fault_bits) is not torch.Tensor
+                    or materialized.row_fault_bits.dtype != torch.int64
+                    or tuple(materialized.row_fault_bits.shape)
                     != (self._epoch.num_envs,)
-                    or materialized.overflow.device.type != "cpu"
-                    or not materialized.overflow.is_contiguous()
+                    or materialized.row_fault_bits.device.type != "cpu"
+                    or not materialized.row_fault_bits.is_contiguous()
                 ):
-                    self._poison_locked("epoch drain overflow image ABI differs")
+                    self._poison_locked("epoch drain row-fault image ABI differs")
                     raise ActionBallFullMdpLeanRuntimeError(
-                        "epoch drain overflow image ABI differs"
+                        "epoch drain row-fault image ABI differs"
                     )
-                overflowed = bool(materialized.overflow.any())
                 self._drain_materialized = True
                 host_entries = materialized.entries
                 if (
@@ -756,6 +781,12 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     raise ActionBallFullMdpLeanRuntimeError(
                         "packed epoch host suffix differs from prepared frontier"
                     )
+                if bool(materialized.row_fault_bits.ne(0).any()):
+                    fault = ActionBallFullMdpEpochRowFaultError(
+                        materialized.row_fault_bits
+                    )
+                    self._poison_locked(str(fault))
+                    raise fault
                 try:
                     decoded = drain_v2.decode_epoch_drain_suffix(
                         host_entries,
@@ -780,11 +811,6 @@ class ActionBallFullMdpLeanRuntimeOwner:
                         "epoch drain decoder result type differs"
                     )
                 self._active_decoded_drain = decoded
-                if overflowed:
-                    self._poison_locked("epoch drain decoded a terminal overflow")
-                    raise ActionBallFullMdpLeanRuntimeError(
-                        "epoch drain decoded a terminal overflow"
-                    )
                 return boundary
             finally:
                 self._leave()
@@ -2441,6 +2467,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
 
 
 __all__ = [
+    "ActionBallFullMdpEpochRowFaultError",
     "ActionBallFullMdpLeanRuntimeError",
     "ActionBallFullMdpLeanRuntimeOwner",
     "ActionEpochPpoBoundarySummary",

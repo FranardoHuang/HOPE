@@ -1950,8 +1950,8 @@ def _geometric_table_contact_attribution_unchecked(
     )
 
     nonfinite = (
-        ~torch.isfinite(body_pos_w).all(dim=(1, 2))
-        | ~torch.isfinite(body_quat_w).all(dim=(1, 2))
+        ~torch.isfinite(body_pos_w).flatten(1).all(dim=1)
+        | ~torch.isfinite(body_quat_w).flatten(1).all(dim=1)
         | ~torch.isfinite(env_origins).all(dim=1)
         | ~(body_quat_norm_sq[..., 0] > 0.0).all(dim=1)
     )
@@ -1961,7 +1961,7 @@ def _geometric_table_contact_attribution_unchecked(
     component_exact &= valid[:, None, None]
     blade_exact &= valid[:, None]
     exact_terminal_union = (
-        torch.any(component_exact, dim=(1, 2))
+        component_exact.flatten(1).any(dim=1)
         | torch.any(blade_exact, dim=1)
         | nonfinite
     )
@@ -2147,12 +2147,12 @@ def _geometric_table_contact_hit_mask_unchecked(
         aabb_lo,
         aabb_hi,
     )
-    body_hit = torch.any(component_exact, dim=(1, 2))
+    body_hit = component_exact.flatten(1).any(dim=1)
     racket_hit = torch.any(blade_exact, dim=1)
 
     invalid_runtime = (
-        ~torch.isfinite(body_pos_w).all(dim=(1, 2))
-        | ~torch.isfinite(body_quat_w).all(dim=(1, 2))
+        ~torch.isfinite(body_pos_w).flatten(1).all(dim=1)
+        | ~torch.isfinite(body_quat_w).flatten(1).all(dim=1)
         | ~torch.isfinite(env_origins).all(dim=1)
         | ~(body_quat_norm_sq[..., 0] > 0.0).all(dim=1)
     )

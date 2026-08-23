@@ -751,7 +751,7 @@ def test_idle_no_key_avoids_plant_and_keeps_observation_neutral(
     assert bundle.owner._action_epoch_ready_streak.tolist() == [0, 0]
     assert bundle.owner._action_epoch_ready_live.tolist() == [False, False]
     assert epoch_owner.commit_head == commit_head
-    assert not bool(epoch_owner._undecoded_overflow.any())
+    assert not bool(epoch_owner._undrained_row_fault_bits.ne(0).any())
     record = original_current(epoch_owner)
     owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
     assert record.fact_valid_bits[:, :, owner_slot].eq(0).all()
@@ -928,6 +928,118 @@ def test_idle_stamp_rejects_independent_source_mismatch_before_mutation(
     replayed = bundle.action_epoch_observation_state()
     assert replayed.source_step.tolist() == [1, 1]
     assert replayed.control_tick.tolist() == first.control_tick.tolist()
+    assert bundle.owner._fault_bits.tolist() == [0, 0]
+
+
+def _idle_row_state(owner, row):
+    names = (
+        "_action_epoch_ready_instant",
+        "_action_epoch_ready_live",
+        "_action_epoch_ready_streak",
+        "_action_epoch_ready_reference_kind",
+        "_action_epoch_ready_reference_action_slot",
+        "_action_epoch_ready_reference_action_uid",
+        "_action_epoch_first_ready_source_step",
+        "_action_epoch_ready_last_motion_cadence_tick",
+        "_action_epoch_ready_last_reset_generation",
+        "_idle_observation_reset_generation",
+        "_idle_observation_motion_cadence_tick",
+    )
+    values = {
+        name: getattr(owner, name)[row].detach().clone() for name in names
+    }
+    for field in fields(owner._action_epoch_ready_shot_key):
+        values[f"shot_key.{field.name}"] = getattr(
+            owner._action_epoch_ready_shot_key, field.name
+        )[row].detach().clone()
+    return values
+
+
+@pytest.mark.parametrize(
+    ("case", "first_bad_cadence", "second_bad_cadence", "expected_fault"),
+    (
+        (
+            "rollback",
+            10,
+            9,
+            recovery.FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY,
+        ),
+        (
+            "skip",
+            10,
+            12,
+            recovery.FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY,
+        ),
+        (
+            "successor_overflow",
+            torch.iinfo(torch.int64).max - 1,
+            torch.iinfo(torch.int64).max,
+            recovery.FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW,
+        ),
+    ),
+)
+def test_idle_cadence_fault_quarantines_only_bad_row_and_advances_peer(
+    monkeypatch,
+    case,
+    first_bad_cadence,
+    second_bad_cadence,
+    expected_fault,
+):
+    del case
+    device = torch.device("cpu")
+    env, motion, _robot, _sensor = _subject(monkeypatch, device=device)
+    epoch_owner = motion._diagnostic_test_epoch_owner
+    bundle = _construct_bundle(
+        env=env, motion=motion, action_epoch_owner=epoch_owner
+    )
+
+    env.common_step_counter = 0
+    motion._action_ball_continuous_episode_step.copy_(
+        torch.tensor(
+            (first_bad_cadence, 10), dtype=torch.int64, device=device
+        )
+    )
+    assert bundle.stamp_epoch_idle_observation_without_keyed_facts(
+        current_source_step=0
+    ) is None
+    bad_before = _idle_row_state(bundle.owner, 0)
+    peer_before = _idle_row_state(bundle.owner, 1)
+
+    env.common_step_counter = 1
+    motion._action_ball_continuous_episode_step.copy_(
+        torch.tensor(
+            (second_bad_cadence, 11), dtype=torch.int64, device=device
+        )
+    )
+    assert bundle.stamp_epoch_idle_observation_without_keyed_facts(
+        current_source_step=1
+    ) is None
+
+    assert bundle.owner._fault_bits.tolist() == [expected_fault, 0]
+    bad_after = _idle_row_state(bundle.owner, 0)
+    for name, expected in bad_before.items():
+        assert torch.equal(bad_after[name], expected), name
+
+    peer_after = _idle_row_state(bundle.owner, 1)
+    cadence_fields = {
+        "_action_epoch_ready_last_motion_cadence_tick",
+        "_idle_observation_motion_cadence_tick",
+    }
+    for name, expected in peer_before.items():
+        if name in cadence_fields:
+            assert peer_after[name].item() == 11, name
+        else:
+            assert torch.equal(peer_after[name], expected), name
+
+    observed = bundle.action_epoch_observation_state()
+    assert observed.postphysics_valid.tolist() == [False, True]
+    assert observed.source_step.tolist() == [-1, 1]
+    assert observed.control_tick.tolist() == [-1, 12]
+    assert observed.ready_streak.tolist() == [0, 0]
+    assert observed.foot_supported_lr.tolist() == [
+        [False, False],
+        [False, False],
+    ]
 
 
 def test_epoch_publish_reads_one_action_epoch_snapshot(monkeypatch):

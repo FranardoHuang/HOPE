@@ -2404,3 +2404,47 @@ telemetry。Mu launcher的Warp/CUDA/TMP/pycache均落fresh run root。
 host聚焦与launcher证据同G05；exact EPA48/RSL3 Pod runtime、clean detached source、fresh V4 ACK、真实contact/
 landing、双后端physics parity、12500 completion与transfer均未测。G06继续`Partial`，不授权resume、promotion、
 export、部署或真机。
+
+### 2026-08-23 V4 portable MuJoCo ACK3995与V5减法候选（Gate仍`Partial`）
+
+clean V4 commit `9e26afd3342e1da8643b225c987d4a3c91a3ff2f`已在exact Pod得到
+`589 passed, 12 skipped, 0 failed`，portable one-shot dry-run通过；fresh MuJoCo namespace继续在GPU0只读
+运行，保持`diagnostic_unauthorized=true`，没有resume、namespace复用或live patch。2026-08-23T11:39:47Z
+的固定JSONL前缀为durable ACK `0..3995`、`785,645,568` transitions。recent20/50 wall=
+`14.344/14.346 s/H48`，episode length=`375.28/375.70`，return=`33.380/33.379`；Reward/storage finite，
+nonfinite、conservation、lifecycle和missed-launch fault均为0。
+
+episode均长已越过首次due tick295，证明balance能学且task exposure会自然打开；但recent20的
+`10,450/10,450` completed episode仍全部由tilt/table闭合，不能称安全存活毕业。累计reveal=`1,219,808`、
+launch/contact-eligible=`265,378/265,378`、R03 physically-valid=`63,684`，racket/selected contact仍为0。
+相对ACK3875又增加`35,724`个eligible launch和`10,738`个R03-valid仍零contact，因此mimic→hit已经明确
+不符合预期，不能继续解释为“只需更多step”。R06 present/eligible=`379`全为`flight_expired`；真实hit
+分母为0，所以post-hit landing/recovery统一记`未测`，不是0%成功率。
+
+该结果没有提供新offset或Observation缺口：现役203-D actor已含table-relative root position、heading与COM
+velocity共8维，尚无same-observation/different-required-action反例；`history=8`继续延后。V5修的是实现偏移：
+首次ACCEPT前reset-ready，ACCEPT同tick原子切selected measured frame0，recovery使用completed-action frame0；
+typed Physical continuity和negative-face normal另有确定性反例。它不增加Stage、balance Reward、R07准入或
+不可部署actor状态。
+
+[`fullmdp-a-h48-v5-*`](../DEFINITIONS.md#fullmdp-optimization-lineage-v5)当前仍只是branch candidate：
+
+- contact buffer从每control `41`次全扫描合成`21`次，H48为`1968→1008`（减少49%）；保留per-world row
+  count、global counter、selected/opposite/invalid、robot-table、net/landing及final-forward语义。host联合
+  `335 passed,10 skipped`，CPU microbenchmark ratio `.647`只证明调用减法，不能代签CUDA wall。
+- `source_plant`只绑定vendor base闭包与verification receipt；`runtime_attach` v2绑定exact geometry、
+  `decimation=20/step_dt=.02`、`njmax=572/nconmax=128`、owner-local-frame及actual court/ball augmented
+  [`MJB`](../DEFINITIONS.md#mjb) `1ef4bb9e…30c0b / 72,260,546 bytes`。single path-free
+  [`runtime_stack`](../DEFINITIONS.md#mujoco-fullmdp-runtime-stack)另绑定EPA48、RSL3.1.2与MJLab1.5.3 tree。
+  private-stage receipt必须先exact匹配预注册MJB才允许no-clobber hardlink；漂移时不发布`runtime.mjb`且不留
+  stage。consumer在读取ACK前独立复验stack、base/owner frame并hash/load run-owned MJB。
+- Physical/R06 owner fault不再只是“写journal无人读”：六个ingress cause进入ActionEpoch现有唯一
+  pre-optimizer packed drain；selected-rubber错配逐行neutral，健康peer继续。Motion exact-resume child schema
+  6→7保存三段reference所需device状态，不保存第二份host计数。
+
+受影响40个测试文件逐fresh Python合计`1724 passed,66 skipped,0 failed`，修改/新增Python `py_compile`与
+whole-diff check通过。66项skip包含CUDA/SimulationApp/runtime条件；exact EPA48/RSL3 Pod fixed-tape、GPU
+direct/RSL一轮更新、双launcher dry-run、profiler-off wall及fresh双后端ACK仍未闭合。故当前不能写成已提速、
+已完成plant/physics parity或可替换V4；formal registration、真实contact/landing、12500 completion、transfer、
+export、部署和真机仍未测。独立plant/finite/full-key/optimizer/durable ACK继续fail closed，same-writer
+self-proof与任务成功率不新增为安全Gate。G06保持`Partial`。

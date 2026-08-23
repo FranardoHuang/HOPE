@@ -199,6 +199,7 @@ class _EpochLaunchStub:
     def __init__(self, owner, key):
         self.owner = owner
         self.launch_views = []
+        self.current_shot_projection_calls = 0
         self.shot_slot_capacity = 1
         n = owner.num_envs
         self.record = types.SimpleNamespace(
@@ -206,8 +207,8 @@ class _EpochLaunchStub:
                 n, dtype=torch.int64, device=owner.device
             ),
             identity=types.SimpleNamespace(shot_key=key),
-            publication_ordinal=torch.arange(
-                n, dtype=torch.int64, device=owner.device
+            publication_ordinal=(
+                torch.arange(n, dtype=torch.int64, device=owner.device) + 8
             )[:, None],
             phase=torch.full(
                 (n, 1), epoch.PHASE_REVEAL_COMMITTED,
@@ -219,7 +220,36 @@ class _EpochLaunchStub:
         )
 
     def current(self):
-        return self.record
+        raise AssertionError("Physical launch must not clone the full Epoch record")
+
+    def project_current_shot(self):
+        self.current_shot_projection_calls += 1
+        slot = self.record.current_task_slot
+        slot_valid = slot.ge(0) & slot.lt(self.shot_slot_capacity)
+        safe_slot = slot.clamp(0, self.shot_slot_capacity - 1)
+        index = safe_slot[:, None]
+
+        def selected(value):
+            gathered = torch.gather(value, 1, index).squeeze(1)
+            return torch.where(
+                slot_valid, gathered, torch.full_like(gathered, -1)
+            )
+
+        return epoch.ActionEpochCurrentShotProjection(
+            slot_valid=slot_valid,
+            phase=selected(self.record.phase),
+            shot_key=physical._row_identity.ActionEpochShotKey(
+                **{
+                    field.name: selected(
+                        getattr(self.record.identity.shot_key, field.name)
+                    )
+                    for field in fields(
+                        physical._row_identity.ActionEpochShotKey
+                    )
+                }
+            ),
+            publication_ordinal=selected(self.record.publication_ordinal),
+        )
 
     def project_keyed_postphysics_activity_mask(self, *, owner):
         assert owner is self.owner
@@ -395,6 +425,8 @@ def test_physical_epoch_hot_sources_have_no_host_or_current_epoch_rejoin():
             ".nonzero(",
         ):
             assert forbidden not in source
+    assert "epoch_owner.current()" not in launch
+    assert "epoch_owner.project_current_shot()" in launch
     refresh = inspect.getsource(
         physical.ActionBallPhysicalFlightDeviceOwner.
         refresh_action_epoch_host_activity
@@ -404,7 +436,9 @@ def test_physical_epoch_hot_sources_have_no_host_or_current_epoch_rejoin():
         assert forbidden not in refresh
     assert "epoch_owner.current()" not in publish
     assert "self._action_epoch_flight_shot_key.clone()" not in publish
-    assert "shot_key=self._action_epoch_flight_shot_key" in publish
+    assert "shot_key=image.shot_key" in publish
+    assert "publication_ordinal=image.publication_ordinal" in publish
+    assert "previous_ball_center_m=image.previous_ball_center_m" in publish
     # Physical's one-shot packet is consumed synchronously by Epoch/R06.  A
     # second same-writer full-grid snapshot is neither an independent fact nor
     # a safety boundary.
@@ -413,6 +447,15 @@ def test_physical_epoch_hot_sources_have_no_host_or_current_epoch_rejoin():
     assert "refresh_physical_postphysics_rows" in publish
     assert "publish_physical_launch_rows" not in launch
     assert "refresh_physical_launch_rows()" in launch
+    epoch_launch = inspect.getsource(
+        epoch.ActionEpochOwner.refresh_physical_launch_rows
+    )
+    epoch_postphysics = inspect.getsource(
+        epoch.ActionEpochOwner.refresh_physical_postphysics_rows
+    )
+    assert "publication_ordinal.eq(current_publication)" in epoch_launch
+    assert "publication[:, :, None].eq(" in epoch_postphysics
+    assert "record.publication_ordinal[:, None, :]" in epoch_postphysics
 
 
 def test_r06_live_row_forces_dense_activity_when_physical_is_empty():
@@ -788,7 +831,7 @@ def test_future_pending_fixed_tapes_skip_dense_scene_and_r06_callpoints(
     current_grid = _shot_key(
         num_envs=num_envs, device=owner.device, width=1
     )
-    _epoch_owner, motion, r06 = _bind_launch_stubs(owner, current_grid)
+    epoch_owner, motion, r06 = _bind_launch_stubs(owner, current_grid)
     motion.control_tick.fill_(1)
     key = physical._row_identity.ActionEpochShotKey(
         **{
@@ -844,6 +887,7 @@ def test_future_pending_fixed_tapes_skip_dense_scene_and_r06_callpoints(
     assert r06.views == []
     assert not owner._action_epoch_direct_state_mismatch(before)
     assert owner._mutation_version == mutation_before
+    assert epoch_owner.current_shot_projection_calls == 0
     assert physical._device_bitwise_equal(
         owner._action_epoch_runtime_fault_bits, runtime_fault_before
     )
@@ -898,6 +942,8 @@ def test_due_tick_launch_matches_uncached_dense_fixed_tape():
         ordinal=ordinal.clone(),
         flight_slot=flight_slot.clone(),
     )
+    cached_epoch.record.publication_ordinal[:, 0].copy_(ordinal)
+    reference_epoch.record.publication_ordinal[:, 0].copy_(ordinal)
 
     # The cached lane has a host/common counter far ahead of Motion's episode
     # clock, but selects dense exactly when the retained Motion launch step is
@@ -912,6 +958,8 @@ def test_due_tick_launch_matches_uncached_dense_fixed_tape():
     cached.launch_action_epoch()
     reference.launch_action_epoch()
 
+    assert cached_epoch.current_shot_projection_calls == 1
+    assert reference_epoch.current_shot_projection_calls == 1
     assert cached_scene.apply_count == reference_scene.apply_count == 1
     assert physical._device_bitwise_equal(
         cached_scene.read_state_env(), reference_scene.read_state_env()
@@ -1234,6 +1282,9 @@ def test_launch_rejects_each_mutated_row_key_field(field_name):
         pending=torch.ones(2, dtype=torch.bool),
         ordinal=torch.tensor((3, 4), dtype=torch.int64),
     )
+    _epoch_owner.record.publication_ordinal[:, 0].copy_(
+        torch.tensor((3, 4), dtype=torch.int64)
+    )
 
     before = scene.read_state_env().clone()
     owner.launch_action_epoch()
@@ -1291,7 +1342,7 @@ def test_invalid_d05_accept_is_not_staged_for_physx():
 
 
 @pytest.mark.parametrize("num_envs", (2, 64))
-def test_launch_keeps_k_slot_permutation_and_peer_publication_independent(
+def test_launch_keeps_k_slot_permutation_with_exact_current_publication(
     num_envs,
 ):
     owner, _scene = _physical_owner(torch.device("cpu"), num_envs=num_envs)
@@ -1312,8 +1363,7 @@ def test_launch_keeps_k_slot_permutation_and_peer_publication_independent(
         ordinal=ordinal,
         flight_slot=slots,
     )
-    # The journal may advance independently; it is never the Physical join.
-    epoch_owner.record.publication_ordinal.add_(1000)
+    epoch_owner.record.publication_ordinal[:, 0].copy_(ordinal)
 
     owner.launch_action_epoch()
 
@@ -1327,6 +1377,80 @@ def test_launch_keeps_k_slot_permutation_and_peer_publication_independent(
     assert torch.equal(
         owner._action_epoch_flight_publication_ordinal[rows, slots], ordinal
     )
+
+
+def test_launch_rejects_stale_publication_ordinal_before_scene_write():
+    owner, scene = _physical_owner(torch.device("cpu"))
+    current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
+    epoch_owner, _motion, r06 = _bind_launch_stubs(owner, current_grid)
+    current_key = physical._row_identity.ActionEpochShotKey(
+        **{
+            field.name: getattr(current_grid, field.name)[:, 0]
+            for field in fields(physical._row_identity.ActionEpochShotKey)
+        }
+    )
+    ordinal = torch.tensor((8, 9), dtype=torch.int64)
+    owner._action_epoch_pending_launch = _pending(
+        owner,
+        key=current_key,
+        pending=torch.ones(2, dtype=torch.bool),
+        ordinal=ordinal,
+    )
+    epoch_owner.record.publication_ordinal[0, 0].add_(1000)
+    before = scene.read_state_env().clone()
+    pending_state = owner._action_epoch_pending_launch.physical_state_f32.clone()
+
+    owner.launch_action_epoch()
+
+    assert r06.due_rows[-1].tolist() == [False, True]
+    assert owner._action_epoch_pending_launch.pending.tolist() == [True, False]
+    assert torch.equal(scene.read_state_env()[0], before[0])
+    assert torch.equal(scene.read_state_env()[1, 0], pending_state[1])
+    assert torch.bitwise_and(
+        owner._action_epoch_runtime_fault_bits,
+        physical._ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST,
+    ).tolist() == [
+        physical._ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST,
+        0,
+    ]
+
+
+def test_launch_invalid_current_slot_faults_only_that_row_before_scene_write():
+    owner, scene = _physical_owner(torch.device("cpu"))
+    current_grid = _shot_key(num_envs=2, device=owner.device, width=1)
+    epoch_owner, _motion, r06 = _bind_launch_stubs(owner, current_grid)
+    current_key = physical._row_identity.ActionEpochShotKey(
+        **{
+            field.name: getattr(current_grid, field.name)[:, 0].clone()
+            for field in fields(physical._row_identity.ActionEpochShotKey)
+        }
+    )
+    ordinal = torch.tensor((8, 9), dtype=torch.int64)
+    owner._action_epoch_pending_launch = _pending(
+        owner,
+        key=current_key,
+        pending=torch.ones(2, dtype=torch.bool),
+        ordinal=ordinal,
+    )
+    epoch_owner.record.publication_ordinal[:, 0].copy_(ordinal)
+    epoch_owner.record.current_task_slot[0] = -1
+    before = scene.read_state_env().clone()
+    pending_state = owner._action_epoch_pending_launch.physical_state_f32.clone()
+
+    owner.launch_action_epoch()
+
+    assert epoch_owner.current_shot_projection_calls == 1
+    assert r06.due_rows[-1].tolist() == [False, True]
+    assert owner._action_epoch_pending_launch.pending.tolist() == [True, False]
+    assert torch.equal(scene.read_state_env()[0], before[0])
+    assert torch.equal(scene.read_state_env()[1, 0], pending_state[1])
+    assert torch.bitwise_and(
+        owner._action_epoch_runtime_fault_bits,
+        physical._ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST,
+    ).tolist() == [
+        physical._ACTION_EPOCH_RUNTIME_FAULT_DUE_IDENTITY_LOST,
+        0,
+    ]
 
 
 def test_launch_projection_is_fixed_n_with_neutral_unselected_rows():

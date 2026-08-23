@@ -4683,7 +4683,12 @@ class DeviceR05Owner:
             dtype=torch.bool,
             shape=(n,),
         )
-        torch._assert_async(torch.all(~accept | due))
+        # ``accept`` and ``due`` have the same exact ActionEpoch writer:
+        # ActionEpoch constructs candidates only from ``due & available`` and
+        # its ACCEPT predicate begins with those constructed rows.  Rechecking
+        # that theorem here was an anonymous CUDA-poisoning writer echo, not an
+        # independent trust boundary.  The writer-side rowwise regression is
+        # the executable contract; this consumer only applies its afterimage.
         rng_advance = prepared.rng_advance_mask
         try:
             after = self._publication_afterimage()

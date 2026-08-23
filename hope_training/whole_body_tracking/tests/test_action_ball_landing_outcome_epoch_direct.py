@@ -200,6 +200,30 @@ def _bound_epoch(owner):
     return epoch, physical
 
 
+def test_r06_bind_rejects_named_fault_registry_drift(monkeypatch):
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    epoch = E.ActionEpochOwner(
+        num_envs=owner.num_envs,
+        device=owner.device,
+        shot_slot_capacity=1,
+        initial_reset_generation=1,
+    )
+    epoch.activate_reset_genesis(
+        selected_mask=torch.ones(2, dtype=torch.bool, device=owner.device),
+        reset_generation=torch.ones(2, dtype=torch.int64, device=owner.device),
+    )
+    names = list(E.ACTION_EPOCH_ROW_FAULT_NAMES)
+    target = E.ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT
+    names = tuple(
+        (bit, "renamed_payment_fault" if bit == target else name)
+        for bit, name in names
+    )
+    monkeypatch.setattr(E, "ACTION_EPOCH_ROW_FAULT_NAMES", names)
+
+    with pytest.raises(D.LandingOutcomeDeviceError, match="row-fault ABI differs"):
+        owner.bind_action_ball_full_mdp_epoch_owner(epoch)
+
+
 def _row_key(owner, *, task_delta: int = 0):
     return E.ActionEpochShotKey(
         reset_generation=torch.tensor((1, 1), dtype=torch.int64, device=owner.device),
@@ -241,6 +265,42 @@ def _install_payment_projector(epoch, rows):
     epoch._current_payment_rows = rows.clone()
 
 
+def _row_fault_words(epoch):
+    return epoch._undrained_row_fault_bits.detach().cpu().tolist()
+
+
+def _assert_row_fault_words(epoch, row0_bits):
+    assert _row_fault_words(epoch) == [row0_bits, 0]
+
+
+def _snapshot_mailbox_row(owner, row):
+    return {
+        name: tensor[row].detach().clone()
+        for name, tensor in owner._checkpoint_tensors().items()
+        if name.startswith("mailbox_")
+        and tensor.ndim >= 2
+        and tuple(tensor.shape[:2]) == owner._mailbox_shape
+    }
+
+
+def _assert_mailbox_row_unchanged(owner, row, before):
+    current = owner._checkpoint_tensors()
+    for name, expected in before.items():
+        assert torch.equal(current[name][row], expected), name
+
+
+def _duplicate_mailbox_row(owner, row=0):
+    for name, tensor in vars(owner).items():
+        if (
+            name.startswith("_mailbox_")
+            and name != "_mailbox_slot_ids"
+            and type(tensor) is torch.Tensor
+            and tensor.ndim >= 2
+            and tuple(tensor.shape[:2]) == owner._mailbox_shape
+        ):
+            tensor[row, 1].copy_(tensor[row, 0])
+
+
 def test_rowwise_outcome_projection_uses_retained_key_without_current_epoch():
     owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
     key = _row_key(owner)
@@ -257,6 +317,29 @@ def test_rowwise_outcome_projection_uses_retained_key_without_current_epoch():
     projected.publication_ordinal.fill_(999)
     assert torch.equal(owner._mailbox_task_identity[:, 0], key.task_identity)
     assert torch.equal(owner._mailbox_publication_ordinal[:, 0], torch.tensor((17, 18)))
+
+
+def test_outcome_duplicate_is_named_neutral_and_does_not_hide_healthy_peer():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    epoch, _physical = _bound_epoch(owner)
+    key = _row_key(owner)
+    _seed_rowwise_mailbox(owner, key)
+    owner._mailbox_settlement_cause[:, 0] = D.SETTLEMENT_CAUSE_CONTACT_DEADLINE
+    _duplicate_mailbox_row(owner)
+    before = {
+        row: _snapshot_mailbox_row(owner, row) for row in range(owner.num_envs)
+    }
+
+    projected = owner.project_current_action_epoch_outcome_rows()
+
+    _assert_row_fault_words(
+        epoch, E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE
+    )
+    assert projected.valid.tolist() == [False, True]
+    assert projected.publication_ordinal.tolist() == [-1, 18]
+    assert not projected.fact_values[0].any()
+    for row, before_row in before.items():
+        _assert_mailbox_row_unchanged(owner, row, before_row)
 
 
 def test_rowwise_payment_exact_key_close_duplicate_and_unconsumed_hold():
@@ -288,8 +371,16 @@ def test_rowwise_payment_exact_key_close_duplicate_and_unconsumed_hold():
         shot_key=newer,
         payment_step=torch.tensor((33, 34), dtype=torch.int64, device=owner.device),
     )
-    with pytest.raises(RuntimeError, match="overwrite unconsumed debt"):
-        owner.close_action_ball_full_mdp_epoch_reward_rows()
+    mailbox_before = {
+        row: _snapshot_mailbox_row(owner, row) for row in range(owner.num_envs)
+    }
+    owner.close_action_ball_full_mdp_epoch_reward_rows()
+    assert _row_fault_words(epoch) == [
+        E.ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE,
+        E.ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE,
+    ]
+    for row, before_row in mailbox_before.items():
+        _assert_mailbox_row_unchanged(owner, row, before_row)
 
 
 def test_closed_row_projection_releases_only_exact_previous_paid_debt():
@@ -324,6 +415,53 @@ def test_closed_row_projection_releases_only_exact_previous_paid_debt():
         assert torch.equal(owner._checkpoint_tensors()[name][1], expected)
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_bit"),
+    (
+        ("invalid_projection", E.ROW_FAULT_R06_CLOSED_PROJECTION_CONTRACT),
+        ("debt_mismatch", E.ROW_FAULT_R06_CLOSED_DEBT_MISMATCH),
+    ),
+)
+def test_closed_row_fault_retains_bad_debt_and_releases_healthy_peer(
+    mode, expected_bit
+):
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    epoch, _physical = _bound_epoch(owner)
+    key = _row_key(owner)
+    _seed_rowwise_mailbox(owner, key)
+    payment = E.ActionEpochRewardPaymentRows(
+        valid=torch.ones(2, dtype=torch.bool, device=owner.device),
+        shot_key=key.clone(),
+        payment_step=torch.tensor((29, 30), dtype=torch.int64, device=owner.device),
+    )
+    _install_payment_projector(epoch, payment)
+    owner.close_action_ball_full_mdp_epoch_reward_rows()
+    assert _row_fault_words(epoch) == [0, 0]
+    row0_before = {
+        name: tensor[0].detach().clone()
+        for name, tensor in owner._checkpoint_tensors().items()
+        if name.startswith("previous_paid_") and tensor.ndim >= 1
+    }
+    closed_key = key.clone()
+    if mode == "invalid_projection":
+        closed_key.action_uid[0] = 0
+    else:
+        closed_key.task_identity[0].add_(1000)
+    epoch._current_closed_rows = E.ActionEpochClosedRows(
+        valid=torch.ones(2, dtype=torch.bool, device=owner.device),
+        shot_key=closed_key,
+    )
+
+    owner.consume_closed_action_epoch_rows()
+
+    _assert_row_fault_words(epoch, expected_bit)
+    assert bool(owner._previous_paid_valid[0])
+    assert not bool(owner._previous_paid_valid[1])
+    current = owner._checkpoint_tensors()
+    for name, expected in row0_before.items():
+        assert torch.equal(current[name][0], expected), name
+
+
 def test_partial_payment_closes_only_valid_row_and_retains_peer_mailbox():
     owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
     epoch, _physical = _bound_epoch(owner)
@@ -343,20 +481,28 @@ def test_partial_payment_closes_only_valid_row_and_retains_peer_mailbox():
 
 
 @pytest.mark.parametrize(
-    ("mode", "message"),
+    ("mode", "expected_bit"),
     (
-        ("wrong_task_same_ordinal", "mismatched retained identity"),
-        ("wrong_ball_same_ordinal", "mismatched retained identity"),
-        ("wrong_shot_same_ordinal", "mismatched retained identity"),
-        ("payment_before_settlement", "preceded settlement"),
-        ("payment_step_regression", "regressed"),
+        ("invalid_projection", E.ROW_FAULT_R06_PAYMENT_PROJECTION_CONTRACT),
+        ("duplicate_mailbox", E.ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE),
+        ("wrong_task_same_ordinal", E.ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED),
+        ("wrong_ball_same_ordinal", E.ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED),
+        ("wrong_shot_same_ordinal", E.ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED),
+        ("payment_before_settlement", E.ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT),
+        ("payment_step_regression", E.ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION),
+        (
+            "unconsumed_debt_overwrite",
+            E.ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE,
+        ),
     ),
 )
-def test_rowwise_payment_failure_boundaries(mode, message):
+def test_rowwise_payment_fault_masks_only_bad_row_and_preserves_causal_bit(
+    mode, expected_bit
+):
     owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
     epoch, _physical = _bound_epoch(owner)
     mailbox_key = _row_key(owner)
-    target = _seed_rowwise_mailbox(owner, mailbox_key)
+    _seed_rowwise_mailbox(owner, mailbox_key)
     payment_key = mailbox_key.clone()
     if mode.startswith("wrong_"):
         field = {
@@ -364,25 +510,89 @@ def test_rowwise_payment_failure_boundaries(mode, message):
             "wrong_ball_same_ordinal": "ball_identity",
             "wrong_shot_same_ordinal": "shot_index",
         }[mode]
-        getattr(payment_key, field).add_(1000)
+        getattr(payment_key, field)[0].add_(1000)
+    if mode == "duplicate_mailbox":
+        _duplicate_mailbox_row(owner)
     if mode == "payment_step_regression":
-        owner._previous_paid_payment_step_highwater.fill_(40)
-    payment_step = (
-        torch.tensor((22, 23), dtype=torch.int64, device=owner.device)
-        if mode == "payment_before_settlement"
-        else torch.tensor((29, 30), dtype=torch.int64, device=owner.device)
+        owner._previous_paid_payment_step_highwater[0] = 40
+    if mode == "unconsumed_debt_overwrite":
+        owner._previous_paid_valid[0] = True
+    payment_step = torch.tensor(
+        (22 if mode == "payment_before_settlement" else 29, 30),
+        dtype=torch.int64,
+        device=owner.device,
     )
+    if mode == "invalid_projection":
+        payment_step[0] = -1
     payment = E.ActionEpochRewardPaymentRows(
         valid=torch.ones(2, dtype=torch.bool, device=owner.device),
         shot_key=payment_key,
         payment_step=payment_step,
     )
     _install_payment_projector(epoch, payment)
-    with pytest.raises(RuntimeError, match=message):
-        owner.close_action_ball_full_mdp_epoch_reward_rows()
-    assert owner._device_sticky_poison.all()
-    assert owner._mailbox_history_valid[target].all()
-    assert not owner._previous_paid_valid.any()
+    row0_before = _snapshot_mailbox_row(owner, 0)
+
+    owner.close_action_ball_full_mdp_epoch_reward_rows()
+
+    _assert_row_fault_words(epoch, expected_bit)
+    _assert_mailbox_row_unchanged(owner, 0, row0_before)
+    assert bool(owner._mailbox_history_valid[0, 0])
+    assert not bool(owner._mailbox_history_valid[1, 0])
+    assert bool(owner._previous_paid_valid[1])
+    assert int(owner._previous_paid_payment_step[1]) == 30
+    if mode != "unconsumed_debt_overwrite":
+        assert not bool(owner._previous_paid_valid[0])
+    else:
+        assert bool(owner._previous_paid_valid[0])
+
+
+def test_payment_compound_fault_packs_both_causes_without_mutating_bad_row():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    epoch, _physical = _bound_epoch(owner)
+    key = _row_key(owner)
+    _seed_rowwise_mailbox(owner, key)
+    owner._previous_paid_valid[0] = True
+    owner._previous_paid_payment_step_highwater[0] = 40
+    payment = E.ActionEpochRewardPaymentRows(
+        valid=torch.ones(2, dtype=torch.bool, device=owner.device),
+        shot_key=key.clone(),
+        payment_step=torch.tensor((29, 30), dtype=torch.int64, device=owner.device),
+    )
+    _install_payment_projector(epoch, payment)
+    row0_before = _snapshot_mailbox_row(owner, 0)
+
+    owner.close_action_ball_full_mdp_epoch_reward_rows()
+
+    expected = (
+        E.ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION
+        | E.ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE
+    )
+    _assert_row_fault_words(epoch, expected)
+    _assert_mailbox_row_unchanged(owner, 0, row0_before)
+    assert bool(owner._previous_paid_valid[0])
+    assert not bool(owner._mailbox_history_valid[1, 0])
+    assert bool(owner._previous_paid_valid[1])
+
+    start, end = epoch.prepare_drain()
+    materialized = epoch.materialize_drain(start=start, end=end)
+    assert materialized.row_fault_bits.tolist() == [expected, 0]
+
+
+def test_r06_runtime_fault_helper_rejects_unknown_or_compound_reason_bits():
+    owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
+    epoch, _physical = _bound_epoch(owner)
+    baseline = epoch._undrained_row_fault_bits.clone()
+    rows = torch.tensor((True, False), dtype=torch.bool, device=owner.device)
+    for invalid_bit in (
+        1 << 40,
+        E.ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION
+        | E.ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE,
+    ):
+        with pytest.raises(D.LandingOutcomeDeviceError, match="ABI differs"):
+            owner._latch_action_epoch_row_fault(
+                rows, epoch_reason_bit=invalid_bit
+            )
+    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
 
 
 def test_fixed_n_physical_launch_installs_due_and_neutral_rows_without_compaction():
@@ -507,6 +717,83 @@ def test_fixed_n_physical_launch_installs_due_and_neutral_rows_without_compactio
     assert torch.equal(owner._mutation_version, before)
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_bit"),
+    (
+        ("selection", E.ROW_FAULT_R06_LAUNCH_SELECTION_CONTRACT),
+        ("identity", E.ROW_FAULT_R06_LAUNCH_IDENTITY_CONTRACT),
+    ),
+)
+def test_launch_fault_masks_bad_row_and_installs_healthy_peer(mode, expected_bit):
+    import test_action_ball_physical_epoch_hot_lane as hot
+
+    device = torch.device("cpu")
+    physical, _scene = hot._physical_owner(device, num_envs=2)
+    owner = T._coordinator(
+        rows=2,
+        flight_slots=2,
+        mailbox_slots=2,
+        bind_physical_park=False,
+        device=device,
+    )
+    epoch, _ = _bound_epoch(owner)
+    physical._action_epoch_owner = epoch
+    physical.bind_r06_owner(owner)
+
+    selected = torch.ones(2, dtype=torch.bool, device=device)
+    due = torch.ones(2, dtype=torch.bool, device=device)
+    key = _row_key(owner)
+    flight_slot = torch.zeros(2, dtype=torch.int64, device=device)
+    publication = torch.tensor((17, 18), dtype=torch.int64, device=device)
+    target = torch.empty((2, 2), dtype=torch.float32, device=device)
+    target[:, 0] = (
+        owner.profile.opponent_table_x_min_m
+        + owner.profile.opponent_table_x_max_m
+    ) / 2.0
+    target[:, 1] = (
+        owner.profile.table_y_min_m + owner.profile.table_y_max_m
+    ) / 2.0
+    launch = torch.tensor((3, 3), dtype=torch.int64, device=device)
+    deadline = torch.tensor((4, 4), dtype=torch.int64, device=device)
+    horizon = torch.tensor((5, 5), dtype=torch.int64, device=device)
+    if mode == "selection":
+        selected[0] = False
+        flight_slot[0] = -1
+        publication[0] = -1
+        target[0].zero_()
+        launch[0] = deadline[0] = horizon[0] = -1
+        for field in E.fields(E.ActionEpochShotKey):
+            getattr(key, field.name)[0] = -1
+    else:
+        key.action_uid[0] = 0
+    physical._action_epoch_active_r06_launch = hot.physical.ActionEpochR06LaunchProjection(
+        selected_mask=selected,
+        due=due,
+        late_launch=torch.zeros(2, dtype=torch.bool, device=device),
+        flight_slot=flight_slot,
+        shot_key=key,
+        publication_ordinal=publication,
+        target_xy_m=target,
+        launch_control_step=launch,
+        contact_deadline_control_step=deadline,
+        crossing_horizon_control_step=horizon,
+        physical_owner=physical,
+        epoch_owner=epoch,
+        owner_identity=physical._owner_identity,
+        _token=hot.physical._ACTION_EPOCH_R06_LAUNCH_TOKEN,
+    )
+    try:
+        owner.install_action_ball_full_mdp_epoch_launch_from_physical()
+    finally:
+        physical._action_epoch_active_r06_launch = None
+
+    _assert_row_fault_words(epoch, expected_bit)
+    assert not owner._flight_action_epoch[0].any()
+    assert not owner._mailbox_reserved[0].any()
+    assert bool(owner._flight_action_epoch[1, 0])
+    assert bool(owner._mailbox_reserved[1, 0])
+
+
 _OBSERVATION_KEY_VALUES = {
     "reset_generation": 1,
     "ball_generation": 3,
@@ -534,6 +821,7 @@ def _observation_key(owner, **overrides):
 def _seed_typed_observation_flight(
     owner,
     *,
+    row=0,
     slot,
     key,
     publication=17,
@@ -544,15 +832,15 @@ def _seed_typed_observation_flight(
     clear=False,
 ):
     for field in E.fields(E.ActionEpochShotKey):
-        getattr(owner, "_flight_" + field.name)[0, slot] = getattr(
+        getattr(owner, "_flight_" + field.name)[row, slot] = getattr(
             key, field.name
-        )[0]
-    owner._flight_publication_ordinal[0, slot] = publication
-    owner._flight_state[0, slot] = state
-    owner._flight_action_epoch[0, slot] = action_epoch
-    owner._flight_contact_valid[0, slot] = contact
-    owner._flight_net_crossed[0, slot] = crossed
-    owner._flight_net_clear[0, slot] = clear
+        )[row]
+    owner._flight_publication_ordinal[row, slot] = publication
+    owner._flight_state[row, slot] = state
+    owner._flight_action_epoch[row, slot] = action_epoch
+    owner._flight_contact_valid[row, slot] = contact
+    owner._flight_net_crossed[row, slot] = crossed
+    owner._flight_net_clear[row, slot] = clear
 
 
 def _project_current_flight(owner, key, *, publication=17):
@@ -692,14 +980,36 @@ def test_current_flight_projection_rejects_invalid_key_or_publication(
     assert not projected.net_clear.any()
 
 
-def test_current_flight_projection_duplicate_exact_owner_fails_stop():
+def test_current_flight_duplicate_is_named_neutral_and_keeps_healthy_peer():
     owner = T._coordinator(rows=2, flight_slots=2, mailbox_slots=2)
-    key = _observation_key(owner)
-    _seed_typed_observation_flight(owner, slot=0, key=key, publication=17)
-    _seed_typed_observation_flight(owner, slot=1, key=key, publication=17)
+    epoch, _physical = _bound_epoch(owner)
+    key = _row_key(owner)
+    _seed_typed_observation_flight(owner, row=0, slot=0, key=key, publication=17)
+    _seed_typed_observation_flight(owner, row=0, slot=1, key=key, publication=17)
+    _seed_typed_observation_flight(
+        owner,
+        row=1,
+        slot=0,
+        key=key,
+        publication=18,
+        contact=True,
+        crossed=True,
+        clear=True,
+    )
 
-    with pytest.raises(RuntimeError, match="not unique"):
-        _project_current_flight(owner, key)
+    projected = owner.require_owned_action_epoch_current_flight_observation(
+        owner.action_ball_full_mdp_observation_projection(),
+        current_shot_key=key,
+        current_publication_ordinal=torch.tensor(
+            (17, 18), dtype=torch.int64, device=owner.device
+        ),
+    )
+
+    _assert_row_fault_words(epoch, E.ROW_FAULT_R06_CURRENT_FLIGHT_DUPLICATE)
+    assert projected.flight_slot.tolist() == [-1, 0]
+    assert projected.contact_valid.tolist() == [False, True]
+    assert projected.net_crossed.tolist() == [False, True]
+    assert projected.net_clear.tolist() == [False, True]
 
 
 @pytest.mark.parametrize(

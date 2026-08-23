@@ -83,16 +83,22 @@ _CARRY_NAME = (
     "whole_body_tracking.tasks.tracking.mdp."
     "action_ball_full_mdp_lean_checkpoint_txn"
 )
-carry = importlib.util.module_from_spec(
-    _CARRY_SPEC := importlib.util.spec_from_file_location(
+carry = getattr(epoch, "carry_txn", None)
+if carry is None:
+    carry = sys.modules.get(_CARRY_NAME) or sys.modules.get(
+        "action_ball_full_mdp_lean_checkpoint_txn"
+    )
+if carry is None:
+    _CARRY_SPEC = importlib.util.spec_from_file_location(
         _CARRY_NAME,
         _GLOBAL_DRAIN_PATH.parent / "action_ball_full_mdp_lean_checkpoint_txn.py",
     )
-)
-assert _CARRY_SPEC is not None and _CARRY_SPEC.loader is not None
+    assert _CARRY_SPEC is not None and _CARRY_SPEC.loader is not None
+    carry = importlib.util.module_from_spec(_CARRY_SPEC)
+    sys.modules[_CARRY_NAME] = carry
+    _CARRY_SPEC.loader.exec_module(carry)
 sys.modules[_CARRY_NAME] = carry
 sys.modules["action_ball_full_mdp_lean_checkpoint_txn"] = carry
-_CARRY_SPEC.loader.exec_module(carry)
 setattr(
     sys.modules["whole_body_tracking.tasks.tracking.mdp"],
     "action_ball_full_mdp_lean_checkpoint_txn",

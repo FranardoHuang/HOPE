@@ -6697,3 +6697,43 @@ launcher改用run-owned HOME/XDG/CUDA/TMP/pycache并在ready child的fdinfo直�
 修改文件host分进程回归合计`533 passed,23 skipped`，另有alignment聚焦`12 passed,23 deselected`；本机完整
 alignment的五个失败均为pinned`mjlab`缺席，必须在exact Pod重跑。clean commit、exact Pod、fresh V4连续ACK、
 profiler-off wall与学习阶段尚未闭合；本节不授权resume/promotion/export/deploy，G05保持`Partial`。
+
+### 2026-08-23 V4 Isaac最终ACK748与V5候选（Gate仍`Partial`）
+
+clean V4 commit `9e26afd3342e1da8643b225c987d4a3c91a3ff2f`已在exact Pod得到
+`589 passed, 12 skipped, 0 failed`，one-shot dry-run通过；fresh Isaac namespace保持
+`diagnostic_unauthorized=true`且没有resume、namespace复用或live patch。它最终连续durable ACK为`0..748`
+（749轮、`147,259,392` transitions）；update749在optimizer前报
+`epoch drain decoded a terminal overflow`，没有ACK749，进程已退出。V4只有generic bool，不能唯一恢复
+具体row/cause，也不能把它写成EPA容量故障。此前全部durable Reward/storage finite，nonfinite和conservation=0。
+
+最终真实阶段漏斗为D05 ACCEPT/due=`270/300`、playback=`61`、physical launch=`1`、contact/R03=`0/0`。
+R06虽有一次settlement，但contact/net/cross/table/common均为0；R07/retire为0，不能平均进成功率或写成
+landing样本。recent50 episode均长/return=`179.802/12.157`，仍低于首次reveal tick `295`，所以balance还
+没有基本成功；61次playback证明mimic入口已软开放，但mimic→hit稳定交接未证明，hit→landing仍`未测`。
+recent50 wall mean/median=`9.128/9.100 s/H48`，不满足约6秒量级目标。
+
+[`fullmdp-a-h48-v5-*`](../DEFINITIONS.md#fullmdp-optimization-lineage-v5)目前只是semantics-preserving
+性能/身份候选。它修正三段reference selector、payment-before-close、launch-before-playback、typed
+publication/Physical continuity及negative-face normal；不增加Stage、Reward、Observation、physics或H48。
+旧匿名bool已由device `int64[N]`具名row-fault image替换并复用唯一packed drain；源码注册表为33项
+（bit0--26及Physical/R06 ingress bit41--46）。Physical/R06 owner fault在业务写前latch，selected-rubber
+identity错配只neutralize坏row并进入具名producer fault；unknown/compound同样在optimizer前fail closed，
+健康peer继续。R07 idle允许cadence hold或`+1`、keyed recovery才要求精确`+1`，不再把合法idle漂移写成故障。
+
+热consumer现只读取`slot_valid + phase + typed shot key8 + publication`的current-shot投影：N4096静态
+payload从完整record约`5.953 MiB/call`降到`0.316 MiB/call`（`94.7%`），cached/dense-empty/retained在
+decimation4下分别为`0/4/8`次；invalid slot复用既有`DUE_IDENTITY_LOST`且不scene-write。该数字只证明
+数据流减法，不代签GPU wall。Motion exact-resume顶层schema仍为5、child由6升7，恢复三段reference所需的
+safe-ready/live body状态而不保存第二份host counter。受影响40个测试文件逐fresh Python合计
+`1724 passed,66 skipped,0 failed`，全修改Python `py_compile`与whole-diff check通过；设备skip、exact Pod
+CUDA/fixed-tape、fresh ACK与profiler-off wall仍未闭合。
+
+MuJoCo侧single [`runtime_stack`](../DEFINITIONS.md#mujoco-fullmdp-runtime-stack)与`runtime_attach` v2分别绑定
+actual EPA/RSL/MJLab代码树及exact geometry source、policy clock、`572/128`每world容量、owner-local-frame
+digest与真实court/ball augmented [`MJB`](../DEFINITIONS.md#mjb)。private-stage receipt必须先exact匹配预注册
+MJB才允许no-clobber发布；独立consumer在ACK前hash/加载。formal registration receipt仍未闭合。这些候选针对
+不可信证据边界，不是新安全Gate。V5尚未commit，也尚未完成exact Pod parity、fresh ACK或profiler-off实测，
+所以既不授权替换现役V4，也不把host测试/CPU probe写成吞吐或physics结论。
+按`HANDOFF_TO_CODEX_20260808.md`，独立finite/plant/key-generation/optimizer事实继续fail-close，task成功、
+R07 readiness和same-writer回声不升级为安全Gate。G05保持`Partial`。

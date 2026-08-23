@@ -3,14 +3,21 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import copy
 from pathlib import Path
+import re
 import sys
+import types
 
 import pytest
 import torch
 
 
 LANE = Path(__file__).resolve().parents[1]
+PLANT_XML = LANE.parents[2] / (
+    "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
+    "a3_pingpong/a3_pingpong.xml"
+)
 TRANSITIONS = 4096 * 48
 UID = 6907688916670928
 COMMIT = "a" * 40
@@ -32,15 +39,72 @@ MUJOCO_WARP_RUNTIME = {
     ),
     "import_scope": "fresh_run_local_site",
 }
+RSL_RL_RUNTIME = {
+    "distribution": "rsl-rl-lib",
+    "version": "3.1.2",
+    "wheel_sha256": (
+        "406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d"
+    ),
+    "import_scope": "fresh_run_local_site",
+}
+MJLAB_RUNTIME = {
+    "schema_version": 1,
+    "distribution": "mjlab",
+    "version": "1.5.3",
+    "import_scope": "verified_venv_distribution",
+    "selected_tree_scope": "mjlab/**/*.py+mjlab/scene/scene.xml",
+    "selected_file_count": 193,
+    "selected_byte_count": 1_399_177,
+    "selected_tree_sha256": (
+        "88c9725d0416b4ac3e21f6752ad423c13ea3b8cfb9e23ca664f8aba146cec33d"
+    ),
+    "mjlab_tasks_entry_point_count": 0,
+}
+
+
+def _runtime_stack():
+    return {
+        "schema_version": 1,
+        "mujoco_warp": dict(MUJOCO_WARP_RUNTIME),
+        "rsl_rl": dict(RSL_RL_RUNTIME),
+        "mjlab": dict(MJLAB_RUNTIME),
+    }
+VERIFICATION_RECEIPT_SHA256 = "c" * 64
+OWNER_LOCAL_FRAME_SHA256 = "d" * 64
+
+
+def _plant_contract():
+    name = "_consumer_test_mujoco_full_mdp_plant_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = LANE / "mujoco_full_mdp_plant_contract.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+PLANT_MODEL = _plant_contract().verified_plant_model_identity(
+    verification_receipt_sha256=VERIFICATION_RECEIPT_SHA256,
+    owner_local_frame_sha256=OWNER_LOCAL_FRAME_SHA256,
+    final_augmented_mjb=_plant_contract().expected_plant_model_identity()[
+        "runtime_attach"
+    ]["final_augmented_mjb"],
+)
 IDENTITY = {
     "source_commit": COMMIT,
     "run_namespace": NAMESPACE,
-    "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
+    "runtime_stack": _runtime_stack(),
+    "plant_model": PLANT_MODEL,
 }
 OTHER_IDENTITY = {
     "source_commit": "b" * 40,
     "run_namespace": "mujoco-fullmdp-consumer-other-0002",
-    "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
+    "runtime_stack": _runtime_stack(),
+    "plant_model": PLANT_MODEL,
 }
 
 
@@ -48,7 +112,15 @@ def _copy_identity(identity):
     return {
         "source_commit": identity["source_commit"],
         "run_namespace": identity["run_namespace"],
-        "mujoco_warp_runtime": dict(identity["mujoco_warp_runtime"]),
+        "runtime_stack": {
+            "schema_version": identity["runtime_stack"]["schema_version"],
+            "mujoco_warp": dict(identity["runtime_stack"]["mujoco_warp"]),
+            "rsl_rl": dict(identity["runtime_stack"]["rsl_rl"]),
+            "mjlab": dict(identity["runtime_stack"]["mjlab"]),
+        },
+        "plant_model": _plant_contract().clone_plant_model_identity(
+            identity["plant_model"]
+        ),
     }
 
 
@@ -65,6 +137,7 @@ RUNNER_EVENT_KEYS = {
     "landing_crossing_rows", "r06_present_rows", "r06_eligible_rows",
     "r06_common_rows", "r07_present_rows", "r07_eligible_rows",
     "recovery_success_rows", "recovery_failure_rows", "recovery_timeout_rows",
+    "recovery_completion_fault_rows",
 }
 RUNNER_LIFECYCLE_KEYS = {
     "gym_reset_rows", "unknown_terminal_rows", "invalid_done_rows",
@@ -76,7 +149,7 @@ RUNNER_LIFECYCLE_KEYS = {
 }
 
 
-def _load():
+def _load(*, stub_runtime_mjb=True):
     path = LANE / "mujoco_full_mdp_longrun_consumer.py"
     name = "mujoco_full_mdp_longrun_consumer_test"
     spec = importlib.util.spec_from_file_location(name, path)
@@ -84,6 +157,53 @@ def _load():
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
+    source = _plant_contract().expected_plant_model_identity()["source_plant"]
+
+    def verify(*, mjcf_path, **_kwargs):
+        path = Path(mjcf_path)
+        if (
+            path.name != source["root_filename"]
+            or hashlib.sha256(path.read_bytes()).hexdigest()
+            != source["root_mjcf_sha256"]
+        ):
+            raise ValueError("fixture plant root differs")
+        class Verified:
+            portable_identity_sha256 = source["portable_identity_sha256"]
+            verification_receipt_sha256 = VERIFICATION_RECEIPT_SHA256
+
+            def consume_verified_model(self, consumer):
+                return consumer(object())
+
+        return Verified()
+
+    module._canonical_mujoco_identity_module = lambda: types.SimpleNamespace(
+        verify_exact_mujoco_identity=verify
+    )
+    module._mujoco_module = lambda: object()
+    module._table_termination_module = lambda: types.SimpleNamespace(
+        consume_verified_owner_frame_contract=lambda _mujoco, verified: (
+            verified.consume_verified_model(
+                lambda _model: {
+                    "content_sha256": OWNER_LOCAL_FRAME_SHA256,
+                }
+            )
+        )
+    )
+    runtime_verification = object()
+    module._epa48_runtime_module = lambda: types.SimpleNamespace(
+        verify_runtime_stack_preimport=lambda: runtime_verification,
+        verified_runtime_stack_identity=lambda verification: (
+            _runtime_stack()
+            if verification is runtime_verification
+            else pytest.fail("consumer runtime verification token differs")
+        ),
+    )
+    if stub_runtime_mjb:
+        module._verified_runtime_mjb = lambda _evidence: dict(
+            _plant_contract().expected_plant_model_identity()["runtime_attach"][
+                "final_augmented_mjb"
+            ]
+        )
     return module
 
 
@@ -92,7 +212,7 @@ def _base_record(module, index, *, identity=IDENTITY):
     terminal = {key: 0 for key in module.TERMINAL_KEYS}
     lifecycle = {key: 0 for key in RUNNER_LIFECYCLE_KEYS}
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "record_type": "mujoco_full_mdp_update_ack",
         "diagnostic_unauthorized": True,
         "update_index": index,
@@ -311,7 +431,7 @@ def _write_evidence(path, rows):
 def _write_completion(path, module, count, evidence_inventory, receipts,
                       *, identity=IDENTITY, mutation=None):
     record = {
-        "schema_version": 4,
+        "schema_version": 5,
         "record_type": "mujoco_full_mdp_completion",
         "diagnostic_unauthorized": True,
         "run_identity": _copy_identity(identity),
@@ -366,12 +486,13 @@ def _artifacts(module, tmp_path, count, *, complete, identity=IDENTITY,
 
 
 def _consume(module, evidence, snapshots, count, completion=None,
-             *, commit=COMMIT, namespace=NAMESPACE):
+             *, commit=COMMIT, namespace=NAMESPACE, plant_xml=PLANT_XML):
     return module.consume(
         evidence,
         expected_updates=count,
         expected_source_commit=commit,
         expected_run_namespace=namespace,
+        expected_plant_xml=plant_xml,
         snapshot_dir=snapshots,
         completion_json=completion,
     )
@@ -383,7 +504,7 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
         module, tmp_path, 5, complete=False
     )
     summary = _consume(module, evidence, snapshots, 5)
-    assert summary["schema_version"] == 3
+    assert summary["schema_version"] == 4
     assert summary["run_identity"] == IDENTITY
     assert summary["evidence_level"] == "advisory_prefix"
     assert summary["engineering_run_complete"] is False
@@ -393,6 +514,7 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
     assert summary["snapshot_inventory"][0]["name"] == "model_0.pt"
     assert summary["model_abi_verified"] is True
     assert summary["optimizer_state_verified"] is True
+    assert summary["runtime_mjb_verified"] is True
     assert summary["completion_seal_verified"] is False
     assert summary["action_contract"] is None
     assert summary["opportunity_d05"] == {
@@ -412,17 +534,104 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
     }
 
 
-def test_runner_update_ack_fixture_matches_exact_evidence_v4_wire(tmp_path):
+def test_runner_update_ack_fixture_matches_exact_evidence_v5_wire(tmp_path):
     module = _load()
     assert module.EVENT_KEYS == RUNNER_EVENT_KEYS
     assert module.LIFECYCLE_KEYS == RUNNER_LIFECYCLE_KEYS
-    assert len(module.EVENT_KEYS) == 29
+    assert len(module.EVENT_KEYS) == 30
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False
     )
     summary = _consume(module, evidence, snapshots, 1)
     assert summary["milestones"]["reveal_due_rows"] == 0
     assert summary["engineering_run_complete"] is False
+
+
+def test_runtime_mjb_verification_is_once_per_consume_not_once_per_ack(tmp_path):
+    module = _load()
+    calls = []
+    expected = dict(
+        _plant_contract().expected_plant_model_identity()["runtime_attach"][
+            "final_augmented_mjb"
+        ]
+    )
+
+    def verify(evidence):
+        calls.append(Path(evidence))
+        return dict(expected)
+
+    module._verified_runtime_mjb = verify
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 5, complete=False,
+    )
+    _consume(module, evidence, snapshots, 5)
+    assert calls == [evidence]
+
+
+def test_runtime_stack_is_independently_verified_before_runtime_mjb_and_ack(
+    tmp_path,
+):
+    module = _load()
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False,
+    )
+    trace = []
+    verification = object()
+    expected_mjb = dict(
+        _plant_contract().expected_plant_model_identity()["runtime_attach"][
+            "final_augmented_mjb"
+        ]
+    )
+    module._epa48_runtime_module = lambda: types.SimpleNamespace(
+        verify_runtime_stack_preimport=lambda: (
+            trace.append("runtime_preimport") or verification
+        ),
+        verified_runtime_stack_identity=lambda actual: (
+            trace.append("runtime_identity") or _runtime_stack()
+            if actual is verification
+            else pytest.fail("runtime verification token differs")
+        ),
+    )
+    module._verified_runtime_mjb = lambda _evidence: (
+        trace.append("runtime_mjb") or expected_mjb
+    )
+    original_read_rows = module._read_rows
+
+    def read_rows(*args, **kwargs):
+        trace.append("ack_read")
+        return original_read_rows(*args, **kwargs)
+
+    module._read_rows = read_rows
+    _consume(module, evidence, snapshots, 1)
+    assert trace[:4] == [
+        "runtime_preimport", "runtime_identity", "runtime_mjb", "ack_read",
+    ]
+
+
+@pytest.mark.parametrize("message", (
+    "MJLab selected code-tree SHA differs",
+    "RSL-RL 3 wheel SHA differs",
+))
+def test_runtime_stack_drift_is_rejected_before_runtime_mjb_or_ack(
+    tmp_path, message,
+):
+    module = _load()
+    evidence = tmp_path / "updates.jsonl"
+    snapshots = tmp_path / "snapshots"
+    snapshots.mkdir()
+    module._epa48_runtime_module = lambda: types.SimpleNamespace(
+        verify_runtime_stack_preimport=lambda: (_ for _ in ()).throw(
+            RuntimeError(message)
+        )
+    )
+    module._verified_runtime_mjb = lambda _path: pytest.fail(
+        "runtime MJB must not be read after runtime-stack drift"
+    )
+    module._read_rows = lambda *_args, **_kwargs: pytest.fail(
+        "ACK must not be read after runtime-stack drift"
+    )
+    with pytest.raises(RuntimeError, match=re.escape(message)):
+        _consume(module, evidence, snapshots, 1)
 
 
 @pytest.mark.parametrize(
@@ -446,7 +655,7 @@ def test_consumer_rejects_each_nonfinite_storage_receipt(field, tmp_path):
         _consume(module, evidence, snapshots, 1)
 
 
-def test_consumer_rejects_storage_domains_and_missed_launch_receipts(tmp_path):
+def test_consumer_rejects_storage_domains_and_named_fault_receipts(tmp_path):
     module = _load()
     for label, mutation, error in (
         (
@@ -461,7 +670,14 @@ def test_consumer_rejects_storage_domains_and_missed_launch_receipts(tmp_path):
             lambda rows: rows[0]["extras_counts"].__setitem__(
                 "missed_launch_rows", 1
             ),
-            "missed launch fault counter",
+            "named event fault counter.*missed_launch_rows",
+        ),
+        (
+            "recovery-completion",
+            lambda rows: rows[0]["extras_counts"].__setitem__(
+                "recovery_completion_fault_rows", 1
+            ),
+            "named event fault counter.*recovery_completion_fault_rows",
         ),
         (
             "sigma",
@@ -480,7 +696,7 @@ def test_consumer_rejects_storage_domains_and_missed_launch_receipts(tmp_path):
             _consume(module, evidence, snapshots, 1)
 
 
-def test_evidence_v3_and_completion_v3_are_rejected_by_separate_schemas(
+def test_evidence_v4_and_completion_v4_are_rejected_by_separate_schemas(
         monkeypatch, tmp_path):
     module = _load()
 
@@ -489,7 +705,7 @@ def test_evidence_v3_and_completion_v3_are_rejected_by_separate_schemas(
     evidence, snapshots, _completion, rows = _artifacts(
         module, evidence_root, 1, complete=False
     )
-    rows[0]["schema_version"] = 3
+    rows[0]["schema_version"] = 4
     _write_evidence(evidence, rows)
     with pytest.raises(ValueError, match="fixed fields at update 0"):
         _consume(module, evidence, snapshots, 1)
@@ -499,13 +715,13 @@ def test_evidence_v3_and_completion_v3_are_rejected_by_separate_schemas(
     completion_root.mkdir()
     evidence, snapshots, completion, _rows = _artifacts(
         module, completion_root, 1, complete=True,
-        seal_mutation=lambda row: row.__setitem__("schema_version", 3),
+        seal_mutation=lambda row: row.__setitem__("schema_version", 4),
     )
     with pytest.raises(ValueError, match="completion seal binding"):
         _consume(module, evidence, snapshots, 1, completion)
 
 
-def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v4():
+def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v5():
     module = _load()
     indices = module._snapshot_indices(True)
     assert indices == list(range(0, 12_500, 500)) + [12_499]
@@ -659,13 +875,190 @@ def test_rejects_mutated_runtime_identity_in_evidence_even_with_new_hash(tmp_pat
     module = _load()
 
     def mutate(rows):
-        rows[0]["run_identity"]["mujoco_warp_runtime"]["epa_horizon"] = 24
+        rows[0]["run_identity"]["runtime_stack"]["mujoco_warp"][
+            "epa_horizon"
+        ] = 24
 
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate
     )
     with pytest.raises(ValueError, match="run identity at update 0"):
         _consume(module, evidence, snapshots, 1)
+
+
+def test_rejects_legacy_mujoco_warp_runtime_identity_wire(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        identity = rows[0]["run_identity"]
+        stack = identity.pop("runtime_stack")
+        identity["mujoco_warp_runtime"] = stack["mujoco_warp"]
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="run identity keys"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_rejects_mutated_plant_identity_in_evidence_even_with_new_hash(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["run_identity"]["plant_model"]["runtime_attach"][
+            "final_augmented_mjb"
+        ]["sha256"] = "0" * 64
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="run identity at update 0"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_rejects_mutated_owner_frame_receipt_even_with_new_outer_hash(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["run_identity"]["plant_model"]["runtime_attach"][
+            "owner_local_frame_sha256"
+        ] = "e" * 64
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="run identity at update 0"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_expected_plant_xml_is_canonical_and_sha_pinned(tmp_path):
+    module = _load()
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False
+    )
+    wrong = tmp_path / "wrong.xml"
+    wrong.write_text('<mujoco model="A3T2.5_pingpong_0519"/>\n')
+    with pytest.raises(ValueError, match="expected plant exact verification"):
+        _consume(module, evidence, snapshots, 1, plant_xml=wrong)
+
+
+def test_consumer_verifies_base_once_and_consumes_same_model_for_owner(monkeypatch):
+    module = _load()
+    counts = {"verify": 0, "consume": 0}
+    source = _plant_contract().expected_plant_model_identity()["source_plant"]
+
+    class Verified:
+        portable_identity_sha256 = source["portable_identity_sha256"]
+        verification_receipt_sha256 = VERIFICATION_RECEIPT_SHA256
+
+        def consume_verified_model(self, consumer):
+            counts["consume"] += 1
+            return consumer(object())
+
+    def verify(**_kwargs):
+        counts["verify"] += 1
+        return Verified()
+
+    monkeypatch.setattr(
+        module,
+        "_canonical_mujoco_identity_module",
+        lambda: types.SimpleNamespace(verify_exact_mujoco_identity=verify),
+    )
+    monkeypatch.setattr(module, "_mujoco_module", lambda: object())
+    monkeypatch.setattr(
+        module,
+        "_table_termination_module",
+        lambda: types.SimpleNamespace(
+            consume_verified_owner_frame_contract=lambda _mujoco, verified: (
+                verified.consume_verified_model(
+                    lambda _model: {
+                        "content_sha256": OWNER_LOCAL_FRAME_SHA256,
+                    }
+                )
+            )
+        ),
+    )
+    assert module._verified_plant_model(
+        PLANT_XML,
+        _plant_contract().expected_plant_model_identity()["runtime_attach"][
+            "final_augmented_mjb"
+        ],
+    ) == PLANT_MODEL
+    assert counts == {"verify": 1, "consume": 1}
+
+
+def test_consumer_hashes_and_loads_the_run_owned_runtime_mjb_once(
+    monkeypatch, tmp_path,
+):
+    module = _load(stub_runtime_mjb=False)
+    payload = b"independently observed augmented MJB"
+    runtime_mjb = tmp_path / "runtime.mjb"
+    runtime_mjb.write_bytes(payload)
+    receipt = {
+        "relative_locator": "runtime.mjb",
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "size_bytes": len(payload),
+    }
+    contract = module._plant_contract_module()
+    expected = contract.expected_plant_model_identity()
+
+    def expected_with_fixture():
+        value = copy.deepcopy(expected)
+        value["runtime_attach"]["final_augmented_mjb"] = dict(receipt)
+        return value
+
+    monkeypatch.setattr(contract, "expected_plant_model_identity", expected_with_fixture)
+    loads = []
+
+    class FakeModel:
+        @classmethod
+        def from_binary_path(cls, path):
+            loads.append(path)
+            assert Path(path).read_bytes() == payload
+            return object()
+
+    monkeypatch.setattr(
+        module, "_mujoco_module",
+        lambda: types.SimpleNamespace(MjModel=FakeModel),
+    )
+    assert module._verified_runtime_mjb(tmp_path / "evidence.jsonl") == receipt
+    assert loads == [str(runtime_mjb)]
+
+
+def test_consumer_rejects_runtime_mjb_byte_drift_before_loading(
+    monkeypatch, tmp_path,
+):
+    module = _load(stub_runtime_mjb=False)
+    (tmp_path / "runtime.mjb").write_bytes(b"drift")
+    loads = []
+
+    class FakeModel:
+        @classmethod
+        def from_binary_path(cls, path):
+            loads.append(path)
+            return object()
+
+    monkeypatch.setattr(
+        module, "_mujoco_module",
+        lambda: types.SimpleNamespace(MjModel=FakeModel),
+    )
+    with pytest.raises(ValueError, match="runtime MJB receipt"):
+        module._verified_runtime_mjb(tmp_path / "evidence.jsonl")
+    assert loads == []
+
+
+def test_consumer_locator_path_is_not_part_of_wire_identity(tmp_path):
+    module = _load()
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False
+    )
+    relocated = tmp_path / "relocated" / "a3_pingpong.xml"
+    relocated.parent.mkdir()
+    relocated.write_bytes(PLANT_XML.read_bytes())
+    summary = _consume(
+        module, evidence, snapshots, 1, plant_xml=relocated
+    )
+    assert summary["run_identity"] == IDENTITY
 
 
 def test_rejects_cross_run_snapshot_infos_even_with_matching_receipt(tmp_path):
@@ -682,7 +1075,7 @@ def test_rejects_mutated_runtime_identity_in_snapshot_infos(tmp_path):
 
     def mutate(index, payload):
         if index == 0:
-            payload["infos"]["run_identity"]["mujoco_warp_runtime"][
+            payload["infos"]["run_identity"]["runtime_stack"]["mujoco_warp"][
                 "wheel_sha256"
             ] = "0" * 64
 
@@ -698,7 +1091,9 @@ def test_rejects_mutated_runtime_identity_in_completion(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "COMPLETE_UPDATES", 1)
 
     def mutate(record):
-        record["run_identity"]["mujoco_warp_runtime"]["version"] = "3.10.0.3"
+        record["run_identity"]["runtime_stack"]["mujoco_warp"][
+            "version"
+        ] = "3.10.0.3"
 
     evidence, snapshots, completion, _rows = _artifacts(
         module, tmp_path, 1, complete=True, seal_mutation=mutate
@@ -840,7 +1235,7 @@ def test_rejects_prepared_hash_drift_and_duplicate_json_key(tmp_path):
         _consume(module, evidence, snapshots, 1)
 
     record = json.dumps(rows[0])
-    evidence.write_text(record[:-1] + ',"schema_version":4}\n')
+    evidence.write_text(record[:-1] + ',"schema_version":5}\n')
     with pytest.raises(ValueError, match="duplicate JSON key"):
         _consume(module, evidence, snapshots, 1)
 
@@ -856,6 +1251,7 @@ def test_artifact_mode_is_exact(tmp_path):
             expected_updates=1,
             expected_source_commit=COMMIT,
             expected_run_namespace=NAMESPACE,
+            expected_plant_xml=PLANT_XML,
             snapshot_dir=None,
         )
     with pytest.raises(ValueError, match="expected update count"):
@@ -864,5 +1260,6 @@ def test_artifact_mode_is_exact(tmp_path):
             expected_updates=2,
             expected_source_commit=COMMIT,
             expected_run_namespace=NAMESPACE,
+            expected_plant_xml=PLANT_XML,
             snapshot_dir=snapshots,
         )

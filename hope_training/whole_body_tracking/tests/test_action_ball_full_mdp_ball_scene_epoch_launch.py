@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import importlib.util
-from pathlib import Path
 import sys
 from types import ModuleType
 
@@ -12,30 +10,11 @@ import pytest
 import torch
 
 from test_action_ball_full_mdp_ball_scene import S, _Asset, _ReplicatedScene, _spec
+import test_action_ball_full_mdp_epoch_rowwise as epoch_rowwise
 
 
-_ROOT = Path(__file__).resolve().parents[1]
-_MDP = (
-    _ROOT
-    / "source"
-    / "whole_body_tracking"
-    / "whole_body_tracking"
-    / "tasks"
-    / "tracking"
-    / "mdp"
-)
-
-
-def _load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-E = _load("action_ball_full_mdp_epoch", _MDP / "action_ball_full_mdp_epoch.py")
+_PACKAGE = "whole_body_tracking.tasks.tracking.mdp"
+E = epoch_rowwise.E
 
 
 class _Projection:
@@ -121,10 +100,17 @@ def _direct_module_bindings(monkeypatch):
     # tests bind the exact already-loaded source classes under their direct
     # fallback names; the scene still verifies exact class and bound-method
     # identity rather than accepting a duck-typed fixture.
-    monkeypatch.setitem(sys.modules, "action_ball_full_mdp_epoch", E)
-    module = ModuleType("action_ball_physical_flight_device")
+    package = sys.modules[_PACKAGE]
+    epoch_name = "action_ball_full_mdp_epoch"
+    physical_name = "action_ball_physical_flight_device"
+    monkeypatch.setitem(sys.modules, epoch_name, E)
+    monkeypatch.setitem(sys.modules, f"{_PACKAGE}.{epoch_name}", E)
+    monkeypatch.setattr(package, epoch_name, E, raising=False)
+    module = ModuleType(f"{_PACKAGE}.{physical_name}")
     module.ActionBallPhysicalFlightDeviceOwner = _Physical
-    monkeypatch.setitem(sys.modules, "action_ball_physical_flight_device", module)
+    monkeypatch.setitem(sys.modules, physical_name, module)
+    monkeypatch.setitem(sys.modules, f"{_PACKAGE}.{physical_name}", module)
+    monkeypatch.setattr(package, physical_name, module, raising=False)
 
 
 def test_exact_bound_physical_projection_is_the_only_scene_launch_payload():

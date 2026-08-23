@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -15,8 +16,14 @@ import torch
 
 
 LANE = Path(__file__).resolve().parents[1]
+PLANT_XML = LANE.parents[2] / (
+    "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
+    "a3_pingpong/a3_pingpong.xml"
+)
 SOURCE_COMMIT = "a" * 40
 RUN_NAMESPACE = "mujoco-full-a-runner-v2-test"
+VERIFICATION_RECEIPT_SHA256 = "c" * 64
+OWNER_LOCAL_FRAME_SHA256 = "d" * 64
 MUJOCO_WARP_RUNTIME = {
     "schema_version": 1,
     "distribution": "mujoco-warp",
@@ -34,13 +41,88 @@ MUJOCO_WARP_RUNTIME = {
     ),
     "import_scope": "fresh_run_local_site",
 }
+RSL_RL_RUNTIME = {
+    "distribution": "rsl-rl-lib",
+    "version": "3.1.2",
+    "wheel_sha256": (
+        "406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d"
+    ),
+    "import_scope": "fresh_run_local_site",
+}
+MJLAB_RUNTIME = {
+    "schema_version": 1,
+    "distribution": "mjlab",
+    "version": "1.5.3",
+    "import_scope": "verified_venv_distribution",
+    "selected_tree_scope": "mjlab/**/*.py+mjlab/scene/scene.xml",
+    "selected_file_count": 193,
+    "selected_byte_count": 1_399_177,
+    "selected_tree_sha256": (
+        "88c9725d0416b4ac3e21f6752ad423c13ea3b8cfb9e23ca664f8aba146cec33d"
+    ),
+    "mjlab_tasks_entry_point_count": 0,
+}
+
+
+def _runtime_stack():
+    return {
+        "schema_version": 1,
+        "mujoco_warp": dict(MUJOCO_WARP_RUNTIME),
+        "rsl_rl": dict(RSL_RL_RUNTIME),
+        "mjlab": dict(MJLAB_RUNTIME),
+    }
+
+
+def _plant_contract():
+    name = "_runner_test_mujoco_full_mdp_plant_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = LANE / "mujoco_full_mdp_plant_contract.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _plant_model():
+    final_mjb = _plant_contract().expected_plant_model_identity()[
+        "runtime_attach"
+    ]["final_augmented_mjb"]
+    return _plant_contract().verified_plant_model_identity(
+        verification_receipt_sha256=VERIFICATION_RECEIPT_SHA256,
+        owner_local_frame_sha256=OWNER_LOCAL_FRAME_SHA256,
+        final_augmented_mjb=final_mjb,
+    )
+
+
+def _augmented_mjb():
+    return dict(
+        _plant_contract().expected_plant_model_identity()["runtime_attach"][
+            "final_augmented_mjb"
+        ]
+    )
+
+
+def _source_scan():
+    source = _plant_contract().expected_plant_model_identity()["source_plant"]
+    return {
+        "root_path": str(PLANT_XML),
+        **{key: source[key] for key in (
+            "root_filename", "root_mjcf_sha256", "source_closure_sha256",
+            "source_member_count", "source_total_bytes",
+        )},
+    }
 
 
 def _identity():
     return {
         "source_commit": SOURCE_COMMIT,
         "run_namespace": RUN_NAMESPACE,
-        "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
+        "runtime_stack": _runtime_stack(),
+        "plant_model": _plant_model(),
     }
 
 
@@ -78,6 +160,35 @@ def _load_consumer():
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    source = _plant_contract().expected_plant_model_identity()["source_plant"]
+    class Verified:
+        portable_identity_sha256 = source["portable_identity_sha256"]
+        verification_receipt_sha256 = VERIFICATION_RECEIPT_SHA256
+
+        def consume_verified_model(self, consumer):
+            return consumer(object())
+
+    module._canonical_mujoco_identity_module = lambda: types.SimpleNamespace(
+        verify_exact_mujoco_identity=lambda **_kwargs: Verified()
+    )
+    module._mujoco_module = lambda: object()
+    module._table_termination_module = lambda: types.SimpleNamespace(
+        consume_verified_owner_frame_contract=lambda _mujoco, verified: (
+            verified.consume_verified_model(
+                lambda _model: {"content_sha256": OWNER_LOCAL_FRAME_SHA256}
+            )
+        )
+    )
+    runtime_verification = object()
+    module._epa48_runtime_module = lambda: types.SimpleNamespace(
+        verify_runtime_stack_preimport=lambda: runtime_verification,
+        verified_runtime_stack_identity=lambda actual: (
+            _runtime_stack()
+            if actual is runtime_verification
+            else pytest.fail("consumer runtime verification token differs")
+        ),
+    )
+    module._verified_runtime_mjb = lambda _evidence: _augmented_mjb()
     return module
 
 
@@ -150,41 +261,42 @@ def test_full_a_binds_epa48_before_torch_rsl_and_wait_imports(tmp_path):
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        runtime = {
+        runtime_stack = {
             "schema_version": 1,
-            "distribution": "mujoco-warp",
-            "fork_id": "hope_mujoco_warp_epa48_v1",
-            "version": "3.10.0.3+hope.epa48.1",
-            "epa_horizon": 48,
-            "types_py_sha256": (
-                "391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696"
-            ),
-            "wheel_sha256": (
-                "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a"
-            ),
-            "build_receipt_sha256": (
-                "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041"
-            ),
-            "import_scope": "fresh_run_local_site",
+            "mujoco_warp": {"verified": "epa48"},
+            "rsl_rl": {"verified": "rsl3"},
+            "mjlab": {"verified": "mjlab-1.5.3"},
         }
 
         def log(value):
             with trace.open("a", encoding="utf-8") as stream:
                 stream.write(value + "\\n")
 
+        preimport = object()
+
+        def verify_preimport():
+            assert not any(
+                name == prefix or name.startswith(prefix + ".")
+                for name in sys.modules
+                for prefix in ("torch", "mujoco_warp", "mjlab", "rsl_rl")
+            )
+            log("preverify")
+            return preimport
+
         module._epa48_runtime_module = lambda: types.SimpleNamespace(
-            expected_mujoco_warp_runtime_identity=lambda: dict(runtime)
+            verify_runtime_stack_preimport=verify_preimport,
         )
 
-        def bind(raw):
+        def bind(raw, verified):
             assert raw == str(root / "runtime_site")
+            assert verified is preimport
             assert not any(
                 name == prefix or name.startswith(prefix + ".")
                 for name in sys.modules
                 for prefix in ("torch", "mujoco_warp", "mjlab", "rsl_rl")
             )
             log("bind")
-            return dict(runtime)
+            return runtime_stack
 
         def rsl3_runner():
             log("rsl")
@@ -226,17 +338,86 @@ def test_full_a_binds_epa48_before_torch_rsl_and_wait_imports(tmp_path):
     )
     assert completed.returncode == 0, completed.stderr
     assert trace.read_text(encoding="utf-8").splitlines() == [
-        "bind", "torch", "rsl", "wait",
+        "preverify", "bind", "torch", "rsl", "wait",
     ]
 
 
 def test_full_a_run_identity_isolates_the_binder_result_copy():
     module = _load()
-    runtime = dict(MUJOCO_WARP_RUNTIME)
-    identity = module._run_identity(SOURCE_COMMIT, RUN_NAMESPACE, runtime)
+    runtime = _runtime_stack()
+    plant_model = _plant_model()
+    identity = module._run_identity(
+        SOURCE_COMMIT, RUN_NAMESPACE, runtime, plant_model)
     assert identity == _identity()
-    runtime["epa_horizon"] = 24
+    runtime["mujoco_warp"]["epa_horizon"] = 24
+    plant_model["runtime_attach"]["final_augmented_mjb"]["sha256"] = "0" * 64
     assert identity == _identity()
+
+
+def test_mjlab_postimport_verification_precedes_run_identity(monkeypatch):
+    module = _load()
+    runtime_stack = _runtime_stack()
+    monkeypatch.setattr(
+        module,
+        "_epa48_runtime_module",
+        lambda: types.SimpleNamespace(
+            verify_loaded_mjlab_runtime_modules=lambda: dict(MJLAB_RUNTIME)
+        ),
+    )
+    module._verify_full_a_runtime_postimport(runtime_stack)
+    drifted = dict(MJLAB_RUNTIME)
+    drifted["selected_tree_sha256"] = "0" * 64
+    monkeypatch.setattr(
+        module,
+        "_epa48_runtime_module",
+        lambda: types.SimpleNamespace(
+            verify_loaded_mjlab_runtime_modules=lambda: drifted
+        ),
+    )
+    with pytest.raises(RuntimeError, match="pre/post identity differs"):
+        module._verify_full_a_runtime_postimport(runtime_stack)
+
+    source = inspect.getsource(module.main)
+    assert source.index("FullMdpInitialWaitVecEnv(") < source.index(
+        "_verify_full_a_runtime_postimport(runtime_identity)"
+    ) < source.index("_run_identity(")
+
+
+def test_source_commit_is_measured_from_the_clean_runner_checkout(tmp_path):
+    module = _load()
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Runner Test"],
+        check=True,
+    )
+    source = repo / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "source.py"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", "fixture"], check=True,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    ).stdout.strip()
+
+    assert module._verified_source_checkout_commit(
+        commit, repo_root=repo,
+    ) == commit
+    with pytest.raises(RuntimeError, match="source checkout differs"):
+        module._verified_source_checkout_commit("a" * 40, repo_root=repo)
+
+    source.write_text("VALUE = 2\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="source checkout differs"):
+        module._verified_source_checkout_commit(commit, repo_root=repo)
 
 
 def test_runtime_site_argument_is_full_a_only_and_required_before_torch(tmp_path):
@@ -275,6 +456,7 @@ FULL_A_EVENT_KEYS = (
     "full_a_r06_common_event", "full_a_r07_present_event",
     "full_a_r07_eligible_event", "full_a_recovery_success_event",
     "full_a_recovery_failure_event", "full_a_recovery_timeout_event",
+    "full_a_recovery_completion_fault_event",
 )
 
 
@@ -291,10 +473,11 @@ def _install_fake_stack(
     ready_payload = b'{"pose":"frozen"}'
     ready_pose.write_bytes(ready_payload)
     monkeypatch.setenv("ACTIONBALL_READY_POSE", str(ready_pose))
+    monkeypatch.setenv("A3_PINGPONG_XML", str(PLANT_XML))
     monkeypatch.setattr(
         module, "READY_POSE_SHA256", hashlib.sha256(ready_payload).hexdigest()
     )
-    trace, saved = [], []
+    trace, saved, live_models = [], [], []
     evidence = tmp_path / "updates.jsonl"
     snapshots = tmp_path / "snapshots"
     completion = tmp_path / "completion.json"
@@ -334,13 +517,14 @@ def _install_fake_stack(
 
     class _Env:
         def __init__(
-            self, sim, task, device, seed, ready_pose_payload,
+            self, sim, task, device, xml_path, seed, ready_pose_payload,
             ready_pose_source, full_a_mode,
         ):
             assert sim.nworld == num_envs and task.action_scale_mode == "vendor"
             assert device == "cuda:0" and seed == 0
             assert ready_pose_payload == ready_payload
             assert ready_pose_source == str(ready_pose)
+            assert xml_path == (PLANT_XML if full_a_mode else None)
             assert full_a_mode is expected_mode
             assert task.episode_length_s == (30.0 if full_a_mode else 3.0)
             self.num_envs, self.num_actions = num_envs, 31
@@ -350,6 +534,35 @@ def _install_fake_stack(
             self.reset_generation = torch.zeros(num_envs, dtype=torch.long)
             self.episode_length_buf = torch.zeros(num_envs, dtype=torch.long)
             self.max_episode_length = 150
+            self.env = types.SimpleNamespace(xml_path=PLANT_XML)
+            source = _plant_contract().expected_plant_model_identity()[
+                "source_plant"
+            ]
+            self._table_keepout = types.SimpleNamespace(
+                plant_identity_receipt={
+                    "root_mjcf_sha256": source["root_mjcf_sha256"],
+                    "identity_manifest_sha256": source["manifest_sha256"],
+                    "portable_identity_sha256": source[
+                        "portable_identity_sha256"
+                    ],
+                    "verification_receipt_sha256": VERIFICATION_RECEIPT_SHA256,
+                    "owner_local_frame_sha256": OWNER_LOCAL_FRAME_SHA256,
+                }
+            )
+            self.decimation = 20
+            self.step_dt = 0.02
+            self.njmax_alloc = 572
+            self.naconmax_alloc = 128 * num_envs
+            self.mj_model = types.SimpleNamespace(
+                opt=types.SimpleNamespace(
+                    timestep=0.001,
+                    integrator=0,
+                    solver=2,
+                    ccd_iterations=35,
+                    noslip_iterations=0,
+                )
+            )
+            live_models.append(self.mj_model)
 
         @property
         def action_contract_identity(self):
@@ -543,13 +756,40 @@ def _install_fake_stack(
     monkeypatch.setitem(sys.modules, wait_module.__name__, wait_module)
     monkeypatch.setattr(module, "_rsl3_runner", lambda: ("3.1.2", _Runner, object()))
     monkeypatch.setattr(module, "_require_rsl3_runtime", lambda *_: None)
+    monkeypatch.setattr(module, "_scan_plant_source", lambda _path: _source_scan())
+    contract = module._plant_contract_module()
+    expected_attach = contract.expected_plant_model_identity()["runtime_attach"]
+    monkeypatch.setattr(module, "_mujoco_module", lambda: object())
+    monkeypatch.setattr(
+        module,
+        "_geometry_source_identity",
+        lambda: expected_attach["geometry_source_sha256"],
+    )
+    def persist_runtime_mjb(_mujoco, _model, root):
+        assert len(live_models) == 1 and _model is live_models[0]
+        target = Path(root) / "runtime.mjb"
+        target.write_bytes(b"fake runner-owned augmented MJB")
+        return dict(expected_attach["final_augmented_mjb"])
+
+    monkeypatch.setattr(
+        contract, "persist_augmented_runtime_mjb", persist_runtime_mjb,
+    )
     runtime_site = tmp_path / "runtime_site"
+    runtime_preimport = object()
+    monkeypatch.setattr(
+        module,
+        "_epa48_runtime_module",
+        lambda: types.SimpleNamespace(
+            verify_runtime_stack_preimport=lambda: runtime_preimport,
+            verify_loaded_mjlab_runtime_modules=lambda: dict(MJLAB_RUNTIME),
+        ),
+    )
     monkeypatch.setattr(
         module,
         "_bind_full_a_runtime",
-        lambda raw: (
-            dict(MUJOCO_WARP_RUNTIME)
-            if raw == str(runtime_site)
+        lambda raw, verified: (
+            _runtime_stack()
+            if raw == str(runtime_site) and verified is runtime_preimport
             else pytest.fail("Full-A runtime site argument differs")
         ),
     )
@@ -593,6 +833,7 @@ def test_real_runner_writer_prefix_is_consumed_without_a_second_schema(
         expected_updates=1,
         expected_source_commit=SOURCE_COMMIT,
         expected_run_namespace=RUN_NAMESPACE,
+        expected_plant_xml=PLANT_XML,
         snapshot_dir=snapshots,
     )
     assert summary["evidence_level"] == "advisory_prefix"
@@ -622,6 +863,7 @@ def test_main_preserves_default_wait_learn_one(monkeypatch, capsys, tmp_path):
     assert trace == ["optimizer"] and saved == []
     assert not evidence.exists() and list(snapshots.iterdir()) == []
     assert not completion.exists()
+    assert not (tmp_path / "runtime.mjb").exists()
 
 
 def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
@@ -649,8 +891,19 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     rows = [json.loads(line) for line in evidence.read_text().splitlines()]
     assert [row["update_index"] for row in rows] == [0, 1]
     assert all(
-        row["schema_version"] == 4 and row["run_identity"] == _identity()
+        row["schema_version"] == 5 and row["run_identity"] == _identity()
         for row in rows
+    )
+    expected_mjb = _augmented_mjb()
+    assert expected_mjb["relative_locator"] == "runtime.mjb"
+    assert all(
+        row["run_identity"]["plant_model"]["runtime_attach"][
+            "final_augmented_mjb"
+        ] == expected_mjb
+        for row in rows
+    )
+    assert (tmp_path / expected_mjb["relative_locator"]).read_bytes() == (
+        b"fake runner-owned augmented MJB"
     )
     assert all(set(row["storage_finite"]) == {
         "observations_policy", "observations_critic", "actions", "values",
@@ -688,12 +941,15 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
             (snapshots / f"model_{index}.pt").read_bytes()
         ).hexdigest()
     seal = json.loads(completion.read_text())
-    assert seal["schema_version"] == 4
+    assert seal["schema_version"] == 5
     assert seal["record_type"] == "mujoco_full_mdp_completion"
     assert seal["diagnostic_unauthorized"] is True
     assert seal["checkpoint_authority"] is False
     assert seal["resume_authority"] is False
     assert seal["run_identity"] == _identity()
+    assert seal["run_identity"]["plant_model"]["runtime_attach"][
+        "final_augmented_mjb"
+    ] == expected_mjb
     assert seal["action_contract"] == ACTION_CONTRACT
     assert seal["action_ball_full_mdp_ppo_recipe_sha256"] == (
         _load().FULL_MDP_PPO_RECIPE_SHA256
@@ -909,7 +1165,7 @@ def test_evidence_jsonl_is_created_exclusively(monkeypatch, tmp_path):
     seal = tmp_path / "completion.json"
     seal.write_bytes(b"do not overwrite")
     with pytest.raises(FileExistsError):
-        module._write_completion(str(seal), {"schema_version": 4})
+        module._write_completion(str(seal), {"schema_version": 5})
     assert seal.read_bytes() == b"do not overwrite"
 
 
@@ -936,6 +1192,208 @@ def test_ready_pose_binding_rejects_missing_relative_symlink_and_wrong_bytes(
     monkeypatch.setenv("ACTIONBALL_READY_POSE", str(target))
     with pytest.raises(RuntimeError, match="path differs"):
         module._ready_pose_input()
+
+
+def _fake_compiled_plant_env():
+    expected = _plant_contract().expected_plant_model_identity()["source_plant"]
+    return types.SimpleNamespace(
+        env=types.SimpleNamespace(xml_path=PLANT_XML),
+        _table_keepout=types.SimpleNamespace(
+            plant_identity_receipt={
+                "root_mjcf_sha256": expected["root_mjcf_sha256"],
+                "identity_manifest_sha256": expected["manifest_sha256"],
+                "portable_identity_sha256": expected["portable_identity_sha256"],
+                "verification_receipt_sha256": VERIFICATION_RECEIPT_SHA256,
+                "owner_local_frame_sha256": OWNER_LOCAL_FRAME_SHA256,
+            }
+        ),
+        decimation=20,
+        step_dt=0.02,
+        sim_cfg=types.SimpleNamespace(
+            cone="elliptic",
+            add_pairs=True,
+            ball_spawn_hope=(2.0, -0.7625, 0.68),
+        ),
+        njmax_alloc=572,
+        naconmax_alloc=128,
+        num_envs=1,
+        mj_model=types.SimpleNamespace(
+            opt=types.SimpleNamespace(
+                timestep=0.001,
+                integrator=0,
+                solver=2,
+                cone=1,
+                ccd_iterations=35,
+                noslip_iterations=0,
+            )
+        ),
+    )
+
+
+def _bind_runtime_identity_fakes(module, monkeypatch):
+    contract = module._plant_contract_module()
+    expected = contract.expected_plant_model_identity()["runtime_attach"]
+    monkeypatch.setattr(module, "_mujoco_module", lambda: object())
+    monkeypatch.setattr(
+        module,
+        "_geometry_source_identity",
+        lambda: expected["geometry_source_sha256"],
+    )
+
+
+def test_compiled_plant_identity_is_exact_and_bound(monkeypatch):
+    module = _load()
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    monkeypatch.setenv("A3_PINGPONG_XML", str(PLANT_XML))
+    scan = _source_scan()
+    assert module._plant_model_identity(
+        _fake_compiled_plant_env(), PLANT_XML, scan, scan, _augmented_mjb()
+    ) == _plant_model()
+
+
+def test_source_closure_scan_matches_the_pinned_manifest_without_compiling():
+    module = _load()
+    assert module._scan_plant_source(PLANT_XML) == _source_scan()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (
+        ("timestep", 0.002),
+        ("decimation", 4),
+        ("step_dt", 0.04),
+    ),
+)
+def test_runtime_attachment_rejects_each_policy_clock_drift(
+    monkeypatch, field, value,
+):
+    module = _load()
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    monkeypatch.setenv("A3_PINGPONG_XML", str(PLANT_XML))
+    env = _fake_compiled_plant_env()
+    augmented_mjb = _augmented_mjb()
+    if field in ("decimation", "step_dt"):
+        setattr(env, field, value)
+    else:
+        # timestep belongs to the serialized MJB. Simulate the changed bytes
+        # instead of maintaining a second option-field gate in production.
+        augmented_mjb = {
+            "relative_locator": "runtime.mjb",
+            "sha256": "0" * 64,
+            "size_bytes": 1,
+        }
+    with pytest.raises(RuntimeError, match="runtime plant attachment differs"):
+        module._plant_model_identity(
+            env, PLANT_XML, _source_scan(), _source_scan(), augmented_mjb,
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (
+        ("njmax", 571),
+        ("nconmax", 127),
+    ),
+)
+def test_runtime_attachment_rejects_capacity_drift(
+    monkeypatch, field, value,
+):
+    module = _load()
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    env = _fake_compiled_plant_env()
+    if field == "njmax":
+        env.njmax_alloc = value
+    else:
+        env.naconmax_alloc = value
+    with pytest.raises(RuntimeError, match="runtime plant attachment differs"):
+        module._plant_model_identity(
+            env, PLANT_XML, _source_scan(), _source_scan(), _augmented_mjb()
+        )
+
+
+def test_runtime_attachment_rejects_geometry_mjb_and_owner_drift(monkeypatch):
+    module = _load()
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    env = _fake_compiled_plant_env()
+    monkeypatch.setattr(module, "_geometry_source_identity", lambda: "0" * 64)
+    with pytest.raises(RuntimeError, match="runtime plant attachment differs"):
+        module._plant_model_identity(
+            env, PLANT_XML, _source_scan(), _source_scan(), _augmented_mjb()
+        )
+
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    bad_mjb = {
+        "relative_locator": "runtime.mjb",
+        "sha256": "0" * 64,
+        "size_bytes": 1,
+    }
+    with pytest.raises(RuntimeError, match="runtime plant attachment differs"):
+        module._plant_model_identity(
+            env, PLANT_XML, _source_scan(), _source_scan(), bad_mjb,
+        )
+
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    env._table_keepout.plant_identity_receipt["owner_local_frame_sha256"] = "short"
+    with pytest.raises(ValueError, match="owner-local frame receipt differs"):
+        module._plant_model_identity(
+            env, PLANT_XML, _source_scan(), _source_scan(), _augmented_mjb()
+        )
+
+
+def test_full_a_geometry_override_is_rejected_before_court_import(monkeypatch):
+    module = _load()
+    monkeypatch.setenv("HOPE_GEOMETRY_PY", "/tmp/alternate-geometry.py")
+    with pytest.raises(RuntimeError, match="forbids the ambient"):
+        module._require_geometry_source_environment()
+
+    monkeypatch.delenv("HOPE_GEOMETRY_PY")
+    module._require_geometry_source_environment()
+
+
+def test_geometry_source_identity_is_the_exact_checkout_module(monkeypatch):
+    module = _load()
+    contract = module._plant_contract_module()
+    court = types.ModuleType("a3_court_env")
+    court.__file__ = str(LANE / "a3_court_env.py")
+    court.geom = types.SimpleNamespace(
+        __source_path__=str(contract.expected_geometry_source_path())
+    )
+    monkeypatch.setitem(sys.modules, "a3_court_env", court)
+    assert module._geometry_source_identity() == (
+        contract.TRUSTED_GEOMETRY_SOURCE_SHA256
+    )
+
+
+def test_compiled_plant_identity_rejects_unbound_or_different_env_path(
+    monkeypatch, tmp_path,
+):
+    module = _load()
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    env = _fake_compiled_plant_env()
+    monkeypatch.delenv("A3_PINGPONG_XML", raising=False)
+    with pytest.raises(RuntimeError, match="not bound"):
+        module._plant_xml_input()
+    different = tmp_path / "a3_pingpong.xml"
+    different.write_bytes(PLANT_XML.read_bytes())
+    monkeypatch.setenv("A3_PINGPONG_XML", str(different))
+    with pytest.raises(RuntimeError, match="plant XML identity differs"):
+        module._plant_model_identity(
+            env, different, _source_scan(), _source_scan(), _augmented_mjb()
+        )
+
+
+def test_compiled_plant_identity_rejects_post_construction_closure_drift(
+    monkeypatch,
+):
+    module = _load()
+    _bind_runtime_identity_fakes(module, monkeypatch)
+    before, after = _source_scan(), _source_scan()
+    after["source_closure_sha256"] = "0" * 64
+    with pytest.raises(RuntimeError, match="plant XML identity differs"):
+        module._plant_model_identity(
+            _fake_compiled_plant_env(), PLANT_XML, before, after,
+            _augmented_mjb(),
+        )
 
 
 def test_foreign_preloaded_wait_environment_is_rejected(monkeypatch):

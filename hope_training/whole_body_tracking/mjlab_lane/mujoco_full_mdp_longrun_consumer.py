@@ -36,9 +36,62 @@ def _epa48_runtime_module():
         sys.modules.pop(name, None); raise
     return module
 
+def _plant_contract_module():
+    source = Path(__file__).with_name("mujoco_full_mdp_plant_contract.py").resolve()
+    name = "_hope_mujoco_full_mdp_plant_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached MuJoCo plant contract origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None: raise RuntimeError("cannot load MuJoCo plant contract")
+    module = importlib.util.module_from_spec(spec); sys.modules[name] = module
+    try: spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None); raise
+    return module
+
+def _canonical_mujoco_identity_module():
+    source = (Path(__file__).resolve().parents[1] / "scripts" /
+              "canonical_mujoco_identity.py")
+    name = "_hope_canonical_mujoco_identity"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached canonical MuJoCo identity origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None: raise RuntimeError("cannot load canonical MuJoCo identity")
+    module = importlib.util.module_from_spec(spec); sys.modules[name] = module
+    try: spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None); raise
+    return module
+
+def _table_termination_module():
+    root = Path(__file__).resolve().parent.parent
+    expected = root / "mujoco_native/table_termination.py"
+    inserted = str(root) not in sys.path
+    if inserted: sys.path.insert(0, str(root))
+    try:
+        module = importlib.import_module("mujoco_native.table_termination")
+    finally:
+        if inserted and sys.path and sys.path[0] == str(root): sys.path.pop(0)
+    if (
+        Path(getattr(module, "__file__", "")).resolve() != expected
+        or Path(getattr(module, "REPO_ROOT", "")).resolve()
+        != Path(__file__).resolve().parents[3]
+    ):
+        _fail("table termination authority origin")
+    return module
+
+def _mujoco_module():
+    return importlib.import_module("mujoco")
+
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
-EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 4, 4, 3
+EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 5, 5, 4
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, 4096,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
@@ -50,7 +103,8 @@ EVENT_KEYS = _names("""reveal_rows reveal_due_rows reveal_deferred_rows launch_r
  opposite_contact_rows edge_contact_rows between_contact_rows invalid_contact_rows actual_hard_edge_rows
  qdes_guard_intervention_rows r03_present_rows
  r03_physically_valid_rows landing_crossing_rows r06_present_rows r06_eligible_rows r06_common_rows
- r07_present_rows r07_eligible_rows recovery_success_rows recovery_failure_rows recovery_timeout_rows""")
+ r07_present_rows r07_eligible_rows recovery_success_rows recovery_failure_rows recovery_timeout_rows
+ recovery_completion_fault_rows""")
 TERMINAL_KEYS = _names("time_out base_fell_tilt base_too_low joint_qdes_forbidden robot_hit_table")
 LIFECYCLE_KEYS = _names("""gym_reset_rows unknown_terminal_rows invalid_done_rows done_explanation_fault_rows
  time_out_rows timeout_fault_rows selected_reset_fault_rows reset_generation_rows reset_generation_fault_rows
@@ -111,15 +165,63 @@ def _num(value, label):
 def _hex(value, size, label):
     if type(value) is not str or re.fullmatch(f"[0-9a-f]{{{size}}}", value) is None: _fail(label)
     return value
-def _run_identity(commit, namespace):
+def _verified_plant_model(path, final_augmented_mjb):
+    contract, canonical = _plant_contract_module(), _canonical_mujoco_identity_module()
+    try:
+        verified = canonical.verify_exact_mujoco_identity(
+            mjcf_path=Path(path),
+            expected_manifest_path=contract.expected_manifest_path(),
+            trusted_expected_manifest_sha256=contract.TRUSTED_EXPECTED_MANIFEST_SHA256,
+        )
+    except Exception as exc:
+        _fail("expected plant exact verification: " + str(exc))
+    expected = contract.expected_plant_model_identity()
+    if (
+        verified.portable_identity_sha256
+        != expected["source_plant"]["portable_identity_sha256"]
+    ):
+        _fail("expected plant portable identity")
+    try:
+        mujoco = _mujoco_module()
+        owner = _table_termination_module().consume_verified_owner_frame_contract(
+            mujoco, verified
+        )["content_sha256"]
+    except Exception as exc:
+        _fail("expected plant owner-frame verification: " + str(exc))
+    return contract.verified_plant_model_identity(
+        verification_receipt_sha256=verified.verification_receipt_sha256,
+        owner_local_frame_sha256=owner,
+        final_augmented_mjb=final_augmented_mjb,
+    )
+def _run_identity(
+    commit, namespace, runtime_stack, plant_xml, final_augmented_mjb
+):
     if (type(commit) is not str or re.fullmatch(r"[0-9a-f]{40}", commit) is None
             or type(namespace) is not str
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{15,159}", namespace) is None):
         _fail("expected run identity")
+    _keys(
+        runtime_stack,
+        {"schema_version", "mujoco_warp", "rsl_rl", "mjlab"},
+        "verified runtime stack",
+    )
+    if (
+        type(runtime_stack["schema_version"]) is not int
+        or runtime_stack["schema_version"] != 1
+        or any(type(runtime_stack[key]) is not dict for key in (
+            "mujoco_warp", "rsl_rl", "mjlab"
+        ))
+    ):
+        _fail("verified runtime stack")
     return {"source_commit": commit, "run_namespace": namespace,
-        "mujoco_warp_runtime": (
-            _epa48_runtime_module().expected_mujoco_warp_runtime_identity()
-        )}
+        "runtime_stack": {
+            "schema_version": runtime_stack["schema_version"],
+            "mujoco_warp": dict(runtime_stack["mujoco_warp"]),
+            "rsl_rl": dict(runtime_stack["rsl_rl"]),
+            "mjlab": dict(runtime_stack["mjlab"]),
+        },
+        "plant_model": _verified_plant_model(
+            plant_xml, final_augmented_mjb)}
 def _count_map(row, name, keys):
     _keys(row[name], keys, name)
     return {key: _int(value, f"{name}.{key}", TRANSITIONS_PER_UPDATE) for key, value in row[name].items()}
@@ -158,9 +260,9 @@ def _validate_record(row, index, run_identity):
     if any(type(row[key]) is not type(value) or row[key] != value for key, value in fixed.items()):
         _fail(f"fixed fields at update {index}")
     _keys(row["run_identity"], {
-        "source_commit", "run_namespace", "mujoco_warp_runtime"
+        "source_commit", "run_namespace", "runtime_stack", "plant_model"
     }, "run identity")
-    if row["run_identity"] != run_identity:
+    if not _same(row["run_identity"], run_identity):
         _fail(f"run identity at update {index}")
     if (_hex(row["prepared_update_sha256"], 64, "prepared update hash")
             != _prepared_hash(row)):
@@ -180,8 +282,11 @@ def _validate_record(row, index, run_identity):
     if invalid_domains:
         _fail("rollout storage domain: " + ",".join(sorted(invalid_domains)))
     events = _count_map(row, "extras_counts", EVENT_KEYS)
-    if events["missed_launch_rows"] != 0:
-        _fail("missed launch fault counter")
+    named_faults = [name for name in (
+        "missed_launch_rows", "recovery_completion_fault_rows",
+    ) if events[name] != 0]
+    if named_faults:
+        _fail("named event fault counter: " + ",".join(named_faults))
     terms = _count_map(row, "terminal_bit_counts", TERMINAL_KEYS)
     life = _count_map(row, "lifecycle_counts", LIFECYCLE_KEYS)
     classes = _count_map(row, "classification_status_counts", map(str, range(6)))
@@ -294,7 +399,7 @@ def _validate_record(row, index, run_identity):
             < timing["collection_seconds"] + timing["learning_seconds"]):
         _fail("timings")
     return events, terms, life, outcomes, snapshot, timing["run_elapsed_pre_ack_seconds"]
-def _read_regular(path, label):
+def _stable_regular(path, label, *, retain_bytes):
     if not path.is_absolute():
         _fail(label + " path is not absolute")
     try:
@@ -302,23 +407,75 @@ def _read_regular(path, label):
     except OSError as exc:
         _fail(label + " open: " + str(exc))
     try:
-        before = os.fstat(fd); chunks = []
+        before = os.fstat(fd)
+        digest = hashlib.sha256()
+        chunks = [] if retain_bytes else None
         while True:
             chunk = os.read(fd, 1024 * 1024)
             if not chunk: break
-            chunks.append(chunk)
+            digest.update(chunk)
+            if chunks is not None: chunks.append(chunk)
         after, current = os.fstat(fd), os.stat(path, follow_symlinks=False)
-        stable = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
-                  before.st_ctime_ns) == (after.st_dev, after.st_ino, after.st_size,
-                  after.st_mtime_ns, after.st_ctime_ns)
+        state = lambda item: (
+            item.st_dev, item.st_ino, item.st_mode, item.st_nlink,
+            item.st_size, item.st_mtime_ns, item.st_ctime_ns,
+        )
+        stable = state(before) == state(after) == state(current)
         if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not stable
                 or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)
                 or path.resolve(strict=True) != path):
             _fail(label + " is not one stable regular file")
-        raw = b"".join(chunks)
-        return raw, {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+        return (
+            b"".join(chunks) if chunks is not None else None,
+            {"bytes": before.st_size, "sha256": digest.hexdigest()},
+            state(before),
+        )
     finally:
         os.close(fd)
+def _read_regular(path, label):
+    raw, inventory, _state = _stable_regular(
+        path, label, retain_bytes=True,
+    )
+    return raw, inventory
+def _verified_runtime_mjb(evidence_jsonl):
+    """Independently hash and load the one run-owned augmented model."""
+    contract = _plant_contract_module()
+    expected = contract.expected_plant_model_identity()["runtime_attach"][
+        "final_augmented_mjb"
+    ]
+    locator = expected["relative_locator"]
+    if (
+        type(locator) is not str
+        or not locator
+        or Path(locator).is_absolute()
+        or Path(locator).name != locator
+        or locator in (".", "..")
+    ):
+        _fail("runtime MJB relative locator")
+    root = Path(evidence_jsonl).parent
+    path = root / locator
+    _raw, inventory, state = _stable_regular(
+        path, "runtime MJB", retain_bytes=False,
+    )
+    observed = {
+        "relative_locator": locator,
+        "sha256": inventory["sha256"],
+        "size_bytes": inventory["bytes"],
+    }
+    if not _same(observed, expected):
+        _fail("runtime MJB receipt")
+    try:
+        model = _mujoco_module().MjModel.from_binary_path(str(path))
+        current = os.stat(path, follow_symlinks=False)
+    except Exception as exc:
+        _fail("runtime MJB load: " + str(exc))
+    current_state = (
+        current.st_dev, current.st_ino, current.st_mode, current.st_nlink,
+        current.st_size, current.st_mtime_ns, current.st_ctime_ns,
+    )
+    if model is None or current_state != state:
+        _fail("runtime MJB changed during load")
+    return observed
 def _read_rows(path, count, identity):
     raw, inventory = _read_regular(path, "JSONL")
     if not raw.endswith(b"\n") or b"\n\n" in raw: _fail("JSONL framing")
@@ -459,11 +616,19 @@ def _rate(numerator, denominator):
     if numerator > denominator: _fail("rate numerator exceeds denominator")
     return numerator / denominator if denominator else None
 def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_commit: str,
-            expected_run_namespace: str, snapshot_dir: Path,
+            expected_run_namespace: str, expected_plant_xml: Path, snapshot_dir: Path,
             completion_json=None) -> dict:
     if type(expected_updates) is not int or expected_updates not in (1, 5, COMPLETE_UPDATES):
         _fail("expected update count")
-    identity = _run_identity(expected_source_commit, expected_run_namespace)
+    runtime_module = _epa48_runtime_module()
+    runtime_verification = runtime_module.verify_runtime_stack_preimport()
+    runtime_stack = runtime_module.verified_runtime_stack_identity(
+        runtime_verification
+    )
+    runtime_mjb = _verified_runtime_mjb(evidence_jsonl)
+    identity = _run_identity(
+        expected_source_commit, expected_run_namespace, runtime_stack,
+        expected_plant_xml, runtime_mjb)
     complete = expected_updates == COMPLETE_UPDATES
     if snapshot_dir is None or complete != (completion_json is not None): _fail("artifact mode")
     rows, events, life, terms, outcomes, evidence = _read_rows(
@@ -508,15 +673,18 @@ def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_comm
         "last_learning_rate": rows[-1][0]["learning_rate"], "evidence_jsonl": evidence,
         "snapshot_count": len(snapshots), "snapshot_inventory": snapshots,
         "model_abi_verified": True, "optimizer_state_verified": True,
+        "runtime_mjb_verified": True,
         "completion_seal_verified": complete,
         "action_ball_full_mdp_ppo_recipe_sha256": FULL_MDP_PPO_RECIPE_SHA256,
         "action_contract": dict(ACTION_CONTRACT) if complete else None}
 def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--evidence-jsonl", type=Path, required=True); parser.add_argument("--expected-updates", type=int, default=COMPLETE_UPDATES)
     parser.add_argument("--expected-source-commit", required=True); parser.add_argument("--expected-run-namespace", required=True)
+    parser.add_argument("--expected-plant-xml", type=Path, required=True)
     parser.add_argument("--snapshot-dir", type=Path, required=True); parser.add_argument("--completion-json", type=Path); args = parser.parse_args()
     print(json.dumps(consume(args.evidence_jsonl, expected_updates=args.expected_updates,
         expected_source_commit=args.expected_source_commit,
-        expected_run_namespace=args.expected_run_namespace, snapshot_dir=args.snapshot_dir,
+        expected_run_namespace=args.expected_run_namespace,
+        expected_plant_xml=args.expected_plant_xml, snapshot_dir=args.snapshot_dir,
         completion_json=args.completion_json), sort_keys=True, separators=(",", ":"), allow_nan=False)); return 0
 if __name__ == "__main__": raise SystemExit(main())

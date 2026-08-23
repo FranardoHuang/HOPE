@@ -298,15 +298,26 @@ def test_pre_gym_accepts_only_the_two_code_owned_family_tasks(
 
 
 def _fresh_reward_config_module():
-    class _A:
-        action_ball_full_mdp_family_role = "A"
-
-    class _C:
-        action_ball_full_mdp_family_role = "C"
-
+    module_name = train_mod._FRESH_FULL_MDP_ENV_CFG_MODULE
+    a_type = type(
+        "HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg",
+        (),
+        {
+            "__module__": module_name,
+            "action_ball_full_mdp_family_role": "A",
+        },
+    )
+    c_type = type(
+        "HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg",
+        (),
+        {
+            "__module__": module_name,
+            "action_ball_full_mdp_family_role": "C",
+        },
+    )
     return types.SimpleNamespace(
-        HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg=_A,
-        HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg=_C,
+        HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg=a_type,
+        HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg=c_type,
     )
 
 

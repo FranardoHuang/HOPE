@@ -81,6 +81,38 @@ def _request(port, *, stamp=(7, 0, 2, 13, 1)):
     )
 
 
+def _direct_request(port, *, stamp=(7, 0, 2, 13, 1)):
+    shape = (port.num_envs, port.flight_capacity)
+    observe = torch.tensor(
+        [[True, False], [False, True]], dtype=torch.bool, device=port.device
+    )
+    shot_key = _direct_key(port, active=observe)
+    publication = torch.where(
+        observe,
+        torch.full(shape, 17, dtype=torch.int64, device=port.device),
+        torch.full(shape, -1, dtype=torch.int64, device=port.device),
+    )
+    state = port.read_state_env()
+    return D.ActionEpochPhysicalPostPhysicsCaptureRequest(
+        exact_stamp=stamp,
+        observe_mask=observe,
+        flight_slot=torch.arange(
+            port.flight_capacity, dtype=torch.int64, device=port.device
+        ).unsqueeze(0).expand(shape),
+        shot_key=shot_key,
+        publication_ordinal=publication,
+        observation_ordinal=torch.where(
+            observe,
+            torch.zeros(shape, dtype=torch.int64, device=port.device),
+            torch.full(shape, -1, dtype=torch.int64, device=port.device),
+        ),
+        previous_ball_center_m=state[..., :3].clone(),
+        current_state_env_f32=state,
+        _owner_identity=object(),
+        _token=object(),
+    )
+
+
 @pytest.mark.parametrize(
     "device_name",
     [
@@ -159,6 +191,28 @@ def test_owner_issued_capture_reads_scene_once_and_returns_that_exact_state(
 def test_foreign_request_cannot_omit_scene_state():
     port = _port(torch.device("cpu"))
     request = _request(port)
+    object.__setattr__(request, "current_state_env_f32", None)
+    with pytest.raises(
+        S.ActionBallFullMdpBallSceneError,
+        match="current_state_env_f32 tensor ABI",
+    ):
+        port.capture_post_physics_facts(request)
+
+
+def test_direct_scene_request_needs_no_legacy_digest_or_generation():
+    port = _port(torch.device("cpu"))
+    request = _direct_request(port)
+
+    facts = port.capture_post_physics_facts(request)
+
+    assert not hasattr(request, "full_key_sha256")
+    assert not hasattr(request, "ball_generation")
+    assert torch.equal(facts.producer_contract_fault, request.observe_mask)
+
+
+def test_foreign_direct_request_cannot_omit_scene_state():
+    port = _port(torch.device("cpu"))
+    request = _direct_request(port)
     object.__setattr__(request, "current_state_env_f32", None)
     with pytest.raises(
         S.ActionBallFullMdpBallSceneError,
@@ -384,8 +438,81 @@ def _owner_request(owner, *, stamp=(1, 0, 1, 1, 1)):
     )
 
 
+def _direct_key(owner, *, active=None, offset=0):
+    shape = (owner.num_envs, owner.flight_capacity)
+    if active is None:
+        active = torch.ones(shape, dtype=torch.bool, device=owner.device)
+    bases = {
+        "reset_generation": 1,
+        "ball_generation": 3,
+        "action_uid": 7,
+        "action_slot": 0,
+        "shot_index": 11,
+        "task_identity": 101,
+        "outcome_identity": 201,
+        "ball_identity": 301,
+    }
+    return D._row_identity.ActionEpochShotKey(
+        **{
+            name: torch.where(
+                active,
+                torch.full(
+                    shape,
+                    value + offset,
+                    dtype=torch.int64,
+                    device=owner.device,
+                ),
+                torch.full(
+                    shape, -1, dtype=torch.int64, device=owner.device
+                ),
+            ).contiguous()
+            for name, value in bases.items()
+        }
+    )
+
+
+def _direct_owner_request(owner, *, stamp=(1, 0, 1, 1, 1)):
+    shape = (owner.num_envs, owner.flight_capacity)
+    observe = owner._expected_active.detach().clone()
+    shot_key = D._row_identity.ActionEpochShotKey(
+        **{
+            name: owner._expected_action_epoch_shot_key[name].detach().clone()
+            for name in S._ACTION_EPOCH_SHOT_KEY_FIELDS
+        }
+    )
+    ordinal = torch.where(
+        observe,
+        torch.zeros(shape, dtype=torch.int64, device=owner.device),
+        torch.full(shape, -1, dtype=torch.int64, device=owner.device),
+    )
+    return D.ActionEpochPhysicalPostPhysicsCaptureRequest(
+        exact_stamp=stamp,
+        observe_mask=observe,
+        flight_slot=torch.arange(
+            owner.flight_capacity, dtype=torch.int64, device=owner.device
+        ).unsqueeze(0).expand(shape),
+        shot_key=shot_key,
+        publication_ordinal=(
+            owner._expected_action_epoch_publication_ordinal.detach().clone()
+        ),
+        observation_ordinal=ordinal,
+        previous_ball_center_m=torch.zeros(
+            shape + (3,), dtype=torch.float32, device=owner.device
+        ),
+        current_state_env_f32=torch.zeros(
+            shape + (13,), dtype=torch.float32, device=owner.device
+        ),
+        _owner_identity=object(),
+        _token=object(),
+    )
+
+
 def _capture_owner(owner, centres, *, stamp=(1, 0, 1, 1, 1)):
-    request = _owner_request(owner, stamp=stamp)
+    request = (
+        _direct_owner_request(owner, stamp=stamp)
+        if owner._action_epoch_direct_binding
+        else _owner_request(owner, stamp=stamp)
+    )
     live = torch.zeros(
         (owner.num_envs, owner.flight_capacity, 13),
         dtype=torch.float32,
@@ -397,7 +524,9 @@ def _capture_owner(owner, centres, *, stamp=(1, 0, 1, 1, 1)):
     )
 
 
-def _direct_arm(owner, *, active=None, rubber=None, key=None, generation=None):
+def _direct_arm(
+    owner, *, active=None, rubber=None, shot_key=None, publication_ordinal=None
+):
     shape = (owner.num_envs, owner.flight_capacity)
     active = (
         torch.ones(shape, dtype=torch.bool, device=owner.device)
@@ -412,23 +541,28 @@ def _direct_arm(owner, *, active=None, rubber=None, key=None, generation=None):
     rubber = torch.where(
         active, rubber, torch.full_like(rubber, S.RUBBER_INACTIVE)
     )
-    key = (
-        torch.ones(shape + (32,), dtype=torch.uint8, device=owner.device)
-        if key is None
-        else key
+    shot_key = (
+        _direct_key(owner, active=active)
+        if shot_key is None
+        else shot_key
     )
-    generation = (
-        torch.zeros(shape, dtype=torch.int64, device=owner.device)
-        if generation is None
-        else generation
+    publication_ordinal = (
+        torch.where(
+            active,
+            torch.full(shape, 17, dtype=torch.int64, device=owner.device),
+            torch.full(shape, -1, dtype=torch.int64, device=owner.device),
+        )
+        if publication_ordinal is None
+        else publication_ordinal
     )
     owner._bind_action_epoch_expected_rubber(
         active_mask=active,
         expected_rubber=rubber,
-        ball_generation=generation,
-        full_key_sha256=key,
+        shot_key=shot_key,
+        publication_ordinal=publication_ordinal,
         _installer_token=S._PHYSX_FACT_OWNER_TOKEN,
     )
+    return shot_key, publication_ordinal
 
 
 def _mark_live_subscriptions(owner):
@@ -458,14 +592,14 @@ def _mark_live_subscriptions(owner):
         ),
     ],
 )
-def test_action_epoch_direct_capture_joins_full_key_and_allows_unarmed_empty(
+def test_action_epoch_direct_capture_joins_typed_key_and_allows_unarmed_empty(
     device_name,
 ):
     owner, centres, *_ = _fact_owner(device=torch.device(device_name))
     _mark_live_subscriptions(owner)
-    request = _owner_request(owner)
     _direct_arm(owner)
-    request.full_key_sha256[0, 0, 0] = 9
+    request = _direct_owner_request(owner)
+    request.shot_key.outcome_identity[0, 0] += 1
     owner.on_post_step_heartbeat(0.005)
     facts = owner.capture(
         request=request,
@@ -489,6 +623,56 @@ def test_action_epoch_direct_capture_joins_full_key_and_allows_unarmed_empty(
     )
     assert not torch.any(no_facts.producer_contract_fault)
     assert not torch.any(no_facts.selected_contact_event)
+
+
+def test_action_epoch_direct_binding_does_not_write_legacy_identity_planes():
+    owner, centres, *_ = _fact_owner(device=torch.device("cpu"))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+    owner._expected_key.fill_(23)
+    owner._expected_generation.fill_(41)
+    legacy_key_before = owner._expected_key.clone()
+    legacy_generation_before = owner._expected_generation.clone()
+
+    _direct_arm(owner)
+
+    assert torch.equal(owner._expected_key, legacy_key_before)
+    assert torch.equal(owner._expected_generation, legacy_generation_before)
+    owner.on_post_step_heartbeat(0.005)
+    facts = _capture_owner(owner, centres)
+    assert not torch.any(facts.producer_contract_fault)
+    assert torch.equal(owner._expected_key, legacy_key_before)
+    assert torch.equal(owner._expected_generation, legacy_generation_before)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (*S._ACTION_EPOCH_SHOT_KEY_FIELDS, "publication_ordinal"),
+)
+def test_action_epoch_direct_capture_faults_each_mutated_typed_identity_field_only(
+    field_name,
+):
+    owner, _centres, *_ = _fact_owner(device=torch.device("cpu"))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+    _direct_arm(owner)
+    request = _direct_owner_request(owner)
+    if field_name == "publication_ordinal":
+        request.publication_ordinal[0, 0] += 1
+    else:
+        getattr(request.shot_key, field_name)[0, 0] += 1
+    owner.on_post_step_heartbeat(0.005)
+
+    facts = owner.capture(
+        request=request,
+        live_state=request.current_state_env_f32,
+        facts_type=D.IsaacPostPhysicsFacts,
+        stamp_type=D.PhysicsStampGrid,
+    )
+
+    expected = torch.zeros((2, 2), dtype=torch.bool)
+    expected[0, 0] = True
+    assert torch.equal(facts.producer_contract_fault, expected)
 
 
 def test_action_epoch_idle_pair_seals_heartbeat_fence_before_first_live_capture():
@@ -599,10 +783,7 @@ def test_action_epoch_activity_mask_keeps_one_dense_empty_cleanup_after_live():
         (owner.num_envs, owner.flight_capacity), dtype=torch.bool, device=owner.device
     )
     _direct_arm(owner, active=inactive)
-    empty = _owner_request(owner, stamp=(2, 0, 1, 2, 1))
-    empty.observe_mask.zero_()
-    empty.full_key_sha256.zero_()
-    empty.ball_generation.fill_(-1)
+    empty = _direct_owner_request(owner, stamp=(2, 0, 1, 2, 1))
     owner.on_post_step_heartbeat(0.005)
     owner.capture(
         request=empty,
@@ -833,12 +1014,12 @@ def test_named_mesh_requires_mesh_collision_api_and_convex_hull(
     )
 
 
-def test_full_key_change_resets_same_generation_same_face_latches():
+def test_typed_key_change_resets_same_generation_same_face_latches():
     owner, centres, ball, red, _black = _fact_owner(device=torch.device("cpu"))
     owner._diagnostic_unauthorized = False
     _mark_live_subscriptions(owner)
-    first_key = torch.ones((2, 2, 32), dtype=torch.uint8)
-    _direct_arm(owner, key=first_key)
+    first_key = _direct_key(owner)
+    _direct_arm(owner, shot_key=first_key)
     owner.on_contact_report([_Header(ball=ball[0][0], collider=red[0])], [])
     owner.on_post_step_heartbeat(0.005)
     first = _capture_owner(owner, centres)
@@ -846,8 +1027,8 @@ def test_full_key_change_resets_same_generation_same_face_latches():
     assert owner._contact_latch[0, 0]
 
     next_key = first_key.clone()
-    next_key[0, 0, 0] = 2
-    _direct_arm(owner, key=next_key)
+    next_key.outcome_identity[0, 0] += 1
+    _direct_arm(owner, shot_key=next_key)
     assert not owner._contact_latch[0, 0]
 
 

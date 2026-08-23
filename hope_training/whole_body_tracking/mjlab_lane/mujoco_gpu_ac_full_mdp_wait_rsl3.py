@@ -20,6 +20,7 @@ from pathlib import Path
 import re
 import stat
 import statistics
+import subprocess
 import sys
 import time
 
@@ -75,12 +76,66 @@ def _epa48_runtime_module():
     return module
 
 
+def _plant_contract_module():
+    """Load the dependency-free plant wire contract from this checkout."""
+
+    source = Path(__file__).with_name("mujoco_full_mdp_plant_contract.py").resolve()
+    name = "_hope_mujoco_full_mdp_plant_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached MuJoCo plant contract origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load MuJoCo plant contract")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def _canonical_mujoco_identity_module():
+    """Load the complete source-closure/model verifier from this checkout."""
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "canonical_mujoco_identity.py"
+    )
+    name = "_hope_canonical_mujoco_identity"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached canonical MuJoCo identity origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load canonical MuJoCo identity verifier")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def _mujoco_module():
+    return importlib.import_module("mujoco")
+
+
 FULL_MDP_PPO_RECIPE = (
     _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 )
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
 RSL_RL_VERSION = "3.1.2"
-COMPLETION_SCHEMA_VERSION = 4
+COMPLETION_SCHEMA_VERSION = 5
 NUM_STEPS_PER_ENV = FULL_MDP_PPO_RECIPE.num_steps_per_env
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
 FULL_A_ACTION_UID = 6907688916670928
@@ -121,22 +176,95 @@ def _require_run_identity_fields(
         raise ValueError("MuJoCo Full-A run identity differs")
 
 
+def _verified_source_checkout_commit(
+    expected_commit: str, *, repo_root: Path | None = None,
+) -> str:
+    """Measure, rather than echo, the source checkout used by the runner."""
+
+    if type(expected_commit) is not str or re.fullmatch(
+        r"[0-9a-f]{40}", expected_commit
+    ) is None:
+        raise RuntimeError("MuJoCo Full-A source checkout differs")
+    root = (
+        Path(__file__).resolve().parents[3]
+        if repo_root is None
+        else Path(repo_root)
+    )
+    try:
+        if not root.is_absolute() or root.resolve(strict=True) != root:
+            raise RuntimeError("MuJoCo Full-A source checkout differs")
+    except OSError as exc:
+        raise RuntimeError("MuJoCo Full-A source checkout differs") from exc
+
+    prefix = ["git", "--no-optional-locks", "-C", str(root)]
+
+    def read(arguments: list[str]) -> str:
+        try:
+            result = subprocess.run(
+                prefix + arguments,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+            )
+        except OSError as exc:
+            raise RuntimeError("MuJoCo Full-A source checkout differs") from exc
+        if result.returncode != 0:
+            raise RuntimeError("MuJoCo Full-A source checkout differs")
+        return result.stdout
+
+    actual = read(["rev-parse", "HEAD"]).strip()
+    status = read(["status", "--porcelain=v1", "--untracked-files=all"])
+    if actual != expected_commit or status:
+        raise RuntimeError("MuJoCo Full-A source checkout differs")
+    return actual
+
+
 def _run_identity(
     source_commit: str | None,
     run_namespace: str | None,
-    mujoco_warp_runtime: dict,
+    runtime_stack: dict,
+    plant_model: dict,
 ) -> dict:
     return {
         "source_commit": source_commit,
         "run_namespace": run_namespace,
-        "mujoco_warp_runtime": dict(mujoco_warp_runtime),
+        "runtime_stack": {
+            "schema_version": runtime_stack["schema_version"],
+            "mujoco_warp": dict(runtime_stack["mujoco_warp"]),
+            "rsl_rl": dict(runtime_stack["rsl_rl"]),
+            "mjlab": dict(runtime_stack["mjlab"]),
+        },
+        "plant_model": (
+            _plant_contract_module().clone_plant_model_identity(plant_model)
+        ),
     }
 
 
-def _bind_full_a_runtime(raw: str | None) -> dict:
+def _bind_full_a_runtime(raw: str | None, preimport_verification) -> dict:
     if type(raw) is not str or not raw:
         raise ValueError("MuJoCo Full-A runtime site is not bound")
-    return _epa48_runtime_module().bind_fresh_epa48_runtime_site(Path(raw))
+    return _epa48_runtime_module().bind_fresh_epa48_runtime_site(
+        Path(raw), preimport_verification=preimport_verification
+    )
+
+
+def _verify_full_a_runtime_postimport(runtime_stack: dict) -> None:
+    """Close the MJLab pre/post import identity before evidence construction."""
+
+    if (
+        type(runtime_stack) is not dict
+        or set(runtime_stack) != {"schema_version", "mujoco_warp", "rsl_rl", "mjlab"}
+        or type(runtime_stack.get("schema_version")) is not int
+        or runtime_stack["schema_version"] != 1
+        or type(runtime_stack.get("mjlab")) is not dict
+    ):
+        raise RuntimeError("MuJoCo Full-A runtime stack identity differs")
+    postimport = _epa48_runtime_module().verify_loaded_mjlab_runtime_modules()
+    if postimport != runtime_stack["mjlab"]:
+        raise RuntimeError("MuJoCo Full-A MJLab pre/post identity differs")
 
 
 def _stable_file_sha256(path: Path) -> str:
@@ -189,6 +317,139 @@ def _ready_pose_input() -> tuple[bytes, str]:
         raise RuntimeError("MuJoCo WAIT ready-pose path differs") from exc
     finally:
         os.close(fd)
+
+
+def _plant_xml_input() -> Path:
+    raw = os.environ.get("A3_PINGPONG_XML")
+    if not raw:
+        raise RuntimeError("MuJoCo Full-A plant XML is not bound")
+    path = Path(raw)
+    expected = _plant_contract_module().expected_plant_model_identity()
+    if (
+        not path.is_absolute()
+        or path.name != expected["source_plant"]["root_filename"]
+    ):
+        raise RuntimeError("MuJoCo Full-A plant XML path differs")
+    return path
+
+
+def _require_geometry_source_environment() -> None:
+    """Reject the legacy diagnostic override before importing the court."""
+
+    if "HOPE_GEOMETRY_PY" in os.environ:
+        raise RuntimeError(
+            "MuJoCo Full-A forbids the ambient HOPE_GEOMETRY_PY override"
+        )
+
+
+def _geometry_source_identity() -> str:
+    """Bind the geometry module that actually constructed the live court."""
+
+    contract = _plant_contract_module()
+    court = importlib.import_module("a3_court_env")
+    expected_court = Path(__file__).with_name("a3_court_env.py").resolve()
+    if Path(getattr(court, "__file__", "")).resolve() != expected_court:
+        raise RuntimeError("MuJoCo Full-A court module import origin differs")
+    try:
+        source = Path(court.geom.__source_path__)
+        digest = contract.verify_geometry_source(source)
+    except Exception as exc:
+        raise RuntimeError("MuJoCo Full-A geometry source identity differs") from exc
+    return digest
+
+
+def _scan_plant_source(path: Path) -> dict:
+    contract = _plant_contract_module()
+    canonical = _canonical_mujoco_identity_module()
+    try:
+        closure = canonical.scan_mjcf_source_closure(path)
+    except Exception as exc:
+        raise RuntimeError("MuJoCo Full-A plant source-closure scan failed") from exc
+    expected = contract.expected_plant_model_identity()["source_plant"]
+    actual = {
+        "root_path": str(closure.root_path),
+        "root_filename": closure.root_filename,
+        "root_mjcf_sha256": closure.root_mjcf_sha256,
+        "source_closure_sha256": closure.closure_sha256,
+        "source_member_count": closure.member_count,
+        "source_total_bytes": closure.total_bytes,
+    }
+    if actual != {
+        "root_path": str(path),
+        **{key: expected[key] for key in (
+            "root_filename", "root_mjcf_sha256", "source_closure_sha256",
+            "source_member_count", "source_total_bytes",
+        )},
+    }:
+        raise RuntimeError("MuJoCo Full-A plant source closure differs")
+    return actual
+
+
+def _plant_model_identity(
+    env, path: Path, before, after, augmented_mjb: dict,
+) -> dict:
+    contract = _plant_contract_module()
+    expected = contract.expected_plant_model_identity()
+    source_expected = expected["source_plant"]
+    runtime_expected = expected["runtime_attach"]
+    try:
+        env_path = Path(env.env.xml_path)
+        resolved = path.resolve(strict=True)
+        live_binding = dict(env._table_keepout.plant_identity_receipt)
+    except (AttributeError, OSError, TypeError) as exc:
+        raise RuntimeError("MuJoCo Full-A plant XML identity differs") from exc
+    binding_keys = {
+        "root_mjcf_sha256", "identity_manifest_sha256",
+        "portable_identity_sha256", "verification_receipt_sha256",
+        "owner_local_frame_sha256",
+    }
+    if (
+        not path.is_absolute()
+        or resolved != path
+        or env_path != path
+        or before != after
+        or set(live_binding) != binding_keys
+        or live_binding["root_mjcf_sha256"]
+        != source_expected["root_mjcf_sha256"]
+        or live_binding["identity_manifest_sha256"]
+        != source_expected["manifest_sha256"]
+        or live_binding["portable_identity_sha256"]
+        != source_expected["portable_identity_sha256"]
+    ):
+        raise RuntimeError("MuJoCo Full-A plant XML identity differs")
+    try:
+        policy_clock = {
+            "decimation": int(env.decimation),
+            "step_dt": float(env.step_dt),
+        }
+        naconmax = int(env.naconmax_alloc)
+        num_envs = int(env.num_envs)
+        warp_capacity = {
+            "njmax_per_world": int(env.njmax_alloc),
+            "nconmax_per_world": naconmax // num_envs,
+        }
+        if num_envs <= 0 or naconmax != warp_capacity["nconmax_per_world"] * num_envs:
+            raise RuntimeError("MuJoCo Full-A Warp capacity shape differs")
+        geometry_source_sha256 = _geometry_source_identity()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError("MuJoCo Full-A runtime plant attachment differs") from exc
+    runtime_actual = {
+        "model_scope": runtime_expected["model_scope"],
+        "contract_type": runtime_expected["contract_type"],
+        "geometry_source_sha256": geometry_source_sha256,
+        "policy_clock": policy_clock,
+        "warp_capacity": warp_capacity,
+        "final_augmented_mjb": augmented_mjb,
+    }
+    if not contract.runtime_attach_is_exact(runtime_actual):
+        raise RuntimeError("MuJoCo Full-A runtime plant attachment differs")
+    return contract.verified_plant_model_identity(
+        verification_receipt_sha256=(
+            live_binding["verification_receipt_sha256"]
+        ),
+        owner_local_frame_sha256=live_binding["owner_local_frame_sha256"],
+        final_augmented_mjb=augmented_mjb,
+    )
 
 
 def build_train_cfg() -> dict:
@@ -322,6 +583,35 @@ def _open_evidence_jsonl(raw: str | None) -> int | None:
         os.close(fd)
         raise
     return fd
+
+
+def _full_a_artifact_root(
+    evidence_jsonl: str, snapshot_dir: str | None, completion_json: str | None,
+) -> Path:
+    """Resolve the one run root used by every relative artifact locator."""
+
+    evidence = Path(evidence_jsonl)
+    root = evidence.parent
+    try:
+        row = root.lstat()
+        if (
+            not evidence.is_absolute()
+            or root.resolve(strict=True) != root
+            or not stat.S_ISDIR(row.st_mode)
+            or stat.S_ISLNK(row.st_mode)
+        ):
+            raise ValueError("MuJoCo Full-A artifact root differs")
+    except OSError as exc:
+        raise ValueError("MuJoCo Full-A artifact root differs") from exc
+    if completion_json is not None:
+        completion = Path(completion_json)
+        if not completion.is_absolute() or completion.parent != root:
+            raise ValueError("MuJoCo Full-A artifact root differs")
+    if snapshot_dir is not None:
+        snapshots = Path(snapshot_dir)
+        if not snapshots.is_absolute() or snapshots.parent != root:
+            raise ValueError("MuJoCo Full-A artifact root differs")
+    return root
 
 
 def _snapshot_root(raw: str | None) -> Path | None:
@@ -605,13 +895,26 @@ def main(
         for name in RATE_PROBE_PROFILE_ENVS
     ):
         raise ValueError("diagnostic rate probe requires profiler environment off")
+    if full_a_mode and (
+        type(mujoco_warp_runtime_site) is not str
+        or not mujoco_warp_runtime_site
+    ):
+        raise ValueError("MuJoCo Full-A runtime site is not bound")
     if full_a_mode:
         _require_run_identity_fields(source_commit, run_namespace)
-    runtime_identity = _bind_full_a_runtime(
-        mujoco_warp_runtime_site
-    ) if full_a_mode else None
-    identity = (
-        _run_identity(source_commit, run_namespace, runtime_identity)
+        _require_geometry_source_environment()
+        if not _test_allow_small_full_a:
+            source_commit = _verified_source_checkout_commit(source_commit)
+    runtime_preimport = (
+        _epa48_runtime_module().verify_runtime_stack_preimport()
+        if full_a_mode else None
+    )
+    runtime_identity = (
+        _bind_full_a_runtime(mujoco_warp_runtime_site, runtime_preimport)
+        if full_a_mode else None
+    )
+    artifact_root = (
+        _full_a_artifact_root(evidence_jsonl, snapshot_dir, completion_json)
         if full_a_mode else None
     )
 
@@ -622,6 +925,8 @@ def main(
     version, runner_type, distribution = _rsl3_runner()
     wait = _wait_module()
     ready_pose_payload, ready_pose_source = _ready_pose_input()
+    plant_path = _plant_xml_input() if full_a_mode else None
+    plant_before = _scan_plant_source(plant_path) if full_a_mode else None
     torch.manual_seed(0)
     task = wait.TaskCfg(
         episode_length_s=30.0 if full_a_mode else 3.0,
@@ -635,10 +940,33 @@ def main(
         wait.SimCfg(nworld=num_envs),
         task,
         device="cuda:0",
+        xml_path=plant_path,
         seed=0,
         ready_pose_payload=ready_pose_payload,
         ready_pose_source=ready_pose_source,
         full_a_mode=full_a_mode,
+    )
+    if full_a_mode:
+        _verify_full_a_runtime_postimport(runtime_identity)
+    plant_after = _scan_plant_source(plant_path) if full_a_mode else None
+    if full_a_mode and not _test_allow_small_full_a:
+        source_commit = _verified_source_checkout_commit(source_commit)
+    augmented_mjb = (
+        _plant_contract_module().persist_augmented_runtime_mjb(
+            _mujoco_module(), env.mj_model, artifact_root,
+        )
+        if full_a_mode else None
+    )
+    identity = (
+        _run_identity(
+            source_commit,
+            run_namespace,
+            runtime_identity,
+            _plant_model_identity(
+                env, plant_path, plant_before, plant_after, augmented_mjb,
+            ),
+        )
+        if full_a_mode else None
     )
     action_contract = env.action_contract_identity if full_a_mode else None
     observation = wait.observation_contract

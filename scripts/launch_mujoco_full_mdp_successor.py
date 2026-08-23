@@ -7,6 +7,7 @@ import argparse
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -23,12 +24,39 @@ RUNNER_RELATIVE = Path(
     "hope_training/whole_body_tracking/mjlab_lane/"
     "mujoco_gpu_ac_full_mdp_wait_rsl3.py"
 )
-ENV_UNSET = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "CONDA_PREFIX")
+PLANT_CONTRACT_RELATIVE = Path(
+    "hope_training/whole_body_tracking/mjlab_lane/"
+    "mujoco_full_mdp_plant_contract.py"
+)
+CHILD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+CHILD_LOCALE = "C.UTF-8"
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
 
 
 class LaunchError(RuntimeError):
     pass
+
+
+def _plant_contract_module():
+    """Load the dependency-free plant contract from this exact checkout."""
+    source = (REPO_ROOT / PLANT_CONTRACT_RELATIVE).resolve()
+    name = "_hope_mujoco_full_mdp_plant_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise LaunchError("cached MuJoCo plant contract origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise LaunchError("cannot load MuJoCo plant contract")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
 
 
 def _run_text(argv: list[str], label: str) -> str:
@@ -87,6 +115,24 @@ def _ready_pose(path: Path) -> Path:
     return path
 
 
+def _plant_xml(path: Path) -> Path:
+    path = _canonical_regular(path, "plant-xml")
+    try:
+        expected = _plant_contract_module().expected_plant_model_identity()
+    except Exception as exc:
+        raise LaunchError("cannot load pinned MuJoCo plant contract") from exc
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise LaunchError("cannot read plant-xml") from exc
+    if (
+        path.name != expected["source_plant"]["root_filename"]
+        or digest != expected["source_plant"]["root_mjcf_sha256"]
+    ):
+        raise LaunchError("plant-xml SHA-256 differs")
+    return path
+
+
 def _python_entry(path: Path) -> Path:
     """Validate a Python entry without resolving away its venv semantics."""
     if not path.is_absolute():
@@ -127,10 +173,11 @@ def _nearest_existing(path: Path) -> Path:
     return current
 
 
-def _validate_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
+def _validate_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path, Path, Path]:
     python = _python_entry(args.python)
     runner = _canonical_regular(REPO_ROOT / RUNNER_RELATIVE, "Full-A runner")
     ready_pose = _ready_pose(args.ready_pose)
+    plant_xml = _plant_xml(args.plant_xml)
     root = args.run_root
     if (
         not root.is_absolute()
@@ -156,7 +203,7 @@ def _validate_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path, Path]:
         raise LaunchError("expected-gpu-uuid format differs")
     if not args.lock_file.is_absolute():
         raise LaunchError("lock-file must be absolute")
-    return python, runner, ready_pose, root
+    return python, runner, ready_pose, plant_xml, root
 
 
 def _paths(root: Path) -> dict[str, Path]:
@@ -167,6 +214,11 @@ def _paths(root: Path) -> dict[str, Path]:
         "runtime_site": root / "runtime_site",
         "warp_cache": root / "warp_cache",
         "cuda_cache": root / "cuda_cache",
+        "home": root / "home",
+        "xdg_cache": root / "xdg_cache",
+        "xdg_config": root / "xdg_config",
+        "xdg_data": root / "xdg_data",
+        "xdg_state": root / "xdg_state",
         "tmp": root / "tmp",
         "pycache": root / "pycache",
         "stdout": root / "stdout.log",
@@ -190,14 +242,28 @@ def _child_argv(
 
 
 def _env_contract(
-    gpu_index: int, ready_pose: Path, paths: dict[str, Path]
+    gpu_index: int, ready_pose: Path, plant_xml: Path, paths: dict[str, Path]
 ) -> dict[str, object]:
     return {
         "set": {
+            # Construct the child environment from this closed set.  In
+            # particular, dynamic-loader, Python, CUDA and thread-control
+            # variables from the launch shell must not silently change the
+            # execution represented by one durable run identity.
+            "PATH": CHILD_PATH,
+            "HOME": str(paths["home"]),
+            "XDG_CACHE_HOME": str(paths["xdg_cache"]),
+            "XDG_CONFIG_HOME": str(paths["xdg_config"]),
+            "XDG_DATA_HOME": str(paths["xdg_data"]),
+            "XDG_STATE_HOME": str(paths["xdg_state"]),
+            "LANG": CHILD_LOCALE,
+            "LC_ALL": CHILD_LOCALE,
+            "LC_CTYPE": CHILD_LOCALE,
             "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
             "CUDA_VISIBLE_DEVICES": str(gpu_index),
             "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "A3_PINGPONG_XML": str(plant_xml),
             # Warp's compiler emits large PCH temporaries through TMPDIR.
             # Keep them off the small shared root overlay.
             "TMPDIR": str(paths["tmp"]),
@@ -211,16 +277,22 @@ def _env_contract(
             # not the launch user's ~/.cache/warp directory.
             "WARP_CACHE_PATH": str(paths["warp_cache"]),
         },
-        "unset": list(ENV_UNSET),
+        "inherit": [],
     }
 
 
 def _child_env(contract: dict[str, object]) -> dict[str, str]:
-    result = dict(os.environ)
-    for name in contract["unset"]:
-        result.pop(name, None)
-    result.update(contract["set"])
-    return result
+    if set(contract) != {"set", "inherit"} or contract["inherit"] != []:
+        raise LaunchError("child environment contract differs")
+    values = contract["set"]
+    if (
+        type(values) is not dict
+        or not values
+        or any(type(name) is not str or type(value) is not str
+               for name, value in values.items())
+    ):
+        raise LaunchError("child environment contract differs")
+    return dict(values)
 
 
 def _gpu_is_free(index: int, expected_uuid: str) -> None:
@@ -287,6 +359,11 @@ def _create_root(root: Path, paths: dict[str, Path]) -> None:
         os.mkdir(paths["snapshots"], 0o700)
         os.mkdir(paths["warp_cache"], 0o700)
         os.mkdir(paths["cuda_cache"], 0o700)
+        os.mkdir(paths["home"], 0o700)
+        os.mkdir(paths["xdg_cache"], 0o700)
+        os.mkdir(paths["xdg_config"], 0o700)
+        os.mkdir(paths["xdg_data"], 0o700)
+        os.mkdir(paths["xdg_state"], 0o700)
         os.mkdir(paths["tmp"], 0o700)
         os.mkdir(paths["pycache"], 0o700)
     except OSError as exc:
@@ -295,13 +372,19 @@ def _create_root(root: Path, paths: dict[str, Path]) -> None:
 
 def launch(args: argparse.Namespace) -> int:
     commit = _source_commit()
-    python, runner, ready_pose, root = _validate_inputs(args)
+    python, runner, ready_pose, plant_xml, root = _validate_inputs(args)
     paths = _paths(root)
     argv = _child_argv(python, runner, paths, commit, args.namespace)
-    contract = _env_contract(args.gpu_index, ready_pose, paths)
+    contract = _env_contract(args.gpu_index, ready_pose, plant_xml, paths)
     if args.dry_run:
-        print(json.dumps({"argv": argv, "env": contract}, sort_keys=True,
-                         separators=(",", ":")))
+        plant_identity = _plant_contract_module().expected_plant_model_identity()
+        print(json.dumps({
+            "argv": argv,
+            "env": contract,
+            "plant_xml": {
+                "path": str(plant_xml), "expected_identity": plant_identity,
+            },
+        }, sort_keys=True, separators=(",", ":")))
         return 0
     with _exclusive_lock(args.lock_file):
         _gpu_is_free(args.gpu_index, args.expected_gpu_uuid)
@@ -339,6 +422,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-gpu-uuid", required=True)
     parser.add_argument("--lock-file", type=Path, required=True)
     parser.add_argument("--ready-pose", type=Path, required=True)
+    parser.add_argument("--plant-xml", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

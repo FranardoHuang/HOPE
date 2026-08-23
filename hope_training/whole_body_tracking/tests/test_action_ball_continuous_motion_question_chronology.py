@@ -148,6 +148,30 @@ def _motion(device: torch.device = torch.device("cpu")) -> tuple[object, tuple]:
             command._env.scene.env_origins.to(device)
         )
         command.device = str(device)
+    body_shape = (
+        command.num_envs,
+        command.motion.body_pos_w.shape[1],
+        3,
+    )
+    quat_shape = (*body_shape[:-1], 4)
+    command._action_ball_safe_ready_body_pos_w = torch.zeros(
+        body_shape, dtype=torch.float32, device=device
+    )
+    command._action_ball_safe_ready_body_quat_w = torch.zeros(
+        quat_shape, dtype=torch.float32, device=device
+    )
+    command._action_ball_safe_ready_body_quat_w[..., 0] = 1.0
+    command._action_ball_safe_ready_reference_pending = torch.zeros(
+        command.num_envs, dtype=torch.bool, device=device
+    )
+    command._action_ball_safe_ready_pending_count = 0
+    command.body_pos_relative_w = torch.zeros(
+        body_shape, dtype=torch.float32, device=device
+    )
+    command.body_quat_relative_w = torch.zeros(
+        quat_shape, dtype=torch.float32, device=device
+    )
+    command.body_quat_relative_w[..., 0] = 1.0
     command._action_ball_continuous_episode_step.copy_(
         torch.tensor([10, 20], dtype=torch.int64, device=device)
     )

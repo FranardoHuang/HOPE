@@ -140,12 +140,16 @@ MuJoCo V2 checkpoint的mean std已从`.02`单调涨到大于`1`并伴随balance�
 保留advantage对learned std和adaptive-KL的真实控制；不叠加std clamp、decay或课程状态机。V2 checkpoint
 已经带有放大的std，故同样禁止resume，必须fresh。
 
-learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。2026-08-23的
-[`fullmdp-a-h48-v4-*`](../DEFINITIONS.md#fullmdp-correction-lineage-v4)只把MuJoCo per-update evidence升级为
-schema 4，terminal completion保持schema 4，consumer summary保持schema 3；consumer必须按exact schema
-分流，旧V3 evidence不得拿新consumer伪装兼容。schema 4除Reward/return/advantage外，还在同一次PPO前host
-reduction中检查policy/critic observation、action、value、action log-probability、old mu、old sigma全部finite，
-done严格二值且old sigma严格为正；ACK逐字段自陈这些事实。H48并不是性能豁免：每次update的
+learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。V4历史谱系的
+MuJoCo per-update evidence/terminal completion/consumer summary为exact `4/4/3`。2026-08-23的
+[`fullmdp-a-h48-v5-*`](../DEFINITIONS.md#fullmdp-optimization-lineage-v5) branch candidate必须使用exact
+`5/5/4`；consumer必须按exact schema分流，旧V3/V4 evidence不得拿新consumer伪装兼容。schema 5
+继承V4在同一次PPO前host reduction中对Reward/return/advantage、policy/critic observation、action、value、
+action log-probability、old mu、old sigma的finite/domain检查，并把独立验过的path-free
+[`run_identity.runtime_stack`](../DEFINITIONS.md#mujoco-fullmdp-runtime-stack)与
+[`run_identity.plant_model`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)带入每条ACK、completion和consumer
+重建身份；旧`mujoco_warp_runtime`被原子替换，不保留双真源；
+done仍严格二值，old sigma仍严格为正。H48并不是性能豁免：每次update的
 transition翻倍，验收统一报告transitions/s和`wall_s * 24 / H`的H24-equivalent，并保留原始wall；真实GPU
 wall、显存和学习收益未测前，任何host hash/shape测试都只能算配方闭合。
 
@@ -203,20 +207,52 @@ host/Pod diagnostic。旧r3与两条Isaac H24 run均已停止，新V2只能fresh
 
 portable MuJoCo Full-A的branch候选单次入口是`scripts/launch_mujoco_full_mdp_successor.py`。它只接受
 clean Git checkout、absent `/workspace/.../<namespace>`、canonical Python、显式GPU index/UUID与已有lock file，
-并要求[`--ready-pose`](../DEFINITIONS.md#mujoco-fullmdp-ready-pose)绑定一份canonical regular file；launcher在建run root前核固定SHA
-`ab6b7e41...8d38069`，再把同一路径显式写入child的`ACTIONBALL_READY_POSE`环境，而不是依赖启动shell的隐式状态；
-dry-run只打印固定H48 argv/env，不查GPU或建run root。真实模式持lock覆盖唯一child lifetime，等待自然rc并
+并要求[`--ready-pose`](../DEFINITIONS.md#mujoco-fullmdp-ready-pose)与
+[`--plant-xml`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)分别绑定canonical regular ready JSON和root MJCF。
+launcher在建run root前核ready SHA及plant root filename/SHA，再把两条locator显式写入child环境；runner在环境构造
+前后各核完整source closure，构造中的canonical verifier另核manifest、portable identity、base MJB/toolchain/model
+合同。launcher会从child环境删除ambient `HOPE_GEOMETRY_PY`；绕过launcher直调Full-A runner时，只要该变量
+存在，runner也会在court/MJLab/Warp import前拒绝，不能再用诊断override替换实际构造geometry。
+
+runner还在自身首次Torch/MJLab import前建立并cold verify唯一
+[`runtime_stack` v1](../DEFINITIONS.md#mujoco-fullmdp-runtime-stack)：actual EPA48与RSL3.1.2 wheel bytes、
+distribution/import winner，以及MJLab1.5.3选定193文件树必须同时命中；环境构造后再复核tree和每个loaded
+`mjlab.*` module origin，然后才允许形成run identity/ledger。pre/post payload逐字段相同，不能留下旧
+EPA-only wire或从已import module自报身份。
+
+live env构造完成后，runner核实际geometry source SHA，把已经augmented的live `env.mj_model`经private
+stage→hash/fsync→no-clobber hardlink发布为run-owned `runtime.mjb`，并逐字节核诊断预注册MJB
+`1ef4bb9e…30c0b / 72,260,546 bytes`，再独立绑定policy clock、Warp capacity与从verified base派生的
+owner-local-frame digest；完整字段见
+[`runtime_attach v2`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)。这些path-free事实进入schema-5
+ACK/completion。dry-run只打印固定H48 argv/env、plant locator与expected identity，不查GPU、建run root或
+冒充live augmented-model verification。
+真实模式持lock覆盖唯一child lifetime，等待自然rc并
 原样返回；child的cwd固定为fresh run root，使`MUJOCO_LOG.TXT`等底层fallback产物不能污染source checkout；
 没有monitor、retry、resume、signal或`ACCEPT`门。Pod1 clean detached `2e4279ba`已用真实venv
 完成dry-run，且未建root、未查GPU、未改lock；real run未闭合前仍不得把host`11 passed`或dry-run写成
 发车授权。当前`96f0ca69…` real已在GPU2运行并取得durable ACK；完整证据边界见
 [portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)。
 
+自然结束后的独立`mujoco_full_mdp_longrun_consumer.py`必须显式接收
+[`--expected-plant-xml`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)，从该locator重新执行canonical full
+verification，重建path-free `run_identity.plant_model`，再逐条对账schema-5 ACK、schema-5 completion与snapshot。
+consumer独立重算base verification receipt与owner-local-frame digest，并逐字段要求预注册geometry SHA、
+policy clock、Warp capacity和actual augmented MJB identity；在读取`runtime.mjb`或ACK之前，它还独立cold
+verify同一runtime stack，并对run-owned MJB重新hash、用MuJoCo加载一次。summary固定schema 4。不得信任producer自报的
+绝对路径，也不得把V4的`4/4/3`证据升级解释。runtime_attach v2当前只有隔离Pod CPU的`N=1/N=2`、
+两checkout路径三fresh进程byte-identical诊断预注册证据；formal N1/N2/semantic-mutation registration receipt、
+V5 exact checkout和fresh发车尚未完成。launcher、run、
+completion和consumer仍全部是fresh `diagnostic_unauthorized`，不形成formal readiness。
+
 Isaac Full-A的对应单次入口是`scripts/launch_isaac_full_mdp_successor.py`。它复用仓库现有Kit boot
 owner，不再建立第二套supervisor：从clean Git固定同一typed H48 argv，核exact IsaacLab、Kit Python、
 RSL wheel与A3 USD，先取得目标GPU的nonblocking lifetime lock，再核index→UUID和empty compute-app，最后
 才创建fresh run root。fd16 runtime receipt、fd18 sealed RSL archive与GPU lock由唯一child继承；训练child
 通过`/usr/bin/env -i`获得窄runtime环境，避免Kit launcher的环境清洗丢失attestation输入。
+当前exact Pod调用中，`--isaac-python`是`/workspace/isaacsim-5.1.0/python.sh`，而
+`--kit-python`必须是`/workspace/isaacsim-5.1.0/kit/python/bin/python3`；两者用途不同，不能用前者路径
+替代后者的Kit runtime attestation。
 
 fresh root还必须拥有`home`、`cuda_cache`、`xdg_cache/config/data/state`、`tmp`、`pycache`与`training`；
 launcher/child分别把`HOME`、四个`XDG_*`、`CUDA_CACHE_PATH`、`TMPDIR`和`PYTHONPYCACHEPREFIX`钉到这些目录。

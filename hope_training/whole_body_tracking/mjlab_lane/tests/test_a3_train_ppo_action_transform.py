@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+import warnings
 
 import numpy as np
 import pytest
@@ -151,7 +152,7 @@ def _plant_env(n, width, actuator_from_runtime=None):
     env.sim = _FakeSim(n, width)
     env._qpos_act = lambda: env.sim.data.qpos
     env._qvel_act = lambda: env.sim.data.qvel
-    env._after_physics_substep = lambda _index: None
+    env._after_physics_substep = lambda _index, _contact_census: None
     env._contact_ok = False
     env._cap_ok = False
     env._state = lambda: {"sentinel": True}
@@ -159,6 +160,33 @@ def _plant_env(n, width, actuator_from_runtime=None):
     env.ball_age_buf = torch.zeros(n, dtype=torch.long)
     env.common_step_counter = 0
     return env
+
+
+def test_advance_plant_shares_exactly_one_contact_census_per_substep():
+    env = _plant_env(2, 3)
+    env.decimation = 4
+    env._contact_ok = True
+    censuses = [object() for _ in range(env.decimation)]
+    probe_calls = []
+    consumed = []
+
+    def probe():
+        census = censuses[len(probe_calls)]
+        probe_calls.append(census)
+        return census
+
+    def consume(substep_index, census):
+        consumed.append((substep_index, census))
+
+    env._probe_contacts = probe
+    env._after_physics_substep = consume
+    train.A3ReadyBallVecEnv._advance_plant(
+        env, torch.zeros((env.num_envs, env.num_actions))
+    )
+
+    assert env.sim.step_calls == env.decimation
+    assert probe_calls == censuses
+    assert consumed == list(enumerate(censuses))
 
 
 def test_runtime_decoder_has_one_unclipped_ctrl_scatter_owner():
@@ -275,6 +303,23 @@ def test_contract_and_all_31_one_hot_name_columns_are_exact(monkeypatch):
         runtime_tau[runtime_index] = 1.0
         actuator_tau = runtime_tau[actuator_from_runtime]
         assert np.flatnonzero(actuator_tau).tolist() == [int(actuator_index)]
+
+
+def test_readonly_permutation_tensor_is_an_owned_warning_free_snapshot():
+    source = np.arange(31, dtype=np.int64)
+    source.setflags(write=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        tensor = train._tensor_from_owned_numpy(
+            torch, source, dtype=torch.long, device=torch.device("cpu")
+        )
+
+    assert not source.flags.writeable
+    assert tensor.dtype == torch.long
+    assert tensor.data_ptr() != source.ctypes.data
+    source.setflags(write=True)
+    source[0] = 99
+    assert tensor[0].item() == 0
 
 
 def test_runtime_action_wiring_rejects_wrong_contract_bytes(

@@ -28,9 +28,44 @@ FullMDP child的canonical目录，令checkpoint、WAL和training contract归属�
 JSON文件；launcher与child都核固定SHA `ab6b7e41...8d38069`，并由launcher显式设置
 `ACTIONBALL_READY_POSE`。它消除外层shell的隐藏依赖，不是课程Gate、学习成绩或安全授权。
 
+<a id="mujoco-fullmdp-runtime-stack"></a>
+**portable MuJoCo FullMDP `runtime_stack` / 实际执行代码栈身份**：schema v1的path-free durable identity，
+与[`plant_model`](#mujoco-fullmdp-plant-binding)正交。它只包含三份执行真源：exact EPA48 MuJoCo-Warp
+wheel/runtime、`rsl-rl-lib==3.1.2` wheel（SHA
+`406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d`）和`mjlab==1.5.3`选定
+193文件、`1,399,177` bytes的installed tree（SHA `88c9725d...`）。旧`mujoco_warp_runtime`字段被原子
+替换，不保留双真源。runner在Torch/MJLab首次import前cold verify wheels/tree，env后再核所有loaded
+`mjlab.*` module；consumer在读取`runtime.mjb`或ACK前独立执行同一验证。它防正常环境漂移，不是hostile
+filesystem原子安全证明，也不授权physics parity、训练成功或部署。
+
+<a id="mujoco-fullmdp-plant-binding"></a>
+**portable MuJoCo FullMDP `--plant-xml` / `--expected-plant-xml` / plant定位与身份分层**：
+`--plant-xml`是one-shot launcher必填的绝对、canonical regular root MJCF定位器，launcher将它显式
+绑定到child的`A3_PINGPONG_XML`；`--expected-plant-xml`是独立consumer必填的复验locator，
+consumer将其归一为canonical absolute path后重新执行full verification。绝对路径只回答“这次从哪里读”，不进durable
+`run_identity.plant_model`；因此搬迁后仍能以同一份内容身份独立复验，不能拿原路径字符串伪造一致。
+
+durable plant identity只有两层：`source_plant`表示pre-registered vendor base，绑定已钉manifest、
+portable identity、root/完整source closure、base compiled MJB、compiler toolchain与model-contract
+摘要及实际`verification_receipt_sha256`；`runtime_attach` v2才表示MJLab加入court/ball后的实际runtime。
+后者最小且完整地绑定geometry source SHA
+`df71f12a21fedb4b8caed182906288f573b2f05c731441a5f529996baaf056b2`、policy clock
+`decimation=20 / step_dt=0.02`、Warp allocation capacity
+`njmax_per_world=572 / nconmax_per_world=128`、实际augmented model保存出的MJB
+`sha256=1ef4bb9e52b0b46afd422d2fe712ae38628853a1704b324b20a8ec3f26030c0b /
+size_bytes=72,260,546`，以及从exact verified base独立派生的`owner_local_frame_sha256`。
+
+该augmented MJB已在隔离Pod CPU上用`N=1`与`N=2`、两个绝对checkout路径、三个fresh进程构造，
+三份bytes完全一致；实测保存内容覆盖cone、contact pairs、spawn、MuJoCo options与model counts。
+Warp allocation capacity不存进MJB，所以必须作为独立字段绑定，不能靠MJB摘要推断。base MJB也不得被
+错写成augmented runtime MJB。runner把live `env.mj_model`经private stage→hash/fsync→no-clobber hardlink
+发布为run-owned `runtime.mjb`，consumer先独立hash/加载再读ACK。以上只是diagnostic pre-registration与消费
+身份；formal N1/N2和semantic-mutation registration receipt、V5 exact checkout/fresh发车仍未闭合，更不代签
+physics parity、训练成功、formal promotion或部署。
+
 <a id="mujoco-fullmdp-longrun-flags"></a>
 **portable MuJoCo FullMDP长跑flags**：[`--full-a`](#mujoco-fullmdp-longrun-flags)选择portable
-26-event engineering surface，而不是历史WAIT环境或业务Full-A成功声明；其中
+30-event engineering surface，而不是历史WAIT环境或业务Full-A成功声明；其中
 `completed_action_epoch`只由同一env行真实闭合launch/selected contact/fault-free physically-valid
 R03/fault-free eligible+source-valid R06/exact 68-cell R07/natural RETIRE时原子发布，
 禁止用跨env边际计数拼出业务完成；
@@ -42,8 +77,9 @@ exclusive写入的completion seal；[`--source-commit`](#mujoco-fullmdp-longrun-
 [`--run-namespace`](#mujoco-fullmdp-longrun-flags)把ACK、snapshot和seal绑定到同一fresh源码与运行身份；
 [`--mujoco-warp-runtime-site`](#mujoco-fullmdp-longrun-flags)是Full-A专用的MuJoCo-Warp/RSL-RL
 隔离导入目录：caller必须传一个绝对、父目录已存在且本身尚不存在的fresh路径；正常Full-A CLI中，
-binder会在runner自身的Torch、RSL-RL、WAIT或MJLab import之前把两枚已钉wheel解到同一site并核import winner；它不是可复用venv或
-任意`PYTHONPATH`。binder不读取Git，也不自报`source_commit`；未来launcher必须先从clean Git truth
+binder会在runner自身的Torch、RSL-RL、WAIT或MJLab import之前把两枚已钉wheel解到同一site并核import winner，
+同时cold verify现役venv的MJLab选定树；它不是可复用venv或任意`PYTHONPATH`。binder不读取Git，也不自报
+`source_commit`；launcher必须先从clean Git truth
 取得commit再通过前一flag显式传入。恢复与调用边界见
 [`setup_local_sync.md`](operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)；
 [`--save-interval=500`](#mujoco-fullmdp-longrun-flags)是当前typed recipe固定的500轮快照周期，另在自然终点
@@ -77,11 +113,19 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   无条件噪声奖励，不增加iteration/phase schedule、clamp或新Gate。学习配方hash不含总预算/保存频率，完整执行hash
   另含二者；详细值以typed recipe为准。`H=48`是算法取舍和当前合同，不是“每update 6秒”的性能承诺。
 - <a id="fullmdp-correction-lineage-v4"></a>**`fullmdp-a-h48-v4-*` / FullMDP第四批实现纠错lineage**：
-  2026-08-23在V3真实训练与结构审计后计划启动的fresh-only namespace族，用来验证one-shot Reward、exact launch、
+  2026-08-23在V3真实训练与结构审计后启动的fresh-only namespace族，用来验证one-shot Reward、exact launch、
   四次episode内可完成cadence、完整rollout有限性和run-owned cache/lock等实现修复。这里的`v4`只编号fresh
   source/run谱系；学习算法仍是[`action_ball_full_mdp_ppo_v3`](#fullmdp-ppo-v3)，Observation仍是203/219 V2，
   不表示PPO V4、课程第四阶段、checkpoint兼容、promotion或部署授权。每个失败root/namespace一次性消费，
   修复后必须新commit、新root、新namespace，不得hot-patch、retry或resume。
+- <a id="fullmdp-optimization-lineage-v5"></a>**`fullmdp-a-h48-v5-*` / FullMDP第五批热路与plant合同branch candidate**：
+  2026-08-23基于V4继续的fresh-only诊断候选谱系；只收窄不改学习语义的hot-path减法与
+  [`plant定位/身份分层`](#mujoco-fullmdp-plant-binding)，PPO仍是V3 H48，Observation仍是203/219 V2。
+  MuJoCo per-update evidence/terminal completion/consumer summary版本分别是exact `5/5/4`；新版本携带
+  path-free [`runtime_stack`](#mujoco-fullmdp-runtime-stack)与plant identity，不与V4的`4/4/3`伪兼容。
+  V5也修合法payment-before-close、launch-before-playback、exact publication join、具名row fault及negative-face
+  normal，并删除可证伪的热路冗余。`v5`只是source/run lineage编号，不是
+  PPO V5、已采用配方、ready结论、promotion或真机授权；exact Pod fresh real运行未闭合前只能称branch candidate。
 - <a id="fullmdp-ppo-v2"></a>**`action_ball_full_mdp_ppo_v2` / FullMDP统一PPO V2历史配方**：与V3的
   H48、预算、GAE和optimizer分组相同，但使用永久`entropy_coef=.01`；已由V3取代，只用于解释历史run，
   不得resume或作为当前学习证据。

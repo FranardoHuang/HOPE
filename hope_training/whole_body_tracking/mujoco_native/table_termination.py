@@ -17,6 +17,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -43,7 +44,7 @@ ISAAC_TERMINATION_CALLABLES = (
     "whole_body_tracking/tasks/tracking/mdp/terminations.py"
 )
 EXPECTED_ISAAC_TERMINATION_CALLABLES_SEMANTIC_AST_SHA256 = (
-    "cb6b91f9e93e7fef5464bca51f3cea2210acb41ec58e1e0817ffe7b07368a28b"
+    "b90dc5ee5ee932ec449bb4caefe4fe4006d4bcf9a8a5f0cbede91b8e2aca806c"
 )
 #: Hoisted so the re-pin helpers in the tests read the live selector list
 #: instead of keeping a fourth hand-copy of it.  A selector added here is
@@ -729,6 +730,37 @@ def _assert_owner_frame_contract_equal(
         )
 
 
+def consume_verified_owner_frame_contract(
+    mujoco: Any, verified_identity: Any
+) -> dict[str, Any]:
+    """Derive owner-frame identity from one already-verified base model.
+
+    The canonical verifier owns compilation and its before/after unchanged
+    checks.  Consumers use this narrow adapter so they do not compile the same
+    72 MB plant a second time or reimplement the 32-body projection.
+    """
+
+    consume = getattr(verified_identity, "consume_verified_model", None)
+    if not callable(consume):
+        raise TableTerminationContractError(
+            "verified MuJoCo identity cannot expose its checked model"
+        )
+    contract = consume(lambda model: _owner_frame_contract(mujoco, model))
+    if (
+        not isinstance(contract, Mapping)
+        or contract.get("kind")
+        != "a3_table_collision_owner_local_frame_contract_v1"
+        or not isinstance(contract.get("body_rows"), list)
+        or len(contract["body_rows"]) != len(TABLE_CONTACT_BODY_NAMES)
+        or not isinstance(contract.get("content_sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", contract["content_sha256"]) is None
+    ):
+        raise TableTerminationContractError(
+            "verified MuJoCo owner-local frame contract is malformed"
+        )
+    return dict(contract)
+
+
 def _load_canonical_identity_module() -> Any:
     verifier_sha = _sha256_file(
         CANONICAL_MUJOCO_IDENTITY_PY, "canonical MuJoCo identity verifier"
@@ -772,9 +804,7 @@ def _verified_registered_owner_frames(
         raise TableTerminationContractError(
             "portable MuJoCo plant identity SHA-256 drifted"
         )
-    frames = verified.consume_verified_model(
-        lambda base_model: _owner_frame_contract(mujoco, base_model)
-    )
+    frames = consume_verified_owner_frame_contract(mujoco, verified)
     return (
         frames,
         verified.portable_identity_sha256,
@@ -1387,6 +1417,7 @@ __all__ = [
     "TABLE_GUARD_MARGIN_M",
     "TableTerminationContractError",
     "bind_pre_registered_owner_frames",
+    "consume_verified_owner_frame_contract",
     "geometric_robot_table_hit",
     "live_isaac_constant_blockers",
     "load_collision_components",

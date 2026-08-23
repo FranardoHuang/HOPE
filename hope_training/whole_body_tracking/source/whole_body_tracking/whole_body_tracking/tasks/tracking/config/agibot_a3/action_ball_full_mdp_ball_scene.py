@@ -69,6 +69,16 @@ POSTPHYSICS_CAPTURE_HOLD_REASONS = (
 RUBBER_INACTIVE = -1
 RUBBER_RED = 0
 RUBBER_BLACK = 1
+_ACTION_EPOCH_SHOT_KEY_FIELDS = (
+    "reset_generation",
+    "ball_generation",
+    "action_uid",
+    "action_slot",
+    "shot_index",
+    "task_identity",
+    "outcome_identity",
+    "ball_identity",
+)
 CALLBACK_ORDER_CONTACT_BEFORE_HEARTBEAT = "contact_before_post_step_heartbeat"
 CALLBACK_ORDER_HEARTBEAT_BEFORE_CONTACT = "post_step_heartbeat_before_contact"
 CALLBACK_ORDER_SAME_STEP_CHRONOLOGY = "same_step_event_chronology"
@@ -998,6 +1008,15 @@ class IsaacPhysxBallFactOwner:
         self._expected_generation = torch.full(
             shape, -1, dtype=torch.int64, device=self.device
         )
+        self._expected_action_epoch_shot_key = {
+            name: torch.full(
+                shape, -1, dtype=torch.int64, device=self.device
+            )
+            for name in _ACTION_EPOCH_SHOT_KEY_FIELDS
+        }
+        self._expected_action_epoch_publication_ordinal = torch.full(
+            shape, -1, dtype=torch.int64, device=self.device
+        )
         self._bound_authority: ExpectedRubberAuthorityView | None = None
         self._bound_projection_sha256: str | None = None
         self._previous_center = torch.zeros(
@@ -1182,11 +1201,11 @@ class IsaacPhysxBallFactOwner:
         *,
         active_mask: object,
         expected_rubber: object,
-        ball_generation: object,
-        full_key_sha256: object,
+        shot_key: object,
+        publication_ordinal: object,
         _installer_token: object,
     ) -> None:
-        """Bind exact owner-joined face truth without legacy digest carriers."""
+        """Bind exact owner-joined face truth from the typed direct identity."""
 
         import torch
 
@@ -1208,29 +1227,52 @@ class IsaacPhysxBallFactOwner:
             dtype=torch.int8,
             label="expected_rubber",
         )
-        generation = self._tensor(
-            ball_generation,
+        key_fields = {
+            name: self._tensor(
+                getattr(shot_key, name, None),
+                shape=shape,
+                dtype=torch.int64,
+                label="shot_key." + name,
+            )
+            for name in _ACTION_EPOCH_SHOT_KEY_FIELDS
+        }
+        if any(not value.is_contiguous() for value in key_fields.values()):
+            raise ActionBallFullMdpBallSceneError(
+                "ActionEpoch shot_key tensor ABI differs"
+            )
+        publication = self._tensor(
+            publication_ordinal,
             shape=shape,
             dtype=torch.int64,
-            label="ball_generation",
+            label="publication_ordinal",
         )
-        full_key = self._tensor(
-            full_key_sha256,
-            shape=shape + (32,),
-            dtype=torch.uint8,
-            label="full_key_sha256",
+        key_valid = (
+            key_fields["reset_generation"].ge(0)
+            & key_fields["ball_generation"].ge(0)
+            & key_fields["action_uid"].gt(0)
+            & key_fields["action_slot"].ge(0)
+            & key_fields["shot_index"].gt(0)
+            & key_fields["task_identity"].gt(0)
+            & key_fields["outcome_identity"].gt(0)
+            & key_fields["ball_identity"].gt(0)
         )
         bad = (
             active
             & (rubber != RUBBER_RED)
             & (rubber != RUBBER_BLACK)
-        ) | (~active & (rubber != RUBBER_INACTIVE)) | (active & (generation < 0)) | (
-            active & torch.eq(full_key, 0).all(dim=-1)
+        ) | (~active & (rubber != RUBBER_INACTIVE)) | (
+            active & (~key_valid | publication.lt(0))
         )
+        identity_match = publication.eq(
+            self._expected_action_epoch_publication_ordinal
+        )
+        for name in _ACTION_EPOCH_SHOT_KEY_FIELDS:
+            identity_match &= key_fields[name].eq(
+                self._expected_action_epoch_shot_key[name]
+            )
         new_identity = active & (
             ~self._expected_active
-            | ~torch.eq(full_key, self._expected_key).all(dim=-1)
-            | (generation != self._expected_generation)
+            | ~identity_match
             | (rubber != self._expected_rubber)
         )
         reset = new_identity | ~active
@@ -1243,8 +1285,9 @@ class IsaacPhysxBallFactOwner:
         self._binding_fault.copy_(bad)
         self._expected_active.copy_(active)
         self._expected_rubber.copy_(rubber)
-        self._expected_generation.copy_(generation)
-        self._expected_key.copy_(full_key)
+        for name in _ACTION_EPOCH_SHOT_KEY_FIELDS:
+            self._expected_action_epoch_shot_key[name].copy_(key_fields[name])
+        self._expected_action_epoch_publication_ordinal.copy_(publication)
         self._action_epoch_idle_binding = False
         self._action_epoch_direct_binding = True
 
@@ -1735,18 +1778,6 @@ class IsaacPhysxBallFactOwner:
             dtype=torch.float32,
             label="live state",
         )[..., :3]
-        key = self._tensor(
-            getattr(request, "full_key_sha256", None),
-            shape=shape + (32,),
-            dtype=torch.uint8,
-            label="request full_key_sha256",
-        )
-        generation = self._tensor(
-            getattr(request, "ball_generation", None),
-            shape=shape,
-            dtype=torch.int64,
-            label="request ball_generation",
-        )
         exact = getattr(request, "exact_stamp", None)
         if self._action_epoch_idle_binding:
             raise ActionBallFullMdpBallSceneError(
@@ -1757,6 +1788,46 @@ class IsaacPhysxBallFactOwner:
             and self._bound_projection_sha256 is not None
         )
         authority_bound = legacy_bound or self._action_epoch_direct_binding
+        if self._action_epoch_direct_binding:
+            request_shot_key = getattr(request, "shot_key", None)
+            request_key_fields = {
+                name: self._tensor(
+                    getattr(request_shot_key, name, None),
+                    shape=shape,
+                    dtype=torch.int64,
+                    label="request shot_key." + name,
+                )
+                for name in _ACTION_EPOCH_SHOT_KEY_FIELDS
+            }
+            request_publication = self._tensor(
+                getattr(request, "publication_ordinal", None),
+                shape=shape,
+                dtype=torch.int64,
+                label="request publication_ordinal",
+            )
+            identity_match = request_publication.eq(
+                self._expected_action_epoch_publication_ordinal
+            )
+            for name in _ACTION_EPOCH_SHOT_KEY_FIELDS:
+                identity_match &= request_key_fields[name].eq(
+                    self._expected_action_epoch_shot_key[name]
+                )
+        else:
+            key = self._tensor(
+                getattr(request, "full_key_sha256", None),
+                shape=shape + (32,),
+                dtype=torch.uint8,
+                label="request full_key_sha256",
+            )
+            generation = self._tensor(
+                getattr(request, "ball_generation", None),
+                shape=shape,
+                dtype=torch.int64,
+                label="request ball_generation",
+            )
+            identity_match = torch.eq(key, self._expected_key).all(dim=-1) & (
+                generation == self._expected_generation
+            )
         if (
             type(exact) is not tuple
             or len(exact) != 5
@@ -1772,8 +1843,7 @@ class IsaacPhysxBallFactOwner:
         control, substep, _decimation, _sim_step, _phase = exact
         identity_fault = observe & (
             ~self._expected_active
-            | ~torch.eq(key, self._expected_key).all(dim=-1)
-            | (generation != self._expected_generation)
+            | ~identity_match
         )
         unbound_fault = observe & ~torch.full(
             shape,
@@ -3095,6 +3165,17 @@ class IsaacLabPhysicalFlightScenePort:
                 "exact Physical/Racket face projection is unavailable"
             ) from exc
         shape = (self.num_envs, self.flight_capacity)
+        try:
+            shot_key = physical_module._row_identity.require_action_epoch_shot_key(
+                getattr(physical, "shot_key", None),
+                shape=shape,
+                device=self.device,
+                label="scene Physical allocation shot_key",
+            )
+        except BaseException as exc:
+            raise ActionBallFullMdpBallSceneError(
+                "Physical allocation typed shot key differs"
+            ) from exc
         if (
             type(physical)
             is not physical_module.ActionEpochPhysicsFactAllocationProjection
@@ -3117,14 +3198,10 @@ class IsaacLabPhysicalFlightScenePort:
             or tuple(racket.expected_rubber.shape) != shape
             or racket.expected_rubber.dtype != torch.int8
             or racket.expected_rubber.device != self.device
-            or type(physical.ball_generation) is not torch.Tensor
-            or tuple(physical.ball_generation.shape) != shape
-            or physical.ball_generation.dtype != torch.int64
-            or physical.ball_generation.device != self.device
-            or type(physical.full_key_sha256) is not torch.Tensor
-            or tuple(physical.full_key_sha256.shape) != shape + (32,)
-            or physical.full_key_sha256.dtype != torch.uint8
-            or physical.full_key_sha256.device != self.device
+            or type(physical.publication_ordinal) is not torch.Tensor
+            or tuple(physical.publication_ordinal.shape) != shape
+            or physical.publication_ordinal.dtype != torch.int64
+            or physical.publication_ordinal.device != self.device
         ):
             raise ActionBallFullMdpBallSceneError(
                 "Physical allocation and Racket selected face do not join"
@@ -3143,8 +3220,8 @@ class IsaacLabPhysicalFlightScenePort:
         fact_owner._bind_action_epoch_expected_rubber(
             active_mask=physical.active_mask,
             expected_rubber=expected,
-            ball_generation=physical.ball_generation,
-            full_key_sha256=physical.full_key_sha256,
+            shot_key=shot_key,
+            publication_ordinal=physical.publication_ordinal,
             _installer_token=_PHYSX_FACT_OWNER_TOKEN,
         )
 
@@ -3211,11 +3288,12 @@ class IsaacLabPhysicalFlightScenePort:
     def capture_post_physics_facts(self, request: object):
         """Capture the provable part of the exact Physical postphysics ABI.
 
-        The caller-owned request already binds the Physical slot/key/generation/
-        ordinal image.  This concrete port joins its current post-scene-update
-        K-body root state to that retained image without a device-to-host
-        transfer; key/generation/ordinal remain Physical-owner facts, not an
-        independent scene proof.  The current scene has no exact contact/net/table/overflow fact
+        The caller-owned request already binds either the legacy digest image
+        or the ActionEpoch typed shot-key/publication image.  This concrete
+        port joins its current post-scene-update K-body root state to that
+        retained image without a device-to-host transfer; identity remains a
+        Physical-owner fact, not an independent scene proof.  The current
+        scene has no exact contact/net/table/overflow fact
         producers, so every observed live row is explicitly marked as a producer
         contract fault.  The pinned robot merges both rubbers and the handle
         into one wrist body, so a ball-wrist report is not selected-rubber
@@ -3227,16 +3305,26 @@ class IsaacLabPhysicalFlightScenePort:
         import torch
 
         physical_module = sys.modules.get(type(request).__module__)
-        request_type = getattr(
+        legacy_request_type = getattr(
             physical_module, "PhysicalPostPhysicsCaptureRequest", None
+        )
+        action_epoch_request_type = getattr(
+            physical_module,
+            "ActionEpochPhysicalPostPhysicsCaptureRequest",
+            None,
         )
         facts_type = getattr(physical_module, "IsaacPostPhysicsFacts", None)
         stamp_type = getattr(physical_module, "PhysicsStampGrid", None)
+        action_epoch_direct = type(request) is action_epoch_request_type
         if (
-            request_type is None
+            legacy_request_type is None
+            or action_epoch_request_type is None
             or facts_type is None
             or stamp_type is None
-            or type(request) is not request_type
+            or (
+                type(request) is not legacy_request_type
+                and not action_epoch_direct
+            )
         ):
             raise ActionBallFullMdpBallSceneError(
                 "postphysics request is not the exact Physical owner ABI"
@@ -3281,12 +3369,36 @@ class IsaacLabPhysicalFlightScenePort:
 
         observe = exact_tensor("observe_mask", suffix=(), dtype=torch.bool)
         flight_slot = exact_tensor("flight_slot", suffix=(), dtype=torch.int64)
-        full_key = exact_tensor(
-            "full_key_sha256", suffix=(32,), dtype=torch.uint8
+        direct_identity_fault = torch.zeros(
+            shape, dtype=torch.bool, device=self.device
         )
-        generation = exact_tensor(
-            "ball_generation", suffix=(), dtype=torch.int64
-        )
+        if action_epoch_direct:
+            row_identity = getattr(physical_module, "_row_identity", None)
+            try:
+                shot_key = row_identity.require_action_epoch_shot_key(
+                    getattr(request, "shot_key", None),
+                    shape=shape,
+                    device=self.device,
+                    label="scene direct postphysics shot_key",
+                )
+            except BaseException as exc:
+                raise ActionBallFullMdpBallSceneError(
+                    "postphysics request shot_key tensor ABI differs"
+                ) from exc
+            publication = exact_tensor(
+                "publication_ordinal", suffix=(), dtype=torch.int64
+            )
+            direct_identity_fault = observe & (
+                ~row_identity.action_epoch_shot_key_valid(shot_key)
+                | publication.lt(0)
+            )
+        else:
+            full_key = exact_tensor(
+                "full_key_sha256", suffix=(32,), dtype=torch.uint8
+            )
+            generation = exact_tensor(
+                "ball_generation", suffix=(), dtype=torch.int64
+            )
         ordinal = exact_tensor(
             "observation_ordinal", suffix=(), dtype=torch.int64
         )
@@ -3324,8 +3436,15 @@ class IsaacLabPhysicalFlightScenePort:
         # event producers are bound, ``observe`` below faults every live row.
         request_self_consistency_fault = (
             (flight_slot != expected_slot)
-            | (observe & torch.eq(full_key, 0).all(dim=-1))
-            | (observe & (generation < 0))
+            | direct_identity_fault
+            | (
+                torch.zeros(shape, dtype=torch.bool, device=self.device)
+                if action_epoch_direct
+                else (
+                    (observe & torch.eq(full_key, 0).all(dim=-1))
+                    | (observe & (generation < 0))
+                )
+            )
             | (observe & (ordinal < 0))
             | (
                 torch.zeros(shape, dtype=torch.bool, device=self.device)

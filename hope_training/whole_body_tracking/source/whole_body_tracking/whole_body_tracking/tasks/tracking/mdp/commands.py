@@ -120,6 +120,71 @@ def _stand_start_yaw_samples(yaw_range, count: int, device):
         return torch.full((count,), yaw_lo, device=device)
     return sample_uniform(yaw_lo, yaw_hi, (count,), device)
 
+
+def _motion_anchor_relative_body_transform(
+    anchor_pos_w: torch.Tensor,
+    anchor_quat_w: torch.Tensor,
+    robot_anchor_pos_w: torch.Tensor,
+    robot_anchor_quat_w: torch.Tensor,
+    body_pos_w: torch.Tensor,
+    body_quat_w: torch.Tensor,
+    *,
+    expected_body_count: int | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Re-anchor body poses with one rigid transform per environment.
+
+    The transform is independent of the tracked-body index. Keep that value
+    at ``[N, *]`` until the IsaacLab quaternion kernels require matching
+    ``[N, B, *]`` shapes, then use zero-stride views rather than materializing
+    four repeated anchor tensors. Inputs are never mutated.
+    """
+
+    if body_pos_w.ndim != 3 or body_pos_w.shape[2] != 3:
+        raise ValueError(
+            "motion anchor tensor shape differs from the configured body layout"
+        )
+    batch_size = body_pos_w.shape[0]
+    body_count = body_pos_w.shape[1]
+    if (
+        body_quat_w.ndim != 3
+        or tuple(body_quat_w.shape) != (batch_size, body_count, 4)
+        or tuple(anchor_pos_w.shape) != (batch_size, 3)
+        or tuple(anchor_quat_w.shape) != (batch_size, 4)
+        or tuple(robot_anchor_pos_w.shape) != (batch_size, 3)
+        or tuple(robot_anchor_quat_w.shape) != (batch_size, 4)
+        or (
+            expected_body_count is not None
+            and body_count != expected_body_count
+        )
+    ):
+        raise ValueError(
+            "motion anchor tensor shape differs from the configured body layout"
+        )
+
+    delta_pos_w = robot_anchor_pos_w.clone()
+    delta_pos_w[..., 2] = anchor_pos_w[..., 2]
+    delta_ori_w = yaw_quat(
+        quat_mul(robot_anchor_quat_w, quat_inv(anchor_quat_w))
+    )
+    delta_pos_w_by_body = delta_pos_w[:, None, :].expand(
+        -1, body_count, -1
+    )
+    delta_ori_w_by_body = delta_ori_w[:, None, :].expand(
+        -1, body_count, -1
+    )
+    anchor_pos_w_by_body = anchor_pos_w[:, None, :].expand(
+        -1, body_count, -1
+    )
+    return (
+        quat_mul(delta_ori_w_by_body, body_quat_w),
+        delta_pos_w_by_body
+        + quat_apply(
+            delta_ori_w_by_body,
+            body_pos_w - anchor_pos_w_by_body,
+        ),
+    )
+
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -135,6 +200,35 @@ _ACTION_BALL_RUNTIME_MODULE = None
 ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE = 0
 ACTION_BALL_CONTINUOUS_MOTION_CLOSE_PLAYED_SUFFIX = 1
 ACTION_BALL_CONTINUOUS_MOTION_CLOSE_UNPLAYED = 2
+
+# ActionEpoch owns the packed fault namespace and validates these values again
+# when the exact Motion owner is construction-bound.  Motion keeps only the
+# four producer-side constants needed to avoid a hot import in each tick.
+_ACTION_EPOCH_ROW_FAULT_MOTION_CADENCE_OVERDUE = 1 << 23
+_ACTION_EPOCH_ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW = 1 << 24
+_ACTION_EPOCH_ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT = 1 << 25
+_ACTION_EPOCH_ROW_FAULT_MOTION_TASK_TIMING_CONTRACT = 1 << 26
+_ACTION_EPOCH_MOTION_ROW_FAULT_BINDINGS = (
+    (
+        "ROW_FAULT_MOTION_CADENCE_OVERDUE",
+        _ACTION_EPOCH_ROW_FAULT_MOTION_CADENCE_OVERDUE,
+    ),
+    (
+        "ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW",
+        _ACTION_EPOCH_ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW,
+    ),
+    (
+        "ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT",
+        _ACTION_EPOCH_ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
+    ),
+    (
+        "ROW_FAULT_MOTION_TASK_TIMING_CONTRACT",
+        _ACTION_EPOCH_ROW_FAULT_MOTION_TASK_TIMING_CONTRACT,
+    ),
+)
+_ACTION_EPOCH_MOTION_ROW_FAULT_BITS = frozenset(
+    value for _name, value in _ACTION_EPOCH_MOTION_ROW_FAULT_BINDINGS
+)
 
 
 @dataclass(frozen=True)
@@ -286,7 +380,7 @@ _ACTION_BALL_CONTINUOUS_MOTION_SELECTED_RESET_AUTHORITY_API_SHA256 = (
 _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_KIND = (
     "action_ball_continuous_motion_fresh_checkpoint_v1"
 )
-_ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_SCHEMA_VERSION = 6
+_ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_SCHEMA_VERSION = 7
 _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS = (
     ("sequence_active", "_action_ball_continuous_sequence_active", False),
     ("control_tick", "_action_ball_continuous_episode_step", False),
@@ -343,6 +437,23 @@ _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS = (
     ("teacher_time_step_f", "time_steps_f", True),
     ("teacher_speed_scale", "speed_scale", True),
     ("teacher_hold_counter", "hold_counter", True),
+    (
+        "reset_ready_body_pos_w",
+        "_action_ball_safe_ready_body_pos_w",
+        False,
+    ),
+    (
+        "reset_ready_body_quat_w",
+        "_action_ball_safe_ready_body_quat_w",
+        False,
+    ),
+    (
+        "reset_ready_reference_pending",
+        "_action_ball_safe_ready_reference_pending",
+        False,
+    ),
+    ("body_pos_relative_w", "body_pos_relative_w", False),
+    ("body_quat_relative_w", "body_quat_relative_w", False),
     ("reset_pending", "_action_ball_continuous_motion_reset_pending", False),
 )
 
@@ -3015,6 +3126,8 @@ class MotionCommand(CommandTerm):
         # Device-R05 genesis join so factories cannot silently synthesize an
         # epoch while constructing Motion.
         self._action_ball_full_mdp_motion_epoch_owner = None
+        self._action_ball_full_mdp_motion_epoch_fault_latch = None
+        self._action_ball_full_mdp_motion_epoch_writable_rows = None
         # Exact question chronology capabilities are Motion-owned and retain
         # the independent Physical horizon capability that supplied the
         # candidate-keyed maximum complete segment.  They are deliberately
@@ -3639,7 +3752,9 @@ class MotionCommand(CommandTerm):
         self._hold_action_ball_continuous_ready_reference()
         self._increment_action_ball_continuous_motion_mutation_version()
 
-    def _hold_action_ball_continuous_ready_reference(self) -> None:
+    def _hold_action_ball_continuous_ready_reference(
+        self, writable_rows: torch.Tensor | None = None
+    ) -> None:
         """Publish completed-action frame 0 with every reference velocity zero.
 
         Only command/reference tensors change.  This method deliberately has
@@ -3649,6 +3764,8 @@ class MotionCommand(CommandTerm):
         if not self.action_ball_continuous_motion_enabled:
             return
         ready = self._action_ball_continuous_ready_reference_active
+        if writable_rows is not None:
+            ready = ready & writable_rows
         ready_steps = self.motion.seg_start[self.clip_id]
         self.time_steps.copy_(torch.where(ready, ready_steps, self.time_steps))
         self.time_steps_f.copy_(
@@ -3798,6 +3915,7 @@ class MotionCommand(CommandTerm):
         motion_active_before: torch.Tensor,
         suffix_due: torch.Tensor,
         closed_without_playback: torch.Tensor,
+        writable_rows: torch.Tensor | None = None,
     ) -> None:
         """Advance the independent exact five-state lifecycle once.
 
@@ -3811,9 +3929,15 @@ class MotionCommand(CommandTerm):
         # recovery/ready transitions.
         if self._action_ball_continuous_motion_device_r05_owner is None:
             return
+        if writable_rows is None:
+            writable_rows = torch.ones_like(
+                self._action_ball_continuous_sequence_active
+            )
         current = self._action_ball_continuous_canonical_phase
         next_phase = current.clone()
-        active = self._action_ball_continuous_sequence_active
+        active = (
+            self._action_ball_continuous_sequence_active & writable_rows
+        )
         task_valid = self._action_ball_continuous_canonical_task_valid
         # Fresh Full-MDP lifecycle is owned by observable task/teacher events.
         # R07 remains recovery telemetry/reward; it cannot become a training
@@ -3831,6 +3955,7 @@ class MotionCommand(CommandTerm):
         teacher_started = (
             timing
             & teacher_left_frame0
+            & writable_rows
             & (
                 self._action_ball_task_age_s + 1.0e-12
                 >= self._action_ball_pre_swing_wait_s
@@ -3844,7 +3969,9 @@ class MotionCommand(CommandTerm):
             # mask below; an IDLE, foreign or stale row produces an empty
             # event without becoming caller-authored selection authority.
             published = epoch_owner.publish_motion_playback_started(owner=self)
-            published_started = published.motion_playback_started[:, 0]
+            published_started = (
+                published.motion_playback_started[:, 0] & writable_rows
+            )
             teacher_started &= published_started
             playback_after = playback_after | published_started
         else:
@@ -4217,6 +4344,20 @@ class MotionCommand(CommandTerm):
             for field_name, attr_name, _nonnegative
             in _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
         }
+        pending_work = bool(
+            tensors["reset_ready_reference_pending"].any()
+        )
+        pending_count = getattr(
+            self, "_action_ball_safe_ready_pending_count", None
+        )
+        if (
+            type(pending_count) is not int
+            or not 0 <= pending_count <= self.num_envs
+            or (pending_count > 0) != pending_work
+        ):
+            raise RuntimeError(
+                "continuous Motion reset-ready pending cache differs from its mask"
+            )
         tensor_payload = {
             name: value.tolist() for name, value in tensors.items()
         }
@@ -4764,6 +4905,14 @@ class MotionCommand(CommandTerm):
             _canonical_json_bytes(canonical_payload)
         ).hexdigest() != leaf["canonical_sha256"]:
             raise ValueError("Motion fresh checkpoint root differs")
+        # This host value is only the zero/nonzero work cache for the device
+        # mask.  It is deliberately not serialized as a second authority.
+        # Derive it from the already validated CPU checkpoint tensor.
+        safe_ready_pending_count = (
+            self.num_envs
+            if bool(tensors["reset_ready_reference_pending"].any())
+            else 0
+        )
         return {
             **{
                 name: leaf[name]
@@ -4784,6 +4933,7 @@ class MotionCommand(CommandTerm):
             "device_owner_mutation_version": device_version,
             "terminal_resolution_total_device": terminal_total_device,
             "fault_count_device": fault_count_device,
+            "safe_ready_pending_count": safe_ready_pending_count,
             "tensors": tensors,
         }
 
@@ -5371,6 +5521,69 @@ class MotionCommand(CommandTerm):
                 fresh_buffer_specs, retained_fresh_buffers
             )
         }
+        # FullMDP's first curriculum segment is balance, not action-frame
+        # imitation.  Freeze one real reset-ready FK tuple after genesis so
+        # joint, body and anchor teachers all describe the same state until
+        # the first accepted task.  Reuse the existing generic safe-ready
+        # buffers; enabling the legacy split/canonical modes would impose
+        # unrelated N=1 clip contracts on the fresh catalog.
+        ready_body_shape = (self.num_envs, len(self.cfg.body_names), 3)
+        ready_quat_shape = (self.num_envs, len(self.cfg.body_names), 4)
+        ready_pos = getattr(
+            self, "_action_ball_safe_ready_body_pos_w", None
+        )
+        ready_quat = getattr(
+            self, "_action_ball_safe_ready_body_quat_w", None
+        )
+        ready_pending = getattr(
+            self, "_action_ball_safe_ready_reference_pending", None
+        )
+        if ready_pos is None and ready_quat is None:
+            if ready_pending is not None and (
+                type(ready_pending) is not torch.Tensor
+                or tuple(ready_pending.shape) != (self.num_envs,)
+                or ready_pending.dtype != torch.bool
+                or ready_pending.device != torch.device(self.device)
+            ):
+                raise RuntimeError(
+                    "Motion fresh reset-ready pending state differs"
+                )
+            ready_pos = torch.zeros(
+                ready_body_shape,
+                dtype=self.motion.body_pos_w.dtype,
+                device=self.device,
+            )
+            ready_quat = torch.zeros(
+                ready_quat_shape,
+                dtype=self.motion.body_quat_w.dtype,
+                device=self.device,
+            )
+            if ready_pending is None:
+                ready_pending = torch.ones(
+                    self.num_envs, dtype=torch.bool, device=self.device
+                )
+        elif (
+            type(ready_pos) is not torch.Tensor
+            or tuple(ready_pos.shape) != ready_body_shape
+            or ready_pos.dtype != self.motion.body_pos_w.dtype
+            or ready_pos.device != torch.device(self.device)
+            or type(ready_quat) is not torch.Tensor
+            or tuple(ready_quat.shape) != ready_quat_shape
+            or ready_quat.dtype != self.motion.body_quat_w.dtype
+            or ready_quat.device != torch.device(self.device)
+            or type(ready_pending) is not torch.Tensor
+            or tuple(ready_pending.shape) != (self.num_envs,)
+            or ready_pending.dtype != torch.bool
+            or ready_pending.device != torch.device(self.device)
+        ):
+            raise RuntimeError(
+                "Motion fresh reset-ready reference buffers differ"
+            )
+        ready_pending.fill_(True)
+        self._action_ball_safe_ready_body_pos_w = ready_pos
+        self._action_ball_safe_ready_body_quat_w = ready_quat
+        self._action_ball_safe_ready_reference_pending = ready_pending
+        self._action_ball_safe_ready_pending_count = self.num_envs
         time_left = getattr(self, "time_left", None)
         time_left_receipt = _tensor_identity_version_receipt(time_left)
         if (
@@ -5730,6 +5943,72 @@ class MotionCommand(CommandTerm):
         )
         self._action_ball_continuous_fresh_motion_lane_bound = True
 
+    def _latch_action_ball_full_mdp_motion_epoch_row_fault(
+        self,
+        rows: torch.Tensor,
+        *,
+        reason_bit: int,
+    ) -> torch.Tensor:
+        """Latch one named Motion cause and return rows still safe to write.
+
+        The fresh direct lane uses ActionEpoch's existing packed optimizer
+        drain, so this adds neither a per-tick device-to-host read nor another
+        safety owner.  Legacy diagnostic views without an Epoch owner still
+        suppress the bad row locally instead of poisoning the CUDA context.
+        """
+
+        if (
+            not torch.is_tensor(rows)
+            or rows.dtype != torch.bool
+            or tuple(rows.shape) != (self.num_envs,)
+            or rows.device != torch.device(self.device)
+            or type(reason_bit) is not int
+            or reason_bit not in _ACTION_EPOCH_MOTION_ROW_FAULT_BITS
+        ):
+            raise RuntimeError("Motion named ActionEpoch row-fault ABI differs")
+        fault_rows = rows.contiguous()
+        latch = getattr(
+            self, "_action_ball_full_mdp_motion_epoch_fault_latch", None
+        )
+        writable = getattr(
+            self,
+            "_action_ball_full_mdp_motion_epoch_writable_rows",
+            None,
+        )
+        if latch is None:
+            if getattr(
+                self,
+                "_action_ball_continuous_fresh_motion_lane_bound",
+                False,
+            ):
+                raise RuntimeError(
+                    "fresh Motion row fault requires its exact ActionEpoch owner"
+                )
+            return ~fault_rows
+        if (
+            not torch.is_tensor(writable)
+            or writable.dtype != torch.bool
+            or tuple(writable.shape) != (self.num_envs,)
+            or writable.device != torch.device(self.device)
+            or not writable.is_contiguous()
+        ):
+            raise RuntimeError("Motion named ActionEpoch writable-row ABI differs")
+        # Preserve causal isolation inside Motion: after this producer has
+        # quarantined a row, later derived predicates must not relabel the
+        # same root defect with additional downstream bits.
+        fault_rows = fault_rows & writable
+        safe_rows = latch("motion", reason_bit, fault_rows, owner=self)
+        if (
+            not torch.is_tensor(safe_rows)
+            or safe_rows.dtype != torch.bool
+            or tuple(safe_rows.shape) != (self.num_envs,)
+            or safe_rows.device != torch.device(self.device)
+            or not safe_rows.is_contiguous()
+        ):
+            raise RuntimeError("Motion named ActionEpoch safe-row ABI differs")
+        writable.logical_and_(safe_rows)
+        return writable
+
     def bind_action_ball_full_mdp_motion_epoch_owner(
         self,
         epoch_owner: object,
@@ -5762,6 +6041,7 @@ class MotionCommand(CommandTerm):
             "bind_d05_accept_writers",
             "settle_d05_transaction",
             "require_active_d05_accepted_rows",
+            "latch_runtime_row_fault",
         )
         if (
             type(epoch_owner) is not epoch.ActionEpochOwner
@@ -5777,6 +6057,10 @@ class MotionCommand(CommandTerm):
             # an empty pre-genesis owner.  Shot/reveal work has not begun.
             or epoch_owner.commit_head != 1
             or epoch_owner.drain_frontier != 0
+            or any(
+                getattr(epoch, name, None) != expected
+                for name, expected in _ACTION_EPOCH_MOTION_ROW_FAULT_BINDINGS
+            )
             or any(
                 not callable(getattr(epoch_owner, name, None))
                 or getattr(getattr(epoch_owner, name), "__self__", None)
@@ -5799,8 +6083,14 @@ class MotionCommand(CommandTerm):
             raise TypeError(
                 "Motion epoch binding requires the exact playback-transition ABI"
             )
+        fault_latch = epoch_owner.latch_runtime_row_fault
+        writable_rows = torch.ones(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
         bind_playback(self)
         self._action_ball_full_mdp_motion_epoch_owner = epoch_owner
+        self._action_ball_full_mdp_motion_epoch_fault_latch = fault_latch
+        self._action_ball_full_mdp_motion_epoch_writable_rows = writable_rows
 
     def action_epoch_playback_transition_mask(
         self,
@@ -5893,12 +6183,13 @@ class MotionCommand(CommandTerm):
         rows = (
             row_slot_active
             & selected
-            & phase.eq(epoch.PHASE_REVEAL_COMMITTED)
+            & epoch.action_epoch_open_shot_phase_mask(phase)
             & full_key_matches
             & self._action_ball_continuous_canonical_task_valid
             & self._action_ball_task_timing_active
             & self._action_ball_continuous_motion_active
             & ~self._action_ball_continuous_canonical_playback_started
+            & self._action_ball_full_mdp_motion_epoch_writable_rows
             & teacher_left_frame0
             & (
                 self._action_ball_task_age_s + 1.0e-12
@@ -6078,6 +6369,27 @@ class MotionCommand(CommandTerm):
             row_identity.action_epoch_shot_key_valid(key)
             & task_valid_grid
         )[:, 0]
+        if self._action_ball_full_mdp_motion_epoch_writable_rows is not None:
+            write_rows &= (
+                self._action_ball_full_mdp_motion_epoch_writable_rows
+            )
+        # Validate/latch the complete reveal reference before any D05 Motion
+        # destination changes.  ``refresh`` preserves invalid cache rows and
+        # updates the persistent writable mask; re-intersect so a frame/pending
+        # defect cannot mutate timing, identity, counters, or playback state
+        # before the packed optimizer drain observes bit 25.
+        self.refresh_action_ball_revealed_body_reference(write_rows)
+        persistent_writable = (
+            self._action_ball_full_mdp_motion_epoch_writable_rows
+        )
+        if torch.is_tensor(persistent_writable):
+            write_rows &= persistent_writable
+        elif getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            raise RuntimeError(
+                "fresh Motion D05 write requires its exact ActionEpoch quarantine"
+            )
         timing = timing_grid[:, 0, :epoch.MOTION_TASK_F32_WIDTH]
         false_rows = torch.zeros(n, dtype=torch.bool, device=device)
         true_rows = torch.ones(n, dtype=torch.bool, device=device)
@@ -6190,6 +6502,9 @@ class MotionCommand(CommandTerm):
             )
         for destination, after_image in swaps:
             destination.copy_(after_image)
+        # ``refresh_action_ball_revealed_body_reference`` already installed
+        # the healthy rows' selected frame-0 body cache in the preflight above.
+        # The pure copies complete the same public D05 transaction here.
 
     def publish_action_ball_full_mdp_post_d05_observation(self) -> None:
         """Publish Motion only after the complete three-writer D05 commit.
@@ -7144,6 +7459,18 @@ class MotionCommand(CommandTerm):
         origin = int(schedule["sequence_origin_step"])
         first_reveal = int(schedule["first_reveal_step"])
         ready_steps = self.motion.seg_start[self.clip_id]
+        ready_pending = getattr(
+            self, "_action_ball_safe_ready_reference_pending", None
+        )
+        if (
+            not torch.is_tensor(ready_pending)
+            or ready_pending.dtype != torch.bool
+            or tuple(ready_pending.shape) != (self.num_envs,)
+            or ready_pending.device != torch.device(self.device)
+        ):
+            raise RuntimeError(
+                "Motion selected reset requires its reset-ready capture state"
+            )
         # Device validation is evidence for the sole global PPO drain, never
         # asynchronous authorization for the synchronous copies below.  A
         # bad generation claim (including MAX) must still settle every
@@ -7247,6 +7574,7 @@ class MotionCommand(CommandTerm):
             (self.time_steps_f, ready_steps.to(dtype=self.time_steps_f.dtype)),
             (self.speed_scale, full(self.speed_scale, 0.0)),
             (self.hold_counter, full(self.hold_counter, 1)),
+            (ready_pending, ready_pending | selected),
         )
         if "in_hold" in self.metrics:
             replacements = (
@@ -7362,6 +7690,10 @@ class MotionCommand(CommandTerm):
         try:
             for destination, after_image in swaps:
                 destination.copy_(after_image)
+            # This host value is only a conservative hot-path work flag; the
+            # device ``ready_pending`` mask above remains the sole row truth.
+            # Avoid a selected-id readback merely to compute an exact count.
+            self._action_ball_safe_ready_pending_count = self.num_envs
             self._action_ball_continuous_motion_mutation_version = version_after
             self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack = True
             self._action_ball_continuous_prepared_task_commit = None
@@ -10783,7 +11115,9 @@ class MotionCommand(CommandTerm):
                 ordinals[ready],
             )
 
-    def _publish_action_ball_continuous_phase(self) -> None:
+    def _publish_action_ball_continuous_phase(
+        self, writable_rows: torch.Tensor | None = None
+    ) -> None:
         step = self._action_ball_continuous_episode_step
         ordinal = self._action_ball_continuous_scheduled_ordinal
         deadline = self._action_ball_continuous_current_deadline_step
@@ -10883,6 +11217,12 @@ class MotionCommand(CommandTerm):
             ),
             phase,
         )
+        if writable_rows is not None:
+            phase = torch.where(
+                writable_rows,
+                phase,
+                self._action_ball_continuous_phase,
+            )
         self._action_ball_continuous_phase.copy_(phase)
 
     def _advance_action_ball_continuous_motion_cadence(
@@ -10909,48 +11249,122 @@ class MotionCommand(CommandTerm):
             )
         schedule = self._action_ball_continuous_schedule_projection
         active_sequence = self._action_ball_continuous_sequence_active
-        # A reveal not committed by the next Motion update, or a ready reveal
-        # committed without releasing playback, was not an atomic handoff.
-        # Record either missing half, then keep the frozen cadence moving;
-        # target/ball integration will classify it as infrastructure.
-        self._action_ball_continuous_task_commit_missed |= (
-            self._action_ball_continuous_task_commit_pending
-        )
-        self._action_ball_continuous_task_commit_pending.zero_()
-        self._action_ball_continuous_motion_release_missed |= (
-            self._action_ball_continuous_motion_release_pending
-        )
-        self._action_ball_continuous_motion_release_pending.zero_()
-        self._action_ball_continuous_reveal_due.zero_()
-        self._action_ball_continuous_closed_mask.zero_()
-        self._action_ball_continuous_close_reason.fill_(
-            ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE
-        )
-        self._action_ball_continuous_deadline_due.zero_()
-        self._action_ball_continuous_recovery_unavailable.zero_()
-        self._action_ball_continuous_episode_step.add_(
-            active_sequence.to(dtype=torch.long)
-        )
-        step = self._action_ball_continuous_episode_step
+        if self._action_ball_swing_generation is None:
+            raise RuntimeError(
+                "continuous Motion cadence has no swing-generation authority"
+            )
         fresh_schedule_exhausted = torch.zeros_like(active_sequence)
         if self._action_ball_continuous_fresh_motion_lane_bound:
             fresh_schedule_exhausted = (
                 self._action_ball_continuous_scheduled_ordinal
                 >= _ACTION_BALL_FULL_MDP_FRESH_REFERENCE_DUE_COUNT - 1
             )
-        reveal = (
+        prospective_step = self._action_ball_continuous_episode_step + (
+            active_sequence.to(dtype=torch.long)
+        )
+        prospective_reveal = (
             active_sequence
             & ~fresh_schedule_exhausted
-            & (step == self._action_ball_continuous_next_reveal_step)
-        )
-        torch._assert_async(
-            torch.all(
-                ~active_sequence
-                | fresh_schedule_exhausted
-                | (step <= self._action_ball_continuous_next_reveal_step)
+            & prospective_step.eq(
+                self._action_ball_continuous_next_reveal_step
             )
         )
-        self._action_ball_continuous_reveal_due.copy_(reveal)
+        overdue = (
+            active_sequence
+            & ~fresh_schedule_exhausted
+            & prospective_step.gt(
+                self._action_ball_continuous_next_reveal_step
+            )
+        )
+        writable_rows = (
+            self._latch_action_ball_full_mdp_motion_epoch_row_fault(
+                overdue.contiguous(),
+                reason_bit=(
+                    _ACTION_EPOCH_ROW_FAULT_MOTION_CADENCE_OVERDUE
+                ),
+            )
+        )
+        successor_candidate = prospective_reveal & (
+            self._action_ball_continuous_scheduled_ordinal >= 0
+        )
+        generation_writable = (
+            self._latch_action_ball_full_mdp_motion_epoch_row_fault(
+                (
+                    successor_candidate
+                    & self._action_ball_swing_generation.ge(
+                        self._ACTION_BALL_INT64_MAX
+                    )
+                ).contiguous(),
+                reason_bit=(
+                    _ACTION_EPOCH_ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW
+                ),
+            )
+        )
+        writable_rows = writable_rows & generation_writable
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            prospective_task_close = (
+                active_sequence
+                & self._action_ball_continuous_canonical_task_valid
+                & prospective_step.eq(
+                    self._action_ball_continuous_canonical_task_close_tick
+                )
+                & ~self._action_ball_continuous_canonical_playback_started
+            )
+            timing_advance = (
+                self._action_ball_continuous_motion_active
+                & ~prospective_task_close
+                & writable_rows
+            )
+            reference_writable = (
+                self._latch_action_ball_full_mdp_motion_epoch_row_fault(
+                    (
+                        timing_advance
+                        & ~self._action_ball_task_timing_active
+                    ).contiguous(),
+                    reason_bit=(
+                        _ACTION_EPOCH_ROW_FAULT_MOTION_TASK_TIMING_CONTRACT
+                    ),
+                )
+            )
+            writable_rows = writable_rows & reference_writable
+        active_sequence = active_sequence & writable_rows
+        # A reveal not committed by the next Motion update, or a ready reveal
+        # committed without releasing playback, was not an atomic handoff.
+        # Record either missing half, then keep the frozen cadence moving;
+        # target/ball integration will classify it as infrastructure.
+        self._action_ball_continuous_task_commit_missed |= (
+            self._action_ball_continuous_task_commit_pending & writable_rows
+        )
+        self._action_ball_continuous_task_commit_pending.masked_fill_(
+            writable_rows, False
+        )
+        self._action_ball_continuous_motion_release_missed |= (
+            self._action_ball_continuous_motion_release_pending & writable_rows
+        )
+        self._action_ball_continuous_motion_release_pending.masked_fill_(
+            writable_rows, False
+        )
+        self._action_ball_continuous_reveal_due.masked_fill_(
+            writable_rows, False
+        )
+        self._action_ball_continuous_closed_mask.masked_fill_(
+            writable_rows, False
+        )
+        self._action_ball_continuous_close_reason.masked_fill_(
+            writable_rows, ACTION_BALL_CONTINUOUS_MOTION_CLOSE_NONE
+        )
+        self._action_ball_continuous_deadline_due.masked_fill_(
+            writable_rows, False
+        )
+        self._action_ball_continuous_recovery_unavailable.masked_fill_(
+            writable_rows, False
+        )
+        self._action_ball_continuous_episode_step.add_(
+            active_sequence.to(dtype=torch.long)
+        )
+        step = self._action_ball_continuous_episode_step
+        reveal = prospective_reveal & writable_rows
+        self._action_ball_continuous_reveal_due.logical_or_(reveal)
         self._action_ball_continuous_current_policy_opportunity[reveal] = False
         self._action_ball_continuous_task_commit_missed[reveal] = False
         self._action_ball_continuous_task_committed[reveal] = False
@@ -10958,19 +11372,6 @@ class MotionCommand(CommandTerm):
         self._action_ball_continuous_motion_release_missed[reveal] = False
         successor = reveal & (
             self._action_ball_continuous_scheduled_ordinal >= 0
-        )
-        if self._action_ball_swing_generation is None:
-            raise RuntimeError(
-                "continuous Motion cadence has no swing-generation authority"
-            )
-        torch._assert_async(
-            torch.all(
-                ~successor
-                | (
-                    self._action_ball_swing_generation
-                    < self._ACTION_BALL_INT64_MAX
-                )
-            )
         )
         self._action_ball_swing_generation.add_(successor.to(torch.long))
         self._action_ball_continuous_scheduled_ordinal[reveal] += 1
@@ -11023,7 +11424,9 @@ class MotionCommand(CommandTerm):
         ]
         self._action_ball_continuous_motion_release_pending[ready] = True
         unavailable = reveal & ~ready
-        self._action_ball_continuous_recovery_unavailable.copy_(unavailable)
+        self._action_ball_continuous_recovery_unavailable.logical_or_(
+            unavailable
+        )
 
         current_ordinal = self._action_ball_continuous_scheduled_ordinal
         deadline = (
@@ -11038,7 +11441,7 @@ class MotionCommand(CommandTerm):
                 < current_ordinal
             )
         )
-        self._action_ball_continuous_deadline_due.copy_(deadline)
+        self._action_ball_continuous_deadline_due.logical_or_(deadline)
         self._action_ball_continuous_last_closed_ordinal[deadline] = (
             current_ordinal[deadline]
         )
@@ -11050,7 +11453,9 @@ class MotionCommand(CommandTerm):
         self._action_ball_continuous_task_commit_pending[deadline] = False
         self._action_ball_continuous_motion_release_pending[deadline] = False
 
-        motion_active = self._action_ball_continuous_motion_active.clone()
+        motion_active = (
+            self._action_ball_continuous_motion_active & writable_rows
+        )
         closed_without_playback = deadline & ~motion_active
         if self._action_ball_continuous_fresh_motion_lane_bound:
             task_close_due = (
@@ -11086,15 +11491,20 @@ class MotionCommand(CommandTerm):
         self._write_action_ball_continuous_close_edge(
             suffix_due=suffix_due,
             closed_without_playback=closed_without_playback,
+            writable_rows=writable_rows,
         )
         self._advance_action_ball_continuous_canonical_lifecycle(
             motion_active_before=motion_active,
             suffix_due=suffix_due,
             closed_without_playback=closed_without_playback,
+            writable_rows=writable_rows,
         )
-        self._hold_action_ball_continuous_ready_reference()
-        held = held | self._action_ball_continuous_ready_reference_active
-        self._publish_action_ball_continuous_phase()
+        self._hold_action_ball_continuous_ready_reference(writable_rows)
+        held = held | (
+            self._action_ball_continuous_ready_reference_active
+            & writable_rows
+        )
+        self._publish_action_ball_continuous_phase(writable_rows)
         if "action_ball_continuous_phase" in self.metrics:
             self.metrics["action_ball_continuous_phase"] = (
                 self._action_ball_continuous_phase.to(
@@ -11147,14 +11557,12 @@ class MotionCommand(CommandTerm):
         *,
         suffix_due: torch.Tensor,
         closed_without_playback: torch.Tensor,
+        writable_rows: torch.Tensor | None = None,
     ) -> None:
         """Publish this tick's row-wise close mechanics before identity clear."""
 
-        self._action_ball_continuous_closed_mask.copy_(
-            suffix_due | closed_without_playback
-        )
-        self._action_ball_continuous_close_reason.copy_(
-            torch.where(
+        closed_mask = suffix_due | closed_without_playback
+        close_reason = torch.where(
                 suffix_due,
                 torch.full_like(
                     self._action_ball_continuous_close_reason,
@@ -11172,7 +11580,19 @@ class MotionCommand(CommandTerm):
                     ),
                 ),
             )
-        )
+        if writable_rows is not None:
+            closed_mask = torch.where(
+                writable_rows,
+                closed_mask,
+                self._action_ball_continuous_closed_mask,
+            )
+            close_reason = torch.where(
+                writable_rows,
+                close_reason,
+                self._action_ball_continuous_close_reason,
+            )
+        self._action_ball_continuous_closed_mask.copy_(closed_mask)
+        self._action_ball_continuous_close_reason.copy_(close_reason)
 
     @staticmethod
     def _range_is_exact_zero_pair(value) -> bool:
@@ -12707,6 +13127,43 @@ class MotionCommand(CommandTerm):
             return self.time_steps
         return torch.where(self.in_hold, self._canonical_ready_steps(), self.time_steps)
 
+    def _action_ball_full_mdp_safe_pose_reference_steps(self) -> torch.Tensor:
+        """Return legal gather indices while a named row fault drains.
+
+        ActionEpoch's writable mask is the sole quarantine fact.  Once a
+        fresh row faults, actor/reward materialization must remain total until
+        the synchronous optimizer drain observes that cause; masking only the
+        destination after an out-of-range gather would be too late.  Healthy
+        rows keep their exact reference step, while quarantined rows read the
+        selected clip's legal frame 0 and cannot mutate published caches.
+        """
+
+        steps = self._pose_reference_steps()
+        if not getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            return steps
+        writable = getattr(
+            self,
+            "_action_ball_full_mdp_motion_epoch_writable_rows",
+            None,
+        )
+        if writable is None:
+            # Construction may query observation shapes before ActionEpoch is
+            # bound.  No runtime row fault can exist at that point.
+            return steps
+        if (
+            not torch.is_tensor(writable)
+            or writable.dtype != torch.bool
+            or tuple(writable.shape) != (self.num_envs,)
+            or writable.device != torch.device(self.device)
+        ):
+            raise RuntimeError(
+                "fresh Motion quarantine writable-row ABI differs"
+            )
+        frame_zero = self.motion.seg_start[self.clip_id]
+        return torch.where(writable, steps, frame_zero)
+
     @classmethod
     def _action_ball_plain_int(
         cls, value, *, name: str, minimum: int = 0
@@ -13313,18 +13770,23 @@ class MotionCommand(CommandTerm):
     def refresh_action_ball_revealed_body_reference(
         self, reveal: torch.Tensor
     ) -> None:
-        """Refresh cached aligned bodies on the exact split-ready reveal tick.
+        """Refresh cached aligned bodies on an exact public reveal tick.
 
         Motion updates before RacketTargetCommand.  Racket owns ``task_valid``
         and may therefore reveal a row after Motion has already materialized
         ``body_*_relative_w`` from the safe-ready tuple for this policy tick.
-        Joint and paddle accessors read the public bit lazily, but critic/body
-        consumers read these cached aligned tensors.  Refreshing only newly
-        revealed rows here keeps all three teacher views on measured frame 0
-        during the same public tick.
+        The fresh direct lane has the same ordering at D05's writer barrier.
+        Joint and anchor accessors select lazily, but body rewards consume
+        cached aligned tensors.  Refreshing only newly accepted rows keeps the
+        complete teacher tuple on measured frame 0 during the same public tick.
         """
 
-        if not self.action_ball_diagnostic_split_ready_teacher:
+        fresh_direct = getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        )
+        if not (
+            self.action_ball_diagnostic_split_ready_teacher or fresh_direct
+        ):
             return
         if (
             not torch.is_tensor(reveal)
@@ -13333,31 +13795,55 @@ class MotionCommand(CommandTerm):
             or reveal.device != torch.device(self.device)
         ):
             raise ValueError(
-                "split-ready reveal must be one bool tensor on Motion's device"
+                "teacher reveal must be one bool tensor on Motion's device"
             )
-        task_valid = getattr(self, "_action_ball_public_task_valid", None)
         pending = getattr(
             self, "_action_ball_safe_ready_reference_pending", None
         )
-        if task_valid is None or pending is None:
+        if pending is None:
             raise RuntimeError(
-                "split-ready reveal requires bound task-valid and safe-ready state"
+                "teacher reveal requires bound safe-ready state"
             )
 
         # Keep this full-batch and mask-select below.  A CUDA ``nonzero`` /
         # one-argument ``where`` would add a host synchronization to every
         # policy tick merely to discover that most reveal masks are empty.
-        torch._assert_async(torch.all(~reveal | task_valid))
-        torch._assert_async(torch.all(~reveal | ~pending))
         steps = self._pose_reference_steps()
         frame_zero = self.motion.seg_start[self.clip_id]
-        torch._assert_async(torch.all(~reveal | (steps == frame_zero)))
+        reveal_fault = reveal & (pending | steps.ne(frame_zero))
+        fault_latch = getattr(
+            self,
+            "_latch_action_ball_full_mdp_motion_epoch_row_fault",
+            None,
+        )
+        if callable(fault_latch):
+            writable_rows = fault_latch(
+                reveal_fault.contiguous(),
+                reason_bit=(
+                    _ACTION_EPOCH_ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT
+                ),
+            )
+        elif fresh_direct:
+            raise RuntimeError(
+                "fresh Motion reveal reference requires its exact ActionEpoch owner"
+            )
+        else:
+            # Extracted legacy diagnostic fixtures intentionally do not carry
+            # the production ActionEpoch helper.  They retain the old local
+            # quarantine semantics; only the fresh direct lane is fail-closed.
+            writable_rows = ~reveal_fault
+        reveal = reveal & writable_rows
+        # The named fault intentionally accepts an invalid/out-of-range step
+        # as input.  Never pass that rejected index to a CUDA gather: rows not
+        # being refreshed use a legal frame-0 placeholder whose values are
+        # masked away below.
+        safe_steps = torch.where(reveal, steps, frame_zero)
 
         body_pos_w = (
-            self.motion.body_pos_w[steps]
+            self.motion.body_pos_w[safe_steps]
             + self._env.scene.env_origins[:, None, :]
         )
-        body_quat_w = self.motion.body_quat_w[steps]
+        body_quat_w = self.motion.body_quat_w[safe_steps]
         anchor_pos_w = body_pos_w[:, self.motion_anchor_body_index]
         anchor_quat_w = body_quat_w[:, self.motion_anchor_body_index]
         robot_anchor_pos_w = self.robot.data.body_pos_w[
@@ -13366,30 +13852,17 @@ class MotionCommand(CommandTerm):
         robot_anchor_quat_w = self.robot.data.body_quat_w[
             :, self.robot_anchor_body_index
         ]
-        body_count = len(self.cfg.body_names)
-        anchor_pos_w_repeat = anchor_pos_w[:, None, :].repeat(
-            1, body_count, 1
-        )
-        anchor_quat_w_repeat = anchor_quat_w[:, None, :].repeat(
-            1, body_count, 1
-        )
-        robot_anchor_pos_w_repeat = robot_anchor_pos_w[:, None, :].repeat(
-            1, body_count, 1
-        )
-        robot_anchor_quat_w_repeat = robot_anchor_quat_w[:, None, :].repeat(
-            1, body_count, 1
-        )
-        delta_pos_w = robot_anchor_pos_w_repeat
-        delta_pos_w[..., 2] = anchor_pos_w_repeat[..., 2]
-        delta_ori_w = yaw_quat(
-            quat_mul(
-                robot_anchor_quat_w_repeat,
-                quat_inv(anchor_quat_w_repeat),
-            )
-        )
-        measured_body_quat_relative_w = quat_mul(delta_ori_w, body_quat_w)
-        measured_body_pos_relative_w = delta_pos_w + quat_apply(
-            delta_ori_w, body_pos_w - anchor_pos_w_repeat
+        (
+            measured_body_quat_relative_w,
+            measured_body_pos_relative_w,
+        ) = _motion_anchor_relative_body_transform(
+            anchor_pos_w,
+            anchor_quat_w,
+            robot_anchor_pos_w,
+            robot_anchor_quat_w,
+            body_pos_w,
+            body_quat_w,
+            expected_body_count=len(self.cfg.body_names),
         )
         self.body_quat_relative_w = torch.where(
             reveal[:, None, None],
@@ -13402,7 +13875,49 @@ class MotionCommand(CommandTerm):
             self.body_pos_relative_w,
         )
 
+    def _action_ball_full_mdp_initial_balance_reference_mask(
+        self,
+    ) -> torch.Tensor:
+        """Rows whose teacher is the episode's frozen reset-ready tuple.
+
+        The existing policy-opportunity counter is reset by the selected-reset
+        transaction and increments only under D05 ACCEPT.  It therefore gives
+        the exact curriculum boundary without a new selector, caller verdict
+        or task gate: censored reveals remain balance rows; accepted, playback
+        and completed-recovery rows use the selected action reference.
+        """
+
+        if not getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            return torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        created = getattr(
+            self,
+            "_action_ball_continuous_policy_opportunities_created",
+            None,
+        )
+        if (
+            type(created) is not torch.Tensor
+            or created.dtype != torch.int64
+            or created.device != torch.device(self.device)
+            or tuple(created.shape) != (self.num_envs,)
+        ):
+            raise RuntimeError(
+                "fresh Motion balance-reference counter ABI differs"
+            )
+        return created.eq(0)
+
     def _action_ball_safe_ready_wait_mask(self) -> torch.Tensor:
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            # Reset observations may read teacher properties before the next
+            # command update.  Capture once from the settled plant, never from
+            # the policy's moving current pose thereafter.
+            self._capture_action_ball_safe_ready_reference()
+            return self._action_ball_full_mdp_initial_balance_reference_mask()
         if not self.action_ball_diagnostic_split_ready_teacher:
             return torch.zeros(
                 self.num_envs, dtype=torch.bool, device=self.device
@@ -13509,11 +14024,21 @@ class MotionCommand(CommandTerm):
             return
         if pending is None or count is None:
             raise RuntimeError(
-                "split-ready safe reference pending state is half-initialized"
+                "safe-ready reference pending state is half-initialized"
             )
         if count == 0:
             return
-        ids = torch.where(pending)[0]
+        writable = getattr(
+            self,
+            "_action_ball_full_mdp_motion_epoch_writable_rows",
+            None,
+        )
+        capture_rows = (
+            pending
+            if not torch.is_tensor(writable)
+            else (pending & writable)
+        )
+        ids = torch.where(capture_rows)[0]
         body_pos = self.robot.data.body_pos_w[ids][:, self.body_indexes]
         body_quat = self.robot.data.body_quat_w[ids][:, self.body_indexes]
         if (
@@ -13525,7 +14050,7 @@ class MotionCommand(CommandTerm):
             or not bool(torch.isfinite(body_quat).all())
         ):
             raise RuntimeError(
-                "split-ready physical FK reference is unavailable after reset"
+                "physical FK reset-ready reference is unavailable after reset"
             )
         self._action_ball_safe_ready_body_pos_w[ids] = body_pos
         self._action_ball_safe_ready_body_quat_w[ids] = body_quat
@@ -13535,7 +14060,10 @@ class MotionCommand(CommandTerm):
         # episode while joint targets already expose the new safe-ready pose.
         self.body_pos_relative_w[ids] = body_pos
         self.body_quat_relative_w[ids] = body_quat
-        pending[ids] = False
+        # A terminal fault row must not mutate its cached teacher.  The packed
+        # optimizer drain will stop the run, so the one-shot request is cleared
+        # for all rows after healthy rows have been frozen.
+        pending.zero_()
         self._action_ball_safe_ready_pending_count = 0
 
     def bind_action_ball_task_authority(
@@ -15761,6 +16289,7 @@ class MotionCommand(CommandTerm):
         if resolve_pending:
             self._resolve_pending_action_ball_tasks()
         active_all = self._action_ball_task_timing_active
+        writable_rows = torch.ones_like(active_all)
         if resolve_pending:
             if self._action_ball_birth_broker.diagnostic_fast_path:
                 if self._action_ball_diagnostic_pending_row_count != 0:
@@ -15787,8 +16316,18 @@ class MotionCommand(CommandTerm):
             # command owner has atomically installed timing and acknowledged
             # the same reveal.  Re-running the legacy formal pending resolver
             # here would perform a device-wide ``where`` plus D2H scan on every
-            # policy tick.  Keep the prerequisite as a device assertion.
-            torch._assert_async(torch.all(~advance_mask | active_all))
+            # policy tick.  Latch the exact task-timing cause into the
+            # existing packed Epoch drain and suppress the bad row locally.
+            writable_rows = (
+                self._latch_action_ball_full_mdp_motion_epoch_row_fault(
+                    (advance_mask & ~active_all).contiguous(),
+                    reason_bit=(
+                        _ACTION_EPOCH_ROW_FAULT_MOTION_TASK_TIMING_CONTRACT
+                    ),
+                )
+            )
+            advance_mask = advance_mask & writable_rows
+            active_before_resolve &= writable_rows
         active = (
             active_all
             if advance_mask is None
@@ -15825,8 +16364,15 @@ class MotionCommand(CommandTerm):
             self.motion.seg_len[self.clip_id] - 1
         ).to(dtype=torch.float64)
         phase_frames = torch.minimum(phase_frames, final_frames)
+        next_time_steps_f = (clip_starts + phase_frames).to(
+            self.time_steps_f.dtype
+        )
         self.time_steps_f.copy_(
-            (clip_starts + phase_frames).to(self.time_steps_f.dtype)
+            torch.where(
+                writable_rows,
+                next_time_steps_f,
+                self.time_steps_f,
+            )
         )
         rounded = self.time_steps_f.round().long()
         final_steps = (
@@ -15834,17 +16380,45 @@ class MotionCommand(CommandTerm):
             + self.motion.seg_len[self.clip_id]
             - 1
         )
-        self.time_steps.copy_(torch.minimum(rounded, final_steps))
+        self.time_steps.copy_(
+            torch.where(
+                writable_rows,
+                torch.minimum(rounded, final_steps),
+                self.time_steps,
+            )
+        )
         self.speed_scale.copy_(
             torch.where(
-                active,
-                self._action_ball_teacher_rate.to(self.speed_scale.dtype),
-                torch.zeros_like(self.speed_scale),
+                writable_rows,
+                torch.where(
+                    active,
+                    self._action_ball_teacher_rate.to(self.speed_scale.dtype),
+                    torch.zeros_like(self.speed_scale),
+                ),
+                self.speed_scale,
             )
         )
         held = active & (active_motion_s <= 1.0e-12)
-        self.hold_counter.copy_(held.to(self.hold_counter.dtype))
-        self.metrics["in_hold"] = held.float()
+        self.hold_counter.copy_(
+            torch.where(
+                writable_rows,
+                held.to(self.hold_counter.dtype),
+                self.hold_counter,
+            )
+        )
+        prior_in_hold = self.metrics.get("in_hold")
+        if (
+            torch.is_tensor(prior_in_hold)
+            and tuple(prior_in_hold.shape) == (self.num_envs,)
+            and prior_in_hold.device == torch.device(self.device)
+        ):
+            self.metrics["in_hold"] = torch.where(
+                writable_rows,
+                held.to(prior_in_hold.dtype),
+                prior_in_hold,
+            )
+        else:
+            self.metrics["in_hold"] = held.float()
         self.metrics["playback_speed"] = self.speed_scale.clone()
         self.metrics["action_ball_task_age_s"] = (
             self._action_ball_task_age_s.to(self.speed_scale.dtype)
@@ -16737,7 +17311,9 @@ class MotionCommand(CommandTerm):
         # stand_start transition. C++ mirrors this (pp_policy: refs.joint_pos =
         # default_q at level 0) — keep them in lockstep.
         if self.canonical_ready_mode:
-            measured = self.motion.joint_pos[self._pose_reference_steps()]
+            measured = self.motion.joint_pos[
+                self._action_ball_full_mdp_safe_pose_reference_steps()
+            ]
             if (
                 self.action_ball_diagnostic_split_ready_teacher
                 and self._action_ball_public_task_valid is not None
@@ -16750,9 +17326,23 @@ class MotionCommand(CommandTerm):
                 )
                 measured = torch.where(wait[:, None], safe, measured)
             return measured
-        jp = self.motion.joint_pos[self.time_steps]
+        jp = self.motion.joint_pos[
+            self._action_ball_full_mdp_safe_pose_reference_steps()
+        ]
         dq = self.robot.data.default_joint_pos
-        return torch.where(self.in_hold[:, None], dq, jp)
+        if getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            # Fresh FullMDP freezes selected frame 0 during prepare/recovery;
+            # only the initial balance segment uses the runtime default pose.
+            # The generic legacy HOLD rule would otherwise keep joint teacher
+            # at default while body/anchor already exposed frame 0.
+            use_default = (
+                self._action_ball_full_mdp_initial_balance_reference_mask()
+            )
+        else:
+            use_default = self.in_hold
+        return torch.where(use_default[:, None], dq, jp)
 
     @property
     def joint_vel(self) -> torch.Tensor:
@@ -16763,7 +17353,9 @@ class MotionCommand(CommandTerm):
         # AGI-sim / hardware bare-hold fall (Gate 2.5 P2, 3-5 s tip). A frozen reference
         # is not moving: zero its velocities on held envs. The C++ runner mirrors this
         # (pp_policy zeroes refs.joint_vel in its hold states) — keep them in lockstep.
-        jv = self.motion.joint_vel[self.time_steps]
+        jv = self.motion.joint_vel[
+            self._action_ball_full_mdp_safe_pose_reference_steps()
+        ]
         # R14: at playback speed s the reference joints traverse the same poses s× as fast.
         if self.retiming_active:
             jv = jv * self.speed_scale[:, None]
@@ -16772,18 +17364,13 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_pos_w(self) -> torch.Tensor:
-        if self.action_ball_diagnostic_split_ready_teacher:
-            self._capture_action_ball_safe_ready_reference()
-        steps = self._pose_reference_steps()
+        wait = self._action_ball_safe_ready_wait_mask()
+        steps = self._action_ball_full_mdp_safe_pose_reference_steps()
         measured = (
             self.motion.body_pos_w[steps]
             + self._env.scene.env_origins[:, None, :]
         )
-        if (
-            self.action_ball_diagnostic_split_ready_teacher
-            and self._action_ball_public_task_valid is not None
-        ):
-            wait = self._action_ball_safe_ready_wait_mask()
+        if self._action_ball_safe_ready_body_pos_w is not None:
             measured = torch.where(
                 wait[:, None, None],
                 self._action_ball_safe_ready_body_pos_w,
@@ -16793,14 +17380,11 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_quat_w(self) -> torch.Tensor:
-        if self.action_ball_diagnostic_split_ready_teacher:
-            self._capture_action_ball_safe_ready_reference()
-        measured = self.motion.body_quat_w[self._pose_reference_steps()]
-        if (
-            self.action_ball_diagnostic_split_ready_teacher
-            and self._action_ball_public_task_valid is not None
-        ):
-            wait = self._action_ball_safe_ready_wait_mask()
+        wait = self._action_ball_safe_ready_wait_mask()
+        measured = self.motion.body_quat_w[
+            self._action_ball_full_mdp_safe_pose_reference_steps()
+        ]
+        if self._action_ball_safe_ready_body_quat_w is not None:
             measured = torch.where(
                 wait[:, None, None],
                 self._action_ball_safe_ready_body_quat_w,
@@ -16813,7 +17397,9 @@ class MotionCommand(CommandTerm):
         # Zeroed during hold — see joint_vel. Un-gated motion_body_lin_vel otherwise
         # pays for tracking frame-0's -1.11 m/s DOWNWARD torso velocity all hold long.
         # R14 retiming composes: scale by playback speed first, then hold-zero wins.
-        v = self.motion.body_lin_vel_w[self.time_steps]
+        v = self.motion.body_lin_vel_w[
+            self._action_ball_full_mdp_safe_pose_reference_steps()
+        ]
         if self.retiming_active:
             v = v * self.speed_scale[:, None, None]
         stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
@@ -16821,7 +17407,9 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_ang_vel_w(self) -> torch.Tensor:
-        v = self.motion.body_ang_vel_w[self.time_steps]
+        v = self.motion.body_ang_vel_w[
+            self._action_ball_full_mdp_safe_pose_reference_steps()
+        ]
         if self.retiming_active:
             v = v * self.speed_scale[:, None, None]
         stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
@@ -16837,20 +17425,30 @@ class MotionCommand(CommandTerm):
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
-        alv = self.motion.body_lin_vel_w[self.time_steps, self.motion_anchor_body_index]
+        alv = self.motion.body_lin_vel_w[
+            self._action_ball_full_mdp_safe_pose_reference_steps(),
+            self.motion_anchor_body_index,
+        ]
         if self.retiming_active:
             alv = alv * self.speed_scale[:, None]
-        if self.canonical_ready_mode:
+        if self.canonical_ready_mode or getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
             stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
             alv = torch.where(stationary[:, None], torch.zeros_like(alv), alv)
         return alv
 
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
-        aav = self.motion.body_ang_vel_w[self.time_steps, self.motion_anchor_body_index]
+        aav = self.motion.body_ang_vel_w[
+            self._action_ball_full_mdp_safe_pose_reference_steps(),
+            self.motion_anchor_body_index,
+        ]
         if self.retiming_active:
             aav = aav * self.speed_scale[:, None]
-        if self.canonical_ready_mode:
+        if self.canonical_ready_mode or getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
             stationary = self.in_hold | self._action_ball_safe_ready_wait_mask()
             aav = torch.where(stationary[:, None], torch.zeros_like(aav), aav)
         return aav
@@ -17538,7 +18136,7 @@ class MotionCommand(CommandTerm):
         if self._action_ball_birth_broker is not None:
             # Diagnostic A211/C211 has no promotion authority, but its sampler, question/cache,
             # WAIT and command continuation state are still real mutable bytes.  Authorization and
-            # recoverability are independent axes: serialize the full schema-4 handoff and keep the
+            # recoverability are independent axes: serialize the full schema-5 handoff and keep the
             # diagnostic brand inside Racket's hard contract.
             #
             # 人话勘误(2026-08-07):这段以前的结尾是"而不是悄悄把每个诊断
@@ -17601,7 +18199,7 @@ class MotionCommand(CommandTerm):
             expected.add("continuous_motion_leaf")
         if type(value) is not dict or set(value) != expected:
             raise ValueError(
-                "Motion action-ball exact-resume state keys do not match schema 4"
+                "Motion action-ball exact-resume state keys do not match the strict schema"
             )
         runtime = self._action_ball_runtime_module_bound
         admission_receipt = (
@@ -17975,6 +18573,9 @@ class MotionCommand(CommandTerm):
                 "fault_count_device": leaf_state["fault_count_device"].to(
                     device=self.device
                 ),
+                "safe_ready_pending_count": leaf_state[
+                    "safe_ready_pending_count"
+                ],
                 "tensors": {
                     field_name: leaf_state["tensors"][field_name].to(
                         device=getattr(self, attr_name).device
@@ -18032,6 +18633,7 @@ class MotionCommand(CommandTerm):
                     self._action_ball_continuous_motion_global_drain_last_acknowledged_mutation_version,
                     self._action_ball_continuous_motion_checkpoint_requires_global_drain_ack,
                     self._action_ball_continuous_published_common_step,
+                    self._action_ball_safe_ready_pending_count,
                     tuple(
                         (
                             attr_name,
@@ -18165,6 +18767,11 @@ class MotionCommand(CommandTerm):
                     self._action_ball_continuous_published_common_step = (
                         leaf_state["published_common_step"]
                     )
+                    self._action_ball_safe_ready_pending_count = (
+                        continuous_motion_leaf_after[
+                            "safe_ready_pending_count"
+                        ]
+                    )
                     leaf_tensors = leaf_state["tensors"]
                     for field_name, attr_name, _nonnegative in (
                         _ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
@@ -18248,6 +18855,7 @@ class MotionCommand(CommandTerm):
                         leaf_drain_acknowledged_mutation_before,
                         leaf_checkpoint_requires_drain_ack_before,
                         leaf_published_common_step_before,
+                        leaf_safe_ready_pending_count_before,
                         leaf_tensors_before,
                     ) = continuous_motion_leaf_before
                     self._action_ball_continuous_motion_device_mutation_version.copy_(
@@ -18288,6 +18896,9 @@ class MotionCommand(CommandTerm):
                     )
                     self._action_ball_continuous_published_common_step = (
                         leaf_published_common_step_before
+                    )
+                    self._action_ball_safe_ready_pending_count = (
+                        leaf_safe_ready_pending_count_before
                     )
                     for attr_name, tensor_before in leaf_tensors_before:
                         getattr(self, attr_name).copy_(tensor_before)
@@ -19473,7 +20084,14 @@ class MotionCommand(CommandTerm):
         # simulator's settled FK tensors.  Freeze them once for RESET_WAIT;
         # later policy motion cannot turn the mimic target into a moving copy
         # of the robot.
-        if self.action_ball_diagnostic_split_ready_teacher:
+        if (
+            self.action_ball_diagnostic_split_ready_teacher
+            or getattr(
+                self,
+                "_action_ball_continuous_fresh_motion_lane_bound",
+                False,
+            )
+        ):
             self._capture_action_ball_safe_ready_reference()
 
         # Pre-swing HOLD: action-ball owns a continuous receipt deadline (including a possible
@@ -19673,17 +20291,44 @@ class MotionCommand(CommandTerm):
             finally:
                 self._resampling_from_wrap = False
 
-        anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
-        anchor_quat_w_repeat = self.anchor_quat_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
-        robot_anchor_pos_w_repeat = self.robot_anchor_pos_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
-        robot_anchor_quat_w_repeat = self.robot_anchor_quat_w[:, None, :].repeat(1, len(self.cfg.body_names), 1)
-
-        delta_pos_w = robot_anchor_pos_w_repeat
-        delta_pos_w[..., 2] = anchor_pos_w_repeat[..., 2]
-        delta_ori_w = yaw_quat(quat_mul(robot_anchor_quat_w_repeat, quat_inv(anchor_quat_w_repeat)))
-
-        self.body_quat_relative_w = quat_mul(delta_ori_w, self.body_quat_w)
-        self.body_pos_relative_w = delta_pos_w + quat_apply(delta_ori_w, self.body_pos_w - anchor_pos_w_repeat)
+        (
+            next_body_quat_relative_w,
+            next_body_pos_relative_w,
+        ) = _motion_anchor_relative_body_transform(
+            self.anchor_pos_w,
+            self.anchor_quat_w,
+            self.robot_anchor_pos_w,
+            self.robot_anchor_quat_w,
+            self.body_pos_w,
+            self.body_quat_w,
+            expected_body_count=len(self.cfg.body_names),
+        )
+        writable_rows = getattr(
+            self,
+            "_action_ball_full_mdp_motion_epoch_writable_rows",
+            None,
+        )
+        if (
+            fresh_action_ball_active
+            and torch.is_tensor(writable_rows)
+            and writable_rows.dtype == torch.bool
+            and tuple(writable_rows.shape) == (self.num_envs,)
+            and writable_rows.device == torch.device(self.device)
+        ):
+            body_write = writable_rows[:, None, None]
+            self.body_quat_relative_w = torch.where(
+                body_write,
+                next_body_quat_relative_w,
+                self.body_quat_relative_w,
+            )
+            self.body_pos_relative_w = torch.where(
+                body_write,
+                next_body_pos_relative_w,
+                self.body_pos_relative_w,
+            )
+        else:
+            self.body_quat_relative_w = next_body_quat_relative_w
+            self.body_pos_relative_w = next_body_pos_relative_w
 
         self.bin_failed_count = (
             self.cfg.adaptive_alpha * self._current_bin_failed + (1 - self.cfg.adaptive_alpha) * self.bin_failed_count

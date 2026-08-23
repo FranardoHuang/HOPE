@@ -119,6 +119,49 @@ def _device_verdict(device: str, count: int = 24, dtype=torch.float64):
     return actual.cpu(), torch.as_tensor(expected)
 
 
+def test_construction_exposes_only_path_free_plant_receipt(monkeypatch):
+    digests = {
+        "root_mjcf_sha256": "a" * 64,
+        "identity_manifest_sha256": "b" * 64,
+        "portable_identity_sha256": "c" * 64,
+        "verification_receipt_sha256": "d" * 64,
+        "owner_local_frame_sha256": "e" * 64,
+    }
+    authority = SimpleNamespace(
+        identity_receipt={
+            **digests,
+            "root_mjcf_path": "/must/not/leak/a3_pingpong.xml",
+            "identity_manifest_path": "/must/not/leak/manifest.json",
+        },
+        body_ids=np.arange(32, dtype=np.int64),
+        components=SimpleNamespace(
+            owner_indices=np.zeros(1, dtype=np.int64),
+            local_centers_m=np.zeros((1, 3), dtype=np.float64),
+            local_half_axes_m=np.zeros((1, 3, 3), dtype=np.float64),
+        ),
+        aabb_lo=np.zeros((1, 3), dtype=np.float64),
+        aabb_hi=np.ones((1, 3), dtype=np.float64),
+        racket_body_index=31,
+    )
+    monkeypatch.setattr(
+        keepout._authority, "ExactRobotTableGuard", lambda *_args, **_kwargs: authority
+    )
+    monkeypatch.setattr(
+        keepout,
+        "_load_table_scene",
+        lambda: SimpleNamespace(
+            action_ball_policy_obstacle_geometry=lambda: (),
+            action_ball_policy_geometry_contract=lambda _rows: {},
+        ),
+    )
+    bound = keepout.DeviceExactTableKeepout(
+        mujoco=object(), model=object(), mjcf_path=Path("/tmp/a3_pingpong.xml"),
+        env_origins=torch.zeros((2, 3)), device=torch.device("cpu"),
+    )
+    assert dict(bound.plant_identity_receipt) == digests
+    assert all("path" not in key for key in bound.plant_identity_receipt)
+
+
 def _empty_corner_discriminator(device: str, dtype):
     positions = torch.full((1, 32, 3), 50.0, dtype=dtype, device=device)
     positions[0, 0] = torch.tensor((0.112, 0.112, 0.0), dtype=dtype, device=device)

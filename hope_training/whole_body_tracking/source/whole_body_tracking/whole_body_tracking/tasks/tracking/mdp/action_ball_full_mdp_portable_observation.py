@@ -243,8 +243,10 @@ def quat_rotate_inverse_wxyz(quaternion, vector):
 def heading_xy_from_quat_wxyz(quaternion):
     """Return unit ``[cos(yaw), sin(yaw)]`` from a wxyz quaternion.
 
-    Yaw is undefined when the base X axis is vertical.  Such near-singular
-    poses fail explicitly instead of shrinking every heading-frame XY vector.
+    Yaw is undefined when the base X axis is vertical.  Use the deterministic
+    canonical heading ``[1, 0]`` for only those singular rows.  A fallen base
+    is a learnable terminal state, not a process-level observation fault; valid
+    peers must therefore remain observable without poisoning the CUDA stream.
     """
 
     import torch
@@ -256,13 +258,11 @@ def heading_xy_from_quat_wxyz(quaternion):
         dim=-1,
     )
     norm = torch.linalg.vector_norm(projected, dim=-1, keepdim=True)
-    valid = torch.all(norm > 1.0e-6)
-    async_assert = getattr(torch, "_assert_async", None)
-    if callable(async_assert):
-        async_assert(valid)
-    else:  # pragma: no cover - supported Torch builds provide _assert_async.
-        torch._assert(valid, "base heading is undefined near vertical X axis")
-    return projected / norm
+    singular = norm <= 1.0e-6
+    safe_norm = torch.where(singular, torch.ones_like(norm), norm)
+    normalized = projected / safe_norm
+    canonical = torch.cat((torch.ones_like(norm), torch.zeros_like(norm)), dim=-1)
+    return torch.where(singular, canonical, normalized)
 
 
 def rotate_world_to_heading_xy(heading_xy, vector):

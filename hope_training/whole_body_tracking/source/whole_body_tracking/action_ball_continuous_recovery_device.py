@@ -187,6 +187,8 @@ FAULT_DUPLICATE_PAYMENT = 1 << 11
 FAULT_PAYMENT_MISMATCH = 1 << 12
 FAULT_RESET_UNSETTLED = 1 << 13
 FAULT_LEDGER_SEQUENCE = 1 << 14
+FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY = 1 << 15
+FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW = 1 << 16
 
 FAULTS = (
     ("invalid_bind", FAULT_INVALID_BIND),
@@ -204,6 +206,14 @@ FAULTS = (
     ("payment_mismatch", FAULT_PAYMENT_MISMATCH),
     ("reset_unsettled", FAULT_RESET_UNSETTLED),
     ("ledger_sequence", FAULT_LEDGER_SEQUENCE),
+    (
+        "action_epoch_motion_chronology",
+        FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY,
+    ),
+    (
+        "motion_cadence_successor_overflow",
+        FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW,
+    ),
 )
 
 R07_GLOBAL_DRAIN_OWNER_KIND = "r07_recovery"
@@ -3327,9 +3337,12 @@ class ContinuousRecoveryDeviceCoordinator:
             shape=(self.num_envs,),
             dtype=torch.int64,
         )
-        self._require_action_epoch_motion_cadence_chronology(
-            reset_generation=reset_generation,
-            motion_cadence_tick=motion_cadence_tick,
+        _generation_changed, motion_chronology_valid = (
+            self._action_epoch_motion_cadence_chronology(
+                reset_generation=reset_generation,
+                motion_cadence_tick=motion_cadence_tick,
+                allow_same_generation_hold=False,
+            )
         )
 
         parent_action_slot = getattr(
@@ -3444,9 +3457,6 @@ class ContinuousRecoveryDeviceCoordinator:
             label="R07 epoch lifecycle completed",
             shape=(self.num_envs, shot_slot_capacity),
             dtype=torch.bool,
-        )
-        torch._assert_async(
-            torch.all(~(lifecycle_upcoming & lifecycle_completed))
         )
         bootstrap_lifecycle = (
             slot_valid & lifecycle_upcoming[env_ids, safe_slots]
@@ -3614,8 +3624,14 @@ class ContinuousRecoveryDeviceCoordinator:
             producer_fault_bits |= torch.full_like(
                 producer_fault_bits, R07_EPOCH_FAULT_EPOCH_IDENTITY
             )
-        facts_valid = plant_valid & reference_valid & chronology_valid
-        infrastructure_fault = producer_fault_bits.ne(0)
+        # This view remains pure: the exact publication writer below owns the
+        # sticky R07 fault.  Still make the invalid independent-owner join
+        # unusable here so reward/ready values cannot escape before that write.
+        r07_row_safe = self._fault_bits.eq(0) & motion_chronology_valid
+        facts_valid = (
+            plant_valid & reference_valid & chronology_valid & r07_row_safe
+        )
+        infrastructure_fault = producer_fault_bits.ne(0) | ~r07_row_safe
         scores = torch.reciprocal(
             1.0 + torch.square(errors / self._scales.unsqueeze(0))
         )
@@ -3749,31 +3765,91 @@ class ContinuousRecoveryDeviceCoordinator:
         self._require_r07_business_mutation_allowed(
             label="ActionEpoch idle post-physics support"
         )
-        self._action_epoch_ready_last_motion_cadence_tick.copy_(motion_tick)
-        self._action_epoch_ready_last_reset_generation.copy_(reset_generation)
+        _generation_changed, chronology_valid = (
+            self._action_epoch_motion_cadence_chronology(
+                reset_generation=reset_generation,
+                motion_cadence_tick=motion_tick,
+                allow_same_generation_hold=True,
+            )
+        )
+        writable_rows = self._latch_r07_row_fault(
+            ~chronology_valid,
+            reason_bit=FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY,
+        )
+        writable_rows = self._latch_r07_row_fault(
+            writable_rows
+            & motion_tick.ge(torch.iinfo(torch.int64).max),
+            reason_bit=FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW,
+        )
+        self._action_epoch_ready_last_motion_cadence_tick.copy_(
+            torch.where(
+                writable_rows,
+                motion_tick,
+                self._action_epoch_ready_last_motion_cadence_tick,
+            )
+        )
+        self._action_epoch_ready_last_reset_generation.copy_(
+            torch.where(
+                writable_rows,
+                reset_generation,
+                self._action_epoch_ready_last_reset_generation,
+            )
+        )
         self._action_epoch_ready_last_source_step = observed_source_step
         # A neutral/N/A tick is a real gap in R07's consecutive-readiness
         # chronology.  Preserve the keyed reference and first-ready history,
         # but never let a later full recovery sample inherit dwell accumulated
         # before this gap.
-        self._action_epoch_ready_instant.zero_()
-        self._action_epoch_ready_live.zero_()
-        self._action_epoch_ready_streak.zero_()
+        self._action_epoch_ready_instant.bitwise_and_(~writable_rows)
+        self._action_epoch_ready_live.bitwise_and_(~writable_rows)
+        self._action_epoch_ready_streak.copy_(
+            torch.where(
+                writable_rows,
+                torch.zeros_like(self._action_epoch_ready_streak),
+                self._action_epoch_ready_streak,
+            )
+        )
         self._idle_observation_source_step = observed_source_step
-        self._idle_observation_reset_generation.copy_(reset_generation)
-        self._idle_observation_motion_cadence_tick.copy_(motion_tick)
+        self._idle_observation_reset_generation.copy_(
+            torch.where(
+                writable_rows,
+                reset_generation,
+                self._idle_observation_reset_generation,
+            )
+        )
+        self._idle_observation_motion_cadence_tick.copy_(
+            torch.where(
+                writable_rows,
+                motion_tick,
+                self._idle_observation_motion_cadence_tick,
+            )
+        )
         self._idle_observation_published = True
         self._latest_motion_ready_projection = None
         self._advance_mutation_version()
         return None
 
-    def _require_action_epoch_motion_cadence_chronology(
+    def _action_epoch_motion_cadence_chronology(
         self,
         *,
         reset_generation: torch.Tensor,
         motion_cadence_tick: torch.Tensor,
-    ) -> torch.Tensor:
-        """Validate row cadence against the independent ActionEpoch reset."""
+        allow_same_generation_hold: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return generation-change and validity for the independent join.
+
+        The no-key idle path samples the global source clock even when Motion's
+        row-local sequence is inactive, so its cadence may legally hold for one
+        or more source ticks.  A keyed recovery sample is stricter: Motion is
+        active and must publish the exact next cadence tick.  Keep that semantic
+        choice explicit at each callsite instead of inferring one clock from the
+        other.
+        """
+
+        if type(allow_same_generation_hold) is not bool:
+            raise ContinuousRecoveryDeviceError(
+                "R07 cadence hold mode differs"
+            )
 
         reset_generation = self._tensor(
             reset_generation,
@@ -3797,6 +3873,10 @@ class ContinuousRecoveryDeviceCoordinator:
         tick_advanced = (
             prior_tick < torch.iinfo(torch.int64).max
         ) & motion_cadence_tick.eq(prior_tick + 1)
+        tick_held = motion_cadence_tick.eq(prior_tick)
+        same_generation_tick_valid = tick_advanced
+        if allow_same_generation_hold:
+            same_generation_tick_valid = tick_held | tick_advanced
         # ``-1`` is owner-private initialization state, never a Motion fact
         # that R07 may publish or turn into a next-tick capability.
         chronology_valid = motion_cadence_tick.ge(0) & (
@@ -3804,16 +3884,44 @@ class ContinuousRecoveryDeviceCoordinator:
             | (
                 has_history
                 & (
-                    (same_generation & tick_advanced)
+                    (same_generation & same_generation_tick_valid)
                     | generation_advanced
                 )
             )
         )
-        # The two operands have independent writers: ActionEpoch owns reset
-        # generation while Motion owns cadence_tick.  Keep this on device;
-        # an invalid row poisons the stream before any ActionEpoch publication.
-        torch._assert_async(torch.all(chronology_valid))
-        return has_history & generation_advanced
+        return has_history & generation_advanced, chronology_valid
+
+    def _latch_r07_row_fault(
+        self,
+        fault_rows: torch.Tensor,
+        *,
+        reason_bit: int,
+    ) -> torch.Tensor:
+        """Latch one named device fault and return the global writable rows."""
+
+        rows = self._tensor(
+            fault_rows,
+            label="R07 runtime fault rows",
+            shape=(self.num_envs,),
+            dtype=torch.bool,
+        )
+        known_bits = frozenset(bit for _name, bit in FAULTS)
+        if (
+            type(reason_bit) is not int
+            or reason_bit <= 0
+            or reason_bit & (reason_bit - 1)
+            or reason_bit not in known_bits
+        ):
+            raise ContinuousRecoveryDeviceError(
+                "R07 runtime fault reason bit is unknown or compound"
+            )
+        # The first root fault owns the row's causal diagnosis.  Later checks
+        # see the returned sticky safe mask and cannot manufacture compounds.
+        root_rows = rows & self._fault_bits.eq(0)
+        self._fault_bits.bitwise_or_(
+            root_rows.to(dtype=torch.int64) * int(reason_bit)
+        )
+        return self._fault_bits.eq(0)
 
     def _require_action_epoch_readiness_chronology(
         self,
@@ -3921,11 +4029,21 @@ class ContinuousRecoveryDeviceCoordinator:
             shape=(self.num_envs, self.num_feet),
             dtype=torch.bool,
         )
-        generation_changed = (
-            self._require_action_epoch_motion_cadence_chronology(
+        generation_changed, chronology_valid = (
+            self._action_epoch_motion_cadence_chronology(
                 reset_generation=result.reset_generation,
                 motion_cadence_tick=result.motion_cadence_tick,
+                allow_same_generation_hold=False,
             )
+        )
+        writable_rows = self._latch_r07_row_fault(
+            ~chronology_valid,
+            reason_bit=FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY,
+        )
+        writable_rows = self._latch_r07_row_fault(
+            writable_rows
+            & result.motion_cadence_tick.ge(torch.iinfo(torch.int64).max),
+            reason_bit=FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW,
         )
 
         if key is None:
@@ -3951,6 +4069,7 @@ class ContinuousRecoveryDeviceCoordinator:
             | key_changed
         )
         reference_identity_changed |= generation_changed
+        reference_identity_changed &= writable_rows
         prior_streak = torch.where(
             reference_identity_changed,
             torch.zeros_like(self._action_epoch_ready_streak),
@@ -3967,6 +4086,7 @@ class ContinuousRecoveryDeviceCoordinator:
             & ~result.infrastructure_fault
             & result.producer_fault_bits.eq(0)
             & result.source_step.eq(int(observed_source_step))
+            & writable_rows
         )
         next_streak, ready_live = self._next_ready_dwell(
             ready_instant,
@@ -3974,37 +4094,85 @@ class ContinuousRecoveryDeviceCoordinator:
         )
         first_ready = ready_live & first_ready_source_step.lt(0)
 
-        self._action_epoch_ready_instant.copy_(ready_instant)
-        self._action_epoch_ready_live.copy_(ready_live)
-        self._action_epoch_ready_streak.copy_(next_streak)
-        self._action_epoch_ready_reference_kind.copy_(result.reference_kind)
+        self._action_epoch_ready_instant.copy_(
+            torch.where(
+                writable_rows,
+                ready_instant,
+                self._action_epoch_ready_instant,
+            )
+        )
+        self._action_epoch_ready_live.copy_(
+            torch.where(
+                writable_rows,
+                ready_live,
+                self._action_epoch_ready_live,
+            )
+        )
+        self._action_epoch_ready_streak.copy_(
+            torch.where(
+                writable_rows,
+                next_streak,
+                self._action_epoch_ready_streak,
+            )
+        )
+        self._action_epoch_ready_reference_kind.copy_(
+            torch.where(
+                writable_rows,
+                result.reference_kind,
+                self._action_epoch_ready_reference_kind,
+            )
+        )
         self._action_epoch_ready_reference_action_slot.copy_(
-            result.reference_action_slot
+            torch.where(
+                writable_rows,
+                result.reference_action_slot,
+                self._action_epoch_ready_reference_action_slot,
+            )
         )
         self._action_epoch_ready_reference_action_uid.copy_(
-            result.reference_action_uid
+            torch.where(
+                writable_rows,
+                result.reference_action_uid,
+                self._action_epoch_ready_reference_action_uid,
+            )
         )
         for field in fields(_row_identity.ActionEpochShotKey):
             destination = getattr(self._action_epoch_ready_shot_key, field.name)
-            if key is None:
-                destination.fill_(-1)
-            else:
-                destination.copy_(getattr(key, field.name))
+            source = (
+                torch.full_like(destination, -1)
+                if key is None
+                else getattr(key, field.name)
+            )
+            destination.copy_(
+                torch.where(writable_rows, source, destination)
+            )
         self._action_epoch_first_ready_source_step.copy_(
             torch.where(
-                first_ready,
-                torch.full_like(
+                writable_rows,
+                torch.where(
+                    first_ready,
+                    torch.full_like(
+                        first_ready_source_step,
+                        int(observed_source_step),
+                    ),
                     first_ready_source_step,
-                    int(observed_source_step),
                 ),
-                first_ready_source_step,
+                self._action_epoch_first_ready_source_step,
             )
         )
         self._action_epoch_ready_last_motion_cadence_tick.copy_(
-            result.motion_cadence_tick
+            torch.where(
+                writable_rows,
+                result.motion_cadence_tick,
+                self._action_epoch_ready_last_motion_cadence_tick,
+            )
         )
         self._action_epoch_ready_last_reset_generation.copy_(
-            result.reset_generation
+            torch.where(
+                writable_rows,
+                result.reset_generation,
+                self._action_epoch_ready_last_reset_generation,
+            )
         )
         self._action_epoch_ready_last_source_step = int(observed_source_step)
         self._ready_instant_total.add_(ready_instant.to(torch.int64).sum())
@@ -4014,8 +4182,12 @@ class ContinuousRecoveryDeviceCoordinator:
         # action, not an R07 fact owned by a current full ActionEpoch shot key.
         # Keep the owner-private dwell/first-ready chronology above, but only
         # publish keyed telemetry for a completed action reference.
-        epoch_first_ready = first_ready & result.reference_kind.eq(
-            R07_REFERENCE_COMPLETED_ACTION_FRAME0
+        epoch_first_ready = (
+            first_ready
+            & writable_rows
+            & result.reference_kind.eq(
+                R07_REFERENCE_COMPLETED_ACTION_FRAME0
+            )
         )
         if publish_keyed_first_ready:
             bundle.action_epoch_owner.publish_r07_first_ready(
@@ -4025,21 +4197,39 @@ class ContinuousRecoveryDeviceCoordinator:
                 source_step=self._action_epoch_first_ready_source_step,
             )
 
+        neutral_i64 = torch.full_like(result.source_step, -1)
+        control_cadence = torch.where(
+            writable_rows,
+            result.motion_cadence_tick,
+            torch.zeros_like(result.motion_cadence_tick),
+        )
         motion_ready_payload = _MotionReadyPayload(
             owner_identity=self._identity,
             owner=self,
-            postphysics_valid=result.facts_valid.detach().clone(),
-            source_step=result.source_step.detach().clone(),
-            reset_generation=result.reset_generation.detach().clone(),
+            postphysics_valid=(
+                result.facts_valid & writable_rows
+            ).detach().clone(),
+            source_step=torch.where(
+                writable_rows, result.source_step, neutral_i64
+            ).detach().clone(),
+            reset_generation=torch.where(
+                writable_rows, result.reset_generation, neutral_i64
+            ).detach().clone(),
             control_tick=torch.where(
-                result.motion_cadence_tick < torch.iinfo(torch.int64).max,
-                result.motion_cadence_tick + 1,
-                torch.full_like(result.motion_cadence_tick, -1),
+                writable_rows,
+                control_cadence + 1,
+                neutral_i64,
             ),
-            ready=ready_live.detach().clone(),
-            ready_streak=next_streak.detach().clone(),
+            ready=(ready_live & writable_rows).detach().clone(),
+            ready_streak=torch.where(
+                writable_rows,
+                next_streak,
+                torch.zeros_like(next_streak),
+            ).detach().clone(),
             required_dwell=int(self.profile.ready_dwell_ticks),
-            foot_supported_lr=foot_supported_lr.detach().clone(),
+            foot_supported_lr=(
+                foot_supported_lr & writable_rows[:, None]
+            ).detach().clone(),
         )
         self._latest_motion_ready_projection = _mint_full_mdp_identity(
             ContinuousRecoveryMotionReadyProjection,
@@ -4364,18 +4554,32 @@ class ContinuousRecoveryDeviceCoordinator:
                     device=self.device,
                 )
                 cadence_tick = self._idle_observation_motion_cadence_tick
-                torch._assert_async(
-                    torch.all(cadence_tick < torch.iinfo(torch.int64).max)
+                valid_rows = (
+                    self._fault_bits.eq(0)
+                    & cadence_tick.ge(0)
+                    & cadence_tick.lt(torch.iinfo(torch.int64).max)
                 )
+                safe_cadence = torch.where(
+                    valid_rows,
+                    cadence_tick,
+                    torch.zeros_like(cadence_tick),
+                )
+                neutral_i64 = torch.full_like(cadence_tick, -1)
                 return ContinuousRecoveryObservationState(
-                    postphysics_valid=torch.ones_like(
-                        source_step, dtype=torch.bool
+                    postphysics_valid=valid_rows.detach().clone(),
+                    source_step=torch.where(
+                        valid_rows, source_step, neutral_i64
                     ),
-                    source_step=source_step,
-                    reset_generation=(
-                        self._idle_observation_reset_generation.detach().clone()
+                    reset_generation=torch.where(
+                        valid_rows,
+                        self._idle_observation_reset_generation,
+                        neutral_i64,
+                    ).detach().clone(),
+                    control_tick=torch.where(
+                        valid_rows,
+                        safe_cadence + 1,
+                        neutral_i64,
                     ),
-                    control_tick=cadence_tick.detach().clone().add_(1),
                     ready_streak=(
                         torch.zeros_like(cadence_tick)
                     ),
@@ -6412,6 +6616,8 @@ __all__ = (
     "PHASE_READY_HOLD",
     "PHASE_RECOVERY_UNAVAILABLE",
     "PHASE_INFRASTRUCTURE_INVALID",
+    "FAULT_ACTION_EPOCH_MOTION_CHRONOLOGY",
+    "FAULT_MOTION_CADENCE_SUCCESSOR_OVERFLOW",
     "FAULTS",
     "ContinuousRecoveryDeviceError",
     "ContinuousRecoveryConstructionHold",

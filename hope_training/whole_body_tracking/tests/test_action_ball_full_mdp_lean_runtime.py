@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -10,7 +9,7 @@ import sys
 import pytest
 import torch
 
-from test_action_ball_full_mdp_epoch_rowwise import _ready_epoch
+import test_action_ball_full_mdp_epoch_rowwise as epoch_rowwise
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,32 +20,15 @@ for path in (str(SOURCE), str(MDP)):
         sys.path.insert(0, path)
 
 
-# Reuse the production namespace already established by preceding collection.
-# The integrated suite first imports these owners package-qualified, while a
-# cold focused invocation cannot import ``mdp.__init__`` without Isaac Lab and
-# therefore uses the modules' supported flat fallback.  Package and flat names
-# are not specified to alias one another, so select one namespace once and keep
-# all three exact class identities inside it.
-_PACKAGE = "whole_body_tracking.tasks.tracking.mdp"
-_LEAVES = (
-    "action_ball_full_mdp_epoch",
-    "action_ball_full_mdp_lean_rewards",
-    "action_ball_full_mdp_lean_runtime",
-)
-_PACKAGE_IS_LIVE = _PACKAGE in sys.modules and any(
-    f"{_PACKAGE}.{leaf}" in sys.modules for leaf in _LEAVES
-)
-_MODULE_PREFIX = f"{_PACKAGE}." if _PACKAGE_IS_LIVE else ""
-
-
-def _canonical_module(leaf: str):
-    return importlib.import_module(f"{_MODULE_PREFIX}{leaf}")
-
-
-E = _canonical_module(_LEAVES[0])
-R = _canonical_module(_LEAVES[1])
-L = _canonical_module(_LEAVES[2])
-T = _canonical_module("action_ball_full_mdp_lean_checkpoint_txn")
+# Reuse the one production module graph established by the row-wise fixture.
+# Choosing a namespace from ambient ``sys.modules`` made exact dataclass checks
+# depend on collection order whenever the same source had also been imported
+# through its supported flat fallback.
+_ready_epoch = epoch_rowwise._ready_epoch
+E = epoch_rowwise.E
+R = epoch_rowwise.LEAN_REWARDS
+L = epoch_rowwise.LEAN
+T = L.carry_txn
 
 
 class _CarryRoot:
@@ -418,9 +400,11 @@ def test_preceding_import_same_process_reuses_canonical_module_identities():
     # later copy imports its fixtures in the same process.  In particular, the
     # runtime's exact graph-type check remains meaningful rather than being
     # weakened to accommodate two spec-loaded copies of the same class.
-    assert _canonical_module(_LEAVES[0]) is E
-    assert _canonical_module(_LEAVES[1]) is R
-    assert _canonical_module(_LEAVES[2]) is L
+    assert epoch_rowwise.E is E
+    assert epoch_rowwise.LEAN_REWARDS is R
+    assert epoch_rowwise.LEAN is L
+    assert E.carry_txn is T
+    assert L.carry_txn is T
     owner, _epoch, graph = _owner()
     assert owner._reward_graph_identity is graph
     assert type(graph) is R.LeanActionEpochRewardGraph
@@ -523,24 +507,146 @@ def test_failed_journal_ack_does_not_install_provisional_continuation(monkeypatc
     assert owner._next_update_index == 0
 
 
-def test_host_overflow_stops_before_optimizer_and_materializes_once(monkeypatch):
+def test_host_named_row_fault_stops_before_optimizer_and_materializes_once(monkeypatch):
     owner, epoch, _graph = _owner()
-    epoch._undecoded_overflow[1] = True
+    epoch._undrained_row_fault_bits[1] = E.ROW_FAULT_MOTION_CLOSE_CONTRACT
     original = E.ActionEpochOwner.materialize_drain
     calls = []
 
     def counted(self, *, start, end):
         calls.append((start, end))
         materialized = original(self, start=start, end=end)
-        assert materialized.overflow.device.type == "cpu"
+        assert materialized.row_fault_bits.device.type == "cpu"
         return materialized
 
     monkeypatch.setattr(E.ActionEpochOwner, "materialize_drain", counted)
-    with pytest.raises(L.ActionBallFullMdpLeanRuntimeError, match="overflow"):
+    with pytest.raises(
+        L.ActionBallFullMdpEpochRowFaultError,
+        match=r"motion_close_contract\(rows=1,envs=\[1\]\)",
+    ):
         owner.prepare_pre_optimizer_ppo_boundary(
             update_index=0, completed_environment_steps=4
         )
     assert calls == [(0, 1)]
+    assert owner.poisoned
+
+
+def test_host_selected_reset_generation_overflow_fault_is_named_exactly():
+    owner, epoch, _graph = _owner()
+    epoch._undrained_row_fault_bits[0] = (
+        E.ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW
+    )
+
+    with pytest.raises(
+        L.ActionBallFullMdpEpochRowFaultError,
+        match=(
+            r"selected_reset_generation_overflow\(rows=1,envs=\[0\]\)"
+        ),
+    ) as raised:
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=4
+        )
+
+    assert raised.value.row_fault_bits.tolist() == [
+        E.ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW,
+        0,
+    ]
+    assert owner.poisoned
+
+
+def test_exact_bound_runtime_faults_pack_and_decode_each_named_cause():
+    owner, epoch, _graph = _owner()
+    r06 = epoch_rowwise._R06(epoch, epoch.device)
+    motion = epoch_rowwise._PlaybackOwner(epoch)
+    epoch.bind_fact_owner("r06_landing_outcome", r06)
+    epoch.bind_async_owner("r06_landing_outcome", r06)
+    epoch.bind_motion_playback_owner(motion)
+    rows = torch.tensor([True, False], dtype=torch.bool, device=epoch.device)
+    other_rows = ~rows
+    epoch.latch_runtime_row_fault(
+        "r06_landing_outcome",
+        E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+        rows,
+        owner=r06,
+    )
+    epoch.latch_runtime_row_fault(
+        "motion",
+        E.ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
+        other_rows,
+        owner=motion,
+    )
+    epoch.latch_runtime_row_fault(
+        "motion",
+        E.ROW_FAULT_MOTION_TASK_TIMING_CONTRACT,
+        other_rows,
+        owner=motion,
+    )
+    epoch.latch_runtime_row_fault(
+        "r06_landing_outcome",
+        E.ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE,
+        rows,
+        owner=r06,
+    )
+
+    with pytest.raises(L.ActionBallFullMdpEpochRowFaultError) as raised:
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=4
+        )
+
+    expected = (
+        E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE
+        | E.ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE
+    )
+    assert raised.value.row_fault_bits.tolist() == [
+        expected,
+        (
+            E.ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT
+            | E.ROW_FAULT_MOTION_TASK_TIMING_CONTRACT
+        ),
+    ]
+    assert (
+        "r06_outcome_projection_duplicate(rows=1,envs=[0])"
+        in str(raised.value)
+    )
+    assert (
+        "r06_payment_mailbox_duplicate(rows=1,envs=[0])"
+        in str(raised.value)
+    )
+    assert (
+        "motion_reveal_reference_contract(rows=1,envs=[1])"
+        in str(raised.value)
+    )
+    assert "motion_task_timing_contract(rows=1,envs=[1])" in str(
+        raised.value
+    )
+    assert owner.poisoned
+
+
+def test_host_row_fault_reports_compound_named_and_unknown_bits_exactly():
+    owner, epoch, _graph = _owner()
+    unknown = 1 << 40
+    epoch._undrained_row_fault_bits.copy_(torch.tensor([
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT | unknown,
+        E.ROW_FAULT_RESET_GENESIS_CONTRACT,
+    ], dtype=torch.int64))
+
+    with pytest.raises(L.ActionBallFullMdpEpochRowFaultError) as raised:
+        owner.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=4
+        )
+
+    fault = raised.value
+    assert fault.row_fault_bits.tolist() == [
+        E.ROW_FAULT_MOTION_CLOSE_CONTRACT | unknown,
+        E.ROW_FAULT_RESET_GENESIS_CONTRACT,
+    ]
+    message = str(fault)
+    assert "reset_genesis_contract(rows=1,envs=[1])" in message
+    assert "motion_close_contract(rows=1,envs=[0])" in message
+    assert (
+        "unknown_action_epoch_row_fault_bits"
+        f"(rows=1,envs=[0],values=[{unknown}])"
+    ) in message
     assert owner.poisoned
 
 

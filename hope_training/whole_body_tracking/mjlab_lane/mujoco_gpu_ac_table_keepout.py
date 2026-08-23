@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+from types import MappingProxyType
 
 import torch
 
@@ -175,6 +176,24 @@ class DeviceExactTableKeepout:
             contract,
             mjcf_path=mjcf_path,
             body_name_prefix="robot/",
+        )
+        identity = authority.identity_receipt
+        identity_keys = (
+            "root_mjcf_sha256",
+            "identity_manifest_sha256",
+            "portable_identity_sha256",
+            "verification_receipt_sha256",
+            "owner_local_frame_sha256",
+        )
+        if any(
+            type(identity.get(key)) is not str
+            or len(identity[key]) != 64
+            or any(char not in "0123456789abcdef" for char in identity[key])
+            for key in identity_keys
+        ):
+            raise RuntimeError("MuJoCo table keepout plant identity receipt differs")
+        self.plant_identity_receipt = MappingProxyType(
+            {key: identity[key] for key in identity_keys}
         )
         dtype = env_origins.dtype
 

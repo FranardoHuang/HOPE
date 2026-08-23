@@ -82,6 +82,7 @@ def _prepare_batch(*, num_envs: int, swing_generation: int):
     # The harness bypasses MotionCommand.__init__; spell out the formal/default
     # lifecycle state that production construction always installs.
     command.action_ball_diagnostic_split_ready_teacher = False
+    command.action_ball_single_stroke_timeout_enabled = False
     command._action_ball_single_stroke_complete = torch.zeros(
         num_envs, dtype=torch.bool
     )
@@ -853,6 +854,7 @@ def test_split_ready_update_latches_completion_without_wrap_resample():
     command._event_scheduler = None
     command._multiseg = True
     command.action_ball_diagnostic_split_ready_teacher = True
+    command.action_ball_single_stroke_timeout_enabled = True
     command._action_ball_safe_ready_reference_pending = torch.zeros(
         4, dtype=torch.bool
     )
@@ -940,3 +942,62 @@ def test_racket_routes_only_diagnostic_rows_to_selected_batch_resolver():
     assert "try:" not in diagnostic_seam
     assert "except" not in diagnostic_seam
     assert "poisons the whole run" in diagnostic_seam
+
+
+@pytest.mark.parametrize(
+    ("phase_name", "expected_started"),
+    (
+        ("PHASE_LAUNCH_SETTLED", True),
+        ("PHASE_OUTCOME_SETTLED", True),
+        ("PHASE_IDLE", False),
+        ("PHASE_RETIRED", False),
+    ),
+)
+def test_motion_first_frame0_exit_publishes_only_for_open_shot_phases(
+    phase_name,
+    expected_started,
+):
+    """Launch/outcome remain open to Motion's late first-playback edge."""
+
+    # Lazy import avoids a collection cycle through
+    # continuous_motion_bridge -> this module -> rowwise_accept_writer.
+    import test_action_ball_motion_rowwise_accept_writer as motion_epoch
+
+    (
+        command,
+        _owner,
+        epoch_owner,
+        token,
+        _record,
+        _racket_peer,
+        _physical_peer,
+    ) = motion_epoch._install_real_d05_record(
+        device=torch.device("cpu"),
+        corrupt_accept_mask=False,
+    )
+    epoch_owner.settle_d05_transaction(token)
+    epoch_mod = motion_epoch.D05._require_action_epoch_module()
+
+    current = epoch_owner.current()
+    phase = current.phase.clone()
+    phase[0, 0] = getattr(epoch_mod, phase_name)
+    epoch_owner._publication = replace(
+        epoch_owner._publication,
+        current=replace(current, phase=phase),
+    )
+    motion_epoch._make_teacher_start_reachable(command)
+
+    motion_epoch._advance_canonical_lifecycle_once(command)
+
+    assert epoch_owner.current().motion_playback_started[:, 0].tolist() == [
+        expected_started,
+        False,
+    ]
+    assert (
+        command._action_ball_continuous_canonical_playback_started.tolist()
+        == [expected_started, False]
+    )
+    entry = epoch_owner._publication.pending_log[-1]
+    assert entry.transition == epoch_mod.MOTION_PLAYBACK_STARTED
+    event_mask = entry.delta.values[entry.delta.names.index("event_mask")]
+    assert event_mask[:, 0].tolist() == [expected_started, False]

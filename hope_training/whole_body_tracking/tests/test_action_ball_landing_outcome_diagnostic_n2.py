@@ -150,10 +150,21 @@ class _Asset:
         self.data.root_state_w[env_ids, 7:] = value
 
 
+class _ReplicatedScene(dict):
+    """Minimal InteractiveScene facts required by the concrete scene port."""
+
+    def __init__(self, *, num_envs: int):
+        super().__init__()
+        self.cfg = SimpleNamespace(replicate_physics=True)
+        self.env_prim_paths = [
+            f"/World/envs/env_{index}" for index in range(num_envs)
+        ]
+
+
 def _physical_owner(scene_module, physical_module, spec, binding, device):
     exact_device = torch.device(device)
     origins = torch.zeros((2, 3), dtype=torch.float32, device=exact_device)
-    scene = {}
+    scene = _ReplicatedScene(num_envs=2)
     for name in spec.scene_entity_names:
         root = torch.zeros((2, 13), dtype=torch.float32, device=exact_device)
         root[:, 2] = scene_module.PARK_POSITION_ENV_M[2]

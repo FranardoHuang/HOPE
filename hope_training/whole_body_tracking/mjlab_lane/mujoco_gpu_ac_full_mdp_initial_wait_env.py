@@ -416,6 +416,27 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         torch = self._torch
         n = self.num_envs
         dtype = self.qpos_init.dtype
+        # Reward14 is evaluated on every control step.  Materialize its immutable
+        # configured weights once with the rest of the Full-A device state so the
+        # portable kernel never performs a per-step host-to-device construction.
+        self._full_a_lifecycle_reward_weights = torch.tensor(
+            portable_reward.LIFECYCLE_WEIGHTS,
+            dtype=dtype,
+            device=self.device,
+        )
+        # WAIT/recovery parking uses these exact constants on every control
+        # transition.  Cache only the immutable scene-frame offset and unit
+        # quaternion; per-world origins remain live inputs in _full_a_park_rows.
+        self._full_a_park_position_scene = torch.tensor(
+            WAIT_BALL_PARK_HOPE,
+            dtype=dtype,
+            device=self.device,
+        ) + self.hope_to_scene
+        self._full_a_park_quaternion = torch.tensor(
+            (1.0, 0.0, 0.0, 0.0),
+            dtype=dtype,
+            device=self.device,
+        )
         self._epoch_task_f32 = torch.zeros(
             (n, observation_contract.TASK_F32_WIDTH), dtype=dtype, device=self.device
         )
@@ -733,21 +754,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         n = int(ids.numel())
         if n == 0:
             return
-        torch = self._torch
-        park_env = torch.tensor(
-            WAIT_BALL_PARK_HOPE,
-            dtype=self.qpos_init.dtype,
-            device=self.device,
-        ) + self.hope_to_scene
         data = self.sim.data
         data.qpos[ids, self.b_q : self.b_q + 3] = (
-            self.env.scene.env_origins[ids] + park_env
+            self.env.scene.env_origins[ids] + self._full_a_park_position_scene
         )
-        data.qpos[ids, self.b_q + 3 : self.b_q + 7] = torch.tensor(
-            (1.0, 0.0, 0.0, 0.0),
-            dtype=self.qpos_init.dtype,
-            device=self.device,
-        ).expand(n, 4)
+        data.qpos[ids, self.b_q + 3 : self.b_q + 7] = (
+            self._full_a_park_quaternion.expand(n, 4)
+        )
         data.qvel[ids, self.b_v : self.b_v + 6] = 0.0
         self.ball_age_buf[ids] = 0
 
@@ -803,30 +816,28 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         launch = launch_pending & launch_tick.eq(now)
         self._full_a_launch_rows(launch.nonzero(as_tuple=False).squeeze(-1))
         waiting = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED)
-        self._full_a_park_rows(waiting.nonzero(as_tuple=False).squeeze(-1))
         recovering = self._epoch_phase.eq(FULL_A_PHASE_OUTCOME_SETTLED) | (
             self._epoch_phase.eq(FULL_A_PHASE_RETIRED)
         )
-        self._full_a_park_rows(recovering.nonzero(as_tuple=False).squeeze(-1))
         idle = self._epoch_phase.eq(FULL_A_PHASE_IDLE)
-        self._full_a_park_rows(idle.nonzero(as_tuple=False).squeeze(-1))
+        # These post-launch phases are disjoint and all require the identical
+        # idempotent park write.  Select their union once: per-row chronology is
+        # unchanged (reveal, then exact launch, then park-if-nonflight) while the
+        # dynamic-shape selections fall from five to three per control step.
+        park = waiting | recovering | idle
+        self._full_a_park_rows(park.nonzero(as_tuple=False).squeeze(-1))
         return reveal, launch, due, deferred, missed_launch
 
-    def _full_a_latch_ball_contacts(self) -> None:
-        """Latch live contact plus first net/landing-plane crossings."""
+    def _full_a_latch_ball_contacts(self, contact_census=None) -> None:
+        """Consume one shared census, then latch net/landing-plane crossings."""
 
         torch = self._torch
-        geom = self._con_geom[:]
-        valid = self._con_idx < self._nacon[0]
-        g0, g1 = geom[:, 0], geom[:, 1]
-        ball0, ball1 = g0.eq(self._ball_gid), g1.eq(self._ball_gid)
-        other = torch.where(ball0, g1, g0).long()
-        ball = valid & (ball0 | ball1)
-        world = self._con_world[:].long().clamp_(0, self.num_envs - 1)
-        racket_count = torch.zeros(self.num_envs, device=self.device)
-        table_count = torch.zeros_like(racket_count)
-        racket_count.scatter_add_(0, world, (ball & self._geom_class[other].eq(1)).float())
-        table_count.scatter_add_(0, world, (ball & self._geom_class[other].eq(2)).float())
+        if contact_census is None:
+            # Focused host tests may invoke this consumer directly.  Production
+            # always passes the census already recorded by the base probe.
+            contact_census = A3ReadyBallVecEnv._contact_census(self)
+        racket_count = contact_census.ball_racket_by_world
+        table_count = contact_census.ball_table_by_world
         active = self._epoch_phase.eq(FULL_A_PHASE_LAUNCH_SETTLED)
         first_contact = active & racket_count.gt(0) & ~self._full_a_racket_contact
         center = self.sim.data.qpos[:, self.b_q : self.b_q + 3]
@@ -1418,10 +1429,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             & ~terminated
             & ~truncated
         )
-        if bool((completion_due & ~complete_window).any()):
-            raise RuntimeError(
-                "portable R07 recovery window is incomplete or faulted"
-            )
+        completion_fault = completion_due & ~complete_window
+        # Keep the hot path device-only, but do not translate an internal
+        # chronology fault into a business recovery verdict.  The named event
+        # returned below is accumulated by the ledger and rejected at its one
+        # pre-optimizer host boundary.
+        self._full_a_recovery_sticky_fault |= completion_fault
         terminal, success, failure, timeout = portable_outcome.recovery_status(
             torch=torch,
             recovering=recovery,
@@ -1431,8 +1444,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             ready_seen=self._full_a_recovery_ready_seen,
             end_age=FULL_A_RECOVERY_END_AGE_TICK,
         )
-        terminal |= invalid_outcome
-        failure |= invalid_outcome
+        terminal = (terminal | invalid_outcome) & ~completion_fault
+        success &= ~completion_fault
+        failure = (failure | invalid_outcome) & ~completion_fault
+        timeout &= ~completion_fault
         # A physical/Gym terminal interrupts recovery and true-resets the row;
         # it is telemetry, not a nonterminating shot retirement.  Only the
         # naturally closed 68-cell window enters RETIRED.
@@ -1444,7 +1459,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 self._epoch_phase,
             )
         )
-        return terminal, success, failure, timeout
+        return terminal, success, failure, timeout, completion_fault
 
     def _full_a_completed_action_epoch(self, shot_retired):
         """Close one same-row business epoch; this is evidence, not shot success."""
@@ -1693,28 +1708,29 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             data.subtree_com[:, roots],
         )
 
-    def _latch_post_forward_resolved_table_contacts(self) -> None:
-        """Include contacts created by the final integration in this step."""
+    def _latch_post_forward_resolved_table_contacts(
+        self, contact_census=None
+    ) -> None:
+        """Include final-integration table facts from the shared census."""
 
-        torch = self._torch
-        geom = self._con_geom[:]
-        valid = self._con_idx < self._nacon[0]
-        g0, g1 = geom[:, 0], geom[:, 1]
-        table0 = g0.eq(self._table_gid)
-        table1 = g1.eq(self._table_gid)
-        partner = torch.where(table0, g1, g0).long()
-        robot_table = valid & (table0 | table1) & self._is_robot_geom[partner]
-        world = self._con_world[:].long().clamp_(0, self.num_envs - 1)
-        self._cur_robot_table.scatter_add_(0, world, robot_table.float())
+        if contact_census is None:
+            contact_census = A3ReadyBallVecEnv._contact_census(self)
+        self._cur_robot_table.add_(contact_census.robot_table_by_world)
 
-    def _after_physics_substep(self, substep_index) -> None:
+    def _after_physics_substep(
+        self, substep_index, contact_census=None
+    ) -> None:
         # MJWarp leaves derived poses at the pre-integration state.  Calls
         # 2..20 therefore expose post-states 1..19; the explicit final forward
         # below supplies post-state 20 without adding 20 redundant forwards.
         if substep_index > 0:
             self._cur_table_keepout |= self._table_keepout.sample(self.sim.data)
             if getattr(self, "full_a_mode", False) and self._fullmdp_initialized:
-                self._full_a_latch_ball_contacts()
+                if contact_census is None:
+                    raise RuntimeError(
+                        "FullMDP physics substep contact census is absent"
+                    )
+                self._full_a_latch_ball_contacts(contact_census)
 
     def _latch_post_forward_table_keepout(self) -> None:
         self._cur_table_keepout |= self._table_keepout.sample(self.sim.data)
@@ -1797,17 +1813,41 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         n = int(ids.numel())
         if n == 0:
             return
-        park_hope = torch.tensor(
-            WAIT_BALL_PARK_HOPE, dtype=self.qpos_init.dtype, device=self.device
+        full_a_initialized = (
+            getattr(self, "full_a_mode", False) and self._fullmdp_initialized
         )
-        park_scene = park_hope + self.hope_to_scene
+        if full_a_initialized:
+            # Full-A owns scene-local state in a multi-world batch.  Reuse the
+            # construction-time constants, while keeping origins live so a
+            # reset cannot park every row in world zero.
+            park_scene = self._full_a_park_position_scene
+            park_position_w = (
+                self.env.scene.env_origins[ids] + park_scene
+            )
+        else:
+            # Base construction and the legacy WAIT lane reach this override
+            # before Full-A state exists.  Preserve its state math and write
+            # ordering exactly.
+            park_hope = torch.tensor(
+                WAIT_BALL_PARK_HOPE,
+                dtype=self.qpos_init.dtype,
+                device=self.device,
+            )
+            park_scene = park_hope + self.hope_to_scene
+            park_position_w = park_scene.expand(n, 3)
         data = self.sim.data
-        data.qpos[ids, self.b_q : self.b_q + 3] = park_scene.expand(n, 3)
-        data.qpos[ids, self.b_q + 3 : self.b_q + 7] = torch.tensor(
-            [1.0, 0.0, 0.0, 0.0],
-            dtype=self.qpos_init.dtype,
-            device=self.device,
-        ).expand(n, 4)
+        data.qpos[ids, self.b_q : self.b_q + 3] = park_position_w
+        if full_a_initialized:
+            park_quaternion = self._full_a_park_quaternion
+        else:
+            park_quaternion = torch.tensor(
+                [1.0, 0.0, 0.0, 0.0],
+                dtype=self.qpos_init.dtype,
+                device=self.device,
+            )
+        data.qpos[ids, self.b_q + 3 : self.b_q + 7] = (
+            park_quaternion.expand(n, 4)
+        )
         data.qvel[ids, self.b_v : self.b_v + 6] = 0.0
         self.ball_age_buf[ids] = 0
 
@@ -2223,6 +2263,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
                 fact_f32=self._full_a_owner_fact_f32,
                 owner_fault_bits=self._full_a_owner_fault_bits,
                 step_dt=self.step_dt,
+                weights=self._full_a_lifecycle_reward_weights,
             )
         terms[:, 14:] = configured
         reward = terms.sum(dim=1)
@@ -2406,9 +2447,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         ) = self._full_a_prepare_step()
         _st_before_forward, _tau_sq, requested_qdes = self._advance_plant(actions)
         self.sim.forward()
-        self._latch_post_forward_resolved_table_contacts()
+        final_contact_census = A3ReadyBallVecEnv._contact_census(self)
+        self._latch_post_forward_resolved_table_contacts(final_contact_census)
         self._latch_post_forward_table_keepout()
-        self._full_a_latch_ball_contacts()
+        self._full_a_latch_ball_contacts(final_contact_census)
         if self._cap_ok:
             self._probe_capacity("forward")
         st = self._state()
@@ -2436,9 +2478,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             recovery_errors, recovery_hard_safety_ok
         )
         reward, reward_terms = self._fullmdp_reward20()
-        recovery_terminal, recovery_success, recovery_failure, recovery_timeout = (
-            self._full_a_finish_recovery(terminated, truncated)
-        )
+        (
+            recovery_terminal,
+            recovery_success,
+            recovery_failure,
+            recovery_timeout,
+            recovery_completion_fault,
+        ) = self._full_a_finish_recovery(terminated, truncated)
         contact_event = self._full_a_generic_contact_event.clone()
         selected_contact_event = self._full_a_selected_contact_event.clone()
         opposite_contact_event = self._full_a_opposite_contact_event.clone()
@@ -2455,8 +2501,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         landing_crossing_event = (
             outcome_event & self._full_a_landing_crossing_present
         ).clone()
-        recovery_terminal |= invalid_contact_event
-        recovery_failure |= invalid_contact_event
+        valid_invalid_contact = invalid_contact_event & ~recovery_completion_fault
+        recovery_terminal |= valid_invalid_contact
+        recovery_failure |= valid_invalid_contact
         dones = terminated | truncated
         shot_retired = recovery_terminal & ~dones
         completed_action_epoch = self._full_a_completed_action_epoch(shot_retired)
@@ -2538,6 +2585,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "full_a_recovery_success_event": recovery_success,
             "full_a_recovery_failure_event": recovery_failure,
             "full_a_recovery_timeout_event": recovery_timeout,
+            "full_a_recovery_completion_fault_event": (
+                recovery_completion_fault
+            ),
         }
         return self.get_observations(), reward, dones.long(), extras
 

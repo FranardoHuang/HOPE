@@ -1535,7 +1535,7 @@ def test_motion_accepts_canonical_float32_teacher_rate_boundary_seam():
     )
 
 
-def test_schema4_exact_resume_handoff_restores_local_refs_without_shared_io():
+def test_schema5_exact_resume_handoff_restores_local_refs_without_shared_io():
     command, runtime, broker, provider, authority = _motion_harness(8)
     task_authority = _bind_task_authority(command, runtime, broker)
     env_ids = torch.arange(8, dtype=torch.long)
@@ -1555,7 +1555,7 @@ def test_schema4_exact_resume_handoff_restores_local_refs_without_shared_io():
     before_preflight = deepcopy(saved)
     command.validate_exact_resume_state_dict(saved, strict=True)
     _assert_nested_equal(command.exact_resume_state_dict(), before_preflight)
-    assert saved["schema_version"] == 4
+    assert saved["schema_version"] == 5
     assert "broker_state" not in saved["action_ball_birth"]
     assert (
         saved["action_ball_birth"]["shared_racket_state_sha256"]

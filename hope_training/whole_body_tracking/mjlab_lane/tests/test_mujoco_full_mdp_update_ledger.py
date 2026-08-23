@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import inspect
@@ -33,13 +34,62 @@ MUJOCO_WARP_RUNTIME = {
     ),
     "import_scope": "fresh_run_local_site",
 }
+RUNTIME_STACK = {
+    "schema_version": 1,
+    "mujoco_warp": MUJOCO_WARP_RUNTIME,
+    "rsl_rl": {
+        "distribution": "rsl-rl-lib",
+        "version": "3.1.2",
+        "wheel_sha256": (
+            "406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d"
+        ),
+        "import_scope": "fresh_run_local_site",
+    },
+    "mjlab": {
+        "schema_version": 1,
+        "distribution": "mjlab",
+        "version": "1.5.3",
+        "import_scope": "verified_venv_distribution",
+        "selected_tree_scope": "mjlab/**/*.py+mjlab/scene/scene.xml",
+        "selected_file_count": 193,
+        "selected_byte_count": 1399177,
+        "selected_tree_sha256": (
+            "88c9725d0416b4ac3e21f6752ad423c13ea3b8cfb9e23ca664f8aba146cec33d"
+        ),
+        "mjlab_tasks_entry_point_count": 0,
+    },
+}
+
+
+def _plant_contract():
+    name = "_ledger_test_mujoco_full_mdp_plant_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        return cached
+    path = LANE / "mujoco_full_mdp_plant_contract.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+PLANT_MODEL = _plant_contract().verified_plant_model_identity(
+    verification_receipt_sha256="c" * 64,
+    owner_local_frame_sha256="d" * 64,
+    final_augmented_mjb=_plant_contract().expected_plant_model_identity()[
+        "runtime_attach"
+    ]["final_augmented_mjb"],
+)
 
 
 def _run_identity(source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE):
     return {
         "source_commit": source_commit,
         "run_namespace": run_namespace,
-        "mujoco_warp_runtime": dict(MUJOCO_WARP_RUNTIME),
+        "runtime_stack": copy.deepcopy(RUNTIME_STACK),
+        "plant_model": _plant_contract().clone_plant_model_identity(PLANT_MODEL),
     }
 
 
@@ -80,6 +130,9 @@ EVENT_KEYS = {
     "recovery_success_rows": "full_a_recovery_success_event",
     "recovery_failure_rows": "full_a_recovery_failure_event",
     "recovery_timeout_rows": "full_a_recovery_timeout_event",
+    "recovery_completion_fault_rows": (
+        "full_a_recovery_completion_fault_event"
+    ),
 }
 STORAGE_WIDTHS = {
     "observations_policy": 203,
@@ -177,8 +230,43 @@ def test_constructor_rejects_nonexact_run_identity(source_commit, run_namespace)
 @pytest.mark.parametrize(
     "mutation",
     (
-        lambda identity: identity.pop("mujoco_warp_runtime"),
-        lambda identity: identity.__setitem__("mujoco_warp_runtime", []),
+        lambda identity: identity.pop("runtime_stack"),
+        lambda identity: identity.__setitem__("runtime_stack", []),
+        lambda identity: (
+            identity.__setitem__(
+                "mujoco_warp_runtime", identity.pop("runtime_stack")["mujoco_warp"]
+            )
+        ),
+        lambda identity: identity["runtime_stack"].__setitem__(
+            "schema_version", True
+        ),
+        lambda identity: identity["runtime_stack"].__setitem__("extra", 1),
+        lambda identity: identity["runtime_stack"]["mujoco_warp"].__setitem__(
+            "epa_horizon", 24
+        ),
+        lambda identity: identity["runtime_stack"]["rsl_rl"].__setitem__(
+            "version", "3.1.1"
+        ),
+        lambda identity: identity["runtime_stack"]["mjlab"].pop(
+            "selected_tree_sha256"
+        ),
+        lambda identity: identity["runtime_stack"]["mjlab"].__setitem__(
+            "selected_file_count", 194
+        ),
+        lambda identity: identity.pop("plant_model"),
+        lambda identity: identity["plant_model"]["runtime_attach"][
+            "policy_clock"
+        ].__setitem__(
+            "step_dt", 0.002
+        ),
+        lambda identity: identity["plant_model"]["runtime_attach"][
+            "final_augmented_mjb"
+        ].__setitem__(
+            "sha256", "0" * 64
+        ),
+        lambda identity: identity["plant_model"]["source_plant"].__setitem__(
+            "verification_receipt_sha256", "not-a-digest"
+        ),
     ),
 )
 def test_constructor_rejects_missing_or_nonmapping_runtime_identity(mutation):
@@ -193,7 +281,12 @@ def test_constructor_isolates_nested_runtime_identity_copy():
     module = _load()
     identity = _run_identity()
     ledger = _ledger(module, run_identity=identity)
-    identity["mujoco_warp_runtime"]["epa_horizon"] = 24
+    identity["runtime_stack"]["mujoco_warp"]["epa_horizon"] = 24
+    identity["runtime_stack"]["rsl_rl"]["version"] = "mutated"
+    identity["runtime_stack"]["mjlab"]["selected_tree_sha256"] = "0" * 64
+    identity["plant_model"]["runtime_attach"]["final_augmented_mjb"][
+        "sha256"
+    ] = "0" * 64
     assert ledger.run_identity == _run_identity()
 
 
@@ -336,14 +429,19 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     prepared = _prepare(ledger, 0, environment_steps=2)
     record = _decode(prepared)
 
-    assert record["schema_version"] == 4
+    assert record["schema_version"] == 5
     assert record["run_identity"] == _run_identity()
+    assert record["run_identity"]["plant_model"]["runtime_attach"][
+        "final_augmented_mjb"
+    ] == _plant_contract().expected_plant_model_identity()["runtime_attach"][
+        "final_augmented_mjb"
+    ]
     assert record["update_index"] == 0
     assert record["num_envs"] == 3
     assert record["num_steps_per_env"] == 2
     assert record["transitions_delta"] == 6
     assert record["transitions_cumulative"] == 6
-    assert len(record["extras_counts"]) == 29
+    assert len(record["extras_counts"]) == 30
     assert record["storage_finite"] == {
         name: True for name in STORAGE_WIDTHS
     }
@@ -611,6 +709,23 @@ def test_prepare_rejects_named_missed_launch_fault_before_optimizer():
         phase=[5, 0, 0],
     ))
     with pytest.raises(RuntimeError, match="missed_launch_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+def test_prepare_rejects_named_recovery_completion_fault_with_invalid_contact():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "racket_contact_rows": [True, False, False],
+            "invalid_contact_rows": [True, False, False],
+            "recovery_completion_fault_rows": [True, False, False],
+        },
+        status=[5, 0, 0],
+        phase=[6, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="recovery_completion_fault_rows"):
         _prepare(ledger, 0, environment_steps=1)
 
 

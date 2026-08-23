@@ -1,8 +1,73 @@
 """Minimal transactional update ledger for portable MuJoCo FullMDP."""
 from __future__ import annotations
+import copy
 from dataclasses import dataclass
-import hashlib, json, math, os, re
-SCHEMA_VERSION, REWARD_TERM_COUNT = 4, 20
+import hashlib, importlib.util, json, math, os, re, sys
+from pathlib import Path
+SCHEMA_VERSION, REWARD_TERM_COUNT = 5, 20
+
+EXACT_RUNTIME_STACK = {
+    "schema_version": 1,
+    "mujoco_warp": {
+        "schema_version": 1,
+        "distribution": "mujoco-warp",
+        "fork_id": "hope_mujoco_warp_epa48_v1",
+        "version": "3.10.0.3+hope.epa48.1",
+        "epa_horizon": 48,
+        "types_py_sha256": (
+            "391e421eeede84389d6c7daeae39b19ce43132d29c11f7f3c328a50011c7a696"
+        ),
+        "wheel_sha256": (
+            "58f47b1c3b4249d82666f25d3a302ff5a215043a3d7a3b9445a5ca7ef15b561a"
+        ),
+        "build_receipt_sha256": (
+            "336f6454296d3c062e26fb0c330d6dbca4b2fd0ad4e50f386f8a647db013e041"
+        ),
+        "import_scope": "fresh_run_local_site",
+    },
+    "rsl_rl": {
+        "distribution": "rsl-rl-lib",
+        "version": "3.1.2",
+        "wheel_sha256": (
+            "406867356b70920e99ed8fd12c5b3463a64895407cc3ed96c917fddb9bfae06d"
+        ),
+        "import_scope": "fresh_run_local_site",
+    },
+    "mjlab": {
+        "schema_version": 1,
+        "distribution": "mjlab",
+        "version": "1.5.3",
+        "import_scope": "verified_venv_distribution",
+        "selected_tree_scope": "mjlab/**/*.py+mjlab/scene/scene.xml",
+        "selected_file_count": 193,
+        "selected_byte_count": 1399177,
+        "selected_tree_sha256": (
+            "88c9725d0416b4ac3e21f6752ad423c13ea3b8cfb9e23ca664f8aba146cec33d"
+        ),
+        "mjlab_tasks_entry_point_count": 0,
+    },
+}
+
+
+def _plant_contract_module():
+    source = Path(__file__).with_name("mujoco_full_mdp_plant_contract.py").resolve()
+    name = "_hope_mujoco_full_mdp_plant_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached MuJoCo plant contract origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load MuJoCo plant contract")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
 EXACT_TERMINATION_BITS = {
     "time_out": 1, "base_fell_tilt": 2, "base_too_low": 4,
     "joint_qdes_forbidden": 8, "robot_hit_table": 16,
@@ -18,6 +83,7 @@ EVENT_NAMES = (
     "r03_present_rows", "r03_physically_valid_rows", "landing_crossing_rows",
     "r06_present_rows", "r06_eligible_rows", "r06_common_rows", "r07_present_rows", "r07_eligible_rows",
     "recovery_success_rows", "recovery_failure_rows", "recovery_timeout_rows",
+    "recovery_completion_fault_rows",
 )
 EVENT_FIELDS = tuple((name, "full_a_" + name[:-5] + "_event") for name in EVENT_NAMES)
 STORAGE_FLOAT_WIDTHS = (
@@ -54,6 +120,24 @@ class PreparedUpdate:
     update_index: int
     token: int
     payload: bytes
+
+
+def _plant_model_is_exact(value) -> bool:
+    return _plant_contract_module().plant_model_identity_is_exact(value)
+
+
+def _tree_is_exact(value, expected) -> bool:
+    if type(value) is not type(expected):
+        return False
+    if type(expected) is dict:
+        return set(value) == set(expected) and all(
+            _tree_is_exact(value[key], expected[key]) for key in expected
+        )
+    return value == expected
+
+
+def runtime_stack_is_exact(value) -> bool:
+    return _tree_is_exact(value, EXACT_RUNTIME_STACK)
 
 
 def storage_schema_is_exact(torch_module, *, num_steps: int, num_envs: int,
@@ -102,7 +186,8 @@ class FullMdpUpdateLedger:
             raise ValueError("FullMDP ledger dimensions or action identity differ")
         if (type(run_identity) is not dict
                 or set(run_identity) != {
-                    "source_commit", "run_namespace", "mujoco_warp_runtime"
+                    "source_commit", "run_namespace", "runtime_stack",
+                    "plant_model",
                 }
                 or type(run_identity.get("source_commit")) is not str
                 or re.fullmatch(r"[0-9a-f]{40}", run_identity["source_commit"]) is None
@@ -111,9 +196,11 @@ class FullMdpUpdateLedger:
                     r"[A-Za-z0-9][A-Za-z0-9._-]{15,159}",
                     run_identity["run_namespace"],
                 ) is None
-                or type(run_identity.get("mujoco_warp_runtime")) is not dict):
+                or not runtime_stack_is_exact(run_identity.get("runtime_stack"))
+                or not _plant_model_is_exact(run_identity.get("plant_model"))):
             raise ValueError("FullMDP run identity differs")
-        runtime = run_identity["mujoco_warp_runtime"]
+        runtime_stack = run_identity["runtime_stack"]
+        plant_model = run_identity["plant_model"]
         if termination_bits != EXACT_TERMINATION_BITS:
             raise ValueError("termination bit schema differs")
         bits = tuple(sorted(EXACT_TERMINATION_BITS.items(), key=lambda row: row[1]))
@@ -131,7 +218,10 @@ class FullMdpUpdateLedger:
         self.run_identity = {
             "source_commit": run_identity["source_commit"],
             "run_namespace": run_identity["run_namespace"],
-            "mujoco_warp_runtime": dict(runtime),
+            "runtime_stack": copy.deepcopy(runtime_stack),
+            "plant_model": (
+                _plant_contract_module().clone_plant_model_identity(plant_model)
+            ),
         }
         self._reset_generation = initial_reset_generation.detach().clone()
         counters = (
@@ -232,6 +322,7 @@ class FullMdpUpdateLedger:
             )]
         ).sum(dim=0, dtype=torch.long)
         natural_recovery = event["recovery_success_rows"] | event["recovery_timeout_rows"]
+        completion_fault = event["recovery_completion_fault_rows"]
         phase2, phase5, phase6, phase8 = (phase.eq(code) for code in (2, 5, 6, 8))
         outcome_event = event["flight_terminal_rows"]
         legal_outcome = outcome.eq(3)
@@ -257,7 +348,8 @@ class FullMdpUpdateLedger:
             | (event["r06_present_rows"] & ~(phase6 | phase8))
             | (event["r07_present_rows"] & ~(phase6 | phase8))
             | event["shot_retired_rows"].ne(
-                natural_recovery | event["invalid_contact_rows"]
+                natural_recovery
+                | (event["invalid_contact_rows"] & ~completion_fault)
             )
             | (event["completed_action_epoch_rows"] & ~event["shot_retired_rows"])
             | (
@@ -407,7 +499,9 @@ class FullMdpUpdateLedger:
         misc = {name: int(value) for name, value in zip(_MISC_NAMES, misc_values)}
         transitions = self.num_envs * self.num_steps
         bad = [name for name in _ZERO_FAULTS if misc[name] != 0]
-        bad_events = [name for name in ("missed_launch_rows",) if events[name] != 0]
+        bad_events = [name for name in (
+            "missed_launch_rows", "recovery_completion_fault_rows",
+        ) if events[name] != 0]
         if bad or bad_events or any(misc[name] != transitions for name in (
             "reward20_finite_rows", "actual_reward_finite_rows",
             "slot0_rows", "uid_rows", "identity_rows",
@@ -419,7 +513,7 @@ class FullMdpUpdateLedger:
         record = {
             "schema_version": SCHEMA_VERSION, "record_type": "mujoco_full_mdp_update_ack",
             "diagnostic_unauthorized": True, "update_index": update_index,
-            "run_identity": dict(self.run_identity),
+            "run_identity": copy.deepcopy(self.run_identity),
             "num_envs": self.num_envs, "num_steps_per_env": self.num_steps,
             "transitions_delta": transitions, "transitions_cumulative": transitions * (update_index + 1),
             "environment_steps_delta": self.num_steps,

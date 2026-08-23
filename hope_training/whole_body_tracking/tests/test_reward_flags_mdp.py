@@ -59,6 +59,9 @@ import torch
 HERE = os.path.dirname(os.path.abspath(__file__))
 MDP_DIR = os.path.abspath(os.path.join(
     HERE, "..", "source", "whole_body_tracking", "whole_body_tracking", "tasks", "tracking", "mdp"))
+SOURCE_ROOT = os.path.abspath(os.path.join(MDP_DIR, "..", "..", "..", ".."))
+if SOURCE_ROOT not in sys.path:
+    sys.path.insert(0, SOURCE_ROOT)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -242,8 +245,17 @@ _PREEXISTING_ISAACLAB_MODULES = {
 try:
     _install_isaaclab_stub()
     _PKG = "whole_body_tracking.tasks.tracking.mdp"
-    for _p in ("whole_body_tracking", "whole_body_tracking.tasks", "whole_body_tracking.tasks.tracking", _PKG):
-        sys.modules.setdefault(_p, types.ModuleType(_p))
+    _package_paths = {
+        "whole_body_tracking": os.path.dirname(
+            os.path.dirname(os.path.dirname(MDP_DIR))
+        ),
+        "whole_body_tracking.tasks": os.path.dirname(os.path.dirname(MDP_DIR)),
+        "whole_body_tracking.tasks.tracking": os.path.dirname(MDP_DIR),
+        _PKG: MDP_DIR,
+    }
+    for _p, _path in _package_paths.items():
+        _package = sys.modules.setdefault(_p, types.ModuleType(_p))
+        _package.__path__ = [_path]
     _load(f"{_PKG}.event_timing", "event_timing.py")
     _load(f"{_PKG}.post_swing_teacher", "post_swing_teacher.py")
     planner_revision_mod = _load(f"{_PKG}.planner_revision", "planner_revision.py")

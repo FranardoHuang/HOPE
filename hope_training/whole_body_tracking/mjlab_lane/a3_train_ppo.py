@@ -80,7 +80,7 @@ import time
 import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -113,6 +113,25 @@ ACTION_OFFSET_SOURCE = "runtime_plant.default_joint_pos_rad"
 ACTION_OFFSET_FLOAT32_SHA256 = (
   "1b638d7b2e1ac7e552aace2ac8c2b00980dd9daf691f930b5fe775cebc84af78"
 )
+
+
+class ContactCensus(NamedTuple):
+  """Ephemeral per-world contact facts from one contact-buffer traversal.
+
+  The three ``*_by_world`` tensors are construction-owned scratch buffers and
+  remain valid only until the next census.  Consumers must use them
+  immediately; retaining or cloning the full contact array would recreate the
+  hot-path cost this compact handoff removes.
+  """
+
+  ball_racket_by_world: Any
+  ball_table_by_world: Any
+  robot_table_by_world: Any
+  ball_racket_total: Any
+  ball_table_total: Any
+  robot_table_total: Any
+
+
 EXECUTABLE_QDES_GUARD = "action_ball_shared_soft_hard_state_guard_v1"
 _ACTION_JOINT_ORDER_CONTRACT = (
   _HERE.parents[2] / "configs/a3_joint_order_bijection_v1.json"
@@ -209,6 +228,12 @@ def _runtime_action_wiring(model, prefix: str):
   actuator_from_runtime_array.setflags(write=False)
   return (runtime_from_actuator_array, actuator_from_runtime_array,
           tuple(target))
+
+
+def _tensor_from_owned_numpy(torch_module, value, *, dtype, device):
+  """Snapshot one NumPy-backed constant before giving storage to PyTorch."""
+  return torch_module.as_tensor(
+    np.array(value, copy=True), dtype=dtype, device=device)
 
 
 def _runtime_action_offset(ready_pose_payload: bytes, runtime_joint_names):
@@ -1214,7 +1239,8 @@ class A3ReadyBallVecEnv:
     self.kd = T(kd_np)
     self.q_adr_act = T(q_adr_act, torch.long)
     self.v_adr_act = T(v_adr_act, torch.long)
-    self.actuator_from_runtime = T(actuator_from_runtime, torch.long)
+    self.actuator_from_runtime = _tensor_from_owned_numpy(
+      torch, actuator_from_runtime, dtype=torch.long, device=self.device)
     self._action_joint_names = action_joint_names
     self._action_offset_sha256 = action_offset_sha256
     # Contiguity lets us use slices instead of gathers in the 1 kHz inner loop.
@@ -1443,6 +1469,17 @@ class A3ReadyBallVecEnv:
     self._acc["contact_ball_table_substeps"] = torch.zeros((), device=self.device)
     self._acc["ep_touched_racket"] = torch.zeros((), device=self.device)
     self._cur_touched = torch.zeros(self.num_envs, device=self.device)
+    # One compact per-world handoff is reused by the base metrics and any
+    # FullMDP lifecycle consumer.  These are scratch, not retained evidence;
+    # every census zeroes and refills them on the current CUDA stream.
+    self._contact_ball_racket_by_world = torch.zeros(
+      self.num_envs, device=self.device)
+    self._contact_ball_table_by_world = torch.zeros_like(
+      self._contact_ball_racket_by_world)
+    self._contact_robot_table_by_world = torch.zeros_like(
+      self._contact_ball_racket_by_world)
+    self._contact_zero_total = torch.zeros(
+      (), dtype=torch.long, device=self.device)
 
     # ---- the ROBOT-vs-table channel -----------------------------------
     #
@@ -1594,13 +1631,13 @@ class A3ReadyBallVecEnv:
     if mask:
       raise CapacityOverflow(mask, where, detail=self._capacity_detail())
 
-  def _probe_contacts(self):
-    """Per-substep, sync-free: which worlds had the racket on the ball.
+  def _contact_census(self) -> ContactCensus:
+    """Traverse the contact buffer once and return compact per-world facts.
 
-    Runs inside the 1 kHz loop over the whole pre-allocated contact array, so
-    every extra pass over it is throughput.  Kept to: one validity compare, two
-    ball compares, one select, one gather through the geom-class table, three
-    masks, two reductions and one scatter.  No host sync, no `.item()`.
+    FullMDP used to repeat this full ``nworld * nconmax`` traversal after the
+    base metric probe.  The census is now the single contact-array owner; base
+    metrics and lifecycle logic consume the same immediate per-world result.
+    No host sync, dynamic row selection, or RNG is introduced.
     """
     torch = self._torch
     g = self._con_geom[:]
@@ -1613,10 +1650,13 @@ class A3ReadyBallVecEnv:
     ball_row = valid & (is0 | is1)
     hit = ball_row & (kind == 1)
     tab = ball_row & (kind == 2)
-    self._acc["contact_ball_racket_substeps"] += hit.sum()
-    self._acc["contact_ball_table_substeps"] += tab.sum()
     w = self._con_world[:].long().clamp_(0, self.num_envs - 1)
-    self._cur_touched.scatter_add_(0, w, hit.float())
+    ball_racket = self._contact_ball_racket_by_world.zero_()
+    ball_table = self._contact_ball_table_by_world.zero_()
+    robot_table = self._contact_robot_table_by_world.zero_()
+    ball_racket.scatter_add_(0, w, hit.float())
+    ball_table.scatter_add_(0, w, tab.float())
+    robot_total = self._contact_zero_total
     if self._robot_table_ok:
       # Same pass, same arrays: which rows are table-vs-robot rather than
       # table-vs-ball.  Four more elementwise ops, no extra sync.
@@ -1624,8 +1664,28 @@ class A3ReadyBallVecEnv:
       t1 = g1 == self._table_gid
       partner = torch.where(t0, g1, g0).long()
       rt = valid & (t0 | t1) & self._is_robot_geom[partner]
-      self._acc["contact_robot_table_substeps"] += rt.sum()
-      self._cur_robot_table.scatter_add_(0, w, rt.float())
+      robot_table.scatter_add_(0, w, rt.float())
+      robot_total = rt.sum()
+    return ContactCensus(
+      ball_racket_by_world=ball_racket,
+      ball_table_by_world=ball_table,
+      robot_table_by_world=robot_table,
+      ball_racket_total=hit.sum(),
+      ball_table_total=tab.sum(),
+      robot_table_total=robot_total,
+    )
+
+  def _probe_contacts(self) -> ContactCensus:
+    """Record base metrics from, and return, the one per-substep census."""
+
+    census = self._contact_census()
+    self._acc["contact_ball_racket_substeps"] += census.ball_racket_total
+    self._acc["contact_ball_table_substeps"] += census.ball_table_total
+    self._cur_touched.add_(census.ball_racket_by_world)
+    if self._robot_table_ok:
+      self._acc["contact_robot_table_substeps"] += census.robot_table_total
+      self._cur_robot_table.add_(census.robot_table_by_world)
+    return census
 
   def _rand(self, *shape, lo=0.0, hi=1.0):
     torch = self._torch
@@ -1802,8 +1862,8 @@ class A3ReadyBallVecEnv:
 
   # ---- step -------------------------------------------------------------
 
-  def _after_physics_substep(self, substep_index):
-    """Optional device-only observer; the base plant has no extra predicate."""
+  def _after_physics_substep(self, substep_index, contact_census=None):
+    """Optional device-only consumer of the current compact contact census."""
 
   def _latch_actual_hard_edge(self):
     """Latch raw joint-position hard edges without a host synchronization."""
@@ -1888,9 +1948,10 @@ class A3ReadyBallVecEnv:
       tau_sq += (tau_n * tau_n).mean(dim=-1)
       self.sim.step()
       self._latch_actual_hard_edge()
-      self._after_physics_substep(substep_index)
+      contact_census = None
       if self._contact_ok:
-        self._probe_contacts()
+        contact_census = self._probe_contacts()
+      self._after_physics_substep(substep_index, contact_census)
       if self._cap_ok:
         # This sample MUST stay inside the decimation loop.  `_reset_idx` at
         # the bottom of this method calls `sim.reset(ids)`, and

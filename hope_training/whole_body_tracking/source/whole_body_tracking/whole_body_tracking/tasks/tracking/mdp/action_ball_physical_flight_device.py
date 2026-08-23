@@ -1064,13 +1064,35 @@ class IsaacPostPhysicsFacts:
 
 @dataclass(frozen=True, eq=False)
 class PhysicalPostPhysicsCaptureRequest:
-    """Owner-issued, one-substep input to the exact concrete scene producer."""
+    """Legacy digest-keyed input to the exact concrete scene producer."""
 
     exact_stamp: tuple[int, int, int, int, int]
     observe_mask: torch.Tensor
     flight_slot: torch.Tensor
     full_key_sha256: torch.Tensor
     ball_generation: torch.Tensor
+    observation_ordinal: torch.Tensor
+    previous_ball_center_m: torch.Tensor
+    current_state_env_f32: torch.Tensor | None
+    _owner_identity: object
+    _token: object
+
+
+@dataclass(frozen=True, eq=False)
+class ActionEpochPhysicalPostPhysicsCaptureRequest:
+    """Typed direct-lane input to the exact concrete scene producer.
+
+    The ActionEpoch business identity is the eight-field shot key plus its
+    publication ordinal.  Legacy outcome digests are deliberately absent, so
+    a fresh direct launch cannot be made to depend on an unrelated legacy
+    writer or on a digest synthesized only to satisfy the scene boundary.
+    """
+
+    exact_stamp: tuple[int, int, int, int, int]
+    observe_mask: torch.Tensor
+    flight_slot: torch.Tensor
+    shot_key: _row_identity.ActionEpochShotKey
+    publication_ordinal: torch.Tensor
     observation_ordinal: torch.Tensor
     previous_ball_center_m: torch.Tensor
     current_state_env_f32: torch.Tensor | None
@@ -1120,6 +1142,8 @@ class _ActionEpochDirectState:
     active_flight_slot: torch.Tensor
     flight_shot_key: _row_identity.ActionEpochShotKey
     flight_publication_ordinal: torch.Tensor
+    flight_observation_ordinal: torch.Tensor
+    flight_previous_ball_center_m: torch.Tensor
 
 
 class ActionEpochSceneWriteProjection:
@@ -1310,10 +1334,10 @@ class ActionEpochPhysicsFactAllocationProjection:
         flight_slot: torch.Tensor,
         shot_key: _row_identity.ActionEpochShotKey,
         publication_ordinal: torch.Tensor,
-        full_key_sha256: torch.Tensor,
         physical_owner: object,
         epoch_owner: object,
         owner_identity: object,
+        full_key_sha256: torch.Tensor | None = None,
         _token: object,
     ) -> None:
         if _token is not _ACTION_EPOCH_PHYSICS_FACT_ALLOCATION_TOKEN:
@@ -1325,6 +1349,9 @@ class ActionEpochPhysicsFactAllocationProjection:
         self.flight_slot = flight_slot
         self.shot_key = shot_key
         self.publication_ordinal = publication_ordinal
+        # Compatibility-only constructor surface for focused legacy Racket
+        # tests.  The production direct lane always leaves this ``None`` and
+        # neither Physical nor the scene reads it as identity authority.
         self.full_key_sha256 = full_key_sha256
         self.physical_owner = physical_owner
         self.epoch_owner = epoch_owner
@@ -1355,13 +1382,27 @@ class ActionEpochPhysicsFactAllocationProjection:
 
 
 @dataclass(frozen=True)
-class _PostPhysicsCaptureImage:
+class _LegacyPostPhysicsCaptureImage:
     exact_stamp: tuple[int, int, int, int, int]
     observe_mask: torch.Tensor
     flight_slot: torch.Tensor
     full_key_sha256: torch.Tensor
     ball_generation: torch.Tensor
     observation_ordinal: torch.Tensor
+    current_state_env_f32: torch.Tensor
+    slot_version: torch.Tensor
+    owner_mutation_version: int
+
+
+@dataclass(frozen=True)
+class _ActionEpochPostPhysicsCaptureImage:
+    exact_stamp: tuple[int, int, int, int, int]
+    observe_mask: torch.Tensor
+    flight_slot: torch.Tensor
+    shot_key: _row_identity.ActionEpochShotKey
+    publication_ordinal: torch.Tensor
+    observation_ordinal: torch.Tensor
+    previous_ball_center_m: torch.Tensor
     current_state_env_f32: torch.Tensor
     slot_version: torch.Tensor
     owner_mutation_version: int
@@ -2652,6 +2693,12 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_flight_publication_ordinal = torch.full(
             shape, -1, dtype=torch.int64, device=self.device
         )
+        self._action_epoch_flight_observation_ordinal = torch.full(
+            shape, -1, dtype=torch.int64, device=self.device
+        )
+        self._action_epoch_flight_previous_ball_center_m = torch.zeros(
+            shape + (3,), dtype=torch.float32, device=self.device
+        )
         self._action_epoch_active_scene_write: (
             ActionEpochSceneWriteProjection | None
         ) = None
@@ -2683,7 +2730,11 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._active_postphysics: PhysicalPostPhysicsPublication | None = None
         self._active_postphysics_image: _PostPhysicsImage | None = None
         self._active_postphysics_capture: IsaacPostPhysicsFacts | None = None
-        self._active_postphysics_capture_image: _PostPhysicsCaptureImage | None = None
+        self._active_postphysics_capture_image: (
+            _LegacyPostPhysicsCaptureImage
+            | _ActionEpochPostPhysicsCaptureImage
+            | None
+        ) = None
         self._last_postphysics_exact_stamp: tuple[int, int, int, int, int] | None = None
         self._active_r06_ack: object | None = None
         self._active_r06_ack_image: _AcknowledgedR06Image | None = None
@@ -3327,7 +3378,6 @@ class ActionBallPhysicalFlightDeviceOwner:
         live_or_due = (self._published & ~self._parked) | launch_due_mask
         shot_key_grid = self._action_epoch_flight_shot_key.clone()
         ordinal_grid = self._action_epoch_flight_publication_ordinal.detach().clone()
-        hash_grid = self._outcome_sha.detach().clone()
         if shot_key is not None:
             if (
                 selected_env_index is None
@@ -3379,9 +3429,6 @@ class ActionBallPhysicalFlightDeviceOwner:
                 flight_slot=fixed_slot_grid.detach().clone(),
                 shot_key=masked_shot_key,
                 publication_ordinal=masked_identity(ordinal_grid),
-                full_key_sha256=torch.where(
-                    live_or_due.unsqueeze(-1), hash_grid, torch.zeros_like(hash_grid)
-                ),
                 physical_owner=self,
                 epoch_owner=self._action_epoch_owner,
                 owner_identity=self._owner_identity,
@@ -3470,6 +3517,12 @@ class ActionBallPhysicalFlightDeviceOwner:
             flight_publication_ordinal=(
                 self._action_epoch_flight_publication_ordinal.detach().clone()
             ),
+            flight_observation_ordinal=(
+                self._action_epoch_flight_observation_ordinal.detach().clone()
+            ),
+            flight_previous_ball_center_m=(
+                self._action_epoch_flight_previous_ball_center_m.detach().clone()
+            ),
         )
 
     def _current_action_epoch_motion_observation(self) -> object:
@@ -3544,6 +3597,10 @@ class ActionBallPhysicalFlightDeviceOwner:
                 }
             ),
             flight_publication_ordinal=clear_rows(before.flight_publication_ordinal),
+            flight_observation_ordinal=clear_rows(before.flight_observation_ordinal),
+            flight_previous_ball_center_m=clear_rows(
+                before.flight_previous_ball_center_m
+            ),
         )
 
     def _action_epoch_direct_state_mismatch(
@@ -3555,6 +3612,11 @@ class ActionBallPhysicalFlightDeviceOwner:
         pairs = [
             (actual.active_flight_slot, expected.active_flight_slot),
             (actual.flight_publication_ordinal, expected.flight_publication_ordinal),
+            (actual.flight_observation_ordinal, expected.flight_observation_ordinal),
+            (
+                actual.flight_previous_ball_center_m,
+                expected.flight_previous_ball_center_m,
+            ),
             *((getattr(actual.flight_shot_key, f.name), getattr(expected.flight_shot_key, f.name))
               for f in fields(_row_identity.ActionEpochShotKey)),
         ]
@@ -3958,20 +4020,14 @@ class ActionBallPhysicalFlightDeviceOwner:
             self.num_envs, dtype=torch.int64, device=self.device
         )
         current_tick = getattr(motion, "control_tick", None)
-        record = epoch_owner.current()
-        shot_slots = record.current_task_slot
-        safe_shot_slots = shot_slots.clamp(0, epoch_owner.shot_slot_capacity - 1)
-        record_key_grid = _row_identity.require_action_epoch_shot_key(
-            record.identity.shot_key,
-            shape=(self.num_envs, epoch_owner.shot_slot_capacity),
-            device=self.device,
-            label="Physical launch current shot_key",
-        )
-        current_key = self._gather_action_epoch_shot_key(
-            record_key_grid, ids, safe_shot_slots
-        )
+        current_shot = epoch_owner.project_current_shot()
+        current_key = current_shot.shot_key
+        current_publication = current_shot.publication_ordinal
         key_current = _row_identity.action_epoch_shot_key_equal(
             current_key, pending.shot_key
+        )
+        publication_current = current_publication.eq(
+            pending.publication_ordinal
         )
         identity_current = (
             getattr(motion, "action_uid").eq(pending.shot_key.action_uid)
@@ -3983,20 +4039,26 @@ class ActionBallPhysicalFlightDeviceOwner:
                 pending.shot_key.ball_generation
             )
         )
-        phase_current = record.phase[ids, safe_shot_slots].eq(
+        phase_current = current_shot.phase.eq(
             epoch.PHASE_REVEAL_COMMITTED
         )
         exact_tick = current_tick.eq(pending.launch_control_step)
         missed_launch = current_tick.gt(pending.launch_control_step)
         launch_due = (
             pending.pending
+            & current_shot.slot_valid
             & phase_current
             & identity_current
             & key_current
+            & publication_current
             & exact_tick
         )
         invalid_due = pending.pending & exact_tick & (
-            ~phase_current | ~identity_current | ~key_current
+            ~current_shot.slot_valid
+            | ~phase_current
+            | ~identity_current
+            | ~key_current
+            | ~publication_current
         )
         self._action_epoch_runtime_fault_bits |= (
             invalid_due.to(torch.int64)
@@ -4048,11 +4110,27 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._reveal_step[ids, safe_flight_slots] = torch.where(
                 launch_due, pending.launch_control_step, selected_reveal
             )
-            previous_center = self._previous_ball_center[ids, safe_flight_slots]
-            self._previous_ball_center[ids, safe_flight_slots] = torch.where(
+            previous_center = self._action_epoch_flight_previous_ball_center_m[
+                ids, safe_flight_slots
+            ]
+            self._action_epoch_flight_previous_ball_center_m[
+                ids, safe_flight_slots
+            ] = torch.where(
                 launch_due[:, None],
                 pending.physical_state_f32[:, :3],
                 previous_center,
+            )
+            previous_observation_ordinal = (
+                self._action_epoch_flight_observation_ordinal[
+                    ids, safe_flight_slots
+                ]
+            )
+            self._action_epoch_flight_observation_ordinal[
+                ids, safe_flight_slots
+            ] = torch.where(
+                launch_due,
+                torch.full_like(previous_observation_ordinal, -1),
+                previous_observation_ordinal,
             )
             self._parked[ids, safe_flight_slots] &= ~launch_due
             self._published[ids, safe_flight_slots] |= launch_due
@@ -6990,25 +7068,49 @@ class ActionBallPhysicalFlightDeviceOwner:
         shape = (self.num_envs, self.flight_capacity)
         observe = self._published & ~self._parked
         flight_slot = self._fixed_flight_slot_grid
-        next_ordinal = torch.where(
-            observe, self._observation_ordinal + 1, self._observation_ordinal
-        )
-        request = PhysicalPostPhysicsCaptureRequest(
-            exact_stamp=exact,
-            observe_mask=observe,
-            flight_slot=flight_slot,
-            full_key_sha256=self._outcome_sha,
-            ball_generation=self._generation,
-            observation_ordinal=next_ordinal,
-            previous_ball_center_m=self._previous_ball_center,
-            # The exact bound scene producer owns the single post-scene read
-            # and returns it in ``IsaacPostPhysicsFacts``.  ``None`` is legal
-            # only with this owner-issued identity/token pair; direct test or
-            # foreign requests must still supply and match an explicit state.
-            current_state_env_f32=None,
-            _owner_identity=self._owner_identity,
-            _token=_POSTPHYSICS_CAPTURE_REQUEST_TOKEN,
-        )
+        action_epoch_direct = self._action_epoch_runtime_call_active
+        if action_epoch_direct:
+            next_ordinal = torch.where(
+                observe,
+                self._action_epoch_flight_observation_ordinal + 1,
+                self._action_epoch_flight_observation_ordinal,
+            )
+            request = ActionEpochPhysicalPostPhysicsCaptureRequest(
+                exact_stamp=exact,
+                observe_mask=observe,
+                flight_slot=flight_slot,
+                shot_key=self._action_epoch_flight_shot_key,
+                publication_ordinal=(
+                    self._action_epoch_flight_publication_ordinal
+                ),
+                observation_ordinal=next_ordinal,
+                previous_ball_center_m=(
+                    self._action_epoch_flight_previous_ball_center_m
+                ),
+                # The exact bound scene producer owns the single post-scene
+                # read and returns it in ``IsaacPostPhysicsFacts``.
+                current_state_env_f32=None,
+                _owner_identity=self._owner_identity,
+                _token=_POSTPHYSICS_CAPTURE_REQUEST_TOKEN,
+            )
+        else:
+            next_ordinal = torch.where(
+                observe,
+                self._observation_ordinal + 1,
+                self._observation_ordinal,
+            )
+            request = PhysicalPostPhysicsCaptureRequest(
+                exact_stamp=exact,
+                observe_mask=observe,
+                flight_slot=flight_slot,
+                full_key_sha256=self._outcome_sha,
+                ball_generation=self._generation,
+                observation_ordinal=next_ordinal,
+                previous_ball_center_m=self._previous_ball_center,
+                current_state_env_f32=None,
+                _owner_identity=self._owner_identity,
+                _token=_POSTPHYSICS_CAPTURE_REQUEST_TOKEN,
+            )
         try:
             raw = bound_capture(request)
         except BaseException as exc:
@@ -7046,17 +7148,47 @@ class ActionBallPhysicalFlightDeviceOwner:
             return value.detach().clone()
 
         self._active_postphysics_capture = facts
-        self._active_postphysics_capture_image = _PostPhysicsCaptureImage(
-            exact_stamp=exact,
-            observe_mask=retain(observe),
-            flight_slot=retain(flight_slot),
-            full_key_sha256=retain(self._outcome_sha),
-            ball_generation=retain(self._generation),
-            observation_ordinal=retain(next_ordinal),
-            current_state_env_f32=retain(state),
-            slot_version=retain(self._slot_version),
-            owner_mutation_version=self._mutation_version,
-        )
+        if action_epoch_direct:
+            self._active_postphysics_capture_image = (
+                _ActionEpochPostPhysicsCaptureImage(
+                    exact_stamp=exact,
+                    observe_mask=retain(observe),
+                    flight_slot=retain(flight_slot),
+                    shot_key=_row_identity.ActionEpochShotKey(
+                        **{
+                            field.name: retain(
+                                getattr(
+                                    self._action_epoch_flight_shot_key,
+                                    field.name,
+                                )
+                            )
+                            for field in fields(_row_identity.ActionEpochShotKey)
+                        }
+                    ),
+                    publication_ordinal=retain(
+                        self._action_epoch_flight_publication_ordinal
+                    ),
+                    observation_ordinal=retain(next_ordinal),
+                    previous_ball_center_m=retain(
+                        self._action_epoch_flight_previous_ball_center_m
+                    ),
+                    current_state_env_f32=retain(state),
+                    slot_version=retain(self._slot_version),
+                    owner_mutation_version=self._mutation_version,
+                )
+            )
+        else:
+            self._active_postphysics_capture_image = _LegacyPostPhysicsCaptureImage(
+                exact_stamp=exact,
+                observe_mask=retain(observe),
+                flight_slot=retain(flight_slot),
+                full_key_sha256=retain(self._outcome_sha),
+                ball_generation=retain(self._generation),
+                observation_ordinal=retain(next_ordinal),
+                current_state_env_f32=retain(state),
+                slot_version=retain(self._slot_version),
+                owner_mutation_version=self._mutation_version,
+            )
         self._last_postphysics_exact_stamp = exact
         return facts
 
@@ -7141,7 +7273,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         image = self._active_postphysics_capture_image
         if (
             facts is not self._active_postphysics_capture
-            or image is None
+            or type(image) is not _ActionEpochPostPhysicsCaptureImage
             or facts._owner_identity is not self._owner_identity
             or facts._capture_token is not _POSTPHYSICS_CAPTURE_FACTS_TOKEN
         ):
@@ -7285,12 +7417,10 @@ class ActionBallPhysicalFlightDeviceOwner:
             ActionEpochR06PostPhysicsProjection(
                 observe_mask=observe.detach(),
                 flight_slot=fixed_flight_slot.detach(),
-                shot_key=self._action_epoch_flight_shot_key,
-                publication_ordinal=(
-                    self._action_epoch_flight_publication_ordinal.detach()
-                ),
+                shot_key=image.shot_key,
+                publication_ordinal=image.publication_ordinal.detach(),
                 observation_ordinal=image.observation_ordinal.detach(),
-                previous_ball_center_m=self._previous_ball_center.detach(),
+                previous_ball_center_m=image.previous_ball_center_m.detach(),
                 current_ball_center_m=current_center.detach(),
                 observation_stamp=observation_stamp,
                 selected_contact_event=contact.detach(),
@@ -7423,6 +7553,24 @@ class ActionBallPhysicalFlightDeviceOwner:
             * _ACTION_EPOCH_RUNTIME_FAULT_R06_RETIRE_MISMATCH
         )
         safe_retired = retired & ~retire_mismatch
+        safe_accepted = accepted & ~retire_mismatch
+        # R06 accepted this exact typed publication and continuity image.  It
+        # is now the sole authority for the next direct substep.  Masked
+        # ``where`` updates leave every healthy peer byte untouched.
+        self._action_epoch_flight_observation_ordinal.copy_(
+            torch.where(
+                safe_accepted,
+                image.observation_ordinal,
+                self._action_epoch_flight_observation_ordinal,
+            )
+        )
+        self._action_epoch_flight_previous_ball_center_m.copy_(
+            torch.where(
+                safe_accepted.unsqueeze(-1),
+                current_center,
+                self._action_epoch_flight_previous_ball_center_m,
+            )
+        )
         scene_handle = self._prepare_action_epoch_scene_write(
             kind="retire",
             state_env_f32=self._park_state_template,
@@ -7483,6 +7631,24 @@ class ActionBallPhysicalFlightDeviceOwner:
                     self._action_epoch_flight_publication_ordinal, -1
                 ),
                 self._action_epoch_flight_publication_ordinal,
+            )
+        )
+        self._action_epoch_flight_observation_ordinal.copy_(
+            torch.where(
+                clear_slot_mask,
+                torch.full_like(
+                    self._action_epoch_flight_observation_ordinal, -1
+                ),
+                self._action_epoch_flight_observation_ordinal,
+            )
+        )
+        self._action_epoch_flight_previous_ball_center_m.copy_(
+            torch.where(
+                clear_slot_mask.unsqueeze(-1),
+                torch.zeros_like(
+                    self._action_epoch_flight_previous_ball_center_m
+                ),
+                self._action_epoch_flight_previous_ball_center_m,
             )
         )
         self._action_epoch_active_flight_slot = torch.where(
@@ -7625,7 +7791,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             or facts is not self._active_postphysics_capture
             or facts._owner_identity is not self._owner_identity
             or facts._capture_token is not _POSTPHYSICS_CAPTURE_FACTS_TOKEN
-            or image is None
+            or type(image) is not _LegacyPostPhysicsCaptureImage
         ):
             self._poison_postphysics_capture(
                 "postphysics build did not consume the exact one-shot capture"
@@ -10433,6 +10599,12 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._action_epoch_flight_publication_ordinal.copy_(
                 direct_after.flight_publication_ordinal
             )
+            self._action_epoch_flight_observation_ordinal.copy_(
+                direct_after.flight_observation_ordinal
+            )
+            self._action_epoch_flight_previous_ball_center_m.copy_(
+                direct_after.flight_previous_ball_center_m
+            )
             self._action_epoch_host_activity_control_step = None
             self._action_epoch_host_activity_has_work = True
             self._action_epoch_host_activity_has_keyed_work = True
@@ -11721,6 +11893,10 @@ class ActionBallPhysicalFlightDeviceOwner:
             (pending is not None and bool(pending.pending.any()))
             or bool(self._action_epoch_active_flight_slot.ge(0).any())
             or bool(self._action_epoch_flight_publication_ordinal.ge(0).any())
+            or bool(self._action_epoch_flight_observation_ordinal.ge(0).any())
+            or bool(
+                self._action_epoch_flight_previous_ball_center_m.ne(0).any()
+            )
         ):
             raise PhysicalEpochIntegrationHold(
                 "checkpoint HOLD: lean ActionEpoch pending/live Physical state "
@@ -11731,6 +11907,7 @@ __all__ = [
     "AcknowledgedR06PhysicalSnapshot",
     "ActionEpochPhysicsFactAllocationProjection",
     "ActionEpochHostActivityVerdict",
+    "ActionEpochPhysicalPostPhysicsCaptureRequest",
     "ActionEpochR06LaunchProjection",
     "ActionEpochR06PostPhysicsProjection",
     "ActionEpochSceneWriteProjection",

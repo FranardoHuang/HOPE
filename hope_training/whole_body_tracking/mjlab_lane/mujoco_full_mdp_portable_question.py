@@ -418,11 +418,13 @@ def build_center_question(
     )
     reference_quat = repeated(row.reference_racket_quat_wxyz)
     racket_quat = _quat_mul_wxyz(torch, delta_yaw_q, reference_quat)
-    local_selected_normal = repeated(
-        geometry.face_normal_local(int(row.mount_normal_sign))
-    )
+    # The measured teacher quaternion is the racket mount A-frame, whose raw
+    # normal is always local +Y.  ``mount_normal_sign`` selects which physical
+    # rubber face meets the ball; applying it here would make a perfect mimic
+    # of a negative-face action disagree with its own teacher/R03 observation.
+    local_reference_normal = repeated(geometry.face_normal_local(1))
     racket_normal = _quat_apply_wxyz(
-        torch, racket_quat, local_selected_normal
+        torch, racket_quat, local_reference_normal
     )
     racket_normal = racket_normal / torch.linalg.vector_norm(
         racket_normal, dim=1, keepdim=True

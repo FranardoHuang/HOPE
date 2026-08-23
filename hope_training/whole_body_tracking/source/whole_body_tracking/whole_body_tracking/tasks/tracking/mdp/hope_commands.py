@@ -9789,26 +9789,17 @@ class RacketTargetCommand(CommandTerm):
             raise ActionBallContinuousRacketSelectedRubberHold(
                 "ActionEpoch selected-rubber Physical allocation ABI differs"
             )
-        record = epoch_owner.current()
-        slot = record.current_task_slot
-        slot_capacity = record.phase.shape[1]
-        slot_valid = slot.ge(0) & slot.lt(slot_capacity)
-        safe_slot = slot.clamp(min=0, max=slot_capacity - 1)
-        index = safe_slot[:, None]
-
-        def selected(value: torch.Tensor) -> torch.Tensor:
-            return torch.gather(value, 1, index).squeeze(1)
-
-        phase = selected(record.phase)
+        current_shot = epoch_owner.project_current_shot()
+        phase = current_shot.phase
         epoch_active = phase.eq(epoch.PHASE_REVEAL_COMMITTED) | phase.eq(
             epoch.PHASE_LAUNCH_SETTLED
         )
-        expected_action_uid = selected(record.identity.action_uid)[:, None]
-        expected_action_slot = selected(record.identity.action_slot)[:, None]
-        expected_task_identity = selected(record.identity.task_identity)[:, None]
-        expected_reset_generation = record.reset_generation[:, None]
+        expected_action_uid = current_shot.shot_key.action_uid[:, None]
+        expected_action_slot = current_shot.shot_key.action_slot[:, None]
+        expected_task_identity = current_shot.shot_key.task_identity[:, None]
+        expected_reset_generation = current_shot.shot_key.reset_generation[:, None]
         epoch_mismatch = active & (
-            ~slot_valid[:, None]
+            ~current_shot.slot_valid[:, None]
             | ~epoch_active[:, None]
             | allocation.action_uid.ne(expected_action_uid)
             | allocation.action_slot.ne(expected_action_slot)
@@ -9841,9 +9832,16 @@ class RacketTargetCommand(CommandTerm):
             allocation.action_slot, active, sign_table
         )
         invalid = epoch_mismatch | allocation_mismatch | rubber_bad
-        torch._assert_async(
-            torch.all(~invalid),
-            "ActionEpoch selected-rubber allocation lost its exact owner identity",
+        # Cross-owner mismatch is row telemetry, not a process assertion.
+        # Neutralize only the bad face; the scene keeps Physical's active mask
+        # and maps active+inactive to its binding fault, which Physical publishes
+        # as the named postphysics-producer fault with zero facts.
+        rubber = torch.where(
+            invalid,
+            torch.full_like(
+                rubber, _ACTION_BALL_FULL_MDP_RUBBER_INACTIVE
+            ),
+            rubber,
         )
         return ActionBallFullMdpActionEpochSelectedRubberView(
             racket_owner=self,

@@ -11,6 +11,7 @@ import inspect
 from pathlib import Path
 import sys
 import textwrap
+import types
 
 import pytest
 import torch
@@ -66,6 +67,295 @@ def _seed_current_task_rows(command) -> None:
     command._action_ball_continuous_canonical_phase.fill_(
         C.ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE
     )
+
+
+def _bound_fresh_motion():
+    command, _cadence_owner, device_owner, epoch_owner = (
+        genesis._fresh_command_and_owners(torch.device("cpu"))
+    )
+    command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
+    command.bind_action_ball_full_mdp_motion_epoch_owner(epoch_owner)
+    return command, epoch_owner
+
+
+def _motion_row_snapshot(command, row: int) -> dict[str, torch.Tensor]:
+    return {
+        field: getattr(command, attr)[row].detach().clone()
+        for field, attr, _nonnegative in (
+            C._ACTION_BALL_CONTINUOUS_MOTION_CHECKPOINT_TENSORS
+        )
+    }
+
+
+def _assert_motion_row_unchanged(command, row: int, before) -> None:
+    after = _motion_row_snapshot(command, row)
+    assert after.keys() == before.keys()
+    for name in before:
+        assert torch.equal(after[name], before[name]), name
+
+
+def _advance_once(command) -> None:
+    command._env.common_step_counter = 0
+    command._advance_action_ball_continuous_motion_cadence()
+
+
+def test_named_cadence_overdue_fault_freezes_only_bad_row() -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    command._action_ball_continuous_episode_step[0] = (
+        command._action_ball_continuous_next_reveal_step[0]
+    )
+    bad_before = _motion_row_snapshot(command, 0)
+    peer_step_before = command._action_ball_continuous_episode_step[1].clone()
+
+    _advance_once(command)
+
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [
+        genesis.E.ROW_FAULT_MOTION_CADENCE_OVERDUE,
+        0,
+    ]
+    _assert_motion_row_unchanged(command, 0, bad_before)
+    assert command._action_ball_continuous_episode_step[1] == (
+        peer_step_before + 1
+    )
+
+
+def test_cadence_overdue_is_not_compounded_with_task_timing_fault() -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    command._action_ball_continuous_episode_step[0] = (
+        command._action_ball_continuous_next_reveal_step[0]
+    )
+    command._action_ball_continuous_motion_active[0] = True
+    command._action_ball_task_timing_active[0] = False
+    bad_before = _motion_row_snapshot(command, 0)
+    peer_step_before = command._action_ball_continuous_episode_step[1].clone()
+
+    _advance_once(command)
+
+    bits = epoch_owner._undrained_row_fault_bits
+    assert bits.tolist() == [
+        genesis.E.ROW_FAULT_MOTION_CADENCE_OVERDUE,
+        0,
+    ]
+    assert not torch.any(
+        bits.bitwise_and(genesis.E.ROW_FAULT_MOTION_TASK_TIMING_CONTRACT)
+    )
+    _assert_motion_row_unchanged(command, 0, bad_before)
+    assert command._action_ball_continuous_episode_step[1] == (
+        peer_step_before + 1
+    )
+
+
+def test_named_swing_generation_overflow_fault_precedes_reveal_writes() -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    command._action_ball_continuous_episode_step[0] = (
+        command._action_ball_continuous_next_reveal_step[0] - 1
+    )
+    command._action_ball_continuous_scheduled_ordinal[0] = 0
+    command._action_ball_swing_generation[0] = command._ACTION_BALL_INT64_MAX
+    bad_before = _motion_row_snapshot(command, 0)
+    peer_step_before = command._action_ball_continuous_episode_step[1].clone()
+
+    _advance_once(command)
+
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [
+        genesis.E.ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW,
+        0,
+    ]
+    _assert_motion_row_unchanged(command, 0, bad_before)
+    assert command._action_ball_continuous_episode_step[1] == (
+        peer_step_before + 1
+    )
+
+
+def test_named_task_timing_fault_freezes_age_and_cadence_before_write() -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    command._action_ball_continuous_motion_active[0] = True
+    command._action_ball_task_timing_active[0] = False
+    command._action_ball_task_age_s[0] = 7.0
+    bad_before = _motion_row_snapshot(command, 0)
+    peer_step_before = command._action_ball_continuous_episode_step[1].clone()
+
+    _advance_once(command)
+
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [
+        genesis.E.ROW_FAULT_MOTION_TASK_TIMING_CONTRACT,
+        0,
+    ]
+    _assert_motion_row_unchanged(command, 0, bad_before)
+    assert command._action_ball_continuous_episode_step[1] == (
+        peer_step_before + 1
+    )
+
+
+def _configure_reveal_cache(command) -> None:
+    command.action_ball_diagnostic_split_ready_teacher = True
+    command.canonical_ready_mode = False
+    command.clip_id.copy_(torch.tensor([0, 1], dtype=torch.int64))
+    frame_zero = command.motion.seg_start[command.clip_id]
+    command.time_steps.copy_(frame_zero)
+    command._action_ball_safe_ready_reference_pending = torch.tensor(
+        [True, False], dtype=torch.bool
+    )
+    command._action_ball_public_task_valid = torch.tensor(
+        [True, True], dtype=torch.bool
+    )
+    command.motion.body_pos_w = torch.zeros_like(command.motion.body_pos_w)
+    command.motion.body_pos_w[frame_zero[0], 0] = torch.tensor([1.0, 2.0, 3.0])
+    command.motion.body_pos_w[frame_zero[1], 0] = torch.tensor([4.0, 5.0, 6.0])
+    command.motion.body_quat_w = torch.zeros_like(command.motion.body_quat_w)
+    command.motion.body_quat_w[:, 0, 0] = 1.0
+    command.motion_anchor_body_index = 0
+    command.robot_anchor_body_index = 0
+    command.body_indexes = [0]
+    command.robot.data.body_pos_w = torch.zeros((2, 1, 3))
+    command.robot.data.body_quat_w = torch.zeros((2, 1, 4))
+    command.robot.data.body_quat_w[:, 0, 0] = 1.0
+    command.body_pos_relative_w = torch.full((2, 1, 3), -9.0)
+    command.body_quat_relative_w = torch.full((2, 1, 4), -9.0)
+
+
+def _latch_out_of_range_reveal_fault(command, epoch_owner) -> torch.Tensor:
+    _configure_reveal_cache(command)
+    command._action_ball_safe_ready_reference_pending.zero_()
+    command._action_ball_safe_ready_pending_count = 0
+    command._action_ball_continuous_policy_opportunities_created.fill_(1)
+    command.time_steps[0] = int(command.motion.time_step_total) + 17
+    command.time_steps_f[0] = command.time_steps[0].float()
+    command.refresh_action_ball_revealed_body_reference(
+        torch.tensor([True, False], dtype=torch.bool)
+    )
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [
+        genesis.E.ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
+        0,
+    ]
+    return command.motion.seg_start[command.clip_id]
+
+
+def test_named_reveal_reference_fault_masks_cache_and_keeps_peer() -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    _configure_reveal_cache(command)
+    bad_pos_before = command.body_pos_relative_w[0].clone()
+    bad_quat_before = command.body_quat_relative_w[0].clone()
+    peer_pos_before = command.body_pos_relative_w[1].clone()
+
+    command.refresh_action_ball_revealed_body_reference(
+        torch.tensor([True, True], dtype=torch.bool)
+    )
+
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [
+        genesis.E.ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
+        0,
+    ]
+    assert torch.equal(command.body_pos_relative_w[0], bad_pos_before)
+    assert torch.equal(command.body_quat_relative_w[0], bad_quat_before)
+    assert not torch.equal(command.body_pos_relative_w[1], peer_pos_before)
+
+
+def test_fresh_reveal_fault_without_epoch_owner_fails_closed_before_cache_write(
+) -> None:
+    command, _cadence_owner, device_owner, _epoch_owner = (
+        genesis._fresh_command_and_owners(torch.device("cpu"))
+    )
+    command.bind_action_ball_continuous_motion_device_r05_reveal(device_owner)
+    _configure_reveal_cache(command)
+    before_pos = command.body_pos_relative_w.clone()
+    before_quat = command.body_quat_relative_w.clone()
+
+    with pytest.raises(
+        RuntimeError,
+        match="fresh Motion row fault requires its exact ActionEpoch owner",
+    ):
+        command.refresh_action_ball_revealed_body_reference(
+            torch.tensor([True, False], dtype=torch.bool)
+        )
+
+    assert torch.equal(command.body_pos_relative_w, before_pos)
+    assert torch.equal(command.body_quat_relative_w, before_quat)
+
+
+def test_out_of_range_fault_quarantines_every_motion_reference_getter() -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    frame_zero = _latch_out_of_range_reveal_fault(command, epoch_owner)
+    bridge._add_velocity_reference_tensors(command)
+    command.robot.data.default_joint_pos = torch.zeros_like(
+        command.motion.joint_pos[: command.num_envs]
+    )
+
+    safe_steps = command._action_ball_full_mdp_safe_pose_reference_steps()
+    assert safe_steps.tolist() == [frame_zero[0].item(), frame_zero[1].item()]
+    references = {
+        name: getattr(command, name)
+        for name in (
+            "joint_pos",
+            "joint_vel",
+            "body_pos_w",
+            "body_quat_w",
+            "body_lin_vel_w",
+            "body_ang_vel_w",
+            "anchor_pos_w",
+            "anchor_quat_w",
+            "anchor_lin_vel_w",
+            "anchor_ang_vel_w",
+        )
+    }
+    for name, value in references.items():
+        assert value.shape[0] == command.num_envs, name
+        assert torch.all(torch.isfinite(value)), name
+    assert torch.equal(
+        references["joint_pos"][0], command.motion.joint_pos[frame_zero[0]]
+    )
+    assert torch.equal(
+        references["body_pos_w"][0, 0],
+        command.motion.body_pos_w[frame_zero[0], 0]
+        + command._env.scene.env_origins[0],
+    )
+
+
+def test_out_of_range_fault_survives_real_update_tail_without_cache_write(
+) -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    _latch_out_of_range_reveal_fault(command, epoch_owner)
+    bad_pos_before = command.body_pos_relative_w[0].clone()
+    bad_quat_before = command.body_quat_relative_w[0].clone()
+    peer_pos_before = command.body_pos_relative_w[1].clone()
+    peer_quat_before = command.body_quat_relative_w[1].clone()
+    command._stagger_ep_pending = False
+    command._event_scheduler = None
+    command._multiseg = True
+    command._advance_action_ball_continuous_motion_cadence = types.MethodType(
+        lambda self: (
+            torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+            torch.zeros(self.num_envs, dtype=torch.bool, device=self.device),
+        ),
+        command,
+    )
+
+    C.MotionCommand._update_command(command)
+
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [
+        genesis.E.ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
+        0,
+    ]
+    assert torch.equal(command.body_pos_relative_w[0], bad_pos_before)
+    assert torch.equal(command.body_quat_relative_w[0], bad_quat_before)
+    assert not torch.equal(command.body_pos_relative_w[1], peer_pos_before)
+    assert not torch.equal(command.body_quat_relative_w[1], peer_quat_before)
+
+
+def test_task_valid_false_alone_is_not_a_reveal_reference_fault() -> None:
+    command, epoch_owner = _bound_fresh_motion()
+    _configure_reveal_cache(command)
+    command._action_ball_safe_ready_reference_pending.zero_()
+    command._action_ball_public_task_valid[0] = False
+    before = command.body_pos_relative_w.clone()
+
+    command.refresh_action_ball_revealed_body_reference(
+        torch.tensor([True, False], dtype=torch.bool)
+    )
+
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [0, 0]
+    assert not torch.equal(command.body_pos_relative_w[0], before[0])
+    assert torch.equal(command.body_pos_relative_w[1], before[1])
 
 
 def test_motion_lifecycle_keeps_playback_publication_but_not_legacy_close() -> None:
@@ -270,10 +560,12 @@ def test_close_and_eager_seal_order_and_new_projection_path_have_no_hot_d2h(
         "_seal_action_ball_continuous_current_projection"
     ]
 
-    # Inspect the complete new eager-seal/current-projection call graph one
-    # function at a time.  The old cadence advance reaches pre-existing async
-    # assertions elsewhere and is intentionally not represented as clean.
+    # Inspect the complete cadence/eager-seal/current-projection call graph one
+    # function at a time.  Fresh cadence faults must use the named packed Epoch
+    # path; an anonymous CUDA assertion is not a write authorization boundary.
     inspected = (
+        C.MotionCommand._advance_action_ball_continuous_motion_cadence,
+        C.MotionCommand._latch_action_ball_full_mdp_motion_epoch_row_fault,
         C.MotionCommand._seal_action_ball_continuous_current_projection,
         C.MotionCommand._clone_action_ball_continuous_projection,
         C.MotionCommand._write_action_ball_continuous_close_edge,

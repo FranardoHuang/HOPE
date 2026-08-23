@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import math
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,44 +29,191 @@ HOPE_COMMANDS_PATH = MDP / "hope_commands.py"
 OBSERVATIONS_PATH = MDP / "hope_observations.py"
 REWARDS_PATH = MDP / "hope_rewards.py"
 TASK_CFG = ROOT / "cfg" / "task"
+MOTION_ANCHOR_HELPER = "_motion_anchor_relative_body_transform"
+PINNED_ISAACLAB_CHECKOUT = "IsaacLab-8320e0be"
 
 
-def _quat_mul(lhs, rhs):
-    lw, lx, ly, lz = lhs.unbind(dim=-1)
-    rw, rx, ry, rz = rhs.unbind(dim=-1)
-    return torch.stack(
-        (
-            lw * rw - lx * rx - ly * ry - lz * rz,
-            lw * rx + lx * rw + ly * rz - lz * ry,
-            lw * ry - lx * rz + ly * rw + lz * rx,
-            lw * rz + lx * ry - ly * rx + lz * rw,
+def _commands_top_level_function(name):
+    source = COMMANDS_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(COMMANDS_PATH))
+    return next(
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == name
+    )
+
+
+def _load_motion_anchor_transform(math_namespace):
+    helper = _commands_top_level_function(MOTION_ANCHOR_HELPER)
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias("annotations")],
+                level=0,
+            ),
+            helper,
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(module)
+    namespace = {"torch": torch, **math_namespace}
+    exec(compile(module, str(COMMANDS_PATH), "exec"), namespace)
+    return namespace[MOTION_ANCHOR_HELPER]
+
+
+@pytest.fixture(scope="module")
+def _pinned_isaaclab_anchor_math():
+    expected_root_raw = os.environ.get("HOPE_ISAACLAB_ROOT")
+    if expected_root_raw is None:
+        pytest.skip("exact anchor parity requires HOPE_ISAACLAB_ROOT")
+    configured_root = Path(expected_root_raw)
+    assert configured_root.name == PINNED_ISAACLAB_CHECKOUT
+    expected_root = configured_root.resolve()
+    module_path = (
+        expected_root
+        / "source"
+        / "isaaclab"
+        / "isaaclab"
+        / "utils"
+        / "math.py"
+    ).resolve()
+    assert expected_root == module_path or expected_root in module_path.parents
+    assert module_path.is_file()
+    spec = importlib.util.spec_from_file_location(
+        "_action_ball_pinned_isaaclab_math_8320e0be",
+        module_path,
+    )
+    assert spec is not None and spec.loader is not None
+    math_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(math_module)
+    return {
+        name: getattr(math_module, name)
+        for name in ("quat_apply", "quat_inv", "quat_mul", "yaw_quat")
+    }
+
+
+def _legacy_repeated_anchor_transform(
+    anchor_pos_w,
+    anchor_quat_w,
+    robot_anchor_pos_w,
+    robot_anchor_quat_w,
+    body_pos_w,
+    body_quat_w,
+    *,
+    quat_apply,
+    quat_inv,
+    quat_mul,
+    yaw_quat,
+):
+    """Exact pre-optimization anchor transform used as the fixed-tape oracle."""
+
+    body_count = body_pos_w.shape[1]
+    anchor_pos_w_repeat = anchor_pos_w[:, None, :].repeat(1, body_count, 1)
+    anchor_quat_w_repeat = anchor_quat_w[:, None, :].repeat(1, body_count, 1)
+    robot_anchor_pos_w_repeat = robot_anchor_pos_w[:, None, :].repeat(
+        1, body_count, 1
+    )
+    robot_anchor_quat_w_repeat = robot_anchor_quat_w[:, None, :].repeat(
+        1, body_count, 1
+    )
+    delta_pos_w = robot_anchor_pos_w_repeat
+    delta_pos_w[..., 2] = anchor_pos_w_repeat[..., 2]
+    delta_ori_w = yaw_quat(
+        quat_mul(
+            robot_anchor_quat_w_repeat,
+            quat_inv(anchor_quat_w_repeat),
+        )
+    )
+    return (
+        quat_mul(delta_ori_w, body_quat_w),
+        delta_pos_w
+        + quat_apply(delta_ori_w, body_pos_w - anchor_pos_w_repeat),
+    )
+
+
+def _anchor_transform_tape(num_envs, dtype, quaternion_case, device):
+    generator = torch.Generator(device=device).manual_seed(20260823 + num_envs)
+    tape = [
+        torch.randn(shape, generator=generator, dtype=dtype, device=device)
+        for shape in (
+            (num_envs, 3),
+            (num_envs, 4),
+            (num_envs, 3),
+            (num_envs, 4),
+            (num_envs, 14, 3),
+            (num_envs, 14, 4),
+        )
+    ]
+    if quaternion_case == "degenerate":
+        # Near-zero, non-unit, hemisphere-flipped, and 180-degree rotations;
+        # all stay finite so torch.equal remains a meaningful bitwise oracle.
+        special = torch.tensor(
+            (
+                (0.0, 1.0, 0.0, 0.0),
+                (1.0e-12, -2.0e-12, 3.0e-12, -4.0e-12),
+                (-1.0, 0.0, 0.0, 0.0),
+                (2.0, -0.5, 0.25, -1.0),
+            ),
+            dtype=dtype,
+            device=device,
+        )
+        tiled = special.repeat((num_envs + 3) // 4, 1)[:num_envs]
+        tape[1] = tiled.clone()
+        tape[3] = torch.flip(tiled, dims=(0,)).clone()
+    return tuple(tape)
+
+
+def _motion_method_source(method_name):
+    source = COMMANDS_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(COMMANDS_PATH))
+    motion = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MotionCommand"
+    )
+    method = next(
+        node
+        for node in motion.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == method_name
+    )
+    return ast.get_source_segment(source, method) or ""
+
+
+def _motion_anchor_helper_binding(method_name):
+    source = COMMANDS_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(COMMANDS_PATH))
+    motion = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MotionCommand"
+    )
+    method = next(
+        node
+        for node in motion.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == method_name
+    )
+    assignment = next(
+        node
+        for node in ast.walk(method)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == MOTION_ANCHOR_HELPER
+    )
+    assert len(assignment.targets) == 1
+    target = assignment.targets[0]
+    assert isinstance(target, ast.Tuple)
+    return (
+        tuple(ast.get_source_segment(source, item) for item in target.elts),
+        tuple(
+            ast.get_source_segment(source, item)
+            for item in assignment.value.args
         ),
-        dim=-1,
     )
-
-
-def _quat_inv(quat):
-    result = quat.clone()
-    result[..., 1:] *= -1.0
-    return result / torch.sum(torch.square(quat), dim=-1, keepdim=True)
-
-
-def _quat_apply(quat, vector):
-    xyz = quat[..., 1:]
-    uv = torch.cross(xyz, vector, dim=-1)
-    uuv = torch.cross(xyz, uv, dim=-1)
-    return vector + 2.0 * (quat[..., :1] * uv + uuv)
-
-
-def _yaw_quat(quat):
-    yaw = torch.atan2(
-        2.0 * (quat[..., 0] * quat[..., 3] + quat[..., 1] * quat[..., 2]),
-        1.0 - 2.0 * (torch.square(quat[..., 2]) + torch.square(quat[..., 3])),
-    )
-    result = torch.zeros_like(quat)
-    result[..., 0] = torch.cos(0.5 * yaw)
-    result[..., 3] = torch.sin(0.5 * yaw)
-    return result
 
 
 def _load_motion_teacher_view():
@@ -78,6 +227,7 @@ def _load_motion_teacher_view():
     wanted = {
         "_advance_action_ball_task_timing",
         "refresh_action_ball_revealed_body_reference",
+        "_action_ball_full_mdp_safe_pose_reference_steps",
         "_action_ball_safe_ready_wait_mask",
         "_capture_action_ball_safe_ready_reference",
         "action_ball_time_to_contact_remaining_s",
@@ -96,6 +246,7 @@ def _load_motion_teacher_view():
         and node.name in wanted
     ]
     assert {node.name for node in methods} == wanted
+    anchor_helper = _commands_top_level_function(MOTION_ANCHOR_HELPER)
     view = ast.ClassDef(
         name="MotionTeacherView",
         bases=[],
@@ -103,14 +254,28 @@ def _load_motion_teacher_view():
         body=methods,
         decorator_list=[],
     )
-    module = ast.Module(body=[view], type_ignores=[])
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias("annotations")],
+                level=0,
+            ),
+            anchor_helper,
+            view,
+        ],
+        type_ignores=[],
+    )
     ast.fix_missing_locations(module)
+    # This dependency-light fixture only uses identity quaternions and checks
+    # reveal ownership, not quaternion numerics. Exact transform numerics are
+    # covered below with the real pinned IsaacLab kernels.
     namespace = {
         "torch": torch,
-        "quat_apply": _quat_apply,
-        "quat_inv": _quat_inv,
-        "quat_mul": _quat_mul,
-        "yaw_quat": _yaw_quat,
+        "quat_apply": lambda _quat, vector: vector,
+        "quat_inv": lambda quat: quat,
+        "quat_mul": lambda lhs, _rhs: lhs,
+        "yaw_quat": lambda quat: quat,
     }
     exec(compile(module, str(COMMANDS_PATH), "exec"), namespace)
     return namespace["MotionTeacherView"]
@@ -235,6 +400,10 @@ def _motion_teacher_fixture():
     view.device = torch.device("cpu")
     view.canonical_ready_mode = True
     view.action_ball_diagnostic_split_ready_teacher = True
+    # This legacy hidden-WAIT fixture predates the continuous-motion owner.
+    # Pin the real default explicitly instead of asking production to grow a
+    # compatibility getattr fallback.
+    view.action_ball_continuous_motion_enabled = False
     view._action_ball_public_task_valid = torch.tensor([False, True])
     view._action_ball_safe_ready_reference_pending = torch.zeros(2, dtype=torch.bool)
     view._action_ball_safe_ready_pending_count = 0
@@ -300,6 +469,136 @@ def _motion_teacher_fixture():
     view.body_quat_relative_w = view._action_ball_safe_ready_body_quat_w.clone()
     view._multiseg = False
     return view, safe_joint, measured_joint, measured_body_pos, measured_body_quat
+
+
+@pytest.mark.parametrize("num_envs", (1, 2, 64, 4096))
+@pytest.mark.parametrize("dtype", (torch.float32, torch.float64))
+@pytest.mark.parametrize("quaternion_case", ("ordinary", "degenerate"))
+def test_motion_anchor_broadcast_is_bitwise_equal_to_repeated_fixed_tape(
+    num_envs,
+    dtype,
+    quaternion_case,
+    _pinned_isaaclab_anchor_math,
+):
+    device = torch.device(
+        os.environ.get("ACTION_BALL_ANCHOR_PARITY_DEVICE", "cpu")
+    )
+    if device.type == "cuda":
+        assert torch.cuda.is_available()
+    tape = _anchor_transform_tape(num_envs, dtype, quaternion_case, device)
+    untouched = tuple(value.clone() for value in tape)
+    transform = _load_motion_anchor_transform(_pinned_isaaclab_anchor_math)
+
+    expected_quat, expected_pos = _legacy_repeated_anchor_transform(
+        *tape,
+        **_pinned_isaaclab_anchor_math,
+    )
+    actual_quat, actual_pos = transform(*tape, expected_body_count=14)
+
+    assert tuple(actual_quat.shape) == (num_envs, 14, 4)
+    assert tuple(actual_pos.shape) == (num_envs, 14, 3)
+    assert actual_quat.dtype == expected_quat.dtype == dtype
+    assert actual_pos.dtype == expected_pos.dtype == dtype
+    assert actual_quat.device == expected_quat.device == device
+    assert actual_pos.device == expected_pos.device == device
+    assert torch.equal(
+        actual_quat.contiguous().view(torch.uint8),
+        expected_quat.contiguous().view(torch.uint8),
+    )
+    assert torch.equal(
+        actual_pos.contiguous().view(torch.uint8),
+        expected_pos.contiguous().view(torch.uint8),
+    )
+    for value, original in zip(tape, untouched):
+        assert torch.equal(
+            value.contiguous().view(torch.uint8),
+            original.contiguous().view(torch.uint8),
+        )
+
+
+@pytest.mark.parametrize("width_case", ("configured", "quaternion"))
+def test_motion_anchor_rejects_wrong_body_width_before_quaternion_math(
+    width_case,
+):
+    def forbidden_math(*_args, **_kwargs):
+        raise AssertionError("shape drift reached quaternion math")
+
+    transform = _load_motion_anchor_transform(
+        {
+            "quat_apply": forbidden_math,
+            "quat_inv": forbidden_math,
+            "quat_mul": forbidden_math,
+            "yaw_quat": forbidden_math,
+        }
+    )
+    body_pos_width = 13 if width_case == "configured" else 14
+    body_quat_width = 13 if width_case == "quaternion" else body_pos_width
+    with pytest.raises(
+        ValueError,
+        match="tensor shape differs from the configured body layout",
+    ):
+        transform(
+            torch.zeros((2, 3)),
+            torch.zeros((2, 4)),
+            torch.zeros((2, 3)),
+            torch.zeros((2, 4)),
+            torch.zeros((2, body_pos_width, 3)),
+            torch.zeros((2, body_quat_width, 4)),
+            expected_body_count=14,
+        )
+
+
+def test_motion_anchor_hotpaths_share_one_pure_helper_without_host_sync():
+    commands_source = COMMANDS_PATH.read_text(encoding="utf-8")
+    helper_node = _commands_top_level_function(MOTION_ANCHOR_HELPER)
+    helper_source = ast.get_source_segment(commands_source, helper_node) or ""
+    update_source = _motion_method_source("_update_command")
+    reveal_source = _motion_method_source(
+        "refresh_action_ball_revealed_body_reference"
+    )
+
+    assert commands_source.count(f"def {MOTION_ANCHOR_HELPER}(") == 1
+    assert commands_source.count(f"{MOTION_ANCHOR_HELPER}(") == 3
+    assert update_source.count(f"{MOTION_ANCHOR_HELPER}(") == 1
+    assert reveal_source.count(f"{MOTION_ANCHOR_HELPER}(") == 1
+    assert _motion_anchor_helper_binding("_update_command") == (
+        ("next_body_quat_relative_w", "next_body_pos_relative_w"),
+        (
+            "self.anchor_pos_w",
+            "self.anchor_quat_w",
+            "self.robot_anchor_pos_w",
+            "self.robot_anchor_quat_w",
+            "self.body_pos_w",
+            "self.body_quat_w",
+        ),
+    )
+    assert _motion_anchor_helper_binding(
+        "refresh_action_ball_revealed_body_reference"
+    ) == (
+        (
+            "measured_body_quat_relative_w",
+            "measured_body_pos_relative_w",
+        ),
+        (
+            "anchor_pos_w",
+            "anchor_quat_w",
+            "robot_anchor_pos_w",
+            "robot_anchor_quat_w",
+            "body_pos_w",
+            "body_quat_w",
+        ),
+    )
+    for callpoint in (update_source, reveal_source):
+        assert "delta_ori_w = yaw_quat(" not in callpoint
+        assert ".repeat(" not in callpoint
+        assert "expected_body_count=len(self.cfg.body_names)" in "".join(
+            callpoint.split()
+        )
+    assert helper_source.count("delta_ori_w = yaw_quat(") == 1
+    assert ".repeat(" not in helper_source
+    assert helper_source.count(".expand(") == 3
+    for forbidden in (".cpu(", ".item(", ".tolist(", "bool("):
+        assert forbidden not in helper_source
 
 
 @pytest.mark.parametrize(
@@ -611,6 +910,7 @@ def _load_reward_helpers():
     tree = ast.parse(source, filename=str(REWARDS_PATH))
     wanted = {
         "action_ball_task_valid_mask",
+        "strike_guidance_eligibility_mask",
         "_stage1_split_ready_wait_mask",
         "_stage1_quat_normalize",
         "_stage1_quat_mul",
@@ -632,12 +932,33 @@ def _load_reward_helpers():
         "motion_racket_normal_tracking_cauchy",
         "motion_racket_long_axis_tracking_cauchy",
     }
+    wanted_constants = {
+        "STRIKE_GUIDANCE_ELIGIBILITY_WINDOW_INTEGRATED",
+        "STRIKE_GUIDANCE_ELIGIBILITY_EXACT_ONE_SHOT",
+        "STRIKE_GUIDANCE_ELIGIBILITY_DEVICE_SEALED",
+        "STRIKE_GUIDANCE_ELIGIBILITY_MODES",
+    }
     nodes = [
         node
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name in wanted
     ]
     assert {node.name for node in nodes} == wanted
+    dependency_nodes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id in wanted_constants
+            for target in node.targets
+        )
+    ]
+    assert {
+        target.id
+        for node in dependency_nodes
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    } == wanted_constants
     module = ast.Module(
         body=[
             ast.ImportFrom(
@@ -645,7 +966,7 @@ def _load_reward_helpers():
                 names=[ast.alias("annotations")],
                 level=0,
             ),
-            *nodes,
+            *sorted((*nodes, *dependency_nodes), key=lambda node: node.lineno),
         ],
         type_ignores=[],
     )
@@ -831,6 +1152,7 @@ def _load_racket_ledger_view():
     )
     wanted = {
         "_action_ball_close_attempts",
+        "_action_ball_strike_fact_close_before_task_mutation",
         "_book_sparse_reward_eligibility",
         "_vb_book_strike_step",
     }
@@ -908,6 +1230,10 @@ def _racket_ledger_fixture():
     # semantics merely because this dependency-light fixture omitted a field.
     view.num_envs = 2
     view._action_ball_fixed_view_enabled = False
+    # The extracted close path now calls the strike-fact mutation owner.  Bind
+    # that real helper and its production default-off flag in the fake; do not
+    # replace the owner call with a no-op shim.
+    view._action_ball_strike_fact_device_enabled = False
     # S0 给 close_attempts 加了 resume 重置豁免闩: 从 checkpoint 恢复后的那次
     # 重置不算一次"关闭的机会"。真构造器在 __init__ 里就建好这个 [num_envs]
     # bool 张量, 这里照做, 不走它那条为老 checkpoint 准备的惰性补建分支。

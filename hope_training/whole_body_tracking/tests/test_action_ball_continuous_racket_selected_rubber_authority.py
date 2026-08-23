@@ -202,6 +202,54 @@ def _set_direct_allocation(
     )
 
 
+def _direct_scene_port(
+    *, scene, target, active, physical_owner, owner, racket
+):
+    fact_owner = scene.IsaacPhysxBallFactOwner.__new__(
+        scene.IsaacPhysxBallFactOwner
+    )
+    fact_owner.num_envs = 2
+    fact_owner.flight_capacity = 2
+    fact_owner.device = target
+    fact_owner._bound_authority = None
+    fact_owner._action_epoch_direct_binding = False
+    fact_owner._expected_active = torch.zeros_like(active)
+    fact_owner._expected_rubber = torch.full(
+        (2, 2), -1, dtype=torch.int8, device=target
+    )
+    fact_owner._expected_generation = torch.full(
+        (2, 2), -1, dtype=torch.int64, device=target
+    )
+    fact_owner._expected_key = torch.zeros(
+        2, 2, 32, dtype=torch.uint8, device=target
+    )
+    fact_owner._expected_action_epoch_shot_key = {
+        name: torch.full((2, 2), -1, dtype=torch.int64, device=target)
+        for name in scene._ACTION_EPOCH_SHOT_KEY_FIELDS
+    }
+    fact_owner._expected_action_epoch_publication_ordinal = torch.full(
+        (2, 2), -1, dtype=torch.int64, device=target
+    )
+    fact_owner._previous_valid = torch.zeros_like(active)
+    fact_owner._contact_latch = torch.zeros_like(active)
+    fact_owner._net_latch = torch.zeros_like(active)
+    fact_owner._landing_latch = torch.zeros_like(active)
+    fact_owner._contact_candidate_event = torch.zeros_like(active)
+    fact_owner._known_non_rubber_candidate_event = torch.zeros_like(active)
+    fact_owner._binding_fault = torch.zeros_like(active)
+    port = scene.IsaacLabPhysicalFlightScenePort.__new__(
+        scene.IsaacLabPhysicalFlightScenePort
+    )
+    port.num_envs = 2
+    port.flight_capacity = 2
+    port.device = target
+    port._action_epoch_physical_owner = physical_owner
+    port._action_epoch_owner = owner
+    port._action_epoch_racket_owner = racket
+    port._physx_fact_owner = fact_owner
+    return port, fact_owner
+
+
 @pytest.mark.parametrize("device", ("cpu", "cuda:0"))
 @pytest.mark.parametrize(
     "selected,active,expected",
@@ -279,41 +327,14 @@ def test_scene_noarg_chain_accepts_idle_empty_rows(
         physical=physical,
         active=active_tensor,
     )
-    fact_owner = scene.IsaacPhysxBallFactOwner.__new__(
-        scene.IsaacPhysxBallFactOwner
+    port, fact_owner = _direct_scene_port(
+        scene=scene,
+        target=target,
+        active=active_tensor,
+        physical_owner=physical_owner,
+        owner=owner,
+        racket=racket,
     )
-    fact_owner.num_envs = 2
-    fact_owner.flight_capacity = 2
-    fact_owner.device = target
-    fact_owner._bound_authority = None
-    fact_owner._action_epoch_direct_binding = False
-    fact_owner._expected_active = torch.zeros_like(active_tensor)
-    fact_owner._expected_rubber = torch.full(
-        (2, 2), -1, dtype=torch.int8, device=target
-    )
-    fact_owner._expected_generation = torch.full(
-        (2, 2), -1, dtype=torch.int64, device=target
-    )
-    fact_owner._expected_key = torch.zeros(
-        2, 2, 32, dtype=torch.uint8, device=target
-    )
-    fact_owner._previous_valid = torch.zeros_like(active_tensor)
-    fact_owner._contact_latch = torch.zeros_like(active_tensor)
-    fact_owner._net_latch = torch.zeros_like(active_tensor)
-    fact_owner._landing_latch = torch.zeros_like(active_tensor)
-    fact_owner._contact_candidate_event = torch.zeros_like(active_tensor)
-    fact_owner._known_non_rubber_candidate_event = torch.zeros_like(active_tensor)
-    fact_owner._binding_fault = torch.zeros_like(active_tensor)
-    port = scene.IsaacLabPhysicalFlightScenePort.__new__(
-        scene.IsaacLabPhysicalFlightScenePort
-    )
-    port.num_envs = 2
-    port.flight_capacity = 2
-    port.device = target
-    port._action_epoch_physical_owner = physical_owner
-    port._action_epoch_owner = owner
-    port._action_epoch_racket_owner = racket
-    port._physx_fact_owner = fact_owner
 
     port.arm_action_epoch_physics_fact_source()
 
@@ -323,6 +344,41 @@ def test_scene_noarg_chain_accepts_idle_empty_rows(
     assert torch.equal(
         fact_owner._expected_rubber,
         torch.tensor(expected, dtype=torch.int8, device=target),
+    )
+
+
+def test_scene_noarg_chain_marks_only_changed_identity_row_as_binding_fault():
+    scene = _load_scene_module()
+    racket, physical_owner, owner, physical = _direct_epoch_racket("cpu")
+    active = torch.tensor([[True, False], [False, True]], dtype=torch.bool)
+    _set_direct_allocation(
+        racket=racket,
+        physical_owner=physical_owner,
+        owner=owner,
+        physical=physical,
+        active=active,
+    )
+    allocation = physical_owner._action_epoch_active_physics_fact_allocation
+    allocation.reset_generation[0, 0] = 2
+    port, fact_owner = _direct_scene_port(
+        scene=scene,
+        target=torch.device("cpu"),
+        active=active,
+        physical_owner=physical_owner,
+        owner=owner,
+        racket=racket,
+    )
+
+    port.arm_action_epoch_physics_fact_source()
+
+    assert torch.equal(
+        fact_owner._binding_fault,
+        torch.tensor([[True, False], [False, False]], dtype=torch.bool),
+    )
+    assert torch.equal(fact_owner._expected_active, active)
+    assert torch.equal(
+        fact_owner._expected_rubber,
+        torch.tensor([[-1, -1], [-1, 1]], dtype=torch.int8),
     )
 
 
@@ -367,11 +423,21 @@ def test_direct_epoch_selected_rubber_mixed_red_black_and_inactive(device):
     )
 
     allocation = physical_owner._action_epoch_active_physics_fact_allocation
-    if target.type == "cpu":
-        allocation.reset_generation[0, 0] = 2
-        with pytest.raises(RuntimeError, match="lost its exact owner identity"):
-            racket.action_ball_full_mdp_action_epoch_selected_rubber_view()
-        allocation.reset_generation[0, 0] = 1
+    allocation.reset_generation[0, 0] = 2
+    neutral = racket.action_ball_full_mdp_action_epoch_selected_rubber_view()
+    assert torch.equal(neutral.active_mask, active)
+    assert torch.equal(
+        neutral.expected_rubber,
+        torch.tensor([[-1, -1], [-1, 1]], dtype=torch.int8, device=target),
+    )
+    # The contradictory row becomes an inactive-face sentinel; the independent
+    # healthy row keeps its selected black face byte-for-byte.
+    assert neutral.expected_rubber[0, 0].item() == -1
+    assert (
+        neutral.expected_rubber[1, 1].item()
+        == view.expected_rubber[1, 1].item()
+    )
+    allocation.reset_generation[0, 0] = 1
 
     allocation.active_mask.zero_()
     allocation.launch_due_mask.zero_()
@@ -400,6 +466,74 @@ def test_direct_epoch_selected_rubber_mixed_red_black_and_inactive(device):
         match="inactive or stale",
     ):
         racket.action_ball_full_mdp_action_epoch_selected_rubber_view()
+
+
+def test_direct_epoch_selected_rubber_avoids_nonportable_async_assert(
+    monkeypatch,
+):
+    """Supported host Torch 2.0.1 accepts only the condition argument."""
+
+    racket, physical_owner, owner, physical = _direct_epoch_racket("cpu")
+    active = torch.tensor([[True, False], [False, True]], dtype=torch.bool)
+    _set_direct_allocation(
+        racket=racket,
+        physical_owner=physical_owner,
+        owner=owner,
+        physical=physical,
+        active=active,
+    )
+    calls = []
+
+    def torch20_assert_async(condition):
+        calls.append(condition)
+
+    monkeypatch.setattr(torch, "_assert_async", torch20_assert_async)
+    view = racket.action_ball_full_mdp_action_epoch_selected_rubber_view()
+
+    assert calls == []
+    assert torch.equal(view.active_mask, active)
+    assert torch.equal(
+        view.expected_rubber,
+        torch.tensor([[0, -1], [-1, 1]], dtype=torch.int8),
+    )
+
+
+def test_direct_epoch_selected_rubber_uses_one_narrow_projection_not_record_clone(
+    monkeypatch,
+):
+    racket, physical_owner, owner, physical = _direct_epoch_racket("cpu")
+    active = torch.tensor([[True, False], [False, True]], dtype=torch.bool)
+    _set_direct_allocation(
+        racket=racket,
+        physical_owner=physical_owner,
+        owner=owner,
+        physical=physical,
+        active=active,
+    )
+    epoch = importlib.import_module(
+        "whole_body_tracking.tasks.tracking.mdp.action_ball_full_mdp_epoch"
+    )
+    project = owner.project_current_shot
+    calls = []
+
+    def counted_projection():
+        calls.append(True)
+        return project()
+
+    def forbidden_record_clone(_record):
+        raise AssertionError("selected-rubber must not clone the full Epoch record")
+
+    monkeypatch.setattr(owner, "project_current_shot", counted_projection)
+    monkeypatch.setattr(epoch.ActionEpochRecord, "clone", forbidden_record_clone)
+
+    view = racket.action_ball_full_mdp_action_epoch_selected_rubber_view()
+
+    assert calls == [True]
+    assert torch.equal(view.active_mask, active)
+    assert torch.equal(
+        view.expected_rubber,
+        torch.tensor([[0, -1], [-1, 1]], dtype=torch.int8),
+    )
 
 
 @pytest.mark.parametrize("device", ("cpu", "cuda:0"))
@@ -453,11 +587,11 @@ def test_direct_epoch_selected_rubber_rejects_foreign_physical(device):
         ("task_identity", 999),
     ),
 )
-def test_direct_epoch_selected_rubber_rejects_changed_identity(
+def test_direct_epoch_selected_rubber_neutralizes_changed_identity_only(
     field, replacement
 ):
     racket, physical_owner, owner, physical = _direct_epoch_racket("cpu")
-    active = torch.tensor([[True, False], [False, False]])
+    active = torch.tensor([[True, False], [False, True]])
     shot_key, publication_ordinal = _allocation_identity(owner, active)
     getattr(shot_key, field)[0, 0] = replacement
     physical_owner._action_epoch_active_physics_fact_allocation = (
@@ -474,8 +608,13 @@ def test_direct_epoch_selected_rubber_rejects_changed_identity(
             _token=physical._ACTION_EPOCH_PHYSICS_FACT_ALLOCATION_TOKEN,
         )
     )
-    with pytest.raises(RuntimeError, match="lost its exact owner identity"):
-        racket.action_ball_full_mdp_action_epoch_selected_rubber_view()
+    view = racket.action_ball_full_mdp_action_epoch_selected_rubber_view()
+
+    assert torch.equal(view.active_mask, active)
+    assert torch.equal(
+        view.expected_rubber,
+        torch.tensor([[-1, -1], [-1, 1]], dtype=torch.int8),
+    )
 
 
 @pytest.mark.parametrize("device", ("cpu", "cuda:0"))
@@ -574,12 +713,15 @@ def test_direct_epoch_surface_has_no_caller_authority_or_host_verdict():
         ".tolist(",
         ".cpu(",
         "bool(",
+        "_assert_async",
         "sha256",
         "receipt",
         "token",
         "scene_snapshot",
     ):
         assert forbidden not in source
+    assert "epoch_owner.current()" not in source
+    assert "epoch_owner.project_current_shot()" in source
 
 
 def _published_view(racket):

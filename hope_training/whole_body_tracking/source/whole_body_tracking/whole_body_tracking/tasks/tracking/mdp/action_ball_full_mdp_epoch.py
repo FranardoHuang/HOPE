@@ -108,6 +108,16 @@ PHASE_REJECTED = 4
 PHASE_REWARD_SETTLED = 7
 PHASE_DEFERRED = 10
 
+
+def action_epoch_open_shot_phase_mask(phase: torch.Tensor) -> torch.Tensor:
+    """Rows whose published shot may still receive Motion playback/close edges."""
+
+    return (
+        phase.eq(PHASE_REVEAL_COMMITTED)
+        | phase.eq(PHASE_LAUNCH_SETTLED)
+        | phase.eq(PHASE_OUTCOME_SETTLED)
+    )
+
 D05_DECISION_NONE = 0
 D05_DECISION_ACCEPT = 1
 D05_DECISION_CENSOR = 2
@@ -123,6 +133,173 @@ MOTION_CLOSED = "MOTION_CLOSED"
 _I64_MAX = 2**63 - 1
 _FAULT_ILLEGAL_REPLAY = 1 << 60
 _FAULT_ABORT_AFTER_PUBLICATION = 1 << 59
+
+# Device-resident row faults share the existing single packed drain transfer.
+# Keep these causes orthogonal: a fatal run must say which causal join failed,
+# rather than collapsing unrelated lifecycle contracts into one boolean.
+ROW_FAULT_RESET_GENESIS_CONTRACT = 1 << 0
+ROW_FAULT_MOTION_CLOSE_CONTRACT = 1 << 1
+ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT = 1 << 2
+ROW_FAULT_D05_RESET_GENERATION_JOIN = 1 << 3
+ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN = 1 << 4
+ROW_FAULT_R06_OUTCOME_JOIN = 1 << 5
+ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY = 1 << 6
+ROW_FAULT_OWNER_FACT_ACTIVE_JOIN = 1 << 7
+ROW_FAULT_R07_FIRST_READY_JOIN = 1 << 8
+ROW_FAULT_PHYSICAL_LAUNCH_JOIN = 1 << 9
+ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW = 1 << 10
+ROW_FAULT_R06_LAUNCH_SELECTION_CONTRACT = 1 << 11
+ROW_FAULT_R06_LAUNCH_IDENTITY_CONTRACT = 1 << 12
+ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE = 1 << 13
+ROW_FAULT_R06_PAYMENT_PROJECTION_CONTRACT = 1 << 14
+ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE = 1 << 15
+ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED = 1 << 16
+ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT = 1 << 17
+ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION = 1 << 18
+ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE = 1 << 19
+ROW_FAULT_R06_CLOSED_PROJECTION_CONTRACT = 1 << 20
+ROW_FAULT_R06_CLOSED_DEBT_MISMATCH = 1 << 21
+ROW_FAULT_R06_CURRENT_FLIGHT_DUPLICATE = 1 << 22
+ROW_FAULT_MOTION_CADENCE_OVERDUE = 1 << 23
+ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW = 1 << 24
+ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT = 1 << 25
+ROW_FAULT_MOTION_TASK_TIMING_CONTRACT = 1 << 26
+# Physical already publishes these two exact source bits.  Keep the values
+# identical at the optimizer boundary so the causal producer/nonfinite split is
+# not lost while moving from the owner journal into the one packed row word.
+ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER = 1 << 41
+ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE = 1 << 42
+# R06's private fault namespace overlaps earlier ActionEpoch bits, so map its
+# retained source word into a disjoint public row-fault range.  The raw R06 word
+# remains in the journal for exact sub-cause audit.
+ROW_FAULT_R06_OWNER_PRODUCER_CONTRACT = 1 << 43
+ROW_FAULT_R06_OWNER_ENGINE_OVERFLOW = 1 << 44
+ROW_FAULT_R06_OWNER_NONFINITE = 1 << 45
+ROW_FAULT_R06_OWNER_OTHER = 1 << 46
+
+ACTION_EPOCH_ROW_FAULT_NAMES = (
+    (ROW_FAULT_RESET_GENESIS_CONTRACT, "reset_genesis_contract"),
+    (ROW_FAULT_MOTION_CLOSE_CONTRACT, "motion_close_contract"),
+    (ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT, "r06_previous_paid_contract"),
+    (ROW_FAULT_D05_RESET_GENERATION_JOIN, "d05_reset_generation_join"),
+    (ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN, "physical_postphysics_join"),
+    (ROW_FAULT_R06_OUTCOME_JOIN, "r06_outcome_join"),
+    (ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY, "reward_payment_chronology"),
+    (ROW_FAULT_OWNER_FACT_ACTIVE_JOIN, "owner_fact_active_join"),
+    (ROW_FAULT_R07_FIRST_READY_JOIN, "r07_first_ready_join"),
+    (ROW_FAULT_PHYSICAL_LAUNCH_JOIN, "physical_launch_join"),
+    (
+        ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW,
+        "selected_reset_generation_overflow",
+    ),
+    (
+        ROW_FAULT_R06_LAUNCH_SELECTION_CONTRACT,
+        "r06_launch_selection_contract",
+    ),
+    (
+        ROW_FAULT_R06_LAUNCH_IDENTITY_CONTRACT,
+        "r06_launch_identity_contract",
+    ),
+    (
+        ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+        "r06_outcome_projection_duplicate",
+    ),
+    (
+        ROW_FAULT_R06_PAYMENT_PROJECTION_CONTRACT,
+        "r06_payment_projection_contract",
+    ),
+    (
+        ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE,
+        "r06_payment_mailbox_duplicate",
+    ),
+    (
+        ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED,
+        "r06_payment_missing_or_mismatched",
+    ),
+    (
+        ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT,
+        "r06_payment_before_settlement",
+    ),
+    (
+        ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION,
+        "r06_payment_highwater_regression",
+    ),
+    (
+        ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE,
+        "r06_payment_unconsumed_debt_overwrite",
+    ),
+    (
+        ROW_FAULT_R06_CLOSED_PROJECTION_CONTRACT,
+        "r06_closed_projection_contract",
+    ),
+    (
+        ROW_FAULT_R06_CLOSED_DEBT_MISMATCH,
+        "r06_closed_debt_mismatch",
+    ),
+    (
+        ROW_FAULT_R06_CURRENT_FLIGHT_DUPLICATE,
+        "r06_current_flight_duplicate",
+    ),
+    (ROW_FAULT_MOTION_CADENCE_OVERDUE, "motion_cadence_overdue"),
+    (
+        ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW,
+        "motion_swing_generation_overflow",
+    ),
+    (
+        ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
+        "motion_reveal_reference_contract",
+    ),
+    (
+        ROW_FAULT_MOTION_TASK_TIMING_CONTRACT,
+        "motion_task_timing_contract",
+    ),
+    (
+        ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER,
+        "physical_postphysics_producer",
+    ),
+    (
+        ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE,
+        "physical_postphysics_nonfinite",
+    ),
+    (
+        ROW_FAULT_R06_OWNER_PRODUCER_CONTRACT,
+        "r06_owner_producer_contract",
+    ),
+    (
+        ROW_FAULT_R06_OWNER_ENGINE_OVERFLOW,
+        "r06_owner_engine_overflow",
+    ),
+    (ROW_FAULT_R06_OWNER_NONFINITE, "r06_owner_nonfinite"),
+    (ROW_FAULT_R06_OWNER_OTHER, "r06_owner_other"),
+)
+_KNOWN_ROW_FAULT_MASK = sum(bit for bit, _name in ACTION_EPOCH_ROW_FAULT_NAMES)
+_R06_RUNTIME_ROW_FAULT_BITS = frozenset(
+    (
+        ROW_FAULT_R06_LAUNCH_SELECTION_CONTRACT,
+        ROW_FAULT_R06_LAUNCH_IDENTITY_CONTRACT,
+        ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+        ROW_FAULT_R06_PAYMENT_PROJECTION_CONTRACT,
+        ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE,
+        ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED,
+        ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT,
+        ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION,
+        ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE,
+        ROW_FAULT_R06_CLOSED_PROJECTION_CONTRACT,
+        ROW_FAULT_R06_CLOSED_DEBT_MISMATCH,
+        ROW_FAULT_R06_CURRENT_FLIGHT_DUPLICATE,
+    )
+)
+_RUNTIME_ROW_FAULT_BITS_BY_OWNER = {
+    "r06_landing_outcome": _R06_RUNTIME_ROW_FAULT_BITS,
+    "motion": frozenset(
+        (
+            ROW_FAULT_MOTION_CADENCE_OVERDUE,
+            ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW,
+            ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT,
+            ROW_FAULT_MOTION_TASK_TIMING_CONTRACT,
+        )
+    ),
+}
 _FAULT_GENERATION_OVERFLOW = 1 << 58
 _FAULT_REWARD_CYCLE_OVERFLOW = 1 << 57
 _FAULT_ASYNC_REPLAY = 1 << 52
@@ -213,6 +390,21 @@ class ActionEpochIdleObservationChronology:
 
     epoch_version: int
     reset_generation: torch.Tensor
+
+
+@dataclass(frozen=True)
+class ActionEpochCurrentShotProjection:
+    """Transient clone-only value for the current shot in every row.
+
+    The owner gathers one internally selected slot and returns no authority,
+    token, or caller-selected mask.  Consumers must use the value immediately
+    on the current device stream and must not retain it across an Epoch write.
+    """
+
+    slot_valid: torch.Tensor
+    phase: torch.Tensor
+    shot_key: ActionEpochShotKey
+    publication_ordinal: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -412,12 +604,12 @@ class ActionEpochMaterializedDrain:
     """The sole host image minted by one frozen drain materialization."""
 
     entries: tuple[CommitEntry, ...]
-    overflow: torch.Tensor
+    row_fault_bits: torch.Tensor
     milestone_i64: torch.Tensor
     milestone_f64: torch.Tensor
 
 
-_DRAIN_PACK_VERSION = 4
+_DRAIN_PACK_VERSION = 5
 _DRAIN_DTYPE_NBYTES = {
     torch.bool: 1,
     torch.int64: 8,
@@ -631,7 +823,7 @@ class _ActionEpochCarryState:
     reward_ordinal: int
     last_motion_common_step: int
     current: ActionEpochRecord
-    undecoded_overflow: torch.Tensor
+    undrained_row_fault_bits: torch.Tensor
     action_uids_by_slot: torch.Tensor
     family_codes_by_slot: torch.Tensor
     last_r06_paid_payment_step: torch.Tensor
@@ -688,9 +880,9 @@ class ActionEpochOwner:
         self._drain_frontier = 0
         self._pending_drain: Optional[tuple[int, int]] = None
         self._pending_drain_materialized = False
-        self._drain_decoded_overflow = False
-        self._undecoded_overflow = torch.zeros(
-            (num_envs,), dtype=torch.bool, device=self.device
+        self._drain_decoded_row_fault = False
+        self._undrained_row_fault_bits = torch.zeros(
+            (num_envs,), dtype=torch.int64, device=self.device
         )
         self.milestone = milestone_tensors.MilestoneTensorAccumulator(
             num_envs, self.device, shot_slot_capacity
@@ -710,6 +902,7 @@ class ActionEpochOwner:
             0, dtype=torch.int64, device=self.device
         )
         self._family_codes_by_slot = self._action_uids_by_slot.clone()
+        self._motion_playback_owner: Optional[object] = None
         self._motion_playback: Optional[object] = None
         self._physical_launch_projection: Optional[object] = None
         self._physical_projection: Optional[object] = None
@@ -776,6 +969,46 @@ class ActionEpochOwner:
             if self._publication.current is None:
                 raise ActionEpochError("no ActionEpoch record exists")
             return self._publication.current.clone()
+
+    def project_current_shot(self) -> ActionEpochCurrentShotProjection:
+        """Gather the current device row without cloning the full record.
+
+        This is a same-stream read projection, not an admission verdict.  An
+        invalid internal slot is represented by ``slot_valid=False`` and
+        neutral ``-1`` values so each consumer can route only that row to its
+        existing named fault without a host synchronization.
+        """
+
+        with self._lock:
+            record = self._publication.current
+            if record is None:
+                raise ActionEpochError("no ActionEpoch record exists")
+            slot = record.current_task_slot
+            slot_valid = slot.ge(0) & slot.lt(self.shot_slot_capacity)
+            safe_slot = slot.clamp(0, self.shot_slot_capacity - 1)
+            index = safe_slot[:, None]
+
+            def selected(value: torch.Tensor) -> torch.Tensor:
+                gathered = torch.gather(value, 1, index).squeeze(1)
+                return torch.where(
+                    slot_valid,
+                    gathered,
+                    torch.full_like(gathered, -1),
+                ).detach()
+
+            return ActionEpochCurrentShotProjection(
+                slot_valid=slot_valid.detach(),
+                phase=selected(record.phase),
+                shot_key=ActionEpochShotKey(
+                    **{
+                        field.name: selected(
+                            getattr(record.identity.shot_key, field.name)
+                        )
+                        for field in fields(ActionEpochShotKey)
+                    }
+                ),
+                publication_ordinal=selected(record.publication_ordinal),
+            )
 
     def project_keyed_postphysics_activity_mask(
         self, *, owner: object
@@ -890,13 +1123,80 @@ class ActionEpochOwner:
         if self._poisoned:
             raise ActionEpochError("ActionEpoch owner is poisoned")
 
-    def _latch_device_row_fault(self, fault: torch.Tensor) -> torch.Tensor:
-        """Latch a device-only row fault and return rows still safe to mutate."""
+    def _latch_device_row_fault(
+        self, fault: torch.Tensor, *, reason_bit: int
+    ) -> torch.Tensor:
+        """Latch one named device-only cause and return rows safe to mutate."""
 
-        self._undecoded_overflow = torch.bitwise_or(
-            self._undecoded_overflow, fault
+        if (
+            type(reason_bit) is not int
+            or reason_bit <= 0
+            or reason_bit & (reason_bit - 1)
+            or reason_bit & ~_KNOWN_ROW_FAULT_MASK
+        ):
+            raise ActionEpochError("device row fault reason bit differs")
+        self._undrained_row_fault_bits = torch.bitwise_or(
+            self._undrained_row_fault_bits,
+            torch.where(fault, reason_bit, 0),
         )
-        return ~self._undecoded_overflow
+        return self._undrained_row_fault_bits.eq(0)
+
+    def latch_runtime_row_fault(
+        self,
+        owner_kind: str,
+        reason_bit: int,
+        rows: torch.Tensor,
+        *,
+        owner: object,
+    ) -> torch.Tensor:
+        """Latch one pre-registered runtime-owner fault at the packed boundary.
+
+        This narrow ingress deliberately remains callable from an exact owner
+        projection that Epoch is currently pulling, so it cannot use the
+        ordinary non-reentrant mutation guard.  The owner identity, owner/bit
+        registry, tensor ABI, carry lease, and frozen-drain boundary are still
+        exact; callers cannot select another owner's or a compound reason.
+        """
+
+        with self._lock:
+            carry_txn._require_leaf_mutable(self)
+            self._healthy()
+            if self._pending_drain is not None:
+                raise ActionEpochError("mutation cannot overlap a frozen drain")
+            allowed_bits = (
+                _RUNTIME_ROW_FAULT_BITS_BY_OWNER.get(owner_kind)
+                if type(owner_kind) is str
+                else None
+            )
+            expected_owner = None
+            if type(owner_kind) is str:
+                expected_owner = (
+                    self._motion_playback_owner
+                    if owner_kind == "motion"
+                    else self._async_owner_identities.get(owner_kind)
+                )
+            exact_owner_binding = expected_owner is owner
+            if owner_kind == "r06_landing_outcome":
+                exact_owner_binding &= (
+                    self._fact_owner_identities.get(owner_kind) is owner
+                )
+            if (
+                allowed_bits is None
+                or owner is None
+                or not exact_owner_binding
+            ):
+                raise ActionEpochError("runtime row fault owner binding differs")
+            if type(reason_bit) is not int or reason_bit not in allowed_bits:
+                raise ActionEpochError("runtime row fault reason bit differs")
+            exact_rows = self._borrow_tensor(
+                rows,
+                label="runtime row fault rows",
+                shape=(self.num_envs,),
+                dtype=torch.bool,
+            )
+            return self._latch_device_row_fault(
+                exact_rows, reason_bit=reason_bit
+            )
 
     def _tensor(
         self,
@@ -1269,6 +1569,7 @@ class ActionEpochOwner:
             self._motion_playback = self._exact_bound(
                 owner, "action_epoch_playback_transition_mask"
             )
+            self._motion_playback_owner = owner
 
     def bind_selected_reset_owner(self, owner: object) -> None:
         with self._operation("bind selected reset"):
@@ -1297,8 +1598,12 @@ class ActionEpochOwner:
                 shape=(self.num_envs,),
                 dtype=torch.int64,
             )
-            self._undecoded_overflow = self._undecoded_overflow | (
-                ~selected | generation.ne(self._reset_generation)
+            genesis_fault = ~selected | generation.ne(self._reset_generation)
+            self._undrained_row_fault_bits = torch.bitwise_or(
+                self._undrained_row_fault_bits,
+                torch.where(
+                    genesis_fault, ROW_FAULT_RESET_GENESIS_CONTRACT, 0
+                ),
             )
             self._genesis_activated = True
             empty_i64 = torch.full(
@@ -1672,12 +1977,12 @@ class ActionEpochOwner:
             paid = self._require_previous_paid_rows(
                 self._r06_paid_projection(), label="R06.previous_paid_rows"
             )
-            business_rows = (
+            external_business_rows = (
                 due
                 | closed
                 | close_reason_rows.ne(MOTION_CLOSE_NONE)
-                | paid.valid
             )
+            business_rows = external_business_rows | paid.valid
             if torch.equal(business_rows, torch.zeros_like(business_rows)):
                 # Preserve scalar chronology without manufacturing a private
                 # transaction, empty journal rows, or neutral writer calls.
@@ -1696,10 +2001,9 @@ class ActionEpochOwner:
                 self._gather_current_key(record.identity.shot_key)
             )
             current_phase_for_close = self._gather_current(record.phase)
-            close_has_active_row = current_key_valid & (
-                current_phase_for_close.eq(PHASE_REVEAL_COMMITTED)
-                | current_phase_for_close.eq(PHASE_LAUNCH_SETTLED)
-                | current_phase_for_close.eq(PHASE_OUTCOME_SETTLED)
+            close_has_active_row = (
+                current_key_valid
+                & action_epoch_open_shot_phase_mask(current_phase_for_close)
             )
             causal = (
                 (~close_reason_rows.eq(MOTION_CLOSE_PLAYED_SUFFIX) | current_playback)
@@ -1711,9 +2015,11 @@ class ActionEpochOwner:
                 & causal
                 & (~closed | close_has_active_row)
             )
-            safe_rows = self._latch_device_row_fault(~close_valid)
-            due &= safe_rows
-            closed &= safe_rows
+            safe_rows = self._latch_device_row_fault(
+                ~close_valid, reason_bit=ROW_FAULT_MOTION_CLOSE_CONTRACT
+            )
+            due = due & safe_rows
+            closed = closed & safe_rows
             close_reason_rows = torch.where(
                 safe_rows,
                 close_reason_rows,
@@ -1725,16 +2031,6 @@ class ActionEpochOwner:
                 close_reason_rows[:, None],
                 record.motion_close_reason,
             )
-            key = record.identity.shot_key
-            names, values = self._event(close_slots, key)
-            record = self._append(
-                record,
-                transition=MOTION_CLOSED,
-                names=(*names, "motion_close_reason"),
-                values=(*values, close_reason),
-                changes={"motion_close_reason": close_reason},
-            )
-
             current_key = self._gather_current_key(record.identity.shot_key)
             current_publication = self._gather_current(
                 record.publication_ordinal
@@ -1742,7 +2038,7 @@ class ActionEpochOwner:
             current_settlement = self._gather_current(record.settlement_step)
             current_payment = self._gather_current(record.payment_step)
             current_phase = self._gather_current(record.phase)
-            debt = self._gather_current(record.motion_close_reason).ne(MOTION_CLOSE_NONE)
+            debt = self._gather_current(close_reason).ne(MOTION_CLOSE_NONE)
             paid_chronology = (
                 paid.publication_ordinal.ge(0)
                 & paid.settlement_step.ge(0)
@@ -1761,26 +2057,59 @@ class ActionEpochOwner:
                 & current_payment.ge(current_settlement)
                 & current_payment.le(common_step)
             )
-            # A valid mailbox row is an assertion of the entire local paid
-            # contract.  Partial matches are faults, never high-water input.
-            paid_contract = (
+            # Payment and Motion close are independent edges.  A valid R06
+            # mailbox may arrive before Motion closes; that is a legal pending
+            # intermediate state, not corruption.  Validate only the asserted
+            # payment identity/chronology here, then retire once close debt is
+            # also present.
+            paid_assertion_contract = (
                 paid_chronology
                 & same_paid_key
                 & paid.publication_ordinal.eq(current_publication)
                 & paid.settlement_step.eq(current_settlement)
                 & paid.payment_step.eq(current_payment)
                 & current_phase.eq(PHASE_OUTCOME_SETTLED)
-                & debt
                 & current_payment_chronology
             )
+            invalid_paid_assertion = paid.valid & ~paid_assertion_contract
             paid_safe = self._latch_device_row_fault(
-                paid.valid & ~paid_contract
+                invalid_paid_assertion,
+                reason_bit=ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT,
             )
-            due &= paid_safe
+            due = due & paid_safe
             paid_matches = (
                 paid.valid
-                & paid_contract
+                & paid_assertion_contract
+                & debt
                 & paid_safe
+            )
+            # R06 retains one paid mailbox until Motion contributes the
+            # independent close edge.  Re-reading that same valid assertion is
+            # chronology validation, not a new lifecycle event.  Keep scalar
+            # Motion time monotonic, but do not manufacture two empty epoch
+            # events plus a zero-mask D05/writer transaction on every pending
+            # tick.  A real due/close, a malformed assertion, or the exact
+            # close+payment retirement still takes the ordinary journal path.
+            actionable_rows = (
+                external_business_rows
+                | invalid_paid_assertion
+                | paid_matches
+            )
+            if torch.equal(
+                actionable_rows, torch.zeros_like(actionable_rows)
+            ):
+                self._next_epoch += 1
+                self._last_motion_common_step = common_step
+                return None
+
+            key = record.identity.shot_key
+            names, values = self._event(close_slots, key)
+            record = self._append(
+                record,
+                transition=MOTION_CLOSED,
+                names=(*names, "motion_close_reason"),
+                values=(*values, close_reason),
+                changes={"motion_close_reason": close_reason},
             )
             self._last_r06_paid_payment_step = torch.where(
                 paid_matches,
@@ -1928,7 +2257,8 @@ class ActionEpochOwner:
                 )
             )
             device_safe = self._latch_device_row_fault(
-                reset_generation_mismatch.any(dim=1)
+                reset_generation_mismatch.any(dim=1),
+                reason_bit=ROW_FAULT_D05_RESET_GENERATION_JOIN,
             )
             candidate_faults = candidate.owner_fault_bits.clone()
             r05_slot = self._owner_slot("r05_runtime")
@@ -2202,7 +2532,7 @@ class ActionEpochOwner:
                 raise
             eligible = (
                 mask
-                & record.phase.eq(PHASE_REVEAL_COMMITTED)
+                & action_epoch_open_shot_phase_mask(record.phase)
                 & ~record.motion_playback_started
             )
             started = record.motion_playback_started | eligible
@@ -2300,7 +2630,9 @@ class ActionEpochOwner:
             join = (
                 observe[:, :, None]
                 & row_identity.action_epoch_shot_key_valid(key)[:, :, None]
-                & publication.ge(0)[:, :, None]
+                & publication[:, :, None].eq(
+                    record.publication_ordinal[:, None, :]
+                )
                 & (
                     record.phase.eq(PHASE_LAUNCH_SETTLED)
                     | record.phase.eq(PHASE_OUTCOME_SETTLED)
@@ -2316,7 +2648,9 @@ class ActionEpochOwner:
                 (observe & source_count.ne(1)).any(dim=1)
                 | destination_count.gt(1).any(dim=1)
             )
-            safe_rows = self._latch_device_row_fault(invalid_rows)
+            safe_rows = self._latch_device_row_fault(
+                invalid_rows, reason_bit=ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN
+            )
             join &= safe_rows[:, None, None]
             joined = join.any(dim=1)
             source_index = join.to(torch.int64).argmax(dim=1)
@@ -2332,30 +2666,63 @@ class ActionEpochOwner:
             joined_valid = gather_physical(valid_bits)
             joined_source = gather_physical(source_step)
             joined_facts = gather_physical(fact_f32)
+            physical_fault = joined & joined_faults.ne(0)
+            physical_nonfinite = physical_fault & torch.bitwise_and(
+                joined_faults,
+                ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE,
+            ).ne(0)
+            recognized_physical_fault_mask = (
+                ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER
+                | ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE
+            )
+            # An unregistered/foreign Physical source bit is itself a producer
+            # contract fault.  It must stop the optimizer rather than becoming
+            # an unscored miss merely because this consumer cannot name it.
+            physical_producer = physical_fault & (
+                torch.bitwise_and(
+                    joined_faults,
+                    ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER,
+                ).ne(0)
+                | torch.bitwise_and(
+                    joined_faults, ~recognized_physical_fault_mask
+                ).ne(0)
+            )
+            self._latch_device_row_fault(
+                physical_producer.any(dim=1),
+                reason_bit=ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER,
+            )
+            owner_safe_rows = self._latch_device_row_fault(
+                physical_nonfinite.any(dim=1),
+                reason_bit=ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE,
+            )
+            business_joined = joined & owner_safe_rows[:, None]
+            journal_faults = torch.where(
+                joined, joined_faults, torch.zeros_like(joined_faults)
+            )
             owner_slot = self._owner_slot("physical_ball")
             owner_faults = record.owner_fault_bits.clone()
             owner_faults[:, :, owner_slot] = torch.where(
                 joined,
                 torch.bitwise_or(
-                    owner_faults[:, :, owner_slot], joined_faults
+                    owner_faults[:, :, owner_slot], journal_faults
                 ),
                 owner_faults[:, :, owner_slot],
             )
             record_valid = record.fact_valid_bits.clone()
             record_valid[:, :, owner_slot] = torch.where(
-                joined,
+                business_joined,
                 torch.bitwise_or(
                     record_valid[:, :, owner_slot], joined_valid
                 ),
                 record_valid[:, :, owner_slot],
             )
             previous_valid = record.fact_valid_bits[:, :, owner_slot]
-            present = joined & torch.bitwise_and(joined_valid, 1).ne(0)
+            present = business_joined & torch.bitwise_and(joined_valid, 1).ne(0)
             first_observed = (
                 present & ~torch.bitwise_and(previous_valid, 1).ne(0)
             )
             first_contact = (
-                joined
+                business_joined
                 & torch.bitwise_and(joined_valid, 2).ne(0)
                 & ~torch.bitwise_and(previous_valid, 2).ne(0)
             )
@@ -2391,7 +2758,7 @@ class ActionEpochOwner:
                 values=(
                     *values,
                     record.publication_ordinal,
-                    joined_faults,
+                    journal_faults,
                     record_valid[:, :, owner_slot],
                     record_source[:, :, owner_slot],
                 ),
@@ -2516,13 +2883,52 @@ class ActionEpochOwner:
                 & same_after_image
             )
             safe_rows = self._latch_device_row_fault(
-                valid & ~(first_join | already_joined)
+                valid & ~(first_join | already_joined),
+                reason_bit=ROW_FAULT_R06_OUTCOME_JOIN,
             )
-            join_rows = valid & first_join & safe_rows
+            observed_rows = valid & first_join & safe_rows
+            r06_producer_rows = observed_rows & torch.bitwise_and(
+                faults, r06_device.FAULT_PRODUCER_CONTRACT
+            ).ne(0)
+            r06_overflow_rows = observed_rows & torch.bitwise_and(
+                faults, r06_device.FAULT_ENGINE_OVERFLOW
+            ).ne(0)
+            r06_nonfinite_rows = observed_rows & torch.bitwise_and(
+                faults, r06_device.FAULT_NONFINITE
+            ).ne(0)
+            recognized_r06_fault_mask = (
+                r06_device.FAULT_PRODUCER_CONTRACT
+                | r06_device.FAULT_ENGINE_OVERFLOW
+                | r06_device.FAULT_NONFINITE
+            )
+            r06_other_rows = (
+                observed_rows
+                & faults.ne(0)
+                & torch.bitwise_and(faults, ~recognized_r06_fault_mask).ne(0)
+            )
+            self._latch_device_row_fault(
+                r06_producer_rows,
+                reason_bit=ROW_FAULT_R06_OWNER_PRODUCER_CONTRACT,
+            )
+            self._latch_device_row_fault(
+                r06_overflow_rows,
+                reason_bit=ROW_FAULT_R06_OWNER_ENGINE_OVERFLOW,
+            )
+            self._latch_device_row_fault(
+                r06_nonfinite_rows,
+                reason_bit=ROW_FAULT_R06_OWNER_NONFINITE,
+            )
+            owner_safe_rows = self._latch_device_row_fault(
+                r06_other_rows,
+                reason_bit=ROW_FAULT_R06_OWNER_OTHER,
+            )
+            join_rows = observed_rows & owner_safe_rows
+            audit_rows = observed_rows
             join = self._current_slot_mask(join_rows)
+            audit_join = self._current_slot_mask(audit_rows)
             owner_faults = record.owner_fault_bits.clone()
             owner_faults[:, :, owner_slot] = torch.where(
-                join,
+                audit_join,
                 torch.bitwise_or(owner_faults[:, :, owner_slot], faults[:, None]),
                 owner_faults[:, :, owner_slot],
             )
@@ -2547,7 +2953,7 @@ class ActionEpochOwner:
                 torch.full_like(record.phase, PHASE_OUTCOME_SETTLED),
                 record.phase,
             )
-            names, values = self._event(join, record.identity.shot_key)
+            names, values = self._event(audit_join, record.identity.shot_key)
             predicate_bits = (
                 facts[:, r06_device.R06_ACTION_EPOCH_CONTACT_VALID_F32]
                 .eq(1.0).to(torch.int64)
@@ -2583,7 +2989,11 @@ class ActionEpochOwner:
                     settlement_step,
                     record_valid[:, :, owner_slot],
                     outcome_code,
-                    owner_faults[:, :, owner_slot],
+                    torch.where(
+                        audit_join,
+                        faults[:, None],
+                        torch.zeros_like(owner_faults[:, :, owner_slot]),
+                    ),
                     predicate_bits,
                 ),
                 changes={
@@ -2750,7 +3160,8 @@ class ActionEpochOwner:
                 & settlement_step.le(control_step)
             )
             safe_rows = self._latch_device_row_fault(
-                pending & ~payment_contract
+                pending & ~payment_contract,
+                reason_bit=ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY,
             )
             valid = pending & payment_contract & safe_rows
             mask = self._current_slot_mask(valid)
@@ -2869,14 +3280,12 @@ class ActionEpochOwner:
                 row_identity.action_epoch_shot_key_valid(
                     record.identity.shot_key
                 )
-                & (
-                    record.phase.eq(PHASE_REVEAL_COMMITTED)
-                    | record.phase.eq(PHASE_LAUNCH_SETTLED)
-                    | record.phase.eq(PHASE_OUTCOME_SETTLED)
-                )
+                & action_epoch_open_shot_phase_mask(record.phase)
             )
             invalid_rows = (requested & ~active).any(dim=1)
-            safe_rows = self._latch_device_row_fault(invalid_rows)
+            safe_rows = self._latch_device_row_fault(
+                invalid_rows, reason_bit=ROW_FAULT_OWNER_FACT_ACTIVE_JOIN
+            )
             selected = requested & active & safe_rows[:, None]
             owner_fault_free = record.owner_fault_bits[:, :, owner_slot].eq(0)
             fully_valid = None
@@ -2979,7 +3388,8 @@ class ActionEpochOwner:
                     getattr(key, field.name)[:, None]
                 )
             safe = self._latch_device_row_fault(
-                rows & (joined.sum(dim=1).ne(1) | step.lt(0))
+                rows & (joined.sum(dim=1).ne(1) | step.lt(0)),
+                reason_bit=ROW_FAULT_R07_FIRST_READY_JOIN,
             )
             joined &= safe[:, None]
             names, values = self._event(joined, record.identity.shot_key)
@@ -3057,19 +3467,24 @@ class ActionEpochOwner:
             )
             current_key = self._gather_current_key(record.identity.shot_key)
             current_phase = self._gather_current(record.phase)
+            current_publication = self._gather_current(
+                record.publication_ordinal
+            )
             joined = (
                 row_identity.action_epoch_shot_key_valid(shot_key)
                 & row_identity.action_epoch_shot_key_equal(shot_key, current_key)
                 & current_phase.eq(PHASE_REVEAL_COMMITTED)
             )
-            chronology = publication_ordinal.ge(0)
+            chronology = publication_ordinal.eq(current_publication)
             target_finite = torch.isfinite(target_xy_m).all(dim=1)
             invalid_rows = (
                 (due & (~joined | ~chronology))
                 | (late & ~due)
                 | ~target_finite
             )
-            safe_rows = self._latch_device_row_fault(invalid_rows)
+            safe_rows = self._latch_device_row_fault(
+                invalid_rows, reason_bit=ROW_FAULT_PHYSICAL_LAUNCH_JOIN
+            )
             safe_due = due & joined & chronology & safe_rows
             safe_late = late & safe_due
             event = self._current_slot_mask(safe_due)
@@ -3212,7 +3627,14 @@ class ActionEpochOwner:
                 "r05_runtime", "reset_event_envs", plan.selected_mask
             )
             self._reset_generation = record.reset_generation
-            self._undecoded_overflow = self._undecoded_overflow | plan.overflow
+            self._undrained_row_fault_bits = torch.bitwise_or(
+                self._undrained_row_fault_bits,
+                torch.where(
+                    plan.overflow,
+                    ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW,
+                    0,
+                ),
+            )
             selected = plan.selected_mask
             self._current_payment_rows = ActionEpochRewardPaymentRows(
                 valid=torch.where(
@@ -3434,10 +3856,10 @@ class ActionEpochOwner:
                 version=_DRAIN_PACK_VERSION,
                 entry_index=-1,
                 value_index=-1,
-                name="overflow",
+                name="row_fault_bits",
                 offset=offset,
-                nbytes=self.num_envs,
-                dtype=torch.bool,
+                nbytes=self.num_envs * 8,
+                dtype=torch.int64,
                 shape=(self.num_envs,),
             )
         )
@@ -3463,7 +3885,7 @@ class ActionEpochOwner:
         ):
             raise ActionEpochError("drain byte payload is truncated, extended, or malformed")
         decoded: list[list[torch.Tensor]] = [list() for _ in entries]
-        overflow: Optional[torch.Tensor] = None
+        row_fault_bits: Optional[torch.Tensor] = None
         milestone_i64: Optional[torch.Tensor] = None
         milestone_f64: Optional[torch.Tensor] = None
         for segment in layout:
@@ -3474,10 +3896,10 @@ class ActionEpochOwner:
             elif segment.name == "milestone_f64":
                 milestone_f64 = value
             elif segment.entry_index < 0:
-                overflow = value
+                row_fault_bits = value
             else:
                 decoded[segment.entry_index].append(value)
-        if overflow is None or milestone_i64 is None or milestone_f64 is None:
+        if row_fault_bits is None or milestone_i64 is None or milestone_f64 is None:
             raise ActionEpochError("drain fixed tensor bytes are absent")
         decoded_entries = tuple(
             replace(
@@ -3487,7 +3909,8 @@ class ActionEpochOwner:
             for entry, values in zip(entries, decoded)
         )
         return ActionEpochMaterializedDrain(
-            entries=decoded_entries, overflow=overflow,
+            entries=decoded_entries,
+            row_fault_bits=row_fault_bits,
             milestone_i64=milestone_i64, milestone_f64=milestone_f64,
         )
 
@@ -3534,7 +3957,7 @@ class ActionEpochOwner:
                 value.detach().contiguous().view(torch.uint8).reshape(-1)
                 for value in self.milestone.pack_views()
             ) + (
-                self._undecoded_overflow.detach()
+                self._undrained_row_fault_bits.detach()
                 .contiguous()
                 .view(torch.uint8)
                 .reshape(-1),
@@ -3544,10 +3967,12 @@ class ActionEpochOwner:
             materialized = self._decode_drain_bytes(
                 host_bytes=host_bytes, entries=entries, layout=layout
             )
-            decoded_overflow = bool(materialized.overflow.any())
+            decoded_row_fault = bool(
+                materialized.row_fault_bits.ne(0).any()
+            )
             self._pending_drain_materialized = True
-            self._drain_decoded_overflow = decoded_overflow
-            if decoded_overflow:
+            self._drain_decoded_row_fault = decoded_row_fault
+            if decoded_row_fault:
                 self._poisoned = True
             return materialized
 
@@ -3563,12 +3988,12 @@ class ActionEpochOwner:
             if (
                 self._pending_drain != (start, end)
                 or not self._pending_drain_materialized
-                or self._drain_decoded_overflow
+                or self._drain_decoded_row_fault
             ):
                 raise ActionEpochError("drain ACK lease differs")
             with torch.inference_mode(False):
-                replacement_overflow = torch.zeros(
-                    (self.num_envs,), dtype=torch.bool, device=self.device
+                replacement_fault_bits = torch.zeros(
+                    (self.num_envs,), dtype=torch.int64, device=self.device
                 )
             self._publication = _Publication(
                 self._publication.current,
@@ -3581,8 +4006,8 @@ class ActionEpochOwner:
             self._drain_frontier = end
             self._pending_drain = None
             self._pending_drain_materialized = False
-            self._drain_decoded_overflow = False
-            self._undecoded_overflow = replacement_overflow
+            self._drain_decoded_row_fault = False
+            self._undrained_row_fault_bits = replacement_fault_bits
             self.milestone.clear_window_()
 
     def _checkpoint_record_specs(
@@ -3659,7 +4084,7 @@ class ActionEpochOwner:
         self,
     ) -> tuple[tuple[str, torch.Tensor], ...]:
         return (
-            ("owner.undecoded_overflow", self._undecoded_overflow),
+            ("owner.undrained_row_fault_bits", self._undrained_row_fault_bits),
             ("owner.action_uids_by_slot", self._action_uids_by_slot),
             ("owner.family_codes_by_slot", self._family_codes_by_slot),
             (
@@ -3676,7 +4101,7 @@ class ActionEpochOwner:
             raise ActionEpochError("checkpoint action catalog must be nonempty")
         env = (self.num_envs,)
         specs: list[tuple[str, tuple[int, ...], torch.dtype]] = [
-            ("owner.undecoded_overflow", env, torch.bool),
+            ("owner.undrained_row_fault_bits", env, torch.int64),
             ("owner.action_uids_by_slot", (action_count,), torch.int64),
             ("owner.family_codes_by_slot", (action_count,), torch.int64),
             ("owner.last_r06_paid_payment_step", env, torch.int64),
@@ -3704,7 +4129,8 @@ class ActionEpochOwner:
             or self._selected_reset.active
             or self._pending_drain is not None
             or self._pending_drain_materialized
-            or self._drain_decoded_overflow
+            or self._drain_decoded_row_fault
+            or bool(self._undrained_row_fault_bits.ne(0).any())
         )
         if common_bad:
             raise ActionEpochError("restore boundary is not quiescent")
@@ -3731,7 +4157,10 @@ class ActionEpochOwner:
         self, state: _ActionEpochCarryState,
     ) -> tuple[tuple[str, torch.Tensor], ...]:
         return (
-            ("owner.undecoded_overflow", state.undecoded_overflow),
+            (
+                "owner.undrained_row_fault_bits",
+                state.undrained_row_fault_bits,
+            ),
             ("owner.action_uids_by_slot", state.action_uids_by_slot),
             ("owner.family_codes_by_slot", state.family_codes_by_slot),
             (
@@ -3802,8 +4231,8 @@ class ActionEpochOwner:
             )
         except (TypeError, ValueError) as exc:
             raise ActionEpochError("checkpoint action catalog differs") from exc
-        if bool(state.undecoded_overflow.any()):
-            raise ActionEpochError("checkpoint undecoded overflow differs")
+        if bool(state.undrained_row_fault_bits.ne(0).any()):
+            raise ActionEpochError("checkpoint undrained row fault differs")
         phase = state.current.phase
         allowed_phase = torch.zeros_like(phase, dtype=torch.bool)
         for exact_phase in (
@@ -3963,7 +4392,9 @@ class ActionEpochOwner:
             commit_head=scalars[2], drain_frontier=scalars[3],
             next_epoch=scalars[4], reward_ordinal=scalars[5],
             last_motion_common_step=scalars[6], current=record,
-            undecoded_overflow=by_name["owner.undecoded_overflow"],
+            undrained_row_fault_bits=by_name[
+                "owner.undrained_row_fault_bits"
+            ],
             action_uids_by_slot=by_name["owner.action_uids_by_slot"],
             family_codes_by_slot=by_name["owner.family_codes_by_slot"],
             last_r06_paid_payment_step=by_name["owner.last_r06_paid_payment_step"],
@@ -4020,7 +4451,9 @@ class ActionEpochOwner:
             self._reset_generation = current.reset_generation
             self._reward_cycle_age = current.reward_cycle_age
             self._reward_cycle_fault = current.reward_cycle_fault
-            self._undecoded_overflow = by_name["owner.undecoded_overflow"]
+            self._undrained_row_fault_bits = by_name[
+                "owner.undrained_row_fault_bits"
+            ]
             self._last_r06_paid_payment_step = by_name[
                 "owner.last_r06_paid_payment_step"
             ]
@@ -4030,7 +4463,7 @@ class ActionEpochOwner:
             )
             self._pending_drain = None
             self._pending_drain_materialized = False
-            self._drain_decoded_overflow = False
+            self._drain_decoded_row_fault = False
             self._active_d05 = None
             self._reward_open = False
             self._current_closed_rows = None
@@ -4063,9 +4496,11 @@ class ActionEpochOwner:
 
 
 __all__ = [
+    "ACTION_EPOCH_ROW_FAULT_NAMES",
     "ActionEpochIdleObservationChronology",
     "ActionEpochCheckpoint",
     "ActionEpochClosedRows",
+    "ActionEpochCurrentShotProjection",
     "ActionEpochD05AcceptedRows",
     "ActionEpochD05CandidateProjection",
     "ActionEpochDueRows",
@@ -4081,4 +4516,38 @@ __all__ = [
     "EpochIdentityPayload",
     "EpochTaskPayload",
     "PackedDelta",
+    "ROW_FAULT_D05_RESET_GENERATION_JOIN",
+    "ROW_FAULT_MOTION_CADENCE_OVERDUE",
+    "ROW_FAULT_MOTION_CLOSE_CONTRACT",
+    "ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT",
+    "ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW",
+    "ROW_FAULT_MOTION_TASK_TIMING_CONTRACT",
+    "ROW_FAULT_OWNER_FACT_ACTIVE_JOIN",
+    "ROW_FAULT_PHYSICAL_LAUNCH_JOIN",
+    "ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN",
+    "ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE",
+    "ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER",
+    "ROW_FAULT_R06_CLOSED_DEBT_MISMATCH",
+    "ROW_FAULT_R06_CLOSED_PROJECTION_CONTRACT",
+    "ROW_FAULT_R06_CURRENT_FLIGHT_DUPLICATE",
+    "ROW_FAULT_R06_LAUNCH_IDENTITY_CONTRACT",
+    "ROW_FAULT_R06_LAUNCH_SELECTION_CONTRACT",
+    "ROW_FAULT_R06_OUTCOME_JOIN",
+    "ROW_FAULT_R06_OWNER_ENGINE_OVERFLOW",
+    "ROW_FAULT_R06_OWNER_NONFINITE",
+    "ROW_FAULT_R06_OWNER_OTHER",
+    "ROW_FAULT_R06_OWNER_PRODUCER_CONTRACT",
+    "ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE",
+    "ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT",
+    "ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION",
+    "ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE",
+    "ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED",
+    "ROW_FAULT_R06_PAYMENT_PROJECTION_CONTRACT",
+    "ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE",
+    "ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT",
+    "ROW_FAULT_R07_FIRST_READY_JOIN",
+    "ROW_FAULT_RESET_GENESIS_CONTRACT",
+    "ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY",
+    "ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW",
+    "action_epoch_open_shot_phase_mask",
 ]

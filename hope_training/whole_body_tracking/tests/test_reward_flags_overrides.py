@@ -439,6 +439,116 @@ def test_empty_task_applies_nothing():
     assert not hasattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR)
 
 
+def test_legacy_reward_identity_prefilter_does_not_import_isaac_cfg(monkeypatch):
+    calls = []
+
+    def forbidden_import(name):
+        calls.append(name)
+        raise AssertionError("legacy Reward identity must not import Isaac cfg")
+
+    monkeypatch.setattr(train_mod.importlib, "import_module", forbidden_import)
+    assert train_mod._fresh_full_mdp_reward_graph_identity(
+        _make_env_cfg(), {}
+    ) is None
+    assert calls == []
+
+
+_FAKE_FRESH_REWARD_CFG_CASES = (
+    (
+        "HOPEPingPongActionBallFullMdpAAgibotA3EnvCfg",
+        "A",
+        "HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
+    ),
+    (
+        "HOPEPingPongActionBallFullMdpCAgibotA3EnvCfg",
+        "C",
+        "HOPE-PingPong-ActionBall-FullMdpC-AgibotA3-v0",
+    ),
+)
+
+
+def _fake_fresh_reward_cfg_module():
+    module_name = train_mod._FRESH_FULL_MDP_ENV_CFG_MODULE
+    return _NS(
+        **{
+            class_name: type(
+                class_name,
+                (),
+                {
+                    "__module__": module_name,
+                    "action_ball_full_mdp_family_role": family,
+                },
+            )
+            for class_name, family, _task_id in _FAKE_FRESH_REWARD_CFG_CASES
+        }
+    )
+
+
+def test_fresh_reward_identity_name_prefilter_cannot_replace_exact_type(monkeypatch):
+    config_module = _fake_fresh_reward_cfg_module()
+    module_name = train_mod._FRESH_FULL_MDP_ENV_CFG_MODULE
+    class_name, family, task_id = _FAKE_FRESH_REWARD_CFG_CASES[0]
+    forged_type = type(
+        class_name,
+        (),
+        {
+            "__module__": module_name,
+            "action_ball_full_mdp_family_role": family,
+        },
+    )
+    calls = []
+
+    def focused_import(name):
+        calls.append(name)
+        assert name == module_name
+        return config_module
+
+    monkeypatch.setattr(train_mod.importlib, "import_module", focused_import)
+    assert train_mod._fresh_full_mdp_reward_graph_identity(
+        forged_type(),
+        {
+            "gym_task": task_id,
+            "action_ball_full_mdp_family_role": family,
+            train_mod._ACTION_BALL_FULL_MDP_RUNTIME_FLAG: True,
+        },
+    ) is None
+    assert calls == [module_name]
+
+
+@pytest.mark.parametrize(
+    "class_name,family,task_id",
+    _FAKE_FRESH_REWARD_CFG_CASES,
+)
+def test_fresh_reward_identity_canonical_types_still_validate_task_tuple(
+    monkeypatch, class_name, family, task_id
+):
+    config_module = _fake_fresh_reward_cfg_module()
+    monkeypatch.setattr(
+        train_mod.importlib,
+        "import_module",
+        lambda name: (
+            config_module
+            if name == train_mod._FRESH_FULL_MDP_ENV_CFG_MODULE
+            else pytest.fail(f"unexpected import: {name}")
+        ),
+    )
+    env_cfg = getattr(config_module, class_name)()
+    task = {
+        "gym_task": task_id,
+        "action_ball_full_mdp_family_role": family,
+        train_mod._ACTION_BALL_FULL_MDP_RUNTIME_FLAG: True,
+    }
+    assert train_mod._fresh_full_mdp_reward_graph_identity(env_cfg, task) == family
+
+    foreign = dict(task)
+    foreign["action_ball_full_mdp_family_role"] = "C" if family == "A" else "A"
+    with pytest.raises(
+        train_mod._OverrideError,
+        match="foreign task/config identity",
+    ):
+        train_mod._fresh_full_mdp_reward_graph_identity(env_cfg, foreign)
+
+
 def test_table_attribution_override_uses_fail_loud_explicit_boolean_parser():
     name = "task.table_contact_attribution_diagnostic"
     assert train_mod._as_explicit_bool(True, name) is True
@@ -3012,9 +3122,9 @@ def test_retired_high_dose_quality_weights_fail_closed(key, value):
 
 
 def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_there():
-    # 这条测试保留旧七个 task 的缺陷存档:它们全都显式写了三键,所以包里的冻结质量表
-    # 在那些谱系上仍是死码。ActionBall 现在有意采用已验证的 Tier-1 低 tracking:
-    # pack 仍供应 v2 outcome/safety，其显式 4/0.5/0.5 按真实翻译顺序后写后赢。
+    # 显式列出真正声明质量三键的 task；不要用一个随文件增长失真的匿名计数。
+    # ActionBall 现在有意采用已验证的 Tier-1 低 tracking:pack 仍供应 v2
+    # outcome/safety，其显式 4/0.5/0.5 按真实翻译顺序后写后赢。
     import glob
     import re
 
@@ -3023,25 +3133,23 @@ def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_ther
         text = open(path, encoding="utf-8").read()
         if re.search(r"^\s*racket_position_weight\s*:", text, re.M):
             declaring.append(os.path.basename(path))
-    assert "HOPEPingPongVirtualBall.yaml" in declaring
-    action_ball = "HOPEPingPongActionBall.yaml"
-    assert action_ball in declaring
-    stage1_profiles = {
+    expected_declaring = {
+        "HOPEPingPong.yaml",
+        "HOPEPingPongActionBall.yaml",
+        "HOPEPingPongActionBallA211VendorV2N1Learnability.yaml",
+        "HOPEPingPongActionBallA3VendorV2.yaml",
+        "HOPEPingPongActionBallC211VendorV2N1Learnability.yaml",
+        "HOPEPingPongDeployParity.yaml",
+        "HOPEPingPongHitter.yaml",
+        "HOPEPingPongHitterPure.yaml",
+        "HOPEPingPongHitterPureRally.yaml",
+        "HOPEPingPongHitterPureRallyV3.yaml",
         "HOPEPingPongStage1NaturalClipA3VendorV1.yaml",
         "HOPEPingPongStage1NaturalClipA3VendorV2.yaml",
+        "HOPEPingPongVirtualBall.yaml",
     }
-    assert stage1_profiles.issubset(declaring)
-    action_ball_successors = {"HOPEPingPongActionBallA3VendorV2.yaml"}
-    assert action_ball_successors.issubset(declaring)
-    assert len(
-        [
-            name
-            for name in declaring
-            if name != action_ball
-            and name not in stage1_profiles
-            and name not in action_ball_successors
-        ]
-    ) == 7, declaring
+    assert set(declaring) == expected_declaring
+    action_ball = "HOPEPingPongActionBall.yaml"
 
     import yaml
 

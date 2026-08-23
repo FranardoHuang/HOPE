@@ -328,7 +328,7 @@ def test_portable_frame_transforms_match_independent_ninety_degree_golden():
     )
 
 
-def test_tilted_heading_is_unit_and_near_vertical_heading_fails_explicitly():
+def test_tilted_heading_is_unit_and_near_vertical_heading_is_canonical():
     yaw_45_pitch_60 = torch.tensor(
         [[0.80010315, -0.19134172, 0.46193977, 0.33141357]]
     )
@@ -348,8 +348,21 @@ def test_tilted_heading_is_unit_and_near_vertical_heading_fails_explicitly():
         rtol=0.0,
     )
     near_vertical = torch.tensor([[0.70710678, 0.0, 0.70710678, 0.0]])
-    with pytest.raises(RuntimeError):
-        P.heading_xy_from_quat_wxyz(near_vertical)
+    mixed = torch.cat((yaw_45_pitch_60, near_vertical), dim=0)
+    heading = P.heading_xy_from_quat_wxyz(mixed)
+    torch.testing.assert_close(
+        heading,
+        torch.cat((expected_heading, torch.tensor([[1.0, 0.0]])), dim=0),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    assert torch.isfinite(heading).all()
+    torch.testing.assert_close(
+        torch.linalg.vector_norm(heading, dim=-1),
+        torch.ones(2),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
 
 
 def test_new_root_translation_yaw_and_com_velocity_break_old_229_aliases():
@@ -692,6 +705,68 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     )
     assert policy[1, 202].item() == 0.0
 
+    # R06 owns its latch hierarchy and scene-slot range.  A malformed row is
+    # consumed as no live flight, while the independent peer remains exact.
+    r06_row_names = (
+        "live_ball_center_rel_root_heading",
+        "live_ball_lin_vel_heading",
+        "live_ball_ang_vel_heading",
+        "selected_rubber_contact_latched",
+        "net_crossed_latched",
+        "net_clear_latched",
+    )
+    for case, slot_value, contact_value, crossed_value, clear_value in (
+        ("absent-retained", -1, True, True, True),
+        ("slot-outside", 2, True, True, True),
+        ("clear-before-crossing", 1, True, False, True),
+        ("crossing-before-contact", 1, False, True, False),
+    ):
+        flight.flight_slot[0] = slot_value
+        flight.contact_valid[0] = contact_value
+        flight.net_crossed[0] = crossed_value
+        flight.net_clear[0] = clear_value
+        faulty_view = O.build_direct_action_epoch_observation_facts(
+            runtime_owner=runtime, record=record
+        )
+        for name in r06_row_names:
+            assert faulty_view.critic_rows[name][0].eq(0).all(), (case, name)
+        faulty_policy, faulty_critic = source._pack(
+            faulty_view, record, common_step=10
+        )
+        assert torch.equal(faulty_policy[1], policy[1]), case
+        assert torch.equal(faulty_critic[1], critic[1]), case
+    flight.flight_slot[0] = 1
+    flight.contact_valid[0] = True
+    flight.net_crossed[0] = True
+    flight.net_clear[0] = True
+
+    # Motion/Epoch UID mismatch invalidates only the task-conditioned actor
+    # question.  Robot state and the healthy peer are not collateral damage.
+    motion_view.action_uid[0] = 102
+    uid_fault_view = O.build_direct_action_epoch_observation_facts(
+        runtime_owner=runtime, record=record
+    )
+    assert not uid_fault_view.task_valid[0]
+    for name in (
+        "racket_target_pos_error_heading",
+        "racket_target_vel_error_heading",
+        "racket_target_normal_error_heading",
+        "base_goal_error_heading_xy",
+        "time_to_contact_s",
+        "time_to_teacher_start_s",
+    ):
+        assert uid_fault_view.actor_rows[name][0].eq(0).all(), name
+    uid_fault_policy, uid_fault_critic = source._pack(
+        uid_fault_view, record, common_step=10
+    )
+    assert torch.equal(uid_fault_policy[1], policy[1])
+    assert torch.equal(uid_fault_critic[1], critic[1])
+    assert torch.equal(
+        uid_fault_view.actor_rows["time_to_next_opportunity_s"][0],
+        view.actor_rows["time_to_next_opportunity_s"][0],
+    )
+    motion_view.action_uid[0] = 101
+
     # A true selected reset advances only row 0's Motion generation after the
     # real post-physics publication above.  Its first returned observation is
     # finite and reset-safe; the untouched peer remains byte-identical.
@@ -727,15 +802,24 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     )
     assert resumed_view.critic_rows["foot_supported_lr"][0].tolist() == [1.0, 0.0]
     assert resumed_view.critic_rows["cadence_ready_dwell_fraction"][0].item() == 0.5
+    resumed_policy, resumed_critic = source._pack(
+        resumed_view, record, common_step=10
+    )
 
     # R07 only stamps the pre-reset cadence it observed.  Motion is the
     # independent chronology authority, so a replayed same-generation stamp
-    # is rejected here instead of being self-approved by the R07 producer.
+    # contributes no support/dwell instead of poisoning a later CUDA launch.
     ready.control_tick[0] -= 1
-    with pytest.raises(RuntimeError):
-        O.build_direct_action_epoch_observation_facts(
-            runtime_owner=runtime, record=record
-        )
+    replayed_view = O.build_direct_action_epoch_observation_facts(
+        runtime_owner=runtime, record=record
+    )
+    assert replayed_view.critic_rows["foot_supported_lr"][0].eq(0).all()
+    assert replayed_view.critic_rows["cadence_ready_dwell_fraction"][0].eq(0).all()
+    replayed_policy, replayed_critic = source._pack(
+        replayed_view, record, common_step=10
+    )
+    assert torch.equal(replayed_policy[1], resumed_policy[1])
+    assert torch.equal(replayed_critic[1], resumed_critic[1])
     ready.control_tick[0] += 1
 
     # Cold genesis has no post-physics capability.  Its explicit invalid/zero
@@ -758,7 +842,8 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     assert torch.isfinite(genesis_critic).all()
     assert genesis_critic[:, 216:219].eq(0).all()
 
-    # MAX may not wrap into a reset boundary and hide stale chronology.
+    # MAX may not wrap into a reset boundary and hide stale chronology.  The
+    # malformed row is zeroed and the valid peer remains byte-identical.
     ready.postphysics_valid.fill_(True)
     ready.source_step.fill_(10)
     ready.reset_generation[:] = torch.tensor(
@@ -768,10 +853,16 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     motion_view.reset_generation[:] = torch.tensor(
         [torch.iinfo(torch.int64).min, 1], dtype=torch.int64
     )
-    with pytest.raises(RuntimeError):
-        O.build_direct_action_epoch_observation_facts(
-            runtime_owner=runtime, record=record
-        )
+    wrapped_view = O.build_direct_action_epoch_observation_facts(
+        runtime_owner=runtime, record=record
+    )
+    assert wrapped_view.critic_rows["foot_supported_lr"][0].eq(0).all()
+    assert wrapped_view.critic_rows["cadence_ready_dwell_fraction"][0].eq(0).all()
+    wrapped_policy, wrapped_critic = source._pack(
+        wrapped_view, record, common_step=10
+    )
+    assert torch.equal(wrapped_policy[1], genesis_policy[1])
+    assert torch.equal(wrapped_critic[1], genesis_critic[1])
 
     ready.reset_generation.fill_(1)
     motion_view.reset_generation.fill_(1)
@@ -954,19 +1045,12 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     assert calls == [0, 1, 1]
 
 
-def test_packer_ignores_raw_task_owner_facts_and_reward_ledger(monkeypatch):
+def test_packer_ignores_raw_task_owner_facts_and_reward_ledger():
     env = _Env()
     epoch = _prepared_epoch()
     runtime, parts = _runtime(env, epoch)
     source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
     record = epoch.current()
-    monkeypatch.setattr(
-        O,
-        "_assert_async_all",
-        lambda predicate, *, label: torch.testing.assert_close(
-            predicate, torch.ones_like(predicate), msg=label
-        ),
-    )
     view = _direct_view(env, record, parts)
     actor, critic = source._pack(view, record, common_step=10)
 
@@ -995,6 +1079,29 @@ def test_packer_ignores_raw_task_owner_facts_and_reward_ledger(monkeypatch):
         torch.tensor([[0, 1, 0, 0, 0], [0, 0, 0, 0, 1]]).float(),
     )
 
+    # Motion and Epoch own their enum production invariants.  The observation
+    # consumer cannot let one malformed row poison a CUDA context or alias a
+    # real phase, so it emits an all-zero phase slice and preserves its peer.
+    motion_phase_bad = view.motion_phase_code.clone()
+    motion_phase_bad[0] = 9
+    bad_motion_view = O.DirectActionEpochObservationFacts(
+        **{**view.__dict__, "motion_phase_code": motion_phase_bad}
+    )
+    bad_motion_actor, bad_motion_critic = source._pack(
+        bad_motion_view, record, common_step=10
+    )
+    assert bad_motion_actor[0, 178:183].eq(0).all()
+    assert torch.equal(bad_motion_actor[1], actor[1])
+    assert torch.equal(bad_motion_critic[1], critic[1])
+
+    epoch_phase_bad = record.clone()
+    epoch_phase_bad.phase[0, 0] = 999
+    bad_epoch_actor, bad_epoch_critic = source._pack(
+        view, epoch_phase_bad, common_step=10
+    )
+    assert bad_epoch_actor[0, 197:202].eq(0).all()
+    assert torch.equal(bad_epoch_actor[1], actor[1])
+    assert torch.equal(bad_epoch_critic[1], critic[1])
 
 
 def test_term_rejects_invalid_group_instance_shadow_and_caller_source(monkeypatch):
@@ -1065,7 +1172,9 @@ def test_term_rejects_foreign_source_retained_by_exact_env_resolver(monkeypatch)
         O._term(env, group="policy")
 
 
-def test_nonfinite_direct_fact_fails_without_runtime_zero_fallback(monkeypatch):
+def test_nonfinite_direct_fact_reaches_existing_optimizer_finite_boundary(
+    monkeypatch,
+):
     env = _Env()
     epoch = _prepared_epoch()
     runtime, parts = _runtime(env, epoch)
@@ -1086,18 +1195,29 @@ def test_nonfinite_direct_fact_fails_without_runtime_zero_fallback(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(L.ActionBallFullMdpLeanRuntimeOwner, O.DIRECT_VIEW_METHOD, bad, raising=False)
+    monkeypatch.setattr(
+        L.ActionBallFullMdpLeanRuntimeOwner,
+        O.DIRECT_VIEW_METHOD,
+        bad,
+        raising=False,
+    )
     source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
     source.observe("policy")
     source.observe("critic")
     env._action_ball_full_mdp_manager_construction_state = "base_managers_complete"
-    with pytest.raises(RuntimeError):
-        source.observe("policy")
-    assert source.semantic_publication_count == 0
+    policy = source.observe("policy")
+    critic = source.observe("critic")
+    assert torch.isnan(policy[0, 14])
+    assert torch.isinf(policy[1, 14])
+    assert torch.isnan(critic[0, 14])
+    assert torch.isinf(critic[1, 14])
+    assert source.semantic_publication_count == 1
 
 
 def test_source_has_no_superseded_observation_or_zero_prefix_adapter():
     source = (MDP / "action_ball_full_mdp_lean_observation_cfg.py").read_text(encoding="utf-8")
+    assert "_assert_async_all" not in source
+    assert "torch._assert_async" not in source
     for marker in (
         "FreshFullMdpObservationOwner",
         "ACTOR_FIXED_WIDTH",

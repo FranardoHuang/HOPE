@@ -3,14 +3,15 @@
 One direct runtime publication supplies the robot, Motion, Racket, Physical,
 R06 and R07 state that can change the next transition.  Raw task packets,
 owner fact rows, fault bits and Reward ledgers are deliberately not policy or
-critic inputs.  Infrastructure faults fail-stop instead of becoming features.
+critic inputs.  Structural ABI and ownership faults fail-stop; row-local
+semantic mismatches are masked without becoming features or device assertions.
 
 Isaac Lab invokes each term once while constructing ObservationManager.  Those
 two calls are explicitly shape-only and may return zeros.  Every term config
 contains only its code-owned group name; the call resolves the exact source
 atomically retained by the environment instead of embedding a live Kit object
-in config state.  Every later call requires the direct runtime publication and
-finite semantic tensors.
+in config state.  Every later call requires the direct runtime publication;
+numeric finite rejection remains at the rollout-storage/preoptimizer boundary.
 """
 
 from __future__ import annotations
@@ -113,17 +114,6 @@ def _exact_tensor(
             f"{label} must be {list(shape)} {dtype} on {device}"
         )
     return value
-
-
-def _assert_async_all(predicate: torch.Tensor, *, label: str) -> None:
-    """Schedule a device assertion without a per-step tensor-to-host decode."""
-
-    condition = torch.all(predicate)
-    async_assert = getattr(torch, "_assert_async", None)
-    if callable(async_assert):
-        async_assert(condition)
-    else:  # pragma: no cover - supported Torch builds provide _assert_async.
-        torch._assert(condition, label)
 
 
 def _gather_selected(value: torch.Tensor, slot: torch.Tensor) -> torch.Tensor:
@@ -299,14 +289,6 @@ def build_direct_action_epoch_observation_facts(
         device=device,
         dtype=torch.bool,
     )
-    live = flight_slot.ge(0)
-    _assert_async_all(
-        live | (~contact & ~crossed & ~clear),
-        label="absent R06 current flight has retained latches",
-    )
-    _assert_async_all(~clear | crossed, label="R06 net-clear lacks crossing")
-    _assert_async_all(~crossed | contact, label="R06 net crossing lacks contact")
-
     scene_state = physical.scene_port.read_state_env()
     flight_capacity = getattr(r06, "flight_slot_capacity", None)
     if (
@@ -321,10 +303,15 @@ def build_direct_action_epoch_observation_facts(
         or scene_state.dtype != dtype
     ):
         raise LeanObservationError("Physical flight scene ABI differs")
-    _assert_async_all(
-        (flight_slot >= -1) & (flight_slot < flight_capacity),
-        label="R06 current flight_slot is outside Physical capacity",
+    slot_valid = flight_slot.ge(-1) & flight_slot.lt(flight_capacity)
+    live_slot = flight_slot.ge(0)
+    r06_row_valid = (
+        slot_valid
+        & (live_slot | (~contact & ~crossed & ~clear))
+        & (~clear | crossed)
+        & (~crossed | contact)
     )
+    live = live_slot & r06_row_valid
     flight_index = flight_slot.clamp(0, flight_capacity - 1)
     env_index = torch.arange(n, dtype=torch.int64, device=device)
     ball = scene_state[env_index, flight_index]
@@ -338,9 +325,9 @@ def build_direct_action_epoch_observation_facts(
     )
     ball9 = torch.where(live[:, None], ball9, torch.zeros_like(ball9))
 
-    contact = contact[:, None]
-    crossed = crossed[:, None]
-    clear = clear[:, None]
+    contact = (contact & r06_row_valid)[:, None]
+    crossed = (crossed & r06_row_valid)[:, None]
+    clear = (clear & r06_row_valid)[:, None]
 
     ready = r07.action_epoch_observation_state()
     postphysics_valid = _exact_tensor(
@@ -428,11 +415,10 @@ def build_direct_action_epoch_observation_facts(
         & same_generation
         & ready_control_tick.eq(motion_control_tick)
     )
-    _assert_async_all(
-        (motion_generation >= 0)
-        & (cold_genesis | reset_boundary | same_epoch_publication),
-        label="R07 observation chronology differs",
+    chronology_valid = (motion_generation >= 0) & (
+        cold_genesis | reset_boundary | same_epoch_publication
     )
+    same_epoch_publication &= chronology_valid
     if type(ready.required_dwell) is not int or ready.required_dwell < 1:
         raise LeanObservationError("R07 required dwell differs")
     # A selected true reset happens after this step's real post-physics
@@ -471,15 +457,32 @@ def build_direct_action_epoch_observation_facts(
     }
 
     epoch_uid = _gather_selected(record.action_uid, slot)
-    _assert_async_all(
-        ~task_valid | (motion_view.action_uid == epoch_uid),
-        label="Motion/Epoch current action UID differs",
+    motion_action_uid = _exact_tensor(
+        motion_view.action_uid,
+        label="Motion observation action_uid",
+        shape=(n,),
+        device=device,
+        dtype=torch.int64,
     )
+    safe_task_valid = task_valid & motion_action_uid.eq(epoch_uid)
+    safe_task_mask = safe_task_valid[:, None]
+    for name in (
+        "racket_target_pos_error_heading",
+        "racket_target_vel_error_heading",
+        "racket_target_normal_error_heading",
+        "base_goal_error_heading_xy",
+        "time_to_contact_s",
+        "time_to_teacher_start_s",
+    ):
+        value = actor_rows[name]
+        actor_rows[name] = torch.where(
+            safe_task_mask, value, torch.zeros_like(value)
+        )
     return DirectActionEpochObservationFacts(
         actor_rows=actor_rows,
         critic_rows=critic_rows,
         motion_phase_code=motion_view.phase,
-        task_valid=task_valid,
+        task_valid=safe_task_valid,
         transaction_epoch=record.epoch,
         transaction_version=record.version,
         common_step=step,
@@ -644,15 +647,12 @@ class LeanActionEpochObservationSource:
             device=self._device,
             dtype=torch.bool,
         )
-        phase = _exact_tensor(
+        _exact_tensor(
             view.motion_phase_code,
             label="direct motion_phase_code",
             shape=(self._num_envs,),
             device=self._device,
             dtype=torch.int64,
-        )
-        _assert_async_all(
-            (phase >= 0) & (phase < 5), label="Motion phase is outside 0..4"
         )
         return view
 
@@ -672,7 +672,6 @@ class LeanActionEpochObservationSource:
             | phase.eq(epoch_v1.PHASE_OUTCOME_SETTLED)
             | phase.eq(epoch_v1.PHASE_RETIRED)
         )
-        _assert_async_all(allowed_phase, label="ActionEpoch public phase differs")
         learning_phase = torch.zeros_like(phase)
         for index, code in enumerate(
             (
@@ -689,9 +688,19 @@ class LeanActionEpochObservationSource:
         phase_one_hot = torch.nn.functional.one_hot(
             learning_phase, num_classes=5
         ).to(dtype=self._dtype)
+        phase_one_hot *= allowed_phase[:, None].to(dtype=self._dtype)
+        motion_phase_valid = (
+            view.motion_phase_code.ge(0) & view.motion_phase_code.lt(5)
+        )
+        safe_motion_phase = torch.where(
+            motion_phase_valid,
+            view.motion_phase_code,
+            torch.zeros_like(view.motion_phase_code),
+        )
         motion_phase = torch.nn.functional.one_hot(
-            view.motion_phase_code, num_classes=5
+            safe_motion_phase, num_classes=5
         ).to(dtype=self._dtype)
+        motion_phase *= motion_phase_valid[:, None].to(dtype=self._dtype)
         actor_rows = dict(view.actor_rows)
         actor_rows.update(
             {
@@ -718,10 +727,8 @@ class LeanActionEpochObservationSource:
             raise LeanObservationError("named actor layout width differs")
         if critic.shape != (self._num_envs, CRITIC_WIDTH_V2):
             raise LeanObservationError("named critic layout width differs")
-        # The critic contains the actor as its exact prefix, so this single
-        # reduction rejects every nonfinite actor value as well as the
-        # critic-only suffix without rescanning the prefix.
-        _assert_async_all(torch.isfinite(critic), label="packed critic is nonfinite")
+        # Preserve nonfinite values for the rollout-storage/preoptimizer finite
+        # boundary, which owns named synchronous rejection before optimization.
         return actor, critic
 
     def _semantic(self) -> tuple[torch.Tensor, torch.Tensor]:

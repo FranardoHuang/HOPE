@@ -483,6 +483,88 @@ FAULTS = (
     ("batch_abort", FAULT_BATCH_ABORT),
     ("safety_cleanup", FAULT_SAFETY_CLEANUP),
 )
+# The lean ActionEpoch owner packs these R06-owned row causes into its existing
+# optimizer-boundary transfer.  This is a distinct namespace from ``FAULTS``:
+# the values are pinned to ActionEpoch's public row-fault ABI and are validated
+# again when the exact owner is cold-bound below.
+R06_EPOCH_ROW_FAULT_LAUNCH_SELECTION_CONTRACT = 1 << 11
+R06_EPOCH_ROW_FAULT_LAUNCH_IDENTITY_CONTRACT = 1 << 12
+R06_EPOCH_ROW_FAULT_OUTCOME_PROJECTION_DUPLICATE = 1 << 13
+R06_EPOCH_ROW_FAULT_PAYMENT_PROJECTION_CONTRACT = 1 << 14
+R06_EPOCH_ROW_FAULT_PAYMENT_MAILBOX_DUPLICATE = 1 << 15
+R06_EPOCH_ROW_FAULT_PAYMENT_MISSING_OR_MISMATCHED = 1 << 16
+R06_EPOCH_ROW_FAULT_PAYMENT_BEFORE_SETTLEMENT = 1 << 17
+R06_EPOCH_ROW_FAULT_PAYMENT_HIGHWATER_REGRESSION = 1 << 18
+R06_EPOCH_ROW_FAULT_PAYMENT_UNCONSUMED_DEBT_OVERWRITE = 1 << 19
+R06_EPOCH_ROW_FAULT_CLOSED_PROJECTION_CONTRACT = 1 << 20
+R06_EPOCH_ROW_FAULT_CLOSED_DEBT_MISMATCH = 1 << 21
+R06_EPOCH_ROW_FAULT_CURRENT_FLIGHT_DUPLICATE = 1 << 22
+
+R06_ACTION_EPOCH_ROW_FAULT_BINDINGS = (
+    (
+        "ROW_FAULT_R06_LAUNCH_SELECTION_CONTRACT",
+        R06_EPOCH_ROW_FAULT_LAUNCH_SELECTION_CONTRACT,
+        "r06_launch_selection_contract",
+    ),
+    (
+        "ROW_FAULT_R06_LAUNCH_IDENTITY_CONTRACT",
+        R06_EPOCH_ROW_FAULT_LAUNCH_IDENTITY_CONTRACT,
+        "r06_launch_identity_contract",
+    ),
+    (
+        "ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE",
+        R06_EPOCH_ROW_FAULT_OUTCOME_PROJECTION_DUPLICATE,
+        "r06_outcome_projection_duplicate",
+    ),
+    (
+        "ROW_FAULT_R06_PAYMENT_PROJECTION_CONTRACT",
+        R06_EPOCH_ROW_FAULT_PAYMENT_PROJECTION_CONTRACT,
+        "r06_payment_projection_contract",
+    ),
+    (
+        "ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE",
+        R06_EPOCH_ROW_FAULT_PAYMENT_MAILBOX_DUPLICATE,
+        "r06_payment_mailbox_duplicate",
+    ),
+    (
+        "ROW_FAULT_R06_PAYMENT_MISSING_OR_MISMATCHED",
+        R06_EPOCH_ROW_FAULT_PAYMENT_MISSING_OR_MISMATCHED,
+        "r06_payment_missing_or_mismatched",
+    ),
+    (
+        "ROW_FAULT_R06_PAYMENT_BEFORE_SETTLEMENT",
+        R06_EPOCH_ROW_FAULT_PAYMENT_BEFORE_SETTLEMENT,
+        "r06_payment_before_settlement",
+    ),
+    (
+        "ROW_FAULT_R06_PAYMENT_HIGHWATER_REGRESSION",
+        R06_EPOCH_ROW_FAULT_PAYMENT_HIGHWATER_REGRESSION,
+        "r06_payment_highwater_regression",
+    ),
+    (
+        "ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE",
+        R06_EPOCH_ROW_FAULT_PAYMENT_UNCONSUMED_DEBT_OVERWRITE,
+        "r06_payment_unconsumed_debt_overwrite",
+    ),
+    (
+        "ROW_FAULT_R06_CLOSED_PROJECTION_CONTRACT",
+        R06_EPOCH_ROW_FAULT_CLOSED_PROJECTION_CONTRACT,
+        "r06_closed_projection_contract",
+    ),
+    (
+        "ROW_FAULT_R06_CLOSED_DEBT_MISMATCH",
+        R06_EPOCH_ROW_FAULT_CLOSED_DEBT_MISMATCH,
+        "r06_closed_debt_mismatch",
+    ),
+    (
+        "ROW_FAULT_R06_CURRENT_FLIGHT_DUPLICATE",
+        R06_EPOCH_ROW_FAULT_CURRENT_FLIGHT_DUPLICATE,
+        "r06_current_flight_duplicate",
+    ),
+)
+_R06_ACTION_EPOCH_ROW_FAULT_BITS = frozenset(
+    bit for _constant, bit, _reason in R06_ACTION_EPOCH_ROW_FAULT_BINDINGS
+)
 
 # R06 owns this exact row schema.  The all-owner boundary merely packs the
 # already-materialized verdict; it may neither reinterpret nor widen the
@@ -5749,6 +5831,7 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         # no formal/checkpoint/export authority and carries no caller verdict,
         # receipt, or source-SHA success claim.
         self._action_ball_full_mdp_epoch_owner: object | None = None
+        self._action_epoch_row_fault_latch: object | None = None
         self._full_mdp_observation_projection = object.__new__(
             ActionBallFullMdpObservationProjection
         )
@@ -5938,15 +6021,86 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 raise LandingOutcomeDeviceError(
                     "diagnostic R06 live Env/Physical/ActionEpoch owner join differs"
                 )
+        fault_latch = getattr(epoch_owner, "latch_runtime_row_fault", None)
+        direct_fault_latch = getattr(
+            epoch_v1.ActionEpochOwner, "latch_runtime_row_fault", None
+        )
+        try:
+            epoch_fault_names = dict(
+                getattr(epoch_v1, "ACTION_EPOCH_ROW_FAULT_NAMES", ())
+            )
+        except (TypeError, ValueError):
+            epoch_fault_names = {}
+        if (
+            not callable(fault_latch)
+            or not callable(direct_fault_latch)
+            or getattr(fault_latch, "__self__", None) is not epoch_owner
+            or getattr(fault_latch, "__func__", None) is not direct_fault_latch
+            or any(
+                getattr(epoch_v1, constant, None) != expected
+                or epoch_fault_names.get(expected) != reason
+                for constant, expected, reason
+                in R06_ACTION_EPOCH_ROW_FAULT_BINDINGS
+            )
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 epoch owner named row-fault ABI differs"
+            )
         epoch_owner.bind_fact_owner("r06_landing_outcome", self)
         epoch_owner.bind_async_owner("r06_landing_outcome", self)
         self._action_ball_full_mdp_epoch_owner = epoch_owner
+        self._action_epoch_row_fault_latch = fault_latch
         if diagnostic_record is not None:
             # The exact Env/Physical/scene objects are a cold join, not runtime
             # state.  Once ActionEpoch accepts both R06 bindings, drop the
             # construction graph so this leaf cannot retain the Env or its
             # large device tensor graph for the owner's whole lifetime.
             self._diagnostic_n2_construction_record = None
+
+    def _latch_action_epoch_row_fault(
+        self,
+        rows: torch.Tensor,
+        *,
+        epoch_reason_bit: int,
+    ) -> torch.Tensor:
+        """Latch one exact R06 cause and return rows still safe to use.
+
+        This path performs no host read or synchronization.  The exact bound
+        Epoch owner ORs the cause into its single existing packed
+        optimizer-boundary word.  The legacy unbound seam masks only the
+        current call for backward-compatible isolated tests; fresh V5 binds
+        Epoch before any live row and therefore gets sticky row semantics.
+        """
+
+        if (
+            type(rows) is not torch.Tensor
+            or rows.dtype != torch.bool
+            or rows.device != self.device
+            or tuple(rows.shape) != (self.num_envs,)
+            or not rows.is_contiguous()
+            or type(epoch_reason_bit) is not int
+            or epoch_reason_bit not in _R06_ACTION_EPOCH_ROW_FAULT_BITS
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 named ActionEpoch row-fault ABI differs"
+            )
+        latch = self._action_epoch_row_fault_latch
+        if latch is None:
+            return ~rows
+        epoch_safe = latch(
+            "r06_landing_outcome", epoch_reason_bit, rows, owner=self
+        )
+        if (
+            type(epoch_safe) is not torch.Tensor
+            or epoch_safe.dtype != torch.bool
+            or epoch_safe.device != self.device
+            or tuple(epoch_safe.shape) != (self.num_envs,)
+            or not epoch_safe.is_contiguous()
+        ):
+            raise LandingOutcomeDeviceError(
+                "R06 named ActionEpoch row-fault safe mask differs"
+            )
+        return epoch_safe
 
     def install_action_ball_full_mdp_epoch_launch_from_physical(self) -> None:
         """Install exact launched rows from the permanently paired Physical owner.
@@ -6077,10 +6231,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             & contact_deadline.eq(-1)
             & crossing_horizon.eq(-1)
         )
-        torch._assert_async(
-            torch.all(~due | selected) & torch.all(selected | neutral),
-            "R06 epoch launch fixed-row selection or neutral sentinel differs",
+        safe_rows = self._latch_action_epoch_row_fault(
+            ((due & ~selected) | (~selected & ~neutral)).contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_LAUNCH_SELECTION_CONTRACT
+            ),
         )
+        due = due & safe_rows
         safe_ids = ids
         flight_in_range = flight_slot.ge(0) & flight_slot.lt(
             self.flight_slot_capacity
@@ -6196,10 +6353,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             & launch_step.ge(0)
             & crossing_horizon.ge(contact_deadline)
         )
-        torch._assert_async(
-            torch.all(~due | (identity_valid & value_valid)),
-            "R06 epoch launch rows differ from retained Physical identity",
+        safe_rows = self._latch_action_epoch_row_fault(
+            (due & ~(identity_valid & value_valid)).contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_LAUNCH_IDENTITY_CONTRACT
+            ),
         )
+        due = due & safe_rows
 
         flight_target = torch.zeros(
             self._flight_shape, dtype=torch.bool, device=self.device
@@ -6414,10 +6574,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
         selected = candidate & self._mailbox_publication_ordinal.eq(
             newest_ordinal.unsqueeze(1)
         )
-        torch._assert_async(
-            torch.all(selected.to(torch.int64).sum(dim=1).le(1)),
-            "R06 outcome projection found duplicate publication owners",
+        safe_rows = self._latch_action_epoch_row_fault(
+            selected.to(torch.int64).sum(dim=1).gt(1).contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_OUTCOME_PROJECTION_DUPLICATE
+            ),
         )
+        selected = selected & safe_rows.unsqueeze(1)
         valid = selected.any(dim=1)
         mailbox_slot = torch.argmax(selected.to(torch.int64), dim=1)
 
@@ -6608,16 +6771,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             dtype=torch.int64,
         )
         key_valid = _row_identity.action_epoch_shot_key_valid(payment_key)
-        torch._assert_async(
-            torch.all(
-                ~valid
-                | (
-                    key_valid
-                    & payment_step.ge(0)
-                )
+        safe_rows = self._latch_action_epoch_row_fault(
+            (valid & ~(key_valid & payment_step.ge(0))).contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_PAYMENT_PROJECTION_CONTRACT
             ),
-            "R06 reward payment projection has invalid row semantics",
         )
+        valid = valid & safe_rows
 
         expanded_payment_key = _row_identity.ActionEpochShotKey(
             **{
@@ -6629,7 +6789,8 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             }
         )
         mailbox_match = (
-            self._mailbox_action_epoch
+            valid.unsqueeze(1)
+            & self._mailbox_action_epoch
             & self._mailbox_history_valid
             & self._mailbox_physical_retired
             & self._mailbox_state.eq(MAILBOX_SETTLED_UNPAID)
@@ -6637,10 +6798,14 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 self._mailbox_action_epoch_shot_key(), expanded_payment_key
             )
         )
-        torch._assert_async(
-            torch.all(mailbox_match.to(torch.int64).sum(dim=1).le(1)),
-            "R06 payment close found duplicate mailbox owners",
+        safe_rows = self._latch_action_epoch_row_fault(
+            mailbox_match.to(torch.int64).sum(dim=1).gt(1).contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_PAYMENT_MAILBOX_DUPLICATE
+            ),
         )
+        valid = valid & safe_rows
+        mailbox_match = mailbox_match & safe_rows.unsqueeze(1)
         candidate = valid & mailbox_match.any(dim=1)
         previous_match = (
             self._previous_paid_valid
@@ -6666,43 +6831,44 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             & payment_step.lt(retained_settlement_step)
         )
         missing_or_mismatched = valid & ~candidate & ~previous_match
-        overwrite_or_regression = (
+        highwater_regression = (
             valid
             & ~previous_match
-            & (
-                ~candidate
-                | self._previous_paid_valid
-                | payment_step.lt(self._previous_paid_payment_step_highwater)
-            )
+            & candidate
+            & payment_step.lt(self._previous_paid_payment_step_highwater)
         )
-        self._device_sticky_poison |= (
-            missing_or_mismatched
-            | overwrite_or_regression
-            | payment_before_settlement
+        unconsumed_debt_overwrite = (
+            valid
+            & ~previous_match
+            & candidate
+            & self._previous_paid_valid
         )
-        torch._assert_async(
-            torch.all(~valid | candidate | previous_match),
-            "R06 payment preceded settlement or mismatched retained identity",
-        )
-        torch._assert_async(
-            torch.all(~payment_before_settlement),
-            "R06 payment preceded settlement retained by R06",
-        )
-        torch._assert_async(
-            torch.all(
-                ~valid
-                | previous_match
-                | (
-                    candidate
-                    & ~self._previous_paid_valid
-                    & payment_step.ge(retained_settlement_step)
-                    & payment_step.ge(
-                        self._previous_paid_payment_step_highwater
-                    )
-                )
+        self._latch_action_epoch_row_fault(
+            missing_or_mismatched.contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_PAYMENT_MISSING_OR_MISMATCHED
             ),
-            "R06 payment regressed or would overwrite unconsumed debt",
         )
+        self._latch_action_epoch_row_fault(
+            payment_before_settlement.contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_PAYMENT_BEFORE_SETTLEMENT
+            ),
+        )
+        self._latch_action_epoch_row_fault(
+            highwater_regression.contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_PAYMENT_HIGHWATER_REGRESSION
+            ),
+        )
+        safe_rows = self._latch_action_epoch_row_fault(
+            unconsumed_debt_overwrite.contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_PAYMENT_UNCONSUMED_DEBT_OVERWRITE
+            ),
+        )
+        candidate = candidate & safe_rows
+        previous_match = previous_match & safe_rows
         close = mailbox_match & candidate.unsqueeze(1)
 
         for destination, source in (
@@ -6897,10 +7063,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             label="R06 closed action epoch shot_key",
         )
         key_valid = _row_identity.action_epoch_shot_key_valid(closed_key)
-        torch._assert_async(
-            torch.all(~valid | key_valid),
-            "R06 closed-row projection has invalid row semantics",
+        safe_rows = self._latch_action_epoch_row_fault(
+            (valid & ~key_valid).contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_CLOSED_PROJECTION_CONTRACT
+            ),
         )
+        valid = valid & safe_rows
         release = (
             valid
             & self._previous_paid_valid
@@ -6908,11 +7077,11 @@ class ActionBallLandingOutcomeDeviceCoordinator:
                 self._previous_paid_action_epoch_shot_key(), closed_key
             )
         )
-        self._device_sticky_poison |= valid & ~release
-        torch._assert_async(
-            torch.all(~valid | release),
-            "R06 closed row mismatched durable previous-paid debt",
+        safe_rows = self._latch_action_epoch_row_fault(
+            (valid & ~release).contiguous(),
+            epoch_reason_bit=R06_EPOCH_ROW_FAULT_CLOSED_DEBT_MISMATCH,
         )
+        release = release & safe_rows
         for destination in (
             self._previous_paid_action_uid,
             self._previous_paid_action_slot,
@@ -7015,10 +7184,13 @@ class ActionBallLandingOutcomeDeviceCoordinator:
             matches &= getattr(flight_key, field.name).eq(
                 getattr(expected_key, field.name)[:, None]
             )
-        torch._assert_async(
-            torch.all(matches.to(torch.int64).sum(dim=1).le(1)),
-            "R06 current ActionEpoch flight is not unique",
+        safe_rows = self._latch_action_epoch_row_fault(
+            matches.to(torch.int64).sum(dim=1).gt(1).contiguous(),
+            epoch_reason_bit=(
+                R06_EPOCH_ROW_FAULT_CURRENT_FLIGHT_DUPLICATE
+            ),
         )
+        matches = matches & safe_rows.unsqueeze(1)
         selected = torch.argmax(matches.to(torch.int64), dim=1)
         present = matches.any(dim=1)
 

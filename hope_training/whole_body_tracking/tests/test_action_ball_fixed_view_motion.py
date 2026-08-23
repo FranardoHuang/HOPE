@@ -349,7 +349,7 @@ def test_fixed_view_second_generation_checkpoint_uses_full_birth_history():
         (row["env_id"], row["reset_generation"])
         for row in broker_state["consumed_receipts"]
     ] == [(0, 1), (0, 2), (1, 1), (1, 2)]
-    assert saved["schema_version"] == 4
+    assert saved["schema_version"] == 5
     assert (
         provider.issue_invocations,
         domain.claim_invocations,
@@ -486,7 +486,7 @@ def test_fixed_view_motion_exact_state_load_finalize_roundtrip_is_data_only():
     saved_shared_racket = deepcopy(task_authority.state_dict())
     saved = command.exact_resume_state_dict()
 
-    assert saved["schema_version"] == 4
+    assert saved["schema_version"] == 5
     assert (
         saved["identity"]["action_ball"]["fixed_view_identity_sha256"]
         == _FIXED_VIEW_IDENTITY
