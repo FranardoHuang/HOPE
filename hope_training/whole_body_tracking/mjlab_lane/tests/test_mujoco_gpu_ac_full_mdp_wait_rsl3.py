@@ -845,6 +845,55 @@ def test_real_runner_writer_prefix_is_consumed_without_a_second_schema(
     assert summary["snapshot_count"] == 1
 
 
+def test_stdout_marker_failure_is_best_effort(monkeypatch):
+    module = _load()
+
+    class BrokenStdout:
+        def write(self, _payload):
+            raise BrokenPipeError("closed pipe")
+
+        def flush(self):
+            raise AssertionError("flush must not follow a failed write")
+
+    warnings = []
+    monkeypatch.setattr(module.sys, "stdout", BrokenStdout())
+    monkeypatch.setattr(
+        module.sys,
+        "stderr",
+        types.SimpleNamespace(
+            write=lambda payload: warnings.append(payload), flush=lambda: None
+        ),
+    )
+    module._best_effort_stdout_marker("committed")
+    assert len(warnings) == 1
+    assert json.loads(warnings[0]) == {
+        "error_type": "BrokenPipeError",
+        "event": "action_ball_stdout_marker_failed",
+    }
+
+
+def test_stdout_and_warning_sink_failures_cannot_revoke_commit(monkeypatch):
+    module = _load()
+
+    class FlushFailure:
+        def write(self, payload):
+            return len(payload)
+
+        def flush(self):
+            raise OSError("flush failed")
+
+    class WarningFailure:
+        def write(self, _payload):
+            raise OSError("stderr failed")
+
+        def flush(self):
+            raise OSError("stderr flush failed")
+
+    monkeypatch.setattr(module.sys, "stdout", FlushFailure())
+    monkeypatch.setattr(module.sys, "stderr", WarningFailure())
+    module._best_effort_stdout_marker("committed")
+
+
 def test_main_preserves_default_wait_learn_one(monkeypatch, capsys, tmp_path):
     invoke, trace, saved, evidence, snapshots, completion = _install_fake_stack(
         monkeypatch, tmp_path, num_envs=2, num_updates=1,

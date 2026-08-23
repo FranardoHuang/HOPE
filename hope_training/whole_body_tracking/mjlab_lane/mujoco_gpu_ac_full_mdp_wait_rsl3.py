@@ -25,6 +25,30 @@ import sys
 import time
 
 
+def _best_effort_stdout_marker(marker: str) -> None:
+    """Publish a human-readable marker without becoming training authority."""
+
+    try:
+        sys.stdout.write(marker + "\n")
+        sys.stdout.flush()
+    except (OSError, ValueError) as exc:
+        # Optimizer state, evidence ACKs, snapshots and completion receipts are
+        # already durable before these markers are emitted.  A closed pipe or
+        # broken logging sink must not relabel that committed state as a failed
+        # update.  stderr is also observational and may itself be unavailable.
+        try:
+            warning = {
+                "event": "action_ball_stdout_marker_failed",
+                "error_type": type(exc).__name__,
+            }
+            sys.stderr.write(
+                json.dumps(warning, sort_keys=True, separators=(",", ":")) + "\n"
+            )
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            pass
+
+
 def _ppo_recipe_module():
     """Load the shared dependency-free recipe from this exact checkout."""
 
@@ -1081,9 +1105,8 @@ def main(
             )
             if receipt is not None:
                 snapshot_receipts.append(receipt)
-                print(
-                    f"ACTION_BALL_MUJOCO_FULL_A_PROGRESS={index}:{receipt['name']}",
-                    flush=True,
+                _best_effort_stdout_marker(
+                    f"ACTION_BALL_MUJOCO_FULL_A_PROGRESS={index}:{receipt['name']}"
                 )
         update_finished_at = time.perf_counter()
         if diagnostic_rate_probe:
@@ -1217,10 +1240,9 @@ def main(
         payload.update({
             "engineering_run_complete": True, "full_a_update_ack_count": updates,
         })
-    print(
+    _best_effort_stdout_marker(
         "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON="
-        + json.dumps(payload, sort_keys=True),
-        flush=True,
+        + json.dumps(payload, sort_keys=True)
     )
     return 0
 
