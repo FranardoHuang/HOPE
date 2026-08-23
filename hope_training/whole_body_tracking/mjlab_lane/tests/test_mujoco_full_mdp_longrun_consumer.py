@@ -125,11 +125,12 @@ def _copy_identity(identity):
 
 
 RUNNER_EVENT_KEYS = {
+    "scheduled_due_rows", "due_terminal_overlap_rows",
     "reveal_rows", "reveal_due_rows", "reveal_deferred_rows", "launch_rows",
     "missed_launch_rows",
     "flight_terminal_rows", "shot_retired_rows", "selected_reset_rows",
     "completed_action_epoch_rows",
-    "racket_contact_eligible_rows", "racket_contact_rows", "selected_contact_rows",
+    "racket_contact_rows", "selected_contact_rows",
     "opposite_contact_rows", "edge_contact_rows", "between_contact_rows",
     "invalid_contact_rows", "actual_hard_edge_rows",
     "qdes_guard_intervention_rows", "r03_present_rows",
@@ -146,6 +147,13 @@ RUNNER_LIFECYCLE_KEYS = {
     "reset_generation_fault_rows", "resolved_table_rows",
     "landing_on_opponent_rows", "landing_opponent_bound_rows",
     "classification_unknown_rows", "event_semantics_fault_rows",
+}
+RUNNER_FACT_INTEGRITY_KEYS = {
+    "fact_integrity_r03_nonfinite_rows",
+    "fact_integrity_r06_source_invalid_rows",
+    "fact_integrity_r07_sequence_rows",
+    "fact_integrity_r07_nonfinite_rows",
+    "fact_integrity_unknown_bits_rows",
 }
 
 
@@ -212,7 +220,7 @@ def _base_record(module, index, *, identity=IDENTITY):
     terminal = {key: 0 for key in module.TERMINAL_KEYS}
     lifecycle = {key: 0 for key in RUNNER_LIFECYCLE_KEYS}
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "record_type": "mujoco_full_mdp_update_ack",
         "diagnostic_unauthorized": True,
         "update_index": index,
@@ -252,6 +260,9 @@ def _base_record(module, index, *, identity=IDENTITY):
         "selected_reset_rows": 0,
         "gym_reset_rows": 0,
         "lifecycle_counts": lifecycle,
+        "fact_integrity_counts": {
+            key: 0 for key in RUNNER_FACT_INTEGRITY_KEYS
+        },
         "reward20": {
             "term_sums": [0.0] * 20,
             "actual_reward_sum": 0.0,
@@ -280,10 +291,10 @@ def _base_record(module, index, *, identity=IDENTITY):
 def _add_business_chain(row):
     events = row["extras_counts"]
     events.update({
+        "scheduled_due_rows": 1,
         "reveal_due_rows": 1,
         "reveal_rows": 1,
         "launch_rows": 1,
-        "racket_contact_eligible_rows": 1,
         "racket_contact_rows": 1,
         "selected_contact_rows": 1,
         "r03_present_rows": 1,
@@ -504,7 +515,7 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
         module, tmp_path, 5, complete=False
     )
     summary = _consume(module, evidence, snapshots, 5)
-    assert summary["schema_version"] == 4
+    assert summary["schema_version"] == 5
     assert summary["run_identity"] == IDENTITY
     assert summary["evidence_level"] == "advisory_prefix"
     assert summary["engineering_run_complete"] is False
@@ -521,24 +532,35 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
         "status": "not_produced", "denominator": None,
     }
     assert summary["portable_reveal_opportunity"] == {
+        "scheduled_rows": 0,
+        "terminal_overlap_rows": 0,
         "due_rows": 0, "accepted_rows": 0, "deferred_rows": 0,
         "accept_rate": None, "defer_rate": None,
     }
     assert summary["action_coverage"]["backhand"] == {
         "status": "未测", "observed_rows": 0, "denominator": 0,
     }
+    assert summary["hit_opportunity_r03"] == {
+        "present_rows": 0,
+        "physically_valid_rows": 0,
+        "selected_contact_rows": 0,
+        "selected_contact_to_physically_valid_ratio": None,
+    }
     assert summary["rates"] == {
-        "selected_contact_per_eligible": None,
+        "selected_contact_per_launch": None,
+        "r03_physically_valid_per_present": None,
+        "r06_common_per_eligible": None,
         "opponent_landing_per_crossing": None,
         "recovery_success_per_terminal": None,
     }
 
 
-def test_runner_update_ack_fixture_matches_exact_evidence_v5_wire(tmp_path):
+def test_runner_update_ack_fixture_matches_exact_evidence_v6_wire(tmp_path):
     module = _load()
     assert module.EVENT_KEYS == RUNNER_EVENT_KEYS
     assert module.LIFECYCLE_KEYS == RUNNER_LIFECYCLE_KEYS
-    assert len(module.EVENT_KEYS) == 30
+    assert module.FACT_INTEGRITY_KEYS == RUNNER_FACT_INTEGRITY_KEYS
+    assert len(module.EVENT_KEYS) == 31
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False
     )
@@ -696,7 +718,7 @@ def test_consumer_rejects_storage_domains_and_named_fault_receipts(tmp_path):
             _consume(module, evidence, snapshots, 1)
 
 
-def test_evidence_v4_and_completion_v4_are_rejected_by_separate_schemas(
+def test_evidence_v5_and_completion_v4_are_rejected_by_separate_schemas(
         monkeypatch, tmp_path):
     module = _load()
 
@@ -705,7 +727,7 @@ def test_evidence_v4_and_completion_v4_are_rejected_by_separate_schemas(
     evidence, snapshots, _completion, rows = _artifacts(
         module, evidence_root, 1, complete=False
     )
-    rows[0]["schema_version"] = 4
+    rows[0]["schema_version"] = 5
     _write_evidence(evidence, rows)
     with pytest.raises(ValueError, match="fixed fields at update 0"):
         _consume(module, evidence, snapshots, 1)
@@ -781,11 +803,21 @@ def test_sealed_slot0_chain_never_claims_formal_full_a_completion(
     assert summary["milestones"]["selected_reset_rows"] == 0
     assert summary["milestones"]["gym_reset_rows"] == 0
     assert summary["portable_reveal_opportunity"] == {
+        "scheduled_rows": 1,
+        "terminal_overlap_rows": 0,
         "due_rows": 1, "accepted_rows": 1, "deferred_rows": 0,
         "accept_rate": 1.0, "defer_rate": 0.0,
     }
+    assert summary["hit_opportunity_r03"] == {
+        "present_rows": 1,
+        "physically_valid_rows": 1,
+        "selected_contact_rows": 1,
+        "selected_contact_to_physically_valid_ratio": 1.0,
+    }
     assert summary["rates"] == {
-        "selected_contact_per_eligible": 1.0,
+        "selected_contact_per_launch": 1.0,
+        "r03_physically_valid_per_present": 1.0,
+        "r06_common_per_eligible": 1.0,
         "opponent_landing_per_crossing": 1.0,
         "recovery_success_per_terminal": 1.0,
     }
@@ -809,12 +841,123 @@ def test_cross_env_marginals_cannot_complete_one_action_epoch(monkeypatch, tmp_p
     assert summary["business_chain_missing"] == ["completed_action_epoch_rows"]
 
 
+@pytest.mark.parametrize(
+    "predecessor",
+    ("selected_contact_rows", "r03_physically_valid_rows", "r06_eligible_rows"),
+)
+def test_completed_action_requires_each_causal_predecessor(
+    predecessor, tmp_path
+):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"][predecessor] = 0
+        if predecessor == "selected_contact_rows":
+            row["extras_counts"]["racket_contact_rows"] = 0
+            row["classification_status_counts"].update({
+                "0": TRANSITIONS, "1": 0,
+            })
+        if predecessor == "r06_eligible_rows":
+            row["extras_counts"]["r06_common_rows"] = 0
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, business=True,
+        row_mutation=mutate,
+    )
+    with pytest.raises(ValueError, match="cumulative lifecycle conservation"):
+        _consume(module, evidence, snapshots, 1)
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "launch_without_reveal",
+        "contact_without_launch",
+        "r03_without_launch",
+        "terminal_without_launch",
+        "landing_without_selected",
+        "retire_without_launch",
+    ),
+)
+def test_fresh_prefix_causal_bounds_reject_marginal_only_rows(case, tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        event = row["extras_counts"]
+        if case == "launch_without_reveal":
+            event["launch_rows"] = 1
+            row["phase_counts"] = {
+                "0": TRANSITIONS - 1, "2": 0, "5": 1, "6": 0, "8": 0,
+            }
+        elif case == "contact_without_launch":
+            event.update({"racket_contact_rows": 1, "selected_contact_rows": 1})
+            row["classification_status_counts"].update({
+                "0": TRANSITIONS - 1, "1": 1,
+            })
+            row["phase_counts"] = {
+                "0": TRANSITIONS - 1, "2": 0, "5": 1, "6": 0, "8": 0,
+            }
+        elif case == "r03_without_launch":
+            event["r03_present_rows"] = 1
+            row["phase_counts"] = {
+                "0": TRANSITIONS - 1, "2": 0, "5": 1, "6": 0, "8": 0,
+            }
+        elif case == "terminal_without_launch":
+            event.update({"flight_terminal_rows": 1, "r06_present_rows": 1,
+                          "r06_eligible_rows": 1})
+            row["outcome_code_counts"]["5"] = 1
+            row["phase_counts"] = {
+                "0": TRANSITIONS - 1, "2": 0, "5": 0, "6": 1, "8": 0,
+            }
+        elif case == "landing_without_selected":
+            event.update({
+                "scheduled_due_rows": 1, "reveal_due_rows": 1,
+                "reveal_rows": 1, "launch_rows": 1,
+                "flight_terminal_rows": 1, "landing_crossing_rows": 1,
+                "r06_present_rows": 1, "r06_eligible_rows": 1,
+            })
+            row["outcome_code_counts"]["4"] = 1
+            row["phase_counts"] = {
+                "0": TRANSITIONS - 2, "2": 1, "5": 0, "6": 1, "8": 0,
+            }
+        else:
+            event.update({"shot_retired_rows": 1, "recovery_success_rows": 1})
+            row["phase_counts"] = {
+                "0": TRANSITIONS - 1, "2": 0, "5": 0, "6": 0, "8": 1,
+            }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="cumulative lifecycle conservation"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_r06_common_uses_all_source_valid_outcomes_as_denominator(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["extras_counts"]["r06_common_rows"] = 0
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, business=True,
+        row_mutation=mutate,
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["rates"]["r06_common_per_eligible"] == 0.0
+    assert summary["rates"]["opponent_landing_per_crossing"] == 1.0
+
+
 def test_portable_due_accept_defer_rates_use_due_denominator(tmp_path):
     module = _load()
 
     def mutate(rows):
         rows[0]["extras_counts"].update({
-            "reveal_due_rows": 2, "reveal_deferred_rows": 1,
+            "scheduled_due_rows": 2,
+            "reveal_due_rows": 2,
+            "reveal_deferred_rows": 1,
         })
 
     evidence, snapshots, _completion, _rows = _artifacts(
@@ -822,9 +965,282 @@ def test_portable_due_accept_defer_rates_use_due_denominator(tmp_path):
     )
     summary = _consume(module, evidence, snapshots, 1)
     assert summary["portable_reveal_opportunity"] == {
+        "scheduled_rows": 2,
+        "terminal_overlap_rows": 0,
         "due_rows": 2, "accepted_rows": 1, "deferred_rows": 1,
         "accept_rate": 0.5, "defer_rate": 0.5,
     }
+
+
+def test_early_selected_contact_without_r03_is_reported_not_rejected(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"].update({
+            "scheduled_due_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 1,
+            "launch_rows": 1,
+            "racket_contact_rows": 1,
+            "selected_contact_rows": 1,
+        })
+        row["classification_status_counts"].update({
+            "0": TRANSITIONS - 1,
+            "1": 1,
+        })
+        row["phase_counts"] = {
+            "0": TRANSITIONS - 2,
+            "2": 1,
+            "5": 1,
+            "6": 0,
+            "8": 0,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["hit_opportunity_r03"] == {
+        "present_rows": 0,
+        "physically_valid_rows": 0,
+        "selected_contact_rows": 1,
+        "selected_contact_to_physically_valid_ratio": None,
+    }
+
+
+def test_scheduled_due_terminal_overlap_stays_distinct_from_public_due(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"].update({
+            "scheduled_due_rows": 1,
+            "due_terminal_overlap_rows": 1,
+            "selected_reset_rows": 1,
+        })
+        row["selected_reset_rows"] = 1
+        row["gym_reset_rows"] = 1
+        row["terminal_bit_counts"]["base_fell_tilt"] = 1
+        row["lifecycle_counts"].update({
+            "gym_reset_rows": 1,
+            "reset_generation_rows": 1,
+        })
+        row["episodes"] = {
+            "completed_count": 1,
+            "return_sum": 0.0,
+            "length_sum": 1,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["portable_reveal_opportunity"] == {
+        "scheduled_rows": 1,
+        "terminal_overlap_rows": 1,
+        "due_rows": 0,
+        "accepted_rows": 0,
+        "deferred_rows": 0,
+        "accept_rate": None,
+        "defer_rate": None,
+    }
+
+
+def test_retirement_and_r07_marginals_fit_final_reveal_phase(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"].update({
+            "scheduled_due_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 1,
+            "launch_rows": 1,
+            "flight_terminal_rows": 1,
+            "r06_present_rows": 1,
+            "r07_present_rows": 1,
+            "r07_eligible_rows": 1,
+            "recovery_timeout_rows": 1,
+            "shot_retired_rows": 1,
+        })
+        row["outcome_code_counts"]["1"] = 1
+        row["phase_counts"] = {
+            "0": TRANSITIONS - 2,
+            "2": 1,
+            "5": 1,
+            "6": 0,
+            "8": 0,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["reveal_rows"] == 1
+    assert summary["milestones"]["shot_retired_rows"] == 1
+    assert summary["milestones"]["r07_present_rows"] == 1
+
+
+def test_reveal_marginal_cannot_launder_r07_phase_without_retirement(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"].update({
+            "scheduled_due_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 1,
+            "r07_present_rows": 1,
+            "r07_eligible_rows": 1,
+        })
+        row["phase_counts"] = {
+            "0": TRANSITIONS - 1,
+            "2": 1,
+            "5": 0,
+            "6": 0,
+            "8": 0,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="phase/event conservation"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_immediate_terminal_launch_uses_terminal_phase_capacity(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"].update({
+            "scheduled_due_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 1,
+            "launch_rows": 1,
+            "flight_terminal_rows": 1,
+            "r06_present_rows": 1,
+            "r06_eligible_rows": 1,
+        })
+        row["outcome_code_counts"]["5"] = 1
+        row["phase_counts"] = {
+            "0": TRANSITIONS - 2, "2": 1, "5": 0, "6": 1, "8": 0,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["launch_rows"] == 1
+    assert summary["milestones"]["flight_terminal_rows"] == 1
+
+
+def test_launch_without_launch_or_terminal_phase_is_rejected(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"].update({
+            "scheduled_due_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 1,
+            "launch_rows": 1,
+        })
+        row["phase_counts"] = {
+            "0": TRANSITIONS - 1, "2": 1, "5": 0, "6": 0, "8": 0,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="phase/event conservation"):
+        _consume(module, evidence, snapshots, 1)
+
+
+@pytest.mark.parametrize("name", sorted(RUNNER_FACT_INTEGRITY_KEYS))
+def test_rejects_each_durable_fact_integrity_counter(name, tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["fact_integrity_counts"][name] = 1
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="fact integrity fault counter"):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_resolved_table_requires_canonical_robot_hit_table_reason(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"]["selected_reset_rows"] = 1
+        row["selected_reset_rows"] = 1
+        row["gym_reset_rows"] = 1
+        row["terminal_bit_counts"]["robot_hit_table"] = 1
+        row["lifecycle_counts"].update({
+            "gym_reset_rows": 1,
+            "reset_generation_rows": 1,
+            "resolved_table_rows": 1,
+        })
+        row["episodes"] = {
+            "completed_count": 1,
+            "return_sum": 0.0,
+            "length_sum": 1,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["terminal_bit_totals"]["robot_hit_table"] == 1
+    assert summary["milestones"]["gym_reset_rows"] == 1
+    assert summary["table_terminal"] == {
+        "robot_hit_table_rows": 1,
+        "resolved_rows": 1,
+        "keepout_only_rows": 0,
+    }
+
+    keepout_root = tmp_path / "keepout-only"
+    keepout_root.mkdir()
+
+    def keepout_only(rows):
+        row = rows[0]
+        row["extras_counts"]["selected_reset_rows"] = 1
+        row["selected_reset_rows"] = 1
+        row["gym_reset_rows"] = 1
+        row["terminal_bit_counts"]["robot_hit_table"] = 1
+        row["lifecycle_counts"].update({
+            "gym_reset_rows": 1, "reset_generation_rows": 1,
+        })
+        row["episodes"] = {
+            "completed_count": 1, "return_sum": 0.0, "length_sum": 1,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, keepout_root, 1, complete=False, row_mutation=keepout_only
+    )
+    keepout_summary = _consume(module, evidence, snapshots, 1)
+    assert keepout_summary["table_terminal"] == {
+        "robot_hit_table_rows": 1,
+        "resolved_rows": 0,
+        "keepout_only_rows": 1,
+    }
+
+    def omit_reason(rows):
+        mutate(rows)
+        rows[0]["terminal_bit_counts"]["robot_hit_table"] = 0
+
+    bad_root = tmp_path / "missing-table-reason"
+    bad_root.mkdir()
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, bad_root, 1, complete=False, row_mutation=omit_reason
+    )
+    with pytest.raises(ValueError, match="lifecycle cross-check"):
+        _consume(module, evidence, snapshots, 1)
 
 
 def test_complete_rejects_missing_final_seal(monkeypatch, tmp_path):
@@ -1207,6 +1623,47 @@ def test_gym_reset_recovery_failure_is_not_a_shot_retirement(tmp_path):
     assert summary["milestones"]["recovery_failure_rows"] == 1
     assert summary["milestones"]["shot_retired_rows"] == 0
     assert "shot_retired_rows" in summary["business_chain_missing"]
+
+
+def test_invalid_contact_cannot_appear_in_a_durable_ack(tmp_path):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        row["extras_counts"].update({
+            "scheduled_due_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 1,
+            "launch_rows": 1,
+            "racket_contact_rows": 1,
+            "invalid_contact_rows": 1,
+            "flight_terminal_rows": 1,
+            "r06_present_rows": 1,
+            "selected_reset_rows": 1,
+            "recovery_failure_rows": 1,
+        })
+        row["selected_reset_rows"] = 1
+        row["gym_reset_rows"] = 1
+        row["terminal_bit_counts"]["base_fell_tilt"] = 1
+        row["classification_status_counts"].update({
+            "0": TRANSITIONS - 1, "5": 1,
+        })
+        row["outcome_code_counts"]["6"] = 1
+        row["phase_counts"] = {
+            "0": TRANSITIONS - 3, "2": 1, "5": 1, "6": 1, "8": 0,
+        }
+        row["lifecycle_counts"].update({
+            "gym_reset_rows": 1, "reset_generation_rows": 1,
+        })
+        row["episodes"] = {
+            "completed_count": 1, "return_sum": 0.0, "length_sum": 1,
+        }
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="source-invalid event in durable ACK"):
+        _consume(module, evidence, snapshots, 1)
 
 
 def test_rejects_recovery_failure_masquerading_as_shot_retirement(tmp_path):

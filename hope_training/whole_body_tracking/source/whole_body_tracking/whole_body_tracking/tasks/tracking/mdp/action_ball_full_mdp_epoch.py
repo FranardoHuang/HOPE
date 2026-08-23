@@ -164,6 +164,13 @@ ROW_FAULT_MOTION_CADENCE_OVERDUE = 1 << 23
 ROW_FAULT_MOTION_SWING_GENERATION_OVERFLOW = 1 << 24
 ROW_FAULT_MOTION_REVEAL_REFERENCE_CONTRACT = 1 << 25
 ROW_FAULT_MOTION_TASK_TIMING_CONTRACT = 1 << 26
+# R03 keeps its compact source-local word in ``owner_fault_bits`` for exact
+# audit, but these disjoint ActionEpoch bits are the optimizer-facing causes.
+# A rejected source row therefore cannot turn into a neutral Reward and still
+# enter PPO merely because the Reward view correctly ignores owner faults.
+ROW_FAULT_R03_EPOCH_IDENTITY = 1 << 27
+ROW_FAULT_R03_STALE_SOURCE_STEP = 1 << 28
+ROW_FAULT_R03_NONFINITE_FACT = 1 << 29
 # Physical already publishes these two exact source bits.  Keep the values
 # identical at the optimizer boundary so the causal producer/nonfinite split is
 # not lost while moving from the owner journal into the one packed row word.
@@ -253,6 +260,9 @@ ACTION_EPOCH_ROW_FAULT_NAMES = (
         ROW_FAULT_MOTION_TASK_TIMING_CONTRACT,
         "motion_task_timing_contract",
     ),
+    (ROW_FAULT_R03_EPOCH_IDENTITY, "r03_epoch_identity"),
+    (ROW_FAULT_R03_STALE_SOURCE_STEP, "r03_stale_source_step"),
+    (ROW_FAULT_R03_NONFINITE_FACT, "r03_nonfinite_fact"),
     (
         ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER,
         "physical_postphysics_producer",
@@ -290,6 +300,13 @@ _R06_RUNTIME_ROW_FAULT_BITS = frozenset(
     )
 )
 _RUNTIME_ROW_FAULT_BITS_BY_OWNER = {
+    "r03_strike_fact": frozenset(
+        (
+            ROW_FAULT_R03_EPOCH_IDENTITY,
+            ROW_FAULT_R03_STALE_SOURCE_STEP,
+            ROW_FAULT_R03_NONFINITE_FACT,
+        )
+    ),
     "r06_landing_outcome": _R06_RUNTIME_ROW_FAULT_BITS,
     "motion": frozenset(
         (
@@ -1170,11 +1187,12 @@ class ActionEpochOwner:
             )
             expected_owner = None
             if type(owner_kind) is str:
-                expected_owner = (
-                    self._motion_playback_owner
-                    if owner_kind == "motion"
-                    else self._async_owner_identities.get(owner_kind)
-                )
+                if owner_kind == "motion":
+                    expected_owner = self._motion_playback_owner
+                elif owner_kind == "r03_strike_fact":
+                    expected_owner = self._fact_owner_identities.get(owner_kind)
+                else:
+                    expected_owner = self._async_owner_identities.get(owner_kind)
             exact_owner_binding = expected_owner is owner
             if owner_kind == "r06_landing_outcome":
                 exact_owner_binding &= (
@@ -4527,6 +4545,9 @@ __all__ = [
     "ROW_FAULT_PHYSICAL_POSTPHYSICS_JOIN",
     "ROW_FAULT_PHYSICAL_POSTPHYSICS_NONFINITE",
     "ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER",
+    "ROW_FAULT_R03_EPOCH_IDENTITY",
+    "ROW_FAULT_R03_NONFINITE_FACT",
+    "ROW_FAULT_R03_STALE_SOURCE_STEP",
     "ROW_FAULT_R06_CLOSED_DEBT_MISMATCH",
     "ROW_FAULT_R06_CLOSED_PROJECTION_CONTRACT",
     "ROW_FAULT_R06_CURRENT_FLIGHT_DUPLICATE",

@@ -1053,13 +1053,14 @@ def test_runtime_row_fault_latch_rejects_foreign_bit_compound_and_tensor_abi(
 def test_row_fault_registry_is_unique_named_single_bits_with_owner_subsets():
     bits = tuple(bit for bit, _name in E.ACTION_EPOCH_ROW_FAULT_NAMES)
     names = tuple(name for _bit, name in E.ACTION_EPOCH_ROW_FAULT_NAMES)
-    assert len(bits) == 33
+    assert len(bits) == 36
     assert len(bits) == len(set(bits))
     assert len(names) == len(set(names))
     assert all(bit > 0 and bit & (bit - 1) == 0 for bit in bits)
     assert E._KNOWN_ROW_FAULT_MASK == sum(bits)
     assert set(E._RUNTIME_ROW_FAULT_BITS_BY_OWNER) == {
         "motion",
+        "r03_strike_fact",
         "r06_landing_outcome",
     }
     assert all(

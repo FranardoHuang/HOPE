@@ -592,6 +592,102 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
     }
 
 
+@pytest.mark.parametrize("failure_mode", ["short_write", "broken_pipe"])
+def test_stdout_delivery_failure_cannot_poison_committed_training_transaction(
+    tmp_path, _fake_imports, monkeypatch, failure_mode
+):
+    env = _Env()
+    boundary = adapter.ActionBallFullMdpRsl3Adapter(
+        env=env, owner=env.owner, log_dir=str(tmp_path)
+    )
+    stdout_markers = []
+    stderr_rows = []
+
+    class FailingStdout:
+        def write(self, value):
+            stdout_markers.append(value)
+            if failure_mode == "broken_pipe":
+                raise BrokenPipeError("collector closed")
+            return len(value) - 1
+
+        def flush(self):
+            raise AssertionError("failed stdout writes must not be flushed")
+
+    class RecordingStderr:
+        def write(self, value):
+            stderr_rows.append(value)
+            return len(value)
+
+        def flush(self):
+            return None
+
+    monkeypatch.setattr(
+        adapter,
+        "sys",
+        types.SimpleNamespace(stdout=FailingStdout(), stderr=RecordingStderr()),
+    )
+
+    assert boundary.update(
+        lambda: {"loss": 1.0},
+        update_index=0,
+        completed_environment_steps=48,
+    ) == {"loss": 1.0}
+    env.action_term.snapshot = _compact_snapshot(
+        num_envs=2,
+        policy_steps=24,
+        first_sequence=24,
+        consume_sequence=1,
+    )
+    assert boundary.update(
+        lambda: {"loss": 0.5},
+        update_index=1,
+        completed_environment_steps=96,
+    ) == {"loss": 0.5}
+
+    assert env.owner.poisoned is False
+    assert env.owner.active is None
+    assert env.action_term.pending is None
+    assert env.action_term.acknowledged == 2
+    assert boundary._last_update == 1
+    assert [row.split("=", 1)[0] for row in stdout_markers] == [
+        "HOPE_JOINT_SAFETY_UPDATE_JSON",
+        "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON",
+    ] * 2
+    warnings = [
+        json.loads(row.split("=", 1)[1])
+        for row in stderr_rows
+        if row.startswith("HOPE_NONAUTHORITATIVE_STDOUT_WARNING_JSON=")
+    ]
+    assert [warning["marker"] for warning in warnings] == [
+        "HOPE_JOINT_SAFETY_UPDATE_JSON",
+        "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON",
+    ] * 2
+    assert {warning["failure"] for warning in warnings} == {
+        "short_write" if failure_mode == "short_write" else "builtins.BrokenPipeError"
+    }
+    assert all(
+        warning["stdout_authoritative"] is False
+        and warning["durable_wal_authoritative"] is True
+        and warning["training_transaction"] == "committed"
+        for warning in warnings
+    )
+    forensic = durable_wal.read_forensic_committed_frontier(
+        boundary._path,
+        expected_rank=0,
+        expected_segment_id=boundary._segment,
+    )
+    assert forensic["durable_epoch_ack_count"] == 2
+    assert forensic["pending_without_epoch_ack"] is False
+    assert forensic["committed_frontier"] == {
+        "ppo_update": 1,
+        "completed_environment_steps": 96,
+        "epoch_operation_sequence": 2,
+        "epoch_drain_sequence": 2,
+        "epoch_commit_start": 0,
+        "epoch_commit_end": 0,
+    }
+
+
 def test_optimizer_exception_poisoned_without_wal_or_ack(tmp_path, _fake_imports):
     env = _Env()
     boundary = adapter.ActionBallFullMdpRsl3Adapter(

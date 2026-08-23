@@ -439,13 +439,13 @@ def test_runtime_site_argument_is_full_a_only_and_required_before_torch(tmp_path
 
 
 FULL_A_EVENT_KEYS = (
+    "full_a_scheduled_due_event", "full_a_due_terminal_overlap_event",
     "full_a_reveal_event", "full_a_reveal_due_event",
     "full_a_reveal_deferred_event", "full_a_launch_event",
     "full_a_missed_launch_event",
     "full_a_flight_terminal_event", "full_a_shot_retired_event",
     "full_a_completed_action_epoch_event",
-    "full_a_selected_reset_event",
-    "full_a_racket_contact_eligible_event", "full_a_racket_contact_event",
+    "full_a_selected_reset_event", "full_a_racket_contact_event",
     "full_a_selected_contact_event", "full_a_opposite_contact_event",
     "full_a_edge_contact_event", "full_a_between_contact_event",
     "full_a_invalid_contact_event", "full_a_actual_hard_edge_event",
@@ -605,6 +605,9 @@ def _install_fake_stack(
                         num_envs, dtype=torch.int8
                     ),
                     "full_a_outcome_code": torch.zeros(
+                        num_envs, dtype=torch.long
+                    ),
+                    "full_a_fact_integrity_fault_bits": torch.zeros(
                         num_envs, dtype=torch.long
                     ),
                     "full_a_phase_before_reset": torch.zeros(
@@ -891,7 +894,7 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     rows = [json.loads(line) for line in evidence.read_text().splitlines()]
     assert [row["update_index"] for row in rows] == [0, 1]
     assert all(
-        row["schema_version"] == 5 and row["run_identity"] == _identity()
+        row["schema_version"] == 6 and row["run_identity"] == _identity()
         for row in rows
     )
     expected_mjb = _augmented_mjb()

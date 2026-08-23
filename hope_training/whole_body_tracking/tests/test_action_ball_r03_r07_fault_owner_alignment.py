@@ -260,13 +260,36 @@ def test_r03_real_publish_and_epoch_gate_require_the_bound_coordinator():
     ]
     assert record.fact_source_step[row, slot, owner_slot].tolist() == [7, -1]
     assert record.owner_fault_bits[row, slot, owner_slot].tolist() == [0, 0]
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
 
     epoch.merge_runtime_owner_fault("r03_strike_fact", bits, owner=owner)
     record = epoch.current()
     assert record.owner_fault_bits[row, slot, owner_slot].tolist() == [4, 0]
 
 
-def test_r03_stale_arm_rejects_next_full_key_with_same_action_slot():
+@pytest.mark.parametrize(
+    ("fault_kind", "expected_fault", "expected_row_fault"),
+    (
+        (
+            "epoch_identity",
+            R03.R03_EPOCH_FAULT_EPOCH_IDENTITY,
+            "ROW_FAULT_R03_EPOCH_IDENTITY",
+        ),
+        (
+            "stale_source",
+            R03.R03_EPOCH_FAULT_STALE_SOURCE_STEP,
+            "ROW_FAULT_R03_STALE_SOURCE_STEP",
+        ),
+        (
+            "nonfinite",
+            R03.R03_EPOCH_FAULT_NONFINITE_FACT,
+            "ROW_FAULT_R03_NONFINITE_FACT",
+        ),
+    ),
+)
+def test_r03_publish_faults_freeze_bad_row_preserve_peer_and_enter_named_drain(
+    fault_kind, expected_fault, expected_row_fault
+):
     owner, epoch, racket, identity = _real_settled_r03()
     step = torch.ones(2, dtype=torch.int64)
     zero = torch.zeros((2, 3), dtype=torch.float32)
@@ -293,28 +316,43 @@ def test_r03_stale_arm_rejects_next_full_key_with_same_action_slot():
         )
     )
 
-    # Adversarially replace only shot_index.  action_uid/action_slot remain
-    # identical, so a legacy two-field or scalar-epoch join would accept it.
-    retained_uid = epoch._publication.current.identity.action_uid[0, 0].item()
-    retained_slot = epoch._publication.current.identity.action_slot[0, 0].item()
-    epoch._publication.current.identity.shot_key.shot_index[0, 0].add_(1)
-    assert epoch._publication.current.identity.action_uid[0, 0].item() == retained_uid
-    assert epoch._publication.current.identity.action_slot[0, 0].item() == retained_slot
+    publish_step = step.clone()
+    achieved = zero.clone()
+    if fault_kind == "epoch_identity":
+        # Adversarially replace only shot_index.  action_uid/action_slot remain
+        # identical, so a legacy two-field or scalar-epoch join would accept it.
+        retained_uid = epoch._publication.current.identity.action_uid[0, 0].item()
+        retained_slot = epoch._publication.current.identity.action_slot[0, 0].item()
+        epoch._publication.current.identity.shot_key.shot_index[0, 0].add_(1)
+        assert (
+            epoch._publication.current.identity.action_uid[0, 0].item()
+            == retained_uid
+        )
+        assert (
+            epoch._publication.current.identity.action_slot[0, 0].item()
+            == retained_slot
+        )
+    elif fault_kind == "stale_source":
+        publish_step[0] += 1
+    else:
+        achieved[0, 0] = torch.nan
     with _active(racket):
         owner.publish_action_epoch_strike_fact_v1(
             racket_owner=racket,
-            source_step=step,
+            source_step=publish_step,
             racket_identity=identity,
-            achieved_position=zero,
+            achieved_position=achieved,
             achieved_velocity=zero,
             achieved_face_normal=zero,
         )
     record = epoch.current()
     assert (
         record.owner_fault_bits[0, 0, r03_slot].item()
-        & R03.R03_EPOCH_FAULT_EPOCH_IDENTITY
+        & expected_fault
     )
     assert record.fact_valid_bits[0, 0, r03_slot].item() == 0
+    assert record.fact_source_step[0, 0, r03_slot].item() == -1
+    assert torch.count_nonzero(record.fact_f32[0, 0, r03_slot]).item() == 0
     peer_after = tuple(
         tensor[1].contiguous().numpy().tobytes()
         for tensor in (
@@ -325,22 +363,48 @@ def test_r03_stale_arm_rejects_next_full_key_with_same_action_slot():
         )
     )
     assert peer_after == peer_before
+    expected_named = getattr(epoch_module, expected_row_fault)
+    assert epoch._undrained_row_fault_bits.tolist() == [expected_named, 0]
+    start, end = epoch.prepare_drain()
+    assert epoch.materialize_drain(start=start, end=end).row_fault_bits.tolist() == [
+        expected_named,
+        0,
+    ]
 
 
 @pytest.mark.parametrize(
-    ("fault_kind", "expected_fault"),
+    ("fault_kind", "expected_fault", "expected_row_fault"),
     (
-        ("stale_source", R03.R03_EPOCH_FAULT_STALE_SOURCE_STEP),
-        ("nonfinite", R03.R03_EPOCH_FAULT_NONFINITE_FACT),
+        (
+            "epoch_identity",
+            R03.R03_EPOCH_FAULT_EPOCH_IDENTITY,
+            "ROW_FAULT_R03_EPOCH_IDENTITY",
+        ),
+        (
+            "stale_source",
+            R03.R03_EPOCH_FAULT_STALE_SOURCE_STEP,
+            "ROW_FAULT_R03_STALE_SOURCE_STEP",
+        ),
+        (
+            "nonfinite",
+            R03.R03_EPOCH_FAULT_NONFINITE_FACT,
+            "ROW_FAULT_R03_NONFINITE_FACT",
+        ),
     ),
 )
-def test_r03_real_arm_types_stale_and_nonfinite_without_touching_peer(
-    fault_kind, expected_fault
+def test_r03_real_arm_types_each_fault_without_touching_peer(
+    fault_kind, expected_fault, expected_row_fault
 ):
     owner, epoch, racket, identity = _real_settled_r03()
     step = torch.ones(2, dtype=torch.int64)
     target_position = torch.zeros((2, 3), dtype=torch.float32)
-    if fault_kind == "stale_source":
+    if fault_kind == "epoch_identity":
+        identity = replace(
+            identity,
+            task_identity=identity.task_identity.clone(),
+        )
+        identity.task_identity[0] += 1
+    elif fault_kind == "stale_source":
         step[0] = -1
     else:
         target_position[0, 0] = torch.nan
@@ -381,6 +445,73 @@ def test_r03_real_arm_types_stale_and_nonfinite_without_touching_peer(
         )
     )
     assert peer_after == peer_before
+    epoch_module = importlib.import_module(type(epoch).__module__)
+    expected_named = getattr(epoch_module, expected_row_fault)
+    assert epoch._undrained_row_fault_bits.tolist() == [expected_named, 0]
+
+
+def test_r03_producer_fault_stops_preoptimizer_with_exact_named_cause():
+    owner, epoch, racket, identity = _real_settled_r03()
+    step = torch.ones(2, dtype=torch.int64)
+    zero = torch.zeros((2, 3), dtype=torch.float32)
+    with _active(racket):
+        owner.arm_action_epoch_strike_fact_v1(
+            racket_owner=racket,
+            source_step=step,
+            racket_identity=identity,
+            target_position=zero,
+            target_velocity=zero,
+            target_face_normal=zero,
+            ball_position=zero,
+            ball_velocity=zero,
+        )
+    achieved = zero.clone()
+    achieved[0, 0] = torch.nan
+    with _active(racket):
+        owner.publish_action_epoch_strike_fact_v1(
+            racket_owner=racket,
+            source_step=step,
+            racket_identity=identity,
+            achieved_position=achieved,
+            achieved_velocity=zero,
+            achieved_face_normal=zero,
+        )
+
+    module_prefix = type(epoch).__module__.rsplit(".", 1)[0]
+    lean_rewards = importlib.import_module(
+        module_prefix + ".action_ball_full_mdp_lean_rewards"
+    )
+    lean = importlib.import_module(
+        module_prefix + ".action_ball_full_mdp_lean_runtime"
+    )
+    reward = lean_rewards.LeanActionEpochRewardGraph(epoch_owner=epoch)
+    runtime = lean.ActionBallFullMdpLeanRuntimeOwner(
+        env=object(),
+        runtime_lease=object(),
+        epoch_owner=epoch,
+        reward_graph=reward,
+        r05_runtime=object(),
+        motion=object(),
+        racket=racket,
+        physical_ball=object(),
+        r06_landing_outcome=object(),
+        r03_strike_fact=owner,
+        r07_recovery=object(),
+    )
+
+    with pytest.raises(
+        lean.ActionBallFullMdpEpochRowFaultError,
+        match=r"r03_nonfinite_fact\(rows=1,envs=\[0\]\)",
+    ) as raised:
+        runtime.prepare_pre_optimizer_ppo_boundary(
+            update_index=0, completed_environment_steps=48
+        )
+    epoch_module = importlib.import_module(type(epoch).__module__)
+    assert raised.value.row_fault_bits.tolist() == [
+        epoch_module.ROW_FAULT_R03_NONFINITE_FACT,
+        0,
+    ]
+    assert runtime.poisoned
 
 
 def test_r07_epoch_gate_rejects_same_type_foreign_bundle_without_mutation():

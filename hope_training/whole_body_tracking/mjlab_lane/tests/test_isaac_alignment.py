@@ -341,22 +341,14 @@ def test_mutation_hardcoded_raw_clip_in_full_a_wrapper_is_refused(tmp_path):
     lane, repo = _build_tree(tmp_path)
     _patch(
         lane / "mujoco_gpu_ac_full_mdp_initial_wait_env.py",
-        "        (\n"
-        "            reveal_event,\n"
-        "            launch_event,\n"
-        "            reveal_due_event,\n"
-        "            reveal_deferred_event,\n"
-        "            missed_launch_event,\n"
-        "        ) = self._full_a_prepare_step()\n"
+        "        scheduled_due_event, launch_event, missed_launch_event = (\n"
+        "            self._full_a_prepare_step()\n"
+        "        )\n"
         "        _st_before_forward, _tau_sq, requested_qdes = "
         "self._advance_plant(actions)",
-        "        (\n"
-        "            reveal_event,\n"
-        "            launch_event,\n"
-        "            reveal_due_event,\n"
-        "            reveal_deferred_event,\n"
-        "            missed_launch_event,\n"
-        "        ) = self._full_a_prepare_step()\n"
+        "        scheduled_due_event, launch_event, missed_launch_event = (\n"
+        "            self._full_a_prepare_step()\n"
+        "        )\n"
         "        _st_before_forward, _tau_sq, requested_qdes = "
         "self._advance_plant(torch.clamp(actions, -4.0, 4.0))",
     )

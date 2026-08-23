@@ -125,7 +125,7 @@ generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint
 所以现役A/C继续fresh-only。
 
 不要为了替代已退休的formal路径新增同一writer自造的依赖有向无环图（DAG）/hash/receipt门；那类
-self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示已达到`6 s/update`、学会回球、
+self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示已达到约`6 s/update`的方向目标、学会回球、
 获得formal authority或完成任何Gate。性能结论仍须使用exact Pod、profiler-off、matched-strata墙钟证据。
 
 #### FullMDP PPO V3执行配方（2026-08-23 branch candidate）
@@ -140,18 +140,36 @@ MuJoCo V2 checkpoint的mean std已从`.02`单调涨到大于`1`并伴随balance�
 保留advantage对learned std和adaptive-KL的真实控制；不叠加std clamp、decay或课程状态机。V2 checkpoint
 已经带有放大的std，故同样禁止resume，必须fresh。
 
-learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。V4历史谱系的
-MuJoCo per-update evidence/terminal completion/consumer summary为exact `4/4/3`。2026-08-23的
-[`fullmdp-a-h48-v5-*`](../DEFINITIONS.md#fullmdp-optimization-lineage-v5) branch candidate必须使用exact
-`5/5/4`；consumer必须按exact schema分流，旧V3/V4 evidence不得拿新consumer伪装兼容。schema 5
-继承V4在同一次PPO前host reduction中对Reward/return/advantage、policy/critic observation、action、value、
-action log-probability、old mu、old sigma的finite/domain检查，并把独立验过的path-free
-[`run_identity.runtime_stack`](../DEFINITIONS.md#mujoco-fullmdp-runtime-stack)与
-[`run_identity.plant_model`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)带入每条ACK、completion和consumer
-重建身份；旧`mujoco_warp_runtime`被原子替换，不保留双真源；
-done仍严格二值，old sigma仍严格为正。H48并不是性能豁免：每次update的
-transition翻倍，验收统一报告transitions/s和`wall_s * 24 / H`的H24-equivalent，并保留原始wall；真实GPU
-wall、显存和学习收益未测前，任何host hash/shape测试都只能算配方闭合。
+learning SHA只描述影响学习的配方；execution SHA还绑定iteration budget与save cadence。
+[fullmdp-a-h48-v5-*](../DEFINITIONS.md#fullmdp-optimization-lineage-v5)最终wire只接受exact
+`evidence/update schema=6`、`completion schema=5`、`consumer summary schema=5`。上一个已提交
+版本是`5/5/4`；本轮未发布的中间版本不再二次升号。consumer必须按exact schema分流，旧V3/V4 evidence
+不得拿新consumer伪装兼容。schema 6在同一次PPO前host reduction中继承对Reward/return/advantage、
+policy/critic observation、action、value、action log-probability、old mu和old sigma的finite/domain检查，
+新增`scheduled_due_rows`、`due_terminal_overlap_rows`、`reveal_due_rows`与具名
+fact-integrity字段，并把独立验过的path-free
+[run_identity.runtime_stack](../DEFINITIONS.md#mujoco-fullmdp-runtime-stack)与
+[run_identity.plant_model](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)带入每条ACK、completion和consumer
+重建身份；旧`mujoco_warp_runtime`被原子替换，不保留双真源。done仍严格二值，old sigma仍严格为正。
+旧V4的`racket_contact_eligible`与launch完全相同，只是已删除的冗余别名，不是contact opportunity或分母。
+H48并不是性能豁免：验收统一报告transitions/s、原始wall和`wall_s * 24 / H`的H24-equivalent；约6秒只是
+“继续大砍迭代时间”的方向目标，不是发车、rate probe或safety Gate。真实GPU wall、显存与学习收益未测前，
+host hash/shape测试只能算配方闭合。
+
+learner transition只允许一个因果顺序：freeze scheduled due → 结算existing launch/park →
+physics/terminal/facts/reward on `obs_t` teacher → 结算outcome/recovery → 只对survivor分类
+public due → selected measured frame0进入返回的`obs_{t+1}`。首次ACCEPT前joint/body共同使用
+reset-ready，第一笔task-conditioned action/reward从下一transition开始，recovery使用completed-action
+frame0，不新增offset。结算后仍busy才DEFER；起始busy但当界自然RETIRED可立即ACCEPT；due+terminal不public；
+launch+outcome同tick合法，outcome与natural recovery互斥。
+
+完整性cause分开编号：Isaac共享ActionEpoch owner共36项row fault（bit0--26的27项既有原因、R03
+identity/stale/nonfinite bit27--29、Physical/R06六项bit41--46）；MuJoCo只有四项per-transition packed
+cause（R03 nonfinite、R06 source-invalid、R07 sequence、R07 nonfinite）。Mu R03 stale因逐tick调用与同step
+消费按构造不可达而删除，不影响Isaac的R03 stale bit，两个namespace不混计。所有cause只进入各自既有唯一
+packed pre-optimizer drain。`pure_timeout = raw_timeout & ~plant_terminal`；只有pure timeout获得RSL
+bootstrap与canonical timeout reason，horizon与tilt/table/qdes重叠不bootstrap。Mu `robot_hit_table`表示
+keepout或resolved-table，resolved只是子fact。`invalid_contact + done`是真reset而不是retire。
 
 MuJoCo one-shot launcher在child任何import前把`WARP_CACHE_PATH`、`CUDA_CACHE_PATH`、`TMPDIR`和
 `PYTHONPYCACHEPREFIX`分别绑定到fresh `<run-root>/warp_cache`、`cuda_cache`、`tmp`和`pycache`；这些是
@@ -163,7 +181,8 @@ MuJoCo使用`--full-a --diagnostic-rate-probe`；Isaac只可把task中的
 并保持`diagnostic_unauthorized`。Isaac root `max_iterations`仍只能缺席或等于typed `12500`；传61仍在Kit前
 拒绝，实际61预算由code-owned diagnostic flag在runner边界安装。该入口不写学习结论、不授权resume/
 promotion/export/deploy，也不得在完成后自动转成12500；先报告50个measured update的逐项wall、p50/p90、
-transitions/s和H24-equivalent，再由人决定继续优化还是另开fresh长跑。
+transitions/s和H24-equivalent，再由人决定继续优化还是另开fresh长跑。约6秒不是probe
+通过线，probe也不代替corrected V5的fresh训练证据。
 
 #### FullMDP semantic Observation V2与snapshot边界（2026-08-21 branch candidate）
 
@@ -176,7 +195,8 @@ historical WAIT consumer使用。family C将另用202/218合同，不补零伪�
 heading-frame COM velocity和raw A/+Y task-normal residual；contact/support/spin/fault/reward ledger只允许出现在critic或
 telemetry。actor task-valid必须来自Motion-visible mask，不能用Epoch retained row把RETIRED task重新暴露；
 target必须使用actor-visible delayed planner tuple，不能读live truth。所有scale是V2 ABI内的静态常量；
-不得另开running normalization或CLI clipping改变语义。
+不得另开running normalization或CLI clipping改变语义。现役`history_length=0`；没有
+same-observation/different-required-action alias反例时，不新增history、冗余观测或无法部署的oracle。
 
 Isaac在尚无admitted shot key时没有R07 recovery业务事件。该no-key路径只核独立的source step、
 ActionEpoch reset generation与Motion cadence chronology，不读取ContactSensor；critic `[216:219]`的
@@ -203,7 +223,8 @@ observation摘要作自证。缺字段、旧schema、hash mismatch、路径/iter
 本次training contract相同，不授权resume、promotion、export、部署或真机安全。
 
 当前真实IMU、table/root定位、marker→COM因果速度和planner producer尚未接通；simulation V2通过也只能称
-host/Pod diagnostic。旧r3与两条Isaac H24 run均已停止，新V2只能fresh launch。
+host/Pod diagnostic。corrected V5尚未训练；Isaac与MuJoCo都只能从最终clean SHA、fresh exact checkout、
+fresh run root与fresh namespace发车，旧V4/a103运行证据不迁移。
 
 portable MuJoCo Full-A的branch候选单次入口是`scripts/launch_mujoco_full_mdp_successor.py`。它只接受
 clean Git checkout、absent `/workspace/.../<namespace>`、canonical Python、显式GPU index/UUID与已有lock file，
@@ -224,29 +245,39 @@ live env构造完成后，runner核实际geometry source SHA，把已经augmente
 stage→hash/fsync→no-clobber hardlink发布为run-owned `runtime.mjb`，并逐字节核诊断预注册MJB
 `1ef4bb9e…30c0b / 72,260,546 bytes`，再独立绑定policy clock、Warp capacity与从verified base派生的
 owner-local-frame digest；完整字段见
-[`runtime_attach v2`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)。这些path-free事实进入schema-5
-ACK/completion。dry-run只打印固定H48 argv/env、plant locator与expected identity，不查GPU、建run root或
+[`runtime_attach v2`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)。这些path-free事实进入schema-6
+update/evidence与schema-5 completion。dry-run只打印固定H48 argv/env、plant locator与expected identity，
+不查GPU、建run root或
 冒充live augmented-model verification。
 真实模式先按`nvidia-smi index→UUID`核选卡空闲，再把**同一UUID**直接写入child
 `CUDA_VISIBLE_DEVICES`，不假定numeric CUDA enumeration与`nvidia-smi` index偶然一致。GPU flock的同一
 open-file-description通过`pass_fds`由child继承：parent等待自然rc并原样返回，即使parent异常退出，仍存活的
 唯一child也继续持有lifetime lock，直到自身退出；child的cwd固定为fresh run root，使`MUJOCO_LOG.TXT`等
 底层fallback产物不能污染source checkout；
-没有monitor、retry、resume、signal或`ACCEPT`门。Pod1 clean detached `2e4279ba`已用真实venv
-完成dry-run，且未建root、未查GPU、未改lock；real run未闭合前仍不得把host`11 passed`或dry-run写成
-发车授权。当前`96f0ca69…` real已在GPU2运行并取得durable ACK；完整证据边界见
+没有monitor、retry、resume、signal或`ACCEPT`门。corrected V5的final clean SHA、exact Pod checkout、
+fresh namespace、dry-run与real run均为pending；旧V4/a103的host、dry-run或ACK不是发车授权。完整证据边界见
 [portable Full-A实验§0](../experiments/2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md#epa48-fresh-runtime-binding-20260821)。
 
 自然结束后的独立`mujoco_full_mdp_longrun_consumer.py`必须显式接收
-[`--expected-plant-xml`](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)，从该locator重新执行canonical full
-verification，重建path-free `run_identity.plant_model`，再逐条对账schema-5 ACK、schema-5 completion与snapshot。
-consumer独立重算base verification receipt与owner-local-frame digest，并逐字段要求预注册geometry SHA、
-policy clock、Warp capacity和actual augmented MJB identity；在读取`runtime.mjb`或ACK之前，它还独立cold
-verify同一runtime stack，并对run-owned MJB重新hash、用MuJoCo加载一次。summary固定schema 4。不得信任producer自报的
-绝对路径，也不得把V4的`4/4/3`证据升级解释。runtime_attach v2当前只有隔离Pod CPU的`N=1/N=2`、
-两checkout路径三fresh进程byte-identical诊断预注册证据；formal N1/N2/semantic-mutation registration receipt、
-V5 exact checkout和fresh发车尚未完成。launcher、run、
-completion和consumer仍全部是fresh `diagnostic_unauthorized`，不形成formal readiness。
+[--expected-plant-xml](../DEFINITIONS.md#mujoco-fullmdp-plant-binding)，从locator重新执行canonical full
+verification，重建path-free `run_identity.plant_model`，再逐条对账schema-6 update/evidence、
+schema-5 completion与snapshot；summary固定schema 5。consumer独立重算base receipt与owner-local-frame
+digest，逐字段要求geometry SHA、policy clock、Warp capacity与actual augmented MJB identity，并在读取
+`runtime.mjb`或ACK前cold verify同一runtime stack、重新hash并用MuJoCo加载run-owned MJB。
+
+consumer还必须在fresh prefix上重验`launch<=reveal`、`racket contact<=launch`、
+`selected contact<=racket contact`、`R03 present<=launch`、`flight outcome<=launch`、
+`landing crossing<=selected contact`、`shot retired<=launch`，以及Mu四项fact-integrity、pure-timeout与
+canonical table reason。R03与contact clock不同，`selected_contact/R03_valid`只作描述比；真实
+selected-contact rate以launch为分母。`r06_common_per_eligible`是closed task-landing成功率，
+`opponent_landing_per_crossing`只是crossing条件比例，不得代称总成功率。consumer必须拒绝已删除的
+`racket_contact_eligible`假分母，不得信任producer绝对路径或把旧V4证据升级解释。final V5 exact checkout、
+fresh run、formal plant registration与Pod结果仍pending；launcher、run、completion与consumer均为
+fresh `diagnostic_unauthorized`，不形成formal readiness。
+
+stdout payload可以在transaction前序列化，但训练authority顺序固定为optimizer → WAL/fsync → owner ACK →
+EPOCH_ACK/fsync；stdout marker随后才best effort输出。short write、`BrokenPipe`或flush failure只写
+structured stderr warning，不得回滚、污染或否定已经durable的训练。
 
 Isaac Full-A的对应单次入口是`scripts/launch_isaac_full_mdp_successor.py`。它复用仓库现有Kit boot
 owner，不再建立第二套supervisor：从clean Git固定同一typed H48 argv，核exact IsaacLab、Kit Python、
@@ -265,9 +296,10 @@ launcher/child分别把`HOME`、四个`XDG_*`、`CUDA_CACHE_PATH`、`TMPDIR`和`
 该入口不把matched timing、`ACCEPT>0`、已有学习表现或短跑成功当作启动门；这些都不是防止错误写卡、
 错误资产、错误进程或数值故障的独立安全事实。它也不monitor/retry/resume/signal，ready marker后只验证
 exact PID=PGID、runtime receipt与live non-zombie进程并返回。真正的overflow/nonfinite、joint/table/contact
-边界和optimizer后durable ACK仍在训练路径内保持fail-stop。exact Pod real run未闭合前，不得把host测试或
-dry-run写成已启动。当前successor `99405266…`已在GPU0 fresh namespace真实启动并取得连续durable ACK；
-前10个完整H48 wall median=`18.445 s`。这只把本条从“待启动”改为“运行中”，不改变上述authority。
+边界和optimizer后durable ACK仍在训练路径内保持fail-stop。corrected V5的final clean SHA、exact Pod
+dry-run、fresh namespace、real run、连续ACK与profiler-off wall均为pending；未闭合前不得把host测试、
+旧V4/a103证据或dry-run写成已启动。Isaac的36项fault、post-transition reference、pure-timeout与stdout
+non-authority均按本节共享合同执行。
 
 2026-08-22课程解阻后的successor必须额外显式给出GPU-local `--cpu-affinity`。CPU list必须在每次launch前
 从live PCI/NUMA topology重新取得，不能把历史GPU0的`32-47,96-111`外推到另一张卡；当前Pod1实测GPU1/2为

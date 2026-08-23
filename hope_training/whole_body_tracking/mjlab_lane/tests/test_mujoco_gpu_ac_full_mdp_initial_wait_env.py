@@ -1,4 +1,4 @@
-"""Direct tests for the first real MuJoCo 229/399 initial-WAIT slice."""
+"""Direct tests for the current MuJoCo 203/219 initial-WAIT slice."""
 
 from __future__ import annotations
 

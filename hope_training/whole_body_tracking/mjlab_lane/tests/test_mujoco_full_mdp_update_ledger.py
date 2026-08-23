@@ -101,6 +101,8 @@ TERMINATION_BITS = {
     "robot_hit_table": 16,
 }
 EVENT_KEYS = {
+    "scheduled_due_rows": "full_a_scheduled_due_event",
+    "due_terminal_overlap_rows": "full_a_due_terminal_overlap_event",
     "reveal_rows": "full_a_reveal_event",
     "reveal_due_rows": "full_a_reveal_due_event",
     "reveal_deferred_rows": "full_a_reveal_deferred_event",
@@ -110,7 +112,6 @@ EVENT_KEYS = {
     "shot_retired_rows": "full_a_shot_retired_event",
     "completed_action_epoch_rows": "full_a_completed_action_epoch_event",
     "selected_reset_rows": "full_a_selected_reset_event",
-    "racket_contact_eligible_rows": "full_a_racket_contact_eligible_event",
     "racket_contact_rows": "full_a_racket_contact_event",
     "selected_contact_rows": "full_a_selected_contact_event",
     "opposite_contact_rows": "full_a_opposite_contact_event",
@@ -157,6 +158,30 @@ def _load():
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_fact_integrity_bit_and_counter_abi_is_exact():
+    module = _load()
+    assert module.FACT_INTEGRITY_CAUSES == (
+        ("fact_integrity_r03_nonfinite_rows", 1),
+        ("fact_integrity_r06_source_invalid_rows", 2),
+        ("fact_integrity_r07_sequence_rows", 4),
+        ("fact_integrity_r07_nonfinite_rows", 8),
+    )
+    assert module.FACT_INTEGRITY_COUNT_NAMES == (
+        "fact_integrity_r03_nonfinite_rows",
+        "fact_integrity_r06_source_invalid_rows",
+        "fact_integrity_r07_sequence_rows",
+        "fact_integrity_r07_nonfinite_rows",
+        "fact_integrity_unknown_bits_rows",
+    )
+    assert module.FACT_INTEGRITY_KNOWN_MASK == 15
+    assert set(module.FACT_INTEGRITY_COUNT_NAMES).issubset(
+        module._MISC_NAMES
+    )
+    assert set(module.FACT_INTEGRITY_COUNT_NAMES).issubset(
+        module._ZERO_FAULTS
+    )
 
 
 def _ledger(module, *, steps=2, num_envs=3, run_identity=None):
@@ -292,8 +317,18 @@ def test_constructor_isolates_nested_runtime_identity_copy():
 
 def _result(module, *, num_envs=3, event=None, bits=None, done=None,
             generation=None, time_outs=None, resolved=None, status=None,
-            landing=None, opponent_bound=None, outcome=None, phase=None):
-    event = event or {}
+            landing=None, opponent_bound=None, outcome=None, phase=None,
+            fact_integrity_bits=None):
+    event = dict(event or {})
+    if "scheduled_due_rows" not in event:
+        public_due = event.get("reveal_due_rows", [False] * num_envs)
+        terminal_overlap = event.get(
+            "due_terminal_overlap_rows", [False] * num_envs
+        )
+        event["scheduled_due_rows"] = [
+            bool(public_due[index] or terminal_overlap[index])
+            for index in range(num_envs)
+        ]
     extras = {
         key: torch.tensor(event.get(name, [False] * num_envs), dtype=torch.bool)
         for name, key in EVENT_KEYS.items()
@@ -321,6 +356,9 @@ def _result(module, *, num_envs=3, event=None, bits=None, done=None,
             ),
             "full_a_phase_before_reset": torch.tensor(
                 phase or [2] * num_envs, dtype=torch.long
+            ),
+            "full_a_fact_integrity_fault_bits": torch.tensor(
+                fact_integrity_bits or [0] * num_envs, dtype=torch.long
             ),
             "full_a_landing_on_opponent": torch.tensor(
                 landing or [False] * num_envs, dtype=torch.bool
@@ -394,8 +432,6 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
         _result(
             module,
             event={
-                "reveal_rows": [False, True, True],
-                "reveal_due_rows": [False, True, True],
                 "flight_terminal_rows": [True, False, False],
                 "landing_crossing_rows": [True, False, False],
                 "r06_present_rows": [True, False, False],
@@ -407,7 +443,7 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
             generation=[0, 1, 1],
             time_outs=[False, True, False],
             outcome=[3, 0, 0],
-            phase=[6, 2, 2],
+            phase=[6, 0, 0],
             landing=[True, False, False],
             opponent_bound=[True, False, False],
         )
@@ -416,12 +452,14 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
         _result(
             module,
             event={
+                "reveal_rows": [False, True, True],
+                "reveal_due_rows": [False, True, True],
                 "shot_retired_rows": [True, False, False],
                 "recovery_success_rows": [True, False, False],
             },
             generation=[0, 1, 1],
             outcome=[3, 0, 0],
-            phase=[8, 0, 0],
+            phase=[8, 2, 2],
             landing=[True, False, False],
             opponent_bound=[True, False, False],
         )
@@ -429,7 +467,7 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     prepared = _prepare(ledger, 0, environment_steps=2)
     record = _decode(prepared)
 
-    assert record["schema_version"] == 5
+    assert record["schema_version"] == 6
     assert record["run_identity"] == _run_identity()
     assert record["run_identity"]["plant_model"]["runtime_attach"][
         "final_augmented_mjb"
@@ -441,7 +479,7 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     assert record["num_steps_per_env"] == 2
     assert record["transitions_delta"] == 6
     assert record["transitions_cumulative"] == 6
-    assert len(record["extras_counts"]) == 30
+    assert len(record["extras_counts"]) == 31
     assert record["storage_finite"] == {
         name: True for name in STORAGE_WIDTHS
     }
@@ -449,6 +487,8 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
         "dones_binary": True, "sigma_positive": True,
     }
     assert record["extras_counts"]["reveal_rows"] == 2
+    assert record["extras_counts"]["scheduled_due_rows"] == 2
+    assert record["extras_counts"]["due_terminal_overlap_rows"] == 0
     assert record["extras_counts"]["reveal_due_rows"] == 2
     assert record["extras_counts"]["reveal_deferred_rows"] == 0
     assert record["extras_counts"]["shot_retired_rows"] == 1
@@ -458,6 +498,9 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     assert record["environment_steps_delta"] == 2
     assert record["environment_steps_cumulative"] == 2
     assert record["lifecycle_counts"]["reset_generation_rows"] == 2
+    assert record["fact_integrity_counts"] == {
+        name: 0 for name in module.FACT_INTEGRITY_COUNT_NAMES
+    }
     assert record["classification_status_counts"] == {
         "0": 6, "1": 0, "2": 0, "3": 0, "4": 0, "5": 0
     }
@@ -517,10 +560,30 @@ def test_prepare_does_not_gate_structurally_clean_zero_business_telemetry():
         (lambda module, result: result[3].pop("reward_terms"), "reward_terms"),
         (lambda module, result: result[3].pop("full_a_action_uid"), "full_a_action_uid"),
         (
+            lambda module, result: result[3].pop(
+                "full_a_fact_integrity_fault_bits"
+            ),
+            "full_a_fact_integrity_fault_bits",
+        ),
+        (
             lambda module, result: result[3].__setitem__(
                 "full_a_r07_present_event", torch.zeros(3, dtype=torch.long)
             ),
             "full_a_r07_present_event",
+        ),
+        (
+            lambda module, result: result[3].__setitem__(
+                "full_a_fact_integrity_fault_bits",
+                torch.zeros(3, dtype=torch.bool),
+            ),
+            "full_a_fact_integrity_fault_bits",
+        ),
+        (
+            lambda module, result: result[3].__setitem__(
+                "full_a_fact_integrity_fault_bits",
+                torch.zeros(2, dtype=torch.long),
+            ),
+            "full_a_fact_integrity_fault_bits",
         ),
     ),
 )
@@ -626,7 +689,6 @@ def test_prepare_rejects_action_identity_drift(field, value):
         (
             lambda result: (
                 result[3]["full_a_launch_event"].fill_(True),
-                result[3]["full_a_racket_contact_eligible_event"].fill_(True),
             ),
             "event_semantics_fault_rows",
         ),
@@ -729,6 +791,53 @@ def test_prepare_rejects_named_recovery_completion_fault_with_invalid_contact():
         _prepare(ledger, 0, environment_steps=1)
 
 
+@pytest.mark.parametrize("cause_name,bit", (
+    (name, bit) for name, bit in _load().FACT_INTEGRITY_CAUSES
+))
+def test_prepare_rejects_each_named_fact_integrity_cause_before_optimizer(
+    cause_name, bit
+):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module, fact_integrity_bits=[bit, 0, 0], phase=[5, 0, 0]
+    ))
+    with pytest.raises(RuntimeError, match=cause_name):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+def test_prepare_rejects_unknown_fact_integrity_bit_before_optimizer():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    unknown = 1 << module.FACT_INTEGRITY_KNOWN_MASK.bit_length()
+    ledger.ingest(_result(
+        module, fact_integrity_bits=[unknown, 0, 0], phase=[5, 0, 0]
+    ))
+    with pytest.raises(RuntimeError, match="fact_integrity_unknown_bits_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+def test_prepare_counts_each_cause_once_when_packed_bits_are_combined():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    causes = dict(module.FACT_INTEGRITY_CAUSES)
+    ledger.ingest(_result(
+        module,
+        fact_integrity_bits=[
+            causes["fact_integrity_r03_nonfinite_rows"]
+            | causes["fact_integrity_r07_sequence_rows"],
+            causes["fact_integrity_r06_source_invalid_rows"],
+            causes["fact_integrity_r07_nonfinite_rows"],
+        ],
+        phase=[5, 5, 5],
+    ))
+    with pytest.raises(RuntimeError) as caught:
+        _prepare(ledger, 0, environment_steps=1)
+    message = str(caught.value)
+    for name in causes:
+        assert f"{name}=1" in message
+
+
 def test_prepare_accepts_idle_retired_occupancy_and_both_due_verdicts():
     module = _load()
     ledger = _ledger(module, steps=1)
@@ -739,15 +848,202 @@ def test_prepare_accepts_idle_retired_occupancy_and_both_due_verdicts():
             "reveal_rows": [True, False, False],
             "reveal_deferred_rows": [False, True, False],
         },
-        phase=[2, 0, 8],
+        phase=[2, 5, 6],
     ))
     record = _decode(_prepare(ledger, 0, environment_steps=1))
     assert record["extras_counts"]["reveal_due_rows"] == 2
     assert record["extras_counts"]["reveal_rows"] == 1
     assert record["extras_counts"]["reveal_deferred_rows"] == 1
     assert record["phase_counts"] == {
-        "0": 1, "2": 1, "5": 0, "6": 0, "8": 1
+        "0": 0, "2": 1, "5": 1, "6": 1, "8": 0
     }
+
+
+@pytest.mark.parametrize("phase", (0, 8))
+def test_prepare_rejects_defer_when_final_row_is_available(phase):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "reveal_due_rows": [True, False, False],
+            "reveal_deferred_rows": [True, False, False],
+        },
+        phase=[phase, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+def test_prepare_rejects_launch_without_flight_or_launch_phase():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={"launch_rows": [True, False, False]},
+        phase=[0, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+@pytest.mark.parametrize(
+    "event,kwargs",
+    (
+        (
+            {
+                "flight_terminal_rows": [True, False, False],
+                "r06_present_rows": [True, False, False],
+            },
+            {"outcome": [5, 0, 0]},
+        ),
+        ({"r07_present_rows": [True, False, False]}, {}),
+        (
+            {
+                "racket_contact_rows": [True, False, False],
+                "selected_contact_rows": [True, False, False],
+            },
+            {"status": [1, 0, 0]},
+        ),
+        ({"r03_present_rows": [True, False, False]}, {}),
+    ),
+)
+def test_prepare_rejects_fresh_fact_laundered_by_bare_phase8(event, kwargs):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module, event=event, phase=[8, 0, 0], **kwargs
+    ))
+    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+def test_immediate_invalid_launch_is_semantically_legal_but_integrity_rejected():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    source_invalid = dict(module.FACT_INTEGRITY_CAUSES)[
+        "fact_integrity_r06_source_invalid_rows"
+    ]
+    ledger.ingest(_result(
+        module,
+        event={
+            "launch_rows": [True, False, False],
+            "racket_contact_rows": [True, False, False],
+            "invalid_contact_rows": [True, False, False],
+            "flight_terminal_rows": [True, False, False],
+            "r06_present_rows": [True, False, False],
+            "recovery_failure_rows": [True, False, False],
+            "shot_retired_rows": [True, False, False],
+        },
+        status=[5, 0, 0], outcome=[6, 0, 0], phase=[8, 0, 0],
+        fact_integrity_bits=[source_invalid, 0, 0],
+    ))
+    event_fault_index = module._MISC_NAMES.index("event_semantics_fault_rows")
+    assert ledger._misc[event_fault_index].item() == 0
+    with pytest.raises(RuntimeError, match="r06_source_invalid") as caught:
+        _prepare(ledger, 0, environment_steps=1)
+    assert "event_semantics_fault_rows" not in str(caught.value)
+
+
+def test_prepare_rejects_invalid_contact_missing_source_integrity_cause():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "racket_contact_rows": [True, False, False],
+            "invalid_contact_rows": [True, False, False],
+            "flight_terminal_rows": [True, False, False],
+            "r06_present_rows": [True, False, False],
+            "recovery_failure_rows": [True, False, False],
+            "shot_retired_rows": [True, False, False],
+        },
+        status=[5, 0, 0], outcome=[6, 0, 0], phase=[8, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+def test_prepare_rejects_outcome_and_natural_recovery_on_same_transition():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "flight_terminal_rows": [True, False, False],
+            "r06_present_rows": [True, False, False],
+            "recovery_success_rows": [True, False, False],
+            "shot_retired_rows": [True, False, False],
+        },
+        outcome=[5, 0, 0], phase=[8, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+@pytest.mark.parametrize(
+    "event_name,status",
+    (("opposite_contact_rows", 2), ("edge_contact_rows", 3),
+     ("between_contact_rows", 4)),
+)
+def test_prepare_accepts_finite_source_valid_contact_business_results(
+    event_name, status
+):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "racket_contact_rows": [True, False, False],
+            event_name: [True, False, False],
+        },
+        status=[status, 0, 0], phase=[5, 0, 0],
+    ))
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    assert record["extras_counts"][event_name] == 1
+    assert set(record["fact_integrity_counts"].values()) == {0}
+
+
+def test_prepare_rejects_due_opportunity_on_done_before_optimizer():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "reveal_due_rows": [True, False, False],
+            "reveal_rows": [True, False, False],
+            "selected_reset_rows": [True, False, False],
+        },
+        bits=[2, 0, 0],
+        done=[1, 0, 0],
+        generation=[1, 0, 0],
+        phase=[2, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="event_semantics_fault_rows") as caught:
+        _prepare(ledger, 0, environment_steps=1)
+    assert str(caught.value).endswith("event_semantics_fault_rows=1")
+
+
+def test_prepare_accepts_scheduled_due_terminal_overlap_without_public_due():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "scheduled_due_rows": [True, False, False],
+            "due_terminal_overlap_rows": [True, False, False],
+            "selected_reset_rows": [True, False, False],
+        },
+        bits=[2, 0, 0],
+        done=[1, 0, 0],
+        generation=[1, 0, 0],
+        phase=[0, 0, 0],
+    ))
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    assert record["extras_counts"]["scheduled_due_rows"] == 1
+    assert record["extras_counts"]["due_terminal_overlap_rows"] == 1
+    assert record["extras_counts"]["reveal_due_rows"] == 0
+    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
 
 
 def test_prepare_accepts_shot_retirement_without_gym_reset_or_generation_change():
@@ -767,6 +1063,51 @@ def test_prepare_accepts_shot_retirement_without_gym_reset_or_generation_change(
     assert record["selected_reset_rows"] == 0
     assert record["gym_reset_rows"] == 0
     assert record["lifecycle_counts"]["reset_generation_rows"] == 0
+
+
+def test_prepare_accepts_retirement_and_r07_before_same_boundary_reveal():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "scheduled_due_rows": [True, False, False],
+            "reveal_due_rows": [True, False, False],
+            "reveal_rows": [True, False, False],
+            "r07_present_rows": [True, False, False],
+            "r07_eligible_rows": [True, False, False],
+            "recovery_timeout_rows": [True, False, False],
+            "shot_retired_rows": [True, False, False],
+        },
+        phase=[2, 0, 0],
+    ))
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    assert record["extras_counts"]["reveal_rows"] == 1
+    assert record["extras_counts"]["shot_retired_rows"] == 1
+    assert record["extras_counts"]["r07_present_rows"] == 1
+    assert record["phase_counts"] == {
+        "0": 2, "2": 1, "5": 0, "6": 0, "8": 0
+    }
+    assert record["lifecycle_counts"]["reset_generation_rows"] == 0
+    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
+
+
+def test_prepare_rejects_reveal_laundering_r07_without_old_shot_retirement():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "scheduled_due_rows": [True, False, False],
+            "reveal_due_rows": [True, False, False],
+            "reveal_rows": [True, False, False],
+            "r07_present_rows": [True, False, False],
+            "r07_eligible_rows": [True, False, False],
+        },
+        phase=[2, 0, 0],
+    ))
+    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
+        _prepare(ledger, 0, environment_steps=1)
 
 
 def test_prepare_accepts_gym_terminal_recovery_failure_without_shot_retirement():
@@ -789,7 +1130,7 @@ def test_prepare_accepts_gym_terminal_recovery_failure_without_shot_retirement()
     assert record["selected_reset_rows"] == 1
 
 
-def test_prepare_accepts_invalid_contact_failure_as_durable_retirement():
+def test_prepare_rejects_invalid_contact_failure_as_source_integrity_fault():
     module = _load()
     ledger = _ledger(module, steps=1)
     ledger.ingest(_result(
@@ -805,12 +1146,43 @@ def test_prepare_accepts_invalid_contact_failure_as_durable_retirement():
         status=[5, 0, 0],
         outcome=[6, 0, 0],
         phase=[8, 0, 0],
+        fact_integrity_bits=[dict(module.FACT_INTEGRITY_CAUSES)[
+            "fact_integrity_r06_source_invalid_rows"
+        ], 0, 0],
     ))
-    record = _decode(_prepare(ledger, 0, environment_steps=1))
-    assert record["extras_counts"]["invalid_contact_rows"] == 1
-    assert record["extras_counts"]["recovery_failure_rows"] == 1
-    assert record["extras_counts"]["shot_retired_rows"] == 1
-    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
+    with pytest.raises(
+        RuntimeError, match="fact_integrity_r06_source_invalid_rows"
+    ):
+        _prepare(ledger, 0, environment_steps=1)
+
+
+def test_prepare_rejects_invalid_contact_with_gym_reset_before_optimizer():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={
+            "racket_contact_rows": [True, False, False],
+            "invalid_contact_rows": [True, False, False],
+            "flight_terminal_rows": [True, False, False],
+            "r06_present_rows": [True, False, False],
+            "selected_reset_rows": [True, False, False],
+            "recovery_failure_rows": [True, False, False],
+        },
+        bits=[2, 0, 0],
+        done=[1, 0, 0],
+        generation=[1, 0, 0],
+        status=[5, 0, 0],
+        outcome=[6, 0, 0],
+        phase=[6, 0, 0],
+        fact_integrity_bits=[dict(module.FACT_INTEGRITY_CAUSES)[
+            "fact_integrity_r06_source_invalid_rows"
+        ], 0, 0],
+    ))
+    with pytest.raises(
+        RuntimeError, match="fact_integrity_r06_source_invalid_rows"
+    ):
+        _prepare(ledger, 0, environment_steps=1)
 
 
 def test_prepare_counts_joint_safety_telemetry_without_a_done_bit():
@@ -835,7 +1207,7 @@ def test_prepare_counts_joint_safety_telemetry_without_a_done_bit():
     "bits,resolved",
     (
         ([3, 0, 0], [False, False, False]),
-        ([1, 0, 0], [True, False, False]),
+        ([17, 0, 0], [True, False, False]),
     ),
 )
 def test_prepare_rejects_nonpure_timeout_bit(bits, resolved):
@@ -852,6 +1224,24 @@ def test_prepare_rejects_nonpure_timeout_bit(bits, resolved):
     ))
     with pytest.raises(RuntimeError, match="timeout_fault_rows"):
         _prepare(ledger, 0, environment_steps=1)
+
+
+def test_prepare_accepts_resolved_table_only_with_canonical_table_bit():
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(
+        module,
+        event={"selected_reset_rows": [True, False, False]},
+        bits=[16, 0, 0],
+        done=[1, 0, 0],
+        generation=[1, 0, 0],
+        resolved=[True, False, False],
+        phase=[0, 0, 0],
+    ))
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    assert record["terminal_bit_counts"]["robot_hit_table"] == 1
+    assert record["lifecycle_counts"]["resolved_table_rows"] == 1
+    assert record["lifecycle_counts"]["done_explanation_fault_rows"] == 0
 
 
 def test_prepare_accepts_own_table_outcome_only_with_landing_crossing():

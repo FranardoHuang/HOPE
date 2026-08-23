@@ -91,15 +91,15 @@ def _mujoco_module():
 
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
-EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 5, 5, 4
+EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 6, 5, 5
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, 4096,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
     6907688916670928)
 TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
 def _names(raw): return frozenset(raw.split())
-EVENT_KEYS = _names("""reveal_rows reveal_due_rows reveal_deferred_rows launch_rows missed_launch_rows flight_terminal_rows
- shot_retired_rows completed_action_epoch_rows selected_reset_rows racket_contact_eligible_rows racket_contact_rows selected_contact_rows
+EVENT_KEYS = _names("""scheduled_due_rows due_terminal_overlap_rows reveal_rows reveal_due_rows reveal_deferred_rows launch_rows missed_launch_rows flight_terminal_rows
+ shot_retired_rows completed_action_epoch_rows selected_reset_rows racket_contact_rows selected_contact_rows
  opposite_contact_rows edge_contact_rows between_contact_rows invalid_contact_rows actual_hard_edge_rows
  qdes_guard_intervention_rows r03_present_rows
  r03_physically_valid_rows landing_crossing_rows r06_present_rows r06_eligible_rows r06_common_rows
@@ -111,11 +111,15 @@ LIFECYCLE_KEYS = _names("""gym_reset_rows unknown_terminal_rows invalid_done_row
  resolved_table_rows landing_on_opponent_rows landing_opponent_bound_rows classification_unknown_rows event_semantics_fault_rows""")
 FAULT_KEYS = _names("""unknown_terminal_rows invalid_done_rows done_explanation_fault_rows timeout_fault_rows
  selected_reset_fault_rows reset_generation_fault_rows classification_unknown_rows event_semantics_fault_rows""")
+FACT_INTEGRITY_KEYS = _names("""fact_integrity_r03_nonfinite_rows
+ fact_integrity_r06_source_invalid_rows
+ fact_integrity_r07_sequence_rows fact_integrity_r07_nonfinite_rows
+ fact_integrity_unknown_bits_rows""")
 TOP_KEYS = _names("""schema_version record_type diagnostic_unauthorized update_index
  run_identity num_envs num_steps_per_env transitions_delta transitions_cumulative
  environment_steps_delta environment_steps_cumulative storage_finite storage_domains extras_counts
  terminal_bit_counts classification_status_counts outcome_code_counts phase_counts episodes
- rollout_policy_mean_std selected_reset_rows gym_reset_rows lifecycle_counts reward20
+ rollout_policy_mean_std selected_reset_rows gym_reset_rows lifecycle_counts fact_integrity_counts reward20
  action_identity prepared_update_sha256 snapshot optimizer_metrics learning_rate timings""")
 ACK_KEYS = _names("prepared_update_sha256 snapshot optimizer_metrics learning_rate timings")
 REWARD_KEYS = _names("""term_sums actual_reward_sum reward20_finite_rows
@@ -289,17 +293,26 @@ def _validate_record(row, index, run_identity):
         _fail("named event fault counter: " + ",".join(named_faults))
     terms = _count_map(row, "terminal_bit_counts", TERMINAL_KEYS)
     life = _count_map(row, "lifecycle_counts", LIFECYCLE_KEYS)
+    fact_integrity = _count_map(
+        row, "fact_integrity_counts", FACT_INTEGRITY_KEYS
+    )
     classes = _count_map(row, "classification_status_counts", map(str, range(6)))
     outcomes = _count_map(row, "outcome_code_counts", map(str, range(7)))
     phases = _count_map(row, "phase_counts", ("0", "2", "5", "6", "8"))
     if any(life[key] for key in FAULT_KEYS):
         _fail("lifecycle fault counter")
+    if any(fact_integrity.values()):
+        _fail("fact integrity fault counter")
+    # Classifier INVALID_INPUT is an R06 source-integrity incident.  The
+    # pre-optimizer ledger never ACKs such a row, so it cannot appear in a
+    # durable record even though the event remains useful in rejected-run logs.
+    if events["invalid_contact_rows"]:
+        _fail("source-invalid event in durable ACK")
     classified = sum(events[key] for key in (
         "selected_contact_rows", "opposite_contact_rows", "edge_contact_rows",
         "between_contact_rows", "invalid_contact_rows"))
     subset_fault = (
-        events["racket_contact_eligible_rows"] != events["launch_rows"]
-        or classified != events["racket_contact_rows"]
+        classified != events["racket_contact_rows"]
         or tuple(classes[str(i)] for i in range(6)) != (
             TRANSITIONS_PER_UPDATE - classified, events["selected_contact_rows"],
             events["opposite_contact_rows"], events["edge_contact_rows"],
@@ -312,7 +325,23 @@ def _validate_record(row, index, run_identity):
         or events["r07_eligible_rows"] > events["r07_present_rows"]
         or events["reveal_due_rows"] != (
             events["reveal_rows"] + events["reveal_deferred_rows"])
-        or events["shot_retired_rows"] != (
+        or events["scheduled_due_rows"] != (
+            events["reveal_due_rows"]
+            + events["due_terminal_overlap_rows"])
+        or events["due_terminal_overlap_rows"] > events["selected_reset_rows"]
+        # The durable wire contains marginals, not the rowwise intersection of
+        # invalid contact with Gym reset.  The runner has already checked the
+        # exact row relation before optimizer; an independent aggregate
+        # consumer can honestly prove only these tight bounds.  Requiring the
+        # sum would reject a physically possible invalid-contact+reset row,
+        # while adding another same-writer overlap echo would not add truth.
+        or events["shot_retired_rows"] < max(
+            events["recovery_success_rows"]
+            + events["recovery_timeout_rows"],
+            events["invalid_contact_rows"]
+            - events["selected_reset_rows"],
+        )
+        or events["shot_retired_rows"] > (
             events["recovery_success_rows"] + events["recovery_timeout_rows"]
             + events["invalid_contact_rows"])
         or events["completed_action_epoch_rows"] > events["shot_retired_rows"])
@@ -322,10 +351,25 @@ def _validate_record(row, index, run_identity):
             or sum(outcomes.values()) != events["flight_terminal_rows"]
             or sum(phases.values()) != TRANSITIONS_PER_UPDATE):
         _fail("classification/outcome/phase row total")
-    if (events["reveal_rows"] > phases["2"] or events["launch_rows"] > phases["5"]
-            or events["flight_terminal_rows"] > phases["6"] + phases["8"]
-            or events["shot_retired_rows"] > phases["8"]
-            or events["r07_present_rows"] > phases["6"] + phases["8"]):
+    retired_reveal_upper = min(
+        events["reveal_rows"], events["shot_retired_rows"]
+    )
+    if (events["reveal_rows"] > phases["2"]
+            or events["launch_rows"] > (
+                phases["5"] + events["flight_terminal_rows"]
+            )
+            or events["racket_contact_rows"] > (
+                phases["5"] + phases["6"] + events["shot_retired_rows"]
+            )
+            or events["r03_present_rows"] > (
+                phases["5"] + phases["6"] + events["shot_retired_rows"]
+            )
+            or events["flight_terminal_rows"] > (
+                phases["6"] + events["shot_retired_rows"])
+            or events["shot_retired_rows"] > (
+                phases["8"] + retired_reveal_upper)
+            or events["r07_present_rows"] > (
+                phases["6"] + events["shot_retired_rows"])):
         _fail("phase/event conservation")
     if (life["landing_on_opponent_rows"] > life["landing_opponent_bound_rows"]
             or life["landing_opponent_bound_rows"] > events["landing_crossing_rows"]
@@ -342,8 +386,9 @@ def _validate_record(row, index, run_identity):
                 gym + events["invalid_contact_rows"]
             )
             or events["shot_retired_rows"] + selected > TRANSITIONS_PER_UPDATE
-            or gym < max((life["resolved_table_rows"], *terms.values()))
-            or gym > life["resolved_table_rows"] + sum(terms.values())):
+            or life["resolved_table_rows"] > terms["robot_hit_table"]
+            or gym < max(terms.values())
+            or gym > sum(terms.values())):
         _fail("lifecycle cross-check")
     episodes = row["episodes"]
     _keys(episodes, {"completed_count", "return_sum", "length_sum"}, "episodes")
@@ -495,8 +540,17 @@ def _read_rows(path, count, identity):
         if (totals["launch_rows"] > totals["reveal_rows"]
                 or totals["racket_contact_rows"] > totals["launch_rows"]
                 or totals["selected_contact_rows"] > totals["racket_contact_rows"]
+                or totals["r03_present_rows"] > totals["launch_rows"]
                 or totals["flight_terminal_rows"] > totals["launch_rows"]
-                or totals["shot_retired_rows"] > totals["flight_terminal_rows"]):
+                or totals["landing_crossing_rows"] > totals["selected_contact_rows"]
+                or totals["shot_retired_rows"] > totals["launch_rows"]
+                or totals["completed_action_epoch_rows"] > min(
+                    totals["launch_rows"],
+                    totals["selected_contact_rows"],
+                    totals["r03_physically_valid_rows"],
+                    totals["r06_eligible_rows"],
+                    totals["shot_retired_rows"],
+                )):
             _fail("cumulative lifecycle conservation")
         rows.append((row, snapshot))
     return rows, totals, life, terms, outcomes, inventory
@@ -615,6 +669,8 @@ def _completion(path, identity, count, evidence, snapshots):
 def _rate(numerator, denominator):
     if numerator > denominator: _fail("rate numerator exceeds denominator")
     return numerator / denominator if denominator else None
+def _ratio(numerator, denominator):
+    return numerator / denominator if denominator else None
 def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_commit: str,
             expected_run_namespace: str, expected_plant_xml: Path, snapshot_dir: Path,
             completion_json=None) -> dict:
@@ -638,8 +694,10 @@ def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_comm
     recovery = sum(events[key] for key in (
         "recovery_success_rows", "recovery_failure_rows", "recovery_timeout_rows"))
     required = ("reveal_due_rows", "reveal_rows", "launch_rows", "racket_contact_rows",
-                "selected_contact_rows", "r03_present_rows", "flight_terminal_rows",
-                "r06_present_rows", "r07_present_rows", "shot_retired_rows",
+                "selected_contact_rows", "r03_present_rows", "r03_physically_valid_rows",
+                "landing_crossing_rows", "flight_terminal_rows",
+                "r06_present_rows", "r06_eligible_rows", "r06_common_rows",
+                "r07_present_rows", "shot_retired_rows",
                 "completed_action_epoch_rows")
     missing = [key for key in required if events[key] == 0]
     transitions = TRANSITIONS_PER_UPDATE * expected_updates
@@ -655,18 +713,45 @@ def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_comm
         "last_update_index": expected_updates - 1,
         "environment_steps": STEPS_PER_UPDATE * expected_updates, "transitions": transitions,
         "milestones": milestones, "outcome_code_totals": outcomes, "terminal_bit_totals": terms,
+        "table_terminal": {
+            "robot_hit_table_rows": terms["robot_hit_table"],
+            "resolved_rows": life["resolved_table_rows"],
+            "keepout_only_rows": (
+                terms["robot_hit_table"] - life["resolved_table_rows"]
+            ),
+        },
         "action_coverage": {
             "slot0": {"status": "observed", "observed_rows": transitions, "denominator": transitions},
             "forehand": {"status": "observed", "observed_rows": transitions, "denominator": transitions},
             "backhand": {"status": "未测", "observed_rows": 0, "denominator": 0}},
         "opportunity_d05": {"status": "not_produced", "denominator": None},
         "portable_reveal_opportunity": {
+            "scheduled_rows": events["scheduled_due_rows"],
+            "terminal_overlap_rows": events["due_terminal_overlap_rows"],
             "due_rows": events["reveal_due_rows"], "accepted_rows": events["reveal_rows"],
             "deferred_rows": events["reveal_deferred_rows"],
             "accept_rate": _rate(events["reveal_rows"], events["reveal_due_rows"]),
             "defer_rate": _rate(events["reveal_deferred_rows"], events["reveal_due_rows"])},
-        "rates": {"selected_contact_per_eligible": _rate(
-                events["selected_contact_rows"], events["racket_contact_eligible_rows"]),
+        # Contact and exact-R03 publication are distinct clocked marginals, so
+        # neither is a rowwise subset of the other.  Preserve the requested
+        # R03 denominators without turning a legal early-contact prefix into a
+        # false conservation failure or disguising the quotient as a rate.
+        "hit_opportunity_r03": {
+            "present_rows": events["r03_present_rows"],
+            "physically_valid_rows": events["r03_physically_valid_rows"],
+            "selected_contact_rows": events["selected_contact_rows"],
+            "selected_contact_to_physically_valid_ratio": _ratio(
+                events["selected_contact_rows"],
+                events["r03_physically_valid_rows"],
+            ),
+        },
+        "rates": {
+            "selected_contact_per_launch": _rate(
+                events["selected_contact_rows"], events["launch_rows"]),
+            "r03_physically_valid_per_present": _rate(
+                events["r03_physically_valid_rows"], events["r03_present_rows"]),
+            "r06_common_per_eligible": _rate(
+                events["r06_common_rows"], events["r06_eligible_rows"]),
             "opponent_landing_per_crossing": _rate(
                 life["landing_on_opponent_rows"], events["landing_crossing_rows"]),
             "recovery_success_per_terminal": _rate(events["recovery_success_rows"], recovery)},

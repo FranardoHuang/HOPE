@@ -2789,7 +2789,7 @@ ACTION_BALL_FULL_MDP_TERMINATION_MANAGER_ORDER = (
 
 @configclass
 class HOPEActionBallFullMdpTerminationsCfg:
-    """Fresh publisher plus real episode timeout and absolute safety exits."""
+    """Fresh publisher plus real episode timeout and plant terminal exits."""
 
     # This term publishes R03/R07 through the exact top reward graph and never
     # requests a timeout.  It must precede every RewardTerm in the same control
@@ -2798,6 +2798,9 @@ class HOPEActionBallFullMdpTerminationsCfg:
         func=mdp.fresh_full_mdp_pre_reward_done_term,
         time_out=False,
     )
+    # The manager retains this raw horizon fact for telemetry.  The fresh env
+    # removes simultaneous plant terminals before exposing timeout to RSL or
+    # writing the canonical reset-reason bit.
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     base_fell_tilt = DoneTerm(
         func=mdp.bad_orientation,

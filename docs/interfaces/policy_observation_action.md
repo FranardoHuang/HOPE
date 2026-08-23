@@ -408,7 +408,7 @@ The multiplier column below means `network_value = raw_physical_value * multipli
 | `[138:169]` | `teacher_joint_vel` | 31 | current teacher joint velocity | `0.05` |
 | `[169:172]` | `motion_anchor_pos_b` | 3 | teacher anchor position relative to the current robot anchor, current anchor frame | `10/3` |
 | `[172:178]` | `motion_anchor_ori_b6` | 6 | teacher-versus-current anchor orientation residual, continuous 6-D form | `1` |
-| `[178:183]` | `motion_phase_one_hot` | 5 | existing Motion phase (`pre-reveal hidden/active opportunity/post-deadline suffix/recovery hidden/ready hold`) | `1` |
+| `[178:183]` | `motion_phase_one_hot` | 5 | Motion-owned playback phase (`prepare visible/swing/follow through/recover hidden/ready hold`) | `1` |
 | `[183:186]` | `racket_target_pos_error_heading` | 3 | actor-visible target position minus achieved racket-site position, heading frame | `5` |
 | `[186:189]` | `racket_target_vel_error_heading` | 3 | actor-visible target point velocity minus achieved racket-site velocity, heading frame | `1` |
 | `[189:192]` | `racket_target_normal_error_heading` | 3 | actor-visible raw A/+Y target normal minus achieved raw mount +Y normal, heading frame；per-action mount sign只选择胶面/contact identity，不翻转该残差 | `2` |

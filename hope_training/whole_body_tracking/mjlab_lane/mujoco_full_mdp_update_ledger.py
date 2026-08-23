@@ -4,7 +4,7 @@ import copy
 from dataclasses import dataclass
 import hashlib, importlib.util, json, math, os, re, sys
 from pathlib import Path
-SCHEMA_VERSION, REWARD_TERM_COUNT = 5, 20
+SCHEMA_VERSION, REWARD_TERM_COUNT = 6, 20
 
 EXACT_RUNTIME_STACK = {
     "schema_version": 1,
@@ -74,10 +74,11 @@ EXACT_TERMINATION_BITS = {
 }
 EXACT_PHASE_CODES = (0, 2, 5, 6, 8)
 EVENT_NAMES = (
+    "scheduled_due_rows", "due_terminal_overlap_rows",
     "reveal_rows", "reveal_due_rows", "reveal_deferred_rows", "launch_rows",
     "missed_launch_rows", "flight_terminal_rows",
     "shot_retired_rows", "completed_action_epoch_rows", "selected_reset_rows",
-    "racket_contact_eligible_rows", "racket_contact_rows", "selected_contact_rows",
+    "racket_contact_rows", "selected_contact_rows",
     "opposite_contact_rows", "edge_contact_rows", "between_contact_rows", "invalid_contact_rows",
     "actual_hard_edge_rows", "qdes_guard_intervention_rows",
     "r03_present_rows", "r03_physically_valid_rows", "landing_crossing_rows",
@@ -93,6 +94,16 @@ STORAGE_FLOAT_WIDTHS = (
     ("advantages", 1),
 )
 STORAGE_DOMAIN_NAMES = ("dones_binary", "sigma_positive")
+FACT_INTEGRITY_CAUSES = (
+    ("fact_integrity_r03_nonfinite_rows", 1 << 0),
+    ("fact_integrity_r06_source_invalid_rows", 1 << 1),
+    ("fact_integrity_r07_sequence_rows", 1 << 2),
+    ("fact_integrity_r07_nonfinite_rows", 1 << 3),
+)
+FACT_INTEGRITY_COUNT_NAMES = tuple(
+    name for name, _bit in FACT_INTEGRITY_CAUSES
+) + ("fact_integrity_unknown_bits_rows",)
+FACT_INTEGRITY_KNOWN_MASK = sum(bit for _name, bit in FACT_INTEGRITY_CAUSES)
 _MISC_NAMES = (
     "gym_reset_rows", "unknown_terminal_rows", "invalid_done_rows",
     "done_explanation_fault_rows", "time_out_rows", "timeout_fault_rows",
@@ -106,6 +117,7 @@ _MISC_NAMES = (
     "uid_rows", "mount_sign_rows", "identity_rows",
     "outcome_unknown_rows", "outcome_event_code_fault_rows",
     "phase_unknown_rows",
+    *FACT_INTEGRITY_COUNT_NAMES,
 )
 _ZERO_FAULTS = (
     "unknown_terminal_rows", "invalid_done_rows", "done_explanation_fault_rows",
@@ -114,6 +126,7 @@ _ZERO_FAULTS = (
     "conservation_fault_rows", "event_semantics_fault_rows",
     "outcome_unknown_rows", "outcome_event_code_fault_rows",
     "phase_unknown_rows",
+    *FACT_INTEGRITY_COUNT_NAMES,
 )
 @dataclass(frozen=True)
 class PreparedUpdate:
@@ -213,6 +226,7 @@ class FullMdpUpdateLedger:
         self.num_envs, self.num_steps = num_envs, num_steps_per_env
         self.term_bits, self.known_term_mask = bits, sum(bit for _name, bit in bits)
         self.time_out_bit = termination_bits["time_out"]
+        self.table_bit = termination_bits["robot_hit_table"]
         self.action_uid, self.mount_normal_sign = action_uid, mount_normal_sign
         self.family = family
         self.run_identity = {
@@ -273,6 +287,13 @@ class FullMdpUpdateLedger:
         phase = self._vector(extras, "full_a_phase_before_reset", torch.long)
         landing = self._vector(extras, "full_a_landing_on_opponent", torch.bool)
         opponent_bound = self._vector(extras, "full_a_landing_opponent_bound", torch.bool)
+        fact_integrity_bits = self._vector(
+            extras, "full_a_fact_integrity_fault_bits", torch.long
+        )
+        fact_integrity = {
+            name: torch.bitwise_and(fact_integrity_bits, bit).ne(0)
+            for name, bit in FACT_INTEGRITY_CAUSES
+        }
         terms = extras.get("reward_terms")
         if not (isinstance(terms, torch.Tensor) and torch.is_floating_point(terms)
                 and tuple(terms.shape) == (self.num_envs, REWARD_TERM_COUNT)
@@ -297,8 +318,10 @@ class FullMdpUpdateLedger:
         generation_delta = generation - self._reset_generation
         terminal_present = bits.ne(0)
         timeout_bit = torch.bitwise_and(bits, self.time_out_bit).ne(0)
+        table_bit = torch.bitwise_and(bits, self.table_bit).ne(0)
         timeout_fault = time_outs.ne(timeout_bit) | (
-            timeout_bit & (bits.ne(self.time_out_bit) | resolved))
+            timeout_bit & bits.ne(self.time_out_bit)
+        )
         identity = slot.eq(0) & uid.eq(self.action_uid) & sign.eq(self.mount_normal_sign)
         classified = torch.stack(
             [event[name] for name in (
@@ -325,12 +348,23 @@ class FullMdpUpdateLedger:
         completion_fault = event["recovery_completion_fault_rows"]
         phase2, phase5, phase6, phase8 = (phase.eq(code) for code in (2, 5, 6, 8))
         outcome_event = event["flight_terminal_rows"]
+        shot_retired = event["shot_retired_rows"]
+        retired_reveal = (
+            shot_retired & event["reveal_rows"] & phase2
+        )
+        post_contact_phase = phase5 | phase6 | shot_retired
+        outcome_phase = phase6 | shot_retired
         legal_outcome = outcome.eq(3)
         own_table_outcome = outcome.eq(4)
         event_semantics_fault = (
             classified_count.ne(event["racket_contact_rows"].to(torch.long))
             | status.ne(expected_status)
-            | event["racket_contact_eligible_rows"].ne(event["launch_rows"])
+            | (
+                event["invalid_contact_rows"]
+                & ~fact_integrity[
+                    "fact_integrity_r06_source_invalid_rows"
+                ]
+            )
             | (event["r03_physically_valid_rows"] & ~event["r03_present_rows"])
             | (event["landing_crossing_rows"] & ~event["flight_terminal_rows"])
             | event["r06_present_rows"].ne(event["flight_terminal_rows"])
@@ -341,15 +375,41 @@ class FullMdpUpdateLedger:
             | event["reveal_due_rows"].ne(
                 event["reveal_rows"] | event["reveal_deferred_rows"]
             )
+            | event["scheduled_due_rows"].ne(
+                event["reveal_due_rows"]
+                | event["due_terminal_overlap_rows"]
+            )
+            | event["due_terminal_overlap_rows"].ne(
+                event["scheduled_due_rows"] & done
+            )
+            | (event["reveal_due_rows"] & done)
             | (event["reveal_rows"] & event["reveal_deferred_rows"])
             | (event["reveal_rows"] & ~phase2)
-            | (event["launch_rows"] & ~phase5)
-            | (outcome_event & ~(phase6 | phase8))
-            | (event["r06_present_rows"] & ~(phase6 | phase8))
-            | (event["r07_present_rows"] & ~(phase6 | phase8))
+            | (event["reveal_deferred_rows"] & (phase.eq(0) | phase8))
+            | (event["launch_rows"] & ~(phase5 | outcome_event))
+            | (
+                (event["racket_contact_rows"] | event["r03_present_rows"])
+                & ~post_contact_phase
+            )
+            # The phase field is the final post-boundary phase.  A retiring
+            # old shot may publish its terminal/R06/R07 marginals and be
+            # atomically replaced by a new reveal on the same surviving row.
+            | (outcome_event & ~outcome_phase)
+            | (
+                event["r06_present_rows"]
+                & ~outcome_phase
+            )
+            | (
+                event["r07_present_rows"]
+                & ~outcome_phase
+            )
             | event["shot_retired_rows"].ne(
                 natural_recovery
-                | (event["invalid_contact_rows"] & ~completion_fault)
+                | (
+                    event["invalid_contact_rows"]
+                    & ~completion_fault
+                    & ~done
+                )
             )
             | (event["completed_action_epoch_rows"] & ~event["shot_retired_rows"])
             | (
@@ -357,7 +417,11 @@ class FullMdpUpdateLedger:
                 & ~(done | event["invalid_contact_rows"])
             )
             | (natural_recovery & done)
-            | (event["shot_retired_rows"] & (~phase8 | done))
+            | (outcome_event & natural_recovery)
+            | (
+                event["shot_retired_rows"]
+                & (~(phase8 | retired_reveal) | done)
+            )
             | selected_reset.ne(done)
             | (outcome_event & outcome.eq(0))
             | (outcome_event & legal_outcome & ~(landing & opponent_bound))
@@ -379,7 +443,7 @@ class FullMdpUpdateLedger:
         self._misc += torch.stack(
             (
                 done, torch.bitwise_and(bits, ~self.known_term_mask).ne(0),
-                invalid_done, done.ne(terminal_present | resolved),
+                invalid_done, done.ne(terminal_present) | (resolved & ~table_bit),
                 time_outs, timeout_fault, selected_reset.ne(done),
                 generation_delta, generation_delta.ne(done.to(torch.long)),
                 resolved, landing & landing_event, opponent_bound & landing_event,
@@ -390,6 +454,13 @@ class FullMdpUpdateLedger:
                 ~torch.stack(
                     [phase.eq(index) for index in EXACT_PHASE_CODES]
                 ).any(dim=0),
+                *(
+                    fact_integrity[name]
+                    for name, _bit in FACT_INTEGRITY_CAUSES
+                ),
+                torch.bitwise_and(
+                    fact_integrity_bits, ~FACT_INTEGRITY_KNOWN_MASK
+                ).ne(0),
             )
         ).sum(1, dtype=torch.float64)
         self._reward += torch.where(torch.isfinite(terms), terms,
@@ -506,8 +577,14 @@ class FullMdpUpdateLedger:
             "reward20_finite_rows", "actual_reward_finite_rows",
             "slot0_rows", "uid_rows", "identity_rows",
         )):
-            raise RuntimeError("FullMDP ledger rollout evidence differs: "
-                               + ",".join(bad + bad_events or ["identity_or_finite_rows"]))
+            details = (
+                [f"{name}={misc[name]}" for name in bad]
+                + [f"{name}={events[name]}" for name in bad_events]
+            )
+            raise RuntimeError(
+                "FullMDP ledger rollout evidence differs: "
+                + ",".join(details or ["identity_or_finite_rows"])
+            )
         family_counts = {"forehand": 0, "backhand": 0}
         family_counts[self.family] = misc["identity_rows"]
         record = {
@@ -535,6 +612,9 @@ class FullMdpUpdateLedger:
             "rollout_policy_mean_std": float(policy_mean_std),
             "selected_reset_rows": events["selected_reset_rows"], "gym_reset_rows": misc["gym_reset_rows"],
             "lifecycle_counts": {name: misc[name] for name in _MISC_NAMES[:14]},
+            "fact_integrity_counts": {
+                name: misc[name] for name in FACT_INTEGRITY_COUNT_NAMES
+            },
             "reward20": {
                 "term_sums": reward_values,
                 "actual_reward_sum": actual_sum,

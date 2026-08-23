@@ -1198,7 +1198,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 self._leave()
 
     def after_command_compute_before_observation(self, control_step: int) -> None:
-        """Run conditional D05 settlement and arm real R03 before physics."""
+        """Settle conditional D05 and arm R03 before the returned observation."""
 
         with self._lock:
             self._enter("after command compute")

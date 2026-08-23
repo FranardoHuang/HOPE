@@ -1201,6 +1201,8 @@ def _reset_event_env():
     )
     env.termination_manager = _TerminationManager([], 2)
     env.termination_manager._term_dones[1, 1] = True
+    env.reset_terminated = torch.tensor([False, True], dtype=torch.bool)
+    env.reset_time_outs = torch.zeros(2, dtype=torch.bool)
     owner, components, _physical = _install_exact_lean_graph(env, [])
     env._full_mdp_runtime_owner = owner
     return env, components

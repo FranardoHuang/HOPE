@@ -411,6 +411,11 @@ def _env(
         torch.tensor(reset_mask, dtype=torch.bool),
         reason_masks=termination_reason_masks,
     )
+    env.reset_terminated = env.termination_manager.terminated.clone()
+    env.reset_time_outs = torch.logical_and(
+        env.termination_manager.time_outs,
+        ~env.reset_terminated,
+    )
     env.reward_manager = _PlainManager(trace, "reward")
     env.observation_manager = _PlainManager(
         trace,
@@ -624,20 +629,73 @@ def test_selected_reset_uses_exact_num_rerenders_without_write_or_forward():
     assert len(reset_renders) == 2
 
 
-def test_selected_reset_facts_preserve_overlapping_fixed_reasons_and_clocks():
+@pytest.mark.parametrize(
+    ("plant_reason_masks", "expected_reason_bits"),
+    (
+        ({"base_fell_tilt": torch.tensor([False, True])}, 2),
+        ({"joint_qdes_forbidden": torch.tensor([False, True])}, 8),
+        ({"robot_hit_table": torch.tensor([False, True])}, 16),
+        (
+            {
+                "joint_qdes_forbidden": torch.tensor([False, True]),
+                "robot_hit_table": torch.tensor([False, True]),
+            },
+            24,
+        ),
+    ),
+)
+def test_horizon_overlap_with_plant_terminal_is_never_rsl_timeout(
+    plant_reason_masks, expected_reason_bits
+):
+    # Row 1 starts at max_episode_length - 1 and reaches the horizon on this
+    # transition.  A plant terminal on the same row must own the learning done;
+    # row 0 is the healthy peer and must remain unselected with its generation.
+    reason_masks = {
+        "time_out": torch.tensor([False, True]),
+        **plant_reason_masks,
+    }
+    env, owner, *_ = _env(
+        reset_mask=(False, True),
+        decimation=1,
+        termination_reason_masks=reason_masks,
+    )
+    env.episode_length_buf.copy_(torch.tensor([9, 19], dtype=torch.int64))
+    result = env.step(torch.zeros(2, 4))
+
+    assert result[2].tolist() == [False, True]
+    assert result[3].tolist() == [False, False]
+    assert env.termination_manager.time_outs.tolist() == [False, True]
+    assert torch.equal(
+        owner.reset_facts[0],
+        torch.tensor(
+            [[-1, -1, 0], [1, 20, expected_reason_bits]],
+            dtype=torch.int64,
+        ),
+    )
+    assert env._action_ball_full_mdp_reset_generation.tolist() == [7, 8]
+    assert env.episode_length_buf.tolist() == [10, 0]
+
+
+def test_pure_horizon_transition_remains_rsl_timeout_and_reason_owner():
     env, owner, *_ = _env(
         reset_mask=(False, True),
         decimation=1,
         termination_reason_masks={
-            "joint_qdes_forbidden": torch.tensor([False, True]),
-            "robot_hit_table": torch.tensor([False, True]),
+            "time_out": torch.tensor([False, True]),
         },
     )
-    env.step(torch.zeros(2, 4))
+    env.episode_length_buf.copy_(torch.tensor([9, 19], dtype=torch.int64))
+    result = env.step(torch.zeros(2, 4))
+
+    assert result[2].tolist() == [False, False]
+    assert result[3].tolist() == [False, True]
+    assert env.termination_manager.time_outs.tolist() == [False, True]
     assert torch.equal(
         owner.reset_facts[0],
-        torch.tensor([[-1, -1, 0], [1, 20, 24]], dtype=torch.int64),
+        torch.tensor([[-1, -1, 0], [1, 20, 1]], dtype=torch.int64),
     )
+    assert env._action_ball_full_mdp_reset_generation.tolist() == [7, 8]
+    assert env.episode_length_buf.tolist() == [10, 0]
 
 
 def test_missing_owner_first_operation_fails_before_action_or_sim():

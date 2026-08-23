@@ -13,87 +13,93 @@
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 [`origin/main` 的 `NOW`](../../NOW.md)。
 
-> **阅读规则：**当前执行合同只认紧接下来的2026-08-23 correction、adoption table与
-> [双后端TODO §0.4](../../operations/action_ball_dual_backend_longrun_todo_20260819.md)。后文按日期保留的
-> 运行、229/399、211/319、H24、`history=8`对照和旧gate结论都是可追溯历史；除非被当前块明确引用，
-> 不得反向覆盖现役203/219、H48或三段reference合同。
+> **阅读规则：**当前执行合同只认本节、紧随其后的adoption table与
+> [双后端TODO §0.4](../../operations/action_ball_dual_backend_longrun_todo_20260819.md)。从
+> “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
+> 都是可追溯历史；除非本节明确引用，不得反向覆盖现役`203/219`、H48、三段reference或6/5/5 wire。
 
-> **2026-08-23 current correction（supersede紧随其后的2026-08-21顶部块；历史章节不改写）：**现役
-> fixed slot0课程只有四个episode内可完成的due `295/588/881/1174`；`1467`是第四拍retirement boundary，
-> 不是第五次机会。reference不能再用“hidden都一样”概括：只在首次ACCEPT前由reset-ready joint/body共同
-> 支撑balance；D05 ACCEPT同tick原子安装selected measured frame0 joint/body；后续recovery/ready使用上一条
-> completed-action frame0。V5发现并修正的旧Isaac generic-`in_hold`选择器回归属于实现偏移，不是新增
-> offset、课程或actor Observation的理由。
-> official racket site到selected-face球心包含精确一个球半径；该位置结论只覆盖current slot0。N73的
-> negative-face normal必须把raw mount `+Y` mimic/R03与selected physical face符号分开，V5已加反例修复，
-> 不是新Observation或Gate。
->
-> 当前学习真源为H48、GAE `lambda=.98`、entropy `0`、fresh learned `log_std`/init sigma `.02`；actor/critic
-> 是semantic `203/219`；现役`history_length=0`，对照系统的`history=8`仅为deferred候选而非遗漏。
-> actor分别编码Epoch业务carry-state与Motion teacher/reference状态，不能把两种phase硬绑成一个顺序。
-> actor字段属于deployment-intended因果量，但真实
-> table/root pose、OptiTrack/IMU外参、同步、marker→COM velocity和stale/dropout producer仍由G07闭合，不能
-> 把sim truth写成已部署。
->
-> clean V4 `9e26afd3342e1da8643b225c987d4a3c91a3ff2f`的Isaac最终连续ACK `0..748`；update749在optimizer
-> 前报`epoch drain decoded a terminal overflow`后停止。V4只存generic bool，不能唯一恢复row/cause，也不能
-> 把它误写成EPA容量故障。2026-08-23T11:39:47Z的MuJoCo只读快照为ACK `0..3995`、
-> `785,645,568` transitions，进程继续存活；recent20/50 episode length=`375.28/375.70`，证明balance可学且
-> 后续曝光自然打开，但recent20的`10,450/10,450` completed episode仍全由tilt/table闭合，不能称安全存活
-> 毕业。累计reveal=`1,219,808`、launch/contact-eligible=`265,378/265,378`、R03 valid=`63,684`后
-> racket/selected contact仍为0，因此已明确卡在mimic→hit；post-hit landing/recovery仍`未测`。
->
-> V5仍只是`diagnostic_unauthorized` branch candidate：修合法payment-before-close、launch-before-playback、
-> exact publication join；ActionEpoch row-fault注册表由源码动态核验为33项：既有bit0--26共27项，另有
-> Physical producer/nonfinite与R06 owner producer/overflow/nonfinite/other六个稀疏ingress bit41--46；
-> owner fault在业务写前latch，raw journal仍保留；ActionEpoch全文件=`81 passed,7 skipped`，真实
-> selected-rubber binding相邻反例=`3 passed`。另有不混号的R07 local 17项。热路候选保持H48/
-> `lambda=.98`并做可证伪的数据流减法。MuJoCo运行身份由
-> 单一`runtime_stack`（EPA48、RSL3.1.2 wheel、MJLab1.5.3选定树）与正交`plant_model`组成；runner保存live
-> augmented `runtime.mjb`，独立consumer在ACK前复验。exact Pod、formal MJB registration receipt、fresh双后端
-> ACK与profiler-off wall尚未闭合，所以这段不授权promotion、export、部署或真机。
->
-> 另一个P0是direct Physical已发布typed shot key/publication，scene/postphysics却仍读legacy
-> `outcome_sha/generation/observation`，fresh direct中的零digest与停滞ordinal会破坏identity/continuity。
-> V5 direct只认typed 8-field key+publication，并由Physical推进substep ordinal与previous/current center；
-> legacy API保持独立。legacy digest=`0/23`参数化三substep反例=`2 passed`，九文件host联合=
-> `203 passed,17 skipped`；17项skip需要CUDA/SimulationApp，Pod exact Isaac/CUDA N=2仍未测。
->
-> 本轮性能只采用两项有直接数据流证据的减法：MuJoCo contact扫描从`41→21/control`、H48从
-> `1968→1008/update`（host联合=`335 passed,10 skipped`；CPU microbenchmark ratio `.647`不代签GPU wall），
-> 以及Isaac热consumer读取ActionEpoch窄投影而非dense `current()`；N4096静态payload约
-> `5.953→0.316 MiB/call`（降`94.7%`），cached/dense-empty/retained每control调用`0/4/8`次；六文件相邻=
-> `147 passed,16 skipped,0 failed`，真实wall仍待Pod profiler。另外修正Physical/R06 fault写journal却不进
-> 唯一pre-optimizer verdict、selected-rubber异步self-assert、Motion reset-ready exact-resume与legacy Reward
-> eager import；Motion top schema 5保持、child 6→7，六关键文件逐fresh=`127 passed`、11文件联合=
-> `222 passed,1 skipped`；Reward lazy-import已过flags `427 passed`与train wiring+flags `562 passed`。
-> per-ordinal Reward snapshots、每control至少3次D2H、canonical/flat双import和三层stamp/receipt
-> echo仍待Pod matched-state profile，不写成已完成。
-> MuJoCo plant发布在env构造后复验clean source，并要求private-stage receipt exact匹配expected MJB后才
-> hardlink；漂移时`runtime.mjb`不存在且stage无残留。
-> plant contract=`13 passed`，runner identity=`12 passed,39 deselected`，但formal N1/N2/CUDA仍未测。
-> 本轮40个受影响test文件全部逐fresh Python=`1724 passed,66 skipped,0 failed`，修改/新增Python
-> `py_compile`与whole-diff check通过；66项skip不代签exact Pod/CUDA、fixed-tape、launcher或真实wall。
->
-> clean `67612c41…`的独立Pod checkout随后得到CPU合同`457 passed,6 skipped,0 failed`与双launcher
-> dry-run；首轮EPA48 GPU direct五项为`4 passed,1 failed`。唯一失败的CUDA test仍断言旧
-> `ACCEPT == R07 ready`并注入tests-only ready bit；production与同文件host mutation的现役合同均为
-> “存活到due就曝光，只有busy lifecycle才逐row DEFER”，所以修复是删除旧oracle/注入，不是把R07重新变成
-> admission Gate。并行审计还让Mu child直接消费已核GPU UUID并继承同一GPU flock，删除numeric enumeration
-> 与parent-only lifetime两项假设；host launcher=`21 passed`、transition=`62 passed,6 skipped`。这些改动
-> 必须以新的clean commit在Pod重跑GPU direct/RSL update与fresh ACK，当前仍不授权发车结论。
+## 2026-08-23 current correction
+
+**旧V4只读事实，不迁移为V5验收：**MuJoCo临时固定前缀为durable ACK `0..4509`、
+`886,702,080` transitions；recent20 wall mean/median=`14.299/14.301 s/H48`、episode均长
+`378.583 tick`。recent20 public due/reveal/defer=`10,487/10,487/0`、launch=`6,809`、R03
+physically-valid=`2,176`，racket contact、selected contact与landing均为0；累计
+reveal/launch/R03-valid=`1,488,260/426,606/112,669`，contact仍为0。停止旧run后的final freeze会
+**替换**这组前缀，不追加另一段流水账。旧schema-4的`racket_contact_eligible`与launch逐行exact相等，
+只是已删除的冗余别名，从来不是contact opportunity或命中分母。
+
+V4的episode已稳定越过first due 295，只证明survival-to-due可达且task/mimic/hit输入会自然
+打开，不证明balance已基本形成；但reference、
+typed identity与transition chronology实现错误污染了该lineage。零contact只能裁决**旧实现**
+mimic→hit handoff失败，不能裁决自然课程设计；corrected V5尚未训练，hit后的landing继续`未测`。
+课程保持balance→mimic→hit→landing：上一阶段开始成功时，下一阶段分母应已自然出现，不增硬Stage、
+balance Reward或R07 admission。fixed slot0可完成due仍是`295/588/881/1174`；`1467`是第四球的
+retirement boundary，不是第五次机会。
+
+**Reference与Observation：**首次ACCEPT前joint/body共同使用reset-ready；post-transition ACCEPT把
+selected measured action frame0原子安装到返回的`obs_{t+1}`，第一笔task-conditioned action/reward从
+下一transition开始；recovery/ready使用completed-action frame0。V5修的是与该合同相反的旧selector回归，
+不是新增offset。actor/critic保持semantic `203/219`，`history_length=0`；无
+same-observation/different-required-action alias反例，不新增237-D、history、账本或不可部署oracle。
+H48、GAE `lambda=.98`、E5/MB8、entropy 0、fresh sigma `.02`保持；约“6秒”只是继续大砍迭代时间的
+方向目标，不是formal、launch或safety Gate。
+actor已有Motion phase（`prepare_visible/swing/follow_through/recover_hidden/ready_hold`）；当前缺的
+是独立durable playback denominator，故playback成功继续`未测`，不得由reveal代写。
+
+**唯一transition顺序：**freeze scheduled due → 结算既有launch/park → physics/terminal/facts/reward
+继续归因给产生`action_t`的`obs_t` teacher → 结算outcome/recovery → 只对survivor分类public due →
+安装frame0到`obs_{t+1}`。只有结算后仍busy才`DEFER`；起始busy但同边界自然`RETIRED`可立即
+`ACCEPT`；due与terminal重叠不public。launch与outcome同tick合法，outcome与natural recovery互斥。
+Epoch业务phase与Motion teacher/reference phase是两个独立clock，不要求伪同步。
+
+**Fault namespace不混计：**
+
+- Isaac共享ActionEpoch owner有36项single-bit row fault：bit0--26为27项既有原因，R03
+  identity/stale/nonfinite为bit27--29，Physical/R06六项为bit41--46。R07 local ledger另属本地编号。
+- MuJoCo每control只latch本transition的四项packed fact-integrity cause：R03 nonfinite、R06
+  source-invalid、R07 sequence、R07 nonfinite。R03 stale因per-tick invocation与same-step consume按构造
+  不可达，删除而不保留恒0 Gate。四项只进入既有唯一pre-optimizer drain，不加第二owner或逐step D2H。
+
+**Evidence wire与诚实分母：**最终版本固定为`evidence/update schema=6`、`completion schema=5`、
+`summary schema=5`；上一个已提交版本是`5/5/4`，本轮未发布中间版不再二次升号。
+`scheduled_due_rows`表示schedule在本transition到达，`due_terminal_overlap_rows`表示due+terminal且
+actor永不可见，`reveal_due_rows`只表示surviving public due。consumer只验fresh prefix上的可证明边界：
+`launch<=reveal`、`racket contact<=launch`、`selected contact<=racket contact`、
+`R03 present<=launch`、`flight outcome<=launch`、`landing crossing<=selected contact`、
+`shot retired<=launch`。`invalid_contact + done`是真reset而非retire，只见marginal的consumer不臆造
+same-writer overlap。R03 exact-strike与contact使用不同clock，`selected_contact/R03_valid`只作描述比；
+selected-contact的正式分母是launch。`r06_common_per_eligible`才是closed task-landing成功率；
+`opponent_landing_per_crossing`只是在crossing条件下的比例，不得代称总成功率，也不新增event或Gate。
+
+**Terminal与authority：**`pure_timeout = raw_timeout & ~plant_terminal`；只有pure timeout获得RSL
+bootstrap与canonical timeout reason，horizon与tilt/table/qdes重叠不bootstrap。Mu
+`robot_hit_table` bit覆盖keepout或resolved-table，resolved只是子fact。stdout payload可在transaction前
+序列化，但真实提交顺序是optimizer → WAL/fsync → owner ACK → EPOCH_ACK/fsync；其后stdout marker仅
+best effort。short write、`BrokenPipe`或flush失败只发structured stderr warning，不能poison或撤销已提交
+训练。
+
+按`HANDOFF_TO_CODEX_20260808.md` §3，只保留可由独立反例击穿的plant/finite/full-key/optimizer/
+durable WAL+ACK边界；task success、R07 ready、stdout与same-writer echo不是安全Gate。结构逐步收敛为
+`PlantFacts → ActionBallState transition → StepTelemetry`，backend physics与WAL/ACK留在边界，每次抽取
+做fixed-tape parity；不以一次巨型重写制造新的多真源。
+
+最终clean commit SHA、final host exact counts、exact Pod CPU/CUDA与EPA48/RSL3、双launcher dry-run、
+fixed-tape、fresh V5 Isaac/MuJoCo 1/5 ACK、profiler-off matched-strata wall、contact/landing、
+12500 completion与transfer/physics parity全部**pending**。旧a103与V4的Pod/ACK证据不代签corrected V5，
+本节不授权发车、resume、promotion、export、部署或真机。
 
 ### 2026-08-23 current adoption table
 
 | 项 | 当前裁决 | 原因 |
 | --- | --- | --- |
-| learner | 采用H48、GAE `lambda=.98`、E5/MB8、entropy 0、fresh sigma `.02` | H48是学习取舍；吞吐必须另用profiler-off wall验收 |
-| actor/critic | 保持semantic `203/219`，拒绝237-D | 203-D已含建议的8维`base_position_table(3)+base_heading_table_xy(2)+base_com_lin_vel_heading(3)`；无新观测缺口证据 |
-| history | 当前`history_length=0`，`history=8`延后 | 未发现alias反例，不先扩大部署和normalizer合同 |
-| balance | 不加Reward、不加Stage | V4 episode已穿过first due 295且recent50均长`375.70`，reveal随存活自然增加；balance可学但尚非安全存活毕业 |
-| reference | 修既有三段selector | 首次ACCEPT前reset-ready；ACCEPT同tick切到selected measured frame0；recovery为completed-action frame0 |
-| lifecycle | Epoch与Motion phase解耦；typed identity与具名fault保留 | 两种phase目的不同；只拦真实跨owner错配，不做same-writer自证 |
-| safety/evidence | 保留finite、真实plant terminal、full-key/generation、optimizer与durable ACK边界；拒绝task成功、R07 ready、每update有事件和same-writer echo作为Gate | 前者可由独立反例击穿；后者是学习结果或同源自证，不是安全事实 |
+| learner | 采用H48、GAE `lambda=.98`、E5/MB8、entropy 0、fresh sigma `.02` | H48是学习取舍；约6秒只是速度方向，须另用profiler-off matched wall验收 |
+| actor/critic | 保持semantic `203/219`与`history_length=0` | 已含必要root/task/teacher/clock；无alias反例不扩大部署与normalizer合同 |
+| curriculum | 保持balance→mimic→hit→landing自然交接 | 上一阶段开始成功即应开放下一阶段分母；不增加硬Stage、balance Reward或R07 admission |
+| reference | 采用reset-ready → post-transition selected frame0 → completed-action frame0三段selector | 使`action_t`、reward与返回Observation的因果一致；不新增offset |
+| lifecycle | 采用post-settlement due分类、双phase解耦 | 只让仍busy row DEFER；terminal overlap不public；保留合法same-tick launch/outcome |
+| fault/evidence | Isaac36与Mu4分开，统一进入各自唯一pre-optimizer drain；wire为6/5/5 | 具名根因可审计；不增恒0或same-writer Gate |
+| safety | 保留finite、plant、full-key、optimizer与durable WAL/ACK；拒绝task成功、R07、stdout和same-writer echo作为Gate | 前者保护可独立击穿的可信事实；后者是学习结果、镜像或同源自证 |
+| structure | 增量收敛到`PlantFacts → ActionBallState transition → StepTelemetry` | 减少可变真源；不以巨型重写替代逐步parity |
 
 > **2026-08-21 portable successor事实纠正（supersede下文旧229/399、H24与active-run叙述）：**当前
 > MuJoCo portable Full-A的执行真源是

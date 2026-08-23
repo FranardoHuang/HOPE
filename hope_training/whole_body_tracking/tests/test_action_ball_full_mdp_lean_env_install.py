@@ -1037,6 +1037,10 @@ def _real_selected_reset_env(device, monkeypatch):
     env.termination_manager = _TerminalResetManager(
         trace, "termination_reset", device=device
     )
+    env.reset_terminated = torch.tensor(
+        [True, False], dtype=torch.bool, device=device
+    )
+    env.reset_time_outs = torch.zeros(2, dtype=torch.bool, device=device)
     env._reset_non_action_ball_commands = lambda ids: {
         "thin_native_ids": ids.detach().clone()
     }

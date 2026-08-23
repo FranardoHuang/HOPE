@@ -1102,7 +1102,7 @@ def test_placement_shell_is_common_positive_while_treatment_stays_owner_bound():
     assert not hasattr(right, "action_ball_full_mdp_placement_gain")
 
 
-def test_termination_cfg_is_dedicated_real_publisher_timeout_and_safety_graph():
+def test_termination_cfg_is_dedicated_publisher_timeout_and_plant_terminal_graph():
     pytest.importorskip("isaaclab")
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking import mdp

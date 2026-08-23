@@ -33,6 +33,7 @@ OBSERVATION_KIND = "action_ball_full_mdp_semantic_observation_v2"
 SNAPSHOT_RECEIPT_SCHEMA_VERSION = 2
 SNAPSHOT_RECEIPT_KIND = "action_ball_full_mdp_diagnostic_snapshot_receipt_v2"
 SNAPSHOT_PAYLOAD_KIND = "policy_optimizer_diagnostic_nonresumable_v2"
+_STDOUT_WARNING_PREFIX = "HOPE_NONAUTHORITATIVE_STDOUT_WARNING_JSON="
 
 _SNAPSHOT_IDENTITY_KEYS = {
     "action_ball_full_mdp_snapshot_kind",
@@ -47,6 +48,51 @@ _SNAPSHOT_IDENTITY_KEYS = {
     "checkpoint_authority",
     "resume_authority",
 }
+
+
+def _emit_non_authoritative_stdout_marker(marker: str, *, marker_name: str) -> None:
+    """Best-effort mirror of evidence already committed to the durable WAL."""
+
+    reported_characters = None
+    failure = None
+    try:
+        reported_characters = sys.stdout.write(marker)
+        if (
+            type(reported_characters) is not int
+            or reported_characters != len(marker)
+        ):
+            failure = "short_write"
+        else:
+            sys.stdout.flush()
+            return
+    except Exception as exc:
+        # Stdout is explicitly outside the training transaction.
+        failure = type(exc).__module__ + "." + type(exc).__qualname__
+
+    warning = {
+        "event": "hope_nonauthoritative_stdout_delivery_warning",
+        "schema_version": 1,
+        "marker": marker_name,
+        "failure": failure,
+        "expected_character_count": len(marker),
+        "reported_character_count": (
+            reported_characters if type(reported_characters) is int else None
+        ),
+        "stdout_authoritative": False,
+        "durable_wal_authoritative": True,
+        "training_transaction": "committed",
+    }
+    try:
+        sys.stderr.write(
+            _STDOUT_WARNING_PREFIX
+            + json.dumps(warning, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        )
+        sys.stderr.flush()
+    except Exception:
+        # A second non-authoritative stream failure must not undo or poison a
+        # committed optimizer/WAL/owner transaction either.
+        pass
 
 
 def _validate_training_contract_identity(
@@ -959,6 +1005,33 @@ class ActionBallFullMdpRsl3Adapter:
             canonical, pending_line = self._wal.encode_pending(
                 segment_id=self._segment, rank=self._rank, telemetry=record
             )
+            safety_receipt = {
+                **record["joint_safety"],
+                "status": (
+                    "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+                ),
+                "completed_environment_steps": record[
+                    "completed_environment_steps"
+                ],
+                "epoch_operation_sequence": record[
+                    "epoch_operation_sequence"
+                ],
+                "epoch_drain_sequence": record["epoch_drain_sequence"],
+                "epoch_commit_start": record["epoch_commit_start"],
+                "epoch_commit_end": record["epoch_commit_end"],
+            }
+            safety_marker = (
+                "HOPE_JOINT_SAFETY_UPDATE_JSON="
+                + json.dumps(
+                    safety_receipt, sort_keys=True, separators=(",", ":")
+                )
+                + "\n"
+            )
+            marker = (
+                "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON="
+                + canonical.decode("utf-8")
+                + "\n"
+            )
             pending_start, pending_end = self._append(pending_line)
             if self._ack(boundary, summary, update_index=update_index) is not summary:
                 raise RuntimeError("single_action_lean owner changed ACK summary identity")
@@ -998,37 +1071,7 @@ class ActionBallFullMdpRsl3Adapter:
                 "last_policy_step_sequence"
             ]
             self._safety_pending = None
-            safety_receipt = {
-                **record["joint_safety"],
-                "status": (
-                    "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
-                ),
-                "completed_environment_steps": record[
-                    "completed_environment_steps"
-                ],
-                "epoch_operation_sequence": record[
-                    "epoch_operation_sequence"
-                ],
-                "epoch_drain_sequence": record["epoch_drain_sequence"],
-                "epoch_commit_start": record["epoch_commit_start"],
-                "epoch_commit_end": record["epoch_commit_end"],
-            }
-            safety_marker = (
-                "HOPE_JOINT_SAFETY_UPDATE_JSON="
-                + json.dumps(
-                    safety_receipt, sort_keys=True, separators=(",", ":")
-                )
-                + "\n"
-            )
-            if sys.stdout.write(safety_marker) != len(safety_marker):
-                raise OSError("single_action_lean joint-safety stdout was short")
-            sys.stdout.flush()
-            marker = "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=" + canonical.decode("utf-8") + "\n"
-            if sys.stdout.write(marker) != len(marker):
-                raise OSError("single_action_lean telemetry stdout was short")
-            sys.stdout.flush()
             self._last_update = update_index
-            return result
         except BaseException as exc:
             reason = (
                 "single_action_lean optimizer boundary failed; retry forbidden: "
@@ -1039,6 +1082,13 @@ class ActionBallFullMdpRsl3Adapter:
             except BaseException:
                 pass
             raise RuntimeError(reason) from exc
+        _emit_non_authoritative_stdout_marker(
+            safety_marker, marker_name="HOPE_JOINT_SAFETY_UPDATE_JSON"
+        )
+        _emit_non_authoritative_stdout_marker(
+            marker, marker_name="HOPE_ACTION_EPOCH_UPDATE_ACK_JSON"
+        )
+        return result
 
 
 class ActionBallFullMdpRsl3Runner(OnPolicyRunner):

@@ -75,6 +75,10 @@ FULL_A_SUPPORT_FORCE_N = 10.0
 FULL_A_DEFAULT_ROOT_POS = (0.0, 0.0, 1.0684)
 FULL_A_DEFAULT_ROOT_QUAT_WXYZ = (1.0, 0.0, 0.0, 0.0)
 FULL_A_POLICY_BOOTSTRAP_KIND = "a3_default_stand_zero_head_v1"
+FULL_A_FACT_INTEGRITY_R03_NONFINITE = 1 << 0
+FULL_A_FACT_INTEGRITY_R06_SOURCE_INVALID = 1 << 1
+FULL_A_FACT_INTEGRITY_R07_SEQUENCE = 1 << 2
+FULL_A_FACT_INTEGRITY_R07_NONFINITE = 1 << 3
 FULLMDP_TRACKED_BODY_NAMES = (
     "pelvis_link",
     "left_hip_roll_Link",
@@ -449,6 +453,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_owner_fault_bits = torch.zeros_like(
             self._full_a_owner_valid_bits
         )
+        # One per-transition producer-fault ingress.  It is intentionally not
+        # lifecycle state: begin-step clears it, while a same-transition Gym
+        # reset/reveal must not erase evidence before the rollout ledger drains
+        # the returned extras.
+        self._full_a_fact_integrity_fault_bits = torch.zeros(
+            n, dtype=torch.long, device=self.device
+        )
         self._full_a_owner_source_step = torch.full_like(
             self._full_a_owner_valid_bits, -1
         )
@@ -643,6 +654,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_cadence_ready[ids] = False
 
     def _full_a_begin_control_step(self) -> None:
+        self._full_a_fact_integrity_fault_bits.zero_()
         self._full_a_contact_classification_status.zero_()
         self._full_a_generic_contact_event.zero_()
         self._full_a_selected_contact_event.zero_()
@@ -714,10 +726,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self._full_a_r03_armed[ids] = True
         self._full_a_r03_physically_valid[ids] = target_finite & normal_unit
 
-        # This callpoint runs immediately before _advance_plant increments the
-        # shared control clock.  The accepted question belongs to that next
-        # transition, matching fresh Motion's command-compute tick.
-        reveal = int(self.common_step_counter) + 1
+        # This callpoint runs after the preceding transition's reward and
+        # termination have settled, but before the returned observation.  The
+        # accepted question therefore belongs to the current post-transition
+        # boundary and is visible to the next policy action that can earn its
+        # first imitation reward.
+        reveal = int(self.common_step_counter)
         contact_tick = reveal + question["ttc_ticks"]
         launch_tick = contact_tick - question["launch_horizon_ticks"]
         deadline = contact_tick + max(
@@ -765,47 +779,20 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         self.ball_age_buf[ids] = 0
 
     def _full_a_prepare_step(self):
+        """Freeze the due schedule and advance only already-visible shots."""
+
         torch = self._torch
         policy_tick = self.episode_length_buf + 1
-        last_scheduled_ordinal = len(
-            self._full_a_cadence.reference_due_ticks
-        ) - 1
+        last_scheduled_ordinal = (
+            len(self._full_a_cadence.reference_due_ticks) - 1
+        )
         opportunity_available = self._full_a_scheduled_ordinal.lt(
             last_scheduled_ordinal
         )
-        due = policy_tick.eq(self._full_a_next_reveal_tick) & opportunity_available
-        candidate = self._epoch_phase.eq(FULL_A_PHASE_IDLE) | self._epoch_phase.eq(
-            FULL_A_PHASE_RETIRED
+        scheduled_due = (
+            policy_tick.eq(self._full_a_next_reveal_tick)
+            & opportunity_available
         )
-        # Curriculum exposure is earned by surviving to the scheduled due
-        # tick.  The 13-component R07 projection remains useful recovery
-        # telemetry, but it is not a safety invariant and must not hold the
-        # first learnable motion/ball sample behind an all-of gate.
-        reveal = due & candidate
-        deferred = due & ~candidate
-        self._full_a_scheduled_ordinal += due.to(torch.long)
-        exhausted = due & self._full_a_scheduled_ordinal.eq(
-            last_scheduled_ordinal
-        )
-        future_tick = self._full_a_next_reveal_tick + int(
-            self._full_a_cadence.cadence_ticks
-        )
-        self._full_a_next_reveal_tick.copy_(
-            torch.where(
-                exhausted,
-                torch.full_like(
-                    self._full_a_next_reveal_tick,
-                    int(self._full_a_cadence.episode_horizon_ticks) + 1,
-                ),
-                torch.where(due, future_tick, self._full_a_next_reveal_tick),
-            )
-        )
-        reveal_ids = reveal.nonzero(as_tuple=False).squeeze(-1)
-        if reveal_ids.numel() > 0:
-            # A retired row remains visible until a real ACCEPT.  The ACCEPT
-            # itself atomically replaces that row; DEFER is a zero-write.
-            self._clear_lifecycle(reveal_ids)
-            self._full_a_reveal_rows(reveal_ids)
         launch_pending = self._epoch_phase.eq(FULL_A_PHASE_REVEAL_COMMITTED)
         launch_tick = self._epoch_clock_ticks[:, 2]
         now = int(self.common_step_counter)
@@ -826,7 +813,51 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # dynamic-shape selections fall from five to three per control step.
         park = waiting | recovering | idle
         self._full_a_park_rows(park.nonzero(as_tuple=False).squeeze(-1))
-        return reveal, launch, due, deferred, missed_launch
+        return scheduled_due, launch, missed_launch
+
+    def _full_a_settle_reveal(self, scheduled_due, dones):
+        """Classify a frozen due using post-transition lifecycle availability."""
+
+        torch = self._torch
+        survived = ~dones
+        available = self._epoch_phase.eq(FULL_A_PHASE_IDLE) | (
+            self._epoch_phase.eq(FULL_A_PHASE_RETIRED)
+        )
+        # Availability belongs to the returned-observation boundary.  A row
+        # busy at transition start may naturally retire during physics and
+        # recovery settlement, then ACCEPT without losing this scheduled
+        # opportunity.  R07 remains telemetry/reward, never admission.
+        due = scheduled_due & survived
+        reveal = due & available
+        deferred = due & ~available
+        due_terminal_overlap = scheduled_due & dones
+        last_scheduled_ordinal = (
+            len(self._full_a_cadence.reference_due_ticks) - 1
+        )
+        self._full_a_scheduled_ordinal += due.to(torch.long)
+        exhausted = due & self._full_a_scheduled_ordinal.eq(
+            last_scheduled_ordinal
+        )
+        future_tick = self._full_a_next_reveal_tick + int(
+            self._full_a_cadence.cadence_ticks
+        )
+        self._full_a_next_reveal_tick.copy_(
+            torch.where(
+                exhausted,
+                torch.full_like(
+                    self._full_a_next_reveal_tick,
+                    int(self._full_a_cadence.episode_horizon_ticks) + 1,
+                ),
+                torch.where(due, future_tick, self._full_a_next_reveal_tick),
+            )
+        )
+        reveal_ids = reveal.nonzero(as_tuple=False).squeeze(-1)
+        if reveal_ids.numel() > 0:
+            # ACCEPT atomically replaces an IDLE/RETIRED row.  DEFER and a
+            # terminal overlap are zero-write with respect to task/lifecycle.
+            self._clear_lifecycle(reveal_ids)
+            self._full_a_reveal_rows(reveal_ids)
+        return reveal, due, deferred, due_terminal_overlap
 
     def _full_a_latch_ball_contacts(self, contact_census=None) -> None:
         """Consume one shared census, then latch net/landing-plane crossings."""
@@ -972,6 +1003,10 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             & self._torch.isfinite(normal).all(dim=1)
         )
         safe = due & achieved_finite
+        self._full_a_fact_integrity_fault_bits |= (
+            (due & ~achieved_finite).to(self._torch.long)
+            * FULL_A_FACT_INTEGRITY_R03_NONFINITE
+        )
         fact = self._full_a_r03_fact_f32
         fact[:, 15:18] = self._torch.where(
             safe[:, None], position, fact[:, 15:18]
@@ -1148,13 +1183,18 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             + source_valid.to(torch.long) * portable_reward.R06_POLICY_ELIGIBLE
             + source_valid.to(torch.long) * portable_reward.R06_SOURCE_VALID
         )
+        source_invalid = present & ~source_valid
+        self._full_a_fact_integrity_fault_bits |= (
+            source_invalid.to(torch.long)
+            * FULL_A_FACT_INTEGRITY_R06_SOURCE_INVALID
+        )
         self._full_a_r06_payment_event.copy_(present)
         self._full_a_owner_valid_bits[:, 2] = torch.where(
             present, bits, self._full_a_owner_valid_bits[:, 2]
         )
         self._full_a_owner_fault_bits[:, 2] = torch.where(
             present,
-            (present & ~source_valid).to(torch.long),
+            source_invalid.to(torch.long),
             self._full_a_owner_fault_bits[:, 2],
         )
         self._full_a_owner_source_step[:, 2] = torch.where(
@@ -1369,7 +1409,12 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             self._full_a_recovery_last_age + 1,
         )
         sequence_fault = expected & age.ne(expected_age)
-        self._full_a_recovery_sticky_fault |= sequence_fault | (expected & ~valid)
+        nonfinite_fault = expected & ~valid
+        self._full_a_fact_integrity_fault_bits |= (
+            sequence_fault.to(torch.long) * FULL_A_FACT_INTEGRITY_R07_SEQUENCE
+            + nonfinite_fault.to(torch.long) * FULL_A_FACT_INTEGRITY_R07_NONFINITE
+        )
+        self._full_a_recovery_sticky_fault |= sequence_fault | nonfinite_fault
         clean_eligible = eligible & ~self._full_a_recovery_sticky_fault
         facts = torch.where(clean_eligible[:, None], facts, torch.zeros_like(facts))
         self._full_a_owner_valid_bits[:, 3] = (
@@ -2293,13 +2338,15 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # hits a physical/safety terminal must not receive gamma*V merely
         # because the horizon ended on the same control transition.
         truncated = timeout & ~terminated
+        table_terminal = keepout | resolved_table
         bits = (
             truncated.to(torch.long) * FULLMDP_TERMINATION_BITS["time_out"]
             + tilt.to(torch.long) * FULLMDP_TERMINATION_BITS["base_fell_tilt"]
             + low.to(torch.long) * FULLMDP_TERMINATION_BITS["base_too_low"]
             + qdes_safety.to(torch.long)
             * FULLMDP_TERMINATION_BITS["joint_qdes_forbidden"]
-            + keepout.to(torch.long) * FULLMDP_TERMINATION_BITS["robot_hit_table"]
+            + table_terminal.to(torch.long)
+            * FULLMDP_TERMINATION_BITS["robot_hit_table"]
         )
         return terminated, truncated, bits, resolved_table
 
@@ -2379,6 +2426,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         if self._fullmdp_initialized:
             self.reset_generation += 1
             self.last_terminal_bits.zero_()
+            if self.full_a_mode:
+                self._full_a_fact_integrity_fault_bits.zero_()
             self._clear_lifecycle(self._all_env_ids)
             if self.full_a_mode:
                 self._full_a_reset_cadence_rows(self._all_env_ids)
@@ -2438,13 +2487,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
 
         torch = self._torch
         self._full_a_begin_control_step()
-        (
-            reveal_event,
-            launch_event,
-            reveal_due_event,
-            reveal_deferred_event,
-            missed_launch_event,
-        ) = self._full_a_prepare_step()
+        scheduled_due_event, launch_event, missed_launch_event = (
+            self._full_a_prepare_step()
+        )
         _st_before_forward, _tau_sq, requested_qdes = self._advance_plant(actions)
         self.sim.forward()
         final_contact_census = A3ReadyBallVecEnv._contact_census(self)
@@ -2454,7 +2499,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         if self._cap_ok:
             self._probe_capacity("forward")
         st = self._state()
-        self._full_a_update_teacher()
+        # The cached teacher is the one published in the observation that
+        # produced ``actions``.  Keep it fixed through physics and reward;
+        # advance it only at the post-transition observation boundary below.
         terminated, truncated, terminal_bits, resolved_table_contact = (
             self._fullmdp_termination(st, requested_qdes)
         )
@@ -2510,11 +2557,19 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # Only a true Gym reset advances reset_generation.  A retired shot is
         # retained until the next frozen due tick produces a real ACCEPT.
         selected_reset = dones.clone()
-        terminal_phase = self._epoch_phase.clone()
         outcome_state = self._full_a_outcome_code.clone()
         racket_contact = self._full_a_racket_contact.clone()
         table_contact = self._full_a_ball_table_contact.clone()
         physical_center = self._full_a_physical_fact_f32[:, :3].clone()
+        (
+            reveal_event,
+            reveal_due_event,
+            reveal_deferred_event,
+            due_terminal_overlap_event,
+        ) = self._full_a_settle_reveal(
+            scheduled_due_event, dones
+        )
+        terminal_phase = self._epoch_phase.clone()
         reset_ids = dones.nonzero(as_tuple=False).squeeze(-1)
         if reset_ids.numel() > 0:
             self.last_terminal_bits[reset_ids] = terminal_bits[reset_ids]
@@ -2539,9 +2594,14 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "reset_generation": self.reset_generation.clone(),
             "full_a_phase_before_reset": terminal_phase,
             "full_a_outcome_code": outcome_state,
+            "full_a_fact_integrity_fault_bits": (
+                self._full_a_fact_integrity_fault_bits.clone()
+            ),
             "full_a_racket_contact": racket_contact,
             "full_a_ball_table_contact": table_contact,
             "full_a_physical_current_center": physical_center,
+            "full_a_scheduled_due_event": scheduled_due_event,
+            "full_a_due_terminal_overlap_event": due_terminal_overlap_event,
             "full_a_reveal_event": reveal_event,
             "full_a_reveal_due_event": reveal_due_event,
             "full_a_reveal_deferred_event": reveal_deferred_event,
@@ -2551,7 +2611,6 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "full_a_shot_retired_event": shot_retired,
             "full_a_completed_action_epoch_event": completed_action_epoch,
             "full_a_selected_reset_event": selected_reset,
-            "full_a_racket_contact_eligible_event": launch_event,
             "full_a_racket_contact_event": contact_event,
             "full_a_action_slot": self._full_a_action_slot.clone(),
             "full_a_action_uid": self._full_a_action_uid.clone(),
@@ -2604,6 +2663,10 @@ __all__ = [
     "FULL_A_OUTCOME_NONE",
     "FULL_A_OUTCOME_FLIGHT_EXPIRED",
     "FULL_A_OUTCOME_BALL_DEAD",
+    "FULL_A_FACT_INTEGRITY_R03_NONFINITE",
+    "FULL_A_FACT_INTEGRITY_R06_SOURCE_INVALID",
+    "FULL_A_FACT_INTEGRITY_R07_SEQUENCE",
+    "FULL_A_FACT_INTEGRITY_R07_NONFINITE",
     "FULL_A_SUPPORT_FORCE_N",
     "FULLMDP_TRACKED_BODY_NAMES",
     "FULLMDP_DENSE_REWARD_SPECS",

@@ -2532,6 +2532,16 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             raise FullMdpPostPhysicsProtocolError(
                 "fresh full-MDP terminal reset reason order differs"
             )
+        pure_timeout = getattr(self, "reset_time_outs", None)
+        if (
+            type(pure_timeout) is not torch.Tensor
+            or pure_timeout.dtype != torch.bool
+            or pure_timeout.shape != (self.num_envs,)
+            or pure_timeout.device != torch.device(self.device)
+        ):
+            raise FullMdpPostPhysicsProtocolError(
+                "fresh full-MDP canonical pure-timeout tensor differs"
+            )
         reason_bits = torch.zeros(
             (self.num_envs,),
             dtype=torch.int64,
@@ -2543,7 +2553,11 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             # ``TerminationManager.compute`` has already produced this exact
             # fixed buffer.  Read its retained result once; do not call a term
             # function or query the manager again during reset or PPO drain.
-            reason = cached_reasons[:, column]
+            reason = (
+                pure_timeout
+                if term_name == "time_out"
+                else cached_reasons[:, column]
+            )
             if (
                 type(reason) is not torch.Tensor
                 or reason.dtype != torch.bool
@@ -2919,7 +2933,15 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             # -- check terminations
             self.reset_buf = self.termination_manager.compute()
             self.reset_terminated = self.termination_manager.terminated
-            self.reset_time_outs = self.termination_manager.time_outs
+            raw_time_outs = self.termination_manager.time_outs
+            # A horizon/plant overlap is a real terminal transition, not a
+            # truncation that RSL may bootstrap through.  Keep the manager's
+            # raw timeout tensor intact for telemetry; publish only the
+            # disjoint Gymnasium/RSL timeout partition to learning consumers.
+            pure_timeout = torch.logical_and(
+                raw_time_outs, ~self.reset_terminated
+            )
+            self.reset_time_outs = pure_timeout
             # -- reward computation
             self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
             components = self._action_ball_full_mdp_components

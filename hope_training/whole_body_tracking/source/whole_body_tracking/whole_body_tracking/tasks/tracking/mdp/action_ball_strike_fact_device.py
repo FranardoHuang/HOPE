@@ -841,6 +841,39 @@ class ActionBallStrikeFactDeviceCoordinator:
             )
         guard()
 
+    def _latch_action_epoch_producer_faults(
+        self,
+        *,
+        epoch_module: object,
+        identity_fault: torch.Tensor,
+        stale_source: torch.Tensor,
+        nonfinite: torch.Tensor,
+    ) -> torch.Tensor:
+        """Route every R03 producer cause into Epoch's sole PPO fault drain."""
+
+        if self._action_epoch_owner is None:  # pragma: no cover - caller guard
+            raise StrikeFactEpochPublicationHold(
+                "lean R03 fault latch requires construction-bound ActionEpochOwner"
+            )
+        self._action_epoch_owner.latch_runtime_row_fault(
+            "r03_strike_fact",
+            epoch_module.ROW_FAULT_R03_EPOCH_IDENTITY,
+            identity_fault,
+            owner=self,
+        )
+        self._action_epoch_owner.latch_runtime_row_fault(
+            "r03_strike_fact",
+            epoch_module.ROW_FAULT_R03_STALE_SOURCE_STEP,
+            stale_source,
+            owner=self,
+        )
+        return self._action_epoch_owner.latch_runtime_row_fault(
+            "r03_strike_fact",
+            epoch_module.ROW_FAULT_R03_NONFINITE_FACT,
+            nonfinite,
+            owner=self,
+        )
+
     def _epoch_racket_identity(
         self, value: EpochR03RacketIdentity
     ) -> EpochR03RacketIdentity:
@@ -942,6 +975,12 @@ class ActionBallStrikeFactDeviceCoordinator:
         }
         stale_source = eligible & steps.lt(0)
         nonfinite = eligible & self._vectors_nonfinite(target_vectors)
+        epoch_safe = self._latch_action_epoch_producer_faults(
+            epoch_module=epoch_module,
+            identity_fault=identity_fault,
+            stale_source=stale_source,
+            nonfinite=nonfinite,
+        )
         fault = (
             identity_fault.to(torch.int64) * R03_EPOCH_FAULT_EPOCH_IDENTITY
             | stale_source.to(torch.int64) * R03_EPOCH_FAULT_STALE_SOURCE_STEP
@@ -957,7 +996,7 @@ class ActionBallStrikeFactDeviceCoordinator:
         self._action_epoch_owner.merge_runtime_owner_fault(
             "r03_strike_fact", fault_slots, owner=self
         )
-        safe = eligible & fault.eq(0)
+        safe = eligible & fault.eq(0) & epoch_safe
         self._epoch_arm_source_step = steps
         self._epoch_arm_identity = identity
         self._epoch_arm_mask = safe
@@ -1049,6 +1088,12 @@ class ActionBallStrikeFactDeviceCoordinator:
             ),
         }
         nonfinite = self._epoch_arm_mask & self._vectors_nonfinite(achieved)
+        epoch_safe = self._latch_action_epoch_producer_faults(
+            epoch_module=epoch_module,
+            identity_fault=identity_fault,
+            stale_source=stale_source,
+            nonfinite=nonfinite,
+        )
         fault = (
             identity_fault.to(torch.int64) * R03_EPOCH_FAULT_EPOCH_IDENTITY
             | stale_source.to(torch.int64) * R03_EPOCH_FAULT_STALE_SOURCE_STEP
@@ -1063,7 +1108,7 @@ class ActionBallStrikeFactDeviceCoordinator:
         self._action_epoch_owner.merge_runtime_owner_fault(
             "r03_strike_fact", fault_slots, owner=self
         )
-        safe = self._epoch_arm_mask & fault.eq(0)
+        safe = self._epoch_arm_mask & fault.eq(0) & epoch_safe
         valid_bits = torch.zeros_like(fault_slots)
         selected_valid = (
             safe.to(torch.int64) * R03_EPOCH_FACT_PRESENT
