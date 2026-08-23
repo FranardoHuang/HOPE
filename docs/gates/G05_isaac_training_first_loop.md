@@ -2,18 +2,29 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-**2026-08-23 FullMDP PPO V3 / R03 exact-strike候选（Gate仍`Partial`）：**现役V2 Isaac的R03 arm错误地要求
-`REVEAL_COMMITTED`，而exact one-shot只在真实launch后出现，production下因而不可达；这不是需要更多step的
-课程现象。候选改为在`LAUNCH_SETTLED && exact`冻结问题，publish只核冻结identity/source，并用真实R06
-LAUNCH→OUTCOME时序防止二次phase gate回归。shared typed recipe同时从永久`entropy_coef=.01`改为`0`；
-真实V2 MuJoCo checkpoint的mean std已从`.02`涨过`1`并继续超过`2.8`，不能resume。没有新增actor observation、
-stage、owner、receipt、std clamp/decay或成功Gate；H48/lambda `.98`不变。clean `46800617…` exact Pod
-相关回归合计`345 passed,13 skipped`；fresh Isaac到update694时TensorBoard mean std
-`.02000495→.01445465`，完成episode均长由first10 `87.53`升到recent10 `176.72 tick`，Reward
-nonfinite/attributed fault为0。累计`due/selected/accepted=233/233/218`、playback=`42`，但launch/R03/contact/
-landing仍为0分母和`未测`；课程入口已开而mimic→hit未成。recent10 raw wall `10.380 s/H48`，H24-equivalent
-约`5.190 s`。因此这里只关闭启动、optimizer canary和mimic入口，不声称下游通过，本Gate不晋级。详见
-[课程解阻实验§7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)。
+**2026-08-23 FullMDP V5 clean Isaac当前摘要（Gate仍`Partial`）：**live run的clean且已push source为
+`39f9481950a660e198dedac7fd402806d648906b`。exact Pod broad CPU/ABI回归为
+`792 passed, 57 skipped, 0 failed`；同一clean source另做runtime focused重跑为`77 passed, 0 failed`，
+两者不是可相加的unique测试总数。GPU组件证据为projection `4/0`、selected-rubber `27/0`和runner
+pre-optimizer drain `1/0`，合计`32/0`；其中runner drain不是Isaac integration，真实Kit fresh训练才是
+更强的整合路径。
+
+fresh namespace `fullmdp-a-h48-v5-isaac-chronology-39f94819-20260823T144237Z`在GPU1取得验收前缀
+durable ACK `0..63`（`12,582,912` transitions）；最后5个console iteration为
+`7.78/7.47/8.17/6.79/8.19 s`。前缀内`139,264`个episode全部因base tilt结束，D05/motion/launch/contact/
+outcome/recovery event均为0，finite、fault与conservation计数均为0。学习轨迹现冻结到连续durable ACK
+`0..450`（`88,670,208` transitions）：此前显著回退后，最新`431..450`的`23,081`个episode mean
+length/return=`170.249/15.625`，已超过旧局部峰值`160.279/14.398`。该窗全部因tilt结束，
+qdes/table/low/timeout terminal、fault、nonfinite与conservation均为0；所以回退已证实为可恢复的早期PPO
+非单调性，没有实现因果要求重启，但balance仍未基本成功。累计due/public=`20/20`、ACCEPT/reject=`17/3`，
+已有2次真实playback；launch/contact/outcome/landing/recovery仍为0，mimic成功继续`未测`。与ACK431..450
+一一对齐的stdout辅助total/collection/learning mean=`9.488/8.625/0.862 s/H48`，启动期单点6.79秒不是
+稳态结论。
+该run保持`diagnostic_unauthorized=true`；actor/critic仍为`203/219`、`history_length=0`，不增加offset或
+stage。H48速度只是迭代方向，fresh wall尚无matched-strata，不能正式归因。
+下一个fresh source应补optimizer/KL与terminal reference-phase纯telemetry，而不是新增安全Gate。自然mimic/
+hit/landing分母、12500 completion、formal independent playback、physics/transfer parity以及
+promotion/deploy均未闭合，因此本Gate不晋级。
 
 **2026-08-22 `aa42418b`当前结论（Gate仍`Partial`）：**no-key ContactSensor主墙已删除；exact Pod=
 `304 passed, 6 skipped`，profiler-off匹配5轮中位`6.346 s/H48`。新Isaac到ACK176仍active/finite/fault0；
