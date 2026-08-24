@@ -196,9 +196,13 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         _full_a_pre_swing_wait_s=torch.tensor([0.5, 7.0], dtype=dtype),
         common_step_counter=20,
         step_dt=0.02,
-        _full_a_next_reveal_tick=torch.tensor([30, 40]),
-        episode_length_buf=torch.tensor([10, 20]),
-        max_episode_length=100,
+        _full_a_cadence=types.SimpleNamespace(
+            reference_due_ticks=(295, 588, 881, 1174)
+        ),
+        _full_a_scheduled_ordinal=torch.tensor([2, 3]),
+        _full_a_next_reveal_tick=torch.tensor([30, 1501]),
+        episode_length_buf=torch.tensor([10, 1174]),
+        max_episode_length=1500,
         _epoch_phase=torch.tensor(
             [wait_env.FULL_A_PHASE_LAUNCH_SETTLED, wait_env.FULL_A_PHASE_RETIRED]
         ),
@@ -276,7 +280,27 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
     assert torch.equal(actor("time_to_teacher_start_s")[:, 0], torch.tensor([0.3, 0.0], dtype=dtype))
     torch.testing.assert_close(
         actor("time_to_next_opportunity_s")[:, 0],
-        torch.tensor([0.4 / 5.86, 0.4 / 5.86], dtype=dtype),
+        torch.tensor(
+            [
+                0.4 / 5.86,
+                wait_env.portable_catalog.FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S
+                / 5.86,
+            ],
+            dtype=dtype,
+        ),
+    )
+    torch.testing.assert_close(
+        actor("time_to_next_opportunity_s")[1, 0] * 5.86,
+        torch.tensor(
+            wait_env.portable_catalog.FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S,
+            dtype=dtype,
+        ),
+        rtol=0.0,
+        atol=1.0e-15,
+    )
+    assert (
+        wait_env.portable_catalog.FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S
+        == -1.0
     )
     assert torch.count_nonzero(policy[1, 183:196]) == 0
     assert torch.equal(actor("epoch_learning_phase_one_hot"), torch.tensor([[0, 0, 1, 0, 0], [0, 0, 0, 0, 1]], dtype=dtype))
@@ -297,9 +321,31 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
     assert torch.count_nonzero(privileged("cadence_ready_dwell_fraction")) == 0
     torch.testing.assert_close(
         privileged("episode_time_remaining_s")[:, 0],
-        torch.tensor([1.8 / 30.0, 1.6 / 30.0], dtype=dtype),
+        torch.tensor([29.8 / 30.0, 6.52 / 30.0], dtype=dtype),
     )
     assert torch.equal(critic[:, :203], policy)
+
+    # The first three accepted due boundaries keep their real 293-tick
+    # countdown.  Only the fourth accepted ordinal changes the same actor
+    # column to the explicit exhausted sentinel above.
+    for ordinal, due_tick, next_tick in (
+        (0, 295, 588),
+        (1, 588, 881),
+        (2, 881, 1174),
+    ):
+        env._full_a_scheduled_ordinal[1] = ordinal
+        env.episode_length_buf[1] = due_tick
+        env._full_a_next_reveal_tick[1] = next_tick
+        next_policy = wait_env.FullMdpInitialWaitVecEnv._full_a_semantic_observation_v2(
+            env, st
+        )
+        start, end = V2_ACTOR_SLICES["time_to_next_opportunity_s"]
+        torch.testing.assert_close(
+            next_policy[1, start:end],
+            torch.ones((1,), dtype=dtype),
+            rtol=0.0,
+            atol=1.0e-15,
+        )
 
 
 def test_initial_wait_requires_positive_world_count_and_deterministic_reset():

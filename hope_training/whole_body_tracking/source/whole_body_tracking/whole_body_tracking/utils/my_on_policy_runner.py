@@ -2160,11 +2160,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             frontier.drain_sequence,
             frontier.start_commit,
             frontier.end_commit,
+            frontier.due_terminal_overlap_rows,
         )
         if (
             any(type(value) is not int or value < 0 for value in exact_ints)
-            or frontier.schema_version != 10
-            or frontier.kind != "action_ball_epoch_ppo_boundary_summary_v10"
+            or frontier.schema_version != 11
+            or frontier.kind != "action_ball_epoch_ppo_boundary_summary_v11"
             or frontier.num_envs != int(self.env.num_envs)
             or frontier.shot_slot_capacity != expected_slots
             or not isinstance(device, torch.device)

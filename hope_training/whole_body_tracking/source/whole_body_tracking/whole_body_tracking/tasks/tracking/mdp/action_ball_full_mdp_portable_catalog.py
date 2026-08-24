@@ -83,7 +83,12 @@ FRESH_FIRST_REVEAL_TICK = 295
 FRESH_RECOVERY_END_OFFSET_TICKS = 77
 FRESH_HIDDEN_GAP_TICKS = 2
 FRESH_REFERENCE_DUE_COUNT = 4
+FRESH_REFERENCE_DUE_TICKS = (295, 588, 881, 1174)
 FRESH_EPISODE_HORIZON_TICKS = 1500
+# Raw actor-clock sentinel shared by both backends.  A negative value is
+# outside the domain of every real countdown and makes schedule exhaustion
+# distinguishable from the fourth shot's still-valid settlement boundary.
+FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S = -1.0
 
 
 @dataclass(frozen=True)
@@ -197,7 +202,7 @@ def derive_portable_fresh_cadence(
     if (
         maximum_close != 214
         or cadence != 293
-        or due_ticks != (295, 588, 881, 1174)
+        or due_ticks != FRESH_REFERENCE_DUE_TICKS
         # Every advertised opportunity must fit its complete construction
         # window.  Tick 1467 is the fourth row's retirement boundary, not a
         # fifth reveal: only 33 episode ticks remain after it.
@@ -506,7 +511,9 @@ __all__ = [
     "FRESH_RECOVERY_END_OFFSET_TICKS",
     "FRESH_HIDDEN_GAP_TICKS",
     "FRESH_REFERENCE_DUE_COUNT",
+    "FRESH_REFERENCE_DUE_TICKS",
     "FRESH_EPISODE_HORIZON_TICKS",
+    "FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S",
     "ActionBallFullMdpDiagnosticCatalogTable",
     "PortableActionCenterRow",
     "PortableActionCenterTable",

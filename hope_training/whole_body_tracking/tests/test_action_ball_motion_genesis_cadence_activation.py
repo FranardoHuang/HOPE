@@ -395,6 +395,7 @@ def test_fresh_1500_tick_trace_has_exactly_four_due_opportunities() -> None:
 
     reveal_ticks = []
     issued_task_ticks = []
+    exhausted_observation_clocks = {}
     for common_step in range(1500):
         command._env.common_step_counter = common_step
         command._advance_action_ball_continuous_motion_cadence()
@@ -402,6 +403,18 @@ def test_fresh_1500_tick_trace_has_exactly_four_due_opportunities() -> None:
             assert torch.all(command._action_ball_continuous_reveal_due)
             reveal_ticks.append(common_step)
         token = command.issue_current_r05_cadence_if_due()
+        if common_step in (1174, 1467):
+            observation_token = (
+                command.action_ball_continuous_motion_observation_projection()
+            )
+            observation = (
+                command.require_owned_action_ball_continuous_motion_observation(
+                    observation_token
+                )
+            )
+            exhausted_observation_clocks[common_step] = (
+                observation.time_to_next_reveal_s.tolist()
+            )
         if token is not None:
             issued_task_ticks.append(common_step)
         if common_step == 1467:
@@ -416,6 +429,10 @@ def test_fresh_1500_tick_trace_has_exactly_four_due_opportunities() -> None:
     assert issued_task_ticks == reveal_ticks
     assert command._action_ball_continuous_scheduled_ordinal.tolist() == [3, 3]
     assert command._action_ball_swing_generation.tolist() == [3, 3]
+    assert exhausted_observation_clocks == {
+        1174: [-1.0, -1.0],
+        1467: [-1.0, -1.0],
+    }
     assert command._action_ball_continuous_next_reveal_step.tolist() == [
         1500,
         1500,

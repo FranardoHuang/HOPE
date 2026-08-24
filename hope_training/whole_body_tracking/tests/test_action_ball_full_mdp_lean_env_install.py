@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import ast
 import importlib
-import importlib.util
 from pathlib import Path
 import sys
 import types
 
 import pytest
 import torch
+
+from full_mdp_env_canonical_harness import (
+    load_canonical_full_mdp_env,
+    probe_canonical_full_mdp_env_subprocess,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,47 +29,11 @@ MODULE_PATH = (
 )
 
 
-def _load_subject(name: str):
-    class FakeEnv:
-        pass
-
-    class FakeCfg:
-        pass
-
-    stubs = {
-        "isaaclab": types.ModuleType("isaaclab"),
-        "isaaclab.envs": types.ModuleType("isaaclab.envs"),
-        "isaaclab.envs.common": types.ModuleType("isaaclab.envs.common"),
-        "isaaclab.envs.manager_based_rl_env": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env"
-        ),
-        "isaaclab.envs.manager_based_rl_env_cfg": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env_cfg"
-        ),
-    }
-    stubs["isaaclab"].__path__ = []
-    stubs["isaaclab.envs"].__path__ = []
-    stubs["isaaclab.envs.common"].VecEnvStepReturn = tuple
-    stubs["isaaclab.envs.manager_based_rl_env"].ManagerBasedRLEnv = FakeEnv
-    stubs["isaaclab.envs.manager_based_rl_env_cfg"].ManagerBasedRLEnvCfg = FakeCfg
-    previous = {key: sys.modules.get(key) for key in stubs}
-    try:
-        sys.modules.update(stubs)
-        spec = importlib.util.spec_from_file_location(name, MODULE_PATH)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = value
+M = load_canonical_full_mdp_env(MODULE_PATH, retain_namespace=True)
 
 
-M = _load_subject("_action_ball_full_mdp_lean_env_install_subject")
+def test_cold_import_uses_launcher_canonical_namespace_without_ambient_kit():
+    probe_canonical_full_mdp_env_subprocess(MODULE_PATH)
 
 
 class _ObservationSource:

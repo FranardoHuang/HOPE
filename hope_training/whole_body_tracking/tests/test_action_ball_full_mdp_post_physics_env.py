@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import ast
 import importlib
-import importlib.util
 from pathlib import Path
 import sys
 import types
 
 import pytest
 import torch
+
+from full_mdp_env_canonical_harness import load_canonical_full_mdp_env
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,64 +35,8 @@ for path in (str(SOURCE), str(MDP)):
         sys.path.insert(0, path)
 
 
-def _load_subject():
-    subject_name = "_action_ball_full_mdp_env_test_subject"
-    if subject_name in sys.modules:
-        return sys.modules[subject_name]
-
-    class FakeManagerBasedRLEnv:
-        base_constructions = 0
-
-        def __init__(self, *args, **kwargs):
-            type(self).base_constructions += 1
-            raise AssertionError("focused tests must not construct a Kit env")
-
-        def close(self):
-            return None
-
-    class FakeManagerBasedRLEnvCfg:
-        pass
-
-    stubs = {
-        "isaaclab": types.ModuleType("isaaclab"),
-        "isaaclab.envs": types.ModuleType("isaaclab.envs"),
-        "isaaclab.envs.common": types.ModuleType("isaaclab.envs.common"),
-        "isaaclab.envs.manager_based_rl_env": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env"
-        ),
-        "isaaclab.envs.manager_based_rl_env_cfg": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env_cfg"
-        ),
-    }
-    stubs["isaaclab"].__path__ = []
-    stubs["isaaclab.envs"].__path__ = []
-    stubs["isaaclab.envs.common"].VecEnvStepReturn = tuple
-    stubs["isaaclab.envs.manager_based_rl_env"].ManagerBasedRLEnv = (
-        FakeManagerBasedRLEnv
-    )
-    stubs["isaaclab.envs.manager_based_rl_env_cfg"].ManagerBasedRLEnvCfg = (
-        FakeManagerBasedRLEnvCfg
-    )
-
-    previous = {name: sys.modules.get(name) for name in stubs}
-    try:
-        sys.modules.update(stubs)
-        spec = importlib.util.spec_from_file_location(subject_name, MODULE_PATH)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[subject_name] = module
-        spec.loader.exec_module(module)
-        module._TEST_FAKE_BASE = FakeManagerBasedRLEnv
-        return module
-    finally:
-        for name, prior in previous.items():
-            if prior is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = prior
-
-
-M = _load_subject()
+M = load_canonical_full_mdp_env(MODULE_PATH, retain_namespace=True)
+M._TEST_FAKE_BASE = M.ManagerBasedRLEnv
 
 
 def _lean_modules():

@@ -394,7 +394,15 @@ def _cuda_bound_verdict(inputs, device, *, full_body=False):
     bound.blade_center_offset = tensor_inputs["blade_center_offset"]
     bound.blade_local_half_axes = tensor_inputs["blade_local_half_axes"]
     bound._bind_cuda_kernel(body_count=positions.shape[1])
-    return bound.sample(SimpleNamespace(xpos=positions, xquat=quats))
+    wp_data = SimpleNamespace(
+        xpos=keepout._wp.from_torch(
+            positions, dtype=keepout._wp.vec3, requires_grad=False
+        ),
+        xquat=keepout._wp.from_torch(
+            quats, dtype=keepout._wp.quat, requires_grad=False
+        ),
+    )
+    return bound.sample(SimpleNamespace(struct=wp_data))
 
 
 def _tape_verdict(inputs, device):
@@ -524,16 +532,38 @@ def test_free_function_rejects_non_cpu_instead_of_opening_second_cuda_path():
         )
 
 
-def test_cuda_bound_sampler_passes_full_pose_without_torch_gather(monkeypatch):
+class _FakeWarpArray:
+    """Strict metadata double for a native ``warp.array`` instance."""
+
+    def __init__(
+        self,
+        *,
+        shape,
+        dtype,
+        device,
+        ptr=4096,
+        is_contiguous=True,
+    ):
+        self.shape = shape
+        self.dtype = dtype
+        self.device = device
+        self.ptr = ptr
+        self.is_contiguous = is_contiguous
+
+
+def test_cuda_bound_sampler_uses_native_mjwarp_arrays_without_torch_bridge(
+    monkeypatch,
+):
     seen = {}
 
     class FakeWarp:
+        array = _FakeWarpArray
         vec3 = object()
-        vec4 = object()
+        quat = object()
 
         @staticmethod
         def from_torch(tensor, *, dtype=None, requires_grad=None):
-            return tensor
+            raise AssertionError("live MJWarp arrays must not be rewrapped from Torch")
 
         @staticmethod
         def launch(kernel, **kwargs):
@@ -545,12 +575,13 @@ def test_cuda_bound_sampler_passes_full_pose_without_torch_gather(monkeypatch):
     bound._cuda_kernel_output = torch.empty(2, dtype=torch.bool)
     bound._cuda_warp_static_inputs = (object(),)
     bound._cuda_warp_output = object()
-    bound._cuda_warp_device = object()
+    warp_device = object()
+    bound._cuda_warp_device = warp_device
     bound._cuda_warp_stream = object()
     bound._cuda_torch_stream_handle = 17
     bound._cuda_live_device = torch.device("cpu")
-    bound._cuda_live_pos_shape = (2, 47, 3)
-    bound._cuda_live_quat_shape = (2, 47, 4)
+    bound._cuda_live_pos_shape = (2, 47)
+    bound._cuda_live_quat_shape = (2, 47)
     bound.env_origins = torch.zeros((2, 3))
     bound.body_ids = torch.arange(32)
     bound.component_owner_indices = torch.arange(62).remainder(32)
@@ -561,18 +592,35 @@ def test_cuda_bound_sampler_passes_full_pose_without_torch_gather(monkeypatch):
     bound.racket_body_index = 31
     bound.blade_center_offset = torch.zeros(3)
     bound.blade_local_half_axes = torch.zeros((3, 3))
-    data = SimpleNamespace(
-        xpos=torch.zeros((2, 47, 3)),
-        xquat=torch.zeros((2, 47, 4)),
+    wp_data = SimpleNamespace(
+        xpos=_FakeWarpArray(
+            shape=(2, 47), dtype=keepout._wp.vec3, device=warp_device
+        ),
+        xquat=_FakeWarpArray(
+            shape=(2, 47), dtype=keepout._wp.quat, device=warp_device, ptr=8192
+        ),
     )
+
+    class DataBridgeDouble:
+        struct = wp_data
+
+        @property
+        def xpos(self):
+            raise AssertionError("production must bypass the TorchArray proxy")
+
+        @property
+        def xquat(self):
+            raise AssertionError("production must bypass the TorchArray proxy")
+
+    data = DataBridgeDouble()
     monkeypatch.setattr(
         torch.cuda,
         "current_stream",
         lambda _device: SimpleNamespace(cuda_stream=17),
     )
     actual = bound.sample(data)
-    assert seen["inputs"][0] is data.xpos
-    assert seen["inputs"][1] is data.xquat
+    assert seen["inputs"][0] is wp_data.xpos
+    assert seen["inputs"][1] is wp_data.xquat
     assert seen["inputs"][2:] == bound._cuda_warp_static_inputs
     assert seen["outputs"] == (bound._cuda_warp_output,)
     assert seen["device"] is bound._cuda_warp_device
@@ -580,53 +628,80 @@ def test_cuda_bound_sampler_passes_full_pose_without_torch_gather(monkeypatch):
     assert actual is bound._cuda_kernel_output
 
 
-@pytest.mark.parametrize(
-    ("xpos", "xquat", "message"),
-    (
+def test_cuda_bound_sampler_rejects_live_contract_drift_before_launch(
+    monkeypatch,
+):
+    class FakeWarp:
+        array = _FakeWarpArray
+        vec3 = object()
+        quat = object()
+
+        @staticmethod
+        def launch(*_args, **_kwargs):
+            pytest.fail("invalid live poses reached Warp")
+
+    fake = FakeWarp()
+    monkeypatch.setattr(keepout, "_wp", fake)
+    bound = object.__new__(keepout.DeviceExactTableKeepout)
+    bound._cuda_kernel_output = torch.empty(2, dtype=torch.bool)
+    warp_device = object()
+    bound._cuda_warp_device = warp_device
+    bound._cuda_live_device = torch.device("cpu")
+    bound._cuda_live_pos_shape = (2, 47)
+    bound._cuda_live_quat_shape = (2, 47)
+    valid_pos = _FakeWarpArray(
+        shape=(2, 47), dtype=fake.vec3, device=warp_device
+    )
+    valid_quat = _FakeWarpArray(
+        shape=(2, 47), dtype=fake.quat, device=warp_device, ptr=8192
+    )
+    duck_array = SimpleNamespace(
+        shape=(2, 47),
+        dtype=fake.vec3,
+        device=warp_device,
+        ptr=4096,
+        is_contiguous=True,
+    )
+    cases = (
+        (duck_array, valid_quat, "requires native MJWarp pose arrays"),
         (
-            torch.zeros((2, 47, 3), dtype=torch.float64),
-            torch.zeros((2, 47, 4)),
+            _FakeWarpArray(
+                shape=(2, 47), dtype=object(), device=warp_device
+            ),
+            valid_quat,
             "live pose dtype differs",
         ),
         (
-            torch.zeros((2, 46, 3)),
-            torch.zeros((2, 47, 4)),
+            _FakeWarpArray(shape=(2, 46), dtype=fake.vec3, device=warp_device),
+            valid_quat,
             "live pose shape differs",
         ),
         (
-            torch.empty((2, 47, 3), device="meta"),
-            torch.empty((2, 47, 4), device="meta"),
+            _FakeWarpArray(shape=(2, 47), dtype=fake.vec3, device=object()),
+            valid_quat,
             "live pose device differs",
         ),
-    ),
-)
-def test_cuda_bound_sampler_rejects_live_contract_drift_before_launch(
-    monkeypatch, xpos, xquat, message
-):
-    bound = object.__new__(keepout.DeviceExactTableKeepout)
-    bound._cuda_kernel_output = torch.empty(2, dtype=torch.bool)
-    bound._cuda_live_device = torch.device("cpu")
-    bound._cuda_live_pos_shape = (2, 47, 3)
-    bound._cuda_live_quat_shape = (2, 47, 4)
-    monkeypatch.setattr(
-        keepout,
-        "_wp",
-        SimpleNamespace(
-            launch=lambda *_args, **_kwargs: pytest.fail(
-                "invalid live poses reached Warp"
-            )
+        (
+            _FakeWarpArray(
+                shape=(2, 47), dtype=fake.vec3, device=warp_device, ptr=0
+            ),
+            valid_quat,
+            "live pose pointer is null",
         ),
     )
-    with pytest.raises(RuntimeError, match=message):
-        bound.sample(SimpleNamespace(xpos=xpos, xquat=xquat))
+    for xpos, xquat, message in cases:
+        data = SimpleNamespace(struct=SimpleNamespace(xpos=xpos, xquat=xquat))
+        with pytest.raises(RuntimeError, match=message):
+            bound.sample(data)
 
 
 def test_cuda_bound_sampler_caches_static_wrappers_and_rebinds_only_on_stream_change(
     monkeypatch,
 ):
     class FakeWarp:
+        array = _FakeWarpArray
         vec3 = object()
-        vec4 = object()
+        quat = object()
         mat33 = object()
         bool = object()
 
@@ -681,12 +756,13 @@ def test_cuda_bound_sampler_caches_static_wrappers_and_rebinds_only_on_stream_ch
     bound._cuda_warp_output = fake.from_torch(
         bound._cuda_kernel_output, dtype=fake.bool, requires_grad=False
     )
-    bound._cuda_warp_device = object()
+    warp_device = object()
+    bound._cuda_warp_device = warp_device
     bound._cuda_warp_stream = None
     bound._cuda_torch_stream_handle = None
     bound._cuda_live_device = torch.device("cpu")
-    bound._cuda_live_pos_shape = (2, 47, 3)
-    bound._cuda_live_quat_shape = (2, 47, 4)
+    bound._cuda_live_pos_shape = (2, 47)
+    bound._cuda_live_quat_shape = (2, 47)
     monkeypatch.setattr(
         keepout,
         "_validate_cuda_static_inputs",
@@ -697,10 +773,16 @@ def test_cuda_bound_sampler_caches_static_wrappers_and_rebinds_only_on_stream_ch
 
     current = SimpleNamespace(cuda_stream=41)
     monkeypatch.setattr(torch.cuda, "current_stream", lambda _device: current)
-    data = SimpleNamespace(
-        xpos=torch.zeros((2, 47, 3)),
-        xquat=torch.zeros((2, 47, 4)),
+    wp_data = SimpleNamespace(
+        xpos=_FakeWarpArray(
+            shape=(2, 47), dtype=fake.vec3, device=warp_device
+        ),
+        xquat=_FakeWarpArray(
+            shape=(2, 47), dtype=fake.quat, device=warp_device, ptr=8192
+        ),
     )
+    data = SimpleNamespace(struct=wp_data)
+    construction_wrap_count = len(fake.wraps)
 
     for _ in range(2):
         assert bound.sample(data) is bound._cuda_kernel_output
@@ -741,8 +823,9 @@ def test_cuda_bound_sampler_caches_static_wrappers_and_rebinds_only_on_stream_ch
         )
         == 1
     )
-    assert sum(wrapped[0] is data.xpos for wrapped in fake.wraps) == 4
-    assert sum(wrapped[0] is data.xquat for wrapped in fake.wraps) == 4
+    assert len(fake.wraps) == construction_wrap_count
+    assert all(wrapped[0] is not wp_data.xpos for wrapped in fake.wraps)
+    assert all(wrapped[0] is not wp_data.xquat for wrapped in fake.wraps)
     assert all(wrapped[2] is False for wrapped in fake.wraps)
 
 

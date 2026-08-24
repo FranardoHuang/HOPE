@@ -2345,6 +2345,45 @@ def test_host_full_a_scheduled_ordinal_caps_episode_fit_opportunities():
     assert not scheduled_due.any()
 
 
+def test_host_full_a_fourth_due_exhausts_schedule_but_keeps_shot_boundary():
+    env = _host_full_a_lifecycle_env()
+    env._full_a_cadence = SimpleNamespace(
+        first_reveal_tick=295,
+        cadence_ticks=293,
+        episode_horizon_ticks=1500,
+        reference_due_ticks=(295, 588, 881, 1174),
+    )
+    ids = torch.arange(env.num_envs)
+    env._clear_lifecycle(ids)
+    env._epoch_phase.fill_(wait_env.FULL_A_PHASE_RETIRED)
+    env._full_a_scheduled_ordinal.fill_(2)
+    env._full_a_next_reveal_tick.fill_(1174)
+    env.episode_length_buf.fill_(1173)
+    env.common_step_counter = 1173
+
+    scheduled_due, _launch, missed = env._full_a_prepare_step()
+    # Mirror the real integrated transition before the returned-observation
+    # settlement boundary.
+    env.episode_length_buf += 1
+    env.common_step_counter += 1
+    reveal, due, deferred, overlap = env._full_a_settle_reveal(
+        scheduled_due, torch.zeros(env.num_envs, dtype=torch.bool)
+    )
+
+    assert due.all() and reveal.all()
+    assert not deferred.any() and not overlap.any() and not missed.any()
+    assert env.episode_length_buf.eq(1174).all()
+    assert env._full_a_scheduled_ordinal.eq(3).all()
+    assert env._full_a_next_reveal_tick.eq(1501).all()
+    # This is the accepted fourth shot's internal settlement boundary, not a
+    # fifth curriculum opportunity.
+    assert env._epoch_clock_ticks[:, 4].eq(1467).all()
+
+    env.episode_length_buf.fill_(1466)
+    scheduled_due, _launch, _missed_launch = env._full_a_prepare_step()
+    assert not scheduled_due.any()
+
+
 def test_host_full_a_step_reveals_after_balance_prefix_without_r07_admission():
     env = _host_full_a_lifecycle_env()
     ids = torch.arange(2)

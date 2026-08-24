@@ -551,6 +551,7 @@ def test_prepare_materializes_once_and_ack_commits_the_typed_summary(
     assert summary.frontier.end_commit == 1
     assert summary.frontier.update_index == 0
     assert summary.frontier.completed_environment_steps == 8
+    assert summary.frontier.due_terminal_overlap_rows == 0
     assert summary.settlement.transactions == 0
     assert epoch.drain_frontier == 1
     assert not hasattr(owner, "require_owned_runner_frontier_projection")

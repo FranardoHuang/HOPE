@@ -16,6 +16,8 @@ import types
 import pytest
 import torch
 
+from full_mdp_env_canonical_harness import load_canonical_full_mdp_env
+
 
 _EXACT_SPLIT_ASSET = (
     "/workspace/franco/runtime_assets/"
@@ -86,52 +88,9 @@ SOURCE_ROOT = ROOT / "source" / "whole_body_tracking"
 TRACKING_ROOT = SOURCE_ROOT / "whole_body_tracking" / "tasks" / "tracking"
 MDP_ROOT = TRACKING_ROOT / "mdp"
 def _load_env_subject():
-    name = "_action_ball_full_mdp_runtime_factory_env_subject"
-    if name in sys.modules:
-        return sys.modules[name]
-
-    class FakeManagerBasedRLEnv:
-        def close(self):
-            return None
-
-    class FakeManagerBasedRLEnvCfg:
-        pass
-
-    stubs = {
-        "isaaclab": types.ModuleType("isaaclab"),
-        "isaaclab.envs": types.ModuleType("isaaclab.envs"),
-        "isaaclab.envs.common": types.ModuleType("isaaclab.envs.common"),
-        "isaaclab.envs.manager_based_rl_env": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env"
-        ),
-        "isaaclab.envs.manager_based_rl_env_cfg": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env_cfg"
-        ),
-    }
-    stubs["isaaclab"].__path__ = []
-    stubs["isaaclab.envs"].__path__ = []
-    stubs["isaaclab.envs.common"].VecEnvStepReturn = tuple
-    stubs["isaaclab.envs.manager_based_rl_env"].ManagerBasedRLEnv = (
-        FakeManagerBasedRLEnv
+    return load_canonical_full_mdp_env(
+        ENV_MODULE_PATH, retain_namespace=True
     )
-    stubs["isaaclab.envs.manager_based_rl_env_cfg"].ManagerBasedRLEnvCfg = (
-        FakeManagerBasedRLEnvCfg
-    )
-    previous = {key: sys.modules.get(key) for key in stubs}
-    try:
-        sys.modules.update(stubs)
-        spec = importlib.util.spec_from_file_location(name, ENV_MODULE_PATH)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        for key, prior in previous.items():
-            if prior is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = prior
 
 
 def _load_constructing_env_subject(name: str):
@@ -159,44 +118,13 @@ def _load_constructing_env_subject(name: str):
         def close(self):
             self.cfg.trace.append("close")
 
-    class FakeManagerBasedRLEnvCfg:
-        pass
-
-    stubs = {
-        "isaaclab": types.ModuleType("isaaclab"),
-        "isaaclab.envs": types.ModuleType("isaaclab.envs"),
-        "isaaclab.envs.common": types.ModuleType("isaaclab.envs.common"),
-        "isaaclab.envs.manager_based_rl_env": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env"
-        ),
-        "isaaclab.envs.manager_based_rl_env_cfg": types.ModuleType(
-            "isaaclab.envs.manager_based_rl_env_cfg"
-        ),
-    }
-    stubs["isaaclab"].__path__ = []
-    stubs["isaaclab.envs"].__path__ = []
-    stubs["isaaclab.envs.common"].VecEnvStepReturn = tuple
-    stubs["isaaclab.envs.manager_based_rl_env"].ManagerBasedRLEnv = (
-        ConstructingManagerBasedRLEnv
+    del name
+    module = load_canonical_full_mdp_env(
+        ENV_MODULE_PATH, retain_namespace=False
     )
-    stubs["isaaclab.envs.manager_based_rl_env_cfg"].ManagerBasedRLEnvCfg = (
-        FakeManagerBasedRLEnvCfg
-    )
-    previous = {key: sys.modules.get(key) for key in stubs}
-    try:
-        sys.modules.update(stubs)
-        spec = importlib.util.spec_from_file_location(name, ENV_MODULE_PATH)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-        return module
-    finally:
-        for key, prior in previous.items():
-            if prior is None:
-                sys.modules.pop(key, None)
-            else:
-                sys.modules[key] = prior
+    module.ManagerBasedRLEnv.__init__ = ConstructingManagerBasedRLEnv.__init__
+    module.ManagerBasedRLEnv.close = ConstructingManagerBasedRLEnv.close
+    return module
 
 
 def _load_factory_subject(name: str):
@@ -320,10 +248,6 @@ def _single_action_lean_cfg(*, family="A"):
 
 
 M = _load_env_subject()
-sys.modules.setdefault(
-    "whole_body_tracking.tasks.tracking.full_mdp_env",
-    M,
-)
 
 
 class _Cfg:

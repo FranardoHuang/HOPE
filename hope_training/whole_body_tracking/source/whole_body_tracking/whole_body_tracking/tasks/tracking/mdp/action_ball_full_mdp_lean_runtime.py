@@ -995,6 +995,9 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     drain_sequence=self._drain_sequence + 1,
                     start_commit=start,
                     end_commit=end,
+                    due_terminal_overlap_rows=(
+                        decoded.due_terminal_overlap_rows
+                    ),
                 )
                 summary = decoded.with_frontier(frontier)
                 if type(summary) is not ActionEpochPpoBoundarySummary:

@@ -22,11 +22,16 @@ try:
 except ImportError:
     import action_ball_full_mdp_action_strata as action_strata
 
+try:
+    from . import action_ball_full_mdp_portable_catalog as portable_catalog
+except ImportError:
+    import action_ball_full_mdp_portable_catalog as portable_catalog
+
 ActionEpochShotKey = row_identity.ActionEpochShotKey
 
 
-DRAIN_SCHEMA_VERSION = 10
-DRAIN_SUMMARY_KIND = "action_ball_epoch_ppo_boundary_summary_v10"
+DRAIN_SCHEMA_VERSION = 11
+DRAIN_SUMMARY_KIND = "action_ball_epoch_ppo_boundary_summary_v11"
 LIFECYCLE_PAYMENT_COUNT = 14
 SHOT_KEY_FIELDS = (
     "reset_generation",
@@ -220,6 +225,7 @@ class EpochDrainFrontier:
     drain_sequence: int
     start_commit: int
     end_commit: int
+    due_terminal_overlap_rows: int
     diagnostic_unauthorized: bool = True
 
 
@@ -430,6 +436,7 @@ class DecodedEpochDrain:
     completed_shots: tuple[CompletedActionEpochShot, ...]
     terminal_shots: tuple[TerminalActionEpochShot, ...]
     terminal_resets: tuple[ResetTelemetry, ...]
+    due_terminal_overlap_rows: int
     milestone: milestone_tensors.MilestoneWindowTelemetry
     next_continuation: ActionEpochDrainContinuation
 
@@ -1226,7 +1233,7 @@ def decode_epoch_drain_suffix(
         raise ActionEpochDrainDecodeError("D05 conservation differs")
     active_after = int(state.occupied.sum().item())
     episode = dict(zip(
-        milestone_tensors.EPISODE_I64_NAMES, milestone.i64[-7:]
+        milestone_tensors.EPISODE_I64_NAMES, milestone.episode_i64_counts
     ))
     expected_episode = {
         "completed": len(terminal_resets),
@@ -1289,6 +1296,10 @@ def decode_epoch_drain_suffix(
         completed_shots=tuple(completed),
         terminal_shots=tuple(terminal_shots),
         terminal_resets=tuple(terminal_resets),
+        due_terminal_overlap_rows=sum(
+            reset.episode_tick in portable_catalog.FRESH_REFERENCE_DUE_TICKS
+            for reset in terminal_resets
+        ),
         milestone=milestone,
         next_continuation=state,
     )

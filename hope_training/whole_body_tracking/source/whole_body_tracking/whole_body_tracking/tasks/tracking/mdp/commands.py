@@ -98,6 +98,10 @@ _ACTION_BALL_FULL_MDP_FRESH_REFERENCE_DUE_COUNT = (
 _ACTION_BALL_FULL_MDP_FRESH_EPISODE_HORIZON_TICKS = (
     _FULL_MDP_PORTABLE_CATALOG.FRESH_EPISODE_HORIZON_TICKS
 )
+_ACTION_BALL_FULL_MDP_FRESH_SCHEDULE_EXHAUSTED_TIME_S = (
+    _FULL_MDP_PORTABLE_CATALOG.
+    FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S
+)
 
 try:
     import action_ball_full_mdp_row_identity as _ACTION_BALL_ROW_IDENTITY
@@ -4161,6 +4165,19 @@ class MotionCommand(CommandTerm):
         ).to(dtype=self._action_ball_task_age_s.dtype) * float(
             self._env.step_dt
         )
+        if self._action_ball_continuous_fresh_motion_lane_bound:
+            schedule_exhausted = (
+                self._action_ball_continuous_scheduled_ordinal
+                >= _ACTION_BALL_FULL_MDP_FRESH_REFERENCE_DUE_COUNT - 1
+            )
+            time_to_next_reveal = torch.where(
+                schedule_exhausted,
+                torch.full_like(
+                    time_to_next_reveal,
+                    _ACTION_BALL_FULL_MDP_FRESH_SCHEDULE_EXHAUSTED_TIME_S,
+                ),
+                time_to_next_reveal,
+            )
         record = ActionBallContinuousMotionObservationView(
             motion_owner=self,
             publication_identity=publication_identity,

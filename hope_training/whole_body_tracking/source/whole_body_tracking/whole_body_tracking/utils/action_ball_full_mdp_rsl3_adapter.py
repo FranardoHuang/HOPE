@@ -22,8 +22,8 @@ from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 
 
 RUN_MODE = "single_action_lean"
-TELEMETRY_SCHEMA_VERSION = 11
-TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v11"
+TELEMETRY_SCHEMA_VERSION = 12
+TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v12"
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
 ACTOR_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_actor_v2"
 ACTOR_OBSERVATION_WIDTH = 203
@@ -722,7 +722,13 @@ def _telemetry(summary: object, runtime_module: object) -> dict:
         "epoch_commit_end": frontier.end_commit,
         "shot_slot_capacity": frontier.shot_slot_capacity,
         "d05_transactions": settlement.transactions,
+        "d05_scheduled_due_rows": (
+            settlement.due_rows + frontier.due_terminal_overlap_rows
+        ),
         "d05_due_rows": settlement.due_rows,
+        "d05_due_terminal_overlap_rows": (
+            frontier.due_terminal_overlap_rows
+        ),
         "d05_selected_rows": settlement.selected_rows,
         "d05_accepted_rows": settlement.accepted,
         "d05_censored_rows": settlement.censored,

@@ -105,6 +105,12 @@ class MilestoneWindowTelemetry:
     i64: tuple[int, ...]
     f64: tuple[float, ...]
 
+    @property
+    def episode_i64_counts(self) -> tuple[int, ...]:
+        """Return the named episode window independent of later schema fields."""
+
+        return self.i64[_EPI:_PI]
+
     def as_json(self, term_names: tuple[str, ...]) -> dict[str, object]:
         if len(term_names) != REWARD_TERM_COUNT:
             raise ValueError("milestone reward term names differ")
@@ -172,7 +178,7 @@ class MilestoneWindowTelemetry:
                 ],
             },
             "episodes": {
-                **dict(zip(EPISODE_I64_NAMES, self.i64[_EPI:_PI])),
+                **dict(zip(EPISODE_I64_NAMES, self.episode_i64_counts)),
                 **dict(zip(EPISODE_F64_NAMES, self.f64[_EPF:_PF])),
             },
             "paddle_motion_prior_playback": {

@@ -185,7 +185,7 @@ def _host_test_geometric_robot_table_hit_mask(
 if _wp is not None:
 
     @_wp.func
-    def _warp_quat_rotate_wxyz_f32(q: _wp.vec4, v: _wp.vec3) -> _wp.vec3:
+    def _warp_quat_rotate_wxyz_f32(q: _wp.quat, v: _wp.vec3) -> _wp.vec3:
         xyz = _wp.vec3(q[1], q[2], q[3])
         first = _wp.cross(xyz, v)
         return v + 2.0 * (q[0] * first + _wp.cross(xyz, first))
@@ -309,7 +309,7 @@ if _wp is not None:
     @_wp.kernel(enable_backward=False)
     def _warp_table_keepout_f32(
         body_pos_w: _wp.array(dtype=_wp.vec3, ndim=2),
-        body_quat_w: _wp.array(dtype=_wp.vec4, ndim=2),
+        body_quat_w: _wp.array(dtype=_wp.quat, ndim=2),
         env_origins: _wp.array(dtype=_wp.vec3, ndim=1),
         body_ids: _wp.array(dtype=_wp.int64, ndim=1),
         component_owner_indices: _wp.array(dtype=_wp.int64, ndim=1),
@@ -493,26 +493,32 @@ def _validate_cuda_static_inputs(
         raise RuntimeError("CUDA table keepout component owner binding differs")
 
 
-def _validate_cuda_live_poses(
-    body_pos_w: torch.Tensor,
-    body_quat_w: torch.Tensor,
+def _validate_cuda_live_warp_arrays(
+    body_pos_w: object,
+    body_quat_w: object,
     *,
-    device: torch.device,
-    pos_shape: tuple[int, int, int],
-    quat_shape: tuple[int, int, int],
+    device: object,
+    pos_shape: tuple[int, int],
+    quat_shape: tuple[int, int],
 ) -> None:
-    """Check only the two live MuJoCo views before a bound Warp launch."""
+    """Validate the two native MJWarp arrays without conversion or readback."""
 
-    if not isinstance(body_pos_w, torch.Tensor) or not isinstance(
-        body_quat_w, torch.Tensor
+    if not isinstance(body_pos_w, _wp.array) or not isinstance(
+        body_quat_w, _wp.array
     ):
-        raise RuntimeError("CUDA table keepout live poses must be Torch tensors")
+        raise RuntimeError("CUDA table keepout requires native MJWarp pose arrays")
     if body_pos_w.device != device or body_quat_w.device != device:
         raise RuntimeError("CUDA table keepout live pose device differs")
-    if body_pos_w.dtype != torch.float32 or body_quat_w.dtype != torch.float32:
+    if body_pos_w.dtype != _wp.vec3 or body_quat_w.dtype != _wp.quat:
         raise RuntimeError("CUDA table keepout live pose dtype differs")
     if tuple(body_pos_w.shape) != pos_shape or tuple(body_quat_w.shape) != quat_shape:
         raise RuntimeError("CUDA table keepout live pose shape differs")
+    if not body_pos_w.is_contiguous or not body_quat_w.is_contiguous:
+        raise RuntimeError("CUDA table keepout live pose layout differs")
+    if type(body_pos_w.ptr) is not int or type(body_quat_w.ptr) is not int:
+        raise RuntimeError("CUDA table keepout live pose pointer type differs")
+    if body_pos_w.ptr == 0 or body_quat_w.ptr == 0:
+        raise RuntimeError("CUDA table keepout live pose pointer is null")
 
 
 def _warp_static_launch_inputs(
@@ -688,8 +694,12 @@ class DeviceExactTableKeepout:
         )
         env_count = int(self.env_origins.shape[0])
         self._cuda_live_device = self.env_origins.device
-        self._cuda_live_pos_shape = (env_count, body_count, 3)
-        self._cuda_live_quat_shape = (env_count, body_count, 4)
+        # Native MJWarp stores vector-valued arrays as two-dimensional
+        # ``array2d[vec3/quat]``; the trailing vector width appears only after
+        # a Torch view is made.  The production sampler consumes these arrays
+        # directly, so no per-step bridge/wrapper conversion is needed.
+        self._cuda_live_pos_shape = (env_count, body_count)
+        self._cuda_live_quat_shape = (env_count, body_count)
         self._cuda_kernel_output = torch.empty(
             (env_count,), dtype=torch.bool, device=self._cuda_live_device
         )
@@ -724,12 +734,18 @@ class DeviceExactTableKeepout:
 
     def sample(self, data) -> torch.Tensor:
         if self._cuda_kernel_output is not None:
-            body_pos_w = data.xpos
-            body_quat_w = data.xquat
-            _validate_cuda_live_poses(
+            try:
+                wp_data = data.struct
+                body_pos_w = wp_data.xpos
+                body_quat_w = wp_data.xquat
+            except AttributeError as exc:
+                raise RuntimeError(
+                    "CUDA table keepout requires the native MJWarp data struct"
+                ) from exc
+            _validate_cuda_live_warp_arrays(
                 body_pos_w,
                 body_quat_w,
-                device=self._cuda_live_device,
+                device=self._cuda_warp_device,
                 pos_shape=self._cuda_live_pos_shape,
                 quat_shape=self._cuda_live_quat_shape,
             )
@@ -738,12 +754,8 @@ class DeviceExactTableKeepout:
                     _warp_table_keepout_f32,
                     dim=body_pos_w.shape[0],
                     inputs=(
-                        _wp.from_torch(
-                            body_pos_w, dtype=_wp.vec3, requires_grad=False
-                        ),
-                        _wp.from_torch(
-                            body_quat_w, dtype=_wp.vec4, requires_grad=False
-                        ),
+                        body_pos_w,
+                        body_quat_w,
                         *self._cuda_warp_static_inputs,
                     ),
                     outputs=(self._cuda_warp_output,),

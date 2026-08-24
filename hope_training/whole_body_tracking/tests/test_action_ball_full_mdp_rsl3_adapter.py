@@ -66,6 +66,7 @@ class _Frontier:
     start_commit: int = 0
     end_commit: int = 0
     shot_slot_capacity: int = 1
+    due_terminal_overlap_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -463,26 +464,83 @@ def _fake_imports(monkeypatch):
     )
     real_import_module = adapter.importlib.import_module
 
-    def import_module(name):
-        if name == "torch" or name.startswith("torch."):
-            return real_import_module(name)
-        if name.endswith("action_ball_full_mdp_lean_runtime"):
+    def import_module(name, package=None):
+        resolved = (
+            importlib.util.resolve_name(name, package)
+            if name.startswith(".")
+            else name
+        )
+        if resolved == "torch" or resolved.startswith("torch."):
+            return real_import_module(name, package)
+        if resolved == (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "action_ball_full_mdp_lean_runtime"
+        ):
             return runtime
-        if name.endswith("action_ball_full_mdp_lean_observation_cfg"):
+        if resolved == (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "action_ball_full_mdp_lean_observation_cfg"
+        ):
             return types.SimpleNamespace(
                 installed_observation_facts=lambda env: env.observation_facts
             )
-        if name.endswith("action_ball_full_mdp_lean_rewards"):
+        if resolved == (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "action_ball_full_mdp_lean_rewards"
+        ):
             return types.SimpleNamespace(MANAGER_NAMES=("reward",))
-        if name.endswith("hope_actions"):
-            module = types.ModuleType(name)
+        if resolved == "whole_body_tracking.tasks.tracking.mdp.hope_actions":
+            module = types.ModuleType(resolved)
             module.ClampedJointPositionAction = ClampedJointPositionAction
             return module
-        if name.endswith("action_ball_full_mdp_durable_wal"):
+        if resolved == (
+            "whole_body_tracking.utils.action_ball_full_mdp_durable_wal"
+        ):
             return durable_wal
-        raise AssertionError(f"unexpected adapter import: {name}")
+        raise AssertionError(f"unexpected adapter import: {resolved}")
 
     monkeypatch.setattr(adapter.importlib, "import_module", import_module)
+    return runtime
+
+
+def test_schedule_telemetry_uses_existing_public_due_plus_terminal_overlap(
+    _fake_imports,
+):
+    summary = _Summary(
+        frontier=_Frontier(
+            update_index=3,
+            completed_environment_steps=96,
+            due_terminal_overlap_rows=2,
+        ),
+        settlement=_Settlement(
+            transactions=1,
+            due_rows=5,
+            accepted=1,
+            censored=1,
+            rejected=1,
+            deferred=2,
+        ),
+    )
+
+    telemetry = adapter._telemetry(summary, _fake_imports)
+
+    assert telemetry["d05_due_rows"] == 5
+    assert telemetry["d05_due_terminal_overlap_rows"] == 2
+    assert telemetry["d05_scheduled_due_rows"] == 7
+    assert "d05_public_due_rows" not in telemetry
+
+
+def test_fake_imports_preserve_package_aware_torch_lazy_import(
+    _fake_imports,
+):
+    torch = pytest.importorskip("torch")
+    assert adapter.importlib.import_module(".optim", "torch") is torch.optim
+    parameter = torch.nn.Parameter(torch.tensor([2.0]))
+    optimizer = torch.optim.Adam([parameter], lr=0.1)
+    optimizer.zero_grad()
+    parameter.square().sum().backward()
+    optimizer.step()
+    assert int(optimizer.state[parameter]["step"].item()) == 1
 
 
 def test_update_orders_optimizer_between_prepare_and_durable_ack(
@@ -536,10 +594,20 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
         "action_ball_epoch_durable_ack_v2",
     ]
     assert rows[0]["pending_ack_telemetry"]["diagnostic_unauthorized"] is True
-    assert rows[0]["pending_ack_telemetry"]["schema_version"] == 11
+    assert rows[0]["pending_ack_telemetry"]["schema_version"] == 12
     assert rows[0]["pending_ack_telemetry"]["kind"] == (
-        "action_ball_epoch_optimizer_update_ack_telemetry_v11"
+        "action_ball_epoch_optimizer_update_ack_telemetry_v12"
     )
+    assert {
+        key: rows[0]["pending_ack_telemetry"][key]
+        for key in (
+            "d05_scheduled_due_rows",
+            "d05_due_terminal_overlap_rows",
+        )
+    } == {
+        "d05_scheduled_due_rows": 0,
+        "d05_due_terminal_overlap_rows": 0,
+    }
     assert rows[0]["pending_ack_telemetry"]["joint_safety"] == {
         "event": "hope_joint_safety_diagnostic_compact_update",
         "schema_version": 1,

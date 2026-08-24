@@ -2222,6 +2222,14 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         time_to_next_opportunity = (
             self._full_a_next_reveal_tick - self.episode_length_buf
         ).to(dtype=dtype) * float(self.step_dt)
+        schedule_exhausted = self._full_a_scheduled_ordinal.ge(
+            len(self._full_a_cadence.reference_due_ticks) - 1
+        )
+        time_to_next_opportunity = torch.where(
+            schedule_exhausted,
+            portable_catalog.FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S,
+            time_to_next_opportunity,
+        )
 
         learning_phase = torch.zeros_like(self._epoch_phase)
         for index, code in enumerate(

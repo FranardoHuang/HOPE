@@ -30,6 +30,28 @@ def _milestone():
     )
 
 
+def _milestone_with_episode_closures(*closures, paddle_unavailable=False):
+    milestone = D.milestone_tensors.MilestoneTensorAccumulator(
+        SHAPE[0], torch.device("cpu")
+    )
+    for selected, lengths, reasons in closures:
+        milestone.close_episodes(
+            torch.tensor(selected, dtype=torch.bool),
+            torch.tensor(lengths, dtype=torch.int64),
+            torch.tensor(reasons, dtype=torch.int64),
+        )
+    if paddle_unavailable:
+        first_paddle = (
+            D.milestone_tensors.REWARD_TERM_COUNT
+            - len(D.milestone_tensors.PADDLE_PLAYBACK_TERM_NAMES)
+        )
+        for ordinal in range(
+            first_paddle, D.milestone_tensors.REWARD_TERM_COUNT
+        ):
+            milestone.add_paddle_motion_prior_unavailable(ordinal)
+    return tuple(value.detach().clone() for value in milestone.pack_views())
+
+
 def _key(*, valid_rows=(), seed=10_000):
     values = {}
     for offset, name in enumerate(D.SHOT_KEY_FIELDS):
@@ -294,6 +316,40 @@ def test_update_zero_empty_suffix_is_a_general_zero_transaction_abi():
     assert decoded.continuation.active_after == 0
 
 
+def test_schema7_4096_h48_unavailable_tail_is_not_episode_evidence():
+    milestone = D.milestone_tensors.MilestoneTensorAccumulator(
+        4096, torch.device("cpu")
+    )
+    first_paddle = (
+        D.milestone_tensors.REWARD_TERM_COUNT
+        - len(D.milestone_tensors.PADDLE_PLAYBACK_TERM_NAMES)
+    )
+    for _control in range(48):
+        for ordinal in range(
+            first_paddle, D.milestone_tensors.REWARD_TERM_COUNT
+        ):
+            milestone.add_paddle_motion_prior_unavailable(ordinal)
+    milestone_i64, milestone_f64 = tuple(
+        value.detach().clone() for value in milestone.pack_views()
+    )
+
+    decoded = _decode(
+        (), milestone=(milestone_i64, milestone_f64)
+    )
+
+    assert decoded.terminal_resets == ()
+    assert decoded.milestone.episode_i64_counts == (0,) * 7
+    assert tuple(milestone_i64[-7:].tolist()) == (
+        0,
+        0,
+        0,
+        4096 * 48,
+        0,
+        0,
+        0,
+    )
+
+
 def test_event_telemetry_and_business_journal_remain_separately_visible():
     entries = []
     _append_completed_shot(
@@ -315,24 +371,81 @@ def test_event_telemetry_and_business_journal_remain_separately_visible():
 
 
 def test_episode_window_matches_exact_selected_reset_suffix():
-    milestone_i64, milestone_f64 = _milestone()
-    milestone_i64[-7:] = torch.tensor([1, 2, 1, 0, 0, 0, 0])
+    milestone_i64, milestone_f64 = _milestone_with_episode_closures(
+        ((True, False), (2, 0), (1, 0)),
+        paddle_unavailable=True,
+    )
     decoded = _decode(
         (_selected_reset_entry(0),),
         milestone=(milestone_i64, milestone_f64),
     )
     assert len(decoded.terminal_resets) == 1
+    assert decoded.milestone.episode_i64_counts == (1, 2, 1, 0, 0, 0, 0)
+    # Schema 7 appends four paddle telemetry blocks after episode counters.
+    # Their nonzero unavailable counts must not masquerade as reset evidence.
+    assert tuple(milestone_i64[-7:].tolist()) != (1, 2, 1, 0, 0, 0, 0)
 
-    mismatched = milestone_i64.clone()
-    mismatched[-6] = 3
+    mismatched_i64, mismatched_f64 = _milestone_with_episode_closures(
+        ((True, False), (3, 0), (1, 0)),
+        paddle_unavailable=True,
+    )
     with pytest.raises(
         D.ActionEpochDrainDecodeError,
         match="episode/reset suffix relationship differs",
     ):
         _decode(
             (_selected_reset_entry(0),),
-            milestone=(mismatched, milestone_f64),
+            milestone=(mismatched_i64, mismatched_f64),
         )
+
+
+@pytest.mark.parametrize("reason_bits", (1, 2, 16))
+def test_due_tick_terminal_is_counted_beside_surviving_public_due(reason_bits):
+    entries = []
+    _append_d05(
+        entries,
+        due_row=1,
+        decision=D.D05_DECISION_CENSOR,
+        valid_key=False,
+        epoch=4,
+    )
+    entries.append(
+        _selected_reset_entry(
+            len(entries),
+            selected=(True, False),
+            generations=(1, 0),
+            facts=((10, 295, reason_bits), (-1, -1, 0)),
+        )
+    )
+    milestone_i64, milestone_f64 = _milestone_with_episode_closures(
+        ((True, False), (295, 0), (reason_bits, 0)),
+    )
+    decoded = _decode(
+        entries, milestone=(milestone_i64, milestone_f64)
+    )
+
+    assert decoded.settlement.due_rows == 1
+    assert decoded.due_terminal_overlap_rows == 1
+    assert (
+        decoded.settlement.due_rows + decoded.due_terminal_overlap_rows
+    ) == 2
+
+
+def test_non_due_terminal_tick_does_not_inflate_scheduled_exposure():
+    milestone_i64, milestone_f64 = _milestone_with_episode_closures(
+        ((True, False), (294, 0), (2, 0)),
+    )
+    decoded = _decode(
+        (
+            _selected_reset_entry(
+                0,
+                facts=((10, 294, 2), (-1, -1, 0)),
+            ),
+        ),
+        milestone=(milestone_i64, milestone_f64),
+    )
+    assert decoded.settlement.due_rows == 0
+    assert decoded.due_terminal_overlap_rows == 0
 
 
 def test_frozen_producer_negative_unpublished_epoch_rows_decode():
@@ -705,8 +818,9 @@ def test_selected_reset_clears_only_the_selected_continuation_row():
     first = _decode(entries)
     selected = torch.tensor([True, False], dtype=torch.bool)
     reset = _selected_reset_entry(0, generations=(11_000, 0))
-    milestone_i64, milestone_f64 = _milestone()
-    milestone_i64[-7:] = torch.tensor([1, 2, 1, 0, 0, 0, 0])
+    milestone_i64, milestone_f64 = _milestone_with_episode_closures(
+        ((True, False), (2, 0), (1, 0)),
+    )
     second = _decode(
         (reset,), first.next_continuation, start=len(entries),
         milestone=(milestone_i64, milestone_f64),
@@ -784,8 +898,9 @@ def test_r07_invalid_then_qualified_and_first_ready_preserve_true_sources():
     decoded = _decode(
         (ready,), decoded.next_continuation, start=len(first) + 4
     )
-    milestone_i64, milestone_f64 = _milestone()
-    milestone_i64[-7:] = torch.tensor([1, 2, 1, 0, 0, 0, 0])
+    milestone_i64, milestone_f64 = _milestone_with_episode_closures(
+        ((True, False), (2, 0), (1, 0)),
+    )
     closed = _decode(
         (_selected_reset_entry(0, generations=(11_000, 0)),),
         decoded.next_continuation,
@@ -900,8 +1015,10 @@ def test_selected_reset_telemetry_illegal_counterexamples_fail_closed(facts):
 
 
 def test_same_env_multiple_resets_and_multibit_reasons_remain_distinct():
-    milestone_i64, milestone_f64 = _milestone()
-    milestone_i64[-7:] = torch.tensor([2, 8, 1, 0, 2, 0, 1])
+    milestone_i64, milestone_f64 = _milestone_with_episode_closures(
+        ((True, False), (7, 0), (1 | 4, 0)),
+        ((True, False), (1, 0), (4 | 16, 0)),
+    )
     decoded = _decode(
         (
             _selected_reset_entry(
