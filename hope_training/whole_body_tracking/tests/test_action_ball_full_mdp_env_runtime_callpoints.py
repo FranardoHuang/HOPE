@@ -733,6 +733,46 @@ def test_pure_horizon_transition_remains_rsl_timeout_and_reason_owner():
     assert env.episode_length_buf.tolist() == [10, 0]
 
 
+@pytest.mark.parametrize(
+    ("reason_name", "expected_reason_bits", "expected_terminated", "expected_timeout"),
+    (
+        ("time_out", 1, False, True),
+        ("base_fell_tilt", 2, True, False),
+        ("robot_hit_table", 16, True, False),
+    ),
+)
+def test_due_transition_294_to_295_journals_exact_terminal_tick(
+    reason_name,
+    expected_reason_bits,
+    expected_terminated,
+    expected_timeout,
+):
+    # Row 1 terminates on the exact transition that advances its episode clock
+    # from 294 to the first public cadence tick.  The top env must freeze 295 in
+    # ResetTelemetry before native reset clears the row; row 0 is an async peer.
+    env, owner, *_ = _env(
+        reset_mask=(False, True),
+        decimation=1,
+        episode_lengths=(41, 294),
+        termination_reason_masks={
+            reason_name: torch.tensor([False, True]),
+        },
+    )
+
+    result = env.step(torch.zeros(2, 4))
+
+    assert result[2].tolist() == [False, expected_terminated]
+    assert result[3].tolist() == [False, expected_timeout]
+    assert torch.equal(
+        owner.reset_facts[0],
+        torch.tensor(
+            [[-1, -1, 0], [1, 295, expected_reason_bits]],
+            dtype=torch.int64,
+        ),
+    )
+    assert env.episode_length_buf.tolist() == [42, 0]
+
+
 def test_mixed_batch_partitions_timeout_plant_and_reset_facts_rowwise():
     # Exercise all three terminal classes in one manager result.  Row 0 is a
     # pure horizon, row 1 reaches the horizon and has a plant terminal on the
