@@ -96,25 +96,41 @@ def _device_verdict(device: str, count: int = 24, dtype=torch.float64):
     tensor = lambda value, tensor_dtype=dtype: torch.as_tensor(  # noqa: E731
         np.array(value, copy=True), dtype=tensor_dtype, device=device
     )
-    actual = keepout.geometric_robot_table_hit_mask(
-        tensor(positions),
-        tensor(quats),
-        torch.zeros((count, 3), dtype=dtype, device=device),
-        tensor(components.owner_indices, torch.long),
-        tensor(components.local_centers_m),
-        tensor(components.local_half_axes_m),
-        tensor(lo),
-        tensor(hi),
-        racket_body_index=keepout._authority.TABLE_CONTACT_BODY_NAMES.index(
+    inputs = {
+        "body_pos_w": tensor(positions),
+        "body_quat_w": tensor(quats),
+        "env_origins": torch.zeros((count, 3), dtype=dtype, device=device),
+        "component_owner_indices": tensor(components.owner_indices, torch.long),
+        "component_local_centers": tensor(components.local_centers_m),
+        "component_local_half_axes": tensor(components.local_half_axes_m),
+        "table_lo": tensor(lo),
+        "table_hi": tensor(hi),
+        "racket_body_index": keepout._authority.TABLE_CONTACT_BODY_NAMES.index(
             keepout._authority.RACKET_BODY_NAME
         ),
-        blade_center_offset=tensor(
+        "blade_center_offset": tensor(
             keepout._authority.RACKET_BLADE_CENTER_OFFSET_WRIST_M
         ),
-        blade_local_half_axes=tensor(
+        "blade_local_half_axes": tensor(
             keepout._authority.RACKET_BLADE_LOCAL_HALF_AXES_M
         ),
-    )
+    }
+    if torch.device(device).type == "cpu":
+        actual = keepout.geometric_robot_table_hit_mask(
+            inputs["body_pos_w"],
+            inputs["body_quat_w"],
+            inputs["env_origins"],
+            inputs["component_owner_indices"],
+            inputs["component_local_centers"],
+            inputs["component_local_half_axes"],
+            inputs["table_lo"],
+            inputs["table_hi"],
+            racket_body_index=inputs["racket_body_index"],
+            blade_center_offset=inputs["blade_center_offset"],
+            blade_local_half_axes=inputs["blade_local_half_axes"],
+        )
+    else:
+        actual = _cuda_bound_verdict(inputs, device)
     assert actual.device == torch.device(device)
     return actual.cpu(), torch.as_tensor(expected)
 
@@ -169,26 +185,257 @@ def _empty_corner_discriminator(device: str, dtype):
     quats[..., 0] = 1.0
     quats[0, 0, 0] = np.cos(np.pi / 8.0)
     quats[0, 0, 3] = np.sin(np.pi / 8.0)
-    axes = torch.eye(3, dtype=dtype, device=device).mul_(0.01).unsqueeze(0)
-    lo = torch.tensor(((-0.1, -0.1, -0.1),), dtype=dtype, device=device)
-    hi = -lo
+    one_axes = torch.eye(3, dtype=dtype, device=device).mul_(0.01)
+    axes = one_axes.unsqueeze(0).repeat(62, 1, 1)
+    lo = torch.tensor(
+        (
+            (-0.1, -0.1, -0.1),
+            (10.0, 10.0, 10.0),
+            (20.0, 20.0, 20.0),
+            (30.0, 30.0, 30.0),
+            (40.0, 40.0, 40.0),
+        ),
+        dtype=dtype,
+        device=device,
+    )
+    hi = lo + torch.tensor((0.2, 0.2, 0.2), dtype=dtype, device=device)
+    hi[0] = -lo[0]
     broad_half = float(np.sqrt(2.0) * 0.01 + 1.0e-6)
     assert 0.112 - broad_half <= 0.1
-    actual = keepout.geometric_robot_table_hit_mask(
-        positions,
-        quats,
-        torch.zeros((1, 3), dtype=dtype, device=device),
-        torch.zeros(1, dtype=torch.long, device=device),
-        torch.zeros((1, 3), dtype=dtype, device=device),
-        axes,
-        lo,
-        hi,
-        racket_body_index=31,
-        blade_center_offset=torch.zeros(3, dtype=dtype, device=device),
-        blade_local_half_axes=axes[0],
-    )
+    inputs = {
+        "body_pos_w": positions,
+        "body_quat_w": quats,
+        "env_origins": torch.zeros((1, 3), dtype=dtype, device=device),
+        "component_owner_indices": torch.zeros(
+            62, dtype=torch.long, device=device
+        ),
+        "component_local_centers": torch.zeros(
+            (62, 3), dtype=dtype, device=device
+        ),
+        "component_local_half_axes": axes,
+        "table_lo": lo,
+        "table_hi": hi,
+        "racket_body_index": 31,
+        "blade_center_offset": torch.zeros(3, dtype=dtype, device=device),
+        "blade_local_half_axes": one_axes,
+    }
+    if torch.device(device).type == "cpu":
+        actual = keepout.geometric_robot_table_hit_mask(
+            inputs["body_pos_w"],
+            inputs["body_quat_w"],
+            inputs["env_origins"],
+            inputs["component_owner_indices"],
+            inputs["component_local_centers"],
+            inputs["component_local_half_axes"],
+            inputs["table_lo"],
+            inputs["table_hi"],
+            racket_body_index=inputs["racket_body_index"],
+            blade_center_offset=inputs["blade_center_offset"],
+            blade_local_half_axes=inputs["blade_local_half_axes"],
+        )
+    else:
+        actual = _cuda_bound_verdict(inputs, device)
     assert actual.device == torch.device(device)
     return actual.cpu()
+
+
+def _fixed_shape_tape(dtype=torch.float32):
+    """One immutable tape spanning every discrete SAT/fail-closed stratum."""
+
+    count = 94
+    positions = torch.full((count, 32, 3), 50.0, dtype=dtype)
+    quats = torch.zeros((count, 32, 4), dtype=dtype)
+    quats[..., 0] = 1.0
+    origins = torch.zeros((count, 3), dtype=dtype)
+    owners = torch.arange(62, dtype=torch.long).remainder(31)
+    centers = torch.zeros((62, 3), dtype=dtype)
+    half_axes = torch.eye(3, dtype=dtype).mul(0.125).repeat(62, 1, 1)
+    anisotropic = torch.diag(torch.tensor((0.2, 0.05, 0.1), dtype=dtype))
+    half_axes[owners == 0] = anisotropic
+    lo = torch.tensor(
+        (
+            (-1.0, -1.0, -1.0),
+            (10.0, 10.0, 10.0),
+            (20.0, 20.0, 20.0),
+            (30.0, 30.0, 30.0),
+            (40.0, 40.0, 40.0),
+        ),
+        dtype=dtype,
+    )
+    hi = lo + 0.5
+    hi[0] = 1.0
+
+    # none=[0:8]; sparse=[8:16] with exactly two positive environments.
+    positions[9, 0] = 0.0
+    positions[14, 0] = 0.0
+    # all=[16:24].
+    positions[16:24, 0] = 0.0
+    # touching=[24] is inclusive; [25] is separated by a representable gap.
+    positions[24, 1] = torch.tensor((1.125, 0.0, 0.0), dtype=dtype)
+    positions[25, 1] = torch.tensor((1.126953125, 0.0, 0.0), dtype=dtype)
+    # Exercise world->environment subtraction on both known-negative and
+    # known-positive rows without changing their local geometry.
+    # Keep the one-ULP boundary rows [36:38] at zero origin: adding and then
+    # subtracting a large origin would itself consume the intended ULP gap.
+    translated = torch.tensor((*range(26), *range(30, 36)), dtype=torch.long)
+    origins[translated] = torch.linspace(
+        -37.0, 41.0, translated.numel(), dtype=dtype
+    )[:, None] * torch.tensor((1.0, -0.5, 0.25), dtype=dtype)
+    positions[translated] += origins[translated, None]
+
+    # nonfinite/zero-quaternion=[26:30], all fail closed even though geometry is far.
+    positions[26, 7, 0] = float("nan")
+    quats[27, 11, 2] = float("inf")
+    quats[28, 19] = 0.0
+    origins[29, 1] = float("nan")
+
+    # Each nonzero-index table box gets one positive component row [30:34].
+    # Row 34 is blade-only because component owners exclude body 31.  Row 35
+    # proves quaternion normalization, rather than unit input, owns the pose.
+    for row, table in zip(range(30, 34), range(1, 5)):
+        positions[row, 0] = 0.5 * (lo[table] + hi[table]) + origins[row]
+    positions[34, 31] = origins[34]
+    positions[35, 0] = origins[35]
+    quats[35] *= 2.0
+
+    # Rows 36/37 are the same rotated anisotropic OBB at exact contact and one
+    # representable step outside it.  This catches FMA/operation-order drift at
+    # the only place where a float difference can flip the terminal bit.
+    theta = torch.tensor(np.pi / 4.0, dtype=dtype)
+    rotated_quat = torch.stack(
+        (
+            torch.cos(0.5 * theta),
+            torch.zeros_like(theta),
+            torch.zeros_like(theta),
+            torch.sin(0.5 * theta),
+        )
+    )
+    quats[36:38, 0] = rotated_quat
+    normalized_rotated_quat = rotated_quat / torch.linalg.vector_norm(rotated_quat)
+    rotated_axes = keepout._quat_rotate_wxyz(
+        normalized_rotated_quat.expand(3, -1), anisotropic
+    )
+    touching_center_x = 1.0 + torch.sum(torch.abs(rotated_axes[:, 0]))
+    separated_center_x = torch.nextafter(
+        touching_center_x, torch.tensor(float("inf"), dtype=dtype)
+    )
+    positions[36, 0] = (
+        torch.stack(
+            (touching_center_x, torch.zeros_like(theta), torch.zeros_like(theta))
+        )
+        + origins[36]
+    )
+    positions[37, 0] = (
+        torch.stack(
+            (separated_center_x, torch.zeros_like(theta), torch.zeros_like(theta))
+        )
+        + origins[37]
+    )
+
+    # random=[38:94], generated once from a fixed seed and intentionally not
+    # concentrated near a boundary.  Its verdict comes from the retained oracle.
+    generator = torch.Generator(device="cpu").manual_seed(20260825)
+    positions[38:] = torch.empty((56, 32, 3), dtype=dtype).uniform_(
+        -3.0, 3.0, generator=generator
+    )
+    random_quat = torch.randn((56, 32, 4), dtype=dtype, generator=generator)
+    quats[38:] = random_quat / torch.linalg.vector_norm(
+        random_quat, dim=-1, keepdim=True
+    )
+    return {
+        "body_pos_w": positions,
+        "body_quat_w": quats,
+        "env_origins": origins,
+        "component_owner_indices": owners,
+        "component_local_centers": centers,
+        "component_local_half_axes": half_axes,
+        "table_lo": lo,
+        "table_hi": hi,
+        "racket_body_index": 31,
+        "blade_center_offset": torch.zeros(3, dtype=dtype),
+        "blade_local_half_axes": torch.eye(3, dtype=dtype).mul(0.125),
+    }
+
+
+def _cuda_bound_verdict(inputs, device, *, full_body=False):
+    """Exercise the only CUDA production path with synthetic bound constants."""
+
+    tensor_inputs = {
+        key: value.to(device)
+        for key, value in inputs.items()
+        if isinstance(value, torch.Tensor)
+    }
+    body_ids = torch.arange(32, dtype=torch.long, device=device)
+    positions = tensor_inputs["body_pos_w"]
+    quats = tensor_inputs["body_quat_w"]
+    if full_body:
+        body_ids = torch.tensor((31, *range(31)), dtype=torch.long, device=device)
+        count = positions.shape[0]
+        full_positions = torch.full(
+            (count, 47, 3), float("nan"), dtype=torch.float32, device=device
+        )
+        full_quats = torch.full(
+            (count, 47, 4), float("nan"), dtype=torch.float32, device=device
+        )
+        full_positions[:, body_ids] = positions
+        full_quats[:, body_ids] = quats
+        positions = full_positions
+        quats = full_quats
+
+    bound = object.__new__(keepout.DeviceExactTableKeepout)
+    bound.env_origins = tensor_inputs["env_origins"]
+    bound.body_ids = body_ids
+    bound.component_owner_indices = tensor_inputs["component_owner_indices"]
+    bound.component_local_centers = tensor_inputs["component_local_centers"]
+    bound.component_local_half_axes = tensor_inputs["component_local_half_axes"]
+    bound.table_lo = tensor_inputs["table_lo"]
+    bound.table_hi = tensor_inputs["table_hi"]
+    bound.racket_body_index = inputs["racket_body_index"]
+    bound.blade_center_offset = tensor_inputs["blade_center_offset"]
+    bound.blade_local_half_axes = tensor_inputs["blade_local_half_axes"]
+    bound._bind_cuda_kernel(body_count=positions.shape[1])
+    return bound.sample(SimpleNamespace(xpos=positions, xquat=quats))
+
+
+def _tape_verdict(inputs, device):
+    if torch.device(device).type == "cuda":
+        return _cuda_bound_verdict(inputs, device)
+    tensor_inputs = {
+        key: value.to(device)
+        for key, value in inputs.items()
+        if isinstance(value, torch.Tensor)
+    }
+    return keepout.geometric_robot_table_hit_mask(
+        tensor_inputs["body_pos_w"],
+        tensor_inputs["body_quat_w"],
+        tensor_inputs["env_origins"],
+        tensor_inputs["component_owner_indices"],
+        tensor_inputs["component_local_centers"],
+        tensor_inputs["component_local_half_axes"],
+        tensor_inputs["table_lo"],
+        tensor_inputs["table_hi"],
+        racket_body_index=inputs["racket_body_index"],
+        blade_center_offset=tensor_inputs["blade_center_offset"],
+        blade_local_half_axes=tensor_inputs["blade_local_half_axes"],
+    )
+
+
+def _full_body_tape_verdict(inputs, device):
+    """Exercise the production local-body -> MuJoCo-body gather inside Warp."""
+
+    return _cuda_bound_verdict(inputs, device, full_body=True)
+
+
+def _assert_fixed_tape_strata(verdict):
+    assert verdict[0:8].tolist() == [False] * 8
+    assert verdict[8:16].tolist() == [
+        False, True, False, False, False, False, True, False
+    ]
+    assert verdict[16:24].tolist() == [True] * 8
+    assert verdict[24:26].tolist() == [True, False]
+    assert verdict[26:30].tolist() == [True] * 4
+    assert verdict[30:36].tolist() == [True] * 6
+    assert verdict[36:38].tolist() == [True, False]
 
 
 def test_substep_latch_skips_preintegration_pose_and_includes_final_forward():
@@ -226,16 +473,292 @@ def test_torch_cpu_guard_matches_authority_in_runtime_and_audit_dtypes(dtype):
     assert _empty_corner_discriminator("cpu", dtype).tolist() == [False]
 
 
+@pytest.mark.parametrize("dtype", (torch.float32, torch.float64))
+def test_fixed_shape_tape_covers_none_sparse_all_touching_nonfinite_random(dtype):
+    inputs = _fixed_shape_tape(dtype)
+    actual = _tape_verdict(inputs, "cpu")
+    oracle = keepout._host_test_geometric_robot_table_hit_mask(
+        inputs["body_pos_w"],
+        inputs["body_quat_w"],
+        inputs["env_origins"],
+        inputs["component_owner_indices"],
+        inputs["component_local_centers"],
+        inputs["component_local_half_axes"],
+        inputs["table_lo"],
+        inputs["table_hi"],
+        racket_body_index=inputs["racket_body_index"],
+        blade_center_offset=inputs["blade_center_offset"],
+        blade_local_half_axes=inputs["blade_local_half_axes"],
+    )
+    assert torch.equal(actual, oracle)
+    _assert_fixed_tape_strata(actual)
+
+
+def test_missing_warp_backend_fails_loud_instead_of_selecting_eager(monkeypatch):
+    import_error = ImportError("deliberately absent")
+    monkeypatch.setattr(keepout, "_wp", None)
+    monkeypatch.setattr(keepout, "_warp_table_keepout_f32", None)
+    monkeypatch.setattr(keepout, "_WARP_IMPORT_ERROR", import_error)
+    with pytest.raises(
+        RuntimeError, match="eager fallback is host-test-only"
+    ) as caught:
+        keepout._require_warp_table_keepout_kernel()
+    assert caught.value.__cause__ is import_error
+
+
+def test_free_function_rejects_non_cpu_instead_of_opening_second_cuda_path():
+    body_pos = torch.empty((1, 32, 3), device="meta")
+    with pytest.raises(RuntimeError, match="free function is a CPU oracle"):
+        keepout.geometric_robot_table_hit_mask(
+            body_pos,
+            torch.empty((1, 32, 4), device="meta"),
+            torch.empty((1, 3), device="meta"),
+            torch.empty(62, dtype=torch.long, device="meta"),
+            torch.empty((62, 3), device="meta"),
+            torch.empty((62, 3, 3), device="meta"),
+            torch.empty((5, 3), device="meta"),
+            torch.empty((5, 3), device="meta"),
+            racket_body_index=31,
+            blade_center_offset=torch.empty(3, device="meta"),
+            blade_local_half_axes=torch.empty((3, 3), device="meta"),
+        )
+
+
+def test_cuda_bound_sampler_passes_full_pose_without_torch_gather(monkeypatch):
+    seen = {}
+
+    class FakeWarp:
+        vec3 = object()
+        vec4 = object()
+
+        @staticmethod
+        def from_torch(tensor, *, dtype=None, requires_grad=None):
+            return tensor
+
+        @staticmethod
+        def launch(kernel, **kwargs):
+            seen["kernel"] = kernel
+            seen.update(kwargs)
+
+    monkeypatch.setattr(keepout, "_wp", FakeWarp())
+    bound = object.__new__(keepout.DeviceExactTableKeepout)
+    bound._cuda_kernel_output = torch.empty(2, dtype=torch.bool)
+    bound._cuda_warp_static_inputs = (object(),)
+    bound._cuda_warp_output = object()
+    bound._cuda_warp_device = object()
+    bound._cuda_warp_stream = object()
+    bound._cuda_torch_stream_handle = 17
+    bound._cuda_live_device = torch.device("cpu")
+    bound._cuda_live_pos_shape = (2, 47, 3)
+    bound._cuda_live_quat_shape = (2, 47, 4)
+    bound.env_origins = torch.zeros((2, 3))
+    bound.body_ids = torch.arange(32)
+    bound.component_owner_indices = torch.arange(62).remainder(32)
+    bound.component_local_centers = torch.zeros((62, 3))
+    bound.component_local_half_axes = torch.zeros((62, 3, 3))
+    bound.table_lo = torch.zeros((5, 3))
+    bound.table_hi = torch.ones((5, 3))
+    bound.racket_body_index = 31
+    bound.blade_center_offset = torch.zeros(3)
+    bound.blade_local_half_axes = torch.zeros((3, 3))
+    data = SimpleNamespace(
+        xpos=torch.zeros((2, 47, 3)),
+        xquat=torch.zeros((2, 47, 4)),
+    )
+    monkeypatch.setattr(
+        torch.cuda,
+        "current_stream",
+        lambda _device: SimpleNamespace(cuda_stream=17),
+    )
+    actual = bound.sample(data)
+    assert seen["inputs"][0] is data.xpos
+    assert seen["inputs"][1] is data.xquat
+    assert seen["inputs"][2:] == bound._cuda_warp_static_inputs
+    assert seen["outputs"] == (bound._cuda_warp_output,)
+    assert seen["device"] is bound._cuda_warp_device
+    assert seen["stream"] is bound._cuda_warp_stream
+    assert actual is bound._cuda_kernel_output
+
+
+@pytest.mark.parametrize(
+    ("xpos", "xquat", "message"),
+    (
+        (
+            torch.zeros((2, 47, 3), dtype=torch.float64),
+            torch.zeros((2, 47, 4)),
+            "live pose dtype differs",
+        ),
+        (
+            torch.zeros((2, 46, 3)),
+            torch.zeros((2, 47, 4)),
+            "live pose shape differs",
+        ),
+        (
+            torch.empty((2, 47, 3), device="meta"),
+            torch.empty((2, 47, 4), device="meta"),
+            "live pose device differs",
+        ),
+    ),
+)
+def test_cuda_bound_sampler_rejects_live_contract_drift_before_launch(
+    monkeypatch, xpos, xquat, message
+):
+    bound = object.__new__(keepout.DeviceExactTableKeepout)
+    bound._cuda_kernel_output = torch.empty(2, dtype=torch.bool)
+    bound._cuda_live_device = torch.device("cpu")
+    bound._cuda_live_pos_shape = (2, 47, 3)
+    bound._cuda_live_quat_shape = (2, 47, 4)
+    monkeypatch.setattr(
+        keepout,
+        "_wp",
+        SimpleNamespace(
+            launch=lambda *_args, **_kwargs: pytest.fail(
+                "invalid live poses reached Warp"
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError, match=message):
+        bound.sample(SimpleNamespace(xpos=xpos, xquat=xquat))
+
+
+def test_cuda_bound_sampler_caches_static_wrappers_and_rebinds_only_on_stream_change(
+    monkeypatch,
+):
+    class FakeWarp:
+        vec3 = object()
+        vec4 = object()
+        mat33 = object()
+        bool = object()
+
+        def __init__(self):
+            self.wraps = []
+            self.streams = []
+            self.launches = []
+
+        def from_torch(self, tensor, *, dtype=None, requires_grad=None):
+            wrapped = object()
+            self.wraps.append((tensor, dtype, requires_grad, wrapped))
+            return wrapped
+
+        def stream_from_torch(self, stream):
+            wrapped = object()
+            self.streams.append((stream.cuda_stream, wrapped))
+            return wrapped
+
+        def device_from_torch(self, _device):
+            raise AssertionError("the bound Warp device must be reused")
+
+        def launch(self, kernel, **kwargs):
+            self.launches.append((kernel, kwargs))
+
+    fake = FakeWarp()
+    monkeypatch.setattr(keepout, "_wp", fake)
+
+    bound = object.__new__(keepout.DeviceExactTableKeepout)
+    bound.env_origins = torch.zeros((2, 3))
+    bound.body_ids = torch.arange(32)
+    bound.component_owner_indices = torch.arange(62).remainder(32)
+    bound.component_local_centers = torch.zeros((62, 3))
+    bound.component_local_half_axes = torch.zeros((62, 3, 3))
+    bound.table_lo = torch.zeros((5, 3))
+    bound.table_hi = torch.ones((5, 3))
+    bound.racket_body_index = 31
+    bound.blade_center_offset = torch.zeros(3)
+    bound.blade_local_half_axes = torch.zeros((3, 3))
+    bound._cuda_kernel_output = torch.empty(2, dtype=torch.bool)
+    bound._cuda_warp_static_inputs = keepout._warp_static_launch_inputs(
+        bound.env_origins,
+        bound.body_ids,
+        bound.component_owner_indices,
+        bound.component_local_centers,
+        bound.component_local_half_axes,
+        bound.table_lo,
+        bound.table_hi,
+        racket_body_index=bound.racket_body_index,
+        blade_center_offset=bound.blade_center_offset,
+        blade_local_half_axes=bound.blade_local_half_axes,
+    )
+    bound._cuda_warp_output = fake.from_torch(
+        bound._cuda_kernel_output, dtype=fake.bool, requires_grad=False
+    )
+    bound._cuda_warp_device = object()
+    bound._cuda_warp_stream = None
+    bound._cuda_torch_stream_handle = None
+    bound._cuda_live_device = torch.device("cpu")
+    bound._cuda_live_pos_shape = (2, 47, 3)
+    bound._cuda_live_quat_shape = (2, 47, 4)
+    monkeypatch.setattr(
+        keepout,
+        "_validate_cuda_static_inputs",
+        lambda *_args, **_kwargs: pytest.fail(
+            "sample repeated construction-time static validation"
+        ),
+    )
+
+    current = SimpleNamespace(cuda_stream=41)
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda _device: current)
+    data = SimpleNamespace(
+        xpos=torch.zeros((2, 47, 3)),
+        xquat=torch.zeros((2, 47, 4)),
+    )
+
+    for _ in range(2):
+        assert bound.sample(data) is bound._cuda_kernel_output
+    current.cuda_stream = 73
+    for _ in range(2):
+        assert bound.sample(data) is bound._cuda_kernel_output
+
+    assert [handle for handle, _wrapped in fake.streams] == [41, 73]
+    assert [launch[1]["stream"] for launch in fake.launches] == [
+        fake.streams[0][1],
+        fake.streams[0][1],
+        fake.streams[1][1],
+        fake.streams[1][1],
+    ]
+    static_tensors = (
+        bound.env_origins,
+        bound.body_ids,
+        bound.component_owner_indices,
+        bound.component_local_centers,
+        bound.component_local_half_axes,
+        bound.table_lo,
+        bound.table_hi,
+        bound._cuda_kernel_output,
+    )
+    for tensor in static_tensors:
+        assert sum(wrapped[0] is tensor for wrapped in fake.wraps) == 1
+    assert (
+        sum(
+            wrapped[0]._base is bound.blade_center_offset
+            for wrapped in fake.wraps
+        )
+        == 1
+    )
+    assert (
+        sum(
+            wrapped[0]._base is bound.blade_local_half_axes
+            for wrapped in fake.wraps
+        )
+        == 1
+    )
+    assert sum(wrapped[0] is data.xpos for wrapped in fake.wraps) == 4
+    assert sum(wrapped[0] is data.xquat for wrapped in fake.wraps) == 4
+    assert all(wrapped[2] is False for wrapped in fake.wraps)
+
+
 @pytest.mark.skipif(
     os.environ.get("ACTIONBALL_RUN_MUJOCO_GPU_DIRECT") != "1",
     reason="requires the exact MuJoCo-Warp GPU environment",
 )
-def test_torch_gpu_guard_matches_existing_numpy_authority_exactly():
-    actual, expected = _device_verdict(
-        os.environ.get("ACTIONBALL_MUJOCO_DEVICE", "cuda:0"),
-        dtype=torch.float32,
-    )
+def test_warp_gpu_guard_matches_existing_numpy_authority_exactly():
+    device = os.environ.get("ACTIONBALL_MUJOCO_DEVICE", "cuda:0")
+    actual, expected = _device_verdict(device, dtype=torch.float32)
     assert torch.equal(actual, expected)
-    assert _empty_corner_discriminator(
-        os.environ.get("ACTIONBALL_MUJOCO_DEVICE", "cuda:0"), torch.float32
-    ).tolist() == [False]
+    assert _empty_corner_discriminator(device, torch.float32).tolist() == [False]
+    inputs = _fixed_shape_tape(torch.float32)
+    oracle = _tape_verdict(inputs, "cpu")
+    kernel = _tape_verdict(inputs, device).cpu()
+    assert torch.equal(kernel, oracle)
+    _assert_fixed_tape_strata(kernel)
+    full_body_kernel = _full_body_tape_verdict(inputs, device).cpu()
+    assert torch.equal(full_body_kernel, oracle)
