@@ -1,17 +1,29 @@
 # G05 Isaac Training First Loop
 
-Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
+Status: Partial (the base training-loop mechanics are proven; the current-fresh promotion sub-gate is open)
 
-## 2026-08-25 FullMDP V6 Isaac候选（仍`Partial`）
+## 2026-08-25 FullMDP V6 Isaac fresh（仍`Partial`）
 
 fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、
 [`Reward24`](../DEFINITIONS.md#fullmdp-reward24)和
-[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3) `215/231`；final exact source SHA尚未
-冻结。四个due与耗尽clock、schema7具名slice、terminal-overlap跨writer合成及4096 predecessor Pod
+[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3) `215/231`；final clean/pushed source=
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`。四个due与耗尽clock、schema7具名slice、terminal-overlap跨writer合成及4096 predecessor Pod
 反例/receipt只认[课程真源](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)和
-[性能真源](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。
-pre-V3 4096 probe只关闭predecessor runtime路径；PPO V5 2048 exact rate、短学习canary、连续ACK和阶段
-分母仍`未测`。
+[性能真源](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
+exact Pod host=`1,036 passed, 11 skipped`；PPO V5 2048 rate自然完成61 update，p50/p90=
+`7.81/8.38 s/H48`，仍未达到严格6秒。fresh Isaac已从同一source连续ACK，Reward24/V3/optimizer/WAL/
+finite/conservation启动边界通过；25000 completion尚未完成，mimic基本成功尚未判定；固定快照的
+contact/hit/landing尚无eligible denominator，均为`未测`。
+固定`ACK 0..101`快照中，episode first10→recent10 mean length/return=
+`87.502/12.956 → 129.229/20.532`；common mimic与paddle prior income/sample均改善，但尚无row活到
+tick295，故task/playback/launch/contact/landing均为`未测`。该早期状态符合先balance且common mimic/
+paddle-prior income/sample同步提高，不构成hit失败；这些income不是policy gradient。
+
+后续固定窗到ACK294已自然出现`4` playback、`2` launch/R03与`2` settlement；selected contact=
+`0/2 launch`，landing仍为`未测`。逐row审计的`24`个accepted-terminal样本都在tick`297..367`因
+base tilt结束，说明主约束仍是生存而非状态机断链。Isaac actual-hard-edge近期相对first10下降约`237×`、
+qdes nonfinite/terminal为0；这允许当前diagnostic训练继续，但非零actual-hard-edge仍阻断formal/promotion/
+deployment/真机安全。详细不同口径分母只认[课程实验§10.6](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#106-首次双侧launch与关节遥测裁决固定诊断窗)。
 
 旧V5能够改善balance却未闭合mimic→contact；新候选必须fresh验证balance→mimic→hit→landing。上一阶段
 开始基本成形时下一阶段应已有自然非零分母，但`ACCEPT/contact/landing`都不是启动或安全Gate。Gate只保留
@@ -6705,7 +6717,7 @@ clean exact Pod分进程回归=`304 passed, 6 skipped`。GPU2 5轮profile中
 后续自然推进中，Isaac update106首次出现`due/selected/ACCEPT=1/1/1`且CENSOR/fault=0；MuJoCo
 update49--59累计`due/reveal=9/9`且每个task update的R03 present/physically-valid rows均非零。这关闭的是
 “上一阶段一旦有row活过tick295，task/action-mimic入口是否立即开放”，不等于balance/action mimic成功；
-两端launch/contact/landing仍为0分母，击球与上台继续`未测`。本轮也不关闭physics parity、12500
+两端launch=0，故contact/landing为`未测`；击球与上台继续`未测`。本轮也不关闭physics parity、12500
 completion、resume、export、部署或真机安全，G05继续`Partial`且`diagnostic_unauthorized=true`。
 
 ### 2026-08-23 V3阶段复核与fresh V4实现纠错候选（Gate仍`Partial`）

@@ -4,9 +4,9 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V6-candidate-real-GPU-retest-pending / prior-runs-frozen / Pod-matched-wall-pending`
-> 证据等级：pre-V3 `ba7225b2` Isaac predecessor runtime/rate为E2；final V3/PPO V5 exact candidate与Mu
-> 仍为E1/未测。Phase-C0--C2b只有静态payload proxy与host语义证据，Pod matched wall仍未测
+> 状态：`V6-exact-rate-complete / dual-fresh-active / prior-runs-frozen / diagnostic-unauthorized`
+> 证据等级：final V3/PPO V5两端runtime/rate与fresh prefix各为诊断E2；静态clone payload仍只是E1，
+> fixed-tape跨引擎physics parity、formal learning与promotion未完成
 >
 > 阅读边界：current结论只认§16；§1--15保留为热墙定位与已做减法的历史证据，旧Reward20/PPO版本不得
 > 覆盖当前Reward24/PPO V5/Observation V3。
@@ -567,7 +567,9 @@ clean exact Pod=`304 passed, 6 skipped`。同GPU H48 profile的`r07_idle_support
 [课程解阻实验§6.6](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)维护。该结果关闭当前no-key首墙，
 不等于single-state架构已完成，也不授权physics promotion、resume、export或部署。
 
-## 16. 2026-08-25 current：真实Pod反例、PPO V5迭代尺度与未完成rate
+<a id="fullmdp-v6-rate-current"></a>
+
+## 16. 2026-08-25 current：V6 exact rate、fresh重启与结构债
 
 旧MuJoCo V5最新只读窗口仍约`13.4 s/H48`（精确快照见课程实验§10.1），所以即便曾有更快的历史窗口，
 当前仍有大幅加速空间。H48与约6秒
@@ -585,36 +587,72 @@ synthetic PASS不等于production热路可用，
 telemetry后的`[-7:]`位置后缀误当episode/reset slice，在下一optimizer前失败。它证明的是positional decode
 错误；单个未完成样本既不是rate成绩，也不是runtime PASS。修复必须按具名episode slice读取。
 
-`ba7225b2`的修复直接接受这两份真实Warp arrays，不做Torch转换、host sync或第二份pose authority；Torch输入只
-保留给dependency-light测试边界。`9d333b0b`只是V3/PPO V5前的test successor，最终source SHA待冻结；
-真实Mu GPU retest和matched candidate rate仍`未测`。只有真实Full-A lifecycle、returned Observation V3、
-Reward24及rate receipt全部通过后，才能裁决该kernel保留或回退。
+`ba7225b2`先修正真实Warp arrays；最终clean/pushed source冻结为
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`，同时修正Isaac schema7具名episode slice、
+PPO V5/Reward24/Observation V3、四次cadence与terminal overlap。最终分进程fresh-process host矩阵本地为
+`1,022 passed, 13 skipped`，exact Pod为`1,036 passed, 11 skipped`。原始checkout一度因没有
+launcher-like `PYTHONPATH`而collection失败；在精确运行路径下对该partition重跑为`15 passed`，
+没有把环境边界吞成PASS。
 
-`72b87100`的CPU exact尝试也不能概括为“全绿”或“全是环境”：两个可运行partition分别为
+`72b87100`的旧CPU exact尝试不能概括为“全绿”或“全是环境”：两个可运行partition分别为
 `351 passed, 9 skipped`和`60 passed`；Isaac partition为`917 passed, 27 skipped, 24 failed, 19 errors`。
-其中`39`项由`omni`依赖边界阻塞，另`4`项确实暴露harness/candidate问题。最终V3/PPO V5 source的CPU矩阵
-尚未执行，必须重新按partition报告，不能从predecessor数字外推。
+其中`39`项由`omni`依赖边界阻塞，另`4`项确实暴露harness/candidate问题；它们促成了上面的最终矩阵，
+不能再从predecessor数字外推。
 
 Isaac侧独立的61-update probe已经在Pod1 GPU1以clean `ba7225b2`自然完成；test-only `9d333b0b`的三个
 production tree与其逐字相同。measured `10..59` wall mean/p50/p90=`9.082/9.31/10.374 s`；Reward sample
 `11,993,088/11,993,088` finite，nonfinite/fault/conservation=`0/0/0`。receipt是
 `/workspace/franco/validations/isaac-fullmdp-v7-ba7225b2-gpu1-rate-20260825t044300cst/diagnostic-rate-probe.json`
 （SHA-256=`6735e7d5…c34d`），run log SHA-256=`d8d4a2f4…49e7`。collection随episode length增长而变慢；
-这是相关性，不是热墙因果裁决。该probe没有
+这是相关性，不是热墙因果裁决。该历史probe没有
 任何due或shot分母，也早于Observation V3与PPO V5，故只证明Isaac predecessor运行路径和4096尺度吞吐，
-不能代签Mu kernel、最终V6 rate或学习质量。约6秒方向仍未达到。
+不能代签Mu kernel、最终V6 rate或学习质量。
 
-当前性能/算法裁决把fresh learner从`4096 env × H48 × 12,500 update × 8 minibatch`改为
+最终source的两个profiler-off rate probe均自然完成`61` update
+（`10 warm-up + 50 measured + 1 tail`，每条各`5,996,544` transitions）；吞吐只以50轮测量窗的
+`4,915,200` transitions除以measured wall：
+
+- MuJoCo GPU2 measured wall=`272.685368 s`，p50/p90=`5.468/5.526 s/H48`，吞吐
+  `≈18,025.17 transitions/s`。artifact root=
+  `/workspace/franco/validations/fullmdp-v6-caddecb7-mu-gpu2-rate-20260824t2228z-r2`；
+  `diagnostic-rate-probe.json`/`evidence.jsonl`/`stdout.log` SHA-256分别为
+  `8ab72b052091968c73e0043755fde0414fd2ec5975b61ac5315e2546dcc4dc83`、
+  `2c85320ccdf2659a50529c7884a5e4641bbdce170e2206e6b82232bc30f89ae4`、
+  `9532c68edec1f8219b71ebb0a46a643a90176ad7c5b2f08cdf2920dddf04322b`。
+- Isaac GPU1 measured wall=`380.66 s`，mean/p50/p90=`7.613/7.81/8.38 s/H48`，吞吐
+  `12,912.31 transitions/s`。artifact root=
+  `/workspace/franco/validations/fullmdp-v6-caddecb7-isaac-gpu1-rate-20260824t2228z`；
+  `diagnostic-rate-probe.json`/`run.log`/`train-runtime.receipt` SHA-256分别为
+  `9ec050fbf92328cfec980f2aeb160469deddfee14af394e98dd974f98d2042e4`、
+  `566cc068c3ffd5ce680ea54609be564c84645639ee01c23f50b65206546f3394`、
+  `5c588f65d71053a6d56b29b1652b93a27419a197758b66bbea0ffd530a52a9c4`。
+
+两条probe的Reward24、Observation V3 `215/231`、done/reason/lifecycle与
+nonfinite/fault/conservation均通过同一诊断边界。MuJoCo已达到约6秒方向；Isaac相较pre-V3
+`4096×H48` probe及更早约22秒明显下降，但仍未达到严格6秒。
+
+性能/算法裁决把fresh learner从`4096 env × H48 × 12,500 update × 8 minibatch`改为
 [`PPO V5`](../../DEFINITIONS.md#fullmdp-ppo-v5)的`2048 × H48 × 25,000 × 4`，learning epoch仍5、
 save interval仍500。总transition=`2,457,600,000`、每minibatch=`24,576` sample和总optimizer step=
-`500,000`保持；希望把单iteration降到约`4.8 s`以恢复可迭代性。它不是语义等价加速：policy刷新频率、
-GAE/KL反馈、WAL与checkpoint的样本边界都改变，必须在最终exact source上另跑rate probe与短学习canary。
-旧4096结果只能作容量/墙时基线。
+`500,000`保持，但policy刷新频率翻倍，GAE/KL反馈、WAL与checkpoint样本边界改变。它是为迭代性作的明确
+算法取舍，不是语义等价加速，也不能把全部改善归因于某一个热路；旧4096结果只作容量/墙时背景。
 
-结构减法不能写成泛化授权。同一writer echo、无consumer Gate和sealed immutable artifact后的重复source
-recheck只进入逐callpoint候选；删除前须点名checker及两个writer，证明同writer或seal后不可变，并同批保留
-mutation反例和必要telemetry。跨writer conservation、native plant finite/joint/table invariant、optimizer
-前拒绝、run-owned artifact no-clobber和WAL/fsync/ACK必须保留。当前另有“窄projection替代每步full-record
-clone”、dead keyed-epoch work和idle scratch zero等profile候选；尚未profile/实现，不得写成已采用或换算
-wall秒数。§16全部证据保持`diagnostic_unauthorized=true`，不授权promotion、export、deployment或physics
-parity。
+旧MuJoCo V5经精确身份复核后以TERM收口，最终ACK=`0..9046`、`1,778,712,576` transitions；
+recent50 wall mean/p50/p90=`13.314/13.301/13.328 s/H48`。旧root只读且没有伪造completion；
+阶段分母只在[课程实验§10.1](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#101-v5回答了什么没有回答什么)
+维护。
+
+本轮已删除没有production consumer的`keyed_epoch_work`链和optimizer后同writer对象身份echo；
+command API在不可逆ACK前完成真正校验后返回`None`。WAL parent-directory fsync、optimizer成功边界、
+跨writer conservation、native plant finite/joint/table、full-key/generation、run-owned artifact
+no-clobber和GPU lifetime lock均保留。这是按`HANDOFF_TO_CODEX_20260808.md`的四问删除“看起来安全”的
+同源回声，不是弱化真正独立边界。
+
+仍未解决的结构债已量化：`ActionEpochRecord`含44个tensor，N2048一份为`2.9765625 MiB`；每policy
+step固定5份全量clone，即H48每update `714.375 MiB`、10,560次`Tensor.clone()`，其中Motion路径占
+`428.625 MiB`。下一最小候选是删除callback内same-writer重读，并让publisher只返回caller唯一消费的
+`[N] bool`；静态上减少`285.75 MiB/H48`和4,224次clone。该数字只是payload，不换算成秒；须用Pod
+profile确认Motion/command span后再实施，不为两份同写者复制新建Gate。
+
+§16全部证据保持`diagnostic_unauthorized=true`。rate和真实运行路径已闭合，但contact/landing、
+fixed-tape跨引擎physics parity、formal checkpoint、promotion、export、deployment与真机授权均没有因此完成。

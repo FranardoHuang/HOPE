@@ -2,13 +2,22 @@
 
 Status: Partial
 
-## 2026-08-25 FullMDP V6 native-plant候选（仍`Partial`）
+## 2026-08-25 FullMDP V6 native-plant运行（仍`Partial`）
 
-`9d333b0b`（语义`ba7225b2`）只是最终Observation V3/PPO V5前的predecessor，final exact source SHA
-待冻结。真实Pod已经反证把MuJoCo-Warp外层pose代理当Torch tensor；candidate改为直接消费底层native
-`data.struct.xpos/xquat`的`wp.array[vec3/quat]`，不经Torch或host sync。失败、修复和待测边界的详细真源是
-[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。
-final source的exact真实Mu Full-A、接触物理与Isaac↔MuJoCo parity仍`未测`。
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`是最终clean/pushed source。真实Pod曾反证把
+MuJoCo-Warp外层pose代理当Torch tensor；最终实现直接消费底层native `data.struct.xpos/xquat`的
+`wp.array[vec3/quat]`，不经Torch或host sync。exact Pod host=`1,036 passed, 11 skipped`；
+真实Mu Full-A [`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5) rate自然完成61 update，p50/p90=
+`5.468/5.526 s/H48`，[`Reward24`](../DEFINITIONS.md#fullmdp-reward24)、
+[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)、
+rate-probe内lifecycle bookkeeping、finite与conservation均通过。失败、修复和receipt的详细真源是
+[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
+fresh Mu长跑也已从同一source取得连续[逐optimizer durable ACK](../DEFINITIONS.md#mujoco-fullmdp-longrun-flags)；
+后续固定窗已在两端自然得到launch/R03，但selected contact仍为Mu`0/59 launch`、Isaac`0/2 launch`，
+landing因无selected contact仍为`未测`；task→contact→landing生命周期与Isaac↔MuJoCo fixed-tape
+数值/接触physics parity均未闭合。两端qdes nonfinite/terminal为0但actual-hard-edge非零且近期下降；
+[详细口径与分母](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#106-首次双侧launch与关节遥测裁决固定诊断窗)
+只支持diagnostic继续训练，明确阻断formal、promotion、deployment与真机安全声明。
 
 本Gate只保留独立可击穿的model/plant边界：finite、joint/table/contact几何、source asset与native runtime
 身份。task成功、mimic/contact比例、same-writer echo和测试fixture的数据类型不属于model安全Gate；也不因

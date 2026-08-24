@@ -1,14 +1,15 @@
 # 实验登记册
 
 实验用来回答可证伪的问题。本目录管理假设、冻结变量、运行记录、结果以及采用/拒绝决定。
-`NOW.md` 只链接每个特性的最新有效实验，不重复实验细节。
+`origin/main:docs/NOW.md` 只链接每个特性的最新有效实验，不重复实验细节；功能分支内的
+`docs/NOW.md` 只能是待合入提案，不能改写运行态权威。
 本目录的共享缩写统一按 [术语与人话对照](../DEFINITIONS.md) 解释。
 
 ## 必须按职责路由
 
 | 信息 | 权威位置 |
 | --- | --- |
-| 当前采用的 setting 与阶段/特性状态 | [`NOW.md`](../NOW.md) |
+| 当前采用的 setting 与阶段/特性状态 | `origin/main:docs/NOW.md`（功能分支 `docs/NOW.md` 仅为待合入提案） |
 | 单个实验的设计、运行、证据和决定 | 本目录 |
 | 已合入 `main` 的重要能力/修复 | [`TIMELINE.md`](../TIMELINE.md) |
 | 可复现的验收与 gate 状态 | [`gates/`](../gates/) |
@@ -40,9 +41,10 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| [EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819](2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md) | portable MuJoCo怎样逐纵切片消费同一slot0题目、teacher与生命周期，直到可做H48的4096长跑？ | Franco | Codex | successor-runtime-binding-branch-candidate / physics-HOLD | E1 source/host + Pod actual import | fresh EPA48/RSL3双wheel site actual import已通过；ActionBall fixed-tape、matched H48 wall、ASan oracle、independent fixture replay与fresh longrun仍未测，非training GO |
-| [EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819](2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md) | 为什么FullMDP 4096 rollout约22秒，怎样在不删语义时恢复到6--8秒？ | Franco | Codex | zero-flight-host-validated | E1 host + E2 active profiler | 成对zero-live-flight idle fast path已有host语义反例：zero-flight `112 passed,4 skipped`、consumer semantic `166 passed,8 skipped`；Pod matched wall与live 25k未测 |
-| [EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802](2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) | 能否用最终球任务合同先过 Isaac N1 最小可学门，再把主训练迁到 MuJoCo 并直接扩到通过准入的完整 73 动作？ | Franco | Codex | running | E1 | branch-candidate，不改写 `origin/main` 当前队列。measured-racket schema-v3 已 exact `73/73` 重定向/物化/FK-audit 并版本化入 repo；三条 N1 consumer 已换新 SHA/namespace，measured-channel 73 动作 source manifest 也已生成。V2 已实装 long-axis、SMASH split-window、broad/adaptive/precision 和 exact-resume；静态顺序 max motion `3.5255` < target final/initial `4.0296/4.3104` < landing `12`。hit-only 9-D intent 因3对严格碰撞被否决；最终18-D/ABI、schema-v2 prototype/source-capsule/compiler formal 消费链、训练实收入、Isaac 球任务门、MuJoCo trainer 和 N73 闭环仍缺，旧 READY 继续保留 |
+| [EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819](2026-08/EXP-ACTION-BALL-MUJOCO-PORTABLE-FULLA-20260819.md) | portable MuJoCo怎样逐纵切片消费同一slot0题目、teacher与生命周期，直到可做H48的4096长跑？ | Franco | Codex | running | E1 source/host + Pod actual import | successor runtime-binding branch candidate，physics仍HOLD；fresh EPA48/RSL3双wheel site actual import已通过；ActionBall fixed-tape、matched H48 wall、ASan oracle、independent fixture replay与fresh longrun仍未测，非training GO |
+| [EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819](2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md) | 为什么FullMDP rollout约22秒，怎样用结构减法与算法取舍恢复可迭代速度？ | Franco | Codex | running | E2 exact Pod runtime | branch diagnostic V6 profiler-off rate已完成：Mu p50/p90=`5.468/5.526 s/H48`，Isaac=`7.81/8.38 s/H48`；Mu达到约6秒方向，Isaac未达严格6秒。25k completion尚未完成；固定学习快照的contact/landing尚无eligible denominator，均为`未测`；formal authority未闭合 |
+| [EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822](2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md) | 怎样让balance→mimic→hit→landing自然重叠，而不把任务成绩伪装成安全Gate？ | Franco | Codex | running | E2 branch diagnostic | V6双后端fresh已运行；固定ACK0..101窗内仅Mu打开task分母，Isaac尚无due，两端只证明survival与income/sample趋势，不证明mimic基本成功、hit/landing、promotion或formal训练完成 |
+| [EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802](2026-08/EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802.md) | 能否用最终球任务合同先过 Isaac N1 最小可学门，再把主训练迁到 MuJoCo 并直接扩到通过准入的完整 73 动作？ | Franco | Codex | running | E2 branch diagnostic runtime | V6 single-slot ABI/runtime、两端rate与fresh prefix已闭合；25k学习、自然contact/landing、跨引擎physics parity、formal N1与N73仍未闭合，不改写`origin/main`采用配置 |
 | [EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803](2026-08/EXP-A3-P1-0803-31ACTION-NORMALIZATION-20260803.md) | 能否在不改现役 runtime pointer 的前提下，把 0803 vendor body 变成保惯量的 31-action Isaac candidate？ | Franco | Codex | completed | E1 | exact diff/closure 与 host static/import 已过；Pod Isaac imported order/body/reset/FK/dynamics、夹爪 mount authority 与 MuJoCo v3 未闭合，不可替换 pre-long plant |
 | [EXP-ACTION-BALL-PHASED-READINESS-20260730](2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) | 首个 N1、1000 update、formal N5、N73 与部署各自最迟必须闭合哪些训练、观测、吞吐和安全合同？ | Franco | Codex | running | E3 | 旧三条 stable-ready milestone1000 已自然完成且 checkpoint finite，但约 `797–1043` 次 strike opportunity 下 capture/return 全零，不续跑也不 resume 成新 setting。智元 host 合同已实现；Pod diagnostic 仍卡在新 vendor nominal-hold/receipt/bundle 重物化，formal N1 另因 action-set/trust 缺失 fail closed |
 | [EXP-ROUGH-GROUND-FRICTION-FIX-20260729](2026-07/EXP-ROUGH-GROUND-FRICTION-FIX-20260729.md) | 能否在不移动桌子/动作坐标的前提下，用每环境零均值地垫和物理一致摩擦训练抬脚？ | Franco | Claude、Codex | blocked | E1 | host `379 passed`；fresh N5 首轮仍用平地/no-move，rough/move 须补 Isaac clone、接触、raycast、seed/mesh、初始穿插与 4096-env 性能门 |

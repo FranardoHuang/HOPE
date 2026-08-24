@@ -2,15 +2,20 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
-## 2026-08-25 FullMDP V6双后端候选（仍`Partial`）
+## 2026-08-25 FullMDP V6双后端fresh（仍`Partial`）
 
 最终共享合同是PPO V5、Reward24、Observation V3 `215/231`、四个真实due/耗尽clock、Mu wire`9/5/6`
-与Isaac milestone schema7；final exact source SHA尚未冻结。这些只是接口同义，不等于两个physics engine
-已经数值或行为对齐。学习/分母只认[课程实验§10](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)，
-Pod失败/rate/receipt只认[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)，
+与Isaac milestone schema7；final exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`。
+exact Pod host=`1,036 passed, 11 skipped`，两端2048×H48 rate probe均自然完成61 update：
+Mu p50/p90=`5.468/5.526 s`，Isaac=`7.81/8.38 s`；两个fresh namespace也已连续ACK。这些只证明
+共享接口与各自runtime路径成立，不等于两个physics engine已经数值或行为对齐。学习/分母只认
+[课程实验§10](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)，
+Pod失败/rate/receipt只认[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)，
 ABI只认[Observation接口](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)。
-pre-V3 Isaac predecessor证据不能代签PPO V5、Mu或parity；final exact CPU、真实Mu、两端rate与fixed-tape/
-matched physics parity仍`未测`。
+固定`ACK 0..101`快照中，Mu/Isaac recent10 episode mean length=`159.622/129.229`；
+Mu scheduled/public/overlap=`14/13/1`且launch=0，故contact/landing为`未测`；Isaac尚无due，task及其
+下游均为`未测`。它反映不同early
+state distribution，不能代签parity；fixed-tape/matched physics parity仍`未测`。
 
 跨引擎Gate保留真正独立的plant/source、finite、joint/table/contact、full-key/generation、WAL/artifact
 boundary与可重放fixed tape；same-writer echo、task成功和R07 ready不是parity或安全Gate。当前没有contact/

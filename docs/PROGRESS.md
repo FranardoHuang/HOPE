@@ -1,5 +1,36 @@
 # 简短进度记录
 
+## 2026-08-25 — FullMDP V6 exact rate闭合并双fresh替换（branch diagnostic）
+
+- clean/pushed final source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`；本地分进程矩阵=
+  `1,022 passed, 13 skipped`，exact Pod=`1,036 passed, 11 skipped`。真实Pod揭示并修正Mu native
+  Warp pose绑定和Isaac schema7 positional decode；Reward24、Observation V3 `215/231`、PPO V5、
+  四due/exhausted clock与terminal overlap现由同一source运行。
+- 两端`2048×H48×61` profiler-off rate自然完成：Mu p50/p90=`5.468/5.526 s`、
+  `18,025.17 transitions/s`；Isaac=`7.81/8.38 s`、`12,912.31 transitions/s`。Mu达到约6秒方向，
+  Isaac仍未达到严格6秒；`4096/U12500/MB8 → 2048/U25000/MB4`保持总transition/minibatch/
+  optimizer-step但刷新边界改变，因此是算法取舍，不冒充语义等价热路加速。
+- 旧Mu V5精确TERM冻结在ACK9046、`1,778,712,576` transitions；最终recent50（ACK8997..9046）wall p50=
+  `13.301 s/H48`且selected contact仍`0/24,121 launch`，landing为`未测`。V6两端已fresh/no-resume
+  同时启动；固定ACK0..9→ACK92..101中episode survival、common mimic和paddle-prior income/sample均提高。
+  Mu scheduled/public/overlap=`14/13/1`且launch=0，故contact/landing为`未测`；Isaac尚无due，task及其
+  下游均为`未测`。它仍是balance→mimic早期，不把零分母误写成hit失败。
+- mandatory Build1 model21800 actor warm-start是Build4相对fresh run最直接的已证配置差异；因此Build4
+  不能被当作fresh-from-zero证据；缺actual model0 receipt且配方混杂，也不能把早期行为单独归因给继承。
+  本轮采用direct-paddle objective/
+  correction-information原则；Reward24与same-source actor residual是本轮实现，后者必要性仍待paired control。
+  混杂的cadence/replay/LR/sigma/数值延后。结构上已删dead
+  keyed work与post-ACK same-writer echo；余下full-record clone静态为`714.375 MiB/H48`，下一刀先profile
+  Motion两份冗余复制，不新增安全Gate。详细真源见
+  [课程实验§10](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)、
+  [热路实验§16](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)；
+  G04/G05/G06保持`Partial`，`diagnostic_unauthorized=true`。
+- 后续固定诊断窗首次证明两侧都自然打开launch/R03：Mu=`59 launch→3 valid R03→0 contact`，
+  Isaac=`26 accepted→4 playback→2 launch/R03→0 contact`；Isaac的24个accepted-terminal样本均因base tilt
+  在tick297..367结束，当前不因零contact重启。两端qdes nonfinite/terminal仍为0，actual-hard-edge近期
+  明显下降，故diagnostic继续；但真实模拟硬边触碰非零，formal/promotion/deployment/真机安全继续NO-GO。
+  详细不同分母只认[课程实验§10.6](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#106-首次双侧launch与关节遥测裁决固定诊断窗)。
+
 ## 2026-08-23 — V4最终冻结与V5 exact Pod双fresh运行（branch diagnostic）
 
 - V4 Isaac最终ACK=`0..748`；update749在optimizer前由旧generic overflow停止，旧wire不能反推具体row/cause。
@@ -4879,7 +4910,8 @@
   `15.775 s/H48`、H24-equivalent`7.89 s`，尚未达目标，profile把主墙定位为
   `post_physics_publish`。fresh MuJoCo已到至少ACK47且全finite，recent20 wall中位约`9.634 s/H48`、
   H24-equivalent`4.82 s`，进入目标量级；其update45首次出现`due=1/reveal=1/deferred=0`并立即产生
-  phase-2/R03/task Reward梯度，验证课程首穿。selected contact/landing仍为0，故击球/上台继续`未测`；
+  phase-2/R03/task Reward非零income/sample，验证课程首穿。selected contact=0，landing因没有selected-contact
+  分母为`未测`，故击球/上台仍未闭合；
   Gate G05/G06保持`Partial`、`diagnostic_unauthorized=true`。
 
 ## 2026-08-22 — 第二次fresh候选：具名CUDA故障、共享q_des、mimic→contact闭环
@@ -4916,14 +4948,9 @@
   LeanRuntime先完成原有class-bound identity认证，再用可卸载callback包住同一个bound method；没有以诊断
   为由放宽生产方法身份合同。
 
-## 2026-08-25 — FullMDP V5反例收口、V6最小桥与Pod重验
+## HISTORICAL / SUPERSEDED — 2026-08-25 V6候选冻结、尚未Pod重验
 
-- 旧MuJoCo V5的balance/task exposure改善但`selected contact=0/launch`，landing无eligible分母而为`未测`；
-  不能继续用“step还少”解释mimic→contact断点。冻结计数、正确分母与Build4 adopt/defer/reject只认
-  [课程实验§10](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)。
-- V6冻结为PPO V5（2048/H48/U25000/MB4/E5）、Reward24、Observation V3 `215/231`、四次真实due/
-  exhausted sentinel、跨writer terminal overlap、schema具名slice与Mu native-Warp keepout；最终exact
-  source SHA及两端rate/学习canary仍待验，完整合同见[双后端TODO §0.5](operations/action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)。
-- predecessor Pod反例与4096 Isaac probe仅证明旧runtime路径，不能代签V3/PPO V5、Mu或课程学习；唯一
-  performance/receipt真源见[热路实验§16](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。G04/G05/G06保持`Partial`，全部证据继续
-  `diagnostic_unauthorized=true`。
+- 本段形成时只冻结了PPO V5、Reward24、Observation V3、四due/terminal overlap与native-Warp设计；
+  final source、rate与fresh仍待验。它已由本页顶部同日“exact rate闭合并双fresh替换”条目取代；当前数字与
+  authority只认[课程实验§10](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)和
+  [热路实验§16](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。

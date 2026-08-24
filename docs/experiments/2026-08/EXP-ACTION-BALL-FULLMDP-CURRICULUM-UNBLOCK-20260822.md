@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V6 PPO-V5/Observation-V3 candidate / old V4-V5 evidence frozen / no authorized formal run`
+> 状态：`V6 PPO-V5/Observation-V3 dual-fresh active / old V4-V5 evidence frozen / no authorized formal run`
 > 证据边界：`diagnostic_unauthorized=true`；本记录不授权 resume、promotion、export、部署或真机。
 
 > **阅读边界（2026-08-25）：**§1--§9保留课程故障发现、V4/V5运行和被替换实现史，不是现役执行真源；
@@ -134,9 +134,9 @@
   table-hit已占约`11.0%`，必须继续按原因与分母观察。
 - MuJoCo early update0--9与recent update38--47的完成episode平均长度从`105.61`升到`149.75 tick`。
   update45首次真实出现`due=1 / reveal=1 / deferred=0`，随后同一rollout有phase-2 task row `27`个、
-  `R03 physically valid=26`且task Reward0--9已产生非零梯度；这直接验证上一阶段有一个row活到due时，
-  下一阶段立即开始可学，不再被旧R07门清零。selected contact与landing仍为0，所以击球和上台继续记
-  `未测`。最近20轮wall中位约`9.634 s/H48`（H24-equivalent约`4.82 s`）。
+  `R03 physically valid=26`且task Reward0--9已产生非零income/sample；这直接验证上一阶段有一个row活到due时，
+  下一阶段立即开始可学，不再被旧R07门清零。selected contact=0，landing因没有selected-contact分母为
+  `未测`，故击球和上台仍未闭合。最近20轮wall中位约`9.634 s/H48`（H24-equivalent约`4.82 s`）。
 
 ## 6. 2026-08-22第二次successor：CUDA故障、几何闭环与热路减法
 
@@ -286,14 +286,14 @@ action mimic→hit或hit→landing交接。
 `due/selected/ACCEPT=1/1/1`且defer/reject/CENSOR/fault全0；MuJoCo update49--59累计
 `due/reveal=9/9`、deferred=0，每个有task的update都产生非零且相等的R03 present/physically-valid rows。
 这证明上一阶段只要有row活过tick295，task/action-mimic分母立即打开，没有被R07 readiness再次阻断。Isaac尚未
-开始playback，两个backend的launch/contact/landing仍为0，所以击球/上台继续`未测`，不能用R03几何有效
+开始playback，两个backend的launch=0，故contact/landing为`未测`；击球/上台继续`未测`，不能用R03几何有效
 冒充真实接触。
 
 只读刷新到Isaac ACK176 / MuJoCo update118时，累计分母分别为
 `due/selected/construction/key=2/2/2/2`和`due/reveal=15/15`、deferred=0、R03
 present/physically-valid=`174/174`。Isaac recent10 collection中位`8.238 s/H48`、episode均长
 `148.93 tick`；MuJoCo对应为`9.585 s/H48`、`151.17 tick`。两端fault/nonfinite/conservation仍为0，
-但Isaac playback与两端launch/contact/landing仍为0。
+但Isaac playback=0；两端launch=0，故contact/landing为`未测`。
 
 ### 6.7 side-session建议的独立裁决
 
@@ -630,18 +630,29 @@ present/physically-valid=`1/1`。这证明两条自然课程链已经分别到�
 ## 10. 2026-08-25 current：V5反例收口与V6最小桥修复
 
 本节取代§9全节作为本实验的current裁决；执行顺序只认
-[双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)。
-它不把branch candidate写成已运行结果。
+[双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)。
+它区分已运行的branch诊断结果与仍未完成的formal/promotion，不把diagnostic写成authorized或formal。
 
 ### 10.1 V5回答了什么、没有回答什么
 
-旧MuJoCo V5 source=`39f94819…`的最新只读快照到ACK8692（`1,709,113,344` transitions；固定recent50
-window截至update8688）。该窗wall/episode length/return mean=`13.405 s/563.64 tick/42.704`，
-scheduled due=`22,656`、launch=`20,929`、R03 physically-valid=`20,445`；raw edge与selected contact均为
-`0/20,929 launch`。全历史只在update1389与1541各有1次raw edge，共2次；selected/physical contact与
-landing始终没有事件。因为没有selected contact，landing没有eligible分母，必须写`未测`。settled-result
-组成是recovery=`0`、fail=`9,524`、timeout=`9,155`，但它不是selected-shot recovery rate，也不能把
-landing补成零。mimic/sample=`.074871`、sigma=`.0127691`；因此：
+旧MuJoCo V5 source=`39f9481950a660e198dedac7fd402806d648906b`已经精确TERM并只读冻结，最终ACK=
+`0..9046`（`1,778,712,576` transitions），没有伪造completion。最终recent50 wall
+窗口固定为ACK8997..9046，mean/p50/p90=`13.314/13.301/13.328 s/H48`；`14,818`个episode的mean length/return=
+`663.851/48.624`。该窗scheduled/public/terminal-overlap=`24,845/24,827/18`，launch=
+`24,121`、R03 physically-valid=`23,833`，raw racket edge与selected contact均为
+`0/24,121 launch`；recovery success/fail/timeout=`0/7,415/12,402`。
+
+全历史scheduled/public/terminal-overlap=`3,484,435/3,481,891/2,544`，launch=`3,260,695`、
+R03 physically-valid=`3,108,092`，raw racket edge只有2次，selected contact始终为0。因为没有
+selected contact，landing没有eligible分母，必须写`未测`；recovery fail/timeout也不是selected-shot
+recovery rate，不能把landing补成零。因此：
+
+可复算输入是只读root
+`/workspace/franco/runs/fullmdp-a-h48-v5-mujoco-chronology-39f94819-20260823T144237Z/evidence.jsonl`
+（最后修改`2026-08-24T22:47:42Z`，SHA-256=
+`138a1aed62e239713b843385972cd231b2d19638d7874178e05e0f2415091a11`）。全历史取全部9047条ACK；
+recent50取末50条（ACK8997..9046）；计数逐条求和，episode mean按`Σlength或return / Σcompleted episode`
+计算。
 
 - balance/survival和return继续改善，task、launch与精确击球目标的分母也足够大；
 - mimic→真实拍球的连续控制桥没有按设计出现，不能再用“训练步数还少”解释；
@@ -667,19 +678,26 @@ hitting-face法向和长轴四个Cauchy prior
 
 ### 10.3 从Build4学原则，不抄证明与数值
 
-可复现参考冻结为`origin/build_4@324e60d1`。Build4更容易出现可见动作，核心不是一个神奇reward常数，
-而是四件事叠加：从model21800强warm-start且
-重置sigma `.19`；只有2条clip；约`1--1.3 s`一次的高频任务曝光；actor直接看见desired拍心位置/速度与
-TTS，并从proprioception推断actual拍状态，reward在strike window连续支付位置/速度/法向`14/14/5`目标。
-它支持“mimic目标必须直接约束拍且policy至少能够推断纠偏状态”，但没有独立actor normal字段或
-achieved-residual，不能拿它证明Observation V3是必要条件，也不能区分曝光频率、
-warm-start、数据窄化、replay和数值的贡献。
+可复现参考冻结为`origin/build_4@324e60d1`。启动合同**强制**从Build1 `model21800` bit-exact
+warm-start actor mean，缺checkpoint会直接拒绝，然后才把sigma重置为`.19`；这是Build4相对当前fresh run
+最直接的已证配置差异，所以Build4不能被当作fresh-from-zero实验。仓内又没有actual model0 initialization
+receipt；加之cadence、replay、Reward和优化器设置同时变化，不能把早期行为独立归因给继承，也不能拿两者
+的早期动作量作因果对比。
 
-Build4仓内有model3440 checkpoint、ONNX与deploy YAML的hash identity；但selected candidate的promotion仍为
-`NOT_PROVEN`，没有逐侧/逐动作evaluation receipt、fresh schema22 long或matched Gate3，artifact身份不能
-代签行为质量。它也没有训练73动作，virtual landing项在选中配方中为零。故本轮：
+Build4同时只有2条clip、约`1--1.3 s`一次的高频任务曝光、actor直接看desired拍心位置/速度与TTS，并从
+proprioception推断actual拍状态；reward在strike window连续支付位置/速度/法向`14/14/5`，另有replay与
+双learning-rate。这些机制可能保持或细化挥拍，但在同一配方中混杂，现有证据不能排序。它只支持
+“mimic目标必须直接约束拍且policy至少能够推断纠偏状态”；没有独立actor normal或achieved-residual，
+不能拿它证明Observation V3必要，也不能把某个曝光频率或reward常数写成因果答案。
 
-- **adopt：**直接连续拍面Reward与同source actor-visible残差，以及逐阶段诚实分母；
+Build4操作文档记录了本地model3440 checkpoint、ONNX与deploy YAML的hash；对应字节不在
+`origin/build_4@324e60d1` Git tree，本轮未复算。即使接受这份历史identity记录，selected candidate的
+promotion仍为`NOT_PROVEN`，没有逐侧/逐动作evaluation receipt、fresh schema22 long或matched Gate3，
+artifact身份不能代签行为质量。当前V6 live仍只有single slot0；Build4的2条clip与最终73动作目标之间的差距只限制最终外推，
+不能解释当前single-slot early-learning差异。Build4 virtual landing项在选中配方中为零。故本轮：
+
+- **adopt：**Build4的direct-paddle objective/correction-information原则与逐阶段诚实分母；Reward24是本轮
+  直接连续拍面实现，Observation V3 residual是本轮独立的最小实现，其必要性仍待paired control；
 - **defer：**`1--1.3 s`曝光频率、warm-start、replay、双LR、sigma `.19`与`14/14/5`数值，留给独立可归因实验；
 - **reject：**直接续Build4 checkpoint、把它称为physical/fullMDP formal成功，或把2条clip外推成73动作。
 
@@ -689,8 +707,8 @@ learner最终采用[`PPO V5`](../../DEFINITIONS.md#fullmdp-ppo-v5)：`2048 env �
 E5/MB4；继承V4的`gamma=.99`、GAE`lambda=.98`、entropy0、learned`log_std`、fresh sigma`.05`且没有
 按iteration强制std decay。相对4096/U12500/MB8，总transition=`2,457,600,000`、每minibatch=`24,576`
 sample和optimizer step=`500,000`保持；但policy刷新、GAE/KL、WAL和checkpoint的样本边界改变，所以这是
-明确的算法/迭代性取舍，不是语义等价热路优化。约`4.8 s/H48`只是待测估计，必须由exact rate probe与
-短学习canary确认。
+明确的算法/迭代性取舍，不是语义等价热路优化。exact rate已实测Mu p50/p90=
+`5.468/5.526 s/H48`、Isaac=`7.81/8.38 s/H48`；前者达到约6秒方向，后者未达到严格6秒。
 
 Observation最终采用[`V3`](../../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)：
 actor/critic=`215/231`。它在旧common183与task tail之间加入4×3 heading-frame residual：同一measured
@@ -710,8 +728,93 @@ Gate、D2H、新owner或actor字段。
 
 ### 10.5 验收边界
 
-Pod predecessor已经反证Isaac positional schema decode和Mu Torch-only pose adapter；pre-V3的Isaac
-4096×H48 probe随后关闭了该runtime路径，但没有课程分母，且不能代签PPO V5。失败分类、exact数字与receipt
-只认[热路实验§16](EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。
-最终source的CPU矩阵、两端PPO V5 exact rate、Mu真实Full-A、Isaac短学习canary、双fresh ACK与学习分母仍
-`未测`；G04/G05/G06继续`Partial`，`diagnostic_unauthorized=true`。
+最终clean/pushed source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`。exact Pod host为
+`1,036 passed, 11 skipped`；两端PPO V5 rate probe均自然完成61 update，Mu p50/p90=
+`5.468/5.526 s/H48`，Isaac=`7.81/8.38 s/H48`。失败分类、recipe身份与receipt只认
+[热路实验§16](EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)。
+
+两个[`FullMDP V6`](../../DEFINITIONS.md#fullmdp-v6-candidate) `2048×H48×25000`
+[`fresh/no-resume`](../../DEFINITIONS.md#fresh-only-no-resume)长跑已于`2026-08-24T22:48:31Z`从同一checkout同时启动：
+
+- MuJoCo namespace=`fullmdp-a-h48-v6-mujoco-reward24-obsv3-caddecb7-20260824T224808Z`，GPU0；
+- Isaac namespace=`fullmdp-a-h48-v6-isaac-reward24-obsv3-caddecb7-20260824T224808Z`，GPU1。
+
+`ACK 0..101`固定启动快照在`observed_at=2026-08-24T23:10:34Z`只读提取；两端各完成
+`10,027,008` transitions，进程、PGID、exact GPU UUID、
+CPU affinity与lifetime flock仍在。Mu累计`73,051`个episode，mean length/return=
+`134.964/21.730`；first10→recent10固定为ACK0..9→ACK92..101，结果为
+`104.337/16.043 → 159.622/26.015`。episode mean均按`Σlength或return / Σcompleted episode`计算；common mimic与新增
+paddle-prior的income/sample分别`0.08751→0.09350`、`0.06794→0.06948`；scheduled/public/
+terminal-overlap=`14/13/1`，launch=0，故contact与landing均为`未测`。Isaac累计`93,776`个episode，mean
+length/return=`105.427/16.195`；first10→recent10为`87.502/12.956 → 129.229/20.532`。
+common mimic与paddle-prior分别`0.08173→0.09008`、`0.06768→0.06887`；尚无row活到首次due，
+所以task/playback/launch/contact/landing均为`未测`。income/sample均按`Σconfigured income / Σreward sample`
+计算，不是policy gradient。可复算输入分别是Mu root
+`/workspace/franco/runs/fullmdp-a-h48-v6-mujoco-reward24-obsv3-caddecb7-20260824T224808Z/evidence.jsonl`
+首102行（SHA-256=`32f6b4ea4a21d5480a023e89445059ee72fe39647d2c996e0a3d582df5593b99`）和Isaac root
+`/workspace/franco/runs/fullmdp-a-h48-v6-isaac-reward24-obsv3-caddecb7-20260824T224808Z/run.log`
+首102条`HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=`行（SHA-256=
+`78b8fca9f7105c72ffdde25dc959bfd6e272bda4d049e3dbb9af4a3ec4ffb520`）。
+
+两端Reward nonfinite/conservation、attributed/fact fault与qdes-forbidden terminal均为0。recent10 raw wall
+mean为Mu `5.518 s/H48`、Isaac `8.332 s/H48`。这只支持“balance/survival与common mimic/
+paddle-prior income/sample同步提高；能活到295 tick的Mu row已自然打开task入口”。当前尚不能称balance或
+mimic基本成功，也不能把launch=0、contact未测
+解释成hit失败；后续判据保持上一阶段开始基本成形时下一阶段已有自然非零分母。25000 completion、
+selected contact/landing、formal physics parity与transfer均未完成；G04/G05/G06继续`Partial`，
+`diagnostic_unauthorized=true`。
+
+### 10.6 首次双侧launch与关节遥测裁决（固定诊断窗）
+
+`2026-08-24T23:30:13Z`只读学习快照不覆盖§10.5启动窗，而是冻结首次双侧launch这个结论变化点：
+
+- MuJoCo到durable ACK326，共`32,145,408` transitions；recent10 ACK317..326的episode mean
+  length/return=`354.184/55.818`，相对first10的`104.337/16.043`明显提高。common mimic
+  income/sample=`0.09025`，略高于first10的`0.08751`；paddle-prior=`0.06725`，相对`0.06794`
+  基本持平且略低，不能写成所有mimic项同步改善。累计scheduled/public/terminal-overlap=
+  `24,934/24,841/93`，`59`个launch中有`3`个R03 present且`3/3` physically-valid；selected contact=
+  `0/59 launch`，是有分母的diagnostic negative，landing因selected contact=0仍为`未测`。
+- Isaac到durable ACK294，共`28,999,680` transitions；recent10 ACK285..294的episode mean
+  length/return=`173.915/27.968`，相对first10的`87.502/12.956`提高。common mimic与paddle-prior
+  income/sample=`0.09148/0.06935`，均高于first10的`0.08173/0.06768`。累计scheduled/public/
+  terminal-overlap=`30/29/1`，public中accepted/rejected=`26/3`；已有`4`次playback、`2`次physical
+  launch、`2/2` R03 present/physically-valid与`2`次settlement/payment，selected contact=`0/2 launch`，
+  landing仍为`未测`。逐row复核的`24`个accepted-terminal样本全部因`base_fell_tilt`在episode tick
+  `297..367`结束；它解释了大多数accepted尚未走到playback，而非证明accepted/playback实现断链。
+
+两条进程在`2026-08-24T23:31:40Z`继续增长到Mu ACK335与Isaac ACK304。上述证据证明四阶段没有被硬Gate
+串行化：balance尚未称基本成功时，两边已经自然打开playback/launch/R03；当前瓶颈转为继续存活和
+launch后的击球学习。仍然没有contact/landing成功证据，也没有量化的“基本成功”预注册阈值；后者只按
+[当前TODO的未来窗口证据判读合同](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)
+补齐，不能回看本窗后再调阈值。live recent10 wall约为Mu`9.23 s/update`、Isaac`8.9 s/update`；随着row存活
+更久、task路径打开，live wall不再等于空任务占多数的fixed rate probe，因此Mu的约6秒rate方向不能冒充
+全程学习wall承诺。
+
+另在`2026-08-24T23:34:21Z`/`23:34:04Z`冻结关节遥测审计。两个后端口径不同，禁止合并平均：
+
+- Mu ACK0..352共`34,701,312` env-policy rows；actual-hard-edge=
+  `1,940,999/34,701,312=5.5934%`，qdes-guard-intervention=
+  `2,060,531/34,701,312=5.9379%`。recent10 ACK343..352分别为
+  `51,317/983,040=5.2202%`与`60,159/983,040=6.1197%`，latest row为`3.1016%/3.8300%`；
+  first10曾为`31.5741%/33.1323%`，方向显著下降。`joint_qdes_forbidden=0`。
+- Isaac ACK0..319共`31,457,280` env-policy rows。policy crossing的分母是
+  `transition×31 joint`，累计`5,625,017/975,175,680=0.576821%`；substep hard crossing与actual hard
+  edge的分母是`transition×31 joint×5 readback`，累计分别为
+  `28,523,732/4,875,878,400=0.584997%`与`26,145,870/4,875,878,400=0.536229%`。recent10三项依次为
+  `0.017175%/0.021422%/0.007762%`；first10 actual hard edge=`1.84254%`，近期下降约`237×`。
+  qdes joint count、qdes-forbidden terminal与Reward nonfinite均为0。
+
+可复算输入仍是§10.5的两个run root。Mu `evidence.jsonl`原始前353行已核update index=`0..352`，
+`head -n 353 evidence.jsonl | sha256sum`为
+`0bb0f818e4dc4f98e957d3eaff58eb01e50f0bf467d1ff3b594b76f344fabc21`；Isaac `run.log`筛选canonical
+ACK整行后前320行已核`ppo_update=0..319`，
+`grep '^HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=' run.log | head -n 320 | sha256sum`为
+`46db8f7efdbd835670deab59433acdc22b6536accebdd62fe59cae9a3fec9225`。
+
+语义必须分开：qdes-guard-intervention包含有限投影/预测越inner envelope后的可恢复制动；
+actual-hard-edge则是真实模拟关节在任一readback到达或越过机械硬边，不能称为“无害投影”。现役
+`diagnostic_unauthorized`配置允许finite策略通过制动恢复并继续optimizer，符合
+[`HANDOFF_TO_CODEX_20260808` §3.5](../../operations/HANDOFF_TO_CODEX_20260808.md#35-一个反向的平衡franco-08-08-的纠正)
+“可由policy学会回避则记账继续”的范围；两端近期显著下降且nonfinite/完整性故障为0，所以当前不停车、
+不重启。但这批非零actual-hard-edge明确阻断formal、promotion、deployment与真机安全声明；若qdes
+nonfinite变为非零、证据/守恒失真，或balance成熟后actual hard edge不再下降甚至反升，必须停下做根因修复。

@@ -106,8 +106,8 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   minibatch；继承V4的`gamma=.99`、GAE`lambda=.98`、`entropy_coef=0`、learned`log_std`、fresh
   `init_noise_std=.05`、adaptive KL且无iteration强制std decay。相对V4的4096/U12500/MB8，
   总transition=`2,457,600,000`、每minibatch=`24,576` sample和总optimizer step=`500,000`保持；但policy
-  刷新、GAE/KL反馈、WAL与checkpoint样本边界改变，因此不是语义等价性能优化。约`4.8 s/H48`只是待测
-  迭代目标，必须以final exact source的rate probe和短学习canary验收。
+  刷新、GAE/KL反馈、WAL与checkpoint样本边界改变，因此不是语义等价性能优化。final exact rate实测
+  Mu p50/p90=`5.468/5.526 s/H48`、Isaac=`7.81/8.38 s/H48`；这只验收迭代速度，不代签学习质量。
 
 - <a id="fullmdp-ppo-v4"></a>**`action_ball_full_mdp_ppo_v4` / FullMDP统一PPO V4配方**：Isaac与
   MuJoCo Full-A的predecessor typed recipe：`4096 env`、`H=48`、总更新`12,500`、save interval`500`、
@@ -125,12 +125,12 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   它补的是mimic→hit的连续控制桥，不新增contact oracle、actor authority或安全Gate；真实接触/落点仍只由
   lifecycle事实判定。
 
-- <a id="fullmdp-v6-candidate"></a>**`fullmdp-a-h48-v6-*` / FullMDP第六批最小学习闭环候选**：
+- <a id="fullmdp-v6-candidate"></a>**`fullmdp-a-h48-v6-*` / FullMDP第六批最小学习闭环lineage**：
   2026-08-25以PPO V5、Reward24、Observation V3、四次真实cadence、terminal-overlap跨writer合成、
-  milestone schema7具名slice与Mu native-Warp keepout为核心的fresh-only branch lineage。`9d333b0b`
-  （语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；最终exact source、Pod重验和fresh学习
-  尚未闭合，所以不是live source，也不表示第六课程Stage、checkpoint兼容、promotion、physics parity或
-  部署授权。
+  milestone schema7具名slice与Mu native-Warp keepout为核心的fresh-only branch lineage。最终
+  clean/pushed source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`，两端rate与fresh ACK已闭合；
+  `9d333b0b`（语义`ba7225b2`）只作predecessor。该名称不表示第六课程Stage、25000完成、
+  checkpoint兼容、promotion、physics parity或部署授权。
 
 - <a id="fullmdp-rate-probe"></a>**FullMDP 61-update rate probe / FullMDP六十一轮吞吐探针**：按当前
   recipe固定`2048 env × H48`，使用profiler-off的`10`轮warm-up + `50`轮measured + `1`轮tail诊断预算。
@@ -167,7 +167,7 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   不与当前`9/5/6`伪兼容。V5引入path-free [`runtime_stack`](#mujoco-fullmdp-runtime-stack)与plant identity。
   V5也修合法payment-before-close、launch-before-playback、exact publication join、具名row fault及negative-face
   normal，并删除可证伪的热路冗余。`v5`只是source/run lineage编号，不是
-  PPO V5、现役配方、ready结论、promotion或真机授权；当前执行由V6候选取代，V5只保留只读证据。
+  PPO V5、现役配方、ready结论、promotion或真机授权；当前执行由V6 fresh取代，V5只保留只读证据。
 - <a id="fullmdp-ppo-v2"></a>**`action_ball_full_mdp_ppo_v2` / FullMDP统一PPO V2历史配方**：与V3的
   H48、预算、GAE和optimizer分组相同，但使用永久`entropy_coef=.01`；已由V3取代，只用于解释历史run，
   不得resume或作为当前学习证据。

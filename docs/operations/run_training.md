@@ -125,12 +125,12 @@ generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint
 所以现役A/C继续fresh-only。
 
 不要为了替代已退休的formal路径新增同一writer自造的依赖有向无环图（DAG）/hash/receipt门；那类
-self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示已达到约`6 s/update`的方向目标、学会回球、
-获得formal authority或完成任何Gate。性能结论仍须使用exact Pod、profiler-off、matched-strata墙钟证据。
+self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示学会回球、获得formal authority或
+完成任何Gate；当前速度结果只认下面V6 exact Pod rate，不从Phase-A结构推算。
 
 <a id="fullmdp-ppo-v5-observation-v3-current"></a>
 
-#### Current FullMDP PPO V5与Observation V3执行合同（2026-08-25 branch candidate）
+#### Current FullMDP PPO V5与Observation V3执行合同（2026-08-25 branch diagnostic）
 
 V6 fresh-only launcher必须从code-owned typed recipe读取[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)：
 `num_envs=2048`、`num_steps_per_env=48`、`max_iterations=25000`、`save_interval=500`、
@@ -150,12 +150,15 @@ Mu update/completion/summary wire为`9/5/6`，Isaac milestone为schema7具名epi
 `2048 env × H48 × 61 update`、profiler-off、fresh process和`diagnostic_unauthorized=true`。Mu使用
 `--full-a --diagnostic-rate-probe`；Isaac只显式打开task内的
 `action_ball_full_mdp_rate_probe`。长跑的`max_iterations`仍是25000，61预算由code-owned diagnostic
-边界安装。约`4.8 s/H48`只是待测迭代目标；probe之后还要短学习canary，不能自动转成长跑或代签学习质量。
+边界安装。final `caddecb7`实测Mu p50/p90=`5.468/5.526 s/H48`、Isaac=
+`7.81/8.38 s/H48`；Mu达到约6秒方向，Isaac未达到严格6秒。该差异包含PPO尺度取舍，不是语义等价热路
+对拍；probe不能自动转成长跑或代签学习质量。
 
-`9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；final exact source SHA尚未冻结。
-只有final clean checkout的CPU partition、两端真实GPU rate、Reward24/V3 finite、Mu Full-A returned
-observation/lifecycle和Isaac短学习canary闭合后，才可创建两个fresh root/namespace。当前状态和顺序只认
-[双后端长跑TODO §0.5](action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)；
+`9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；final clean/pushed exact source=
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`。CPU partition、两端真实GPU rate、Reward24/V3 finite、
+Mu Full-A returned observation/lifecycle、Isaac启动canary均已闭合，两个fresh root/namespace已按本合同
+创建并连续ACK。当前状态和顺序只认
+[双后端长跑TODO §0.5](action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)；
 G04/G05/G06保持`Partial`，不授权promotion、export、部署或真机。
 
 #### HISTORICAL / FROZEN — FullMDP PPO V3执行配方（2026-08-23 branch candidate）
