@@ -240,7 +240,7 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     assert cfg["policy"]["actor_obs_normalization"] is False
     assert cfg["policy"]["critic_obs_normalization"] is False
     assert cfg["algorithm"]["num_learning_epochs"] == 5
-    assert cfg["algorithm"]["num_mini_batches"] == 8
+    assert cfg["algorithm"]["num_mini_batches"] == 4
     assert cfg["algorithm"]["gamma"] == 0.99
     assert cfg["algorithm"]["lam"] == 0.98
     assert cfg["algorithm"]["entropy_coef"] == 0.0
@@ -583,8 +583,8 @@ def _install_fake_stack(
             return dict(ACTION_CONTRACT)
 
         def get_observations(self):
-            policy_width = 203 if self.full_a_mode else 229
-            critic_width = 219 if self.full_a_mode else 399
+            policy_width = 215 if self.full_a_mode else 229
+            critic_width = 231 if self.full_a_mode else 399
             return {
                 "policy": torch.zeros(num_envs, policy_width),
                 "critic": torch.zeros(num_envs, critic_width),
@@ -651,8 +651,8 @@ def _install_fake_stack(
     wait_module.observation_contract = types.SimpleNamespace(
         ACTOR_WIDTH_V1=229,
         CRITIC_WIDTH_V1=399,
-        ACTOR_WIDTH_V2=203,
-        CRITIC_WIDTH_V2=219,
+        ACTOR_WIDTH_V3=215,
+        CRITIC_WIDTH_V3=231,
     )
     wait_module.FULLMDP_TERMINATION_BITS = {
         "time_out": 1, "base_fell_tilt": 2, "base_too_low": 4,
@@ -675,8 +675,8 @@ def _install_fake_stack(
             self.storage = types.SimpleNamespace(
                 step=0,
                 observations={
-                    "policy": torch.zeros(num_steps, num_envs, 203),
-                    "critic": torch.zeros(num_steps, num_envs, 219),
+                    "policy": torch.zeros(num_steps, num_envs, 215),
+                    "critic": torch.zeros(num_steps, num_envs, 231),
                 },
                 actions=torch.zeros(num_steps, num_envs, 31),
                 dones=torch.zeros(shape, dtype=torch.uint8),
@@ -995,8 +995,8 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
             if line.startswith("ACTION_BALL_MUJOCO_WAIT_RSL3_JSON=")
         )
     )
-    assert final["policy_width"] == 203
-    assert final["critic_width"] == 219
+    assert final["policy_width"] == 215
+    assert final["critic_width"] == 231
     assert trace == [
         "prepare", "optimizer", "save", "ack",
         "prepare", "optimizer", "save", "ack",
@@ -1163,16 +1163,16 @@ def test_full_a_production_shape_and_snapshot_schedule_are_exact(
     monkeypatch, tmp_path,
 ):
     module = _load()
-    assert module._snapshot_indices(12_500, 500) == (
-        *range(0, 12_500, 500), 12_499,
+    assert module._snapshot_indices(25_000, 500) == (
+        *range(0, 25_000, 500), 24_999,
     )
     monkeypatch.setattr(
         module, "_rsl3_runner",
         lambda: pytest.fail("shape validation must precede RSL construction"),
     )
-    with pytest.raises(ValueError, match="4096x48x12500"):
+    with pytest.raises(ValueError, match="2048x48x25000"):
         module.main(
-            num_envs=2, num_updates=12_500,
+            num_envs=2, num_updates=25_000,
             full_a_mode=True, evidence_jsonl=str(tmp_path / "updates.jsonl"),
             snapshot_dir=str(tmp_path), completion_json=str(tmp_path / "seal.json"),
             source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE,
@@ -1205,8 +1205,44 @@ def test_full_a_rate_probe_reuses_ledger_without_snapshot_or_completion(
     record = json.loads(output[-1].split("=", 1)[1])
     rate = record["rate_probe"]
     assert record["diagnostic_unauthorized"] is True
+    assert record["formal_evidence"] is False
+    assert record["safety_gate"] is False
+    assert record["kind"] == "action_ball_mujoco_full_mdp_h48_rate_probe_v1"
+    assert record["schema_version"] == 1
+    assert record["source_commit"] == SOURCE_COMMIT
+    assert record["namespace"] == RUN_NAMESPACE
+    assert record["learning_recipe_sha256"] == (
+        module.FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+    )
     assert record["task_lifecycle"] == "full_a_diagnostic_rate_probe"
     assert "engineering_run_complete" not in record
+    assert "action_ball_full_mdp_ppo_recipe_sha256" not in record
+    assert record["candidate_production_execution_recipe"] == (
+        module.FULL_MDP_PPO_RECIPE.execution_recipe()
+    )
+    assert record["candidate_production_execution_recipe_sha256"] == (
+        module.FULL_MDP_PPO_RECIPE_SHA256
+    )
+    actual_rate_recipe = module._rate_execution_recipe(
+        num_envs=1,
+        num_steps_per_env=module.NUM_STEPS_PER_ENV,
+        max_iterations=module.RATE_PROBE_NUM_UPDATES,
+        save_interval=module.FULL_A_SAVE_INTERVAL,
+    )
+    assert record["rate_execution_recipe"] == actual_rate_recipe
+    assert record["rate_execution_recipe_sha256"] == (
+        module._canonical_payload_sha256(actual_rate_recipe)
+    )
+    assert record["rate_execution_recipe_sha256"] != (
+        record["candidate_production_execution_recipe_sha256"]
+    )
+    assert actual_rate_recipe["runner_overrides"] == {
+        "num_envs": {"candidate_production": 2_048, "rate_execution": 1},
+        "max_iterations": {
+            "candidate_production": 25_000,
+            "rate_execution": 61,
+        },
+    }
     assert rate["warmup_updates"] == 10
     assert rate["measured_updates"] == 50
     assert rate["tail_updates"] == 1
@@ -1229,6 +1265,22 @@ def test_rate_probe_keeps_production_shape_and_rejects_artifact_authority(
     monkeypatch, tmp_path, profiler_env,
 ):
     module = _load()
+    production_rate_recipe = module._rate_execution_recipe()
+    assert production_rate_recipe["effective_runner"] == {
+        "num_envs": 2_048,
+        "num_steps_per_env": 48,
+        "max_iterations": 61,
+        "save_interval": 500,
+    }
+    assert production_rate_recipe["runner_overrides"] == {
+        "max_iterations": {
+            "candidate_production": 25_000,
+            "rate_execution": 61,
+        }
+    }
+    assert module._canonical_payload_sha256(production_rate_recipe) != (
+        module.FULL_MDP_PPO_RECIPE_SHA256
+    )
     monkeypatch.setattr(
         module, "_rsl3_runner",
         lambda: pytest.fail("rate validation must precede RSL construction"),
@@ -1239,17 +1291,17 @@ def test_rate_probe_keeps_production_shape_and_rejects_artifact_authority(
         source_commit=SOURCE_COMMIT, run_namespace=RUN_NAMESPACE,
         mujoco_warp_runtime_site=str(tmp_path / "runtime_site"),
     )
-    with pytest.raises(ValueError, match="4096x48x61"):
+    with pytest.raises(ValueError, match="2048x48x61"):
         module.main(num_envs=2, num_updates=61, **common)
     with pytest.raises(ValueError, match="forbids snapshot/completion"):
         module.main(
-            num_envs=4096, num_updates=61,
+            num_envs=2048, num_updates=61,
             snapshot_dir=str(tmp_path / "snapshots"), **common,
         )
     assert profiler_env in module.RATE_PROBE_PROFILE_ENVS
     monkeypatch.setenv(profiler_env, "1")
     with pytest.raises(ValueError, match="profiler environment off"):
-        module.main(num_envs=4096, num_updates=61, **common)
+        module.main(num_envs=2048, num_updates=61, **common)
 
 
 def test_rate_probe_cli_has_no_resume_surface():

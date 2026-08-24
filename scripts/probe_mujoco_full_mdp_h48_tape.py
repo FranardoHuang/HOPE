@@ -35,11 +35,17 @@ REWARD_CONTRACT_SOURCE = (
     "whole_body_tracking/tasks/tracking/mdp/"
     "action_ball_full_mdp_reward_contract.py"
 )
+OBSERVATION_CONTRACT_SOURCE = (
+    ROOT
+    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/"
+    "action_ball_full_mdp_portable_observation.py"
+)
 ARRAYS_NAME = "arrays.npz"
 SUMMARY_NAME = "summary.json"
 FLOAT_FIELDS = (
     "initial_qpos", "initial_qvel", "initial_actor", "initial_critic",
-    "reward_terms", "actor203", "critic219", "qpos", "qvel",
+    "reward_terms", "actor", "critic", "qpos", "qvel",
 )
 DISCRETE_FIELDS = (
     "done", "termination_bits", "time_out", "backend_table_contact",
@@ -127,6 +133,12 @@ reward_contract = _load_source(
     REWARD_CONTRACT_SOURCE, "_hope_h48_reward_contract"
 )
 REWARD_TERM_COUNT = reward_contract.REWARD_TERM_COUNT
+observation_contract = _load_source(
+    OBSERVATION_CONTRACT_SOURCE, "_hope_h48_observation_contract"
+)
+OBSERVATION_KIND = observation_contract.OBSERVATION_KIND_V3
+ACTOR_WIDTH = observation_contract.ACTOR_WIDTH_V3
+CRITIC_WIDTH = observation_contract.CRITIC_WIDTH_V3
 
 def _fresh_root(path: Path) -> Path:
     if not path.is_absolute() or path.name in ("", ".", "..") or os.path.lexists(path):
@@ -210,18 +222,22 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
             "action_slot": extras["full_a_action_slot"],
             "action_uid": extras["full_a_action_uid"],
             "mount_normal_sign": extras["full_a_mount_normal_sign"],
-            "reward_terms": extras["reward_terms"], "actor203": observations["policy"],
-            "critic219": observations["critic"], "qpos": env.sim.data.qpos,
+            "reward_terms": extras["reward_terms"], "actor": observations["policy"],
+            "critic": observations["critic"], "qpos": env.sim.data.qpos,
             "qvel": env.sim.data.qvel}
         mapping.update({"event__" + name: extras[name] for name in event_names})
         if (tuple(mapping["reward_terms"].shape)
                 != (cfg["num_envs"], REWARD_TERM_COUNT)
-                or tuple(mapping["actor203"].shape) != (cfg["num_envs"], 203)
-                or tuple(mapping["critic219"].shape) != (cfg["num_envs"], 219)
+                or tuple(mapping["actor"].shape)
+                != (cfg["num_envs"], ACTOR_WIDTH)
+                or tuple(mapping["critic"].shape)
+                != (cfg["num_envs"], CRITIC_WIDTH)
                 or not torch.equal(reward, mapping["reward_terms"].sum(dim=1))
-                or not torch.equal(mapping["actor203"], mapping["critic219"][:, :203])
+                or not torch.equal(
+                    mapping["actor"], mapping["critic"][:, :ACTOR_WIDTH]
+                )
                 or any(not bool(torch.isfinite(mapping[name]).all()) for name in
-                       ("reward_terms", "actor203", "critic219", "qpos", "qvel"))):
+                       ("reward_terms", "actor", "critic", "qpos", "qvel"))):
             raise ProbeError("Full-A H48 numeric/ABI surface differs")
         current = {name: value.detach().cpu().numpy().copy()
                    for name, value in mapping.items()}
@@ -238,7 +254,7 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
         os.close(fd)
     totals = {name: int(arrays["event__" + name].sum()) for name in event_names}
     arrays_payload = _stable_bytes(root / ARRAYS_NAME, "probe arrays")
-    summary = {"schema_version": 1, "record_type": "mujoco_full_mdp_h48_fixed_tape",
+    summary = {"schema_version": 2, "record_type": "mujoco_full_mdp_h48_fixed_tape_v2",
         "diagnostic_unauthorized": True, "training_authorized": False,
         "checkpoint_authority": False, "source": _source_identity(),
         "probe_source_sha256": hashlib.sha256(_stable_bytes(Path(__file__).resolve(), "probe source")).hexdigest(),
@@ -247,6 +263,9 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
         "ready_pose_sha256": hashlib.sha256(ready_payload).hexdigest(),
         "shape": {"num_envs": cfg["num_envs"], "num_ticks": cfg["num_ticks"],
                   "action_width": cfg["action_width"]},
+        "observation": {"kind": OBSERVATION_KIND,
+                        "actor_width": ACTOR_WIDTH,
+                        "critic_width": CRITIC_WIDTH},
         "arrays_npz_sha256": hashlib.sha256(arrays_payload).hexdigest(),
         "event_totals": totals,
         "natural_h48_strata": {name: (totals[event] if totals[event] else "未测")
@@ -266,9 +285,15 @@ def _load_record(root: Path):
         raise ProbeError("cannot load probe record") from exc
     cfg, config_sha = load_config()
     action_bytes, tape_sha = generate_action_bytes(cfg)
-    if (summary.get("record_type") != "mujoco_full_mdp_h48_fixed_tape"
+    if (summary.get("schema_version") != 2
+            or summary.get("record_type") != "mujoco_full_mdp_h48_fixed_tape_v2"
             or summary.get("config_sha256") != config_sha
             or summary.get("action_tape_sha256") != tape_sha
+            or summary.get("observation") != {
+                "kind": OBSERVATION_KIND,
+                "actor_width": ACTOR_WIDTH,
+                "critic_width": CRITIC_WIDTH,
+            }
             or summary.get("arrays_npz_sha256") != hashlib.sha256(payload).hexdigest()):
         raise ProbeError("probe record identity differs")
     base = {"actions", *FLOAT_FIELDS, *DISCRETE_FIELDS}
@@ -276,10 +301,12 @@ def _load_record(root: Path):
     required_events = {"event__" + name for name in STRATA_EVENTS.values()}
     if set(arrays) != base | events or not required_events <= events:
         raise ProbeError("probe record array surface differs")
-    expected = {"actions": (48, 64, 31), "initial_actor": (64, 203),
-        "initial_critic": (64, 219),
+    expected = {"actions": (48, 64, 31),
+        "initial_actor": (64, ACTOR_WIDTH),
+        "initial_critic": (64, CRITIC_WIDTH),
         "reward_terms": (48, 64, REWARD_TERM_COUNT),
-        "actor203": (48, 64, 203), "critic219": (48, 64, 219)}
+        "actor": (48, 64, ACTOR_WIDTH),
+        "critic": (48, 64, CRITIC_WIDTH)}
     expected.update({name: (48, 64) for name in (*DISCRETE_FIELDS, *events)})
     for name, shape in expected.items():
         if arrays[name].shape != shape:

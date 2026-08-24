@@ -27,6 +27,10 @@ PLANT_XML = PROJECT / (
 )
 RUNNER = Path("hope_training/whole_body_tracking/mjlab_lane/"
               "mujoco_gpu_ac_full_mdp_wait_rsl3.py")
+PPO_RECIPE = Path(
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "action_ball_full_mdp_ppo_recipe.py"
+)
 PLANT_CONTRACT = Path("hope_training/whole_body_tracking/mjlab_lane/"
                       "mujoco_full_mdp_plant_contract.py")
 PLANT_MANIFEST = Path("configs/a3_mujoco_identity_v2_20260803.json")
@@ -70,6 +74,9 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     runner = repo / RUNNER
     runner.parent.mkdir(parents=True)
     runner.write_text("# tracked runner placeholder\n", encoding="utf-8")
+    recipe = repo / PPO_RECIPE
+    recipe.parent.mkdir(parents=True)
+    shutil.copy2(PROJECT / PPO_RECIPE, recipe)
     shutil.copy2(PROJECT / PLANT_CONTRACT, repo / PLANT_CONTRACT)
     manifest = repo / PLANT_MANIFEST
     manifest.parent.mkdir(parents=True)
@@ -80,8 +87,14 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "fixture")
     sys.modules.pop("_hope_mujoco_full_mdp_plant_contract", None)
+    sys.modules.pop("_hope_mujoco_full_mdp_ppo_recipe_launcher", None)
     request.addfinalizer(
         lambda: sys.modules.pop("_hope_mujoco_full_mdp_plant_contract", None)
+    )
+    request.addfinalizer(
+        lambda: sys.modules.pop(
+            "_hope_mujoco_full_mdp_ppo_recipe_launcher", None
+        )
     )
     module = _load(repo / "scripts" / SCRIPT.name)
     monkeypatch.setattr(module, "_available_cpu_ids", lambda: set(range(128)))
@@ -209,7 +222,7 @@ def _expected_trainer(rig, commit: str) -> list[str]:
     root = rig.root
     return [
         str(rig.python), str(rig.runner), "--full-a",
-        "--num-envs", "4096", "--num-updates", "12500",
+        "--num-envs", "2048", "--num-updates", "25000",
         "--evidence-jsonl", str(root / "evidence.jsonl"),
         "--snapshot-dir", str(root / "snapshots"),
         "--completion-json", str(root / "completion.json"),
@@ -217,6 +230,65 @@ def _expected_trainer(rig, commit: str) -> list[str]:
         "--mujoco-warp-runtime-site", str(root / "runtime_site"),
         "--save-interval", "500",
     ]
+
+
+def _expected_rate_trainer(rig, commit: str) -> list[str]:
+    root = rig.root
+    return [
+        str(rig.python), str(rig.runner), "--full-a",
+        "--num-envs", "2048", "--num-updates", "61",
+        "--evidence-jsonl", str(root / "evidence.jsonl"),
+        "--source-commit", commit, "--run-namespace", NAMESPACE,
+        "--mujoco-warp-runtime-site", str(root / "runtime_site"),
+        "--save-interval", "500", "--diagnostic-rate-probe",
+    ]
+
+
+def _runner_rate_payload(rig, commit: str) -> dict[str, object]:
+    recipe = rig.module.FULL_MDP_PPO_RECIPE
+    rate_execution = rig.module._rate_execution_recipe()
+    measured = [1.0 + index / 100.0 for index in range(50)]
+    measured_wall = sum(measured)
+    measured_transitions = 50 * recipe.num_steps_per_env * recipe.num_envs
+    return {
+        "kind": "action_ball_mujoco_full_mdp_h48_rate_probe_v1",
+        "schema_version": 1,
+        "diagnostic_unauthorized": True,
+        "formal_evidence": False,
+        "safety_gate": False,
+        "source_commit": commit,
+        "namespace": NAMESPACE,
+        "rsl_rl_version": "3.1.2",
+        "ppo_update_calls": 61,
+        "environment_steps": 61 * recipe.num_steps_per_env,
+        "transitions": 61 * recipe.num_steps_per_env * recipe.num_envs,
+        "policy_width": 215,
+        "critic_width": 231,
+        "learning_recipe_sha256": recipe.learning_recipe_sha256(),
+        "task_lifecycle": "full_a_diagnostic_rate_probe",
+        "candidate_production_execution_recipe": recipe.execution_recipe(),
+        "candidate_production_execution_recipe_sha256": recipe.recipe_sha256(),
+        "rate_execution_recipe": rate_execution,
+        "rate_execution_recipe_sha256": (
+            rig.module._canonical_payload_sha256(rate_execution)
+        ),
+        "rate_probe": {
+            "warmup_updates": 10,
+            "measured_updates": 50,
+            "tail_updates": 1,
+            "total_wall_seconds": measured_wall + 11.0,
+            "measured_wall_seconds": measured_wall,
+            "measured_update_seconds": measured,
+            "measured_transitions": measured_transitions,
+            "measured_transitions_per_second": (
+                measured_transitions / measured_wall
+            ),
+            "update_seconds_p50": rig.module.statistics.median(measured),
+            "update_seconds_p90": rig.module.statistics.quantiles(
+                measured, n=10, method="inclusive"
+            )[8],
+        },
+    }
 
 
 def _expected_child(
@@ -247,6 +319,51 @@ print(json.dumps(module.expected_plant_model_identity(), sort_keys=True))
     assert identity["source_plant"]["portable_identity_sha256"] == (
         "472219ae346d9217b7d1af860d462a18d6ed8507c5cbb9c0f1ddcd6f964dfd7a"
     )
+
+
+def test_rate_execution_identity_is_exact_across_both_launchers_and_mu_runner() -> None:
+    script = r"""
+import importlib.util, json, pathlib, sys
+modules = []
+for index, raw in enumerate(sys.argv[1:]):
+    path = pathlib.Path(raw)
+    spec = importlib.util.spec_from_file_location(f'rate_identity_{index}', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    modules.append(module)
+payloads = [module._rate_execution_recipe() for module in modules]
+hashes = [module._canonical_payload_sha256(payload) for module, payload in zip(modules, payloads)]
+print(json.dumps({'payloads': payloads, 'hashes': hashes,
+                  'candidate': modules[0].FULL_MDP_PPO_RECIPE.recipe_sha256()},
+                 sort_keys=True))
+"""
+    runner = PROJECT / RUNNER
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            script,
+            str(PROJECT / "scripts" / "launch_isaac_full_mdp_successor.py"),
+            str(SCRIPT),
+            str(runner),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["payloads"][0] == result["payloads"][1] == result["payloads"][2]
+    assert len(set(result["hashes"])) == 1
+    assert result["hashes"][0] != result["candidate"]
+    assert result["payloads"][0]["runner_overrides"] == {
+        "max_iterations": {
+            "candidate_production": 25_000,
+            "rate_execution": 61,
+        }
+    }
 
 
 def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
@@ -296,11 +413,51 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
                 rig.module._plant_contract_module().expected_plant_model_identity()
             ),
         },
+        "ppo_recipe": rig.module.FULL_MDP_PPO_RECIPE.execution_recipe(),
+        "ppo_recipe_sha256": (
+            rig.module.FULL_MDP_PPO_RECIPE.recipe_sha256()
+        ),
         "cpu_affinity": None,
         "cpu_affinity_source": None,
         "cpu_ids": [],
     }
     assert output.err == ""
+    assert not rig.root.parent.exists()
+
+
+def test_diagnostic_rate_dry_run_binds_actual_61_update_identity_only(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True) + ["--diagnostic-rate-probe"]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+    assert payload["argv"] == _expected_rate_trainer(rig, commit)
+    joined = " ".join(payload["argv"])
+    assert "--snapshot-dir" not in joined
+    assert "--completion-json" not in joined
+    assert payload["candidate_production_execution_recipe"] == (
+        rig.module.FULL_MDP_PPO_RECIPE.execution_recipe()
+    )
+    assert payload["candidate_production_execution_recipe_sha256"] == (
+        rig.module.FULL_MDP_PPO_RECIPE.recipe_sha256()
+    )
+    rate_execution = rig.module._rate_execution_recipe()
+    assert payload["rate_execution_recipe"] == rate_execution
+    assert payload["rate_execution_recipe_sha256"] == (
+        rig.module._canonical_payload_sha256(rate_execution)
+    )
+    assert payload["rate_execution_recipe_sha256"] != (
+        payload["candidate_production_execution_recipe_sha256"]
+    )
+    assert rate_execution["runner_overrides"] == {
+        "max_iterations": {
+            "candidate_production": 25_000,
+            "rate_execution": 61,
+        }
+    }
+    assert "ppo_recipe_sha256" not in payload
     assert not rig.root.parent.exists()
 
 
@@ -533,6 +690,196 @@ def test_python_symlink_requires_a_canonical_venv(rig) -> None:
     entry = venv / "bin" / "python"
     entry.symlink_to(rig.python)
     assert rig.module._python_entry(entry) == entry
+
+
+def test_rate_receipt_parser_binds_runner_payload_and_is_no_clobber(
+    rig, tmp_path: Path
+) -> None:
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+    child_payload = _runner_rate_payload(rig, commit)
+    stdout = tmp_path / "stdout.log"
+    stdout.write_text(
+        rig.module.RATE_PROBE_STDOUT_MARKER
+        + json.dumps(child_payload, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    receipt_payload = rig.module._rate_probe_receipt_payload(
+        stdout_log=stdout,
+        source_commit=commit,
+        namespace=NAMESPACE,
+        gpu_index=2,
+        gpu_uuid=UUID,
+    )
+    assert receipt_payload["gpu"] == {"index": 2, "uuid": UUID}
+    assert receipt_payload["kind"] == (
+        "action_ball_mujoco_full_mdp_h48_rate_receipt_v1"
+    )
+    assert receipt_payload["runner_marker"] == {
+        "kind": "action_ball_mujoco_full_mdp_h48_rate_probe_v1",
+        "schema_version": 1,
+    }
+    assert receipt_payload["stdout_log"] == {
+        "path": str(stdout),
+        "sha256": rig.module._sha256(stdout),
+    }
+    assert receipt_payload["rate_execution_recipe_sha256"] != (
+        receipt_payload["candidate_production_execution_recipe_sha256"]
+    )
+    assert "action_ball_full_mdp_ppo_recipe_sha256" not in receipt_payload
+
+    receipt = tmp_path / "diagnostic-rate-probe.json"
+    rig.module._write_rate_probe_receipt(receipt, receipt_payload)
+    assert json.loads(receipt.read_text()) == receipt_payload
+    with pytest.raises(rig.module.LaunchError, match="no-clobber"):
+        rig.module._write_rate_probe_receipt(receipt, receipt_payload)
+
+    bad = json.loads(json.dumps(child_payload))
+    bad["rate_execution_recipe_sha256"] = (
+        bad["candidate_production_execution_recipe_sha256"]
+    )
+    stdout.write_text(
+        rig.module.RATE_PROBE_STDOUT_MARKER + json.dumps(bad) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(rig.module.LaunchError, match="identity differs"):
+        rig.module._rate_probe_receipt_payload(
+            stdout_log=stdout,
+            source_commit=commit,
+            namespace=NAMESPACE,
+            gpu_index=2,
+            gpu_uuid=UUID,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("checkpoint_authority", True),
+        ("schema_version", True),
+        ("diagnostic_unauthorized", 1),
+        ("rsl_rl_version", "WRONG"),
+        ("policy_width", 999),
+        ("policy_width", 215.0),
+        ("ppo_update_calls", 61.0),
+        ("rate_probe.warmup_updates", 10.0),
+        ("rate_execution_recipe.effective_runner.max_iterations", 61.0),
+        ("rate_probe.measured_wall_seconds", 999.0),
+        ("rate_probe.measured_transitions_per_second", -1.0),
+        ("rate_probe.update_seconds_p50", 999.0),
+        ("rate_probe.update_seconds_p90", -1.0),
+    ),
+)
+def test_rate_receipt_parser_rejects_extra_authority_and_forged_metrics(
+    rig, tmp_path: Path, field: str, value
+) -> None:
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+    child_payload = _runner_rate_payload(rig, commit)
+    target = child_payload
+    parts = field.split(".")
+    for name in parts[:-1]:
+        target = target[name]
+    target[parts[-1]] = value
+    stdout = tmp_path / "stdout.log"
+    stdout.write_text(
+        rig.module.RATE_PROBE_STDOUT_MARKER
+        + json.dumps(child_payload)
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(rig.module.LaunchError):
+        rig.module._rate_probe_receipt_payload(
+            stdout_log=stdout,
+            source_commit=commit,
+            namespace=NAMESPACE,
+            gpu_index=2,
+            gpu_uuid=UUID,
+        )
+
+
+def test_rate_receipt_parser_rejects_duplicate_json_keys(rig, tmp_path: Path) -> None:
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+    child_payload = _runner_rate_payload(rig, commit)
+    body = json.dumps(child_payload, separators=(",", ":"))
+    body = body[:-1] + ',"kind":"duplicate"}'
+    stdout = tmp_path / "stdout.log"
+    stdout.write_text(
+        rig.module.RATE_PROBE_STDOUT_MARKER + body + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(rig.module.LaunchError, match="finite JSON"):
+        rig.module._rate_probe_receipt_payload(
+            stdout_log=stdout,
+            source_commit=commit,
+            namespace=NAMESPACE,
+            gpu_index=2,
+            gpu_uuid=UUID,
+        )
+
+
+def test_real_rate_launch_writes_actual_execution_receipt(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+    child_payload = _runner_rate_payload(rig, commit)
+    marker = (
+        rig.module.RATE_PROBE_STDOUT_MARKER
+        + json.dumps(child_payload, sort_keys=True, separators=(",", ":"))
+    )
+    rate_python = _executable(
+        rig.python.with_name("rate-python"),
+        "#!/usr/bin/env python3\n"
+        f"print({marker!r}, flush=True)\n",
+    )
+    assert rig.module.main(
+        rig.argv(executable=rate_python) + ["--diagnostic-rate-probe"]
+    ) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["status"] == "DIAGNOSTIC_RATE_PROBE_COMPLETE"
+    receipt_path = rig.root / "diagnostic-rate-probe.json"
+    assert summary["rate_receipt"] == str(receipt_path)
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt["kind"] == (
+        "action_ball_mujoco_full_mdp_h48_rate_receipt_v1"
+    )
+    assert receipt["runner_marker"] == {
+        "kind": "action_ball_mujoco_full_mdp_h48_rate_probe_v1",
+        "schema_version": 1,
+    }
+    assert receipt["candidate_production_execution_recipe_sha256"] == (
+        rig.module.FULL_MDP_PPO_RECIPE.recipe_sha256()
+    )
+    assert receipt["rate_execution_recipe_sha256"] == (
+        rig.module._canonical_payload_sha256(
+            rig.module._rate_execution_recipe()
+        )
+    )
+    assert receipt["rate_execution_recipe_sha256"] != (
+        receipt["candidate_production_execution_recipe_sha256"]
+    )
+    assert receipt["gpu"] == {"index": 2, "uuid": UUID}
+    assert not (rig.root / "completion.json").exists()
+
+
+def test_real_rate_launch_rejects_production_hash_as_execution_hash(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+    child_payload = _runner_rate_payload(rig, commit)
+    child_payload["rate_execution_recipe_sha256"] = (
+        child_payload["candidate_production_execution_recipe_sha256"]
+    )
+    marker = rig.module.RATE_PROBE_STDOUT_MARKER + json.dumps(child_payload)
+    rate_python = _executable(
+        rig.python.with_name("bad-rate-python"),
+        "#!/usr/bin/env python3\n"
+        f"print({marker!r}, flush=True)\n",
+    )
+    assert rig.module.main(
+        rig.argv(executable=rate_python) + ["--diagnostic-rate-probe"]
+    ) == 2
+    assert "rate receipt identity differs" in capsys.readouterr().err
+    assert not (rig.root / "diagnostic-rate-probe.json").exists()
 
 
 def test_child_rc_logs_exact_env_argv_and_lock_lifetime(

@@ -115,6 +115,24 @@ def _portable_catalog_module():
     )
 
 
+def _portable_observation_module():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_portable_observation.py"
+    ).resolve()
+    return _load_pinned_local_module(
+        source=source,
+        name="_hope_mujoco_ledger_action_ball_full_mdp_portable_observation",
+        subject="FullMDP portable observation contract",
+    )
+
+
 def _exact_reward_contract() -> tuple[tuple[str, ...], int]:
     contract = _reward_contract_module()
     names = getattr(contract, "MANAGER_NAMES", None)
@@ -132,6 +150,37 @@ def _exact_reward_contract() -> tuple[tuple[str, ...], int]:
 
 
 REWARD_TERM_NAMES, REWARD_TERM_COUNT = _exact_reward_contract()
+
+
+def _exact_observation_storage_widths() -> tuple[int, int]:
+    contract = _portable_observation_module()
+    actor_width = getattr(contract, "ACTOR_WIDTH_V3", None)
+    critic_width = getattr(contract, "CRITIC_WIDTH_V3", None)
+    if (
+        getattr(contract, "OBSERVATION_KIND_V3", None)
+        != "action_ball_full_mdp_semantic_observation_v3"
+        or type(actor_width) is not int
+        or type(critic_width) is not int
+        or actor_width <= 0
+        or critic_width <= actor_width
+        or actor_width != sum(
+            width for _name, width in contract.ACTOR_LAYOUT_V3
+        )
+        or critic_width
+        != actor_width
+        + sum(
+            width
+            for _name, width in contract.CRITIC_EXTENSION_LAYOUT_V3
+        )
+    ):
+        raise RuntimeError("FullMDP semantic observation V3 contract differs")
+    return actor_width, critic_width
+
+
+(
+    FULLMDP_ACTOR_OBSERVATION_WIDTH,
+    FULLMDP_CRITIC_OBSERVATION_WIDTH,
+) = _exact_observation_storage_widths()
 
 
 def _exact_paddle_prior_contract():
@@ -184,7 +233,8 @@ EVENT_NAMES = (
 )
 EVENT_FIELDS = tuple((name, "full_a_" + name[:-5] + "_event") for name in EVENT_NAMES)
 STORAGE_FLOAT_WIDTHS = (
-    ("observations_policy", 203), ("observations_critic", 219),
+    ("observations_policy", FULLMDP_ACTOR_OBSERVATION_WIDTH),
+    ("observations_critic", FULLMDP_CRITIC_OBSERVATION_WIDTH),
     ("actions", 31), ("values", 1), ("actions_log_prob", 1),
     ("mu", 31), ("sigma", 31), ("rewards", 1), ("returns", 1),
     ("advantages", 1),
@@ -209,6 +259,12 @@ LIFECYCLE_COUNT_NAMES = (
     "classification_unknown_rows",
 )
 _MISC_NAMES = LIFECYCLE_COUNT_NAMES + (
+    # Internal, rowwise producer-partition checks.  They fail before an ACK is
+    # serialized and therefore do not create a second public evidence schema.
+    "scheduled_due_partition_fault_rows",
+    "reveal_due_partition_fault_rows",
+    "r03_subset_fault_rows",
+    "r06_subset_fault_rows",
     "reward_terms_finite_rows",
     "reward_terms_nonfinite_rows", "actual_reward_finite_rows",
     "actual_reward_nonfinite_rows", "conservation_fault_rows", "slot0_rows",
@@ -222,6 +278,10 @@ _ZERO_FAULTS = (
     "timeout_fault_rows", "selected_reset_fault_rows", "reset_generation_fault_rows",
     "classification_unknown_rows", "reward_terms_nonfinite_rows", "actual_reward_nonfinite_rows",
     "conservation_fault_rows",
+    "scheduled_due_partition_fault_rows",
+    "reveal_due_partition_fault_rows",
+    "r03_subset_fault_rows",
+    "r06_subset_fault_rows",
     "outcome_unknown_rows", "outcome_event_code_fault_rows",
     "phase_unknown_rows",
     *FACT_INTEGRITY_COUNT_NAMES,
@@ -440,6 +500,32 @@ class FullMdpUpdateLedger:
         )
         identity = slot.eq(0) & uid.eq(self.action_uid) & sign.eq(self.mount_normal_sign)
         outcome_event = event["flight_terminal_rows"]
+        scheduled_due_partition_fault = (
+            event["scheduled_due_rows"].ne(
+                event["reveal_due_rows"]
+                | event["due_terminal_overlap_rows"]
+            )
+            | (
+                event["reveal_due_rows"]
+                & event["due_terminal_overlap_rows"]
+            )
+        )
+        reveal_due_partition_fault = (
+            event["reveal_due_rows"].ne(
+                event["reveal_rows"] | event["reveal_deferred_rows"]
+            )
+            | (event["reveal_rows"] & event["reveal_deferred_rows"])
+        )
+        r03_subset_fault = (
+            event["r03_physically_valid_rows"] & ~event["r03_present_rows"]
+        )
+        r06_subset_fault = (
+            (
+                event["r06_eligible_rows"]
+                & ~event["r06_present_rows"]
+            )
+            | (event["r06_common_rows"] & ~event["r06_eligible_rows"])
+        )
         self._event += torch.stack(events).sum(1, dtype=torch.float64)
         self._terminal += torch.stack(
             [torch.bitwise_and(bits, bit).ne(0) for _name, bit in self.term_bits]
@@ -460,6 +546,10 @@ class FullMdpUpdateLedger:
                 generation_delta, generation_delta.ne(done.to(torch.long)),
                 resolved, landing & landing_event, opponent_bound & landing_event,
                 status.lt(0) | status.gt(5),
+                scheduled_due_partition_fault,
+                reveal_due_partition_fault,
+                r03_subset_fault,
+                r06_subset_fault,
                 terms_finite, ~terms_finite, actual_finite, ~actual_finite, ~conserved,
                 slot.eq(0), uid.eq(self.action_uid), sign.eq(self.mount_normal_sign),
                 identity, outcome.lt(0) | outcome.gt(6), outcome_event & outcome.eq(0),

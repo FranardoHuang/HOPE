@@ -48,16 +48,19 @@ This gate is about safety, timing, message layout, and controlled rollout before
 
 ## Current State
 
-FullMDP semantic Observation V2 update (2026-08-21, branch candidate): the 203-D actor is constrained
+FullMDP semantic Observation V3 update (2026-08-25, branch candidate): the 215-D actor is constrained
 to deploy-observable classes—joint encoders/FK, pelvis IMU, calibrated OptiTrack table/root pose and
 causal marker-to-root-COM velocity, plus controller-owned teacher/planner clocks and delayed targets.
+Its new 12-D block is measured Motion teacher minus achieved paddle position/point velocity/signed face/
+long axis, using those same causal producers rather than sim-only ball or contact truth.
 Live ball/spin, contact/net latches, support and recovery dwell are critic-only and are not promised
 to the real actor. The complete order and scale have one truth source in
-[policy_observation_action.md](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v2-actor-203--critic-219).
-This is an observability design constraint, not a deployment pass: the real 203-D producer,
+[policy_observation_action.md](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231).
+This is an observability design constraint, not a deployment pass: the real 215-D producer,
 table/marker/COM and IMU extrinsics, capture-time synchronization, causal velocity error and
 stale/dropout behavior, C++ parity, dry-run and hardware evidence are all still open. G07 therefore
-remains `Partial`.
+remains `Partial`; V2 203/219 is only historical/control and cannot be a fresh fallback.
+The FullMDP branch remains `diagnostic_unauthorized=true`; this paragraph grants no hardware action.
 
 Done (2026-06-30 → 2026-07-02, recorded 2026-07-03):
 

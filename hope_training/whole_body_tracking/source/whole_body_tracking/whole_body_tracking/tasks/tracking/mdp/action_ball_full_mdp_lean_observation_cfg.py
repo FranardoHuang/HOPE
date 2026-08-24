@@ -38,13 +38,16 @@ DIAGNOSTIC_UNAUTHORIZED = True
 RUNTIME_INTEGRATED = False
 LAUNCH_AUTHORIZED = False
 
-DIRECT_VIEW_METHOD = "semantic_action_epoch_observation_v2"
+DIRECT_VIEW_METHOD = "semantic_action_epoch_observation_v3"
 ENV_TERM_METHOD = "_action_ball_full_mdp_lean_observe_term"
 MANAGER_GROUP_ORDER = ("policy", "critic")
 _CONSTRUCTION_STATE = "runtime_graph_ready"
 ACTOR_CONTRACT_V2 = portable_observation.ACTOR_CONTRACT_V2
 CRITIC_CONTRACT_V2 = portable_observation.CRITIC_CONTRACT_V2
 OBSERVATION_KIND_V2 = portable_observation.OBSERVATION_KIND_V2
+ACTOR_CONTRACT_V3 = portable_observation.ACTOR_CONTRACT_V3
+CRITIC_CONTRACT_V3 = portable_observation.CRITIC_CONTRACT_V3
+OBSERVATION_KIND_V3 = portable_observation.OBSERVATION_KIND_V3
 
 # This is a deliberately small, named diagnostic ABI for the exact 31-DoF A3
 # plant and current 31-wide action.  Widths are derived only from these fields.
@@ -54,10 +57,14 @@ ACTOR_LAYOUT_V2 = portable_observation.ACTOR_LAYOUT_V2
 CRITIC_EXTENSION_LAYOUT_V2 = portable_observation.CRITIC_EXTENSION_LAYOUT_V2
 ACTOR_WIDTH_V2 = portable_observation.ACTOR_WIDTH_V2
 CRITIC_WIDTH_V2 = portable_observation.CRITIC_WIDTH_V2
+ACTOR_LAYOUT_V3 = portable_observation.ACTOR_LAYOUT_V3
+CRITIC_EXTENSION_LAYOUT_V3 = portable_observation.CRITIC_EXTENSION_LAYOUT_V3
+ACTOR_WIDTH_V3 = portable_observation.ACTOR_WIDTH_V3
+CRITIC_WIDTH_V3 = portable_observation.CRITIC_WIDTH_V3
 
 _DIRECT_FLOAT_LAYOUT = tuple(
     (name, width)
-    for name, width in ACTOR_LAYOUT_V2 + CRITIC_EXTENSION_LAYOUT_V2
+    for name, width in ACTOR_LAYOUT_V3 + CRITIC_EXTENSION_LAYOUT_V3
     if name
     not in (
         "motion_phase_one_hot",
@@ -127,7 +134,7 @@ def build_direct_action_epoch_observation_facts(
     runtime_owner: lean_runtime.ActionBallFullMdpLeanRuntimeOwner,
     record: epoch_v1.ActionEpochRecord,
 ) -> DirectActionEpochObservationFacts:
-    """Project the bound Isaac owners into the semantic 203/219 ABI."""
+    """Project the bound Isaac owners into the semantic 215/231 ABI."""
 
     if type(runtime_owner) is not lean_runtime.ActionBallFullMdpLeanRuntimeOwner:
         raise LeanObservationError("direct fact builder requires exact lean owner")
@@ -137,9 +144,11 @@ def build_direct_action_epoch_observation_facts(
     env = runtime_owner.full_mdp_runtime_env
     parts = dict(runtime_owner.component_identities)
     try:
+        from . import hope_rewards
         from .commands import MotionCommand
         from whole_body_tracking.tasks.table_tennis import geometry as table_geometry
     except ImportError:
+        import hope_rewards
         from commands import MotionCommand
         from whole_body_tracking.tasks.table_tennis import geometry as table_geometry
 
@@ -195,6 +204,15 @@ def build_direct_action_epoch_observation_facts(
     actor_target_pos_w = racket.actor_racket_target_pos_w()
     actor_target_vel_w = racket.actor_racket_target_vel_w()
     actor_target_normal_w = racket.actor_target_normal_cmd()
+    (
+        motion_target_pos_w,
+        motion_target_signed_normal_w,
+        motion_target_vel_w,
+        motion_target_long_axis_w,
+    ) = hope_rewards.stage1_aligned_clip_racket_target_now(racket)
+    motion_actual_signed_normal_w = (
+        hope_rewards.stage1_actual_racket_face_normal_now(racket)
+    )
     base_goal_delta = torch.cat(
         (
             racket.base_target_pos_w - root_pos_w[:, :2],
@@ -215,6 +233,18 @@ def build_direct_action_epoch_observation_facts(
         "teacher_joint_vel": motion.joint_vel,
         "motion_anchor_pos_b": anchor_pos,
         "motion_anchor_ori_b6": anchor_ori,
+        "motion_racket_pos_error_heading": heading(
+            motion_target_pos_w - racket.racket_pos_w
+        ),
+        "motion_racket_vel_error_heading": heading(
+            motion_target_vel_w - racket.racket_lin_vel_w
+        ),
+        "motion_racket_signed_normal_error_heading": heading(
+            motion_target_signed_normal_w - motion_actual_signed_normal_w
+        ),
+        "motion_racket_long_axis_error_heading": heading(
+            motion_target_long_axis_w - racket.racket_long_axis_w
+        ),
         "racket_target_pos_error_heading": task_vector(
             actor_target_pos_w - racket.racket_pos_w
         ),
@@ -540,6 +570,17 @@ class LeanActionEpochObservationSource:
                 "direct observation providers are absent: " + ",".join(missing)
             )
         r06 = by_name["r06_landing_outcome"]
+        motion = by_name["motion"]
+        motion_mutation_generation = getattr(
+            motion, "_action_ball_continuous_motion_mutation_version", None
+        )
+        if (
+            type(motion_mutation_generation) is not int
+            or motion_mutation_generation < 0
+        ):
+            raise LeanObservationConstructionHold(
+                "Motion host mutation generation differs"
+            )
         dtype = getattr(r06, "dtype", None)
         if not isinstance(dtype, torch.dtype) or not dtype.is_floating_point:
             raise LeanObservationConstructionHold(
@@ -567,22 +608,23 @@ class LeanActionEpochObservationSource:
         self._env = env
         self._runtime_owner = runtime_owner
         self._epoch_owner = epoch_owner
+        self._motion = motion
         self._num_envs = epoch_owner.num_envs
         self._device = epoch_owner.device
         self._dtype = dtype
-        self._actor_scale_v2 = torch.tensor(
-            portable_observation.ACTOR_SCALE_FLAT_V2,
+        self._actor_scale_v3 = torch.tensor(
+            portable_observation.ACTOR_SCALE_FLAT_V3,
             dtype=dtype,
             device=self._device,
-        ).reshape(1, ACTOR_WIDTH_V2)
-        self._critic_extension_scale_v2 = torch.tensor(
-            portable_observation.CRITIC_EXTENSION_SCALE_FLAT_V2,
+        ).reshape(1, ACTOR_WIDTH_V3)
+        self._critic_extension_scale_v3 = torch.tensor(
+            portable_observation.CRITIC_EXTENSION_SCALE_FLAT_V3,
             dtype=dtype,
             device=self._device,
-        ).reshape(1, CRITIC_WIDTH_V2 - ACTOR_WIDTH_V2)
-        self._widths = {"policy": ACTOR_WIDTH_V2, "critic": CRITIC_WIDTH_V2}
+        ).reshape(1, CRITIC_WIDTH_V3 - ACTOR_WIDTH_V3)
+        self._widths = {"policy": ACTOR_WIDTH_V3, "critic": CRITIC_WIDTH_V3}
         self._shape_probed: set[str] = set()
-        self._cached_key: tuple[int, int, int] | None = None
+        self._cached_key: tuple[int, int, int, int] | None = None
         self._cached_actor: torch.Tensor | None = None
         self._cached_critic: torch.Tensor | None = None
         self._semantic_publications = 0
@@ -714,18 +756,18 @@ class LeanActionEpochObservationSource:
             }
         )
         actor = portable_observation.concatenate_layout_rows(
-            ACTOR_LAYOUT_V2, actor_rows
+            ACTOR_LAYOUT_V3, actor_rows
         )
-        actor.mul_(self._actor_scale_v2)
+        actor.mul_(self._actor_scale_v3)
         critic_extension = portable_observation.concatenate_layout_rows(
-            CRITIC_EXTENSION_LAYOUT_V2,
+            CRITIC_EXTENSION_LAYOUT_V3,
             view.critic_rows,
         )
-        critic_extension.mul_(self._critic_extension_scale_v2)
+        critic_extension.mul_(self._critic_extension_scale_v3)
         critic = torch.cat((actor, critic_extension), dim=1)
-        if actor.shape != (self._num_envs, ACTOR_WIDTH_V2):
+        if actor.shape != (self._num_envs, ACTOR_WIDTH_V3):
             raise LeanObservationError("named actor layout width differs")
-        if critic.shape != (self._num_envs, CRITIC_WIDTH_V2):
+        if critic.shape != (self._num_envs, CRITIC_WIDTH_V3):
             raise LeanObservationError("named critic layout width differs")
         # Preserve nonfinite values for the rollout-storage/preoptimizer finite
         # boundary, which owns named synchronous rejection before optimization.
@@ -741,17 +783,33 @@ class LeanActionEpochObservationSource:
         common_step = getattr(self._env, "common_step_counter", None)
         if type(common_step) is not int or common_step < 0:
             raise LeanObservationError("environment common_step_counter differs")
+        motion_mutation_generation = getattr(
+            self._motion,
+            "_action_ball_continuous_motion_mutation_version",
+            None,
+        )
+        if (
+            type(motion_mutation_generation) is not int
+            or motion_mutation_generation < 0
+        ):
+            raise LeanObservationError("Motion host mutation generation differs")
         cached_key = self._cached_key
         if (
             cached_key is not None
             and cached_key[0] == common_step
-            and cached_key[2] + 1 == self._epoch_owner.commit_head
+            and cached_key[1] == motion_mutation_generation
+            and cached_key[3] + 1 == self._epoch_owner.commit_head
             and self._cached_actor is not None
             and self._cached_critic is not None
         ):
             return self._cached_actor, self._cached_critic
         record = self._epoch_owner.current()
-        key = (common_step, record.epoch, record.version)
+        key = (
+            common_step,
+            motion_mutation_generation,
+            record.epoch,
+            record.version,
+        )
         view = getattr(self._runtime_owner, DIRECT_VIEW_METHOD)(record)
         checked = self._validate_direct(
             view, record=record, common_step=common_step
@@ -905,9 +963,9 @@ def installed_observation_facts(env: object) -> dict[str, object]:
     if (
         getattr(manager, "active_terms", None) != expected_active
         or getattr(manager, "group_obs_term_dim", None)
-        != {"policy": [(ACTOR_WIDTH_V2,)], "critic": [(CRITIC_WIDTH_V2,)]}
+        != {"policy": [(ACTOR_WIDTH_V3,)], "critic": [(CRITIC_WIDTH_V3,)]}
         or getattr(manager, "group_obs_dim", None)
-        != {"policy": (ACTOR_WIDTH_V2,), "critic": (CRITIC_WIDTH_V2,)}
+        != {"policy": (ACTOR_WIDTH_V3,), "critic": (CRITIC_WIDTH_V3,)}
         or getattr(manager, "group_obs_concatenate", None)
         != {"policy": True, "critic": True}
         or type(cfgs) is not dict
@@ -951,7 +1009,7 @@ def installed_observation_facts(env: object) -> dict[str, object]:
         or source._num_envs != epoch_owner.num_envs
         or source._device != epoch_owner.device
         or source.group_widths
-        != {"policy": ACTOR_WIDTH_V2, "critic": CRITIC_WIDTH_V2}
+        != {"policy": ACTOR_WIDTH_V3, "critic": CRITIC_WIDTH_V3}
         or type(components) is not tuple
         or any(type(row) is not tuple or len(row) != 2 for row in components)
     ):
@@ -959,16 +1017,16 @@ def installed_observation_facts(env: object) -> dict[str, object]:
             "installed ActionEpoch observation resolver/source differs"
         )
     return {
-        "actor_obs_contract": ACTOR_CONTRACT_V2,
+        "actor_obs_contract": ACTOR_CONTRACT_V3,
         "actor_obs_mode": "action_ball_full_mdp",
-        "actor_obs_total_dim": ACTOR_WIDTH_V2,
+        "actor_obs_total_dim": ACTOR_WIDTH_V3,
         "actor_obs_term_names": ["action_epoch"],
-        "actor_obs_term_dims": [ACTOR_WIDTH_V2],
-        "critic_obs_contract": CRITIC_CONTRACT_V2,
-        "critic_obs_total_dim": CRITIC_WIDTH_V2,
+        "actor_obs_term_dims": [ACTOR_WIDTH_V3],
+        "critic_obs_contract": CRITIC_CONTRACT_V3,
+        "critic_obs_total_dim": CRITIC_WIDTH_V3,
         "critic_obs_term_names": ["action_epoch"],
-        "critic_obs_term_dims": [CRITIC_WIDTH_V2],
-        "fresh_full_mdp_observation_kind": OBSERVATION_KIND_V2,
+        "critic_obs_term_dims": [CRITIC_WIDTH_V3],
+        "fresh_full_mdp_observation_kind": OBSERVATION_KIND_V3,
         "fresh_full_mdp_diagnostic_unauthorized": True,
         "fresh_full_mdp_launch_authorized": False,
         "fresh_full_mdp_no_capacity_receipt_or_sha_authority": True,
@@ -989,6 +1047,13 @@ __all__ = [
     "CRITIC_EXTENSION_LAYOUT_V2",
     "ACTOR_WIDTH_V2",
     "CRITIC_WIDTH_V2",
+    "ACTOR_CONTRACT_V3",
+    "CRITIC_CONTRACT_V3",
+    "OBSERVATION_KIND_V3",
+    "ACTOR_LAYOUT_V3",
+    "CRITIC_EXTENSION_LAYOUT_V3",
+    "ACTOR_WIDTH_V3",
+    "CRITIC_WIDTH_V3",
     "DirectActionEpochObservationFacts",
     "build_direct_action_epoch_observation_facts",
     "LeanObservationError",

@@ -624,18 +624,12 @@ def test_recovery_postphysics_activity_is_exact_fixed_window_for_every_keyed_pha
     epoch, d05, _cadence, _r06, _playback, _motion, _racket, physical = (
         _ready_epoch()
     )
-    assert not epoch.project_keyed_postphysics_activity_mask(
-        owner=physical
-    ).any()
     assert not epoch.project_recovery_postphysics_activity_mask(
         owner=physical,
         motion_cadence_tick=torch.tensor([30, 30], dtype=torch.int64),
     ).any()
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
-    assert epoch.project_keyed_postphysics_activity_mask(
-        owner=physical
-    ).tolist() == [[True], [False]]
     # deadline=20 is a per-row Motion clock.  No global scalar participates in
     # this projection; Physical owns that separate host-cache chronology.
     assert not epoch.project_recovery_postphysics_activity_mask(
@@ -679,8 +673,6 @@ def test_recovery_postphysics_activity_is_exact_fixed_window_for_every_keyed_pha
         owner=physical,
         motion_cadence_tick=torch.tensor([30, 30], dtype=torch.int64),
     ).any()
-    with pytest.raises(E.ActionEpochError, match="owner identity"):
-        epoch.project_keyed_postphysics_activity_mask(owner=object())
     with pytest.raises(E.ActionEpochError, match="owner identity"):
         epoch.project_recovery_postphysics_activity_mask(
             owner=object(),

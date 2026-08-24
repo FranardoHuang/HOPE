@@ -4915,3 +4915,15 @@
 - 首次`8cbccad8…`实现错误地替换frozen R07实例方法，runner构造时自然RC1；失败root封存。successor改为
   LeanRuntime先完成原有class-bound identity认证，再用可卸载callback包住同一个bound method；没有以诊断
   为由放宽生产方法身份合同。
+
+## 2026-08-25 — FullMDP V5反例收口、V6最小桥与Pod重验
+
+- 旧MuJoCo V5的balance/task exposure改善但`selected contact=0/launch`，landing无eligible分母而为`未测`；
+  不能继续用“step还少”解释mimic→contact断点。冻结计数、正确分母与Build4 adopt/defer/reject只认
+  [课程实验§10](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)。
+- V6冻结为PPO V5（2048/H48/U25000/MB4/E5）、Reward24、Observation V3 `215/231`、四次真实due/
+  exhausted sentinel、跨writer terminal overlap、schema具名slice与Mu native-Warp keepout；最终exact
+  source SHA及两端rate/学习canary仍待验，完整合同见[双后端TODO §0.5](operations/action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)。
+- predecessor Pod反例与4096 Isaac probe仅证明旧runtime路径，不能代签V3/PPO V5、Mu或课程学习；唯一
+  performance/receipt真源见[热路实验§16](experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。G04/G05/G06保持`Partial`，全部证据继续
+  `diagnostic_unauthorized=true`。

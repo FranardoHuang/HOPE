@@ -27,13 +27,28 @@ REWARD_PATH = (
 
 def _load_rewards():
     canonical = "whole_body_tracking.tasks.tracking.mdp.hope_commands"
+    mdp_canonical = "whole_body_tracking.tasks.tracking.mdp"
+    geometry_canonical = f"{mdp_canonical}.racket_contact_geometry"
     old = sys.modules.get(canonical)
+    old_mdp = sys.modules.get(mdp_canonical)
+    old_geometry = sys.modules.get(geometry_canonical)
     stub = types.ModuleType(canonical)
     stub.RacketTargetCommand = object
     stub.face_tracking_pair = lambda command: (
         command.racket_normal_w,
         command.racket_target_normal_w,
     )
+    mdp_stub = types.ModuleType(mdp_canonical)
+    mdp_stub.__path__ = []
+    geometry_spec = importlib.util.spec_from_file_location(
+        geometry_canonical, REWARD_PATH.with_name("racket_contact_geometry.py")
+    )
+    assert geometry_spec is not None and geometry_spec.loader is not None
+    geometry = importlib.util.module_from_spec(geometry_spec)
+    sys.modules[mdp_canonical] = mdp_stub
+    sys.modules[geometry_canonical] = geometry
+    geometry_spec.loader.exec_module(geometry)
+    mdp_stub.racket_contact_geometry = geometry
     sys.modules[canonical] = stub
     try:
         spec = importlib.util.spec_from_file_location("stage1_clip_site_rewards_under_test", REWARD_PATH)
@@ -46,6 +61,14 @@ def _load_rewards():
             sys.modules.pop(canonical, None)
         else:
             sys.modules[canonical] = old
+        if old_mdp is None:
+            sys.modules.pop(mdp_canonical, None)
+        else:
+            sys.modules[mdp_canonical] = old_mdp
+        if old_geometry is None:
+            sys.modules.pop(geometry_canonical, None)
+        else:
+            sys.modules[geometry_canonical] = old_geometry
 
 
 @pytest.fixture(scope="module")
@@ -148,6 +171,7 @@ def _fake_command():
     motion = types.SimpleNamespace(
         motion=loader,
         _multiseg=False,
+        _action_ball_continuous_motion_mutation_version=0,
         motion_anchor_body_index=0,
         robot_anchor_body_index=2,
         robot_anchor_pos_w=torch.tensor([[10.0, 0.0, 1.0], [20.0, 0.0, 1.0]]),
@@ -382,13 +406,8 @@ def test_fullmdp_motion_prior_cauchy_wrappers_have_exact_half_height(
     long_axis = torch.tensor([[1.0, 0.0, 0.0]]).repeat(2, 1)
     monkeypatch.setattr(
         rewards,
-        "_stage1_aligned_clip_site_target",
-        lambda _cmd: (position, normal, velocity),
-    )
-    monkeypatch.setattr(
-        rewards,
-        "_stage1_aligned_clip_long_axis_target",
-        lambda _cmd: long_axis,
+        "stage1_aligned_clip_racket_target_now",
+        lambda _cmd: (position, normal, velocity, long_axis),
     )
     command.racket_pos_w = position + torch.tensor([0.70, 0.0, 0.0])
     command.racket_lin_vel_w = velocity + torch.tensor([4.0, 0.0, 0.0])
@@ -500,6 +519,82 @@ def test_public_now_target_reuses_the_shared_per_step_teacher_cache(rewards):
     assert command._stage1_clip_site_target_cache is cache
     for lhs, rhs in zip(first, second):
         torch.testing.assert_close(lhs, rhs)
+
+
+def test_same_motion_generation_reuses_teacher_across_reward_terms(
+    rewards, monkeypatch
+):
+    command = _fresh_measured_command()
+    command._motion().ready_wait.zero_()
+    command.racket_pos_w = torch.zeros(command.num_envs, 3)
+    command.racket_lin_vel_w = torch.zeros(command.num_envs, 3)
+    command.racket_long_axis_w = torch.tensor(
+        [[1.0, 0.0, 0.0]]
+    ).repeat(command.num_envs, 1)
+    env = types.SimpleNamespace(command_manager=_CommandManager(command))
+    calls = []
+    original = rewards._stage1_aligned_clip_racket_target_at_steps
+
+    def counted(cmd, steps):
+        calls.append(steps.clone())
+        return original(cmd, steps)
+
+    monkeypatch.setattr(
+        rewards, "_stage1_aligned_clip_racket_target_at_steps", counted
+    )
+    for reward in (
+        rewards.motion_racket_position_tracking_cauchy,
+        rewards.motion_racket_velocity_tracking_cauchy,
+        rewards.motion_racket_normal_tracking_cauchy,
+        rewards.motion_racket_long_axis_tracking_cauchy,
+    ):
+        value = reward(env, "racket_target", std=1.0)
+        assert torch.isfinite(value).all()
+
+    assert len(calls) == 1
+    assert command._stage1_clip_site_target_cache[0] == (7, 0)
+
+
+def test_motion_generation_invalidates_reward_cache_before_observation(
+    rewards, monkeypatch
+):
+    command = _fresh_measured_command()
+    motion = command._motion()
+    motion.ready_wait.zero_()
+    motion.safe_steps.zero_()
+    motion._action_ball_continuous_motion_mutation_version = 23
+    command.racket_pos_w = torch.zeros(command.num_envs, 3)
+    env = types.SimpleNamespace(command_manager=_CommandManager(command))
+    calls = []
+    original = rewards._stage1_aligned_clip_racket_target_at_steps
+
+    def counted(cmd, steps):
+        calls.append(steps.clone())
+        return original(cmd, steps)
+
+    monkeypatch.setattr(
+        rewards, "_stage1_aligned_clip_racket_target_at_steps", counted
+    )
+    # Isaac reward fills generation 23 at common_step 7.
+    reward = rewards.motion_racket_position_tracking_cauchy(
+        env, "racket_target", std=1.0
+    )
+    assert torch.isfinite(reward).all()
+    before = command._stage1_clip_site_target_cache[1][0].clone()
+    assert len(calls) == 1
+    assert command._stage1_clip_site_target_cache[0] == (7, 23)
+
+    # Motion advances in the same public step, then observation must see its
+    # new selected rows rather than RewardManager's cached teacher.
+    motion.safe_steps.fill_(2)
+    motion._action_ball_continuous_motion_mutation_version += 1
+    after = rewards.stage1_aligned_clip_racket_target_now(command)[0]
+
+    assert len(calls) == 2
+    torch.testing.assert_close(calls[0], torch.zeros(2, dtype=torch.long))
+    torch.testing.assert_close(calls[1], torch.full((2,), 2, dtype=torch.long))
+    assert command._stage1_clip_site_target_cache[0] == (7, 24)
+    assert not torch.equal(before, after)
 
 
 def test_fixed_coarse_kernels_cover_reviewed_cold_start_envelope(rewards):

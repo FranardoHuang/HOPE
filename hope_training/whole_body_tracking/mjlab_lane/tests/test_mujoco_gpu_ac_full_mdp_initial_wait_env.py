@@ -1,4 +1,4 @@
-"""Direct tests for the current MuJoCo 203/219 initial-WAIT slice."""
+"""Direct tests for the current MuJoCo 215/231 initial-WAIT slice."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ P = wait_env.observation_contract
 
 # Independent literal offsets.  These are deliberately not derived from the
 # production layout: a reordered producer must fail even when its total width
-# remains 203/219.
-V2_ACTOR_SLICES = {
+# remains 215/231.
+V3_ACTOR_SLICES = {
     "projected_gravity_b": (0, 3),
     "base_ang_vel_b": (3, 6),
     "base_position_table": (6, 9),
@@ -38,26 +38,30 @@ V2_ACTOR_SLICES = {
     "motion_anchor_pos_b": (169, 172),
     "motion_anchor_ori_b6": (172, 178),
     "motion_phase_one_hot": (178, 183),
-    "racket_target_pos_error_heading": (183, 186),
-    "racket_target_vel_error_heading": (186, 189),
-    "racket_target_normal_error_heading": (189, 192),
-    "base_goal_error_heading_xy": (192, 194),
-    "time_to_contact_s": (194, 195),
-    "time_to_teacher_start_s": (195, 196),
-    "time_to_next_opportunity_s": (196, 197),
-    "epoch_learning_phase_one_hot": (197, 202),
-    "task_valid": (202, 203),
+    "motion_racket_pos_error_heading": (183, 186),
+    "motion_racket_vel_error_heading": (186, 189),
+    "motion_racket_signed_normal_error_heading": (189, 192),
+    "motion_racket_long_axis_error_heading": (192, 195),
+    "racket_target_pos_error_heading": (195, 198),
+    "racket_target_vel_error_heading": (198, 201),
+    "racket_target_normal_error_heading": (201, 204),
+    "base_goal_error_heading_xy": (204, 206),
+    "time_to_contact_s": (206, 207),
+    "time_to_teacher_start_s": (207, 208),
+    "time_to_next_opportunity_s": (208, 209),
+    "epoch_learning_phase_one_hot": (209, 214),
+    "task_valid": (214, 215),
 }
-V2_CRITIC_SLICES = {
-    "episode_time_remaining_s": (203, 204),
-    "live_ball_center_rel_root_heading": (204, 207),
-    "live_ball_lin_vel_heading": (207, 210),
-    "live_ball_ang_vel_heading": (210, 213),
-    "selected_rubber_contact_latched": (213, 214),
-    "net_crossed_latched": (214, 215),
-    "net_clear_latched": (215, 216),
-    "foot_supported_lr": (216, 218),
-    "cadence_ready_dwell_fraction": (218, 219),
+V3_CRITIC_SLICES = {
+    "episode_time_remaining_s": (215, 216),
+    "live_ball_center_rel_root_heading": (216, 219),
+    "live_ball_lin_vel_heading": (219, 222),
+    "live_ball_ang_vel_heading": (222, 225),
+    "selected_rubber_contact_latched": (225, 226),
+    "net_crossed_latched": (226, 227),
+    "net_clear_latched": (227, 228),
+    "foot_supported_lr": (228, 230),
+    "cadence_ready_dwell_fraction": (230, 231),
 }
 
 
@@ -92,21 +96,25 @@ def test_shared_layout_has_the_live_full_mdp_widths_and_one_order():
         offset += width
 
 
-def test_semantic_v2_literal_offsets_are_exact_and_not_padding():
-    assert P.ACTOR_WIDTH_V2 == 203
-    assert P.CRITIC_WIDTH_V2 == 219
+def test_semantic_v3_literal_offsets_are_exact_and_v2_has_no_live_method():
+    assert P.ACTOR_WIDTH_V3 == 215
+    assert P.CRITIC_WIDTH_V3 == 231
     assert tuple(
-        (name, end - start) for name, (start, end) in V2_ACTOR_SLICES.items()
-    ) == P.ACTOR_LAYOUT_V2
+        (name, end - start) for name, (start, end) in V3_ACTOR_SLICES.items()
+    ) == P.ACTOR_LAYOUT_V3
     assert tuple(
         (name, end - start)
-        for name, (start, end) in V2_CRITIC_SLICES.items()
-    ) == P.CRITIC_EXTENSION_LAYOUT_V2
-    assert tuple(V2_ACTOR_SLICES.values())[-1][1] == 203
-    assert tuple(V2_CRITIC_SLICES.values())[-1][1] == 219
+        for name, (start, end) in V3_CRITIC_SLICES.items()
+    ) == P.CRITIC_EXTENSION_LAYOUT_V3
+    assert tuple(V3_ACTOR_SLICES.values())[-1][1] == 215
+    assert tuple(V3_CRITIC_SLICES.values())[-1][1] == 231
+    assert not hasattr(
+        wait_env.FullMdpInitialWaitVecEnv,
+        "_full_a_semantic_observation_v2",
+    )
 
 
-def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
+def test_full_a_semantic_v3_uses_cached_paddle_native_frames_and_current_shot():
     n, dtype = 2, torch.float64
     origins = torch.tensor([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]], dtype=dtype)
     root_scene = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=dtype)
@@ -148,6 +156,21 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
     racket_position = torch.tensor([[1.0, 1.0, 1.0], [9.0, 9.0, 9.0]], dtype=dtype)
     racket_velocity = torch.tensor([[1.0, 0.0, 0.0], [9.0, 9.0, 9.0]], dtype=dtype)
     racket_raw_normal = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=dtype)
+    racket_long_axis = torch.tensor(
+        [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], dtype=dtype
+    )
+    teacher_racket_position = origins + torch.tensor(
+        [[2.0, 3.0, 4.0], [10.0, 11.0, 12.0]], dtype=dtype
+    )
+    teacher_racket_velocity = torch.tensor(
+        [[4.0, 5.0, 6.0], [10.0, 11.0, 12.0]], dtype=dtype
+    )
+    teacher_racket_signed_normal = torch.tensor(
+        [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], dtype=dtype
+    )
+    teacher_racket_long_axis = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=dtype
+    )
     com_velocity = torch.tensor(
         [[[1.0, 0.0, 0.0]], [[4.0, 5.0, 6.0]]], dtype=dtype
     )
@@ -158,6 +181,17 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
     xipos = torch.zeros((n, 1, 3), dtype=dtype)
     xipos[0, 0, 0] = 1.0
     subtree_com = torch.zeros((n, 1, 3), dtype=dtype)
+
+    kinematics_calls = []
+
+    def racket_kinematics():
+        kinematics_calls.append(True)
+        return (
+            racket_position,
+            racket_velocity,
+            racket_raw_normal,
+            racket_long_axis,
+        )
 
     env = types.SimpleNamespace(
         _torch=torch,
@@ -188,9 +222,9 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         _aligned_teacher_body_pos=torch.full((n, 1, 3), -777.0, dtype=dtype),
         _aligned_teacher_body_quat=torch.full((n, 1, 4), -777.0, dtype=dtype),
         _full_a_table_surface_center_scene=torch.tensor([0.5, 1.5, 0.75], dtype=dtype),
-        # Row one retains the Epoch current shot after retirement, but its
-        # READY_HOLD Motion phase must hide every actor task field.
-        _epoch_task_valid=torch.tensor([True, True]),
+        # Row one is pre-first-action READY_HOLD.  It must hide every actor
+        # task field while retaining the all-phase paddle residual.
+        _epoch_task_valid=torch.tensor([True, False]),
         _epoch_task_f32=task,
         _epoch_clock_ticks=torch.tensor([[10, 25, 0, 0, 0], [-1, -1, -1, -1, -1]]),
         _full_a_pre_swing_wait_s=torch.tensor([0.5, 7.0], dtype=dtype),
@@ -204,7 +238,7 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         episode_length_buf=torch.tensor([10, 1174]),
         max_episode_length=1500,
         _epoch_phase=torch.tensor(
-            [wait_env.FULL_A_PHASE_LAUNCH_SETTLED, wait_env.FULL_A_PHASE_RETIRED]
+            [wait_env.FULL_A_PHASE_LAUNCH_SETTLED, wait_env.FULL_A_PHASE_IDLE]
         ),
         _full_a_outcome_code=torch.zeros(n, dtype=torch.long),
         _epoch_launch_succeeded=torch.tensor([True, True]),
@@ -214,26 +248,28 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         _full_a_teacher_joint_pos=teacher_joint,
         _full_a_teacher_joint_vel=teacher_joint_vel,
         _full_a_mount_normal_sign=torch.tensor([-1, 1], dtype=torch.int8),
+        _fullmdp_mount_normal_sign=torch.tensor([-1.0, -1.0], dtype=dtype),
+        _aligned_teacher_racket_site_pos_w=teacher_racket_position,
+        _aligned_teacher_racket_site_lin_vel_w=teacher_racket_velocity,
+        _aligned_teacher_racket_signed_normal_w=(
+            teacher_racket_signed_normal
+        ),
+        _aligned_teacher_racket_long_axis_w=teacher_racket_long_axis,
         _full_a_selected_racket_contact=torch.tensor([True, True]),
         _full_a_net_crossed=torch.tensor([True, True]),
         _full_a_net_clear=torch.tensor([True, True]),
         _full_a_foot_supported_lr=torch.tensor([[True, False], [False, True]]),
         _full_a_cadence_ready_streak=torch.tensor([1, 7]),
-        _full_a_actor_scale_v2=torch.tensor(P.ACTOR_SCALE_FLAT_V2, dtype=dtype),
-        _full_a_critic_extension_scale_v2=torch.tensor(
-            P.CRITIC_EXTENSION_SCALE_FLAT_V2, dtype=dtype
+        _full_a_actor_scale_v3=torch.tensor(P.ACTOR_SCALE_FLAT_V3, dtype=dtype),
+        _full_a_critic_extension_scale_v3=torch.tensor(
+            P.CRITIC_EXTENSION_SCALE_FLAT_V3, dtype=dtype
         ),
         _qpos_act=lambda: joint,
         _qvel_act=lambda: joint_vel,
         _body_com_velocities_from_cvel=(
             wait_env.FullMdpInitialWaitVecEnv._body_com_velocities_from_cvel
         ),
-        _full_a_racket_kinematics=lambda: (
-            racket_position,
-            racket_velocity,
-            racket_raw_normal,
-            torch.tensor([[1.0, 0.0, 0.0]], dtype=dtype).repeat(n, 1),
-        ),
+        _full_a_racket_kinematics=racket_kinematics,
     )
     st = {
         "base_pos": root_world,
@@ -243,19 +279,20 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         "base_ang_b": torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=dtype),
         "proj_g": torch.tensor([[0.0, 0.0, -1.0], [0.0, 0.0, -1.0]], dtype=dtype),
     }
-    policy = wait_env.FullMdpInitialWaitVecEnv._full_a_semantic_observation_v2(
+    policy = wait_env.FullMdpInitialWaitVecEnv._full_a_semantic_observation_v3(
         env, st
     )
     critic = env._critic_obs_buf
-    assert policy.shape == (2, 203)
-    assert critic.shape == (2, 219)
+    assert policy.shape == (2, 215)
+    assert critic.shape == (2, 231)
+    assert len(kinematics_calls) == 1
 
     def actor(name):
-        start, end = V2_ACTOR_SLICES[name]
+        start, end = V3_ACTOR_SLICES[name]
         return policy[:, start:end]
 
     def privileged(name):
-        start, end = V2_CRITIC_SLICES[name]
+        start, end = V3_CRITIC_SLICES[name]
         return critic[:, start:end]
 
     assert torch.allclose(actor("base_position_table")[0], torch.tensor([0.5, 0.5, 2.25], dtype=dtype))
@@ -267,6 +304,37 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
     torch.testing.assert_close(actor("teacher_joint_vel"), teacher_joint_vel * 0.05)
     assert torch.allclose(actor("motion_anchor_pos_b")[0], torch.tensor([10.0 / 3.0, 20.0 / 3.0, 10.0], dtype=dtype))
     assert not torch.any(actor("motion_anchor_pos_b").eq(-777.0))
+    torch.testing.assert_close(
+        actor("motion_racket_pos_error_heading"),
+        torch.tensor([[10.0, -5.0, 15.0], [5.0, 10.0, 15.0]], dtype=dtype),
+        rtol=0.0,
+        # Quaternion normalization plus the 90-degree heading rotation may
+        # round one float64 product by roughly two ulps.
+        atol=3.0e-15,
+    )
+    torch.testing.assert_close(
+        actor("motion_racket_vel_error_heading"),
+        torch.tensor([[5.0, -3.0, 6.0], [1.0, 2.0, 3.0]], dtype=dtype),
+        rtol=0.0,
+        atol=3.0e-15,
+    )
+    torch.testing.assert_close(
+        actor("motion_racket_signed_normal_error_heading"),
+        # Row zero owns mount sign -1; the pre-action row must still compare
+        # the ready teacher against raw +Y rather than applying that sign.
+        torch.tensor([[2.0, -2.0, 0.0], [2.0, -2.0, 0.0]], dtype=dtype),
+        rtol=0.0,
+        atol=3.0e-15,
+    )
+    torch.testing.assert_close(
+        actor("motion_racket_long_axis_error_heading"),
+        torch.tensor([[-2.0, -2.0, 0.0], [-2.0, 2.0, 0.0]], dtype=dtype),
+        rtol=0.0,
+        atol=3.0e-15,
+    )
+    # Row one is READY/task-hidden, but the measured-paddle residual is a
+    # common full-phase state rather than part of the masked ball-task tail.
+    assert torch.count_nonzero(policy[1, 183:195]) == 10
     assert torch.allclose(actor("racket_target_pos_error_heading")[0], torch.tensor([10.0, -5.0, 15.0], dtype=dtype), atol=1e-15)
     assert torch.allclose(actor("racket_target_vel_error_heading")[0], torch.tensor([2.0, 0.0, 3.0], dtype=dtype), atol=1e-15)
     # mount sign=-1 selects the contacted rubber but does not reverse the raw
@@ -302,8 +370,8 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         wait_env.portable_catalog.FRESH_SCHEDULE_EXHAUSTED_TIME_TO_NEXT_OPPORTUNITY_S
         == -1.0
     )
-    assert torch.count_nonzero(policy[1, 183:196]) == 0
-    assert torch.equal(actor("epoch_learning_phase_one_hot"), torch.tensor([[0, 0, 1, 0, 0], [0, 0, 0, 0, 1]], dtype=dtype))
+    assert torch.count_nonzero(policy[1, 195:208]) == 0
+    assert torch.equal(actor("epoch_learning_phase_one_hot"), torch.tensor([[0, 0, 1, 0, 0], [1, 0, 0, 0, 0]], dtype=dtype))
     assert torch.equal(actor("task_valid")[:, 0], torch.tensor([1.0, 0.0], dtype=dtype))
 
     assert torch.allclose(privileged("live_ball_center_rel_root_heading")[0], torch.tensor([0.0, -1.0, 0.0], dtype=dtype), atol=1e-15)
@@ -311,19 +379,19 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
     # Ball spin is body-local in qvel: ball yaw maps +X to world +Y, then base
     # inverse yaw maps it back to heading +X before static 1/60 scaling.
     assert torch.allclose(privileged("live_ball_ang_vel_heading")[0], torch.tensor([1.0 / 60.0, 0.0, 0.0], dtype=dtype), atol=1e-15)
-    assert torch.count_nonzero(critic[1, 204:213]) == 0
-    # RETIRED retains the Epoch payload for identity/history, but no live
-    # flight remains.  Contact/net critic state must therefore be neutral.
-    assert torch.count_nonzero(critic[1, 213:216]) == 0
+    assert torch.count_nonzero(critic[1, 216:225]) == 0
+    # The pre-action row has no live flight.  Contact/net critic state must
+    # therefore be neutral even when its backing test caches are poisoned.
+    assert torch.count_nonzero(critic[1, 225:228]) == 0
     # Support/dwell are recovery-only critic facts.  Poisoned live caches from
-    # LAUNCH_SETTLED/RETIRED rows must publish exact N/A zeros.
+    # non-recovery rows must publish exact N/A zeros.
     assert torch.count_nonzero(privileged("foot_supported_lr")) == 0
     assert torch.count_nonzero(privileged("cadence_ready_dwell_fraction")) == 0
     torch.testing.assert_close(
         privileged("episode_time_remaining_s")[:, 0],
         torch.tensor([29.8 / 30.0, 6.52 / 30.0], dtype=dtype),
     )
-    assert torch.equal(critic[:, :203], policy)
+    assert torch.equal(critic[:, :215], policy)
 
     # The first three accepted due boundaries keep their real 293-tick
     # countdown.  Only the fourth accepted ordinal changes the same actor
@@ -336,10 +404,12 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         env._full_a_scheduled_ordinal[1] = ordinal
         env.episode_length_buf[1] = due_tick
         env._full_a_next_reveal_tick[1] = next_tick
-        next_policy = wait_env.FullMdpInitialWaitVecEnv._full_a_semantic_observation_v2(
+        calls_before = len(kinematics_calls)
+        next_policy = wait_env.FullMdpInitialWaitVecEnv._full_a_semantic_observation_v3(
             env, st
         )
-        start, end = V2_ACTOR_SLICES["time_to_next_opportunity_s"]
+        assert len(kinematics_calls) == calls_before + 1
+        start, end = V3_ACTOR_SLICES["time_to_next_opportunity_s"]
         torch.testing.assert_close(
             next_policy[1, start:end],
             torch.ones((1,), dtype=dtype),

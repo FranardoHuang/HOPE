@@ -5,7 +5,7 @@ tracked :class:`A3ReadyBallVecEnv` implementation.  WAIT parks the ball and
 keeps the legacy V1 observation ABI.  The opt-in A slice additionally reveals
 and launches one deterministic question, publishes live Physical/R03/R06/R07
 facts, computes their ordered lifecycle/motion reward terms, and
-publishes the compact semantic V2 observation ABI.
+publishes the compact semantic V3 observation ABI.
 
 The narrow WAIT transition below advances the real plant and closes only the
 IDLE reward/termination/masked-reset path.  An observed generic racket
@@ -111,7 +111,7 @@ FULLMDP_TERMINATION_BITS = {
 
 
 class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
-    """Real WAIT V1 plus the Full-A semantic 203/219 observation."""
+    """Real WAIT V1 plus the Full-A semantic 215/231 observation."""
 
     def __init__(
         self,
@@ -588,13 +588,13 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         # Materialize the shared host ABI constants once.  Observation packing
         # then needs one flat multiply per newly allocated actor/critic suffix,
         # with the already-scaled actor reused as the critic prefix.
-        self._full_a_actor_scale_v2 = torch.tensor(
-            observation_contract.ACTOR_SCALE_FLAT_V2,
+        self._full_a_actor_scale_v3 = torch.tensor(
+            observation_contract.ACTOR_SCALE_FLAT_V3,
             dtype=dtype,
             device=self.device,
         )
-        self._full_a_critic_extension_scale_v2 = torch.tensor(
-            observation_contract.CRITIC_EXTENSION_SCALE_FLAT_V2,
+        self._full_a_critic_extension_scale_v3 = torch.tensor(
+            observation_contract.CRITIC_EXTENSION_SCALE_FLAT_V3,
             dtype=dtype,
             device=self.device,
         )
@@ -2138,8 +2138,8 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         data.qvel[ids, self.b_v : self.b_v + 6] = 0.0
         self.ball_age_buf[ids] = 0
 
-    def _full_a_semantic_observation_v2(self, st):
-        """Pack the live Full-A plant into the shared semantic 203/219 ABI."""
+    def _full_a_semantic_observation_v3(self, st):
+        """Pack the live Full-A plant into the shared semantic 215/231 ABI."""
 
         torch = self._torch
         data = self.sim.data
@@ -2191,8 +2191,26 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             data.subtree_com[:, self._fullmdp_pelvis_root_id],
         )[0]
 
-        racket_pos_scene, racket_vel_w, racket_raw_normal_w, _racket_long_axis_w = (
-            self._full_a_racket_kinematics()
+        (
+            racket_pos_scene,
+            racket_vel_w,
+            racket_raw_normal_w,
+            racket_long_axis_w,
+        ) = self._full_a_racket_kinematics()
+        # The measured-paddle reward and observation consume one aligned
+        # teacher tuple and one actual FK tuple.  Ready rows own the raw +Y
+        # face, while rows with a selected Epoch own its physical mount sign;
+        # neither convention is a visibility mask for these all-phase fields.
+        racket_face_sign = torch.where(
+            current_task,
+            self._fullmdp_mount_normal_sign,
+            torch.ones_like(self._fullmdp_mount_normal_sign),
+        )
+        racket_signed_normal_w = (
+            racket_raw_normal_w * racket_face_sign[:, None]
+        )
+        teacher_racket_pos_scene = (
+            self._aligned_teacher_racket_site_pos_w - origins
         )
         task = self._epoch_task_f32
         base_goal_delta = torch.cat(
@@ -2267,6 +2285,19 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "motion_phase_one_hot": torch.nn.functional.one_hot(
                 self._full_a_motion_phase_code, num_classes=5
             ).to(dtype=dtype),
+            "motion_racket_pos_error_heading": heading(
+                teacher_racket_pos_scene - racket_pos_scene
+            ),
+            "motion_racket_vel_error_heading": heading(
+                self._aligned_teacher_racket_site_lin_vel_w - racket_vel_w
+            ),
+            "motion_racket_signed_normal_error_heading": heading(
+                self._aligned_teacher_racket_signed_normal_w
+                - racket_signed_normal_w
+            ),
+            "motion_racket_long_axis_error_heading": heading(
+                self._aligned_teacher_racket_long_axis_w - racket_long_axis_w
+            ),
             "racket_target_pos_error_heading": task_vector(
                 task[:, 5:8] - racket_pos_scene
             ),
@@ -2286,9 +2317,9 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             "task_valid": task_visible[:, None].to(dtype=dtype),
         }
         policy = observation_contract.concatenate_layout_rows(
-            observation_contract.ACTOR_LAYOUT_V2, actor_rows
+            observation_contract.ACTOR_LAYOUT_V3, actor_rows
         )
-        policy.mul_(self._full_a_actor_scale_v2)
+        policy.mul_(self._full_a_actor_scale_v3)
 
         ball_pos_w = data.qpos[:, self.b_q : self.b_q + 3]
         ball_quat_w = data.qpos[:, self.b_q + 3 : self.b_q + 7]
@@ -2352,16 +2383,16 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             ),
         }
         critic_extension = observation_contract.concatenate_layout_rows(
-            observation_contract.CRITIC_EXTENSION_LAYOUT_V2, critic_rows
+            observation_contract.CRITIC_EXTENSION_LAYOUT_V3, critic_rows
         )
-        critic_extension.mul_(self._full_a_critic_extension_scale_v2)
+        critic_extension.mul_(self._full_a_critic_extension_scale_v3)
         critic = torch.cat((policy, critic_extension), dim=1)
         if tuple(policy.shape) != (
             self.num_envs,
-            observation_contract.ACTOR_WIDTH_V2,
+            observation_contract.ACTOR_WIDTH_V3,
         ) or tuple(critic.shape) != (
             self.num_envs,
-            observation_contract.CRITIC_WIDTH_V2,
+            observation_contract.CRITIC_WIDTH_V3,
         ):
             raise RuntimeError("portable Full-A semantic observation width differs")
         # The update ledger scans both stored observation groups before PPO;
@@ -2371,7 +2402,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
         return policy
 
     def _compute_obs(self, st=None):
-        """Publish legacy WAIT V1 or the initialized Full-A semantic V2."""
+        """Publish legacy WAIT V1 or the initialized Full-A semantic V3."""
 
         torch = self._torch
         # Base construction calls reset() -> _compute_obs() before the
@@ -2382,7 +2413,7 @@ class FullMdpInitialWaitVecEnv(A3ReadyBallVecEnv):
             getattr(self, "full_a_mode", False) and self._fullmdp_initialized
         )
         if full_a_initialized:
-            return self._full_a_semantic_observation_v2(st or self._state())
+            return self._full_a_semantic_observation_v3(st or self._state())
 
         contact = self._con_geom[:]
         valid = self._con_idx < self._nacon[0]

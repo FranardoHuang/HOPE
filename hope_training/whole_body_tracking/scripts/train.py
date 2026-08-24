@@ -6198,7 +6198,7 @@ def _post_swing_settle_debt_reward_contract(env_cfg, runtime_facts: dict) -> dic
     }
 
 
-def _task_first_agent_recipe(agent_cfg) -> dict:
+def _task_first_agent_recipe(agent_cfg, *, num_envs: int | None = None) -> dict:
     """Return the canonical learning recipe required for an exact resume.
 
     Checkpoint tensors and optimizer moments are not sufficient to reproduce
@@ -6264,9 +6264,17 @@ def _task_first_agent_recipe(agent_cfg) -> dict:
                 f"algorithm.{optional_stateful_feature}"
             )
 
+    if num_envs is not None and (
+        type(num_envs) is not int or num_envs <= 0
+    ):
+        raise RuntimeError(
+            "task-first PPO num_envs must be a positive plain integer when bound"
+        )
+    schema_version = 2 if num_envs is not None else 1
     recipe = {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "runner": {
+            **({} if num_envs is None else {"num_envs": num_envs}),
             "num_steps_per_env": steps,
             "empirical_normalization": empirical,
         },
@@ -6281,7 +6289,7 @@ def _task_first_agent_recipe(agent_cfg) -> dict:
         sort_keys=True,
     ).encode("utf-8")
     return {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "recipe": recipe,
     }
@@ -11721,7 +11729,9 @@ def _build_training_hard_contract(
             if not action_ball_full_mdp_enabled
             else {
                 "action_ball_full_mdp_ppo_runner_recipe": (
-                    _task_first_agent_recipe(agent_cfg)
+                    _task_first_agent_recipe(
+                        agent_cfg, num_envs=int(env.num_envs)
+                    )
                 )
             }
         ),
@@ -15711,7 +15721,7 @@ def _resolve_action_ball_full_mdp_lean_actor_observation_contract(
                 "diagnostic_action_epoch",
                 "exact installed diagnostic ActionEpoch policy observation",
             )
-            for name, dim in zip(actor_names, actor_dims, strict=True)
+            for name, dim in zip(actor_names, actor_dims)
         ),
     )
 
@@ -16154,14 +16164,14 @@ def _apply_action_ball_full_mdp_policy_algo_config(
 def _apply_action_ball_full_mdp_ppo_recipe(
     algo: dict, *, requested: bool
 ):
-    """Replace only a FullMDP run's legacy PPO defaults with typed V4."""
+    """Replace only a FullMDP run's legacy PPO defaults with typed V5."""
 
     if type(requested) is not bool:
         raise TypeError("FullMDP PPO recipe selection must be an exact bool")
     if not requested:
         return None
     if not isinstance(algo, dict):
-        raise _OverrideError("FullMDP PPO V4 requires cfg.algo to be a mapping")
+        raise _OverrideError("FullMDP PPO V5 requires cfg.algo to be a mapping")
     recipe = (
         _action_ball_full_mdp_ppo_recipe_module()
         .ACTION_BALL_FULL_MDP_PPO_RECIPE
@@ -16207,28 +16217,36 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
             )
         if root_iterations != recipe.max_iterations:
             raise _OverrideError(
-                "FullMDP PPO V4 max_iterations is code-owned at "
+                "FullMDP PPO V5 max_iterations is code-owned at "
                 f"{recipe.max_iterations}; got root max_iterations="
                 f"{root_iterations}"
             )
 
+    if _get(task, "algo") is not None:
+        raise _OverrideError(
+            "FullMDP PPO V5 has one typed recipe; resolved task.algo is a "
+            "competing PPO authority"
+        )
+
+    protected_prefixes = (
+        "algo.runner",
+        "algo.policy",
+        "algo.algorithm",
+        "task.algo",
+    )
     conflicts = []
     for raw_arg in _ORIGINAL_TRAINING_ARGV[1:]:
         if type(raw_arg) is not str or "=" not in raw_arg:
             continue
         key = raw_arg.split("=", 1)[0].lstrip("+")
-        if key.startswith(
-            (
-                "algo.runner.",
-                "algo.policy.",
-                "algo.algorithm.",
-                "task.algo.",
-            )
+        if any(
+            key == prefix or key.startswith(prefix + ".")
+            for prefix in protected_prefixes
         ):
             conflicts.append(key)
     if conflicts:
         raise _OverrideError(
-            "FullMDP PPO V4 has one typed recipe; nested Hydra PPO overrides "
+            "FullMDP PPO V5 has one typed recipe; nested Hydra PPO overrides "
             "would be silently replaced: " + ",".join(sorted(set(conflicts)))
         )
 
@@ -20238,7 +20256,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         raw_num_envs,
         action_ball_full_mdp_requested=action_ball_full_mdp_requested,
     )
-    if any(
+    oracle_shape_requested = any(
         _get(cfg, field) is not None
         for field in (
             "action_ball_teacher_qdes_oracle_output_path",
@@ -20246,8 +20264,23 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
             "action_ball_c211_oracle_bundle_output_path",
             "action_ball_c211_oracle_episodes",
         )
-    ):
+    )
+    if oracle_shape_requested:
         num_envs = 1
+    elif action_ball_full_mdp_requested:
+        expected_num_envs = (
+            _action_ball_full_mdp_ppo_recipe_module()
+            .ACTION_BALL_FULL_MDP_PPO_RECIPE.num_envs
+        )
+        if type(expected_num_envs) is not int or expected_num_envs <= 0:
+            raise RuntimeError(
+                "[train.py] FullMDP typed recipe lacks a positive num_envs"
+            )
+        if num_envs != expected_num_envs:
+            raise _OverrideError(
+                "FullMDP PPO V5 num_envs is code-owned at "
+                f"{expected_num_envs}; got num_envs={num_envs}"
+            )
     action_ball_full_mdp_pre_gym_binding = (
         _resolve_action_ball_full_mdp_pre_gym_binding(
             requested=action_ball_full_mdp_requested,
@@ -20375,6 +20408,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         print(
             "[train.py] full-MDP PPO recipe: "
             f"kind={action_ball_full_mdp_ppo_recipe.kind} "
+            f"N={action_ball_full_mdp_ppo_recipe.num_envs} "
             f"H={action_ball_full_mdp_ppo_recipe.num_steps_per_env} "
             f"updates={action_ball_full_mdp_ppo_recipe.max_iterations} "
             f"save={action_ball_full_mdp_ppo_recipe.save_interval} "
@@ -20407,7 +20441,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
             != action_ball_full_mdp_ppo_recipe.max_iterations
         ):
             raise _OverrideError(
-                "FullMDP PPO V4 max_iterations is code-owned at "
+                "FullMDP PPO V5 max_iterations is code-owned at "
                 f"{action_ball_full_mdp_ppo_recipe.max_iterations}; got "
                 f"root max_iterations={requested_iterations}"
             )

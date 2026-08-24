@@ -1,15 +1,15 @@
 # EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822
 
-> 问题：为什么两条 [FullMDP](../../DEFINITIONS.md#fullmdp-ppo-v3) H48 长跑已经学会站立，却没有进入可学习的 mimic/击球链；怎样用最少状态和单一真源修复后 fresh 重启？
+> 问题：为什么两条 [FullMDP](../../DEFINITIONS.md#fullmdp-v6-candidate) H48 长跑已经学会站立，却没有进入可学习的 mimic/击球链；怎样用最少状态和单一真源修复后 fresh 重启？
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V4 final evidence frozen / V5 fresh diagnostic evidence / no authorized formal run`
+> 状态：`V6 PPO-V5/Observation-V3 candidate / old V4-V5 evidence frozen / no authorized formal run`
 > 证据边界：`diagnostic_unauthorized=true`；本记录不授权 resume、promotion、export、部署或真机。
 
-> **阅读边界（2026-08-23）：**§1--§8保留课程故障的发现与被替换实现史，不是现役执行真源；当前契约、
-> V4最终证据和V5未闭合项只认§9。尤其是旧文中“hidden都用reset-ready”和“11项row fault”已被§9明确
-> supersede，不能再拿来描述现役代码。
+> **阅读边界（2026-08-25）：**§1--§9保留课程故障发现、V4/V5运行和被替换实现史，不是现役执行真源；
+> 当前契约与未闭合项只认§10。尤其是旧文中“hidden都用reset-ready”“11项row fault”和“V2 203/219
+> 唯一现役合同”均已supersede，不能反向覆盖PPO V5、Observation V3或当前证据边界。
 
 ## 1. 旧 live 事实与裁决
 
@@ -475,7 +475,7 @@ production after-image当前可达且本轮反例未触发，但后续不能继�
 dry-run、GPU-local affinity、fresh V4连续ACK和真实wall尚未完成。完成前不替换V3、不宣布速度恢复、也不更新
 `docs/NOW.md`或任何formal Gate为Done。
 
-## 9. 2026-08-23 V4最终封存与V5 fresh诊断边界
+## HISTORICAL / FROZEN — 9. 2026-08-23 V4最终封存与V5 fresh诊断边界
 
 ### 9.1 V4真实训练最终封存：两端均已停止，不再续写前缀
 
@@ -626,3 +626,92 @@ present/physically-valid=`1/1`。这证明两条自然课程链已经分别到�
 辅助mean/median=`9.488/9.465 s`、Mu durable mean/median=`9.235/9.223 s`；约6秒方向
 尚未达到。没有resume、promotion、export、physics parity、部署或真机授权，V5不得写成formal run、已完成
 提速或Gate完成。
+
+## 10. 2026-08-25 current：V5反例收口与V6最小桥修复
+
+本节取代§9全节作为本实验的current裁决；执行顺序只认
+[双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)。
+它不把branch candidate写成已运行结果。
+
+### 10.1 V5回答了什么、没有回答什么
+
+旧MuJoCo V5 source=`39f94819…`的最新只读快照到ACK8692（`1,709,113,344` transitions；固定recent50
+window截至update8688）。该窗wall/episode length/return mean=`13.405 s/563.64 tick/42.704`，
+scheduled due=`22,656`、launch=`20,929`、R03 physically-valid=`20,445`；raw edge与selected contact均为
+`0/20,929 launch`。全历史只在update1389与1541各有1次raw edge，共2次；selected/physical contact与
+landing始终没有事件。因为没有selected contact，landing没有eligible分母，必须写`未测`。settled-result
+组成是recovery=`0`、fail=`9,524`、timeout=`9,155`，但它不是selected-shot recovery rate，也不能把
+landing补成零。mimic/sample=`.074871`、sigma=`.0127691`；因此：
+
+- balance/survival和return继续改善，task、launch与精确击球目标的分母也足够大；
+- mimic→真实拍球的连续控制桥没有按设计出现，不能再用“训练步数还少”解释；
+- 这个negative只裁决V5实现，不裁决balance→mimic→hit→landing的自然课程。修正后的fresh lineage仍须
+  重新给逐阶段分母；上一阶段开始成功时下一阶段应已能取得样本，而不是等上一阶段形式毕业后才开门。
+
+### 10.2 为什么采用measured-paddle连续prior
+
+V5的common mimic由两个anchor项和四个body-average项构成；后四项曾把持拍腕与其他body混在平均量里，
+即使整体姿态改善，policy仍可能用错误腕部姿态取得相近收入。V6的
+[`Reward24`](../../DEFINITIONS.md#fullmdp-reward24)保留14项lifecycle与两个anchor项，只从四个
+body-average项排除持拍腕，再用同一份官方实测动作的拍心位置、点速度、selected physical
+hitting-face法向和长轴四个Cauchy prior
+直接训练拍的6-DoF轨迹。四项weight=`1/1/1/.5`、width=`.70 m / 4 mps / pi rad / 1 rad`，strike window
+不降权；它们的总cap为3.5，相对六个common mimic项cap 5.0足够形成桥，但仍让one-shot ball lifecycle决定击球与
+落点质量。Reward没有新增隐藏oracle或课程Gate；actor侧另以Observation V3只暴露同producer、同clock的
+最小teacher-achieved残差，不能把“Reward本身不加观测”误写成actor仍保持V2。
+
+这里的mimic法向不是actor task tail里的raw-A目标残差：动作选定后，playback用该动作的
+`mount_normal_sign`把achieved raw `+Y`变成selected physical face，并与同一sign语义的measured teacher
+对拍；只有reset-ready没有selected动作时才使用canonical raw `+Y`。slot0的sign=`+1`不能代签未来负sign
+动作。
+
+### 10.3 从Build4学原则，不抄证明与数值
+
+可复现参考冻结为`origin/build_4@324e60d1`。Build4更容易出现可见动作，核心不是一个神奇reward常数，
+而是四件事叠加：从model21800强warm-start且
+重置sigma `.19`；只有2条clip；约`1--1.3 s`一次的高频任务曝光；actor直接看见desired拍心位置/速度与
+TTS，并从proprioception推断actual拍状态，reward在strike window连续支付位置/速度/法向`14/14/5`目标。
+它支持“mimic目标必须直接约束拍且policy至少能够推断纠偏状态”，但没有独立actor normal字段或
+achieved-residual，不能拿它证明Observation V3是必要条件，也不能区分曝光频率、
+warm-start、数据窄化、replay和数值的贡献。
+
+Build4仓内有model3440 checkpoint、ONNX与deploy YAML的hash identity；但selected candidate的promotion仍为
+`NOT_PROVEN`，没有逐侧/逐动作evaluation receipt、fresh schema22 long或matched Gate3，artifact身份不能
+代签行为质量。它也没有训练73动作，virtual landing项在选中配方中为零。故本轮：
+
+- **adopt：**直接连续拍面Reward与同source actor-visible残差，以及逐阶段诚实分母；
+- **defer：**`1--1.3 s`曝光频率、warm-start、replay、双LR、sigma `.19`与`14/14/5`数值，留给独立可归因实验；
+- **reject：**直接续Build4 checkpoint、把它称为physical/fullMDP formal成功，或把2条clip外推成73动作。
+
+### 10.4 V6合同与课程时钟
+
+learner最终采用[`PPO V5`](../../DEFINITIONS.md#fullmdp-ppo-v5)：`2048 env × H48 × U25000`、save500、
+E5/MB4；继承V4的`gamma=.99`、GAE`lambda=.98`、entropy0、learned`log_std`、fresh sigma`.05`且没有
+按iteration强制std decay。相对4096/U12500/MB8，总transition=`2,457,600,000`、每minibatch=`24,576`
+sample和optimizer step=`500,000`保持；但policy刷新、GAE/KL、WAL和checkpoint的样本边界改变，所以这是
+明确的算法/迭代性取舍，不是语义等价热路优化。约`4.8 s/H48`只是待测估计，必须由exact rate probe与
+短学习canary确认。
+
+Observation最终采用[`V3`](../../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)：
+actor/critic=`215/231`。它在旧common183与task tail之间加入4×3 heading-frame residual：同一measured
+Motion teacher减去achieved paddle的拍心位置、点速度、signed physical face和长轴。四块全phase、
+不按`task_valid` mask，直接复用Reward24 producer；它关闭的是Reward source未直接actor-visible的
+representation gap与sample-complexity负担，不宣称已枚举strict Markov alias、V5零接触唯一根因、完整
+Markov或收敛。V2 `203/219`只保留旧checkpoint ABI及后续
+paired control，不能作为fresh fallback。拒绝加入raw ball/aim/rate/history/action ID；实机builder尚未
+闭合，不能称deployment已验证。
+
+四个真实due为tick`295/588/881/1174`；tick1467是第四球settlement boundary，不是第五次机会。V3 actor
+clock列`[208]`（V2历史位置`[196]`）在仍有机会时
+给到下一次due的时间，第四次due消费后给raw `-1` exhausted sentinel；Isaac与MuJoCo必须同义，不能分别
+指向1467和episode horizon。terminal恰好跨due时，MuJoCo从pre-physics schedule直接记overlap；Isaac由
+独立`ResetTelemetry`与D05 scheduled-due在既有CPU pre-optimizer drain求交集。该跨writer合成没有每步
+Gate、D2H、新owner或actor字段。
+
+### 10.5 验收边界
+
+Pod predecessor已经反证Isaac positional schema decode和Mu Torch-only pose adapter；pre-V3的Isaac
+4096×H48 probe随后关闭了该runtime路径，但没有课程分母，且不能代签PPO V5。失败分类、exact数字与receipt
+只认[热路实验§16](EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。
+最终source的CPU矩阵、两端PPO V5 exact rate、Mu真实Full-A、Isaac短学习canary、双fresh ACK与学习分母仍
+`未测`；G04/G05/G06继续`Partial`，`diagnostic_unauthorized=true`。

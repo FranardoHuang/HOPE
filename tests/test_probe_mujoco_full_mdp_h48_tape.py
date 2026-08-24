@@ -69,16 +69,16 @@ def _record(root: Path, *, delta: float = 0.0, discrete_flip: bool = False,
     arrays = {"actions": np.frombuffer(action_bytes, dtype="<f4").reshape(48, 64, 31).copy(),
         "initial_qpos": np.zeros((64, 3), dtype=np.float32),
         "initial_qvel": np.zeros((64, 3), dtype=np.float32),
-        "initial_actor": np.zeros((64, 203), dtype=np.float32),
-        "initial_critic": np.zeros((64, 219), dtype=np.float32),
+        "initial_actor": np.zeros((64, M.ACTOR_WIDTH), dtype=np.float32),
+        "initial_critic": np.zeros((64, M.CRITIC_WIDTH), dtype=np.float32),
         "reward_terms": np.zeros(
             (48, 64, M.REWARD_TERM_COUNT), dtype=np.float32
         ),
-        "actor203": np.zeros((48, 64, 203), dtype=np.float32),
-        "critic219": np.zeros((48, 64, 219), dtype=np.float32),
+        "actor": np.zeros((48, 64, M.ACTOR_WIDTH), dtype=np.float32),
+        "critic": np.zeros((48, 64, M.CRITIC_WIDTH), dtype=np.float32),
         "qpos": np.zeros((48, 64, 3), dtype=np.float32),
         "qvel": np.zeros((48, 64, 3), dtype=np.float32)}
-    arrays["actor203"][1, 1, 2] = delta
+    arrays["actor"][1, 1, 2] = delta
     for name in M.DISCRETE_FIELDS:
         arrays[name] = np.zeros((48, 64), dtype=np.int64)
     arrays["done"][0, 0] = int(discrete_flip)
@@ -90,10 +90,16 @@ def _record(root: Path, *, delta: float = 0.0, discrete_flip: bool = False,
         np.savez_compressed(stream, **arrays)
     payload = (root / M.ARRAYS_NAME).read_bytes()
     summary = {
-        "record_type": "mujoco_full_mdp_h48_fixed_tape",
+        "schema_version": 2,
+        "record_type": "mujoco_full_mdp_h48_fixed_tape_v2",
         "config_sha256": "c" * 64 if fake_identity else config_sha,
         "action_tape_sha256": "t" * 64 if fake_identity else tape_sha,
         "source": {"commit": root.name, "dirty": False},
+        "observation": {
+            "kind": M.OBSERVATION_KIND,
+            "actor_width": M.ACTOR_WIDTH,
+            "critic_width": M.CRITIC_WIDTH,
+        },
         "natural_h48_strata": {"reveal": 999},
         "arrays_npz_sha256": hashlib.sha256(payload).hexdigest(),
     }
@@ -109,9 +115,9 @@ def test_compare_reports_measured_envelope_without_readiness_verdict(tmp_path):
     assert result["same_exact_tape"] is True
     assert result["all_discrete_exact"] is False
     assert result["discrete_mismatch_cells"]["done"] == 1
-    assert result["numeric_difference_envelope"]["actor203"] == {
+    assert result["numeric_difference_envelope"]["actor"] == {
         "exact": False, "max_abs": 0.125,
-        "mean_abs": pytest.approx(0.125 / (48 * 64 * 203)),
+        "mean_abs": pytest.approx(0.125 / (48 * 64 * M.ACTOR_WIDTH)),
     }
     assert result["missing_natural_strata"] == {
         name: "未测" for name in M.STRATA_EVENTS
@@ -155,3 +161,5 @@ def test_cli_is_public_and_source_calls_real_full_a_boundary():
     assert "_epoch_phase[" not in source and "_full_a_launch_rows" not in source
     assert M.REWARD_TERM_COUNT == 24
     assert M.REWARD_TERM_COUNT == len(M.reward_contract.MANAGER_NAMES)
+    assert M.OBSERVATION_KIND == "action_ball_full_mdp_semantic_observation_v3"
+    assert (M.ACTOR_WIDTH, M.CRITIC_WIDTH) == (215, 231)

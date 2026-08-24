@@ -72,7 +72,9 @@ def _prepared_epoch():
 def _runtime(env, epoch):
     parts = {
         "r05_runtime": object(),
-        "motion": object(),
+        "motion": types.SimpleNamespace(
+            _action_ball_continuous_motion_mutation_version=0
+        ),
         "racket": object(),
         "physical_ball": object(),
         "r06_landing_outcome": _R06(),
@@ -92,7 +94,7 @@ def _runtime(env, epoch):
 def _direct_view(env, record, parts):
     value = 1.0
     actor_rows = {}
-    for name, width in O.ACTOR_LAYOUT_V2:
+    for name, width in O.ACTOR_LAYOUT_V3:
         if name in (
             "motion_phase_one_hot",
             "epoch_learning_phase_one_hot",
@@ -102,7 +104,7 @@ def _direct_view(env, record, parts):
         actor_rows[name] = torch.full((2, width), value)
         value += 1.0
     critic_rows = {}
-    for name, width in O.CRITIC_EXTENSION_LAYOUT_V2:
+    for name, width in O.CRITIC_EXTENSION_LAYOUT_V3:
         critic_rows[name] = torch.full((2, width), value)
         value += 1.0
     task_valid = O._gather_selected(
@@ -147,6 +149,38 @@ def _hard_coded_actor_scale_v2():
     return tuple(scale for scale, width in groups for _ in range(width))
 
 
+def _hard_coded_actor_scale_v3():
+    groups = (
+        (1.0, 3),
+        (0.25, 3),
+        (1.0, 3),
+        (1.0, 2),
+        (0.5, 3),
+        (1.0, 31),
+        (0.05, 31),
+        (1.0, 31),
+        (1.0, 31),
+        (0.05, 31),
+        (10.0 / 3.0, 3),
+        (1.0, 6),
+        (1.0, 5),
+        (5.0, 3),
+        (1.0, 3),
+        (2.0, 3),
+        (2.0, 3),
+        (5.0, 3),
+        (1.0, 3),
+        (2.0, 3),
+        (5.0, 2),
+        (1.0 / 2.42, 1),
+        (1.0, 1),
+        (1.0 / 5.86, 1),
+        (1.0, 5),
+        (1.0, 1),
+    )
+    return tuple(scale for scale, width in groups for _ in range(width))
+
+
 def _hard_coded_critic_extension_scale_v2():
     groups = (
         (1.0 / 30.0, 1),
@@ -162,7 +196,7 @@ def _hard_coded_critic_extension_scale_v2():
     return tuple(scale for scale, width in groups for _ in range(width))
 
 
-def test_named_layout_is_semantic_203_219_without_raw_packets_or_ledgers():
+def test_v2_history_is_preserved_and_live_v3_is_semantic_215_231():
     assert P.COMMON_ACTOR_WIDTH_V2 == 183
     assert O.ACTOR_WIDTH_V2 == 203
     assert O.CRITIC_WIDTH_V2 == 219
@@ -180,6 +214,28 @@ def test_named_layout_is_semantic_203_219_without_raw_packets_or_ledgers():
         "task_valid",
     ]
     assert sum(width for _, width in O.CRITIC_EXTENSION_LAYOUT_V2) == 16
+    assert P.COMMON_ACTOR_WIDTH_V3 == 195
+    assert O.ACTOR_WIDTH_V3 == 215
+    assert O.CRITIC_WIDTH_V3 == 231
+    assert O.ACTOR_CONTRACT_V3 == "action_ball_full_mdp_semantic_actor_v3"
+    assert O.CRITIC_CONTRACT_V3 == "action_ball_full_mdp_semantic_critic_v3"
+    assert O.OBSERVATION_KIND_V3 == "action_ball_full_mdp_semantic_observation_v3"
+    assert O.ACTOR_LAYOUT_V3 is P.ACTOR_LAYOUT_V3
+    assert O.CRITIC_EXTENSION_LAYOUT_V3 is P.CRITIC_EXTENSION_LAYOUT_V3
+    assert [name for name, _ in P.COMMON_ACTOR_LAYOUT_V3][-4:] == [
+        "motion_racket_pos_error_heading",
+        "motion_racket_vel_error_heading",
+        "motion_racket_signed_normal_error_heading",
+        "motion_racket_long_axis_error_heading",
+    ]
+    assert P.ACTOR_LAYOUT_V3[-9:] == P.ACTOR_TASK_LAYOUT_V2
+    assert O.DIRECT_VIEW_METHOD == "semantic_action_epoch_observation_v3"
+    assert callable(getattr(L.ActionBallFullMdpLeanRuntimeOwner, O.DIRECT_VIEW_METHOD))
+    assert not hasattr(
+        L.ActionBallFullMdpLeanRuntimeOwner,
+        "semantic_action_epoch_observation_v2",
+    )
+    assert sum(width for _, width in O.CRITIC_EXTENSION_LAYOUT_V3) == 16
 
 
 def test_v2_static_scale_keys_and_flat_values_match_independent_golden():
@@ -225,6 +281,22 @@ def test_v2_static_scale_keys_and_flat_values_match_independent_golden():
     )
     assert len(P.ACTOR_SCALE_FLAT_V2) == 203
     assert len(P.CRITIC_EXTENSION_SCALE_FLAT_V2) == 16
+
+
+def test_v3_static_scale_and_critic_prefix_match_independent_golden():
+    assert P.MOTION_RACKET_RESIDUAL_SCALE_BY_FIELD_V3 == (
+        ("motion_racket_pos_error_heading", 5.0),
+        ("motion_racket_vel_error_heading", 1.0),
+        ("motion_racket_signed_normal_error_heading", 2.0),
+        ("motion_racket_long_axis_error_heading", 2.0),
+    )
+    assert P.ACTOR_SCALE_FLAT_V3 == _hard_coded_actor_scale_v3()
+    assert (
+        P.CRITIC_EXTENSION_SCALE_FLAT_V3
+        == _hard_coded_critic_extension_scale_v2()
+    )
+    assert len(P.ACTOR_SCALE_FLAT_V3) == 215
+    assert len(P.CRITIC_EXTENSION_SCALE_FLAT_V3) == 16
 
 
 def test_portable_keeps_complete_legacy_v1_surface_until_atomic_cutover():
@@ -479,6 +551,7 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
         joint_vel=torch.zeros((2, 31)),
     )
     motion = Motion()
+    motion._action_ball_continuous_motion_mutation_version = 0
     motion.robot = types.SimpleNamespace(data=data)
     motion.joint_pos = torch.zeros((2, 31))
     motion.joint_vel = torch.zeros((2, 31))
@@ -521,6 +594,29 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     actor_target_normal_w = torch.tensor(
         [[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]]
     )
+    motion_target_pos_w = torch.tensor(
+        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    )
+    motion_target_signed_normal_w = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    motion_target_vel_w = torch.tensor(
+        [[3.0, 4.0, 5.0], [6.0, 7.0, 8.0]]
+    )
+    motion_target_long_axis_w = torch.tensor(
+        [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    hope_rewards = types.ModuleType("hope_rewards")
+    hope_rewards.stage1_aligned_clip_racket_target_now = lambda _cmd: (
+        motion_target_pos_w,
+        motion_target_signed_normal_w,
+        motion_target_vel_w,
+        motion_target_long_axis_w,
+    )
+    hope_rewards.stage1_actual_racket_face_normal_now = (
+        lambda cmd: cmd.racket_normal_w
+    )
+    monkeypatch.setitem(sys.modules, "hope_rewards", hope_rewards)
     racket = types.SimpleNamespace(
         cfg=types.SimpleNamespace(
             vb_table_near_x=0.0,
@@ -528,16 +624,18 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
             face_command=False,
         ),
         # The live controller target deliberately differs from the delayed
-        # actor-visible command.  V2 must consume the latter while keeping the
+        # actor-visible command.  V3 must consume the latter while keeping the
         # measured racket pose/velocity/normal live.
         racket_target_pos_w=torch.ones((2, 3)),
         racket_pos_w=torch.zeros((2, 3)),
         racket_target_vel_w=torch.ones((2, 3)),
         racket_lin_vel_w=torch.zeros((2, 3)),
         racket_normal_raw_w=torch.tensor([[0.0, 1.0, 0.0]]).repeat(2, 1),
-        # The signed normal deliberately points the other way.  FullMDP V2
-        # must stay aligned with the raw A/+Y question and R03 reward.
+        # The signed normal deliberately points the other way.  The full-phase
+        # mimic residual uses this physical face, while the ball-task question
+        # stays aligned with the raw A/+Y question and R03 reward.
         racket_normal_w=torch.tensor([[0.0, -1.0, 0.0]]).repeat(2, 1),
+        racket_long_axis_w=torch.tensor([[1.0, 0.0, 0.0]]).repeat(2, 1),
         target_normal_cmd=torch.tensor([[1.0, 0.0, 0.0]]).repeat(2, 1),
         base_target_pos_w=torch.ones((2, 2)),
         actor_racket_target_pos_w=lambda: actor_target_pos_w,
@@ -600,7 +698,7 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     r07 = types.SimpleNamespace(
         plant_fact_adapter=types.SimpleNamespace(
             read=lambda: (_ for _ in ()).throw(
-                AssertionError("Observation V2 reread the R07 plant adapter")
+                AssertionError("Observation V3 reread the R07 plant adapter")
             )
         ),
         action_epoch_observation_state=lambda: ready,
@@ -622,6 +720,34 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
         runtime_owner=runtime, record=record
     )
     torch.testing.assert_close(
+        view.actor_rows["motion_racket_pos_error_heading"],
+        torch.tensor([[2.0, -1.0, 3.0], [4.0, 5.0, 6.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.actor_rows["motion_racket_vel_error_heading"],
+        torch.tensor([[4.0, -3.0, 5.0], [6.0, 7.0, 8.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.actor_rows["motion_racket_signed_normal_error_heading"],
+        torch.tensor([[1.0, -1.0, 0.0], [0.0, 1.0, 1.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    torch.testing.assert_close(
+        view.actor_rows["motion_racket_long_axis_error_heading"],
+        torch.tensor([[1.0, 1.0, 0.0], [-1.0, 0.0, 1.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    # The hidden-task row still observes its full-phase mimic error.  These
+    # blocks are not task leakage and must never be zeroed by task visibility.
+    for name, _ in P.MOTION_RACKET_RESIDUAL_LAYOUT_V3:
+        assert view.actor_rows[name][1].ne(0).any(), name
+    torch.testing.assert_close(
         view.actor_rows["racket_target_pos_error_heading"],
         torch.tensor([[0.0, -2.0, 1.0], [0.0, 0.0, 0.0]]),
         atol=1.0e-6,
@@ -638,6 +764,10 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
         torch.tensor([[-2.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
         atol=1.0e-6,
         rtol=0.0,
+    )
+    assert not torch.equal(
+        view.actor_rows["motion_racket_signed_normal_error_heading"][0],
+        view.actor_rows["racket_target_normal_error_heading"][0],
     )
     torch.testing.assert_close(
         view.critic_rows["live_ball_center_rel_root_heading"],
@@ -688,22 +818,23 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     )
     source = O.LeanActionEpochObservationSource(env=env, runtime_owner=runtime)
     policy, critic = source._pack(view, record, common_step=10)
-    assert policy.shape == (2, 203) and policy.dtype == torch.float32
-    assert critic.shape == (2, 219) and critic.dtype == torch.float32
+    assert policy.shape == (2, 215) and policy.dtype == torch.float32
+    assert critic.shape == (2, 231) and critic.dtype == torch.float32
     assert torch.isfinite(policy).all() and torch.isfinite(critic).all()
     torch.testing.assert_close(
-        policy[:, 194:197],
+        policy[:, 206:209],
         torch.tensor([[0.1, 0.125, 0.1], [0.0, 0.0, 0.2]]),
     )
-    torch.testing.assert_close(critic[:, :203], policy)
+    torch.testing.assert_close(critic[:, :215], policy)
     # Task-dependent fields are masked, while next-opportunity and RETIRED
     # phase remain observable and the actor-visible validity bit is false.
-    assert policy[1, 183:196].eq(0).all()
-    assert policy[1, 196].item() == pytest.approx(1.172 / 5.86)
+    assert policy[1, 183:195].ne(0).any()
+    assert policy[1, 195:208].eq(0).all()
+    assert policy[1, 208].item() == pytest.approx(1.172 / 5.86)
     torch.testing.assert_close(
-        policy[1, 197:202], torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0])
+        policy[1, 209:214], torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0])
     )
-    assert policy[1, 202].item() == 0.0
+    assert policy[1, 214].item() == 0.0
 
     # R06 owns its latch hierarchy and scene-slot range.  A malformed row is
     # consumed as no live flight, while the independent peer remains exact.
@@ -785,8 +916,8 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     )
     assert torch.isfinite(reset_policy).all()
     assert torch.isfinite(reset_critic).all()
-    assert reset_critic[0, 216:218].eq(0).all()
-    assert reset_critic[0, 218].item() == 0.0
+    assert reset_critic[0, 228:230].eq(0).all()
+    assert reset_critic[0, 230].item() == 0.0
     assert torch.equal(reset_policy[1], peer_policy)
     assert torch.equal(reset_critic[1], peer_critic)
 
@@ -840,7 +971,7 @@ def test_direct_builder_reads_live_ball_support_and_dwell_without_old_facts(
     )
     assert torch.isfinite(genesis_policy).all()
     assert torch.isfinite(genesis_critic).all()
-    assert genesis_critic[:, 216:219].eq(0).all()
+    assert genesis_critic[:, 228:231].eq(0).all()
 
     # MAX may not wrap into a reset boundary and hide stale chronology.  The
     # malformed row is zeroed and the valid peer remains byte-identical.
@@ -924,14 +1055,14 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
         env=env, runtime_owner=runtime
     )
     assert type(bundle) is O.DiagnosticN2ObservationManagerBundle
-    actor_scale_ptr = bundle.source._actor_scale_v2.data_ptr()
-    critic_scale_ptr = bundle.source._critic_extension_scale_v2.data_ptr()
+    actor_scale_ptr = bundle.source._actor_scale_v3.data_ptr()
+    critic_scale_ptr = bundle.source._critic_extension_scale_v3.data_ptr()
     torch.testing.assert_close(
-        bundle.source._actor_scale_v2,
-        torch.tensor(_hard_coded_actor_scale_v2())[None, :],
+        bundle.source._actor_scale_v3,
+        torch.tensor(_hard_coded_actor_scale_v3())[None, :],
     )
     torch.testing.assert_close(
-        bundle.source._critic_extension_scale_v2,
+        bundle.source._critic_extension_scale_v3,
         torch.tensor(_hard_coded_critic_extension_scale_v2())[None, :],
     )
     env._installed_lean_observation_source = bundle.source
@@ -943,19 +1074,19 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     copied = copy.deepcopy(cfg)
     assert copied["policy"].action_epoch.params == {"group": "policy"}
     assert copied["critic"].action_epoch.params == {"group": "critic"}
-    assert policy_term.func(env, **policy_term.params).shape == (2, 203)
-    assert critic_term.func(env, **critic_term.params).shape == (2, 219)
+    assert policy_term.func(env, **policy_term.params).shape == (2, 215)
+    assert critic_term.func(env, **critic_term.params).shape == (2, 231)
     assert calls == []
 
     env._action_ball_full_mdp_manager_construction_state = "base_managers_complete"
     policy = policy_term.func(env, **policy_term.params)
     critic = critic_term.func(env, **critic_term.params)
-    assert bundle.source._actor_scale_v2.data_ptr() == actor_scale_ptr
-    assert bundle.source._critic_extension_scale_v2.data_ptr() == critic_scale_ptr
+    assert bundle.source._actor_scale_v3.data_ptr() == actor_scale_ptr
+    assert bundle.source._critic_extension_scale_v3.data_ptr() == critic_scale_ptr
     assert calls == [0]
     assert current_calls == [1]
-    assert policy.shape == (2, 203) and torch.all(torch.isfinite(policy))
-    assert critic.shape == (2, 219) and torch.all(torch.isfinite(critic))
+    assert policy.shape == (2, 215) and torch.all(torch.isfinite(policy))
+    assert critic.shape == (2, 231) and torch.all(torch.isfinite(critic))
 
     # A real same-step Epoch commit invalidates the cache even though this
     # zero fault row does not change any packed semantic value.
@@ -969,12 +1100,21 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     assert calls == [0, 1]
     assert current_calls == [1, 2]
 
+    # RecorderManager may request an observation before Motion advances in the
+    # same environment step.  Motion generation, not instrumentation order,
+    # must invalidate that earlier whole-observation cache.
+    parts["motion"]._action_ball_continuous_motion_mutation_version += 1
+    same_step_after_motion = policy_term.func(env, **policy_term.params)
+    torch.testing.assert_close(same_step_after_motion, policy)
+    assert calls == [0, 1, 1]
+    assert current_calls == [1, 2, 2]
+
     # A new control step rebuilds once even if Epoch itself has not mutated.
     env.common_step_counter += 1
     next_step_critic = critic_term.func(env, **critic_term.params)
     torch.testing.assert_close(next_step_critic, critic)
-    assert calls == [0, 1, 1]
-    assert current_calls == [1, 2, 2]
+    assert calls == [0, 1, 1, 1]
+    assert current_calls == [1, 2, 2, 2]
 
     # Independent hard-coded golden: expected order is written here rather
     # than generated from the shared layout under test.
@@ -997,6 +1137,10 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
             torch.nn.functional.one_hot(
                 torch.tensor([1, 4]), num_classes=5
             ).float(),
+            actor["motion_racket_pos_error_heading"],
+            actor["motion_racket_vel_error_heading"],
+            actor["motion_racket_signed_normal_error_heading"],
+            actor["motion_racket_long_axis_error_heading"],
             actor["racket_target_pos_error_heading"],
             actor["racket_target_vel_error_heading"],
             actor["racket_target_normal_error_heading"],
@@ -1010,7 +1154,7 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
         dim=1,
     )
     expected_policy = expected_policy_raw * torch.tensor(
-        _hard_coded_actor_scale_v2()
+        _hard_coded_actor_scale_v3()
     )[None, :]
     torch.testing.assert_close(policy, expected_policy)
     extension = view.critic_rows
@@ -1033,16 +1177,16 @@ def test_shape_probe_then_semantic_pack_reads_current_public_epoch(monkeypatch):
     )[None, :]
     expected_critic = torch.cat((expected_policy, expected_extension), dim=1)
     torch.testing.assert_close(critic, expected_critic)
-    torch.testing.assert_close(critic[:, :203], policy)
+    torch.testing.assert_close(critic[:, :215], policy)
     assert policy.abs().max().item() > 1.0
-    assert bundle.source.semantic_publication_count == 3
+    assert bundle.source.semantic_publication_count == 4
 
     # Poison is checked before the hot cache and cannot return a previously
     # finite observation from the same step.
     epoch.poison_owner_write("r03_strike_fact", 1, owner=r03_owner)
     with pytest.raises(O.LeanObservationError, match="poisoned"):
         policy_term.func(env, **policy_term.params)
-    assert calls == [0, 1, 1]
+    assert calls == [0, 1, 1, 1]
 
 
 def test_packer_ignores_raw_task_owner_facts_and_reward_ledger():
@@ -1075,7 +1219,7 @@ def test_packer_ignores_raw_task_owner_facts_and_reward_ledger():
     phase_changed.phase[1, 0] = E.PHASE_RETIRED
     phased, _ = source._pack(view, phase_changed, common_step=10)
     torch.testing.assert_close(
-        phased[:, 197:202],
+        phased[:, 209:214],
         torch.tensor([[0, 1, 0, 0, 0], [0, 0, 0, 0, 1]]).float(),
     )
 
@@ -1099,7 +1243,7 @@ def test_packer_ignores_raw_task_owner_facts_and_reward_ledger():
     bad_epoch_actor, bad_epoch_critic = source._pack(
         view, epoch_phase_bad, common_step=10
     )
-    assert bad_epoch_actor[0, 197:202].eq(0).all()
+    assert bad_epoch_actor[0, 209:214].eq(0).all()
     assert torch.equal(bad_epoch_actor[1], actor[1])
     assert torch.equal(bad_epoch_critic[1], critic[1])
 
@@ -1135,7 +1279,7 @@ def test_term_rejects_invalid_group_instance_shadow_and_caller_source(monkeypatc
     with pytest.raises(TypeError, match="unexpected keyword argument 'source'"):
         O._term(env, group="policy", source=bundle.source)
 
-    env.__dict__[O.ENV_TERM_METHOD] = lambda **_kwargs: torch.zeros((2, 203))
+    env.__dict__[O.ENV_TERM_METHOD] = lambda **_kwargs: torch.zeros((2, 215))
     with pytest.raises(O.LeanObservationConstructionHold, match="shadowed"):
         O._term(env, group="policy")
 

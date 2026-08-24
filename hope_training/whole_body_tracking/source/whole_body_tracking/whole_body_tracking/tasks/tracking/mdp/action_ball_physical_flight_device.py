@@ -78,7 +78,6 @@ class ActionEpochHostActivityVerdict:
 
     control_step: int
     transport_work: bool
-    keyed_epoch_work: bool
     recovery_epoch_work: bool
 
 
@@ -2720,7 +2719,6 @@ class ActionBallPhysicalFlightDeviceOwner:
         # pre/post boundary.
         self._action_epoch_host_activity_control_step: int | None = None
         self._action_epoch_host_activity_has_work = True
-        self._action_epoch_host_activity_has_keyed_work = True
         self._action_epoch_host_activity_has_recovery_work = True
         self._action_epoch_substep_pair: str | None = None
         self._action_epoch_empty_env_mask = torch.zeros(
@@ -3803,7 +3801,6 @@ class ActionBallPhysicalFlightDeviceOwner:
         # verdict can therefore never leak into a later control step.
         self._action_epoch_host_activity_control_step = None
         self._action_epoch_host_activity_has_work = True
-        self._action_epoch_host_activity_has_keyed_work = True
         self._action_epoch_host_activity_has_recovery_work = True
         motion = self._current_action_epoch_motion_observation()
         current_tick = getattr(motion, "control_tick")
@@ -3861,21 +3858,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             scene_work = scene_activity.any(dim=1)
         transport_work = torch.any(physical_work | r06_work | scene_work)
         epoch_owner = self._action_epoch_owner
-        project_keyed = getattr(
-            epoch_owner, "project_keyed_postphysics_activity_mask", None
-        )
-        if not callable(project_keyed):
-            raise PhysicalEpochIntegrationHold(
-                "ActionEpoch keyed activity projection is absent"
-            )
-        keyed_rows = _tensor(
-            project_keyed(owner=self),
-            label="ActionEpoch keyed activity census",
-            shape=(self.num_envs, self._action_epoch_owner.shot_slot_capacity),
-            dtype=torch.bool,
-            device=self.device,
-        )
-        keyed_epoch_work = torch.any(keyed_rows)
         project_recovery = getattr(
             epoch_owner, "project_recovery_postphysics_activity_mask", None
         )
@@ -3897,10 +3879,9 @@ class ActionBallPhysicalFlightDeviceOwner:
         # Pack all activity facts plus all named fault classes into the one
         # existing scalar.  No second device-to-host synchronization is added.
         summary = transport_work.to(torch.int64)
-        summary += keyed_epoch_work.to(torch.int64) * 2
-        summary += recovery_epoch_work.to(torch.int64) * 4
+        summary += recovery_epoch_work.to(torch.int64) * 2
         for ordinal, (bit, _name) in enumerate(
-            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=3
+            _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
         ):
             present = torch.any(
                 torch.bitwise_and(
@@ -3912,7 +3893,7 @@ class ActionBallPhysicalFlightDeviceOwner:
         fault_names = tuple(
             name
             for ordinal, (_bit, name) in enumerate(
-                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=3
+                _ACTION_EPOCH_RUNTIME_FAULT_NAMES, start=2
             )
             if host_summary & (1 << ordinal)
         )
@@ -3923,9 +3904,8 @@ class ActionBallPhysicalFlightDeviceOwner:
             )
             raise PhysicalEpochIntegrationHold(self._poison_reason)
         self._action_epoch_host_activity_has_work = bool(host_summary & 1)
-        self._action_epoch_host_activity_has_keyed_work = bool(host_summary & 2)
         self._action_epoch_host_activity_has_recovery_work = bool(
-            host_summary & 4
+            host_summary & 2
         )
         self._action_epoch_host_activity_control_step = next_control_step
 
@@ -3945,7 +3925,6 @@ class ActionBallPhysicalFlightDeviceOwner:
         return ActionEpochHostActivityVerdict(
             control_step=control_step,
             transport_work=self._action_epoch_host_activity_has_work,
-            keyed_epoch_work=self._action_epoch_host_activity_has_keyed_work,
             recovery_epoch_work=(
                 self._action_epoch_host_activity_has_recovery_work
             ),
@@ -10632,7 +10611,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             )
             self._action_epoch_host_activity_control_step = None
             self._action_epoch_host_activity_has_work = True
-            self._action_epoch_host_activity_has_keyed_work = True
             self._action_epoch_host_activity_has_recovery_work = True
             self._host_reset_generation_projection_current = False
             self._advance_owner_mutation_version()
@@ -11901,7 +11879,6 @@ class ActionBallPhysicalFlightDeviceOwner:
             self._reset_generation = predicted_reset_generations
             self._action_epoch_host_activity_control_step = None
             self._action_epoch_host_activity_has_work = True
-            self._action_epoch_host_activity_has_keyed_work = True
             self._action_epoch_host_activity_has_recovery_work = True
             self._advance_owner_mutation_version()
         except Exception as exc:

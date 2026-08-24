@@ -193,9 +193,9 @@ def test_full_mdp_rate_probe_keeps_the_typed_cli_budget_authority(monkeypatch):
         ),
     )
     assert train_mod._preflight_action_ball_full_mdp_ppo_cli(
-        {"task": task, "max_iterations": 12_500}
+        {"task": task, "max_iterations": 25_000}
     ) is None
-    with pytest.raises(train_mod._OverrideError, match="code-owned at 12500"):
+    with pytest.raises(train_mod._OverrideError, match="code-owned at 25000"):
         train_mod._preflight_action_ball_full_mdp_ppo_cli(
             {"task": task, "max_iterations": 61}
         )
@@ -768,7 +768,7 @@ def test_pre_gym_binding_uses_only_code_owned_lean_factory(monkeypatch):
         binding.owner_type = object
 
 
-def test_full_mdp_typed_ppo_v4_replaces_only_the_fresh_algo_mapping():
+def test_full_mdp_typed_ppo_v5_replaces_only_the_fresh_algo_mapping():
     legacy = {
         "name": "ppo",
         "runner": {"num_steps_per_env": 24, "max_iterations": 25_000},
@@ -781,14 +781,14 @@ def test_full_mdp_typed_ppo_v4_replaces_only_the_fresh_algo_mapping():
     assert legacy["name"] == "ppo"
     assert legacy["runner"] == {
         "num_steps_per_env": 48,
-        "max_iterations": 12_500,
+        "max_iterations": 25_000,
         "save_interval": 500,
         "empirical_normalization": False,
     }
     assert legacy["policy"] == recipe.policy()
     assert legacy["algorithm"] == recipe.algorithm()
     assert legacy["algorithm"]["lam"] == 0.98
-    assert legacy["algorithm"]["num_mini_batches"] == 8
+    assert legacy["algorithm"]["num_mini_batches"] == 4
 
     class _AgentCfg:
         def to_dict(self):
@@ -798,7 +798,9 @@ def test_full_mdp_typed_ppo_v4_replaces_only_the_fresh_algo_mapping():
                 "algorithm": legacy["algorithm"],
             }
 
-    serialized = train_mod._task_first_agent_recipe(_AgentCfg())
+    serialized = train_mod._task_first_agent_recipe(
+        _AgentCfg(), num_envs=2_048
+    )
     assert serialized["recipe"] == recipe.learning_recipe()
     assert serialized["sha256"] == recipe.learning_recipe_sha256()
 
@@ -808,7 +810,7 @@ def test_full_mdp_ppo_cli_preflight_rejects_competing_schedule_before_kit(
 ):
     cfg = {
         "task": {"action_ball_full_mdp_runtime": True},
-        "max_iterations": 12_500,
+        "max_iterations": 25_000,
     }
     monkeypatch.setattr(
         train_mod,
@@ -818,14 +820,14 @@ def test_full_mdp_ppo_cli_preflight_rejects_competing_schedule_before_kit(
     assert train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg) is None
 
     cfg["max_iterations"] = 5
-    with pytest.raises(train_mod._OverrideError, match="code-owned at 12500"):
+    with pytest.raises(train_mod._OverrideError, match="code-owned at 25000"):
         train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
 
-    cfg["max_iterations"] = 12_500.0
+    cfg["max_iterations"] = 25_000.0
     with pytest.raises(train_mod._OverrideError, match="exact integer"):
         train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
 
-    cfg["max_iterations"] = 12_500
+    cfg["max_iterations"] = 25_000
     monkeypatch.setattr(
         train_mod,
         "_ORIGINAL_TRAINING_ARGV",
@@ -838,6 +840,50 @@ def test_full_mdp_ppo_cli_preflight_rejects_competing_schedule_before_kit(
     )
     with pytest.raises(train_mod._OverrideError, match="nested Hydra PPO"):
         train_mod._preflight_action_ball_full_mdp_ppo_cli(cfg)
+
+
+@pytest.mark.parametrize(
+    "whole_node_override",
+    (
+        "algo.runner={num_steps_per_env:1}",
+        "algo.policy={init_noise_std:1.0}",
+        "algo.algorithm={lam:0.1}",
+        "task.algo={runner:{num_steps_per_env:1}}",
+    ),
+)
+def test_full_mdp_ppo_cli_preflight_rejects_whole_node_overrides(
+    monkeypatch, whole_node_override
+):
+    monkeypatch.setattr(
+        train_mod,
+        "_ORIGINAL_TRAINING_ARGV",
+        ("python", "train.py", "task=FullMdpA", whole_node_override),
+    )
+    with pytest.raises(train_mod._OverrideError, match="nested Hydra PPO"):
+        train_mod._preflight_action_ball_full_mdp_ppo_cli(
+            {
+                "task": {"action_ball_full_mdp_runtime": True},
+                "max_iterations": 25_000,
+            }
+        )
+
+
+def test_full_mdp_ppo_cli_preflight_rejects_resolved_task_algo(monkeypatch):
+    monkeypatch.setattr(
+        train_mod,
+        "_ORIGINAL_TRAINING_ARGV",
+        ("python", "train.py", "task=FullMdpA"),
+    )
+    with pytest.raises(train_mod._OverrideError, match="resolved task.algo"):
+        train_mod._preflight_action_ball_full_mdp_ppo_cli(
+            {
+                "task": {
+                    "action_ball_full_mdp_runtime": True,
+                    "algo": {"entropy_coef": 0.2},
+                },
+                "max_iterations": 25_000,
+            }
+        )
 
 
 def test_legacy_ppo_cli_preflight_does_not_claim_the_typed_recipe(monkeypatch):
@@ -870,7 +916,96 @@ def test_legacy_algo_does_not_load_or_apply_the_full_mdp_recipe(monkeypatch):
 def test_full_mdp_hard_contract_reuses_existing_agent_recipe_serializer():
     source = inspect.getsource(train_mod._build_training_hard_contract)
     assert '"action_ball_full_mdp_ppo_runner_recipe"' in source
-    assert "_task_first_agent_recipe(agent_cfg)" in source
+    assert "num_envs=int(env.num_envs)" in source
+
+
+class _PreGymReached(RuntimeError):
+    def __init__(self, num_envs):
+        super().__init__(str(num_envs))
+        self.num_envs = num_envs
+
+
+def _exercise_full_mdp_num_env_preflight(
+    monkeypatch, *, num_envs, oracle=False
+):
+    class _ImportStub:
+        def __init__(self, **attrs):
+            vars(self).update(attrs)
+
+        def __getattr__(self, _name):
+            return object()
+
+    torch_stub = _ImportStub(
+        backends=_ImportStub(
+            cuda=_ImportStub(matmul=_ImportStub(allow_tf32=False)),
+            cudnn=_ImportStub(allow_tf32=False),
+        )
+    )
+    package_stub = _ImportStub(__file__="focused-test-stub")
+    generic_stub = _ImportStub()
+    real_import = __import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "torch":
+            return torch_stub
+        if name.startswith("whole_body_tracking"):
+            return package_stub if not fromlist else generic_stub
+        if name.startswith(("gymnasium", "isaaclab", "isaaclab_rl")):
+            return generic_stub
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    monkeypatch.setattr(
+        train_mod,
+        "_action_ball_full_mdp_ppo_recipe_module",
+        lambda: types.SimpleNamespace(
+            ACTION_BALL_FULL_MDP_PPO_RECIPE=types.SimpleNamespace(
+                num_envs=2_048
+            )
+        ),
+    )
+
+    def reached_pre_gym(**kwargs):
+        raise _PreGymReached(kwargs["num_envs"])
+
+    monkeypatch.setattr(
+        train_mod,
+        "_resolve_action_ball_full_mdp_pre_gym_binding",
+        reached_pre_gym,
+    )
+
+    class _Cfg(dict):
+        __getattr__ = dict.__getitem__
+
+    task = _Cfg(
+        gym_task="HOPE-PingPong-ActionBall-FullMdpA-AgibotA3-v0",
+        action_ball_full_mdp_runtime=True,
+        action_ball_full_mdp_rate_probe=False,
+        env=_Cfg(num_envs=num_envs),
+    )
+    cfg = _Cfg(task=task, num_envs=num_envs)
+    if oracle:
+        cfg["action_ball_teacher_qdes_oracle_output_path"] = "oracle.json"
+    return train_mod._run_with_environment_close_owner(cfg, object())
+
+
+def test_full_mdp_v5_accepts_only_typed_2048_before_gym(monkeypatch):
+    with pytest.raises(_PreGymReached) as caught:
+        _exercise_full_mdp_num_env_preflight(monkeypatch, num_envs=2_048)
+    assert caught.value.num_envs == 2_048
+
+    with pytest.raises(train_mod._OverrideError, match="code-owned at 2048"):
+        _exercise_full_mdp_num_env_preflight(monkeypatch, num_envs=4_096)
+
+
+def test_full_mdp_oracle_forces_n1_without_v5_training_shape_rejection(
+    monkeypatch,
+):
+    with pytest.raises(_PreGymReached) as caught:
+        _exercise_full_mdp_num_env_preflight(
+            monkeypatch, num_envs=4_096, oracle=True
+        )
+    assert caught.value.num_envs == 1
 
 
 @pytest.mark.parametrize("num_envs", [1, 2, 64, 4096])
@@ -1099,21 +1234,21 @@ def _installed_lean_actor_observation(monkeypatch, binding):
 
         @property
         def group_widths(self):
-            return {"policy": 203, "critic": 219}
+            return {"policy": 215, "critic": 231}
 
     def _term(_env, *, group):
         return (_env, group)
 
-    actor_layout = (("actor_payload", 203),)
+    actor_layout = (("actor_payload", 215),)
     critic_extension = (("critic_extension", 16),)
     lean_observations = types.SimpleNamespace(
         LeanActionEpochObservationSource=_Source,
         _term=_term,
         MANAGER_GROUP_ORDER=("policy", "critic"),
-        ACTOR_LAYOUT_V2=actor_layout,
-        CRITIC_EXTENSION_LAYOUT_V2=critic_extension,
-        ACTOR_WIDTH_V2=203,
-        CRITIC_WIDTH_V2=219,
+        ACTOR_LAYOUT_V3=actor_layout,
+        CRITIC_EXTENSION_LAYOUT_V3=critic_extension,
+        ACTOR_WIDTH_V3=215,
+        CRITIC_WIDTH_V3=231,
         DIAGNOSTIC_UNAUTHORIZED=True,
         LAUNCH_AUTHORIZED=False,
     )
@@ -1145,8 +1280,8 @@ def _installed_lean_actor_observation(monkeypatch, binding):
     )
     env.observation_manager = types.SimpleNamespace(
         active_terms={"policy": ["action_epoch"], "critic": ["action_epoch"]},
-        group_obs_term_dim={"policy": [(203,)], "critic": [(219,)]},
-        group_obs_dim={"policy": (203,), "critic": (219,)},
+        group_obs_term_dim={"policy": [(215,)], "critic": [(231,)]},
+        group_obs_dim={"policy": (215,), "critic": (231,)},
         group_obs_concatenate={"policy": True, "critic": True},
         _group_obs_term_cfgs={
             "policy": [
@@ -1185,9 +1320,9 @@ def _installed_lean_actor_observation(monkeypatch, binding):
             or manager.active_terms
             != {"policy": ["action_epoch"], "critic": ["action_epoch"]}
             or manager.group_obs_term_dim
-            != {"policy": [(203,)], "critic": [(219,)]}
+            != {"policy": [(215,)], "critic": [(231,)]}
             or manager.group_obs_dim
-            != {"policy": (203,), "critic": (219,)}
+            != {"policy": (215,), "critic": (231,)}
             or policy.params != {"group": "policy"}
             or critic.params != {"group": "critic"}
             or supplied_env._action_ball_full_mdp_lean_observation_source
@@ -1203,19 +1338,19 @@ def _installed_lean_actor_observation(monkeypatch, binding):
         ):
             raise RuntimeError("foreign diagnostic observation")
         return {
-            "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
+            "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v3",
             "actor_obs_mode": "action_ball_full_mdp",
-            "actor_obs_total_dim": 203,
+            "actor_obs_total_dim": 215,
             "actor_obs_term_names": ["action_epoch"],
-            "actor_obs_term_dims": [203],
+            "actor_obs_term_dims": [215],
             "critic_obs_contract": (
-                "action_ball_full_mdp_semantic_critic_v2"
+                "action_ball_full_mdp_semantic_critic_v3"
             ),
-            "critic_obs_total_dim": 219,
+            "critic_obs_total_dim": 231,
             "critic_obs_term_names": ["action_epoch"],
-            "critic_obs_term_dims": [219],
+            "critic_obs_term_dims": [231],
             "fresh_full_mdp_observation_kind": (
-                "action_ball_full_mdp_semantic_observation_v2"
+                "action_ball_full_mdp_semantic_observation_v3"
             ),
             "fresh_full_mdp_diagnostic_unauthorized": True,
             "fresh_full_mdp_launch_authorized": False,
@@ -1261,11 +1396,11 @@ def test_diagnostic_actor_contract_uses_only_installed_action_epoch_source(
         )
     )
     assert type(contract) is state.actor_contract_type
-    assert contract.name == "action_ball_full_mdp_semantic_actor_v2"
+    assert contract.name == "action_ball_full_mdp_semantic_actor_v3"
     assert contract.obs_mode == "action_ball_full_mdp"
-    assert contract.total_dim == 203
+    assert contract.total_dim == 215
     assert tuple((term.name, term.dim) for term in contract.terms) == (
-        ("action_epoch", 203),
+        ("action_epoch", 215),
     )
     assert not hasattr(state.parts["r06_landing_outcome"], "capacity_authority")
 
@@ -2043,28 +2178,49 @@ def test_run_source_has_real_callsites_exact_runner_selection_and_no_config_fact
     assert len(runner_type_assignments) == 1
     runner_choice = runner_type_assignments[0].value
     assert isinstance(runner_choice, ast.IfExp)
-    assert ast.unparse(runner_choice.body) == "ActionBallFullMdpRsl3Runner"
-    assert ast.unparse(runner_choice.orelse) == "OnPolicyRunner"
+    assert isinstance(runner_choice.body, ast.Name)
+    assert runner_choice.body.id == "ActionBallFullMdpRsl3Runner"
+    assert isinstance(runner_choice.orelse, ast.Name)
+    assert runner_choice.orelse.id == "OnPolicyRunner"
     runner_keywords = {
-        keyword.arg: ast.unparse(keyword.value)
+        keyword.arg: keyword.value
         for keyword in runner_calls[0].keywords
     }
-    assert runner_keywords["action_ball_full_mdp_runtime_owner"] == (
-        "action_ball_full_mdp_runtime_owner"
-    )
-    assert runner_keywords["action_ball_r10_checkpoint_adapter"] == (
-        "action_ball_r10_checkpoint_adapter"
-    )
-    assert runner_keywords["action_ball_r10_cold_restore_capsule"] == (
-        "action_ball_r10_cold_restore_capsule"
-    )
-    assert runner_keywords["action_ball_full_mdp_run_mode"] == (
-        "None if action_ball_full_mdp_pre_gym_binding is None else "
-        "_ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE"
-    )
-    assert runner_keywords["require_exact_resume_state"] == (
-        "strict_exact_training and (not action_ball_full_mdp_training)"
-    )
+    runtime_owner = runner_keywords["action_ball_full_mdp_runtime_owner"]
+    checkpoint_adapter = runner_keywords["action_ball_r10_checkpoint_adapter"]
+    assert isinstance(runtime_owner, ast.Name)
+    assert runtime_owner.id == "action_ball_full_mdp_runtime_owner"
+    assert isinstance(checkpoint_adapter, ast.Name)
+    assert checkpoint_adapter.id == "action_ball_r10_checkpoint_adapter"
+    cold_restore = runner_keywords["action_ball_r10_cold_restore_capsule"]
+    assert isinstance(cold_restore, ast.Name)
+    assert cold_restore.id == "action_ball_r10_cold_restore_capsule"
+
+    run_mode = runner_keywords["action_ball_full_mdp_run_mode"]
+    assert isinstance(run_mode, ast.IfExp)
+    assert isinstance(run_mode.test, ast.Compare)
+    assert isinstance(run_mode.test.left, ast.Name)
+    assert run_mode.test.left.id == "action_ball_full_mdp_pre_gym_binding"
+    assert len(run_mode.test.ops) == 1
+    assert isinstance(run_mode.test.ops[0], ast.Is)
+    assert len(run_mode.test.comparators) == 1
+    assert isinstance(run_mode.test.comparators[0], ast.Constant)
+    assert run_mode.test.comparators[0].value is None
+    assert isinstance(run_mode.body, ast.Constant)
+    assert run_mode.body.value is None
+    assert isinstance(run_mode.orelse, ast.Name)
+    assert run_mode.orelse.id == "_ACTION_BALL_FULL_MDP_SINGLE_ACTION_LEAN_MODE"
+
+    exact_resume = runner_keywords["require_exact_resume_state"]
+    assert isinstance(exact_resume, ast.BoolOp)
+    assert isinstance(exact_resume.op, ast.And)
+    assert len(exact_resume.values) == 2
+    assert isinstance(exact_resume.values[0], ast.Name)
+    assert exact_resume.values[0].id == "strict_exact_training"
+    assert isinstance(exact_resume.values[1], ast.UnaryOp)
+    assert isinstance(exact_resume.values[1].op, ast.Not)
+    assert isinstance(exact_resume.values[1].operand, ast.Name)
+    assert exact_resume.values[1].operand.id == "action_ball_full_mdp_training"
     assert "_get(cfg, \"full_mdp_runtime_owner_factory\")" not in source
     assert "_get(cfg.task, \"full_mdp_runtime_owner_factory\")" not in source
 

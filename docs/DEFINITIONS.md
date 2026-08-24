@@ -83,7 +83,7 @@ binder会在runner自身的Torch、RSL-RL、WAIT或MJLab import之前把两枚�
 取得commit再通过前一flag显式传入。恢复与调用边界见
 [`setup_local_sync.md`](operations/setup_local_sync.md#bind-the-exact-epa48--rsl-rl-312-site-for-portable-full-a)；
 [`--save-interval=500`](#mujoco-fullmdp-longrun-flags)是当前typed recipe固定的500轮快照周期，另在自然终点
-update `12499`保存。completion seal只证明exact 12,500-update engineering completion；独立consumer另行报告
+update `24999`保存。completion seal只证明exact 25,000-update engineering completion；独立consumer另行报告
 slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，因为73动作、双侧与科学窗口
 报告未闭合。这些flag不授权checkpoint resume、promotion、跨后端matched结论或部署。
 
@@ -96,6 +96,48 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
 
 ## 当前训练与判卷术语
 
+- <a id="diagnostic-unauthorized"></a>**`diagnostic_unauthorized=true` / 仅诊断、无晋级授权**：运行、probe、
+  smoke、host/Pod测试和有限checkpoint只可回答明确登记的工程或学习问题；无论退出码、Reward、wall或局部
+  Gate多好，都不自动授权resume、promotion、正式checkpoint、export、deployment、跨引擎physics parity或
+  真机。缺少formal证据的格继续写`未测`或`Partial`，不能用本旗标把它们升级，也不能把本旗标本身当安全Gate。
+
+- <a id="fullmdp-ppo-v5"></a>**`action_ball_full_mdp_ppo_v5` / FullMDP统一PPO V5配方**：fresh V6
+  learner采用`2048 env × H48 × 25,000 update`、save interval`500`、每轮`5`个learning epoch和`4`个
+  minibatch；继承V4的`gamma=.99`、GAE`lambda=.98`、`entropy_coef=0`、learned`log_std`、fresh
+  `init_noise_std=.05`、adaptive KL且无iteration强制std decay。相对V4的4096/U12500/MB8，
+  总transition=`2,457,600,000`、每minibatch=`24,576` sample和总optimizer step=`500,000`保持；但policy
+  刷新、GAE/KL反馈、WAL与checkpoint样本边界改变，因此不是语义等价性能优化。约`4.8 s/H48`只是待测
+  迭代目标，必须以final exact source的rate probe和短学习canary验收。
+
+- <a id="fullmdp-ppo-v4"></a>**`action_ball_full_mdp_ppo_v4` / FullMDP统一PPO V4配方**：Isaac与
+  MuJoCo Full-A的predecessor typed recipe：`4096 env`、`H=48`、总更新`12,500`、save interval`500`、
+  optimizer每轮`5`个learning epoch和`8`个minibatch、`gamma=.99`、GAE`lambda=.98`、
+  `entropy_coef=0`、learned`log_std`、fresh`init_noise_std=.05`、adaptive KL且没有按iteration强制
+  std decay。`.05`是探索初值，不是安全阈值或性能修复；V3的`.02` checkpoint不得resume到V4，V4也不得
+  resume为V5。当前fresh配方是V5。
+
+- <a id="fullmdp-reward24"></a>**`Reward24` / FullMDP二十四项奖励合同**：一个有序共享真源，包含
+  14项shot lifecycle/task payment、6项通用全身mimic和4项official measured-paddle continuous prior。
+  六项common mimic中两个anchor项不变，另外四个body-average项排除持拍腕；四项prior直接约束官方拍心
+  位置、point-consistent速度、selected physical hitting-face法向与mesh-bound长轴，weight=`1/1/1/.5`、Cauchy width=
+  `.70 m / 4 mps / pi rad / 1 rad`，strike window不降权。动作选择后按`mount_normal_sign`取得physical
+  face；只有reset-ready使用canonical raw `+Y`。它与actor task tail的raw-A目标残差不是同一字段。
+  它补的是mimic→hit的连续控制桥，不新增contact oracle、actor authority或安全Gate；真实接触/落点仍只由
+  lifecycle事实判定。
+
+- <a id="fullmdp-v6-candidate"></a>**`fullmdp-a-h48-v6-*` / FullMDP第六批最小学习闭环候选**：
+  2026-08-25以PPO V5、Reward24、Observation V3、四次真实cadence、terminal-overlap跨writer合成、
+  milestone schema7具名slice与Mu native-Warp keepout为核心的fresh-only branch lineage。`9d333b0b`
+  （语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；最终exact source、Pod重验和fresh学习
+  尚未闭合，所以不是live source，也不表示第六课程Stage、checkpoint兼容、promotion、physics parity或
+  部署授权。
+
+- <a id="fullmdp-rate-probe"></a>**FullMDP 61-update rate probe / FullMDP六十一轮吞吐探针**：按当前
+  recipe固定`2048 env × H48`，使用profiler-off的`10`轮warm-up + `50`轮measured + `1`轮tail诊断预算。
+  既有`ba7225b2`的4096探针只作predecessor历史基线。只报告测量窗
+  p50/p90、transitions/s和必要strata；一次update、带profile窗口或旧run平均不能代签。探针保持
+  `diagnostic_unauthorized=true`，不取代25000长跑、学习质量或physics parity。
+
 - <a id="mujoco-warp-epa48-fork"></a>**MuJoCo-Warp EPA48 fork / MuJoCo-Warp凸体穿透算法48边界窄分支**：
   EPA是Expanding Polytope Algorithm（扩展多面体算法），MuJoCo-Warp用它计算凸体穿透法向与深度；
   horizon是算法每轮可保留的边界边缓冲，本分支只把上限`24`改为`48`，并用PEP 440 local version
@@ -104,38 +146,51 @@ slot0业务链是否真实出现，但本代`full_a_complete`固定为`false`，
   instrumented build或ASan（AddressSanitizer，地址越界检测器）。tracked patch/build receipt只证明
   supply chain，不证明24-fail/48-pass、physics parity或训练授权。
 
-- <a id="fullmdp-ppo-v3"></a>**`action_ball_full_mdp_ppo_v3` / FullMDP统一PPO V3配方**：Isaac与
+- <a id="fullmdp-ppo-v3"></a>**`action_ball_full_mdp_ppo_v3` / FullMDP统一PPO V3历史配方**：Isaac与
   MuJoCo Full-A共同读取的typed recipe：`H=48`、总更新`12,500`、`save_interval=500`、每次
   optimizer做`5`个learning epoch和`8`个minibatch、`gamma=0.99`、GAE
   `lambda=0.98`、fresh `init_noise_std=0.02`、learned `log_std`、`entropy_coef=0`、
   `empirical_normalization=false`。V2的永久`entropy_coef=.01`会在每个minibatch给每个`log_std`施加
   与任务质量无关的固定上推梯度；现役V2 MuJoCo从`.02`涨到大于`1`后已破坏balance，因此V3直接删除这项
   无条件噪声奖励，不增加iteration/phase schedule、clamp或新Gate。学习配方hash不含总预算/保存频率，完整执行hash
-  另含二者；详细值以typed recipe为准。`H=48`是算法取舍和当前合同，不是“每update 6秒”的性能承诺。
+  另含二者；详细值以typed recipe为准。`H=48`是算法取舍，不是“每update 6秒”的性能承诺；当前配方是V5。
 - <a id="fullmdp-correction-lineage-v4"></a>**`fullmdp-a-h48-v4-*` / FullMDP第四批实现纠错lineage**：
   2026-08-23在V3真实训练与结构审计后启动的fresh-only namespace族，用来验证one-shot Reward、exact launch、
   四次episode内可完成cadence、完整rollout有限性和run-owned cache/lock等实现修复。这里的`v4`只编号fresh
   source/run谱系；学习算法仍是[`action_ball_full_mdp_ppo_v3`](#fullmdp-ppo-v3)，Observation仍是203/219 V2，
   不表示PPO V4、课程第四阶段、checkpoint兼容、promotion或部署授权。每个失败root/namespace一次性消费，
   修复后必须新commit、新root、新namespace，不得hot-patch、retry或resume。
-- <a id="fullmdp-optimization-lineage-v5"></a>**`fullmdp-a-h48-v5-*` / FullMDP第五批热路与plant合同branch candidate**：
+- <a id="fullmdp-optimization-lineage-v5"></a>**`fullmdp-a-h48-v5-*` / FullMDP第五批热路与plant合同历史lineage**：
   2026-08-23基于V4继续的fresh-only诊断候选谱系；只收窄不改学习语义的hot-path减法与
   [`plant定位/身份分层`](#mujoco-fullmdp-plant-binding)，PPO仍是V3 H48，Observation仍是203/219 V2。
-  MuJoCo per-update evidence/terminal completion/consumer summary版本分别是exact `5/5/4`；新版本携带
-  path-free [`runtime_stack`](#mujoco-fullmdp-runtime-stack)与plant identity，不与V4的`4/4/3`伪兼容。
+  MuJoCo evidence wire在该历史lineage内多次显式升版；早期`5/5/4`与V4的`4/4/3`均只按各自source解析，
+  不与当前`9/5/6`伪兼容。V5引入path-free [`runtime_stack`](#mujoco-fullmdp-runtime-stack)与plant identity。
   V5也修合法payment-before-close、launch-before-playback、exact publication join、具名row fault及negative-face
   normal，并删除可证伪的热路冗余。`v5`只是source/run lineage编号，不是
-  PPO V5、已采用配方、ready结论、promotion或真机授权；exact Pod fresh real运行未闭合前只能称branch candidate。
+  PPO V5、现役配方、ready结论、promotion或真机授权；当前执行由V6候选取代，V5只保留只读证据。
 - <a id="fullmdp-ppo-v2"></a>**`action_ball_full_mdp_ppo_v2` / FullMDP统一PPO V2历史配方**：与V3的
   H48、预算、GAE和optimizer分组相同，但使用永久`entropy_coef=.01`；已由V3取代，只用于解释历史run，
   不得resume或作为当前学习证据。
-- <a id="fullmdp-semantic-observation-v2"></a>**FullMDP semantic Observation V2 / FullMDP语义观测V2**：
+- <a id="fullmdp-semantic-observation-v2"></a>**FullMDP semantic Observation V2 / FullMDP语义观测V2基线**：
   `action_ball_full_mdp_semantic_actor_v2`为203维actor，
   `action_ball_full_mdp_semantic_critic_v2`为219维critic；逐字段静态scale属于ABI，关闭经验归一化。
   它增加最小floating-root位置/heading/COM速度、删除raw task与控制账本，只声称减少balance alias，
-  不声称已证明Markov或真机ready。唯一完整顺序、scale和可观测来源见
-  [`policy_observation_action.md`](interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v2-actor-203--critic-219)；
+  不声称已证明Markov或真机ready。Reward24加入独立measured-paddle teacher后，V2留下该Reward source未
+  直接actor-visible的representation gap，已由V3取代；203/219只用于旧checkpoint ABI与后续paired
+  control，不得作为fresh fallback。
+  V2唯一完整顺序、scale和可观测来源见
+  [`policy_observation_action.md`](interfaces/policy_observation_action.md#historicalcontrol-fullmdp-semantic-observation-v2-actor-203--critic-219)；
   本表不复制第二份布局。
+
+- <a id="fullmdp-semantic-observation-v3"></a>**FullMDP semantic Observation V3 / FullMDP语义观测V3**：
+  `action_ball_full_mdp_semantic_actor_v3`为215维actor，critic是该215维exact prefix加不变16维privileged
+  suffix，共231维。在旧common183与task tail之间插入四组3维、全phase、不按`task_valid` mask的heading
+  residual：同一measured Motion teacher减去achieved paddle的site position、point velocity、signed
+  physical face和long axis。它关闭Reward24 source未直接actor-visible的representation gap，避免MLP从q/dq重学
+  measured-vs-achieved FK/Jacobian；当前没有枚举exact相同203向量却不同Reward/action的逐row碰撞，因此不
+  冒充严格Markov证明，也不宣称零接触唯一根因、收敛或部署验证；不加入raw ball/
+  aim/rate/history/action ID。唯一完整顺序、scale、符号与可观测来源见
+  [`policy_observation_action.md`](interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)。
 
 - **FullMDP RSL3 adapter / FullMDP RSL3优化边界适配器**：不复制RSL-RL3 rollout/storage/env-step，
   只包住真实零参数`alg.update()`，把FullMDP的pre-optimizer freeze、post-update summary、durable WAL与

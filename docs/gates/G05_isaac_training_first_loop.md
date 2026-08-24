@@ -2,7 +2,23 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
-**2026-08-23 FullMDP V5 clean Isaac当前摘要（Gate仍`Partial`）：**live run的clean且已push source为
+## 2026-08-25 FullMDP V6 Isaac候选（仍`Partial`）
+
+fresh候选采用[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)、
+[`Reward24`](../DEFINITIONS.md#fullmdp-reward24)和
+[`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3) `215/231`；final exact source SHA尚未
+冻结。四个due与耗尽clock、schema7具名slice、terminal-overlap跨writer合成及4096 predecessor Pod
+反例/receipt只认[课程真源](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)和
+[性能真源](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。
+pre-V3 4096 probe只关闭predecessor runtime路径；PPO V5 2048 exact rate、短学习canary、连续ACK和阶段
+分母仍`未测`。
+
+旧V5能够改善balance却未闭合mimic→contact；新候选必须fresh验证balance→mimic→hit→landing。上一阶段
+开始基本成形时下一阶段应已有自然非零分母，但`ACCEPT/contact/landing`都不是启动或安全Gate。Gate只保留
+finite、plant terminal、full-key/generation、optimizer与durable WAL/fsync/ACK等独立事实边界。G05继续
+`Partial`且`diagnostic_unauthorized=true`，不授权resume、promotion、export、部署或真机。
+
+**HISTORICAL / FROZEN — 2026-08-23 FullMDP V5 clean Isaac摘要（Gate仍`Partial`）：**live run的clean且已push source为
 `39f9481950a660e198dedac7fd402806d648906b`。exact Pod broad CPU/ABI回归为
 `792 passed, 57 skipped, 0 failed`；同一clean source另做runtime focused重跑为`77 passed, 0 failed`，
 两者不是可相加的unique测试总数。GPU组件证据为projection `4/0`、selected-rubber `27/0`和runner

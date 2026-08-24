@@ -114,10 +114,38 @@ grant formal motion, export, deployment or robot authority.
 Runtime tracking of measured site position, point velocity, signed face and the corrected long axis
 is the intended wrist teacher, while all three right-wrist joints remain policy actions. “Free wrist
 from body mimic” means generic wrist body position/orientation/velocity imitation is removed; it does
-not mean the wrist is untrained. The direct measured rigid-paddle reward remains low-weight over the
-full clip, including the strike window, so it teaches preparation, impact, follow-through and twist.
-The strike-window ball-task target is the much higher-weight master on shared coordinates. Real
-racket mass/CoM/inertia is a separate physics-calibration gate.
+not mean the wrist is untrained. The direct measured rigid-paddle reward remains active over the full
+clip, including the strike window, so it teaches preparation, impact, follow-through and twist. The
+one-shot ball lifecycle remains the authority for actual contact and landing quality. Real racket
+mass/CoM/inertia is a separate physics-calibration gate.
+
+### Current FullMDP measured-paddle prior
+
+[`Reward24`](../DEFINITIONS.md#fullmdp-reward24) keeps two common anchor terms, removes
+`right_wrist_yaw_Link` from the other four body-imitation averages, and gives the held racket four
+direct Cauchy channels from the same measured motion row:
+
+| Channel | Weight | Width | Geometry identity |
+| --- | ---: | ---: | --- |
+| official site position | `1.0` | `.70 m` | canonical control point `S` |
+| official site point velocity | `1.0` | `4.0 m/s` | point-consistent `v_S`, not body COM velocity |
+| selected physical hitting-face normal | `1.0` | `pi rad` | playback applies the selected action's `mount_normal_sign` to achieved raw `+Y` and compares with the same signed measured teacher; reset-ready alone uses canonical raw `+Y` |
+| corrected racket long axis | `.5` | `1.0 rad` | mesh-bound `(local +X + local +Z)/sqrt(2)` axis |
+
+The four-channel maximum is `3.5`, versus `5.0` across the six common mimic terms. This is intentionally
+material: the older `.20/.20/.20/.10` coefficients only made sense when the common body block was
+also globally scaled by `.15`; retaining those values beside unit-scale body terms diluted the wrist
+bridge by about `6.7x`. The current prior does not down-weight inside the strike window because the
+measured motion and lifecycle target describe the same racket state there. Reward24 itself publishes
+no observation, contact oracle, owner or safety Gate; it removes an underconstrained imitation
+average. Separately, the actor receives
+[`Observation V3`](policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)'s
+same-producer teacher-minus-achieved 12-D paddle residual; this is the minimal source-closure for the
+Reward state, not a second FK or a sim-only oracle. Its signed-normal channel follows exactly the
+ready/playback convention in the table and never applies `mount_normal_sign` to the already-signed
+teacher twice. This motion normal is not the actor task tail's raw-A target residual. Actual selected-rubber
+contact still requires the signed physical-B identity below, and slot0 sign`+1` cannot validate
+negative-sign actions.
 
 ## Signed face identity is not an oriented plane
 

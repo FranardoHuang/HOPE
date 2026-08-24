@@ -938,10 +938,26 @@ def _stage1_aligned_clip_measured_racket_target(
     """Materialize one cached four-channel selected-motion paddle target."""
 
     token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
-    cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
-    if type(token) is int and cached is not None and cached[0] == token:
-        return cached[1]
     motion = cmd._motion()
+    mutation_generation = getattr(
+        motion, "_action_ball_continuous_motion_mutation_version", None
+    )
+    # RewardManager runs before Motion advances, while the direct observation
+    # producer runs afterwards without necessarily changing common_step.  The
+    # Motion host high-water is advanced after its live tensor mutation and is
+    # already a plain int, so this identity adds neither a kernel nor D2H.
+    cache_identity = (
+        (token, mutation_generation)
+        if type(token) is int and type(mutation_generation) is int
+        else token
+    )
+    cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
+    if (
+        type(token) is int
+        and cached is not None
+        and cached[0] == cache_identity
+    ):
+        return cached[1]
     safe_step_selector = getattr(
         motion, "_action_ball_full_mdp_safe_pose_reference_steps", None
     )
@@ -961,7 +977,7 @@ def _stage1_aligned_clip_measured_racket_target(
         )
     measured = _stage1_aligned_clip_racket_target_at_steps(cmd, current)
     if type(token) is int:
-        cmd._stage1_clip_site_target_cache = (token, measured)
+        cmd._stage1_clip_site_target_cache = (cache_identity, measured)
     return measured
 
 
@@ -1017,7 +1033,20 @@ def stage1_aligned_clip_site_target_now(
     the three blocks at concatenation time, but must not independently reconstruct their geometry.
     """
 
-    return _stage1_aligned_clip_site_target(cmd)
+    return stage1_aligned_clip_racket_target_now(cmd)[:3]
+
+
+def stage1_aligned_clip_racket_target_now(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Public full-phase measured paddle teacher used by reward and observation.
+
+    Tuple order is ``(position, signed normal, point velocity, long axis)``.
+    Consumers must use this selected ready/playback producer instead of
+    independently reconstructing paddle geometry from robot FK.
+    """
+
+    return _stage1_aligned_clip_racket_target(cmd)
 
 
 def stage1_aligned_clip_site_target_at_reference_hit(
@@ -1081,6 +1110,14 @@ def _stage1_actual_face_normal(cmd: RacketTargetCommand) -> torch.Tensor:
     if raw.device != signed.device or raw.dtype != signed.dtype:
         raise RuntimeError("raw and signed actual paddle faces changed ABI")
     return torch.where(wait[:, None], raw, signed)
+
+
+def stage1_actual_racket_face_normal_now(
+    cmd: RacketTargetCommand,
+) -> torch.Tensor:
+    """Public actual face in the same signed/ready convention as the teacher."""
+
+    return _stage1_actual_face_normal(cmd)
 
 
 def stage1_clip_racket_tracking_errors(
@@ -1200,7 +1237,7 @@ def motion_racket_position_tracking_cauchy(
     """Measured-paddle position imitation, optionally attenuated at ball contact."""
 
     cmd = _cmd(env, command_name)
-    target_pos, _, _ = _stage1_aligned_clip_site_target(cmd)
+    target_pos, _, _, _ = stage1_aligned_clip_racket_target_now(cmd)
     error = torch.linalg.vector_norm(cmd.racket_pos_w - target_pos, dim=-1)
     raw = _cauchy_tracking_kernel(error, std)
     return _scale_motion_racket_prior_in_strike_window(
@@ -1217,7 +1254,7 @@ def motion_racket_velocity_tracking_cauchy(
     """Measured-paddle site-velocity imitation, optionally attenuated at ball contact."""
 
     cmd = _cmd(env, command_name)
-    _, _, target_velocity = _stage1_aligned_clip_site_target(cmd)
+    _, _, target_velocity, _ = stage1_aligned_clip_racket_target_now(cmd)
     error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - target_velocity, dim=-1)
     raw = _cauchy_tracking_kernel(error, std)
     return _scale_motion_racket_prior_in_strike_window(
@@ -1234,7 +1271,7 @@ def motion_racket_normal_tracking_cauchy(
     """Measured physical-face imitation, optionally attenuated at ball contact."""
 
     cmd = _cmd(env, command_name)
-    _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
+    _, target_normal, _, _ = stage1_aligned_clip_racket_target_now(cmd)
     cosine = torch.sum(
         _stage1_actual_face_normal(cmd) * target_normal, dim=-1
     ).clamp(-1.0, 1.0)
@@ -1254,7 +1291,7 @@ def motion_racket_long_axis_tracking_cauchy(
     """Measured butt-to-blade imitation; closes wrist twist left invisible by face normal."""
 
     cmd = _cmd(env, command_name)
-    target_long_axis = _stage1_aligned_clip_long_axis_target(cmd)
+    _, _, _, target_long_axis = stage1_aligned_clip_racket_target_now(cmd)
     cosine = torch.sum(cmd.racket_long_axis_w * target_long_axis, dim=-1).clamp(-1.0, 1.0)
     raw = _cauchy_tracking_kernel(torch.acos(cosine), std)
     return _scale_motion_racket_prior_in_strike_window(

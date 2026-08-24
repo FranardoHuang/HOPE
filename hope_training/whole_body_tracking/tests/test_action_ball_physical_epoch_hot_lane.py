@@ -134,11 +134,6 @@ def _physical_owner(device: torch.device, *, num_envs: int = 2):
     )
     owner._action_epoch_owner = types.SimpleNamespace(
         shot_slot_capacity=1,
-        project_keyed_postphysics_activity_mask=(
-            lambda *, owner: torch.zeros(
-                (num_envs, 1), dtype=torch.bool, device=device
-            )
-        ),
         project_recovery_postphysics_activity_mask=(
             lambda *, owner, motion_cadence_tick: torch.zeros(
                 (num_envs, 1), dtype=torch.bool, device=device
@@ -269,14 +264,6 @@ class _EpochLaunchStub:
                 }
             ),
             publication_ordinal=selected(self.record.publication_ordinal),
-        )
-
-    def project_keyed_postphysics_activity_mask(self, *, owner):
-        assert owner is self.owner
-        return torch.ones(
-            (self.owner.num_envs, self.shot_slot_capacity),
-            dtype=torch.bool,
-            device=self.owner.device,
         )
 
     def project_recovery_postphysics_activity_mask(
@@ -490,7 +477,7 @@ def test_r06_live_row_forces_dense_activity_when_physical_is_empty():
     assert owner._action_epoch_host_activity_has_work is True
 
 
-def test_host_activity_verdict_keeps_transport_and_keyed_facts_distinct():
+def test_host_activity_verdict_keeps_transport_and_recovery_facts_distinct():
     idle, _scene = _physical_owner(torch.device("cpu"))
     assert idle._fixed_flight_slot_grid.is_contiguous()
     idle._r06_owner = types.SimpleNamespace(
@@ -500,29 +487,24 @@ def test_host_activity_verdict_keeps_transport_and_keyed_facts_distinct():
     idle_verdict = idle.action_epoch_host_activity_verdict(control_step=1)
     assert type(idle_verdict) is physical.ActionEpochHostActivityVerdict
     assert idle_verdict.transport_work is False
-    assert idle_verdict.keyed_epoch_work is False
     assert idle_verdict.recovery_epoch_work is False
 
-    retired, _scene = _physical_owner(torch.device("cpu"))
-    retired._r06_owner = types.SimpleNamespace(
+    recovery, _scene = _physical_owner(torch.device("cpu"))
+    recovery._r06_owner = types.SimpleNamespace(
         flight_state=torch.zeros((2, 2), dtype=torch.int8)
     )
-    retired._action_epoch_owner = types.SimpleNamespace(
+    recovery._action_epoch_owner = types.SimpleNamespace(
         shot_slot_capacity=1,
-        project_keyed_postphysics_activity_mask=(
-            lambda *, owner: torch.ones((2, 1), dtype=torch.bool)
-        ),
         project_recovery_postphysics_activity_mask=(
-            lambda *, owner, motion_cadence_tick: torch.zeros(
+            lambda *, owner, motion_cadence_tick: torch.ones(
                 (2, 1), dtype=torch.bool
             )
         ),
     )
-    retired.refresh_action_epoch_host_activity(next_control_step=1)
-    retired_verdict = retired.action_epoch_host_activity_verdict(control_step=1)
-    assert retired_verdict.transport_work is False
-    assert retired_verdict.keyed_epoch_work is True
-    assert retired_verdict.recovery_epoch_work is False
+    recovery.refresh_action_epoch_host_activity(next_control_step=1)
+    recovery_verdict = recovery.action_epoch_host_activity_verdict(control_step=1)
+    assert recovery_verdict.transport_work is False
+    assert recovery_verdict.recovery_epoch_work is True
 
 
 def test_dense_fact_arm_reuses_the_construction_owned_contiguous_slot_grid(
@@ -560,13 +542,8 @@ def test_dense_fact_arm_reuses_the_construction_owned_contiguous_slot_grid(
     assert owner._action_epoch_active_physics_fact_allocation is None
 
 
-@pytest.mark.parametrize(
-    ("keyed", "recovery"),
-    ((False, False), (True, False), (True, True)),
-)
-def test_host_activity_packs_keyed_and_recovery_bits_in_one_sync(
-    keyed, recovery
-):
+@pytest.mark.parametrize("recovery", (False, True))
+def test_host_activity_packs_recovery_bit_in_one_sync(recovery):
     owner, _scene = _physical_owner(torch.device("cpu"))
     owner._r06_owner = types.SimpleNamespace(
         flight_state=torch.zeros((2, 2), dtype=torch.int8)
@@ -581,9 +558,6 @@ def test_host_activity_packs_keyed_and_recovery_bits_in_one_sync(
 
     owner._action_epoch_owner = types.SimpleNamespace(
         shot_slot_capacity=1,
-        project_keyed_postphysics_activity_mask=(
-            lambda *, owner: torch.full((2, 1), keyed, dtype=torch.bool)
-        ),
         project_recovery_postphysics_activity_mask=project_recovery,
     )
 
@@ -595,7 +569,6 @@ def test_host_activity_packs_keyed_and_recovery_bits_in_one_sync(
     verdict = owner.action_epoch_host_activity_verdict(control_step=401)
 
     assert verdict.transport_work is False
-    assert verdict.keyed_epoch_work is keyed
     assert verdict.recovery_epoch_work is recovery
     assert len(recovery_calls) == 1
     assert recovery_calls[0][0] is owner
@@ -604,7 +577,7 @@ def test_host_activity_packs_keyed_and_recovery_bits_in_one_sync(
     )
 
 
-def test_keyed_activity_projection_failure_invalidates_cache_fail_dense():
+def test_recovery_activity_projection_failure_invalidates_cache_fail_dense():
     owner, _scene = _physical_owner(torch.device("cpu"))
     owner._r06_owner = types.SimpleNamespace(
         flight_state=torch.zeros((2, 2), dtype=torch.int8)
@@ -615,17 +588,16 @@ def test_keyed_activity_projection_failure_invalidates_cache_fail_dense():
     ).transport_work is False
     owner._last_postphysics_exact_stamp = (1, 0, 1, 1, 1)
 
-    def fail_projection(*, owner):
-        raise RuntimeError("keyed activity failure")
+    def fail_projection(*, owner, motion_cadence_tick):
+        raise RuntimeError("recovery activity failure")
 
-    owner._action_epoch_owner.project_keyed_postphysics_activity_mask = (
+    owner._action_epoch_owner.project_recovery_postphysics_activity_mask = (
         fail_projection
     )
-    with pytest.raises(RuntimeError, match="keyed activity failure"):
+    with pytest.raises(RuntimeError, match="recovery activity failure"):
         owner.refresh_action_epoch_host_activity(next_control_step=2)
     assert owner._action_epoch_host_activity_control_step is None
     assert owner._action_epoch_host_activity_has_work is True
-    assert owner._action_epoch_host_activity_has_keyed_work is True
     assert owner._action_epoch_host_activity_has_recovery_work is True
     with pytest.raises(
         physical.PhysicalEpochIntegrationHold, match="absent, stale, or replayed"
@@ -782,7 +754,6 @@ def test_reset_restore_and_checkpoint_boundaries_invalidate_or_reject_idle_cache
     invalidation = (
         "self._action_epoch_host_activity_control_step = None",
         "self._action_epoch_host_activity_has_work = True",
-        "self._action_epoch_host_activity_has_keyed_work = True",
         "self._action_epoch_host_activity_has_recovery_work = True",
     )
     for method in (

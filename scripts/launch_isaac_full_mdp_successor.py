@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,10 @@ WORKSPACE_ROOT = Path("/workspace")
 NVIDIA_SMI = Path("/usr/bin/nvidia-smi")
 TASKSET = Path("/usr/bin/taskset")
 TRAIN_RELATIVE = Path("hope_training/whole_body_tracking/scripts/train.py")
+PPO_RECIPE_RELATIVE = Path(
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "action_ball_full_mdp_ppo_recipe.py"
+)
 KIT_LAUNCHER_RELATIVE = Path(
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
@@ -40,24 +45,153 @@ LD_LIBRARY_PATH = (
     "x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e"
 )
 RATE_PROBE_COMPLETION_TIMEOUT_S = 7200
-ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-RATE_PROBE_BUDGET_RE = re.compile(
-    r"FULLMDP_H48_RATE_PROBE:.*\bupdates=([0-9]+)\s+"
-    r"warmup=([0-9]+)\s+measured=([0-9]+)\s+tail=([0-9]+)(?:\s|$)"
+RATE_PROBE_WARMUP_UPDATES = 10
+RATE_PROBE_MEASURED_UPDATES = 50
+RATE_PROBE_TAIL_UPDATES = 1
+RATE_PROBE_NUM_UPDATES = (
+    RATE_PROBE_WARMUP_UPDATES
+    + RATE_PROBE_MEASURED_UPDATES
+    + RATE_PROBE_TAIL_UPDATES
 )
+RATE_PROBE_BUDGET = (
+    RATE_PROBE_NUM_UPDATES,
+    RATE_PROBE_WARMUP_UPDATES,
+    RATE_PROBE_MEASURED_UPDATES,
+    RATE_PROBE_TAIL_UPDATES,
+)
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+RATE_PROBE_MARKER_TOKEN = "FULLMDP_H48_RATE_PROBE:"
+PPO_RECIPE_MARKER_TOKEN = "full-MDP PPO recipe:"
 LEARNING_ITERATION_RE = re.compile(
     r"^\s*Learning iteration\s+([0-9]+)/([0-9]+)\s*$"
 )
 ITERATION_TIME_RE = re.compile(
     r"^\s*Iteration time:\s*([0-9]+(?:\.[0-9]+)?)s\s*$"
 )
-RECIPE_SHA256_RE = re.compile(
-    r"learning_recipe_sha256=([0-9a-f]{64})(?:\s|$)"
-)
 
 
 class LaunchError(RuntimeError):
     pass
+
+
+def _ppo_recipe_module():
+    """Load the dependency-free typed recipe from this exact checkout."""
+
+    source = (REPO_ROOT / PPO_RECIPE_RELATIVE).resolve()
+    name = "_hope_isaac_full_mdp_ppo_recipe"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise LaunchError("cached FullMDP PPO recipe origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise LaunchError("cannot load FullMDP PPO recipe")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+FULL_MDP_PPO_RECIPE = (
+    _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
+)
+
+
+def _canonical_payload_sha256(payload: dict[str, object]) -> str:
+    body = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _rate_execution_recipe(
+    *,
+    num_envs: int = FULL_MDP_PPO_RECIPE.num_envs,
+    num_steps_per_env: int = FULL_MDP_PPO_RECIPE.num_steps_per_env,
+    max_iterations: int = RATE_PROBE_NUM_UPDATES,
+    save_interval: int = FULL_MDP_PPO_RECIPE.save_interval,
+) -> dict[str, object]:
+    """Return the backend-neutral, actual finite rate execution identity."""
+
+    effective_runner = {
+        "num_envs": num_envs,
+        "num_steps_per_env": num_steps_per_env,
+        "max_iterations": max_iterations,
+        "save_interval": save_interval,
+    }
+    candidate_runner = {
+        "num_envs": FULL_MDP_PPO_RECIPE.num_envs,
+        "num_steps_per_env": FULL_MDP_PPO_RECIPE.num_steps_per_env,
+        "max_iterations": FULL_MDP_PPO_RECIPE.max_iterations,
+        "save_interval": FULL_MDP_PPO_RECIPE.save_interval,
+    }
+    return {
+        "schema_version": 1,
+        "kind": "action_ball_full_mdp_h48_rate_execution_v1",
+        "candidate_production_execution_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE.recipe_sha256()
+        ),
+        "learning_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+        ),
+        "effective_runner": effective_runner,
+        "runner_overrides": {
+            name: {
+                "candidate_production": candidate_runner[name],
+                "rate_execution": effective_runner[name],
+            }
+            for name in candidate_runner
+            if candidate_runner[name] != effective_runner[name]
+        },
+        "diagnostic_overrides": {
+            "warmup_updates": RATE_PROBE_WARMUP_UPDATES,
+            "measured_updates": RATE_PROBE_MEASURED_UPDATES,
+            "tail_updates": RATE_PROBE_TAIL_UPDATES,
+            "profiler_enabled": False,
+            "diagnostic_unauthorized": True,
+            "formal_evidence": False,
+            "checkpoint_authority": False,
+            "resume_authority": False,
+        },
+    }
+
+
+def _expected_rate_probe_marker() -> str:
+    return (
+        "[train.py] FULLMDP_H48_RATE_PROBE: diagnostic_unauthorized=true "
+        f"updates={RATE_PROBE_NUM_UPDATES} "
+        f"warmup={RATE_PROBE_WARMUP_UPDATES} "
+        f"measured={RATE_PROBE_MEASURED_UPDATES} "
+        f"tail={RATE_PROBE_TAIL_UPDATES} "
+        "profiler=off formal_evidence=false checkpoint_authority=false"
+    )
+
+
+def _expected_ppo_recipe_marker() -> str:
+    recipe = FULL_MDP_PPO_RECIPE
+    return (
+        "[train.py] full-MDP PPO recipe: "
+        f"kind={recipe.kind} "
+        f"N={recipe.num_envs} "
+        f"H={recipe.num_steps_per_env} "
+        f"updates={recipe.max_iterations} "
+        f"save={recipe.save_interval} "
+        f"epochs={recipe.num_learning_epochs} "
+        f"minibatches={recipe.num_mini_batches} "
+        f"gamma={recipe.gamma} "
+        f"lambda={recipe.lam} "
+        "effective_normalization=false "
+        f"learning_recipe_sha256={recipe.learning_recipe_sha256()}"
+    )
 
 
 def _run_text(argv: list[str], label: str) -> str:
@@ -338,7 +472,7 @@ def _child_argv(
         "logger=tensorboard",
         "device=cuda:0",
         "seed=0",
-        "num_envs=4096",
+        f"num_envs={FULL_MDP_PPO_RECIPE.num_envs}",
         f"run_name={namespace}-DIAGNOSTIC_UNAUTHORIZED",
         "checkpoint_path=null",
         "checkpoint_tolerant=false",
@@ -607,15 +741,10 @@ def _rate_probe_payload(
     except OSError as exc:
         raise LaunchError("cannot read completed diagnostic rate log") from exc
     lines = [ANSI_RE.sub("", line) for line in raw.splitlines()]
-    budgets: set[tuple[int, int, int, int]] = set()
     iteration_ids: list[int] = []
     iteration_totals: list[int] = []
     update_seconds: list[float] = []
-    recipe_sha256: set[str] = set()
     for line in lines:
-        match = RATE_PROBE_BUDGET_RE.search(line)
-        if match is not None:
-            budgets.add(tuple(int(value) for value in match.groups()))
         match = LEARNING_ITERATION_RE.fullmatch(line)
         if match is not None:
             iteration_ids.append(int(match.group(1)))
@@ -626,19 +755,19 @@ def _rate_probe_payload(
             if not 0.0 < seconds < float("inf"):
                 raise LaunchError("diagnostic rate probe update wall differs")
             update_seconds.append(seconds)
-        match = RECIPE_SHA256_RE.search(line)
-        if match is not None:
-            recipe_sha256.add(match.group(1))
-    if len(budgets) != 1:
-        raise LaunchError("diagnostic rate probe budget identity differs")
-    updates, warmup_updates, measured_updates, tail_updates = next(iter(budgets))
-    if (
-        warmup_updates < 1
-        or measured_updates < 2
-        or tail_updates < 1
-        or updates != warmup_updates + measured_updates + tail_updates
-    ):
-        raise LaunchError("diagnostic rate probe budget window differs")
+    budget_markers = [
+        line for line in lines if RATE_PROBE_MARKER_TOKEN in line
+    ]
+    if budget_markers != [_expected_rate_probe_marker()]:
+        raise LaunchError(
+            "diagnostic rate probe budget must be exact 61/10/50/1"
+        )
+    recipe_markers = [
+        line for line in lines if PPO_RECIPE_MARKER_TOKEN in line
+    ]
+    if recipe_markers != [_expected_ppo_recipe_marker()]:
+        raise LaunchError("diagnostic rate probe recipe identity differs")
+    updates, warmup_updates, measured_updates, tail_updates = RATE_PROBE_BUDGET
     expected_ids = list(range(updates))
     if (
         iteration_ids != expected_ids
@@ -646,27 +775,36 @@ def _rate_probe_payload(
         or len(update_seconds) != updates
     ):
         raise LaunchError("diagnostic rate probe 61-update timing window differs")
-    if len(recipe_sha256) != 1:
-        raise LaunchError("diagnostic rate probe recipe identity differs")
+    child_learning_recipe_sha256 = FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
     measured = update_seconds[
         warmup_updates:warmup_updates + measured_updates
     ]
     tail = update_seconds[-tail_updates:]
     if len(measured) != measured_updates or len(tail) != tail_updates:
         raise LaunchError("diagnostic rate probe measured timing window differs")
+    candidate_production_recipe = FULL_MDP_PPO_RECIPE.execution_recipe()
+    candidate_production_sha256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
+    rate_execution_recipe = _rate_execution_recipe()
+    rate_execution_sha256 = _canonical_payload_sha256(rate_execution_recipe)
     return {
-        "kind": "action_ball_isaac_full_mdp_h48_rate_probe_v1",
-        "schema_version": 1,
+        "kind": "action_ball_isaac_full_mdp_h48_rate_probe_v2",
+        "schema_version": 2,
         "diagnostic_unauthorized": True,
         "formal_evidence": False,
         "safety_gate": False,
         "source_commit": source_commit,
         "namespace": namespace,
         "gpu": {"index": gpu_index, "uuid": gpu_uuid},
-        "action_ball_full_mdp_ppo_recipe_sha256": next(iter(recipe_sha256)),
+        "learning_recipe_sha256": child_learning_recipe_sha256,
+        "candidate_production_execution_recipe": candidate_production_recipe,
+        "candidate_production_execution_recipe_sha256": (
+            candidate_production_sha256
+        ),
+        "rate_execution_recipe": rate_execution_recipe,
+        "rate_execution_recipe_sha256": rate_execution_sha256,
         "shape": {
-            "num_envs": 4096,
-            "num_steps_per_env": 48,
+            "num_envs": FULL_MDP_PPO_RECIPE.num_envs,
+            "num_steps_per_env": FULL_MDP_PPO_RECIPE.num_steps_per_env,
             "updates": updates,
         },
         "timing_source": (
@@ -771,7 +909,7 @@ def launch(args: argparse.Namespace) -> int:
         profile_updates=args.profile_updates,
     )
     if args.dry_run:
-        print(json.dumps({
+        dry_run_payload = {
             "source_commit": commit,
             "argv": child_argv,
             "launcher_env": _launcher_env(
@@ -781,7 +919,29 @@ def launch(args: argparse.Namespace) -> int:
             "run_root": str(root),
             "cpu_affinity": cpu_affinity,
             "cpu_ids": cpu_ids,
-        }, sort_keys=True, separators=(",", ":")))
+        }
+        if args.diagnostic_rate_probe:
+            rate_execution_recipe = _rate_execution_recipe()
+            dry_run_payload.update({
+                "candidate_production_execution_recipe": (
+                    FULL_MDP_PPO_RECIPE.execution_recipe()
+                ),
+                "candidate_production_execution_recipe_sha256": (
+                    FULL_MDP_PPO_RECIPE.recipe_sha256()
+                ),
+                "rate_execution_recipe": rate_execution_recipe,
+                "rate_execution_recipe_sha256": (
+                    _canonical_payload_sha256(rate_execution_recipe)
+                ),
+            })
+        else:
+            dry_run_payload.update({
+                "ppo_recipe": FULL_MDP_PPO_RECIPE.execution_recipe(),
+                "ppo_recipe_sha256": FULL_MDP_PPO_RECIPE.recipe_sha256(),
+            })
+        print(json.dumps(
+            dry_run_payload, sort_keys=True, separators=(",", ":")
+        ))
         return 0
 
     gpu_lock = _acquire_lock(args.lock_file)

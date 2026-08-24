@@ -3085,7 +3085,8 @@ def test_negative_mount_perfect_mimic_keeps_raw_normal_and_signed_ball_offset():
         geometry.face_normal_local(-1), dtype=task.dtype
     )
 
-    # Observation V2 subtracts the live raw A/+Y normal from task[11:14].
+    # Observation V3's task tail subtracts the live raw A/+Y normal from
+    # task[11:14]; its separate motion residual uses the physical signed face.
     # A perfect negative-face mimic must therefore carry exactly zero actor
     # residual instead of the old sign-flipped two-unit residual.
     torch.testing.assert_close(
@@ -3906,9 +3907,9 @@ def test_full_a_teacher_holds_coherent_frame0_then_plays_and_retires_rowwise():
     assert torch.equal(env.reset_generation, generation)
 
 
-def test_semantic_v2_drops_raw_task_owner_fault_and_reward_ledger_columns():
-    actor = {name for name, _width in P.ACTOR_LAYOUT_V2}
-    critic = {name for name, _width in P.CRITIC_EXTENSION_LAYOUT_V2}
+def test_semantic_v3_drops_raw_task_owner_fault_and_reward_ledger_columns():
+    actor = {name for name, _width in P.ACTOR_LAYOUT_V3}
+    critic = {name for name, _width in P.CRITIC_EXTENSION_LAYOUT_V3}
     assert not actor.intersection(
         {"epoch_task_f32", "epoch_clock_remaining_s", "epoch_selected", "epoch_launch_succeeded"}
     )
@@ -5442,8 +5443,8 @@ def _assert_step_surface(result, *, num_envs: int):
 
 def _assert_full_a_step_surface(result, *, num_envs: int):
     observations, reward, dones, extras = result
-    assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V2)
-    assert tuple(observations["critic"].shape) == (num_envs, P.CRITIC_WIDTH_V2)
+    assert tuple(observations["policy"].shape) == (num_envs, P.ACTOR_WIDTH_V3)
+    assert tuple(observations["critic"].shape) == (num_envs, P.CRITIC_WIDTH_V3)
     assert tuple(reward.shape) == (num_envs,)
     assert tuple(dones.shape) == (num_envs,)
     assert dones.dtype == torch.long
@@ -5553,7 +5554,7 @@ def _jump_real_full_a_clock_to_transition_before_first_due(env) -> None:
     env.episode_length_buf.fill_(first_due - 2)
 
 
-def _v2_layout_slice(layout, name, *, offset=0):
+def _v3_layout_slice(layout, name, *, offset=0):
     """Resolve one shared ABI field for direct GPU value checks."""
 
     start = int(offset)
@@ -5573,25 +5574,25 @@ def _assert_real_full_a_returned_observation(
     expected_task_visible,
     expected_live_ball,
 ):
-    """Check one real returned V2 boundary against its live numeric owners."""
+    """Check one real returned V3 boundary against its live numeric owners."""
 
     policy = observations["policy"]
     critic = observations["critic"]
     immediate = env.get_observations()
     assert torch.equal(policy, immediate["policy"])
     assert torch.equal(critic, immediate["critic"])
-    assert torch.equal(critic[:, : P.ACTOR_WIDTH_V2], policy)
+    assert torch.equal(critic[:, : P.ACTOR_WIDTH_V3], policy)
 
     def actor(name):
-        return policy[:, _v2_layout_slice(P.ACTOR_LAYOUT_V2, name)]
+        return policy[:, _v3_layout_slice(P.ACTOR_LAYOUT_V3, name)]
 
     def privileged(name):
         return critic[
             :,
-            _v2_layout_slice(
-                P.CRITIC_EXTENSION_LAYOUT_V2,
+            _v3_layout_slice(
+                P.CRITIC_EXTENSION_LAYOUT_V3,
                 name,
-                offset=P.ACTOR_WIDTH_V2,
+                offset=P.ACTOR_WIDTH_V3,
             ),
         ]
 
@@ -5651,8 +5652,52 @@ def _assert_real_full_a_returned_observation(
     def heading(value):
         return P.rotate_world_to_heading_xy(heading_xy, value)
 
-    racket_pos, racket_vel, racket_raw_normal, _long_axis = (
+    racket_pos, racket_vel, racket_raw_normal, racket_long_axis = (
         env._full_a_racket_kinematics()
+    )
+    racket_face_sign = torch.where(
+        env._epoch_task_valid,
+        env._fullmdp_mount_normal_sign,
+        torch.ones_like(env._fullmdp_mount_normal_sign),
+    )
+    racket_signed_normal = racket_raw_normal * racket_face_sign[:, None]
+    expected_motion_reference = torch.cat(
+        (
+            heading(
+                env._aligned_teacher_racket_site_pos_w
+                - env.env.scene.env_origins
+                - racket_pos
+            )
+            * 5.0,
+            heading(
+                env._aligned_teacher_racket_site_lin_vel_w - racket_vel
+            ),
+            heading(
+                env._aligned_teacher_racket_signed_normal_w
+                - racket_signed_normal
+            )
+            * 2.0,
+            heading(
+                env._aligned_teacher_racket_long_axis_w - racket_long_axis
+            )
+            * 2.0,
+        ),
+        dim=1,
+    )
+    actual_motion_reference = torch.cat(
+        (
+            actor("motion_racket_pos_error_heading"),
+            actor("motion_racket_vel_error_heading"),
+            actor("motion_racket_signed_normal_error_heading"),
+            actor("motion_racket_long_axis_error_heading"),
+        ),
+        dim=1,
+    )
+    torch.testing.assert_close(
+        actual_motion_reference,
+        expected_motion_reference,
+        rtol=0.0,
+        atol=3.0e-6,
     )
     task = env._epoch_task_f32
     root_scene = st["base_pos"] - env.env.scene.env_origins
@@ -5972,7 +6017,7 @@ def test_real_full_a_n1_zero_action_survival_opportunity_accepts_without_next_ti
     reason="requires the exact MuJoCo-Warp GPU environment and A3 assets",
 )
 def test_real_full_a_n1_returned_observation_tracks_motion_reference_lifecycle():
-    """Prove the real returned 203/219 boundary across all teacher stages."""
+    """Prove the real returned 215/231 boundary across all teacher stages."""
 
     env = _gpu_env(num_envs=1, full_a_mode=True)
     try:
@@ -6052,11 +6097,28 @@ def test_real_full_a_n1_returned_observation_tracks_motion_reference_lifecycle()
             )
         )
         assert not bool(playback_done[0])
-        assert env._full_a_motion_phase_code[0] in (
-            wait_env.FULL_A_MOTION_SWING_PHASE_INDEX,
-            wait_env.FULL_A_MOTION_FOLLOW_PHASE_INDEX,
+        assert env._full_a_motion_phase_code[0] == (
+            wait_env.FULL_A_MOTION_SWING_PHASE_INDEX
         )
-        assert env._full_a_teacher_frame[0] > 0
+        elapsed_s = torch.full(
+            (1,),
+            (int(env.common_step_counter) - reveal_tick) * float(env.step_dt),
+            dtype=env.qpos_init.dtype,
+            device=env.device,
+        )
+        expected_playback = wait_env.portable_question.sample_motion_teacher(
+            torch,
+            env._full_a_teacher,
+            elapsed_s,
+            env._full_a_teacher_rate,
+            env._full_a_pre_swing_wait_s,
+        )
+        # Leaving HOLD is time-owned.  At the first positive active-time
+        # boundary the rounded measured sampler may still legitimately own
+        # frame zero; the returned observation must follow that exact owner.
+        assert torch.equal(
+            env._full_a_teacher_frame, expected_playback["frame"]
+        )
         _assert_real_full_a_returned_observation(
             env,
             playback,
@@ -6148,7 +6210,7 @@ def test_real_full_a_n1_returned_observation_tracks_motion_reference_lifecycle()
                 retired["policy"], env.get_observations()["policy"]
             )
             assert torch.equal(
-                retired["critic"][:, : P.ACTOR_WIDTH_V2],
+                retired["critic"][:, : P.ACTOR_WIDTH_V3],
                 retired["policy"],
             )
         assert retired is not None and retired_extras is not None
@@ -6294,11 +6356,13 @@ def test_real_full_a_n2_selected_outcome_preserves_peer_rows():
         peer_generation = before["reset_generation"][1].clone()
         generation_before = env.reset_generation.clone()
         peer_task = env._epoch_task_f32[1].clone()
-        env._epoch_clock_ticks[0, 3] = int(env.common_step_counter)
+        outcome_boundary = int(env.common_step_counter) + 1
+        env._epoch_clock_ticks[0, 3] = outcome_boundary
         env._epoch_clock_ticks[1, 3] += 100
         _, _, outcome_dones, outcome_extras = _assert_full_a_step_surface(
             env.step(zero), num_envs=2
         )
+        assert int(env.common_step_counter) == outcome_boundary
         assert torch.equal(
             outcome_dones, torch.tensor([0, 0], device=env.device)
         )

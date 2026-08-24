@@ -383,32 +383,32 @@ def test_runtime_contract_carries_exact_full_mdp_critic_layout():
         "critic": ["action_epoch"],
     }
     env.observation_manager.group_obs_term_dim = {
-        "policy": [(203,)],
-        "critic": [(219,)],
+        "policy": [(215,)],
+        "critic": [(231,)],
     }
     env.observation_manager.group_obs_dim = {
-        "policy": (203,),
-        "critic": (219,),
+        "policy": (215,),
+        "critic": (231,),
     }
     env.observation_manager.cfg["policy"] = SimpleNamespace(
         history_length=None,
         to_dict=lambda: {"action_epoch": {"history_length": 0}},
     )
     actor = SimpleNamespace(
-        name="action_ball_full_mdp_semantic_actor_v2",
+        name="action_ball_full_mdp_semantic_actor_v3",
         obs_mode="action_ball_full_mdp",
-        total_dim=203,
-        terms=(_Term("action_epoch", 203),),
+        total_dim=215,
+        terms=(_Term("action_epoch", 215),),
     )
 
     facts = TC.runtime_execution_facts(env, actor)
 
     assert facts["critic_obs_contract"] == (
-        "action_ball_full_mdp_semantic_critic_v2"
+        "action_ball_full_mdp_semantic_critic_v3"
     )
-    assert facts["critic_obs_total_dim"] == 219
+    assert facts["critic_obs_total_dim"] == 231
     assert facts["critic_obs_term_names"] == ["action_epoch"]
-    assert facts["critic_obs_term_dims"] == [219]
+    assert facts["critic_obs_term_dims"] == [231]
 
     env.observation_manager.group_obs_term_dim["critic"] = [(218,)]
     env.observation_manager.group_obs_dim["critic"] = (218,)
@@ -1287,16 +1287,16 @@ def _full_mdp_schema3_contract():
             TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY: True,
             TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY: 0.05,
             "target_mode": "action_ball_full_mdp",
-            "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
+            "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v3",
             "actor_obs_mode": "action_ball_full_mdp",
-            "actor_obs_total_dim": 203,
+            "actor_obs_total_dim": 215,
             "actor_obs_term_names": ["action_epoch"],
-            "actor_obs_term_dims": [203],
+            "actor_obs_term_dims": [215],
             "observation_history_lengths": [1],
-            "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
-            "critic_obs_total_dim": 219,
+            "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v3",
+            "critic_obs_total_dim": 231,
             "critic_obs_term_names": ["action_epoch"],
-            "critic_obs_term_dims": [219],
+            "critic_obs_term_dims": [231],
             "fresh_full_mdp_installed_reward_graph": {
                 "schema_version": 1,
                 "kind": "action_ball_epoch_lean_reward_graph_v1",
@@ -1970,6 +1970,20 @@ def test_full_mdp_schema3_has_one_exact_disjoint_identity():
     with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
         TC.validate_schema3_contract_structure(complete_v1)
 
+    complete_v2 = _full_mdp_schema3_contract()
+    complete_v2.update(
+        {
+            "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
+            "actor_obs_total_dim": 203,
+            "actor_obs_term_dims": [203],
+            "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
+            "critic_obs_total_dim": 219,
+            "critic_obs_term_dims": [219],
+        }
+    )
+    with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
+        TC.validate_schema3_contract_structure(complete_v2)
+
     stale_no_save = _full_mdp_schema3_contract()
     stale_no_save["action_ball_full_mdp_runtime"]["no_save"] = True
     with pytest.raises(ValueError, match="full-MDP runtime identity differs"):
@@ -1989,7 +2003,7 @@ def test_full_mdp_schema3_has_one_exact_disjoint_identity():
 
     for key, value in (
         ("fresh_full_mdp_installed_reward_graph", {}),
-        ("critic_obs_contract", "action_ball_full_mdp_semantic_critic_v2"),
+        ("critic_obs_contract", "action_ball_full_mdp_semantic_critic_v3"),
     ):
         partial = _schema3_contract()
         partial[key] = value

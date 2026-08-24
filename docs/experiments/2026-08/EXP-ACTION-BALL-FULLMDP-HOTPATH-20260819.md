@@ -4,8 +4,12 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`baseline-runs-stopped-incomplete / profiled / observation-v2-host-implemented / zero-flight-host-validated / direct-lean-phase-a+b-host-validated / phase-c0+c1+c2+c2b-host-validated / Pod-matched-wall-pending`
-> 证据等级：E2 fresh Pod steady wall/profiler + E1源码/host fixed-tape；Phase-C0--C2b只有静态payload proxy与host语义证据，Pod matched wall仍未测
+> 状态：`V6-candidate-real-GPU-retest-pending / prior-runs-frozen / Pod-matched-wall-pending`
+> 证据等级：pre-V3 `ba7225b2` Isaac predecessor runtime/rate为E2；final V3/PPO V5 exact candidate与Mu
+> 仍为E1/未测。Phase-C0--C2b只有静态payload proxy与host语义证据，Pod matched wall仍未测
+>
+> 阅读边界：current结论只认§16；§1--15保留为热墙定位与已做减法的历史证据，旧Reward20/PPO版本不得
+> 覆盖当前Reward24/PPO V5/Observation V3。
 
 ## 1. 采用、延后、拒绝
 
@@ -562,3 +566,55 @@ clean exact Pod=`304 passed, 6 skipped`。同GPU H48 profile的`r07_idle_support
 `6.758 s/H48`并连续ACK；详细运行身份、双backend切换和阶段分母只在
 [课程解阻实验§6.6](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md)维护。该结果关闭当前no-key首墙，
 不等于single-state架构已完成，也不授权physics promotion、resume、export或部署。
+
+## 16. 2026-08-25 current：真实Pod反例、PPO V5迭代尺度与未完成rate
+
+旧MuJoCo V5最新只读窗口仍约`13.4 s/H48`（精确快照见课程实验§10.1），所以即便曾有更快的历史窗口，
+当前仍有大幅加速空间。H48与约6秒
+只是学习/迭代方向；性能结论必须来自exact source、同卡、profiler-off、`10 warm-up + 50 measured + 1 tail`
+的p50/p90和transitions/s，并同时保持fixed-tape RNG/done/reason/reset/lifecycle/Reward24及
+Observation V3 parity。
+
+`72b87100`把table keepout的多次广播几何运算融合为一个Warp kernel，synthetic exact tape通过；但真实
+Full-A在Pod揭示外层`data.xpos/xquat`代理不是Torch tensor，底层`data.struct.xpos/xquat`才是native
+`wp.array`的`vec3/quat`。旧adapter在kernel前要求Torch类型，四个真实GPU节点都在构造边界失败。因此
+synthetic PASS不等于production热路可用，
+更不能据此报速度。
+
+同一72b批次的Isaac真实Kit只完成update0=`8.55 s/H48`，随后milestone schema7 consumer仍把新增paddle
+telemetry后的`[-7:]`位置后缀误当episode/reset slice，在下一optimizer前失败。它证明的是positional decode
+错误；单个未完成样本既不是rate成绩，也不是runtime PASS。修复必须按具名episode slice读取。
+
+`ba7225b2`的修复直接接受这两份真实Warp arrays，不做Torch转换、host sync或第二份pose authority；Torch输入只
+保留给dependency-light测试边界。`9d333b0b`只是V3/PPO V5前的test successor，最终source SHA待冻结；
+真实Mu GPU retest和matched candidate rate仍`未测`。只有真实Full-A lifecycle、returned Observation V3、
+Reward24及rate receipt全部通过后，才能裁决该kernel保留或回退。
+
+`72b87100`的CPU exact尝试也不能概括为“全绿”或“全是环境”：两个可运行partition分别为
+`351 passed, 9 skipped`和`60 passed`；Isaac partition为`917 passed, 27 skipped, 24 failed, 19 errors`。
+其中`39`项由`omni`依赖边界阻塞，另`4`项确实暴露harness/candidate问题。最终V3/PPO V5 source的CPU矩阵
+尚未执行，必须重新按partition报告，不能从predecessor数字外推。
+
+Isaac侧独立的61-update probe已经在Pod1 GPU1以clean `ba7225b2`自然完成；test-only `9d333b0b`的三个
+production tree与其逐字相同。measured `10..59` wall mean/p50/p90=`9.082/9.31/10.374 s`；Reward sample
+`11,993,088/11,993,088` finite，nonfinite/fault/conservation=`0/0/0`。receipt是
+`/workspace/franco/validations/isaac-fullmdp-v7-ba7225b2-gpu1-rate-20260825t044300cst/diagnostic-rate-probe.json`
+（SHA-256=`6735e7d5…c34d`），run log SHA-256=`d8d4a2f4…49e7`。collection随episode length增长而变慢；
+这是相关性，不是热墙因果裁决。该probe没有
+任何due或shot分母，也早于Observation V3与PPO V5，故只证明Isaac predecessor运行路径和4096尺度吞吐，
+不能代签Mu kernel、最终V6 rate或学习质量。约6秒方向仍未达到。
+
+当前性能/算法裁决把fresh learner从`4096 env × H48 × 12,500 update × 8 minibatch`改为
+[`PPO V5`](../../DEFINITIONS.md#fullmdp-ppo-v5)的`2048 × H48 × 25,000 × 4`，learning epoch仍5、
+save interval仍500。总transition=`2,457,600,000`、每minibatch=`24,576` sample和总optimizer step=
+`500,000`保持；希望把单iteration降到约`4.8 s`以恢复可迭代性。它不是语义等价加速：policy刷新频率、
+GAE/KL反馈、WAL与checkpoint的样本边界都改变，必须在最终exact source上另跑rate probe与短学习canary。
+旧4096结果只能作容量/墙时基线。
+
+结构减法不能写成泛化授权。同一writer echo、无consumer Gate和sealed immutable artifact后的重复source
+recheck只进入逐callpoint候选；删除前须点名checker及两个writer，证明同writer或seal后不可变，并同批保留
+mutation反例和必要telemetry。跨writer conservation、native plant finite/joint/table invariant、optimizer
+前拒绝、run-owned artifact no-clobber和WAL/fsync/ACK必须保留。当前另有“窄projection替代每步full-record
+clone”、dead keyed-epoch work和idle scratch zero等profile候选；尚未profile/实现，不得写成已采用或换算
+wall秒数。§16全部证据保持`diagnostic_unauthorized=true`，不授权promotion、export、deployment或physics
+parity。

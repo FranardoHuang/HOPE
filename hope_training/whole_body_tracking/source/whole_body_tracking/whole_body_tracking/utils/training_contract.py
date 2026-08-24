@@ -363,12 +363,12 @@ _ACTION_BALL_C211_CRITIC_OBS_LAYOUT = (
     ("task_valid", 1),
 )
 _ACTION_BALL_FULL_MDP_ACTOR_OBS_CONTRACT = (
-    "action_ball_full_mdp_semantic_actor_v2"
+    "action_ball_full_mdp_semantic_actor_v3"
 )
 _ACTION_BALL_FULL_MDP_CRITIC_OBS_CONTRACT = (
-    "action_ball_full_mdp_semantic_critic_v2"
+    "action_ball_full_mdp_semantic_critic_v3"
 )
-_ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT = (("action_epoch", 219),)
+_ACTION_BALL_FULL_MDP_CRITIC_OBS_LAYOUT = (("action_epoch", 231),)
 _ACTION_BALL_FULL_MDP_LEGACY_ACTOR_OBS_CONTRACT = (
     "action_ball_full_mdp_action_epoch_v1"
 )
@@ -6996,15 +6996,15 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             target_mode != "action_ball_full_mdp"
             or contract.get("actor_obs_mode") != "action_ball_full_mdp"
             or actor_contract != _ACTION_BALL_FULL_MDP_ACTOR_OBS_CONTRACT
-            or contract.get("actor_obs_total_dim") != 203
+            or contract.get("actor_obs_total_dim") != 215
             or contract.get("actor_obs_term_names") != ["action_epoch"]
-            or contract.get("actor_obs_term_dims") != [203]
+            or contract.get("actor_obs_term_dims") != [215]
             or contract.get("observation_history_lengths") != [1]
             or contract.get("critic_obs_contract")
             != _ACTION_BALL_FULL_MDP_CRITIC_OBS_CONTRACT
-            or contract.get("critic_obs_total_dim") != 219
+            or contract.get("critic_obs_total_dim") != 231
             or contract.get("critic_obs_term_names") != ["action_epoch"]
-            or contract.get("critic_obs_term_dims") != [219]
+            or contract.get("critic_obs_term_dims") != [231]
             or not isinstance(full_mdp_runtime, Mapping)
             or set(full_mdp_runtime)
             not in (

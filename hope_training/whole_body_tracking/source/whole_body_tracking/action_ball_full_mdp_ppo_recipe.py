@@ -1,4 +1,4 @@
-"""Typed, dependency-free PPO V4 recipe for the continuous FullMDP lanes.
+"""Typed, dependency-free PPO V5 recipe for the continuous FullMDP lanes.
 
 The shared ``cfg/algo/ppo.yaml`` remains the legacy/default recipe for every
 other task.  FullMDP Isaac and MuJoCo consumers derive their effective values
@@ -16,9 +16,15 @@ import json
 class ActionBallFullMdpPpoRecipe:
     """Complete FullMDP PPO recipe, including its finite run schedule."""
 
-    kind: str = "action_ball_full_mdp_ppo_v4"
+    # V5 is a latency/refresh tradeoff, not a fixed-tape-equivalent speedup.
+    # Halving N and doubling the update count preserves the total transition
+    # budget, while halving the minibatch count preserves minibatch size and
+    # the total number of optimizer steps.  It deliberately refreshes the
+    # policy twice as often, so N belongs to the scientific learning identity.
+    kind: str = "action_ball_full_mdp_ppo_v5"
+    num_envs: int = 2_048
     num_steps_per_env: int = 48
-    max_iterations: int = 12_500
+    max_iterations: int = 25_000
     save_interval: int = 500
     empirical_normalization: bool = False
 
@@ -31,7 +37,7 @@ class ActionBallFullMdpPpoRecipe:
 
     algorithm_class_name: str = "PPO"
     num_learning_epochs: int = 5
-    num_mini_batches: int = 8
+    num_mini_batches: int = 4
     clip_param: float = 0.2
     gamma: float = 0.99
     lam: float = 0.98
@@ -95,8 +101,9 @@ class ActionBallFullMdpPpoRecipe:
         """
 
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "runner": {
+                "num_envs": self.num_envs,
                 "num_steps_per_env": self.num_steps_per_env,
                 "empirical_normalization": self.empirical_normalization,
             },
@@ -111,9 +118,10 @@ class ActionBallFullMdpPpoRecipe:
         """Return the complete finite execution identity for run artifacts."""
 
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": self.kind,
             "runner": {
+                "num_envs": self.num_envs,
                 "num_steps_per_env": self.num_steps_per_env,
                 "max_iterations": self.max_iterations,
                 "save_interval": self.save_interval,

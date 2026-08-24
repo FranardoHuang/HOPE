@@ -13,6 +13,7 @@ import types
 import pytest
 
 
+_REAL_IMPORT_MODULE = importlib.import_module
 _UTILS = (
     Path(__file__).parents[1]
     / "source/whole_body_tracking/whole_body_tracking/utils"
@@ -384,7 +385,7 @@ class _Env:
     def __init__(self, num_envs=2):
         self.num_envs = num_envs
         self.unwrapped = self
-        self.observation_facts = _v2_observation_facts()
+        self.observation_facts = _v3_observation_facts()
         self.action_ball_full_mdp_runtime_lease = object()
         self.owner = _Owner(self, self.action_ball_full_mdp_runtime_lease, num_envs)
         self.action_term = _ActionTerm(self.owner.events)
@@ -401,19 +402,19 @@ class _Env:
         return self.owner
 
 
-def _v2_observation_facts(**overrides):
+def _v3_observation_facts(**overrides):
     facts = {
-        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
+        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v3",
         "actor_obs_mode": "action_ball_full_mdp",
-        "actor_obs_total_dim": 203,
+        "actor_obs_total_dim": 215,
         "actor_obs_term_names": ["action_epoch"],
-        "actor_obs_term_dims": [203],
-        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
-        "critic_obs_total_dim": 219,
+        "actor_obs_term_dims": [215],
+        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v3",
+        "critic_obs_total_dim": 231,
         "critic_obs_term_names": ["action_epoch"],
-        "critic_obs_term_dims": [219],
+        "critic_obs_term_dims": [231],
         "fresh_full_mdp_observation_kind": (
-            "action_ball_full_mdp_semantic_observation_v2"
+            "action_ball_full_mdp_semantic_observation_v3"
         ),
         "fresh_full_mdp_diagnostic_unauthorized": True,
         "fresh_full_mdp_launch_authorized": False,
@@ -423,18 +424,18 @@ def _v2_observation_facts(**overrides):
     return facts
 
 
-def _v2_snapshot_identity(*, sha256="a" * 64, **overrides):
+def _v3_snapshot_identity(*, sha256="a" * 64, **overrides):
     identity = {
         "action_ball_full_mdp_snapshot_kind": (
             "policy_optimizer_diagnostic_nonresumable_v2"
         ),
         "fresh_full_mdp_observation_kind": (
-            "action_ball_full_mdp_semantic_observation_v2"
+            "action_ball_full_mdp_semantic_observation_v3"
         ),
-        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
-        "actor_obs_total_dim": 203,
-        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
-        "critic_obs_total_dim": 219,
+        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v3",
+        "actor_obs_total_dim": 215,
+        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v3",
+        "critic_obs_total_dim": 231,
         "training_contract_schema_version": 3,
         "training_contract_sha256": sha256,
         "diagnostic_unauthorized": True,
@@ -462,8 +463,6 @@ def _fake_imports(monkeypatch):
             )
         ),
     )
-    real_import_module = adapter.importlib.import_module
-
     def import_module(name, package=None):
         resolved = (
             importlib.util.resolve_name(name, package)
@@ -471,7 +470,7 @@ def _fake_imports(monkeypatch):
             else name
         )
         if resolved == "torch" or resolved.startswith("torch."):
-            return real_import_module(name, package)
+            return _REAL_IMPORT_MODULE(name, package)
         if resolved == (
             "whole_body_tracking.tasks.tracking.mdp."
             "action_ball_full_mdp_lean_runtime"
@@ -499,7 +498,11 @@ def _fake_imports(monkeypatch):
             return durable_wal
         raise AssertionError(f"unexpected adapter import: {resolved}")
 
-    monkeypatch.setattr(adapter.importlib, "import_module", import_module)
+    monkeypatch.setattr(
+        adapter,
+        "importlib",
+        types.SimpleNamespace(import_module=import_module),
+    )
     return runtime
 
 
@@ -533,6 +536,52 @@ def test_schedule_telemetry_uses_existing_public_due_plus_terminal_overlap(
 def test_fake_imports_preserve_package_aware_torch_lazy_import(
     _fake_imports,
 ):
+    assert importlib.import_module is _REAL_IMPORT_MODULE
+    assert adapter.importlib.import_module is not _REAL_IMPORT_MODULE
+
+
+def test_create_wal_fsyncs_file_child_directory_and_parent(tmp_path, monkeypatch):
+    real_open = adapter.os.open
+    real_fsync = adapter.os.fsync
+    fd_paths = {}
+    synced_paths = []
+
+    def tracked_open(path, *args, **kwargs):
+        fd = real_open(path, *args, **kwargs)
+        fd_paths[fd] = Path(path)
+        return fd
+
+    def tracked_fsync(fd):
+        synced_paths.append(fd_paths.get(fd))
+        return real_fsync(fd)
+
+    monkeypatch.setattr(adapter.os, "open", tracked_open)
+    monkeypatch.setattr(adapter.os, "fsync", tracked_fsync)
+
+    path, _identity, _segment = adapter.ActionBallFullMdpRsl3Adapter._create_wal(
+        str(tmp_path)
+    )
+
+    assert path.parent == tmp_path / "action_ball_epoch_durable_wal"
+    assert synced_paths == [path, path.parent, tmp_path]
+
+
+def test_create_wal_parent_fsync_failure_is_fail_closed(tmp_path, monkeypatch):
+    real_fsync = adapter.os.fsync
+    calls = 0
+
+    def fail_parent_fsync(fd):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise OSError("parent fsync failed")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(adapter.os, "fsync", fail_parent_fsync)
+
+    with pytest.raises(OSError, match="parent fsync failed"):
+        adapter.ActionBallFullMdpRsl3Adapter._create_wal(str(tmp_path))
+    assert calls == 3
     torch = pytest.importorskip("torch")
     assert adapter.importlib.import_module(".optim", "torch") is torch.optim
     parameter = torch.nn.Parameter(torch.tensor([2.0]))
@@ -541,6 +590,7 @@ def test_fake_imports_preserve_package_aware_torch_lazy_import(
     parameter.square().sum().backward()
     optimizer.step()
     assert int(optimizer.state[parameter]["step"].item()) == 1
+    assert importlib.import_module is _REAL_IMPORT_MODULE
 
 
 def test_update_orders_optimizer_between_prepare_and_durable_ack(
@@ -570,6 +620,15 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
         return append(line)
 
     monkeypatch.setattr(boundary, "_append", logged_append)
+
+    owner_ack = boundary._ack
+
+    def command_ack(*args, **kwargs):
+        result = owner_ack(*args, **kwargs)
+        assert result is None
+        return None
+
+    monkeypatch.setattr(boundary, "_ack", command_ack)
 
     assert boundary.update(
         update, update_index=0, completed_environment_steps=48
@@ -822,12 +881,19 @@ def test_stdout_delivery_failure_cannot_poison_committed_training_transaction(
     assert {warning["failure"] for warning in warnings} == {
         "short_write" if failure_mode == "short_write" else "builtins.BrokenPipeError"
     }
-    assert all(
-        warning["stdout_authoritative"] is False
-        and warning["durable_wal_authoritative"] is True
-        and warning["training_transaction"] == "committed"
-        for warning in warnings
-    )
+    for warning in warnings:
+        assert warning["stdout_authoritative"] is False
+        if warning["marker"] == "HOPE_ACTION_EPOCH_UPDATE_ACK_JSON":
+            assert warning["durable_wal_authoritative"] is True
+            assert warning["durable_scope"] == "action_epoch"
+            assert warning["training_transaction"] == "epoch_ack_committed"
+        else:
+            assert warning["durable_wal_authoritative"] is False
+            assert warning["durable_scope"] == "none"
+            assert (
+                warning["training_transaction"]
+                == "completed_in_process_not_durable"
+            )
     forensic = durable_wal.read_forensic_committed_frontier(
         boundary._path,
         expected_rank=0,
@@ -1171,7 +1237,7 @@ def _install_fake_runner_base(monkeypatch, calls):
     )
 
 
-def test_runner_binds_v2_observation_and_contract_before_base_init(
+def test_runner_binds_v3_observation_and_contract_before_base_init(
     tmp_path, _fake_imports, monkeypatch
 ):
     env = _Env()
@@ -1193,12 +1259,12 @@ def test_runner_binds_v2_observation_and_contract_before_base_init(
     assert runner.training_contract_sha256 == "a" * 64
     assert runner._full_mdp_observation_identity == {
         "fresh_full_mdp_observation_kind": (
-            "action_ball_full_mdp_semantic_observation_v2"
+            "action_ball_full_mdp_semantic_observation_v3"
         ),
-        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v2",
-        "actor_obs_total_dim": 203,
-        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v2",
-        "critic_obs_total_dim": 219,
+        "actor_obs_contract": "action_ball_full_mdp_semantic_actor_v3",
+        "actor_obs_total_dim": 215,
+        "critic_obs_contract": "action_ball_full_mdp_semantic_critic_v3",
+        "critic_obs_total_dim": 231,
     }
     assert not hasattr(runner, "training_contract_lineage_exact")
     assert not hasattr(runner, "training_launch_claim_sha256")
@@ -1214,7 +1280,7 @@ def test_runner_binds_v2_observation_and_contract_before_base_init(
         (3, "a" * 63, "SHA differs"),
     ],
 )
-def test_runner_rejects_non_v2_contract_identity_before_base_init(
+def test_runner_rejects_non_v3_contract_identity_before_base_init(
     tmp_path, _fake_imports, monkeypatch, schema, sha256, error
 ):
     env = _Env()
@@ -1321,7 +1387,7 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
     runner.training_contract_sha256 = "a" * 64
     runner._full_mdp_observation_identity = {
         key: value
-        for key, value in _v2_snapshot_identity().items()
+        for key, value in _v3_snapshot_identity().items()
         if key
         in {
             "fresh_full_mdp_observation_kind",
@@ -1345,7 +1411,7 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
     assert calls == [
         (
             str(tmp_path / "model_1000.diagnostic_nonresumable.pt"),
-            _v2_snapshot_identity(),
+            _v3_snapshot_identity(),
         )
     ]
     snapshot = tmp_path / "model_1000.diagnostic_nonresumable.pt"
@@ -1362,7 +1428,7 @@ def test_runner_save_uses_explicit_nonresumable_snapshot_name_and_metadata(
         "model_tensor_count": 1,
         "optimizer_tensor_count": 1,
         "all_tensors_finite": True,
-        **_v2_snapshot_identity(),
+        **_v3_snapshot_identity(),
     }
     with pytest.raises(RuntimeError, match="forbids checkpoint load/resume"):
         runner.load(str(calls[0][0]))
@@ -1388,7 +1454,7 @@ def test_snapshot_receipt_rejects_unparseable_payload_before_sidecar(
         adapter._write_snapshot_receipt(
             snapshot,
             learning_iteration=7,
-            required_infos=_v2_snapshot_identity(),
+            required_infos=_v3_snapshot_identity(),
         )
     assert not snapshot.with_name(snapshot.name + ".receipt.json").exists()
 
@@ -1396,7 +1462,7 @@ def test_snapshot_receipt_rejects_unparseable_payload_before_sidecar(
 def test_snapshot_receipt_rejects_v1_identity_before_read(tmp_path):
     snapshot = tmp_path / "model_7.diagnostic_nonresumable.pt"
     snapshot.write_bytes(b"old-v1-snapshot")
-    old_identity = _v2_snapshot_identity(
+    old_identity = _v3_snapshot_identity(
         action_ball_full_mdp_snapshot_kind=(
             "policy_optimizer_diagnostic_nonresumable_v1"
         ),
@@ -1411,6 +1477,29 @@ def test_snapshot_receipt_rejects_v1_identity_before_read(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="training-contract schema differs"):
+        adapter._write_snapshot_receipt(
+            snapshot,
+            learning_iteration=7,
+            required_infos=old_identity,
+        )
+
+    assert not snapshot.with_name(snapshot.name + ".receipt.json").exists()
+
+
+def test_snapshot_receipt_rejects_semantic_v2_identity_before_read(tmp_path):
+    snapshot = tmp_path / "model_7.diagnostic_nonresumable.pt"
+    snapshot.write_bytes(b"old-semantic-v2-snapshot")
+    old_identity = _v3_snapshot_identity(
+        fresh_full_mdp_observation_kind=(
+            "action_ball_full_mdp_semantic_observation_v2"
+        ),
+        actor_obs_contract="action_ball_full_mdp_semantic_actor_v2",
+        actor_obs_total_dim=203,
+        critic_obs_contract="action_ball_full_mdp_semantic_critic_v2",
+        critic_obs_total_dim=219,
+    )
+
+    with pytest.raises(RuntimeError, match="snapshot identity differs"):
         adapter._write_snapshot_receipt(
             snapshot,
             learning_iteration=7,
@@ -1462,7 +1551,7 @@ def test_snapshot_receipt_rejects_v1_payload_metadata(tmp_path, monkeypatch):
         adapter._write_snapshot_receipt(
             snapshot,
             learning_iteration=7,
-            required_infos=_v2_snapshot_identity(),
+            required_infos=_v3_snapshot_identity(),
         )
 
     assert not snapshot.with_name(snapshot.name + ".receipt.json").exists()

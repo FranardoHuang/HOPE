@@ -13,7 +13,7 @@ action_ball_full_mdp_runtime: true
 # Exact, code-owned 61-update H48 timing lane.  False is the only normal
 # training value; the operator may set it true only for the profiler-off
 # diagnostic described in the operations TODO.  It never changes the typed
-# 12,500-update learning recipe or authorizes a checkpoint lineage.
+# 25,000-update learning recipe or authorizes a checkpoint lineage.
 action_ball_full_mdp_rate_probe: false
 actor_obs_contract: null
 registry_name: null
@@ -34,7 +34,9 @@ physical_ball: false
 table_obstacle: true
 
 env:
-  num_envs: 4096
+  # Static composition agrees with the typed recipe.  The Python recipe is the
+  # sole executable authority and rejects any different resolved value.
+  num_envs: 2048
 
 motion:
   # The fresh diagnostic uses all 73 measured capture clips.  The old switch

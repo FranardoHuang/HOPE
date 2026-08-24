@@ -128,7 +128,37 @@ generation/overflow、finite与sticky poison/fail-stop；FullMDP全局checkpoint
 self-proof没有独立事实源。这份Phase-A合同没有新增运行命令，也不表示已达到约`6 s/update`的方向目标、学会回球、
 获得formal authority或完成任何Gate。性能结论仍须使用exact Pod、profiler-off、matched-strata墙钟证据。
 
-#### FullMDP PPO V3执行配方（2026-08-23 branch candidate）
+<a id="fullmdp-ppo-v5-observation-v3-current"></a>
+
+#### Current FullMDP PPO V5与Observation V3执行合同（2026-08-25 branch candidate）
+
+V6 fresh-only launcher必须从code-owned typed recipe读取[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)：
+`num_envs=2048`、`num_steps_per_env=48`、`max_iterations=25000`、`save_interval=500`、
+`num_learning_epochs=5`、`num_mini_batches=4`、`gamma=.99`、GAE`lambda=.98`、fresh
+`init_noise_std=.05`、learned`log_std`、`entropy_coef=0`且无强制std decay。Hydra argv、task YAML和
+MuJoCo CLI不得复制或覆盖这些值。相对4096/U12500/MB8，总transition、minibatch大小和optimizer-step数
+保持，但刷新/GAE/KL/WAL/checkpoint边界改变；只能fresh，不能resume，也不能称语义等价加速。
+
+actor/critic必须分别绑定`action_ball_full_mdp_semantic_actor_v3` 215-D与
+`action_ball_full_mdp_semantic_critic_v3` 231-D；完整顺序只认
+[Observation接口](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)。
+V2 203/219只允许旧checkpoint解析和paired control，不得作为fresh fallback。Reward必须为Reward24；
+Mu update/completion/summary wire为`9/5/6`，Isaac milestone为schema7具名episode slice。四个due是
+`295/588/881/1174`，V3 `[208]`在第四次消费后发布raw`-1` exhausted sentinel。
+
+两端rate diagnostic仍是`10 warm-up + 50 measured + 1 tail`，但必须按当前recipe跑
+`2048 env × H48 × 61 update`、profiler-off、fresh process和`diagnostic_unauthorized=true`。Mu使用
+`--full-a --diagnostic-rate-probe`；Isaac只显式打开task内的
+`action_ball_full_mdp_rate_probe`。长跑的`max_iterations`仍是25000，61预算由code-owned diagnostic
+边界安装。约`4.8 s/H48`只是待测迭代目标；probe之后还要短学习canary，不能自动转成长跑或代签学习质量。
+
+`9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；final exact source SHA尚未冻结。
+只有final clean checkout的CPU partition、两端真实GPU rate、Reward24/V3 finite、Mu Full-A returned
+observation/lifecycle和Isaac短学习canary闭合后，才可创建两个fresh root/namespace。当前状态和顺序只认
+[双后端长跑TODO §0.5](action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)；
+G04/G05/G06保持`Partial`，不授权promotion、export、部署或真机。
+
+#### HISTORICAL / FROZEN — FullMDP PPO V3执行配方（2026-08-23 branch candidate）
 
 FullMDP A/C与portable MuJoCo只能消费code-owned typed recipe：`num_steps_per_env=48`、
 `max_iterations=12500`、`save_interval=500`、`num_learning_epochs=5`、`num_mini_batches=8`、
@@ -188,7 +218,7 @@ promotion/export/deploy，也不得在完成后自动转成12500；先报告50�
 transitions/s和H24-equivalent，再由人决定继续优化还是另开fresh长跑。约6秒不是probe
 通过线，probe也不代替corrected V5的fresh训练证据。
 
-#### FullMDP semantic Observation V2与snapshot边界（2026-08-21 branch candidate）
+#### HISTORICAL / FROZEN — FullMDP semantic Observation V2与snapshot边界（2026-08-21 branch candidate）
 
 family A只接受actor contract `action_ball_full_mdp_semantic_actor_v2`（203-D）和critic contract
 `action_ball_full_mdp_semantic_critic_v2`（219-D）；observation kind为

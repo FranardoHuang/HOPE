@@ -25,11 +25,11 @@ RUN_MODE = "single_action_lean"
 TELEMETRY_SCHEMA_VERSION = 12
 TELEMETRY_KIND = "action_ball_epoch_optimizer_update_ack_telemetry_v12"
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
-ACTOR_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_actor_v2"
-ACTOR_OBSERVATION_WIDTH = 203
-CRITIC_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_critic_v2"
-CRITIC_OBSERVATION_WIDTH = 219
-OBSERVATION_KIND = "action_ball_full_mdp_semantic_observation_v2"
+ACTOR_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_actor_v3"
+ACTOR_OBSERVATION_WIDTH = 215
+CRITIC_OBSERVATION_CONTRACT = "action_ball_full_mdp_semantic_critic_v3"
+CRITIC_OBSERVATION_WIDTH = 231
+OBSERVATION_KIND = "action_ball_full_mdp_semantic_observation_v3"
 SNAPSHOT_RECEIPT_SCHEMA_VERSION = 2
 SNAPSHOT_RECEIPT_KIND = "action_ball_full_mdp_diagnostic_snapshot_receipt_v2"
 SNAPSHOT_PAYLOAD_KIND = "policy_optimizer_diagnostic_nonresumable_v2"
@@ -50,8 +50,16 @@ _SNAPSHOT_IDENTITY_KEYS = {
 }
 
 
-def _emit_non_authoritative_stdout_marker(marker: str, *, marker_name: str) -> None:
-    """Best-effort mirror of evidence already committed to the durable WAL."""
+def _emit_non_authoritative_stdout_marker(
+    marker: str,
+    *,
+    marker_name: str,
+    durable_wal_authoritative: bool,
+) -> None:
+    """Best-effort stdout delivery with an explicit durability scope."""
+
+    if type(durable_wal_authoritative) is not bool:
+        raise TypeError("stdout marker durability scope must be an exact bool")
 
     reported_characters = None
     failure = None
@@ -79,8 +87,15 @@ def _emit_non_authoritative_stdout_marker(marker: str, *, marker_name: str) -> N
             reported_characters if type(reported_characters) is int else None
         ),
         "stdout_authoritative": False,
-        "durable_wal_authoritative": True,
-        "training_transaction": "committed",
+        "durable_wal_authoritative": durable_wal_authoritative,
+        "durable_scope": (
+            "action_epoch" if durable_wal_authoritative else "none"
+        ),
+        "training_transaction": (
+            "epoch_ack_committed"
+            if durable_wal_authoritative
+            else "completed_in_process_not_durable"
+        ),
     }
     try:
         sys.stderr.write(
@@ -91,7 +106,7 @@ def _emit_non_authoritative_stdout_marker(marker: str, *, marker_name: str) -> N
         sys.stderr.flush()
     except Exception:
         # A second non-authoritative stream failure must not undo or poison a
-        # committed optimizer/WAL/owner transaction either.
+        # completed in-process update either.
         pass
 
 
@@ -889,6 +904,18 @@ class ActionBallFullMdpRsl3Adapter:
             os.fsync(dir_fd)
         finally:
             os.close(dir_fd)
+        # The child fsync persists the new file within ``directory``.  The
+        # parent fsync separately persists the directory entry itself; without
+        # it, a power loss can erase the entire otherwise-durable WAL tree.
+        root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        root_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(
+            os, "O_NOFOLLOW", 0
+        )
+        root_fd = os.open(root, root_flags)
+        try:
+            os.fsync(root_fd)
+        finally:
+            os.close(root_fd)
         identity = (info.st_dev, info.st_ino)
         return path, identity, f"{info.st_dev:x}:{info.st_ino:x}"
 
@@ -1088,10 +1115,14 @@ class ActionBallFullMdpRsl3Adapter:
                 pass
             raise RuntimeError(reason) from exc
         _emit_non_authoritative_stdout_marker(
-            safety_marker, marker_name="HOPE_JOINT_SAFETY_UPDATE_JSON"
+            safety_marker,
+            marker_name="HOPE_JOINT_SAFETY_UPDATE_JSON",
+            durable_wal_authoritative=False,
         )
         _emit_non_authoritative_stdout_marker(
-            marker, marker_name="HOPE_ACTION_EPOCH_UPDATE_ACK_JSON"
+            marker,
+            marker_name="HOPE_ACTION_EPOCH_UPDATE_ACK_JSON",
+            durable_wal_authoritative=True,
         )
         return result
 

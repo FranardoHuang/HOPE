@@ -14,11 +14,30 @@ import torch
 
 
 LANE = Path(__file__).resolve().parents[1]
+PPO_RECIPE_PATH = LANE.parent / (
+    "source/whole_body_tracking/action_ball_full_mdp_ppo_recipe.py"
+)
 PLANT_XML = LANE.parents[2] / (
     "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/"
     "a3_pingpong/a3_pingpong.xml"
 )
-TRANSITIONS = 4096 * 48
+
+
+def _load_ppo_recipe():
+    spec = importlib.util.spec_from_file_location(
+        "_mujoco_consumer_test_ppo_recipe", PPO_RECIPE_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.ACTION_BALL_FULL_MDP_PPO_RECIPE
+
+
+PPO_RECIPE = _load_ppo_recipe()
+NUM_ENVS = PPO_RECIPE.num_envs
+STEPS_PER_UPDATE = PPO_RECIPE.num_steps_per_env
+TRANSITIONS = NUM_ENVS * STEPS_PER_UPDATE
 UID = 6907688916670928
 COMMIT = "a" * 40
 NAMESPACE = "mujoco-fullmdp-consumer-test-0001"
@@ -225,12 +244,12 @@ def _base_record(module, index, *, identity=IDENTITY):
         "diagnostic_unauthorized": True,
         "update_index": index,
         "run_identity": _copy_identity(identity),
-        "num_envs": 4096,
-        "num_steps_per_env": 48,
+        "num_envs": NUM_ENVS,
+        "num_steps_per_env": STEPS_PER_UPDATE,
         "transitions_delta": TRANSITIONS,
         "transitions_cumulative": TRANSITIONS * (index + 1),
-        "environment_steps_delta": 48,
-        "environment_steps_cumulative": 48 * (index + 1),
+        "environment_steps_delta": STEPS_PER_UPDATE,
+        "environment_steps_cumulative": STEPS_PER_UPDATE * (index + 1),
         "storage_finite": {
             "observations_policy": True,
             "observations_critic": True,
@@ -460,10 +479,10 @@ def _write_completion(path, module, count, evidence_inventory, receipts,
         "record_type": "mujoco_full_mdp_completion",
         "diagnostic_unauthorized": True,
         "run_identity": _copy_identity(identity),
-        "num_envs": 4096,
-        "num_steps_per_env": 48,
+        "num_envs": NUM_ENVS,
+        "num_steps_per_env": STEPS_PER_UPDATE,
         "completed_updates": count,
-        "environment_steps": 48 * count,
+        "environment_steps": STEPS_PER_UPDATE * count,
         "transitions": TRANSITIONS * count,
         "evidence_jsonl": evidence_inventory,
         "snapshot_receipts": receipts,
@@ -877,11 +896,16 @@ def test_evidence_v7_and_completion_v4_are_rejected_by_separate_schemas(
         _consume(module, evidence, snapshots, 1, completion)
 
 
-def test_snapshot_schedule_preserves_twenty_six_artifacts():
+def test_snapshot_schedule_follows_the_typed_finite_recipe():
     module = _load()
     indices = module._snapshot_indices(True)
-    assert indices == list(range(0, 12_500, 500)) + [12_499]
-    assert len(indices) == 26
+    expected = list(
+        range(0, module.COMPLETE_UPDATES, module.SAVE_INTERVAL)
+    )
+    if module.COMPLETE_UPDATES - 1 not in expected:
+        expected.append(module.COMPLETE_UPDATES - 1)
+    assert indices == expected
+    assert indices[-1] == module.COMPLETE_UPDATES - 1
 
 
 def test_sealed_all_zero_longrun_is_not_milestone_coverage_completion(
@@ -1127,6 +1151,65 @@ def test_portable_due_accept_defer_rates_use_due_denominator(tmp_path):
         "due_rows": 2, "accepted_rows": 1, "deferred_rows": 1,
         "accept_rate": 0.5, "defer_rate": 0.5,
     }
+
+
+@pytest.mark.parametrize(
+    "broken_counts",
+    (
+        {
+            "scheduled_due_rows": 1,
+            "due_terminal_overlap_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 1,
+        },
+        {
+            "scheduled_due_rows": 1,
+            "reveal_due_rows": 1,
+            "reveal_rows": 2,
+            "reveal_deferred_rows": 0,
+        },
+    ),
+)
+def test_consumer_rejects_broken_curriculum_opportunity_partition(
+    tmp_path, broken_counts
+):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["extras_counts"].update(broken_counts)
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="curriculum opportunity partition"):
+        _consume(module, evidence, snapshots, 1)
+
+
+@pytest.mark.parametrize(
+    "broken_counts",
+    (
+        {"r03_present_rows": 1, "r03_physically_valid_rows": 2},
+        {"r06_present_rows": 1, "r06_eligible_rows": 2},
+        {
+            "r06_present_rows": 2,
+            "r06_eligible_rows": 1,
+            "r06_common_rows": 2,
+        },
+    ),
+)
+def test_consumer_rejects_broken_reward_opportunity_subset(
+    tmp_path, broken_counts
+):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["extras_counts"].update(broken_counts)
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match="reward opportunity subset"):
+        _consume(module, evidence, snapshots, 1)
 
 
 def test_early_selected_contact_without_r03_is_reported_not_rejected(tmp_path):
@@ -1685,16 +1768,30 @@ def test_rejects_finite_toy_snapshot_that_is_not_exact_model_abi(tmp_path):
         _consume(module, evidence, snapshots, 1)
 
 
-def test_fresh_model_abi_is_semantic_203_219_and_rejects_legacy_inputs(tmp_path):
+@pytest.mark.parametrize(
+    ("parameter_name", "v2_shape"),
+    (
+        ("actor.0.weight", (512, 203)),
+        ("critic.0.weight", (512, 219)),
+    ),
+)
+def test_fresh_model_abi_is_semantic_v3_and_rejects_v2_snapshots(
+    tmp_path, parameter_name, v2_shape
+):
     module = _load()
+    contract = module._portable_observation_module()
     shapes = dict(module.MODEL_SHAPES)
-    assert shapes["actor.0.weight"] == (512, 203)
-    assert shapes["critic.0.weight"] == (512, 219)
+    assert contract.ACTOR_WIDTH_V3 == 215
+    assert contract.CRITIC_WIDTH_V3 == 231
+    assert module.ACTOR_OBSERVATION_WIDTH == contract.ACTOR_WIDTH_V3
+    assert module.CRITIC_OBSERVATION_WIDTH == contract.CRITIC_WIDTH_V3
+    assert shapes["actor.0.weight"] == (512, contract.ACTOR_WIDTH_V3)
+    assert shapes["critic.0.weight"] == (512, contract.CRITIC_WIDTH_V3)
 
     def mutate(index, payload):
         if index == 0:
-            payload["model_state_dict"]["actor.0.weight"] = torch.zeros(
-                (512, 229), dtype=torch.float32
+            payload["model_state_dict"][parameter_name] = torch.zeros(
+                v2_shape, dtype=torch.float32
             )
 
     evidence, snapshots, _completion, _rows = _artifacts(
@@ -1727,19 +1824,6 @@ def test_rejects_snapshot_ack_receipt_not_bound_to_same_file(tmp_path):
     _write_evidence(evidence, rows)
     with pytest.raises(ValueError, match="snapshot ACK receipt binding"):
         _consume(module, evidence, snapshots, 1)
-
-
-def test_consumer_keeps_producer_marginals_without_subset_gate(tmp_path):
-    module = _load()
-
-    def mutate(rows):
-        rows[0]["extras_counts"]["r06_common_rows"] = 1
-
-    evidence, snapshots, _completion, _rows = _artifacts(
-        module, tmp_path, 1, complete=False, row_mutation=mutate
-    )
-    summary = _consume(module, evidence, snapshots, 1)
-    assert summary["milestones"]["r06_common_rows"] == 1
 
 
 def test_rejects_legacy_phase_seven_wire_key(tmp_path):

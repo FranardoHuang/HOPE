@@ -1,24 +1,79 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`successor-running / live-diagnostic-only / no-authorized-formal-run`
+- 状态：`V6-candidate-exact-Pod-retest / old-V5-read-only / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 本 successor 最高证据等级：`E1`；历史 negative-control 另有 `E3` 诊断，不传递为新系统 E3
-- 创建日期/最后复核日期：2026-08-02 / 2026-08-23
+- 本 successor 当前最高证据等级：Isaac pre-V3 predecessor runtime为`E2`；最终V3/PPO V5与Mu侧仍低于
+  `E2`，历史negative-control另有`E3`诊断且不向新系统传递
+- 创建日期/最后复核日期：2026-08-02 / 2026-08-25
 
 共享缩写按[术语与人话对照](../../DEFINITIONS.md)解释。本文件是下一版系统的**依赖、证据充分性和
 版本迁移账**，不是全项目优先级队列。当前采用 setting、认领和算力顺序仍只认
 [`origin/main` 的 `NOW`](../../NOW.md)。
 
-> **阅读规则：**当前执行合同只认本节、紧随其后的adoption table与
-> [双后端TODO §0.4](../../operations/action_ball_dual_backend_longrun_todo_20260819.md)。从
+> **阅读规则：**当前执行合同只认“2026-08-25 current correction”、紧随其后的adoption table与
+> [双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)。从
 > “2026-08-21 portable successor事实纠正”起的229/399、211/319、H24、`history=8`与旧schema/gate结论
-> 都是可追溯历史；除非本节明确引用，不得反向覆盖现役`203/219`、H48、三段reference或6/5/5 wire。
+> 都是可追溯历史；除非本节明确引用，不得反向覆盖H48、三段reference、`9/5/6` wire、PPO V5或
+> Observation V3 `215/231`。V2 `203/219`只作旧checkpoint ABI和paired control。
 
-## 2026-08-23 current correction
+## 2026-08-25 current correction
+
+**当前候选与旧live分层：**旧MuJoCo V5只读证据已证明balance/task exposure改善而
+mimic→selected contact没有闭合；landing因没有eligible contact仍为`未测`，不能写成零成功率。冻结计数、
+分母和Build4来源只认[课程实验§10](EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)。
+`9d333b0b`（语义`ba7225b2`）是Observation/PPO最终裁决前的predecessor；最终V6 exact source SHA待冻结，
+不得继承V5 checkpoint或证据等级。
+
+**当前学习合同：**fresh learner采用[`PPO V5`](../../DEFINITIONS.md#fullmdp-ppo-v5)的
+`2048 env × H48 × U25000`、save500、E5/MB4，继承V4的GAE`lambda=.98`、entropy0、learned`log_std`、
+fresh sigma`.05`且无强制decay。总transition、minibatch大小和optimizer-step数虽保持，但刷新/GAE/KL/
+WAL/checkpoint边界改变，必须另做exact rate与学习canary。Reward采用
+[`Reward24`](../../DEFINITIONS.md#fullmdp-reward24)，Observation采用
+[`V3`](../../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)
+`215/231`：四个全phase、同clock measured-teacher-minus-achieved paddle heading residual关闭Reward source
+未直接actor-visible的representation gap；不加入raw ball/aim/rate/history/action ID，也不宣称strict
+Markov alias、完整Markov或部署已验证。motion
+normal是signed physical face；ball-task normal仍是raw-A，两者不可复用。
+
+**Cadence与wire纠正：**真实due只有tick`295/588/881/1174`；`1467`是第四球settlement boundary，不是
+第五个机会。V3 actor `[208] time_to_next_opportunity_s`在第四次due消费后用raw `-1`表示exhausted，两个
+backend同义。Isaac的due+terminal overlap来自独立ResetTelemetry与D05 scheduled-due在既有CPU
+pre-optimizer drain求交集，不新增每步Gate/D2H/owner。Isaac milestone schema7按具名episode slice解码；
+Mu evidence/completion/summary当前为`9/5/6`，旧`6/5/5`只作历史。
+
+**MuJoCo native表示与Pod反例：**真实Full-A已证明pose事实源是底层
+`data.struct.xpos/xquat` native Warp `wp.array[vec3/quat]`，不是外层TorchArray代理；candidate直接消费
+native arrays，不做Torch中转或host sync。72b失败分类、CPU分区、Isaac predecessor 61-update receipt与
+PPO V5性能边界只认[热路实验§16](EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。
+pre-V3 Isaac runtime达到单侧`E2`，但最终V3/PPO V5 exact CPU、Mu真实GPU、两端rate和matched physics
+仍为`未测`，不能整体抬成跨后端`E2`。
+
+**Build4辩证对照：**只采用直接连续拍面Reward与同source actor-visible纠偏状态；曝光频率、warm-start、
+replay、双LR、sigma与具体权重延后。其selected candidate仍`NOT_PROVEN`；commit、混杂因素与
+adopt/defer/reject详见课程实验§10.3。
+
+**结构与安全边界：**目标是`PlantFacts → ActionBallState transition → StepTelemetry`。same-writer echo、
+无人消费Gate或seal后source recheck只能作为逐callpoint删除候选；未点名writer/seal并同批提供mutation反例前
+不得删除。跨writer conservation、native plant finite/joint/table、full-key/generation、optimizer边界、
+run-owned no-clobber、WAL/fsync/ACK和GPU lock继续保留。
+
+### 2026-08-25 current adoption table
+
+| 项 | 当前裁决 | 原因 |
+| --- | --- | --- |
+| learner | 采用PPO V5 `2048/H48/U25000/MB4/E5` | 总样本经济保持但刷新语义改变；exact rate+学习canary未测 |
+| Reward | 采用Reward24与四项measured-paddle prior | 直接闭合持拍腕的连续mimic桥，不增Stage |
+| actor/critic | 采用Observation V3 `215/231`；V2只作旧ABI/paired control | 同producer最小残差关闭representation gap；拒绝raw ball/aim/history/ID扩张 |
+| cadence | 采用四个真实due与耗尽`-1` sentinel | 不给policy不存在的第五机会；双backend同义 |
+| Build4 | 采用direct reward+actor-visible same-source state；延后曝光频率/warm-start/replay/数值；拒绝formal/73-action外推 | 区分可迁移机制与未证明结果 |
+| performance | 4096 predecessor probe只作基线；最终PPO V5两端rate均未测 | 约`4.8 s`是目标，不是结果；单轮、synthetic PASS与代码删行不能代签 |
+| authority | 保持`diagnostic_unauthorized`、G04/G05/G06 `Partial` | contact/landing、exact Pod、physics parity、completion与transfer均未闭合 |
+
+## HISTORICAL / FROZEN — 2026-08-23 current correction
 
 **旧V4最终冻结，不迁移为V5验收：**MuJoCo最终连续durable ACK `0..4798`、`943,521,792`
 transitions；recent20 wall mean/median=`14.146/13.994 s/H48`。累计public due/reveal/defer=
@@ -129,7 +184,7 @@ live clean SHA、host/Pod CPU/CUDA与EPA48/RSL3、双launcher dry-run及fresh Is
 独立playback denominator、12500 completion与transfer仍**pending**。本节只确认诊断发车与可信短前缀，
 不授权resume、promotion、export、部署或真机。
 
-### 2026-08-23 current adoption table
+### HISTORICAL / FROZEN — 2026-08-23 current adoption table
 
 | 项 | 当前裁决 | 原因 |
 | --- | --- | --- |
@@ -11430,12 +11485,12 @@ leg-only projection、4 s被动稳定和 `200/800` durability 都不得成为隐
    与 stateful export Gate3B 通过，且按实际 transition/lead-time/streak 报分母；
 6. independent physical exam 完成；缺数据的 formal 格仍明确 `未测`，没有被平均数掩盖。
 
-在此之前，当前最诚实的总体状态只认页首`2026-08-23 current correction`与
-[双后端TODO §0.4](../../operations/action_ball_dual_backend_longrun_todo_20260819.md)：V5 clean source已在
-Isaac/MuJoCo双fresh运行，证据可信短前缀和balance早期改善成立，但mimic、hit、landing、recovery、formal
-checkpoint、physics/transfer parity与12500 completion仍未测或未闭合。下文A211/C211、211/319-D、oracle32、
-四格与`0/73` mechanical audit是predecessor历史，不得覆盖现役203/219、H48、三段reference、6/5/5 wire或
-`diagnostic_unauthorized=true`边界。
+在此之前，当前总体状态只认页首`2026-08-25 current correction`与
+[双后端TODO §0.5](../../operations/action_ball_dual_backend_longrun_todo_20260819.md#05-2026-08-25-currentv6最小学习闭环候选exact-pod重验与fresh双后端替换)：
+PPO V5、Reward24与Observation V3 `215/231`合同已冻结，但final exact source SHA、两端Pod rate/学习canary、
+mimic→contact、landing/recovery、formal checkpoint、physics/transfer parity与25000 completion仍未测或未
+闭合。下文A211/C211、211/319-D、oracle32、四格与`0/73` mechanical audit是predecessor历史，不得覆盖
+V3、H48、三段reference、`9/5/6` wire或`diagnostic_unauthorized=true`边界。
 ### 2026-08-18：WAIT RSL3 输入身份修正
 
 薄launcher原先没有把one-shot运行器冻结的ready-pose传进production env；direct GPU测试与真实

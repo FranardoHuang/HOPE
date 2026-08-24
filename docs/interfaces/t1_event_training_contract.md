@@ -1,12 +1,43 @@
 # T1 Post-Strike Event Training Contract
 
-Status: **core training implementation plus frame-0 waiting design; not launch-ready**
-(2026-07-15).
+Status: **FullMDP V6 cadence/evidence candidate plus historical T1 scheduler; exact Pod retest pending**
+(2026-08-25).
 
 This note defines the runtime seam added after the frozen T0/T1 preregistration at commit
 `1913861`. It does not mutate that preregistration or fill any of its null launch bindings.
 Materialized schedules, continuous Isaac/MuJoCo judges, self-hit instrumentation, a fresh exact
 baseline, and the semantics-correct plant contract remain blockers.
+
+## Current FullMDP four-opportunity cadence
+
+The current single-action FullMDP candidate does not invent a fifth opportunity to fill the episode.
+Its four real scheduled due ticks are exactly:
+
+```text
+295, 588, 881, 1174
+```
+
+Tick `1467` is the settlement boundary for the fourth shot, not another reveal. Observation V3 actor
+column `[208]` (`[196]` in historical V2) is a countdown only while one of those four due events remains;
+after tick1174 is consumed it publishes raw `-1` as an exhausted sentinel. This keeps Isaac and
+MuJoCo from exposing different fictitious futures without adding an observation column.
+
+A scheduled due and a public reveal are different facts. The schedule is frozen before physics; a
+row that terminates while crossing a due contributes to `scheduled_due` and `due_terminal_overlap`,
+but never to actor-visible `public_due`. MuJoCo can retain that pre-physics schedule fact directly.
+On Isaac, reset and D05 are independent writers: the existing CPU pre-optimizer drain computes the
+intersection of `ResetTelemetry` terminal rows and D05 scheduled-due rows. This is a cross-writer
+evidence join, not a per-step safety Gate. It adds no D2H, owner, actor field, receipt or task-success
+dependency, and healthy peers remain trainable.
+
+Isaac milestone schema7 appends paddle telemetry after the episode/reset block. Consumers must use
+the named episode slice, never a positional `[-7:]` suffix. Predecessor `9d333b0b` includes the
+fresh-due terminal counterexample, but the final Observation V3/PPO V5 source SHA, its exact Pod
+CPU/Kit validation and fresh runtime evidence remain `未测`; schema correctness is not launch or
+promotion authority.
+
+The older materialized T1 scheduler below remains a separate historical design track. It must not
+override the current FullMDP four-opportunity cadence or be cited as V6 launch readiness.
 
 ## Materialized schedule bytes
 

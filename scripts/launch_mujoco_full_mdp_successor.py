@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import statistics
 import subprocess
 import sys
 
@@ -25,6 +26,10 @@ RUNNER_RELATIVE = Path(
     "hope_training/whole_body_tracking/mjlab_lane/"
     "mujoco_gpu_ac_full_mdp_wait_rsl3.py"
 )
+PPO_RECIPE_RELATIVE = Path(
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "action_ball_full_mdp_ppo_recipe.py"
+)
 PLANT_CONTRACT_RELATIVE = Path(
     "hope_training/whole_body_tracking/mjlab_lane/"
     "mujoco_full_mdp_plant_contract.py"
@@ -32,6 +37,15 @@ PLANT_CONTRACT_RELATIVE = Path(
 CHILD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 CHILD_LOCALE = "C.UTF-8"
 READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d38069"
+RATE_PROBE_WARMUP_UPDATES = 10
+RATE_PROBE_MEASURED_UPDATES = 50
+RATE_PROBE_TAIL_UPDATES = 1
+RATE_PROBE_NUM_UPDATES = (
+    RATE_PROBE_WARMUP_UPDATES
+    + RATE_PROBE_MEASURED_UPDATES
+    + RATE_PROBE_TAIL_UPDATES
+)
+RATE_PROBE_STDOUT_MARKER = "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON="
 
 
 class LaunchError(RuntimeError):
@@ -58,6 +72,112 @@ def _plant_contract_module():
         sys.modules.pop(name, None)
         raise
     return module
+
+
+def _ppo_recipe_module():
+    """Load the dependency-free typed recipe from this exact checkout."""
+
+    source = (REPO_ROOT / PPO_RECIPE_RELATIVE).resolve()
+    name = "_hope_mujoco_full_mdp_ppo_recipe_launcher"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise LaunchError("cached FullMDP PPO recipe origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise LaunchError("cannot load FullMDP PPO recipe")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+FULL_MDP_PPO_RECIPE = (
+    _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
+)
+
+
+def _canonical_payload_sha256(payload: dict[str, object]) -> str:
+    body = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _same_exact(left, right) -> bool:
+    if type(left) is not type(right):
+        return False
+    if type(left) is dict:
+        return set(left) == set(right) and all(
+            _same_exact(left[name], right[name]) for name in left
+        )
+    if type(left) is list:
+        return len(left) == len(right) and all(
+            _same_exact(left_value, right_value)
+            for left_value, right_value in zip(left, right)
+        )
+    return left == right
+
+
+def _rate_execution_recipe(
+    *,
+    num_envs: int = FULL_MDP_PPO_RECIPE.num_envs,
+    num_steps_per_env: int = FULL_MDP_PPO_RECIPE.num_steps_per_env,
+    max_iterations: int = RATE_PROBE_NUM_UPDATES,
+    save_interval: int = FULL_MDP_PPO_RECIPE.save_interval,
+) -> dict[str, object]:
+    """Return the backend-neutral, actual finite rate execution identity."""
+
+    effective_runner = {
+        "num_envs": num_envs,
+        "num_steps_per_env": num_steps_per_env,
+        "max_iterations": max_iterations,
+        "save_interval": save_interval,
+    }
+    candidate_runner = {
+        "num_envs": FULL_MDP_PPO_RECIPE.num_envs,
+        "num_steps_per_env": FULL_MDP_PPO_RECIPE.num_steps_per_env,
+        "max_iterations": FULL_MDP_PPO_RECIPE.max_iterations,
+        "save_interval": FULL_MDP_PPO_RECIPE.save_interval,
+    }
+    return {
+        "schema_version": 1,
+        "kind": "action_ball_full_mdp_h48_rate_execution_v1",
+        "candidate_production_execution_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE.recipe_sha256()
+        ),
+        "learning_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+        ),
+        "effective_runner": effective_runner,
+        "runner_overrides": {
+            name: {
+                "candidate_production": candidate_runner[name],
+                "rate_execution": effective_runner[name],
+            }
+            for name in candidate_runner
+            if candidate_runner[name] != effective_runner[name]
+        },
+        "diagnostic_overrides": {
+            "warmup_updates": RATE_PROBE_WARMUP_UPDATES,
+            "measured_updates": RATE_PROBE_MEASURED_UPDATES,
+            "tail_updates": RATE_PROBE_TAIL_UPDATES,
+            "profiler_enabled": False,
+            "diagnostic_unauthorized": True,
+            "formal_evidence": False,
+            "checkpoint_authority": False,
+            "resume_authority": False,
+        },
+    }
 
 
 def _run_text(argv: list[str], label: str) -> str:
@@ -224,22 +344,42 @@ def _paths(root: Path) -> dict[str, Path]:
         "pycache": root / "pycache",
         "stdout": root / "stdout.log",
         "stderr": root / "stderr.log",
+        "rate_receipt": root / "diagnostic-rate-probe.json",
     }
 
 
 def _child_argv(
-    python: Path, runner: Path, paths: dict[str, Path], commit: str, namespace: str
+    python: Path,
+    runner: Path,
+    paths: dict[str, Path],
+    commit: str,
+    namespace: str,
+    *,
+    diagnostic_rate_probe: bool = False,
 ) -> list[str]:
-    return [
+    argv = [
         str(python), str(runner), "--full-a",
-        "--num-envs", "4096", "--num-updates", "12500",
+        "--num-envs", str(FULL_MDP_PPO_RECIPE.num_envs),
+        "--num-updates", str(
+            RATE_PROBE_NUM_UPDATES
+            if diagnostic_rate_probe
+            else FULL_MDP_PPO_RECIPE.max_iterations
+        ),
         "--evidence-jsonl", str(paths["evidence"]),
-        "--snapshot-dir", str(paths["snapshots"]),
-        "--completion-json", str(paths["completion"]),
+    ]
+    if not diagnostic_rate_probe:
+        argv.extend((
+            "--snapshot-dir", str(paths["snapshots"]),
+            "--completion-json", str(paths["completion"]),
+        ))
+    argv.extend((
         "--source-commit", commit, "--run-namespace", namespace,
         "--mujoco-warp-runtime-site", str(paths["runtime_site"]),
-        "--save-interval", "500",
-    ]
+        "--save-interval", str(FULL_MDP_PPO_RECIPE.save_interval),
+    ))
+    if diagnostic_rate_probe:
+        argv.append("--diagnostic-rate-probe")
+    return argv
 
 
 def _env_contract(
@@ -297,6 +437,235 @@ def _child_env(contract: dict[str, object]) -> dict[str, str]:
     ):
         raise LaunchError("child environment contract differs")
     return dict(values)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb", buffering=0) as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+    except OSError as exc:
+        raise LaunchError(f"cannot hash {path}") from exc
+    return digest.hexdigest()
+
+
+def _rate_probe_receipt_payload(
+    *,
+    stdout_log: Path,
+    source_commit: str,
+    namespace: str,
+    gpu_index: int,
+    gpu_uuid: str,
+) -> dict[str, object]:
+    """Validate the runner's natural-exit marker and bind launcher identity."""
+
+    try:
+        rows = stdout_log.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise LaunchError("cannot read completed MuJoCo rate log") from exc
+    markers = [
+        row[len(RATE_PROBE_STDOUT_MARKER):]
+        for row in rows
+        if row.startswith(RATE_PROBE_STDOUT_MARKER)
+    ]
+    if len(markers) != 1:
+        raise LaunchError("MuJoCo diagnostic rate marker identity differs")
+    def unique_object(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise ValueError("duplicate JSON key")
+            result[name] = value
+        return result
+
+    try:
+        payload = json.loads(
+            markers[0],
+            object_pairs_hook=unique_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                ValueError("nonfinite JSON constant")
+            ),
+        )
+        if type(payload) is not dict:
+            raise TypeError("rate marker is not an object")
+        _canonical_payload_sha256(payload)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise LaunchError("MuJoCo diagnostic rate marker is not finite JSON") from exc
+
+    candidate = FULL_MDP_PPO_RECIPE.execution_recipe()
+    candidate_sha256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
+    rate_execution = _rate_execution_recipe()
+    rate_execution_sha256 = _canonical_payload_sha256(rate_execution)
+    expected_scalars = {
+        "kind": "action_ball_mujoco_full_mdp_h48_rate_probe_v1",
+        "schema_version": 1,
+        "diagnostic_unauthorized": True,
+        "formal_evidence": False,
+        "safety_gate": False,
+        "source_commit": source_commit,
+        "namespace": namespace,
+        "task_lifecycle": "full_a_diagnostic_rate_probe",
+        "rsl_rl_version": "3.1.2",
+        "policy_width": 215,
+        "critic_width": 231,
+        "learning_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+        ),
+        "ppo_update_calls": RATE_PROBE_NUM_UPDATES,
+        "environment_steps": (
+            RATE_PROBE_NUM_UPDATES * FULL_MDP_PPO_RECIPE.num_steps_per_env
+        ),
+        "transitions": (
+            RATE_PROBE_NUM_UPDATES
+            * FULL_MDP_PPO_RECIPE.num_steps_per_env
+            * FULL_MDP_PPO_RECIPE.num_envs
+        ),
+        "candidate_production_execution_recipe_sha256": candidate_sha256,
+        "rate_execution_recipe_sha256": rate_execution_sha256,
+    }
+    outer_keys = set(expected_scalars) | {
+        "candidate_production_execution_recipe",
+        "rate_execution_recipe",
+        "rate_probe",
+    }
+    if set(payload) != outer_keys or any(
+        not _same_exact(payload.get(name), value)
+        for name, value in expected_scalars.items()
+    ):
+        raise LaunchError("MuJoCo diagnostic rate receipt identity differs")
+    if (
+        not _same_exact(
+            payload.get("candidate_production_execution_recipe"), candidate
+        )
+        or not _same_exact(payload.get("rate_execution_recipe"), rate_execution)
+        or _canonical_payload_sha256(
+            payload["candidate_production_execution_recipe"]
+        ) != candidate_sha256
+        or _canonical_payload_sha256(
+            payload["rate_execution_recipe"]
+        ) != rate_execution_sha256
+    ):
+        raise LaunchError("MuJoCo diagnostic rate recipe identity differs")
+    rate = payload.get("rate_probe")
+    rate_keys = {
+        "warmup_updates",
+        "measured_updates",
+        "tail_updates",
+        "total_wall_seconds",
+        "measured_wall_seconds",
+        "measured_update_seconds",
+        "measured_transitions",
+        "measured_transitions_per_second",
+        "update_seconds_p50",
+        "update_seconds_p90",
+    }
+    if type(rate) is not dict or set(rate) not in (
+        rate_keys,
+        rate_keys | {"torch_cuda_peak_allocated_bytes"},
+    ) or any(
+        not _same_exact(rate.get(name), value)
+        for name, value in {
+            "warmup_updates": RATE_PROBE_WARMUP_UPDATES,
+            "measured_updates": RATE_PROBE_MEASURED_UPDATES,
+            "tail_updates": RATE_PROBE_TAIL_UPDATES,
+            "measured_transitions": (
+                RATE_PROBE_MEASURED_UPDATES
+                * FULL_MDP_PPO_RECIPE.num_steps_per_env
+                * FULL_MDP_PPO_RECIPE.num_envs
+            ),
+        }.items()
+    ):
+        raise LaunchError("MuJoCo diagnostic rate timing window differs")
+    measured = rate.get("measured_update_seconds")
+    if (
+        type(measured) is not list
+        or len(measured) != RATE_PROBE_MEASURED_UPDATES
+        or any(
+            type(value) is not float
+            or not 0.0 < value < float("inf")
+            for value in measured
+        )
+    ):
+        raise LaunchError("MuJoCo diagnostic rate timing samples differ")
+    measured_wall = sum(measured)
+    measured_transitions = (
+        RATE_PROBE_MEASURED_UPDATES
+        * FULL_MDP_PPO_RECIPE.num_steps_per_env
+        * FULL_MDP_PPO_RECIPE.num_envs
+    )
+    expected_metrics = {
+        "measured_wall_seconds": measured_wall,
+        "measured_transitions_per_second": (
+            measured_transitions / measured_wall
+        ),
+        "update_seconds_p50": statistics.median(measured),
+        "update_seconds_p90": statistics.quantiles(
+            measured, n=10, method="inclusive"
+        )[8],
+    }
+    total_wall = rate.get("total_wall_seconds")
+    if (
+        type(total_wall) is not float
+        or not measured_wall <= total_wall < float("inf")
+        or any(
+            not _same_exact(rate.get(name), value)
+            for name, value in expected_metrics.items()
+        )
+        or (
+            "torch_cuda_peak_allocated_bytes" in rate
+            and (
+                type(rate["torch_cuda_peak_allocated_bytes"]) is not int
+                or rate["torch_cuda_peak_allocated_bytes"] < 0
+            )
+        )
+    ):
+        raise LaunchError("MuJoCo diagnostic rate aggregate metrics differ")
+
+    receipt = dict(payload)
+    receipt["runner_marker"] = {
+        "kind": payload["kind"],
+        "schema_version": payload["schema_version"],
+    }
+    receipt["kind"] = "action_ball_mujoco_full_mdp_h48_rate_receipt_v1"
+    receipt["schema_version"] = 1
+    receipt["gpu"] = {"index": gpu_index, "uuid": gpu_uuid}
+    receipt["stdout_log"] = {
+        "path": str(stdout_log),
+        "sha256": _sha256(stdout_log),
+    }
+    return receipt
+
+
+def _write_rate_probe_receipt(path: Path, payload: dict[str, object]) -> None:
+    try:
+        body = (
+            json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise LaunchError("MuJoCo diagnostic rate receipt is not finite JSON") from exc
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        offset = 0
+        while offset < len(body):
+            written = os.write(descriptor, body[offset:])
+            if written <= 0:
+                raise OSError("short diagnostic receipt write")
+            offset += written
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise LaunchError("cannot no-clobber MuJoCo diagnostic rate receipt") from exc
+    finally:
+        if "descriptor" in locals():
+            os.close(descriptor)
 
 
 def _gpu_is_free(index: int, expected_uuid: str) -> None:
@@ -422,7 +791,14 @@ def launch(args: argparse.Namespace) -> int:
         if not os.access(taskset, os.X_OK):
             raise LaunchError("taskset must be executable")
     paths = _paths(root)
-    argv = _child_argv(python, runner, paths, commit, args.namespace)
+    argv = _child_argv(
+        python,
+        runner,
+        paths,
+        commit,
+        args.namespace,
+        diagnostic_rate_probe=args.diagnostic_rate_probe,
+    )
     if cpu_affinity is not None:
         argv = [str(taskset), "-c", cpu_affinity, *argv]
     contract = _env_contract(
@@ -430,7 +806,7 @@ def launch(args: argparse.Namespace) -> int:
     )
     if args.dry_run:
         plant_identity = _plant_contract_module().expected_plant_model_identity()
-        print(json.dumps({
+        dry_run_payload = {
             "argv": argv,
             "env": contract,
             "plant_xml": {
@@ -441,7 +817,29 @@ def launch(args: argparse.Namespace) -> int:
                 None if cpu_affinity is None else "explicit_cli"
             ),
             "cpu_ids": cpu_ids,
-        }, sort_keys=True, separators=(",", ":")))
+        }
+        if args.diagnostic_rate_probe:
+            rate_execution_recipe = _rate_execution_recipe()
+            dry_run_payload.update({
+                "candidate_production_execution_recipe": (
+                    FULL_MDP_PPO_RECIPE.execution_recipe()
+                ),
+                "candidate_production_execution_recipe_sha256": (
+                    FULL_MDP_PPO_RECIPE.recipe_sha256()
+                ),
+                "rate_execution_recipe": rate_execution_recipe,
+                "rate_execution_recipe_sha256": (
+                    _canonical_payload_sha256(rate_execution_recipe)
+                ),
+            })
+        else:
+            dry_run_payload.update({
+                "ppo_recipe": FULL_MDP_PPO_RECIPE.execution_recipe(),
+                "ppo_recipe_sha256": FULL_MDP_PPO_RECIPE.recipe_sha256(),
+            })
+        print(json.dumps(
+            dry_run_payload, sort_keys=True, separators=(",", ":")
+        ))
         return 0
     with _exclusive_lock(args.lock_file) as gpu_lock:
         _gpu_is_free(args.gpu_index, args.expected_gpu_uuid)
@@ -467,7 +865,32 @@ def launch(args: argparse.Namespace) -> int:
                 )
             except OSError as exc:
                 raise LaunchError("cannot start Full-A child") from exc
-            return child.wait()
+            returncode = child.wait()
+        if not args.diagnostic_rate_probe or returncode != 0:
+            return returncode
+        rate_payload = _rate_probe_receipt_payload(
+            stdout_log=paths["stdout"],
+            source_commit=commit,
+            namespace=args.namespace,
+            gpu_index=args.gpu_index,
+            gpu_uuid=args.expected_gpu_uuid,
+        )
+        _write_rate_probe_receipt(paths["rate_receipt"], rate_payload)
+        print(json.dumps({
+            "diagnostic_unauthorized": True,
+            "formal_evidence": False,
+            "namespace": args.namespace,
+            "gpu_uuid": args.expected_gpu_uuid,
+            "status": "DIAGNOSTIC_RATE_PROBE_COMPLETE",
+            "rate_receipt": str(paths["rate_receipt"]),
+            "update_seconds_p50": rate_payload["rate_probe"][
+                "update_seconds_p50"
+            ],
+            "update_seconds_p90": rate_payload["rate_probe"][
+                "update_seconds_p90"
+            ],
+        }, sort_keys=True, separators=(",", ":")))
+        return 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -481,6 +904,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ready-pose", type=Path, required=True)
     parser.add_argument("--plant-xml", type=Path, required=True)
     parser.add_argument("--cpu-affinity")
+    parser.add_argument("--diagnostic-rate-probe", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

@@ -19,12 +19,10 @@ N1 uses fixed-194 `action_ball_table_pose_twist_heading_task_teacher_start_v2`: 
 one-hot slot is replaced by the exact Motion phase-governor countdown. Pod smoke/probe have
 materialized the 17-term layout and finite fresh checkpoints; what remains open is the corrected
 safety-gated long result and production deploy-consumer parity.
-The current portable FullMDP successor is the semantic Observation V2 contract:
-actor=`203`, critic=`219`. It restores the minimum floating-base state needed to distinguish
-balance-relevant states, removes raw task/control ledgers, and uses one shared ordered/scaled ABI in
-Isaac and MuJoCo Full-A. It is a fresh, warm-start-breaking lineage. The old raw `229/399` V1 remains
-only for intentional legacy WAIT compatibility; neither V1 nor the historical `211/319` fixed-question
-lineages is a fallback for a Full-A V2 launch.
+The current portable FullMDP successor is semantic Observation V3: actor=`215`, critic=`231`. It keeps
+V2's minimum floating-base state and adds only four 3-D, full-phase measured-teacher-minus-achieved
+paddle residuals required to make Reward24's state actor-visible. V2 `203/219` is historical/control;
+raw V1 `229/399` remains only for intentional legacy WAIT compatibility. None is a fresh V3 fallback.
 
 ## HITTER-Compatible Contract
 
@@ -381,9 +379,90 @@ The 212-D common prefix groups as `robot/achieved=117` and `teacher/mimic=95`:
   representation, followed by teacher joint position31/velocity31, teacher paddle-now9 and teacher
   paddle-at-reference-hit9. This raw teacher-base representation is not the final canonical choice.
 
-### Current portable FullMDP semantic Observation V2: actor 203 / critic 219
+### Current portable FullMDP semantic Observation V3: actor 215 / critic 231
 
-The current FullMDP identity is
+The fresh FullMDP identity is `action_ball_full_mdp_semantic_observation_v3`, paired with
+`action_ball_full_mdp_semantic_actor_v3` and `action_ball_full_mdp_semantic_critic_v3`. The critic's
+first 215 columns are the actor row byte-for-byte after static scaling, followed by the unchanged
+16-D privileged suffix. `empirical_normalization=false`; no observation clipping is added. This
+section is the only complete V3 order/scale truth source.
+
+V3 preserves V2 `[0:183]`, inserts one 12-D measured-motion paddle block, then shifts the V2 task
+tail and critic suffix by 12 columns:
+
+| Slice | Ordered term | Dim | Exact meaning / frame | Static multiplier |
+| --- | --- | ---: | --- | ---: |
+| `[0:3]` | `projected_gravity_b` | 3 | unit gravity direction in pelvis/body coordinates | `1` |
+| `[3:6]` | `base_ang_vel_b` | 3 | pelvis/body-frame angular velocity | `.25` |
+| `[6:9]` | `base_position_table` | 3 | root XYZ minus fixed table-surface centre, fixed table/world axes | `1` |
+| `[9:11]` | `base_heading_table_xy` | 2 | normalized `[cos(yaw), sin(yaw)]` in fixed table axes | `1` |
+| `[11:14]` | `base_com_lin_vel_heading` | 3 | root inertial-COM linear velocity, current-root yaw-only heading frame | `.5` |
+| `[14:45]` | `joint_pos_rel` | 31 | measured joint position minus default, actor joint order | `1` |
+| `[45:76]` | `joint_vel` | 31 | measured joint velocity, actor joint order | `.05` |
+| `[76:107]` | `last_action` | 31 | previous normalized actor output | `1` |
+| `[107:138]` | `teacher_joint_pos_rel` | 31 | current teacher joint position minus default | `1` |
+| `[138:169]` | `teacher_joint_vel` | 31 | current teacher joint velocity | `.05` |
+| `[169:172]` | `motion_anchor_pos_b` | 3 | teacher anchor relative to current robot anchor, current anchor frame | `10/3` |
+| `[172:178]` | `motion_anchor_ori_b6` | 6 | teacher-versus-current anchor orientation residual, continuous 6-D form | `1` |
+| `[178:183]` | `motion_phase_one_hot` | 5 | Motion playback phase (`prepare visible/swing/follow through/recover hidden/ready hold`) | `1` |
+| `[183:186]` | `motion_racket_pos_error_heading` | 3 | measured teacher site position minus achieved site position, current-root yaw-only heading frame | `5` |
+| `[186:189]` | `motion_racket_vel_error_heading` | 3 | measured teacher site point velocity minus achieved site point velocity, same heading frame | `1` |
+| `[189:192]` | `motion_racket_signed_normal_error_heading` | 3 | measured signed physical face minus achieved signed physical face, same heading frame; 3-D unit-vector chord residual, not `acos` | `2` |
+| `[192:195]` | `motion_racket_long_axis_error_heading` | 3 | measured long axis minus achieved long axis, same heading frame; 3-D unit-vector chord residual | `2` |
+| `[195:198]` | `racket_target_pos_error_heading` | 3 | actor-visible ball-task target position minus achieved racket-site position, heading frame | `5` |
+| `[198:201]` | `racket_target_vel_error_heading` | 3 | actor-visible ball-task target point velocity minus achieved racket-site velocity, heading frame | `1` |
+| `[201:204]` | `racket_target_normal_error_heading` | 3 | actor-visible raw-A/+Y task target minus achieved raw mount +Y, heading frame | `2` |
+| `[204:206]` | `base_goal_error_heading_xy` | 2 | desired base XY minus current root XY, heading frame | `5` |
+| `[206:207]` | `time_to_contact_s` | 1 | signed task contact time remaining | `1/2.42` |
+| `[207:208]` | `time_to_teacher_start_s` | 1 | teacher playback start time remaining | `1` |
+| `[208:209]` | `time_to_next_opportunity_s` | 1 | time to next real cadence due; raw `-1` after the fourth due is consumed | `1/5.86` |
+| `[209:214]` | `epoch_learning_phase_one_hot` | 5 | compact public phase (`idle/reveal/launch/outcome/retired`) | `1` |
+| `[214:215]` | `task_valid` | 1 | Motion-owned actor visibility bit | `1` |
+| `[215:216]` | `episode_time_remaining_s` | 1 | privileged finite-episode time remaining | `1/30` |
+| `[216:219]` | `live_ball_center_rel_root_heading` | 3 | privileged live ball centre minus root, heading frame | `1` |
+| `[219:222]` | `live_ball_lin_vel_heading` | 3 | privileged live ball linear velocity, heading frame | `.1` |
+| `[222:225]` | `live_ball_ang_vel_heading` | 3 | privileged live ball angular velocity, heading frame | `1/60` |
+| `[225:226]` | `selected_rubber_contact_latched` | 1 | privileged selected-rubber contact latch | `1` |
+| `[226:227]` | `net_crossed_latched` | 1 | privileged net-crossed latch | `1` |
+| `[227:228]` | `net_clear_latched` | 1 | privileged net-clear latch | `1` |
+| `[228:230]` | `foot_supported_lr` | 2 | privileged keyed-recovery left/right support bits; N/A-as-zero before a keyed shot | `1` |
+| `[230:231]` | `cadence_ready_dwell_fraction` | 1 | privileged keyed-recovery ready streak fraction, clamped `[0,1]`; N/A-as-zero before a keyed shot | `1` |
+
+All four new raw residuals are `heading_yaw_rotate(teacher_world - achieved_world)`. Position is in
+metres and velocity in metres per second. The heading basis is the current root's yaw-only frame;
+the table axes remain fixed world/environment-local axes and no rotating table pose is assumed. The
+four fields are common/full-phase state and are **never** masked by `task_valid`. By contrast, the
+first six task-owned fields `[195:208]` are safe-zeroed while task-hidden; next-opportunity, learning
+phase and `task_valid` remain visible.
+
+The motion normal uses the same signed-physical-face producer as Reward24. Before the first action and
+in split-ready, achieved face is canonical raw `+Y`; after leaving ready it applies the selected
+action's `mount_normal_sign`. The measured teacher is already aligned to that signed-face convention
+and must never receive the sign twice. Long axis has no sign. This is deliberately distinct from the
+ball-task raw-A normal at `[201:204]`, whose mount sign chooses contact identity but does not flip the
+task residual.
+
+Reward24 directly depends on an independently measured Motion paddle source. Teacher `q/dq` plus
+robot `q/dq` does not directly expose that measured-versus-achieved residual when the measured channel
+differs from FK. V3 closes that producer/representation gap without making the policy approximate
+FK/Jacobian and measurement residual together. This is a source-closure and sample-complexity decision;
+no exact row-pair with identical
+203-D bytes and different reward/action has been enumerated, so it is not presented as a strict Markov
+alias proof. It does not prove that zero contact had no other cause, that the whole process is Markov,
+or that training/physics transfer will succeed. It adds no raw ball, spin, aim, teacher rate, action
+ID, history or sim-only second-contact state. Teacher fields come from the current Motion clip/state;
+achieved fields come from paddle pose/point velocity/axes, so the design is deploy-observable, but the
+real builder, synchronization and dropout behavior remain unverified.
+
+The episode has real opportunity ticks `295/588/881/1174`; tick1467 is only final settlement. Thus
+V3 `[208]` becomes raw `-1` immediately after the fourth due is consumed. V2 uses identical semantics
+at historical index `[196]`.
+
+### Historical/control FullMDP semantic Observation V2: actor 203 / critic 219
+
+V2 is retained for old checkpoint ABI and as a later paired control if V3 fails to improve learning.
+It is not a permitted fresh fallback and cannot be selected merely because its width matches an old
+normalizer. The V2 FullMDP identity is
 `action_ball_full_mdp_semantic_observation_v2`, paired with actor contract
 `action_ball_full_mdp_semantic_actor_v2` and critic contract
 `action_ball_full_mdp_semantic_critic_v2`. This section is the **only complete ordered-layout and
@@ -415,7 +494,7 @@ The multiplier column below means `network_value = raw_physical_value * multipli
 | `[192:194]` | `base_goal_error_heading_xy` | 2 | desired base XY minus current root XY, heading frame | `5` |
 | `[194:195]` | `time_to_contact_s` | 1 | signed task contact time remaining; zero when task-hidden | `1/2.42` |
 | `[195:196]` | `time_to_teacher_start_s` | 1 | teacher playback start time remaining; zero when task-hidden | `1` |
-| `[196:197]` | `time_to_next_opportunity_s` | 1 | time until cadence can next reveal a task; visible also outside a task | `1/5.86` |
+| `[196:197]` | `time_to_next_opportunity_s` | 1 | raw seconds until the next real cadence due; after the fourth and final due, raw `-1` is the explicit exhausted sentinel rather than a fictitious fifth opportunity | `1/5.86` |
 | `[197:202]` | `epoch_learning_phase_one_hot` | 5 | compact public phase (`idle/reveal/launch/outcome/retired`) | `1` |
 | `[202:203]` | `task_valid` | 1 | Motion-owned actor visibility bit, not Epoch payload retention | `1` |
 | `[203:204]` | `episode_time_remaining_s` | 1 | privileged finite-episode time remaining | `1/30` |
@@ -428,12 +507,13 @@ The multiplier column below means `network_value = raw_physical_value * multipli
 | `[216:218]` | `foot_supported_lr` | 2 | privileged left/right support-contact bits for a keyed R07 recovery; before any keyed shot they are not applicable and are zero-filled without reading the contact sensor | `1` |
 | `[218:219]` | `cadence_ready_dwell_fraction` | 1 | privileged keyed-recovery ready streak divided by required dwell, clamped to `[0,1]`; before any keyed shot it is not applicable and zero-filled | `1` |
 
-This is not `229 + 8 = 237` or `399 + 8 = 407`. V1 exposed a 45-value raw task payload plus
+This historical V2 layout is not `229 + 8 = 237` or `399 + 8 = 407`. V1 exposed a 45-value raw task payload plus
 Epoch/control bookkeeping to the actor and broad owner-fact/Reward due-paid ledgers to the critic.
 V2 adds the nonredundant floating-root block `base position3 + unit heading2 + COM velocity3`, but
 deletes those raw ledgers and replaces them with the semantic residuals, clocks, phases and compact
 privileged suffix above. V1 `229/399` is retained only by the deliberately legacy WAIT runner/model;
-Full-A must bind V2 `203/219` and cannot silently fall back by matching an old checkpoint width.
+The old V5 Full-A lane bound V2 `203/219`; fresh V6 must bind V3 `215/231` and cannot silently fall
+back by matching an old checkpoint width.
 
 The three position-like terms are not duplicates. `base_position_table` answers where the robot is
 relative to the table; `base_goal_error_heading_xy` answers where the current task wants the base to
@@ -452,7 +532,16 @@ Racket's public actor-visible target accessors, including configured observation
 truth or a private target tensor. A backend must supply the corresponding causal target view rather
 than granting the policy an undelayed simulator oracle.
 
-For the fresh FullMDP lane, `motion_phase_one_hot` is derived only from the
+The fixed single-action episode has exactly four opportunity ticks:
+`295`, `588`, `881`, and `1174`. Tick `1467` is the fourth shot's settlement boundary, not a fifth
+opportunity. Therefore `[196]` is nonnegative only while a real future due exists; immediately after
+the fourth due is consumed it becomes raw `-1` for the rest of the episode. Isaac and MuJoCo must
+produce this same sentinel rather than one backend counting to tick1467 and the other counting to
+episode horizon. This is a semantic correction inside the existing one-column ABI, not an added
+observation. It avoids asking the policy to infer exhaustion from a clock that describes an event
+which cannot occur.
+
+For the historical V2 lane (and unchanged in V3), `motion_phase_one_hot` is derived only from the
 observable Motion/task lifecycle. R07 recovery readiness does not choose an
 actor phase, authorize reveal, or become a training-liveness dependency.
 Before the first task the actor sees the hidden/reset-ready lifecycle; at
@@ -469,7 +558,8 @@ The internal Isaac Motion publication feeding this ABI is one typed ten-tensor s
 validate the same opaque publication token, then receive isolated clones of only these ten fields;
 they do not receive the old 34-field identity/timing ledger. The isolation is intentional because a
 frozen dataclass does not make Tensor bytes immutable. Float64 countdowns are converted to float32
-only at this policy boundary. This internal narrowing does not change the 203/219 model ABI.
+only at this policy boundary. This historical narrowing did not change the V2 203/219 ABI; V3 changes
+the model ABI only through its explicit 12-D insertion.
 
 For a keyed R07 recovery, support and cadence dwell are one narrow direct observation state from the
 same real post-physics plant sample; Observation must not call the broad plant adapter a second time
@@ -483,11 +573,11 @@ same-generation peers retain their published bytes and still require exact contr
 The next keyed real post-physics publication restores the reset row. Generation rollback, jumps and
 integer wrap fail.
 
-This is a numeric semantic change even though the critic width stays `219`: older FullMDP snapshots
+This was a V2 numeric semantic change even though the critic width stayed`219`: older FullMDP snapshots
 observed live foot bits in idle rows, whereas this contract emits N/A zeros until a keyed shot exists.
 The retained width is only an ABI/load-shape compatibility choice. A run using this contract must use
-a fresh lineage and must not claim exact resume from a pre-change checkpoint. Actor `203-D` deployment
-semantics are unchanged.
+a fresh V2 lineage and must not claim exact resume from a pre-change checkpoint. It does not authorize
+loading that 203-D actor into the current 215-D V3 lane.
 
 The critic's current-flight latches and ball row are selected by R06 against the complete current
 `ActionEpochShotKey` **and** publication ordinal. R06 performs that identity match internally and
@@ -1345,13 +1435,16 @@ What the real system can observe (team contract, 2026-07):
 Rules: actor observations must be built only from deploy-available signals; rewards run in sim
 only and may use privileged state; the critic may be privileged. The current 175-D actor uses only
 robot-side signals + planner targets (no mocap terms at all). The historical fixed-194 contract and
-the current FullMDP semantic V2 both require absolute table-relative context in addition to
-robot-relative tasks. Semantic V2's actor uses calibrated table/root pose, a unit root heading and a
+the current FullMDP semantic V3 both require absolute table-relative context in addition to
+robot-relative tasks. Semantic V3's actor uses calibrated table/root pose, a unit root heading and a
 causal root inertial-COM velocity estimate, while projected gravity and angular rate remain direct
-pelvis-IMU quantities. Training must use each backend's exact counterpart of those same physical
-terms. Deployment must close table and marker→root/COM extrinsics, gyro extrinsic, timestamp
-alignment, velocity-estimator noise/latency/stale/dropout and the exact 203-D real builder first;
-until then semantic V2 remains simulator-only (see G07 Next Steps).
+pelvis-IMU quantities. Its additional 12-D block uses the controller's current measured Motion
+teacher row and achieved paddle state reconstructed from encoder FK plus the same base estimate; it
+does not require PLAY-time racket mocap or ball/contact truth. Training must use each backend's exact
+counterpart of those physical terms. Deployment must close table and marker→root/COM extrinsics,
+gyro extrinsic, timestamp alignment, velocity-estimator and teacher/paddle synchronization noise,
+latency/stale/dropout, plus the exact 215-D real builder; until then semantic V3 remains simulator-only
+(see G07 Next Steps). V2 203-D remains historical/control, not a fresh deployment fallback.
 
 ## Table-Tennis Physics Scene Observation (experimental)
 

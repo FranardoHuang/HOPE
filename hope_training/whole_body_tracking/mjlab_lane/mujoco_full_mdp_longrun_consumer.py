@@ -81,6 +81,35 @@ def _reward_contract_module():
         raise
     return module
 
+def _portable_observation_module():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_portable_observation.py"
+    ).resolve()
+    name = "_hope_mujoco_consumer_action_ball_full_mdp_portable_observation"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached FullMDP portable observation origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load FullMDP portable observation contract")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
 def _exact_reward_contract():
     contract = _reward_contract_module()
     names = getattr(contract, "MANAGER_NAMES", None)
@@ -95,6 +124,29 @@ def _exact_reward_contract():
     ):
         raise RuntimeError("FullMDP reward contract differs")
     return names, count
+
+def _exact_observation_model_widths():
+    contract = _portable_observation_module()
+    actor_width = getattr(contract, "ACTOR_WIDTH_V3", None)
+    critic_width = getattr(contract, "CRITIC_WIDTH_V3", None)
+    if (
+        getattr(contract, "OBSERVATION_KIND_V3", None)
+        != "action_ball_full_mdp_semantic_observation_v3"
+        or type(actor_width) is not int
+        or type(critic_width) is not int
+        or actor_width <= 0
+        or critic_width <= actor_width
+        or actor_width
+        != sum(width for _name, width in contract.ACTOR_LAYOUT_V3)
+        or critic_width
+        != actor_width
+        + sum(
+            width
+            for _name, width in contract.CRITIC_EXTENSION_LAYOUT_V3
+        )
+    ):
+        raise RuntimeError("FullMDP semantic observation V3 contract differs")
+    return actor_width, critic_width
 
 def _canonical_mujoco_identity_module():
     source = (Path(__file__).resolve().parents[1] / "scripts" /
@@ -136,6 +188,9 @@ def _mujoco_module():
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
 REWARD_TERM_NAMES, REWARD_TERM_COUNT = _exact_reward_contract()
+ACTOR_OBSERVATION_WIDTH, CRITIC_OBSERVATION_WIDTH = (
+    _exact_observation_model_widths()
+)
 PADDLE_PRIOR_TERM_NAMES = tuple(
     spec.manager_name
     for spec in _reward_contract_module().PADDLE_MOTION_PRIOR_SPECS
@@ -145,7 +200,7 @@ if REWARD_TERM_NAMES[-len(PADDLE_PRIOR_TERM_NAMES):] != PADDLE_PRIOR_TERM_NAMES:
 PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
 EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 9, 5, 6
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
-    FULL_MDP_PPO_RECIPE.max_iterations, 4096,
+    FULL_MDP_PPO_RECIPE.max_iterations, FULL_MDP_PPO_RECIPE.num_envs,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
     6907688916670928)
 TRANSITIONS_PER_UPDATE = NUM_ENVS * STEPS_PER_UPDATE
@@ -201,10 +256,13 @@ ACTION_CONTRACT = {
     "transfer_authority": False, "matched_cross_backend_authority": False,
 }
 MODEL_SHAPES = (
-    ("log_std", (31,)), ("actor.0.weight", (512, 203)), ("actor.0.bias", (512,)),
+    ("log_std", (31,)),
+    ("actor.0.weight", (512, ACTOR_OBSERVATION_WIDTH)),
+    ("actor.0.bias", (512,)),
     ("actor.2.weight", (256, 512)), ("actor.2.bias", (256,)), ("actor.4.weight", (128, 256)), ("actor.4.bias", (128,)),
     ("actor.6.weight", (31, 128)), ("actor.6.bias", (31,)),
-    ("critic.0.weight", (512, 219)), ("critic.0.bias", (512,)),
+    ("critic.0.weight", (512, CRITIC_OBSERVATION_WIDTH)),
+    ("critic.0.bias", (512,)),
     ("critic.2.weight", (256, 512)), ("critic.2.bias", (256,)), ("critic.4.weight", (128, 256)), ("critic.4.bias", (128,)),
     ("critic.6.weight", (1, 128)), ("critic.6.bias", (1,)),
 )
@@ -341,6 +399,19 @@ def _validate_record(row, index, run_identity):
     if invalid_domains:
         _fail("rollout storage domain: " + ",".join(sorted(invalid_domains)))
     events = _count_map(row, "extras_counts", EVENT_KEYS)
+    if (
+        events["scheduled_due_rows"]
+        != events["reveal_due_rows"] + events["due_terminal_overlap_rows"]
+        or events["reveal_due_rows"]
+        != events["reveal_rows"] + events["reveal_deferred_rows"]
+    ):
+        _fail("curriculum opportunity partition")
+    if (
+        events["r03_physically_valid_rows"] > events["r03_present_rows"]
+        or events["r06_common_rows"] > events["r06_eligible_rows"]
+        or events["r06_eligible_rows"] > events["r06_present_rows"]
+    ):
+        _fail("reward opportunity subset")
     named_faults = [name for name in (
         "missed_launch_rows", "recovery_completion_fault_rows",
     ) if events[name] != 0]

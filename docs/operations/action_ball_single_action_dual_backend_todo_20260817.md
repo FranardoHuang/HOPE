@@ -2,7 +2,7 @@
 
 > **HISTORICAL / READ-ONLY：** 本页只保留2026-08-17到2026-08-19的详细历史账；下文所有
 > `ACTIVE`、`RUNNING`、229/399、H24、25k与旧namespace表述都只描述当时快照，不是当前命令或合同。
-> 当前依赖、停止状态、A203/219、H48与fresh-run条件只看
+> 当前依赖、停止状态、Observation/PPO合同与fresh-run条件只看
 > [`action_ball_dual_backend_longrun_todo_20260819.md`](action_ball_dual_backend_longrun_todo_20260819.md)。
 > 不再在本页追加命令流水。
 

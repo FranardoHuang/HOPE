@@ -2,6 +2,19 @@
 
 Status: Partial
 
+## 2026-08-25 FullMDP V6 native-plant候选（仍`Partial`）
+
+`9d333b0b`（语义`ba7225b2`）只是最终Observation V3/PPO V5前的predecessor，final exact source SHA
+待冻结。真实Pod已经反证把MuJoCo-Warp外层pose代理当Torch tensor；candidate改为直接消费底层native
+`data.struct.xpos/xquat`的`wp.array[vec3/quat]`，不经Torch或host sync。失败、修复和待测边界的详细真源是
+[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)。
+final source的exact真实Mu Full-A、接触物理与Isaac↔MuJoCo parity仍`未测`。
+
+本Gate只保留独立可击穿的model/plant边界：finite、joint/table/contact几何、source asset与native runtime
+身份。task成功、mimic/contact比例、same-writer echo和测试fixture的数据类型不属于model安全Gate；也不因
+追求简洁删除跨事实源的几何/运行时校验。G04保持`Partial`且
+`diagnostic_unauthorized=true`，不授权promotion、transfer、部署或真机。
+
 ## Goal
 
 Build consistent A3 simulation assets in MuJoCo and Isaac so training and deployment can share robot semantics.

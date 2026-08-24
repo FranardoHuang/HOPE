@@ -145,12 +145,10 @@ class _Physical:
         calls,
         *,
         transport_work=True,
-        keyed_epoch_work=True,
         recovery_epoch_work=True,
     ):
         self.calls = calls
         self.transport_work = transport_work
-        self.keyed_epoch_work = keyed_epoch_work
         self.recovery_epoch_work = recovery_epoch_work
 
     def refresh_action_epoch_host_activity(self, *, next_control_step):
@@ -161,7 +159,6 @@ class _Physical:
         return type("Activity", (), {
             "control_step": control_step,
             "transport_work": self.transport_work,
-            "keyed_epoch_work": self.keyed_epoch_work,
             "recovery_epoch_work": self.recovery_epoch_work,
         })()
 
@@ -189,11 +186,9 @@ class _PostPhysicsPhysical:
         self,
         *,
         transport_work: bool,
-        keyed_epoch_work: bool,
         recovery_epoch_work: bool,
     ):
         self.transport_work = transport_work
-        self.keyed_epoch_work = keyed_epoch_work
         self.recovery_epoch_work = recovery_epoch_work
         self.launch_count = 0
         self.publish_count = 0
@@ -210,7 +205,6 @@ class _PostPhysicsPhysical:
         return types.SimpleNamespace(
             control_step=control_step,
             transport_work=self.transport_work,
-            keyed_epoch_work=self.keyed_epoch_work,
             recovery_epoch_work=self.recovery_epoch_work,
         )
 
@@ -340,7 +334,7 @@ def _owner(
     return owner, epoch, graph
 
 
-def test_semantic_observation_v2_is_the_only_live_forwarding_surface(
+def test_semantic_observation_v3_is_the_only_live_forwarding_surface(
     monkeypatch,
 ):
     owner, epoch, _graph = _owner()
@@ -363,8 +357,8 @@ def test_semantic_observation_v2_is_the_only_live_forwarding_surface(
 
     assert not hasattr(L.ActionBallFullMdpLeanRuntimeOwner, "action_epoch_observation_v1")
     assert not hasattr(owner, "action_epoch_observation_v1")
-    first = owner.semantic_action_epoch_observation_v2(record)
-    second = owner.semantic_action_epoch_observation_v2(record)
+    first = owner.semantic_action_epoch_observation_v3(record)
+    second = owner.semantic_action_epoch_observation_v3(record)
     assert first is cached_observation
     assert second is cached_observation
     assert calls == [(owner, record), (owner, record)]
@@ -800,14 +794,13 @@ def test_after_command_orders_r05_then_racket_without_caller_rows():
         owner.after_command_compute_before_observation(1)
 
 
-@pytest.mark.parametrize("keyed_epoch_work", (False, True))
-def test_after_command_transport_idle_skips_r03_arm(keyed_epoch_work):
+@pytest.mark.parametrize("recovery_epoch_work", (False, True))
+def test_after_command_transport_idle_skips_r03_arm(recovery_epoch_work):
     calls = []
     physical = _Physical(
         calls,
         transport_work=False,
-        keyed_epoch_work=keyed_epoch_work,
-        recovery_epoch_work=keyed_epoch_work,
+        recovery_epoch_work=recovery_epoch_work,
     )
     owner, _epoch, _graph = _owner(
         r05=_R05(calls),
@@ -818,29 +811,26 @@ def test_after_command_transport_idle_skips_r03_arm(keyed_epoch_work):
     assert calls == ["r05", ("physical", 1)]
     verdict = physical.action_epoch_host_activity_verdict(control_step=1)
     assert verdict.transport_work is False
-    assert verdict.keyed_epoch_work is keyed_epoch_work
-    assert verdict.recovery_epoch_work is keyed_epoch_work
+    assert verdict.recovery_epoch_work is recovery_epoch_work
 
 
 @pytest.mark.parametrize(
     (
         "transport_work",
-        "keyed_epoch_work",
         "recovery_epoch_work",
         "expected_racket",
         "expected_full_r07",
         "expected_idle_r07",
     ),
     (
-        pytest.param(False, False, False, 0, 0, 1, id="unkeyed-idle"),
-        pytest.param(True, True, False, 1, 0, 1, id="keyed-pre-recovery"),
-        pytest.param(False, True, True, 0, 1, 0, id="actual-recovery"),
+        pytest.param(False, False, 0, 0, 1, id="idle"),
+        pytest.param(True, False, 1, 0, 1, id="transport-pre-recovery"),
+        pytest.param(False, True, 0, 1, 0, id="actual-recovery"),
     ),
 )
 def test_post_physics_reads_r07_plant_only_for_actual_recovery_epoch(
     monkeypatch,
     transport_work,
-    keyed_epoch_work,
     recovery_epoch_work,
     expected_racket,
     expected_full_r07,
@@ -849,7 +839,6 @@ def test_post_physics_reads_r07_plant_only_for_actual_recovery_epoch(
     pre_type, post_type, phase_type = _exact_physics_stamp_types(monkeypatch)
     physical = _PostPhysicsPhysical(
         transport_work=transport_work,
-        keyed_epoch_work=keyed_epoch_work,
         recovery_epoch_work=recovery_epoch_work,
     )
     racket = _PostPhysicsRacket()

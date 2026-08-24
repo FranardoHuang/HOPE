@@ -166,7 +166,7 @@ READY_POSE_SHA256 = "ab6b7e41ff129f91238835c533c8d589e68cc21f7e6184d639e95d8938d
 FULL_A_ACTION_UID = 6907688916670928
 FULL_A_MOUNT_NORMAL_SIGN = 1
 FULL_A_FAMILY = "forehand"
-FULL_A_NUM_ENVS = 4096
+FULL_A_NUM_ENVS = FULL_MDP_PPO_RECIPE.num_envs
 FULL_A_NUM_UPDATES = FULL_MDP_PPO_RECIPE.max_iterations
 FULL_A_SAVE_INTERVAL = FULL_MDP_PPO_RECIPE.save_interval
 RATE_PROBE_WARMUP_UPDATES = 10
@@ -189,6 +189,69 @@ RSL_RL_SOURCE_SHA256 = {
     "rsl_rl/storage/rollout_storage.py": "32d8b1b3cead87e0eeb96e2b334a5c75fd431309e43dae85a42a89b62c5dc5de",
     "rsl_rl/networks/mlp.py": "ead23a9b888bb70115c7ec17c085f21afa6903feeeb595d33aa9ce6c27534bfe",
 }
+
+
+def _canonical_payload_sha256(payload: dict[str, object]) -> str:
+    body = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+def _rate_execution_recipe(
+    *,
+    num_envs: int = FULL_A_NUM_ENVS,
+    num_steps_per_env: int = NUM_STEPS_PER_ENV,
+    max_iterations: int = RATE_PROBE_NUM_UPDATES,
+    save_interval: int = FULL_A_SAVE_INTERVAL,
+) -> dict[str, object]:
+    """Return the backend-neutral, actual finite rate execution identity."""
+
+    effective_runner = {
+        "num_envs": num_envs,
+        "num_steps_per_env": num_steps_per_env,
+        "max_iterations": max_iterations,
+        "save_interval": save_interval,
+    }
+    candidate_runner = {
+        "num_envs": FULL_A_NUM_ENVS,
+        "num_steps_per_env": NUM_STEPS_PER_ENV,
+        "max_iterations": FULL_A_NUM_UPDATES,
+        "save_interval": FULL_A_SAVE_INTERVAL,
+    }
+    return {
+        "schema_version": 1,
+        "kind": "action_ball_full_mdp_h48_rate_execution_v1",
+        "candidate_production_execution_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE_SHA256
+        ),
+        "learning_recipe_sha256": (
+            FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+        ),
+        "effective_runner": effective_runner,
+        "runner_overrides": {
+            name: {
+                "candidate_production": candidate_runner[name],
+                "rate_execution": effective_runner[name],
+            }
+            for name in candidate_runner
+            if candidate_runner[name] != effective_runner[name]
+        },
+        "diagnostic_overrides": {
+            "warmup_updates": RATE_PROBE_WARMUP_UPDATES,
+            "measured_updates": RATE_PROBE_MEASURED_UPDATES,
+            "tail_updates": RATE_PROBE_TAIL_UPDATES,
+            "profiler_enabled": False,
+            "diagnostic_unauthorized": True,
+            "formal_evidence": False,
+            "checkpoint_authority": False,
+            "resume_authority": False,
+        },
+    }
 
 
 def _require_run_identity_fields(
@@ -999,10 +1062,10 @@ def main(
     action_contract = env.action_contract_identity if full_a_mode else None
     observation = wait.observation_contract
     policy_width = (
-        observation.ACTOR_WIDTH_V2 if full_a_mode else observation.ACTOR_WIDTH_V1
+        observation.ACTOR_WIDTH_V3 if full_a_mode else observation.ACTOR_WIDTH_V1
     )
     critic_width = (
-        observation.CRITIC_WIDTH_V2 if full_a_mode else observation.CRITIC_WIDTH_V1
+        observation.CRITIC_WIDTH_V3 if full_a_mode else observation.CRITIC_WIDTH_V1
     )
     initial = env.get_observations()
     if (
@@ -1197,9 +1260,6 @@ def main(
         "transitions": env.common_step_counter * env.num_envs,
         "policy_width": final["policy"].shape[1],
         "critic_width": final["critic"].shape[1],
-        "action_ball_full_mdp_ppo_recipe_sha256": (
-            FULL_MDP_PPO_RECIPE_SHA256
-        ),
         "task_lifecycle": (
             "full_a_diagnostic_rate_probe"
             if diagnostic_rate_probe
@@ -1209,6 +1269,33 @@ def main(
         ),
     }
     if diagnostic_rate_probe:
+        rate_execution_recipe = _rate_execution_recipe(
+            num_envs=num_envs,
+            num_steps_per_env=num_steps_per_env,
+            max_iterations=num_updates,
+            save_interval=save_interval,
+        )
+        payload.update({
+            "kind": "action_ball_mujoco_full_mdp_h48_rate_probe_v1",
+            "schema_version": 1,
+            "formal_evidence": False,
+            "safety_gate": False,
+            "source_commit": source_commit,
+            "namespace": run_namespace,
+            "learning_recipe_sha256": (
+                FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
+            ),
+            "candidate_production_execution_recipe": (
+                FULL_MDP_PPO_RECIPE.execution_recipe()
+            ),
+            "candidate_production_execution_recipe_sha256": (
+                FULL_MDP_PPO_RECIPE_SHA256
+            ),
+            "rate_execution_recipe": rate_execution_recipe,
+            "rate_execution_recipe_sha256": (
+                _canonical_payload_sha256(rate_execution_recipe)
+            ),
+        })
         measured = rate_update_seconds[
             RATE_PROBE_WARMUP_UPDATES:
             RATE_PROBE_WARMUP_UPDATES + RATE_PROBE_MEASURED_UPDATES
@@ -1241,9 +1328,16 @@ def main(
             )
         payload["rate_probe"] = rate
     elif full_a_mode:
+        payload["action_ball_full_mdp_ppo_recipe_sha256"] = (
+            FULL_MDP_PPO_RECIPE_SHA256
+        )
         payload.update({
             "engineering_run_complete": True, "full_a_update_ack_count": updates,
         })
+    else:
+        payload["action_ball_full_mdp_ppo_recipe_sha256"] = (
+            FULL_MDP_PPO_RECIPE_SHA256
+        )
     _best_effort_stdout_marker(
         "ACTION_BALL_MUJOCO_WAIT_RSL3_JSON="
         + json.dumps(payload, sort_keys=True)

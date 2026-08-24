@@ -16,6 +16,10 @@ import pytest
 PROJECT = Path(__file__).resolve().parents[1]
 SCRIPT = PROJECT / "scripts" / "launch_isaac_full_mdp_successor.py"
 TRAIN = Path("hope_training/whole_body_tracking/scripts/train.py")
+PPO_RECIPE = Path(
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "action_ball_full_mdp_ppo_recipe.py"
+)
 KIT_LAUNCHER = Path(
     "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
 )
@@ -60,7 +64,7 @@ def _executable(path: Path, source: str) -> Path:
 
 
 @pytest.fixture
-def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
     base = tmp_path.resolve()
     repo = base / "repo"
     (repo / "scripts").mkdir(parents=True)
@@ -68,6 +72,9 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     train = repo / TRAIN
     train.parent.mkdir(parents=True)
     train.write_text("# train placeholder\n", encoding="utf-8")
+    recipe = repo / PPO_RECIPE
+    recipe.parent.mkdir(parents=True)
+    shutil.copy2(PROJECT / PPO_RECIPE, recipe)
     record = base / "kit-record.json"
     kit = repo / KIT_LAUNCHER
     kit.parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +89,10 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _git(repo, "config", "user.name", "Launcher Test")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "fixture")
+    sys.modules.pop("_hope_isaac_full_mdp_ppo_recipe", None)
+    request.addfinalizer(
+        lambda: sys.modules.pop("_hope_isaac_full_mdp_ppo_recipe", None)
+    )
     module = _load(repo / "scripts" / SCRIPT.name)
 
     isaaclab = base / "IsaacLab"
@@ -188,7 +199,7 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
         "logger=tensorboard",
         "device=cuda:0",
         "seed=0",
-        "num_envs=4096",
+        "num_envs=2048",
         f"run_name={NAMESPACE}-DIAGNOSTIC_UNAUTHORIZED",
         "checkpoint_path=null",
         "checkpoint_tolerant=false",
@@ -198,7 +209,7 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     ]
     joined = " ".join(payload["argv"])
     assert "task=HOPEPingPongActionBallFullMdpA" in joined
-    assert "num_envs=4096" in joined
+    assert "num_envs=2048" in joined
     assert "DIAGNOSTIC_UNAUTHORIZED" in joined
     assert "max_iterations=" not in joined
     assert "save_interval=" not in joined
@@ -210,6 +221,12 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert payload["runtime_env"]["HOME"] == str(rig.root / "home")
     assert payload["runtime_env"]["CUDA_CACHE_PATH"] == str(
         rig.root / "cuda_cache"
+    )
+    assert payload["ppo_recipe"] == (
+        rig.module.FULL_MDP_PPO_RECIPE.execution_recipe()
+    )
+    assert payload["ppo_recipe_sha256"] == (
+        rig.module.FULL_MDP_PPO_RECIPE.recipe_sha256()
     )
     for name, directory in (
         ("XDG_CACHE_HOME", "xdg_cache"),
@@ -252,6 +269,20 @@ def test_dry_run_rate_probe_is_explicit_completion_mode_and_default_is_unchanged
     assert "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES" not in (
         payload["runtime_env"]
     )
+    candidate = rig.module.FULL_MDP_PPO_RECIPE.execution_recipe()
+    rate_execution = rig.module._rate_execution_recipe()
+    assert payload["candidate_production_execution_recipe"] == candidate
+    assert payload["candidate_production_execution_recipe_sha256"] == (
+        rig.module.FULL_MDP_PPO_RECIPE.recipe_sha256()
+    )
+    assert payload["rate_execution_recipe"] == rate_execution
+    assert payload["rate_execution_recipe_sha256"] == (
+        rig.module._canonical_payload_sha256(rate_execution)
+    )
+    assert payload["rate_execution_recipe_sha256"] != (
+        payload["candidate_production_execution_recipe_sha256"]
+    )
+    assert "ppo_recipe_sha256" not in payload
 
     assert rig.module.main(rig.argv(dry=True)) == 0
     default = json.loads(capsys.readouterr().out)
@@ -274,13 +305,11 @@ def test_rate_probe_and_profiler_are_mutually_exclusive_before_root(
 def test_rate_probe_receipt_parses_exact_10_plus_50_and_is_no_clobber(
     rig, tmp_path: Path
 ) -> None:
-    recipe = "a" * 64
+    recipe = rig.module.FULL_MDP_PPO_RECIPE.learning_recipe_sha256()
     log = tmp_path / "run.log"
     rows = [
-        "[train.py] FULLMDP_H48_RATE_PROBE: diagnostic_unauthorized=true "
-        "updates=61 warmup=10 measured=50 tail=1 profiler=off",
-        "[train.py] full-MDP PPO recipe: "
-        f"kind=v4 learning_recipe_sha256={recipe}"
+        rig.module._expected_rate_probe_marker(),
+        rig.module._expected_ppo_recipe_marker(),
     ]
     for update in range(61):
         rows.extend(
@@ -303,7 +332,48 @@ def test_rate_probe_receipt_parses_exact_10_plus_50_and_is_no_clobber(
     assert payload["source_commit"] == "b" * 40
     assert payload["namespace"] == NAMESPACE
     assert payload["gpu"] == {"index": 0, "uuid": UUID}
-    assert payload["action_ball_full_mdp_ppo_recipe_sha256"] == recipe
+    assert payload["learning_recipe_sha256"] == recipe
+    assert payload["kind"] == "action_ball_isaac_full_mdp_h48_rate_probe_v2"
+    assert payload["schema_version"] == 2
+    assert payload["shape"] == {
+        "num_envs": 2_048,
+        "num_steps_per_env": 48,
+        "updates": 61,
+    }
+    candidate = rig.module.FULL_MDP_PPO_RECIPE.execution_recipe()
+    rate_execution = rig.module._rate_execution_recipe()
+    assert payload["candidate_production_execution_recipe"] == candidate
+    assert payload["candidate_production_execution_recipe_sha256"] == (
+        rig.module.FULL_MDP_PPO_RECIPE.recipe_sha256()
+    )
+    assert payload["rate_execution_recipe"] == rate_execution
+    assert rate_execution["effective_runner"] == {
+        "num_envs": 2_048,
+        "num_steps_per_env": 48,
+        "max_iterations": 61,
+        "save_interval": 500,
+    }
+    assert rate_execution["runner_overrides"]["max_iterations"] == {
+        "candidate_production": 25_000,
+        "rate_execution": 61,
+    }
+    assert rate_execution["diagnostic_overrides"] == {
+        "warmup_updates": 10,
+        "measured_updates": 50,
+        "tail_updates": 1,
+        "profiler_enabled": False,
+        "diagnostic_unauthorized": True,
+        "formal_evidence": False,
+        "checkpoint_authority": False,
+        "resume_authority": False,
+    }
+    assert payload["rate_execution_recipe_sha256"] == (
+        rig.module._canonical_payload_sha256(rate_execution)
+    )
+    assert payload["rate_execution_recipe_sha256"] != (
+        payload["candidate_production_execution_recipe_sha256"]
+    )
+    assert "action_ball_full_mdp_ppo_execution_sha256" not in payload
     assert len(payload["raw_update_seconds"]) == 61
     assert payload["measured_update_seconds"] == pytest.approx(
         [1.0 + update / 100.0 for update in range(10, 60)]
@@ -318,18 +388,97 @@ def test_rate_probe_receipt_parses_exact_10_plus_50_and_is_no_clobber(
         rig.module._write_rate_probe_receipt(receipt, payload)
 
 
-def test_rate_probe_parser_rejects_missing_update_or_recipe(rig, tmp_path: Path) -> None:
+@pytest.mark.parametrize("missing", ("update", "recipe"))
+def test_rate_probe_parser_rejects_missing_update_or_recipe(
+    rig, tmp_path: Path, missing: str
+) -> None:
     log = tmp_path / "run.log"
-    log.write_text(
+    rows = [rig.module._expected_rate_probe_marker()]
+    if missing != "recipe":
+        rows.append(rig.module._expected_ppo_recipe_marker())
+    update_count = 60 if missing == "update" else 61
+    for update in range(update_count):
+        rows.extend((
+            f"Learning iteration {update}/61",
+            "Iteration time: 1.00s",
+        ))
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    expected_error = "61-update" if missing == "update" else "recipe identity"
+    with pytest.raises(rig.module.LaunchError, match=expected_error):
+        rig.module._rate_probe_payload(
+            run_log=log,
+            source_commit="b" * 40,
+            namespace=NAMESPACE,
+            gpu_index=0,
+            gpu_uuid=UUID,
+        )
+
+
+@pytest.mark.parametrize(
+    ("updates", "warmup", "measured", "tail"),
+    (
+        (61, 9, 51, 1),
+        (61, 10, 49, 2),
+        (61, 11, 49, 1),
+        (62, 10, 50, 2),
+    ),
+)
+def test_rate_probe_parser_rejects_noncanonical_equal_sum_windows(
+    rig, tmp_path: Path, updates: int, warmup: int, measured: int, tail: int
+) -> None:
+    log = tmp_path / "run.log"
+    rows = [
         "[train.py] FULLMDP_H48_RATE_PROBE: diagnostic_unauthorized=true "
-        "updates=61 warmup=10 measured=50 tail=1 profiler=off\n"
-        + "\n".join(
-            f"Learning iteration {update}/61\nIteration time: 1.00s"
-            for update in range(60)
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(rig.module.LaunchError, match="61-update"):
+        f"updates={updates} warmup={warmup} measured={measured} tail={tail} "
+        "profiler=off formal_evidence=false checkpoint_authority=false",
+        rig.module._expected_ppo_recipe_marker(),
+    ]
+    for update in range(updates):
+        rows.extend((
+            f"Learning iteration {update}/{updates}",
+            "Iteration time: 1.00s",
+        ))
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    with pytest.raises(
+        rig.module.LaunchError, match="exact 61/10/50/1"
+    ):
+        rig.module._rate_probe_payload(
+            run_log=log,
+            source_commit="b" * 40,
+            namespace=NAMESPACE,
+            gpu_index=0,
+            gpu_uuid=UUID,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("bad_authority", "duplicate_budget", "wrong_recipe_shape", "duplicate_recipe"),
+)
+def test_rate_probe_parser_requires_one_exact_child_marker(
+    rig, tmp_path: Path, mutation: str
+) -> None:
+    budget = rig.module._expected_rate_probe_marker()
+    recipe = rig.module._expected_ppo_recipe_marker()
+    if mutation == "bad_authority":
+        budget = budget.replace(
+            "diagnostic_unauthorized=true", "diagnostic_unauthorized=false"
+        ).replace("profiler=off", "profiler=on")
+    elif mutation == "wrong_recipe_shape":
+        recipe = recipe.replace("N=2048", "N=4096")
+    rows = [budget, recipe]
+    if mutation == "duplicate_budget":
+        rows.append(budget)
+    elif mutation == "duplicate_recipe":
+        rows.append(recipe)
+    for update in range(61):
+        rows.extend((
+            f"Learning iteration {update}/61",
+            "Iteration time: 1.00s",
+        ))
+    log = tmp_path / "run.log"
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    with pytest.raises(rig.module.LaunchError, match="budget|recipe identity"):
         rig.module._rate_probe_payload(
             run_log=log,
             source_commit="b" * 40,

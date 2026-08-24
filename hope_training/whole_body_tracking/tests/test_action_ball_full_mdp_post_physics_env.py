@@ -570,7 +570,6 @@ class _Physical:
         self.fail_publish = False
         self.mutate_clock = False
         self.transport_work = True
-        self.keyed_epoch_work = True
         self.recovery_epoch_work = True
 
     def launch_action_epoch(self):
@@ -585,7 +584,6 @@ class _Physical:
         return type("Activity", (), {
             "control_step": control_step,
             "transport_work": self.transport_work,
-            "keyed_epoch_work": self.keyed_epoch_work,
             "recovery_epoch_work": self.recovery_epoch_work,
         })()
 
@@ -909,7 +907,6 @@ def _fake_env(
     rendering=False,
     decimation=3,
     transport_work=True,
-    keyed_epoch_work=True,
     recovery_epoch_work=True,
 ):
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
@@ -956,7 +953,6 @@ def _fake_env(
     )
     env._full_mdp_selected_true_reset = owner.selected_true_reset
     physical.transport_work = transport_work
-    physical.keyed_epoch_work = keyed_epoch_work
     physical.recovery_epoch_work = recovery_epoch_work
     owner.after_command_compute_before_observation(0)
     trace.clear()
@@ -1016,7 +1012,6 @@ def test_global_idle_without_key_skips_r03_and_all_motion_ready_work(
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=False,
-        keyed_epoch_work=False,
         recovery_epoch_work=False,
     )
     env.step(torch.zeros(2, 4))
@@ -1034,7 +1029,6 @@ def test_transport_idle_recovery_epoch_keeps_full_r07_publication():
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=False,
-        keyed_epoch_work=True,
         recovery_epoch_work=True,
     )
     env.step(torch.zeros(2, 4))
@@ -1047,7 +1041,7 @@ def test_transport_idle_recovery_epoch_keeps_full_r07_publication():
     assert names.count("motion_ready") == 1
 
 
-def test_transport_idle_key_outside_recovery_window_uses_neutral_chronology_only(
+def test_transport_idle_outside_recovery_window_uses_neutral_chronology_only(
     monkeypatch,
 ):
     def reject_projection(_self):
@@ -1065,7 +1059,6 @@ def test_transport_idle_key_outside_recovery_window_uses_neutral_chronology_only
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=False,
-        keyed_epoch_work=True,
         recovery_epoch_work=False,
     )
     env.step(torch.zeros(2, 4))
@@ -1077,7 +1070,7 @@ def test_transport_idle_key_outside_recovery_window_uses_neutral_chronology_only
     assert "motion_ready" not in names
 
 
-def test_live_transport_key_before_recovery_uses_neutral_chronology_only(
+def test_live_transport_before_recovery_uses_neutral_chronology_only(
     monkeypatch,
 ):
     def reject_projection(_self):
@@ -1095,7 +1088,6 @@ def test_live_transport_key_before_recovery_uses_neutral_chronology_only(
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=True,
-        keyed_epoch_work=True,
         recovery_epoch_work=False,
     )
     env.step(torch.zeros(2, 4))
@@ -1107,11 +1099,10 @@ def test_live_transport_key_before_recovery_uses_neutral_chronology_only(
     assert "motion_ready" not in names
 
 
-def test_transport_work_without_key_keeps_r03_but_skips_r07_keyed_writes():
+def test_transport_work_outside_recovery_keeps_r03_but_skips_r07_writes():
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=True,
-        keyed_epoch_work=False,
         recovery_epoch_work=False,
     )
     env.step(torch.zeros(2, 4))

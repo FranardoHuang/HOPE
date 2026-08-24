@@ -137,8 +137,8 @@ EVENT_KEYS = {
     ),
 }
 STORAGE_WIDTHS = {
-    "observations_policy": 203,
-    "observations_critic": 219,
+    "observations_policy": 215,
+    "observations_critic": 231,
     "actions": 31,
     "values": 1,
     "actions_log_prob": 1,
@@ -194,6 +194,19 @@ def test_reward_graph_contract_is_loaded_from_the_shared_ordered_authority():
     assert module.REWARD_TERM_COUNT == len(module.REWARD_TERM_NAMES)
 
 
+def test_rollout_storage_widths_are_loaded_from_semantic_v3_authority():
+    module = _load()
+    contract = module._portable_observation_module()
+    assert contract.OBSERVATION_KIND_V3 == (
+        "action_ball_full_mdp_semantic_observation_v3"
+    )
+    assert contract.ACTOR_WIDTH_V3 == 215
+    assert contract.CRITIC_WIDTH_V3 == 231
+    assert module.FULLMDP_ACTOR_OBSERVATION_WIDTH == contract.ACTOR_WIDTH_V3
+    assert module.FULLMDP_CRITIC_OBSERVATION_WIDTH == contract.CRITIC_WIDTH_V3
+    assert dict(module.STORAGE_FLOAT_WIDTHS) == STORAGE_WIDTHS
+
+
 @pytest.mark.parametrize(
     "loader_name,cache_name,expected_error",
     (
@@ -211,6 +224,11 @@ def test_reward_graph_contract_is_loaded_from_the_shared_ordered_authority():
             "_portable_catalog_module",
             "_hope_mujoco_ledger_action_ball_full_mdp_portable_catalog",
             "cached FullMDP portable catalog origin differs",
+        ),
+        (
+            "_portable_observation_module",
+            "_hope_mujoco_ledger_action_ball_full_mdp_portable_observation",
+            "cached FullMDP portable observation contract origin differs",
         ),
     ),
 )
@@ -982,10 +1000,8 @@ def test_prepare_accepts_idle_retired_occupancy_and_both_due_verdicts():
 @pytest.mark.parametrize(
     "event_name",
     (
-        "reveal_due_rows",
         "launch_rows",
         "r03_present_rows",
-        "r06_common_rows",
         "r07_present_rows",
         "completed_action_epoch_rows",
     ),
@@ -993,7 +1009,7 @@ def test_prepare_accepts_idle_retired_occupancy_and_both_due_verdicts():
 def test_prepare_records_producer_marginals_without_rebuilding_implications(
     event_name,
 ):
-    """Producer transition tests own event relationships; ledger owns counts."""
+    """Only the two explicit opportunity partitions are ledger invariants."""
 
     module = _load()
     ledger = _ledger(module, steps=1)
@@ -1003,6 +1019,50 @@ def test_prepare_records_producer_marginals_without_rebuilding_implications(
     record = _decode(_prepare(ledger, 0, environment_steps=1))
     assert record["extras_counts"][event_name] == 1
     assert "event_semantics_fault_rows" not in record["lifecycle_counts"]
+
+
+@pytest.mark.parametrize(
+    ("event", "fault_name"),
+    (
+        (
+            {
+                "scheduled_due_rows": [True, False, False],
+                "due_terminal_overlap_rows": [True, False, False],
+                "reveal_due_rows": [True, False, False],
+                "reveal_rows": [True, False, False],
+            },
+            "scheduled_due_partition_fault_rows=1",
+        ),
+        (
+            {"reveal_due_rows": [True, False, False]},
+            "reveal_due_partition_fault_rows=1",
+        ),
+        (
+            {"r03_physically_valid_rows": [True, False, False]},
+            "r03_subset_fault_rows=1",
+        ),
+        (
+            {"r06_eligible_rows": [True, False, False]},
+            "r06_subset_fault_rows=1",
+        ),
+        (
+            {
+                "r06_present_rows": [True, False, False],
+                "r06_eligible_rows": [True, False, False],
+                "r06_common_rows": [True, True, False],
+            },
+            "r06_subset_fault_rows=1",
+        ),
+    ),
+)
+def test_prepare_rejects_broken_event_subset_or_opportunity_partition(
+    event, fault_name
+):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(module, event=event))
+    with pytest.raises(RuntimeError, match=fault_name):
+        _prepare(ledger, 0, environment_steps=1)
 
 
 def test_immediate_invalid_launch_is_semantically_legal_but_integrity_rejected():
@@ -1286,6 +1346,35 @@ def test_prepare_packs_storage_health_in_the_single_copy_and_rejects_nonfinite()
     ledger.ingest(_result(module))
     with pytest.raises(RuntimeError, match="storage is nonfinite"):
         _prepare(ledger, 0, environment_steps=1, finite=False)
+
+
+@pytest.mark.parametrize(
+    ("name", "v2_width"),
+    (("observations_policy", 203), ("observations_critic", 219)),
+)
+def test_prepare_rejects_semantic_v2_rollout_observation_width_before_optimizer(
+    name, v2_width
+):
+    module = _load()
+    ledger = _ledger(module, steps=1)
+    ledger.ingest(_result(module))
+    storage = {
+        field: torch.ones(1, ledger.num_envs, width)
+        for field, width in STORAGE_WIDTHS.items()
+    }
+    storage[name] = torch.ones(1, ledger.num_envs, v2_width)
+    with pytest.raises(RuntimeError, match="storage_tensors"):
+        ledger.prepare(
+            0,
+            environment_steps=1,
+            storage_step=1,
+            storage_tensors=storage,
+            storage_dones=torch.zeros(
+                1, ledger.num_envs, 1, dtype=torch.uint8
+            ),
+            policy_std=torch.full((ledger.num_envs, 31), 0.02),
+        )
+    assert ledger._pending is None
 
 
 @pytest.mark.parametrize("name", tuple(STORAGE_WIDTHS))

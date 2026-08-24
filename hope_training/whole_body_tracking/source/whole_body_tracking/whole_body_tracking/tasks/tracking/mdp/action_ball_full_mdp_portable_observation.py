@@ -4,7 +4,7 @@ Only column order and pure tensor transforms live here. Isaac and MuJoCo own
 their live numerical producers; this module defines no owner, registry,
 receipt, gate, lifecycle journal, or fallback value.
 
-V2's table frame is the current fixed, axis-aligned ActionBall table frame.
+V2/V3's table frame is the current fixed, axis-aligned ActionBall table frame.
 A rotatable table requires a new contract with a real table-pose producer.
 """
 
@@ -115,6 +115,35 @@ CRITIC_EXTENSION_WIDTH_V2 = sum(
 )
 CRITIC_WIDTH_V2 = ACTOR_WIDTH_V2 + CRITIC_EXTENSION_WIDTH_V2
 
+
+# V3 preserves every V2 column and inserts only the four full-phase measured
+# paddle residuals that make the actor observe the state used by the live
+# imitation reward.  Ball-task residuals remain a distinct, task-masked tail.
+ACTOR_CONTRACT_V3 = "action_ball_full_mdp_semantic_actor_v3"
+CRITIC_CONTRACT_V3 = "action_ball_full_mdp_semantic_critic_v3"
+OBSERVATION_KIND_V3 = "action_ball_full_mdp_semantic_observation_v3"
+
+MOTION_RACKET_RESIDUAL_LAYOUT_V3 = (
+    ("motion_racket_pos_error_heading", 3),
+    ("motion_racket_vel_error_heading", 3),
+    ("motion_racket_signed_normal_error_heading", 3),
+    ("motion_racket_long_axis_error_heading", 3),
+)
+
+COMMON_ACTOR_LAYOUT_V3 = (
+    COMMON_ACTOR_LAYOUT_V2 + MOTION_RACKET_RESIDUAL_LAYOUT_V3
+)
+ACTOR_TASK_LAYOUT_V3 = ACTOR_TASK_LAYOUT_V2
+ACTOR_LAYOUT_V3 = COMMON_ACTOR_LAYOUT_V3 + ACTOR_TASK_LAYOUT_V3
+CRITIC_EXTENSION_LAYOUT_V3 = CRITIC_EXTENSION_LAYOUT_V2
+
+COMMON_ACTOR_WIDTH_V3 = sum(width for _, width in COMMON_ACTOR_LAYOUT_V3)
+ACTOR_WIDTH_V3 = sum(width for _, width in ACTOR_LAYOUT_V3)
+CRITIC_EXTENSION_WIDTH_V3 = sum(
+    width for _, width in CRITIC_EXTENSION_LAYOUT_V3
+)
+CRITIC_WIDTH_V3 = ACTOR_WIDTH_V3 + CRITIC_EXTENSION_WIDTH_V3
+
 # Static nondimensionalization is part of the V2 ABI.  These immutable host
 # tuples are shared by both engines; V1 remains raw and never consumes them.
 ACTOR_SCALE_BY_FIELD_V2 = (
@@ -154,12 +183,26 @@ CRITIC_EXTENSION_SCALE_BY_FIELD_V2 = (
     ("cadence_ready_dwell_fraction", 1.0),
 )
 
+MOTION_RACKET_RESIDUAL_SCALE_BY_FIELD_V3 = (
+    ("motion_racket_pos_error_heading", 5.0),
+    ("motion_racket_vel_error_heading", 1.0),
+    ("motion_racket_signed_normal_error_heading", 2.0),
+    ("motion_racket_long_axis_error_heading", 2.0),
+)
+
+ACTOR_SCALE_BY_FIELD_V3 = (
+    ACTOR_SCALE_BY_FIELD_V2[: len(COMMON_ACTOR_LAYOUT_V2)]
+    + MOTION_RACKET_RESIDUAL_SCALE_BY_FIELD_V3
+    + ACTOR_SCALE_BY_FIELD_V2[len(COMMON_ACTOR_LAYOUT_V2) :]
+)
+CRITIC_EXTENSION_SCALE_BY_FIELD_V3 = CRITIC_EXTENSION_SCALE_BY_FIELD_V2
+
 
 def _expand_layout_scale(layout, scale_by_field):
     if tuple(name for name, _ in layout) != tuple(
         name for name, _ in scale_by_field
     ):
-        raise RuntimeError("V2 observation scale fields differ from layout")
+        raise RuntimeError("observation scale fields differ from layout")
     return tuple(
         multiplier
         for (_, width), (_, multiplier) in zip(layout, scale_by_field)
@@ -172,6 +215,12 @@ ACTOR_SCALE_FLAT_V2 = _expand_layout_scale(
 )
 CRITIC_EXTENSION_SCALE_FLAT_V2 = _expand_layout_scale(
     CRITIC_EXTENSION_LAYOUT_V2, CRITIC_EXTENSION_SCALE_BY_FIELD_V2
+)
+ACTOR_SCALE_FLAT_V3 = _expand_layout_scale(
+    ACTOR_LAYOUT_V3, ACTOR_SCALE_BY_FIELD_V3
+)
+CRITIC_EXTENSION_SCALE_FLAT_V3 = _expand_layout_scale(
+    CRITIC_EXTENSION_LAYOUT_V3, CRITIC_EXTENSION_SCALE_BY_FIELD_V3
 )
 
 
@@ -347,6 +396,23 @@ __all__ = [
     "CRITIC_EXTENSION_SCALE_BY_FIELD_V2",
     "ACTOR_SCALE_FLAT_V2",
     "CRITIC_EXTENSION_SCALE_FLAT_V2",
+    "ACTOR_CONTRACT_V3",
+    "CRITIC_CONTRACT_V3",
+    "OBSERVATION_KIND_V3",
+    "MOTION_RACKET_RESIDUAL_LAYOUT_V3",
+    "COMMON_ACTOR_LAYOUT_V3",
+    "ACTOR_TASK_LAYOUT_V3",
+    "ACTOR_LAYOUT_V3",
+    "CRITIC_EXTENSION_LAYOUT_V3",
+    "COMMON_ACTOR_WIDTH_V3",
+    "ACTOR_WIDTH_V3",
+    "CRITIC_EXTENSION_WIDTH_V3",
+    "CRITIC_WIDTH_V3",
+    "MOTION_RACKET_RESIDUAL_SCALE_BY_FIELD_V3",
+    "ACTOR_SCALE_BY_FIELD_V3",
+    "CRITIC_EXTENSION_SCALE_BY_FIELD_V3",
+    "ACTOR_SCALE_FLAT_V3",
+    "CRITIC_EXTENSION_SCALE_FLAT_V3",
     "concatenate_layout_rows",
     "normalize_quat_wxyz",
     "quat_conjugate_wxyz",

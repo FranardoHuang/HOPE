@@ -87,12 +87,12 @@ station center 属于 level-0 task identity。level 0 只做中心 warm-up，pos
 才开始；base residual 是最后一轴。改变 station center 会改变 manifest/task identity，并使旧碰撞、
 能力与 selector 证据失效。
 
-## Historical ChingMu Runtime Contract (superseded for FullMDP semantic V2)
+## Historical ChingMu Runtime Contract (superseded for FullMDP semantic V2/V3)
 
 The following 300-Hz ChingMu/VRPN contract documents the old P1/P2 consumer and remains relevant
 only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; FullMDP
-semantic V2 uses the OptiTrack+IMU split stated in
-[FullMDP semantic V2 table and heading frame](#actionball-table-pose-frame).
+semantic V2/V3 use the OptiTrack+IMU split stated in
+[FullMDP semantic V2/V3 shared table and heading frame](#action-ball-table-pose-frame).
 Isaac and MuJoCo implement the simulator row, but the real C++ producer does not; this sentence does
 not authorize deployment.
 Do not copy the old object names, rate, sensor authority or noise profile into the fresh contract.
@@ -131,18 +131,19 @@ the interface boundary.
 
 The historical base flat wire already carried position plus a normalized quaternion, but the old
 `LocMode::kExternalBase` C++ consumer deliberately uses only mocap position and retains the
-yaw-aligned pelvis-IMU quaternion. That mixed historical producer is not semantic V2. V2 requires
+yaw-aligned pelvis-IMU quaternion. That mixed historical producer is not semantic V2/V3. Their shared prefix requires
 one time-consistent packet: table-relative root position and unit heading from calibrated
 OptiTrack/localization, causal root inertial-COM linear velocity from the same pose lineage, and
 projected gravity plus body-frame angular velocity from the pelvis IMU. Explicit latency,
-stale/dropout and marker-extrinsic handling remain mandatory. The complete ordered 203/219 layout is
-defined only in [policy_observation_action.md](policy_observation_action.md#current-portable-fullmdp-semantic-observation-v2-actor-203--critic-219).
+stale/dropout and marker-extrinsic handling remain mandatory. The current complete ordered V3 215/231 layout is
+defined only in [policy_observation_action.md](policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231);
+V2 203/219 is historical/control.
 
 <a id="action-ball-table-pose-frame"></a>
 
-## FullMDP semantic V2 table and heading frame
+## FullMDP semantic V2/V3 shared table and heading frame
 
-Semantic V2 is intentionally narrower than a general movable-table interface. The current Isaac and
+Semantic V2 and V3 intentionally share a frame contract narrower than a general movable-table interface. The current Isaac and
 MuJoCo ActionBall scenes fix every table to the environment-local world axes; environment origins
 translate rows but never rotate them. In that fixed frame:
 
@@ -165,12 +166,12 @@ position_error_h = heading(target_position_world - achieved_position_world)
 vector_error_h   = heading(target_vector_world - achieved_vector_world)
 ```
 
-Therefore task position/velocity/raw-A-normal residuals and root COM velocity share the table yaw
+Therefore motion-paddle residuals, task position/velocity/raw-A-normal residuals and root COM velocity share the table yaw
 convention without rotating through transient root roll/pitch. `base_position_table` is absolute
 table context, `base_goal_error_heading_xy` is a task residual, and `motion_anchor_pos_b` is a
 teacher alignment residual; equal dimensions do not make them interchangeable. Their exact network
 order belongs only to
-[policy_observation_action.md](policy_observation_action.md#current-portable-fullmdp-semantic-observation-v2-actor-203--critic-219).
+[policy_observation_action.md](policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231).
 
 Isaac's `root_lin_vel_w` is the linear velocity of the root body's inertial center of mass. MuJoCo's
 `cvel` linear component is instead expressed at the kinematic root subtree COM, so the portable
@@ -190,8 +191,10 @@ must be causal: update only on a genuinely new capture timestamp, transform the 
 COM point, estimate from present/past samples, and surface age/dropout instead of turning held poses
 into zero velocity. Pelvis IMU supplies projected gravity and calibrated body-frame gyro directly;
 joint encoders and FK supply achieved robot/racket state. Capture-time synchronization,
-OptiTrack↔IMU offset, marker/COM extrinsics, estimator error under dropout and the exact real 203-D
-builder have not been accepted. Semantic V2 is therefore simulator-trainable but **not deploy-ready**.
+OptiTrack↔IMU offset, marker/COM extrinsics, estimator error under dropout and the exact real 215-D
+builder have not been accepted. V3's additional measured-teacher/achieved paddle values use sources
+already required here, but source availability does not prove synchronization or builder parity.
+Semantic V3 is therefore simulator-trainable in design but **not deploy-ready**.
 
 ## Base Link
 

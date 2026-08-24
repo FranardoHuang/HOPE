@@ -1039,44 +1039,6 @@ class ActionEpochOwner:
                 publication_ordinal=selected(record.publication_ordinal),
             )
 
-    def project_keyed_postphysics_activity_mask(
-        self, *, owner: object
-    ) -> torch.Tensor:
-        """Project rows whose completed ActionEpoch key still needs R07 work.
-
-        The projection is consumed only by the construction-bound Physical
-        owner while it performs the existing once-per-control host activity
-        reduction.  It is a device fact, not an admission or safety verdict:
-        in particular RETIRED rows remain active until Motion closes them, so
-        a transport-idle ball cannot suppress post-shot recovery evidence.
-        """
-
-        with self._lock:
-            self._healthy()
-            record = self._publication.current
-            if (
-                record is None
-                or self._async_owner_identities.get("physical_ball") is not owner
-            ):
-                raise ActionEpochError(
-                    "keyed postphysics activity owner identity differs"
-                )
-            motion_slot = self._owner_slot("motion")
-            phase = record.phase
-            return (
-                row_identity.action_epoch_shot_key_valid(
-                    record.identity.shot_key
-                )
-                & record.writes_started[:, :, motion_slot]
-                & record.writes_committed[:, :, motion_slot]
-                & (
-                    phase.eq(PHASE_REVEAL_COMMITTED)
-                    | phase.eq(PHASE_LAUNCH_SETTLED)
-                    | phase.eq(PHASE_OUTCOME_SETTLED)
-                    | phase.eq(PHASE_RETIRED)
-                )
-            ).detach()
-
     def project_recovery_postphysics_activity_mask(
         self,
         *,

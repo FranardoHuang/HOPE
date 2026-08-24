@@ -2,7 +2,22 @@
 
 Status: Partial (parity procedure operational and used to gate the 2026-07-02 sim-to-real; formal per-checkpoint acceptance thresholds still to be recorded)
 
-**2026-08-23 FullMDP V5双后端当前摘要（Gate仍`Partial`）：**两条live run的clean且已push source为
+## 2026-08-25 FullMDP V6双后端候选（仍`Partial`）
+
+最终共享合同是PPO V5、Reward24、Observation V3 `215/231`、四个真实due/耗尽clock、Mu wire`9/5/6`
+与Isaac milestone schema7；final exact source SHA尚未冻结。这些只是接口同义，不等于两个physics engine
+已经数值或行为对齐。学习/分母只认[课程实验§10](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#10-2026-08-25-currentv5反例收口与v6最小桥修复)，
+Pod失败/rate/receipt只认[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#16-2026-08-25-current真实pod反例ppo-v5迭代尺度与未完成rate)，
+ABI只认[Observation接口](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)。
+pre-V3 Isaac predecessor证据不能代签PPO V5、Mu或parity；final exact CPU、真实Mu、两端rate与fixed-tape/
+matched physics parity仍`未测`。
+
+跨引擎Gate保留真正独立的plant/source、finite、joint/table/contact、full-key/generation、WAL/artifact
+boundary与可重放fixed tape；same-writer echo、task成功和R07 ready不是parity或安全Gate。当前没有contact/
+landing、formal checkpoint、completion或matched parity，所以G06保持`Partial`，不授权resume、promotion、
+export、部署或真机；`diagnostic_unauthorized=true`保持。
+
+**HISTORICAL / FROZEN — 2026-08-23 FullMDP V5双后端摘要（Gate仍`Partial`）：**两条live run的clean且已push source为
 `39f9481950a660e198dedac7fd402806d648906b`。exact Pod broad CPU/ABI为
 `792 passed, 57 skipped, 0 failed`；额外clean runtime focused重跑为`77 passed, 0 failed`，不与前者
 相加伪装unique总数。MuJoCo GPU direct为`5/0`并完成RSL H48 one-update `1/0`；Isaac GPU为projection
