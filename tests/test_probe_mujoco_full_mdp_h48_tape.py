@@ -71,7 +71,9 @@ def _record(root: Path, *, delta: float = 0.0, discrete_flip: bool = False,
         "initial_qvel": np.zeros((64, 3), dtype=np.float32),
         "initial_actor": np.zeros((64, 203), dtype=np.float32),
         "initial_critic": np.zeros((64, 219), dtype=np.float32),
-        "reward20": np.zeros((48, 64, 20), dtype=np.float32),
+        "reward_terms": np.zeros(
+            (48, 64, M.REWARD_TERM_COUNT), dtype=np.float32
+        ),
         "actor203": np.zeros((48, 64, 203), dtype=np.float32),
         "critic219": np.zeros((48, 64, 219), dtype=np.float32),
         "qpos": np.zeros((48, 64, 3), dtype=np.float32),
@@ -151,3 +153,5 @@ def test_cli_is_public_and_source_calls_real_full_a_boundary():
     assert "wait.FullMdpInitialWaitVecEnv" in source
     assert "full_a_mode=True" in source
     assert "_epoch_phase[" not in source and "_full_a_launch_rows" not in source
+    assert M.REWARD_TERM_COUNT == 24
+    assert M.REWARD_TERM_COUNT == len(M.reward_contract.MANAGER_NAMES)

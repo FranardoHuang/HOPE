@@ -1,4 +1,4 @@
-"""Engine-neutral lifecycle part of the FullMDP Reward20 graph.
+"""Engine-neutral lifecycle14 slice of the shared FullMDP reward graph.
 
 The kernel consumes only the four canonical ActionEpoch owner fact rows in
 ``(physical, R03, R06, R07)`` order.  It owns no Isaac or MuJoCo object and
@@ -81,7 +81,7 @@ def lifecycle_reward14(
     step_dt: float,
     weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Return configured Reward20 ordinals 0..13 as ``[N,14]``.
+    """Return the configured lifecycle ordinals 0..13 as ``[N,14]``.
 
     The packing and math match ``action_ball_full_mdp_lean_rewards``.  This
     function deliberately does not return a success verdict: a row can be a

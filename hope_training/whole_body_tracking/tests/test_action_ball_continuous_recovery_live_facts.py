@@ -200,6 +200,7 @@ def _rowwise_settled_subject(
     construction_admissible: bool = True,
     playback_admissible: bool = True,
     producer_fault: int = 0,
+    settle_both: bool = False,
 ):
     """Settle row 0 through the real D05 -> Motion -> Epoch writer chain.
 
@@ -242,6 +243,36 @@ def _rowwise_settled_subject(
     row_record.candidate.identity.shot_key.action_uid[0, 0] = (
         parent_identity.action_uid
     )
+    if settle_both:
+        # Rebuild the still-private transaction with both real N=2 candidates
+        # selected.  This is used only to exercise asynchronous per-row R07
+        # producer ages under one global-any runtime call.
+        raw_candidate = _d05_owner._action_epoch_candidate(row_record.prepared)
+        raw_candidate.identity.shot_key.action_uid[:, 0] = (
+            parent_identity.action_uid
+        )
+        row_record.prepared.admissible.fill_(True)
+        both = torch.ones(2, dtype=torch.bool, device=device)
+        rows = epoch_v1.ActionEpochDueRows(
+            common_step=1,
+            due_mask=both,
+            construct_mask=both.clone(),
+        )
+        row_record = _d05_owner._build_row_transaction(
+            token,
+            rows,
+            row_record.prepared,
+            row_record.preview,
+        )
+        assert row_record.accept_mask.tolist() == [True, True]
+        row_record.stage = "settling"
+        _d05_owner._row_transaction_records[token] = row_record
+        _d05_owner._active_row_transaction = token
+        epoch_owner._active_d05 = epoch_v1._ActiveD05Transaction(
+            rows=rows,
+            publication_ordinal=17,
+            base_version=epoch_owner.current().version,
+        )
     if not construction_admissible:
         row_record.candidate.construction_admissible[0, 0] = False
         row_record.accept_mask[0] = False
@@ -520,19 +551,22 @@ def test_r07_reveal_keeps_fall_and_low_support_numeric_but_unpaid(
         -1,
     ]
 
+    # Global source chronology is intentionally far ahead of the resettable
+    # Motion clock.  The default local deadline is 40, so cadence 50 is age 10.
+    env.common_step_counter = 10_000
     result = _publish_epoch_reward_facts(
         bundle,
         motion,
-        cadence_tick=40,
+        cadence_tick=50,
         current_source_step=torch.full(
-            (2,), 40, dtype=torch.int64, device=device
+            (2,), 10_000, dtype=torch.int64, device=device
         )
     )
     assert result.facts_valid.tolist() == [True, True]
     assert result.infrastructure_fault.tolist() == [False, False]
     assert result.producer_fault_bits.tolist() == [0, 0]
     assert result.ready_instant.tolist() == [False, False]
-    assert result.recovery_age_tick.tolist() == [0, -1]
+    assert result.recovery_age_tick.tolist() == [10, -1]
     assert result.reward_eligible.tolist() == [False, False]
     assert torch.isfinite(result.weighted_reward).all()
     assert torch.all(result.weighted_reward == 0)
@@ -546,19 +580,19 @@ def test_r07_reveal_keeps_fall_and_low_support_numeric_but_unpaid(
 
     # A finite fall remains a low-value sample, not an infrastructure fault.
     robot.data.root_pos_w[0, 2] = 0.49
-    env.common_step_counter = 41
+    env.common_step_counter = 10_001
     fallen = _publish_epoch_reward_facts(
         bundle,
         motion,
-        cadence_tick=41,
+        cadence_tick=51,
         current_source_step=torch.full(
-            (2,), 41, dtype=torch.int64, device=device
+            (2,), 10_001, dtype=torch.int64, device=device
         )
     )
     assert fallen.facts_valid.tolist() == [True, True]
     assert fallen.infrastructure_fault.tolist() == [False, False]
     assert fallen.ready_instant.tolist() == [False, False]
-    assert fallen.recovery_age_tick.tolist() == [1, -1]
+    assert fallen.recovery_age_tick.tolist() == [11, -1]
     assert fallen.reward_eligible.tolist() == [False, False]
     assert torch.isfinite(fallen.weighted_reward).all()
 
@@ -591,17 +625,18 @@ def test_r07_reward_eligibility_is_exact_post_outcome_window(
     env, motion, _robot, _sensor, bundle, epoch_owner = (
         _rowwise_settled_subject(monkeypatch, device=device)
     )
-    source_step = 100
+    source_step = 10_000
+    cadence_tick = 200
     _set_current_phase_and_deadline(
         epoch_owner,
         phase=phase,
-        deadline_tick=source_step - age,
+        deadline_tick=cadence_tick - age,
     )
     env.common_step_counter = source_step
     result = _publish_epoch_reward_facts(
         bundle,
         motion,
-        cadence_tick=source_step,
+        cadence_tick=cadence_tick,
         current_source_step=torch.full(
             (2,), source_step, dtype=torch.int64, device=device
         ),
@@ -614,7 +649,17 @@ def test_r07_reward_eligibility_is_exact_post_outcome_window(
 
     record = epoch_owner.current()
     owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
-    expected_present = phase != epoch_v1.PHASE_RETIRED
+    expected_present = (
+        phase
+        in (
+            epoch_v1.PHASE_REVEAL_COMMITTED,
+            epoch_v1.PHASE_LAUNCH_SETTLED,
+            epoch_v1.PHASE_OUTCOME_SETTLED,
+        )
+        and recovery.RECOVERY_START_AGE_TICK
+        <= age
+        <= recovery.RECOVERY_END_AGE_TICK
+    )
     assert bool(record.fact_valid_bits[0, 0, owner_slot].ne(0)) is expected_present
     assert record.fact_f32[0, 0, owner_slot, 2].item() == float(
         expected_eligible
@@ -622,6 +667,151 @@ def test_r07_reward_eligibility_is_exact_post_outcome_window(
     # The non-due IDLE peer is never turned into an R07 payment row.
     assert record.fact_valid_bits[1, 0, owner_slot].item() == 0
     assert record.fact_f32[1, 0, owner_slot].eq(0).all()
+    if phase == epoch_v1.PHASE_OUTCOME_SETTLED and age == 77:
+        assert record.fact_valid_bits[0, 0, owner_slot].item() == 3
+        assert record.owner_fault_bits[0, 0, owner_slot].item() == 0
+        assert record.fact_source_step[0, 0, owner_slot].item() == source_step
+        terminal = record.fact_f32[0, 0, owner_slot]
+        assert terminal[3].item() == 1.0
+        assert terminal[4].item() == 0.0
+        assert terminal[6].item() == 77.0
+        assert torch.isfinite(terminal).all()
+
+
+def test_r07_async_window_publishes_only_due_row_and_retains_terminal_peer(
+    monkeypatch,
+):
+    device = torch.device("cpu")
+    env, motion, _robot, _sensor, bundle, epoch_owner = (
+        _rowwise_settled_subject(
+            monkeypatch,
+            device=device,
+            settle_both=True,
+        )
+    )
+    publication = epoch_owner._publication
+    record = publication.current
+    phase = record.phase.clone()
+    deadline = record.clocks.deadline_tick.clone()
+    phase[:, 0] = torch.tensor(
+        [
+            epoch_v1.PHASE_REVEAL_COMMITTED,
+            epoch_v1.PHASE_OUTCOME_SETTLED,
+        ],
+        dtype=torch.int64,
+        device=device,
+    )
+    deadline[:, 0] = torch.tensor(
+        [191, 123], dtype=torch.int64, device=device
+    )
+    epoch_owner._publication = epoch_v1._Publication(
+        replace(
+            record,
+            phase=phase,
+            clocks=replace(record.clocks, deadline_tick=deadline),
+        ),
+        publication.pending_log,
+    )
+
+    # One global-any producer call sees local ages [9, 77].  Only the terminal
+    # OUTCOME peer may publish.
+    env.common_step_counter = 9_999
+    first = _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=200,
+        current_source_step=torch.full(
+            (2,), 9_999, dtype=torch.int64, device=device
+        ),
+    )
+    assert first.recovery_age_tick.tolist() == [9, 77]
+    owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
+    after_first = epoch_owner.current()
+    assert after_first.fact_valid_bits[:, 0, owner_slot].tolist() == [0, 3]
+    assert after_first.fact_source_step[1, 0, owner_slot].item() == 9_999
+    assert after_first.fact_f32[1, 0, owner_slot, 6].item() == 77.0
+    retained_valid = after_first.fact_valid_bits[1, 0, owner_slot].clone()
+    retained_source = after_first.fact_source_step[1, 0, owner_slot].clone()
+    retained_fault = after_first.owner_fault_bits[1, 0, owner_slot].clone()
+    retained_fact = after_first.fact_f32[1, 0, owner_slot].clone()
+
+    # On the next global call ages cross to [10, 78].  The pre-outcome row now
+    # publishes a numeric, Reward-zero cell while the age-78 peer must preserve
+    # its age-77 terminal fact byte-for-byte for a later R06 debt join.
+    env.common_step_counter = 10_000
+    second = _publish_epoch_reward_facts(
+        bundle,
+        motion,
+        cadence_tick=201,
+        current_source_step=torch.full(
+            (2,), 10_000, dtype=torch.int64, device=device
+        ),
+    )
+    assert second.recovery_age_tick.tolist() == [10, 78]
+    assert second.reward_eligible.tolist() == [False, False]
+    assert second.weighted_reward.eq(0).all()
+    after_second = epoch_owner.current()
+    assert after_second.fact_valid_bits[0, 0, owner_slot].item() == 3
+    assert after_second.fact_source_step[0, 0, owner_slot].item() == 10_000
+    assert after_second.fact_f32[0, 0, owner_slot, 6].item() == 10.0
+    assert torch.equal(
+        after_second.fact_valid_bits[1, 0, owner_slot], retained_valid
+    )
+    assert torch.equal(
+        after_second.fact_source_step[1, 0, owner_slot], retained_source
+    )
+    assert torch.equal(
+        after_second.owner_fault_bits[1, 0, owner_slot], retained_fault
+    )
+    assert torch.equal(after_second.fact_f32[1, 0, owner_slot], retained_fact)
+
+
+def test_selected_contact_no_crossing_launch_publishes_all_68_r07_cells_unpaid(
+    monkeypatch,
+):
+    device = torch.device("cpu")
+    env, motion, _robot, _sensor, bundle, epoch_owner = (
+        _rowwise_settled_subject(monkeypatch, device=device)
+    )
+    _set_current_phase_and_deadline(
+        epoch_owner,
+        phase=epoch_v1.PHASE_LAUNCH_SETTLED,
+        deadline_tick=40,
+    )
+    owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
+    published_sources = []
+    for age in range(
+        recovery.RECOVERY_START_AGE_TICK,
+        recovery.RECOVERY_END_AGE_TICK + 1,
+    ):
+        source = 10_000 + age - recovery.RECOVERY_START_AGE_TICK
+        env.common_step_counter = source
+        result = _publish_epoch_reward_facts(
+            bundle,
+            motion,
+            cadence_tick=40 + age,
+            current_source_step=torch.full(
+                (2,), source, dtype=torch.int64, device=device
+            ),
+        )
+        assert result.recovery_age_tick.tolist() == [age, -1]
+        assert result.reward_eligible.tolist() == [False, False]
+        assert result.weighted_reward.eq(0).all()
+        record = epoch_owner.current()
+        assert record.fact_valid_bits[0, 0, owner_slot].item() == 3
+        assert record.owner_fault_bits[0, 0, owner_slot].item() == 0
+        assert record.fact_source_step[0, 0, owner_slot].item() == source
+        assert record.fact_f32[0, 0, owner_slot, 6].item() == float(age)
+        published_sources.append(source)
+
+    assert len(published_sources) == 68
+    assert published_sources == list(range(10_000, 10_068))
+    terminal = epoch_owner.current().fact_f32[0, 0, owner_slot]
+    assert terminal[2].item() == 0.0  # Reward eligibility remains OUTCOME-only.
+    assert terminal[3].item() == 1.0
+    assert terminal[4].item() == 0.0
+    assert terminal[6].item() == 77.0
+    assert torch.isfinite(terminal).all()
 
 
 def test_r07_epoch_direct_publish_marks_nonfinite_plant_as_typed_fault(monkeypatch):
@@ -629,19 +819,24 @@ def test_r07_epoch_direct_publish_marks_nonfinite_plant_as_typed_fault(monkeypat
     env, motion, robot, _sensor, bundle, epoch_owner = (
         _rowwise_settled_subject(monkeypatch, device=device)
     )
-    robot.data.joint_vel[1, 0] = math.nan
+    robot.data.joint_vel[0, 0] = math.nan
+    env.common_step_counter = 10_000
     result = _publish_epoch_reward_facts(
         bundle,
         motion,
-        cadence_tick=40,
+        cadence_tick=50,
         current_source_step=torch.full(
-            (2,), 40, dtype=torch.int64, device=device
+            (2,), 10_000, dtype=torch.int64, device=device
         )
     )
-    assert result.facts_valid.tolist() == [True, False]
-    assert result.infrastructure_fault.tolist() == [False, True]
-    assert result.producer_fault_bits[1].item() & recovery.R07_EPOCH_FAULT_INVALID_PLANT_FACT
-    assert result.weighted_reward[1].item() == 0.0
+    assert result.facts_valid.tolist() == [False, True]
+    assert result.infrastructure_fault.tolist() == [True, False]
+    assert result.producer_fault_bits[0].item() & recovery.R07_EPOCH_FAULT_INVALID_PLANT_FACT
+    assert result.weighted_reward[0].item() == 0.0
+    record = epoch_owner.current()
+    owner_slot = epoch_v1.OWNER_ORDER.index("r07_recovery")
+    assert record.fact_valid_bits[0, 0, owner_slot].item() == 1
+    assert record.owner_fault_bits[0, 0, owner_slot].ne(0)
 
 
 @pytest.mark.parametrize("device_name", ("cpu", "cuda:0"))

@@ -1,4 +1,4 @@
-"""Typed, dependency-free PPO V3 recipe for the continuous FullMDP lanes.
+"""Typed, dependency-free PPO V4 recipe for the continuous FullMDP lanes.
 
 The shared ``cfg/algo/ppo.yaml`` remains the legacy/default recipe for every
 other task.  FullMDP Isaac and MuJoCo consumers derive their effective values
@@ -16,7 +16,7 @@ import json
 class ActionBallFullMdpPpoRecipe:
     """Complete FullMDP PPO recipe, including its finite run schedule."""
 
-    kind: str = "action_ball_full_mdp_ppo_v3"
+    kind: str = "action_ball_full_mdp_ppo_v4"
     num_steps_per_env: int = 48
     max_iterations: int = 12_500
     save_interval: int = 500
@@ -26,7 +26,7 @@ class ActionBallFullMdpPpoRecipe:
     actor_hidden_dims: tuple[int, ...] = (512, 256, 128)
     critic_hidden_dims: tuple[int, ...] = (512, 256, 128)
     activation: str = "elu"
-    init_noise_std: float = 0.02
+    init_noise_std: float = 0.05
     noise_std_type: str = "log"
 
     algorithm_class_name: str = "PPO"
@@ -39,7 +39,7 @@ class ActionBallFullMdpPpoRecipe:
     # ``log_std`` is already learned by PPO.  A permanent positive entropy
     # coefficient adds the same upward gradient to every action dimension on
     # every minibatch, independent of task quality.  In the v2 long runs that
-    # drove mean std from 0.02 past 1.0 and destroyed an already learned
+    # drove mean std past 1.0 and destroyed an already learned
     # balance policy.  Keep exploration in the learned distribution instead
     # of paying an unconditional lifetime bonus for more noise.
     entropy_coef: float = 0.0

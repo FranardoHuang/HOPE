@@ -52,9 +52,27 @@ def _load_subject():
         "isaaclab.envs.manager_based_rl_env_cfg": types.ModuleType(
             "isaaclab.envs.manager_based_rl_env_cfg"
         ),
+        "whole_body_tracking": types.ModuleType("whole_body_tracking"),
+        "whole_body_tracking.tasks": types.ModuleType(
+            "whole_body_tracking.tasks"
+        ),
+        "whole_body_tracking.tasks.tracking": types.ModuleType(
+            "whole_body_tracking.tasks.tracking"
+        ),
+        "whole_body_tracking.tasks.tracking.mdp": types.ModuleType(
+            "whole_body_tracking.tasks.tracking.mdp"
+        ),
+        (
+            "whole_body_tracking.tasks.tracking.mdp."
+            "action_ball_full_mdp_reward_contract"
+        ): types.ModuleType("action_ball_full_mdp_reward_contract"),
     }
     stubs["isaaclab"].__path__ = []
     stubs["isaaclab.envs"].__path__ = []
+    stubs["whole_body_tracking"].__path__ = []
+    stubs["whole_body_tracking.tasks"].__path__ = []
+    stubs["whole_body_tracking.tasks.tracking"].__path__ = []
+    stubs["whole_body_tracking.tasks.tracking.mdp"].__path__ = []
     stubs["isaaclab.envs.common"].VecEnvStepReturn = tuple
     stubs["isaaclab.envs.manager_based_rl_env"].ManagerBasedRLEnv = (
         FakeManagerBasedRLEnv
@@ -337,11 +355,11 @@ class _PlainManager:
 
 
 class _CommandTerm:
-    def __init__(self, trace, name):
+    def __init__(self, trace, name, *, count=2):
         self.trace = trace
         self.name = name
-        self.time_left = torch.ones(2)
-        self.command_counter = torch.zeros(2, dtype=torch.long)
+        self.time_left = torch.ones(count)
+        self.command_counter = torch.zeros(count, dtype=torch.long)
         self.reset_calls = []
 
     def reset(self, *, env_ids):
@@ -386,12 +404,19 @@ class _Events:
 
 
 def _env(
-    *, reset_mask=(False, False), decimation=2, termination_reason_masks=None
+    *,
+    reset_mask=(False, False),
+    decimation=2,
+    termination_reason_masks=None,
+    episode_lengths=None,
 ):
     env = object.__new__(M.ActionBallFullMdpManagerBasedRLEnv)
     trace = []
+    reset_mask_tensor = torch.as_tensor(reset_mask, dtype=torch.bool)
+    assert reset_mask_tensor.ndim == 1
+    num_envs = int(reset_mask_tensor.shape[0])
     env.device = "cpu"
-    env.num_envs = 2
+    env.num_envs = num_envs
     env.cfg = types.SimpleNamespace(
         decimation=decimation,
         sim=types.SimpleNamespace(render_interval=1),
@@ -401,14 +426,21 @@ def _env(
     env.step_dt = 0.01
     env.common_step_counter = 0
     env._sim_step_counter = 0
-    env.episode_length_buf = torch.tensor([9, 19], dtype=torch.long)
+    if episode_lengths is None:
+        episode_lengths = (
+            (9, 19) if num_envs == 2 else tuple(range(num_envs))
+        )
+    env.episode_length_buf = torch.as_tensor(
+        episode_lengths, dtype=torch.long
+    ).clone()
+    assert env.episode_length_buf.shape == (num_envs,)
     env.action_manager = _ActionManager(trace)
     env.scene = _Scene(trace)
     env.sim = _Sim(trace)
     env.recorder_manager = _Recorder(trace)
     env.termination_manager = _Termination(
         trace,
-        torch.tensor(reset_mask, dtype=torch.bool),
+        reset_mask_tensor,
         reason_masks=termination_reason_masks,
     )
     env.reset_terminated = env.termination_manager.terminated.clone()
@@ -416,17 +448,20 @@ def _env(
         env.termination_manager.time_outs,
         ~env.reset_terminated,
     )
-    env.reward_manager = _PlainManager(trace, "reward")
+    env.reward_manager = _PlainManager(trace, "reward", count=num_envs)
     env.observation_manager = _PlainManager(
         trace,
         "observation",
-        compute_value={"policy": torch.zeros(2, 1)},
+        count=num_envs,
+        compute_value={"policy": torch.zeros(num_envs, 1)},
     )
-    env.curriculum_manager = _PlainManager(trace, "curriculum")
+    env.curriculum_manager = _PlainManager(
+        trace, "curriculum", count=num_envs
+    )
     env.event_manager = _Events(trace)
-    motion = _CommandTerm(trace, "motion")
-    racket = _CommandTerm(trace, "racket")
-    wind = _CommandTerm(trace, "wind")
+    motion = _CommandTerm(trace, "motion", count=num_envs)
+    racket = _CommandTerm(trace, "racket", count=num_envs)
+    wind = _CommandTerm(trace, "wind", count=num_envs)
     env.command_manager = _Commands(
         trace,
         {"motion": motion, "racket_target": racket, "wind": wind},
@@ -696,6 +731,42 @@ def test_pure_horizon_transition_remains_rsl_timeout_and_reason_owner():
     )
     assert env._action_ball_full_mdp_reset_generation.tolist() == [7, 8]
     assert env.episode_length_buf.tolist() == [10, 0]
+
+
+def test_mixed_batch_partitions_timeout_plant_and_reset_facts_rowwise():
+    # Exercise all three terminal classes in one manager result.  Row 0 is a
+    # pure horizon, row 1 reaches the horizon and has a plant terminal on the
+    # same transition, and row 2 has only the plant terminal.  The retained
+    # manager timeout is raw telemetry; the returned timeout and terminal
+    # reason ledger are the disjoint learning/reset ownership partition.
+    env, owner, *_ = _env(
+        reset_mask=(True, True, True),
+        decimation=1,
+        episode_lengths=(19, 19, 5),
+        termination_reason_masks={
+            "time_out": torch.tensor([True, True, False]),
+            "base_fell_tilt": torch.tensor([False, True, True]),
+        },
+    )
+
+    result = env.step(torch.zeros(3, 4))
+
+    assert env.termination_manager.time_outs.tolist() == [True, True, False]
+    assert result[2].tolist() == [False, True, True]
+    assert result[3].tolist() == [True, False, False]
+    assert torch.equal(owner.reset_ids[0], torch.tensor([0, 1, 2]))
+    assert torch.equal(
+        owner.reset_facts[0],
+        torch.tensor(
+            [[1, 20, 1], [1, 20, 2], [1, 6, 2]],
+            dtype=torch.int64,
+        ),
+    )
+    reason_bits = owner.reset_facts[0][:, 2]
+    assert torch.all(reason_bits > 0)
+    assert torch.all(torch.bitwise_and(reason_bits, reason_bits - 1) == 0)
+    assert env._action_ball_full_mdp_reset_generation.tolist() == [8, 8, 8]
+    assert env.episode_length_buf.tolist() == [0, 0, 0]
 
 
 def test_missing_owner_first_operation_fails_before_action_or_sim():

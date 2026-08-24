@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import statistics
 import subprocess
 import sys
 
@@ -37,6 +38,21 @@ PINNED_A3_USD_SHA256 = (
 LD_LIBRARY_PATH = (
     "/workspace/franco/runtime_assets/libopengl_noble_1_7_0/usr/lib/"
     "x86_64-linux-gnu:/workspace/franco/runtime_assets/libglu_af791d1e"
+)
+RATE_PROBE_COMPLETION_TIMEOUT_S = 7200
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+RATE_PROBE_BUDGET_RE = re.compile(
+    r"FULLMDP_H48_RATE_PROBE:.*\bupdates=([0-9]+)\s+"
+    r"warmup=([0-9]+)\s+measured=([0-9]+)\s+tail=([0-9]+)(?:\s|$)"
+)
+LEARNING_ITERATION_RE = re.compile(
+    r"^\s*Learning iteration\s+([0-9]+)/([0-9]+)\s*$"
+)
+ITERATION_TIME_RE = re.compile(
+    r"^\s*Iteration time:\s*([0-9]+(?:\.[0-9]+)?)s\s*$"
+)
+RECIPE_SHA256_RE = re.compile(
+    r"learning_recipe_sha256=([0-9a-f]{64})(?:\s|$)"
 )
 
 
@@ -252,6 +268,7 @@ def _paths(root: Path) -> dict[str, Path]:
         "xdg_data": root / "xdg_data",
         "xdg_state": root / "xdg_state",
         "runtime_receipt": root / "train-runtime.receipt",
+        "rate_receipt": root / "diagnostic-rate-probe.json",
         "run_log": root / "run.log",
         "launch_state": root / "kit_boot.launch",
         "training": root / "training",
@@ -306,8 +323,10 @@ def _child_argv(
     train: Path,
     namespace: str,
     hydra_run_dir: Path,
+    *,
+    diagnostic_rate_probe: bool = False,
 ) -> list[str]:
-    return [
+    argv = [
         str(isaac_python),
         "-P",
         "-B",
@@ -327,6 +346,9 @@ def _child_argv(
         "checkpoint_allow_contract_mismatch=false",
         f"hydra.run.dir={hydra_run_dir}",
     ]
+    if diagnostic_rate_probe:
+        argv.append("task.action_ball_full_mdp_rate_probe=true")
+    return argv
 
 
 def _pythonpath(isaaclab: Path, venv_site: Path) -> str:
@@ -391,8 +413,10 @@ def _runtime_env(
     return result
 
 
-def _launcher_env(paths: dict[str, Path]) -> dict[str, str]:
-    return {
+def _launcher_env(
+    paths: dict[str, Path], *, diagnostic_rate_probe: bool = False
+) -> dict[str, str]:
+    result = {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
         "HOME": str(paths["home"]),
         "XDG_CACHE_HOME": str(paths["xdg_cache"]),
@@ -404,8 +428,13 @@ def _launcher_env(paths: dict[str, Path]) -> dict[str, str]:
         "KIT_BOOT_STALE_TIMEOUT_S": "180",
         "KIT_BOOT_POLL_S": "5",
         "KIT_BOOT_STATE_FILE": str(paths["launch_state"]),
-        "KIT_WAIT_FOR_COMPLETION": "0",
+        "KIT_WAIT_FOR_COMPLETION": "1" if diagnostic_rate_probe else "0",
     }
+    if diagnostic_rate_probe:
+        result["KIT_COMPLETION_TIMEOUT_S"] = str(
+            RATE_PROBE_COMPLETION_TIMEOUT_S
+        )
+    return result
 
 
 def _acquire_lock(path: Path) -> int:
@@ -525,6 +554,172 @@ def _verify_started(
     return pid, pgid
 
 
+def _verify_completed(paths: dict[str, Path]) -> tuple[int, int]:
+    """Require one natural, clean completion after the 61-update probe."""
+
+    fields = _state_fields(paths["launch_state"])
+    try:
+        pid = int(fields["pid"])
+        pgid = int(fields["pgid"])
+    except (KeyError, ValueError) as exc:
+        raise LaunchError("Kit launch state has no exact PID/PGID") from exc
+    if (
+        pid <= 1
+        or pgid != pid
+        or fields.get("ready_utc") is None
+        or fields.get("completion_utc") is None
+        or fields.get("completion_exit_code") != "0"
+        or fields.get("terminal_kind") != "clean_completion"
+        or fields.get("terminal_exit_code") != "0"
+    ):
+        raise LaunchError("diagnostic rate probe did not complete naturally")
+    if any(
+        key in fields
+        for key in (
+            "stop_signal",
+            "completion_timeout_s",
+            "term_identity_evidence",
+            "kill_identity_evidence",
+        )
+    ):
+        raise LaunchError("diagnostic rate probe completion used a stop path")
+    try:
+        runtime_receipt = paths["runtime_receipt"].read_bytes()
+    except OSError as exc:
+        raise LaunchError("cannot read runtime attestation receipt") from exc
+    if runtime_receipt != b"trainer_runtime_attested_v2\n":
+        raise LaunchError("runtime attestation receipt differs")
+    return pid, pgid
+
+
+def _rate_probe_payload(
+    *,
+    run_log: Path,
+    source_commit: str,
+    namespace: str,
+    gpu_index: int,
+    gpu_uuid: str,
+) -> dict[str, object]:
+    """Parse RSL-RL's own update walls; do not redefine PPO timing."""
+
+    try:
+        raw = run_log.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise LaunchError("cannot read completed diagnostic rate log") from exc
+    lines = [ANSI_RE.sub("", line) for line in raw.splitlines()]
+    budgets: set[tuple[int, int, int, int]] = set()
+    iteration_ids: list[int] = []
+    iteration_totals: list[int] = []
+    update_seconds: list[float] = []
+    recipe_sha256: set[str] = set()
+    for line in lines:
+        match = RATE_PROBE_BUDGET_RE.search(line)
+        if match is not None:
+            budgets.add(tuple(int(value) for value in match.groups()))
+        match = LEARNING_ITERATION_RE.fullmatch(line)
+        if match is not None:
+            iteration_ids.append(int(match.group(1)))
+            iteration_totals.append(int(match.group(2)))
+        match = ITERATION_TIME_RE.fullmatch(line)
+        if match is not None:
+            seconds = float(match.group(1))
+            if not 0.0 < seconds < float("inf"):
+                raise LaunchError("diagnostic rate probe update wall differs")
+            update_seconds.append(seconds)
+        match = RECIPE_SHA256_RE.search(line)
+        if match is not None:
+            recipe_sha256.add(match.group(1))
+    if len(budgets) != 1:
+        raise LaunchError("diagnostic rate probe budget identity differs")
+    updates, warmup_updates, measured_updates, tail_updates = next(iter(budgets))
+    if (
+        warmup_updates < 1
+        or measured_updates < 2
+        or tail_updates < 1
+        or updates != warmup_updates + measured_updates + tail_updates
+    ):
+        raise LaunchError("diagnostic rate probe budget window differs")
+    expected_ids = list(range(updates))
+    if (
+        iteration_ids != expected_ids
+        or iteration_totals != [updates] * updates
+        or len(update_seconds) != updates
+    ):
+        raise LaunchError("diagnostic rate probe 61-update timing window differs")
+    if len(recipe_sha256) != 1:
+        raise LaunchError("diagnostic rate probe recipe identity differs")
+    measured = update_seconds[
+        warmup_updates:warmup_updates + measured_updates
+    ]
+    tail = update_seconds[-tail_updates:]
+    if len(measured) != measured_updates or len(tail) != tail_updates:
+        raise LaunchError("diagnostic rate probe measured timing window differs")
+    return {
+        "kind": "action_ball_isaac_full_mdp_h48_rate_probe_v1",
+        "schema_version": 1,
+        "diagnostic_unauthorized": True,
+        "formal_evidence": False,
+        "safety_gate": False,
+        "source_commit": source_commit,
+        "namespace": namespace,
+        "gpu": {"index": gpu_index, "uuid": gpu_uuid},
+        "action_ball_full_mdp_ppo_recipe_sha256": next(iter(recipe_sha256)),
+        "shape": {
+            "num_envs": 4096,
+            "num_steps_per_env": 48,
+            "updates": updates,
+        },
+        "timing_source": (
+            "RSL-RL Iteration time stdout; profiler off; values retain "
+            "the runtime's printed precision"
+        ),
+        "warmup_updates": warmup_updates,
+        "measured_updates": measured_updates,
+        "tail_updates": tail_updates,
+        "raw_update_seconds": update_seconds,
+        "measured_update_seconds": measured,
+        "update_seconds_p50": statistics.median(measured),
+        "update_seconds_p90": statistics.quantiles(
+            measured, n=10, method="inclusive"
+        )[8],
+        "run_log": {
+            "path": str(run_log),
+            "sha256": _sha256(run_log),
+        },
+    }
+
+
+def _write_rate_probe_receipt(path: Path, payload: dict[str, object]) -> None:
+    try:
+        body = (
+            json.dumps(
+                payload,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise LaunchError("diagnostic rate probe receipt is not finite JSON") from exc
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        offset = 0
+        while offset < len(body):
+            written = os.write(descriptor, body[offset:])
+            if written <= 0:
+                raise OSError("short diagnostic receipt write")
+            offset += written
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise LaunchError("cannot no-clobber diagnostic rate receipt") from exc
+    finally:
+        if "descriptor" in locals():
+            os.close(descriptor)
+
+
 def launch(args: argparse.Namespace) -> int:
     commit = _source_commit()
     train = _canonical_regular(REPO_ROOT / TRAIN_RELATIVE, "Isaac train entry")
@@ -552,12 +747,20 @@ def launch(args: argparse.Namespace) -> int:
         raise LaunchError("expected-gpu-uuid format differs")
     if not 0 <= args.profile_updates <= 50:
         raise LaunchError("profile-updates must be between 0 and 50")
+    if args.diagnostic_rate_probe and args.profile_updates:
+        raise LaunchError(
+            "diagnostic-rate-probe and profile-updates are mutually exclusive"
+        )
     cpu_affinity, cpu_ids = _cpu_affinity(args.cpu_affinity)
     if cpu_affinity is not None:
         _canonical_regular(TASKSET, "taskset", executable=True)
     paths = _paths(root)
     child_argv = _child_argv(
-        isaac_python, train, args.namespace, paths["hydra"]
+        isaac_python,
+        train,
+        args.namespace,
+        paths["hydra"],
+        diagnostic_rate_probe=args.diagnostic_rate_probe,
     )
     runtime_env = _runtime_env(
         gpu_uuid=args.expected_gpu_uuid,
@@ -571,7 +774,9 @@ def launch(args: argparse.Namespace) -> int:
         print(json.dumps({
             "source_commit": commit,
             "argv": child_argv,
-            "launcher_env": _launcher_env(paths),
+            "launcher_env": _launcher_env(
+                paths, diagnostic_rate_probe=args.diagnostic_rate_probe
+            ),
             "runtime_env": runtime_env,
             "run_root": str(root),
             "cpu_affinity": cpu_affinity,
@@ -598,7 +803,9 @@ def launch(args: argparse.Namespace) -> int:
             result = subprocess.run(
                 command,
                 cwd=REPO_ROOT,
-                env=_launcher_env(paths),
+                env=_launcher_env(
+                    paths, diagnostic_rate_probe=args.diagnostic_rate_probe
+                ),
                 stdin=subprocess.DEVNULL,
                 check=False,
                 pass_fds=(gpu_lock, *runtime_descriptors),
@@ -607,9 +814,23 @@ def launch(args: argparse.Namespace) -> int:
             raise LaunchError("cannot start the Kit boot launcher") from exc
         if result.returncode != 0:
             raise LaunchError(f"Kit boot launcher failed rc={result.returncode}")
-        pid, pgid = _verify_started(
-            paths, gpu_lock=gpu_lock, lock_file=args.lock_file
-        )
+        if args.diagnostic_rate_probe:
+            pid, pgid = _verify_completed(paths)
+            rate_payload = _rate_probe_payload(
+                run_log=paths["run_log"],
+                source_commit=commit,
+                namespace=args.namespace,
+                gpu_index=args.gpu_index,
+                gpu_uuid=args.expected_gpu_uuid,
+            )
+            _write_rate_probe_receipt(paths["rate_receipt"], rate_payload)
+            status = "DIAGNOSTIC_RATE_PROBE_COMPLETE"
+        else:
+            pid, pgid = _verify_started(
+                paths, gpu_lock=gpu_lock, lock_file=args.lock_file
+            )
+            rate_payload = None
+            status = "RUNNING"
         print(json.dumps({
             "diagnostic_unauthorized": True,
             "gpu_uuid": args.expected_gpu_uuid,
@@ -620,7 +841,16 @@ def launch(args: argparse.Namespace) -> int:
             "gpu_lock_fd": gpu_lock,
             "run_root": str(root),
             "source_commit": commit,
-            "status": "RUNNING",
+            "status": status,
+            **(
+                {
+                    "rate_receipt": str(paths["rate_receipt"]),
+                    "update_seconds_p50": rate_payload["update_seconds_p50"],
+                    "update_seconds_p90": rate_payload["update_seconds_p90"],
+                }
+                if rate_payload is not None
+                else {}
+            ),
         }, sort_keys=True, separators=(",", ":")))
         return 0
     finally:
@@ -650,6 +880,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-gpu-uuid", required=True)
     parser.add_argument("--lock-file", type=Path, required=True)
     parser.add_argument("--profile-updates", type=int, default=0)
+    parser.add_argument("--diagnostic-rate-probe", action="store_true")
     parser.add_argument("--cpu-affinity")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)

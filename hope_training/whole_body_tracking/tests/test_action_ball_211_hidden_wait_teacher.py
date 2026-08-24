@@ -917,8 +917,10 @@ def _load_reward_helpers():
         "_stage1_quat_apply",
         "_stage1_split_ready_safe_racket_tuple",
         "_stage1_select_split_ready_site_target",
+        "_stage1_actual_face_normal",
         "_cauchy_tracking_kernel",
         "_window_pos",
+        "_scale_motion_racket_prior_in_strike_window",
         "_target_component_valid",
         "_target_position_now",
         "_pos_kernel_raw",
@@ -1013,7 +1015,10 @@ def _paddle_fixture(namespace, *, motion=None):
             motion=SimpleNamespace(num_segments=1),
             clip_id=torch.zeros(2, dtype=torch.long),
             _multiseg=False,
+            in_hold=torch.zeros(2, dtype=torch.bool),
+            speed_scale=torch.ones(2, dtype=dtype),
         )
+        motion._action_ball_safe_ready_wait_mask = lambda: ~task_valid
     else:
         task_valid = motion._action_ball_public_task_valid
     cmd = SimpleNamespace(
@@ -1060,7 +1065,7 @@ def test_hidden_wait_paddle_tuple_has_no_measured_frame0_leak_and_rewards_match(
     selected = namespace["_stage1_aligned_clip_site_target"](cmd)
     selected_long = namespace["_stage1_aligned_clip_long_axis_target"](cmd)
     expected_safe_pos = torch.tensor([1.2, 2.0, 3.0], dtype=torch.float64)
-    expected_safe_face = torch.tensor([0.0, -1.0, 0.0], dtype=torch.float64)
+    expected_safe_face = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float64)
     expected_safe_long = torch.tensor(
         [1.0 / math.sqrt(2.0), 0.0, 1.0 / math.sqrt(2.0)],
         dtype=torch.float64,
@@ -1075,6 +1080,7 @@ def test_hidden_wait_paddle_tuple_has_no_measured_frame0_leak_and_rewards_match(
 
     cmd.racket_pos_w = selected[0].clone()
     cmd.racket_normal_w = selected[1].clone()
+    cmd.racket_normal_raw_w = selected[1].clone()
     cmd.racket_lin_vel_w = selected[2].clone()
     cmd.racket_long_axis_w = selected_long.clone()
     for name in (
@@ -1385,7 +1391,7 @@ def test_unbound_safe_ready_state_is_not_mistaken_for_a_lost_pending_mask():
 
 
 def test_reward_wait_mask_matches_motion_on_the_unbound_construction_state():
-    """奖励侧的等待掩码必须和 Motion 侧对"还没绑定"给出同一个答案。
+    """奖励侧必须逐字采用 Motion 的唯一等待选择器。
 
     人话:``MotionCommand._action_ball_public_task_valid`` 只有在
     ``RacketTargetCommand._install_action_ball_task_wait`` 第一次跑过之后才有值,
@@ -1395,7 +1401,7 @@ def test_reward_wait_mask_matches_motion_on_the_unbound_construction_state():
     奖励侧的 ``_stage1_split_ready_wait_mask`` 却把它当成"两边各持一份张量"直接抛错,
     于是 A211/C211 四格从 materialize 走到 recipe 时环境在 ``gym.make`` 里就建不起来。
 
-    真正的分歧 —— Motion 绑的和 Racket own 的不是同一个张量 —— 仍然必须硬拒。
+    task-valid identity/构造期空态都由 Motion 自己判定;奖励侧既不复制也不重建。
     """
 
     namespace = _load_reward_helpers()
@@ -1407,7 +1413,9 @@ def test_reward_wait_mask_matches_motion_on_the_unbound_construction_state():
         action_ball_diagnostic_split_ready_teacher=True,
         _action_ball_public_task_valid=None,
         in_hold=torch.zeros(2, dtype=torch.bool),
-        _capture_action_ball_safe_ready_reference=lambda: None,
+        _action_ball_safe_ready_wait_mask=lambda: torch.zeros(
+            2, dtype=torch.bool
+        ),
     )
     cmd = SimpleNamespace(
         num_envs=2,
@@ -1425,10 +1433,10 @@ def test_reward_wait_mask_matches_motion_on_the_unbound_construction_state():
     assert not bool(result.any())
 
     # 2) 绑的是同一个张量:恢复原语义 ~task_valid。
-    motion._action_ball_public_task_valid = owned
+    motion._action_ball_safe_ready_wait_mask = lambda: ~owned
     assert mask(cmd).tolist() == [True, False]
 
-    # 3) 绑的是"另一份"张量 —— 真正的分歧,照旧硬拒。
-    motion._action_ball_public_task_valid = owned.clone()
-    with pytest.raises(RuntimeError, match="share one"):
+    # 3) Motion 若返回错误 ABI,奖励侧硬拒,但不另造第二份语义。
+    motion._action_ball_safe_ready_wait_mask = lambda: torch.zeros(1, dtype=torch.bool)
+    with pytest.raises(RuntimeError, match="selector changed ABI"):
         mask(cmd)

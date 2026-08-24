@@ -768,7 +768,7 @@ def test_pre_gym_binding_uses_only_code_owned_lean_factory(monkeypatch):
         binding.owner_type = object
 
 
-def test_full_mdp_typed_ppo_v3_replaces_only_the_fresh_algo_mapping():
+def test_full_mdp_typed_ppo_v4_replaces_only_the_fresh_algo_mapping():
     legacy = {
         "name": "ppo",
         "runner": {"num_steps_per_env": 24, "max_iterations": 25_000},
@@ -1500,9 +1500,17 @@ def test_diagnostic_motion_body_order_rejects_missing_or_nonclass_cfg_symbol(
         train_mod._diagnostic_full_mdp_motion_body_names_contract(state.env)
 
 
-def _lean_reward20_status(monkeypatch):
-    names = tuple(f"manager_{index}" for index in range(20))
-    module = types.SimpleNamespace(MANAGER_NAMES=names, MANAGER_TERM_COUNT=20)
+def _shared_reward_status(monkeypatch):
+    reward_contract = (
+        train_mod._training_contract_module()
+        ._action_ball_full_mdp_reward_contract_module()
+    )
+    names = reward_contract.MANAGER_NAMES
+    module = types.SimpleNamespace(
+        MANAGER_NAMES=names,
+        MANAGER_TERM_COUNT=reward_contract.REWARD_TERM_COUNT,
+        reward_contract=reward_contract,
+    )
     real_import = train_mod.importlib.import_module
     monkeypatch.setattr(
         train_mod.importlib,
@@ -1520,12 +1528,12 @@ def _lean_reward20_status(monkeypatch):
     }
 
 
-def test_diagnostic_racket_guidance_is_covered_by_exact_reward20(monkeypatch):
-    status = _lean_reward20_status(monkeypatch)
+def test_diagnostic_racket_guidance_is_covered_by_exact_shared_reward(monkeypatch):
+    status = _shared_reward_status(monkeypatch)
     contract = train_mod._diagnostic_full_mdp_racket_guidance_contract(status)
     assert contract == {
-        "schema_version": 2,
-        "kind": "action_ball_full_mdp_racket_guidance_in_lean_reward20_v2",
+        "schema_version": 3,
+        "kind": "action_ball_full_mdp_racket_guidance_in_shared_reward_v3",
         "covered_by_reward_graph_kind": status["kind"],
         "ordered_manager_names": status["ordered_manager_names"],
         "diagnostic_unauthorized": True,
@@ -1534,10 +1542,10 @@ def test_diagnostic_racket_guidance_is_covered_by_exact_reward20(monkeypatch):
 
 
 @pytest.mark.parametrize("mutation", ("reordered", "missing"))
-def test_diagnostic_racket_guidance_rejects_inexact_reward20_manager_order(
+def test_diagnostic_racket_guidance_rejects_inexact_shared_reward_manager_order(
     monkeypatch, mutation
 ):
-    status = _lean_reward20_status(monkeypatch)
+    status = _shared_reward_status(monkeypatch)
     if mutation == "reordered":
         status["ordered_manager_names"][:2] = reversed(
             status["ordered_manager_names"][:2]
@@ -1567,7 +1575,11 @@ def _installed_lean_reward_graph(monkeypatch, binding):
         def cycle_open(self):
             return self._cycle_open
 
-    manager_names = tuple(f"manager_{i}" for i in range(20))
+    reward_contract = (
+        train_mod._training_contract_module()
+        ._action_ball_full_mdp_reward_contract_module()
+    )
+    manager_names = reward_contract.MANAGER_NAMES
     consumer_owners = ("r03",) * 10 + ("physical", "r06", "r06", "r07")
     consumers = tuple(
         f"{owner}:{name}"
@@ -1606,12 +1618,13 @@ def _installed_lean_reward_graph(monkeypatch, binding):
         LeanActionEpochRewardGraph=_LeanGraph,
         GRAPH_ATTR="action_ball_full_mdp_lean_reward_graph",
         MANAGER_NAMES=manager_names,
-        MANAGER_TERM_COUNT=20,
+        MANAGER_TERM_COUNT=reward_contract.REWARD_TERM_COUNT,
         ORDERED_CONSUMERS=consumers,
         LIFECYCLE_PAYMENT_COUNT=14,
         DIAGNOSTIC_N2_REWARD_PROFILE_KIND=(
-            "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
+            "action_ball_full_mdp_diagnostic_n2_reward_profile_v3"
         ),
+        reward_contract=reward_contract,
         DIAGNOSTIC_UNAUTHORIZED=True,
         LAUNCH_AUTHORIZED=False,
     )
@@ -1651,7 +1664,7 @@ def test_diagnostic_post_gym_uses_only_exact_lean_graph_getter(monkeypatch):
         "schema_version": 1,
         "kind": "action_ball_epoch_lean_reward_graph_v1",
         "profile_kind": (
-            "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
+            "action_ball_full_mdp_diagnostic_n2_reward_profile_v3"
         ),
         "ordered_manager_names": list(state.manager_names),
         "ordered_payment_consumers": list(state.consumers),
@@ -1662,7 +1675,7 @@ def test_diagnostic_post_gym_uses_only_exact_lean_graph_getter(monkeypatch):
     assert all("sha256" not in name for name in status)
 
 
-def test_diagnostic_real_lean_reward_module_crosses_exact_20_term_abi(
+def test_diagnostic_real_lean_reward_module_crosses_exact_shared_reward_abi(
     monkeypatch,
 ):
     try:
@@ -1689,7 +1702,11 @@ def test_diagnostic_real_lean_reward_module_crosses_exact_20_term_abi(
     "mutation",
     (
         lambda module: setattr(module, "MANAGER_TERM_COUNT", 14),
-        lambda module: setattr(module, "LIFECYCLE_PAYMENT_COUNT", 20),
+        lambda module: setattr(
+            module,
+            "LIFECYCLE_PAYMENT_COUNT",
+            module.LIFECYCLE_PAYMENT_COUNT + 1,
+        ),
         lambda module: setattr(module, "MANAGER_NAMES", module.MANAGER_NAMES[:-1]),
         lambda module: setattr(
             module,

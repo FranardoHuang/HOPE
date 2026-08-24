@@ -44,6 +44,10 @@ class PortableMotionTeacher:
     body_quat_w: object
     body_lin_vel_w: object
     body_ang_vel_w: object
+    measured_racket_site_pos_w: object
+    measured_racket_site_lin_vel_w: object
+    measured_racket_normal_w: object
+    measured_racket_long_axis_w: object
 
 
 def _plain_finite(value, label):
@@ -124,6 +128,14 @@ def load_portable_motion_teacher(
             "kinematics_schema_version",
             "body_pos_point",
             "body_lin_vel_point",
+            "measured_racket_site_pos_w",
+            "measured_racket_normal_w",
+            "measured_racket_long_axis_w",
+            "measured_racket_schema_version",
+            "measured_racket_position_semantics",
+            "measured_racket_normal_semantics",
+            "measured_racket_long_axis_semantics",
+            "measured_racket_retarget_admitted",
             "measured_racket_robot_mount_normal_sign",
             "measured_racket_joint_order_contract_id",
             "measured_racket_joint_order_contract_sha256",
@@ -189,11 +201,50 @@ def load_portable_motion_teacher(
             :, body_indices
         ]
         frames = joint_pos.shape[0]
+        measured_racket_pos = np.asarray(
+            data["measured_racket_site_pos_w"], dtype=np.float32
+        )
+        measured_racket_normal = np.asarray(
+            data["measured_racket_normal_w"], dtype=np.float32
+        )
+        measured_racket_long_axis = np.asarray(
+            data["measured_racket_long_axis_w"], dtype=np.float32
+        )
+        measured_shape = (frames, 3)
+        measured_norm = np.linalg.norm(measured_racket_normal, axis=1)
+        measured_long_norm = np.linalg.norm(measured_racket_long_axis, axis=1)
+        measured_orthogonality = np.sum(
+            measured_racket_normal * measured_racket_long_axis, axis=1
+        )
         if (
-            body_pos.shape != (frames, len(body_indices), 3)
+            frames < 2
+            or body_pos.shape != (frames, len(body_indices), 3)
             or body_quat.shape != (frames, len(body_indices), 4)
             or body_lin.shape != body_pos.shape
             or body_ang.shape != body_pos.shape
+            or measured_racket_pos.shape != measured_shape
+            or measured_racket_normal.shape != measured_shape
+            or measured_racket_long_axis.shape != measured_shape
+            or int(
+                np.asarray(data["measured_racket_schema_version"]).reshape(-1)[0]
+            )
+            != 4
+            or str(
+                np.asarray(data["measured_racket_position_semantics"]).reshape(-1)[0]
+            )
+            != "physical_blade_center"
+            or str(
+                np.asarray(data["measured_racket_normal_semantics"]).reshape(-1)[0]
+            )
+            != "signed_physical_hitting_face"
+            or str(
+                np.asarray(data["measured_racket_long_axis_semantics"]).reshape(-1)[0]
+            )
+            != "measured_paddle_butt_to_blade"
+            or int(
+                np.asarray(data["measured_racket_retarget_admitted"]).reshape(-1)[0]
+            )
+            != 1
             or not np.allclose(
                 np.linalg.norm(body_quat, axis=2),
                 1.0,
@@ -209,7 +260,19 @@ def load_portable_motion_teacher(
                     body_quat,
                     body_lin,
                     body_ang,
+                    measured_racket_pos,
+                    measured_racket_normal,
+                    measured_racket_long_axis,
                 )
+            )
+            or not np.allclose(
+                measured_norm, 1.0, rtol=0.0, atol=1.0e-3
+            )
+            or not np.allclose(
+                measured_long_norm, 1.0, rtol=0.0, atol=1.0e-3
+            )
+            or not np.allclose(
+                measured_orthogonality, 0.0, rtol=0.0, atol=1.0e-3
             )
         ):
             raise ValueError("portable teacher arrays differ or are nonfinite")
@@ -235,6 +298,19 @@ def load_portable_motion_teacher(
         ):
             raise ValueError("portable teacher strike frame differs")
 
+        # The schema-v4 measured teacher stores one official-site position per
+        # motion frame, but no redundant velocity array.  Materialize the exact
+        # phase-local derivative once at the cold loading boundary: centered in
+        # the interior and one-sided at each endpoint.  Runtime retiming then
+        # multiplies this source-rate velocity by the selected teacher rate.
+        frame_index = np.arange(frames, dtype=np.int64)
+        previous = np.maximum(frame_index - 1, 0)
+        following = np.minimum(frame_index + 1, frames - 1)
+        frame_span = (following - previous).astype(np.float32)
+        measured_racket_velocity = (
+            measured_racket_pos[following] - measured_racket_pos[previous]
+        ) * np.float32(fps) / frame_span[:, None]
+
         def tensor(value):
             # np.load arrays may be read-only.  Copy before crossing the Torch
             # seam so the device tensor never aliases the archive buffer.
@@ -254,6 +330,10 @@ def load_portable_motion_teacher(
             body_quat_w=tensor(body_quat),
             body_lin_vel_w=tensor(body_lin),
             body_ang_vel_w=tensor(body_ang),
+            measured_racket_site_pos_w=tensor(measured_racket_pos),
+            measured_racket_site_lin_vel_w=tensor(measured_racket_velocity),
+            measured_racket_normal_w=tensor(measured_racket_normal),
+            measured_racket_long_axis_w=tensor(measured_racket_long_axis),
         )
 
 
@@ -269,6 +349,9 @@ def sample_motion_teacher(torch, teacher, elapsed_s, teacher_rate, pre_swing_wai
     joint_vel = teacher.joint_vel[frame] * teacher_rate[:, None]
     body_lin = teacher.body_lin_vel_w[frame] * teacher_rate[:, None, None]
     body_ang = teacher.body_ang_vel_w[frame] * teacher_rate[:, None, None]
+    racket_lin = (
+        teacher.measured_racket_site_lin_vel_w[frame] * teacher_rate[:, None]
+    )
     return {
         "frame": frame,
         "started": started,
@@ -282,6 +365,12 @@ def sample_motion_teacher(torch, teacher, elapsed_s, teacher_rate, pre_swing_wai
         "body_ang_vel_w": torch.where(
             started[:, None, None], body_ang, torch.zeros_like(body_ang)
         ),
+        "measured_racket_site_pos_w": teacher.measured_racket_site_pos_w[frame],
+        "measured_racket_site_lin_vel_w": torch.where(
+            started[:, None], racket_lin, torch.zeros_like(racket_lin)
+        ),
+        "measured_racket_normal_w": teacher.measured_racket_normal_w[frame],
+        "measured_racket_long_axis_w": teacher.measured_racket_long_axis_w[frame],
     }
 
 

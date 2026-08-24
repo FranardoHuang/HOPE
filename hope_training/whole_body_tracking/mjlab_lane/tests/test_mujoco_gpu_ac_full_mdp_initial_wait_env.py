@@ -202,6 +202,7 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
         _epoch_phase=torch.tensor(
             [wait_env.FULL_A_PHASE_LAUNCH_SETTLED, wait_env.FULL_A_PHASE_RETIRED]
         ),
+        _full_a_outcome_code=torch.zeros(n, dtype=torch.long),
         _epoch_launch_succeeded=torch.tensor([True, True]),
         _full_a_motion_phase_code=torch.tensor([1, 4]),
         action_offset=offset,
@@ -227,6 +228,7 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
             racket_position,
             racket_velocity,
             racket_raw_normal,
+            torch.tensor([[1.0, 0.0, 0.0]], dtype=dtype).repeat(n, 1),
         ),
     )
     st = {
@@ -289,8 +291,10 @@ def test_full_a_semantic_v2_uses_native_com_frames_clocks_and_current_shot():
     # RETIRED retains the Epoch payload for identity/history, but no live
     # flight remains.  Contact/net critic state must therefore be neutral.
     assert torch.count_nonzero(critic[1, 213:216]) == 0
-    assert torch.equal(privileged("foot_supported_lr"), torch.tensor([[1, 0], [0, 1]], dtype=dtype))
-    assert torch.equal(privileged("cadence_ready_dwell_fraction")[:, 0], torch.tensor([0.5, 1.0], dtype=dtype))
+    # Support/dwell are recovery-only critic facts.  Poisoned live caches from
+    # LAUNCH_SETTLED/RETIRED rows must publish exact N/A zeros.
+    assert torch.count_nonzero(privileged("foot_supported_lr")) == 0
+    assert torch.count_nonzero(privileged("cadence_ready_dwell_fraction")) == 0
     torch.testing.assert_close(
         privileged("episode_time_remaining_s")[:, 0],
         torch.tensor([1.8 / 30.0, 1.6 / 30.0], dtype=dtype),

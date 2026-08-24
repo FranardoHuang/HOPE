@@ -332,7 +332,7 @@ def _components(env):
 
 def _manager_cfgs():
     return (
-        {str(index): object() for index in range(20)},
+        {name: object() for name in M.reward_contract.MANAGER_NAMES},
         {"policy": object(), "critic": object()},
         {
             name: object()
@@ -1082,6 +1082,16 @@ def _peer_raw_bytes(epoch_owner, d05_owner):
     return tuple(rows)
 
 
+def _milestone_semantic_payload(epoch_owner):
+    leaf = epoch_owner.milestone
+    module = sys.modules[type(leaf).__module__]
+    i64, f64 = (
+        value.detach().cpu().contiguous() for value in leaf.pack_views()
+    )
+    names = tuple(str(index) for index in range(module.REWARD_TERM_COUNT))
+    return module.decode_host_window(i64, f64).as_json(names)
+
+
 def _selected_env_devices():
     values = ["cpu"]
     if torch.cuda.is_available():
@@ -1216,8 +1226,18 @@ def test_real_env_non_genesis_selected_reset_reaches_next_observation(
         [-1, -1, 0],
     ]
     assert env.episode_length_buf.tolist() == [0, 47]
-    assert epoch_owner.milestone.i64[-7:].tolist() == [1, 31, 0, 0, 0, 1, 1]
-    assert epoch_owner.milestone.f64[-2:].tolist() == [2.0, 4.0]
+    milestone = _milestone_semantic_payload(epoch_owner)
+    assert milestone["episodes"] == {
+        "completed": 1,
+        "length_sum": 31,
+        "reason_time_out": 0,
+        "reason_base_fell_tilt": 0,
+        "reason_base_too_low": 0,
+        "reason_joint_qdes_forbidden": 1,
+        "reason_robot_hit_table": 1,
+        "return_sum": 2.0,
+        "return_sum_sq": 4.0,
+    }
     assert epoch_owner.milestone.open_episode_return.tolist() == [0.0, 5.0]
     assert _peer_raw_bytes(epoch_owner, d05_owner) == peer_before
     assert d05_owner._true_reset_receipts == {}
@@ -1279,8 +1299,8 @@ def test_native_reset_failure_does_not_preclose_episode_carry(device, monkeypatc
         env._reset_idx(env_ids)
 
     assert owner.poisoned is False
-    assert epoch_owner.milestone.i64[-7:].tolist() == [0] * 7
-    assert epoch_owner.milestone.f64[-2:].tolist() == [0.0, 0.0]
+    milestone = _milestone_semantic_payload(epoch_owner)
+    assert all(value == 0 for value in milestone["episodes"].values())
     assert epoch_owner.milestone.open_episode_return.tolist() == [2.0, 5.0]
 
 

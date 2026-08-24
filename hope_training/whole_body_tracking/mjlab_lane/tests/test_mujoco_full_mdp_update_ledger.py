@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import types
 
 import pytest
 import torch
@@ -184,6 +185,65 @@ def test_fact_integrity_bit_and_counter_abi_is_exact():
     )
 
 
+def test_reward_graph_contract_is_loaded_from_the_shared_ordered_authority():
+    module = _load()
+    contract = module._reward_contract_module()
+    assert module.SCHEMA_VERSION == 9
+    assert module.REWARD_TERM_NAMES == contract.MANAGER_NAMES
+    assert module.REWARD_TERM_COUNT == contract.REWARD_TERM_COUNT
+    assert module.REWARD_TERM_COUNT == len(module.REWARD_TERM_NAMES)
+
+
+@pytest.mark.parametrize(
+    "loader_name,cache_name,expected_error",
+    (
+        (
+            "_plant_contract_module",
+            "_hope_mujoco_full_mdp_plant_contract",
+            "cached MuJoCo plant contract origin differs",
+        ),
+        (
+            "_reward_contract_module",
+            "_hope_mujoco_ledger_action_ball_full_mdp_reward_contract",
+            "cached FullMDP reward contract origin differs",
+        ),
+        (
+            "_portable_catalog_module",
+            "_hope_mujoco_ledger_action_ball_full_mdp_portable_catalog",
+            "cached FullMDP portable catalog origin differs",
+        ),
+    ),
+)
+def test_local_contract_loaders_reject_cached_origin_drift(
+    monkeypatch, loader_name, cache_name, expected_error
+):
+    module = _load()
+    impostor = types.ModuleType(cache_name)
+    impostor.__file__ = "/wrong/origin.py"
+    monkeypatch.setitem(sys.modules, cache_name, impostor)
+
+    with pytest.raises(RuntimeError) as caught:
+        getattr(module, loader_name)()
+    assert str(caught.value) == expected_error
+
+
+def test_local_module_loader_drops_failed_partial_import(tmp_path):
+    module = _load()
+    source = tmp_path / "broken_contract.py"
+    source.write_text("raise RuntimeError('broken contract')\n", encoding="utf-8")
+    name = "_ledger_test_failed_pinned_local_module"
+    sys.modules.pop(name, None)
+
+    with pytest.raises(RuntimeError, match="broken contract"):
+        module._load_pinned_local_module(
+            source=source.resolve(),
+            name=name,
+            subject="test contract",
+        )
+
+    assert name not in sys.modules
+
+
 def _ledger(module, *, steps=2, num_envs=3, run_identity=None):
     return module.FullMdpUpdateLedger(
         torch_module=torch,
@@ -318,7 +378,7 @@ def test_constructor_isolates_nested_runtime_identity_copy():
 def _result(module, *, num_envs=3, event=None, bits=None, done=None,
             generation=None, time_outs=None, resolved=None, status=None,
             landing=None, opponent_bound=None, outcome=None, phase=None,
-            fact_integrity_bits=None):
+            fact_integrity_bits=None, paddle_playback=None):
     event = dict(event or {})
     if "scheduled_due_rows" not in event:
         public_due = event.get("reveal_due_rows", [False] * num_envs)
@@ -333,7 +393,12 @@ def _result(module, *, num_envs=3, event=None, bits=None, done=None,
         key: torch.tensor(event.get(name, [False] * num_envs), dtype=torch.bool)
         for name, key in EVENT_KEYS.items()
     }
-    terms = torch.arange(1, 21, dtype=torch.float32).repeat(num_envs, 1) / 100.0
+    terms = (
+        torch.arange(
+            1, module.REWARD_TERM_COUNT + 1, dtype=torch.float32
+        ).repeat(num_envs, 1)
+        / 100.0
+    )
     extras.update(
         {
             "termination_bits": torch.tensor(bits or [0] * num_envs, dtype=torch.long),
@@ -359,6 +424,9 @@ def _result(module, *, num_envs=3, event=None, bits=None, done=None,
             ),
             "full_a_fact_integrity_fault_bits": torch.tensor(
                 fact_integrity_bits or [0] * num_envs, dtype=torch.long
+            ),
+            "full_a_paddle_prior_playback": torch.tensor(
+                paddle_playback or [False] * num_envs, dtype=torch.bool
             ),
             "full_a_landing_on_opponent": torch.tensor(
                 landing or [False] * num_envs, dtype=torch.bool
@@ -467,7 +535,7 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     prepared = _prepare(ledger, 0, environment_steps=2)
     record = _decode(prepared)
 
-    assert record["schema_version"] == 6
+    assert record["schema_version"] == 9
     assert record["run_identity"] == _run_identity()
     assert record["run_identity"]["plant_model"]["runtime_attach"][
         "final_augmented_mjb"
@@ -510,8 +578,11 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     assert record["phase_counts"] == {
         "0": 2, "2": 2, "5": 0, "6": 1, "8": 1
     }
+    per_row_reward = sum(range(1, module.REWARD_TERM_COUNT + 1)) / 100.0
     assert record["episodes"] == {
-        "completed_count": 2, "return_sum": pytest.approx(4.2), "length_sum": 2
+        "completed_count": 2,
+        "return_sum": pytest.approx(2 * per_row_reward),
+        "length_sum": 2,
     }
     assert record["rollout_policy_mean_std"] == pytest.approx(0.02)
     assert record["terminal_bit_counts"] == {
@@ -521,12 +592,23 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
         "joint_qdes_forbidden": 0,
         "robot_hit_table": 1,
     }
-    reward = record["reward20"]
-    assert len(reward["term_sums"]) == 20
+    reward = record["reward_graph"]
+    assert reward["term_names"] == list(module.REWARD_TERM_NAMES)
+    assert reward["term_count"] == module.REWARD_TERM_COUNT
+    assert len(reward["term_sums"]) == module.REWARD_TERM_COUNT
     assert reward["term_sums"][0] == pytest.approx(0.06)
-    assert reward["actual_reward_sum"] == pytest.approx(12.6)
-    assert reward["reward20_finite_rows"] == 6
+    assert reward["actual_reward_sum"] == pytest.approx(6 * per_row_reward)
+    assert reward["reward_terms_finite_rows"] == 6
+    assert reward["reward_terms_nonfinite_rows"] == 0
     assert reward["conservation_fault_rows"] == 0
+    assert reward["playback_paddle_prior"] == {
+        "term_names": list(module.PADDLE_PRIOR_TERM_NAMES),
+        "row_count": 0,
+        "finite_rows": [0] * module.PADDLE_PRIOR_TERM_COUNT,
+        "kernel_sum": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
+        "kernel_sumsq": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
+        "domain_violation_rows": [0] * module.PADDLE_PRIOR_TERM_COUNT,
+    }
     assert record["action_identity"] == {
         "action_slot": 0,
         "action_uid": UID,
@@ -544,13 +626,103 @@ def test_prepare_packs_exact_raw_update_schema_and_zero_denominators():
     assert "not_produced" not in prepared.payload.decode("utf-8")
 
 
+def test_playback_paddle_prior_reuses_reward_terms_for_non_gating_moments():
+    module = _load()
+    ledger = _ledger(module, steps=1, num_envs=4)
+    result = _result(
+        module,
+        num_envs=4,
+        paddle_playback=[True, True, False, True],
+    )
+    kernels = torch.tensor(
+        [
+            [1.0, 0.50, 0.25, 0.20],
+            [0.50, 0.25, 0.20, 0.10],
+            [0.75, 0.75, 0.75, 0.75],
+            [0.00, 0.20, 0.10, 0.05],
+        ],
+        dtype=torch.float32,
+    )
+    max_payment = torch.tensor(
+        module.PADDLE_PRIOR_WEIGHTS, dtype=torch.float32
+    ) * module.FULLMDP_POLICY_STEP_S
+    terms = result[3]["reward_terms"]
+    terms[
+        :,
+        module.PADDLE_PRIOR_TERM_START : (
+            module.PADDLE_PRIOR_TERM_START
+            + module.PADDLE_PRIOR_TERM_COUNT
+        ),
+    ] = kernels * max_payment
+    result = (result[0], terms.sum(1), result[2], result[3])
+
+    ledger.ingest(result)
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    measured = record["reward_graph"]["playback_paddle_prior"]
+    playback = terms[
+        [0, 1, 3],
+        module.PADDLE_PRIOR_TERM_START : (
+            module.PADDLE_PRIOR_TERM_START
+            + module.PADDLE_PRIOR_TERM_COUNT
+        ),
+    ].to(torch.float64) / torch.tensor(
+        [
+            weight * module.FULLMDP_POLICY_STEP_S
+            for weight in module.PADDLE_PRIOR_WEIGHTS
+        ],
+        dtype=torch.float64,
+    )
+    assert measured["term_names"] == list(module.PADDLE_PRIOR_TERM_NAMES)
+    assert measured["row_count"] == 3
+    assert measured["finite_rows"] == [3, 3, 3, 3]
+    assert measured["kernel_sum"] == pytest.approx(
+        playback.sum(0).tolist()
+    )
+    assert measured["kernel_sumsq"] == pytest.approx(
+        playback.square().sum(0).tolist()
+    )
+    assert measured["domain_violation_rows"] == [0, 0, 0, 0]
+
+
+def test_playback_paddle_prior_domain_violations_are_visible_but_non_gating():
+    module = _load()
+    ledger = _ledger(module, steps=1, num_envs=2)
+    result = _result(
+        module,
+        num_envs=2,
+        paddle_playback=[True, True],
+    )
+    kernels = torch.tensor(
+        [[-0.25, 1.25, 0.0, 1.0], [0.5, 0.5, 0.5, 0.5]],
+        dtype=torch.float32,
+    )
+    max_payment = torch.tensor(
+        module.PADDLE_PRIOR_WEIGHTS, dtype=torch.float32
+    ) * module.FULLMDP_POLICY_STEP_S
+    terms = result[3]["reward_terms"]
+    terms[
+        :,
+        module.PADDLE_PRIOR_TERM_START : (
+            module.PADDLE_PRIOR_TERM_START
+            + module.PADDLE_PRIOR_TERM_COUNT
+        ),
+    ] = kernels * max_payment
+    result = (result[0], terms.sum(1), result[2], result[3])
+
+    ledger.ingest(result)
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    measured = record["reward_graph"]["playback_paddle_prior"]
+    assert measured["finite_rows"] == [2, 2, 2, 2]
+    assert measured["domain_violation_rows"] == [1, 1, 0, 0]
+
+
 def test_prepare_does_not_gate_structurally_clean_zero_business_telemetry():
     module = _load()
     ledger = _ledger(module, steps=1)
     ledger.ingest(_result(module))
     record = _decode(_prepare(ledger, 0, environment_steps=1))
     assert set(record["extras_counts"].values()) == {0}
-    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
+    assert "event_semantics_fault_rows" not in record["lifecycle_counts"]
 
 
 @pytest.mark.parametrize(
@@ -558,7 +730,27 @@ def test_prepare_does_not_gate_structurally_clean_zero_business_telemetry():
     (
         (lambda module, result: result[3].pop("full_a_r06_present_event"), "full_a_r06_present_event"),
         (lambda module, result: result[3].pop("reward_terms"), "reward_terms"),
+        (
+            lambda module, result: result[3].__setitem__(
+                "reward_terms",
+                torch.zeros(3, module.REWARD_TERM_COUNT - 1),
+            ),
+            "reward_terms",
+        ),
         (lambda module, result: result[3].pop("full_a_action_uid"), "full_a_action_uid"),
+        (
+            lambda module, result: result[3].pop(
+                "full_a_paddle_prior_playback"
+            ),
+            "full_a_paddle_prior_playback",
+        ),
+        (
+            lambda module, result: result[3].__setitem__(
+                "full_a_paddle_prior_playback",
+                torch.zeros(3, dtype=torch.long),
+            ),
+            "full_a_paddle_prior_playback",
+        ),
         (
             lambda module, result: result[3].pop(
                 "full_a_fact_integrity_fault_bits"
@@ -667,57 +859,6 @@ def test_prepare_rejects_action_identity_drift(field, value):
             "phase_unknown_rows",
         ),
         (
-            lambda result: result[3]["full_a_reveal_due_event"].fill_(True),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: (
-                result[3]["full_a_reveal_event"].fill_(True),
-                result[3]["full_a_reveal_due_event"].fill_(True),
-                result[3]["full_a_reveal_deferred_event"].fill_(True),
-            ),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: (
-                result[3]["full_a_reveal_event"].fill_(True),
-                result[3]["full_a_reveal_due_event"].fill_(True),
-                result[3]["full_a_phase_before_reset"].fill_(5),
-            ),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: (
-                result[3]["full_a_launch_event"].fill_(True),
-            ),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: result[3]["full_a_r07_present_event"].fill_(True),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: (
-                result[3]["full_a_recovery_success_event"].fill_(True),
-                result[3]["full_a_phase_before_reset"].fill_(8),
-            ),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: (
-                result[3]["full_a_shot_retired_event"].fill_(True),
-                result[3]["full_a_recovery_success_event"].fill_(True),
-                result[3]["full_a_phase_before_reset"].fill_(6),
-            ),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: result[3][
-                "full_a_completed_action_epoch_event"
-            ].fill_(True),
-            "event_semantics_fault_rows",
-        ),
-        (
             lambda result: result[3]["full_a_selected_reset_event"].fill_(True),
             "selected_reset_fault_rows",
         ),
@@ -728,27 +869,6 @@ def test_prepare_rejects_action_identity_drift(field, value):
                 result[3]["reset_generation"].fill_(1),
             ),
             "selected_reset_fault_rows",
-        ),
-        (
-            lambda result: (
-                result[2].fill_(1),
-                result[3]["termination_bits"].fill_(2),
-                result[3]["reset_generation"].fill_(1),
-                result[3]["full_a_selected_reset_event"].fill_(True),
-                result[3]["full_a_shot_retired_event"].fill_(True),
-                result[3]["full_a_recovery_success_event"].fill_(True),
-                result[3]["full_a_phase_before_reset"].fill_(8),
-            ),
-            "event_semantics_fault_rows",
-        ),
-        (
-            lambda result: (
-                result[3]["full_a_flight_terminal_event"].fill_(True),
-                result[3]["full_a_r06_present_event"].fill_(True),
-                result[3]["full_a_outcome_code"].fill_(4),
-                result[3]["full_a_phase_before_reset"].fill_(6),
-            ),
-            "event_semantics_fault_rows",
         ),
     ),
 )
@@ -859,63 +979,30 @@ def test_prepare_accepts_idle_retired_occupancy_and_both_due_verdicts():
     }
 
 
-@pytest.mark.parametrize("phase", (0, 8))
-def test_prepare_rejects_defer_when_final_row_is_available(phase):
-    module = _load()
-    ledger = _ledger(module, steps=1)
-    ledger.ingest(_result(
-        module,
-        event={
-            "reveal_due_rows": [True, False, False],
-            "reveal_deferred_rows": [True, False, False],
-        },
-        phase=[phase, 0, 0],
-    ))
-    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
-        _prepare(ledger, 0, environment_steps=1)
-
-
-def test_prepare_rejects_launch_without_flight_or_launch_phase():
-    module = _load()
-    ledger = _ledger(module, steps=1)
-    ledger.ingest(_result(
-        module,
-        event={"launch_rows": [True, False, False]},
-        phase=[0, 0, 0],
-    ))
-    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
-        _prepare(ledger, 0, environment_steps=1)
-
-
 @pytest.mark.parametrize(
-    "event,kwargs",
+    "event_name",
     (
-        (
-            {
-                "flight_terminal_rows": [True, False, False],
-                "r06_present_rows": [True, False, False],
-            },
-            {"outcome": [5, 0, 0]},
-        ),
-        ({"r07_present_rows": [True, False, False]}, {}),
-        (
-            {
-                "racket_contact_rows": [True, False, False],
-                "selected_contact_rows": [True, False, False],
-            },
-            {"status": [1, 0, 0]},
-        ),
-        ({"r03_present_rows": [True, False, False]}, {}),
+        "reveal_due_rows",
+        "launch_rows",
+        "r03_present_rows",
+        "r06_common_rows",
+        "r07_present_rows",
+        "completed_action_epoch_rows",
     ),
 )
-def test_prepare_rejects_fresh_fact_laundered_by_bare_phase8(event, kwargs):
+def test_prepare_records_producer_marginals_without_rebuilding_implications(
+    event_name,
+):
+    """Producer transition tests own event relationships; ledger owns counts."""
+
     module = _load()
     ledger = _ledger(module, steps=1)
     ledger.ingest(_result(
-        module, event=event, phase=[8, 0, 0], **kwargs
+        module, event={event_name: [True, False, False]}
     ))
-    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
-        _prepare(ledger, 0, environment_steps=1)
+    record = _decode(_prepare(ledger, 0, environment_steps=1))
+    assert record["extras_counts"][event_name] == 1
+    assert "event_semantics_fault_rows" not in record["lifecycle_counts"]
 
 
 def test_immediate_invalid_launch_is_semantically_legal_but_integrity_rejected():
@@ -938,47 +1025,9 @@ def test_immediate_invalid_launch_is_semantically_legal_but_integrity_rejected()
         status=[5, 0, 0], outcome=[6, 0, 0], phase=[8, 0, 0],
         fact_integrity_bits=[source_invalid, 0, 0],
     ))
-    event_fault_index = module._MISC_NAMES.index("event_semantics_fault_rows")
-    assert ledger._misc[event_fault_index].item() == 0
     with pytest.raises(RuntimeError, match="r06_source_invalid") as caught:
         _prepare(ledger, 0, environment_steps=1)
     assert "event_semantics_fault_rows" not in str(caught.value)
-
-
-def test_prepare_rejects_invalid_contact_missing_source_integrity_cause():
-    module = _load()
-    ledger = _ledger(module, steps=1)
-    ledger.ingest(_result(
-        module,
-        event={
-            "racket_contact_rows": [True, False, False],
-            "invalid_contact_rows": [True, False, False],
-            "flight_terminal_rows": [True, False, False],
-            "r06_present_rows": [True, False, False],
-            "recovery_failure_rows": [True, False, False],
-            "shot_retired_rows": [True, False, False],
-        },
-        status=[5, 0, 0], outcome=[6, 0, 0], phase=[8, 0, 0],
-    ))
-    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
-        _prepare(ledger, 0, environment_steps=1)
-
-
-def test_prepare_rejects_outcome_and_natural_recovery_on_same_transition():
-    module = _load()
-    ledger = _ledger(module, steps=1)
-    ledger.ingest(_result(
-        module,
-        event={
-            "flight_terminal_rows": [True, False, False],
-            "r06_present_rows": [True, False, False],
-            "recovery_success_rows": [True, False, False],
-            "shot_retired_rows": [True, False, False],
-        },
-        outcome=[5, 0, 0], phase=[8, 0, 0],
-    ))
-    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
-        _prepare(ledger, 0, environment_steps=1)
 
 
 @pytest.mark.parametrize(
@@ -1004,26 +1053,6 @@ def test_prepare_accepts_finite_source_valid_contact_business_results(
     assert set(record["fact_integrity_counts"].values()) == {0}
 
 
-def test_prepare_rejects_due_opportunity_on_done_before_optimizer():
-    module = _load()
-    ledger = _ledger(module, steps=1)
-    ledger.ingest(_result(
-        module,
-        event={
-            "reveal_due_rows": [True, False, False],
-            "reveal_rows": [True, False, False],
-            "selected_reset_rows": [True, False, False],
-        },
-        bits=[2, 0, 0],
-        done=[1, 0, 0],
-        generation=[1, 0, 0],
-        phase=[2, 0, 0],
-    ))
-    with pytest.raises(RuntimeError, match="event_semantics_fault_rows") as caught:
-        _prepare(ledger, 0, environment_steps=1)
-    assert str(caught.value).endswith("event_semantics_fault_rows=1")
-
-
 def test_prepare_accepts_scheduled_due_terminal_overlap_without_public_due():
     module = _load()
     ledger = _ledger(module, steps=1)
@@ -1043,7 +1072,7 @@ def test_prepare_accepts_scheduled_due_terminal_overlap_without_public_due():
     assert record["extras_counts"]["scheduled_due_rows"] == 1
     assert record["extras_counts"]["due_terminal_overlap_rows"] == 1
     assert record["extras_counts"]["reveal_due_rows"] == 0
-    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
+    assert "event_semantics_fault_rows" not in record["lifecycle_counts"]
 
 
 def test_prepare_accepts_shot_retirement_without_gym_reset_or_generation_change():
@@ -1089,25 +1118,7 @@ def test_prepare_accepts_retirement_and_r07_before_same_boundary_reveal():
         "0": 2, "2": 1, "5": 0, "6": 0, "8": 0
     }
     assert record["lifecycle_counts"]["reset_generation_rows"] == 0
-    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
-
-
-def test_prepare_rejects_reveal_laundering_r07_without_old_shot_retirement():
-    module = _load()
-    ledger = _ledger(module, steps=1)
-    ledger.ingest(_result(
-        module,
-        event={
-            "scheduled_due_rows": [True, False, False],
-            "reveal_due_rows": [True, False, False],
-            "reveal_rows": [True, False, False],
-            "r07_present_rows": [True, False, False],
-            "r07_eligible_rows": [True, False, False],
-        },
-        phase=[2, 0, 0],
-    ))
-    with pytest.raises(RuntimeError, match="event_semantics_fault_rows"):
-        _prepare(ledger, 0, environment_steps=1)
+    assert "event_semantics_fault_rows" not in record["lifecycle_counts"]
 
 
 def test_prepare_accepts_gym_terminal_recovery_failure_without_shot_retirement():
@@ -1200,7 +1211,7 @@ def test_prepare_counts_joint_safety_telemetry_without_a_done_bit():
     assert record["extras_counts"]["qdes_guard_intervention_rows"] == 1
     assert record["terminal_bit_counts"]["joint_qdes_forbidden"] == 0
     assert record["lifecycle_counts"]["gym_reset_rows"] == 0
-    assert record["lifecycle_counts"]["event_semantics_fault_rows"] == 0
+    assert "event_semantics_fault_rows" not in record["lifecycle_counts"]
 
 
 @pytest.mark.parametrize(

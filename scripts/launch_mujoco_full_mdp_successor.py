@@ -20,6 +20,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = Path("/workspace")
 NVIDIA_SMI = Path("/usr/bin/nvidia-smi")
+TASKSET = Path("/usr/bin/taskset")
 RUNNER_RELATIVE = Path(
     "hope_training/whole_body_tracking/mjlab_lane/"
     "mujoco_gpu_ac_full_mdp_wait_rsl3.py"
@@ -329,6 +330,44 @@ def _gpu_is_free(index: int, expected_uuid: str) -> None:
             raise LaunchError("selected GPU already has a compute application")
 
 
+def _available_cpu_ids() -> set[int]:
+    try:
+        return set(os.sched_getaffinity(0))
+    except (AttributeError, OSError) as exc:
+        raise LaunchError("cpu-affinity requires Linux sched_getaffinity") from exc
+
+
+def _cpu_affinity(value: str | None) -> tuple[str | None, tuple[int, ...]]:
+    """Parse one explicit Linux CPU list and reject unavailable processors."""
+
+    if value is None:
+        return None, ()
+    if re.fullmatch(
+        r"[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*", value
+    ) is None:
+        raise LaunchError("cpu-affinity must be a comma-separated CPU/range list")
+    selected: set[int] = set()
+    for field in value.split(","):
+        if "-" in field:
+            lower_text, upper_text = field.split("-", 1)
+            lower, upper = int(lower_text), int(upper_text)
+            if upper < lower:
+                raise LaunchError("cpu-affinity range is reversed")
+            values = range(lower, upper + 1)
+        else:
+            values = (int(field),)
+        for cpu in values:
+            if cpu > 4095 or cpu in selected:
+                raise LaunchError(
+                    "cpu-affinity contains an invalid or duplicate CPU"
+                )
+            selected.add(cpu)
+    available = _available_cpu_ids()
+    if not selected or not selected.issubset(available):
+        raise LaunchError("cpu-affinity is outside the launcher's allowed CPU set")
+    return value, tuple(sorted(selected))
+
+
 @contextmanager
 def _exclusive_lock(path: Path):
     _canonical_regular(path, "lock-file")
@@ -376,8 +415,16 @@ def _create_root(root: Path, paths: dict[str, Path]) -> None:
 def launch(args: argparse.Namespace) -> int:
     commit = _source_commit()
     python, runner, ready_pose, plant_xml, root = _validate_inputs(args)
+    cpu_affinity, cpu_ids = _cpu_affinity(args.cpu_affinity)
+    taskset = None
+    if cpu_affinity is not None:
+        taskset = _canonical_regular(TASKSET, "taskset")
+        if not os.access(taskset, os.X_OK):
+            raise LaunchError("taskset must be executable")
     paths = _paths(root)
     argv = _child_argv(python, runner, paths, commit, args.namespace)
+    if cpu_affinity is not None:
+        argv = [str(taskset), "-c", cpu_affinity, *argv]
     contract = _env_contract(
         args.expected_gpu_uuid, ready_pose, plant_xml, paths
     )
@@ -389,6 +436,11 @@ def launch(args: argparse.Namespace) -> int:
             "plant_xml": {
                 "path": str(plant_xml), "expected_identity": plant_identity,
             },
+            "cpu_affinity": cpu_affinity,
+            "cpu_affinity_source": (
+                None if cpu_affinity is None else "explicit_cli"
+            ),
+            "cpu_ids": cpu_ids,
         }, sort_keys=True, separators=(",", ":")))
         return 0
     with _exclusive_lock(args.lock_file) as gpu_lock:
@@ -428,6 +480,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lock-file", type=Path, required=True)
     parser.add_argument("--ready-pose", type=Path, required=True)
     parser.add_argument("--plant-xml", type=Path, required=True)
+    parser.add_argument("--cpu-affinity")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args(argv)
 

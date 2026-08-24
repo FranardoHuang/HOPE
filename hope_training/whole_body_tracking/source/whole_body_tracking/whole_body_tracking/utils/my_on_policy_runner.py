@@ -10516,15 +10516,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         full_mdp_wal_line,
                         )
                     )
-                    acknowledged = self._action_ball_full_mdp_ack_callback(
+                    self._action_ball_full_mdp_ack_callback(
                         full_mdp_prepared,
                         full_mdp_pending_summary,
                         update_index=next_rollout_step,
                     )
-                    if acknowledged is not full_mdp_pending_summary:
-                        raise RuntimeError(
-                            "fresh full-MDP destructive ACK changed summary identity"
-                        )
                     epoch_ack_line = (
                         _action_ball_full_mdp_durable_wal_module().encode_epoch_ack(
                             pending_line=full_mdp_wal_line,
@@ -10536,7 +10532,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         full_mdp_wal_path, epoch_ack_line
                     )
                     self._action_ball_full_mdp_durable_ack_callback(
-                        acknowledged,
+                        full_mdp_pending_summary,
                         update_index=next_rollout_step,
                         segment_id=self._action_ball_full_mdp_durable_wal_segment_id,
                         rank=self._joint_safety_rank(),
@@ -10546,7 +10542,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         ack_byte_end=full_mdp_epoch_ack_span[1],
                     )
                     self._action_ball_full_mdp_consume_epoch_ack_summary(
-                        acknowledged,
+                        full_mdp_pending_summary,
                         update_index=next_rollout_step,
                         completed_environment_steps=(
                             active.completed_environment_steps

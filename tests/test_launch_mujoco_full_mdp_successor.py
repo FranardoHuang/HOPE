@@ -84,6 +84,7 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request):
         lambda: sys.modules.pop("_hope_mujoco_full_mdp_plant_contract", None)
     )
     module = _load(repo / "scripts" / SCRIPT.name)
+    monkeypatch.setattr(module, "_available_cpu_ids", lambda: set(range(128)))
 
     tools = base / "tools"
     tools.mkdir()
@@ -136,6 +137,16 @@ while not release.exists() and time.monotonic() < deadline:
     time.sleep(0.01)
 sys.exit(7)
 """)
+    taskset = _executable(tools / "taskset", """#!/usr/bin/env python3
+import os, sys
+if len(sys.argv) < 4 or sys.argv[1] != "-c":
+    sys.exit(90)
+try:
+    os.execv(sys.argv[3], sys.argv[3:])
+except OSError as exc:
+    print(f"taskset child exec failed: {exc}", file=sys.stderr)
+    sys.exit(126)
+""")
     nvidia = _executable(tools / "nvidia-smi", """#!/bin/sh
 if [ "$#" -eq 2 ] && [ "$1" = "--query-gpu=index,uuid" ] && [ "$2" = "--format=csv,noheader,nounits" ]; then
     printf '%s' "$FAKE_GPU_ROWS"
@@ -159,6 +170,7 @@ fi
     )
     monkeypatch.setattr(module, "WORKSPACE_ROOT", workspace)
     monkeypatch.setattr(module, "NVIDIA_SMI", nvidia)
+    monkeypatch.setattr(module, "TASKSET", taskset)
     monkeypatch.setenv("FAKE_GPU_ROWS", f"0, GPU-other-0000\n2, {UUID}\n")
     monkeypatch.setenv("FAKE_APP_ROWS", "")
     monkeypatch.setenv("WARP_CACHE_PATH", str(base / "ambient-warp-cache"))
@@ -172,24 +184,28 @@ fi
 
     def argv(*, dry: bool = False, root: Path = run_root,
              executable: Path = python, expected: str = UUID,
-             ready: Path = ready_pose, plant: Path = plant_xml) -> list[str]:
+             ready: Path = ready_pose, plant: Path = plant_xml,
+             cpu_affinity: str | None = None) -> list[str]:
         result = [
             "--python", str(executable), "--run-root", str(root),
             "--namespace", NAMESPACE, "--gpu-index", "2",
             "--expected-gpu-uuid", expected, "--lock-file", str(lock),
             "--ready-pose", str(ready), "--plant-xml", str(plant),
         ]
+        if cpu_affinity is not None:
+            result.extend(("--cpu-affinity", cpu_affinity))
         return result + (["--dry-run"] if dry else [])
 
     return SimpleNamespace(
         module=module, repo=repo, runner=runner, python=python, nvidia=nvidia,
+        taskset=taskset,
         workspace=workspace, root=run_root, lock=lock, record=record,
         ready_pose=ready_pose, plant_xml=plant_xml, started=started,
         release=release, argv=argv,
     )
 
 
-def _expected_child(rig, commit: str) -> list[str]:
+def _expected_trainer(rig, commit: str) -> list[str]:
     root = rig.root
     return [
         str(rig.python), str(rig.runner), "--full-a",
@@ -201,6 +217,15 @@ def _expected_child(rig, commit: str) -> list[str]:
         "--mujoco-warp-runtime-site", str(root / "runtime_site"),
         "--save-interval", "500",
     ]
+
+
+def _expected_child(
+    rig, commit: str, *, cpu_affinity: str | None = None
+) -> list[str]:
+    trainer = _expected_trainer(rig, commit)
+    if cpu_affinity is None:
+        return trainer
+    return [str(rig.taskset), "-c", cpu_affinity, *trainer]
 
 
 def test_plant_contract_loads_under_stdlib_only_python() -> None:
@@ -226,7 +251,15 @@ print(json.dumps(module.expected_plant_model_identity(), sort_keys=True))
 
 def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
     rig, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    rig.module.NVIDIA_SMI = rig.nvidia.with_name("must-not-run")
+    monkeypatch.setattr(
+        rig.module, "_gpu_is_free", lambda *_: pytest.fail("GPU occupancy queried")
+    )
+    monkeypatch.setattr(
+        rig.module,
+        "_available_cpu_ids",
+        lambda: pytest.fail("CPU affinity queried without an explicit flag"),
+    )
+    monkeypatch.setattr(rig.module, "TASKSET", rig.taskset.with_name("missing"))
     descriptor = os.open(rig.lock, os.O_RDWR)
     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
@@ -263,8 +296,113 @@ def test_good_ready_pose_dry_run_reports_exact_binding_without_resources(
                 rig.module._plant_contract_module().expected_plant_model_identity()
             ),
         },
+        "cpu_affinity": None,
+        "cpu_affinity_source": None,
+        "cpu_ids": [],
     }
     assert output.err == ""
+    assert not rig.root.parent.exists()
+
+
+def test_cpu_affinity_is_explicit_and_exact(rig) -> None:
+    assert rig.module._cpu_affinity(None) == (None, ())
+    assert rig.module._cpu_affinity("48-63,112-127") == (
+        "48-63,112-127",
+        (*range(48, 64), *range(112, 128)),
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("", "comma-separated"),
+        ("1-", "comma-separated"),
+        ("4-2", "reversed"),
+        ("1,1", "duplicate"),
+        ("0-1,1-2", "duplicate"),
+        ("4096", "invalid"),
+    ],
+)
+def test_malformed_explicit_cpu_affinity_fails(
+    rig, value: str, message: str
+) -> None:
+    with pytest.raises(rig.module.LaunchError, match=message):
+        rig.module._cpu_affinity(value)
+
+
+def test_explicit_cpu_set_outside_launcher_cpuset_fails_before_root(
+    rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(rig.module, "_available_cpu_ids", lambda: {0, 1})
+    assert rig.module.main(rig.argv(dry=True, cpu_affinity="2")) == 2
+    assert "allowed CPU set" in capsys.readouterr().err
+    assert not rig.root.parent.exists()
+
+
+def test_explicit_cpu_affinity_dry_run_records_explicit_source(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    affinity = "48-63,112-127"
+    assert rig.module.main(
+        rig.argv(dry=True, cpu_affinity=affinity)
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+    assert payload["argv"] == _expected_child(
+        rig, commit, cpu_affinity=affinity
+    )
+    assert payload["cpu_affinity"] == affinity
+    assert payload["cpu_affinity_source"] == "explicit_cli"
+    assert payload["cpu_ids"] == [*range(48, 64), *range(112, 128)]
+    assert "cpu_affinity_gpu_index" not in payload
+
+
+def test_explicit_cpu_affinity_wraps_exact_child_without_preexec(
+    rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: dict[str, object] = {}
+    commit = _git(rig.repo, "rev-parse", "HEAD")
+
+    class Child:
+        @staticmethod
+        def wait() -> int:
+            return 13
+
+    def popen(argv, **kwargs):
+        observed["argv"] = argv
+        observed["kwargs"] = kwargs
+        return Child()
+
+    monkeypatch.setattr(rig.module, "_source_commit", lambda: commit)
+    monkeypatch.setattr(rig.module, "_gpu_is_free", lambda *_: None)
+    monkeypatch.setattr(rig.module.subprocess, "Popen", popen)
+    affinity = "48-63,112-127"
+    args = rig.module.parse_args(rig.argv(cpu_affinity=affinity))
+    assert rig.module.launch(args) == 13
+    assert observed["argv"] == _expected_child(
+        rig, commit, cpu_affinity=affinity
+    )
+    assert "preexec_fn" not in observed["kwargs"]
+
+
+@pytest.mark.parametrize("kind", ["missing", "symlink", "nonexecutable"])
+def test_invalid_taskset_fails_before_lock_gpu_or_root(
+    rig, kind: str, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str]
+) -> None:
+    candidate = rig.taskset.with_name(f"taskset-{kind}")
+    if kind == "symlink":
+        candidate.symlink_to(rig.taskset)
+    elif kind == "nonexecutable":
+        candidate.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    monkeypatch.setattr(rig.module, "TASKSET", candidate)
+    monkeypatch.setattr(
+        rig.module, "_gpu_is_free", lambda *_: pytest.fail("GPU occupancy queried")
+    )
+    assert rig.module.main(
+        rig.argv(cpu_affinity="48-63,112-127")
+    ) == 2
+    assert "taskset" in capsys.readouterr().err
     assert not rig.root.parent.exists()
 
 
@@ -438,7 +576,9 @@ def test_child_rc_logs_exact_env_argv_and_lock_lifetime(
     assert (rig.root / "stdout.log").read_text() == "fake child stdout\n"
     assert (rig.root / "stderr.log").read_text() == "fake child stderr\n"
     record = json.loads(rig.record.read_text())
-    assert record["argv"] == _expected_child(rig, _git(rig.repo, "rev-parse", "HEAD"))[1:]
+    assert record["argv"] == _expected_trainer(
+        rig, _git(rig.repo, "rev-parse", "HEAD")
+    )[1:]
     assert record["cwd"] == str(rig.root)
     assert (rig.root / "MUJOCO_LOG.TXT").read_text() == "process-local runtime log"
     assert record["warp_cache_is_dir"] is True

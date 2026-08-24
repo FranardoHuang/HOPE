@@ -146,7 +146,7 @@ RUNNER_LIFECYCLE_KEYS = {
     "selected_reset_fault_rows", "reset_generation_rows",
     "reset_generation_fault_rows", "resolved_table_rows",
     "landing_on_opponent_rows", "landing_opponent_bound_rows",
-    "classification_unknown_rows", "event_semantics_fault_rows",
+    "classification_unknown_rows",
 }
 RUNNER_FACT_INTEGRITY_KEYS = {
     "fact_integrity_r03_nonfinite_rows",
@@ -220,7 +220,7 @@ def _base_record(module, index, *, identity=IDENTITY):
     terminal = {key: 0 for key in module.TERMINAL_KEYS}
     lifecycle = {key: 0 for key in RUNNER_LIFECYCLE_KEYS}
     return {
-        "schema_version": 6,
+        "schema_version": 9,
         "record_type": "mujoco_full_mdp_update_ack",
         "diagnostic_unauthorized": True,
         "update_index": index,
@@ -263,14 +263,26 @@ def _base_record(module, index, *, identity=IDENTITY):
         "fact_integrity_counts": {
             key: 0 for key in RUNNER_FACT_INTEGRITY_KEYS
         },
-        "reward20": {
-            "term_sums": [0.0] * 20,
+        "reward_graph": {
+            "term_names": list(module.REWARD_TERM_NAMES),
+            "term_count": module.REWARD_TERM_COUNT,
+            "term_sums": [0.0] * module.REWARD_TERM_COUNT,
             "actual_reward_sum": 0.0,
-            "reward20_finite_rows": TRANSITIONS,
-            "reward20_nonfinite_rows": 0,
+            "reward_terms_finite_rows": TRANSITIONS,
+            "reward_terms_nonfinite_rows": 0,
             "actual_reward_finite_rows": TRANSITIONS,
             "actual_reward_nonfinite_rows": 0,
             "conservation_fault_rows": 0,
+            "playback_paddle_prior": {
+                "term_names": list(module.PADDLE_PRIOR_TERM_NAMES),
+                "row_count": 0,
+                "finite_rows": [0] * module.PADDLE_PRIOR_TERM_COUNT,
+                "kernel_sum": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
+                "kernel_sumsq": [0.0] * module.PADDLE_PRIOR_TERM_COUNT,
+                "domain_violation_rows": [
+                    0
+                ] * module.PADDLE_PRIOR_TERM_COUNT,
+            },
         },
         "action_identity": {
             "action_slot": 0,
@@ -288,7 +300,7 @@ def _base_record(module, index, *, identity=IDENTITY):
     }
 
 
-def _add_business_chain(row):
+def _add_producer_attested_milestone_coverage(row):
     events = row["extras_counts"]
     events.update({
         "scheduled_due_rows": 1,
@@ -340,10 +352,12 @@ def _finalize(row):
     return row
 
 
-def _records(module, count, *, identity=IDENTITY, business=False, mutation=None):
+def _records(
+    module, count, *, identity=IDENTITY, milestone_coverage=False, mutation=None
+):
     rows = [_base_record(module, index, identity=identity) for index in range(count)]
-    if business:
-        _add_business_chain(rows[0])
+    if milestone_coverage:
+        _add_producer_attested_milestone_coverage(rows[0])
     if mutation is not None:
         mutation(rows)
     return [_finalize(row) for row in rows]
@@ -442,7 +456,7 @@ def _write_evidence(path, rows):
 def _write_completion(path, module, count, evidence_inventory, receipts,
                       *, identity=IDENTITY, mutation=None):
     record = {
-        "schema_version": 5,
+        "schema_version": module.COMPLETION_SCHEMA_VERSION,
         "record_type": "mujoco_full_mdp_completion",
         "diagnostic_unauthorized": True,
         "run_identity": _copy_identity(identity),
@@ -472,7 +486,7 @@ def _write_completion(path, module, count, evidence_inventory, receipts,
 
 
 def _artifacts(module, tmp_path, count, *, complete, identity=IDENTITY,
-               business=False, row_mutation=None, toy=False,
+               milestone_coverage=False, row_mutation=None, toy=False,
                snapshot_identity=None, snapshot_mutation=None, seal=True,
                seal_mutation=None):
     evidence = tmp_path / "updates.jsonl"
@@ -480,7 +494,8 @@ def _artifacts(module, tmp_path, count, *, complete, identity=IDENTITY,
     completion = tmp_path / "completion.json"
     snapshots.mkdir()
     rows = _records(
-        module, count, identity=identity, business=business, mutation=row_mutation
+        module, count, identity=identity,
+        milestone_coverage=milestone_coverage, mutation=row_mutation,
     )
     receipts = _write_snapshots(
         module, snapshots, rows, complete=complete,
@@ -515,11 +530,12 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
         module, tmp_path, 5, complete=False
     )
     summary = _consume(module, evidence, snapshots, 5)
-    assert summary["schema_version"] == 5
+    assert summary["schema_version"] == 6
     assert summary["run_identity"] == IDENTITY
     assert summary["evidence_level"] == "advisory_prefix"
     assert summary["engineering_run_complete"] is False
-    assert summary["business_chain_complete"] is False
+    assert summary["producer_attested_milestone_coverage_complete"] is False
+    assert summary["same_epoch_chain_replay_status"] == "not_produced"
     assert summary["full_a_complete"] is False
     assert summary["snapshot_count"] == 1
     assert summary["snapshot_inventory"][0]["name"] == "model_0.pt"
@@ -555,18 +571,136 @@ def test_prefix_five_verifies_model_zero_but_stays_advisory(tmp_path):
     }
 
 
-def test_runner_update_ack_fixture_matches_exact_evidence_v6_wire(tmp_path):
+def test_runner_update_ack_fixture_matches_exact_evidence_v9_wire(tmp_path):
     module = _load()
     assert module.EVENT_KEYS == RUNNER_EVENT_KEYS
     assert module.LIFECYCLE_KEYS == RUNNER_LIFECYCLE_KEYS
     assert module.FACT_INTEGRITY_KEYS == RUNNER_FACT_INTEGRITY_KEYS
     assert len(module.EVENT_KEYS) == 31
+    assert module.REWARD_TERM_COUNT == len(module.REWARD_TERM_NAMES)
+    assert module.REWARD_TERM_NAMES == (
+        module._reward_contract_module().MANAGER_NAMES
+    )
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False
     )
     summary = _consume(module, evidence, snapshots, 1)
     assert summary["milestones"]["reveal_due_rows"] == 0
     assert summary["engineering_run_complete"] is False
+
+
+@pytest.mark.parametrize(
+    "case,error",
+    (
+        ("legacy_top_key", "top-level keys"),
+        ("term_names", "reward graph term contract"),
+        ("term_count", "reward graph term contract"),
+        ("term_sums", "reward graph term contract"),
+        ("extra_key", "reward graph keys"),
+        ("legacy_finite_key", "reward graph keys"),
+    ),
+)
+def test_reward_graph_wire_rejects_legacy_or_nonexact_contract(
+    case, error, tmp_path
+):
+    module = _load()
+
+    def mutate(rows):
+        row = rows[0]
+        reward = row["reward_graph"]
+        if case == "legacy_top_key":
+            row["reward20"] = row.pop("reward_graph")
+        elif case == "term_names":
+            reward["term_names"][:2] = reversed(reward["term_names"][:2])
+        elif case == "term_count":
+            reward["term_count"] += 1
+        elif case == "term_sums":
+            reward["term_sums"].pop()
+        elif case == "extra_key":
+            reward["extra"] = 0
+        else:
+            reward["reward20_finite_rows"] = reward.pop(
+                "reward_terms_finite_rows"
+            )
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match=error):
+        _consume(module, evidence, snapshots, 1)
+
+
+def test_playback_paddle_prior_wire_accepts_non_gating_finite_moments(
+    tmp_path,
+):
+    module = _load()
+
+    def mutate(rows):
+        rows[0]["reward_graph"]["playback_paddle_prior"].update({
+            "row_count": 3,
+            "finite_rows": [3, 3, 3, 3],
+            "kernel_sum": [1.5, 1.5, 1.2, 2.4],
+            "kernel_sumsq": [1.875, 1.25, 0.48, 1.92],
+            "domain_violation_rows": [2, 0, 0, 0],
+        })
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["engineering_run_complete"] is False
+
+
+@pytest.mark.parametrize(
+    "case,error",
+    (
+        ("missing_key", "playback paddle prior keys"),
+        ("term_names", "playback paddle prior term contract"),
+        ("row_count", "playback paddle prior row_count"),
+        ("finite_rows", "playback paddle prior finite_rows"),
+        ("domain_rows", "playback paddle prior domain_violation_rows"),
+        ("negative_sumsq", "playback paddle prior moments"),
+        ("impossible_moments", "playback paddle prior moments"),
+        ("zero_finite_nonzero_moment", "playback paddle prior moments"),
+    ),
+)
+def test_playback_paddle_prior_wire_rejects_nonexact_or_impossible_moments(
+    case, error, tmp_path
+):
+    module = _load()
+
+    def mutate(rows):
+        paddle = rows[0]["reward_graph"]["playback_paddle_prior"]
+        if case == "missing_key":
+            paddle.pop("domain_violation_rows")
+        elif case == "term_names":
+            paddle["term_names"][:2] = reversed(paddle["term_names"][:2])
+        elif case == "row_count":
+            paddle["row_count"] = TRANSITIONS + 1
+        elif case == "finite_rows":
+            paddle["row_count"] = 1
+            paddle["finite_rows"][0] = 2
+        elif case == "domain_rows":
+            paddle["row_count"] = 1
+            paddle["finite_rows"][0] = 1
+            paddle["domain_violation_rows"][0] = 2
+        elif case == "negative_sumsq":
+            paddle["row_count"] = 1
+            paddle["finite_rows"][0] = 1
+            paddle["kernel_sumsq"][0] = -0.1
+        elif case == "impossible_moments":
+            paddle["row_count"] = 1
+            paddle["finite_rows"][0] = 1
+            paddle["kernel_sum"][0] = 1.0
+            paddle["kernel_sumsq"][0] = 0.5
+        elif case == "zero_finite_nonzero_moment":
+            paddle["kernel_sum"][0] = 1.0
+
+    evidence, snapshots, _completion, _rows = _artifacts(
+        module, tmp_path, 1, complete=False, row_mutation=mutate
+    )
+    with pytest.raises(ValueError, match=error):
+        _consume(module, evidence, snapshots, 1)
 
 
 def test_runtime_mjb_verification_is_once_per_consume_not_once_per_ack(tmp_path):
@@ -718,7 +852,7 @@ def test_consumer_rejects_storage_domains_and_named_fault_receipts(tmp_path):
             _consume(module, evidence, snapshots, 1)
 
 
-def test_evidence_v5_and_completion_v4_are_rejected_by_separate_schemas(
+def test_evidence_v7_and_completion_v4_are_rejected_by_separate_schemas(
         monkeypatch, tmp_path):
     module = _load()
 
@@ -727,7 +861,7 @@ def test_evidence_v5_and_completion_v4_are_rejected_by_separate_schemas(
     evidence, snapshots, _completion, rows = _artifacts(
         module, evidence_root, 1, complete=False
     )
-    rows[0]["schema_version"] = 5
+    rows[0]["schema_version"] = 7
     _write_evidence(evidence, rows)
     with pytest.raises(ValueError, match="fixed fields at update 0"):
         _consume(module, evidence, snapshots, 1)
@@ -743,14 +877,14 @@ def test_evidence_v5_and_completion_v4_are_rejected_by_separate_schemas(
         _consume(module, evidence, snapshots, 1, completion)
 
 
-def test_snapshot_schedule_preserves_twenty_six_artifacts_for_v5():
+def test_snapshot_schedule_preserves_twenty_six_artifacts():
     module = _load()
     indices = module._snapshot_indices(True)
     assert indices == list(range(0, 12_500, 500)) + [12_499]
     assert len(indices) == 26
 
 
-def test_sealed_all_zero_longrun_is_engineering_not_business_completion(
+def test_sealed_all_zero_longrun_is_not_milestone_coverage_completion(
         monkeypatch, tmp_path):
     module = _load()
     monkeypatch.setattr(module, "COMPLETE_UPDATES", 2)
@@ -759,13 +893,15 @@ def test_sealed_all_zero_longrun_is_engineering_not_business_completion(
     )
     summary = _consume(module, evidence, snapshots, 2, completion)
     assert summary["engineering_run_complete"] is True
-    assert summary["business_chain_complete"] is False
+    assert summary["producer_attested_milestone_coverage_complete"] is False
     assert summary["full_a_complete"] is False
     assert summary["completion_seal_verified"] is True
     assert summary["action_contract"] == module.ACTION_CONTRACT
     assert summary["action_contract"]["transfer_authority"] is False
     assert summary["action_contract"]["matched_cross_backend_authority"] is False
-    assert "selected_contact_rows" in summary["business_chain_missing"]
+    assert "selected_contact_rows" in summary[
+        "producer_attested_milestone_coverage_missing"
+    ]
     assert all(value == 0 for value in summary["milestones"].values())
 
 
@@ -786,19 +922,22 @@ def test_joint_safety_telemetry_reaches_summary_without_a_done_bit(tmp_path):
     assert summary["milestones"]["gym_reset_rows"] == 0
 
 
-def test_sealed_slot0_chain_never_claims_formal_full_a_completion(
+def test_sealed_slot0_milestone_coverage_never_claims_formal_completion(
         monkeypatch, tmp_path):
     module = _load()
     monkeypatch.setattr(module, "COMPLETE_UPDATES", 2)
     evidence, snapshots, completion, _rows = _artifacts(
-        module, tmp_path, 2, complete=True, business=True
+        module, tmp_path, 2, complete=True, milestone_coverage=True
     )
     summary = _consume(module, evidence, snapshots, 2, completion)
     assert summary["diagnostic_unauthorized"] is True
     assert summary["engineering_run_complete"] is True
-    assert summary["business_chain_complete"] is True
+    assert summary["producer_attested_milestone_coverage_complete"] is True
+    assert summary["same_epoch_chain_replay_status"] == "not_produced"
     assert summary["full_a_complete"] is False
-    assert summary["business_chain_missing"] == []
+    assert summary["producer_attested_milestone_coverage_missing"] == []
+    assert "business_chain_complete" not in summary
+    assert "business_chain_missing" not in summary
     assert summary["milestones"]["selected_contact_rows"] == 1
     assert summary["milestones"]["selected_reset_rows"] == 0
     assert summary["milestones"]["gym_reset_rows"] == 0
@@ -823,7 +962,9 @@ def test_sealed_slot0_chain_never_claims_formal_full_a_completion(
     }
 
 
-def test_cross_env_marginals_cannot_complete_one_action_epoch(monkeypatch, tmp_path):
+def test_missing_completed_milestone_keeps_aggregate_coverage_incomplete(
+    monkeypatch, tmp_path
+):
     module = _load()
     monkeypatch.setattr(module, "COMPLETE_UPDATES", 2)
 
@@ -831,21 +972,23 @@ def test_cross_env_marginals_cannot_complete_one_action_epoch(monkeypatch, tmp_p
         rows[0]["extras_counts"]["completed_action_epoch_rows"] = 0
 
     evidence, snapshots, completion, _rows = _artifacts(
-        module, tmp_path, 2, complete=True, business=True,
+        module, tmp_path, 2, complete=True, milestone_coverage=True,
         row_mutation=drop_joint_event,
     )
     summary = _consume(module, evidence, snapshots, 2, completion)
     assert summary["engineering_run_complete"] is True
-    assert summary["business_chain_complete"] is False
+    assert summary["producer_attested_milestone_coverage_complete"] is False
     assert summary["full_a_complete"] is False
-    assert summary["business_chain_missing"] == ["completed_action_epoch_rows"]
+    assert summary["producer_attested_milestone_coverage_missing"] == [
+        "completed_action_epoch_rows"
+    ]
 
 
 @pytest.mark.parametrize(
     "predecessor",
     ("selected_contact_rows", "r03_physically_valid_rows", "r06_eligible_rows"),
 )
-def test_completed_action_requires_each_causal_predecessor(
+def test_consumer_reports_missing_predecessor_without_inferring_a_chain(
     predecessor, tmp_path
 ):
     module = _load()
@@ -862,11 +1005,14 @@ def test_completed_action_requires_each_causal_predecessor(
             row["extras_counts"]["r06_common_rows"] = 0
 
     evidence, snapshots, _completion, _rows = _artifacts(
-        module, tmp_path, 1, complete=False, business=True,
+        module, tmp_path, 1, complete=False, milestone_coverage=True,
         row_mutation=mutate,
     )
-    with pytest.raises(ValueError, match="cumulative lifecycle conservation"):
-        _consume(module, evidence, snapshots, 1)
+    summary = _consume(module, evidence, snapshots, 1)
+    assert predecessor in summary[
+        "producer_attested_milestone_coverage_missing"
+    ]
+    assert summary["milestones"]["completed_action_epoch_rows"] == 1
 
 
 @pytest.mark.parametrize(
@@ -880,7 +1026,9 @@ def test_completed_action_requires_each_causal_predecessor(
         "retire_without_launch",
     ),
 )
-def test_fresh_prefix_causal_bounds_reject_marginal_only_rows(case, tmp_path):
+def test_consumer_reports_marginal_rows_without_reconstructing_causal_bounds(
+    case, tmp_path
+):
     module = _load()
 
     def mutate(rows):
@@ -931,8 +1079,16 @@ def test_fresh_prefix_causal_bounds_reject_marginal_only_rows(case, tmp_path):
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate
     )
-    with pytest.raises(ValueError, match="cumulative lifecycle conservation"):
-        _consume(module, evidence, snapshots, 1)
+    summary = _consume(module, evidence, snapshots, 1)
+    observed_key = {
+        "launch_without_reveal": "launch_rows",
+        "contact_without_launch": "selected_contact_rows",
+        "r03_without_launch": "r03_present_rows",
+        "terminal_without_launch": "flight_terminal_rows",
+        "landing_without_selected": "landing_crossing_rows",
+        "retire_without_launch": "shot_retired_rows",
+    }[case]
+    assert summary["milestones"][observed_key] == 1
 
 
 def test_r06_common_uses_all_source_valid_outcomes_as_denominator(tmp_path):
@@ -942,7 +1098,7 @@ def test_r06_common_uses_all_source_valid_outcomes_as_denominator(tmp_path):
         rows[0]["extras_counts"]["r06_common_rows"] = 0
 
     evidence, snapshots, _completion, _rows = _artifacts(
-        module, tmp_path, 1, complete=False, business=True,
+        module, tmp_path, 1, complete=False, milestone_coverage=True,
         row_mutation=mutate,
     )
     summary = _consume(module, evidence, snapshots, 1)
@@ -961,7 +1117,8 @@ def test_portable_due_accept_defer_rates_use_due_denominator(tmp_path):
         })
 
     evidence, snapshots, _completion, _rows = _artifacts(
-        module, tmp_path, 1, complete=False, business=True, row_mutation=mutate
+        module, tmp_path, 1, complete=False, milestone_coverage=True,
+        row_mutation=mutate,
     )
     summary = _consume(module, evidence, snapshots, 1)
     assert summary["portable_reveal_opportunity"] == {
@@ -1082,7 +1239,7 @@ def test_retirement_and_r07_marginals_fit_final_reveal_phase(tmp_path):
     assert summary["milestones"]["r07_present_rows"] == 1
 
 
-def test_reveal_marginal_cannot_launder_r07_phase_without_retirement(tmp_path):
+def test_consumer_does_not_rebuild_reveal_r07_phase_implication(tmp_path):
     module = _load()
 
     def mutate(rows):
@@ -1105,8 +1262,9 @@ def test_reveal_marginal_cannot_launder_r07_phase_without_retirement(tmp_path):
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate
     )
-    with pytest.raises(ValueError, match="phase/event conservation"):
-        _consume(module, evidence, snapshots, 1)
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["reveal_rows"] == 1
+    assert summary["milestones"]["r07_present_rows"] == 1
 
 
 def test_immediate_terminal_launch_uses_terminal_phase_capacity(tmp_path):
@@ -1136,7 +1294,7 @@ def test_immediate_terminal_launch_uses_terminal_phase_capacity(tmp_path):
     assert summary["milestones"]["flight_terminal_rows"] == 1
 
 
-def test_launch_without_launch_or_terminal_phase_is_rejected(tmp_path):
+def test_consumer_does_not_rebuild_launch_phase_implication(tmp_path):
     module = _load()
 
     def mutate(rows):
@@ -1154,8 +1312,8 @@ def test_launch_without_launch_or_terminal_phase_is_rejected(tmp_path):
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate
     )
-    with pytest.raises(ValueError, match="phase/event conservation"):
-        _consume(module, evidence, snapshots, 1)
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["launch_rows"] == 1
 
 
 @pytest.mark.parametrize("name", sorted(RUNNER_FACT_INTEGRITY_KEYS))
@@ -1571,7 +1729,7 @@ def test_rejects_snapshot_ack_receipt_not_bound_to_same_file(tmp_path):
         _consume(module, evidence, snapshots, 1)
 
 
-def test_rejects_bad_event_subset_even_when_fault_counter_claims_zero(tmp_path):
+def test_consumer_keeps_producer_marginals_without_subset_gate(tmp_path):
     module = _load()
 
     def mutate(rows):
@@ -1580,8 +1738,8 @@ def test_rejects_bad_event_subset_even_when_fault_counter_claims_zero(tmp_path):
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate
     )
-    with pytest.raises(ValueError, match="event subset conservation"):
-        _consume(module, evidence, snapshots, 1)
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["r06_common_rows"] == 1
 
 
 def test_rejects_legacy_phase_seven_wire_key(tmp_path):
@@ -1622,10 +1780,14 @@ def test_gym_reset_recovery_failure_is_not_a_shot_retirement(tmp_path):
     summary = _consume(module, evidence, snapshots, 1)
     assert summary["milestones"]["recovery_failure_rows"] == 1
     assert summary["milestones"]["shot_retired_rows"] == 0
-    assert "shot_retired_rows" in summary["business_chain_missing"]
+    assert "shot_retired_rows" in summary[
+        "producer_attested_milestone_coverage_missing"
+    ]
 
 
-def test_invalid_contact_cannot_appear_in_a_durable_ack(tmp_path):
+def test_consumer_does_not_infer_missing_fact_integrity_from_event_marginal(
+    tmp_path,
+):
     module = _load()
 
     def mutate(rows):
@@ -1662,11 +1824,11 @@ def test_invalid_contact_cannot_appear_in_a_durable_ack(tmp_path):
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate
     )
-    with pytest.raises(ValueError, match="source-invalid event in durable ACK"):
-        _consume(module, evidence, snapshots, 1)
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["invalid_contact_rows"] == 1
 
 
-def test_rejects_recovery_failure_masquerading_as_shot_retirement(tmp_path):
+def test_consumer_does_not_rebuild_recovery_retirement_implication(tmp_path):
     module = _load()
 
     def mutate(rows):
@@ -1677,8 +1839,9 @@ def test_rejects_recovery_failure_masquerading_as_shot_retirement(tmp_path):
     evidence, snapshots, _completion, _rows = _artifacts(
         module, tmp_path, 1, complete=False, row_mutation=mutate
     )
-    with pytest.raises(ValueError, match="event subset conservation"):
-        _consume(module, evidence, snapshots, 1)
+    summary = _consume(module, evidence, snapshots, 1)
+    assert summary["milestones"]["recovery_failure_rows"] == 1
+    assert summary["milestones"]["shot_retired_rows"] == 1
 
 
 def test_rejects_prepared_hash_drift_and_duplicate_json_key(tmp_path):

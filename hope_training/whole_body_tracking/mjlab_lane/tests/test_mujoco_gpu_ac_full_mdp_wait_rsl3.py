@@ -201,9 +201,16 @@ def test_full_a_policy_bootstrap_zeroes_only_output_head_and_pins_std():
     policy = types.SimpleNamespace(
         actor=actor,
         log_std=torch.nn.Parameter(
-            torch.full((31,), float(torch.log(torch.tensor(0.02))))
+            torch.full(
+                (31,),
+                float(
+                    torch.log(
+                        torch.tensor(module.FULL_MDP_PPO_RECIPE.init_noise_std)
+                    )
+                ),
+            )
         ),
-        noise_std_type="log",
+        noise_std_type=module.FULL_MDP_PPO_RECIPE.noise_std_type,
     )
     runner = types.SimpleNamespace(alg=types.SimpleNamespace(policy=policy))
 
@@ -212,7 +219,10 @@ def test_full_a_policy_bootstrap_zeroes_only_output_head_and_pins_std():
     assert torch.equal(actor[0].weight, hidden_before)
     assert torch.count_nonzero(actor[-1].weight) == 0
     assert torch.count_nonzero(actor[-1].bias) == 0
-    torch.testing.assert_close(torch.exp(policy.log_std), torch.full((31,), 0.02))
+    torch.testing.assert_close(
+        torch.exp(policy.log_std),
+        torch.full((31,), module.FULL_MDP_PPO_RECIPE.init_noise_std),
+    )
 
 
 def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
@@ -221,8 +231,12 @@ def test_rsl3_config_keeps_fullmdp_actor_and_critic_groups_separate():
     assert cfg["num_steps_per_env"] == 48
     assert cfg["save_interval"] == 500
     assert cfg["obs_groups"] == {"policy": ["policy"], "critic": ["critic"]}
-    assert cfg["policy"]["init_noise_std"] == 0.02
-    assert cfg["policy"]["noise_std_type"] == "log"
+    assert cfg["policy"]["init_noise_std"] == (
+        module.FULL_MDP_PPO_RECIPE.init_noise_std
+    )
+    assert cfg["policy"]["noise_std_type"] == (
+        module.FULL_MDP_PPO_RECIPE.noise_std_type
+    )
     assert cfg["policy"]["actor_obs_normalization"] is False
     assert cfg["policy"]["critic_obs_normalization"] is False
     assert cfg["algorithm"]["num_learning_epochs"] == 5
@@ -578,7 +592,7 @@ def _install_fake_stack(
 
         def step(self, _actions):
             self.common_step_counter += 1
-            terms = torch.zeros(num_envs, 20)
+            terms = torch.zeros(num_envs, ledger_module.REWARD_TERM_COUNT)
             terms[:, 14] = 1.0
             extras = {}
             if self.full_a_mode:
@@ -593,6 +607,9 @@ def _install_fake_stack(
                         num_envs, dtype=torch.bool
                     ),
                     "reward_terms": terms,
+                    "full_a_paddle_prior_playback": torch.zeros(
+                        num_envs, dtype=torch.bool
+                    ),
                     "reset_generation": self.reset_generation.clone(),
                     "full_a_action_slot": torch.zeros(num_envs, dtype=torch.long),
                     "full_a_action_uid": torch.full(
@@ -688,9 +705,20 @@ def _install_fake_stack(
                 def __init__(self):
                     self.actor = torch.nn.Sequential(torch.nn.Linear(1, 31))
                     self.log_std = torch.nn.Parameter(
-                        torch.full((31,), float(torch.log(torch.tensor(0.02))))
+                        torch.full(
+                            (31,),
+                            float(
+                                torch.log(
+                                    torch.tensor(
+                                        module.FULL_MDP_PPO_RECIPE.init_noise_std
+                                    )
+                                )
+                            ),
+                        )
                     )
-                    self.noise_std_type = "log"
+                    self.noise_std_type = (
+                        module.FULL_MDP_PPO_RECIPE.noise_std_type
+                    )
 
                 @property
                 def action_std(self):
@@ -841,8 +869,41 @@ def test_real_runner_writer_prefix_is_consumed_without_a_second_schema(
     )
     assert summary["evidence_level"] == "advisory_prefix"
     assert summary["engineering_run_complete"] is False
-    assert summary["business_chain_complete"] is False
+    assert summary["producer_attested_milestone_coverage_complete"] is False
+    assert summary["same_epoch_chain_replay_status"] == "not_produced"
     assert summary["snapshot_count"] == 1
+
+
+def test_real_runner_completion_v5_round_trips_through_summary_v6(
+    monkeypatch, tmp_path,
+):
+    invoke, _trace, _saved, evidence, snapshots, completion = _install_fake_stack(
+        monkeypatch, tmp_path, num_envs=2, num_updates=2,
+        full_a_mode=True, valid_torch_snapshot=True,
+    )
+    assert invoke() == 0
+    consumer = _load_consumer()
+    monkeypatch.setattr(consumer, "NUM_ENVS", 2)
+    monkeypatch.setattr(consumer, "STEPS_PER_UPDATE", 48)
+    monkeypatch.setattr(consumer, "TRANSITIONS_PER_UPDATE", 96)
+    monkeypatch.setattr(consumer, "COMPLETE_UPDATES", 2)
+
+    summary = consumer.consume(
+        evidence,
+        expected_updates=2,
+        expected_source_commit=SOURCE_COMMIT,
+        expected_run_namespace=RUN_NAMESPACE,
+        expected_plant_xml=PLANT_XML,
+        snapshot_dir=snapshots,
+        completion_json=completion,
+    )
+
+    assert json.loads(completion.read_text())["schema_version"] == 5
+    assert summary["schema_version"] == 6
+    assert summary["engineering_run_complete"] is True
+    assert summary["completion_seal_verified"] is True
+    assert summary["producer_attested_milestone_coverage_complete"] is False
+    assert summary["same_epoch_chain_replay_status"] == "not_produced"
 
 
 def test_stdout_marker_failure_is_best_effort(monkeypatch):
@@ -943,7 +1004,7 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     rows = [json.loads(line) for line in evidence.read_text().splitlines()]
     assert [row["update_index"] for row in rows] == [0, 1]
     assert all(
-        row["schema_version"] == 6 and row["run_identity"] == _identity()
+        row["schema_version"] == 9 and row["run_identity"] == _identity()
         for row in rows
     )
     expected_mjb = _augmented_mjb()
@@ -967,7 +1028,10 @@ def test_full_a_orders_prepare_optimizer_ack_snapshot_and_keeps_zero_telemetry(
     } for row in rows)
     assert rows[0]["extras_counts"]["r06_present_rows"] == 0
     assert rows[1]["extras_counts"]["r07_present_rows"] == 0
-    assert rows[1]["reward20"]["reward20_finite_rows"] == 144
+    assert rows[1]["reward_graph"]["reward_terms_finite_rows"] == 144
+    assert rows[1]["reward_graph"]["term_count"] == len(
+        rows[1]["reward_graph"]["term_names"]
+    )
     assert rows[1]["optimizer_metrics"] == {
         "entropy": 1.5, "surrogate": -0.125, "value_function": 0.25
     }

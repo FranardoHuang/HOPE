@@ -12,8 +12,13 @@ try:
 except ImportError:
     import action_ball_full_mdp_lean_checkpoint_txn as carry_txn
 
-SCHEMA_VERSION = 4
-REWARD_TERM_COUNT = 20
+try:
+    from . import action_ball_full_mdp_reward_contract as reward_contract
+except ImportError:
+    import action_ball_full_mdp_reward_contract as reward_contract
+
+SCHEMA_VERSION = 7
+REWARD_TERM_COUNT = reward_contract.REWARD_TERM_COUNT
 REWARD_I64_COLUMNS = ("evaluated", "eligible", "finite", "nonzero")
 REWARD_F64_COLUMNS = (
     "primitive_sum", "primitive_sum_sq", "payment_raw_sum",
@@ -53,6 +58,14 @@ EPISODE_I64_NAMES = (
     "reason_robot_hit_table",
 )
 EPISODE_F64_NAMES = ("return_sum", "return_sum_sq")
+PADDLE_PLAYBACK_I64_COLUMNS = (
+    "telemetry_unavailable_count",
+    "playback_count",
+    "finite_count",
+    "domain_violation_count",
+)
+PADDLE_PLAYBACK_F64_COLUMNS = ("kernel_sum", "kernel_sum_sq")
+PADDLE_PLAYBACK_TERM_NAMES = reward_contract.PADDLE_MOTION_PRIOR_NAMES
 NOT_PRODUCED = (
     "per_action_event_strata", "per_side_event_strata",
     "landing_xy_event_statistics", "recovery_success_event",
@@ -68,8 +81,14 @@ _EI = _AI + len(ACTUAL_I64_NAMES)
 _EPI = _EI + len(EVENT_NAMES)
 _AF = _RF
 _EPF = _AF + len(ACTUAL_F64_NAMES)
-I64_NUMEL = _EPI + len(EPISODE_I64_NAMES)
-F64_NUMEL = _EPF + len(EPISODE_F64_NAMES)
+_PI = _EPI + len(EPISODE_I64_NAMES)
+_PF = _EPF + len(EPISODE_F64_NAMES)
+I64_NUMEL = _PI + len(PADDLE_PLAYBACK_TERM_NAMES) * len(
+    PADDLE_PLAYBACK_I64_COLUMNS
+)
+F64_NUMEL = _PF + len(PADDLE_PLAYBACK_TERM_NAMES) * len(
+    PADDLE_PLAYBACK_F64_COLUMNS
+)
 
 
 def _configured_totals(floats: tuple[float, ...]) -> tuple[float, float]:
@@ -99,6 +118,36 @@ class MilestoneWindowTelemetry:
                 **dict(zip(REWARD_F64_COLUMNS, reward_f[f0:f0 + 7])),
             })
         configured_sum, configured_abs_sum = _configured_totals(self.f64)
+        paddle_playback = []
+        for index, name in enumerate(PADDLE_PLAYBACK_TERM_NAMES):
+            i0 = _PI + index * len(PADDLE_PLAYBACK_I64_COLUMNS)
+            f0 = _PF + index * len(PADDLE_PLAYBACK_F64_COLUMNS)
+            paddle_playback.append(
+                {
+                    "ordinal": (
+                        REWARD_TERM_COUNT
+                        - len(PADDLE_PLAYBACK_TERM_NAMES)
+                        + index
+                    ),
+                    "term": name,
+                    **dict(
+                        zip(
+                            PADDLE_PLAYBACK_I64_COLUMNS,
+                            self.i64[
+                                i0 : i0 + len(PADDLE_PLAYBACK_I64_COLUMNS)
+                            ],
+                        )
+                    ),
+                    **dict(
+                        zip(
+                            PADDLE_PLAYBACK_F64_COLUMNS,
+                            self.f64[
+                                f0 : f0 + len(PADDLE_PLAYBACK_F64_COLUMNS)
+                            ],
+                        )
+                    ),
+                }
+            )
         return {
             "schema_version": SCHEMA_VERSION,
             "sample_unit": "reward_manager_payment_sample",
@@ -123,8 +172,15 @@ class MilestoneWindowTelemetry:
                 ],
             },
             "episodes": {
-                **dict(zip(EPISODE_I64_NAMES, self.i64[_EPI:])),
-                **dict(zip(EPISODE_F64_NAMES, self.f64[_EPF:])),
+                **dict(zip(EPISODE_I64_NAMES, self.i64[_EPI:_PI])),
+                **dict(zip(EPISODE_F64_NAMES, self.f64[_EPF:_PF])),
+            },
+            "paddle_motion_prior_playback": {
+                "sample_unit": "motion_playback_active_reward_row",
+                "predicate": (
+                    "Motion.action_ball_full_mdp_playback_active_mask"
+                ),
+                "terms": paddle_playback,
             },
             "not_produced": NOT_PRODUCED,
         }
@@ -149,6 +205,24 @@ def decode_host_window(i64: torch.Tensor, f64: torch.Tensor) -> MilestoneWindowT
         raise ValueError("milestone nonnegative telemetry differs")
     if floats[_EPF + 1] < 0.0:
         raise ValueError("milestone nonnegative telemetry differs")
+    for index in range(len(PADDLE_PLAYBACK_TERM_NAMES)):
+        i0 = _PI + index * len(PADDLE_PLAYBACK_I64_COLUMNS)
+        f0 = _PF + index * len(PADDLE_PLAYBACK_F64_COLUMNS)
+        (
+            _telemetry_unavailable_count,
+            playback_count,
+            finite_count,
+            domain_violation_count,
+        ) = ints[
+            i0 : i0 + len(PADDLE_PLAYBACK_I64_COLUMNS)
+        ]
+        kernel_sum_sq = floats[f0 + 1]
+        if (
+            finite_count > playback_count
+            or domain_violation_count > finite_count
+            or kernel_sum_sq < 0.0
+        ):
+            raise ValueError("milestone paddle playback telemetry differs")
     nonfinite_count, violations = ints[_AI + 2:_EI]
     if nonfinite_count != 0 or violations != 0:
         raise ValueError("milestone actual reward conservation differs")
@@ -216,6 +290,73 @@ class MilestoneTensorAccumulator:
             p.sum(), p.square().sum(), q.sum(), income.sum(), income.square().sum(),
             income.clamp_min(0).sum(), (-income.clamp_max(0)).sum(),
         )))
+
+    def add_paddle_motion_prior_playback(
+        self,
+        ordinal: int,
+        kernel: torch.Tensor,
+        playback_active: torch.Tensor,
+    ) -> None:
+        """Reduce raw motion-prior kernels on Motion-owned playback rows.
+
+        A finite zero kernel is a valid sample.  Values outside the analytic
+        Cauchy range are counted for diagnosis but remain telemetry: this leaf
+        neither clamps them nor turns that same-writer relationship into a
+        training gate.
+        """
+
+        self._writable()
+        first = REWARD_TERM_COUNT - len(PADDLE_PLAYBACK_TERM_NAMES)
+        if type(ordinal) is not int or not first <= ordinal < REWARD_TERM_COUNT:
+            raise RuntimeError("milestone paddle playback ordinal differs")
+        if (
+            type(kernel) is not torch.Tensor
+            or type(playback_active) is not torch.Tensor
+            or tuple(kernel.shape) != (self._num_envs,)
+            or playback_active.shape != kernel.shape
+            or kernel.device != self._device
+            or playback_active.device != self._device
+            or kernel.dtype is not torch.float32
+            or playback_active.dtype != torch.bool
+        ):
+            raise RuntimeError("milestone paddle playback tensor ABI differs")
+        finite = playback_active & torch.isfinite(kernel)
+        domain_violation = finite & (
+            kernel.lt(0.0) | kernel.gt(1.0)
+        )
+        index = ordinal - first
+        i0 = _PI + index * len(PADDLE_PLAYBACK_I64_COLUMNS)
+        f0 = _PF + index * len(PADDLE_PLAYBACK_F64_COLUMNS)
+        self.i64[i0 : i0 + len(PADDLE_PLAYBACK_I64_COLUMNS)].add_(
+            torch.stack(
+                (
+                    torch.zeros((), dtype=torch.int64, device=kernel.device),
+                    playback_active.sum(dtype=torch.int64),
+                    finite.sum(dtype=torch.int64),
+                    domain_violation.sum(dtype=torch.int64),
+                )
+            )
+        )
+        clean_kernel = torch.where(finite, kernel, 0.0).to(torch.float64)
+        self.f64[f0 : f0 + len(PADDLE_PLAYBACK_F64_COLUMNS)].add_(
+            torch.stack(
+                (
+                    clean_kernel.sum(),
+                    clean_kernel.square().sum(),
+                )
+            )
+        )
+
+    def add_paddle_motion_prior_unavailable(self, ordinal: int) -> None:
+        """Record missing optional telemetry without changing training flow."""
+
+        self._writable()
+        first = REWARD_TERM_COUNT - len(PADDLE_PLAYBACK_TERM_NAMES)
+        if type(ordinal) is not int or not first <= ordinal < REWARD_TERM_COUNT:
+            raise RuntimeError("milestone paddle playback ordinal differs")
+        index = ordinal - first
+        i0 = _PI + index * len(PADDLE_PLAYBACK_I64_COLUMNS)
+        self.i64[i0].add_(self._num_envs)
 
     def close_actual_step(self, reward: torch.Tensor) -> None:
         self._writable()

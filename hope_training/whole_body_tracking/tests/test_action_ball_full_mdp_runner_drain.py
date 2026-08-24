@@ -1105,17 +1105,18 @@ def test_diagnostic_marker_flattens_typed_completed_shots(
         if line.startswith("HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=")
     )
     assert payload["schema_version"] == 10
-    assert payload["milestone"]["schema_version"] == 4
+    assert payload["milestone"]["schema_version"] == 7
     reward_terms = payload["milestone"]["reward_terms"]
-    assert len(reward_terms) == 20
-    assert tuple(row["term"] for row in reward_terms[14:]) == (
-        "motion_global_anchor_pos",
-        "motion_global_anchor_ori",
-        "motion_body_pos",
-        "motion_body_ori",
-        "motion_body_lin_vel",
-        "motion_body_ang_vel",
+    rewards = sys.modules[
+        "whole_body_tracking.tasks.tracking.mdp."
+        "action_ball_full_mdp_lean_rewards"
+    ]
+    assert tuple(row["term"] for row in reward_terms) == rewards.MANAGER_NAMES
+    playback = payload["milestone"]["paddle_motion_prior_playback"]
+    assert tuple(row["term"] for row in playback["terms"]) == (
+        rewards.PADDLE_MOTION_PRIOR_NAMES
     )
+    assert all(row["playback_count"] == 0 for row in playback["terms"])
     assert len(payload["completed_shots"]) == 1
     completed = payload["completed_shots"][0]
     assert completed["action_uid"] == shot.action_uid

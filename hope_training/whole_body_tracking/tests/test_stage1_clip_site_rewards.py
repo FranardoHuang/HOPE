@@ -191,6 +191,56 @@ def _fake_command():
     return command
 
 
+def _fresh_measured_command():
+    command = _fake_command()
+    motion = command._motion()
+    loader = motion.motion
+    loader.measured_racket_available = True
+    loader._measured_racket_site_pos_w = torch.tensor(
+        [
+            [0.0, 0.0, 1.0],
+            [0.1, 0.0, 1.0],
+            [0.3, 0.0, 1.0],
+            [0.6, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+        ]
+    )
+    # This artifact channel is already signed for the selected action.
+    loader._measured_racket_normal_w = torch.tensor(
+        [[0.0, -1.0, 0.0]]
+    ).repeat(loader.time_step_total, 1)
+    loader._measured_racket_long_axis_w = torch.tensor(
+        [[1.0, 0.0, 0.0]]
+    ).repeat(loader.time_step_total, 1)
+    command.cfg.motion_teacher_racket_source = "measured_channel"
+
+    motion._action_ball_continuous_fresh_motion_lane_bound = True
+    motion.action_ball_diagnostic_split_ready_teacher = False
+    motion.ready_wait = torch.ones(command.num_envs, dtype=torch.bool)
+    motion.safe_steps = torch.zeros(command.num_envs, dtype=torch.long)
+    motion._action_ball_safe_ready_wait_mask = lambda: motion.ready_wait
+    motion._action_ball_full_mdp_safe_pose_reference_steps = (
+        lambda: motion.safe_steps
+    )
+    motion.robot = types.SimpleNamespace(
+        body_names=("root", "racket", "anchor")
+    )
+    motion.cfg = types.SimpleNamespace(
+        body_names=("root", "racket", "anchor")
+    )
+    motion.body_pos_relative_w = torch.zeros(command.num_envs, 3, 3)
+    motion.body_pos_relative_w[:, 1] = torch.tensor(
+        [[30.0, 0.0, 1.0], [40.0, 0.0, 1.0]]
+    )
+    motion.body_quat_relative_w = torch.zeros(command.num_envs, 3, 4)
+    motion.body_quat_relative_w[..., 0] = 1.0
+    command.racket_normal_raw_w = torch.tensor(
+        [[0.0, 1.0, 0.0]]
+    ).repeat(command.num_envs, 1)
+    command.racket_normal_w = -command.racket_normal_raw_w
+    return command
+
+
 def test_reward_wrappers_use_full_phase_teacher_and_separate_precision_windows(rewards):
     command = _fake_command()
     target_pos, target_normal, target_velocity = rewards._stage1_aligned_clip_site_target(command)
@@ -276,6 +326,9 @@ def test_measured_channel_hold_zeroes_velocity_but_preserves_measured_geometry(r
         [[0.0, 0.0, 1.0], [0.1, 0.0, 1.0], [0.3, 0.0, 1.0], [0.6, 0.0, 1.0], [1.0, 0.0, 1.0]]
     )
     loader._measured_racket_normal_w = torch.tensor([[0.0, -1.0, 0.0]]).repeat(5, 1)
+    loader._measured_racket_long_axis_w = torch.tensor(
+        [[1.0, 0.0, 0.0]]
+    ).repeat(5, 1)
     command.cfg.motion_teacher_racket_source = "measured_channel"
     motion.in_hold = torch.tensor([True, False])
     motion.speed_scale = torch.tensor([0.0, 0.5])
@@ -319,12 +372,134 @@ def test_motion_racket_teacher_is_masked_inside_wide_strike_window(rewards):
         torch.testing.assert_close(value, torch.tensor([0.0, 1.0]))
 
 
+def test_fullmdp_motion_prior_cauchy_wrappers_have_exact_half_height(
+    rewards, monkeypatch
+):
+    command = _fake_command()
+    position = torch.zeros(2, 3)
+    normal = torch.tensor([[0.0, 1.0, 0.0]]).repeat(2, 1)
+    velocity = torch.zeros(2, 3)
+    long_axis = torch.tensor([[1.0, 0.0, 0.0]]).repeat(2, 1)
+    monkeypatch.setattr(
+        rewards,
+        "_stage1_aligned_clip_site_target",
+        lambda _cmd: (position, normal, velocity),
+    )
+    monkeypatch.setattr(
+        rewards,
+        "_stage1_aligned_clip_long_axis_target",
+        lambda _cmd: long_axis,
+    )
+    command.racket_pos_w = position + torch.tensor([0.70, 0.0, 0.0])
+    command.racket_lin_vel_w = velocity + torch.tensor([4.0, 0.0, 0.0])
+    command.racket_normal_w = -normal
+    command.racket_long_axis_w = torch.tensor(
+        [[math.cos(1.0), math.sin(1.0), 0.0]]
+    ).repeat(2, 1)
+    command.strike_window_wide = torch.zeros(2, dtype=torch.bool)
+    env = types.SimpleNamespace(command_manager=_CommandManager(command))
+
+    values = (
+        rewards.motion_racket_position_tracking_cauchy(
+            env, "racket_target", 0.70, 1.0
+        ),
+        rewards.motion_racket_velocity_tracking_cauchy(
+            env, "racket_target", 4.0, 1.0
+        ),
+        rewards.motion_racket_normal_tracking_cauchy(
+            env, "racket_target", math.pi, 1.0
+        ),
+        rewards.motion_racket_long_axis_tracking_cauchy(
+            env, "racket_target", 1.0, 1.0
+        ),
+    )
+    for value in values:
+        torch.testing.assert_close(value, torch.full((2,), 0.5))
+    torch.testing.assert_close(
+        rewards._cauchy_tracking_kernel(torch.tensor([0.0, 1.0, 2.0]), 1.0),
+        torch.tensor([1.0, 0.5, 0.2]),
+    )
+
+
+def test_fresh_same_token_reselects_ready_to_signed_measured_frame0(
+    rewards, monkeypatch
+):
+    command = _fresh_measured_command()
+    calls = []
+    original = rewards._stage1_aligned_clip_racket_target_at_steps
+
+    def counted(cmd, steps):
+        calls.append(steps.clone())
+        return original(cmd, steps)
+
+    monkeypatch.setattr(
+        rewards, "_stage1_aligned_clip_racket_target_at_steps", counted
+    )
+    first = rewards._stage1_aligned_clip_racket_target(command)
+    measured = rewards._stage1_aligned_clip_measured_racket_target(command)
+    torch.testing.assert_close(
+        first[0], command._motion().body_pos_relative_w[:, 1]
+    )
+    torch.testing.assert_close(
+        first[1], command.racket_normal_raw_w
+    )
+    torch.testing.assert_close(first[2], torch.zeros_like(first[2]))
+    env = types.SimpleNamespace(command_manager=_CommandManager(command))
+    torch.testing.assert_close(
+        rewards.motion_racket_normal_tracking_cauchy(
+            env, "racket_target", math.pi, 1.0
+        ),
+        torch.ones(2),
+    )
+
+    # ACCEPT changes only Motion's selector; the public step token remains 7.
+    command._motion().ready_wait[0] = False
+    second = rewards._stage1_aligned_clip_racket_target(command)
+    for channel in range(4):
+        torch.testing.assert_close(second[channel][0], measured[channel][0])
+        torch.testing.assert_close(second[channel][1], first[channel][1])
+    torch.testing.assert_close(second[1][0], torch.tensor([0.0, -1.0, 0.0]))
+    torch.testing.assert_close(
+        rewards.motion_racket_normal_tracking_cauchy(
+            env, "racket_target", math.pi, 1.0
+        ),
+        torch.ones(2),
+    )
+    assert len(calls) == 1
+
+
+def test_current_four_channel_target_uses_quarantined_motion_steps(rewards):
+    command = _fresh_measured_command()
+    motion = command._motion()
+    motion.ready_wait.zero_()
+    motion.safe_steps = torch.tensor([0, 2], dtype=torch.long)
+
+    def forbidden_raw_steps():
+        raise AssertionError("fresh reward bypassed Motion quarantine")
+
+    motion._pose_reference_steps = forbidden_raw_steps
+    actual = rewards._stage1_aligned_clip_racket_target(command)
+    expected_raw = rewards._stage1_aligned_clip_racket_target_at_steps(
+        command, motion.safe_steps
+    )
+    expected = rewards._stage1_select_split_ready_site_target(
+        command, expected_raw
+    )
+    assert len(actual) == 4
+    for actual_channel, expected_channel in zip(actual, expected):
+        assert torch.isfinite(actual_channel).all()
+        torch.testing.assert_close(actual_channel, expected_channel)
+
+
 def test_public_now_target_reuses_the_shared_per_step_teacher_cache(rewards):
     command = _fake_command()
     first = rewards.stage1_aligned_clip_site_target_now(command)
+    cache = command._stage1_clip_site_target_cache
     second = rewards.stage1_aligned_clip_site_target_now(command)
 
-    assert first is second
+    assert command._stage1_clip_site_target_cache is cache
+    for lhs, rhs in zip(first, second):
+        torch.testing.assert_close(lhs, rhs)
 
 
 def test_fixed_coarse_kernels_cover_reviewed_cold_start_envelope(rewards):

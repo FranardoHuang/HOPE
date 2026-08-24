@@ -333,6 +333,7 @@ class PhysxFactOwnerCheckpoint:
     previous_center_m: object
     previous_center_valid: object
     selected_contact_latch: object
+    ordinary_invalid_contact_latch: object
     net_crossed_latch: object
     first_descending_crossing_latch: object
     last_heartbeat: int
@@ -1028,6 +1029,9 @@ class IsaacPhysxBallFactOwner:
         self._contact_latch = torch.zeros(
             shape, dtype=torch.bool, device=self.device
         )
+        self._ordinary_invalid_contact_latch = torch.zeros(
+            shape, dtype=torch.bool, device=self.device
+        )
         self._contact_candidate_event = torch.zeros(
             shape + (2,), dtype=torch.bool, device=self.device
         )
@@ -1038,6 +1042,9 @@ class IsaacPhysxBallFactOwner:
             shape + (2,), -1, dtype=torch.int64, device=self.device
         )
         self._known_non_rubber_candidate_event = torch.zeros(
+            shape, dtype=torch.bool, device=self.device
+        )
+        self._racket_invalid_contact_candidate_event = torch.zeros(
             shape, dtype=torch.bool, device=self.device
         )
         self._binding_fault = torch.zeros(shape, dtype=torch.bool, device=self.device)
@@ -1183,10 +1190,12 @@ class IsaacPhysxBallFactOwner:
         reset = new_identity | inactive
         self._previous_valid.logical_and_(~reset)
         self._contact_latch.logical_and_(~reset)
+        self._ordinary_invalid_contact_latch.logical_and_(~reset)
         self._net_latch.logical_and_(~reset)
         self._landing_latch.logical_and_(~reset)
         self._contact_candidate_event.zero_()
         self._known_non_rubber_candidate_event.zero_()
+        self._racket_invalid_contact_candidate_event.zero_()
         self._binding_fault.copy_(bad)
         self._expected_active.copy_(active)
         self._expected_rubber.copy_(rubber)
@@ -1278,10 +1287,12 @@ class IsaacPhysxBallFactOwner:
         reset = new_identity | ~active
         self._previous_valid.logical_and_(~reset)
         self._contact_latch.logical_and_(~reset)
+        self._ordinary_invalid_contact_latch.logical_and_(~reset)
         self._net_latch.logical_and_(~reset)
         self._landing_latch.logical_and_(~reset)
         self._contact_candidate_event.zero_()
         self._known_non_rubber_candidate_event.zero_()
+        self._racket_invalid_contact_candidate_event.zero_()
         self._binding_fault.copy_(bad)
         self._expected_active.copy_(active)
         self._expected_rubber.copy_(rubber)
@@ -1312,8 +1323,9 @@ class IsaacPhysxBallFactOwner:
             self._expected_active
             | self._contact_candidate_event.any(dim=-1)
             | self._known_non_rubber_candidate_event
+            | self._racket_invalid_contact_candidate_event
             | self._binding_fault
-        ).detach().clone()
+        ).detach()
 
     def _begin_action_epoch_idle_binding(self) -> None:
         """Open one callback epoch after all writers proved the grid idle."""
@@ -1334,6 +1346,8 @@ class IsaacPhysxBallFactOwner:
         self, *, exact_stamp: object
     ) -> None:
         """Seal one idle callback epoch without reading any scene tensor."""
+
+        import torch
 
         exact = exact_stamp
         if (
@@ -1357,9 +1371,14 @@ class IsaacPhysxBallFactOwner:
             raise ActionBallFullMdpBallSceneError(
                 "ActionEpoch idle binding stamp is duplicate or non-monotonic"
             )
-        self._contact_candidate_event.zero_()
-        self._known_non_rubber_candidate_event.zero_()
-        self._binding_fault.zero_()
+        torch._foreach_zero_(
+            [
+                self._contact_candidate_event,
+                self._known_non_rubber_candidate_event,
+                self._racket_invalid_contact_candidate_event,
+                self._binding_fault,
+            ]
+        )
         self._action_epoch_idle_binding = False
         self._action_epoch_direct_binding = False
         self._last_capture_heartbeat = self._last_heartbeat
@@ -1376,6 +1395,7 @@ class IsaacPhysxBallFactOwner:
         self._bound_projection_sha256 = None
         self._contact_candidate_event.zero_()
         self._known_non_rubber_candidate_event.zero_()
+        self._racket_invalid_contact_candidate_event.zero_()
         self._binding_fault.zero_()
 
     def bind_subscriptions(
@@ -1714,6 +1734,10 @@ class IsaacPhysxBallFactOwner:
                         self._known_non_rubber_candidate_event[
                             env_index, slot_index
                         ] = True
+                        if known_role in ("handle", "wrist_shell"):
+                            self._racket_invalid_contact_candidate_event[
+                                env_index, slot_index
+                            ] = True
                 continue
             rubber_env, rubber_side = rubber
             if rubber_env != env_index or (
@@ -1871,9 +1895,11 @@ class IsaacPhysxBallFactOwner:
         ).squeeze(-1)
         wrong_face = observe & wrong_face_candidate
         self._wrong_face_event_count.add_(wrong_face.to(dtype=torch.int64))
-        ambiguous_face = observe & selected_candidate & (
-            wrong_face_candidate | self._known_non_rubber_candidate_event
-        )
+        ordinary_invalid_contact = observe & (
+            wrong_face_candidate
+            | self._racket_invalid_contact_candidate_event
+            | (selected_candidate & self._known_non_rubber_candidate_event)
+        ) & ~self._contact_latch
         heartbeat_fault = observe & (
             (self._last_heartbeat <= self._last_capture_heartbeat)
             | (
@@ -1897,7 +1923,6 @@ class IsaacPhysxBallFactOwner:
             | heartbeat_fault
             | callback_fault
             | self._binding_fault
-            | ambiguous_face
         )
         if self._diagnostic_unauthorized and not self._action_epoch_direct_binding:
             producer_fault = producer_fault | observe
@@ -1914,8 +1939,11 @@ class IsaacPhysxBallFactOwner:
             observe
             & selected_candidate
             & ~self._contact_latch
+            & ~self._ordinary_invalid_contact_latch
+            & ~ordinary_invalid_contact
             & ~producer_fault
         )
+        self._ordinary_invalid_contact_latch.logical_or_(ordinary_invalid_contact)
         contact_center = torch.where(
             contact.unsqueeze(-1),
             selected_candidate_center,
@@ -2016,6 +2044,7 @@ class IsaacPhysxBallFactOwner:
         )
         self._contact_candidate_event.zero_()
         self._known_non_rubber_candidate_event.zero_()
+        self._racket_invalid_contact_candidate_event.zero_()
         self._binding_fault.zero_()
         self._bound_authority = None
         self._bound_projection_sha256 = None
@@ -2116,6 +2145,7 @@ class IsaacPhysxBallFactOwner:
             value.previous_center_m,
             value.previous_center_valid,
             value.selected_contact_latch,
+            value.ordinary_invalid_contact_latch,
             value.net_crossed_latch,
             value.first_descending_crossing_latch,
             value.wrong_face_event_count_by_ball,
@@ -2136,13 +2166,14 @@ class IsaacPhysxBallFactOwner:
             or self._action_epoch_direct_binding
             or self._action_epoch_idle_binding
             or bool(torch.any(self._contact_candidate_event))
+            or bool(torch.any(self._racket_invalid_contact_candidate_event))
             or bool(torch.any(self._binding_fault))
         ):
             raise ActionBallFullMdpBallSceneError(
                 "PhysX fact checkpoint requires a drained capture boundary"
             )
         checkpoint = PhysxFactOwnerCheckpoint(
-            schema_version=2,
+            schema_version=3,
             scene_identity_sha256=self.scene_identity_sha256,
             callback_order=self.callback_order,
             expected_active=self._expected_active.detach().clone(),
@@ -2152,6 +2183,9 @@ class IsaacPhysxBallFactOwner:
             previous_center_m=self._previous_center.detach().clone(),
             previous_center_valid=self._previous_valid.detach().clone(),
             selected_contact_latch=self._contact_latch.detach().clone(),
+            ordinary_invalid_contact_latch=(
+                self._ordinary_invalid_contact_latch.detach().clone()
+            ),
             net_crossed_latch=self._net_latch.detach().clone(),
             first_descending_crossing_latch=self._landing_latch.detach().clone(),
             last_heartbeat=self._last_heartbeat,
@@ -2200,7 +2234,7 @@ class IsaacPhysxBallFactOwner:
         if (
             type(value) is not PhysxFactOwnerCheckpoint
             or value._token is not _PHYSX_FACT_CHECKPOINT_TOKEN
-            or value.schema_version != 2
+            or value.schema_version != 3
             or value.scene_identity_sha256 != self.scene_identity_sha256
             or value.callback_order != self.callback_order
             or type(value.last_heartbeat) is not int
@@ -2241,6 +2275,7 @@ class IsaacPhysxBallFactOwner:
                 )
             )
             or bool(torch.any(self._contact_candidate_event))
+            or bool(torch.any(self._racket_invalid_contact_candidate_event))
             or bool(torch.any(self._binding_fault))
         ):
             raise ActionBallFullMdpBallSceneError(
@@ -2288,6 +2323,12 @@ class IsaacPhysxBallFactOwner:
             dtype=torch.bool,
             label="checkpoint selected_contact_latch",
         )
+        invalid_contact = self._tensor(
+            value.ordinary_invalid_contact_latch,
+            shape=shape,
+            dtype=torch.bool,
+            label="checkpoint ordinary_invalid_contact_latch",
+        )
         net = self._tensor(
             value.net_crossed_latch,
             shape=shape,
@@ -2319,6 +2360,8 @@ class IsaacPhysxBallFactOwner:
         )
         state_semantics_bad = (
             (contact & ~expected_active)
+            | (invalid_contact & ~expected_active)
+            | (contact & invalid_contact)
             | (net & ~contact)
             | (landing & ~contact)
             | (valid & ~torch.isfinite(previous).all(dim=-1))
@@ -2335,6 +2378,7 @@ class IsaacPhysxBallFactOwner:
         self._previous_center.copy_(previous)
         self._previous_valid.copy_(valid)
         self._contact_latch.copy_(contact)
+        self._ordinary_invalid_contact_latch.copy_(invalid_contact)
         self._net_latch.copy_(net)
         self._landing_latch.copy_(landing)
         self._last_heartbeat = value.last_heartbeat

@@ -27,6 +27,11 @@ except ImportError:  # pragma: no cover - package-style test import
     from whole_body_tracking import action_ball_full_mdp_row_identity as row_identity
 
 try:
+    from whole_body_tracking import action_ball_continuous_recovery_device as r07_device
+except ImportError:  # pragma: no cover - direct-source focused tests
+    import action_ball_continuous_recovery_device as r07_device
+
+try:
     from . import action_ball_full_mdp_selected_reset as selected_reset
 except ImportError:
     import action_ball_full_mdp_selected_reset as selected_reset
@@ -171,6 +176,9 @@ ROW_FAULT_MOTION_TASK_TIMING_CONTRACT = 1 << 26
 ROW_FAULT_R03_EPOCH_IDENTITY = 1 << 27
 ROW_FAULT_R03_STALE_SOURCE_STEP = 1 << 28
 ROW_FAULT_R03_NONFINITE_FACT = 1 << 29
+# The terminal R07 cell is a distinct cross-clock chronology fact.  It is not
+# the active-row publication join (bit 7) or first-ready identity join (bit 8).
+ROW_FAULT_R07_TERMINAL_FACT_CONTRACT = 1 << 30
 # Physical already publishes these two exact source bits.  Keep the values
 # identical at the optimizer boundary so the causal producer/nonfinite split is
 # not lost while moving from the owner journal into the one packed row word.
@@ -263,6 +271,10 @@ ACTION_EPOCH_ROW_FAULT_NAMES = (
     (ROW_FAULT_R03_EPOCH_IDENTITY, "r03_epoch_identity"),
     (ROW_FAULT_R03_STALE_SOURCE_STEP, "r03_stale_source_step"),
     (ROW_FAULT_R03_NONFINITE_FACT, "r03_nonfinite_fact"),
+    (
+        ROW_FAULT_R07_TERMINAL_FACT_CONTRACT,
+        "r07_terminal_fact_contract",
+    ),
     (
         ROW_FAULT_PHYSICAL_POSTPHYSICS_PRODUCER,
         "physical_postphysics_producer",
@@ -1066,9 +1078,21 @@ class ActionEpochOwner:
             ).detach()
 
     def project_recovery_postphysics_activity_mask(
-        self, *, owner: object
+        self,
+        *,
+        owner: object,
+        motion_cadence_tick: torch.Tensor,
     ) -> torch.Tensor:
-        """Project completed rows whose R07 recovery phase remains active."""
+        """Project keyed rows due for one fixed-window R07 producer cell.
+
+        Recovery age is computed in Motion's per-environment cadence domain;
+        selected reset can rewind those rows without rewinding the global
+        counter.  Physical independently owns and validates the global cached
+        host-verdict chronology, so duplicating that scalar here would add no
+        row fact or safety invariant.
+        Outcome settlement is a Reward-consumer condition and deliberately
+        does not gate production.
+        """
 
         with self._lock:
             self._healthy()
@@ -1080,17 +1104,34 @@ class ActionEpochOwner:
                 raise ActionEpochError(
                     "recovery postphysics activity owner identity differs"
                 )
+            if (
+                type(motion_cadence_tick) is not torch.Tensor
+                or motion_cadence_tick.dtype != torch.int64
+                or motion_cadence_tick.device != self.device
+                or tuple(motion_cadence_tick.shape) != (self.num_envs,)
+                or not motion_cadence_tick.is_contiguous()
+            ):
+                raise ActionEpochError(
+                    "recovery postphysics Motion cadence tick ABI differs"
+                )
             motion_slot = self._owner_slot("motion")
             phase = record.phase
+            deadline = record.clocks.deadline_tick
+            recovery_age = motion_cadence_tick[:, None] - deadline
             return (
                 row_identity.action_epoch_shot_key_valid(
                     record.identity.shot_key
                 )
                 & record.writes_started[:, :, motion_slot]
                 & record.writes_committed[:, :, motion_slot]
+                & deadline.ge(0)
+                & motion_cadence_tick[:, None].ge(deadline)
+                & recovery_age.ge(r07_device.RECOVERY_START_AGE_TICK)
+                & recovery_age.le(r07_device.RECOVERY_END_AGE_TICK)
                 & (
-                    phase.eq(PHASE_OUTCOME_SETTLED)
-                    | phase.eq(PHASE_RETIRED)
+                    phase.eq(PHASE_REVEAL_COMMITTED)
+                    | phase.eq(PHASE_LAUNCH_SETTLED)
+                    | phase.eq(PHASE_OUTCOME_SETTLED)
                 )
             ).detach()
 
@@ -1974,6 +2015,12 @@ class ActionEpochOwner:
             common_step = getattr(projection, "common_step", None)
             if type(common_step) is not int or common_step <= self._last_motion_common_step:
                 raise ActionEpochError("Motion current projection chronology differs")
+            episode_tick = self._tensor(
+                getattr(projection, "episode_tick", None),
+                label="Motion.episode_tick",
+                shape=(self.num_envs,),
+                dtype=torch.int64,
+            )
             due = self._tensor(
                 getattr(projection, "reveal_due", None),
                 label="Motion.reveal_due",
@@ -1995,12 +2042,98 @@ class ActionEpochOwner:
             paid = self._require_previous_paid_rows(
                 self._r06_paid_projection(), label="R06.previous_paid_rows"
             )
+            current_key = self._gather_current_key(record.identity.shot_key)
+            current_key_valid = row_identity.action_epoch_shot_key_valid(
+                current_key
+            )
+            current_phase = self._gather_current(record.phase)
+            motion_slot = self._owner_slot("motion")
+            current_motion_committed = self._gather_current(
+                record.writes_started[:, :, motion_slot]
+                & record.writes_committed[:, :, motion_slot]
+            )
+            current_deadline = self._gather_current(record.clocks.deadline_tick)
+            r07_slot = self._owner_slot("r07_recovery")
+            r07_valid = self._gather_current(
+                record.fact_valid_bits[:, :, r07_slot]
+            )
+            r07_fault = self._gather_current(
+                record.owner_fault_bits[:, :, r07_slot]
+            )
+            r07_source = self._gather_current(
+                record.fact_source_step[:, :, r07_slot]
+            )
+            r07_fact = self._gather_current(
+                record.fact_f32[:, :, r07_slot, :]
+            )
+            r07_terminal_due = (
+                current_key_valid
+                & current_motion_committed
+                & action_epoch_open_shot_phase_mask(current_phase)
+                & current_deadline.ge(0)
+                # The prior post-physics cell at cadence age 77 is visible at
+                # the next Motion boundary, local episode tick D+78.
+                & episode_tick.eq(
+                    current_deadline
+                    + r07_device.RECOVERY_END_AGE_TICK
+                    + 1
+                )
+            )
+            required_r07_bits = (
+                r07_device.R07_EPOCH_FACT_PRESENT
+                | r07_device.R07_EPOCH_FACT_NUMERICALLY_VALID
+            )
+            # Motion cadence and the environment source step have a constant
+            # per-row offset for one reset generation.  Recover the only global
+            # source that can name cadence age 77 instead of accepting any old
+            # retained producer cell.  At the exact D+78 join this simplifies
+            # to ``common_step - 1``; a later R06 payment retains the same cell
+            # while both clocks advance together.
+            expected_r07_terminal_source = (
+                common_step
+                - episode_tick
+                + current_deadline
+                + r07_device.RECOVERY_END_AGE_TICK
+            )
+            r07_terminal_fact_clean = (
+                r07_valid.eq(required_r07_bits)
+                & r07_fault.eq(0)
+                & r07_source.eq(expected_r07_terminal_source)
+                & r07_fact[:, 3].eq(1.0)
+                & r07_fact[:, 4].eq(0.0)
+                & r07_fact[:, 6].eq(
+                    float(r07_device.RECOVERY_END_AGE_TICK)
+                )
+                & torch.isfinite(r07_fact).all(dim=1)
+            )
+            r07_terminal_fault = r07_terminal_due & ~r07_terminal_fact_clean
+            r07_window_complete = (
+                current_key_valid
+                & current_motion_committed
+                & action_epoch_open_shot_phase_mask(current_phase)
+                & current_deadline.ge(0)
+                & episode_tick.ge(
+                    current_deadline
+                    + r07_device.RECOVERY_END_AGE_TICK
+                    + 1
+                )
+                & r07_terminal_fact_clean
+            )
+            # This exact D+78 check is independent of fact publication and
+            # first-ready joins.  It never inspects Reward eligibility, ready,
+            # score, or component thresholds.
+            r07_terminal_safe = self._latch_device_row_fault(
+                r07_terminal_fault,
+                reason_bit=ROW_FAULT_R07_TERMINAL_FACT_CONTRACT,
+            )
             external_business_rows = (
                 due
                 | closed
                 | close_reason_rows.ne(MOTION_CLOSE_NONE)
             )
-            business_rows = external_business_rows | paid.valid
+            business_rows = (
+                external_business_rows | paid.valid | r07_terminal_fault
+            )
             if torch.equal(business_rows, torch.zeros_like(business_rows)):
                 # Preserve scalar chronology without manufacturing a private
                 # transaction, empty journal rows, or neutral writer calls.
@@ -2014,9 +2147,6 @@ class ActionEpochOwner:
             )
             current_playback = self._gather_current(
                 record.motion_playback_started
-            )
-            current_key_valid = row_identity.action_epoch_shot_key_valid(
-                self._gather_current_key(record.identity.shot_key)
             )
             current_phase_for_close = self._gather_current(record.phase)
             close_has_active_row = (
@@ -2036,6 +2166,7 @@ class ActionEpochOwner:
             safe_rows = self._latch_device_row_fault(
                 ~close_valid, reason_bit=ROW_FAULT_MOTION_CLOSE_CONTRACT
             )
+            safe_rows &= r07_terminal_safe
             due = due & safe_rows
             closed = closed & safe_rows
             close_reason_rows = torch.where(
@@ -2049,13 +2180,11 @@ class ActionEpochOwner:
                 close_reason_rows[:, None],
                 record.motion_close_reason,
             )
-            current_key = self._gather_current_key(record.identity.shot_key)
             current_publication = self._gather_current(
                 record.publication_ordinal
             )
             current_settlement = self._gather_current(record.settlement_step)
             current_payment = self._gather_current(record.payment_step)
-            current_phase = self._gather_current(record.phase)
             debt = self._gather_current(close_reason).ne(MOTION_CLOSE_NONE)
             paid_chronology = (
                 paid.publication_ordinal.ge(0)
@@ -2075,11 +2204,9 @@ class ActionEpochOwner:
                 & current_payment.ge(current_settlement)
                 & current_payment.le(common_step)
             )
-            # Payment and Motion close are independent edges.  A valid R06
-            # mailbox may arrive before Motion closes; that is a legal pending
-            # intermediate state, not corruption.  Validate only the asserted
-            # payment identity/chronology here, then retire once close debt is
-            # also present.
+            # Payment, Motion close, and the fixed R07 producer suffix are
+            # independent debts.  A valid R06 mailbox may arrive before either
+            # other edge; retain it until all three exact facts join.
             paid_assertion_contract = (
                 paid_chronology
                 & same_paid_key
@@ -2095,23 +2222,24 @@ class ActionEpochOwner:
                 reason_bit=ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT,
             )
             due = due & paid_safe
-            paid_matches = (
+            paid_close_matches = (
                 paid.valid
                 & paid_assertion_contract
                 & debt
                 & paid_safe
             )
-            # R06 retains one paid mailbox until Motion contributes the
-            # independent close edge.  Re-reading that same valid assertion is
-            # chronology validation, not a new lifecycle event.  Keep scalar
+            # R06 retains one paid mailbox until Motion close and the terminal
+            # R07 producer cell both join.  Re-reading that same valid assertion
+            # is chronology validation, not a new lifecycle event.  Keep scalar
             # Motion time monotonic, but do not manufacture two empty epoch
             # events plus a zero-mask D05/writer transaction on every pending
-            # tick.  A real due/close, a malformed assertion, or the exact
-            # close+payment retirement still takes the ordinary journal path.
+            # tick.  A real due/close, malformed assertion, exact terminal
+            # fault, or three-debt retirement still takes the journal path.
             actionable_rows = (
                 external_business_rows
                 | invalid_paid_assertion
-                | paid_matches
+                | (paid_close_matches & r07_window_complete)
+                | r07_terminal_fault
             )
             if torch.equal(
                 actionable_rows, torch.zeros_like(actionable_rows)
@@ -2129,14 +2257,18 @@ class ActionEpochOwner:
                 values=(*values, close_reason),
                 changes={"motion_close_reason": close_reason},
             )
+            retire_rows = (
+                paid_close_matches
+                & r07_window_complete
+                & r07_terminal_safe
+            )
             self._last_r06_paid_payment_step = torch.where(
-                paid_matches,
+                retire_rows,
                 torch.maximum(
                     self._last_r06_paid_payment_step, paid.payment_step
                 ),
                 self._last_r06_paid_payment_step,
             )
-            retire_rows = paid_matches
             retire_slots = self._current_slot_mask(retire_rows)
             phase = torch.where(
                 retire_slots,
@@ -3141,8 +3273,8 @@ class ActionEpochOwner:
             if last:
                 self._reward_open = False
 
-    def publish_reward_payment(self, control_step: int) -> ActionEpochRewardPaymentRows:
-        """Publish the actual completed Reward edge; control_step is clock fact."""
+    def publish_reward_payment(self, control_step: int) -> None:
+        """Publish the actual completed Reward edge as a command."""
 
         if type(control_step) is not int or control_step < 0:
             raise ActionEpochError("control_step must be a non-negative exact int")
@@ -3215,7 +3347,6 @@ class ActionEpochOwner:
                     ),
                 ),
             )
-            return self._current_payment_rows.clone()
 
     def project_current_reward_payment_rows(self) -> ActionEpochRewardPaymentRows:
         with self._lock:
@@ -4567,6 +4698,7 @@ __all__ = [
     "ROW_FAULT_R06_PAYMENT_UNCONSUMED_DEBT_OVERWRITE",
     "ROW_FAULT_R06_PREVIOUS_PAID_CONTRACT",
     "ROW_FAULT_R07_FIRST_READY_JOIN",
+    "ROW_FAULT_R07_TERMINAL_FACT_CONTRACT",
     "ROW_FAULT_RESET_GENESIS_CONTRACT",
     "ROW_FAULT_REWARD_PAYMENT_CHRONOLOGY",
     "ROW_FAULT_SELECTED_RESET_GENERATION_OVERFLOW",

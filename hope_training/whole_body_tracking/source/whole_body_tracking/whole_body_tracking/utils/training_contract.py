@@ -15,10 +15,51 @@ import binascii
 from copy import deepcopy
 import functools
 import hashlib
+import importlib.util
 import json
 import math
 from pathlib import Path, PurePosixPath
 from collections.abc import Mapping, MutableMapping
+
+
+_ACTION_BALL_FULL_MDP_REWARD_CONTRACT_PATH_MODULE = None
+
+
+def _action_ball_full_mdp_reward_contract_module():
+    """Load the dependency-light shared Reward contract without importing mdp.
+
+    Importing ``tasks.tracking.mdp`` executes its Isaac-facing package
+    initializer.  This contract module must remain usable by export and
+    sidecar validation without Isaac or Torch, so execute the one exact source
+    file under a private cache instead.
+    """
+
+    global _ACTION_BALL_FULL_MDP_REWARD_CONTRACT_PATH_MODULE
+    source = (
+        Path(__file__).resolve(strict=True).parents[1]
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_reward_contract.py"
+    )
+    cached = _ACTION_BALL_FULL_MDP_REWARD_CONTRACT_PATH_MODULE
+    if cached is not None:
+        if Path(cached.__file__).resolve() != source:
+            raise RuntimeError("cached shared Reward contract path differs")
+        return cached
+    if not source.is_file():
+        raise RuntimeError("shared FullMDP Reward contract is missing")
+    spec = importlib.util.spec_from_file_location(
+        "_hope_training_contract_full_mdp_reward_contract", source
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load shared FullMDP Reward contract")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if Path(module.__file__).resolve() != source:
+        raise RuntimeError("shared FullMDP Reward contract executed from a wrong file")
+    _ACTION_BALL_FULL_MDP_REWARD_CONTRACT_PATH_MODULE = module
+    return module
 
 
 TRAINING_CONTRACT_SCHEMA_VERSION = 3
@@ -6938,6 +6979,9 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
         or "fresh_full_mdp_installed_reward_graph" in contract
     )
     if full_mdp_declared:
+        reward_contract = _action_ball_full_mdp_reward_contract_module()
+        shared_reward_names = list(reward_contract.MANAGER_NAMES)
+        shared_lifecycle_count = reward_contract.LIFECYCLE_PAYMENT_COUNT
         reward_names = (
             full_mdp_reward.get("ordered_manager_names")
             if isinstance(full_mdp_reward, Mapping)
@@ -7019,34 +7063,25 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             or full_mdp_reward.get("kind")
             != "action_ball_epoch_lean_reward_graph_v1"
             or full_mdp_reward.get("profile_kind")
-            != "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
+            != "action_ball_full_mdp_diagnostic_n2_reward_profile_v3"
             or full_mdp_reward.get("diagnostic_unauthorized") is not True
             or full_mdp_reward.get("launch_authorized") is not False
             or full_mdp_reward.get("no_receipt_or_sha_authority") is not True
             or type(reward_names) is not list
-            or len(reward_names) != 20
+            or reward_names != shared_reward_names
             or any(type(name) is not str or not name for name in reward_names)
-            or len(set(reward_names)) != 20
-            or reward_names[14:]
-            != [
-                "motion_global_anchor_pos",
-                "motion_global_anchor_ori",
-                "motion_body_pos",
-                "motion_body_ori",
-                "motion_body_lin_vel",
-                "motion_body_ang_vel",
-            ]
+            or len(set(reward_names)) != len(shared_reward_names)
             or type(payment_consumers) is not list
-            or len(payment_consumers) != 14
+            or len(payment_consumers) != shared_lifecycle_count
             or any(
                 type(name) is not str or name.count(":") != 1
                 for name in payment_consumers
             )
-            or len(set(payment_consumers)) != 14
+            or len(set(payment_consumers)) != shared_lifecycle_count
             or [name.split(":", 1)[0] for name in payment_consumers]
             != ["r03"] * 10 + ["physical", "r06", "r06", "r07"]
             or [name.split(":", 1)[-1] for name in payment_consumers]
-            != reward_names[:14]
+            != reward_names[:shared_lifecycle_count]
         ):
             raise ValueError("schema-3 full-MDP runtime identity differs")
         if block_present or action_delay_present:

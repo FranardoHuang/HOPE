@@ -5128,7 +5128,7 @@ def _racket_guidance_reward_contract(env_cfg, *, racket_task: bool) -> dict | No
 
 
 def _diagnostic_full_mdp_racket_guidance_contract(installed_graph: dict) -> dict:
-    """Record that fresh diagnostic guidance is owned by the 20-term graph."""
+    """Record that guidance is owned by the exact shared Reward contract."""
 
     lean_rewards = importlib.import_module(
         "whole_body_tracking.tasks.tracking.mdp."
@@ -5136,6 +5136,9 @@ def _diagnostic_full_mdp_racket_guidance_contract(installed_graph: dict) -> dict
     )
     expected_names = getattr(lean_rewards, "MANAGER_NAMES", None)
     expected_count = getattr(lean_rewards, "MANAGER_TERM_COUNT", None)
+    reward_contract = getattr(lean_rewards, "reward_contract", None)
+    shared_names = getattr(reward_contract, "MANAGER_NAMES", None)
+    shared_count = getattr(reward_contract, "REWARD_TERM_COUNT", None)
     names = (
         installed_graph.get("ordered_manager_names")
         if type(installed_graph) is dict
@@ -5150,18 +5153,21 @@ def _diagnostic_full_mdp_racket_guidance_contract(installed_graph: dict) -> dict
         or installed_graph.get("no_receipt_or_sha_authority") is not True
         or type(expected_names) is not tuple
         or type(expected_count) is not int
-        or expected_count != 20
+        or type(shared_names) is not tuple
+        or type(shared_count) is not int
+        or expected_names != shared_names
+        or expected_count != shared_count
         or len(expected_names) != expected_count
         or type(names) is not list
         or tuple(names) != expected_names
     ):
         raise RuntimeError(
             "[train.py] diagnostic racket guidance is not covered by the "
-            "exact installed Lean 20-term Reward graph"
+            "exact installed shared Reward graph"
         )
     return {
-        "schema_version": 2,
-        "kind": "action_ball_full_mdp_racket_guidance_in_lean_reward20_v2",
+        "schema_version": 3,
+        "kind": "action_ball_full_mdp_racket_guidance_in_shared_reward_v3",
         "covered_by_reward_graph_kind": installed_graph["kind"],
         "ordered_manager_names": list(expected_names),
         "diagnostic_unauthorized": True,
@@ -15106,11 +15112,24 @@ _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_CFG_KEY = (
 _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_KIND = (
     "a3_default_stand_zero_head_v1"
 )
-_ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD = 0.02
 _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM = 31
 _ACTION_BALL_FULL_MDP_DIAGNOSTIC_JOINT_SAFETY_MODE = (
     "diagnostic_compact_two_phase_update_v1"
 )
+
+
+def _action_ball_full_mdp_policy_bootstrap_from_ppo_recipe() -> dict:
+    """Project the typed PPO policy prior into the bootstrap wire shape."""
+
+    recipe = (
+        _action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
+    return {
+        "kind": _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_KIND,
+        "init_noise_std": recipe.init_noise_std,
+        "noise_std_type": recipe.noise_std_type,
+    }
 
 
 def _resolve_training_num_envs(
@@ -15191,8 +15210,15 @@ def _configure_action_ball_full_mdp_joint_safety_evidence(
 _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER = (
     "action_ball_full_mdp_lean_reward_graph"
 )
+
+
 def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
     """Validate the code-owned default-stand bootstrap without self-hashing it."""
+
+    recipe = (
+        _action_ball_full_mdp_ppo_recipe_module()
+        .ACTION_BALL_FULL_MDP_PPO_RECIPE
+    )
 
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
@@ -15260,13 +15286,15 @@ def _validate_action_ball_full_mdp_policy_bootstrap_contract(value) -> dict:
         or len(bias) != _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM
         or any(type(item) not in (int, float) or float(item) != 0.0 for item in bias)
         or initialization["init_noise_std"]
-        != _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD
+        != recipe.init_noise_std
         or initialization["required_realized_init_noise_std"]
-        != _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD
-        or initialization["noise_std_type"] != "log"
+        != recipe.init_noise_std
+        or initialization["noise_std_type"] != recipe.noise_std_type
     ):
         raise RuntimeError(
-            "fresh full-MDP policy bootstrap must be zero-head exact log_std=0.02"
+            "fresh full-MDP policy bootstrap must be zero-head exact "
+            f"{recipe.noise_std_type}_std={recipe.init_noise_std!r} from "
+            f"{recipe.kind}"
         )
     return copy.deepcopy(value)
 
@@ -15278,13 +15306,12 @@ def _action_ball_full_mdp_policy_bootstrap_contract(
 
     import torch
 
-    resolved = _resolve_action_ball_full_mdp_policy_bootstrap_config(
-        {
-            _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_CFG_KEY: bootstrap_config,
-            _ACTION_BALL_FULL_MDP_RUNTIME_FLAG: True,
-        },
-        requested=True,
-    )
+    resolved = _action_ball_full_mdp_policy_bootstrap_from_ppo_recipe()
+    if type(bootstrap_config) is not dict or bootstrap_config != resolved:
+        raise RuntimeError(
+            "fresh full-MDP resolved policy bootstrap differs from its typed "
+            "PPO recipe"
+        )
     try:
         action = env.action_manager.get_term("joint_pos")
         robot = env.scene["robot"]
@@ -15379,7 +15406,7 @@ def _action_ball_full_mdp_policy_bootstrap_contract(
         or policy_cfg.get("init_noise_std") != resolved["init_noise_std"]
     ):
         raise RuntimeError(
-            "fresh full-MDP runner policy differs from exact log_std=0.02 config"
+            "fresh full-MDP runner policy differs from exact typed PPO recipe"
         )
     contract = {
         "schema_version": 1,
@@ -15404,11 +15431,9 @@ def _action_ball_full_mdp_policy_bootstrap_contract(
                 0.0
             ]
             * _ACTION_BALL_FULL_MDP_POLICY_ACTION_DIM,
-            "init_noise_std": _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD,
-            "noise_std_type": "log",
-            "required_realized_init_noise_std": (
-                _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD
-            ),
+            "init_noise_std": resolved["init_noise_std"],
+            "noise_std_type": resolved["noise_std_type"],
+            "required_realized_init_noise_std": resolved["init_noise_std"],
         },
     }
     return _validate_action_ball_full_mdp_policy_bootstrap_contract(contract)
@@ -15447,9 +15472,11 @@ def _inspect_action_ball_full_mdp_policy_bootstrap_runtime(
         raise RuntimeError(
             "fresh full-MDP actor output does not match the 31-D contract"
         )
-    if getattr(policy, "noise_std_type", None) != "log":
+    required_noise_std_type = contract["initialization"]["noise_std_type"]
+    if getattr(policy, "noise_std_type", None) != required_noise_std_type:
         raise RuntimeError(
-            "fresh full-MDP runtime policy noise parameterization is not log"
+            "fresh full-MDP runtime policy noise parameterization differs from "
+            "its typed recipe"
         )
     log_std = getattr(policy, "log_std", None)
     if not torch.is_tensor(log_std) or list(log_std.shape) != [action_dim]:
@@ -15466,7 +15493,8 @@ def _inspect_action_ball_full_mdp_policy_bootstrap_runtime(
     if require_initial_values:
         expected_bias = torch.zeros_like(output.bias)
         expected_std = torch.full_like(
-            actual_std, _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD
+            actual_std,
+            contract["initialization"]["required_realized_init_noise_std"],
         )
         if (
             int(torch.count_nonzero(output.weight).item()) != 0
@@ -15476,7 +15504,8 @@ def _inspect_action_ball_full_mdp_policy_bootstrap_runtime(
             )
         ):
             raise RuntimeError(
-                "fresh full-MDP runtime policy differs from zero-head log_std=0.02"
+                "fresh full-MDP runtime policy differs from zero-head "
+                "typed-recipe bootstrap"
             )
     summary = torch.stack(
         (actual_std.min(), actual_std.mean(), actual_std.max())
@@ -15542,9 +15571,9 @@ def _apply_action_ball_full_mdp_fresh_policy_bootstrap(
                 "kind": _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_KIND,
                 "applied_fresh": True,
                 "configured_init_noise_std": (
-                    _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD
+                    contract["initialization"]["init_noise_std"]
                 ),
-                "noise_std_type": "log",
+                "noise_std_type": contract["initialization"]["noise_std_type"],
                 **facts,
             },
             allow_nan=False,
@@ -15691,7 +15720,7 @@ def _resolve_action_ball_full_mdp_installed_reward_graph(
     pre_gym_binding,
     runtime_env,
 ) -> dict | None:
-    """Authenticate the installed 20-manager/14-payment Lean Reward graph.
+    """Authenticate the installed shared-manager/14-payment Lean Reward graph.
 
     The returned dictionary is a non-capability status copied from the
     factory's authenticated view.  It is deliberately not shaped like the
@@ -15735,15 +15764,24 @@ def _resolve_action_ball_full_mdp_installed_reward_graph(
     profile_kind = getattr(
         lean_rewards, "DIAGNOSTIC_N2_REWARD_PROFILE_KIND", None
     )
+    reward_contract = getattr(lean_rewards, "reward_contract", None)
+    shared_names = getattr(reward_contract, "MANAGER_NAMES", None)
+    shared_count = getattr(reward_contract, "REWARD_TERM_COUNT", None)
+    shared_lifecycle_count = getattr(
+        reward_contract, "LIFECYCLE_PAYMENT_COUNT", None
+    )
     if (
         type(graph_type) is not type
         or graph_attr != _ACTION_BALL_FULL_MDP_LEAN_REWARD_GRAPH_GETTER
         or type(manager_names) is not tuple
+        or type(shared_names) is not tuple
         or type(payment_consumers) is not tuple
         or type(lifecycle_payment_count) is not int
-        or lifecycle_payment_count != 14
+        or lifecycle_payment_count != shared_lifecycle_count
         or type(manager_term_count) is not int
-        or manager_term_count != 20
+        or type(shared_count) is not int
+        or manager_names != shared_names
+        or manager_term_count != shared_count
         or len(manager_names) != manager_term_count
         or len(payment_consumers) != lifecycle_payment_count
         or len(set(manager_names)) != manager_term_count
@@ -15768,7 +15806,7 @@ def _resolve_action_ball_full_mdp_installed_reward_graph(
         is not True
         or getattr(lean_rewards, "LAUNCH_AUTHORIZED", None) is not False
         or profile_kind
-        != "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
+        != "action_ball_full_mdp_diagnostic_n2_reward_profile_v3"
     ):
         raise RuntimeError(
             "[train.py] diagnostic lean Reward module ABI differs"
@@ -16079,35 +16117,16 @@ def _resolve_action_ball_full_mdp_policy_bootstrap_config(
         )
     _check_unknown_keys(
         raw,
-        ("kind", "init_noise_std", "noise_std_type"),
+        ("kind",),
         "task.action_ball_full_mdp_policy_bootstrap",
     )
     kind = _get(raw, "kind")
-    noise = _get(raw, "init_noise_std")
-    noise_std_type = _get(raw, "noise_std_type")
     if kind != _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_KIND:
         raise _OverrideError(
             "fresh full-MDP policy bootstrap kind must be exactly "
             f"{_ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_KIND!r}"
         )
-    if (
-        isinstance(noise, bool)
-        or not isinstance(noise, (int, float))
-        or not math.isfinite(float(noise))
-        or float(noise) != _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD
-    ):
-        raise _OverrideError(
-            "fresh full-MDP policy bootstrap init_noise_std must be exactly 0.02"
-        )
-    if noise_std_type != "log":
-        raise _OverrideError(
-            "fresh full-MDP policy bootstrap noise_std_type must be exactly 'log'"
-        )
-    return {
-        "kind": _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_KIND,
-        "init_noise_std": _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_STD,
-        "noise_std_type": "log",
-    }
+    return _action_ball_full_mdp_policy_bootstrap_from_ppo_recipe()
 
 
 def _apply_action_ball_full_mdp_policy_algo_config(
@@ -16117,13 +16136,12 @@ def _apply_action_ball_full_mdp_policy_algo_config(
 
     if bootstrap_config is None:
         return
-    resolved = _resolve_action_ball_full_mdp_policy_bootstrap_config(
-        {
-            _ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_CFG_KEY: bootstrap_config,
-            _ACTION_BALL_FULL_MDP_RUNTIME_FLAG: True,
-        },
-        requested=True,
-    )
+    resolved = _action_ball_full_mdp_policy_bootstrap_from_ppo_recipe()
+    if type(bootstrap_config) is not dict or bootstrap_config != resolved:
+        raise _OverrideError(
+            "fresh full-MDP resolved policy bootstrap differs from its typed "
+            "PPO recipe"
+        )
     policy = algo.get("policy") if isinstance(algo, dict) else None
     if not isinstance(policy, dict):
         raise _OverrideError(
@@ -16136,14 +16154,14 @@ def _apply_action_ball_full_mdp_policy_algo_config(
 def _apply_action_ball_full_mdp_ppo_recipe(
     algo: dict, *, requested: bool
 ):
-    """Replace only a FullMDP run's legacy PPO defaults with typed V2."""
+    """Replace only a FullMDP run's legacy PPO defaults with typed V4."""
 
     if type(requested) is not bool:
         raise TypeError("FullMDP PPO recipe selection must be an exact bool")
     if not requested:
         return None
     if not isinstance(algo, dict):
-        raise _OverrideError("FullMDP PPO V3 requires cfg.algo to be a mapping")
+        raise _OverrideError("FullMDP PPO V4 requires cfg.algo to be a mapping")
     recipe = (
         _action_ball_full_mdp_ppo_recipe_module()
         .ACTION_BALL_FULL_MDP_PPO_RECIPE
@@ -16189,7 +16207,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
             )
         if root_iterations != recipe.max_iterations:
             raise _OverrideError(
-                "FullMDP PPO V3 max_iterations is code-owned at "
+                "FullMDP PPO V4 max_iterations is code-owned at "
                 f"{recipe.max_iterations}; got root max_iterations="
                 f"{root_iterations}"
             )
@@ -16210,7 +16228,7 @@ def _preflight_action_ball_full_mdp_ppo_cli(cfg) -> None:
             conflicts.append(key)
     if conflicts:
         raise _OverrideError(
-            "FullMDP PPO V3 has one typed recipe; nested Hydra PPO overrides "
+            "FullMDP PPO V4 has one typed recipe; nested Hydra PPO overrides "
             "would be silently replaced: " + ",".join(sorted(set(conflicts)))
         )
 
@@ -20372,8 +20390,10 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
     if action_ball_full_mdp_policy_bootstrap_config is not None:
         print(
             "[train.py] full-MDP policy config: "
-            "kind=a3_default_stand_zero_head_v1 "
-            "init_noise_std=0.02 noise_std_type=log",
+            f"kind={action_ball_full_mdp_policy_bootstrap_config['kind']} "
+            "init_noise_std="
+            f"{action_ball_full_mdp_ppo_recipe.init_noise_std!r} "
+            f"noise_std_type={action_ball_full_mdp_ppo_recipe.noise_std_type}",
             flush=True,
         )
     agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(algo, str(cfg.task.experiment_name)))
@@ -20387,7 +20407,7 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
             != action_ball_full_mdp_ppo_recipe.max_iterations
         ):
             raise _OverrideError(
-                "FullMDP PPO V3 max_iterations is code-owned at "
+                "FullMDP PPO V4 max_iterations is code-owned at "
                 f"{action_ball_full_mdp_ppo_recipe.max_iterations}; got "
                 f"root max_iterations={requested_iterations}"
             )
@@ -21044,8 +21064,12 @@ def _run_with_environment_close_owner(cfg, environment_close_owner):
         )
         print(
             "[train.py] full-MDP policy bootstrap validated: "
-            "kind=a3_default_stand_zero_head_v1 action_dim=31 "
-            "init_noise_std=0.02 noise_std_type=log",
+            f"kind={action_ball_full_mdp_policy_bootstrap['kind']} "
+            f"action_dim={action_ball_full_mdp_policy_bootstrap['actor_output_dim']} "
+            "init_noise_std="
+            f"{action_ball_full_mdp_policy_bootstrap['initialization']['init_noise_std']!r} "
+            "noise_std_type="
+            f"{action_ball_full_mdp_policy_bootstrap['initialization']['noise_std_type']}",
             flush=True,
         )
 

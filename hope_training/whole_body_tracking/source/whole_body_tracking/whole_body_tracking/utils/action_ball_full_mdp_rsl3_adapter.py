@@ -1033,8 +1033,7 @@ class ActionBallFullMdpRsl3Adapter:
                 + "\n"
             )
             pending_start, pending_end = self._append(pending_line)
-            if self._ack(boundary, summary, update_index=update_index) is not summary:
-                raise RuntimeError("single_action_lean owner changed ACK summary identity")
+            self._ack(boundary, summary, update_index=update_index)
             if (
                 safety_pending is not self._safety_pending
                 or safety_pending["term"] is not self._safety_term
@@ -1128,7 +1127,6 @@ class ActionBallFullMdpRsl3Runner(OnPolicyRunner):
         )
         runtime_env = getattr(env, "unwrapped", env)
         observation_identity = _validate_observation_identity(runtime_env)
-        _bound(action_ball_full_mdp_runtime_owner, "require_healthy")()
         self.training_contract_schema_version = contract_schema
         self.training_contract_sha256 = contract_sha256
         self._full_mdp_observation_identity = observation_identity

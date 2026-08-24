@@ -1279,16 +1279,8 @@ def _full_mdp_schema3_contract():
         "r06:post_contact_placement_guidance",
         "r07:common_recovery_reward_v1",
     ]
-    managers = [name.split(":", 1)[1] for name in consumers]
-    managers.extend(
-        [
-            "motion_global_anchor_pos",
-            "motion_global_anchor_ori",
-            "motion_body_pos",
-            "motion_body_ori",
-            "motion_body_lin_vel",
-            "motion_body_ang_vel",
-        ]
+    managers = list(
+        TC._action_ball_full_mdp_reward_contract_module().MANAGER_NAMES
     )
     contract.update(
         {
@@ -1309,7 +1301,7 @@ def _full_mdp_schema3_contract():
                 "schema_version": 1,
                 "kind": "action_ball_epoch_lean_reward_graph_v1",
                 "profile_kind": (
-                    "action_ball_full_mdp_diagnostic_n2_reward_profile_v2"
+                    "action_ball_full_mdp_diagnostic_n2_reward_profile_v3"
                 ),
                 "ordered_manager_names": managers,
                 "ordered_payment_consumers": consumers,

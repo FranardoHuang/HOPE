@@ -4,7 +4,7 @@ import copy
 from dataclasses import dataclass
 import hashlib, importlib.util, json, math, os, re, sys
 from pathlib import Path
-SCHEMA_VERSION, REWARD_TERM_COUNT = 6, 20
+SCHEMA_VERSION = 9
 
 EXACT_RUNTIME_STACK = {
     "schema_version": 1,
@@ -49,17 +49,16 @@ EXACT_RUNTIME_STACK = {
 }
 
 
-def _plant_contract_module():
-    source = Path(__file__).with_name("mujoco_full_mdp_plant_contract.py").resolve()
-    name = "_hope_mujoco_full_mdp_plant_contract"
+def _load_pinned_local_module(*, source: Path, name: str, subject: str):
+    """Load one origin-pinned local module without caching failed imports."""
     cached = sys.modules.get(name)
     if cached is not None:
         if Path(getattr(cached, "__file__", "")).resolve() != source:
-            raise RuntimeError("cached MuJoCo plant contract origin differs")
+            raise RuntimeError(f"cached {subject} origin differs")
         return cached
     spec = importlib.util.spec_from_file_location(name, source)
     if spec is None or spec.loader is None:
-        raise RuntimeError("cannot load MuJoCo plant contract")
+        raise RuntimeError(f"cannot load {subject}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     try:
@@ -68,6 +67,103 @@ def _plant_contract_module():
         sys.modules.pop(name, None)
         raise
     return module
+
+
+def _plant_contract_module():
+    return _load_pinned_local_module(
+        source=Path(__file__).with_name(
+            "mujoco_full_mdp_plant_contract.py"
+        ).resolve(),
+        name="_hope_mujoco_full_mdp_plant_contract",
+        subject="MuJoCo plant contract",
+    )
+
+
+def _reward_contract_module():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_reward_contract.py"
+    ).resolve()
+    return _load_pinned_local_module(
+        source=source,
+        name="_hope_mujoco_ledger_action_ball_full_mdp_reward_contract",
+        subject="FullMDP reward contract",
+    )
+
+
+def _portable_catalog_module():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_portable_catalog.py"
+    ).resolve()
+    return _load_pinned_local_module(
+        source=source,
+        name="_hope_mujoco_ledger_action_ball_full_mdp_portable_catalog",
+        subject="FullMDP portable catalog",
+    )
+
+
+def _exact_reward_contract() -> tuple[tuple[str, ...], int]:
+    contract = _reward_contract_module()
+    names = getattr(contract, "MANAGER_NAMES", None)
+    count = getattr(contract, "REWARD_TERM_COUNT", None)
+    if (
+        type(names) is not tuple
+        or not names
+        or any(type(name) is not str or not name for name in names)
+        or len(set(names)) != len(names)
+        or type(count) is not int
+        or count != len(names)
+    ):
+        raise RuntimeError("FullMDP reward contract differs")
+    return names, count
+
+
+REWARD_TERM_NAMES, REWARD_TERM_COUNT = _exact_reward_contract()
+
+
+def _exact_paddle_prior_contract():
+    contract = _reward_contract_module()
+    specs = getattr(contract, "PADDLE_MOTION_PRIOR_SPECS", None)
+    if type(specs) is not tuple or not specs:
+        raise RuntimeError("FullMDP paddle prior contract differs")
+    names = tuple(spec.manager_name for spec in specs)
+    weights = tuple(float(spec.manager_weight) for spec in specs)
+    start = REWARD_TERM_COUNT - len(names)
+    if (
+        REWARD_TERM_NAMES[start:] != names
+        or any(
+            not math.isfinite(value) or value <= 0.0
+            for value in weights
+        )
+    ):
+        raise RuntimeError("FullMDP paddle prior contract differs")
+    return names, weights, start
+
+
+(
+    PADDLE_PRIOR_TERM_NAMES,
+    PADDLE_PRIOR_WEIGHTS,
+    PADDLE_PRIOR_TERM_START,
+) = _exact_paddle_prior_contract()
+PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
+FULLMDP_POLICY_STEP_S = float(
+    _portable_catalog_module().FRESH_POLICY_STEP_S
+)
+if not math.isfinite(FULLMDP_POLICY_STEP_S) or FULLMDP_POLICY_STEP_S <= 0.0:
+    raise RuntimeError("FullMDP policy step differs")
 EXACT_TERMINATION_BITS = {
     "time_out": 1, "base_fell_tilt": 2, "base_too_low": 4,
     "joint_qdes_forbidden": 8, "robot_hit_table": 16,
@@ -104,15 +200,17 @@ FACT_INTEGRITY_COUNT_NAMES = tuple(
     name for name, _bit in FACT_INTEGRITY_CAUSES
 ) + ("fact_integrity_unknown_bits_rows",)
 FACT_INTEGRITY_KNOWN_MASK = sum(bit for _name, bit in FACT_INTEGRITY_CAUSES)
-_MISC_NAMES = (
+LIFECYCLE_COUNT_NAMES = (
     "gym_reset_rows", "unknown_terminal_rows", "invalid_done_rows",
     "done_explanation_fault_rows", "time_out_rows", "timeout_fault_rows",
     "selected_reset_fault_rows", "reset_generation_rows",
     "reset_generation_fault_rows", "resolved_table_rows",
     "landing_on_opponent_rows", "landing_opponent_bound_rows",
-    "classification_unknown_rows", "event_semantics_fault_rows",
-    "reward20_finite_rows",
-    "reward20_nonfinite_rows", "actual_reward_finite_rows",
+    "classification_unknown_rows",
+)
+_MISC_NAMES = LIFECYCLE_COUNT_NAMES + (
+    "reward_terms_finite_rows",
+    "reward_terms_nonfinite_rows", "actual_reward_finite_rows",
     "actual_reward_nonfinite_rows", "conservation_fault_rows", "slot0_rows",
     "uid_rows", "mount_sign_rows", "identity_rows",
     "outcome_unknown_rows", "outcome_event_code_fault_rows",
@@ -122,8 +220,8 @@ _MISC_NAMES = (
 _ZERO_FAULTS = (
     "unknown_terminal_rows", "invalid_done_rows", "done_explanation_fault_rows",
     "timeout_fault_rows", "selected_reset_fault_rows", "reset_generation_fault_rows",
-    "classification_unknown_rows", "reward20_nonfinite_rows", "actual_reward_nonfinite_rows",
-    "conservation_fault_rows", "event_semantics_fault_rows",
+    "classification_unknown_rows", "reward_terms_nonfinite_rows", "actual_reward_nonfinite_rows",
+    "conservation_fault_rows",
     "outcome_unknown_rows", "outcome_event_code_fault_rows",
     "phase_unknown_rows",
     *FACT_INTEGRITY_COUNT_NAMES,
@@ -247,6 +345,21 @@ class FullMdpUpdateLedger:
             torch.zeros(size, dtype=torch.float64, device=device) for size in counters)
         self._episode_return = torch.zeros(num_envs, dtype=torch.float64, device=device)
         self._episode_length = torch.zeros(num_envs, dtype=torch.long, device=device)
+        self._paddle_playback_rows = torch.zeros(
+            1, dtype=torch.float64, device=device
+        )
+        # Rows: finite count, raw kernel sum/sumsq, domain-violation count.
+        self._paddle_playback_stats = torch.zeros(
+            (4, PADDLE_PRIOR_TERM_COUNT), dtype=torch.float64, device=device
+        )
+        self._paddle_max_payment = torch.tensor(
+            [
+                weight * FULLMDP_POLICY_STEP_S
+                for weight in PADDLE_PRIOR_WEIGHTS
+            ],
+            dtype=torch.float64,
+            device=device,
+        )
         self._steps, self._faults, self._next, self._token = 0, set(), 0, 0
         self._pending = None
         self._last_run_elapsed_seconds = 0.0
@@ -290,6 +403,9 @@ class FullMdpUpdateLedger:
         fact_integrity_bits = self._vector(
             extras, "full_a_fact_integrity_fault_bits", torch.long
         )
+        paddle_playback = self._vector(
+            extras, "full_a_paddle_prior_playback", torch.bool
+        )
         fact_integrity = {
             name: torch.bitwise_and(fact_integrity_bits, bit).ne(0)
             for name, bit in FACT_INTEGRITY_CAUSES
@@ -323,111 +439,7 @@ class FullMdpUpdateLedger:
             timeout_bit & bits.ne(self.time_out_bit)
         )
         identity = slot.eq(0) & uid.eq(self.action_uid) & sign.eq(self.mount_normal_sign)
-        classified = torch.stack(
-            [event[name] for name in (
-                "selected_contact_rows", "opposite_contact_rows",
-                "edge_contact_rows", "between_contact_rows",
-                "invalid_contact_rows",
-            )]
-        )
-        classified_count = classified.sum(dim=0, dtype=torch.long)
-        expected_status = (
-            event["selected_contact_rows"].to(torch.int8)
-            + event["opposite_contact_rows"].to(torch.int8) * 2
-            + event["edge_contact_rows"].to(torch.int8) * 3
-            + event["between_contact_rows"].to(torch.int8) * 4
-            + event["invalid_contact_rows"].to(torch.int8) * 5
-        )
-        recovery_count = torch.stack(
-            [event[name] for name in (
-                "recovery_success_rows", "recovery_failure_rows",
-                "recovery_timeout_rows",
-            )]
-        ).sum(dim=0, dtype=torch.long)
-        natural_recovery = event["recovery_success_rows"] | event["recovery_timeout_rows"]
-        completion_fault = event["recovery_completion_fault_rows"]
-        phase2, phase5, phase6, phase8 = (phase.eq(code) for code in (2, 5, 6, 8))
         outcome_event = event["flight_terminal_rows"]
-        shot_retired = event["shot_retired_rows"]
-        retired_reveal = (
-            shot_retired & event["reveal_rows"] & phase2
-        )
-        post_contact_phase = phase5 | phase6 | shot_retired
-        outcome_phase = phase6 | shot_retired
-        legal_outcome = outcome.eq(3)
-        own_table_outcome = outcome.eq(4)
-        event_semantics_fault = (
-            classified_count.ne(event["racket_contact_rows"].to(torch.long))
-            | status.ne(expected_status)
-            | (
-                event["invalid_contact_rows"]
-                & ~fact_integrity[
-                    "fact_integrity_r06_source_invalid_rows"
-                ]
-            )
-            | (event["r03_physically_valid_rows"] & ~event["r03_present_rows"])
-            | (event["landing_crossing_rows"] & ~event["flight_terminal_rows"])
-            | event["r06_present_rows"].ne(event["flight_terminal_rows"])
-            | (event["r06_eligible_rows"] & ~event["r06_present_rows"])
-            | (event["r06_common_rows"] & ~event["r06_eligible_rows"])
-            | (event["r07_eligible_rows"] & ~event["r07_present_rows"])
-            | recovery_count.gt(1)
-            | event["reveal_due_rows"].ne(
-                event["reveal_rows"] | event["reveal_deferred_rows"]
-            )
-            | event["scheduled_due_rows"].ne(
-                event["reveal_due_rows"]
-                | event["due_terminal_overlap_rows"]
-            )
-            | event["due_terminal_overlap_rows"].ne(
-                event["scheduled_due_rows"] & done
-            )
-            | (event["reveal_due_rows"] & done)
-            | (event["reveal_rows"] & event["reveal_deferred_rows"])
-            | (event["reveal_rows"] & ~phase2)
-            | (event["reveal_deferred_rows"] & (phase.eq(0) | phase8))
-            | (event["launch_rows"] & ~(phase5 | outcome_event))
-            | (
-                (event["racket_contact_rows"] | event["r03_present_rows"])
-                & ~post_contact_phase
-            )
-            # The phase field is the final post-boundary phase.  A retiring
-            # old shot may publish its terminal/R06/R07 marginals and be
-            # atomically replaced by a new reveal on the same surviving row.
-            | (outcome_event & ~outcome_phase)
-            | (
-                event["r06_present_rows"]
-                & ~outcome_phase
-            )
-            | (
-                event["r07_present_rows"]
-                & ~outcome_phase
-            )
-            | event["shot_retired_rows"].ne(
-                natural_recovery
-                | (
-                    event["invalid_contact_rows"]
-                    & ~completion_fault
-                    & ~done
-                )
-            )
-            | (event["completed_action_epoch_rows"] & ~event["shot_retired_rows"])
-            | (
-                event["recovery_failure_rows"]
-                & ~(done | event["invalid_contact_rows"])
-            )
-            | (natural_recovery & done)
-            | (outcome_event & natural_recovery)
-            | (
-                event["shot_retired_rows"]
-                & (~(phase8 | retired_reveal) | done)
-            )
-            | selected_reset.ne(done)
-            | (outcome_event & outcome.eq(0))
-            | (outcome_event & legal_outcome & ~(landing & opponent_bound))
-            | (outcome_event & legal_outcome & ~event["landing_crossing_rows"])
-            | (outcome_event & own_table_outcome & ~event["landing_crossing_rows"])
-        )
         self._event += torch.stack(events).sum(1, dtype=torch.float64)
         self._terminal += torch.stack(
             [torch.bitwise_and(bits, bit).ne(0) for _name, bit in self.term_bits]
@@ -447,7 +459,7 @@ class FullMdpUpdateLedger:
                 time_outs, timeout_fault, selected_reset.ne(done),
                 generation_delta, generation_delta.ne(done.to(torch.long)),
                 resolved, landing & landing_event, opponent_bound & landing_event,
-                status.lt(0) | status.gt(5), event_semantics_fault,
+                status.lt(0) | status.gt(5),
                 terms_finite, ~terms_finite, actual_finite, ~actual_finite, ~conserved,
                 slot.eq(0), uid.eq(self.action_uid), sign.eq(self.mount_normal_sign),
                 identity, outcome.lt(0) | outcome.gt(6), outcome_event & outcome.eq(0),
@@ -465,6 +477,34 @@ class FullMdpUpdateLedger:
         ).sum(1, dtype=torch.float64)
         self._reward += torch.where(torch.isfinite(terms), terms,
                                     torch.zeros_like(terms)).sum(0, dtype=torch.float64)
+        paddle_terms = terms[
+            :,
+            PADDLE_PRIOR_TERM_START : (
+                PADDLE_PRIOR_TERM_START + PADDLE_PRIOR_TERM_COUNT
+            ),
+        ].to(dtype=torch.float64)
+        paddle_kernel = paddle_terms / self._paddle_max_payment
+        paddle_finite = (
+            paddle_playback[:, None]
+            & torch.isfinite(paddle_kernel)
+        )
+        finite_kernel = torch.where(
+            paddle_finite, paddle_kernel, torch.zeros_like(paddle_kernel)
+        )
+        paddle_domain_violation = paddle_finite & (
+            paddle_kernel.lt(0.0) | paddle_kernel.gt(1.0)
+        )
+        self._paddle_playback_rows += paddle_playback.sum(
+            dtype=torch.float64
+        )
+        self._paddle_playback_stats += torch.stack(
+            (
+                paddle_finite.sum(0, dtype=torch.float64),
+                finite_kernel.sum(0),
+                torch.square(finite_kernel).sum(0),
+                paddle_domain_violation.sum(0, dtype=torch.float64),
+            )
+        )
         self._actual += torch.where(actual_finite, actual,
                                     torch.zeros_like(actual)).sum(0, dtype=torch.float64)
         safe_actual = torch.where(actual_finite, actual,
@@ -526,6 +566,8 @@ class FullMdpUpdateLedger:
         host = torch.cat(
             (self._event, self._terminal, self._classification, self._outcome,
              self._phase, self._misc, self._reward, self._actual,
+             self._paddle_playback_rows,
+             self._paddle_playback_stats.reshape(-1),
              self._episode, storage_finite, storage_domains, policy_summary)
         ).cpu()
         values = host.tolist()
@@ -539,6 +581,20 @@ class FullMdpUpdateLedger:
         misc_values = take(len(_MISC_NAMES)); cursor += len(_MISC_NAMES)
         reward_values = take(REWARD_TERM_COUNT); cursor += REWARD_TERM_COUNT
         actual_sum = values[cursor]; cursor += 1
+        paddle_playback_rows = values[cursor]; cursor += 1
+        paddle_stat_width = 4 * PADDLE_PRIOR_TERM_COUNT
+        paddle_stats = values[cursor:cursor + paddle_stat_width]
+        cursor += paddle_stat_width
+        paddle_finite = paddle_stats[:PADDLE_PRIOR_TERM_COUNT]
+        paddle_kernel_sum = paddle_stats[
+            PADDLE_PRIOR_TERM_COUNT : 2 * PADDLE_PRIOR_TERM_COUNT
+        ]
+        paddle_kernel_sumsq = paddle_stats[
+            2 * PADDLE_PRIOR_TERM_COUNT : 3 * PADDLE_PRIOR_TERM_COUNT
+        ]
+        paddle_domain_violation = paddle_stats[
+            3 * PADDLE_PRIOR_TERM_COUNT : 4 * PADDLE_PRIOR_TERM_COUNT
+        ]
         episode_values = values[cursor:cursor + 3]; cursor += 3
         storage_values = values[cursor:cursor + len(storage_names)]
         cursor += len(storage_names)
@@ -574,7 +630,7 @@ class FullMdpUpdateLedger:
             "missed_launch_rows", "recovery_completion_fault_rows",
         ) if events[name] != 0]
         if bad or bad_events or any(misc[name] != transitions for name in (
-            "reward20_finite_rows", "actual_reward_finite_rows",
+            "reward_terms_finite_rows", "actual_reward_finite_rows",
             "slot0_rows", "uid_rows", "identity_rows",
         )):
             details = (
@@ -611,16 +667,30 @@ class FullMdpUpdateLedger:
                          "length_sum": int(episode_values[2])},
             "rollout_policy_mean_std": float(policy_mean_std),
             "selected_reset_rows": events["selected_reset_rows"], "gym_reset_rows": misc["gym_reset_rows"],
-            "lifecycle_counts": {name: misc[name] for name in _MISC_NAMES[:14]},
+            "lifecycle_counts": {
+                name: misc[name] for name in LIFECYCLE_COUNT_NAMES
+            },
             "fact_integrity_counts": {
                 name: misc[name] for name in FACT_INTEGRITY_COUNT_NAMES
             },
-            "reward20": {
+            "reward_graph": {
+                "term_names": list(REWARD_TERM_NAMES),
+                "term_count": REWARD_TERM_COUNT,
                 "term_sums": reward_values,
                 "actual_reward_sum": actual_sum,
-                **{name: misc[name] for name in ("reward20_finite_rows",
-                    "reward20_nonfinite_rows", "actual_reward_finite_rows",
+                **{name: misc[name] for name in ("reward_terms_finite_rows",
+                    "reward_terms_nonfinite_rows", "actual_reward_finite_rows",
                     "actual_reward_nonfinite_rows", "conservation_fault_rows")},
+                "playback_paddle_prior": {
+                    "term_names": list(PADDLE_PRIOR_TERM_NAMES),
+                    "row_count": int(paddle_playback_rows),
+                    "finite_rows": [int(value) for value in paddle_finite],
+                    "kernel_sum": paddle_kernel_sum,
+                    "kernel_sumsq": paddle_kernel_sumsq,
+                    "domain_violation_rows": [
+                        int(value) for value in paddle_domain_violation
+                    ],
+                },
             },
             "action_identity": {
                 "action_slot": 0, "action_uid": self.action_uid,
@@ -694,6 +764,7 @@ class FullMdpUpdateLedger:
         for tensor in (
             self._event, self._terminal, self._classification, self._outcome,
             self._phase, self._misc, self._reward, self._actual, self._episode,
+            self._paddle_playback_rows, self._paddle_playback_stats,
         ):
             tensor.zero_()
         self._steps, self._faults, self._pending = 0, set(), None

@@ -936,7 +936,7 @@ def test_fresh_cfg_scene_is_frozen_and_refuses_a_duplicate_pre_env_attach():
     ) == spec.scene_entity_names
 
 
-def test_reward_template_keeps_fourteen_lifecycle_and_appends_six_common_dense():
+def test_reward_template_matches_exact_shared_reward24_contract():
     pytest.importorskip("isaaclab")
     from whole_body_tracking.tasks.tracking.config.agibot_a3 import hope_env_cfg as H
     from whole_body_tracking.tasks.tracking import mdp
@@ -959,32 +959,24 @@ def test_reward_template_keeps_fourteen_lifecycle_and_appends_six_common_dense()
 
     terms = reward_cfg.terms
     assert mdp.EXPECTED_PAYMENT_COUNT == 14
-    assert len(terms) == 20
+    contract = H._full_mdp_reward_contract
+    assert len(terms) == contract.REWARD_TERM_COUNT == 24
     assert tuple(term.manager_name for term in terms) == (
-        "racket_position",
-        "racket_velocity",
-        "racket_normal",
-        "racket_position_coarse",
-        "racket_velocity_coarse",
-        "racket_normal_coarse",
-        "racket_position_precision",
-        "racket_velocity_precision",
-        "racket_normal_precision",
-        "paddle_center_proximity",
-        "physical_selected_contact",
-        "common_on_table_outcome",
-        "post_contact_placement_guidance",
-        "common_recovery_reward_v1",
-        "motion_global_anchor_pos",
-        "motion_global_anchor_ori",
-        "motion_body_pos",
-        "motion_body_ori",
-        "motion_body_lin_vel",
-        "motion_body_ang_vel",
-    ) == H.ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER
-    assert tuple(term.payment_consumer for term in terms[:14]) == mdp.ORDERED_CONSUMERS
-    assert tuple(term.payment_consumer for term in terms[14:]) == tuple(
-        f"common_dense:{term.manager_name}" for term in terms[14:]
+        H.ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER
+    )
+    assert H.ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER == contract.MANAGER_NAMES
+    lifecycle_count = contract.LIFECYCLE_PAYMENT_COUNT
+    common_end = lifecycle_count + len(contract.COMMON_DENSE_SPECS)
+    assert tuple(term.payment_consumer for term in terms[:lifecycle_count]) == mdp.ORDERED_CONSUMERS
+    assert tuple(
+        term.payment_consumer for term in terms[lifecycle_count:common_end]
+    ) == tuple(
+        f"common_dense:{term.manager_name}"
+        for term in terms[lifecycle_count:common_end]
+    )
+    assert tuple(term.payment_consumer for term in terms[common_end:]) == tuple(
+        f"paddle_motion_prior:{term.manager_name}"
+        for term in terms[common_end:]
     )
     assert tuple(term.func for term in terms) == (
         mdp.r03_racket_position,
@@ -1001,12 +993,14 @@ def test_reward_template_keeps_fourteen_lifecycle_and_appends_six_common_dense()
         mdp.r06_common_on_table_outcome,
         mdp.r06_post_contact_placement_guidance,
         mdp.r07_continuous_recovery,
-        mdp.motion_global_anchor_position_error_exp,
-        mdp.motion_global_anchor_orientation_error_exp,
-        mdp.motion_relative_body_position_error_exp,
-        mdp.motion_relative_body_orientation_error_exp,
-        mdp.motion_global_body_linear_velocity_error_exp,
-        mdp.motion_global_body_angular_velocity_error_exp,
+        *(
+            H._full_mdp_lean_rewards.common_dense_reward
+            for _ in contract.COMMON_DENSE_SPECS
+        ),
+        *(
+            H._full_mdp_lean_rewards.paddle_motion_prior_reward
+            for _ in contract.PADDLE_MOTION_PRIOR_SPECS
+        ),
     )
     assert tuple(term.owner_role for term in terms) == (
         *("r03_owner" for _ in range(10)),
@@ -1014,12 +1008,20 @@ def test_reward_template_keeps_fourteen_lifecycle_and_appends_six_common_dense()
         "r06_owner",
         "r06_owner",
         "r07_owner",
-        *("motion_owner" for _ in range(6)),
+        *(
+            "motion_owner"
+            for _ in (
+                contract.COMMON_DENSE_SPECS
+                + contract.PADDLE_MOTION_PRIOR_SPECS
+            )
+        ),
     )
-    assert tuple(term.manager_weight for term in terms[14:]) == (
-        0.5, 0.5, 1.0, 1.0, 1.0, 1.0
+    assert tuple(term.manager_weight for term in terms[lifecycle_count:]) == (
+        *(spec.manager_weight for spec in contract.COMMON_DENSE_SPECS),
+        *(spec.manager_weight for spec in contract.PADDLE_MOTION_PRIOR_SPECS),
     )
-    assert terms[14:] == H.ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
+    assert terms[lifecycle_count:common_end] == H.ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
+    assert terms[common_end:] == H.ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
 
     for term in terms[:13]:
         assert term.weight_source == H.ACTION_BALL_FULL_MDP_WEIGHT_SOURCE
@@ -1041,11 +1043,25 @@ def test_reward_template_keeps_fourteen_lifecycle_and_appends_six_common_dense()
     assert recovery.owner_weight_source.endswith(
         ".recovery.recovery_pose"
     )
-    for term in terms[14:]:
+    for ordinal, term in enumerate(terms[lifecycle_count:common_end], start=lifecycle_count):
         assert term.weight_source == H.ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE
         assert term.manager_weight > 0.0
         assert term.manager_weight_path is None
-        assert term.fixed_func_params[0] == ("command_name", "motion")
+        assert term.fixed_func_params[:2] == (
+            ("ordinal", ordinal),
+            ("command_name", "motion"),
+        )
+    for ordinal, term in enumerate(terms[common_end:], start=common_end):
+        assert term.weight_source == H.ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE
+        assert term.fixed_func_params[:2] == (
+            ("ordinal", ordinal),
+            ("command_name", "racket_target"),
+        )
+    assert contract.HELD_RACKET_WRIST_BODY_NAME not in H.ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES
+    for term in terms[lifecycle_count + 2 : common_end]:
+        assert dict(term.fixed_func_params)["body_names"] == H.ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES
+    for term in (*terms[lifecycle_count : lifecycle_count + 2], *terms[common_end:]):
+        assert "body_names" not in dict(term.fixed_func_params)
 
     forbidden = {
         "death_penalty",

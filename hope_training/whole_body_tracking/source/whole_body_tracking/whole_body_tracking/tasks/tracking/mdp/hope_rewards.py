@@ -287,39 +287,37 @@ def _strike_fact_device_tracking_payment(
 
 
 def _stage1_split_ready_wait_mask(cmd: RacketTargetCommand) -> torch.Tensor:
-    """Return the one public mask that selects the hidden-WAIT teacher."""
+    """Return Motion's sole row selector for the physical reset-ready teacher.
+
+    Both the legacy split-ready diagnostic and fresh FullMDP use Motion's
+    selector.  Rewards must not reconstruct the transition from task validity,
+    opportunity counters, hold clocks, or any other downstream fact: Motion
+    already owns the ready -> selected-frame-0 -> playback/completed-frame-0
+    state machine.
+    """
 
     motion = cmd._motion()
-    if not bool(
+    bridge_enabled = bool(
         getattr(motion, "action_ball_diagnostic_split_ready_teacher", False)
-    ):
-        return torch.zeros_like(motion.in_hold, dtype=torch.bool)
-    # Rewards and paddle observations may be the first reset-time consumers;
-    # do not depend on a preceding Motion command update or observation term.
-    capture = getattr(
-        motion, "_capture_action_ball_safe_ready_reference", None
+    ) or bool(
+        getattr(motion, "_action_ball_continuous_fresh_motion_lane_bound", False)
     )
-    if callable(capture):
-        capture()
-    task_valid = action_ball_task_valid_mask(cmd)
-    bound = getattr(motion, "_action_ball_public_task_valid", None)
-    owned = getattr(cmd, "_action_ball_task_valid", None)
-    if bound is None:
-        # 人话:Motion 侧还没绑定,只可能是 RacketTargetCommand.
-        # _install_action_ball_task_wait 一次都没跑过 —— 也就是 gym.make 里
-        # ObservationManager 探测观测维度的那次干调用(此时还没有任何 reset)。
-        # 这不是"两边各持一份张量",而是"还没有任何一行处在 WAIT"。Motion 自己的
-        # commands._action_ball_safe_ready_wait_mask 对同一个状态就是返回全 False,
-        # 奖励侧必须给出同一个答案,否则两边在构造期就自相矛盾,四格从 materialize
-        # 走到 recipe 一次都建不成环境。真正的分歧在下面照旧硬拒;真正跑到 reveal
-        # 却仍未绑定,commands.refresh_action_ball_revealed_body_reference 也照旧硬拒。
-        return torch.zeros_like(task_valid)
-    if bound is not owned:
+    if not bridge_enabled:
+        return torch.zeros_like(motion.in_hold, dtype=torch.bool)
+    selector = getattr(motion, "_action_ball_safe_ready_wait_mask", None)
+    if not callable(selector):
         raise RuntimeError(
-            "split-ready teacher requires Motion and Racket to share one "
-            "task_valid tensor"
+            "safe-ready paddle teacher requires Motion's unique row selector"
         )
-    return ~task_valid
+    wait = selector()
+    if (
+        not torch.is_tensor(wait)
+        or wait.dtype != torch.bool
+        or tuple(wait.shape) != tuple(motion.in_hold.shape)
+        or wait.device != motion.in_hold.device
+    ):
+        raise RuntimeError("Motion safe-ready row selector changed ABI")
+    return wait
 
 
 def _window_pos(cmd: RacketTargetCommand) -> torch.Tensor:
@@ -332,6 +330,20 @@ def _window_wide(cmd: RacketTargetCommand) -> torch.Tensor:
     """1c WIDE window for the normal/velocity channels (== strike_window unless racket.strike_window_wide_s)."""
     win = getattr(cmd, "strike_window_wide", None)
     return (cmd.strike_window if win is None else win) & action_ball_task_valid_mask(cmd)
+
+
+def _scale_motion_racket_prior_in_strike_window(
+    cmd: RacketTargetCommand,
+    raw: torch.Tensor,
+    scale_in_strike_window: float,
+) -> torch.Tensor:
+    """Yield to a distinct strike target only when a recipe requests it."""
+
+    scale = float(scale_in_strike_window)
+    if scale == 1.0:
+        return raw
+    window = _window_wide(cmd)
+    return torch.where(window, raw * scale, raw)
 
 
 def _stage1_quat_normalize(quat: torch.Tensor, *, name: str) -> torch.Tensor:
@@ -550,10 +562,13 @@ def _stage1_split_ready_safe_racket_tuple(
     """
 
     motion = cmd._motion()
-    if not bool(
+    bridge_enabled = bool(
         getattr(motion, "action_ball_diagnostic_split_ready_teacher", False)
-    ):
-        raise RuntimeError("safe-ready racket tuple requested outside split-ready")
+    ) or bool(
+        getattr(motion, "_action_ball_continuous_fresh_motion_lane_bound", False)
+    )
+    if not bridge_enabled:
+        raise RuntimeError("safe-ready racket tuple requested outside a ready bridge")
 
     source_index = (
         int(cmd._racket_body_index)
@@ -596,29 +611,14 @@ def _stage1_split_ready_safe_racket_tuple(
 
     axis = torch.zeros_like(site_pos)
     axis[:, int(cmd.cfg.mount_normal_axis)] = 1.0
-    signed_face = _stage1_quat_apply(site_quat, axis)
-    use_per_clip_sign = bool(cmd.cfg.mount_normal_sign_per_clip) or (
-        str(getattr(cmd.cfg, "motion_teacher_racket_source", "robot_fk"))
-        == "measured_channel"
-    )
-    if use_per_clip_sign:
-        signs = cmd._mount_signs_cfg(int(motion.motion.num_segments))
-        sign_table = torch.as_tensor(
-            signs, device=cmd.device, dtype=signed_face.dtype
-        )
-        sign = (
-            sign_table[motion.clip_id]
-            if bool(getattr(motion, "_multiseg", False))
-            else sign_table[0].expand(cmd.num_envs)
-        )
-    else:
-        sign = torch.full(
-            (cmd.num_envs,),
-            float(cmd.cfg.mount_normal_sign),
-            device=cmd.device,
-            dtype=signed_face.dtype,
-        )
-    signed_face = signed_face * sign[:, None]
+    # Reset-ready is the physical pose captured before an action is selected.
+    # Its face is therefore the canonical raw +axis face.  Applying a selected
+    # clip's mount sign here would leak a future/stale action into balance and
+    # can flip an otherwise identical birth pose by 180 degrees.
+    raw_face = _stage1_quat_apply(site_quat, axis)
+    raw_face = raw_face / torch.linalg.vector_norm(
+        raw_face, dim=-1, keepdim=True
+    ).clamp_min(1.0e-12)
 
     local_long_axis = torch.as_tensor(
         racket_contact_geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
@@ -632,49 +632,75 @@ def _stage1_split_ready_safe_racket_tuple(
     point_velocity = torch.zeros_like(site_pos)
     finite = (
         torch.isfinite(site_pos).all(dim=-1)
-        & torch.isfinite(signed_face).all(dim=-1)
+        & torch.isfinite(raw_face).all(dim=-1)
         & torch.isfinite(long_axis).all(dim=-1)
     )
     unit = (
-        (torch.linalg.vector_norm(signed_face, dim=-1) - 1.0).abs()
+        (torch.linalg.vector_norm(raw_face, dim=-1) - 1.0).abs()
         <= 1.0e-5
     ) & (
         (torch.linalg.vector_norm(long_axis, dim=-1) - 1.0).abs()
         <= 1.0e-5
     )
     torch._assert_async((finite & unit).all())
-    return site_pos, signed_face, point_velocity, long_axis
+    return site_pos, raw_face, point_velocity, long_axis
 
 
 def _stage1_select_split_ready_site_target(
     cmd: RacketTargetCommand,
-    measured: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Atomically select safe-ready or measured paddle p/face/point-v."""
+    measured: tuple[torch.Tensor, ...],
+) -> tuple[torch.Tensor, ...]:
+    """Atomically select one complete safe-ready or measured paddle tuple."""
 
+    motion = cmd._motion()
     wait = _stage1_split_ready_wait_mask(cmd)
-    if not bool(
-        getattr(
-            cmd._motion(), "action_ball_diagnostic_split_ready_teacher", False
-        )
+    speed = motion.speed_scale.to(device=cmd.device)
+    stationary = motion.in_hold.to(device=cmd.device, dtype=torch.bool)
+    if (
+        speed.shape != (cmd.num_envs,)
+        or stationary.shape != (cmd.num_envs,)
+        or wait.shape != (cmd.num_envs,)
     ):
+        raise ValueError("paddle teacher phase masks changed shape")
+    torch._assert_async(
+        (
+            torch.isfinite(speed)
+            & (speed >= 0.0)
+            & (stationary | wait | (speed > 0.0))
+        ).all()
+    )
+    if len(measured) not in (3, 4):
+        raise ValueError("paddle teacher tuple must contain three or four channels")
+    effective = list(measured)
+    effective[2] = torch.where(
+        stationary[:, None],
+        torch.zeros_like(measured[2]),
+        measured[2] * speed.to(dtype=measured[2].dtype)[:, None],
+    )
+    measured = tuple(effective)
+    bridge_enabled = bool(
+        getattr(motion, "action_ball_diagnostic_split_ready_teacher", False)
+    ) or bool(
+        getattr(motion, "_action_ball_continuous_fresh_motion_lane_bound", False)
+    )
+    if not bridge_enabled:
         return measured
     safe = _stage1_split_ready_safe_racket_tuple(cmd)
     return tuple(
         torch.where(wait[:, None], safe_value, measured_value)
-        for safe_value, measured_value in zip(safe[:3], measured)
+        for safe_value, measured_value in zip(safe[: len(measured)], measured)
     )
 
 
-def _stage1_aligned_clip_site_target_at_steps(
+def _stage1_aligned_clip_racket_target_at_steps(
     cmd: RacketTargetCommand, current: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build the aligned official-site teacher state at explicit reference steps.
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build all aligned official-paddle channels at explicit reference steps.
 
     ``current`` is an absolute MotionLoader row per environment.  Keeping the alignment and
-    official-site reconstruction in this one helper makes the phase-continuous reward target and
-    the nominal contact-time observation share the same frame, mount, face-sign and point-velocity
-    semantics.  No ball/task target is read here.
+    official-site reconstruction in this one helper makes position, signed
+    face, point velocity and butt-to-blade axis share one row, alignment and
+    cache identity.  No ball/task target is read here.
     """
 
     motion = cmd._motion()
@@ -701,26 +727,6 @@ def _stage1_aligned_clip_site_target_at_steps(
     previous = torch.maximum(current - 1, starts)
     following = torch.minimum(current + 1, ends)
     torch._assert_async((following > previous).all())
-
-    # A held reference is a stationary teacher even though its neighboring source rows encode the
-    # future swing.  In particular, split-ready reset leaves ``speed_scale == 0`` until the first
-    # command-manager compute, while rewards/observations are evaluated before that compute.  Do
-    # not divide the source-row span by zero and do not clamp it to an epsilon (which would invent
-    # an enormous moving target).  Use a harmless unit rate for the geometric differentiation and
-    # overwrite the held point velocity with literal zero, matching MotionCommand's joint/body
-    # velocity semantics.  Unheld rows remain byte-for-byte on the prior span formula.
-    held = motion.in_hold.to(
-        device=cmd.device, dtype=torch.bool
-    ) | _stage1_split_ready_wait_mask(cmd)
-    speed = motion.speed_scale.to(device=cmd.device)
-    if held.shape != (cmd.num_envs,) or speed.shape != (cmd.num_envs,):
-        raise ValueError(
-            "Stage-1 hold/speed masks must have one row per environment, got "
-            f"{tuple(held.shape)}/{tuple(speed.shape)}"
-        )
-    torch._assert_async(
-        (torch.isfinite(speed) & (speed >= 0.0) & (held | (speed > 0.0))).all()
-    )
 
     teacher_source = str(getattr(cmd.cfg, "motion_teacher_racket_source", "robot_fk"))
     if teacher_source not in ("robot_fk", "measured_channel"):
@@ -789,20 +795,29 @@ def _stage1_aligned_clip_site_target_at_steps(
     if teacher_source == "measured_channel":
         measured_pos = getattr(loader, "_measured_racket_site_pos_w", None)
         measured_normal = getattr(loader, "_measured_racket_normal_w", None)
+        measured_long_axis = getattr(
+            loader, "_measured_racket_long_axis_w", None
+        )
         if (
             not bool(getattr(loader, "measured_racket_available", False))
             or measured_pos is None
             or measured_normal is None
+            or measured_long_axis is None
         ):
             raise RuntimeError(
                 "motion_teacher_racket_source='measured_channel' requires every motion NPZ to "
                 "carry the complete measured-racket schema; FK fallback is intentionally forbidden"
             )
         expected_pos = (int(loader.time_step_total), 3)
-        if measured_pos.shape != expected_pos or measured_normal.shape != expected_pos:
+        if (
+            measured_pos.shape != expected_pos
+            or measured_normal.shape != expected_pos
+            or measured_long_axis.shape != expected_pos
+        ):
             raise ValueError(
                 "MotionLoader measured-racket tensors changed shape: "
-                f"{tuple(measured_pos.shape)}/{tuple(measured_normal.shape)} vs {expected_pos}"
+                f"{tuple(measured_pos.shape)}/{tuple(measured_normal.shape)}/"
+                f"{tuple(measured_long_axis.shape)} vs {expected_pos}"
             )
 
         def _aligned_measured_pos(step: torch.Tensor) -> torch.Tensor:
@@ -815,10 +830,8 @@ def _stage1_aligned_clip_site_target_at_steps(
         measured_normal_current = _stage1_quat_apply(
             delta_quat, measured_normal[current]
         )
-        typed_speed = speed.to(dtype=measured_current.dtype)
-        safe_speed = torch.where(held, torch.ones_like(typed_speed), typed_speed)
         frame_span = (following - previous).to(dtype=measured_current.dtype)
-        span_s = frame_span * float(cmd._env.step_dt) / safe_speed
+        span_s = frame_span * float(cmd._env.step_dt)
         position, normal, velocity = stage1_clip_site_target_from_aligned_measured_racket(
             measured_previous,
             measured_current,
@@ -826,7 +839,28 @@ def _stage1_aligned_clip_site_target_at_steps(
             measured_normal_current,
             central_difference_span_s=span_s,
         )
-        return position, normal, torch.where(held[:, None], torch.zeros_like(velocity), velocity)
+        # The artifact channel is already the selected action's measured,
+        # signed geometry.  Align it once; never apply the mount sign again.
+        long_axis = _stage1_quat_apply(
+            delta_quat, measured_long_axis[current]
+        )
+        long_axis_norm = torch.linalg.vector_norm(
+            long_axis, dim=-1, keepdim=True
+        )
+        torch._assert_async(
+            (
+                torch.isfinite(long_axis).all(dim=-1)
+                & torch.isfinite(long_axis_norm[:, 0])
+                & (long_axis_norm[:, 0] > 1.0e-12)
+            ).all()
+        )
+        long_axis = long_axis / long_axis_norm.clamp_min(1.0e-12)
+        return (
+            position,
+            normal,
+            velocity,
+            long_axis,
+        )
 
     previous_pos, previous_quat = _aligned(previous)
     current_pos, current_quat = _aligned(current)
@@ -847,10 +881,8 @@ def _stage1_aligned_clip_site_target_at_steps(
         sign = sign_table[motion.clip_id] if bool(getattr(motion, "_multiseg", False)) else sign_table[0]
     else:
         sign = float(cmd.cfg.mount_normal_sign)
-    typed_speed = speed.to(dtype=current_pos.dtype)
-    safe_speed = torch.where(held, torch.ones_like(typed_speed), typed_speed)
     frame_span = (following - previous).to(dtype=current_pos.dtype)
-    span_s = frame_span * float(cmd._env.step_dt) / safe_speed
+    span_s = frame_span * float(cmd._env.step_dt)
     position, normal, velocity = stage1_clip_site_target_from_aligned_body_pose(
         previous_pos,
         previous_quat,
@@ -864,99 +896,116 @@ def _stage1_aligned_clip_site_target_at_steps(
         normal_sign=sign,
         central_difference_span_s=span_s,
     )
-    return position, normal, torch.where(held[:, None], torch.zeros_like(velocity), velocity)
+    site_quat = current_quat
+    if cmd._racket_mode != "body":
+        site_quat = _stage1_quat_normalize(
+            _stage1_quat_mul(
+                current_quat,
+                _stage1_quat_normalize(mount_quat, name="mount_quat"),
+            ),
+            name="aligned_reference_site_quat",
+        )
+    local_long_axis = torch.as_tensor(
+        racket_contact_geometry.RACKET_BUTT_TO_BLADE_AXIS_LOCAL,
+        device=cmd.device,
+        dtype=position.dtype,
+    ).expand(cmd.num_envs, 3)
+    long_axis = _stage1_quat_apply(site_quat, local_long_axis)
+    long_axis = long_axis / torch.linalg.vector_norm(
+        long_axis, dim=-1, keepdim=True
+    ).clamp_min(1.0e-12)
+    torch._assert_async(torch.isfinite(long_axis).all())
+    return (
+        position,
+        normal,
+        velocity,
+        long_axis,
+    )
+
+
+def _stage1_aligned_clip_site_target_at_steps(
+    cmd: RacketTargetCommand, current: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Compatibility view of the explicit-step paddle target without its axis."""
+
+    measured = _stage1_aligned_clip_racket_target_at_steps(cmd, current)
+    return _stage1_select_split_ready_site_target(cmd, measured)[:3]
+
+
+def _stage1_aligned_clip_measured_racket_target(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Materialize one cached four-channel selected-motion paddle target."""
+
+    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
+    cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
+    if type(token) is int and cached is not None and cached[0] == token:
+        return cached[1]
+    motion = cmd._motion()
+    safe_step_selector = getattr(
+        motion, "_action_ball_full_mdp_safe_pose_reference_steps", None
+    )
+    if bool(
+        getattr(motion, "_action_ball_continuous_fresh_motion_lane_bound", False)
+    ):
+        if not callable(safe_step_selector):
+            raise RuntimeError(
+                "fresh paddle teacher requires Motion's quarantined reference-step selector"
+            )
+        current = safe_step_selector()
+    else:
+        current = (
+            safe_step_selector()
+            if callable(safe_step_selector)
+            else motion._pose_reference_steps()
+        )
+    measured = _stage1_aligned_clip_racket_target_at_steps(cmd, current)
+    if type(token) is int:
+        cmd._stage1_clip_site_target_cache = (token, measured)
+    return measured
+
+
+def _stage1_aligned_clip_racket_target(
+    cmd: RacketTargetCommand,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Select one complete ready/playback paddle tuple from Motion's state."""
+
+    # Cache only the selected-motion producer.  Motion may atomically switch
+    # ready -> selected frame 0 within the same public control token, so the
+    # safe-ready row selection itself is intentionally recomputed per caller.
+    measured = _stage1_aligned_clip_measured_racket_target(cmd)
+    selected = _stage1_select_split_ready_site_target(cmd, measured)
+    if len(selected) != 4:
+        raise RuntimeError("selected paddle target lost a channel")
+    return selected  # type: ignore[return-value]
 
 
 def _stage1_aligned_clip_site_target(
     cmd: RacketTargetCommand,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Materialize one cached, phase-continuous teacher site target for this policy step."""
+    """Compatibility view of the phase-continuous paddle target."""
 
-    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
-    cached = getattr(cmd, "_stage1_clip_site_target_cache", None)
-    if type(token) is int and cached is not None and cached[0] == token:
-        measured = cached[1]
-    else:
-        current = cmd._motion()._pose_reference_steps()
-        measured = _stage1_aligned_clip_site_target_at_steps(cmd, current)
-        if type(token) is int:
-            cmd._stage1_clip_site_target_cache = (token, measured)
-    # Cache only the measured producer.  task_valid may reveal within the same
-    # public control token, so caching the selected value would make one
-    # consumer observe WAIT while another observes TASK_ACTIVE.
-    return _stage1_select_split_ready_site_target(cmd, measured)
+    return _stage1_aligned_clip_racket_target(cmd)[:3]
 
 
 def _stage1_aligned_clip_measured_long_axis_target(
     cmd: RacketTargetCommand,
 ) -> torch.Tensor:
-    """Return the aligned measured butt-to-blade axis at the current teacher phase."""
+    """Compatibility view of the cached selected-motion long-axis channel."""
 
     if str(getattr(cmd.cfg, "motion_teacher_racket_source", "robot_fk")) != "measured_channel":
         raise RuntimeError(
             "racket long-axis imitation requires motion_teacher_racket_source='measured_channel'"
         )
-    token = getattr(getattr(cmd, "_env", None), "common_step_counter", None)
-    cached = getattr(cmd, "_stage1_clip_long_axis_target_cache", None)
-    if type(token) is int and cached is not None and cached[0] == token:
-        return cached[1]
-    motion = cmd._motion()
-    loader = motion.motion
-    measured_long_axis = getattr(loader, "_measured_racket_long_axis_w", None)
-    if (
-        not bool(getattr(loader, "measured_racket_available", False))
-        or measured_long_axis is None
-        or measured_long_axis.shape != (int(loader.time_step_total), 3)
-    ):
-        raise RuntimeError(
-            "measured-channel long-axis reward requires one schema-3 axis row per motion frame"
-        )
-    current = motion._pose_reference_steps().to(device=cmd.device, dtype=torch.long)
-    if current.shape != (cmd.num_envs,):
-        raise ValueError("measured long-axis reference steps changed shape")
-    body_quat = loader._body_quat_w
-    anchor_index = int(motion.robot_anchor_body_index)
-    if (
-        body_quat.ndim != 3
-        or body_quat.shape[-1] != 4
-        or not 0 <= anchor_index < body_quat.shape[1]
-    ):
-        raise ValueError("MotionLoader anchor quaternion contract changed")
-    ref_anchor_quat = _stage1_quat_normalize(
-        body_quat[current, anchor_index], name="reference_anchor_quat"
-    )
-    robot_anchor_quat = _stage1_quat_normalize(
-        motion.robot_anchor_quat_w, name="robot_anchor_quat"
-    )
-    ref_anchor_inv = ref_anchor_quat.clone()
-    ref_anchor_inv[..., 1:] *= -1.0
-    delta_quat = _stage1_yaw_quat(
-        _stage1_quat_mul(robot_anchor_quat, ref_anchor_inv)
-    )
-    result = _stage1_quat_apply(delta_quat, measured_long_axis[current])
-    norm = torch.linalg.vector_norm(result, dim=-1, keepdim=True)
-    torch._assert_async((torch.isfinite(norm) & (norm > 1.0e-12)).all())
-    result = result / norm
-    if type(token) is int:
-        cmd._stage1_clip_long_axis_target_cache = (token, result)
-    return result
+    return _stage1_aligned_clip_measured_racket_target(cmd)[3]
 
 
 def _stage1_aligned_clip_long_axis_target(
     cmd: RacketTargetCommand,
 ) -> torch.Tensor:
-    """Atomically select safe-ready or measured butt-to-blade axis."""
+    """Return the selected ready/playback butt-to-blade axis."""
 
-    measured = _stage1_aligned_clip_measured_long_axis_target(cmd)
-    if not bool(
-        getattr(
-            cmd._motion(), "action_ball_diagnostic_split_ready_teacher", False
-        )
-    ):
-        return measured
-    wait = _stage1_split_ready_wait_mask(cmd)
-    safe_long_axis = _stage1_split_ready_safe_racket_tuple(cmd)[3]
-    return torch.where(wait[:, None], safe_long_axis, measured)
+    return _stage1_aligned_clip_racket_target(cmd)[3]
 
 
 def stage1_aligned_clip_site_target_now(
@@ -999,10 +1048,39 @@ def stage1_aligned_clip_site_target_at_reference_hit(
         )
         if hit_steps.shape != (cmd.num_envs,):
             raise ValueError("Stage-1 reference-hit rows changed shape")
-        measured = _stage1_aligned_clip_site_target_at_steps(cmd, hit_steps)
+        measured = _stage1_aligned_clip_racket_target_at_steps(cmd, hit_steps)
         if type(token) is int:
             cmd._stage1_clip_site_reference_hit_cache = (token, measured)
-    return _stage1_select_split_ready_site_target(cmd, measured)
+    return _stage1_select_split_ready_site_target(cmd, measured)[:3]
+
+
+def _stage1_actual_face_normal(cmd: RacketTargetCommand) -> torch.Tensor:
+    """Return the actual face in the same ready/playback convention as its target.
+
+    A reset-ready pose exists before any action is selected, so those rows use
+    the canonical raw +axis face.  Once Motion leaves that state, the selected
+    action's current mount sign applies on the actual side.  The measured
+    teacher normal is already signed and is never transformed here.
+    """
+
+    signed = cmd.racket_normal_w
+    wait = _stage1_split_ready_wait_mask(cmd)
+    motion = cmd._motion()
+    bridge_enabled = bool(
+        getattr(motion, "action_ball_diagnostic_split_ready_teacher", False)
+    ) or bool(
+        getattr(motion, "_action_ball_continuous_fresh_motion_lane_bound", False)
+    )
+    if not bridge_enabled:
+        return signed
+    raw = getattr(cmd, "racket_normal_raw_w", None)
+    if not torch.is_tensor(raw) or raw.shape != signed.shape:
+        raise RuntimeError(
+            "safe-ready paddle reward requires the canonical raw actual face"
+        )
+    if raw.device != signed.device or raw.dtype != signed.dtype:
+        raise RuntimeError("raw and signed actual paddle faces changed ABI")
+    return torch.where(wait[:, None], raw, signed)
 
 
 def stage1_clip_racket_tracking_errors(
@@ -1017,7 +1095,9 @@ def stage1_clip_racket_tracking_errors(
 
     target_pos, target_normal, target_velocity = _stage1_aligned_clip_site_target(cmd)
     pos_error = torch.linalg.vector_norm(cmd.racket_pos_w - target_pos, dim=-1)
-    normal_cos = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    normal_cos = torch.sum(
+        _stage1_actual_face_normal(cmd) * target_normal, dim=-1
+    ).clamp(-1.0, 1.0)
     normal_error = torch.acos(normal_cos)
     velocity_error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - target_velocity, dim=-1)
     return pos_error, normal_error, velocity_error
@@ -1044,7 +1124,9 @@ def stage1_clip_racket_normal_tracking_exp(
 
     cmd = _cmd(env, command_name)
     _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
-    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    cos_angle = torch.sum(
+        _stage1_actual_face_normal(cmd) * target_normal, dim=-1
+    ).clamp(-1.0, 1.0)
     raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
     full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
     _dbg_log(cmd, "stage1_clip_racket_normal", raw, full_phase)
@@ -1100,7 +1182,9 @@ def stage1_clip_racket_normal_coarse_tracking_exp(
 
     cmd = _cmd(env, command_name)
     _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
-    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    cos_angle = torch.sum(
+        _stage1_actual_face_normal(cmd) * target_normal, dim=-1
+    ).clamp(-1.0, 1.0)
     raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
     full_phase = torch.ones_like(cmd.strike_window, dtype=torch.bool)
     _dbg_log(cmd, "stage1_clip_racket_normal_coarse", raw, full_phase)
@@ -1119,10 +1203,9 @@ def motion_racket_position_tracking_cauchy(
     target_pos, _, _ = _stage1_aligned_clip_site_target(cmd)
     error = torch.linalg.vector_norm(cmd.racket_pos_w - target_pos, dim=-1)
     raw = _cauchy_tracking_kernel(error, std)
-    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
-        scale_in_strike_window
+    return _scale_motion_racket_prior_in_strike_window(
+        cmd, raw, scale_in_strike_window
     )
-    return raw * scale
 
 
 def motion_racket_velocity_tracking_cauchy(
@@ -1137,10 +1220,9 @@ def motion_racket_velocity_tracking_cauchy(
     _, _, target_velocity = _stage1_aligned_clip_site_target(cmd)
     error = torch.linalg.vector_norm(cmd.racket_lin_vel_w - target_velocity, dim=-1)
     raw = _cauchy_tracking_kernel(error, std)
-    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
-        scale_in_strike_window
+    return _scale_motion_racket_prior_in_strike_window(
+        cmd, raw, scale_in_strike_window
     )
-    return raw * scale
 
 
 def motion_racket_normal_tracking_cauchy(
@@ -1153,13 +1235,14 @@ def motion_racket_normal_tracking_cauchy(
 
     cmd = _cmd(env, command_name)
     _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
-    cosine = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    cosine = torch.sum(
+        _stage1_actual_face_normal(cmd) * target_normal, dim=-1
+    ).clamp(-1.0, 1.0)
     error = torch.acos(cosine)
     raw = _cauchy_tracking_kernel(error, std)
-    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
-        scale_in_strike_window
+    return _scale_motion_racket_prior_in_strike_window(
+        cmd, raw, scale_in_strike_window
     )
-    return raw * scale
 
 
 def motion_racket_long_axis_tracking_cauchy(
@@ -1174,10 +1257,9 @@ def motion_racket_long_axis_tracking_cauchy(
     target_long_axis = _stage1_aligned_clip_long_axis_target(cmd)
     cosine = torch.sum(cmd.racket_long_axis_w * target_long_axis, dim=-1).clamp(-1.0, 1.0)
     raw = _cauchy_tracking_kernel(torch.acos(cosine), std)
-    scale = (~_window_wide(cmd)).float() + _window_wide(cmd).float() * float(
-        scale_in_strike_window
+    return _scale_motion_racket_prior_in_strike_window(
+        cmd, raw, scale_in_strike_window
     )
-    return raw * scale
 
 
 def stage1_clip_racket_position_precision_tracking_exp(
@@ -1215,7 +1297,9 @@ def stage1_clip_racket_normal_precision_tracking_exp(
 
     cmd = _cmd(env, command_name)
     _, target_normal, _ = _stage1_aligned_clip_site_target(cmd)
-    cos_angle = torch.sum(cmd.racket_normal_w * target_normal, dim=-1).clamp(-1.0, 1.0)
+    cos_angle = torch.sum(
+        _stage1_actual_face_normal(cmd) * target_normal, dim=-1
+    ).clamp(-1.0, 1.0)
     raw = torch.exp(-torch.square(torch.acos(cos_angle)) / float(std) ** 2)
     win = _window_wide(cmd)
     _dbg_log(cmd, "stage1_clip_racket_normal_precision", raw, win)

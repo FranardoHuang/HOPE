@@ -369,7 +369,6 @@ class _Owner:
         assert boundary is self.active and summary is self.summary
         self.events.append(("ack", update_index))
         self.active = None
-        return summary
 
     def _record_durable_epoch_ack_span(self, summary, **kwargs):
         assert summary is self.summary and self.active is None
@@ -462,8 +461,11 @@ def _fake_imports(monkeypatch):
             )
         ),
     )
+    real_import_module = adapter.importlib.import_module
 
     def import_module(name):
+        if name == "torch" or name.startswith("torch."):
+            return real_import_module(name)
         if name.endswith("action_ball_full_mdp_lean_runtime"):
             return runtime
         if name.endswith("action_ball_full_mdp_lean_observation_cfg"):
@@ -561,6 +563,7 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
     }
     assert env.action_term.pending is None
     assert env.action_term.acknowledged == 1
+    assert env.owner.active is None
     output = capsys.readouterr().out.splitlines()
     assert [line.split("=", 1)[0] for line in output] == [
         "HOPE_JOINT_SAFETY_UPDATE_JSON",
@@ -590,6 +593,92 @@ def test_update_orders_optimizer_between_prepare_and_durable_ack(
         "epoch_commit_start": 0,
         "epoch_commit_end": 0,
     }
+
+
+def test_runner_alg_update_executes_real_optimizer_inside_boundary_and_returns_result(
+    tmp_path, _fake_imports, monkeypatch
+):
+    torch = pytest.importorskip("torch")
+    env = _Env()
+    parameter = torch.nn.Parameter(torch.tensor([2.0]))
+    optimizer = torch.optim.Adam([parameter], lr=0.1)
+    storage_sentinel = object()
+    result_sentinel = object()
+
+    class _Algorithm:
+        def __init__(self):
+            self.storage = storage_sentinel
+
+        def update(self):
+            assert self.storage is storage_sentinel
+            env.owner.events.append("optimizer_begin")
+            optimizer.zero_grad()
+            loss = parameter.square().sum()
+            loss.backward()
+            optimizer.step()
+            env.owner.events.append("optimizer_end")
+            return result_sentinel
+
+    def base_init(self, base_env, train_cfg, log_dir, device):
+        del train_cfg, log_dir, device
+        self.env = base_env
+        self.alg = _Algorithm()
+        self.is_distributed = False
+        self.num_steps_per_env = 24
+
+    monkeypatch.setattr(adapter.OnPolicyRunner, "__init__", base_init, raising=False)
+    runner = adapter.ActionBallFullMdpRsl3Runner(
+        env,
+        {},
+        str(tmp_path),
+        training_contract_schema_version=3,
+        training_contract_sha256="a" * 64,
+        action_ball_full_mdp_runtime_owner=env.owner,
+        action_ball_full_mdp_run_mode="single_action_lean",
+    )
+    boundary = runner._full_mdp_adapter
+    append = boundary._append
+    append_count = 0
+
+    def logged_append(line):
+        nonlocal append_count
+        env.owner.events.append(
+            "wal_pending" if append_count == 0 else "wal_epoch_ack"
+        )
+        append_count += 1
+        return append(line)
+
+    monkeypatch.setattr(boundary, "_append", logged_append)
+    before = parameter.detach().clone()
+
+    assert runner.alg.update() is result_sentinel
+    assert not torch.equal(parameter.detach(), before)
+    state = optimizer.state[parameter]
+    assert int(state["step"].item()) == 1
+    assert torch.count_nonzero(state["exp_avg"]).item() == 1
+    names = [
+        event if isinstance(event, str) else event[0]
+        for event in env.owner.events
+    ]
+    assert names == [
+        "healthy",
+        "healthy",
+        "prepare",
+        "safety_prepare",
+        "optimizer_begin",
+        "optimizer_end",
+        "mark",
+        "summary",
+        "wal_pending",
+        "ack",
+        "wal_epoch_ack",
+        "latch",
+        "safety_ack",
+    ]
+    assert boundary._last_update == 0
+    assert env.owner.active is None
+    assert env.action_term.pending is None
+    assert env.action_term.acknowledged == 1
 
 
 @pytest.mark.parametrize("failure_mode", ["short_write", "broken_pipe"])

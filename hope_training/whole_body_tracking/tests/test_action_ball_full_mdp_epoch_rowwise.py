@@ -71,6 +71,78 @@ FAKE_R06_MODULE = R06_MODULE
 FAKE_PHYSICAL_MODULE = PHYSICAL_MODULE
 
 
+# Independent test oracle.  Keep both names and literal bit positions here:
+# deriving either side from Epoch's production registry would let a misplaced
+# or accidentally shared owner bit make the implementation and test agree.
+_ROW_FAULT_NAMED_BIT_ORACLE = (
+    (1 << 0, "reset_genesis_contract"),
+    (1 << 1, "motion_close_contract"),
+    (1 << 2, "r06_previous_paid_contract"),
+    (1 << 3, "d05_reset_generation_join"),
+    (1 << 4, "physical_postphysics_join"),
+    (1 << 5, "r06_outcome_join"),
+    (1 << 6, "reward_payment_chronology"),
+    (1 << 7, "owner_fact_active_join"),
+    (1 << 8, "r07_first_ready_join"),
+    (1 << 9, "physical_launch_join"),
+    (1 << 10, "selected_reset_generation_overflow"),
+    (1 << 11, "r06_launch_selection_contract"),
+    (1 << 12, "r06_launch_identity_contract"),
+    (1 << 13, "r06_outcome_projection_duplicate"),
+    (1 << 14, "r06_payment_projection_contract"),
+    (1 << 15, "r06_payment_mailbox_duplicate"),
+    (1 << 16, "r06_payment_missing_or_mismatched"),
+    (1 << 17, "r06_payment_before_settlement"),
+    (1 << 18, "r06_payment_highwater_regression"),
+    (1 << 19, "r06_payment_unconsumed_debt_overwrite"),
+    (1 << 20, "r06_closed_projection_contract"),
+    (1 << 21, "r06_closed_debt_mismatch"),
+    (1 << 22, "r06_current_flight_duplicate"),
+    (1 << 23, "motion_cadence_overdue"),
+    (1 << 24, "motion_swing_generation_overflow"),
+    (1 << 25, "motion_reveal_reference_contract"),
+    (1 << 26, "motion_task_timing_contract"),
+    (1 << 27, "r03_epoch_identity"),
+    (1 << 28, "r03_stale_source_step"),
+    (1 << 29, "r03_nonfinite_fact"),
+    (1 << 30, "r07_terminal_fact_contract"),
+    (1 << 41, "physical_postphysics_producer"),
+    (1 << 42, "physical_postphysics_nonfinite"),
+    (1 << 43, "r06_owner_producer_contract"),
+    (1 << 44, "r06_owner_engine_overflow"),
+    (1 << 45, "r06_owner_nonfinite"),
+    (1 << 46, "r06_owner_other"),
+)
+
+_RUNTIME_OWNER_ALLOWED_NAMED_BIT_ORACLE = {
+    "motion": (
+        ("motion_cadence_overdue", 1 << 23),
+        ("motion_swing_generation_overflow", 1 << 24),
+        ("motion_reveal_reference_contract", 1 << 25),
+        ("motion_task_timing_contract", 1 << 26),
+    ),
+    "r03_strike_fact": (
+        ("r03_epoch_identity", 1 << 27),
+        ("r03_stale_source_step", 1 << 28),
+        ("r03_nonfinite_fact", 1 << 29),
+    ),
+    "r06_landing_outcome": (
+        ("r06_launch_selection_contract", 1 << 11),
+        ("r06_launch_identity_contract", 1 << 12),
+        ("r06_outcome_projection_duplicate", 1 << 13),
+        ("r06_payment_projection_contract", 1 << 14),
+        ("r06_payment_mailbox_duplicate", 1 << 15),
+        ("r06_payment_missing_or_mismatched", 1 << 16),
+        ("r06_payment_before_settlement", 1 << 17),
+        ("r06_payment_highwater_regression", 1 << 18),
+        ("r06_payment_unconsumed_debt_overwrite", 1 << 19),
+        ("r06_closed_projection_contract", 1 << 20),
+        ("r06_closed_debt_mismatch", 1 << 21),
+        ("r06_current_flight_duplicate", 1 << 22),
+    ),
+}
+
+
 def _key(values: torch.Tensor, valid: torch.Tensor) -> E.ActionEpochShotKey:
     def field(offset: int) -> torch.Tensor:
         return torch.where(valid, values + offset, torch.full_like(values, -1))
@@ -244,6 +316,13 @@ class _MotionProjection:
     reveal_due: torch.Tensor
     closed_mask: torch.Tensor
     close_reason: torch.Tensor
+    episode_tick: torch.Tensor | None = None
+
+    def __post_init__(self):
+        if self.episode_tick is None:
+            self.episode_tick = torch.full_like(
+                self.close_reason, self.common_step
+            )
 
 
 class _MotionCadence:
@@ -414,7 +493,7 @@ class _NoHostTensorObservation(TorchDispatchMode):
 
 def _ready_epoch(
     *, reward_age: int = 0, bind_playback: bool = False, device="cpu",
-    catalog_uids=(21,), family_codes=(1,),
+    catalog_uids=(21,), family_codes=(1,), bind_r07: bool = False,
 ):
     exact_device = torch.device(device)
     epoch = E.ActionEpochOwner(
@@ -438,8 +517,69 @@ def _ready_epoch(
     physical = _Physical()
     epoch.bind_fact_owner("physical_ball", physical)
     epoch.bind_async_owner("physical_ball", physical)
+    if bind_r07:
+        epoch._test_r07_owner = object()
+        epoch.bind_fact_owner("r07_recovery", epoch._test_r07_owner)
     return (
         epoch, d05, cadence, r06, playback, d05.motion, d05.racket, physical
+    )
+
+
+def _publish_clean_r07_terminal_fact(
+    epoch: E.ActionEpochOwner,
+    *,
+    source_step: int,
+    rows: torch.Tensor | None = None,
+) -> None:
+    record = epoch.current()
+    if rows is None:
+        rows = torch.tensor(
+            [True, False], dtype=torch.bool, device=epoch.device
+        )
+    selected = rows[:, None]
+    valid_bits = torch.where(
+        selected,
+        torch.full(
+            selected.shape,
+            E.r07_device.R07_EPOCH_FACT_PRESENT
+            | E.r07_device.R07_EPOCH_FACT_NUMERICALLY_VALID,
+            dtype=torch.int64,
+            device=epoch.device,
+        ),
+        torch.zeros(selected.shape, dtype=torch.int64, device=epoch.device),
+    )
+    source = torch.where(
+        selected,
+        torch.full(
+            selected.shape,
+            source_step,
+            dtype=torch.int64,
+            device=epoch.device,
+        ),
+        torch.full(
+            selected.shape, -1, dtype=torch.int64, device=epoch.device
+        ),
+    )
+    values = torch.zeros(
+        (*selected.shape, E.OWNER_FACT_F32_WIDTH),
+        dtype=torch.float32,
+        device=epoch.device,
+    )
+    # Clean producer fact while deliberately proving that Reward eligibility
+    # and ready are not retirement debts.
+    values[:, :, 3] = selected.to(torch.float32)
+    values[:, :, 4] = 0.0
+    values[:, :, 6] = torch.where(
+        selected,
+        torch.full_like(selected, 77, dtype=torch.int64),
+        torch.zeros_like(selected, dtype=torch.int64),
+    ).to(torch.float32)
+    epoch.publish_owner_facts(
+        "r07_recovery",
+        owner=epoch._test_r07_owner,
+        valid_bits=valid_bits,
+        source_step=source,
+        values=values,
     )
 
 
@@ -480,7 +620,7 @@ def _two_row_launched_epoch(*, device="cpu"):
     return epoch, r06, physical
 
 
-def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
+def test_recovery_postphysics_activity_is_exact_fixed_window_for_every_keyed_phase():
     epoch, d05, _cadence, _r06, _playback, _motion, _racket, physical = (
         _ready_epoch()
     )
@@ -488,64 +628,124 @@ def test_keyed_postphysics_activity_keeps_retired_completed_rows_active():
         owner=physical
     ).any()
     assert not epoch.project_recovery_postphysics_activity_mask(
-        owner=physical
+        owner=physical,
+        motion_cadence_tick=torch.tensor([30, 30], dtype=torch.int64),
     ).any()
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
     assert epoch.project_keyed_postphysics_activity_mask(
         owner=physical
     ).tolist() == [[True], [False]]
+    # deadline=20 is a per-row Motion clock.  No global scalar participates in
+    # this projection; Physical owns that separate host-cache chronology.
     assert not epoch.project_recovery_postphysics_activity_mask(
-        owner=physical
+        owner=physical,
+        motion_cadence_tick=torch.tensor([29, 29], dtype=torch.int64),
     ).any()
-
+    for phase in (
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_LAUNCH_SETTLED,
+        E.PHASE_OUTCOME_SETTLED,
+    ):
+        current = epoch._publication.current
+        assert current is not None
+        exact_phase = current.phase.clone()
+        exact_phase[0, 0] = phase
+        epoch._publication = replace(
+            epoch._publication,
+            current=replace(current, phase=exact_phase),
+        )
+        assert epoch.project_recovery_postphysics_activity_mask(
+            owner=physical,
+            motion_cadence_tick=torch.tensor([30, 30], dtype=torch.int64),
+        ).tolist() == [[True], [False]]
+        assert epoch.project_recovery_postphysics_activity_mask(
+            owner=physical,
+            motion_cadence_tick=torch.tensor([97, 97], dtype=torch.int64),
+        ).tolist() == [[True], [False]]
+        assert not epoch.project_recovery_postphysics_activity_mask(
+            owner=physical,
+            motion_cadence_tick=torch.tensor([98, 98], dtype=torch.int64),
+        ).any()
     current = epoch._publication.current
     assert current is not None
+    retired_phase = current.phase.clone()
+    retired_phase[0, 0] = E.PHASE_RETIRED
     epoch._publication = replace(
         epoch._publication,
-        current=replace(
-            current,
-            phase=torch.full_like(current.phase, E.PHASE_LAUNCH_SETTLED),
-        ),
+        current=replace(current, phase=retired_phase),
     )
-    assert epoch.project_keyed_postphysics_activity_mask(
-        owner=physical
-    ).tolist() == [[True], [False]]
     assert not epoch.project_recovery_postphysics_activity_mask(
-        owner=physical
+        owner=physical,
+        motion_cadence_tick=torch.tensor([30, 30], dtype=torch.int64),
     ).any()
-
-    current = epoch._publication.current
-    assert current is not None
-    epoch._publication = replace(
-        epoch._publication,
-        current=replace(
-            current,
-            phase=torch.full_like(current.phase, E.PHASE_OUTCOME_SETTLED),
-        ),
-    )
-    assert epoch.project_recovery_postphysics_activity_mask(
-        owner=physical
-    ).tolist() == [[True], [False]]
-    current = epoch._publication.current
-    assert current is not None
-    epoch._publication = replace(
-        epoch._publication,
-        current=replace(
-            current,
-            phase=torch.full_like(current.phase, E.PHASE_RETIRED),
-        ),
-    )
-    assert epoch.project_keyed_postphysics_activity_mask(
-        owner=physical
-    ).tolist() == [[True], [False]]
-    assert epoch.project_recovery_postphysics_activity_mask(
-        owner=physical
-    ).tolist() == [[True], [False]]
     with pytest.raises(E.ActionEpochError, match="owner identity"):
         epoch.project_keyed_postphysics_activity_mask(owner=object())
     with pytest.raises(E.ActionEpochError, match="owner identity"):
-        epoch.project_recovery_postphysics_activity_mask(owner=object())
+        epoch.project_recovery_postphysics_activity_mask(
+            owner=object(),
+            motion_cadence_tick=torch.tensor([30, 30], dtype=torch.int64),
+        )
+    with pytest.raises(E.ActionEpochError, match="cadence tick ABI"):
+        epoch.project_recovery_postphysics_activity_mask(
+            owner=physical,
+            motion_cadence_tick=torch.tensor([30, 30], dtype=torch.int32),
+        )
+
+
+def test_recovery_postphysics_activity_uses_each_async_row_deadline_without_crossing():
+    epoch, _r06, physical = _two_row_launched_epoch()
+    publication = epoch._publication
+    record = publication.current
+    assert record is not None
+    deadline = record.clocks.deadline_tick.clone()
+    deadline[:, 0] = torch.tensor([20, 40], dtype=torch.int64)
+    phase = record.phase.clone()
+    phase[:, 0] = torch.tensor(
+        [E.PHASE_LAUNCH_SETTLED, E.PHASE_REVEAL_COMMITTED],
+        dtype=torch.int64,
+    )
+    epoch._publication = replace(
+        publication,
+        current=replace(
+            record,
+            clocks=replace(record.clocks, deadline_tick=deadline),
+            phase=phase,
+        ),
+    )
+
+    assert epoch.project_recovery_postphysics_activity_mask(
+        owner=physical,
+        motion_cadence_tick=torch.tensor([30, 49], dtype=torch.int64),
+    ).tolist() == [[True], [False]]
+    assert epoch.project_recovery_postphysics_activity_mask(
+        owner=physical,
+        motion_cadence_tick=torch.tensor([31, 50], dtype=torch.int64),
+    ).tolist() == [[True], [True]]
+    assert epoch.project_recovery_postphysics_activity_mask(
+        owner=physical,
+        motion_cadence_tick=torch.tensor([98, 97], dtype=torch.int64),
+    ).tolist() == [[False], [True]]
+
+    # Guard before interpreting subtraction: MIN - (MAX - 9) wraps to age 10
+    # in int64, but a cadence tick earlier than its deadline is never active.
+    record = epoch._publication.current
+    assert record is not None
+    overflow_deadline = record.clocks.deadline_tick.clone()
+    overflow_deadline[0, 0] = torch.iinfo(torch.int64).max - 9
+    epoch._publication = replace(
+        epoch._publication,
+        current=replace(
+            record,
+            clocks=replace(record.clocks, deadline_tick=overflow_deadline),
+        ),
+    )
+    assert not epoch.project_recovery_postphysics_activity_mask(
+        owner=physical,
+        motion_cadence_tick=torch.tensor(
+            [torch.iinfo(torch.int64).min, 40], dtype=torch.int64
+        ),
+    ).any()
 
 
 def test_idle_observation_chronology_is_narrow_clone_only_and_owner_bound():
@@ -595,6 +795,32 @@ def _materialized_entries(epoch: E.ActionEpochOwner) -> tuple[E.CommitEntry, ...
     assert materialized.row_fault_bits.tolist() == [0] * epoch.num_envs
     epoch.acknowledge_drain(start=start, end=end)
     return materialized.entries
+
+
+def _runtime_fault_state(epoch: E.ActionEpochOwner):
+    return types.SimpleNamespace(
+        row_fault_bits=epoch._undrained_row_fault_bits.clone(),
+        record=epoch.current(),
+        commit_head=epoch.commit_head,
+        drain_frontier=epoch.drain_frontier,
+        next_epoch=epoch._next_epoch,
+        pending_log_ids=tuple(id(entry) for entry in epoch._publication.pending_log),
+        pending_drain=epoch._pending_drain,
+        poisoned=epoch.poisoned,
+    )
+
+
+def _assert_runtime_fault_state(epoch: E.ActionEpochOwner, expected) -> None:
+    assert torch.equal(epoch._undrained_row_fault_bits, expected.row_fault_bits)
+    _assert_record_tensors_equal(epoch.current(), expected.record)
+    assert epoch.commit_head == expected.commit_head
+    assert epoch.drain_frontier == expected.drain_frontier
+    assert epoch._next_epoch == expected.next_epoch
+    assert tuple(id(entry) for entry in epoch._publication.pending_log) == (
+        expected.pending_log_ids
+    )
+    assert epoch._pending_drain is expected.pending_drain
+    assert epoch.poisoned is expected.poisoned is False
 
 
 def test_k0_after_command_advances_only_scalar_chronology():
@@ -719,7 +945,7 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
         sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
     )
     epoch, d05, cadence, r06, playback, *_middle, physical = _ready_epoch(
-        bind_playback=True
+        bind_playback=True, bind_r07=True
     )
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
@@ -733,7 +959,8 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
     epoch.open_reward_cycle()
     for ordinal in range(E.REWARD_CONSUMER_COUNT):
         epoch.pay_reward(ordinal)
-    payment = epoch.publish_reward_payment(20)
+    assert epoch.publish_reward_payment(20) is None
+    payment = epoch.project_current_reward_payment_rows()
     paid_record = epoch.current()
     r06.previous = PreviousPaidActionEpochRows(
         valid=payment.valid.clone(),
@@ -809,8 +1036,8 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
         False,
     ]
 
-    # The next cadence contributes exactly the missing close edge.  That is
-    # the sole retirement/consume point and advances payment high-water once.
+    # Motion now contributes its independent close edge, but the R07 terminal
+    # producer cell is still outstanding.  Keep both R06 mailbox and close debt.
     cadence.projection = _MotionProjection(
         24,
         torch.zeros(2, dtype=torch.bool),
@@ -823,10 +1050,53 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
     rows = epoch.prepare_after_command_rows()
     assert rows is not None and not bool(rows.due_mask.any())
     assert epoch.current().phase[:, 0].tolist() == [
-        E.PHASE_RETIRED,
+        E.PHASE_OUTCOME_SETTLED,
         E.PHASE_IDLE,
     ]
     assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+    assert r06.consumed is not None and r06.consumed.valid.tolist() == [
+        False,
+        False,
+    ]
+    assert epoch._last_r06_paid_payment_step.tolist() == [-1, -1]
+    assert epoch.project_current_reward_payment_rows().valid.tolist() == [
+        True,
+        False,
+    ]
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+    cadence.projection = _MotionProjection(
+        10_097,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
+        episode_tick=torch.tensor([97, 6], dtype=torch.int64),
+    )
+    assert epoch.prepare_after_command_rows() is None
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+    assert epoch.project_current_reward_payment_rows().valid.tolist() == [
+        True,
+        False,
+    ]
+
+    # The prior post-physics publication is global source 10_097 while Motion's
+    # resettable per-row episode tick reaches deadline20+78 at the next
+    # boundary.  Keeping the domains asymmetric prevents a first-episode
+    # global==local fixture from hiding the terminal-source conversion.
+    _publish_clean_r07_terminal_fact(epoch, source_step=10_097)
+    cadence.projection = _MotionProjection(
+        10_098,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
+        episode_tick=torch.tensor([98, 7], dtype=torch.int64),
+    )
+    rows = epoch.prepare_after_command_rows()
+    assert rows is not None and not bool(rows.due_mask.any())
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_RETIRED,
+        E.PHASE_IDLE,
+    ]
     assert r06.consumed is not None and r06.consumed.valid.tolist() == [
         True,
         False,
@@ -845,6 +1115,220 @@ def test_paid_outcome_holds_without_close_then_retires_once_on_played_suffix(
         if entry.transition == "RETIRED"
     )
     assert sum(int(mask.to(torch.int64).sum()) for mask in retirement_masks) == 1
+
+
+@pytest.mark.parametrize(
+    "terminal_fault",
+    (
+        "missing",
+        "present_only",
+        "extra_valid_bits",
+        "owner_fault",
+        "stale_source",
+        "facts_invalid",
+        "infrastructure_fault",
+        "wrong_age",
+        "nonfinite",
+    ),
+)
+def test_invalid_r07_terminal_fact_faults_exactly_at_local_deadline_plus_78(
+    terminal_fault,
+):
+    epoch, d05, cadence, r06, *_ = _ready_epoch(bind_r07=True)
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+
+    cadence.projection = _MotionProjection(
+        10_097,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
+        episode_tick=torch.tensor([97, 4], dtype=torch.int64),
+    )
+    assert epoch.prepare_after_command_rows() is None
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+
+    if terminal_fault != "missing":
+        _publish_clean_r07_terminal_fact(epoch, source_step=10_097)
+        publication = epoch._publication
+        record = publication.current
+        assert record is not None
+        r07_slot = E.OWNER_ORDER.index("r07_recovery")
+        valid = record.fact_valid_bits.clone()
+        owner_fault = record.owner_fault_bits.clone()
+        source = record.fact_source_step.clone()
+        values = record.fact_f32.clone()
+        if terminal_fault == "present_only":
+            valid[0, 0, r07_slot] = E.r07_device.R07_EPOCH_FACT_PRESENT
+        elif terminal_fault == "extra_valid_bits":
+            valid[0, 0, r07_slot] = 7
+        elif terminal_fault == "owner_fault":
+            owner_fault[0, 0, r07_slot] = 1
+        elif terminal_fault == "stale_source":
+            source[0, 0, r07_slot] = 10_096
+        elif terminal_fault == "facts_invalid":
+            values[0, 0, r07_slot, 3] = 0.0
+        elif terminal_fault == "infrastructure_fault":
+            values[0, 0, r07_slot, 4] = 1.0
+        elif terminal_fault == "wrong_age":
+            values[0, 0, r07_slot, 6] = 76.0
+        elif terminal_fault == "nonfinite":
+            values[0, 0, r07_slot, 0] = torch.nan
+        else:  # pragma: no cover - parameter table is the independent oracle
+            raise AssertionError(terminal_fault)
+        epoch._publication = E._Publication(
+            replace(
+                record,
+                fact_valid_bits=valid,
+                owner_fault_bits=owner_fault,
+                fact_source_step=source,
+                fact_f32=values,
+            ),
+            publication.pending_log,
+        )
+
+    cadence.projection = _MotionProjection(
+        10_098,
+        torch.zeros(2, dtype=torch.bool),
+        torch.zeros(2, dtype=torch.bool),
+        torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
+        episode_tick=torch.tensor([98, 5], dtype=torch.int64),
+    )
+    rows = epoch.prepare_after_command_rows()
+    assert rows is not None and not bool(rows.due_mask.any())
+    assert epoch._undrained_row_fault_bits.tolist() == [
+        E.ROW_FAULT_R07_TERMINAL_FACT_CONTRACT,
+        0,
+    ]
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_IDLE,
+    ]
+    assert r06.consumed is not None and r06.consumed.valid.tolist() == [
+        False,
+        False,
+    ]
+    assert epoch._last_r06_paid_payment_step.tolist() == [-1, -1]
+    assert epoch.project_current_reward_payment_rows().valid.tolist() == [
+        False,
+        False,
+    ]
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+
+def test_late_r06_payment_retires_and_accepts_same_row_successor_at_next_reveal(
+    monkeypatch,
+):
+    """A pre-outcome age-77 producer cell is lifecycle debt, not admission."""
+
+    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
+    monkeypatch.setitem(
+        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
+    )
+    epoch, d05, cadence, r06, playback, *_middle, physical = _ready_epoch(
+        bind_playback=True, bind_r07=True
+    )
+    epoch.prepare_after_command_rows()
+    epoch.settle_d05_transaction(d05.arm())
+    epoch.publish_motion_playback_started(owner=playback)
+    physical.launch = _launch_packet(
+        epoch.current(), due=torch.tensor([True, False])
+    )
+    epoch.refresh_physical_launch_rows()
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_LAUNCH_SETTLED,
+        E.PHASE_IDLE,
+    ]
+
+    # deadline=20: the global post-physics source 10_097 carries local age 77.
+    # At the following after-command boundary local D+78 validates and retains
+    # it, but cannot retire before the independent R06 payment arrives.
+    _publish_clean_r07_terminal_fact(epoch, source_step=10_097)
+    cadence.projection = _MotionProjection(
+        10_098,
+        torch.zeros(2, dtype=torch.bool),
+        torch.tensor([True, False]),
+        torch.tensor(
+            [E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE],
+            dtype=torch.int64,
+        ),
+        episode_tick=torch.tensor([98, 4], dtype=torch.int64),
+    )
+    rows = epoch.prepare_after_command_rows()
+    assert rows is not None and not bool(rows.due_mask.any())
+    assert epoch.current().phase[:, 0].tolist() == [
+        E.PHASE_LAUNCH_SETTLED,
+        E.PHASE_IDLE,
+    ]
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
+    assert r06.consumed is not None and r06.consumed.valid.tolist() == [
+        False,
+        False,
+    ]
+    epoch.abort_d05_transaction(owner=d05.owner)
+
+    # The no-crossing R06 horizon settles one control later.  Reward payment is
+    # available before that control's after-command boundary, exactly when the
+    # same row is due for its successor.  The retained age-77 cell must close
+    # the third debt without becoming a D05 task-quality gate.
+    r06.outcome = _row0_outcome_packet(
+        epoch.current(), settlement_step=10_099
+    )
+    epoch.refresh_r06_outcome_rows()
+    epoch.open_reward_cycle()
+    for ordinal in range(E.REWARD_CONSUMER_COUNT):
+        epoch.pay_reward(ordinal)
+    epoch.publish_reward_payment(10_099)
+    payment = epoch.project_current_reward_payment_rows()
+    paid_record = epoch.current()
+    r06.previous = PreviousPaidActionEpochRows(
+        valid=payment.valid.clone(),
+        shot_key=payment.shot_key.clone(),
+        publication_ordinal=paid_record.publication_ordinal[:, 0].clone(),
+        settlement_step=paid_record.settlement_step[:, 0].clone(),
+        payment_step=payment.payment_step.clone(),
+    )
+    successor = _candidate(epoch.device)
+    successor_values = torch.tensor(
+        [[9], [2]], dtype=torch.int64, device=epoch.device
+    )
+    successor_rows = torch.tensor(
+        [[True], [False]], dtype=torch.bool, device=epoch.device
+    )
+    d05.candidate = replace(
+        successor,
+        identity=replace(
+            successor.identity,
+            shot_key=_key(successor_values, successor_rows),
+        ),
+    )
+    cadence.projection = _MotionProjection(
+        10_099,
+        torch.tensor([True, False]),
+        torch.zeros(2, dtype=torch.bool),
+        torch.full((2,), E.MOTION_CLOSE_NONE, dtype=torch.int64),
+        episode_tick=torch.tensor([99, 5], dtype=torch.int64),
+    )
+    rows = epoch.prepare_after_command_rows()
+    assert rows is not None
+    assert rows.due_mask.tolist() == [True, False]
+    assert rows.construct_mask.tolist() == [True, False]
+    assert r06.consumed is not None and r06.consumed.valid.tolist() == [
+        True,
+        False,
+    ]
+    assert epoch._last_r06_paid_payment_step.tolist() == [10_099, -1]
+    epoch.settle_d05_transaction(d05.arm())
+    current = epoch.current()
+    assert current.phase[:, 0].tolist() == [
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_IDLE,
+    ]
+    # The terminal-only D+78 transaction consumed ordinal 1 even though its
+    # zero-due D05 opportunity was aborted; the same-row successor is ordinal 2.
+    assert current.publication_ordinal[:, 0].tolist() == [2, -1]
+    assert current.identity.shot_key.shot_index[:, 0].tolist() == [39, -1]
+    assert epoch._undrained_row_fault_bits.tolist() == [0, 0]
 
 
 @pytest.mark.parametrize(
@@ -991,39 +1475,101 @@ def test_runtime_row_fault_latch_uses_exact_r06_and_real_motion_owners(device):
 @pytest.mark.parametrize(
     "device", ["cpu"] + (["cuda:0"] if torch.cuda.is_available() else [])
 )
-def test_runtime_row_fault_latch_rejects_foreign_bit_compound_and_tensor_abi(
+def test_runtime_row_fault_latch_rejects_foreign_owner_bit_matrix_without_mutation(
     device,
 ):
-    epoch, _d05, _cadence, r06, *_ = _ready_epoch(device=device)
+    epoch, _d05, _cadence, r06, playback, *_ = _ready_epoch(
+        bind_playback=True, device=device
+    )
+    r03 = object()
+    epoch.bind_fact_owner("r03_strike_fact", r03)
+    owners = {
+        "motion": playback,
+        "r03_strike_fact": r03,
+        "r06_landing_outcome": r06,
+    }
     rows = torch.tensor([True, False], dtype=torch.bool, device=epoch.device)
-    baseline = epoch._undrained_row_fault_bits.clone()
+    baseline = _runtime_fault_state(epoch)
+
+    for owner_kind, owner in owners.items():
+        allowed = {
+            bit
+            for _name, bit in _RUNTIME_OWNER_ALLOWED_NAMED_BIT_ORACLE[
+                owner_kind
+            ]
+        }
+        for forbidden_bit, _forbidden_name in _ROW_FAULT_NAMED_BIT_ORACLE:
+            if forbidden_bit in allowed:
+                continue
+            with pytest.raises(E.ActionEpochError, match="reason bit differs"):
+                epoch.latch_runtime_row_fault(
+                    owner_kind,
+                    forbidden_bit,
+                    rows,
+                    owner=owner,
+                )
+            _assert_runtime_fault_state(epoch, baseline)
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu"] + (["cuda:0"] if torch.cuda.is_available() else [])
+)
+def test_runtime_row_fault_latch_rejects_invalid_reasons_and_tensor_abi_cleanly(
+    device,
+):
+    epoch, _d05, _cadence, r06, playback, *_ = _ready_epoch(
+        bind_playback=True, device=device
+    )
+    r03 = object()
+    epoch.bind_fact_owner("r03_strike_fact", r03)
+    owners = {
+        "motion": playback,
+        "r03_strike_fact": r03,
+        "r06_landing_outcome": r06,
+    }
+    rows = torch.tensor([True, False], dtype=torch.bool, device=epoch.device)
+    baseline = _runtime_fault_state(epoch)
+
+    for owner_kind, owner in owners.items():
+        own_bits = tuple(
+            bit
+            for _name, bit in _RUNTIME_OWNER_ALLOWED_NAMED_BIT_ORACLE[
+                owner_kind
+            ]
+        )
+        for invalid_reason in (
+            0,
+            1 << 62,
+            True,
+            "not-a-bit",
+            1.0,
+            own_bits[0] | own_bits[1],
+        ):
+            with pytest.raises(E.ActionEpochError, match="reason bit differs"):
+                epoch.latch_runtime_row_fault(
+                    owner_kind,
+                    invalid_reason,
+                    rows,
+                    owner=owner,
+                )
+            _assert_runtime_fault_state(epoch, baseline)
 
     with pytest.raises(E.ActionEpochError, match="owner binding differs"):
         epoch.latch_runtime_row_fault(
             "r06_landing_outcome",
-            E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+            1 << 13,
             rows,
             owner=object(),
         )
+    _assert_runtime_fault_state(epoch, baseline)
     with pytest.raises(E.ActionEpochError, match="owner binding differs"):
         epoch.latch_runtime_row_fault(
             [],
-            E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE,
+            1 << 13,
             rows,
             owner=r06,
         )
-    for forbidden_bit in (
-        E.ROW_FAULT_MOTION_CLOSE_CONTRACT,
-        E.ROW_FAULT_R06_OUTCOME_PROJECTION_DUPLICATE
-        | E.ROW_FAULT_R06_PAYMENT_MAILBOX_DUPLICATE,
-    ):
-        with pytest.raises(E.ActionEpochError, match="reason bit differs"):
-            epoch.latch_runtime_row_fault(
-                "r06_landing_outcome",
-                forbidden_bit,
-                rows,
-                owner=r06,
-            )
+    _assert_runtime_fault_state(epoch, baseline)
     for malformed in (
         torch.zeros(3, dtype=torch.bool, device=epoch.device),
         torch.zeros(4, dtype=torch.bool, device=epoch.device)[::2],
@@ -1036,9 +1582,10 @@ def test_runtime_row_fault_latch_rejects_foreign_bit_compound_and_tensor_abi(
                 malformed,
                 owner=r06,
             )
-    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
+        _assert_runtime_fault_state(epoch, baseline)
 
     start, end = epoch.prepare_drain()
+    frozen_baseline = _runtime_fault_state(epoch)
     with pytest.raises(E.ActionEpochError, match="frozen drain"):
         epoch.latch_runtime_row_fault(
             "r06_landing_outcome",
@@ -1046,27 +1593,44 @@ def test_runtime_row_fault_latch_rejects_foreign_bit_compound_and_tensor_abi(
             rows,
             owner=r06,
         )
-    assert torch.equal(epoch._undrained_row_fault_bits, baseline)
+    _assert_runtime_fault_state(epoch, frozen_baseline)
     epoch.abort_drain(start=start, end=end)
 
 
-def test_row_fault_registry_is_unique_named_single_bits_with_owner_subsets():
-    bits = tuple(bit for bit, _name in E.ACTION_EPOCH_ROW_FAULT_NAMES)
-    names = tuple(name for _bit, name in E.ACTION_EPOCH_ROW_FAULT_NAMES)
-    assert len(bits) == 36
+def test_runtime_row_fault_r03_positive_bit_latches_only_selected_row():
+    epoch, _d05, _cadence, _r06, _playback, *_ = _ready_epoch()
+    r03 = object()
+    epoch.bind_fact_owner("r03_strike_fact", r03)
+    rows = torch.tensor([True, False], dtype=torch.bool, device=epoch.device)
+
+    safe = epoch.latch_runtime_row_fault(
+        "r03_strike_fact", 1 << 27, rows, owner=r03
+    )
+
+    assert safe.tolist() == [False, True]
+    assert epoch._undrained_row_fault_bits.tolist() == [1 << 27, 0]
+    assert not epoch.poisoned
+
+
+def test_row_fault_registry_matches_independent_named_owner_oracle():
+    assert tuple(E.ACTION_EPOCH_ROW_FAULT_NAMES) == _ROW_FAULT_NAMED_BIT_ORACLE
+    bits = tuple(bit for bit, _name in _ROW_FAULT_NAMED_BIT_ORACLE)
+    names = tuple(name for _bit, name in _ROW_FAULT_NAMED_BIT_ORACLE)
     assert len(bits) == len(set(bits))
     assert len(names) == len(set(names))
     assert all(bit > 0 and bit & (bit - 1) == 0 for bit in bits)
     assert E._KNOWN_ROW_FAULT_MASK == sum(bits)
-    assert set(E._RUNTIME_ROW_FAULT_BITS_BY_OWNER) == {
-        "motion",
-        "r03_strike_fact",
-        "r06_landing_outcome",
+    expected_by_owner = {
+        owner_kind: frozenset(bit for _name, bit in named_bits)
+        for owner_kind, named_bits in (
+            _RUNTIME_OWNER_ALLOWED_NAMED_BIT_ORACLE.items()
+        )
     }
-    assert all(
-        allowed and allowed.issubset(bits)
-        for allowed in E._RUNTIME_ROW_FAULT_BITS_BY_OWNER.values()
-    )
+    assert E._RUNTIME_ROW_FAULT_BITS_BY_OWNER == expected_by_owner
+    named_by_bit = dict(_ROW_FAULT_NAMED_BIT_ORACLE)
+    for named_bits in _RUNTIME_OWNER_ALLOWED_NAMED_BIT_ORACLE.values():
+        for expected_name, bit in named_bits:
+            assert named_by_bit[bit] == expected_name
 
 
 def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(monkeypatch):
@@ -1090,6 +1654,8 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
     physical = _Physical()
     epoch.bind_fact_owner("physical_ball", physical)
     epoch.bind_async_owner("physical_ball", physical)
+    epoch._test_r07_owner = object()
+    epoch.bind_fact_owner("r07_recovery", epoch._test_r07_owner)
     playback = _PlaybackOwner(epoch)
     epoch.bind_motion_playback_owner(playback)
 
@@ -1147,7 +1713,8 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
     epoch.open_reward_cycle()
     for ordinal in range(E.REWARD_CONSUMER_COUNT):
         epoch.pay_reward(ordinal)
-    payment = epoch.publish_reward_payment(77)
+    assert epoch.publish_reward_payment(77) is None
+    payment = epoch.project_current_reward_payment_rows()
     assert payment.valid.tolist() == [True, False]
     assert payment.payment_step.tolist() == [77, -1]
     paid_record = epoch.current()
@@ -1168,14 +1735,20 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
         task=replace(peer.task, task_valid=peer_construct),
         construction_admissible=peer_construct,
     )
+    # Global common step 10_080 deliberately differs from row0's Motion terminal
+    # boundary 98 while remaining a reachable post-reset chronology.  The
+    # retained source is still the immediately prior global post-physics step,
+    # while values[2]/[5] remain zero.
+    _publish_clean_r07_terminal_fact(epoch, source_step=10_079)
     cadence.projection = _MotionProjection(
-        80,
+        10_080,
         torch.tensor([False, True]),
         torch.tensor([True, False]),
         torch.tensor(
             [E.MOTION_CLOSE_PLAYED_SUFFIX, E.MOTION_CLOSE_NONE],
             dtype=torch.int64,
         ),
+        episode_tick=torch.tensor([98, 4], dtype=torch.int64),
     )
     epoch.prepare_after_command_rows()
     epoch.settle_d05_transaction(d05.arm())
@@ -1198,7 +1771,7 @@ def test_accept_is_masked_reject_is_event_only_and_payment_uses_control_step(mon
     )
     assert retired_delta["event_mask"].tolist() == [[True], [False]]
     assert retired_delta["payment_step"].tolist() == [[77], [-1]]
-    assert retired_delta["retirement_step"].tolist() == [[80], [-1]]
+    assert retired_delta["retirement_step"].tolist() == [[10_080], [-1]]
     assert torch.all(
         retired_delta["payment_step"][retired_delta["event_mask"]]
         <= retired_delta["retirement_step"][retired_delta["event_mask"]]
@@ -1838,45 +2411,6 @@ def test_physical_owner_fault_latches_before_business_write_and_keeps_raw_audit(
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
     assert materialized.row_fault_bits.tolist() == [expected_row_fault, 0]
-
-
-def test_physical_producer_fault_aborts_lean_preoptimizer_before_decode(
-    monkeypatch,
-):
-    monkeypatch.setitem(sys.modules, FAKE_R06_MODULE.__name__, FAKE_R06_MODULE)
-    monkeypatch.setitem(
-        sys.modules, FAKE_PHYSICAL_MODULE.__name__, FAKE_PHYSICAL_MODULE
-    )
-    epoch, _r06, physical = _two_row_launched_epoch()
-    packet = _physical_packet(epoch.current(), flight_index=0, contact=False)
-    packet.owner_fault_bits[0, 0] = (
-        PHYSICAL_MODULE.PHYSICAL_EPOCH_FAULT_POSTPHYSICS_PRODUCER
-    )
-    packet.producer_contract_fault[0, 0] = True
-    physical.projection = packet
-    epoch.refresh_physical_postphysics_rows()
-    reward = LEAN_REWARDS.LeanActionEpochRewardGraph(epoch_owner=epoch)
-    runtime = LEAN.ActionBallFullMdpLeanRuntimeOwner(
-        env=object(),
-        runtime_lease=object(),
-        epoch_owner=epoch,
-        reward_graph=reward,
-        r05_runtime=object(),
-        motion=object(),
-        racket=object(),
-        physical_ball=physical,
-        r06_landing_outcome=object(),
-        r03_strike_fact=object(),
-        r07_recovery=object(),
-    )
-
-    with pytest.raises(
-        LEAN.ActionBallFullMdpEpochRowFaultError,
-        match="physical_postphysics_producer",
-    ):
-        runtime.prepare_pre_optimizer_ppo_boundary(
-            update_index=0, completed_environment_steps=48
-        )
 
 
 @pytest.mark.parametrize(
@@ -3695,317 +4229,6 @@ def test_active_epoch_carry_source_rejects_nonzero_named_row_fault_bits():
         source._lean_carry_capture(lease)
 
     assert torch.equal(source._undrained_row_fault_bits, before)
-
-
-@pytest.mark.skip(reason="superseded by Lean-root composite carry transaction")
-def test_private_epoch_carry_restores_record_frontier_payment_and_milestone():
-    source = _portable_epoch_source()
-    transfer_calls = []
-    original_transfer = E._single_d2h_packed_bytes
-    original_milestone_transfer = E.milestone_tensors._single_d2h_checkpoint_carry
-
-    def counted_transfer(value):
-        transfer_calls.append(value)
-        return original_transfer(value)
-
-    def forbidden_separate_milestone_transfer(_views):
-        raise AssertionError("Epoch capture must include milestone in its packed D2H")
-
-    E._single_d2h_packed_bytes = counted_transfer
-    E.milestone_tensors._single_d2h_checkpoint_carry = (
-        forbidden_separate_milestone_transfer
-    )
-    try:
-        state = source._checkpoint_carry_state()
-    finally:
-        E._single_d2h_packed_bytes = original_transfer
-        E.milestone_tensors._single_d2h_checkpoint_carry = (
-            original_milestone_transfer
-        )
-    assert len(transfer_calls) == 1
-    assert state.current.phase.device.type == "cpu"
-    assert state.current.phase[0, 0] == E.PHASE_REVEAL_COMMITTED
-
-    target, *_ = _ready_epoch()
-    token = target._prepare_restore_carry(state)
-    assert not hasattr(token, "_state")
-    assert not hasattr(token, "_milestone_token")
-    action_catalog = target._action_uids_by_slot
-    family_catalog = target._family_codes_by_slot
-    state.current.phase.fill_(123)  # prepared target must not alias its input
-    target._commit_restore_carry(token)
-
-    _assert_record_tensors_equal(source.current(), target.current())
-    assert target.commit_head == source.commit_head
-    assert target.drain_frontier == source.drain_frontier
-    assert target._next_epoch == source._next_epoch
-    assert target._reward_ordinal == E.REWARD_CONSUMER_COUNT
-    assert torch.equal(
-        target.project_current_reward_payment_rows().shot_key.action_uid,
-        source.project_current_reward_payment_rows().shot_key.action_uid,
-    )
-    assert target.milestone.open_episode_return.tolist() == [1.25, -0.5]
-    assert target.milestone.r03_seen[:, 0].tolist() == [True, False]
-    assert target.milestone.r07_ready_seen[:, 0].tolist() == [False, True]
-    assert target._action_uids_by_slot is action_catalog
-    assert target._family_codes_by_slot is family_catalog
-    assert target._reset_generation is target._publication.current.reset_generation
-    assert target._reward_cycle_age is target._publication.current.reward_cycle_age
-    assert target._reward_cycle_fault is target._publication.current.reward_cycle_fault
-    with pytest.raises(E.ActionEpochError):
-        target._commit_restore_carry(token)
-    with pytest.raises(E.ActionEpochError):
-        target._abort_restore_carry(token)
-    target.open_reward_cycle()  # restored closed chronology starts the next cycle
-    target.pay_reward(0)
-
-
-@pytest.mark.skip(reason="superseded by central opaque authority and alias checks")
-def test_private_epoch_restore_rejects_foreign_catalog_alias_and_token():
-    source = _portable_epoch_source()
-    state = source._checkpoint_carry_state()
-    target, *_ = _ready_epoch()
-    before = target.current()
-
-    foreign_catalog = replace(
-        state, family_codes_by_slot=torch.tensor([2], dtype=torch.int64)
-    )
-    with pytest.raises(E.ActionEpochError):
-        target._prepare_restore_carry(foreign_catalog)
-    _assert_record_tensors_equal(before, target.current())
-
-    aliased = replace(
-        state,
-        last_r06_paid_payment_step=state.current_payment_rows.payment_step,
-    )
-    with pytest.raises(E.ActionEpochError):
-        target._prepare_restore_carry(aliased)
-    _assert_record_tensors_equal(before, target.current())
-
-    non_tensor_catalog = replace(state, action_uids_by_slot=(21,))
-    with pytest.raises(E.ActionEpochError):
-        target._prepare_restore_carry(non_tensor_catalog)
-
-    foreign_version = replace(
-        state, current=replace(state.current, version=state.current.version + 1)
-    )
-    with pytest.raises(E.ActionEpochError):
-        target._prepare_restore_carry(foreign_version)
-
-    malformed_target, *_ = _ready_epoch()
-    malformed_current = malformed_target._publication.current
-    malformed_target._publication = E._Publication(
-        replace(malformed_current, phase=malformed_current.phase[:, :0]),
-        malformed_target._publication.pending_log,
-    )
-    with pytest.raises(E.ActionEpochError):
-        malformed_target._prepare_restore_carry(state)
-
-    overflow_target, *_ = _ready_epoch()
-    overflow_target._undrained_row_fault_bits[0] = E.ROW_FAULT_RESET_GENESIS_CONTRACT
-    with pytest.raises(E.ActionEpochError):
-        overflow_target._prepare_restore_carry(state)
-
-    aliased_target, *_ = _ready_epoch()
-    aliased_target.milestone.r07_ready_seen = aliased_target.milestone.r03_seen
-    with pytest.raises(RuntimeError, match="tensors alias"):
-        aliased_target._prepare_restore_carry(state)
-
-    cross_aliased_target, *_ = _ready_epoch()
-    cross_aliased_target.milestone.r03_seen = (
-        cross_aliased_target._undrained_row_fault_bits[:, None]
-    )
-    with pytest.raises(E.ActionEpochError, match="aliases"):
-        cross_aliased_target._prepare_restore_carry(state)
-
-    peer, *_ = _ready_epoch()
-    token = target._prepare_restore_carry(state)
-    with pytest.raises(E.ActionEpochError):
-        peer._commit_restore_carry(token)
-    target._abort_restore_carry(token)
-    with pytest.raises(E.ActionEpochError):
-        target._commit_restore_carry(token)
-    with pytest.raises(E.ActionEpochError):
-        target._abort_restore_carry(token)
-    target.prepare_after_command_rows()  # abort reopens the original dormant owner
-
-
-@pytest.mark.skip(reason="superseded by central typed schema validation")
-def test_epoch_carry_rejects_foreign_chronology_and_nested_aliases():
-    source = _portable_epoch_source()
-    state = source._checkpoint_carry_state()
-    target, *_ = _ready_epoch()
-
-    slot = state.current.current_task_slot.clone()
-    slot[0] = state.shot_slot_capacity
-    publication = state.current.publication_ordinal.clone()
-    publication[0, 0] = state.next_epoch
-    key_reset = state.current.identity.shot_key.reset_generation.clone()
-    key_reset[0, 0] += 1
-    mutants = (
-        replace(state, next_epoch=state.current.version + 1),
-        replace(state, last_motion_common_step=-1),
-        replace(state, current=replace(state.current, current_task_slot=slot)),
-        replace(
-            state, current=replace(state.current, publication_ordinal=publication)
-        ),
-        replace(state, current=replace(state.current, epoch=0)),
-        replace(
-            state,
-            current=replace(
-                state.current,
-                identity=replace(
-                    state.current.identity,
-                    shot_key=replace(
-                        state.current.identity.shot_key,
-                        reset_generation=key_reset,
-                    ),
-                ),
-            ),
-        ),
-        replace(
-            state,
-            milestone_carry=replace(
-                state.milestone_carry,
-                r03_seen=state.current.launch_succeeded,
-            ),
-        ),
-        replace(
-            state,
-            milestone_carry=replace(
-                state.milestone_carry,
-                open_episode_return=state.current.reset_generation.view(
-                    torch.float64
-                ),
-            ),
-        ),
-    )
-    for mutant in mutants:
-        with pytest.raises((E.ActionEpochError, RuntimeError)):
-            target._prepare_restore_carry(mutant)
-
-    live_alias = _portable_epoch_source()
-    live_alias.milestone.r03_seen = (
-        live_alias._publication.current.launch_succeeded
-    )
-    with pytest.raises(E.ActionEpochError):
-        live_alias._checkpoint_carry_state()
-
-    mirror_drift = _portable_epoch_source()
-    mirror_drift._reset_generation = mirror_drift._reset_generation.clone()
-    mirror_drift._reset_generation[0] += 1
-    with pytest.raises(E.ActionEpochError, match="owner mirror"):
-        mirror_drift._checkpoint_carry_state()
-
-
-@pytest.mark.skip(reason="superseded by root cross-owner invariant phase")
-def test_epoch_carry_rejects_foreign_payment_chronology(monkeypatch):
-    state = _portable_paid_epoch_source(monkeypatch)._checkpoint_carry_state()
-    assert state.current_payment_rows.valid.tolist() == [True, False]
-    target, *_ = _ready_epoch()
-
-    foreign_key = state.current_payment_rows.shot_key.clone()
-    foreign_key.shot_index[0] += 1
-    wrong_phase = state.current.phase.clone()
-    wrong_phase[0, 0] = E.PHASE_REVEAL_COMMITTED
-    wrong_step = state.current_payment_rows.payment_step.clone()
-    wrong_step[0] += 1
-    late_settlement = state.current.settlement_step.clone()
-    late_settlement[0, 0] = state.current_payment_rows.payment_step[0] + 1
-    absent_settlement = state.current.settlement_step.clone()
-    absent_settlement[0, 0] = -1
-    absent_due = state.current.reward_due.clone()
-    absent_due[0].zero_()
-    absent_paid = state.current.reward_paid.clone()
-    absent_paid[0].zero_()
-    missing_projection_valid = state.current_payment_rows.valid.clone()
-    missing_projection_valid[0] = False
-    missing_projection_step = state.current_payment_rows.payment_step.clone()
-    missing_projection_step[0] = -1
-    mutants = (
-        replace(
-            state,
-            current_payment_rows=replace(
-                state.current_payment_rows, shot_key=foreign_key
-            ),
-        ),
-        replace(state, current=replace(state.current, phase=wrong_phase)),
-        replace(
-            state,
-            current_payment_rows=replace(
-                state.current_payment_rows, payment_step=wrong_step
-            ),
-        ),
-        replace(
-            state,
-            current=replace(state.current, settlement_step=late_settlement),
-        ),
-        replace(
-            state,
-            current=replace(state.current, settlement_step=absent_settlement),
-        ),
-        replace(
-            state,
-            current=replace(
-                state.current,
-                reward_due=absent_due,
-                reward_paid=absent_paid,
-            ),
-        ),
-        replace(
-            state,
-            current_payment_rows=replace(
-                state.current_payment_rows,
-                valid=missing_projection_valid,
-                payment_step=missing_projection_step,
-            ),
-        ),
-    )
-    for mutant in mutants:
-        with pytest.raises(E.ActionEpochError):
-            target._prepare_restore_carry(mutant)
-
-
-@pytest.mark.skip(reason="superseded by graph-wide lease and process fail-stop")
-def test_prepared_epoch_restore_blocks_writers_and_partial_commit_is_no_retry(
-    monkeypatch,
-):
-    state = _portable_epoch_source()._checkpoint_carry_state()
-    target, *_ = _ready_epoch()
-    token = target._prepare_restore_carry(state)
-    with pytest.raises(E.ActionEpochError):
-        target.prepare_after_command_rows()
-
-    milestone_type = type(target.milestone)
-    original_commit = milestone_type._commit_restore_carry
-
-    def fail_after_milestone_commit(owner, milestone_token):
-        original_commit(owner, milestone_token)
-        raise RuntimeError("injected child commit failure")
-
-    monkeypatch.setattr(
-        milestone_type, "_commit_restore_carry", fail_after_milestone_commit
-    )
-    with pytest.raises(RuntimeError, match="injected child commit failure"):
-        target._commit_restore_carry(token)
-    assert target.poisoned
-    assert target.milestone.open_episode_return.tolist() == [1.25, -0.5]
-    with pytest.raises(E.ActionEpochError):
-        target._commit_restore_carry(token)
-    with pytest.raises(E.ActionEpochError):
-        target._abort_restore_carry(token)
-
-
-@pytest.mark.skip(reason="superseded by root durable-ACK capture preflight")
-def test_epoch_carry_capture_requires_ack_boundary_and_exact_live_abi():
-    epoch, *_ = _ready_epoch()
-    with pytest.raises(E.ActionEpochError):
-        epoch._checkpoint_carry_state()  # genesis journal is not ACKed
-    _materialized_entries(epoch)
-    epoch._action_uids_by_slot = torch.empty(0, dtype=torch.int64)
-    epoch._family_codes_by_slot = torch.empty(0, dtype=torch.int64)
-    with pytest.raises(E.ActionEpochError):
-        epoch._checkpoint_carry_state()
 
 
 @pytest.mark.parametrize(

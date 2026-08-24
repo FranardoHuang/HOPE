@@ -175,6 +175,51 @@ def _frame_zero(command):
     }
 
 
+def test_playback_active_accessor_is_exact_zero_copy_motion_authority():
+    command, _device_owner, _authority = _fresh_command(2)
+    active = command._action_ball_continuous_canonical_playback_started
+    assert command._action_ball_continuous_canonical_phase.tolist() == [
+        C.ACTION_BALL_CONTINUOUS_CANONICAL_RECOVER_HIDDEN,
+        C.ACTION_BALL_CONTINUOUS_CANONICAL_RECOVER_HIDDEN,
+    ]
+    assert not bool(active.any())
+
+    # Focused phase projection of the existing owner tensor: prepare is false,
+    # swing/follow are true, and suffix/recovery clears it again.  The accessor
+    # must return that exact storage rather than reconstructing from phase.
+    command._action_ball_continuous_canonical_phase.copy_(
+        torch.tensor(
+            [
+                C.ACTION_BALL_CONTINUOUS_CANONICAL_PREPARE_VISIBLE,
+                C.ACTION_BALL_CONTINUOUS_CANONICAL_SWING,
+            ],
+            dtype=torch.int64,
+        )
+    )
+    active.copy_(torch.tensor([False, True], dtype=torch.bool))
+
+    exposed = command.action_ball_full_mdp_playback_active_mask()
+
+    assert exposed is active
+    assert exposed.tolist() == [False, True]
+    active.copy_(torch.tensor([False, True], dtype=torch.bool))
+    command._action_ball_continuous_canonical_phase.copy_(
+        torch.tensor(
+            [
+                C.ACTION_BALL_CONTINUOUS_CANONICAL_RECOVER_HIDDEN,
+                C.ACTION_BALL_CONTINUOUS_CANONICAL_FOLLOW_THROUGH,
+            ],
+            dtype=torch.int64,
+        )
+    )
+    assert exposed.tolist() == [False, True]
+    active.zero_()
+    command._action_ball_continuous_canonical_phase.fill_(
+        C.ACTION_BALL_CONTINUOUS_CANONICAL_READY_HOLD
+    )
+    assert not bool(exposed.any())
+
+
 def _bind_exact_accept_test_owners(command, d05_owner, epoch_owner) -> None:
     """Finish the exact fresh ActionEpoch construction omitted by its unit stub."""
 

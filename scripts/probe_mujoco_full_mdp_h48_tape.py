@@ -29,11 +29,17 @@ CONFIG_SHA256 = "4dbd3168fd24ac12f544509b136b2c4c1457c260f1e829de84c155a2f60479e
 LANE = ROOT / "hope_training/whole_body_tracking/mjlab_lane"
 RUNNER = LANE / "mujoco_gpu_ac_full_mdp_wait_rsl3.py"
 ENV_SOURCE = LANE / "mujoco_gpu_ac_full_mdp_initial_wait_env.py"
+REWARD_CONTRACT_SOURCE = (
+    ROOT
+    / "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp/"
+    "action_ball_full_mdp_reward_contract.py"
+)
 ARRAYS_NAME = "arrays.npz"
 SUMMARY_NAME = "summary.json"
 FLOAT_FIELDS = (
     "initial_qpos", "initial_qvel", "initial_actor", "initial_critic",
-    "reward20", "actor203", "critic219", "qpos", "qvel",
+    "reward_terms", "actor203", "critic219", "qpos", "qvel",
 )
 DISCRETE_FIELDS = (
     "done", "termination_bits", "time_out", "backend_table_contact",
@@ -117,6 +123,11 @@ def _load_source(path: Path, name: str):
         raise
     return module
 
+reward_contract = _load_source(
+    REWARD_CONTRACT_SOURCE, "_hope_h48_reward_contract"
+)
+REWARD_TERM_COUNT = reward_contract.REWARD_TERM_COUNT
+
 def _fresh_root(path: Path) -> Path:
     if not path.is_absolute() or path.name in ("", ".", "..") or os.path.lexists(path):
         raise ProbeError("output root must be one absent absolute path")
@@ -199,17 +210,18 @@ def _probe(output_root: Path, ready_pose: Path) -> dict:
             "action_slot": extras["full_a_action_slot"],
             "action_uid": extras["full_a_action_uid"],
             "mount_normal_sign": extras["full_a_mount_normal_sign"],
-            "reward20": extras["reward_terms"], "actor203": observations["policy"],
+            "reward_terms": extras["reward_terms"], "actor203": observations["policy"],
             "critic219": observations["critic"], "qpos": env.sim.data.qpos,
             "qvel": env.sim.data.qvel}
         mapping.update({"event__" + name: extras[name] for name in event_names})
-        if (tuple(mapping["reward20"].shape) != (cfg["num_envs"], 20)
+        if (tuple(mapping["reward_terms"].shape)
+                != (cfg["num_envs"], REWARD_TERM_COUNT)
                 or tuple(mapping["actor203"].shape) != (cfg["num_envs"], 203)
                 or tuple(mapping["critic219"].shape) != (cfg["num_envs"], 219)
-                or not torch.equal(reward, mapping["reward20"].sum(dim=1))
+                or not torch.equal(reward, mapping["reward_terms"].sum(dim=1))
                 or not torch.equal(mapping["actor203"], mapping["critic219"][:, :203])
                 or any(not bool(torch.isfinite(mapping[name]).all()) for name in
-                       ("reward20", "actor203", "critic219", "qpos", "qvel"))):
+                       ("reward_terms", "actor203", "critic219", "qpos", "qvel"))):
             raise ProbeError("Full-A H48 numeric/ABI surface differs")
         current = {name: value.detach().cpu().numpy().copy()
                    for name, value in mapping.items()}
@@ -265,7 +277,8 @@ def _load_record(root: Path):
     if set(arrays) != base | events or not required_events <= events:
         raise ProbeError("probe record array surface differs")
     expected = {"actions": (48, 64, 31), "initial_actor": (64, 203),
-        "initial_critic": (64, 219), "reward20": (48, 64, 20),
+        "initial_critic": (64, 219),
+        "reward_terms": (48, 64, REWARD_TERM_COUNT),
         "actor203": (48, 64, 203), "critic219": (48, 64, 219)}
     expected.update({name: (48, 64) for name in (*DISCRETE_FIELDS, *events)})
     for name, shape in expected.items():

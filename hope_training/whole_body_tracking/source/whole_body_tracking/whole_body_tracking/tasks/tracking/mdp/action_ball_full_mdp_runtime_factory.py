@@ -26,6 +26,11 @@ import weakref
 
 import torch
 
+try:
+    from . import action_ball_full_mdp_reward_contract as reward_contract
+except ImportError:
+    import action_ball_full_mdp_reward_contract as reward_contract
+
 
 RUNTIME_INTEGRATED = False
 LAUNCH_AUTHORIZED = False
@@ -458,9 +463,12 @@ def _manager_cfg_rows(
             "materialized RewardManager config must be an ordered plain dict"
         )
     names = tuple(term.manager_name for term in templates)
-    if tuple(manager_cfg) != names or len(names) != 20:
+    if (
+        tuple(manager_cfg) != names
+        or names != reward_contract.MANAGER_NAMES
+    ):
         raise ActionBallFullMdpRewardMaterializationHold(
-            "installed RewardManager graph is not the exact ordered twenty"
+            "installed RewardManager graph differs from the shared order"
         )
     rows: list[dict[str, object]] = []
     for index, template in enumerate(templates):
@@ -484,7 +492,7 @@ def _manager_cfg_rows(
                 f"installed Reward weight is not finite positive: {template.manager_name}"
             )
         params = term.params
-        lifecycle = index < 14
+        lifecycle = index < reward_contract.LIFECYCLE_PAYMENT_COUNT
         if type(params) is not dict or (
             lifecycle and params.get("graph_attr") != graph_attr
         ) or (not lifecycle and "graph_attr" in params):
@@ -499,9 +507,21 @@ def _manager_cfg_rows(
             raise ActionBallFullMdpRewardMaterializationHold(
                 f"installed Reward params differ: {template.manager_name}"
             )
+        if any(
+            params[name] != expected
+            for name, expected in template.fixed_func_params
+        ):
+            raise ActionBallFullMdpRewardMaterializationHold(
+                f"installed fixed Reward params differ: {template.manager_name}"
+            )
         normalized_params = {}
         for name, value in sorted(params.items()):
-            if isinstance(value, bool) or type(value) not in (str, int, float):
+            if isinstance(value, bool) or type(value) not in (
+                str,
+                int,
+                float,
+                tuple,
+            ):
                 raise ActionBallFullMdpRewardMaterializationHold(
                     f"installed Reward param is not canonical: {template.manager_name}.{name}"
                 )
@@ -512,6 +532,19 @@ def _manager_cfg_rows(
                         f"installed Reward param is nonfinite: {template.manager_name}.{name}"
                     )
                 normalized_params[name] = {"float_hex": numeric.hex()}
+            elif type(value) is tuple:
+                if (
+                    name != "body_names"
+                    or not value
+                    or any(type(item) is not str or not item for item in value)
+                    or len(set(value)) != len(value)
+                    or reward_contract.HELD_RACKET_WRIST_BODY_NAME in value
+                ):
+                    raise ActionBallFullMdpRewardMaterializationHold(
+                        "installed Reward body scope is not canonical: "
+                        + template.manager_name
+                    )
+                normalized_params[name] = list(value)
             else:
                 normalized_params[name] = value
         rows.append(
@@ -1776,7 +1809,7 @@ def materialize_action_ball_full_mdp_reward_manager(
     numeric_authority_receipt: object,
     reward_graph: object,
 ) -> ActionBallFullMdpInstalledRewardGraphReceipt:
-    """Consume one authority and atomically install its exact 20-term graph.
+    """Consume one authority and atomically install the shared Reward graph.
 
     This does not construct any of the four absent production producers and it
     never converts a diagnostic authority or graph into runtime/launch
@@ -1806,7 +1839,7 @@ def materialize_action_ball_full_mdp_reward_manager(
     blockers = tuple(config.action_ball_full_mdp_reward_template_blockers(template))
     if blockers:
         raise ActionBallFullMdpRewardMaterializationHold(
-            "dedicated twenty-term Reward template differs: " + ",".join(blockers)
+            "dedicated shared Reward template differs: " + ",".join(blockers)
         )
     if hasattr(env, REWARD_GRAPH_ATTR) or hasattr(env, INSTALLED_REWARD_RECEIPT_ATTR):
         raise ActionBallFullMdpRewardMaterializationHold(
@@ -1814,8 +1847,12 @@ def materialize_action_ball_full_mdp_reward_manager(
         )
     templates = tuple(config.ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES)
     if (
-        len(templates) != 20
-        or tuple(term.payment_consumer for term in templates[:14])
+        tuple(term.manager_name for term in templates)
+        != reward_contract.MANAGER_NAMES
+        or tuple(
+            term.payment_consumer
+            for term in templates[: reward_contract.LIFECYCLE_PAYMENT_COUNT]
+        )
         != tuple(rewards.ORDERED_CONSUMERS)
     ):
         raise ActionBallFullMdpRewardMaterializationHold(
@@ -1846,7 +1883,11 @@ def materialize_action_ball_full_mdp_reward_manager(
 
     materialized: dict[str, object] = {}
     for index, term_template in enumerate(templates):
-        params = {"graph_attr": REWARD_GRAPH_ATTR} if index < 14 else {}
+        params = (
+            {"graph_attr": REWARD_GRAPH_ATTR}
+            if index < reward_contract.LIFECYCLE_PAYMENT_COUNT
+            else {}
+        )
         if term_template.weight_source == config.ACTION_BALL_FULL_MDP_WEIGHT_SOURCE:
             if term_template.manager_weight is not None:
                 raise ActionBallFullMdpRewardMaterializationHold(
@@ -1857,16 +1898,19 @@ def materialize_action_ball_full_mdp_reward_manager(
                 label=term_template.manager_weight_path,
             )
         elif (
-            index == 13
+            index == reward_contract.LIFECYCLE_PAYMENT_COUNT - 1
             and term_template.weight_source
             == config.ACTION_BALL_FULL_MDP_FIXED_WEIGHT_SOURCE
             and term_template.manager_weight == 1.0
         ):
             manager_weight = 1.0
         elif (
-            index >= 14
+            index >= reward_contract.LIFECYCLE_PAYMENT_COUNT
             and term_template.weight_source
-            == config.ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE
+            in (
+                config.ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE,
+                config.ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE,
+            )
             and term_template.manager_weight is not None
         ):
             manager_weight = _positive_host_number(
@@ -1974,7 +2018,7 @@ def require_owned_action_ball_full_mdp_installed_reward_graph(
     env: object,
     reward_graph: object,
 ) -> ActionBallFullMdpInstalledRewardGraphView:
-    """Reverse-derive and authenticate the currently installed 20-term graph."""
+    """Reverse-derive and authenticate the installed shared Reward graph."""
 
     if type(receipt) is not ActionBallFullMdpInstalledRewardGraphReceipt:
         raise ActionBallFullMdpRewardMaterializationHold(
@@ -1996,8 +2040,14 @@ def require_owned_action_ball_full_mdp_installed_reward_graph(
         )
     _budget, rewards, config, reward_term_type = _reward_dependencies()
     templates = tuple(config.ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES)
-    if tuple(term.payment_consumer for term in templates[:14]) != tuple(
-        rewards.ORDERED_CONSUMERS
+    if (
+        tuple(term.manager_name for term in templates)
+        != reward_contract.MANAGER_NAMES
+        or tuple(
+            term.payment_consumer
+            for term in templates[: reward_contract.LIFECYCLE_PAYMENT_COUNT]
+        )
+        != tuple(rewards.ORDERED_CONSUMERS)
     ):
         raise ActionBallFullMdpRewardMaterializationHold(
             "installed Reward template payment order drifted"

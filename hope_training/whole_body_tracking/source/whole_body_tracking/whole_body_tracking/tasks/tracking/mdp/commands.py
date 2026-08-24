@@ -13945,6 +13945,38 @@ class MotionCommand(CommandTerm):
             return (~task_valid) & ~completed_action_ready
         return ~task_valid
 
+    def action_ball_full_mdp_playback_active_mask(self) -> torch.Tensor:
+        """Return Motion's sole existing FullMDP playback-started row mask.
+
+        This is a zero-copy telemetry accessor.  It exposes no new lifecycle
+        state and does not infer playback from task validity, reward values,
+        reference steps, physical outcome, or recovery.  Motion turns it on
+        only after the teacher leaves selected frame 0, and clears it at the
+        suffix-hidden transition.  Prepare/ready/recovery are therefore false;
+        canonical swing/follow-through are true.
+        """
+
+        if not getattr(
+            self, "_action_ball_continuous_fresh_motion_lane_bound", False
+        ):
+            raise RuntimeError(
+                "FullMDP playback-active telemetry requires the fresh Motion lane"
+            )
+        active = getattr(
+            self, "_action_ball_continuous_canonical_playback_started", None
+        )
+        if (
+            type(active) is not torch.Tensor
+            or active.dtype != torch.bool
+            or active.device != torch.device(self.device)
+            or tuple(active.shape) != (self.num_envs,)
+            or not active.is_contiguous()
+        ):
+            raise RuntimeError(
+                "FullMDP playback-started Motion tensor changed ABI"
+            )
+        return active
+
     def action_ball_split_ready_hold_command(self):
         """WAIT-phase ``(mask, executable q_des)`` for anything that DRIVES the plant.
 

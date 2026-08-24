@@ -906,10 +906,21 @@ class _RewardManager:
                 ordinal, scale=1.0 if ordinal < 10 else None
             )
             actual.add_(value * self.step_dt)
-        for offset in range(len(REWARDS.COMMON_DENSE_NAMES)):
-            ordinal = REWARDS.LIFECYCLE_PAYMENT_COUNT + offset
+        for ordinal in range(
+            REWARDS.LIFECYCLE_PAYMENT_COUNT, REWARDS.MANAGER_TERM_COUNT
+        ):
+            dense_value = torch.zeros(self.count, dtype=torch.float32)
+            telemetry = (
+                {
+                    "paddle_playback_active": torch.zeros(
+                        self.count, dtype=torch.bool
+                    ),
+                }
+                if ordinal == REWARDS.PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+                else {}
+            )
             value = self.graph.record_common_dense(
-                ordinal, torch.zeros(self.count, dtype=torch.float32)
+                ordinal, dense_value, **telemetry
             )
             actual.add_(value * self.step_dt)
         return actual
@@ -1091,14 +1102,14 @@ def test_transport_idle_recovery_epoch_keeps_full_r07_publication():
     assert names.count("motion_ready") == 1
 
 
-def test_transport_idle_preoutcome_key_uses_neutral_chronology_only(
+def test_transport_idle_key_outside_recovery_window_uses_neutral_chronology_only(
     monkeypatch,
 ):
     def reject_projection(_self):
-        raise AssertionError("pre-outcome row projected R07 readiness to Motion")
+        raise AssertionError("out-of-window row projected R07 readiness to Motion")
 
     def reject_install(_self, _projection):
-        raise AssertionError("pre-outcome row installed R07 readiness into Motion")
+        raise AssertionError("out-of-window row installed R07 readiness into Motion")
 
     monkeypatch.setattr(_R07, "motion_ready_projection", reject_projection)
     monkeypatch.setattr(
@@ -1121,7 +1132,21 @@ def test_transport_idle_preoutcome_key_uses_neutral_chronology_only(
     assert "motion_ready" not in names
 
 
-def test_live_transport_key_conservatively_keeps_full_r07_publication():
+def test_live_transport_key_before_recovery_uses_neutral_chronology_only(
+    monkeypatch,
+):
+    def reject_projection(_self):
+        raise AssertionError("pre-recovery transport projected R07 readiness")
+
+    def reject_install(_self, _projection):
+        raise AssertionError("pre-recovery transport installed R07 readiness")
+
+    monkeypatch.setattr(_R07, "motion_ready_projection", reject_projection)
+    monkeypatch.setattr(
+        _Motion,
+        "install_action_ball_continuous_r07_ready_projection",
+        reject_install,
+    )
     env, _owner, _physical, trace = _fake_env(
         decimation=2,
         transport_work=True,
@@ -1131,10 +1156,10 @@ def test_live_transport_key_conservatively_keeps_full_r07_publication():
     env.step(torch.zeros(2, 4))
     names = [row[0] for row in trace]
     assert names.count("racket_publish") == 1
-    assert names.count("r07_publish") == 1
-    assert "r07_idle_stamp" not in names
-    assert names.count("r07_ready") == 1
-    assert names.count("motion_ready") == 1
+    assert "r07_publish" not in names
+    assert names.count("r07_idle_stamp") == 1
+    assert "r07_ready" not in names
+    assert "motion_ready" not in names
 
 
 def test_transport_work_without_key_keeps_r03_but_skips_r07_keyed_writes():

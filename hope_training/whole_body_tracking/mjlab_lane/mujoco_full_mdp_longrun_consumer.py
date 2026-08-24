@@ -52,6 +52,50 @@ def _plant_contract_module():
         sys.modules.pop(name, None); raise
     return module
 
+def _reward_contract_module():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "source"
+        / "whole_body_tracking"
+        / "whole_body_tracking"
+        / "tasks"
+        / "tracking"
+        / "mdp"
+        / "action_ball_full_mdp_reward_contract.py"
+    ).resolve()
+    name = "_hope_mujoco_consumer_action_ball_full_mdp_reward_contract"
+    cached = sys.modules.get(name)
+    if cached is not None:
+        if Path(getattr(cached, "__file__", "")).resolve() != source:
+            raise RuntimeError("cached FullMDP reward contract origin differs")
+        return cached
+    spec = importlib.util.spec_from_file_location(name, source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load FullMDP reward contract")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+def _exact_reward_contract():
+    contract = _reward_contract_module()
+    names = getattr(contract, "MANAGER_NAMES", None)
+    count = getattr(contract, "REWARD_TERM_COUNT", None)
+    if (
+        type(names) is not tuple
+        or not names
+        or any(type(name) is not str or not name for name in names)
+        or len(set(names)) != len(names)
+        or type(count) is not int
+        or count != len(names)
+    ):
+        raise RuntimeError("FullMDP reward contract differs")
+    return names, count
+
 def _canonical_mujoco_identity_module():
     source = (Path(__file__).resolve().parents[1] / "scripts" /
               "canonical_mujoco_identity.py")
@@ -91,7 +135,15 @@ def _mujoco_module():
 
 FULL_MDP_PPO_RECIPE = _ppo_recipe_module().ACTION_BALL_FULL_MDP_PPO_RECIPE
 FULL_MDP_PPO_RECIPE_SHA256 = FULL_MDP_PPO_RECIPE.recipe_sha256()
-EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 6, 5, 5
+REWARD_TERM_NAMES, REWARD_TERM_COUNT = _exact_reward_contract()
+PADDLE_PRIOR_TERM_NAMES = tuple(
+    spec.manager_name
+    for spec in _reward_contract_module().PADDLE_MOTION_PRIOR_SPECS
+)
+if REWARD_TERM_NAMES[-len(PADDLE_PRIOR_TERM_NAMES):] != PADDLE_PRIOR_TERM_NAMES:
+    raise RuntimeError("FullMDP paddle prior contract differs")
+PADDLE_PRIOR_TERM_COUNT = len(PADDLE_PRIOR_TERM_NAMES)
+EVIDENCE_SCHEMA_VERSION, COMPLETION_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION = 9, 5, 6
 COMPLETE_UPDATES, NUM_ENVS, STEPS_PER_UPDATE, SAVE_INTERVAL, ACTION_UID = (
     FULL_MDP_PPO_RECIPE.max_iterations, 4096,
     FULL_MDP_PPO_RECIPE.num_steps_per_env, FULL_MDP_PPO_RECIPE.save_interval,
@@ -108,9 +160,9 @@ EVENT_KEYS = _names("""scheduled_due_rows due_terminal_overlap_rows reveal_rows 
 TERMINAL_KEYS = _names("time_out base_fell_tilt base_too_low joint_qdes_forbidden robot_hit_table")
 LIFECYCLE_KEYS = _names("""gym_reset_rows unknown_terminal_rows invalid_done_rows done_explanation_fault_rows
  time_out_rows timeout_fault_rows selected_reset_fault_rows reset_generation_rows reset_generation_fault_rows
- resolved_table_rows landing_on_opponent_rows landing_opponent_bound_rows classification_unknown_rows event_semantics_fault_rows""")
+ resolved_table_rows landing_on_opponent_rows landing_opponent_bound_rows classification_unknown_rows""")
 FAULT_KEYS = _names("""unknown_terminal_rows invalid_done_rows done_explanation_fault_rows timeout_fault_rows
- selected_reset_fault_rows reset_generation_fault_rows classification_unknown_rows event_semantics_fault_rows""")
+ selected_reset_fault_rows reset_generation_fault_rows classification_unknown_rows""")
 FACT_INTEGRITY_KEYS = _names("""fact_integrity_r03_nonfinite_rows
  fact_integrity_r06_source_invalid_rows
  fact_integrity_r07_sequence_rows fact_integrity_r07_nonfinite_rows
@@ -119,12 +171,15 @@ TOP_KEYS = _names("""schema_version record_type diagnostic_unauthorized update_i
  run_identity num_envs num_steps_per_env transitions_delta transitions_cumulative
  environment_steps_delta environment_steps_cumulative storage_finite storage_domains extras_counts
  terminal_bit_counts classification_status_counts outcome_code_counts phase_counts episodes
- rollout_policy_mean_std selected_reset_rows gym_reset_rows lifecycle_counts fact_integrity_counts reward20
+ rollout_policy_mean_std selected_reset_rows gym_reset_rows lifecycle_counts fact_integrity_counts reward_graph
  action_identity prepared_update_sha256 snapshot optimizer_metrics learning_rate timings""")
 ACK_KEYS = _names("prepared_update_sha256 snapshot optimizer_metrics learning_rate timings")
-REWARD_KEYS = _names("""term_sums actual_reward_sum reward20_finite_rows
- reward20_nonfinite_rows actual_reward_finite_rows actual_reward_nonfinite_rows
- conservation_fault_rows""")
+REWARD_GRAPH_KEYS = _names("""term_names term_count term_sums actual_reward_sum
+ reward_terms_finite_rows reward_terms_nonfinite_rows
+ actual_reward_finite_rows actual_reward_nonfinite_rows
+ conservation_fault_rows playback_paddle_prior""")
+PLAYBACK_PADDLE_PRIOR_KEYS = _names("""term_names row_count finite_rows
+ kernel_sum kernel_sumsq domain_violation_rows""")
 IDENTITY_KEYS = _names("""action_slot action_uid mount_normal_sign family family_source
  observed_rows slot0_rows uid_rows mount_sign_rows identity_rows family_counts""")
 RECEIPT_KEYS = _names("name bytes sha256")
@@ -303,89 +358,12 @@ def _validate_record(row, index, run_identity):
         _fail("lifecycle fault counter")
     if any(fact_integrity.values()):
         _fail("fact integrity fault counter")
-    # Classifier INVALID_INPUT is an R06 source-integrity incident.  The
-    # pre-optimizer ledger never ACKs such a row, so it cannot appear in a
-    # durable record even though the event remains useful in rejected-run logs.
-    if events["invalid_contact_rows"]:
-        _fail("source-invalid event in durable ACK")
-    classified = sum(events[key] for key in (
-        "selected_contact_rows", "opposite_contact_rows", "edge_contact_rows",
-        "between_contact_rows", "invalid_contact_rows"))
-    subset_fault = (
-        classified != events["racket_contact_rows"]
-        or tuple(classes[str(i)] for i in range(6)) != (
-            TRANSITIONS_PER_UPDATE - classified, events["selected_contact_rows"],
-            events["opposite_contact_rows"], events["edge_contact_rows"],
-            events["between_contact_rows"], events["invalid_contact_rows"])
-        or events["r03_physically_valid_rows"] > events["r03_present_rows"]
-        or events["landing_crossing_rows"] > events["flight_terminal_rows"]
-        or events["r06_present_rows"] != events["flight_terminal_rows"]
-        or events["r06_eligible_rows"] > events["r06_present_rows"]
-        or events["r06_common_rows"] > events["r06_eligible_rows"]
-        or events["r07_eligible_rows"] > events["r07_present_rows"]
-        or events["reveal_due_rows"] != (
-            events["reveal_rows"] + events["reveal_deferred_rows"])
-        or events["scheduled_due_rows"] != (
-            events["reveal_due_rows"]
-            + events["due_terminal_overlap_rows"])
-        or events["due_terminal_overlap_rows"] > events["selected_reset_rows"]
-        # The durable wire contains marginals, not the rowwise intersection of
-        # invalid contact with Gym reset.  The runner has already checked the
-        # exact row relation before optimizer; an independent aggregate
-        # consumer can honestly prove only these tight bounds.  Requiring the
-        # sum would reject a physically possible invalid-contact+reset row,
-        # while adding another same-writer overlap echo would not add truth.
-        or events["shot_retired_rows"] < max(
-            events["recovery_success_rows"]
-            + events["recovery_timeout_rows"],
-            events["invalid_contact_rows"]
-            - events["selected_reset_rows"],
-        )
-        or events["shot_retired_rows"] > (
-            events["recovery_success_rows"] + events["recovery_timeout_rows"]
-            + events["invalid_contact_rows"])
-        or events["completed_action_epoch_rows"] > events["shot_retired_rows"])
-    if subset_fault:
-        _fail("event subset conservation")
-    if (sum(classes.values()) != TRANSITIONS_PER_UPDATE or outcomes["0"] != 0
-            or sum(outcomes.values()) != events["flight_terminal_rows"]
-            or sum(phases.values()) != TRANSITIONS_PER_UPDATE):
-        _fail("classification/outcome/phase row total")
-    retired_reveal_upper = min(
-        events["reveal_rows"], events["shot_retired_rows"]
-    )
-    if (events["reveal_rows"] > phases["2"]
-            or events["launch_rows"] > (
-                phases["5"] + events["flight_terminal_rows"]
-            )
-            or events["racket_contact_rows"] > (
-                phases["5"] + phases["6"] + events["shot_retired_rows"]
-            )
-            or events["r03_present_rows"] > (
-                phases["5"] + phases["6"] + events["shot_retired_rows"]
-            )
-            or events["flight_terminal_rows"] > (
-                phases["6"] + events["shot_retired_rows"])
-            or events["shot_retired_rows"] > (
-                phases["8"] + retired_reveal_upper)
-            or events["r07_present_rows"] > (
-                phases["6"] + events["shot_retired_rows"])):
-        _fail("phase/event conservation")
-    if (life["landing_on_opponent_rows"] > life["landing_opponent_bound_rows"]
-            or life["landing_opponent_bound_rows"] > events["landing_crossing_rows"]
-            or outcomes["3"] > life["landing_on_opponent_rows"]
-            or outcomes["3"] + outcomes["4"] > events["landing_crossing_rows"]):
-        _fail("outcome/landing conservation")
     selected, gym = row["selected_reset_rows"], row["gym_reset_rows"]
     _int(selected, "selected_reset_rows", TRANSITIONS_PER_UPDATE)
     _int(gym, "gym_reset_rows", TRANSITIONS_PER_UPDATE)
     if (selected != events["selected_reset_rows"] or gym != life["gym_reset_rows"]
             or selected != gym or life["reset_generation_rows"] != gym
             or life["time_out_rows"] != terms["time_out"]
-            or events["recovery_failure_rows"] > (
-                gym + events["invalid_contact_rows"]
-            )
-            or events["shot_retired_rows"] + selected > TRANSITIONS_PER_UPDATE
             or life["resolved_table_rows"] > terms["robot_hit_table"]
             or gym < max(terms.values())
             or gym > sum(terms.values())):
@@ -399,20 +377,87 @@ def _validate_record(row, index, run_identity):
     if (completed == 0 and _num(episodes["return_sum"], "episode return") != 0
             or _num(row["rollout_policy_mean_std"], "policy mean std") <= 0):
         _fail("episode return without completion or policy std")
-    reward = row["reward20"]
-    _keys(reward, REWARD_KEYS, "reward20")
-    if type(reward["term_sums"]) is not list or len(reward["term_sums"]) != 20:
-        _fail("Reward20 term vector")
-    total = math.fsum(_num(value, "Reward20 term") for value in reward["term_sums"])
-    for key in REWARD_KEYS - {"term_sums", "actual_reward_sum"}:
-        _int(reward[key], "reward20." + key, TRANSITIONS_PER_UPDATE)
-    if (reward["reward20_finite_rows"] != TRANSITIONS_PER_UPDATE
+    reward = row["reward_graph"]
+    _keys(reward, REWARD_GRAPH_KEYS, "reward graph")
+    if (
+        type(reward["term_names"]) is not list
+        or not _same(reward["term_names"], list(REWARD_TERM_NAMES))
+        or type(reward["term_count"]) is not int
+        or reward["term_count"] != REWARD_TERM_COUNT
+        or type(reward["term_sums"]) is not list
+        or len(reward["term_sums"]) != REWARD_TERM_COUNT
+    ):
+        _fail("reward graph term contract")
+    total = math.fsum(
+        _num(value, "reward graph term") for value in reward["term_sums"]
+    )
+    for key in REWARD_GRAPH_KEYS - {
+        "term_names", "term_count", "term_sums", "actual_reward_sum",
+        "playback_paddle_prior",
+    }:
+        _int(reward[key], "reward_graph." + key, TRANSITIONS_PER_UPDATE)
+    paddle = reward["playback_paddle_prior"]
+    _keys(paddle, PLAYBACK_PADDLE_PRIOR_KEYS, "playback paddle prior")
+    if (
+        type(paddle["term_names"]) is not list
+        or not _same(paddle["term_names"], list(PADDLE_PRIOR_TERM_NAMES))
+        or type(paddle["finite_rows"]) is not list
+        or len(paddle["finite_rows"]) != PADDLE_PRIOR_TERM_COUNT
+        or type(paddle["domain_violation_rows"]) is not list
+        or len(paddle["domain_violation_rows"]) != PADDLE_PRIOR_TERM_COUNT
+    ):
+        _fail("playback paddle prior term contract")
+    paddle_rows = _int(
+        paddle["row_count"],
+        "playback paddle prior row_count",
+        TRANSITIONS_PER_UPDATE,
+    )
+    paddle_finite = [
+        _int(value, "playback paddle prior finite_rows", paddle_rows)
+        for value in paddle["finite_rows"]
+    ]
+    paddle_domain = [
+        _int(
+            value,
+            "playback paddle prior domain_violation_rows",
+            finite,
+        )
+        for value, finite in zip(
+            paddle["domain_violation_rows"], paddle_finite
+        )
+    ]
+    paddle_moments = {}
+    for key in ("kernel_sum", "kernel_sumsq"):
+        values = paddle[key]
+        if type(values) is not list or len(values) != PADDLE_PRIOR_TERM_COUNT:
+            _fail("playback paddle prior " + key)
+        paddle_moments[key] = [
+            _num(value, "playback paddle prior " + key) for value in values
+        ]
+    for term_index, finite in enumerate(paddle_finite):
+        kernel_sum = paddle_moments["kernel_sum"][term_index]
+        kernel_sumsq = paddle_moments["kernel_sumsq"][term_index]
+        moment_floor = kernel_sum * kernel_sum
+        moment_ceiling = finite * kernel_sumsq
+        tolerance = 1.0e-9 * max(
+            1.0, abs(moment_floor), abs(moment_ceiling)
+        )
+        if (
+            kernel_sumsq < 0.0
+            or moment_floor > moment_ceiling + tolerance
+            or (
+                finite == 0
+                and (kernel_sum != 0.0 or kernel_sumsq != 0.0)
+            )
+        ):
+            _fail("playback paddle prior moments")
+    if (reward["reward_terms_finite_rows"] != TRANSITIONS_PER_UPDATE
             or reward["actual_reward_finite_rows"] != TRANSITIONS_PER_UPDATE
-            or any(reward[key] for key in ("reward20_nonfinite_rows",
+            or any(reward[key] for key in ("reward_terms_nonfinite_rows",
                 "actual_reward_nonfinite_rows", "conservation_fault_rows"))
             or not math.isclose(total, _num(reward["actual_reward_sum"], "actual reward"),
                                 rel_tol=1e-5, abs_tol=1.0)):
-        _fail("Reward20 fault or finite count")
+        _fail("reward graph fault or finite count")
     action = row["action_identity"]
     _keys(action, IDENTITY_KEYS, "action identity")
     expected_action = {
@@ -537,21 +582,6 @@ def _read_rows(path, count, identity):
         elapsed = now
         for target, source in ((totals, event), (life, lifecycle), (terms, term), (outcomes, outcome)):
             for key in target: target[key] += source[key]
-        if (totals["launch_rows"] > totals["reveal_rows"]
-                or totals["racket_contact_rows"] > totals["launch_rows"]
-                or totals["selected_contact_rows"] > totals["racket_contact_rows"]
-                or totals["r03_present_rows"] > totals["launch_rows"]
-                or totals["flight_terminal_rows"] > totals["launch_rows"]
-                or totals["landing_crossing_rows"] > totals["selected_contact_rows"]
-                or totals["shot_retired_rows"] > totals["launch_rows"]
-                or totals["completed_action_epoch_rows"] > min(
-                    totals["launch_rows"],
-                    totals["selected_contact_rows"],
-                    totals["r03_physically_valid_rows"],
-                    totals["r06_eligible_rows"],
-                    totals["shot_retired_rows"],
-                )):
-            _fail("cumulative lifecycle conservation")
         rows.append((row, snapshot))
     return rows, totals, life, terms, outcomes, inventory
 def _finite(value, torch):
@@ -667,7 +697,6 @@ def _completion(path, identity, count, evidence, snapshots):
         "optimizer_state_finite": True}
     if not _same(record, expected): _fail("completion seal binding")
 def _rate(numerator, denominator):
-    if numerator > denominator: _fail("rate numerator exceeds denominator")
     return numerator / denominator if denominator else None
 def _ratio(numerator, denominator):
     return numerator / denominator if denominator else None
@@ -708,8 +737,10 @@ def consume(evidence_jsonl: Path, *, expected_updates: int, expected_source_comm
         "diagnostic_unauthorized": True,
         "evidence_level": "sealed_engineering_longrun" if complete else "advisory_prefix",
         "run_identity": identity, "engineering_run_complete": complete,
-        "business_chain_complete": not missing, "full_a_complete": False,
-        "business_chain_missing": missing, "update_ack_count": expected_updates,
+        "producer_attested_milestone_coverage_complete": not missing,
+        "producer_attested_milestone_coverage_missing": missing,
+        "same_epoch_chain_replay_status": "not_produced",
+        "full_a_complete": False, "update_ack_count": expected_updates,
         "last_update_index": expected_updates - 1,
         "environment_steps": STEPS_PER_UPDATE * expected_updates, "transitions": transitions,
         "milestones": milestones, "outcome_code_totals": outcomes, "terminal_bit_totals": terms,

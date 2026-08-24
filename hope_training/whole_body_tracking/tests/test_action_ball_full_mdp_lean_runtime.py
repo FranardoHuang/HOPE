@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections import namedtuple
 from dataclasses import replace
+from enum import IntEnum
 from pathlib import Path
 import sys
+import types
 
 import pytest
 import torch
@@ -167,12 +170,128 @@ class _R06:
     def __init__(self, calls, *, fail=False):
         self.calls = calls
         self.fail = fail
+        self.epoch = None
+        self.projected_payment = None
 
     def close_action_ball_full_mdp_epoch_reward_rows(self):
         self.calls.append("r06")
         if self.fail:
             raise RuntimeError("r06 close failed")
+        if self.epoch is not None:
+            self.projected_payment = (
+                self.epoch.project_current_reward_payment_rows()
+            )
         return None
+
+
+class _PostPhysicsPhysical:
+    def __init__(
+        self,
+        *,
+        transport_work: bool,
+        keyed_epoch_work: bool,
+        recovery_epoch_work: bool,
+    ):
+        self.transport_work = transport_work
+        self.keyed_epoch_work = keyed_epoch_work
+        self.recovery_epoch_work = recovery_epoch_work
+        self.launch_count = 0
+        self.publish_count = 0
+
+    def launch_action_epoch(self):
+        self.launch_count += 1
+        return None
+
+    def publish_action_epoch_post_physics(self, _stamp):
+        self.publish_count += 1
+        return None
+
+    def action_epoch_host_activity_verdict(self, *, control_step):
+        return types.SimpleNamespace(
+            control_step=control_step,
+            transport_work=self.transport_work,
+            keyed_epoch_work=self.keyed_epoch_work,
+            recovery_epoch_work=self.recovery_epoch_work,
+        )
+
+
+class _PostPhysicsRacket:
+    def __init__(self):
+        self.publish_count = 0
+
+    def publish_action_ball_full_mdp_epoch_strike_fact(self, *, source_step):
+        assert source_step == 1
+        self.publish_count += 1
+        return None
+
+
+class _PostPhysicsR07:
+    def __init__(self):
+        self.returned_facts = object()
+        self.full_source_steps = []
+        self.idle_source_steps = []
+        self.projection_count = 0
+
+    def publish_epoch_reward_facts(self, *, current_source_step):
+        assert type(current_source_step) is torch.Tensor
+        self.full_source_steps.append(current_source_step.clone())
+        return self.returned_facts
+
+    def stamp_epoch_idle_observation_without_keyed_facts(
+        self, *, current_source_step
+    ):
+        assert type(current_source_step) is int
+        self.idle_source_steps.append(current_source_step)
+        return None
+
+    def motion_ready_projection(self):
+        self.projection_count += 1
+        return self.returned_facts
+
+
+class _PostPhysicsMotion:
+    def __init__(self):
+        self.installed = []
+
+    def install_action_ball_continuous_r07_ready_projection(self, projection):
+        self.installed.append(projection)
+        return None
+
+
+def _exact_physics_stamp_types(monkeypatch):
+    module_name = "whole_body_tracking.tasks.tracking.full_mdp_env"
+    module = types.ModuleType(module_name)
+    phase_type = IntEnum(
+        "FullMdpPhysicsEventPhase",
+        {"POST_SCENE_UPDATE": 1},
+        module=module_name,
+    )
+    pre_type = namedtuple(
+        "FullMdpPrePhysicsSubstepStamp",
+        (
+            "control_step",
+            "physics_substep",
+            "physics_substeps_per_control",
+            "sim_step_before",
+        ),
+        module=module_name,
+    )
+    post_type = namedtuple(
+        "FullMdpPhysicsSubstepStamp",
+        (
+            "control_step",
+            "physics_substep",
+            "physics_substeps_per_control",
+            "sim_step",
+            "event_phase",
+        ),
+        module=module_name,
+    )
+    module.FullMdpPhysicsEventPhase = phase_type
+    module.FullMdpPrePhysicsSubstepStamp = pre_type
+    module.FullMdpPhysicsSubstepStamp = post_type
+    monkeypatch.setitem(sys.modules, module_name, module)
+    return pre_type, post_type, phase_type
 
 
 def _devices():
@@ -191,9 +310,11 @@ def _owner(
     *,
     device=torch.device("cpu"),
     r05=None,
+    motion=None,
     racket=None,
     physical=None,
     r06=None,
+    r07=None,
 ):
     env = _Env()
     epoch = E.ActionEpochOwner(num_envs=2, device=device)
@@ -209,12 +330,12 @@ def _owner(
         epoch_owner=epoch,
         reward_graph=graph,
         r05_runtime=object() if r05 is None else r05,
-        motion=object(),
+        motion=object() if motion is None else motion,
         racket=object() if racket is None else racket,
         physical_ball=object() if physical is None else physical,
         r06_landing_outcome=object() if r06 is None else r06,
         r03_strike_fact=object(),
-        r07_recovery=object(),
+        r07_recovery=object() if r07 is None else r07,
     )
     return owner, epoch, graph
 
@@ -390,9 +511,10 @@ def _complete_boundary(owner, *, update, completed):
     summary = owner.prepare_post_update_summary(
         boundary, update_index=update
     )
-    return owner.acknowledge_post_update(
+    owner.acknowledge_post_update(
         boundary, summary, update_index=update
     )
+    return summary
 
 
 def test_preceding_import_same_process_reuses_canonical_module_identities():
@@ -410,7 +532,7 @@ def test_preceding_import_same_process_reuses_canonical_module_identities():
     assert type(graph) is R.LeanActionEpochRewardGraph
 
 
-def test_prepare_materializes_once_and_ack_returns_the_typed_summary(
+def test_prepare_materializes_once_and_ack_commits_the_typed_summary(
     device, monkeypatch
 ):
     owner, epoch, _graph = _owner(device=device)
@@ -450,13 +572,21 @@ def test_post_update_summary_is_non_destructive_until_exact_ack():
     returned = owner.acknowledge_post_update(
         boundary, summary, update_index=0
     )
-    assert returned is summary
+    assert returned is None
     assert epoch.drain_frontier == 1
     assert owner._active_post_update_summary is None
 
 
-def test_post_update_ack_rejects_same_typed_but_foreign_summary():
+def test_post_update_ack_rejects_equal_copy_before_destructive_epoch_ack(
+    monkeypatch,
+):
     owner, epoch, _graph = _owner()
+    epoch_ack_calls = []
+
+    def record_epoch_ack(self, *, start, end):
+        epoch_ack_calls.append((self, start, end))
+
+    monkeypatch.setattr(E.ActionEpochOwner, "acknowledge_drain", record_epoch_ack)
     boundary = owner.prepare_pre_optimizer_ppo_boundary(
         update_index=0, completed_environment_steps=8
     )
@@ -472,6 +602,7 @@ def test_post_update_ack_rejects_same_typed_but_foreign_summary():
     assert owner.poisoned
     assert owner._active_post_update_summary is summary
     assert epoch.drain_frontier == 0
+    assert epoch_ack_calls == []
 
 
 def test_update_zero_and_later_use_the_same_zero_or_many_abi():
@@ -690,6 +821,66 @@ def test_after_command_transport_idle_skips_r03_arm(keyed_epoch_work):
     assert verdict.recovery_epoch_work is keyed_epoch_work
 
 
+@pytest.mark.parametrize(
+    (
+        "transport_work",
+        "keyed_epoch_work",
+        "recovery_epoch_work",
+        "expected_racket",
+        "expected_full_r07",
+        "expected_idle_r07",
+    ),
+    (
+        pytest.param(False, False, False, 0, 0, 1, id="unkeyed-idle"),
+        pytest.param(True, True, False, 1, 0, 1, id="keyed-pre-recovery"),
+        pytest.param(False, True, True, 0, 1, 0, id="actual-recovery"),
+    ),
+)
+def test_post_physics_reads_r07_plant_only_for_actual_recovery_epoch(
+    monkeypatch,
+    transport_work,
+    keyed_epoch_work,
+    recovery_epoch_work,
+    expected_racket,
+    expected_full_r07,
+    expected_idle_r07,
+):
+    pre_type, post_type, phase_type = _exact_physics_stamp_types(monkeypatch)
+    physical = _PostPhysicsPhysical(
+        transport_work=transport_work,
+        keyed_epoch_work=keyed_epoch_work,
+        recovery_epoch_work=recovery_epoch_work,
+    )
+    racket = _PostPhysicsRacket()
+    r07 = _PostPhysicsR07()
+    motion = _PostPhysicsMotion()
+    owner, _epoch, _graph = _owner(
+        physical=physical,
+        racket=racket,
+        r07=r07,
+        motion=motion,
+    )
+
+    owner.before_policy_step(1, torch.zeros((2, 1)))
+    owner.before_physics_substep(pre_type(1, 0, 1, 0))
+    assert owner.publish_post_physics_substep(
+        post_type(1, 0, 1, 1, phase_type.POST_SCENE_UPDATE)
+    ) is None
+
+    assert physical.launch_count == 1
+    assert physical.publish_count == 1
+    assert racket.publish_count == expected_racket
+    assert len(r07.full_source_steps) == expected_full_r07
+    assert r07.idle_source_steps == [0] * expected_idle_r07
+    assert r07.projection_count == expected_full_r07
+    assert motion.installed == [r07.returned_facts] * expected_full_r07
+    if expected_full_r07:
+        assert torch.equal(
+            r07.full_source_steps[0], torch.zeros(2, dtype=torch.int64)
+        )
+    assert not owner.poisoned
+
+
 def test_after_command_rejects_the_removed_r05_surface():
     owner, _epoch, _graph = _owner(r05=object(), racket=_Racket([]))
     with pytest.raises(L.ActionBallFullMdpLeanRuntimeError, match="advance"):
@@ -730,16 +921,32 @@ def test_selected_reset_global_poison_reaches_epoch_with_exact_r05_owner():
     assert epoch.poisoned
 
 
-def test_after_reward_uses_real_control_step_then_calls_r06_no_arg():
+def test_after_reward_ignores_same_writer_echo_then_r06_pulls_independent_projection(
+    monkeypatch,
+):
     calls = []
-    owner, epoch, graph = _owner(r06=_R06(calls))
+    r06 = _R06(calls)
+    owner, epoch, graph = _owner(r06=r06)
+    r06.epoch = epoch
     owner._last_before_policy_control_step = 1
     graph._completed_cycle_count = 1
     graph._actual_closed_cycle_count = 1
     commit_before = epoch.commit_head
+    publish_payment = E.ActionEpochOwner.publish_reward_payment
+    same_writer_echo = object()
+
+    def publish_then_echo(self, control_step):
+        assert publish_payment(self, control_step) is None
+        return same_writer_echo
+
+    monkeypatch.setattr(
+        E.ActionEpochOwner, "publish_reward_payment", publish_then_echo
+    )
     owner.after_reward_close(1)
     assert calls == ["r06"]
     assert epoch.commit_head == commit_before + 1
+    assert type(r06.projected_payment) is E.ActionEpochRewardPaymentRows
+    assert r06.projected_payment.payment_step.tolist() == [-1, -1]
     start, end = epoch.prepare_drain()
     materialized = epoch.materialize_drain(start=start, end=end)
     assert materialized.entries[-1].transition == "PAYMENT_RECORDED"

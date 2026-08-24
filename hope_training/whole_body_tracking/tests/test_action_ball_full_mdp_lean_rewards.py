@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import importlib
 import inspect
+import math
 import os
 from pathlib import Path
 import pickle
@@ -31,6 +32,16 @@ TEST_DEVICE = os.environ.get("ACTION_BALL_LEAN_REWARD_TEST_DEVICE", "cpu")
 
 def _tensor(data, *, dtype=None):
     return torch.tensor(data, dtype=dtype, device=TEST_DEVICE)
+
+
+def _paddle_telemetry_kwargs(ordinal, value):
+    if ordinal != R.PADDLE_MOTION_PRIOR_FIRST_ORDINAL:
+        return {}
+    return {
+        "paddle_playback_active": torch.ones(
+            value.shape, dtype=torch.bool, device=value.device
+        ),
+    }
 
 
 def _epoch(*, placement_gain=2.0, bind_selected_reset=False):
@@ -174,11 +185,15 @@ def _pay_all(
         actual.add_(term)
     dense_values = dense_values or tuple(
         torch.ones(graph.num_envs, dtype=torch.float32, device=TEST_DEVICE)
-        for _ in R.COMMON_DENSE_NAMES
+        for _ in R.ALL_DENSE_SPECS
     )
     for offset, value in enumerate(dense_values):
         ordinal = R.LIFECYCLE_PAYMENT_COUNT + offset
-        values.append(graph.record_common_dense(ordinal, value))
+        values.append(
+            graph.record_common_dense(
+                ordinal, value, **_paddle_telemetry_kwargs(ordinal, value)
+            )
+        )
         if manager_weights is None:
             term = value * graph._milestone_configured_income_scale[ordinal].to(
                 torch.float32
@@ -198,11 +213,20 @@ class _ExactEnvRewardDispatcherRepresentation:
         self._test_reward_graph = graph
 
     def _action_ball_full_mdp_lean_reward_term(
-        self, *, ordinal: int, scale: float | None = None, value=None
+        self,
+        *,
+        ordinal: int,
+        scale: float | None = None,
+        value=None,
+        paddle_playback_active=None,
     ) -> torch.Tensor:
         if ordinal < R.LIFECYCLE_PAYMENT_COUNT:
             return self._test_reward_graph.pay(ordinal, scale=scale)
-        return self._test_reward_graph.record_common_dense(ordinal, value)
+        return self._test_reward_graph.record_common_dense(
+            ordinal,
+            value,
+            paddle_playback_active=paddle_playback_active,
+        )
 
 
 class _OldReferenceLeanActionEpochRewardGraph(R.LeanActionEpochRewardGraph):
@@ -415,8 +439,11 @@ def test_r03_cache_lifecycle_closes_and_reopens_with_a_new_cycle():
         value = graph.pay(ordinal)
         actual.add_(value)
     for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT, R.MANAGER_TERM_COUNT):
+        dense_value = torch.ones(graph.num_envs, device=TEST_DEVICE)
         value = graph.record_common_dense(
-            ordinal, torch.ones(graph.num_envs, device=TEST_DEVICE)
+            ordinal,
+            dense_value,
+            **_paddle_telemetry_kwargs(ordinal, dense_value),
         )
         actual.add_(value)
     graph.close_milestone_actual_reward(actual)
@@ -491,7 +518,8 @@ def test_sticky_one_shots_do_not_repay_and_r07_requires_fresh_phase_tick():
     graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
 
     first = _pay_all(graph)
-    payment = owner.publish_reward_payment(8)
+    assert owner.publish_reward_payment(8) is None
+    payment = owner.project_current_reward_payment_rows()
     second = _pay_all(graph)
     record = owner.current()
     r07_slot = E.OWNER_ORDER.index("r07_recovery")
@@ -510,7 +538,9 @@ def test_sticky_one_shots_do_not_repay_and_r07_requires_fresh_phase_tick():
     assert all(not bool(value.any()) for value in second[:14])
     assert all(not bool(value.any()) for value in third[:13])
     assert torch.equal(third[13], first[13])
-    reward_i = owner.milestone.i64[: 20 * 4].reshape(20, 4)
+    reward_i = owner.milestone.i64[
+        : R.MANAGER_TERM_COUNT * 4
+    ].reshape(R.MANAGER_TERM_COUNT, 4)
     assert reward_i[0, 1].item() == 2
     assert reward_i[10, 1].item() == 1
     assert reward_i[11, 1].item() == 2
@@ -518,7 +548,9 @@ def test_sticky_one_shots_do_not_repay_and_r07_requires_fresh_phase_tick():
     assert reward_i[13, 1].item() == 4
 
 
-def test_r06_payment_tick_can_follow_its_outcome_source_tick():
+def test_reward_payment_command_defers_the_only_projection_clone_to_r06_pull(
+    monkeypatch,
+):
     owner = _epoch()
     publication = owner._publication
     record = publication.current
@@ -534,7 +566,18 @@ def test_r06_payment_tick_can_follow_its_outcome_source_tick():
     )
 
     values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
-    payment = owner.publish_reward_payment(8)
+    clone_calls = []
+    clone_payment_rows = E.ActionEpochRewardPaymentRows.clone
+
+    def counted_clone(value):
+        clone_calls.append(value)
+        return clone_payment_rows(value)
+
+    monkeypatch.setattr(E.ActionEpochRewardPaymentRows, "clone", counted_clone)
+    assert owner.publish_reward_payment(8) is None
+    assert clone_calls == []
+    payment = owner.project_current_reward_payment_rows()
+    assert clone_calls == [owner._current_payment_rows]
 
     assert torch.equal(values[11], _tensor((1.0, 0.0)))
     assert torch.equal(values[12], torch.ones(2, device=TEST_DEVICE))
@@ -561,7 +604,8 @@ def test_r06_rejects_missing_settlement_and_noncanonical_unpaid_sentinel():
     )
 
     values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
-    payment = owner.publish_reward_payment(8)
+    assert owner.publish_reward_payment(8) is None
+    payment = owner.project_current_reward_payment_rows()
 
     assert not bool(values[11].any())
     assert not bool(values[12].any())
@@ -578,7 +622,8 @@ def test_reward_payment_before_local_settlement_faults_without_mutation():
     owner = _epoch()
     _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
 
-    payment = owner.publish_reward_payment(7)
+    assert owner.publish_reward_payment(7) is None
+    payment = owner.project_current_reward_payment_rows()
 
     assert payment.valid.tolist() == [False, False]
     assert payment.payment_step.tolist() == [-1, -1]
@@ -646,15 +691,24 @@ def test_reward_cycle_overflow_fault_suppresses_all_fresh_reward_families():
     assert owner.current().reward_cycle_fault.ne(0).all()
 
 
-def test_r07_retired_row_cannot_replay_fact_or_mask_peer():
+@pytest.mark.parametrize(
+    "phase",
+    (
+        E.PHASE_REVEAL_COMMITTED,
+        E.PHASE_LAUNCH_SETTLED,
+        E.PHASE_RETIRED,
+    ),
+    ids=("reveal", "launch", "retired"),
+)
+def test_r07_non_outcome_row_cannot_pay_preloaded_fact_or_mask_peer(phase):
     owner = _epoch()
     publication = owner._publication
     record = publication.current
-    phase = record.phase.clone()
-    phase[0, 0] = E.PHASE_RETIRED
+    row_phase = record.phase.clone()
+    row_phase[0, 0] = phase
     before_peer = record.fact_f32[1, 0, E.OWNER_ORDER.index("r07_recovery")].clone()
     owner._publication = E._Publication(
-        replace(record, phase=phase), publication.pending_log
+        replace(record, phase=row_phase), publication.pending_log
     )
 
     values = _pay_all(R.LeanActionEpochRewardGraph(epoch_owner=owner))
@@ -727,8 +781,12 @@ def test_real_consumers_reduce_primitive_eligibility_and_configured_income():
         -2.0 if ordinal == 0 else 1.0 for ordinal in range(R.MANAGER_TERM_COUNT)
     )
     _pay_all(graph, manager_weights=weights, manager_dt=0.25)
-    reward_i = owner.milestone.i64[: 20 * 4].reshape(20, 4)
-    reward_f = owner.milestone.f64[: 20 * 7].reshape(20, 7)
+    reward_i = owner.milestone.i64[
+        : R.MANAGER_TERM_COUNT * 4
+    ].reshape(R.MANAGER_TERM_COUNT, 4)
+    reward_f = owner.milestone.f64[
+        : R.MANAGER_TERM_COUNT * 7
+    ].reshape(R.MANAGER_TERM_COUNT, 7)
     assert reward_i[0].tolist() == [2, 2, 2, 2]
     assert reward_f[0, 0].item() == 2.0
     assert reward_f[0, 3].item() == -1.0
@@ -743,7 +801,9 @@ def test_real_consumers_reduce_primitive_eligibility_and_configured_income():
 def test_actual_conservation_accepts_pinned_float32_two_multiply_order():
     owner = _epoch()
     graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
-    weights = tuple(0.13 + ordinal * 0.017 for ordinal in range(20))
+    weights = tuple(
+        0.13 + ordinal * 0.017 for ordinal in range(R.MANAGER_TERM_COUNT)
+    )
     dt = 0.031
     cfg = {
         name: types.SimpleNamespace(weight=weights[ordinal])
@@ -752,7 +812,7 @@ def test_actual_conservation_accepts_pinned_float32_two_multiply_order():
     graph.configure_milestone_configured_income(cfg, dt)
     _pay_all(graph, manager_weights=weights, manager_dt=dt)
     milestone = owner.milestone
-    violation_index = 20 * 4 + 3
+    violation_index = R.MANAGER_TERM_COUNT * 4 + 3
     assert milestone.i64[violation_index].item() == 0
     start, end = owner.prepare_drain()
     materialized = owner.materialize_drain(start=start, end=end)
@@ -788,8 +848,12 @@ def test_ordinal_twelve_primitive_and_payment_are_independently_identified():
     assert torch.equal(values_a[11], values_c[11])
     assert torch.equal(values_a[12], torch.ones(2, device=TEST_DEVICE))
     assert torch.equal(values_c[12], torch.full((2,), 1.5, device=TEST_DEVICE))
-    reward_a = owner_a.milestone.f64[: 20 * 7].reshape(20, 7)
-    reward_c = owner_c.milestone.f64[: 20 * 7].reshape(20, 7)
+    reward_a = owner_a.milestone.f64[
+        : R.MANAGER_TERM_COUNT * 7
+    ].reshape(R.MANAGER_TERM_COUNT, 7)
+    reward_c = owner_c.milestone.f64[
+        : R.MANAGER_TERM_COUNT * 7
+    ].reshape(R.MANAGER_TERM_COUNT, 7)
     assert reward_a[12, 0].item() == reward_c[12, 0].item() == 1.0
     assert reward_a[12, 2].item() == 2.0
     assert reward_c[12, 2].item() == 3.0
@@ -809,7 +873,7 @@ def test_skipped_or_duplicate_ordinal_does_not_increment_completion():
 def test_actual_close_rejects_partial_missing_and_duplicate_cycles():
     partial = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
     partial.pay(0, scale=1.0)
-    with pytest.raises(R.LeanRewardCycleError, match="before all twenty"):
+    with pytest.raises(R.LeanRewardCycleError, match="before all shared-contract"):
         partial.close_milestone_actual_reward(torch.zeros(2, device=TEST_DEVICE))
     assert partial.poisoned is True
 
@@ -828,17 +892,57 @@ def test_actual_close_rejects_partial_missing_and_duplicate_cycles():
     assert duplicate.poisoned is True
 
 
-def test_producer_fault_suppresses_only_its_reward_row():
-    owner = _epoch()
-    owner.merge_runtime_owner_fault(
-        "physical_ball",
-        _tensor([[0], [32]], dtype=torch.int64),
-        owner=owner._fact_owner_identities["physical_ball"],
+@pytest.mark.parametrize(("bad_row", "healthy_row"), ((0, 1), (1, 0)))
+def test_producer_fault_suppresses_only_its_reward_row(bad_row, healthy_row):
+    baseline_owner = _epoch()
+    baseline_values = _pay_all(
+        R.LeanActionEpochRewardGraph(epoch_owner=baseline_owner)
     )
+    expected_r07 = baseline_values[13]
+    baseline_reward_i = baseline_owner.milestone.i64[
+        : R.MANAGER_TERM_COUNT * 4
+    ].reshape(R.MANAGER_TERM_COUNT, 4)
+    assert expected_r07.ne(0).all()
+    assert expected_r07[0].ne(expected_r07[1])
+    assert baseline_reward_i[13].tolist() == [2, 2, 2, 2]
+
+    owner = _epoch()
+    r07_slot = E.OWNER_ORDER.index("r07_recovery")
+    before = owner.current()
+    healthy_bits = before.fact_valid_bits[healthy_row, 0, r07_slot].clone()
+    healthy_step = before.fact_source_step[healthy_row, 0, r07_slot].clone()
+    healthy_fact = before.fact_f32[healthy_row, 0, r07_slot].clone()
+    faults = torch.zeros((2, 1), dtype=torch.int64, device=TEST_DEVICE)
+    faults[bad_row, 0] = 32
+    owner.merge_runtime_owner_fault(
+        "r07_recovery",
+        faults,
+        owner=owner._fact_owner_identities["r07_recovery"],
+    )
+
     graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
     values = _pay_all(graph)
-    assert torch.equal(values[10], _tensor((1.0, 0.0)))
+    expected_after_fault = expected_r07.clone()
+    expected_after_fault[bad_row] = 0.0
+    assert torch.equal(values[13], expected_after_fault)
+    assert values[13].shape == (2,)
+    assert values[13][healthy_row].eq(expected_r07[healthy_row])
+    assert values[13][bad_row].eq(0.0)
     assert graph.completed_cycle_count == 1
+
+    after = owner.current()
+    assert torch.equal(
+        after.fact_valid_bits[healthy_row, 0, r07_slot], healthy_bits
+    )
+    assert torch.equal(
+        after.fact_source_step[healthy_row, 0, r07_slot], healthy_step
+    )
+    assert torch.equal(after.fact_f32[healthy_row, 0, r07_slot], healthy_fact)
+    reward_i = owner.milestone.i64[
+        : R.MANAGER_TERM_COUNT * 4
+    ].reshape(R.MANAGER_TERM_COUNT, 4)
+    assert reward_i[13, 0].eq(baseline_reward_i[13, 0])
+    assert reward_i[13].tolist() == [2, 1, 1, 1]
 
 
 def test_materializer_refuses_missing_real_isaac_import(monkeypatch):
@@ -861,6 +965,10 @@ def test_materializer_builds_exact_order_with_real_type_surface(monkeypatch):
         "import_module",
         lambda _name: types.SimpleNamespace(RewardTermCfg=RewardTermCfg),
     )
+    expected_body_names = ("pelvis", "left_ankle", "right_elbow")
+    monkeypatch.setattr(
+        R, "_a3_tracked_except_held_wrist_body_names", lambda: expected_body_names
+    )
     weights = dict(R.DIAGNOSTIC_N2_WEIGHTS)
     scales = {name: 0.5 for name in R.R03_NAMES}
     cfg = R.materialize_reward_manager_cfg(weights=weights, r03_scales=scales)
@@ -875,7 +983,39 @@ def test_materializer_builds_exact_order_with_real_type_surface(monkeypatch):
         term.params == {}
         for term in tuple(cfg.values())[len(R.R03_NAMES):R.LIFECYCLE_PAYMENT_COUNT]
     )
-    assert tuple(term.params["ordinal"] for term in tuple(cfg.values())[14:]) == tuple(range(14, 20))
+    dense_terms = tuple(cfg.values())[R.LIFECYCLE_PAYMENT_COUNT :]
+    assert tuple(term.params["ordinal"] for term in dense_terms) == tuple(
+        range(R.LIFECYCLE_PAYMENT_COUNT, R.MANAGER_TERM_COUNT)
+    )
+    assert R.MANAGER_TERM_COUNT == len(R.MANAGER_NAMES) == 24
+    assert R.MANAGER_NAMES[-4:] == (
+        "motion_racket_position",
+        "motion_racket_velocity",
+        "motion_racket_normal",
+        "motion_racket_long_axis",
+    )
+    assert tuple(cfg[name].weight for name in R.PADDLE_MOTION_PRIOR_NAMES) == (
+        1.0,
+        1.0,
+        1.0,
+        0.5,
+    )
+    body_names_by_term = {
+        name: cfg[name].params.get("body_names")
+        for name in R.COMMON_DENSE_NAMES
+    }
+    assert body_names_by_term == {
+        "motion_global_anchor_pos": None,
+        "motion_global_anchor_ori": None,
+        "motion_body_pos": expected_body_names,
+        "motion_body_ori": expected_body_names,
+        "motion_body_lin_vel": expected_body_names,
+        "motion_body_ang_vel": expected_body_names,
+    }
+    assert all(
+        "body_names" not in cfg[name].params
+        for name in R.PADDLE_MOTION_PRIOR_NAMES
+    )
 
 
 def test_manager_cfg_and_each_callable_pickle_by_exact_module_global(monkeypatch):
@@ -883,6 +1023,11 @@ def test_manager_cfg_and_each_callable_pickle_by_exact_module_global(monkeypatch
         R.importlib,
         "import_module",
         lambda _name: types.SimpleNamespace(RewardTermCfg=types.SimpleNamespace),
+    )
+    monkeypatch.setattr(
+        R,
+        "_a3_tracked_except_held_wrist_body_names",
+        lambda: ("pelvis", "right_elbow"),
     )
     weights = dict(R.DIAGNOSTIC_N2_WEIGHTS)
     scales = {name: 0.5 for name in R.R03_NAMES}
@@ -910,10 +1055,13 @@ def test_module_global_functions_dispatch_exact_fourteen_lifecycle_groups():
     for ordinal, name in enumerate(R.LIFECYCLE_MANAGER_NAMES):
         function = getattr(R, name)
         values.append(function(env, scale=1.0 if ordinal < 10 else None))
-    for ordinal in range(14, 20):
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT, R.MANAGER_TERM_COUNT):
+        dense_value = torch.ones(2, device=TEST_DEVICE)
         values.append(
             env._action_ball_full_mdp_lean_reward_term(
-                ordinal=ordinal, value=torch.ones(2, device=TEST_DEVICE)
+                ordinal=ordinal,
+                value=dense_value,
+                **_paddle_telemetry_kwargs(ordinal, dense_value),
             )
         )
     assert graph.completed_cycle_count == 1
@@ -927,8 +1075,13 @@ def test_module_global_functions_dispatch_exact_fourteen_lifecycle_groups():
 def test_common_dense_reuses_motion_evaluator_and_changes_with_reference_error(
     monkeypatch,
 ):
-    def evaluator(env, *, command_name, std, coarse_std=None):
+    calls = []
+
+    def evaluator(
+        env, *, command_name, std, coarse_std=None, body_names=None
+    ):
         assert command_name == "motion"
+        calls.append(body_names)
         fine = torch.exp(-torch.square(env.reference - env.robot) / std**2)
         if coarse_std is None:
             return fine
@@ -940,7 +1093,7 @@ def test_common_dense_reuses_motion_evaluator_and_changes_with_reference_error(
         )
 
     evaluator_module = types.SimpleNamespace(
-        **{spec[1]: evaluator for spec in R.COMMON_DENSE_SPECS}
+        **{spec.evaluator_name: evaluator for spec in R.COMMON_DENSE_SPECS}
     )
     real_import = R.importlib.import_module
     monkeypatch.setattr(
@@ -954,27 +1107,170 @@ def test_common_dense_reuses_motion_evaluator_and_changes_with_reference_error(
     env = _ExactEnvRewardDispatcherRepresentation(graph)
     env.reference = torch.tensor([0.0, 1.0], device=TEST_DEVICE)
     env.robot = torch.tensor([0.0, 0.0], device=TEST_DEVICE)
-    for ordinal in range(14):
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT):
         graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
     values = []
-    for ordinal, spec in enumerate(R.COMMON_DENSE_SPECS, start=14):
-        coarse_std = (
-            R.BODY_ORIENTATION_COARSE_STD
-            if spec[0] == "motion_body_ori"
-            else None
-        )
+    body_names = ("pelvis", "right_elbow")
+    for ordinal, spec in enumerate(
+        R.COMMON_DENSE_SPECS, start=R.LIFECYCLE_PAYMENT_COUNT
+    ):
         values.append(
             R.common_dense_reward(
                 env,
                 ordinal=ordinal,
-                command_name="motion",
-                std=spec[3],
-                coarse_std=coarse_std,
+                command_name=spec.command_name,
+                std=spec.std,
+                coarse_std=spec.coarse_std,
+                body_names=(body_names if spec.body_scope is not None else None),
             )
+        )
+    for ordinal in range(
+        R.LIFECYCLE_PAYMENT_COUNT + len(R.COMMON_DENSE_SPECS),
+        R.MANAGER_TERM_COUNT,
+    ):
+        dense_value = torch.ones(2, device=TEST_DEVICE)
+        graph.record_common_dense(
+            ordinal,
+            dense_value,
+            **_paddle_telemetry_kwargs(ordinal, dense_value),
         )
     assert graph.completed_cycle_count == 1
     assert all(torch.isfinite(value).all() for value in values)
     assert all(value[0] > value[1] for value in values)
+    assert calls == [None, None, body_names, body_names, body_names, body_names]
+
+
+@pytest.mark.parametrize("telemetry_available", (True, False))
+def test_paddle_motion_prior_dispatches_exact_specs_and_closes_cycle(
+    monkeypatch, telemetry_available
+):
+    calls = []
+    telemetry_calls = 0
+
+    def make_evaluator(evaluator_name):
+        def evaluator(
+            env, *, command_name, std, scale_in_strike_window
+        ):
+            calls.append(
+                (
+                    evaluator_name,
+                    command_name,
+                    std,
+                    scale_in_strike_window,
+                )
+            )
+            return torch.full(
+                (env._test_reward_graph.num_envs,),
+                0.25 + 0.1 * len(calls),
+                dtype=torch.float32,
+                device=TEST_DEVICE,
+            )
+
+        return evaluator
+
+    class Motion:
+        def action_ball_full_mdp_playback_active_mask(self):
+            nonlocal telemetry_calls
+            telemetry_calls += 1
+            if not telemetry_available:
+                raise RuntimeError("optional diagnostic telemetry unavailable")
+            return torch.tensor(
+                [True, False], dtype=torch.bool, device=TEST_DEVICE
+            )
+
+    motion = Motion()
+    command = types.SimpleNamespace(_motion=lambda: motion)
+    evaluator_module = types.SimpleNamespace(
+        _cmd=lambda _env, name: command
+        if name == "racket_target"
+        else (_ for _ in ()).throw(KeyError(name)),
+        **{
+            spec.evaluator_name: make_evaluator(spec.evaluator_name)
+            for spec in R.PADDLE_MOTION_PRIOR_SPECS
+        }
+    )
+    real_import = R.importlib.import_module
+    monkeypatch.setattr(
+        R.importlib,
+        "import_module",
+        lambda name: evaluator_module
+        if name.endswith(".hope_rewards")
+        else real_import(name),
+    )
+    graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
+    env = _ExactEnvRewardDispatcherRepresentation(graph)
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT):
+        graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
+    for ordinal in range(
+        R.LIFECYCLE_PAYMENT_COUNT,
+        R.LIFECYCLE_PAYMENT_COUNT + len(R.COMMON_DENSE_SPECS),
+    ):
+        graph.record_common_dense(
+            ordinal, torch.ones(2, dtype=torch.float32, device=TEST_DEVICE)
+        )
+    first = R.LIFECYCLE_PAYMENT_COUNT + len(R.COMMON_DENSE_SPECS)
+    values = []
+    for ordinal, spec in enumerate(R.PADDLE_MOTION_PRIOR_SPECS, start=first):
+        values.append(
+            R.paddle_motion_prior_reward(
+                env,
+                ordinal=ordinal,
+                command_name=spec.command_name,
+                std=spec.std,
+                scale_in_strike_window=spec.scale_in_strike_window,
+            )
+        )
+    assert graph.completed_cycle_count == 1
+    assert graph.poisoned is False
+    assert all(torch.isfinite(value).all() for value in values)
+    assert telemetry_calls == 1
+    assert calls == [
+        (
+            spec.evaluator_name,
+            spec.command_name,
+            spec.std,
+            spec.scale_in_strike_window,
+        )
+        for spec in R.PADDLE_MOTION_PRIOR_SPECS
+    ]
+    owner_telemetry = graph.epoch_owner.milestone
+    payload = R.epoch_v1.milestone_tensors.decode_host_window(
+        *(
+            value.detach().cpu().contiguous()
+            for value in owner_telemetry.pack_views()
+        )
+    ).as_json(R.MANAGER_NAMES)
+    playback_rows = payload["paddle_motion_prior_playback"]["terms"]
+    expected_unavailable = [0] * 4 if telemetry_available else [2] * 4
+    expected_playback = [1] * 4 if telemetry_available else [0] * 4
+    assert [
+        row["telemetry_unavailable_count"] for row in playback_rows
+    ] == expected_unavailable
+    assert [row["playback_count"] for row in playback_rows] == expected_playback
+    assert [row["finite_count"] for row in playback_rows] == expected_playback
+    assert [row["domain_violation_count"] for row in playback_rows] == [0] * 4
+    for row, value in zip(playback_rows, values):
+        expected_sum = float(value[0]) if telemetry_available else 0.0
+        assert row["kernel_sum"] == pytest.approx(expected_sum)
+
+
+def test_shared_reward_contract_removes_exactly_one_held_wrist_in_order():
+    contract = R.reward_contract
+    tracked = (
+        "pelvis",
+        contract.HELD_RACKET_WRIST_BODY_NAME,
+        "right_elbow",
+    )
+    assert contract.tracked_except_held_wrist_body_names(tracked) == (
+        "pelvis",
+        "right_elbow",
+    )
+    with pytest.raises(ValueError, match="held racket wrist"):
+        contract.tracked_except_held_wrist_body_names(("pelvis", "right_elbow"))
+    with pytest.raises(ValueError, match="held racket wrist"):
+        contract.tracked_except_held_wrist_body_names(
+            ("pelvis", contract.HELD_RACKET_WRIST_BODY_NAME, "pelvis")
+        )
 
 
 def test_dense_rows_ignore_lifecycle_paid_bits_and_exist_when_lifecycle_is_zero():
@@ -983,14 +1279,21 @@ def test_dense_rows_ignore_lifecycle_paid_bits_and_exist_when_lifecycle_is_zero(
     graph = R.LeanActionEpochRewardGraph(epoch_owner=owner)
     lifecycle = tuple(
         graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
-        for ordinal in range(14)
+        for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT)
     )
     assert all(not bool(value.any()) for value in lifecycle)
     owner._publication.current.reward_paid.logical_not_()
-    dense = tuple(
-        graph.record_common_dense(ordinal, torch.ones(2, device=TEST_DEVICE))
-        for ordinal in range(14, 20)
-    )
+    dense = []
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT, R.MANAGER_TERM_COUNT):
+        dense_value = torch.ones(2, device=TEST_DEVICE)
+        dense.append(
+            graph.record_common_dense(
+                ordinal,
+                dense_value,
+                **_paddle_telemetry_kwargs(ordinal, dense_value),
+            )
+        )
+    dense = tuple(dense)
     assert all(torch.equal(value, torch.ones(2, device=TEST_DEVICE)) for value in dense)
     assert graph.completed_cycle_count == 1
 
@@ -998,7 +1301,7 @@ def test_dense_rows_ignore_lifecycle_paid_bits_and_exist_when_lifecycle_is_zero(
 @pytest.mark.parametrize("bad_ordinal", (15, 19))
 def test_dense_skip_or_reorder_fails_before_actual_close(bad_ordinal):
     graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
-    for ordinal in range(14):
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT):
         graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
     with pytest.raises(R.LeanRewardCycleError, match="expected 14"):
         graph.record_common_dense(
@@ -1010,7 +1313,7 @@ def test_dense_skip_or_reorder_fails_before_actual_close(bad_ordinal):
 
 def test_dense_duplicate_fails_before_actual_close():
     graph = R.LeanActionEpochRewardGraph(epoch_owner=_epoch())
-    for ordinal in range(14):
+    for ordinal in range(R.LIFECYCLE_PAYMENT_COUNT):
         graph.pay(ordinal, scale=1.0 if ordinal < 10 else None)
     graph.record_common_dense(14, torch.ones(2, device=TEST_DEVICE))
     with pytest.raises(R.LeanRewardCycleError, match="expected 15"):
@@ -1081,11 +1384,20 @@ def test_diagnostic_bundle_has_no_caller_numeric_seam(monkeypatch):
         def __init__(self, *, func, weight, params):
             self.func, self.weight, self.params = func, weight, params
 
-    monkeypatch.setattr(
-        R.importlib,
-        "import_module",
-        lambda _name: types.SimpleNamespace(RewardTermCfg=RewardTermCfg),
+    tracked = (
+        "pelvis_link",
+        R.reward_contract.HELD_RACKET_WRIST_BODY_NAME,
+        "right_elbow_Link",
     )
+
+    def import_focused_dependency(name):
+        if name == "isaaclab.managers":
+            return types.SimpleNamespace(RewardTermCfg=RewardTermCfg)
+        if name == "whole_body_tracking.robots.agibot_a3":
+            return types.SimpleNamespace(A3_TRACKED_BODIES=tracked)
+        raise AssertionError("unexpected diagnostic bundle import: " + name)
+
+    monkeypatch.setattr(R.importlib, "import_module", import_focused_dependency)
     bundle = R.materialize_diagnostic_n2_reward_manager_cfg(epoch_owner=owner)
     assert type(bundle) is R.DiagnosticN2RewardManagerBundle
     assert type(bundle.graph) is R.LeanActionEpochRewardGraph

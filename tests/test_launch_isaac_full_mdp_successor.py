@@ -176,6 +176,26 @@ def test_dry_run_is_h48_typed_longrun_without_rate_or_recipe_overrides(
     assert rig.module.main(rig.argv(dry=True)) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["source_commit"] == _git(rig.repo, "rev-parse", "HEAD")
+    assert payload["argv"] == [
+        str(rig.isaac_python),
+        "-P",
+        "-B",
+        str(rig.repo / TRAIN),
+        "task=HOPEPingPongActionBallFullMdpA",
+        "algo=ppo",
+        "headless=true",
+        "video=false",
+        "logger=tensorboard",
+        "device=cuda:0",
+        "seed=0",
+        "num_envs=4096",
+        f"run_name={NAMESPACE}-DIAGNOSTIC_UNAUTHORIZED",
+        "checkpoint_path=null",
+        "checkpoint_tolerant=false",
+        "checkpoint_allow_missing_contract=false",
+        "checkpoint_allow_contract_mismatch=false",
+        f"hydra.run.dir={rig.root / 'training' / 'hydra'}",
+    ]
     joined = " ".join(payload["argv"])
     assert "task=HOPEPingPongActionBallFullMdpA" in joined
     assert "num_envs=4096" in joined
@@ -215,6 +235,128 @@ def test_dry_run_can_bind_bounded_full_mdp_profiler(
         "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES"
     ] == "5"
     assert not rig.root.exists()
+
+
+def test_dry_run_rate_probe_is_explicit_completion_mode_and_default_is_unchanged(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True) + ["--diagnostic-rate-probe"]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["argv"][-1] == (
+        "task.action_ball_full_mdp_rate_probe=true"
+    )
+    assert payload["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "1"
+    assert payload["launcher_env"]["KIT_COMPLETION_TIMEOUT_S"] == "7200"
+    assert "HOPE_ACTION_BALL_FULL_MDP_PROFILE_UPDATES" not in (
+        payload["runtime_env"]
+    )
+
+    assert rig.module.main(rig.argv(dry=True)) == 0
+    default = json.loads(capsys.readouterr().out)
+    assert default["launcher_env"]["KIT_WAIT_FOR_COMPLETION"] == "0"
+    assert "KIT_COMPLETION_TIMEOUT_S" not in default["launcher_env"]
+    assert "task.action_ball_full_mdp_rate_probe=true" not in default["argv"]
+
+
+def test_rate_probe_and_profiler_are_mutually_exclusive_before_root(
+    rig, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert rig.module.main(
+        rig.argv(dry=True)
+        + ["--diagnostic-rate-probe", "--profile-updates", "1"]
+    ) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+    assert not rig.root.exists()
+
+
+def test_rate_probe_receipt_parses_exact_10_plus_50_and_is_no_clobber(
+    rig, tmp_path: Path
+) -> None:
+    recipe = "a" * 64
+    log = tmp_path / "run.log"
+    rows = [
+        "[train.py] FULLMDP_H48_RATE_PROBE: diagnostic_unauthorized=true "
+        "updates=61 warmup=10 measured=50 tail=1 profiler=off",
+        "[train.py] full-MDP PPO recipe: "
+        f"kind=v4 learning_recipe_sha256={recipe}"
+    ]
+    for update in range(61):
+        rows.extend(
+            (
+                f"\x1b[1m Learning iteration {update}/61 \x1b[0m",
+                f"Iteration time: {1.0 + update / 100.0:.2f}s",
+            )
+        )
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    payload = rig.module._rate_probe_payload(
+        run_log=log,
+        source_commit="b" * 40,
+        namespace=NAMESPACE,
+        gpu_index=0,
+        gpu_uuid=UUID,
+    )
+    assert payload["diagnostic_unauthorized"] is True
+    assert payload["formal_evidence"] is False
+    assert payload["safety_gate"] is False
+    assert payload["source_commit"] == "b" * 40
+    assert payload["namespace"] == NAMESPACE
+    assert payload["gpu"] == {"index": 0, "uuid": UUID}
+    assert payload["action_ball_full_mdp_ppo_recipe_sha256"] == recipe
+    assert len(payload["raw_update_seconds"]) == 61
+    assert payload["measured_update_seconds"] == pytest.approx(
+        [1.0 + update / 100.0 for update in range(10, 60)]
+    )
+    assert payload["update_seconds_p50"] == pytest.approx(1.345)
+    assert payload["update_seconds_p90"] == pytest.approx(1.541)
+
+    receipt = tmp_path / "rate.json"
+    rig.module._write_rate_probe_receipt(receipt, payload)
+    assert json.loads(receipt.read_text()) == payload
+    with pytest.raises(rig.module.LaunchError, match="no-clobber"):
+        rig.module._write_rate_probe_receipt(receipt, payload)
+
+
+def test_rate_probe_parser_rejects_missing_update_or_recipe(rig, tmp_path: Path) -> None:
+    log = tmp_path / "run.log"
+    log.write_text(
+        "[train.py] FULLMDP_H48_RATE_PROBE: diagnostic_unauthorized=true "
+        "updates=61 warmup=10 measured=50 tail=1 profiler=off\n"
+        + "\n".join(
+            f"Learning iteration {update}/61\nIteration time: 1.00s"
+            for update in range(60)
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(rig.module.LaunchError, match="61-update"):
+        rig.module._rate_probe_payload(
+            run_log=log,
+            source_commit="b" * 40,
+            namespace=NAMESPACE,
+            gpu_index=0,
+            gpu_uuid=UUID,
+        )
+
+
+def test_rate_probe_completion_requires_natural_exit_without_stop_path(
+    rig, tmp_path: Path
+) -> None:
+    state = tmp_path / "launch.state"
+    runtime_receipt = tmp_path / "runtime.receipt"
+    runtime_receipt.write_bytes(b"trainer_runtime_attested_v2\n")
+    clean = (
+        "pid=1234\npgid=1234\nready_utc=now\ncompletion_utc=later\n"
+        "completion_exit_code=0\nterminal_kind=clean_completion\n"
+        "terminal_exit_code=0\n"
+    )
+    state.write_text(clean, encoding="utf-8")
+    paths = {"launch_state": state, "runtime_receipt": runtime_receipt}
+    assert rig.module._verify_completed(paths) == (1234, 1234)
+
+    state.write_text(clean + "stop_signal=TERM\n", encoding="utf-8")
+    with pytest.raises(rig.module.LaunchError, match="used a stop path"):
+        rig.module._verify_completed(paths)
 
 
 def test_dry_run_can_bind_explicit_cpu_affinity(

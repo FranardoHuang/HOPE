@@ -1,7 +1,8 @@
 """Run upstream RSL-RL 3 on the real MuJoCo portable environment.
 
 The default preserves the historical one-update WAIT ABI. ``--full-a`` exposes
-the current R03/R06/R07/Reward20 engineering surface with fail-closed evidence;
+the current R03/R06/R07/ordered-reward-graph engineering surface with
+fail-closed evidence;
 ``--diagnostic-rate-probe`` keeps that surface but measures a finite 61-update
 profiler-off window without snapshots or completion authority.
 """
@@ -505,13 +506,16 @@ def _apply_full_a_policy_bootstrap(runner, torch_module) -> None:
         or output.bias is None
         or not torch_module.is_tensor(log_std)
         or tuple(log_std.shape) != (31,)
-        or getattr(policy, "noise_std_type", None) != "log"
+        or getattr(policy, "noise_std_type", None)
+        != FULL_MDP_PPO_RECIPE.noise_std_type
     ):
         raise RuntimeError("MuJoCo Full-A policy bootstrap surface differs")
     with torch_module.no_grad():
         output.weight.zero_()
         output.bias.zero_()
-    expected_std = torch_module.full_like(log_std, 0.02)
+    expected_std = torch_module.full_like(
+        log_std, FULL_MDP_PPO_RECIPE.init_noise_std
+    )
     if (
         int(torch_module.count_nonzero(output.weight).item()) != 0
         or int(torch_module.count_nonzero(output.bias).item()) != 0

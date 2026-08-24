@@ -1058,3 +1058,300 @@ def test_current_flight_projection_rejects_foreign_handle_and_publication_abi():
             current_shot_key=key,
             current_publication_ordinal=torch.tensor((17, -1), dtype=torch.int32),
         )
+
+
+def _launch_selected_reset_clock_tape_into_real_r06():
+    """Launch local Motion 7/8/9 into global Physical/R06 99/100/101."""
+
+    import test_action_ball_physical_epoch_hot_lane as hot
+
+    device = torch.device("cpu")
+    physical_owner, _scene = hot._physical_owner(device, num_envs=2)
+    r06_owner = T._coordinator(
+        rows=2,
+        flight_slots=2,
+        mailbox_slots=2,
+        bind_physical_park=False,
+        device=device,
+    )
+    epoch_owner, _ = _bound_epoch(r06_owner)
+    physical_owner._action_epoch_owner = epoch_owner
+    physical_owner.bind_r06_owner(r06_owner)
+    epoch_owner._physical_launch_projection = (
+        physical_owner.action_epoch_r06_launch_projection
+    )
+
+    key_grid = hot._shot_key(num_envs=2, device=device, width=1)
+    row_key = E.ActionEpochShotKey(
+        **{
+            field.name: getattr(key_grid, field.name)[:, 0]
+            for field in E.fields(E.ActionEpochShotKey)
+        }
+    )
+    publication = torch.tensor((17, 18), dtype=torch.int64, device=device)
+    record = epoch_owner._publication.current
+    assert record is not None
+    record.current_task_slot.zero_()
+    record.phase[:, 0].fill_(E.PHASE_REVEAL_COMMITTED)
+    record.publication_ordinal[:, 0].copy_(publication)
+    for field in E.fields(E.ActionEpochShotKey):
+        getattr(record.identity.shot_key, field.name)[:, 0].copy_(
+            getattr(row_key, field.name)
+        )
+
+    motion_owner = hot._MotionLaunchStub(physical_owner, row_key)
+    # Row 0 was selected for reset and reached local launch tick 7.  Row 1 was
+    # not selected; its continuing episode remains at global-aligned tick 99.
+    motion_owner.control_tick.copy_(
+        torch.tensor((7, 99), dtype=torch.int64, device=device)
+    )
+    physical_owner._action_epoch_motion_owner = motion_owner
+    pending = hot._pending(
+        physical_owner,
+        key=row_key,
+        pending=torch.ones(2, dtype=torch.bool, device=device),
+        ordinal=publication,
+        flight_slot=torch.zeros(2, dtype=torch.int64, device=device),
+    )
+    # The unselected peer has its own later launch tape and must not be pulled
+    # into the selected row's translated 99/100/101 R06 chronology.
+    pending.launch_motion_tick[1] = 100
+    pending.contact_deadline_motion_tick[1] = 101
+    pending.crossing_horizon_motion_tick[1] = 102
+    pending.target_xy_m[:, 0].fill_(
+        (
+            r06_owner.profile.opponent_table_x_min_m
+            + r06_owner.profile.opponent_table_x_max_m
+        )
+        / 2.0
+    )
+    pending.target_xy_m[:, 1].fill_(
+        (r06_owner.profile.table_y_min_m + r06_owner.profile.table_y_max_m)
+        / 2.0
+    )
+    physical_owner._action_epoch_pending_launch = pending
+
+    # The last completed global boundary is 99; the next Physical control is
+    # 100.  Physical must translate retained per-row Motion clocks exactly once.
+    physical_owner._last_postphysics_exact_stamp = (99, 0, 1, 99, 1)
+    physical_owner.launch_action_epoch()
+
+    assert physical_owner._action_epoch_pending_launch.pending.tolist() == [False, True]
+    assert r06_owner._flight_state[:, 0].tolist() == [D.FLIGHT_INBOUND, D.FLIGHT_EMPTY]
+    assert r06_owner._flight_reveal_control_step[:, 0].tolist() == [99, -1]
+    assert r06_owner._flight_contact_deadline_control_step[:, 0].tolist() == [100, -1]
+    assert r06_owner._flight_crossing_horizon_control_step[:, 0].tolist() == [101, -1]
+    assert not r06_owner._mailbox_reserved[1].any()
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [0, 0]
+    return physical_owner, r06_owner, epoch_owner, row_key, publication
+
+
+def _real_physical_r06_packet(
+    *,
+    physical_owner,
+    epoch_owner,
+    row_key,
+    publication,
+    control_step,
+    observation_ordinal,
+    contact=False,
+    crossing=False,
+    previous_center=None,
+):
+    import test_action_ball_physical_epoch_hot_lane as hot
+
+    device = physical_owner.device
+    shape = (physical_owner.num_envs, physical_owner.flight_capacity)
+    observe = torch.zeros(shape, dtype=torch.bool, device=device)
+    observe[0, 0] = True
+    key = E.ActionEpochShotKey(
+        **{
+            field.name: torch.full(
+                shape, -1, dtype=torch.int64, device=device
+            )
+            for field in E.fields(E.ActionEpochShotKey)
+        }
+    )
+    for field in E.fields(E.ActionEpochShotKey):
+        getattr(key, field.name)[0, 0] = getattr(row_key, field.name)[0]
+    publication_grid = torch.full(
+        shape, -1, dtype=torch.int64, device=device
+    )
+    publication_grid[0, 0] = publication[0]
+    ordinal_grid = torch.full(shape, -1, dtype=torch.int64, device=device)
+    ordinal_grid[0, 0] = observation_ordinal
+
+    target_xy = torch.tensor(
+        (
+            (
+                physical_owner._r06_owner.profile.opponent_table_x_min_m
+                + physical_owner._r06_owner.profile.opponent_table_x_max_m
+            )
+            / 2.0,
+            (
+                physical_owner._r06_owner.profile.table_y_min_m
+                + physical_owner._r06_owner.profile.table_y_max_m
+            )
+            / 2.0,
+        ),
+        dtype=torch.float32,
+        device=device,
+    )
+    plane = physical_owner._r06_owner.profile.ball_center_landing_plane_z_m
+    high_center = torch.tensor(
+        (target_xy[0], target_xy[1], plane + 0.2),
+        dtype=torch.float32,
+        device=device,
+    )
+    low_center = torch.tensor(
+        (target_xy[0], target_xy[1], plane - 0.2),
+        dtype=torch.float32,
+        device=device,
+    )
+    previous = torch.zeros(shape + (3,), dtype=torch.float32, device=device)
+    current = torch.zeros_like(previous)
+    previous[0, 0] = high_center if previous_center is None else previous_center
+    current[0, 0] = low_center if crossing else high_center
+
+    def stamp(*, active, phase):
+        control = torch.full(shape, -1, dtype=torch.int64, device=device)
+        substep = torch.full(shape, -1, dtype=torch.int32, device=device)
+        event_phase = torch.full(shape, -1, dtype=torch.int8, device=device)
+        if active:
+            control[0, 0] = control_step
+            substep[0, 0] = 0
+            event_phase[0, 0] = phase
+        return hot.physical.PhysicsStampGrid(
+            control_step=control,
+            physics_substep=substep,
+            event_phase=event_phase,
+        )
+
+    event = torch.zeros(shape, dtype=torch.bool, device=device)
+    event[0, 0] = contact
+    crossing_event = torch.zeros(shape, dtype=torch.bool, device=device)
+    crossing_event[0, 0] = crossing
+    report = torch.zeros(shape, dtype=torch.bool, device=device)
+    # After first contact, Physical must continue to report the crossing
+    # channel even when this observation contains no crossing event.
+    report[0, 0] = contact or observation_ordinal > 0
+    contact_center = torch.zeros_like(previous)
+    contact_center[0, 0] = high_center
+    crossing_xy = torch.zeros(shape + (2,), dtype=torch.float32, device=device)
+    crossing_xy[0, 0] = target_xy
+    source_step = torch.full(shape, -1, dtype=torch.int64, device=device)
+    source_step[0, 0] = control_step
+    return hot.physical.ActionEpochR06PostPhysicsProjection(
+        observe_mask=observe,
+        flight_slot=physical_owner._fixed_flight_slot_grid.detach().clone(),
+        shot_key=key,
+        publication_ordinal=publication_grid,
+        observation_ordinal=ordinal_grid,
+        previous_ball_center_m=previous,
+        current_ball_center_m=current,
+        observation_stamp=stamp(active=True, phase=D.PHASE_LANDING),
+        selected_contact_event=event,
+        selected_contact_ball_center_m=contact_center,
+        selected_contact_outgoing_segment_anchor_m=contact_center.clone(),
+        selected_contact_stamp=stamp(active=contact, phase=D.PHASE_CONTACT),
+        net_crossing_event=torch.zeros(shape, dtype=torch.bool, device=device),
+        net_clear_at_crossing=torch.zeros(shape, dtype=torch.bool, device=device),
+        net_crossing_stamp=stamp(active=False, phase=D.PHASE_NET),
+        crossing_report_delivered=report,
+        first_descending_crossing_event=crossing_event,
+        first_descending_crossing_xy_m=crossing_xy,
+        first_descending_crossing_stamp=stamp(
+            active=crossing, phase=D.PHASE_LANDING
+        ),
+        nonfinite_observation=torch.zeros(shape, dtype=torch.bool, device=device),
+        producer_contract_fault=torch.zeros(shape, dtype=torch.bool, device=device),
+        engine_overflow=torch.zeros(shape, dtype=torch.bool, device=device),
+        owner_fault_bits=torch.zeros(shape, dtype=torch.int64, device=device),
+        fact_valid_bits=torch.zeros(shape, dtype=torch.int64, device=device),
+        fact_source_step=source_step,
+        fact_f32=torch.zeros(
+            shape + (hot.physical.PHYSICAL_EPOCH_FACT_F32_WIDTH,),
+            dtype=torch.float32,
+            device=device,
+        ),
+        physical_owner=physical_owner,
+        epoch_owner=epoch_owner,
+        _owner_identity=physical_owner._owner_identity,
+        _token=hot.physical._ACTION_EPOCH_R06_POSTPHYSICS_TOKEN,
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_cause"),
+    (
+        ("no_contact_deadline", D.SETTLEMENT_CAUSE_CONTACT_DEADLINE),
+        ("contact_no_cross_horizon", D.SETTLEMENT_CAUSE_CROSSING_HORIZON),
+        ("early_crossing", D.SETTLEMENT_CAUSE_FIRST_CROSSING),
+    ),
+)
+def test_selected_reset_local_clock_maps_once_across_real_physical_r06_owners(
+    mode, expected_cause
+):
+    (
+        physical_owner,
+        r06_owner,
+        epoch_owner,
+        row_key,
+        publication,
+    ) = _launch_selected_reset_clock_tape_into_real_r06()
+
+    contact = mode != "no_contact_deadline"
+    first = _real_physical_r06_packet(
+        physical_owner=physical_owner,
+        epoch_owner=epoch_owner,
+        row_key=row_key,
+        publication=publication,
+        control_step=100,
+        observation_ordinal=0,
+        contact=contact,
+        crossing=mode == "early_crossing",
+    )
+    physical_owner._action_epoch_active_r06_postphysics = first
+    try:
+        result = r06_owner.publish_action_ball_full_mdp_epoch_post_physics()
+        retire = r06_owner.retire_action_ball_full_mdp_epoch_post_physics()
+    finally:
+        physical_owner._action_epoch_active_r06_postphysics = None
+
+    if mode == "contact_no_cross_horizon":
+        assert result.accepted[0, 0]
+        assert not result.settled_mask.any()
+        assert result.new_valid_contact_mask[0, 0]
+        assert not retire.retired_mask.any()
+        second = _real_physical_r06_packet(
+            physical_owner=physical_owner,
+            epoch_owner=epoch_owner,
+            row_key=row_key,
+            publication=publication,
+            control_step=101,
+            observation_ordinal=1,
+            contact=False,
+            crossing=False,
+            previous_center=first.current_ball_center_m[0, 0],
+        )
+        physical_owner._action_epoch_active_r06_postphysics = second
+        try:
+            result = r06_owner.publish_action_ball_full_mdp_epoch_post_physics()
+            retire = r06_owner.retire_action_ball_full_mdp_epoch_post_physics()
+        finally:
+            physical_owner._action_epoch_active_r06_postphysics = None
+
+    assert result.accepted.tolist() == [[True, False], [False, False]]
+    assert not result.rejected.any()
+    assert result.fault_bits.tolist() == [[0, 0], [0, 0]]
+    assert result.settled_mask.tolist() == [[True, False], [False, False]]
+    assert int(result.settlement_cause[0, 0]) == expected_cause
+    assert int(result.settlement_cause[0, 0]) != D.SETTLEMENT_CAUSE_PROTOCOL_FAULT
+    assert retire.retired_mask.tolist() == [[True, False], [False, False]]
+
+    # The asynchronous peer was neither compacted into row 0's slot nor
+    # observed/settled under row 0's global chronology.
+    assert physical_owner._action_epoch_pending_launch.pending.tolist() == [False, True]
+    assert r06_owner._flight_state[1, 0] == D.FLIGHT_EMPTY
+    assert not r06_owner._mailbox_reserved[1].any()
+    assert epoch_owner._undrained_row_fault_bits.tolist() == [0, 0]

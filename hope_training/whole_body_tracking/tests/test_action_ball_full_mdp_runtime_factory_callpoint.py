@@ -407,7 +407,8 @@ class _LeanRewardGraph:
         self.configured = None
 
     def configure_milestone_configured_income(self, manager_cfg, step_dt):
-        assert type(manager_cfg) is dict and len(manager_cfg) == 20
+        assert type(manager_cfg) is dict
+        assert tuple(manager_cfg) == M.reward_contract.MANAGER_NAMES
         self.configured = (manager_cfg, step_dt)
 
 
@@ -472,7 +473,7 @@ def _atomic_lean_graph_inputs(
     return {
         "components": components,
         "reward_manager_cfg": {
-            f"reward_{index:02d}": object() for index in range(20)
+            name: object() for name in subject.reward_contract.MANAGER_NAMES
         },
         "observation_source": observation_source,
         "observation_manager_cfg": {
@@ -755,7 +756,9 @@ def test_builder_runs_exactly_once_after_command_before_observation(monkeypatch)
     assert builder_module.seen_lease is minted_lease
     install_inputs = builder_module.seen_install_inputs
     assert type(install_inputs["components"]) is M.FullMdpLeanRuntimeComponents
-    assert len(install_inputs["reward_manager_cfg"]) == 20
+    assert tuple(install_inputs["reward_manager_cfg"]) == (
+        M.reward_contract.MANAGER_NAMES
+    )
     assert install_inputs["components"].reward_graph.configured == (
         install_inputs["reward_manager_cfg"],
         env.step_dt,
@@ -2727,7 +2730,7 @@ def test_code_owned_lean_reward_bundle_materializes_exact_graph_and_cfg(
     assert type(bundle) is rewards.DiagnosticN2RewardManagerBundle
     assert type(bundle.graph) is rewards.LeanActionEpochRewardGraph
     assert bundle.graph.epoch_owner is owner
-    assert len(bundle.manager_cfg) == 20
+    assert len(bundle.manager_cfg) == rewards.MANAGER_TERM_COUNT
     assert tuple(bundle.manager_cfg) == rewards.MANAGER_NAMES
     assert tuple(term.func for term in bundle.manager_cfg.values()) == (
         rewards.REWARD_TERM_CALLABLES
@@ -2855,7 +2858,9 @@ def test_atomic_env_publish_failure_calls_real_physx_unsubscribe_boundary(
         epoch_owner=object(),
         device_r05_owner=object(),
         reward_graph=object(),
-        reward_manager_cfg={str(i): object() for i in range(20)},
+        reward_manager_cfg={
+            name: object() for name in factory.reward_contract.MANAGER_NAMES
+        },
         observation_source=object(),
         observation_manager_cfg={"policy": object(), "critic": object()},
         termination_manager_cfg={

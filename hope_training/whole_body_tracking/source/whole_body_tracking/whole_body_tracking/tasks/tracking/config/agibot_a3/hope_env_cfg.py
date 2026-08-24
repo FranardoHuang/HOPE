@@ -31,7 +31,16 @@ from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import whole_body_tracking.tasks.tracking.mdp as mdp
-from whole_body_tracking.robots.agibot_a3 import A3_FEET_BODIES, A3_HAND_BODIES, A3_UPPER_TRACKED
+from whole_body_tracking.robots.agibot_a3 import (
+    A3_FEET_BODIES,
+    A3_HAND_BODIES,
+    A3_TRACKED_BODIES,
+    A3_UPPER_TRACKED,
+)
+from whole_body_tracking.tasks.tracking.mdp import (
+    action_ball_full_mdp_lean_rewards as _full_mdp_lean_rewards,
+    action_ball_full_mdp_reward_contract as _full_mdp_reward_contract,
+)
 from whole_body_tracking.tasks.tracking.action_ball_a211_trainability import (
     A211_CRITIC_CONTRACT,
     A211_TRAINABILITY_CONTRACT,
@@ -2621,6 +2630,35 @@ ACTION_BALL_FULL_MDP_REWARD_TEMPLATE_STATUS = "HOLD_NUMERIC_AUTHORITY_UNMATERIAL
 ACTION_BALL_FULL_MDP_WEIGHT_SOURCE = "numeric_authority"
 ACTION_BALL_FULL_MDP_FIXED_WEIGHT_SOURCE = "fixed_manager_contract"
 ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE = "fixed_common_dense_contract"
+ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE = (
+    "fixed_paddle_motion_prior_contract"
+)
+ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES = (
+    _full_mdp_reward_contract.tracked_except_held_wrist_body_names(
+        A3_TRACKED_BODIES
+    )
+)
+
+
+def _action_ball_full_mdp_dense_fixed_func_params(
+    spec, *, ordinal: int
+) -> tuple:
+    params = [
+        ("ordinal", ordinal),
+        ("command_name", spec.command_name),
+        ("std", spec.std),
+    ]
+    if spec.coarse_std is not None:
+        params.append(("coarse_std", spec.coarse_std))
+    if spec.body_scope == _full_mdp_reward_contract.TRACKED_EXCEPT_HELD_WRIST:
+        params.append(("body_names", ACTION_BALL_FULL_MDP_NON_WRIST_BODY_NAMES))
+    elif spec.body_scope is not None:
+        raise RuntimeError("fresh full-MDP dense body scope differs")
+    if spec.scale_in_strike_window is not None:
+        params.append(
+            ("scale_in_strike_window", spec.scale_in_strike_window)
+        )
+    return tuple(params)
 
 
 @dataclass(frozen=True)
@@ -2732,35 +2770,64 @@ ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = tuple(
 )
 ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES = tuple(
     ActionBallFullMdpRewardTermTemplate(
-        manager_name=name,
-        payment_consumer=f"common_dense:{name}",
+        manager_name=spec.manager_name,
+        payment_consumer=f"common_dense:{spec.manager_name}",
         owner_role="motion_owner",
-        func=func,
+        func=_full_mdp_lean_rewards.common_dense_reward,
         weight_source=ACTION_BALL_FULL_MDP_COMMON_DENSE_WEIGHT_SOURCE,
-        manager_weight=weight,
-        fixed_func_params=(("command_name", "motion"), ("std", std)),
+        manager_weight=spec.manager_weight,
+        fixed_func_params=_action_ball_full_mdp_dense_fixed_func_params(
+            spec,
+            ordinal=(
+                _full_mdp_reward_contract.LIFECYCLE_PAYMENT_COUNT + index
+            ),
+        ),
     )
-    for name, func, weight, std in (
-        ("motion_global_anchor_pos", mdp.motion_global_anchor_position_error_exp, 0.5, 0.3),
-        ("motion_global_anchor_ori", mdp.motion_global_anchor_orientation_error_exp, 0.5, 0.4),
-        ("motion_body_pos", mdp.motion_relative_body_position_error_exp, 1.0, 0.3),
-        ("motion_body_ori", mdp.motion_relative_body_orientation_error_exp, 1.0, 0.4),
-        ("motion_body_lin_vel", mdp.motion_global_body_linear_velocity_error_exp, 1.0, 1.0),
-        ("motion_body_ang_vel", mdp.motion_global_body_angular_velocity_error_exp, 1.0, 3.14),
+    for index, spec in enumerate(
+        _full_mdp_reward_contract.COMMON_DENSE_SPECS
+    )
+)
+ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES = tuple(
+    ActionBallFullMdpRewardTermTemplate(
+        manager_name=spec.manager_name,
+        payment_consumer=f"paddle_motion_prior:{spec.manager_name}",
+        owner_role="motion_owner",
+        func=_full_mdp_lean_rewards.paddle_motion_prior_reward,
+        weight_source=(
+            ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_WEIGHT_SOURCE
+        ),
+        manager_weight=spec.manager_weight,
+        fixed_func_params=_action_ball_full_mdp_dense_fixed_func_params(
+            spec,
+            ordinal=(
+                _full_mdp_reward_contract.LIFECYCLE_PAYMENT_COUNT
+                + len(_full_mdp_reward_contract.COMMON_DENSE_SPECS)
+                + index
+            ),
+        ),
+    )
+    for index, spec in enumerate(
+        _full_mdp_reward_contract.PADDLE_MOTION_PRIOR_SPECS
     )
 )
 ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES = (
     ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
     + ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
+    + ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
 )
 ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER = tuple(
     term.manager_name for term in ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES
 )
+if (
+    ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER
+    != _full_mdp_reward_contract.MANAGER_NAMES
+):
+    raise RuntimeError("fresh full-MDP Reward template order differs")
 
 
 @configclass
 class HOPEActionBallFullMdpRewardsCfg:
-    """Fail-closed twenty-term template, not a RewardManager config.
+    """Fail-closed shared-contract template, not a RewardManager config.
 
     This object is intentionally composed during ordinary registration so the
     exact callable/order/owner contract is inspectable without constructing a
@@ -2869,7 +2936,10 @@ def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
         blockers.append("self_asserted_numeric_authority_forbidden")
     if value.launch_authorized is not False:
         blockers.append("self_asserted_launch_authority_forbidden")
-    if type(value.terms) is not tuple or len(value.terms) != 20:
+    if (
+        type(value.terms) is not tuple
+        or len(value.terms) != _full_mdp_reward_contract.REWARD_TERM_COUNT
+    ):
         blockers.append("reward_template_term_count_differs")
         return tuple(blockers)
     for actual, expected in zip(value.terms, ACTION_BALL_FULL_MDP_REWARD_TERM_TEMPLATES):
@@ -2882,14 +2952,30 @@ def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
         ACTION_BALL_FULL_MDP_REWARD_MANAGER_ORDER
     ):
         blockers.append("reward_template_manager_order_differs")
-    if tuple(term.payment_consumer for term in value.terms[:14]) != mdp.ORDERED_CONSUMERS:
+    lifecycle_count = _full_mdp_reward_contract.LIFECYCLE_PAYMENT_COUNT
+    common_end = lifecycle_count + len(
+        ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
+    )
+    if tuple(
+        term.payment_consumer for term in value.terms[:lifecycle_count]
+    ) != mdp.ORDERED_CONSUMERS:
         blockers.append("reward_template_payment_order_differs")
-    if tuple(term.payment_consumer for term in value.terms[14:]) != tuple(
+    if tuple(
+        term.payment_consumer
+        for term in value.terms[lifecycle_count:common_end]
+    ) != tuple(
         f"common_dense:{term.manager_name}"
         for term in ACTION_BALL_FULL_MDP_COMMON_DENSE_TERM_TEMPLATES
     ):
         blockers.append("reward_template_common_dense_order_differs")
-    for term in value.terms[:13]:
+    if tuple(
+        term.payment_consumer for term in value.terms[common_end:]
+    ) != tuple(
+        f"paddle_motion_prior:{term.manager_name}"
+        for term in ACTION_BALL_FULL_MDP_PADDLE_MOTION_PRIOR_TERM_TEMPLATES
+    ):
+        blockers.append("reward_template_paddle_motion_prior_order_differs")
+    for term in value.terms[: lifecycle_count - 1]:
         if (
             term.weight_source != ACTION_BALL_FULL_MDP_WEIGHT_SOURCE
             or term.manager_weight is not None
@@ -2899,7 +2985,7 @@ def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
             )
         ):
             blockers.append(f"unmaterialized_numeric_weight_present:{term.manager_name}")
-    recovery = value.terms[13]
+    recovery = value.terms[lifecycle_count - 1]
     if (
         recovery.weight_source != ACTION_BALL_FULL_MDP_FIXED_WEIGHT_SOURCE
         or recovery.manager_weight != 1.0
@@ -2907,7 +2993,11 @@ def action_ball_full_mdp_reward_template_blockers(value) -> tuple[str, ...]:
         or recovery.fixed_func_params != (("manager_weight", 1.0),)
     ):
         blockers.append("r07_manager_weight_contract_differs")
-    placement = value.terms[12]
+    placement = value.terms[
+        _full_mdp_reward_contract.LIFECYCLE_MANAGER_NAMES.index(
+            "post_contact_placement_guidance"
+        )
+    ]
     if (
         not placement.scheduled_for_a
         or not placement.scheduled_for_c
@@ -2928,7 +3018,7 @@ def require_action_ball_full_mdp_reward_manager_materialized(value) -> None:
         )
     raise RuntimeError(
         "fresh full-MDP RewardManager construction HOLD: numeric authority "
-        "has not atomically materialized the twenty RewardTermCfg objects"
+        "has not atomically materialized the shared RewardTermCfg contract"
     )
 
 
@@ -2968,7 +3058,7 @@ ACTION_BALL_FULL_MDP_CONSTRUCTION_BLOCKERS = (
     "K=2 scene capacity is diagnostic code-owned, not formal launch authority",
     "nine distinct runtime components are not construction-installed",
     "C10 family payment authority is not minted from the exact EnvCfg role",
-    "twenty-term RewardManager numeric authority is not materialized",
+    "shared RewardManager numeric authority is not materialized",
 )
 
 
@@ -3127,7 +3217,7 @@ class HOPEPingPongActionBallFullMdpAgibotA3EnvCfg(
 
     Observation width and the numeric Reward profile remain deliberately
     unfrozen until R08/R03.  A and C share one inspectable, non-executable
-    twenty-term Reward template; the factory must replace it atomically from
+    shared-contract Reward template; the factory must replace it atomically from
     one numeric authority before RewardManager construction.  The later C10
     owner may derive only the post-contact placement role from the exact
     registered leaf type.

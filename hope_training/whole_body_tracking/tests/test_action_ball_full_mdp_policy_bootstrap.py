@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import json
 from pathlib import Path
 import sys
 import types
@@ -18,6 +19,12 @@ SCRIPTS = ROOT / "scripts"
 TRAIN_PATH = SCRIPTS / "train.py"
 COMMON_TASK_PATH = (
     ROOT / "cfg" / "task" / "HOPEPingPongActionBallFullMdpCommon.yaml"
+)
+VENDOR_RUNTIME_PATH = (
+    ROOT.parents[1]
+    / "configs"
+    / "a3_vendor_runtime_authority_20260802_r9"
+    / "bh_loop_c.vendor_runtime_authority.v1.json"
 )
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
@@ -44,6 +51,11 @@ if "omegaconf" not in sys.modules and importlib.util.find_spec("omegaconf") is N
 
 import train as train_mod  # noqa: E402
 
+PPO_RECIPE = (
+    train_mod._action_ball_full_mdp_ppo_recipe_module()
+    .ACTION_BALL_FULL_MDP_PPO_RECIPE
+)
+
 for _stub_name in _TEMP_IMPORT_STUBS:
     sys.modules.pop(_stub_name, None)
 
@@ -58,7 +70,11 @@ class _Manager:
 
 
 class _AgentCfg:
-    def __init__(self, *, noise=0.02, noise_std_type="log"):
+    def __init__(self, *, noise=None, noise_std_type=None):
+        if noise is None:
+            noise = PPO_RECIPE.init_noise_std
+        if noise_std_type is None:
+            noise_std_type = PPO_RECIPE.noise_std_type
         self._value = {
             "policy": {
                 "init_noise_std": noise,
@@ -73,13 +89,16 @@ class _AgentCfg:
 
 
 def _config(**overrides):
-    value = {
-        "kind": "a3_default_stand_zero_head_v1",
-        "init_noise_std": 0.02,
-        "noise_std_type": "log",
-    }
+    value = {"kind": "a3_default_stand_zero_head_v1"}
     value.update(overrides)
     return value
+
+
+def _resolved_config():
+    return train_mod._resolve_action_ball_full_mdp_policy_bootstrap_config(
+        {"action_ball_full_mdp_policy_bootstrap": _config()},
+        requested=True,
+    )
 
 
 def _env(*, offset_delta=0.0, use_default_offset=True):
@@ -115,11 +134,13 @@ def _env(*, offset_delta=0.0, use_default_offset=True):
 
 def _contract(**env_kwargs):
     return train_mod._action_ball_full_mdp_policy_bootstrap_contract(
-        _env(**env_kwargs), _AgentCfg(), _config()
+        _env(**env_kwargs), _AgentCfg(), _resolved_config()
     )
 
 
-def _runner(*, std=0.02):
+def _runner(*, std=None):
+    if std is None:
+        std = PPO_RECIPE.init_noise_std
     actor = torch.nn.Sequential(
         torch.nn.Linear(6, 8),
         torch.nn.ELU(),
@@ -127,7 +148,7 @@ def _runner(*, std=0.02):
     )
     policy = types.SimpleNamespace(
         actor=actor,
-        noise_std_type="log",
+        noise_std_type=PPO_RECIPE.noise_std_type,
         log_std=torch.nn.Parameter(torch.log(torch.full((31,), std))),
     )
     return types.SimpleNamespace(
@@ -159,8 +180,53 @@ def test_common_ac_config_pins_one_exact_full_mdp_bootstrap():
     source = COMMON_TASK_PATH.read_text(encoding="utf-8")
     assert source.count("action_ball_full_mdp_policy_bootstrap:") == 1
     assert source.count("kind: a3_default_stand_zero_head_v1") == 1
-    assert source.count("init_noise_std: 0.02") == 1
-    assert source.count("noise_std_type: log") == 1
+    assert "init_noise_std:" not in source
+    assert "noise_std_type:" not in source
+
+
+def test_zero_head_fixed_normal_tape_recomputes_candidate_qdes_projection():
+    """Keep the sigma comparison deterministic; this is not a launch gate."""
+
+    plant = json.loads(VENDOR_RUNTIME_PATH.read_text(encoding="utf-8"))[
+        "runtime_plant_identity"
+    ]
+    names = plant["joint_names"]
+    defaults = plant["default_joint_pos_rad"]
+    scales = plant["action_scale_rad"]
+    mechanical = plant["physx_control_position_limits"][
+        "mechanical_joint_pos_limits"
+    ]
+    inner_fraction = 0.05
+    inner = tuple(
+        (
+            lower + inner_fraction * (upper - lower),
+            upper - inner_fraction * (upper - lower),
+        )
+        for lower, upper in mechanical
+    )
+    left = names.index("left_shoulder_roll_joint")
+    right = names.index("right_shoulder_roll_joint")
+    # One fixed standard-normal counterexample tape.  Only the two tightest
+    # shoulders are non-zero, at 1/2/4 sigma toward their nearest inner bound.
+    tape = tuple(
+        ((left, -magnitude), (right, magnitude))
+        for magnitude in (1.0, 2.0, 4.0)
+    )
+
+    def projected_scalar_count(sigma: float) -> int:
+        count = 0
+        for row in tape:
+            for joint, normal in row:
+                raw_qdes = defaults[joint] + scales[joint] * sigma * normal
+                lower, upper = inner[joint]
+                count += int(raw_qdes < lower or raw_qdes > upper)
+        return count
+
+    assert PPO_RECIPE.init_noise_std == 0.05
+    assert {
+        sigma: projected_scalar_count(sigma)
+        for sigma in (0.02, PPO_RECIPE.init_noise_std, 0.1)
+    } == {0.02: 0, 0.05: 2, 0.1: 4}
 
 
 def test_diagnostic_binding_alone_selects_consumed_compact_joint_safety():
@@ -209,8 +275,8 @@ def test_registered_ac_parse_then_lean_binding_is_the_only_compact_writer(gym_id
     ("fault", "message"),
     [
         ({"kind": "motion_frame0"}, "kind must be exactly"),
-        ({"init_noise_std": 1.0}, "must be exactly 0.02"),
-        ({"noise_std_type": "scalar"}, "must be exactly 'log'"),
+        ({"init_noise_std": 1.0}, "silently ignored"),
+        ({"noise_std_type": "scalar"}, "silently ignored"),
         ({"extra": True}, "silently ignored"),
     ],
 )
@@ -237,10 +303,12 @@ def test_algo_override_is_exact_and_happens_before_runner_cfg_parsing():
     algo = {
         "policy": {"init_noise_std": 1.0, "noise_std_type": "scalar"}
     }
-    train_mod._apply_action_ball_full_mdp_policy_algo_config(algo, _config())
+    train_mod._apply_action_ball_full_mdp_policy_algo_config(
+        algo, _resolved_config()
+    )
     assert algo["policy"] == {
-        "init_noise_std": 0.02,
-        "noise_std_type": "log",
+        "init_noise_std": PPO_RECIPE.init_noise_std,
+        "noise_std_type": PPO_RECIPE.noise_std_type,
     }
     run_source = inspect.getsource(train_mod._run_with_environment_close_owner)
     assert run_source.index(
@@ -254,6 +322,12 @@ def test_contract_uses_live_per_row_default_offset_and_never_motion():
     assert contract["actor_output_dim"] == 31
     assert contract["initialization"]["output_layer_weight"] == "zeros"
     assert contract["initialization"]["output_layer_bias"] == [0.0] * 31
+    assert contract["initialization"]["init_noise_std"] == (
+        PPO_RECIPE.init_noise_std
+    )
+    assert contract["initialization"]["noise_std_type"] == (
+        PPO_RECIPE.noise_std_type
+    )
     assert contract["decoder"]["zero_action_target"] == (
         "robot.data.default_joint_pos[:,action_joint_ids]"
     )
@@ -268,7 +342,9 @@ def test_live_action_term_counterexamples_fail_independently():
         _contract(use_default_offset=False)
     with pytest.raises(RuntimeError, match="runner policy differs"):
         train_mod._action_ball_full_mdp_policy_bootstrap_contract(
-            _env(), _AgentCfg(noise=1.0, noise_std_type="scalar"), _config()
+            _env(),
+            _AgentCfg(noise=1.0, noise_std_type="scalar"),
+            _resolved_config(),
         )
 
 
@@ -283,8 +359,11 @@ def test_fresh_apply_zeros_real_actor_for_distinct_observations(capsys):
         (torch.zeros(6), torch.tensor([2.0, -3.0, 5.0, 7.0, -11.0, 13.0]))
     )
     assert torch.equal(actor(observations), torch.zeros(2, 31))
-    assert torch.equal(
-        torch.exp(runner.alg.policy.log_std), torch.full((31,), 0.02)
+    torch.testing.assert_close(
+        torch.exp(runner.alg.policy.log_std),
+        torch.full((31,), PPO_RECIPE.init_noise_std),
+        rtol=0.0,
+        atol=1.0e-8,
     )
     marker = capsys.readouterr().out
     assert marker.count("HOPE_ACTION_BALL_FULL_MDP_POLICY_BOOTSTRAP_JSON=") == 1

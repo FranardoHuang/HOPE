@@ -816,22 +816,22 @@ class DiagnosticN2ContinuousRecoveryBundle:
             | current_phase.eq(launch_phase)
             | current_phase.eq(outcome_phase)
         )
-        reward_window = _action_epoch_recovery_reward_window(
-            current_phase,
-            result.recovery_age_tick,
-            outcome_settled_phase=outcome_phase,
+        producer_window = (
+            result.recovery_age_tick.ge(RECOVERY_START_AGE_TICK)
+            & result.recovery_age_tick.le(RECOVERY_END_AGE_TICK)
         )
         publish_rows = (
             slot_valid
             & completed
             & active_phase
             & _row_identity.action_epoch_shot_key_valid(current_key)
+            & producer_window
         )
         fault_bits = torch.zeros(
             (n, s), dtype=torch.int64, device=owner.device
         )
         fault_bits[env_ids, safe_slots] = torch.where(
-            publish_rows & reward_window,
+            publish_rows,
             result.producer_fault_bits,
             torch.zeros_like(result.producer_fault_bits),
         )
@@ -3599,11 +3599,11 @@ class ContinuousRecoveryDeviceCoordinator:
             completed_lifecycle
             & current_key_valid
             & deadline_tick.ge(0)
-            & step.ge(deadline_tick)
+            & motion_cadence_tick.ge(deadline_tick)
         )
         recovery_age_tick = torch.where(
             recovery_age_valid,
-            step - deadline_tick,
+            motion_cadence_tick - deadline_tick,
             torch.full_like(step, -1),
         )
         plant_valid = facts.facts_valid & arithmetic_valid

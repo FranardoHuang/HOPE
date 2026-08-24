@@ -22,11 +22,11 @@ registry_name_2: null
 # Fresh A/C share one plant-birth policy prior.  Zero normalized action decodes
 # through the live default-offset action term to the same materialized default
 # joint pose written by the selected-row reset; Motion frame 0 is deliberately
-# not a bootstrap authority for this continuous 73-clip task.
+# not a bootstrap authority for this continuous 73-clip task.  The dependency-
+# free typed PPO recipe owns every policy number and parameterization; YAML only
+# selects the bootstrap transformation.
 action_ball_full_mdp_policy_bootstrap:
   kind: a3_default_stand_zero_head_v1
-  init_noise_std: 0.02
-  noise_std_type: log
 
 # Legacy one-ball drivers are not a substitute for the capacity-derived K-body
 # fresh scene.  The Python EnvCfg repeats and enforces these tombstones.

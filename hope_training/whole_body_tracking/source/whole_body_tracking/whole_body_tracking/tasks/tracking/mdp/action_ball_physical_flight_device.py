@@ -1129,9 +1129,9 @@ class _ActionEpochPendingLaunchState:
     publication_ordinal: torch.Tensor
     physical_state_f32: torch.Tensor
     target_xy_m: torch.Tensor
-    launch_control_step: torch.Tensor
-    contact_deadline_control_step: torch.Tensor
-    crossing_horizon_control_step: torch.Tensor
+    launch_motion_tick: torch.Tensor
+    contact_deadline_motion_tick: torch.Tensor
+    crossing_horizon_motion_tick: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -1194,6 +1194,9 @@ class ActionEpochR06LaunchProjection:
     R06 may read this view only while the exact Physical launch transaction is
     active.  It contains D05-owned accepted identities and Physical's private
     K-slot allocation; no caller supplies launch tensors or an outcome verdict.
+    All ``*_control_step`` fields are in the global PhysicsStamp domain.  The
+    retained pending clocks are Motion-local and are translated exactly once at
+    the reset-generation-bound launch join.
     """
 
     __slots__ = (
@@ -3419,14 +3422,11 @@ class ActionBallPhysicalFlightDeviceOwner:
             }
         )
 
-        fixed_slot_grid = torch.arange(
-            self.flight_capacity, dtype=torch.int64, device=self.device
-        ).unsqueeze(0).expand(shape)
         self._action_epoch_active_physics_fact_allocation = (
             ActionEpochPhysicsFactAllocationProjection(
                 active_mask=live_or_due.detach().clone(),
                 launch_due_mask=launch_due_mask.detach().clone(),
-                flight_slot=fixed_slot_grid.detach().clone(),
+                flight_slot=self._fixed_flight_slot_grid.detach().clone(),
                 shot_key=masked_shot_key,
                 publication_ordinal=masked_identity(ordinal_grid),
                 physical_owner=self,
@@ -3553,6 +3553,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             or current_tick.dtype != torch.int64
             or current_tick.device != self.device
             or tuple(current_tick.shape) != (self.num_envs,)
+            or not current_tick.is_contiguous()
         ):
             raise PhysicalEpochIntegrationHold(
                 "Physical ActionEpoch Motion clock ABI differs"
@@ -3721,9 +3722,9 @@ class ActionBallPhysicalFlightDeviceOwner:
                 publication_ordinal=torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
                 physical_state_f32=torch.zeros((self.num_envs, STATE_WIDTH), dtype=torch.float32, device=self.device),
                 target_xy_m=torch.zeros((self.num_envs, 2), dtype=torch.float32, device=self.device),
-                launch_control_step=torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
-                contact_deadline_control_step=torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
-                crossing_horizon_control_step=torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
+                launch_motion_tick=torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
+                contact_deadline_motion_tick=torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
+                crossing_horizon_motion_tick=torch.full((self.num_envs,), -1, dtype=torch.int64, device=self.device),
             )
         valid = ~task_valid | (
             _row_identity.action_epoch_shot_key_valid(key)
@@ -3755,12 +3756,12 @@ class ActionBallPhysicalFlightDeviceOwner:
             publication_ordinal=merge(publication, before.publication_ordinal),
             physical_state_f32=merge(physical_state, before.physical_state_f32),
             target_xy_m=merge(target_xy, before.target_xy_m),
-            launch_control_step=merge(launch_tick, before.launch_control_step),
-            contact_deadline_control_step=merge(
-                deadline_tick, before.contact_deadline_control_step
+            launch_motion_tick=merge(launch_tick, before.launch_motion_tick),
+            contact_deadline_motion_tick=merge(
+                deadline_tick, before.contact_deadline_motion_tick
             ),
-            crossing_horizon_control_step=merge(
-                horizon_tick, before.crossing_horizon_control_step
+            crossing_horizon_motion_tick=merge(
+                horizon_tick, before.crossing_horizon_motion_tick
             ),
         )
 
@@ -3804,6 +3805,8 @@ class ActionBallPhysicalFlightDeviceOwner:
         self._action_epoch_host_activity_has_work = True
         self._action_epoch_host_activity_has_keyed_work = True
         self._action_epoch_host_activity_has_recovery_work = True
+        motion = self._current_action_epoch_motion_observation()
+        current_tick = getattr(motion, "control_tick")
         pending = self._action_epoch_pending_launch
         if pending is None:
             pending_due = self._action_epoch_empty_env_mask
@@ -3811,10 +3814,8 @@ class ActionBallPhysicalFlightDeviceOwner:
             # The retained launch step is in Motion's per-environment episode
             # clock.  A selected reset rewinds only those rows, so the host's
             # global ``next_control_step`` must never decide launch activity.
-            motion = self._current_action_epoch_motion_observation()
-            current_tick = getattr(motion, "control_tick")
             pending_due = pending.pending & current_tick.eq(
-                pending.launch_control_step
+                pending.launch_motion_tick
             )
             # Launch is an exact chronology boundary, not a catch-up service.
             # Once a row is overdue its reverse-flight tape has already lost
@@ -3822,7 +3823,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             # clocks.  Mask it from PhysX and attribute the infrastructure
             # failure through this existing packed host reduction.
             missed_launch = pending.pending & current_tick.gt(
-                pending.launch_control_step
+                pending.launch_motion_tick
             )
             self._action_epoch_runtime_fault_bits |= (
                 missed_launch.to(torch.int64)
@@ -3881,9 +3882,12 @@ class ActionBallPhysicalFlightDeviceOwner:
         if not callable(project_recovery):
             raise PhysicalEpochIntegrationHold(
                 "ActionEpoch recovery activity projection is absent"
-            )
+        )
         recovery_rows = _tensor(
-            project_recovery(owner=self),
+            project_recovery(
+                owner=self,
+                motion_cadence_tick=current_tick,
+            ),
             label="ActionEpoch recovery activity census",
             shape=(self.num_envs, self._action_epoch_owner.shot_slot_capacity),
             dtype=torch.bool,
@@ -4020,6 +4024,27 @@ class ActionBallPhysicalFlightDeviceOwner:
             self.num_envs, dtype=torch.int64, device=self.device
         )
         current_tick = getattr(motion, "control_tick", None)
+        # Motion's current tick names the integration boundary completed by the
+        # preceding after-command call.  The upcoming first PhysicsStamp is one
+        # global control later.  Translate the three retained Motion clocks once
+        # at this exact reset-generation-bound launch join; R06 and every engine
+        # event stamp remain purely in the global PhysicsStamp domain.
+        next_physics_control = self._action_epoch_expected_control(
+            require_control_boundary=False
+        )
+        motion_to_global_offset = (
+            torch.full_like(current_tick, next_physics_control - 1)
+            - current_tick
+        )
+        global_launch_control_step = (
+            pending.launch_motion_tick + motion_to_global_offset
+        )
+        global_contact_deadline_control_step = (
+            pending.contact_deadline_motion_tick + motion_to_global_offset
+        )
+        global_crossing_horizon_control_step = (
+            pending.crossing_horizon_motion_tick + motion_to_global_offset
+        )
         current_shot = epoch_owner.project_current_shot()
         current_key = current_shot.shot_key
         current_publication = current_shot.publication_ordinal
@@ -4042,8 +4067,8 @@ class ActionBallPhysicalFlightDeviceOwner:
         phase_current = current_shot.phase.eq(
             epoch.PHASE_REVEAL_COMMITTED
         )
-        exact_tick = current_tick.eq(pending.launch_control_step)
-        missed_launch = current_tick.gt(pending.launch_control_step)
+        exact_tick = current_tick.eq(pending.launch_motion_tick)
+        missed_launch = current_tick.gt(pending.launch_motion_tick)
         launch_due = (
             pending.pending
             & current_shot.slot_valid
@@ -4108,7 +4133,7 @@ class ActionBallPhysicalFlightDeviceOwner:
             )
             selected_reveal = self._reveal_step[ids, safe_flight_slots]
             self._reveal_step[ids, safe_flight_slots] = torch.where(
-                launch_due, pending.launch_control_step, selected_reveal
+                launch_due, global_launch_control_step, selected_reveal
             )
             previous_center = self._action_epoch_flight_previous_ball_center_m[
                 ids, safe_flight_slots
@@ -4188,13 +4213,13 @@ class ActionBallPhysicalFlightDeviceOwner:
                 ),
                 target_xy_m=selected_or(pending.target_xy_m, 0.0),
                 launch_control_step=selected_or(
-                    pending.launch_control_step, -1
+                    global_launch_control_step, -1
                 ),
                 contact_deadline_control_step=(
-                    selected_or(pending.contact_deadline_control_step, -1)
+                    selected_or(global_contact_deadline_control_step, -1)
                 ),
                 crossing_horizon_control_step=(
-                    selected_or(pending.crossing_horizon_control_step, -1)
+                    selected_or(global_crossing_horizon_control_step, -1)
                 ),
                 physical_owner=self,
                 epoch_owner=epoch_owner,

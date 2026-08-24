@@ -232,10 +232,12 @@ def _direct_scene_port(
     )
     fact_owner._previous_valid = torch.zeros_like(active)
     fact_owner._contact_latch = torch.zeros_like(active)
+    fact_owner._ordinary_invalid_contact_latch = torch.zeros_like(active)
     fact_owner._net_latch = torch.zeros_like(active)
     fact_owner._landing_latch = torch.zeros_like(active)
     fact_owner._contact_candidate_event = torch.zeros_like(active)
     fact_owner._known_non_rubber_candidate_event = torch.zeros_like(active)
+    fact_owner._racket_invalid_contact_candidate_event = torch.zeros_like(active)
     fact_owner._binding_fault = torch.zeros_like(active)
     port = scene.IsaacLabPhysicalFlightScenePort.__new__(
         scene.IsaacLabPhysicalFlightScenePort

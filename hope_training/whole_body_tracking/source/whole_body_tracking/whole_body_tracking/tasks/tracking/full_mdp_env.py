@@ -55,6 +55,10 @@ from isaaclab.envs.common import VecEnvStepReturn
 from isaaclab.envs.manager_based_rl_env import ManagerBasedRLEnv
 from isaaclab.envs.manager_based_rl_env_cfg import ManagerBasedRLEnvCfg
 
+from whole_body_tracking.tasks.tracking.mdp import (
+    action_ball_full_mdp_reward_contract as reward_contract,
+)
+
 
 PINNED_ISAACLAB_RELEASE = "v2.3.2"
 PINNED_ISAACLAB_COMMIT = "8320e0be5c0f2def58d5b19d308c6d2539d47cb2"
@@ -1672,7 +1676,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             )
         if (
             type(reward_manager_cfg) is not dict
-            or len(reward_manager_cfg) != 20
+            or tuple(reward_manager_cfg) != reward_contract.MANAGER_NAMES
             or type(observation_manager_cfg) is not dict
             or tuple(observation_manager_cfg) != ("policy", "critic")
             or type(termination_manager_cfg) is not dict
@@ -1838,6 +1842,7 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
         ordinal: int,
         scale: float | None = None,
         value: torch.Tensor | None = None,
+        paddle_playback_active: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Pay one manager ordinal through the atomically installed graph.
 
@@ -1887,7 +1892,10 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
                 "lean Reward graph/epoch/component identity differs"
             )
         if ordinal < lean_rewards.LIFECYCLE_PAYMENT_COUNT:
-            if value is not None:
+            if (
+                value is not None
+                or paddle_playback_active is not None
+            ):
                 raise FullMdpPostPhysicsProtocolError(
                     "lifecycle Reward term cannot inject a dense value"
                 )
@@ -1896,7 +1904,20 @@ class ActionBallFullMdpManagerBasedRLEnv(ManagerBasedRLEnv):
             raise FullMdpPostPhysicsProtocolError(
                 "common dense Reward term requires one tensor and no scale"
             )
-        return graph_type.record_common_dense(graph, ordinal, value)
+        paddle_row = ordinal >= lean_rewards.PADDLE_MOTION_PRIOR_FIRST_ORDINAL
+        if (
+            paddle_playback_active is not None
+            and type(paddle_playback_active) is not torch.Tensor
+        ) or (not paddle_row and paddle_playback_active is not None):
+            raise FullMdpPostPhysicsProtocolError(
+                "dense Reward paddle telemetry binding differs"
+            )
+        return graph_type.record_common_dense(
+            graph,
+            ordinal,
+            value,
+            paddle_playback_active=paddle_playback_active,
+        )
 
     def _require_action_ball_full_mdp_lease(self, lease: object) -> None:
         if self._action_ball_full_mdp_manager_construction_state != "sealed":

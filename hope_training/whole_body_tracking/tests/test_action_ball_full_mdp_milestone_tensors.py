@@ -43,7 +43,7 @@ def test_reward_keeps_eligible_zero_distinct_and_names_only_configured_income():
     _add_step(leaf, eligible=torch.tensor([True, False]))
     payload = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())
     row = payload["reward_terms"][0]
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 7
     assert payload["sample_unit"] == "reward_manager_payment_sample"
     assert "ladder_counts" not in payload and "ladder_stats" not in payload
     assert "per_action_event_strata" in payload["not_produced"]
@@ -143,7 +143,7 @@ def test_decoder_rejects_negative_domains_and_independent_actual_verdicts():
         negative[M._AF + offset] = -5.0e-13
         mutants.append((good_i, negative))
     bad_return_square = good_f.clone()
-    bad_return_square[-1] = -5.0e-10
+    bad_return_square[M._EPF + 1] = -5.0e-10
     mutants.append((good_i, bad_return_square))
     nonfinite_verdict = good_i.clone()
     nonfinite_verdict[M._AI + 2] = 1
@@ -154,6 +154,92 @@ def test_decoder_rejects_negative_domains_and_independent_actual_verdicts():
     for i64, f64 in mutants:
         with pytest.raises(ValueError):
             M.decode_host_window(i64, f64)
+
+
+def test_paddle_motion_prior_playback_is_exactly_masked_non_gating_telemetry():
+    leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
+    playback = torch.tensor([True, False, True], dtype=torch.bool)
+    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
+    expected = []
+    for index, ordinal in enumerate(range(first, M.REWARD_TERM_COUNT)):
+        kernel = torch.tensor(
+            [0.5 + 0.1 * index, 0.99, 0.25 + 0.1 * index],
+            dtype=torch.float32,
+        )
+        leaf.add_paddle_motion_prior_playback(
+            ordinal, kernel, playback
+        )
+        expected.append(kernel)
+
+    payload = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())
+    rows = payload["paddle_motion_prior_playback"]["terms"]
+    assert payload["paddle_motion_prior_playback"]["predicate"] == (
+        "Motion.action_ball_full_mdp_playback_active_mask"
+    )
+    assert tuple(row["term"] for row in rows) == M.PADDLE_PLAYBACK_TERM_NAMES
+    for row, kernel in zip(rows, expected):
+        assert row["telemetry_unavailable_count"] == 0
+        assert row["playback_count"] == 2
+        assert row["finite_count"] == 2
+        assert row["domain_violation_count"] == 0
+        assert row["kernel_sum"] == pytest.approx(
+            float(kernel[0].double() + kernel[2].double())
+        )
+        assert row["kernel_sum_sq"] == pytest.approx(
+            float(kernel[0].double().square() + kernel[2].double().square())
+        )
+    # Telemetry does not open or mutate the configured-income reward step.
+    assert leaf._scratch_open is False
+    assert not bool(leaf.open_step_configured_income.any())
+
+
+def test_paddle_motion_prior_unavailable_is_explicit_non_gating_telemetry():
+    leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
+    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
+    for ordinal in range(first, M.REWARD_TERM_COUNT):
+        leaf.add_paddle_motion_prior_unavailable(ordinal)
+    rows = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())[
+        "paddle_motion_prior_playback"
+    ]["terms"]
+    assert [row["telemetry_unavailable_count"] for row in rows] == [3] * 4
+    assert [row["playback_count"] for row in rows] == [0] * 4
+    assert [row["finite_count"] for row in rows] == [0] * 4
+    assert leaf._scratch_open is False
+
+
+def test_paddle_motion_prior_playback_counts_active_nonfinite_without_pollution():
+    leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
+    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
+    leaf.add_paddle_motion_prior_playback(
+        first,
+        torch.tensor([0.5, float("nan"), 0.0], dtype=torch.float32),
+        torch.tensor([True, True, True], dtype=torch.bool),
+    )
+    row = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())[
+        "paddle_motion_prior_playback"
+    ]["terms"][0]
+    assert row["playback_count"] == 3
+    assert row["finite_count"] == 2
+    assert row["domain_violation_count"] == 0
+    assert row["kernel_sum"] == 0.5
+
+
+def test_paddle_motion_prior_domain_drift_is_telemetry_not_a_decoder_gate():
+    leaf = M.MilestoneTensorAccumulator(3, torch.device("cpu"))
+    first = M.REWARD_TERM_COUNT - len(M.PADDLE_PLAYBACK_TERM_NAMES)
+    leaf.add_paddle_motion_prior_playback(
+        first,
+        torch.tensor([-2.0, 1.25, 0.0], dtype=torch.float32),
+        torch.ones(3, dtype=torch.bool),
+    )
+    row = M.decode_host_window(*leaf.pack_views()).as_json(_term_names())[
+        "paddle_motion_prior_playback"
+    ]["terms"][0]
+    assert row["playback_count"] == 3
+    assert row["finite_count"] == 3
+    assert row["domain_violation_count"] == 2
+    assert row["kernel_sum"] == pytest.approx(-0.75)
+    assert row["kernel_sum_sq"] == pytest.approx(5.5625)
 
 
 def test_decoder_does_not_recheck_same_writer_analytic_relationships():

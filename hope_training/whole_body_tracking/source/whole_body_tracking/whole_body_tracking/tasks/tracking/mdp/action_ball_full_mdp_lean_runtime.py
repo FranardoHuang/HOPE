@@ -860,8 +860,13 @@ class ActionBallFullMdpLeanRuntimeOwner:
         summary: object,
         *,
         update_index: int,
-    ) -> ActionEpochPpoBoundarySummary:
-        """Destructively ACK only the exact owner-prepared durable summary."""
+    ) -> None:
+        """Destructively ACK the exact owner-prepared durable summary.
+
+        This is a command API: every identity and chronology check happens
+        before the irreversible Epoch ACK, and successful return carries no
+        value for a caller to re-validate after owner state has been cleared.
+        """
 
         with self._lock:
             self._enter("acknowledge post update")
@@ -932,7 +937,6 @@ class ActionBallFullMdpLeanRuntimeOwner:
                 self._last_completed_environment_steps = completed
                 self._pending_durable_ack_summary = summary
                 self._clear_active_locked()
-                return summary
             finally:
                 self._leave()
 
@@ -1413,17 +1417,14 @@ class ActionBallFullMdpLeanRuntimeOwner:
                                 raise ActionBallFullMdpLeanRuntimeError(
                                     "Racket epoch strike-fact publisher must return None"
                                 )
-                        # The packed host verdict distinguishes a merely keyed
-                        # reveal/future-launch row from real R07 business.  A
-                        # live transport remains conservative because this
-                        # final substep may settle its outcome; retained
-                        # OUTCOME/RETIRED recovery rows stay active through the
-                        # dedicated recovery bit even after transport is idle.
-                        # No-key transport can never publish keyed epoch facts.
-                        full_r07 = activity.keyed_epoch_work and (
-                            activity.transport_work
-                            or activity.recovery_epoch_work
-                        )
+                        # The recovery bit is the fixed task-close-relative
+                        # producer window, independent of R06 outcome phase.
+                        # Thus a selected-contact/no-crossing LAUNCH row still
+                        # publishes all 68 plant cells, while the Reward graph
+                        # separately keeps pre-outcome payment at zero.  The
+                        # Physical verdict is the sole row authority; idle/out
+                        # of-window rows retain the neutral N/A stamp.
+                        full_r07 = activity.recovery_epoch_work
                         recovery_method = (
                             "publish_epoch_reward_facts"
                             if full_r07
@@ -1542,14 +1543,7 @@ class ActionBallFullMdpLeanRuntimeOwner:
                     publish_payment = self._bound_plain_method(
                         self._epoch, "publish_reward_payment"
                     )
-                    payment = publish_payment(step)
-                    payment_type = getattr(
-                        epoch_v1, "ActionEpochRewardPaymentRows", None
-                    )
-                    if type(payment_type) is not type or type(payment) is not payment_type:
-                        raise ActionBallFullMdpLeanRuntimeError(
-                            "ActionEpoch Reward payment publication type differs"
-                        )
+                    publish_payment(step)
                     close_r06 = self._bound_plain_method(
                         self._r06_landing_outcome,
                         "close_action_ball_full_mdp_epoch_reward_rows",

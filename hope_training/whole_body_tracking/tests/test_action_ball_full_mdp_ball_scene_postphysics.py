@@ -675,6 +675,142 @@ def test_action_epoch_direct_capture_faults_each_mutated_typed_identity_field_on
     assert torch.equal(facts.producer_contract_fault, expected)
 
 
+@pytest.mark.parametrize(
+    "device_name",
+    [
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="CUDA unavailable"
+            ),
+        ),
+    ],
+)
+def test_action_epoch_idle_completion_foreach_clears_exact_scratch_set_once(
+    monkeypatch, device_name
+):
+    owner, _centres, *_ = _fact_owner(device=torch.device(device_name))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+    scratch = (
+        owner._contact_candidate_event,
+        owner._known_non_rubber_candidate_event,
+        owner._racket_invalid_contact_candidate_event,
+        owner._binding_fault,
+    )
+    for value in scratch:
+        value.fill_(True)
+    owner._contact_candidate_center.fill_(3.5)
+    owner._contact_candidate_heartbeat.fill_(17)
+    candidate_center_before = owner._contact_candidate_center.clone()
+    candidate_heartbeat_before = owner._contact_candidate_heartbeat.clone()
+    persistent_latches = (
+        owner._contact_latch,
+        owner._ordinary_invalid_contact_latch,
+        owner._net_latch,
+        owner._landing_latch,
+    )
+    for value in persistent_latches:
+        value.fill_(True)
+    persistent_before = tuple(value.clone() for value in persistent_latches)
+    owner._producer_fault_sticky = True
+
+    calls = []
+    foreach_zero = torch._foreach_zero_
+
+    def counted(values):
+        calls.append((type(values), tuple(values)))
+        return foreach_zero(values)
+
+    monkeypatch.setattr(torch, "_foreach_zero_", counted)
+    owner._begin_action_epoch_idle_binding()
+    owner.on_post_step_heartbeat(0.005)
+    owner._complete_action_epoch_idle_binding(exact_stamp=(1, 0, 1, 1, 1))
+
+    assert len(calls) == 1
+    container_type, cleared = calls[0]
+    assert container_type is list
+    assert len(cleared) == len(scratch) == 4
+    assert all(actual is expected for actual, expected in zip(cleared, scratch))
+    assert all(not bool(value.any()) for value in scratch)
+    assert torch.equal(owner._contact_candidate_center, candidate_center_before)
+    assert torch.equal(
+        owner._contact_candidate_heartbeat, candidate_heartbeat_before
+    )
+    assert all(
+        torch.equal(actual, expected)
+        for actual, expected in zip(persistent_latches, persistent_before)
+    )
+    assert owner._action_epoch_idle_binding is False
+    assert owner._action_epoch_direct_binding is False
+    assert owner._last_capture_heartbeat == owner._last_heartbeat == 1
+    assert owner._last_exact_stamp == (1, 0, 1, 1, 1)
+    assert owner._producer_fault_sticky is True
+
+
+def test_action_epoch_idle_completion_is_one_real_cuda_foreach_zero_kernel():
+    if not torch.cuda.is_available():
+        pytest.skip("real CUDA is unavailable")
+    torch_release = torch.__version__.split("+", 1)[0]
+    if not torch_release.startswith("2.7."):
+        pytest.skip("CUDA kernel contract is pinned to Torch 2.7.x")
+
+    owner, _centres, *_ = _fact_owner(device=torch.device("cuda"))
+    owner._diagnostic_unauthorized = False
+    _mark_live_subscriptions(owner)
+    scratch = (
+        owner._contact_candidate_event,
+        owner._known_non_rubber_candidate_event,
+        owner._racket_invalid_contact_candidate_event,
+        owner._binding_fault,
+    )
+    for value in scratch:
+        value.fill_(True)
+    owner._begin_action_epoch_idle_binding()
+    owner.on_post_step_heartbeat(0.005)
+    torch.cuda.synchronize()
+
+    with torch.profiler.profile(
+        activities=(
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        )
+    ) as profile:
+        owner._complete_action_epoch_idle_binding(
+            exact_stamp=(1, 0, 1, 1, 1)
+        )
+        torch.cuda.synchronize()
+
+    events = tuple(profile.events())
+    foreach_cpu = tuple(
+        event
+        for event in events
+        if event.key == "aten::_foreach_zero_"
+        and str(event.device_type).endswith("CPU")
+    )
+    assert len(foreach_cpu) == 1
+
+    def descends_from_foreach(event) -> bool:
+        parent = event.cpu_parent
+        while parent is not None:
+            if parent is foreach_cpu[0]:
+                return True
+            parent = parent.cpu_parent
+        return False
+
+    foreach_cuda = tuple(
+        event
+        for event in events
+        if str(event.device_type).endswith("CUDA")
+        and descends_from_foreach(event)
+    )
+    assert len(foreach_cuda) == 1
+    kernel_name = foreach_cuda[0].key.lower()
+    assert "multi_tensor" in kernel_name or "foreach" in kernel_name
+    assert all(not bool(value.any()) for value in scratch)
+
+
 def test_action_epoch_idle_pair_seals_heartbeat_fence_before_first_live_capture():
     owner, centres, *_ = _fact_owner(device=torch.device("cpu"))
     owner._diagnostic_unauthorized = False
@@ -777,7 +913,13 @@ def test_action_epoch_activity_mask_keeps_one_dense_empty_cleanup_after_live():
         owner._action_epoch_activity_mask()
     owner.on_post_step_heartbeat(0.005)
     _capture_owner(owner, centres)
+    activity = owner._action_epoch_activity_mask()
+    assert torch.all(activity)
+    activity.zero_()
     assert torch.all(owner._action_epoch_activity_mask())
+    assert ".clone()" not in inspect.getsource(
+        S.IsaacPhysxBallFactOwner._action_epoch_activity_mask
+    )
 
     inactive = torch.zeros(
         (owner.num_envs, owner.flight_capacity), dtype=torch.bool, device=owner.device
@@ -825,7 +967,7 @@ def test_direct_selected_contact_wrong_face_known_none_and_unknown_alias_are_dis
     assert not torch.any(fault.selected_contact_event)
 
 
-def test_same_ball_selected_and_opposite_face_in_one_callback_is_ambiguous_fault():
+def test_ambiguous_faces_are_invalid_outcome_latched_until_next_shot():
     owner, centres, ball, red, black = _fact_owner(device=torch.device("cpu"))
     owner._diagnostic_unauthorized = False
     _mark_live_subscriptions(owner)
@@ -840,17 +982,45 @@ def test_same_ball_selected_and_opposite_face_in_one_callback_is_ambiguous_fault
     )
     owner.on_post_step_heartbeat(0.005)
     facts = _capture_owner(owner, centres)
-    assert facts.producer_contract_fault[0, 0]
+    assert not torch.any(facts.producer_contract_fault)
     assert not facts.selected_contact_event[0, 0]
+    assert owner._ordinary_invalid_contact_latch[0, 0]
+    telemetry = owner.diagnostic_telemetry()
+    assert telemetry["wrong_face_event_count_by_ball"][0, 0] == 1
+
+    _direct_arm(owner)
+    owner.on_contact_report(
+        [_Header(ball=ball[0][0], collider=red[0])], []
+    )
+    owner.on_post_step_heartbeat(0.005)
+    same_shot = _capture_owner(owner, centres, stamp=(2, 0, 1, 2, 1))
+    assert not same_shot.selected_contact_event[0, 0]
+    assert not same_shot.producer_contract_fault[0, 0]
+    assert owner._ordinary_invalid_contact_latch[0, 0]
+
+    active = torch.ones((2, 2), dtype=torch.bool)
+    _direct_arm(
+        owner,
+        shot_key=_direct_key(owner, active=active, offset=1),
+        publication_ordinal=torch.full((2, 2), 18, dtype=torch.int64),
+    )
+    owner.on_contact_report(
+        [_Header(ball=ball[0][0], collider=red[0])], []
+    )
+    owner.on_post_step_heartbeat(0.005)
+    next_shot = _capture_owner(owner, centres, stamp=(3, 0, 1, 3, 1))
+    assert next_shot.selected_contact_event[0, 0]
 
 
-def test_selected_plus_known_handle_is_ambiguous_but_handle_only_is_none():
+def test_selected_plus_handle_and_handle_only_are_nonfatal_invalid_contacts():
     owner, centres, ball, red, _black = _fact_owner(device=torch.device("cpu"))
     handle = "/World/envs/env_0/Robot/handle"
     other_handle = "/World/envs/env_1/Robot/handle"
+    table = "/World/envs/env_0/Table/collider"
     owner._known_non_rubber_path_to_binding = {
         handle: (0, "handle", "/World/envs/env_0/Robot"),
         other_handle: (1, "handle", "/World/envs/env_1/Robot"),
+        table: (0, "table", "/World/envs/env_0/Table"),
     }
     owner._diagnostic_unauthorized = False
     _mark_live_subscriptions(owner)
@@ -859,16 +1029,23 @@ def test_selected_plus_known_handle_is_ambiguous_but_handle_only_is_none():
         [
             _Header(ball=ball[0][0], collider=red[0]),
             _Header(ball=ball[0][0], collider=handle),
+            _Header(ball=ball[0][1], collider=red[0]),
+            _Header(ball=ball[0][1], collider=table),
             _Header(ball=ball[1][1], collider=other_handle),
         ],
         [],
     )
     owner.on_post_step_heartbeat(0.005)
     facts = _capture_owner(owner, centres)
-    assert facts.producer_contract_fault[0, 0]
+    assert not facts.producer_contract_fault[0, 0]
     assert not facts.selected_contact_event[0, 0]
+    assert owner._ordinary_invalid_contact_latch[0, 0]
+    assert not facts.producer_contract_fault[0, 1]
+    assert not facts.selected_contact_event[0, 1]
+    assert owner._ordinary_invalid_contact_latch[0, 1]
     assert not facts.producer_contract_fault[1, 1]
     assert not facts.selected_contact_event[1, 1]
+    assert owner._ordinary_invalid_contact_latch[1, 1]
 
 
 @pytest.mark.parametrize("ball_on_left", (True, False))
