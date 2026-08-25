@@ -158,9 +158,10 @@ Isaac milestone为schema8；新增teacher-achieved paddle error必须有finite/s
 对拍；probe不能自动转成长跑或代签学习质量。
 
 `9d333b0b`（语义`ba7225b2`）只是pre-V3/pre-PPO-V5 predecessor；V6 exact source=
-`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已被大分母零接触与hard-edge反升证伪。V7替代源必须先在
-Pod1验证Reward28、schema8/10、fixed-tape、short-learning和active-strata wall；只在replacement ready后
-精确停止旧PID，并使用fresh root/namespace，禁止resume或复用V6。当前状态和顺序只认
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已被大分母零接触与hard-edge反升证伪并停止。V7 exact source=
+`1d33130ba07288918aa73d1323e1106303b7cad1`已经按本节入口以fresh Mu/Isaac namespace运行，首批ACK验证
+Reward28、Mu schema10、Isaac milestone schema8、finite与conservation；仍禁止resume、复用root或热改
+exact checkout。启动前缀不是active-strata rate、mimic/hit/landing或formal证据。当前状态和顺序只认
 [双后端长跑TODO §0.5](action_ball_dual_backend_longrun_todo_20260819.md#fullmdp-v6-todo-current)；
 G04/G05/G06保持`Partial`，不授权promotion、export、部署或真机。
 

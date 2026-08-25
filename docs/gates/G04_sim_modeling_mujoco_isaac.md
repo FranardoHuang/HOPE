@@ -13,8 +13,10 @@ V7保持相同native plant、[`PPO V5`](../DEFINITIONS.md#fullmdp-ppo-v5)和
 [`Observation V3`](../DEFINITIONS.md#fullmdp-semantic-observation-v3)，改用
 [`Reward28`](../DEFINITIONS.md#fullmdp-reward28)、Mu evidence schema10与Isaac milestone schema8。
 四项action/joint成本是连续学习目标，actual hard edge仍不是新增Done；paddle真实误差与fixed composite
-kernel不成为model安全Gate。当前本地聚焦矩阵=`606 passed, 34 skipped`；exact Pod V7 GPU、短学习与
-active wall仍在验证。task→contact→landing与Isaac↔MuJoCo fixed-tape physics parity也未闭合，因此
+kernel不成为model安全Gate。本地聚焦矩阵=`606 passed, 34 skipped`；source `1d33130b`又在Pod1按受影响
+文件隔离为`706 passed, 32 skipped`，并已fresh双端运行。首批Mu schema10与Isaac milestone schema8 ACK
+均为Reward28、finite、conservation fault 0；这只关闭实际runtime attach与学习图启动，不关闭
+task→contact→landing或Isaac↔MuJoCo fixed-tape physics parity，因此
 G04不晋级。[详细口径与分母](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)
 明确阻断formal、promotion、deployment与真机安全声明。
 

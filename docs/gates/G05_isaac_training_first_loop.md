@@ -13,8 +13,10 @@ terminal-overlap跨writer合成和自然重叠课程；milestone升为schema8，
 V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已冻结为negative：Isaac在`409,414`
 次launch后仍零contact，actual-hard-edge从first10约`1.843%`升到recent10约`3.366%`，active wall也
 恶化到约`32.06 s/H48`。旧61-update rate、启动ACK和早期下降不能再代表当前训练健康。V7本地聚焦=
-`606 passed, 34 skipped`；exact Pod Kit、short-learning、active-strata wall与fresh ACK尚未闭合，故
-contact/hit/landing仍全部`未测`，不能把本地通过写成训练成功。最终不同口径分母只认
+`606 passed, 34 skipped`，Pod1受影响文件逐进程隔离=`706 passed, 32 skipped`。exact source
+`1d33130b`已用fresh namespace在GPU1运行到update61：Reward28的28项均finite，milestone schema8、
+conservation fault 0，recent10 wall mean/p50=`8.423/8.380 s/H48`。该窗仍是balance-only且无due，故
+mimic/contact/hit/landing仍全部`未测`，也未达到严格6秒；不能把启动通过写成训练成功。最终不同口径分母只认
 [课程实验§10.7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)。
 
 旧V5能够改善balance却未闭合mimic→contact；新候选必须fresh验证balance→mimic→hit→landing。上一阶段

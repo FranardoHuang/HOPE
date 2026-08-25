@@ -4,7 +4,7 @@
 >
 > 人类负责人：Franco
 > 执行者：Codex
-> 状态：`V6 dual-fresh negative read-only / V7 replacement Pod validation / no authorized formal run`
+> 状态：`V6 stopped negative frozen / V7 dual-fresh running / no authorized formal run`
 > 证据边界：`diagnostic_unauthorized=true`；本记录不授权 resume、promotion、export、部署或真机。
 
 > **阅读边界（2026-08-25）：**§1--§9保留课程故障发现、V4/V5运行和被替换实现史，不是现役执行真源；
@@ -864,11 +864,11 @@ Python重放，并对event/row做`.item()`/`.tolist()`后把完整opportunity/sh
 训练、聚合分层或durability所需的最小状态。下一性能刀应换成device compact counts + bounded fault sample，
 保留optimizer/WAL/fsync/ACK独立边界；不能把整个owner graph原样移进C++或再加receipt。
 
-可复算前缀：Mu `head -n 6847 evidence.jsonl` SHA-256=
+V6可复算前缀：Mu `head -n 6847 evidence.jsonl` SHA-256=
 `e27dc113e792c797ad83c04162c68e5039adda8cd9d5c54b791cb60e4159107f`；Isaac筛选前2509条
 `HOPE_ACTION_EPOCH_UPDATE_ACK_JSON=`整行 SHA-256=
-`92c452506e2e9702cfc3f1c995d31022d1d2c292fc5854d51992df40fbdebff9`。两条active root仍只读；
-replacement未通过exact Pod前不hot-patch、不resume、不复用namespace。
+`92c452506e2e9702cfc3f1c995d31022d1d2c292fc5854d51992df40fbdebff9`。这两条V6 root现已停止并保持
+只读；V7现役exact checkout与两个fresh namespace同样禁止hot-patch、resume或复用。
 
 ### 10.8 V7 replacement合同：修学习目标，不加课程Gate
 
@@ -886,6 +886,14 @@ V7保留`balance → mimic → hit → landing`的自然重叠课程、四个due
   归属；其他action/side仍`未测`。
 
 wire因新增误差字段显式升版：Isaac milestone schema8，Mu evidence/completion/summary=`10/5/6`。
-本地聚焦回归=`606 passed, 34 skipped`。Pod1 fixed synthetic action-shaped tape拒绝把`cq_n_iters`从12
-降到8/4：两者均改变admission reason、selected identity和target residual，故本轮保持12。exact Pod
-GPU、短学习、active-strata wall与fresh双端ACK仍是V7启动前置；通过前旧V6只读，不修改source/PID/governor。
+本地聚焦回归=`606 passed, 34 skipped`，Pod1受影响文件逐进程隔离=`706 passed, 32 skipped`。Pod1 fixed
+synthetic action-shaped tape拒绝把`cq_n_iters`从12降到8/4：两者均改变admission reason、selected identity
+和target residual，故本轮保持12。
+
+旧V6已经在精确进程身份复核后停止。V7 source=`1d33130ba07288918aa73d1323e1106303b7cad1`现以fresh Mu
+namespace `fullmdp-a-h48-v7-mujoco-reward28-obsv3-1d33130b-20260825T180216Z-r2`和fresh Isaac namespace
+`fullmdp-a-h48-v7-isaac-reward28-obsv3-1d33130b-20260825T180216Z`运行。启动窗Mu ACK0..16、Isaac
+update0..61均为28项finite且conservation fault 0；paddle error字段存在，但因为仍是balance-only而active
+分母为0，所以mimic仍`未测`，不是0误差。两端due/contact/landing也尚无分母；按自然重叠课程继续等待，
+不能把启动窗变成success Gate。Mu recent10 mean/p50=`5.360/5.366 s/H48`，Isaac=
+`8.423/8.380 s/H48`；active-strata wall和各阶段预注册判据仍未闭合。

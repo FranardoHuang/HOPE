@@ -1,6 +1,6 @@
 # ActionBall 双后端长跑：当前执行 TODO
 
-> 状态：`V6-dual-fresh-negative-read-only / V7-replacement-Pod-validation / branch-scoped / diagnostic_unauthorized`
+> 状态：`V6-stopped-negative-frozen / V7-dual-fresh-running / branch-scoped / diagnostic_unauthorized`
 > 人类负责人：Franco
 > 执行者：Codex
 > 更新：2026-08-26
@@ -17,8 +17,9 @@
 本节是本页唯一现役局部执行合同；它不改变`origin/main:docs/NOW.md`的统一优先级。V5 source
 `39f9481950a660e198dedac7fd402806d648906b`及其namespace保持只读，禁止hot-patch、resume或复用。
 `9d333b0b`（语义`ba7225b2`）只是Observation/PPO最终裁决前的predecessor；V6 clean/pushed source
-`caddecb76727ea55b0ce089453eea91cb5a9f8ea`的两个live namespace已经被大分母证伪，只保留只读到V7
-替代物完成exact Pod验证。所有运行仍为
+`caddecb76727ea55b0ce089453eea91cb5a9f8ea`的两个namespace已经被大分母证伪并在精确身份复核后停止；
+run root与证据保持只读。V7 exact source=`1d33130ba07288918aa73d1323e1106303b7cad1`已经完成Pod聚焦验证并以
+两个fresh namespace运行。所有运行仍为
 [`diagnostic_unauthorized`](../DEFINITIONS.md#diagnostic-unauthorized)，不得由
 短验、单轮wall或文档状态推出promotion、physics parity、export、部署或真机授权。
 
@@ -67,9 +68,15 @@ Gate和独立sealed immutable artifact后的重复source recheck只是**逐callp
 删除；不能把“TOCTOU”三个字当成泛化豁免。plant finite/joint/table、full-key/generation、跨writer事实
 守恒、optimizer成功边界、run-owned artifact no-clobber、WAL/fsync/ACK与GPU lifetime lock继续保留。
 本轮已经删除无production consumer的`keyed_epoch_work`链和optimizer后same-writer identity echo。
-仍在热路的固定全量record clone静态为`714.375 MiB/H48`、10,560次`Tensor.clone()`；下一最小候选
-只删除Motion callback同writer重读并缩窄返回值，理论减少`285.75 MiB/H48`和4,224次clone。该payload
-不能换算成秒，须先用Pod profile定位；不为这两份复制增加新Gate。
+旧V6热路的固定全量record clone静态为`714.375 MiB/H48`、10,560次`Tensor.clone()`；V7已经删除
+Motion callback同writer重读并缩窄返回值，理论减少`285.75 MiB/H48`和4,224次clone。该payload不能
+换算成秒；Pod active wall另行实测，不为这两份复制增加新Gate。
+
+静态结构审计也确认债务不是抽象观感：`scripts/train.py`为22,426行，`_apply_task_overrides`单函数
+3,401行、`_run_with_environment_close_owner`为1,778行；`ActionEpochOwner`单类3,743行。Reward24整包
+替换漏掉四项连续成本就是跨层procedural override的真实反例。后续结构目标固定为code-owned typed learning
+spec、pure transition/reward kernel、薄backend adapter和offline evidence consumer；先把逐shot JSON/Python
+重放移出active ACK。active V7 exact checkout保持只读，不为整理文件热改训练，也不新造自证Gate。
 
 ### 当前Pod事实与执行顺序
 
@@ -106,11 +113,21 @@ slice和Mu native pose adapter两处实现错误；最终
   plant/full-key、optimizer、WAL/fsync/ACK边界。新增误差使Isaac/Mu wire显式升为`8`与`10/5/6`。
 - [x] Pod1 GPU2 fixed synthetic action-shaped tape拒绝`cq_n_iters=8/4`：两者都改变admission reason、
   selected identity和target residual；保持12 iterations，不把学习风险冒充等价加速。
-- [x] 本地集成聚焦矩阵=`606 passed, 34 skipped`，changed tree compileall与`git diff --check`通过。
-- [ ] 在Pod1 exact clean source完成CPU/Isaac/Mu GPU聚焦矩阵、短学习和active-strata wall；旧V6在此之前
-  继续只读，不修改governor/source/PID。
-- [ ] replacement ready后逐一复核PID/startticks/PGID/cwd/source/namespace，精确停止旧V6；确认GPU/lock
-  释放后以两个fresh V7 namespace重启，读取首批durable ACK、Reward28、误差分母与wall。
+- [x] 本地集成聚焦矩阵=`606 passed, 34 skipped`，changed tree compileall与`git diff --check`通过；Pod1把
+  14个受影响文件逐进程隔离重跑为`706 passed, 32 skipped`。一次把所有fake-module测试塞进同一解释器的
+  `212 failed`只证明test pollution，未吞成PASS；隔离后全部生产相关文件通过。
+- [x] replacement ready后逐一复核PID/startticks/PGID/cwd/source/namespace，精确停止旧V6。Mu两PID在TERM
+  后退出；Isaac wrapper退出但同一Kit child在60秒后仍占卡，复核原startticks/namespace后只对该PID做
+  SIGKILL。旧root未删除、未伪造completion。
+- [x] source `1d33130b`以fresh V7双端重启：Isaac namespace=
+  `fullmdp-a-h48-v7-isaac-reward28-obsv3-1d33130b-20260825T180216Z`；Mu前两个namespace在首ACK前分别因
+  未恢复ignored EPA48/RSL3 pinned bundle fail-closed且不复用，按既有`setup_local_sync`恢复后现役为
+  `fullmdp-a-h48-v7-mujoco-reward28-obsv3-1d33130b-20260825T180216Z-r2`。两端首批ACK均为28项、finite、
+  conservation fault 0，Isaac milestone schema8、Mu schema10。
+- [ ] exact active-strata wall、短学习与课程交接仍在运行中。启动balance-only前缀中Mu ACK0..16
+  recent10 mean/p50=`5.360/5.366 s/H48`，Isaac update0..61 recent10 mean/p50=`8.423/8.380 s/H48`；
+  Mu达到约6秒迭代方向，Isaac仍未达到，且两者都不能代替mimic/action-active matched wall。Pod `/sys`
+  为只读，无法把绑核governor从powersave切到performance；此infra限制独立记录，不绕过、不与算法混合归因。
 - [ ] 在首次使用“基本成功”作结论前，先冻结可复算的**证据判读合同**，不能看完曲线再补阈值：balance按固定窗
   survival-to-due与terminal mix判；mimic按task/playback eligible行上的teacher-achieved paddle残差与行为趋势判，
   `income/sample`只能作收入诊断、不能代替梯度或行为成功；hit按`selected contact / launch`与target error判；landing按

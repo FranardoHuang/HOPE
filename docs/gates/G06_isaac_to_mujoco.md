@@ -8,10 +8,12 @@ V7共享候选合同是PPO V5、Reward28、Observation V3 `215/231`、四个真�
 `10/5/6`与Isaac milestone schema8。两个backend共用action/joint与paddle纯tensor数学，仍由各自plant
 producer给事实；这关闭配方漂移，不等于physics parity。
 
-V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已冻结为negative只读谱系：
+V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`已停止并冻结为negative只读谱系：
 Mu/Isaac分别在`1,439,028/409,414`次launch后selected contact仍为0，且hard-edge反升。V7本地聚焦=
-`606 passed, 34 skipped`，exact Pod与fresh双端ACK尚未闭合；contact、landing和matched physics继续为
-`未测`。学习分母只认[课程实验§10.7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)，
+`606 passed, 34 skipped`、Pod1隔离矩阵=`706 passed, 32 skipped`。source `1d33130b`的fresh Mu/Isaac
+均已有28项finite ACK；启动窗recent10 mean/p50分别为`5.360/5.366`与`8.423/8.380 s/H48`，但两窗都
+没有task/contact分母且不是matched physics。contact、landing和matched physics继续为`未测`。学习分母只认
+[课程实验§10.7](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-CURRICULUM-UNBLOCK-20260822.md#107-v6结论翻转生存形成但mimichit桥与joint经济失败)，
 性能证据只认[热路实验§16](../experiments/2026-08/EXP-ACTION-BALL-FULLMDP-HOTPATH-20260819.md#fullmdp-v6-rate-current)，
 ABI只认[Observation接口](../interfaces/policy_observation_action.md#current-portable-fullmdp-semantic-observation-v3-actor-215--critic-231)。
 

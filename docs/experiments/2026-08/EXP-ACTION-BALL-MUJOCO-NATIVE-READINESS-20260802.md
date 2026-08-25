@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-MUJOCO-NATIVE-READINESS-20260802 — ActionBall 下一版系统与 MuJoCo 原生训练准备账
 
-- 状态：`V6-dual-fresh-negative-read-only / V7-replacement-Pod-validation / no-authorized-formal-run`
+- 状态：`V6-stopped-negative-frozen / V7-dual-fresh-running / no-authorized-formal-run`
 - 阶段/轴：ChingMu-73 动作库、Ball-first 自动扩域、Isaac 最小可学门、MuJoCo 原生训练
 - 集成小目标：用一个自然动作在 Isaac 验证可学性的同时并行完成 MuJoCo trainer；共享 bundle 冻结后两引擎 N1 并行，主训练在 MuJoCo 直接扩到通过机械准入的完整 73 动作
 - 人类负责人：Franco
@@ -22,8 +22,9 @@
 
 ## 2026-08-26 current correction
 
-**当前fresh与旧run分层：**V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`两端仍在
-只读运行，但其科学结论已经冻结为negative；继续到25k不再是当前学习结论的前置条件。Mu固定
+**当前fresh与旧run分层：**V6 exact source=`caddecb76727ea55b0ce089453eea91cb5a9f8ea`两端已经在
+精确PID/startticks/PGID/source/namespace复核后停止，其run root与科学结论冻结为negative；继续到25k
+不再是当前学习结论的前置条件。Mu固定
 `673,087,488` transitions后有`0/1,439,028 launch` selected contact，Isaac固定`246,644,736`
 transitions后有`0/409,414 launch`；landing因没有eligible contact仍为`未测`，不能写成零成功率。
 两端episode mean length已接近1500-tick horizon，说明balance/survival形成；mimic收入反降且wire没有
@@ -63,8 +64,16 @@ PPO V5性能边界只认[热路实验§16](EXP-ACTION-BALL-FULLMDP-HOTPATH-20260
 业务近期已恶化到Mu约`9.10 s/H48`、Isaac约`32.06 s/H48`，后者collection约`29.73 s`。空任务率不能
 代表真实训练率。V7已把milestone逐term eager reduction合为每control step少量batched reduction，并将
 Motion同writer完整record往返缩为四字段projection与一个bool结果；跨writer事实、optimizer→WAL/fsync→ACK
-仍保留。逐CommitEntry/row完整业务重放继续是后续性能项，不能在未验证compact分层前直接删掉。两端分别关闭
-runtime路径，但V7 exact Pod active wall和matched physics仍`未测`，不能整体抬成跨后端`E2`。
+仍保留。逐CommitEntry/row完整业务重放继续是后续性能项，不能在未验证compact分层前直接删掉。
+
+V7 exact source=`1d33130ba07288918aa73d1323e1106303b7cad1`的14个受影响测试文件已在Pod1逐进程隔离为
+`706 passed, 32 skipped`；Mu/Isaac launcher dry-run、fresh root与首批durable ACK均通过。现役namespace为
+`fullmdp-a-h48-v7-mujoco-reward28-obsv3-1d33130b-20260825T180216Z-r2`与
+`fullmdp-a-h48-v7-isaac-reward28-obsv3-1d33130b-20260825T180216Z`。Mu首个可复算启动窗ACK0..16的
+recent10 mean/p50=`5.360/5.366 s/H48`，Isaac update0..61为`8.423/8.380 s/H48`；两端均是28项、
+finite、conservation fault 0，Mu schema10与Isaac milestone schema8成立。当前尚是balance-only，paddle
+误差、contact和landing没有eligible分母，全部写`未测`；active/mimic matched wall与matched physics也仍
+`未测`，不能整体抬成跨后端`E2`。
 
 **Build4辩证对照：**mandatory Build1 `model21800` actor warm-start是相对fresh run最直接的已证配置
 差异；因此Build4不能被当作fresh-from-zero证据。缺actual model0 receipt且配方混杂，早期行为也不能独立

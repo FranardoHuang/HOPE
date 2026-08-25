@@ -1,6 +1,20 @@
 # 简短进度记录
 
-## 2026-08-26 — FullMDP V6长跑结论翻转与V7替代源（branch diagnostic）
+## 2026-08-26 — FullMDP V6冻结与V7双fresh运行（branch diagnostic）
+
+- V7 source=`1d33130ba07288918aa73d1323e1106303b7cad1`已push；Pod1把14个受影响测试文件逐进程隔离为
+  `706 passed, 32 skipped`，双launcher dry-run通过。精确复核后停止旧V6：Mu组TERM退出；Isaac Kit
+  child在TERM后60秒仍占卡，只对同一startticks/namespace PID做SIGKILL；旧root保留且没有伪造completion。
+- fresh V7 Isaac namespace=`fullmdp-a-h48-v7-isaac-reward28-obsv3-1d33130b-20260825T180216Z`；fresh Mu
+  namespace=`fullmdp-a-h48-v7-mujoco-reward28-obsv3-1d33130b-20260825T180216Z-r2`。Mu前两个root在首ACK前
+  分别因未按`setup_local_sync`恢复ignored EPA48/RSL3 bundle fail-closed，未删除或复用。现役首窗Mu
+  ACK0..16 recent10 mean/p50=`5.360/5.366 s/H48`，Isaac update0..61=`8.423/8.380 s/H48`；两端均为
+  28项finite、conservation fault 0、schema10/8。当前仍是balance-only，mimic/contact/landing无eligible
+  denominator，写`未测`；Isaac仍未达到严格6秒，active-strata wall继续实测。
+- 结构审计确认`train.py`为22,426行，最大override/run函数分别3,401/1,778行，`ActionEpochOwner`单类
+  3,743行；Reward24整包替换漏成本是跨层procedural override的真实失败。后续按typed learning spec、pure
+  transition/reward、薄backend adapter、offline evidence consumer继续拆；不为operator漏恢复资产或任务成功
+  新增自证/安全Gate。
 
 - 固定Mu ACK0..6846=`673,087,488` transitions与Isaac ACK0..2508=`246,644,736` transitions。两端
   episode mean length已从约`104/88`升到recent10约`1464/1442`，但selected contact分别保持

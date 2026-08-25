@@ -670,5 +670,12 @@ active CPU另有独立infra事实：旧V6使用的CPU partition当时governor=`p
 这可能影响Isaac host-bound wall，但在旧run仍活着时修改会污染其只读证据；V7只允许在精确停止旧PID后做
 matched on/off检查，不与solver或Reward修复混合归因。
 
+旧PID停止后对V7同一64个绑核尝试切`intel_pstate performance`，Pod容器明确返回只读`/sys`，因此
+governor仍为`powersave`；没有绕权限、也没有把未执行的infra变化写成收益。source `1d33130b`的fresh启动窗
+实测Mu ACK0..16 recent10 mean/p50=`5.360/5.366 s/H48`，Isaac update0..61=
+`8.423/8.380 s/H48`。两端均是balance-only、28项finite、conservation fault 0；Mu达到约6秒方向，Isaac
+仍未达到，而且这两个数都不能外推mimic/action-active wall。下一性能刀仍是PPO边界compact counts与bounded
+fault sample，而不是降低solver精度或增加安全Gate。
+
 §16全部证据保持`diagnostic_unauthorized=true`。rate和真实运行路径已闭合，但contact/landing、
 fixed-tape跨引擎physics parity、formal checkpoint、promotion、export、deployment与真机授权均没有因此完成。
